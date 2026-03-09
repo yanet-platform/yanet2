@@ -621,6 +621,10 @@ func freeCPacketHandlerConfig(cConfig *C.struct_packet_handler_config) {
 					if cAllowedSlice[j].port_ranges != nil {
 						C.free(unsafe.Pointer(cAllowedSlice[j].port_ranges))
 					}
+					// Free tag string if allocated
+					if cAllowedSlice[j].tag != nil {
+						C.free(unsafe.Pointer(cAllowedSlice[j].tag))
+					}
 				}
 				C.free(unsafe.Pointer(cVsSlice[i].config.allowed_src))
 			}
@@ -855,8 +859,12 @@ func goToCVsConfigInPlace(
 				cAllowedSlice[i].port_ranges = nil
 			}
 
-			// Set tag field
-			cAllowedSlice[i].tag = C.uint32_t(allowedSrc.Tag)
+			// Set tag field - convert Go string to C *char
+			if allowedSrc.Tag != "" {
+				cAllowedSlice[i].tag = C.CString(allowedSrc.Tag)
+			} else {
+				cAllowedSlice[i].tag = nil
+			}
 		}
 	} else {
 		cConfig.config.allowed_src = nil
@@ -929,6 +937,10 @@ func freeCVsConfig(cConfig *C.struct_named_vs_config) {
 			}
 			if cAllowedSlice[i].port_ranges != nil {
 				C.free(unsafe.Pointer(cAllowedSlice[i].port_ranges))
+			}
+			// Free tag string if allocated
+			if cAllowedSlice[i].tag != nil {
+				C.free(unsafe.Pointer(cAllowedSlice[i].tag))
 			}
 		}
 		C.free(unsafe.Pointer(cConfig.config.allowed_src))
@@ -1029,8 +1041,12 @@ func cToGoVsConfig(cConfig *C.struct_named_vs_config) *VsConfig {
 				}
 			}
 
-			// Get tag field
-			config.AllowedSources[i].Tag = uint32(cAllowedSlice[i].tag)
+			// Get tag field - convert C *char to Go string
+			if cAllowedSlice[i].tag != nil {
+				config.AllowedSources[i].Tag = C.GoString(cAllowedSlice[i].tag)
+			} else {
+				config.AllowedSources[i].Tag = ""
+			}
 		}
 	} else {
 		config.AllowedSources = []AllowedSources{}
@@ -1312,12 +1328,17 @@ func cToGoNamedVsStats(cStats *C.struct_named_vs_stats) *NamedVsStats {
 			cStats.allowed_sources_count,
 		)
 		stats.AllowedSources = make([]struct {
-			Tag    uint32
+			Tag    string
 			Passes uint64
 		}, cStats.allowed_sources_count)
 
 		for i := range stats.AllowedSources {
-			stats.AllowedSources[i].Tag = uint32(cAllowedSourcesSlice[i].tag)
+			// Convert C *char to Go string
+			if cAllowedSourcesSlice[i].tag != nil {
+				stats.AllowedSources[i].Tag = C.GoString(cAllowedSourcesSlice[i].tag)
+			} else {
+				stats.AllowedSources[i].Tag = ""
+			}
 			stats.AllowedSources[i].Passes = uint64(
 				cAllowedSourcesSlice[i].passes,
 			)

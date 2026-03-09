@@ -151,7 +151,7 @@ impl InspectService {
                 tree.begin_child(format!("Pipeline {}", pipeline.name));
                 tree.add_empty_child("rx".to_string());
                 for function in &pipeline.functions {
-                    tree.add_empty_child(format!("{}", function));
+                    tree.add_empty_child(function.to_string());
                 }
                 tree.add_empty_child("tx".to_string());
                 tree.end_child();

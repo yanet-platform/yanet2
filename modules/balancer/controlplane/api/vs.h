@@ -312,14 +312,15 @@ struct allowed_sources {
 	/**
 	 * Tag identifier for tracking allowed source statistics.
 	 *
-	 * When non-zero, enables per-tag statistics tracking for packets
+	 * When non-NULL, enables per-tag statistics tracking for packets
 	 * matching this allowed source entry. Multiple allowed_sources entries
 	 * can share the same tag to aggregate statistics across different
 	 * network prefixes or port ranges.
 	 *
 	 * BEHAVIOR:
-	 * - tag = 0: No statistics tracking for this entry (default)
-	 * - tag > 0: Track packets matching this entry under the specified tag
+	 * - tag = NULL: No statistics tracking for this entry (default)
+	 * - tag = "name": Track packets matching this entry under the specified
+	 * tag
 	 *
 	 * STATISTICS:
 	 * - Tracked in allowed_sources_stats array in named_vs_stats
@@ -334,15 +335,24 @@ struct allowed_sources {
 	 *
 	 * EXAMPLES:
 	 * 1. Track internal vs external traffic:
-	 *    - Internal networks (10.0.0.0/8, 172.16.0.0/12): tag = 1
-	 *    - External networks (0.0.0.0/0): tag = 2
+	 *    - Internal networks (10.0.0.0/8, 172.16.0.0/12): tag = "internal"
+	 *    - External networks (0.0.0.0/0): tag = "external"
 	 *
 	 * 2. Track per-customer traffic:
-	 *    - Customer A networks: tag = 100
-	 *    - Customer B networks: tag = 101
-	 *    - Customer C networks: tag = 102
+	 *    - Customer A networks: tag = "customer_a"
+	 *    - Customer B networks: tag = "customer_b"
+	 *    - Customer C networks: tag = "customer_c"
+	 *
+	 * CONSTRAINTS:
+	 * - Maximum tag length: 240 characters
+	 * - Tags exceeding this limit will be rejected during configuration
+	 *
+	 * MEMORY MANAGEMENT:
+	 * - Caller owns the string memory
+	 * - String must remain valid for the lifetime of the configuration
+	 * - Balancer does not free this pointer
 	 */
-	uint32_t tag;
+	const char *tag;
 };
 
 struct named_real_config;
@@ -638,10 +648,10 @@ struct vs_stats {
  * share the same tag, and their statistics are aggregated together.
  *
  * AGGREGATION:
- * - All allowed_sources entries with the same non-zero tag share one stats
+ * - All allowed_sources entries with the same non-NULL tag share one stats
  * entry
  * - Statistics are cumulative across all matching entries
- * - Only non-zero tags generate statistics entries
+ * - Only non-NULL tags generate statistics entries
  *
  * LIFECYCLE:
  * - Created when first packet matches an allowed source with this tag
@@ -654,8 +664,12 @@ struct allowed_sources_stats {
 	 *
 	 * This corresponds to the tag field in allowed_sources entries.
 	 * All entries with this tag contribute to these statistics.
+	 *
+	 * MEMORY MANAGEMENT:
+	 * - This is a heap-allocated copy of the original tag string
+	 * - Must be freed by caller (typically via balancer_stats_free())
 	 */
-	uint32_t tag;
+	const char *tag;
 
 	/**
 	 * Total packets that passed allowed source filtering for this tag.
@@ -705,19 +719,21 @@ struct named_vs_stats {
 	/**
 	 * Number of allowed source statistics entries.
 	 *
-	 * This is the count of unique non-zero tags across all allowed_sources
+	 * This is the count of unique non-NULL tags across all allowed_sources
 	 * entries in the virtual service configuration. Each unique tag gets
 	 * one statistics entry.
 	 *
 	 * RELATIONSHIP TO CONFIG:
 	 * - allowed_sources_count <= vs_config.allowed_src_count
-	 * - Only non-zero tags are counted
+	 * - Only non-NULL tags are counted
 	 * - Duplicate tags share one statistics entry
 	 *
 	 * EXAMPLES:
-	 * - Config has 3 allowed_src entries with tags [1, 2, 1] → count = 2
-	 * - Config has 2 allowed_src entries with tags [0, 0] → count = 0
-	 * - Config has 4 allowed_src entries with tags [1, 2, 3, 4] → count = 4
+	 * - Config has 3 allowed_src entries with tags ["a", "b", "a"] → count
+	 * = 2
+	 * - Config has 2 allowed_src entries with tags [NULL, NULL] → count = 0
+	 * - Config has 4 allowed_src entries with tags ["a", "b", "c", "d"] →
+	 * count = 4
 	 */
 	size_t allowed_sources_count;
 

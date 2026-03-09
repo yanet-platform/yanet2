@@ -450,10 +450,16 @@ func protoToVsConfig(
 			})
 		}
 
+		// Convert tag from protobuf *string to Go string
+		var tag string
+		if protoAllowedSrc.Tag != nil {
+			tag = *protoAllowedSrc.Tag
+		}
+
 		allowedSrc = append(allowedSrc, ffi.AllowedSources{
 			Nets:       nets,
 			PortRanges: portRanges,
-			Tag:        protoAllowedSrc.Tag,
+			Tag:        tag,
 		})
 	}
 
@@ -1293,10 +1299,17 @@ func convertVsConfigToProtoWithWlc(
 			})
 		}
 
+		// Convert tag from Go string to protobuf *string
+		var protoTag *string
+		if allowedSrc.Tag != "" {
+			tagCopy := allowedSrc.Tag
+			protoTag = &tagCopy
+		}
+
 		allowedSrcs = append(allowedSrcs, &balancerpb.AllowedSources{
 			Nets:  nets,
 			Ports: protoPortRanges,
-			Tag:   allowedSrc.Tag,
+			Tag:   protoTag,
 		})
 	}
 

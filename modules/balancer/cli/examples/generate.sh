@@ -22,7 +22,7 @@ echo -e "${GREEN}Building project...${NC}"
 cargo build --release 2>&1 | grep -v "Compiling\|Finished" || true
 
 # List of examples
-EXAMPLES=("config" "list" "stats" "sessions" "info" "graph")
+EXAMPLES=("config" "list" "stats" "sessions" "info" "graph" "inspect")
 
 # Generate outputs for each example in each format
 for example in "${EXAMPLES[@]}"; do
@@ -64,6 +64,31 @@ for format in table tree json; do
     fi
     echo "    - $format format"
     cargo run --example update updated "$format" 2>&1 | grep -v "Compiling\|Finished\|Running" > "outputs/$format/update_updated.$ext"
+done
+
+# Generate vs examples (has update and delete scenarios)
+echo -e "${GREEN}Generating outputs for vs...${NC}"
+
+# VS - update scenario
+echo "  - update scenario"
+for format in table tree json; do
+    ext="txt"
+    if [ "$format" = "json" ]; then
+        ext="json"
+    fi
+    echo "    - $format format"
+    cargo run --example vs update "$format" 2>&1 | grep -v "Compiling\|Finished\|Running" > "outputs/$format/vs_update.$ext"
+done
+
+# VS - delete scenario
+echo "  - delete scenario"
+for format in table tree json; do
+    ext="txt"
+    if [ "$format" = "json" ]; then
+        ext="json"
+    fi
+    echo "    - $format format"
+    cargo run --example vs delete "$format" 2>&1 | grep -v "Compiling\|Finished\|Running" > "outputs/$format/vs_delete.$ext"
 done
 
 echo -e "${BLUE}Done! Example outputs saved to:${NC}"

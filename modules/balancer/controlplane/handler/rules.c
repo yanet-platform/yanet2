@@ -12,8 +12,12 @@
 #include <string.h>
 
 // Declare filter compiler signatures for VS lookup tables
-FILTER_COMPILER_DECLARE(vs_lookup_ipv4, net4_fast_dst, port_dst, proto);
-FILTER_COMPILER_DECLARE(vs_lookup_ipv6, net6_fast_dst, port_dst, proto);
+FILTER_COMPILER_DECLARE(
+	vs_lookup_ipv4, net4_fast_dst, port_fast_dst, proto_range_fast
+);
+FILTER_COMPILER_DECLARE(
+	vs_lookup_ipv6, net6_fast_dst, port_fast_dst, proto_range_fast
+);
 
 static int
 init_transport_rule(
@@ -44,9 +48,12 @@ init_transport_rule(
 		return -1;
 	}
 
-	rule->transport.proto.proto = vs_config->identifier.transport_proto;
-	rule->transport.proto.enable_bits = 0;
-	rule->transport.proto.disable_bits = 0;
+	rule->transport.proto_count = 1;
+	rule->transport.protos = calloc(1, sizeof(struct filter_proto_range));
+	rule->transport.protos[0].from =
+		vs_config->identifier.transport_proto * 256;
+	rule->transport.protos[0].to =
+		vs_config->identifier.transport_proto * 256 + 255;
 	return 0;
 }
 
@@ -103,6 +110,7 @@ free_rules(size_t rules_count, struct filter_rule *rules) {
 		free(rule->net4.dsts);
 		free(rule->net6.dsts);
 		free(rule->transport.dsts);
+		free(rule->transport.protos);
 	}
 	free(rules);
 }
@@ -170,6 +178,8 @@ rules_memory_usage(size_t rules_count, struct filter_rule *rules) {
 		result +=
 			sizeof(struct filter_port_range) *
 			(rule->transport.dst_count + rule->transport.src_count);
+		result += sizeof(struct filter_proto_range) *
+			  rule->transport.proto_count;
 		result += sizeof(struct filter_proto_range) *
 			  rule->transport.proto_count;
 	}

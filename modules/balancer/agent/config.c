@@ -94,7 +94,25 @@ clone_allowed_src_to_relative(
 			entries[i].nets = NULL;
 		}
 
-		entries[i].tag = src[i].tag;
+		// Clone tag string if present
+		if (src[i].tag != NULL) {
+			size_t tag_len = strlen(src[i].tag) + 1;
+			char *tag_copy = memory_balloc(mctx, tag_len);
+			if (tag_copy == NULL) {
+				// TODO: proper cleanup
+				memory_bfree(
+					mctx,
+					entries,
+					sizeof(struct allowed_sources) * count
+				);
+				return -1;
+			}
+			memcpy(tag_copy, src[i].tag, tag_len);
+			entries[i].tag = tag_copy;
+			SET_OFFSET_OF(&entries[i].tag, entries[i].tag);
+		} else {
+			entries[i].tag = NULL;
+		}
 
 		entries[i].port_ranges_count = src[i].port_ranges_count;
 
@@ -457,7 +475,13 @@ clone_allowed_src_from_relative(
 			entries[i].port_ranges = NULL;
 		}
 
-		entries[i].tag = src[i].tag;
+		// Clone tag string if present
+		if (src[i].tag != NULL) {
+			const char *src_tag = ADDR_OF(&src[i].tag);
+			entries[i].tag = strdup(src_tag);
+		} else {
+			entries[i].tag = NULL;
+		}
 	}
 
 	*dst = entries;
@@ -693,7 +717,7 @@ free_vs_config_with_relative_pointers(
 	if (cfg->allowed_src_count > 0 && cfg->allowed_src != NULL) {
 		struct allowed_sources *entries = ADDR_OF(&cfg->allowed_src);
 
-		// First, free each nested ports_range array
+		// First, free each nested ports_range array and tag strings
 		for (size_t i = 0; i < cfg->allowed_src_count; i++) {
 			if (entries[i].port_ranges_count > 0 &&
 			    entries[i].port_ranges != NULL) {
@@ -705,6 +729,12 @@ free_vs_config_with_relative_pointers(
 					sizeof(struct ports_range) *
 						entries[i].port_ranges_count
 				);
+			}
+			// Free tag string if present
+			if (entries[i].tag != NULL) {
+				const char *tag = ADDR_OF(&entries[i].tag);
+				size_t tag_len = strlen(tag) + 1;
+				memory_bfree(mctx, (void *)tag, tag_len);
 			}
 		}
 

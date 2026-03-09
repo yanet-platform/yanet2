@@ -5,6 +5,7 @@
 #include <rte_udp.h>
 
 #include "dataplane/packet/packet.h"
+#include "lib/dataplane/packet/data.h"
 
 #include "layermap.h"
 #include "lookup.h"

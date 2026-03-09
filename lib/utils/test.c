@@ -21,7 +21,7 @@ test_convert_packet() {
 
 	// get raw packet data
 
-	struct packet_data pdata = packet_data(&packet);
+	struct packet_info pdata = packet_info(&packet);
 
 	// fill packet with provided data
 

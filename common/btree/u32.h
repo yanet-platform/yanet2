@@ -112,6 +112,49 @@ btree_u32_get_gte_mask_avx2(__m256i target_signed, const uint32_t *data) {
 	__m256i lt_mask = _mm256_cmpgt_epi32(target_signed, vec_signed);
 	return _mm256_movemask_ps((__m256)lt_mask);
 }
+/**
+ * @brief Get GT mask using AVX2 for 8 uint32_t elements
+ * @param target Target value (broadcasted to all lanes)
+ * @param data Pointer to 8 uint32_t values (must be 32-byte aligned)
+ * @return Bitmask where bit i is set if data[i] > target
+ *
+ * Uses AVX2 unsigned max and equality comparison to determine
+ * which elements are greater than the target.
+ */
+static inline int
+btree_u32_get_gt_mask_avx2(__m256i target_signed, const uint32_t *data) {
+	__m256i vec_signed = _mm256_load_si256((__m256i *)data);
+	__m256i lte_mask = _mm256_cmpgt_epi32(target_signed, vec_signed);
+	__m256i eq_mask = _mm256_cmpeq_epi32(target_signed, vec_signed);
+	__m256i combined = _mm256_or_si256(lte_mask, eq_mask);
+	return _mm256_movemask_ps((__m256)combined);
+}
+
+/**
+ * @brief Search within a single block using AVX2 SIMD for GT comparison
+ * @param block Pointer to block to search
+ * @param value Value to search for
+ * @return Index of first element > value, or BTREE_U32_BLOCK_SIZE if all <=
+ * value
+ *
+ * Processes 16 elements in two AVX2 operations (8 elements each).
+ * Returns the index of the first element that is greater than
+ * the search value.
+ */
+static inline size_t
+btree_u32_block_search_gt(const struct btree_u32_block *block, __m256i target) {
+	// Process first 8 elements
+	int mask1 = btree_u32_get_gt_mask_avx2(target, block->values);
+
+	// Process next 8 elements
+	int mask2 = btree_u32_get_gt_mask_avx2(target, block->values + 8);
+
+	// Combine masks: mask2 shifted left by 8 bits
+	unsigned int combined = (mask1 | (mask2 << 8)) ^ 0x1FFFF;
+
+	// Find first set bit (1-indexed), subtract 1 for 0-indexed result
+	return __builtin_ffs(combined) - 1;
+}
 
 /**
  * @brief Search within a single block using AVX2 SIMD
@@ -298,6 +341,14 @@ btree_u32_lower_bounds(
 	uint32_t *result
 );
 
+static inline size_t
+btree_u32_upper_bounds(
+	struct btree_u32 *btree,
+	uint32_t *values,
+	size_t count,
+	uint32_t *result
+);
+
 /**
  * @brief Find first element >= value (lower bound)
  *
@@ -364,12 +415,112 @@ btree_u32_lower_bound(struct btree_u32 *btree, uint32_t value) {
  */
 static inline size_t
 btree_u32_upper_bound(struct btree_u32 *btree, uint32_t value) {
-	return btree_u32_lower_bound(btree, value + 1);
+	uint32_t result;
+	btree_u32_upper_bounds(btree, &value, 1, &result);
+	return result;
 }
 
 #define PREFETCH 0
 
 enum { btree_u32_max_batch_size = 32 };
+
+static inline size_t
+btree_u32_upper_bounds(
+	struct btree_u32 *btree,
+	uint32_t *values,
+	size_t count,
+	uint32_t *result
+) {
+	struct context {
+		size_t result;
+		size_t k;
+		__m256i target;
+	} ctx[btree_u32_max_batch_size];
+
+	if (count > btree_u32_max_batch_size) {
+		count = btree_u32_max_batch_size;
+	}
+
+	// initialize context
+	for (size_t i = 0; i < count; ++i) {
+		struct context *c = &ctx[i];
+		c->result = 0;
+		c->k = 0;
+		c->target = _mm256_set1_epi32(values[i] ^ 0x80000000);
+	}
+
+	const size_t nblocks = btree_u32_nblocks(btree);
+
+	for (size_t step = 0; step < btree->h; ++step) {
+		for (size_t i = 0; i < count; ++i) {
+			if (PREFETCH > 0 && i + PREFETCH < count) {
+				__builtin_prefetch(
+					big_array_get(
+						&btree->array,
+						ctx[i + PREFETCH].k *
+							sizeof(struct
+							       btree_u32_block)
+					),
+					0,
+					3
+				);
+			}
+
+			struct context *c = &ctx[i];
+			const struct btree_u32_block *block =
+				(const struct btree_u32_block *)big_array_get(
+					&btree->array,
+					c->k * sizeof(struct btree_u32_block)
+				);
+
+			// Search within block using SIMD (GT comparison)
+			size_t idx =
+				btree_u32_block_search_gt(block, c->target);
+
+			// Update result index
+			c->result *= (BTREE_U32_BLOCK_SIZE + 1);
+			c->result += idx;
+
+			// Move to the next block
+			c->k = btree_u32_next(c->k, idx);
+		}
+	}
+
+	for (size_t i = 0; i < count; ++i) {
+		if (PREFETCH > 0 && i + PREFETCH < count) {
+			__builtin_prefetch(
+				big_array_get(
+					&btree->array,
+					ctx[i + PREFETCH].k *
+						sizeof(struct btree_u32_block)
+				),
+				0,
+				3
+			);
+		}
+		struct context *c = &ctx[i];
+		if (c->k < nblocks) {
+			const struct btree_u32_block *block =
+				(const struct btree_u32_block *)big_array_get(
+					&btree->array,
+					c->k * sizeof(struct btree_u32_block)
+				);
+
+			// Search within block using SIMD (GT comparison)
+			size_t idx =
+				btree_u32_block_search_gt(block, c->target);
+
+			// Update result index
+			c->result *= (BTREE_U32_BLOCK_SIZE + 1);
+			c->result += idx;
+		} else {
+			c->result += btree->max_h_cnt;
+		}
+		result[i] = (c->result < btree->n) ? c->result : btree->n;
+	}
+
+	return count;
+}
 
 static inline size_t
 btree_u32_lower_bounds(

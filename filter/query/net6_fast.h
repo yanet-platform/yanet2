@@ -1,11 +1,10 @@
 #pragma once
 
 #include "classifiers/net6_fast.h"
-#include "common/big_array.h"
-#include "common/btree/u64.h"
-#include "common/memory_address.h"
+#include "common/value.h"
 #include "lib/dataplane/packet/packet.h"
 
+#include <assert.h>
 #include <netinet/in.h>
 #include <rte_ip.h>
 #include <rte_mbuf.h>
@@ -17,6 +16,7 @@
 #include <string.h>
 
 #include "declare.h"
+#include "segments.h"
 
 typedef uint8_t *(get_addr_func)(struct packet *packet);
 
@@ -47,41 +47,31 @@ query_batch(
 	uint32_t count,
 	uint64_t *values_high,
 	uint64_t *values_low,
+	uint32_t *result_high,
 	uint32_t *result_low
 ) {
-	uint64_t *high_to = ADDR_OF(&classifier->high.to);
-	uint64_t *low_to = ADDR_OF(&classifier->low.to);
 	for (size_t i = 0; i < count; ++i) {
 		uint8_t *addr = getter(packets[i]);
 		uint64_t values[2];
 		memcpy(values, addr, 16);
-		values_high[i] = rte_be_to_cpu_64(values[0]) + 1;
-		values_low[i] = rte_be_to_cpu_64(values[1]) + 1;
+		values_high[i] = rte_be_to_cpu_64(values[0]);
+		values_low[i] = rte_be_to_cpu_64(values[1]);
 	}
-	btree_u64_lower_bounds(
-		&classifier->high.btree, values_high, count, result
+
+	size_t count_high = segments_u64_classify(
+		&classifier->high, count, values_high, result_high
 	);
-	btree_u64_lower_bounds(
-		&classifier->low.btree, values_low, count, result_low
+	size_t count_low = segments_u64_classify(
+		&classifier->low, count, values_low, result_low
 	);
+
+	assert(count_high == count_low);
+
 	for (size_t i = 0; i < count; ++i) {
-		if (unlikely(
-			    result[i] == 0 || result_low[i] == 0 ||
-			    high_to[result[i] - 1] < values_high[i] - 1 ||
-			    low_to[result_low[i] - 1] < values_low[i] - 1
-		    )) {
-			result[i] = classifier->mismatch_classifier;
-		} else {
-			memcpy(&result[i],
-			       big_array_get(
-				       &classifier->comb,
-				       sizeof(int
-				       ) * ((result[i] - 1) *
-						    classifier->low.btree.n +
-					    result_low[i] - 1)
-			       ),
-			       sizeof(int));
-		}
+		size_t idx_high = result_high[i];
+		size_t idx_low = result_low[i];
+		result[i] =
+			value_table_get(&classifier->comb, idx_high, idx_low);
 	}
 }
 
@@ -93,35 +83,39 @@ query(void *data,
       uint32_t count) {
 	struct net6_fast_classifier *classifier =
 		(struct net6_fast_classifier *)data;
-	uint64_t values_high[btree_u64_max_batch_size];
-	uint64_t values_low[btree_u64_max_batch_size];
-	uint32_t result_low[btree_u64_max_batch_size];
-	while (count >= btree_u64_max_batch_size) {
+	uint64_t values_high[segments_u64_classifier_max_batch_size];
+	uint64_t values_low[segments_u64_classifier_max_batch_size];
+	uint32_t result_high[segments_u64_classifier_max_batch_size];
+	uint32_t result_low[segments_u64_classifier_max_batch_size];
+	while (count >= segments_u64_classifier_max_batch_size) {
 		query_batch(
 			classifier,
 			getter,
 			packets,
 			result,
-			btree_u64_max_batch_size,
+			segments_u64_classifier_max_batch_size,
 			values_high,
 			values_low,
+			result_high,
 			result_low
 		);
-		count -= btree_u64_max_batch_size;
-		result += btree_u64_max_batch_size;
-		packets += btree_u64_max_batch_size;
+		count -= segments_u64_classifier_max_batch_size;
+		result += segments_u64_classifier_max_batch_size;
+		packets += segments_u64_classifier_max_batch_size;
 	}
-	count %= btree_u64_max_batch_size;
-	query_batch(
-		classifier,
-		getter,
-		packets,
-		result,
-		count,
-		values_high,
-		values_low,
-		result_low
-	);
+	if (count > 0) {
+		query_batch(
+			classifier,
+			getter,
+			packets,
+			result,
+			count,
+			values_high,
+			values_low,
+			result_high,
+			result_low
+		);
+	}
 }
 
 static inline void

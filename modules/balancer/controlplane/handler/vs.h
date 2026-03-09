@@ -149,4 +149,4 @@ vs_fill_inspect(struct vs *vs, struct vs_inspect *inspect, size_t workers);
 ////////////////////////////////////////////////////////////////////////////////
 
 ssize_t
-parse_vs_acl_counter(struct counter_handle *counter, uint32_t *tag);
+parse_vs_acl_counter(struct counter_handle *counter, const char **tag);

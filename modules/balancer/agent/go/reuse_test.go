@@ -3,6 +3,7 @@ package balancer
 import (
 	"math/rand/v2"
 	"net/netip"
+	"strconv"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
@@ -1350,7 +1351,7 @@ func TestACLAndFilterReuse(t *testing.T) {
 						Ports: []*balancerpb.PortsRange{
 							{From: 1024, To: 65535},
 						},
-						Tag: 100, // Tag = 100
+						Tag: func() *string { s := "100"; return &s }(), // Tag = 100
 					},
 					{
 						Nets: []*balancerpb.Net{{
@@ -1367,7 +1368,7 @@ func TestACLAndFilterReuse(t *testing.T) {
 							{From: 80, To: 80},
 							{From: 443, To: 443},
 						},
-						Tag: 200, // Tag = 200
+						Tag: func() *string { s := "200"; return &s }(), // Tag = 200
 					},
 				},
 			),
@@ -1387,7 +1388,7 @@ func TestACLAndFilterReuse(t *testing.T) {
 									AsSlice(),
 							},
 						}},
-						Tag: 300, // Tag = 300
+						Tag: func() *string { s := "300"; return &s }(), // Tag = 300
 					},
 				},
 			),
@@ -1424,7 +1425,7 @@ func TestACLAndFilterReuse(t *testing.T) {
 						Ports: []*balancerpb.PortsRange{
 							{From: 1024, To: 65535},
 						},
-						Tag: 999, // Different tag (was 100)
+						Tag: func() *string { s := "999"; return &s }(), // Different tag (was 100)
 					},
 					{
 						Nets: []*balancerpb.Net{{
@@ -1441,7 +1442,7 @@ func TestACLAndFilterReuse(t *testing.T) {
 							{From: 80, To: 80},
 							{From: 443, To: 443},
 						},
-						Tag: 888, // Different tag (was 200)
+						Tag: func() *string { s := "888"; return &s }(), // Different tag (was 200)
 					},
 				},
 			),
@@ -1461,7 +1462,7 @@ func TestACLAndFilterReuse(t *testing.T) {
 									AsSlice(),
 							},
 						}},
-						Tag: 0, // Different tag (was 300)
+						Tag: func() *string { s := "0"; return &s }(), // Different tag (was 300)
 					},
 				},
 			),
@@ -1488,25 +1489,40 @@ func TestACLAndFilterReuse(t *testing.T) {
 
 		// Verify first VS tags
 		require.Len(t, config.PacketHandler.Vs[0].AllowedSrcs, 2)
-		assert.Equal(
+		require.NotNil(
 			t,
-			uint32(999),
 			config.PacketHandler.Vs[0].AllowedSrcs[0].Tag,
-			"first VS first tag should be 999",
+			"first VS first tag should not be nil",
 		)
 		assert.Equal(
 			t,
-			uint32(888),
+			"999",
+			*config.PacketHandler.Vs[0].AllowedSrcs[0].Tag,
+			"first VS first tag should be 999",
+		)
+		require.NotNil(
+			t,
 			config.PacketHandler.Vs[0].AllowedSrcs[1].Tag,
+			"first VS second tag should not be nil",
+		)
+		assert.Equal(
+			t,
+			"888",
+			*config.PacketHandler.Vs[0].AllowedSrcs[1].Tag,
 			"first VS second tag should be 888",
 		)
 
 		// Verify second VS tag
 		require.Len(t, config.PacketHandler.Vs[1].AllowedSrcs, 1)
+		require.NotNil(
+			t,
+			config.PacketHandler.Vs[1].AllowedSrcs[0].Tag,
+			"second VS tag should not be nil",
+		)
 		assert.Equal(
 			t,
-			uint32(0),
-			config.PacketHandler.Vs[1].AllowedSrcs[0].Tag,
+			"0",
+			*config.PacketHandler.Vs[1].AllowedSrcs[0].Tag,
 			"second VS tag should be 0",
 		)
 	})
@@ -1571,7 +1587,7 @@ func TestACLAndFilterReuse(t *testing.T) {
 				{
 					Nets:  nets,
 					Ports: ports,
-					Tag:   tag,
+					Tag:   func() *string { s := strconv.FormatUint(uint64(tag), 10); return &s }(),
 				},
 			}
 		}
@@ -1619,7 +1635,7 @@ func TestACLAndFilterReuse(t *testing.T) {
 				result[i] = &balancerpb.AllowedSources{
 					Nets:  rule.Nets,
 					Ports: rule.Ports,
-					Tag:   newTag,
+					Tag:   func() *string { s := strconv.FormatUint(uint64(newTag), 10); return &s }(),
 				}
 			}
 			return result
@@ -1853,28 +1869,48 @@ func TestACLAndFilterReuse(t *testing.T) {
 		require.Len(t, finalConfig.PacketHandler.Vs, 4)
 
 		// Check that the new tags are stored correctly
+		require.NotNil(
+			t,
+			finalConfig.PacketHandler.Vs[0].AllowedSrcs[0].Tag,
+			"first IPv4 VS tag should not be nil",
+		)
 		assert.Equal(
 			t,
-			uint32(111),
-			finalConfig.PacketHandler.Vs[0].AllowedSrcs[0].Tag,
+			"111",
+			*finalConfig.PacketHandler.Vs[0].AllowedSrcs[0].Tag,
 			"first IPv4 VS tag should be 111",
 		)
+		require.NotNil(
+			t,
+			finalConfig.PacketHandler.Vs[1].AllowedSrcs[0].Tag,
+			"second IPv4 VS tag should not be nil",
+		)
 		assert.Equal(
 			t,
-			uint32(222),
-			finalConfig.PacketHandler.Vs[1].AllowedSrcs[0].Tag,
+			"222",
+			*finalConfig.PacketHandler.Vs[1].AllowedSrcs[0].Tag,
 			"second IPv4 VS tag should be 222",
 		)
-		assert.Equal(
+		require.NotNil(
 			t,
-			uint32(333),
 			finalConfig.PacketHandler.Vs[2].AllowedSrcs[0].Tag,
-			"first IPv6 VS tag should be 333",
+			"first IPv6 VS tag should not be nil",
 		)
 		assert.Equal(
 			t,
-			uint32(444),
+			"333",
+			*finalConfig.PacketHandler.Vs[2].AllowedSrcs[0].Tag,
+			"first IPv6 VS tag should be 333",
+		)
+		require.NotNil(
+			t,
 			finalConfig.PacketHandler.Vs[3].AllowedSrcs[0].Tag,
+			"second IPv6 VS tag should not be nil",
+		)
+		assert.Equal(
+			t,
+			"444",
+			*finalConfig.PacketHandler.Vs[3].AllowedSrcs[0].Tag,
 			"second IPv6 VS tag should be 444",
 		)
 

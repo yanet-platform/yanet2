@@ -3,6 +3,7 @@ subdir('balancer')
 subdir('fwstate')
 subdir('acl') # depends on fwstate
 subdir('route')
+subdir('route-mpls')
 subdir('forward')
 subdir('dscp')
 subdir('nat64')

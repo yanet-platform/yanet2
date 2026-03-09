@@ -15,6 +15,7 @@ import (
 	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
 	nat64 "github.com/yanet-platform/yanet2/modules/nat64/controlplane"
 	pdump "github.com/yanet-platform/yanet2/modules/pdump/controlplane"
+	route_mpls "github.com/yanet-platform/yanet2/modules/route-mpls/controlplane"
 	route "github.com/yanet-platform/yanet2/modules/route/controlplane"
 
 	plain "github.com/yanet-platform/yanet2/devices/plain/controlplane"
@@ -88,6 +89,11 @@ func NewDirector(cfg *Config, options ...DirectorOption) (*Director, error) {
 		return nil, fmt.Errorf("failed to initialize route built-in module: %w", err)
 	}
 
+	routeMPLSModule, err := route_mpls.NewRouteMPLSModule(cfg.Modules.RouteMPLS, log)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize route mpls built-in module: %w", err)
+	}
+
 	decapModule, err := decap.NewDecapModule(cfg.Modules.Decap, log)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize decap built-in module: %w", err)
@@ -138,6 +144,9 @@ func NewDirector(cfg *Config, options ...DirectorOption) (*Director, error) {
 		shm,
 		gateway.WithBuiltInModule(
 			routeModule,
+		),
+		gateway.WithBuiltInModule(
+			routeMPLSModule,
 		),
 		gateway.WithBuiltInModule(
 			decapModule,

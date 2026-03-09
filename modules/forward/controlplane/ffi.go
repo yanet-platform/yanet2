@@ -14,7 +14,10 @@ import (
 	"runtime"
 	"unsafe"
 
-	"github.com/yanet-platform/yanet2/common/go/filter"
+	"github.com/yanet-platform/yanet2/common/go/filter/device"
+	"github.com/yanet-platform/yanet2/common/go/filter/ipnet4"
+	"github.com/yanet-platform/yanet2/common/go/filter/ipnet6"
+	"github.com/yanet-platform/yanet2/common/go/filter/vlanrange"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 )
 
@@ -67,12 +70,12 @@ type forwardRule struct {
 	target     string
 	mode       forwardMode
 	counter    string
-	devices    []filter.Device
-	vlanRanges []filter.VlanRange
-	src4s      []filter.IPNet4
-	dst4s      []filter.IPNet4
-	src6s      []filter.IPNet6
-	dst6s      []filter.IPNet6
+	devices    device.Devices
+	vlanRanges vlanrange.VlanRanges
+	src4s      ipnet4.IPNets
+	dst4s      ipnet4.IPNets
+	src6s      ipnet6.IPNets
+	dst6s      ipnet6.IPNets
 }
 
 func (m *forwardRule) CBuild(pinner *runtime.Pinner) C.struct_forward_rule {
@@ -95,12 +98,12 @@ func (m *forwardRule) CBuild(pinner *runtime.Pinner) C.struct_forward_rule {
 	C.strncpy(&cRule.counter[0], cCounter, C.COUNTER_NAME_LEN)
 	C.free(unsafe.Pointer(cCounter))
 
-	cRule.devices = *(*C.struct_filter_devices)(unsafe.Pointer(filter.Devices(m.devices).CBuild(pinner)))
-	cRule.vlan_ranges = *(*C.struct_filter_vlan_ranges)(unsafe.Pointer(filter.VlanRanges(m.vlanRanges).CBuild(pinner)))
-	cRule.src_net4s = *(*C.struct_filter_net4s)(unsafe.Pointer(filter.IPNet4s(m.src4s).CBuild(pinner)))
-	cRule.dst_net4s = *(*C.struct_filter_net4s)(unsafe.Pointer(filter.IPNet4s(m.dst4s).CBuild(pinner)))
-	cRule.src_net6s = *(*C.struct_filter_net6s)(unsafe.Pointer(filter.IPNet6s(m.src6s).CBuild(pinner)))
-	cRule.dst_net6s = *(*C.struct_filter_net6s)(unsafe.Pointer(filter.IPNet6s(m.dst6s).CBuild(pinner)))
+	device.CBuilds(&cRule.devices, m.devices, pinner)
+	vlanrange.CBuilds(&cRule.vlan_ranges, m.vlanRanges, pinner)
+	ipnet4.CBuilds(&cRule.src_net4s, m.src4s, pinner)
+	ipnet4.CBuilds(&cRule.dst_net4s, m.dst4s, pinner)
+	ipnet6.CBuilds(&cRule.src_net6s, m.src6s, pinner)
+	ipnet6.CBuilds(&cRule.dst_net6s, m.dst6s, pinner)
 
 	return cRule
 }

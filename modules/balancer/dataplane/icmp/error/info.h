@@ -16,20 +16,6 @@ struct icmp_packet_info {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-struct ipv6_extension {
-	uint8_t next_header;
-	uint8_t extension_length;
-} __attribute__((__packed__));
-
-struct ipv6_extension_fragment {
-	uint8_t next_header;
-	uint8_t reserved;
-	uint16_t offset_flag_m;
-	uint32_t identification;
-} __attribute__((__packed__));
-
-////////////////////////////////////////////////////////////////////////////////
-
 #define PACKET_INFO_UNKNOWN ((uint16_t)-1)
 #define PACKET_INFO_EXTENSIONS_MAX ((uint32_t)32)
 #define PACKET_INFO_EXTENSION_SIZE_MAX ((uint32_t)16)
@@ -101,10 +87,10 @@ fill_icmp_packet_info_ipv6(
 		if (transport_hdr_type == IPPROTO_HOPOPTS ||
 		    transport_hdr_type == IPPROTO_ROUTING ||
 		    transport_hdr_type == IPPROTO_DSTOPTS) {
-			const struct ipv6_extension *extension =
+			const struct yanet_ipv6_ext_2byte *extension =
 				rte_pktmbuf_mtod_offset(
 					mbuf,
-					struct ipv6_extension *,
+					struct yanet_ipv6_ext_2byte *,
 					transport_hdr_offset
 				);
 
@@ -118,10 +104,10 @@ fill_icmp_packet_info_ipv6(
 			transport_hdr_offset +=
 				8 + extension->extension_length * 8;
 		} else if (transport_hdr_type == IPPROTO_FRAGMENT) {
-			const struct ipv6_extension_fragment *extension =
+			const struct yanet_ipv6_ext_fragment *extension =
 				rte_pktmbuf_mtod_offset(
 					mbuf,
-					struct ipv6_extension_fragment *,
+					struct yanet_ipv6_ext_fragment *,
 					transport_hdr_offset
 				);
 

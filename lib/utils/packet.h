@@ -49,15 +49,15 @@ free_packet(struct packet *packet);
 
 ////////////////////////////////////////////////////////////////////////////////
 
-struct packet_data {
+struct packet_info {
 	const uint8_t *data;
 	uint16_t size;
 	uint16_t tx_device_id;
 	uint16_t rx_device_id;
 };
 
-struct packet_data
-packet_data(const struct packet *p);
+struct packet_info
+packet_info(const struct packet *p);
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -65,7 +65,7 @@ int
 fill_packet_list(
 	struct packet_list *packet_list,
 	size_t packets_count,
-	struct packet_data *packets,
+	struct packet_info *packets,
 	uint16_t mbuf_size
 );
 
@@ -75,7 +75,7 @@ int
 fill_packet_list_custom_alloc(
 	struct packet_list *packet_list,
 	size_t packets_count,
-	struct packet_data *packets,
+	struct packet_info *packets,
 	uint16_t mbuf_size,
 	void *alloc,
 	alloc_func alloc_func
@@ -100,7 +100,7 @@ free_packet_list_custom_alloc(
 ////////////////////////////////////////////////////////////////////////////////
 
 int
-fill_packet_from_data(struct packet *packet, struct packet_data *data);
+fill_packet_from_data(struct packet *packet, struct packet_info *data);
 
 void
-init_mbuf(struct rte_mbuf *m, struct packet_data *data, uint16_t buf_len);
+init_mbuf(struct rte_mbuf *m, struct packet_info *data, uint16_t buf_len);

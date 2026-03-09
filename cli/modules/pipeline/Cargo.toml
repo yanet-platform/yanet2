@@ -6,6 +6,7 @@ authors = ["YANET Team"]
 description = "CLI for YANET pipeline module"
 
 [dependencies]
+commonpb = { path = "../../../common/rust/commonpb", version = "0.1", package = "yanet-commonpb" }
 ync = { path = "../../core", version = "0.1", package = "yanet-cli"}
 log = "0.4"
 clap = { version = "4.5", features = ["derive"] }

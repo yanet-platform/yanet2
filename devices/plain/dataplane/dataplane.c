@@ -5,6 +5,7 @@
 #include "lib/dataplane/device/device.h"
 
 #include "dataplane/packet/packet.h"
+#include "lib/dataplane/module/packet_front.h"
 
 #include "dataplane/pipeline/pipeline.h"
 

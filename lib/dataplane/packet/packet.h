@@ -24,14 +24,10 @@ struct transport_header {
 	uint16_t offset;
 };
 
-struct pipeline_ectx;
-
 struct packet {
 	struct packet *next;
 
 	struct rte_mbuf *mbuf;
-
-	struct pipeline_ectx *pipeline_ectx;
 
 	uint32_t hash;
 
@@ -121,30 +117,8 @@ parse_ipv6_header(struct packet *packet, uint16_t *type, uint16_t *offset);
 int
 parse_packet(struct packet *packet);
 
-static inline struct rte_mbuf *
-packet_to_mbuf(const struct packet *packet) {
-	return packet->mbuf;
-}
-
-struct packet *
-mbuf_to_packet(struct rte_mbuf *mbuf);
-
-uint16_t
-packet_data_len(struct packet *packet);
-
 void
 packet_list_print(struct packet_list *list);
-
-/**
- * @brief Count number of packets in a packet list
- *
- * Traverses the linked list of packets and counts total number.
- *
- * @param list Pointer to packet list structure to count
- * @return Total number of packets in the list
- */
-int
-packet_list_counter(struct packet_list *list);
 
 /**
  * @brief Calculate total bytes in a packet list
@@ -182,13 +156,13 @@ packet_list_bytes_sum(struct packet_list *list);
 void
 logtrace_rte_mbuf(struct rte_mbuf *mbuf);
 
-struct ipv6_ext_2byte {
-	uint8_t next_type;
-	uint8_t size;
+struct yanet_ipv6_ext_2byte {
+	uint8_t next_header;
+	uint8_t extension_length;
 } __attribute__((__packed__));
 
-struct ipv6_ext_fragment {
-	uint8_t next_type;
+struct yanet_ipv6_ext_fragment {
+	uint8_t next_header;
 	uint8_t reserved;
 	uint16_t offset_flag;
 	uint32_t identification;

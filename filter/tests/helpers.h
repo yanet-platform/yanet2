@@ -1,6 +1,8 @@
 #pragma once
 
 #include "common/network.h"
+#include "common/registry.h"
+#include "common/test_assert.h"
 #include "filter/rule.h"
 #include <stddef.h>
 #include <stdint.h>
@@ -125,6 +127,16 @@ builder_set_proto(
 }
 
 static inline void
+builder_set_proto_range(
+	struct filter_rule_builder *b, uint8_t proto, uint16_t flags_or_type
+) {
+	// proto_range encoding: proto * 256 + flags/type
+	uint16_t encoded = (uint16_t)proto * 256 + flags_or_type;
+	size_t i = b->proto_ranges_count++;
+	b->proto_ranges[i] = (struct filter_proto_range){encoded, encoded};
+}
+
+static inline void
 builder_set_vlan(struct filter_rule_builder *b, uint16_t vlan) {
 	b->vlan_ranges[0].from = vlan;
 	b->vlan_ranges[0].to = vlan;
@@ -168,3 +180,60 @@ build_rule(struct filter_rule_builder *b, uint32_t action) {
 	(uint8_t[4]) {                                                         \
 		(uint8_t)(a), (uint8_t)(b), (uint8_t)(c), (uint8_t)(d)         \
 	}
+
+static inline int
+compare_expected_ranges(
+	struct value_range **ranges,
+	struct value_range **expected,
+	size_t packets_count
+) {
+	for (size_t packet_idx = 0; packet_idx < packets_count; ++packet_idx) {
+		struct value_range *range = ranges[packet_idx];
+		uint32_t *range_values = ADDR_OF(&range->values);
+
+		struct value_range *expected_range = expected[packet_idx];
+		uint32_t *expected_range_values = expected_range->values;
+
+		for (size_t expected_value_idx = 0;
+		     expected_value_idx < expected_range->count;
+		     ++expected_value_idx) {
+			int found = 0;
+			for (size_t got_idx = 0; got_idx < range->count;
+			     ++got_idx) {
+				if (expected_range_values[expected_value_idx] ==
+				    range_values[got_idx]) {
+					found = 1;
+					break;
+				}
+			}
+
+			TEST_ASSERT(
+				found,
+				"packet at idx %zu: not got expected action %u",
+				packet_idx,
+				expected_range_values[expected_value_idx]
+			);
+		}
+
+		for (size_t got_idx = 0; got_idx < range->count; ++got_idx) {
+			int found = 0;
+			for (size_t expected_value_idx = 0;
+			     expected_value_idx < expected_range->count;
+			     ++expected_value_idx) {
+				if (expected_range_values[expected_value_idx] ==
+				    range_values[got_idx]) {
+					found = 1;
+					break;
+				}
+			}
+			TEST_ASSERT(
+				found,
+				"packet at idx %zu: got unexpected action %u",
+				packet_idx,
+				range_values[got_idx]
+			);
+		}
+	}
+
+	return TEST_SUCCESS;
+}

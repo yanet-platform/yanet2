@@ -9,6 +9,7 @@
 #include "counters/counters.h"
 #include "lib/controlplane/diag/diag.h"
 
+#include "rule.h"
 #include "rules.h"
 #include "selector.h"
 #include "vs.h"
@@ -25,6 +26,27 @@
 #include <sys/types.h>
 
 #include "filter/compiler.h"
+
+#define MAX_TAG_LENGTH 240
+
+static int
+validate_tag(const char *tag) {
+	if (tag == NULL) {
+		return 0; // NULL is valid (means no tracking)
+	}
+	size_t len = strnlen(tag, MAX_TAG_LENGTH + 1);
+	if (len == 0) {
+		NEW_ERROR("tag must be at least 1 character long");
+		return -1;
+	}
+	if (len > MAX_TAG_LENGTH) {
+		NEW_ERROR(
+			"tag length %zu exceeds maximum %d", len, MAX_TAG_LENGTH
+		);
+		return -1;
+	}
+	return 0;
+}
 
 static int
 setup_reals(
@@ -209,10 +231,11 @@ static int
 fill_rule(
 	struct vs *vs,
 	struct filter_rule *rule,
+	size_t src_idx,
 	struct allowed_sources *src,
 	struct memory_context *mctx
 ) {
-	rule->action = src->tag;
+	rule->action = (uint32_t)src_idx;
 
 	if (vs->identifier.ip_proto == IPPROTO_IP) {
 		rule->net4.dst_count = 0;
@@ -356,6 +379,7 @@ src_filter_rules(
 		if (fill_rule(
 			    vs,
 			    &r[rule_idx],
+			    rule_idx,
 			    &config->allowed_src[rule_idx],
 			    mctx
 		    ) != 0) {
@@ -403,8 +427,8 @@ src_filter_rules(
 
 ////////////////////////////////////////////////////////////////////////////////
 
-FILTER_COMPILER_DECLARE(vs_acl_ipv4, net4_fast_src, port_src);
-FILTER_COMPILER_DECLARE(vs_acl_ipv6, net6_fast_src, port_src);
+FILTER_COMPILER_DECLARE(vs_acl_ipv4, net4_fast_src, port_fast_src);
+FILTER_COMPILER_DECLARE(vs_acl_ipv6, net6_fast_src, port_fast_src);
 
 ////////////////////////////////////////////////////////////////////////////////
 // Helper functions for rule comparison and sorting
@@ -451,6 +475,21 @@ compare_port_range(const void *va, const void *vb) {
 	return 0;
 }
 
+static int
+compare_proto_range(const void *va, const void *vb) {
+	const struct filter_proto_range *a =
+		(const struct filter_proto_range *)va;
+	const struct filter_proto_range *b =
+		(const struct filter_proto_range *)vb;
+	if (a->from != b->from) {
+		return (a->from < b->from) ? -1 : 1;
+	}
+	if (a->to != b->to) {
+		return (a->to < b->to) ? -1 : 1;
+	}
+	return 0;
+}
+
 // Normalize a single rule by sorting its internal arrays.
 // This function expects ABSOLUTE pointers in the rule.
 static void
@@ -477,6 +516,14 @@ normalize_rule(struct filter_rule *rule) {
 		      rule->transport.src_count,
 		      sizeof(struct filter_port_range),
 		      compare_port_range);
+	}
+
+	// Sort proto ranges (already absolute pointer)
+	if (rule->transport.proto_count > 1 && rule->transport.protos != NULL) {
+		qsort(rule->transport.protos,
+		      rule->transport.proto_count,
+		      sizeof(struct filter_proto_range),
+		      compare_proto_range);
 	}
 }
 
@@ -535,6 +582,7 @@ compare_filter_rules(const void *va, const void *vb) {
 			}
 		}
 	}
+
 	return 0;
 }
 
@@ -595,6 +643,7 @@ compare_filter_rules_relative(
 			}
 		}
 	}
+
 	return 0;
 }
 
@@ -810,7 +859,7 @@ setup_acl_rules(
 		rules[++last_rule_idx] = rules[rule_idx];
 	}
 
-	char counter_name[80];
+	char counter_name[256];
 	uint64_t *rule_counters =
 		memory_balloc(mctx, sizeof(uint64_t) * rules_count);
 	if (rule_counters == NULL && rules_count > 0) {
@@ -823,11 +872,22 @@ setup_acl_rules(
 	for (size_t i = 0; i < rules_count; ++i) {
 		rule_to_relative_addresses(&rules[i]);
 
-		uint32_t rule_tag = rules[i].action;
-		if (rule_tag != 0) {
+		uint32_t allowed_src_idx = rules[i].action;
+		const char *rule_tag = config->allowed_src[allowed_src_idx].tag;
+
+		// Validate tag before using it
+		if (validate_tag(rule_tag) != 0) {
+			PUSH_ERROR(
+				"invalid tag at allowed_src index %u",
+				allowed_src_idx
+			);
+			return -1;
+		}
+
+		if (rule_tag != NULL) {
 			// register counter
 			sprintf(counter_name,
-				"acl_%zu_%u",
+				"acl_%zu_%s",
 				vs->registry_idx,
 				rule_tag);
 			uint64_t counter_id = counter_registry_register(
@@ -993,13 +1053,13 @@ vs_fill_inspect(struct vs *vs, struct vs_inspect *inspect, size_t workers) {
 }
 
 ssize_t
-parse_vs_acl_counter(struct counter_handle *counter, uint32_t *tag) {
+parse_vs_acl_counter(struct counter_handle *counter, const char **tag) {
 	// in format acl_<vs_registry_idx>_<tag>
 	if (strncmp(counter->name, "acl_", 4) == 0) { // vs acl counter
 		char *end_ptr = NULL;
 		size_t vs_registry_idx =
 			strtoull(counter->name + 4, &end_ptr, 10);
-		*tag = atoi(end_ptr + 1);
+		*tag = end_ptr + 1; // Point to the tag string in counter name
 		return vs_registry_idx;
 	} else {
 		return -1;

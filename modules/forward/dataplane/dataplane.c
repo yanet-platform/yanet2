@@ -11,6 +11,7 @@
 #include "dataplane/module/module.h"
 #include "dataplane/packet/packet.h"
 #include "dataplane/pipeline/pipeline.h"
+#include "lib/dataplane/module/packet_front.h"
 
 FILTER_QUERY_DECLARE(FWD_FILTER_VLAN_TAG, device, vlan);
 

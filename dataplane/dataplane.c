@@ -25,6 +25,9 @@
 #include "dataplane/device.h"
 #include "dataplane/worker.h"
 
+#include "lib/dataplane/packet/data.h"
+#include "lib/dataplane/packet/packet.h"
+
 #include <unistd.h>
 
 #include "sys/mman.h"
@@ -482,6 +485,7 @@ dataplane_init(
 			"pdump",
 			"acl",
 			"fwstate",
+			"route_mpls",
 		};
 		for (size_t i = 0; i < sizeof(modules) / sizeof(modules[0]);
 		     ++i) {

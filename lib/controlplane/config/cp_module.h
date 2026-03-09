@@ -4,11 +4,13 @@
 #include "common/memory.h"
 
 #include "counters/counters.h"
+#include "counters/histogram.h"
 
 #include "controlplane/config/defines.h"
-
 #include "controlplane/config/registry.h"
-#include "counters/histogram.h"
+
+#include "lib/dataplane/counters/module.h"
+
 #include <assert.h>
 
 /*
@@ -28,93 +30,6 @@ typedef void (*cp_module_free_handler)(struct cp_module *cp_module);
 
 struct cp_module_device {
 	char name[CP_DEVICE_NAME_LEN];
-};
-
-/**
- * Number of performance histogram counters per module.
- *
- * Each module instance tracks packet processing latency across 6 different
- * batch sizes:
- * - hist_0: 1 packet
- * - hist_1: 2-3 packets
- * - hist_2: 4-7 packets
- * - hist_3: 8-15 packets
- * - hist_4: 16-31 packets
- * - hist_5: 32+ packets
- */
-#define CP_MODULE_PERF_COUNTERS 6
-
-/**
- * Number of linear histogram buckets for performance counter latency tracking.
- *
- * Linear buckets provide fine-grained resolution for typical packet processing
- * latencies. With 24 buckets and a 100ns step size, this covers latencies from
- * 100ns to 2400ns with precise granularity.
- */
-#define CP_MODULE_PERF_COUNTER_LINEAR_HISTS 24
-
-/**
- * Number of exponential histogram buckets for performance counter latency
- * tracking.
- *
- * Exponential buckets efficiently cover outlier latencies beyond the linear
- * range. With 5 exponential buckets, this extends coverage to handle rare
- * high-latency events without excessive memory overhead.
- */
-#define CP_MODULE_PERF_COUNTER_EXP_HISTS 5
-
-/**
- * Memory layout for module performance counter data.
- *
- * This structure defines the layout of performance metrics stored in shared
- * memory for each module instance. It tracks packet processing statistics
- * including:
- * - Total accumulated latency across all batches
- * - Total packet and byte counts
- * - Histogram of batch counts distributed across latency buckets
- *
- * The histogram uses a hybrid approach with linear buckets (fine-grained) and
- * exponential buckets (outlier coverage) as defined by cp_module_perf_counter.
- */
-struct cp_module_perf_counter_layout {
-	/** Total accumulated processing latency in nanoseconds */
-	uint64_t summary_latency;
-	/** Total number of packets processed */
-	uint64_t packets;
-	/** Total number of bytes processed */
-	uint64_t bytes;
-	/** Histogram of batch counts across latency buckets (linear +
-	 * exponential) */
-	uint64_t batch_count
-		[CP_MODULE_PERF_COUNTER_LINEAR_HISTS +
-		 CP_MODULE_PERF_COUNTER_EXP_HISTS];
-};
-
-#define CP_MODULE_PERF_COUNTER_SIZE                                            \
-	(sizeof(struct cp_module_perf_counter_layout) / sizeof(uint64_t))
-
-// TODO: docs
-static_assert(
-	CP_MODULE_PERF_COUNTER_SIZE <= (1 << COUNTER_MAX_SIZE_EXP),
-	"cp_module_perf_counter is too large for single counter"
-);
-
-/**
- * Hybrid histogram configuration for module performance counters.
- *
- * This histogram tracks packet processing latency in nanoseconds with:
- * - Minimum value: 10 ns
- * - Linear buckets: 20 buckets with 50 ns step (covering 10-1010 ns)
- * - Exponential buckets: 9 buckets for larger latencies
- *
- * The hybrid approach provides fine-grained resolution for typical latencies
- * (linear buckets) while efficiently covering outliers (exponential buckets).
- */
-static const struct counters_hybrid_histogram cp_module_perf_counter = {
-	.min_value = 100 /* ns */,
-	.linear_hists = CP_MODULE_PERF_COUNTER_LINEAR_HISTS,
-	.linear_step = 100 /* ns */,
-	.exp_hists = CP_MODULE_PERF_COUNTER_EXP_HISTS
 };
 
 struct cp_module {
@@ -145,13 +60,12 @@ struct cp_module {
 	// Tx bytes counter
 	uint64_t tx_bytes_counter_id;
 
-	// Performance histogram counter IDs for packet batch processing.
-	// Contains 6 counter IDs (hist_0 through hist_5) that track latency
-	// distribution for different batch sizes: hist_0 (1 pkt), hist_1 (2-3
-	// pkts), hist_2 (4-7 pkts), hist_3 (8-15 pkts), hist_4 (16-31 pkts),
-	// hist_5 (32+ pkts). Each counter is a hybrid histogram with linear and
-	// exponential buckets as defined by cp_module_counter_hist.
-	uint64_t perf_counters_indices[CP_MODULE_PERF_COUNTERS];
+	// Runtime indices for the performance histogram counters.
+	// These indices map to the actual counter storage locations for
+	// the performance counters defined in cp_module->perf_counters_indices.
+	// Used during packet processing to efficiently access latency tracking
+	// histograms for different batch sizes.
+	uint64_t perf_counters_indices[MODULE_ECTX_PERF_COUNTERS];
 
 	// Link to the previous instance of the module configuration
 	struct cp_module *prev;

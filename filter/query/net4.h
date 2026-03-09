@@ -2,6 +2,7 @@
 
 #include "common/lpm.h"
 #include "declare.h"
+#include "lib/dataplane/packet/data.h"
 #include "lib/dataplane/packet/packet.h"
 
 #include <rte_ip.h>

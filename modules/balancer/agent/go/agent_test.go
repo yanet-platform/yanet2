@@ -492,12 +492,11 @@ func TestBalancerAgent(t *testing.T) {
 			"should have 1 allowed source",
 		)
 
-		// Verify tag is 0 (default) since it wasn't specified in the config
-		assert.Equal(
+		// Verify tag is nil since it wasn't specified in the config
+		assert.Nil(
 			t,
-			uint32(0),
 			config.PacketHandler.Vs[0].AllowedSrcs[0].Tag,
-			"tag should be 0 when not specified",
+			"tag should be nil when not specified",
 		)
 	})
 
@@ -551,7 +550,7 @@ func TestBalancerAgent(t *testing.T) {
 											AsSlice(),
 									},
 								}},
-								Tag: 54321, // Set a specific tag
+								Tag: func() *string { s := "54321"; return &s }(), // Set a specific tag
 							},
 						},
 						Peers: []*balancerpb.Addr{
@@ -589,10 +588,15 @@ func TestBalancerAgent(t *testing.T) {
 			"should have 1 allowed source",
 		)
 
+		require.NotNil(
+			t,
+			config.PacketHandler.Vs[0].AllowedSrcs[0].Tag,
+			"tag should not be nil",
+		)
 		assert.Equal(
 			t,
-			uint32(54321),
-			config.PacketHandler.Vs[0].AllowedSrcs[0].Tag,
+			"54321",
+			*config.PacketHandler.Vs[0].AllowedSrcs[0].Tag,
 			"tag should be updated to 54321",
 		)
 	})

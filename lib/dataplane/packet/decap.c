@@ -5,6 +5,8 @@
 #include "decap.h"
 #include "packet.h"
 
+#include "lib/dataplane/packet/data.h"
+
 // (first u32 + count of optional u32) * 4
 #define decap_gre_header_size(byte0)                                           \
 	(1 + __builtin_popcount((byte0) & 0xb0)) << 2

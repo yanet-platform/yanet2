@@ -1718,7 +1718,7 @@ func TestAllowedSourcesTagConversion(t *testing.T) {
 												AsSlice(),
 										},
 									}},
-									Tag: 12345, // Non-zero tag
+									Tag: func() *string { s := "12345"; return &s }(), // Non-zero tag
 								},
 							},
 						},
@@ -1750,7 +1750,7 @@ func TestAllowedSourcesTagConversion(t *testing.T) {
 				)
 				assert.Equal(
 					t,
-					uint32(12345),
+					"12345",
 					config.Balancer.Handler.VirtualServices[0].AllowedSources[0].Tag,
 					"Tag should be 12345",
 				)
@@ -1824,9 +1824,9 @@ func TestAllowedSourcesTagConversion(t *testing.T) {
 				)
 				assert.Equal(
 					t,
-					uint32(0),
+					"",
 					config.Balancer.Handler.VirtualServices[0].AllowedSources[0].Tag,
-					"Tag should default to 0",
+					"Tag should default to empty string",
 				)
 			},
 		},
@@ -1866,7 +1866,7 @@ func TestAllowedSourcesTagConversion(t *testing.T) {
 												AsSlice(),
 										},
 									}},
-									Tag: 100,
+									Tag: func() *string { s := "100"; return &s }(),
 								},
 								{
 									Nets: []*balancerpb.Net{{
@@ -1879,7 +1879,7 @@ func TestAllowedSourcesTagConversion(t *testing.T) {
 												AsSlice(),
 										},
 									}},
-									Tag: 200,
+									Tag: func() *string { s := "200"; return &s }(),
 								},
 								{
 									Nets: []*balancerpb.Net{{
@@ -1924,21 +1924,21 @@ func TestAllowedSourcesTagConversion(t *testing.T) {
 				)
 				assert.Equal(
 					t,
-					uint32(100),
+					"100",
 					config.Balancer.Handler.VirtualServices[0].AllowedSources[0].Tag,
 					"First tag should be 100",
 				)
 				assert.Equal(
 					t,
-					uint32(200),
+					"200",
 					config.Balancer.Handler.VirtualServices[0].AllowedSources[1].Tag,
 					"Second tag should be 200",
 				)
 				assert.Equal(
 					t,
-					uint32(0),
+					"",
 					config.Balancer.Handler.VirtualServices[0].AllowedSources[2].Tag,
-					"Third tag should be 0",
+					"Third tag should be empty string",
 				)
 			},
 		},
@@ -1985,7 +1985,7 @@ func TestAllowedSourcesTagRoundTrip(t *testing.T) {
 									),
 								},
 								PortRanges: []ffi.PortRange{},
-								Tag:        12345,
+								Tag:        "12345",
 							},
 							{
 								Nets: []xnetip.NetWithMask{
@@ -1994,7 +1994,7 @@ func TestAllowedSourcesTagRoundTrip(t *testing.T) {
 									),
 								},
 								PortRanges: []ffi.PortRange{},
-								Tag:        0, // Zero tag
+								Tag:        "0", // Zero tag
 							},
 							{
 								Nets: []xnetip.NetWithMask{
@@ -2003,7 +2003,7 @@ func TestAllowedSourcesTagRoundTrip(t *testing.T) {
 									),
 								},
 								PortRanges: []ffi.PortRange{},
-								Tag:        99999,
+								Tag:        "99999",
 							},
 						},
 						PeersV4: []netip.Addr{},
@@ -2037,22 +2037,37 @@ func TestAllowedSourcesTagRoundTrip(t *testing.T) {
 	require.Len(t, protoConfig.PacketHandler.Vs[0].AllowedSrcs, 3)
 
 	// Verify tags in proto
+	require.NotNil(
+		t,
+		protoConfig.PacketHandler.Vs[0].AllowedSrcs[0].Tag,
+		"First tag should not be nil in proto",
+	)
 	assert.Equal(
 		t,
-		uint32(12345),
-		protoConfig.PacketHandler.Vs[0].AllowedSrcs[0].Tag,
+		"12345",
+		*protoConfig.PacketHandler.Vs[0].AllowedSrcs[0].Tag,
 		"First tag should be 12345 in proto",
 	)
-	assert.Equal(
+	require.NotNil(
 		t,
-		uint32(0),
 		protoConfig.PacketHandler.Vs[0].AllowedSrcs[1].Tag,
-		"Second tag should be 0 in proto",
+		"Second tag should not be nil in proto",
 	)
 	assert.Equal(
 		t,
-		uint32(99999),
+		"0",
+		*protoConfig.PacketHandler.Vs[0].AllowedSrcs[1].Tag,
+		"Second tag should be 0 in proto",
+	)
+	require.NotNil(
+		t,
 		protoConfig.PacketHandler.Vs[0].AllowedSrcs[2].Tag,
+		"Third tag should not be nil in proto",
+	)
+	assert.Equal(
+		t,
+		"99999",
+		*protoConfig.PacketHandler.Vs[0].AllowedSrcs[2].Tag,
 		"Third tag should be 99999 in proto",
 	)
 
@@ -2069,19 +2084,19 @@ func TestAllowedSourcesTagRoundTrip(t *testing.T) {
 	// Verify tags are preserved
 	assert.Equal(
 		t,
-		uint32(12345),
+		"12345",
 		convertedConfig.Balancer.Handler.VirtualServices[0].AllowedSources[0].Tag,
 		"First tag should be preserved as 12345",
 	)
 	assert.Equal(
 		t,
-		uint32(0),
+		"0",
 		convertedConfig.Balancer.Handler.VirtualServices[0].AllowedSources[1].Tag,
 		"Second tag should be preserved as 0",
 	)
 	assert.Equal(
 		t,
-		uint32(99999),
+		"99999",
 		convertedConfig.Balancer.Handler.VirtualServices[0].AllowedSources[2].Tag,
 		"Third tag should be preserved as 99999",
 	)

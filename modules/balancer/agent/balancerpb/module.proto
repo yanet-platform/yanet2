@@ -194,19 +194,25 @@ message AllowedSources {
 
 	// Tag identifier for tracking allowed source statistics.
 	//
-	// When non-zero, enables per-tag statistics tracking for packets
-	// matching this allowed source entry. Multiple AllowedSources entries
-	// can share the same tag to aggregate statistics across different
-	// network prefixes or port ranges.
+	// When specified (non-empty), enables per-tag statistics tracking for
+	// packets matching this allowed source entry. Multiple AllowedSources
+	// entries can share the same tag to aggregate statistics across
+	// different network prefixes or port ranges.
 	//
 	// BEHAVIOR:
-	// - tag = 0: No statistics tracking for this entry (default)
-	// - tag > 0: Track packets matching this entry under the specified tag
+	// - tag not set or empty: No statistics tracking for this entry
+	// (default)
+	// - tag = "name": Track packets matching this entry under the specified
+	// tag
 	//
 	// STATISTICS:
 	// - Tracked in AllowedSourcesStats in NamedVsStats
-	// - Each unique non-zero tag gets its own statistics entry
+	// - Each unique non-empty tag gets its own statistics entry
 	// - Counts total packets that passed allowed source filtering
+	//
+	// CONSTRAINTS:
+	// - Maximum tag length: 240 characters
+	// - Tags exceeding this limit will be rejected during configuration
 	//
 	// USE CASES:
 	// - Track traffic from different customer networks separately
@@ -216,19 +222,19 @@ message AllowedSources {
 	//
 	// EXAMPLES:
 	// 1. Track internal vs external traffic:
-	//    - Internal networks (10.0.0.0/8, 172.16.0.0/12): tag = 1
-	//    - External networks (0.0.0.0/0): tag = 2
+	//    - Internal networks (10.0.0.0/8, 172.16.0.0/12): tag = "internal"
+	//    - External networks (0.0.0.0/0): tag = "external"
 	//
 	// 2. Track per-customer traffic:
-	//    - Customer A networks: tag = 100
-	//    - Customer B networks: tag = 101
-	//    - Customer C networks: tag = 102
+	//    - Customer A networks: tag = "customer_a"
+	//    - Customer B networks: tag = "customer_b"
+	//    - Customer C networks: tag = "customer_c"
 	//
 	// 3. Aggregate multiple ranges under one tag:
-	//    - Entry 1: nets=[10.0.0.0/8], tag=1
-	//    - Entry 2: nets=[172.16.0.0/12], tag=1
+	//    - Entry 1: nets=[10.0.0.0/8], tag="internal"
+	//    - Entry 2: nets=[172.16.0.0/12], tag="internal"
 	//    - Both entries contribute to the same statistics counter
-	uint32 tag = 3;
+	optional string tag = 3;
 }
 
 // Virtual service configuration.

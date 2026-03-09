@@ -3,22 +3,18 @@ use core::error::Error;
 use clap::{ArgAction, CommandFactory, Parser, ValueEnum};
 use clap_complete::CompleteEnv;
 use code::{UpdateDeviceVlanRequest, device_vlan_service_client::DeviceVlanServiceClient};
-use commonpb::{Device, DevicePipeline};
-use tonic::{codec::CompressionEncoding, transport::Channel};
-use ync::logging;
+use commonpb::pb::Device;
+use tonic::codec::CompressionEncoding;
+use ync::{
+    client::{ConnectionArgs, LayeredChannel},
+    logging,
+};
 
 #[allow(non_snake_case)]
 pub mod code {
     use serde::Serialize;
 
     tonic::include_proto!("vlanpb");
-}
-
-#[allow(non_snake_case)]
-pub mod commonpb {
-    use serde::Serialize;
-
-    tonic::include_proto!("commonpb");
 }
 
 /// DeviceVlan module.
@@ -28,9 +24,8 @@ pub mod commonpb {
 pub struct Cmd {
     #[clap(subcommand)]
     pub mode: ModeCmd,
-    /// Gateway endpoint.
-    #[clap(long, default_value = "grpc://[::1]:8080", global = true)]
-    pub endpoint: String,
+    #[command(flatten)]
+    pub connection: ConnectionArgs,
     /// Log verbosity level.
     #[clap(short, action = ArgAction::Count, global = true)]
     pub verbose: u8,
@@ -67,13 +62,13 @@ pub struct UpdateCmd {
 }
 
 pub struct DeviceVlanService {
-    client: DeviceVlanServiceClient<Channel>,
+    client: DeviceVlanServiceClient<LayeredChannel>,
 }
 
 impl DeviceVlanService {
-    pub async fn new(endpoint: String) -> Result<Self, Box<dyn Error>> {
-        let client = DeviceVlanServiceClient::connect(endpoint).await?;
-        let client = client
+    pub async fn new(connection: &ConnectionArgs) -> Result<Self, Box<dyn Error>> {
+        let channel = ync::client::connect(connection).await?;
+        let client = DeviceVlanServiceClient::new(channel)
             .send_compressed(CompressionEncoding::Gzip)
             .accept_compressed(CompressionEncoding::Gzip);
         Ok(Self { client })
@@ -86,33 +81,13 @@ impl DeviceVlanService {
                 input: cmd
                     .input
                     .into_iter()
-                    .map(|p| {
-                        let parts: Vec<&str> = p.split(':').collect();
-                        if parts.len() != 2 {
-                            panic!("Invalid pipeline format. Expected 'pipeline_name:weight'");
-                        }
-                        let weight = parts[1].parse::<u64>().expect("Invalid weight value");
-                        DevicePipeline {
-                            name: parts[0].to_string(),
-                            weight: weight,
-                        }
-                    })
-                    .collect(),
+                    .map(|s| s.parse())
+                    .collect::<Result<Vec<_>, _>>()?,
                 output: cmd
                     .output
                     .into_iter()
-                    .map(|p| {
-                        let parts: Vec<&str> = p.split(':').collect();
-                        if parts.len() != 2 {
-                            panic!("Invalid pipeline format. Expected 'pipeline_name:weight'");
-                        }
-                        let weight = parts[1].parse::<u64>().expect("Invalid weight value");
-                        DevicePipeline {
-                            name: parts[0].to_string(),
-                            weight: weight,
-                        }
-                    })
-                    .collect(),
+                    .map(|s| s.parse())
+                    .collect::<Result<Vec<_>, _>>()?,
             }),
             vlan: cmd.vlan as u32,
         };
@@ -125,7 +100,7 @@ impl DeviceVlanService {
 }
 
 async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
-    let mut service = DeviceVlanService::new(cmd.endpoint).await?;
+    let mut service = DeviceVlanService::new(&cmd.connection).await?;
 
     match cmd.mode {
         ModeCmd::Update(cmd) => service.update_config(cmd).await,

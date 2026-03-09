@@ -3278,6 +3278,7 @@ dependencies = [
  "tonic",
  "tonic-build",
  "yanet-cli",
+ "yanet-commonpb",
 ]
 
 [[package]]
@@ -3298,6 +3299,7 @@ dependencies = [
  "tonic",
  "tonic-build",
  "yanet-cli",
+ "yanet-commonpb",
 ]
 
 [[package]]
@@ -3327,7 +3329,6 @@ dependencies = [
  "clap_complete",
  "colored",
  "ipnet",
- "ipnetwork",
  "log",
  "prost",
  "prost-types",
@@ -3354,6 +3355,7 @@ dependencies = [
  "tonic",
  "tonic-build",
  "yanet-cli",
+ "yanet-commonpb",
 ]
 
 [[package]]
@@ -3467,6 +3469,7 @@ dependencies = [
  "tonic",
  "tonic-build",
  "yanet-cli",
+ "yanet-commonpb",
 ]
 
 [[package]]
@@ -3487,6 +3490,39 @@ dependencies = [
  "tonic-build",
  "tower",
  "yanet-cli",
+]
+
+[[package]]
+name = "yanet-cli-route-mpls"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "clap_complete",
+ "colored",
+ "ipnet",
+ "ipnetwork",
+ "log",
+ "prost",
+ "prost-types",
+ "ptree",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tabled 0.18.0",
+ "tokio",
+ "tonic",
+ "tonic-build",
+ "yanet-cli",
+]
+
+[[package]]
+name = "yanet-commonpb"
+version = "0.1.0"
+dependencies = [
+ "prost",
+ "serde",
+ "tonic",
+ "tonic-build",
 ]
 
 [[package]]

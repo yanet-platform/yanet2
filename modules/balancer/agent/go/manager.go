@@ -7,6 +7,7 @@ package balancer
 import (
 	"context"
 	"fmt"
+	"net/netip"
 	"sync"
 	"time"
 
@@ -461,4 +462,276 @@ func (b *BalancerManager) Free() {
 	defer b.mu.Unlock()
 
 	b.stopBackgroundTasks()
+}
+
+// UpdateVS updates specific virtual services in the balancer configuration.
+//
+// This method takes the current FFI config, updates/adds the specified virtual
+// services (provided in protobuf format), and calls the FFI update. The ACL
+// reuse list in the returned UpdateInfo only contains virtual services from
+// the update request.
+//
+// Behavior:
+// - Virtual services in the request that already exist are replaced
+// - Virtual services in the request that don't exist are added
+// - Virtual services not in the request remain unchanged
+func (b *BalancerManager) UpdateVS(
+	vsList []*balancerpb.VirtualService,
+	now time.Time,
+) (*ffi.UpdateInfo, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	b.log.Debugw("updating virtual services", "vs_count", len(vsList))
+
+	// Convert protobuf VS list to FFI format
+	ffiVsList := make([]ffi.VsConfig, 0, len(vsList))
+	for i, protoVs := range vsList {
+		ffiVs, err := protoToVsConfig(protoVs)
+		if err != nil {
+			b.log.Errorw("failed to convert VS", "index", i, "error", err)
+			return nil, fmt.Errorf(
+				"failed to convert VS at index %d: %w",
+				i,
+				err,
+			)
+		}
+		ffiVsList = append(ffiVsList, ffiVs)
+	}
+
+	// Get current config
+	currentConfig := b.handle.Config()
+
+	// Build a map of VS identifiers from the request for quick lookup
+	requestedVsIds := make(map[ffi.VsIdentifier]bool)
+	for _, vs := range ffiVsList {
+		requestedVsIds[vs.Identifier] = true
+	}
+
+	// Create new VS list: keep existing VS that are not in the request,
+	// then add/replace with VS from the request
+	newVsList := make([]ffi.VsConfig, 0)
+
+	// Keep existing VS that are not being updated
+	for _, existingVs := range currentConfig.Balancer.Handler.VirtualServices {
+		if !requestedVsIds[existingVs.Identifier] {
+			newVsList = append(newVsList, existingVs)
+		}
+	}
+
+	// Add VS from the request (these are new or updated)
+	newVsList = append(newVsList, ffiVsList...)
+
+	// Update WLC config - recalculate which VS indices have WLC enabled
+	newWlcVs := make([]uint32, 0)
+	wlcEnabledOld := make(map[ffi.VsIdentifier]bool)
+	for _, vsIdx := range currentConfig.Wlc.Vs {
+		if int(vsIdx) < len(currentConfig.Balancer.Handler.VirtualServices) {
+			wlcEnabledOld[currentConfig.Balancer.Handler.VirtualServices[vsIdx].Identifier] = true
+		}
+	}
+	// Check which VS in the request have WLC enabled
+	wlcEnabledNew := make(map[ffi.VsIdentifier]bool)
+	for _, protoVs := range vsList {
+		if protoVs.Flags != nil && protoVs.Flags.Wlc {
+			ffiVs, _ := protoToVsConfig(protoVs)
+			wlcEnabledNew[ffiVs.Identifier] = true
+		}
+	}
+	// For new VS list, find indices of VS that have WLC enabled
+	for i, vs := range newVsList {
+		// If VS is in the request, use the new WLC flag; otherwise use the old one
+		if requestedVsIds[vs.Identifier] {
+			if wlcEnabledNew[vs.Identifier] {
+				newWlcVs = append(newWlcVs, uint32(i))
+			}
+		} else if wlcEnabledOld[vs.Identifier] {
+			newWlcVs = append(newWlcVs, uint32(i))
+		}
+	}
+
+	// Create updated manager config
+	updatedConfig := &ffi.BalancerManagerConfig{
+		Balancer: ffi.BalancerConfig{
+			Handler: ffi.PacketHandlerConfig{
+				SessionsTimeouts: currentConfig.Balancer.Handler.SessionsTimeouts,
+				VirtualServices:  newVsList,
+				SourceV4:         currentConfig.Balancer.Handler.SourceV4,
+				SourceV6:         currentConfig.Balancer.Handler.SourceV6,
+				DecapV4:          currentConfig.Balancer.Handler.DecapV4,
+				DecapV6:          currentConfig.Balancer.Handler.DecapV6,
+			},
+			State: currentConfig.Balancer.State,
+		},
+		Wlc: ffi.BalancerManagerWlcConfig{
+			Power:         currentConfig.Wlc.Power,
+			MaxRealWeight: currentConfig.Wlc.MaxRealWeight,
+			Vs:            newWlcVs,
+		},
+		RefreshPeriod: currentConfig.RefreshPeriod,
+		MaxLoadFactor: currentConfig.MaxLoadFactor,
+	}
+
+	// Update via FFI
+	updateInfo, err := b.handle.Update(updatedConfig, now)
+	if err != nil {
+		b.log.Errorw("failed to update manager", "error", err)
+		return nil, fmt.Errorf("failed to update manager: %w", err)
+	}
+
+	// Filter ACL reuse list to only include VS from the update request
+	filteredUpdateInfo := filterACLReusesForRequestedVs(
+		updateInfo,
+		requestedVsIds,
+	)
+
+	b.log.Infow("virtual services updated successfully",
+		"vs_count", len(vsList),
+		"vs_ipv4_matcher_reused", filteredUpdateInfo.VsIpv4MatcherReused,
+		"vs_ipv6_matcher_reused", filteredUpdateInfo.VsIpv6MatcherReused,
+		"acl_reused_vs_count", len(filteredUpdateInfo.ACLReusedVs))
+
+	return filteredUpdateInfo, nil
+}
+
+// DeleteVS deletes specific virtual services from the balancer configuration.
+//
+// This method takes the current FFI config, removes the specified virtual
+// services (identified by protobuf VS list), and calls the FFI update. The ACL
+// reuse list in the returned UpdateInfo is always empty since deleted VSs don't
+// have ACL filters to reuse.
+//
+// Behavior:
+// - Virtual services matching the identifiers in the request are removed
+// - Virtual services not in the request remain unchanged
+// - Deleting a non-existent VS is not an error (idempotent)
+func (b *BalancerManager) DeleteVS(
+	vsList []*balancerpb.VirtualService,
+	now time.Time,
+) (*ffi.UpdateInfo, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	b.log.Debugw("deleting virtual services", "vs_count", len(vsList))
+
+	// Get current config
+	currentConfig := b.handle.Config()
+
+	// Build a map of VS identifiers to delete for quick lookup
+	vsToDelete := make(map[ffi.VsIdentifier]bool)
+	for _, protoVs := range vsList {
+		if protoVs.Id != nil {
+			vsID := protoVsIdentifierToFFI(protoVs.Id)
+			vsToDelete[vsID] = true
+		}
+	}
+
+	// Create new VS list without the deleted VS
+	newVsList := make([]ffi.VsConfig, 0)
+
+	for _, existingVs := range currentConfig.Balancer.Handler.VirtualServices {
+		if !vsToDelete[existingVs.Identifier] {
+			newVsList = append(newVsList, existingVs)
+		}
+	}
+
+	// Update WLC config - recalculate which VS indices have WLC enabled
+	newWlcVs := make([]uint32, 0)
+	wlcEnabledOld := make(map[ffi.VsIdentifier]bool)
+	for _, vsIdx := range currentConfig.Wlc.Vs {
+		if int(vsIdx) < len(currentConfig.Balancer.Handler.VirtualServices) {
+			wlcEnabledOld[currentConfig.Balancer.Handler.VirtualServices[vsIdx].Identifier] = true
+		}
+	}
+	// For new VS list, find indices of VS that had WLC enabled
+	for i, vs := range newVsList {
+		if wlcEnabledOld[vs.Identifier] {
+			newWlcVs = append(newWlcVs, uint32(i))
+		}
+	}
+
+	// Create updated manager config
+	updatedConfig := &ffi.BalancerManagerConfig{
+		Balancer: ffi.BalancerConfig{
+			Handler: ffi.PacketHandlerConfig{
+				SessionsTimeouts: currentConfig.Balancer.Handler.SessionsTimeouts,
+				VirtualServices:  newVsList,
+				SourceV4:         currentConfig.Balancer.Handler.SourceV4,
+				SourceV6:         currentConfig.Balancer.Handler.SourceV6,
+				DecapV4:          currentConfig.Balancer.Handler.DecapV4,
+				DecapV6:          currentConfig.Balancer.Handler.DecapV6,
+			},
+			State: currentConfig.Balancer.State,
+		},
+		Wlc: ffi.BalancerManagerWlcConfig{
+			Power:         currentConfig.Wlc.Power,
+			MaxRealWeight: currentConfig.Wlc.MaxRealWeight,
+			Vs:            newWlcVs,
+		},
+		RefreshPeriod: currentConfig.RefreshPeriod,
+		MaxLoadFactor: currentConfig.MaxLoadFactor,
+	}
+
+	// Update via FFI
+	updateInfo, err := b.handle.Update(updatedConfig, now)
+	if err != nil {
+		b.log.Errorw("failed to update manager", "error", err)
+		return nil, fmt.Errorf("failed to update manager: %w", err)
+	}
+
+	// For delete, ACL reuse list should be empty
+	updateInfo.ACLReusedVs = []ffi.VsIdentifier{}
+
+	b.log.Infow("virtual services deleted successfully",
+		"vs_count", len(vsList),
+		"vs_ipv4_matcher_reused", updateInfo.VsIpv4MatcherReused,
+		"vs_ipv6_matcher_reused", updateInfo.VsIpv6MatcherReused)
+
+	return updateInfo, nil
+}
+
+// protoVsIdentifierToFFI converts a protobuf VS identifier to FFI format
+func protoVsIdentifierToFFI(id *balancerpb.VsIdentifier) ffi.VsIdentifier {
+	var addr netip.Addr
+	if id.Addr != nil {
+		addr, _ = netip.AddrFromSlice(id.Addr.Bytes)
+	}
+
+	proto := ffi.VsTransportProtoUDP
+	if id.Proto == balancerpb.TransportProto_TCP {
+		proto = ffi.VsTransportProtoTCP
+	}
+
+	return ffi.VsIdentifier{
+		Addr:           addr,
+		Port:           uint16(id.Port),
+		TransportProto: proto,
+	}
+}
+
+// filterACLReusesForRequestedVs filters the ACL reuse list to only include
+// VS identifiers that were in the original update request.
+// This ensures the response only reports reuse status for VSs that were
+// actually part of the update operation.
+func filterACLReusesForRequestedVs(
+	info *ffi.UpdateInfo,
+	requestedVsIds map[ffi.VsIdentifier]bool,
+) *ffi.UpdateInfo {
+	if info == nil {
+		return nil
+	}
+
+	filtered := &ffi.UpdateInfo{
+		VsIpv4MatcherReused: info.VsIpv4MatcherReused,
+		VsIpv6MatcherReused: info.VsIpv6MatcherReused,
+		ACLReusedVs:         make([]ffi.VsIdentifier, 0),
+	}
+
+	for _, vsID := range info.ACLReusedVs {
+		if requestedVsIds[vsID] {
+			filtered.ACLReusedVs = append(filtered.ACLReusedVs, vsID)
+		}
+	}
+
+	return filtered
 }

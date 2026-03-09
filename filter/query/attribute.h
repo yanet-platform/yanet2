@@ -7,8 +7,10 @@
 #include "net6.h"
 #include "net6_fast.h"
 #include "port.h"
+#include "port_fast.h"
 #include "proto.h"
 #include "proto_range.h"
+#include "proto_range_fast.h"
 #include "vlan.h"
 
 typedef void (*filter_attr_query_func)(
@@ -32,7 +34,10 @@ struct filter_attr_query {
 REGISTER_ATTRIBUTE(port_src);
 REGISTER_ATTRIBUTE(port_dst);
 REGISTER_ATTRIBUTE(proto);
+REGISTER_ATTRIBUTE(port_fast_src);
+REGISTER_ATTRIBUTE(port_fast_dst);
 REGISTER_ATTRIBUTE(proto_range);
+REGISTER_ATTRIBUTE(proto_range_fast);
 REGISTER_ATTRIBUTE(net4_src);
 REGISTER_ATTRIBUTE(net4_dst);
 REGISTER_ATTRIBUTE(net6_src);

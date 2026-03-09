@@ -1410,7 +1410,7 @@ func TestManagerTagFieldInConfig(t *testing.T) {
 										AsSlice(),
 								},
 							}},
-							Tag: 11111, // First tag
+							Tag: func() *string { s := "11111"; return &s }(), // First tag
 						},
 						{
 							Nets: []*balancerpb.Net{{
@@ -1423,7 +1423,7 @@ func TestManagerTagFieldInConfig(t *testing.T) {
 										AsSlice(),
 								},
 							}},
-							Tag: 22222, // Second tag
+							Tag: func() *string { s := "22222"; return &s }(), // Second tag
 						},
 					},
 				},
@@ -1485,16 +1485,26 @@ func TestManagerTagFieldInConfig(t *testing.T) {
 		)
 
 		// Verify tags
-		assert.Equal(
+		require.NotNil(
 			t,
-			uint32(11111),
 			config.PacketHandler.Vs[0].AllowedSrcs[0].Tag,
-			"first tag should be 11111",
+			"first tag should not be nil",
 		)
 		assert.Equal(
 			t,
-			uint32(22222),
+			"11111",
+			*config.PacketHandler.Vs[0].AllowedSrcs[0].Tag,
+			"first tag should be 11111",
+		)
+		require.NotNil(
+			t,
 			config.PacketHandler.Vs[0].AllowedSrcs[1].Tag,
+			"second tag should not be nil",
+		)
+		assert.Equal(
+			t,
+			"22222",
+			*config.PacketHandler.Vs[0].AllowedSrcs[1].Tag,
 			"second tag should be 22222",
 		)
 	})
@@ -1547,7 +1557,7 @@ func TestManagerTagFieldInConfig(t *testing.T) {
 											AsSlice(),
 									},
 								}},
-								Tag: 33333, // Changed tag
+								Tag: func() *string { s := "33333"; return &s }(), // Changed tag
 							},
 							{
 								Nets: []*balancerpb.Net{{
@@ -1560,7 +1570,7 @@ func TestManagerTagFieldInConfig(t *testing.T) {
 											AsSlice(),
 									},
 								}},
-								Tag: 0, // Changed to zero
+								Tag: func() *string { s := "0"; return &s }(), // Changed to zero
 							},
 						},
 					},
@@ -1592,16 +1602,26 @@ func TestManagerTagFieldInConfig(t *testing.T) {
 			"should have 2 allowed sources",
 		)
 
-		assert.Equal(
+		require.NotNil(
 			t,
-			uint32(33333),
 			config.PacketHandler.Vs[0].AllowedSrcs[0].Tag,
-			"first tag should be updated to 33333",
+			"first tag should not be nil",
 		)
 		assert.Equal(
 			t,
-			uint32(0),
+			"33333",
+			*config.PacketHandler.Vs[0].AllowedSrcs[0].Tag,
+			"first tag should be updated to 33333",
+		)
+		require.NotNil(
+			t,
 			config.PacketHandler.Vs[0].AllowedSrcs[1].Tag,
+			"second tag should not be nil",
+		)
+		assert.Equal(
+			t,
+			"0",
+			*config.PacketHandler.Vs[0].AllowedSrcs[1].Tag,
 			"second tag should be updated to 0",
 		)
 	})

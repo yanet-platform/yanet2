@@ -13,6 +13,7 @@
 #include "dataplane/worker/worker.h"
 #include "fwstate/lookup.h"
 #include "fwstate/sync.h"
+#include "lib/dataplane/module/packet_front.h"
 #include "logging/log.h"
 
 #include <filter/query.h>

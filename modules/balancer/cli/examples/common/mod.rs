@@ -24,7 +24,7 @@ pub fn create_show_config_example() -> balancerpb::ShowConfigResponse {
                                     mask: Some(balancerpb::Addr { bytes: vec![255, 0, 0, 0] }),
                                 }],
                                 ports: vec![],
-                                tag: 100,
+                                tag: Some("100".to_string()),
                             },
                             // Multiple networks in one entry with port restrictions and tag
                             balancerpb::AllowedSources {
@@ -39,7 +39,7 @@ pub fn create_show_config_example() -> balancerpb::ShowConfigResponse {
                                     },
                                 ],
                                 ports: vec![balancerpb::PortsRange { from: 1024, to: 65535 }],
-                                tag: 200,
+                                tag: Some("200".to_string()),
                             },
                             // Network without tag (tag = 0)
                             balancerpb::AllowedSources {
@@ -48,7 +48,7 @@ pub fn create_show_config_example() -> balancerpb::ShowConfigResponse {
                                     mask: Some(balancerpb::Addr { bytes: vec![255, 255, 255, 0] }),
                                 }],
                                 ports: vec![balancerpb::PortsRange { from: 80, to: 80 }],
-                                tag: 0, // No tag
+                                tag: None, // No tag
                             },
                         ],
                         reals: vec![
@@ -101,7 +101,7 @@ pub fn create_show_config_example() -> balancerpb::ShowConfigResponse {
                                     balancerpb::PortsRange { from: 443, to: 443 },
                                     balancerpb::PortsRange { from: 8443, to: 8443 },
                                 ],
-                                tag: 0, // No tag - won't appear in stats
+                                tag: None, // No tag - won't appear in stats
                             },
                             // Multiple networks with non-contiguous netmask and tag
                             balancerpb::AllowedSources {
@@ -120,7 +120,7 @@ pub fn create_show_config_example() -> balancerpb::ShowConfigResponse {
                                     },
                                 ],
                                 ports: vec![balancerpb::PortsRange { from: 1024, to: 65535 }],
-                                tag: 300,
+                                tag: Some("300".to_string()),
                             },
                         ],
                         reals: vec![
@@ -183,7 +183,7 @@ pub fn create_show_config_example() -> balancerpb::ShowConfigResponse {
                                     }),
                                 }],
                                 ports: vec![],
-                                tag: 400,
+                                tag: Some("400".to_string()),
                             },
                         ],
                         reals: vec![
@@ -499,8 +499,14 @@ pub fn create_config_stats_example() -> balancerpb::ShowStatsResponse {
                         outgoing_bytes: 799_500_000,
                     }),
                     allowed_sources: vec![
-                        balancerpb::AllowedSourcesStats { tag: 100, passes: 500_000 },
-                        balancerpb::AllowedSourcesStats { tag: 200, passes: 299_500 },
+                        balancerpb::AllowedSourcesStats {
+                            tag: "100".to_string(),
+                            passes: 500_000,
+                        },
+                        balancerpb::AllowedSourcesStats {
+                            tag: "200".to_string(),
+                            passes: 299_500,
+                        },
                         // Tag 0 (no tag) doesn't appear in stats
                     ],
                     reals: vec![
@@ -573,7 +579,10 @@ pub fn create_config_stats_example() -> balancerpb::ShowStatsResponse {
                     }),
                     allowed_sources: vec![
                         // Tag 0 (no tag) doesn't appear in stats
-                        balancerpb::AllowedSourcesStats { tag: 300, passes: 400_000 },
+                        balancerpb::AllowedSourcesStats {
+                            tag: "300".to_string(),
+                            passes: 400_000,
+                        },
                     ],
                     reals: vec![balancerpb::NamedRealStats {
                         real: Some(balancerpb::RealIdentifier {
@@ -622,7 +631,10 @@ pub fn create_config_stats_example() -> balancerpb::ShowStatsResponse {
                         outgoing_packets: 300_000,
                         outgoing_bytes: 300_000_000,
                     }),
-                    allowed_sources: vec![balancerpb::AllowedSourcesStats { tag: 400, passes: 300_000 }],
+                    allowed_sources: vec![balancerpb::AllowedSourcesStats {
+                        tag: "400".to_string(),
+                        passes: 300_000,
+                    }],
                     reals: vec![
                         balancerpb::NamedRealStats {
                             real: Some(balancerpb::RealIdentifier {
@@ -865,6 +877,39 @@ pub fn create_update_info_updated_example() -> balancerpb::UpdateInfo {
                 proto: balancerpb::TransportProto::Tcp as i32,
             },
         ],
+    }
+}
+
+#[allow(dead_code)]
+pub fn create_vs_update_info_example() -> balancerpb::UpdateInfo {
+    // VS update/delete operations never have created=true
+    balancerpb::UpdateInfo {
+        created: false,
+        vs_ipv4_matcher_reused: true,
+        vs_ipv6_matcher_reused: false,
+        vs_acl_reuses: vec![
+            balancerpb::VsIdentifier {
+                addr: Some(balancerpb::Addr { bytes: vec![192, 0, 2, 1] }),
+                port: 80,
+                proto: balancerpb::TransportProto::Tcp as i32,
+            },
+            balancerpb::VsIdentifier {
+                addr: Some(balancerpb::Addr { bytes: vec![192, 0, 2, 2] }),
+                port: 443,
+                proto: balancerpb::TransportProto::Tcp as i32,
+            },
+        ],
+    }
+}
+
+#[allow(dead_code)]
+pub fn create_vs_delete_info_example() -> balancerpb::UpdateInfo {
+    // VS delete operations have empty ACL reuse list
+    balancerpb::UpdateInfo {
+        created: false,
+        vs_ipv4_matcher_reused: false,
+        vs_ipv6_matcher_reused: true,
+        vs_acl_reuses: vec![], // Always empty for delete
     }
 }
 

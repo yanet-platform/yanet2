@@ -6,8 +6,10 @@ mod common;
 
 use std::{env, error::Error};
 
-use yanet_cli_balancer::output::{self, OutputFormat};
-use yanet_cli_balancer::rpc::balancerpb;
+use yanet_cli_balancer::{
+    output::{self, OutputFormat},
+    rpc::balancerpb,
+};
 
 fn main() -> Result<(), Box<dyn Error>> {
     let response = balancerpb::ShowGraphResponse {

@@ -160,7 +160,9 @@ init_reals(
 		NEW_ERROR("no memory");
 		return -1;
 	}
-	memset(reals, 0, sizeof(struct real) * real_count);
+	if (real_count > 0) {
+		memset(reals, 0, sizeof(struct real) * real_count);
+	}
 	SET_OFFSET_OF(&handler->reals, reals);
 
 	size_t real_ph_idx = 0;

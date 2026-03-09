@@ -1,6 +1,1 @@
-{
-  "created": true,
-  "vs_ipv4_matcher_reused": false,
-  "vs_ipv6_matcher_reused": false,
-  "vs_acl_reuses": []
-}
+{"created":true,"vs_ipv4_matcher_reused":false,"vs_ipv6_matcher_reused":false,"vs_acl_reuses":[]}

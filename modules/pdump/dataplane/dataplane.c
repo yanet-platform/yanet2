@@ -7,6 +7,8 @@
 #include "dataplane/config/zone.h"
 #include "dataplane/module/module.h"
 #include "dataplane/packet/packet.h"
+#include "lib/dataplane/module/packet_front.h"
+#include "lib/dataplane/packet/data.h"
 
 #include "controlplane/config/econtext.h"
 

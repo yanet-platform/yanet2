@@ -1,0 +1,15 @@
+
+════════════════════════════════════════════════════════════
+  VS Update Summary
+════════════════════════════════════════════════════════════
+
+Filter Reuse Status:
+  IPv4 VS Matcher: ✓ Reused (not recompiled)
+  IPv6 VS Matcher: ✗ Recompiled
+
+ACL Filters Reused: (2 virtual services)
+  • 192.0.2.1:80/TCP
+  • 192.0.2.2:443/TCP
+
+════════════════════════════════════════════════════════════
+

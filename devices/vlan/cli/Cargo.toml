@@ -7,6 +7,7 @@ publish = false
 rust-version = "1.85"
 
 [dependencies]
+commonpb = { path = "../../../common/rust/commonpb", version = "0.1", package = "yanet-commonpb" }
 ync = { path = "../../../cli/core", version = "0.1", package = "yanet-cli"}
 clap = { version = "4.5", features = ["derive"] }
 clap_complete = { version = "4.5", features = ["unstable-dynamic"] }

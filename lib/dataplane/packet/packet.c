@@ -1,6 +1,7 @@
 #include "packet.h"
 
 #include "common/crc32.h"
+#include "data.h"
 
 #include "yanet_build_config.h"
 
@@ -130,13 +131,15 @@ parse_ipv6_header(struct packet *packet, uint16_t *type, uint16_t *offset) {
 				return -1;
 			}
 
-			const struct ipv6_ext_2byte *ext =
+			const struct yanet_ipv6_ext_2byte *ext =
 				rte_pktmbuf_mtod_offset(
-					mbuf, struct ipv6_ext_2byte *, *offset
+					mbuf,
+					struct yanet_ipv6_ext_2byte *,
+					*offset
 				);
 
-			ext_type = ext->next_type;
-			*offset += (1 + ext->size) * 8;
+			ext_type = ext->next_header;
+			*offset += (1 + ext->extension_length) * 8;
 
 			// FIXME: packet->network_flags |=
 			// NETWORK_FLAG_HAS_EXTENSION;
@@ -145,13 +148,15 @@ parse_ipv6_header(struct packet *packet, uint16_t *type, uint16_t *offset) {
 				return -1;
 			}
 
-			const struct ipv6_ext_2byte *ext =
+			const struct yanet_ipv6_ext_2byte *ext =
 				rte_pktmbuf_mtod_offset(
-					mbuf, struct ipv6_ext_2byte *, *offset
+					mbuf,
+					struct yanet_ipv6_ext_2byte *,
+					*offset
 				);
 
-			ext_type = ext->next_type;
-			*offset += (2 + ext->size) * 4;
+			ext_type = ext->next_header;
+			*offset += (2 + ext->extension_length) * 4;
 			// FIXME: packet->network_flags |=
 			// NETWORK_FLAG_HAS_EXTENSION;
 		} else if (ext_type == IPPROTO_FRAGMENT) {
@@ -159,10 +164,10 @@ parse_ipv6_header(struct packet *packet, uint16_t *type, uint16_t *offset) {
 				return -1;
 			}
 
-			const struct ipv6_ext_fragment *ext =
+			const struct yanet_ipv6_ext_fragment *ext =
 				rte_pktmbuf_mtod_offset(
 					mbuf,
-					struct ipv6_ext_fragment *,
+					struct yanet_ipv6_ext_fragment *,
 					*offset
 				);
 
@@ -174,7 +179,7 @@ parse_ipv6_header(struct packet *packet, uint16_t *type, uint16_t *offset) {
 				}
 			}
 
-			ext_type = ext->next_type;
+			ext_type = ext->next_header;
 			*offset += RTE_IPV6_FRAG_HDR_SIZE;
 
 			// FIXME: packet->network_flags |=
@@ -262,16 +267,6 @@ parse_packet(struct packet *packet) {
 	}
 
 	return 0;
-}
-
-struct packet *
-mbuf_to_packet(struct rte_mbuf *mbuf) {
-	return (struct packet *)((void *)mbuf->buf_addr);
-}
-
-uint16_t
-packet_data_len(struct packet *packet) {
-	return rte_pktmbuf_data_len(packet_to_mbuf(packet));
 }
 
 void
@@ -551,15 +546,6 @@ logtrace_rte_mbuf(struct rte_mbuf *mbuf) {
 #else
 	(void)mbuf;
 #endif // ENABLE_TRACE_LOG
-}
-
-int
-packet_list_counter(struct packet_list *list) {
-	int count = 0;
-	for (struct packet *pkt = list->first; pkt != NULL; pkt = pkt->next) {
-		count++;
-	}
-	return count;
 }
 
 uint64_t

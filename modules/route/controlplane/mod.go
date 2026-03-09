@@ -8,8 +8,8 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 
-	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	routepb "github.com/yanet-platform/yanet2/modules/route/controlplane/routepb"
+	cpffi "github.com/yanet-platform/yanet2/controlplane/ffi"
+	"github.com/yanet-platform/yanet2/modules/route/controlplane/routepb"
 	"github.com/yanet-platform/yanet2/modules/route/internal/discovery/neigh"
 )
 
@@ -23,8 +23,8 @@ const (
 // routing configuration.
 type RouteModule struct {
 	cfg              *Config
-	shm              *ffi.SharedMemory
-	agent            *ffi.Agent
+	shm              *cpffi.SharedMemory
+	agent            *cpffi.Agent
 	neighbourMonitor *neigh.NeighMonitor
 	routeService     *RouteService
 	neighbourService *NeighbourService
@@ -45,7 +45,7 @@ func NewRouteModule(cfg *Config, log *zap.SugaredLogger) (*RouteModule, error) {
 		return nil, fmt.Errorf("failed to create neighbour monitor: %w", err)
 	}
 
-	shm, err := ffi.AttachSharedMemory(cfg.MemoryPath)
+	shm, err := cpffi.AttachSharedMemory(cfg.MemoryPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to attach to shared memory %q: %w", cfg.MemoryPath, err)
 	}

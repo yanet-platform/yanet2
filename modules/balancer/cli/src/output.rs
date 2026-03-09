@@ -301,6 +301,151 @@ fn print_update_info_table(update_info: &balancerpb::UpdateInfo) -> Result<(), B
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+// VS Update/Delete Info Output
+////////////////////////////////////////////////////////////////////////////////
+
+#[derive(Debug, Clone, Copy)]
+pub enum VsOperation {
+    Update,
+    Delete,
+}
+
+/// Print VS update/delete information (without created flag)
+pub fn print_vs_update_info(
+    update_info: &balancerpb::UpdateInfo,
+    format: OutputFormat,
+    operation: VsOperation,
+) -> Result<(), Box<dyn Error>> {
+    match format {
+        OutputFormat::Json => print_vs_update_info_json(update_info),
+        OutputFormat::Tree => print_vs_update_info_tree(update_info, operation),
+        OutputFormat::Table => print_vs_update_info_table(update_info, operation),
+    }
+}
+
+fn print_vs_update_info_json(update_info: &balancerpb::UpdateInfo) -> Result<(), Box<dyn Error>> {
+    let json = json_output::convert_vs_update_info(update_info);
+    println!("{}", serde_json::to_string(&json)?);
+    Ok(())
+}
+
+fn print_vs_update_info_tree(
+    update_info: &balancerpb::UpdateInfo,
+    operation: VsOperation,
+) -> Result<(), Box<dyn Error>> {
+    let title = match operation {
+        VsOperation::Update => "VS Update Result",
+        VsOperation::Delete => "VS Delete Result",
+    };
+    let mut tree = TreeBuilder::new(title.to_string());
+
+    // Filter reuse status
+    tree.begin_child("Filter Reuse Status".to_string());
+
+    let ipv4_status = if update_info.vs_ipv4_matcher_reused {
+        "Reused (not recompiled)"
+    } else {
+        "Recompiled"
+    };
+    tree.add_empty_child(format!("IPv4 VS Matcher: {}", ipv4_status));
+
+    let ipv6_status = if update_info.vs_ipv6_matcher_reused {
+        "Reused (not recompiled)"
+    } else {
+        "Recompiled"
+    };
+    tree.add_empty_child(format!("IPv6 VS Matcher: {}", ipv6_status));
+
+    tree.end_child();
+
+    // ACL reuse information (only for update operations)
+    if matches!(operation, VsOperation::Update) {
+        if !update_info.vs_acl_reuses.is_empty() {
+            tree.begin_child(format!(
+                "ACL Filters Reused ({} virtual services)",
+                update_info.vs_acl_reuses.len()
+            ));
+            for vs_id in &update_info.vs_acl_reuses {
+                if let Ok(ip) = opt_addr_to_ip(&vs_id.addr) {
+                    tree.add_empty_child(format_vs(ip, vs_id.port, vs_id.proto));
+                }
+            }
+            tree.end_child();
+        } else {
+            tree.add_empty_child("ACL Filters Reused: None".to_string());
+        }
+    }
+
+    let tree = tree.build();
+    ptree::print_tree(&tree)?;
+    Ok(())
+}
+
+fn print_vs_update_info_table(
+    update_info: &balancerpb::UpdateInfo,
+    operation: VsOperation,
+) -> Result<(), Box<dyn Error>> {
+    println!();
+    println!("{}", "═".repeat(60).cyan().bold());
+    let title = match operation {
+        VsOperation::Update => "  VS Update Summary",
+        VsOperation::Delete => "  VS Delete Result",
+    };
+    println!("{}", title.white().bold());
+    println!("{}", "═".repeat(60).cyan().bold());
+    println!();
+
+    // Filter reuse status
+    println!("{}", "Filter Reuse Status:".bright_cyan().bold());
+
+    let ipv4_status = if update_info.vs_ipv4_matcher_reused {
+        "✓ Reused (not recompiled)".bright_green()
+    } else {
+        "✗ Recompiled".bright_yellow()
+    };
+    println!("  IPv4 VS Matcher: {}", ipv4_status);
+
+    let ipv6_status = if update_info.vs_ipv6_matcher_reused {
+        "✓ Reused (not recompiled)".bright_green()
+    } else {
+        "✗ Recompiled".bright_yellow()
+    };
+    println!("  IPv6 VS Matcher: {}", ipv6_status);
+
+    println!();
+
+    // ACL reuse information (only for update operations)
+    if matches!(operation, VsOperation::Update) {
+        if !update_info.vs_acl_reuses.is_empty() {
+            println!(
+                "{} {}",
+                "ACL Filters Reused:".bright_cyan().bold(),
+                format!("({} virtual services)", update_info.vs_acl_reuses.len()).bright_white()
+            );
+
+            for vs_id in &update_info.vs_acl_reuses {
+                if let Ok(ip) = opt_addr_to_ip(&vs_id.addr) {
+                    println!("  • {}", format_vs(ip, vs_id.port, vs_id.proto).bright_yellow());
+                }
+            }
+        } else {
+            println!(
+                "{} {}",
+                "ACL Filters Reused:".bright_cyan().bold(),
+                "None".bright_yellow()
+            );
+        }
+
+        println!();
+    }
+
+    println!("{}", "═".repeat(60).cyan().bold());
+    println!();
+
+    Ok(())
+}
+
+////////////////////////////////////////////////////////////////////////////////
 // ShowConfig Output
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -1122,10 +1267,10 @@ fn print_show_stats_tree(response: &balancerpb::ShowStatsResponse) -> Result<(),
                         if !vs.allowed_sources.is_empty() {
                             tree.begin_child("Allowed Sources".to_string());
                             for allowed_src in &vs.allowed_sources {
-                                let tag_str = if allowed_src.tag == 0 {
+                                let tag_str = if allowed_src.tag.is_empty() {
                                     "None".to_string()
                                 } else {
-                                    allowed_src.tag.to_string()
+                                    allowed_src.tag.clone()
                                 };
                                 tree.add_empty_child(format!(
                                     "Tag {}: {} passes",
@@ -1481,10 +1626,10 @@ fn print_show_stats_table(response: &balancerpb::ShowStatsResponse) -> Result<()
                         if !vs.allowed_sources.is_empty() {
                             println!("  {}:", "Allowed Sources".bright_cyan().bold());
                             for allowed_src in &vs.allowed_sources {
-                                let tag_str = if allowed_src.tag == 0 {
+                                let tag_str = if allowed_src.tag.is_empty() {
                                     "None".to_string()
                                 } else {
-                                    allowed_src.tag.to_string()
+                                    allowed_src.tag.clone()
                                 };
                                 println!(
                                     "    Tag {}: {}",
@@ -1769,7 +1914,8 @@ fn print_show_graph_table(response: &balancerpb::ShowGraphResponse) -> Result<()
     println!();
 
     if let Some(graph) = &response.graph {
-        // Display each VS with its reals in a hierarchical format (similar to info output)
+        // Display each VS with its reals in a hierarchical format (similar to info
+        // output)
         if !graph.virtual_services.is_empty() {
             for vs in &graph.virtual_services {
                 if let Some(vs_id) = &vs.identifier {

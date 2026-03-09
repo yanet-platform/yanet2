@@ -9,10 +9,13 @@ compiler_sources = files(
   'compiler/net6.c',
   'compiler/port.c',
   'compiler/proto_range.c',
+  'compiler/proto_range_fast.c',
   'compiler/proto.c',
   'compiler/vlan.c',
   'compiler/net6_fast.c',
   'compiler/net4_fast.c',
+  'compiler/port_fast.c',
+  'compiler/segments.c',
 )
 
 lib_filter_compiler = static_library(

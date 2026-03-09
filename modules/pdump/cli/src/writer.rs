@@ -205,12 +205,12 @@ pub fn pdump_write(
             log::error!("failed to write record: {e}");
             break;
         };
-        if let Some(limit) = packet_limit {
-            if count >= limit {
-                log::debug!("stopping writer because the packet capture limit has been reached: {limit}");
+        if let Some(limit) = packet_limit
+            && count >= limit
+        {
+            log::debug!("stopping writer because the packet capture limit has been reached: {limit}");
 
-                break;
-            }
+            break;
         }
         count += 1;
     }
