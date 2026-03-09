@@ -54,6 +54,7 @@ impl BalancerService {
             Mode::Sessions(cmd) => self.sessions(cmd).await,
             Mode::Graph(cmd) => self.graph(cmd).await,
             Mode::Inspect(cmd) => self.inspect(cmd).await,
+            Mode::Metrics(cmd) => self.metrics(cmd).await,
         }
     }
 
@@ -245,6 +246,16 @@ impl BalancerService {
         let response = self.client.show_inspect(request).await?.into_inner();
 
         output::print_show_inspect(&response, cmd.format.to_format())?;
+        Ok(())
+    }
+
+    /// Metrics
+    async fn metrics(&mut self, cmd: MetricsCmd) -> Result<(), Box<dyn Error>> {
+        log::debug!("Fetching metrics");
+        let request: balancerpb::GetMetricsRequest = (&cmd).into();
+        let response = self.client.get_metrics(request).await?.into_inner();
+        let s = serde_json::to_string(&response)?;
+        println!("{}", s);
         Ok(())
     }
 }
