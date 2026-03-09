@@ -22,13 +22,3 @@ type Metric[T any] struct {
 	ID    MetricID
 	Value T
 }
-
-type IsMetricValue interface {
-	isMetricValue()
-}
-
-func (*Counter) isMetricValue() {}
-
-func (*Gauge) isMetricValue() {}
-
-func (*Histogram) isMetricValue() {}

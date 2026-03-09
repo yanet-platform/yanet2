@@ -4,8 +4,10 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/metrics"
 )
 
-func MetricValueToProto(v metrics.IsMetricValue) isMetric_Value {
-	switch v := v.(type) {
+func MetricValueToProto[T metrics.Counter | metrics.Gauge | metrics.Histogram](
+	v *T,
+) isMetric_Value {
+	switch v := any(v).(type) {
 	case *metrics.Counter:
 		return &Metric_Counter{
 			Counter: v.Load(),
@@ -56,7 +58,9 @@ func MetricLabelsToProto(labels []metrics.Label) []*Label {
 	return res
 }
 
-func MetricRefsToProto[T metrics.IsMetricValue](refs []metrics.Metric[T]) []*Metric {
+func MetricRefsToProto[T metrics.Counter | metrics.Gauge | metrics.Histogram](
+	refs []metrics.Metric[*T],
+) []*Metric {
 	res := make([]*Metric, 0, len(refs))
 	for _, ref := range refs {
 		res = append(res, &Metric{

@@ -245,7 +245,16 @@ func (b *BalancerManager) Stats(
 	return ConvertBalancerStatsToProto(ffiStats), nil
 }
 
+<<<<<<< HEAD
 func (b *BalancerManager) Metrics(ref *balancerpb.PacketHandlerRef) ([]*commonpb.Metric, error) {
+=======
+////////////////////////////////////////////////////////////////////////////////
+
+func (b *BalancerManager) Metrics(
+	now time.Time,
+	ref *balancerpb.PacketHandlerRef,
+) ([]*commonpb.Metric, error) {
+>>>>>>> 18096890 (fixed review issues)
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -262,12 +271,29 @@ func (b *BalancerManager) Metrics(ref *balancerpb.PacketHandlerRef) ([]*commonpb
 		return nil, fmt.Errorf("failed to get stats: %s", err)
 	}
 
+<<<<<<< HEAD
 	refLabels := make([]*commonpb.Label, 0, 5)
 	refLabels = append(refLabels, &commonpb.Label{Name: "device", Value: *ref.Device})
 	refLabels = append(refLabels, &commonpb.Label{Name: "pipeline", Value: *ref.Pipeline})
 	refLabels = append(refLabels, &commonpb.Label{Name: "function", Value: *ref.Function})
 	refLabels = append(refLabels, &commonpb.Label{Name: "chain", Value: *ref.Chain})
 	refLabels = append(refLabels, &commonpb.Label{Name: "config", Value: b.Name()})
+=======
+	info, err := b.handle.Info(now)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get info: %s", err)
+	}
+
+	config := b.handle.Config()
+
+	refLabels := []*commonpb.Label{
+		{Name: "device", Value: *ref.Device},
+		{Name: "pipeline", Value: *ref.Pipeline},
+		{Name: "function", Value: *ref.Function},
+		{Name: "chain", Value: *ref.Chain},
+		{Name: "config", Value: b.Name()},
+	}
+>>>>>>> 18096890 (fixed review issues)
 
 	makeCounter := func(name string, value uint64, extraLabels ...*commonpb.Label) *commonpb.Metric {
 		metric := commonpb.Metric{Name: name, Labels: append(refLabels, extraLabels...), Value: &commonpb.Metric_Counter{Counter: value}}
@@ -295,25 +321,96 @@ func (b *BalancerManager) Metrics(ref *balancerpb.PacketHandlerRef) ([]*commonpb
 	metrics := make([]*commonpb.Metric, 0, counters)
 	metrics = append(metrics, incomingBits, incomingPackets, outgoingBits, outgoingPackets)
 
+<<<<<<< HEAD
+=======
+	// make common metrics
+	{
+		// active sessions and session table capacity
+		metrics = append(
+			metrics,
+			makeGauge("active_sessions", float64(info.ActiveSessions)),
+			makeGauge(
+				"session_table_capacity",
+				float64(config.Balancer.State.TableCapacity),
+			),
+		)
+
+		// counters
+		for _, counter := range commonCounters {
+			metrics = append(
+				metrics,
+				makeCounter(counter.name, counter.getter(ffiStats)),
+			)
+		}
+	}
+
+	// make vs metrics
+>>>>>>> 18096890 (fixed review issues)
 	for vsIdx := range ffiStats.Vs {
 		vs := &ffiStats.Vs[vsIdx]
 		labelVS := &commonpb.Label{Name: "vs", Value: vs.Identifier.String()}
 
+<<<<<<< HEAD
 		incomingBits := makeCounter("vs_incoming_bits", vs.Stats.IncomingBytes*8, labelVS)
 		incomingPackets := makeCounter("vs_incoming_packets", vs.Stats.IncomingPackets, labelVS)
 		outgoingBits := makeCounter("vs_outgoing_bits", vs.Stats.OutgoingBytes*8, labelVS)
 		outgoingPackets := makeCounter("vs_outgoing_packets", vs.Stats.OutgoingPackets, labelVS)
 
 		metrics = append(metrics, incomingBits, incomingPackets, outgoingBits, outgoingPackets)
+=======
+		// active sessions
+		metrics = append(
+			metrics,
+			makeGauge(
+				"vs_active_sessions",
+				float64(vsInfo.ActiveSessions),
+				labelVS,
+			),
+		)
+
+		// counters
+		for _, counter := range vsCounters {
+			metrics = append(
+				metrics,
+				makeCounter(counter.name, counter.getter(&vs.Stats), labelVS),
+			)
+		}
+>>>>>>> 18096890 (fixed review issues)
 
 		for realIdx := range vs.Reals {
 			real := &vs.Reals[realIdx]
 			labelReal := &commonpb.Label{Name: "real", Value: real.Dst.String()}
 
+<<<<<<< HEAD
 			incomingBits := makeCounter("real_incoming_bits", real.Stats.Bytes*8, labelVS, labelReal)
 			incomingPackets := makeCounter("real_incoming_packets", real.Stats.Packets, labelVS, labelReal)
 
 			metrics = append(metrics, incomingBits, incomingPackets)
+=======
+			// active sessions
+			metrics = append(
+				metrics,
+				makeGauge(
+					"real_active_sessions",
+					float64(realInfo.ActiveSessions),
+					labelVS,
+					labelReal,
+				),
+			)
+
+			// counters
+			for _, counter := range realCounters {
+				metrics = append(
+					metrics,
+					makeCounter(
+						counter.name,
+						counter.getter(&real.Stats),
+						labelVS,
+						labelReal,
+					),
+				)
+			}
+>>>>>>> 18096890 (fixed review issues)
 		}
 	}
 
