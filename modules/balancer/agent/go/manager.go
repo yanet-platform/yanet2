@@ -575,19 +575,10 @@ func (b *BalancerManager) Metrics(
 
 	for vsIdx := range ffiStats.Vs {
 		vs := &ffiStats.Vs[vsIdx]
-<<<<<<< HEAD
 		metricsCount += perRealMetrics * len(vs.Reals)
 	}
 
 	metrics := make([]*commonpb.Metric, 0, metricsCount)
-=======
-		labelVS := &commonpb.Label{Name: "vs", Value: vs.Identifier.String()}
-
-		incomingBits := makeCounter("vs_incoming_bits", vs.Stats.IncomingBytes*8, labelVS)
-		incomingPackets := makeCounter("vs_incoming_packets", vs.Stats.IncomingPackets, labelVS)
-		outgoingBits := makeCounter("vs_outgoing_bits", vs.Stats.OutgoingBytes*8, labelVS)
-		outgoingPackets := makeCounter("vs_outgoing_packets", vs.Stats.OutgoingPackets, labelVS)
->>>>>>> afb3f9be (metrics fix)
 
 	// make common metrics
 	{
