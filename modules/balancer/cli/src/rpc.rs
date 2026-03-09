@@ -1,11 +1,5 @@
 //! gRPC proto module definitions
 
-#[allow(non_snake_case)]
-pub mod commonpb {
-    tonic::include_proto!("commonpb");
-}
-
-#[allow(non_snake_case)]
 #[allow(clippy::all, non_snake_case)]
 pub mod commonpb {
     tonic::include_proto!("commonpb");

@@ -170,11 +170,7 @@ func (a *BalancerAgent) Metrics() ([]*commonpb.Metric, error) {
 
 		metrics, err := manager.Metrics(time.Now(), &ref)
 		if err != nil {
-<<<<<<< HEAD
 			a.log.Errorf("failed to get metrics", "balancer", manager.Name())
-=======
-			a.log.Errorf("failed to get metrics for balancer '%s'", manager.Name())
->>>>>>> 98abe8b2 (add metrics in balancer)
 		} else {
 			result = append(result, metrics...)
 		}
