@@ -6,8 +6,7 @@
 #include <rte_udp.h>
 
 #include "common/checksum.h"
-
-#include <stdio.h>
+#include "lib/dataplane/packet/data.h"
 
 int
 packet_prepend(struct packet *packet, const void *header, const size_t size) {

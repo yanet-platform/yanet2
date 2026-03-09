@@ -33,6 +33,8 @@
 #include "dataplane/dpdk.h"
 #include "dataplane/module/module.h"
 #include "dataplane/nat64dp.h"
+#include "lib/dataplane/module/packet_front.h"
+#include "lib/dataplane/packet/data.h"
 #include "logging/log.h"
 #include "test.h"
 
@@ -3943,24 +3945,6 @@ append_test_cases_from_mappings_icmp(struct test_case **test_case) {
 	return 0;
 }
 
-/**
- * @brief Count number of packets in a packet list
- *
- * Traverses the linked list of packets and counts total number.
- * Used for test verification to check expected vs actual packet counts
- * in input, output and drop lists.
- *
- * @param list Pointer to packet list structure to count
- * @return Total number of packets in the list
- */
-// static inline int
-// packet_list_counter(struct packet_list *list) {
-// 	int count = 0;
-// 	for (struct packet *pkt = list->first; pkt != NULL; pkt = pkt->next) {
-// 		count++;
-// 	}
-// 	return count;
-// }
 /**
  * @brief Clean up and free resources for a packet list
  *

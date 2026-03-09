@@ -14,6 +14,8 @@
 #include <rte_build_config.h>
 #include <string.h>
 
+#include "lib/dataplane/module/packet_front.h"
+#include "lib/dataplane/packet/data.h"
 #include "lib/dataplane/packet/packet.h"
 #include "yanet_build_config.h"
 

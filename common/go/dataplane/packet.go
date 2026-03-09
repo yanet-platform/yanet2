@@ -6,6 +6,7 @@ package dataplane
 //#cgo LDFLAGS: -L../../../build/lib/logging -llogging
 //
 //#include "lib/dataplane/packet/packet.h"
+//#include "lib/dataplane/module/packet_front.h"
 //#include "lib/utils/packet.h"
 import "C"
 import (

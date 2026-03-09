@@ -7,6 +7,7 @@
 #include "config.h"
 
 #include "dataplane/pipeline/pipeline.h"
+#include "lib/dataplane/packet/packet.h"
 
 struct dataplane;
 struct dataplane_instance;

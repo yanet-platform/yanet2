@@ -8,6 +8,8 @@
 #include "dataplane/module/module.h"
 #include "dataplane/packet/dscp.h"
 #include "dataplane/packet/packet.h"
+#include "lib/dataplane/module/packet_front.h"
+#include "lib/dataplane/packet/data.h"
 
 static int
 dscp_handle_v4(struct dscp_module_config *config, struct packet *packet) {

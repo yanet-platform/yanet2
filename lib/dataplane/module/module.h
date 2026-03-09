@@ -2,8 +2,6 @@
 
 #define MODULE_TYPE_LEN 80
 
-#include "lib/dataplane/module/packet_front.h"
-
 struct packet_front;
 struct module_ectx;
 struct dp_worker;

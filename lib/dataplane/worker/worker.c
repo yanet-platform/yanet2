@@ -1,6 +1,8 @@
 #include "worker.h"
 
 #include "../../utils/mbuf.h"
+#include "lib/dataplane/packet/data.h"
+#include "lib/dataplane/packet/packet.h"
 
 struct packet *
 worker_packet_alloc(struct dp_worker *dp_worker) {

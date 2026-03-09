@@ -2,12 +2,9 @@
 
 #include <stdint.h>
 
-#include "dataplane/module/module.h"
-
 struct dp_config;
 struct dp_worker;
 struct packet_front;
-struct cp_config_gen;
 
 struct pipeline_ectx;
 struct device_ectx;

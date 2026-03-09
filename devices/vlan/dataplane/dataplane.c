@@ -11,7 +11,8 @@
 
 #include "lib/dataplane/device/device.h"
 
-#include "dataplane/packet/packet.h"
+#include "lib/dataplane/packet/data.h"
+#include "lib/dataplane/packet/packet.h"
 
 #include "dataplane/pipeline/pipeline.h"
 

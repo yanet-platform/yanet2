@@ -3,6 +3,7 @@
 #include "../vs.h"
 #include "context.h"
 #include "lib/dataplane/module/module.h"
+#include "lib/dataplane/module/packet_front.h"
 #include "real.h"
 
 #include <string.h>

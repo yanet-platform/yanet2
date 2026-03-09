@@ -14,6 +14,8 @@
 #include "controlplane/config/econtext.h"
 #include "dataplane/module/module.h"
 #include "dataplane/packet/packet.h"
+#include "lib/dataplane/module/packet_front.h"
+#include "lib/dataplane/packet/data.h"
 #include "lib/logging/log.h"
 #include "mock/worker_mempool.h"
 

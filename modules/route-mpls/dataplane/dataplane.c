@@ -13,6 +13,7 @@
 #include "lib/dataplane/config/zone.h"
 
 #include "lib/dataplane/module/module.h"
+#include "lib/dataplane/module/packet_front.h"
 #include "lib/dataplane/packet/encap.h"
 #include "lib/dataplane/packet/packet.h"
 #include "lib/dataplane/pipeline/pipeline.h"

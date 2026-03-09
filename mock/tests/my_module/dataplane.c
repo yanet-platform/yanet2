@@ -5,8 +5,10 @@
 
 #include "common/container_of.h"
 #include "dataplane/time/clock.h"
-#include "lib/controlplane/config/econtext.h"
 #include "lib/dataplane/config/zone.h"
+#include "lib/dataplane/module/packet_front.h"
+#include "lib/dataplane/packet/packet.h"
+#include "lib/dataplane/pipeline/econtext.h"
 
 #include "config.h"
 

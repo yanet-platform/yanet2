@@ -8,6 +8,7 @@
 #include "dataplane/config/zone.h"
 #include "dataplane/packet/packet.h"
 #include "dataplane/time/tsc.h"
+#include "lib/dataplane/module/packet_front.h"
 #include "lib/logging/log.h"
 
 #include <rte_cycles.h>

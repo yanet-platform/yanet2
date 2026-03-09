@@ -1,6 +1,7 @@
 #include "packet.h"
 
 #include "common/crc32.h"
+#include "data.h"
 
 #include "yanet_build_config.h"
 
@@ -266,21 +267,6 @@ parse_packet(struct packet *packet) {
 	}
 
 	return 0;
-}
-
-struct packet *
-mbuf_to_packet(struct rte_mbuf *mbuf) {
-	return (struct packet *)((void *)mbuf->buf_addr);
-}
-
-void *
-packet_data(struct packet *packet) {
-	return rte_pktmbuf_mtod(packet_to_mbuf(packet), char *);
-}
-
-uint16_t
-packet_data_len(struct packet *packet) {
-	return rte_pktmbuf_data_len(packet_to_mbuf(packet));
 }
 
 void
@@ -560,15 +546,6 @@ logtrace_rte_mbuf(struct rte_mbuf *mbuf) {
 #else
 	(void)mbuf;
 #endif // ENABLE_TRACE_LOG
-}
-
-int
-packet_list_counter(struct packet_list *list) {
-	int count = 0;
-	for (struct packet *pkt = list->first; pkt != NULL; pkt = pkt->next) {
-		count++;
-	}
-	return count;
 }
 
 uint64_t
