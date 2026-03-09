@@ -296,21 +296,21 @@ func (b *BalancerManager) Metrics(ref *balancerpb.PacketHandlerRef) ([]*commonpb
 
 	for vsIdx := range ffiStats.Vs {
 		vs := &ffiStats.Vs[vsIdx]
-		label := &commonpb.Label{Name: "vs", Value: vs.Identifier.String()}
+		labelVS := &commonpb.Label{Name: "vs", Value: vs.Identifier.String()}
 
-		incomingBits := makeCounter("incoming_bits", vs.Stats.IncomingBytes*8, label)
-		incomingPackets := makeCounter("incoming_packets", vs.Stats.IncomingPackets, label)
-		outgoingBits := makeCounter("outgoing_bits", vs.Stats.OutgoingBytes*8, label)
-		outgoingPackets := makeCounter("outgoing_packets", vs.Stats.OutgoingPackets, label)
+		incomingBits := makeCounter("vs_incoming_bits", vs.Stats.IncomingBytes*8, labelVS)
+		incomingPackets := makeCounter("vs_incoming_packets", vs.Stats.IncomingPackets, labelVS)
+		outgoingBits := makeCounter("vs_outgoing_bits", vs.Stats.OutgoingBytes*8, labelVS)
+		outgoingPackets := makeCounter("vs_outgoing_packets", vs.Stats.OutgoingPackets, labelVS)
 
 		metrics = append(metrics, incomingBits, incomingPackets, outgoingBits, outgoingPackets)
 
 		for realIdx := range vs.Reals {
 			real := &vs.Reals[realIdx]
-			label := &commonpb.Label{Name: "real", Value: real.Dst.String()}
+			labelReal := &commonpb.Label{Name: "real", Value: real.Dst.String()}
 
-			incomingBits := makeCounter("incoming_bits", real.Stats.Bytes*8, label)
-			incomingPackets := makeCounter("incoming_packets", real.Stats.Packets, label)
+			incomingBits := makeCounter("real_incoming_bits", real.Stats.Bytes*8, labelVS, labelReal)
+			incomingPackets := makeCounter("real_incoming_packets", real.Stats.Packets, labelVS, labelReal)
 
 			metrics = append(metrics, incomingBits, incomingPackets)
 		}
