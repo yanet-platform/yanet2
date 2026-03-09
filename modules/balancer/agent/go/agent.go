@@ -142,7 +142,7 @@ func (a *BalancerAgent) Metrics() ([]*commonpb.Metric, error) {
 			position := &positions[idx]
 			manager := a.managers[positions[idx].ModuleName]
 			if manager == nil {
-				a.log.Warnw("balancer manager not found", "name", position.ModuleName)
+				a.log.Warnw("balancer manager not found", "config", position.ModuleName)
 			}
 			managers = append(managers, manager)
 		}
@@ -165,7 +165,7 @@ func (a *BalancerAgent) Metrics() ([]*commonpb.Metric, error) {
 
 		metrics, err := manager.Metrics(&ref)
 		if err != nil {
-			a.log.Errorf("failed to get metrics for balancer '%s'", manager.Name())
+			a.log.Errorf("failed to get metrics", "balancer", manager.Name())
 		} else {
 			result = append(result, metrics...)
 		}
