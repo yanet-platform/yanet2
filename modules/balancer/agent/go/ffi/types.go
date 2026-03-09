@@ -6,6 +6,7 @@ package ffi
 
 import (
 	"net/netip"
+	"strconv"
 	"time"
 
 	"github.com/yanet-platform/yanet2/common/go/xnetip"
@@ -45,6 +46,17 @@ const (
 	VsTransportProtoUDP VsTransportProto = 1 // IPPROTO_UDP
 )
 
+func (proto *VsTransportProto) String() string {
+	switch *proto {
+	case VsTransportProtoTCP:
+		return "TCP"
+	case VsTransportProtoUDP:
+		return "UDP"
+	default:
+		return "unknown"
+	}
+}
+
 // VsFlags represents flags for virtual service configuration
 type VsFlags struct {
 	PureL3 bool // VS_PURE_L3_FLAG - serve all ports
@@ -60,10 +72,18 @@ type VsIdentifier struct {
 	TransportProto VsTransportProto // TCP or UDP
 }
 
+func (id *VsIdentifier) String() string {
+	return id.Addr.String() + ":" + strconv.Itoa(int(id.Port)) + "/" + id.TransportProto.String()
+}
+
 // RelativeRealIdentifier identifies a real server relative to its VS
 type RelativeRealIdentifier struct {
 	Addr netip.Addr // Real endpoint address
 	Port uint16     // Destination port on the real
+}
+
+func (id *RelativeRealIdentifier) String() string {
+	return id.Addr.String() + ":" + strconv.Itoa(int(id.Port))
 }
 
 // RealIdentifier uniquely identifies a real server within a virtual service

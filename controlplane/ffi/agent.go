@@ -210,7 +210,11 @@ func (m *Agent) UpdatePlainDevices(devices []DeviceConfig) error {
 		cName := C.CString(name)
 		defer C.free(unsafe.Pointer(cName))
 
-		cCfg := C.cp_device_plain_config_create(cName, C.uint64_t(len(input)), C.uint64_t(len(output)))
+		cCfg := C.cp_device_plain_config_create(
+			cName,
+			C.uint64_t(len(input)),
+			C.uint64_t(len(output)),
+		)
 
 		for idx := range input {
 			pipeline := &input[idx]
@@ -236,12 +240,21 @@ func (m *Agent) UpdatePlainDevices(devices []DeviceConfig) error {
 			)
 		}
 
-		ptr, err := C.cp_device_plain_create((*C.struct_agent)(m.AsRawPtr()), cCfg)
+		ptr, err := C.cp_device_plain_create(
+			(*C.struct_agent)(m.AsRawPtr()),
+			cCfg,
+		)
 		if err != nil {
-			return fmt.Errorf("failed to initialize plain device config: %w", err)
+			return fmt.Errorf(
+				"failed to initialize plain device config: %w",
+				err,
+			)
 		}
 		if ptr == nil {
-			return fmt.Errorf("failed to initialize plain device config: device %q not found", name)
+			return fmt.Errorf(
+				"failed to initialize plain device config: device %q not found",
+				name,
+			)
 		}
 
 		configs = append(configs, NewShmDeviceConfig(unsafe.Pointer(ptr)))
@@ -323,7 +336,11 @@ func (m *Agent) DeleteModuleConfig(configName string) error {
 	cConfigName := C.CString(configName)
 	defer C.free(unsafe.Pointer(cConfigName))
 
-	result := C.agent_delete_module((*C.struct_agent)(m.AsRawPtr()), cTypeName, cConfigName)
+	result := C.agent_delete_module(
+		(*C.struct_agent)(m.AsRawPtr()),
+		cTypeName,
+		cConfigName,
+	)
 	if result != 0 {
 		return m.TakeError()
 	}

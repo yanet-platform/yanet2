@@ -156,3 +156,8 @@ balancer_agent_inspect_free(struct agent_inspect *inspect);
  */
 const char *
 balancer_agent_take_error(struct balancer_agent *agent);
+
+struct dp_config;
+
+struct dp_config *
+balancer_agent_dp_config(struct balancer_agent *agent);

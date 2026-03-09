@@ -358,3 +358,19 @@ func (m *BalancerService) ShowInspect(
 		Inspect: inspect,
 	}, nil
 }
+
+////////////////////////////////////////////////////////////////////////////////
+
+func (m *BalancerService) GetMetrics(
+	ctx context.Context,
+	req *balancerpb.GetMetricsRequest,
+) (*balancerpb.GetMetricsResponse, error) {
+	metrics, err := m.agent.Metrics()
+	if err != nil {
+		return nil, err
+	} else {
+		return &balancerpb.GetMetricsResponse{
+			Metrics: metrics,
+		}, nil
+	}
+}

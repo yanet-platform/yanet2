@@ -8,6 +8,8 @@ import "modules/balancer/agent/balancerpb/inspect.proto";
 import "modules/balancer/agent/balancerpb/module.proto";
 import "modules/balancer/agent/balancerpb/stats.proto";
 
+import "common/commonpb/metric.proto";
+
 option go_package = "github.com/yanet-platform/yanet2/modules/"
 		    "balancer/agent/balancerpb;balancerpb";
 
@@ -127,6 +129,16 @@ service BalancerService {
 	// by the balancer, including client addresses, virtual service
 	// mappings, real server assignments, and timeout information.
 	rpc ShowSessions(ShowSessionsRequest) returns (ShowSessionsResponse);
+
+	rpc GetMetrics(GetMetricsRequest) returns (GetMetricsResponse);
+}
+
+message GetMetricsRequest {
+}
+
+message GetMetricsResponse {
+	// List of metrics
+	repeated commonpb.Metric metrics = 1;
 }
 
 ///////////////////////////////////////////////////////////////////////////////

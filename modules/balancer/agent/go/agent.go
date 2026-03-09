@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/yanet-platform/yanet2/common/commonpb"
 	yanet "github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/balancer/agent/balancerpb"
 	"github.com/yanet-platform/yanet2/modules/balancer/agent/go/ffi"
@@ -126,4 +127,49 @@ func (a *BalancerAgent) Inspect() *balancerpb.AgentInspect {
 
 	ffiInspect := a.handle.Inspect()
 	return ConvertAgentInspectToProto(ffiInspect)
+}
+
+func (a *BalancerAgent) Metrics() ([]*commonpb.Metric, error) {
+	dpConfig := a.handle.DPConfig()
+	positions := dpConfig.AllModulePositions("balancer")
+
+	managers := make([]*BalancerManager, 0, len(positions))
+	{
+		a.mu.Lock()
+		defer a.mu.Unlock()
+
+		for idx := range positions {
+			position := &positions[idx]
+			manager := a.managers[positions[idx].ModuleName]
+			if manager == nil {
+				a.log.Warnw("balancer manager not found", "name", position.ModuleName)
+			}
+			managers = append(managers, manager)
+		}
+	}
+
+	result := make([]*commonpb.Metric, 0, len(managers)*200)
+
+	for idx := range positions {
+		manager := managers[idx]
+		if manager == nil {
+			continue
+		}
+		position := positions[idx]
+		ref := balancerpb.PacketHandlerRef{
+			Device:   &position.Device,
+			Pipeline: &position.Pipeline,
+			Function: &position.Function,
+			Chain:    &position.Chain,
+		}
+
+		metrics, err := manager.Metrics(&ref)
+		if err != nil {
+			a.log.Errorf("failed to get metrics for balancer '%s'", manager.Name())
+		} else {
+			result = append(result, metrics...)
+		}
+	}
+
+	return result, nil
 }

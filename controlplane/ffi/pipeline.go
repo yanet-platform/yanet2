@@ -64,7 +64,10 @@ func newFunctionConfig(config FunctionConfig) (*functionConfig, error) {
 	cName := C.CString(config.Name)
 	defer C.free(unsafe.Pointer(cName))
 
-	ptr, err := C.cp_function_config_create(cName, C.uint64_t(len(config.Chains)))
+	ptr, err := C.cp_function_config_create(
+		cName,
+		C.uint64_t(len(config.Chains)),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create ffi function config: %w", err)
 	}
@@ -97,13 +100,26 @@ func newFunctionConfig(config FunctionConfig) (*functionConfig, error) {
 			cNames = &names[0]
 		}
 
-		chainPtr, err := C.cp_chain_config_create(chainName, C.uint64_t(len(chain.Chain.Modules)), cTypes, cNames)
+		chainPtr, err := C.cp_chain_config_create(
+			chainName,
+			C.uint64_t(len(chain.Chain.Modules)),
+			cTypes,
+			cNames,
+		)
 		if err != nil {
 			C.cp_function_config_free(ptr)
-			return nil, fmt.Errorf("failed to create ffi function config: %w", err)
+			return nil, fmt.Errorf(
+				"failed to create ffi function config: %w",
+				err,
+			)
 		}
 
-		if C.cp_function_config_set_chain(ptr, C.uint64_t(idx), chainPtr, C.uint64_t(chain.Weight)) != 0 {
+		if C.cp_function_config_set_chain(
+			ptr,
+			C.uint64_t(idx),
+			chainPtr,
+			C.uint64_t(chain.Weight),
+		) != 0 {
 			C.cp_function_config_free(ptr)
 			return nil, fmt.Errorf("failed to create ffi function config")
 		}
@@ -129,7 +145,10 @@ func newPipelineConfig(config PipelineConfig) (*pipelineConfig, error) {
 	cName := C.CString(config.Name)
 	defer C.free(unsafe.Pointer(cName))
 
-	ptr, err := C.cp_pipeline_config_create(cName, C.uint64_t(len(config.Functions)))
+	ptr, err := C.cp_pipeline_config_create(
+		cName,
+		C.uint64_t(len(config.Functions)),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create ffi pipeline config: %w", err)
 	}

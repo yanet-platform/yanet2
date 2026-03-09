@@ -99,3 +99,8 @@ balancer_agent_inspect_free(struct agent_inspect *inspect) {
 	inspect->balancers = NULL;
 	inspect->balancer_count = 0;
 }
+
+struct dp_config *
+balancer_agent_dp_config(struct balancer_agent *agent) {
+	return agent_dp_config((struct agent *)agent);
+}

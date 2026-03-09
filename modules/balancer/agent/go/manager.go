@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/yanet-platform/yanet2/common/commonpb"
 	"github.com/yanet-platform/yanet2/modules/balancer/agent/balancerpb"
 	"github.com/yanet-platform/yanet2/modules/balancer/agent/go/ffi"
 	"go.uber.org/zap"
@@ -241,6 +242,81 @@ func (b *BalancerManager) Stats(
 	}
 
 	return ConvertBalancerStatsToProto(ffiStats), nil
+}
+
+func (b *BalancerManager) Metrics(ref *balancerpb.PacketHandlerRef) ([]*commonpb.Metric, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	// Convert protobuf ref to FFI ref
+	ffiRef := &ffi.PacketHandlerRef{
+		Device:   ref.Device,
+		Pipeline: ref.Pipeline,
+		Function: ref.Function,
+		Chain:    ref.Chain,
+	}
+
+	ffiStats, err := b.handle.Stats(ffiRef)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get stats: %s", err)
+	}
+
+	refLabels := make([]*commonpb.Label, 0, 5)
+	refLabels = append(refLabels, &commonpb.Label{Name: "device", Value: *ref.Device})
+	refLabels = append(refLabels, &commonpb.Label{Name: "pipeline", Value: *ref.Pipeline})
+	refLabels = append(refLabels, &commonpb.Label{Name: "function", Value: *ref.Function})
+	refLabels = append(refLabels, &commonpb.Label{Name: "chain", Value: *ref.Chain})
+	refLabels = append(refLabels, &commonpb.Label{Name: "config", Value: b.Name()})
+
+	makeCounter := func(name string, value uint64, extraLabels ...*commonpb.Label) *commonpb.Metric {
+		metric := commonpb.Metric{Name: name, Labels: append(refLabels, extraLabels...), Value: &commonpb.Metric_Counter{Counter: value}}
+		return &metric
+	}
+
+	commonCounters := 4
+
+	incomingBits := makeCounter("incoming_bits", ffiStats.Common.IncomingBytes*8)
+	incomingPackets := makeCounter("incoming_packets", ffiStats.Common.IncomingPackets)
+
+	outgoingBits := makeCounter("outgoing_bits", ffiStats.Common.OutgoingBytes*8)
+	outgoingPackets := makeCounter("outgoing_packets", ffiStats.Common.OutgoingPackets)
+
+	perVScounters := 4
+	perRealCounters := 2
+
+	counters := commonCounters + perVScounters*len(ffiStats.Vs)
+
+	for vsIdx := range ffiStats.Vs {
+		vs := &ffiStats.Vs[vsIdx]
+		counters += perRealCounters * len(vs.Reals)
+	}
+
+	metrics := make([]*commonpb.Metric, 0, counters)
+	metrics = append(metrics, incomingBits, incomingPackets, outgoingBits, outgoingPackets)
+
+	for vsIdx := range ffiStats.Vs {
+		vs := &ffiStats.Vs[vsIdx]
+		label := &commonpb.Label{Name: "vs", Value: vs.Identifier.String()}
+
+		incomingBits := makeCounter("incoming_bits", vs.Stats.IncomingBytes*8, label)
+		incomingPackets := makeCounter("incoming_packets", vs.Stats.IncomingPackets, label)
+		outgoingBits := makeCounter("outgoing_bits", vs.Stats.OutgoingBytes*8, label)
+		outgoingPackets := makeCounter("outgoing_packets", vs.Stats.OutgoingPackets, label)
+
+		metrics = append(metrics, incomingBits, incomingPackets, outgoingBits, outgoingPackets)
+
+		for realIdx := range vs.Reals {
+			real := &vs.Reals[realIdx]
+			label := &commonpb.Label{Name: "real", Value: real.Dst.String()}
+
+			incomingBits := makeCounter("incoming_bits", real.Stats.Bytes*8, label)
+			incomingPackets := makeCounter("incoming_packets", real.Stats.Packets, label)
+
+			metrics = append(metrics, incomingBits, incomingPackets)
+		}
+	}
+
+	return metrics, nil
 }
 
 func (b *BalancerManager) Sessions(

@@ -105,3 +105,8 @@ func (a *BalancerAgent) Inspect() *AgentInspect {
 	C.balancer_agent_inspect_free(&cInspect)
 	return inspect
 }
+
+func (a *BalancerAgent) DPConfig() *yanet.DPConfig {
+	dpConfig := C.balancer_agent_dp_config(a.handle)
+	return yanet.NewDPConfigFromRaw(unsafe.Pointer(dpConfig))
+}

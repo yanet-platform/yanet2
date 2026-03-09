@@ -34,7 +34,11 @@ func AttachSharedMemory(path string) (*SharedMemory, error) {
 
 	ptr, err := C.yanet_shm_attach(cPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to attach to shared memory %q: %w", path, err)
+		return nil, fmt.Errorf(
+			"failed to attach to shared memory %q: %w",
+			path,
+			err,
+		)
 	}
 
 	return &SharedMemory{ptr: ptr}, nil
@@ -65,7 +69,11 @@ func (m *SharedMemory) DPConfig(instanceIdx uint32) *DPConfig {
 }
 
 // AgentAttach attaches a module agent to shared memory on the dataplane instance.
-func (m *SharedMemory) AgentAttach(name string, instanceIdx uint32, size datasize.ByteSize) (*Agent, error) {
+func (m *SharedMemory) AgentAttach(
+	name string,
+	instanceIdx uint32,
+	size datasize.ByteSize,
+) (*Agent, error) {
 	cName := C.CString(name)
 	defer C.free(unsafe.Pointer(cName))
 
@@ -79,11 +87,20 @@ func (m *SharedMemory) AgentAttach(name string, instanceIdx uint32, size datasiz
 
 // AgentReattach attaches a module agent to shared memory on the dataplane instance.
 // If Agent with such name already attached, it will be reattached to the same memory.
-func (m *SharedMemory) AgentReattach(name string, instanceIdx uint32, size datasize.ByteSize) (*Agent, error) {
+func (m *SharedMemory) AgentReattach(
+	name string,
+	instanceIdx uint32,
+	size datasize.ByteSize,
+) (*Agent, error) {
 	cName := C.CString(name)
 	defer C.free(unsafe.Pointer(cName))
 
-	ptr := C.agent_reattach(m.ptr, C.uint32_t(instanceIdx), cName, C.size_t(size))
+	ptr := C.agent_reattach(
+		m.ptr,
+		C.uint32_t(instanceIdx),
+		cName,
+		C.size_t(size),
+	)
 	if ptr == nil {
 		return nil, fmt.Errorf("failed to attach agent: %s", name)
 	}
@@ -92,12 +109,20 @@ func (m *SharedMemory) AgentReattach(name string, instanceIdx uint32, size datas
 }
 
 // AgentsAttach attaches agents to shared memory on the specified list of instances.
-func (m *SharedMemory) AgentsAttach(name string, instanceIndices []uint32, size datasize.ByteSize) ([]*Agent, error) {
+func (m *SharedMemory) AgentsAttach(
+	name string,
+	instanceIndices []uint32,
+	size datasize.ByteSize,
+) ([]*Agent, error) {
 	agents := make([]*Agent, 0, len(instanceIndices))
 	for _, instanceIdx := range instanceIndices {
 		agent, err := m.AgentReattach(name, instanceIdx, size)
 		if err != nil {
-			return nil, fmt.Errorf("failed to connect to shared memory on instance %d: %w", instanceIdx, err)
+			return nil, fmt.Errorf(
+				"failed to connect to shared memory on instance %d: %w",
+				instanceIdx,
+				err,
+			)
 		}
 
 		agents = append(agents, agent)
@@ -118,6 +143,10 @@ func (m *SharedMemory) InstanceIndices() []uint32 {
 // DPConfig represents a handle to dataplane configuration.
 type DPConfig struct {
 	ptr *C.struct_dp_config
+}
+
+func NewDPConfigFromRaw(ptr unsafe.Pointer) *DPConfig {
+	return &DPConfig{ptr: (*C.struct_dp_config)(ptr)}
 }
 
 func (m *DPConfig) NumaIdx() uint32 {
@@ -200,7 +229,10 @@ func (m *DPConfig) Functions() []Function {
 
 			modules := make([]ChainModule, chainInfo.length)
 			for idx := range chainInfo.length {
-				modInfo := C.yanet_get_cp_function_chain_module_info(chainInfo, idx)
+				modInfo := C.yanet_get_cp_function_chain_module_info(
+					chainInfo,
+					idx,
+				)
 				modules[idx] = ChainModule{
 					Type: C.GoString(&modInfo._type[0]),
 					Name: C.GoString(&modInfo.name[0]),
@@ -234,7 +266,10 @@ func (m *DPConfig) Pipelines() []Pipeline {
 
 		functions := make([]string, pipelineInfo.length)
 		for idx := range pipelineInfo.length {
-			function := C.yanet_get_cp_pipeline_function_info_id(pipelineInfo, idx)
+			function := C.yanet_get_cp_pipeline_function_info_id(
+				pipelineInfo,
+				idx,
+			)
 			functions[idx] = C.GoString(&function.name[0])
 		}
 
@@ -263,7 +298,11 @@ func (m *DPConfig) Agents() []AgentInfo {
 		instances := make([]AgentInstanceInfo, agentInfo.instance_count)
 		for instIdx := C.uint64_t(0); instIdx < agentInfo.instance_count; instIdx++ {
 			var instanceInfo *C.struct_cp_agent_instance_info
-			rc := C.yanet_get_cp_agent_instance_info(agentInfo, instIdx, &instanceInfo)
+			rc := C.yanet_get_cp_agent_instance_info(
+				agentInfo,
+				instIdx,
+				&instanceInfo,
+			)
 			if rc != 0 {
 				panic("FFI corruption: agent instance index became invalid")
 			}
@@ -366,7 +405,10 @@ func (m *DPConfig) Devices() []DeviceInfo {
 
 		inputPipelines := make([]DevicePipelineInfo, deviceInfo.input_count)
 		for pipelineIdx := C.uint64_t(0); pipelineIdx < deviceInfo.input_count; pipelineIdx++ {
-			pipelineInfo := C.yanet_get_cp_device_input_pipeline_info(deviceInfo, pipelineIdx)
+			pipelineInfo := C.yanet_get_cp_device_input_pipeline_info(
+				deviceInfo,
+				pipelineIdx,
+			)
 			if pipelineInfo == nil {
 				continue
 			}
@@ -379,7 +421,10 @@ func (m *DPConfig) Devices() []DeviceInfo {
 
 		outputPipelines := make([]DevicePipelineInfo, deviceInfo.output_count)
 		for pipelineIdx := C.uint64_t(0); pipelineIdx < deviceInfo.output_count; pipelineIdx++ {
-			pipelineInfo := C.yanet_get_cp_device_output_pipeline_info(deviceInfo, pipelineIdx)
+			pipelineInfo := C.yanet_get_cp_device_output_pipeline_info(
+				deviceInfo,
+				pipelineIdx,
+			)
 			if pipelineInfo == nil {
 				continue
 			}
@@ -406,7 +451,9 @@ type CounterInfo struct {
 	Values [][]uint64
 }
 
-func (m *DPConfig) encodeCounters(counters *C.struct_counter_handle_list) []CounterInfo {
+func (m *DPConfig) encodeCounters(
+	counters *C.struct_counter_handle_list,
+) []CounterInfo {
 	res := make([]CounterInfo, 0)
 
 	for cidx := C.uint64_t(0); cidx < counters.count; cidx++ {
@@ -484,7 +531,12 @@ func (m *DPConfig) FunctionCounters(
 	defer C.free(unsafe.Pointer(cPipelineName))
 	cFunctionName := C.CString(functionName)
 	defer C.free(unsafe.Pointer(cFunctionName))
-	counters := C.yanet_get_function_counters(m.ptr, cDeviceName, cPipelineName, cFunctionName)
+	counters := C.yanet_get_function_counters(
+		m.ptr,
+		cDeviceName,
+		cPipelineName,
+		cFunctionName,
+	)
 	defer C.yanet_counter_handle_list_free(counters)
 
 	if counters == nil {
@@ -508,7 +560,13 @@ func (m *DPConfig) ChainCounters(
 	defer C.free(unsafe.Pointer(cFunctionName))
 	cChainName := C.CString(chainName)
 	defer C.free(unsafe.Pointer(cChainName))
-	counters := C.yanet_get_chain_counters(m.ptr, cDeviceName, cPipelineName, cFunctionName, cChainName)
+	counters := C.yanet_get_chain_counters(
+		m.ptr,
+		cDeviceName,
+		cPipelineName,
+		cFunctionName,
+		cChainName,
+	)
 	defer C.yanet_counter_handle_list_free(counters)
 
 	if counters == nil {
@@ -652,7 +710,10 @@ func (m *DPConfig) PerformanceCounters(
 		errMsg := C.diag_msg(&diag)
 		if errMsg != nil {
 			defer C.free(unsafe.Pointer(errMsg))
-			return nil, fmt.Errorf("failed to get module performance counters: %s", C.GoString(errMsg))
+			return nil, fmt.Errorf(
+				"failed to get module performance counters: %s",
+				C.GoString(errMsg),
+			)
 		}
 		return nil, fmt.Errorf("failed to get module performance counters")
 	}
@@ -665,8 +726,14 @@ func (m *DPConfig) PerformanceCounters(
 	for i := range perfCounters {
 		cCounter := &cCounters[i]
 
-		latencyRanges := make([]PerformanceCounterLatencyRange, cCounter.latency_ranges_count)
-		cLatencyRanges := unsafe.Slice(cCounter.latency_ranges, cCounter.latency_ranges_count)
+		latencyRanges := make(
+			[]PerformanceCounterLatencyRange,
+			cCounter.latency_ranges_count,
+		)
+		cLatencyRanges := unsafe.Slice(
+			cCounter.latency_ranges,
+			cCounter.latency_ranges_count,
+		)
 
 		for j := range latencyRanges {
 			latencyRanges[j] = PerformanceCounterLatencyRange{
@@ -696,4 +763,80 @@ func (m *DPConfig) PerformanceCounters(
 	}
 
 	return result, nil
+}
+
+type ModuleReference struct {
+	Device     string
+	Pipeline   string
+	Function   string
+	Chain      string
+	ModuleType string
+	ModuleName string
+}
+
+func (m *DPConfig) AllModulePositions(moduleType string) []ModuleReference {
+	deviceList := m.Devices()
+
+	pipelineList := m.Pipelines()
+	pipelineFunctions := make(map[string][]string)
+	for _, pipeline := range pipelineList {
+		pipelineFunctions[pipeline.Name] = pipeline.Functions
+	}
+
+	functionList := m.Functions()
+	functions := make(map[string][]Chain)
+	for _, function := range functionList {
+		functions[function.Name] = function.Chains
+	}
+
+	count := 0
+	for _, device := range deviceList {
+		pipelineVariants := [][]DevicePipelineInfo{
+			device.InputPipelines,
+			device.OutputPipelines,
+		}
+		for _, pipelines := range pipelineVariants {
+			for _, pipeline := range pipelines {
+				for _, function := range pipelineFunctions[pipeline.Name] {
+					for _, chain := range functions[function] {
+						for _, module := range chain.Modules {
+							if module.Type == moduleType {
+								count += 1
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	result := make([]ModuleReference, 0, count)
+	for _, device := range deviceList {
+		pipelineVariants := [][]DevicePipelineInfo{
+			device.InputPipelines,
+			device.OutputPipelines,
+		}
+		for _, pipelines := range pipelineVariants {
+			for _, pipeline := range pipelines {
+				for _, function := range pipelineFunctions[pipeline.Name] {
+					for _, chain := range functions[function] {
+						for _, module := range chain.Modules {
+							if module.Type == moduleType {
+								result = append(result, ModuleReference{
+									Device:     device.Name,
+									Pipeline:   pipeline.Name,
+									Function:   function,
+									Chain:      chain.Name,
+									ModuleType: module.Type,
+									ModuleName: module.Name,
+								})
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return result
 }
