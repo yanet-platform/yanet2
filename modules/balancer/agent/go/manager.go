@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"net/netip"
+	"strconv"
 	"sync"
 	"time"
 
@@ -245,16 +246,12 @@ func (b *BalancerManager) Stats(
 	return ConvertBalancerStatsToProto(ffiStats), nil
 }
 
-<<<<<<< HEAD
-func (b *BalancerManager) Metrics(ref *balancerpb.PacketHandlerRef) ([]*commonpb.Metric, error) {
-=======
 ////////////////////////////////////////////////////////////////////////////////
 
 func (b *BalancerManager) Metrics(
 	now time.Time,
 	ref *balancerpb.PacketHandlerRef,
 ) ([]*commonpb.Metric, error) {
->>>>>>> 18096890 (fixed review issues)
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -271,14 +268,6 @@ func (b *BalancerManager) Metrics(
 		return nil, fmt.Errorf("failed to get stats: %s", err)
 	}
 
-<<<<<<< HEAD
-	refLabels := make([]*commonpb.Label, 0, 5)
-	refLabels = append(refLabels, &commonpb.Label{Name: "device", Value: *ref.Device})
-	refLabels = append(refLabels, &commonpb.Label{Name: "pipeline", Value: *ref.Pipeline})
-	refLabels = append(refLabels, &commonpb.Label{Name: "function", Value: *ref.Function})
-	refLabels = append(refLabels, &commonpb.Label{Name: "chain", Value: *ref.Chain})
-	refLabels = append(refLabels, &commonpb.Label{Name: "config", Value: b.Name()})
-=======
 	info, err := b.handle.Info(now)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get info: %s", err)
@@ -293,36 +282,45 @@ func (b *BalancerManager) Metrics(
 		{Name: "chain", Value: *ref.Chain},
 		{Name: "config", Value: b.Name()},
 	}
->>>>>>> 18096890 (fixed review issues)
 
 	makeCounter := func(name string, value uint64, extraLabels ...*commonpb.Label) *commonpb.Metric {
-		metric := commonpb.Metric{Name: name, Labels: append(refLabels, extraLabels...), Value: &commonpb.Metric_Counter{Counter: value}}
+		metric := commonpb.Metric{
+			Name:   name,
+			Labels: append(refLabels, extraLabels...),
+			Value:  &commonpb.Metric_Counter{Counter: value},
+		}
 		return &metric
 	}
 
-	commonCounters := 4
+	makeGauge := func(name string, value float64, extraLabels ...*commonpb.Label) *commonpb.Metric {
+		metric := commonpb.Metric{
+			Name:   name,
+			Labels: append(refLabels, extraLabels...),
+			Value:  &commonpb.Metric_Gauge{Gauge: value},
+		}
+		return &metric
+	}
 
-	incomingBits := makeCounter("incoming_bits", ffiStats.Common.IncomingBytes*8)
-	incomingPackets := makeCounter("incoming_packets", ffiStats.Common.IncomingPackets)
+	commonMetricsCount := len(
+		commonCounters,
+	) + 2 // +2 for active sessions and session table capacity (from info and config)
 
-	outgoingBits := makeCounter("outgoing_bits", ffiStats.Common.OutgoingBytes*8)
-	outgoingPackets := makeCounter("outgoing_packets", ffiStats.Common.OutgoingPackets)
+	perVsMetrics := len(
+		vsCounters,
+	) + 1 // +1 for active sessions (from info)
+	perRealMetrics := len(
+		realCounters,
+	) + 1 // +1 for active sessions (from info)
 
-	perVScounters := 4
-	perRealCounters := 2
-
-	counters := commonCounters + perVScounters*len(ffiStats.Vs)
+	metricsCount := commonMetricsCount + perVsMetrics*len(ffiStats.Vs)
 
 	for vsIdx := range ffiStats.Vs {
 		vs := &ffiStats.Vs[vsIdx]
-		counters += perRealCounters * len(vs.Reals)
+		metricsCount += perRealMetrics * len(vs.Reals)
 	}
 
-	metrics := make([]*commonpb.Metric, 0, counters)
-	metrics = append(metrics, incomingBits, incomingPackets, outgoingBits, outgoingPackets)
+	metrics := make([]*commonpb.Metric, 0, metricsCount)
 
-<<<<<<< HEAD
-=======
 	// make common metrics
 	{
 		// active sessions and session table capacity
@@ -345,26 +343,22 @@ func (b *BalancerManager) Metrics(
 	}
 
 	// make vs metrics
->>>>>>> 18096890 (fixed review issues)
 	for vsIdx := range ffiStats.Vs {
 		vs := &ffiStats.Vs[vsIdx]
-		labelVS := &commonpb.Label{Name: "vs", Value: vs.Identifier.String()}
+		vsInfo := &info.Vs[vsIdx]
+		labelsVS := []*commonpb.Label{
+			{Name: "vip", Value: vs.Identifier.Addr.String()},
+			{Name: "port", Value: strconv.Itoa(int(vs.Identifier.Port))},
+			{Name: "protocol", Value: vs.Identifier.TransportProto.String()},
+		}
 
-<<<<<<< HEAD
-		incomingBits := makeCounter("vs_incoming_bits", vs.Stats.IncomingBytes*8, labelVS)
-		incomingPackets := makeCounter("vs_incoming_packets", vs.Stats.IncomingPackets, labelVS)
-		outgoingBits := makeCounter("vs_outgoing_bits", vs.Stats.OutgoingBytes*8, labelVS)
-		outgoingPackets := makeCounter("vs_outgoing_packets", vs.Stats.OutgoingPackets, labelVS)
-
-		metrics = append(metrics, incomingBits, incomingPackets, outgoingBits, outgoingPackets)
-=======
 		// active sessions
 		metrics = append(
 			metrics,
 			makeGauge(
 				"vs_active_sessions",
 				float64(vsInfo.ActiveSessions),
-				labelVS,
+				labelsVS...,
 			),
 		)
 
@@ -372,29 +366,26 @@ func (b *BalancerManager) Metrics(
 		for _, counter := range vsCounters {
 			metrics = append(
 				metrics,
-				makeCounter(counter.name, counter.getter(&vs.Stats), labelVS),
+				makeCounter(
+					counter.name,
+					counter.getter(&vs.Stats),
+					labelsVS...),
 			)
 		}
->>>>>>> 18096890 (fixed review issues)
 
+		// make real metrics
 		for realIdx := range vs.Reals {
 			real := &vs.Reals[realIdx]
-			labelReal := &commonpb.Label{Name: "real", Value: real.Dst.String()}
+			realInfo := &vsInfo.Reals[realIdx]
+			labelsReal := append(labelsVS, &commonpb.Label{Name: "real_ip", Value: real.Dst.String()})
 
-<<<<<<< HEAD
-			incomingBits := makeCounter("real_incoming_bits", real.Stats.Bytes*8, labelVS, labelReal)
-			incomingPackets := makeCounter("real_incoming_packets", real.Stats.Packets, labelVS, labelReal)
-
-			metrics = append(metrics, incomingBits, incomingPackets)
-=======
 			// active sessions
 			metrics = append(
 				metrics,
 				makeGauge(
 					"real_active_sessions",
 					float64(realInfo.ActiveSessions),
-					labelVS,
-					labelReal,
+					labelsReal...,
 				),
 			)
 
@@ -405,12 +396,10 @@ func (b *BalancerManager) Metrics(
 					makeCounter(
 						counter.name,
 						counter.getter(&real.Stats),
-						labelVS,
-						labelReal,
+						labelsReal...,
 					),
 				)
 			}
->>>>>>> 18096890 (fixed review issues)
 		}
 	}
 
