@@ -9,6 +9,7 @@ package balancer
 import (
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/yanet-platform/yanet2/common/commonpb"
@@ -142,7 +143,11 @@ func (a *BalancerAgent) Metrics() ([]*commonpb.Metric, error) {
 			position := &positions[idx]
 			manager := a.managers[positions[idx].ModuleName]
 			if manager == nil {
-				a.log.Warnw("balancer manager not found", "config", position.ModuleName)
+				a.log.Warnw(
+					"balancer manager not found",
+					"config",
+					position.ModuleName,
+				)
 			}
 			managers = append(managers, manager)
 		}
@@ -163,7 +168,7 @@ func (a *BalancerAgent) Metrics() ([]*commonpb.Metric, error) {
 			Chain:    &position.Chain,
 		}
 
-		metrics, err := manager.Metrics(&ref)
+		metrics, err := manager.Metrics(time.Now(), &ref)
 		if err != nil {
 			a.log.Errorf("failed to get metrics", "balancer", manager.Name())
 		} else {

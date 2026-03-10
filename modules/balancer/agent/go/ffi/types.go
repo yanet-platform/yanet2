@@ -73,7 +73,7 @@ type VsIdentifier struct {
 }
 
 func (id *VsIdentifier) String() string {
-	return id.Addr.String() + ":" + strconv.Itoa(int(id.Port)) + "/" + id.TransportProto.String()
+	return netip.AddrPortFrom(id.Addr, id.Port).String() + "/" + id.TransportProto.String()
 }
 
 // RelativeRealIdentifier identifies a real server relative to its VS

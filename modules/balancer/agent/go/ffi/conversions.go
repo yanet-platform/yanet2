@@ -1335,7 +1335,9 @@ func cToGoNamedVsStats(cStats *C.struct_named_vs_stats) *NamedVsStats {
 		for i := range stats.AllowedSources {
 			// Convert C *char to Go string
 			if cAllowedSourcesSlice[i].tag != nil {
-				stats.AllowedSources[i].Tag = C.GoString(cAllowedSourcesSlice[i].tag)
+				stats.AllowedSources[i].Tag = C.GoString(
+					cAllowedSourcesSlice[i].tag,
+				)
 			} else {
 				stats.AllowedSources[i].Tag = ""
 			}
