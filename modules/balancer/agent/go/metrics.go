@@ -1,6 +1,11 @@
 package balancer
 
-import "github.com/yanet-platform/yanet2/modules/balancer/agent/go/ffi"
+import (
+	"time"
+
+	"github.com/yanet-platform/yanet2/common/go/metrics"
+	"github.com/yanet-platform/yanet2/modules/balancer/agent/go/ffi"
+)
 
 var commonCounters = []struct {
 	name   string
@@ -246,4 +251,57 @@ var realCounters = []struct {
 			return s.PacketsRealDisabled
 		},
 	},
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+type handlersMetrics struct {
+	callCount     *metrics.MetricMap[*metrics.Counter]
+	callLatencies *metrics.MetricMap[*metrics.Histogram]
+}
+
+func newHandlersMetrics() handlersMetrics {
+	return handlersMetrics{
+		callCount:     metrics.NewMetricMap[*metrics.Counter](),
+		callLatencies: metrics.NewMetricMap[*metrics.Histogram](),
+	}
+}
+
+var defaultLatencyBoundsMS = []float64{1, 2, 5, 10, 25, 50, 75, 100, 150, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1500, 2000, 3000, 4000, 5000}
+
+type handlerMetricTracker struct {
+	metricID  metrics.MetricID
+	startTime time.Time
+	metrics   *handlersMetrics
+	latencies []float64
+}
+
+func newHandlerMetricTracker(handlerName string, handlerMetrics *handlersMetrics, latencies []float64, labels []metrics.Label) *handlerMetricTracker {
+	if handlerMetrics == nil || latencies == nil {
+		return nil
+	}
+	id := metrics.MetricID{
+		Name:   handlerName,
+		Labels: labels,
+	}
+	return &handlerMetricTracker{
+		metricID:  id,
+		startTime: time.Now(),
+		metrics:   handlerMetrics,
+		latencies: latencies,
+	}
+}
+
+func (m *handlerMetricTracker) Fix() {
+	duration := time.Since(m.startTime)
+
+	// update counts
+	m.metrics.callCount.GetOrCreate(m.metricID, func() *metrics.Counter {
+		return &metrics.Counter{}
+	}).Inc()
+
+	// update latencies
+	m.metrics.callLatencies.GetOrCreate(m.metricID, func() *metrics.Histogram {
+		return metrics.NewHistogram(m.latencies)
+	}).Observe(float64(duration.Milliseconds()))
 }

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/yanet-platform/yanet2/common/commonpb"
+	"github.com/yanet-platform/yanet2/common/go/metrics"
 	"github.com/yanet-platform/yanet2/modules/balancer/agent/balancerpb"
 	"github.com/yanet-platform/yanet2/modules/balancer/agent/go/ffi"
 	"go.uber.org/zap"
@@ -31,6 +32,8 @@ type BalancerManager struct {
 
 	// Logger
 	log *zap.SugaredLogger
+
+	handlerMetrics handlersMetrics
 }
 
 func NewBalancerManager(
@@ -42,9 +45,17 @@ func NewBalancerManager(
 		handle:           handle,
 		realUpdateBuffer: []ffi.RealUpdate{},
 		log:              log.With("balancer", name),
+		handlerMetrics:   newHandlersMetrics(),
 	}
 	manager.startBackgroundTasks()
 	return manager
+}
+
+func (b *BalancerManager) newHandlerTracker(handle string, extraLabels ...metrics.Label) *handlerMetricTracker {
+	labels := append([]metrics.Label{
+		{Name: "config", Value: b.Name()},
+	}, extraLabels...)
+	return newHandlerMetricTracker(handle, &b.handlerMetrics, defaultLatencyBoundsMS, labels)
 }
 
 func (b *BalancerManager) Name() string {
@@ -57,6 +68,9 @@ func (b *BalancerManager) Update(
 ) (*ffi.UpdateInfo, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+
+	tracker := b.newHandlerTracker("update")
+	defer tracker.Fix()
 
 	b.log.Debugw("updating balancer configuration")
 
@@ -118,6 +132,9 @@ func (b *BalancerManager) UpdateReals(
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
+	tracker := b.newHandlerTracker("update_reals", metrics.Label{Name: "buffer", Value: strconv.FormatBool(buffer)})
+	defer tracker.Fix()
+
 	b.log.Debugw("updating reals", "count", len(updates), "buffer", buffer)
 
 	// Convert protobuf updates to FFI updates
@@ -162,6 +179,9 @@ func (b *BalancerManager) FlushRealUpdates() (int, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
+	tracker := b.newHandlerTracker("flush_real_updates")
+	defer tracker.Fix()
+
 	count := len(b.realUpdateBuffer)
 	if count == 0 {
 		b.log.Debugw("no buffered updates to flush")
@@ -204,6 +224,10 @@ func (b *BalancerManager) BufferedUpdates() []*balancerpb.RealUpdate {
 func (b *BalancerManager) Graph() *balancerpb.Graph {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+
+	tracker := b.newHandlerTracker("graph")
+	defer tracker.Fix()
+
 	cfg := b.handle.Config()
 	graph := b.handle.Graph()
 
@@ -215,6 +239,9 @@ func (b *BalancerManager) Info(
 ) (*balancerpb.BalancerInfo, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+
+	tracker := b.newHandlerTracker("info")
+	defer tracker.Fix()
 
 	ffiInfo, err := b.handle.Info(now)
 	if err != nil {
@@ -229,6 +256,9 @@ func (b *BalancerManager) Stats(
 ) (*balancerpb.BalancerStats, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+
+	tracker := b.newHandlerTracker("stats")
+	defer tracker.Fix()
 
 	// Convert protobuf ref to FFI ref
 	ffiRef := &ffi.PacketHandlerRef{
@@ -254,6 +284,9 @@ func (b *BalancerManager) Metrics(
 ) ([]*commonpb.Metric, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+
+	tracker := b.newHandlerTracker("metrics")
+	defer tracker.Fix()
 
 	// Convert protobuf ref to FFI ref
 	ffiRef := &ffi.PacketHandlerRef{
@@ -412,6 +445,9 @@ func (b *BalancerManager) Sessions(
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
+	tracker := b.newHandlerTracker("sessions")
+	defer tracker.Fix()
+
 	ffiSessions := b.handle.Sessions(now)
 
 	sessions := make([]*balancerpb.SessionInfo, 0, len(ffiSessions.Sessions))
@@ -479,6 +515,9 @@ func (b *BalancerManager) backgroundRefreshTask() {
 func (b *BalancerManager) Refresh(now time.Time) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+
+	tracker := b.newHandlerTracker("refresh")
+	defer tracker.Fix()
 
 	b.log.Debug("refreshing")
 
@@ -567,6 +606,9 @@ func (b *BalancerManager) UpdateVS(
 ) (*ffi.UpdateInfo, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+
+	tracker := b.newHandlerTracker("update_vs")
+	defer tracker.Fix()
 
 	b.log.Debugw("updating virtual services", "vs_count", len(vsList))
 
@@ -697,6 +739,9 @@ func (b *BalancerManager) DeleteVS(
 ) (*ffi.UpdateInfo, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+
+	tracker := b.newHandlerTracker("delete_vs")
+	defer tracker.Fix()
 
 	b.log.Debugw("deleting virtual services", "vs_count", len(vsList))
 
