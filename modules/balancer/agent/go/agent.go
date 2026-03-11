@@ -189,5 +189,8 @@ func (a *BalancerAgent) Metrics() ([]*commonpb.Metric, error) {
 		}
 	}
 
+	// append agent metrics
+	result = append(result, a.handlersMetrics.collect()...)
+
 	return result, nil
 }
