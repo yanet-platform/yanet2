@@ -434,6 +434,21 @@ func (b *BalancerManager) Metrics(
 				)
 			}
 		}
+
+		// make acl metrics
+		for aclIdx := range vs.AllowedSources {
+			acl := &vs.AllowedSources[aclIdx]
+			labelsACL := append(labelsVS, &commonpb.Label{Name: "acl_tag", Value: acl.Tag})
+
+			metrics = append(
+				metrics,
+				makeCounter(
+					"vs_acl_hits",
+					acl.Passes,
+					labelsACL...,
+				),
+			)
+		}
 	}
 
 	calls := b.handlerMetrics.collect()
