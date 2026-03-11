@@ -436,7 +436,9 @@ func (b *BalancerManager) Metrics(
 		}
 	}
 
-	return metrics, nil
+	calls := b.handlerMetrics.collect()
+
+	return append(metrics, calls...), nil
 }
 
 func (b *BalancerManager) Sessions(

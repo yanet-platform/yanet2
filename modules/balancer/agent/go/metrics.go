@@ -3,6 +3,7 @@ package balancer
 import (
 	"time"
 
+	"github.com/yanet-platform/yanet2/common/commonpb"
 	"github.com/yanet-platform/yanet2/common/go/metrics"
 	"github.com/yanet-platform/yanet2/modules/balancer/agent/go/ffi"
 )
@@ -265,6 +266,12 @@ func newHandlersMetrics() handlersMetrics {
 		callCount:     metrics.NewMetricMap[*metrics.Counter](),
 		callLatencies: metrics.NewMetricMap[*metrics.Histogram](),
 	}
+}
+
+func (m *handlersMetrics) collect() []*commonpb.Metric {
+	calls := commonpb.MetricRefsToProto(m.callCount.Metrics())
+	latencies := commonpb.MetricRefsToProto(m.callLatencies.Metrics())
+	return append(calls, latencies...)
 }
 
 var defaultLatencyBoundsMS = []float64{1, 2, 5, 10, 25, 50, 75, 100, 150, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1500, 2000, 3000, 4000, 5000}
