@@ -150,7 +150,6 @@ func (a *BalancerAgent) Metrics() ([]*commonpb.Metric, error) {
 	managers := make([]*BalancerManager, 0, len(positions))
 	{
 		a.mu.Lock()
-		defer a.mu.Unlock()
 
 		for idx := range positions {
 			position := &positions[idx]
@@ -164,6 +163,8 @@ func (a *BalancerAgent) Metrics() ([]*commonpb.Metric, error) {
 			}
 			managers = append(managers, manager)
 		}
+
+		a.mu.Unlock()
 	}
 
 	result := make([]*commonpb.Metric, 0, len(managers)*200)
