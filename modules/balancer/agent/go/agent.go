@@ -13,6 +13,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/yanet-platform/yanet2/common/commonpb"
+	"github.com/yanet-platform/yanet2/common/go/metrics"
 	yanet "github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/balancer/agent/balancerpb"
 	"github.com/yanet-platform/yanet2/modules/balancer/agent/go/ffi"
@@ -24,6 +25,8 @@ type BalancerAgent struct {
 	managers map[string]*BalancerManager
 
 	mu sync.Mutex
+
+	handlersMetrics handlersMetrics
 
 	log *zap.SugaredLogger
 }
@@ -48,10 +51,11 @@ func NewBalancerAgent(
 		managers[manager.Name()] = manager
 	}
 	return &BalancerAgent{
-		handle:   handle,
-		managers: managers,
-		mu:       sync.Mutex{},
-		log:      log,
+		handle:          handle,
+		managers:        managers,
+		mu:              sync.Mutex{},
+		log:             log,
+		handlersMetrics: newHandlersMetrics(),
 	}, nil
 }
 
@@ -61,6 +65,15 @@ func (a *BalancerAgent) NewBalancerManager(
 ) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+
+	tracker := newHandlerMetricTracker("create", &a.handlersMetrics, defaultLatencyBoundsMS,
+		[]metrics.Label{
+			{
+				Name:  "config",
+				Value: name,
+			},
+		})
+	defer tracker.Fix()
 
 	a.log.Infow("creating new balancer manager", "name", name)
 

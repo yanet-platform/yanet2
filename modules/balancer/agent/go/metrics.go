@@ -257,24 +257,44 @@ var realCounters = []struct {
 ////////////////////////////////////////////////////////////////////////////////
 
 type handlersMetrics struct {
-	callCount     *metrics.MetricMap[*metrics.Counter]
 	callLatencies *metrics.MetricMap[*metrics.Histogram]
 }
 
 func newHandlersMetrics() handlersMetrics {
 	return handlersMetrics{
-		callCount:     metrics.NewMetricMap[*metrics.Counter](),
 		callLatencies: metrics.NewMetricMap[*metrics.Histogram](),
 	}
 }
 
 func (m *handlersMetrics) collect() []*commonpb.Metric {
-	calls := commonpb.MetricRefsToProto(m.callCount.Metrics())
-	latencies := commonpb.MetricRefsToProto(m.callLatencies.Metrics())
-	return append(calls, latencies...)
+	return commonpb.MetricRefsToProto(m.callLatencies.Metrics())
 }
 
-var defaultLatencyBoundsMS = []float64{1, 2, 5, 10, 25, 50, 75, 100, 150, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1500, 2000, 3000, 4000, 5000}
+var defaultLatencyBoundsMS = []float64{
+	1,
+	2,
+	5,
+	10,
+	25,
+	50,
+	75,
+	100,
+	150,
+	200,
+	300,
+	400,
+	500,
+	600,
+	700,
+	800,
+	900,
+	1000,
+	1500,
+	2000,
+	3000,
+	4000,
+	5000,
+}
 
 type handlerMetricTracker struct {
 	metricID  metrics.MetricID
@@ -283,7 +303,12 @@ type handlerMetricTracker struct {
 	latencies []float64
 }
 
-func newHandlerMetricTracker(handlerName string, handlerMetrics *handlersMetrics, latencies []float64, labels []metrics.Label) *handlerMetricTracker {
+func newHandlerMetricTracker(
+	handlerName string,
+	handlerMetrics *handlersMetrics,
+	latencies []float64,
+	labels []metrics.Label,
+) *handlerMetricTracker {
 	if handlerMetrics == nil || latencies == nil {
 		return nil
 	}
@@ -301,11 +326,6 @@ func newHandlerMetricTracker(handlerName string, handlerMetrics *handlersMetrics
 
 func (m *handlerMetricTracker) Fix() {
 	duration := time.Since(m.startTime)
-
-	// update counts
-	m.metrics.callCount.GetOrCreate(m.metricID, func() *metrics.Counter {
-		return &metrics.Counter{}
-	}).Inc()
 
 	// update latencies
 	m.metrics.callLatencies.GetOrCreate(m.metricID, func() *metrics.Histogram {
