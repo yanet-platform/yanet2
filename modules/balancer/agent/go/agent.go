@@ -156,7 +156,7 @@ func (a *BalancerAgent) Metrics() ([]*commonpb.Metric, error) {
 			manager := a.managers[positions[idx].ModuleName]
 			if manager == nil {
 				a.log.Warnw(
-					"balancer manager not found",
+					"metrics: balancer manager not found",
 					"config",
 					position.ModuleName,
 				)
