@@ -168,6 +168,12 @@ pub struct RealInfoJson {
 
 #[derive(Serialize)]
 pub struct ShowStatsResponseJson {
+    pub entries: Vec<StatsEntryJson>,
+}
+
+#[derive(Serialize)]
+pub struct StatsEntryJson {
+    pub name: String,
     pub ref_: Option<PacketHandlerRefJson>,
     pub stats: Option<BalancerStatsJson>,
 }
@@ -554,105 +560,112 @@ pub fn convert_show_info(response: &balancerpb::ShowInfoResponse) -> ShowInfoRes
 
 pub fn convert_show_stats(response: &balancerpb::ShowStatsResponse) -> ShowStatsResponseJson {
     ShowStatsResponseJson {
-        ref_: response.r#ref.as_ref().map(|r| PacketHandlerRefJson {
-            device: r.device.clone(),
-            pipeline: r.pipeline.clone(),
-            function: r.function.clone(),
-            chain: r.chain.clone(),
-        }),
-        stats: response.stats.as_ref().map(|s| BalancerStatsJson {
-            l4: s.l4.as_ref().map(|l| L4StatsJson {
-                incoming_packets: l.incoming_packets,
-                select_vs_failed: l.select_vs_failed,
-                invalid_packets: l.invalid_packets,
-                select_real_failed: l.select_real_failed,
-                outgoing_packets: l.outgoing_packets,
-            }),
-            icmpv4: s.icmpv4.as_ref().map(|i| IcmpStatsJson {
-                incoming_packets: i.incoming_packets,
-                src_not_allowed: i.src_not_allowed,
-                echo_responses: i.echo_responses,
-                payload_too_short_ip: i.payload_too_short_ip,
-                unmatching_src_from_original: i.unmatching_src_from_original,
-                payload_too_short_port: i.payload_too_short_port,
-                unexpected_transport: i.unexpected_transport,
-                unrecognized_vs: i.unrecognized_vs,
-                forwarded_packets: i.forwarded_packets,
-                broadcasted_packets: i.broadcasted_packets,
-                packet_clones_sent: i.packet_clones_sent,
-                packet_clones_received: i.packet_clones_received,
-                packet_clone_failures: i.packet_clone_failures,
-            }),
-            icmpv6: s.icmpv6.as_ref().map(|i| IcmpStatsJson {
-                incoming_packets: i.incoming_packets,
-                src_not_allowed: i.src_not_allowed,
-                echo_responses: i.echo_responses,
-                payload_too_short_ip: i.payload_too_short_ip,
-                unmatching_src_from_original: i.unmatching_src_from_original,
-                payload_too_short_port: i.payload_too_short_port,
-                unexpected_transport: i.unexpected_transport,
-                unrecognized_vs: i.unrecognized_vs,
-                forwarded_packets: i.forwarded_packets,
-                broadcasted_packets: i.broadcasted_packets,
-                packet_clones_sent: i.packet_clones_sent,
-                packet_clones_received: i.packet_clones_received,
-                packet_clone_failures: i.packet_clone_failures,
-            }),
-            common: s.common.as_ref().map(|c| CommonStatsJson {
-                incoming_packets: c.incoming_packets,
-                incoming_bytes: c.incoming_bytes,
-                unexpected_network_proto: c.unexpected_network_proto,
-                decap_successful: c.decap_successful,
-                decap_failed: c.decap_failed,
-                outgoing_packets: c.outgoing_packets,
-                outgoing_bytes: c.outgoing_bytes,
-            }),
-            vs: s
-                .vs
-                .iter()
-                .map(|v| NamedVsStatsJson {
-                    vs: convert_vs_identifier(v.vs.as_ref()),
-                    stats: v.stats.as_ref().map(|st| VsStatsJson {
-                        incoming_packets: st.incoming_packets,
-                        incoming_bytes: st.incoming_bytes,
-                        packet_src_not_allowed: st.packet_src_not_allowed,
-                        no_reals: st.no_reals,
-                        ops_packets: st.ops_packets,
-                        session_table_overflow: st.session_table_overflow,
-                        echo_icmp_packets: st.echo_icmp_packets,
-                        error_icmp_packets: st.error_icmp_packets,
-                        real_is_disabled: st.real_is_disabled,
-                        real_is_removed: st.real_is_removed,
-                        not_rescheduled_packets: st.not_rescheduled_packets,
-                        broadcasted_icmp_packets: st.broadcasted_icmp_packets,
-                        created_sessions: st.created_sessions,
-                        outgoing_packets: st.outgoing_packets,
-                        outgoing_bytes: st.outgoing_bytes,
+        entries: response
+            .entries
+            .iter()
+            .map(|e| StatsEntryJson {
+                name: e.name.clone(),
+                ref_: e.r#ref.as_ref().map(|r| PacketHandlerRefJson {
+                    device: r.device.clone(),
+                    pipeline: r.pipeline.clone(),
+                    function: r.function.clone(),
+                    chain: r.chain.clone(),
+                }),
+                stats: e.stats.as_ref().map(|s| BalancerStatsJson {
+                    l4: s.l4.as_ref().map(|l| L4StatsJson {
+                        incoming_packets: l.incoming_packets,
+                        select_vs_failed: l.select_vs_failed,
+                        invalid_packets: l.invalid_packets,
+                        select_real_failed: l.select_real_failed,
+                        outgoing_packets: l.outgoing_packets,
                     }),
-                    reals: v
-                        .reals
+                    icmpv4: s.icmpv4.as_ref().map(|i| IcmpStatsJson {
+                        incoming_packets: i.incoming_packets,
+                        src_not_allowed: i.src_not_allowed,
+                        echo_responses: i.echo_responses,
+                        payload_too_short_ip: i.payload_too_short_ip,
+                        unmatching_src_from_original: i.unmatching_src_from_original,
+                        payload_too_short_port: i.payload_too_short_port,
+                        unexpected_transport: i.unexpected_transport,
+                        unrecognized_vs: i.unrecognized_vs,
+                        forwarded_packets: i.forwarded_packets,
+                        broadcasted_packets: i.broadcasted_packets,
+                        packet_clones_sent: i.packet_clones_sent,
+                        packet_clones_received: i.packet_clones_received,
+                        packet_clone_failures: i.packet_clone_failures,
+                    }),
+                    icmpv6: s.icmpv6.as_ref().map(|i| IcmpStatsJson {
+                        incoming_packets: i.incoming_packets,
+                        src_not_allowed: i.src_not_allowed,
+                        echo_responses: i.echo_responses,
+                        payload_too_short_ip: i.payload_too_short_ip,
+                        unmatching_src_from_original: i.unmatching_src_from_original,
+                        payload_too_short_port: i.payload_too_short_port,
+                        unexpected_transport: i.unexpected_transport,
+                        unrecognized_vs: i.unrecognized_vs,
+                        forwarded_packets: i.forwarded_packets,
+                        broadcasted_packets: i.broadcasted_packets,
+                        packet_clones_sent: i.packet_clones_sent,
+                        packet_clones_received: i.packet_clones_received,
+                        packet_clone_failures: i.packet_clone_failures,
+                    }),
+                    common: s.common.as_ref().map(|c| CommonStatsJson {
+                        incoming_packets: c.incoming_packets,
+                        incoming_bytes: c.incoming_bytes,
+                        unexpected_network_proto: c.unexpected_network_proto,
+                        decap_successful: c.decap_successful,
+                        decap_failed: c.decap_failed,
+                        outgoing_packets: c.outgoing_packets,
+                        outgoing_bytes: c.outgoing_bytes,
+                    }),
+                    vs: s
+                        .vs
                         .iter()
-                        .map(|r| NamedRealStatsJson {
-                            real: convert_real_identifier(r.real.as_ref()),
-                            stats: r.stats.as_ref().map(|st| RealStatsJson {
-                                packets_real_disabled: st.packets_real_disabled,
-                                packets_real_not_present: 0, // Field removed in new proto
+                        .map(|v| NamedVsStatsJson {
+                            vs: convert_vs_identifier(v.vs.as_ref()),
+                            stats: v.stats.as_ref().map(|st| VsStatsJson {
+                                incoming_packets: st.incoming_packets,
+                                incoming_bytes: st.incoming_bytes,
+                                packet_src_not_allowed: st.packet_src_not_allowed,
+                                no_reals: st.no_reals,
                                 ops_packets: st.ops_packets,
+                                session_table_overflow: st.session_table_overflow,
+                                echo_icmp_packets: st.echo_icmp_packets,
                                 error_icmp_packets: st.error_icmp_packets,
+                                real_is_disabled: st.real_is_disabled,
+                                real_is_removed: st.real_is_removed,
+                                not_rescheduled_packets: st.not_rescheduled_packets,
+                                broadcasted_icmp_packets: st.broadcasted_icmp_packets,
                                 created_sessions: st.created_sessions,
-                                packets: st.packets,
-                                bytes: st.bytes,
+                                outgoing_packets: st.outgoing_packets,
+                                outgoing_bytes: st.outgoing_bytes,
                             }),
+                            reals: v
+                                .reals
+                                .iter()
+                                .map(|r| NamedRealStatsJson {
+                                    real: convert_real_identifier(r.real.as_ref()),
+                                    stats: r.stats.as_ref().map(|st| RealStatsJson {
+                                        packets_real_disabled: st.packets_real_disabled,
+                                        packets_real_not_present: 0, // Field removed in new proto
+                                        ops_packets: st.ops_packets,
+                                        error_icmp_packets: st.error_icmp_packets,
+                                        created_sessions: st.created_sessions,
+                                        packets: st.packets,
+                                        bytes: st.bytes,
+                                    }),
+                                })
+                                .collect(),
+                            allowed_sources: v
+                                .allowed_sources
+                                .iter()
+                                .map(|a| AllowedSourcesStatsJson { tag: a.tag.clone(), passes: a.passes })
+                                .collect(),
                         })
                         .collect(),
-                    allowed_sources: v
-                        .allowed_sources
-                        .iter()
-                        .map(|a| AllowedSourcesStatsJson { tag: a.tag.clone(), passes: a.passes })
-                        .collect(),
-                })
-                .collect(),
-        }),
+                }),
+            })
+            .collect(),
     }
 }
 

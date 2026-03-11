@@ -195,3 +195,103 @@ func (a *BalancerAgent) Metrics() ([]*commonpb.Metric, error) {
 
 	return result, nil
 }
+
+// StatsEntries enumerates dataplane balancer positions,
+// optionally filters by balancer name and packet-handler ref fields, selects the
+// corresponding manager for each position, and returns a list of (name, ref,
+// stats) entries.
+//
+// Filtering rules:
+// - if name is specified: only positions with ModuleName == name are included
+// - for PacketHandlerRef: each specified field (device/pipeline/function/chain) is matched by strict equality.
+func (a *BalancerAgent) StatsEntries(
+	name *string,
+	refFilter *balancerpb.PacketHandlerRef,
+) ([]*balancerpb.StatsEntry, error) {
+	dpConfig := a.handle.DPConfig()
+	positions := dpConfig.AllModulePositions("balancer")
+
+	// Snapshot managers under lock to avoid holding agent mutex during per-position stats reads.
+	managersByName := make(map[string]*BalancerManager, len(a.managers))
+	{
+		a.mu.Lock()
+		for k, v := range a.managers {
+			managersByName[k] = v
+		}
+		a.mu.Unlock()
+	}
+
+	matchesRef := func(posDevice, posPipeline, posFunction, posChain string) bool {
+		if refFilter == nil {
+			return true
+		}
+		if refFilter.Device != nil && *refFilter.Device != posDevice {
+			return false
+		}
+		if refFilter.Pipeline != nil && *refFilter.Pipeline != posPipeline {
+			return false
+		}
+		if refFilter.Function != nil && *refFilter.Function != posFunction {
+			return false
+		}
+		if refFilter.Chain != nil && *refFilter.Chain != posChain {
+			return false
+		}
+		return true
+	}
+
+	entries := make([]*balancerpb.StatsEntry, 0)
+
+	for idx := range positions {
+		position := &positions[idx]
+
+		// Optional manager-name filter
+		if name != nil && position.ModuleName != *name {
+			continue
+		}
+
+		// Optional packet-handler ref filter
+		if !matchesRef(position.Device, position.Pipeline, position.Function, position.Chain) {
+			continue
+		}
+
+		manager := managersByName[position.ModuleName]
+		if manager == nil {
+			a.log.Warnw(
+				"stats: balancer manager not found",
+				"config",
+				position.ModuleName,
+			)
+			continue
+		}
+
+		ref := &balancerpb.PacketHandlerRef{
+			Device:   &position.Device,
+			Pipeline: &position.Pipeline,
+			Function: &position.Function,
+			Chain:    &position.Chain,
+		}
+
+		stats, err := manager.Stats(ref)
+		if err != nil {
+			a.log.Warnw(
+				"failed to get stats for position",
+				"config", position.ModuleName,
+				"device", position.Device,
+				"pipeline", position.Pipeline,
+				"function", position.Function,
+				"chain", position.Chain,
+				"error", err,
+			)
+			continue
+		}
+
+		entries = append(entries, &balancerpb.StatsEntry{
+			Name:  position.ModuleName,
+			Ref:   ref,
+			Stats: stats,
+		})
+	}
+
+	return entries, nil
+}

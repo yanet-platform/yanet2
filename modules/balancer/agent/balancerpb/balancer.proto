@@ -381,24 +381,39 @@ message ShowInfoResponse {
 }
 
 // Request to show balancer statistics.
+//
+// If name is specified, returns stats only for that balancer instance.
+// If name is not specified, returns stats for all balancer instances.
+//
+// PacketHandlerRef fields are treated as filters:
+// - if device is specified: only positions for that device are included
+// - same for pipeline, function, chain.
 message ShowStatsRequest {
-	// Balancer instance name (optional, auto-selects if only one exists)
+	// Balancer instance name (optional).
 	optional string name = 1;
+
+	// Packet handler reference filter 
+	// (optional fields inside PacketHandlerRef).
 	PacketHandlerRef ref = 2;
 }
 
-// Response containing balancer statistics.
-message ShowStatsResponse {
-	// Balancer instance name
+// A single stats entry bound to a specific balancer instance name and packet
+// handler position.
+message StatsEntry {
+	// Balancer instance name (manager/module config name).
 	string name = 1;
 
+	// Packet handler reference identifying the dataplane position.
 	PacketHandlerRef ref = 2;
 
-	// Packet processing statistics.
-	//
-	// Includes counters for L4 processing, ICMP handling,
-	// per-virtual-service statistics, and per-real-server statistics.
+	// Packet processing statistics for this position.
 	BalancerStats stats = 3;
+}
+
+// Response containing balancer statistics for one or more positions.
+message ShowStatsResponse {
+	// List of stats entries. Each entry includes (name, ref, stats).
+	repeated StatsEntry entries = 1;
 }
 
 ///////////////////////////////////////////////////////////////////////////////

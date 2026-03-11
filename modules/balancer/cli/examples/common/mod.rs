@@ -420,276 +420,314 @@ pub fn create_state_info_example() -> balancerpb::ShowInfoResponse {
 #[allow(dead_code)]
 pub fn create_config_stats_example() -> balancerpb::ShowStatsResponse {
     balancerpb::ShowStatsResponse {
-        name: "my-balancer".to_string(),
-        r#ref: Some(balancerpb::PacketHandlerRef {
-            device: Some("eth0".to_string()),
-            pipeline: Some("main".to_string()),
-            function: Some("balancer".to_string()),
-            chain: Some("forward".to_string()),
-        }),
-        stats: Some(balancerpb::BalancerStats {
-            l4: Some(balancerpb::L4Stats {
-                incoming_packets: 1_200_000,
-                select_vs_failed: 100,
-                invalid_packets: 350,
-                select_real_failed: 50,
-                outgoing_packets: 1_199_500,
-            }),
-            icmpv4: Some(balancerpb::IcmpStats {
-                src_not_allowed: 1_215,
-                incoming_packets: 34_567,
-                echo_responses: 30_000,
-                payload_too_short_ip: 12,
-                unmatching_src_from_original: 8,
-                payload_too_short_port: 5,
-                unexpected_transport: 3,
-                unrecognized_vs: 2,
-                forwarded_packets: 4_500,
-                broadcasted_packets: 67,
-                packet_clones_sent: 150,
-                packet_clones_received: 145,
-                packet_clone_failures: 5,
-            }),
-            icmpv6: Some(balancerpb::IcmpStats {
-                src_not_allowed: 1_215,
-                incoming_packets: 1_234,
-                echo_responses: 1_200,
-                payload_too_short_ip: 2,
-                unmatching_src_from_original: 1,
-                payload_too_short_port: 1,
-                unexpected_transport: 0,
-                unrecognized_vs: 0,
-                forwarded_packets: 34,
-                broadcasted_packets: 2,
-                packet_clones_sent: 10,
-                packet_clones_received: 9,
-                packet_clone_failures: 1,
-            }),
-            common: Some(balancerpb::CommonStats {
-                incoming_packets: 1_234_567,
-                incoming_bytes: 1_288_490_188,
-                unexpected_network_proto: 0,
-                decap_successful: 50_000,
-                decap_failed: 123,
-                outgoing_packets: 1_234_000,
-                outgoing_bytes: 1_181_116_006,
-            }),
-            vs: vec![
-                balancerpb::NamedVsStats {
-                    vs: Some(balancerpb::VsIdentifier {
-                        addr: Some(balancerpb::Addr { bytes: vec![192, 0, 2, 1] }),
-                        port: 80,
-                        proto: balancerpb::TransportProto::Tcp as i32,
+        entries: vec![
+            balancerpb::StatsEntry {
+                name: "my-balancer".to_string(),
+                r#ref: Some(balancerpb::PacketHandlerRef {
+                    device: Some("eth0".to_string()),
+                    pipeline: Some("main".to_string()),
+                    function: Some("balancer".to_string()),
+                    chain: Some("forward".to_string()),
+                }),
+                stats: Some(balancerpb::BalancerStats {
+                    l4: Some(balancerpb::L4Stats {
+                        incoming_packets: 1_200_000,
+                        select_vs_failed: 100,
+                        invalid_packets: 350,
+                        select_real_failed: 50,
+                        outgoing_packets: 1_199_500,
                     }),
-                    stats: Some(balancerpb::VsStats {
-                        incoming_packets: 800_000,
-                        incoming_bytes: 800_000_000,
-                        packet_src_not_allowed: 0,
-                        no_reals: 0,
-                        ops_packets: 0,
-                        session_table_overflow: 0,
-                        echo_icmp_packets: 0,
-                        error_icmp_packets: 0,
-                        real_is_disabled: 0,
-                        real_is_removed: 0,
-                        not_rescheduled_packets: 0,
-                        broadcasted_icmp_packets: 0,
-                        created_sessions: 50_000,
-                        outgoing_packets: 799_500,
-                        outgoing_bytes: 799_500_000,
+                    icmpv4: Some(balancerpb::IcmpStats {
+                        src_not_allowed: 1_215,
+                        incoming_packets: 34_567,
+                        echo_responses: 30_000,
+                        payload_too_short_ip: 12,
+                        unmatching_src_from_original: 8,
+                        payload_too_short_port: 5,
+                        unexpected_transport: 3,
+                        unrecognized_vs: 2,
+                        forwarded_packets: 4_500,
+                        broadcasted_packets: 67,
+                        packet_clones_sent: 150,
+                        packet_clones_received: 145,
+                        packet_clone_failures: 5,
                     }),
-                    allowed_sources: vec![
-                        balancerpb::AllowedSourcesStats {
-                            tag: "100".to_string(),
-                            passes: 500_000,
-                        },
-                        balancerpb::AllowedSourcesStats {
-                            tag: "200".to_string(),
-                            passes: 299_500,
-                        },
-                        // Tag 0 (no tag) doesn't appear in stats
-                    ],
-                    reals: vec![
-                        balancerpb::NamedRealStats {
-                            real: Some(balancerpb::RealIdentifier {
-                                vs: Some(balancerpb::VsIdentifier {
-                                    addr: Some(balancerpb::Addr { bytes: vec![192, 0, 2, 1] }),
-                                    port: 80,
-                                    proto: balancerpb::TransportProto::Tcp as i32,
-                                }),
-                                real: Some(balancerpb::RelativeRealIdentifier {
-                                    ip: Some(balancerpb::Addr { bytes: vec![10, 1, 1, 1] }),
-                                    port: 80,
-                                }),
+                    icmpv6: Some(balancerpb::IcmpStats {
+                        src_not_allowed: 1_215,
+                        incoming_packets: 1_234,
+                        echo_responses: 1_200,
+                        payload_too_short_ip: 2,
+                        unmatching_src_from_original: 1,
+                        payload_too_short_port: 1,
+                        unexpected_transport: 0,
+                        unrecognized_vs: 0,
+                        forwarded_packets: 34,
+                        broadcasted_packets: 2,
+                        packet_clones_sent: 10,
+                        packet_clones_received: 9,
+                        packet_clone_failures: 1,
+                    }),
+                    common: Some(balancerpb::CommonStats {
+                        incoming_packets: 1_234_567,
+                        incoming_bytes: 1_288_490_188,
+                        unexpected_network_proto: 0,
+                        decap_successful: 50_000,
+                        decap_failed: 123,
+                        outgoing_packets: 1_234_000,
+                        outgoing_bytes: 1_181_116_006,
+                    }),
+                    vs: vec![
+                        balancerpb::NamedVsStats {
+                            vs: Some(balancerpb::VsIdentifier {
+                                addr: Some(balancerpb::Addr { bytes: vec![192, 0, 2, 1] }),
+                                port: 80,
+                                proto: balancerpb::TransportProto::Tcp as i32,
                             }),
-                            stats: Some(balancerpb::RealStats {
-                                packets_real_disabled: 0,
+                            stats: Some(balancerpb::VsStats {
+                                incoming_packets: 800_000,
+                                incoming_bytes: 800_000_000,
+                                packet_src_not_allowed: 0,
+                                no_reals: 0,
                                 ops_packets: 0,
+                                session_table_overflow: 0,
+                                echo_icmp_packets: 0,
                                 error_icmp_packets: 0,
-                                created_sessions: 30_000,
-                                packets: 500_000,
-                                bytes: 629_145_600,
+                                real_is_disabled: 0,
+                                real_is_removed: 0,
+                                not_rescheduled_packets: 0,
+                                broadcasted_icmp_packets: 0,
+                                created_sessions: 50_000,
+                                outgoing_packets: 799_500,
+                                outgoing_bytes: 799_500_000,
                             }),
+                            allowed_sources: vec![
+                                balancerpb::AllowedSourcesStats {
+                                    tag: "100".to_string(),
+                                    passes: 500_000,
+                                },
+                                balancerpb::AllowedSourcesStats {
+                                    tag: "200".to_string(),
+                                    passes: 299_500,
+                                },
+                                // Tag 0 (no tag) doesn't appear in stats
+                            ],
+                            reals: vec![
+                                balancerpb::NamedRealStats {
+                                    real: Some(balancerpb::RealIdentifier {
+                                        vs: Some(balancerpb::VsIdentifier {
+                                            addr: Some(balancerpb::Addr { bytes: vec![192, 0, 2, 1] }),
+                                            port: 80,
+                                            proto: balancerpb::TransportProto::Tcp as i32,
+                                        }),
+                                        real: Some(balancerpb::RelativeRealIdentifier {
+                                            ip: Some(balancerpb::Addr { bytes: vec![10, 1, 1, 1] }),
+                                            port: 80,
+                                        }),
+                                    }),
+                                    stats: Some(balancerpb::RealStats {
+                                        packets_real_disabled: 0,
+                                        ops_packets: 0,
+                                        error_icmp_packets: 0,
+                                        created_sessions: 30_000,
+                                        packets: 500_000,
+                                        bytes: 629_145_600,
+                                    }),
+                                },
+                                balancerpb::NamedRealStats {
+                                    real: Some(balancerpb::RealIdentifier {
+                                        vs: Some(balancerpb::VsIdentifier {
+                                            addr: Some(balancerpb::Addr { bytes: vec![192, 0, 2, 1] }),
+                                            port: 80,
+                                            proto: balancerpb::TransportProto::Tcp as i32,
+                                        }),
+                                        real: Some(balancerpb::RelativeRealIdentifier {
+                                            ip: Some(balancerpb::Addr { bytes: vec![10, 1, 1, 2] }),
+                                            port: 80,
+                                        }),
+                                    }),
+                                    stats: Some(balancerpb::RealStats {
+                                        packets_real_disabled: 0,
+                                        ops_packets: 0,
+                                        error_icmp_packets: 0,
+                                        created_sessions: 20_000,
+                                        packets: 300_000,
+                                        bytes: 366_503_875,
+                                    }),
+                                },
+                            ],
                         },
-                        balancerpb::NamedRealStats {
-                            real: Some(balancerpb::RealIdentifier {
-                                vs: Some(balancerpb::VsIdentifier {
-                                    addr: Some(balancerpb::Addr { bytes: vec![192, 0, 2, 1] }),
-                                    port: 80,
-                                    proto: balancerpb::TransportProto::Tcp as i32,
-                                }),
-                                real: Some(balancerpb::RelativeRealIdentifier {
-                                    ip: Some(balancerpb::Addr { bytes: vec![10, 1, 1, 2] }),
-                                    port: 80,
-                                }),
-                            }),
-                            stats: Some(balancerpb::RealStats {
-                                packets_real_disabled: 0,
-                                ops_packets: 0,
-                                error_icmp_packets: 0,
-                                created_sessions: 20_000,
-                                packets: 300_000,
-                                bytes: 366_503_875,
-                            }),
-                        },
-                    ],
-                },
-                balancerpb::NamedVsStats {
-                    vs: Some(balancerpb::VsIdentifier {
-                        addr: Some(balancerpb::Addr { bytes: vec![192, 0, 2, 2] }),
-                        port: 443,
-                        proto: balancerpb::TransportProto::Tcp as i32,
-                    }),
-                    stats: Some(balancerpb::VsStats {
-                        incoming_packets: 400_000,
-                        incoming_bytes: 400_000_000,
-                        packet_src_not_allowed: 0,
-                        no_reals: 0,
-                        ops_packets: 0,
-                        session_table_overflow: 0,
-                        echo_icmp_packets: 0,
-                        error_icmp_packets: 0,
-                        real_is_disabled: 0,
-                        real_is_removed: 0,
-                        not_rescheduled_packets: 0,
-                        broadcasted_icmp_packets: 0,
-                        created_sessions: 25_000,
-                        outgoing_packets: 400_000,
-                        outgoing_bytes: 400_000_000,
-                    }),
-                    allowed_sources: vec![
-                        // Tag 0 (no tag) doesn't appear in stats
-                        balancerpb::AllowedSourcesStats {
-                            tag: "300".to_string(),
-                            passes: 400_000,
-                        },
-                    ],
-                    reals: vec![balancerpb::NamedRealStats {
-                        real: Some(balancerpb::RealIdentifier {
+                        balancerpb::NamedVsStats {
                             vs: Some(balancerpb::VsIdentifier {
                                 addr: Some(balancerpb::Addr { bytes: vec![192, 0, 2, 2] }),
                                 port: 443,
                                 proto: balancerpb::TransportProto::Tcp as i32,
                             }),
-                            real: Some(balancerpb::RelativeRealIdentifier {
-                                ip: Some(balancerpb::Addr { bytes: vec![10, 2, 1, 1] }),
-                                port: 443,
-                            }),
-                        }),
-                        stats: Some(balancerpb::RealStats {
-                            packets_real_disabled: 0,
-                            ops_packets: 0,
-                            error_icmp_packets: 0,
-                            created_sessions: 25_000,
-                            packets: 400_000,
-                            bytes: 503_316_480,
-                        }),
-                    }],
-                },
-                balancerpb::NamedVsStats {
-                    vs: Some(balancerpb::VsIdentifier {
-                        addr: Some(balancerpb::Addr {
-                            bytes: vec![0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
-                        }),
-                        port: 443,
-                        proto: balancerpb::TransportProto::Tcp as i32,
-                    }),
-                    stats: Some(balancerpb::VsStats {
-                        incoming_packets: 300_000,
-                        incoming_bytes: 300_000_000,
-                        packet_src_not_allowed: 0,
-                        no_reals: 0,
-                        ops_packets: 0,
-                        session_table_overflow: 0,
-                        echo_icmp_packets: 0,
-                        error_icmp_packets: 0,
-                        real_is_disabled: 0,
-                        real_is_removed: 0,
-                        not_rescheduled_packets: 0,
-                        broadcasted_icmp_packets: 0,
-                        created_sessions: 15_000,
-                        outgoing_packets: 300_000,
-                        outgoing_bytes: 300_000_000,
-                    }),
-                    allowed_sources: vec![balancerpb::AllowedSourcesStats {
-                        tag: "400".to_string(),
-                        passes: 300_000,
-                    }],
-                    reals: vec![
-                        balancerpb::NamedRealStats {
-                            real: Some(balancerpb::RealIdentifier {
-                                vs: Some(balancerpb::VsIdentifier {
-                                    addr: Some(balancerpb::Addr {
-                                        bytes: vec![0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
-                                    }),
-                                    port: 443,
-                                    proto: balancerpb::TransportProto::Tcp as i32,
-                                }),
-                                real: Some(balancerpb::RelativeRealIdentifier {
-                                    ip: Some(balancerpb::Addr {
-                                        bytes: vec![0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x10, 1],
-                                    }),
-                                    port: 443,
-                                }),
-                            }),
-                            stats: Some(balancerpb::RealStats {
-                                packets_real_disabled: 0,
+                            stats: Some(balancerpb::VsStats {
+                                incoming_packets: 400_000,
+                                incoming_bytes: 400_000_000,
+                                packet_src_not_allowed: 0,
+                                no_reals: 0,
                                 ops_packets: 0,
+                                session_table_overflow: 0,
+                                echo_icmp_packets: 0,
                                 error_icmp_packets: 0,
-                                created_sessions: 7_500,
-                                packets: 150_000,
-                                bytes: 150_000_000,
+                                real_is_disabled: 0,
+                                real_is_removed: 0,
+                                not_rescheduled_packets: 0,
+                                broadcasted_icmp_packets: 0,
+                                created_sessions: 25_000,
+                                outgoing_packets: 400_000,
+                                outgoing_bytes: 400_000_000,
                             }),
+                            allowed_sources: vec![
+                                // Tag 0 (no tag) doesn't appear in stats
+                                balancerpb::AllowedSourcesStats {
+                                    tag: "300".to_string(),
+                                    passes: 400_000,
+                                },
+                            ],
+                            reals: vec![balancerpb::NamedRealStats {
+                                real: Some(balancerpb::RealIdentifier {
+                                    vs: Some(balancerpb::VsIdentifier {
+                                        addr: Some(balancerpb::Addr { bytes: vec![192, 0, 2, 2] }),
+                                        port: 443,
+                                        proto: balancerpb::TransportProto::Tcp as i32,
+                                    }),
+                                    real: Some(balancerpb::RelativeRealIdentifier {
+                                        ip: Some(balancerpb::Addr { bytes: vec![10, 2, 1, 1] }),
+                                        port: 443,
+                                    }),
+                                }),
+                                stats: Some(balancerpb::RealStats {
+                                    packets_real_disabled: 0,
+                                    ops_packets: 0,
+                                    error_icmp_packets: 0,
+                                    created_sessions: 25_000,
+                                    packets: 400_000,
+                                    bytes: 503_316_480,
+                                }),
+                            }],
                         },
-                        balancerpb::NamedRealStats {
-                            real: Some(balancerpb::RealIdentifier {
-                                vs: Some(balancerpb::VsIdentifier {
-                                    addr: Some(balancerpb::Addr {
-                                        bytes: vec![0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
-                                    }),
-                                    port: 443,
-                                    proto: balancerpb::TransportProto::Tcp as i32,
+                        balancerpb::NamedVsStats {
+                            vs: Some(balancerpb::VsIdentifier {
+                                addr: Some(balancerpb::Addr {
+                                    bytes: vec![0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
                                 }),
-                                real: Some(balancerpb::RelativeRealIdentifier {
-                                    ip: Some(balancerpb::Addr {
-                                        bytes: vec![0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x10, 2],
-                                    }),
-                                    port: 443,
-                                }),
+                                port: 443,
+                                proto: balancerpb::TransportProto::Tcp as i32,
                             }),
-                            stats: Some(balancerpb::RealStats {
-                                packets_real_disabled: 0,
+                            stats: Some(balancerpb::VsStats {
+                                incoming_packets: 300_000,
+                                incoming_bytes: 300_000_000,
+                                packet_src_not_allowed: 0,
+                                no_reals: 0,
                                 ops_packets: 0,
+                                session_table_overflow: 0,
+                                echo_icmp_packets: 0,
                                 error_icmp_packets: 0,
-                                created_sessions: 7_500,
-                                packets: 150_000,
-                                bytes: 150_000_000,
+                                real_is_disabled: 0,
+                                real_is_removed: 0,
+                                not_rescheduled_packets: 0,
+                                broadcasted_icmp_packets: 0,
+                                created_sessions: 15_000,
+                                outgoing_packets: 300_000,
+                                outgoing_bytes: 300_000_000,
                             }),
+                            allowed_sources: vec![balancerpb::AllowedSourcesStats {
+                                tag: "400".to_string(),
+                                passes: 300_000,
+                            }],
+                            reals: vec![
+                                balancerpb::NamedRealStats {
+                                    real: Some(balancerpb::RealIdentifier {
+                                        vs: Some(balancerpb::VsIdentifier {
+                                            addr: Some(balancerpb::Addr {
+                                                bytes: vec![0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+                                            }),
+                                            port: 443,
+                                            proto: balancerpb::TransportProto::Tcp as i32,
+                                        }),
+                                        real: Some(balancerpb::RelativeRealIdentifier {
+                                            ip: Some(balancerpb::Addr {
+                                                bytes: vec![
+                                                    0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x10, 1,
+                                                ],
+                                            }),
+                                            port: 443,
+                                        }),
+                                    }),
+                                    stats: Some(balancerpb::RealStats {
+                                        packets_real_disabled: 0,
+                                        ops_packets: 0,
+                                        error_icmp_packets: 0,
+                                        created_sessions: 7_500,
+                                        packets: 150_000,
+                                        bytes: 150_000_000,
+                                    }),
+                                },
+                                balancerpb::NamedRealStats {
+                                    real: Some(balancerpb::RealIdentifier {
+                                        vs: Some(balancerpb::VsIdentifier {
+                                            addr: Some(balancerpb::Addr {
+                                                bytes: vec![0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+                                            }),
+                                            port: 443,
+                                            proto: balancerpb::TransportProto::Tcp as i32,
+                                        }),
+                                        real: Some(balancerpb::RelativeRealIdentifier {
+                                            ip: Some(balancerpb::Addr {
+                                                bytes: vec![
+                                                    0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x10, 2,
+                                                ],
+                                            }),
+                                            port: 443,
+                                        }),
+                                    }),
+                                    stats: Some(balancerpb::RealStats {
+                                        packets_real_disabled: 0,
+                                        ops_packets: 0,
+                                        error_icmp_packets: 0,
+                                        created_sessions: 7_500,
+                                        packets: 150_000,
+                                        bytes: 150_000_000,
+                                    }),
+                                },
+                            ],
                         },
                     ],
-                },
-            ],
-        }),
+                }),
+            },
+            balancerpb::StatsEntry {
+                name: "test-balancer".to_string(),
+                r#ref: Some(balancerpb::PacketHandlerRef {
+                    device: Some("eth1".to_string()),
+                    pipeline: Some("main".to_string()),
+                    function: Some("balancer".to_string()),
+                    chain: Some("forward".to_string()),
+                }),
+                stats: Some(balancerpb::BalancerStats {
+                    l4: Some(balancerpb::L4Stats {
+                        incoming_packets: 10_000,
+                        select_vs_failed: 0,
+                        invalid_packets: 0,
+                        select_real_failed: 0,
+                        outgoing_packets: 10_000,
+                    }),
+                    icmpv4: None,
+                    icmpv6: None,
+                    common: Some(balancerpb::CommonStats {
+                        incoming_packets: 10_000,
+                        incoming_bytes: 10_000_000,
+                        unexpected_network_proto: 0,
+                        decap_successful: 0,
+                        decap_failed: 0,
+                        outgoing_packets: 10_000,
+                        outgoing_bytes: 10_000_000,
+                    }),
+                    vs: vec![],
+                }),
+            },
+        ],
     }
 }
 

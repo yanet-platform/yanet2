@@ -277,26 +277,29 @@ func (m *BalancerService) ShowInfo(
 
 ////////////////////////////////////////////////////////////////////////////////
 
-// ShowStats returns stats of the balancer config
+/*
+ShowStats returns stats for balancer dataplane positions.
+
+Behavior:
+- If req.name is specified: only positions belonging to that balancer instance are considered.
+- If req.name is not specified: positions for all balancer instances are considered.
+- PacketHandlerRef fields are filters (strict equality on specified fields).
+
+The enumeration pattern matches [`BalancerAgent.Metrics()`](modules/balancer/agent/go/agent.go:146):
+we enumerate all balancer positions from DPConfig and then pick the manager per position.
+*/
 func (m *BalancerService) ShowStats(
 	ctx context.Context,
 	req *balancerpb.ShowStatsRequest,
 ) (*balancerpb.ShowStatsResponse, error) {
-	manager, name, err := m.getManagerWithAutoSelection(req.Name)
-	if err != nil {
-		return nil, err
-	}
-
-	stats, err := manager.Stats(req.Ref)
+	entries, err := m.agent.StatsEntries(req.Name, req.Ref)
 	if err != nil {
 		msg := fmt.Sprintf("failed to get stats: %v", err)
 		return nil, status.Error(codes.Internal, msg)
 	}
 
 	return &balancerpb.ShowStatsResponse{
-		Name:  name,
-		Ref:   req.Ref,
-		Stats: stats,
+		Entries: entries,
 	}, nil
 }
 

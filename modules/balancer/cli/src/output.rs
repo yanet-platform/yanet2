@@ -1037,259 +1037,273 @@ pub fn print_show_stats(response: &balancerpb::ShowStatsResponse, format: Output
 fn print_show_stats_tree(response: &balancerpb::ShowStatsResponse) -> Result<(), Box<dyn Error>> {
     let mut tree = TreeBuilder::new("Balancer Statistics".to_string());
 
-    // Ref section with topology information
-    tree.begin_child("[0]".cyan().to_string());
-    tree.add_empty_child(format!("Config: {}", response.name));
-    if let Some(ref_info) = &response.r#ref {
-        if let Some(device) = &ref_info.device {
-            tree.add_empty_child(format!("Device: {}", device));
-        }
-        if let Some(pipeline) = &ref_info.pipeline {
-            tree.add_empty_child(format!("Pipeline: {}", pipeline));
-        }
-        if let Some(function) = &ref_info.function {
-            tree.add_empty_child(format!("Function: {}", function));
-        }
-        if let Some(chain) = &ref_info.chain {
-            tree.add_empty_child(format!("Chain: {}", chain));
-        }
-    }
+    for (entry_idx, entry) in response.entries.iter().enumerate() {
+        tree.begin_child(format!("[{}]", entry_idx).cyan().to_string());
+        tree.add_empty_child(format!("Config: {}", entry.name));
 
-    if let Some(stats) = &response.stats {
-        // Module stats (split into components)
-        tree.begin_child("Module".to_string());
-
-        if let Some(common) = &stats.common {
-            tree.begin_child("Common".to_string());
-            tree.add_empty_child(format!("Incoming Packets: {}", format_number(common.incoming_packets)));
-            tree.add_empty_child(format!("Incoming Bytes: {}", format_bytes(common.incoming_bytes)));
-            tree.add_empty_child(format!(
-                "Unexpected Network Proto: {}",
-                format_number(common.unexpected_network_proto)
-            ));
-            tree.add_empty_child(format!("Decap Successful: {}", format_number(common.decap_successful)));
-            tree.add_empty_child(format!("Decap Failed: {}", format_number(common.decap_failed)));
-            tree.add_empty_child(format!("Outgoing Packets: {}", format_number(common.outgoing_packets)));
-            tree.add_empty_child(format!("Outgoing Bytes: {}", format_bytes(common.outgoing_bytes)));
-            tree.end_child();
+        if let Some(ref_info) = &entry.r#ref {
+            if let Some(device) = &ref_info.device {
+                tree.add_empty_child(format!("Device: {}", device));
+            }
+            if let Some(pipeline) = &ref_info.pipeline {
+                tree.add_empty_child(format!("Pipeline: {}", pipeline));
+            }
+            if let Some(function) = &ref_info.function {
+                tree.add_empty_child(format!("Function: {}", function));
+            }
+            if let Some(chain) = &ref_info.chain {
+                tree.add_empty_child(format!("Chain: {}", chain));
+            }
         }
 
-        if let Some(l4) = &stats.l4 {
-            tree.begin_child("L4".to_string());
-            tree.add_empty_child(format!("Incoming Packets: {}", format_number(l4.incoming_packets)));
-            tree.add_empty_child(format!("Outgoing Packets: {}", format_number(l4.outgoing_packets)));
-            tree.add_empty_child(format!("Select VS Failed: {}", format_number(l4.select_vs_failed)));
-            tree.add_empty_child(format!("Select Real Failed: {}", format_number(l4.select_real_failed)));
-            tree.add_empty_child(format!("Invalid Packets: {}", format_number(l4.invalid_packets)));
-            tree.end_child();
-        }
+        if let Some(stats) = &entry.stats {
+            // Module stats (split into components)
+            tree.begin_child("Module".to_string());
 
-        if let Some(icmpv4) = &stats.icmpv4 {
-            tree.begin_child("ICMPv4".to_string());
-            tree.add_empty_child(format!("Incoming Packets: {}", format_number(icmpv4.incoming_packets)));
-            tree.add_empty_child(format!("Src Not Allowed: {}", format_number(icmpv4.src_not_allowed)));
-            tree.add_empty_child(format!("Echo Responses: {}", format_number(icmpv4.echo_responses)));
-            tree.add_empty_child(format!(
-                "Payload Too Short IP: {}",
-                format_number(icmpv4.payload_too_short_ip)
-            ));
-            tree.add_empty_child(format!(
-                "Unmatching Src From Original: {}",
-                format_number(icmpv4.unmatching_src_from_original)
-            ));
-            tree.add_empty_child(format!(
-                "Payload Too Short Port: {}",
-                format_number(icmpv4.payload_too_short_port)
-            ));
-            tree.add_empty_child(format!(
-                "Unexpected Transport: {}",
-                format_number(icmpv4.unexpected_transport)
-            ));
-            tree.add_empty_child(format!("Unrecognized VS: {}", format_number(icmpv4.unrecognized_vs)));
-            tree.add_empty_child(format!(
-                "Forwarded Packets: {}",
-                format_number(icmpv4.forwarded_packets)
-            ));
-            tree.add_empty_child(format!(
-                "Broadcasted Packets: {}",
-                format_number(icmpv4.broadcasted_packets)
-            ));
-            tree.add_empty_child(format!(
-                "Packet Clones Sent: {}",
-                format_number(icmpv4.packet_clones_sent)
-            ));
-            tree.add_empty_child(format!(
-                "Packet Clones Received: {}",
-                format_number(icmpv4.packet_clones_received)
-            ));
-            tree.add_empty_child(format!(
-                "Packet Clone Failures: {}",
-                format_number(icmpv4.packet_clone_failures)
-            ));
-            tree.end_child();
-        }
+            if let Some(common) = &stats.common {
+                tree.begin_child("Common".to_string());
+                tree.add_empty_child(format!("Incoming Packets: {}", format_number(common.incoming_packets)));
+                tree.add_empty_child(format!("Incoming Bytes: {}", format_bytes(common.incoming_bytes)));
+                tree.add_empty_child(format!(
+                    "Unexpected Network Proto: {}",
+                    format_number(common.unexpected_network_proto)
+                ));
+                tree.add_empty_child(format!("Decap Successful: {}", format_number(common.decap_successful)));
+                tree.add_empty_child(format!("Decap Failed: {}", format_number(common.decap_failed)));
+                tree.add_empty_child(format!("Outgoing Packets: {}", format_number(common.outgoing_packets)));
+                tree.add_empty_child(format!("Outgoing Bytes: {}", format_bytes(common.outgoing_bytes)));
+                tree.end_child();
+            }
 
-        if let Some(icmpv6) = &stats.icmpv6 {
-            tree.begin_child("ICMPv6".to_string());
-            tree.add_empty_child(format!("Incoming Packets: {}", format_number(icmpv6.incoming_packets)));
-            tree.add_empty_child(format!("Src Not Allowed: {}", format_number(icmpv6.src_not_allowed)));
-            tree.add_empty_child(format!("Echo Responses: {}", format_number(icmpv6.echo_responses)));
-            tree.add_empty_child(format!(
-                "Payload Too Short IP: {}",
-                format_number(icmpv6.payload_too_short_ip)
-            ));
-            tree.add_empty_child(format!(
-                "Unmatching Src From Original: {}",
-                format_number(icmpv6.unmatching_src_from_original)
-            ));
-            tree.add_empty_child(format!(
-                "Payload Too Short Port: {}",
-                format_number(icmpv6.payload_too_short_port)
-            ));
-            tree.add_empty_child(format!(
-                "Unexpected Transport: {}",
-                format_number(icmpv6.unexpected_transport)
-            ));
-            tree.add_empty_child(format!("Unrecognized VS: {}", format_number(icmpv6.unrecognized_vs)));
-            tree.add_empty_child(format!(
-                "Forwarded Packets: {}",
-                format_number(icmpv6.forwarded_packets)
-            ));
-            tree.add_empty_child(format!(
-                "Broadcasted Packets: {}",
-                format_number(icmpv6.broadcasted_packets)
-            ));
-            tree.add_empty_child(format!(
-                "Packet Clones Sent: {}",
-                format_number(icmpv6.packet_clones_sent)
-            ));
-            tree.add_empty_child(format!(
-                "Packet Clones Received: {}",
-                format_number(icmpv6.packet_clones_received)
-            ));
-            tree.add_empty_child(format!(
-                "Packet Clone Failures: {}",
-                format_number(icmpv6.packet_clone_failures)
-            ));
-            tree.end_child();
-        }
+            if let Some(l4) = &stats.l4 {
+                tree.begin_child("L4".to_string());
+                tree.add_empty_child(format!("Incoming Packets: {}", format_number(l4.incoming_packets)));
+                tree.add_empty_child(format!("Outgoing Packets: {}", format_number(l4.outgoing_packets)));
+                tree.add_empty_child(format!("Select VS Failed: {}", format_number(l4.select_vs_failed)));
+                tree.add_empty_child(format!("Select Real Failed: {}", format_number(l4.select_real_failed)));
+                tree.add_empty_child(format!("Invalid Packets: {}", format_number(l4.invalid_packets)));
+                tree.end_child();
+            }
 
-        tree.end_child();
+            if let Some(icmpv4) = &stats.icmpv4 {
+                tree.begin_child("ICMPv4".to_string());
+                tree.add_empty_child(format!("Incoming Packets: {}", format_number(icmpv4.incoming_packets)));
+                tree.add_empty_child(format!("Src Not Allowed: {}", format_number(icmpv4.src_not_allowed)));
+                tree.add_empty_child(format!("Echo Responses: {}", format_number(icmpv4.echo_responses)));
+                tree.add_empty_child(format!(
+                    "Payload Too Short IP: {}",
+                    format_number(icmpv4.payload_too_short_ip)
+                ));
+                tree.add_empty_child(format!(
+                    "Unmatching Src From Original: {}",
+                    format_number(icmpv4.unmatching_src_from_original)
+                ));
+                tree.add_empty_child(format!(
+                    "Payload Too Short Port: {}",
+                    format_number(icmpv4.payload_too_short_port)
+                ));
+                tree.add_empty_child(format!(
+                    "Unexpected Transport: {}",
+                    format_number(icmpv4.unexpected_transport)
+                ));
+                tree.add_empty_child(format!("Unrecognized VS: {}", format_number(icmpv4.unrecognized_vs)));
+                tree.add_empty_child(format!(
+                    "Forwarded Packets: {}",
+                    format_number(icmpv4.forwarded_packets)
+                ));
+                tree.add_empty_child(format!(
+                    "Broadcasted Packets: {}",
+                    format_number(icmpv4.broadcasted_packets)
+                ));
+                tree.add_empty_child(format!(
+                    "Packet Clones Sent: {}",
+                    format_number(icmpv4.packet_clones_sent)
+                ));
+                tree.add_empty_child(format!(
+                    "Packet Clones Received: {}",
+                    format_number(icmpv4.packet_clones_received)
+                ));
+                tree.add_empty_child(format!(
+                    "Packet Clone Failures: {}",
+                    format_number(icmpv4.packet_clone_failures)
+                ));
+                tree.end_child();
+            }
 
-        // VS stats
-        if !stats.vs.is_empty() {
-            tree.begin_child(format!("Virtual Services ({})", stats.vs.len()));
-            for (vs_idx, vs) in stats.vs.iter().enumerate() {
-                if let Some(vs_id) = &vs.vs {
-                    if let Ok(ip) = opt_addr_to_ip(&vs_id.addr) {
-                        tree.begin_child(format!("[{}]", vs_idx).cyan().to_string());
-                        tree.add_empty_child(format!("VS: {}", format_vs(ip, vs_id.port, vs_id.proto)));
-                        if let Some(s) = &vs.stats {
-                            tree.add_empty_child(format!(
-                                "Incoming: {} pkts, {}",
-                                format_number(s.incoming_packets),
-                                format_bytes(s.incoming_bytes)
-                            ));
-                            tree.add_empty_child(format!(
-                                "Outgoing: {} pkts, {}",
-                                format_number(s.outgoing_packets),
-                                format_bytes(s.outgoing_bytes)
-                            ));
-                            tree.add_empty_child(format!("Created Sessions: {}", format_number(s.created_sessions)));
-                            tree.add_empty_child(format!(
-                                "Packet Src Not Allowed: {}",
-                                format_number(s.packet_src_not_allowed)
-                            ));
-                            tree.add_empty_child(format!("No Reals: {}", format_number(s.no_reals)));
-                            tree.add_empty_child(format!("OPS Packets: {}", format_number(s.ops_packets)));
-                            tree.add_empty_child(format!(
-                                "Session Table Overflow: {}",
-                                format_number(s.session_table_overflow)
-                            ));
-                            tree.add_empty_child(format!("Echo ICMP Packets: {}", format_number(s.echo_icmp_packets)));
-                            tree.add_empty_child(format!(
-                                "Error ICMP Packets: {}",
-                                format_number(s.error_icmp_packets)
-                            ));
-                            tree.add_empty_child(format!("Real Is Disabled: {}", format_number(s.real_is_disabled)));
-                            tree.add_empty_child(format!("Real Is Removed: {}", format_number(s.real_is_removed)));
-                            tree.add_empty_child(format!(
-                                "Not Rescheduled Packets: {}",
-                                format_number(s.not_rescheduled_packets)
-                            ));
-                            tree.add_empty_child(format!(
-                                "Broadcasted ICMP Packets: {}",
-                                format_number(s.broadcasted_icmp_packets)
-                            ));
-                        }
+            if let Some(icmpv6) = &stats.icmpv6 {
+                tree.begin_child("ICMPv6".to_string());
+                tree.add_empty_child(format!("Incoming Packets: {}", format_number(icmpv6.incoming_packets)));
+                tree.add_empty_child(format!("Src Not Allowed: {}", format_number(icmpv6.src_not_allowed)));
+                tree.add_empty_child(format!("Echo Responses: {}", format_number(icmpv6.echo_responses)));
+                tree.add_empty_child(format!(
+                    "Payload Too Short IP: {}",
+                    format_number(icmpv6.payload_too_short_ip)
+                ));
+                tree.add_empty_child(format!(
+                    "Unmatching Src From Original: {}",
+                    format_number(icmpv6.unmatching_src_from_original)
+                ));
+                tree.add_empty_child(format!(
+                    "Payload Too Short Port: {}",
+                    format_number(icmpv6.payload_too_short_port)
+                ));
+                tree.add_empty_child(format!(
+                    "Unexpected Transport: {}",
+                    format_number(icmpv6.unexpected_transport)
+                ));
+                tree.add_empty_child(format!("Unrecognized VS: {}", format_number(icmpv6.unrecognized_vs)));
+                tree.add_empty_child(format!(
+                    "Forwarded Packets: {}",
+                    format_number(icmpv6.forwarded_packets)
+                ));
+                tree.add_empty_child(format!(
+                    "Broadcasted Packets: {}",
+                    format_number(icmpv6.broadcasted_packets)
+                ));
+                tree.add_empty_child(format!(
+                    "Packet Clones Sent: {}",
+                    format_number(icmpv6.packet_clones_sent)
+                ));
+                tree.add_empty_child(format!(
+                    "Packet Clones Received: {}",
+                    format_number(icmpv6.packet_clones_received)
+                ));
+                tree.add_empty_child(format!(
+                    "Packet Clone Failures: {}",
+                    format_number(icmpv6.packet_clone_failures)
+                ));
+                tree.end_child();
+            }
 
-                        // Real stats
-                        if !vs.reals.is_empty() {
-                            tree.begin_child(format!("Reals ({})", vs.reals.len()));
-                            for (real_idx, real) in vs.reals.iter().enumerate() {
-                                if let Some(real_id) = &real.real {
-                                    if let Some(rel_real) = &real_id.real {
-                                        if let Ok(real_ip) = opt_addr_to_ip(&rel_real.ip) {
-                                            tree.begin_child(format!("[{}]", real_idx).cyan().to_string());
-                                            tree.add_empty_child(format!(
-                                                "Real: {}",
-                                                format_real(real_ip, rel_real.port as u16)
-                                            ));
-                                            if let Some(s) = &real.stats {
-                                                tree.add_empty_child(format!("Packets: {}", format_number(s.packets)));
-                                                tree.add_empty_child(format!("Bytes: {}", format_bytes(s.bytes)));
+            tree.end_child(); // Module
+
+            // VS stats
+            if !stats.vs.is_empty() {
+                tree.begin_child(format!("Virtual Services ({})", stats.vs.len()));
+                for (vs_idx, vs) in stats.vs.iter().enumerate() {
+                    if let Some(vs_id) = &vs.vs {
+                        if let Ok(ip) = opt_addr_to_ip(&vs_id.addr) {
+                            tree.begin_child(format!("[{}]", vs_idx).cyan().to_string());
+                            tree.add_empty_child(format!("VS: {}", format_vs(ip, vs_id.port, vs_id.proto)));
+                            if let Some(s) = &vs.stats {
+                                tree.add_empty_child(format!(
+                                    "Incoming: {} pkts, {}",
+                                    format_number(s.incoming_packets),
+                                    format_bytes(s.incoming_bytes)
+                                ));
+                                tree.add_empty_child(format!(
+                                    "Outgoing: {} pkts, {}",
+                                    format_number(s.outgoing_packets),
+                                    format_bytes(s.outgoing_bytes)
+                                ));
+                                tree.add_empty_child(format!(
+                                    "Created Sessions: {}",
+                                    format_number(s.created_sessions)
+                                ));
+                                tree.add_empty_child(format!(
+                                    "Packet Src Not Allowed: {}",
+                                    format_number(s.packet_src_not_allowed)
+                                ));
+                                tree.add_empty_child(format!("No Reals: {}", format_number(s.no_reals)));
+                                tree.add_empty_child(format!("OPS Packets: {}", format_number(s.ops_packets)));
+                                tree.add_empty_child(format!(
+                                    "Session Table Overflow: {}",
+                                    format_number(s.session_table_overflow)
+                                ));
+                                tree.add_empty_child(format!(
+                                    "Echo ICMP Packets: {}",
+                                    format_number(s.echo_icmp_packets)
+                                ));
+                                tree.add_empty_child(format!(
+                                    "Error ICMP Packets: {}",
+                                    format_number(s.error_icmp_packets)
+                                ));
+                                tree.add_empty_child(format!(
+                                    "Real Is Disabled: {}",
+                                    format_number(s.real_is_disabled)
+                                ));
+                                tree.add_empty_child(format!("Real Is Removed: {}", format_number(s.real_is_removed)));
+                                tree.add_empty_child(format!(
+                                    "Not Rescheduled Packets: {}",
+                                    format_number(s.not_rescheduled_packets)
+                                ));
+                                tree.add_empty_child(format!(
+                                    "Broadcasted ICMP Packets: {}",
+                                    format_number(s.broadcasted_icmp_packets)
+                                ));
+                            }
+
+                            // Real stats
+                            if !vs.reals.is_empty() {
+                                tree.begin_child(format!("Reals ({})", vs.reals.len()));
+                                for (real_idx, real) in vs.reals.iter().enumerate() {
+                                    if let Some(real_id) = &real.real {
+                                        if let Some(rel_real) = &real_id.real {
+                                            if let Ok(real_ip) = opt_addr_to_ip(&rel_real.ip) {
+                                                tree.begin_child(format!("[{}]", real_idx).cyan().to_string());
                                                 tree.add_empty_child(format!(
-                                                    "Created Sessions: {}",
-                                                    format_number(s.created_sessions)
+                                                    "Real: {}",
+                                                    format_real(real_ip, rel_real.port as u16)
                                                 ));
-                                                tree.add_empty_child(format!(
-                                                    "Packets Real Disabled: {}",
-                                                    format_number(s.packets_real_disabled)
-                                                ));
-                                                tree.add_empty_child(format!(
-                                                    "OPS Packets: {}",
-                                                    format_number(s.ops_packets)
-                                                ));
-                                                tree.add_empty_child(format!(
-                                                    "Error ICMP Packets: {}",
-                                                    format_number(s.error_icmp_packets)
-                                                ));
+                                                if let Some(s) = &real.stats {
+                                                    tree.add_empty_child(format!(
+                                                        "Packets: {}",
+                                                        format_number(s.packets)
+                                                    ));
+                                                    tree.add_empty_child(format!("Bytes: {}", format_bytes(s.bytes)));
+                                                    tree.add_empty_child(format!(
+                                                        "Created Sessions: {}",
+                                                        format_number(s.created_sessions)
+                                                    ));
+                                                    tree.add_empty_child(format!(
+                                                        "Packets Real Disabled: {}",
+                                                        format_number(s.packets_real_disabled)
+                                                    ));
+                                                    tree.add_empty_child(format!(
+                                                        "OPS Packets: {}",
+                                                        format_number(s.ops_packets)
+                                                    ));
+                                                    tree.add_empty_child(format!(
+                                                        "Error ICMP Packets: {}",
+                                                        format_number(s.error_icmp_packets)
+                                                    ));
+                                                }
+                                                tree.end_child();
                                             }
-                                            tree.end_child();
                                         }
                                     }
                                 }
+                                tree.end_child();
                             }
-                            tree.end_child();
-                        }
 
-                        // Allowed sources stats
-                        if !vs.allowed_sources.is_empty() {
-                            tree.begin_child("Allowed Sources".to_string());
-                            for allowed_src in &vs.allowed_sources {
-                                let tag_str = if allowed_src.tag.is_empty() {
-                                    "None".to_string()
-                                } else {
-                                    allowed_src.tag.clone()
-                                };
-                                tree.add_empty_child(format!(
-                                    "Tag {}: {} passes",
-                                    tag_str,
-                                    format_number(allowed_src.passes)
-                                ));
+                            // Allowed sources stats
+                            if !vs.allowed_sources.is_empty() {
+                                tree.begin_child("Allowed Sources".to_string());
+                                for allowed_src in &vs.allowed_sources {
+                                    let tag_str = if allowed_src.tag.is_empty() {
+                                        "None".to_string()
+                                    } else {
+                                        allowed_src.tag.clone()
+                                    };
+                                    tree.add_empty_child(format!(
+                                        "Tag {}: {} passes",
+                                        tag_str,
+                                        format_number(allowed_src.passes)
+                                    ));
+                                }
+                                tree.end_child();
                             }
-                            tree.end_child();
-                        }
 
-                        tree.end_child();
+                            tree.end_child(); // VS
+                        }
                     }
                 }
+                tree.end_child();
             }
-            tree.end_child();
         }
-    }
 
-    tree.end_child(); // Close Ref section
+        tree.end_child(); // entry
+    }
 
     let tree = tree.build();
     ptree::print_tree(&tree)?;
@@ -1297,23 +1311,38 @@ fn print_show_stats_tree(response: &balancerpb::ShowStatsResponse) -> Result<(),
 }
 
 fn print_show_stats_table(response: &balancerpb::ShowStatsResponse) -> Result<(), Box<dyn Error>> {
-    // Print header with topology info and config name as two-line subtitle
-    let subtitle = if let Some(ref_info) = &response.r#ref {
-        format!(
-            "Config: {} | Device: {}\nPipeline: {} | Function: {} | Chain: {}",
-            response.name,
-            ref_info.device.as_deref().unwrap_or("N/A"),
-            ref_info.pipeline.as_deref().unwrap_or("N/A"),
-            ref_info.function.as_deref().unwrap_or("N/A"),
-            ref_info.chain.as_deref().unwrap_or("N/A"),
-        )
-    } else {
-        format!("Config: {}", response.name)
-    };
-    print_boxed_header("BALANCER STATISTICS", Some(&subtitle));
-    println!();
+    if response.entries.is_empty() {
+        print_boxed_header("BALANCER STATISTICS", Some("Entries: 0"));
+        println!();
+        return Ok(());
+    }
 
-    if let Some(stats) = &response.stats {
+    for (idx, entry) in response.entries.iter().enumerate() {
+        if idx > 0 {
+            println!("{}", "─".repeat(80).bright_black());
+            println!();
+        }
+
+        // Print header with topology info and config name as two-line subtitle
+        let subtitle = if let Some(ref_info) = &entry.r#ref {
+            format!(
+                "Config: {} | Device: {}\nPipeline: {} | Function: {} | Chain: {}",
+                entry.name,
+                ref_info.device.as_deref().unwrap_or("N/A"),
+                ref_info.pipeline.as_deref().unwrap_or("N/A"),
+                ref_info.function.as_deref().unwrap_or("N/A"),
+                ref_info.chain.as_deref().unwrap_or("N/A"),
+            )
+        } else {
+            format!("Config: {}", entry.name)
+        };
+        print_boxed_header("BALANCER STATISTICS", Some(&subtitle));
+        println!();
+
+        let Some(stats) = &entry.stats else {
+            continue;
+        };
+
         println!("{}", "Module:".bright_yellow().bold());
 
         #[derive(Tabled)]
