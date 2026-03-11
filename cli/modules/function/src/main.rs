@@ -1,57 +1,19 @@
 //! CLI for YANET "function" module.
 
 use core::error::Error;
-use std::str::FromStr;
 
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
-use code::{
-    function_service_client::FunctionServiceClient, Chain, DeleteFunctionRequest, Function, FunctionChain,
-    UpdateFunctionRequest,
-};
-use commonpb::pb::{FunctionId, ModuleId};
+use commonpb::pb::FunctionId;
 use tonic::codec::CompressionEncoding;
 use ync::{
     client::{ConnectionArgs, LayeredChannel},
     logging,
 };
-
-#[allow(non_snake_case)]
-pub mod code {
-    tonic::include_proto!("ynpb");
-}
-
-impl FromStr for FunctionChain {
-    type Err = Box<dyn Error>;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let (chain_part, modules_part) = s
-            .split_once('=')
-            .ok_or_else(|| format!("invalid chain format: expected 'name:weight=modules', got {s:?}"))?;
-        let (name, weight) = chain_part
-            .split_once(':')
-            .ok_or_else(|| format!("invalid chain format: expected 'name:weight', got {chain_part:?}"))?;
-        let weight = weight
-            .parse::<u64>()
-            .map_err(|e| format!("invalid chain weight {weight:?}: {e}"))?;
-        let modules = modules_part
-            .split(',')
-            .map(|m| -> Result<ModuleId, Box<dyn Error>> {
-                let (r#type, name) = m
-                    .split_once(':')
-                    .ok_or_else(|| format!("invalid module format: expected 'module_type:config_name', got {m:?}"))?;
-                Ok(ModuleId {
-                    r#type: r#type.to_string(),
-                    name: name.to_string(),
-                })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(FunctionChain {
-            weight,
-            chain: Some(Chain { name: name.to_string(), modules }),
-        })
-    }
-}
+use ynpb::pb::{
+    function_service_client::FunctionServiceClient, DeleteFunctionRequest, Function, FunctionChain,
+    UpdateFunctionRequest,
+};
 
 /// Function module.
 #[derive(Debug, Clone, Parser)]

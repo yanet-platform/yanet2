@@ -4,6 +4,7 @@ resolver = "2"
 
 members = [
     "common/rust/commonpb",
+    "common/rust/ynpb",
     "cli/core",
     "cli/modules/common",
     "cli/modules/inspect",

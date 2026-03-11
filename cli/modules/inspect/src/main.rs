@@ -4,20 +4,13 @@ use core::error::Error;
 
 use clap::{ArgAction, CommandFactory, Parser, ValueEnum};
 use clap_complete::CompleteEnv;
-use code::{inspect_service_client::InspectServiceClient, InspectRequest};
 use ptree::TreeBuilder;
 use tonic::codec::CompressionEncoding;
 use ync::{
     client::{ConnectionArgs, LayeredChannel},
     logging,
 };
-
-#[allow(non_snake_case)]
-pub mod code {
-    use serde::Serialize;
-
-    tonic::include_proto!("ynpb");
-}
+use ynpb::pb::{inspect_service_client::InspectServiceClient, InspectRequest, InspectResponse};
 
 /// Inspect module - displays system introspection information.
 #[derive(Debug, Clone, Parser)]
@@ -94,7 +87,7 @@ impl InspectService {
         Ok(())
     }
 
-    fn format_tree_output(&self, response: &code::InspectResponse) -> Result<(), Box<dyn Error>> {
+    fn format_tree_output(&self, response: &InspectResponse) -> Result<(), Box<dyn Error>> {
         let mut tree = TreeBuilder::new("YANET System".to_string());
 
         if let Some(info) = &response.instance_info {

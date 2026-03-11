@@ -2,16 +2,11 @@
 
 use core::error::Error;
 
-use clap::{builder::PossibleValue, ArgAction, CommandFactory, Parser, Subcommand, ValueEnum};
+use clap::{ArgAction, CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::CompleteEnv;
 use tonic::codec::CompressionEncoding;
 use ync::{client::ConnectionArgs, logging};
-use ynpb::{logging_client::LoggingClient, UpdateLevelRequest};
-
-#[allow(non_snake_case)]
-pub mod ynpb {
-    tonic::include_proto!("ynpb");
-}
+use ynpb::pb::{logging_client::LoggingClient, UpdateLevelRequest};
 
 /// Common functionality.
 #[derive(Debug, Clone, Parser)]
@@ -43,23 +38,26 @@ enum LoggingCmd {
 #[derive(Debug, Clone, Parser)]
 struct SetLogLevelCmd {
     /// Minimum log level.
-    level: ynpb::LogLevel,
+    level: LogLevel,
 }
 
-impl ValueEnum for ynpb::LogLevel {
-    fn value_variants<'a>() -> &'a [Self] {
-        &[Self::Debug, Self::Info, Self::Warn, Self::Error]
-    }
+/// Log level for the logging service.
+#[derive(Debug, Clone, ValueEnum)]
+enum LogLevel {
+    Debug,
+    Info,
+    Warn,
+    Error,
+}
 
-    fn to_possible_value(&self) -> Option<PossibleValue> {
-        let v = match self {
-            Self::Debug => PossibleValue::new("debug"),
-            Self::Info => PossibleValue::new("info"),
-            Self::Warn => PossibleValue::new("warn"),
-            Self::Error => PossibleValue::new("error"),
-        };
-
-        Some(v)
+impl From<LogLevel> for ynpb::pb::LogLevel {
+    fn from(level: LogLevel) -> Self {
+        match level {
+            LogLevel::Debug => Self::Debug,
+            LogLevel::Info => Self::Info,
+            LogLevel::Warn => Self::Warn,
+            LogLevel::Error => Self::Error,
+        }
     }
 }
 
@@ -77,24 +75,18 @@ pub async fn main() {
 }
 
 async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
-    let connection = cmd.connection;
-
-    match cmd.mode {
-        ModeCmd::Logging(cmd) => run_logging(cmd, &connection).await,
-    }
-}
-
-async fn run_logging(cmd: LoggingCmd, connection: &ConnectionArgs) -> Result<(), Box<dyn Error>> {
-    let channel = ync::client::connect(connection).await?;
+    let channel = ync::client::connect(&cmd.connection).await?;
     let mut client = LoggingClient::new(channel)
         .send_compressed(CompressionEncoding::Gzip)
         .accept_compressed(CompressionEncoding::Gzip);
 
-    match cmd {
-        LoggingCmd::SetLevel(cmd) => {
-            let _ = client
-                .update_level(UpdateLevelRequest { level: cmd.level.into() })
-                .await?;
+    match cmd.mode {
+        ModeCmd::Logging(LoggingCmd::SetLevel(cmd)) => {
+            let request = UpdateLevelRequest {
+                level: ynpb::pb::LogLevel::from(cmd.level).into(),
+            };
+            let _ = client.update_level(request).await?;
+            println!("OK");
         }
     }
 

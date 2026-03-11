@@ -4,23 +4,17 @@ use core::error::Error;
 
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
-use code::{
-    counters_service_client::CountersServiceClient, ChainCountersRequest, DeviceCountersRequest,
-    FunctionCountersRequest, ModuleCountersRequest, PerfCountersRequest, PipelineCountersRequest,
-};
 use colored::Colorize;
 use tonic::codec::CompressionEncoding;
 use ync::{
     client::{ConnectionArgs, LayeredChannel},
     logging,
 };
-
-#[allow(non_snake_case)]
-pub mod code {
-    use serde::Serialize;
-
-    tonic::include_proto!("ynpb");
-}
+use ynpb::pb::{
+    counters_service_client::CountersServiceClient, ChainCountersRequest, DeviceCountersRequest,
+    FunctionCountersRequest, LatencyRangeCounter, ModuleCountersRequest, PerfCounter, PerfCountersRequest,
+    PerfCountersResponse, PipelineCountersRequest,
+};
 
 /// Counters module - displays counters information.
 #[derive(Debug, Clone, Parser)]
@@ -303,7 +297,7 @@ struct HistogramWidths {
 }
 
 /// Calculate global column widths across all counters for consistent alignment
-fn calculate_global_widths(counters: &[code::PerfCounter]) -> HistogramWidths {
+fn calculate_global_widths(counters: &[PerfCounter]) -> HistogramWidths {
     let mut max_left_val_width = 0usize;
     let mut max_right_val_width = 0usize;
     let mut max_count_width = 0usize;
@@ -334,7 +328,7 @@ fn calculate_global_widths(counters: &[code::PerfCounter]) -> HistogramWidths {
 }
 
 /// Format and display performance counters with beautiful histogram output
-fn format_perf_counters(response: &code::PerfCountersResponse) {
+fn format_perf_counters(response: &PerfCountersResponse) {
     // Header - 74 chars inner width (76 total with borders)
     println!(
         "{}",
@@ -417,7 +411,7 @@ fn format_perf_counters(response: &code::PerfCountersResponse) {
 }
 
 /// Format a single batch size counter with histogram
-fn format_batch_counter(counter: &code::PerfCounter, next_min_batch: Option<u32>, widths: &HistogramWidths) {
+fn format_batch_counter(counter: &PerfCounter, next_min_batch: Option<u32>, widths: &HistogramWidths) {
     // Table width: 76 chars total (74 inner + 2 for borders)
     const TABLE_WIDTH: usize = 74;
 
@@ -739,7 +733,7 @@ fn format_batch_counter(counter: &code::PerfCounter, next_min_batch: Option<u32>
 }
 
 /// Calculate percentiles from histogram data
-fn calculate_percentiles(latencies: &[code::LatencyRangeCounter], total_batches: u64) -> (u64, u64, u64, u64) {
+fn calculate_percentiles(latencies: &[LatencyRangeCounter], total_batches: u64) -> (u64, u64, u64, u64) {
     if latencies.is_empty() || total_batches == 0 {
         return (0, 0, 0, 0);
     }
@@ -857,77 +851,77 @@ mod tests {
     #[test]
     fn test_perf_counter_output() {
         // Create example performance counter data
-        let response = code::PerfCountersResponse {
+        let response = PerfCountersResponse {
             tx: 1_234_567,
             rx: 1_234_567,
             tx_bytes: 1_288_490_188, // ~1.20 GB
             rx_bytes: 1_288_490_188,
             counters: vec![
                 // Batch size 1
-                code::PerfCounter {
+                PerfCounter {
                     min_batch_size: 1,
                     summary_latency: 401_500,
                     packets: 398,
                     bytes: 25_472,
                     latencies: vec![
-                        code::LatencyRangeCounter { min_latency: 0, batches: 0 },
-                        code::LatencyRangeCounter { min_latency: 10, batches: 0 },
-                        code::LatencyRangeCounter { min_latency: 60, batches: 0 },
-                        code::LatencyRangeCounter { min_latency: 110, batches: 0 },
-                        code::LatencyRangeCounter { min_latency: 160, batches: 7 },
-                        code::LatencyRangeCounter { min_latency: 210, batches: 7 },
-                        code::LatencyRangeCounter { min_latency: 260, batches: 7 },
-                        code::LatencyRangeCounter { min_latency: 310, batches: 9 },
-                        code::LatencyRangeCounter { min_latency: 360, batches: 4 },
-                        code::LatencyRangeCounter { min_latency: 410, batches: 4 },
-                        code::LatencyRangeCounter { min_latency: 460, batches: 4 },
-                        code::LatencyRangeCounter { min_latency: 510, batches: 4 },
-                        code::LatencyRangeCounter { min_latency: 560, batches: 10 },
-                        code::LatencyRangeCounter { min_latency: 610, batches: 11 },
-                        code::LatencyRangeCounter { min_latency: 660, batches: 16 },
-                        code::LatencyRangeCounter { min_latency: 710, batches: 15 },
-                        code::LatencyRangeCounter { min_latency: 760, batches: 16 },
-                        code::LatencyRangeCounter { min_latency: 810, batches: 18 },
-                        code::LatencyRangeCounter { min_latency: 860, batches: 20 },
-                        code::LatencyRangeCounter { min_latency: 910, batches: 15 },
-                        code::LatencyRangeCounter { min_latency: 960, batches: 228 },
-                        code::LatencyRangeCounter { min_latency: 1920, batches: 3 },
-                        code::LatencyRangeCounter { min_latency: 3840, batches: 0 },
-                        code::LatencyRangeCounter { min_latency: 7680, batches: 0 },
-                        code::LatencyRangeCounter { min_latency: 15360, batches: 0 },
-                        code::LatencyRangeCounter { min_latency: 30720, batches: 0 },
-                        code::LatencyRangeCounter { min_latency: 61440, batches: 0 },
-                        code::LatencyRangeCounter { min_latency: 122880, batches: 0 },
-                        code::LatencyRangeCounter { min_latency: 245760, batches: 0 },
-                        code::LatencyRangeCounter { min_latency: 491520, batches: 0 },
+                        LatencyRangeCounter { min_latency: 0, batches: 0 },
+                        LatencyRangeCounter { min_latency: 10, batches: 0 },
+                        LatencyRangeCounter { min_latency: 60, batches: 0 },
+                        LatencyRangeCounter { min_latency: 110, batches: 0 },
+                        LatencyRangeCounter { min_latency: 160, batches: 7 },
+                        LatencyRangeCounter { min_latency: 210, batches: 7 },
+                        LatencyRangeCounter { min_latency: 260, batches: 7 },
+                        LatencyRangeCounter { min_latency: 310, batches: 9 },
+                        LatencyRangeCounter { min_latency: 360, batches: 4 },
+                        LatencyRangeCounter { min_latency: 410, batches: 4 },
+                        LatencyRangeCounter { min_latency: 460, batches: 4 },
+                        LatencyRangeCounter { min_latency: 510, batches: 4 },
+                        LatencyRangeCounter { min_latency: 560, batches: 10 },
+                        LatencyRangeCounter { min_latency: 610, batches: 11 },
+                        LatencyRangeCounter { min_latency: 660, batches: 16 },
+                        LatencyRangeCounter { min_latency: 710, batches: 15 },
+                        LatencyRangeCounter { min_latency: 760, batches: 16 },
+                        LatencyRangeCounter { min_latency: 810, batches: 18 },
+                        LatencyRangeCounter { min_latency: 860, batches: 20 },
+                        LatencyRangeCounter { min_latency: 910, batches: 15 },
+                        LatencyRangeCounter { min_latency: 960, batches: 228 },
+                        LatencyRangeCounter { min_latency: 1920, batches: 3 },
+                        LatencyRangeCounter { min_latency: 3840, batches: 0 },
+                        LatencyRangeCounter { min_latency: 7680, batches: 0 },
+                        LatencyRangeCounter { min_latency: 15360, batches: 0 },
+                        LatencyRangeCounter { min_latency: 30720, batches: 0 },
+                        LatencyRangeCounter { min_latency: 61440, batches: 0 },
+                        LatencyRangeCounter { min_latency: 122880, batches: 0 },
+                        LatencyRangeCounter { min_latency: 245760, batches: 0 },
+                        LatencyRangeCounter { min_latency: 491520, batches: 0 },
                     ],
                 },
                 // Batch size 2-31
-                code::PerfCounter {
+                PerfCounter {
                     min_batch_size: 2,
                     summary_latency: 2_220_000,
                     packets: 45_678,
                     bytes: 45_678_000,
                     latencies: vec![
-                        code::LatencyRangeCounter { min_latency: 200, batches: 12_025 },
-                        code::LatencyRangeCounter { min_latency: 400, batches: 4_625 },
-                        code::LatencyRangeCounter { min_latency: 800, batches: 1_295 },
-                        code::LatencyRangeCounter { min_latency: 1600, batches: 370 },
-                        code::LatencyRangeCounter { min_latency: 3200, batches: 185 },
+                        LatencyRangeCounter { min_latency: 200, batches: 12_025 },
+                        LatencyRangeCounter { min_latency: 400, batches: 4_625 },
+                        LatencyRangeCounter { min_latency: 800, batches: 1_295 },
+                        LatencyRangeCounter { min_latency: 1600, batches: 370 },
+                        LatencyRangeCounter { min_latency: 3200, batches: 185 },
                     ],
                 },
                 // Batch size 32+
-                code::PerfCounter {
+                PerfCounter {
                     min_batch_size: 32,
                     summary_latency: 15_400_000,
                     packets: 1_024_000,
                     bytes: 1_024_000_000,
                     latencies: vec![
-                        code::LatencyRangeCounter { min_latency: 200, batches: 20_800 },
-                        code::LatencyRangeCounter { min_latency: 400, batches: 8_000 },
-                        code::LatencyRangeCounter { min_latency: 800, batches: 2_240 },
-                        code::LatencyRangeCounter { min_latency: 1600, batches: 640 },
-                        code::LatencyRangeCounter { min_latency: 3200, batches: 320 },
+                        LatencyRangeCounter { min_latency: 200, batches: 20_800 },
+                        LatencyRangeCounter { min_latency: 400, batches: 8_000 },
+                        LatencyRangeCounter { min_latency: 800, batches: 2_240 },
+                        LatencyRangeCounter { min_latency: 1600, batches: 640 },
+                        LatencyRangeCounter { min_latency: 3200, batches: 320 },
                     ],
                 },
             ],
@@ -941,22 +935,22 @@ mod tests {
     #[test]
     fn test_perf_counter_uniform_distribution() {
         // Test with uniform distribution (all buckets have equal counts)
-        let response = code::PerfCountersResponse {
+        let response = PerfCountersResponse {
             tx: 100_000,
             rx: 100_000,
             tx_bytes: 100_000_000,
             rx_bytes: 100_000_000,
-            counters: vec![code::PerfCounter {
+            counters: vec![PerfCounter {
                 min_batch_size: 1,
                 summary_latency: 500_000,
                 packets: 500,
                 bytes: 1_024_000_000,
                 latencies: vec![
-                    code::LatencyRangeCounter { min_latency: 100, batches: 100 },
-                    code::LatencyRangeCounter { min_latency: 200, batches: 100 },
-                    code::LatencyRangeCounter { min_latency: 300, batches: 100 },
-                    code::LatencyRangeCounter { min_latency: 400, batches: 100 },
-                    code::LatencyRangeCounter { min_latency: 500, batches: 100 },
+                    LatencyRangeCounter { min_latency: 100, batches: 100 },
+                    LatencyRangeCounter { min_latency: 200, batches: 100 },
+                    LatencyRangeCounter { min_latency: 300, batches: 100 },
+                    LatencyRangeCounter { min_latency: 400, batches: 100 },
+                    LatencyRangeCounter { min_latency: 500, batches: 100 },
                 ],
             }],
         };
@@ -968,22 +962,22 @@ mod tests {
     #[test]
     fn test_perf_counter_single_bucket() {
         // Test with all data in a single bucket
-        let response = code::PerfCountersResponse {
+        let response = PerfCountersResponse {
             tx: 50_000,
             rx: 50_000,
             tx_bytes: 50_000_000,
             rx_bytes: 50_000_000,
-            counters: vec![code::PerfCounter {
+            counters: vec![PerfCounter {
                 min_batch_size: 1,
                 summary_latency: 1_000_000,
                 packets: 1000,
                 bytes: 1_024_000_000,
                 latencies: vec![
-                    code::LatencyRangeCounter { min_latency: 100, batches: 0 },
-                    code::LatencyRangeCounter { min_latency: 500, batches: 0 },
-                    code::LatencyRangeCounter { min_latency: 1000, batches: 1000 },
-                    code::LatencyRangeCounter { min_latency: 2000, batches: 0 },
-                    code::LatencyRangeCounter { min_latency: 5000, batches: 0 },
+                    LatencyRangeCounter { min_latency: 100, batches: 0 },
+                    LatencyRangeCounter { min_latency: 500, batches: 0 },
+                    LatencyRangeCounter { min_latency: 1000, batches: 1000 },
+                    LatencyRangeCounter { min_latency: 2000, batches: 0 },
+                    LatencyRangeCounter { min_latency: 5000, batches: 0 },
                 ],
             }],
         };
@@ -995,30 +989,30 @@ mod tests {
     #[test]
     fn test_perf_counter_large_numbers() {
         // Test with very large numbers
-        let response = code::PerfCountersResponse {
+        let response = PerfCountersResponse {
             tx: 999_999_999_999,
             rx: 888_888_888_888,
             tx_bytes: 1_234_567_890_123_456,
             rx_bytes: 9_876_543_210_987_654,
-            counters: vec![code::PerfCounter {
+            counters: vec![PerfCounter {
                 min_batch_size: 64,
                 summary_latency: 999_999_999_999,
                 packets: 999_999_999,
                 bytes: 63_999_999_936,
                 latencies: vec![
-                    code::LatencyRangeCounter {
+                    LatencyRangeCounter {
                         min_latency: 1_000_000,
                         batches: 100_000_000,
                     },
-                    code::LatencyRangeCounter {
+                    LatencyRangeCounter {
                         min_latency: 10_000_000,
                         batches: 50_000_000,
                     },
-                    code::LatencyRangeCounter {
+                    LatencyRangeCounter {
                         min_latency: 100_000_000,
                         batches: 10_000_000,
                     },
-                    code::LatencyRangeCounter {
+                    LatencyRangeCounter {
                         min_latency: 1_000_000_000,
                         batches: 1_000_000,
                     },
@@ -1033,21 +1027,21 @@ mod tests {
     #[test]
     fn test_perf_counter_small_numbers() {
         // Test with very small numbers
-        let response = code::PerfCountersResponse {
+        let response = PerfCountersResponse {
             tx: 10,
             rx: 5,
             tx_bytes: 1000,
             rx_bytes: 500,
-            counters: vec![code::PerfCounter {
+            counters: vec![PerfCounter {
                 min_batch_size: 1,
                 summary_latency: 100,
                 packets: 10,
                 bytes: 640,
                 latencies: vec![
-                    code::LatencyRangeCounter { min_latency: 1, batches: 3 },
-                    code::LatencyRangeCounter { min_latency: 5, batches: 4 },
-                    code::LatencyRangeCounter { min_latency: 10, batches: 2 },
-                    code::LatencyRangeCounter { min_latency: 20, batches: 1 },
+                    LatencyRangeCounter { min_latency: 1, batches: 3 },
+                    LatencyRangeCounter { min_latency: 5, batches: 4 },
+                    LatencyRangeCounter { min_latency: 10, batches: 2 },
+                    LatencyRangeCounter { min_latency: 20, batches: 1 },
                 ],
             }],
         };
@@ -1059,20 +1053,20 @@ mod tests {
     #[test]
     fn test_perf_counter_empty_histogram() {
         // Test with empty histogram (all zeros)
-        let response = code::PerfCountersResponse {
+        let response = PerfCountersResponse {
             tx: 0,
             rx: 0,
             tx_bytes: 0,
             rx_bytes: 0,
-            counters: vec![code::PerfCounter {
+            counters: vec![PerfCounter {
                 min_batch_size: 1,
                 summary_latency: 0,
                 packets: 0,
                 bytes: 0,
                 latencies: vec![
-                    code::LatencyRangeCounter { min_latency: 100, batches: 0 },
-                    code::LatencyRangeCounter { min_latency: 200, batches: 0 },
-                    code::LatencyRangeCounter { min_latency: 300, batches: 0 },
+                    LatencyRangeCounter { min_latency: 100, batches: 0 },
+                    LatencyRangeCounter { min_latency: 200, batches: 0 },
+                    LatencyRangeCounter { min_latency: 300, batches: 0 },
                 ],
             }],
         };
@@ -1084,23 +1078,23 @@ mod tests {
     #[test]
     fn test_perf_counter_bimodal_distribution() {
         // Test with bimodal distribution (two peaks)
-        let response = code::PerfCountersResponse {
+        let response = PerfCountersResponse {
             tx: 200_000,
             rx: 200_000,
             tx_bytes: 200_000_000,
             rx_bytes: 200_000_000,
-            counters: vec![code::PerfCounter {
+            counters: vec![PerfCounter {
                 min_batch_size: 8,
                 summary_latency: 5_000_000,
                 packets: 2000,
                 bytes: 128_000,
                 latencies: vec![
-                    code::LatencyRangeCounter { min_latency: 100, batches: 500 },
-                    code::LatencyRangeCounter { min_latency: 200, batches: 50 },
-                    code::LatencyRangeCounter { min_latency: 300, batches: 10 },
-                    code::LatencyRangeCounter { min_latency: 400, batches: 50 },
-                    code::LatencyRangeCounter { min_latency: 500, batches: 500 },
-                    code::LatencyRangeCounter { min_latency: 1000, batches: 100 },
+                    LatencyRangeCounter { min_latency: 100, batches: 500 },
+                    LatencyRangeCounter { min_latency: 200, batches: 50 },
+                    LatencyRangeCounter { min_latency: 300, batches: 10 },
+                    LatencyRangeCounter { min_latency: 400, batches: 50 },
+                    LatencyRangeCounter { min_latency: 500, batches: 500 },
+                    LatencyRangeCounter { min_latency: 1000, batches: 100 },
                 ],
             }],
         };
@@ -1112,17 +1106,17 @@ mod tests {
     #[test]
     fn test_perf_counter_asymmetric_rx_tx() {
         // Test with very different RX and TX values
-        let response = code::PerfCountersResponse {
+        let response = PerfCountersResponse {
             tx: 1,
             rx: 999_999_999,
             tx_bytes: 64,
             rx_bytes: 999_999_999_999,
-            counters: vec![code::PerfCounter {
+            counters: vec![PerfCounter {
                 min_batch_size: 1,
                 summary_latency: 1000,
                 packets: 100,
                 bytes: 6_400,
-                latencies: vec![code::LatencyRangeCounter { min_latency: 10, batches: 100 }],
+                latencies: vec![LatencyRangeCounter { min_latency: 10, batches: 100 }],
             }],
         };
 
