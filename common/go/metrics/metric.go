@@ -1,21 +1,24 @@
-// Package metrics provides thread-safe metric primitives for collecting
-// application telemetry data including counters, gauges, and histograms.
+/*
+Package metrics provides thread-safe metric primitives for collecting
+application telemetry data including counters, gauges, and histograms.
+*/
 package metrics
 
-import "slices"
+import "maps"
 
-type Label struct {
-	Name  string
-	Value string
+type Labels map[string]string
+
+func (a Labels) Equals(b Labels) bool {
+	return maps.Equal(a, b)
 }
 
 type MetricID struct {
 	Name   string
-	Labels []Label
+	Labels Labels
 }
 
-func (a MetricID) EqualOrdered(b MetricID) bool {
-	return a.Name == b.Name && slices.Equal(a.Labels, b.Labels)
+func (a MetricID) Equals(b MetricID) bool {
+	return a.Name == b.Name && a.Labels.Equals(b.Labels)
 }
 
 type Metric[T any] struct {

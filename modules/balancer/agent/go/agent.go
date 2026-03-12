@@ -66,13 +66,12 @@ func (a *BalancerAgent) NewBalancerManager(
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	tracker := newHandlerMetricTracker("create", &a.handlersMetrics, defaultLatencyBoundsMS,
-		[]metrics.Label{
-			{
-				Name:  "config",
-				Value: name,
-			},
-		})
+	tracker := newHandlerMetricTracker(
+		"create",
+		&a.handlersMetrics,
+		defaultLatencyBoundsMS,
+		metrics.Labels{"config": name},
+	)
 	defer tracker.Fix()
 
 	a.log.Infow("creating new balancer manager", "name", name)

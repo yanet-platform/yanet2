@@ -2,7 +2,7 @@ package metrics
 
 import "testing"
 
-func TestMetricIDEqualOrdered(t *testing.T) {
+func TestMetricIDEquals(t *testing.T) {
 	tests := []struct {
 		name string
 		a, b MetricID
@@ -10,8 +10,8 @@ func TestMetricIDEqualOrdered(t *testing.T) {
 	}{
 		{
 			name: "Equal",
-			a:    MetricID{Name: "test", Labels: []Label{{Name: "a", Value: "1"}}},
-			b:    MetricID{Name: "test", Labels: []Label{{Name: "a", Value: "1"}}},
+			a:    MetricID{Name: "test", Labels: Labels{"a": "1"}},
+			b:    MetricID{Name: "test", Labels: Labels{"a": "1"}},
 			want: true,
 		},
 		{
@@ -22,20 +22,20 @@ func TestMetricIDEqualOrdered(t *testing.T) {
 		},
 		{
 			name: "DifferentLabelValue",
-			a:    MetricID{Name: "test", Labels: []Label{{Name: "a", Value: "1"}}},
-			b:    MetricID{Name: "test", Labels: []Label{{Name: "a", Value: "2"}}},
+			a:    MetricID{Name: "test", Labels: Labels{"a": "1"}},
+			b:    MetricID{Name: "test", Labels: Labels{"a": "2"}},
 			want: false,
 		},
 		{
-			name: "DifferentLabelOrder",
-			a:    MetricID{Name: "test", Labels: []Label{{Name: "a", Value: "1"}, {Name: "b", Value: "2"}}},
-			b:    MetricID{Name: "test", Labels: []Label{{Name: "b", Value: "2"}, {Name: "a", Value: "1"}}},
+			name: "DifferentLabelKey",
+			a:    MetricID{Name: "test", Labels: Labels{"a": "1"}},
+			b:    MetricID{Name: "test", Labels: Labels{"b": "1"}},
 			want: false,
 		},
 		{
 			name: "DifferentLabelCount",
-			a:    MetricID{Name: "test", Labels: []Label{{Name: "a", Value: "1"}}},
-			b:    MetricID{Name: "test", Labels: []Label{{Name: "a", Value: "1"}, {Name: "b", Value: "2"}}},
+			a:    MetricID{Name: "test", Labels: Labels{"a": "1"}},
+			b:    MetricID{Name: "test", Labels: Labels{"a": "1", "b": "2"}},
 			want: false,
 		},
 		{
@@ -44,12 +44,18 @@ func TestMetricIDEqualOrdered(t *testing.T) {
 			b:    MetricID{Name: "test"},
 			want: true,
 		},
+		{
+			name: "NilAndEmptyLabelsEqual",
+			a:    MetricID{Name: "test", Labels: nil},
+			b:    MetricID{Name: "test", Labels: Labels{}},
+			want: true,
+		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := tc.a.EqualOrdered(tc.b); got != tc.want {
-				t.Errorf("EqualOrdered() = %v, want %v", got, tc.want)
+			if got := tc.a.Equals(tc.b); got != tc.want {
+				t.Errorf("Equals() = %v, want %v", got, tc.want)
 			}
 		})
 	}

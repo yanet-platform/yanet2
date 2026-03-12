@@ -3,6 +3,7 @@ package metrics
 import (
 	"hash/fnv"
 	"io"
+	"slices"
 	"sync"
 )
 
@@ -32,7 +33,7 @@ func (m *MetricMap[T]) tryGet(id MetricID, h uint64) *T {
 
 	if bucket, ok := m.entries[h]; ok {
 		for idx := range bucket {
-			if bucket[idx].id.EqualOrdered(id) {
+			if bucket[idx].id.Equals(id) {
 				return &bucket[idx].metric
 			}
 		}
@@ -47,7 +48,7 @@ func (m *MetricMap[T]) create(id MetricID, h uint64, create func() T) T {
 
 	if bucket, ok := m.entries[h]; ok {
 		for idx := range bucket {
-			if bucket[idx].id.EqualOrdered(id) {
+			if bucket[idx].id.Equals(id) {
 				return bucket[idx].metric
 			}
 		}
@@ -57,7 +58,7 @@ func (m *MetricMap[T]) create(id MetricID, h uint64, create func() T) T {
 }
 
 // GetOrCreate returns the metric for the given label list, creating it via
-// create if it does not yet exist. Order of labels is important
+// create if it does not yet exist.
 func (m *MetricMap[T]) GetOrCreate(id MetricID, create func() T) T {
 	h := hashID(id)
 
@@ -82,7 +83,8 @@ func (m *MetricMap[T]) Metrics() []Metric[T] {
 	return out
 }
 
-// Hashes metric ID with respect to order of labels
+// Hashes metric ID deterministically.
+// Since labels are a map, we sort keys to get stable hashing.
 func hashID(id MetricID) uint64 {
 	h := fnv.New64a()
 	var z [1]byte // zero separator
@@ -90,10 +92,17 @@ func hashID(id MetricID) uint64 {
 	_, _ = io.WriteString(h, id.Name)
 	_, _ = h.Write(z[:])
 
-	for _, label := range id.Labels {
-		_, _ = io.WriteString(h, label.Name)
+	keys := make([]string, 0, len(id.Labels))
+	for k := range id.Labels {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+
+	for _, k := range keys {
+		v := id.Labels[k]
+		_, _ = io.WriteString(h, k)
 		_, _ = h.Write(z[:])
-		_, _ = io.WriteString(h, label.Value)
+		_, _ = io.WriteString(h, v)
 		_, _ = h.Write(z[:])
 	}
 

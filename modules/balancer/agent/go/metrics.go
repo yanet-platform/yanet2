@@ -307,7 +307,7 @@ func newHandlerMetricTracker(
 	handlerName string,
 	handlerMetrics *handlersMetrics,
 	latencies []float64,
-	labels []metrics.Label,
+	labels metrics.Labels,
 ) *handlerMetricTracker {
 	if handlerMetrics == nil || latencies == nil {
 		return nil

@@ -13,7 +13,7 @@ import (
 func TestMetricMapGetOrCreate(t *testing.T) {
 	t.Run("CreatesNew", func(t *testing.T) {
 		m := NewMetricMap[*Counter]()
-		id := MetricID{Name: "test", Labels: []Label{{Name: "a", Value: "1"}}}
+		id := MetricID{Name: "test", Labels: Labels{"a": "1"}}
 
 		var calls int
 		c := m.GetOrCreate(id, func() *Counter { calls++; return &Counter{} })
@@ -53,19 +53,19 @@ func TestMetricMapGetOrCreate(t *testing.T) {
 	})
 }
 
-func TestMetricMapLabelOrder(t *testing.T) {
+func TestMetricMapLabelsAreASet(t *testing.T) {
 	m := NewMetricMap[*Counter]()
 
-	id1 := MetricID{Name: "test", Labels: []Label{{Name: "a", Value: "1"}, {Name: "b", Value: "2"}}}
-	id2 := MetricID{Name: "test", Labels: []Label{{Name: "b", Value: "2"}, {Name: "a", Value: "1"}}}
+	id1 := MetricID{Name: "test", Labels: Labels{"a": "1", "b": "2"}}
+	id2 := MetricID{Name: "test", Labels: Labels{"b": "2", "a": "1"}}
 
 	c1 := m.GetOrCreate(id1, func() *Counter { return &Counter{} })
 	c2 := m.GetOrCreate(id2, func() *Counter { return &Counter{} })
 
-	assert.NotSame(t, c1, c2, "different label order should create different metrics")
+	assert.Same(t, c1, c2, "same label set should resolve to the same metric")
 
 	c1.Inc()
-	assert.Equal(t, uint64(0), c2.Load(), "metrics with different label order should be independent")
+	assert.Equal(t, uint64(1), c2.Load(), "should observe updates through either reference")
 }
 
 func TestMetricMapMetrics(t *testing.T) {
@@ -109,11 +109,11 @@ func TestMetricMapMetrics(t *testing.T) {
 
 	t.Run("IDsPreserved", func(t *testing.T) {
 		m := NewMetricMap[*Counter]()
-		id := MetricID{Name: "test", Labels: []Label{{Name: "env", Value: "prod"}}}
+		id := MetricID{Name: "test", Labels: Labels{"env": "prod"}}
 		m.GetOrCreate(id, func() *Counter { return &Counter{} })
 
 		refs := m.Metrics()
-		assert.True(t, refs[0].ID.EqualOrdered(id), "ID should be preserved")
+		assert.True(t, refs[0].ID.Equals(id), "ID should be preserved")
 	})
 }
 
@@ -194,7 +194,7 @@ func BenchmarkGetOrCreate(b *testing.B) {
 
 	b.Run("Existing", func(b *testing.B) {
 		m := NewMetricMap[*Counter]()
-		id := MetricID{Name: "metric", Labels: []Label{{Name: "a", Value: "1"}}}
+		id := MetricID{Name: "metric", Labels: Labels{"a": "1"}}
 		m.GetOrCreate(id, func() *Counter { return &Counter{} })
 
 		b.ResetTimer()

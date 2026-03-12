@@ -1,6 +1,8 @@
 package commonpb
 
 import (
+	"slices"
+
 	"github.com/yanet-platform/yanet2/common/go/metrics"
 )
 
@@ -47,14 +49,22 @@ func MetricValueToProto[T metrics.Counter | metrics.Gauge | metrics.Histogram](
 	return nil
 }
 
-func MetricLabelsToProto(labels []metrics.Label) []*Label {
-	res := make([]*Label, 0, len(labels))
-	for _, l := range labels {
+// MetricLabelsToProto converts map-based labels to proto labels with deterministic ordering.
+func MetricLabelsToProto(labels metrics.Labels) []*Label {
+	keys := make([]string, 0, len(labels))
+	for k := range labels {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+
+	res := make([]*Label, 0, len(keys))
+	for _, k := range keys {
 		res = append(res, &Label{
-			Name:  l.Name,
-			Value: l.Value,
+			Name:  k,
+			Value: labels[k],
 		})
 	}
+
 	return res
 }
 

@@ -64,15 +64,16 @@ func TestMetricValueToProto_Histogram(t *testing.T) {
 }
 
 func TestMetricLabelsToProto(t *testing.T) {
-	labels := []metrics.Label{
-		{Name: "env", Value: "prod"},
-		{Name: "region", Value: "us-east"},
+	labels := metrics.Labels{
+		"env":    "prod",
+		"region": "us-east",
 	}
 
 	result := MetricLabelsToProto(labels)
 
 	require.Len(t, result, 2, "should have 2 labels")
 
+	// Deterministic ordering: sorted by label name ascending.
 	assert.Equal(t, "env", result[0].Name, "first label name should match")
 	assert.Equal(t, "prod", result[0].Value, "first label value should match")
 	assert.Equal(t, "region", result[1].Name, "second label name should match")
@@ -88,8 +89,8 @@ func TestMetricLabelsToProto_Empty(t *testing.T) {
 func TestMetricRefsToProto_Counter(t *testing.T) {
 	m := metrics.NewMetricMap[*metrics.Counter]()
 
-	id1 := metrics.MetricID{Name: "requests", Labels: []metrics.Label{{Name: "method", Value: "GET"}}}
-	id2 := metrics.MetricID{Name: "requests", Labels: []metrics.Label{{Name: "method", Value: "POST"}}}
+	id1 := metrics.MetricID{Name: "requests", Labels: metrics.Labels{"method": "GET"}}
+	id2 := metrics.MetricID{Name: "requests", Labels: metrics.Labels{"method": "POST"}}
 
 	c1 := m.GetOrCreate(id1, func() *metrics.Counter { return &metrics.Counter{} })
 	c2 := m.GetOrCreate(id2, func() *metrics.Counter { return &metrics.Counter{} })
@@ -123,7 +124,7 @@ func TestMetricRefsToProto_Counter(t *testing.T) {
 func TestMetricRefsToProto_Gauge(t *testing.T) {
 	m := metrics.NewMetricMap[*metrics.Gauge]()
 
-	id := metrics.MetricID{Name: "temperature", Labels: []metrics.Label{{Name: "location", Value: "cpu"}}}
+	id := metrics.MetricID{Name: "temperature", Labels: metrics.Labels{"location": "cpu"}}
 	g := m.GetOrCreate(id, func() *metrics.Gauge { return &metrics.Gauge{} })
 	g.Store(65.5)
 
@@ -142,7 +143,7 @@ func TestMetricRefsToProto_Gauge(t *testing.T) {
 func TestMetricRefsToProto_Histogram(t *testing.T) {
 	m := metrics.NewMetricMap[*metrics.Histogram]()
 
-	id := metrics.MetricID{Name: "latency", Labels: []metrics.Label{{Name: "endpoint", Value: "/api"}}}
+	id := metrics.MetricID{Name: "latency", Labels: metrics.Labels{"endpoint": "/api"}}
 	h := m.GetOrCreate(id, func() *metrics.Histogram { return metrics.NewHistogram([]float64{10, 50, 100}) })
 
 	// Observe values in different buckets:

@@ -51,10 +51,15 @@ func NewBalancerManager(
 	return manager
 }
 
-func (b *BalancerManager) newHandlerTracker(handle string, extraLabels ...metrics.Label) *handlerMetricTracker {
-	labels := append([]metrics.Label{
-		{Name: "config", Value: b.Name()},
-	}, extraLabels...)
+func (b *BalancerManager) newHandlerTracker(handle string, extraLabels ...metrics.Labels) *handlerMetricTracker {
+	labels := metrics.Labels{
+		"config": b.Name(),
+	}
+	for _, extra := range extraLabels {
+		for k, v := range extra {
+			labels[k] = v
+		}
+	}
 	return newHandlerMetricTracker(handle, &b.handlerMetrics, defaultLatencyBoundsMS, labels)
 }
 
@@ -132,7 +137,7 @@ func (b *BalancerManager) UpdateReals(
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	tracker := b.newHandlerTracker("update_reals", metrics.Label{Name: "buffer", Value: strconv.FormatBool(buffer)})
+	tracker := b.newHandlerTracker("update_reals", metrics.Labels{"buffer": strconv.FormatBool(buffer)})
 	defer tracker.Fix()
 
 	b.log.Debugw("updating reals", "count", len(updates), "buffer", buffer)
