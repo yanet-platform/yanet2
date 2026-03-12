@@ -10,7 +10,6 @@ common_protoc_gen = custom_target(
     'common-protoc',
     output: [
         'target.pb.go',
-        'target_grpc.pb.go',
         'metric.pb.go',
     ],
     input: common_proto_files,
@@ -18,7 +17,6 @@ common_protoc_gen = custom_target(
         protoc,
         '-I', common_proto_dir,
         '--go_out=paths=source_relative:' + common_proto_dir,
-        '--go-grpc_out=paths=source_relative:' + common_proto_dir,
         '@INPUT@',
     ],
     build_by_default: true,
