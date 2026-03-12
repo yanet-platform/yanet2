@@ -53,7 +53,7 @@ func (m *MetricMap[T]) create(id MetricID, h uint64, create func() T) T {
 			}
 		}
 	}
-	m.entries[h] = append(m.entries[h], metricEntry[T]{id: id, metric: create()})
+	m.entries[h] = append(m.entries[h], metricEntry[T]{id: id.Clone(), metric: create()})
 	return m.entries[h][len(m.entries[h])-1].metric
 }
 
@@ -77,7 +77,7 @@ func (m *MetricMap[T]) Metrics() []Metric[T] {
 	var out []Metric[T]
 	for _, bucket := range m.entries {
 		for i := range bucket {
-			out = append(out, Metric[T]{ID: bucket[i].id, Value: bucket[i].metric})
+			out = append(out, Metric[T]{ID: bucket[i].id.Clone(), Value: bucket[i].metric})
 		}
 	}
 	return out
