@@ -392,7 +392,7 @@ message ShowStatsRequest {
 	// Balancer instance name (optional).
 	optional string name = 1;
 
-	// Packet handler reference filter 
+	// Packet handler reference filter
 	// (optional fields inside PacketHandlerRef).
 	PacketHandlerRef ref = 2;
 }
