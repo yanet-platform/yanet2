@@ -4,7 +4,7 @@ use std::{
     error::Error,
     fs,
     io::ErrorKind,
-    os::unix::{fs::MetadataExt, process::CommandExt},
+    os::unix::{fs::PermissionsExt, process::CommandExt},
     process::{self, Stdio},
 };
 
@@ -79,8 +79,10 @@ pub fn locate_modules(prefix: &str) -> Result<HashSet<String>, Box<dyn Error>> {
             };
 
             if let Ok(md) = path.metadata() {
-                if name.starts_with(prefix) && md.mode() & 0o200 == 0o200 {
-                    modules.insert(name.replace(prefix, "").to_string());
+                if let Some(name) = name.strip_prefix(prefix) {
+                    if md.permissions().mode() & 0o111 != 0 {
+                        modules.insert(name.to_string());
+                    }
                 }
             }
         }
