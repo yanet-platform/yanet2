@@ -141,7 +141,6 @@ check_has_ip6(const struct forward_rule *forward_rule) {
 static int
 check_forward_rule_ip4(const struct forward_rule *forward_rule) {
 	return check_has_ip4(forward_rule);
-	;
 }
 
 static int
