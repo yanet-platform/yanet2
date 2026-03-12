@@ -319,7 +319,9 @@ yanet_mock_init(
 	for (size_t i = 0; i < config->device_count; ++i) {
 		struct dp_port *device = &devices[i];
 		memset(device, 0, sizeof(struct dp_port));
-		strcpy(device->port_name, config->devices[i].name);
+		strtcpy(device->port_name,
+			config->devices[i].name,
+			sizeof(device->port_name));
 		device->port_id = config->devices[i].id;
 	}
 	SET_OFFSET_OF(&dp_config->dp_topology.devices, devices);

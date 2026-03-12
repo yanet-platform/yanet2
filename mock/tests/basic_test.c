@@ -2,6 +2,7 @@
 #include "api/agent.h"
 #include "api/config.h"
 
+#include "common/strutils.h"
 #include "common/test_assert.h"
 #include "controlplane/config/cp_device.h"
 #include "controlplane/config/cp_function.h"
@@ -186,7 +187,9 @@ main() {
 	config.devices[0].id = 0;
 	config.worker_count = 1;
 	memset(config.devices[0].name, 0, sizeof(config.devices[0].name));
-	strcpy(config.devices[0].name, "01:00.0");
+	strtcpy(config.devices[0].name,
+		"01:00.0",
+		sizeof(config.devices[0].name));
 
 	LOG(INFO, "initialize mock...");
 
