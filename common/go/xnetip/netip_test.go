@@ -3,6 +3,9 @@ package xnetip
 import (
 	"net/netip"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestLastAddr(t *testing.T) {
@@ -251,6 +254,191 @@ func TestLastAddrHostPrefixes(t *testing.T) {
 	}
 }
 
+func TestRangeToCIDR(t *testing.T) {
+	tests := []struct {
+		name   string
+		from   string
+		to     string
+		prefix string
+		ok     bool
+	}{
+		// Valid IPv4 ranges.
+		{
+			name:   "IPv4 /32 host",
+			from:   "10.0.0.1",
+			to:     "10.0.0.1",
+			prefix: "10.0.0.1/32",
+			ok:     true,
+		},
+		{
+			name:   "IPv4 /24",
+			from:   "192.168.1.0",
+			to:     "192.168.1.255",
+			prefix: "192.168.1.0/24",
+			ok:     true,
+		},
+		{
+			name:   "IPv4 /16",
+			from:   "172.16.0.0",
+			to:     "172.16.255.255",
+			prefix: "172.16.0.0/16",
+			ok:     true,
+		},
+		{
+			name:   "IPv4 /0",
+			from:   "0.0.0.0",
+			to:     "255.255.255.255",
+			prefix: "0.0.0.0/0",
+			ok:     true,
+		},
+
+		// Valid IPv6 ranges.
+		{
+			name:   "IPv6 /128 host",
+			from:   "2001:db8::1",
+			to:     "2001:db8::1",
+			prefix: "2001:db8::1/128",
+			ok:     true,
+		},
+		{
+			name:   "IPv6 /64",
+			from:   "2001:db8:1234:5678::",
+			to:     "2001:db8:1234:5678:ffff:ffff:ffff:ffff",
+			prefix: "2001:db8:1234:5678::/64",
+			ok:     true,
+		},
+		{
+			name:   "IPv6 /48",
+			from:   "2001:db8:abcd::",
+			to:     "2001:db8:abcd:ffff:ffff:ffff:ffff:ffff",
+			prefix: "2001:db8:abcd::/48",
+			ok:     true,
+		},
+		{
+			name:   "IPv6 /0",
+			from:   "::",
+			to:     "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
+			prefix: "::/0",
+			ok:     true,
+		},
+
+		// Non-octet-aligned prefixes.
+		{
+			name:   "IPv4 /25",
+			from:   "192.168.1.0",
+			to:     "192.168.1.127",
+			prefix: "192.168.1.0/25",
+			ok:     true,
+		},
+		{
+			name:   "IPv4 /21",
+			from:   "10.0.8.0",
+			to:     "10.0.15.255",
+			prefix: "10.0.8.0/21",
+			ok:     true,
+		},
+		{
+			name:   "IPv4 /30",
+			from:   "192.168.1.4",
+			to:     "192.168.1.7",
+			prefix: "192.168.1.4/30",
+			ok:     true,
+		},
+		{
+			name:   "IPv6 /45",
+			from:   "2001:db8:abc0::",
+			to:     "2001:db8:abc7:ffff:ffff:ffff:ffff:ffff",
+			prefix: "2001:db8:abc0::/45",
+			ok:     true,
+		},
+		{
+			name:   "IPv6 /53",
+			from:   "2001:db8:abcd:0::",
+			to:     "2001:db8:abcd:7ff:ffff:ffff:ffff:ffff",
+			prefix: "2001:db8:abcd:0::/53",
+			ok:     true,
+		},
+		{
+			name:   "IPv6 /79",
+			from:   "2001:db8:1234:5678:ab00::",
+			to:     "2001:db8:1234:5678:ab01:ffff:ffff:ffff",
+			prefix: "2001:db8:1234:5678:ab00::/79",
+			ok:     true,
+		},
+		{
+			name:   "IPv6 /121",
+			from:   "2001:db8::1:0",
+			to:     "2001:db8::1:7f",
+			prefix: "2001:db8::1:0/121",
+			ok:     true,
+		},
+
+		// Edge cases around the 64-bit boundary.
+		{
+			name:   "IPv6 /63 crosses 64-bit boundary",
+			from:   "2001:db8:1234:5678::",
+			to:     "2001:db8:1234:5679:ffff:ffff:ffff:ffff",
+			prefix: "2001:db8:1234:5678::/63",
+			ok:     true,
+		},
+		{
+			name:   "IPv6 /65 just past 64-bit boundary",
+			from:   "2001:db8:1234:5678:8000::",
+			to:     "2001:db8:1234:5678:ffff:ffff:ffff:ffff",
+			prefix: "2001:db8:1234:5678:8000::/65",
+			ok:     true,
+		},
+
+		// Invalid ranges.
+		{
+			name: "IPv4 not aligned to single prefix",
+			from: "10.0.0.1",
+			to:   "10.0.0.3",
+			ok:   false,
+		},
+		{
+			name: "IPv4 from > to",
+			from: "10.0.1.0",
+			to:   "10.0.0.255",
+			ok:   false,
+		},
+		{
+			name: "IPv6 not aligned to single prefix",
+			from: "2001:db8::1",
+			to:   "2001:db8::3",
+			ok:   false,
+		},
+		{
+			name: "IPv4 partial range",
+			from: "10.0.0.0",
+			to:   "10.0.0.200",
+			ok:   false,
+		},
+		{
+			name: "mixed address families",
+			from: "10.0.0.0",
+			to:   "2001:db8::ffff",
+			ok:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			from := netip.MustParseAddr(tt.from)
+			to := netip.MustParseAddr(tt.to)
+
+			prefix, ok := RangeToCIDR(from, to)
+			require.Equal(t, tt.ok, ok)
+			if !tt.ok {
+				return
+			}
+
+			expected := netip.MustParsePrefix(tt.prefix)
+			assert.Equal(t, expected, prefix)
+		})
+	}
+}
+
 // BenchmarkLastAddr benchmarks the LastAddr function
 func BenchmarkLastAddr(b *testing.B) {
 	prefixes := []netip.Prefix{
@@ -264,5 +452,32 @@ func BenchmarkLastAddr(b *testing.B) {
 		for _, p := range prefixes {
 			LastAddr(p)
 		}
+	}
+}
+
+func BenchmarkRangeToCIDR(b *testing.B) {
+	ranges := []struct {
+		name string
+		from netip.Addr
+		to   netip.Addr
+	}{
+		{"IPv4/24", netip.MustParseAddr("192.168.1.0"), netip.MustParseAddr("192.168.1.255")},
+		{"IPv4/25", netip.MustParseAddr("192.168.1.0"), netip.MustParseAddr("192.168.1.127")},
+		{"IPv4/30", netip.MustParseAddr("192.168.1.4"), netip.MustParseAddr("192.168.1.7")},
+		{"IPv4/32", netip.MustParseAddr("10.0.0.1"), netip.MustParseAddr("10.0.0.1")},
+		{"IPv6/45", netip.MustParseAddr("2001:db8:abc0::"), netip.MustParseAddr("2001:db8:abc7:ffff:ffff:ffff:ffff:ffff")},
+		{"IPv6/53", netip.MustParseAddr("2001:db8:abcd::"), netip.MustParseAddr("2001:db8:abcd:7ff:ffff:ffff:ffff:ffff")},
+		{"IPv6/64", netip.MustParseAddr("2001:db8:1234:5678::"), netip.MustParseAddr("2001:db8:1234:5678:ffff:ffff:ffff:ffff")},
+		{"IPv6/79", netip.MustParseAddr("2001:db8:1234:5678:ab00::"), netip.MustParseAddr("2001:db8:1234:5678:ab01:ffff:ffff:ffff")},
+		{"IPv6/121", netip.MustParseAddr("2001:db8::1:0"), netip.MustParseAddr("2001:db8::1:7f")},
+		{"IPv6/128", netip.MustParseAddr("2001:db8::1"), netip.MustParseAddr("2001:db8::1")},
+	}
+
+	for _, r := range ranges {
+		b.Run(r.name, func(b *testing.B) {
+			for b.Loop() {
+				RangeToCIDR(r.from, r.to)
+			}
+		})
 	}
 }

@@ -192,7 +192,7 @@ func (m *RouteService) ShowFIB(
 			continue
 		}
 
-		prefix := formatPrefixRange(e.AddressFamily, e.PrefixFrom, e.PrefixTo)
+		prefix := formatPrefixRange(e.PrefixFrom, e.PrefixTo)
 
 		nexthops := make([]*routepb.FIBNexthop, len(e.Nexthops))
 		for i, nh := range e.Nexthops {
@@ -216,71 +216,12 @@ func (m *RouteService) ShowFIB(
 //
 // If the range corresponds to a single CIDR prefix, it returns CIDR notation;
 // otherwise "from-to" range notation.
-func formatPrefixRange(af uint8, from netip.Addr, to netip.Addr) string {
-	if prefix, ok := rangeToCIDR(af, from, to); ok {
+func formatPrefixRange(from, to netip.Addr) string {
+	if prefix, ok := xnetip.RangeToCIDR(from, to); ok {
 		return prefix.String()
 	}
 
 	return from.String() + "-" + to.String()
-}
-
-// rangeToCIDR attempts to convert an address range to a CIDR prefix.
-//
-// Returns false if the range does not correspond to a single prefix.
-func rangeToCIDR(af uint8, from netip.Addr, to netip.Addr) (netip.Prefix, bool) {
-	var bits int
-	if af == 4 {
-		bits = 32
-	} else {
-		bits = 128
-	}
-
-	fromBytes := from.As16()
-	toBytes := to.As16()
-
-	// For IPv4, the relevant bytes are at offset 12..15 in As16().
-	offset := 0
-	if af == 4 {
-		offset = 12
-	}
-	byteLen := bits / 8
-
-	// Find the prefix length by XORing from and to, then counting leading
-	// zeros in the XOR result.
-	prefixLen := 0
-	for i := range byteLen {
-		xor := fromBytes[offset+i] ^ toBytes[offset+i]
-		if xor == 0 {
-			prefixLen += 8
-			continue
-		}
-		// Count leading zeros in this byte.
-		for bit := 7; bit >= 0; bit-- {
-			if xor&(1<<bit) != 0 {
-				break
-			}
-			prefixLen++
-		}
-		break
-	}
-
-	// Verify: from must have all host bits zero, to must have all host bits
-	// one.
-	prefix, err := from.Prefix(prefixLen)
-	if err != nil {
-		return netip.Prefix{}, false
-	}
-	if prefix.Addr() != from {
-		return netip.Prefix{}, false
-	}
-
-	// Verify the "to" address matches the broadcast for this prefix.
-	expectedTo := xnetip.LastAddr(prefix)
-	if expectedTo != to {
-		return netip.Prefix{}, false
-	}
-
-	return prefix, true
 }
 
 func (m *RouteService) FlushRoutes(
