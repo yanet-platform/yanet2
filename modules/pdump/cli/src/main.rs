@@ -131,7 +131,7 @@ impl PdumpService {
         }
 
         if let Some(ring_size) = cmd.ring_size {
-            cfg.ring_size = ring_size;
+            cfg.ring_size = ring_size.get();
             mask.paths.push("ring_size".to_string());
         }
 

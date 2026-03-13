@@ -1,3 +1,6 @@
+use core::str::FromStr;
+
+use bytesize::ByteSize;
 use clap::{Parser, ValueEnum};
 
 #[derive(Debug, Clone, Parser)]
@@ -45,8 +48,8 @@ pub struct SetConfigCmd {
     pub snaplen: Option<u32>,
 
     /// Per-worker ring buffer size
-    #[arg(long = "ring-size", value_parser=ring_buffer_size_range)]
-    pub ring_size: Option<u32>,
+    #[arg(long = "ring-size")]
+    pub ring_size: Option<RingBufferSize>,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -68,20 +71,38 @@ pub struct ReadCmd {
     pub num: Option<u64>,
 }
 
-fn ring_buffer_size_range(s: &str) -> Result<u64, String> {
-    let val = s.parse::<bytesize::ByteSize>()?;
-    let min = bytesize::ByteSize::mib(1);
-    let max = bytesize::ByteSize::mib(64);
-    if val > max {
-        Err(format!("exceeds maximum of {max}"))
-    } else if val < min {
-        Err(format!("less than minimum of {min}"))
-    } else {
-        let val = val.as_u64();
-        if !val.is_power_of_two() {
-            return Err(format!("value is not a power of two: {val}"));
+/// Ring buffer size.
+#[derive(Debug, Clone, Copy)]
+pub struct RingBufferSize(u32);
+
+impl RingBufferSize {
+    /// Minimum ring buffer size.
+    const MIN: ByteSize = ByteSize::mib(1);
+    /// Maximum ring buffer size.
+    const MAX: ByteSize = ByteSize::mib(64);
+
+    /// Get the underlying byte size.
+    #[inline]
+    pub const fn get(self) -> u32 {
+        let Self(v) = self;
+        v
+    }
+}
+
+impl FromStr for RingBufferSize {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.parse::<ByteSize>()? {
+            v if v < Self::MIN => Err(format!("less than minimum of {}", Self::MIN)),
+            v if v > Self::MAX => Err(format!("exceeds maximum of {}", Self::MAX)),
+            v if !v.as_u64().is_power_of_two() => Err(format!("value is not a power of two: {}", v.as_u64())),
+            v => {
+                // NOTE: truncation is impossible because of the above checks.
+                let v = v.as_u64() as u32;
+                Ok(Self(v))
+            }
         }
-        Ok(val)
     }
 }
 
