@@ -59,8 +59,23 @@ pub fn locate_modules(prefix: &str) -> Result<HashSet<String>, Box<dyn Error>> {
             continue;
         }
 
-        for entry in fs::read_dir(path)? {
-            let entry = entry?;
+        let entries = match fs::read_dir(&path) {
+            Ok(entries) => entries,
+            Err(err) => {
+                // Continue on error, because some directories may not be readable.
+                log::trace!("failed to read directory {}: {err}", path.display());
+                continue;
+            }
+        };
+        for entry in entries {
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(err) => {
+                    // Continue on error, because some entries may not be readable.
+                    log::trace!("failed to read entry in directory {}: {err}", path.display());
+                    continue;
+                }
+            };
             let path = entry.path();
 
             if !path.is_file() {
