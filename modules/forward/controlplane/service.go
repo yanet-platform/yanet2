@@ -152,7 +152,7 @@ func (m *ForwardService) UpdateConfig(ctx context.Context, req *forwardpb.Update
 	}
 
 	if oldModule, ok := m.configs[name]; ok {
-		FreeModuleConfig(oldModule.module)
+		oldModule.module.Free()
 	}
 
 	m.configs[name] = forwardConfig{

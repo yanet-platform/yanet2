@@ -26,10 +26,6 @@ type ModuleConfig struct {
 }
 
 func NewModuleConfig(agent *ffi.Agent, name string) (*ModuleConfig, error) {
-	if agent == nil {
-		return nil, fmt.Errorf("agent cannot be nil")
-	}
-
 	cName := C.CString(name)
 	defer C.free(unsafe.Pointer(cName))
 
@@ -46,8 +42,11 @@ func NewModuleConfig(agent *ffi.Agent, name string) (*ModuleConfig, error) {
 	}, nil
 }
 
-func FreeModuleConfig(module *ModuleConfig) {
-	C.forward_module_config_free(module.asRawPtr())
+func (m *ModuleConfig) Free() {
+	if ptr := m.asRawPtr(); ptr != nil {
+		C.forward_module_config_free(ptr)
+		m.ptr = ffi.ModuleConfig{}
+	}
 }
 
 func (m *ModuleConfig) asRawPtr() *C.struct_cp_module {
