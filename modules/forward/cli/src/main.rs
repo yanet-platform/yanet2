@@ -79,7 +79,7 @@ pub enum ModeCmd {
 
 #[derive(Debug, Clone, Parser)]
 pub struct ShowCmd {
-    /// The name of the module to delete
+    /// The name of the module config to show.
     #[arg(long = "cfg", short)]
     pub config_name: String,
 }
