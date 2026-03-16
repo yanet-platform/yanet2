@@ -27,3 +27,8 @@ map_free(struct map *map);
 
 int
 map_find(struct map *map, size_t key, size_t *value);
+
+size_t
+map_memory_usage(
+    struct map *map
+);

@@ -75,3 +75,10 @@ map_find(struct map *map, size_t key, size_t *value) {
 		return 0;
 	}
 }
+
+size_t
+map_memory_usage(
+    struct map *map
+) {
+    return big_array_memory_usage(&map->keys) + big_array_memory_usage(&map->values) + btree_u64_memory_usage(&map->btree);
+}
