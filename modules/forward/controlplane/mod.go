@@ -25,7 +25,7 @@ type ForwardModule struct {
 func NewForwardModule(cfg *Config, log *zap.SugaredLogger) (*ForwardModule, error) {
 	log = log.With(zap.String("module", "forwardpb.ForwardService"))
 
-	shm, err := ffi.AttachSharedMemory(cfg.MemoryPath)
+	shm, err := ffi.AttachSharedMemory(cfg.MemoryPath.Unwrap())
 	if err != nil {
 		return nil, err
 	}
@@ -35,7 +35,7 @@ func NewForwardModule(cfg *Config, log *zap.SugaredLogger) (*ForwardModule, erro
 		zap.Stringer("size", cfg.MemoryRequirements),
 	)
 
-	agent, err := shm.AgentReattach(agentName, cfg.InstanceID, cfg.MemoryRequirements)
+	agent, err := shm.AgentReattach(agentName, cfg.InstanceID, cfg.MemoryRequirements.Unwrap())
 	if err != nil {
 		return nil, fmt.Errorf("failed to attach agent to shared memory: %w", err)
 	}
@@ -56,7 +56,7 @@ func (m *ForwardModule) Name() string {
 }
 
 func (m *ForwardModule) Endpoint() string {
-	return m.cfg.Endpoint
+	return m.cfg.Endpoint.Unwrap()
 }
 
 func (m *ForwardModule) ServicesNames() []string {

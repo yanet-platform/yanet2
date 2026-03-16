@@ -23,7 +23,7 @@ type DevicePlainDevice struct {
 func NewDevicePlainDevice(cfg *Config, log *zap.SugaredLogger) (*DevicePlainDevice, error) {
 	log = log.With(zap.String("module", "plainpb.DevicePlainService"))
 
-	shm, err := ffi.AttachSharedMemory(cfg.MemoryPath)
+	shm, err := ffi.AttachSharedMemory(cfg.MemoryPath.Unwrap())
 	if err != nil {
 		return nil, err
 	}
@@ -33,7 +33,7 @@ func NewDevicePlainDevice(cfg *Config, log *zap.SugaredLogger) (*DevicePlainDevi
 		zap.Stringer("size", cfg.MemoryRequirements),
 	)
 
-	agent, err := shm.AgentReattach("plain", cfg.InstanceID, cfg.MemoryRequirements)
+	agent, err := shm.AgentReattach("plain", cfg.InstanceID, cfg.MemoryRequirements.Unwrap())
 	if err != nil {
 		return nil, fmt.Errorf("failed to attach agent to shared memory: %w", err)
 	}
@@ -54,7 +54,7 @@ func (m *DevicePlainDevice) Name() string {
 }
 
 func (m *DevicePlainDevice) Endpoint() string {
-	return m.cfg.Endpoint
+	return m.cfg.Endpoint.Unwrap()
 }
 
 func (m *DevicePlainDevice) ServicesNames() []string {

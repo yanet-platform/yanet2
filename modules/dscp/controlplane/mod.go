@@ -23,7 +23,7 @@ type DscpModule struct {
 func NewDSCPModule(cfg *Config, log *zap.SugaredLogger) (*DscpModule, error) {
 	log = log.With(zap.String("module", "dscppb.DscpService"))
 
-	shm, err := ffi.AttachSharedMemory(cfg.MemoryPath)
+	shm, err := ffi.AttachSharedMemory(cfg.MemoryPath.Unwrap())
 	if err != nil {
 		return nil, err
 	}
@@ -33,7 +33,7 @@ func NewDSCPModule(cfg *Config, log *zap.SugaredLogger) (*DscpModule, error) {
 		zap.Stringer("size", cfg.MemoryRequirements),
 	)
 
-	agent, err := shm.AgentReattach("dscp", cfg.InstanceID, cfg.MemoryRequirements)
+	agent, err := shm.AgentReattach("dscp", cfg.InstanceID, cfg.MemoryRequirements.Unwrap())
 	if err != nil {
 		return nil, fmt.Errorf("failed to attach agent to shared memory: %w", err)
 	}
@@ -54,7 +54,7 @@ func (m *DscpModule) Name() string {
 }
 
 func (m *DscpModule) Endpoint() string {
-	return m.cfg.Endpoint
+	return m.cfg.Endpoint.Unwrap()
 }
 
 func (m *DscpModule) ServicesNames() []string {

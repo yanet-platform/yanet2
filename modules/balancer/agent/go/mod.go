@@ -23,12 +23,12 @@ func NewBalancerModule(
 ) (*BalancerModule, error) {
 	log = log.With(zap.String("module", "balancerpb.BalancerService"))
 
-	shm, err := yanet.AttachSharedMemory(cfg.MemoryPath)
+	shm, err := yanet.AttachSharedMemory(cfg.MemoryPath.Unwrap())
 	if err != nil {
 		return nil, fmt.Errorf("failed to attach shared memory: %w", err)
 	}
 
-	svc, err := NewBalancerService(shm, cfg.MemoryRequirements, log)
+	svc, err := NewBalancerService(shm, cfg.MemoryRequirements.Unwrap(), log)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create balancer service: %w", err)
 	}
@@ -44,7 +44,7 @@ func (m *BalancerModule) Name() string {
 }
 
 func (m *BalancerModule) Endpoint() string {
-	return m.cfg.Endpoint
+	return m.cfg.Endpoint.Unwrap()
 }
 
 func (m *BalancerModule) ServicesNames() []string {

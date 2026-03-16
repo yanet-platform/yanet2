@@ -45,7 +45,7 @@ func NewRouteModule(cfg *Config, log *zap.SugaredLogger) (*RouteModule, error) {
 		return nil, fmt.Errorf("failed to create neighbour monitor: %w", err)
 	}
 
-	shm, err := cpffi.AttachSharedMemory(cfg.MemoryPath)
+	shm, err := cpffi.AttachSharedMemory(cfg.MemoryPath.Unwrap())
 	if err != nil {
 		return nil, fmt.Errorf("failed to attach to shared memory %q: %w", cfg.MemoryPath, err)
 	}
@@ -55,7 +55,7 @@ func NewRouteModule(cfg *Config, log *zap.SugaredLogger) (*RouteModule, error) {
 		zap.Stringer("size", cfg.MemoryRequirements),
 	)
 
-	agent, err := shm.AgentReattach("route", cfg.InstanceID, cfg.MemoryRequirements)
+	agent, err := shm.AgentReattach("route", cfg.InstanceID, cfg.MemoryRequirements.Unwrap())
 	if err != nil {
 		return nil, fmt.Errorf("failed to attach agent to shared memory: %w", err)
 	}
@@ -109,7 +109,7 @@ func (m *RouteModule) Name() string {
 }
 
 func (m *RouteModule) Endpoint() string {
-	return m.cfg.Endpoint
+	return m.cfg.Endpoint.Unwrap()
 }
 
 func (m *RouteModule) ServicesNames() []string {

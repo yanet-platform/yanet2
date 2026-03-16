@@ -31,7 +31,7 @@ type ACLModule struct {
 func NewACLModule(cfg *Config, log *zap.SugaredLogger) (*ACLModule, error) {
 	log = log.With(zap.String("module", serviceName))
 
-	shm, err := ffi.AttachSharedMemory(cfg.MemoryPath)
+	shm, err := ffi.AttachSharedMemory(cfg.MemoryPath.Unwrap())
 	if err != nil {
 		return nil, fmt.Errorf("failed to attach shared memory: %w", err)
 	}
@@ -41,7 +41,7 @@ func NewACLModule(cfg *Config, log *zap.SugaredLogger) (*ACLModule, error) {
 		zap.Stringer("size", cfg.MemoryRequirements),
 	)
 
-	agent, err := shm.AgentReattach(agentName, cfg.InstanceID, cfg.MemoryRequirements)
+	agent, err := shm.AgentReattach(agentName, cfg.InstanceID, cfg.MemoryRequirements.Unwrap())
 	if err != nil {
 		return nil, fmt.Errorf("failed to attach agent to shared memory: %w", err)
 	}
@@ -65,7 +65,7 @@ func (m *ACLModule) Name() string {
 }
 
 func (m *ACLModule) Endpoint() string {
-	return m.cfg.Endpoint
+	return m.cfg.Endpoint.Unwrap()
 }
 
 func (m *ACLModule) ServicesNames() []string {

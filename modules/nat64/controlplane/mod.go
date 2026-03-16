@@ -23,7 +23,7 @@ type NAT64Module struct {
 func NewNAT64Module(cfg *Config, log *zap.SugaredLogger) (*NAT64Module, error) {
 	log = log.With(zap.String("module", "nat64pb.NAT64Service"))
 
-	shm, err := ffi.AttachSharedMemory(cfg.MemoryPath)
+	shm, err := ffi.AttachSharedMemory(cfg.MemoryPath.Unwrap())
 	if err != nil {
 		return nil, err
 	}
@@ -33,7 +33,7 @@ func NewNAT64Module(cfg *Config, log *zap.SugaredLogger) (*NAT64Module, error) {
 		zap.Stringer("size", cfg.MemoryRequirements),
 	)
 
-	agent, err := shm.AgentReattach("nat64", cfg.InstanceID, cfg.MemoryRequirements)
+	agent, err := shm.AgentReattach("nat64", cfg.InstanceID, cfg.MemoryRequirements.Unwrap())
 	if err != nil {
 		return nil, fmt.Errorf("failed to attach agent to shared memory: %w", err)
 	}
@@ -54,7 +54,7 @@ func (m *NAT64Module) Name() string {
 }
 
 func (m *NAT64Module) Endpoint() string {
-	return m.cfg.Endpoint
+	return m.cfg.Endpoint.Unwrap()
 }
 
 func (m *NAT64Module) ServicesNames() []string {

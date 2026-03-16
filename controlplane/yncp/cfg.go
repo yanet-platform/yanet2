@@ -8,6 +8,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/yanet-platform/yanet2/common/go/logging"
+	"github.com/yanet-platform/yanet2/common/go/xcfg"
 	"github.com/yanet-platform/yanet2/controlplane/internal/gateway"
 
 	acl "github.com/yanet-platform/yanet2/modules/acl/controlplane"
@@ -72,7 +73,7 @@ func LoadConfig(path string) (*Config, error) {
 	}
 
 	cfg := DefaultConfig()
-	if err := yaml.Unmarshal(buf, cfg); err != nil {
+	if err := xcfg.Decode(buf, cfg); err != nil {
 		return nil, fmt.Errorf("failed to deserialize config: %w", err)
 	}
 
