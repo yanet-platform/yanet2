@@ -1,9 +1,6 @@
 package fwstate
 
 import (
-	"fmt"
-	"net"
-
 	"github.com/c2h5oh/datasize"
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
 )
@@ -24,19 +21,6 @@ type Config struct {
 
 	// GatewayEndpoint is the address of the gateway service
 	GatewayEndpoint xcfg.NonEmptyString `yaml:"gateway_endpoint"`
-}
-
-// Validate checks if the configuration is valid
-func (c *Config) Validate() error {
-	if _, err := net.ResolveTCPAddr("tcp", c.Endpoint.Unwrap()); err != nil {
-		return fmt.Errorf("invalid endpoint address: %w", err)
-	}
-
-	if _, err := net.ResolveTCPAddr("tcp", c.GatewayEndpoint.Unwrap()); err != nil {
-		return fmt.Errorf("invalid gateway endpoint address: %w", err)
-	}
-
-	return nil
 }
 
 // DefaultConfig returns default configuration
