@@ -12,29 +12,28 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/filter/ipnet4"
 	"github.com/yanet-platform/yanet2/common/go/filter/ipnet6"
 	"github.com/yanet-platform/yanet2/common/go/filter/vlanrange"
-	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	cpffi "github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/forward/controlplane/forwardpb"
+	"github.com/yanet-platform/yanet2/modules/forward/internal/ffi"
 )
-
-type ffiConfigUpdater func(m *ForwardService, name string) error
 
 type forwardConfig struct {
 	rules  []*forwardpb.Rule
-	module *ModuleConfig
+	module *ffi.ModuleConfig
 }
 
 type ForwardService struct {
 	forwardpb.UnimplementedForwardServiceServer
 
 	mu      sync.Mutex
-	agent   *ffi.Agent
+	agent   *cpffi.Agent
 	configs map[string]forwardConfig
 }
 
-func NewForwardService(agent *ffi.Agent) *ForwardService {
+func NewForwardService(agent *cpffi.Agent) *ForwardService {
 	return &ForwardService{
 		agent:   agent,
-		configs: make(map[string]forwardConfig),
+		configs: map[string]forwardConfig{},
 	}
 }
 
@@ -46,7 +45,7 @@ func (m *ForwardService) ListConfigs(
 		Configs: make([]string, 0),
 	}
 
-	// Lock instances store and module updates
+	// Lock instances store and module updates.
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -88,7 +87,7 @@ func (m *ForwardService) UpdateConfig(ctx context.Context, req *forwardpb.Update
 
 	reqRules := req.Rules
 
-	rules := make([]forwardRule, 0, len(reqRules))
+	rules := make([]ffi.ForwardRule, 0, len(reqRules))
 	for _, reqRule := range reqRules {
 		devices, err := device.FromDevices(reqRule.Devices)
 		if err != nil {
@@ -115,39 +114,38 @@ func (m *ForwardService) UpdateConfig(ctx context.Context, req *forwardpb.Update
 			return nil, err
 		}
 
-		rule := forwardRule{
-			target:     reqRule.Action.Target,
-			mode:       modeNone,
-			counter:    reqRule.Action.Counter,
-			devices:    devices,
-			vlanRanges: vlanRanges,
-			src4s:      src4s,
-			dst4s:      dst4s,
-			src6s:      src6s,
-			dst6s:      dst6s,
+		rule := ffi.ForwardRule{
+			Target:     reqRule.Action.Target,
+			Mode:       ffi.ModeNone,
+			Counter:    reqRule.Action.Counter,
+			Devices:    devices,
+			VlanRanges: vlanRanges,
+			Src4s:      src4s,
+			Dst4s:      dst4s,
+			Src6s:      src6s,
+			Dst6s:      dst6s,
 		}
 
 		if reqRule.Action.Mode == forwardpb.ForwardMode_IN {
-			rule.mode = modeIn
+			rule.Mode = ffi.ModeIn
 		}
 		if reqRule.Action.Mode == forwardpb.ForwardMode_OUT {
-			rule.mode = modeOut
+			rule.Mode = ffi.ModeOut
 		}
 
 		rules = append(rules, rule)
 	}
 
-	module, err := NewModuleConfig(m.agent, name)
+	module, err := ffi.NewModuleConfig(m.agent, name)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create module config: %w", err)
-
 	}
 
 	if err := module.Update(rules); err != nil {
 		return nil, fmt.Errorf("failed to update module config: %w", err)
 	}
 
-	if err := m.agent.UpdateModules([]ffi.ModuleConfig{module.AsFFIModule()}); err != nil {
+	if err := m.agent.UpdateModules([]cpffi.ModuleConfig{module.AsFFIModule()}); err != nil {
 		return nil, fmt.Errorf("failed to update module: %w", err)
 	}
 
@@ -171,7 +169,7 @@ func (m *ForwardService) DeleteConfig(ctx context.Context, req *forwardpb.Delete
 	// Remove module configuration from the control plane.
 	// TODO
 
-	deleted := DeleteConfig(m, name)
+	deleted := m.agent.DeleteModuleConfig(name) == nil
 
 	response := &forwardpb.DeleteConfigResponse{
 		Deleted: deleted,
