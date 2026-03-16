@@ -42,7 +42,7 @@ pub mod filterpb {
                     s.serialize_str(&net.to_string())
                 }
                 (16, 16) => {
-                    let addr = u128::from_be_bytes(<[u8; 16]>::try_from(self.mask.as_slice()).expect("checked above"));
+                    let addr = u128::from_be_bytes(<[u8; 16]>::try_from(self.addr.as_slice()).expect("checked above"));
                     let mask = u128::from_be_bytes(<[u8; 16]>::try_from(self.mask.as_slice()).expect("checked above"));
                     let net = Ipv6Network::from_bits(addr, mask);
                     s.serialize_str(&net.to_string())
