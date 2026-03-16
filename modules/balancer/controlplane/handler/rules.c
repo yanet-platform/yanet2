@@ -166,6 +166,36 @@ build_filter(
 	return 0;
 }
 
+void
+free_filter_ipv4(
+	struct packet_handler_vs *packet_handler_vs, struct memory_context *mctx
+) {
+	if (packet_handler_vs->filter_reused) {
+		return;
+	}
+	struct filter *filter = ADDR_OF(&packet_handler_vs->filter);
+	if (filter == NULL) {
+		return;
+	}
+	FILTER_FREE(filter, vs_lookup_ipv4);
+	memory_bfree(mctx, filter, sizeof(struct filter));
+}
+
+void
+free_filter_ipv6(
+	struct packet_handler_vs *packet_handler_vs, struct memory_context *mctx
+) {
+	if (packet_handler_vs->filter_reused) {
+		return;
+	}
+	struct filter *filter = ADDR_OF(&packet_handler_vs->filter);
+	if (filter == NULL) {
+		return;
+	}
+	FILTER_FREE(filter, vs_lookup_ipv6);
+	memory_bfree(mctx, filter, sizeof(struct filter));
+}
+
 uint64_t
 rules_memory_usage(size_t rules_count, struct filter_rule *rules) {
 	uint64_t result = sizeof(struct filter_rule) * rules_count;

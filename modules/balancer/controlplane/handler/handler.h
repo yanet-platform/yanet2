@@ -219,3 +219,18 @@ packet_handler_real_idx(
 	struct real_identifier *real,
 	struct real_ph_index *idx
 );
+
+/**
+ * Free resources held by a packet handler.
+ *
+ * Releases all memory and structures owned by the handler, including:
+ * - VS and real registries
+ * - Filters (unless reused by another handler)
+ * - LPM trees for announce and decap
+ * - Index maps
+ * - The handler structure itself
+ *
+ * @param handler Packet handler instance to free
+ */
+void
+packet_handler_free(struct packet_handler *handler);

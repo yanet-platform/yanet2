@@ -150,7 +150,7 @@ balancer_update_packet_handler(
 	} else {
 		diag_reset(&balancer->diag);
 		SET_OFFSET_OF(&balancer->handler, handler);
-		// TODO: free handler
+		packet_handler_free(prev_handler);
 		ret = 0;
 	}
 

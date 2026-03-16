@@ -485,3 +485,57 @@ packet_handler_real_idx(
 
 	return 0;
 }
+
+void
+packet_handler_free(struct packet_handler *handler) {
+	if (handler == NULL) {
+		return;
+	}
+
+	struct agent *agent = ADDR_OF(&handler->cp_module.agent);
+	struct memory_context *mctx = &agent->memory_context;
+
+	// Free VS filters (if not reused)
+	free_filter_ipv4(&handler->vs_ipv4, mctx);
+	free_filter_ipv6(&handler->vs_ipv6, mctx);
+
+	// Free announce LPMs
+	lpm_free(&handler->vs_ipv4.announce);
+	lpm_free(&handler->vs_ipv6.announce);
+
+	// Free VS index maps
+	map_free(&handler->vs_ipv4.index);
+	map_free(&handler->vs_ipv6.index);
+
+	// Free each VS's resources
+	struct vs *vss = ADDR_OF(&handler->vs);
+	for (size_t i = 0; i < handler->vs_count; i++) {
+		vs_free(&vss[i], mctx);
+	}
+
+	// Free VS array
+	memory_bfree(mctx, vss, sizeof(struct vs) * handler->vs_count);
+
+	// Free VS index map
+	map_free(&handler->vs_index);
+
+	// Free VS registry
+	vs_registry_free(&handler->vs_registry);
+
+	// Free reals array
+	struct real *reals = ADDR_OF(&handler->reals);
+	memory_bfree(mctx, reals, sizeof(struct real) * handler->reals_count);
+
+	// Free reals index map
+	map_free(&handler->reals_index);
+
+	// Free reals registry
+	reals_registry_free(&handler->reals_registry);
+
+	// Free decap LPMs
+	lpm_free(&handler->decap_ipv4);
+	lpm_free(&handler->decap_ipv6);
+
+	// Free the handler itself
+	memory_bfree(mctx, handler, sizeof(struct packet_handler));
+}

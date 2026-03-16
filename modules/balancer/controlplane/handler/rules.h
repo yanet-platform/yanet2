@@ -53,6 +53,34 @@ build_filter(
 	int proto
 );
 
+/**
+ * Free IPv4 VS lookup filter resources.
+ *
+ * Releases filter resources for an IPv4 packet handler VS.
+ * Does nothing if the filter was reused from a previous handler.
+ *
+ * @param packet_handler_vs Packet handler VS structure
+ * @param mctx Memory context for deallocations
+ */
+void
+free_filter_ipv4(
+	struct packet_handler_vs *packet_handler_vs, struct memory_context *mctx
+);
+
+/**
+ * Free IPv6 VS lookup filter resources.
+ *
+ * Releases filter resources for an IPv6 packet handler VS.
+ * Does nothing if the filter was reused from a previous handler.
+ *
+ * @param packet_handler_vs Packet handler VS structure
+ * @param mctx Memory context for deallocations
+ */
+void
+free_filter_ipv6(
+	struct packet_handler_vs *packet_handler_vs, struct memory_context *mctx
+);
+
 // TODO: docs
 uint64_t
 rules_memory_usage(size_t rules_count, struct filter_rule *rules);
