@@ -36,7 +36,7 @@ pub mod filterpb {
         fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
             match (self.addr.len(), self.mask.len()) {
                 (4, 4) => {
-                    let addr = u32::from_be_bytes(<[u8; 4]>::try_from(self.mask.as_slice()).expect("checked above"));
+                    let addr = u32::from_be_bytes(<[u8; 4]>::try_from(self.addr.as_slice()).expect("checked above"));
                     let mask = u32::from_be_bytes(<[u8; 4]>::try_from(self.mask.as_slice()).expect("checked above"));
                     let net = Ipv4Network::from_bits(addr, mask);
                     s.serialize_str(&net.to_string())
