@@ -166,7 +166,7 @@ packet_handler:
 state:
   # Session table configuration
   session_table:
-    capacity: 1000000  # Maximum concurrent sessions
+    capacity: 1024  # Maximum concurrent sessions
     max_load_factor: 0.75  # Trigger resize at 75% capacity
   
   # WLC (Weighted Least Connections) configuration

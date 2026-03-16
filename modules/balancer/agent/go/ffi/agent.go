@@ -60,6 +60,9 @@ func (a *BalancerAgent) Managers() []BalancerManager {
 		managers[i] = BalancerManager{handle: cManagersSlice[i]}
 	}
 
+	// Free the C-allocated array (the manager pointers themselves are owned by the agent)
+	C.free(unsafe.Pointer(cManagers.managers))
+
 	return managers
 }
 

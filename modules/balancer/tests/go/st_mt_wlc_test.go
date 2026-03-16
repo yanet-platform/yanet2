@@ -373,18 +373,21 @@ func runMultithreadedWlcTest(t *testing.T, config *multithreadTestConfig) {
 		)
 	}
 
-	done := make(chan struct{}, 1)
+	done := make(chan struct{})
+	refreshDone := make(chan struct{})
 
 	// Start extend session table routine
 	go func() {
+		defer close(refreshDone)
 		refreshRoutine(mock, balancer, done, config, errors)
 	}()
 
 	// Listen for errors
 	wg.Wait()
 
-	// Stop extend session table routine
-	done <- struct{}{}
+	// Stop extend session table routine and wait until it fully exits
+	close(done)
+	<-refreshDone
 
 	close(errors)
 
