@@ -85,9 +85,6 @@ pub struct ShowCmd {
 }
 
 #[derive(Debug, Clone, Parser)]
-pub struct ListCmd {}
-
-#[derive(Debug, Clone, Parser)]
 pub struct DeleteCmd {
     /// The name of the module config to delete.
     #[arg(long = "cfg", short)]
