@@ -17,6 +17,11 @@ use clap::ValueEnum;
 
 pub use self::interceptor::AuthLayer;
 
+/// Default certificate tag to match in the SSH agent.
+///
+/// TODO: from config.
+const DEFAULT_CERT_TAG: &str = ":insecure:";
+
 /// Supported authentication methods.
 #[derive(Debug, Clone, Copy, ValueEnum)]
 pub enum AuthMethod {
@@ -43,11 +48,11 @@ pub enum AuthError {
 }
 
 /// Create a tower layer based on the CLI auth arguments.
-pub fn create_layer(args: &AuthArgs) -> Result<AuthLayer, AuthError> {
+pub async fn create_layer(args: &AuthArgs) -> Result<AuthLayer, AuthError> {
     match args.auth {
         AuthMethod::None => Ok(AuthLayer::nop()),
         AuthMethod::Sshcert => {
-            let layer = AuthLayer::from_agent()?;
+            let layer = AuthLayer::from_agent(DEFAULT_CERT_TAG).await?;
             Ok(layer)
         }
     }

@@ -1,15 +1,13 @@
 //! Tonic gRPC interceptor for SSH certificate authentication.
-//!
-//! Uses a tower [`Layer`]/[`Service`] to intercept HTTP/2 requests and
-//! attach a signed SSH certificate token to the `x-yanet-authentication`
-//! metadata header. This approach (vs tonic's `Interceptor` trait) gives
-//! access to the request URI, which is needed for method binding.
 
 use std::{
-    sync::{Arc, Mutex},
+    future::Future,
+    pin::Pin,
+    sync::Arc,
     task::{Context, Poll},
 };
 
+use tokio::sync::Mutex;
 use tower::{Layer, Service};
 
 use super::{
@@ -20,7 +18,7 @@ use super::{
 /// Tower layer that wraps a service with SSH certificate authentication.
 #[derive(Clone)]
 pub struct AuthLayer {
-    inner: Arc<Mutex<AuthLayerState>>,
+    state: Arc<Mutex<AuthLayerState>>,
 }
 
 enum AuthLayerState {
@@ -32,23 +30,22 @@ impl AuthLayer {
     /// Create an auth layer that signs requests using the SSH agent.
     pub fn sshcert(agent: SshAgent, cert_blob: Vec<u8>) -> Self {
         Self {
-            inner: Arc::new(Mutex::new(AuthLayerState::SshCert { agent, cert_blob })),
+            state: Arc::new(Mutex::new(AuthLayerState::SshCert { agent, cert_blob })),
         }
     }
 
-    /// Create an auth layer from the SSH agent, finding a `:insecure:`
-    /// certificate.
-    pub fn from_agent() -> Result<Self, AgentError> {
-        let mut agent = SshAgent::from_env()?;
-        // TODO: configurable certificate tag.
-        let (_cert, blob) = agent.find_certificate(":insecure:")?;
+    /// Create an auth layer from the SSH agent, finding a certificate
+    /// matching the given tag.
+    pub async fn from_agent(cert_tag: &str) -> Result<Self, AgentError> {
+        let mut agent = SshAgent::from_env().await?;
+        let (_cert, blob) = agent.find_certificate(cert_tag).await?;
         Ok(Self::sshcert(agent, blob))
     }
 
     /// Create a no-op auth layer that passes requests through unchanged.
     pub fn nop() -> Self {
         Self {
-            inner: Arc::new(Mutex::new(AuthLayerState::Nop)),
+            state: Arc::new(Mutex::new(AuthLayerState::Nop)),
         }
     }
 }
@@ -57,9 +54,11 @@ impl<S> Layer<S> for AuthLayer {
     type Service = AuthService<S>;
 
     fn layer(&self, inner: S) -> Self::Service {
-        AuthService { inner, state: self.inner.clone() }
+        AuthService { inner, state: self.state.clone() }
     }
 }
+
+type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
 /// Tower service that attaches SSH certificate auth tokens to requests.
 #[derive(Clone)]
@@ -70,40 +69,45 @@ pub struct AuthService<S> {
 
 impl<S, B> Service<http::Request<B>> for AuthService<S>
 where
-    S: Service<http::Request<B>>,
+    S: Service<http::Request<B>> + Clone + Send + 'static,
+    S::Future: Send,
+    S::Response: Send,
+    S::Error: Into<BoxError> + Send,
+    B: Send + 'static,
 {
     type Response = S::Response;
-    type Error = S::Error;
-    type Future = S::Future;
+    type Error = BoxError;
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.inner.poll_ready(cx)
+        self.inner.poll_ready(cx).map_err(Into::into)
     }
 
     fn call(&mut self, mut request: http::Request<B>) -> Self::Future {
-        let mut state = self.state.lock().expect("auth state lock poisoned");
+        // Standard Tower pattern: clone and swap to get an owned service
+        // for the async block.
+        let clone = self.inner.clone();
+        let mut inner = std::mem::replace(&mut self.inner, clone);
+        let state = self.state.clone();
 
-        if let AuthLayerState::SshCert { agent, cert_blob } = &mut *state {
-            let method = request.uri().path().to_string();
+        Box::pin(async move {
+            {
+                let mut guard = state.lock().await;
 
-            match Token::build(cert_blob, &method, agent) {
-                Ok(token) => match token.to_header_value() {
-                    Ok(header_value) => {
-                        if let Ok(value) = header_value.parse() {
-                            request.headers_mut().insert("x-yanet-authentication", value);
-                        }
-                    }
-                    Err(e) => {
-                        log::error!("failed to serialize sshcert token: {e}");
-                    }
-                },
-                Err(e) => {
-                    log::error!("failed to build sshcert token: {e}");
+                if let AuthLayerState::SshCert { agent, cert_blob } = &mut *guard {
+                    let method = request.uri().path().to_string();
+                    let header = Token::build_header_value(cert_blob, &method, agent)
+                        .await
+                        .map_err(|e| -> BoxError { Box::new(e) })?;
+
+                    let value = header
+                        .parse()
+                        .map_err(|e: http::header::InvalidHeaderValue| -> BoxError { Box::new(e) })?;
+                    request.headers_mut().insert("x-yanet-authentication", value);
                 }
             }
-        }
 
-        drop(state);
-        self.inner.call(request)
+            inner.call(request).await.map_err(Into::into)
+        })
     }
 }

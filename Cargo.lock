@@ -3145,6 +3145,7 @@ dependencies = [
  "simple_logger",
  "ssh-key",
  "thiserror",
+ "tokio",
  "tonic",
  "tower",
  "uuid",

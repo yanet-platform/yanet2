@@ -59,6 +59,7 @@ pub enum ConnectionError {
 /// Connect to the endpoint with all interceptors pre-applied.
 pub async fn connect(args: &ConnectionArgs) -> Result<LayeredChannel, ConnectionError> {
     let channel = Channel::from_shared(args.endpoint.clone())?.connect().await?;
-    let layer = auth::create_layer(&args.auth)?;
-    Ok(layer.layer(channel))
+    let auth = auth::create_layer(&args.auth).await?;
+
+    Ok(auth.layer(channel))
 }
