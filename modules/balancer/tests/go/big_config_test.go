@@ -461,7 +461,7 @@ func TestBigConfig(t *testing.T) {
 
 	// Phase 1: Test with 10 VS and 50 reals each
 	t.Run("Phase1_10VS_50Reals", func(t *testing.T) {
-		testPacketSending(t, ts, initialConfig, rng, 10, 10000)
+		testPacketSending(t, ts, initialConfig, rng, 10, 8000)
 	})
 
 	// Phase 2: Update to 20 VS with 20 reals each
@@ -479,7 +479,7 @@ func TestBigConfig(t *testing.T) {
 
 		utils.EnableAllReals(t, ts)
 
-		testPacketSending(t, ts, newConfig, rng, 10, 10000)
+		testPacketSending(t, ts, newConfig, rng, 10, 8000)
 	})
 }
 

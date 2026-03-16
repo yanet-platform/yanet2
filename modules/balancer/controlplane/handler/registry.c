@@ -57,7 +57,9 @@ service_registry_init(
 		void *elem_ptr = elems_bytes + idx * elem_size;
 
 		ssize_t stable_idx =
-			prev != NULL ? service_registry_lookup(prev, elem_ptr, cmp) : -1;
+			prev != NULL
+				? service_registry_lookup(prev, elem_ptr, cmp)
+				: -1;
 		if (stable_idx == -1) {
 			stable_idx = (ssize_t)registry->next_stable_index++;
 		}
@@ -82,7 +84,9 @@ service_registry_free(struct service_registry *registry) {
 }
 
 ssize_t
-service_registry_lookup(struct service_registry *registry, void *elem, registry_cmp cmp) {
+service_registry_lookup(
+	struct service_registry *registry, const void *elem, registry_cmp cmp
+) {
 	ssize_t left = -1;
 	ssize_t right = (ssize_t)registry->elems_count;
 	while (left + 1 < right) {
@@ -162,17 +166,20 @@ real_identifier_cmp(const void *left, const void *right) {
 	}
 
 	if (a->relative.ip_proto == IPPROTO_IP) {
-		c = memcmp(a->relative.addr.v4.bytes,
-			   b->relative.addr.v4.bytes,
-			   NET4_LEN);
+		c =
+			memcmp(a->relative.addr.v4.bytes,
+			       b->relative.addr.v4.bytes,
+			       NET4_LEN);
 	} else if (a->relative.ip_proto == IPPROTO_IPV6) {
-		c = memcmp(a->relative.addr.v6.bytes,
-			   b->relative.addr.v6.bytes,
-			   NET6_LEN);
+		c =
+			memcmp(a->relative.addr.v6.bytes,
+			       b->relative.addr.v6.bytes,
+			       NET6_LEN);
 	} else {
-		c = memcmp(&a->relative.addr,
-			   &b->relative.addr,
-			   sizeof(a->relative.addr));
+		c =
+			memcmp(&a->relative.addr,
+			       &b->relative.addr,
+			       sizeof(a->relative.addr));
 	}
 	if (c != 0) {
 		return c;
@@ -206,7 +213,7 @@ vs_registry_free(vs_registry_t *registry) {
 }
 
 ssize_t
-vs_registry_lookup(vs_registry_t *registry, struct vs_identifier *vs) {
+vs_registry_lookup(vs_registry_t *registry, const struct vs_identifier *vs) {
 	return service_registry_lookup(registry, vs, vs_identifier_cmp);
 }
 
@@ -235,6 +242,8 @@ reals_registry_free(reals_registry_t *registry) {
 }
 
 ssize_t
-reals_registry_lookup(reals_registry_t *registry, struct real_identifier *real) {
+reals_registry_lookup(
+	reals_registry_t *registry, const struct real_identifier *real
+) {
 	return service_registry_lookup(registry, real, real_identifier_cmp);
 }

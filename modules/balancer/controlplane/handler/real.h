@@ -26,33 +26,45 @@ struct real {
 	// The address is masked by the mask during initialization
 	const struct net src;
 
-	// Identifier of the real server (destination address + VS identifier)
-	// Uses relative_real_identifier which contains the backend's address
-	const struct relative_real_identifier identifier;
+	// Full identifier of the real server
+	const struct real_identifier identifier;
 
-	// Index in the balancer state's real registry
-	// Used to look up real_state for weight and enabled status
-	const size_t registry_idx;
+	// Stable index in the handler's real registry
+	// Preserved across config updates for the same real
+	const size_t stable_idx;
 
 	// Counter ID for tracking statistics for this real server
-	// Registered as "rl_<registry_idx>" in the counter registry
+	// Registered as "rl_<stable_idx>" in the counter registry
 	const uint64_t counter_id;
+
+	// Mutable state - preserved from previous config or set from config
+	// Whether traffic is allowed to this real. False by default
+	bool enabled;
+
+	// Scheduler weight [0..MAX_REAL_WEIGHT]
+	uint16_t weight;
 };
 
 ////////////////////////////////////////////////////////////////////////////////
 
 struct balancer_state;
 struct counter_registry;
+struct packet_handler;
 
 /**
  * Initialize a real view for the given packet handler index.
+ *
+ * Looks up or inserts the real in the handler's registry, assigns a stable
+ * index, and preserves enabled/weight state from prev_handler if the real
+ * existed before.
  *
  * Returns 0 on success, -1 on error.
  */
 int
 real_init(
 	struct real *real,
-	struct balancer_state *state,
+	struct packet_handler *handler,
+	struct packet_handler *prev_handler,
 	struct vs_identifier *vs,
 	struct named_real_config *config,
 	struct counter_registry *registry

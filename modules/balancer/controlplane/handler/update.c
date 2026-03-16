@@ -2,7 +2,7 @@
 #include "lib/controlplane/diag/diag.h"
 
 #include "real.h"
-#include "state/state.h"
+#include "registry.h"
 #include "vs.h"
 
 #include "handler.h"
@@ -35,32 +35,39 @@ unmark_vs_updated(size_t ph_idx) {
 
 static int
 validate_update(struct packet_handler *handler, struct real_update *update) {
-	struct balancer_state *state = ADDR_OF(&handler->state);
-
-	// validate real
-	struct real_state *real =
-		balancer_state_find_real(state, &update->identifier);
-	if (real == NULL) {
-		NEW_ERROR("real not found");
+	// validate real - check if it exists in handler's registry
+	ssize_t real_stable_idx = reals_registry_lookup(
+		&handler->reals_registry, &update->identifier
+	);
+	if (real_stable_idx < 0) {
+		NEW_ERROR("real not found in registry");
 		return -1;
 	}
-	if (ADDR_OF(&handler->reals_index)[real->registry_idx] ==
-	    (uint32_t)-1) {
-		NEW_ERROR("real is not registered in handler");
+
+	// check if real is present in current handler config
+	size_t real_config_idx;
+	if (map_find(
+		    &handler->reals_index, real_stable_idx, &real_config_idx
+	    ) != 0) {
+		NEW_ERROR("real is not present in current handler configuration"
+		);
 		return -1;
 	}
 
 	// validate virtual service
-	struct vs_state *vs = balancer_state_find_vs(
-		state, &update->identifier.vs_identifier
+	ssize_t vs_stable_idx = vs_registry_lookup(
+		&handler->vs_registry, &update->identifier.vs_identifier
 	);
-	if (vs == NULL) {
-		NEW_ERROR("virtual service not found");
+	if (vs_stable_idx < 0) {
+		NEW_ERROR("virtual service not found in registry");
 		return -1;
 	}
 
-	if (ADDR_OF(&handler->vs_index)[vs->registry_idx] == (uint32_t)-1) {
-		NEW_ERROR("virtual service is not registered in handler");
+	// check if VS is present in current handler config
+	size_t vs_config_idx;
+	if (map_find(&handler->vs_index, vs_stable_idx, &vs_config_idx) != 0) {
+		NEW_ERROR("virtual service is not present in current handler "
+			  "configuration");
 		return -1;
 	}
 
@@ -97,63 +104,78 @@ validate_update(struct packet_handler *handler, struct real_update *update) {
 
 static void
 update_real(struct packet_handler *handler, struct real_update *update) {
-	uint32_t *vs_index = ADDR_OF(&handler->vs_index);
-
-	struct balancer_state *state = ADDR_OF(&handler->state);
-
-	struct real_state *real_state =
-		balancer_state_find_real(state, &update->identifier);
-
-	struct vs_state *vs = balancer_state_find_vs(
-		state, &update->identifier.vs_identifier
+	// Find real's stable index
+	ssize_t real_stable_idx = reals_registry_lookup(
+		&handler->reals_registry, &update->identifier
 	);
+	assert(real_stable_idx >= 0);
 
-	assert(real_state != NULL && vs != NULL);
+	// Find real's config index
+	size_t real_config_idx;
+	int res = map_find(
+		&handler->reals_index, real_stable_idx, &real_config_idx
+	);
+	assert(res == 0);
 
-	size_t vs_ph_idx = vs_index[vs->registry_idx];
+	// Get the real structure
+	struct real *reals = ADDR_OF(&handler->reals);
+	struct real *real = &reals[real_config_idx];
 
+	// Find VS stable index
+	ssize_t vs_stable_idx = vs_registry_lookup(
+		&handler->vs_registry, &update->identifier.vs_identifier
+	);
+	assert(vs_stable_idx >= 0);
+
+	// Find VS config index
+	size_t vs_config_idx;
+	res = map_find(&handler->vs_index, vs_stable_idx, &vs_config_idx);
+	assert(res == 0);
+
+	// Update real fields
 	int updated = 0;
 	if (update->enabled != DONT_UPDATE_REAL_ENABLED &&
-	    real_state->enabled != update->enabled) {
-		real_state->enabled = update->enabled;
+	    real->enabled != update->enabled) {
+		real->enabled = update->enabled;
 		updated = 1;
 	}
 
 	if (update->weight != DONT_UPDATE_REAL_WEIGHT &&
-	    real_state->weight != update->weight) {
-		real_state->weight = update->weight;
+	    real->weight != update->weight) {
+		real->weight = update->weight;
 		updated = 1;
 	}
 
 	if (updated) {
-		mark_vs_updated(vs_ph_idx);
+		mark_vs_updated(vs_config_idx);
 	}
 }
 
 static int
 update_vs(struct packet_handler *handler, struct real_update *update) {
-	struct balancer_state *state = ADDR_OF(&handler->state);
-
-	struct vs_state *vss_state = balancer_state_find_vs(
-		state, &update->identifier.vs_identifier
+	// Find VS stable index
+	ssize_t vs_stable_idx = vs_registry_lookup(
+		&handler->vs_registry, &update->identifier.vs_identifier
 	);
-	assert(vss_state != NULL);
+	assert(vs_stable_idx >= 0);
 
-	uint32_t *vs_index = ADDR_OF(&handler->vs_index);
-	size_t vs_ph_idx = vs_index[vss_state->registry_idx];
+	// Find VS config index
+	size_t vs_config_idx;
+	int res = map_find(&handler->vs_index, vs_stable_idx, &vs_config_idx);
+	assert(res == 0);
 
-	if (!is_vs_updated(vs_ph_idx)) {
+	if (!is_vs_updated(vs_config_idx)) {
 		return 0;
 	}
 
 	struct vs *vss = ADDR_OF(&handler->vs);
-	struct vs *vs = &vss[vs_ph_idx];
+	struct vs *vs = &vss[vs_config_idx];
 	if (vs_update_reals(vs) != 0) {
 		PUSH_ERROR("failed to update reals");
 		return -1;
 	}
 
-	unmark_vs_updated(vs_ph_idx);
+	unmark_vs_updated(vs_config_idx);
 
 	return 0;
 }

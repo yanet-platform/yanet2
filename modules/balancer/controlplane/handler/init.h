@@ -8,6 +8,8 @@ struct memory_context;
 struct packet_handler_config;
 struct balancer_state;
 
+struct real;
+
 /**
  * Initialize packet handler counters.
  *
@@ -55,16 +57,23 @@ init_decaps(
  *
  * @param handler Packet handler instance
  * @param mctx Memory context
+ * @param reals Array of reals
+ * @param reals_count Number of reals
  * @return 0 on success, -1 on error
  */
 int
-setup_reals_index(struct packet_handler *handler, struct memory_context *mctx);
+setup_reals_index(
+	struct packet_handler *handler,
+	struct memory_context *mctx,
+	struct real *reals,
+	size_t reals_count
+);
 
 /**
  * Initialize reals for the packet handler.
  *
  * @param handler Packet handler instance
- * @param state Balancer state
+ * @param prev_handler Previous packet handler (for state preservation)
  * @param mctx Memory context
  * @param config Packet handler configuration
  * @param registry Counter registry
@@ -74,7 +83,7 @@ setup_reals_index(struct packet_handler *handler, struct memory_context *mctx);
 int
 init_reals(
 	struct packet_handler *handler,
-	struct balancer_state *state,
+	struct packet_handler *prev_handler,
 	struct memory_context *mctx,
 	struct packet_handler_config *config,
 	struct counter_registry *registry,

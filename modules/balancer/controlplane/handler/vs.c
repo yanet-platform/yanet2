@@ -14,9 +14,6 @@
 #include "selector.h"
 #include "vs.h"
 
-#include "state/state.h"
-#include "state/vs.h"
-
 #include <assert.h>
 #include <netinet/in.h>
 #include <stddef.h>
@@ -63,13 +60,10 @@ setup_reals(
 
 static int
 setup_selector(
-	struct vs *vs,
-	struct balancer_state *state,
-	struct memory_context *mctx,
-	struct vs_config *config
+	struct vs *vs, struct memory_context *mctx, struct vs_config *config
 ) {
 	const struct real *reals = ADDR_OF(&vs->reals);
-	if (selector_init(&vs->selector, state, mctx, config->scheduler) != 0) {
+	if (selector_init(&vs->selector, mctx, config->scheduler) != 0) {
 		PUSH_ERROR("failed to setup selector");
 		return -1;
 	}
@@ -84,7 +78,7 @@ setup_selector(
 static int
 register_counter(struct vs *vs, struct counter_registry *registry) {
 	char name[60];
-	sprintf(name, "vs_%zu", vs->registry_idx);
+	sprintf(name, "vs_%zu", vs->stable_idx);
 	vs->counter_id = counter_registry_register(
 		registry, name, sizeof(struct vs_stats) / sizeof(uint64_t)
 	);
@@ -140,26 +134,6 @@ setup_peers(
 		       sizeof(struct net6_addr) * vs->peers_v6_count);
 	}
 
-	return 0;
-}
-
-int
-vs_state_setup(
-	struct vs *vs,
-	struct balancer_state *balancer_state,
-	struct named_vs_config *config
-) {
-	struct vs_state *vs_state = balancer_state_find_or_insert_vs(
-		balancer_state, &config->identifier
-	);
-	if (!vs_state) {
-		PUSH_ERROR(
-			"failed to find or insert virtual service into registry"
-		);
-		return -1;
-	}
-	vs->registry_idx = vs_state->registry_idx;
-	vs->identifier = config->identifier;
 	return 0;
 }
 
@@ -888,7 +862,7 @@ setup_acl_rules(
 			// register counter
 			sprintf(counter_name,
 				"acl_%zu_%s",
-				vs->registry_idx,
+				vs->stable_idx,
 				rule_tag);
 			uint64_t counter_id = counter_registry_register(
 				counters, counter_name, 1
@@ -923,7 +897,6 @@ vs_with_identifier_and_registry_idx_init(
 	struct vs *prev_vs,
 	size_t first_real_idx,
 	struct real *reals,
-	struct balancer_state *balancer_state,
 	struct named_vs_config *config,
 	struct counter_registry *counters,
 	struct memory_context *mctx,
@@ -944,7 +917,7 @@ vs_with_identifier_and_registry_idx_init(
 		goto free_peers;
 	}
 
-	if (setup_selector(vs, balancer_state, mctx, &config->config) != 0) {
+	if (setup_selector(vs, mctx, &config->config) != 0) {
 		PUSH_ERROR("failed to setup selector");
 		goto free_peers;
 	}

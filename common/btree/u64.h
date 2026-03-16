@@ -633,9 +633,7 @@ btree_u64_lower_bounds(
 }
 
 static inline size_t
-btree_u64_memory_usage(
-	struct btree_u64 *btree
-) {
+btree_u64_memory_usage(struct btree_u64 *btree) {
 	return big_array_memory_usage(&btree->array);
 }
 

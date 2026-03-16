@@ -55,7 +55,6 @@ static int
 register_and_prepare_all_vs(
 	struct packet_handler *handler,
 	struct packet_handler *prev_handler,
-	struct balancer_state *state,
 	struct packet_handler_config *config,
 	struct vs *virtual_services,
 	size_t *initial_vs_idx,
@@ -74,7 +73,6 @@ register_and_prepare_all_vs(
 		    config->vs,
 		    initial_vs_idx,
 		    virtual_services,
-		    state,
 		    update_info,
 		    reuse_ipv4_filter
 	    ) != 0) {
@@ -91,7 +89,6 @@ register_and_prepare_all_vs(
 		    config->vs + ipv4_count,
 		    initial_vs_idx + ipv4_count,
 		    virtual_services + ipv4_count,
-		    state,
 		    update_info,
 		    reuse_ipv6_filter
 	    ) != 0) {
@@ -106,7 +103,6 @@ static int
 init_all_packet_handler_vs(
 	struct packet_handler *handler,
 	struct packet_handler *prev_handler,
-	struct balancer_state *state,
 	struct memory_context *mctx,
 	struct packet_handler_config *config,
 	struct counter_registry *registry,
@@ -121,7 +117,6 @@ init_all_packet_handler_vs(
 	if (init_packet_handler_vs(
 		    handler,
 		    IPPROTO_IP,
-		    state,
 		    mctx,
 		    config->vs,
 		    registry,
@@ -139,7 +134,6 @@ init_all_packet_handler_vs(
 	if (init_packet_handler_vs(
 		    handler,
 		    IPPROTO_IPV6,
-		    state,
 		    mctx,
 		    config->vs + ipv4_count,
 		    registry,
@@ -219,7 +213,6 @@ init_all_vs_filters_and_announce(
 static int
 init_vs_and_reals(
 	struct packet_handler *handler,
-	struct balancer_state *state,
 	struct memory_context *mctx,
 	struct packet_handler_config *config,
 	struct counter_registry *registry,
@@ -237,12 +230,42 @@ init_vs_and_reals(
 		return -1;
 	}
 
+	// Collect VS identifiers for registry initialization
+	struct vs_identifier *vs_identifiers =
+		malloc(sizeof(struct vs_identifier) * config->vs_count);
+	if (vs_identifiers == NULL && config->vs_count > 0) {
+		NEW_ERROR("failed to allocate memory for VS identifiers");
+		goto free_initial_vs_idx_on_error;
+	}
+	for (size_t i = 0; i < config->vs_count; ++i) {
+		vs_identifiers[i] = config->vs[i].identifier;
+	}
+
+	// Initialize VS registry
+	if (vs_registry_init(
+		    &handler->vs_registry,
+		    mctx,
+		    vs_identifiers,
+		    config->vs_count,
+		    prev_handler ? &prev_handler->vs_registry : NULL
+	    ) != 0) {
+		NEW_ERROR("failed to initialize VS registry");
+		free(vs_identifiers);
+		goto free_initial_vs_idx_on_error;
+	}
+	free(vs_identifiers);
+
 	// Initialize reals
 	if (init_reals(
-		    handler, state, mctx, config, registry, initial_vs_idx
+		    handler,
+		    prev_handler,
+		    mctx,
+		    config,
+		    registry,
+		    initial_vs_idx
 	    ) != 0) {
 		PUSH_ERROR("init reals");
-		goto free_initial_vs_idx_on_error;
+		goto free_vs_registry_on_error;
 	}
 
 	struct real *reals = ADDR_OF(&handler->reals);
@@ -253,7 +276,7 @@ init_vs_and_reals(
 		memory_balloc(mctx, sizeof(struct vs) * config->vs_count);
 	if (virtual_services == NULL && config->vs_count > 0) {
 		NEW_ERROR("no memory");
-		goto free_initial_vs_idx_on_error;
+		goto free_vs_registry_on_error;
 	}
 	SET_OFFSET_OF(&handler->vs, virtual_services);
 
@@ -263,7 +286,6 @@ init_vs_and_reals(
 	if (register_and_prepare_all_vs(
 		    handler,
 		    prev_handler,
-		    state,
 		    config,
 		    virtual_services,
 		    initial_vs_idx,
@@ -280,7 +302,6 @@ init_vs_and_reals(
 	if (init_all_packet_handler_vs(
 		    handler,
 		    prev_handler,
-		    state,
 		    mctx,
 		    config,
 		    registry,
@@ -307,9 +328,8 @@ init_vs_and_reals(
 	}
 
 	// Setup VS index mapping
-	if (setup_vs_index(
-		    handler, virtual_services, initial_vs_idx, state, mctx
-	    ) != 0) {
+	if (setup_vs_index(handler, virtual_services, initial_vs_idx, mctx) !=
+	    0) {
 		PUSH_ERROR("failed to setup VS index");
 		goto free_virtual_services_on_error;
 	}
@@ -321,6 +341,9 @@ free_virtual_services_on_error:
 	memory_bfree(
 		mctx, virtual_services, sizeof(struct vs) * config->vs_count
 	);
+
+free_vs_registry_on_error:
+	vs_registry_free(&handler->vs_registry);
 
 free_initial_vs_idx_on_error:
 	free(initial_vs_idx);
@@ -380,7 +403,6 @@ packet_handler_setup(
 
 	if (init_vs_and_reals(
 		    handler,
-		    state,
 		    mctx,
 		    config,
 		    counter_registry,
@@ -405,11 +427,7 @@ free_vs:
 		ADDR_OF(&handler->vs),
 		sizeof(struct vs) * handler->vs_count
 	);
-	memory_bfree(
-		mctx,
-		ADDR_OF(&handler->vs_index),
-		sizeof(uint32_t) * handler->vs_index_size
-	);
+	map_free(&handler->vs_index);
 
 free_decap:
 	lpm_free(&handler->decap_ipv4);
@@ -427,22 +445,43 @@ packet_handler_real_idx(
 	struct real_identifier *real,
 	struct real_ph_index *real_ph_index
 ) {
-	struct balancer_state *state = ADDR_OF(&handler->state);
-
-	struct real_state *real_state = balancer_state_find_real(state, real);
-	if (real_state == NULL) {
+	// Look up the real's stable index in the registry
+	ssize_t stable_idx;
+	if ((stable_idx = reals_registry_lookup(&handler->reals_registry, real)
+	    ) == -1) {
 		return -1;
 	}
 
-	uint32_t *vs_idx = ADDR_OF(&handler->vs_index);
-	real_ph_index->vs_idx = vs_idx[real_state->vs_registry_idx];
+	// Look up the config index from the stable index
+	size_t config_idx;
+	if (map_find(&handler->reals_index, stable_idx, &config_idx) != 0) {
+		return -1;
+	}
+
+	// Get the real and find its VS
+	struct real *reals = ADDR_OF(&handler->reals);
+	struct real *r = &reals[config_idx];
+
+	// Look up VS stable index
+	ssize_t vs_stable_idx;
+	if ((vs_stable_idx = vs_registry_lookup(
+		     &handler->vs_registry, &r->identifier.vs_identifier
+	     )) == -1) {
+		return -1;
+	}
+
+	// Look up VS config index
+	size_t vs_config_idx;
+	if (map_find(&handler->vs_index, vs_stable_idx, &vs_config_idx) != 0) {
+		return -1;
+	}
+
+	real_ph_index->vs_idx = vs_config_idx;
 
 	struct vs *vss = ADDR_OF(&handler->vs);
-	struct vs *vs = &vss[real_ph_index->vs_idx];
+	struct vs *vs = &vss[vs_config_idx];
 
-	uint32_t *reals_idx = ADDR_OF(&handler->reals_index);
-	real_ph_index->real_idx =
-		reals_idx[real_state->registry_idx] - vs->first_real_idx;
+	real_ph_index->real_idx = config_idx - vs->first_real_idx;
 
 	return 0;
 }

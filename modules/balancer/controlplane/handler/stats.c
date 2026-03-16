@@ -179,7 +179,7 @@ init_real_stats(
 	struct real *reals
 ) {
 	for (size_t i = 0; i < reals_count; ++i) {
-		real_stats[i].real = reals[i].identifier;
+		real_stats[i].real = reals[i].identifier.relative;
 		memset(&real_stats[i].stats, 0, sizeof(struct real_stats));
 	}
 }
@@ -219,25 +219,26 @@ calculate_stats(
 	struct named_real_stats *real_stats,
 	struct counter_handle_list *counter_handles
 ) {
-	// vs index and reals index
-	uint32_t *vs_index = ADDR_OF(&handler->vs_index);
-	uint32_t *reals_index = ADDR_OF(&handler->reals_index);
-
 	const size_t instances = counter_handles->instance_count;
 
 	// calculate virtual service, real and common balancer stats
 
 	for (size_t i = 0; i < counter_handles->count; ++i) {
 		struct counter_handle *counter = &counter_handles->counters[i];
-		ssize_t vs_registry_idx = counter_to_vs_registry_idx(counter);
-		if (vs_registry_idx != -1) {
-			uint32_t idx = vs_index[vs_registry_idx];
-			if (idx == INDEX_INVALID) {
+		ssize_t vs_stable_idx = counter_to_vs_registry_idx(counter);
+		if (vs_stable_idx != -1) {
+			size_t vs_config_idx;
+			if (map_find(
+				    &handler->vs_index,
+				    vs_stable_idx,
+				    &vs_config_idx
+			    ) != 0) {
 				// virtual service not present in packet handler
-				// config, continue
+				// config
 				continue;
 			}
-			struct named_vs_stats *vs_stats = &stats->vs[idx];
+			struct named_vs_stats *vs_stats =
+				&stats->vs[vs_config_idx];
 			setup_vs_stats(&vs_stats->stats, instances, counter);
 			continue;
 		}
@@ -245,31 +246,40 @@ calculate_stats(
 		// else, if it is not virtual service counter
 		// check if it is real counter
 
-		ssize_t real_registry_idx =
-			counter_to_real_registry_idx(counter);
-		if (real_registry_idx != -1) {
-			uint32_t idx = reals_index[real_registry_idx];
-			if (idx == (uint32_t)-1) {
-				// real not present in packet handler config,
-				// continue
+		ssize_t real_stable_idx = counter_to_real_registry_idx(counter);
+		if (real_stable_idx != -1) {
+			size_t real_config_idx;
+			if (map_find(
+				    &handler->reals_index,
+				    real_stable_idx,
+				    &real_config_idx
+			    ) != 0) {
+				// real not present in packet handler config
 				continue;
 			}
 			setup_real_stats(
-				&real_stats[idx].stats, instances, counter
+				&real_stats[real_config_idx].stats,
+				instances,
+				counter
 			);
 			continue;
 		}
 
 		const char *rule_tag;
-		vs_registry_idx = parse_vs_acl_counter(counter, &rule_tag);
-		if (vs_registry_idx != -1) {
-			uint32_t idx = vs_index[vs_registry_idx];
-			if (idx == INDEX_INVALID) {
+		vs_stable_idx = parse_vs_acl_counter(counter, &rule_tag);
+		if (vs_stable_idx != -1) {
+			size_t vs_config_idx;
+			if (map_find(
+				    &handler->vs_index,
+				    vs_stable_idx,
+				    &vs_config_idx
+			    ) != 0) {
 				// virtual service not present in packet handler
-				// config, continue
+				// config
 				continue;
 			}
-			struct named_vs_stats *vs_stats = &stats->vs[idx];
+			struct named_vs_stats *vs_stats =
+				&stats->vs[vs_config_idx];
 			size_t allowed_sources_stats_count =
 				vs_stats->allowed_sources_count++;
 			struct allowed_sources_stats *stats =

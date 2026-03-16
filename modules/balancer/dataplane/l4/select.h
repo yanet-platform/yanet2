@@ -2,6 +2,7 @@
 
 #include "common/memory_address.h"
 
+#include "handler/map.h"
 #include "handler/vs.h"
 #include "rte_tcp.h"
 #include "selector.h"
@@ -14,7 +15,6 @@
 #include "../flow/common.h"
 #include "../flow/context.h"
 #include "../flow/helpers.h"
-#include "../flow/stats.h"
 
 #include "state/session.h"
 #include "state/session_table.h"
@@ -43,7 +43,7 @@ select_real(
 	struct packet_handler *handler = ctx->handler;
 	struct real *reals = ADDR_OF(&handler->reals);
 
-	uint32_t *reals_index = ADDR_OF(&handler->reals_index);
+	struct map *reals_index = &handler->reals_index;
 
 	const size_t worker_idx = ctx->worker->idx;
 	const uint32_t now = ctx->now;
@@ -105,10 +105,12 @@ select_real(
 
 	if (get_session_result == SESSION_FOUND) { // session with such id found
 		// session_state->real_id contains the global registry index
-		uint32_t real_registry_id = session_state->real_id;
-		uint32_t real_ph_idx = reals_index[real_registry_id];
+		size_t real_stable_idx = session_state->real_id;
+		uint64_t real_ph_idx;
+		int find_res =
+			map_find(reals_index, real_stable_idx, &real_ph_idx);
 
-		if (real_ph_idx == (uint32_t)-1) {
+		if (find_res == -1) {
 			// session is for real which is not
 			// configured for the current packet handler.
 
@@ -187,7 +189,7 @@ select_real(
 
 	session_state->create_timestamp = now;
 	session_state->last_packet_timestamp = now;
-	session_state->real_id = real->registry_idx;
+	session_state->real_id = real->stable_idx;
 	session_state->timeout = ctx->session_timeout;
 
 	session_unlock(session_lock);

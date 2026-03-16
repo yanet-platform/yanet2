@@ -48,9 +48,8 @@ struct selector_worker {
  * Uses either round-robin or hash-based selection depending on VS scheduler.
  */
 struct real_selector {
-	struct balancer_state *state; // Relative pointer to the balancer state
-	struct memory_context mctx;   // Memory context for rings
-	rcu_t rcu;		      // RCU guard for ring swaps
+	struct memory_context mctx; // Memory context for rings
+	rcu_t rcu;		    // RCU guard for ring swaps
 	struct selector_worker workers[MAX_WORKERS_NUM]; // Per-worker state
 	struct ring rings[2];	// Double-buffered rings
 	_Atomic size_t ring_id; // Active ring index
@@ -64,7 +63,6 @@ struct real_selector {
 int
 selector_init(
 	struct real_selector *selector,
-	struct balancer_state *state,
 	struct memory_context *mctx,
 	enum vs_scheduler scheduler
 );

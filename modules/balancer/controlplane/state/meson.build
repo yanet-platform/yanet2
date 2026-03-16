@@ -7,10 +7,6 @@ includes = include_directories('.', '../')
 
 sources = files(
   'session_table.c',
-  'registry.c',
-  'index.c',
-  'array.c',
-  'real.c',
   'state.c',
 )
 

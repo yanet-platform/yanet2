@@ -4,6 +4,7 @@
 #include "common/lpm.h"
 #include "common/memory_address.h"
 #include "compiler.h"
+#include "map.h"
 #include "vs.h"
 #include <stdlib.h>
 
@@ -28,7 +29,7 @@ packet_handler_vs_inspect(
 		inspect->summary_vs_usage += vs_inspect->inspect.total_usage;
 	}
 	inspect->announce_usage = lpm_memory_usage(&handler_vs->announce);
-	inspect->index_usage = sizeof(uint32_t) * handler_vs->vs_index_size;
+	inspect->index_usage = map_memory_usage(&handler_vs->index);
 	inspect->total_usage = inspect->matcher_usage +
 			       inspect->summary_vs_usage +
 			       inspect->announce_usage + inspect->index_usage;
@@ -49,9 +50,8 @@ packet_handler_inspect(
 	inspect->summary_vs_usage = inspect->vs_ipv4_inspect.summary_vs_usage +
 				    inspect->vs_ipv6_inspect.summary_vs_usage +
 				    sizeof(struct vs) * handler->vs_count;
-	inspect->reals_index_usage =
-		sizeof(uint32_t) * handler->reals_index_size;
-	inspect->vs_index_usage = sizeof(uint32_t) * handler->vs_index_size;
+	inspect->reals_index_usage = map_memory_usage(&handler->reals_index);
+	inspect->vs_index_usage = map_memory_usage(&handler->vs_index);
 	inspect->counters_usage = (sizeof(struct balancer_icmp_stats) * 2 +
 				   sizeof(struct balancer_common_stats) +
 				   sizeof(struct balancer_l4_stats)) *

@@ -42,7 +42,8 @@ tunnel_packet(struct vs *vs, struct real *real, struct packet *packet) {
 		);
 	}
 
-	const int real_ipv6 = real->identifier.ip_proto == IPPROTO_IPV6 ? 1 : 0;
+	const int real_ipv6 =
+		real->identifier.relative.ip_proto == IPPROTO_IPV6 ? 1 : 0;
 
 	if (real_ipv6) { // IPv6
 		// rs->src_addr is already masked.
@@ -60,7 +61,9 @@ tunnel_packet(struct vs *vs, struct real *real, struct packet *packet) {
 			src[i] |= src_user[i] & (~n6->mask[i]);
 		}
 
-		packet_ip6_encap(packet, real->identifier.addr.v6.bytes, src);
+		packet_ip6_encap(
+			packet, real->identifier.relative.addr.v6.bytes, src
+		);
 	} else { // IPv4
 		// rs->src_addr is already masked.
 		const struct net4 *n4 = &real->src.v4;
@@ -75,7 +78,7 @@ tunnel_packet(struct vs *vs, struct real *real, struct packet *packet) {
 
 		packet_ip4_encap(
 			packet,
-			real->identifier.addr.v4.bytes,
+			real->identifier.relative.addr.v4.bytes,
 			(uint8_t *)(&src)
 		);
 	}

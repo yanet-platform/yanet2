@@ -22,7 +22,7 @@ struct balancer_update_info;
 struct vs {
 	struct vs_identifier identifier; // Address + Port + Proto
 
-	size_t registry_idx; // Index in the registry
+	size_t stable_idx; // Index in the registry
 
 	uint8_t flags; // VS_* flags describing behavior/scheduling
 
@@ -78,24 +78,6 @@ struct vs {
 };
 
 /**
- * Setup VS state in the balancer registry.
- *
- * Finds or inserts the virtual service into the balancer state registry
- * and initializes the VS's registry_idx and identifier fields.
- *
- * @param vs             VS structure to initialize
- * @param balancer_state Balancer state containing the VS registry
- * @param config         VS configuration with identifier
- * @return 0 on success, -1 on error
- */
-int
-vs_state_setup(
-	struct vs *vs,
-	struct balancer_state *balancer_state,
-	struct named_vs_config *config
-);
-
-/**
  * Initialize handler-side VS view.
  * Returns 0 on success, -1 on error.
  */
@@ -105,7 +87,6 @@ vs_with_identifier_and_registry_idx_init(
 	struct vs *prev_vs,
 	size_t first_real_idx,
 	struct real *reals,
-	struct balancer_state *state,
 	struct named_vs_config *config,
 	struct counter_registry *registry,
 	struct memory_context *mctx,

@@ -11,11 +11,6 @@ cmp_kv(const void *left, const void *right) {
 	return left_entry->key - right_entry->key;
 };
 
-static inline size_t
-get(struct big_array *array, size_t idx) {
-	return *(size_t *)big_array_get(array, idx * sizeof(size_t));
-}
-
 static inline void
 set(struct big_array *array, size_t idx, size_t value) {
 	memcpy(big_array_get(array, idx * sizeof(size_t)),
@@ -65,20 +60,9 @@ map_free(struct map *map) {
 	btree_u64_free(&map->btree);
 }
 
-int
-map_find(struct map *map, size_t key, size_t *value) {
-	size_t lb = btree_u64_lower_bound(&map->btree, key);
-	if (lb == map->btree.n || get(&map->keys, lb) != key) {
-		return -1;
-	} else {
-		*value = get(&map->values, lb);
-		return 0;
-	}
-}
-
 size_t
-map_memory_usage(
-    struct map *map
-) {
-    return big_array_memory_usage(&map->keys) + big_array_memory_usage(&map->values) + btree_u64_memory_usage(&map->btree);
+map_memory_usage(struct map *map) {
+	return big_array_memory_usage(&map->keys) +
+	       big_array_memory_usage(&map->values) +
+	       btree_u64_memory_usage(&map->btree);
 }

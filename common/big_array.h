@@ -316,8 +316,6 @@ big_array_free(struct big_array *array) {
 }
 
 static inline size_t
-big_array_memory_usage(
-	struct big_array *array
-) {
+big_array_memory_usage(struct big_array *array) {
 	return array->mctx.balloc_size - array->mctx.bfree_size;
 }

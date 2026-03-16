@@ -7,13 +7,11 @@
 #include "lib/controlplane/diag/diag.h"
 
 #include "real.h"
-#include "state/state.h"
 #include <stdatomic.h>
 
-int
+static int
 ring_init(
 	struct ring *ring,
-	struct balancer_state *state,
 	struct memory_context *mctx,
 	size_t reals_count,
 	const struct real *reals
@@ -31,12 +29,9 @@ ring_init(
 	size_t len = 0;
 	for (size_t i = 0; i < reals_count; ++i) {
 		const struct real *real = &reals[i];
-		struct real_state *real_state = balancer_state_get_real_by_idx(
-			state, real->registry_idx
-		);
-		uint16_t weight = real_state->enabled ? real_state->weight : 0;
+		uint16_t weight = real->enabled ? real->weight : 0;
 		len += weight;
-		if (real_state->enabled) {
+		if (real->enabled) {
 			enabled[i / 8] |= 1 << (i % 8);
 		}
 	}
@@ -49,10 +44,7 @@ ring_init(
 	size_t idx = 0;
 	for (size_t i = 0; i < reals_count; ++i) {
 		const struct real *real = &reals[i];
-		struct real_state *real_state = balancer_state_get_real_by_idx(
-			state, real->registry_idx
-		);
-		uint16_t weight = real_state->enabled ? real_state->weight : 0;
+		uint16_t weight = real->enabled ? real->weight : 0;
 		for (size_t copy = 0; copy < weight; ++copy) {
 			ids[idx++] = i;
 		}
@@ -85,12 +77,10 @@ selector_update(
 	size_t reals_count,
 	const struct real *reals
 ) {
-	struct balancer_state *state = ADDR_OF(&selector->state);
 	size_t cur_ring_id = selector->ring_id;
 	size_t new_ring_id = cur_ring_id ^ 1;
 	struct ring *new_ring = &selector->rings[new_ring_id];
-	if (ring_init(new_ring, state, &selector->mctx, reals_count, reals) !=
-	    0) {
+	if (ring_init(new_ring, &selector->mctx, reals_count, reals) != 0) {
 		PUSH_ERROR("failed to init ring");
 		return -1;
 	}
@@ -102,17 +92,14 @@ selector_update(
 int
 selector_init(
 	struct real_selector *selector,
-	struct balancer_state *state,
 	struct memory_context *mctx,
 	enum vs_scheduler scheduler
 ) {
-	SET_OFFSET_OF(&selector->state, state);
 	memory_context_init_from(&selector->mctx, mctx, "real_selector");
 	rcu_init(&selector->rcu);
 	selector->use_rr = scheduler == round_robin ? 1 : 0;
 	selector->ring_id = 0;
-	if (ring_init(&selector->rings[0], state, &selector->mctx, 0, NULL) !=
-	    0) {
+	if (ring_init(&selector->rings[0], &selector->mctx, 0, NULL) != 0) {
 		PUSH_ERROR("failed to init ring");
 		return -1;
 	}

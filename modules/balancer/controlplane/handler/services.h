@@ -66,22 +66,22 @@ validate_and_reorder_vs_configs(
 );
 
 /**
- * Register virtual services in balancer state.
+ * Register virtual services in handler registry.
  *
+ * @param handler Packet handler instance
  * @param vs_count Number of virtual services
  * @param initial_vs_idx Array of initial VS indices for error reporting
  * @param configs Array of VS configurations
- * @param state Balancer state
  * @param prev_handler Previous packet handler (may be NULL)
  * @param match Output: number of matching VS with previous config
  * @return 0 on success, -1 on error
  */
 int
 register_virtual_services(
+	struct packet_handler *handler,
 	size_t vs_count,
 	const size_t *initial_vs_idx,
 	struct named_vs_config *configs,
-	struct balancer_state *state,
 	struct packet_handler *prev_handler,
 	size_t *match
 );
@@ -96,7 +96,6 @@ register_virtual_services(
  * @param vs_configs Array of VS configurations
  * @param initial_vs_idx Array of initial VS indices for error reporting
  * @param virtual_services Array of VS structures to initialize
- * @param state Balancer state
  * @param update_info Update information structure (may be NULL)
  * @param reuse_filter Output: 1 if filter can be reused, 0 otherwise
  * @return 0 on success, -1 on error
@@ -110,7 +109,6 @@ register_and_prepare_vs(
 	struct named_vs_config *vs_configs,
 	size_t *initial_vs_idx,
 	struct vs *virtual_services,
-	struct balancer_state *state,
 	struct balancer_update_info *update_info,
 	int *reuse_filter
 );
@@ -120,7 +118,6 @@ register_and_prepare_vs(
  *
  * @param handler Packet handler instance
  * @param proto IP protocol (IPPROTO_IP or IPPROTO_IPV6)
- * @param state Balancer state
  * @param mctx Memory context
  * @param vs_configs Array of VS configurations
  * @param registry Counter registry
@@ -135,7 +132,6 @@ int
 init_packet_handler_vs(
 	struct packet_handler *handler,
 	int proto,
-	struct balancer_state *state,
 	struct memory_context *mctx,
 	struct named_vs_config *vs_configs,
 	struct counter_registry *registry,
@@ -192,7 +188,6 @@ init_announce(
  * @param handler Packet handler instance
  * @param virtual_services Array of VS structures
  * @param initial_vs_idx Array of initial VS indices for error reporting
- * @param state Balancer state
  * @param mctx Memory context
  * @return 0 on success, -1 on error
  */
@@ -201,6 +196,5 @@ setup_vs_index(
 	struct packet_handler *handler,
 	struct vs *virtual_services,
 	size_t *initial_vs_idx,
-	struct balancer_state *state,
 	struct memory_context *mctx
 );

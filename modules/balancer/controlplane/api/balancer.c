@@ -20,7 +20,6 @@
 #include "handler/handler.h"
 #include "handler/inspect.h"
 #include "handler/vs.h"
-#include "state/real.h"
 #include "state/session_table.h"
 #include "state/state.h"
 #include "vs.h"
@@ -299,7 +298,6 @@ void
 balancer_graph(struct balancer_handle *handle, struct balancer_graph *graph) {
 	struct balancer *balancer = balancer_handle_deref(handle);
 	struct packet_handler *handler = ADDR_OF(&balancer->handler);
-	struct balancer_state *state = &balancer->state;
 
 	// Allocate VS array
 	graph->vs_count = handler->vs_count;
@@ -336,15 +334,11 @@ balancer_graph(struct balancer_handle *handle, struct balancer_graph *graph) {
 				&graph_vs->reals[real_idx];
 
 			// Copy real identifier (relative to VS)
-			graph_real->identifier = real->identifier;
+			graph_real->identifier = real->identifier.relative;
 
-			// Get weight and enabled flag from balancer_state
-			struct real_state *real_state =
-				balancer_state_get_real_by_idx(
-					state, real->registry_idx
-				);
-			graph_real->weight = real_state->weight;
-			graph_real->enabled = real_state->enabled;
+			// Get weight and enabled flag from struct real
+			graph_real->weight = real->weight;
+			graph_real->enabled = real->enabled;
 		}
 	}
 }

@@ -41,18 +41,23 @@ fill_sessions_callback(
 		ctx->sessions = new_info;
 	}
 
-	// real not present in current packet handler config
-	if (ADDR_OF(&ctx->handler->reals_index)[state->real_id] ==
-	    INDEX_INVALID) {
+	// Check if real is present in current packet handler config
+	size_t real_config_idx;
+	if (map_find(
+		    &ctx->handler->reals_index, state->real_id, &real_config_idx
+	    ) != 0) {
+		// real not present in current packet handler config
 		return 0;
 	}
 
 	struct named_session_info *session_info = &ctx->sessions[ctx->size++];
 
+	// Get real from handler's reals array
+	struct real *reals = ADDR_OF(&ctx->handler->reals);
+	struct real *real = &reals[real_config_idx];
+
 	// fill identifier
-	session_info->identifier.real =
-		balancer_state_get_real_by_idx(ctx->state, state->real_id)
-			->identifier;
+	session_info->identifier.real = real->identifier;
 	session_info->identifier.client_ip = id->client_ip;
 	session_info->identifier.client_port = ntohs(id->client_port);
 
@@ -91,7 +96,7 @@ packet_handler_sessions_info(
 
 static void
 init_real_info(struct named_real_info *info, struct real *real) {
-	info->real = real->identifier;
+	info->real = real->identifier.relative;
 	info->active_sessions = 0;
 	info->last_packet_timestamp = 0;
 }
@@ -155,30 +160,36 @@ fill_balancer_info_callback(
 	struct session_id *id, struct session_state *state, void *userdata
 ) {
 	struct fill_balancer_info_ctx *ctx = userdata;
-	uint32_t real_idx = ADDR_OF(&ctx->handler->reals_index)[state->real_id];
-	if (real_idx ==
-	    INDEX_INVALID) { // real not present in packet handler config
+
+	// Check if real is present in current packet handler config
+	size_t real_config_idx;
+	if (map_find(
+		    &ctx->handler->reals_index, state->real_id, &real_config_idx
+	    ) != 0) {
+		// real not present in packet handler config
 		return 0;
 	}
 
 	const int is_session_active =
 		state->last_packet_timestamp + state->timeout > ctx->now;
 
-	uint32_t vs_idx = ADDR_OF(&ctx->handler->vs_index)[id->vs_id];
-	assert(vs_idx != INDEX_INVALID);
+	// Check if VS is present in current packet handler config
+	size_t vs_config_idx;
+	int res = map_find(&ctx->handler->vs_index, id->vs_id, &vs_config_idx);
+	assert(res == 0);
 
 	ctx->info->active_sessions += is_session_active;
 	check_max(
 		&ctx->info->last_packet_timestamp, state->last_packet_timestamp
 	);
 
-	struct named_real_info *real_info = &ctx->reals[real_idx];
+	struct named_real_info *real_info = &ctx->reals[real_config_idx];
 	real_info->active_sessions += is_session_active;
 	check_max(
 		&real_info->last_packet_timestamp, state->last_packet_timestamp
 	);
 
-	struct named_vs_info *vs_info = &ctx->info->vs[vs_idx];
+	struct named_vs_info *vs_info = &ctx->info->vs[vs_config_idx];
 	vs_info->active_sessions += is_session_active;
 	check_max(
 		&vs_info->last_packet_timestamp, state->last_packet_timestamp
