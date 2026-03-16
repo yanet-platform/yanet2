@@ -40,7 +40,7 @@ func NewForwardModule(cfg *Config, log *zap.SugaredLogger) (*ForwardModule, erro
 		return nil, fmt.Errorf("failed to attach agent to shared memory: %w", err)
 	}
 
-	forwardService := NewForwardService(agent)
+	forwardService := NewForwardService(NewBackend(agent))
 
 	return &ForwardModule{
 		cfg:            cfg,

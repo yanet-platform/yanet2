@@ -12,27 +12,40 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/filter/ipnet4"
 	"github.com/yanet-platform/yanet2/common/go/filter/ipnet6"
 	"github.com/yanet-platform/yanet2/common/go/filter/vlanrange"
-	cpffi "github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/forward/controlplane/forwardpb"
 	"github.com/yanet-platform/yanet2/modules/forward/internal/ffi"
 )
 
+// ModuleHandle is a handle to a module configuration.
+type ModuleHandle interface {
+	Free()
+}
+
+// Backend abstracts shared memory operations.
+type Backend interface {
+	// UpdateModule creates a module config, writes rules, and publishes
+	// it to the dataplane.
+	UpdateModule(name string, rules []ffi.ForwardRule) (ModuleHandle, error)
+	// DeleteModule removes a module config.
+	DeleteModule(name string) error
+}
+
 type forwardConfig struct {
 	rules  []*forwardpb.Rule
-	module *ffi.ModuleConfig
+	module ModuleHandle
 }
 
 type ForwardService struct {
 	forwardpb.UnimplementedForwardServiceServer
 
 	mu      sync.Mutex
-	agent   *cpffi.Agent
+	backend Backend
 	configs map[string]forwardConfig
 }
 
-func NewForwardService(agent *cpffi.Agent) *ForwardService {
+func NewForwardService(backend Backend) *ForwardService {
 	return &ForwardService{
-		agent:   agent,
+		backend: backend,
 		configs: map[string]forwardConfig{},
 	}
 }
@@ -40,17 +53,16 @@ func NewForwardService(agent *cpffi.Agent) *ForwardService {
 func (m *ForwardService) ListConfigs(
 	ctx context.Context, request *forwardpb.ListConfigsRequest,
 ) (*forwardpb.ListConfigsResponse, error) {
-
-	response := &forwardpb.ListConfigsResponse{
-		Configs: make([]string, 0),
-	}
-
-	// Lock instances store and module updates.
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	configs := make([]string, 0, len(m.configs))
 	for name := range m.configs {
-		response.Configs = append(response.Configs, name)
+		configs = append(configs, name)
+	}
+
+	response := &forwardpb.ListConfigsResponse{
+		Configs: configs,
 	}
 
 	return response, nil
@@ -136,17 +148,12 @@ func (m *ForwardService) UpdateConfig(ctx context.Context, req *forwardpb.Update
 		rules = append(rules, rule)
 	}
 
-	module, err := ffi.NewModuleConfig(m.agent, name)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	module, err := m.backend.UpdateModule(name, rules)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create module config: %w", err)
-	}
-
-	if err := module.Update(rules); err != nil {
 		return nil, fmt.Errorf("failed to update module config: %w", err)
-	}
-
-	if err := m.agent.UpdateModules([]cpffi.ModuleConfig{module.AsFFIModule()}); err != nil {
-		return nil, fmt.Errorf("failed to update module: %w", err)
 	}
 
 	if oldModule, ok := m.configs[name]; ok {
@@ -166,13 +173,24 @@ func (m *ForwardService) DeleteConfig(ctx context.Context, req *forwardpb.Delete
 	if name == "" {
 		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
-	// Remove module configuration from the control plane.
-	// TODO
 
-	deleted := m.agent.DeleteModuleConfig(name) == nil
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
-	response := &forwardpb.DeleteConfigResponse{
-		Deleted: deleted,
+	config, ok := m.configs[name]
+	if !ok {
+		return nil, status.Error(codes.InvalidArgument, "not found")
 	}
-	return response, nil
+
+	if err := m.backend.DeleteModule(name); err != nil {
+		return nil, fmt.Errorf("failed to delete module config %q: %w", name, err)
+	}
+
+	if config.module != nil {
+		config.module.Free()
+	}
+
+	delete(m.configs, name)
+
+	return &forwardpb.DeleteConfigResponse{Deleted: true}, nil
 }
