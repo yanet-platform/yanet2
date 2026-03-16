@@ -8,7 +8,7 @@
 
 typedef int (*registry_cmp)(const void *left, const void *right);
 
-struct registry {
+struct service_registry {
 	size_t next_stable_index;
 
 	size_t elems_count;
@@ -20,23 +20,23 @@ struct registry {
 };
 
 int
-registry_init(
-	struct registry *registry,
+service_registry_init(
+	struct service_registry *registry,
 	struct memory_context *mctx,
 	void *elems,
 	size_t elem_size,
 	size_t elems_count,
 	registry_cmp cmp,
-	struct registry *prev
+	struct service_registry *prev
 );
 
 void
-registry_free(struct registry *registry);
+service_registry_free(struct service_registry *registry);
 
 ssize_t
-registry_lookup(struct registry *registry, void *elem, registry_cmp cmp);
+service_registry_lookup(struct service_registry *registry, void *elem, registry_cmp cmp);
 
-typedef struct registry vs_registry_t;
+typedef struct service_registry vs_registry_t;
 
 int
 vs_registry_init(
@@ -57,7 +57,7 @@ vs_registry_lookup(
     vs_registry_t *registry, struct vs_identifier *vs
 );
 
-typedef struct registry reals_registry_t;
+typedef struct service_registry reals_registry_t;
 
 int
 reals_registry_init(

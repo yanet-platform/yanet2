@@ -20,11 +20,11 @@ struct balancer_state {
 	// session table
 	struct session_table session_table;
 
-	// registry of virtual services
-	struct service_registry vs_registry;
+	// // registry of virtual services
+	// struct service_registry vs_registry;
 
-	// registry of reals
-	struct service_registry real_registry;
+	// // registry of reals
+	// struct service_registry real_registry;
 };
 
 ////////////////////////////////////////////////////////////////////////////////

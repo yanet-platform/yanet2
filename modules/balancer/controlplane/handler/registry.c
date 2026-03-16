@@ -15,14 +15,14 @@ static int
 real_identifier_cmp(const void *left, const void *right);
 
 int
-registry_init(
-	struct registry *registry,
+service_registry_init(
+	struct service_registry *registry,
 	struct memory_context *mctx,
 	void *elems,
 	size_t elem_size,
 	size_t elems_count,
 	registry_cmp cmp,
-	struct registry *prev
+	struct service_registry *prev
 ) {
 	if (prev != NULL && prev->elem_size != elem_size) {
 		NEW_ERROR("internal error: incompatible registry: "
@@ -57,7 +57,7 @@ registry_init(
 		void *elem_ptr = elems_bytes + idx * elem_size;
 
 		ssize_t stable_idx =
-			prev != NULL ? registry_lookup(prev, elem_ptr, cmp) : -1;
+			prev != NULL ? service_registry_lookup(prev, elem_ptr, cmp) : -1;
 		if (stable_idx == -1) {
 			stable_idx = (ssize_t)registry->next_stable_index++;
 		}
@@ -75,14 +75,14 @@ registry_init(
 }
 
 void
-registry_free(struct registry *registry) {
+service_registry_free(struct service_registry *registry) {
 	big_array_free(&registry->elems);
 	big_array_free(&registry->indices);
 	memset(registry, 0, sizeof(*registry));
 }
 
 ssize_t
-registry_lookup(struct registry *registry, void *elem, registry_cmp cmp) {
+service_registry_lookup(struct service_registry *registry, void *elem, registry_cmp cmp) {
 	ssize_t left = -1;
 	ssize_t right = (ssize_t)registry->elems_count;
 	while (left + 1 < right) {
@@ -189,7 +189,7 @@ vs_registry_init(
 	size_t vs_count,
 	vs_registry_t *prev
 ) {
-	return registry_init(
+	return service_registry_init(
 		registry,
 		mctx,
 		vs,
@@ -202,12 +202,12 @@ vs_registry_init(
 
 void
 vs_registry_free(vs_registry_t *registry) {
-	registry_free(registry);
+	service_registry_free(registry);
 }
 
 ssize_t
 vs_registry_lookup(vs_registry_t *registry, struct vs_identifier *vs) {
-	return registry_lookup(registry, vs, vs_identifier_cmp);
+	return service_registry_lookup(registry, vs, vs_identifier_cmp);
 }
 
 int
@@ -218,7 +218,7 @@ reals_registry_init(
 	size_t reals_count,
 	reals_registry_t *prev
 ) {
-	return registry_init(
+	return service_registry_init(
 		registry,
 		mctx,
 		reals,
@@ -231,10 +231,10 @@ reals_registry_init(
 
 void
 reals_registry_free(reals_registry_t *registry) {
-	registry_free(registry);
+	service_registry_free(registry);
 }
 
 ssize_t
 reals_registry_lookup(reals_registry_t *registry, struct real_identifier *real) {
-	return registry_lookup(registry, real, real_identifier_cmp);
+	return service_registry_lookup(registry, real, real_identifier_cmp);
 }

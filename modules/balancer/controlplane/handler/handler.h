@@ -10,6 +10,8 @@
 #include "filter/filter.h"
 
 #include "common/lpm.h"
+#include "map.h"
+#include "registry.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -61,14 +63,8 @@ struct packet_handler_vs {
 	// (relative pointer to IPv4 or IPv6 virtual services)
 	struct vs *vs;
 
-	// Size of the vs_index mapping array
-	// Equals the total number of VS in the balancer state registry
-	size_t vs_index_size;
-
-	// Maps VS registry index to position in this protocol's vs array
-	// vs_index[registry_idx] = vs_idx, or INDEX_INVALID if not present
-	// (relative pointer)
-	uint32_t *vs_index;
+	// maps stable vs index to the config index
+	struct map index;
 };
 
 /**
@@ -96,13 +92,14 @@ struct packet_handler {
 	// First ipv4_count entries are IPv4, remaining are IPv6
 	struct vs *vs;
 
-	// Size of the vs_index mapping array
-	// Equals the total number of VS in the balancer state registry
-	size_t vs_index_size;
+	// maps stable vs index to the config index
+	struct map vs_index;
 
-	// Maps VS registry index to position in vs array (relative pointer)
-	// vs_index[registry_idx] = vs_idx, or INDEX_INVALID if not present
-	uint32_t *vs_index;
+	// registry of all virtual services
+	vs_registry_t vs_registry;
+
+	// registry of all reals
+	reals_registry_t reals_registry;
 
 	// Per-protocol virtual service containers
 	// vs_ipv4.vs points to IPv4 subset of the vs array
@@ -114,10 +111,8 @@ struct packet_handler {
 	size_t reals_count;
 	struct real *reals;
 
-	// map: real_registry_idx -> ph_real_idx
-	// -1 means no mapping
-	size_t reals_index_size;
-	uint32_t *reals_index;
+	// maps stable real index to the config index
+	struct map reals_index;
 
 	// counter indices
 	struct {
