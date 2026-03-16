@@ -27,9 +27,32 @@ pub mod forwardpb {
 
 #[allow(non_snake_case)]
 pub mod filterpb {
-    use serde::Serialize;
+    use netip::{Ipv4Network, Ipv6Network};
+    use serde::{Serialize, Serializer};
 
     tonic::include_proto!("filterpb");
+
+    impl Serialize for IpNet {
+        fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+            match (self.addr.len(), self.mask.len()) {
+                (4, 4) => {
+                    let addr = u32::from_be_bytes(<[u8; 4]>::try_from(self.mask.as_slice()).expect("checked above"));
+                    let mask = u32::from_be_bytes(<[u8; 4]>::try_from(self.mask.as_slice()).expect("checked above"));
+                    let net = Ipv4Network::from_bits(addr, mask);
+                    s.serialize_str(&net.to_string())
+                }
+                (16, 16) => {
+                    let addr = u128::from_be_bytes(<[u8; 16]>::try_from(self.mask.as_slice()).expect("checked above"));
+                    let mask = u128::from_be_bytes(<[u8; 16]>::try_from(self.mask.as_slice()).expect("checked above"));
+                    let net = Ipv6Network::from_bits(addr, mask);
+                    s.serialize_str(&net.to_string())
+                }
+                (a, n) => Err(serde::ser::Error::custom(
+                    format!("invalid addr/mask lengths: {a}/{n}",),
+                )),
+            }
+        }
+    }
 }
 
 /// Forward module.
@@ -51,7 +74,7 @@ pub enum ModeCmd {
     Delete(DeleteCmd),
     Update(UpdateCmd),
     Show(ShowCmd),
-    List(ListCmd),
+    List,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -212,7 +235,7 @@ impl ForwardService {
         Ok(())
     }
 
-    pub async fn list_configs(&mut self, _cmd: ListCmd) -> Result<(), Box<dyn Error>> {
+    pub async fn list_configs(&mut self) -> Result<(), Box<dyn Error>> {
         let request = ListConfigsRequest {};
         let response = self.client.list_configs(request).await?.into_inner();
 
@@ -246,7 +269,7 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
         ModeCmd::Delete(cmd) => service.delete_config(cmd).await,
         ModeCmd::Update(cmd) => service.update_config(cmd).await,
         ModeCmd::Show(cmd) => service.show_config(cmd).await,
-        ModeCmd::List(cmd) => service.list_configs(cmd).await,
+        ModeCmd::List => service.list_configs().await,
     }
 }
 
