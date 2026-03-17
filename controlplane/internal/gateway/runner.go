@@ -124,6 +124,7 @@ func (m *BuiltInModuleRunner) register(ctx context.Context, addr net.Addr) error
 	if err != nil {
 		return fmt.Errorf("failed to initialize gateway gRPC client: %w", err)
 	}
+	defer gatewayConn.Close()
 
 	client := ynpb.NewGatewayClient(gatewayConn)
 
