@@ -541,7 +541,7 @@ func (b *BalancerManager) Refresh(now time.Time) error {
 	tracker := b.newHandlerTracker("refresh")
 	defer tracker.Fix()
 
-	b.log.Debug("refreshing")
+	b.log.Info("refreshing state")
 
 	// Get current config
 	config := b.handle.Config()
