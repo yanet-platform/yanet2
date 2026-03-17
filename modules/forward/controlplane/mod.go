@@ -6,7 +6,7 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
-	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	cpffi "github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/forward/controlplane/forwardpb"
 )
 
@@ -16,8 +16,8 @@ const agentName = "forward"
 // forwarding traffic between devices.
 type ForwardModule struct {
 	cfg            *Config
-	shm            *ffi.SharedMemory
-	agent          *ffi.Agent
+	shm            *cpffi.SharedMemory
+	agent          *cpffi.Agent
 	forwardService *ForwardService
 	log            *zap.SugaredLogger
 }
@@ -25,7 +25,7 @@ type ForwardModule struct {
 func NewForwardModule(cfg *Config, log *zap.SugaredLogger) (*ForwardModule, error) {
 	log = log.With(zap.String("module", "forwardpb.ForwardService"))
 
-	shm, err := ffi.AttachSharedMemory(cfg.MemoryPath)
+	shm, err := cpffi.AttachSharedMemory(cfg.MemoryPath.Unwrap())
 	if err != nil {
 		return nil, err
 	}
@@ -35,12 +35,12 @@ func NewForwardModule(cfg *Config, log *zap.SugaredLogger) (*ForwardModule, erro
 		zap.Stringer("size", cfg.MemoryRequirements),
 	)
 
-	agent, err := shm.AgentReattach(agentName, cfg.InstanceID, cfg.MemoryRequirements)
+	agent, err := shm.AgentReattach(agentName, cfg.InstanceID, cfg.MemoryRequirements.Unwrap())
 	if err != nil {
 		return nil, fmt.Errorf("failed to attach agent to shared memory: %w", err)
 	}
 
-	forwardService := NewForwardService(agent)
+	forwardService := NewForwardService(NewBackend(agent))
 
 	return &ForwardModule{
 		cfg:            cfg,
@@ -56,7 +56,7 @@ func (m *ForwardModule) Name() string {
 }
 
 func (m *ForwardModule) Endpoint() string {
-	return m.cfg.Endpoint
+	return m.cfg.Endpoint.Unwrap()
 }
 
 func (m *ForwardModule) ServicesNames() []string {

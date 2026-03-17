@@ -100,7 +100,7 @@ func (m *BuiltInModuleRunner) listen() (net.Listener, error) {
 
 	if strings.HasPrefix(endpoint, "/") {
 		dir := path.Dir(endpoint)
-		if err := os.MkdirAll(dir, 0644); err != nil {
+		if err := os.MkdirAll(dir, 0755); err != nil {
 			return nil, err
 		}
 		if err := os.Remove(endpoint); err != nil {

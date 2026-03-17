@@ -24,7 +24,7 @@ type RouteMPLSModule struct {
 func NewRouteMPLSModule(cfg *Config, log *zap.SugaredLogger) (*RouteMPLSModule, error) {
 	log = log.With(zap.String("module", "routemplspb.RouteService"))
 
-	shm, err := ffi.AttachSharedMemory(cfg.MemoryPath)
+	shm, err := ffi.AttachSharedMemory(cfg.MemoryPath.Unwrap())
 	if err != nil {
 		return nil, fmt.Errorf("failed to attach to shared memory %q: %w", cfg.MemoryPath, err)
 	}
@@ -34,7 +34,7 @@ func NewRouteMPLSModule(cfg *Config, log *zap.SugaredLogger) (*RouteMPLSModule, 
 		zap.Stringer("size", cfg.MemoryRequirements),
 	)
 
-	agent, err := shm.AgentAttach("route-mpls", cfg.InstanceID, cfg.MemoryRequirements)
+	agent, err := shm.AgentAttach("route-mpls", cfg.InstanceID, cfg.MemoryRequirements.Unwrap())
 	if err != nil {
 		return nil, fmt.Errorf("failed to attach agent to shared memory: %w", err)
 	}
@@ -55,7 +55,7 @@ func (m *RouteMPLSModule) Name() string {
 }
 
 func (m *RouteMPLSModule) Endpoint() string {
-	return m.cfg.Endpoint
+	return m.cfg.Endpoint.Unwrap()
 }
 
 func (m *RouteMPLSModule) ServicesNames() []string {

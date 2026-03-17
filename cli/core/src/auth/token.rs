@@ -14,6 +14,15 @@ const TOKEN_VERSION: i32 = 1;
 /// Header prefix for the `x-yanet-authentication` metadata value.
 const TOKEN_PREFIX: &str = "sshcert ";
 
+#[derive(Debug, thiserror::Error)]
+pub enum TokenError {
+    #[error("signing failed: {0}")]
+    Sign(#[from] AgentError),
+
+    #[error("token serialization failed: {0}")]
+    Serialize(#[from] serde_json::Error),
+}
+
 /// SSH certificate authentication token.
 ///
 /// JSON-serialized and base64-encoded into the `x-yanet-authentication`
@@ -36,7 +45,7 @@ impl Token {
     /// 2. Build canonical signed data.
     /// 3. Ask SSH agent to sign it.
     /// 4. Base64-encode the SSH wire-format signature.
-    pub fn build(cert_blob: &[u8], method: &str, agent: &mut SshAgent) -> Result<Self, AgentError> {
+    pub async fn build(cert_blob: &[u8], method: &str, agent: &mut SshAgent) -> Result<Self, TokenError> {
         let certificate = BASE64.encode(cert_blob);
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -49,7 +58,7 @@ impl Token {
             TOKEN_VERSION, certificate, timestamp, nonce, method,
         );
 
-        let sig_bytes = agent.sign(cert_blob, canonical.as_bytes(), 0)?;
+        let sig_bytes = agent.sign(cert_blob, canonical.as_bytes(), 0).await?;
         let signature = BASE64.encode(&sig_bytes);
 
         Ok(Self {
@@ -65,9 +74,19 @@ impl Token {
     /// Encode the token into the `x-yanet-authentication` header value.
     ///
     /// Format: `sshcert <base64(json)>`.
-    pub fn to_header_value(&self) -> Result<String, serde_json::Error> {
+    pub fn to_header_value(&self) -> Result<String, TokenError> {
         let json = serde_json::to_string(self)?;
         let encoded = BASE64.encode(json.as_bytes());
-        Ok(format!("{}{}", TOKEN_PREFIX, encoded))
+        Ok(format!("{TOKEN_PREFIX}{encoded}"))
+    }
+
+    /// Build a signed token and encode it into a header value in one step.
+    pub async fn build_header_value(
+        cert_blob: &[u8],
+        method: &str,
+        agent: &mut SshAgent,
+    ) -> Result<String, TokenError> {
+        let token = Self::build(cert_blob, method, agent).await?;
+        token.to_header_value()
     }
 }
