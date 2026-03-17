@@ -7,6 +7,7 @@ package balancer
 import (
 	"context"
 	"fmt"
+	"maps"
 	"net/netip"
 	"strconv"
 	"sync"
@@ -56,9 +57,7 @@ func (b *BalancerManager) newHandlerTracker(handle string, extraLabels ...metric
 		"config": b.Name(),
 	}
 	for _, extra := range extraLabels {
-		for k, v := range extra {
-			labels[k] = v
-		}
+		maps.Copy(labels, extra)
 	}
 	return newHandlerMetricTracker(handle, &b.handlerMetrics, defaultLatencyBoundsMS, labels)
 }
@@ -126,6 +125,9 @@ func (b *BalancerManager) Update(
 			"count", len(updateInfo.ACLReusedVs),
 			"vs_identifiers", updateInfo.ACLReusedVs)
 	}
+
+	// restart background tasks
+	b.startBackgroundTasks()
 
 	return updateInfo, nil
 }
@@ -484,6 +486,8 @@ func (b *BalancerManager) Sessions(
 }
 
 func (b *BalancerManager) startBackgroundTasks() {
+	b.stopBackgroundTasks()
+
 	b.ctx, b.cancel = context.WithCancel(context.Background())
 
 	if b.handle.Config().RefreshPeriod == 0 {
