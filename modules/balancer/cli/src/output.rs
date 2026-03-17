@@ -2226,26 +2226,6 @@ fn print_show_inspect_normal(response: &balancerpb::ShowInspectResponse) -> Resu
                 format_bytes(state.total_usage).bright_green(),
                 state_percent
             );
-            let vs_reg_pct = if balancer.total_usage > 0 {
-                (state.vs_registry_usage as f64 / balancer.total_usage as f64) * 100.0
-            } else {
-                0.0
-            };
-            println!(
-                "    VS Registry: {} ({:.1}%)",
-                format_bytes(state.vs_registry_usage).bright_green(),
-                vs_reg_pct
-            );
-            let reals_reg_pct = if balancer.total_usage > 0 {
-                (state.reals_registry_usage as f64 / balancer.total_usage as f64) * 100.0
-            } else {
-                0.0
-            };
-            println!(
-                "    Reals Registry: {} ({:.1}%)",
-                format_bytes(state.reals_registry_usage).bright_green(),
-                reals_reg_pct
-            );
             let session_pct = if balancer.total_usage > 0 {
                 (state.session_table_usage as f64 / balancer.total_usage as f64) * 100.0
             } else {
@@ -2684,26 +2664,6 @@ fn print_show_inspect_detail(response: &balancerpb::ShowInspectResponse) -> Resu
                 "State:".bright_cyan().bold(),
                 format_bytes(state.total_usage).bright_green(),
                 state_percent
-            );
-            let vs_reg_pct = if balancer.total_usage > 0 {
-                (state.vs_registry_usage as f64 / balancer.total_usage as f64) * 100.0
-            } else {
-                0.0
-            };
-            println!(
-                "    VS Registry: {} ({:.1}%)",
-                format_bytes(state.vs_registry_usage).bright_green(),
-                vs_reg_pct
-            );
-            let reals_reg_pct = if balancer.total_usage > 0 {
-                (state.reals_registry_usage as f64 / balancer.total_usage as f64) * 100.0
-            } else {
-                0.0
-            };
-            println!(
-                "    Reals Registry: {} ({:.1}%)",
-                format_bytes(state.reals_registry_usage).bright_green(),
-                reals_reg_pct
             );
             let session_pct = if balancer.total_usage > 0 {
                 (state.session_table_usage as f64 / balancer.total_usage as f64) * 100.0

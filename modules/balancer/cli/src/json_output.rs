@@ -816,8 +816,6 @@ pub struct RealsUsageJson {
 
 #[derive(Serialize)]
 pub struct StateInspectJson {
-    pub vs_registry_usage: u64,
-    pub reals_registry_usage: u64,
     pub session_table_usage: u64,
     pub total_usage: u64,
 }
@@ -937,14 +935,10 @@ fn convert_reals_usage(reals: Option<&balancerpb::RealsUsage>) -> RealsUsageJson
 fn convert_state_inspect(state: Option<&balancerpb::StateInspect>) -> StateInspectJson {
     match state {
         Some(state) => StateInspectJson {
-            vs_registry_usage: state.vs_registry_usage,
-            reals_registry_usage: state.reals_registry_usage,
             session_table_usage: state.session_table_usage,
             total_usage: state.total_usage,
         },
         None => StateInspectJson {
-            vs_registry_usage: 0,
-            reals_registry_usage: 0,
             session_table_usage: 0,
             total_usage: 0,
         },
