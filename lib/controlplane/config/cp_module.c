@@ -148,6 +148,21 @@ cp_module_init(
 	return 0;
 }
 
+void
+cp_module_fini(struct cp_module *cp_module) {
+	counter_registry_free(&cp_module->counter_registry);
+
+	struct cp_module_device *devices = ADDR_OF(&cp_module->devices);
+	if (devices != NULL) {
+		memory_bfree(
+			&cp_module->memory_context,
+			devices,
+			sizeof(struct cp_module_device) *
+				cp_module->device_count
+		);
+	}
+}
+
 int
 cp_module_link_device(
 	struct cp_module *cp_module, const char *name, uint64_t *index

@@ -46,6 +46,9 @@ counter_registry_register(
 	struct counter_registry *registry, const char *name, uint64_t size
 );
 
+void
+counter_registry_free(struct counter_registry *registry);
+
 int
 counter_registry_link(
 	struct counter_registry *dst, struct counter_registry *src

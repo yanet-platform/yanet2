@@ -113,6 +113,16 @@ cp_module_init(
 	const char *module_name
 );
 
+/**
+ * Release resources allocated by cp_module_init.
+ *
+ * Must be called before freeing the module configuration struct itself.
+ *
+ * @param cp_module Pointer to the module configuration to finalize
+ */
+void
+cp_module_fini(struct cp_module *cp_module);
+
 struct cp_module_registry {
 	struct memory_context *memory_context;
 	struct registry registry;

@@ -58,6 +58,12 @@ type Agent struct {
 	ptr  *C.struct_agent
 }
 
+// BlockAllocatorFreeSize returns the total free memory in the agent's block
+// allocator.
+func (m *Agent) BlockAllocatorFreeSize() uint64 {
+	return uint64(C.block_allocator_free_size(&m.ptr.block_allocator))
+}
+
 func (m *Agent) Close() error {
 	_, err := C.agent_detach(m.ptr)
 	return err

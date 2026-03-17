@@ -9,6 +9,7 @@
 #include "common/container_of.h"
 
 #include "controlplane/agent/agent.h"
+#include "controlplane/config/cp_module.h"
 
 FILTER_COMPILER_DECLARE(FWD_FILTER_VLAN_TAG, device, vlan);
 
@@ -60,12 +61,14 @@ forward_module_config_free(struct cp_module *cp_module) {
 	memory_bfree(
 		&cp_module->memory_context,
 		ADDR_OF(&config->targets),
-		sizeof(struct forward_target *) * config->target_count
+		sizeof(struct forward_target) * config->target_count
 	);
 
 	FILTER_FREE(&config->filter_vlan, FWD_FILTER_VLAN_TAG);
 	FILTER_FREE(&config->filter_ip4, FWD_FILTER_IP4_TAG);
 	FILTER_FREE(&config->filter_ip6, FWD_FILTER_IP6_TAG);
+
+	cp_module_fini(cp_module);
 
 	struct agent *agent = ADDR_OF(&cp_module->agent);
 	// FIXME: remove the check as agent should be assigned

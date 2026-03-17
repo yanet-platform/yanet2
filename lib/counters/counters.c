@@ -28,6 +28,20 @@ counter_registry_init(
 	return 0;
 }
 
+void
+counter_registry_free(struct counter_registry *registry) {
+	struct memory_context *memory_context =
+		ADDR_OF(&registry->memory_context);
+	struct counter *names = ADDR_OF(&registry->names);
+	if (names != NULL) {
+		memory_bfree(
+			memory_context,
+			names,
+			sizeof(struct counter) * registry->capacity
+		);
+	}
+}
+
 uint64_t
 counter_registry_lookup_index(
 	struct counter_registry *registry, const char *name, uint64_t size
