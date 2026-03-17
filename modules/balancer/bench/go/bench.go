@@ -26,8 +26,8 @@ import (
 
 var (
 	PacketsMemory int = (1 << 32) + (1 << 30)
-	TotalMemory   int = (1 << 32) + PacketsMemory
-	CpMemory      int = TotalMemory - PacketsMemory
+	TotalMemory   int = CpMemory + PacketsMemory
+	CpMemory      int = (1 << 33)
 	AgentMemory   int = CpMemory - (1 << 27)
 )
 

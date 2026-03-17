@@ -26,7 +26,6 @@ type BalancerManager struct {
 	realUpdateBuffer []ffi.RealUpdate
 
 	// Background task management
-	ctx    context.Context
 	cancel context.CancelFunc
 
 	mu sync.Mutex
@@ -492,10 +491,11 @@ func (b *BalancerManager) startBackgroundTasks() {
 		return
 	}
 
-	b.ctx, b.cancel = context.WithCancel(context.Background())
+	var ctx context.Context
+	ctx, b.cancel = context.WithCancel(context.Background())
 
 	// Start background refresh task
-	go b.backgroundRefreshTask()
+	go b.backgroundRefreshTask(ctx)
 }
 
 // backgroundRefreshTask runs periodically to:
@@ -503,7 +503,7 @@ func (b *BalancerManager) startBackgroundTasks() {
 // 2. Resize session table if load factor exceeds threshold
 // 3. Adjust WLC weights based on active connections
 // 4. Apply real updates if needed
-func (b *BalancerManager) backgroundRefreshTask() {
+func (b *BalancerManager) backgroundRefreshTask(ctx context.Context) {
 	for {
 		// Get current config to check refresh period
 		b.mu.Lock()
@@ -521,7 +521,7 @@ func (b *BalancerManager) backgroundRefreshTask() {
 
 		// Wait for refresh period or context cancellation
 		select {
-		case <-b.ctx.Done():
+		case <-ctx.Done():
 			b.log.Debugw("background refresh task stopped (context cancelled)")
 			return
 		case <-time.After(refreshPeriod):
