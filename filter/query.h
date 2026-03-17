@@ -74,7 +74,7 @@ filter_actions_with_category(
 		const size_t __n = sizeof(__filter_attrs_query_##tag) /        \
 				   sizeof(__filter_attrs_query_##tag[0]);      \
 		/* Local slots storage */                                      \
-		uint32_t __slots[2 * MAX_ATTRIBUTES * count];                  \
+		uint32_t __slots[2 * MAX_ATTRIBUTES * count + 1];              \
 		/* compute classifiers for leaf attributes into parent slots   \
 		 */                                                            \
 		for (size_t __ai = 0; __ai < __n; ++__ai) {                    \
