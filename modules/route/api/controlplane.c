@@ -39,6 +39,7 @@ route_module_config_create(struct agent *agent, const char *name) {
 			config,
 			sizeof(struct route_module_config)
 		);
+		return NULL;
 	}
 
 	if (route_module_config_data_init(
