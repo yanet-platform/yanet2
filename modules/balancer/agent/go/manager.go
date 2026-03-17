@@ -488,11 +488,11 @@ func (b *BalancerManager) Sessions(
 func (b *BalancerManager) startBackgroundTasks() {
 	b.stopBackgroundTasks()
 
-	b.ctx, b.cancel = context.WithCancel(context.Background())
-
 	if b.handle.Config().RefreshPeriod == 0 {
 		return
 	}
+
+	b.ctx, b.cancel = context.WithCancel(context.Background())
 
 	// Start background refresh task
 	go b.backgroundRefreshTask()
@@ -605,6 +605,7 @@ func (b *BalancerManager) Refresh(now time.Time) error {
 func (b *BalancerManager) stopBackgroundTasks() {
 	if b.cancel != nil {
 		b.cancel()
+		b.cancel = nil
 	}
 }
 
