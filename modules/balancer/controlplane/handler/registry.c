@@ -83,6 +83,12 @@ service_registry_free(struct service_registry *registry) {
 	memset(registry, 0, sizeof(*registry));
 }
 
+size_t
+service_registry_usage(struct service_registry *registry) {
+	return big_array_memory_usage(&registry->elems) +
+	       big_array_memory_usage(&registry->indices);
+}
+
 ssize_t
 service_registry_lookup(
 	struct service_registry *registry, const void *elem, registry_cmp cmp
@@ -217,6 +223,11 @@ vs_registry_lookup(vs_registry_t *registry, const struct vs_identifier *vs) {
 	return service_registry_lookup(registry, vs, vs_identifier_cmp);
 }
 
+size_t
+vs_registry_usage(vs_registry_t *registry) {
+	return service_registry_usage(registry);
+}
+
 int
 reals_registry_init(
 	reals_registry_t *registry,
@@ -246,4 +257,9 @@ reals_registry_lookup(
 	reals_registry_t *registry, const struct real_identifier *real
 ) {
 	return service_registry_lookup(registry, real, real_identifier_cmp);
+}
+
+size_t
+reals_registry_usage(reals_registry_t *registry) {
+	return service_registry_usage(registry);
 }

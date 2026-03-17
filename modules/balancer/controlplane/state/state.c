@@ -67,7 +67,5 @@ balancer_state_inspect(
 ) {
 	inspect->session_table_usage =
 		session_table_memory_usage(&state->session_table);
-	inspect->vs_registry_usage = 0;	   // Moved to packet_handler
-	inspect->reals_registry_usage = 0; // Moved to packet_handler
 	inspect->total_usage = inspect->session_table_usage;
 }

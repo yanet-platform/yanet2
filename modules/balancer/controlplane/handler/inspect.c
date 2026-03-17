@@ -5,6 +5,7 @@
 #include "common/memory_address.h"
 #include "compiler.h"
 #include "map.h"
+#include "registry.h"
 #include "vs.h"
 #include <stdlib.h>
 
@@ -50,8 +51,11 @@ packet_handler_inspect(
 	inspect->summary_vs_usage = inspect->vs_ipv4_inspect.summary_vs_usage +
 				    inspect->vs_ipv6_inspect.summary_vs_usage +
 				    sizeof(struct vs) * handler->vs_count;
-	inspect->reals_index_usage = map_memory_usage(&handler->reals_index);
-	inspect->vs_index_usage = map_memory_usage(&handler->vs_index);
+	inspect->reals_index_usage =
+		map_memory_usage(&handler->reals_index) +
+		reals_registry_usage(&handler->reals_registry);
+	inspect->vs_index_usage = map_memory_usage(&handler->vs_index) +
+				  vs_registry_usage(&handler->vs_registry);
 	inspect->counters_usage = (sizeof(struct balancer_icmp_stats) * 2 +
 				   sizeof(struct balancer_common_stats) +
 				   sizeof(struct balancer_l4_stats)) *

@@ -1544,9 +1544,7 @@ func cToGoRealsUsage(cUsage *C.struct_reals_usage) *RealsUsage {
 
 func cToGoStateInspect(cInspect *C.struct_state_inspect) *StateInspect {
 	return &StateInspect{
-		VsRegistryUsage:    uint64(cInspect.vs_registry_usage),
-		RealsRegistryUsage: uint64(cInspect.reals_registry_usage),
-		SessionTableUsage:  uint64(cInspect.session_table_usage),
-		TotalUsage:         uint64(cInspect.total_usage),
+		SessionTableUsage: uint64(cInspect.session_table_usage),
+		TotalUsage:        uint64(cInspect.total_usage),
 	}
 }

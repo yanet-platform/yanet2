@@ -64,8 +64,6 @@ struct packet_handler_inspect {
 };
 
 struct state_inspect {
-	size_t vs_registry_usage;
-	size_t reals_registry_usage;
 	size_t session_table_usage;
 	size_t total_usage;
 };

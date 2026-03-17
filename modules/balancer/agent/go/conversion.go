@@ -1610,10 +1610,8 @@ func ConvertStateInspectToProto(
 	}
 
 	return &balancerpb.StateInspect{
-		VsRegistryUsage:    inspect.VsRegistryUsage,
-		RealsRegistryUsage: inspect.RealsRegistryUsage,
-		SessionTableUsage:  inspect.SessionTableUsage,
-		TotalUsage:         inspect.TotalUsage,
+		SessionTableUsage: inspect.SessionTableUsage,
+		TotalUsage:        inspect.TotalUsage,
 	}
 }
 

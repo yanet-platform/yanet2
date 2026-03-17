@@ -54,10 +54,8 @@ message PacketHandlerInspect {
 
 // State memory usage
 message StateInspect {
-	uint64 vs_registry_usage = 1;
-	uint64 reals_registry_usage = 2;
-	uint64 session_table_usage = 3;
-	uint64 total_usage = 4;
+	uint64 session_table_usage = 1;
+	uint64 total_usage = 2;
 }
 
 // Per-balancer memory inspection

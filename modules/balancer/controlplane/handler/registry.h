@@ -38,6 +38,9 @@ service_registry_lookup(
 	struct service_registry *registry, const void *elem, registry_cmp cmp
 );
 
+size_t
+service_registry_usage(struct service_registry *registry);
+
 typedef struct service_registry vs_registry_t;
 
 int
@@ -54,6 +57,9 @@ vs_registry_free(vs_registry_t *registry);
 
 ssize_t
 vs_registry_lookup(vs_registry_t *registry, const struct vs_identifier *vs);
+
+size_t
+vs_registry_usage(vs_registry_t *registry);
 
 typedef struct service_registry reals_registry_t;
 
@@ -73,3 +79,6 @@ ssize_t
 reals_registry_lookup(
 	reals_registry_t *registry, const struct real_identifier *real
 );
+
+size_t
+reals_registry_usage(reals_registry_t *registry);
