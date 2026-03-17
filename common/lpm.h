@@ -100,11 +100,21 @@ lpm_new_page(struct lpm *lpm, union lpm_value *value) {
 			old_chunk_count * sizeof(struct lpm_page *)
 		);
 	}
-	memset(lpm_page(lpm, lpm->page_count), 0xff, sizeof(struct lpm_page));
+	struct lpm_page *np = lpm_page(lpm, lpm->page_count);
 	lpm->page_count += 1;
 
-	if (value != NULL)
+	if (value != NULL) {
+		// Propagate the existing leaf value into every slot of the
+		// new page so that broader prefixes are not lost when
+		// splitting a node.
+		for (int i = 0; i < 256; i++) {
+			np->values[i].value = value->value;
+		}
+
 		SET_OFFSET_OF(&value->page, lpm_page(lpm, lpm->page_count - 1));
+	} else {
+		memset(np, 0xff, sizeof(struct lpm_page));
+	}
 
 	return 0;
 }

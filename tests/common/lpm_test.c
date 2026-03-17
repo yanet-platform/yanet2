@@ -51,10 +51,62 @@ walk_func(
 	return 0;
 }
 
+// Broad prefix value must survive when a narrower overlapping prefix is
+// inserted afterwards.
+static int
+test_overlapping_prefixes(void) {
+	void *arena = malloc(ARENA_SIZE);
+	if (arena == NULL)
+		return -1;
+
+	struct block_allocator ba;
+	block_allocator_init(&ba);
+	block_allocator_put_arena(&ba, arena, ARENA_SIZE);
+
+	struct memory_context mctx;
+	memory_context_init(&mctx, "lpm_overlap", &ba);
+
+	struct lpm tree;
+	if (lpm_init(&tree, &mctx)) {
+		free(arena);
+		return -1;
+	}
+
+	// 0.0.0.0/0 -> value 42, then 0.1.0.0/16 -> value 99.
+	uint8_t from[4], to[4];
+	memset(from, 0x00, 4);
+	memset(to, 0xff, 4);
+	lpm_insert(&tree, 4, from, to, 42);
+	from[1] = 0x01;
+	to[0] = 0x00;
+	to[1] = 0x01;
+	lpm_insert(&tree, 4, from, to, 99);
+
+	int rc = -1;
+	uint8_t k1[4] = {0x00, 0x01, 0x02, 0x03};
+	uint8_t k2[4] = {0x00, 0x02, 0x00, 0x00};
+	if (lpm_lookup(&tree, 4, k1) != 99) {
+		fprintf(stdout, "narrow prefix lookup failed\n");
+	} else if (lpm_lookup(&tree, 4, k2) != 42) {
+		fprintf(stdout, "broad prefix lost after page split\n");
+	} else {
+		rc = 0;
+	}
+
+	lpm_free(&tree);
+	free(arena);
+	return rc;
+}
+
 int
 main(int argc, char **argv) {
 	(void)argc;
 	(void)argv;
+
+	if (test_overlapping_prefixes()) {
+		fprintf(stdout, "test_overlapping_prefixes: FAILED\n");
+		return -1;
+	}
 
 	void *arena0 = malloc(ARENA_SIZE);
 	if (arena0 == NULL) {
