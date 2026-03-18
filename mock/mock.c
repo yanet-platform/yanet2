@@ -209,8 +209,8 @@ dataplane_initialize(
 	);
 	SET_OFFSET_OF(&agent.dp_config, dp_config);
 	SET_OFFSET_OF(&agent.cp_config, cp_config);
+
 	struct cp_config_gen *cp_config_gen = cp_config_gen_create(&agent);
-	cp_config_gen->config_gen_ectx = NULL;
 	SET_OFFSET_OF(&cp_config->cp_config_gen, cp_config_gen);
 
 	struct dp_worker **workers_array = memory_balloc(

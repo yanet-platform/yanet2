@@ -77,6 +77,7 @@ cp_config_gen_create_from(
 	}
 
 	new_config_gen->gen = old_config_gen->gen + 1;
+	new_config_gen->config_gen_ectx = NULL;
 
 	SET_OFFSET_OF(
 		&new_config_gen->dp_config, ADDR_OF(&old_config_gen->dp_config)
@@ -615,6 +616,7 @@ cp_config_gen_create(struct agent *agent) {
 		return NULL;
 	}
 	cp_config_gen->gen = 0;
+	cp_config_gen->config_gen_ectx = NULL;
 	SET_OFFSET_OF(
 		&cp_config_gen->dp_config, ADDR_OF(&cp_config->dp_config)
 	);
