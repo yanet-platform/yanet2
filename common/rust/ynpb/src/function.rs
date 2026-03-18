@@ -3,7 +3,7 @@ use core::{error::Error, str::FromStr};
 use crate::pb;
 
 impl FromStr for pb::FunctionChain {
-    type Err = Box<dyn Error>;
+    type Err = Box<dyn Error + Send + Sync>;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let (chain_part, modules_part) = s
@@ -17,11 +17,11 @@ impl FromStr for pb::FunctionChain {
             .map_err(|e| format!("invalid chain weight {weight:?}: {e}"))?;
         let modules = modules_part
             .split(',')
-            .map(|m| -> Result<::commonpb::pb::ModuleId, Box<dyn Error>> {
+            .map(|m| -> Result<commonpb::pb::ModuleId, Box<dyn Error + Send + Sync>> {
                 let (r#type, name) = m
                     .split_once(':')
                     .ok_or_else(|| format!("invalid module format: expected 'module_type:config_name', got {m:?}"))?;
-                Ok(::commonpb::pb::ModuleId {
+                Ok(commonpb::pb::ModuleId {
                     r#type: r#type.to_string(),
                     name: name.to_string(),
                 })

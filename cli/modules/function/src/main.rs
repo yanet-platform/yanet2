@@ -44,7 +44,7 @@ pub struct UpdateCmd {
     pub name: String,
     /// Chains in format name:weight=type:name,type:name
     #[arg(long)]
-    pub chains: Vec<String>,
+    pub chains: Vec<FunctionChain>,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -90,15 +90,10 @@ impl FunctionService {
     }
 
     pub async fn update_functions(&mut self, cmd: UpdateCmd) -> Result<(), Box<dyn Error>> {
-        let chains = cmd
-            .chains
-            .iter()
-            .map(|s| s.parse::<FunctionChain>())
-            .collect::<Result<Vec<_>, _>>()?;
         let request = UpdateFunctionRequest {
             function: Some(Function {
                 id: Some(FunctionId { name: cmd.name }),
-                chains,
+                chains: cmd.chains,
             }),
         };
 
