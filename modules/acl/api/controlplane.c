@@ -91,7 +91,7 @@ acl_module_config_free(struct cp_module *cp_module) {
 	memory_bfree(
 		&cp_module->memory_context,
 		ADDR_OF(&config->targets),
-		sizeof(struct acl_target *) * config->target_count
+		sizeof(struct acl_target) * config->target_count
 	);
 
 	FILTER_FREE(&config->filter_vlan, ACL_FILTER_VLAN_TAG);
