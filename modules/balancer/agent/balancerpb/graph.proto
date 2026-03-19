@@ -4,8 +4,7 @@ package balancerpb;
 
 import "modules/balancer/agent/balancerpb/module.proto";
 
-option go_package = "github.com/yanet-platform/yanet2/modules/"
-		    "balancer/agent/balancerpb;balancerpb";
+option go_package = "github.com/yanet-platform/yanet2/modules/balancer/agent/balancerpb;balancerpb";
 
 // Real server in graph topology.
 //

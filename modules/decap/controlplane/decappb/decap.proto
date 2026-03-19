@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package decappb;
 
-option go_package = "github.com/yanet-platform/yanet2/controlplane/modules/decap/decappb;decappb";
+option go_package = "github.com/yanet-platform/yanet2/modules/decap/controlplane/decappb;decappb";
 
 // DecapService is a service for decapsulation module.
 service DecapService {

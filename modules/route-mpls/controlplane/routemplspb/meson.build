@@ -2,7 +2,7 @@ proto_dir = meson.current_source_dir()
 root_dir = meson.project_source_root()
 
 proto_files = [
-    join_paths(proto_dir, 'route-mpls.proto'),
+    join_paths(proto_dir, 'routempls.proto'),
 ]
 
 protoc_gen = custom_target(

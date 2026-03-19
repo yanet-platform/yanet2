@@ -2,8 +2,7 @@ syntax = "proto3";
 
 package fwstatepb;
 
-option go_package = "github.com/yanet-platform/yanet2/modules/"
-		    "fwstate/controlplane/fwstatepb;fwstatepb";
+option go_package = "github.com/yanet-platform/yanet2/modules/fwstate/controlplane/fwstatepb;fwstatepb";
 
 service FWStateService {
 	// Updates the complete FWState configuration
@@ -108,7 +107,7 @@ message FwStateKey {
 
 message FwStateValue {
 	bool external = 1;
-	uint32 flags = 2;      // raw fw_state_flags_u byte
+	uint32 flags = 2; // raw fw_state_flags_u byte
 	uint64 created_at = 3; // nanoseconds
 	uint64 updated_at = 4; // nanoseconds
 	uint64 packets_backward = 5;
@@ -118,24 +117,24 @@ message FwStateValue {
 message FwStateEntry {
 	FwStateKey key = 1;
 	FwStateValue value = 2;
-	uint32 idx = 3;	  // Key index within the layer
+	uint32 idx = 3; // Key index within the layer
 	bool expired = 4; // Whether updated_at + TTL < now
 }
 
 message ListEntriesRequest {
-	string config_name = 1;	  // Config to iterate
-	bool is_ipv6 = 2;	  // false = fw4state, true = fw6state
-	uint32 layer_index = 3;	  // Which layer to iterate (0 = active)
+	string config_name = 1; // Config to iterate
+	bool is_ipv6 = 2; // false = fw4state, true = fw6state
+	uint32 layer_index = 3; // Which layer to iterate (0 = active)
 	bool include_expired = 4; // Whether to include expired entries
-	Direction direction = 5;  // Direction for this read
-	uint32 batch_size = 6;	  // Number of entries to return in this batch
+	Direction direction = 5; // Direction for this read
+	uint32 batch_size = 6; // Number of entries to return in this batch
 	int64 index = 7; // Cursor position from previous response (0 on first)
 }
 
 message ListEntriesResponse {
 	repeated FwStateEntry entries = 1;
-	bool has_more = 2;     // false when cursor reached the end
-	int64 index = 3;       // Updated cursor position for next request
+	bool has_more = 2; // false when cursor reached the end
+	int64 index = 3; // Updated cursor position for next request
 	uint64 generation = 4; // Config generation for consistency detection
 }
 

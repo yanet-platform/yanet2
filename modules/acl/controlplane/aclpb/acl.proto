@@ -4,8 +4,7 @@ package aclpb;
 
 import "common/filterpb/filter.proto";
 
-option go_package = "github.com/yanet-platform/yanet2/modules/"
-		    "acl/controlplane/aclpb;aclpb";
+option go_package = "github.com/yanet-platform/yanet2/modules/acl/controlplane/aclpb;aclpb";
 
 service ACLService {
 	// Updates the complete ACL configuration with a new set of rules

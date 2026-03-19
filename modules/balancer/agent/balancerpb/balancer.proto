@@ -10,8 +10,7 @@ import "modules/balancer/agent/balancerpb/stats.proto";
 
 import "common/commonpb/metric.proto";
 
-option go_package = "github.com/yanet-platform/yanet2/modules/"
-		    "balancer/agent/balancerpb;balancerpb";
+option go_package = "github.com/yanet-platform/yanet2/modules/balancer/agent/balancerpb;balancerpb";
 
 // Balancer agent service.
 //

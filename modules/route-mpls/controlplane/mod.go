@@ -7,7 +7,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	route_mplspb "github.com/yanet-platform/yanet2/modules/route-mpls/controlplane/route-mplspb"
+	"github.com/yanet-platform/yanet2/modules/route-mpls/controlplane/routemplspb"
 )
 
 // RouteMPLSModule is a controlplane part of a module that is responsible for
@@ -65,7 +65,7 @@ func (m *RouteMPLSModule) ServicesNames() []string {
 }
 
 func (m *RouteMPLSModule) RegisterService(server *grpc.Server) {
-	route_mplspb.RegisterRouteMPLSServiceServer(server, m.routeMPLSService)
+	routemplspb.RegisterRouteMPLSServiceServer(server, m.routeMPLSService)
 }
 
 // Close closes the module.

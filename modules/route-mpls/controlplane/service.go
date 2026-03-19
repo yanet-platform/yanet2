@@ -16,11 +16,11 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/filter/ipnet6"
 	"github.com/yanet-platform/yanet2/common/go/maptrie"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	route_mplspb "github.com/yanet-platform/yanet2/modules/route-mpls/controlplane/route-mplspb"
+	"github.com/yanet-platform/yanet2/modules/route-mpls/controlplane/routemplspb"
 )
 
 type RouteMPLSService struct {
-	route_mplspb.UnimplementedRouteMPLSServiceServer
+	routemplspb.UnimplementedRouteMPLSServiceServer
 
 	mu      sync.Mutex
 	agent   *ffi.Agent
@@ -104,12 +104,12 @@ func NewRouteMPLSService(
 
 func (m *RouteMPLSService) ListConfigs(
 	ctx context.Context,
-	request *route_mplspb.ListConfigsRequest,
-) (*route_mplspb.ListConfigsResponse, error) {
+	request *routemplspb.ListConfigsRequest,
+) (*routemplspb.ListConfigsResponse, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	response := &route_mplspb.ListConfigsResponse{
+	response := &routemplspb.ListConfigsResponse{
 		Configs: make([]string, 0, len(m.configs)),
 	}
 
@@ -122,8 +122,8 @@ func (m *RouteMPLSService) ListConfigs(
 
 func (m *RouteMPLSService) ShowConfig(
 	ctx context.Context,
-	req *route_mplspb.ShowConfigRequest,
-) (*route_mplspb.ShowConfigResponse, error) {
+	req *routemplspb.ShowConfigRequest,
+) (*routemplspb.ShowConfigResponse, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -137,19 +137,19 @@ func (m *RouteMPLSService) ShowConfig(
 		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
 
-	rules := make([]*route_mplspb.Rule, 0)
+	rules := make([]*routemplspb.Rule, 0)
 
 	for _, prefixes := range config.prefixes {
 		for prefix, nexthops := range prefixes {
 			for _, nexthop := range nexthops.NextHops {
 				rules = append(
 					rules,
-					&route_mplspb.Rule{
+					&routemplspb.Rule{
 						Prefix: &filterpb.IPPrefix{
 							Addr:   prefix.Addr().AsSlice(),
 							Length: uint32(prefix.Bits()),
 						},
-						Nexthop: &route_mplspb.NextHop{
+						Nexthop: &routemplspb.NextHop{
 							Label:         nexthop.MPLSLabel,
 							SourceIp:      nexthop.Source.AsSlice(),
 							DestinationIp: nexthop.Destination.AsSlice(),
@@ -165,7 +165,7 @@ func (m *RouteMPLSService) ShowConfig(
 		}
 	}
 
-	response := &route_mplspb.ShowConfigResponse{
+	response := &routemplspb.ShowConfigResponse{
 		Name:  name,
 		Rules: rules,
 	}
@@ -175,8 +175,8 @@ func (m *RouteMPLSService) ShowConfig(
 
 func (m *RouteMPLSService) DeleteConfig(
 	ctx context.Context,
-	req *route_mplspb.DeleteConfigRequest,
-) (*route_mplspb.DeleteConfigResponse, error) {
+	req *routemplspb.DeleteConfigRequest,
+) (*routemplspb.DeleteConfigResponse, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -200,7 +200,7 @@ func (m *RouteMPLSService) DeleteConfig(
 
 	delete(m.configs, name)
 
-	response := &route_mplspb.DeleteConfigResponse{}
+	response := &routemplspb.DeleteConfigResponse{}
 
 	return response, nil
 }
@@ -280,7 +280,7 @@ func makePrefix(prefix *filterpb.IPPrefix) (netip.Prefix, error) {
 	return netip.PrefixFrom(addr, int(prefix.Length)), nil
 }
 
-func makeNextHop(nexthop *route_mplspb.NextHop) (NextHop, error) {
+func makeNextHop(nexthop *routemplspb.NextHop) (NextHop, error) {
 	src, ok := netip.AddrFromSlice(nexthop.SourceIp)
 	if !ok {
 		return NextHop{}, fmt.Errorf("invalid source address")
@@ -307,8 +307,8 @@ func makeNextHop(nexthop *route_mplspb.NextHop) (NextHop, error) {
 
 func (m *RouteMPLSService) CreateConfig(
 	ctx context.Context,
-	req *route_mplspb.CreateConfigRequest,
-) (*route_mplspb.CreateConfigResponse, error) {
+	req *routemplspb.CreateConfigRequest,
+) (*routemplspb.CreateConfigResponse, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -368,15 +368,15 @@ func (m *RouteMPLSService) CreateConfig(
 
 	m.configs[name] = config
 
-	response := &route_mplspb.CreateConfigResponse{}
+	response := &routemplspb.CreateConfigResponse{}
 
 	return response, nil
 }
 
 func (m *RouteMPLSService) UpdateConfig(
 	ctx context.Context,
-	req *route_mplspb.UpdateConfigRequest,
-) (*route_mplspb.UpdateConfigResponse, error) {
+	req *routemplspb.UpdateConfigRequest,
+) (*routemplspb.UpdateConfigResponse, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -471,7 +471,7 @@ func (m *RouteMPLSService) UpdateConfig(
 
 	m.configs[name] = config
 
-	response := &route_mplspb.UpdateConfigResponse{}
+	response := &routemplspb.UpdateConfigResponse{}
 
 	return response, nil
 

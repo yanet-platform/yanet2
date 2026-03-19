@@ -1,1 +1,1 @@
-subdir('route-mplspb')
+subdir('routemplspb')
