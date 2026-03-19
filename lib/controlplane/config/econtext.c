@@ -312,14 +312,11 @@ function_ectx_free(
 
 			chain_ectx_free(cp_config_gen, chain_ectx);
 		}
-		if (function_ectx->chain_count > 0) {
-			memory_bfree(
-				memory_context,
-				chains,
-				sizeof(struct chain_ectx *) *
-					function_ectx->chain_count
-			);
-		}
+		memory_bfree(
+			memory_context,
+			chains,
+			sizeof(struct chain_ectx *) * function_ectx->chain_count
+		);
 	}
 
 	struct counter_storage *counter_storage =
@@ -638,9 +635,7 @@ device_entry_ectx_free(
 				continue;
 			pipeline_ectx_free(cp_config_gen, pipeline_ectx);
 		}
-	}
 
-	if (pipelines != NULL && device_entry_ectx->pipeline_count > 0) {
 		memory_bfree(
 			memory_context,
 			pipelines,
