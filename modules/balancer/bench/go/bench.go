@@ -594,60 +594,16 @@ func Run(config *BenchConfig) error {
 	fmt.Printf("                         BALANCER BENCHMARK RESULTS\n")
 	printSeparator()
 
-	// Get current time for info query
-	// now := time.Unix(0, 0)
-
 	// Print worker performance summary
 	printWorkerPerformance(workerPerfs, benchDuration, config.Workers)
 
-	// Get balancer info
-	// balancerInfo, err := bal.Info(now)
-	// if err != nil {
-	// 	logger.Errorw("failed to get balancer info", "error", err)
-	// } else {
-	// 	printBalancerInfo(balancerInfo)
-	// }
-
-	// Get balancer stats
-	// deviceName := DeviceName
-	// pipelineName := PipelineName
-	// functionName := FunctionName
-	// chainName := ChainName
-	// ref := &balancerpb.PacketHandlerRef{
-	// 	Device:   &deviceName,
-	// 	Pipeline: &pipelineName,
-	// 	Function: &functionName,
-	// 	Chain:    &chainName,
-	// }
-	// stats, err := bal.Stats(ref)
-	// if err != nil {
-	// 	logger.Errorw("failed to get balancer stats", "error", err)
-	// } else {
-	// 	printBalancerStats(stats, balancerInfo)
-	// }
-
-	printSeparator()
-	fmt.Printf("\n")
+	fmt.Println()
 
 	if isErr {
 		return fmt.Errorf("some workers failed")
 	} else {
 		return nil
 	}
-}
-
-// formatBytes converts bytes to human-readable format (KB, MB, GB, TB)
-func formatBytes(bytes uint64) string {
-	const unit = 1024
-	if bytes < unit {
-		return fmt.Sprintf("%d B", bytes)
-	}
-	div, exp := uint64(unit), 0
-	for n := bytes / unit; n >= unit; n /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGT"[exp])
 }
 
 // formatNumber adds comma separators to large numbers
@@ -664,14 +620,6 @@ func formatNumber(n uint64) string {
 		result = append(result, byte(c))
 	}
 	return string(result)
-}
-
-// formatTimestamp converts protobuf timestamp to readable format
-func formatTimestamp(ts *time.Time) string {
-	if ts == nil || ts.IsZero() {
-		return "N/A"
-	}
-	return ts.UTC().Format("2006-01-02 15:04:05 UTC")
 }
 
 // printSeparator prints a separator line
