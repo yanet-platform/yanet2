@@ -21,7 +21,6 @@ import (
 	balancer "github.com/yanet-platform/yanet2/modules/balancer/agent/go"
 	"go.uber.org/zap/zapcore"
 	"golang.org/x/sys/unix"
-	"google.golang.org/protobuf/types/known/durationpb"
 )
 
 var (
@@ -355,16 +354,13 @@ func balancerConfig(config *BenchConfig) *balancerpb.BalancerConfig {
 
 	// State configuration
 	capacity := uint64(
-		config.BatchesPerWorker * config.PacketsPerBatch * config.Workers * 4,
+		config.SessionTableCapacity,
 	)
-	refreshPeriod := durationpb.New(
-		0,
-	) // Disable periodic refresh for benchmarking
 
 	stateConfig := &balancerpb.StateConfig{
 		SessionTableCapacity:      &capacity,
 		SessionTableMaxLoadFactor: nil,
-		RefreshPeriod:             refreshPeriod,
+		RefreshPeriod:             nil,
 		Wlc:                       nil,
 	}
 
@@ -599,36 +595,36 @@ func Run(config *BenchConfig) error {
 	printSeparator()
 
 	// Get current time for info query
-	now := time.Unix(0, 0)
+	// now := time.Unix(0, 0)
 
 	// Print worker performance summary
 	printWorkerPerformance(workerPerfs, benchDuration, config.Workers)
 
 	// Get balancer info
-	balancerInfo, err := bal.Info(now)
-	if err != nil {
-		logger.Errorw("failed to get balancer info", "error", err)
-	} else {
-		printBalancerInfo(balancerInfo)
-	}
+	// balancerInfo, err := bal.Info(now)
+	// if err != nil {
+	// 	logger.Errorw("failed to get balancer info", "error", err)
+	// } else {
+	// 	printBalancerInfo(balancerInfo)
+	// }
 
 	// Get balancer stats
-	deviceName := DeviceName
-	pipelineName := PipelineName
-	functionName := FunctionName
-	chainName := ChainName
-	ref := &balancerpb.PacketHandlerRef{
-		Device:   &deviceName,
-		Pipeline: &pipelineName,
-		Function: &functionName,
-		Chain:    &chainName,
-	}
-	stats, err := bal.Stats(ref)
-	if err != nil {
-		logger.Errorw("failed to get balancer stats", "error", err)
-	} else if balancerInfo != nil {
-		printBalancerStats(stats, balancerInfo)
-	}
+	// deviceName := DeviceName
+	// pipelineName := PipelineName
+	// functionName := FunctionName
+	// chainName := ChainName
+	// ref := &balancerpb.PacketHandlerRef{
+	// 	Device:   &deviceName,
+	// 	Pipeline: &pipelineName,
+	// 	Function: &functionName,
+	// 	Chain:    &chainName,
+	// }
+	// stats, err := bal.Stats(ref)
+	// if err != nil {
+	// 	logger.Errorw("failed to get balancer stats", "error", err)
+	// } else {
+	// 	printBalancerStats(stats, balancerInfo)
+	// }
 
 	printSeparator()
 	fmt.Printf("\n")
@@ -681,224 +677,6 @@ func formatTimestamp(ts *time.Time) string {
 // printSeparator prints a separator line
 func printSeparator() {
 	fmt.Println("================================================================================")
-}
-
-// printBalancerInfo prints the balancer info section
-func printBalancerInfo(info *balancerpb.BalancerInfo) {
-	fmt.Println("\nBALANCER INFO")
-	fmt.Println("-------------")
-	fmt.Printf("Balancer Name:        %s\n", BalancerName)
-	fmt.Printf("Active Sessions:      %s\n", formatNumber(info.ActiveSessions))
-	if info.LastPacketTimestamp != nil {
-		lastPacket := info.LastPacketTimestamp.AsTime()
-		fmt.Printf("Last Packet:          %s\n", formatTimestamp(&lastPacket))
-	} else {
-		fmt.Printf("Last Packet:          N/A\n")
-	}
-}
-
-// printCommonStats prints common statistics
-func printCommonStats(stats *balancerpb.CommonStats) {
-	fmt.Println("\nCOMMON STATS")
-	fmt.Println("------------")
-	fmt.Printf("Incoming:             %s packets, %s\n",
-		formatNumber(stats.IncomingPackets),
-		formatBytes(stats.IncomingBytes))
-	fmt.Printf("Outgoing:             %s packets, %s\n",
-		formatNumber(stats.OutgoingPackets),
-		formatBytes(stats.OutgoingBytes))
-	fmt.Printf("Decap Success:        %s packets\n", formatNumber(stats.DecapSuccessful))
-	fmt.Printf("Decap Failed:         %s packets\n", formatNumber(stats.DecapFailed))
-	if stats.UnexpectedNetworkProto > 0 {
-		fmt.Printf("Unexpected Protocol:  %s packets\n", formatNumber(stats.UnexpectedNetworkProto))
-	}
-}
-
-// printL4Stats prints L4 (TCP/UDP) statistics
-func printL4Stats(stats *balancerpb.L4Stats) {
-	fmt.Println("\nL4 STATS (TCP/UDP)")
-	fmt.Println("------------------")
-	fmt.Printf("Incoming Packets:     %s\n", formatNumber(stats.IncomingPackets))
-	fmt.Printf("Outgoing Packets:     %s\n", formatNumber(stats.OutgoingPackets))
-	if stats.SelectVsFailed > 0 {
-		fmt.Printf("Select VS Failed:     %s\n", formatNumber(stats.SelectVsFailed))
-	}
-	if stats.SelectRealFailed > 0 {
-		fmt.Printf("Select Real Failed:   %s\n", formatNumber(stats.SelectRealFailed))
-	}
-	if stats.InvalidPackets > 0 {
-		fmt.Printf("Invalid Packets:      %s\n", formatNumber(stats.InvalidPackets))
-	}
-}
-
-// printIcmpStats prints ICMP statistics (v4 or v6)
-func printIcmpStats(stats *balancerpb.IcmpStats, version string) {
-	if stats.IncomingPackets == 0 {
-		return // Skip if no ICMP traffic
-	}
-
-	fmt.Printf("\nICMP%s STATS\n", version)
-	fmt.Println("------------")
-	fmt.Printf("Incoming Packets:     %s\n", formatNumber(stats.IncomingPackets))
-	if stats.SrcNotAllowed > 0 {
-		fmt.Printf("Src Not Allowed:      %s\n", formatNumber(stats.SrcNotAllowed))
-	}
-	if stats.EchoResponses > 0 {
-		fmt.Printf("Echo Responses:       %s\n", formatNumber(stats.EchoResponses))
-	}
-	if stats.UnrecognizedVs > 0 {
-		fmt.Printf("Unrecognized VS:      %s\n", formatNumber(stats.UnrecognizedVs))
-	}
-	if stats.ForwardedPackets > 0 {
-		fmt.Printf("Forwarded:            %s\n", formatNumber(stats.ForwardedPackets))
-	}
-	if stats.BroadcastedPackets > 0 {
-		fmt.Printf("Broadcasted:          %s\n", formatNumber(stats.BroadcastedPackets))
-	}
-	if stats.PayloadTooShortIp > 0 {
-		fmt.Printf("Payload Too Short IP: %s\n", formatNumber(stats.PayloadTooShortIp))
-	}
-	if stats.PayloadTooShortPort > 0 {
-		fmt.Printf("Payload Too Short Port: %s\n", formatNumber(stats.PayloadTooShortPort))
-	}
-	if stats.UnexpectedTransport > 0 {
-		fmt.Printf("Unexpected Transport: %s\n", formatNumber(stats.UnexpectedTransport))
-	}
-	if stats.PacketClonesSent > 0 {
-		fmt.Printf("Packet Clones Sent:   %s\n", formatNumber(stats.PacketClonesSent))
-	}
-	if stats.PacketClonesReceived > 0 {
-		fmt.Printf("Packet Clones Recv:   %s\n", formatNumber(stats.PacketClonesReceived))
-	}
-	if stats.PacketCloneFailures > 0 {
-		fmt.Printf("Clone Failures:       %s\n", formatNumber(stats.PacketCloneFailures))
-	}
-}
-
-// printVsStats prints virtual service statistics with real breakdowns
-func printVsStats(vsStats *balancerpb.NamedVsStats, vsInfo *balancerpb.VsInfo) {
-	// Format VS identifier
-	vsAddr, _ := netip.AddrFromSlice(vsStats.Vs.Addr.Bytes)
-	proto := "TCP"
-	if vsStats.Vs.Proto == balancerpb.TransportProto_UDP {
-		proto = "UDP"
-	}
-
-	fmt.Printf("\nVS: %s:%d (%s)\n", vsAddr, vsStats.Vs.Port, proto)
-
-	// VS stats
-	stats := vsStats.Stats
-	fmt.Printf("  Incoming:           %s packets, %s\n",
-		formatNumber(stats.IncomingPackets),
-		formatBytes(stats.IncomingBytes))
-	fmt.Printf("  Outgoing:           %s packets, %s\n",
-		formatNumber(stats.OutgoingPackets),
-		formatBytes(stats.OutgoingBytes))
-	fmt.Printf("  Created Sessions:   %s\n", formatNumber(stats.CreatedSessions))
-
-	if vsInfo != nil {
-		fmt.Printf("  Active Sessions:    %s\n", formatNumber(vsInfo.ActiveSessions))
-		if vsInfo.LastPacketTimestamp != nil {
-			lastPacket := vsInfo.LastPacketTimestamp.AsTime()
-			fmt.Printf("  Last Packet:        %s\n", formatTimestamp(&lastPacket))
-		}
-	}
-
-	// Additional VS stats if non-zero
-	if stats.PacketSrcNotAllowed > 0 {
-		fmt.Printf("  Src Not Allowed:    %s\n", formatNumber(stats.PacketSrcNotAllowed))
-	}
-	if stats.NoReals > 0 {
-		fmt.Printf("  No Reals:           %s\n", formatNumber(stats.NoReals))
-	}
-	if stats.OpsPackets > 0 {
-		fmt.Printf("  OPS Packets:        %s\n", formatNumber(stats.OpsPackets))
-	}
-	if stats.SessionTableOverflow > 0 {
-		fmt.Printf("  Table Overflow:     %s\n", formatNumber(stats.SessionTableOverflow))
-	}
-	if stats.EchoIcmpPackets > 0 {
-		fmt.Printf("  Echo ICMP:          %s\n", formatNumber(stats.EchoIcmpPackets))
-	}
-	if stats.ErrorIcmpPackets > 0 {
-		fmt.Printf("  Error ICMP:         %s\n", formatNumber(stats.ErrorIcmpPackets))
-	}
-	if stats.RealIsDisabled > 0 {
-		fmt.Printf("  Real Disabled:      %s\n", formatNumber(stats.RealIsDisabled))
-	}
-	if stats.RealIsRemoved > 0 {
-		fmt.Printf("  Real Removed:       %s\n", formatNumber(stats.RealIsRemoved))
-	}
-	if stats.NotRescheduledPackets > 0 {
-		fmt.Printf("  Not Rescheduled:    %s\n", formatNumber(stats.NotRescheduledPackets))
-	}
-
-	// Print real server stats
-	for idx, realStats := range vsStats.Reals {
-		realAddr, _ := netip.AddrFromSlice(realStats.Real.Real.Ip.Bytes)
-		fmt.Printf("\n  Real: %s:%d\n", realAddr, realStats.Real.Real.Port)
-		fmt.Printf("    Traffic:          %s packets, %s\n",
-			formatNumber(realStats.Stats.Packets),
-			formatBytes(realStats.Stats.Bytes))
-		fmt.Printf("    Created Sessions: %s\n", formatNumber(realStats.Stats.CreatedSessions))
-
-		// Find matching real info
-		if vsInfo != nil && idx < len(vsInfo.Reals) {
-			realInfo := vsInfo.Reals[idx]
-			fmt.Printf("    Active Sessions:  %s\n", formatNumber(realInfo.ActiveSessions))
-			if realInfo.LastPacketTimestamp != nil {
-				lastPacket := realInfo.LastPacketTimestamp.AsTime()
-				fmt.Printf("    Last Packet:      %s\n", formatTimestamp(&lastPacket))
-			}
-		}
-
-		// Additional real stats if non-zero
-		if realStats.Stats.PacketsRealDisabled > 0 {
-			fmt.Printf("    Pkts When Disabled: %s\n", formatNumber(realStats.Stats.PacketsRealDisabled))
-		}
-		if realStats.Stats.OpsPackets > 0 {
-			fmt.Printf("    OPS Packets:      %s\n", formatNumber(realStats.Stats.OpsPackets))
-		}
-		if realStats.Stats.ErrorIcmpPackets > 0 {
-			fmt.Printf("    Error ICMP:       %s\n", formatNumber(realStats.Stats.ErrorIcmpPackets))
-		}
-	}
-}
-
-// printBalancerStats prints all balancer statistics
-func printBalancerStats(stats *balancerpb.BalancerStats, info *balancerpb.BalancerInfo) {
-	// Print common stats
-	if stats.Common != nil {
-		printCommonStats(stats.Common)
-	}
-
-	// Print L4 stats
-	if stats.L4 != nil {
-		printL4Stats(stats.L4)
-	}
-
-	// Print ICMP stats
-	if stats.Icmpv4 != nil {
-		printIcmpStats(stats.Icmpv4, "v4")
-	}
-	if stats.Icmpv6 != nil {
-		printIcmpStats(stats.Icmpv6, "v6")
-	}
-
-	// Print VS stats
-	if len(stats.Vs) > 0 {
-		fmt.Printf("\nVIRTUAL SERVICES (%d total)\n", len(stats.Vs))
-		fmt.Println("--------------------------")
-
-		for idx, vsStats := range stats.Vs {
-			// Find matching VS info
-			var vsInfo *balancerpb.VsInfo
-			if info != nil && idx < len(info.Vs) {
-				vsInfo = info.Vs[idx]
-			}
-			printVsStats(vsStats, vsInfo)
-		}
-	}
 }
 
 // printWorkerPerformance prints worker performance summary

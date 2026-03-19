@@ -50,8 +50,20 @@ tunnel_packet(struct vs *vs, struct real *real, struct packet *packet) {
 
 		const struct net6 *n6 = &real->src.v6;
 
-		uint8_t src[NET6_LEN];
-		memcpy(src, n6->addr, NET6_LEN);
+		packet_ip6_encap(
+			packet,
+			real->identifier.relative.addr.v6.bytes,
+			n6->addr
+		);
+
+		struct rte_ipv6_hdr *ipv6_header_outer =
+			rte_pktmbuf_mtod_offset(
+				mbuf,
+				struct rte_ipv6_hdr *,
+				packet->network_header.offset
+			);
+
+		uint8_t *src = ipv6_header_outer->src_addr;
 		uint8_t len = (ipv4_header_inner != NULL ? NET4_LEN : NET6_LEN);
 		uint8_t *src_user =
 			(ipv4_header_inner != NULL
@@ -60,14 +72,24 @@ tunnel_packet(struct vs *vs, struct real *real, struct packet *packet) {
 		for (uint8_t i = 0; i < len; i++) {
 			src[i] |= src_user[i] & (~n6->mask[i]);
 		}
-
-		packet_ip6_encap(
-			packet, real->identifier.relative.addr.v6.bytes, src
-		);
 	} else { // IPv4
 		// rs->src_addr is already masked.
 		const struct net4 *n4 = &real->src.v4;
-		uint8_t src[4];
+
+		packet_ip4_encap(
+			packet,
+			real->identifier.relative.addr.v4.bytes,
+			n4->addr
+		);
+
+		struct rte_ipv4_hdr *ipv4_header_outer =
+			rte_pktmbuf_mtod_offset(
+				mbuf,
+				struct rte_ipv4_hdr *,
+				packet->network_header.offset
+			);
+
+		uint8_t *src = (uint8_t *)&ipv4_header_outer->src_addr;
 		uint8_t *src_user =
 			(ipv4_header_inner != NULL)
 				? (uint8_t *)&ipv4_header_inner->src_addr
@@ -75,12 +97,6 @@ tunnel_packet(struct vs *vs, struct real *real, struct packet *packet) {
 		for (size_t i = 0; i < 4; ++i) {
 			src[i] = (src_user[i] & ~n4->mask[i]) | n4->addr[i];
 		}
-
-		packet_ip4_encap(
-			packet,
-			real->identifier.relative.addr.v4.bytes,
-			(uint8_t *)(&src)
-		);
 	}
 
 	// use GRE for encap

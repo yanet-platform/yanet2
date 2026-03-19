@@ -23,3 +23,5 @@ workers: 4
 allowed_src_per_vs: 10
 
 round_robin_prob: 0.5
+
+session_table_capacity: 131072

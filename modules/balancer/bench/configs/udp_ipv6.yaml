@@ -8,7 +8,7 @@ pure_l3_prob: 0.0
 ops_prob: 0.0
 
 # Scheduling algorithm probability
-round_robin_prob: 0.5
+round_robin_prob: 1
 
 # Virtual services configuration (only UDP, no TCP)
 tcp_ipv4_vs: 0
@@ -26,18 +26,20 @@ allowed_src_per_vs: 5
 # Session management
 # Probability of creating a new session (vs reusing existing)
 # 0.3 means 30% new sessions, 70% reuse existing sessions
-new_session_prob: 0.3
+new_session_prob: 0.01
 
 # ICMP packet probabilities (set to 0 for UDP-only testing)
 icmp_prob: 0.0
 icmp_redirect_prob: 0.0
 
 # Packet generation configuration
-batches_per_worker: 131072
-packets_per_batch: 64
+batches_per_worker: 262144
+packets_per_batch: 32
 
 # MSS option for TCP packets (not applicable for UDP, but must be specified)
 mss: 0
 
 # Number of worker threads
 workers: 1
+
+session_table_capacity: 33554432

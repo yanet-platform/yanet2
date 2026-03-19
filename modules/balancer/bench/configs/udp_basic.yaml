@@ -26,7 +26,7 @@ allowed_src_per_vs: 5
 # Session management
 # Probability of creating a new session (vs reusing existing)
 # 0.3 means 30% new sessions, 70% reuse existing sessions
-new_session_prob: 0.3
+new_session_prob: 0.01
 
 # ICMP packet probabilities (set to 0 for UDP-only testing)
 icmp_prob: 0.0
@@ -41,3 +41,5 @@ mss: 0
 
 # Number of worker threads
 workers: 1
+
+session_table_capacity: 33554432

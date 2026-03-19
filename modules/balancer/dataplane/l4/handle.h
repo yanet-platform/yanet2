@@ -12,41 +12,8 @@
 #include "session_table.h"
 #include "state/state.h"
 #include <assert.h>
-#include <stdio.h>
 
 ////////////////////////////////////////////////////////////////////////////////
-
-static inline void
-handle_l4_packet(struct packet_ctx *ctx) {
-	// update stats
-	L4_STATS_INC(incoming_packets, ctx);
-
-	// 1. Validate packet and set metadata
-	struct packet_metadata meta;
-	int res = fill_packet_metadata(ctx->packet, &meta);
-	if (res != 0) { // unexpected packet type
-		L4_STATS_INC(invalid_packets, ctx);
-		packet_ctx_drop_packet(ctx);
-		return;
-	}
-
-	// 2. Lookup virtual service for which packet is
-	// directed to
-
-	struct vs *vs = vs_lookup_and_fw(ctx);
-	if (vs == NULL) { // not found virtual service
-		L4_STATS_INC(select_vs_failed, ctx);
-		packet_ctx_drop_packet(ctx);
-		return;
-	}
-
-	// update VS incoming stats
-	packet_ctx_update_vs_stats_on_incoming_packet(ctx);
-
-	// 3. Select real for which packet will be forwarded
-}
-
-enum { adv = 8 };
 
 static inline void
 handle_l4_packets(struct packet_ctx *ctxs, size_t count) {

@@ -10,7 +10,6 @@
 
 #include "common/memory_address.h"
 
-#include "lib/controlplane/config/econtext.h"
 #include "lib/dataplane/config/zone.h"
 
 #include "dataplane.h"

@@ -219,8 +219,11 @@ __ttlmap_init_internal( // NOLINT
 		__TTLMAP_BUCKET_DECLARE(__key_type, value_type);               \
 		__bucket_t *__buckets_array =                                  \
 			ADDR_OF(&((map_ptr)->chunks[__chunk]));                \
+		uint32_t __idx = (__hash >> ((map_ptr)->buckets_exp)) &        \
+				 (__TTLMAP_BUCKET_ENTRIES - 1);                \
 		__TTLMAP_BUCKET_PREFETCH(                                      \
 			&__buckets_array[__bucket_in_chunk],                   \
+			__idx,                                                 \
 			sizeof(__bucket_t),                                    \
 			##__VA_ARGS__                                          \
 		);                                                             \

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "common/network.h"
+#include "dataplane/packet/data.h"
 #include "dataplane/packet/packet.h"
 #include "rte_byteorder.h"
 #include "rte_ether.h"
@@ -23,12 +24,18 @@ struct packet_metadata {
 	uint8_t network_proto;
 	uint8_t transport_proto;
 
-	uint8_t src_addr[16];
-	uint8_t dst_addr[16];
+	uint8_t *src_addr;
+	uint8_t *dst_addr;
 	uint16_t src_port;
 	uint16_t dst_port;
 
 	uint8_t tcp_flags;
+};
+
+struct packet_metadata_copy {
+	struct packet_metadata meta;
+	uint8_t src_addr[NET6_LEN];
+	uint8_t dst_addr[NET6_LEN];
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -37,8 +44,20 @@ static inline void
 fill_packet_metadata_ipv4(
 	struct rte_ipv4_hdr *ip_hdr, struct packet_metadata *metadata
 ) {
-	memcpy(metadata->dst_addr, (uint8_t *)&ip_hdr->dst_addr, NET4_LEN);
-	memcpy(metadata->src_addr, (uint8_t *)&ip_hdr->src_addr, NET4_LEN);
+	metadata->network_proto = IPPROTO_IP;
+	metadata->dst_addr = (uint8_t *)&ip_hdr->dst_addr;
+	metadata->src_addr = (uint8_t *)&ip_hdr->src_addr;
+}
+
+static inline void
+fill_packet_metadata_copy_ipv4(
+	struct rte_ipv4_hdr *ip_hdr, struct packet_metadata_copy *copy
+) {
+	copy->meta.network_proto = IPPROTO_IP;
+	memcpy(copy->dst_addr, &ip_hdr->dst_addr, NET4_LEN);
+	memcpy(copy->src_addr, &ip_hdr->src_addr, NET4_LEN);
+	copy->meta.dst_addr = copy->dst_addr;
+	copy->meta.src_addr = copy->src_addr;
 }
 
 static inline void
@@ -46,8 +65,19 @@ fill_packet_metadata_ipv6(
 	struct rte_ipv6_hdr *ip_hdr, struct packet_metadata *metadata
 ) {
 	metadata->network_proto = IPPROTO_IPV6;
-	memcpy(metadata->dst_addr, ip_hdr->dst_addr, NET6_LEN);
-	memcpy(metadata->src_addr, ip_hdr->src_addr, NET6_LEN);
+	metadata->dst_addr = ip_hdr->dst_addr;
+	metadata->src_addr = ip_hdr->src_addr;
+}
+
+static inline void
+fill_packet_metadata_copy_ipv6(
+	struct rte_ipv6_hdr *ip_hdr, struct packet_metadata_copy *copy
+) {
+	copy->meta.network_proto = IPPROTO_IPV6;
+	memcpy(copy->dst_addr, ip_hdr->dst_addr, NET6_LEN);
+	memcpy(copy->src_addr, ip_hdr->src_addr, NET6_LEN);
+	copy->meta.dst_addr = copy->dst_addr;
+	copy->meta.src_addr = copy->src_addr;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -76,8 +106,6 @@ fill_packet_metadata_udp(
 
 static inline int
 fill_packet_metadata(struct packet *packet, struct packet_metadata *metadata) {
-	memset(metadata, 0, sizeof(struct packet_metadata));
-
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 
 	if (packet->network_header.type ==
@@ -121,6 +149,53 @@ fill_packet_metadata(struct packet *packet, struct packet_metadata *metadata) {
 	return 0;
 }
 
+static inline int
+fill_packet_metadata_copy(
+	struct packet *packet, struct packet_metadata_copy *copy
+) {
+	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
+
+	if (packet->network_header.type ==
+	    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
+		struct rte_ipv4_hdr *ipv4_header = rte_pktmbuf_mtod_offset(
+			mbuf,
+			struct rte_ipv4_hdr *,
+			packet->network_header.offset
+		);
+		fill_packet_metadata_copy_ipv4(ipv4_header, copy);
+	} else if (packet->network_header.type ==
+		   rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
+		struct rte_ipv6_hdr *ipv6_header = rte_pktmbuf_mtod_offset(
+			mbuf,
+			struct rte_ipv6_hdr *,
+			packet->network_header.offset
+		);
+		fill_packet_metadata_copy_ipv6(ipv6_header, copy);
+	} else { // unsupported
+		return -1;
+	}
+
+	if (packet->transport_header.type == IPPROTO_TCP) {
+		struct rte_tcp_hdr *tcp_header = rte_pktmbuf_mtod_offset(
+			mbuf,
+			struct rte_tcp_hdr *,
+			packet->transport_header.offset
+		);
+		fill_packet_metadata_tcp(tcp_header, &copy->meta);
+	} else if (packet->transport_header.type == IPPROTO_UDP) {
+		struct rte_udp_hdr *udp_header = rte_pktmbuf_mtod_offset(
+			mbuf,
+			struct rte_udp_hdr *,
+			packet->transport_header.offset
+		);
+		fill_packet_metadata_udp(udp_header, &copy->meta);
+	} else { // unsupported
+		return -1;
+	}
+
+	return 0;
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 
 static inline uint32_t
@@ -154,7 +229,9 @@ fill_session_id(
 	struct session_id *id, struct packet_metadata *data, struct vs *vs
 ) {
 	memset(id, 0, sizeof(*id));
-	memcpy(&id->client_ip, data->src_addr, sizeof(id->client_ip));
+	memcpy(&id->client_ip,
+	       data->src_addr,
+	       data->network_proto == IPPROTO_IPV6 ? NET6_LEN : NET4_LEN);
 	id->client_port = data->src_port;
 	id->vs_id = vs->stable_idx;
 }

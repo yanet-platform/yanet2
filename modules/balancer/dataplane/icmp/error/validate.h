@@ -107,7 +107,9 @@ packet_swap_src_dst(struct packet *packet) {
 
 static inline int
 validate_packet_ipv4(
-	struct packet_ctx *ctx, struct packet_metadata *meta, struct vs **vs
+	struct packet_ctx *ctx,
+	struct packet_metadata_copy *meta_copy,
+	struct vs **vs
 ) {
 	struct packet *packet = ctx->packet;
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
@@ -115,7 +117,7 @@ validate_packet_ipv4(
 		mbuf, struct rte_ipv4_hdr *, packet->network_header.offset
 	);
 
-	meta->network_proto = IPPROTO_IP;
+	meta_copy->meta.network_proto = IPPROTO_IP;
 	struct icmp_packet_info info;
 	info.network.type = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4);
 
@@ -152,7 +154,7 @@ validate_packet_ipv4(
 	packet_swap_src_dst(ctx->packet);
 
 	// fill packet metadata
-	if (fill_packet_metadata(packet, meta)) {
+	if (fill_packet_metadata_copy(packet, meta_copy)) {
 		ICMP_V4_STATS_INC(unexpected_transport, ctx);
 		packet_swap_src_dst(ctx->packet);
 		packet_swap_headers(
@@ -176,7 +178,9 @@ validate_packet_ipv4(
 
 static inline int
 validate_packet_ipv6(
-	struct packet_ctx *ctx, struct packet_metadata *meta, struct vs **vs
+	struct packet_ctx *ctx,
+	struct packet_metadata_copy *meta_copy,
+	struct vs **vs
 ) {
 	struct packet *packet = ctx->packet;
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
@@ -185,7 +189,7 @@ validate_packet_ipv6(
 		mbuf, struct rte_ipv6_hdr *, packet->network_header.offset
 	);
 
-	meta->network_proto = IPPROTO_IPV6;
+	meta_copy->meta.network_proto = IPPROTO_IPV6;
 	struct icmp_packet_info info;
 	info.network.type = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6);
 
@@ -221,7 +225,7 @@ validate_packet_ipv6(
 	packet_swap_src_dst(ctx->packet);
 
 	// fill packet metadata
-	if (fill_packet_metadata(packet, meta)) {
+	if (fill_packet_metadata_copy(packet, meta_copy)) {
 		ICMP_V6_STATS_INC(unexpected_transport, ctx);
 		packet_swap_src_dst(ctx->packet);
 		packet_swap_headers(
@@ -253,7 +257,7 @@ validate_and_parse_packet(struct packet_ctx *ctx) {
 	// After that, try to find session with real
 	// in the current balancer state.
 
-	struct packet_metadata meta;
+	struct packet_metadata_copy meta_copy;
 	struct vs *vs;
 
 	// validate packet, set metadata and packet icmp info
@@ -262,11 +266,11 @@ validate_and_parse_packet(struct packet_ctx *ctx) {
 	int validate_result;
 	switch (ctx->packet->transport_header.type) {
 	case IPPROTO_ICMP: {
-		validate_result = validate_packet_ipv4(ctx, &meta, &vs);
+		validate_result = validate_packet_ipv4(ctx, &meta_copy, &vs);
 		break;
 	}
 	case IPPROTO_ICMPV6: {
-		validate_result = validate_packet_ipv6(ctx, &meta, &vs);
+		validate_result = validate_packet_ipv6(ctx, &meta_copy, &vs);
 		break;
 	}
 	default: {
@@ -294,7 +298,7 @@ validate_and_parse_packet(struct packet_ctx *ctx) {
 
 	// fill session id
 	struct session_id session_id;
-	fill_session_id(&session_id, &meta, vs);
+	fill_session_id(&session_id, &meta_copy.meta, vs);
 
 	// begin critical section
 	uint64_t current_gen = session_table_begin_cs(

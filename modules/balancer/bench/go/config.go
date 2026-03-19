@@ -32,4 +32,6 @@ type BenchConfig struct {
 	mss int `yaml:"mss"`
 
 	Workers int `yaml:"workers"`
+
+	SessionTableCapacity int `yaml:"session_table_capacity"`
 }

@@ -225,11 +225,8 @@ __ttlmap_bucket_count(size_t kv_entries) { // NOLINT
 		__result;                                                      \
 	})
 
-#define __TTLMAP_BUCKET_PREFETCH(bucket, bucket_size, ...)                     \
+#define __TTLMAP_BUCKET_PREFETCH(bucket, entry, bucket_size, ...)              \
 	do {                                                                   \
-		for (size_t i = 0; i < (bucket_size); i += 64) {               \
-			__builtin_prefetch(                                    \
-				(const char *)bucket + i, ##__VA_ARGS__        \
-			);                                                     \
-		}                                                              \
+		__builtin_prefetch(&(bucket)->lock, ##__VA_ARGS__);            \
+		__builtin_prefetch(&(bucket)->entries[entry], ##__VA_ARGS__);  \
 	} while (0)
