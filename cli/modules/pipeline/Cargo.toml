@@ -9,6 +9,9 @@ description = "CLI for YANET pipeline module"
 ynpb = { path = "../../../common/rust/ynpb", version = "0.1", package = "yanet-ynpb" }
 commonpb = { path = "../../../common/rust/commonpb", version = "0.1", package = "yanet-commonpb" }
 ync = { path = "../../core", version = "0.1", package = "yanet-cli"}
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
 log = "0.4"
 clap = { version = "4.5", features = ["derive"] }
 clap_complete = { version = "4.5", features = ["unstable-dynamic"] }

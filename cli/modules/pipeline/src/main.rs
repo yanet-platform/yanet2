@@ -2,16 +2,18 @@
 
 use core::error::Error;
 
-use clap::{ArgAction, CommandFactory, Parser};
+use clap::{ArgAction, CommandFactory, Parser, ValueEnum};
 use clap_complete::CompleteEnv;
 use commonpb::pb::{FunctionId, PipelineId};
+use serde::Serialize;
 use tonic::codec::CompressionEncoding;
 use ync::{
     client::{ConnectionArgs, LayeredChannel},
     logging,
 };
 use ynpb::pb::{
-    pipeline_service_client::PipelineServiceClient, DeletePipelineRequest, Pipeline, UpdatePipelineRequest,
+    pipeline_service_client::PipelineServiceClient, DeletePipelineRequest, GetPipelineRequest, ListPipelinesRequest,
+    ListPipelinesResponse, Pipeline, UpdatePipelineRequest,
 };
 
 /// Pipeline module.
@@ -30,10 +32,38 @@ pub struct Cmd {
 
 #[derive(Debug, Clone, Parser)]
 pub enum ModeCmd {
+    /// List all pipelines.
+    List(ListCmd),
+    /// Show pipeline definition.
+    Show(ShowCmd),
     /// Update pipeline configurations.
     Update(UpdateCmd),
     /// Delete pipeline.
     Delete(DeleteCmd),
+}
+
+#[derive(Debug, Clone, Copy, Default, ValueEnum)]
+pub enum OutputFormat {
+    #[default]
+    Yaml,
+    Json,
+}
+
+#[derive(Debug, Clone, Parser)]
+pub struct ListCmd {
+    /// Output format.
+    #[clap(long, value_enum, default_value_t)]
+    pub format: OutputFormat,
+}
+
+#[derive(Debug, Clone, Parser)]
+pub struct ShowCmd {
+    /// Pipeline name.
+    #[arg(long)]
+    pub name: String,
+    /// Output format.
+    #[clap(long, value_enum, default_value_t)]
+    pub format: OutputFormat,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -70,9 +100,41 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
     let mut service = PipelineService::new(&cmd.connection).await?;
 
     match cmd.mode {
-        ModeCmd::Update(cmd) => service.update_pipeline(cmd).await,
-        ModeCmd::Delete(cmd) => service.delete_pipeline(cmd).await,
+        ModeCmd::List(cmd) => {
+            let response = service.list_pipelines().await?;
+            println_fmt(&response.ids, cmd.format)?;
+        }
+        ModeCmd::Show(cmd) => {
+            let pipeline = service.get_pipeline(&cmd.name).await?;
+            println_fmt(&pipeline, cmd.format)?;
+        }
+        ModeCmd::Update(cmd) => {
+            service.update_pipeline(cmd).await?;
+            println!("OK");
+        }
+        ModeCmd::Delete(cmd) => {
+            service.delete_pipeline(cmd).await?;
+            println!("OK");
+        }
     }
+
+    Ok(())
+}
+
+fn println_fmt<T>(value: &T, format: OutputFormat) -> Result<(), Box<dyn Error>>
+where
+    T: Serialize,
+{
+    match format {
+        OutputFormat::Yaml => {
+            print!("{}", serde_yaml::to_string(value)?);
+        }
+        OutputFormat::Json => {
+            println!("{}", serde_json::to_string(value)?);
+        }
+    }
+
+    Ok(())
 }
 
 pub struct PipelineService {
@@ -86,6 +148,19 @@ impl PipelineService {
             .send_compressed(CompressionEncoding::Gzip)
             .accept_compressed(CompressionEncoding::Gzip);
         Ok(Self { client })
+    }
+
+    pub async fn list_pipelines(&mut self) -> Result<ListPipelinesResponse, Box<dyn Error>> {
+        let response = self.client.list(ListPipelinesRequest {}).await?.into_inner();
+        Ok(response)
+    }
+
+    pub async fn get_pipeline(&mut self, name: &str) -> Result<Option<Pipeline>, Box<dyn Error>> {
+        let request = GetPipelineRequest {
+            id: Some(PipelineId { name: name.to_string() }),
+        };
+        let response = self.client.get(request).await?.into_inner();
+        Ok(response.pipeline)
     }
 
     pub async fn update_pipeline(&mut self, cmd: UpdateCmd) -> Result<(), Box<dyn Error>> {
