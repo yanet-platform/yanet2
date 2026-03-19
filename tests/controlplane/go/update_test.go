@@ -360,4 +360,27 @@ func TestControlplaneUpdates(t *testing.T) {
 		err := bootstrap.UpdateFunction(config)
 		require.NoError(t, err, "failed to update function")
 	})
+
+	// Device with input pipeline equals output pipeline emits error
+	t.Run("UpdateDeviceWithInputPipelineEqualsOutputPipeline", func(t *testing.T) {
+		config := []ffi.DeviceConfig{
+			{
+				Name: "device",
+				Input: []ffi.DevicePipelineConfig{
+					{
+						Name:   "pipeline0",
+						Weight: 1,
+					},
+				},
+				Output: []ffi.DevicePipelineConfig{
+					{
+						Name:   "pipeline0",
+						Weight: 1,
+					},
+				},
+			},
+		}
+		err := bootstrap.UpdatePlainDevices(config)
+		require.Error(t, err, "failed to update device with input pipeline equals output pipeline")
+	})
 }
