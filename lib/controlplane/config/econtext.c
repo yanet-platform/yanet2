@@ -316,7 +316,8 @@ function_ectx_free(
 			memory_bfree(
 				memory_context,
 				chains,
-				sizeof(struct chain_ectx *) * function_ectx->chain_count
+				sizeof(struct chain_ectx *) *
+					function_ectx->chain_count
 			);
 		}
 	}
