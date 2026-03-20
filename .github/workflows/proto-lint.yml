@@ -1,0 +1,28 @@
+name: Proto Lint
+
+on:
+  push:
+    paths:
+      - '**/*.proto'
+      - 'lint/protobuf/**'
+  pull_request:
+    paths:
+      - '**/*.proto'
+      - 'lint/protobuf/**'
+
+jobs:
+  protolint:
+    name: protolint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Run tests
+        run: go test ./lint/protobuf/cmd/protolint/
+
+      - name: Run linter
+        run: go run ./lint/protobuf/cmd/protolint/

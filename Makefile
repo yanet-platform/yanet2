@@ -1,4 +1,4 @@
-.PHONY: all dataplane test test-functional cli cli-install fuzz clean $(foreach module,$(MODULES),cli/$(module) cli-install/$(module))
+.PHONY: all dataplane test test-functional proto-lint cli cli-install fuzz clean $(foreach module,$(MODULES),cli/$(module) cli-install/$(module))
 
 # Define the list of modules to avoid repetition
 MODULES := decap dscp route forward nat64 pdump acl fwstate
@@ -7,6 +7,10 @@ MODULES := decap dscp route forward nat64 pdump acl fwstate
 PREFIX ?= /usr
 
 all: dataplane cli
+
+proto-lint:
+	go test ./lint/protobuf/cmd/protolint/
+	go run ./lint/protobuf/cmd/protolint/
 
 go-cache-clean:
 	go clean -cache

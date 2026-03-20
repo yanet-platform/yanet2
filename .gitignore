@@ -57,6 +57,7 @@ dkms.conf
 #
 # Binaries for programs and plugins
 *.exe~
+protolint
 
 # Test binary, built with `go test -c`
 *.test

@@ -1,5 +1,5 @@
 subdir('api')
-subdir('bird-adapter/proto')
+subdir('bird-adapter/adapterpb')
 subdir('controlplane')
 subdir('dataplane')
 subdir('fuzzing')

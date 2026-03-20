@@ -16,7 +16,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/encoding/gzip"
 
-	adapterpb "github.com/yanet-platform/yanet2/modules/route/bird-adapter/proto"
+	adapterpb "github.com/yanet-platform/yanet2/modules/route/bird-adapter/adapterpb"
 	"github.com/yanet-platform/yanet2/modules/route/controlplane/routepb"
 	"github.com/yanet-platform/yanet2/modules/route/internal/discovery/bird"
 	"github.com/yanet-platform/yanet2/modules/route/internal/rib"
