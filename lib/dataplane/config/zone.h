@@ -1,10 +1,8 @@
 #pragma once
 
-#include <stdalign.h>
 #include <stdbool.h>
 #include <stdint.h>
-#include <time.h>
-#include <unistd.h>
+#include <sys/types.h>
 
 #include "dataplane/device/device.h"
 #include "dataplane/module/module.h"
@@ -14,8 +12,6 @@
 #include "dataplane/config/topology.h"
 
 #include "counters/counters.h"
-
-#include "controlplane/agent/agent.h"
 
 struct cp_config;
 struct rte_mempool;

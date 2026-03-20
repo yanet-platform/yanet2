@@ -10,7 +10,6 @@
 #include "rule.h"
 #include <assert.h>
 #include <stdlib.h>
-#include <string.h>
 
 static int
 validate_net6_half(uint8_t *bytes) {

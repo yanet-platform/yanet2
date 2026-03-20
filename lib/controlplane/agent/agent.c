@@ -11,7 +11,6 @@
 #include <errno.h>
 
 #include "common/memory.h"
-#include "common/memory_address.h"
 #include "common/memory_block.h"
 #include "common/strutils.h"
 
@@ -21,7 +20,6 @@
 #include "dataplane/config/zone.h"
 
 #include "api/agent.h"
-#include "diag.h"
 
 #include <stdio.h>
 

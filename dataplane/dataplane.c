@@ -19,6 +19,7 @@
 
 #include "common/hugepages.h"
 
+#include "controlplane/agent/agent.h"
 #include "controlplane/config/zone.h"
 #include "dataplane/config/zone.h"
 

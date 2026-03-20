@@ -1,8 +1,6 @@
 #include "common/memory.h"
-#include "common/memory_address.h"
 #include "fwmap.h"
 #include <stdatomic.h>
-#include <unistd.h>
 
 typedef struct layermap_list {
 	fwmap_t *layer;

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "dataplane/packet/packet.h"
+#include "lib/controlplane/diag/diag.h"
 #include "mock/mock.h"
 
 #include "config.h"

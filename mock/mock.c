@@ -10,6 +10,7 @@
 #include "common/exp_array.h"
 #include "common/memory.h"
 #include "common/memory_address.h"
+#include "controlplane/agent/agent.h"
 #include "dataplane/config/zone.h"
 #include "lib/controlplane/config/zone.h"
 #include "worker.h"

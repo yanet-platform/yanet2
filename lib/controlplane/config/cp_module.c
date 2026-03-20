@@ -1,8 +1,10 @@
 #include "cp_module.h"
 
+#include "api/counter.h"
 #include "common/container_of.h"
 
 #include "counters/counters.h"
+#include "counters/histogram.h"
 #include "dataplane/config/zone.h"
 
 #include "controlplane/agent/agent.h"

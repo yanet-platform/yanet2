@@ -2,6 +2,7 @@
 
 #include "common/container_of.h"
 
+#include "controlplane/agent/agent.h"
 #include "dataplane/config/zone.h"
 
 #include "controlplane/config/zone.h"

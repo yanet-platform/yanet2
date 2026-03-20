@@ -1,7 +1,5 @@
 #pragma once
 
-#include <stdbool.h>
-
 #include "common/memory.h"
 
 struct registry_item {

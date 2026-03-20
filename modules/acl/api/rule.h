@@ -1,6 +1,5 @@
 #pragma once
 
-#include <assert.h>
 #include <stddef.h>
 
 #include <filter/rule.h>

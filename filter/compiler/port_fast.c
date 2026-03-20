@@ -7,7 +7,6 @@
 #include "rule.h"
 #include <assert.h>
 #include <stdlib.h>
-#include <string.h>
 
 typedef struct filter_port_ranges(port_ranges_getter)(
 	const struct filter_rule *rule

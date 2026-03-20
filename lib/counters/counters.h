@@ -1,6 +1,5 @@
 #pragma once
 
-#include <assert.h>
 #include <stdint.h>
 
 #include "common/memory.h"

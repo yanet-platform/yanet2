@@ -6,7 +6,6 @@
 
 #include "state/session.h"
 
-#include <assert.h>
 #include <stdatomic.h>
 #include <stdio.h>
 

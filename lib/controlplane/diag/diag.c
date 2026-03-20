@@ -1,12 +1,8 @@
 #include "diag.h"
 
-#include <asm-generic/errno-base.h>
 #include <errno.h>
 #include <stdlib.h>
-
 #include <string.h>
-
-#include "common/tls_stack/stack.h"
 
 void
 diag_reset(struct diag *diag) {

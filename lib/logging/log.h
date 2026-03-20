@@ -2,8 +2,6 @@
 
 #include <stdint.h>
 #include <stdio.h>
-#include <strings.h>
-#include <unistd.h>
 
 #include "yanet_build_config.h"
 

@@ -1,5 +1,6 @@
 #include "zone.h"
-#include <stdint.h>
+
+#include <unistd.h>
 
 struct dp_config *
 dp_config_nextk(struct dp_config *current, uint32_t k) {

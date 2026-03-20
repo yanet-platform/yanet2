@@ -8,6 +8,7 @@ package fwstate
 //#cgo LDFLAGS: -L../../../../build/lib/logging -llogging
 /*
 #include <stdlib.h>
+#include <time.h>
 #include "modules/fwstate/dataplane/config.h"
 #include "modules/fwstate/api/fwstate_cp.h"
 #include "lib/fwstate/config.h"

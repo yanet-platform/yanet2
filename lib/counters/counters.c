@@ -1,11 +1,8 @@
 #include "counters.h"
 
-#include "common/memory.h"
 #include "common/numutils.h"
 #include "common/strutils.h"
-#include <assert.h>
 
-#include "api/counter.h"
 #include "lib/controlplane/diag/diag.h"
 
 int

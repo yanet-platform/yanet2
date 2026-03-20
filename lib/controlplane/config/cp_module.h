@@ -1,17 +1,16 @@
 #pragma once
 
-#include "api/counter.h"
 #include "common/memory.h"
 
 #include "counters/counters.h"
-#include "counters/histogram.h"
 
 #include "controlplane/config/defines.h"
 #include "controlplane/config/registry.h"
 
 #include "lib/dataplane/counters/module.h"
 
-#include <assert.h>
+struct counter_handle;
+struct module_performance_counter;
 
 /*
  * Structure cp_module reflects module configuration

@@ -1,4 +1,3 @@
-#include <assert.h>
 #include <netinet/in.h>
 
 #include "common/test_assert.h"

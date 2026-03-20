@@ -8,7 +8,6 @@
 #include "rule.h"
 #include <assert.h>
 #include <stdlib.h>
-#include <string.h>
 
 struct net4_count {
 	struct net4 *net4;

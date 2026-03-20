@@ -8,6 +8,8 @@
 
 #include "api/counter.h"
 
+#include <stdalign.h>
+
 #include "common/container_of.h"
 #include "common/memory.h"
 #include "common/memory_address.h"

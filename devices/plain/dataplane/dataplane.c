@@ -1,5 +1,7 @@
 #include "config.h"
 
+#include <stdio.h>
+
 #include "common/container_of.h"
 
 #include "lib/dataplane/device/device.h"

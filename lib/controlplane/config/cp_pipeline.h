@@ -1,7 +1,5 @@
 #pragma once
 
-#include <stdio.h>
-
 #include "common/memory.h"
 
 #include "counters/counters.h"

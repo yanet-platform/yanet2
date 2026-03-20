@@ -4,8 +4,6 @@
 
 #include "common/container_of.h"
 
-#include "common/container_of.h"
-
 #include "dataplane/module/module.h"
 #include "dataplane/module/packet_front.h"
 

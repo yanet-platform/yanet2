@@ -10,7 +10,6 @@
 #include <rte_udp.h>
 
 #include <stdint.h>
-#include <stdio.h>
 
 #include "declare.h"
 #include "segments.h"
