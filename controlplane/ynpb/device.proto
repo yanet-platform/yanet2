@@ -6,18 +6,15 @@ option go_package = "github.com/yanet-platform/yanet2/controlplane/ynpb;ynpb";
 
 // TODO: docs
 service DeviceService {
-	// Lists all configured devices
-	rpc List(ListDevicesRequest) returns (ListDevicesResponse);
+  // Lists all configured devices
+  rpc List(ListDevicesRequest) returns (ListDevicesResponse);
 }
 
-message ListDevicesRequest {
-}
+message ListDevicesRequest {}
 
-message ListDevicesResponse {
-	repeated DeviceId ids = 1;
-}
+message ListDevicesResponse { repeated DeviceId ids = 1; }
 
 message DeviceId {
-	string type = 1;
-	string name = 2;
+  string type = 1;
+  string name = 2;
 }

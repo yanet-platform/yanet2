@@ -5,69 +5,57 @@ package ynpb;
 option go_package = "github.com/yanet-platform/yanet2/controlplane/ynpb;ynpb";
 
 service CountersService {
-	// Inspect retrieves the current configuration state.
-	rpc Device(DeviceCountersRequest) returns (CountersResponse) {
-	}
-	rpc Pipeline(PipelineCountersRequest) returns (CountersResponse) {
-	}
-	rpc Function(FunctionCountersRequest) returns (CountersResponse) {
-	}
-	rpc Chain(ChainCountersRequest) returns (CountersResponse) {
-	}
-	rpc Module(ModuleCountersRequest) returns (CountersResponse) {
-	}
-	rpc Perf(PerfCountersRequest) returns (PerfCountersResponse) {
-	}
+  // Inspect retrieves the current configuration state.
+  rpc Device(DeviceCountersRequest) returns (CountersResponse) {}
+  rpc Pipeline(PipelineCountersRequest) returns (CountersResponse) {}
+  rpc Function(FunctionCountersRequest) returns (CountersResponse) {}
+  rpc Chain(ChainCountersRequest) returns (CountersResponse) {}
+  rpc Module(ModuleCountersRequest) returns (CountersResponse) {}
+  rpc Perf(PerfCountersRequest) returns (PerfCountersResponse) {}
 }
 
-message DeviceCountersRequest {
-	string device = 1;
-}
+message DeviceCountersRequest { string device = 1; }
 
 message PipelineCountersRequest {
-	string device = 1;
-	string pipeline = 2;
+  string device = 1;
+  string pipeline = 2;
 }
 
 message FunctionCountersRequest {
-	string device = 1;
-	string pipeline = 2;
-	string function = 3;
+  string device = 1;
+  string pipeline = 2;
+  string function = 3;
 }
 
 message ChainCountersRequest {
-	string device = 1;
-	string pipeline = 2;
-	string function = 3;
-	string chain = 4;
+  string device = 1;
+  string pipeline = 2;
+  string function = 3;
+  string chain = 4;
 }
 
 message ModuleCountersRequest {
-	string device = 1;
-	string pipeline = 2;
-	string function = 3;
-	string chain = 4;
-	string module_type = 5;
-	string module_name = 6;
-	// CounterQuery filters counters by name. If empty, returns all
-	// counters.
-	//
-	// TODO: support wildcards or regex?
-	repeated string counter_query = 7;
+  string device = 1;
+  string pipeline = 2;
+  string function = 3;
+  string chain = 4;
+  string module_type = 5;
+  string module_name = 6;
+  // CounterQuery filters counters by name. If empty, returns all
+  // counters.
+  //
+  // TODO: support wildcards or regex?
+  repeated string counter_query = 7;
 }
 
-message CounterInstanceInfo {
-	repeated uint64 values = 1;
-}
+message CounterInstanceInfo { repeated uint64 values = 1; }
 
 message CounterInfo {
-	string name = 1;
-	repeated CounterInstanceInfo instances = 2;
+  string name = 1;
+  repeated CounterInstanceInfo instances = 2;
 }
 
-message CountersResponse {
-	repeated CounterInfo counters = 1;
-}
+message CountersResponse { repeated CounterInfo counters = 1; }
 
 // Request message for retrieving module performance counters.
 //
@@ -76,12 +64,12 @@ message CountersResponse {
 // its own histogram of latency measurements using hybrid linear/exponential
 // buckets for efficient coverage of typical and outlier latencies.
 message PerfCountersRequest {
-	string device = 1;
-	string pipeline = 2;
-	string function = 3;
-	string chain = 4;
-	string module_type = 5;
-	string module_name = 6;
+  string device = 1;
+  string pipeline = 2;
+  string function = 3;
+  string chain = 4;
+  string module_type = 5;
+  string module_name = 6;
 }
 
 // Represents a single latency bucket in a performance histogram.
@@ -92,10 +80,10 @@ message PerfCountersRequest {
 // fine-grained resolution at typical latencies and
 // exponential buckets for efficient coverage of outliers.
 message LatencyRangeCounter {
-	// Minimum latency in nanoseconds for this bucket
-	uint32 min_latency = 1;
-	// Number of packet batches that fell into this latency bucket
-	uint64 batches = 2;
+  // Minimum latency in nanoseconds for this bucket
+  uint32 min_latency = 1;
+  // Number of packet batches that fell into this latency bucket
+  uint64 batches = 2;
 }
 
 // Performance metrics for a specific packet batch size range.
@@ -105,16 +93,16 @@ message LatencyRangeCounter {
 // 4-7 packets, etc.). The latency distribution is captured using a hybrid
 // histogram with both linear and exponential buckets.
 message PerfCounter {
-	// Minimum batch size for this counter (e.g., 1, 2, 4, 8, 16, 32)
-	uint32 min_batch_size = 1;
-	// Total (summary) processing latency in nanoseconds across all batches
-	uint64 summary_latency = 2;
-	// Total number of packets transmitted for this batch size range
-	uint64 packets = 3;
-	// Total number of bytes processed for this batch size range
-	uint64 bytes = 4;
-	// Histogram of latency measurements, sorted by increasing min_latency
-	repeated LatencyRangeCounter latencies = 5;
+  // Minimum batch size for this counter (e.g., 1, 2, 4, 8, 16, 32)
+  uint32 min_batch_size = 1;
+  // Total (summary) processing latency in nanoseconds across all batches
+  uint64 summary_latency = 2;
+  // Total number of packets transmitted for this batch size range
+  uint64 packets = 3;
+  // Total number of bytes processed for this batch size range
+  uint64 bytes = 4;
+  // Histogram of latency measurements, sorted by increasing min_latency
+  repeated LatencyRangeCounter latencies = 5;
 }
 
 // Response containing all performance counters for a module.
@@ -126,19 +114,19 @@ message PerfCounter {
 // Additionally includes aggregated tx/rx packet and byte counters that track
 // the total traffic processed by the module across all worker threads.
 message PerfCountersResponse {
-	// Performance counters for each batch size range, ordered by
-	// min_batch_size
-	repeated PerfCounter counters = 1;
+  // Performance counters for each batch size range, ordered by
+  // min_batch_size
+  repeated PerfCounter counters = 1;
 
-	// Total number of packets transmitted by the module across all workers
-	uint64 tx = 2;
+  // Total number of packets transmitted by the module across all workers
+  uint64 tx = 2;
 
-	// Total number of packets received by the module across all workers
-	uint64 rx = 3;
+  // Total number of packets received by the module across all workers
+  uint64 rx = 3;
 
-	// Total number of bytes transmitted by the module across all workers
-	uint64 tx_bytes = 4;
+  // Total number of bytes transmitted by the module across all workers
+  uint64 tx_bytes = 4;
 
-	// Total number of bytes received by the module across all workers
-	uint64 rx_bytes = 5;
+  // Total number of bytes received by the module across all workers
+  uint64 rx_bytes = 5;
 }

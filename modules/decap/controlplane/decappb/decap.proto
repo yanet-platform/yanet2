@@ -6,54 +6,41 @@ option go_package = "github.com/yanet-platform/yanet2/modules/decap/controlplane
 
 // DecapService is a service for decapsulation module.
 service DecapService {
-	// ListConfigs returns all decap module configurations of all
-	// dataplane instances.
-	rpc ListConfigs(ListConfigsRequest) returns (ListConfigsResponse);
+  // ListConfigs returns all decap module configurations of all
+  // dataplane instances.
+  rpc ListConfigs(ListConfigsRequest) returns (ListConfigsResponse);
 
-	// ShowConfig returns the current configuration for the decap module.
-	rpc ShowConfig(ShowConfigRequest) returns (ShowConfigResponse) {
-	}
+  // ShowConfig returns the current configuration for the decap module.
+  rpc ShowConfig(ShowConfigRequest) returns (ShowConfigResponse) {}
 
-	// AddPrefixes adds prefixes to the decap module configuration.
-	rpc AddPrefixes(AddPrefixesRequest) returns (AddPrefixesResponse) {
-	}
-	// RemovePrefixes removes prefixes from the decap module configuration.
-	rpc RemovePrefixes(RemovePrefixesRequest)
-		returns (RemovePrefixesResponse) {
-	}
+  // AddPrefixes adds prefixes to the decap module configuration.
+  rpc AddPrefixes(AddPrefixesRequest) returns (AddPrefixesResponse) {}
+  // RemovePrefixes removes prefixes from the decap module configuration.
+  rpc RemovePrefixes(RemovePrefixesRequest) returns (RemovePrefixesResponse) {}
 }
 
-message ListConfigsRequest {
-}
+message ListConfigsRequest {}
 
 // ListConfigsResponse contains existing configurations.
-message ListConfigsResponse {
-	repeated string configs = 1;
-}
+message ListConfigsResponse { repeated string configs = 1; }
 
 // ShowConfigResponse retrieves the runtime configuration for the decap module.
-message ShowConfigRequest {
-	string name = 1;
-}
+message ShowConfigRequest { string name = 1; }
 
 // ShowConfigResponse contains the configuration details of the decap module.
-message ShowConfigResponse {
-	repeated string prefixes = 1;
-}
+message ShowConfigResponse { repeated string prefixes = 1; }
 
 // AddPrefixesRequest adds prefixes to the input filter of the decap module.
 message AddPrefixesRequest {
-	string name = 1;
-	repeated string prefixes = 2;
+  string name = 1;
+  repeated string prefixes = 2;
 }
-message AddPrefixesResponse {
-}
+message AddPrefixesResponse {}
 
 // RemovePrefixesRequest removes prefixes from the input filter of the decap
 // module.
 message RemovePrefixesRequest {
-	string name = 1;
-	repeated string prefixes = 2;
+  string name = 1;
+  repeated string prefixes = 2;
 }
-message RemovePrefixesResponse {
-}
+message RemovePrefixesResponse {}

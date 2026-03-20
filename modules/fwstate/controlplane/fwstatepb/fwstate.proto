@@ -5,159 +5,146 @@ package fwstatepb;
 option go_package = "github.com/yanet-platform/yanet2/modules/fwstate/controlplane/fwstatepb;fwstatepb";
 
 service FWStateService {
-	// Updates the complete FWState configuration
-	rpc UpdateConfig(UpdateConfigRequest) returns (UpdateConfigResponse);
-	// Allows to delete fwstate config if it is not referenced
-	// by any pipeline.
-	rpc DeleteConfig(DeleteConfigRequest) returns (DeleteConfigResponse);
-	// Show specific FWState configuration
-	rpc ShowConfig(ShowConfigRequest) returns (ShowConfigResponse);
-	// List all FWState configurations across instances
-	rpc ListConfigs(ListConfigsRequest) returns (ListConfigsResponse);
-	// Link FWState configuration to ACL configurations
-	rpc LinkFWState(LinkFWStateRequest) returns (LinkFWStateResponse);
-	// Get statistics for FWState maps
-	rpc GetStats(GetStatsRequest) returns (GetStatsResponse);
-	// Bidirectional stream for listing map entries.
-	rpc ListEntries(stream ListEntriesRequest)
-		returns (stream ListEntriesResponse);
+  // Updates the complete FWState configuration
+  rpc UpdateConfig(UpdateConfigRequest) returns (UpdateConfigResponse);
+  // Allows to delete fwstate config if it is not referenced
+  // by any pipeline.
+  rpc DeleteConfig(DeleteConfigRequest) returns (DeleteConfigResponse);
+  // Show specific FWState configuration
+  rpc ShowConfig(ShowConfigRequest) returns (ShowConfigResponse);
+  // List all FWState configurations across instances
+  rpc ListConfigs(ListConfigsRequest) returns (ListConfigsResponse);
+  // Link FWState configuration to ACL configurations
+  rpc LinkFWState(LinkFWStateRequest) returns (LinkFWStateResponse);
+  // Get statistics for FWState maps
+  rpc GetStats(GetStatsRequest) returns (GetStatsResponse);
+  // Bidirectional stream for listing map entries.
+  rpc ListEntries(stream ListEntriesRequest) returns (stream ListEntriesResponse);
 }
 
 message UpdateConfigRequest {
-	string name = 1;
-	MapConfig map_config = 2;
-	SyncConfig sync_config = 3;
+  string name = 1;
+  MapConfig map_config = 2;
+  SyncConfig sync_config = 3;
 }
 
-message UpdateConfigResponse {
-}
+message UpdateConfigResponse {}
 
 message ShowConfigRequest {
-	string name = 1;
-	bool ok_if_not_found = 2;
+  string name = 1;
+  bool ok_if_not_found = 2;
 }
 
 message ShowConfigResponse {
-	string name = 1;
-	repeated string linked_acls = 2;
-	MapConfig map_config = 3;
-	SyncConfig sync_config = 4;
+  string name = 1;
+  repeated string linked_acls = 2;
+  MapConfig map_config = 3;
+  SyncConfig sync_config = 4;
 }
 
-message DeleteConfigRequest {
-	string name = 1;
-}
+message DeleteConfigRequest { string name = 1; }
 
-message DeleteConfigResponse {
-}
+message DeleteConfigResponse {}
 
-message ListConfigsRequest {
-}
+message ListConfigsRequest {}
 
-message ListConfigsResponse {
-	repeated string configs = 1;
-}
+message ListConfigsResponse { repeated string configs = 1; }
 
 message LinkFWStateRequest {
-	string fwstate_name = 1;
-	repeated string acl_config_names = 2;
+  string fwstate_name = 1;
+  repeated string acl_config_names = 2;
 }
 
-message LinkFWStateResponse {
-}
+message LinkFWStateResponse {}
 
-message GetStatsRequest {
-	string name = 1;
-}
+message GetStatsRequest { string name = 1; }
 
 message GetStatsResponse {
-	MapStats ipv4_stats = 1;
-	MapStats ipv6_stats = 2;
+  MapStats ipv4_stats = 1;
+  MapStats ipv6_stats = 2;
 }
 
 message MapStats {
-	uint32 index_size = 1;
-	uint32 extra_bucket_count = 2;
-	uint32 max_chain_length = 3;
-	uint32 layer_count = 4;
-	uint64 total_elements = 5;
-	uint64 max_deadline = 6;
-	uint64 memory_used = 7;
-	string note = 8;
+  uint32 index_size = 1;
+  uint32 extra_bucket_count = 2;
+  uint32 max_chain_length = 3;
+  uint32 layer_count = 4;
+  uint64 total_elements = 5;
+  uint64 max_deadline = 6;
+  uint64 memory_used = 7;
+  string note = 8;
 }
 
 enum Direction {
-	FORWARD = 0;
-	BACKWARD = 1;
+  FORWARD = 0;
+  BACKWARD = 1;
 }
 
 // IP address representation supporting both IPv4 and IPv6.
 // IPv4: 4 bytes, IPv6: 16 bytes.
-message Addr {
-	bytes bytes = 1;
-}
+message Addr { bytes bytes = 1; }
 
 message FwStateKey {
-	uint32 proto = 1;
-	uint32 src_port = 2;
-	uint32 dst_port = 3;
-	Addr src_addr = 4;
-	Addr dst_addr = 5;
+  uint32 proto = 1;
+  uint32 src_port = 2;
+  uint32 dst_port = 3;
+  Addr src_addr = 4;
+  Addr dst_addr = 5;
 }
 
 message FwStateValue {
-	bool external = 1;
-	uint32 flags = 2; // raw fw_state_flags_u byte
-	uint64 created_at = 3; // nanoseconds
-	uint64 updated_at = 4; // nanoseconds
-	uint64 packets_backward = 5;
-	uint64 packets_forward = 6;
+  bool external = 1;
+  uint32 flags = 2;      // raw fw_state_flags_u byte
+  uint64 created_at = 3; // nanoseconds
+  uint64 updated_at = 4; // nanoseconds
+  uint64 packets_backward = 5;
+  uint64 packets_forward = 6;
 }
 
 message FwStateEntry {
-	FwStateKey key = 1;
-	FwStateValue value = 2;
-	uint32 idx = 3; // Key index within the layer
-	bool expired = 4; // Whether updated_at + TTL < now
+  FwStateKey key = 1;
+  FwStateValue value = 2;
+  uint32 idx = 3;   // Key index within the layer
+  bool expired = 4; // Whether updated_at + TTL < now
 }
 
 message ListEntriesRequest {
-	string config_name = 1; // Config to iterate
-	bool is_ipv6 = 2; // false = fw4state, true = fw6state
-	uint32 layer_index = 3; // Which layer to iterate (0 = active)
-	bool include_expired = 4; // Whether to include expired entries
-	Direction direction = 5; // Direction for this read
-	uint32 batch_size = 6; // Number of entries to return in this batch
-	int64 index = 7; // Cursor position from previous response (0 on first)
+  string config_name = 1;   // Config to iterate
+  bool is_ipv6 = 2;         // false = fw4state, true = fw6state
+  uint32 layer_index = 3;   // Which layer to iterate (0 = active)
+  bool include_expired = 4; // Whether to include expired entries
+  Direction direction = 5;  // Direction for this read
+  uint32 batch_size = 6;    // Number of entries to return in this batch
+  int64 index = 7;          // Cursor position from previous response (0 on first)
 }
 
 message ListEntriesResponse {
-	repeated FwStateEntry entries = 1;
-	bool has_more = 2; // false when cursor reached the end
-	int64 index = 3; // Updated cursor position for next request
-	uint64 generation = 4; // Config generation for consistency detection
+  repeated FwStateEntry entries = 1;
+  bool has_more = 2;     // false when cursor reached the end
+  int64 index = 3;       // Updated cursor position for next request
+  uint64 generation = 4; // Config generation for consistency detection
 }
 
 // Map configuration for fwstate
 message MapConfig {
-	uint32 index_size = 1;
-	uint32 extra_bucket_count = 2;
+  uint32 index_size = 1;
+  uint32 extra_bucket_count = 2;
 }
 
 // Firewall state synchronization configuration
 message SyncConfig {
-	bytes src_addr = 1;	      // IPv6 source address (16 bytes);
-	bytes dst_ether = 2;	      // Destination MAC address (6 bytes);
-	bytes dst_addr_multicast = 3; // Multicast IPv6 address (16 bytes);
-	uint32 port_multicast = 4;    // Multicast port;
-	bytes dst_addr_unicast = 5;   // Unicast IPv6 address (16 bytes);
-	uint32 port_unicast = 6;      // Unicast port;
+  bytes src_addr = 1;           // IPv6 source address (16 bytes);
+  bytes dst_ether = 2;          // Destination MAC address (6 bytes);
+  bytes dst_addr_multicast = 3; // Multicast IPv6 address (16 bytes);
+  uint32 port_multicast = 4;    // Multicast port;
+  bytes dst_addr_unicast = 5;   // Unicast IPv6 address (16 bytes);
+  uint32 port_unicast = 6;      // Unicast port;
 
-	// Connection timeouts
-	uint64 tcp_syn_ack = 7; // TCP SYN-ACK timeout in nanoseconds;
-	uint64 tcp_syn = 8;	// TCP SYN timeout in nanoseconds;
-	uint64 tcp_fin = 9;	// TCP FIN timeout in nanoseconds;
-	uint64 tcp = 10;	// TCP established timeout in nanoseconds;
-	uint64 udp = 11;	// UDP timeout in nanoseconds;
-	uint64 default = 12;	// Default timeout in nanoseconds;
+  // Connection timeouts
+  uint64 tcp_syn_ack = 7; // TCP SYN-ACK timeout in nanoseconds;
+  uint64 tcp_syn = 8;     // TCP SYN timeout in nanoseconds;
+  uint64 tcp_fin = 9;     // TCP FIN timeout in nanoseconds;
+  uint64 tcp = 10;        // TCP established timeout in nanoseconds;
+  uint64 udp = 11;        // UDP timeout in nanoseconds;
+  uint64 default = 12;    // Default timeout in nanoseconds;
 }

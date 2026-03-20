@@ -6,19 +6,17 @@ option go_package = "github.com/yanet-platform/yanet2/controlplane/ynpb;ynpb";
 
 // Gateway API service.
 service Gateway {
-	// Register registers a new module.
-	rpc Register(RegisterRequest) returns (RegisterResponse) {
-	}
+  // Register registers a new module.
+  rpc Register(RegisterRequest) returns (RegisterResponse) {}
 }
 
 // RegisterRequest is the request to register a new module.
 message RegisterRequest {
-	// Name is the name of the module.
-	string name = 1;
-	// Endpoint is the endpoint of the module.
-	string endpoint = 2;
+  // Name is the name of the module.
+  string name = 1;
+  // Endpoint is the endpoint of the module.
+  string endpoint = 2;
 }
 
 // RegisterResponse is the response to the RegisterRequest.
-message RegisterResponse {
-}
+message RegisterResponse {}

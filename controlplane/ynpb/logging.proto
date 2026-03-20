@@ -5,37 +5,35 @@ package ynpb;
 option go_package = "github.com/yanet-platform/yanet2/controlplane/ynpb;ynpb";
 
 service Logging {
-	// UpdateLevel updates the minimum logging level.
-	rpc UpdateLevel(UpdateLevelRequest) returns (UpdateLevelResponse) {
-	}
+  // UpdateLevel updates the minimum logging level.
+  rpc UpdateLevel(UpdateLevelRequest) returns (UpdateLevelResponse) {}
 }
 
 // UpdateLevelRequest is the request to update the minimum logging level.
 message UpdateLevelRequest {
-	// Level is the new minimum logging level.
-	LogLevel level = 1;
+  // Level is the new minimum logging level.
+  LogLevel level = 1;
 }
 
 // LogLevel describes possible logging levels.
 enum LogLevel {
-	// Info log level.
-	//
-	// This is default value.
-	INFO = 0;
-	// Debug log level.
-	DEBUG = -1;
-	// Warn log level.
-	//
-	// Warning logs are more important than "INFO", but don't need
-	// individual human review.
-	WARN = 3;
-	// Error log level.
-	//
-	// Error level logs are high-priority. If an application is running
-	// smoothly, it shouldn't generate any error-level logs.
-	ERROR = 4;
+  // Info log level.
+  //
+  // This is default value.
+  INFO = 0;
+  // Debug log level.
+  DEBUG = -1;
+  // Warn log level.
+  //
+  // Warning logs are more important than "INFO", but don't need
+  // individual human review.
+  WARN = 3;
+  // Error log level.
+  //
+  // Error level logs are high-priority. If an application is running
+  // smoothly, it shouldn't generate any error-level logs.
+  ERROR = 4;
 }
 
 // UpdateLevelResponse is the response to the UpdateLevelRequest.
-message UpdateLevelResponse {
-}
+message UpdateLevelResponse {}

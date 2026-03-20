@@ -9,8 +9,9 @@ PREFIX ?= /usr
 all: dataplane cli
 
 proto-lint:
+	@find . -name '*.proto' -print0 | xargs -0 clang-format --dry-run --Werror
 	go test ./lint/protobuf/cmd/protolint/
-	go run ./lint/protobuf/cmd/protolint/
+	go run ./lint/protobuf/cmd/protolint/ --exclude subprojects
 
 go-cache-clean:
 	go clean -cache

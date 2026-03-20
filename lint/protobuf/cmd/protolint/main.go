@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,6 +10,18 @@ import (
 )
 
 const modulePrefix = "github.com/yanet-platform/yanet2/"
+
+// excludeList is a flag.Value that accumulates multiple --exclude values.
+type excludeList []string
+
+func (e *excludeList) String() string {
+	return strings.Join(*e, ", ")
+}
+
+func (e *excludeList) Set(v string) error {
+	*e = append(*e, filepath.Clean(v))
+	return nil
+}
 
 // protoFile holds parsed data from a single .proto file.
 type protoFile struct {
@@ -20,7 +33,11 @@ type protoFile struct {
 }
 
 func main() {
-	files, err := collectProtoFiles(".")
+	var excludes excludeList
+	flag.Var(&excludes, "exclude", "directory to exclude (may be repeated)")
+	flag.Parse()
+
+	files, err := collectProtoFiles(".", excludes)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error walking directory: %v\n", err)
 		os.Exit(1)
@@ -38,16 +55,39 @@ func main() {
 	}
 }
 
+// isExcluded reports whether path is inside any of the excluded directories.
+func isExcluded(path string, excludes []string) bool {
+	for _, ex := range excludes {
+		// filepath.Rel returns a path without ".." prefix when path is inside ex.
+		rel, err := filepath.Rel(ex, path)
+		if err != nil {
+			continue
+		}
+		if !strings.HasPrefix(rel, "..") {
+			return true
+		}
+	}
+	return false
+}
+
 // collectProtoFiles walks the directory tree rooted at root and returns a
-// parsed protoFile for every .proto file found.
-func collectProtoFiles(root string) ([]protoFile, error) {
+// parsed protoFile for every .proto file found, skipping excluded directories.
+func collectProtoFiles(root string, excludes []string) ([]protoFile, error) {
 	var files []protoFile
 
 	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
-		if info.IsDir() || !strings.HasSuffix(path, ".proto") {
+
+		if info.IsDir() {
+			if isExcluded(path, excludes) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		if !strings.HasSuffix(path, ".proto") {
 			return nil
 		}
 

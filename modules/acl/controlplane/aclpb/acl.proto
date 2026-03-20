@@ -7,76 +7,68 @@ import "common/filterpb/filter.proto";
 option go_package = "github.com/yanet-platform/yanet2/modules/acl/controlplane/aclpb;aclpb";
 
 service ACLService {
-	// Updates the complete ACL configuration with a new set of rules
-	rpc UpdateConfig(UpdateConfigRequest) returns (UpdateConfigResponse);
-	// Allows to delete acl config if it is not referenced
-	// by any pipeline.
-	rpc DeleteConfig(DeleteConfigRequest) returns (DeleteConfigResponse);
-	// Show specific ACL configuration
-	rpc ShowConfig(ShowConfigRequest) returns (ShowConfigResponse);
-	// List all ACL configurations across instances
-	rpc ListConfigs(ListConfigsRequest) returns (ListConfigsResponse);
+  // Updates the complete ACL configuration with a new set of rules
+  rpc UpdateConfig(UpdateConfigRequest) returns (UpdateConfigResponse);
+  // Allows to delete acl config if it is not referenced
+  // by any pipeline.
+  rpc DeleteConfig(DeleteConfigRequest) returns (DeleteConfigResponse);
+  // Show specific ACL configuration
+  rpc ShowConfig(ShowConfigRequest) returns (ShowConfigResponse);
+  // List all ACL configurations across instances
+  rpc ListConfigs(ListConfigsRequest) returns (ListConfigsResponse);
 }
 
 message UpdateConfigRequest {
-	string name = 1;
-	repeated Rule rules = 2;
+  string name = 1;
+  repeated Rule rules = 2;
 }
 
-message UpdateConfigResponse {
-}
+message UpdateConfigResponse {}
 
-message ShowConfigRequest {
-	string name = 1;
-}
+message ShowConfigRequest { string name = 1; }
 
 message ShowConfigResponse {
-	string name = 1;
-	repeated Rule rules = 2;
-	string fwstate_name = 3;
+  string name = 1;
+  repeated Rule rules = 2;
+  string fwstate_name = 3;
 }
 
 message Rule {
-	Action action = 1;
+  Action action = 1;
 
-	repeated filterpb.Device devices = 2;
-	repeated filterpb.VlanRange vlan_ranges = 3;
-	repeated filterpb.IPNet srcs = 4;
-	repeated filterpb.IPNet dsts = 5;
-	repeated filterpb.ProtoRange proto_ranges = 6;
-	repeated filterpb.PortRange src_port_ranges = 7;
-	repeated filterpb.PortRange dst_port_ranges = 8;
+  repeated filterpb.Device devices = 2;
+  repeated filterpb.VlanRange vlan_ranges = 3;
+  repeated filterpb.IPNet srcs = 4;
+  repeated filterpb.IPNet dsts = 5;
+  repeated filterpb.ProtoRange proto_ranges = 6;
+  repeated filterpb.PortRange src_port_ranges = 7;
+  repeated filterpb.PortRange dst_port_ranges = 8;
 }
 
 message Action {
-	ActionKind kind = 1;
-	string counter = 2;
-	bool keep_state = 3;
+  ActionKind kind = 1;
+  string counter = 2;
+  bool keep_state = 3;
 }
 
 // Defines possible actions for matched traffic
 enum ActionKind {
-	ACTION_KIND_PASS = 0;
-	ACTION_KIND_DENY = 1;
-	ACTION_KIND_COUNT = 2;
-	ACTION_KIND_CHECK_STATE = 3;
-	ACTION_KIND_CREATE_STATE = 4;
+  ACTION_KIND_PASS = 0;
+  ACTION_KIND_DENY = 1;
+  ACTION_KIND_COUNT = 2;
+  ACTION_KIND_CHECK_STATE = 3;
+  ACTION_KIND_CREATE_STATE = 4;
 }
 
 // Delete config with specified name.
 message DeleteConfigRequest {
-	// Specifies module name and
-	// dataplane instance of acl agent to delete.
-	string name = 1;
+  // Specifies module name and
+  // dataplane instance of acl agent to delete.
+  string name = 1;
 }
 
-message DeleteConfigResponse {
-	bool deleted = 1;
-}
+message DeleteConfigResponse { bool deleted = 1; }
 
-message ListConfigsRequest {
-}
+message ListConfigsRequest {}
 
-message ListConfigsResponse {
-	repeated string configs = 1;
-}
+message ListConfigsResponse { repeated string configs = 1; }

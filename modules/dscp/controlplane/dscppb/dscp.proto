@@ -6,76 +6,64 @@ option go_package = "github.com/yanet-platform/yanet2/modules/dscp/controlplane/
 
 // DscpService is a service for Differentiated Services Code Point module.
 service DscpService {
-	// ListConfigs returns all dscp module configurations of all
-	// dataplane instances.
-	rpc ListConfigs(ListConfigsRequest) returns (ListConfigsResponse);
+  // ListConfigs returns all dscp module configurations of all
+  // dataplane instances.
+  rpc ListConfigs(ListConfigsRequest) returns (ListConfigsResponse);
 
-	// ShowConfig returns the current configuration for the dscp module.
-	rpc ShowConfig(ShowConfigRequest) returns (ShowConfigResponse);
+  // ShowConfig returns the current configuration for the dscp module.
+  rpc ShowConfig(ShowConfigRequest) returns (ShowConfigResponse);
 
-	// AddPrefixes adds prefixes to the dscp module configuration.
-	rpc AddPrefixes(AddPrefixesRequest) returns (AddPrefixesResponse);
-	// RemovePrefixes removes prefixes from the dscp module configuration.
-	rpc RemovePrefixes(RemovePrefixesRequest)
-		returns (RemovePrefixesResponse);
-	// SetDscpMarking sets the DSCP marking configuration.
-	rpc SetDscpMarking(SetDscpMarkingRequest)
-		returns (SetDscpMarkingResponse);
+  // AddPrefixes adds prefixes to the dscp module configuration.
+  rpc AddPrefixes(AddPrefixesRequest) returns (AddPrefixesResponse);
+  // RemovePrefixes removes prefixes from the dscp module configuration.
+  rpc RemovePrefixes(RemovePrefixesRequest) returns (RemovePrefixesResponse);
+  // SetDscpMarking sets the DSCP marking configuration.
+  rpc SetDscpMarking(SetDscpMarkingRequest) returns (SetDscpMarkingResponse);
 }
 
 message Config {
-	repeated string prefixes = 2;
-	DscpConfig dscp_config = 3;
+  repeated string prefixes = 2;
+  DscpConfig dscp_config = 3;
 }
 
-message ListConfigsRequest {
-}
+message ListConfigsRequest {}
 
 // ListConfigsResponse contains existing configurations.
-message ListConfigsResponse {
-	repeated string configs = 1;
-}
+message ListConfigsResponse { repeated string configs = 1; }
 
 // ShowConfigResponse retrieves the runtime configuration for the dscp module.
-message ShowConfigRequest {
-	string name = 1;
-}
+message ShowConfigRequest { string name = 1; }
 
 // DscpConfig contains the DSCP marking configuration.
 message DscpConfig {
-	// Flag indicates when to apply DSCP marking.
-	// 0 - Never, 1 - Default (mark only if original DSCP is 0), 2 - Always
-	uint32 flag = 1;
-	// DSCP value to set
-	uint32 mark = 2;
+  // Flag indicates when to apply DSCP marking.
+  // 0 - Never, 1 - Default (mark only if original DSCP is 0), 2 - Always
+  uint32 flag = 1;
+  // DSCP value to set
+  uint32 mark = 2;
 }
 
 // ShowConfigResponse contains the configuration details of the dscp module.
-message ShowConfigResponse {
-	Config config = 1;
-}
+message ShowConfigResponse { Config config = 1; }
 
 // AddPrefixesRequest adds prefixes to the input filter of the dscp module.
 message AddPrefixesRequest {
-	string name = 1;
-	repeated string prefixes = 2;
+  string name = 1;
+  repeated string prefixes = 2;
 }
-message AddPrefixesResponse {
-}
+message AddPrefixesResponse {}
 
 // RemovePrefixesRequest removes prefixes from the input filter of the dscp
 // module.
 message RemovePrefixesRequest {
-	string name = 1;
-	repeated string prefixes = 2;
+  string name = 1;
+  repeated string prefixes = 2;
 }
-message RemovePrefixesResponse {
-}
+message RemovePrefixesResponse {}
 
 // SetDscpMarkingRequest sets the DSCP marking configuration.
 message SetDscpMarkingRequest {
-	string name = 1;
-	DscpConfig dscp_config = 2;
+  string name = 1;
+  DscpConfig dscp_config = 2;
 }
-message SetDscpMarkingResponse {
-}
+message SetDscpMarkingResponse {}

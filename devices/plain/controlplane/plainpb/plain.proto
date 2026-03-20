@@ -6,16 +6,11 @@ import "common/commonpb/target.proto";
 
 option go_package = "github.com/yanet-platform/yanet2/devices/plain/controlplane/plainpb;plainpb";
 
-service DevicePlainService {
-	rpc UpdateDevice(UpdateDevicePlainRequest)
-		returns (UpdateDevicePlainResponse);
-}
+service DevicePlainService { rpc UpdateDevice(UpdateDevicePlainRequest) returns (UpdateDevicePlainResponse); }
 
 message UpdateDevicePlainRequest {
-	string name = 1;
-	commonpb.Device device = 2;
+  string name = 1;
+  commonpb.Device device = 2;
 }
 
-message UpdateDevicePlainResponse {
-	string error = 1;
-}
+message UpdateDevicePlainResponse { string error = 1; }

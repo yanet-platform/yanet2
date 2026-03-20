@@ -6,6 +6,85 @@ import (
 	"testing"
 )
 
+func TestIsExcluded(t *testing.T) {
+	tests := []struct {
+		name     string
+		path     string
+		excludes []string
+		want     bool
+	}{
+		{
+			name:     "not excluded",
+			path:     "modules/foo/bar.proto",
+			excludes: []string{"subprojects"},
+			want:     false,
+		},
+		{
+			name:     "directly excluded",
+			path:     "subprojects/foo/bar.proto",
+			excludes: []string{"subprojects"},
+			want:     true,
+		},
+		{
+			name:     "excluded by one of multiple",
+			path:     "vendor/foo/bar.proto",
+			excludes: []string{"subprojects", "vendor"},
+			want:     true,
+		},
+		{
+			name:     "empty excludes",
+			path:     "modules/foo/bar.proto",
+			excludes: nil,
+			want:     false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := isExcluded(tc.path, tc.excludes)
+			if got != tc.want {
+				t.Errorf("isExcluded(%q, %v) = %v, want %v", tc.path, tc.excludes, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestCollectProtoFilesExclude(t *testing.T) {
+	root := t.TempDir()
+
+	// Create two directories: one included, one excluded.
+	includedDir := filepath.Join(root, "goodpb")
+	excludedDir := filepath.Join(root, "subprojects", "vendored")
+	for _, d := range []string{includedDir, excludedDir} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+	}
+
+	writeFile := func(path, content string) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+	}
+
+	writeFile(filepath.Join(includedDir, "good.proto"), "syntax = \"proto3\";\npackage goodpb;\n")
+	writeFile(filepath.Join(excludedDir, "bad.proto"), "syntax = \"proto3\";\npackage vendored;\n")
+
+	excludes := []string{filepath.Join(root, "subprojects")}
+	files, err := collectProtoFiles(root, excludes)
+	if err != nil {
+		t.Fatalf("collectProtoFiles: %v", err)
+	}
+
+	if len(files) != 1 {
+		t.Fatalf("got %d files, want 1: %v", len(files), files)
+	}
+	if files[0].pkg != "goodpb" {
+		t.Errorf("got package %q, want %q", files[0].pkg, "goodpb")
+	}
+}
+
 // writeProto creates a temporary .proto file with the given content inside a
 // subdirectory named dirName under a root temp dir. It returns the file path
 // and the root directory.

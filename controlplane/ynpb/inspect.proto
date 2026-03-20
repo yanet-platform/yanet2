@@ -7,24 +7,23 @@ option go_package = "github.com/yanet-platform/yanet2/controlplane/ynpb;ynpb";
 // InspectService provides read-only introspection into the current state
 // of a YANET dataplane instance.
 service InspectService {
-	// Inspect retrieves a complete snapshot of the current dataplane
-	// configuration.
-	//
-	// This includes all modules, configurations, pipelines, functions,
-	// agents, and devices for the served instance.
-	rpc Inspect(InspectRequest) returns (InspectResponse);
+  // Inspect retrieves a complete snapshot of the current dataplane
+  // configuration.
+  //
+  // This includes all modules, configurations, pipelines, functions,
+  // agents, and devices for the served instance.
+  rpc Inspect(InspectRequest) returns (InspectResponse);
 }
 
 // InspectRequest is the request message for the Inspect RPC.
-message InspectRequest {
-}
+message InspectRequest {}
 
 // InspectResponse contains a complete snapshot of the dataplane instance
 // configuration at the time of the request.
 message InspectResponse {
-	// InstanceInfo contains detailed information about the dataplane
-	// instance.
-	InstanceInfo instance_info = 1;
+  // InstanceInfo contains detailed information about the dataplane
+  // instance.
+  InstanceInfo instance_info = 1;
 }
 
 // InstanceInfo provides a complete view of a single dataplane instance's
@@ -33,52 +32,52 @@ message InspectResponse {
 // Each YANET deployment may have multiple instances, typically one per NUMA
 // node for optimal memory locality.
 message InstanceInfo {
-	// Unique index identifying this instance within the YANET deployment.
-	//
-	// Instance indices are assigned sequentially starting from 0.
-	uint32 instance_idx = 1;
-	// Index of the NUMA node this instance is attached to.
-	uint32 numa_idx = 2;
-	// List of dataplane modules loaded in this instance.
-	//
-	// Dataplane modules provide packet processing capabilities (e.g.,
-	// routing, NAT, ACL).
-	repeated DPModuleInfo dp_modules = 3;
-	// List of control plane configurations applied to this instance.
-	//
-	// Each configuration represents a named instance of a module type
-	// with specific settings.
-	repeated CPConfigInfo cp_configs = 4;
-	// List of packet processing functions configured in this instance.
-	//
-	// Functions define how packets are processed through chains of modules.
-	repeated FunctionInfo functions = 5;
-	// List of pipelines configured in this instance.
-	//
-	// Pipelines define the sequence of functions applied to packets from
-	// ingress to egress.
-	repeated PipelineInfo pipelines = 6;
-	// List of control plane agents running in this instance.
-	//
-	// Agents are processes that manage and update module configurations at
-	// runtime.
-	repeated AgentInfo agents = 7;
-	// List of network devices (interfaces) configured in this instance.
-	//
-	// Devices represent physical or virtual network interfaces that
-	// send and receive packets.
-	repeated DeviceInfo devices = 8;
+  // Unique index identifying this instance within the YANET deployment.
+  //
+  // Instance indices are assigned sequentially starting from 0.
+  uint32 instance_idx = 1;
+  // Index of the NUMA node this instance is attached to.
+  uint32 numa_idx = 2;
+  // List of dataplane modules loaded in this instance.
+  //
+  // Dataplane modules provide packet processing capabilities (e.g.,
+  // routing, NAT, ACL).
+  repeated DPModuleInfo dp_modules = 3;
+  // List of control plane configurations applied to this instance.
+  //
+  // Each configuration represents a named instance of a module type
+  // with specific settings.
+  repeated CPConfigInfo cp_configs = 4;
+  // List of packet processing functions configured in this instance.
+  //
+  // Functions define how packets are processed through chains of modules.
+  repeated FunctionInfo functions = 5;
+  // List of pipelines configured in this instance.
+  //
+  // Pipelines define the sequence of functions applied to packets from
+  // ingress to egress.
+  repeated PipelineInfo pipelines = 6;
+  // List of control plane agents running in this instance.
+  //
+  // Agents are processes that manage and update module configurations at
+  // runtime.
+  repeated AgentInfo agents = 7;
+  // List of network devices (interfaces) configured in this instance.
+  //
+  // Devices represent physical or virtual network interfaces that
+  // send and receive packets.
+  repeated DeviceInfo devices = 8;
 }
 
 // DPModuleInfo contains information about a dataplane module.
 //
 // Dataplane modules are the building blocks of packet processing.
 message DPModuleInfo {
-	// Unique name identifying the module type in the dataplane.
-	//
-	// The name is used to reference the module when configuring functions
-	// and chains.
-	string name = 1;
+  // Unique name identifying the module type in the dataplane.
+  //
+  // The name is used to reference the module when configuring functions
+  // and chains.
+  string name = 1;
 }
 
 // CPConfigInfo contains information about a control plane configuration.
@@ -87,19 +86,19 @@ message DPModuleInfo {
 // specific settings. Multiple configurations of the same type can coexist
 // (e.g., multiple route tables or ACL rulesets).
 message CPConfigInfo {
-	// Module type this configuration belongs to (e.g., "route", "acl").
-	//
-	// MUST match a loaded dataplane module name.
-	string type = 1;
-	// Unique name for this configuration within its type.
-	//
-	// The combination of "type:name" forms a globally unique identifier.
-	string name = 2;
-	// Generation number tracking configuration updates.
-	//
-	// Incremented each time the configuration is modified, allowing clients
-	// to detect changes and implement optimistic concurrency control.
-	uint64 generation = 3;
+  // Module type this configuration belongs to (e.g., "route", "acl").
+  //
+  // MUST match a loaded dataplane module name.
+  string type = 1;
+  // Unique name for this configuration within its type.
+  //
+  // The combination of "type:name" forms a globally unique identifier.
+  string name = 2;
+  // Generation number tracking configuration updates.
+  //
+  // Incremented each time the configuration is modified, allowing clients
+  // to detect changes and implement optimistic concurrency control.
+  uint64 generation = 3;
 }
 
 // ChainModuleInfo identifies a specific module configuration within
@@ -109,13 +108,13 @@ message CPConfigInfo {
 // in sequence. This message specifies which module configuration
 // to use at each step.
 message ChainModuleInfo {
-	// Module type (e.g., "route", "acl", "nat64").
-	string type = 1;
-	// Configuration name within the module type.
-	//
-	// Together with type, this uniquely identifies the module configuration
-	// to apply.
-	string name = 2;
+  // Module type (e.g., "route", "acl", "nat64").
+  string type = 1;
+  // Configuration name within the module type.
+  //
+  // Together with type, this uniquely identifies the module configuration
+  // to apply.
+  string name = 2;
 }
 
 // FunctionChainInfo describes a processing chain within a function.
@@ -124,17 +123,17 @@ message ChainModuleInfo {
 // traverse. Functions can have multiple chains with different weights
 // for load balancing or failover scenarios.
 message FunctionChainInfo {
-	// Name identifying this chain within the function.
-	string name = 1;
-	// Weight used for load balancing when a function has multiple chains.
-	//
-	// Higher weight means more traffic is directed to this chain.
-	// A weight of 0 effectively disables the chain.
-	uint64 weight = 2;
-	// Ordered list of module configurations in this chain.
-	//
-	// Packets are processed by each module in sequence from first to last.
-	repeated ChainModuleInfo modules = 3;
+  // Name identifying this chain within the function.
+  string name = 1;
+  // Weight used for load balancing when a function has multiple chains.
+  //
+  // Higher weight means more traffic is directed to this chain.
+  // A weight of 0 effectively disables the chain.
+  uint64 weight = 2;
+  // Ordered list of module configurations in this chain.
+  //
+  // Packets are processed by each module in sequence from first to last.
+  repeated ChainModuleInfo modules = 3;
 }
 
 // FunctionInfo describes a packet processing function.
@@ -144,16 +143,16 @@ message FunctionChainInfo {
 // are processed. When multiple chains exist, traffic is distributed based on
 // chain weights.
 message FunctionInfo {
-	// Unique name identifying this function.
-	//
-	// Referenced by pipelines to include the function in packet processing
-	// paths.
-	string name = 1;
-	// List of processing chains in this function.
-	//
-	// At least one chain is required. Multiple chains enable load balancing
-	// or A/B testing of different processing paths.
-	repeated FunctionChainInfo chains = 2;
+  // Unique name identifying this function.
+  //
+  // Referenced by pipelines to include the function in packet processing
+  // paths.
+  string name = 1;
+  // List of processing chains in this function.
+  //
+  // At least one chain is required. Multiple chains enable load balancing
+  // or A/B testing of different processing paths.
+  repeated FunctionChainInfo chains = 2;
 }
 
 // PipelineInfo describes a packet processing pipeline.
@@ -161,14 +160,14 @@ message FunctionInfo {
 // A pipeline defines the complete processing path for packets from a specific
 // ingress or egress point.
 message PipelineInfo {
-	// Unique name identifying this pipeline.
-	//
-	// Referenced by devices to associate pipelines with input/output paths.
-	string name = 1;
-	// Ordered list of function names to apply to packets.
-	//
-	// Functions are executed in order.
-	repeated string functions = 2;
+  // Unique name identifying this pipeline.
+  //
+  // Referenced by devices to associate pipelines with input/output paths.
+  string name = 1;
+  // Ordered list of function names to apply to packets.
+  //
+  // Functions are executed in order.
+  repeated string functions = 2;
 }
 
 // AgentInfo contains information about a control plane agent.
@@ -177,41 +176,41 @@ message PipelineInfo {
 // at runtime. They can update routing tables, ACL rules, and other
 // configurations without requiring dataplane restart.
 message AgentInfo {
-	// Unique identifier for this agent type.
-	string name = 1;
-	// List of running instances of this agent.
-	//
-	// Each instance operates independently and has its own memory
-	// allocation and generation.
-	repeated AgentInstanceInfo instances = 2;
+  // Unique identifier for this agent type.
+  string name = 1;
+  // List of running instances of this agent.
+  //
+  // Each instance operates independently and has its own memory
+  // allocation and generation.
+  repeated AgentInstanceInfo instances = 2;
 }
 
 // AgentInstanceInfo contains runtime information about a specific agent process
 // instance.
 message AgentInstanceInfo {
-	// Operating system process ID of the agent instance.
-	// Can be used for monitoring and debugging purposes.
-	uint32 pid = 1;
-	// Maximum memory (in bytes) this agent instance is allowed to allocate
-	// from the shared memory pool.
-	//
-	// Enforced by the dataplane to prevent runaway agents from exhausting
-	// resources.
-	uint64 memory_limit = 2;
-	// Current amount of memory (in bytes) allocated by this agent instance.
-	//
-	// Includes all active allocations in the shared memory pool.
-	uint64 allocated = 3;
-	// Total amount of memory (in bytes) freed by this agent instance since
-	// startup.
-	//
-	// Useful for tracking memory churn and detecting leaks.
-	uint64 freed = 4;
-	// Generation number of this agent instance.
-	//
-	// Incremented when the agent performs a major configuration update,
-	// allowing the dataplane to coordinate atomic configuration switches.
-	uint64 generation = 5;
+  // Operating system process ID of the agent instance.
+  // Can be used for monitoring and debugging purposes.
+  uint32 pid = 1;
+  // Maximum memory (in bytes) this agent instance is allowed to allocate
+  // from the shared memory pool.
+  //
+  // Enforced by the dataplane to prevent runaway agents from exhausting
+  // resources.
+  uint64 memory_limit = 2;
+  // Current amount of memory (in bytes) allocated by this agent instance.
+  //
+  // Includes all active allocations in the shared memory pool.
+  uint64 allocated = 3;
+  // Total amount of memory (in bytes) freed by this agent instance since
+  // startup.
+  //
+  // Useful for tracking memory churn and detecting leaks.
+  uint64 freed = 4;
+  // Generation number of this agent instance.
+  //
+  // Incremented when the agent performs a major configuration update,
+  // allowing the dataplane to coordinate atomic configuration switches.
+  uint64 generation = 5;
 }
 
 // DeviceInfo contains information about a network device.
@@ -220,25 +219,25 @@ message AgentInstanceInfo {
 // They can be physical NICs, virtual interfaces, or software constructs like
 // tunnel endpoints.
 message DeviceInfo {
-	// Device type indicating the driver or abstraction layer.
-	string type = 1;
-	// Unique name identifying this device within its type.
-	//
-	// The combination of "type:name" forms a globally unique identifier.
-	string name = 2;
-	// Pipelines which are executed on incoming traffic to this device.
-	repeated DevicePipelineInfo input_pipelines = 3;
-	// Pipelines which are executed on outgoing traffic from this device.
-	repeated DevicePipelineInfo output_pipelines = 4;
+  // Device type indicating the driver or abstraction layer.
+  string type = 1;
+  // Unique name identifying this device within its type.
+  //
+  // The combination of "type:name" forms a globally unique identifier.
+  string name = 2;
+  // Pipelines which are executed on incoming traffic to this device.
+  repeated DevicePipelineInfo input_pipelines = 3;
+  // Pipelines which are executed on outgoing traffic from this device.
+  repeated DevicePipelineInfo output_pipelines = 4;
 }
 message DevicePipelineInfo {
-	// Name of the pipeline associated with this device.
-	//
-	// Must reference a valid pipeline configured in the instance.
-	string name = 1;
-	// Weight for load balancing when multiple pipelines are configured.
-	//
-	// Higher weight means more packets are directed to/from this pipeline.
-	// Used for distributing traffic across multiple processing paths.
-	uint64 weight = 2;
+  // Name of the pipeline associated with this device.
+  //
+  // Must reference a valid pipeline configured in the instance.
+  string name = 1;
+  // Weight for load balancing when multiple pipelines are configured.
+  //
+  // Higher weight means more packets are directed to/from this pipeline.
+  // Used for distributing traffic across multiple processing paths.
+  uint64 weight = 2;
 }

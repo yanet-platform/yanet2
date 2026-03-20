@@ -6,107 +6,94 @@ option go_package = "github.com/yanet-platform/yanet2/modules/pdump/controlplane
 
 // PdumpService is a service for Differentiated Services Code Point module.
 service PdumpService {
-	// ListConfigs returns all pdump module configurations
-	rpc ListConfigs(ListConfigsRequest) returns (ListConfigsResponse);
+  // ListConfigs returns all pdump module configurations
+  rpc ListConfigs(ListConfigsRequest) returns (ListConfigsResponse);
 
-	// ShowConfig returns the current configuration for the pdump module.
-	rpc ShowConfig(ShowConfigRequest) returns (ShowConfigResponse);
+  // ShowConfig returns the current configuration for the pdump module.
+  rpc ShowConfig(ShowConfigRequest) returns (ShowConfigResponse);
 
-	// SetConfig sets a new config for the pdump module
-	rpc SetConfig(SetConfigRequest) returns (SetConfigResponse);
+  // SetConfig sets a new config for the pdump module
+  rpc SetConfig(SetConfigRequest) returns (SetConfigResponse);
 
-	// DeleteConfig deletes a pdump module configuration.
-	rpc DeleteConfig(DeleteConfigRequest) returns (DeleteConfigResponse);
+  // DeleteConfig deletes a pdump module configuration.
+  rpc DeleteConfig(DeleteConfigRequest) returns (DeleteConfigResponse);
 
-	// ReadDump activates reading packet dumps from shared memory. Each
-	// packet is returned as an individual Record message containing
-	// metadata and packet content.
-	rpc ReadDump(ReadDumpRequest) returns (stream Record);
+  // ReadDump activates reading packet dumps from shared memory. Each
+  // packet is returned as an individual Record message containing
+  // metadata and packet content.
+  rpc ReadDump(ReadDumpRequest) returns (stream Record);
 }
 
 // ReadDumpRequest contains the target config for initializing pdump record
 // streaming.
-message ReadDumpRequest {
-	string name = 1;
-}
+message ReadDumpRequest { string name = 1; }
 
 message RecordMeta {
-	// Timestamp of receiving package on dataplane side.
-	uint64 timestamp = 1;
-	// Size of the payload data
-	uint32 data_size = 2;
-	// PacketLen indicates the length of the original packet.
-	uint32 packet_len = 3;
-	// Worker that processes this message; this index is used to select the
-	// appropriate ring buffer.
-	uint32 worker_idx = 4;
-	// Index of the pipeline where the pdump module is located.
-	uint32 pipeline_idx = 5;
-	// ID of the device from which the packet was received.
-	uint32 rx_device_id = 6;
-	// ID of the device to which the packet may be sent.
-	uint32 tx_device_id = 7;
-	// Indicates from which packet_list the packet is collected.
-	uint32 queue = 8;
+  // Timestamp of receiving package on dataplane side.
+  uint64 timestamp = 1;
+  // Size of the payload data
+  uint32 data_size = 2;
+  // PacketLen indicates the length of the original packet.
+  uint32 packet_len = 3;
+  // Worker that processes this message; this index is used to select the
+  // appropriate ring buffer.
+  uint32 worker_idx = 4;
+  // Index of the pipeline where the pdump module is located.
+  uint32 pipeline_idx = 5;
+  // ID of the device from which the packet was received.
+  uint32 rx_device_id = 6;
+  // ID of the device to which the packet may be sent.
+  uint32 tx_device_id = 7;
+  // Indicates from which packet_list the packet is collected.
+  uint32 queue = 8;
 }
 
 message Record {
-	RecordMeta meta = 1;
-	bytes data = 2;
+  RecordMeta meta = 1;
+  bytes data = 2;
 }
 
-message ListConfigsRequest {
-}
+message ListConfigsRequest {}
 
 // ListConfigsResponse contains existing configurations.
-message ListConfigsResponse {
-	repeated string configs = 1;
-}
+message ListConfigsResponse { repeated string configs = 1; }
 
 // ShowConfigResponse retrieves the runtime configuration for the pdump module.
-message ShowConfigRequest {
-	string name = 1;
-}
+message ShowConfigRequest { string name = 1; }
 
 // Config contains the pdump module configuration.
 message Config {
-	// Pcap style filter.
-	string filter = 1;
-	// Mode specifies a bitmap of queues that should be dumped.
-	// For now available queues are INPUT, OUTPUT, DROP.
-	uint32 mode = 2;
-	// Snaplen specifies maximum packet length to capture.
-	uint32 snaplen = 3;
-	// Ring_size specifies per worker ring buffer size.
-	uint32 ring_size = 4;
+  // Pcap style filter.
+  string filter = 1;
+  // Mode specifies a bitmap of queues that should be dumped.
+  // For now available queues are INPUT, OUTPUT, DROP.
+  uint32 mode = 2;
+  // Snaplen specifies maximum packet length to capture.
+  uint32 snaplen = 3;
+  // Ring_size specifies per worker ring buffer size.
+  uint32 ring_size = 4;
 }
 
 // ShowConfigResponse contains the configuration details of the pdump module.
-message ShowConfigResponse {
-	Config config = 1;
-}
+message ShowConfigResponse { Config config = 1; }
 
 // SetConfigRequest contains new configuration for the pdump module
 message SetConfigRequest {
-	string name = 1;
-	Config config = 2;
-	FieldMask update_mask = 3;
+  string name = 1;
+  Config config = 2;
+  FieldMask update_mask = 3;
 }
 
-message SetConfigResponse {
-}
+message SetConfigResponse {}
 
 // DeleteConfigRequest specifies the pdump config to delete.
-message DeleteConfigRequest {
-	string name = 1;
-}
+message DeleteConfigRequest { string name = 1; }
 
-message DeleteConfigResponse {
-}
+message DeleteConfigResponse {}
 
 // Copy pasted from import "google/protobuf/field_mask.proto";
 // for integrity purposes.
 message FieldMask {
-	// The set of field mask paths.
-	repeated string paths = 1;
+  // The set of field mask paths.
+  repeated string paths = 1;
 }

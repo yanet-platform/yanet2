@@ -5,8 +5,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .emit_rerun_if_changed(false)
         .build_server(false)
         .compile_protos(
-            &["../../controlplane/routepb/neighbour.proto"],
-            &["../../controlplane/routepb"],
+            &["modules/route/controlplane/routepb/neighbour.proto"],
+            &["../../../../"],
         )?;
 
     Ok(())

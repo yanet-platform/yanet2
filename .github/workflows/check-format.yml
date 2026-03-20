@@ -6,13 +6,11 @@ on:
     paths:
       - "**.h"
       - "**.c"
-      - "**.proto"
   pull_request:
     branches: ["main"]
     paths:
       - "**.h"
       - "**.c"
-      - "**.proto"
 
 jobs:
   c-cpp-fmt:
@@ -26,16 +24,4 @@ jobs:
           include: |
             *.h
             *.c
-          exclude-regex: '^./subprojects/'
-
-  proto-fmt:
-    name: Protobuf formatting
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-      - name: Run clang-format
-        uses: ./.github/actions/clang-format
-        with:
-          include: |
-            *.proto
           exclude-regex: '^./subprojects/'

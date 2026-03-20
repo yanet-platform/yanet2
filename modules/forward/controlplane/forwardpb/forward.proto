@@ -8,81 +8,72 @@ option go_package = "github.com/yanet-platform/yanet2/modules/forward/controlpla
 
 // ForwardService is a controlplane service for forwarding module.
 service ForwardService {
-	// ListConfigs returns all forward module configurations of all
-	// dataplane instances.
-	rpc ListConfigs(ListConfigsRequest) returns (ListConfigsResponse);
+  // ListConfigs returns all forward module configurations of all
+  // dataplane instances.
+  rpc ListConfigs(ListConfigsRequest) returns (ListConfigsResponse);
 
-	// ShowConfig returns the current configuration for the forward module.
-	rpc ShowConfig(ShowConfigRequest) returns (ShowConfigResponse);
+  // ShowConfig returns the current configuration for the forward module.
+  rpc ShowConfig(ShowConfigRequest) returns (ShowConfigResponse);
 
-	rpc UpdateConfig(UpdateConfigRequest) returns (UpdateConfigResponse);
+  rpc UpdateConfig(UpdateConfigRequest) returns (UpdateConfigResponse);
 
-	// Allows to delete forward config if it is not referenced
-	// by any pipeline.
-	rpc DeleteConfig(DeleteConfigRequest) returns (DeleteConfigResponse);
+  // Allows to delete forward config if it is not referenced
+  // by any pipeline.
+  rpc DeleteConfig(DeleteConfigRequest) returns (DeleteConfigResponse);
 }
 
 message Config {
-	// TODO
+  // TODO
 }
 
-message ListConfigsRequest {
-}
+message ListConfigsRequest {}
 
 // ListConfigsResponse contains existing configurations.
-message ListConfigsResponse {
-	repeated string configs = 1;
-}
+message ListConfigsResponse { repeated string configs = 1; }
 
 // ShowConfigResponse retrieves the runtime configuration for the forward
 // module.
-message ShowConfigRequest {
-	string name = 1;
-}
+message ShowConfigRequest { string name = 1; }
 
 // ShowConfigResponse contains the configuration details of the forward module.
 message ShowConfigResponse {
-	string name = 1;
-	repeated Rule rules = 2;
+  string name = 1;
+  repeated Rule rules = 2;
 }
 
 enum ForwardMode {
-	NONE = 0;
-	IN = 1;
-	OUT = 2;
+  NONE = 0;
+  IN = 1;
+  OUT = 2;
 }
 
 message Rule {
-	Action action = 1;
+  Action action = 1;
 
-	repeated filterpb.Device devices = 2;
-	repeated filterpb.VlanRange vlan_ranges = 3;
-	repeated filterpb.IPNet srcs = 4;
-	repeated filterpb.IPNet dsts = 5;
+  repeated filterpb.Device devices = 2;
+  repeated filterpb.VlanRange vlan_ranges = 3;
+  repeated filterpb.IPNet srcs = 4;
+  repeated filterpb.IPNet dsts = 5;
 }
 
 message Action {
-	string target = 1;
-	ForwardMode mode = 2;
-	string counter = 3;
+  string target = 1;
+  ForwardMode mode = 2;
+  string counter = 3;
 }
 
 message UpdateConfigRequest {
-	string name = 1;
-	repeated Rule rules = 2;
+  string name = 1;
+  repeated Rule rules = 2;
 }
 
-message UpdateConfigResponse {
-	string error = 1;
-}
+message UpdateConfigResponse { string error = 1; }
 
 // Delete config with specified name.
 message DeleteConfigRequest {
-	// Specifies module name and
-	// dataplane instance of forward agent to delete.
-	string name = 1;
+  // Specifies module name and
+  // dataplane instance of forward agent to delete.
+  string name = 1;
 }
 
-message DeleteConfigResponse {
-	bool deleted = 1;
-}
+message DeleteConfigResponse { bool deleted = 1; }

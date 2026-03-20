@@ -13,3 +13,17 @@ BinPackParameters: false
 AlwaysBreakAfterReturnType: All
 ContinuationIndentWidth: 8
 
+# Special rules for proto files
+---
+Language: Proto
+
+UseTab: Never
+IndentWidth: 2
+TabWidth: 2
+
+ColumnLimit: 120
+AllowShortFunctionsOnASingleLine: true
+
+# Do not align option go_package
+AlignAfterOpenBracket: DontAlign
+ContinuationIndentWidth: 2
