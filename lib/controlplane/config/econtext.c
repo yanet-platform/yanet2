@@ -684,20 +684,22 @@ device_entry_ectx_create(
 	memset(device_entry_ectx, 0, ectx_size);
 	device_entry_ectx->handler = handler;
 
-	device_entry_ectx->pipeline_count = cp_device_entry->pipeline_count;
-	if (!device_entry_ectx->pipeline_count)
-		return device_entry_ectx;
 	struct pipeline_ectx **pipelines =
 		(struct pipeline_ectx **)memory_balloc(
 			memory_context,
 			sizeof(struct pipeline_ectx *) *
-				device_entry_ectx->pipeline_count
+				cp_device_entry->pipeline_count
 		);
-	if (pipelines == NULL) {
+	if (pipelines == NULL && cp_device_entry->pipeline_count > 0) {
 		NEW_ERROR("failed to allocate memory for pipelines array in "
 			  "device entry");
 		goto error;
 	}
+	device_entry_ectx->pipeline_count = cp_device_entry->pipeline_count;
+
+	if (!device_entry_ectx->pipeline_count)
+		return device_entry_ectx;
+
 	memset(pipelines,
 	       0,
 	       sizeof(struct pipeline_ectx *) *
