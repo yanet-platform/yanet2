@@ -1,6 +1,7 @@
 package controlplane_test
 
 import (
+	"fmt"
 	"net/netip"
 	"testing"
 
@@ -383,4 +384,88 @@ func TestControlplaneUpdates(t *testing.T) {
 		err := bootstrap.UpdatePlainDevices(config)
 		require.Error(t, err, "failed to update device with input pipeline equals output pipeline")
 	})
+
+	// No segfault on trying to create a heavy pipeline
+	t.Run("HeavyPipeline", func(t *testing.T) {
+		config := []ffi.DeviceConfig{
+			{
+				Name: "device",
+				Input: []ffi.DevicePipelineConfig{
+					{
+						Name:   "pipeline0",
+						Weight: 1000000000,
+					},
+				},
+				Output: []ffi.DevicePipelineConfig{
+					{
+						Name:   "dummy",
+						Weight: 1,
+					},
+				},
+			},
+		}
+		if err = bootstrap.UpdatePlainDevices(config); err != nil {
+			t.Logf("Got expected error: %v", err)
+		}
+	})
+
+	// It must be allowed to remove function from pipeline0
+	t.Run("RemoveFunctionFromPipeline0", func(t *testing.T) {
+		err := bootstrap.UpdatePipeline(ffi.PipelineConfig{
+			Name: "pipeline0",
+		})
+		require.NoError(t, err)
+	})
+
+	// No segfault on creating a lot of pipelines
+	t.Run("ManyPipelines", func(t *testing.T) {
+		// Create and register pipelines
+		pipelineCount := 500
+		pipelines := make([]ffi.DevicePipelineConfig, pipelineCount)
+		for i := range pipelineCount {
+			pipelines[i] = ffi.DevicePipelineConfig{
+				Name:   fmt.Sprintf("pipeline%d", i),
+				Weight: 100,
+			}
+
+			err := bootstrap.UpdatePipeline(ffi.PipelineConfig{
+				Name: pipelines[i].Name,
+			})
+			require.NoErrorf(t, err, "failed to update pipeline %s", pipelines[i].Name)
+		}
+
+		config := []ffi.DeviceConfig{
+			{
+				Name:  "device",
+				Input: pipelines,
+				Output: []ffi.DevicePipelineConfig{
+					{
+						Name:   "dummy",
+						Weight: 1,
+					},
+				},
+			},
+		}
+		if err = bootstrap.UpdatePlainDevices(config); err != nil {
+			t.Logf("Got expected error: %v", err)
+		}
+
+		bootstrap.UpdatePlainDevices([]ffi.DeviceConfig{
+			{
+				Name: "device",
+			},
+		})
+
+		// Delete all pipelines (they not referenced)
+		for i := range pipelines {
+			err := bootstrap.DeletePipeline(pipelines[i].Name)
+			require.NoErrorf(t, err, "failed to delete pipeline %s", pipelines[i].Name)
+		}
+	})
+
+	// TODO: Test empty pipeline is allowed
+
+	// TODO: Test empty function is allowed
+
+	// TODO: Test empty chain is allowed
 }
