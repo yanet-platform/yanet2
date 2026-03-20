@@ -462,10 +462,4 @@ func TestControlplaneUpdates(t *testing.T) {
 			require.NoErrorf(t, err, "failed to delete pipeline %s", pipelines[i].Name)
 		}
 	})
-
-	// TODO: Test empty pipeline is allowed
-
-	// TODO: Test empty function is allowed
-
-	// TODO: Test empty chain is allowed
 }
