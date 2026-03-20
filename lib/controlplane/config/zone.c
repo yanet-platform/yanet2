@@ -145,17 +145,22 @@ static inline void
 cp_config_gen_free(
 	struct cp_config *cp_config, struct cp_config_gen *config_gen
 ) {
+	// Free ectx first, as its internals reference
+	// module configs, chains, functions and pipelines
 	(void)cp_config;
-	cp_module_registry_destroy(&config_gen->module_registry);
-	cp_function_registry_destroy(&config_gen->function_registry);
-	cp_pipeline_registry_destroy(&config_gen->pipeline_registry);
-	cp_device_registry_destroy(&config_gen->device_registry);
-
 	struct config_gen_ectx *config_gen_ectx =
 		ADDR_OF(&config_gen->config_gen_ectx);
 	if (config_gen_ectx != NULL)
 		config_gen_ectx_free(config_gen, config_gen_ectx);
 
+	// Then, free registries of module configs, chains,
+	// functions and pipelines
+	cp_module_registry_destroy(&config_gen->module_registry);
+	cp_function_registry_destroy(&config_gen->function_registry);
+	cp_pipeline_registry_destroy(&config_gen->pipeline_registry);
+	cp_device_registry_destroy(&config_gen->device_registry);
+
+	// Finally, free counter storage registry
 	cp_config_counter_storage_registry_destroy(
 		&config_gen->counter_storage_registry
 	);
