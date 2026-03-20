@@ -1,5 +1,6 @@
 #include "dpdk.h"
 
+#include <stdarg.h>
 #include <stdio.h>
 
 #include <rte_dev.h>
@@ -10,6 +11,39 @@
 
 #include "logging/log.h"
 
+struct eal_args {
+	char buf[1024];
+	int buf_pos;
+	char *argv[128];
+	unsigned int argc;
+};
+
+static int __attribute__((format(printf, 2, 3)))
+eal_args_add(struct eal_args *args, const char *fmt, ...) {
+	if (args->argc >= sizeof(args->argv) / sizeof(args->argv[0]) - 1) {
+		return -1;
+	}
+
+	int remaining = (int)sizeof(args->buf) - args->buf_pos;
+	if (remaining <= 0) {
+		return -1;
+	}
+
+	args->argv[args->argc++] = &args->buf[args->buf_pos];
+
+	va_list ap;
+	va_start(ap, fmt);
+	int written = vsnprintf(&args->buf[args->buf_pos], remaining, fmt, ap);
+	va_end(ap);
+
+	if (written < 0 || written >= remaining) {
+		return -1;
+	}
+
+	args->buf_pos += written + 1;
+	return 0;
+}
+
 int
 dpdk_init(
 	const char *binary,
@@ -17,35 +51,35 @@ dpdk_init(
 	size_t port_count,
 	const char *const *port_names
 ) {
-	char buffer[1024];
-	int bufferPosition = 0;
+	struct eal_args args = {0};
 
-	unsigned int eal_argc = 0;
-	char *eal_argv[128];
-#define insert_eal_arg(args...)                                                \
-	do {                                                                   \
-		eal_argv[eal_argc++] = &buffer[bufferPosition];                \
-		bufferPosition += snprintf(                                    \
-			&buffer[bufferPosition],                               \
-			sizeof(buffer) - bufferPosition,                       \
-			##args                                                 \
-		);                                                             \
-		bufferPosition++;                                              \
-	} while (0)
-
-	insert_eal_arg("%s", binary);
-
-	for (size_t port_idx = 0; port_idx < port_count; ++port_idx) {
-		insert_eal_arg("-a");
-		insert_eal_arg("%s", port_names[port_idx]);
+	if (eal_args_add(&args, "%s", binary)) {
+		goto error;
 	}
 
-	insert_eal_arg("-m");
-	insert_eal_arg("%lu", dpdk_memory);
+	for (size_t port_idx = 0; port_idx < port_count; ++port_idx) {
+		if (eal_args_add(&args, "-a")) {
+			goto error;
+		}
+		if (eal_args_add(&args, "%s", port_names[port_idx])) {
+			goto error;
+		}
+	}
 
-	eal_argv[eal_argc] = NULL;
+	if (eal_args_add(&args, "-m")) {
+		goto error;
+	}
+	if (eal_args_add(&args, "%lu", dpdk_memory)) {
+		goto error;
+	}
 
-	return rte_eal_init(eal_argc, eal_argv);
+	args.argv[args.argc] = NULL;
+
+	return rte_eal_init(args.argc, args.argv);
+
+error:
+	LOG(ERROR, "EAL arguments buffer is full");
+	return -1;
 }
 
 int
