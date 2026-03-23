@@ -22,13 +22,6 @@
  * to a contiguous subset of this array via vs->reals (relative pointer).
  */
 struct real {
-	// Source network used for encapsulation/routing to this backend
-	// The address is masked by the mask during initialization
-	const struct net src;
-
-	// Full identifier of the real server
-	const struct real_identifier identifier;
-
 	// Stable index in the handler's real registry
 	// Preserved across config updates for the same real
 	const size_t stable_idx;
@@ -37,12 +30,19 @@ struct real {
 	// Registered as "rl_<stable_idx>" in the counter registry
 	const uint64_t counter_id;
 
+	// Scheduler weight [0..MAX_REAL_WEIGHT]
+	uint16_t weight;
+
+	// Source network used for encapsulation/routing to this backend
+	// The address is masked by the mask during initialization
+	const struct net src;
+
+	// Full identifier of the real server
+	const struct real_identifier identifier;
+
 	// Mutable state - preserved from previous config or set from config
 	// Whether traffic is allowed to this real. False by default
 	bool enabled;
-
-	// Scheduler weight [0..MAX_REAL_WEIGHT]
-	uint16_t weight;
 };
 
 ////////////////////////////////////////////////////////////////////////////////
