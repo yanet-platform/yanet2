@@ -131,6 +131,12 @@ jobs:
       - name: Show meson test log
         run: grep -v 'Inherited environment' build/meson-logs/testlog.txt
 
+      - name: Run TSAN tests
+        run: make test-tsan
+      - name: Show TSAN test log
+        if: always()
+        run: grep -v 'Inherited environment' build-tsan/meson-logs/testlog.txt || true
+
       - name: Clean debug build artifacts to free space
         run: |
           echo "=== Disk space before cleanup ==="
