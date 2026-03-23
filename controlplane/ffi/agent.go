@@ -25,31 +25,55 @@ import (
 	"unsafe"
 )
 
+// ModuleConfig is a Go wrapper around a C cp_module pointer, representing a
+// module's shared memory configuration.
+//
+// Each module package creates its own typed wrapper embedding ModuleConfig,
+// using unsafe.Pointer as a bridge between CGo contexts of different packages.
 type ModuleConfig struct {
 	ptr *C.struct_cp_module
 }
 
+// NewModuleConfig wraps a raw C pointer into a ModuleConfig.
+//
+// The pointer must originate from a module-specific C constructor that returns
+// a valid cp_module pointer.
+// The caller is responsible for ensuring the pointer's validity and lifetime.
 func NewModuleConfig(ptr unsafe.Pointer) ModuleConfig {
 	return ModuleConfig{
 		ptr: (*C.struct_cp_module)(ptr),
 	}
 }
 
+// AsRawPtr returns the underlying C pointer as unsafe.Pointer for passing
+// across CGo package boundaries.
+func (m ModuleConfig) AsRawPtr() unsafe.Pointer {
+	return unsafe.Pointer(m.ptr)
+}
+
+// ShmDeviceConfig is a Go wrapper around a C cp_device pointer, representing
+// a device's shared memory configuration.
+//
+// Device packages (plain, vlan) create their own typed wrappers embedding
+// ShmDeviceConfig.
 type ShmDeviceConfig struct {
 	ptr *C.struct_cp_device
 }
 
+// NewShmDeviceConfig wraps a raw C pointer into a ShmDeviceConfig.
+//
+// The pointer must originate from a device-specific C constructor (e.g.
+// cp_device_plain_create).
+// The caller is responsible for ensuring the pointer's validity and lifetime.
 func NewShmDeviceConfig(ptr unsafe.Pointer) ShmDeviceConfig {
 	return ShmDeviceConfig{
 		ptr: (*C.struct_cp_device)(ptr),
 	}
 }
 
-func (m *ShmDeviceConfig) AsRawPtr() unsafe.Pointer {
-	return unsafe.Pointer(m.ptr)
-}
-
-func (m *ModuleConfig) AsRawPtr() unsafe.Pointer {
+// AsRawPtr returns the underlying C pointer as unsafe.Pointer for passing
+// across CGo package boundaries.
+func (m ShmDeviceConfig) AsRawPtr() unsafe.Pointer {
 	return unsafe.Pointer(m.ptr)
 }
 
