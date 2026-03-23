@@ -8,7 +8,8 @@ includes = include_directories('.', '../')
 sources = files(
   'session_table.c',
   'state.c',
-  'interval_counter.c'
+  'interval_counter.c',
+  'active_sessions.c',
 )
 
 lib_balancer_state = static_library(
