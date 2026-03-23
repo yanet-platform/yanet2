@@ -1,43 +1,5 @@
 #pragma once
 
-/**
- * @file interval_counter.h
- *
- * Real-time interval counter using a circular difference array.
- *
- * Tracks the number of concurrently active intervals (e.g. sessions) over
- * a sliding time window. Each interval is defined by a start timestamp and
- * a duration in seconds.
- *
- * The data structure uses a difference array technique on a power-of-two
- * sized ring buffer. When an interval [T, T+len) is created, we record
- * +1 at position T and -1 at position T+len. The prefix sum of the
- * difference array at any point in time gives the number of currently
- * active intervals.
- *
- * The caller is responsible for maintaining a running sum (int64_t) of
- * active intervals. Each call to make/prolong returns a delta that must
- * be added to this running sum.
- *
- * Preconditions (caller must guarantee):
- *   - All interval lengths (len, new_right - now) are strictly less than
- *     time_ring_size.
- *   - In prolong(), last_right >= now (the old endpoint has not passed).
- *   - time_ring_size is a power of two.
- *   - time_ring_size_mask == time_ring_size - 1.
- *
- * Typical usage:
- *
- *   int64_t active_sessions = 0;
- *
- *   // New session arrives with estimated duration `len` seconds
- *   active_sessions += rt_interval_counter_make(&ctr, &cfg, now, len);
- *
- *   // Existing session is extended from old endpoint to new endpoint
- *   active_sessions += rt_interval_counter_prolong(&ctr, &cfg, now,
- *                                                  old_end, new_end);
- */
-
 #include "common/likely.h"
 #include <assert.h>
 #include <stdint.h>
