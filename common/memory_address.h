@@ -51,7 +51,8 @@
 		SET_OFFSET_OF(DST, ADDR_OF(SRC));                              \
 	} while (0)
 
-/*
+#include <stdatomic.h>
+
 #define ATOMIC_ADDR_OF(OFFSET)                                                 \
 	__extension__({                                                        \
 		typeof(*OFFSET) _offset = atomic_load_explicit(                \
@@ -69,4 +70,3 @@
 			       (uintptr_t)((ADDR) ? (PTR) : NULL)),            \
 		memory_order_release                                           \
 	)
-*/

@@ -1,4 +1,4 @@
-.PHONY: all dataplane test test-functional proto-lint cli cli-install fuzz clean $(foreach module,$(MODULES),cli/$(module) cli-install/$(module))
+.PHONY: all dataplane test test-tsan test-functional proto-lint cli cli-install fuzz clean $(foreach module,$(MODULES),cli/$(module) cli-install/$(module))
 
 # Define the list of modules to avoid repetition
 MODULES := decap dscp route forward nat64 pdump acl fwstate
@@ -64,6 +64,14 @@ test-asan: go-cache-clean
 	meson compile -C build
 	CGO_CFLAGS="-fsanitize=address,undefined" CGO_LDFLAGS="-fsanitize=address,undefined" go test -count=1 $$(go list ./... | grep -v 'tests/functional')
 	meson test -C build
+
+test-tsan:
+	@if [ ! -d "build-tsan" ]; then \
+		meson setup build-tsan -Dbuildtype=debug -Doptimization=0 -Db_sanitize=thread; \
+	else \
+		meson configure -Dbuildtype=debug -Doptimization=0 -Db_sanitize=thread build-tsan; \
+	fi
+	meson test -C build-tsan --suite common
 
 test-functional:
 	@echo "Running functional tests..."
