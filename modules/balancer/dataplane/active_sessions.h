@@ -6,23 +6,33 @@
 #define ACTIVE_SESSIONS_TRACKER_MAX_TIMEOUT 100
 #define ACTIVE_SESSIONS_TRACKER_PRECISION 16
 
+/*
+ * Per-worker active-session tracker.
+ *
+ * Session lifetimes are rounded to `ACTIVE_SESSIONS_TRACKER_PRECISION`
+ * ticks and accumulated through [`struct
+ * rt_interval_counter`](modules/balancer/dataplane/interval_counter.h:19).
+ */
 struct active_sessions_tracker_shard {
 	struct rt_interval_counter counter;
 	uint32_t count;
 	uint32_t last_packet_timestamp;
 } __attribute__((aligned(64)));
 
+/* Convert a packet timestamp to the current tracker tick. */
 static inline uint32_t
 active_sessions_tracker_now(uint32_t timestamp) {
 	return timestamp / ACTIVE_SESSIONS_TRACKER_PRECISION;
 }
 
+/* Round a packet timestamp up to the tick where the session expires. */
 static inline uint32_t
 active_sessions_tracker_until(uint32_t timestamp) {
 	return (timestamp + ACTIVE_SESSIONS_TRACKER_PRECISION - 1) /
 	       ACTIVE_SESSIONS_TRACKER_PRECISION;
 }
 
+/* Account for a newly created session on the selected worker shard. */
 static inline void
 active_sessions_tracker_new_session(
 	struct active_sessions_tracker_shard *tracker_shards,
@@ -40,6 +50,7 @@ active_sessions_tracker_new_session(
 	shard->last_packet_timestamp = now;
 }
 
+/* Extend an existing session and move its scheduled expiration. */
 static inline void
 active_sessions_tracker_prolong_session(
 	struct active_sessions_tracker_shard *tracker_shards,

@@ -9,11 +9,19 @@
 #define RT_INTERVAL_COUNTER_RING_SIZE (1u << RT_INTERVAL_COUNTER_RING_SIZE_EXP)
 #define RT_INTERVAL_COUNTER_RING_MASK (RT_INTERVAL_COUNTER_RING_SIZE - 1u)
 
+/*
+ * Ring-based interval counter that stores per-timestamp deltas.
+ *
+ * The caller keeps a running total and applies the returned change.
+ * `make` starts an interval at `now` and schedules its end at `until`.
+ * `prolong` moves a previously scheduled end further in time.
+ */
 struct rt_interval_counter {
 	int32_t diff[RT_INTERVAL_COUNTER_RING_SIZE];
 	uint32_t last_timestamp;
 };
 
+/* Reset the whole ring when all slots are older than the current time. */
 static inline int64_t
 rt_interval_counter_try_reset(
 	struct rt_interval_counter *counter, uint32_t now
@@ -38,6 +46,7 @@ rt_interval_counter_try_reset(
 	return sum;
 }
 
+/* Expire slots up to `now` and return the net change for the running total. */
 static inline int64_t
 rt_interval_counter_advance(struct rt_interval_counter *counter, uint32_t now) {
 	int64_t change = 0;
@@ -62,6 +71,8 @@ rt_interval_counter_advance(struct rt_interval_counter *counter, uint32_t now) {
 	return change;
 }
 
+/* Start a new interval `[now, until)` and return the change visible at `now`.
+ */
 static inline int64_t
 rt_interval_counter_make(
 	struct rt_interval_counter *counter, uint32_t now, uint32_t until
@@ -74,6 +85,7 @@ rt_interval_counter_make(
 	return change + rt_interval_counter_advance(counter, now);
 }
 
+/* Move an existing interval end from `prev_until` to `new_until`. */
 static inline int64_t
 rt_interval_counter_prolong(
 	struct rt_interval_counter *counter,
