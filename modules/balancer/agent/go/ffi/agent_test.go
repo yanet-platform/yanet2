@@ -134,7 +134,7 @@ func TestAgent(t *testing.T) {
 					TCPSynAck: 15,
 					TCPSyn:    25,
 					TCPFin:    20,
-					TCP:       120,
+					TCP:       69,
 					UDP:       15,
 					Default:   25,
 				},

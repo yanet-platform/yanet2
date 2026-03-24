@@ -151,7 +151,7 @@ func TestBalancerAgentInspect(t *testing.T) {
 				TcpSynAck: 15,
 				TcpSyn:    25,
 				TcpFin:    20,
-				Tcp:       120,
+				Tcp:       69,
 				Udp:       15,
 				Default:   25,
 			},

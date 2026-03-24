@@ -149,7 +149,7 @@ func TestBalancerAgent(t *testing.T) {
 				TcpSynAck: 15,
 				TcpSyn:    25,
 				TcpFin:    20,
-				Tcp:       120,
+				Tcp:       69,
 				Udp:       15,
 				Default:   25,
 			},
@@ -282,12 +282,12 @@ func TestBalancerAgent(t *testing.T) {
 	t.Run("UpdateManager_First", func(t *testing.T) {
 		// Update first manager configuration
 		newSessionTimeouts := balancerpb.SessionsTimeouts{
-			TcpSynAck: 30,  // Changed from 10
-			TcpSyn:    40,  // Changed from 20
-			TcpFin:    35,  // Changed from 15
-			Tcp:       200, // Changed from 100
-			Udp:       21,  // Changed from 11
-			Default:   39,  // Changed from 19
+			TcpSynAck: 30, // Changed from 10
+			TcpSyn:    40, // Changed from 20
+			TcpFin:    35, // Changed from 15
+			Tcp:       69, // Changed from 100
+			Udp:       21, // Changed from 11
+			Default:   39, // Changed from 19
 		}
 
 		update := &balancerpb.BalancerConfig{
@@ -382,7 +382,7 @@ func TestBalancerAgent(t *testing.T) {
 			uint32(30),
 			config2.PacketHandler.SessionsTimeouts.TcpSynAck,
 		)
-		assert.Equal(t, uint32(200), config2.PacketHandler.SessionsTimeouts.Tcp)
+		assert.Equal(t, uint32(69), config2.PacketHandler.SessionsTimeouts.Tcp)
 	})
 
 	t.Run("UpdateManager_Second", func(t *testing.T) {

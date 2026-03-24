@@ -959,7 +959,7 @@ func TestManager(t *testing.T) {
 						TCPSynAck: 15,
 						TCPSyn:    25,
 						TCPFin:    20,
-						TCP:       120,
+						TCP:       100,
 						UDP:       15,
 						Default:   25,
 					},
