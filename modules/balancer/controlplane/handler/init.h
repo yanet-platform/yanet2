@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stddef.h>
+#include <stdint.h>
 
 struct packet_handler;
 struct counter_registry;
@@ -69,17 +70,6 @@ setup_reals_index(
 	size_t reals_count
 );
 
-/**
- * Initialize reals for the packet handler.
- *
- * @param handler Packet handler instance
- * @param prev_handler Previous packet handler (for state preservation)
- * @param mctx Memory context
- * @param config Packet handler configuration
- * @param registry Counter registry
- * @param initial_vs_idx Array of initial VS indices for error reporting
- * @return 0 on success, -1 on error
- */
 int
 init_reals(
 	struct packet_handler *handler,
@@ -87,5 +77,6 @@ init_reals(
 	struct memory_context *mctx,
 	struct packet_handler_config *config,
 	struct counter_registry *registry,
-	size_t *initial_vs_idx
+	size_t *initial_vs_idx,
+	size_t workers
 );

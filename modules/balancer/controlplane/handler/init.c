@@ -160,7 +160,8 @@ init_reals(
 	struct memory_context *mctx,
 	struct packet_handler_config *config,
 	struct counter_registry *registry,
-	size_t *initial_vs_idx
+	size_t *initial_vs_idx,
+	size_t workers
 ) {
 	// Count total reals
 	size_t real_count = 0;
@@ -231,7 +232,9 @@ init_reals(
 				    prev_handler,
 				    &vs_config->identifier,
 				    real_config,
-				    registry
+				    registry,
+				    workers,
+				    mctx
 			    ) != 0) {
 				PUSH_ERROR(
 					"service at index %zu: real at index "

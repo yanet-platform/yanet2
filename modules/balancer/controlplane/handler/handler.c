@@ -1,5 +1,6 @@
 #include "handler.h"
 #include "api/balancer.h"
+#include "api/session.h"
 #include "api/vs.h"
 #include "common/memory.h"
 #include "common/memory_address.h"
@@ -7,6 +8,9 @@
 #include "lib/controlplane/agent/agent.h"
 #include "lib/controlplane/config/cp_module.h"
 #include "lib/controlplane/diag/diag.h"
+#include "lib/dataplane/config/zone.h"
+
+#include "modules/balancer/dataplane/active_sessions.h"
 
 #include <assert.h>
 #include <netinet/in.h>
@@ -217,7 +221,8 @@ init_vs_and_reals(
 	struct packet_handler_config *config,
 	struct counter_registry *registry,
 	struct packet_handler *prev_handler,
-	struct balancer_update_info *update_info
+	struct balancer_update_info *update_info,
+	size_t workers
 ) {
 	size_t *initial_vs_idx = NULL;
 	size_t ipv4_count = 0;
@@ -262,7 +267,8 @@ init_vs_and_reals(
 		    mctx,
 		    config,
 		    registry,
-		    initial_vs_idx
+		    initial_vs_idx,
+		    workers
 	    ) != 0) {
 		PUSH_ERROR("init reals");
 		goto free_vs_registry_on_error;
@@ -350,6 +356,17 @@ free_initial_vs_idx_on_error:
 	return -1;
 }
 
+#define MAX_TIMEOUT ACTIVE_SESSIONS_TRACKER_MAX_TIMEOUT
+
+static bool
+validate_sessions_timeouts(struct sessions_timeouts *timeouts) {
+	return (timeouts->tcp <= MAX_TIMEOUT && timeouts->udp <= MAX_TIMEOUT &&
+		timeouts->def <= MAX_TIMEOUT &&
+		timeouts->tcp_fin <= MAX_TIMEOUT &&
+		timeouts->tcp_syn <= MAX_TIMEOUT &&
+		timeouts->tcp_syn_ack <= MAX_TIMEOUT);
+}
+
 struct packet_handler *
 packet_handler_setup(
 	struct agent *agent,
@@ -359,6 +376,14 @@ packet_handler_setup(
 	struct packet_handler *prev_handler,
 	struct balancer_update_info *update_info
 ) {
+	if (!validate_sessions_timeouts(&config->sessions_timeouts)) {
+		NEW_ERROR(
+			"sessions timeouts are too large (max is %d)",
+			MAX_TIMEOUT
+		);
+		return NULL;
+	}
+
 	if (update_info != NULL && config->vs_count > 0) {
 		update_info->vs_acl_reused =
 			calloc(config->vs_count, sizeof(struct vs_identifier));
@@ -401,13 +426,15 @@ packet_handler_setup(
 		goto free_handler;
 	}
 
+	size_t workers = ADDR_OF(&agent->dp_config)->worker_count;
 	if (init_vs_and_reals(
 		    handler,
 		    mctx,
 		    config,
 		    counter_registry,
 		    prev_handler,
-		    update_info
+		    update_info,
+		    workers
 	    ) != 0) {
 		PUSH_ERROR("virtual services");
 		goto free_decap;

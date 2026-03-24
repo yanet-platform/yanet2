@@ -3,8 +3,8 @@
 #include "interval_counter.h"
 #include <stdalign.h>
 
-#define ACTIVE_SESSIONS_TRACKER_MAX_TIMEOUT 56
-#define ACTIVE_SESSIONS_TRACKER_PRECISION 8
+#define ACTIVE_SESSIONS_TRACKER_MAX_TIMEOUT 100
+#define ACTIVE_SESSIONS_TRACKER_PRECISION 16
 
 struct active_sessions_tracker_shard {
 	struct rt_interval_counter counter;

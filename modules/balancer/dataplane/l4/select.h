@@ -1,5 +1,6 @@
 #pragma once
 
+#include "active_sessions.h"
 #include "common/memory_address.h"
 
 #include "handler/map.h"
@@ -11,6 +12,7 @@
 #include <filter/filter.h>
 #include <netinet/in.h>
 #include <stdint.h>
+#include <unistd.h>
 
 #include "../flow/common.h"
 #include "../flow/context.h"
@@ -142,6 +144,18 @@ select_real(
 			// set real in packet context
 			packet_ctx_set_real(ctx, real);
 
+			// prolong session in the active sessions tracker
+			struct active_sessions_tracker_shard *tracker_shards =
+				ADDR_OF(&real->tracker_shards);
+			active_sessions_tracker_prolong_session(
+				tracker_shards,
+				worker_idx,
+				session_state->last_packet_timestamp,
+				session_state->timeout,
+				now,
+				ctx->session_timeout
+			);
+
 			// update session and unlock it
 			session_state->timeout = ctx->session_timeout;
 			session_state->last_packet_timestamp = now;
@@ -191,6 +205,13 @@ select_real(
 	session_state->last_packet_timestamp = now;
 	session_state->real_id = real->stable_idx;
 	session_state->timeout = ctx->session_timeout;
+
+	// register new session in the active sessions tracker
+	struct active_sessions_tracker_shard *tracker_shards =
+		ADDR_OF(&real->tracker_shards);
+	active_sessions_tracker_new_session(
+		tracker_shards, worker_idx, now, ctx->session_timeout
+	);
 
 	session_unlock(session_lock);
 

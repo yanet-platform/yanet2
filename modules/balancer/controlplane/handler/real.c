@@ -4,16 +4,48 @@
 #include "api/real.h"
 
 #include "api/vs.h"
+#include "common/memory.h"
 #include "common/memory_address.h"
 #include "common/network.h"
 #include "handler.h"
 #include "lib/controlplane/diag/diag.h"
 #include "lib/counters/counters.h"
+#include "modules/balancer/dataplane/active_sessions.h"
 #include "registry.h"
 
 #include <assert.h>
 #include <netinet/in.h>
 #include <string.h>
+
+#include "modules/balancer/controlplane/state/active_sessions.h"
+
+static int
+real_init_active_sessions_tracker(
+	struct real *real,
+	struct real *prev_real,
+	size_t workers,
+	struct memory_context *mctx
+) {
+	real->tracker_reused = false;
+
+	if (prev_real != NULL) {
+		EQUATE_OFFSET(
+			&real->tracker_shards, &prev_real->tracker_shards
+		);
+		prev_real->tracker_reused = true;
+		return 0;
+	}
+
+	struct active_sessions_tracker_shard *tracker_shards =
+		active_sessions_tracker_create(mctx, workers, 0);
+	if (tracker_shards == NULL) {
+		NEW_ERROR("no memory");
+		return -1;
+	}
+	SET_OFFSET_OF(&real->tracker_shards, tracker_shards);
+
+	return 0;
+}
 
 int
 real_init(
@@ -22,7 +54,9 @@ real_init(
 	struct packet_handler *prev_handler,
 	struct vs_identifier *vs,
 	struct named_real_config *named_config,
-	struct counter_registry *registry
+	struct counter_registry *registry,
+	size_t workers,
+	struct memory_context *mctx
 ) {
 	// Build full real identifier
 	struct real_identifier identifier;
@@ -55,6 +89,7 @@ real_init(
 	bool enabled = false; // default
 	uint16_t weight = named_config->config.weight;
 
+	struct real *prev_real = NULL;
 	if (prev_handler) {
 		// Check if this real existed in previous handler
 		size_t prev_config_idx;
@@ -65,9 +100,13 @@ real_init(
 		    ) == 0) {
 			// Real existed - preserve its mutable state
 			struct real *prev_reals = ADDR_OF(&prev_handler->reals);
-			enabled = prev_reals[prev_config_idx].enabled;
-			weight = prev_reals[prev_config_idx].weight;
+			prev_real = &prev_reals[prev_config_idx];
 		}
+	}
+
+	if (prev_real) {
+		enabled = prev_real->enabled;
+		weight = prev_real->weight;
 	}
 
 	// Mask the source address based on IP protocol version
@@ -97,6 +136,13 @@ real_init(
 	};
 	memcpy(real, &r, sizeof(struct real));
 
+	// Initialize active sessions tracker
+	if (real_init_active_sessions_tracker(real, prev_real, workers, mctx) !=
+	    0) {
+		return -1;
+	}
+	assert(real->tracker_shards != NULL);
+
 	return 0;
 }
 
@@ -106,5 +152,14 @@ counter_to_real_registry_idx(struct counter_handle *counter) {
 		return atoi(counter->name + 3);
 	} else {
 		return -1;
+	}
+}
+
+void
+real_free(struct real *real, size_t workers, struct memory_context *mctx) {
+	if (!real->tracker_reused) {
+		active_sessions_tracker_destroy(
+			real->tracker_shards, workers, mctx
+		);
 	}
 }
