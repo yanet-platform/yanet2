@@ -11,8 +11,8 @@
  * prolong_session() adds prolong()'s return value to count.
  */
 
-#include "../../../../common/memory_block.h"
 #include "../../../../common/memory.h"
+#include "../../../../common/memory_block.h"
 #include "../../../../common/test_assert.h"
 #include "../../controlplane/state/active_sessions.h"
 #include "../../dataplane/active_sessions.h"
@@ -97,9 +97,7 @@ test_new_session_increments_count(void) {
 		"count should be 1 after one new_session"
 	);
 	TEST_ASSERT_EQUAL(
-		(int64_t)tracker[1].count,
-		0,
-		"shard[1].count should remain 0"
+		(int64_t)tracker[1].count, 0, "shard[1].count should remain 0"
 	);
 
 	/* Second session on shard 0 at the same timestamp. */
@@ -337,9 +335,7 @@ test_last_packet_timestamp_is_updated(void) {
 	 *   5 - 3 = 2 < 8 ✓
 	 *   last_packet_timestamp = 48
 	 */
-	active_sessions_tracker_prolong_session(
-		tracker, 0, 32, 32, 48, 32
-	);
+	active_sessions_tracker_prolong_session(tracker, 0, 32, 32, 48, 32);
 	TEST_ASSERT_EQUAL(
 		(int64_t)tracker[0].last_packet_timestamp,
 		48,
@@ -382,17 +378,13 @@ test_destroy_frees_memory(void) {
 		"exactly one allocation should have been made"
 	);
 	TEST_ASSERT_EQUAL(
-		(int64_t)mctx.bfree_count,
-		0,
-		"no frees before destroy"
+		(int64_t)mctx.bfree_count, 0, "no frees before destroy"
 	);
 
 	active_sessions_tracker_destroy(tracker, shards, &mctx);
 
 	TEST_ASSERT_EQUAL(
-		(int64_t)mctx.bfree_count,
-		1,
-		"exactly one free after destroy"
+		(int64_t)mctx.bfree_count, 1, "exactly one free after destroy"
 	);
 	TEST_ASSERT_EQUAL(
 		(int64_t)mctx.balloc_count,
@@ -445,8 +437,7 @@ main(void) {
 
 	LOG(INFO, "test_destroy_frees_memory...");
 	TEST_ASSERT_SUCCESS(
-		test_destroy_frees_memory(),
-		"test_destroy_frees_memory failed"
+		test_destroy_frees_memory(), "test_destroy_frees_memory failed"
 	);
 
 	return TEST_SUCCESS;
