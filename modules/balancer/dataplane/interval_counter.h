@@ -77,6 +77,8 @@ static inline int64_t
 rt_interval_counter_make(
 	struct rt_interval_counter *counter, uint32_t now, uint32_t until
 ) {
+	assert(until - now < RT_INTERVAL_COUNTER_RING_SIZE);
+
 	int64_t change = rt_interval_counter_try_reset(counter, now);
 
 	counter->diff[now & RT_INTERVAL_COUNTER_RING_MASK] += 1;
