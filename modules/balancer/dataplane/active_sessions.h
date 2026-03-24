@@ -3,6 +3,15 @@
 #include "interval_counter.h"
 #include <stdalign.h>
 
+/*
+ * The underlying rt_interval_counter ring has size 8, so the tick
+ * distance (until_tick - now_tick) must be < 8.  With precision=16
+ * this means the session timeout must satisfy:
+ *   (ts + timeout + 15)/16 - ts/16 < 8
+ * For ts=0: (timeout + 15)/16 < 8  =>  timeout < 113.
+ * Safe timeouts: 16, 32, 48, 64, 80, 96, 112.
+*/
+
 #define ACTIVE_SESSIONS_TRACKER_MAX_TIMEOUT 100
 #define ACTIVE_SESSIONS_TRACKER_PRECISION 16
 
