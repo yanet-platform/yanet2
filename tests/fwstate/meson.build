@@ -48,11 +48,17 @@ layermap_test = executable(
   link_args: yanet_link_args,
   dependencies: dependencies,
 )
-test('layermap_basic',
-  layermap_test,
-  timeout: 15,
-  suite: ['fwstate'],
-)
+# Skip layermap_test because it is written with the assumption that adding new layers
+# will go through the lock of installing new configs in dataplane. This assumption
+# doesn't hold in the test environment, causing TSAN to detect data races.
+# TODO: Rewrite the test to emulate the config installation lock in dataplane.
+if not get_option('b_sanitize').contains('thread')
+  test('layermap_basic',
+    layermap_test,
+    timeout: 15,
+    suite: ['fwstate'],
+  )
+endif
 
 fwstate_cursor_test = executable(
   'fwstate_cursor_test',
