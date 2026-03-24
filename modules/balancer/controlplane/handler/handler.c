@@ -536,7 +536,7 @@ packet_handler_free(struct packet_handler *handler) {
 
 	// Free each VS's resources
 	struct vs *vss = ADDR_OF(&handler->vs);
-	for (size_t i = 0; i < handler->vs_count; i++) {
+	for (size_t i = 0; i < handler->vs_count; ++i) {
 		vs_free(&vss[i], mctx);
 	}
 
@@ -550,7 +550,11 @@ packet_handler_free(struct packet_handler *handler) {
 	vs_registry_free(&handler->vs_registry);
 
 	// Free reals array
+	size_t workers = ADDR_OF(&handler->state)->workers;
 	struct real *reals = ADDR_OF(&handler->reals);
+	for (size_t i = 0; i < handler->reals_count; ++i) {
+		real_free(&reals[i], workers, mctx);
+	}
 	memory_bfree(mctx, reals, sizeof(struct real) * handler->reals_count);
 
 	// Free reals index map
