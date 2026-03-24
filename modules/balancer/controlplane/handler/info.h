@@ -43,3 +43,8 @@ void
 packet_handler_balancer_info(
 	struct packet_handler *handler, struct balancer_info *info, uint32_t now
 );
+
+void
+packet_handler_active_sessions(
+	struct packet_handler *handler, struct balancer_info *info
+);

@@ -543,3 +543,11 @@ balancer_manager_inspect_free(struct balancer_inspect *inspect) {
 			NULL;
 	}
 }
+
+void
+balancer_manager_active_sessions(
+	struct balancer_manager *manager, struct balancer_info *info
+) {
+	struct balancer_handle *balancer = ADDR_OF(&manager->balancer);
+	balancer_active_sessions(balancer, info);
+}

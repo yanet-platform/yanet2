@@ -159,7 +159,7 @@ void
 real_free(struct real *real, size_t workers, struct memory_context *mctx) {
 	if (!real->tracker_reused) {
 		active_sessions_tracker_destroy(
-			real->tracker_shards, workers, mctx
+			ADDR_OF(&real->tracker_shards), workers, mctx
 		);
 	}
 }

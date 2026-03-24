@@ -1,9 +1,11 @@
 #include "info.h"
 
 #include "api/balancer.h"
+#include "api/real.h"
 #include "api/vs.h"
 #include "common/memory_address.h"
 #include "handler/handler.h"
+#include "modules/balancer/dataplane/active_sessions.h"
 #include "real.h"
 #include "state/session.h"
 #include "state/state.h"
@@ -230,4 +232,69 @@ packet_handler_balancer_info(
 		&state->session_table, 0, fill_balancer_info_callback, &ctx
 	);
 	assert(res == 0);
+}
+
+void
+packet_handler_active_sessions(
+	struct packet_handler *handler, struct balancer_info *info
+) {
+	struct balancer_state *state = ADDR_OF(&handler->state);
+	const size_t workers = state->workers;
+
+	struct named_real_info *reals_info =
+		malloc(sizeof(struct named_real_info) * handler->reals_count);
+	init_real_infos(reals_info, handler);
+
+	struct named_vs_info *vs_info =
+		malloc(sizeof(struct named_vs_info) * handler->vs_count);
+	init_vs_infos(vs_info, reals_info, handler);
+
+	// Initialize info structure
+	info->vs_count = handler->vs_count;
+	info->vs = vs_info;
+	info->active_sessions = 0;
+	info->last_packet_timestamp = 0;
+
+	// fill reals
+	struct real *real = ADDR_OF(&handler->reals);
+	for (size_t real_idx = 0; real_idx < handler->reals_count; ++real_idx) {
+		struct active_sessions_tracker_shard *tracker_shards =
+			ADDR_OF(&real[real_idx].tracker_shards);
+		for (size_t worker_idx = 0; worker_idx < workers;
+		     ++worker_idx) {
+			struct active_sessions_tracker_shard *shard =
+				&tracker_shards[worker_idx];
+			struct named_real_info *cur_real_info =
+				&reals_info[real_idx];
+			cur_real_info->active_sessions += shard->count;
+			if (cur_real_info->last_packet_timestamp <
+			    shard->last_packet_timestamp) {
+				cur_real_info->last_packet_timestamp =
+					shard->last_packet_timestamp;
+			}
+		}
+	}
+
+	// fill virtual services
+	for (size_t vs_idx = 0; vs_idx < handler->vs_count; ++vs_idx) {
+		struct named_vs_info *cur_vs_info = &vs_info[vs_idx];
+		for (size_t real_idx = 0; real_idx < cur_vs_info->reals_count;
+		     ++real_idx) {
+			struct named_real_info *cur_real_info =
+				&cur_vs_info->reals[real_idx];
+			cur_vs_info->active_sessions +=
+				cur_real_info->active_sessions;
+			if (cur_vs_info->last_packet_timestamp <
+			    cur_real_info->last_packet_timestamp) {
+				cur_vs_info->last_packet_timestamp =
+					cur_real_info->last_packet_timestamp;
+			}
+		}
+		info->active_sessions += cur_vs_info->active_sessions;
+		if (info->last_packet_timestamp <
+		    cur_vs_info->last_packet_timestamp) {
+			info->last_packet_timestamp =
+				cur_vs_info->last_packet_timestamp;
+		}
+	}
 }

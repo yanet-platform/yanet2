@@ -184,6 +184,15 @@ balancer_info(
 	return 0;
 }
 
+void
+balancer_active_sessions(
+	struct balancer_handle *handle, struct balancer_info *info
+) {
+	struct balancer *balancer = balancer_handle_deref(handle);
+	struct packet_handler *handler = ADDR_OF(&balancer->handler);
+	packet_handler_active_sessions(handler, info);
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 
 int

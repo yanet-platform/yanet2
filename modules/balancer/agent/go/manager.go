@@ -257,6 +257,16 @@ func (b *BalancerManager) Info(
 	return ConvertBalancerInfoToProto(ffiInfo), nil
 }
 
+func (b *BalancerManager) ActiveSessions() *balancerpb.BalancerInfo {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	tracker := b.newHandlerTracker("active_sessions")
+	defer tracker.Fix()
+
+	return ConvertBalancerInfoToProto(b.handle.ActiveSessions())
+}
+
 func (b *BalancerManager) Stats(
 	ref *balancerpb.PacketHandlerRef,
 ) (*balancerpb.BalancerStats, error) {

@@ -175,6 +175,15 @@ func (m *BalancerManager) Info(now time.Time) (*BalancerInfo, error) {
 	return info, nil
 }
 
+// ActiveSessions queries active session counters from the manager without a full info refresh.
+func (m *BalancerManager) ActiveSessions() *BalancerInfo {
+	var cInfo C.struct_balancer_info
+
+	C.balancer_manager_active_sessions(m.handle, &cInfo)
+
+	return cToGoBalancerInfo(&cInfo)
+}
+
 // Sessions enumerates active sessions tracked by the manager's balancer
 func (m *BalancerManager) Sessions(now time.Time) *Sessions {
 	var cSessions C.struct_sessions

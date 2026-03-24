@@ -370,6 +370,11 @@ balancer_info(
 	uint32_t now
 );
 
+void
+balancer_active_sessions(
+	struct balancer_handle *balancer, struct balancer_info *info
+);
+
 /**
  * Free all allocations inside a balancer_info previously filled by
  * balancer_info().
@@ -513,3 +518,8 @@ balancer_inspect(
 
 void
 balancer_inspect_free(struct balancer_inspect *inspect);
+
+void
+balancer_active_sessions(
+	struct balancer_handle *handle, struct balancer_info *info
+);

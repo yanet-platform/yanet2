@@ -617,3 +617,8 @@ balancer_manager_inspect_free(struct balancer_inspect *inspect);
  */
 const char *
 balancer_manager_take_error(struct balancer_manager *manager);
+
+void
+balancer_manager_active_sessions(
+	struct balancer_manager *manager, struct balancer_info *info
+);
