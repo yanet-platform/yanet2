@@ -202,6 +202,16 @@ packet_handler_fill_stats(
 	struct packet_handler_ref *ref
 );
 
+struct balancer_snapshot;
+
+int
+packet_handler_fill_snapshot_stats(
+	struct packet_handler *handler,
+	struct balancer_snapshot *snapshot,
+	struct packet_handler_ref *ref,
+	bool vs_acl
+);
+
 /**
  * Get packet handler indices for a real server.
  *

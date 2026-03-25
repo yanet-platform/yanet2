@@ -7,6 +7,7 @@
 #include "modules/balancer/controlplane/api/balancer.h"
 #include "modules/balancer/controlplane/api/handler.h"
 #include "modules/balancer/controlplane/api/real.h"
+#include "modules/balancer/controlplane/api/vs.h"
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
@@ -550,4 +551,37 @@ balancer_manager_active_sessions(
 ) {
 	struct balancer_handle *balancer = ADDR_OF(&manager->balancer);
 	balancer_active_sessions(balancer, info);
+}
+
+int
+balancer_manager_snapshot(
+	struct balancer_manager *manager,
+	struct balancer_snapshot *snapshot,
+	struct balancer_snapshot_params *params
+) {
+	struct balancer_handle *balancer = ADDR_OF(&manager->balancer);
+	if (balancer_snapshot(balancer, snapshot, params) != 0) {
+		return -1;
+	}
+	struct balancer_config *balancer_config = &manager->config.balancer;
+
+	// set proper weights
+	for (size_t vs_idx = 0; vs_idx < snapshot->vs_count; ++vs_idx) {
+		struct named_vs_snapshot *vs_snapshot =
+			&snapshot->vs_snapshots[vs_idx];
+		struct named_vs_config *vs_config =
+			ADDR_OF(&balancer_config->handler.vs) + vs_idx;
+		for (size_t real_idx = 0;
+		     real_idx < vs_config->config.real_count;
+		     ++real_idx) {
+			struct named_real_snapshot *real_snapshot =
+				&vs_snapshot->snapshot.reals[real_idx];
+			struct named_real_config *real_config =
+				ADDR_OF(&vs_config->config.reals) + real_idx;
+			real_snapshot->snapshot.weight =
+				real_config->config.weight;
+		}
+	}
+
+	return 0;
 }

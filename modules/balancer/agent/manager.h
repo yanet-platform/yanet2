@@ -3,6 +3,7 @@
 
 #include "agent.h"
 #include "modules/balancer/controlplane/api/balancer.h"
+#include "modules/balancer/controlplane/api/snapshot.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -621,4 +622,11 @@ balancer_manager_take_error(struct balancer_manager *manager);
 void
 balancer_manager_active_sessions(
 	struct balancer_manager *manager, struct balancer_info *info
+);
+
+int
+balancer_manager_snapshot(
+	struct balancer_manager *manager,
+	struct balancer_snapshot *snapshot,
+	struct balancer_snapshot_params *params
 );

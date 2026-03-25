@@ -825,3 +825,20 @@ struct named_vs_info {
 	 */
 	struct named_real_info *reals;
 };
+
+struct named_real_snapshot;
+
+struct vs_snapshot {
+	struct vs_stats stats;
+	size_t active_sessions;
+	uint32_t last_packet_timestamp;
+	size_t reals_count;
+	struct named_real_snapshot *reals;
+	size_t allowed_sources_count;
+	struct allowed_sources_stats *allowed_sources;
+};
+
+struct named_vs_snapshot {
+	struct vs_identifier vs_identifier;
+	struct vs_snapshot snapshot;
+};

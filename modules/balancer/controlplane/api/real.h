@@ -262,3 +262,17 @@ struct real_ph_index {
 	 */
 	size_t real_idx;
 };
+
+struct real_snapshot {
+	struct real_stats stats;
+	size_t active_sessions;
+	uint32_t last_packet_timestamp;
+	uint16_t weight;
+	uint16_t effective_weight;
+	bool enabled;
+};
+
+struct named_real_snapshot {
+	struct relative_real_identifier real_identifier;
+	struct real_snapshot snapshot;
+};

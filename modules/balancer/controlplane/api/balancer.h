@@ -4,6 +4,7 @@
 #include "inspect.h"
 #include "real.h"
 #include "session.h"
+#include "snapshot.h"
 #include "state.h"
 #include "stats.h"
 #include "vs.h"
@@ -523,3 +524,13 @@ void
 balancer_active_sessions(
 	struct balancer_handle *handle, struct balancer_info *info
 );
+
+int
+balancer_snapshot(
+	struct balancer_handle *handle,
+	struct balancer_snapshot *snapshot,
+	struct balancer_snapshot_params *params
+);
+
+void
+balancer_snapshot_free(struct balancer_snapshot *snapshot);

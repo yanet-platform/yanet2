@@ -3,7 +3,9 @@
 #include "graph.h"
 #include "handler/info.h"
 #include "inspect.h"
+#include "real.h"
 #include "session.h"
+#include "snapshot.h"
 #include "state.h"
 
 #include "api/counter.h"
@@ -27,6 +29,7 @@
 #include "vs.h"
 
 #include <assert.h>
+#include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -413,4 +416,179 @@ balancer_inspect_free(struct balancer_inspect *inspect) {
 		inspect->packet_handler_inspect.vs_ipv6_inspect.vs_inspects =
 			NULL;
 	}
+}
+
+static void
+accumulate_real_active_sessions(
+	const struct real *real,
+	const struct balancer_state *state,
+	size_t *active_sessions,
+	uint32_t *last_packet_timestamp
+) {
+	struct active_sessions_tracker_shard *tracker_shards =
+		ADDR_OF(&real->tracker_shards);
+
+	for (size_t worker_idx = 0; worker_idx < state->workers; ++worker_idx) {
+		struct active_sessions_tracker_shard *shard =
+			&tracker_shards[worker_idx];
+		*active_sessions += shard->count;
+		if (*last_packet_timestamp < shard->last_packet_timestamp) {
+			*last_packet_timestamp = shard->last_packet_timestamp;
+		}
+	}
+}
+
+static void
+accumulate_vs_active_sessions(
+	const struct vs_snapshot *vs_snapshot,
+	size_t *active_sessions,
+	uint32_t *last_packet_timestamp
+) {
+	struct named_real_snapshot *reals = vs_snapshot->reals;
+	for (size_t real_idx = 0; real_idx < vs_snapshot->reals_count;
+	     ++real_idx) {
+		struct real_snapshot *real_snapshot = &reals[real_idx].snapshot;
+		if (*last_packet_timestamp <
+		    real_snapshot->last_packet_timestamp) {
+			*last_packet_timestamp =
+				real_snapshot->last_packet_timestamp;
+		}
+		*active_sessions += real_snapshot->active_sessions;
+	}
+}
+
+void
+balancer_snapshot_free(struct balancer_snapshot *snapshot) {
+	if (snapshot == NULL) {
+		return;
+	}
+
+	free(snapshot->vs_snapshots);
+	memset(snapshot, 0, sizeof(*snapshot));
+}
+
+static int
+balancer_snapshot_fill_stats(
+	struct balancer *balancer,
+	struct balancer_snapshot *snapshot,
+	struct balancer_snapshot_params *params
+) {
+	struct packet_handler *handler = ADDR_OF(&balancer->handler);
+	return packet_handler_fill_snapshot_stats(
+		handler,
+		snapshot,
+		params->packet_handler_ref,
+		params->include_vs_acl
+	);
+}
+
+static void
+balancer_snapshot_fill(
+	struct balancer *balancer,
+	struct balancer_snapshot *snapshot,
+	struct named_real_snapshot *real_snapshots,
+	struct balancer_snapshot_params *params
+) {
+	struct packet_handler *handler = ADDR_OF(&balancer->handler);
+	struct balancer_state *state = ADDR_OF(&handler->state);
+	struct vs *virtual_services = ADDR_OF(&handler->vs);
+	size_t reals_counter = 0;
+	for (size_t vs_idx = 0; vs_idx < handler->vs_count; ++vs_idx) {
+		struct vs *current_vs = &virtual_services[vs_idx];
+		struct named_vs_snapshot *vs_snapshot =
+			&snapshot->vs_snapshots[vs_idx];
+		memcpy(&vs_snapshot->vs_identifier,
+		       &current_vs->identifier,
+		       sizeof(vs_snapshot->vs_identifier));
+
+		// todo: make single buffer for all allowed sources and
+		// all tags
+		vs_snapshot->snapshot.allowed_sources_count = 0;
+		vs_snapshot->snapshot.allowed_sources =
+			malloc(sizeof(struct allowed_sources_stats) *
+			       current_vs->rules_count);
+
+		const struct real *current_vs_reals =
+			ADDR_OF(&current_vs->reals);
+
+		struct named_real_snapshot *current_vs_real_snapshots =
+			&real_snapshots[reals_counter];
+
+		vs_snapshot->snapshot.reals_count = current_vs->reals_count;
+		vs_snapshot->snapshot.reals = current_vs_real_snapshots;
+
+		for (size_t real_idx = 0; real_idx < current_vs->reals_count;
+		     ++real_idx) {
+			const struct real *current_real =
+				&current_vs_reals[real_idx];
+			struct named_real_snapshot *real_snapshot =
+				&current_vs_real_snapshots[real_idx];
+
+			memcpy(&real_snapshot->real_identifier,
+			       &current_real->identifier,
+			       sizeof(real_snapshot->real_identifier));
+
+			// setup graph (effective weight and enabled state)
+			real_snapshot->snapshot.effective_weight =
+				current_real->weight;
+			real_snapshot->snapshot.enabled = current_real->enabled;
+
+			// accumulate active sessions for this real
+			if (params->include_active_sessions) {
+				accumulate_real_active_sessions(
+					current_real,
+					state,
+					&real_snapshot->snapshot
+						 .active_sessions,
+					&real_snapshot->snapshot
+						 .last_packet_timestamp
+				);
+			}
+		}
+
+		// accumulate active sessions for this virtual service
+		if (params->include_active_sessions) {
+			accumulate_vs_active_sessions(
+				&vs_snapshot->snapshot,
+				&vs_snapshot->snapshot.active_sessions,
+				&vs_snapshot->snapshot.last_packet_timestamp
+			);
+		}
+
+		reals_counter += current_vs->reals_count;
+	}
+}
+
+int
+balancer_snapshot(
+	struct balancer_handle *handle,
+	struct balancer_snapshot *snapshot,
+	struct balancer_snapshot_params *params
+) {
+	struct balancer *balancer = balancer_handle_deref(handle);
+	struct packet_handler *handler = ADDR_OF(&balancer->handler);
+
+	size_t total_size =
+		sizeof(struct named_vs_snapshot) * handler->vs_count +
+		sizeof(struct named_real_snapshot) * handler->reals_count;
+	void *memory = malloc(total_size);
+	memset(memory, 0, total_size);
+
+	struct named_vs_snapshot *vs_snapshots = memory;
+	snapshot->vs_snapshots = vs_snapshots;
+
+	struct named_real_snapshot *real_snapshots =
+		memory + sizeof(struct named_vs_snapshot) * handler->vs_count;
+
+	memset(snapshot, 0, sizeof(struct balancer_snapshot));
+
+	// fill identifiers, graph and active_sessions (only if requested)
+	balancer_snapshot_fill(balancer, snapshot, real_snapshots, params);
+
+	// fill stats if requested
+	int res = 0;
+	if (params->packet_handler_ref != NULL) {
+		res = balancer_snapshot_fill_stats(balancer, snapshot, params);
+	}
+	return res;
 }
