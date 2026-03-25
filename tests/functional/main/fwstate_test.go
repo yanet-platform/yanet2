@@ -71,8 +71,11 @@ func TestFWStateListEntries(t *testing.T) {
 				true, false, false, false, // SYN
 				[]byte("state entry"),
 			)
-			_, _, err := fw.SendPacketAndParse(0, 0, pkt, 200*time.Millisecond)
-			_ = err // CreateState does not forward the original packet
+			out, err := fw.SendPacketAndParseAll(0, 0, pkt, 200*time.Millisecond)
+			require.NoError(t, err, "CreateState should not error")
+			require.NotEmpty(t, out, "CreateState should forward packets")
+			// CreateState produces 2 packets: original + sync packet
+			require.Len(t, out, 2, "CreateState should produce 2 packets (original + sync)")
 		}
 	})
 
@@ -254,8 +257,11 @@ func TestFWStateListEntries(t *testing.T) {
 				true, false, false, false, // SYN
 				[]byte("v6 state"),
 			)
-			_, _, err := fw.SendPacketAndParse(0, 0, pkt, 200*time.Millisecond)
-			_ = err
+			out, err := fw.SendPacketAndParseAll(0, 0, pkt, 200*time.Millisecond)
+			require.NoError(t, err, "CreateState should not error")
+			require.NotEmpty(t, out, "CreateState should forward packets")
+			// CreateState produces 2 packets: original + sync packet
+			require.Len(t, out, 2, "CreateState should produce 2 packets (original + sync)")
 		}
 	})
 

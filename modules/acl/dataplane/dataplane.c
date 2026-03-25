@@ -279,7 +279,11 @@ acl_handle_packets(
 			case ACL_ACTION_DENY:
 				packet_front_drop(packet_front, packet);
 				break;
+			case ACL_ACTION_COUNT:
+				packet_front_output(packet_front, packet);
+				break;
 			case ACL_ACTION_CREATE_STATE:
+				packet_front_output(packet_front, packet);
 				push_sync_packet = SYNC_INGRESS;
 				break;
 			case ACL_ACTION_CHECK_STATE:
@@ -296,6 +300,8 @@ acl_handle_packets(
 					packet_front_drop(packet_front, packet);
 				}
 				break;
+			default:
+				packet_front_drop(packet_front, packet);
 			}
 
 			if (push_sync_packet != SYNC_NONE) {
