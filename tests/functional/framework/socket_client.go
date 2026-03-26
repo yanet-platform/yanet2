@@ -372,6 +372,56 @@ func (sc *SocketClient) ReceivePacket(timeout time.Duration, dumpPath string) ([
 	}
 }
 
+// ReceiveAllPackets receives all packets available on the socket within the timeout.
+func (sc *SocketClient) ReceiveAllPackets(timeout time.Duration, dumpPath string) ([][]byte, error) {
+	if sc.inner.conn == nil {
+		return nil, fmt.Errorf("not connected to socket")
+	}
+
+	var packets [][]byte
+
+	for {
+		err := sc.inner.conn.SetReadDeadline(time.Now().Add(timeout))
+		if err != nil {
+			return packets, fmt.Errorf("failed to set read deadline: %w", err)
+		}
+
+		// Read the packet length prefix (4 bytes)
+		lengthPrefix := make([]byte, 4)
+		_, err = sc.inner.conn.Read(lengthPrefix)
+		if err != nil {
+			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				// Timeout is expected when no more packets
+				break
+			}
+			return packets, fmt.Errorf("failed to read packet length prefix: %w", err)
+		}
+
+		packetLength := binary.BigEndian.Uint32(lengthPrefix)
+		if packetLength > 9000 {
+			return packets, fmt.Errorf("packet length %d exceeds maximum buffer size", packetLength)
+		}
+
+		// Read the packet data
+		packetData := make([]byte, packetLength)
+		_, err = sc.inner.conn.Read(packetData)
+		if err != nil {
+			return packets, fmt.Errorf("failed to read packet data: %w", err)
+		}
+
+		// Write raw socket data to dump file
+		packetWithLength := make([]byte, 0, 4+len(packetData))
+		packetWithLength = append(append(packetWithLength, lengthPrefix...), packetData...)
+		if err := writeToDumpFile(dumpPath, packetWithLength); err != nil {
+			sc.log.Warnf("Failed to write to dump file: %v", err)
+		}
+
+		packets = append(packets, packetData)
+	}
+
+	return packets, nil
+}
+
 // Close gracefully terminates the socket connection and releases associated
 // network resources. This method should be called when the socket client is
 // no longer needed to prevent resource leaks.

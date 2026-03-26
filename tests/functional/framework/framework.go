@@ -544,6 +544,35 @@ func (f *F) SendPacketAndCapture(inputIfaceIndex int, outputIfaceIndex int, pack
 	return outputClient.ReceivePacket(timeout, outputDumpPath)
 }
 
+// SendPacketAndCaptureAll sends a network packet and captures all response packets.
+func (f *F) SendPacketAndCaptureAll(inputIfaceIndex int, outputIfaceIndex int, packet []byte, timeout time.Duration) ([][]byte, error) {
+	inputClient, err := f.GetSocketClient(inputIfaceIndex)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get input socket client: %w", err)
+	}
+
+	outputClient, err := f.GetSocketClient(outputIfaceIndex)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get output socket client: %w", err)
+	}
+
+	inputDumpPath, outputDumpPath := f.getDumpFilePaths()
+
+	if err := inputClient.Connect(); err != nil {
+		return nil, fmt.Errorf("failed to connect to input socket: %w", err)
+	}
+
+	if err := outputClient.Connect(); err != nil {
+		return nil, fmt.Errorf("failed to connect to output socket: %w", err)
+	}
+
+	if err := inputClient.SendPacket(packet, inputDumpPath); err != nil {
+		return nil, fmt.Errorf("failed to send packet: %w", err)
+	}
+
+	return outputClient.ReceiveAllPackets(timeout, outputDumpPath)
+}
+
 // SendPacketAndParse sends a network packet, captures the response, and parses both
 // the input and output packets into structured PacketInfo objects. This high-level
 // method provides comprehensive packet analysis for detailed testing scenarios.
@@ -599,6 +628,36 @@ func (f *F) SendPacketAndParse(inputIfaceIndex int, outputIfaceIndex int, packet
 	f.log.Debugf("Received packet: %s", outputPacketInfo.String())
 
 	return inputPacketInfo, outputPacketInfo, nil
+}
+
+// SendPacketAndParseAll sends a network packet and captures ALL response packets.
+func (f *F) SendPacketAndParseAll(inputIfaceIndex int, outputIfaceIndex int, packet []byte, timeout time.Duration) ([]*PacketInfo, error) {
+	inputPacketInfo, err := f.PacketParser.ParsePacket(packet)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse input packet: %w", err)
+	}
+
+	f.log.Debugf("Sending packet: %s", inputPacketInfo.String())
+	_ = inputPacketInfo // Input packet info not needed for return
+
+	// Send packet and capture all responses
+	responses, err := f.SendPacketAndCaptureAll(inputIfaceIndex, outputIfaceIndex, packet, timeout)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send and capture: %w", err)
+	}
+
+	// Parse all response packets
+	var outputPacketInfos []*PacketInfo
+	for i, responseData := range responses {
+		outputPacketInfo, err := f.PacketParser.ParsePacket(responseData)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse response packet %d: %w", i, err)
+		}
+		f.log.Debugf("Received packet %d: %s", i, outputPacketInfo.String())
+		outputPacketInfos = append(outputPacketInfos, outputPacketInfo)
+	}
+
+	return outputPacketInfos, nil
 }
 
 // GetSocketClient retrieves or creates a socket client for the specified network
