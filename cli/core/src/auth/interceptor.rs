@@ -1,11 +1,12 @@
 //! Tonic gRPC interceptor for SSH certificate authentication.
 
-use std::{
+use core::{
+    error::Error,
     future::Future,
     pin::Pin,
-    sync::Arc,
     task::{Context, Poll},
 };
+use std::sync::Arc;
 
 use tokio::sync::Mutex;
 use tower::{Layer, Service};
@@ -15,15 +16,15 @@ use super::{
     token::Token,
 };
 
+enum AuthLayerState {
+    SshCert { agent: SshAgent, cert_blob: Vec<u8> },
+    Nop,
+}
+
 /// Tower layer that wraps a service with SSH certificate authentication.
 #[derive(Clone)]
 pub struct AuthLayer {
     state: Arc<Mutex<AuthLayerState>>,
-}
-
-enum AuthLayerState {
-    SshCert { agent: SshAgent, cert_blob: Vec<u8> },
-    Nop,
 }
 
 impl AuthLayer {
@@ -38,7 +39,7 @@ impl AuthLayer {
     /// matching the given tag.
     pub async fn from_agent(cert_tag: &str) -> Result<Self, AgentError> {
         let mut agent = SshAgent::from_env().await?;
-        let (_cert, blob) = agent.find_certificate(cert_tag).await?;
+        let (.., blob) = agent.find_certificate(cert_tag).await?;
         Ok(Self::sshcert(agent, blob))
     }
 
@@ -58,7 +59,7 @@ impl<S> Layer<S> for AuthLayer {
     }
 }
 
-type BoxError = Box<dyn std::error::Error + Send + Sync>;
+type BoxError = Box<dyn Error + Send + Sync>;
 
 /// Tower service that attaches SSH certificate auth tokens to requests.
 #[derive(Clone)]
@@ -87,14 +88,14 @@ where
         // Standard Tower pattern: clone and swap to get an owned service
         // for the async block.
         let clone = self.inner.clone();
-        let mut inner = std::mem::replace(&mut self.inner, clone);
+        let mut inner = core::mem::replace(&mut self.inner, clone);
         let state = self.state.clone();
 
         Box::pin(async move {
             {
-                let mut guard = state.lock().await;
+                let mut lock = state.lock().await;
 
-                if let AuthLayerState::SshCert { agent, cert_blob } = &mut *guard {
+                if let AuthLayerState::SshCert { agent, cert_blob } = &mut *lock {
                     let method = request.uri().path().to_string();
                     let header = Token::build_header_value(cert_blob, &method, agent)
                         .await
