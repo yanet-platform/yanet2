@@ -7,6 +7,8 @@ import "modules/balancer/agent/balancerpb/info.proto";
 import "modules/balancer/agent/balancerpb/inspect.proto";
 import "modules/balancer/agent/balancerpb/module.proto";
 import "modules/balancer/agent/balancerpb/stats.proto";
+import "modules/balancer/agent/balancerpb/filter.proto";
+import "modules/balancer/agent/balancerpb/snapshot.proto";
 
 import "common/commonpb/metric.proto";
 
@@ -529,3 +531,16 @@ message DeleteVSResponse {
   // Note: created field will always be false for DeleteVS operations.
   UpdateInfo info = 2;
 }
+
+message ShowSnapshotRequest {
+  optional string name = 1;
+
+  optional PacketHandlerRef packet_handler_ref = 2;
+
+  optional Filter filter = 3;
+
+  bool include_active_sessions = 4;
+  bool include_acl = 5;
+}
+
+message ShowSnapshotResponse { BalancerSnapshot snapshot = 1; }

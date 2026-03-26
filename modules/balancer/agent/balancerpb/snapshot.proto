@@ -1,0 +1,39 @@
+syntax = "proto3";
+
+package balancerpb;
+
+import "google/protobuf/timestamp.proto";
+
+import "modules/balancer/agent/balancerpb/module.proto";
+import "modules/balancer/agent/balancerpb/stats.proto";
+
+option go_package = "github.com/yanet-platform/yanet2/modules/balancer/agent/balancerpb;balancerpb";
+
+message BalancerSnapshot {
+  L4Stats l4_stats = 1;
+  CommonStats common_stats = 2;
+  IcmpStats icmp_ipv4_stats = 3;
+  IcmpStats icmp_ipv6_stats = 4;
+  uint64 active_sessions = 5;
+  google.protobuf.Timestamp last_packet_timestamp = 6;
+  repeated VsSnapshot virtual_services = 7;
+}
+
+message VsSnapshot {
+  VsIdentifier id = 1;
+  VsStats vs_stats = 2;
+  uint64 active_sessions = 3;
+  google.protobuf.Timestamp last_packet_timestamp = 4;
+  repeated AllowedSourcesStats allowed_sources = 5;
+  repeated RealSnapshot reals = 6;
+}
+
+message RealSnapshot {
+  RealIdentifier id = 1;
+  RealStats real_stats = 2;
+  uint64 active_sessions = 3;
+  google.protobuf.Timestamp last_packet_timestamp = 4;
+  uint64 weight = 5;
+  uint64 effective_weight = 6;
+  bool enabled = 7;
+}
