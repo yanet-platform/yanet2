@@ -4,7 +4,7 @@ use core::{error::Error, net::IpAddr};
 
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
-use ipnet::IpNet;
+use netip::{Contiguous, IpNetwork};
 use ptree::TreeBuilder;
 use tabled::{
     settings::{
@@ -89,7 +89,7 @@ pub struct RouteInsertCmd {
     ///
     /// The prefix must be an IPv4 or IPv6 address followed by "/" and the
     /// length of the prefix.
-    pub prefix: IpNet,
+    pub prefix: Contiguous<IpNetwork>,
     /// Route config name.
     #[arg(long = "cfg", short)]
     pub config_name: String,
@@ -107,7 +107,7 @@ pub struct RouteRemoveCmd {
     ///
     /// The prefix must be an IPv4 or IPv6 address followed by "/" and the
     /// length of the prefix.
-    pub prefix: IpNet,
+    pub prefix: Contiguous<IpNetwork>,
     /// Route config name.
     #[arg(long = "cfg", short)]
     pub config_name: String,

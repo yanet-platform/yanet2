@@ -21,7 +21,6 @@ ptree = "0.5"
 tabled = "0.17"
 colored = "3"
 log = "0.4"
-ipnet = "2"
 chrono = "0.4"
 
 [build-dependencies]

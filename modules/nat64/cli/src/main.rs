@@ -3,11 +3,11 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 
 use clap::{ArgAction, CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::CompleteEnv;
-use ipnet::Ipv6Net;
 use nat64pb::{
     nat64_service_client::Nat64ServiceClient, AddMappingRequest, AddPrefixRequest, ListConfigsRequest,
     SetDropUnknownRequest, SetMtuRequest, ShowConfigRequest, ShowConfigResponse,
 };
+use netip::{Contiguous, Ipv6Network};
 use ptree::TreeBuilder;
 use tonic::codec::CompressionEncoding;
 use ync::{
@@ -86,7 +86,7 @@ pub struct AddPrefixCmd {
     pub config_name: String,
     /// IPv6 prefix (12 bytes) to be added.
     #[arg(long)]
-    pub prefix: Ipv6Net,
+    pub prefix: Contiguous<Ipv6Network>,
 }
 
 #[derive(Debug, Clone, Parser)]

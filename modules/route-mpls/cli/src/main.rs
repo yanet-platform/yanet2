@@ -1,6 +1,6 @@
 //! CLI for YANET "route-mpls" module.
 
-use core::{error::Error, net::IpAddr};
+use core::{error::Error, net::IpAddr, ops::Deref};
 
 #[allow(non_snake_case)]
 pub mod filterpb {
@@ -18,7 +18,7 @@ pub mod routemplspb {
 
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
-use ipnetwork::IpNetwork;
+use netip::{Contiguous, IpNetwork};
 use routemplspb::{
     route_mpls_service_client::RouteMplsServiceClient, update_event::Event, CreateConfigRequest, DeleteConfigRequest,
     ListConfigsRequest, NextHop, Rule, ShowConfigRequest, UpdateConfigRequest, UpdateEvent,
@@ -85,7 +85,7 @@ pub struct RouteUpdateCmd {
     pub config_name: String,
     /// Route prefix
     #[arg(long = "prefix", short)]
-    pub prefix: IpNetwork,
+    pub prefix: Contiguous<IpNetwork>,
     /// The IP address of the tunnel destination.
     #[arg(long = "dst")]
     pub dst_addr: IpAddr,
@@ -119,7 +119,7 @@ pub struct RouteWithdrawCmd {
     pub config_name: String,
     /// Route prefix
     #[arg(long = "prefix", short)]
-    pub prefix: IpNetwork,
+    pub prefix: Contiguous<IpNetwork>,
     /// The IP address of the tunnel destination.
     #[arg(long = "dst")]
     pub dst_addr: IpAddr,
@@ -128,20 +128,22 @@ pub struct RouteWithdrawCmd {
     pub mpls_label: u32,
 }
 
-impl TryFrom<&IpNetwork> for filterpb::IpPrefix {
+impl TryFrom<Contiguous<IpNetwork>> for filterpb::IpPrefix {
     type Error = Box<dyn Error>;
 
-    fn try_from(value: &IpNetwork) -> Result<Self, Self::Error> {
-        Ok(match value {
-            IpNetwork::V4(v4) => filterpb::IpPrefix {
-                addr: v4.ip().octets().to_vec(),
-                length: v4.prefix() as u32,
-            },
-            IpNetwork::V6(v6) => filterpb::IpPrefix {
-                addr: v6.ip().octets().to_vec(),
-                length: v6.prefix() as u32,
-            },
-        })
+    fn try_from(net: Contiguous<IpNetwork>) -> Result<Self, Self::Error> {
+        let length = net.prefix() as u32;
+
+        match net.deref() {
+            IpNetwork::V4(net) => {
+                let addr = net.addr().octets().to_vec();
+                Ok(filterpb::IpPrefix { addr, length })
+            }
+            IpNetwork::V6(net) => {
+                let addr = net.addr().octets().to_vec();
+                Ok(filterpb::IpPrefix { addr, length })
+            }
+        }
     }
 }
 
@@ -218,7 +220,7 @@ impl RouteMplsService {
             name: cmd.config_name.clone(),
             updates: vec![UpdateEvent {
                 event: Some(Event::Update(Rule {
-                    prefix: Some(filterpb::IpPrefix::try_from(&cmd.prefix)?),
+                    prefix: Some(filterpb::IpPrefix::try_from(cmd.prefix)?),
                     nexthop: Some(NextHop {
                         kind: routemplspb::ActionKind::Tunnel.into(),
                         label: cmd.mpls_label,
@@ -248,7 +250,7 @@ impl RouteMplsService {
             name: cmd.config_name.clone(),
             updates: vec![UpdateEvent {
                 event: Some(Event::Withdraw(Rule {
-                    prefix: Some(filterpb::IpPrefix::try_from(&cmd.prefix)?),
+                    prefix: Some(filterpb::IpPrefix::try_from(cmd.prefix)?),
                     nexthop: Some(NextHop {
                         kind: routemplspb::ActionKind::Tunnel.into(),
                         label: cmd.mpls_label,

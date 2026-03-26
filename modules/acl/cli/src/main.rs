@@ -1,4 +1,4 @@
-use core::{error::Error, net::IpAddr};
+use core::error::Error;
 use std::{fs::File, path::Path};
 
 use aclpb::{
@@ -8,7 +8,7 @@ use aclpb::{
 use args::{DeleteCmd, ModeCmd, ShowCmd, UpdateCmd};
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
-use ipnetwork::IpNetwork;
+use netip::IpNetwork;
 use serde::{Deserialize, Serialize};
 use tonic::codec::CompressionEncoding;
 use ync::{
@@ -50,54 +50,20 @@ impl TryFrom<&String> for filterpb::IpNet {
     type Error = Box<dyn Error>;
 
     fn try_from(value: &String) -> Result<Self, Self::Error> {
-        let parts: Vec<&str> = value.split('/').collect();
-        if parts.len() == 1 {
-            let addr: IpAddr = value.parse()?;
-            return Ok(match addr {
-                IpAddr::V4(v4) => filterpb::IpNet {
-                    addr: v4.octets().to_vec(),
-                    mask: [0xff, 0xff, 0xff, 0xff].to_vec(),
-                },
-                IpAddr::V6(v6) => filterpb::IpNet {
-                    addr: v6.octets().to_vec(),
-                    mask: [
-                        0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-                    ]
-                    .to_vec(),
-                },
-            });
-        }
+        let net = IpNetwork::parse(value)?;
 
-        if parts.len() != 2 {
-            return Err("invalid format: expected IP/mask or IP/prefix".into());
-        }
+        match net {
+            IpNetwork::V4(net) => {
+                let addr = net.addr().octets().to_vec();
+                let mask = net.mask().octets().to_vec();
 
-        let network_result: Result<IpNetwork, _> = value.parse();
+                Ok(filterpb::IpNet { addr, mask })
+            }
+            IpNetwork::V6(net) => {
+                let addr = net.addr().octets().to_vec();
+                let mask = net.mask().octets().to_vec();
 
-        match network_result {
-            Ok(net) => Ok(filterpb::IpNet {
-                addr: match net.ip() {
-                    IpAddr::V4(v4) => v4.octets().to_vec(),
-                    IpAddr::V6(v6) => v6.octets().to_vec(),
-                },
-                mask: match net.mask() {
-                    IpAddr::V4(v4) => v4.octets().to_vec(),
-                    IpAddr::V6(v6) => v6.octets().to_vec(),
-                },
-            }),
-            Err(_) => {
-                let addr: IpAddr = parts[0].parse()?;
-                let mask: IpAddr = parts[1].parse()?;
-                Ok(filterpb::IpNet {
-                    addr: match addr {
-                        IpAddr::V4(v4) => v4.octets().to_vec(),
-                        IpAddr::V6(v6) => v6.octets().to_vec(),
-                    },
-                    mask: match mask {
-                        IpAddr::V4(v4) => v4.octets().to_vec(),
-                        IpAddr::V6(v6) => v6.octets().to_vec(),
-                    },
-                })
+                Ok(filterpb::IpNet { addr, mask })
             }
         }
     }

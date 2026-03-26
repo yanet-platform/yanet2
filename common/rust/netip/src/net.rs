@@ -8,10 +8,12 @@
 
 use core::{
     convert::TryFrom,
+    error::Error,
     fmt::{Debug, Display, Formatter},
-    net::{AddrParseError, Ipv4Addr, Ipv6Addr},
+    net::{AddrParseError, IpAddr, Ipv4Addr, Ipv6Addr},
     num::ParseIntError,
-    ops::Range,
+    ops::{Deref, Range},
+    str::FromStr,
 };
 
 const IPV4_ALL_BITS: Ipv4Addr = Ipv4Addr::new(0xff, 0xff, 0xff, 0xff);
@@ -71,6 +73,8 @@ impl Display for IpNetParseError {
     }
 }
 
+impl Error for IpNetParseError {}
+
 impl From<AddrParseError> for IpNetParseError {
     #[inline]
     fn from(err: AddrParseError) -> Self {
@@ -112,6 +116,258 @@ pub fn ipv6_mask_from_cidr(cidr: u8) -> Result<Ipv6Addr, CidrOverflowError> {
         Ok(mask.into())
     } else {
         Err(CidrOverflowError(cidr, 128))
+    }
+}
+
+/// An IP network, either IPv4 or IPv6.
+///
+/// This enum can contain either an [`Ipv4Network`] or an [`Ipv6Network`], see
+/// their respective documentation for more details.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum IpNetwork {
+    /// An IPv4 network.
+    V4(Ipv4Network),
+    /// An IPv6 network.
+    V6(Ipv6Network),
+}
+
+impl IpNetwork {
+    /// Parses specified buffer into an extended IP network.
+    ///
+    /// The following formats are supported:
+    ///
+    /// | Format                   | Example                           |
+    /// |--------------------------|-----------------------------------|
+    /// | IPv4                     | `77.88.55.242`                    |
+    /// | IPv4/CIDR                | `77.88.0.0/16`                    |
+    /// | IPv4/IPv4                | `77.88.0.0/255.255.0.0`           |
+    /// | IPv6                     | `2a02:6b8::2:242`                 |
+    /// | IPv6/CIDR                | `2a02:6b8:c00::/40`               |
+    /// | IPv6/IPv6                | `2a02:6b8:c00::/ffff:ffff:ff00::` |
+    ///
+    /// # Note
+    ///
+    /// During construction, the address is normalized using mask, for example
+    /// the network `77.88.55.242/16` becomes `77.88.0.0/16`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use core::net::{Ipv4Addr, Ipv6Addr};
+    ///
+    /// use netip::{IpNetwork, Ipv4Network, Ipv6Network};
+    ///
+    /// // Here are some examples to show supported formats and the output of this function.
+    ///
+    /// // We can parse IPv4 addresses without explicit `/32` mask.
+    /// assert_eq!(
+    ///     IpNetwork::V4(Ipv4Network::new(
+    ///         Ipv4Addr::new(77, 88, 55, 242),
+    ///         Ipv4Addr::new(255, 255, 255, 255),
+    ///     ),),
+    ///     // IPv4 address.
+    ///     IpNetwork::parse("77.88.55.242").unwrap(),
+    /// );
+    ///
+    /// // When a mask can be represented in common CIDR format, like `/16`,
+    /// // which means "leading 16 bits on the mask is set to one".
+    /// assert_eq!(
+    ///     IpNetwork::V4(Ipv4Network::new(
+    ///         Ipv4Addr::new(77, 88, 0, 0),
+    ///         Ipv4Addr::new(255, 255, 0, 0),
+    ///     ),),
+    ///     // IPv4 CIDR network.
+    ///     IpNetwork::parse("77.88.0.0/16").unwrap(),
+    /// );
+    ///
+    /// // But we can also specify mask explicitly. This is useful when we
+    /// // want non-contiguous mask.
+    /// assert_eq!(
+    ///     IpNetwork::V4(Ipv4Network::new(
+    ///         Ipv4Addr::new(77, 88, 0, 0),
+    ///         Ipv4Addr::new(255, 255, 0, 0),
+    ///     ),),
+    ///     // IPv4 network with explicit mask.
+    ///     IpNetwork::parse("77.88.0.0/255.255.0.0").unwrap(),
+    /// );
+    ///
+    /// // Parse IPv6 addresses without explicit `/128` mask.
+    /// assert_eq!(
+    ///     IpNetwork::V6(Ipv6Network::new(
+    ///         Ipv6Addr::new(0x2a02, 0x6b8, 0, 0, 0, 0, 0x2, 0x242),
+    ///         Ipv6Addr::new(
+    ///             0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff
+    ///         ),
+    ///     ),),
+    ///     // IPv6 address.
+    ///     IpNetwork::parse("2a02:6b8::2:242").unwrap(),
+    /// );
+    ///
+    /// // CIDR format.
+    /// assert_eq!(
+    ///     IpNetwork::V6(Ipv6Network::new(
+    ///         Ipv6Addr::new(0x2a02, 0x6b8, 0xc00, 0, 0, 0, 0, 0),
+    ///         Ipv6Addr::new(0xffff, 0xffff, 0xff00, 0, 0, 0, 0, 0),
+    ///     ),),
+    ///     // IPv6 CIDR network.
+    ///     IpNetwork::parse("2a02:6b8:c00::/40").unwrap(),
+    /// );
+    ///
+    /// // Network with explicit mask (congituous in this case).
+    /// assert_eq!(
+    ///     IpNetwork::V6(Ipv6Network::new(
+    ///         Ipv6Addr::new(0x2a02, 0x6b8, 0xc00, 0, 0, 0, 0, 0),
+    ///         Ipv6Addr::new(0xffff, 0xffff, 0xff00, 0, 0, 0, 0, 0),
+    ///     ),),
+    ///     // IPv6 network with explicit mask.
+    ///     IpNetwork::parse("2a02:6b8:c00::/ffff:ffff:ff00::").unwrap(),
+    /// );
+    ///
+    /// // Network with explicit non-contiguous mask.
+    /// assert_eq!(
+    ///     IpNetwork::V6(Ipv6Network::new(
+    ///         Ipv6Addr::new(0x2a02, 0x6b8, 0xc00, 0, 0, 0x1234, 0, 0),
+    ///         Ipv6Addr::new(0xffff, 0xffff, 0xff00, 0, 0xffff, 0xffff, 0, 0),
+    ///     ),),
+    ///     // The same network as above, but specified explicitly.
+    ///     IpNetwork::parse("2a02:6b8:c00::1234:0:0/ffff:ffff:ff00::ffff:ffff:0:0").unwrap(),
+    /// );
+    /// ```
+    pub fn parse(buf: &str) -> Result<Self, IpNetParseError> {
+        match Ipv4Network::parse(buf) {
+            Ok(net) => {
+                return Ok(Self::V4(net));
+            }
+            Err(IpNetParseError::AddrParseError(..)) => {}
+            Err(err) => {
+                return Err(err);
+            }
+        }
+
+        let net = Ipv6Network::parse(buf)?;
+        Ok(Self::V6(net))
+    }
+
+    /// Checks whether this network is a contiguous, i.e. contains mask with
+    /// only leading bits set to one contiguously.
+    #[inline]
+    pub const fn is_contiguous(&self) -> bool {
+        match self {
+            Self::V4(net) => net.is_contiguous(),
+            Self::V6(net) => net.is_contiguous(),
+        }
+    }
+
+    /// Returns the mask prefix, i.e. the number of leading bits set, if this
+    /// network is a contiguous one, `None` otherwise.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use netip::IpNetwork;
+    ///
+    /// assert_eq!(
+    ///     Some(24),
+    ///     IpNetwork::parse("192.168.1.0/24").unwrap().prefix()
+    /// );
+    ///
+    /// assert_eq!(
+    ///     Some(40),
+    ///     IpNetwork::parse("2a02:6b8::/40").unwrap().prefix()
+    /// );
+    /// assert_eq!(Some(128), IpNetwork::parse("2a02:6b8::1").unwrap().prefix());
+    /// ```
+    #[inline]
+    pub const fn prefix(&self) -> Option<u8> {
+        match self {
+            Self::V4(net) => net.prefix(),
+            Self::V6(net) => net.prefix(),
+        }
+    }
+}
+
+impl Display for IpNetwork {
+    fn fmt(&self, fmt: &mut Formatter) -> Result<(), core::fmt::Error> {
+        match self {
+            IpNetwork::V4(net) => Display::fmt(&net, fmt),
+            IpNetwork::V6(net) => Display::fmt(&net, fmt),
+        }
+    }
+}
+
+impl From<Ipv4Addr> for IpNetwork {
+    #[inline]
+    fn from(addr: Ipv4Addr) -> Self {
+        // Construct network directly, because no address mutation occurs.
+        Self::V4(Ipv4Network(addr, IPV4_ALL_BITS))
+    }
+}
+
+impl TryFrom<(Ipv4Addr, u8)> for IpNetwork {
+    type Error = CidrOverflowError;
+
+    fn try_from((addr, cidr): (Ipv4Addr, u8)) -> Result<Self, Self::Error> {
+        Ok(Self::V4(Ipv4Network::new(addr, ipv4_mask_from_cidr(cidr)?)))
+    }
+}
+
+impl From<(Ipv4Addr, Ipv4Addr)> for IpNetwork {
+    fn from((addr, mask): (Ipv4Addr, Ipv4Addr)) -> Self {
+        Self::V4(Ipv4Network::new(addr, mask))
+    }
+}
+
+impl From<Ipv4Network> for IpNetwork {
+    #[inline]
+    fn from(net: Ipv4Network) -> Self {
+        Self::V4(net)
+    }
+}
+
+impl From<Ipv6Addr> for IpNetwork {
+    fn from(addr: Ipv6Addr) -> Self {
+        // Construct network directly, because no address mutation occurs.
+        Self::V6(Ipv6Network(addr, IPV6_ALL_BITS))
+    }
+}
+
+impl TryFrom<(Ipv6Addr, u8)> for IpNetwork {
+    type Error = CidrOverflowError;
+
+    fn try_from((addr, cidr): (Ipv6Addr, u8)) -> Result<Self, Self::Error> {
+        Ok(Self::V6(Ipv6Network::new(addr, ipv6_mask_from_cidr(cidr)?)))
+    }
+}
+
+impl From<(Ipv6Addr, Ipv6Addr)> for IpNetwork {
+    fn from((addr, mask): (Ipv6Addr, Ipv6Addr)) -> Self {
+        Self::V6(Ipv6Network::new(addr, mask))
+    }
+}
+
+impl From<Ipv6Network> for IpNetwork {
+    #[inline]
+    fn from(net: Ipv6Network) -> Self {
+        Self::V6(net)
+    }
+}
+
+impl From<IpAddr> for IpNetwork {
+    #[inline]
+    fn from(addr: IpAddr) -> Self {
+        match addr {
+            IpAddr::V4(addr) => Self::from(addr),
+            IpAddr::V6(addr) => Self::from(addr),
+        }
+    }
+}
+
+impl FromStr for IpNetwork {
+    type Err = IpNetParseError;
+
+    #[inline]
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        IpNetwork::parse(s)
     }
 }
 
@@ -521,6 +777,15 @@ impl TryFrom<(Ipv4Addr, u8)> for Ipv4Network {
     fn try_from((addr, cidr): (Ipv4Addr, u8)) -> Result<Self, Self::Error> {
         let mask = ipv4_mask_from_cidr(cidr)?;
         Ok(Self::new(addr, mask))
+    }
+}
+
+impl FromStr for Ipv4Network {
+    type Err = IpNetParseError;
+
+    #[inline]
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ipv4Network::parse(s)
     }
 }
 
@@ -1044,6 +1309,15 @@ impl TryFrom<(Ipv6Addr, u8)> for Ipv6Network {
     }
 }
 
+impl FromStr for Ipv6Network {
+    type Err = IpNetParseError;
+
+    #[inline]
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ipv6Network::parse(s)
+    }
+}
+
 impl AsRef<Ipv6Network> for Ipv6Network {
     #[inline]
     fn as_ref(&self) -> &Ipv6Network {
@@ -1413,6 +1687,152 @@ impl BinarySplit for Ipv6Network {
     #[inline]
     fn supernet_for(&self, nets: &[Self]) -> Ipv6Network {
         self.supernet_for(nets)
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub enum ContiguousIpNetParseError {
+    NonContiguousNetwork,
+    IpNetParseError(IpNetParseError),
+}
+
+impl From<IpNetParseError> for ContiguousIpNetParseError {
+    #[inline]
+    fn from(err: IpNetParseError) -> Self {
+        ContiguousIpNetParseError::IpNetParseError(err)
+    }
+}
+
+impl Display for ContiguousIpNetParseError {
+    fn fmt(&self, fmt: &mut Formatter) -> Result<(), core::fmt::Error> {
+        match self {
+            Self::NonContiguousNetwork => write!(fmt, "non-contiguous network"),
+            Self::IpNetParseError(err) => write!(fmt, "{}", err),
+        }
+    }
+}
+
+impl Error for ContiguousIpNetParseError {}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct Contiguous<T>(T);
+
+impl Contiguous<IpNetwork> {
+    /// Parses an IP network from a string and returns a contiguous network.
+    pub fn parse(buf: &str) -> Result<Self, ContiguousIpNetParseError> {
+        let net = IpNetwork::parse(buf)?;
+
+        if net.is_contiguous() {
+            Ok(Self(net))
+        } else {
+            Err(ContiguousIpNetParseError::NonContiguousNetwork)
+        }
+    }
+
+    /// Returns the prefix length of the network.
+    #[inline]
+    pub fn prefix(&self) -> u8 {
+        match self {
+            Self(IpNetwork::V4(net)) => Contiguous(*net).prefix(),
+            Self(IpNetwork::V6(net)) => Contiguous(*net).prefix(),
+        }
+    }
+}
+
+impl Contiguous<Ipv4Network> {
+    /// Parses an IPv4 network from a string and returns a contiguous network.
+    pub fn parse(buf: &str) -> Result<Self, ContiguousIpNetParseError> {
+        let net = Ipv4Network::parse(buf)?;
+
+        if net.is_contiguous() {
+            Ok(Self(net))
+        } else {
+            Err(ContiguousIpNetParseError::NonContiguousNetwork)
+        }
+    }
+
+    /// Returns the prefix length of the network.
+    #[inline]
+    pub const fn prefix(&self) -> u8 {
+        match self {
+            Self(net) => {
+                let mask = u32::from_be_bytes(net.mask().octets());
+                let ones = mask.leading_ones();
+                ones as u8
+            }
+        }
+    }
+}
+
+impl Contiguous<Ipv6Network> {
+    /// Parses an IPv6 network from a string and returns a contiguous network.
+    pub fn parse(buf: &str) -> Result<Self, ContiguousIpNetParseError> {
+        let net = Ipv6Network::parse(buf)?;
+
+        if net.is_contiguous() {
+            Ok(Self(net))
+        } else {
+            Err(ContiguousIpNetParseError::NonContiguousNetwork)
+        }
+    }
+
+    /// Returns the prefix length of the network.
+    #[inline]
+    pub const fn prefix(&self) -> u8 {
+        match self {
+            Self(net) => {
+                let mask = u128::from_be_bytes(net.mask().octets());
+                let ones = mask.leading_ones();
+                ones as u8
+            }
+        }
+    }
+}
+
+impl<T> Deref for Contiguous<T> {
+    type Target = T;
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        match self {
+            Self(net) => net,
+        }
+    }
+}
+
+impl<T> Display for Contiguous<T>
+where
+    T: Display,
+{
+    #[inline]
+    fn fmt(&self, fmt: &mut Formatter) -> Result<(), core::fmt::Error> {
+        match self {
+            Self(net) => Display::fmt(net, fmt),
+        }
+    }
+}
+
+impl FromStr for Contiguous<IpNetwork> {
+    type Err = ContiguousIpNetParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::parse(s)
+    }
+}
+
+impl FromStr for Contiguous<Ipv4Network> {
+    type Err = ContiguousIpNetParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::parse(s)
+    }
+}
+
+impl FromStr for Contiguous<Ipv6Network> {
+    type Err = ContiguousIpNetParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::parse(s)
     }
 }
 
@@ -2188,5 +2608,77 @@ mod test {
         for (idx, net) in nets.iter().enumerate() {
             assert_eq!(range.contains(&idx), supernet.contains(net));
         }
+    }
+
+    #[test]
+    fn test_ipnetwork_parse_v4() {
+        let expected = IpNetwork::V4(Ipv4Network::new(
+            Ipv4Addr::new(192, 168, 1, 0),
+            Ipv4Addr::new(255, 255, 255, 0),
+        ));
+
+        assert_eq!(expected, IpNetwork::parse("192.168.1.0/24").unwrap());
+    }
+
+    #[test]
+    fn test_ipnetwork_parse_v6() {
+        let expected = IpNetwork::V6(Ipv6Network::new(
+            Ipv6Addr::new(0x2a02, 0x6b8, 0xc00, 0, 0, 0, 0, 0),
+            Ipv6Addr::new(0xffff, 0xffff, 0xff00, 0, 0, 0, 0, 0),
+        ));
+
+        assert_eq!(expected, IpNetwork::parse("2a02:6b8:c00::/40").unwrap());
+    }
+
+    #[test]
+    fn test_ipnetwork_parse_invalid() {
+        assert_eq!(
+            IpNetParseError::CidrOverflow(CidrOverflowError(33, 32)),
+            IpNetwork::parse("192.168.1.0/33").unwrap_err(),
+        );
+    }
+
+    #[test]
+    fn test_ipnetwork_parse_invalid_v6() {
+        assert_eq!(
+            IpNetParseError::CidrOverflow(CidrOverflowError(129, 128)),
+            IpNetwork::parse("2a02:6b8:c00::/129").unwrap_err(),
+        );
+    }
+
+    #[test]
+    fn test_contiguous_ip_network_parse_v4() {
+        let expected = Contiguous(Ipv4Network::new(
+            Ipv4Addr::new(192, 168, 1, 0),
+            Ipv4Addr::new(255, 255, 255, 0),
+        ));
+
+        assert_eq!(expected, Contiguous::<Ipv4Network>::parse("192.168.1.0/24").unwrap(),);
+    }
+
+    #[test]
+    fn test_contiguous_ip_network_parse_v4_invalid() {
+        assert_eq!(
+            ContiguousIpNetParseError::NonContiguousNetwork,
+            Contiguous::<Ipv4Network>::parse("192.168.0.1/255.255.0.255").unwrap_err(),
+        );
+    }
+
+    #[test]
+    fn test_contiguous_ip_network_parse_v6() {
+        let expected = Contiguous(Ipv6Network::new(
+            Ipv6Addr::new(0x2a02, 0x6b8, 0xc00, 0, 0, 0, 0, 0),
+            Ipv6Addr::new(0xffff, 0xffff, 0xff00, 0, 0, 0, 0, 0),
+        ));
+
+        assert_eq!(expected, Contiguous::<Ipv6Network>::parse("2a02:6b8:c00::/40").unwrap(),);
+    }
+
+    #[test]
+    fn test_contiguous_ip_network_parse_v6_invalid() {
+        assert_eq!(
+            ContiguousIpNetParseError::NonContiguousNetwork,
+            Contiguous::<Ipv6Network>::parse("2a02:6b8:c00::1234:0:0/ffff:ffff:ff00::ffff:ffff:0:0").unwrap_err(),
+        );
     }
 }

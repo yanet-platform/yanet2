@@ -6,7 +6,7 @@ use decappb::{
     AddPrefixesRequest, ListConfigsRequest, RemovePrefixesRequest, ShowConfigRequest, ShowConfigResponse,
     decap_service_client::DecapServiceClient,
 };
-use ipnet::IpNet;
+use netip::{Contiguous, IpNetwork};
 use ptree::TreeBuilder;
 use tonic::codec::CompressionEncoding;
 use ync::{
@@ -60,7 +60,7 @@ pub struct AddPrefixesCmd {
     pub config_name: String,
     /// Prefix to be added to the input filter of the decapsulation module.
     #[arg(long, short)]
-    pub prefix: Vec<IpNet>,
+    pub prefix: Vec<Contiguous<IpNetwork>>,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -70,7 +70,7 @@ pub struct RemovePrefixesCmd {
     pub config_name: String,
     /// Prefix to be removed from the input filter of the decapsulation module.
     #[arg(long, short)]
-    pub prefix: Vec<IpNet>,
+    pub prefix: Vec<Contiguous<IpNetwork>>,
 }
 
 /// Output format options.

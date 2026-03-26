@@ -1,10 +1,7 @@
-use core::{
-    fmt::{self, Display, Formatter},
-    str::FromStr,
-};
+use core::fmt::{self, Display, Formatter};
 
 use colored::Colorize;
-use ipnet::IpNet;
+use netip::{Contiguous, IpNetwork};
 use tabled::Tabled;
 
 #[allow(clippy::all, non_snake_case)]
@@ -79,7 +76,7 @@ impl From<routepb::Route> for RouteEntry {
         let communities = route.large_communities.into_iter().map(|c| c.into()).collect();
 
         // TODO: migrate to strongly-typed protobuf messages for IPNetwork.
-        let prefix = IpNet::from_str(&route.prefix).expect("must be valid prefix");
+        let prefix = Contiguous::<IpNetwork>::parse(&route.prefix).expect("must be valid prefix");
 
         let source = routepb::RouteSourceId::try_from(route.source)
             .unwrap_or_default()
@@ -103,7 +100,7 @@ impl From<routepb::Route> for RouteEntry {
 }
 
 #[derive(Debug)]
-pub struct Prefix(pub IpNet, pub bool);
+pub struct Prefix(pub Contiguous<IpNetwork>, pub bool);
 
 impl Display for Prefix {
     fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {

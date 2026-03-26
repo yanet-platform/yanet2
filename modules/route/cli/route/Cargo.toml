@@ -8,6 +8,7 @@ rust-version = "1.84"
 
 [dependencies]
 ync = { path = "../../../../cli/core", version = "0.1", package = "yanet-cli" }
+netip = { path = "../../../../common/rust/netip", version = "0.1" }
 log = "0.4"
 clap = { version = "4.5", features = ["derive"] }
 clap_complete = { version = "4.5", features = ["unstable-dynamic"] }
@@ -16,7 +17,6 @@ prost = "0.13"
 prost-types = "0.13"
 tonic = { version = "0.13", features = ["gzip"] }
 tower = "0.5"
-ipnet = "2"
 tabled = { version = "0.18", features = ["ansi"] }
 ptree = "0.5"
 colored = "3"
