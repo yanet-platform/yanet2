@@ -753,7 +753,6 @@ impl Display for Ipv4Network {
         match self {
             Self(addr, mask) => {
                 match self.prefix() {
-                    Some(32) => fmt.write_fmt(format_args!("{}", addr)),
                     Some(prefix) => fmt.write_fmt(format_args!("{}/{}", addr, prefix)),
                     None => {
                         // This is a non-contiguous network, expand the mask.
@@ -1275,7 +1274,6 @@ impl Display for Ipv6Network {
         match self {
             Ipv6Network(addr, mask) => {
                 match self.prefix() {
-                    Some(128) => fmt.write_fmt(format_args!("{}", addr)),
                     Some(prefix) => fmt.write_fmt(format_args!("{}/{}", addr, prefix)),
                     None => {
                         // This is a non-contiguous network, expand the mask.
@@ -2282,13 +2280,13 @@ mod test {
     #[test]
     fn test_net_display_addr() {
         let net = Ipv4Network::new(Ipv4Addr::new(127, 0, 0, 1), Ipv4Addr::new(255, 255, 255, 255));
-        assert_eq!("127.0.0.1", &format!("{net}"));
+        assert_eq!("127.0.0.1/32", &format!("{net}"));
 
         let net = Ipv6Network::new(
             Ipv6Addr::new(0x2a02, 0x6b8, 0, 0, 0, 0, 0, 1),
             Ipv6Addr::new(0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff),
         );
-        assert_eq!("2a02:6b8::1", &format!("{net}"));
+        assert_eq!("2a02:6b8::1/128", &format!("{net}"));
     }
 
     #[test]
