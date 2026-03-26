@@ -323,6 +323,7 @@ jobs:
           qemu-system-x86_64 --version
 
       - name: Cache Ubuntu cloud image
+        id: cache-ubuntu-image
         uses: actions/cache@v4
         with:
           path: tests/functional/ubuntu-24.04-minimal-cloudimg-amd64.img
@@ -331,14 +332,37 @@ jobs:
             ${{ runner.os }}-ubuntu-image-
 
       - name: Cache QEMU image
+        id: cache-qemu-image
         uses: actions/cache@v4
         with:
           path: |
             tests/functional/yanet-test.qcow2
             tests/functional/*.iso
-          key: ${{ runner.os }}-qemu-image-${{ hashFiles('tests/functional/Makefile') }}-${{ hashFiles('tests/functional/cloud-init-user-data.yaml') }}
+          key: ${{ runner.os }}-qemu-image-${{ hashFiles('tests/functional/Makefile') }}-${{ hashFiles('tests/functional/cloud-init-user-data.yaml') }}-${{ hashFiles('tests/functional/meta-data') }}
           restore-keys: |
             ${{ runner.os }}-qemu-image-
+
+      - name: Normalize cached VM artifact timestamps
+        if: steps.cache-qemu-image.outputs.cache-hit == 'true' || steps.cache-ubuntu-image.outputs.cache-hit == 'true'
+        run: |
+          set -euo pipefail
+
+          cd tests/functional
+
+          # Git checkout sets source files mtimes to "now". Cached artifacts keep old mtimes,
+          # so `make` treats them as stale and rebuilds QCOW2/ISO every run. Touch artifacts
+          # (deps first, then target) to keep make from doing unnecessary work.
+          if [ -f ubuntu-24.04-minimal-cloudimg-amd64.img ]; then
+              touch ubuntu-24.04-minimal-cloudimg-amd64.img
+          fi
+
+          if ls -1 *.iso >/dev/null 2>&1; then
+              touch *.iso
+          fi
+
+          if [ -f yanet-test.qcow2 ]; then
+              touch yanet-test.qcow2
+          fi
 
       - name: Download YANET binaries from build job
         uses: actions/download-artifact@v4
