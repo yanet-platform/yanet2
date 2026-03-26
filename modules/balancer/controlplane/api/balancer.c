@@ -486,44 +486,47 @@ static void
 balancer_snapshot_fill(
 	struct balancer *balancer,
 	struct balancer_snapshot *snapshot,
-	struct named_real_snapshot *real_snapshots,
 	struct balancer_snapshot_params *params
 ) {
 	struct packet_handler *handler = ADDR_OF(&balancer->handler);
 	struct balancer_state *state = ADDR_OF(&handler->state);
 	struct vs *virtual_services = ADDR_OF(&handler->vs);
-	size_t reals_counter = 0;
+
+	snapshot->vs_count = handler->vs_count;
+	void *memory = snapshot->vs_snapshots + snapshot->vs_count;
+
 	for (size_t vs_idx = 0; vs_idx < handler->vs_count; ++vs_idx) {
 		struct vs *current_vs = &virtual_services[vs_idx];
 		struct named_vs_snapshot *vs_snapshot =
 			&snapshot->vs_snapshots[vs_idx];
+
+		// set vs identifier
 		memcpy(&vs_snapshot->vs_identifier,
 		       &current_vs->identifier,
 		       sizeof(vs_snapshot->vs_identifier));
 
-		// todo: make single buffer for all allowed sources and
-		// all tags
+		// setup memory for the allowed sources stats
 		vs_snapshot->snapshot.allowed_sources_count = 0;
-		vs_snapshot->snapshot.allowed_sources =
-			malloc(sizeof(struct allowed_sources_stats) *
-			       current_vs->rules_count);
-
-		const struct real *current_vs_reals =
-			ADDR_OF(&current_vs->reals);
-
-		struct named_real_snapshot *current_vs_real_snapshots =
-			&real_snapshots[reals_counter];
+		vs_snapshot->snapshot.allowed_sources = memory;
+		memory += sizeof(struct allowed_sources_stats) *
+			  current_vs->rules_count;
 
 		vs_snapshot->snapshot.reals_count = current_vs->reals_count;
-		vs_snapshot->snapshot.reals = current_vs_real_snapshots;
+		vs_snapshot->snapshot.reals = memory;
+		memory += sizeof(struct named_real_snapshot) *
+			  current_vs->reals_count;
 
+		// setup real identifier, graph and active sessions
+		const struct real *current_vs_reals =
+			ADDR_OF(&current_vs->reals);
 		for (size_t real_idx = 0; real_idx < current_vs->reals_count;
 		     ++real_idx) {
 			const struct real *current_real =
 				&current_vs_reals[real_idx];
 			struct named_real_snapshot *real_snapshot =
-				&current_vs_real_snapshots[real_idx];
+				&vs_snapshot->snapshot.reals[real_idx];
 
+			// set real identifier
 			memcpy(&real_snapshot->real_identifier,
 			       &current_real->identifier,
 			       sizeof(real_snapshot->real_identifier));
@@ -554,9 +557,21 @@ balancer_snapshot_fill(
 				&vs_snapshot->snapshot.last_packet_timestamp
 			);
 		}
-
-		reals_counter += current_vs->reals_count;
 	}
+}
+
+static size_t
+calc_vs_heap_memory(struct packet_handler *handler) {
+	size_t mem = 0;
+	struct vs *vs = ADDR_OF(&handler->vs);
+	for (size_t vs_idx = 0; vs_idx < handler->vs_count; ++vs_idx) {
+		struct vs *cur_vs = vs + vs_idx;
+		mem += sizeof(struct named_vs_snapshot) +
+		       cur_vs->rules_count *
+			       sizeof(struct allowed_sources_stats) +
+		       cur_vs->reals_count * sizeof(struct named_real_snapshot);
+	}
+	return mem;
 }
 
 int
@@ -565,25 +580,22 @@ balancer_snapshot(
 	struct balancer_snapshot *snapshot,
 	struct balancer_snapshot_params *params
 ) {
+	memset(snapshot, 0, sizeof(struct balancer_snapshot));
+
 	struct balancer *balancer = balancer_handle_deref(handle);
 	struct packet_handler *handler = ADDR_OF(&balancer->handler);
 
-	size_t total_size =
-		sizeof(struct named_vs_snapshot) * handler->vs_count +
-		sizeof(struct named_real_snapshot) * handler->reals_count;
+	size_t total_size = calc_vs_heap_memory(handler);
+
 	void *memory = malloc(total_size);
 	memset(memory, 0, total_size);
 
 	struct named_vs_snapshot *vs_snapshots = memory;
 	snapshot->vs_snapshots = vs_snapshots;
 
-	struct named_real_snapshot *real_snapshots =
-		memory + sizeof(struct named_vs_snapshot) * handler->vs_count;
-
-	memset(snapshot, 0, sizeof(struct balancer_snapshot));
-
-	// fill identifiers, graph and active_sessions (only if requested)
-	balancer_snapshot_fill(balancer, snapshot, real_snapshots, params);
+	// fill identifiers, pointers, graph and active_sessions (only if
+	// requested)
+	balancer_snapshot_fill(balancer, snapshot, params);
 
 	// fill stats if requested
 	int res = 0;

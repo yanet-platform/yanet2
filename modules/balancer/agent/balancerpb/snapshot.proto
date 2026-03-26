@@ -17,6 +17,7 @@ message BalancerSnapshot {
   uint64 active_sessions = 5;
   google.protobuf.Timestamp last_packet_timestamp = 6;
   repeated VsSnapshot virtual_services = 7;
+  optional PacketHandlerRef packet_handler_ref = 8;
 }
 
 message VsSnapshot {
@@ -29,7 +30,7 @@ message VsSnapshot {
 }
 
 message RealSnapshot {
-  RealIdentifier id = 1;
+  RelativeRealIdentifier id = 1;
   RealStats real_stats = 2;
   uint64 active_sessions = 3;
   google.protobuf.Timestamp last_packet_timestamp = 4;

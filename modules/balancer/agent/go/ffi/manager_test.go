@@ -1244,4 +1244,22 @@ func TestManager(t *testing.T) {
 			"should find the previously enabled real 10.12.13.213:8080",
 		)
 	})
+
+	t.Run("Snapshot", func(t *testing.T) {
+		params := SnapshotParams{
+			IncludeACL:            true,
+			IncludeActiveSessions: true,
+			PacketHandlerRef: &PacketHandlerRef{
+				Device:   &deviceName,
+				Pipeline: &pipelineName,
+				Function: &functionName,
+				Chain:    &chainName,
+			},
+		}
+		snapshot := manager.Snapshot(&params)
+		t.Log(snapshot.ActiveSessions)
+		t.Log(snapshot.LastPacketTimestamp)
+		t.Log(snapshot)
+		require.NotNil(t, snapshot, "snapshot should not be nil")
+	})
 }

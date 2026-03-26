@@ -658,18 +658,17 @@ struct vs_stats {
  * - Persists until virtual service is reconfigured or removed
  * - Reset when statistics are cleared
  */
+
+#define MAX_TAG_LEN 16
+
 struct allowed_sources_stats {
 	/**
 	 * Tag identifier matching allowed_sources.tag.
 	 *
 	 * This corresponds to the tag field in allowed_sources entries.
 	 * All entries with this tag contribute to these statistics.
-	 *
-	 * MEMORY MANAGEMENT:
-	 * - This is a heap-allocated copy of the original tag string
-	 * - Must be freed by caller (typically via balancer_stats_free())
 	 */
-	const char *tag;
+	char tag[MAX_TAG_LEN];
 
 	/**
 	 * Total packets that passed allowed source filtering for this tag.

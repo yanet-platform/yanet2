@@ -630,3 +630,6 @@ balancer_manager_snapshot(
 	struct balancer_snapshot *snapshot,
 	struct balancer_snapshot_params *params
 );
+
+void
+balancer_manager_snapshot_free(struct balancer_snapshot *snapshot);

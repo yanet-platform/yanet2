@@ -306,7 +306,7 @@ balancer_manager_resize_session_table(
 ) {
 	struct balancer_handle *balancer = ADDR_OF(&manager->balancer);
 	if (balancer_resize_session_table(balancer, new_size, now) != 0) {
-		NEW_ERROR("%s", balancer_take_error_msg(balancer));
+		take_balancer_error(balancer, &manager->diag);
 		return -1;
 	}
 	setup_session_table_capacity(manager);
@@ -561,8 +561,10 @@ balancer_manager_snapshot(
 ) {
 	struct balancer_handle *balancer = ADDR_OF(&manager->balancer);
 	if (balancer_snapshot(balancer, snapshot, params) != 0) {
+		take_balancer_error(balancer, &manager->diag);
 		return -1;
 	}
+
 	struct balancer_config *balancer_config = &manager->config.balancer;
 
 	// set proper weights
@@ -584,4 +586,9 @@ balancer_manager_snapshot(
 	}
 
 	return 0;
+}
+
+void
+balancer_manager_snapshot_free(struct balancer_snapshot *snapshot) {
+	balancer_snapshot_free(snapshot);
 }

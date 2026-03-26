@@ -2,6 +2,7 @@
 #include "api/real.h"
 #include "api/vs.h"
 #include "common/memory_address.h"
+#include "common/strutils.h"
 #include "controlplane/agent/agent.h"
 #include "handler.h"
 
@@ -11,6 +12,7 @@
 #include "vs.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "api/stats.h"
 
@@ -124,7 +126,7 @@ setup_vs_acl_stats(
 	const size_t instances,
 	struct counter_handle *counter
 ) {
-	stats->tag = strdup(tag);
+	strtcpy(stats->tag, tag, MAX_TAG_LEN);
 	counter_handle_accum(
 		(uint64_t *)&stats->passes,
 		instances,

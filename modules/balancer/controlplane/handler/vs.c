@@ -24,21 +24,19 @@
 
 #include "filter/compiler.h"
 
-#define MAX_TAG_LENGTH 240
-
 static int
 validate_tag(const char *tag) {
 	if (tag == NULL) {
 		return 0; // NULL is valid (means no tracking)
 	}
-	size_t len = strnlen(tag, MAX_TAG_LENGTH + 1);
+	size_t len = strnlen(tag, MAX_TAG_LEN);
 	if (len == 0) {
 		NEW_ERROR("tag must be at least 1 character long");
 		return -1;
 	}
-	if (len > MAX_TAG_LENGTH) {
+	if (len > MAX_TAG_LEN) {
 		NEW_ERROR(
-			"tag length %zu exceeds maximum %d", len, MAX_TAG_LENGTH
+			"tag length %zu exceeds maximum %d", len, MAX_TAG_LEN
 		);
 		return -1;
 	}

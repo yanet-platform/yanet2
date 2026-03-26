@@ -131,6 +131,37 @@ func (b *BalancerManager) Update(
 	return updateInfo, nil
 }
 
+func (b *BalancerManager) Snapshot(params *balancerpb.ShowSessionsRequest) (*balancerpb.BalancerSnapshot, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	tracker := b.newHandlerTracker("snapshot")
+	defer tracker.Fix()
+
+	b.log.Debugw("taking balancer snapshot")
+
+	// Take snapshot via FFI
+	snapshot, err := b.handle.Snapshot()
+	if err != nil {
+		b.log.Errorw("failed to take snapshot", "error", err)
+		return nil, fmt.Errorf("failed to take snapshot: %w", err)
+	}
+
+	// Convert FFI snapshot to protobuf
+	protoSnapshot, err := NewBalancerSnapshotFromFFI(snapshot)
+	if err != nil {
+		b.log.Errorw("failed to convert snapshot", "error", err)
+		return nil, fmt.Errorf("failed to convert snapshot: %w", err)
+	}
+
+	b.log.Infow("balancer snapshot taken successfully",
+		"vs_count", len(protoSnapshot.VirtualServices),
+		"real_count", len(protoSnapshot.Reals),
+	)
+
+	return protoSnapshot, nil
+}
+
 func (b *BalancerManager) UpdateReals(
 	updates []*balancerpb.RealUpdate,
 	buffer bool,

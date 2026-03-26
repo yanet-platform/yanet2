@@ -17,6 +17,9 @@ import (
 	"fmt"
 	"time"
 	"unsafe"
+
+	"github.com/yanet-platform/yanet2/modules/balancer/agent/balancerpb"
+	"github.com/yanet-platform/yanet2/modules/balancer/agent/go/ffi/proto"
 )
 
 var (
@@ -240,4 +243,24 @@ func (m *BalancerManager) Graph() *BalancerGraph {
 	C.balancer_manager_graph_free(&cGraph)
 
 	return graph
+}
+
+type SnapshotParams struct {
+	IncludeACL            bool
+	IncludeActiveSessions bool
+	PacketHandlerRef      *balancerpb.PacketHandlerRef
+}
+
+func (m *BalancerManager) Snapshot(params *SnapshotParams) *balancerpb.BalancerSnapshot {
+	var cSnapshot C.struct_balancer_snapshot
+
+	var cSnapshotParams C.struct_balancer_snapshot_params
+	cSnapshotParams.include_vs_acl = C.bool(params.IncludeACL)
+	cSnapshotParams.include_active_sessions = C.bool(params.IncludeActiveSessions)
+	cSnapshotParams.packet_handler_ref = goToCPacketHandlerRef(params.PacketHandlerRef)
+
+	C.balancer_manager_snapshot(m.handle, &cSnapshot, &cSnapshotParams)
+	defer C.balancer_manager_snapshot_free(&cSnapshot)
+
+	return proto.ConvertBalancerSnapshot(unsafe.Pointer(&cSnapshot))
 }

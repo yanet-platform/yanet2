@@ -1263,6 +1263,17 @@ func cToGoCommonStats(cStats *C.struct_balancer_common_stats) CommonStats {
 	}
 }
 
+func convertArrayToString(arr [16]C.char) string {
+	// Get pointer to the first element
+	ptr := (*C.char)(&arr[0])
+
+	// Let C safely determine the length (up to 16 maximum)
+	length := C.strnlen(ptr, 16)
+
+	// Convert exactly that length into a Go string
+	return C.GoStringN(ptr, C.int(length))
+}
+
 func cToGoNamedVsStats(cStats *C.struct_named_vs_stats) *NamedVsStats {
 	if cStats == nil {
 		return nil
@@ -1334,11 +1345,7 @@ func cToGoNamedVsStats(cStats *C.struct_named_vs_stats) *NamedVsStats {
 
 		for i := range stats.AllowedSources {
 			// Convert C *char to Go string
-			if cAllowedSourcesSlice[i].tag != nil {
-				stats.AllowedSources[i].Tag = C.GoString(cAllowedSourcesSlice[i].tag)
-			} else {
-				stats.AllowedSources[i].Tag = ""
-			}
+			stats.AllowedSources[i].Tag = convertArrayToString(cAllowedSourcesSlice[i].tag)
 			stats.AllowedSources[i].Passes = uint64(
 				cAllowedSourcesSlice[i].passes,
 			)
