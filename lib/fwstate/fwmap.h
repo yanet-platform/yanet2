@@ -567,9 +567,11 @@ fwmap_next_free_key(fwmap_t *map) {
 	//
 	// Maximum overflow scenario:
 	// - key_cursor can overflow by at most: batch_size * worker_count
-	// - After worker_round, all threads have passed through __atomic_fetch_add,
+	// - After worker_round, all threads have passed through
+	// __atomic_fetch_add,
 	//   so all threads see the same (slightly overflowed) counter value.
-	// - This prevents infinite overflow - the counter stabilizes after one round.
+	// - This prevents infinite overflow - the counter stabilizes after one
+	// round.
 	uint32_t curr_key =
 		__atomic_fetch_add(&map->key_cursor, 1, __ATOMIC_RELAXED);
 	if (curr_key > map->index_mask) {
@@ -746,9 +748,10 @@ fwmap_new(const fwmap_config_t *user_config, struct memory_context *ctx) {
 		return NULL;
 	}
 	// Validate that index_size is not more than half of u32 address space.
-	// This ensures that key_cursor overflow in fwmap_next_free_key is bounded
-	// and prevents excessive memory usage. At 50% of u32 (~2.1B keys),
-	// memory for buckets alone is ~32 GB, which is unlikely to be allocated.
+	// This ensures that key_cursor overflow in fwmap_next_free_key is
+	// bounded and prevents excessive memory usage. At 50% of u32 (~2.1B
+	// keys), memory for buckets alone is ~32 GB, which is unlikely to be
+	// allocated.
 	if (index_size > UINT32_MAX / 2) {
 		errno = EINVAL;
 		return NULL;
