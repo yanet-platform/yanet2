@@ -1690,9 +1690,12 @@ impl BinarySplit for Ipv6Network {
     }
 }
 
+/// An error that occurs when parsing a contiguous IP network.
 #[derive(Debug, PartialEq)]
 pub enum ContiguousIpNetParseError {
+    /// The network is not contiguous.
     NonContiguousNetwork,
+    /// An error occurred while parsing the IP network.
     IpNetParseError(IpNetParseError),
 }
 
@@ -1714,6 +1717,10 @@ impl Display for ContiguousIpNetParseError {
 
 impl Error for ContiguousIpNetParseError {}
 
+/// A contiguous IP network.
+///
+/// Represents a wrapper around an IP network that is **guaranteed to be
+/// contiguous**.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Contiguous<T>(T);
 
@@ -1730,8 +1737,17 @@ impl Contiguous<IpNetwork> {
     }
 
     /// Returns the prefix length of the network.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use netip::{Contiguous, IpNetwork};
+    ///
+    /// let net = Contiguous::<IpNetwork>::parse("192.168.1.0/24").unwrap();
+    /// assert_eq!(24, net.prefix());
+    /// ```
     #[inline]
-    pub fn prefix(&self) -> u8 {
+    pub const fn prefix(&self) -> u8 {
         match self {
             Self(IpNetwork::V4(net)) => Contiguous(*net).prefix(),
             Self(IpNetwork::V6(net)) => Contiguous(*net).prefix(),
@@ -1752,6 +1768,15 @@ impl Contiguous<Ipv4Network> {
     }
 
     /// Returns the prefix length of the network.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use netip::{Contiguous, Ipv4Network};
+    ///
+    /// let net = Contiguous::<Ipv4Network>::parse("172.16.0.0/12").unwrap();
+    /// assert_eq!(12, net.prefix());
+    /// ```
     #[inline]
     pub const fn prefix(&self) -> u8 {
         match self {
@@ -1777,6 +1802,15 @@ impl Contiguous<Ipv6Network> {
     }
 
     /// Returns the prefix length of the network.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use netip::{Contiguous, Ipv6Network};
+    ///
+    /// let net = Contiguous::<Ipv6Network>::parse("2a02:6b8:c00::/40").unwrap();
+    /// assert_eq!(40, net.prefix());
+    /// ```
     #[inline]
     pub const fn prefix(&self) -> u8 {
         match self {
