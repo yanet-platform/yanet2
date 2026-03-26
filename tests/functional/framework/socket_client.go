@@ -378,6 +378,8 @@ func (sc *SocketClient) ReceiveAllPackets(timeout time.Duration, dumpPath string
 		return nil, fmt.Errorf("not connected to socket")
 	}
 
+	parser := NewPacketParser()
+	ourMAC := MustParseMAC(SrcMAC)
 	var packets [][]byte
 
 	for {
@@ -416,7 +418,19 @@ func (sc *SocketClient) ReceiveAllPackets(timeout time.Duration, dumpPath string
 			sc.log.Warnf("Failed to write to dump file: %v", err)
 		}
 
-		packets = append(packets, packetData)
+		// Parse the packet to check DstMAC
+		packetInfo, err := parser.ParsePacket(packetData)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse packet: %w", err)
+		}
+
+		// Check if the packet has the correct DstMAC
+		if packetInfo.DstMAC.String() == ourMAC.String() {
+			packets = append(packets, packetData)
+			sc.log.Debugf("Received packet with correct DstMAC, total: %d", len(packets))
+		} else {
+			sc.log.Debugf("Skipping packet with incorrect DstMAC: %s (expected: %s)", packetInfo.DstMAC, ourMAC)
+		}
 	}
 
 	return packets, nil
