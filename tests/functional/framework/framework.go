@@ -714,7 +714,36 @@ func (f *F) GetSocketClient(ifaceIndex int) (*SocketClient, error) {
 
 	// Return a new client instance with the current framework's logger
 	// This shares the underlying connection (inner) but has its own logger
-	return client.WithLog(f.log.With("interface", ifaceIndex)), nil
+	clientWithLog := client.WithLog(f.log.With("interface", ifaceIndex))
+
+	return clientWithLog, nil
+}
+
+// resetAllConnections closes and reconnects all socket clients.
+// This ensures a clean state before starting a new test, preventing
+// packet leakage between tests. Unlike draining, this approach
+// guarantees a completely clean stream by discarding any buffered
+// data with the old connection.
+//
+// The method iterates through all existing socket clients and
+// resets their connections. Errors during reset are logged but
+// do not cause the operation to fail.
+//
+// Example:
+//
+//	f.resetAllConnections()
+func (f *F) resetAllConnections() {
+	f.socketClients.mutex.Lock()
+	defer f.socketClients.mutex.Unlock()
+
+	// Reset all existing socket clients
+	for i, client := range f.socketClients.clients {
+		if err := client.ResetConnection(); err != nil {
+			f.log.Warnf("Failed to reset connection for interface %d: %v", i, err)
+		} else {
+			f.log.Debugf("Reset connection for interface %d", i)
+		}
+	}
 }
 
 // ExecuteCommand executes a single CLI command within the QEMU virtual machine
@@ -1164,6 +1193,13 @@ func (f *F) Run(name string, fn func(fw *F, t *testing.T)) bool {
 	if f.t == nil {
 		panic("Run() can only be called on TestFramework created via ForTest()")
 	}
+
+	// Reset socket connections before test to ensure clean state
+	// This prevents packet leakage between tests by discarding any
+	// buffered data with the old connection
+	f.log.Debugf("Resetting socket connections before test '%s'", name)
+	f.resetAllConnections()
+
 	return f.t.Run(name, func(t *testing.T) {
 		// Create a new TestFramework with the subtest's full name
 		subFw := f.withTestName(t.Name())
