@@ -1,7 +1,7 @@
-package decap
+package ffi
 
-//#cgo CFLAGS: -I../../../
-//#cgo LDFLAGS: -L../../../build/modules/decap/api -ldecap_cp
+//#cgo CFLAGS: -I../../../../ -I../../../../lib
+//#cgo LDFLAGS: -L../../../../build/modules/decap/api -ldecap_cp
 //
 //#include "api/agent.h"
 //#include "modules/decap/api/controlplane.h"
@@ -9,17 +9,18 @@ import "C"
 
 import (
 	"fmt"
-	"net/netip"
 	"unsafe"
 
-	"github.com/yanet-platform/yanet2/common/go/xnetip"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 )
 
+// ModuleConfig is an opaque handle to the decap module configuration in shared
+// memory.
 type ModuleConfig struct {
 	ptr ffi.ModuleConfig
 }
 
+// NewModuleConfig allocates a new decap module configuration via the C API.
 func NewModuleConfig(agent *ffi.Agent, name string) (*ModuleConfig, error) {
 	cName := C.CString(name)
 	defer C.free(unsafe.Pointer(cName))
@@ -41,41 +42,41 @@ func (m *ModuleConfig) asRawPtr() *C.struct_cp_module {
 	return (*C.struct_cp_module)(m.ptr.AsRawPtr())
 }
 
+// AsFFIModule returns the underlying common module config handle.
 func (m *ModuleConfig) AsFFIModule() ffi.ModuleConfig {
 	return m.ptr
 }
 
-func (m *ModuleConfig) PrefixAdd(prefix netip.Prefix) error {
-	addrStart := prefix.Addr()
-	addrEnd := xnetip.LastAddr(prefix)
-
-	if addrStart.Is4() {
-		return m.prefixAdd4(addrStart.As4(), addrEnd.As4())
+// Free releases the underlying C memory.
+//
+// Safe to call multiple times: subsequent calls are no-ops.
+func (m *ModuleConfig) Free() {
+	if ptr := m.asRawPtr(); ptr != nil {
+		C.decap_module_config_free(ptr)
+		m.ptr = ffi.ModuleConfig{}
 	}
-	if addrStart.Is6() {
-		return m.prefixAdd6(addrStart.As16(), addrEnd.As16())
-	}
-	return fmt.Errorf("unsupported prefix: must be either IPv4 or IPv6")
 }
 
-func (m *ModuleConfig) prefixAdd4(addrStart [4]byte, addrEnd [4]byte) error {
+// addPrefixV4 maps 1:1 to decap_module_config_add_prefix_v4.
+func (m *ModuleConfig) addPrefixV4(from [4]byte, to [4]byte) error {
 	if rc := C.decap_module_config_add_prefix_v4(
 		m.asRawPtr(),
-		(*C.uint8_t)(&addrStart[0]),
-		(*C.uint8_t)(&addrEnd[0]),
+		(*C.uint8_t)(&from[0]),
+		(*C.uint8_t)(&to[0]),
 	); rc != 0 {
-		return fmt.Errorf("failed to add v4 prefix: unknown error code=%d", rc)
+		return fmt.Errorf("failed to add v4 prefix: error code=%d", rc)
 	}
 	return nil
 }
 
-func (m *ModuleConfig) prefixAdd6(addrStart [16]byte, addrEnd [16]byte) error {
+// addPrefixV6 maps 1:1 to decap_module_config_add_prefix_v6.
+func (m *ModuleConfig) addPrefixV6(from [16]byte, to [16]byte) error {
 	if rc := C.decap_module_config_add_prefix_v6(
 		m.asRawPtr(),
-		(*C.uint8_t)(&addrStart[0]),
-		(*C.uint8_t)(&addrEnd[0]),
+		(*C.uint8_t)(&from[0]),
+		(*C.uint8_t)(&to[0]),
 	); rc != 0 {
-		return fmt.Errorf("failed to add v6 prefix: unknown error code=%d", rc)
+		return fmt.Errorf("failed to add v6 prefix: error code=%d", rc)
 	}
 	return nil
 }
