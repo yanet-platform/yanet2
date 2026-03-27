@@ -311,42 +311,49 @@ func (c *CLIManager) waitForCommandCompletionWithMarkers(command, fullCommand, s
 //   - error: An error if the command failed (non-zero exit code)
 func (c *CLIManager) extractCommandOutputWithMarkers(output, startMarker, endMarker string) (string, error) {
 	lines := strings.Split(output, "\n")
-	var resultLines []string
-	foundStart := false
-	retCode := 0
 
-	for _, line := range lines {
-		line = c.cleanControlCharacters(line)
-		if line == "" {
-			continue
+	// Find the LAST occurrence of startMarker before endMarker.
+	// This handles the race condition where a stale marker from a previous
+	// command leaks into the buffer after Reset() due to the readOutput
+	// goroutine writing a line it had already scanned.
+	lastStartIdx := -1
+	endIdx := -1
+	for i, line := range lines {
+		cleaned := c.cleanControlCharacters(line)
+		if strings.Contains(cleaned, startMarker) {
+			lastStartIdx = i
 		}
-
-		// Look for start marker
-		if !foundStart && strings.Contains(line, startMarker) {
-			foundStart = true
-			continue
-		}
-
-		// Look for end marker
-		if foundStart && strings.Contains(line, endMarker) {
-			// Extract return code if present in the format =<code>=
-			if matches := retCodeRegex.FindStringSubmatch(line); len(matches) > 1 {
-				if code, err := strconv.Atoi(matches[1]); err == nil {
-					retCode = code
-				}
-			}
+		if strings.Contains(cleaned, endMarker) && lastStartIdx >= 0 {
+			endIdx = i
 			break
-		}
-
-		if foundStart {
-			// Skip shell prompts and command echoes
-			if !c.isShellPrompt(line) {
-				resultLines = append(resultLines, line)
-			}
 		}
 	}
 
-	// Check if command failed based on return code
+	if lastStartIdx < 0 || endIdx < 0 {
+		return output, fmt.Errorf("markers not found in output")
+	}
+
+	var resultLines []string
+	retCode := 0
+
+	for i := lastStartIdx + 1; i < endIdx; i++ {
+		line := c.cleanControlCharacters(lines[i])
+		if line == "" {
+			continue
+		}
+		if !c.isShellPrompt(line) {
+			resultLines = append(resultLines, line)
+		}
+	}
+
+	// Extract return code from the end marker line
+	endLine := c.cleanControlCharacters(lines[endIdx])
+	if matches := retCodeRegex.FindStringSubmatch(endLine); len(matches) > 1 {
+		if code, err := strconv.Atoi(matches[1]); err == nil {
+			retCode = code
+		}
+	}
+
 	if retCode != 0 {
 		return strings.Join(resultLines, "\n"), fmt.Errorf("command failed with exit code %d", retCode)
 	}

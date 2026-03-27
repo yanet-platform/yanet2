@@ -714,9 +714,7 @@ func (f *F) GetSocketClient(ifaceIndex int) (*SocketClient, error) {
 
 	// Return a new client instance with the current framework's logger
 	// This shares the underlying connection (inner) but has its own logger
-	clientWithLog := client.WithLog(f.log.With("interface", ifaceIndex))
-
-	return clientWithLog, nil
+	return client.WithLog(f.log.With("interface", ifaceIndex)), nil
 }
 
 // resetAllConnections closes and reconnects all socket clients.

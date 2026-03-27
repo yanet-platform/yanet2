@@ -483,36 +483,10 @@ func (sc *SocketClient) Close() error {
 //	    log.Fatalf("Failed to reset connection: %v", err)
 //	}
 func (sc *SocketClient) ResetConnection() error {
-	sc.inner.connMutex.Lock()
-	defer sc.inner.connMutex.Unlock()
-
-	// Close existing connection if any
-	if sc.inner.conn != nil {
-		sc.inner.conn.Close()
-		sc.inner.conn = nil
-		sc.log.Debug("Closed existing connection for reset")
+	if err := sc.Close(); err != nil {
+		sc.log.Debugf("Close error during reset (may be expected): %v", err)
 	}
-
-	// Create new connection
-	var conn net.Conn
-	var err error
-
-	if sc.inner.socketPath != "" {
-		conn, err = net.Dial("unix", sc.inner.socketPath)
-		if err != nil {
-			return fmt.Errorf("failed to reconnect to Unix socket %s: %w", sc.inner.socketPath, err)
-		}
-		sc.log.Debugf("Reconnected to Unix socket at %s", sc.inner.socketPath)
-	} else {
-		conn, err = net.Dial("tcp", fmt.Sprintf("localhost:%d", sc.inner.port))
-		if err != nil {
-			return fmt.Errorf("failed to reconnect to TCP socket on port %d: %w", sc.inner.port, err)
-		}
-		sc.log.Debugf("Reconnected to TCP socket on port %d", sc.inner.port)
-	}
-
-	sc.inner.conn = conn
-	return nil
+	return sc.Connect()
 }
 
 // GetSocketPort returns the TCP port number configured for this socket client.

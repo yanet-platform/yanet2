@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -46,7 +47,7 @@ func setAndWaitForNAT64DropFlags(fw *framework.F, dropUnknownPrefix, dropUnknown
 				DropUnknownMapping bool `json:"drop_unknown_mapping"`
 			}
 		}{}
-		err = json.Unmarshal([]byte(output), &status)
+		err = json.Unmarshal([]byte(extractJSON(output)), &status)
 		if err != nil {
 			return fmt.Errorf("failed to parse NAT64 status ===%s===: %w", output, err)
 		}
@@ -60,6 +61,28 @@ func setAndWaitForNAT64DropFlags(fw *framework.F, dropUnknownPrefix, dropUnknown
 	}
 
 	return fmt.Errorf("timeout waiting for NAT64 drop flags to be applied (prefix=%v, mapping=%v)", dropUnknownPrefix, dropUnknownMapping)
+}
+
+// extractJSON extracts a JSON object from potentially noisy CLI output.
+// It finds the first '{' and matching closing '}', stripping any prefix/suffix noise.
+func extractJSON(s string) string {
+	start := strings.Index(s, "{")
+	if start < 0 {
+		return s
+	}
+	depth := 0
+	for i := start; i < len(s); i++ {
+		switch s[i] {
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return s[start : i+1]
+			}
+		}
+	}
+	return s[start:]
 }
 
 // TestNAT64_BasicFunctionality tests basic NAT64 module functionality
