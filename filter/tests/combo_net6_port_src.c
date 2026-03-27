@@ -85,8 +85,7 @@ test_no_match_port_only(void *arena) {
 	memcpy(net.mask, mask, NET6_LEN);
 	builder_add_net6_src(&builder, net);
 	builder_add_port_src_range(&builder, 80, 90);
-	struct filter_rule rule =
-		build_rule(&builder, 1 | ACTION_NON_TERMINATE);
+	struct filter_rule rule = build_rule(&builder, 1);
 
 	// Test packets: IP matches but port doesn't
 	const struct {
@@ -178,8 +177,7 @@ test_no_match_ip_only(void *arena) {
 	memcpy(net.mask, mask, NET6_LEN);
 	builder_add_net6_src(&builder, net);
 	builder_add_port_src_range(&builder, 80, 90);
-	struct filter_rule rule =
-		build_rule(&builder, 1 | ACTION_NON_TERMINATE);
+	struct filter_rule rule = build_rule(&builder, 1);
 
 	// Test packets: Port matches but IP doesn't
 	const struct {
@@ -286,8 +284,7 @@ test_both_match(void *arena) {
 	memcpy(net.mask, mask, NET6_LEN);
 	builder_add_net6_src(&builder, net);
 	builder_add_port_src_range(&builder, 80, 90);
-	struct filter_rule rule =
-		build_rule(&builder, 1 | ACTION_NON_TERMINATE);
+	struct filter_rule rule = build_rule(&builder, 1);
 
 	// Test packets: Both IP and port match
 	const struct {
@@ -347,7 +344,7 @@ test_both_match(void *arena) {
 		expected_ranges[i] = malloc(sizeof(struct value_range));
 		expected_ranges[i]->count = 1;
 		expected_ranges[i]->values = malloc(sizeof(uint32_t) * 2);
-		expected_ranges[i]->values[0] = 1 | ACTION_NON_TERMINATE;
+		expected_ranges[i]->values[0] = 1;
 	}
 
 	struct block_allocator alloc;

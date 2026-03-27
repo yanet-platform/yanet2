@@ -199,9 +199,7 @@ test_basic(void *arena, enum filter_sign sign) {
 		builder->net6_dst[0] = net;
 		builder->net6_src[0] = net;
 
-		rules[net_idx] = build_rule(
-			builder, (net_idx + 1) | ACTION_NON_TERMINATE
-		);
+		rules[net_idx] = build_rule(builder, (net_idx + 1));
 		// Calculate range for this network
 		uint8_t from = nets[net_idx].addr[15] & mask[15];
 		uint8_t to = nets[net_idx].addr[15] | ~mask[15];
@@ -209,10 +207,11 @@ test_basic(void *arena, enum filter_sign sign) {
 		for (size_t check_idx = 0; check_idx < checks_count;
 		     ++check_idx) {
 			if (from <= checks[check_idx] &&
-			    checks[check_idx] <= to) {
+			    checks[check_idx] <= to &&
+			    !expected_ranges[check_idx]->count) {
 				expected_ranges[check_idx]->values
 					[expected_ranges[check_idx]->count++] =
-					(net_idx + 1) | ACTION_NON_TERMINATE;
+					(net_idx + 1);
 			}
 		}
 	}
@@ -449,14 +448,14 @@ test_multiple_nets_per_rule(void *arena, enum filter_sign sign) {
 	// Packets 0-2 match rule 1, packets 3-4 match rule 2, packets 5-6 match
 	// rule 3, packet 7 matches nothing
 	uint32_t expected_actions[][3] = {
-		{1 | ACTION_NON_TERMINATE, 0, 0}, // Packet 0: Rule 1
-		{1 | ACTION_NON_TERMINATE, 0, 0}, // Packet 1: Rule 1
-		{1 | ACTION_NON_TERMINATE, 0, 0}, // Packet 2: Rule 1
-		{2 | ACTION_NON_TERMINATE, 0, 0}, // Packet 3: Rule 2
-		{2 | ACTION_NON_TERMINATE, 0, 0}, // Packet 4: Rule 2
-		{3 | ACTION_NON_TERMINATE, 0, 0}, // Packet 5: Rule 3
-		{3 | ACTION_NON_TERMINATE, 0, 0}, // Packet 6: Rule 3
-		{0, 0, 0},			  // Packet 7: No match
+		{1, 0, 0}, // Packet 0: Rule 1
+		{1, 0, 0}, // Packet 1: Rule 1
+		{1, 0, 0}, // Packet 2: Rule 1
+		{2, 0, 0}, // Packet 3: Rule 2
+		{2, 0, 0}, // Packet 4: Rule 2
+		{3, 0, 0}, // Packet 5: Rule 3
+		{3, 0, 0}, // Packet 6: Rule 3
+		{0, 0, 0}, // Packet 7: No match
 	};
 	uint32_t expected_counts[] = {1, 1, 1, 1, 1, 1, 1, 0};
 
@@ -489,7 +488,7 @@ test_multiple_nets_per_rule(void *arena, enum filter_sign sign) {
 			builder_add_net6_dst(&builders[0], net);
 		}
 	}
-	rules[0] = build_rule(&builders[0], 1 | ACTION_NON_TERMINATE);
+	rules[0] = build_rule(&builders[0], 1);
 
 	// Rule 2: Add 2 networks
 	builder_init(&builders[1]);
@@ -505,7 +504,7 @@ test_multiple_nets_per_rule(void *arena, enum filter_sign sign) {
 			builder_add_net6_dst(&builders[1], net);
 		}
 	}
-	rules[1] = build_rule(&builders[1], 2 | ACTION_NON_TERMINATE);
+	rules[1] = build_rule(&builders[1], 2);
 
 	// Rule 3: Add 2 networks
 	builder_init(&builders[2]);
@@ -521,7 +520,7 @@ test_multiple_nets_per_rule(void *arena, enum filter_sign sign) {
 			builder_add_net6_dst(&builders[2], net);
 		}
 	}
-	rules[2] = build_rule(&builders[2], 3 | ACTION_NON_TERMINATE);
+	rules[2] = build_rule(&builders[2], 3);
 
 	struct block_allocator alloc;
 	int res = block_allocator_init(&alloc);
@@ -640,10 +639,8 @@ stress(void *arena,
 			}
 		}
 
-		rules[rule_idx] = build_rule(
-			&builders[rule_idx],
-			(rule_idx + 1) | ACTION_NON_TERMINATE
-		);
+		rules[rule_idx] =
+			build_rule(&builders[rule_idx], (rule_idx + 1));
 	}
 
 	struct value_range **expected_ranges =
@@ -735,8 +732,7 @@ stress(void *arena,
 			if (ok) {
 				struct value_range *range =
 					expected_ranges[packet_idx];
-				range->values[range->count++] =
-					(rule_idx + 1) | ACTION_NON_TERMINATE;
+				range->values[range->count++] = (rule_idx + 1);
 			}
 		}
 	}
@@ -845,9 +841,7 @@ test_no_match(void *arena, enum filter_sign sign) {
 		} else {
 			builder_add_net6_dst(&builders[net_idx], net);
 		}
-		rules[net_idx] = build_rule(
-			&builders[net_idx], (net_idx + 1) | ACTION_NON_TERMINATE
-		);
+		rules[net_idx] = build_rule(&builders[net_idx], (net_idx + 1));
 	}
 
 	// Expected: no matches for any packet
@@ -1059,24 +1053,18 @@ test_overlapping_networks(void *arena, enum filter_sign sign) {
 		} else {
 			builder_add_net6_dst(&builders[net_idx], net);
 		}
-		rules[net_idx] = build_rule(
-			&builders[net_idx], (net_idx + 1) | ACTION_NON_TERMINATE
-		);
+		rules[net_idx] = build_rule(&builders[net_idx], (net_idx + 1));
 	}
 
 	// Expected matches
 	uint32_t expected_actions[][4] = {
-		{1 | ACTION_NON_TERMINATE,
-		 2 | ACTION_NON_TERMINATE,
-		 3 | ACTION_NON_TERMINATE,
-		 0}, // Packet 0: rules 1,2,3
-		{1 | ACTION_NON_TERMINATE, 2 | ACTION_NON_TERMINATE, 0, 0
-		},				     // Packet 1: rules 1,2
-		{1 | ACTION_NON_TERMINATE, 0, 0, 0}, // Packet 2: rule 1
-		{4 | ACTION_NON_TERMINATE, 0, 0, 0}, // Packet 3: rule 4
-		{0, 0, 0, 0},			     // Packet 4: no match
+		{1, 0, 0, 0}, // Packet 0: rules 1,2,3
+		{1, 0, 0, 0}, // Packet 1: rules 1,2
+		{1, 0, 0, 0}, // Packet 2: rule 1
+		{4, 0, 0, 0}, // Packet 3: rule 4
+		{0, 0, 0, 0}, // Packet 4: no match
 	};
-	uint32_t expected_counts[] = {3, 2, 1, 1, 0};
+	uint32_t expected_counts[] = {1, 1, 1, 1, 0};
 
 	struct value_range *expected_ranges[test_ips_count];
 	for (size_t i = 0; i < test_ips_count; ++i) {
@@ -1245,9 +1233,7 @@ test_boundary_conditions(void *arena, enum filter_sign sign) {
 		} else {
 			builder_add_net6_dst(&builders[net_idx], net);
 		}
-		rules[net_idx] = build_rule(
-			&builders[net_idx], (net_idx + 1) | ACTION_NON_TERMINATE
-		);
+		rules[net_idx] = build_rule(&builders[net_idx], (net_idx + 1));
 	}
 
 	// Expected: first 4 match, last 2 don't
@@ -1258,8 +1244,7 @@ test_boundary_conditions(void *arena, enum filter_sign sign) {
 		expected_ranges[i]->count = expected_counts[i];
 		expected_ranges[i]->values = malloc(sizeof(uint32_t) * 2);
 		if (expected_counts[i] > 0) {
-			expected_ranges[i]->values[0] =
-				1 | ACTION_NON_TERMINATE;
+			expected_ranges[i]->values[0] = 1;
 		}
 	}
 
@@ -1384,16 +1369,14 @@ test_single_host_networks(void *arena, enum filter_sign sign) {
 		} else {
 			builder_add_net6_dst(&builders[net_idx], net);
 		}
-		rules[net_idx] = build_rule(
-			&builders[net_idx], (net_idx + 1) | ACTION_NON_TERMINATE
-		);
+		rules[net_idx] = build_rule(&builders[net_idx], (net_idx + 1));
 	}
 
 	// Expected: first 3 match their respective rules, last 3 don't match
 	uint32_t expected_actions[][1] = {
-		{1 | ACTION_NON_TERMINATE},
-		{2 | ACTION_NON_TERMINATE},
-		{3 | ACTION_NON_TERMINATE},
+		{1},
+		{2},
+		{3},
 		{0},
 		{0},
 		{0},
@@ -1572,19 +1555,17 @@ test_adjacent_networks(void *arena, enum filter_sign sign) {
 		} else {
 			builder_add_net6_dst(&builders[net_idx], net);
 		}
-		rules[net_idx] = build_rule(
-			&builders[net_idx], (net_idx + 1) | ACTION_NON_TERMINATE
-		);
+		rules[net_idx] = build_rule(&builders[net_idx], (net_idx + 1));
 	}
 
 	// Expected: packets 0,1,4 match rule 1; packets 2,3,5 match rule 2
 	uint32_t expected_actions[][1] = {
-		{1 | ACTION_NON_TERMINATE}, // Packet 0
-		{1 | ACTION_NON_TERMINATE}, // Packet 1
-		{2 | ACTION_NON_TERMINATE}, // Packet 2
-		{2 | ACTION_NON_TERMINATE}, // Packet 3
-		{1 | ACTION_NON_TERMINATE}, // Packet 4
-		{2 | ACTION_NON_TERMINATE}, // Packet 5
+		{1}, // Packet 0
+		{1}, // Packet 1
+		{2}, // Packet 2
+		{2}, // Packet 3
+		{1}, // Packet 4
+		{2}, // Packet 5
 	};
 	uint32_t expected_counts[] = {1, 1, 1, 1, 1, 1};
 

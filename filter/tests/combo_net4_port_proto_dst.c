@@ -45,8 +45,7 @@ test_no_match_proto_only(void *arena) {
 	builder_add_net4_dst(&builder, ip(10, 0, 0, 0), ip(255, 255, 255, 0));
 	builder_add_port_dst_range(&builder, 80, 90);
 	builder_set_proto(&builder, IPPROTO_TCP, 0, 0);
-	struct filter_rule rule =
-		build_rule(&builder, 1 | ACTION_NON_TERMINATE);
+	struct filter_rule rule = build_rule(&builder, 1);
 
 	// Test packets: IP and port match but protocol doesn't
 	const struct {
@@ -130,8 +129,7 @@ test_all_match(void *arena) {
 	builder_add_net4_dst(&builder, ip(10, 0, 0, 0), ip(255, 255, 255, 0));
 	builder_add_port_dst_range(&builder, 80, 90);
 	builder_set_proto(&builder, IPPROTO_TCP, 0, 0);
-	struct filter_rule rule =
-		build_rule(&builder, 1 | ACTION_NON_TERMINATE);
+	struct filter_rule rule = build_rule(&builder, 1);
 
 	// Test packets: All match
 	const struct {
@@ -169,7 +167,7 @@ test_all_match(void *arena) {
 		expected_ranges[i] = malloc(sizeof(struct value_range));
 		expected_ranges[i]->count = 1;
 		expected_ranges[i]->values = malloc(sizeof(uint32_t) * 2);
-		expected_ranges[i]->values[0] = 1 | ACTION_NON_TERMINATE;
+		expected_ranges[i]->values[0] = 1;
 	}
 
 	struct block_allocator alloc;
@@ -216,8 +214,7 @@ test_multiple_rules_overlap(void *arena) {
 	builder_add_net4_dst(&builder1, ip(10, 0, 0, 0), ip(255, 255, 255, 0));
 	builder_add_port_dst_range(&builder1, 80, 90);
 	builder_set_proto(&builder1, IPPROTO_TCP, 0, 0);
-	struct filter_rule rule1 =
-		build_rule(&builder1, 1 | ACTION_NON_TERMINATE);
+	struct filter_rule rule1 = build_rule(&builder1, 1);
 
 	// Rule 2: dst IP 10.0.0.0/16, dst port 85-95, TCP
 	struct filter_rule_builder builder2;
@@ -225,8 +222,7 @@ test_multiple_rules_overlap(void *arena) {
 	builder_add_net4_dst(&builder2, ip(10, 0, 0, 0), ip(255, 255, 0, 0));
 	builder_add_port_dst_range(&builder2, 85, 95);
 	builder_set_proto(&builder2, IPPROTO_TCP, 0, 0);
-	struct filter_rule rule2 =
-		build_rule(&builder2, 2 | ACTION_NON_TERMINATE);
+	struct filter_rule rule2 = build_rule(&builder2, 2);
 
 	// Rule 3: dst IP 10.0.0.0/24, dst port 80-90, UDP
 	struct filter_rule_builder builder3;
@@ -234,8 +230,7 @@ test_multiple_rules_overlap(void *arena) {
 	builder_add_net4_dst(&builder3, ip(10, 0, 0, 0), ip(255, 255, 255, 0));
 	builder_add_port_dst_range(&builder3, 80, 90);
 	builder_set_proto(&builder3, IPPROTO_UDP, 0, 0);
-	struct filter_rule rule3 =
-		build_rule(&builder3, 3 | ACTION_NON_TERMINATE);
+	struct filter_rule rule3 = build_rule(&builder3, 3);
 
 	struct filter_rule rules[] = {rule1, rule2, rule3};
 
@@ -248,35 +243,15 @@ test_multiple_rules_overlap(void *arena) {
 		uint32_t expected_actions[3];
 	} test_cases[] = {
 		// IP: 10.0.0.50, Port: 85, TCP -> matches rule1 and rule2
-		{{10, 0, 0, 50},
-		 85,
-		 IPPROTO_TCP,
-		 2,
-		 {1 | ACTION_NON_TERMINATE, 2 | ACTION_NON_TERMINATE, 0}},
+		{{10, 0, 0, 50}, 85, IPPROTO_TCP, 1, {1, 0, 0}},
 		// IP: 10.0.0.50, Port: 80, TCP -> matches rule1 only
-		{{10, 0, 0, 50},
-		 80,
-		 IPPROTO_TCP,
-		 1,
-		 {1 | ACTION_NON_TERMINATE, 0, 0}},
+		{{10, 0, 0, 50}, 80, IPPROTO_TCP, 1, {1, 0, 0}},
 		// IP: 10.0.1.50, Port: 85, TCP -> matches rule2 only
-		{{10, 0, 1, 50},
-		 85,
-		 IPPROTO_TCP,
-		 1,
-		 {2 | ACTION_NON_TERMINATE, 0, 0}},
+		{{10, 0, 1, 50}, 85, IPPROTO_TCP, 1, {2, 0, 0}},
 		// IP: 10.0.0.50, Port: 85, UDP -> matches rule3 only
-		{{10, 0, 0, 50},
-		 85,
-		 IPPROTO_UDP,
-		 1,
-		 {3 | ACTION_NON_TERMINATE, 0, 0}},
+		{{10, 0, 0, 50}, 85, IPPROTO_UDP, 1, {3, 0, 0}},
 		// IP: 10.0.0.50, Port: 95, TCP -> matches rule2 only
-		{{10, 0, 0, 50},
-		 95,
-		 IPPROTO_TCP,
-		 1,
-		 {2 | ACTION_NON_TERMINATE, 0, 0}},
+		{{10, 0, 0, 50}, 95, IPPROTO_TCP, 1, {2, 0, 0}},
 		// IP: 10.0.0.50, Port: 100, TCP -> no match
 		{{10, 0, 0, 50}, 100, IPPROTO_TCP, 0, {0, 0, 0}},
 		// IP: 10.1.0.50, Port: 85, TCP -> no match (outside /16)
@@ -357,8 +332,7 @@ test_tcp_flags(void *arena) {
 	builder_add_net4_dst(&builder1, ip(10, 0, 0, 0), ip(255, 255, 255, 0));
 	builder_add_port_dst_range(&builder1, 80, 80);
 	builder_set_proto(&builder1, IPPROTO_TCP, 0x02, 0); // SYN flag
-	struct filter_rule rule1 =
-		build_rule(&builder1, 1 | ACTION_NON_TERMINATE);
+	struct filter_rule rule1 = build_rule(&builder1, 1);
 
 	// Rule 2: dst IP 10.0.0.0/24, dst port 80, TCP with ACK flag
 	struct filter_rule_builder builder2;
@@ -366,8 +340,7 @@ test_tcp_flags(void *arena) {
 	builder_add_net4_dst(&builder2, ip(10, 0, 0, 0), ip(255, 255, 255, 0));
 	builder_add_port_dst_range(&builder2, 80, 80);
 	builder_set_proto(&builder2, IPPROTO_TCP, 0x10, 0); // ACK flag
-	struct filter_rule rule2 =
-		build_rule(&builder2, 2 | ACTION_NON_TERMINATE);
+	struct filter_rule rule2 = build_rule(&builder2, 2);
 
 	struct filter_rule rules[] = {rule1, rule2};
 
@@ -381,26 +354,11 @@ test_tcp_flags(void *arena) {
 		uint32_t expected_actions[2];
 	} test_cases[] = {
 		// SYN flag -> matches rule1
-		{{10, 0, 0, 1},
-		 80,
-		 IPPROTO_TCP,
-		 0x02,
-		 1,
-		 {1 | ACTION_NON_TERMINATE, 0}},
+		{{10, 0, 0, 1}, 80, IPPROTO_TCP, 0x02, 1, {1, 0}},
 		// ACK flag -> matches rule2
-		{{10, 0, 0, 1},
-		 80,
-		 IPPROTO_TCP,
-		 0x10,
-		 1,
-		 {2 | ACTION_NON_TERMINATE, 0}},
+		{{10, 0, 0, 1}, 80, IPPROTO_TCP, 0x10, 1, {2, 0}},
 		// SYN+ACK flags -> matches both rules
-		{{10, 0, 0, 1},
-		 80,
-		 IPPROTO_TCP,
-		 0x12,
-		 2,
-		 {1 | ACTION_NON_TERMINATE, 2 | ACTION_NON_TERMINATE}},
+		{{10, 0, 0, 1}, 80, IPPROTO_TCP, 0x12, 1, {1, 0}},
 		// FIN flag -> no match
 		{{10, 0, 0, 1}, 80, IPPROTO_TCP, 0x01, 0, {0, 0}},
 		// No flags -> no match

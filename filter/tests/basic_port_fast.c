@@ -184,17 +184,16 @@ test_basic(void *arena, enum filter_sign sign) {
 			);
 		}
 
-		rules[range_idx] = build_rule(
-			builder, (range_idx + 1) | ACTION_NON_TERMINATE
-		);
+		rules[range_idx] = build_rule(builder, (range_idx + 1));
 
 		for (size_t check_idx = 0; check_idx < checks_count;
 		     ++check_idx) {
 			if (ranges[range_idx].from <= check_ports[check_idx] &&
-			    check_ports[check_idx] <= ranges[range_idx].to) {
+			    check_ports[check_idx] <= ranges[range_idx].to &&
+			    !expected_ranges[check_idx]->count) {
 				expected_ranges[check_idx]->values
 					[expected_ranges[check_idx]->count++] =
-					(range_idx + 1) | ACTION_NON_TERMINATE;
+					(range_idx + 1);
 			}
 		}
 	}
@@ -280,14 +279,14 @@ test_multiple_ranges_per_rule(void *arena, enum filter_sign sign) {
 
 	// Expected actions for each test packet
 	uint32_t expected_actions[][3] = {
-		{1 | ACTION_NON_TERMINATE, 0, 0}, // Packet 0: Rule 1
-		{1 | ACTION_NON_TERMINATE, 0, 0}, // Packet 1: Rule 1
-		{1 | ACTION_NON_TERMINATE, 0, 0}, // Packet 2: Rule 1
-		{2 | ACTION_NON_TERMINATE, 0, 0}, // Packet 3: Rule 2
-		{2 | ACTION_NON_TERMINATE, 0, 0}, // Packet 4: Rule 2
-		{3 | ACTION_NON_TERMINATE, 0, 0}, // Packet 5: Rule 3
-		{3 | ACTION_NON_TERMINATE, 0, 0}, // Packet 6: Rule 3
-		{0, 0, 0},			  // Packet 7: No match
+		{1, 0, 0}, // Packet 0: Rule 1
+		{1, 0, 0}, // Packet 1: Rule 1
+		{1, 0, 0}, // Packet 2: Rule 1
+		{2, 0, 0}, // Packet 3: Rule 2
+		{2, 0, 0}, // Packet 4: Rule 2
+		{3, 0, 0}, // Packet 5: Rule 3
+		{3, 0, 0}, // Packet 6: Rule 3
+		{0, 0, 0}, // Packet 7: No match
 	};
 	uint32_t expected_counts[] = {1, 1, 1, 1, 1, 1, 1, 0};
 
@@ -317,7 +316,7 @@ test_multiple_ranges_per_rule(void *arena, enum filter_sign sign) {
 		builder_add_port_dst_range(&builders[0], 443, 443);
 		builder_add_port_dst_range(&builders[0], 8080, 8080);
 	}
-	rules[0] = build_rule(&builders[0], 1 | ACTION_NON_TERMINATE);
+	rules[0] = build_rule(&builders[0], 1);
 
 	// Rule 2: Add 2 port ranges (22, 3389)
 	builder_init(&builders[1]);
@@ -328,7 +327,7 @@ test_multiple_ranges_per_rule(void *arena, enum filter_sign sign) {
 		builder_add_port_dst_range(&builders[1], 22, 22);
 		builder_add_port_dst_range(&builders[1], 3389, 3389);
 	}
-	rules[1] = build_rule(&builders[1], 2 | ACTION_NON_TERMINATE);
+	rules[1] = build_rule(&builders[1], 2);
 
 	// Rule 3: Add 2 port ranges (3306, 5432)
 	builder_init(&builders[2]);
@@ -339,7 +338,7 @@ test_multiple_ranges_per_rule(void *arena, enum filter_sign sign) {
 		builder_add_port_dst_range(&builders[2], 3306, 3306);
 		builder_add_port_dst_range(&builders[2], 5432, 5432);
 	}
-	rules[2] = build_rule(&builders[2], 3 | ACTION_NON_TERMINATE);
+	rules[2] = build_rule(&builders[2], 3);
 
 	struct block_allocator alloc;
 	int res = block_allocator_init(&alloc);
@@ -438,10 +437,8 @@ stress(void *arena,
 			}
 		}
 
-		rules[rule_idx] = build_rule(
-			&builders[rule_idx],
-			(rule_idx + 1) | ACTION_NON_TERMINATE
-		);
+		rules[rule_idx] =
+			build_rule(&builders[rule_idx], (rule_idx + 1));
 	}
 
 	struct value_range **expected_ranges =
@@ -551,8 +548,9 @@ stress(void *arena,
 			if (ok) {
 				struct value_range *range =
 					expected_ranges[packet_idx];
-				range->values[range->count++] =
-					(rule_idx + 1) | ACTION_NON_TERMINATE;
+				if (!range->count)
+					range->values[range->count++] =
+						(rule_idx + 1);
 			}
 		}
 
@@ -570,8 +568,7 @@ stress(void *arena,
 			     ++i) {
 				uint32_t action =
 					expected_ranges[packet_idx]->values[i];
-				uint32_t rule_idx =
-					(action & ~ACTION_NON_TERMINATE) - 1;
+				uint32_t rule_idx = action - 1;
 				if (rule_idx < num_rules) {
 					struct filter_rule *rule =
 						&rules[rule_idx];
@@ -682,10 +679,8 @@ test_no_match(void *arena, enum filter_sign sign) {
 				ranges[range_idx].to
 			);
 		}
-		rules[range_idx] = build_rule(
-			&builders[range_idx],
-			(range_idx + 1) | ACTION_NON_TERMINATE
-		);
+		rules[range_idx] =
+			build_rule(&builders[range_idx], (range_idx + 1));
 	}
 
 	// Expected: no matches for any packet
@@ -803,25 +798,19 @@ test_overlapping_ranges(void *arena, enum filter_sign sign) {
 				ranges[range_idx].to
 			);
 		}
-		rules[range_idx] = build_rule(
-			&builders[range_idx],
-			(range_idx + 1) | ACTION_NON_TERMINATE
-		);
+		rules[range_idx] =
+			build_rule(&builders[range_idx], (range_idx + 1));
 	}
 
 	// Expected matches
 	uint32_t expected_actions[][4] = {
-		{1 | ACTION_NON_TERMINATE,
-		 2 | ACTION_NON_TERMINATE,
-		 3 | ACTION_NON_TERMINATE,
-		 0}, // Port 1350: rules 1,2,3
-		{1 | ACTION_NON_TERMINATE, 2 | ACTION_NON_TERMINATE, 0, 0
-		},				     // Port 1250: rules 1,2
-		{1 | ACTION_NON_TERMINATE, 0, 0, 0}, // Port 1100: rule 1
-		{4 | ACTION_NON_TERMINATE, 0, 0, 0}, // Port 3500: rule 4
-		{0, 0, 0, 0},			     // Port 5000: no match
+		{1, 0, 0, 0}, // Port 1350: rules 1,2,3
+		{1, 0, 0, 0}, // Port 1250: rules 1,2
+		{1, 0, 0, 0}, // Port 1100: rule 1
+		{4, 0, 0, 0}, // Port 3500: rule 4
+		{0, 0, 0, 0}, // Port 5000: no match
 	};
-	uint32_t expected_counts[] = {3, 2, 1, 1, 0};
+	uint32_t expected_counts[] = {1, 1, 1, 1, 0};
 
 	struct value_range *expected_ranges[test_ports_count];
 	for (size_t i = 0; i < test_ports_count; ++i) {
@@ -937,10 +926,8 @@ test_boundary_conditions(void *arena, enum filter_sign sign) {
 				ranges[range_idx].to
 			);
 		}
-		rules[range_idx] = build_rule(
-			&builders[range_idx],
-			(range_idx + 1) | ACTION_NON_TERMINATE
-		);
+		rules[range_idx] =
+			build_rule(&builders[range_idx], (range_idx + 1));
 	}
 
 	// Expected: first 4 match, last 2 don't
@@ -951,8 +938,7 @@ test_boundary_conditions(void *arena, enum filter_sign sign) {
 		expected_ranges[i]->count = expected_counts[i];
 		expected_ranges[i]->values = malloc(sizeof(uint32_t) * 2);
 		if (expected_counts[i] > 0) {
-			expected_ranges[i]->values[0] =
-				1 | ACTION_NON_TERMINATE;
+			expected_ranges[i]->values[0] = 1;
 		}
 	}
 
@@ -1065,18 +1051,16 @@ test_single_port_ranges(void *arena, enum filter_sign sign) {
 				ranges[range_idx].to
 			);
 		}
-		rules[range_idx] = build_rule(
-			&builders[range_idx],
-			(range_idx + 1) | ACTION_NON_TERMINATE
-		);
+		rules[range_idx] =
+			build_rule(&builders[range_idx], (range_idx + 1));
 	}
 
 	// Expected: first 4 match their respective rules, last 4 don't match
 	uint32_t expected_actions[][1] = {
-		{1 | ACTION_NON_TERMINATE},
-		{2 | ACTION_NON_TERMINATE},
-		{3 | ACTION_NON_TERMINATE},
-		{4 | ACTION_NON_TERMINATE},
+		{1},
+		{2},
+		{3},
+		{4},
 		{0},
 		{0},
 		{0},
@@ -1200,20 +1184,18 @@ test_adjacent_ranges(void *arena, enum filter_sign sign) {
 				ranges[range_idx].to
 			);
 		}
-		rules[range_idx] = build_rule(
-			&builders[range_idx],
-			(range_idx + 1) | ACTION_NON_TERMINATE
-		);
+		rules[range_idx] =
+			build_rule(&builders[range_idx], (range_idx + 1));
 	}
 
 	// Expected: ports 0,1,4 match rule 1; ports 2,3,5 match rule 2
 	uint32_t expected_actions[][1] = {
-		{1 | ACTION_NON_TERMINATE}, // Port 1000
-		{1 | ACTION_NON_TERMINATE}, // Port 1999
-		{2 | ACTION_NON_TERMINATE}, // Port 2000
-		{2 | ACTION_NON_TERMINATE}, // Port 2999
-		{1 | ACTION_NON_TERMINATE}, // Port 1500
-		{2 | ACTION_NON_TERMINATE}, // Port 2500
+		{1}, // Port 1000
+		{1}, // Port 1999
+		{2}, // Port 2000
+		{2}, // Port 2999
+		{1}, // Port 1500
+		{2}, // Port 2500
 	};
 	uint32_t expected_counts[] = {1, 1, 1, 1, 1, 1};
 
@@ -1333,30 +1315,22 @@ test_extreme_ports(void *arena, enum filter_sign sign) {
 				ranges[range_idx].to
 			);
 		}
-		rules[range_idx] = build_rule(
-			&builders[range_idx],
-			(range_idx + 1) | ACTION_NON_TERMINATE
-		);
+		rules[range_idx] =
+			build_rule(&builders[range_idx], (range_idx + 1));
 	}
 
 	// Expected matches
 	uint32_t expected_actions[][3] = {
-		{1 | ACTION_NON_TERMINATE, 3 | ACTION_NON_TERMINATE, 0
-		}, // Port 0: rules 1,3
-		{1 | ACTION_NON_TERMINATE, 3 | ACTION_NON_TERMINATE, 0
-		}, // Port 1: rules 1,3
-		{1 | ACTION_NON_TERMINATE, 3 | ACTION_NON_TERMINATE, 0
-		},				  // Port 100: rules 1,3
-		{3 | ACTION_NON_TERMINATE, 0, 0}, // Port 101: rule 3
-		{2 | ACTION_NON_TERMINATE, 3 | ACTION_NON_TERMINATE, 0
-		}, // Port 65400: rules 2,3
-		{2 | ACTION_NON_TERMINATE, 3 | ACTION_NON_TERMINATE, 0
-		}, // Port 65534: rules 2,3
-		{2 | ACTION_NON_TERMINATE, 3 | ACTION_NON_TERMINATE, 0
-		},				  // Port 65535: rules 2,3
-		{3 | ACTION_NON_TERMINATE, 0, 0}, // Port 500: rule 3
+		{1, 0, 0}, // Port 0: rules 1
+		{1, 0, 0}, // Port 1: rules 1
+		{1, 0, 0}, // Port 100: rules 1
+		{3, 0, 0}, // Port 101: rule 3
+		{2, 0, 0}, // Port 65400: rules 2
+		{2, 0, 0}, // Port 65534: rules 2
+		{2, 0, 0}, // Port 65535: rules 2
+		{3, 0, 0}, // Port 500: rule 3
 	};
-	uint32_t expected_counts[] = {2, 2, 2, 1, 2, 2, 2, 1};
+	uint32_t expected_counts[] = {1, 1, 1, 1, 1, 1, 1, 1};
 
 	struct value_range *expected_ranges[test_ports_count];
 	for (size_t i = 0; i < test_ports_count; ++i) {

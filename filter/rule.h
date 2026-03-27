@@ -22,9 +22,6 @@
 
 ////////////////////////////////////////////////////////////////////////////////
 
-#define ACTION_MASK ((uint32_t)0x8FFFFFFF)
-#define ACTION_NON_TERMINATE ((uint32_t)0x80000000)
-
 #define ACL_DEVICE_NAME_LEN 80
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -149,21 +146,3 @@ struct filter_rule {
 	// which is 0 if rule is for all categories.
 	uint32_t action;
 };
-
-////////////////////////////////////////////////////////////////////////////////
-
-#define FILTER_ACTION_TERMINATE(action) (((action) >> (15)) == 0)
-
-////////////////////////////////////////////////////////////////////////////////
-
-/**
- * @brief Compose 32-bit action value from parts.
- * @param category_mask High 16 bits (0 => applies to all categories).
- * @param non_terminate_flag Set true to allow following rules to also apply.
- * @param user_action Lower 15-bit user-defined action value.
- * @return Encoded 32-bit action.
- */
-static inline uint32_t
-filter_action_create(bool non_terminate_flag, uint32_t user_action) {
-	return ((uint32_t)non_terminate_flag) << 31 | user_action;
-}
