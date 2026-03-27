@@ -22,11 +22,8 @@
 
 ////////////////////////////////////////////////////////////////////////////////
 
-#define ACTION_MASK ((uint32_t)0xFFFF)
-#define ACTION_NON_TERMINATE ((uint32_t)0x8000)
-#define CATEGORY_SHIFT ((uint32_t)16)
-#define MAKE_ACTION_CATEGORY_MASK(category_mask)                               \
-	((uint32_t)(category_mask) << CATEGORY_SHIFT)
+#define ACTION_MASK ((uint32_t)0x8FFFFFFF)
+#define ACTION_NON_TERMINATE ((uint32_t)0x80000000)
 
 #define ACL_DEVICE_NAME_LEN 80
 
@@ -155,8 +152,6 @@ struct filter_rule {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-#define FILTER_ACTION_CATEGORY_MASK(action)                                    \
-	((uint16_t)((action) >> CATEGORY_SHIFT))
 #define FILTER_ACTION_TERMINATE(action) (((action) >> (15)) == 0)
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -169,9 +164,6 @@ struct filter_rule {
  * @return Encoded 32-bit action.
  */
 static inline uint32_t
-filter_action_create(
-	uint16_t category_mask, bool non_terminate_flag, uint16_t user_action
-) {
-	return ((uint32_t)category_mask) << CATEGORY_SHIFT |
-	       ((uint32_t)non_terminate_flag) << 15 | user_action;
+filter_action_create(bool non_terminate_flag, uint32_t user_action) {
+	return ((uint32_t)non_terminate_flag) << 31 | user_action;
 }

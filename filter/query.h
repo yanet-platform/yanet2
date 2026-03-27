@@ -20,39 +20,6 @@
 
 ////////////////////////////////////////////////////////////////////////////////
 
-/**
- * @brief Filter actions in-place by category, preserving order until terminal.
- * @param actions Action list (modified in-place).
- * @param count Number of actions in the list.
- * @param category 0-based category index to keep (others are removed).
- * @return Number of actions remaining after filtering.
- */
-static inline uint32_t
-filter_actions_with_category(
-	uint32_t *actions, uint32_t count, uint16_t category
-) {
-	uint32_t count_category = 0;
-
-	for (uint32_t i = 0; i < count; ++i) {
-		uint32_t action = actions[i];
-		uint16_t cat = FILTER_ACTION_CATEGORY_MASK(action);
-
-		if (cat == 0 || (cat & (1 << category))) {
-			actions[count_category++] = action;
-		} else {
-			continue;
-		}
-
-		if (!(action & ACTION_NON_TERMINATE)) {
-			break;
-		}
-	}
-
-	return count_category;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
 /* Query uses local pair array instead of filter_slots to avoid introducing
  * extra public helper structures in this header. */
 
