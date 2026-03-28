@@ -83,29 +83,27 @@ acl_handle_packets(
 	 */
 
 	struct packet *vlan_packets[packet_list_count(&packet_front->input)];
-	const struct value_range
+	struct value_range
 		*vlan_result[packet_list_count(&packet_front->input)];
 	uint64_t vlan_idx = 0;
 
 	struct packet *ip4_packets[packet_list_count(&packet_front->input)];
-	const struct value_range
-		*ip4_result[packet_list_count(&packet_front->input)];
+	struct value_range *ip4_result[packet_list_count(&packet_front->input)];
 	uint64_t ip4_idx = 0;
 
 	struct packet
 		*ip4_port_packets[packet_list_count(&packet_front->input)];
-	const struct value_range
+	struct value_range
 		*ip4_port_result[packet_list_count(&packet_front->input)];
 	uint64_t ip4_port_idx = 0;
 
 	struct packet *ip6_packets[packet_list_count(&packet_front->input)];
-	const struct value_range
-		*ip6_result[packet_list_count(&packet_front->input)];
+	struct value_range *ip6_result[packet_list_count(&packet_front->input)];
 	uint64_t ip6_idx = 0;
 
 	struct packet
 		*ip6_port_packets[packet_list_count(&packet_front->input)];
-	const struct value_range
+	struct value_range
 		*ip6_port_result[packet_list_count(&packet_front->input)];
 	uint64_t ip6_port_idx = 0;
 

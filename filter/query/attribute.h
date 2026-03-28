@@ -27,9 +27,7 @@ struct filter_attr_query {
 		struct packet **packets,                                       \
 		uint32_t *result,                                              \
 		uint32_t count                                                 \
-	);                                                                     \
-	static const struct filter_attr_query FILTER_ATTR_QUERY(name           \
-	) = {FILTER_ATTR_QUERY_FUNC(name)}
+	);
 
 REGISTER_ATTRIBUTE(port_src);
 REGISTER_ATTRIBUTE(port_dst);

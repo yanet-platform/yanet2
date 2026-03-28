@@ -14,72 +14,74 @@
  */
 #pragma once
 
+#include <stdint.h>
+
 #include "filter.h"
 #include "query/attribute.h"
 #include "rule.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 
-/* Query uses local pair array instead of filter_slots to avoid introducing
- * extra public helper structures in this header. */
+typedef void (*filter_lookup_query_func)(
+	void *data,
+	struct packet **packets,
+	uint32_t *results,
+	uint32_t packet_count
+);
 
-/**
- * @def FILTER_QUERY(filter_ptr, tag, packet_ptr, actions_out_ptr,
- * count_out_ptr)
- * @brief Classify a packet using a filter built for signature tag.
- * @param filter_ptr struct filter* built with FILTER_INIT for the same tag.
- * @param tag Name used in FILTER_QUERY_DECLARE(...).
- * @param packet_ptr struct packet* input packet to classify.
- * @param actions_out_ptr uint32_t** receives pointer to action array (owned by
- * filter).
- * @param count_out_ptr uint32_t* receives number of actions.
- */
-#define FILTER_QUERY(filter_ptr, tag, packet_ptrs, result, count)              \
-	__extension__({                                                        \
-		struct filter *__flt = (filter_ptr);                           \
-		struct packet **__pkts = (packet_ptrs);                        \
-		const size_t __n = sizeof(__filter_attrs_query_##tag) /        \
-				   sizeof(__filter_attrs_query_##tag[0]);      \
-		/* Local slots storage */                                      \
-		uint32_t __slots[2 * MAX_ATTRIBUTES * count + 1];              \
-		/* compute classifiers for leaf attributes into parent slots   \
-		 */                                                            \
-		for (size_t __ai = 0; __ai < __n; ++__ai) {                    \
-			size_t __vtx = __n + __ai;                             \
-			struct filter_vertex *__v = &(__flt)->v[__vtx];        \
-			__filter_attrs_query_##tag[__ai].query(                \
-				ADDR_OF(&__v->data),                           \
-				__pkts,                                        \
-				__slots + __vtx * count,                       \
-				count                                          \
-			);                                                     \
-		}                                                              \
-		/* compute inner vertices except root, pushing up to parent */ \
-		for (size_t __vtx = __n - 1; __vtx >= 2; --__vtx) {            \
-			struct filter_vertex *__v = &(__flt)->v[__vtx];        \
-			for (uint32_t idx = 0; idx < count; ++idx) {           \
-				uint32_t __c = value_table_get(                \
-					&__v->table,                           \
-					__slots[(__vtx << 1) * count + idx],   \
-					__slots[(__vtx << 1 | 1) * count +     \
-						idx]                           \
-				);                                             \
-				__slots[__vtx * count + idx] = __c;            \
-			}                                                      \
-		}                                                              \
-		/* root (1 when n>1, else 0) */                                \
-		const size_t __root = __n > 1;                                 \
-		struct filter_vertex *__r = &(__flt)->v[__root];               \
-		for (uint32_t idx = 0; idx < count; ++idx) {                   \
-			uint32_t __res = value_table_get(                      \
-				&__r->table,                                   \
-				__root == 0 ? 0                                \
-					    : __slots[(__root << 1) * count +  \
-						      idx],                    \
-				__slots[(__root << 1 | 1) * count + idx]       \
-			);                                                     \
-			struct value_range *__range =                          \
-				ADDR_OF(&__r->registry.ranges) + __res;        \
-			(result)[idx] = __range;                               \
-		}                                                              \
-	})
+struct filter_query {
+	uint64_t lookup_count;
+	filter_lookup_query_func *lookups;
+};
+
+static inline void
+FILTER_QUERY(
+	struct filter *filter,
+	const struct filter_query *filter_query,
+	struct packet **packets,
+	struct value_range **results,
+	uint32_t packet_count
+) {
+	/* Local slots storage */
+	uint32_t __slots[2 * MAX_ATTRIBUTES * packet_count + 1];
+	/* compute classifiers for leaf attributes into parent slots
+	 */
+	for (size_t __ai = 0; __ai < filter_query->lookup_count; ++__ai) {
+		size_t __vtx = filter_query->lookup_count + __ai;
+		const struct filter_vertex *__v = &(filter)->v[__vtx];
+		filter_query->lookups[__ai](
+			ADDR_OF(&__v->data),
+			packets,
+			__slots + __vtx * packet_count,
+			packet_count
+		);
+	}
+	/* compute inner vertices except root, pushing up to parent */
+	for (size_t __vtx = filter_query->lookup_count - 1; __vtx >= 2;
+	     --__vtx) {
+		struct filter_vertex *__v = &(filter)->v[__vtx];
+		for (uint32_t idx = 0; idx < packet_count; ++idx) {
+			uint32_t __c = value_table_get(
+				&__v->table,
+				__slots[(__vtx << 1) * packet_count + idx],
+				__slots[(__vtx << 1 | 1) * packet_count + idx]
+			);
+			__slots[__vtx * packet_count + idx] = __c;
+		}
+	}
+	/* root (1 when n>1, else 0) */
+	const size_t __root = filter_query->lookup_count > 1;
+	struct filter_vertex *__r = &(filter)->v[__root];
+	for (uint32_t idx = 0; idx < packet_count; ++idx) {
+		uint32_t __res = value_table_get(
+			&__r->table,
+			__root == 0
+				? 0
+				: __slots[(__root << 1) * packet_count + idx],
+			__slots[(__root << 1 | 1) * packet_count + idx]
+		);
+		struct value_range *__range =
+			ADDR_OF(&__r->registry.ranges) + __res;
+		(results)[idx] = __range;
+	}
+}
