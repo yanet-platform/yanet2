@@ -126,6 +126,69 @@ func TestDecap_IPIP(t *testing.T) {
 	require.Empty(t, diff)
 }
 
+func TestDecap_IPIP_outerDontFragment(t *testing.T) {
+	eth, vlan, _, ip4, icmp := testingLayers()
+	vlan.Type = layers.EthernetTypeIPv4
+	ip4tun := ip4
+	ip4tun.DstIP = net.ParseIP("4.5.6.7")
+	ip4tun.Protocol = layers.IPProtocolIPv4
+	ip4tun.Flags |= layers.IPv4DontFragment // DF flag set, but not fragmented.
+
+	pkt := xpacket.LayersToPacket(t, &eth, &vlan, &ip4tun, &ip4, &icmp)
+	t.Log("Origin packet", pkt)
+
+	prefixes := []netip.Prefix{
+		xerror.Unwrap(netip.ParsePrefix("4.5.6.7/32")),
+	}
+
+	memCtx := testutils.NewMemoryContext("decap_test", datasize.MB)
+	defer memCtx.Free()
+
+	m := decapModuleConfig(prefixes, memCtx)
+
+	result, err := decapHandlePackets(m, pkt)
+	require.NoError(t, err)
+	require.NotEmpty(t, result.Output, "packet with DF flag should not be dropped")
+	require.Empty(t, result.Drop, "packet with DF flag should not be dropped")
+
+	resultPkt := xpacket.ParseEtherPacket(result.Output[0])
+	t.Log("Result packet", resultPkt)
+
+	vlan.Type = layers.EthernetTypeIPv4
+	expectedPkt := xpacket.LayersToPacket(t, &eth, &vlan, &ip4, &icmp)
+	t.Log("Expected packet", expectedPkt)
+
+	diff := cmp.Diff(expectedPkt.Layers(), resultPkt.Layers())
+	require.Empty(t, diff)
+}
+
+func TestDecap_IPIP_Fragmented(t *testing.T) {
+	eth, vlan, _, ip4, icmp := testingLayers()
+	vlan.Type = layers.EthernetTypeIPv4
+	ip4tun := ip4
+	ip4tun.DstIP = net.ParseIP("4.5.6.7")
+	ip4tun.Protocol = layers.IPProtocolIPv4
+	ip4tun.Flags = layers.IPv4MoreFragments // MF flag — this is a fragment
+	ip4tun.FragOffset = 0
+
+	pkt := xpacket.LayersToPacket(t, &eth, &vlan, &ip4tun, &ip4, &icmp)
+	t.Log("Origin packet", pkt)
+
+	prefixes := []netip.Prefix{
+		xerror.Unwrap(netip.ParsePrefix("4.5.6.7/32")),
+	}
+
+	memCtx := testutils.NewMemoryContext("decap_test", datasize.MB)
+	defer memCtx.Free()
+
+	m := decapModuleConfig(prefixes, memCtx)
+
+	result, err := decapHandlePackets(m, pkt)
+	require.NoError(t, err)
+	require.Empty(t, result.Output, "fragmented packet should be dropped")
+	require.NotEmpty(t, result.Drop, "fragmented packet should be dropped")
+}
+
 func TestDecap_IP6IP(t *testing.T) {
 	eth, vlan, ip6tun, ip4, icmp := testingLayers()
 

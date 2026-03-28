@@ -23,7 +23,7 @@ decap_handle_v4(const struct lpm *lpm, struct packet *packet) {
 	struct rte_ipv4_hdr *ipv4_hdr = rte_pktmbuf_mtod_offset(
 		mbuf, struct rte_ipv4_hdr *, packet->network_header.offset
 	);
-	if (ipv4_hdr->fragment_offset != 0) {
+	if (ipv4_hdr->fragment_offset & rte_cpu_to_be_16(0x3FFF)) {
 		return -1; // Fragmented packet
 	}
 
