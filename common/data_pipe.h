@@ -151,19 +151,20 @@ data_pipe_ring_handle(
 	size_t to = atomic_load_explicit(to_pos, memory_order_acquire);
 
 	size_t available = to - from + space;
-	from &= (1 << size) - 1;
+	size_t masked_from = from & ((1 << size) - 1);
 	// Branchless code: the first part is 1 if and only if we wrap around
 	// the ring size whereas the second part is size of the ring overflow.
-	available -=
-		((from + available) >> size) * (from + available - (1 << size));
+	available -= ((masked_from + available) >> size) *
+		     (masked_from + available - (1 << size));
 
 	if (!available) {
 		return 0;
 	}
 
-	size_t handled = handle_func(data + from, available, handle_func_data);
+	size_t handled =
+		handle_func(data + masked_from, available, handle_func_data);
 
-	atomic_fetch_add_explicit(from_pos, handled, memory_order_release);
+	atomic_store_explicit(from_pos, from + handled, memory_order_release);
 
 	return handled;
 }
