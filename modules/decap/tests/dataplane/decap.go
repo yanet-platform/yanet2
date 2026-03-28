@@ -9,6 +9,7 @@ package decap_test
 #include "common/lpm.h"
 #include "modules/decap/dataplane/config.h"
 #include "dataplane/module/module.h"
+#include "dataplane/pipeline/econtext.h"
 
 void
 decap_handle_packets(
