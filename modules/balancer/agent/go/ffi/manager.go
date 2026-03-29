@@ -245,19 +245,13 @@ func (m *BalancerManager) Graph() *BalancerGraph {
 	return graph
 }
 
-type SnapshotParams struct {
-	IncludeACL            bool
-	IncludeActiveSessions bool
-	PacketHandlerRef      *balancerpb.PacketHandlerRef
-}
-
-func (m *BalancerManager) Snapshot(params *SnapshotParams) *balancerpb.BalancerSnapshot {
+func (m *BalancerManager) Snapshot(params *balancerpb.ShowSnapshotRequest) *balancerpb.BalancerSnapshot {
 	var cSnapshot C.struct_balancer_snapshot
 
 	var cSnapshotParams C.struct_balancer_snapshot_params
-	cSnapshotParams.include_vs_acl = C.bool(params.IncludeACL)
+	cSnapshotParams.include_vs_acl = C.bool(params.IncludeAcl)
 	cSnapshotParams.include_active_sessions = C.bool(params.IncludeActiveSessions)
-	cSnapshotParams.packet_handler_ref = goToCPacketHandlerRef(params.PacketHandlerRef)
+	cSnapshotParams.packet_handler_ref = (*C.struct_packet_handler_ref)(unsafe.Pointer(proto.ConvertPacketHandlerRef(params.PacketHandlerRef)))
 
 	C.balancer_manager_snapshot(m.handle, &cSnapshot, &cSnapshotParams)
 	defer C.balancer_manager_snapshot_free(&cSnapshot)

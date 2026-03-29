@@ -9,6 +9,7 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/xnetip"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	mock "github.com/yanet-platform/yanet2/mock/go"
+	"github.com/yanet-platform/yanet2/modules/balancer/agent/balancerpb"
 )
 
 var (
@@ -1246,10 +1247,10 @@ func TestManager(t *testing.T) {
 	})
 
 	t.Run("Snapshot", func(t *testing.T) {
-		params := SnapshotParams{
-			IncludeACL:            true,
+		params := balancerpb.ShowSnapshotRequest{
+			IncludeAcl:            true,
 			IncludeActiveSessions: true,
-			PacketHandlerRef: &PacketHandlerRef{
+			PacketHandlerRef: &balancerpb.PacketHandlerRef{
 				Device:   &deviceName,
 				Pipeline: &pipelineName,
 				Function: &functionName,
@@ -1257,9 +1258,7 @@ func TestManager(t *testing.T) {
 			},
 		}
 		snapshot := manager.Snapshot(&params)
-		t.Log(snapshot.ActiveSessions)
-		t.Log(snapshot.LastPacketTimestamp)
-		t.Log(snapshot)
+		require.Equal(t, len(snapshot.VirtualServices), 3, "should have 3 virtual services")
 		require.NotNil(t, snapshot, "snapshot should not be nil")
 	})
 }

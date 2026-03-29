@@ -99,3 +99,41 @@ func convertTimestamp(unixSec uint32) *timestamppb.Timestamp {
 		Seconds: int64(unixSec),
 	}
 }
+
+func ConvertPacketHandlerRef(
+	ref *balancerpb.PacketHandlerRef,
+) *C.struct_packet_handler_ref {
+	if ref == nil {
+		return nil
+	}
+
+	cRef := (*C.struct_packet_handler_ref)(
+		C.malloc(C.sizeof_struct_packet_handler_ref),
+	)
+
+	if ref.Device != nil {
+		cRef.device = C.CString(*ref.Device)
+	} else {
+		cRef.device = nil
+	}
+
+	if ref.Pipeline != nil {
+		cRef.pipeline = C.CString(*ref.Pipeline)
+	} else {
+		cRef.pipeline = nil
+	}
+
+	if ref.Function != nil {
+		cRef.function = C.CString(*ref.Function)
+	} else {
+		cRef.function = nil
+	}
+
+	if ref.Chain != nil {
+		cRef.chain = C.CString(*ref.Chain)
+	} else {
+		cRef.chain = nil
+	}
+
+	return cRef
+}
