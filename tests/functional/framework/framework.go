@@ -536,6 +536,8 @@ func (f *F) SendPacketAndCapture(inputIfaceIndex int, outputIfaceIndex int, pack
 		return nil, fmt.Errorf("failed to connect to output socket: %w", err)
 	}
 
+	_, _ = outputClient.ReceiveAllPackets(timeout, outputDumpPath)
+
 	// Send packet on input interface
 	if err := inputClient.SendPacket(packet, inputDumpPath); err != nil {
 		return nil, fmt.Errorf("failed to send packet: %w", err)
