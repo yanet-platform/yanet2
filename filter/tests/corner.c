@@ -88,7 +88,7 @@ check_single_attribute(void *memory) {
 
 	// setup filter
 	struct filter filter;
-	int init_result = FILTER_INIT(
+	int init_result = filter_init(
 		&filter, sign_port_src_compile, rules, 3, &memory_context
 	);
 	assert(init_result == 0);
@@ -143,7 +143,7 @@ check_single_attribute(void *memory) {
 #undef queries
 	}
 
-	FILTER_FREE(&filter, sign_port_src_compile);
+	filter_free(&filter, sign_port_src_compile);
 }
 
 int

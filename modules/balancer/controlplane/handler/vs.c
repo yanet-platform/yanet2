@@ -689,7 +689,7 @@ setup_acl(
 	}
 	vs->acl_reused = 0;
 
-	// Get rules and convert relative pointers to absolute for FILTER_INIT
+	// Get rules and convert relative pointers to absolute for filter_init
 	struct filter_rule *rules = ADDR_OF(&vs->rules);
 	size_t rule_count = vs->rules_count;
 
@@ -703,11 +703,11 @@ setup_acl(
 	// Initialize filter with absolute pointers
 	int res;
 	if (vs->identifier.ip_proto == IPPROTO_IP) {
-		res = FILTER_INIT(
+		res = filter_init(
 			vs->acl, vs_acl_ipv4, rules, rule_count, mctx
 		);
 	} else { // IPPROTO_IPV6
-		res = FILTER_INIT(
+		res = filter_init(
 			vs->acl, vs_acl_ipv6, rules, rule_count, mctx
 		);
 	}

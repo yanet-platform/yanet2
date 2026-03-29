@@ -42,7 +42,7 @@ build_filter(struct common *common, struct memory_context *mctx) {
 		rules[i] = build_rule(builder, i + 1);
 	}
 	LOG(INFO, "compiling %zu rules...", rule_count);
-	int res = FILTER_INIT(
+	int res = filter_init(
 		&common->filter, filter_sign, rules, rule_count, mctx
 	);
 	if (res < 0) {

@@ -62,7 +62,7 @@ test_proto_1(void *memory) {
 	struct filter_rule rules[3] = {r1, r2, r3};
 
 	struct filter filter;
-	res = FILTER_INIT(
+	res = filter_init(
 		&filter, sign_vlan_compile, rules, 3, &memory_context
 	);
 	assert(res == 0);
@@ -71,7 +71,7 @@ test_proto_1(void *memory) {
 	query_packet(&filter, 20, 2);
 	query_packet(&filter, 30, 3);
 
-	FILTER_FREE(&filter, sign_vlan_compile);
+	filter_free(&filter, sign_vlan_compile);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

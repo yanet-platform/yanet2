@@ -130,7 +130,7 @@ test_stress_seed12_regression(void *memory, size_t memory_size) {
 
 	// Initialize filter with all 20 rules
 	struct filter filter;
-	res = FILTER_INIT(
+	res = filter_init(
 		&filter, sign_net4_compile, rules, 20, &memory_context
 	);
 	assert(res == 0);
@@ -160,7 +160,7 @@ test_stress_seed12_regression(void *memory, size_t memory_size) {
 		&filter, ip(5, 10, 138, 134), ip(1, 9, 139, 137)
 	);
 
-	FILTER_FREE(&filter, sign_net4_compile);
+	filter_free(&filter, sign_net4_compile);
 
 	LOG(INFO, "Regression test passed!");
 }
@@ -192,7 +192,7 @@ main() {
 
 	// init filter
 	struct filter filter;
-	res = FILTER_INIT(
+	res = filter_init(
 		&filter, sign_net4_compile, &action1, 1, &memory_context
 	);
 	assert(res == 0);
@@ -211,7 +211,7 @@ main() {
 		&filter, ip(192, 255, 168, 10), ip(195, 255, 168, 1)
 	);
 
-	FILTER_FREE(&filter, sign_net4_compile);
+	filter_free(&filter, sign_net4_compile);
 
 	// Regression test for bug where src_dst filter incorrectly matches
 	// when only src matches but dst doesn't (or vice versa)
@@ -229,7 +229,7 @@ main() {
 	struct filter_rule action2 = build_rule(&builder2, 2);
 
 	struct filter filter2;
-	res = FILTER_INIT(
+	res = filter_init(
 		&filter2, sign_net4_compile, &action2, 1, &memory_context
 	);
 	assert(res == 0);
@@ -252,7 +252,7 @@ main() {
 		&filter2, ip(1, 1, 1, 1), ip(7, 4, 200, 100)
 	);
 
-	FILTER_FREE(&filter2, sign_net4_compile);
+	filter_free(&filter2, sign_net4_compile);
 
 	// Run comprehensive regression test with all 20 rules from stress test
 	// Allocate separate memory for the stress test

@@ -49,9 +49,9 @@ route_mpls_module_config_destroy(struct module_config *config) {
 	struct memory_context *memory_context =
 		&config->cp_module.memory_context;
 
-	FILTER_FREE(&config->filter_ip6, FILTER_IP6_TAG);
+	filter_free(&config->filter_ip6, FILTER_IP6_TAG);
 	memset(&config->filter_ip6, 0, sizeof(config->filter_ip6));
-	FILTER_FREE(&config->filter_ip4, FILTER_IP4_TAG);
+	filter_free(&config->filter_ip4, FILTER_IP4_TAG);
 	memset(&config->filter_ip4, 0, sizeof(config->filter_ip4));
 
 	struct target **targets = ADDR_OF(&config->targets);
@@ -161,7 +161,7 @@ route_mpls_module_init_ip4(
 		check_route_mpls_rule_ip4
 	);
 
-	return FILTER_INIT(
+	return filter_init(
 		&config->filter_ip4,
 		FILTER_IP4_TAG,
 		filter_rules,
@@ -187,7 +187,7 @@ route_mpls_module_init_ip6(
 		check_route_mpls_rule_ip6
 	);
 
-	return FILTER_INIT(
+	return filter_init(
 		&config->filter_ip6,
 		FILTER_IP6_TAG,
 		filter_rules,

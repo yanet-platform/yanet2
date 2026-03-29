@@ -10,7 +10,7 @@
  *    high 16 bits form category mask (0 = applies to all categories).
  *
  * See also:
- *  - filter/compiler.h (FILTER_INIT/FILTER_FREE)
+ *  - filter/compiler.h (filter_init/filter_free)
  *  - filter/query.h (FILTER_QUERY and post-processing helpers)
  */
 #pragma once

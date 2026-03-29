@@ -80,7 +80,7 @@ test_basic_tcp_udp(void *memory) {
 	struct filter filter;
 
 	LOG(INFO, "filter init...");
-	res = FILTER_INIT(
+	res = filter_init(
 		&filter,
 		sign_proto_range_fast_compile,
 		rules,
@@ -95,7 +95,7 @@ test_basic_tcp_udp(void *memory) {
 	LOG(INFO, "query udp packet...");
 	query_udp_packet(&filter, 2);
 
-	FILTER_FREE(&filter, sign_proto_range_fast_compile);
+	filter_free(&filter, sign_proto_range_fast_compile);
 
 	return TEST_SUCCESS;
 }
@@ -139,7 +139,7 @@ test_tcp_flags(void *memory) {
 	struct filter_rule rules[3] = {r1, r2, r3};
 
 	struct filter filter;
-	res = FILTER_INIT(
+	res = filter_init(
 		&filter,
 		sign_proto_range_fast_compile,
 		rules,
@@ -157,7 +157,7 @@ test_tcp_flags(void *memory) {
 	LOG(INFO, "query tcp FIN packet...");
 	query_tcp_packet(&filter, 0x01, 3);
 
-	FILTER_FREE(&filter, sign_proto_range_fast_compile);
+	filter_free(&filter, sign_proto_range_fast_compile);
 
 	return TEST_SUCCESS;
 }
@@ -188,7 +188,7 @@ test_multiple_ranges_per_rule(void *memory) {
 	struct filter_rule rules[1] = {r1};
 
 	struct filter filter;
-	res = FILTER_INIT(
+	res = filter_init(
 		&filter,
 		sign_proto_range_fast_compile,
 		rules,
@@ -203,7 +203,7 @@ test_multiple_ranges_per_rule(void *memory) {
 	LOG(INFO, "query udp packet...");
 	query_udp_packet(&filter, 1);
 
-	FILTER_FREE(&filter, sign_proto_range_fast_compile);
+	filter_free(&filter, sign_proto_range_fast_compile);
 
 	return TEST_SUCCESS;
 }
@@ -235,7 +235,7 @@ test_boundary_values(void *memory) {
 	struct filter_rule rules[2] = {r1, r2};
 
 	struct filter filter;
-	res = FILTER_INIT(
+	res = filter_init(
 		&filter,
 		sign_proto_range_fast_compile,
 		rules,
@@ -262,7 +262,7 @@ test_boundary_values(void *memory) {
 	);
 	free_packet(&packet1);
 
-	FILTER_FREE(&filter, sign_proto_range_fast_compile);
+	filter_free(&filter, sign_proto_range_fast_compile);
 
 	return TEST_SUCCESS;
 }

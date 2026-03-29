@@ -86,13 +86,13 @@ test_src_dst_ports(void *memory) {
 
 	// init filter
 	struct filter f;
-	res = FILTER_INIT(&f, sign_ports_compile, actions, 2, &memory_context);
+	res = filter_init(&f, sign_ports_compile, actions, 2, &memory_context);
 	assert(res == 0);
 
 	query_and_expect_action(&f, 6, 3, 1);
 	query_and_expect_action(&f, 8, 3, 2);
 
-	FILTER_FREE(&f, sign_ports_compile);
+	filter_free(&f, sign_ports_compile);
 }
 
 static void
@@ -128,7 +128,7 @@ src_dst_ports(void *memory) {
 	struct filter_rule actions[3] = {action1, action2, action3};
 
 	struct filter f;
-	res = FILTER_INIT(&f, sign_ports_compile, actions, 3, &memory_context);
+	res = filter_init(&f, sign_ports_compile, actions, 3, &memory_context);
 	assert(res == 0);
 
 	query_and_expect_action(&f, 30, 400, 2);
@@ -150,7 +150,7 @@ src_dst_ports(void *memory) {
 	query_and_expect_no_action(&f, 5017, 3000);
 	query_and_expect_no_action(&f, 20, 3000);
 
-	FILTER_FREE(&f, sign_ports_compile);
+	filter_free(&f, sign_ports_compile);
 }
 
 static void
@@ -188,7 +188,7 @@ test_any_port(void *memory) {
 	struct filter_rule actions[3] = {action1, action2, action3};
 
 	struct filter f;
-	res = FILTER_INIT(&f, sign_ports_compile, actions, 3, &memory_context);
+	res = filter_init(&f, sign_ports_compile, actions, 3, &memory_context);
 	assert(res == 0);
 
 	query_and_expect_action(&f, 1025, 11111, 1);
@@ -197,7 +197,7 @@ test_any_port(void *memory) {
 
 	query_and_expect_no_action(&f, 1000, 200);
 
-	FILTER_FREE(&f, sign_ports_compile);
+	filter_free(&f, sign_ports_compile);
 }
 
 int

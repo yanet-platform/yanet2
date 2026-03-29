@@ -115,7 +115,7 @@ test_src_dst_ports(void *memory) {
 
 	// init filter
 	struct filter filter;
-	res = FILTER_INIT(
+	res = filter_init(
 		&filter, sign_ports_compile, actions, 2, &memory_context
 	);
 	assert(res == 0);
@@ -123,7 +123,7 @@ test_src_dst_ports(void *memory) {
 	query_and_expect_action(&filter, 6, 3, 1, "ports");
 	query_and_expect_action(&filter, 8, 3, 2, "ports");
 
-	FILTER_FREE(&filter, sign_ports_compile);
+	filter_free(&filter, sign_ports_compile);
 
 	memory_bfree(&memory_context, memory, 1 << 24);
 	void *mem = memory_balloc(&memory_context, 1 << 24);
@@ -158,7 +158,7 @@ test_src_port_only(void *memory) {
 
 	// init filter
 	struct filter filter;
-	res = FILTER_INIT(
+	res = filter_init(
 		&filter, sign_port_src_compile, actions, 2, &memory_context
 	);
 	assert(res == 0);
@@ -172,7 +172,7 @@ test_src_port_only(void *memory) {
 	query_and_expect_no_action(&filter, 499, 0, "port_src");
 	query_and_expect_no_action(&filter, 801, 0, "port_src");
 
-	FILTER_FREE(&filter, sign_port_src_compile);
+	filter_free(&filter, sign_port_src_compile);
 
 	memory_bfree(&memory_context, memory, 1 << 24);
 	void *mem = memory_balloc(&memory_context, 1 << 24);

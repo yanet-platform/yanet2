@@ -94,11 +94,11 @@ acl_module_config_free(struct cp_module *cp_module) {
 		sizeof(struct acl_target) * config->target_count
 	);
 
-	FILTER_FREE(&config->filter_vlan, ACL_FILTER_VLAN_TAG);
-	FILTER_FREE(&config->filter_ip4, ACL_FILTER_IP4_TAG);
-	FILTER_FREE(&config->filter_ip4_port, ACL_FILTER_IP4_PROTO_PORT_TAG);
-	FILTER_FREE(&config->filter_ip6, ACL_FILTER_IP6_TAG);
-	FILTER_FREE(&config->filter_ip6_port, ACL_FILTER_IP6_PROTO_PORT_TAG);
+	filter_free(&config->filter_vlan, ACL_FILTER_VLAN_TAG);
+	filter_free(&config->filter_ip4, ACL_FILTER_IP4_TAG);
+	filter_free(&config->filter_ip4_port, ACL_FILTER_IP4_PROTO_PORT_TAG);
+	filter_free(&config->filter_ip6, ACL_FILTER_IP6_TAG);
+	filter_free(&config->filter_ip6_port, ACL_FILTER_IP6_PROTO_PORT_TAG);
 
 	// Note: We don't destroy fwstate_cfg maps here because they're owned by
 	// the fwstate module. We only stored offsets to them.
@@ -232,7 +232,7 @@ acl_module_init_l2(
 		acl_rules, acl_rule_count, filter_rules, check_acl_rule_l2
 	);
 
-	return FILTER_INIT(
+	return filter_init(
 		&config->filter_vlan,
 		ACL_FILTER_VLAN_TAG,
 		filter_rules,
@@ -255,7 +255,7 @@ acl_module_init_ip4(
 		acl_rules, acl_rule_count, filter_rules, check_acl_rule_ip4
 	);
 
-	return FILTER_INIT(
+	return filter_init(
 		&config->filter_ip4,
 		ACL_FILTER_IP4_TAG,
 		filter_rules,
@@ -278,7 +278,7 @@ acl_module_init_ip4_port(
 		acl_rules, acl_rule_count, filter_rules, check_acl_rule_ip4_port
 	);
 
-	return FILTER_INIT(
+	return filter_init(
 		&config->filter_ip4_port,
 		ACL_FILTER_IP4_PROTO_PORT_TAG,
 		filter_rules,
@@ -301,7 +301,7 @@ acl_module_init_ip6(
 		acl_rules, acl_rule_count, filter_rules, check_acl_rule_ip6
 	);
 
-	return FILTER_INIT(
+	return filter_init(
 		&config->filter_ip6,
 		ACL_FILTER_IP6_TAG,
 		filter_rules,
@@ -324,7 +324,7 @@ acl_module_init_ip6_port(
 		acl_rules, acl_rule_count, filter_rules, check_acl_rule_ip6_port
 	);
 
-	return FILTER_INIT(
+	return filter_init(
 		&config->filter_ip6_port,
 		ACL_FILTER_IP6_PROTO_PORT_TAG,
 		filter_rules,

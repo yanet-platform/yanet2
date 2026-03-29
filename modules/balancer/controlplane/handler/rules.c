@@ -140,7 +140,7 @@ build_filter(
 
 	const size_t rules_count = vs_count;
 	if (proto == IPPROTO_IPV6) {
-		if (FILTER_INIT(
+		if (filter_init(
 			    filter, vs_lookup_ipv6, rules, rules_count, mctx
 		    ) != 0) {
 			memory_bfree(mctx, filter, sizeof(struct filter));
@@ -149,7 +149,7 @@ build_filter(
 			return -1;
 		}
 	} else {
-		if (FILTER_INIT(
+		if (filter_init(
 			    filter, vs_lookup_ipv4, rules, rules_count, mctx
 		    ) != 0) {
 			memory_bfree(mctx, filter, sizeof(struct filter));
@@ -177,7 +177,7 @@ free_filter_ipv4(
 	if (filter == NULL) {
 		return;
 	}
-	FILTER_FREE(filter, vs_lookup_ipv4);
+	filter_free(filter, vs_lookup_ipv4);
 	memory_bfree(mctx, filter, sizeof(struct filter));
 }
 
@@ -192,7 +192,7 @@ free_filter_ipv6(
 	if (filter == NULL) {
 		return;
 	}
-	FILTER_FREE(filter, vs_lookup_ipv6);
+	filter_free(filter, vs_lookup_ipv6);
 	memory_bfree(mctx, filter, sizeof(struct filter));
 }
 

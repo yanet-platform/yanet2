@@ -27,7 +27,7 @@ filter_net4_compile(
 	struct filter_rule *rules,
 	struct memory_context *mctx
 ) {
-	return FILTER_INIT(
+	return filter_init(
 		filter, ACL_FILTER_NET4_TAG, rules, rule_count, mctx
 	);
 }
@@ -47,7 +47,7 @@ filter_net6_compile(
 	struct filter_rule *rules,
 	struct memory_context *mctx
 ) {
-	return FILTER_INIT(
+	return filter_init(
 		filter, ACL_FILTER_NET6_TAG, rules, rule_count, mctx
 	);
 }
@@ -121,7 +121,7 @@ acl_module_config_create(
 
 free_filter4: {
 	int prev_errno = errno;
-	FILTER_FREE(&config->net4_filter, ACL_FILTER_NET4_TAG);
+	filter_free(&config->net4_filter, ACL_FILTER_NET4_TAG);
 	acl_module_config_free(&config->cp_module);
 	errno = prev_errno;
 }

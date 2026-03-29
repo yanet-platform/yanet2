@@ -211,7 +211,7 @@ test_basic(void *arena, enum filter_sign sign) {
 
 	struct filter filter;
 	if (sign == src) {
-		res = FILTER_INIT(
+		res = filter_init(
 			&filter,
 			sign_fast_src_compile,
 			rules,
@@ -219,7 +219,7 @@ test_basic(void *arena, enum filter_sign sign) {
 			&mctx
 		);
 	} else {
-		res = FILTER_INIT(
+		res = filter_init(
 			&filter,
 			sign_fast_dst_compile,
 			rules,
@@ -361,11 +361,11 @@ test_multiple_ranges_per_rule(void *arena, enum filter_sign sign) {
 
 	struct filter filter;
 	if (sign == src) {
-		res = FILTER_INIT(
+		res = filter_init(
 			&filter, sign_fast_src_compile, rules, num_rules, &mctx
 		);
 	} else {
-		res = FILTER_INIT(
+		res = filter_init(
 			&filter, sign_fast_dst_compile, rules, num_rules, &mctx
 		);
 	}
@@ -464,7 +464,7 @@ stress(void *arena,
 	struct filter filter;
 	switch (sign) {
 	case src:
-		res = FILTER_INIT(
+		res = filter_init(
 			&filter,
 			sign_fast_src_compile,
 			rules,
@@ -473,7 +473,7 @@ stress(void *arena,
 		);
 		break;
 	case dst:
-		res = FILTER_INIT(
+		res = filter_init(
 			&filter,
 			sign_fast_dst_compile,
 			rules,
@@ -482,7 +482,7 @@ stress(void *arena,
 		);
 		break;
 	case src_dst:
-		res = FILTER_INIT(
+		res = filter_init(
 			&filter,
 			sign_fast_src_dst_compile,
 			rules,
@@ -712,7 +712,7 @@ test_no_match(void *arena, enum filter_sign sign) {
 
 	struct filter filter;
 	if (sign == src) {
-		res = FILTER_INIT(
+		res = filter_init(
 			&filter,
 			sign_fast_src_compile,
 			rules,
@@ -720,7 +720,7 @@ test_no_match(void *arena, enum filter_sign sign) {
 			&mctx
 		);
 	} else {
-		res = FILTER_INIT(
+		res = filter_init(
 			&filter,
 			sign_fast_dst_compile,
 			rules,
@@ -851,7 +851,7 @@ test_overlapping_ranges(void *arena, enum filter_sign sign) {
 
 	struct filter filter;
 	if (sign == src) {
-		res = FILTER_INIT(
+		res = filter_init(
 			&filter,
 			sign_fast_src_compile,
 			rules,
@@ -859,7 +859,7 @@ test_overlapping_ranges(void *arena, enum filter_sign sign) {
 			&mctx
 		);
 	} else {
-		res = FILTER_INIT(
+		res = filter_init(
 			&filter,
 			sign_fast_dst_compile,
 			rules,
@@ -979,7 +979,7 @@ test_boundary_conditions(void *arena, enum filter_sign sign) {
 
 	struct filter filter;
 	if (sign == src) {
-		res = FILTER_INIT(
+		res = filter_init(
 			&filter,
 			sign_fast_src_compile,
 			rules,
@@ -987,7 +987,7 @@ test_boundary_conditions(void *arena, enum filter_sign sign) {
 			&mctx
 		);
 	} else {
-		res = FILTER_INIT(
+		res = filter_init(
 			&filter,
 			sign_fast_dst_compile,
 			rules,
@@ -1123,7 +1123,7 @@ test_single_port_ranges(void *arena, enum filter_sign sign) {
 
 	struct filter filter;
 	if (sign == src) {
-		res = FILTER_INIT(
+		res = filter_init(
 			&filter,
 			sign_fast_src_compile,
 			rules,
@@ -1131,7 +1131,7 @@ test_single_port_ranges(void *arena, enum filter_sign sign) {
 			&mctx
 		);
 	} else {
-		res = FILTER_INIT(
+		res = filter_init(
 			&filter,
 			sign_fast_dst_compile,
 			rules,
@@ -1260,7 +1260,7 @@ test_adjacent_ranges(void *arena, enum filter_sign sign) {
 
 	struct filter filter;
 	if (sign == src) {
-		res = FILTER_INIT(
+		res = filter_init(
 			&filter,
 			sign_fast_src_compile,
 			rules,
@@ -1268,7 +1268,7 @@ test_adjacent_ranges(void *arena, enum filter_sign sign) {
 			&mctx
 		);
 	} else {
-		res = FILTER_INIT(
+		res = filter_init(
 			&filter,
 			sign_fast_dst_compile,
 			rules,
@@ -1403,7 +1403,7 @@ test_extreme_ports(void *arena, enum filter_sign sign) {
 
 	struct filter filter;
 	if (sign == src) {
-		res = FILTER_INIT(
+		res = filter_init(
 			&filter,
 			sign_fast_src_compile,
 			rules,
@@ -1411,7 +1411,7 @@ test_extreme_ports(void *arena, enum filter_sign sign) {
 			&mctx
 		);
 	} else {
-		res = FILTER_INIT(
+		res = filter_init(
 			&filter,
 			sign_fast_dst_compile,
 			rules,

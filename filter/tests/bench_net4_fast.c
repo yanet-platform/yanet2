@@ -565,7 +565,7 @@ main(int argc, char **argv) {
 	struct filter filter;
 	switch (config.sig_type) {
 	case sig_net4_dst:
-		res = FILTER_INIT(
+		res = filter_init(
 			&filter,
 			bench_dst_compile,
 			rules,
@@ -574,7 +574,7 @@ main(int argc, char **argv) {
 		);
 		break;
 	case sig_net4_dst_port:
-		res = FILTER_INIT(
+		res = filter_init(
 			&filter,
 			bench_dst_port_compile,
 			rules,
@@ -583,7 +583,7 @@ main(int argc, char **argv) {
 		);
 		break;
 	case sig_net4_dst_port_proto:
-		res = FILTER_INIT(
+		res = filter_init(
 			&filter,
 			bench_dst_port_proto_compile,
 			rules,

@@ -74,7 +74,7 @@ test_proto_1(void *memory) {
 	struct filter filter;
 
 	LOG(INFO, "filter init...");
-	res = FILTER_INIT(
+	res = filter_init(
 		&filter, sign_proto_range_compile, rules, 2, &memory_context
 	);
 	assert(res == 0);
@@ -85,7 +85,7 @@ test_proto_1(void *memory) {
 	LOG(INFO, "query udp packet...");
 	query_udp_packet(&filter, 2);
 
-	FILTER_FREE(&filter, sign_proto_range_compile);
+	filter_free(&filter, sign_proto_range_compile);
 }
 
 int

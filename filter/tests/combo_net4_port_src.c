@@ -123,7 +123,7 @@ test_no_match_port_only(void *arena) {
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize memory context");
 
 	struct filter filter;
-	res = FILTER_INIT(
+	res = filter_init(
 		&filter, combo_net4_port_src_compile, &rule, 1, &mctx
 	);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
@@ -203,7 +203,7 @@ test_no_match_ip_only(void *arena) {
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize memory context");
 
 	struct filter filter;
-	res = FILTER_INIT(
+	res = filter_init(
 		&filter, combo_net4_port_src_compile, &rule, 1, &mctx
 	);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
@@ -284,7 +284,7 @@ test_both_match(void *arena) {
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize memory context");
 
 	struct filter filter;
-	res = FILTER_INIT(
+	res = filter_init(
 		&filter, combo_net4_port_src_compile, &rule, 1, &mctx
 	);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
@@ -393,7 +393,7 @@ test_overlapping(void *arena) {
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize memory context");
 
 	struct filter filter;
-	res = FILTER_INIT(
+	res = filter_init(
 		&filter, combo_net4_port_src_compile, rules, 3, &mctx
 	);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");

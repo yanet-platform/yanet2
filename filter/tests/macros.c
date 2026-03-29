@@ -32,7 +32,7 @@ run_case(void) {
 
 	// init filter
 	struct filter f;
-	res = FILTER_INIT(&f, sign, &r, 1, &memory_context);
+	res = filter_init(&f, sign, &r, 1, &memory_context);
 	assert(res == 0);
 
 	// craft packet: UDP 4000
@@ -50,7 +50,7 @@ run_case(void) {
 	assert(ADDR_OF(&actions->values)[0] == 1);
 
 	free_packet(&p);
-	FILTER_FREE(&f, sign);
+	filter_free(&f, sign);
 	free(memory);
 }
 

@@ -81,7 +81,7 @@ test(void *memory) {
 
 	// build filter
 	struct filter filter;
-	res = FILTER_INIT(
+	res = filter_init(
 		&filter, sign_net4_ports_compile, actions, 2, &memory_context
 	);
 	assert(res == 0);
@@ -96,7 +96,7 @@ test(void *memory) {
 		&filter, ip(198, 233, 10, 15), ip(192, 1, 1, 1), 200, 150, 2
 	);
 
-	FILTER_FREE(&filter, sign_net4_ports_compile);
+	filter_free(&filter, sign_net4_ports_compile);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

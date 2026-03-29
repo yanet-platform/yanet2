@@ -15,11 +15,11 @@
  * @brief Build/teardown macros for filter classification trees.
  *
  * Defines:
- *  - FILTER_INIT: build a filter for a declared attribute signature
- *  - FILTER_FREE: free resources allocated by FILTER_INIT
+ *  - filter_init: build a filter for a declared attribute signature
+ *  - filter_free: free resources allocated by filter_init
  */
 /**
- * @def FILTER_INIT(filter, tag, rules, rule_count, ctx)
+ * @def filter_init(filter, tag, rules, rule_count, ctx)
  * @brief Build filter for signature tag into filter using rules.
  * @param filter struct filter*
  * @param tag name used in FILTER_COMPILER_DECLARE(...)
@@ -51,7 +51,7 @@ struct filter_compiler {
 };
 
 static inline void
-FILTER_FREE(
+filter_free(
 	struct filter *filter, const struct filter_compiler *filter_compiler
 ) {
 	for (size_t i = 0; i < filter_compiler->lookup_count; ++i) {
@@ -78,7 +78,7 @@ FILTER_FREE(
 }
 
 static inline int
-FILTER_INIT(
+filter_init(
 	struct filter *filter,
 	const struct filter_compiler *filter_compiler,
 	const struct filter_rule *rules,
@@ -170,7 +170,7 @@ init_finish:
 	return 0;
 
 init_failed:
-	FILTER_FREE(filter, filter_compiler);
+	filter_free(filter, filter_compiler);
 	return -1;
 }
 

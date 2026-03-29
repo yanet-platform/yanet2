@@ -64,9 +64,9 @@ forward_module_config_free(struct cp_module *cp_module) {
 		sizeof(struct forward_target) * config->target_count
 	);
 
-	FILTER_FREE(&config->filter_vlan, FWD_FILTER_VLAN_TAG);
-	FILTER_FREE(&config->filter_ip4, FWD_FILTER_IP4_TAG);
-	FILTER_FREE(&config->filter_ip6, FWD_FILTER_IP6_TAG);
+	filter_free(&config->filter_vlan, FWD_FILTER_VLAN_TAG);
+	filter_free(&config->filter_ip4, FWD_FILTER_IP4_TAG);
+	filter_free(&config->filter_ip6, FWD_FILTER_IP6_TAG);
 
 	cp_module_fini(cp_module);
 
@@ -169,7 +169,7 @@ forward_module_init_l2(
 		check_forward_rule_l2
 	);
 
-	return FILTER_INIT(
+	return filter_init(
 		&config->filter_vlan,
 		FWD_FILTER_VLAN_TAG,
 		filter_rules,
@@ -196,7 +196,7 @@ forward_module_init_ip4(
 		check_forward_rule_ip4
 	);
 
-	return FILTER_INIT(
+	return filter_init(
 		&config->filter_ip4,
 		FWD_FILTER_IP4_TAG,
 		filter_rules,
@@ -223,7 +223,7 @@ forward_module_init_ip6(
 		check_forward_rule_ip6
 	);
 
-	return FILTER_INIT(
+	return filter_init(
 		&config->filter_ip6,
 		FWD_FILTER_IP6_TAG,
 		filter_rules,
