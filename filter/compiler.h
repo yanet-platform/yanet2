@@ -28,124 +28,151 @@
  * @param ctx const struct memory_context* source context
  * @return int 0 on success, negative on error
  */
-#define FILTER_INIT(filter, tag, rules, rule_count, ctx)                       \
-	__extension__({                                                        \
-		__label__ init_failed;                                         \
-		__label__ init_finish;                                         \
-		int __res;                                                     \
-		if (sizeof(__filter_attrs_compiler_##tag) == 0) {              \
-			__res = -1;                                            \
-			goto init_failed;                                      \
-		}                                                              \
-		__res = memory_context_init_from(                              \
-			&((filter)->memory_context), (ctx), "filter"           \
-		);                                                             \
-		if (__res < 0) {                                               \
-			goto init_failed;                                      \
-		}                                                              \
-		const size_t __n = sizeof(__filter_attrs_compiler_##tag) /     \
-				   sizeof(__filter_attrs_compiler_##tag[0]);   \
-		/* init leaves */                                              \
-		for (size_t __i = 0; __i < __n; ++__i) {                       \
-			struct filter_vertex *__v = &((filter)->v[__n + __i]); \
-			__res = value_registry_init(                           \
-				&__v->registry, &((filter)->memory_context)    \
-			);                                                     \
-			if (__res < 0) {                                       \
-				goto init_failed;                              \
-			}                                                      \
-			__v->data = NULL;                                      \
-			__res = __filter_attrs_compiler_##tag[__i].init(       \
-				&__v->registry,                                \
-				&__v->data,                                    \
-				(rules),                                       \
-				(rule_count),                                  \
-				&((filter)->memory_context)                    \
-			);                                                     \
-			if (__res < 0) {                                       \
-				goto init_failed;                              \
-			}                                                      \
-		}                                                              \
-		if (__n == 1) {                                                \
-			struct value_registry __dummy;                         \
-			__res = init_dummy_registry(                           \
-				&((filter)->memory_context),                   \
-				(rule_count),                                  \
-				&__dummy                                       \
-			);                                                     \
-			if (__res < 0) {                                       \
-				value_registry_free(&__dummy);                 \
-				goto init_failed;                              \
-			}                                                      \
-			__res = merge_and_set_registry_values(                 \
-				&((filter)->memory_context),                   \
-				(rules),                                       \
-				&__dummy,                                      \
-				&((filter)->v[1].registry),                    \
-				&((filter)->v[0].table),                       \
-				&((filter)->v[0].registry)                     \
-			);                                                     \
-			if (__res < 0) {                                       \
-				value_registry_free(&__dummy);                 \
-				goto init_failed;                              \
-			}                                                      \
-			goto init_finish;                                      \
-		}                                                              \
-		for (size_t __idx = __n - 1; __idx >= 2; --__idx) {            \
-			__res = merge_and_collect_registry(                    \
-				&((filter)->memory_context),                   \
-				&((filter)->v[2 * __idx].registry),            \
-				&((filter)->v[2 * __idx + 1].registry),        \
-				&((filter)->v[__idx].table),                   \
-				&((filter)->v[__idx].registry)                 \
-			);                                                     \
-			if (__res < 0) {                                       \
-				goto init_failed;                              \
-			}                                                      \
-		}                                                              \
-		__res = merge_and_set_registry_values(                         \
-			&((filter)->memory_context),                           \
-			(rules),                                               \
-			&((filter)->v[2 * 1].registry),                        \
-			&((filter)->v[2 * 1 + 1].registry),                    \
-			&((filter)->v[1].table),                               \
-			&((filter)->v[1].registry)                             \
-		);                                                             \
-	init_failed:                                                           \
-	init_finish:                                                           \
-		__res;                                                         \
-	})
+typedef int (*filter_lookup_init_func)(
+	struct value_registry *registry,
+	void **data,
+	const struct filter_rule *rules,
+	size_t rule_count,
+	struct memory_context *mctx
+);
 
-/**
- * @def FILTER_FREE(filter, tag)
- * @brief Release resources allocated by FILTER_INIT for signature tag.
- * @param filter struct filter*
- * @param tag name used in FILTER_COMPILER_DECLARE(...)
- */
-#define FILTER_FREE(filter, tag)                                               \
-	__extension__({                                                        \
-		const size_t __n = sizeof(__filter_attrs_compiler_##tag) /     \
-				   sizeof(__filter_attrs_compiler_##tag[0]);   \
-		for (size_t __i = 0; __i < __n; ++__i) {                       \
-			struct filter_vertex *__v = &((filter)->v[__n + __i]); \
-			__filter_attrs_compiler_##tag[__i].free(               \
-				ADDR_OF(&__v->data),                           \
-				&((filter)->memory_context)                    \
-			);                                                     \
-			SET_OFFSET_OF(&__v->data, NULL);                       \
-		}                                                              \
-		for (size_t __i = 1; __i < 2 * __n; ++__i) {                   \
-			value_registry_free(&((filter)->v[__i].registry));     \
-		}                                                              \
-		for (size_t __i = 1; __i < __n; ++__i) {                       \
-			value_table_free(&((filter)->v[__i].table));           \
-		}                                                              \
-		if (__n == 1) {                                                \
-			struct filter_vertex *__v0 = &((filter)->v[0]);        \
-			value_registry_free(&__v0->registry);                  \
-			value_table_free(&__v0->table);                        \
-		}                                                              \
-	})
+typedef void (*filter_lookup_free_func)(
+	void *data, struct memory_context *memory_context
+);
+
+struct filter_lookup_handler {
+	filter_lookup_init_func init;
+	filter_lookup_free_func free;
+};
+
+struct filter_compiler {
+	uint64_t lookup_count;
+	struct filter_lookup_handler *lookups;
+};
+
+static inline void
+FILTER_FREE(
+	struct filter *filter, const struct filter_compiler *filter_compiler
+) {
+	for (size_t i = 0; i < filter_compiler->lookup_count; ++i) {
+		struct filter_vertex *v =
+			filter->v + filter_compiler->lookup_count + i;
+		if (v->data != NULL) {
+			filter_compiler->lookups[i].free(
+				ADDR_OF(&v->data), &filter->memory_context
+			);
+		}
+		SET_OFFSET_OF(&v->data, NULL);
+	}
+	for (size_t i = 1; i < 2 * filter_compiler->lookup_count; ++i) {
+		value_registry_free(&filter->v[i].registry);
+	}
+	for (size_t i = 1; i < filter_compiler->lookup_count; ++i) {
+		value_table_free(&filter->v[i].table);
+	}
+	if (filter_compiler->lookup_count == 1) {
+		struct filter_vertex *v0 = filter->v;
+		value_registry_free(&v0->registry);
+		value_table_free(&v0->table);
+	}
+}
+
+static inline int
+FILTER_INIT(
+	struct filter *filter,
+	const struct filter_compiler *filter_compiler,
+	const struct filter_rule *rules,
+	uint32_t rule_count,
+	struct memory_context *memory_context
+) {
+	if (filter_compiler->lookup_count == 0)
+		return -1;
+
+	memset(filter, 0, sizeof(struct filter));
+
+	if (memory_context_init_from(
+		    &filter->memory_context, memory_context, "filter"
+	    )) {
+		return -1;
+	}
+
+	for (uint64_t lookup_idx = 0;
+	     lookup_idx < filter_compiler->lookup_count;
+	     ++lookup_idx) {
+		struct filter_vertex *v =
+			filter->v + filter_compiler->lookup_count + lookup_idx;
+		if (value_registry_init(
+			    &v->registry, &filter->memory_context
+		    )) {
+			goto init_failed;
+		}
+		v->data = NULL;
+		if (filter_compiler->lookups[lookup_idx].init(
+			    &v->registry,
+			    &v->data,
+			    rules,
+			    rule_count,
+			    &filter->memory_context
+		    )) {
+			goto init_failed;
+		}
+	}
+
+	if (filter_compiler->lookup_count == 1) {
+		struct value_registry dummy;
+		if (init_dummy_registry(
+			    &filter->memory_context, rule_count, &dummy
+		    )) {
+			value_registry_free(&dummy);
+			goto init_failed;
+		}
+
+		if (merge_and_set_registry_values(
+			    &filter->memory_context,
+			    (rules),
+			    &dummy,
+			    &filter->v[1].registry,
+			    &filter->v[0].table,
+			    &filter->v[0].registry
+		    )) {
+			value_registry_free(&dummy);
+			goto init_failed;
+		}
+
+		value_registry_free(&dummy);
+		goto init_finish;
+	}
+
+	for (size_t idx = filter_compiler->lookup_count - 1; idx >= 2; --idx) {
+		if (merge_and_collect_registry(
+			    &filter->memory_context,
+			    &filter->v[2 * idx].registry,
+			    &filter->v[2 * idx + 1].registry,
+			    &filter->v[idx].table,
+			    &filter->v[idx].registry
+		    )) {
+			goto init_failed;
+		}
+	}
+
+	if (merge_and_set_registry_values(
+		    &filter->memory_context,
+		    rules,
+		    &filter->v[2 * 1].registry,
+		    &filter->v[2 * 1 + 1].registry,
+		    &filter->v[1].table,
+		    &filter->v[1].registry
+	    )) {
+		goto init_failed;
+	}
+
+init_finish:
+	return 0;
+
+init_failed:
+	FILTER_FREE(filter, filter_compiler);
+	return -1;
+}
 
 // TODO: docs
 static inline uint64_t
