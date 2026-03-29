@@ -902,7 +902,7 @@ impl Ipv6Network {
     ///     Ipv6Network::parse("2a02:6b8:c00::/40").unwrap(),
     /// );
     ///
-    /// // Network with explicit mask (congituous in this case).
+    /// // Network with explicit mask (contiguous in this case).
     /// assert_eq!(
     ///     Ipv6Network::new(
     ///         Ipv6Addr::new(0x2a02, 0x6b8, 0xc00, 0, 0, 0, 0, 0),
