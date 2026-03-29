@@ -36,9 +36,9 @@ query_packet_and_expect_action(
 	struct value_range *actions;
 
 	if (strcmp(sign, "dst") == 0) {
-		FILTER_QUERY(filter, sign_net6_dst, &packet_ptr, &actions, 1);
+		filter_query(filter, sign_net6_dst, &packet_ptr, &actions, 1);
 	} else if (strcmp(sign, "both") == 0) {
-		FILTER_QUERY(filter, sign_net6, &packet_ptr, &actions, 1);
+		filter_query(filter, sign_net6, &packet_ptr, &actions, 1);
 	} else {
 		assert(0 && "Invalid sign");
 	}
@@ -65,9 +65,9 @@ query_packet_and_expect_no_actions(
 	struct value_range *actions;
 
 	if (strcmp(sign, "dst") == 0) {
-		FILTER_QUERY(filter, sign_net6_dst, &packet_ptr, &actions, 1);
+		filter_query(filter, sign_net6_dst, &packet_ptr, &actions, 1);
 	} else if (strcmp(sign, "both") == 0) {
-		FILTER_QUERY(filter, sign_net6, &packet_ptr, &actions, 1);
+		filter_query(filter, sign_net6, &packet_ptr, &actions, 1);
 	} else {
 		assert(0 && "Invalid sign");
 	}

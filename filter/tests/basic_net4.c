@@ -24,7 +24,7 @@ query_and_expect_action(
 	assert(res == 0);
 	struct packet *packet_ptr = &p;
 	struct value_range *actions;
-	FILTER_QUERY(filter, sign_net4, &packet_ptr, &actions, 1);
+	filter_query(filter, sign_net4, &packet_ptr, &actions, 1);
 	assert(actions->count >= 1);
 	assert(ADDR_OF(&actions->values)[0] == expected);
 	free_packet(&p);
@@ -39,7 +39,7 @@ query_and_expect_no_action(
 	assert(res == 0);
 	struct packet *packet_ptr = &p;
 	struct value_range *actions;
-	FILTER_QUERY(filter, sign_net4, &packet_ptr, &actions, 1);
+	filter_query(filter, sign_net4, &packet_ptr, &actions, 1);
 	assert(actions->count == 0);
 	free_packet(&p);
 }

@@ -37,7 +37,7 @@ query_and_expect_actions(
 	struct value_range **ranges =
 		malloc(sizeof(struct value_range *) * packets_count);
 
-	FILTER_QUERY(
+	filter_query(
 		filter, combo_net4_port_src, packets, ranges, packets_count
 	);
 

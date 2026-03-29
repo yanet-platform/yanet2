@@ -25,7 +25,7 @@ query_packet(struct filter *filter, uint16_t vlan, uint32_t expected) {
 
 	struct packet *packet_ptr = &packet;
 	struct value_range *actions;
-	FILTER_QUERY(filter, sign_vlan, &packet_ptr, &actions, 1);
+	filter_query(filter, sign_vlan, &packet_ptr, &actions, 1);
 	assert(actions->count == 1);
 	assert(ADDR_OF(&actions->values)[0] == expected);
 	free_packet(&packet);

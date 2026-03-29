@@ -66,17 +66,17 @@ query_and_expect_actions(
 
 	switch (type) {
 	case src:
-		FILTER_QUERY(
+		filter_query(
 			filter, sign_fast_src, packets, ranges, packets_count
 		);
 		break;
 	case dst:
-		FILTER_QUERY(
+		filter_query(
 			filter, sign_fast_dst, packets, ranges, packets_count
 		);
 		break;
 	case src_dst:
-		FILTER_QUERY(
+		filter_query(
 			filter,
 			sign_fast_src_dst,
 			packets,

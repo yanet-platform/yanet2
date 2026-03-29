@@ -65,7 +65,7 @@ route_mpls_handle_packets(
 		}
 	}
 
-	FILTER_QUERY(
+	filter_query(
 		&module_config->filter_ip4,
 		FILTER_IP4_DST_TAG,
 		ip4_packets,
@@ -73,7 +73,7 @@ route_mpls_handle_packets(
 		ip4_idx
 	);
 
-	FILTER_QUERY(
+	filter_query(
 		&module_config->filter_ip6,
 		FILTER_IP6_DST_TAG,
 		ip6_packets,

@@ -30,7 +30,7 @@ FILTER_QUERY_DECLARE(vs_acl_ipv4, net4_fast_src, port_fast_src);
 static inline uint32_t
 vs_v4_table_lookup(struct packet_handler *handler, struct packet *packet) {
 	struct value_range *result;
-	FILTER_QUERY(
+	filter_query(
 		ADDR_OF(&handler->vs_ipv4.filter),
 		vs_lookup_ipv4,
 		&packet,
@@ -55,7 +55,7 @@ FILTER_QUERY_DECLARE(vs_acl_ipv6, net6_fast_src, port_fast_src);
 static inline uint32_t
 vs_v6_table_lookup(struct packet_handler *handler, struct packet *packet) {
 	struct value_range *result;
-	FILTER_QUERY(
+	filter_query(
 		ADDR_OF(&handler->vs_ipv6.filter),
 		vs_lookup_ipv6,
 		&packet,
@@ -110,7 +110,7 @@ static inline bool
 vs_v4_fw(struct packet_ctx *ctx, struct vs *vs, struct packet *packet) {
 	(void)ctx;
 	struct value_range *result;
-	FILTER_QUERY(ADDR_OF(&vs->acl), vs_acl_ipv4, &packet, &result, 1);
+	filter_query(ADDR_OF(&vs->acl), vs_acl_ipv4, &packet, &result, 1);
 	return check_fw_and_inc_stats(ctx, vs, result);
 }
 
@@ -165,7 +165,7 @@ static inline bool
 vs_v6_fw(struct packet_ctx *ctx, struct vs *vs, struct packet *packet) {
 	(void)ctx;
 	struct value_range *result;
-	FILTER_QUERY(ADDR_OF(&vs->acl), vs_acl_ipv6, &packet, &result, 1);
+	filter_query(ADDR_OF(&vs->acl), vs_acl_ipv6, &packet, &result, 1);
 	return check_fw_and_inc_stats(ctx, vs, result);
 }
 

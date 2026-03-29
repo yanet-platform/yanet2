@@ -100,7 +100,7 @@ test_no_match_proto_only(void *arena) {
 
 	struct value_range **ranges =
 		malloc(sizeof(struct value_range *) * test_count);
-	FILTER_QUERY(
+	filter_query(
 		&filter, combo_net4_port_proto_dst, packets, ranges, test_count
 	);
 
@@ -185,7 +185,7 @@ test_all_match(void *arena) {
 
 	struct value_range **ranges =
 		malloc(sizeof(struct value_range *) * test_count);
-	FILTER_QUERY(
+	filter_query(
 		&filter, combo_net4_port_proto_dst, packets, ranges, test_count
 	);
 
@@ -303,7 +303,7 @@ test_multiple_rules_overlap(void *arena) {
 
 	struct value_range **ranges =
 		malloc(sizeof(struct value_range *) * test_count);
-	FILTER_QUERY(
+	filter_query(
 		&filter, combo_net4_port_proto_dst, packets, ranges, test_count
 	);
 
@@ -410,7 +410,7 @@ test_tcp_flags(void *arena) {
 
 	struct value_range **ranges =
 		malloc(sizeof(struct value_range *) * test_count);
-	FILTER_QUERY(
+	filter_query(
 		&filter, combo_net4_port_proto_dst, packets, ranges, test_count
 	);
 

@@ -35,7 +35,7 @@ struct filter_query {
 };
 
 static inline void
-FILTER_QUERY(
+filter_query(
 	struct filter *filter,
 	const struct filter_query *filter_query,
 	struct packet **packets,

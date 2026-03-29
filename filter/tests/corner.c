@@ -26,7 +26,7 @@ query_and_expect_action(
 	assert(res == 0);
 	struct packet *packet_ptr = &packet;
 	struct value_range *actions;
-	FILTER_QUERY(filter, sign_port_src, &packet_ptr, &actions, 1);
+	filter_query(filter, sign_port_src, &packet_ptr, &actions, 1);
 	assert(actions->count >= 1);
 	assert(ADDR_OF(&actions->values)[0] == expected);
 	free_packet(&packet);
@@ -43,7 +43,7 @@ query_and_expect_no_action(struct filter *filter, uint16_t src_port) {
 	assert(res == 0);
 	struct packet *packet_ptr = &packet;
 	struct value_range *actions;
-	FILTER_QUERY(filter, sign_port_src, &packet_ptr, &actions, 1);
+	filter_query(filter, sign_port_src, &packet_ptr, &actions, 1);
 	assert(actions->count == 0);
 	free_packet(&packet);
 }

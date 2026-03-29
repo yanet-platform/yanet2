@@ -13,11 +13,11 @@
 #include "dataplane/pipeline/pipeline.h"
 #include "lib/dataplane/module/packet_front.h"
 
-FILTER_QUERY_DECLARE(FWD_FILTER_VLAN_TAG, device, vlan);
+FILTER_QUERY_DECLARE(filter_vlan, device, vlan);
 
-FILTER_QUERY_DECLARE(FWD_FILTER_IP4_TAG, device, vlan, net4_src, net4_dst);
+FILTER_QUERY_DECLARE(filter_ip4, device, vlan, net4_src, net4_dst);
 
-FILTER_QUERY_DECLARE(FWD_FILTER_IP6_TAG, device, vlan, net6_src, net6_dst);
+FILTER_QUERY_DECLARE(filter_ip6, device, vlan, net6_src, net6_dst);
 
 static void
 forward_handle_packets(
@@ -61,25 +61,25 @@ forward_handle_packets(
 		}
 	}
 
-	FILTER_QUERY(
+	filter_query(
 		&forward_config->filter_vlan,
-		FWD_FILTER_VLAN_TAG,
+		filter_vlan,
 		vlan_packets,
 		vlan_result,
 		vlan_idx
 	);
 
-	FILTER_QUERY(
+	filter_query(
 		&forward_config->filter_ip4,
-		FWD_FILTER_IP4_TAG,
+		filter_ip4,
 		ip4_packets,
 		ip4_result,
 		ip4_idx
 	);
 
-	FILTER_QUERY(
+	filter_query(
 		&forward_config->filter_ip6,
-		FWD_FILTER_IP6_TAG,
+		filter_ip6,
 		ip6_packets,
 		ip6_result,
 		ip6_idx

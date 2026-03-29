@@ -39,9 +39,9 @@ query_and_expect_action(
 	struct value_range *actions;
 
 	if (strcmp(sign, "ports") == 0) {
-		FILTER_QUERY(filter, sign_ports, &packet_ptr, &actions, 1);
+		filter_query(filter, sign_ports, &packet_ptr, &actions, 1);
 	} else if (strcmp(sign, "port_src") == 0) {
-		FILTER_QUERY(filter, sign_port_src, &packet_ptr, &actions, 1);
+		filter_query(filter, sign_port_src, &packet_ptr, &actions, 1);
 	} else {
 		assert(0 && "Invalid sign");
 	}
@@ -70,9 +70,9 @@ query_and_expect_no_action(
 	struct value_range *actions;
 
 	if (strcmp(sign, "ports") == 0) {
-		FILTER_QUERY(filter, sign_ports, &packet_ptr, &actions, 1);
+		filter_query(filter, sign_ports, &packet_ptr, &actions, 1);
 	} else if (strcmp(sign, "port_src") == 0) {
-		FILTER_QUERY(filter, sign_port_src, &packet_ptr, &actions, 1);
+		filter_query(filter, sign_port_src, &packet_ptr, &actions, 1);
 	} else {
 		assert(0 && "Invalid sign");
 	}

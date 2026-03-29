@@ -402,7 +402,7 @@ run_benchmark(
 		// Query the filter
 		switch (sig_type) {
 		case sig_net6_dst:
-			FILTER_QUERY(
+			filter_query(
 				filter,
 				bench_dst,
 				packets + batch_idx * batch_size,
@@ -411,7 +411,7 @@ run_benchmark(
 			);
 			break;
 		case sig_net6_dst_port:
-			FILTER_QUERY(
+			filter_query(
 				filter,
 				bench_dst_port,
 				packets + batch_idx * batch_size,
@@ -420,7 +420,7 @@ run_benchmark(
 			);
 			break;
 		case sig_net6_dst_port_proto:
-			FILTER_QUERY(
+			filter_query(
 				filter,
 				bench_dst_port_proto,
 				packets + batch_idx * batch_size,
