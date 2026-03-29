@@ -24,7 +24,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 FILTER_COMPILER_DECLARE(
-	combo_net4_port_proto_dst, net4_fast_dst, port_fast_dst, proto
+	combo_net4_port_proto_dst_compile, net4_fast_dst, port_fast_dst, proto
 );
 FILTER_QUERY_DECLARE(
 	combo_net4_port_proto_dst, net4_fast_dst, port_fast_dst, proto
@@ -95,7 +95,9 @@ test_no_match_proto_only(void *arena) {
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize memory context");
 
 	struct filter filter;
-	res = FILTER_INIT(&filter, combo_net4_port_proto_dst, &rule, 1, &mctx);
+	res = FILTER_INIT(
+		&filter, combo_net4_port_proto_dst_compile, &rule, 1, &mctx
+	);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
 
 	struct value_range **ranges =
@@ -180,7 +182,9 @@ test_all_match(void *arena) {
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize memory context");
 
 	struct filter filter;
-	res = FILTER_INIT(&filter, combo_net4_port_proto_dst, &rule, 1, &mctx);
+	res = FILTER_INIT(
+		&filter, combo_net4_port_proto_dst_compile, &rule, 1, &mctx
+	);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
 
 	struct value_range **ranges =
@@ -298,7 +302,9 @@ test_multiple_rules_overlap(void *arena) {
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize memory context");
 
 	struct filter filter;
-	res = FILTER_INIT(&filter, combo_net4_port_proto_dst, rules, 3, &mctx);
+	res = FILTER_INIT(
+		&filter, combo_net4_port_proto_dst_compile, rules, 3, &mctx
+	);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
 
 	struct value_range **ranges =
@@ -405,7 +411,9 @@ test_tcp_flags(void *arena) {
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize memory context");
 
 	struct filter filter;
-	res = FILTER_INIT(&filter, combo_net4_port_proto_dst, rules, 2, &mctx);
+	res = FILTER_INIT(
+		&filter, combo_net4_port_proto_dst_compile, rules, 2, &mctx
+	);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
 
 	struct value_range **ranges =

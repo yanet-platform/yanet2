@@ -23,7 +23,9 @@
 
 ////////////////////////////////////////////////////////////////////////////////
 
-FILTER_COMPILER_DECLARE(combo_net6_port_src, net6_fast_src, port_fast_src);
+FILTER_COMPILER_DECLARE(
+	combo_net6_port_src_compile, net6_fast_src, port_fast_src
+);
 FILTER_QUERY_DECLARE(combo_net6_port_src, net6_fast_src, port_fast_src);
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -141,7 +143,9 @@ test_no_match_port_only(void *arena) {
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize memory context");
 
 	struct filter filter;
-	res = FILTER_INIT(&filter, combo_net6_port_src, &rule, 1, &mctx);
+	res = FILTER_INIT(
+		&filter, combo_net6_port_src_compile, &rule, 1, &mctx
+	);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
 
 	res = query_and_expect_actions(
@@ -248,7 +252,9 @@ test_no_match_ip_only(void *arena) {
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize memory context");
 
 	struct filter filter;
-	res = FILTER_INIT(&filter, combo_net6_port_src, &rule, 1, &mctx);
+	res = FILTER_INIT(
+		&filter, combo_net6_port_src_compile, &rule, 1, &mctx
+	);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
 
 	res = query_and_expect_actions(
@@ -357,7 +363,9 @@ test_both_match(void *arena) {
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize memory context");
 
 	struct filter filter;
-	res = FILTER_INIT(&filter, combo_net6_port_src, &rule, 1, &mctx);
+	res = FILTER_INIT(
+		&filter, combo_net6_port_src_compile, &rule, 1, &mctx
+	);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
 
 	res = query_and_expect_actions(

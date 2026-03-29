@@ -10,7 +10,7 @@
 #include <netinet/in.h>
 #include <stdio.h>
 
-FILTER_COMPILER_DECLARE(sign_port_src, port_src);
+FILTER_COMPILER_DECLARE(sign_port_src_compile, port_src);
 FILTER_QUERY_DECLARE(sign_port_src, port_src);
 
 static void
@@ -88,8 +88,9 @@ check_single_attribute(void *memory) {
 
 	// setup filter
 	struct filter filter;
-	int init_result =
-		FILTER_INIT(&filter, sign_port_src, rules, 3, &memory_context);
+	int init_result = FILTER_INIT(
+		&filter, sign_port_src_compile, rules, 3, &memory_context
+	);
 	assert(init_result == 0);
 
 	// make few queries and expect hit
@@ -142,7 +143,7 @@ check_single_attribute(void *memory) {
 #undef queries
 	}
 
-	FILTER_FREE(&filter, sign_port_src);
+	FILTER_FREE(&filter, sign_port_src_compile);
 }
 
 int

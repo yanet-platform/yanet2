@@ -11,10 +11,10 @@
 #include <stdio.h>
 #include <string.h>
 
-FILTER_COMPILER_DECLARE(sign_ports, port_src, port_dst);
+FILTER_COMPILER_DECLARE(sign_ports_compile, port_src, port_dst);
 FILTER_QUERY_DECLARE(sign_ports, port_src, port_dst);
 
-FILTER_COMPILER_DECLARE(sign_port_src, port_src);
+FILTER_COMPILER_DECLARE(sign_port_src_compile, port_src);
 FILTER_QUERY_DECLARE(sign_port_src, port_src);
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -115,13 +115,15 @@ test_src_dst_ports(void *memory) {
 
 	// init filter
 	struct filter filter;
-	res = FILTER_INIT(&filter, sign_ports, actions, 2, &memory_context);
+	res = FILTER_INIT(
+		&filter, sign_ports_compile, actions, 2, &memory_context
+	);
 	assert(res == 0);
 
 	query_and_expect_action(&filter, 6, 3, 1, "ports");
 	query_and_expect_action(&filter, 8, 3, 2, "ports");
 
-	FILTER_FREE(&filter, sign_ports);
+	FILTER_FREE(&filter, sign_ports_compile);
 
 	memory_bfree(&memory_context, memory, 1 << 24);
 	void *mem = memory_balloc(&memory_context, 1 << 24);
@@ -156,7 +158,9 @@ test_src_port_only(void *memory) {
 
 	// init filter
 	struct filter filter;
-	res = FILTER_INIT(&filter, sign_port_src, actions, 2, &memory_context);
+	res = FILTER_INIT(
+		&filter, sign_port_src_compile, actions, 2, &memory_context
+	);
 	assert(res == 0);
 
 	query_and_expect_action(&filter, 500, 0, 1, "port_src");
@@ -168,7 +172,7 @@ test_src_port_only(void *memory) {
 	query_and_expect_no_action(&filter, 499, 0, "port_src");
 	query_and_expect_no_action(&filter, 801, 0, "port_src");
 
-	FILTER_FREE(&filter, sign_port_src);
+	FILTER_FREE(&filter, sign_port_src_compile);
 
 	memory_bfree(&memory_context, memory, 1 << 24);
 	void *mem = memory_balloc(&memory_context, 1 << 24);

@@ -9,7 +9,7 @@
 #include <assert.h>
 #include <netinet/in.h>
 
-FILTER_COMPILER_DECLARE(sign_proto_range, proto_range);
+FILTER_COMPILER_DECLARE(sign_proto_range_compile, proto_range);
 FILTER_QUERY_DECLARE(sign_proto_range, proto_range);
 
 static void
@@ -74,7 +74,9 @@ test_proto_1(void *memory) {
 	struct filter filter;
 
 	LOG(INFO, "filter init...");
-	res = FILTER_INIT(&filter, sign_proto_range, rules, 2, &memory_context);
+	res = FILTER_INIT(
+		&filter, sign_proto_range_compile, rules, 2, &memory_context
+	);
 	assert(res == 0);
 
 	LOG(INFO, "query tcp packet...");
@@ -83,7 +85,7 @@ test_proto_1(void *memory) {
 	LOG(INFO, "query udp packet...");
 	query_udp_packet(&filter, 2);
 
-	FILTER_FREE(&filter, sign_proto_range);
+	FILTER_FREE(&filter, sign_proto_range_compile);
 }
 
 int

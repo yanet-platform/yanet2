@@ -10,10 +10,10 @@
 #include <netinet/in.h>
 #include <string.h>
 
-FILTER_COMPILER_DECLARE(sign_net6_dst, net6_dst);
+FILTER_COMPILER_DECLARE(sign_net6_dst_compile, net6_dst);
 FILTER_QUERY_DECLARE(sign_net6_dst, net6_dst);
 
-FILTER_COMPILER_DECLARE(sign_net6, net6_src, net6_dst);
+FILTER_COMPILER_DECLARE(sign_net6_compile, net6_src, net6_dst);
 FILTER_QUERY_DECLARE(sign_net6, net6_src, net6_dst);
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -148,7 +148,7 @@ test1(void *memory) {
 
 	// init filter
 	struct filter filter;
-	res = FILTER_INIT(&filter, sign_net6_dst, rules, 1, &mctx);
+	res = FILTER_INIT(&filter, sign_net6_dst_compile, rules, 1, &mctx);
 	assert(res == 0);
 
 	// query packet 1
@@ -249,7 +249,7 @@ test1(void *memory) {
 		query_packet_and_expect_action(&filter, src, dst, 1, "dst");
 	}
 
-	FILTER_FREE(&filter, sign_net6_dst);
+	FILTER_FREE(&filter, sign_net6_dst_compile);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -298,7 +298,7 @@ test2(void *memory) {
 
 	// init filter
 	struct filter filter;
-	res = FILTER_INIT(&filter, sign_net6_dst, rules, 1, &mctx);
+	res = FILTER_INIT(&filter, sign_net6_dst_compile, rules, 1, &mctx);
 	assert(res == 0);
 
 	// query packet 1
@@ -373,7 +373,7 @@ test2(void *memory) {
 		query_packet_and_expect_no_actions(&filter, src, dst, "dst");
 	}
 
-	FILTER_FREE(&filter, sign_net6_dst);
+	FILTER_FREE(&filter, sign_net6_dst_compile);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -516,7 +516,7 @@ test3(void *memory) {
 
 	// init filter
 	struct filter filter;
-	res = FILTER_INIT(&filter, sign_net6, rules, 2, &mctx);
+	res = FILTER_INIT(&filter, sign_net6_compile, rules, 2, &mctx);
 	assert(res == 0);
 
 	// query packet 1
@@ -563,7 +563,7 @@ test3(void *memory) {
 		query_packet_and_expect_no_actions(&filter, src, dst, "both");
 	}
 
-	FILTER_FREE(&filter, sign_net6);
+	FILTER_FREE(&filter, sign_net6_compile);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

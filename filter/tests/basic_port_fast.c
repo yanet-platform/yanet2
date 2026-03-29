@@ -23,13 +23,15 @@
 
 ////////////////////////////////////////////////////////////////////////////////
 
-FILTER_COMPILER_DECLARE(sign_fast_src_dst, port_fast_src, port_fast_dst);
+FILTER_COMPILER_DECLARE(
+	sign_fast_src_dst_compile, port_fast_src, port_fast_dst
+);
 FILTER_QUERY_DECLARE(sign_fast_src_dst, port_fast_src, port_fast_dst);
 
-FILTER_COMPILER_DECLARE(sign_fast_src, port_fast_src);
+FILTER_COMPILER_DECLARE(sign_fast_src_compile, port_fast_src);
 FILTER_QUERY_DECLARE(sign_fast_src, port_fast_src);
 
-FILTER_COMPILER_DECLARE(sign_fast_dst, port_fast_dst);
+FILTER_COMPILER_DECLARE(sign_fast_dst_compile, port_fast_dst);
 FILTER_QUERY_DECLARE(sign_fast_dst, port_fast_dst);
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -210,11 +212,19 @@ test_basic(void *arena, enum filter_sign sign) {
 	struct filter filter;
 	if (sign == src) {
 		res = FILTER_INIT(
-			&filter, sign_fast_src, rules, ranges_count, &mctx
+			&filter,
+			sign_fast_src_compile,
+			rules,
+			ranges_count,
+			&mctx
 		);
 	} else {
 		res = FILTER_INIT(
-			&filter, sign_fast_dst, rules, ranges_count, &mctx
+			&filter,
+			sign_fast_dst_compile,
+			rules,
+			ranges_count,
+			&mctx
 		);
 	}
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
@@ -352,11 +362,11 @@ test_multiple_ranges_per_rule(void *arena, enum filter_sign sign) {
 	struct filter filter;
 	if (sign == src) {
 		res = FILTER_INIT(
-			&filter, sign_fast_src, rules, num_rules, &mctx
+			&filter, sign_fast_src_compile, rules, num_rules, &mctx
 		);
 	} else {
 		res = FILTER_INIT(
-			&filter, sign_fast_dst, rules, num_rules, &mctx
+			&filter, sign_fast_dst_compile, rules, num_rules, &mctx
 		);
 	}
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
@@ -456,7 +466,7 @@ stress(void *arena,
 	case src:
 		res = FILTER_INIT(
 			&filter,
-			sign_fast_src,
+			sign_fast_src_compile,
 			rules,
 			num_rules,
 			&memory_context
@@ -465,7 +475,7 @@ stress(void *arena,
 	case dst:
 		res = FILTER_INIT(
 			&filter,
-			sign_fast_dst,
+			sign_fast_dst_compile,
 			rules,
 			num_rules,
 			&memory_context
@@ -474,7 +484,7 @@ stress(void *arena,
 	case src_dst:
 		res = FILTER_INIT(
 			&filter,
-			sign_fast_src_dst,
+			sign_fast_src_dst_compile,
 			rules,
 			num_rules,
 			&memory_context
@@ -703,11 +713,19 @@ test_no_match(void *arena, enum filter_sign sign) {
 	struct filter filter;
 	if (sign == src) {
 		res = FILTER_INIT(
-			&filter, sign_fast_src, rules, ranges_count, &mctx
+			&filter,
+			sign_fast_src_compile,
+			rules,
+			ranges_count,
+			&mctx
 		);
 	} else {
 		res = FILTER_INIT(
-			&filter, sign_fast_dst, rules, ranges_count, &mctx
+			&filter,
+			sign_fast_dst_compile,
+			rules,
+			ranges_count,
+			&mctx
 		);
 	}
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
@@ -834,11 +852,19 @@ test_overlapping_ranges(void *arena, enum filter_sign sign) {
 	struct filter filter;
 	if (sign == src) {
 		res = FILTER_INIT(
-			&filter, sign_fast_src, rules, ranges_count, &mctx
+			&filter,
+			sign_fast_src_compile,
+			rules,
+			ranges_count,
+			&mctx
 		);
 	} else {
 		res = FILTER_INIT(
-			&filter, sign_fast_dst, rules, ranges_count, &mctx
+			&filter,
+			sign_fast_dst_compile,
+			rules,
+			ranges_count,
+			&mctx
 		);
 	}
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
@@ -954,11 +980,19 @@ test_boundary_conditions(void *arena, enum filter_sign sign) {
 	struct filter filter;
 	if (sign == src) {
 		res = FILTER_INIT(
-			&filter, sign_fast_src, rules, ranges_count, &mctx
+			&filter,
+			sign_fast_src_compile,
+			rules,
+			ranges_count,
+			&mctx
 		);
 	} else {
 		res = FILTER_INIT(
-			&filter, sign_fast_dst, rules, ranges_count, &mctx
+			&filter,
+			sign_fast_dst_compile,
+			rules,
+			ranges_count,
+			&mctx
 		);
 	}
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
@@ -1090,11 +1124,19 @@ test_single_port_ranges(void *arena, enum filter_sign sign) {
 	struct filter filter;
 	if (sign == src) {
 		res = FILTER_INIT(
-			&filter, sign_fast_src, rules, ranges_count, &mctx
+			&filter,
+			sign_fast_src_compile,
+			rules,
+			ranges_count,
+			&mctx
 		);
 	} else {
 		res = FILTER_INIT(
-			&filter, sign_fast_dst, rules, ranges_count, &mctx
+			&filter,
+			sign_fast_dst_compile,
+			rules,
+			ranges_count,
+			&mctx
 		);
 	}
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
@@ -1219,11 +1261,19 @@ test_adjacent_ranges(void *arena, enum filter_sign sign) {
 	struct filter filter;
 	if (sign == src) {
 		res = FILTER_INIT(
-			&filter, sign_fast_src, rules, ranges_count, &mctx
+			&filter,
+			sign_fast_src_compile,
+			rules,
+			ranges_count,
+			&mctx
 		);
 	} else {
 		res = FILTER_INIT(
-			&filter, sign_fast_dst, rules, ranges_count, &mctx
+			&filter,
+			sign_fast_dst_compile,
+			rules,
+			ranges_count,
+			&mctx
 		);
 	}
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
@@ -1354,11 +1404,19 @@ test_extreme_ports(void *arena, enum filter_sign sign) {
 	struct filter filter;
 	if (sign == src) {
 		res = FILTER_INIT(
-			&filter, sign_fast_src, rules, ranges_count, &mctx
+			&filter,
+			sign_fast_src_compile,
+			rules,
+			ranges_count,
+			&mctx
 		);
 	} else {
 		res = FILTER_INIT(
-			&filter, sign_fast_dst, rules, ranges_count, &mctx
+			&filter,
+			sign_fast_dst_compile,
+			rules,
+			ranges_count,
+			&mctx
 		);
 	}
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");

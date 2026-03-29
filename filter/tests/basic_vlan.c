@@ -9,7 +9,7 @@
 #include <assert.h>
 #include <netinet/in.h>
 
-FILTER_COMPILER_DECLARE(sign_vlan, vlan);
+FILTER_COMPILER_DECLARE(sign_vlan_compile, vlan);
 FILTER_QUERY_DECLARE(sign_vlan, vlan);
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -62,14 +62,16 @@ test_proto_1(void *memory) {
 	struct filter_rule rules[3] = {r1, r2, r3};
 
 	struct filter filter;
-	res = FILTER_INIT(&filter, sign_vlan, rules, 3, &memory_context);
+	res = FILTER_INIT(
+		&filter, sign_vlan_compile, rules, 3, &memory_context
+	);
 	assert(res == 0);
 
 	query_packet(&filter, 10, 1);
 	query_packet(&filter, 20, 2);
 	query_packet(&filter, 30, 3);
 
-	FILTER_FREE(&filter, sign_vlan);
+	FILTER_FREE(&filter, sign_vlan_compile);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

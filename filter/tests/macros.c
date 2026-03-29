@@ -10,7 +10,7 @@
 #include <netinet/in.h>
 
 FILTER_COMPILER_DECLARE(sign, port_src);
-FILTER_QUERY_DECLARE(sign, port_src);
+FILTER_QUERY_DECLARE(sign_compile, port_src);
 
 static void
 run_case(void) {
@@ -45,7 +45,7 @@ run_case(void) {
 	// query via header-only API
 	struct packet *packet_ptr = &p;
 	struct value_range *actions;
-	filter_query(&f, sign, &packet_ptr, &actions, 1);
+	filter_query(&f, sign_compile, &packet_ptr, &actions, 1);
 	assert(actions->count == 1);
 	assert(ADDR_OF(&actions->values)[0] == 1);
 

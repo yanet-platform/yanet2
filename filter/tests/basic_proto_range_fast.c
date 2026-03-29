@@ -11,7 +11,7 @@
 #include <netinet/in.h>
 #include <stdlib.h>
 
-FILTER_COMPILER_DECLARE(sign_proto_range_fast, proto_range_fast);
+FILTER_COMPILER_DECLARE(sign_proto_range_fast_compile, proto_range_fast);
 FILTER_QUERY_DECLARE(sign_proto_range_fast, proto_range_fast);
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -81,7 +81,11 @@ test_basic_tcp_udp(void *memory) {
 
 	LOG(INFO, "filter init...");
 	res = FILTER_INIT(
-		&filter, sign_proto_range_fast, rules, 2, &memory_context
+		&filter,
+		sign_proto_range_fast_compile,
+		rules,
+		2,
+		&memory_context
 	);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
 
@@ -91,7 +95,7 @@ test_basic_tcp_udp(void *memory) {
 	LOG(INFO, "query udp packet...");
 	query_udp_packet(&filter, 2);
 
-	FILTER_FREE(&filter, sign_proto_range_fast);
+	FILTER_FREE(&filter, sign_proto_range_fast_compile);
 
 	return TEST_SUCCESS;
 }
@@ -136,7 +140,11 @@ test_tcp_flags(void *memory) {
 
 	struct filter filter;
 	res = FILTER_INIT(
-		&filter, sign_proto_range_fast, rules, 3, &memory_context
+		&filter,
+		sign_proto_range_fast_compile,
+		rules,
+		3,
+		&memory_context
 	);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
 
@@ -149,7 +157,7 @@ test_tcp_flags(void *memory) {
 	LOG(INFO, "query tcp FIN packet...");
 	query_tcp_packet(&filter, 0x01, 3);
 
-	FILTER_FREE(&filter, sign_proto_range_fast);
+	FILTER_FREE(&filter, sign_proto_range_fast_compile);
 
 	return TEST_SUCCESS;
 }
@@ -181,7 +189,11 @@ test_multiple_ranges_per_rule(void *memory) {
 
 	struct filter filter;
 	res = FILTER_INIT(
-		&filter, sign_proto_range_fast, rules, 1, &memory_context
+		&filter,
+		sign_proto_range_fast_compile,
+		rules,
+		1,
+		&memory_context
 	);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
 
@@ -191,7 +203,7 @@ test_multiple_ranges_per_rule(void *memory) {
 	LOG(INFO, "query udp packet...");
 	query_udp_packet(&filter, 1);
 
-	FILTER_FREE(&filter, sign_proto_range_fast);
+	FILTER_FREE(&filter, sign_proto_range_fast_compile);
 
 	return TEST_SUCCESS;
 }
@@ -224,7 +236,11 @@ test_boundary_values(void *memory) {
 
 	struct filter filter;
 	res = FILTER_INIT(
-		&filter, sign_proto_range_fast, rules, 2, &memory_context
+		&filter,
+		sign_proto_range_fast_compile,
+		rules,
+		2,
+		&memory_context
 	);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
 
@@ -246,7 +262,7 @@ test_boundary_values(void *memory) {
 	);
 	free_packet(&packet1);
 
-	FILTER_FREE(&filter, sign_proto_range_fast);
+	FILTER_FREE(&filter, sign_proto_range_fast_compile);
 
 	return TEST_SUCCESS;
 }

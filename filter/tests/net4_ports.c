@@ -11,7 +11,7 @@
 #include <stdio.h>
 
 FILTER_COMPILER_DECLARE(
-	sign_net4_ports, port_src, port_dst, net4_src, net4_dst
+	sign_net4_ports_compile, port_src, port_dst, net4_src, net4_dst
 );
 FILTER_QUERY_DECLARE(sign_net4_ports, port_src, port_dst, net4_src, net4_dst);
 
@@ -82,7 +82,7 @@ test(void *memory) {
 	// build filter
 	struct filter filter;
 	res = FILTER_INIT(
-		&filter, sign_net4_ports, actions, 2, &memory_context
+		&filter, sign_net4_ports_compile, actions, 2, &memory_context
 	);
 	assert(res == 0);
 
@@ -96,7 +96,7 @@ test(void *memory) {
 		&filter, ip(198, 233, 10, 15), ip(192, 1, 1, 1), 200, 150, 2
 	);
 
-	FILTER_FREE(&filter, sign_net4_ports);
+	FILTER_FREE(&filter, sign_net4_ports_compile);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

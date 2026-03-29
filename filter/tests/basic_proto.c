@@ -9,7 +9,7 @@
 #include <assert.h>
 #include <netinet/in.h>
 
-FILTER_COMPILER_DECLARE(sign_proto, proto);
+FILTER_COMPILER_DECLARE(sign_proto_compile, proto);
 FILTER_QUERY_DECLARE(sign_proto, proto);
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -75,7 +75,9 @@ test_proto_1(void *memory) {
 	struct filter_rule rules[3] = {r1, r2, r3};
 
 	struct filter filter;
-	res = FILTER_INIT(&filter, sign_proto, rules, 3, &memory_context);
+	res = FILTER_INIT(
+		&filter, sign_proto_compile, rules, 3, &memory_context
+	);
 	assert(res == 0);
 
 	query_tcp_packet(&filter, 0b101, 1);
@@ -88,7 +90,7 @@ test_proto_1(void *memory) {
 
 	query_udp_packet(&filter, 2);
 
-	FILTER_FREE(&filter, sign_proto);
+	FILTER_FREE(&filter, sign_proto_compile);
 }
 
 int

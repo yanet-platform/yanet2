@@ -50,13 +50,15 @@
 ////////////////////////////////////////////////////////////////////////////////
 // Filter signature declarations
 
-FILTER_COMPILER_DECLARE(bench_dst, net6_dst);
+FILTER_COMPILER_DECLARE(bench_dst_compile, net6_dst);
 FILTER_QUERY_DECLARE(bench_dst, net6_dst);
 
-FILTER_COMPILER_DECLARE(bench_dst_port, net6_dst, port_dst);
+FILTER_COMPILER_DECLARE(bench_dst_port_compile, net6_dst, port_dst);
 FILTER_QUERY_DECLARE(bench_dst_port, net6_dst, port_dst);
 
-FILTER_COMPILER_DECLARE(bench_dst_port_proto, net6_dst, port_dst, proto);
+FILTER_COMPILER_DECLARE(
+	bench_dst_port_proto_compile, net6_dst, port_dst, proto
+);
 FILTER_QUERY_DECLARE(bench_dst_port_proto, net6_dst, port_dst, proto);
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -598,7 +600,7 @@ main(int argc, char **argv) {
 	case sig_net6_dst:
 		res = FILTER_INIT(
 			&filter,
-			bench_dst,
+			bench_dst_compile,
 			rules,
 			config.num_rules,
 			&memory_context
@@ -607,7 +609,7 @@ main(int argc, char **argv) {
 	case sig_net6_dst_port:
 		res = FILTER_INIT(
 			&filter,
-			bench_dst_port,
+			bench_dst_port_compile,
 			rules,
 			config.num_rules,
 			&memory_context
@@ -616,7 +618,7 @@ main(int argc, char **argv) {
 	case sig_net6_dst_port_proto:
 		res = FILTER_INIT(
 			&filter,
-			bench_dst_port_proto,
+			bench_dst_port_proto_compile,
 			rules,
 			config.num_rules,
 			&memory_context
