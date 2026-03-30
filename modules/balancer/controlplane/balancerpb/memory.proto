@@ -2,81 +2,71 @@ syntax = "proto3";
 
 package balancerpb;
 
-import "modules/balancer/agent/balancerpb/module.proto";
+import "modules/balancer/controlplane/balancerpb/common.proto";
 
-option go_package = "github.com/yanet-platform/yanet2/modules/balancer/agent/balancerpb;balancerpb";
+option go_package = "github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb;balancerpb";
 
 // Memory usage for real servers within a VS
 message RealsUsage {
-	uint64 counters_usage = 1;
-	uint64 data_usage = 2;
-	uint64 total_usage = 3;
+	uint64 counters = 1;
+	uint64 interval_counters = 2;
+	uint64 data = 3;
+	uint64 total = 4;
 }
 
 // Memory usage for a single virtual service
-message VsInspect {
-	uint64 acl_usage = 1;
-	uint64 ring_usage = 2;
-	uint64 counters_usage = 3;
-	RealsUsage reals_usage = 4;
-	uint64 other_usage = 5;
-	uint64 total_usage = 6;
+message VsUsage {
+	uint64 acl = 1;
+	uint64 ring = 2;
+	uint64 counters = 3;
+	RealsUsage reals = 4;
+	uint64 other = 5;
+	uint64 total = 6;
 }
 
 // Named VS inspect with identifier
-message NamedVsInspect {
+message NamedVsUsage {
 	VsIdentifier identifier = 1;
-	VsInspect inspect = 2;
+	VsUsage inspect = 2;
 }
 
-// Memory usage for IPv4 or IPv6 packet handler VS section
-message PacketHandlerVsInspect {
-	uint64 matcher_usage = 1;
-	uint64 summary_vs_usage = 2;
-	repeated NamedVsInspect vs_inspects = 3;
-	uint64 announce_usage = 4;
-	uint64 index_usage = 5;
-	uint64 total_usage = 6;
+message PacketHandlerVsUsage {
+	uint64 matcher = 1;
+	uint64 summary_vs = 2;
+	repeated NamedVsUsage vs = 3;
+	uint64 announce = 4;
+	uint64 index = 5;
+	uint64 total = 6;
 }
 
-// Complete packet handler memory usage
-message PacketHandlerInspect {
-	PacketHandlerVsInspect vs_ipv4_inspect = 1;
-	PacketHandlerVsInspect vs_ipv6_inspect = 2;
-	uint64 summary_vs_usage = 3;
-	uint64 vs_index_usage = 4;
-	uint64 reals_index_usage = 5;
-	uint64 counters_usage = 6;
-	uint64 decap_usage = 7;
-	uint64 total_usage = 8;
+message PacketHandlerUsage {
+	PacketHandlerVsUsage vs_ipv4 = 1;
+	PacketHandlerVsUsage vs_ipv6 = 2;
+	uint64 summary_vs = 3;
+	uint64 vs_index = 4;
+	uint64 reals_index = 5;
+	uint64 counters = 6;
+	uint64 interval_counters = 7;
+	uint64 decap_usage = 8;
+	uint64 total_usage = 9;
 }
 
-// State memory usage
-message StateInspect {
-	uint64 session_table_usage = 1;
-	uint64 total_usage = 2;
-}
-
-// Per-balancer memory inspection
-message BalancerInspect {
-	// Balancer name
+message BalancerMemoryUsage {
 	string name = 1;
-	// Packet handler memory usage
-	PacketHandlerInspect packet_handler_inspect = 2;
-	// State memory usage
-	StateInspect state_inspect = 3;
-	// Other memory usage
-	uint64 other_usage = 4;
-	// Total memory usage for this balancer
-	uint64 total_usage = 5;
+
+	PacketHandlerUsage packet_handler = 2;
+
+	uint64 session_table = 3;
+
+	uint64 other = 4;
+
+	uint64 total = 5;
 }
 
-// Agent-level inspection (top-level response)
-message AgentInspect {
-	// Agent memory limit (configured maximum)
+message AgentMemoryUsage {
 	uint64 memory_limit = 1;
-	// Current memory usage
+	
 	uint64 memory_usage = 2;
-	// List of all balancer inspects
-	repeated BalancerInspect balancers = 3;
+
+	repeated BalancerMemoryUsage balancers = 3;
 }

@@ -4,30 +4,31 @@ package balancerpb;
 
 import "google/protobuf/timestamp.proto";
 
-import "modules/balancer/controlplane/balancerpb/stats.proto";
 import "modules/balancer/controlplane/balancerpb/common.proto";
 
-option go_package = "github.com/yanet-platform/yanet2/modules/balancer/agent/balancerpb;balancerpb";
+option go_package = "github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb;balancerpb";
 
 message BalancerState {
-	L4Stats l4_stats = 1;
-	CommonStats common_stats = 2;
-	IcmpStats icmp_ipv4_stats = 3;
-	IcmpStats icmp_ipv6_stats = 4;
-	uint64 active_sessions = 5;
-	google.protobuf.Timestamp last_packet_timestamp = 6;
-	repeated VirtualServiceState virtual_services = 7;
-	string balancer_name = 8;
-	PacketHandlerRef packet_handler = 9;
+	string balancer_name = 1;
+  PacketHandlerRef packet_handler = 2;
+	L4Stats l4_stats = 3;
+	CommonStats common_stats = 4;
+	IcmpStats icmp_ipv4_stats = 5;
+	IcmpStats icmp_ipv6_stats = 6;
+	uint64 active_sessions = 7;
+	google.protobuf.Timestamp last_packet_timestamp = 8;
+	repeated VsState virtual_services = 9;
 }
 
-message VirtualServiceState {
+message VsState {
 	VsIdentifier id = 1;
-	VsStats vs_stats = 2;
-	uint64 active_sessions = 3;
-	google.protobuf.Timestamp last_packet_timestamp = 4;
-	repeated AllowedSourcesStats allowed_sources = 5;
-	repeated RealState reals = 6;
+	VsFlags flags = 2;
+  VsScheduler scheduler = 3;
+	VsStats stats = 4;
+	uint64 active_sessions = 5;
+	google.protobuf.Timestamp last_packet_timestamp = 6;
+	repeated AllowedSourcesStats allowed_sources = 7;
+	repeated RealState reals = 8;
 }
 
 message RealState {
@@ -307,14 +308,14 @@ message BalancerStats {
   L4Stats l4 = 1;
 
   // ICMPv4 processing statistics
-  IcmpStats icmpv4 = 2;
+  IcmpStats icmp_ipv4 = 2;
 
   // ICMPv6 processing statistics
-  IcmpStats icmpv6 = 3;
+  IcmpStats icmp_ipv6 = 3;
 
   // Common statistics (all protocols)
   CommonStats common = 4;
 
   // Per-virtual-service statistics with per-real breakdowns
-  repeated NamedVsStats vs = 5;
+  repeated NamedVsStats virtual_services = 5;
 }

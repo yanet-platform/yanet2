@@ -3,10 +3,11 @@ syntax = "proto3";
 package balancerpb;
 
 import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
 
 import "common/filterpb/filter.proto";
 
-option go_package = "github.com/yanet-platform/yanet2/modules/balancer/agent/balancerpb;balancerpb";
+option go_package = "github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb;balancerpb";
 
 // Transport layer protocol.
 //
@@ -307,11 +308,7 @@ message Real {
 	//
 	// This allows preserving parts of the original source address while
 	// setting specific bits for routing or identification purposes.
-	//
-	// If not specified, use src of virtual service. 
-	// If src of virtual service not specified, or have another IP protocol,
-	// the error is returned.
-	optional filterpb.IPNet src = 3;
+	filterpb.IPNet src = 3;
 }
 
 // Virtual service feature flags.
@@ -508,7 +505,7 @@ message PacketHandlerConfig {
 	//
 	// Used as the outer source address when tunneling packets to
 	// real servers via IPIP or GRE (for IPv4 destinations).
-	Addr source_address_v4 = 2;
+	bytes source_address_v4 = 2;
 
 	// Source IPv6 address for encapsulated packets.
 	//
@@ -517,7 +514,7 @@ message PacketHandlerConfig {
 	//
 	// Used as the outer source address when tunneling packets to
 	// real servers via IPIP or GRE (for IPv6 destinations).
-	Addr source_address_v6 = 3;
+	bytes source_address_v6 = 3;
 
 	// Decapsulation addresses.
 	//
@@ -528,7 +525,7 @@ message PacketHandlerConfig {
 	// from this list, it attempts to decapsulate it (remove the
 	// outer IP header). Used for return traffic in DSR setups or
 	// multi-tier load balancing.
-	repeated Addr decap_addresses = 4;
+	repeated bytes decap_addresses = 4;
 
 	// Session timeout configuration.
 	//
@@ -740,4 +737,50 @@ message StateConfig {
 	// - Stable/predictable traffic: 30s-60s
 	// - Static configuration (no WLC, no auto-resize): 0 (disabled)
 	optional google.protobuf.Duration refresh_period = 4;
+}
+
+message Session {
+	// Client source IP address (IPv4 or IPv6)
+	bytes client_addr = 1;
+
+	// Client source port number
+	uint32 client_port = 2;
+  
+	// Virtual service this session is associated with.
+	//
+	// Identifies which virtual service the client connected to.
+	VsIdentifier vs_id = 3;
+  
+	// Real server this session is assigned to.
+	//
+	// Identifies which real server is handling this session.
+	// Once assigned, all packets for this session are forwarded
+	// to this real (unless the real becomes unavailable).
+	RealIdentifier real_id = 4;
+  
+	// Session creation timestamp.
+	//
+	// When the first packet of this session was processed and
+	// the session was created in the session table.
+	google.protobuf.Timestamp create_timestamp = 5;
+  
+	// Last packet timestamp.
+	//
+	// When the most recent packet for this session was processed.
+	// Used to calculate session age and determine if timeout has expired.
+	google.protobuf.Timestamp last_packet_timestamp = 6;
+  
+	// Session timeout duration.
+	//
+	// How long the session remains active without receiving packets.
+	// The timeout value depends on the protocol and TCP state:
+	// - TCP SYN: sessions_timeouts.tcp_syn
+	// - TCP SYN-ACK: sessions_timeouts.tcp_syn_ack
+	// - TCP FIN: sessions_timeouts.tcp_fin
+	// - TCP established: sessions_timeouts.tcp
+	// - UDP: sessions_timeouts.udp
+	//
+	// If (current_time - last_packet_timestamp) > timeout, the session
+	// is removed from the session table during the next cleanup cycle.
+	google.protobuf.Duration timeout = 7;
 }

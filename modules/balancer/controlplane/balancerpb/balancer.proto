@@ -2,17 +2,14 @@ syntax = "proto3";
 
 package balancerpb;
 
-import "modules/balancer/agent/balancerpb/graph.proto";
-import "modules/balancer/agent/balancerpb/info.proto";
-import "modules/balancer/agent/balancerpb/inspect.proto";
-import "modules/balancer/agent/balancerpb/module.proto";
-import "modules/balancer/agent/balancerpb/stats.proto";
-import "modules/balancer/agent/balancerpb/filter.proto";
-import "modules/balancer/agent/balancerpb/snapshot.proto";
+import "modules/balancer/controlplane/balancerpb/common.proto";
+import "modules/balancer/controlplane/balancerpb/filter.proto";
+import "modules/balancer/controlplane/balancerpb/memory.proto";
+import "modules/balancer/controlplane/balancerpb/state.proto";
 
 import "common/commonpb/metric.proto";
 
-option go_package = "github.com/yanet-platform/yanet2/modules/balancer/agent/balancerpb;balancerpb";
+option go_package = "github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb;balancerpb";
 
 // Balancer service.
 //
@@ -117,7 +114,7 @@ service Balancer {
 	//
 	// Note: VS matcher filters (IPv4/IPv6) may be recompiled if the set of
 	// VS identifiers changes.
-	rpc UpdateVirtualServices(UpdateVirtualServicesRequest) returns (UpdateVirtualServicesResponse);
+	rpc UpdateVS(UpdateVSRequest) returns (UpdateVSResponse);
 
 	// Delete specific virtual services.
 	//
@@ -136,7 +133,7 @@ service Balancer {
 	//
 	// Note: VS matcher filters (IPv4/IPv6) will be recompiled since the
 	// set of VS identifiers changes.
-	rpc DeleteVirtualServices(DeleteVirtualServicesRequest) returns (DeleteVirtualServicesResponse);
+	rpc DeleteVS(DeleteVSRequest) returns (DeleteVSResponse);
 }
 
 message GetMetricsRequest {
@@ -266,7 +263,7 @@ message FlushRealsRequest {
 message FlushRealsResponse {
 	string name = 1;
 	// Number of buffered updates that were flushed and applied
-	uint32 updates_flushed = 2;
+	uint64 updates_flushed = 2;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -319,7 +316,7 @@ message ListSessionsResponse {
 	//
 	// Each session includes client information, virtual service mapping,
 	// real server assignment, creation time, last packet time, and timeout.
-	repeated SessionInfo sessions = 2;
+	repeated Session sessions = 2;
 }
 
 // Request to show memory usage inspection.
@@ -330,14 +327,14 @@ message GetMemoryUsageRequest {
 // Response containing memory usage inspection.
 message GetMemoryUsageResponse {
 	// Agent-level memory inspection including all balancers
-	AgentInspect inspect = 1;
+	AgentMemoryUsage memory_usage = 1;
 }
 
 // Request to update specific virtual services.
 //
 // Allows partial updates to the VS configuration by specifying only
 // the virtual services that need to be updated or added.
-message UpdateVirtualServicesRequest {
+message UpdateVSRequest {
 	// Balancer instance name (optional, auto-selects if only one exists).
 	//
 	// If not specified and exactly one balancer manager exists, that
@@ -356,7 +353,7 @@ message UpdateVirtualServicesRequest {
 // Response to UpdateVS request.
 //
 // Contains the balancer name and metadata about filter reuse during the update.
-message UpdateVirtualServicesResponse {
+message UpdateVSResponse {
 	// Balancer instance name that was updated.
 	string name = 1;
     ReuseReport reuse = 2;
@@ -366,7 +363,7 @@ message UpdateVirtualServicesResponse {
 //
 // Removes the specified virtual services from the balancer configuration
 // while leaving other virtual services unchanged.
-message DeleteVirtualServicesRequest {
+message DeleteVSRequest {
 	// Balancer instance name (optional, auto-selects if only one exists).
 	//
 	// If not specified and exactly one balancer manager exists, that
@@ -385,7 +382,7 @@ message DeleteVirtualServicesRequest {
 // Response to DeleteVS request.
 //
 // Contains the balancer name and metadata about filter reuse during the update.
-message DeleteVirtualServicesResponse {
+message DeleteVSResponse {
 	// Balancer instance name that was updated.
 	string name = 1;
     ReuseReport reuse = 2;
@@ -403,5 +400,5 @@ message GetStateRequest {
 }
 
 message GetStateResponse { 
-	repeated BalancerSnapshot snapshot = 1;
+	repeated BalancerState state = 1;
 }
