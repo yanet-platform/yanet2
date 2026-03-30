@@ -19,10 +19,10 @@ type ForwardModule struct {
 	shm            *cpffi.SharedMemory
 	agent          *cpffi.Agent
 	forwardService *ForwardService
-	log            *zap.SugaredLogger
+	log            *zap.Logger
 }
 
-func NewForwardModule(cfg *Config, log *zap.SugaredLogger) (*ForwardModule, error) {
+func NewForwardModule(cfg *Config, log *zap.Logger) (*ForwardModule, error) {
 	log = log.With(zap.String("module", "forwardpb.ForwardService"))
 
 	shm, err := cpffi.AttachSharedMemory(cfg.MemoryPath.Unwrap())
@@ -30,7 +30,7 @@ func NewForwardModule(cfg *Config, log *zap.SugaredLogger) (*ForwardModule, erro
 		return nil, err
 	}
 
-	log.Debugw("mapping shared memory",
+	log.Debug("mapping shared memory",
 		zap.Uint32("instance_id", cfg.InstanceID),
 		zap.Stringer("size", cfg.MemoryRequirements),
 	)
@@ -70,11 +70,11 @@ func (m *ForwardModule) RegisterService(server *grpc.Server) {
 // Close closes the module.
 func (m *ForwardModule) Close() error {
 	if err := m.agent.Close(); err != nil {
-		m.log.Warnw("failed to close shared memory agent", zap.Error(err))
+		m.log.Warn("failed to close shared memory agent", zap.Error(err))
 	}
 
 	if err := m.shm.Detach(); err != nil {
-		m.log.Warnw("failed to detach from shared memory mapping", zap.Error(err))
+		m.log.Warn("failed to detach from shared memory mapping", zap.Error(err))
 	}
 
 	return nil

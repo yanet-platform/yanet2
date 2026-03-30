@@ -104,7 +104,7 @@ func NewDirector(cfg *Config, options ...DirectorOption) (*Director, error) {
 		return nil, fmt.Errorf("failed to initialize dscp built-in module: %w", err)
 	}
 
-	forwardModule, err := forward.NewForwardModule(cfg.Modules.Forward, log)
+	forwardModule, err := forward.NewForwardModule(cfg.Modules.Forward, log.Desugar())
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize forward built-in module: %w", err)
 	}
