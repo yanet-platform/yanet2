@@ -15,6 +15,7 @@ import (
 
 	"github.com/yanet-platform/yanet2/common/commonpb"
 	"github.com/yanet-platform/yanet2/common/go/metrics"
+	yanet "github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/balancer/agent/balancerpb"
 	"github.com/yanet-platform/yanet2/modules/balancer/agent/go/ffi"
 	"go.uber.org/zap"
@@ -131,7 +132,7 @@ func (b *BalancerManager) Update(
 	return updateInfo, nil
 }
 
-func (b *BalancerManager) Snapshot(params *balancerpb.ShowSnapshotRequest) (*balancerpb.BalancerSnapshot, error) {
+func (b *BalancerManager) Snapshot(dpConfig *yanet.DPConfig, params *balancerpb.ShowSnapshotRequest) ([]*balancerpb.BalancerSnapshot, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -140,14 +141,9 @@ func (b *BalancerManager) Snapshot(params *balancerpb.ShowSnapshotRequest) (*bal
 
 	b.log.Debugw("taking balancer snapshot")
 
-	// Take snapshot via FFI
-	snapshot := b.handle.Snapshot(params)
+	snapshots := b.handle.Snapshot(dpConfig, params)
 
-	b.log.Infow("balancer snapshot taken successfully",
-		"vs_count", len(snapshot.VirtualServices),
-	)
-
-	return snapshot, nil
+	return snapshots, nil
 }
 
 func (b *BalancerManager) UpdateReals(

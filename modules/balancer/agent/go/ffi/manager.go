@@ -18,6 +18,7 @@ import (
 	"time"
 	"unsafe"
 
+	yanet "github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/balancer/agent/balancerpb"
 	"github.com/yanet-platform/yanet2/modules/balancer/agent/go/ffi/proto"
 )
@@ -245,16 +246,41 @@ func (m *BalancerManager) Graph() *BalancerGraph {
 	return graph
 }
 
-func (m *BalancerManager) Snapshot(params *balancerpb.ShowSnapshotRequest) *balancerpb.BalancerSnapshot {
-	var cSnapshot C.struct_balancer_snapshot
+func (m *BalancerManager) Snapshot(dpConfig *yanet.DPConfig, params *balancerpb.ShowSnapshotRequest) []*balancerpb.BalancerSnapshot {
+	if params.PacketHandlerRef == nil ||
+		(params.PacketHandlerRef.Chain != nil &&
+			params.PacketHandlerRef.Device != nil &&
+			params.PacketHandlerRef.Function != nil &&
+			params.PacketHandlerRef.Pipeline != nil) {
+		var cSnapshot C.struct_balancer_snapshot
 
-	var cSnapshotParams C.struct_balancer_snapshot_params
-	cSnapshotParams.include_vs_acl = C.bool(params.IncludeAcl)
-	cSnapshotParams.include_active_sessions = C.bool(params.IncludeActiveSessions)
-	cSnapshotParams.packet_handler_ref = (*C.struct_packet_handler_ref)(unsafe.Pointer(proto.ConvertPacketHandlerRef(params.PacketHandlerRef)))
+		var cSnapshotParams C.struct_balancer_snapshot_params
+		cSnapshotParams.include_vs_acl = C.bool(params.IncludeAcl)
+		cSnapshotParams.include_active_sessions = C.bool(params.IncludeActiveSessions)
+		cSnapshotParams.packet_handler_ref = (*C.struct_packet_handler_ref)(unsafe.Pointer(proto.ConvertPacketHandlerRef(params.PacketHandlerRef)))
 
-	C.balancer_manager_snapshot(m.handle, &cSnapshot, &cSnapshotParams)
-	defer C.balancer_manager_snapshot_free(&cSnapshot)
+		C.balancer_manager_snapshot(m.handle, &cSnapshot, &cSnapshotParams)
+		defer C.balancer_manager_snapshot_free(&cSnapshot)
 
-	return proto.ConvertBalancerSnapshot(unsafe.Pointer(&cSnapshot))
+		snapshot := proto.ConvertBalancerSnapshot(unsafe.Pointer(&cSnapshot))
+		return []*balancerpb.BalancerSnapshot{snapshot}
+	} else {
+		snapshots := make([]*balancerpb.BalancerSnapshot, 0)
+		for range dpConfig.AllModulePositions("balancer") {
+			// match with packet handler ref filter
+			var cSnapshot C.struct_balancer_snapshot
+
+			var cSnapshotParams C.struct_balancer_snapshot_params
+			cSnapshotParams.include_vs_acl = C.bool(params.IncludeAcl)
+			cSnapshotParams.include_active_sessions = C.bool(params.IncludeActiveSessions)
+			cSnapshotParams.packet_handler_ref = (*C.struct_packet_handler_ref)(unsafe.Pointer(proto.ConvertPacketHandlerRef(params.PacketHandlerRef)))
+
+			C.balancer_manager_snapshot(m.handle, &cSnapshot, &cSnapshotParams)
+			defer C.balancer_manager_snapshot_free(&cSnapshot)
+
+			snapshot := proto.ConvertBalancerSnapshot(unsafe.Pointer(&cSnapshot))
+			snapshots = append(snapshots, snapshot)
+		}
+		return snapshots
+	}
 }

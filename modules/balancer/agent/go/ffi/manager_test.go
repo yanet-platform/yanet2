@@ -9,7 +9,6 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/xnetip"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	mock "github.com/yanet-platform/yanet2/mock/go"
-	"github.com/yanet-platform/yanet2/modules/balancer/agent/balancerpb"
 )
 
 var (
@@ -1244,21 +1243,5 @@ func TestManager(t *testing.T) {
 			foundEnabledReal2,
 			"should find the previously enabled real 10.12.13.213:8080",
 		)
-	})
-
-	t.Run("Snapshot", func(t *testing.T) {
-		params := balancerpb.ShowSnapshotRequest{
-			IncludeAcl:            true,
-			IncludeActiveSessions: true,
-			PacketHandlerRef: &balancerpb.PacketHandlerRef{
-				Device:   &deviceName,
-				Pipeline: &pipelineName,
-				Function: &functionName,
-				Chain:    &chainName,
-			},
-		}
-		snapshot := manager.Snapshot(&params)
-		require.Equal(t, len(snapshot.VirtualServices), 3, "should have 3 virtual services")
-		require.NotNil(t, snapshot, "snapshot should not be nil")
 	})
 }

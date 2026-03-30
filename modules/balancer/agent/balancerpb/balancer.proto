@@ -543,4 +543,4 @@ message ShowSnapshotRequest {
   bool include_acl = 5;
 }
 
-message ShowSnapshotResponse { BalancerSnapshot snapshot = 1; }
+message ShowSnapshotResponse { repeated BalancerSnapshot snapshot = 1; }

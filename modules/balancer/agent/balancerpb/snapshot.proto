@@ -17,7 +17,8 @@ message BalancerSnapshot {
   uint64 active_sessions = 5;
   google.protobuf.Timestamp last_packet_timestamp = 6;
   repeated VsSnapshot virtual_services = 7;
-  optional PacketHandlerRef packet_handler_ref = 8;
+  string name = 8;
+  PacketHandlerRef packet_handler_ref = 9;
 }
 
 message VsSnapshot {

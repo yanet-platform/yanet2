@@ -144,36 +144,17 @@ func (a *BalancerAgent) Inspect() *balancerpb.AgentInspect {
 
 func (a *BalancerAgent) Metrics() ([]*commonpb.Metric, error) {
 	dpConfig := a.handle.DPConfig()
-	positions := dpConfig.AllModulePositions("balancer")
 
-	managers := make([]*BalancerManager, 0, len(positions))
-	{
-		a.mu.Lock()
+	a.mu.Lock()
+	defer a.mu.Unlock()
 
-		for idx := range positions {
-			position := &positions[idx]
-			manager := a.managers[positions[idx].ModuleName]
-			if manager == nil {
-				a.log.Warnw(
-					"metrics: balancer manager not found",
-					"config",
-					position.ModuleName,
-				)
-			}
-			managers = append(managers, manager)
-		}
+	result := make([]*commonpb.Metric, 0, 200)
 
-		a.mu.Unlock()
-	}
-
-	result := make([]*commonpb.Metric, 0, len(managers)*200)
-
-	for idx := range positions {
-		manager := managers[idx]
+	for position := range dpConfig.AllModulePositions("balancer") {
+		manager := a.managers[position.ModuleName]
 		if manager == nil {
 			continue
 		}
-		position := positions[idx]
 		ref := balancerpb.PacketHandlerRef{
 			Device:   &position.Device,
 			Pipeline: &position.Pipeline,
@@ -207,18 +188,8 @@ func (a *BalancerAgent) StatsEntries(
 	name *string,
 	refFilter *balancerpb.PacketHandlerRef,
 ) ([]*balancerpb.StatsEntry, error) {
-	dpConfig := a.handle.DPConfig()
-	positions := dpConfig.AllModulePositions("balancer")
-
-	// Snapshot managers under lock to avoid holding agent mutex during per-position stats reads.
-	managersByName := make(map[string]*BalancerManager, len(a.managers))
-	{
-		a.mu.Lock()
-		for k, v := range a.managers {
-			managersByName[k] = v
-		}
-		a.mu.Unlock()
-	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
 
 	matchesRef := func(posDevice, posPipeline, posFunction, posChain string) bool {
 		if refFilter == nil {
@@ -239,11 +210,11 @@ func (a *BalancerAgent) StatsEntries(
 		return true
 	}
 
+	dpConfig := a.handle.DPConfig()
+
 	entries := make([]*balancerpb.StatsEntry, 0)
 
-	for idx := range positions {
-		position := &positions[idx]
-
+	for position := range dpConfig.AllModulePositions("balancer") {
 		// Optional manager-name filter
 		if name != nil && position.ModuleName != *name {
 			continue
@@ -254,7 +225,7 @@ func (a *BalancerAgent) StatsEntries(
 			continue
 		}
 
-		manager := managersByName[position.ModuleName]
+		manager := a.managers[position.ModuleName]
 		if manager == nil {
 			a.log.Warnw(
 				"stats: balancer manager not found",

@@ -1,3 +1,5 @@
 subdir('state')
 subdir('handler')
 subdir('api')
+subdir('agent')
+subdir('balancerpb')
