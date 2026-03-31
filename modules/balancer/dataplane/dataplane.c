@@ -1,57 +1,68 @@
 #include <netinet/in.h>
-#include <rte_ether.h>
-#include <rte_ip.h>
-#include <rte_tcp.h>
-#include <rte_udp.h>
-#include <threads.h>
+#include <stdio.h>
+#include <stdlib.h>
 
-#include "flow/setup.h"
-#include "flow/stats.h"
-
+#include "common/container_of.h"
 #include "common/memory_address.h"
 
 #include "lib/dataplane/config/zone.h"
+#include "lib/dataplane/module/packet_front.h"
+#include "lib/dataplane/pipeline/econtext.h"
 
+#include "batch.h"
+#include "context.h"
 #include "dataplane.h"
-#include "decap.h"
-
-#include "handler/handler.h"
 #include "icmp/handle.h"
 #include "l4/handle.h"
 
-#include "worker.h"
+typedef void (*batch_handler)(
+	struct worker_context *context,
+	struct packet **packets,
+	size_t packets_count
+);
 
-////////////////////////////////////////////////////////////////////////////////
-
-struct balancer_module {
-	struct module module;
+struct packet_batcher {
+	struct packet *packets[MAX_BATCH_SIZE];
+	size_t count;
+	batch_handler handler;
 };
 
-static inline int
-packet_ctx_try_decap(struct packet_ctx *ctx) {
-	return try_decap(ctx);
+static void
+batcher_add(
+	struct packet_batcher *batcher,
+	struct worker_context *context,
+	struct packet *packet
+) {
+	batcher->packets[batcher->count++] = packet;
+	if (batcher->count == MAX_BATCH_SIZE) {
+		batcher->handler(context, batcher->packets, batcher->count);
+		batcher->count = 0;
+	}
 }
 
-void
-handle_batch(size_t packets_count) {
-	assert(packets_count <= batch_size);
-
-	if (unlikely(packets_count == 0)) {
-		return;
+static void
+batcher_flush(struct packet_batcher *batcher, struct worker_context *context) {
+	if (batcher->count > 0) {
+		batcher->handler(context, batcher->packets, batcher->count);
+		batcher->count = 0;
 	}
+}
 
-	// first, handle icmp packets
-	for (size_t i = 0; i < packets_count; ++i) {
-		struct packet_ctx *ctx = &packet_ctxs[i];
-		uint16_t packet_type = ctx->packet->transport_header.type;
-		if (!ctx->processed && (packet_type == IPPROTO_ICMP ||
-					packet_type == IPPROTO_ICMPV6)) {
-			handle_icmp_packet(ctx);
-		}
-	}
-
-	// handle TCP and UDP packets
-	handle_l4_packets(packet_ctxs, packets_count);
+static void
+build_context(
+	struct worker_context *ctx,
+	struct dp_worker *dp_worker,
+	struct module_ectx *module_ectx,
+	struct packet_front *packet_front
+) {
+	ctx->packet_front = packet_front;
+	ctx->packet_handler = container_of(
+		ADDR_OF(&module_ectx->cp_module),
+		struct balancer_packet_handler,
+		cp_module
+	);
+	ctx->counter_storage = ADDR_OF(&module_ectx->counter_storage);
+	ctx->worker_idx = dp_worker->idx;
 }
 
 void
@@ -60,54 +71,45 @@ balancer_handle_packets(
 	struct module_ectx *module_ectx,
 	struct packet_front *packet_front
 ) {
-	// Get balancer module config as container of provided cp_module.
-	struct packet_handler *handler = container_of(
-		ADDR_OF(&module_ectx->cp_module),
-		struct packet_handler,
-		cp_module
-	);
+	struct worker_context context;
+	build_context(&context, dp_worker, module_ectx, packet_front);
 
-	// Get current time in seconds.
-	uint32_t now = dp_worker->current_time / (1000 * 1000 * 1000);
+	/*
+	 * Classify incoming packets by protocol (L4/ICMP) and IP version
+	 * (IPv4/IPv6), accumulating them into per-category batches.
+	 *
+	 * Batched processing allows the filter engine to evaluate multiple
+	 * packets at once, which is significantly faster than one-at-a-time
+	 * lookups due to memory prefetching and reduced per-packet overhead.
+	 *
+	 * Batches are flushed when they reach MAX_BATCH_SIZE or when all
+	 * input packets have been classified.
+	 */
+	enum { l4_ipv4, l4_ipv6, icmp_ipv4, icmp_ipv6, batcher_count };
+	struct packet_batcher batchers[batcher_count] = {
+		[l4_ipv4] = {.handler = balancer_handle_l4_ipv4},
+		[l4_ipv6] = {.handler = balancer_handle_l4_ipv6},
+		[icmp_ipv4] = {.handler = balancer_handle_icmp_ipv4},
+		[icmp_ipv6] = {.handler = balancer_handle_icmp_ipv6},
+	};
 
-	// setup packet ctxs and try to decap packets
-	// handle packets by batches
-	size_t packets_count = 0;
 	struct packet *packet;
 	while ((packet = packet_list_pop(&packet_front->input)) != NULL) {
-		struct packet_ctx *ctx = &packet_ctxs[packets_count++];
-		packet_ctx_setup(
-			ctx, now, dp_worker, module_ectx, handler, packet_front
-		);
-
-		// Set incoming packet
-		packet_ctx_set_packet(ctx, packet);
-
-		// Update module common stats
-		packet_ctx_update_common_stats_on_incoming_packet(ctx);
-
-		// Try decap packet if its destination
-		// is from the balancer decap list.
-		//
-		// If packet dst is from the destination list
-		// and decap failed, drop packet.
-		if (packet_ctx_try_decap(ctx) != 0) {
-			packet_ctx_drop_packet(ctx);
-			continue;
-		}
-
-		// batch is full
-		if (packets_count == batch_size) {
-			// handle batch of packets
-			handle_batch(packets_count);
-			packets_count = 0;
-		}
+		int is_ipv6 = packet->network_header.type == IPPROTO_IPV6;
+		int is_icmp = packet->transport_header.type == IPPROTO_ICMP ||
+			packet->transport_header.type == IPPROTO_ICMPV6;
+		int idx = is_icmp * 2 + is_ipv6;
+		batcher_add(&batchers[idx], &context, packet);
 	}
 
-	// if there are some unhandled packets
-	// in the last batch
-	handle_batch(packets_count);
+	for (int i = 0; i < batcher_count; i++) {
+		batcher_flush(&batchers[i], &context);
+	}
 }
+
+struct balancer_module {
+	struct module module;
+};
 
 struct module *
 new_module_balancer() {
