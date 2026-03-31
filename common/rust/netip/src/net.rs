@@ -284,6 +284,42 @@ impl IpNetwork {
             Self::V6(net) => net.prefix(),
         }
     }
+
+    /// Returns the last address in this IP network.
+    ///
+    /// For contiguous networks, this is the broadcast address.
+    ///
+    /// For non-contiguous networks, this is the highest address within the
+    /// network range defined by the mask.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use core::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+    ///
+    /// use netip::IpNetwork;
+    ///
+    /// // IPv4 contiguous network.
+    /// assert_eq!(
+    ///     IpAddr::V4(Ipv4Addr::new(192, 168, 1, 255)),
+    ///     IpNetwork::parse("192.168.1.0/24").unwrap().last_addr()
+    /// );
+    ///
+    /// // IPv6 contiguous network.
+    /// assert_eq!(
+    ///     IpAddr::V6(Ipv6Addr::new(
+    ///         0x2001, 0xdb8, 0x1, 0, 0xffff, 0xffff, 0xffff, 0xffff
+    ///     )),
+    ///     IpNetwork::parse("2001:db8:1::/64").unwrap().last_addr()
+    /// );
+    /// ```
+    #[inline]
+    pub fn last_addr(&self) -> IpAddr {
+        match self {
+            Self::V4(net) => IpAddr::V4(net.last_addr()),
+            Self::V6(net) => IpAddr::V6(net.last_addr()),
+        }
+    }
 }
 
 impl Display for IpNetwork {
@@ -741,6 +777,108 @@ impl Ipv4Network {
                 )
             }
         }
+    }
+
+    /// Returns the last address in this IPv4 network.
+    ///
+    /// For contiguous networks, this is the broadcast address.
+    ///
+    /// For non-contiguous networks, this is the highest address within the
+    /// network range defined by the mask.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use core::net::Ipv4Addr;
+    ///
+    /// use netip::Ipv4Network;
+    ///
+    /// // Contiguous network.
+    /// let net = Ipv4Network::new(
+    ///     Ipv4Addr::new(192, 168, 1, 0),
+    ///     Ipv4Addr::new(255, 255, 255, 0),
+    /// );
+    /// assert_eq!(Ipv4Addr::new(192, 168, 1, 255), net.last_addr());
+    ///
+    /// // Single address network.
+    /// let net = Ipv4Network::new(
+    ///     Ipv4Addr::new(10, 0, 0, 1),
+    ///     Ipv4Addr::new(255, 255, 255, 255),
+    /// );
+    /// assert_eq!(Ipv4Addr::new(10, 0, 0, 1), net.last_addr());
+    ///
+    /// // Non-contiguous network.
+    /// let net = Ipv4Network::new(
+    ///     Ipv4Addr::new(192, 168, 0, 1),
+    ///     Ipv4Addr::new(255, 255, 0, 255),
+    /// );
+    /// assert_eq!(Ipv4Addr::new(192, 168, 255, 1), net.last_addr());
+    /// ```
+    ///
+    /// # Formal Proof of Correctness
+    ///
+    /// ## Given
+    /// - Network address: `addr`.
+    /// - Network mask: `mask` (may be non-contiguous).
+    /// - Algorithm: `last_addr = addr | !mask`.
+    ///
+    /// ## Definitions
+    /// Let:
+    /// - `N = addr & mask` (network address with host bits zeroed).
+    /// - `H = !mask` (bitmask of host positions).
+    /// - Address `X` belongs to the network iff `(X & mask) = N`.
+    ///
+    /// ## Lemma 1: Contiguous Mask Case
+    ///
+    /// For contiguous masks (standard CIDR), the algorithm is well-established:
+    /// - ` mask` format: `111...100...0`.
+    /// - `!mask` format: `000...011...1`.
+    /// - `addr | !mask` sets all host bits to 1, yielding the broadcast
+    ///   address.
+    ///
+    /// ## Lemma 2: Generalization to Non-Contiguous Masks
+    ///
+    /// **Theorem**: `X = addr | !mask` is the maximum address satisfying `(X &
+    /// mask) = N`.
+    ///
+    /// ### Proof:
+    ///
+    /// 1. **Membership**: ```(X & mask) = ((addr | !mask) & mask) = (addr &
+    ///    mask) | (!mask & mask) = N | 0 = N ```
+    ///
+    ///    Thus, `X` belongs to the network.
+    ///
+    /// 2. **Maximality**:
+    ///    - Any network address can be expressed as `X = N | H_val` where
+    ///      `H_val` has ones only in host positions
+    ///    - The maximum possible `H_val` is `H = !mask` (all host bits set to
+    ///      1)
+    ///    - Thus `X_max = N | H = (addr & mask) | !mask`
+    ///
+    /// 3. **Simplification**: since `addr & mask` zeros all host bits: ```
+    ///    (addr & mask) | !mask = addr | !mask ```
+    ///    - For mask bits = 1: `addr_bit | 0 = addr_bit`
+    ///    - For mask bits = 0: `0 | 1 = 1`
+    ///
+    /// ## Edge Case Verification
+    ///
+    /// - **Full mask** (255.255.255.255): `last_addr = addr | 0 = addr` (single
+    ///   address network).
+    ///
+    /// - **Zero mask** (0.0.0.0): `last_addr = addr | 0xFFFFFFFF =
+    ///   255.255.255.255` (entire address space).
+    ///
+    /// - **Non-contiguous mask** (e.g., 255.0.255.0): Correctly sets all host
+    ///   bits to 1 while preserving network bits.
+    ///
+    /// ## ∴
+    ///
+    /// The algorithm `addr | !mask` correctly computes the maximum address in
+    /// any IPv4 network, including those with non-contiguous masks.
+    #[inline]
+    pub const fn last_addr(&self) -> Ipv4Addr {
+        let (addr, mask) = self.to_bits();
+        Ipv4Addr::from_bits(addr | !mask)
     }
 }
 
@@ -1262,6 +1400,63 @@ impl Ipv6Network {
         let mask = mask & !(u128::MAX.checked_shr(common_addr_len).unwrap_or_default());
 
         Self::new(addr.into(), mask.into())
+    }
+
+    /// Returns the last address in this IPv6 network.
+    ///
+    /// For contiguous networks, this is the broadcast address.
+    ///
+    /// For non-contiguous networks, this is the highest address within the
+    /// network range defined by the mask.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use core::net::Ipv6Addr;
+    ///
+    /// use netip::Ipv6Network;
+    ///
+    /// // Contiguous network.
+    /// let net = Ipv6Network::new(
+    ///     Ipv6Addr::new(0x2001, 0xdb8, 0x1, 0, 0, 0, 0, 0),
+    ///     Ipv6Addr::new(0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0, 0),
+    /// );
+    /// assert_eq!(
+    ///     Ipv6Addr::new(0x2001, 0xdb8, 0x1, 0, 0, 0, 0xffff, 0xffff),
+    ///     net.last_addr()
+    /// );
+    ///
+    /// // Single address network.
+    /// let net = Ipv6Network::new(
+    ///     Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 0x1),
+    ///     Ipv6Addr::new(
+    ///         0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff,
+    ///     ),
+    /// );
+    /// assert_eq!(
+    ///     Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 0x1),
+    ///     net.last_addr()
+    /// );
+    ///
+    /// // Non-contiguous network.
+    /// let net = Ipv6Network::new(
+    ///     Ipv6Addr::new(0x2a02, 0x6b8, 0xc00, 0, 0, 0x1234, 0, 0),
+    ///     Ipv6Addr::new(0xffff, 0xffff, 0xff00, 0, 0xffff, 0xffff, 0, 0),
+    /// );
+    /// assert_eq!(
+    ///     Ipv6Addr::new(0x2a02, 0x6b8, 0x0cff, 0xffff, 0, 0x1234, 0xffff, 0xffff),
+    ///     net.last_addr()
+    /// );
+    /// ```
+    ///
+    /// # Formal Proof of Correctness
+    ///
+    /// The algorithm follows the same logic as [`Ipv4Network::last_addr`].
+    /// See [`Ipv4Network::last_addr`] for the formal proof.
+    #[inline]
+    pub const fn last_addr(&self) -> Ipv6Addr {
+        let (addr, mask) = self.to_bits();
+        Ipv6Addr::from_bits(addr | !mask)
     }
 }
 
@@ -2123,6 +2318,41 @@ mod test {
     }
 
     #[test]
+    fn ipv4_last_addr() {
+        // Contiguous networks (broadcast addresses).
+        let net = Ipv4Network::new(Ipv4Addr::new(192, 168, 1, 0), Ipv4Addr::new(255, 255, 255, 0));
+        assert_eq!(Ipv4Addr::new(192, 168, 1, 255), net.last_addr());
+
+        let net = Ipv4Network::new(Ipv4Addr::new(10, 0, 0, 0), Ipv4Addr::new(255, 255, 255, 0));
+        assert_eq!(Ipv4Addr::new(10, 0, 0, 255), net.last_addr());
+
+        let net = Ipv4Network::new(Ipv4Addr::new(172, 16, 0, 0), Ipv4Addr::new(255, 255, 0, 0));
+        assert_eq!(Ipv4Addr::new(172, 16, 255, 255), net.last_addr());
+
+        // Single address networks.
+        let net = Ipv4Network::new(Ipv4Addr::new(10, 0, 0, 1), Ipv4Addr::new(255, 255, 255, 255));
+        assert_eq!(Ipv4Addr::new(10, 0, 0, 1), net.last_addr());
+
+        // Unspecified network.
+        let net = Ipv4Network::UNSPECIFIED;
+        assert_eq!(Ipv4Addr::new(255, 255, 255, 255), net.last_addr());
+
+        // Non-contiguous networks.
+        let net = Ipv4Network::new(Ipv4Addr::new(192, 168, 0, 1), Ipv4Addr::new(255, 255, 0, 255));
+        assert_eq!(Ipv4Addr::new(192, 168, 255, 1), net.last_addr());
+
+        let net = Ipv4Network::new(Ipv4Addr::new(10, 0, 0, 42), Ipv4Addr::new(255, 0, 255, 255));
+        assert_eq!(Ipv4Addr::new(10, 255, 0, 42), net.last_addr());
+
+        // Edge cases.
+        let net = Ipv4Network::new(Ipv4Addr::new(255, 255, 255, 255), Ipv4Addr::new(255, 255, 255, 255));
+        assert_eq!(Ipv4Addr::new(255, 255, 255, 255), net.last_addr());
+
+        let net = Ipv4Network::new(Ipv4Addr::new(127, 0, 0, 0), Ipv4Addr::new(255, 0, 0, 0));
+        assert_eq!(Ipv4Addr::new(127, 255, 255, 255), net.last_addr());
+    }
+
+    #[test]
     fn parse_ipv6_explicit_mask_normalizes_addr() {
         // Address bits outside the mask should be cleared.
         assert_eq!(
@@ -2711,6 +2941,116 @@ mod test {
         assert_eq!(
             ContiguousIpNetParseError::NonContiguousNetwork,
             Contiguous::<Ipv6Network>::parse("2a02:6b8:c00::1234:0:0/ffff:ffff:ff00::ffff:ffff:0:0").unwrap_err(),
+        );
+    }
+
+    #[test]
+    fn ipv6_last_addr() {
+        // Contiguous networks (broadcast-like addresses).
+        let net = Ipv6Network::new(
+            Ipv6Addr::new(0x2001, 0xdb8, 0x1, 0, 0, 0, 0, 0),
+            Ipv6Addr::new(0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0, 0),
+        );
+        assert_eq!(
+            Ipv6Addr::new(0x2001, 0xdb8, 0x1, 0, 0, 0, 0xffff, 0xffff),
+            net.last_addr()
+        );
+
+        let net = Ipv6Network::new(
+            Ipv6Addr::new(0x2a02, 0x6b8, 0xc00, 0, 0, 0, 0, 0),
+            Ipv6Addr::new(0xffff, 0xffff, 0xff00, 0, 0, 0, 0, 0),
+        );
+        assert_eq!(
+            Ipv6Addr::new(0x2a02, 0x6b8, 0x0cff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff),
+            net.last_addr()
+        );
+
+        let net = Ipv6Network::new(
+            Ipv6Addr::new(0x2a02, 0x6b8, 0, 0, 0, 0, 0, 0),
+            Ipv6Addr::new(0xffff, 0xffff, 0, 0, 0, 0, 0, 0),
+        );
+        assert_eq!(
+            Ipv6Addr::new(0x2a02, 0x6b8, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff),
+            net.last_addr()
+        );
+
+        // Single address networks.
+        let net = Ipv6Network::new(
+            Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 0x1),
+            Ipv6Addr::new(0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff),
+        );
+        assert_eq!(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 0x1), net.last_addr());
+
+        // Unspecified network.
+        let net = Ipv6Network::UNSPECIFIED;
+        assert_eq!(
+            Ipv6Addr::new(0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff),
+            net.last_addr()
+        );
+
+        // Non-contiguous networks.
+        let net = Ipv6Network::new(
+            Ipv6Addr::new(0x2a02, 0x6b8, 0xc00, 0, 0, 0x1234, 0, 0),
+            Ipv6Addr::new(0xffff, 0xffff, 0xff00, 0, 0xffff, 0xffff, 0, 0),
+        );
+        assert_eq!(
+            Ipv6Addr::new(0x2a02, 0x6b8, 0x0cff, 0xffff, 0, 0x1234, 0xffff, 0xffff),
+            net.last_addr()
+        );
+
+        // Edge cases.
+        let net = Ipv6Network::new(
+            Ipv6Addr::new(0x2a02, 0x6b8, 0xc00, 0, 0, 0, 0, 0),
+            Ipv6Addr::new(0xffff, 0xffff, 0xff00, 0, 0, 0, 0, 0),
+        );
+        assert_eq!(
+            Ipv6Addr::new(0x2a02, 0x6b8, 0x0cff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff),
+            net.last_addr()
+        );
+
+        let net = Ipv6Network::new(
+            Ipv6Addr::new(0x2a02, 0x6b8, 0, 0, 0, 0, 0, 0),
+            Ipv6Addr::new(0xffff, 0xffff, 0xffff, 0xffff, 0, 0, 0, 0),
+        );
+        assert_eq!(
+            Ipv6Addr::new(0x2a02, 0x6b8, 0, 0, 0xffff, 0xffff, 0xffff, 0xffff),
+            net.last_addr()
+        );
+    }
+
+    #[test]
+    fn ipnetwork_last_addr() {
+        use core::net::IpAddr;
+
+        // IPv4 networks.
+        let net = IpNetwork::parse("192.168.1.0/24").unwrap();
+        assert_eq!(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 255)), net.last_addr());
+
+        let net = IpNetwork::parse("10.0.0.1").unwrap();
+        assert_eq!(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)), net.last_addr());
+
+        let net = IpNetwork::parse("0.0.0.0/0").unwrap();
+        assert_eq!(IpAddr::V4(Ipv4Addr::new(255, 255, 255, 255)), net.last_addr());
+
+        // IPv6 networks.
+        let net = IpNetwork::parse("2001:db8:1::/64").unwrap();
+        assert_eq!(
+            IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0x1, 0, 0xffff, 0xffff, 0xffff, 0xffff)),
+            net.last_addr()
+        );
+
+        let net = IpNetwork::parse("2a02:6b8::1").unwrap();
+        assert_eq!(
+            IpAddr::V6(Ipv6Addr::new(0x2a02, 0x6b8, 0, 0, 0, 0, 0, 0x1)),
+            net.last_addr()
+        );
+
+        let net = IpNetwork::parse("::/0").unwrap();
+        assert_eq!(
+            IpAddr::V6(Ipv6Addr::new(
+                0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff
+            )),
+            net.last_addr()
         );
     }
 }
