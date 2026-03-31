@@ -52,6 +52,7 @@ static inline void
 fwstate_build_state_key_v4(
 	struct rte_mbuf *mbuf, struct packet *packet, struct fw4_state_key *key
 ) {
+	memset(key, 0, sizeof(*key));
 	struct rte_ipv4_hdr *ipv4_hdr = rte_pktmbuf_mtod_offset(
 		mbuf, struct rte_ipv4_hdr *, packet->network_header.offset
 	);
@@ -78,6 +79,7 @@ static inline void
 fwstate_build_state_key_v6(
 	struct rte_mbuf *mbuf, struct packet *packet, struct fw6_state_key *key
 ) {
+	memset(key, 0, sizeof(*key));
 	struct rte_ipv6_hdr *ipv6_hdr = rte_pktmbuf_mtod_offset(
 		mbuf, struct rte_ipv6_hdr *, packet->network_header.offset
 	);
