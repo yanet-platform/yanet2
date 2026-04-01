@@ -880,6 +880,56 @@ impl Ipv4Network {
         let (addr, mask) = self.to_bits();
         Ipv4Addr::from_bits(addr | !mask)
     }
+
+    /// Returns a double-ended iterator over every address in this network.
+    ///
+    /// The iterator yields addresses in **host-index order**: the *k* host
+    /// positions (bits where the mask is zero) are filled with successive
+    /// values `0 ..= 2^k - 1`, starting from the least-significant host bit.
+    ///
+    /// For a standard (contiguous) CIDR mask this is equivalent to ascending
+    /// numeric order from [`addr()`](Ipv4Network::addr) to
+    /// [`last_addr()`](Ipv4Network::last_addr).
+    ///
+    /// For a non-contiguous mask the numeric order of the produced addresses
+    /// may differ from the iteration order.
+    ///
+    /// The iterator implements [`DoubleEndedIterator`] and
+    /// [`ExactSizeIterator`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use core::net::Ipv4Addr;
+    ///
+    /// use netip::Ipv4Network;
+    ///
+    /// let net = Ipv4Network::parse("192.168.1.0/24").unwrap();
+    /// let mut addrs = net.addrs();
+    ///
+    /// assert_eq!(256, addrs.len());
+    ///
+    /// assert_eq!(Some(Ipv4Addr::new(192, 168, 1, 0)), addrs.next());
+    /// assert_eq!(Some(Ipv4Addr::new(192, 168, 1, 1)), addrs.next());
+    /// assert_eq!(Some(Ipv4Addr::new(192, 168, 1, 2)), addrs.next());
+    ///
+    /// // It is important to note that both back and forth work on the same
+    /// // range, and do not cross: iteration is over when they meet in the
+    /// // middle.
+    ///
+    /// assert_eq!(Some(Ipv4Addr::new(192, 168, 1, 255)), addrs.next_back());
+    /// assert_eq!(Some(Ipv4Addr::new(192, 168, 1, 254)), addrs.next_back());
+    ///
+    /// assert_eq!(Some(Ipv4Addr::new(192, 168, 1, 3)), addrs.next());
+    /// ```
+    #[inline]
+    pub fn addrs(self) -> Ipv4NetworkAddrs {
+        let (addr, mask) = self.to_bits();
+        let host_bits = (!mask).count_ones();
+        let back = u32::MAX.checked_shr(32 - host_bits).unwrap_or(0);
+
+        Ipv4NetworkAddrs { base: addr, mask, front: 0, back }
+    }
 }
 
 impl Display for Ipv4Network {
@@ -931,6 +981,133 @@ impl AsRef<Ipv4Network> for Ipv4Network {
     fn as_ref(&self) -> &Ipv4Network {
         self
     }
+}
+
+/// Bidirectional iterator over [`Ipv4Addr`] in an [`Ipv4Network`].
+///
+/// Created by [`Ipv4Network::addrs`].
+///
+/// Yields addresses in host-index order: the *k* host positions (bits where the
+/// mask is zero) are filled with successive values `0 ..= 2^k - 1`, starting
+/// from the least-significant host bit.
+///
+/// When the iterator is exhausted it enters a sentinel state where
+/// `front > back`, so every subsequent call to [`next`](Iterator::next) or
+/// [`next_back`](DoubleEndedIterator::next_back) returns [`None`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Ipv4NetworkAddrs {
+    base: u32,
+    mask: u32,
+    front: u32,
+    back: u32,
+}
+
+impl Iterator for Ipv4NetworkAddrs {
+    type Item = Ipv4Addr;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.front > self.back {
+            return None;
+        }
+
+        let index = self.front;
+        self.front = self.front.wrapping_add(1);
+
+        // Wrap-around means front was u32::MAX — only possible for a /0
+        // network.
+        //
+        // Enter sentinel state so the next call returns None.
+        if self.front == 0 {
+            self.front = 1;
+            self.back = 0;
+        }
+
+        Some(Ipv4Addr::from_bits(ipv4_bits_from_host_index(
+            self.base, self.mask, index,
+        )))
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        if self.front > self.back {
+            return (0, Some(0));
+        }
+
+        let rem = self.back.wrapping_sub(self.front).wrapping_add(1);
+
+        if rem == 0 {
+            (usize::MAX, None)
+        } else {
+            let n = rem as usize;
+            (n, Some(n))
+        }
+    }
+}
+
+impl DoubleEndedIterator for Ipv4NetworkAddrs {
+    #[inline]
+    fn next_back(&mut self) -> Option<Self::Item> {
+        if self.front > self.back {
+            return None;
+        }
+
+        let index = self.back;
+
+        if self.front == self.back {
+            self.front = 1;
+            self.back = 0;
+        } else {
+            self.back = self.back.wrapping_sub(1);
+        }
+
+        Some(Ipv4Addr::from_bits(ipv4_bits_from_host_index(
+            self.base, self.mask, index,
+        )))
+    }
+}
+
+impl ExactSizeIterator for Ipv4NetworkAddrs {
+    #[inline]
+    fn len(&self) -> usize {
+        if self.front > self.back {
+            return 0;
+        }
+
+        let rem = self.back.wrapping_sub(self.front).wrapping_add(1);
+
+        if rem == 0 { 1usize << 32 } else { rem as usize }
+    }
+}
+
+#[inline]
+const fn ipv4_bits_from_host_index(base: u32, mask: u32, index: u32) -> u32 {
+    let host_mask = !mask;
+
+    // For contiguous masks (trailing ones only) pdep is identity.
+    if host_mask & host_mask.wrapping_add(1) == 0 {
+        base | index
+    } else {
+        base | pdep_u32(index, host_mask)
+    }
+}
+
+#[inline]
+const fn pdep_u32(mut src: u32, mut mask: u32) -> u32 {
+    let mut out = 0u32;
+
+    while mask != 0 {
+        let t = mask & mask.wrapping_neg();
+
+        if src & 1 != 0 {
+            out |= t;
+        }
+
+        src >>= 1;
+        mask ^= t;
+    }
+
+    out
 }
 
 /// Represents the network range in which IP addresses are IPv6.
@@ -1458,6 +1635,176 @@ impl Ipv6Network {
         let (addr, mask) = self.to_bits();
         Ipv6Addr::from_bits(addr | !mask)
     }
+
+    /// Returns a bidirectional iterator over all addresses in this network.
+    ///
+    /// The iterator yields addresses in **host-index order**: the *k* host
+    /// positions (bits where the mask is zero) are filled with successive
+    /// values `0 ..= 2^k - 1`, starting from the least-significant host bit.
+    ///
+    /// For a standard (contiguous) CIDR mask this is equivalent to ascending
+    /// numeric order from [`addr()`](Ipv6Network::addr) to
+    /// [`last_addr()`](Ipv6Network::last_addr).
+    ///
+    /// For a non-contiguous mask the numeric order of the produced addresses
+    /// may differ from the iteration order.
+    ///
+    /// The iterator implements [`DoubleEndedIterator`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use core::net::Ipv6Addr;
+    ///
+    /// use netip::Ipv6Network;
+    ///
+    /// let net = Ipv6Network::parse("2a02:6b8:c00::1234:0:0/120").unwrap();
+    /// let mut addrs = net.addrs();
+    ///
+    /// assert_eq!(
+    ///     Some(Ipv6Addr::new(0x2a02, 0x6b8, 0xc00, 0, 0, 0x1234, 0, 0)),
+    ///     addrs.next()
+    /// );
+    /// assert_eq!(
+    ///     Some(Ipv6Addr::new(0x2a02, 0x6b8, 0xc00, 0, 0, 0x1234, 0, 1)),
+    ///     addrs.next()
+    /// );
+    ///
+    /// // Both directions work on the same range and do not cross: iteration
+    /// // is over when they meet in the middle.
+    ///
+    /// assert_eq!(
+    ///     Some(Ipv6Addr::new(0x2a02, 0x6b8, 0xc00, 0, 0, 0x1234, 0, 0xff)),
+    ///     addrs.next_back()
+    /// );
+    ///
+    /// assert_eq!(
+    ///     Some(Ipv6Addr::new(0x2a02, 0x6b8, 0xc00, 0, 0, 0x1234, 0, 2)),
+    ///     addrs.next()
+    /// );
+    /// ```
+    #[inline]
+    pub fn addrs(self) -> Ipv6NetworkAddrs {
+        let (addr, mask) = self.to_bits();
+        let host_bits = (!mask).count_ones();
+        let back = u128::MAX.checked_shr(128 - host_bits).unwrap_or(0);
+
+        Ipv6NetworkAddrs { base: addr, mask, front: 0, back }
+    }
+}
+
+/// Bidirectional iterator over [`Ipv6Addr`] in an [`Ipv6Network`].
+///
+/// Created by [`Ipv6Network::addrs`].
+///
+/// Yields addresses in host-index order: the *k* host positions (bits where the
+/// mask is zero) are filled with successive values `0 ..= 2^k - 1`, starting
+/// from the least-significant host bit.
+///
+/// When the iterator is exhausted it enters a sentinel state where
+/// `front > back`, so every subsequent call to [`next`](Iterator::next) or
+/// [`next_back`](DoubleEndedIterator::next_back) returns [`None`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Ipv6NetworkAddrs {
+    base: u128,
+    mask: u128,
+    front: u128,
+    back: u128,
+}
+
+impl Iterator for Ipv6NetworkAddrs {
+    type Item = Ipv6Addr;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.front > self.back {
+            return None;
+        }
+
+        let index = self.front;
+        self.front = self.front.wrapping_add(1);
+
+        // Wrap-around means front was u128::MAX — only possible for a /0
+        // network.
+        //
+        // Enter sentinel state so the next call returns None.
+        if self.front == 0 {
+            self.front = 1;
+            self.back = 0;
+        }
+
+        Some(Ipv6Addr::from_bits(ipv6_bits_from_host_index(
+            self.base, self.mask, index,
+        )))
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        if self.front > self.back {
+            return (0, Some(0));
+        }
+
+        let rem = self.back.wrapping_sub(self.front).wrapping_add(1);
+
+        if rem == 0 {
+            (usize::MAX, None)
+        } else {
+            match usize::try_from(rem) {
+                Ok(n) => (n, Some(n)),
+                Err(..) => (usize::MAX, None),
+            }
+        }
+    }
+}
+
+impl DoubleEndedIterator for Ipv6NetworkAddrs {
+    #[inline]
+    fn next_back(&mut self) -> Option<Self::Item> {
+        if self.front > self.back {
+            return None;
+        }
+
+        let bits = ipv6_bits_from_host_index(self.base, self.mask, self.back);
+
+        if self.front == self.back {
+            self.front = 1;
+            self.back = 0;
+        } else {
+            self.back = self.back.wrapping_sub(1);
+        }
+
+        Some(Ipv6Addr::from_bits(bits))
+    }
+}
+
+#[inline]
+const fn ipv6_bits_from_host_index(base: u128, mask: u128, index: u128) -> u128 {
+    let host_mask = !mask;
+
+    // For contiguous masks (trailing ones only) pdep is identity.
+    if host_mask & host_mask.wrapping_add(1) == 0 {
+        base | index
+    } else {
+        base | pdep_u128(index, host_mask)
+    }
+}
+
+#[inline]
+const fn pdep_u128(mut src: u128, mut mask: u128) -> u128 {
+    let mut out = 0u128;
+
+    while mask != 0 {
+        let t = mask & mask.wrapping_neg();
+
+        if src & 1 != 0 {
+            out |= t;
+        }
+
+        src >>= 1;
+        mask ^= t;
+    }
+
+    out
 }
 
 impl Display for Ipv6Network {
@@ -2186,6 +2533,182 @@ mod test {
                 .unwrap()
                 .contains(&Ipv4Network::parse("127.0.0.1").unwrap())
         );
+    }
+
+    #[test]
+    fn ipv4_addrs_non_contiguous_matches_expected_grid() {
+        let net = Ipv4Network::new(Ipv4Addr::new(192, 168, 0, 1), Ipv4Addr::new(255, 255, 0, 255));
+        let mut expected: Vec<_> = (0u16..256).map(|a| Ipv4Addr::new(192, 168, a as u8, 1)).collect();
+        let mut actual: Vec<_> = net.addrs().collect();
+        expected.sort();
+        actual.sort();
+
+        assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn ipv4_addrs_slash24_matches_incrementing_u32() {
+        let net = Ipv4Network::parse("192.168.1.0/24").unwrap();
+        let mut ip = net.addr().to_bits();
+        for a in net.addrs() {
+            assert_eq!(a.to_bits(), ip);
+            ip = ip.wrapping_add(1);
+        }
+
+        assert_eq!(256, net.addrs().count());
+    }
+
+    #[test]
+    fn ipv4_addrs_slash32_single() {
+        let net = Ipv4Network::parse("10.0.0.1/32").unwrap();
+        assert_eq!(net.addrs().next(), net.addrs().next_back());
+
+        let mut addrs = net.addrs();
+        assert_eq!(addrs.next(), Some(Ipv4Addr::new(10, 0, 0, 1)));
+        assert_eq!(addrs.next(), None);
+        assert_eq!(addrs.next_back(), None);
+    }
+
+    #[test]
+    fn ipv4_addrs_non_contiguous_unique_and_endpoints() {
+        let net = Ipv4Network::new(Ipv4Addr::new(192, 168, 0, 1), Ipv4Addr::new(255, 255, 0, 255));
+
+        let addrs: Vec<_> = net.addrs().collect();
+        assert_eq!(256, addrs.len());
+
+        let mut sorted = addrs.clone();
+        sorted.sort();
+        sorted.dedup();
+
+        assert_eq!(sorted.len(), addrs.len());
+        assert_eq!(addrs.first().copied(), Some(*net.addr()));
+        assert_eq!(addrs.last().copied(), Some(net.last_addr()));
+    }
+
+    #[test]
+    fn ipv4_addrs_interleaved_exhausts_uniquely() {
+        let net = Ipv4Network::parse("192.168.1.0/24").unwrap();
+        let mut addrs = net.addrs();
+        let mut seen = Vec::new();
+        loop {
+            match (addrs.next(), addrs.next_back()) {
+                (Some(a), Some(b)) => {
+                    seen.push(a);
+                    seen.push(b);
+                }
+                (Some(a), None) => seen.push(a),
+                (None, Some(b)) => seen.push(b),
+                (None, None) => break,
+            }
+        }
+
+        assert_eq!(256, seen.len());
+        seen.sort();
+        seen.dedup();
+        assert_eq!(256, seen.len());
+    }
+
+    #[test]
+    fn ipv4_addrs_unspecified_both_ends() {
+        let net = Ipv4Network::UNSPECIFIED;
+        let mut addrs = net.addrs();
+        assert_eq!(addrs.next(), Some(Ipv4Addr::new(0, 0, 0, 0)));
+        assert_eq!(addrs.next_back(), Some(Ipv4Addr::new(255, 255, 255, 255)));
+    }
+
+    #[test]
+    fn ipv6_addrs_slash120_matches_incrementing_u128() {
+        let net = Ipv6Network::parse("2a02:6b8:c00::1234:0:0/120").unwrap();
+        let mut ip = net.addr().to_bits();
+
+        for addr in net.addrs() {
+            assert_eq!(addr.to_bits(), ip);
+            ip = ip.wrapping_add(1);
+        }
+
+        assert_eq!(256, net.addrs().count());
+    }
+
+    #[test]
+    fn ipv6_addrs_slash128_single() {
+        let net = Ipv6Network::parse("::1/128").unwrap();
+        assert_eq!(net.addrs().next(), net.addrs().next_back());
+
+        let mut addrs = net.addrs();
+        assert_eq!(addrs.next(), Some(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1)));
+        assert_eq!(addrs.next(), None);
+        assert_eq!(addrs.next_back(), None);
+    }
+
+    #[test]
+    fn ipv6_addrs_non_contiguous_unique_and_endpoints() {
+        let net = Ipv6Network::new(
+            Ipv6Addr::new(0x2a02, 0x6b8, 0xc00, 0, 0, 0x1234, 0, 0),
+            Ipv6Addr::new(0xffff, 0xffff, 0xff00, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff),
+        );
+
+        let addrs: Vec<_> = net.addrs().collect();
+        assert_eq!(256, addrs.len());
+
+        let mut sorted = addrs.clone();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(sorted.len(), addrs.len());
+        assert_eq!(addrs.first().copied(), Some(*net.addr()));
+        assert_eq!(addrs.last().copied(), Some(net.last_addr()));
+    }
+
+    #[test]
+    fn ipv6_addrs_interleaved_exhausts_uniquely() {
+        let net = Ipv6Network::parse("2a02:6b8:c00::1234:0:0/120").unwrap();
+        let mut addrs = net.addrs();
+        let mut seen = Vec::new();
+
+        loop {
+            match (addrs.next(), addrs.next_back()) {
+                (Some(a), Some(b)) => {
+                    seen.push(a);
+                    seen.push(b);
+                }
+                (Some(a), None) => seen.push(a),
+                (None, Some(b)) => seen.push(b),
+                (None, None) => break,
+            }
+        }
+
+        assert_eq!(256, seen.len());
+        seen.sort();
+        seen.dedup();
+        assert_eq!(256, seen.len());
+    }
+
+    #[test]
+    fn ipv6_addrs_unspecified_both_ends() {
+        let net = Ipv6Network::UNSPECIFIED;
+        let mut addrs = net.addrs();
+        assert_eq!(addrs.next(), Some(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 0)));
+        assert_eq!(
+            addrs.next_back(),
+            Some(Ipv6Addr::new(
+                0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff
+            ))
+        );
+    }
+
+    #[test]
+    fn ipv6_addrs_non_contiguous_matches_expected_grid() {
+        let net = Ipv6Network::new(
+            Ipv6Addr::new(0x2a02, 0x6b8, 0x0c00, 0, 0, 0, 0, 1),
+            Ipv6Addr::new(0xffff, 0xffff, 0xff00, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff),
+        );
+
+        let mut expected: Vec<_> = (0u16..256)
+            .map(|a| Ipv6Addr::new(0x2a02, 0x6b8, 0x0c00 | a, 0, 0, 0, 0, 1))
+            .collect();
+        let mut actual: Vec<_> = net.addrs().collect();
+        expected.sort();
+        actual.sort();
+        assert_eq!(expected, actual);
     }
 
     #[test]
