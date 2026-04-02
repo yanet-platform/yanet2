@@ -62,7 +62,7 @@ func NewRouteModule(cfg *Config, log *zap.Logger) (*RouteModule, error) {
 		return nil, fmt.Errorf("failed to attach agent to shared memory: %w", err)
 	}
 
-	routeService := NewRouteService(agent, neighbourTable, cfg.RibTTL, log)
+	routeService := NewRouteService(NewBackend(agent, log), neighbourTable, cfg.RibTTL, log)
 	neighbourService := NewNeighbourService(neighbourTable)
 
 	return &RouteModule{

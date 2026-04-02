@@ -14,10 +14,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/yanet-platform/yanet2/common/go/bitset"
-	"github.com/yanet-platform/yanet2/common/go/maptrie"
 	"github.com/yanet-platform/yanet2/common/go/xnetip"
-	cpffi "github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/route/controlplane/routepb"
 	"github.com/yanet-platform/yanet2/modules/route/internal/discovery/neigh"
 	"github.com/yanet-platform/yanet2/modules/route/internal/ffi"
@@ -30,11 +27,11 @@ type RouteService struct {
 	// shmLock serializes shared-memory mutations and protects the ffiModules
 	// map.
 	shmLock sync.RWMutex
-	agent   *cpffi.Agent
+	backend Backend
 	// ribsLock protects the ribs map only.
 	ribsLock   sync.RWMutex
 	ribs       map[string]*rib.RIB
-	ffiModules map[string]*ffi.ModuleConfig
+	ffiModules map[string]ModuleHandle
 	neighTable *neigh.NeighTable
 
 	ribTTL time.Duration
@@ -44,15 +41,15 @@ type RouteService struct {
 }
 
 func NewRouteService(
-	agent *cpffi.Agent,
+	backend Backend,
 	neighTable *neigh.NeighTable,
 	ribTTL time.Duration,
 	log *zap.Logger,
 ) *RouteService {
 	return &RouteService{
-		agent:      agent,
+		backend:    backend,
 		ribs:       map[string]*rib.RIB{},
-		ffiModules: map[string]*ffi.ModuleConfig{},
+		ffiModules: map[string]ModuleHandle{},
 		neighTable: neighTable,
 		ribTTL:     ribTTL,
 		quitCh:     make(chan bool),
@@ -335,7 +332,7 @@ func (m *RouteService) DeleteConfig(
 	// Delete the module config from the data plane if it exists.
 	ffiModule, hasFFIModule := m.ffiModules[name]
 	if hasFFIModule {
-		if err := m.agent.DeleteModuleConfig(name); err != nil {
+		if err := m.backend.DeleteModule(name); err != nil {
 			return nil, status.Errorf(codes.Internal, "failed to delete module config %q: %v", name, err)
 		}
 		ffiModule.Free()
@@ -472,152 +469,20 @@ func (m *RouteService) getOrCreateRib(name string) *rib.RIB {
 
 func (m *RouteService) syncRouteUpdates(ribRef *rib.RIB, name string) error {
 	ribDump := ribRef.DumpRoutes()
+	neighbours := m.neighTable.View()
 
-	// Huge mutex, but our shared memory must be protected from concurrent access.
+	// Huge mutex, but our shared memory must be protected from concurrent
+	// access.
 	m.shmLock.Lock()
 	defer m.shmLock.Unlock()
 
-	err := m.updateModuleConfig(name, ribDump)
+	newModule, err := m.backend.UpdateModule(name, ribDump, neighbours)
 	if err != nil {
 		m.log.Error("syncRouteUpdates: failed to update module config",
 			zap.Error(err),
 			zap.String("name", name),
 		)
 		return err
-	}
-	return nil
-}
-
-func (m *RouteService) updateModuleConfig(
-	name string,
-	ribDump maptrie.MapTrie[netip.Prefix, netip.Addr, rib.RoutesList],
-) error {
-	config, err := ffi.NewModuleConfig(m.agent, name)
-	if err != nil {
-		m.log.Error("updateModuleConfig: failed to create module config",
-			zap.Error(err),
-			zap.String("name", name),
-		)
-		return fmt.Errorf("failed to create %q module config: %w", name, err)
-	}
-
-	// Obtain neighbour entry with resolved hardware addresses
-	neighbours := m.neighTable.View()
-
-	// Statistics for summary logging
-	var stats struct {
-		totalPrefixes       int
-		totalRoutes         int
-		skippedPrefixes     int
-		neighbourNotFound   int
-		hardwareRoutesAdded int
-		prefixesAdded       int
-	}
-
-	hardwareRoutes := map[neigh.HardwareRoute]uint32{}
-	routesListsSet := map[bitset.TinyBitset]int{}
-
-	routeInsertionStart := time.Now()
-
-	for prefixLen := range ribDump {
-		for prefix, routesList := range ribDump[prefixLen] {
-			stats.totalPrefixes++
-			routesListSetKey := bitset.TinyBitset{}
-
-			if len(routesList.Routes) == 0 {
-				stats.skippedPrefixes++
-				continue
-			}
-
-			stats.totalRoutes += len(routesList.Routes)
-
-			for _, route := range routesList.Routes {
-				// Lookup hwaddress for the route
-				entry, ok := neighbours.Lookup(route.NextHop.Unmap())
-				if !ok {
-					m.log.Warn("updateModuleConfig: neighbour not found for nexthop",
-						zap.Stringer("nexthop", route.NextHop),
-						zap.Stringer("prefix", prefix),
-						zap.String("name", name),
-					)
-					stats.neighbourNotFound++
-					continue
-				}
-
-				if idx, ok := hardwareRoutes[entry.HardwareRoute]; ok {
-					routesListSetKey.Insert(idx)
-					continue
-				}
-
-				idx, err := config.AddRoute(
-					entry.HardwareRoute.SourceMAC[:],
-					entry.HardwareRoute.DestinationMAC[:],
-					entry.HardwareRoute.Device,
-				)
-				if err != nil {
-					m.log.Error("updateModuleConfig: failed to add hardware route",
-						zap.Error(err),
-						zap.Stringer("hardware_route", entry.HardwareRoute),
-						zap.Stringer("prefix", prefix),
-						zap.String("name", name),
-					)
-					return fmt.Errorf("failed to add hardware route %v for prefix %s: %w", entry.HardwareRoute, prefix, err)
-				}
-				stats.hardwareRoutesAdded++
-				hardwareRoutes[entry.HardwareRoute] = uint32(idx)
-				routesListSetKey.Insert(uint32(idx))
-			}
-
-			if routesListSetKey.Count() == 0 {
-				continue
-			}
-
-			idx, ok := routesListsSet[routesListSetKey]
-			if !ok {
-				routeListIdx, err := config.AddRouteList(routesListSetKey.AsSlice())
-				if err != nil {
-					m.log.Error("updateModuleConfig: failed to add route list",
-						zap.Error(err),
-						zap.Uint32s("route_indices", routesListSetKey.AsSlice()),
-						zap.Stringer("prefix", prefix),
-						zap.String("name", name),
-					)
-					return fmt.Errorf("failed to add routes list: %w", err)
-				}
-				idx = routeListIdx
-				routesListsSet[routesListSetKey] = idx
-			}
-
-			if err := config.AddPrefix(prefix, uint32(idx)); err != nil {
-				m.log.Error("updateModuleConfig: failed to add prefix",
-					zap.Error(err),
-					zap.Stringer("prefix", prefix),
-					zap.Int("route_list_index", idx),
-					zap.String("name", name),
-				)
-				return fmt.Errorf("failed to add prefix %q: %w", prefix, err)
-			}
-			stats.prefixesAdded++
-		}
-	}
-
-	m.log.Info("updateModuleConfig: finished processing routes",
-		zap.String("module", name),
-		zap.Int("total_prefixes", stats.totalPrefixes),
-		zap.Int("total_routes", stats.totalRoutes),
-		zap.Int("skipped_prefixes", stats.skippedPrefixes),
-		zap.Int("neighbour_not_found", stats.neighbourNotFound),
-		zap.Int("hardware_routes_added", stats.hardwareRoutesAdded),
-		zap.Int("prefixes_added", stats.prefixesAdded),
-		zap.Duration("processing_duration", time.Since(routeInsertionStart)),
-	)
-
-	if err := m.agent.UpdateModules([]cpffi.ModuleConfig{config.AsFFIModule()}); err != nil {
-		m.log.Error("updateModuleConfig: failed to update modules via FFI",
-			zap.Error(err),
-			zap.String("name", name),
-		)
-		return fmt.Errorf("failed to update module: %w", err)
 	}
 
 	// Swap the FFI module and free the old one.
@@ -627,7 +492,7 @@ func (m *RouteService) updateModuleConfig(
 	if oldModule, exists := m.ffiModules[name]; exists {
 		oldModule.Free()
 	}
-	m.ffiModules[name] = config
+	m.ffiModules[name] = newModule
 
 	return nil
 }
