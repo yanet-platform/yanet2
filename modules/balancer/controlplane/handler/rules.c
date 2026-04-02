@@ -210,8 +210,6 @@ rules_memory_usage(size_t rules_count, struct filter_rule *rules) {
 			(rule->transport.dst_count + rule->transport.src_count);
 		result += sizeof(struct filter_proto_range) *
 			  rule->transport.proto_count;
-		result += sizeof(struct filter_proto_range) *
-			  rule->transport.proto_count;
 	}
 	return result;
 }
