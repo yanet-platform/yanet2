@@ -12,8 +12,8 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/filter/ipnet4"
 	"github.com/yanet-platform/yanet2/common/go/filter/ipnet6"
 	"github.com/yanet-platform/yanet2/common/go/filter/vlanrange"
+	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
 	"github.com/yanet-platform/yanet2/modules/forward/controlplane/forwardpb"
-	"github.com/yanet-platform/yanet2/modules/forward/internal/ffi"
 )
 
 // ModuleHandle is a handle to a module configuration.
@@ -25,7 +25,7 @@ type ModuleHandle interface {
 type Backend interface {
 	// UpdateModule creates a module config, writes rules, and publishes
 	// it to the dataplane.
-	UpdateModule(name string, rules []ffi.ForwardRule) (ModuleHandle, error)
+	UpdateModule(name string, rules []cforward.ForwardRule) (ModuleHandle, error)
 	// DeleteModule removes a module config.
 	DeleteModule(name string) error
 }
@@ -99,7 +99,7 @@ func (m *ForwardService) UpdateConfig(ctx context.Context, req *forwardpb.Update
 
 	reqRules := req.Rules
 
-	rules := make([]ffi.ForwardRule, 0, len(reqRules))
+	rules := make([]cforward.ForwardRule, 0, len(reqRules))
 	for _, reqRule := range reqRules {
 		devices, err := device.FromDevices(reqRule.Devices)
 		if err != nil {
@@ -126,9 +126,9 @@ func (m *ForwardService) UpdateConfig(ctx context.Context, req *forwardpb.Update
 			return nil, err
 		}
 
-		rule := ffi.ForwardRule{
+		rule := cforward.ForwardRule{
 			Target:     reqRule.Action.Target,
-			Mode:       ffi.ModeNone,
+			Mode:       cforward.ModeNone,
 			Counter:    reqRule.Action.Counter,
 			Devices:    devices,
 			VlanRanges: vlanRanges,
@@ -139,10 +139,10 @@ func (m *ForwardService) UpdateConfig(ctx context.Context, req *forwardpb.Update
 		}
 
 		if reqRule.Action.Mode == forwardpb.ForwardMode_IN {
-			rule.Mode = ffi.ModeIn
+			rule.Mode = cforward.ModeIn
 		}
 		if reqRule.Action.Mode == forwardpb.ForwardMode_OUT {
-			rule.Mode = ffi.ModeOut
+			rule.Mode = cforward.ModeOut
 		}
 
 		rules = append(rules, rule)

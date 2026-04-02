@@ -1,4 +1,4 @@
-package ffi
+package cforward
 
 //#include "modules/forward/api/controlplane.h"
 import "C"

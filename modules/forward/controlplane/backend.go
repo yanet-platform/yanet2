@@ -3,24 +3,24 @@ package forward
 import (
 	"fmt"
 
-	cpffi "github.com/yanet-platform/yanet2/controlplane/ffi"
-	"github.com/yanet-platform/yanet2/modules/forward/internal/ffi"
+	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
 )
 
 // backend is the real Backend implementation backed by shared memory.
 type backend struct {
-	agent *cpffi.Agent
+	agent *ffi.Agent
 }
 
 // NewBackend creates a Backend that operates on real shared memory.
-func NewBackend(agent *cpffi.Agent) Backend {
+func NewBackend(agent *ffi.Agent) Backend {
 	return &backend{
 		agent: agent,
 	}
 }
 
-func (m *backend) UpdateModule(name string, rules []ffi.ForwardRule) (ModuleHandle, error) {
-	module, err := ffi.NewModuleConfig(m.agent, name)
+func (m *backend) UpdateModule(name string, rules []cforward.ForwardRule) (ModuleHandle, error) {
+	module, err := cforward.NewModuleConfig(m.agent, name)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create module config: %w", err)
 	}
@@ -30,7 +30,7 @@ func (m *backend) UpdateModule(name string, rules []ffi.ForwardRule) (ModuleHand
 		return nil, fmt.Errorf("failed to update module config: %w", err)
 	}
 
-	if err := m.agent.UpdateModules([]cpffi.ModuleConfig{module.AsFFIModule()}); err != nil {
+	if err := m.agent.UpdateModules([]ffi.ModuleConfig{module.AsFFIModule()}); err != nil {
 		module.Free()
 		return nil, fmt.Errorf("failed to update module: %w", err)
 	}

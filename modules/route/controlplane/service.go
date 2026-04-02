@@ -15,9 +15,9 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/yanet-platform/yanet2/common/go/xnetip"
+	"github.com/yanet-platform/yanet2/modules/route/bindings/go/croute"
 	"github.com/yanet-platform/yanet2/modules/route/controlplane/routepb"
 	"github.com/yanet-platform/yanet2/modules/route/internal/discovery/neigh"
-	"github.com/yanet-platform/yanet2/modules/route/internal/ffi"
 	"github.com/yanet-platform/yanet2/modules/route/internal/rib"
 )
 
@@ -182,10 +182,10 @@ func (m *RouteService) ShowFIB(
 	response := &routepb.ShowFIBResponse{}
 
 	for _, e := range entries {
-		if request.GetIpv4Only() && e.AddressFamily != ffi.AddressFamilyIPv4 {
+		if request.GetIpv4Only() && e.AddressFamily != croute.AddressFamilyIPv4 {
 			continue
 		}
-		if request.GetIpv6Only() && e.AddressFamily != ffi.AddressFamilyIPv6 {
+		if request.GetIpv6Only() && e.AddressFamily != croute.AddressFamilyIPv6 {
 			continue
 		}
 

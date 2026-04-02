@@ -9,15 +9,15 @@ import (
 
 	"github.com/yanet-platform/yanet2/common/go/bitset"
 	"github.com/yanet-platform/yanet2/common/go/maptrie"
-	cpffi "github.com/yanet-platform/yanet2/controlplane/ffi"
+	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	"github.com/yanet-platform/yanet2/modules/route/bindings/go/croute"
 	"github.com/yanet-platform/yanet2/modules/route/internal/discovery/neigh"
-	"github.com/yanet-platform/yanet2/modules/route/internal/ffi"
 	"github.com/yanet-platform/yanet2/modules/route/internal/rib"
 )
 
 // ModuleHandle is a handle to a module configuration.
 type ModuleHandle interface {
-	DumpFIB() ([]ffi.FIBEntry, error)
+	DumpFIB() ([]croute.FIBEntry, error)
 	Free()
 }
 
@@ -36,12 +36,12 @@ type Backend interface {
 
 // backend is the real Backend implementation backed by shared memory.
 type backend struct {
-	agent *cpffi.Agent
+	agent *ffi.Agent
 	log   *zap.Logger
 }
 
 // NewBackend creates a Backend that operates on real shared memory.
-func NewBackend(agent *cpffi.Agent, log *zap.Logger) Backend {
+func NewBackend(agent *ffi.Agent, log *zap.Logger) Backend {
 	return &backend{
 		agent: agent,
 		log:   log,
@@ -53,7 +53,7 @@ func (m *backend) UpdateModule(
 	ribDump maptrie.MapTrie[netip.Prefix, netip.Addr, rib.RoutesList],
 	neighbours neigh.NexthopCacheView,
 ) (ModuleHandle, error) {
-	config, err := ffi.NewModuleConfig(m.agent, name)
+	config, err := croute.NewModuleConfig(m.agent, name)
 	if err != nil {
 		m.log.Error("failed to create module config",
 			zap.Error(err),
@@ -173,7 +173,7 @@ func (m *backend) UpdateModule(
 		zap.Duration("processing_duration", time.Since(routeInsertionStart)),
 	)
 
-	if err := m.agent.UpdateModules([]cpffi.ModuleConfig{config.AsFFIModule()}); err != nil {
+	if err := m.agent.UpdateModules([]ffi.ModuleConfig{config.AsFFIModule()}); err != nil {
 		m.log.Error("failed to update modules via FFI",
 			zap.Error(err),
 			zap.String("name", name),
