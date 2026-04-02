@@ -14,6 +14,8 @@ import (
 )
 
 const (
+	agentName = "route"
+
 	// defaultStaticPriority is the default priority for statically
 	// configured neighbours.
 	defaultStaticPriority = 10
@@ -28,11 +30,11 @@ type RouteModule struct {
 	neighbourMonitor *neigh.NeighMonitor
 	routeService     *RouteService
 	neighbourService *NeighbourService
-	log              *zap.SugaredLogger
+	log              *zap.Logger
 }
 
 // NewRouteModule creates a new RouteModule.
-func NewRouteModule(cfg *Config, log *zap.SugaredLogger) (*RouteModule, error) {
+func NewRouteModule(cfg *Config, log *zap.Logger) (*RouteModule, error) {
 	log = log.With(zap.String("module", "routepb.RouteService"))
 
 	neighbourTable := neigh.NewNeighTable()
@@ -50,12 +52,12 @@ func NewRouteModule(cfg *Config, log *zap.SugaredLogger) (*RouteModule, error) {
 		return nil, fmt.Errorf("failed to attach to shared memory %q: %w", cfg.MemoryPath, err)
 	}
 
-	log.Debugw("mapping shared memory",
+	log.Debug("mapping shared memory",
 		zap.Uint32("instance_id", cfg.InstanceID),
 		zap.Stringer("size", cfg.MemoryRequirements),
 	)
 
-	agent, err := shm.AgentReattach("route", cfg.InstanceID, cfg.MemoryRequirements.Unwrap())
+	agent, err := shm.AgentReattach(agentName, cfg.InstanceID, cfg.MemoryRequirements.Unwrap())
 	if err != nil {
 		return nil, fmt.Errorf("failed to attach agent to shared memory: %w", err)
 	}
@@ -79,7 +81,7 @@ func NewRouteModule(cfg *Config, log *zap.SugaredLogger) (*RouteModule, error) {
 func newNeighbourMonitor(
 	cfg *Config,
 	neighTable *neigh.NeighTable,
-	log *zap.SugaredLogger,
+	log *zap.Logger,
 ) (*neigh.NeighMonitor, error) {
 	if cfg.NetlinkMonitor.Disabled {
 		return nil, nil
@@ -105,7 +107,7 @@ func newNeighbourMonitor(
 }
 
 func (m *RouteModule) Name() string {
-	return "route"
+	return agentName
 }
 
 func (m *RouteModule) Endpoint() string {
@@ -127,11 +129,11 @@ func (m *RouteModule) RegisterService(server *grpc.Server) {
 // Close closes the module.
 func (m *RouteModule) Close() error {
 	if err := m.agent.Close(); err != nil {
-		m.log.Warnw("failed to close shared memory agent", zap.Error(err))
+		m.log.Warn("failed to close shared memory agent", zap.Error(err))
 	}
 
 	if err := m.shm.Detach(); err != nil {
-		m.log.Warnw("failed to detach from shared memory mapping", zap.Error(err))
+		m.log.Warn("failed to detach from shared memory mapping", zap.Error(err))
 	}
 
 	return nil

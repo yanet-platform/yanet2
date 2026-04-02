@@ -41,7 +41,7 @@ func WithLinkMap(linkMap map[string]string) Option {
 }
 
 // WithLog configures the neighbour monitor with a logger.
-func WithLog(log *zap.SugaredLogger) Option {
+func WithLog(log *zap.Logger) Option {
 	return func(o *options) {
 		o.Log = log
 	}
@@ -50,14 +50,14 @@ func WithLog(log *zap.SugaredLogger) Option {
 type options struct {
 	UpdateInterval time.Duration
 	LinkMap        map[string]string
-	Log            *zap.SugaredLogger
+	Log            *zap.Logger
 }
 
 func newOptions() *options {
 	return &options{
 		UpdateInterval: 5 * time.Minute,
 		LinkMap:        make(map[string]string),
-		Log:            zap.NewNop().Sugar(),
+		Log:            zap.NewNop(),
 	}
 }
 
@@ -72,7 +72,7 @@ type NeighMonitor struct {
 	source         *NeighSource
 	updateInterval time.Duration
 	linkMap        map[string]string
-	log            *zap.SugaredLogger
+	log            *zap.Logger
 }
 
 // NewNeighMonitor creates a new neighbour monitor.
@@ -108,7 +108,7 @@ func (m *NeighMonitor) Run(ctx context.Context) error {
 	})
 
 	err := wg.Wait()
-	m.log.Debugw("stopped neighbour monitor", zap.Error(err))
+	m.log.Debug("stopped neighbour monitor", zap.Error(err))
 	return err
 }
 
@@ -125,7 +125,7 @@ func (m *NeighMonitor) runNeighSubscription(ctx context.Context) error {
 			return ctx.Err()
 		case update := <-txRx:
 			if err := m.processNeighUpdate(update); err != nil {
-				m.log.Warnw("failed to process neighbour update", zap.Error(err))
+				m.log.Warn("failed to process neighbour update", zap.Error(err))
 			}
 		}
 	}
@@ -141,14 +141,14 @@ func (m *NeighMonitor) runNeighPeriodicUpdate(ctx context.Context) error {
 			return ctx.Err()
 		case <-timer.C:
 			if err := m.updateNeighbours(); err != nil {
-				m.log.Warnw("failed to update neighbours", zap.Error(err))
+				m.log.Warn("failed to update neighbours", zap.Error(err))
 			}
 		}
 	}
 }
 
 func (m *NeighMonitor) processNeighUpdate(update netlink.NeighUpdate) error {
-	m.log.Debugw("processing neighbour update",
+	m.log.Debug("processing neighbour update",
 		zap.Int("link_index", update.LinkIndex),
 		zap.Stringer("state", NeighbourState(update.State)),
 		zap.Stringer("nexthop_addr", update.IP),
@@ -163,7 +163,7 @@ func (m *NeighMonitor) processNeighUpdate(update netlink.NeighUpdate) error {
 		//
 		// Instead, the entire neighbors table is overwritten on a timer event.
 	default:
-		m.log.Warnw("received unexpected neighbour update type",
+		m.log.Warn("received unexpected neighbour update type",
 			zap.Uint16("type", update.Type),
 		)
 	}
@@ -207,7 +207,7 @@ func (m *NeighMonitor) updateNeighbours() error {
 	for _, neigh := range neighs {
 		nexthopAddr, ok := netip.AddrFromSlice(neigh.IP)
 		if !ok {
-			m.log.Warnw("failed to parse neighbour IP address",
+			m.log.Warn("failed to parse neighbour IP address",
 				zap.String("ip", neigh.IP.String()),
 			)
 			continue
@@ -215,7 +215,7 @@ func (m *NeighMonitor) updateNeighbours() error {
 
 		// Skip entries with invalid MAC.
 		if len(neigh.HardwareAddr) != 6 {
-			m.log.Warnw("skipping entry with unsupported MAC address: must be EUI-48",
+			m.log.Warn("skipping entry with unsupported MAC address: must be EUI-48",
 				zap.Stringer("mac", neigh.HardwareAddr),
 			)
 			continue
@@ -224,13 +224,13 @@ func (m *NeighMonitor) updateNeighbours() error {
 		// Get the hardware address of the interface.
 		hardwareAddr, ok := linkIndexToHardwareAddr[neigh.LinkIndex]
 		if !ok {
-			m.log.Warnw("no hardware address for link index",
+			m.log.Warn("no hardware address for link index",
 				zap.Int("link_index", neigh.LinkIndex),
 			)
 			continue
 		}
 		if len(hardwareAddr) != 6 {
-			m.log.Warnw("skipping entry with unsupported interface MAC address: must be EUI-48",
+			m.log.Warn("skipping entry with unsupported interface MAC address: must be EUI-48",
 				zap.Stringer("mac", hardwareAddr),
 			)
 			continue
@@ -259,7 +259,7 @@ func (m *NeighMonitor) updateNeighbours() error {
 			}
 		}
 
-		m.log.Debugw("resolved neighbour entry",
+		m.log.Debug("resolved neighbour entry",
 			zap.Stringer("nexthop_addr", entry.NextHop),
 			zap.Stringer("nexthop_hardware_addr", neigh.HardwareAddr),
 			zap.Stringer("iface_hardware_addr", hardwareAddr),
@@ -275,6 +275,6 @@ func (m *NeighMonitor) updateNeighbours() error {
 		return fmt.Errorf("failed to swap source: %w", err)
 	}
 
-	m.log.Infow("updated nexthop cache", zap.Int("size", len(nexthopCache)))
+	m.log.Info("updated nexthop cache", zap.Int("size", len(nexthopCache)))
 	return nil
 }

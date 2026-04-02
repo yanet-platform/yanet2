@@ -84,7 +84,7 @@ func NewDirector(cfg *Config, options ...DirectorOption) (*Director, error) {
 	}
 	log.Debugw("attached to shared memory", zap.String("path", cfg.MemoryPath))
 
-	routeModule, err := route.NewRouteModule(cfg.Modules.Route, log)
+	routeModule, err := route.NewRouteModule(cfg.Modules.Route, log.Desugar())
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize route built-in module: %w", err)
 	}

@@ -40,14 +40,14 @@ type RouteService struct {
 	ribTTL time.Duration
 	quitCh chan bool
 
-	log *zap.SugaredLogger
+	log *zap.Logger
 }
 
 func NewRouteService(
 	agent *cpffi.Agent,
 	neighTable *neigh.NeighTable,
 	ribTTL time.Duration,
-	log *zap.SugaredLogger,
+	log *zap.Logger,
 ) *RouteService {
 	return &RouteService{
 		agent:      agent,
@@ -393,17 +393,26 @@ func (m *RouteService) FeedRIB(stream grpc.ClientStreamingServer[routepb.Update,
 			// NewSession() increments RIB's session counter and returns the new ID.
 			// It also sets the termination flag for the *previous* session's stream.
 			sessionId, terminated = ribRef.NewSession()
-			m.log.Infof("new FeedRIB session %d started for %s", sessionId, name)
+			m.log.Info("new FeedRIB session started",
+				zap.Uint64("session_id", sessionId),
+				zap.String("name", name),
+			)
 		}
 
 		// Check if this session has been superseded by a newer one.
 		if terminated.Load() {
-			m.log.Warnf("FeedRIB session %d for %s terminated by a newer session", sessionId, name)
+			m.log.Warn("FeedRIB session terminated by a newer session",
+				zap.Uint64("session_id", sessionId),
+				zap.String("name", name),
+			)
 			err = stream.SendAndClose(&routepb.UpdateSummary{}) // Gracefully close our side.
 			break
 		}
 		if update.GetRoute() == nil { // flush event
-			m.log.Infof("sync routes in session %d for %s due to flush event in FeedRIB stream", sessionId, name)
+			m.log.Info("sync routes due to flush event in FeedRIB stream",
+				zap.Uint64("session_id", sessionId),
+				zap.String("name", name),
+			)
 			err = m.syncRouteUpdates(ribRef, name)
 			if err != nil {
 				break
@@ -411,7 +420,10 @@ func (m *RouteService) FeedRIB(stream grpc.ClientStreamingServer[routepb.Update,
 		} else {
 			route, convertErr := routepb.ToRIBRoute(update.GetRoute(), update.GetIsDelete())
 			if convertErr != nil {
-				m.log.Errorf("failed to convert proto route to RIB route for session %d: %v. Update: %+v", sessionId, convertErr, update)
+				m.log.Error("failed to convert proto route to RIB route",
+					zap.Uint64("session_id", sessionId),
+					zap.Error(convertErr),
+				)
 				continue // Skip this invalid route update.
 			}
 			route.SessionID = sessionId // Tag route with current session ID.
@@ -423,7 +435,11 @@ func (m *RouteService) FeedRIB(stream grpc.ClientStreamingServer[routepb.Update,
 	// If a RIB was established for this stream, schedule cleanup for its session.
 	// This runs regardless of whether the stream ended cleanly or with an error.
 	if ribRef != nil {
-		m.log.Infof("FeedRIB session %d for %s ended. Scheduling cleanup after %s", sessionId, name, m.ribTTL)
+		m.log.Info("FeedRIB session ended, scheduling cleanup",
+			zap.Uint64("session_id", sessionId),
+			zap.String("name", name),
+			zap.Duration("ttl", m.ribTTL),
+		)
 		// CleanupTask will remove routes from this sessionID (and older BIRD ones) after ribTTL.
 		go ribRef.CleanupTask(sessionId, m.quitCh, m.ribTTL)
 	}
@@ -445,7 +461,7 @@ func (m *RouteService) getOrCreateRib(name string) *rib.RIB {
 
 	ribRef, ok := m.ribs[name]
 	if !ok {
-		m.log.Infow("creating new RIB",
+		m.log.Info("creating new RIB",
 			zap.String("name", name),
 		)
 		ribRef = rib.NewRIB(m.log)
@@ -463,7 +479,7 @@ func (m *RouteService) syncRouteUpdates(ribRef *rib.RIB, name string) error {
 
 	err := m.updateModuleConfig(name, ribDump)
 	if err != nil {
-		m.log.Errorw("syncRouteUpdates: failed to update module config",
+		m.log.Error("syncRouteUpdates: failed to update module config",
 			zap.Error(err),
 			zap.String("name", name),
 		)
@@ -478,7 +494,7 @@ func (m *RouteService) updateModuleConfig(
 ) error {
 	config, err := ffi.NewModuleConfig(m.agent, name)
 	if err != nil {
-		m.log.Errorw("updateModuleConfig: failed to create module config",
+		m.log.Error("updateModuleConfig: failed to create module config",
 			zap.Error(err),
 			zap.String("name", name),
 		)
@@ -519,7 +535,7 @@ func (m *RouteService) updateModuleConfig(
 				// Lookup hwaddress for the route
 				entry, ok := neighbours.Lookup(route.NextHop.Unmap())
 				if !ok {
-					m.log.Warnw("updateModuleConfig: neighbour not found for nexthop",
+					m.log.Warn("updateModuleConfig: neighbour not found for nexthop",
 						zap.Stringer("nexthop", route.NextHop),
 						zap.Stringer("prefix", prefix),
 						zap.String("name", name),
@@ -539,7 +555,7 @@ func (m *RouteService) updateModuleConfig(
 					entry.HardwareRoute.Device,
 				)
 				if err != nil {
-					m.log.Errorw("updateModuleConfig: failed to add hardware route",
+					m.log.Error("updateModuleConfig: failed to add hardware route",
 						zap.Error(err),
 						zap.Stringer("hardware_route", entry.HardwareRoute),
 						zap.Stringer("prefix", prefix),
@@ -560,7 +576,7 @@ func (m *RouteService) updateModuleConfig(
 			if !ok {
 				routeListIdx, err := config.AddRouteList(routesListSetKey.AsSlice())
 				if err != nil {
-					m.log.Errorw("updateModuleConfig: failed to add route list",
+					m.log.Error("updateModuleConfig: failed to add route list",
 						zap.Error(err),
 						zap.Uint32s("route_indices", routesListSetKey.AsSlice()),
 						zap.Stringer("prefix", prefix),
@@ -573,7 +589,7 @@ func (m *RouteService) updateModuleConfig(
 			}
 
 			if err := config.AddPrefix(prefix, uint32(idx)); err != nil {
-				m.log.Errorw("updateModuleConfig: failed to add prefix",
+				m.log.Error("updateModuleConfig: failed to add prefix",
 					zap.Error(err),
 					zap.Stringer("prefix", prefix),
 					zap.Int("route_list_index", idx),
@@ -585,7 +601,7 @@ func (m *RouteService) updateModuleConfig(
 		}
 	}
 
-	m.log.Infow("updateModuleConfig: finished processing routes",
+	m.log.Info("updateModuleConfig: finished processing routes",
 		zap.String("module", name),
 		zap.Int("total_prefixes", stats.totalPrefixes),
 		zap.Int("total_routes", stats.totalRoutes),
@@ -597,7 +613,7 @@ func (m *RouteService) updateModuleConfig(
 	)
 
 	if err := m.agent.UpdateModules([]cpffi.ModuleConfig{config.AsFFIModule()}); err != nil {
-		m.log.Errorw("updateModuleConfig: failed to update modules via FFI",
+		m.log.Error("updateModuleConfig: failed to update modules via FFI",
 			zap.Error(err),
 			zap.String("name", name),
 		)

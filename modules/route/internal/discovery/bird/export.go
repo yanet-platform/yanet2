@@ -27,10 +27,10 @@ type Export struct {
 	cfg      *Config
 	updater  Updater
 	notifier Notifier
-	log      *zap.SugaredLogger
+	log      *zap.Logger
 }
 
-func NewExportReader(cfg *Config, onUpdate Updater, onFlush Notifier, log *zap.SugaredLogger) *Export {
+func NewExportReader(cfg *Config, onUpdate Updater, onFlush Notifier, log *zap.Logger) *Export {
 	sockets := make([]exportSocket, 0, len(cfg.Sockets))
 	for _, s := range cfg.Sockets {
 		sockets = append(sockets, exportSocket{
@@ -68,7 +68,7 @@ func (m *Export) Run(ctx context.Context) error {
 	wg, ctx := errgroup.WithContext(ctx)
 	for _, socket := range m.sockets {
 		wg.Go(func() error {
-			m.log.Infow("starting bird export reader",
+			m.log.Info("starting bird export reader",
 				zap.String("path", socket.path))
 
 			c, err := net.Dial("unix", socket.path)
@@ -78,7 +78,7 @@ func (m *Export) Run(ctx context.Context) error {
 			go func() {
 				<-ctx.Done()
 				if err := c.Close(); err != nil {
-					m.log.Warnw("bird socket closed with an error", zap.Error(err), zap.Any("ctx_err", ctx.Err()))
+					m.log.Warn("bird socket closed with an error", zap.Error(err), zap.Any("ctx_err", ctx.Err()))
 				}
 			}()
 			reader := bufio.NewReader(c)
@@ -130,7 +130,7 @@ func (m *Export) Run(ctx context.Context) error {
 			}
 
 			if timeout || len(batch) >= m.cfg.DumpThreshold {
-				m.log.Debugw("send RIB update", zap.Int("size", len(batch)),
+				m.log.Debug("send RIB update", zap.Int("size", len(batch)),
 					zap.Bool("isTimeout", timeout))
 				if err := m.updater(ctx, batch); err != nil {
 					return fmt.Errorf("failed to call updater: %w", err)
@@ -147,6 +147,6 @@ func (m *Export) Run(ctx context.Context) error {
 	})
 
 	err := wg.Wait()
-	m.log.Infow("export readers are stopped", zap.Error(err))
+	m.log.Info("export readers are stopped", zap.Error(err))
 	return err
 }

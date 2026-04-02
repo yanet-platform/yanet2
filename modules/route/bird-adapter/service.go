@@ -48,12 +48,12 @@ type AdapterService struct {
 	imports         map[string]*importHolder
 	gatewayEndpoint string    // gRPC endpoint of the RouteService (gateway) for RIB updates
 	quitCh          chan bool // Signals all background BIRD import loops to stop
-	log             *zap.SugaredLogger
+	log             *zap.Logger
 }
 
 func NewAdapterService(
 	gatewayEndpoint string,
-	log *zap.SugaredLogger,
+	log *zap.Logger,
 ) *AdapterService {
 	return &AdapterService{
 		imports:         make(map[string]*importHolder),
@@ -109,7 +109,7 @@ func (m *AdapterService) SetupConfig(
 	name := req.GetName()
 	logLevelStr := req.GetConfig().GetLogLevel()
 
-	m.log.Infow("setting up the configuration",
+	m.log.Info("setting up the configuration",
 		zap.String("name", name),
 		zap.String("log_level", logLevelStr),
 	)
@@ -122,20 +122,19 @@ func (m *AdapterService) SetupConfig(
 	}
 
 	// Create per-client logger based on requested log level
-	var clientLog *zap.SugaredLogger
+	var clientLog *zap.Logger
 	if logLevelStr != "" {
 		var level zapcore.Level
 		if err := level.UnmarshalText([]byte(logLevelStr)); err != nil {
-			m.log.Warnw("invalid log level, using nop logger",
+			m.log.Warn("invalid log level, using nop logger",
 				zap.String("name", name),
 				zap.String("log_level", logLevelStr),
 				zap.Error(err),
 			)
-			clientLog = zap.NewNop().Sugar()
+			clientLog = zap.NewNop()
 		} else {
 			// Create a new logger that wraps the existing core with a level filter
-			baseLogger := m.log.Desugar()
-			baseCore := baseLogger.Core()
+			baseCore := m.log.Core()
 
 			// Wrap the base core with our level filter
 			filteredCore := &levelFilterCore{
@@ -143,11 +142,11 @@ func (m *AdapterService) SetupConfig(
 				level: level,
 			}
 
-			clientLog = zap.New(filteredCore).Named(name).Sugar()
+			clientLog = zap.New(filteredCore).Named(name)
 		}
 	} else {
 		// No log level specified, use nop logger
-		clientLog = zap.NewNop().Sugar()
+		clientLog = zap.NewNop()
 	}
 
 	conn, err := grpc.NewClient(
@@ -186,7 +185,7 @@ type importHolder struct {
 // Handles automatic reconnection and graceful cleanup of existing imports.
 // It establishes the initial gRPC stream to the RouteService (gateway), sets up
 // callbacks for the bird.Export reader, and manages replacement of existing imports.
-func (m *AdapterService) processBirdImport(conn *grpc.ClientConn, cfg *bird.Config, name string, clientLog *zap.SugaredLogger) error {
+func (m *AdapterService) processBirdImport(conn *grpc.ClientConn, cfg *bird.Config, name string, clientLog *zap.Logger) error {
 	// streamCtx governs this specific import's gRPC stream and BIRD reader.
 	// Cancelled via holder.cancel on replacement or service stop.
 	streamCtx, cancel := context.WithCancel(context.Background())
@@ -199,17 +198,17 @@ func (m *AdapterService) processBirdImport(conn *grpc.ClientConn, cfg *bird.Conf
 
 	holder := new(importHolder)
 	holder.currentStream = &stream
-	log := m.log.With("config", name)
+	log := m.log.With(zap.String("config", name))
 
 	// onUpdate sends route batches over the gRPC stream. Called by bird.Export.
 	onUpdate := func(ctx context.Context, routes []rib.Route) error {
-		log.Debugw("processing BIRD routes",
+		log.Debug("processing BIRD routes",
 			zap.Int("count", len(routes)),
 		)
 		for idx := range routes {
 			select {
 			case <-ctx.Done():
-				log.Warnw("update stream send cancelled",
+				log.Warn("update stream send cancelled",
 					zap.Error(ctx.Err()),
 				)
 				_, closeErr := (*holder.currentStream).CloseAndRecv()
@@ -219,7 +218,7 @@ func (m *AdapterService) processBirdImport(conn *grpc.ClientConn, cfg *bird.Conf
 
 			// Log if NextHop is invalid before converting to protobuf
 			if !routes[idx].NextHop.IsValid() {
-				clientLog.Debugw("route has invalid next_hop, skip",
+				clientLog.Debug("route has invalid next_hop, skip",
 					zap.String("prefix", routes[idx].Prefix.String()),
 					zap.String("next_hop", routes[idx].NextHop.String()),
 					zap.Binary("next_hop_bytes", routes[idx].NextHop.AsSlice()),
@@ -287,7 +286,7 @@ func (m *AdapterService) runBirdImportLoop(
 	ctx context.Context,
 	holder *importHolder,
 	client routepb.RouteServiceClient,
-	log *zap.SugaredLogger,
+	log *zap.Logger,
 ) {
 	defer func() { // Cleanup on exit
 		log.Info("BIRD import loop cleanup: closing connection and cancelling context")
@@ -309,7 +308,7 @@ func (m *AdapterService) runBirdImportLoop(
 	for {
 		select {
 		case <-ctx.Done():
-			log.Infow("BIRD import loop cancelled via context", zap.Error(ctx.Err()))
+			log.Info("BIRD import loop cancelled via context", zap.Error(ctx.Err()))
 			return
 		case <-m.quitCh:
 			log.Info("BIRD import loop stopping due to service quit signal")
@@ -336,7 +335,7 @@ func (m *AdapterService) runBirdImportLoop(
 		lastRunAttempt := time.Now()
 		err := holder.export.Run(ctx) // Blocking call
 		if err != nil {
-			log.Warnw("BIRD export reader stopped with error", zap.Error(err))
+			log.Warn("BIRD export reader stopped with error", zap.Error(err))
 			streamActive = false // Stream needs re-establishment
 
 			// If context cancellation caused reader to stop, exit loop
@@ -349,7 +348,7 @@ func (m *AdapterService) runBirdImportLoop(
 			if !errors.Is(err, errStreamClosed) {
 				log.Info("closing client stream after BIRD export reader error")
 				if _, closeErr := (*holder.currentStream).CloseAndRecv(); closeErr != nil {
-					log.Warnw("error closing client stream post-reader failure", zap.Error(closeErr))
+					log.Warn("error closing client stream post-reader failure", zap.Error(closeErr))
 				}
 			}
 
@@ -359,7 +358,7 @@ func (m *AdapterService) runBirdImportLoop(
 			// Apply exponential backoff before retrying the export reader
 			select {
 			case <-ctx.Done():
-				log.Infow("BIRD import loop cancelled via context", zap.Error(ctx.Err()))
+				log.Info("BIRD import loop cancelled via context", zap.Error(ctx.Err()))
 				return
 			case <-m.quitCh:
 				log.Info("BIRD import loop stopping due to service quit signal")
@@ -381,7 +380,7 @@ func (m *AdapterService) reconnectStream(
 	ctx context.Context,
 	client routepb.RouteServiceClient,
 	currentStream *grpc.ClientStreamingClient[routepb.Update, routepb.UpdateSummary],
-	log *zap.SugaredLogger,
+	log *zap.Logger,
 ) bool {
 	log.Info("attempting to re-establish BIRD route update stream with exponential backoff")
 
@@ -399,13 +398,13 @@ func (m *AdapterService) reconnectStream(
 			log.Warn("stream reconnection aborted due to service quit signal")
 			return false
 		case <-ctx.Done():
-			log.Warnw("stream reconnection aborted due to import context cancellation", zap.Error(ctx.Err()))
+			log.Warn("stream reconnection aborted due to import context cancellation", zap.Error(ctx.Err()))
 			return false
 		case <-ticker.C:
 			log.Info("attempting FeedRIB call for new stream")
 			newStream, err := client.FeedRIB(ctx) // Use import's context
 			if err != nil {
-				log.Warnw("failed to re-establish stream, retrying via ticker", zap.Error(err))
+				log.Warn("failed to re-establish stream, retrying via ticker", zap.Error(err))
 				continue // Ticker schedules next attempt
 			}
 

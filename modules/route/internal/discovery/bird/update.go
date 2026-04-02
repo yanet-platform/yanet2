@@ -195,7 +195,7 @@ type update struct {
 // updateDecoder wraps update with a logger for per-client logging.
 type updateDecoder struct {
 	update *update
-	log    *zap.SugaredLogger
+	log    *zap.Logger
 }
 
 func newUpdate(data []byte) (*update, error) {
@@ -220,14 +220,14 @@ func newUpdate(data []byte) (*update, error) {
 
 // newUpdateDecoder creates a new updateDecoder from raw data with the provided logger.
 // If logger is nil, a nop logger will be used.
-func newUpdateDecoder(data []byte, log *zap.SugaredLogger) (*updateDecoder, error) {
+func newUpdateDecoder(data []byte, log *zap.Logger) (*updateDecoder, error) {
 	u, err := newUpdate(data)
 	if err != nil {
 		return nil, err
 	}
 
 	if log == nil {
-		log = zap.NewNop().Sugar()
+		log = zap.NewNop()
 	}
 
 	return &updateDecoder{
@@ -404,7 +404,7 @@ func (m *updateDecoder) decodeComplexAttribute(route *rib.Route, data []byte, ty
 				route.NextHop = netipAddrFrom4U32([16]byte(data[:net.IPv6len]))
 			}
 		default:
-			m.log.Debugw("unexpected next_hop attribute length", zap.Int("data_len", len(data)))
+			m.log.Debug("unexpected next_hop attribute length", zap.Int("data_len", len(data)))
 		}
 	case AttrCommunity:
 	case AttrExtCommunity:
@@ -428,11 +428,11 @@ func (m *updateDecoder) decodeComplexAttribute(route *rib.Route, data []byte, ty
 	case AttrMPLSLabelStack:
 	case AttrClusterList:
 	case AttrMPReachNLRI:
-		m.log.Debugw("received MP_REACH_NLRI attribute",
+		m.log.Debug("received MP_REACH_NLRI attribute",
 			zap.Int("data_len", len(data)),
 		)
 	case AttrMPUnreachNLRI:
-		m.log.Debugw("received MP_UNREACH_NLRI attribute",
+		m.log.Debug("received MP_UNREACH_NLRI attribute",
 			zap.Int("data_len", len(data)),
 		)
 	default:

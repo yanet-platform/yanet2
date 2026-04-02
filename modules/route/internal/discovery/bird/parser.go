@@ -17,10 +17,10 @@ const (
 type Parser struct {
 	reader io.Reader
 	buf    []byte
-	log    *zap.SugaredLogger
+	log    *zap.Logger
 }
 
-func NewParser(r io.Reader, bufSize int, log *zap.SugaredLogger) *Parser {
+func NewParser(r io.Reader, bufSize int, log *zap.Logger) *Parser {
 	return &Parser{
 		reader: r,
 		buf:    make([]byte, bufSize),
