@@ -4,24 +4,24 @@ import (
 	"fmt"
 	"net/netip"
 
-	cpffi "github.com/yanet-platform/yanet2/controlplane/ffi"
-	"github.com/yanet-platform/yanet2/modules/decap/internal/ffi"
+	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	"github.com/yanet-platform/yanet2/modules/decap/bindings/go/cdecap"
 )
 
 // backend is the real Backend implementation backed by shared memory.
 type backend struct {
-	agent *cpffi.Agent
+	agent *ffi.Agent
 }
 
 // NewBackend creates a Backend that operates on real shared memory.
-func NewBackend(agent *cpffi.Agent) Backend {
+func NewBackend(agent *ffi.Agent) Backend {
 	return &backend{
 		agent: agent,
 	}
 }
 
 func (m *backend) UpdateModule(name string, prefixes []netip.Prefix) (ModuleHandle, error) {
-	mod, err := ffi.NewModuleConfig(m.agent, name)
+	mod, err := cdecap.NewModuleConfig(m.agent, name)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create module config: %w", err)
 	}
@@ -34,7 +34,7 @@ func (m *backend) UpdateModule(name string, prefixes []netip.Prefix) (ModuleHand
 	}
 
 	if err := m.agent.UpdateModules(
-		[]cpffi.ModuleConfig{mod.AsFFIModule()},
+		[]ffi.ModuleConfig{mod.AsFFIModule()},
 	); err != nil {
 		mod.Free()
 		return nil, fmt.Errorf("failed to update module: %w", err)

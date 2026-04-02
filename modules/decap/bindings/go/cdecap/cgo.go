@@ -1,10 +1,10 @@
-package ffi
+package cdecap
 
-//#cgo CFLAGS: -I../../../../ -I../../../../lib
-//#cgo LDFLAGS: -L../../../../build/modules/decap/api -ldecap_cp
+//#cgo CFLAGS: -I../../../../../ -I../../../../../lib
+//#cgo LDFLAGS: -L../../../../../build/modules/decap/api -ldecap_cp
 //
-//#include "api/agent.h"
-//#include "modules/decap/api/controlplane.h"
+// #include "api/agent.h"
+// #include "modules/decap/api/controlplane.h"
 import "C"
 
 import (
