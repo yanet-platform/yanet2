@@ -3,9 +3,11 @@
 # IPv4:
 #   Rule 1: CreateState for TCP from 192.0.2.0/24 -> 192.0.3.0/24 port 80.
 #   Rule 2: CheckState for return TCP traffic (192.0.3.0/24 -> 192.0.2.0/24).
+#   Rule 3: CreateState for UDP from 192.0.2.0/24 -> 192.0.3.0/24 port 80.
+#   Rule 4: CheckState for return UDP traffic (192.0.3.0/24 -> 192.0.2.0/24).
 # IPv6:
-#   Rule 3: CreateState for TCP from 2001:db8:1::/48 -> 2001:db8:2::/48 port 80.
-#   Rule 4: CheckState for return TCP traffic (2001:db8:2::/48 -> 2001:db8:1::/48).
+#   Rule 5: CreateState for TCP from 2001:db8:1::/48 -> 2001:db8:2::/48 port 80.
+#   Rule 6: CheckState for return TCP traffic (2001:db8:2::/48 -> 2001:db8:1::/48).
 
 rules:
   # === IPv4 ===
@@ -41,6 +43,44 @@ rules:
     proto_ranges:
       - from: 1536
         to: 1791
+    src_ports:
+      - from: 80
+        to: 80
+    srcs:
+      - 192.0.3.0/255.255.255.0
+    vlan_ranges: []
+
+  # Create state for outgoing UDP to port 80
+  - action: CreateState
+    counter: ""
+    devices: []
+    dst_ports:
+      - from: 80
+        to: 80
+    dsts:
+      - 192.0.3.0/255.255.255.0
+    proto_ranges:
+      - from: 4352
+        to: 4607
+    src_ports:
+      - from: 0
+        to: 65535
+    srcs:
+      - 192.0.2.0/255.255.255.0
+    vlan_ranges: []
+
+  # Check state for return UDP traffic
+  - action: CheckState
+    counter: ""
+    devices: []
+    dst_ports:
+      - from: 0
+        to: 65535
+    dsts:
+      - 192.0.2.0/255.255.255.0
+    proto_ranges:
+      - from: 4352
+        to: 4607
     src_ports:
       - from: 80
         to: 80
@@ -87,3 +127,28 @@ rules:
     srcs:
       - "2001:db8:2::/ffff:ffff:ffff::"
     vlan_ranges: []
+
+  # === FWState sync frames ===
+
+  # Allow external fwstate sync frames (IPv6 UDP to multicast ff02::1 port 9999).
+  # These packets are processed by the fwstate module to create external state
+  # entries and then dropped.
+  - action: Allow
+    counter: ""
+    devices: []
+    dst_ports:
+      - from: 9999
+        to: 9999
+    dsts:
+      - "ff02::1/ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"
+    proto_ranges:
+      - from: 4352
+        to: 4607
+    src_ports:
+      - from: 9999
+        to: 9999
+    srcs:
+      - "::/::0"
+    vlan_ranges:
+      - from: 0
+        to: 4095

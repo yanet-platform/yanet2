@@ -72,3 +72,16 @@ test('fwstate_cursor',
   timeout: 15,
   suite: ['fwstate'],
 )
+
+sync_endian_test = executable(
+  'sync_endian_test',
+  ['sync_endian_test.c'],
+  c_args: yanet_test_c_args,
+  link_args: yanet_link_args,
+  dependencies: [lib_common_dep, lib_logging_dep, lib_fwstate_dep, lib_packet_dp_dep],
+)
+test('sync_endian',
+  sync_endian_test,
+  timeout: 15,
+  suite: ['fwstate'],
+)

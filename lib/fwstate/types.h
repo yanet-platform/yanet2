@@ -84,6 +84,7 @@ struct fw_state_flags {
 	uint8_t dst : 4;
 };
 
+// Protocol-specific flags (e.g., TCP flags)
 union fw_state_flags_u {
 	struct fw_state_flags tcp;
 	uint8_t raw;
@@ -111,22 +112,20 @@ struct fw_state_value {
  * Firewall state synchronization frame structure.
  * From FreeBSD `sys/netinet/ip_fw.h`.
  *
- * Note that all fields except IPv6 addresses are little-endian.
  * This structure is used as the payload of UDP packets for
  * synchronizing firewall states between YANET instances.
  */
 struct fw_state_sync_frame {
-	uint32_t dst_ip;   // IPv4 destination (little-endian)
-	uint32_t src_ip;   // IPv4 source (little-endian)
+	uint32_t dst_ip;   // IPv4 destination address (big-endian)
+	uint32_t src_ip;   // IPv4 source address (big-endian)
 	uint16_t dst_port; // Destination port (little-endian)
 	uint16_t src_port; // Source port (little-endian)
 	uint8_t fib;	   // FIB/VRF identifier
 	uint8_t proto;	   // Protocol (TCP/UDP/etc)
-	union fw_state_flags_u
-		flags;	     // Protocol-specific flags (e.g., TCP flags)
+	union fw_state_flags_u flags;
 	uint8_t addr_type;   // 4=IPv4, 6=IPv6
-	uint8_t dst_ip6[16]; // IPv6 destination (network byte order)
-	uint8_t src_ip6[16]; // IPv6 source (network byte order)
+	uint8_t dst_ip6[16]; // IPv6 destination (big-endian)
+	uint8_t src_ip6[16]; // IPv6 source (big-endian)
 	uint32_t flow_id6;   // IPv6 flow label
 	uint32_t extra;	     // Reserved for future use
 } __attribute__((__packed__));
