@@ -6,9 +6,6 @@
 
 #include "counters/counters.h"
 
-#define ACL_ACTION_ALLOW 0
-#define ACL_ACTION_DENY 1
-
 struct agent;
 struct cp_module;
 
