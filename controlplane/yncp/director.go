@@ -99,7 +99,7 @@ func NewDirector(cfg *Config, options ...DirectorOption) (*Director, error) {
 		return nil, fmt.Errorf("failed to initialize decap built-in module: %w", err)
 	}
 
-	dscpModule, err := dscp.NewDSCPModule(cfg.Modules.DSCP, log)
+	dscpModule, err := dscp.NewDSCPModule(cfg.Modules.DSCP, log.Desugar())
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize dscp built-in module: %w", err)
 	}

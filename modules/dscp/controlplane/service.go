@@ -1,33 +1,57 @@
 package dscp
 
 import (
-	"cmp"
 	"context"
-	"fmt"
 	"net/netip"
 	"slices"
 	"sync"
 
-	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	"github.com/yanet-platform/yanet2/common/go/xnetip"
 	"github.com/yanet-platform/yanet2/modules/dscp/controlplane/dscppb"
 )
+
+var (
+	errConfigNameRequired = status.Error(
+		codes.InvalidArgument,
+		"module config name is required",
+	)
+)
+
+// ModuleHandle is a handle to a module configuration.
+type ModuleHandle interface {
+	Free()
+}
+
+// Backend abstracts shared memory operations.
+type Backend interface {
+	// UpdateModule creates a module config, applies mutations, and publishes it
+	// to the dataplane.
+	UpdateModule(name string, prefixes []netip.Prefix, flag uint8, mark uint8) (ModuleHandle, error)
+}
 
 type DscpService struct {
 	dscppb.UnimplementedDscpServiceServer
 
-	mu      sync.Mutex
-	agent   *ffi.Agent
-	configs map[string]*instanceConfig
-	log     *zap.SugaredLogger
+	mu      sync.RWMutex
+	backend Backend
+	configs map[string]*config
 }
 
-type instanceConfig struct {
-	prefixes []netip.Prefix
-	dscpCfg  dscpConfig
+type config struct {
+	Prefixes []netip.Prefix
+	Config   dscpConfig
+	Module   ModuleHandle
+}
+
+func (m *config) Clone() *config {
+	return &config{
+		Prefixes: slices.Clone(m.Prefixes),
+		Config:   m.Config,
+		Module:   m.Module,
+	}
 }
 
 type dscpConfig struct {
@@ -35,25 +59,23 @@ type dscpConfig struct {
 	mark uint8
 }
 
-func NewDscpService(agent *ffi.Agent, log *zap.SugaredLogger) *DscpService {
+func NewDscpService(backend Backend) *DscpService {
 	return &DscpService{
-		agent:   agent,
-		configs: map[string]*instanceConfig{},
-		log:     log,
+		backend: backend,
+		configs: map[string]*config{},
 	}
 }
 
 func (m *DscpService) ListConfigs(
-	ctx context.Context, request *dscppb.ListConfigsRequest,
+	ctx context.Context,
+	request *dscppb.ListConfigsRequest,
 ) (*dscppb.ListConfigsResponse, error) {
-
 	response := &dscppb.ListConfigsResponse{
 		Configs: make([]string, 0),
 	}
 
-	// Lock instances store and module updates
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 
 	for name := range m.configs {
 		response.Configs = append(response.Configs, name)
@@ -68,27 +90,30 @@ func (m *DscpService) ShowConfig(
 ) (*dscppb.ShowConfigResponse, error) {
 	name := request.GetName()
 	if name == "" {
-		return nil, status.Error(codes.InvalidArgument, "module config name is required")
+		return nil, errConfigNameRequired
 	}
 
 	response := &dscppb.ShowConfigResponse{}
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 
-	if config, ok := m.configs[name]; ok {
-		instanceConfig := &dscppb.Config{
-			Prefixes: make([]string, 0, len(config.prefixes)),
-			DscpConfig: &dscppb.DscpConfig{
-				Flag: uint32(config.dscpCfg.flag),
-				Mark: uint32(config.dscpCfg.mark),
-			},
-		}
+	config, ok := m.configs[name]
+	if !ok {
+		return nil, status.Error(codes.InvalidArgument, "config not found")
+	}
 
-		for _, p := range config.prefixes {
-			instanceConfig.Prefixes = append(instanceConfig.Prefixes, p.String())
-		}
-		response.Config = instanceConfig
+	prefixes := make([]string, 0, len(config.Prefixes))
+	for _, p := range config.Prefixes {
+		prefixes = append(prefixes, p.String())
+	}
+
+	response.Config = &dscppb.Config{
+		Prefixes: prefixes,
+		DscpConfig: &dscppb.DscpConfig{
+			Flag: uint32(config.Config.flag),
+			Mark: uint32(config.Config.mark),
+		},
 	}
 
 	return response, nil
@@ -98,41 +123,39 @@ func (m *DscpService) AddPrefixes(
 	ctx context.Context,
 	request *dscppb.AddPrefixesRequest,
 ) (*dscppb.AddPrefixesResponse, error) {
-
 	name := request.GetName()
 	if name == "" {
-		return nil, status.Error(codes.InvalidArgument, "module config name is required")
+		return nil, errConfigNameRequired
 	}
 
-	toAdd := make([]netip.Prefix, 0, len(request.GetPrefixes()))
-	for _, prefixStr := range request.GetPrefixes() {
-		prefix, err := netip.ParsePrefix(prefixStr)
-		if err != nil {
-			return nil, err
-		}
-		toAdd = append(toAdd, prefix.Masked())
+	toAdd, err := parsePrefixes(request.GetPrefixes())
+	if err != nil {
+		return nil, err
 	}
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	config, ok := m.configs[name]
-	if !ok {
-		m.configs[name] = &instanceConfig{
-			prefixes: toAdd,
-			dscpCfg:  dscpConfig{flag: 0, mark: 0},
-		}
-	} else {
-		config.prefixes = slices.Compact(
-			slices.SortedFunc(
-				slices.Values(slices.Concat(config.prefixes, toAdd)),
-				func(a netip.Prefix, b netip.Prefix) int {
-					return cmp.Compare(a.String(), b.String())
-				}),
+	cfg := &config{}
+	if currConfig, ok := m.configs[name]; ok {
+		cfg = currConfig.Clone()
+	}
+
+	cfg.Prefixes = slices.Compact(
+		slices.SortedFunc(
+			slices.Values(slices.Concat(cfg.Prefixes, toAdd)),
+			xnetip.PrefixCompare,
+		),
+	)
+
+	if err := m.updateModuleConfig(name, cfg); err != nil {
+		return nil, status.Errorf(
+			codes.Internal,
+			"failed to update module config %q: %v", name, err,
 		)
 	}
 
-	return &dscppb.AddPrefixesResponse{}, m.updateModuleConfig(name)
+	return &dscppb.AddPrefixesResponse{}, nil
 }
 
 func (m *DscpService) RemovePrefixes(
@@ -141,30 +164,39 @@ func (m *DscpService) RemovePrefixes(
 ) (*dscppb.RemovePrefixesResponse, error) {
 	name := request.GetName()
 	if name == "" {
-		return nil, status.Error(codes.InvalidArgument, "module config name is required")
+		return nil, errConfigNameRequired
 	}
 
-	toRemove := make([]netip.Prefix, 0, len(request.GetPrefixes()))
-	for _, prefixStr := range request.GetPrefixes() {
-		prefix, err := netip.ParsePrefix(prefixStr)
-		if err != nil {
-			return nil, err
-		}
-		toRemove = append(toRemove, prefix.Masked())
+	toRemove, err := parsePrefixes(request.GetPrefixes())
+	if err != nil {
+		return nil, err
 	}
 
-	// Lock instances store and module updates
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	config, ok := m.configs[name]
-	if ok {
-		config.prefixes = slices.DeleteFunc(config.prefixes, func(prefix netip.Prefix) bool {
-			return slices.Contains(toRemove, prefix)
-		})
+	// Create a new config to-be-updated either from scratch or from the
+	// current config.
+	cfg := &config{}
+	if currConfig, ok := m.configs[name]; ok {
+		cfg = currConfig.Clone()
 	}
 
-	return &dscppb.RemovePrefixesResponse{}, m.updateModuleConfig(name)
+	cfg.Prefixes = slices.DeleteFunc(
+		cfg.Prefixes,
+		func(prefix netip.Prefix) bool {
+			return slices.Contains(toRemove, prefix)
+		},
+	)
+
+	if err := m.updateModuleConfig(name, cfg); err != nil {
+		return nil, status.Errorf(
+			codes.Internal,
+			"failed to update module config %q: %v", name, err,
+		)
+	}
+
+	return &dscppb.RemovePrefixesResponse{}, nil
 }
 
 func (m *DscpService) SetDscpMarking(
@@ -173,75 +205,92 @@ func (m *DscpService) SetDscpMarking(
 ) (*dscppb.SetDscpMarkingResponse, error) {
 	name := request.GetName()
 	if name == "" {
-		return nil, status.Error(codes.InvalidArgument, "module config name is required")
+		return nil, errConfigNameRequired
 	}
 
 	dscpCfg := request.GetDscpConfig()
 	if dscpCfg == nil {
-		return nil, status.Error(codes.InvalidArgument, "DSCP config is required")
+		return nil, status.Error(
+			codes.InvalidArgument,
+			"DSCP config is required",
+		)
 	}
 
-	// Validate flag value
 	flag := uint8(dscpCfg.GetFlag())
 	if flag > 2 {
-		return nil, status.Error(codes.InvalidArgument, "invalid flag value (must be 0, 1, or 2)")
+		return nil, status.Error(
+			codes.InvalidArgument,
+			"invalid flag value (must be 0, 1, or 2)",
+		)
 	}
 
 	// Validate mark value (6-bit field)
 	mark := uint8(dscpCfg.GetMark())
 	if mark > 63 {
-		return nil, status.Error(codes.InvalidArgument, "invalid mark value (must be 0-63)")
+		return nil, status.Error(
+			codes.InvalidArgument, "invalid mark value (must be 0-63)",
+		)
 	}
 
-	// Lock instances store and module updates
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	config, ok := m.configs[name]
-	if !ok {
-		m.configs[name] = &instanceConfig{
-			prefixes: []netip.Prefix{},
-			dscpCfg: dscpConfig{
-				flag: flag,
-				mark: mark,
-			},
-		}
-	} else {
-		config.dscpCfg.flag = flag
-		config.dscpCfg.mark = mark
+	cfg := &config{}
+	if currConfig, ok := m.configs[name]; ok {
+		cfg = currConfig.Clone()
+	}
+	cfg.Config = dscpConfig{
+		flag: flag,
+		mark: mark,
 	}
 
-	return &dscppb.SetDscpMarkingResponse{}, m.updateModuleConfig(name)
+	if err := m.updateModuleConfig(name, cfg); err != nil {
+		return nil, status.Errorf(
+			codes.Internal,
+			"failed to update module config %q: %v", name, err,
+		)
+	}
+
+	return &dscppb.SetDscpMarkingResponse{}, nil
 }
 
-func (m *DscpService) updateModuleConfig(
-	name string,
-) error {
-	m.log.Debugw("update config", zap.String("module", name))
-
-	config, err := NewModuleConfig(m.agent, name)
+func (m *DscpService) updateModuleConfig(name string, cfg *config) error {
+	module, err := m.backend.UpdateModule(
+		name,
+		cfg.Prefixes,
+		cfg.Config.flag,
+		cfg.Config.mark,
+	)
 	if err != nil {
-		return fmt.Errorf("failed to create %q module config: %w", name, err)
+		return err
 	}
 
-	moduleConfig := m.configs[name]
-	if moduleConfig != nil {
-		// Add prefixes
-		for _, prefix := range moduleConfig.prefixes {
-			if err := config.PrefixAdd(prefix); err != nil {
-				return fmt.Errorf("failed to add prefix for %s: %w", name, err)
-			}
-		}
-
-		// Set DSCP marking
-		if err := config.SetDscpMarking(moduleConfig.dscpCfg.flag, moduleConfig.dscpCfg.mark); err != nil {
-			return fmt.Errorf("failed to set DSCP marking for %s: %w", name, err)
-		}
+	if cfg.Module != nil {
+		cfg.Module.Free()
 	}
 
-	if err := m.agent.UpdateModules([]ffi.ModuleConfig{config.AsFFIModule()}); err != nil {
-		return fmt.Errorf("failed to update module: %w", err)
+	m.configs[name] = &config{
+		Prefixes: cfg.Prefixes,
+		Config:   cfg.Config,
+		Module:   module,
 	}
 
 	return nil
+}
+
+func parsePrefixes(prefixes []string) ([]netip.Prefix, error) {
+	out := make([]netip.Prefix, 0, len(prefixes))
+	for _, p := range prefixes {
+		prefix, err := netip.ParsePrefix(p)
+		if err != nil {
+			return nil, status.Errorf(
+				codes.InvalidArgument,
+				"failed to parse prefix %q: %v", p, err,
+			)
+		}
+
+		out = append(out, prefix.Masked())
+	}
+
+	return out, nil
 }

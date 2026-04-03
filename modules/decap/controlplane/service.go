@@ -11,6 +11,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/yanet-platform/yanet2/common/go/xnetip"
 	"github.com/yanet-platform/yanet2/modules/decap/controlplane/decappb"
 )
 
@@ -140,13 +141,7 @@ func (m *DecapService) AddPrefixes(
 	cfg.Prefixes = slices.Compact(
 		slices.SortedFunc(
 			slices.Values(slices.Concat(cfg.Prefixes, toAdd)),
-			func(a netip.Prefix, b netip.Prefix) int {
-				if c := a.Addr().Compare(b.Addr()); c != 0 {
-					return c
-				}
-
-				return a.Bits() - b.Bits()
-			},
+			xnetip.PrefixCompare,
 		),
 	)
 
