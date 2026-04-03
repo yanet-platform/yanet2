@@ -88,11 +88,11 @@ func (m *DscpService) ShowConfig(
 	ctx context.Context,
 	request *dscppb.ShowConfigRequest,
 ) (*dscppb.ShowConfigResponse, error) {
-	name := request.GetName()
-	if name == "" {
-		return nil, errConfigNameRequired
+	if err := request.Validate(); err != nil {
+		return nil, err
 	}
 
+	name := request.GetName()
 	response := &dscppb.ShowConfigResponse{}
 
 	m.mu.RLock()
@@ -100,7 +100,7 @@ func (m *DscpService) ShowConfig(
 
 	config, ok := m.configs[name]
 	if !ok {
-		return nil, status.Error(codes.InvalidArgument, "config not found")
+		return nil, status.Error(codes.NotFound, "config not found")
 	}
 
 	prefixes := make([]string, 0, len(config.Prefixes))
@@ -123,11 +123,11 @@ func (m *DscpService) AddPrefixes(
 	ctx context.Context,
 	request *dscppb.AddPrefixesRequest,
 ) (*dscppb.AddPrefixesResponse, error) {
-	name := request.GetName()
-	if name == "" {
-		return nil, errConfigNameRequired
+	if err := request.Validate(); err != nil {
+		return nil, err
 	}
 
+	name := request.GetName()
 	toAdd, err := parsePrefixes(request.GetPrefixes())
 	if err != nil {
 		return nil, err
@@ -162,11 +162,11 @@ func (m *DscpService) RemovePrefixes(
 	ctx context.Context,
 	request *dscppb.RemovePrefixesRequest,
 ) (*dscppb.RemovePrefixesResponse, error) {
-	name := request.GetName()
-	if name == "" {
-		return nil, errConfigNameRequired
+	if err := request.Validate(); err != nil {
+		return nil, err
 	}
 
+	name := request.GetName()
 	toRemove, err := parsePrefixes(request.GetPrefixes())
 	if err != nil {
 		return nil, err
@@ -203,34 +203,13 @@ func (m *DscpService) SetDscpMarking(
 	ctx context.Context,
 	request *dscppb.SetDscpMarkingRequest,
 ) (*dscppb.SetDscpMarkingResponse, error) {
+	if err := request.Validate(); err != nil {
+		return nil, err
+	}
+
 	name := request.GetName()
-	if name == "" {
-		return nil, errConfigNameRequired
-	}
-
-	dscpCfg := request.GetDscpConfig()
-	if dscpCfg == nil {
-		return nil, status.Error(
-			codes.InvalidArgument,
-			"DSCP config is required",
-		)
-	}
-
-	flag := uint8(dscpCfg.GetFlag())
-	if flag > 2 {
-		return nil, status.Error(
-			codes.InvalidArgument,
-			"invalid flag value (must be 0, 1, or 2)",
-		)
-	}
-
-	// Validate mark value (6-bit field)
-	mark := uint8(dscpCfg.GetMark())
-	if mark > 63 {
-		return nil, status.Error(
-			codes.InvalidArgument, "invalid mark value (must be 0-63)",
-		)
-	}
+	flag := uint8(request.GetDscpConfig().GetFlag())
+	mark := uint8(request.GetDscpConfig().GetMark())
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
