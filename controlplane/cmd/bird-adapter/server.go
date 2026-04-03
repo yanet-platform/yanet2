@@ -14,10 +14,10 @@ import (
 	_ "google.golang.org/grpc/encoding/gzip"
 	"gopkg.in/yaml.v3"
 
+	birdAdapter "github.com/yanet-platform/yanet2/agents/bird-adapter"
+	adapterpb "github.com/yanet-platform/yanet2/agents/bird-adapter/adapterpb"
 	"github.com/yanet-platform/yanet2/common/go/logging"
 	"github.com/yanet-platform/yanet2/common/go/xcmd"
-	birdAdapter "github.com/yanet-platform/yanet2/modules/route/bird-adapter"
-	adapterpb "github.com/yanet-platform/yanet2/modules/route/bird-adapter/adapterpb"
 )
 
 var serverCmdArgs struct {

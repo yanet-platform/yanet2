@@ -16,10 +16,10 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/encoding/gzip"
 
-	adapterpb "github.com/yanet-platform/yanet2/modules/route/bird-adapter/adapterpb"
+	adapterpb "github.com/yanet-platform/yanet2/agents/bird-adapter/adapterpb"
+	"github.com/yanet-platform/yanet2/agents/bird-adapter/internal/bird"
+	"github.com/yanet-platform/yanet2/agents/bird-adapter/internal/rib"
 	"github.com/yanet-platform/yanet2/modules/route/controlplane/routepb"
-	"github.com/yanet-platform/yanet2/modules/route/internal/discovery/bird"
-	"github.com/yanet-platform/yanet2/modules/route/internal/rib"
 )
 
 // levelFilterCore wraps a zapcore.Core and filters log entries by level.
@@ -229,7 +229,7 @@ func (m *AdapterService) processBirdImport(conn *grpc.ClientConn, cfg *bird.Conf
 			err := (*holder.currentStream).Send(&routepb.Update{
 				Name:     name,
 				IsDelete: routes[idx].ToRemove,
-				Route:    routepb.FromRIBRoute(&routes[idx], false /* isBest unknown */),
+				Route:    rib.ToPBRoute(&routes[idx], false /* isBest unknown */),
 			})
 			if err != nil {
 				// This error stops bird.Export, triggering reconnection in runBirdImportLoop

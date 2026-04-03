@@ -11,7 +11,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/yanet-platform/yanet2/modules/route/internal/rib"
+	"github.com/yanet-platform/yanet2/agents/bird-adapter/internal/rib"
 )
 
 const (

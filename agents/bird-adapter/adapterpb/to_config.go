@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/yanet-platform/yanet2/modules/route/internal/discovery/bird"
+	"github.com/yanet-platform/yanet2/agents/bird-adapter/internal/bird"
 )
 
 func (m *ImportConfig) ToConfig(cfg *bird.Config) {

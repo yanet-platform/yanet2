@@ -10,7 +10,7 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/yanet-platform/yanet2/modules/route/internal/rib"
+	"github.com/yanet-platform/yanet2/agents/bird-adapter/internal/rib"
 )
 
 type Updater func(context.Context, []rib.Route) error

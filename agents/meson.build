@@ -1,0 +1,2 @@
+subdir('bird-adapter')
+

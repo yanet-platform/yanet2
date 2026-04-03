@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap/zaptest"
 
-	"github.com/yanet-platform/yanet2/modules/route/internal/rib"
+	"github.com/yanet-platform/yanet2/agents/bird-adapter/internal/rib"
 )
 
 // TestParserNext tests the Parser.Next() method which reads chunk size and data.
