@@ -6,6 +6,7 @@ package dscp_test
 //#cgo LDFLAGS: -L../../../../build/lib/logging -llogging
 /*
 #include "lib/dataplane/packet/dscp.h"
+#include "lib/dataplane/pipeline/econtext.h"
 #include "modules/dscp/dataplane/config.h"
 
 uint8_t dscp_mark_never = DSCP_MARK_NEVER;
