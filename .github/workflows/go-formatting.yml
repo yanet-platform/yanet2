@@ -13,7 +13,9 @@ on:
 jobs:
   gofmt:
     name: Check Go Formatting
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, X64]
+    container:
+      image: ubuntu:latest
     steps:
       - uses: actions/checkout@v4
 

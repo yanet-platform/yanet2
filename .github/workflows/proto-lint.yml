@@ -13,7 +13,9 @@ on:
 jobs:
   proto-fmt:
     name: Proto formatting
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, linux, X64]
+    container:
+      image: ubuntu:24.04
     steps:
       - uses: actions/checkout@v4
       - name: Run clang-format
@@ -25,7 +27,9 @@ jobs:
 
   protolint:
     name: Custom protolint linter
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, X64]
+    container:
+      image: ubuntu:24.04
     steps:
       - uses: actions/checkout@v4
 

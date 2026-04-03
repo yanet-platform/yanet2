@@ -17,7 +17,9 @@ jobs:
       matrix:
         unbtver:
           - 24.04
-    runs-on: ubuntu-${{ matrix.unbtver }}
+    runs-on: [self-hosted, linux, X64]
+    container:
+      image: ubuntu:${{ matrix.unbtver }}
     env:
       cache_name: deb-build-${{ matrix.unbtver }}
     steps:

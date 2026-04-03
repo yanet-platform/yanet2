@@ -8,7 +8,9 @@ on:
 jobs:
   build:
     name: Build and Go fuzz
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, linux, X64]
+    container:
+      image: ubuntu:24.04
 
     steps:
       - name: Free up disk space on GitHub runner
@@ -84,7 +86,9 @@ jobs:
 
   c-fuzz-test:
     name: Fuzz ${{ matrix.module }}
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, linux, X64]
+    container:
+      image: ubuntu:24.04
     needs: build
     timeout-minutes: 15
 
@@ -108,7 +112,9 @@ jobs:
 
   notify-on-failure:
     name: Notify on fuzz test failure
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, X64]
+    container:
+      image: ubuntu:24.04
     needs: [build, c-fuzz-test]
     if: failure() && github.event_name == 'schedule'
     env:

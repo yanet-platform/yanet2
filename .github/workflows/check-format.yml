@@ -15,7 +15,9 @@ on:
 jobs:
   c-cpp-fmt:
     name: C formatting
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, linux, X64]
+    container:
+      image: ubuntu:24.04
     steps:
       - uses: actions/checkout@v4
       - name: Run clang-format

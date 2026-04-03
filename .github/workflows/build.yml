@@ -24,7 +24,9 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, linux, X64]
+    container:
+      image: ubuntu:24.04
     env:
       cache_name: build-and-test
 
@@ -275,7 +277,9 @@ jobs:
 
   functional-tests:
     name: Run Functional Tests
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, linux, X64]
+    container:
+      image: ubuntu:24.04
     timeout-minutes: 150
     needs: build
 

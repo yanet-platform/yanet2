@@ -17,7 +17,9 @@ on:
 jobs:
   fmt:
     name: cargo fmt
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, X64]
+    container:
+      image: ubuntu:latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
@@ -28,7 +30,9 @@ jobs:
 
   check:
     name: cargo check
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, X64]
+    container:
+      image: ubuntu:latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -52,7 +56,9 @@ jobs:
 
   clippy:
     name: cargo clippy
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, X64]
+    container:
+      image: ubuntu:latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
