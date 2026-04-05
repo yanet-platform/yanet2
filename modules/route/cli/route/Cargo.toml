@@ -8,7 +8,7 @@ rust-version = "1.84"
 
 [dependencies]
 ync = { path = "../../../../cli/core", version = "0.1", package = "yanet-cli" }
-netip = { path = "../../../../common/rust/netip", version = "0.1" }
+netip = "0.2"
 log = "0.4"
 clap = { version = "4.5", features = ["derive"] }
 clap_complete = { version = "4.5", features = ["unstable-dynamic"] }
