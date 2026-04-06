@@ -8,31 +8,18 @@ import "C"
 
 import (
 	"runtime"
-	"unsafe"
 )
 
-// deviceToChar converts a Go string to a fixed-size C char array.
-func deviceToChar(str string) [C.ACL_DEVICE_NAME_LEN]C.char {
-	var result [C.ACL_DEVICE_NAME_LEN]C.char
-
-	copyLen := len(str)
-	if copyLen >= len(result) {
-		copyLen = len(result) - 1
-	}
-	C.memcpy(
-		unsafe.Pointer(&result[0]),
-		unsafe.Pointer(unsafe.StringData(str)),
-		C.size_t(copyLen),
-	)
-	result[copyLen] = 0
-
-	return result
-}
-
 func (m *Device) build() C.struct_filter_device {
+	var name [C.ACL_DEVICE_NAME_LEN]C.char
+
+	for idx := 0; idx < len(m.Name) && idx < len(name)-1; idx++ {
+		name[idx] = C.char(m.Name[idx])
+	}
+
 	return C.struct_filter_device{
 		id:   0,
-		name: deviceToChar(m.Name),
+		name: name,
 	}
 }
 
