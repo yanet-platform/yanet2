@@ -8,10 +8,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/yanet-platform/yanet2/common/go/filter/device"
-	"github.com/yanet-platform/yanet2/common/go/filter/ipnet4"
-	"github.com/yanet-platform/yanet2/common/go/filter/ipnet6"
-	"github.com/yanet-platform/yanet2/common/go/filter/vlanrange"
+	"github.com/yanet-platform/yanet2/common/filterpb"
 	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
 	"github.com/yanet-platform/yanet2/modules/forward/controlplane/forwardpb"
 )
@@ -101,27 +98,27 @@ func (m *ForwardService) UpdateConfig(ctx context.Context, req *forwardpb.Update
 
 	rules := make([]cforward.ForwardRule, 0, len(reqRules))
 	for _, reqRule := range reqRules {
-		devices, err := device.FromDevices(reqRule.Devices)
+		devices, err := filterpb.ToDevices(reqRule.Devices)
 		if err != nil {
 			return nil, err
 		}
-		vlanRanges, err := vlanrange.FromVlanRanges(reqRule.VlanRanges)
+		vlanRanges, err := filterpb.ToVlanRanges(reqRule.VlanRanges)
 		if err != nil {
 			return nil, err
 		}
-		src4s, err := ipnet4.FromIPNets(reqRule.Srcs)
+		src4s, err := filterpb.ToNet4s(reqRule.Srcs)
 		if err != nil {
 			return nil, err
 		}
-		dst4s, err := ipnet4.FromIPNets(reqRule.Dsts)
+		dst4s, err := filterpb.ToNet4s(reqRule.Dsts)
 		if err != nil {
 			return nil, err
 		}
-		src6s, err := ipnet6.FromIPNets(reqRule.Srcs)
+		src6s, err := filterpb.ToNet6s(reqRule.Srcs)
 		if err != nil {
 			return nil, err
 		}
-		dst6s, err := ipnet6.FromIPNets(reqRule.Dsts)
+		dst6s, err := filterpb.ToNet6s(reqRule.Dsts)
 		if err != nil {
 			return nil, err
 		}

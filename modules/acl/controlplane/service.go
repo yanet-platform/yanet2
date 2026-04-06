@@ -8,12 +8,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/yanet-platform/yanet2/common/go/filter/device"
-	"github.com/yanet-platform/yanet2/common/go/filter/ipnet4"
-	"github.com/yanet-platform/yanet2/common/go/filter/ipnet6"
-	"github.com/yanet-platform/yanet2/common/go/filter/portrange"
-	"github.com/yanet-platform/yanet2/common/go/filter/protorange"
-	"github.com/yanet-platform/yanet2/common/go/filter/vlanrange"
+	"github.com/yanet-platform/yanet2/common/filterpb"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/acl/controlplane/aclpb"
 )
@@ -49,39 +44,39 @@ func NewACLService(agent *ffi.Agent, log *zap.SugaredLogger) *ACLService {
 func convertRules(reqRules []*aclpb.Rule) ([]AclRule, error) {
 	rules := make([]AclRule, 0, len(reqRules))
 	for _, reqRule := range reqRules {
-		devices, err := device.FromDevices(reqRule.Devices)
+		devices, err := filterpb.ToDevices(reqRule.Devices)
 		if err != nil {
 			return nil, err
 		}
-		vlanRanges, err := vlanrange.FromVlanRanges(reqRule.VlanRanges)
+		vlanRanges, err := filterpb.ToVlanRanges(reqRule.VlanRanges)
 		if err != nil {
 			return nil, err
 		}
-		src4s, err := ipnet4.FromIPNets(reqRule.Srcs)
+		src4s, err := filterpb.ToNet4s(reqRule.Srcs)
 		if err != nil {
 			return nil, err
 		}
-		dst4s, err := ipnet4.FromIPNets(reqRule.Dsts)
+		dst4s, err := filterpb.ToNet4s(reqRule.Dsts)
 		if err != nil {
 			return nil, err
 		}
-		src6s, err := ipnet6.FromIPNets(reqRule.Srcs)
+		src6s, err := filterpb.ToNet6s(reqRule.Srcs)
 		if err != nil {
 			return nil, err
 		}
-		dst6s, err := ipnet6.FromIPNets(reqRule.Dsts)
+		dst6s, err := filterpb.ToNet6s(reqRule.Dsts)
 		if err != nil {
 			return nil, err
 		}
-		protoRanges, err := protorange.FromProtoRanges(reqRule.ProtoRanges)
+		protoRanges, err := filterpb.ToProtoRanges(reqRule.ProtoRanges)
 		if err != nil {
 			return nil, err
 		}
-		srcPortRanges, err := portrange.FromPortRanges(reqRule.SrcPortRanges)
+		srcPortRanges, err := filterpb.ToPortRanges(reqRule.SrcPortRanges)
 		if err != nil {
 			return nil, err
 		}
-		dstPortRanges, err := portrange.FromPortRanges(reqRule.DstPortRanges)
+		dstPortRanges, err := filterpb.ToPortRanges(reqRule.DstPortRanges)
 		if err != nil {
 			return nil, err
 		}
@@ -123,6 +118,7 @@ func (m *ACLService) UpdateConfig(
 	ctx context.Context,
 	req *aclpb.UpdateConfigRequest,
 ) (*aclpb.UpdateConfigResponse, error) {
+	// TODO: what the fuck?
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -133,11 +129,12 @@ func (m *ACLService) UpdateConfig(
 
 	reqRules := req.Rules
 
-	rules, err := convertRules(reqRules)
+	rules, err := convertRules(reqRules) // TODO: invalid argument error here.
 	if err != nil {
 		return nil, err
 	}
 
+	// TODO: mutex here.
 	config, err := NewModuleConfig(m.agent, name)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to create module config: %v", err)

@@ -7,10 +7,7 @@ import (
 	"runtime"
 	"unsafe"
 
-	"github.com/yanet-platform/yanet2/common/go/filter/device"
-	"github.com/yanet-platform/yanet2/common/go/filter/ipnet4"
-	"github.com/yanet-platform/yanet2/common/go/filter/ipnet6"
-	"github.com/yanet-platform/yanet2/common/go/filter/vlanrange"
+	"github.com/yanet-platform/yanet2/bindings/go/filter"
 )
 
 // ForwardMode defines the forwarding direction.
@@ -38,12 +35,12 @@ type ForwardRule struct {
 	Target     string
 	Mode       ForwardMode
 	Counter    string
-	Devices    device.Devices
-	VlanRanges vlanrange.VlanRanges
-	Src4s      ipnet4.IPNets
-	Dst4s      ipnet4.IPNets
-	Src6s      ipnet6.IPNets
-	Dst6s      ipnet6.IPNets
+	Devices    filter.Devices
+	VlanRanges filter.VlanRanges
+	Src4s      filter.IPNets
+	Dst4s      filter.IPNets
+	Src6s      filter.IPNets
+	Dst6s      filter.IPNets
 }
 
 // Update compiles the given rules into C structures and pushes them into
@@ -76,12 +73,12 @@ func (m *ForwardRule) cBuild(pinner *runtime.Pinner) C.struct_forward_rule {
 
 	cRule.mode = m.Mode.toC()
 
-	device.CBuilds(&cRule.devices, m.Devices, pinner)
-	vlanrange.CBuilds(&cRule.vlan_ranges, m.VlanRanges, pinner)
-	ipnet4.CBuilds(&cRule.src_net4s, m.Src4s, pinner)
-	ipnet4.CBuilds(&cRule.dst_net4s, m.Dst4s, pinner)
-	ipnet6.CBuilds(&cRule.src_net6s, m.Src6s, pinner)
-	ipnet6.CBuilds(&cRule.dst_net6s, m.Dst6s, pinner)
+	filter.CBuildDevices(&cRule.devices, m.Devices, pinner)
+	filter.CBuildVlanRanges(&cRule.vlan_ranges, m.VlanRanges, pinner)
+	filter.CBuildNet4s(&cRule.src_net4s, m.Src4s, pinner)
+	filter.CBuildNet4s(&cRule.dst_net4s, m.Dst4s, pinner)
+	filter.CBuildNet6s(&cRule.src_net6s, m.Src6s, pinner)
+	filter.CBuildNet6s(&cRule.dst_net6s, m.Dst6s, pinner)
 
 	return cRule
 }

@@ -11,9 +11,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/yanet-platform/yanet2/bindings/go/filter"
 	"github.com/yanet-platform/yanet2/common/filterpb"
-	"github.com/yanet-platform/yanet2/common/go/filter/ipnet4"
-	"github.com/yanet-platform/yanet2/common/go/filter/ipnet6"
 	"github.com/yanet-platform/yanet2/common/go/maptrie"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/route-mpls/controlplane/routemplspb"
@@ -229,8 +228,8 @@ func (m *routeMPLSConfig) submit() error {
 				)
 			}
 
-			dst4s, _ := ipnet4.FromNetIpPrefixes([]netip.Prefix{prefix})
-			dst6s, _ := ipnet6.FromNetIpPrefixes([]netip.Prefix{prefix})
+			dst4s, _ := filter.Net4sFromPrefixes([]netip.Prefix{prefix})
+			dst6s, _ := filter.Net6sFromPrefixes([]netip.Prefix{prefix})
 
 			ffiRule := routeMPLSRule{
 				Dst4s:    dst4s,
@@ -242,7 +241,7 @@ func (m *routeMPLSConfig) submit() error {
 	}
 
 	default4Prefix := netip.PrefixFrom(netip.AddrFrom4([4]byte{}), 0)
-	default4Dst, _ := ipnet4.FromNetIpPrefixes([]netip.Prefix{default4Prefix})
+	default4Dst, _ := filter.Net4sFromPrefixes([]netip.Prefix{default4Prefix})
 	ffiRules = append(ffiRules, routeMPLSRule{
 		Dst4s: default4Dst,
 		NextHops: []routeMPLSNextHop{
@@ -255,7 +254,7 @@ func (m *routeMPLSConfig) submit() error {
 	})
 
 	default16Prefix := netip.PrefixFrom(netip.AddrFrom16([16]byte{}), 0)
-	default16Dst, _ := ipnet6.FromNetIpPrefixes([]netip.Prefix{default16Prefix})
+	default16Dst, _ := filter.Net6sFromPrefixes([]netip.Prefix{default16Prefix})
 
 	ffiRules = append(ffiRules, routeMPLSRule{
 		Dst6s: default16Dst,

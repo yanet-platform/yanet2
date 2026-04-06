@@ -25,8 +25,7 @@ import (
 	"runtime"
 	"unsafe"
 
-	"github.com/yanet-platform/yanet2/common/go/filter/ipnet4"
-	"github.com/yanet-platform/yanet2/common/go/filter/ipnet6"
+	"github.com/yanet-platform/yanet2/bindings/go/filter"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 )
 
@@ -81,16 +80,16 @@ type routeMPLSNextHop struct {
 }
 
 type routeMPLSRule struct {
-	Dst4s    ipnet4.IPNets
-	Dst6s    ipnet6.IPNets
+	Dst4s    filter.IPNets
+	Dst6s    filter.IPNets
 	NextHops []routeMPLSNextHop
 }
 
 func (m *routeMPLSRule) CBuild(pinner *runtime.Pinner) C.struct_route_mpls_rule {
 	cRule := C.struct_route_mpls_rule{}
 
-	ipnet4.CBuilds(&cRule.net4s, m.Dst4s, pinner)
-	ipnet6.CBuilds(&cRule.net6s, m.Dst6s, pinner)
+	filter.CBuildNet4s(&cRule.net4s, m.Dst4s, pinner)
+	filter.CBuildNet6s(&cRule.net6s, m.Dst6s, pinner)
 
 	return cRule
 }
@@ -127,8 +126,8 @@ func (m *ModuleConfig) Update(rules []routeMPLSRule) error {
 		}
 
 		cRule := &cRules[idx]
-		ipnet4.CBuilds(&cRule.net4s, rule.Dst4s, pinner)
-		ipnet6.CBuilds(&cRule.net6s, rule.Dst6s, pinner)
+		filter.CBuildNet4s(&cRule.net4s, rule.Dst4s, pinner)
+		filter.CBuildNet6s(&cRule.net6s, rule.Dst6s, pinner)
 
 		pinner.Pin(&cNextHops[0])
 		cRule.nexthops = &cNextHops[0]
