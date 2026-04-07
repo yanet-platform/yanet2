@@ -10,13 +10,32 @@ on:
     paths-ignore:
       - "web/**"
   workflow_dispatch:
+    inputs:
+      include_2204:
+        description: "Include Ubuntu 22.04 build"
+        type: boolean
+        default: false
 
 jobs:
+  set-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set.outputs.matrix }}
+    steps:
+      - id: set
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ github.event.inputs.include_2204 }}" == "true" ]]; then
+            echo 'matrix={"unbtver":["24.04","22.04"]}' >> $GITHUB_OUTPUT
+          else
+            echo 'matrix={"unbtver":["24.04"]}' >> $GITHUB_OUTPUT
+          fi
+
   build-deb:
+    needs: set-matrix
     strategy:
-      matrix:
-        unbtver:
-          - 24.04
+      fail-fast: false
+      matrix: ${{ fromJson(needs.set-matrix.outputs.matrix) }}
+
     runs-on: ubuntu-${{ matrix.unbtver }}
     env:
       cache_name: deb-build-${{ matrix.unbtver }}
@@ -32,8 +51,7 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
+
       - name: Cache rust
         uses: actions/cache@v4
         with:
@@ -79,11 +97,26 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: yanet2-debs-${{ matrix.unbtver }}
+          name: debs-${{ matrix.unbtver }}
           path: outdeb/*
 
-      - name: Create Release for ${{ matrix.unbtver }}
-        if: startsWith(github.ref, 'refs/tags/')
+  release:
+    needs: build-deb
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Flatten artifacts
+        run: |
+          mkdir -p outdeb
+          find artifacts -type f -name "*.deb" -exec cp {} outdeb/ \;
+
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
           files: outdeb/*
