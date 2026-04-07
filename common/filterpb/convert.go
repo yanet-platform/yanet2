@@ -27,13 +27,12 @@ func ToNet4s(pb []*IPNet) (filter.IPNets, error) {
 	out := make(filter.IPNets, 0, len(pb))
 
 	for idx := range pb {
-		if len(pb[idx].Addr) != 4 {
-			continue
-		}
-
 		net, err := ToIPNet(pb[idx])
 		if err != nil {
 			return nil, err
+		}
+		if !net.Addr.Is4() {
+			continue
 		}
 
 		out = append(out, net)
@@ -48,13 +47,12 @@ func ToNet6s(pb []*IPNet) (filter.IPNets, error) {
 	out := make(filter.IPNets, 0, len(pb))
 
 	for idx := range pb {
-		if len(pb[idx].Addr) != 16 {
-			continue
-		}
-
 		net, err := ToIPNet(pb[idx])
 		if err != nil {
 			return nil, err
+		}
+		if !net.Addr.Is6() {
+			continue
 		}
 
 		out = append(out, net)
