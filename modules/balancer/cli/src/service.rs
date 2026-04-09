@@ -68,7 +68,9 @@ impl BalancerService {
             );
             for vs_reuse in &reuse.vs_reuse_reports {
                 if let Some(id) = &vs_reuse.vs_identifier {
-                    let ip = crate::bytes_to_ip(&id.addr).unwrap_or("?".parse().unwrap());
+                    let ip = crate::bytes_to_ip(&id.addr)
+                        .map(|a| a.to_string())
+                        .unwrap_or_else(|_| "?".to_string());
                     log::info!(
                         "  VS {}:{}/{}: acl_reused={}, selector_reused={}",
                         ip,
@@ -111,7 +113,9 @@ impl BalancerService {
         let response = self.client.get_config(request).await?.into_inner();
         log::debug!("get config response: {response:?}");
 
-        let json = serde_json::to_string_pretty(&response)?;
+        let mut json_value = serde_json::to_value(&response)?;
+        display::prettify_ips(&mut json_value);
+        let json = serde_json::to_string_pretty(&json_value)?;
         println!("{json}");
 
         Ok(())
@@ -154,7 +158,7 @@ impl BalancerService {
         if is_detail {
             display::print_detail(&response.state);
         } else {
-            display::print_compact(&response.state);
+            display::print_compact(&response.state[0]);
         }
 
         Ok(())

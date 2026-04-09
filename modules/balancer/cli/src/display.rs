@@ -13,61 +13,52 @@ use crate::{bytes_to_ip, format_ip_port};
 
 // ─── Compact (IPVS-style) Output ────────────────────────────────────────────
 
-pub fn print_compact(states: &[balancerpb::BalancerState]) {
+pub fn print_compact(state: &balancerpb::BalancerState) {
+    println!("Balancer: {}", state.balancer_name);
+    println!("Active Sessions: {}", format_number(state.active_sessions));
+    println!();
     println!(
-        "{:<5}{:<42}{:<6}Flags",
-        "Prot", "LocalAddress:Port", "Scheduler"
+        "{:<46}{:<6}Flags",
+        "VirtualService", "Scheduler"
     );
     println!(
         "  -> {:<40}{:>8}{:>10}{:>12}{:>10}",
         "RemoteAddress:Port", "Weight", "EfWeight", "ActiveConn", "Enabled"
     );
 
-    for state in states {
-        if !state.balancer_name.is_empty() {
-            println!();
-            println!("Balancer: {}", state.balancer_name);
-            if let Some(r) = &state.r#ref {
-                print_ref_inline(r);
-            }
-            println!("Active Sessions: {}", format_number(state.active_sessions));
-        }
-        println!();
+    for vs in &state.virtual_services {
+        let Some(id) = &vs.id else { continue };
+        let ip = match bytes_to_ip(&id.addr) {
+            Ok(ip) => ip,
+            Err(_) => continue,
+        };
+        let proto = proto_str(id.proto);
+        let scheduler = scheduler_str(vs.scheduler);
+        let flags = flags_str(vs.flags.as_ref());
+        let vs_str = format!("{}/{}", format_ip_port(ip, id.port), proto);
 
-        for vs in &state.virtual_services {
-            let Some(id) = &vs.id else { continue };
-            let ip = match bytes_to_ip(&id.addr) {
+        if flags.is_empty() {
+            println!("{:<46}{}", vs_str, scheduler);
+        } else {
+            println!("{:<46}{} {}", vs_str, scheduler, flags);
+        }
+
+        for real in &vs.reals {
+            let Some(rid) = &real.id else { continue };
+            let rip = match bytes_to_ip(&rid.ip) {
                 Ok(ip) => ip,
                 Err(_) => continue,
             };
-            let proto = proto_str(id.proto);
-            let scheduler = scheduler_str(vs.scheduler);
-            let flags = flags_str(vs.flags.as_ref());
-            let addr_port = format_ip_port(ip, id.port);
-
-            if flags.is_empty() {
-                println!("{:<5}{:<42}{}", proto, addr_port, scheduler);
-            } else {
-                println!("{:<5}{:<42}{} {}", proto, addr_port, scheduler, flags);
-            }
-
-            for real in &vs.reals {
-                let Some(rid) = &real.id else { continue };
-                let rip = match bytes_to_ip(&rid.ip) {
-                    Ok(ip) => ip,
-                    Err(_) => continue,
-                };
-                let real_addr = format_ip_port(rip, rid.port);
-                let enabled = if real.enabled { "yes" } else { "no" };
-                println!(
-                    "  -> {:<40}{:>8}{:>10}{:>12}{:>10}",
-                    real_addr,
-                    format_number(real.weight),
-                    format_number(real.effective_weight),
-                    format_number(real.active_sessions),
-                    enabled,
-                );
-            }
+            let real_addr = format_ip_port(rip, rid.port);
+            let enabled = if real.enabled { "yes" } else { "no" };
+            println!(
+                "  -> {:<40}{:>8}{:>10}{:>12}{:>10}",
+                real_addr,
+                format_number(real.weight),
+                format_number(real.effective_weight),
+                format_number(real.active_sessions),
+                enabled,
+            );
         }
     }
 }
@@ -344,6 +335,44 @@ fn print_table<T: Tabled>(entries: Vec<T>) {
     table.modify(Rows::first(), Color::BOLD);
 
     println!("{table}");
+}
+
+// ─── JSON IP Prettification ─────────────────────────────────────────────────
+
+/// Recursively walk a JSON value and convert byte arrays that represent
+/// IP addresses (length 4 or 16, all elements 0-255) into IP strings.
+/// All `bytes` fields in balancer protos are IPs or masks, so this is safe.
+pub fn prettify_ips(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Array(arr) => {
+            if let Some(ip) = try_bytes_to_ip_string(arr) {
+                *value = serde_json::Value::String(ip);
+            } else {
+                for item in arr.iter_mut() {
+                    prettify_ips(item);
+                }
+            }
+        }
+        serde_json::Value::Object(map) => {
+            for (_, v) in map.iter_mut() {
+                prettify_ips(v);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn try_bytes_to_ip_string(arr: &[serde_json::Value]) -> Option<String> {
+    if arr.len() != 4 && arr.len() != 16 {
+        return None;
+    }
+    let bytes: Vec<u8> = arr
+        .iter()
+        .map(|v| v.as_u64().and_then(|n| u8::try_from(n).ok()))
+        .collect::<Option<Vec<_>>>()?;
+
+    let ip = crate::bytes_to_ip(&bytes).ok()?;
+    Some(ip.to_string())
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
