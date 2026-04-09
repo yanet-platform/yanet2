@@ -1,7 +1,9 @@
 package balancer
 
 import (
+	"encoding/binary"
 	"time"
+	"unsafe"
 
 	"github.com/yanet-platform/yanet2/common/go/relptr"
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb"
@@ -93,9 +95,14 @@ func resolveSession(
 	clientAddr := make([]byte, clientAddrLen)
 	copy(clientAddr, entry.Id.Client_ip[:clientAddrLen])
 
+	// client_port is stored in network byte order (copied directly from the
+	// TCP/UDP header by the dataplane). Convert to host byte order.
+	portBytes := (*[2]byte)(unsafe.Pointer(&entry.Id.Client_port))
+	clientPort := binary.BigEndian.Uint16(portBytes[:])
+
 	return &balancerpb.Session{
 		ClientAddr: clientAddr,
-		ClientPort: uint32(entry.Id.Client_port),
+		ClientPort: uint32(clientPort),
 		VsId:       vsID,
 		RealId: &balancerpb.RealIdentifier{
 			Vs:   vsID,
