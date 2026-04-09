@@ -1,10 +1,10 @@
 use tabled::{
+    Table, Tabled,
     settings::{
+        Color, Style,
         object::{Columns, Rows},
         style::{BorderColor, HorizontalLine},
-        Color, Style,
     },
-    Table, Tabled,
 };
 
 use yanet_cli_balancer::balancerpb;
@@ -17,10 +17,7 @@ pub fn print_compact(state: &balancerpb::BalancerState) {
     println!("Balancer: {}", state.balancer_name);
     println!("Active Sessions: {}", format_number(state.active_sessions));
     println!();
-    println!(
-        "{:<46}{:<6}Flags",
-        "VirtualService", "Scheduler"
-    );
+    println!("{:<46}{:<6}Flags", "VirtualService", "Scheduler");
     println!(
         "  -> {:<40}{:>8}{:>10}{:>12}{:>10}",
         "RemoteAddress:Port", "Weight", "EfWeight", "ActiveConn", "Enabled"
@@ -97,9 +94,17 @@ fn print_module_stats(state: &balancerpb::BalancerState) {
     let mut rows: Vec<StatsRow> = Vec::new();
 
     if let Some(c) = &state.common_stats {
-        rows.push(StatsRow::new("Common", "Incoming Pkts", format_number(c.incoming_packets)));
+        rows.push(StatsRow::new(
+            "Common",
+            "Incoming Pkts",
+            format_number(c.incoming_packets),
+        ));
         rows.push(StatsRow::new("", "Incoming Bytes", format_bytes(c.incoming_bytes)));
-        rows.push(StatsRow::new("", "Unexpected Proto", format_number(c.unexpected_network_proto)));
+        rows.push(StatsRow::new(
+            "",
+            "Unexpected Proto",
+            format_number(c.unexpected_network_proto),
+        ));
         rows.push(StatsRow::new("", "Decap Success", format_number(c.decap_successful)));
         rows.push(StatsRow::new("", "Decap Failed", format_number(c.decap_failed)));
         rows.push(StatsRow::new("", "Outgoing Pkts", format_number(c.outgoing_packets)));
@@ -111,7 +116,11 @@ fn print_module_stats(state: &balancerpb::BalancerState) {
         rows.push(StatsRow::new("L4", "Incoming Pkts", format_number(l.incoming_packets)));
         rows.push(StatsRow::new("", "Outgoing Pkts", format_number(l.outgoing_packets)));
         rows.push(StatsRow::new("", "Select VS Fail", format_number(l.select_vs_failed)));
-        rows.push(StatsRow::new("", "Select Real Fail", format_number(l.select_real_failed)));
+        rows.push(StatsRow::new(
+            "",
+            "Select Real Fail",
+            format_number(l.select_real_failed),
+        ));
         rows.push(StatsRow::new("", "Invalid Pkts", format_number(l.invalid_packets)));
         rows.push(StatsRow::empty());
     }
@@ -126,7 +135,10 @@ fn print_module_stats(state: &balancerpb::BalancerState) {
     }
 
     // Remove trailing empty row.
-    if rows.last().is_some_and(|r| r.category.is_empty() && r.metric.is_empty()) {
+    if rows
+        .last()
+        .is_some_and(|r| r.category.is_empty() && r.metric.is_empty())
+    {
         rows.pop();
     }
 
@@ -135,19 +147,63 @@ fn print_module_stats(state: &balancerpb::BalancerState) {
 }
 
 fn push_icmp_rows(rows: &mut Vec<StatsRow>, category: &str, icmp: &balancerpb::IcmpStats) {
-    rows.push(StatsRow::new(category, "Incoming Pkts", format_number(icmp.incoming_packets)));
-    rows.push(StatsRow::new("", "Src Not Allowed", format_number(icmp.src_not_allowed)));
+    rows.push(StatsRow::new(
+        category,
+        "Incoming Pkts",
+        format_number(icmp.incoming_packets),
+    ));
+    rows.push(StatsRow::new(
+        "",
+        "Src Not Allowed",
+        format_number(icmp.src_not_allowed),
+    ));
     rows.push(StatsRow::new("", "Echo Responses", format_number(icmp.echo_responses)));
-    rows.push(StatsRow::new("", "Payload Short IP", format_number(icmp.payload_too_short_ip)));
-    rows.push(StatsRow::new("", "Unmatch Src Orig", format_number(icmp.unmatching_src_from_original)));
-    rows.push(StatsRow::new("", "Payload Short Port", format_number(icmp.payload_too_short_port)));
-    rows.push(StatsRow::new("", "Unexpected Trans", format_number(icmp.unexpected_transport)));
-    rows.push(StatsRow::new("", "Unrecognized VS", format_number(icmp.unrecognized_vs)));
-    rows.push(StatsRow::new("", "Forwarded Pkts", format_number(icmp.forwarded_packets)));
-    rows.push(StatsRow::new("", "Broadcasted Pkts", format_number(icmp.broadcasted_packets)));
+    rows.push(StatsRow::new(
+        "",
+        "Payload Short IP",
+        format_number(icmp.payload_too_short_ip),
+    ));
+    rows.push(StatsRow::new(
+        "",
+        "Unmatch Src Orig",
+        format_number(icmp.unmatching_src_from_original),
+    ));
+    rows.push(StatsRow::new(
+        "",
+        "Payload Short Port",
+        format_number(icmp.payload_too_short_port),
+    ));
+    rows.push(StatsRow::new(
+        "",
+        "Unexpected Trans",
+        format_number(icmp.unexpected_transport),
+    ));
+    rows.push(StatsRow::new(
+        "",
+        "Unrecognized VS",
+        format_number(icmp.unrecognized_vs),
+    ));
+    rows.push(StatsRow::new(
+        "",
+        "Forwarded Pkts",
+        format_number(icmp.forwarded_packets),
+    ));
+    rows.push(StatsRow::new(
+        "",
+        "Broadcasted Pkts",
+        format_number(icmp.broadcasted_packets),
+    ));
     rows.push(StatsRow::new("", "Clones Sent", format_number(icmp.packet_clones_sent)));
-    rows.push(StatsRow::new("", "Clones Received", format_number(icmp.packet_clones_received)));
-    rows.push(StatsRow::new("", "Clone Failures", format_number(icmp.packet_clone_failures)));
+    rows.push(StatsRow::new(
+        "",
+        "Clones Received",
+        format_number(icmp.packet_clones_received),
+    ));
+    rows.push(StatsRow::new(
+        "",
+        "Clone Failures",
+        format_number(icmp.packet_clone_failures),
+    ));
 }
 
 fn print_vs_detail(vs: &balancerpb::VsState) {
@@ -171,15 +227,27 @@ fn print_vs_detail(vs: &balancerpb::VsState) {
         println!("  Outgoing Packets: {}", format_number(stats.outgoing_packets));
         println!("  Outgoing Bytes: {}", format_bytes(stats.outgoing_bytes));
         println!("  Created Sessions: {}", format_number(stats.created_sessions));
-        println!("  Packet Src Not Allowed: {}", format_number(stats.packet_src_not_allowed));
+        println!(
+            "  Packet Src Not Allowed: {}",
+            format_number(stats.packet_src_not_allowed)
+        );
         println!("  No Reals: {}", format_number(stats.no_reals));
-        println!("  Session Table Overflow: {}", format_number(stats.session_table_overflow));
+        println!(
+            "  Session Table Overflow: {}",
+            format_number(stats.session_table_overflow)
+        );
         println!("  Echo ICMP Packets: {}", format_number(stats.echo_icmp_packets));
         println!("  Error ICMP Packets: {}", format_number(stats.error_icmp_packets));
         println!("  Real Is Disabled: {}", format_number(stats.real_is_disabled));
         println!("  Real Is Removed: {}", format_number(stats.real_is_removed));
-        println!("  Not Rescheduled Packets: {}", format_number(stats.not_rescheduled_packets));
-        println!("  Broadcasted ICMP Packets: {}", format_number(stats.broadcasted_icmp_packets));
+        println!(
+            "  Not Rescheduled Packets: {}",
+            format_number(stats.not_rescheduled_packets)
+        );
+        println!(
+            "  Broadcasted ICMP Packets: {}",
+            format_number(stats.broadcasted_icmp_packets)
+        );
     }
 
     if !vs.allowed_sources.is_empty() {

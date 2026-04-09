@@ -303,10 +303,7 @@ impl TryFrom<VirtualService> for balancerpb::VirtualService {
                 AllowedSrcEntry::Simple(network_str) => {
                     let (addr, mask) = parse_network(network_str)?;
                     Ok(balancerpb::AllowedSources {
-                        nets: vec![filterpb::IpNet {
-                            addr: ip_to_bytes(addr),
-                            mask,
-                        }],
+                        nets: vec![filterpb::IpNet { addr: ip_to_bytes(addr), mask }],
                         ports: vec![],
                         tag: None,
                     })
@@ -318,10 +315,7 @@ impl TryFrom<VirtualService> for balancerpb::VirtualService {
                         None => vec![],
                     };
                     Ok(balancerpb::AllowedSources {
-                        nets: vec![filterpb::IpNet {
-                            addr: ip_to_bytes(addr),
-                            mask,
-                        }],
+                        nets: vec![filterpb::IpNet { addr: ip_to_bytes(addr), mask }],
                         ports: port_ranges,
                         tag: tag.clone(),
                     })
@@ -372,20 +366,11 @@ impl TryFrom<Real> for balancerpb::Real {
 
     fn try_from(real: Real) -> Result<Self, Self::Error> {
         let ip: IpAddr = real.ip.parse().map_err(|e| format!("invalid real IP: {}", e))?;
-        let src_addr: IpAddr = real
-            .src_addr
-            .parse()
-            .map_err(|e| format!("invalid src_addr: {}", e))?;
-        let src_mask: IpAddr = real
-            .src_mask
-            .parse()
-            .map_err(|e| format!("invalid src_mask: {}", e))?;
+        let src_addr: IpAddr = real.src_addr.parse().map_err(|e| format!("invalid src_addr: {}", e))?;
+        let src_mask: IpAddr = real.src_mask.parse().map_err(|e| format!("invalid src_mask: {}", e))?;
 
         Ok(Self {
-            id: Some(balancerpb::RelativeRealIdentifier {
-                ip: ip_to_bytes(ip),
-                port: real.port,
-            }),
+            id: Some(balancerpb::RelativeRealIdentifier { ip: ip_to_bytes(ip), port: real.port }),
             weight: real.weight,
             src: Some(filterpb::IpNet {
                 addr: ip_to_bytes(src_addr),

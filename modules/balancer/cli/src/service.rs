@@ -4,16 +4,16 @@ use ptree::TreeBuilder;
 use tonic::codec::CompressionEncoding;
 
 use yanet_cli_balancer::balancerpb::{
-    self, balancer_client::BalancerClient, FlushRealsRequest, GetConfigRequest, GetStateRequest,
-    ListBalancersRequest, ListSessionsRequest, PacketHandlerRef, RealUpdate, SetConfigRequest, UpdateRealsRequest,
+    self, FlushRealsRequest, GetConfigRequest, GetStateRequest, ListBalancersRequest, ListSessionsRequest,
+    PacketHandlerRef, RealUpdate, SetConfigRequest, UpdateRealsRequest, balancer_client::BalancerClient,
 };
 use ync::client::{ConnectionArgs, LayeredChannel};
 
 use crate::config::BalancerConfig;
 use crate::display;
 use crate::{
-    ip_to_bytes, parse_vs_identifier, ConfigCmd, DisableRealCmd, EnableRealCmd, FlushRealsCmd, ModeCmd, SessionsCmd,
-    ShowCmd, UpdateCmd,
+    ConfigCmd, DisableRealCmd, EnableRealCmd, FlushRealsCmd, ModeCmd, SessionsCmd, ShowCmd, UpdateCmd, ip_to_bytes,
+    parse_vs_identifier,
 };
 
 pub struct BalancerService {
@@ -124,20 +124,17 @@ impl BalancerService {
     async fn show(&mut self, cmd: ShowCmd) -> Result<(), Box<dyn Error>> {
         let is_detail = cmd.is_detail();
 
-        let packet_handler_ref = if cmd.device.is_some()
-            || cmd.pipeline.is_some()
-            || cmd.function.is_some()
-            || cmd.chain.is_some()
-        {
-            Some(PacketHandlerRef {
-                device: cmd.device,
-                pipeline: cmd.pipeline,
-                function: cmd.function,
-                chain: cmd.chain,
-            })
-        } else {
-            None
-        };
+        let packet_handler_ref =
+            if cmd.device.is_some() || cmd.pipeline.is_some() || cmd.function.is_some() || cmd.chain.is_some() {
+                Some(PacketHandlerRef {
+                    device: cmd.device,
+                    pipeline: cmd.pipeline,
+                    function: cmd.function,
+                    chain: cmd.chain,
+                })
+            } else {
+                None
+            };
 
         let request = GetStateRequest {
             name: cmd.name,
@@ -197,10 +194,7 @@ impl BalancerService {
                 Ok(RealUpdate {
                     real_id: Some(balancerpb::RealIdentifier {
                         vs: Some(vs_id.clone()),
-                        real: Some(balancerpb::RelativeRealIdentifier {
-                            ip: ip_to_bytes(real_ip),
-                            port: 0,
-                        }),
+                        real: Some(balancerpb::RelativeRealIdentifier { ip: ip_to_bytes(real_ip), port: 0 }),
                     }),
                     enable: Some(true),
                     weight: cmd.weight,
@@ -252,10 +246,7 @@ impl BalancerService {
                 Ok(RealUpdate {
                     real_id: Some(balancerpb::RealIdentifier {
                         vs: Some(vs_id.clone()),
-                        real: Some(balancerpb::RelativeRealIdentifier {
-                            ip: ip_to_bytes(real_ip),
-                            port: 0,
-                        }),
+                        real: Some(balancerpb::RelativeRealIdentifier { ip: ip_to_bytes(real_ip), port: 0 }),
                     }),
                     enable: Some(false),
                     weight: None,
