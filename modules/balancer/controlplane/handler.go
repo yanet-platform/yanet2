@@ -373,7 +373,7 @@ func (ph *PacketHandler) populateVS(
 	reuseReport.VsReuseReports = make([]*balancerpb.VsReuseReport, 0, len(vsList))
 
 	// First, write virtual services which are present in the previous config
-	ipv4MatcherReused, ipv6MatcherReused, err := placeExistingVS(
+	oldIPv4Matches, oldIPv6Matches, err := placeExistingVS(
 		ph,
 		agent,
 		vsList,
@@ -388,7 +388,7 @@ func (ph *PacketHandler) populateVS(
 	}
 
 	// Then, write virtual services which are new in the new config
-	newIpv4MatcherReused, newIpv6MatcherReused, err := placeNewVS(
+	noNewIPv4, noNewIPv6, err := placeNewVS(
 		ph,
 		agent,
 		vsList,
@@ -402,8 +402,8 @@ func (ph *PacketHandler) populateVS(
 		return err
 	}
 
-	reuseReport.Ipv4VsMatcherReused = ipv4MatcherReused && newIpv4MatcherReused
-	reuseReport.Ipv6VsMatcherReused = ipv6MatcherReused && newIpv6MatcherReused
+	reuseReport.Ipv4VsMatcherReused = prevPh != nil && oldIPv4Matches && noNewIPv4
+	reuseReport.Ipv6VsMatcherReused = prevPh != nil && oldIPv6Matches && noNewIPv6
 
 	ph.Vs_count = uint32(len(services))
 	relptr.SetSlice(&ph.Vs, services)
