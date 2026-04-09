@@ -33,7 +33,6 @@ custom_target(
         # cgo linker deps
         lib_acl_cp,
         lib_acl_dp,
-        lib_balancer_cp,
         lib_balancer_dp,
         lib_decap_cp,
         lib_decap_dp,

@@ -97,10 +97,10 @@ func (b *Balancer) nullifyReusedFields(
 func nullifySharedTrackerShards(oldHandler, newHandler *PacketHandler) {
 	oldVsList := relptr.Slice(&oldHandler.Vs, oldHandler.Vs_count)
 	newVsList := relptr.Slice(&newHandler.Vs, newHandler.Vs_count)
-	for i := range oldVsList {
+	for i := range min(len(oldVsList), len(newVsList)) {
 		oldReals := relptr.Slice(&oldVsList[i].Reals, oldVsList[i].Reals_count)
 		newReals := relptr.Slice(&newVsList[i].Reals, newVsList[i].Reals_count)
-		for j := range len(oldReals) {
+		for j := range min(len(oldReals), len(newReals)) {
 			oldTracker := relptr.Deref(&oldReals[j].Tracker_shards)
 			newTracker := relptr.Deref(&newReals[j].Tracker_shards)
 			if oldTracker != nil && oldTracker == newTracker {
