@@ -396,17 +396,19 @@ func (b *Balancer) buildState(
 	services := relptr.Slice(&b.handler.Vs, b.handler.Vs_count)
 
 	state := &balancerpb.BalancerState{
-		BalancerName: position.ModuleName,
-		Ref: &balancerpb.PacketHandlerRef{
-			Device:   &position.Device,
-			Pipeline: &position.Pipeline,
-			Function: &position.Function,
-			Chain:    &position.Chain,
-		},
+		BalancerName:  b.handler.name(),
 		L4Stats:       &balancerpb.L4Stats{},
 		CommonStats:   &balancerpb.CommonStats{},
 		IcmpIpv4Stats: &balancerpb.IcmpStats{},
 		IcmpIpv6Stats: &balancerpb.IcmpStats{},
+	}
+	if position != nil {
+		state.Ref = &balancerpb.PacketHandlerRef{
+			Device:   &position.Device,
+			Pipeline: &position.Pipeline,
+			Function: &position.Function,
+			Chain:    &position.Chain,
+		}
 	}
 
 	state.VirtualServices = make([]*balancerpb.VsState, len(services))
