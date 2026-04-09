@@ -17,10 +17,10 @@ pub fn print_compact(state: &balancerpb::BalancerState) {
     println!("Balancer: {}", state.balancer_name);
     println!("Active Sessions: {}", format_number(state.active_sessions));
     println!();
-    println!("{:<46}{:<12}Flags", "VirtualService", "Scheduler");
+    println!("{:<46}{:<8}Flags", "VirtualService", "Sched");
     println!(
-        "  -> {:<40}{:>8}{:>10}{:>12}{:>10}",
-        "RemoteAddress:Port", "Weight", "EfWeight", "ActiveConn", "Enabled"
+        "  -> {:<52}{:<8}{:<10}{:<10}{:<10}",
+        "RemoteAddress:Port", "Weight", "EfWeight", "Conns", "Enabled"
     );
 
     for vs in &state.virtual_services {
@@ -34,7 +34,7 @@ pub fn print_compact(state: &balancerpb::BalancerState) {
         let flags = flags_str(vs.flags.as_ref());
         let vs_str = format!("{}/{}", format_ip_port(ip, id.port), proto);
 
-        println!("{:<46}{:<12}{}", vs_str, scheduler, flags);
+        println!("{:<46}{:<8}{}", vs_str, scheduler, flags);
 
         for real in &vs.reals {
             let Some(rid) = &real.id else { continue };
@@ -45,7 +45,7 @@ pub fn print_compact(state: &balancerpb::BalancerState) {
             let real_addr = format_ip_port(rip, rid.port);
             let enabled = if real.enabled { "yes" } else { "no" };
             println!(
-                "  -> {:<40}{:>8}{:>10}{:>12}{:>10}",
+                "  -> {:<52}{:<8}{:<10}{:<10}{:<10}",
                 real_addr,
                 format_number(real.weight),
                 format_number(real.effective_weight),
