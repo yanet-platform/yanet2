@@ -12,12 +12,12 @@
 #include "group.h"
 #include "packet.h"
 #include "real_helpers.h"
-#include "vs_helpers.h"
 #include "resolve.h"
 #include "session/table.h"
 #include "tunnel.h"
 #include "types/session.h"
 #include "types/stats.h"
+#include "vs_helpers.h"
 
 FILTER_QUERY_DECLARE(
 	ipv4_vs_matcher, net4_fast_dst, port_fast_dst, proto_range_fast
@@ -395,7 +395,8 @@ tunnel_packets(
 
 		context->l4_stats->outgoing_packets += 1;
 		context->common_stats->outgoing_packets += 1;
-		context->common_stats->outgoing_bytes += pkt_ctx->packet->mbuf->pkt_len;
+		context->common_stats->outgoing_bytes +=
+			pkt_ctx->packet->mbuf->pkt_len;
 	}
 }
 

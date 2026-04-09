@@ -101,8 +101,10 @@ func resolveSession(
 			Vs:   vsID,
 			Real: realRelID,
 		},
-		CreateTimestamp:     timestamppb.New(time.Unix(int64(entry.State.Create_timestamp), 0)),
-		LastPacketTimestamp: timestamppb.New(time.Unix(int64(entry.State.Last_packet_timestamp), 0)),
-		Timeout:             durationpb.New(time.Duration(entry.State.Timeout) * time.Second),
+		CreateTimestamp: timestamppb.New(time.Unix(int64(entry.State.Create_timestamp), 0)),
+		LastPacketTimestamp: timestamppb.New(
+			time.Unix(int64(entry.State.Last_packet_timestamp), 0),
+		),
+		Timeout: durationpb.New(time.Duration(entry.State.Timeout) * time.Second),
 	}, true
 }

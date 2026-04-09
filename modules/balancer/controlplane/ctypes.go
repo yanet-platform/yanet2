@@ -4,252 +4,252 @@
 package balancer
 
 type (
-	Net4Addr	struct {
+	Net4Addr struct {
 		Bytes [4]uint8
 	}
-	Net6Addr	struct {
+	Net6Addr struct {
 		Bytes [16]uint8
 	}
-	NetAddr	struct {
-		V4		Net4Addr
-		Pad_cgo_0	[12]byte
+	NetAddr struct {
+		V4        Net4Addr
+		Pad_cgo_0 [12]byte
 	}
-	Net4	struct {
-		Addr	[4]uint8
-		Mask	[4]uint8
+	Net4 struct {
+		Addr [4]uint8
+		Mask [4]uint8
 	}
-	Net6	struct {
-		Addr	[16]uint8
-		Mask	[16]uint8
+	Net6 struct {
+		Addr [16]uint8
+		Mask [16]uint8
 	}
-	Net	struct {
-		V4		Net4
-		Pad_cgo_0	[24]byte
+	Net struct {
+		V4        Net4
+		Pad_cgo_0 [24]byte
 	}
 )
 
 type (
 	Filter struct {
-		V	[20]_Ctype_struct_filter_vertex
-		Context	_Ctype_struct_memory_context
+		V       [20]_Ctype_struct_filter_vertex
+		Context _Ctype_struct_memory_context
 	}
 )
 
 type (
 	RCU struct {
-		Workers		[8]_Ctype_struct___1
-		Epoch		uint32
-		Pad_cgo_0	[60]byte
+		Workers   [8]_Ctype_struct___1
+		Epoch     uint32
+		Pad_cgo_0 [60]byte
 	}
 )
 
 type (
-	VS	struct {
-		Reals			*Real
-		Reals_count		uint32
-		Stable_idx		uint64
-		Counter_id		uint64
-		Selector		*RealSelector
-		Acl			*Filter
-		Rule_counter_ids	*uint64
-		Flags			uint16
-		X__padding		[64]uint8
-		Addr			NetAddr
-		Ip_proto		uint8
-		Port			uint16
-		Transport_proto		uint8
-		Peers_v4		*Net4Addr
-		Peers_v4_count		uint32
-		Peers_v6		*Net6Addr
-		Peers_v6_count		uint32
-		Allowed_sources		*AllowedSource
-		Allowed_sources_count	uint32
-		Pad_cgo_0		[4]byte
+	VS struct {
+		Reals                 *Real
+		Reals_count           uint32
+		Stable_idx            uint64
+		Counter_id            uint64
+		Selector              *RealSelector
+		Acl                   *Filter
+		Rule_counter_ids      *uint64
+		Flags                 uint16
+		X__padding            [64]uint8
+		Addr                  NetAddr
+		Ip_proto              uint8
+		Port                  uint16
+		Transport_proto       uint8
+		Peers_v4              *Net4Addr
+		Peers_v4_count        uint32
+		Peers_v6              *Net6Addr
+		Peers_v6_count        uint32
+		Allowed_sources       *AllowedSource
+		Allowed_sources_count uint32
+		Pad_cgo_0             [4]byte
 	}
-	Real	struct {
-		Counter_id		uint64
-		Stable_idx		uint64
-		Tracker_shards		*SessionTrackerShard
-		Addr			NetAddr
-		Src			Net
-		Flags			uint8
-		Weight			uint32
-		Effective_weight	uint32
-		Pad_cgo_0		[4]byte
+	Real struct {
+		Counter_id       uint64
+		Stable_idx       uint64
+		Tracker_shards   *SessionTrackerShard
+		Addr             NetAddr
+		Src              Net
+		Flags            uint8
+		Weight           uint32
+		Effective_weight uint32
+		Pad_cgo_0        [4]byte
 	}
-	AllowedSource	struct {
-		Nets			*Net
-		Nets_count		uint32
-		Port_ranges		*PortRange
-		Port_ranges_count	uint32
-		Tag			[21]int8
-		Pad_cgo_0		[7]byte
+	AllowedSource struct {
+		Nets              *Net
+		Nets_count        uint32
+		Port_ranges       *PortRange
+		Port_ranges_count uint32
+		Tag               [21]int8
+		Pad_cgo_0         [7]byte
 	}
-	SessionTimeouts	struct {
-		Syn_ack	uint8
-		Syn	uint8
-		Fin	uint8
-		Tcp	uint8
-		Udp	uint8
+	SessionTimeouts struct {
+		Syn_ack uint8
+		Syn     uint8
+		Fin     uint8
+		Tcp     uint8
+		Udp     uint8
 	}
-	PacketHandler	struct {
-		Cp_module			_Ctype_struct_cp_module
-		Common_counter_id		uint64
-		Icmp_v4_counter_id		uint64
-		Icmp_v6_counter_id		uint64
-		L4_counter_id			uint64
-		Decap_ipv4_filter		*Filter
-		Decap_ipv6_filter		*Filter
-		Session_table			*SessionTable
-		Ipv4_vs_matcher			*Filter
-		Ipv6_vs_matcher			*Filter
-		Vs				*VS
-		Vs_count			uint32
-		Session_timeouts		SessionTimeouts
-		Source_v4			Net4Addr
-		Source_v6			Net6Addr
-		Pad_cgo_0			[35]byte
-		Rcu				RCU
-		Decap_v4			*Net4Addr
-		Decap_v4_count			uint32
-		Decap_v6			*Net6Addr
-		Decap_v6_count			uint32
-		Wlc_power			uint32
-		Wlc_max_weight			uint32
-		Refresh_period_ms		uint32
-		Session_table_max_load_factor	float32
-		Pad_cgo_1			[20]byte
+	PacketHandler struct {
+		Cp_module                     _Ctype_struct_cp_module
+		Common_counter_id             uint64
+		Icmp_v4_counter_id            uint64
+		Icmp_v6_counter_id            uint64
+		L4_counter_id                 uint64
+		Decap_ipv4_filter             *Filter
+		Decap_ipv6_filter             *Filter
+		Session_table                 *SessionTable
+		Ipv4_vs_matcher               *Filter
+		Ipv6_vs_matcher               *Filter
+		Vs                            *VS
+		Vs_count                      uint32
+		Session_timeouts              SessionTimeouts
+		Source_v4                     Net4Addr
+		Source_v6                     Net6Addr
+		Pad_cgo_0                     [35]byte
+		Rcu                           RCU
+		Decap_v4                      *Net4Addr
+		Decap_v4_count                uint32
+		Decap_v6                      *Net6Addr
+		Decap_v6_count                uint32
+		Wlc_power                     uint32
+		Wlc_max_weight                uint32
+		Refresh_period_ms             uint32
+		Session_table_max_load_factor float32
+		Pad_cgo_1                     [20]byte
 	}
-	SessionTrackerShard	struct {
-		Counter		IntervalCounter
-		Count		uint32
-		Pad_cgo_0	[24]byte
+	SessionTrackerShard struct {
+		Counter   IntervalCounter
+		Count     uint32
+		Pad_cgo_0 [24]byte
 	}
-	IntervalCounter	struct {
-		Diff		[8]int32
-		Timestamp	uint32
+	IntervalCounter struct {
+		Diff      [8]int32
+		Timestamp uint32
 	}
-	SessionTable	struct {
-		Maps		[2]_Ctype_struct_ttlmap
-		Rcu		RCU
-		Gen		uint64
-		Mctx		_Ctype_struct_memory_context
-		Workers		uint32
-		Pad_cgo_0	[12]byte
+	SessionTable struct {
+		Maps      [2]_Ctype_struct_ttlmap
+		Rcu       RCU
+		Gen       uint64
+		Mctx      _Ctype_struct_memory_context
+		Workers   uint32
+		Pad_cgo_0 [12]byte
 	}
-	RealSelector	struct {
-		Rings		[2]_Ctype_struct_balancer_ring
-		Ring_id		uint64
-		Use_rr		int32
-		Pad_cgo_0	[36]byte
-		Workers		[8]_Ctype_struct_balancer_rr_counter
+	RealSelector struct {
+		Rings     [2]_Ctype_struct_balancer_ring
+		Ring_id   uint64
+		Use_rr    int32
+		Pad_cgo_0 [36]byte
+		Workers   [8]_Ctype_struct_balancer_rr_counter
 	}
 )
 
 type (
-	L4Stats	struct {
-		Incoming_packets	uint64
-		Select_vs_failed	uint64
-		Invalid_packets		uint64
-		Select_real_failed	uint64
-		Outgoing_packets	uint64
+	L4Stats struct {
+		Incoming_packets   uint64
+		Select_vs_failed   uint64
+		Invalid_packets    uint64
+		Select_real_failed uint64
+		Outgoing_packets   uint64
 	}
-	IcmpStats	struct {
-		Incoming_packets		uint64
-		Src_not_allowed			uint64
-		Echo_responses			uint64
-		Payload_too_short_ip		uint64
-		Unmatching_src_from_original	uint64
-		Payload_too_short_port		uint64
-		Unexpected_transport		uint64
-		Unrecognized_vs			uint64
-		Forwarded_packets		uint64
-		Broadcasted_packets		uint64
-		Packet_clones_sent		uint64
-		Packet_clones_received		uint64
-		Packet_clone_failures		uint64
+	IcmpStats struct {
+		Incoming_packets             uint64
+		Src_not_allowed              uint64
+		Echo_responses               uint64
+		Payload_too_short_ip         uint64
+		Unmatching_src_from_original uint64
+		Payload_too_short_port       uint64
+		Unexpected_transport         uint64
+		Unrecognized_vs              uint64
+		Forwarded_packets            uint64
+		Broadcasted_packets          uint64
+		Packet_clones_sent           uint64
+		Packet_clones_received       uint64
+		Packet_clone_failures        uint64
 	}
-	CommonStats	struct {
-		Incoming_packets		uint64
-		Incoming_bytes			uint64
-		Unexpected_network_proto	uint64
-		Decap_successful		uint64
-		Decap_failed			uint64
-		Outgoing_packets		uint64
-		Outgoing_bytes			uint64
+	CommonStats struct {
+		Incoming_packets         uint64
+		Incoming_bytes           uint64
+		Unexpected_network_proto uint64
+		Decap_successful         uint64
+		Decap_failed             uint64
+		Outgoing_packets         uint64
+		Outgoing_bytes           uint64
 	}
-	VsStats	struct {
-		Incoming_packets		uint64
-		Incoming_bytes			uint64
-		Packet_src_not_allowed		uint64
-		No_reals			uint64
-		Session_table_overflow		uint64
-		Echo_icmp_packets		uint64
-		Error_icmp_packets		uint64
-		Real_is_disabled		uint64
-		Real_is_removed			uint64
-		Not_rescheduled_packets		uint64
-		Broadcasted_icmp_packets	uint64
-		Created_sessions		uint64
-		Outgoing_packets		uint64
-		Outgoing_bytes			uint64
+	VsStats struct {
+		Incoming_packets         uint64
+		Incoming_bytes           uint64
+		Packet_src_not_allowed   uint64
+		No_reals                 uint64
+		Session_table_overflow   uint64
+		Echo_icmp_packets        uint64
+		Error_icmp_packets       uint64
+		Real_is_disabled         uint64
+		Real_is_removed          uint64
+		Not_rescheduled_packets  uint64
+		Broadcasted_icmp_packets uint64
+		Created_sessions         uint64
+		Outgoing_packets         uint64
+		Outgoing_bytes           uint64
 	}
-	RealStats	struct {
-		Packets_real_disabled	uint64
-		Error_icmp_packets	uint64
-		Created_sessions	uint64
-		Packets			uint64
-		Bytes			uint64
+	RealStats struct {
+		Packets_real_disabled uint64
+		Error_icmp_packets    uint64
+		Created_sessions      uint64
+		Packets               uint64
+		Bytes                 uint64
 	}
 )
 
 const (
-	VSFlagPureL3		= 0x1
-	VSFlagFixMSS		= 0x2
-	VSFlagGRE		= 0x4
-	VSFlagOPS		= 0x8
-	VSFlagWLC		= 0x10
-	VSFlagRemoved		= 0x20
-	VSFlagRoundRobin	= 0x40
+	VSFlagPureL3     = 0x1
+	VSFlagFixMSS     = 0x2
+	VSFlagGRE        = 0x4
+	VSFlagOPS        = 0x8
+	VSFlagWLC        = 0x10
+	VSFlagRemoved    = 0x20
+	VSFlagRoundRobin = 0x40
 )
 
 const (
-	RealFlagEnabled	= 0x1
-	RealFlagRemoved	= 0x2
-	RealFlagIPv6	= 0x4
+	RealFlagEnabled = 0x1
+	RealFlagRemoved = 0x2
+	RealFlagIPv6    = 0x4
 )
 
 const (
-	MaxSessionTimeout		= uint32(97.000000)
-	AllowedSourceMaxTagLength	= uint32(0x14)
+	MaxSessionTimeout         = uint32(97.000000)
+	AllowedSourceMaxTagLength = uint32(0x14)
 )
 
 type (
-	SessionID	struct {
-		Vs_stable_idx	uint64
-		Client_port	uint16
-		Client_ip	[16]uint8
-		Padding		[6]uint8
+	SessionID struct {
+		Vs_stable_idx uint64
+		Client_port   uint16
+		Client_ip     [16]uint8
+		Padding       [6]uint8
 	}
-	SessionState	struct {
-		Real_stable_idx		uint64
-		Last_packet_timestamp	uint32
-		Create_timestamp	uint32
-		Timeout			uint8
-		Pad_cgo_0		[7]byte
+	SessionState struct {
+		Real_stable_idx       uint64
+		Last_packet_timestamp uint32
+		Create_timestamp      uint32
+		Timeout               uint8
+		Pad_cgo_0             [7]byte
 	}
-	SessionEntry	struct {
-		Id	SessionID
-		State	SessionState
+	SessionEntry struct {
+		Id    SessionID
+		State SessionState
 	}
-	SessionTableIter	struct {
-		Iter		_Ctype_struct_ttlmap_bucket_iter
-		Gen		uint32
-		Pad_cgo_0	[4]byte
+	SessionTableIter struct {
+		Iter      _Ctype_struct_ttlmap_bucket_iter
+		Gen       uint32
+		Pad_cgo_0 [4]byte
 	}
 )
 
 type PortRange struct {
-	From	uint16
-	To	uint16
+	From uint16
+	To   uint16
 }

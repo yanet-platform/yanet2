@@ -19,7 +19,8 @@
 #define BALANCER_MAX_SESSION_TIMEOUT                                           \
 	((BALANCER_IC_RING_SIZE - 2) * BALANCER_SESSIONS_TRACKER_PRECISION + 1)
 
-static const uint8_t balancer_max_session_timeout = BALANCER_MAX_SESSION_TIMEOUT;
+static const uint8_t balancer_max_session_timeout =
+	BALANCER_MAX_SESSION_TIMEOUT;
 
 /*
  * Per-worker active-session tracker.

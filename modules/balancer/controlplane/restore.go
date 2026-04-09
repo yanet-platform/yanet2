@@ -101,7 +101,6 @@ func restoreVS(vs *VS) *balancerpb.VirtualService {
 	}
 }
 
-
 func restoreReals(vs *VS) []*balancerpb.Real {
 	reals := relptr.Slice(&vs.Reals, vs.Reals_count)
 	result := make([]*balancerpb.Real, len(reals))

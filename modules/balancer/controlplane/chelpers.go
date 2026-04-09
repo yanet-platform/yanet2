@@ -229,4 +229,3 @@ func (it *SessionTableIter) nextBucket(now uint32, buf []SessionEntry) int {
 func (rcu *RCU) asCPtr() *C.struct_rcu {
 	return (*C.struct_rcu)(unsafe.Pointer(rcu))
 }
-

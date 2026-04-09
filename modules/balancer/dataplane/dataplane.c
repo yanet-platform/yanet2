@@ -55,7 +55,9 @@ batcher_flush(struct packet_batcher *batcher, struct worker_context *context) {
 
 static uint64_t *
 context_get_counter(struct worker_context *context, uint64_t counter_id) {
-	return counter_get_address(counter_id, context->worker_idx, context->counter_storage);
+	return counter_get_address(
+		counter_id, context->worker_idx, context->counter_storage
+	);
 }
 
 static void
@@ -76,10 +78,18 @@ build_context(
 	ctx->worker_idx = dp_worker->idx;
 	ctx->now = dp_worker->current_time / (1000 * 1000 * 1000); /* ns -> s */
 
-	ctx->common_stats = (struct balancer_common_stats *)context_get_counter(ctx, packet_handler->common_counter_id);
-	ctx->icmp_v4_stats = (struct balancer_icmp_stats *)context_get_counter(ctx, packet_handler->icmp_v4_counter_id);
-	ctx->icmp_v6_stats = (struct balancer_icmp_stats *)context_get_counter(ctx, packet_handler->icmp_v6_counter_id);
-	ctx->l4_stats = (struct balancer_l4_stats *)context_get_counter(ctx, packet_handler->l4_counter_id);
+	ctx->common_stats = (struct balancer_common_stats *)context_get_counter(
+		ctx, packet_handler->common_counter_id
+	);
+	ctx->icmp_v4_stats = (struct balancer_icmp_stats *)context_get_counter(
+		ctx, packet_handler->icmp_v4_counter_id
+	);
+	ctx->icmp_v6_stats = (struct balancer_icmp_stats *)context_get_counter(
+		ctx, packet_handler->icmp_v6_counter_id
+	);
+	ctx->l4_stats = (struct balancer_l4_stats *)context_get_counter(
+		ctx, packet_handler->l4_counter_id
+	);
 }
 
 void

@@ -27,7 +27,9 @@ ring_get(struct balancer_ring *ring, uint64_t index) {
 	if (ring->real_ids.size > 0) {
 		uint32_t pos = index % (ring->real_ids.size / sizeof(uint32_t));
 		uint32_t val;
-		memcpy(&val, big_array_get(&ring->real_ids, pos * sizeof(uint32_t)), sizeof(val));
+		memcpy(&val,
+		       big_array_get(&ring->real_ids, pos * sizeof(uint32_t)),
+		       sizeof(val));
 		return val;
 	} else {
 		return INVALID_REAL_IDX;

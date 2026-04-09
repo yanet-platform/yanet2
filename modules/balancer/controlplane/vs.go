@@ -482,4 +482,3 @@ func (vs *VS) state(workers uint32) *balancerpb.VsState {
 	}
 	return vsState
 }
-

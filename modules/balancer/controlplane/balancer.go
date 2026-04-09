@@ -54,7 +54,10 @@ type Balancer struct {
 // by the new handler. Both old and new handlers share these resources; nullifying them
 // on the old handler prevents Free from double-freeing the shared resources.
 // Must be called before freeing the old handler.
-func (b *Balancer) nullifyReusedFields(newHandler *PacketHandler, reuseReport *balancerpb.ReuseReport) {
+func (b *Balancer) nullifyReusedFields(
+	newHandler *PacketHandler,
+	reuseReport *balancerpb.ReuseReport,
+) {
 	handler := b.handler
 	services := relptr.Slice(&handler.Vs, handler.Vs_count)
 	for _, vsReuse := range reuseReport.VsReuseReports {
@@ -499,11 +502,19 @@ func (b *Balancer) UpdateReals(updates []*balancerpb.RealUpdate, buffer bool) (i
 		serviceKey := makeVsKey(update.RealId.Vs)
 		serviceSlot, ok := b.vsIndex[serviceKey]
 		if !ok {
-			return 0, status.Errorf(codes.NotFound, "real update at index %d: virtual service not found", updateIdx)
+			return 0, status.Errorf(
+				codes.NotFound,
+				"real update at index %d: virtual service not found",
+				updateIdx,
+			)
 		}
 		realSlot, ok := serviceSlot.realSlots[makeRealKey(update.RealId.Real)]
 		if !ok {
-			return 0, status.Errorf(codes.NotFound, "real update at index %d: real not found", updateIdx)
+			return 0, status.Errorf(
+				codes.NotFound,
+				"real update at index %d: real not found",
+				updateIdx,
+			)
 		}
 		vs := &services[serviceSlot.index]
 		reals := relptr.Slice(&vs.Reals, vs.Reals_count)
@@ -524,7 +535,11 @@ func (b *Balancer) UpdateReals(updates []*balancerpb.RealUpdate, buffer bool) (i
 	for _, idx := range affectedVs {
 		vs := &services[idx]
 		if err := vs.updateRealSelector(&b.handler.Rcu, b.agent); err != nil {
-			return 0, status.Errorf(codes.Internal, "failed to update ring for some virtual services: %v", err)
+			return 0, status.Errorf(
+				codes.Internal,
+				"failed to update ring for some virtual services: %v",
+				err,
+			)
 		}
 	}
 

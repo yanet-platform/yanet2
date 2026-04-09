@@ -61,16 +61,17 @@ ttlmap_bucket_iter_init(struct ttlmap_bucket_iter *iter, struct ttlmap *map) {
 		int __ret = 1;                                                 \
 		if ((iter_ptr)->next_bucket == (iter_ptr)->buckets) {          \
 			__ret = 0;                                             \
+		} else {                                                       \
+			__TTLMAP_ITER_NEXT_BUCKET(                             \
+				(iter_ptr)->map,                               \
+				(iter_ptr)->next_bucket++,                     \
+				key_type,                                      \
+				value_type,                                    \
+				now,                                           \
+				cb,                                            \
+				data                                           \
+			);                                                     \
 		}                                                              \
-		__TTLMAP_ITER_NEXT_BUCKET(                                     \
-			(iter_ptr)->map,                                       \
-			(iter_ptr)->next_bucket++,                             \
-			key_type,                                              \
-			value_type,                                            \
-			now,                                                   \
-			cb,                                                    \
-			data                                                   \
-		);                                                             \
 		__ret;                                                         \
 	})
 
