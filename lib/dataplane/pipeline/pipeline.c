@@ -249,7 +249,7 @@ device_entry_ectx_process(
 
 	if (!entry_ectx->pipeline_map_size) {
 		packet_list_concat(&packet_front->drop, &packet_front->output);
-		packet_list_init(&packet_front->drop);
+		packet_list_init(&packet_front->output);
 		return;
 	}
 
