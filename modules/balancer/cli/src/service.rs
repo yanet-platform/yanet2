@@ -71,11 +71,16 @@ impl BalancerService {
                     let ip = crate::bytes_to_ip(&id.addr)
                         .map(|a| a.to_string())
                         .unwrap_or_else(|_| "?".to_string());
+                    let proto = match balancerpb::TransportProto::try_from(id.proto) {
+                        Ok(balancerpb::TransportProto::Tcp) => "tcp",
+                        Ok(balancerpb::TransportProto::Udp) => "udp",
+                        _ => "?",
+                    };
                     log::info!(
                         "  VS {}:{}/{}: acl_reused={}, selector_reused={}",
                         ip,
                         id.port,
-                        id.proto,
+                        proto,
                         vs_reuse.acl_reused,
                         vs_reuse.selector_reused,
                     );
@@ -113,10 +118,10 @@ impl BalancerService {
         let response = self.client.get_config(request).await?.into_inner();
         log::debug!("get config response: {response:?}");
 
-        let mut json_value = serde_json::to_value(&response)?;
-        display::prettify_ips(&mut json_value);
-        let json = serde_json::to_string_pretty(&json_value)?;
-        println!("{json}");
+        let mut yaml_value = serde_json::to_value(&response)?;
+        display::prettify_ips(&mut yaml_value);
+        let yaml = serde_yaml::to_string(&yaml_value)?;
+        print!("{yaml}");
 
         Ok(())
     }
