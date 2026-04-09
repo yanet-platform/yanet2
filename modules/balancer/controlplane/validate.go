@@ -1,0 +1,351 @@
+package balancer
+
+import (
+	"bytes"
+	"cmp"
+	"fmt"
+	"slices"
+
+	"github.com/yanet-platform/yanet2/common/filterpb"
+	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb"
+)
+
+func compareIPNet(a, b *filterpb.IPNet) int {
+	if c := bytes.Compare(a.Addr, b.Addr); c != 0 {
+		return c
+	}
+	return bytes.Compare(a.Mask, b.Mask)
+}
+
+func comparePortRange(a, b *filterpb.PortRange) int {
+	if c := cmp.Compare(a.From, b.From); c != 0 {
+		return c
+	}
+	return cmp.Compare(a.To, b.To)
+}
+
+func compareAllowedSourcesPb(a, b *balancerpb.AllowedSources) int {
+	if c := cmp.Compare(len(a.Nets), len(b.Nets)); c != 0 {
+		return c
+	}
+	for i := range a.Nets {
+		if c := compareIPNet(a.Nets[i], b.Nets[i]); c != 0 {
+			return c
+		}
+	}
+	if c := cmp.Compare(len(a.Ports), len(b.Ports)); c != 0 {
+		return c
+	}
+	for i := range a.Ports {
+		if c := comparePortRange(a.Ports[i], b.Ports[i]); c != 0 {
+			return c
+		}
+	}
+	return 0
+}
+
+func validateWlcConfig(wlc *balancerpb.WlcConfig) error {
+	if wlc.Power == nil {
+		return fmt.Errorf("power is nil")
+	}
+	if wlc.MaxWeight == nil {
+		return fmt.Errorf("max_weight is nil")
+	}
+	return nil
+}
+
+func validateStateConfig(state *balancerpb.StateConfig) error {
+	if state.SessionTableCapacity == nil {
+		return fmt.Errorf("session_table_capacity is nil")
+	}
+	if *state.SessionTableCapacity == 0 {
+		return fmt.Errorf("session_table_capacity must be greater than 0")
+	}
+	if state.RefreshPeriod == nil {
+		return fmt.Errorf("refresh_period is nil")
+	}
+	if state.SessionTableMaxLoadFactor == nil {
+		return fmt.Errorf("session_table_max_load_factor is nil")
+	}
+	if *state.SessionTableMaxLoadFactor <= 0 || *state.SessionTableMaxLoadFactor > 1 {
+		return fmt.Errorf("session_table_max_load_factor must be between 0 and 1")
+	}
+	if state.Wlc == nil {
+		return fmt.Errorf("wlc config is nil")
+	}
+	if err := validateWlcConfig(state.Wlc); err != nil {
+		return fmt.Errorf("wlc config: %w", err)
+	}
+	return nil
+}
+
+func validateSessionsTimeouts(timeouts *balancerpb.SessionsTimeouts) error {
+	if timeouts.TcpSynAck > MaxSessionTimeout {
+		return fmt.Errorf("tcp_syn_ack must be less than or equal to %d", MaxSessionTimeout)
+	}
+	if timeouts.TcpSyn > MaxSessionTimeout {
+		return fmt.Errorf("tcp_syn must be less than or equal to %d", MaxSessionTimeout)
+	}
+	if timeouts.TcpFin > MaxSessionTimeout {
+		return fmt.Errorf("tcp_fin must be less than or equal to %d", MaxSessionTimeout)
+	}
+	if timeouts.Tcp > MaxSessionTimeout {
+		return fmt.Errorf("tcp must be less than or equal to %d", MaxSessionTimeout)
+	}
+	if timeouts.Udp > MaxSessionTimeout {
+		return fmt.Errorf("udp must be less than or equal to %d", MaxSessionTimeout)
+	}
+	return nil
+}
+
+func validateMask4(mask []byte) error {
+	bits := uint32(mask[0])<<24 | uint32(mask[1])<<16 | uint32(mask[2])<<8 | uint32(mask[3])
+	inverted := ^bits
+	if inverted&(inverted+1) != 0 {
+		return fmt.Errorf("mask is not contiguous")
+	}
+	return nil
+}
+
+func isContiguous8(mask []byte) bool {
+	bits := uint64(0)
+	for i := range 8 {
+		bits |= uint64(mask[i]) << ((7 - i) * 8)
+	}
+	inverted := ^bits
+	return inverted&(inverted+1) == 0
+}
+
+func validateMask6(mask []byte) error {
+	if !isContiguous8(mask[:8]) {
+		return fmt.Errorf("high mask bits are not contiguous")
+	}
+	if !isContiguous8(mask[8:]) {
+		return fmt.Errorf("low mask bits are not contiguous")
+	}
+	return nil
+}
+
+func validateNet(net *filterpb.IPNet, isV6 bool) error {
+	requiredLen := 4
+	if isV6 {
+		requiredLen = 16
+	}
+	if len(net.Addr) != requiredLen {
+		return fmt.Errorf("net.addr must be %d bytes", requiredLen)
+	}
+	if len(net.Mask) != requiredLen {
+		return fmt.Errorf("net.mask must be %d bytes", requiredLen)
+	}
+	if isV6 {
+		if err := validateMask6(net.Mask); err != nil {
+			return fmt.Errorf("IPv6 net mask: %w", err)
+		}
+	} else {
+		if err := validateMask4(net.Mask); err != nil {
+			return fmt.Errorf("IPv4 net mask: %w", err)
+		}
+	}
+	return nil
+}
+
+func validatePortRange(portRange *filterpb.PortRange) error {
+	if portRange.From > portRange.To {
+		return fmt.Errorf("port_range.from must be less than or equal to port_range.to")
+	}
+	if portRange.To > 65535 {
+		return fmt.Errorf("port_range.to must be less than or equal to 65535")
+	}
+	return nil
+}
+
+func validateAllowedSrc(
+	allowedSrc *balancerpb.AllowedSources,
+	isIPv6 bool,
+) error {
+	for i, net := range allowedSrc.Nets {
+		if err := validateNet(net, isIPv6); err != nil {
+			return fmt.Errorf("net at index %d: %w", i, err)
+		}
+	}
+	for i, port := range allowedSrc.Ports {
+		if err := validatePortRange(port); err != nil {
+			return fmt.Errorf("port at index %d: %w", i, err)
+		}
+	}
+	if allowedSrc.Tag != nil && len(*allowedSrc.Tag) > int(AllowedSourceMaxTagLength) {
+		return fmt.Errorf(
+			"tag must be less than or equal to %d characters",
+			AllowedSourceMaxTagLength,
+		)
+	}
+	return nil
+}
+
+func validateReal(real *balancerpb.Real) error {
+	if real.Id == nil {
+		return fmt.Errorf("id is nil")
+	}
+	id := real.Id
+	if len(id.Ip) != 4 && len(id.Ip) != 16 {
+		return fmt.Errorf("id.ip must be 4 or 16 bytes long")
+	}
+	if id.Port != 0 {
+		return fmt.Errorf("only zero ports is currently supported")
+	}
+	if real.Src == nil {
+		return fmt.Errorf("src is nil")
+	}
+	if len(real.Src.Addr) != len(id.Ip) {
+		return fmt.Errorf("src.addr must be the same length as id.ip")
+	}
+	if len(real.Src.Mask) != len(id.Ip) {
+		return fmt.Errorf("src.mask must be the same length as id.ip")
+	}
+	return nil
+}
+
+// validateAllowedSources validates and sorts the allowed sources slice.
+// Side effect: sorts allowedSources in place. canReuseACL depends on this sort order
+// to compare allowed sources element-by-element between old and new configs.
+func validateAllowedSources(allowedSources []*balancerpb.AllowedSources, isIPv6 bool) error {
+	for i, allowedSrc := range allowedSources {
+		if allowedSrc == nil {
+			return fmt.Errorf("allowed_src at index %d is nil", i)
+		}
+		if err := validateAllowedSrc(allowedSrc, isIPv6); err != nil {
+			return fmt.Errorf("allowed_src at index %d: %w", i, err)
+		}
+	}
+	slices.SortFunc(allowedSources, compareAllowedSourcesPb)
+	for i := 1; i < len(allowedSources); i++ {
+		if compareAllowedSourcesPb(allowedSources[i-1], allowedSources[i]) == 0 {
+			return fmt.Errorf("allowed_src repeated")
+		}
+	}
+	return nil
+}
+
+func validateReals(reals []*balancerpb.Real) error {
+	realsMap := make(map[realKey]int, len(reals))
+	for i, rl := range reals {
+		if rl == nil {
+			return fmt.Errorf("real at index %d is nil", i)
+		}
+		if err := validateReal(rl); err != nil {
+			return fmt.Errorf("real at index %d: %w", i, err)
+		}
+		key := makeRealKey(rl.Id)
+		if prevIdx, ok := realsMap[key]; ok {
+			return fmt.Errorf("real at index %d: duplicate of real at index %d", i, prevIdx)
+		}
+		realsMap[key] = i
+	}
+	return nil
+}
+
+func validateVS(vs *balancerpb.VirtualService) error {
+	if vs.Id == nil {
+		return fmt.Errorf("id is nil")
+	}
+	if len(vs.Id.Addr) != 4 && len(vs.Id.Addr) != 16 {
+		return fmt.Errorf("id.addr must be 4 or 16 bytes")
+	}
+	if vs.Scheduler != balancerpb.VsScheduler_SOURCE_HASH &&
+		vs.Scheduler != balancerpb.VsScheduler_ROUND_ROBIN {
+		return fmt.Errorf("scheduler must be SOURCE_HASH or ROUND_ROBIN")
+	}
+	if vs.Id.Proto != balancerpb.TransportProto_TCP &&
+		vs.Id.Proto != balancerpb.TransportProto_UDP {
+		return fmt.Errorf("id.proto must be TCP or UDP")
+	}
+	if vs.Flags == nil {
+		return fmt.Errorf("flags is nil")
+	}
+	if vs.Flags.PureL3 && vs.Id.Port != 0 {
+		return fmt.Errorf("pure_l3 flag is set but port is not 0")
+	}
+	for i, peer := range vs.Peers {
+		if len(peer) != 4 && len(peer) != 16 {
+			return fmt.Errorf("peer at index %d: addr must be 4 or 16 bytes long", i)
+		}
+	}
+	if err := validateAllowedSources(vs.AllowedSrcs, len(vs.Id.Addr) == 16); err != nil {
+		return err
+	}
+	if err := validateReals(vs.Reals); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validatePacketHandlerConfig(config *balancerpb.PacketHandlerConfig) error {
+	if len(config.SourceAddressV4) != 4 {
+		return fmt.Errorf("source_address_v4 must be 4 bytes")
+	}
+	if len(config.SourceAddressV6) != 16 {
+		return fmt.Errorf("source_address_v6 must be 16 bytes")
+	}
+	if config.SessionsTimeouts == nil {
+		return fmt.Errorf("sessions_timeouts is nil")
+	}
+	if err := validateSessionsTimeouts(config.SessionsTimeouts); err != nil {
+		return fmt.Errorf("sessions_timeouts: %w", err)
+	}
+	for idx, addr := range config.DecapAddresses {
+		if len(addr) != 4 && len(addr) != 16 {
+			return fmt.Errorf("decap_addresses at index %d: must be 4 or 16 bytes", idx)
+		}
+	}
+	// Side effect: sorts decap addresses by family (IPv4 first, then IPv6), then by value.
+	// decapFiltersReusable depends on this ordering to find the IPv4/IPv6 split point.
+	slices.SortFunc(config.DecapAddresses, func(a, b []byte) int {
+		if c := cmp.Compare(len(a), len(b)); c != 0 {
+			return c
+		}
+		return bytes.Compare(a, b)
+	})
+	for i := 1; i < len(config.DecapAddresses); i++ {
+		if bytes.Equal(config.DecapAddresses[i-1], config.DecapAddresses[i]) {
+			return fmt.Errorf("decap address repeated: %x", config.DecapAddresses[i])
+		}
+	}
+
+	vsMap := make(map[vsKey]int, len(config.Vs))
+	for i, vs := range config.Vs {
+		if vs == nil {
+			return fmt.Errorf("vs at index %d is nil", i)
+		}
+		if err := validateVS(vs); err != nil {
+			return fmt.Errorf("vs at index %d: %w", i, err)
+		}
+		key := makeVsKey(vs.Id)
+		if prevIdx, ok := vsMap[key]; ok {
+			return fmt.Errorf("vs at index %d: duplicated at index %d", prevIdx, i)
+		}
+		vsMap[key] = i
+	}
+
+	return nil
+}
+
+// validateBalancerConfig checks that all required fields are present
+// for creating a new balancer.
+func validateBalancerConfig(config *balancerpb.BalancerConfig) error {
+	if config == nil {
+		return fmt.Errorf("config is nil")
+	}
+	if config.PacketHandler == nil {
+		return fmt.Errorf("packet_handler is nil")
+	}
+	if err := validatePacketHandlerConfig(config.PacketHandler); err != nil {
+		return fmt.Errorf("packet_handler: %w", err)
+	}
+	if config.State == nil {
+		return fmt.Errorf("state is nil")
+	}
+	if err := validateStateConfig(config.State); err != nil {
+		return fmt.Errorf("state: %w", err)
+	}
+	return nil
+}

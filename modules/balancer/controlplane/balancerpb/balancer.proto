@@ -70,7 +70,7 @@ service Balancer {
 	// Returns detailed information about all active sessions tracked
 	// by the balancer, including client addresses, virtual service
 	// mappings, real server assignments, and timeout information.
-	rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
+	rpc ListSessions(ListSessionsRequest) returns (stream Session);
 
 	// Update real server properties.
 	//
@@ -162,6 +162,12 @@ message SetConfigRequest {
 	BalancerConfig config = 2;
 }
 
+message VsReuseReport {
+	VsIdentifier vs_identifier = 1;
+	bool acl_reused = 2;
+	bool selector_reused = 3;
+}
+
 message ReuseReport {
     // Whether the IPv4 virtual service matcher was reused.
 	//
@@ -182,17 +188,11 @@ message ReuseReport {
 	// Note: Always false when created=true (no previous config to reuse).
 	bool ipv6_vs_matcher_reused = 2;
 
-	// List of virtual services that reused their ACL filters.
-	//
-	// ACL (Access Control List) filters enforce allowed_src rules
-	// for each virtual service. When a VS's allowed_src configuration
-	// hasn't changed, its ACL filter can be reused.
-	//
-	// This list contains the identifiers of VSs where ACL was reused.
-	// VSs not in this list had their ACL filters recompiled.
-	//
-	// Note: Always empty when created=true (no previous config to reuse).
-	repeated VsIdentifier vs_with_acl_reused = 3;
+	bool ipv4_decap_filter_reused = 3;
+
+	bool ipv6_decap_filter_reused = 4;
+
+	repeated VsReuseReport vs_reuse_reports = 5;
 }
 
 // Response to UpdateConfig request.
@@ -201,6 +201,9 @@ message ReuseReport {
 message SetConfigResponse {
 	string name = 1;
 	optional ReuseReport reuse = 2;
+
+	// As resize can be done to the bigger size, it returns the new capacity
+	uint64 session_table_capacity = 3;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -321,7 +324,8 @@ message ListSessionsResponse {
 
 // Request to show memory usage inspection.
 message GetMemoryUsageRequest {
-	// Empty - returns agent-level inspect with all balancers
+	optional string name = 1;
+	optional Filter filter = 2;
 }
 
 // Response containing memory usage inspection.
@@ -395,8 +399,7 @@ message GetStateRequest {
 
 	optional Filter filter = 3;
 
-	bool include_active_sessions = 4;
-	bool include_acl = 5;
+	bool include_counters = 4;
 }
 
 message GetStateResponse { 

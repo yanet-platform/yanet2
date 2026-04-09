@@ -2,7 +2,6 @@
 
 #include <stddef.h>
 
-#include "common/memory.h"
 #include "detail/bucket.h"
 #include "detail/iter.h"
 #include "detail/lock.h"
@@ -42,6 +41,38 @@ typedef struct ttlmap ttlmap_t;
 
 #define TTLMAP_PREFETCH(map_ptr, key_ptr, value_type, ...)                     \
 	__TTLMAP_PREFETCH(map_ptr, key_ptr, value_type, ##__VA_ARGS__)
+
+struct ttlmap_bucket_iter {
+	size_t buckets;
+	size_t next_bucket;
+	struct ttlmap *map;
+};
+
+static inline void
+ttlmap_bucket_iter_init(struct ttlmap_bucket_iter *iter, struct ttlmap *map) {
+	iter->map = map;
+	iter->next_bucket = 0;
+	iter->buckets =
+		map->buckets_exp == (size_t)-1 ? 0 : 1ull << map->buckets_exp;
+}
+
+#define TTLMAP_ITER_NEXT(iter_ptr, key_type, value_type, now, cb, data)        \
+	__extension__({                                                        \
+		int __ret = 1;                                                 \
+		if ((iter_ptr)->next_bucket == (iter_ptr)->buckets) {          \
+			__ret = 0;                                             \
+		}                                                              \
+		__TTLMAP_ITER_NEXT_BUCKET(                                     \
+			(iter_ptr)->map,                                       \
+			(iter_ptr)->next_bucket++,                             \
+			key_type,                                              \
+			value_type,                                            \
+			now,                                                   \
+			cb,                                                    \
+			data                                                   \
+		);                                                             \
+		__ret;                                                         \
+	})
 
 ////////////////////////////////////////////////////////////////////////////////
 

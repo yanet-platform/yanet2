@@ -212,3 +212,9 @@ int
 agent_storage_put(
 	struct agent *agent, const char *name, void *data, size_t size
 );
+
+void *
+agent_alloc(struct agent *agent, size_t size);
+
+void
+agent_free(struct agent *agent, void *ptr, size_t size);

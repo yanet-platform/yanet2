@@ -1,36 +1,35 @@
 package utils
 
-// Test setup utilities for creating balancer test environments with mock dataplane,
-// configuring YANET infrastructure (devices, pipelines, functions), and managing
-// test lifecycle including balancer agent and manager initialization.
-
 import (
 	"fmt"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/yanet-platform/yanet2/common/go/logging"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	mock "github.com/yanet-platform/yanet2/mock/go"
-	"github.com/yanet-platform/yanet2/modules/balancer/agent/balancerpb"
-	balancer "github.com/yanet-platform/yanet2/modules/balancer/agent/go"
-	"go.uber.org/zap/zapcore"
+	balancer "github.com/yanet-platform/yanet2/modules/balancer/controlplane"
+	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb"
 )
 
 var (
-	DeviceName   string = "01:00.0"
-	PipelineName string = "pipeline0"
-	FunctionName string = "function0"
-	ChainName    string = "chain0"
-	BalancerName string = "balancer0"
+	DeviceName   = "01:00.0"
+	PipelineName = "pipeline0"
+	FunctionName = "function0"
+	ChainName    = "chain0"
+	BalancerName = "balancer0"
 )
-
-////////////////////////////////////////////////////////////////////////////////
 
 type TestConfig struct {
 	Mock        *mock.YanetMockConfig
 	Balancer    *balancerpb.BalancerConfig
-	AgentMemory *datasize.ByteSize
+	AgentMemory datasize.ByteSize // 0 means default (4 MB)
+}
+
+type TestSetup struct {
+	Mock     *mock.YanetMock
+	Agent    *balancer.BalancerAgent
+	Balancer *balancer.Balancer
+	Config   *balancerpb.BalancerConfig
 }
 
 func SingleWorkerMockConfig(
@@ -50,145 +49,126 @@ func SingleWorkerMockConfig(
 	}
 }
 
-type TestSetup struct {
-	Mock     *mock.YanetMock
-	Agent    *balancer.BalancerAgent
-	Balancer *balancer.BalancerManager
-}
-
 func Make(config *TestConfig) (*TestSetup, error) {
 	if config.Mock.AgentsMemory < 8*datasize.MB {
 		return nil, fmt.Errorf("CP memory must be at least 8MB")
 	}
-	mock, err := mock.NewYanetMock(config.Mock)
+
+	m, err := mock.NewYanetMock(config.Mock)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create new mock: %v", err)
-	}
-	logLevel := zapcore.InfoLevel
-	sugaredLogger, _, _ := logging.Init(&logging.Config{
-		Level: logLevel,
-	})
-	agentMemory := 4 * datasize.MB
-	if config.AgentMemory != nil {
-		agentMemory = *config.AgentMemory
-	}
-	agent, err := balancer.NewBalancerAgent(
-		mock.SharedMemory(),
-		agentMemory,
-		sugaredLogger,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create new balancer agent: %v", err)
-	}
-	if err := agent.NewBalancerManager(BalancerName, config.Balancer); err != nil {
-		return nil, fmt.Errorf("failed to create new balancer manager: %v", err)
-	}
-	balancer, err := agent.BalancerManager(BalancerName)
-	if err != nil {
-		panic("failed to get balancer after successful creation")
+		return nil, fmt.Errorf("create mock: %w", err)
 	}
 
-	bootstrap, err := mock.SharedMemory().AgentReattach("bootstrap", 0, 1<<20)
+	agentMemory := 4 * datasize.MB
+	if config.AgentMemory != 0 {
+		agentMemory = config.AgentMemory
+	}
+
+	agent, err := balancer.ReattachBalancerAgent(
+		m.SharedMemory(),
+		0,
+		agentMemory,
+	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to attach to bootstrap agent: %v", err)
+		m.Free()
+		return nil, fmt.Errorf("attach balancer agent: %w", err)
+	}
+
+	b, err := balancer.NewBalancer(agent, BalancerName, config.Balancer)
+	if err != nil {
+		m.Free()
+		return nil, fmt.Errorf("create balancer: %w", err)
+	}
+
+	bootstrap, err := m.SharedMemory().AgentReattach("bootstrap", 0, 1<<20)
+	if err != nil {
+		b.Destroy()
+		m.Free()
+		return nil, fmt.Errorf("attach bootstrap agent: %w", err)
 	}
 
 	if err := setupCp(bootstrap); err != nil {
-		return nil, fmt.Errorf("failed to setup controlplane: %v", err)
+		b.Destroy()
+		m.Free()
+		return nil, fmt.Errorf("setup controlplane: %w", err)
 	}
 
 	return &TestSetup{
-		Mock:     mock,
+		Mock:     m,
 		Agent:    agent,
-		Balancer: balancer,
+		Balancer: b,
+		Config:   config.Balancer,
 	}, nil
 }
 
 func setupCp(agent *ffi.Agent) error {
-	{
-		functionConfig := ffi.FunctionConfig{
-			Name: FunctionName,
-			Chains: []ffi.FunctionChainConfig{
-				{
-					Weight: 1,
-					Chain: ffi.ChainConfig{
-						Name: ChainName,
-						Modules: []ffi.ChainModuleConfig{
-							{
-								Type: "balancer",
-								Name: BalancerName,
-							},
+	functionConfig := ffi.FunctionConfig{
+		Name: FunctionName,
+		Chains: []ffi.FunctionChainConfig{
+			{
+				Weight: 1,
+				Chain: ffi.ChainConfig{
+					Name: ChainName,
+					Modules: []ffi.ChainModuleConfig{
+						{
+							Type: "balancer",
+							Name: BalancerName,
 						},
 					},
 				},
 			},
-		}
-
-		if err := agent.UpdateFunction(functionConfig); err != nil {
-			return fmt.Errorf("failed to update function: %w", err)
-		}
+		},
+	}
+	if err := agent.UpdateFunction(functionConfig); err != nil {
+		return fmt.Errorf("update function: %w", err)
 	}
 
-	// update pipelines
-	{
-		inputPipelineConfig := ffi.PipelineConfig{
-			Name:      PipelineName,
-			Functions: []string{FunctionName},
-		}
-
-		dummyPipelineConfig := ffi.PipelineConfig{
-			Name:      "dummy",
-			Functions: []string{},
-		}
-
-		if err := agent.UpdatePipeline(inputPipelineConfig); err != nil {
-			return fmt.Errorf("failed to update pipeline: %w", err)
-		}
-
-		if err := agent.UpdatePipeline(dummyPipelineConfig); err != nil {
-			return fmt.Errorf("failed to update pipeline: %w", err)
-		}
+	inputPipeline := ffi.PipelineConfig{
+		Name:      PipelineName,
+		Functions: []string{FunctionName},
+	}
+	dummyPipeline := ffi.PipelineConfig{
+		Name:      "dummy",
+		Functions: []string{},
+	}
+	if err := agent.UpdatePipeline(inputPipeline); err != nil {
+		return fmt.Errorf("update input pipeline: %w", err)
+	}
+	if err := agent.UpdatePipeline(dummyPipeline); err != nil {
+		return fmt.Errorf("update dummy pipeline: %w", err)
 	}
 
-	// update devices
-	{
-		deviceConfig := ffi.DeviceConfig{
-			Name: DeviceName,
-			Input: []ffi.DevicePipelineConfig{
-				{
-					Name:   PipelineName,
-					Weight: 1,
-				},
-			},
-			Output: []ffi.DevicePipelineConfig{
-				{
-					Name:   "dummy",
-					Weight: 1,
-				},
-			},
-		}
-
-		if err := agent.UpdatePlainDevices([]ffi.DeviceConfig{deviceConfig}); err != nil {
-			return fmt.Errorf("failed to update pipelines: %w", err)
-		}
+	deviceConfig := ffi.DeviceConfig{
+		Name: DeviceName,
+		Input: []ffi.DevicePipelineConfig{
+			{Name: PipelineName, Weight: 1},
+		},
+		Output: []ffi.DevicePipelineConfig{
+			{Name: "dummy", Weight: 1},
+		},
+	}
+	if err := agent.UpdatePlainDevices([]ffi.DeviceConfig{deviceConfig}); err != nil {
+		return fmt.Errorf("update devices: %w", err)
 	}
 
 	return nil
 }
 
 func (ts *TestSetup) Free() {
-	ts.Balancer.Free()
+	ts.Balancer.Destroy()
 	ts.Mock.Free()
 }
 
-// EnableAllReals enables all real servers in the balancer configuration
 func EnableAllReals(t *testing.T, ts *TestSetup) {
 	t.Helper()
 
-	config := ts.Balancer.Config()
-	var updates []*balancerpb.RealUpdate
-	enableTrue := true
+	config := ts.Config
+	if config.PacketHandler == nil {
+		return
+	}
 
+	enableTrue := true
+	var updates []*balancerpb.RealUpdate
 	for _, vs := range config.PacketHandler.Vs {
 		for _, real := range vs.Reals {
 			updates = append(updates, &balancerpb.RealUpdate{
@@ -204,5 +184,14 @@ func EnableAllReals(t *testing.T, ts *TestSetup) {
 	_, err := ts.Balancer.UpdateReals(updates, false)
 	if err != nil {
 		t.Fatalf("failed to enable reals: %v", err)
+	}
+}
+
+func StateRef() *balancerpb.PacketHandlerRef {
+	return &balancerpb.PacketHandlerRef{
+		Device:   &DeviceName,
+		Pipeline: &PipelineName,
+		Function: &FunctionName,
+		Chain:    &ChainName,
 	}
 }

@@ -1,8 +1,10 @@
 #pragma once
 
-#include <stdint.h>
-#include <stddef.h>
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
+#include "common/network.h"
 
 #include "selector.h"
 
@@ -12,13 +14,54 @@ enum balancer_vs_flags {
 	balancer_vs_gre = 1u << 2,
 	balancer_vs_ops = 1u << 3,
 	balancer_vs_wlc = 1u << 4,
+	balancer_vs_removed = 1u << 5,
+	balancer_vs_round_robin = 1u << 6,
 };
 
 struct filter;
+struct filter_port_range;
+struct balancer_real;
+struct balancer_real_selector;
 
+enum {
+	balancer_vs_acl_max_tag_len = 20,
+};
+
+struct balancer_vs_allowed_source {
+	struct net *nets;
+	uint32_t nets_count;
+
+	struct filter_port_range *port_ranges;
+	uint32_t port_ranges_count;
+
+	char tag[balancer_vs_acl_max_tag_len + 1];
+};
+
+/*
+ * Reals within a VS are stored in a contiguous array with stable
+ * positions. Each position has a fixed config index that never
+ * changes across config updates:
+ *
+ *  - When a real is replaced at position N, the new real occupies
+ *    the same slot with an incremented epoch in its stable_idx.
+ *  - When a real is removed, the slot is marked removed=true
+ *    but not compacted.
+ *  - When a new real is added, it may reuse a removed slot or
+ *    be appended at the end.
+ *
+ * Sessions in the session table store the real's stable_idx,
+ * which encodes (epoch << 32) | config_index. On session reuse,
+ * the dataplane extracts the config index for O(1) array access
+ * and compares the full stable_idx to detect replacements.
+ */
 struct balancer_vs {
+	struct balancer_real *reals;
+	uint32_t reals_count;
+
+	uint64_t stable_idx;
 	uint64_t counter_id;
-	struct balancer_real_selector selector;
+
+	struct balancer_real_selector *selector;
 	struct filter *acl;
 
 	/*
@@ -26,13 +69,28 @@ struct balancer_vs {
 	 * so we can allocate a single array for all rules
 	 * in the shared memory without fragmentation issues.
 	 */
-	uint64_t *rule_counters;
+	uint64_t *rule_counter_ids;
 
-	size_t reals_count;
-	size_t first_real_idx;
-	uint8_t flags;
+	uint16_t flags;
 
-	bool acl_reused;
+	/* ---Controlplane data --- */
+
+	/* To separate dataplane and controlplane cachelines. */
+	uint8_t __padding[64];
+
+	struct net_addr addr;
+	uint8_t ip_proto;
+	uint16_t port;
+	uint8_t transport_proto;
+
+	struct net4_addr *peers_v4;
+	uint32_t peers_v4_count;
+
+	struct net6_addr *peers_v6;
+	uint32_t peers_v6_count;
+
+	struct balancer_vs_allowed_source *allowed_sources;
+	uint32_t allowed_sources_count;
 };
 
 /**

@@ -1,7 +1,7 @@
 #pragma once
 
-#include "lib/counters/counters.h"
 #include "common/memory_address.h"
+#include "lib/counters/counters.h"
 
 #include "dataplane.h"
 #include "types/vs.h"
@@ -24,16 +24,13 @@ vs_get_acl_stats(
 	struct counter_storage *counter_storage,
 	uint32_t rule_idx
 ) {
-	return counter_get_address(
-		ADDR_OF(&vs->rule_counters)[rule_idx], worker, counter_storage
-	);
-}
-
-static inline struct balancer_vs *
-packet_handler_get_vs(
-	struct balancer_packet_handler *packet_handler, size_t id
-) {
-	return (struct balancer_vs *)big_array_get(
-		&packet_handler->vs, id * sizeof(struct balancer_vs)
-	);
+	// Rule counter is undefined if tag is empty
+	uint64_t id = ADDR_OF(&vs->rule_counter_ids)[rule_idx];
+	return id != (uint64_t)-1
+		       ? counter_get_address(
+				 ADDR_OF(&vs->rule_counter_ids)[rule_idx],
+				 worker,
+				 counter_storage
+			 )
+		       : NULL;
 }

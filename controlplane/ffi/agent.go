@@ -20,9 +20,12 @@ package ffi
 //#include "api/agent.h"
 //#include "controlplane/agent/agent.h"
 import "C"
+
 import (
 	"fmt"
 	"unsafe"
+
+	"github.com/c2h5oh/datasize"
 )
 
 // ModuleConfig is a Go wrapper around a C cp_module pointer, representing a
@@ -375,4 +378,57 @@ func (m *Agent) DeleteModuleConfig(configName string) error {
 		return m.TakeError()
 	}
 	return nil
+}
+
+// Alloc allocates memory for a single value of type T and returns a pointer to it.
+func Alloc[T any](m *Agent) *T {
+	var zero T
+	size := unsafe.Sizeof(zero)
+	ptr := m.AllocRaw(datasize.ByteSize(size))
+	if ptr == nil {
+		return nil
+	}
+	return (*T)(ptr)
+}
+
+// Free frees memory for a single value of type T.
+func Free[T any](m *Agent, ptr *T) {
+	var zero T
+	size := unsafe.Sizeof(zero)
+	m.FreeRaw(unsafe.Pointer(ptr), datasize.ByteSize(size))
+}
+
+// AllocSlice allocates a contiguous block of memory for `count` elements of type T
+// and returns it as a Go slice (backed by the allocated memory).
+func AllocSlice[T any](m *Agent, count int) []T {
+	var zero T
+	elemSize := unsafe.Sizeof(zero)
+	totalSize := elemSize * uintptr(count)
+	ptr := m.AllocRaw(datasize.ByteSize(totalSize))
+	if ptr == nil {
+		return nil
+	}
+	return unsafe.Slice((*T)(ptr), count)
+}
+
+// FreeSlice frees memory previously allocated with AllocSlice.
+func FreeSlice[T any](m *Agent, s []T) {
+	if len(s) == 0 {
+		return
+	}
+	var zero T
+	elemSize := unsafe.Sizeof(zero)
+	totalSize := elemSize * uintptr(cap(s))
+	ptr := unsafe.Pointer(unsafe.SliceData(s))
+	m.FreeRaw(ptr, datasize.ByteSize(totalSize))
+}
+
+// AllocRaw still exposes the raw byte-size allocation if needed.
+func (m *Agent) AllocRaw(size datasize.ByteSize) unsafe.Pointer {
+	return C.agent_alloc(m.ptr, C.size_t(size))
+}
+
+// FreeRaw still exposes the raw byte-size free if needed.
+func (m *Agent) FreeRaw(ptr unsafe.Pointer, size datasize.ByteSize) {
+	C.agent_free(m.ptr, ptr, C.size_t(size))
 }

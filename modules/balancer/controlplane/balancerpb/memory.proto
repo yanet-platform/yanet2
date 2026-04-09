@@ -34,14 +34,12 @@ message PacketHandlerVsUsage {
 	uint64 matcher = 1;
 	uint64 summary_vs = 2;
 	repeated NamedVsUsage vs = 3;
-	uint64 announce = 4;
-	uint64 index = 5;
-	uint64 total = 6;
+	uint64 index = 4;
+	uint64 total = 5;
 }
 
 message PacketHandlerUsage {
-	PacketHandlerVsUsage vs_ipv4 = 1;
-	PacketHandlerVsUsage vs_ipv6 = 2;
+	repeated NamedVsUsage vs = 1;
 	uint64 summary_vs = 3;
 	uint64 vs_index = 4;
 	uint64 reals_index = 5;
@@ -53,20 +51,14 @@ message PacketHandlerUsage {
 
 message BalancerMemoryUsage {
 	string name = 1;
-
 	PacketHandlerUsage packet_handler = 2;
-
 	uint64 session_table = 3;
-
 	uint64 other = 4;
-
 	uint64 total = 5;
 }
 
 message AgentMemoryUsage {
 	uint64 memory_limit = 1;
-	
 	uint64 memory_usage = 2;
-
 	repeated BalancerMemoryUsage balancers = 3;
 }

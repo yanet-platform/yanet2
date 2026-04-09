@@ -1,19 +1,24 @@
 #include <netinet/in.h>
+#include <rte_ether.h>
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "common/container_of.h"
 #include "common/memory_address.h"
 
+#include "lib/counters/counters.h"
 #include "lib/dataplane/config/zone.h"
 #include "lib/dataplane/module/packet_front.h"
 #include "lib/dataplane/pipeline/econtext.h"
 
-#include "batch.h"
+#include "types/stats.h"
+
 #include "context.h"
 #include "dataplane.h"
+
 #include "icmp/handle.h"
 #include "l4/handle.h"
+
+#define MAX_BATCH_SIZE 64
 
 typedef void (*batch_handler)(
 	struct worker_context *context,
@@ -48,6 +53,11 @@ batcher_flush(struct packet_batcher *batcher, struct worker_context *context) {
 	}
 }
 
+static uint64_t *
+context_get_counter(struct worker_context *context, uint64_t counter_id) {
+	return counter_get_address(counter_id, context->worker_idx, context->counter_storage);
+}
+
 static void
 build_context(
 	struct worker_context *ctx,
@@ -55,14 +65,21 @@ build_context(
 	struct module_ectx *module_ectx,
 	struct packet_front *packet_front
 ) {
-	ctx->packet_front = packet_front;
-	ctx->packet_handler = container_of(
+	struct balancer_packet_handler *packet_handler = container_of(
 		ADDR_OF(&module_ectx->cp_module),
 		struct balancer_packet_handler,
 		cp_module
 	);
+	ctx->packet_handler = packet_handler;
+	ctx->packet_front = packet_front;
 	ctx->counter_storage = ADDR_OF(&module_ectx->counter_storage);
 	ctx->worker_idx = dp_worker->idx;
+	ctx->now = dp_worker->current_time / (1000 * 1000 * 1000); /* ns -> s */
+
+	ctx->common_stats = (struct balancer_common_stats *)context_get_counter(ctx, packet_handler->common_counter_id);
+	ctx->icmp_v4_stats = (struct balancer_icmp_stats *)context_get_counter(ctx, packet_handler->icmp_v4_counter_id);
+	ctx->icmp_v6_stats = (struct balancer_icmp_stats *)context_get_counter(ctx, packet_handler->icmp_v6_counter_id);
+	ctx->l4_stats = (struct balancer_l4_stats *)context_get_counter(ctx, packet_handler->l4_counter_id);
 }
 
 void
@@ -93,16 +110,21 @@ balancer_handle_packets(
 		[icmp_ipv6] = {.handler = balancer_handle_icmp_ipv6},
 	};
 
+	context.common_stats->incoming_packets += packet_front->input.count;
+
 	struct packet *packet;
 	while ((packet = packet_list_pop(&packet_front->input)) != NULL) {
-		int is_ipv6 = packet->network_header.type == IPPROTO_IPV6;
+		context.common_stats->incoming_bytes += packet->mbuf->pkt_len;
+
+		int is_ipv6 = packet->network_header.type ==
+			      rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6);
 		int is_icmp = packet->transport_header.type == IPPROTO_ICMP ||
-			packet->transport_header.type == IPPROTO_ICMPV6;
+			      packet->transport_header.type == IPPROTO_ICMPV6;
 		int idx = is_icmp * 2 + is_ipv6;
 		batcher_add(&batchers[idx], &context, packet);
 	}
 
-	for (int i = 0; i < batcher_count; i++) {
+	for (int i = 0; i < batcher_count; ++i) {
 		batcher_flush(&batchers[i], &context);
 	}
 }

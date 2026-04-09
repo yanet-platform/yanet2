@@ -1942,3 +1942,13 @@ yanet_module_performance_counters_free(
 		free(counters->counters);
 	}
 }
+
+void *
+agent_alloc(struct agent *agent, size_t size) {
+	return memory_balloc(&agent->memory_context, size);
+}
+
+void
+agent_free(struct agent *agent, void *ptr, size_t size) {
+	memory_bfree(&agent->memory_context, ptr, size);
+}

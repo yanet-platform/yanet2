@@ -12,7 +12,7 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/internal/gateway"
 
 	acl "github.com/yanet-platform/yanet2/modules/acl/controlplane"
-	balancer "github.com/yanet-platform/yanet2/modules/balancer/agent/go"
+	balancer "github.com/yanet-platform/yanet2/modules/balancer/controlplane"
 	decap "github.com/yanet-platform/yanet2/modules/decap/controlplane"
 	dscp "github.com/yanet-platform/yanet2/modules/dscp/controlplane"
 	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"

@@ -1,328 +1,304 @@
-//! gRPC service client implementation
-
 use std::error::Error;
 
+use ptree::TreeBuilder;
 use tonic::codec::CompressionEncoding;
+
+use yanet_cli_balancer::balancerpb::{
+    self, balancer_client::BalancerClient, FlushRealsRequest, GetConfigRequest, GetStateRequest,
+    ListBalancersRequest, ListSessionsRequest, PacketHandlerRef, RealUpdate, SetConfigRequest, UpdateRealsRequest,
+};
 use ync::client::{ConnectionArgs, LayeredChannel};
 
+use crate::config::BalancerConfig;
+use crate::display;
 use crate::{
-    cmd::*,
-    entities::{BalancerConfig, VsListConfig},
-    output,
-    rpc::{BalancerServiceClient, balancerpb},
+    ip_to_bytes, parse_vs_identifier, ConfigCmd, DisableRealCmd, EnableRealCmd, FlushRealsCmd, ModeCmd, SessionsCmd,
+    ShowCmd, UpdateCmd,
 };
 
-////////////////////////////////////////////////////////////////////////////////
-// Logging macros with custom target
-////////////////////////////////////////////////////////////////////////////////
-
-macro_rules! info {
-    ($($arg:tt)*) => {
-        log::info!(target: "yanet_cli_balancer", $($arg)*)
-    };
-}
-
-////////////////////////////////////////////////////////////////////////////////
-// Service
-////////////////////////////////////////////////////////////////////////////////
-
 pub struct BalancerService {
-    client: BalancerServiceClient<LayeredChannel>,
+    client: BalancerClient<LayeredChannel>,
 }
 
 impl BalancerService {
-    /// Connect to the gRPC endpoint
     pub async fn connect(connection: &ConnectionArgs) -> Result<Self, Box<dyn Error>> {
         let channel = ync::client::connect(connection).await?;
-        let client = BalancerServiceClient::new(channel)
+        let client = BalancerClient::new(channel)
             .send_compressed(CompressionEncoding::Gzip)
             .accept_compressed(CompressionEncoding::Gzip);
         Ok(Self { client })
     }
 
-    /// Handle the command
-    pub async fn handle_cmd(&mut self, mode: Mode) -> Result<(), Box<dyn Error>> {
-        log::trace!("Handling command: {:?}", mode);
-
+    pub async fn handle(&mut self, mode: ModeCmd) -> Result<(), Box<dyn Error>> {
         match mode {
-            Mode::Update(cmd) => self.update_config(cmd).await,
-            Mode::Reals(cmd) => self.handle_reals(cmd).await,
-            Mode::Vs(cmd) => self.handle_vs(cmd).await,
-            Mode::Config(cmd) => self.config(cmd).await,
-            Mode::List(cmd) => self.list(cmd).await,
-            Mode::Stats(cmd) => self.stats(cmd).await,
-            Mode::Info(cmd) => self.info(cmd).await,
-            Mode::Sessions(cmd) => self.sessions(cmd).await,
-            Mode::Graph(cmd) => self.graph(cmd).await,
-            Mode::Inspect(cmd) => self.inspect(cmd).await,
-            Mode::Metrics(cmd) => self.metrics(cmd).await,
+            ModeCmd::Update(cmd) => self.update(cmd).await,
+            ModeCmd::List => self.list().await,
+            ModeCmd::Config(cmd) => self.config(cmd).await,
+            ModeCmd::Show(cmd) => self.show(cmd).await,
+            ModeCmd::Sessions(cmd) => self.sessions(cmd).await,
+            ModeCmd::Reals(cmd) => match cmd.mode {
+                crate::RealsMode::Enable(cmd) => self.enable_real(cmd).await,
+                crate::RealsMode::Disable(cmd) => self.disable_real(cmd).await,
+                crate::RealsMode::Flush(cmd) => self.flush_reals(cmd).await,
+            },
         }
     }
 
-    /// Update balancer configuration
-    async fn update_config(&mut self, cmd: UpdateCmd) -> Result<(), Box<dyn Error>> {
-        info!("Loading configuration from: {}", cmd.config);
+    async fn update(&mut self, cmd: UpdateCmd) -> Result<(), Box<dyn Error>> {
+        let yaml_config = BalancerConfig::from_yaml_file(&cmd.config)?;
+        let proto_config: balancerpb::BalancerConfig = yaml_config.try_into()?;
 
-        let config = BalancerConfig::from_yaml_file(&cmd.config)?;
-        let balancer_config: balancerpb::BalancerConfig = config.try_into()?;
-
-        let request = balancerpb::UpdateConfigRequest {
+        let request = SetConfigRequest {
             name: cmd.name.clone(),
-            config: Some(balancer_config),
+            config: Some(proto_config),
+        };
+        log::trace!("set config request: {request:?}");
+
+        let response = self.client.set_config(request).await?.into_inner();
+        log::debug!("set config response: {response:?}");
+
+        log::info!("Balancer '{}' updated successfully", response.name);
+        if let Some(reuse) = &response.reuse {
+            log::info!(
+                "Reuse: ipv4_vs_matcher={}, ipv6_vs_matcher={}, ipv4_decap={}, ipv6_decap={}",
+                reuse.ipv4_vs_matcher_reused,
+                reuse.ipv6_vs_matcher_reused,
+                reuse.ipv4_decap_filter_reused,
+                reuse.ipv6_decap_filter_reused,
+            );
+            for vs_reuse in &reuse.vs_reuse_reports {
+                if let Some(id) = &vs_reuse.vs_identifier {
+                    let ip = crate::bytes_to_ip(&id.addr).unwrap_or("?".parse().unwrap());
+                    log::info!(
+                        "  VS {}:{}/{}: acl_reused={}, selector_reused={}",
+                        ip,
+                        id.port,
+                        id.proto,
+                        vs_reuse.acl_reused,
+                        vs_reuse.selector_reused,
+                    );
+                }
+            }
+        }
+        if response.session_table_capacity > 0 {
+            log::info!("Session table capacity: {}", response.session_table_capacity);
+        }
+
+        Ok(())
+    }
+
+    async fn list(&mut self) -> Result<(), Box<dyn Error>> {
+        let request = ListBalancersRequest {};
+        log::trace!("list balancers request: {request:?}");
+
+        let response = self.client.list_balancers(request).await?.into_inner();
+        log::debug!("list balancers response: {response:?}");
+
+        let mut tree = TreeBuilder::new("Balancers".to_string());
+        for name in &response.names {
+            tree.add_empty_child(name.clone());
+        }
+        let tree = tree.build();
+        ptree::print_tree(&tree)?;
+
+        Ok(())
+    }
+
+    async fn config(&mut self, cmd: ConfigCmd) -> Result<(), Box<dyn Error>> {
+        let request = GetConfigRequest { name: cmd.name };
+        log::trace!("get config request: {request:?}");
+
+        let response = self.client.get_config(request).await?.into_inner();
+        log::debug!("get config response: {response:?}");
+
+        let json = serde_json::to_string_pretty(&response)?;
+        println!("{json}");
+
+        Ok(())
+    }
+
+    async fn show(&mut self, cmd: ShowCmd) -> Result<(), Box<dyn Error>> {
+        let is_detail = cmd.is_detail();
+
+        let packet_handler_ref = if cmd.device.is_some()
+            || cmd.pipeline.is_some()
+            || cmd.function.is_some()
+            || cmd.chain.is_some()
+        {
+            Some(PacketHandlerRef {
+                device: cmd.device,
+                pipeline: cmd.pipeline,
+                function: cmd.function,
+                chain: cmd.chain,
+            })
+        } else {
+            None
         };
 
-        log::debug!("Sending UpdateConfig request");
-        let response = self.client.update_config(request).await?.into_inner();
+        let request = GetStateRequest {
+            name: cmd.name,
+            packet_handler_ref,
+            filter: cmd.filter.to_proto(),
+            include_counters: is_detail,
+        };
+        log::trace!("get state request: {request:?}");
 
-        info!("Successfully updated configuration for '{}'", cmd.name);
+        let response = self.client.get_state(request).await?.into_inner();
+        log::debug!("get state response: {response:?}");
 
-        // Display update information if available
-        if let Some(update_info) = &response.update_info {
-            output::print_update_info(update_info, cmd.format.to_format())?;
+        if response.state.is_empty() {
+            log::info!("No balancer state found");
+            return Ok(());
+        }
+
+        if is_detail {
+            display::print_detail(&response.state);
+        } else {
+            display::print_compact(&response.state);
         }
 
         Ok(())
     }
 
-    /// Handle reals commands
-    async fn handle_reals(&mut self, cmd: RealsCmd) -> Result<(), Box<dyn Error>> {
-        match cmd.mode {
-            RealsMode::Enable(cmd) => self.enable_real(cmd).await,
-            RealsMode::Disable(cmd) => self.disable_real(cmd).await,
-            RealsMode::Flush(cmd) => self.flush_real_updates(cmd).await,
-        }
-    }
-
-    /// Enable a real server
-    async fn enable_real(&mut self, cmd: EnableRealCmd) -> Result<(), Box<dyn Error>> {
-        let flush = cmd.flush;
-        let name = cmd.name.clone();
-
-        let name_display = name.as_deref().unwrap_or("<auto>");
-        info!(
-            "Enabling {} real(s) of VS {} for '{}'",
-            cmd.reals.len(),
-            cmd.vs,
-            name_display
-        );
-
-        let request: balancerpb::UpdateRealsRequest = cmd.try_into()?;
-
-        log::debug!("Sending UpdateReals request");
-        self.client.update_reals(request).await?;
-
-        info!("Successfully buffered real enable");
-
-        // If flush flag is set, immediately flush the updates
-        if flush {
-            let name_display = name.as_deref().unwrap_or("<auto>");
-            info!("Flushing buffered real updates for '{}'", name_display);
-            let flush_request = balancerpb::FlushRealUpdatesRequest { name };
-            let response = self.client.flush_real_updates(flush_request).await?.into_inner();
-            info!("Successfully flushed {} update(s)", response.updates_flushed);
-        }
-
-        Ok(())
-    }
-
-    /// Disable a real server
-    async fn disable_real(&mut self, cmd: DisableRealCmd) -> Result<(), Box<dyn Error>> {
-        let flush = cmd.flush;
-        let name = cmd.name.clone();
-        let reals_count = cmd.reals.len();
-
-        let name_display = name.as_deref().unwrap_or("<auto>");
-        info!(
-            "Disabling {} real(s) of VS {} for '{}'",
-            reals_count, cmd.vs, name_display
-        );
-
-        let request: balancerpb::UpdateRealsRequest = cmd.try_into()?;
-
-        log::debug!("Sending UpdateReals request");
-        self.client.update_reals(request).await?;
-
-        info!("Successfully buffered real disable");
-
-        // If flush flag is set, immediately flush the updates
-        if flush {
-            info!("Flushing buffered real updates");
-            let flush_request = balancerpb::FlushRealUpdatesRequest { name };
-            let response = self.client.flush_real_updates(flush_request).await?.into_inner();
-            info!("Successfully flushed {} update(s)", response.updates_flushed);
-        }
-
-        Ok(())
-    }
-
-    /// Flush buffered real updates
-    async fn flush_real_updates(&mut self, cmd: FlushRealUpdatesCmd) -> Result<(), Box<dyn Error>> {
-        let name_display = cmd.name.as_deref().unwrap_or("<auto>");
-        info!("Flushing buffered real updates for '{}'", name_display);
-
-        let request: balancerpb::FlushRealUpdatesRequest = cmd.into();
-
-        log::debug!("Sending FlushRealUpdates request");
-        let response = self.client.flush_real_updates(request).await?.into_inner();
-
-        info!("Successfully flushed {} update(s)", response.updates_flushed);
-        Ok(())
-    }
-
-    /// Show balancer configuration
-    async fn config(&mut self, cmd: ConfigCmd) -> Result<(), Box<dyn Error>> {
-        let name_display = cmd.name.as_deref().unwrap_or("<auto>");
-        log::debug!("Fetching configuration for '{}'", name_display);
-
-        let request: balancerpb::ShowConfigRequest = (&cmd).into();
-        let response = self.client.show_config(request).await?.into_inner();
-
-        output::print_show_config(&response, cmd.format.to_format())?;
-        Ok(())
-    }
-
-    /// List all balancer configurations
-    async fn list(&mut self, cmd: ListCmd) -> Result<(), Box<dyn Error>> {
-        log::debug!("Fetching all configurations");
-
-        let request = balancerpb::ListConfigsRequest {};
-        let response = self.client.list_configs(request).await?.into_inner();
-
-        output::print_list_configs(&response, cmd.format.to_format())?;
-        Ok(())
-    }
-
-    /// Show configuration statistics
-    async fn stats(&mut self, cmd: StatsCmd) -> Result<(), Box<dyn Error>> {
-        let name_display = cmd.name.as_deref().unwrap_or("<auto>");
-        log::debug!("Fetching statistics for '{}'", name_display);
-
-        let request: balancerpb::ShowStatsRequest = (&cmd).into();
-        let response = self.client.show_stats(request).await?.into_inner();
-
-        output::print_show_stats(&response, cmd.format.to_format())?;
-        Ok(())
-    }
-
-    /// Show state information
-    async fn info(&mut self, cmd: InfoCmd) -> Result<(), Box<dyn Error>> {
-        let name_display = cmd.name.as_deref().unwrap_or("<auto>");
-        log::debug!("Fetching state info for '{}'", name_display);
-
-        let request: balancerpb::ShowInfoRequest = (&cmd).into();
-        let response = self.client.show_info(request).await?.into_inner();
-
-        output::print_show_info(&response, cmd.format.to_format())?;
-        Ok(())
-    }
-
-    /// Show sessions information
     async fn sessions(&mut self, cmd: SessionsCmd) -> Result<(), Box<dyn Error>> {
-        let name_display = cmd.name.as_deref().unwrap_or("<auto>");
-        log::debug!("Fetching sessions info for '{}'", name_display);
+        let request = ListSessionsRequest {
+            name: cmd.name,
+            filter: cmd.filter.to_proto(),
+        };
+        log::trace!("list sessions request: {request:?}");
 
-        let request: balancerpb::ShowSessionsRequest = (&cmd).into();
-        let response = self.client.show_sessions(request).await?.into_inner();
+        let mut stream = self.client.list_sessions(request).await?.into_inner();
 
-        output::print_show_sessions(&response, cmd.format.to_format())?;
-        Ok(())
-    }
-
-    async fn graph(&mut self, cmd: GraphCmd) -> Result<(), Box<dyn Error>> {
-        let name_display = cmd.name.as_deref().unwrap_or("<auto>");
-        log::debug!("Fetching graph info for '{}'", name_display);
-
-        let request: balancerpb::ShowGraphRequest = (&cmd).into();
-        let response = self.client.show_graph(request).await?.into_inner();
-
-        output::print_show_graph(&response, cmd.format.to_format())?;
-        Ok(())
-    }
-
-    /// Show memory usage inspection
-    async fn inspect(&mut self, cmd: InspectCmd) -> Result<(), Box<dyn Error>> {
-        log::debug!("Fetching memory inspection");
-
-        let request: balancerpb::ShowInspectRequest = (&cmd).into();
-        let response = self.client.show_inspect(request).await?.into_inner();
-
-        output::print_show_inspect(&response, cmd.format.to_format())?;
-        Ok(())
-    }
-
-    /// Metrics
-    async fn metrics(&mut self, cmd: MetricsCmd) -> Result<(), Box<dyn Error>> {
-        log::debug!("Fetching metrics");
-        let request: balancerpb::GetMetricsRequest = (&cmd).into();
-        let response = self.client.get_metrics(request).await?.into_inner();
-        let s = serde_json::to_string(&response)?;
-        println!("{}", s);
-        Ok(())
-    }
-
-    /// Handle VS commands
-    async fn handle_vs(&mut self, cmd: VsCmd) -> Result<(), Box<dyn Error>> {
-        match cmd.mode {
-            VsMode::Update(cmd) => self.update_vs(cmd).await,
-            VsMode::Delete(cmd) => self.delete_vs(cmd).await,
+        display::print_sessions_header();
+        while let Some(session) = stream.message().await? {
+            display::print_session(&session);
         }
+
+        Ok(())
     }
 
-    /// Update virtual services
-    async fn update_vs(&mut self, cmd: UpdateVsCmd) -> Result<(), Box<dyn Error>> {
-        let name_display = cmd.name.as_deref().unwrap_or("<auto>");
-        info!("Loading VS configuration from: {}", cmd.config);
+    async fn enable_real(&mut self, cmd: EnableRealCmd) -> Result<(), Box<dyn Error>> {
+        let (ip, port, proto) = parse_vs_identifier(&cmd.vs)?;
+        let vs_id = balancerpb::VsIdentifier {
+            addr: ip_to_bytes(ip),
+            port: port as u32,
+            proto: proto as i32,
+        };
 
-        let vs_config = VsListConfig::from_yaml_file(&cmd.config)?;
-        let vs_count = vs_config.vs.len();
+        let updates: Vec<RealUpdate> = cmd
+            .reals
+            .iter()
+            .map(|r| {
+                let real_ip: std::net::IpAddr = r.parse().map_err(|e| format!("invalid real IP '{}': {}", r, e))?;
+                Ok(RealUpdate {
+                    real_id: Some(balancerpb::RealIdentifier {
+                        vs: Some(vs_id.clone()),
+                        real: Some(balancerpb::RelativeRealIdentifier {
+                            ip: ip_to_bytes(real_ip),
+                            port: 0,
+                        }),
+                    }),
+                    enable: Some(true),
+                    weight: cmd.weight,
+                })
+            })
+            .collect::<Result<Vec<_>, String>>()?;
 
-        // Convert VirtualService entities to protobuf
-        let vs_list: Result<Vec<balancerpb::VirtualService>, String> =
-            vs_config.vs.into_iter().map(TryInto::try_into).collect();
-        let vs_list = vs_list?;
+        let request = UpdateRealsRequest {
+            name: cmd.name,
+            updates,
+            buffer: !cmd.flush,
+        };
+        log::trace!("update reals request: {request:?}");
 
-        let request = balancerpb::UpdateVsRequest { name: cmd.name.clone(), vs: vs_list };
+        let response = self.client.update_reals(request).await?.into_inner();
+        log::debug!("update reals response: {response:?}");
 
-        log::debug!("Sending UpdateVS request for '{}'", name_display);
-        let response = self.client.update_vs(request).await?.into_inner();
+        if response.updates_buffered > 0 {
+            log::info!(
+                "Balancer '{}': {} updates buffered (use 'reals flush' to apply)",
+                response.name,
+                response.updates_buffered
+            );
+        }
+        if response.updates_applied > 0 {
+            log::info!(
+                "Balancer '{}': {} updates applied",
+                response.name,
+                response.updates_applied
+            );
+        }
 
-        info!(
-            "Successfully updated {} virtual service(s) for '{}'",
-            vs_count, response.name
+        Ok(())
+    }
+
+    async fn disable_real(&mut self, cmd: DisableRealCmd) -> Result<(), Box<dyn Error>> {
+        let (ip, port, proto) = parse_vs_identifier(&cmd.vs)?;
+        let vs_id = balancerpb::VsIdentifier {
+            addr: ip_to_bytes(ip),
+            port: port as u32,
+            proto: proto as i32,
+        };
+
+        let updates: Vec<RealUpdate> = cmd
+            .reals
+            .iter()
+            .map(|r| {
+                let real_ip: std::net::IpAddr = r.parse().map_err(|e| format!("invalid real IP '{}': {}", r, e))?;
+                Ok(RealUpdate {
+                    real_id: Some(balancerpb::RealIdentifier {
+                        vs: Some(vs_id.clone()),
+                        real: Some(balancerpb::RelativeRealIdentifier {
+                            ip: ip_to_bytes(real_ip),
+                            port: 0,
+                        }),
+                    }),
+                    enable: Some(false),
+                    weight: None,
+                })
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+
+        let request = UpdateRealsRequest {
+            name: cmd.name,
+            updates,
+            buffer: !cmd.flush,
+        };
+        log::trace!("update reals request: {request:?}");
+
+        let response = self.client.update_reals(request).await?.into_inner();
+        log::debug!("update reals response: {response:?}");
+
+        if response.updates_buffered > 0 {
+            log::info!(
+                "Balancer '{}': {} updates buffered (use 'reals flush' to apply)",
+                response.name,
+                response.updates_buffered
+            );
+        }
+        if response.updates_applied > 0 {
+            log::info!(
+                "Balancer '{}': {} updates applied",
+                response.name,
+                response.updates_applied
+            );
+        }
+
+        Ok(())
+    }
+
+    async fn flush_reals(&mut self, cmd: FlushRealsCmd) -> Result<(), Box<dyn Error>> {
+        let request = FlushRealsRequest { name: cmd.name };
+        log::trace!("flush reals request: {request:?}");
+
+        let response = self.client.flush_reals(request).await?.into_inner();
+        log::debug!("flush reals response: {response:?}");
+
+        log::info!(
+            "Balancer '{}': {} updates flushed",
+            response.name,
+            response.updates_flushed
         );
-
-        // Display update information
-        if let Some(update_info) = &response.info {
-            output::print_vs_update_info(update_info, cmd.format.to_format(), output::VsOperation::Update)?;
-        }
-
-        Ok(())
-    }
-
-    /// Delete virtual services
-    async fn delete_vs(&mut self, cmd: DeleteVsCmd) -> Result<(), Box<dyn Error>> {
-        // Extract values before moving cmd
-        let name_for_display = cmd.name.clone();
-        let name_display = name_for_display.as_deref().unwrap_or("<auto>");
-        let vs_count = cmd.vs.len();
-        let format = cmd.format.to_format();
-
-        info!("Deleting {} virtual service(s) from '{}'", vs_count, name_display);
-
-        let request: balancerpb::DeleteVsRequest = cmd.try_into()?;
-
-        log::debug!("Sending DeleteVS request for '{}'", name_display);
-        let response = self.client.delete_vs(request).await?.into_inner();
-
-        info!(
-            "Successfully deleted {} virtual service(s) from '{}'",
-            vs_count, response.name
-        );
-
-        // Display update information
-        if let Some(update_info) = &response.info {
-            output::print_vs_update_info(update_info, format, output::VsOperation::Delete)?;
-        }
 
         Ok(())
     }

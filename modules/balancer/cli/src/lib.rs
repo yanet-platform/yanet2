@@ -1,8 +1,16 @@
-//! YANET Balancer CLI library
+#[allow(clippy::all, non_snake_case)]
+pub mod filterpb {
+    tonic::include_proto!("filterpb");
+}
 
-pub mod cmd;
-pub mod entities;
-pub mod json_output;
-pub mod output;
-pub mod rpc;
-pub mod service;
+#[allow(clippy::all, non_snake_case)]
+pub mod commonpb {
+    tonic::include_proto!("commonpb");
+}
+
+#[allow(clippy::all, non_snake_case)]
+pub mod balancerpb {
+    tonic::include_proto!("balancerpb");
+}
+
+pub use balancerpb::balancer_client::BalancerClient;

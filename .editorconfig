@@ -1,0 +1,10 @@
+root = true
+
+[*.{c,h}]
+indent_style = tab
+indent_size = 8
+tab_width = 8
+
+[*.proto]
+indent_style = space
+indent_size = 2

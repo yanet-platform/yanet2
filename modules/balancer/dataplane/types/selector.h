@@ -18,6 +18,10 @@ struct balancer_ring {
 	 *
 	 * Stored in a big array because the weighted list can exceed
 	 * the allocator's maximum block size.
+	 *
+	 * TODO: give more accurate comment why we use big array here and why it
+	 * is valid. It is OK to use big array here because every real index
+	 * size is 4 bytes.
 	 */
 	struct big_array real_ids;
 };
@@ -39,9 +43,6 @@ struct balancer_rr_counter {
  * depending on the virtual server scheduler.
  */
 struct balancer_real_selector {
-	/* RCU guard for ring swaps. */
-	rcu_t rcu;
-
 	/* Double-buffered rings. */
 	struct balancer_ring rings[2];
 
@@ -51,6 +52,6 @@ struct balancer_real_selector {
 	/* Non-zero for RR scheduler, zero for hash scheduler. */
 	int use_rr;
 
-	/* Relative pointer to the array of per-worker round-robin counters. */
-	struct balancer_rr_counter *worker_rr_counter;
+	/* Array of per-worker round-robin counters. */
+	struct balancer_rr_counter workers[RCU_WORKERS];
 };

@@ -1,11 +1,12 @@
 use core::error::Error;
 
 pub fn main() -> Result<(), Box<dyn Error>> {
-    println!("cargo:rerun-if-changed=../agent/balancerpb/balancer.proto");
-    println!("cargo:rerun-if-changed=../agent/balancerpb/info.proto");
-    println!("cargo:rerun-if-changed=../agent/balancerpb/module.proto");
-    println!("cargo:rerun-if-changed=../agent/balancerpb/stats.proto");
-    println!("cargo:rerun-if-changed=../agent/balancerpb/graph.proto");
+    println!("cargo:rerun-if-changed=../controlplane/balancerpb/balancer.proto");
+    println!("cargo:rerun-if-changed=../controlplane/balancerpb/common.proto");
+    println!("cargo:rerun-if-changed=../controlplane/balancerpb/filter.proto");
+    println!("cargo:rerun-if-changed=../controlplane/balancerpb/state.proto");
+    println!("cargo:rerun-if-changed=../controlplane/balancerpb/memory.proto");
+    println!("cargo:rerun-if-changed=../../../common/filterpb/filter.proto");
     println!("cargo:rerun-if-changed=../../../common/commonpb/metric.proto");
 
     tonic_build::configure()
@@ -20,11 +21,8 @@ pub fn main() -> Result<(), Box<dyn Error>> {
         .field_attribute("timeout", "#[serde(skip)]")
         .compile_protos(
             &[
-                "modules/balancer/agent/balancerpb/balancer.proto",
-                "modules/balancer/agent/balancerpb/info.proto",
-                "modules/balancer/agent/balancerpb/module.proto",
-                "modules/balancer/agent/balancerpb/stats.proto",
-                "modules/balancer/agent/balancerpb/graph.proto",
+                "modules/balancer/controlplane/balancerpb/balancer.proto",
+                "common/filterpb/filter.proto",
                 "common/commonpb/metric.proto",
             ],
             &["../../.."],

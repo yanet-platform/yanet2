@@ -31,3 +31,18 @@
 		}                                                              \
 		__ret;                                                         \
 	})
+
+#define __TTLMAP_ITER_NEXT_BUCKET(                                             \
+	map_ptr, bucket_idx, key_type, value_type, now, cb, data               \
+)                                                                              \
+	__extension__({                                                        \
+		__TTLMAP_BUCKET_ITER(                                          \
+			map_ptr,                                               \
+			(bucket_idx),                                          \
+			key_type,                                              \
+			value_type,                                            \
+			now,                                                   \
+			cb,                                                    \
+			data                                                   \
+		);                                                             \
+	})
