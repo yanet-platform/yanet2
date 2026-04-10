@@ -133,6 +133,8 @@ impl BalancerService {
         let opts = display::ShowOptions {
             stats: cmd.stats || cmd.detail,
             acl: cmd.acl || cmd.detail,
+            peers: cmd.peers || cmd.detail,
+            decap: cmd.decap || cmd.detail,
         };
 
         let packet_handler_ref =

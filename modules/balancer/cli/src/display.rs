@@ -187,6 +187,8 @@ fn push_icmp_rows(rows: &mut Vec<StatsRow>, category: &str, icmp: &balancerpb::I
 pub struct ShowOptions {
     pub stats: bool,
     pub acl: bool,
+    pub peers: bool,
+    pub decap: bool,
 }
 
 pub fn print_table_view(states: &[balancerpb::BalancerState], opts: &ShowOptions) {
@@ -210,6 +212,10 @@ fn print_table_view_state(state: &balancerpb::BalancerState, opts: &ShowOptions)
         }
     }
     println!();
+
+    if opts.decap {
+        print_decap(state);
+    }
 
     if opts.stats {
         print_module_stats(state);
@@ -247,6 +253,10 @@ fn print_table_view_vs(vs: &balancerpb::VsState, opts: &ShowOptions) {
         }
     }
 
+    if opts.peers {
+        print_vs_peers(vs);
+    }
+
     if opts.acl {
         print_vs_acl(vs, opts.stats);
     }
@@ -264,10 +274,23 @@ fn print_table_view_vs(vs: &balancerpb::VsState, opts: &ShowOptions) {
                 let rs = real.real_stats.as_ref();
                 Some(RealTableRow::Stats(RealStatsRow {
                     real: real_addr,
+                    enabled: if real.enabled {
+                        "yes".to_string()
+                    } else {
+                        "no".to_string()
+                    },
+                    weight: format!(
+                        "{}/{}",
+                        format_number(real.weight),
+                        format_number(real.effective_weight)
+                    ),
                     packets: format_number(rs.map_or(0, |s| s.packets)),
                     bytes: format_bytes(rs.map_or(0, |s| s.bytes)),
-                    created_sessions: format_number(rs.map_or(0, |s| s.created_sessions)),
-                    active_sessions: format_number(real.active_sessions),
+                    sessions: format!(
+                        "{}/{}",
+                        format_number(rs.map_or(0, |s| s.created_sessions)),
+                        format_number(real.active_sessions)
+                    ),
                     last_packet: real
                         .last_packet_timestamp
                         .as_ref()
@@ -373,16 +396,50 @@ fn print_vs_acl(vs: &balancerpb::VsState, with_stats: bool) {
             let mask = bytes_to_ip(&net.mask)
                 .map(|ip| ip.to_string())
                 .unwrap_or_else(|_| "?".to_string());
-            println!("      Net: {}/{}", addr, mask);
+            println!("    Net: {}/{}", addr, mask);
         }
         for pr in &src.ports {
             if pr.from == pr.to {
-                println!("      Port: {}", pr.from);
+                println!("    Port: {}", pr.from);
             } else {
-                println!("      Ports: {}-{}", pr.from, pr.to);
+                println!("    Ports: {}-{}", pr.from, pr.to);
             }
         }
     }
+}
+
+fn print_vs_peers(vs: &balancerpb::VsState) {
+    if vs.peers.is_empty() {
+        return;
+    }
+    println!("  Peers:");
+    for peer in &vs.peers {
+        if let Ok(ip) = bytes_to_ip(peer) {
+            println!("    {}", ip);
+        }
+    }
+}
+
+fn print_decap(state: &balancerpb::BalancerState) {
+    if !state.source_ipv4.is_empty() {
+        if let Ok(ip) = bytes_to_ip(&state.source_ipv4) {
+            println!("Source IPv4: {}", ip);
+        }
+    }
+    if !state.source_ipv6.is_empty() {
+        if let Ok(ip) = bytes_to_ip(&state.source_ipv6) {
+            println!("Source IPv6: {}", ip);
+        }
+    }
+    if !state.decap_addresses.is_empty() {
+        println!("Decap Addresses:");
+        for addr in &state.decap_addresses {
+            if let Ok(ip) = bytes_to_ip(addr) {
+                println!("  {}", ip);
+            }
+        }
+    }
+    println!();
 }
 
 enum RealTableRow {
@@ -489,19 +546,21 @@ impl StatsRow {
 struct RealStatsRow {
     #[tabled(rename = "Real")]
     real: String,
+    #[tabled(rename = "Ena")]
+    enabled: String,
+    #[tabled(rename = "Weight")]
+    weight: String,
     #[tabled(rename = "Packets")]
     packets: String,
     #[tabled(rename = "Bytes")]
     bytes: String,
-    #[tabled(rename = "Created Sessions")]
-    created_sessions: String,
-    #[tabled(rename = "Active Sessions")]
-    active_sessions: String,
+    #[tabled(rename = "Sessions")]
+    sessions: String,
     #[tabled(rename = "Last Packet")]
     last_packet: String,
-    #[tabled(rename = "Disabled Pkts")]
+    #[tabled(rename = "Disabled")]
     disabled_pkts: String,
-    #[tabled(rename = "ICMP Pkts")]
+    #[tabled(rename = "ICMP")]
     icmp_pkts: String,
 }
 

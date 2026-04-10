@@ -11,35 +11,39 @@ option go_package = "github.com/yanet-platform/yanet2/modules/balancer/controlpl
 message BalancerState {
   string balancer_name = 1;
   PacketHandlerRef ref = 2;
-	L4Stats l4_stats = 3;
-	CommonStats common_stats = 4;
-	IcmpStats icmp_ipv4_stats = 5;
-	IcmpStats icmp_ipv6_stats = 6;
-	uint64 active_sessions = 7;
-	google.protobuf.Timestamp last_packet_timestamp = 8;
-	repeated VsState virtual_services = 9;
+  L4Stats l4_stats = 3;
+  CommonStats common_stats = 4;
+  IcmpStats icmp_ipv4_stats = 5;
+  IcmpStats icmp_ipv6_stats = 6;
+  uint64 active_sessions = 7;
+  google.protobuf.Timestamp last_packet_timestamp = 8;
+  repeated VsState virtual_services = 9;
+  bytes source_ipv4 = 10;
+  bytes source_ipv6 = 11;
+  repeated bytes decap_addresses = 12;
 }
 
 message VsState {
-	VsIdentifier id = 1;
-	VsFlags flags = 2;
+  VsIdentifier id = 1;
+  VsFlags flags = 2;
   VsScheduler scheduler = 3;
-	VsStats stats = 4;
-	uint64 active_sessions = 5;
-	google.protobuf.Timestamp last_packet_timestamp = 6;
-	repeated AllowedSourcesStats allowed_sources = 7;
-	repeated RealState reals = 8;
-	repeated AllowedSources allowed_srcs_config = 9;
+  VsStats stats = 4;
+  uint64 active_sessions = 5;
+  google.protobuf.Timestamp last_packet_timestamp = 6;
+  repeated AllowedSourcesStats allowed_sources = 7;
+  repeated RealState reals = 8;
+  repeated AllowedSources allowed_srcs_config = 9;
+  repeated bytes peers = 10;
 }
 
 message RealState {
-	RelativeRealIdentifier id = 1;
-	RealStats real_stats = 2;
-	uint64 active_sessions = 3;
-	google.protobuf.Timestamp last_packet_timestamp = 4;
-	uint64 weight = 5;
-	uint64 effective_weight = 6;
-	bool enabled = 7;
+  RelativeRealIdentifier id = 1;
+  RealStats real_stats = 2;
+  uint64 active_sessions = 3;
+  google.protobuf.Timestamp last_packet_timestamp = 4;
+  uint64 weight = 5;
+  uint64 effective_weight = 6;
+  bool enabled = 7;
 }
 
 // Layer 4 (TCP/UDP) packet processing statistics.

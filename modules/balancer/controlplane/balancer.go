@@ -406,11 +406,14 @@ func (b *Balancer) buildState(
 	services := relptr.Slice(&b.handler.Vs, b.handler.Vs_count)
 
 	state := &balancerpb.BalancerState{
-		BalancerName:  b.handler.name(),
-		L4Stats:       &balancerpb.L4Stats{},
-		CommonStats:   &balancerpb.CommonStats{},
-		IcmpIpv4Stats: &balancerpb.IcmpStats{},
-		IcmpIpv6Stats: &balancerpb.IcmpStats{},
+		BalancerName:   b.handler.name(),
+		L4Stats:        &balancerpb.L4Stats{},
+		CommonStats:    &balancerpb.CommonStats{},
+		IcmpIpv4Stats:  &balancerpb.IcmpStats{},
+		IcmpIpv6Stats:  &balancerpb.IcmpStats{},
+		SourceIpv4:     append([]byte(nil), b.handler.Source_v4.Bytes[:]...),
+		SourceIpv6:     append([]byte(nil), b.handler.Source_v6.Bytes[:]...),
+		DecapAddresses: restoreDecapAddrs(b.handler),
 	}
 	if position != nil {
 		state.Ref = &balancerpb.PacketHandlerRef{

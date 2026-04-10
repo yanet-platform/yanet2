@@ -486,6 +486,7 @@ func (vs *VS) state(workers uint32, now time.Time) *balancerpb.VsState {
 		ActiveSessions:      activeSessions,
 		LastPacketTimestamp: timestamppb.New(lastPacketTimestamp),
 		AllowedSrcsConfig:   restoreAllowedSources(vs, isV6),
+		Peers:               restorePeers(vs),
 	}
 	return vsState
 }

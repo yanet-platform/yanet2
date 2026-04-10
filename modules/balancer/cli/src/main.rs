@@ -81,7 +81,15 @@ pub struct ShowCmd {
     #[arg(long, short = 'a')]
     pub acl: bool,
 
-    /// Enable all output sections (--table --stats --acl).
+    /// Show peers per VS.
+    #[arg(long)]
+    pub peers: bool,
+
+    /// Show decap addresses and source IPs.
+    #[arg(long)]
+    pub decap: bool,
+
+    /// Enable all output sections (--table --stats --acl --peers --decap).
     #[arg(long, short = 'd')]
     pub detail: bool,
 
@@ -110,7 +118,7 @@ impl ShowCmd {
 
     /// Whether tabled output mode is active.
     pub fn needs_table(&self) -> bool {
-        self.table || self.stats || self.acl || self.detail
+        self.table || self.stats || self.acl || self.peers || self.decap || self.detail
     }
 }
 
