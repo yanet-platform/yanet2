@@ -548,19 +548,19 @@ struct RealStatsRow {
     real: String,
     #[tabled(rename = "Ena")]
     enabled: String,
-    #[tabled(rename = "Weight")]
+    #[tabled(rename = "Wght/Eff")]
     weight: String,
-    #[tabled(rename = "Packets")]
+    #[tabled(rename = "Pkts")]
     packets: String,
     #[tabled(rename = "Bytes")]
     bytes: String,
-    #[tabled(rename = "Sessions")]
+    #[tabled(rename = "Sess Crt/Act")]
     sessions: String,
-    #[tabled(rename = "Last Packet")]
+    #[tabled(rename = "Last Pkt")]
     last_packet: String,
-    #[tabled(rename = "Disabled")]
+    #[tabled(rename = "Dis Pkts")]
     disabled_pkts: String,
-    #[tabled(rename = "ICMP")]
+    #[tabled(rename = "ICMP Err")]
     icmp_pkts: String,
 }
 
