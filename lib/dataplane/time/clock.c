@@ -19,7 +19,7 @@ tsc_clock_init(struct tsc_clock *clock) {
 	clock->tsc_to_ns = 1024e9 / rte_get_tsc_hz();
 
 	clock->real_time_ns -=
-		clock->timestamp_counter * clock->tsc_to_ns >> 10;
+		(clock->timestamp_counter >> 10) * clock->tsc_to_ns;
 
 	return 0;
 }
