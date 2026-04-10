@@ -232,6 +232,7 @@ route_mpls_rule_target_create(
 	       0,
 	       sizeof(struct nexthop) * route_mpls_rule->nexthop_count);
 	SET_OFFSET_OF(&target->nexthops, nexthops);
+	target->nexthop_count = route_mpls_rule->nexthop_count;
 
 	uint64_t map_pos = 0;
 
