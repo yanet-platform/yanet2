@@ -21,8 +21,8 @@ pub fn print_compact(state: &balancerpb::BalancerState) {
 
     println!("{:<46}{:<8}Flags", "VirtualService", "Sched");
     println!(
-        "  -> {:<38}{:<6}{:<8}{:<10}{}",
-        "RemoteAddress:Port", "Wght", "EfWght", "Conns", "Enabled"
+        "  -> {:<38}{:<6}{:<8}{:<10}Enabled",
+        "RemoteAddress:Port", "Wght", "EfWght", "Conns",
     );
     println!("{}", "\u{2500}".repeat(LINE_WIDTH));
 
@@ -62,33 +62,7 @@ pub fn print_compact(state: &balancerpb::BalancerState) {
     }
 }
 
-// ─── Detail Output ──────────────────────────────────────────────────────────
-
-pub fn print_detail(states: &[balancerpb::BalancerState]) {
-    for (i, state) in states.iter().enumerate() {
-        if i > 0 {
-            println!();
-        }
-        print_detail_header(state);
-        print_module_stats(state);
-
-        for vs in &state.virtual_services {
-            print_vs_detail(vs);
-        }
-    }
-}
-
-fn print_detail_header(state: &balancerpb::BalancerState) {
-    println!("Balancer: {}", state.balancer_name);
-    if let Some(r) = &state.r#ref {
-        print_ref_inline(r);
-    }
-    println!("Active Sessions: {}", format_number(state.active_sessions));
-    if let Some(ts) = &state.last_packet_timestamp {
-        println!("Last Packet: {}", format_timestamp(ts));
-    }
-    println!();
-}
+// ─── Module Stats ──────────────────────────────────────────────────────────
 
 fn print_module_stats(state: &balancerpb::BalancerState) {
     println!("Module:");
@@ -208,7 +182,45 @@ fn push_icmp_rows(rows: &mut Vec<StatsRow>, category: &str, icmp: &balancerpb::I
     ));
 }
 
-fn print_vs_detail(vs: &balancerpb::VsState) {
+// ─── Table View Output ─────────────────────────────────────────────────────
+
+pub struct ShowOptions {
+    pub stats: bool,
+    pub acl: bool,
+}
+
+pub fn print_table_view(states: &[balancerpb::BalancerState], opts: &ShowOptions) {
+    for (i, state) in states.iter().enumerate() {
+        if i > 0 {
+            println!();
+        }
+        print_table_view_state(state, opts);
+    }
+}
+
+fn print_table_view_state(state: &balancerpb::BalancerState, opts: &ShowOptions) {
+    println!("Balancer: {}", state.balancer_name);
+    if let Some(r) = &state.r#ref {
+        print_ref_inline(r);
+    }
+    if opts.stats {
+        println!("Active Sessions: {}", format_number(state.active_sessions));
+        if let Some(ts) = &state.last_packet_timestamp {
+            println!("Last Packet: {}", format_timestamp(ts));
+        }
+    }
+    println!();
+
+    if opts.stats {
+        print_module_stats(state);
+    }
+
+    for vs in &state.virtual_services {
+        print_table_view_vs(vs, opts);
+    }
+}
+
+fn print_table_view_vs(vs: &balancerpb::VsState, opts: &ShowOptions) {
     let Some(id) = &vs.id else { return };
     let ip = match bytes_to_ip(&id.addr) {
         Ok(ip) => ip,
@@ -216,84 +228,185 @@ fn print_vs_detail(vs: &balancerpb::VsState) {
     };
     let proto = proto_str(id.proto).to_uppercase();
     let addr_port = format_ip_port(ip, id.port);
+    let scheduler = scheduler_str(vs.scheduler);
+    let flags = flags_str(vs.flags.as_ref());
 
     println!("VS {}/{}:", addr_port, proto);
-    println!("  Active Sessions: {}", format_number(vs.active_sessions));
-    if let Some(ts) = &vs.last_packet_timestamp {
-        println!("  Last Packet: {}", format_timestamp(ts));
+    println!("  Scheduler: {}", scheduler);
+    if !flags.is_empty() {
+        println!("  Flags: {}", flags);
     }
 
-    if let Some(stats) = &vs.stats {
-        println!("  Incoming Packets: {}", format_number(stats.incoming_packets));
-        println!("  Incoming Bytes: {}", format_bytes(stats.incoming_bytes));
-        println!("  Outgoing Packets: {}", format_number(stats.outgoing_packets));
-        println!("  Outgoing Bytes: {}", format_bytes(stats.outgoing_bytes));
-        println!("  Created Sessions: {}", format_number(stats.created_sessions));
-        println!(
-            "  Packet Src Not Allowed: {}",
-            format_number(stats.packet_src_not_allowed)
-        );
-        println!("  No Reals: {}", format_number(stats.no_reals));
-        println!(
-            "  Session Table Overflow: {}",
-            format_number(stats.session_table_overflow)
-        );
-        println!("  Echo ICMP Packets: {}", format_number(stats.echo_icmp_packets));
-        println!("  Error ICMP Packets: {}", format_number(stats.error_icmp_packets));
-        println!("  Real Is Disabled: {}", format_number(stats.real_is_disabled));
-        println!("  Real Is Removed: {}", format_number(stats.real_is_removed));
-        println!(
-            "  Not Rescheduled Packets: {}",
-            format_number(stats.not_rescheduled_packets)
-        );
-        println!(
-            "  Broadcasted ICMP Packets: {}",
-            format_number(stats.broadcasted_icmp_packets)
-        );
-    }
-
-    if !vs.allowed_sources.is_empty() {
-        println!("  Allowed Sources:");
-        for acl in &vs.allowed_sources {
-            println!("    Tag {}: {}", acl.tag, format_number(acl.passes));
+    if opts.stats {
+        println!("  Active Sessions: {}", format_number(vs.active_sessions));
+        if let Some(ts) = &vs.last_packet_timestamp {
+            println!("  Last Packet: {}", format_timestamp(ts));
+        }
+        if let Some(stats) = &vs.stats {
+            print_vs_stats(stats);
         }
     }
 
-    let real_rows: Vec<RealStatsRow> = vs
+    if opts.acl {
+        print_vs_acl(vs, opts.stats);
+    }
+
+    // Reals table.
+    let real_rows: Vec<_> = vs
         .reals
         .iter()
         .filter_map(|real| {
             let rid = real.id.as_ref()?;
             let rip = bytes_to_ip(&rid.ip).ok()?;
             let real_addr = format_ip_port(rip, rid.port);
-            let rs = real.real_stats.as_ref();
-            Some(RealStatsRow {
-                real: real_addr,
-                packets: format_number(rs.map_or(0, |s| s.packets)),
-                bytes: format_bytes(rs.map_or(0, |s| s.bytes)),
-                created_sessions: format_number(rs.map_or(0, |s| s.created_sessions)),
-                active_sessions: format_number(real.active_sessions),
-                last_packet: real
-                    .last_packet_timestamp
-                    .as_ref()
-                    .map_or_else(|| "-".to_string(), format_timestamp),
-                disabled_pkts: format_number(rs.map_or(0, |s| s.packets_real_disabled)),
-                icmp_pkts: format_number(rs.map_or(0, |s| s.error_icmp_packets)),
-            })
+
+            if opts.stats {
+                let rs = real.real_stats.as_ref();
+                Some(RealTableRow::Stats(RealStatsRow {
+                    real: real_addr,
+                    packets: format_number(rs.map_or(0, |s| s.packets)),
+                    bytes: format_bytes(rs.map_or(0, |s| s.bytes)),
+                    created_sessions: format_number(rs.map_or(0, |s| s.created_sessions)),
+                    active_sessions: format_number(real.active_sessions),
+                    last_packet: real
+                        .last_packet_timestamp
+                        .as_ref()
+                        .map_or_else(|| "-".to_string(), format_timestamp),
+                    disabled_pkts: format_number(rs.map_or(0, |s| s.packets_real_disabled)),
+                    icmp_pkts: format_number(rs.map_or(0, |s| s.error_icmp_packets)),
+                }))
+            } else {
+                Some(RealTableRow::Basic(RealBasicRow {
+                    real: real_addr,
+                    weight: format_number(real.weight),
+                    effective_weight: format_number(real.effective_weight),
+                    enabled: if real.enabled {
+                        "yes".to_string()
+                    } else {
+                        "no".to_string()
+                    },
+                }))
+            }
         })
         .collect();
 
     if !real_rows.is_empty() {
-        print_table(real_rows);
+        match &real_rows[0] {
+            RealTableRow::Stats(_) => {
+                let rows: Vec<RealStatsRow> = real_rows
+                    .into_iter()
+                    .filter_map(|r| match r {
+                        RealTableRow::Stats(s) => Some(s),
+                        _ => None,
+                    })
+                    .collect();
+                print_table(rows);
+            }
+            RealTableRow::Basic(_) => {
+                let rows: Vec<RealBasicRow> = real_rows
+                    .into_iter()
+                    .filter_map(|r| match r {
+                        RealTableRow::Basic(b) => Some(b),
+                        _ => None,
+                    })
+                    .collect();
+                print_table(rows);
+            }
+        }
     }
     println!();
+}
+
+fn print_vs_stats(stats: &balancerpb::VsStats) {
+    println!("  Incoming Packets: {}", format_number(stats.incoming_packets));
+    println!("  Incoming Bytes: {}", format_bytes(stats.incoming_bytes));
+    println!("  Outgoing Packets: {}", format_number(stats.outgoing_packets));
+    println!("  Outgoing Bytes: {}", format_bytes(stats.outgoing_bytes));
+    println!("  Created Sessions: {}", format_number(stats.created_sessions));
+    println!(
+        "  Packet Src Not Allowed: {}",
+        format_number(stats.packet_src_not_allowed)
+    );
+    println!("  No Reals: {}", format_number(stats.no_reals));
+    println!(
+        "  Session Table Overflow: {}",
+        format_number(stats.session_table_overflow)
+    );
+    println!("  Echo ICMP Packets: {}", format_number(stats.echo_icmp_packets));
+    println!("  Error ICMP Packets: {}", format_number(stats.error_icmp_packets));
+    println!("  Real Is Disabled: {}", format_number(stats.real_is_disabled));
+    println!("  Real Is Removed: {}", format_number(stats.real_is_removed));
+    println!(
+        "  Not Rescheduled Packets: {}",
+        format_number(stats.not_rescheduled_packets)
+    );
+    println!(
+        "  Broadcasted ICMP Packets: {}",
+        format_number(stats.broadcasted_icmp_packets)
+    );
+}
+
+fn print_vs_acl(vs: &balancerpb::VsState, with_stats: bool) {
+    if vs.allowed_srcs_config.is_empty() {
+        return;
+    }
+
+    // Build a map from tag -> passes for stats lookup.
+    let stats_map: std::collections::HashMap<&str, u64> =
+        vs.allowed_sources.iter().map(|s| (s.tag.as_str(), s.passes)).collect();
+
+    println!("  Allowed Sources:");
+    for src in &vs.allowed_srcs_config {
+        let tag = src.tag.as_deref().unwrap_or("");
+        if !tag.is_empty() {
+            if with_stats {
+                let passes = stats_map.get(tag).copied().unwrap_or(0);
+                println!("    Tag: {} (passes: {})", tag, format_number(passes));
+            } else {
+                println!("    Tag: {}", tag);
+            }
+        }
+        for net in &src.nets {
+            let addr = bytes_to_ip(&net.addr)
+                .map(|ip| ip.to_string())
+                .unwrap_or_else(|_| "?".to_string());
+            let mask = bytes_to_ip(&net.mask)
+                .map(|ip| ip.to_string())
+                .unwrap_or_else(|_| "?".to_string());
+            println!("      Net: {}/{}", addr, mask);
+        }
+        for pr in &src.ports {
+            if pr.from == pr.to {
+                println!("      Port: {}", pr.from);
+            } else {
+                println!("      Ports: {}-{}", pr.from, pr.to);
+            }
+        }
+    }
+}
+
+enum RealTableRow {
+    Basic(RealBasicRow),
+    Stats(RealStatsRow),
+}
+
+#[derive(Tabled)]
+struct RealBasicRow {
+    #[tabled(rename = "Real")]
+    real: String,
+    #[tabled(rename = "Weight")]
+    weight: String,
+    #[tabled(rename = "Eff.Weight")]
+    effective_weight: String,
+    #[tabled(rename = "Enabled")]
+    enabled: String,
 }
 
 // ─── Sessions Output ────────────────────────────────────────────────────────
 
 pub fn print_sessions_header() {
     println!(
-        "{:<5}{:<24}{:<20}{:<20}{:<8}{:<21}LastPacket",
+        "{:<5} {:<45} {:<45} {:<45} {:<8} {:<21} LastPacket",
         "Prot", "Client", "Virtual", "Real", "Timeout", "Created"
     );
 }
@@ -337,7 +450,7 @@ pub fn print_session(session: &balancerpb::Session) {
         .map_or_else(|| "-".to_string(), format_timestamp);
 
     println!(
-        "{:<5}{:<24}{:<20}{:<20}{:<8}{:<21}{}",
+        "{:<5} {:<45} {:<45} {:<45} {:<8} {:<21} {}",
         proto, client, virtual_addr, real_addr, timeout, created, last_packet
     );
 }
@@ -407,28 +520,52 @@ fn print_table<T: Tabled>(entries: Vec<T>) {
     println!("{table}");
 }
 
-// ─── JSON IP Prettification ─────────────────────────────────────────────────
+// ─── JSON Prettification ────────────────────────────────────────────────────
 
-/// Recursively walk a JSON value and convert byte arrays that represent
-/// IP addresses (length 4 or 16, all elements 0-255) into IP strings.
-/// All `bytes` fields in balancer protos are IPs or masks, so this is safe.
-pub fn prettify_ips(value: &mut serde_json::Value) {
+/// Recursively walk a JSON value and prettify it for human-readable output:
+/// - Convert byte arrays (IP addresses) into IP strings.
+/// - Convert known enum integer values into short string names.
+pub fn prettify_config(value: &mut serde_json::Value) {
     match value {
         serde_json::Value::Array(arr) => {
             if let Some(ip) = try_bytes_to_ip_string(arr) {
                 *value = serde_json::Value::String(ip);
             } else {
                 for item in arr.iter_mut() {
-                    prettify_ips(item);
+                    prettify_config(item);
                 }
             }
         }
         serde_json::Value::Object(map) => {
+            prettify_enum(map, "scheduler", |v| {
+                balancerpb::VsScheduler::try_from(v).ok().map(|s| match s {
+                    balancerpb::VsScheduler::SourceHash => "sh",
+                    balancerpb::VsScheduler::RoundRobin => "rr",
+                })
+            });
+            prettify_enum(map, "proto", |v| {
+                balancerpb::TransportProto::try_from(v).ok().map(|p| match p {
+                    balancerpb::TransportProto::Tcp => "tcp",
+                    balancerpb::TransportProto::Udp => "udp",
+                })
+            });
             for (_, v) in map.iter_mut() {
-                prettify_ips(v);
+                prettify_config(v);
             }
         }
         _ => {}
+    }
+}
+
+fn prettify_enum(
+    map: &mut serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    to_str: impl FnOnce(i32) -> Option<&'static str>,
+) {
+    if let Some(val) = map.get(key).and_then(|v| v.as_i64()) {
+        if let Some(name) = to_str(val as i32) {
+            map.insert(key.to_string(), serde_json::Value::String(name.to_string()));
+        }
     }
 }
 

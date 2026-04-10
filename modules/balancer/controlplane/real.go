@@ -1,6 +1,7 @@
 package balancer
 
 import (
+	"net"
 	"time"
 
 	"github.com/yanet-platform/yanet2/common/go/relptr"
@@ -168,4 +169,20 @@ func placeNewReals(
 	}
 
 	return realsUnchanged
+}
+
+func formatReal(addr []byte) string {
+	return net.IP(addr).String()
+}
+
+func realIDToString(id *balancerpb.RelativeRealIdentifier) string {
+	return formatReal(id.Ip)
+}
+
+func (r *Real) String() string {
+	proto := ipprotoIP
+	if r.Flags&RealFlagIPv6 != 0 {
+		proto = ipprotoIPv6
+	}
+	return formatReal(r.Addr.Bytes(proto))
 }

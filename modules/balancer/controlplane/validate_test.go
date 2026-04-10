@@ -628,7 +628,7 @@ func TestValidateAllowedSrc(t *testing.T) {
 }
 
 func TestValidateAllowedSources(t *testing.T) {
-	t.Run("detects-duplicates", func(t *testing.T) {
+	t.Run("squashes-duplicates", func(t *testing.T) {
 		src := &balancerpb.AllowedSources{
 			Nets: []*filterpb.IPNet{
 				{Addr: []byte{10, 0, 0, 0}, Mask: []byte{0xFF, 0xFF, 0x00, 0x00}},
@@ -639,19 +639,21 @@ func TestValidateAllowedSources(t *testing.T) {
 				{Addr: []byte{10, 0, 0, 0}, Mask: []byte{0xFF, 0xFF, 0x00, 0x00}},
 			},
 		}
-		err := validateAllowedSources([]*balancerpb.AllowedSources{src, srcDup}, false)
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "repeated")
+		result, err := validateAllowedSources([]*balancerpb.AllowedSources{src, srcDup}, false)
+		require.NoError(t, err)
+		require.Len(t, result, 1)
 	})
 
 	t.Run("nil-entry", func(t *testing.T) {
-		err := validateAllowedSources([]*balancerpb.AllowedSources{nil}, false)
+		_, err := validateAllowedSources([]*balancerpb.AllowedSources{nil}, false)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "index 0")
 	})
 
 	t.Run("empty-ok", func(t *testing.T) {
-		require.NoError(t, validateAllowedSources(nil, false))
+		result, err := validateAllowedSources(nil, false)
+		require.NoError(t, err)
+		require.Empty(t, result)
 	})
 }
 
@@ -767,12 +769,6 @@ func TestValidatePacketHandlerConfig(t *testing.T) {
 	t.Run("invalid-decap-address-length", func(t *testing.T) {
 		cfg := makeValidPacketHandlerConfig()
 		cfg.DecapAddresses = [][]byte{{1, 2, 3}} // not 4 or 16
-		require.Error(t, validatePacketHandlerConfig(cfg))
-	})
-
-	t.Run("duplicate-decap-addresses", func(t *testing.T) {
-		cfg := makeValidPacketHandlerConfig()
-		cfg.DecapAddresses = [][]byte{{10, 0, 0, 1}, {10, 0, 0, 1}}
 		require.Error(t, validatePacketHandlerConfig(cfg))
 	})
 

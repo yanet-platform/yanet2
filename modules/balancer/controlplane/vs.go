@@ -2,6 +2,8 @@ package balancer
 
 import (
 	"bytes"
+	"fmt"
+	"net"
 	"time"
 
 	"github.com/yanet-platform/yanet2/common/go/relptr"
@@ -373,6 +375,9 @@ func (vs *VS) populate(
 		vs.Ip_proto = ipprotoIPv6
 	}
 	vs.Flags |= protoVsFlagsToC(pb.Flags)
+	if pb.Scheduler == balancerpb.VsScheduler_ROUND_ROBIN {
+		vs.Flags |= VSFlagRoundRobin
+	}
 
 	if err := vs.populateAllowedSources(agent, pb.AllowedSrcs); err != nil {
 		return nil, err
@@ -472,6 +477,7 @@ func (vs *VS) state(workers uint32, now time.Time) *balancerpb.VsState {
 		activeSessions += r.ActiveSessions
 		realsState[realIdx] = r
 	}
+	isV6 := vs.Ip_proto == ipprotoIPv6
 	vsState := &balancerpb.VsState{
 		Id:                  vs.id(),
 		Flags:               vsFlags(vs.Flags),
@@ -479,6 +485,31 @@ func (vs *VS) state(workers uint32, now time.Time) *balancerpb.VsState {
 		Reals:               realsState,
 		ActiveSessions:      activeSessions,
 		LastPacketTimestamp: timestamppb.New(lastPacketTimestamp),
+		AllowedSrcsConfig:   restoreAllowedSources(vs, isV6),
 	}
 	return vsState
+}
+
+func formatVS(proto balancerpb.TransportProto, addr []byte, port uint32) string {
+	protoStr := "TCP"
+	if proto == balancerpb.TransportProto_UDP {
+		protoStr = "UDP"
+	}
+	addrStr := net.IP(addr).String()
+	if len(addr) == 16 {
+		addrStr = fmt.Sprintf("[%s]", addrStr)
+	}
+	return fmt.Sprintf("%s:%d/%s", addrStr, port, protoStr)
+}
+
+func vsIDToString(id *balancerpb.VsIdentifier) string {
+	return formatVS(id.Proto, id.Addr, id.Port)
+}
+
+func (vs *VS) String() string {
+	return formatVS(
+		transportProtoToPB(vs.Transport_proto),
+		vs.Addr.Bytes(int(vs.Ip_proto)),
+		uint32(vs.Port),
+	)
 }

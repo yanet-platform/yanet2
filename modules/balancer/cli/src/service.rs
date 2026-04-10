@@ -119,7 +119,7 @@ impl BalancerService {
         log::debug!("get config response: {response:?}");
 
         let mut yaml_value = serde_json::to_value(&response)?;
-        display::prettify_ips(&mut yaml_value);
+        display::prettify_config(&mut yaml_value);
         let yaml = serde_yaml::to_string(&yaml_value)?;
         print!("{yaml}");
 
@@ -127,7 +127,13 @@ impl BalancerService {
     }
 
     async fn show(&mut self, cmd: ShowCmd) -> Result<(), Box<dyn Error>> {
-        let is_detail = cmd.is_detail();
+        let needs_table = cmd.needs_table();
+        let include_counters = cmd.include_counters();
+
+        let opts = display::ShowOptions {
+            stats: cmd.stats || cmd.detail,
+            acl: cmd.acl || cmd.detail,
+        };
 
         let packet_handler_ref =
             if cmd.device.is_some() || cmd.pipeline.is_some() || cmd.function.is_some() || cmd.chain.is_some() {
@@ -145,7 +151,7 @@ impl BalancerService {
             name: cmd.name,
             packet_handler_ref,
             filter: cmd.filter.to_proto(),
-            include_counters: is_detail,
+            include_counters,
         };
         log::trace!("get state request: {request:?}");
 
@@ -157,8 +163,8 @@ impl BalancerService {
             return Ok(());
         }
 
-        if is_detail {
-            display::print_detail(&response.state);
+        if needs_table {
+            display::print_table_view(&response.state, &opts);
         } else {
             display::print_compact(&response.state[0]);
         }

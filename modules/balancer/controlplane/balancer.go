@@ -162,15 +162,19 @@ func (b *Balancer) Update(
 	config *balancerpb.BalancerConfig,
 	now *time.Time,
 ) (*balancerpb.ReuseReport, error) {
-	mergedStateConfig := mergeStateConfig(b.config.State, config.State)
+	st := relptr.Deref(&b.handler.Session_table)
 
-	if config.PacketHandler == nil && now != nil {
-		st := relptr.Deref(&b.handler.Session_table)
-		b.handler.setState(mergedStateConfig, st)
-		newStSize := int(*mergedStateConfig.SessionTableCapacity)
+	if now != nil && config.State.SessionTableCapacity != nil {
+		newStSize := int(*config.State.SessionTableCapacity)
 		if err := b.handler.resizeSessionTable(st, newStSize, *now); err != nil {
 			return nil, status.Errorf(codes.Internal, "resize session table: %v", err)
 		}
+	}
+
+	mergedStateConfig := mergeStateConfig(b.config.State, config.State)
+
+	if config.PacketHandler == nil {
+		b.handler.setState(mergedStateConfig, st)
 		return nil, nil
 	}
 
@@ -320,10 +324,14 @@ func (b *Balancer) UpdateVirtualServices(
 func (b *Balancer) DeleteVirtualServices(
 	vsList []*balancerpb.VirtualService,
 ) (*balancerpb.ReuseReport, error) {
-	for idx, vs := range vsList {
+	for _, vs := range vsList {
 		k := makeVsKey(vs.Id)
 		if _, ok := b.vsIndex[k]; !ok {
-			return nil, status.Errorf(codes.NotFound, "virtual service at index %d not found", idx)
+			return nil, status.Errorf(
+				codes.NotFound,
+				"virtual service %s not found",
+				vsIDToString(vs.Id),
+			)
 		}
 	}
 
@@ -508,16 +516,18 @@ func (b *Balancer) UpdateReals(updates []*balancerpb.RealUpdate, buffer bool) (i
 		if !ok {
 			return 0, status.Errorf(
 				codes.NotFound,
-				"real update at index %d: virtual service not found",
+				"real update at index %d: virtual service %s not found",
 				updateIdx,
+				vsIDToString(update.RealId.Vs),
 			)
 		}
 		realSlot, ok := serviceSlot.realSlots[makeRealKey(update.RealId.Real)]
 		if !ok {
 			return 0, status.Errorf(
 				codes.NotFound,
-				"real update at index %d: real not found",
+				"real update at index %d: real %s not found",
 				updateIdx,
+				realIDToString(update.RealId.Real),
 			)
 		}
 		vs := &services[serviceSlot.index]
@@ -541,7 +551,8 @@ func (b *Balancer) UpdateReals(updates []*balancerpb.RealUpdate, buffer bool) (i
 		if err := vs.updateRealSelector(&b.handler.Rcu, b.agent); err != nil {
 			return 0, status.Errorf(
 				codes.Internal,
-				"failed to update ring for some virtual services: %v",
+				"failed to update ring for virtual service %s: %v",
+				vs,
 				err,
 			)
 		}

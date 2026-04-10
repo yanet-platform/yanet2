@@ -69,15 +69,27 @@ pub struct ShowCmd {
     #[arg(long, short = 'n')]
     pub name: Option<String>,
 
-    /// Show detailed statistics (implied by --device/--pipeline/--function/--chain).
-    #[arg(long)]
+    /// Tabled output: VS info, scheduler, flags, reals with weights.
+    #[arg(long, short = 't')]
+    pub table: bool,
+
+    /// Show all counters, active sessions and last packet timestamps.
+    #[arg(long, short = 's')]
+    pub stats: bool,
+
+    /// Show allowed sources config per VS (with counters if --stats is present).
+    #[arg(long, short = 'a')]
+    pub acl: bool,
+
+    /// Enable all output sections (--table --stats --acl).
+    #[arg(long, short = 'd')]
     pub detail: bool,
 
     #[command(flatten)]
     pub filter: FilterFlags,
 
     /// Filter by device name.
-    #[arg(long, short = 'd')]
+    #[arg(long)]
     pub device: Option<String>,
     /// Filter by pipeline name.
     #[arg(long, short = 'p')]
@@ -91,12 +103,14 @@ pub struct ShowCmd {
 }
 
 impl ShowCmd {
-    pub fn is_detail(&self) -> bool {
-        self.detail
-            || self.device.is_some()
-            || self.pipeline.is_some()
-            || self.function.is_some()
-            || self.chain.is_some()
+    /// Whether counters should be requested from the server.
+    pub fn include_counters(&self) -> bool {
+        self.stats || self.detail
+    }
+
+    /// Whether tabled output mode is active.
+    pub fn needs_table(&self) -> bool {
+        self.table || self.stats || self.acl || self.detail
     }
 }
 

@@ -165,17 +165,26 @@ func validateAllowedSrc(
 ) error {
 	for i, net := range allowedSrc.Nets {
 		if err := validateNet(net, isIPv6); err != nil {
-			return fmt.Errorf("net at index %d: %w", i, err)
+			return fmt.Errorf("net %x/%x at index %d: %w", net.Addr, net.Mask, i, err)
 		}
 	}
+	slices.SortFunc(allowedSrc.Nets, compareIPNet)
+	allowedSrc.Nets = slices.CompactFunc(allowedSrc.Nets, func(a, b *filterpb.IPNet) bool {
+		return compareIPNet(a, b) == 0
+	})
 	for i, port := range allowedSrc.Ports {
 		if err := validatePortRange(port); err != nil {
-			return fmt.Errorf("port at index %d: %w", i, err)
+			return fmt.Errorf("port range [%d-%d] at index %d: %w", port.From, port.To, i, err)
 		}
 	}
+	slices.SortFunc(allowedSrc.Ports, comparePortRange)
+	allowedSrc.Ports = slices.CompactFunc(allowedSrc.Ports, func(a, b *filterpb.PortRange) bool {
+		return comparePortRange(a, b) == 0
+	})
 	if allowedSrc.Tag != nil && len(*allowedSrc.Tag) > int(AllowedSourceMaxTagLength) {
 		return fmt.Errorf(
-			"tag must be less than or equal to %d characters",
+			"tag %s must be less than or equal to %d characters",
+			*allowedSrc.Tag,
 			AllowedSourceMaxTagLength,
 		)
 	}
@@ -205,39 +214,45 @@ func validateReal(real *balancerpb.Real) error {
 	return nil
 }
 
-// validateAllowedSources validates and sorts the allowed sources slice.
-// Side effect: sorts allowedSources in place. canReuseACL depends on this sort order
+// validateAllowedSources validates, sorts, and deduplicates the allowed sources slice.
+// Side effect: sorts and compacts allowedSources. canReuseACL depends on this sort order
 // to compare allowed sources element-by-element between old and new configs.
-func validateAllowedSources(allowedSources []*balancerpb.AllowedSources, isIPv6 bool) error {
+func validateAllowedSources(
+	allowedSources []*balancerpb.AllowedSources,
+	isIPv6 bool,
+) ([]*balancerpb.AllowedSources, error) {
 	for i, allowedSrc := range allowedSources {
 		if allowedSrc == nil {
-			return fmt.Errorf("allowed_src at index %d is nil", i)
+			return nil, fmt.Errorf("allowed_src at index %d is nil", i)
 		}
 		if err := validateAllowedSrc(allowedSrc, isIPv6); err != nil {
-			return fmt.Errorf("allowed_src at index %d: %w", i, err)
+			return nil, fmt.Errorf("allowed_src at index %d: %w", i, err)
 		}
 	}
 	slices.SortFunc(allowedSources, compareAllowedSourcesPb)
-	for i := 1; i < len(allowedSources); i++ {
-		if compareAllowedSourcesPb(allowedSources[i-1], allowedSources[i]) == 0 {
-			return fmt.Errorf("allowed_src repeated")
-		}
-	}
-	return nil
+	allowedSources = slices.CompactFunc(allowedSources, func(a, b *balancerpb.AllowedSources) bool {
+		return compareAllowedSourcesPb(a, b) == 0
+	})
+	return allowedSources, nil
 }
 
 func validateReals(reals []*balancerpb.Real) error {
 	realsMap := make(map[realKey]int, len(reals))
-	for i, rl := range reals {
-		if rl == nil {
+	for i, r := range reals {
+		if r == nil {
 			return fmt.Errorf("real at index %d is nil", i)
 		}
-		if err := validateReal(rl); err != nil {
-			return fmt.Errorf("real at index %d: %w", i, err)
+		if err := validateReal(r); err != nil {
+			return fmt.Errorf("real %s at index %d: %w", realIDToString(r.Id), i, err)
 		}
-		key := makeRealKey(rl.Id)
+		key := makeRealKey(r.Id)
 		if prevIdx, ok := realsMap[key]; ok {
-			return fmt.Errorf("real at index %d: duplicate of real at index %d", i, prevIdx)
+			return fmt.Errorf(
+				"real %s at index %d: duplicate of real at index %d",
+				realIDToString(r.Id),
+				i,
+				prevIdx,
+			)
 		}
 		realsMap[key] = i
 	}
@@ -267,10 +282,12 @@ func validateVS(vs *balancerpb.VirtualService) error {
 	}
 	for i, peer := range vs.Peers {
 		if len(peer) != 4 && len(peer) != 16 {
-			return fmt.Errorf("peer at index %d: addr must be 4 or 16 bytes long", i)
+			return fmt.Errorf("peer %x at index %d: addr must be 4 or 16 bytes long", peer, i)
 		}
 	}
-	if err := validateAllowedSources(vs.AllowedSrcs, len(vs.Id.Addr) == 16); err != nil {
+	var err error
+	vs.AllowedSrcs, err = validateAllowedSources(vs.AllowedSrcs, len(vs.Id.Addr) == 16)
+	if err != nil {
 		return err
 	}
 	if err := validateReals(vs.Reals); err != nil {
@@ -281,10 +298,10 @@ func validateVS(vs *balancerpb.VirtualService) error {
 
 func validatePacketHandlerConfig(config *balancerpb.PacketHandlerConfig) error {
 	if len(config.SourceAddressV4) != 4 {
-		return fmt.Errorf("source_address_v4 must be 4 bytes")
+		return fmt.Errorf("source_address_v4 %x must be 4 bytes", config.SourceAddressV4)
 	}
 	if len(config.SourceAddressV6) != 16 {
-		return fmt.Errorf("source_address_v6 must be 16 bytes")
+		return fmt.Errorf("source_address_v6 %x must be 16 bytes", config.SourceAddressV6)
 	}
 	if config.SessionsTimeouts == nil {
 		return fmt.Errorf("sessions_timeouts is nil")
@@ -294,7 +311,7 @@ func validatePacketHandlerConfig(config *balancerpb.PacketHandlerConfig) error {
 	}
 	for idx, addr := range config.DecapAddresses {
 		if len(addr) != 4 && len(addr) != 16 {
-			return fmt.Errorf("decap_addresses at index %d: must be 4 or 16 bytes", idx)
+			return fmt.Errorf("decap_addresses %x at index %d: must be 4 or 16 bytes", addr, idx)
 		}
 	}
 	// Side effect: sorts decap addresses by family (IPv4 first, then IPv6), then by value.
@@ -305,11 +322,9 @@ func validatePacketHandlerConfig(config *balancerpb.PacketHandlerConfig) error {
 		}
 		return bytes.Compare(a, b)
 	})
-	for i := 1; i < len(config.DecapAddresses); i++ {
-		if bytes.Equal(config.DecapAddresses[i-1], config.DecapAddresses[i]) {
-			return fmt.Errorf("decap address repeated: %x", config.DecapAddresses[i])
-		}
-	}
+	config.DecapAddresses = slices.CompactFunc(config.DecapAddresses, func(a, b []byte) bool {
+		return bytes.Equal(a, b)
+	})
 
 	vsMap := make(map[vsKey]int, len(config.Vs))
 	for i, vs := range config.Vs {
@@ -317,11 +332,16 @@ func validatePacketHandlerConfig(config *balancerpb.PacketHandlerConfig) error {
 			return fmt.Errorf("vs at index %d is nil", i)
 		}
 		if err := validateVS(vs); err != nil {
-			return fmt.Errorf("vs at index %d: %w", i, err)
+			return fmt.Errorf("vs %s at index %d: %w", vsIDToString(vs.Id), i, err)
 		}
 		key := makeVsKey(vs.Id)
 		if prevIdx, ok := vsMap[key]; ok {
-			return fmt.Errorf("vs at index %d: duplicated at index %d", prevIdx, i)
+			return fmt.Errorf(
+				"vs %s at index %d: duplicated at index %d",
+				vsIDToString(vs.Id),
+				i,
+				prevIdx,
+			)
 		}
 		vsMap[key] = i
 	}

@@ -22,7 +22,7 @@ move_session_cb(void *key, void *value, void *userdata) {
 	struct balancer_session_state *state = value;
 	struct balancer_session_id *id = key;
 	struct balancer_session_state *new_state;
-	
+
 	ttlmap_lock_t *lock;
 	int res = TTLMAP_GET(
 		ctx->dst,

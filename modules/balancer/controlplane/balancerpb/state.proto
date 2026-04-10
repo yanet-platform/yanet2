@@ -29,6 +29,7 @@ message VsState {
 	google.protobuf.Timestamp last_packet_timestamp = 6;
 	repeated AllowedSourcesStats allowed_sources = 7;
 	repeated RealState reals = 8;
+	repeated AllowedSources allowed_srcs_config = 9;
 }
 
 message RealState {

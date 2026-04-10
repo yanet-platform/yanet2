@@ -18,16 +18,6 @@ func validateFilter(filter *balancerpb.Filter) error {
 			return fmt.Errorf("invalid filter proto: %v", *filter.Proto)
 		}
 	}
-	if filter.Vip != nil {
-		if n := len(filter.Vip); n != 4 && n != 16 {
-			return fmt.Errorf("invalid filter vip length: %d (expected 4 or 16)", n)
-		}
-	}
-	if filter.RealIp != nil {
-		if n := len(filter.RealIp); n != 4 && n != 16 {
-			return fmt.Errorf("invalid filter real_ip length: %d (expected 4 or 16)", n)
-		}
-	}
 	return nil
 }
 
