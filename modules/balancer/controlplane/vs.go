@@ -456,7 +456,7 @@ func (vs *VS) scheduler() balancerpb.VsScheduler {
 	return balancerpb.VsScheduler_SOURCE_HASH
 }
 
-func (vs *VS) state(workers uint32) *balancerpb.VsState {
+func (vs *VS) state(workers uint32, now time.Time) *balancerpb.VsState {
 	reals := relptr.Slice(&vs.Reals, vs.Reals_count)
 	activeSessions := uint64(0)
 	lastPacketTimestamp := time.Unix(0, 0)
@@ -465,7 +465,7 @@ func (vs *VS) state(workers uint32) *balancerpb.VsState {
 		if reals[realIdx].isRemoved() {
 			continue
 		}
-		r := reals[realIdx].state(workers)
+		r := reals[realIdx].state(workers, now)
 		if r.LastPacketTimestamp.AsTime().After(lastPacketTimestamp) {
 			lastPacketTimestamp = r.LastPacketTimestamp.AsTime()
 		}

@@ -28,4 +28,5 @@ static const uint8_t balancer_max_session_timeout =
 struct balancer_sessions_tracker_shard {
 	struct balancer_interval_counter counter;
 	uint32_t count;
+	uint32_t last_timestamp;
 } __attribute__((aligned(64)));

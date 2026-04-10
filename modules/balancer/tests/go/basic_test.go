@@ -326,7 +326,7 @@ func TestBasic(t *testing.T) {
 
 	t.Run("GetState", func(t *testing.T) {
 		ref := utils.StateRef()
-		states, err := ts.Balancer.GetState(ref, nil, true)
+		states, err := ts.Balancer.GetState(ref, nil, true, ts.Mock.CurrentTime())
 		require.NoError(t, err)
 		require.NotEmpty(t, states)
 
@@ -362,6 +362,39 @@ func TestBasic(t *testing.T) {
 				)
 			}
 		}
+	})
+
+	ts.Mock.AdvanceTime(time.Second * 200)
+
+	t.Run("GetStateAfterTimeAdvance", func(t *testing.T) {
+		states, err := ts.Balancer.GetState(nil, nil, false, ts.Mock.CurrentTime())
+		require.NoError(t, err)
+		require.NotEmpty(t, states)
+
+		state := states[0]
+
+		assert.Equal(t, state.ActiveSessions, uint64(0),
+			"expected zero active sessions after time advance")
+
+		for _, vs := range state.VirtualServices {
+			for _, real := range vs.Reals {
+				assert.Equal(t, real.ActiveSessions, uint64(0),
+					"expected zero active sessions for real %s", real.Id)
+			}
+			assert.Equal(t, vs.ActiveSessions, uint64(0),
+				"expected zero active sessions for VS %s", vs.Id)
+		}
+	})
+
+	t.Run("ListSessionsAfterTimeAdvance", func(t *testing.T) {
+		now := ts.Mock.CurrentTime()
+		var allSessions []*balancerpb.Session
+		err := ts.Balancer.ListSessions(nil, now, func(s *balancerpb.Session) error {
+			allSessions = append(allSessions, s)
+			return nil
+		})
+		require.NoError(t, err)
+		require.Empty(t, allSessions, "expected no sessions after time advance")
 	})
 }
 

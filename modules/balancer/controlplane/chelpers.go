@@ -182,10 +182,16 @@ func (r *Real) asCPtr() *C.struct_balancer_real {
 	return (*C.struct_balancer_real)(unsafe.Pointer(r))
 }
 
-func (r *Real) sessions(workers uint32) (uint64, time.Time) {
+func (r *Real) sessions(workers uint32, now time.Time) (uint64, time.Time) {
 	activeSessions := C.uint64_t(0)
 	lastPacketTimestamp := C.uint32_t(0)
-	C.balancer_real_sessions(r.asCPtr(), C.size_t(workers), &activeSessions, &lastPacketTimestamp)
+	C.balancer_real_sessions(
+		r.asCPtr(),
+		C.size_t(workers),
+		&activeSessions,
+		&lastPacketTimestamp,
+		C.uint32_t(now.Unix()),
+	)
 	return uint64(activeSessions), time.Unix(int64(lastPacketTimestamp), 0)
 }
 

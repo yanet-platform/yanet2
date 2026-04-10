@@ -21,11 +21,16 @@ move_session_cb(void *key, void *value, void *userdata) {
 	struct move_ctx *ctx = userdata;
 	struct balancer_session_state *state = value;
 	struct balancer_session_id *id = key;
-
 	struct balancer_session_state *new_state;
+	
 	ttlmap_lock_t *lock;
 	int res = TTLMAP_GET(
-		ctx->dst, id, &new_state, &lock, ctx->now, state->timeout
+		ctx->dst,
+		id,
+		&new_state,
+		&lock,
+		state->last_packet_timestamp,
+		state->timeout
 	);
 	int status = TTLMAP_STATUS(res);
 

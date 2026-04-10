@@ -10,5 +10,6 @@ balancer_real_sessions(
 	struct balancer_real *real,
 	size_t workers,
 	uint64_t *active_sessions,
-	uint32_t *last_packet_timestamp
+	uint32_t *last_packet_timestamp,
+	uint32_t now
 );

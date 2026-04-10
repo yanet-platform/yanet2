@@ -17,11 +17,11 @@ pub fn print_compact(state: &balancerpb::BalancerState) {
     println!("Balancer: {}", state.balancer_name);
     println!("Active Sessions: {}", format_number(state.active_sessions));
     println!();
-    const LINE_WIDTH: usize = 77;
+    const LINE_WIDTH: usize = 81;
 
     println!("{:<46}{:<8}Flags", "VirtualService", "Sched");
     println!(
-        "  -> {:<38}{:<6}{:<8}{:<6}{}",
+        "  -> {:<38}{:<6}{:<8}{:<10}{}",
         "RemoteAddress:Port", "Wght", "EfWght", "Conns", "Enabled"
     );
     println!("{}", "\u{2500}".repeat(LINE_WIDTH));
@@ -51,7 +51,7 @@ pub fn print_compact(state: &balancerpb::BalancerState) {
             let real_addr = format_ip_port(rip, rid.port);
             let enabled = if real.enabled { "yes" } else { "no" };
             println!(
-                "  -> {:<38}{:<6}{:<8}{:<6}{}",
+                "  -> {:<38}{:<6}{:<8}{:<10}{}",
                 real_addr,
                 format_number(real.weight),
                 format_number(real.effective_weight),

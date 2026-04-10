@@ -177,7 +177,7 @@ func (s *BalancerService) GetState(
 
 	var allStates []*balancerpb.BalancerState
 	for _, b := range balancers {
-		states, err := b.GetState(req.PacketHandlerRef, req.Filter, req.IncludeCounters)
+		states, err := b.GetState(req.PacketHandlerRef, req.Filter, req.IncludeCounters, time.Now())
 		if err != nil {
 			return nil, err
 		}

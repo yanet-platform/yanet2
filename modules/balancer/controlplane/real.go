@@ -1,6 +1,8 @@
 package balancer
 
 import (
+	"time"
+
 	"github.com/yanet-platform/yanet2/common/go/relptr"
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -85,8 +87,8 @@ func (r *Real) id() *balancerpb.RelativeRealIdentifier {
 	}
 }
 
-func (r *Real) state(workers uint32) *balancerpb.RealState {
-	activeSessions, lastPacketTimestamp := r.sessions(workers)
+func (r *Real) state(workers uint32, now time.Time) *balancerpb.RealState {
+	activeSessions, lastPacketTimestamp := r.sessions(workers, now)
 	return &balancerpb.RealState{
 		Id:                  r.id(),
 		Weight:              uint64(r.Weight),

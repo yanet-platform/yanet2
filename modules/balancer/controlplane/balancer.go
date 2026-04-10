@@ -351,6 +351,7 @@ func (b *Balancer) GetState(
 	handlerRef *balancerpb.PacketHandlerRef,
 	filter *balancerpb.Filter,
 	includeCounters bool,
+	now time.Time,
 ) ([]*balancerpb.BalancerState, error) {
 	if err := validateFilter(filter); err != nil {
 		return nil, err
@@ -362,7 +363,7 @@ func (b *Balancer) GetState(
 	balancerName := b.handler.name()
 
 	if !includeCounters {
-		state := b.buildState(workers, &matcher, nil)
+		state := b.buildState(workers, &matcher, nil, now)
 		matcher.filterReals(state)
 		compactBalancerState(state)
 		return []*balancerpb.BalancerState{state}, nil
@@ -378,7 +379,7 @@ func (b *Balancer) GetState(
 			continue
 		}
 
-		state := b.buildState(workers, &matcher, &position)
+		state := b.buildState(workers, &matcher, &position, now)
 		b.applyCounters(state, dpConfig, &position)
 		matcher.filterReals(state)
 		compactBalancerState(state)
@@ -392,6 +393,7 @@ func (b *Balancer) buildState(
 	workers uint32,
 	matcher *filterMatcher,
 	position *yanet.ModuleReference,
+	now time.Time,
 ) *balancerpb.BalancerState {
 	services := relptr.Slice(&b.handler.Vs, b.handler.Vs_count)
 
@@ -420,7 +422,7 @@ func (b *Balancer) buildState(
 		if matcher.hasVsFilter && !matcher.matchVsID(vs.id()) {
 			continue
 		}
-		state.VirtualServices[vsIdx] = vs.state(workers)
+		state.VirtualServices[vsIdx] = vs.state(workers, now)
 	}
 
 	return state

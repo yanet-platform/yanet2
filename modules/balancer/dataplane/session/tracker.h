@@ -33,6 +33,7 @@ sessions_tracker_new_session(
 		sessions_tracker_now(now),
 		sessions_tracker_until(now + timeout)
 	);
+	shard->last_timestamp = now;
 }
 
 /* Extend an existing session and move its scheduled expiration. */
@@ -53,4 +54,5 @@ sessions_tracker_prolong_session(
 		sessions_tracker_until(last_packet_timestamp + prev_timeout),
 		sessions_tracker_until(now + new_timeout)
 	);
+	shard->last_timestamp = now;
 }
