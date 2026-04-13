@@ -198,7 +198,7 @@ func TestRouteMPLS(t *testing.T) {
 
 		require.NotNil(t, inputPacket, "Input packet should be parsed")
 		require.NotNil(t, outputPacket, "Output packet should be parsed")
-		require.Equal(t, outputPacket.DstIP, net.ParseIP("10.12.1.1").To4(), "Invalid uneel destiation")
+		require.Equal(t, outputPacket.DstIP, net.ParseIP("10.12.1.1").To4(), "Invalid tunnel destiation")
 	})
 
 	fw.Run("Test_Packet_Routing_With_RouteMPLS-4-6", func(fw *framework.F, t *testing.T) {
@@ -216,7 +216,7 @@ func TestRouteMPLS(t *testing.T) {
 
 		require.NotNil(t, inputPacket, "Input packet should be parsed")
 		require.NotNil(t, outputPacket, "Output packet should be parsed")
-		require.Equal(t, outputPacket.DstIP, net.ParseIP("ccee::11"), "Invalid uneel destiation")
+		require.Equal(t, outputPacket.DstIP, net.ParseIP("ccee::11"), "Invalid tunnel destiation")
 	})
 
 	fw.Run("Test_Packet_Routing_With_RouteMPLS-6-4", func(fw *framework.F, t *testing.T) {
@@ -234,7 +234,7 @@ func TestRouteMPLS(t *testing.T) {
 
 		require.NotNil(t, inputPacket, "Input packet should be parsed")
 		require.NotNil(t, outputPacket, "Output packet should be parsed")
-		require.Equal(t, outputPacket.DstIP, net.ParseIP("10.12.1.1").To4(), "Invalid uneel destiation")
+		require.Equal(t, outputPacket.DstIP, net.ParseIP("10.12.1.1").To4(), "Invalid tunnel destiation")
 	})
 
 	fw.Run("Test_Packet_Routing_With_RouteMPLS-6-6", func(fw *framework.F, t *testing.T) {
@@ -252,7 +252,7 @@ func TestRouteMPLS(t *testing.T) {
 
 		require.NotNil(t, inputPacket, "Input packet should be parsed")
 		require.NotNil(t, outputPacket, "Output packet should be parsed")
-		require.Equal(t, outputPacket.DstIP, net.ParseIP("ccee::11"), "Invalid uneel destiation")
+		require.Equal(t, outputPacket.DstIP, net.ParseIP("ccee::11"), "Invalid tunnel destiation")
 	})
 
 	fw.Run("Delete_Static_Route", func(fw *framework.F, t *testing.T) {
