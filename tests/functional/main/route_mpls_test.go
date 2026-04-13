@@ -140,28 +140,28 @@ func TestRouteMPLS(t *testing.T) {
 
 	fw.Run("Insert_Static_RouteMPLS-4-4", func(fw *framework.F, t *testing.T) {
 		// Insert route with the nexthop (do_flush is automatic in insert command)
-		output, err := fw.ExecuteCommand("/mnt/target/release/yanet-cli-route-mpls update --cfg route-mpls -p 5.0.0.0/9 --dst 10.12.1.1 --src 4.2.4.2 --label 45 --as_path 14 --local_pref 10 --med 10 --weight 5 --counter 4-4")
+		output, err := fw.ExecuteCommand("/mnt/target/release/yanet-cli-route-mpls update --cfg route-mpls -p 5.0.0.0/9 --dst 10.12.1.1 --src 4.2.4.2 --label 45 --weight 5 --counter 4-4")
 		require.NoError(t, err, "Failed to insert route")
 		t.Logf("Insert route output: %s", output)
 	})
 
 	fw.Run("Insert_Static_RouteMPLS-4-6", func(fw *framework.F, t *testing.T) {
 		// Insert route with the nexthop (do_flush is automatic in insert command)
-		output, err := fw.ExecuteCommand("/mnt/target/release/yanet-cli-route-mpls update --cfg route-mpls -p 6.0.0.0/10 --dst ccee::11 --src 2424::1212 --label 45 --as_path 14 --local_pref 10 --med 10 --weight 5 --counter 4-6")
+		output, err := fw.ExecuteCommand("/mnt/target/release/yanet-cli-route-mpls update --cfg route-mpls -p 6.0.0.0/10 --dst ccee::11 --src 2424::1212 --label 45 --weight 5 --counter 4-6")
 		require.NoError(t, err, "Failed to insert route")
 		t.Logf("Insert route output: %s", output)
 	})
 
 	fw.Run("Insert_Static_RouteMPLS-6-4", func(fw *framework.F, t *testing.T) {
 		// Insert route with the nexthop (do_flush is automatic in insert command)
-		output, err := fw.ExecuteCommand("/mnt/target/release/yanet-cli-route-mpls update --cfg route-mpls -p 0066::0/17 --dst 10.12.1.1 --src 4.2.4.2 --label 45 --as_path 14 --local_pref 10 --med 10 --weight 5 --counter 6-4")
+		output, err := fw.ExecuteCommand("/mnt/target/release/yanet-cli-route-mpls update --cfg route-mpls -p 0066::0/17 --dst 10.12.1.1 --src 4.2.4.2 --label 45 --weight 5 --counter 6-4")
 		require.NoError(t, err, "Failed to insert route")
 		t.Logf("Insert route output: %s", output)
 	})
 
 	fw.Run("Insert_Static_RouteMPLS-6-6", func(fw *framework.F, t *testing.T) {
 		// Insert route with the nexthop (do_flush is automatic in insert command)
-		output, err := fw.ExecuteCommand("/mnt/target/release/yanet-cli-route-mpls update --cfg route-mpls -p 0088::0/19 --dst ccee::11 --src 2424::1212 --label 45 --as_path 14 --local_pref 10 --med 10 --weight 5 --counter 6-6")
+		output, err := fw.ExecuteCommand("/mnt/target/release/yanet-cli-route-mpls update --cfg route-mpls -p 0088::0/19 --dst ccee::11 --src 2424::1212 --label 45 --weight 5 --counter 6-6")
 		require.NoError(t, err, "Failed to insert route")
 		t.Logf("Insert route output: %s", output)
 	})
