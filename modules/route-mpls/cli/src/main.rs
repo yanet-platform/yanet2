@@ -95,15 +95,6 @@ pub struct RouteUpdateCmd {
     /// The IP address of the tunnel source.
     #[arg(long = "src")]
     pub src_addr: IpAddr,
-    /// Local preference
-    #[arg(long = "local_pref")]
-    pub local_pref: u32,
-    /// AS Path
-    #[arg(long = "as_path")]
-    pub as_path: Vec<u32>,
-    /// MED
-    #[arg(long = "med")]
-    pub med: u32,
     /// The ECMP weight.
     #[arg(long = "weight")]
     pub weight: u64,
@@ -232,9 +223,6 @@ impl RouteMplsService {
                             IpAddr::V4(v4) => v4.octets().to_vec(),
                             IpAddr::V6(v6) => v6.octets().to_vec(),
                         },
-                        local_pref: cmd.local_pref,
-                        as_path: cmd.as_path,
-                        med: cmd.med,
                         weight: cmd.weight,
                         counter: cmd.counter,
                     }),
@@ -259,9 +247,6 @@ impl RouteMplsService {
                             IpAddr::V4(v4) => v4.octets().to_vec(),
                             IpAddr::V6(v6) => v6.octets().to_vec(),
                         },
-                        local_pref: 0,
-                        as_path: vec![],
-                        med: 0,
                         weight: 0,
                         counter: "".to_string(),
                     }),

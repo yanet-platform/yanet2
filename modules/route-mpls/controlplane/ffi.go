@@ -3,6 +3,12 @@ package route_mpls
 //#cgo CFLAGS: -I../../../ -I../../../lib
 //#cgo LDFLAGS: -L../../../build/modules/route-mpls/api -lroute_mpls_cp
 //
+//#include <errno.h>
+//
+//static void reset_errno() {
+//    errno = 0;
+//}
+//
 //#include "api/agent.h"
 //#include "modules/route-mpls/api/controlplane.h"
 //
@@ -37,6 +43,7 @@ func NewModuleConfig(agent *ffi.Agent, name string) (*ModuleConfig, error) {
 	cName := C.CString(name)
 	defer C.free(unsafe.Pointer(cName))
 
+	C.reset_errno()
 	ptr, err := C.route_mpls_module_config_create((*C.struct_agent)(agent.AsRawPtr()), cName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize module config: %w", err)
@@ -134,6 +141,7 @@ func (m *ModuleConfig) Update(rules []routeMPLSRule) error {
 		cRule.nexthop_count = C.uint64_t(len(cNextHops))
 	}
 
+	C.reset_errno()
 	rc, err := C.route_mpls_module_config_update(
 		m.asRawPtr(),
 		&cRules[0],

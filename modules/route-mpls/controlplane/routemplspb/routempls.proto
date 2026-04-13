@@ -58,11 +58,8 @@ message NextHop {
   uint32 label = 2;
   bytes source_ip = 3;
   bytes destination_ip = 4;
-  uint32 local_pref = 5;
-  repeated uint32 as_path = 6;
-  uint32 med = 7;
-  uint64 weight = 8;
-  string counter = 9;
+  uint64 weight = 5;
+  string counter = 6;
 }
 
 enum ActionKind {

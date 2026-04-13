@@ -33,10 +33,6 @@ type NextHop struct {
 	Destination netip.Addr
 	MPLSLabel   uint32
 
-	LocalPref uint32
-	ASPath    []uint32
-	Med       uint32
-
 	Weight uint64
 
 	Counter string
@@ -44,18 +40,6 @@ type NextHop struct {
 
 type NextHopList struct {
 	NextHops []NextHop
-}
-
-func nextHopCompareCB(l NextHop, r NextHop) int {
-	if prefDiff := int(l.LocalPref) - int(r.LocalPref); prefDiff != 0 {
-		return prefDiff
-	}
-
-	if pathDiff := len(r.ASPath) - len(l.ASPath); pathDiff != 0 {
-		return pathDiff
-	}
-
-	return int(l.Med) - int(r.Med)
 }
 
 func (m *NextHopList) lookup(destination netip.Addr, mplsLabel uint32) int {
@@ -75,8 +59,6 @@ func (m *NextHopList) Insert(nextHop NextHop) {
 	} else {
 		m.NextHops = append(m.NextHops, nextHop)
 	}
-
-	slices.SortFunc(m.NextHops, nextHopCompareCB)
 }
 
 func (m *NextHopList) Remove(nextHop NextHop) {
@@ -152,9 +134,6 @@ func (m *RouteMPLSService) ShowConfig(
 							Label:         nexthop.MPLSLabel,
 							SourceIp:      nexthop.Source.AsSlice(),
 							DestinationIp: nexthop.Destination.AsSlice(),
-							LocalPref:     nexthop.LocalPref,
-							AsPath:        nexthop.ASPath,
-							Med:           nexthop.Med,
 							Weight:        nexthop.Weight,
 							Counter:       nexthop.Counter,
 						},
@@ -294,10 +273,6 @@ func makeNextHop(nexthop *routemplspb.NextHop) (NextHop, error) {
 		Destination: dst,
 		MPLSLabel:   nexthop.Label,
 
-		LocalPref: nexthop.LocalPref,
-		ASPath:    nexthop.AsPath,
-		Med:       nexthop.Med,
-
 		Weight: nexthop.Weight,
 
 		Counter: nexthop.Counter,
@@ -314,11 +289,6 @@ func (m *RouteMPLSService) CreateConfig(
 	name := req.Name
 	if name == "" {
 		return nil, status.Error(codes.InvalidArgument, "module config name is required")
-	}
-
-	_, ok := m.configs[name]
-	if ok {
-		return nil, status.Error(codes.InvalidArgument, "already exists")
 	}
 
 	prefixes := maptrie.NewMapTrie[netip.Prefix, netip.Addr, NextHopList](0)
@@ -363,6 +333,10 @@ func (m *RouteMPLSService) CreateConfig(
 	if err := config.submit(); err != nil {
 		module.Free()
 		return nil, err
+	}
+
+	if oldConfig, ok := m.configs[name]; ok {
+		oldConfig.routeMPLS.Free()
 	}
 
 	m.configs[name] = config
