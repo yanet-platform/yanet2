@@ -229,7 +229,7 @@ func (m *AdapterService) processBirdImport(conn *grpc.ClientConn, cfg *bird.Conf
 			err := (*holder.currentStream).Send(&routepb.Update{
 				Name:     name,
 				IsDelete: routes[idx].ToRemove,
-				Route:    rib.ToPBRoute(&routes[idx], false /* isBest unknown */),
+				Route:    rib.ToPBRoute(&routes[idx]),
 			})
 			if err != nil {
 				// This error stops bird.Export, triggering reconnection in runBirdImportLoop

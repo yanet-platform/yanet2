@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
-	"slices"
 	"unsafe"
 
 	"go.uber.org/zap"
@@ -356,22 +355,18 @@ func (m *updateDecoder) decodeComplexAttribute(route *rib.Route, data []byte, ty
 		// https://datatracker.ietf.org/doc/html/rfc4271#section-5.1.2
 		for len(data) >= 2 { // traverse all segments
 			segmentType := data[0]
-			route.ASPathLen = data[1]
-			if route.ASPathLen == 0 {
+			asPathLen := data[1]
+			if asPathLen == 0 {
 				return nil
 			}
 			data = data[2:]
-			asPathBytesSize := int(route.ASPathLen) * int(sizeOfUint32)
-			lastUint32Start := asPathBytesSize - int(sizeOfUint32)
+			asPathBytesSize := int(asPathLen) * int(sizeOfUint32)
 
 			// OriginAS is the last one
 			if asPathBytesSize > len(data) {
 				return fmt.Errorf("ASPath attribute truncated want=%d, actual=%d: %w",
 					asPathBytesSize, len(data), ErrAttrsUnexpectedEOD)
 			}
-			peerAS := binary.BigEndian.Uint32(data)
-			originAS := binary.BigEndian.Uint32(data[lastUint32Start:])
-			data = data[asPathBytesSize:]
 
 			if segmentType != ASPathSequence && segmentType != ASPathConfedSequence {
 				// return fmt.Errorf("unsupported ASPath segment type: %d", segmentType)
@@ -381,11 +376,14 @@ func (m *updateDecoder) decodeComplexAttribute(route *rib.Route, data []byte, ty
 				// Note: Routes with only AS_SET or AS_CONFED_SET segments (no sequence types)
 				// will have empty peer/origin AS values, which is acceptable as these routes
 				// typically represent aggregated paths where specific AS information is less relevant.
+				data = data[asPathBytesSize:]
 				continue
 			}
 
-			route.PeerAS = peerAS
-			route.OriginAS = originAS
+			for idx := uint8(0); idx < asPathLen; idx++ {
+				route.ASPath = append(route.ASPath, binary.BigEndian.Uint32(data[int(idx)*int(sizeOfUint32):]))
+			}
+
 			// stop decoding upon encountering the first successful match
 			return nil
 		}
@@ -407,26 +405,65 @@ func (m *updateDecoder) decodeComplexAttribute(route *rib.Route, data []byte, ty
 			m.log.Debug("unexpected next_hop attribute length", zap.Int("data_len", len(data)))
 		}
 	case AttrCommunity:
+		if len(data)%(int(sizeOfUint16)+int(sizeOfUint16)) != 0 {
+			return fmt.Errorf("invalid Communities size: %d", len(data))
+		}
+		for len(data) >= int(sizeOfUint16)+int(sizeOfUint16) {
+			route.Communities = append(
+				route.Communities,
+				rib.Community{
+					ASN:   binary.NativeEndian.Uint16(data),
+					Value: binary.NativeEndian.Uint16(data[sizeOfUint16:]),
+				},
+			)
+			data = data[sizeOfUint16+sizeOfUint16:]
+		}
 	case AttrExtCommunity:
+		if len(data)%int(sizeOfUint64) != 0 {
+			return fmt.Errorf("invalid Extended Communities size: %d", len(data))
+		}
+		for len(data) >= int(sizeOfUint64) {
+			route.ExtCommunities = append(
+				route.ExtCommunities,
+				rib.ExtCommunity{
+					Type:    data[0],
+					SubType: data[1],
+					Value:   binary.BigEndian.Uint64(append([]byte{0, 0}, data[2:sizeOfUint64]...)),
+				},
+			)
+			data = data[sizeOfUint64:]
+		}
 	case AttrLargeCommunity:
-		if len(data) == 0 {
-			// skip empty area
-			return nil
+		if len(data)%sizeOfLargeCommunityStruct != 0 {
+			return fmt.Errorf("invalid Large Communities size: %d", len(data))
 		}
-		areaSize := len(data)
-		tailSize := len(data) % sizeOfLargeCommunityStruct
-		if tailSize != 0 {
-			return fmt.Errorf("%w: area of large communities has unhandled data tail %d bytes: %#+v",
-				ErrUpdateDecode, tailSize, data[len(data)-tailSize:])
-
+		for len(data) >= sizeOfLargeCommunityStruct {
+			route.LargeCommunities = append(
+				route.LargeCommunities,
+				rib.LargeCommunity{
+					ASN:      binary.NativeEndian.Uint32(data),
+					Function: binary.NativeEndian.Uint32(data[sizeOfUint32:]),
+					Value:    binary.NativeEndian.Uint32(data[sizeOfUint32+sizeOfUint32:]),
+				},
+			)
+			data = data[sizeOfLargeCommunityStruct:]
 		}
-		largeCommunities := unsafe.Slice(
-			(*rib.LargeCommunity)(unsafe.Pointer(&data[0])),
-			areaSize/sizeOfLargeCommunityStruct,
-		)
-		route.LargeCommunities = slices.Clone(largeCommunities)
 	case AttrMPLSLabelStack:
+		if len(data)%int(sizeOfUint32) != 0 {
+			return fmt.Errorf("invalid MPLS Label Stack size: %d", len(data))
+		}
+		for len(data) >= int(sizeOfUint32) {
+			route.MplsLabelStack = append(route.MplsLabelStack, binary.NativeEndian.Uint32(data))
+			data = data[sizeOfUint32:]
+		}
 	case AttrClusterList:
+		if len(data)%int(sizeOfUint32) != 0 {
+			return fmt.Errorf("invalid Cluster List size: %d", len(data))
+		}
+		for len(data) >= int(sizeOfUint32) {
+			route.ClusterList = append(route.ClusterList, binary.NativeEndian.Uint32(data))
+			data = data[sizeOfUint32:]
+		}
 	case AttrMPReachNLRI:
 		m.log.Debug("received MP_REACH_NLRI attribute",
 			zap.Int("data_len", len(data)),

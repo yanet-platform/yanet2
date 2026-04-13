@@ -2,7 +2,6 @@ package rib
 
 import (
 	"net/netip"
-	"time"
 
 	"github.com/yanet-platform/yanet2/modules/route/controlplane/routepb"
 )
@@ -15,10 +14,21 @@ const (
 	RouteSourceBird
 )
 
+type Community struct {
+	ASN   uint16
+	Value uint16
+}
+
+type ExtCommunity struct {
+	Type    uint8
+	SubType uint8
+	Value   uint64
+}
+
 type LargeCommunity struct {
-	GlobalAdministrator uint32
-	LocalDataPart1      uint32
-	LocalDataPart2      uint32
+	ASN      uint32
+	Function uint32
+	Value    uint32
 }
 
 // Route stores information about network routes and associated BGP attributes.
@@ -42,14 +52,12 @@ type Route struct {
 	//
 	// This field is used to distinguish similar routes to different systems.
 	RD uint64
-	// LargeCommunities is used for link bandwidth information.
+	// Communities are used to encode complementary route information
+	Communities []Community
+	// ExtCommunities are used to encode complementary route information
+	ExtCommunities []ExtCommunity
+	// LargeCommunities are used to encode complementary route information
 	LargeCommunities []LargeCommunity
-	// UpdatedAt notes the last time the route was added or modified in the RIB.
-	UpdatedAt time.Time
-	// PeerAS denotes the Autonomous System of the BGP peer, per RFC 4271 Section 5.1.2.
-	PeerAS uint32
-	// OriginAS indicates the Autonomous System where the route originated.
-	OriginAS uint32
 	// Med (MULTI_EXIT_DISC) guides route selection, per RFC 4271 Section 5.1.4.
 	//
 	// This field participates in route cost calculation.
@@ -59,10 +67,12 @@ type Route struct {
 	//
 	// This field participates in route cost calculation.
 	Pref uint32
-	// ASPathLen measures the number of AS hops to reach our system.
-	//
-	// This field participates in route cost calculation.
-	ASPathLen uint8
+	// Encode sequence of ASes to reach the target
+	ASPath []uint32
+	// Label stack corresponding to the route
+	MplsLabelStack []uint32
+	// Cluster list used to detect announce loops
+	ClusterList []uint32
 	// SourceID identifies the origin of this route's information,
 	// such as static or Bird.
 	SourceID RouteSourceID
@@ -72,14 +82,14 @@ type Route struct {
 
 func convertLargeCommunity(community LargeCommunity) *routepb.LargeCommunity {
 	return &routepb.LargeCommunity{
-		GlobalAdministrator: community.GlobalAdministrator,
-		LocalDataPart1:      community.LocalDataPart1,
-		LocalDataPart2:      community.LocalDataPart2,
+		GlobalAdministrator: community.ASN,
+		LocalDataPart1:      community.Function,
+		LocalDataPart2:      community.Value,
 	}
 }
 
-func ToPBRoute(route *Route, isBest bool) *routepb.Route {
-	communities := make([]*routepb.LargeCommunity, len(route.LargeCommunities))
+func ToPBRoute(route *Route) *routepb.Route {
+	communities := make([]*routepb.LargeCommunity, 0, len(route.LargeCommunities))
 	for _, c := range route.LargeCommunities {
 		communities = append(communities, convertLargeCommunity(c))
 	}
@@ -89,16 +99,22 @@ func ToPBRoute(route *Route, isBest bool) *routepb.Route {
 		peer = route.Peer.String()
 	}
 
+	peerAS := uint32(0)
+	originAS := uint32(0)
+	if len(route.ASPath) > 0 {
+		peerAS = route.ASPath[0]
+		originAS = route.ASPath[len(route.ASPath)-1]
+	}
+
 	return &routepb.Route{
 		Prefix:           route.Prefix.String(),
 		NextHop:          route.NextHop.String(),
 		Peer:             peer,
-		PeerAs:           route.PeerAS,
-		OriginAs:         route.OriginAS,
+		PeerAs:           peerAS,
+		OriginAs:         originAS,
 		Med:              route.Med,
 		Pref:             route.Pref,
 		Source:           routepb.RouteSourceID(route.SourceID),
 		LargeCommunities: communities,
-		IsBest:           isBest,
 	}
 }

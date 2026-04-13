@@ -108,24 +108,40 @@ func TestDecodeUpdate(t *testing.T) {
 			name: "OK ipv6 update",
 			data: dataIPv6WithLargeCommunities,
 			expected: rib.Route{
-				Prefix:    netip.MustParsePrefix("2001:200:c000::/35"),
-				NextHop:   netip.MustParseAddr("2a02:2891:9:200::13"),
-				Peer:      netip.MustParseAddr("::1"),
-				PeerAS:    51185,
-				OriginAS:  23634,
-				Med:       0,
-				Pref:      100,
-				ASPathLen: 3,
+				Prefix:  netip.MustParsePrefix("2001:200:c000::/35"),
+				NextHop: netip.MustParseAddr("2a02:2891:9:200::13"),
+				Peer:    netip.MustParseAddr("::1"),
+				ASPath:  []uint32{51185, 7500, 23634},
+				Med:     0,
+				Pref:    100,
+				Communities: []rib.Community{
+					rib.Community{
+						ASN:   2,
+						Value: 51185,
+					},
+					rib.Community{
+						ASN:   502,
+						Value: 51185,
+					},
+					rib.Community{
+						ASN:   666,
+						Value: 51185,
+					},
+					rib.Community{
+						ASN:   2066,
+						Value: 51185,
+					},
+				},
 				LargeCommunities: []rib.LargeCommunity{
 					{
-						GlobalAdministrator: 51706,
-						LocalDataPart1:      1000,
-						LocalDataPart2:      1,
+						ASN:      51706,
+						Function: 1000,
+						Value:    1,
 					},
 					{
-						GlobalAdministrator: 51706,
-						LocalDataPart1:      1001,
-						LocalDataPart2:      1,
+						ASN:      51706,
+						Function: 1001,
+						Value:    1,
 					},
 				},
 			},
@@ -204,18 +220,22 @@ func TestDecodeUpdate(t *testing.T) {
 				0x13, 0x5, 0, 0x0,
 			},
 			expected: rib.Route{
-				Prefix:    netip.MustParsePrefix("1.0.4.0/22"),
-				NextHop:   netip.AddrFrom16([16]byte{10: 0xff, 11: 0xff, 12: 0xc3, 0x42, 0xe2, 0xfe}),
-				Peer:      netip.IPv6Loopback(),
-				PeerAS:    0x0000bbc6,
-				OriginAS:  0x00009793,
-				Pref:      0x64,
-				ASPathLen: 0x7,
+				Prefix:  netip.MustParsePrefix("1.0.4.0/22"),
+				NextHop: netip.AddrFrom16([16]byte{10: 0xff, 11: 0xff, 12: 0xc3, 0x42, 0xe2, 0xfe}),
+				Peer:    netip.IPv6Loopback(),
+				ASPath:  []uint32{0x0000bbc6, 1299, 7545, 2764, 38803, 38803, 0x00009793},
+				Pref:    0x64,
+				Communities: []rib.Community{
+					rib.Community{
+						ASN:   100,
+						Value: 48070,
+					},
+				},
 				LargeCommunities: []rib.LargeCommunity{
 					{
-						GlobalAdministrator: 48070,
-						LocalDataPart1:      100,
-						LocalDataPart2:      1299,
+						ASN:      48070,
+						Function: 100,
+						Value:    1299,
 					},
 				},
 			},
@@ -231,14 +251,18 @@ func TestDecodeUpdate(t *testing.T) {
 				0, 0, 0, 8, 4, 0, 0, 4, 0, 0, 0, 0xb8, 0x88, 0x13, 0x5,
 			},
 			expected: rib.Route{
-				Prefix:    netip.MustParsePrefix("1.0.7.0/24"),
-				NextHop:   netip.MustParseAddr("::ffff:206.82.104.185"),
-				Peer:      netip.IPv6Loopback(),
-				PeerAS:    398465,
-				OriginAS:  38803,
-				Pref:      100,
-				ASPathLen: 4,
-				ToRemove:  true, // NOTE: ToRemove test
+				Prefix:  netip.MustParsePrefix("1.0.7.0/24"),
+				NextHop: netip.MustParseAddr("::ffff:206.82.104.185"),
+				Peer:    netip.IPv6Loopback(),
+				ASPath:  []uint32{398465, 1299, 7545, 38803},
+				Communities: []rib.Community{
+					rib.Community{
+						ASN:   35000,
+						Value: 1299,
+					},
+				},
+				Pref:     100,
+				ToRemove: true, // NOTE: ToRemove test
 			},
 		},
 		{

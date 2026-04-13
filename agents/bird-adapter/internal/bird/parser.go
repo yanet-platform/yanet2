@@ -10,7 +10,9 @@ import (
 )
 
 const (
+	sizeOfUint16    = unsafe.Sizeof(uint16(0))
 	sizeOfUint32    = unsafe.Sizeof(uint32(0))
+	sizeOfUint64    = unsafe.Sizeof(uint64(0))
 	sizeOfChunkSize = sizeOfUint32
 )
 
