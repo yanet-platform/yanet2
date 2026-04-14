@@ -19,6 +19,10 @@ service AdapterService {
 message SetupConfigRequest {
   string name = 1;
   ImportConfig config = 2;
+  // v4 source for mpls routes
+  bytes source_v4 = 3;
+  // v6 source for mpls routes
+  bytes source_v6 = 4;
 }
 
 message SetupConfigResponse {}

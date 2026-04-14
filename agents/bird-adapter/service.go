@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/netip"
 	"sync"
 	"time"
 
@@ -18,7 +19,9 @@ import (
 
 	adapterpb "github.com/yanet-platform/yanet2/agents/bird-adapter/adapterpb"
 	"github.com/yanet-platform/yanet2/agents/bird-adapter/internal/bird"
+	"github.com/yanet-platform/yanet2/agents/bird-adapter/internal/mpls"
 	"github.com/yanet-platform/yanet2/agents/bird-adapter/internal/rib"
+	"github.com/yanet-platform/yanet2/modules/route-mpls/controlplane/routemplspb"
 	"github.com/yanet-platform/yanet2/modules/route/controlplane/routepb"
 )
 
@@ -107,6 +110,14 @@ func (m *AdapterService) SetupConfig(
 	req *adapterpb.SetupConfigRequest,
 ) (*adapterpb.SetupConfigResponse, error) {
 	name := req.GetName()
+	mplsV4Src, ok := netip.AddrFromSlice(req.GetSourceV4())
+	if !ok || !mplsV4Src.Is4() {
+		return nil, fmt.Errorf("invalid v4 source address")
+	}
+	mplsV6Src, ok := netip.AddrFromSlice(req.GetSourceV6())
+	if !ok || !mplsV6Src.Is6() {
+		return nil, fmt.Errorf("invalid v6 source address")
+	}
 	logLevelStr := req.GetConfig().GetLogLevel()
 
 	m.log.Info("setting up the configuration",
@@ -159,7 +170,7 @@ func (m *AdapterService) SetupConfig(
 	}
 
 	// And then add dynamic routes, if any.
-	if err := m.processBirdImport(conn, cfg, name, clientLog); err != nil {
+	if err := m.processBirdImport(conn, cfg, name, mplsV4Src, mplsV6Src, clientLog); err != nil {
 		_ = conn.Close()
 		return nil, fmt.Errorf("failed to setup bird import reader: %w ", err)
 	}
@@ -179,13 +190,21 @@ type importHolder struct {
 	currentStream *grpc.ClientStreamingClient[routepb.Update, routepb.UpdateSummary] // Active gRPC stream for RIB updates; replaced on reconnect
 	sockets       []string                                                           // Unix socket paths being read from
 	createdAt     time.Time                                                          // Timestamp when the session was created
+	mplsRib       mpls.Rib                                                           // Store mpls routes
 }
 
 // processBirdImport streams BIRD route updates to the control plane RIB.
 // Handles automatic reconnection and graceful cleanup of existing imports.
 // It establishes the initial gRPC stream to the RouteService (gateway), sets up
 // callbacks for the bird.Export reader, and manages replacement of existing imports.
-func (m *AdapterService) processBirdImport(conn *grpc.ClientConn, cfg *bird.Config, name string, clientLog *zap.Logger) error {
+func (m *AdapterService) processBirdImport(
+	conn *grpc.ClientConn,
+	cfg *bird.Config,
+	name string,
+	mplsV4Src netip.Addr,
+	mplsV6Src netip.Addr,
+	clientLog *zap.Logger,
+) error {
 	// streamCtx governs this specific import's gRPC stream and BIRD reader.
 	// Cancelled via holder.cancel on replacement or service stop.
 	streamCtx, cancel := context.WithCancel(context.Background())
@@ -198,6 +217,10 @@ func (m *AdapterService) processBirdImport(conn *grpc.ClientConn, cfg *bird.Conf
 
 	holder := new(importHolder)
 	holder.currentStream = &stream
+
+	routeMPLSClient := routemplspb.NewRouteMPLSServiceClient(conn)
+	holder.mplsRib = mpls.NewRib()
+
 	log := m.log.With(zap.String("config", name))
 
 	// onUpdate sends route batches over the gRPC stream. Called by bird.Export.
@@ -205,6 +228,10 @@ func (m *AdapterService) processBirdImport(conn *grpc.ClientConn, cfg *bird.Conf
 		log.Debug("processing BIRD routes",
 			zap.Int("count", len(routes)),
 		)
+
+		// Batch mpls module updates
+		mplsUpdates := make([]*routemplspb.UpdateEvent, 0)
+
 		for idx := range routes {
 			select {
 			case <-ctx.Done():
@@ -226,6 +253,38 @@ func (m *AdapterService) processBirdImport(conn *grpc.ClientConn, cfg *bird.Conf
 				continue
 			}
 
+			if routes[idx].RD != 0 {
+				// Assume it is a MPLS route
+				updates := holder.mplsRib.Apply(routes[idx])
+				for idx := range updates {
+					update := updates[idx]
+					source := mplsV4Src
+					if update.Prefix.Addr().Is6() {
+						source = mplsV6Src
+					}
+					if update.ToRemove {
+						mplsUpdates = append(
+							mplsUpdates,
+							&routemplspb.UpdateEvent{
+								Event: &routemplspb.UpdateEvent_Withdraw{
+									Withdraw: rib.ToPBMPLSRoute(&update, source),
+								},
+							},
+						)
+					} else {
+						mplsUpdates = append(
+							mplsUpdates,
+							&routemplspb.UpdateEvent{
+								Event: &routemplspb.UpdateEvent_Update{
+									Update: rib.ToPBMPLSRoute(&update, source),
+								},
+							},
+						)
+					}
+				}
+				continue
+			}
+
 			err := (*holder.currentStream).Send(&routepb.Update{
 				Name:     name,
 				IsDelete: routes[idx].ToRemove,
@@ -236,6 +295,18 @@ func (m *AdapterService) processBirdImport(conn *grpc.ClientConn, cfg *bird.Conf
 				return fmt.Errorf("send BIRD route update for %s failed: %w", routes[idx].Prefix, err)
 			}
 		}
+
+		if len(mplsUpdates) > 0 {
+			// Send mpls routes
+			_, err := routeMPLSClient.UpdateConfig(ctx, &routemplspb.UpdateConfigRequest{
+				Name:    name,
+				Updates: mplsUpdates,
+			})
+			if err != nil {
+				return fmt.Errorf("send BIRD route mpls update failed: %w", err)
+			}
+		}
+
 		return nil
 	}
 
