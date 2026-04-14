@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/yanet-platform/yanet2/common/commonpb"
+	"github.com/yanet-platform/yanet2/common/go/metrics"
 	yanet "github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb"
 	"go.uber.org/zap"
@@ -17,9 +19,10 @@ import (
 type BalancerService struct {
 	balancerpb.UnimplementedBalancerServer
 
-	agent *BalancerAgent
-	mu    sync.Mutex
-	log   *zap.SugaredLogger
+	agent           *BalancerAgent
+	mu              sync.Mutex
+	log             *zap.SugaredLogger
+	handlersMetrics handlersMetrics
 }
 
 func NewBalancerService(
@@ -30,16 +33,23 @@ func NewBalancerService(
 ) (*BalancerService, error) {
 	log.Info("initializing balancer service")
 
-	agent, err := ReattachBalancerAgent(shm, instanceIdx, size)
+	agent, err := ReattachBalancerAgent(shm, instanceIdx, size, log)
 	if err != nil {
 		log.Errorw("failed to reattach balancer agent", "error", err)
 		return nil, err
 	}
 
-	return &BalancerService{
-		agent: agent,
-		log:   log,
-	}, nil
+	s := &BalancerService{
+		agent:           agent,
+		log:             log,
+		handlersMetrics: newHandlersMetrics(),
+	}
+
+	for _, balancer := range agent.AllBalancers() {
+		balancer.startRefreshing(&s.mu)
+	}
+
+	return s, nil
 }
 
 // getBalancerWithAutoSelection retrieves a balancer by name.
@@ -81,6 +91,12 @@ func (s *BalancerService) SetConfig(
 	ctx context.Context,
 	req *balancerpb.SetConfigRequest,
 ) (*balancerpb.SetConfigResponse, error) {
+	tracker := newHandlerMetricTracker(
+		"set_config", &s.handlersMetrics, defaultLatencyBoundsMS,
+		metrics.Labels{"config": req.GetName()},
+	)
+	defer tracker.Fix()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -111,12 +127,14 @@ func (s *BalancerService) SetConfig(
 
 	s.log.Infow("creating new balancer", "name", name)
 
-	b, err := NewBalancer(s.agent, name, req.Config)
+	b, err := NewBalancer(s.agent, name, req.Config, s.log)
 	if err != nil {
 		s.log.Errorw("failed to create balancer", "name", name, "error", err)
 		return nil, err
 	}
 	s.agent.PutBalancer(name, b)
+
+	b.startRefreshing(&s.mu)
 
 	s.log.Infow("balancer created", "name", name)
 
@@ -142,6 +160,11 @@ func (s *BalancerService) GetConfig(
 	ctx context.Context,
 	req *balancerpb.GetConfigRequest,
 ) (*balancerpb.GetConfigResponse, error) {
+	tracker := newHandlerMetricTracker(
+		"get_config", &s.handlersMetrics, defaultLatencyBoundsMS, metrics.Labels{},
+	)
+	defer tracker.Fix()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -161,6 +184,11 @@ func (s *BalancerService) GetState(
 	ctx context.Context,
 	req *balancerpb.GetStateRequest,
 ) (*balancerpb.GetStateResponse, error) {
+	tracker := newHandlerMetricTracker(
+		"get_state", &s.handlersMetrics, defaultLatencyBoundsMS, metrics.Labels{},
+	)
+	defer tracker.Fix()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -193,6 +221,11 @@ func (s *BalancerService) ListSessions(
 	req *balancerpb.ListSessionsRequest,
 	stream grpc.ServerStreamingServer[balancerpb.Session],
 ) error {
+	tracker := newHandlerMetricTracker(
+		"list_sessions", &s.handlersMetrics, defaultLatencyBoundsMS, metrics.Labels{},
+	)
+	defer tracker.Fix()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -210,6 +243,11 @@ func (s *BalancerService) UpdateReals(
 	ctx context.Context,
 	req *balancerpb.UpdateRealsRequest,
 ) (*balancerpb.UpdateRealsResponse, error) {
+	tracker := newHandlerMetricTracker(
+		"update_reals", &s.handlersMetrics, defaultLatencyBoundsMS, metrics.Labels{},
+	)
+	defer tracker.Fix()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -240,6 +278,11 @@ func (s *BalancerService) FlushReals(
 	ctx context.Context,
 	req *balancerpb.FlushRealsRequest,
 ) (*balancerpb.FlushRealsResponse, error) {
+	tracker := newHandlerMetricTracker(
+		"flush_reals", &s.handlersMetrics, defaultLatencyBoundsMS, metrics.Labels{},
+	)
+	defer tracker.Fix()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -266,6 +309,11 @@ func (s *BalancerService) UpdateVS(
 	ctx context.Context,
 	req *balancerpb.UpdateVSRequest,
 ) (*balancerpb.UpdateVSResponse, error) {
+	tracker := newHandlerMetricTracker(
+		"update_vs", &s.handlersMetrics, defaultLatencyBoundsMS, metrics.Labels{},
+	)
+	defer tracker.Fix()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -294,6 +342,11 @@ func (s *BalancerService) DeleteVS(
 	ctx context.Context,
 	req *balancerpb.DeleteVSRequest,
 ) (*balancerpb.DeleteVSResponse, error) {
+	tracker := newHandlerMetricTracker(
+		"delete_vs", &s.handlersMetrics, defaultLatencyBoundsMS, metrics.Labels{},
+	)
+	defer tracker.Fix()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -316,4 +369,31 @@ func (s *BalancerService) DeleteVS(
 		Name:  name,
 		Reuse: reuseReport,
 	}, nil
+}
+
+func (s *BalancerService) GetMetrics(
+	ctx context.Context,
+	req *balancerpb.GetMetricsRequest,
+) (*balancerpb.GetMetricsResponse, error) {
+	tracker := newHandlerMetricTracker(
+		"get_metrics", &s.handlersMetrics, defaultLatencyBoundsMS, metrics.Labels{},
+	)
+	defer tracker.Fix()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	result := make([]*commonpb.Metric, 0, 200)
+
+	for _, b := range s.agent.AllBalancers() {
+		bMetrics, err := b.Metrics(time.Now())
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, bMetrics...)
+	}
+
+	result = append(result, s.handlersMetrics.collect()...)
+
+	return &balancerpb.GetMetricsResponse{Metrics: result}, nil
 }

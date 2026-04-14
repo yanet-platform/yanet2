@@ -5,6 +5,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	yanet "github.com/yanet-platform/yanet2/controlplane/ffi"
+	"go.uber.org/zap"
 )
 
 type BalancerAgent struct {
@@ -35,6 +36,7 @@ func ReattachBalancerAgent(
 	shm *yanet.SharedMemory,
 	instanceIdx uint32,
 	size datasize.ByteSize,
+	log *zap.SugaredLogger,
 ) (*BalancerAgent, error) {
 	agent, err := shm.AgentReattach("balancer", instanceIdx, size)
 	if err != nil {
@@ -48,7 +50,7 @@ func ReattachBalancerAgent(
 	}
 	packetHandlers := balancerAgent.list()
 	for _, ph := range packetHandlers {
-		balancer := restoreBalancerFromPacketHandler(balancerAgent, ph)
+		balancer := restoreBalancerFromPacketHandler(balancerAgent, ph, log)
 		name := balancer.handler.name()
 		balancerAgent.balancers[name] = balancer
 	}

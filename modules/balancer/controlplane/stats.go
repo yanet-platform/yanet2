@@ -17,82 +17,97 @@ func aggregateCounter(counter [][]uint64) {
 	}
 }
 
-func commonStats(counter [][]uint64) *balancerpb.CommonStats {
+func commonStats(counter [][]uint64) *CommonStats {
 	aggregateCounter(counter)
-	commonStats := (*CommonStats)(unsafe.Pointer(&counter[0][0]))
+	return (*CommonStats)(unsafe.Pointer(&counter[0][0]))
+}
+
+func (common *CommonStats) proto() *balancerpb.CommonStats {
 	return &balancerpb.CommonStats{
-		IncomingPackets:        commonStats.Incoming_packets,
-		IncomingBytes:          commonStats.Incoming_bytes,
-		UnexpectedNetworkProto: commonStats.Unexpected_network_proto,
-		DecapSuccessful:        commonStats.Decap_successful,
-		DecapFailed:            commonStats.Decap_failed,
-		OutgoingPackets:        commonStats.Outgoing_packets,
-		OutgoingBytes:          commonStats.Outgoing_bytes,
+		IncomingPackets:        common.Incoming_packets,
+		IncomingBytes:          common.Incoming_bytes,
+		UnexpectedNetworkProto: common.Unexpected_network_proto,
+		DecapSuccessful:        common.Decap_successful,
+		DecapFailed:            common.Decap_failed,
+		OutgoingPackets:        common.Outgoing_packets,
+		OutgoingBytes:          common.Outgoing_bytes,
 	}
 }
 
-func icmpStats(counter [][]uint64) *balancerpb.IcmpStats {
+func icmpStats(counter [][]uint64) *IcmpStats {
 	aggregateCounter(counter)
-	icmpStats := (*IcmpStats)(unsafe.Pointer(&counter[0][0]))
+	return (*IcmpStats)(unsafe.Pointer(&counter[0][0]))
+}
+
+func (i *IcmpStats) proto() *balancerpb.IcmpStats {
 	return &balancerpb.IcmpStats{
-		IncomingPackets:           icmpStats.Incoming_packets,
-		SrcNotAllowed:             icmpStats.Src_not_allowed,
-		EchoResponses:             icmpStats.Echo_responses,
-		PayloadTooShortIp:         icmpStats.Payload_too_short_ip,
-		UnmatchingSrcFromOriginal: icmpStats.Unmatching_src_from_original,
-		PayloadTooShortPort:       icmpStats.Payload_too_short_port,
-		UnexpectedTransport:       icmpStats.Unexpected_transport,
-		UnrecognizedVs:            icmpStats.Unrecognized_vs,
-		ForwardedPackets:          icmpStats.Forwarded_packets,
-		BroadcastedPackets:        icmpStats.Broadcasted_packets,
-		PacketClonesSent:          icmpStats.Packet_clones_sent,
-		PacketClonesReceived:      icmpStats.Packet_clones_received,
-		PacketCloneFailures:       icmpStats.Packet_clone_failures,
+		IncomingPackets:           i.Incoming_packets,
+		SrcNotAllowed:             i.Src_not_allowed,
+		EchoResponses:             i.Echo_responses,
+		PayloadTooShortIp:         i.Payload_too_short_ip,
+		UnmatchingSrcFromOriginal: i.Unmatching_src_from_original,
+		PayloadTooShortPort:       i.Payload_too_short_port,
+		UnexpectedTransport:       i.Unexpected_transport,
+		UnrecognizedVs:            i.Unrecognized_vs,
+		ForwardedPackets:          i.Forwarded_packets,
+		BroadcastedPackets:        i.Broadcasted_packets,
+		PacketClonesSent:          i.Packet_clones_sent,
+		PacketClonesReceived:      i.Packet_clones_received,
+		PacketCloneFailures:       i.Packet_clone_failures,
 	}
 }
 
-func l4Stats(counter [][]uint64) *balancerpb.L4Stats {
+func l4Stats(counter [][]uint64) *L4Stats {
 	aggregateCounter(counter)
-	l4Stats := (*L4Stats)(unsafe.Pointer(&counter[0][0]))
+	return (*L4Stats)(unsafe.Pointer(&counter[0][0]))
+}
+
+func (l4 *L4Stats) proto() *balancerpb.L4Stats {
 	return &balancerpb.L4Stats{
-		IncomingPackets:  l4Stats.Incoming_packets,
-		SelectVsFailed:   l4Stats.Select_vs_failed,
-		InvalidPackets:   l4Stats.Invalid_packets,
-		SelectRealFailed: l4Stats.Select_real_failed,
-		OutgoingPackets:  l4Stats.Outgoing_packets,
+		IncomingPackets:  l4.Incoming_packets,
+		SelectVsFailed:   l4.Select_vs_failed,
+		InvalidPackets:   l4.Invalid_packets,
+		SelectRealFailed: l4.Select_real_failed,
+		OutgoingPackets:  l4.Outgoing_packets,
 	}
 }
 
-func vsStats(counter [][]uint64) *balancerpb.VsStats {
+func vsStats(counter [][]uint64) *VsStats {
 	aggregateCounter(counter)
-	vsStats := (*VsStats)(unsafe.Pointer(&counter[0][0]))
+	return (*VsStats)(unsafe.Pointer(&counter[0][0]))
+}
+
+func (vs *VsStats) proto() *balancerpb.VsStats {
 	return &balancerpb.VsStats{
-		IncomingPackets:        vsStats.Incoming_packets,
-		IncomingBytes:          vsStats.Incoming_bytes,
-		PacketSrcNotAllowed:    vsStats.Packet_src_not_allowed,
-		NoReals:                vsStats.No_reals,
-		SessionTableOverflow:   vsStats.Session_table_overflow,
-		EchoIcmpPackets:        vsStats.Echo_icmp_packets,
-		ErrorIcmpPackets:       vsStats.Error_icmp_packets,
-		RealIsDisabled:         vsStats.Real_is_disabled,
-		RealIsRemoved:          vsStats.Real_is_removed,
-		NotRescheduledPackets:  vsStats.Not_rescheduled_packets,
-		BroadcastedIcmpPackets: vsStats.Broadcasted_icmp_packets,
-		CreatedSessions:        vsStats.Created_sessions,
-		OutgoingPackets:        vsStats.Outgoing_packets,
-		OutgoingBytes:          vsStats.Outgoing_bytes,
+		IncomingPackets:        vs.Incoming_packets,
+		IncomingBytes:          vs.Incoming_bytes,
+		PacketSrcNotAllowed:    vs.Packet_src_not_allowed,
+		NoReals:                vs.No_reals,
+		SessionTableOverflow:   vs.Session_table_overflow,
+		EchoIcmpPackets:        vs.Echo_icmp_packets,
+		ErrorIcmpPackets:       vs.Error_icmp_packets,
+		RealIsDisabled:         vs.Real_is_disabled,
+		RealIsRemoved:          vs.Real_is_removed,
+		NotRescheduledPackets:  vs.Not_rescheduled_packets,
+		BroadcastedIcmpPackets: vs.Broadcasted_icmp_packets,
+		CreatedSessions:        vs.Created_sessions,
+		OutgoingPackets:        vs.Outgoing_packets,
+		OutgoingBytes:          vs.Outgoing_bytes,
 	}
 }
 
-func realStats(counter [][]uint64) *balancerpb.RealStats {
+func realStats(counter [][]uint64) *RealStats {
 	aggregateCounter(counter)
-	realStats := (*RealStats)(unsafe.Pointer(&counter[0][0]))
+	return (*RealStats)(unsafe.Pointer(&counter[0][0]))
+}
+
+func (rs *RealStats) proto() *balancerpb.RealStats {
 	return &balancerpb.RealStats{
-		CreatedSessions:     realStats.Created_sessions,
-		Packets:             realStats.Packets,
-		Bytes:               realStats.Bytes,
-		PacketsRealDisabled: realStats.Packets_real_disabled,
-		ErrorIcmpPackets:    realStats.Error_icmp_packets,
+		CreatedSessions:     rs.Created_sessions,
+		Packets:             rs.Packets,
+		Bytes:               rs.Bytes,
+		PacketsRealDisabled: rs.Packets_real_disabled,
+		ErrorIcmpPackets:    rs.Error_icmp_packets,
 	}
 }
 
@@ -150,7 +165,7 @@ func applyCounter(state *balancerpb.BalancerState, counter yanet.CounterInfo) {
 		if vsState == nil {
 			return
 		}
-		vsState.Stats = vsStats(counter.Values)
+		vsState.Stats = vsStats(counter.Values).proto()
 	case strings.HasPrefix(name, "rl_"):
 		vsIndex, realIndex, ok := realIndexFromCounterName(name)
 		if !ok {
@@ -164,15 +179,15 @@ func applyCounter(state *balancerpb.BalancerState, counter yanet.CounterInfo) {
 		if realState == nil {
 			return
 		}
-		realState.RealStats = realStats(counter.Values)
+		realState.RealStats = realStats(counter.Values).proto()
 	case name == "cmn":
-		state.CommonStats = commonStats(counter.Values)
+		state.CommonStats = commonStats(counter.Values).proto()
 	case name == "iv4":
-		state.IcmpIpv4Stats = icmpStats(counter.Values)
+		state.IcmpIpv4Stats = icmpStats(counter.Values).proto()
 	case name == "iv6":
-		state.IcmpIpv6Stats = icmpStats(counter.Values)
+		state.IcmpIpv6Stats = icmpStats(counter.Values).proto()
 	case name == "l4":
-		state.L4Stats = l4Stats(counter.Values)
+		state.L4Stats = l4Stats(counter.Values).proto()
 	case strings.HasPrefix(name, "acl_"):
 		vsIndex, tag, ok := aclTagFromCounterName(name)
 		if !ok {

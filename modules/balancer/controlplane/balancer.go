@@ -2,11 +2,16 @@
 package balancer
 
 import (
+	"context"
+	"strings"
+	"sync"
 	"time"
 
+	"github.com/yanet-platform/yanet2/common/commonpb"
 	"github.com/yanet-platform/yanet2/common/go/relptr"
 	yanet "github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb"
+	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
@@ -23,6 +28,9 @@ const (
 var errNoAgentMemory = status.Error(codes.ResourceExhausted, "no agent memory")
 
 func (b *Balancer) Destroy() {
+	if b.refresher != nil {
+		b.refresher.Stop()
+	}
 	handler := b.handler
 	agent := b.agent
 	if handler.Session_table != nil {
@@ -48,6 +56,18 @@ type Balancer struct {
 
 	// Last applied config for diffing on Update.
 	config *balancerpb.BalancerConfig
+
+	log *zap.SugaredLogger
+
+	refresher *Refresher
+}
+
+func (b *Balancer) startRefreshing(mu *sync.Mutex) {
+	if b.refresher != nil {
+		b.refresher.Stop()
+	}
+	b.refresher = NewRefresher(b, mu)
+	b.refresher.Run(context.Background())
 }
 
 // nullifyReusedFields clears pointers to resources that were reused (via relptr.Equate)
@@ -93,7 +113,7 @@ func (b *Balancer) nullifyReusedFields(
 }
 
 // nullifySharedTrackerShards clears tracker_shards on old reals whose shards
-// were inherited (via relptr.Equate) by the corresponding new real.
+// were inherited by the corresponding new real.
 func nullifySharedTrackerShards(oldHandler, newHandler *PacketHandler) {
 	oldVsList := relptr.Slice(&oldHandler.Vs, oldHandler.Vs_count)
 	newVsList := relptr.Slice(&newHandler.Vs, newHandler.Vs_count)
@@ -173,8 +193,10 @@ func (b *Balancer) Update(
 
 	mergedStateConfig := mergeStateConfig(b.config.State, config.State)
 
+	b.handler.setState(mergedStateConfig, st)
+	b.refresher.UpdateRefreshPeriod(mergedStateConfig.RefreshPeriod.AsDuration())
+
 	if config.PacketHandler == nil {
-		b.handler.setState(mergedStateConfig, st)
 		return nil, nil
 	}
 
@@ -251,6 +273,7 @@ func NewBalancer(
 	agent *BalancerAgent,
 	name string,
 	config *balancerpb.BalancerConfig,
+	log *zap.SugaredLogger,
 ) (*Balancer, error) {
 	if err := validateBalancerConfig(config); err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid config: %v", err)
@@ -276,6 +299,7 @@ func NewBalancer(
 		handler: handler,
 		agent:   agent,
 		config:  config,
+		log:     log,
 	}
 
 	// Register handler in agent storage, then install into dataplane.
@@ -597,4 +621,175 @@ func mergeStateConfig(old, update *balancerpb.StateConfig) *balancerpb.StateConf
 		result.RefreshPeriod = update.RefreshPeriod
 	}
 	return result
+}
+
+// Metrics reads dataplane counters for all positions where this balancer is
+// installed and returns a flat slice of commonpb.Metric without building any
+// intermediate BalancerState proto tree.
+func (b *Balancer) Metrics(now time.Time) ([]*commonpb.Metric, error) {
+	dpConfig := b.agent.AsYanetAgent().DPConfig()
+	balancerName := b.handler.name()
+	workers := dpConfig.WorkerCount()
+	services := relptr.Slice(&b.handler.Vs, b.handler.Vs_count)
+
+	var result []*commonpb.Metric
+
+	for position := range dpConfig.AllModulePositions("balancer") {
+		if position.ModuleName != balancerName {
+			continue
+		}
+
+		refLabels := []*commonpb.Label{
+			{Name: "device", Value: position.Device},
+			{Name: "pipeline", Value: position.Pipeline},
+			{Name: "function", Value: position.Function},
+			{Name: "chain", Value: position.Chain},
+			{Name: "config", Value: balancerName},
+		}
+
+		counters := dpConfig.ModuleCounters(
+			position.Device, position.Pipeline,
+			position.Function, position.Chain,
+			"balancer", balancerName, []string{},
+		)
+
+		var (
+			cmn *CommonStats
+			l4s *L4Stats
+			iv4 *IcmpStats
+			iv6 *IcmpStats
+		)
+
+		for _, counter := range counters {
+			name := counter.Name
+			switch {
+			case name == "cmn":
+				cmn = commonStats(counter.Values)
+
+			case name == "l4":
+				l4s = l4Stats(counter.Values)
+
+			case name == "iv4":
+				iv4 = icmpStats(counter.Values)
+
+			case name == "iv6":
+				iv6 = icmpStats(counter.Values)
+
+			case strings.HasPrefix(name, "vs_"):
+				vsIndex, ok := vsIndexFromCounterName(name)
+				if !ok || int(vsIndex) >= len(services) {
+					continue
+				}
+				vs := &services[vsIndex]
+				if vs.isRemoved() {
+					continue
+				}
+				vsLabels := b.vsLabels(refLabels, vs)
+				stats := vsStats(counter.Values)
+				for _, c := range vsCounters {
+					result = append(result, &commonpb.Metric{
+						Name:   c.name,
+						Labels: vsLabels,
+						Value:  &commonpb.Metric_Counter{Counter: c.getter(stats)},
+					})
+				}
+
+			case strings.HasPrefix(name, "rl_"):
+				vsIndex, realIndex, ok := realIndexFromCounterName(name)
+				if !ok || int(vsIndex) >= len(services) {
+					continue
+				}
+				vs := &services[vsIndex]
+				if vs.isRemoved() {
+					continue
+				}
+				reals := relptr.Slice(&vs.Reals, vs.Reals_count)
+				if int(realIndex) >= len(reals) {
+					continue
+				}
+				r := &reals[realIndex]
+				if r.isRemoved() {
+					continue
+				}
+				realLabels := b.realLabels(refLabels, vs, r)
+				stats := realStats(counter.Values)
+				for _, c := range realCounters {
+					result = append(result, &commonpb.Metric{
+						Name:   c.name,
+						Labels: realLabels,
+						Value:  &commonpb.Metric_Counter{Counter: c.getter(stats)},
+					})
+				}
+
+			case strings.HasPrefix(name, "acl_"):
+				vsIndex, tag, ok := aclTagFromCounterName(name)
+				if !ok || int(vsIndex) >= len(services) {
+					continue
+				}
+				vs := &services[vsIndex]
+				if vs.isRemoved() {
+					continue
+				}
+				aclLabels := make([]*commonpb.Label, len(refLabels)+2)
+				copy(aclLabels, refLabels)
+				aclLabels[len(refLabels)] = &commonpb.Label{Name: "vs", Value: vs.String()}
+				aclLabels[len(refLabels)+1] = &commonpb.Label{Name: "acl_tag", Value: tag}
+				result = append(result, &commonpb.Metric{
+					Name:   "acl_hits",
+					Labels: aclLabels,
+					Value:  &commonpb.Metric_Counter{Counter: aggregateACLPasses(counter.Values)},
+				})
+			}
+		}
+
+		// Emit global (common + L4 + ICMP) metrics.
+		for _, c := range commonCounters {
+			result = append(result, &commonpb.Metric{
+				Name:   c.name,
+				Labels: refLabels,
+				Value:  &commonpb.Metric_Counter{Counter: c.getter(cmn, l4s, iv4, iv6)},
+			})
+		}
+
+		// Emit active-session gauges from shared-memory session trackers.
+		for vsIdx := range services {
+			vs := &services[vsIdx]
+			if vs.isRemoved() {
+				continue
+			}
+			reals := relptr.Slice(&vs.Reals, vs.Reals_count)
+			for realIdx := range reals {
+				r := &reals[realIdx]
+				if r.isRemoved() {
+					continue
+				}
+				active, _ := r.sessions(workers, now)
+				realLabels := b.realLabels(refLabels, vs, r)
+				result = append(result, &commonpb.Metric{
+					Name:   "real_active_sessions",
+					Labels: realLabels,
+					Value:  &commonpb.Metric_Gauge{Gauge: float64(active)},
+				})
+			}
+		}
+	}
+
+	return result, nil
+}
+
+// vsLabels returns a label set combining refLabels with a "vs" label identifying vs.
+func (b *Balancer) vsLabels(refLabels []*commonpb.Label, vs *VS) []*commonpb.Label {
+	labels := make([]*commonpb.Label, len(refLabels)+1)
+	copy(labels, refLabels)
+	labels[len(refLabels)] = &commonpb.Label{Name: "vs", Value: vs.String()}
+	return labels
+}
+
+// realLabels returns a label set combining refLabels with "vs" and "real" labels.
+func (b *Balancer) realLabels(refLabels []*commonpb.Label, vs *VS, r *Real) []*commonpb.Label {
+	labels := make([]*commonpb.Label, len(refLabels)+2)
+	copy(labels, refLabels)
+	labels[len(refLabels)] = &commonpb.Label{Name: "vs", Value: vs.String()}
+	labels[len(refLabels)+1] = &commonpb.Label{Name: "real", Value: r.String()}
+	return labels
 }

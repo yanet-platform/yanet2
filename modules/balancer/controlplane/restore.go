@@ -6,6 +6,7 @@ import (
 	"github.com/yanet-platform/yanet2/common/filterpb"
 	"github.com/yanet-platform/yanet2/common/go/relptr"
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb"
+	"go.uber.org/zap"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 
@@ -15,11 +16,16 @@ import (
 //
 // The returned Balancer shares the same packet handler memory; no new shared
 // memory is allocated.
-func restoreBalancerFromPacketHandler(agent *BalancerAgent, ph *PacketHandler) *Balancer {
+func restoreBalancerFromPacketHandler(
+	agent *BalancerAgent,
+	ph *PacketHandler,
+	log *zap.SugaredLogger,
+) *Balancer {
 	b := &Balancer{
 		handler: ph,
 		agent:   agent,
 		config:  restoreConfigFromPacketHandler(ph),
+		log:     log,
 	}
 	b.buildIndexes()
 	return b
