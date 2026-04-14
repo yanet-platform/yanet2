@@ -1,7 +1,6 @@
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use serde::{Deserialize, Serialize};
-
 use yanet_cli_balancer::{balancerpb, filterpb};
 
 use crate::ip_to_bytes;

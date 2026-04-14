@@ -226,7 +226,8 @@ pub enum Proto {
 
 use yanet_cli_balancer::balancerpb;
 
-/// Parse a VS identifier string: "ip:port/proto", "[ipv6]:port/proto", or "ipv6:port/proto".
+/// Parse a VS identifier string: "ip:port/proto", "[ipv6]:port/proto", or
+/// "ipv6:port/proto".
 pub fn parse_vs_identifier(vs_str: &str) -> Result<(std::net::IpAddr, u16, balancerpb::TransportProto), String> {
     let vs_parts: Vec<&str> = vs_str.split('/').collect();
     if vs_parts.len() != 2 {

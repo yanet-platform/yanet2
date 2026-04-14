@@ -2,18 +2,15 @@ use std::error::Error;
 
 use ptree::TreeBuilder;
 use tonic::codec::CompressionEncoding;
-
 use yanet_cli_balancer::balancerpb::{
     self, FlushRealsRequest, GetConfigRequest, GetStateRequest, ListBalancersRequest, ListSessionsRequest,
     PacketHandlerRef, RealUpdate, SetConfigRequest, UpdateRealsRequest, balancer_client::BalancerClient,
 };
 use ync::client::{ConnectionArgs, LayeredChannel};
 
-use crate::config::BalancerConfig;
-use crate::display;
 use crate::{
-    ConfigCmd, DisableRealCmd, EnableRealCmd, FlushRealsCmd, ModeCmd, SessionsCmd, ShowCmd, UpdateCmd, ip_to_bytes,
-    parse_vs_identifier,
+    ConfigCmd, DisableRealCmd, EnableRealCmd, FlushRealsCmd, ModeCmd, SessionsCmd, ShowCmd, UpdateCmd,
+    config::BalancerConfig, display, ip_to_bytes, parse_vs_identifier,
 };
 
 pub struct BalancerService {
