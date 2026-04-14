@@ -20,8 +20,8 @@ pub fn print_compact(state: &balancerpb::BalancerState) {
 
     println!("{:<46}{:<8}Flags", "VirtualService", "Sched");
     println!(
-        "  -> {:<38}{:<6}{:<8}{:<10}Enabled",
-        "RemoteAddress:Port", "Wght", "EfWght", "Conns",
+        "  -> {:<38}{:<6}{:<8}{:<10}{:<12}Enabled",
+        "RemoteAddress:Port", "Weight", "Conns", "Pkts", "Bytes",
     );
     println!("{}", "\u{2500}".repeat(LINE_WIDTH));
 
@@ -48,13 +48,14 @@ pub fn print_compact(state: &balancerpb::BalancerState) {
                 Err(_) => continue,
             };
             let real_addr = format_ip_port(rip, rid.port);
-            let enabled = if real.enabled { "yes" } else { "no" };
+            let enabled = if real.enabled { "true" } else { "false" };
             println!(
-                "  -> {:<38}{:<6}{:<8}{:<10}{}",
+                "  -> {:<38}{:<6}{:<8}{:<10}{:<12}{}",
                 real_addr,
                 format_number(real.weight),
-                format_number(real.effective_weight),
                 format_number(real.active_sessions),
+                format_number(real.real_stats.map_or(0, |s| s.packets)),
+                format_number(real.real_stats.map_or(0, |s| s.bytes)),
                 enabled,
             );
         }
@@ -458,8 +459,8 @@ struct RealBasicRow {
 
 pub fn print_sessions_header() {
     println!(
-        "{:<5} {:<45} {:<45} {:<45} {:<8} {:<21} LastPacket",
-        "Prot", "Client", "Virtual", "Real", "Timeout", "Created"
+        "{:<5} {:<45} {:<45} {:<45} {:<8} {:<21}",
+        "VS", "Real", "Client", "Expires", "Timeout", "Created"
     );
 }
 
@@ -467,15 +468,12 @@ pub fn print_session(session: &balancerpb::Session) {
     let vs_id = session.vs_id.as_ref();
     let real_id = session.real_id.as_ref();
 
-    let proto = vs_id.map_or("-", |id| proto_str(id.proto));
-
-    let client = match bytes_to_ip(&session.client_addr) {
-        Ok(ip) => format_ip_port(ip, session.client_port),
-        Err(_) => "-".to_string(),
-    };
-
-    let virtual_addr = vs_id
-        .and_then(|id| bytes_to_ip(&id.addr).ok().map(|ip| format_ip_port(ip, id.port)))
+    let vs = vs_id
+        .and_then(|id| {
+            bytes_to_ip(&id.addr)
+                .ok()
+                .map(|ip| format!("{}/{}", format_ip_port(ip, id.port), proto_str(id.proto)))
+        })
         .unwrap_or_else(|| "-".to_string());
 
     let real_addr = real_id
@@ -485,6 +483,24 @@ pub fn print_session(session: &balancerpb::Session) {
                 .and_then(|r| bytes_to_ip(&r.ip).ok().map(|ip| format_ip_port(ip, r.port)))
         })
         .unwrap_or_else(|| "-".to_string());
+
+    let client = match bytes_to_ip(&session.client_addr) {
+        Ok(ip) => format_ip_port(ip, session.client_port),
+        Err(_) => "-".to_string(),
+    };
+
+    let expires = match (session.last_packet_timestamp.as_ref(), session.timeout.as_ref()) {
+        (Some(last_packet), Some(timeout)) => {
+            let expire_at = last_packet.seconds + timeout.seconds;
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as i64;
+            let remaining = (expire_at - now).max(0);
+            format!("{}s", remaining)
+        }
+        _ => "-".to_string(),
+    };
 
     let timeout = session
         .timeout
@@ -496,14 +512,9 @@ pub fn print_session(session: &balancerpb::Session) {
         .as_ref()
         .map_or_else(|| "-".to_string(), format_timestamp);
 
-    let last_packet = session
-        .last_packet_timestamp
-        .as_ref()
-        .map_or_else(|| "-".to_string(), format_timestamp);
-
     println!(
-        "{:<5} {:<45} {:<45} {:<45} {:<8} {:<21} {}",
-        proto, client, virtual_addr, real_addr, timeout, created, last_packet
+        "{:<5} {:<45} {:<45} {:<45} {:<8} {:<21}",
+        vs, real_addr, client, expires, timeout, created
     );
 }
 
