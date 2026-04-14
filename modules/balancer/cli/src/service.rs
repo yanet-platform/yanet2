@@ -3,13 +3,14 @@ use std::error::Error;
 use ptree::TreeBuilder;
 use tonic::codec::CompressionEncoding;
 use yanet_cli_balancer::balancerpb::{
-    self, FlushRealsRequest, GetConfigRequest, GetStateRequest, ListBalancersRequest, ListSessionsRequest,
-    PacketHandlerRef, RealUpdate, SetConfigRequest, UpdateRealsRequest, balancer_client::BalancerClient,
+    self, FlushRealsRequest, GetConfigRequest, GetMetricsRequest, GetStateRequest, ListBalancersRequest,
+    ListSessionsRequest, PacketHandlerRef, RealUpdate, SetConfigRequest, UpdateRealsRequest,
+    balancer_client::BalancerClient,
 };
 use ync::client::{ConnectionArgs, LayeredChannel};
 
 use crate::{
-    ConfigCmd, DisableRealCmd, EnableRealCmd, FlushRealsCmd, ModeCmd, SessionsCmd, ShowCmd, UpdateCmd,
+    ConfigCmd, DisableRealCmd, EnableRealCmd, FlushRealsCmd, MetricsCmd, ModeCmd, SessionsCmd, ShowCmd, UpdateCmd,
     config::BalancerConfig, display, ip_to_bytes, parse_vs_identifier,
 };
 
@@ -33,6 +34,7 @@ impl BalancerService {
             ModeCmd::Config(cmd) => self.config(cmd).await,
             ModeCmd::Show(cmd) => self.show(cmd).await,
             ModeCmd::Sessions(cmd) => self.sessions(cmd).await,
+            ModeCmd::Metrics(cmd) => self.metrics(cmd).await,
             ModeCmd::Reals(cmd) => match cmd.mode {
                 crate::RealsMode::Enable(cmd) => self.enable_real(cmd).await,
                 crate::RealsMode::Disable(cmd) => self.disable_real(cmd).await,
@@ -184,6 +186,21 @@ impl BalancerService {
         while let Some(session) = stream.message().await? {
             display::print_session(&session);
         }
+
+        Ok(())
+    }
+
+    async fn metrics(&mut self, _cmd: MetricsCmd) -> Result<(), Box<dyn Error>> {
+        let request = GetMetricsRequest {};
+        log::trace!("get metrics request: {request:?}");
+
+        let response = self.client.get_metrics(request).await?.into_inner();
+        log::debug!("get metrics response: {response:?}");
+
+        let mut json_value = serde_json::to_value(&response)?;
+        display::prettify_config(&mut json_value);
+        let json = serde_json::to_string_pretty(&json_value)?;
+        println!("{json}");
 
         Ok(())
     }

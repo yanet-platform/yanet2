@@ -16,12 +16,12 @@ pub fn print_compact(state: &balancerpb::BalancerState) {
     println!("Balancer: {}", state.balancer_name);
     println!("Active Sessions: {}", format_number(state.active_sessions));
     println!();
-    const LINE_WIDTH: usize = 81;
+    const LINE_WIDTH: usize = 100;
 
-    println!("{:<46}{:<8}Flags", "VirtualService", "Sched");
+    println!("{:<46}{:<8}Flags", "VirtualService", "Sched",);
     println!(
-        "  -> {:<38}{:<6}{:<8}{:<10}{:<12}Enabled",
-        "RemoteAddress:Port", "Weight", "Conns", "Pkts", "Bytes",
+        "  -> {:<38}{:<8}{:<6}{:<8}{:<10}{:<12}",
+        "RemoteAddress:Port", "Enabled", "Weight", "Conns", "Pkts", "Bytes",
     );
     println!("{}", "\u{2500}".repeat(LINE_WIDTH));
 
@@ -48,15 +48,16 @@ pub fn print_compact(state: &balancerpb::BalancerState) {
                 Err(_) => continue,
             };
             let real_addr = format_ip_port(rip, rid.port);
+            let rs = real.real_stats.as_ref();
             let enabled = if real.enabled { "true" } else { "false" };
             println!(
-                "  -> {:<38}{:<6}{:<8}{:<10}{:<12}{}",
+                "  -> {:<38}{:<8}{:<6}{:<8}{:<10}{:<12}",
                 real_addr,
+                enabled,
                 format_number(real.weight),
                 format_number(real.active_sessions),
-                format_number(real.real_stats.map_or(0, |s| s.packets)),
-                format_number(real.real_stats.map_or(0, |s| s.bytes)),
-                enabled,
+                format_number(rs.map_or(0, |s| s.packets)),
+                format_number(rs.map_or(0, |s| s.bytes)),
             );
         }
     }
@@ -459,8 +460,8 @@ struct RealBasicRow {
 
 pub fn print_sessions_header() {
     println!(
-        "{:<5} {:<45} {:<45} {:<45} {:<8} {:<21}",
-        "VS", "Real", "Client", "Expires", "Timeout", "Created"
+        "{:<46}{:<46}{:<46}{:<10}{:<10}{}",
+        "VS", "Real", "Client", "Expires", "Timeout", "Created",
     );
 }
 
@@ -513,8 +514,8 @@ pub fn print_session(session: &balancerpb::Session) {
         .map_or_else(|| "-".to_string(), format_timestamp);
 
     println!(
-        "{:<5} {:<45} {:<45} {:<45} {:<8} {:<21}",
-        vs, real_addr, client, expires, timeout, created
+        "{:<46}{:<46}{:<46}{:<10}{:<10}{}",
+        vs, real_addr, client, expires, timeout, created,
     );
 }
 

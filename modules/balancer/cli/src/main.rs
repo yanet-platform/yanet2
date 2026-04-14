@@ -36,6 +36,8 @@ pub enum ModeCmd {
     Show(ShowCmd),
     /// Show active sessions (streaming).
     Sessions(SessionsCmd),
+    /// Show balancer metrics (JSON).
+    Metrics(MetricsCmd),
     /// Manage real servers.
     Reals(RealsCmd),
 }
@@ -134,6 +136,11 @@ pub struct SessionsCmd {
     #[command(flatten)]
     pub filter: FilterFlags,
 }
+
+// ─── Metrics ────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Parser)]
+pub struct MetricsCmd {}
 
 // ─── Reals ───────────────────────────────────────────────────────────────────
 
