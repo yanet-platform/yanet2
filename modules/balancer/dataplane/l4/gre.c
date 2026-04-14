@@ -11,6 +11,7 @@
 
 #include "lib/dataplane/packet/data.h"
 #include "lib/dataplane/packet/packet.h"
+#include "rte_branch_prediction.h"
 
 static void
 adjust_outer_ipv6_for_gre(struct rte_mbuf *mbuf, uint16_t network_offset) {
@@ -58,7 +59,7 @@ insert_gre_header(
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 	const uint16_t gre_size = sizeof(struct rte_gre_hdr);
 
-	if (rte_pktmbuf_prepend(mbuf, gre_size) == NULL) {
+	if (unlikely(rte_pktmbuf_prepend(mbuf, gre_size) == NULL)) {
 		return;
 	}
 

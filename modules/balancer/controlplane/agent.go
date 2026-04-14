@@ -41,7 +41,7 @@ func ReattachAgent(
 ) (*Agent, error) {
 	agent, err := shm.AgentReattach("balancer", instanceIdx, size)
 	if err != nil {
-		return nil, fmt.Errorf("failed to reattach balancer agent: %w", err)
+		return nil, err
 	}
 
 	// Restore balancers

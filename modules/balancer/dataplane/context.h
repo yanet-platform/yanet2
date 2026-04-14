@@ -17,6 +17,6 @@ struct worker_context {
 	struct balancer_icmp_stats *icmp_v4_stats;
 	struct balancer_icmp_stats *icmp_v6_stats;
 
-	// current time in seconds
+	/* Current time in seconds. */
 	uint32_t now;
 };

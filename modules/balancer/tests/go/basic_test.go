@@ -236,7 +236,7 @@ func TestBasic(t *testing.T) {
 				utils.R(real5b.String()),
 			).Build()
 
-		_, err := ts.Balancer.UpdateVirtualServices(
+		_, err := ts.Balancer.UpdateVS(
 			[]*balancerpb.VirtualService{newVS},
 		)
 		require.NoError(t, err)
@@ -264,7 +264,7 @@ func TestBasic(t *testing.T) {
 			},
 		}
 
-		_, err := ts.Balancer.DeleteVirtualServices(
+		_, err := ts.Balancer.DeleteVS(
 			[]*balancerpb.VirtualService{vs4ToDelete},
 		)
 		require.NoError(t, err)

@@ -1,6 +1,5 @@
 #include <netinet/in.h>
 #include <string.h>
-#include <unistd.h>
 
 #include <rte_mbuf.h>
 #include <rte_tcp.h>

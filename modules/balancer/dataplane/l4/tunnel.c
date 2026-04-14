@@ -212,7 +212,7 @@ void
 tunnel_ipv4_packet(struct l4_packet_context *pkt_ctx) {
 	struct packet *packet = pkt_ctx->packet;
 	struct balancer_real *real = pkt_ctx->resolved_real;
-	uint8_t vs_flags = pkt_ctx->matched_vs->flags;
+	uint16_t vs_flags = pkt_ctx->matched_vs->flags;
 
 	/* No MSS clamping for inner IPv4. */
 
@@ -235,7 +235,7 @@ void
 tunnel_ipv6_packet(struct l4_packet_context *pkt_ctx) {
 	struct packet *packet = pkt_ctx->packet;
 	struct balancer_real *real = pkt_ctx->resolved_real;
-	uint8_t vs_flags = pkt_ctx->matched_vs->flags;
+	uint16_t vs_flags = pkt_ctx->matched_vs->flags;
 
 	/* Clamp MSS for IPv6 SYN packets before encapsulation. */
 	if (unlikely(vs_flags & balancer_vs_fix_mss)) {

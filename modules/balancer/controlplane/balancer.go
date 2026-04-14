@@ -322,7 +322,7 @@ func (b *Balancer) Destroy() {
 	yanet.Free(agent.AsYanetAgent(), handler)
 }
 
-func (b *Balancer) UpdateVirtualServices(
+func (b *Balancer) UpdateVS(
 	vsList []*balancerpb.VirtualService,
 ) (*balancerpb.ReuseReport, error) {
 	currentVs := b.config.PacketHandler.Vs
@@ -348,7 +348,7 @@ func (b *Balancer) UpdateVirtualServices(
 	return b.Update(config, nil)
 }
 
-func (b *Balancer) DeleteVirtualServices(
+func (b *Balancer) DeleteVS(
 	vsList []*balancerpb.VirtualService,
 ) (*balancerpb.ReuseReport, error) {
 	for _, vs := range vsList {

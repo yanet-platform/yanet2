@@ -85,7 +85,7 @@ filter_vs_group(
 			rule_idx
 		);
 
-		// Dont track stats for rules with empty tag
+		/* Dont track stats for rules with empty tag. */
 		if (rule_counter != NULL) {
 			*rule_counter += 1;
 		}

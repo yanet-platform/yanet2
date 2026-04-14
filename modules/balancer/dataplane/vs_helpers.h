@@ -27,10 +27,6 @@ vs_get_acl_stats(
 	// Rule counter is undefined if tag is empty
 	uint64_t id = ADDR_OF(&vs->rule_counter_ids)[rule_idx];
 	return id != (uint64_t)-1
-		       ? counter_get_address(
-				 ADDR_OF(&vs->rule_counter_ids)[rule_idx],
-				 worker,
-				 counter_storage
-			 )
+		       ? counter_get_address(id, worker, counter_storage)
 		       : NULL;
 }

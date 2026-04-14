@@ -11,14 +11,6 @@
  */
 #define MAX_GROUPS 16
 
-/*
- * Rearrange vs_ids[] and order[] so that entries with the same vs_id
- * are contiguous. Uses a two-pass counting sort with a small group
- * table, giving O(n * k) time for k distinct VS IDs.
- *
- * Returns true if grouping succeeded, false if there were too many
- * distinct VS IDs (caller should fall back to per-packet processing).
- */
 void
 group_by_id(uint32_t *vs_ids, uint8_t *order, size_t count) {
 	/* Pass 1: collect unique VS IDs and count per group. */

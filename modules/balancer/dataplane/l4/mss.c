@@ -8,6 +8,7 @@
 #include "common/checksum.h"
 
 #include "lib/dataplane/packet/packet.h"
+#include "rte_branch_prediction.h"
 
 #include "mss.h"
 
@@ -62,15 +63,15 @@ get_syn_tcp_header(struct packet *packet) {
  * Returns 0 if the data offset is invalid or out of packet bounds.
  */
 static uint16_t
-tcp_options_length(struct packet *packet, struct rte_tcp_hdr *tcp) {
+tcp_data_offset(struct packet *packet, struct rte_tcp_hdr *tcp) {
 	uint16_t data_offset = (tcp->data_off >> 4) * 4;
 
-	if (data_offset < sizeof(struct rte_tcp_hdr)) {
+	if (unlikely(data_offset < sizeof(struct rte_tcp_hdr))) {
 		return 0;
 	}
 
 	uint16_t pkt_len = rte_pktmbuf_pkt_len(packet->mbuf);
-	if (packet->transport_header.offset + data_offset > pkt_len) {
+	if (unlikely(packet->transport_header.offset + data_offset > pkt_len)) {
 		return 0;
 	}
 
@@ -118,7 +119,7 @@ try_clamp_existing_mss(
 		    opt->kind == TCP_OPTION_KIND_NOP) {
 			offset++;
 		} else {
-			if (opt->len == 0) {
+			if (unlikely(opt->len == 0)) {
 				return false; /* malformed header */
 			}
 			offset += opt->len;
@@ -140,14 +141,16 @@ insert_mss_option(struct packet *packet, struct rte_tcp_hdr *tcp) {
 	uint16_t data_offset = (tcp->data_off >> 4) * 4;
 
 	/* Check if there is room for one more 32-bit option word. */
-	if (data_offset > (TCP_DATA_OFF_MAX << 2) - TCP_OPTION_MSS_LEN) {
+	if (unlikely(
+		    data_offset > (TCP_DATA_OFF_MAX << 2) - TCP_OPTION_MSS_LEN
+	    )) {
 		return;
 	}
 
 	struct rte_mbuf *mbuf = packet->mbuf;
 
 	/* Extend the packet at the front by TCP_OPTION_MSS_LEN bytes. */
-	if (rte_pktmbuf_prepend(mbuf, TCP_OPTION_MSS_LEN) == NULL) {
+	if (unlikely(rte_pktmbuf_prepend(mbuf, TCP_OPTION_MSS_LEN) == NULL)) {
 		return;
 	}
 
@@ -199,12 +202,12 @@ insert_mss_option(struct packet *packet, struct rte_tcp_hdr *tcp) {
 void
 fix_mss_ipv6(struct packet *packet) {
 	struct rte_tcp_hdr *tcp = get_syn_tcp_header(packet);
-	if (tcp == NULL) {
+	if (unlikely(tcp == NULL)) {
 		return;
 	}
 
-	uint16_t data_offset = tcp_options_length(packet, tcp);
-	if (data_offset == 0) {
+	uint16_t data_offset = tcp_data_offset(packet, tcp);
+	if (unlikely(data_offset == 0)) {
 		return;
 	}
 

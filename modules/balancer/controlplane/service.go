@@ -2,6 +2,7 @@ package balancer
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -19,9 +20,10 @@ import (
 type Service struct {
 	balancerpb.UnimplementedBalancerServer
 
-	agent   *Agent
-	mu      sync.Mutex
-	log     *zap.SugaredLogger
+	agent *Agent
+	mu    sync.Mutex
+	log   *zap.SugaredLogger
+
 	metrics methodMetrics
 }
 
@@ -36,7 +38,7 @@ func NewService(
 	agent, err := ReattachAgent(shm, instanceIdx, size, log)
 	if err != nil {
 		log.Errorw("failed to reattach balancer agent", "error", err)
-		return nil, err
+		return nil, fmt.Errorf("failed to reattach balancer agent: %w", err)
 	}
 
 	s := &Service{
@@ -170,7 +172,7 @@ func (s *Service) GetConfig(
 
 	b, name, err := s.getBalancerWithAutoSelection(req.Name)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to auto-select balancer: %w", err)
 	}
 
 	return &balancerpb.GetConfigResponse{
@@ -324,7 +326,7 @@ func (s *Service) UpdateVS(
 
 	s.log.Infow("updating virtual services", "name", name, "vs_count", len(req.Services))
 
-	reuseReport, err := b.UpdateVirtualServices(req.Services)
+	reuseReport, err := b.UpdateVS(req.Services)
 	if err != nil {
 		s.log.Errorw("failed to update virtual services", "name", name, "error", err)
 		return nil, err
@@ -357,7 +359,7 @@ func (s *Service) DeleteVS(
 
 	s.log.Infow("deleting virtual services", "name", name, "vs_count", len(req.Services))
 
-	reuseReport, err := b.DeleteVirtualServices(req.Services)
+	reuseReport, err := b.DeleteVS(req.Services)
 	if err != nil {
 		s.log.Errorw("failed to delete virtual services", "name", name, "error", err)
 		return nil, err
