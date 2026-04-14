@@ -100,7 +100,7 @@ test_src_dst_ports(void *memory) {
 	builder_init(&builder1);
 	builder_add_port_src_range(&builder1, 5, 7);
 	builder_add_port_dst_range(&builder1, 1, 5);
-	struct filter_rule action1 = build_rule(&builder1, 1);
+	struct filter_rule action1 = build_rule(&builder1, 0);
 
 	// action 2:
 	//	src_port: [6..8]
@@ -109,7 +109,7 @@ test_src_dst_ports(void *memory) {
 	builder_init(&builder2);
 	builder_add_port_src_range(&builder2, 6, 8);
 	builder_add_port_dst_range(&builder2, 3, 4);
-	struct filter_rule action2 = build_rule(&builder2, 2);
+	struct filter_rule action2 = build_rule(&builder2, 1);
 
 	struct filter_rule actions[2] = {action1, action2};
 
@@ -120,8 +120,8 @@ test_src_dst_ports(void *memory) {
 	);
 	assert(res == 0);
 
-	query_and_expect_action(&filter, 6, 3, 1, "ports");
-	query_and_expect_action(&filter, 8, 3, 2, "ports");
+	query_and_expect_action(&filter, 6, 3, 0, "ports");
+	query_and_expect_action(&filter, 8, 3, 1, "ports");
 
 	filter_free(&filter, sign_ports_compile);
 
@@ -145,14 +145,14 @@ test_src_port_only(void *memory) {
 	struct filter_rule_builder builder1;
 	builder_init(&builder1);
 	builder_add_port_src_range(&builder1, 500, 700);
-	struct filter_rule action1 = build_rule(&builder1, 1);
+	struct filter_rule action1 = build_rule(&builder1, 0);
 
 	// action 2:
 	//	src_port: [600..800]
 	struct filter_rule_builder builder2;
 	builder_init(&builder2);
 	builder_add_port_src_range(&builder2, 600, 800);
-	struct filter_rule action2 = build_rule(&builder2, 2);
+	struct filter_rule action2 = build_rule(&builder2, 1);
 
 	struct filter_rule actions[2] = {action1, action2};
 
@@ -163,11 +163,11 @@ test_src_port_only(void *memory) {
 	);
 	assert(res == 0);
 
-	query_and_expect_action(&filter, 500, 0, 1, "port_src");
-	query_and_expect_action(&filter, 600, 0, 1, "port_src");
-	query_and_expect_action(&filter, 700, 0, 1, "port_src");
-	query_and_expect_action(&filter, 701, 0, 2, "port_src");
-	query_and_expect_action(&filter, 800, 0, 2, "port_src");
+	query_and_expect_action(&filter, 500, 0, 0, "port_src");
+	query_and_expect_action(&filter, 600, 0, 0, "port_src");
+	query_and_expect_action(&filter, 700, 0, 0, "port_src");
+	query_and_expect_action(&filter, 701, 0, 1, "port_src");
+	query_and_expect_action(&filter, 800, 0, 1, "port_src");
 
 	query_and_expect_no_action(&filter, 499, 0, "port_src");
 	query_and_expect_no_action(&filter, 801, 0, "port_src");

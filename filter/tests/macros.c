@@ -28,7 +28,7 @@ run_case(void) {
 	struct filter_rule_builder b;
 	builder_init(&b);
 	builder_add_port_src_range(&b, 1024, 5016);
-	struct filter_rule r = build_rule(&b, 1);
+	struct filter_rule r = build_rule(&b, 0);
 
 	// init filter
 	struct filter f;
@@ -47,7 +47,7 @@ run_case(void) {
 	struct value_range *actions;
 	filter_query(&f, sign_compile, &packet_ptr, &actions, 1);
 	assert(actions->count == 1);
-	assert(ADDR_OF(&actions->values)[0] == 1);
+	assert(ADDR_OF(&actions->values)[0] == 0);
 
 	free_packet(&p);
 	filter_free(&f, sign);

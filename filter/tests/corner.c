@@ -67,21 +67,21 @@ check_single_attribute(void *memory) {
 	builder_add_port_src_range(&builder1, 5, 7);
 	builder_add_port_src_range(&builder1, 6, 10);
 	builder_add_port_src_range(&builder1, 15, 20);
-	struct filter_rule rule1 = build_rule(&builder1, 1);
+	struct filter_rule rule1 = build_rule(&builder1, 0);
 
 	// second action
 	// src port: [11-21]
 	struct filter_rule_builder builder2;
 	builder_init(&builder2);
 	builder_add_port_src_range(&builder2, 11, 21);
-	struct filter_rule rule2 = build_rule(&builder2, 2);
+	struct filter_rule rule2 = build_rule(&builder2, 1);
 
 	// third action
 	// src port: [30-40]
 	struct filter_rule_builder builder3;
 	builder_init(&builder3);
 	builder_add_port_src_range(&builder3, 30, 40);
-	struct filter_rule rule3 = build_rule(&builder3, 3);
+	struct filter_rule rule3 = build_rule(&builder3, 2);
 
 	// setup rules
 	struct filter_rule rules[3] = {rule1, rule2, rule3};
@@ -119,7 +119,7 @@ check_single_attribute(void *memory) {
 		};
 
 		uint32_t expected_actions[queries] = {
-			1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 1, 1, 1, 2, 3, 3, 3, 3
+			0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 1, 2, 2, 2, 2
 		};
 
 		for (size_t i = 0; i < queries; ++i) {

@@ -47,17 +47,17 @@ test_proto_1(void *memory) {
 	struct filter_rule_builder b1;
 	builder_init(&b1);
 	builder_set_vlan(&b1, 10);
-	struct filter_rule r1 = build_rule(&b1, 1);
+	struct filter_rule r1 = build_rule(&b1, 0);
 
 	struct filter_rule_builder b2;
 	builder_init(&b2);
 	builder_set_vlan(&b2, 20);
-	struct filter_rule r2 = build_rule(&b2, 2);
+	struct filter_rule r2 = build_rule(&b2, 1);
 
 	struct filter_rule_builder b3;
 	builder_init(&b3);
 	builder_set_vlan(&b3, 30);
-	struct filter_rule r3 = build_rule(&b3, 3);
+	struct filter_rule r3 = build_rule(&b3, 2);
 
 	struct filter_rule rules[3] = {r1, r2, r3};
 
@@ -67,9 +67,9 @@ test_proto_1(void *memory) {
 	);
 	assert(res == 0);
 
-	query_packet(&filter, 10, 1);
-	query_packet(&filter, 20, 2);
-	query_packet(&filter, 30, 3);
+	query_packet(&filter, 10, 0);
+	query_packet(&filter, 20, 1);
+	query_packet(&filter, 30, 2);
 
 	filter_free(&filter, sign_vlan_compile);
 }

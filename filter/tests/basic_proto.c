@@ -60,17 +60,17 @@ test_proto_1(void *memory) {
 	struct filter_rule_builder b1;
 	builder_init(&b1);
 	builder_set_proto(&b1, IPPROTO_TCP, 0b101, 0b010);
-	struct filter_rule r1 = build_rule(&b1, 1);
+	struct filter_rule r1 = build_rule(&b1, 0);
 
 	struct filter_rule_builder b2;
 	builder_init(&b2);
 	builder_set_proto(&b2, IPPROTO_UDP, 0, 0);
-	struct filter_rule r2 = build_rule(&b2, 2);
+	struct filter_rule r2 = build_rule(&b2, 1);
 
 	struct filter_rule_builder b3;
 	builder_init(&b3);
 	builder_set_proto(&b3, PROTO_UNSPEC, 0, 0);
-	struct filter_rule r3 = build_rule(&b3, 3);
+	struct filter_rule r3 = build_rule(&b3, 2);
 
 	struct filter_rule rules[3] = {r1, r2, r3};
 
@@ -80,15 +80,15 @@ test_proto_1(void *memory) {
 	);
 	assert(res == 0);
 
-	query_tcp_packet(&filter, 0b101, 1);
-	query_tcp_packet(&filter, 0b10101, 1);
-	query_tcp_packet(&filter, 0b1101, 1);
-	query_tcp_packet(&filter, (1 << 9) - 1 - 2, 1);
-	query_tcp_packet(&filter, 0b010, 3);
-	query_tcp_packet(&filter, 0b011, 3);
-	query_tcp_packet(&filter, 0b1110, 3);
+	query_tcp_packet(&filter, 0b101, 0);
+	query_tcp_packet(&filter, 0b10101, 0);
+	query_tcp_packet(&filter, 0b1101, 0);
+	query_tcp_packet(&filter, (1 << 9) - 1 - 2, 0);
+	query_tcp_packet(&filter, 0b010, 2);
+	query_tcp_packet(&filter, 0b011, 2);
+	query_tcp_packet(&filter, 0b1110, 2);
 
-	query_udp_packet(&filter, 2);
+	query_udp_packet(&filter, 1);
 
 	filter_free(&filter, sign_proto_compile);
 }

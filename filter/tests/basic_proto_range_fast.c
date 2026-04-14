@@ -66,14 +66,14 @@ test_basic_tcp_udp(void *memory) {
 	builder_add_proto_range(
 		&b1, 256 * IPPROTO_TCP, 256 * IPPROTO_TCP + 255
 	);
-	struct filter_rule r1 = build_rule(&b1, 1);
+	struct filter_rule r1 = build_rule(&b1, 0);
 
 	struct filter_rule_builder b2;
 	builder_init(&b2);
 	builder_add_proto_range(
 		&b2, 256 * IPPROTO_UDP, 256 * IPPROTO_UDP + 255
 	);
-	struct filter_rule r2 = build_rule(&b2, 2);
+	struct filter_rule r2 = build_rule(&b2, 1);
 
 	struct filter_rule rules[2] = {r1, r2};
 
@@ -90,10 +90,10 @@ test_basic_tcp_udp(void *memory) {
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
 
 	LOG(INFO, "query tcp packet...");
-	query_tcp_packet(&filter, 0, 1);
+	query_tcp_packet(&filter, 0, 0);
 
 	LOG(INFO, "query udp packet...");
-	query_udp_packet(&filter, 2);
+	query_udp_packet(&filter, 1);
 
 	filter_free(&filter, sign_proto_range_fast_compile);
 
@@ -118,7 +118,7 @@ test_tcp_flags(void *memory) {
 	builder_add_proto_range(
 		&b1, 256 * IPPROTO_TCP + 0x02, 256 * IPPROTO_TCP + 0x02
 	);
-	struct filter_rule r1 = build_rule(&b1, 1);
+	struct filter_rule r1 = build_rule(&b1, 0);
 
 	// Rule 2: TCP ACK (flag 0x10)
 	struct filter_rule_builder b2;
@@ -126,7 +126,7 @@ test_tcp_flags(void *memory) {
 	builder_add_proto_range(
 		&b2, 256 * IPPROTO_TCP + 0x10, 256 * IPPROTO_TCP + 0x10
 	);
-	struct filter_rule r2 = build_rule(&b2, 2);
+	struct filter_rule r2 = build_rule(&b2, 1);
 
 	// Rule 3: TCP FIN (flag 0x01)
 	struct filter_rule_builder b3;
@@ -134,7 +134,7 @@ test_tcp_flags(void *memory) {
 	builder_add_proto_range(
 		&b3, 256 * IPPROTO_TCP + 0x01, 256 * IPPROTO_TCP + 0x01
 	);
-	struct filter_rule r3 = build_rule(&b3, 3);
+	struct filter_rule r3 = build_rule(&b3, 2);
 
 	struct filter_rule rules[3] = {r1, r2, r3};
 
@@ -149,13 +149,13 @@ test_tcp_flags(void *memory) {
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
 
 	LOG(INFO, "query tcp SYN packet...");
-	query_tcp_packet(&filter, 0x02, 1);
+	query_tcp_packet(&filter, 0x02, 0);
 
 	LOG(INFO, "query tcp ACK packet...");
-	query_tcp_packet(&filter, 0x10, 2);
+	query_tcp_packet(&filter, 0x10, 1);
 
 	LOG(INFO, "query tcp FIN packet...");
-	query_tcp_packet(&filter, 0x01, 3);
+	query_tcp_packet(&filter, 0x01, 2);
 
 	filter_free(&filter, sign_proto_range_fast_compile);
 
@@ -183,7 +183,7 @@ test_multiple_ranges_per_rule(void *memory) {
 	builder_add_proto_range(
 		&b1, 256 * IPPROTO_UDP, 256 * IPPROTO_UDP + 255
 	);
-	struct filter_rule r1 = build_rule(&b1, 1);
+	struct filter_rule r1 = build_rule(&b1, 0);
 
 	struct filter_rule rules[1] = {r1};
 
@@ -198,10 +198,10 @@ test_multiple_ranges_per_rule(void *memory) {
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
 
 	LOG(INFO, "query tcp packet...");
-	query_tcp_packet(&filter, 0, 1);
+	query_tcp_packet(&filter, 0, 0);
 
 	LOG(INFO, "query udp packet...");
-	query_udp_packet(&filter, 1);
+	query_udp_packet(&filter, 0);
 
 	filter_free(&filter, sign_proto_range_fast_compile);
 
@@ -224,13 +224,13 @@ test_boundary_values(void *memory) {
 	struct filter_rule_builder b1;
 	builder_init(&b1);
 	builder_add_proto_range(&b1, 0, 100);
-	struct filter_rule r1 = build_rule(&b1, 1);
+	struct filter_rule r1 = build_rule(&b1, 0);
 
 	// Rule 2: Proto range 65435-65535 (near max uint16_t)
 	struct filter_rule_builder b2;
 	builder_init(&b2);
 	builder_add_proto_range(&b2, 65435, 65535);
-	struct filter_rule r2 = build_rule(&b2, 2);
+	struct filter_rule r2 = build_rule(&b2, 1);
 
 	struct filter_rule rules[2] = {r1, r2};
 
@@ -258,7 +258,7 @@ test_boundary_values(void *memory) {
 	);
 	TEST_ASSERT_EQUAL(actions1->count, 1, "proto 0 should match rule 1");
 	TEST_ASSERT_EQUAL(
-		ADDR_OF(&actions1->values)[0], 1, "proto 0 should match rule 1"
+		ADDR_OF(&actions1->values)[0], 0, "proto 0 should match rule 1"
 	);
 	free_packet(&packet1);
 

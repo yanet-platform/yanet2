@@ -39,7 +39,7 @@ build_filter(struct common *common, struct memory_context *mctx) {
 		builder_set_proto(
 			builder, i % 2 == 0 ? IPPROTO_TCP : IPPROTO_UDP, 0, 0
 		);
-		rules[i] = build_rule(builder, i + 1);
+		rules[i] = build_rule(builder, i);
 	}
 	LOG(INFO, "compiling %zu rules...", rule_count);
 	int res = filter_init(

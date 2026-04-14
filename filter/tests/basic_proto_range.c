@@ -60,14 +60,14 @@ test_proto_1(void *memory) {
 	builder_add_proto_range(
 		&b1, 256 * IPPROTO_TCP, 256 * IPPROTO_TCP + 255
 	);
-	struct filter_rule r1 = build_rule(&b1, 1);
+	struct filter_rule r1 = build_rule(&b1, 0);
 
 	struct filter_rule_builder b2;
 	builder_init(&b2);
 	builder_add_proto_range(
 		&b2, 256 * IPPROTO_UDP, 256 * IPPROTO_UDP + 255
 	);
-	struct filter_rule r2 = build_rule(&b2, 2);
+	struct filter_rule r2 = build_rule(&b2, 1);
 
 	struct filter_rule rules[2] = {r1, r2};
 
@@ -80,10 +80,10 @@ test_proto_1(void *memory) {
 	assert(res == 0);
 
 	LOG(INFO, "query tcp packet...");
-	query_tcp_packet(&filter, 0, 1);
+	query_tcp_packet(&filter, 0, 0);
 
 	LOG(INFO, "query udp packet...");
-	query_udp_packet(&filter, 2);
+	query_udp_packet(&filter, 1);
 
 	filter_free(&filter, sign_proto_range_compile);
 }

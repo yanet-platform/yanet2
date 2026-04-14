@@ -125,7 +125,7 @@ test_stress_seed12_regression(void *memory, size_t memory_size) {
 			&builders[i], rule_specs[i].dst_addr, dst_mask
 		);
 
-		rules[i] = build_rule(&builders[i], i + 1);
+		rules[i] = build_rule(&builders[i], i);
 	}
 
 	// Initialize filter with all 20 rules
@@ -188,7 +188,7 @@ main() {
 	builder_add_net4_dst(
 		&builder1, ip(192, 255, 168, 0), ip(255, 255, 255, 0)
 	);
-	struct filter_rule action1 = build_rule(&builder1, 1);
+	struct filter_rule action1 = build_rule(&builder1, 0);
 
 	// init filter
 	struct filter filter;
@@ -198,7 +198,7 @@ main() {
 	assert(res == 0);
 
 	query_and_expect_action(
-		&filter, ip(192, 255, 168, 1), ip(192, 255, 168, 10), 1
+		&filter, ip(192, 255, 168, 1), ip(192, 255, 168, 10), 0
 	);
 
 	// no action because src ip mismatch
@@ -226,7 +226,7 @@ main() {
 	builder_add_net4_dst(
 		&builder2, ip(7, 4, 132, 134), ip(255, 255, 128, 0)
 	);
-	struct filter_rule action2 = build_rule(&builder2, 2);
+	struct filter_rule action2 = build_rule(&builder2, 0);
 
 	struct filter filter2;
 	res = filter_init(
@@ -243,7 +243,7 @@ main() {
 	// Packet: src=5.10.138.134 (matches src), dst=7.4.200.100 (matches dst)
 	// Expected: MATCH because both src and dst match
 	query_and_expect_action(
-		&filter2, ip(5, 10, 138, 134), ip(7, 4, 200, 100), 2
+		&filter2, ip(5, 10, 138, 134), ip(7, 4, 200, 100), 0
 	);
 
 	// Packet: src=1.1.1.1 (does NOT match src), dst=7.4.200.100 (matches

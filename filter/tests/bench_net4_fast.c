@@ -227,7 +227,7 @@ generate_rules(
 			builder_set_proto(&builders[i], proto, 0, 0);
 		}
 
-		rules[i] = build_rule(&builders[i], (i + 1));
+		rules[i] = build_rule(&builders[i], i);
 	}
 }
 

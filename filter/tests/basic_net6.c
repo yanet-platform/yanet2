@@ -143,7 +143,7 @@ test1(void *memory) {
 	};
 	make_addr(net.addr, 0xB, 16, 0xA, 16);
 	builder_add_net6_dst(&builder, net);
-	struct filter_rule rule = build_rule(&builder, 1);
+	struct filter_rule rule = build_rule(&builder, 0);
 	const struct filter_rule rules[1] = {rule};
 
 	// init filter
@@ -156,7 +156,7 @@ test1(void *memory) {
 		uint8_t src[NET6_LEN] = {};
 		uint8_t dst[NET6_LEN];
 		make_addr(dst, 0xB, 16, 0xA, 16);
-		query_packet_and_expect_action(&filter, src, dst, 1, "dst");
+		query_packet_and_expect_action(&filter, src, dst, 0, "dst");
 	}
 
 	// query packet 2
@@ -177,7 +177,7 @@ test1(void *memory) {
 		memset(dst, 0, NET6_LEN);
 		dst[0] = dst[1] = dst[2] = dst[3] = dst[4] = 0xBB;
 		dst[8] = dst[9] = dst[10] = 0xAA;
-		query_packet_and_expect_action(&filter, src, dst, 1, "dst");
+		query_packet_and_expect_action(&filter, src, dst, 0, "dst");
 	}
 
 	// query packet 4
@@ -195,7 +195,7 @@ test1(void *memory) {
 		uint8_t dst[NET6_LEN];
 		make_addr(dst, 0xB, 16, 0xA, 16);
 		dst[5] = 0xB0;
-		query_packet_and_expect_action(&filter, src, dst, 1, "dst");
+		query_packet_and_expect_action(&filter, src, dst, 0, "dst");
 	}
 
 	// query packet 6
@@ -222,7 +222,7 @@ test1(void *memory) {
 		uint8_t dst[NET6_LEN];
 		make_addr(dst, 0xB, 16, 0xA, 16);
 		dst[11] = 0xA0;
-		query_packet_and_expect_action(&filter, src, dst, 1, "dst");
+		query_packet_and_expect_action(&filter, src, dst, 0, "dst");
 	}
 
 	// query packet 9
@@ -246,7 +246,7 @@ test1(void *memory) {
 			0x00,
 			0x00,
 		};
-		query_packet_and_expect_action(&filter, src, dst, 1, "dst");
+		query_packet_and_expect_action(&filter, src, dst, 0, "dst");
 	}
 
 	filter_free(&filter, sign_net6_dst_compile);
@@ -293,7 +293,7 @@ test2(void *memory) {
 	memset(net.addr, 0xBb, 8);
 	memset(net.addr + 8, 0xAa, 8);
 	builder_add_net6_dst(&builder, net);
-	struct filter_rule rule = build_rule(&builder, 1);
+	struct filter_rule rule = build_rule(&builder, 0);
 	const struct filter_rule rules[1] = {rule};
 
 	// init filter
@@ -322,7 +322,7 @@ test2(void *memory) {
 			0x00,
 			0x00,
 		};
-		query_packet_and_expect_action(&filter, src, dst, 1, "dst");
+		query_packet_and_expect_action(&filter, src, dst, 0, "dst");
 	}
 
 	// query packet 2
@@ -449,7 +449,7 @@ test3(void *memory) {
 		make_addr(dst_net.addr, 0xB, 16, 0xA, 16);
 		builder_add_net6_dst(&builder1, dst_net);
 
-		rule1 = build_rule(&builder1, 1);
+		rule1 = build_rule(&builder1, 0);
 	}
 
 	struct filter_rule rule2;
@@ -509,7 +509,7 @@ test3(void *memory) {
 		make_addr(dst_net.addr, 0xB, 16, 0xA, 16);
 		builder_add_net6_dst(&builder2, dst_net);
 
-		rule2 = build_rule(&builder2, 2);
+		rule2 = build_rule(&builder2, 1);
 	}
 
 	const struct filter_rule rules[2] = {rule1, rule2};
@@ -527,7 +527,7 @@ test3(void *memory) {
 		uint8_t dst[16];
 		make_addr(dst, 0xB, 10, 0xA, 6);
 
-		query_packet_and_expect_action(&filter, src, dst, 1, "both");
+		query_packet_and_expect_action(&filter, src, dst, 0, "both");
 	}
 
 	// query packet 2
@@ -538,7 +538,7 @@ test3(void *memory) {
 		uint8_t dst[16];
 		make_addr(dst, 0xB, 9, 0xA, 5);
 
-		query_packet_and_expect_action(&filter, src, dst, 2, "both");
+		query_packet_and_expect_action(&filter, src, dst, 1, "both");
 	}
 
 	// query packet 3
@@ -549,7 +549,7 @@ test3(void *memory) {
 		uint8_t dst[16];
 		make_addr(dst, 0xB, 10, 0xA, 6);
 
-		query_packet_and_expect_action(&filter, src, dst, 1, "both");
+		query_packet_and_expect_action(&filter, src, dst, 0, "both");
 	}
 
 	// query packet 4
