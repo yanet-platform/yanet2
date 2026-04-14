@@ -45,7 +45,7 @@ func WithBuiltInModule(module BuiltInModule) GatewayOption {
 	}
 }
 
-// WithBuiltInModule adds a built-in module to the Gateway.
+// WithBuiltInModule adds a built-in device to the Gateway.
 func WithBuiltInDevice(device BuiltInModule) GatewayOption {
 	return func(o *gatewayOptions) {
 		o.BuiltInModules = append(o.BuiltInModules, device)

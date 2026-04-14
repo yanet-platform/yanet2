@@ -230,7 +230,7 @@ parse_packet(struct packet *packet) {
 		}
 	} else {
 		// unknown header
-		return -1;
+		return 0;
 	}
 
 	// FIXME: separate routines for transport level parsing

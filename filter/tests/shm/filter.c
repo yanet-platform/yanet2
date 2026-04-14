@@ -48,7 +48,7 @@ filter_packets(struct common *common) {
 
 		struct packet *packet_ptr = &packet;
 		struct value_range *actions;
-		FILTER_QUERY(
+		filter_query(
 			&common->filter, filter_sign, &packet_ptr, &actions, 1
 		);
 		free_packet(&packet);

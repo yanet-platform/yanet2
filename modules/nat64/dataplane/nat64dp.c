@@ -653,6 +653,22 @@ icmp_v6_to_v4(
 			return -1;
 		}
 
+		// RFC7915: Validate embedded IPv6 payload length against
+		// actual buffer size to prevent buffer overflows during
+		// checksum calculation
+		uint16_t ipv6_payload_len =
+			rte_be_to_cpu_16(ipv6_payload_header->payload_len);
+		uint16_t max_payload_len =
+			remaining_len - sizeof(struct rte_ipv6_hdr);
+		if (ipv6_payload_len > max_payload_len) {
+			LOG_DBG(NAT64,
+				"Embedded IPv6 payload length (%u) exceeds "
+				"available data (%u)\n",
+				ipv6_payload_len,
+				max_payload_len);
+			return -1;
+		}
+
 		// RFC7915: Validate embedded packet length
 		uint16_t embedded_total_len =
 			rte_be_to_cpu_16(new_ipv4_header->total_length) -

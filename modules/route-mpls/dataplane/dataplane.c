@@ -43,13 +43,11 @@ route_mpls_handle_packets(
 	);
 
 	struct packet *ip4_packets[packet_list_count(&packet_front->input)];
-	const struct value_range
-		*ip4_result[packet_list_count(&packet_front->input)];
+	struct value_range *ip4_result[packet_list_count(&packet_front->input)];
 	uint64_t ip4_idx = 0;
 
 	struct packet *ip6_packets[packet_list_count(&packet_front->input)];
-	const struct value_range
-		*ip6_result[packet_list_count(&packet_front->input)];
+	struct value_range *ip6_result[packet_list_count(&packet_front->input)];
 	uint64_t ip6_idx = 0;
 
 	for (struct packet *packet = packet_list_first(&packet_front->input);
@@ -67,7 +65,7 @@ route_mpls_handle_packets(
 		}
 	}
 
-	FILTER_QUERY(
+	filter_query(
 		&module_config->filter_ip4,
 		FILTER_IP4_DST_TAG,
 		ip4_packets,
@@ -75,7 +73,7 @@ route_mpls_handle_packets(
 		ip4_idx
 	);
 
-	FILTER_QUERY(
+	filter_query(
 		&module_config->filter_ip6,
 		FILTER_IP6_DST_TAG,
 		ip6_packets,

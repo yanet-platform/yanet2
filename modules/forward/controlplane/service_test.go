@@ -8,9 +8,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
 	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
 	"github.com/yanet-platform/yanet2/modules/forward/controlplane/forwardpb"
-	"github.com/yanet-platform/yanet2/modules/forward/internal/ffi"
 )
 
 type mockModuleHandle struct{}
@@ -19,7 +19,7 @@ func (m *mockModuleHandle) Free() {}
 
 type mockBackend struct{}
 
-func (m *mockBackend) UpdateModule(name string, rules []ffi.ForwardRule) (forward.ModuleHandle, error) {
+func (m *mockBackend) UpdateModule(name string, rules []cforward.ForwardRule) (forward.ModuleHandle, error) {
 	return &mockModuleHandle{}, nil
 }
 

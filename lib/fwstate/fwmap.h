@@ -541,9 +541,37 @@ fwmap_allocate_chunks(
 
 static inline int64_t
 fwmap_next_free_key(fwmap_t *map) {
+	// Happy path optimization: check if key_cursor is already exhausted.
+	// On lazy ordering platforms this check may not see the latest value,
+	// but we rely on the atomic operation below for correctness.
 	if (map->key_cursor > map->index_mask) {
 		return -1;
 	}
+	// Atomically increment and return the next free key.
+	//
+	// Overflow analysis:
+	// - We assume normal map sizes use at most 10% of u32 address space
+	//   (~429M keys). For fw4 map (key_size=16, value_size=32):
+	//   * Buckets: 429M / 4 = 107M buckets * 64 bytes = 6.85 GB
+	//   * Keys: 429M * 16 bytes = 6.87 GB
+	//   * Values: 429M * 32 bytes = 13.74 GB
+	//   * Total: ~27.5 GB
+	// - For safety, fwmap_new validates that index_size is not more than
+	//   half of u32 address space (see comment in fwmap_new).
+	// - At 50% of u32 (~2.1B keys), for fw4 map:
+	//   * Buckets: 2.1B / 4 = 525M buckets * 64 bytes = 33.6 GB
+	//   * Keys: 2.1B * 16 bytes = 33.6 GB
+	//   * Values: 2.1B * 32 bytes = 67.2 GB
+	//   * Total: ~134.4 GB
+	//   It is unlikely that we will allocate such a large number of keys.
+	//
+	// Maximum overflow scenario:
+	// - key_cursor can overflow by at most: batch_size * worker_count
+	// - After worker_round, all threads have passed through
+	// __atomic_fetch_add,
+	//   so all threads see the same (slightly overflowed) counter value.
+	// - This prevents infinite overflow - the counter stabilizes after one
+	// round.
 	uint32_t curr_key =
 		__atomic_fetch_add(&map->key_cursor, 1, __ATOMIC_RELAXED);
 	if (curr_key > map->index_mask) {
@@ -716,6 +744,15 @@ fwmap_new(const fwmap_config_t *user_config, struct memory_context *ctx) {
 	// Ensure index_size is a power of 2.
 	index_size = align_up_pow2(index_size);
 	if (!index_size) {
+		errno = EINVAL;
+		return NULL;
+	}
+	// Validate that index_size is not more than half of u32 address space.
+	// This ensures that key_cursor overflow in fwmap_next_free_key is
+	// bounded and prevents excessive memory usage. At 50% of u32 (~2.1B
+	// keys), memory for buckets alone is ~32 GB, which is unlikely to be
+	// allocated.
+	if (index_size > UINT32_MAX / 2) {
 		errno = EINVAL;
 		return NULL;
 	}
@@ -1120,12 +1157,16 @@ fwmap_entry(
 
 	// All slots in the existing chain are full; need to allocate a new
 	// bucket.
+	// extra_size is bounded by FWMAP_CHUNK_INDEX_MAX_SIZE, so u32 overflow
+	// is impossible here (see overflow analysis in fwmap_next_free_key).
 	if (map->extra_free_idx >= map->extra_size) {
 		// No more extra buckets available.
 		return (fwmap_entry_t){0};
 	}
 
 	// Allocate new extra bucket.
+	// extra_size is bounded by FWMAP_CHUNK_INDEX_MAX_SIZE, so u32 overflow
+	// is impossible here (see overflow analysis in fwmap_next_free_key).
 	uint32_t new_bucket_idx =
 		__atomic_fetch_add(&map->extra_free_idx, 1, __ATOMIC_RELAXED);
 	if (new_bucket_idx >= map->extra_size) {

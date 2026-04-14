@@ -20,10 +20,10 @@ type RIB struct {
 	// sessionTerminator points to a flag signaling the active FeedRIB stream to terminate;
 	// swapped on NewSession to invalidate the previous stream.
 	sessionTerminator *atomic.Pointer[atomic.Bool]
-	log               *zap.SugaredLogger
+	log               *zap.Logger
 }
 
-func NewRIB(log *zap.SugaredLogger) *RIB {
+func NewRIB(log *zap.Logger) *RIB {
 	sessionTerminator := &atomic.Pointer[atomic.Bool]{}
 	sessionTerminator.Store(&atomic.Bool{})
 
@@ -65,7 +65,7 @@ func (m *RIB) AddUnicastRoute(prefix netip.Prefix, nexthopAddr netip.Addr, sourc
 	m.mu.Unlock()
 	m.stats.OnChanged()
 
-	m.log.Infow("RIB: added unicast route",
+	m.log.Info("RIB: added unicast route",
 		zap.Stringer("prefix", prefix),
 		zap.Stringer("nexthop", nexthopAddr),
 	)
@@ -103,14 +103,14 @@ func (m *RIB) RemoveUnicastRoute(prefix netip.Prefix, nexthopAddr netip.Addr, so
 	if found > 0 {
 		m.stats.OnRouteRemoved(found)
 		m.stats.OnChanged()
-		m.log.Infow("RIB: removed unicast route",
+		m.log.Info("RIB: removed unicast route",
 			zap.Stringer("prefix", prefix),
 			zap.Stringer("nexthop", nexthopAddr),
 			zap.Uint8("source", uint8(sourceID)),
 			zap.Int("count", found),
 		)
 	} else {
-		m.log.Warnw("RIB: route not found for removal",
+		m.log.Warn("RIB: route not found for removal",
 			zap.Stringer("prefix", prefix),
 			zap.Stringer("nexthop", nexthopAddr),
 			zap.Uint8("source", uint8(sourceID)),
@@ -217,12 +217,12 @@ func (m *RIB) CleanupTask(sessionID uint64, quit chan bool, ttl time.Duration) {
 	timeout := time.After(ttl)
 	select {
 	case <-quit:
-		m.log.Infow("RIB: cleanup task cancelled before timeout",
+		m.log.Info("RIB: cleanup task cancelled before timeout",
 			zap.Uint64("sessionID", sessionID),
 		)
 		return
 	case <-timeout:
-		m.log.Infow("RIB: cleanup task timeout reached, starting cleanup",
+		m.log.Info("RIB: cleanup task timeout reached, starting cleanup",
 			zap.Uint64("sessionID", sessionID),
 		)
 	}
@@ -239,7 +239,7 @@ func (m *RIB) CleanupTask(sessionID uint64, quit chan bool, ttl time.Duration) {
 	for _, routeList := range m.routes.Dump() {
 		select {
 		case <-quit:
-			m.log.Infow("RIB: cleanup task interrupted during cleanup",
+			m.log.Info("RIB: cleanup task interrupted during cleanup",
 				zap.Uint64("sessionID", sessionID),
 				zap.Int("removedCount", removedCount),
 			)
@@ -257,7 +257,7 @@ func (m *RIB) CleanupTask(sessionID uint64, quit chan bool, ttl time.Duration) {
 		m.update(routeList.Routes...)
 	}
 
-	m.log.Infow("RIB: cleanup task completed",
+	m.log.Info("RIB: cleanup task completed",
 		zap.Uint64("sessionID", sessionID),
 		zap.Int("removedCount", removedCount),
 	)

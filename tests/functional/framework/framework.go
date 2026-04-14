@@ -536,12 +536,43 @@ func (f *F) SendPacketAndCapture(inputIfaceIndex int, outputIfaceIndex int, pack
 		return nil, fmt.Errorf("failed to connect to output socket: %w", err)
 	}
 
+	_, _ = outputClient.ReceiveAllPackets(timeout, outputDumpPath)
+
 	// Send packet on input interface
 	if err := inputClient.SendPacket(packet, inputDumpPath); err != nil {
 		return nil, fmt.Errorf("failed to send packet: %w", err)
 	}
 
 	return outputClient.ReceivePacket(timeout, outputDumpPath)
+}
+
+// SendPacketAndCaptureAll sends a network packet and captures all response packets.
+func (f *F) SendPacketAndCaptureAll(inputIfaceIndex int, outputIfaceIndex int, packet []byte, timeout time.Duration) ([][]byte, error) {
+	inputClient, err := f.GetSocketClient(inputIfaceIndex)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get input socket client: %w", err)
+	}
+
+	outputClient, err := f.GetSocketClient(outputIfaceIndex)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get output socket client: %w", err)
+	}
+
+	inputDumpPath, outputDumpPath := f.getDumpFilePaths()
+
+	if err := inputClient.Connect(); err != nil {
+		return nil, fmt.Errorf("failed to connect to input socket: %w", err)
+	}
+
+	if err := outputClient.Connect(); err != nil {
+		return nil, fmt.Errorf("failed to connect to output socket: %w", err)
+	}
+
+	if err := inputClient.SendPacket(packet, inputDumpPath); err != nil {
+		return nil, fmt.Errorf("failed to send packet: %w", err)
+	}
+
+	return outputClient.ReceiveAllPackets(timeout, outputDumpPath)
 }
 
 // SendPacketAndParse sends a network packet, captures the response, and parses both
@@ -601,6 +632,36 @@ func (f *F) SendPacketAndParse(inputIfaceIndex int, outputIfaceIndex int, packet
 	return inputPacketInfo, outputPacketInfo, nil
 }
 
+// SendPacketAndParseAll sends a network packet and captures ALL response packets.
+func (f *F) SendPacketAndParseAll(inputIfaceIndex int, outputIfaceIndex int, packet []byte, timeout time.Duration) ([]*PacketInfo, error) {
+	inputPacketInfo, err := f.PacketParser.ParsePacket(packet)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse input packet: %w", err)
+	}
+
+	f.log.Debugf("Sending packet: %s", inputPacketInfo.String())
+	_ = inputPacketInfo // Input packet info not needed for return
+
+	// Send packet and capture all responses
+	responses, err := f.SendPacketAndCaptureAll(inputIfaceIndex, outputIfaceIndex, packet, timeout)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send and capture: %w", err)
+	}
+
+	// Parse all response packets
+	var outputPacketInfos []*PacketInfo
+	for i, responseData := range responses {
+		outputPacketInfo, err := f.PacketParser.ParsePacket(responseData)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse response packet %d: %w", i, err)
+		}
+		f.log.Debugf("Received packet %d: %s", i, outputPacketInfo.String())
+		outputPacketInfos = append(outputPacketInfos, outputPacketInfo)
+	}
+
+	return outputPacketInfos, nil
+}
+
 // GetSocketClient retrieves or creates a socket client for the specified network
 // interface. The method implements caching to reuse existing connections and
 // ensures thread-safe access to the socket client pool.
@@ -656,6 +717,33 @@ func (f *F) GetSocketClient(ifaceIndex int) (*SocketClient, error) {
 	// Return a new client instance with the current framework's logger
 	// This shares the underlying connection (inner) but has its own logger
 	return client.WithLog(f.log.With("interface", ifaceIndex)), nil
+}
+
+// resetAllConnections closes and reconnects all socket clients.
+// This ensures a clean state before starting a new test, preventing
+// packet leakage between tests. Unlike draining, this approach
+// guarantees a completely clean stream by discarding any buffered
+// data with the old connection.
+//
+// The method iterates through all existing socket clients and
+// resets their connections. Errors during reset are logged but
+// do not cause the operation to fail.
+//
+// Example:
+//
+//	f.resetAllConnections()
+func (f *F) resetAllConnections() {
+	f.socketClients.mutex.Lock()
+	defer f.socketClients.mutex.Unlock()
+
+	// Reset all existing socket clients
+	for i, client := range f.socketClients.clients {
+		if err := client.ResetConnection(); err != nil {
+			f.log.Warnf("Failed to reset connection for interface %d: %v", i, err)
+		} else {
+			f.log.Debugf("Reset connection for interface %d", i)
+		}
+	}
 }
 
 // ExecuteCommand executes a single CLI command within the QEMU virtual machine
@@ -1105,6 +1193,13 @@ func (f *F) Run(name string, fn func(fw *F, t *testing.T)) bool {
 	if f.t == nil {
 		panic("Run() can only be called on TestFramework created via ForTest()")
 	}
+
+	// Reset socket connections before test to ensure clean state
+	// This prevents packet leakage between tests by discarding any
+	// buffered data with the old connection
+	f.log.Debugf("Resetting socket connections before test '%s'", name)
+	f.resetAllConnections()
+
 	return f.t.Run(name, func(t *testing.T) {
 		// Create a new TestFramework with the subtest's full name
 		subFw := f.withTestName(t.Name())

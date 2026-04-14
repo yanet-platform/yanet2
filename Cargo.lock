@@ -1057,21 +1057,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ipnet"
-version = "2.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "469fb0b9cefa57e3ef31275ee7cacb78f2fdca44e4765491884a2b119d4eb130"
-
-[[package]]
-name = "ipnetwork"
-version = "0.21.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cf370abdafd54d13e54a620e8c3e1145f28e46cc9d704bc6d94414559df41763"
-dependencies = [
- "serde",
-]
-
-[[package]]
 name = "is_executable"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1249,7 +1234,9 @@ checksum = "1d87ecb2933e8aeadb3e3a02b828fed80a7528047e68b4f424523a0981a3a084"
 
 [[package]]
 name = "netip"
-version = "0.1.0"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3055e2b830c27116ba791de403649c192c4984a77e2f64d88660cfca248b4b69"
 
 [[package]]
 name = "no-std-net"
@@ -3118,9 +3105,8 @@ dependencies = [
  "clap",
  "clap_complete",
  "colored",
- "ipnet",
- "ipnetwork",
  "log",
+ "netip",
  "prost",
  "prost-types",
  "ptree",
@@ -3141,7 +3127,6 @@ dependencies = [
  "clap",
  "clap_complete",
  "colored",
- "ipnet",
  "log",
  "prost",
  "prost-types",
@@ -3192,8 +3177,8 @@ dependencies = [
  "clap",
  "clap_complete",
  "colored",
- "ipnet",
  "log",
+ "netip",
  "prost",
  "prost-types",
  "ptree",
@@ -3222,7 +3207,6 @@ dependencies = [
  "clap",
  "clap_complete",
  "colored",
- "ipnet",
  "log",
  "prost",
  "prost-types",
@@ -3243,7 +3227,6 @@ dependencies = [
  "clap",
  "clap_complete",
  "colored",
- "ipnet",
  "log",
  "prost",
  "prost-types",
@@ -3264,8 +3247,8 @@ dependencies = [
  "clap",
  "clap_complete",
  "colored",
- "ipnet",
  "log",
+ "netip",
  "prost",
  "ptree",
  "serde",
@@ -3283,7 +3266,6 @@ dependencies = [
  "clap",
  "clap_complete",
  "colored",
- "ipnet",
  "log",
  "netip",
  "prost",
@@ -3357,8 +3339,8 @@ dependencies = [
  "clap",
  "clap_complete",
  "colored",
- "ipnet",
  "log",
+ "netip",
  "prost",
  "prost-types",
  "ptree",
@@ -3434,8 +3416,8 @@ dependencies = [
  "clap",
  "clap_complete",
  "colored",
- "ipnet",
  "log",
+ "netip",
  "prost",
  "prost-types",
  "ptree",
@@ -3454,9 +3436,8 @@ dependencies = [
  "clap",
  "clap_complete",
  "colored",
- "ipnet",
- "ipnetwork",
  "log",
+ "netip",
  "prost",
  "prost-types",
  "ptree",

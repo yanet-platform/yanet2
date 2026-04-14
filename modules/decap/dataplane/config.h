@@ -1,8 +1,7 @@
 #pragma once
 
 #include "common/lpm.h"
-
-#include "controlplane/config/zone.h"
+#include "controlplane/config/cp_module.h"
 
 struct decap_module_config {
 	struct cp_module cp_module;

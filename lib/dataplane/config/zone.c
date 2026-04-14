@@ -16,8 +16,10 @@ dp_config_wait_for_gen(struct dp_config *dp_config, uint64_t gen) {
 	struct dp_worker **workers = ADDR_OF(&dp_config->workers);
 	uint64_t idx = 0;
 	do {
-		volatile struct dp_worker *worker = ADDR_OF(workers + idx);
-		if (worker->gen < gen) {
+		struct dp_worker *worker = ADDR_OF(workers + idx);
+		uint64_t worker_gen =
+			__atomic_load_n(&worker->gen, __ATOMIC_ACQUIRE);
+		if (worker_gen < gen) {
 			// TODO cpu yield
 			continue;
 		}
@@ -35,7 +37,7 @@ dp_config_try_lock(struct dp_config *dp_config) {
 		&zero,
 		pid,
 		false,
-		__ATOMIC_RELAXED,
+		__ATOMIC_ACQUIRE,
 		__ATOMIC_RELAXED
 	);
 }
@@ -49,7 +51,7 @@ dp_config_lock(struct dp_config *dp_config) {
 		&zero,
 		pid,
 		false,
-		__ATOMIC_RELAXED,
+		__ATOMIC_ACQUIRE,
 		__ATOMIC_RELAXED
 	)) {
 		zero = 0;
@@ -65,7 +67,7 @@ dp_config_unlock(struct dp_config *dp_config) {
 		&pid,
 		zero,
 		false,
-		__ATOMIC_RELAXED,
+		__ATOMIC_RELEASE,
 		__ATOMIC_RELAXED
 	);
 }

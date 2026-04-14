@@ -9,7 +9,7 @@
 #include <assert.h>
 #include <netinet/in.h>
 
-FILTER_COMPILER_DECLARE(sign_net4, net4_src, net4_dst);
+FILTER_COMPILER_DECLARE(sign_net4_compile, net4_src, net4_dst);
 FILTER_QUERY_DECLARE(sign_net4, net4_src, net4_dst);
 
 static void
@@ -24,7 +24,7 @@ query_and_expect_action(
 	assert(res == 0);
 	struct packet *packet_ptr = &p;
 	struct value_range *actions;
-	FILTER_QUERY(filter, sign_net4, &packet_ptr, &actions, 1);
+	filter_query(filter, sign_net4, &packet_ptr, &actions, 1);
 	assert(actions->count >= 1);
 	assert(ADDR_OF(&actions->values)[0] == expected);
 	free_packet(&p);
@@ -39,7 +39,7 @@ query_and_expect_no_action(
 	assert(res == 0);
 	struct packet *packet_ptr = &p;
 	struct value_range *actions;
-	FILTER_QUERY(filter, sign_net4, &packet_ptr, &actions, 1);
+	filter_query(filter, sign_net4, &packet_ptr, &actions, 1);
 	assert(actions->count == 0);
 	free_packet(&p);
 }
@@ -125,12 +125,14 @@ test_stress_seed12_regression(void *memory, size_t memory_size) {
 			&builders[i], rule_specs[i].dst_addr, dst_mask
 		);
 
-		rules[i] = build_rule(&builders[i], i + 1);
+		rules[i] = build_rule(&builders[i], i);
 	}
 
 	// Initialize filter with all 20 rules
 	struct filter filter;
-	res = FILTER_INIT(&filter, sign_net4, rules, 20, &memory_context);
+	res = filter_init(
+		&filter, sign_net4_compile, rules, 20, &memory_context
+	);
 	assert(res == 0);
 
 	// Test packet 0: src=7.1.134.133, dst=4.5.130.133
@@ -158,7 +160,7 @@ test_stress_seed12_regression(void *memory, size_t memory_size) {
 		&filter, ip(5, 10, 138, 134), ip(1, 9, 139, 137)
 	);
 
-	FILTER_FREE(&filter, sign_net4);
+	filter_free(&filter, sign_net4_compile);
 
 	LOG(INFO, "Regression test passed!");
 }
@@ -186,15 +188,17 @@ main() {
 	builder_add_net4_dst(
 		&builder1, ip(192, 255, 168, 0), ip(255, 255, 255, 0)
 	);
-	struct filter_rule action1 = build_rule(&builder1, 1);
+	struct filter_rule action1 = build_rule(&builder1, 0);
 
 	// init filter
 	struct filter filter;
-	res = FILTER_INIT(&filter, sign_net4, &action1, 1, &memory_context);
+	res = filter_init(
+		&filter, sign_net4_compile, &action1, 1, &memory_context
+	);
 	assert(res == 0);
 
 	query_and_expect_action(
-		&filter, ip(192, 255, 168, 1), ip(192, 255, 168, 10), 1
+		&filter, ip(192, 255, 168, 1), ip(192, 255, 168, 10), 0
 	);
 
 	// no action because src ip mismatch
@@ -207,7 +211,7 @@ main() {
 		&filter, ip(192, 255, 168, 10), ip(195, 255, 168, 1)
 	);
 
-	FILTER_FREE(&filter, sign_net4);
+	filter_free(&filter, sign_net4_compile);
 
 	// Regression test for bug where src_dst filter incorrectly matches
 	// when only src matches but dst doesn't (or vice versa)
@@ -222,10 +226,12 @@ main() {
 	builder_add_net4_dst(
 		&builder2, ip(7, 4, 132, 134), ip(255, 255, 128, 0)
 	);
-	struct filter_rule action2 = build_rule(&builder2, 2);
+	struct filter_rule action2 = build_rule(&builder2, 0);
 
 	struct filter filter2;
-	res = FILTER_INIT(&filter2, sign_net4, &action2, 1, &memory_context);
+	res = filter_init(
+		&filter2, sign_net4_compile, &action2, 1, &memory_context
+	);
 	assert(res == 0);
 
 	// Packet: src=5.10.138.134 (matches src), dst=1.9.139.137 (does NOT
@@ -237,7 +243,7 @@ main() {
 	// Packet: src=5.10.138.134 (matches src), dst=7.4.200.100 (matches dst)
 	// Expected: MATCH because both src and dst match
 	query_and_expect_action(
-		&filter2, ip(5, 10, 138, 134), ip(7, 4, 200, 100), 2
+		&filter2, ip(5, 10, 138, 134), ip(7, 4, 200, 100), 0
 	);
 
 	// Packet: src=1.1.1.1 (does NOT match src), dst=7.4.200.100 (matches
@@ -246,7 +252,7 @@ main() {
 		&filter2, ip(1, 1, 1, 1), ip(7, 4, 200, 100)
 	);
 
-	FILTER_FREE(&filter2, sign_net4);
+	filter_free(&filter2, sign_net4_compile);
 
 	// Run comprehensive regression test with all 20 rules from stress test
 	// Allocate separate memory for the stress test

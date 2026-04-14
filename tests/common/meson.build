@@ -112,3 +112,15 @@ executable(
   link_args: yanet_link_args,
   dependencies: dependencies
 )
+
+thread_dep = dependency('threads')
+
+data_pipe_test = executable(
+  'data_pipe_test',
+  ['data_pipe_tsan.c'],
+  c_args: yanet_test_c_args,
+  link_args: yanet_link_args,
+  dependencies: [lib_common_dep, thread_dep],
+  include_directories: yanet_rootdir,
+)
+test('data_pipe', data_pipe_test, suite: ['common'])

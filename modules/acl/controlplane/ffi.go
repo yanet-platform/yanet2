@@ -15,13 +15,7 @@ import (
 	"runtime"
 	"unsafe"
 
-	"github.com/yanet-platform/yanet2/common/go/filter/device"
-	"github.com/yanet-platform/yanet2/common/go/filter/ipnet4"
-	"github.com/yanet-platform/yanet2/common/go/filter/ipnet6"
-	"github.com/yanet-platform/yanet2/common/go/filter/portrange"
-	"github.com/yanet-platform/yanet2/common/go/filter/protorange"
-	"github.com/yanet-platform/yanet2/common/go/filter/vlanrange"
-
+	"github.com/yanet-platform/yanet2/bindings/go/filter"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	fwstate "github.com/yanet-platform/yanet2/modules/fwstate/controlplane"
 )
@@ -33,10 +27,6 @@ type ModuleConfig struct {
 
 // NewModuleConfig creates a new ACL module configuration
 func NewModuleConfig(agent *ffi.Agent, name string) (*ModuleConfig, error) {
-	if agent == nil {
-		return nil, fmt.Errorf("agent cannot be nil")
-	}
-
 	cName := C.CString(name)
 	defer C.free(unsafe.Pointer(cName))
 
@@ -71,15 +61,15 @@ func (m *ModuleConfig) AsFFIModule() ffi.ModuleConfig {
 type AclRule struct {
 	Action        uint64
 	Counter       string
-	Devices       device.Devices
-	VlanRanges    vlanrange.VlanRanges
-	Src4s         ipnet4.IPNets
-	Dst4s         ipnet4.IPNets
-	Src6s         ipnet6.IPNets
-	Dst6s         ipnet6.IPNets
-	ProtoRanges   protorange.ProtoRanges
-	SrcPortRanges portrange.PortRanges
-	DstPortRanges portrange.PortRanges
+	Devices       filter.Devices
+	VlanRanges    filter.VlanRanges
+	Src4s         filter.IPNets
+	Dst4s         filter.IPNets
+	Src6s         filter.IPNets
+	Dst6s         filter.IPNets
+	ProtoRanges   filter.ProtoRanges
+	SrcPortRanges filter.PortRanges
+	DstPortRanges filter.PortRanges
 }
 
 func (m *AclRule) CBuild(pinner *runtime.Pinner) C.struct_acl_rule {
@@ -90,15 +80,15 @@ func (m *AclRule) CBuild(pinner *runtime.Pinner) C.struct_acl_rule {
 	C.strncpy(&cRule.counter[0], cCounter, C.COUNTER_NAME_LEN)
 	C.free(unsafe.Pointer(cCounter))
 
-	device.CBuilds(&cRule.devices, m.Devices, pinner)
-	vlanrange.CBuilds(&cRule.vlan_ranges, m.VlanRanges, pinner)
-	ipnet4.CBuilds(&cRule.src_net4s, m.Src4s, pinner)
-	ipnet4.CBuilds(&cRule.dst_net4s, m.Dst4s, pinner)
-	ipnet6.CBuilds(&cRule.src_net6s, m.Src6s, pinner)
-	ipnet6.CBuilds(&cRule.dst_net6s, m.Dst6s, pinner)
-	protorange.CBuilds(&cRule.proto_ranges, m.ProtoRanges, pinner)
-	portrange.CBuilds(&cRule.src_port_ranges, m.SrcPortRanges, pinner)
-	portrange.CBuilds(&cRule.dst_port_ranges, m.DstPortRanges, pinner)
+	filter.CBuildDevices(&cRule.devices, m.Devices, pinner)
+	filter.CBuildVlanRanges(&cRule.vlan_ranges, m.VlanRanges, pinner)
+	filter.CBuildNet4s(&cRule.src_net4s, m.Src4s, pinner)
+	filter.CBuildNet4s(&cRule.dst_net4s, m.Dst4s, pinner)
+	filter.CBuildNet6s(&cRule.src_net6s, m.Src6s, pinner)
+	filter.CBuildNet6s(&cRule.dst_net6s, m.Dst6s, pinner)
+	filter.CBuildProtoRanges(&cRule.proto_ranges, m.ProtoRanges, pinner)
+	filter.CBuildPortRanges(&cRule.src_port_ranges, m.SrcPortRanges, pinner)
+	filter.CBuildPortRanges(&cRule.dst_port_ranges, m.DstPortRanges, pinner)
 
 	return cRule
 }

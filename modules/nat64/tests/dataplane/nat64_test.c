@@ -4952,6 +4952,183 @@ test_nat64_bounds_validation(void) {
 }
 
 /**
+ * @brief Test ICMPv6 embedded packet payload length overflow
+ *
+ * Verifies that NAT64 correctly drops ICMPv6 error messages where the
+ * embedded IPv6 header's payload_len exceeds the actual buffer size.
+ * This prevents heap-buffer-overflow during checksum calculation.
+ *
+ * The test constructs an ICMPv6 Destination Unreachable packet with:
+ * - Embedded IPv6 header claiming payload_len=1000
+ * - Actual embedded data much smaller (just IPv6 header + minimal TCP)
+ *
+ * @return TEST_SUCCESS on success, error code on failure
+ */
+static inline int
+test_nat64_icmp_embedded_overflow(void) {
+	// Configure NAT64 module
+	TEST_ASSERT_SUCCESS(
+		nat64_test_config(&test_params.module_config),
+		"nat64_test_config failed\n"
+	);
+
+	struct rte_mbuf *mbuf = rte_pktmbuf_alloc(test_params.mbuf_pool);
+	TEST_ASSERT_NOT_NULL(mbuf, "Failed to allocate mbuf\n");
+
+	// Build packet: Ethernet + IPv6 + ICMPv6 error + embedded IPv6 + TCP
+	// The embedded IPv6 header will claim payload_len=1000 but actual
+	// data is much smaller
+	uint16_t total_len =
+		sizeof(struct rte_ether_hdr) + sizeof(struct rte_ipv6_hdr) +
+		sizeof(struct icmp6_hdr) + sizeof(struct rte_ipv6_hdr) +
+		sizeof(struct rte_tcp_hdr);
+
+	rte_pktmbuf_append(mbuf, total_len);
+
+	// Ethernet header
+	struct rte_ether_hdr *eth =
+		rte_pktmbuf_mtod(mbuf, struct rte_ether_hdr *);
+	rte_memcpy(
+		eth->dst_addr.addr_bytes,
+		(uint8_t[6]){0xff, 0xff, 0xff, 0xff, 0xff, 0xff},
+		6
+	);
+	rte_memcpy(
+		eth->src_addr.addr_bytes,
+		(uint8_t[6]){0x02, 0x00, 0x00, 0x00, 0x00, 0x00},
+		6
+	);
+	eth->ether_type = RTE_BE16(RTE_ETHER_TYPE_IPV6);
+
+	// Outer IPv6 header
+	// For v6->v4 ICMP error: src=mapped IPv6, dst=mapped IPv4 address
+	struct rte_ipv6_hdr *outer_ipv6 = (struct rte_ipv6_hdr *)(eth + 1);
+	outer_ipv6->vtc_flow = RTE_BE32(0x60000000);
+	outer_ipv6->payload_len = RTE_BE16(
+		sizeof(struct icmp6_hdr) + sizeof(struct rte_ipv6_hdr) +
+		sizeof(struct rte_tcp_hdr)
+	);
+	outer_ipv6->proto = IPPROTO_ICMPV6;
+	outer_ipv6->hop_limits = 64;
+	// Source: mapping address (where ICMP error originates from IPv6 side)
+	rte_memcpy(&outer_ipv6->src_addr, &config_data.mapping[0].ip6, 16);
+	// Destination: mapped IPv4 address (original sender)
+	uint8_t outer_prefix[12] = {
+		0x20,
+		0x01,
+		0x0d,
+		0xb8,
+		0x00,
+		0x00,
+		0x00,
+		0x00,
+		0x00,
+		0x00,
+		0x00,
+		0x00
+	};
+	SET_IPV4_MAPPED_IPV6(
+		&outer_ipv6->dst_addr, outer_prefix, &config_data.mapping[0].ip4
+	);
+
+	// ICMPv6 Destination Unreachable header
+	struct icmp6_hdr *icmp6 = (struct icmp6_hdr *)(outer_ipv6 + 1);
+	icmp6->icmp6_type = ICMP6_DST_UNREACH;
+	icmp6->icmp6_code = ICMP6_DST_UNREACH_NOPORT;
+	icmp6->icmp6_cksum = 0;
+
+	// Embedded IPv6 header (malicious: claims large payload_len)
+	struct rte_ipv6_hdr *embedded_ipv6 = (struct rte_ipv6_hdr *)(icmp6 + 1);
+	embedded_ipv6->vtc_flow = RTE_BE32(0x60000000);
+	// This is the key: claim 1000 bytes payload but only provide TCP header
+	embedded_ipv6->payload_len = RTE_BE16(1000);
+	embedded_ipv6->proto = IPPROTO_TCP;
+	embedded_ipv6->hop_limits = 64;
+	// Use valid mapped addresses
+	uint8_t embed_prefix[12] = {
+		0x20,
+		0x01,
+		0x0d,
+		0xb8,
+		0x00,
+		0x00,
+		0x00,
+		0x00,
+		0x00,
+		0x00,
+		0x00,
+		0x00
+	};
+	SET_IPV4_MAPPED_IPV6(
+		&embedded_ipv6->src_addr,
+		embed_prefix,
+		&config_data.mapping[0].ip4
+	);
+	rte_memcpy(&embedded_ipv6->dst_addr, &config_data.mapping[1].ip6, 16);
+
+	// Embedded TCP header (minimal)
+	struct rte_tcp_hdr *tcp = (struct rte_tcp_hdr *)(embedded_ipv6 + 1);
+	tcp->src_port = RTE_BE16(12345);
+	tcp->dst_port = RTE_BE16(80);
+	tcp->sent_seq = RTE_BE32(1);
+	tcp->recv_ack = 0;
+	tcp->data_off = 0x50;
+	tcp->tcp_flags = RTE_TCP_SYN_FLAG;
+	tcp->rx_win = RTE_BE16(8192);
+	tcp->cksum = 0;
+	tcp->tcp_urp = 0;
+
+	// Calculate ICMPv6 checksum
+	uint32_t cksum = rte_ipv6_phdr_cksum(outer_ipv6, 0);
+	cksum = __rte_raw_cksum(
+		icmp6,
+		sizeof(struct icmp6_hdr) + sizeof(struct rte_ipv6_hdr) +
+			sizeof(struct rte_tcp_hdr),
+		cksum
+	);
+	icmp6->icmp6_cksum = ~__rte_raw_cksum_reduce(cksum);
+
+	// Create packet structure
+	struct packet *packet = mbuf_to_packet(mbuf);
+	memset(packet, 0, sizeof(struct packet));
+	packet->mbuf = mbuf;
+	packet->mbuf->port = 0;
+
+	// Parse packet
+	struct packet_front pf;
+	packet_front_init(&pf);
+	packet_list_add(&pf.input, packet);
+
+	(void)parse_packet(packet);
+
+	// Run NAT64
+	struct module_ectx module_ectx;
+	SET_OFFSET_OF(
+		&module_ectx.cp_module, &test_params.module_config.cp_module
+	);
+	test_params.module->handler(NULL, &module_ectx, &pf);
+
+	// Packet should be dropped due to payload_len overflow
+	int drop_count = packet_list_count(&pf.drop);
+	TEST_ASSERT_EQUAL(
+		drop_count,
+		1,
+		"Expected packet drop due to embedded payload overflow, "
+		"got %d drops\n",
+		drop_count
+	);
+
+	// Clean up
+	packet_list_cleanup(&pf.input);
+	packet_list_cleanup(&pf.output);
+	packet_list_cleanup(&pf.drop);
+	packet_list_cleanup(&pf.pending_input);
+	packet_list_cleanup(&pf.pending_output);
+
+	return TEST_SUCCESS;
+}
+
+/**
  * @brief Test ICMP packet translation
  *
  * Verifies:
@@ -5109,6 +5286,10 @@ static struct unit_test_suite nat64_test_suite =
 		 TEST_CASE_NAMED(
 			 "test_nat64_bounds_validation",
 			 test_nat64_bounds_validation
+		 ),
+		 TEST_CASE_NAMED(
+			 "test_nat64_icmp_embedded_overflow",
+			 test_nat64_icmp_embedded_overflow
 		 ),
 
 		 TEST_CASES_END() /**< NULL terminate unit test array */

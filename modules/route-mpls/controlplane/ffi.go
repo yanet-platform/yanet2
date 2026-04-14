@@ -3,6 +3,12 @@ package route_mpls
 //#cgo CFLAGS: -I../../../ -I../../../lib
 //#cgo LDFLAGS: -L../../../build/modules/route-mpls/api -lroute_mpls_cp
 //
+//#include <errno.h>
+//
+//static void reset_errno() {
+//    errno = 0;
+//}
+//
 //#include "api/agent.h"
 //#include "modules/route-mpls/api/controlplane.h"
 //
@@ -25,8 +31,7 @@ import (
 	"runtime"
 	"unsafe"
 
-	"github.com/yanet-platform/yanet2/common/go/filter/ipnet4"
-	"github.com/yanet-platform/yanet2/common/go/filter/ipnet6"
+	"github.com/yanet-platform/yanet2/bindings/go/filter"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 )
 
@@ -38,6 +43,7 @@ func NewModuleConfig(agent *ffi.Agent, name string) (*ModuleConfig, error) {
 	cName := C.CString(name)
 	defer C.free(unsafe.Pointer(cName))
 
+	C.reset_errno()
 	ptr, err := C.route_mpls_module_config_create((*C.struct_agent)(agent.AsRawPtr()), cName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize module config: %w", err)
@@ -81,16 +87,16 @@ type routeMPLSNextHop struct {
 }
 
 type routeMPLSRule struct {
-	Dst4s    ipnet4.IPNets
-	Dst6s    ipnet6.IPNets
+	Dst4s    filter.IPNets
+	Dst6s    filter.IPNets
 	NextHops []routeMPLSNextHop
 }
 
 func (m *routeMPLSRule) CBuild(pinner *runtime.Pinner) C.struct_route_mpls_rule {
 	cRule := C.struct_route_mpls_rule{}
 
-	ipnet4.CBuilds(&cRule.net4s, m.Dst4s, pinner)
-	ipnet6.CBuilds(&cRule.net6s, m.Dst6s, pinner)
+	filter.CBuildNet4s(&cRule.net4s, m.Dst4s, pinner)
+	filter.CBuildNet6s(&cRule.net6s, m.Dst6s, pinner)
 
 	return cRule
 }
@@ -127,14 +133,15 @@ func (m *ModuleConfig) Update(rules []routeMPLSRule) error {
 		}
 
 		cRule := &cRules[idx]
-		ipnet4.CBuilds(&cRule.net4s, rule.Dst4s, pinner)
-		ipnet6.CBuilds(&cRule.net6s, rule.Dst6s, pinner)
+		filter.CBuildNet4s(&cRule.net4s, rule.Dst4s, pinner)
+		filter.CBuildNet6s(&cRule.net6s, rule.Dst6s, pinner)
 
 		pinner.Pin(&cNextHops[0])
 		cRule.nexthops = &cNextHops[0]
 		cRule.nexthop_count = C.uint64_t(len(cNextHops))
 	}
 
+	C.reset_errno()
 	rc, err := C.route_mpls_module_config_update(
 		m.asRawPtr(),
 		&cRules[0],

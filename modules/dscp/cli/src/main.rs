@@ -6,7 +6,7 @@ use dscppb::{
     AddPrefixesRequest, DscpConfig, RemovePrefixesRequest, SetDscpMarkingRequest, ShowConfigRequest,
     ShowConfigResponse, dscp_service_client::DscpServiceClient,
 };
-use ipnet::IpNet;
+use netip::{Contiguous, IpNetwork};
 use ptree::TreeBuilder;
 use tonic::codec::CompressionEncoding;
 use ync::{
@@ -63,7 +63,7 @@ pub struct AddPrefixesCmd {
     pub config_name: String,
     /// Prefix to be added to the input filter of the DSCP module.
     #[arg(long, short, required = true)]
-    pub prefix: Vec<IpNet>,
+    pub prefix: Vec<Contiguous<IpNetwork>>,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -73,7 +73,7 @@ pub struct RemovePrefixesCmd {
     pub config_name: String,
     /// Prefix to be removed from the input filter of the DSCP module.
     #[arg(long, short, required = true)]
-    pub prefix: Vec<IpNet>,
+    pub prefix: Vec<Contiguous<IpNetwork>>,
 }
 
 #[derive(Debug, Clone, Parser)]

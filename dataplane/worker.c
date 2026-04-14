@@ -287,7 +287,9 @@ worker_loop_round(struct dataplane_worker *worker) {
 	struct config_gen_ectx *config_gen_ectx =
 		ADDR_OF(&cp_config_gen->config_gen_ectx);
 
-	worker->dp_worker->gen = cp_config_gen->gen;
+	__atomic_store_n(
+		&worker->dp_worker->gen, cp_config_gen->gen, __ATOMIC_RELEASE
+	);
 	*worker->dp_worker->iterations += 1;
 
 	struct packet_front packet_front;

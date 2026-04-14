@@ -9,7 +9,7 @@
 #include <assert.h>
 #include <netinet/in.h>
 
-FILTER_COMPILER_DECLARE(sign_proto_range, proto_range);
+FILTER_COMPILER_DECLARE(sign_proto_range_compile, proto_range);
 FILTER_QUERY_DECLARE(sign_proto_range, proto_range);
 
 static void
@@ -21,7 +21,7 @@ query_tcp_packet(struct filter *filter, uint16_t flags, uint32_t expected) {
 	assert(res == 0);
 	struct packet *packet_ptr = &packet;
 	struct value_range *actions;
-	FILTER_QUERY(filter, sign_proto_range, &packet_ptr, &actions, 1);
+	filter_query(filter, sign_proto_range, &packet_ptr, &actions, 1);
 	assert(actions->count >= 1);
 	assert(ADDR_OF(&actions->values)[0] == expected);
 	free_packet(&packet);
@@ -36,7 +36,7 @@ query_udp_packet(struct filter *filter, uint32_t expected) {
 	assert(res == 0);
 	struct packet *packet_ptr = &packet;
 	struct value_range *actions;
-	FILTER_QUERY(filter, sign_proto_range, &packet_ptr, &actions, 1);
+	filter_query(filter, sign_proto_range, &packet_ptr, &actions, 1);
 	assert(actions->count >= 1);
 	assert(ADDR_OF(&actions->values)[0] == expected);
 	free_packet(&packet);
@@ -60,30 +60,32 @@ test_proto_1(void *memory) {
 	builder_add_proto_range(
 		&b1, 256 * IPPROTO_TCP, 256 * IPPROTO_TCP + 255
 	);
-	struct filter_rule r1 = build_rule(&b1, 1);
+	struct filter_rule r1 = build_rule(&b1, 0);
 
 	struct filter_rule_builder b2;
 	builder_init(&b2);
 	builder_add_proto_range(
 		&b2, 256 * IPPROTO_UDP, 256 * IPPROTO_UDP + 255
 	);
-	struct filter_rule r2 = build_rule(&b2, 2);
+	struct filter_rule r2 = build_rule(&b2, 1);
 
 	struct filter_rule rules[2] = {r1, r2};
 
 	struct filter filter;
 
 	LOG(INFO, "filter init...");
-	res = FILTER_INIT(&filter, sign_proto_range, rules, 2, &memory_context);
+	res = filter_init(
+		&filter, sign_proto_range_compile, rules, 2, &memory_context
+	);
 	assert(res == 0);
 
 	LOG(INFO, "query tcp packet...");
-	query_tcp_packet(&filter, 0, 1);
+	query_tcp_packet(&filter, 0, 0);
 
 	LOG(INFO, "query udp packet...");
-	query_udp_packet(&filter, 2);
+	query_udp_packet(&filter, 1);
 
-	FILTER_FREE(&filter, sign_proto_range);
+	filter_free(&filter, sign_proto_range_compile);
 }
 
 int

@@ -17,6 +17,7 @@ The framework allows:
 - **Cross-platform**: Works on macOS and Linux
 - **Socket Networking**: Real packet testing through QEMU socket networking
 - **PTY-based**: Reliable communication through PTY devices
+- **Test Isolation**: Automatic socket reset prevents packet leakage between tests
 
 ## Requirements
 
@@ -265,6 +266,55 @@ This provides:
 - ✅ **High performance** through Unix domain sockets
 - ✅ **Easy debugging** through standard network tools
 - ✅ **Reliability** and low latency communication
+
+## Test Isolation
+
+The framework includes automatic **socket connection reset** to prevent packet leakage between tests:
+
+### Problem Solved
+In CI environments, tests can fail when packets from previous tests remain in socket buffers:
+1. Test A sends packets, some timeout (100ms)
+2. Unconsumed packets stay in buffer
+3. Test B receives packets from Test A → FAIL
+
+### Solution
+Automatic socket connection reset before each test:
+1. Test A sends packets
+2. **Socket connections closed and reopened** before Test B
+3. Any buffered data is discarded with the old connection
+4. Test B starts with a clean stream → PASS
+
+### Usage
+
+**Automatic (Recommended):**
+```go
+fw.Run("MyTest", func(fw *F, t *testing.T) {
+    // Socket connections automatically reset before this runs
+    client, _ := fw.GetSocketClient(0)
+    // ... test code
+})
+```
+
+**Manual:**
+```go
+client, _ := fw.GetSocketClient(0)
+client.ResetConnection() // Close and reconnect
+```
+
+### Monitoring
+
+Enable debug logging to see reset operations:
+```bash
+export YANET_TEST_DEBUG=1
+go test -v ./...
+```
+
+Look for messages like:
+```
+DEBUG Resetting socket connections before test 'TestExample'
+DEBUG Reset connection for interface 0
+DEBUG Reset connection for interface 1
+```
 
 ## Build Dependencies
 

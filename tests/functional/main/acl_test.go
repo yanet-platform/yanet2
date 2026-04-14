@@ -20,14 +20,9 @@ func TestACL(t *testing.T) {
 	// 1. ACL Configuration Tests
 	fw.Run("Configure_ACL_module", func(fw *framework.F, t *testing.T) {
 		commands := []string{
-			// Configure module
-			"/mnt/target/release/yanet-cli-acl update --cfg acl0 --rules /mnt/yanet2/acl.yaml",
-
-			// Configure functions
-			"/mnt/target/release/yanet-cli-function update --name=test --chains ch0:2=acl:acl0,route:route0",
-
-			// Configure pipelines
-			"/mnt/target/release/yanet-cli-pipeline update --name=test --functions test",
+			framework.CLIACL + " update --cfg acl0 --rules /mnt/yanet2/tests/functional/testdata/acl.yaml",
+			framework.CLIFunction + " update --name=test --chains ch0:2=acl:acl0,route:route0",
+			framework.CLIPipeline + " update --name=test --functions test",
 		}
 
 		_, err := fw.ExecuteCommands(commands...)
@@ -503,6 +498,58 @@ func (pg *PacketGenerator) ICMPv6(
 	icmp.SetNetworkLayerForChecksum(ip6)
 
 	return pg.serialize(eth, ip6, icmp, gopacket.Payload(payload))
+}
+
+func TestACLMbufLeak(t *testing.T) {
+	fw := globalFramework.ForTest(t)
+	require.NotNil(t, fw, "Test framework must be initialized")
+	pg := NewPacketGenerator()
+
+	fw.Run("Configure", func(fw *framework.F, t *testing.T) {
+		commands := []string{
+			framework.CLIACL + " update --cfg acl_mbufleak --rules /mnt/yanet2/tests/functional/testdata/acl-mbuf-leak.yaml",
+			framework.CLIFunction + " update --name=test --chains ch0:2=acl:acl_mbufleak,route:route0",
+			framework.CLIPipeline + " update --name=test --functions test",
+		}
+
+		_, err := fw.ExecuteCommands(commands...)
+		require.NoError(t, err, "ACL mbuf-leak configuration failed")
+	})
+
+	fw.Run("Count_passes_packet_through", func(fw *framework.F, t *testing.T) {
+		pkt := pg.UDP(
+			net.ParseIP("192.0.2.30"),
+			net.ParseIP("192.0.3.1"),
+			1234, 5678,
+			[]byte("count action test"),
+		)
+		_, out, err := fw.SendPacketAndParse(0, 0, pkt, 200*time.Millisecond)
+		require.NoError(t, err, "Count packet must be passed through")
+		require.NotNil(t, out, "Count packet must appear on output interface")
+		require.True(t, out.SrcIP.Equal(net.ParseIP("192.0.2.30")), "Count packet src IP must be unchanged")
+		require.True(t, out.DstIP.Equal(net.ParseIP("192.0.3.1")), "Count packet dst IP must be unchanged")
+		require.Equal(t, uint16(1234), out.SrcPort, "Count packet src port must be unchanged")
+		require.Equal(t, uint16(5678), out.DstPort, "Count packet dst port must be unchanged")
+		require.Equal(t, []byte("count action test"), out.Payload, "Count packet payload must be unchanged")
+	})
+
+	fw.Run("CreateState_passes_packet_through", func(fw *framework.F, t *testing.T) {
+		pkt := pg.TCP(
+			net.ParseIP("192.0.2.40"),
+			net.ParseIP("192.0.3.1"),
+			54321, 80,
+			true, false, false, false, // SYN
+			[]byte("create state action test"),
+		)
+		_, out, err := fw.SendPacketAndParse(0, 0, pkt, 200*time.Millisecond)
+		require.NoError(t, err, "CreateState packet must be passed through")
+		require.NotNil(t, out, "CreateState packet must appear on output interface")
+		require.True(t, out.SrcIP.Equal(net.ParseIP("192.0.2.40")), "CreateState packet src IP must be unchanged")
+		require.True(t, out.DstIP.Equal(net.ParseIP("192.0.3.1")), "CreateState packet dst IP must be unchanged")
+		require.Equal(t, uint16(54321), out.SrcPort, "CreateState packet src port must be unchanged")
+		require.Equal(t, uint16(80), out.DstPort, "CreateState packet dst port must be unchanged")
+		require.Equal(t, []byte("create state action test"), out.Payload, "CreateState packet payload must be unchanged")
+	})
 }
 
 func (pg *PacketGenerator) serialize(layers ...gopacket.SerializableLayer) []byte {

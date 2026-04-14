@@ -1,4 +1,4 @@
-use core::error::Error;
+use core::{error::Error, ops::Deref};
 use std::{
     fs::File,
     path::{Path, PathBuf},
@@ -10,7 +10,7 @@ use forwardpb::{
     DeleteConfigRequest, ListConfigsRequest, ShowConfigRequest, UpdateConfigRequest,
     forward_service_client::ForwardServiceClient,
 };
-use ipnet::IpNet;
+use netip::{Contiguous, IpNetwork};
 use serde::{Deserialize, Serialize};
 use tonic::codec::CompressionEncoding;
 use ync::{
@@ -120,21 +120,26 @@ impl From<VlanRange> for filterpb::VlanRange {
     }
 }
 
-impl TryFrom<String> for filterpb::IpNet {
+impl TryFrom<&str> for filterpb::IpNet {
     type Error = Box<dyn Error>;
 
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        let net: IpNet = value.parse()?;
-        let addr = match &net {
-            IpNet::V4(v4) => v4.addr().octets().to_vec(),
-            IpNet::V6(v6) => v6.addr().octets().to_vec(),
-        };
-        let mask = match &net {
-            IpNet::V4(v4) => v4.netmask().octets().to_vec(),
-            IpNet::V6(v6) => v6.netmask().octets().to_vec(),
-        };
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        let net = Contiguous::<IpNetwork>::parse(value)?;
 
-        Ok(Self { addr, mask })
+        match net.deref() {
+            IpNetwork::V4(net) => {
+                let addr = net.addr().octets().to_vec();
+                let mask = net.mask().octets().to_vec();
+
+                Ok(Self { addr, mask })
+            }
+            IpNetwork::V6(net) => {
+                let addr = net.addr().octets().to_vec();
+                let mask = net.mask().octets().to_vec();
+
+                Ok(Self { addr, mask })
+            }
+        }
     }
 }
 
@@ -175,12 +180,12 @@ impl TryFrom<ForwardRule> for forwardpb::Rule {
             srcs: forward_rule
                 .srcs
                 .into_iter()
-                .map(filterpb::IpNet::try_from)
+                .map(|n| filterpb::IpNet::try_from(n.as_str()))
                 .collect::<Result<Vec<_>, _>>()?,
             dsts: forward_rule
                 .dsts
                 .into_iter()
-                .map(filterpb::IpNet::try_from)
+                .map(|n| filterpb::IpNet::try_from(n.as_str()))
                 .collect::<Result<Vec<_>, _>>()?,
         })
     }

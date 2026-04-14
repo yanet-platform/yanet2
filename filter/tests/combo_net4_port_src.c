@@ -22,7 +22,9 @@
 
 ////////////////////////////////////////////////////////////////////////////////
 
-FILTER_COMPILER_DECLARE(combo_net4_port_src, net4_fast_src, port_fast_src);
+FILTER_COMPILER_DECLARE(
+	combo_net4_port_src_compile, net4_fast_src, port_fast_src
+);
 FILTER_QUERY_DECLARE(combo_net4_port_src, net4_fast_src, port_fast_src);
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -37,7 +39,7 @@ query_and_expect_actions(
 	struct value_range **ranges =
 		malloc(sizeof(struct value_range *) * packets_count);
 
-	FILTER_QUERY(
+	filter_query(
 		filter, combo_net4_port_src, packets, ranges, packets_count
 	);
 
@@ -72,8 +74,7 @@ test_no_match_port_only(void *arena) {
 	uint32_t mask = prefix_mask(24);
 	builder_add_net4_src(&builder, ip(10, 0, 0, 0), (const uint8_t *)&mask);
 	builder_add_port_src_range(&builder, 80, 90);
-	struct filter_rule rule =
-		build_rule(&builder, 1 | ACTION_NON_TERMINATE);
+	struct filter_rule rule = build_rule(&builder, 0);
 
 	// Test packets: IP matches but port doesn't
 	const struct {
@@ -122,7 +123,9 @@ test_no_match_port_only(void *arena) {
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize memory context");
 
 	struct filter filter;
-	res = FILTER_INIT(&filter, combo_net4_port_src, &rule, 1, &mctx);
+	res = filter_init(
+		&filter, combo_net4_port_src_compile, &rule, 1, &mctx
+	);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
 
 	res = query_and_expect_actions(
@@ -151,8 +154,7 @@ test_no_match_ip_only(void *arena) {
 	uint32_t mask = prefix_mask(24);
 	builder_add_net4_src(&builder, ip(10, 0, 0, 0), (const uint8_t *)&mask);
 	builder_add_port_src_range(&builder, 80, 90);
-	struct filter_rule rule =
-		build_rule(&builder, 1 | ACTION_NON_TERMINATE);
+	struct filter_rule rule = build_rule(&builder, 0);
 
 	// Test packets: Port matches but IP doesn't
 	const struct {
@@ -201,7 +203,9 @@ test_no_match_ip_only(void *arena) {
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize memory context");
 
 	struct filter filter;
-	res = FILTER_INIT(&filter, combo_net4_port_src, &rule, 1, &mctx);
+	res = filter_init(
+		&filter, combo_net4_port_src_compile, &rule, 1, &mctx
+	);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
 
 	res = query_and_expect_actions(
@@ -230,8 +234,7 @@ test_both_match(void *arena) {
 	uint32_t mask = prefix_mask(24);
 	builder_add_net4_src(&builder, ip(10, 0, 0, 0), (const uint8_t *)&mask);
 	builder_add_port_src_range(&builder, 80, 90);
-	struct filter_rule rule =
-		build_rule(&builder, 1 | ACTION_NON_TERMINATE);
+	struct filter_rule rule = build_rule(&builder, 0);
 
 	// Test packets: Both IP and port match
 	const struct {
@@ -268,7 +271,7 @@ test_both_match(void *arena) {
 		expected_ranges[i] = malloc(sizeof(struct value_range));
 		expected_ranges[i]->count = 1;
 		expected_ranges[i]->values = malloc(sizeof(uint32_t) * 2);
-		expected_ranges[i]->values[0] = 1 | ACTION_NON_TERMINATE;
+		expected_ranges[i]->values[0] = 0;
 	}
 
 	struct block_allocator alloc;
@@ -281,7 +284,9 @@ test_both_match(void *arena) {
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize memory context");
 
 	struct filter filter;
-	res = FILTER_INIT(&filter, combo_net4_port_src, &rule, 1, &mctx);
+	res = filter_init(
+		&filter, combo_net4_port_src_compile, &rule, 1, &mctx
+	);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
 
 	res = query_and_expect_actions(
@@ -316,7 +321,7 @@ test_overlapping(void *arena) {
 		&builders[0], ip(10, 0, 0, 0), (const uint8_t *)&mask1
 	);
 	builder_add_port_src_range(&builders[0], 80, 100);
-	rules[0] = build_rule(&builders[0], 1 | ACTION_NON_TERMINATE);
+	rules[0] = build_rule(&builders[0], 0);
 
 	builder_init(&builders[1]);
 	uint32_t mask2 = prefix_mask(16);
@@ -324,7 +329,7 @@ test_overlapping(void *arena) {
 		&builders[1], ip(10, 1, 0, 0), (const uint8_t *)&mask2
 	);
 	builder_add_port_src_range(&builders[1], 90, 110);
-	rules[1] = build_rule(&builders[1], 2 | ACTION_NON_TERMINATE);
+	rules[1] = build_rule(&builders[1], 1);
 
 	builder_init(&builders[2]);
 	uint32_t mask3 = prefix_mask(24);
@@ -332,7 +337,7 @@ test_overlapping(void *arena) {
 		&builders[2], ip(10, 1, 1, 0), (const uint8_t *)&mask3
 	);
 	builder_add_port_src_range(&builders[2], 95, 105);
-	rules[2] = build_rule(&builders[2], 3 | ACTION_NON_TERMINATE);
+	rules[2] = build_rule(&builders[2], 2);
 
 	// Test packets
 	const struct {
@@ -341,21 +346,10 @@ test_overlapping(void *arena) {
 		uint32_t expected_actions[3];
 		size_t expected_count;
 	} test_cases[] = {
-		{{10, 1, 1, 100},
-		 97,
-		 {1 | ACTION_NON_TERMINATE,
-		  2 | ACTION_NON_TERMINATE,
-		  3 | ACTION_NON_TERMINATE},
-		 3}, // All 3 match
-		{{10, 1, 2, 100},
-		 92,
-		 {1 | ACTION_NON_TERMINATE, 2 | ACTION_NON_TERMINATE, 0},
-		 2}, // Rules 1,2 match
-		{{10, 2, 0, 1}, 85, {1 | ACTION_NON_TERMINATE, 0, 0}, 1
-		}, // Only rule 1 matches
+		{{10, 2, 0, 1}, 85, {0, 0, 0}, 1}, // Only rule 1 matches
 		{{10, 1, 1, 100}, 79, {0, 0, 0}, 0
 		}, // IP matches all but port matches none
-		{{10, 1, 1, 100}, 106, {2 | ACTION_NON_TERMINATE, 0, 0}, 1
+		{{10, 1, 1, 100}, 106, {1, 0, 0}, 1
 		}, // Only rule 2 matches (port 106 in 90-110, not in 80-100 or
 		   // 95-105)
 	};
@@ -399,7 +393,9 @@ test_overlapping(void *arena) {
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize memory context");
 
 	struct filter filter;
-	res = FILTER_INIT(&filter, combo_net4_port_src, rules, 3, &mctx);
+	res = filter_init(
+		&filter, combo_net4_port_src_compile, rules, 3, &mctx
+	);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
 
 	res = query_and_expect_actions(

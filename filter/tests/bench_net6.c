@@ -50,13 +50,15 @@
 ////////////////////////////////////////////////////////////////////////////////
 // Filter signature declarations
 
-FILTER_COMPILER_DECLARE(bench_dst, net6_dst);
+FILTER_COMPILER_DECLARE(bench_dst_compile, net6_dst);
 FILTER_QUERY_DECLARE(bench_dst, net6_dst);
 
-FILTER_COMPILER_DECLARE(bench_dst_port, net6_dst, port_dst);
+FILTER_COMPILER_DECLARE(bench_dst_port_compile, net6_dst, port_dst);
 FILTER_QUERY_DECLARE(bench_dst_port, net6_dst, port_dst);
 
-FILTER_COMPILER_DECLARE(bench_dst_port_proto, net6_dst, port_dst, proto);
+FILTER_COMPILER_DECLARE(
+	bench_dst_port_proto_compile, net6_dst, port_dst, proto
+);
 FILTER_QUERY_DECLARE(bench_dst_port_proto, net6_dst, port_dst, proto);
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -245,9 +247,7 @@ generate_rules(
 			builder_set_proto(&builders[i], proto, 0, 0);
 		}
 
-		rules[i] = build_rule(
-			&builders[i], (i + 1) | ACTION_NON_TERMINATE
-		);
+		rules[i] = build_rule(&builders[i], i);
 	}
 }
 
@@ -403,7 +403,7 @@ run_benchmark(
 		// Query the filter
 		switch (sig_type) {
 		case sig_net6_dst:
-			FILTER_QUERY(
+			filter_query(
 				filter,
 				bench_dst,
 				packets + batch_idx * batch_size,
@@ -412,7 +412,7 @@ run_benchmark(
 			);
 			break;
 		case sig_net6_dst_port:
-			FILTER_QUERY(
+			filter_query(
 				filter,
 				bench_dst_port,
 				packets + batch_idx * batch_size,
@@ -421,7 +421,7 @@ run_benchmark(
 			);
 			break;
 		case sig_net6_dst_port_proto:
-			FILTER_QUERY(
+			filter_query(
 				filter,
 				bench_dst_port_proto,
 				packets + batch_idx * batch_size,
@@ -598,27 +598,27 @@ main(int argc, char **argv) {
 	struct filter filter;
 	switch (config.sig_type) {
 	case sig_net6_dst:
-		res = FILTER_INIT(
+		res = filter_init(
 			&filter,
-			bench_dst,
+			bench_dst_compile,
 			rules,
 			config.num_rules,
 			&memory_context
 		);
 		break;
 	case sig_net6_dst_port:
-		res = FILTER_INIT(
+		res = filter_init(
 			&filter,
-			bench_dst_port,
+			bench_dst_port_compile,
 			rules,
 			config.num_rules,
 			&memory_context
 		);
 		break;
 	case sig_net6_dst_port_proto:
-		res = FILTER_INIT(
+		res = filter_init(
 			&filter,
-			bench_dst_port_proto,
+			bench_dst_port_proto_compile,
 			rules,
 			config.num_rules,
 			&memory_context

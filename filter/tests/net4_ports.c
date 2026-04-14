@@ -11,7 +11,7 @@
 #include <stdio.h>
 
 FILTER_COMPILER_DECLARE(
-	sign_net4_ports, port_src, port_dst, net4_src, net4_dst
+	sign_net4_ports_compile, port_src, port_dst, net4_src, net4_dst
 );
 FILTER_QUERY_DECLARE(sign_net4_ports, port_src, port_dst, net4_src, net4_dst);
 
@@ -31,7 +31,7 @@ query_and_expect_action(
 	assert(res == 0);
 	struct packet *packet_ptr = &p;
 	struct value_range *actions;
-	FILTER_QUERY(filter, sign_net4_ports, &packet_ptr, &actions, 1);
+	filter_query(filter, sign_net4_ports, &packet_ptr, &actions, 1);
 	assert(actions->count >= 1);
 	assert(ADDR_OF(&actions->values)[0] == expected);
 	free_packet(&p);
@@ -62,7 +62,7 @@ test(void *memory) {
 	builder_add_port_dst_range(&b1, 200, 250);
 	builder_add_net4_src(&b1, ip(198, 233, 0, 0), ip(255, 255, 0, 0));
 	builder_add_net4_dst(&b1, ip(192, 0, 0, 0), ip(255, 0, 0, 0));
-	struct filter_rule a1 = build_rule(&b1, 1);
+	struct filter_rule a1 = build_rule(&b1, 0);
 
 	// a2:
 	//  src_port: 200-300
@@ -75,28 +75,28 @@ test(void *memory) {
 	builder_add_port_dst_range(&b2, 100, 300);
 	builder_add_net4_src(&b2, ip(198, 233, 10, 0), ip(255, 255, 255, 0));
 	builder_add_net4_dst(&b2, ip(192, 0, 0, 0), ip(255, 0, 0, 0));
-	struct filter_rule a2 = build_rule(&b2, 2);
+	struct filter_rule a2 = build_rule(&b2, 1);
 
 	struct filter_rule actions[2] = {a1, a2};
 
 	// build filter
 	struct filter filter;
-	res = FILTER_INIT(
-		&filter, sign_net4_ports, actions, 2, &memory_context
+	res = filter_init(
+		&filter, sign_net4_ports_compile, actions, 2, &memory_context
 	);
 	assert(res == 0);
 
 	// make queries
 
 	query_and_expect_action(
-		&filter, ip(198, 233, 10, 15), ip(192, 1, 1, 1), 200, 230, 1
+		&filter, ip(198, 233, 10, 15), ip(192, 1, 1, 1), 200, 230, 0
 	);
 
 	query_and_expect_action(
-		&filter, ip(198, 233, 10, 15), ip(192, 1, 1, 1), 200, 150, 2
+		&filter, ip(198, 233, 10, 15), ip(192, 1, 1, 1), 200, 150, 1
 	);
 
-	FILTER_FREE(&filter, sign_net4_ports);
+	filter_free(&filter, sign_net4_ports_compile);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

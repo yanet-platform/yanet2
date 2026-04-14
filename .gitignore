@@ -133,3 +133,4 @@ node_modules/
 outdeb/
 debian/tmp/
 debian/debhelper-build-stamp
+cscope.*

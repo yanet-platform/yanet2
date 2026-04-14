@@ -9,7 +9,7 @@
 #include <assert.h>
 #include <netinet/in.h>
 
-FILTER_COMPILER_DECLARE(sign_vlan, vlan);
+FILTER_COMPILER_DECLARE(sign_vlan_compile, vlan);
 FILTER_QUERY_DECLARE(sign_vlan, vlan);
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -25,7 +25,7 @@ query_packet(struct filter *filter, uint16_t vlan, uint32_t expected) {
 
 	struct packet *packet_ptr = &packet;
 	struct value_range *actions;
-	FILTER_QUERY(filter, sign_vlan, &packet_ptr, &actions, 1);
+	filter_query(filter, sign_vlan, &packet_ptr, &actions, 1);
 	assert(actions->count == 1);
 	assert(ADDR_OF(&actions->values)[0] == expected);
 	free_packet(&packet);
@@ -47,29 +47,31 @@ test_proto_1(void *memory) {
 	struct filter_rule_builder b1;
 	builder_init(&b1);
 	builder_set_vlan(&b1, 10);
-	struct filter_rule r1 = build_rule(&b1, 1);
+	struct filter_rule r1 = build_rule(&b1, 0);
 
 	struct filter_rule_builder b2;
 	builder_init(&b2);
 	builder_set_vlan(&b2, 20);
-	struct filter_rule r2 = build_rule(&b2, 2);
+	struct filter_rule r2 = build_rule(&b2, 1);
 
 	struct filter_rule_builder b3;
 	builder_init(&b3);
 	builder_set_vlan(&b3, 30);
-	struct filter_rule r3 = build_rule(&b3, 3);
+	struct filter_rule r3 = build_rule(&b3, 2);
 
 	struct filter_rule rules[3] = {r1, r2, r3};
 
 	struct filter filter;
-	res = FILTER_INIT(&filter, sign_vlan, rules, 3, &memory_context);
+	res = filter_init(
+		&filter, sign_vlan_compile, rules, 3, &memory_context
+	);
 	assert(res == 0);
 
-	query_packet(&filter, 10, 1);
-	query_packet(&filter, 20, 2);
-	query_packet(&filter, 30, 3);
+	query_packet(&filter, 10, 0);
+	query_packet(&filter, 20, 1);
+	query_packet(&filter, 30, 2);
 
-	FILTER_FREE(&filter, sign_vlan);
+	filter_free(&filter, sign_vlan_compile);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

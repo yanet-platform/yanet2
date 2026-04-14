@@ -20,7 +20,7 @@ cp_config_try_lock(struct cp_config *cp_config) {
 		&zero,
 		pid,
 		false,
-		__ATOMIC_RELAXED,
+		__ATOMIC_ACQUIRE,
 		__ATOMIC_RELAXED
 	);
 }
@@ -34,7 +34,7 @@ cp_config_lock(struct cp_config *cp_config) {
 		&zero,
 		pid,
 		false,
-		__ATOMIC_RELAXED,
+		__ATOMIC_ACQUIRE,
 		__ATOMIC_RELAXED
 	)) {
 		zero = 0;
@@ -50,7 +50,7 @@ cp_config_unlock(struct cp_config *cp_config) {
 		&pid,
 		zero,
 		false,
-		__ATOMIC_RELAXED,
+		__ATOMIC_RELEASE,
 		__ATOMIC_RELAXED
 	);
 }

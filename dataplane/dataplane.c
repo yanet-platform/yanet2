@@ -384,11 +384,21 @@ dataplane_init(
 	int mem_fd = open(
 		config->storage, O_CREAT | O_TRUNC | O_RDWR, S_IRUSR | S_IWUSR
 	);
-	if (mem_fd < 0)
+	if (mem_fd < 0) {
+		LOG(ERROR,
+		    "failed to open storage at %s: %s",
+		    config->storage,
+		    strerror(errno));
 		return -1;
+	}
 
 	if (ftruncate(mem_fd, storage_size)) {
 		close(mem_fd);
+		LOG(ERROR,
+		    "failed to truncate storage at %s to %ld bytes: %s",
+		    config->storage,
+		    (uint64_t)storage_size,
+		    strerror(errno));
 		return -1;
 	}
 

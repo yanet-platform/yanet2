@@ -3,7 +3,7 @@
  * @brief Core types and utilities for the header-only filter (classifier) API.
  *
  * The filter is a static classification tree built over an explicit, ordered
- * set of attributes (the “signature”). It is constructed with FILTER_INIT()
+ * set of attributes (the “signature”). It is constructed with filter_init()
  * and queried with FILTER_QUERY() using helpers from compiler.h and query.h.
  *
  * Key concepts:
@@ -13,8 +13,8 @@
  * Usage overview:
  *  1) Declare attribute signature with FILTER_COMPILER_DECLARE /
  * FILTER_QUERY_DECLARE 2) Build rules (array of struct filter_rule) 3)
- * FILTER_INIT(...) to build tree into struct filter 4) FILTER_QUERY(...) to
- * classify a packet and get actions 5) FILTER_FREE(...) to release resources
+ * filter_init(...) to build tree into struct filter 4) FILTER_QUERY(...) to
+ * classify a packet and get actions 5) filter_free(...) to release resources
  *
  * Thread-safety:
  *  - Query is read-only and can be called concurrently for the same filter

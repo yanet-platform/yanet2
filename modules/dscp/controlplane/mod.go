@@ -17,18 +17,19 @@ type DscpModule struct {
 	shm         *ffi.SharedMemory
 	agent       *ffi.Agent
 	dscpService *DscpService
-	log         *zap.SugaredLogger
+	log         *zap.Logger
 }
 
-func NewDSCPModule(cfg *Config, log *zap.SugaredLogger) (*DscpModule, error) {
-	log = log.With(zap.String("module", "dscppb.DscpService"))
+func NewDSCPModule(cfg *Config, log *zap.Logger) (*DscpModule, error) {
+	log = log.With(zap.String("module", "dscp"))
 
 	shm, err := ffi.AttachSharedMemory(cfg.MemoryPath.Unwrap())
 	if err != nil {
 		return nil, err
 	}
 
-	log.Debugw("mapping shared memory",
+	log.Debug(
+		"mapping shared memory",
 		zap.Uint32("instance_id", cfg.InstanceID),
 		zap.Stringer("size", cfg.MemoryRequirements),
 	)
@@ -38,7 +39,7 @@ func NewDSCPModule(cfg *Config, log *zap.SugaredLogger) (*DscpModule, error) {
 		return nil, fmt.Errorf("failed to attach agent to shared memory: %w", err)
 	}
 
-	dscpService := NewDscpService(agent, log)
+	dscpService := NewDscpService(newBackend(agent))
 
 	return &DscpModule{
 		cfg:         cfg,
@@ -68,11 +69,11 @@ func (m *DscpModule) RegisterService(server *grpc.Server) {
 // Close closes the module.
 func (m *DscpModule) Close() error {
 	if err := m.agent.Close(); err != nil {
-		m.log.Warnw("failed to close shared memory agent", zap.Error(err))
+		m.log.Warn("failed to close shared memory agent", zap.Error(err))
 	}
 
 	if err := m.shm.Detach(); err != nil {
-		m.log.Warnw("failed to detach from shared memory mapping", zap.Error(err))
+		m.log.Warn("failed to detach from shared memory mapping", zap.Error(err))
 	}
 
 	return nil

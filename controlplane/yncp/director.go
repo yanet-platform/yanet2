@@ -84,7 +84,7 @@ func NewDirector(cfg *Config, options ...DirectorOption) (*Director, error) {
 	}
 	log.Debugw("attached to shared memory", zap.String("path", cfg.MemoryPath))
 
-	routeModule, err := route.NewRouteModule(cfg.Modules.Route, log)
+	routeModule, err := route.NewRouteModule(cfg.Modules.Route, log.Desugar())
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize route built-in module: %w", err)
 	}
@@ -99,12 +99,12 @@ func NewDirector(cfg *Config, options ...DirectorOption) (*Director, error) {
 		return nil, fmt.Errorf("failed to initialize decap built-in module: %w", err)
 	}
 
-	dscpModule, err := dscp.NewDSCPModule(cfg.Modules.DSCP, log)
+	dscpModule, err := dscp.NewDSCPModule(cfg.Modules.DSCP, log.Desugar())
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize dscp built-in module: %w", err)
 	}
 
-	forwardModule, err := forward.NewForwardModule(cfg.Modules.Forward, log)
+	forwardModule, err := forward.NewForwardModule(cfg.Modules.Forward, log.Desugar())
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize forward built-in module: %w", err)
 	}

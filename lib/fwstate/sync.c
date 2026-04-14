@@ -114,11 +114,15 @@ fwstate_fill_sync_frame(
 		);
 		// Swap src/dst ports for EGRESS to match initial 5-tuple
 		if (direction == SYNC_EGRESS) {
-			sync_frame->src_port = udp_hdr->dst_port;
-			sync_frame->dst_port = udp_hdr->src_port;
+			sync_frame->src_port =
+				rte_be_to_cpu_16(udp_hdr->dst_port);
+			sync_frame->dst_port =
+				rte_be_to_cpu_16(udp_hdr->src_port);
 		} else {
-			sync_frame->src_port = udp_hdr->src_port;
-			sync_frame->dst_port = udp_hdr->dst_port;
+			sync_frame->src_port =
+				rte_be_to_cpu_16(udp_hdr->src_port);
+			sync_frame->dst_port =
+				rte_be_to_cpu_16(udp_hdr->dst_port);
 		}
 	} break;
 		// TODO: add support for other protocols

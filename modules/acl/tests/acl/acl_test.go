@@ -8,12 +8,7 @@ import (
 	"github.com/gopacket/gopacket"
 	"github.com/gopacket/gopacket/layers"
 	"github.com/stretchr/testify/require"
-	"github.com/yanet-platform/yanet2/common/go/filter/device"
-	"github.com/yanet-platform/yanet2/common/go/filter/ipnet4"
-	"github.com/yanet-platform/yanet2/common/go/filter/ipnet6"
-	"github.com/yanet-platform/yanet2/common/go/filter/portrange"
-	"github.com/yanet-platform/yanet2/common/go/filter/protorange"
-	"github.com/yanet-platform/yanet2/common/go/filter/vlanrange"
+	"github.com/yanet-platform/yanet2/bindings/go/filter"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	mock "github.com/yanet-platform/yanet2/mock/go"
 	acl "github.com/yanet-platform/yanet2/modules/acl/controlplane"
@@ -54,47 +49,47 @@ func createBasicRules() []acl.AclRule {
 		{
 			Action:     0, // PASS
 			Counter:    "",
-			Devices:    []device.Device{{Name: defaultDeviceName}},
-			VlanRanges: []vlanrange.VlanRange{},
-			Src4s: []ipnet4.IPNet{
+			Devices:    []filter.Device{{Name: defaultDeviceName}},
+			VlanRanges: []filter.VlanRange{},
+			Src4s: []filter.IPNet{
 				{Addr: netip.MustParseAddr("192.0.2.2"), Mask: netip.MustParseAddr("255.255.255.255")},
 			},
-			Dst4s: []ipnet4.IPNet{
+			Dst4s: []filter.IPNet{
 				{Addr: netip.MustParseAddr("192.0.3.1"), Mask: netip.MustParseAddr("255.255.255.255")},
 			},
-			Src6s: []ipnet6.IPNet{},
-			Dst6s: []ipnet6.IPNet{},
-			SrcPortRanges: []portrange.PortRange{
+			Src6s: []filter.IPNet{},
+			Dst6s: []filter.IPNet{},
+			SrcPortRanges: []filter.PortRange{
 				{From: 0, To: 65535},
 			},
-			DstPortRanges: []portrange.PortRange{
+			DstPortRanges: []filter.PortRange{
 				{From: 150, To: 450},
 				{From: 600, To: 600},
 			},
-			ProtoRanges: []protorange.ProtoRange{
+			ProtoRanges: []filter.ProtoRange{
 				{From: 4352, To: 4607}, // UDP
 			},
 		},
 		{
 			Action:     1, // DENY
 			Counter:    "",
-			Devices:    []device.Device{{Name: defaultDeviceName}},
-			VlanRanges: []vlanrange.VlanRange{},
-			Src4s: []ipnet4.IPNet{
+			Devices:    []filter.Device{{Name: defaultDeviceName}},
+			VlanRanges: []filter.VlanRange{},
+			Src4s: []filter.IPNet{
 				{Addr: netip.MustParseAddr("192.0.2.99"), Mask: netip.MustParseAddr("255.255.255.255")},
 			},
-			Dst4s: []ipnet4.IPNet{
+			Dst4s: []filter.IPNet{
 				{Addr: netip.MustParseAddr("192.0.3.1"), Mask: netip.MustParseAddr("255.255.255.255")},
 			},
-			Src6s: []ipnet6.IPNet{},
-			Dst6s: []ipnet6.IPNet{},
-			SrcPortRanges: []portrange.PortRange{
+			Src6s: []filter.IPNet{},
+			Dst6s: []filter.IPNet{},
+			SrcPortRanges: []filter.PortRange{
 				{From: 0, To: 65535},
 			},
-			DstPortRanges: []portrange.PortRange{
+			DstPortRanges: []filter.PortRange{
 				{From: 700, To: 700},
 			},
-			ProtoRanges: []protorange.ProtoRange{
+			ProtoRanges: []filter.ProtoRange{
 				{From: 4352, To: 4607}, // UDP
 			},
 		},
@@ -135,22 +130,22 @@ func createProtocolRules() []acl.AclRule {
 	return []acl.AclRule{
 		{
 			Action:  0, // PASS
-			Devices: []device.Device{{Name: defaultDeviceName}},
-			Src4s: []ipnet4.IPNet{
+			Devices: []filter.Device{{Name: defaultDeviceName}},
+			Src4s: []filter.IPNet{
 				{Addr: netip.MustParseAddr("192.0.2.2"), Mask: netip.MustParseAddr("255.255.255.255")},
 			},
-			Dst4s: []ipnet4.IPNet{
+			Dst4s: []filter.IPNet{
 				{Addr: netip.MustParseAddr("192.0.3.1"), Mask: netip.MustParseAddr("255.255.255.255")},
 			},
-			Src6s: []ipnet6.IPNet{},
-			Dst6s: []ipnet6.IPNet{},
-			SrcPortRanges: []portrange.PortRange{
+			Src6s: []filter.IPNet{},
+			Dst6s: []filter.IPNet{},
+			SrcPortRanges: []filter.PortRange{
 				{From: 0, To: 65535},
 			},
-			DstPortRanges: []portrange.PortRange{
+			DstPortRanges: []filter.PortRange{
 				{From: 600, To: 600},
 			},
-			ProtoRanges: []protorange.ProtoRange{
+			ProtoRanges: []filter.ProtoRange{
 				{From: 1538, To: 1539}, {From: 1542, To: 1543}, // TCP with SYN flag
 				{From: 1546, To: 1547}, {From: 1550, To: 1551},
 				{From: 1554, To: 1555}, {From: 1558, To: 1559},
@@ -187,22 +182,22 @@ func createProtocolRules() []acl.AclRule {
 		},
 		{
 			Action:  1, // DENY
-			Devices: []device.Device{{Name: defaultDeviceName}},
-			Src4s: []ipnet4.IPNet{
+			Devices: []filter.Device{{Name: defaultDeviceName}},
+			Src4s: []filter.IPNet{
 				{Addr: netip.MustParseAddr("0.0.0.0"), Mask: netip.MustParseAddr("0.0.0.0")},
 			},
-			Dst4s: []ipnet4.IPNet{
+			Dst4s: []filter.IPNet{
 				{Addr: netip.MustParseAddr("0.0.0.0"), Mask: netip.MustParseAddr("0.0.0.0")},
 			},
-			Src6s: []ipnet6.IPNet{},
-			Dst6s: []ipnet6.IPNet{},
-			SrcPortRanges: []portrange.PortRange{
+			Src6s: []filter.IPNet{},
+			Dst6s: []filter.IPNet{},
+			SrcPortRanges: []filter.PortRange{
 				{From: 0, To: 65535},
 			},
-			DstPortRanges: []portrange.PortRange{
+			DstPortRanges: []filter.PortRange{
 				{From: 0, To: 65535},
 			},
-			ProtoRanges: []protorange.ProtoRange{
+			ProtoRanges: []filter.ProtoRange{
 				{From: 1540, To: 1543}, {From: 1548, To: 1551},
 				{From: 1556, To: 1559}, {From: 1564, To: 1567},
 				{From: 1572, To: 1575}, {From: 1580, To: 1583},
@@ -223,22 +218,22 @@ func createProtocolRules() []acl.AclRule {
 		},
 		{
 			Action:  0, // PASS
-			Devices: []device.Device{{Name: defaultDeviceName}},
-			Src4s: []ipnet4.IPNet{
+			Devices: []filter.Device{{Name: defaultDeviceName}},
+			Src4s: []filter.IPNet{
 				{Addr: netip.MustParseAddr("192.0.2.2"), Mask: netip.MustParseAddr("255.255.255.255")},
 			},
-			Dst4s: []ipnet4.IPNet{
+			Dst4s: []filter.IPNet{
 				{Addr: netip.MustParseAddr("192.0.3.1"), Mask: netip.MustParseAddr("255.255.255.255")},
 			},
-			Src6s: []ipnet6.IPNet{},
-			Dst6s: []ipnet6.IPNet{},
-			SrcPortRanges: []portrange.PortRange{
+			Src6s: []filter.IPNet{},
+			Dst6s: []filter.IPNet{},
+			SrcPortRanges: []filter.PortRange{
 				{From: 0, To: 65535},
 			},
-			DstPortRanges: []portrange.PortRange{
+			DstPortRanges: []filter.PortRange{
 				{From: 0, To: 65535},
 			},
-			ProtoRanges: []protorange.ProtoRange{
+			ProtoRanges: []filter.ProtoRange{
 				{From: 264, To: 264}, // ICMP Echo
 			},
 		},
@@ -274,22 +269,22 @@ func createPortRangeRules() []acl.AclRule {
 	return []acl.AclRule{
 		{
 			Action:  0, // PASS
-			Devices: []device.Device{{Name: defaultDeviceName}},
-			Src4s: []ipnet4.IPNet{
+			Devices: []filter.Device{{Name: defaultDeviceName}},
+			Src4s: []filter.IPNet{
 				{Addr: netip.MustParseAddr("192.0.2.2"), Mask: netip.MustParseAddr("255.255.255.255")},
 			},
-			Dst4s: []ipnet4.IPNet{
+			Dst4s: []filter.IPNet{
 				{Addr: netip.MustParseAddr("192.0.3.1"), Mask: netip.MustParseAddr("255.255.255.255")},
 			},
-			Src6s: []ipnet6.IPNet{},
-			Dst6s: []ipnet6.IPNet{},
-			SrcPortRanges: []portrange.PortRange{
+			Src6s: []filter.IPNet{},
+			Dst6s: []filter.IPNet{},
+			SrcPortRanges: []filter.PortRange{
 				{From: 0, To: 65535},
 			},
-			DstPortRanges: []portrange.PortRange{
+			DstPortRanges: []filter.PortRange{
 				{From: 150, To: 450},
 			},
-			ProtoRanges: []protorange.ProtoRange{
+			ProtoRanges: []filter.ProtoRange{
 				{From: 4352, To: 4607}, // UDP
 			},
 		},
@@ -315,44 +310,44 @@ func createSubnetRules() []acl.AclRule {
 	return []acl.AclRule{
 		{
 			Action:  0, // PASS
-			Devices: []device.Device{{Name: defaultDeviceName}},
-			Src4s: []ipnet4.IPNet{
+			Devices: []filter.Device{{Name: defaultDeviceName}},
+			Src4s: []filter.IPNet{
 				{Addr: netip.MustParseAddr("192.0.2.0"), Mask: netip.MustParseAddr("255.255.255.0")},
 			},
-			Dst4s: []ipnet4.IPNet{
+			Dst4s: []filter.IPNet{
 				{Addr: netip.MustParseAddr("192.0.3.1"), Mask: netip.MustParseAddr("255.255.255.255")},
 			},
-			Src6s: []ipnet6.IPNet{},
-			Dst6s: []ipnet6.IPNet{},
-			SrcPortRanges: []portrange.PortRange{
+			Src6s: []filter.IPNet{},
+			Dst6s: []filter.IPNet{},
+			SrcPortRanges: []filter.PortRange{
 				{From: 0, To: 65535},
 			},
-			DstPortRanges: []portrange.PortRange{
+			DstPortRanges: []filter.PortRange{
 				{From: 600, To: 600},
 			},
-			ProtoRanges: []protorange.ProtoRange{
+			ProtoRanges: []filter.ProtoRange{
 				{From: 4352, To: 4607}, // UDP
 			},
 		},
 		{
 			Action:  1, // DENY
-			Devices: []device.Device{{Name: defaultDeviceName}},
-			Src4s: []ipnet4.IPNet{
+			Devices: []filter.Device{{Name: defaultDeviceName}},
+			Src4s: []filter.IPNet{
 				{Addr: netip.MustParseAddr("192.0.99.0"), Mask: netip.MustParseAddr("255.255.255.0")},
 				{Addr: netip.MustParseAddr("0.0.0.0"), Mask: netip.MustParseAddr("0.0.0.0")},
 			},
-			Dst4s: []ipnet4.IPNet{
+			Dst4s: []filter.IPNet{
 				{Addr: netip.MustParseAddr("0.0.0.0"), Mask: netip.MustParseAddr("0.0.0.0")},
 			},
-			Src6s: []ipnet6.IPNet{},
-			Dst6s: []ipnet6.IPNet{},
-			SrcPortRanges: []portrange.PortRange{
+			Src6s: []filter.IPNet{},
+			Dst6s: []filter.IPNet{},
+			SrcPortRanges: []filter.PortRange{
 				{From: 0, To: 65535},
 			},
-			DstPortRanges: []portrange.PortRange{
+			DstPortRanges: []filter.PortRange{
 				{From: 0, To: 65535},
 			},
-			ProtoRanges: []protorange.ProtoRange{
+			ProtoRanges: []filter.ProtoRange{
 				{From: 4352, To: 4607}, // UDP
 			},
 		},
@@ -379,64 +374,64 @@ func createIPv6Rules() []acl.AclRule {
 	return []acl.AclRule{
 		{
 			Action:  0, // PASS
-			Devices: []device.Device{{Name: defaultDeviceName}},
-			Src4s:   []ipnet4.IPNet{},
-			Dst4s:   []ipnet4.IPNet{},
-			Src6s: []ipnet6.IPNet{
+			Devices: []filter.Device{{Name: defaultDeviceName}},
+			Src4s:   []filter.IPNet{},
+			Dst4s:   []filter.IPNet{},
+			Src6s: []filter.IPNet{
 				{Addr: netip.MustParseAddr("2001:db8::1"), Mask: netip.MustParseAddr("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff")},
 			},
-			Dst6s: []ipnet6.IPNet{
+			Dst6s: []filter.IPNet{
 				{Addr: netip.MustParseAddr("2001:db8::2"), Mask: netip.MustParseAddr("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff")},
 			},
-			SrcPortRanges: []portrange.PortRange{
+			SrcPortRanges: []filter.PortRange{
 				{From: 0, To: 65535},
 			},
-			DstPortRanges: []portrange.PortRange{
+			DstPortRanges: []filter.PortRange{
 				{From: 600, To: 600},
 			},
-			ProtoRanges: []protorange.ProtoRange{
+			ProtoRanges: []filter.ProtoRange{
 				{From: 1536, To: 1791}, // TCP
 			},
 		},
 		{
 			Action:  0, // PASS
-			Devices: []device.Device{{Name: defaultDeviceName}},
-			Src4s:   []ipnet4.IPNet{},
-			Dst4s:   []ipnet4.IPNet{},
-			Src6s: []ipnet6.IPNet{
+			Devices: []filter.Device{{Name: defaultDeviceName}},
+			Src4s:   []filter.IPNet{},
+			Dst4s:   []filter.IPNet{},
+			Src6s: []filter.IPNet{
 				{Addr: netip.MustParseAddr("2001:db8::1"), Mask: netip.MustParseAddr("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff")},
 			},
-			Dst6s: []ipnet6.IPNet{
+			Dst6s: []filter.IPNet{
 				{Addr: netip.MustParseAddr("2001:db8::2"), Mask: netip.MustParseAddr("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff")},
 			},
-			SrcPortRanges: []portrange.PortRange{
+			SrcPortRanges: []filter.PortRange{
 				{From: 0, To: 65535},
 			},
-			DstPortRanges: []portrange.PortRange{
+			DstPortRanges: []filter.PortRange{
 				{From: 0, To: 65535},
 			},
-			ProtoRanges: []protorange.ProtoRange{
+			ProtoRanges: []filter.ProtoRange{
 				{From: 14976, To: 14976}, // ICMPv6 Echo
 			},
 		},
 		{
 			Action:  1, // DENY
-			Devices: []device.Device{{Name: defaultDeviceName}},
-			Src4s:   []ipnet4.IPNet{},
-			Dst4s:   []ipnet4.IPNet{},
-			Src6s: []ipnet6.IPNet{
+			Devices: []filter.Device{{Name: defaultDeviceName}},
+			Src4s:   []filter.IPNet{},
+			Dst4s:   []filter.IPNet{},
+			Src6s: []filter.IPNet{
 				{Addr: netip.MustParseAddr("2001:db8::99"), Mask: netip.MustParseAddr("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff")},
 			},
-			Dst6s: []ipnet6.IPNet{
+			Dst6s: []filter.IPNet{
 				{Addr: netip.MustParseAddr("2001:db8::2"), Mask: netip.MustParseAddr("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff")},
 			},
-			SrcPortRanges: []portrange.PortRange{
+			SrcPortRanges: []filter.PortRange{
 				{From: 0, To: 65535},
 			},
-			DstPortRanges: []portrange.PortRange{
+			DstPortRanges: []filter.PortRange{
 				{From: 600, To: 600},
 			},
-			ProtoRanges: []protorange.ProtoRange{
+			ProtoRanges: []filter.ProtoRange{
 				{From: 4352, To: 4607}, // UDP
 			},
 		},
@@ -486,85 +481,85 @@ func createOverlappingRules() []acl.AclRule {
 	return []acl.AclRule{
 		{
 			Action:  0, // PASS
-			Devices: []device.Device{{Name: defaultDeviceName}},
-			Src4s: []ipnet4.IPNet{
+			Devices: []filter.Device{{Name: defaultDeviceName}},
+			Src4s: []filter.IPNet{
 				{Addr: netip.MustParseAddr("192.0.2.0"), Mask: netip.MustParseAddr("255.255.255.254")},
 			},
-			Dst4s: []ipnet4.IPNet{
+			Dst4s: []filter.IPNet{
 				{Addr: netip.MustParseAddr("0.0.0.0"), Mask: netip.MustParseAddr("0.0.0.0")},
 			},
-			Src6s: []ipnet6.IPNet{},
-			Dst6s: []ipnet6.IPNet{},
-			SrcPortRanges: []portrange.PortRange{
+			Src6s: []filter.IPNet{},
+			Dst6s: []filter.IPNet{},
+			SrcPortRanges: []filter.PortRange{
 				{From: 0, To: 65535},
 			},
-			DstPortRanges: []portrange.PortRange{
+			DstPortRanges: []filter.PortRange{
 				{From: 0, To: 65535},
 			},
-			ProtoRanges: []protorange.ProtoRange{
+			ProtoRanges: []filter.ProtoRange{
 				{From: 4352, To: 4607}, // UDP
 			},
 		},
 		{
 			Action:  1, // DENY
-			Devices: []device.Device{{Name: defaultDeviceName}},
-			Src4s: []ipnet4.IPNet{
+			Devices: []filter.Device{{Name: defaultDeviceName}},
+			Src4s: []filter.IPNet{
 				{Addr: netip.MustParseAddr("192.0.2.0"), Mask: netip.MustParseAddr("255.255.255.240")},
 			},
-			Dst4s: []ipnet4.IPNet{
+			Dst4s: []filter.IPNet{
 				{Addr: netip.MustParseAddr("0.0.0.0"), Mask: netip.MustParseAddr("0.0.0.0")},
 			},
-			Src6s: []ipnet6.IPNet{},
-			Dst6s: []ipnet6.IPNet{},
-			SrcPortRanges: []portrange.PortRange{
+			Src6s: []filter.IPNet{},
+			Dst6s: []filter.IPNet{},
+			SrcPortRanges: []filter.PortRange{
 				{From: 0, To: 65535},
 			},
-			DstPortRanges: []portrange.PortRange{
+			DstPortRanges: []filter.PortRange{
 				{From: 0, To: 65535},
 			},
-			ProtoRanges: []protorange.ProtoRange{
+			ProtoRanges: []filter.ProtoRange{
 				{From: 4352, To: 4607}, // UDP
 			},
 		},
 		{
 			Action:  0, // PASS
-			Devices: []device.Device{{Name: defaultDeviceName}},
-			Src4s: []ipnet4.IPNet{
+			Devices: []filter.Device{{Name: defaultDeviceName}},
+			Src4s: []filter.IPNet{
 				{Addr: netip.MustParseAddr("192.0.2.0"), Mask: netip.MustParseAddr("255.255.255.0")},
 			},
-			Dst4s: []ipnet4.IPNet{
+			Dst4s: []filter.IPNet{
 				{Addr: netip.MustParseAddr("0.0.0.0"), Mask: netip.MustParseAddr("0.0.0.0")},
 			},
-			Src6s: []ipnet6.IPNet{},
-			Dst6s: []ipnet6.IPNet{},
-			SrcPortRanges: []portrange.PortRange{
+			Src6s: []filter.IPNet{},
+			Dst6s: []filter.IPNet{},
+			SrcPortRanges: []filter.PortRange{
 				{From: 0, To: 65535},
 			},
-			DstPortRanges: []portrange.PortRange{
+			DstPortRanges: []filter.PortRange{
 				{From: 0, To: 65535},
 			},
-			ProtoRanges: []protorange.ProtoRange{
+			ProtoRanges: []filter.ProtoRange{
 				{From: 4352, To: 4607}, // UDP
 			},
 		},
 		{
 			Action:  1, // DENY
-			Devices: []device.Device{{Name: defaultDeviceName}},
-			Src4s: []ipnet4.IPNet{
+			Devices: []filter.Device{{Name: defaultDeviceName}},
+			Src4s: []filter.IPNet{
 				{Addr: netip.MustParseAddr("192.0.0.0"), Mask: netip.MustParseAddr("255.255.0.0")},
 			},
-			Dst4s: []ipnet4.IPNet{
+			Dst4s: []filter.IPNet{
 				{Addr: netip.MustParseAddr("0.0.0.0"), Mask: netip.MustParseAddr("0.0.0.0")},
 			},
-			Src6s: []ipnet6.IPNet{},
-			Dst6s: []ipnet6.IPNet{},
-			SrcPortRanges: []portrange.PortRange{
+			Src6s: []filter.IPNet{},
+			Dst6s: []filter.IPNet{},
+			SrcPortRanges: []filter.PortRange{
 				{From: 0, To: 65535},
 			},
-			DstPortRanges: []portrange.PortRange{
+			DstPortRanges: []filter.PortRange{
 				{From: 0, To: 65535},
 			},
-			ProtoRanges: []protorange.ProtoRange{
+			ProtoRanges: []filter.ProtoRange{
 				{From: 4352, To: 4607}, // UDP
 			},
 		},

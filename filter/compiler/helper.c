@@ -41,8 +41,7 @@ action_list_is_term(struct value_registry *registry, uint32_t range_idx) {
 	if (range->count == 0)
 		return 0;
 
-	uint32_t action = ADDR_OF(&range->values)[range->count - 1];
-	return FILTER_ACTION_TERMINATE(action);
+	return 1;
 }
 
 static int

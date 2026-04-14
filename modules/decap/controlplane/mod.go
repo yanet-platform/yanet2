@@ -38,7 +38,7 @@ func NewDecapModule(cfg *Config, log *zap.SugaredLogger) (*DecapModule, error) {
 		return nil, fmt.Errorf("failed to attach agent to shared memory: %w", err)
 	}
 
-	decapService := NewDecapService(agent, log)
+	decapService := NewDecapService(NewBackend(agent), log)
 
 	return &DecapModule{
 		cfg:          cfg,

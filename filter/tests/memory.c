@@ -11,10 +11,10 @@
 #include <stdio.h>
 #include <string.h>
 
-FILTER_COMPILER_DECLARE(sign_ports, port_src, port_dst);
+FILTER_COMPILER_DECLARE(sign_ports_compile, port_src, port_dst);
 FILTER_QUERY_DECLARE(sign_ports, port_src, port_dst);
 
-FILTER_COMPILER_DECLARE(sign_port_src, port_src);
+FILTER_COMPILER_DECLARE(sign_port_src_compile, port_src);
 FILTER_QUERY_DECLARE(sign_port_src, port_src);
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -39,9 +39,9 @@ query_and_expect_action(
 	struct value_range *actions;
 
 	if (strcmp(sign, "ports") == 0) {
-		FILTER_QUERY(filter, sign_ports, &packet_ptr, &actions, 1);
+		filter_query(filter, sign_ports, &packet_ptr, &actions, 1);
 	} else if (strcmp(sign, "port_src") == 0) {
-		FILTER_QUERY(filter, sign_port_src, &packet_ptr, &actions, 1);
+		filter_query(filter, sign_port_src, &packet_ptr, &actions, 1);
 	} else {
 		assert(0 && "Invalid sign");
 	}
@@ -70,9 +70,9 @@ query_and_expect_no_action(
 	struct value_range *actions;
 
 	if (strcmp(sign, "ports") == 0) {
-		FILTER_QUERY(filter, sign_ports, &packet_ptr, &actions, 1);
+		filter_query(filter, sign_ports, &packet_ptr, &actions, 1);
 	} else if (strcmp(sign, "port_src") == 0) {
-		FILTER_QUERY(filter, sign_port_src, &packet_ptr, &actions, 1);
+		filter_query(filter, sign_port_src, &packet_ptr, &actions, 1);
 	} else {
 		assert(0 && "Invalid sign");
 	}
@@ -100,7 +100,7 @@ test_src_dst_ports(void *memory) {
 	builder_init(&builder1);
 	builder_add_port_src_range(&builder1, 5, 7);
 	builder_add_port_dst_range(&builder1, 1, 5);
-	struct filter_rule action1 = build_rule(&builder1, 1);
+	struct filter_rule action1 = build_rule(&builder1, 0);
 
 	// action 2:
 	//	src_port: [6..8]
@@ -109,19 +109,21 @@ test_src_dst_ports(void *memory) {
 	builder_init(&builder2);
 	builder_add_port_src_range(&builder2, 6, 8);
 	builder_add_port_dst_range(&builder2, 3, 4);
-	struct filter_rule action2 = build_rule(&builder2, 2);
+	struct filter_rule action2 = build_rule(&builder2, 1);
 
 	struct filter_rule actions[2] = {action1, action2};
 
 	// init filter
 	struct filter filter;
-	res = FILTER_INIT(&filter, sign_ports, actions, 2, &memory_context);
+	res = filter_init(
+		&filter, sign_ports_compile, actions, 2, &memory_context
+	);
 	assert(res == 0);
 
-	query_and_expect_action(&filter, 6, 3, 1, "ports");
-	query_and_expect_action(&filter, 8, 3, 2, "ports");
+	query_and_expect_action(&filter, 6, 3, 0, "ports");
+	query_and_expect_action(&filter, 8, 3, 1, "ports");
 
-	FILTER_FREE(&filter, sign_ports);
+	filter_free(&filter, sign_ports_compile);
 
 	memory_bfree(&memory_context, memory, 1 << 24);
 	void *mem = memory_balloc(&memory_context, 1 << 24);
@@ -143,32 +145,34 @@ test_src_port_only(void *memory) {
 	struct filter_rule_builder builder1;
 	builder_init(&builder1);
 	builder_add_port_src_range(&builder1, 500, 700);
-	struct filter_rule action1 = build_rule(&builder1, 1);
+	struct filter_rule action1 = build_rule(&builder1, 0);
 
 	// action 2:
 	//	src_port: [600..800]
 	struct filter_rule_builder builder2;
 	builder_init(&builder2);
 	builder_add_port_src_range(&builder2, 600, 800);
-	struct filter_rule action2 = build_rule(&builder2, 2);
+	struct filter_rule action2 = build_rule(&builder2, 1);
 
 	struct filter_rule actions[2] = {action1, action2};
 
 	// init filter
 	struct filter filter;
-	res = FILTER_INIT(&filter, sign_port_src, actions, 2, &memory_context);
+	res = filter_init(
+		&filter, sign_port_src_compile, actions, 2, &memory_context
+	);
 	assert(res == 0);
 
-	query_and_expect_action(&filter, 500, 0, 1, "port_src");
-	query_and_expect_action(&filter, 600, 0, 1, "port_src");
-	query_and_expect_action(&filter, 700, 0, 1, "port_src");
-	query_and_expect_action(&filter, 701, 0, 2, "port_src");
-	query_and_expect_action(&filter, 800, 0, 2, "port_src");
+	query_and_expect_action(&filter, 500, 0, 0, "port_src");
+	query_and_expect_action(&filter, 600, 0, 0, "port_src");
+	query_and_expect_action(&filter, 700, 0, 0, "port_src");
+	query_and_expect_action(&filter, 701, 0, 1, "port_src");
+	query_and_expect_action(&filter, 800, 0, 1, "port_src");
 
 	query_and_expect_no_action(&filter, 499, 0, "port_src");
 	query_and_expect_no_action(&filter, 801, 0, "port_src");
 
-	FILTER_FREE(&filter, sign_port_src);
+	filter_free(&filter, sign_port_src_compile);
 
 	memory_bfree(&memory_context, memory, 1 << 24);
 	void *mem = memory_balloc(&memory_context, 1 << 24);

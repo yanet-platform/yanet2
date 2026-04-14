@@ -10,7 +10,7 @@
  *    high 16 bits form category mask (0 = applies to all categories).
  *
  * See also:
- *  - filter/compiler.h (FILTER_INIT/FILTER_FREE)
+ *  - filter/compiler.h (filter_init/filter_free)
  *  - filter/query.h (FILTER_QUERY and post-processing helpers)
  */
 #pragma once
@@ -21,12 +21,6 @@
 #include "common/network.h"
 
 ////////////////////////////////////////////////////////////////////////////////
-
-#define ACTION_MASK ((uint32_t)0xFFFF)
-#define ACTION_NON_TERMINATE ((uint32_t)0x8000)
-#define CATEGORY_SHIFT ((uint32_t)16)
-#define MAKE_ACTION_CATEGORY_MASK(category_mask)                               \
-	((uint32_t)(category_mask) << CATEGORY_SHIFT)
 
 #define ACL_DEVICE_NAME_LEN 80
 
@@ -152,26 +146,3 @@ struct filter_rule {
 	// which is 0 if rule is for all categories.
 	uint32_t action;
 };
-
-////////////////////////////////////////////////////////////////////////////////
-
-#define FILTER_ACTION_CATEGORY_MASK(action)                                    \
-	((uint16_t)((action) >> CATEGORY_SHIFT))
-#define FILTER_ACTION_TERMINATE(action) (((action) >> (15)) == 0)
-
-////////////////////////////////////////////////////////////////////////////////
-
-/**
- * @brief Compose 32-bit action value from parts.
- * @param category_mask High 16 bits (0 => applies to all categories).
- * @param non_terminate_flag Set true to allow following rules to also apply.
- * @param user_action Lower 15-bit user-defined action value.
- * @return Encoded 32-bit action.
- */
-static inline uint32_t
-filter_action_create(
-	uint16_t category_mask, bool non_terminate_flag, uint16_t user_action
-) {
-	return ((uint32_t)category_mask) << CATEGORY_SHIFT |
-	       ((uint32_t)non_terminate_flag) << 15 | user_action;
-}

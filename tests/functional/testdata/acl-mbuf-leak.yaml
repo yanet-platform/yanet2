@@ -1,0 +1,54 @@
+rules:
+  - action: Count
+    counter: "count_udp"
+    devices: []
+    dst_ports:
+      - from: 0
+        to: 65535
+    dsts:
+      - 0.0.0.0/0.0.0.0
+    proto_ranges:
+      - from: 4352
+        to: 4607
+    src_ports:
+      - from: 0
+        to: 65535
+    srcs:
+      - 192.0.2.30/255.255.255.255
+    vlan_ranges: []
+
+  - action: CreateState
+    counter: "create_state_tcp"
+    devices: []
+    dst_ports:
+      - from: 80
+        to: 80
+    dsts:
+      - 192.0.3.1/255.255.255.255
+    proto_ranges:
+      - from: 1536
+        to: 1791
+    src_ports:
+      - from: 0
+        to: 65535
+    srcs:
+      - 192.0.2.40/255.255.255.255
+    vlan_ranges: []
+
+  - action: Allow
+    counter: "allow"
+    devices: []
+    dst_ports:
+      - from: 0
+        to: 65535
+    dsts:
+      - 0.0.0.0/0.0.0.0
+    proto_ranges:
+      - from: 4352
+        to: 4607
+    src_ports:
+      - from: 0
+        to: 65535
+    srcs:
+      - 192.0.2.50/255.255.255.255
+    vlan_ranges: []

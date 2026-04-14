@@ -23,7 +23,9 @@
 
 ////////////////////////////////////////////////////////////////////////////////
 
-FILTER_COMPILER_DECLARE(combo_net6_port_src, net6_fast_src, port_fast_src);
+FILTER_COMPILER_DECLARE(
+	combo_net6_port_src_compile, net6_fast_src, port_fast_src
+);
 FILTER_QUERY_DECLARE(combo_net6_port_src, net6_fast_src, port_fast_src);
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -38,7 +40,7 @@ query_and_expect_actions(
 	struct value_range **ranges =
 		malloc(sizeof(struct value_range *) * packets_count);
 
-	FILTER_QUERY(
+	filter_query(
 		filter, combo_net6_port_src, packets, ranges, packets_count
 	);
 
@@ -85,8 +87,7 @@ test_no_match_port_only(void *arena) {
 	memcpy(net.mask, mask, NET6_LEN);
 	builder_add_net6_src(&builder, net);
 	builder_add_port_src_range(&builder, 80, 90);
-	struct filter_rule rule =
-		build_rule(&builder, 1 | ACTION_NON_TERMINATE);
+	struct filter_rule rule = build_rule(&builder, 0);
 
 	// Test packets: IP matches but port doesn't
 	const struct {
@@ -142,7 +143,9 @@ test_no_match_port_only(void *arena) {
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize memory context");
 
 	struct filter filter;
-	res = FILTER_INIT(&filter, combo_net6_port_src, &rule, 1, &mctx);
+	res = filter_init(
+		&filter, combo_net6_port_src_compile, &rule, 1, &mctx
+	);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
 
 	res = query_and_expect_actions(
@@ -178,8 +181,7 @@ test_no_match_ip_only(void *arena) {
 	memcpy(net.mask, mask, NET6_LEN);
 	builder_add_net6_src(&builder, net);
 	builder_add_port_src_range(&builder, 80, 90);
-	struct filter_rule rule =
-		build_rule(&builder, 1 | ACTION_NON_TERMINATE);
+	struct filter_rule rule = build_rule(&builder, 0);
 
 	// Test packets: Port matches but IP doesn't
 	const struct {
@@ -250,7 +252,9 @@ test_no_match_ip_only(void *arena) {
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize memory context");
 
 	struct filter filter;
-	res = FILTER_INIT(&filter, combo_net6_port_src, &rule, 1, &mctx);
+	res = filter_init(
+		&filter, combo_net6_port_src_compile, &rule, 1, &mctx
+	);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
 
 	res = query_and_expect_actions(
@@ -286,8 +290,7 @@ test_both_match(void *arena) {
 	memcpy(net.mask, mask, NET6_LEN);
 	builder_add_net6_src(&builder, net);
 	builder_add_port_src_range(&builder, 80, 90);
-	struct filter_rule rule =
-		build_rule(&builder, 1 | ACTION_NON_TERMINATE);
+	struct filter_rule rule = build_rule(&builder, 0);
 
 	// Test packets: Both IP and port match
 	const struct {
@@ -347,7 +350,7 @@ test_both_match(void *arena) {
 		expected_ranges[i] = malloc(sizeof(struct value_range));
 		expected_ranges[i]->count = 1;
 		expected_ranges[i]->values = malloc(sizeof(uint32_t) * 2);
-		expected_ranges[i]->values[0] = 1 | ACTION_NON_TERMINATE;
+		expected_ranges[i]->values[0] = 0;
 	}
 
 	struct block_allocator alloc;
@@ -360,7 +363,9 @@ test_both_match(void *arena) {
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize memory context");
 
 	struct filter filter;
-	res = FILTER_INIT(&filter, combo_net6_port_src, &rule, 1, &mctx);
+	res = filter_init(
+		&filter, combo_net6_port_src_compile, &rule, 1, &mctx
+	);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
 
 	res = query_and_expect_actions(

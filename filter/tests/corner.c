@@ -10,7 +10,7 @@
 #include <netinet/in.h>
 #include <stdio.h>
 
-FILTER_COMPILER_DECLARE(sign_port_src, port_src);
+FILTER_COMPILER_DECLARE(sign_port_src_compile, port_src);
 FILTER_QUERY_DECLARE(sign_port_src, port_src);
 
 static void
@@ -26,7 +26,7 @@ query_and_expect_action(
 	assert(res == 0);
 	struct packet *packet_ptr = &packet;
 	struct value_range *actions;
-	FILTER_QUERY(filter, sign_port_src, &packet_ptr, &actions, 1);
+	filter_query(filter, sign_port_src, &packet_ptr, &actions, 1);
 	assert(actions->count >= 1);
 	assert(ADDR_OF(&actions->values)[0] == expected);
 	free_packet(&packet);
@@ -43,7 +43,7 @@ query_and_expect_no_action(struct filter *filter, uint16_t src_port) {
 	assert(res == 0);
 	struct packet *packet_ptr = &packet;
 	struct value_range *actions;
-	FILTER_QUERY(filter, sign_port_src, &packet_ptr, &actions, 1);
+	filter_query(filter, sign_port_src, &packet_ptr, &actions, 1);
 	assert(actions->count == 0);
 	free_packet(&packet);
 }
@@ -67,29 +67,30 @@ check_single_attribute(void *memory) {
 	builder_add_port_src_range(&builder1, 5, 7);
 	builder_add_port_src_range(&builder1, 6, 10);
 	builder_add_port_src_range(&builder1, 15, 20);
-	struct filter_rule rule1 = build_rule(&builder1, 1);
+	struct filter_rule rule1 = build_rule(&builder1, 0);
 
 	// second action
 	// src port: [11-21]
 	struct filter_rule_builder builder2;
 	builder_init(&builder2);
 	builder_add_port_src_range(&builder2, 11, 21);
-	struct filter_rule rule2 = build_rule(&builder2, 2);
+	struct filter_rule rule2 = build_rule(&builder2, 1);
 
 	// third action
 	// src port: [30-40]
 	struct filter_rule_builder builder3;
 	builder_init(&builder3);
 	builder_add_port_src_range(&builder3, 30, 40);
-	struct filter_rule rule3 = build_rule(&builder3, 3);
+	struct filter_rule rule3 = build_rule(&builder3, 2);
 
 	// setup rules
 	struct filter_rule rules[3] = {rule1, rule2, rule3};
 
 	// setup filter
 	struct filter filter;
-	int init_result =
-		FILTER_INIT(&filter, sign_port_src, rules, 3, &memory_context);
+	int init_result = filter_init(
+		&filter, sign_port_src_compile, rules, 3, &memory_context
+	);
 	assert(init_result == 0);
 
 	// make few queries and expect hit
@@ -118,7 +119,7 @@ check_single_attribute(void *memory) {
 		};
 
 		uint32_t expected_actions[queries] = {
-			1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 1, 1, 1, 2, 3, 3, 3, 3
+			0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 1, 2, 2, 2, 2
 		};
 
 		for (size_t i = 0; i < queries; ++i) {
@@ -142,7 +143,7 @@ check_single_attribute(void *memory) {
 #undef queries
 	}
 
-	FILTER_FREE(&filter, sign_port_src);
+	filter_free(&filter, sign_port_src_compile);
 }
 
 int

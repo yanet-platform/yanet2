@@ -7,7 +7,7 @@ import (
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	mock "github.com/yanet-platform/yanet2/mock/go"
-	forwardffi "github.com/yanet-platform/yanet2/modules/forward/internal/ffi"
+	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
 )
 
 var defaultDeviceName string = "01:00.0"
@@ -18,13 +18,13 @@ var defaultConfigName string = "forward0"
 
 type TestConfig struct {
 	mock  *mock.YanetMockConfig
-	rules []forwardffi.ForwardRule
+	rules []cforward.ForwardRule
 }
 
 type TestSetup struct {
 	mock   *mock.YanetMock
 	agent  *ffi.Agent
-	module *forwardffi.ModuleConfig
+	module *cforward.ModuleConfig
 }
 
 func SetupTest(config *TestConfig) (*TestSetup, error) {
@@ -51,7 +51,7 @@ func SetupTest(config *TestConfig) (*TestSetup, error) {
 		return nil, fmt.Errorf("failed to attach agent: %w", err)
 	}
 
-	module, err := forwardffi.NewModuleConfig(agent, defaultConfigName)
+	module, err := cforward.NewModuleConfig(agent, defaultConfigName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create new forward module: %w", err)
 	}

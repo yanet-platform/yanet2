@@ -372,6 +372,70 @@ func (sc *SocketClient) ReceivePacket(timeout time.Duration, dumpPath string) ([
 	}
 }
 
+// ReceiveAllPackets receives all packets available on the socket within the timeout.
+func (sc *SocketClient) ReceiveAllPackets(timeout time.Duration, dumpPath string) ([][]byte, error) {
+	if sc.inner.conn == nil {
+		return nil, fmt.Errorf("not connected to socket")
+	}
+
+	parser := NewPacketParser()
+	ourMAC := MustParseMAC(SrcMAC)
+	var packets [][]byte
+
+	for {
+		err := sc.inner.conn.SetReadDeadline(time.Now().Add(timeout))
+		if err != nil {
+			return packets, fmt.Errorf("failed to set read deadline: %w", err)
+		}
+
+		// Read the packet length prefix (4 bytes)
+		lengthPrefix := make([]byte, 4)
+		_, err = sc.inner.conn.Read(lengthPrefix)
+		if err != nil {
+			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				// Timeout is expected when no more packets
+				break
+			}
+			return packets, fmt.Errorf("failed to read packet length prefix: %w", err)
+		}
+
+		packetLength := binary.BigEndian.Uint32(lengthPrefix)
+		if packetLength > 9000 {
+			return packets, fmt.Errorf("packet length %d exceeds maximum buffer size", packetLength)
+		}
+
+		// Read the packet data
+		packetData := make([]byte, packetLength)
+		_, err = sc.inner.conn.Read(packetData)
+		if err != nil {
+			return packets, fmt.Errorf("failed to read packet data: %w", err)
+		}
+
+		// Write raw socket data to dump file
+		packetWithLength := make([]byte, 0, 4+len(packetData))
+		packetWithLength = append(append(packetWithLength, lengthPrefix...), packetData...)
+		if err := writeToDumpFile(dumpPath, packetWithLength); err != nil {
+			sc.log.Warnf("Failed to write to dump file: %v", err)
+		}
+
+		// Parse the packet to check DstMAC
+		packetInfo, err := parser.ParsePacket(packetData)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse packet: %w", err)
+		}
+
+		// Check if the packet has the correct DstMAC
+		if packetInfo.DstMAC.String() == ourMAC.String() {
+			packets = append(packets, packetData)
+			sc.log.Debugf("Received packet with correct DstMAC, total: %d", len(packets))
+		} else {
+			sc.log.Debugf("Skipping packet with incorrect DstMAC: %s (expected: %s)", packetInfo.DstMAC, ourMAC)
+		}
+	}
+
+	return packets, nil
+}
+
 // Close gracefully terminates the socket connection and releases associated
 // network resources. This method should be called when the socket client is
 // no longer needed to prevent resource leaks.
@@ -399,6 +463,30 @@ func (sc *SocketClient) Close() error {
 		return err
 	}
 	return nil
+}
+
+// ResetConnection closes the existing connection and creates a new one.
+// This ensures a clean stream with no buffered data from previous operations.
+// This method is used for test isolation to prevent packet leakage between tests.
+//
+// The method:
+//   - Closes any existing connection (discarding buffered data)
+//   - Creates a new connection to the same socket
+//   - Returns an error if reconnection fails
+//
+// Returns:
+//   - error: An error if reconnection fails, or nil if successful
+//
+// Example:
+//
+//	if err := client.ResetConnection(); err != nil {
+//	    log.Fatalf("Failed to reset connection: %v", err)
+//	}
+func (sc *SocketClient) ResetConnection() error {
+	if err := sc.Close(); err != nil {
+		sc.log.Debugf("Close error during reset (may be expected): %v", err)
+	}
+	return sc.Connect()
 }
 
 // GetSocketPort returns the TCP port number configured for this socket client.

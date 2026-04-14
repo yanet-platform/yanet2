@@ -22,14 +22,12 @@ struct acl_module {
 	struct module module;
 };
 
-FILTER_QUERY_DECLARE(ACL_FILTER_VLAN_TAG, device, vlan);
+FILTER_QUERY_DECLARE(filter_vlan, device, vlan);
+
+FILTER_QUERY_DECLARE(filter_ip4, device, vlan, net4_src, net4_dst, proto_range);
 
 FILTER_QUERY_DECLARE(
-	ACL_FILTER_IP4_TAG, device, vlan, net4_src, net4_dst, proto_range
-);
-
-FILTER_QUERY_DECLARE(
-	ACL_FILTER_IP4_PROTO_PORT_TAG,
+	filter_ip4_port,
 	device,
 	vlan,
 	net4_src,
@@ -39,12 +37,10 @@ FILTER_QUERY_DECLARE(
 	port_dst
 );
 
-FILTER_QUERY_DECLARE(
-	ACL_FILTER_IP6_TAG, device, vlan, net6_src, net6_dst, proto_range
-);
+FILTER_QUERY_DECLARE(filter_ip6, device, vlan, net6_src, net6_dst, proto_range);
 
 FILTER_QUERY_DECLARE(
-	ACL_FILTER_IP6_PROTO_PORT_TAG,
+	filter_ip6_port,
 	device,
 	vlan,
 	net6_src,
@@ -83,29 +79,27 @@ acl_handle_packets(
 	 */
 
 	struct packet *vlan_packets[packet_list_count(&packet_front->input)];
-	const struct value_range
+	struct value_range
 		*vlan_result[packet_list_count(&packet_front->input)];
 	uint64_t vlan_idx = 0;
 
 	struct packet *ip4_packets[packet_list_count(&packet_front->input)];
-	const struct value_range
-		*ip4_result[packet_list_count(&packet_front->input)];
+	struct value_range *ip4_result[packet_list_count(&packet_front->input)];
 	uint64_t ip4_idx = 0;
 
 	struct packet
 		*ip4_port_packets[packet_list_count(&packet_front->input)];
-	const struct value_range
+	struct value_range
 		*ip4_port_result[packet_list_count(&packet_front->input)];
 	uint64_t ip4_port_idx = 0;
 
 	struct packet *ip6_packets[packet_list_count(&packet_front->input)];
-	const struct value_range
-		*ip6_result[packet_list_count(&packet_front->input)];
+	struct value_range *ip6_result[packet_list_count(&packet_front->input)];
 	uint64_t ip6_idx = 0;
 
 	struct packet
 		*ip6_port_packets[packet_list_count(&packet_front->input)];
-	const struct value_range
+	struct value_range
 		*ip6_port_result[packet_list_count(&packet_front->input)];
 	uint64_t ip6_port_idx = 0;
 
@@ -136,41 +130,41 @@ acl_handle_packets(
 		}
 	}
 
-	FILTER_QUERY(
+	filter_query(
 		&acl_config->filter_vlan,
-		ACL_FILTER_VLAN_TAG,
+		filter_vlan,
 		vlan_packets,
 		vlan_result,
 		vlan_idx
 	);
 
-	FILTER_QUERY(
+	filter_query(
 		&acl_config->filter_ip4,
-		ACL_FILTER_IP4_TAG,
+		filter_ip4,
 		ip4_packets,
 		ip4_result,
 		ip4_idx
 	);
 
-	FILTER_QUERY(
+	filter_query(
 		&acl_config->filter_ip4_port,
-		ACL_FILTER_IP4_PROTO_PORT_TAG,
+		filter_ip4_port,
 		ip4_port_packets,
 		ip4_port_result,
 		ip4_port_idx
 	);
 
-	FILTER_QUERY(
+	filter_query(
 		&acl_config->filter_ip6,
-		ACL_FILTER_IP6_TAG,
+		filter_ip6,
 		ip6_packets,
 		ip6_result,
 		ip6_idx
 	);
 
-	FILTER_QUERY(
+	filter_query(
 		&acl_config->filter_ip6_port,
-		ACL_FILTER_IP6_PROTO_PORT_TAG,
+		filter_ip6_port,
 		ip6_port_packets,
 		ip6_port_result,
 		ip6_port_idx
@@ -279,7 +273,11 @@ acl_handle_packets(
 			case ACL_ACTION_DENY:
 				packet_front_drop(packet_front, packet);
 				break;
+			case ACL_ACTION_COUNT:
+				packet_front_output(packet_front, packet);
+				break;
 			case ACL_ACTION_CREATE_STATE:
+				packet_front_output(packet_front, packet);
 				push_sync_packet = SYNC_INGRESS;
 				break;
 			case ACL_ACTION_CHECK_STATE:
@@ -296,6 +294,8 @@ acl_handle_packets(
 					packet_front_drop(packet_front, packet);
 				}
 				break;
+			default:
+				packet_front_drop(packet_front, packet);
 			}
 
 			if (push_sync_packet != SYNC_NONE) {

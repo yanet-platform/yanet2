@@ -6,7 +6,7 @@ It includes a header-only query API and a compiler library.
 ## Rules
 Rules are described in [rule.h](rule.h) and carried in struct filter_rule:
 - L3 (IPv4/IPv6) nets for src/dst, transport (proto/ports/TCP flags), device/VLAN
-- 32-bit action layout: [31..16] category mask, [15] non-terminate, [14..0] user
+- 32-bit action layout: [31] non-terminate, [30..0] user
 See the detailed layout and helpers in [rule.h](rule.h).
 
 
@@ -15,7 +15,6 @@ See the detailed layout and helpers in [rule.h](rule.h).
 - Query
   - Interface: filter/query.h
   - Macros: FILTER_QUERY_DECLARE, FILTER_QUERY
-  - Functions: filter_actions_with_category
 
 - Compiler
   - Interface: filter/compiler.h (+ implementation under filter/compiler/*.c)

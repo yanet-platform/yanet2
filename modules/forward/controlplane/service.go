@@ -8,12 +8,9 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/yanet-platform/yanet2/common/go/filter/device"
-	"github.com/yanet-platform/yanet2/common/go/filter/ipnet4"
-	"github.com/yanet-platform/yanet2/common/go/filter/ipnet6"
-	"github.com/yanet-platform/yanet2/common/go/filter/vlanrange"
+	"github.com/yanet-platform/yanet2/common/filterpb"
+	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
 	"github.com/yanet-platform/yanet2/modules/forward/controlplane/forwardpb"
-	"github.com/yanet-platform/yanet2/modules/forward/internal/ffi"
 )
 
 // ModuleHandle is a handle to a module configuration.
@@ -25,7 +22,7 @@ type ModuleHandle interface {
 type Backend interface {
 	// UpdateModule creates a module config, writes rules, and publishes
 	// it to the dataplane.
-	UpdateModule(name string, rules []ffi.ForwardRule) (ModuleHandle, error)
+	UpdateModule(name string, rules []cforward.ForwardRule) (ModuleHandle, error)
 	// DeleteModule removes a module config.
 	DeleteModule(name string) error
 }
@@ -99,36 +96,36 @@ func (m *ForwardService) UpdateConfig(ctx context.Context, req *forwardpb.Update
 
 	reqRules := req.Rules
 
-	rules := make([]ffi.ForwardRule, 0, len(reqRules))
+	rules := make([]cforward.ForwardRule, 0, len(reqRules))
 	for _, reqRule := range reqRules {
-		devices, err := device.FromDevices(reqRule.Devices)
+		devices, err := filterpb.ToDevices(reqRule.Devices)
 		if err != nil {
 			return nil, err
 		}
-		vlanRanges, err := vlanrange.FromVlanRanges(reqRule.VlanRanges)
+		vlanRanges, err := filterpb.ToVlanRanges(reqRule.VlanRanges)
 		if err != nil {
 			return nil, err
 		}
-		src4s, err := ipnet4.FromIPNets(reqRule.Srcs)
+		src4s, err := filterpb.ToNet4s(reqRule.Srcs)
 		if err != nil {
 			return nil, err
 		}
-		dst4s, err := ipnet4.FromIPNets(reqRule.Dsts)
+		dst4s, err := filterpb.ToNet4s(reqRule.Dsts)
 		if err != nil {
 			return nil, err
 		}
-		src6s, err := ipnet6.FromIPNets(reqRule.Srcs)
+		src6s, err := filterpb.ToNet6s(reqRule.Srcs)
 		if err != nil {
 			return nil, err
 		}
-		dst6s, err := ipnet6.FromIPNets(reqRule.Dsts)
+		dst6s, err := filterpb.ToNet6s(reqRule.Dsts)
 		if err != nil {
 			return nil, err
 		}
 
-		rule := ffi.ForwardRule{
+		rule := cforward.ForwardRule{
 			Target:     reqRule.Action.Target,
-			Mode:       ffi.ModeNone,
+			Mode:       cforward.ModeNone,
 			Counter:    reqRule.Action.Counter,
 			Devices:    devices,
 			VlanRanges: vlanRanges,
@@ -139,10 +136,10 @@ func (m *ForwardService) UpdateConfig(ctx context.Context, req *forwardpb.Update
 		}
 
 		if reqRule.Action.Mode == forwardpb.ForwardMode_IN {
-			rule.Mode = ffi.ModeIn
+			rule.Mode = cforward.ModeIn
 		}
 		if reqRule.Action.Mode == forwardpb.ForwardMode_OUT {
-			rule.Mode = ffi.ModeOut
+			rule.Mode = cforward.ModeOut
 		}
 
 		rules = append(rules, rule)

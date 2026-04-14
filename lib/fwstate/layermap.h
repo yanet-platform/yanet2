@@ -1,6 +1,5 @@
 #include "common/memory.h"
 #include "fwmap.h"
-#include <stdatomic.h>
 
 typedef struct layermap_list {
 	fwmap_t *layer;
@@ -31,8 +30,7 @@ layermap_trim_stale_layers_cp(
 		if (layermap_is_layer_outdated(layer, now)) {
 			// Unlink the outdated layer
 			fwmap_t *next_layer = (fwmap_t *)ADDR_OF(&layer->next);
-			SET_OFFSET_OF(prev_next, next_layer);
-			__atomic_thread_fence(__ATOMIC_RELEASE);
+			ATOMIC_SET_OFFSET_OF(prev_next, next_layer);
 
 			// Add to outdated layers list
 			layermap_list_t *node =
