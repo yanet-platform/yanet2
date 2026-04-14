@@ -77,7 +77,8 @@ pub struct ShowCmd {
     #[arg(long, short = 's')]
     pub stats: bool,
 
-    /// Show allowed sources config per VS (with counters if --stats is present).
+    /// Show allowed sources config per VS (with counters if --stats is
+    /// present).
     #[arg(long, short = 'a')]
     pub acl: bool,
 

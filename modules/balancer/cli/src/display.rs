@@ -6,7 +6,6 @@ use tabled::{
         style::{BorderColor, HorizontalLine},
     },
 };
-
 use yanet_cli_balancer::balancerpb;
 
 use crate::{bytes_to_ip, format_ip_port};
