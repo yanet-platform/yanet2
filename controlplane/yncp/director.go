@@ -124,7 +124,7 @@ func NewDirector(cfg *Config, options ...DirectorOption) (*Director, error) {
 		return nil, fmt.Errorf("failed to initialize acl built-in module: %w", err)
 	}
 
-	balancerModule, err := balancer.NewBalancerModule(cfg.Modules.Balancer, log)
+	balancerModule, err := balancer.NewModule(cfg.Modules.Balancer, log)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize balancer built-in module: %w", err)
 	}

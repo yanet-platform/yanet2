@@ -98,7 +98,7 @@ struct balancer_packet_handler **
 balancer_agent_list(struct agent *agent, size_t *count) {
 	struct balancer_storage *s = get_storage(agent);
 	if (s == NULL) {
-		return 0;
+		return NULL;
 	}
 
 	*count = s->count;

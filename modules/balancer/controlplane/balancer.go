@@ -27,26 +27,13 @@ const (
 
 var errNoAgentMemory = status.Error(codes.ResourceExhausted, "no agent memory")
 
-func (b *Balancer) Destroy() {
-	if b.refresher != nil {
-		b.refresher.Stop()
-	}
-	handler := b.handler
-	agent := b.agent
-	if handler.Session_table != nil {
-		agent.destroySessionTable(relptr.Deref(&handler.Session_table))
-	}
-	handler.free(agent)
-	yanet.Free(agent.AsYanetAgent(), handler)
-}
-
 // Balancer manages a single balancer instance including its shared-memory
 // packet handler, session table, and lookup indices.
 type Balancer struct {
 	// Pointer to the packet handler instance in the shared memory.
 	// It uses relative pointers, so one can use relptr package to access it.
 	handler *PacketHandler
-	agent   *BalancerAgent
+	agent   *Agent
 
 	realUpdateBuffer []*balancerpb.RealUpdate
 
@@ -194,7 +181,10 @@ func (b *Balancer) Update(
 	mergedStateConfig := mergeStateConfig(b.config.State, config.State)
 
 	b.handler.setState(mergedStateConfig, st)
-	b.refresher.UpdateRefreshPeriod(mergedStateConfig.RefreshPeriod.AsDuration())
+
+	if b.refresher != nil {
+		b.refresher.UpdateRefreshPeriod(mergedStateConfig.RefreshPeriod.AsDuration())
+	}
 
 	if config.PacketHandler == nil {
 		return nil, nil
@@ -270,7 +260,7 @@ func configIndexOf(stableIdx uint64) uint32 {
 //
 // On any failure, all allocated resources are freed via Destroy.
 func NewBalancer(
-	agent *BalancerAgent,
+	agent *Agent,
 	name string,
 	config *balancerpb.BalancerConfig,
 	log *zap.SugaredLogger,
@@ -317,6 +307,19 @@ func NewBalancer(
 	b.buildIndexes()
 
 	return b, nil
+}
+
+func (b *Balancer) Destroy() {
+	if b.refresher != nil {
+		b.refresher.Stop()
+	}
+	handler := b.handler
+	agent := b.agent
+	if handler.Session_table != nil {
+		agent.destroySessionTable(relptr.Deref(&handler.Session_table))
+	}
+	handler.free(agent)
+	yanet.Free(agent.AsYanetAgent(), handler)
 }
 
 func (b *Balancer) UpdateVirtualServices(
@@ -395,6 +398,7 @@ func (b *Balancer) GetState(
 	balancerName := b.handler.name()
 
 	if !includeCounters {
+		// No counters means no need in module positions.
 		state := b.buildState(workers, &matcher, nil, now)
 		matcher.filterReals(state)
 		compactBalancerState(state)
@@ -523,9 +527,15 @@ func (b *Balancer) FlushRealUpdates() (int, error) {
 	}
 
 	updates := b.realUpdateBuffer
+
+	updatesApplied, err := b.UpdateReals(updates, false)
+	if err != nil {
+		return 0, err
+	}
+
 	b.realUpdateBuffer = nil
 
-	return b.UpdateReals(updates, false)
+	return updatesApplied, nil
 }
 
 func (b *Balancer) UpdateReals(updates []*balancerpb.RealUpdate, buffer bool) (int, error) {
@@ -677,7 +687,7 @@ func (b *Balancer) Metrics(now time.Time) ([]*commonpb.Metric, error) {
 
 			case strings.HasPrefix(name, "vs_"):
 				vsIndex, ok := vsIndexFromCounterName(name)
-				if !ok || int(vsIndex) >= len(services) {
+				if !ok {
 					continue
 				}
 				vs := &services[vsIndex]

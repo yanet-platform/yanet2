@@ -320,7 +320,7 @@ make_decap_rules(
 	if (rules == NULL && count > 0) {
 		return -1;
 	}
-	memset(rules, 0, count * sizeof(struct filter_rule));
+	// Calloc initializes the memory to zero.
 
 	struct net4_addr *decap_v4 = ADDR_OF(&handler->decap_v4);
 	struct net6_addr *decap_v6 = ADDR_OF(&handler->decap_v6);
@@ -363,6 +363,7 @@ build_decap_filter(struct balancer_packet_handler *handler, int is_ipv6) {
 	struct filter_rule *rules = NULL;
 	ssize_t res = make_decap_rules(handler, &rules, is_ipv6);
 	if (res == -1) {
+		memory_bfree(mctx, filter, sizeof(struct filter));
 		return -2;
 	}
 	size_t count = (size_t)res;
@@ -460,7 +461,7 @@ make_vs_matcher_rules(
 	if (rules == NULL && rule_count > 0) {
 		return -1;
 	}
-	memset(rules, 0, rule_count * sizeof(struct filter_rule));
+	// Calloc initializes the memory to zero.
 
 	size_t rule_idx = 0;
 	for (size_t i = 0; i < service_count; ++i) {
@@ -504,6 +505,7 @@ build_vs_matcher(
 	struct filter_rule *rules = NULL;
 	ssize_t res = make_vs_matcher_rules(&rules, ipproto, vs, vs_count);
 	if (res == -1) {
+		memory_bfree(mctx, filter, sizeof(struct filter));
 		return -2;
 	}
 	size_t count = (size_t)res;

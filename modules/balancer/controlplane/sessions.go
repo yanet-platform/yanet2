@@ -64,6 +64,8 @@ func resolveSession(
 	vsStableIdx := entry.Id.Vs_stable_idx
 	vsConfigIdx := configIndexOf(vsStableIdx)
 
+	// No bounds check needed here:
+	// - vsConfigIdx is guaranteed to be within bounds because VS array never shrinks.
 	vs := &services[vsConfigIdx]
 	if vs.isRemoved() || vs.Stable_idx != vsStableIdx {
 		return nil, false
@@ -78,12 +80,12 @@ func resolveSession(
 	realConfigIdx := configIndexOf(realStableIdx)
 	reals := relptr.Slice(&vs.Reals, vs.Reals_count)
 
-	real := &reals[realConfigIdx]
-	if real.isRemoved() || real.Stable_idx != realStableIdx {
+	r := &reals[realConfigIdx]
+	if r.isRemoved() || r.Stable_idx != realStableIdx {
 		return nil, false
 	}
 
-	realRelID := real.id()
+	realRelID := r.id()
 	if matcher.hasRealFilter && !matcher.matchRealID(realRelID) {
 		return nil, false
 	}

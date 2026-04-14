@@ -9,6 +9,7 @@ import (
 	mock "github.com/yanet-platform/yanet2/mock/go"
 	balancer "github.com/yanet-platform/yanet2/modules/balancer/controlplane"
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb"
+	"go.uber.org/zap"
 )
 
 var (
@@ -27,7 +28,7 @@ type TestConfig struct {
 
 type TestSetup struct {
 	Mock     *mock.YanetMock
-	Agent    *balancer.BalancerAgent
+	Agent    *balancer.Agent
 	Balancer *balancer.Balancer
 	Config   *balancerpb.BalancerConfig
 }
@@ -64,17 +65,20 @@ func Make(config *TestConfig) (*TestSetup, error) {
 		agentMemory = config.AgentMemory
 	}
 
-	agent, err := balancer.ReattachBalancerAgent(
+	log := zap.NewNop().Sugar()
+
+	agent, err := balancer.ReattachAgent(
 		m.SharedMemory(),
 		0,
 		agentMemory,
+		log,
 	)
 	if err != nil {
 		m.Free()
 		return nil, fmt.Errorf("attach balancer agent: %w", err)
 	}
 
-	b, err := balancer.NewBalancer(agent, BalancerName, config.Balancer)
+	b, err := balancer.NewBalancer(agent, BalancerName, config.Balancer, log)
 	if err != nil {
 		m.Free()
 		return nil, fmt.Errorf("create balancer: %w", err)

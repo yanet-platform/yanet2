@@ -17,7 +17,7 @@ import (
 // The returned Balancer shares the same packet handler memory; no new shared
 // memory is allocated.
 func restoreBalancerFromPacketHandler(
-	agent *BalancerAgent,
+	agent *Agent,
 	ph *PacketHandler,
 	log *zap.SugaredLogger,
 ) *Balancer {

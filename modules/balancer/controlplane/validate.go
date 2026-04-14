@@ -116,6 +116,7 @@ func isContiguous8(mask []byte) bool {
 	return inverted&(inverted+1) == 0
 }
 
+// Check if the mask halves are contiguous.
 func validateMask6(mask []byte) error {
 	if !isContiguous8(mask[:8]) {
 		return fmt.Errorf("high mask bits are not contiguous")
@@ -191,24 +192,24 @@ func validateAllowedSrc(
 	return nil
 }
 
-func validateReal(real *balancerpb.Real) error {
-	if real.Id == nil {
+func validateReal(r *balancerpb.Real) error {
+	if r.Id == nil {
 		return fmt.Errorf("id is nil")
 	}
-	id := real.Id
+	id := r.Id
 	if len(id.Ip) != 4 && len(id.Ip) != 16 {
 		return fmt.Errorf("id.ip must be 4 or 16 bytes long")
 	}
 	if id.Port != 0 {
 		return fmt.Errorf("only zero ports is currently supported")
 	}
-	if real.Src == nil {
+	if r.Src == nil {
 		return fmt.Errorf("src is nil")
 	}
-	if len(real.Src.Addr) != len(id.Ip) {
+	if len(r.Src.Addr) != len(id.Ip) {
 		return fmt.Errorf("src.addr must be the same length as id.ip")
 	}
-	if len(real.Src.Mask) != len(id.Ip) {
+	if len(r.Src.Mask) != len(id.Ip) {
 		return fmt.Errorf("src.mask must be the same length as id.ip")
 	}
 	return nil
@@ -322,9 +323,7 @@ func validatePacketHandlerConfig(config *balancerpb.PacketHandlerConfig) error {
 		}
 		return bytes.Compare(a, b)
 	})
-	config.DecapAddresses = slices.CompactFunc(config.DecapAddresses, func(a, b []byte) bool {
-		return bytes.Equal(a, b)
-	})
+	config.DecapAddresses = slices.CompactFunc(config.DecapAddresses, bytes.Equal)
 
 	vsMap := make(map[vsKey]int, len(config.Vs))
 	for i, vs := range config.Vs {

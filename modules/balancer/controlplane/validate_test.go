@@ -57,12 +57,12 @@ func makeValidPacketHandlerConfig() *balancerpb.PacketHandlerConfig {
 }
 
 func makeValidStateConfig() *balancerpb.StateConfig {
-	cap := uint64(1024)
+	capacity := uint64(1024)
 	lf := float32(0.7)
 	power := uint64(2)
 	maxWeight := uint32(100)
 	return &balancerpb.StateConfig{
-		SessionTableCapacity:      &cap,
+		SessionTableCapacity:      &capacity,
 		SessionTableMaxLoadFactor: &lf,
 		Wlc: &balancerpb.WlcConfig{
 			Power:     &power,

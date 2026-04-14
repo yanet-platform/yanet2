@@ -44,6 +44,24 @@ move_session_cb(void *key, void *value, void *userdata) {
 	return 0;
 }
 
+/*
+ * Resize the session table by allocating a new ttlmap and migrating
+ * existing sessions into it.
+ *
+ * Uses a two-phase gen-bump protocol coordinated with the dataplane:
+ *
+ *   gen (even)  — steady state, dataplane uses map selected by gen.
+ *   gen+1 (odd) — transition: the new map is active for writes,
+ *                 dataplane must look up both maps for existing sessions.
+ *   gen+2 (even) — migration complete, old map freed.
+ *
+ * The dataplane checks current_gen atomically on every packet:
+ *   - Even gen: use balancer_st_cur_map(st, gen) only.
+ *   - Odd gen:  write to the new map, but fall back to both maps for
+ *               lookups so in-flight sessions are not lost.
+ *
+ * Returns 0 on success, -1 on allocation failure.
+ */
 int
 balancer_st_resize(
 	struct balancer_session_table *st, size_t new_size, uint32_t now
@@ -63,12 +81,12 @@ balancer_st_resize(
 		return -1;
 	}
 
-	/* Begin transition. */
+	/* Begin transition: odd gen signals dataplane to use both maps. */
 	struct ttlmap *cur = balancer_st_cur_map(st, gen);
 	gen++;
 	atomic_store_explicit(&st->current_gen, gen, memory_order_release);
 
-	/* Migrate sessions. */
+	/* Migrate sessions from old map to new map. */
 	struct move_ctx ctx = {.dst = next, .now = now};
 	TTLMAP_ITER(
 		cur,
@@ -79,7 +97,7 @@ balancer_st_resize(
 		&ctx
 	);
 
-	/* End transition. */
+	/* End transition: even gen, dataplane uses new map only. */
 	gen++;
 	atomic_store_explicit(&st->current_gen, gen, memory_order_release);
 

@@ -205,12 +205,14 @@ fn print_table_view_state(state: &balancerpb::BalancerState, opts: &ShowOptions)
     if let Some(r) = &state.r#ref {
         print_ref_inline(r);
     }
-    if opts.stats {
-        println!("Active Sessions: {}", format_number(state.active_sessions));
-        if let Some(ts) = &state.last_packet_timestamp {
-            println!("Last Packet: {}", format_timestamp(ts));
-        }
-    }
+    println!("Active Sessions: {}", format_number(state.active_sessions));
+    println!(
+        "Last Packet: {}",
+        state
+            .last_packet_timestamp
+            .as_ref()
+            .map_or_else(|| "N/A".to_string(), format_timestamp),
+    );
     println!();
 
     if opts.decap {
@@ -737,8 +739,10 @@ fn format_bytes(bytes: u64) -> String {
 }
 
 fn format_timestamp(ts: &prost_types::Timestamp) -> String {
-    let secs = ts.seconds;
-    let ndt = chrono::DateTime::from_timestamp(secs, ts.nanos as u32);
+    if ts.seconds == 0 && ts.nanos == 0 {
+        return "N/A".to_string();
+    }
+    let ndt = chrono::DateTime::from_timestamp(ts.seconds, ts.nanos as u32);
     match ndt {
         Some(dt) => dt.format("%Y-%m-%d %H:%M:%S").to_string(),
         None => "-".to_string(),

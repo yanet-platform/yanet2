@@ -15,106 +15,103 @@ var commonCounters = []struct {
 }{
 	{
 		name: "incoming_bits",
-		getter: func(c *CommonStats, l *L4Stats, i4 *IcmpStats, i6 *IcmpStats) uint64 {
+		getter: func(c *CommonStats, _ *L4Stats, _ *IcmpStats, _ *IcmpStats) uint64 {
 			return c.Incoming_bytes * 8
 		},
 	},
 	{
 		name: "incoming_packets",
-		getter: func(c *CommonStats, l *L4Stats, i4 *IcmpStats, i6 *IcmpStats) uint64 {
+		getter: func(c *CommonStats, _ *L4Stats, _ *IcmpStats, _ *IcmpStats) uint64 {
 			return c.Incoming_packets
 		},
 	},
 	{
 		name: "outgoing_bits",
-		getter: func(c *CommonStats, l *L4Stats, i4 *IcmpStats, i6 *IcmpStats) uint64 {
+		getter: func(c *CommonStats, _ *L4Stats, _ *IcmpStats, _ *IcmpStats) uint64 {
 			return c.Outgoing_bytes * 8
 		},
 	},
 	{
 		name: "outgoing_packets",
-		getter: func(c *CommonStats, l *L4Stats, i4 *IcmpStats, i6 *IcmpStats) uint64 {
+		getter: func(c *CommonStats, _ *L4Stats, _ *IcmpStats, _ *IcmpStats) uint64 {
 			return c.Outgoing_packets
 		},
 	},
 	{
 		name: "l4_incoming_packets",
-		getter: func(c *CommonStats, l *L4Stats, i4 *IcmpStats, i6 *IcmpStats) uint64 {
+		getter: func(_ *CommonStats, l *L4Stats, _ *IcmpStats, _ *IcmpStats) uint64 {
 			return l.Incoming_packets
 		},
 	},
 	{
 		name: "l4_outgoing_packets",
-		getter: func(c *CommonStats, l *L4Stats, i4 *IcmpStats, i6 *IcmpStats) uint64 {
+		getter: func(_ *CommonStats, l *L4Stats, _ *IcmpStats, _ *IcmpStats) uint64 {
 			return l.Outgoing_packets
 		},
 	},
 	{
 		name: "l4_select_vs_failed",
-		getter: func(c *CommonStats, l *L4Stats, i4 *IcmpStats, i6 *IcmpStats) uint64 {
+		getter: func(_ *CommonStats, l *L4Stats, _ *IcmpStats, _ *IcmpStats) uint64 {
 			return l.Select_vs_failed
 		},
 	},
 	{
 		name: "icmp_ipv4_incoming_packets",
-		getter: func(c *CommonStats, l *L4Stats, i4 *IcmpStats, i6 *IcmpStats) uint64 {
+		getter: func(_ *CommonStats, _ *L4Stats, i4 *IcmpStats, _ *IcmpStats) uint64 {
 			return i4.Incoming_packets
 		},
 	},
 	{
 		name: "icmp_ipv4_forwarded_packets",
-		getter: func(c *CommonStats, l *L4Stats, i4 *IcmpStats, i6 *IcmpStats) uint64 {
+		getter: func(_ *CommonStats, _ *L4Stats, i4 *IcmpStats, _ *IcmpStats) uint64 {
 			return i4.Forwarded_packets
 		},
 	},
 	{
 		name: "icmp_ipv4_packet_clones_sent",
-		getter: func(c *CommonStats, l *L4Stats, i4 *IcmpStats, i6 *IcmpStats) uint64 {
-			if i4 == nil {
-				return 0
-			}
+		getter: func(_ *CommonStats, _ *L4Stats, i4 *IcmpStats, _ *IcmpStats) uint64 {
 			return i4.Packet_clones_sent
 		},
 	},
 	{
 		name: "icmp_ipv4_packet_clones_received",
-		getter: func(c *CommonStats, l *L4Stats, i4 *IcmpStats, i6 *IcmpStats) uint64 {
+		getter: func(_ *CommonStats, _ *L4Stats, i4 *IcmpStats, _ *IcmpStats) uint64 {
 			return i4.Packet_clones_received
 		},
 	},
 	{
 		name: "icmp_ipv4_packet_clone_failures",
-		getter: func(c *CommonStats, l *L4Stats, i4 *IcmpStats, i6 *IcmpStats) uint64 {
+		getter: func(_ *CommonStats, _ *L4Stats, i4 *IcmpStats, _ *IcmpStats) uint64 {
 			return i4.Packet_clone_failures
 		},
 	},
 	{
 		name: "icmp_ipv6_incoming_packets",
-		getter: func(c *CommonStats, l *L4Stats, i4 *IcmpStats, i6 *IcmpStats) uint64 {
+		getter: func(_ *CommonStats, _ *L4Stats, _ *IcmpStats, i6 *IcmpStats) uint64 {
 			return i6.Incoming_packets
 		},
 	},
 	{
 		name: "icmp_ipv6_forwarded_packets",
-		getter: func(c *CommonStats, l *L4Stats, i4 *IcmpStats, i6 *IcmpStats) uint64 {
+		getter: func(_ *CommonStats, _ *L4Stats, _ *IcmpStats, i6 *IcmpStats) uint64 {
 			return i6.Forwarded_packets
 		},
 	},
 	{
 		name: "icmp_ipv6_packet_clones_sent",
-		getter: func(c *CommonStats, l *L4Stats, i4 *IcmpStats, i6 *IcmpStats) uint64 {
+		getter: func(_ *CommonStats, _ *L4Stats, _ *IcmpStats, i6 *IcmpStats) uint64 {
 			return i6.Packet_clones_sent
 		},
 	},
 	{
 		name: "icmp_ipv6_packet_clones_received",
-		getter: func(c *CommonStats, l *L4Stats, i4 *IcmpStats, i6 *IcmpStats) uint64 {
+		getter: func(_ *CommonStats, _ *L4Stats, _ *IcmpStats, i6 *IcmpStats) uint64 {
 			return i6.Packet_clones_received
 		},
 	},
 	{
 		name: "icmp_ipv6_packet_clone_failures",
-		getter: func(c *CommonStats, l *L4Stats, i4 *IcmpStats, i6 *IcmpStats) uint64 {
+		getter: func(_ *CommonStats, _ *L4Stats, _ *IcmpStats, i6 *IcmpStats) uint64 {
 			return i6.Packet_clone_failures
 		},
 	},
@@ -155,18 +152,18 @@ var realCounters = []struct {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-type handlersMetrics struct {
-	callLatencies *metrics.MetricMap[*metrics.Histogram]
+type methodMetrics struct {
+	latencies *metrics.MetricMap[*metrics.Histogram]
 }
 
-func newHandlersMetrics() handlersMetrics {
-	return handlersMetrics{
-		callLatencies: metrics.NewMetricMap[*metrics.Histogram](),
+func newMethodMetrics() methodMetrics {
+	return methodMetrics{
+		latencies: metrics.NewMetricMap[*metrics.Histogram](),
 	}
 }
 
-func (m *handlersMetrics) collect() []*commonpb.Metric {
-	return commonpb.MetricRefsToProto(m.callLatencies.Metrics())
+func (m *methodMetrics) collect() []*commonpb.Metric {
+	return commonpb.MetricRefsToProto(m.latencies.Metrics())
 }
 
 var defaultLatencyBoundsMS = []float64{
@@ -195,37 +192,34 @@ var defaultLatencyBoundsMS = []float64{
 	5000,
 }
 
-type handlerMetricTracker struct {
+type methodMetricsTracker struct {
 	metricID  metrics.MetricID
 	startTime time.Time
-	metrics   *handlersMetrics
+	metrics   methodMetrics
 	latencies []float64
 }
 
-func newHandlerMetricTracker(
+func newMetricsTracker(
 	handlerName string,
-	handlerMetrics *handlersMetrics,
+	methodMetrics methodMetrics,
 	latencies []float64,
 	labels metrics.Labels,
-) *handlerMetricTracker {
-	if handlerMetrics == nil || latencies == nil {
-		return nil
-	}
+) *methodMetricsTracker {
 	id := metrics.MetricID{
 		Name:   handlerName,
 		Labels: labels,
 	}
-	return &handlerMetricTracker{
+	return &methodMetricsTracker{
 		metricID:  id,
 		startTime: time.Now(),
-		metrics:   handlerMetrics,
+		metrics:   methodMetrics,
 		latencies: latencies,
 	}
 }
 
-func (m *handlerMetricTracker) Fix() {
+func (m *methodMetricsTracker) Fix() {
 	duration := time.Since(m.startTime)
-	m.metrics.callLatencies.GetOrCreate(m.metricID, func() *metrics.Histogram {
+	m.metrics.latencies.GetOrCreate(m.metricID, func() *metrics.Histogram {
 		return metrics.NewHistogram(m.latencies)
 	}).Observe(float64(duration.Milliseconds()))
 }

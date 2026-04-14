@@ -44,11 +44,11 @@ func errFromCode(res C.int) error {
 	}
 }
 
-func (a *BalancerAgent) asCPtr() *C.struct_agent {
+func (a *Agent) asCPtr() *C.struct_agent {
 	return (*C.struct_agent)(unsafe.Pointer(a.AsYanetAgent().AsRawPtr()))
 }
 
-func (a *BalancerAgent) install(handler *PacketHandler) error {
+func (a *Agent) install(handler *PacketHandler) error {
 	a.AsYanetAgent().CleanError()
 
 	res := C.balancer_agent_install(
@@ -62,21 +62,21 @@ func (a *BalancerAgent) install(handler *PacketHandler) error {
 	return nil
 }
 
-func (a *BalancerAgent) register(handler *PacketHandler) error {
+func (a *Agent) register(handler *PacketHandler) error {
 	return errFromCode(C.balancer_agent_register(
 		a.asCPtr(),
 		handler.asCPtr(),
 	))
 }
 
-func (a *BalancerAgent) forget(handler *PacketHandler) {
+func (a *Agent) forget(handler *PacketHandler) {
 	C.balancer_agent_forget(
 		a.asCPtr(),
 		handler.asCPtr(),
 	)
 }
 
-func (a *BalancerAgent) list() []*PacketHandler {
+func (a *Agent) list() []*PacketHandler {
 	count := C.size_t(0)
 	handlersRaw := C.balancer_agent_list(a.asCPtr(), &count)
 	if handlersRaw == nil {
@@ -89,14 +89,14 @@ func (a *BalancerAgent) list() []*PacketHandler {
 	return handlers
 }
 
-func (a *BalancerAgent) createSessionTable(capacity int) *SessionTable {
+func (a *Agent) createSessionTable(capacity int) *SessionTable {
 	return (*SessionTable)(unsafe.Pointer(C.balancer_agent_create_st(
 		a.asCPtr(),
 		C.size_t(capacity),
 	)))
 }
 
-func (a *BalancerAgent) destroySessionTable(st *SessionTable) {
+func (a *Agent) destroySessionTable(st *SessionTable) {
 	C.balancer_agent_destroy_st(a.asCPtr(), st.asCPtr())
 }
 
@@ -104,7 +104,7 @@ func (ph *PacketHandler) asCPtr() *C.struct_balancer_packet_handler {
 	return (*C.struct_balancer_packet_handler)(unsafe.Pointer(ph))
 }
 
-func (ph *PacketHandler) initialSetup(agent *BalancerAgent, name string, st *SessionTable) error {
+func (ph *PacketHandler) initialSetup(agent *Agent, name string, st *SessionTable) error {
 	cName := C.CString(name)
 	defer C.free(unsafe.Pointer(cName))
 
@@ -152,29 +152,29 @@ func (vs *VS) asCPtr() *C.struct_balancer_vs {
 	return (*C.struct_balancer_vs)(unsafe.Pointer(vs))
 }
 
-func (vs *VS) setACL(agent *BalancerAgent) error {
+func (vs *VS) setACL(agent *Agent) error {
 	return errFromCode(C.balancer_vs_set_acl(vs.asCPtr(), agent.asCPtr()))
 }
 
-func (vs *VS) freeACL(agent *BalancerAgent) {
+func (vs *VS) freeACL(agent *Agent) {
 	C.balancer_vs_free_acl(vs.asCPtr(), agent.asCPtr())
 }
 
-func (vs *VS) updateRealSelector(rcu *RCU, agent *BalancerAgent) error {
+func (vs *VS) updateRealSelector(rcu *RCU, agent *Agent) error {
 	return errFromCode(
 		C.balancer_vs_update_real_selector(vs.asCPtr(), rcu.asCPtr(), agent.asCPtr()),
 	)
 }
 
-func (vs *VS) freeRealSelector(agent *BalancerAgent) {
+func (vs *VS) freeRealSelector(agent *Agent) {
 	C.balancer_vs_free_real_selector(vs.asCPtr(), agent.asCPtr())
 }
 
-func (vs *VS) setSessionsTracker(agent *BalancerAgent) error {
+func (vs *VS) setSessionsTracker(agent *Agent) error {
 	return errFromCode(C.balancer_vs_set_session_trackers(vs.asCPtr(), agent.asCPtr()))
 }
 
-func (vs *VS) freeSessionTracker(agent *BalancerAgent) {
+func (vs *VS) freeSessionTracker(agent *Agent) {
 	C.balancer_vs_free_session_trackers(vs.asCPtr(), agent.asCPtr())
 }
 
@@ -209,10 +209,14 @@ func (st *SessionTable) resize(newSize int, now time.Time) error {
 
 const bucketMaxEntries = 16
 
+func (it *SessionTableIter) asCPtr() *C.struct_balancer_session_table_iter {
+	return (*C.struct_balancer_session_table_iter)(unsafe.Pointer(it))
+}
+
 func (st *SessionTable) newSessionIter() SessionTableIter {
 	var iter SessionTableIter
 	C.balancer_st_iter_init(
-		(*C.struct_balancer_session_table_iter)(unsafe.Pointer(&iter)),
+		iter.asCPtr(),
 		st.asCPtr(),
 	)
 	return iter

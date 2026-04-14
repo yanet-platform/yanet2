@@ -9,16 +9,16 @@ import (
 	"google.golang.org/grpc"
 )
 
-type BalancerModule struct {
+type Module struct {
 	cfg     *Config
 	shm     *yanet.SharedMemory
-	service *BalancerService
+	service *Service
 }
 
-func NewBalancerModule(
+func NewModule(
 	cfg *Config,
 	log *zap.SugaredLogger,
-) (*BalancerModule, error) {
+) (*Module, error) {
 	log = log.With(zap.String("module", "balancerpb.Balancer"))
 
 	shm, err := yanet.AttachSharedMemory(cfg.MemoryPath.Unwrap())
@@ -26,35 +26,35 @@ func NewBalancerModule(
 		return nil, fmt.Errorf("failed to attach shared memory: %w", err)
 	}
 
-	svc, err := NewBalancerService(shm, cfg.InstanceID, cfg.MemoryRequirements.Unwrap(), log)
+	svc, err := NewService(shm, cfg.InstanceID, cfg.MemoryRequirements.Unwrap(), log)
 	if err != nil {
-		shm.Detach()
+		_ = shm.Detach()
 		return nil, fmt.Errorf("failed to create balancer service: %w", err)
 	}
 
-	return &BalancerModule{
+	return &Module{
 		cfg:     cfg,
 		shm:     shm,
 		service: svc,
 	}, nil
 }
 
-func (m *BalancerModule) Name() string {
+func (m *Module) Name() string {
 	return "balancer"
 }
 
-func (m *BalancerModule) Endpoint() string {
+func (m *Module) Endpoint() string {
 	return m.cfg.Endpoint.Unwrap()
 }
 
-func (m *BalancerModule) ServicesNames() []string {
+func (m *Module) ServicesNames() []string {
 	return []string{"balancerpb.Balancer"}
 }
 
-func (m *BalancerModule) RegisterService(server *grpc.Server) {
+func (m *Module) RegisterService(server *grpc.Server) {
 	balancerpb.RegisterBalancerServer(server, m.service)
 }
 
-func (m *BalancerModule) Close() error {
+func (m *Module) Close() error {
 	return m.shm.Detach()
 }

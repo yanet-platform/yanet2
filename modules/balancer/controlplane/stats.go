@@ -9,6 +9,7 @@ import (
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb"
 )
 
+// Aggregate the worker local counters into the first counter.
 func aggregateCounter(counter [][]uint64) {
 	for idx := 1; idx < len(counter); idx++ {
 		for i := range counter[idx] {

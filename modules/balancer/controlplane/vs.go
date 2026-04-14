@@ -50,7 +50,7 @@ func (vs *VS) key() vsKey {
 	return k
 }
 
-func (vs *VS) free(agent *BalancerAgent) {
+func (vs *VS) free(agent *Agent) {
 	yanetAgent := agent.AsYanetAgent()
 
 	// Compiled filters.
@@ -59,8 +59,8 @@ func (vs *VS) free(agent *BalancerAgent) {
 	vs.freeSessionTracker(agent)
 
 	// Rule counter IDs.
-	ruleCounterIds := relptr.Slice(&vs.Rule_counter_ids, vs.Allowed_sources_count)
-	yanet.FreeSlice(yanetAgent, ruleCounterIds)
+	ruleCounterIDs := relptr.Slice(&vs.Rule_counter_ids, vs.Allowed_sources_count)
+	yanet.FreeSlice(yanetAgent, ruleCounterIDs)
 
 	// Allowed sources.
 	allowedSources := relptr.Slice(&vs.Allowed_sources, vs.Allowed_sources_count)
@@ -88,7 +88,7 @@ func (vs *VS) free(agent *BalancerAgent) {
 
 // populateAllowedSources allocates and fills the allowed sources array for a VS.
 func (vs *VS) populateAllowedSources(
-	agent *BalancerAgent,
+	agent *Agent,
 	sources []*balancerpb.AllowedSources,
 ) error {
 	count := len(sources)
@@ -120,7 +120,7 @@ func (vs *VS) populateAllowedSources(
 	return nil
 }
 
-func (as *AllowedSource) populate(agent *BalancerAgent, src *balancerpb.AllowedSources) error {
+func (as *AllowedSource) populate(agent *Agent, src *balancerpb.AllowedSources) error {
 	// Nets.
 	nets := src.Nets
 	if len(nets) > 0 {
@@ -165,7 +165,7 @@ func (as *AllowedSource) populate(agent *BalancerAgent, src *balancerpb.AllowedS
 }
 
 // populatePeers allocates and fills the peer address arrays for a VS.
-func (vs *VS) populatePeers(agent *BalancerAgent, peers [][]byte) error {
+func (vs *VS) populatePeers(agent *Agent, peers [][]byte) error {
 	v4Count := 0
 	v6Count := 0
 	for _, addr := range peers {
@@ -298,7 +298,7 @@ func (vs *VS) isWLC() bool {
 }
 
 func (vs *VS) populateReals(
-	agent *BalancerAgent,
+	agent *Agent,
 	pbReals []*balancerpb.Real,
 	prevVs *VS,
 ) (reuseSelector bool, err error) {
@@ -357,7 +357,7 @@ func (vs *VS) populateReals(
 }
 
 func (vs *VS) populate(
-	agent *BalancerAgent,
+	agent *Agent,
 	pb *balancerpb.VirtualService,
 	stableIdx uint64,
 	prevVs *VS,

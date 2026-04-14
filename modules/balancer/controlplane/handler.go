@@ -33,7 +33,7 @@ func (ph *PacketHandler) populateSessionTimeouts(t *balancerpb.SessionsTimeouts)
 // Each address family is handled in two passes: first to count, then to fill.
 // AllocSlice requires the total element count upfront and cannot grow
 // incrementally, so we must count before allocating.
-func (ph *PacketHandler) populateDecapAddresses(agent *BalancerAgent, addrs [][]byte) error {
+func (ph *PacketHandler) populateDecapAddresses(agent *Agent, addrs [][]byte) error {
 	v4Count := 0
 	v6Count := 0
 	for _, addr := range addrs {
@@ -130,7 +130,7 @@ func NewPacketHandler(
 	config *balancerpb.BalancerConfig,
 	name string,
 	sessionTable *SessionTable,
-	agent *BalancerAgent,
+	agent *Agent,
 	prev *PacketHandler,
 ) (*PacketHandler, *balancerpb.ReuseReport, error) {
 	phConfig, stateConfig := config.PacketHandler, config.State
@@ -235,7 +235,7 @@ func (ph *PacketHandler) decapFiltersReusable(addrs [][]byte) (ipv4Reused, ipv6R
 // so after this call vsMap contains only genuinely new VSes for placeNewVS to handle.
 func placeExistingVS(
 	ph *PacketHandler,
-	agent *BalancerAgent,
+	agent *Agent,
 	vsList []*balancerpb.VirtualService,
 	targetVs []VS,
 	prevVs []VS,
@@ -284,7 +284,7 @@ func placeExistingVS(
 // and each entry fills exactly one slot.
 func placeNewVS(
 	ph *PacketHandler,
-	agent *BalancerAgent,
+	agent *Agent,
 	vsList []*balancerpb.VirtualService,
 	targetVs []VS,
 	prevVs []VS,
@@ -333,7 +333,7 @@ func placeNewVS(
 }
 
 func (ph *PacketHandler) populateVS(
-	agent *BalancerAgent,
+	agent *Agent,
 	vsList []*balancerpb.VirtualService,
 	prevPh *PacketHandler,
 	reuseReport *balancerpb.ReuseReport,
@@ -388,7 +388,7 @@ func (ph *PacketHandler) populateVS(
 	}
 
 	// Then, write virtual services which are new in the new config
-	noNewIPv4, noNewIPv6, err := placeNewVS(
+	newIPv4Unchanged, newIPv6Unchanged, err := placeNewVS(
 		ph,
 		agent,
 		vsList,
@@ -402,8 +402,8 @@ func (ph *PacketHandler) populateVS(
 		return err
 	}
 
-	reuseReport.Ipv4VsMatcherReused = prevPh != nil && oldIPv4Matches && noNewIPv4
-	reuseReport.Ipv6VsMatcherReused = prevPh != nil && oldIPv6Matches && noNewIPv6
+	reuseReport.Ipv4VsMatcherReused = prevPh != nil && oldIPv4Matches && newIPv4Unchanged
+	reuseReport.Ipv6VsMatcherReused = prevPh != nil && oldIPv6Matches && newIPv6Unchanged
 
 	ph.Vs_count = uint32(len(services))
 	relptr.SetSlice(&ph.Vs, services)
@@ -436,7 +436,7 @@ func (ph *PacketHandler) resizeSessionTable(
 // Safe to call on a partially-initialized handler because every sub-slice
 // starts as nil (zero-initialized) and FreeSlice / the C helpers are no-ops
 // on zero/nil values.
-func (ph *PacketHandler) free(agent *BalancerAgent) {
+func (ph *PacketHandler) free(agent *Agent) {
 	yanetAgent := agent.AsYanetAgent()
 
 	// Free per-VS resources and the VS array itself.

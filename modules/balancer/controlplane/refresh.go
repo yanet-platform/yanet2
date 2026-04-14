@@ -12,7 +12,7 @@ import (
 type Refresher struct {
 	balancer      *Balancer
 	mu            *sync.Mutex
-	ctx           context.Context
+	parentCtx     context.Context
 	cancel        context.CancelFunc
 	done          chan struct{}
 	refreshPeriod time.Duration
@@ -30,7 +30,9 @@ func (r *Refresher) Run(ctx context.Context) {
 	if r.refreshPeriod == 0 {
 		return
 	}
-	r.ctx, r.cancel = context.WithCancel(ctx)
+	r.parentCtx = ctx
+	derived, cancel := context.WithCancel(ctx)
+	r.cancel = cancel
 	r.done = make(chan struct{})
 	go func() {
 		defer close(r.done)
@@ -38,7 +40,7 @@ func (r *Refresher) Run(ctx context.Context) {
 		defer ticker.Stop()
 		for {
 			select {
-			case <-r.ctx.Done():
+			case <-derived.Done():
 				return
 			case <-ticker.C:
 				r.mu.Lock()
@@ -62,9 +64,13 @@ func (r *Refresher) UpdateRefreshPeriod(period time.Duration) {
 	if period == r.refreshPeriod {
 		return
 	}
+	parentCtx := r.parentCtx
 	r.Stop()
 	r.refreshPeriod = period
-	r.Run(context.Background())
+	if parentCtx == nil {
+		parentCtx = context.Background()
+	}
+	r.Run(parentCtx)
 }
 
 func (r *Refresher) refresh() {

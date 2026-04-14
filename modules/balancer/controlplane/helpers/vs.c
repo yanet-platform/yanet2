@@ -28,14 +28,12 @@ FILTER_COMPILER_DECLARE(ipv4_vs_acl, net4_fast_src, port_fast_src);
 FILTER_COMPILER_DECLARE(ipv6_vs_acl, net6_fast_src, port_fast_src);
 
 static void
-free_rules(size_t count, struct filter_rule *rules) {
+free_rules(struct filter_rule *rules, size_t count) {
 	for (size_t i = 0; i < count; ++i) {
 		free(rules[i].net4.dsts);
 		free(rules[i].net6.dsts);
-		free(rules[i].net4.srcs);
-		free(rules[i].net6.srcs);
-		free(rules[i].transport.dsts);
 		free(rules[i].transport.srcs);
+		free(rules[i].transport.dsts);
 		free(rules[i].transport.protos);
 	}
 	free(rules);
@@ -143,7 +141,7 @@ make_acl_rules(struct filter_rule **out, struct balancer_vs *vs) {
 		if (make_acl_net_rule(
 			    rule, ADDR_OF(&src->nets), src->nets_count, ipv6
 		    ) != 0) {
-			free_rules(allowed_src_count, rules);
+			free_rules(rules, allowed_src_count);
 			return -1;
 		}
 
@@ -152,7 +150,7 @@ make_acl_rules(struct filter_rule **out, struct balancer_vs *vs) {
 			    ADDR_OF(&src->port_ranges),
 			    src->port_ranges_count
 		    ) != 0) {
-			free_rules(allowed_src_count, rules);
+			free_rules(rules, allowed_src_count);
 			return -1;
 		}
 
@@ -180,18 +178,18 @@ balancer_vs_set_acl(struct balancer_vs *vs, struct agent *agent) {
 
 	struct filter *filter = memory_balloc(mctx, sizeof(struct filter));
 	if (filter == NULL) {
-		free_rules(src_count, rules);
+		free_rules(rules, src_count);
 		return -1;
 	}
 
 	int ipv6 = vs->ip_proto == IPPROTO_IPV6;
 	if (compile_acl(filter, rules, src_count, mctx, ipv6) != 0) {
 		memory_bfree(mctx, filter, sizeof(struct filter));
-		free_rules(src_count, rules);
+		free_rules(rules, src_count);
 		return -1;
 	}
 
-	free_rules(src_count, rules);
+	free_rules(rules, src_count);
 	SET_OFFSET_OF(&vs->acl, filter);
 
 	return 0;
@@ -247,7 +245,12 @@ ring_fill(
 		}
 	}
 
-	/* Shuffle the ring. */
+	/*
+	 * Shuffle the ring using a deterministic PRNG seeded by vs->stable_idx.
+	 * Determinism is intentional: it guarantees that the same VS always
+	 * produces the same ring layout across restarts and config updates,
+	 * preserving consistent load distribution.
+	 */
 	uint64_t rng = 0xdeadbeef ^ seed;
 	for (size_t i = pos; i > 1; --i) {
 		uint32_t *a = big_array_get(

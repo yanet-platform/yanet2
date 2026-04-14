@@ -2,49 +2,50 @@ package balancer
 
 import (
 	"fmt"
+	"maps"
 
 	"github.com/c2h5oh/datasize"
 	yanet "github.com/yanet-platform/yanet2/controlplane/ffi"
 	"go.uber.org/zap"
 )
 
-type BalancerAgent struct {
+type Agent struct {
 	agent     *yanet.Agent
 	balancers map[string]*Balancer
 }
 
-func (a *BalancerAgent) AsYanetAgent() *yanet.Agent {
+func (a *Agent) AsYanetAgent() *yanet.Agent {
 	return a.agent
 }
 
-func AttachNewBalancerAgent(
+func AttachNewAgent(
 	shm *yanet.SharedMemory,
 	instanceIdx uint32,
 	size datasize.ByteSize,
-) (*BalancerAgent, error) {
+) (*Agent, error) {
 	agent, err := shm.AgentAttach("balancer", instanceIdx, size)
 	if err != nil {
 		return nil, fmt.Errorf("failed to attach balancer agent: %w", err)
 	}
-	return &BalancerAgent{
+	return &Agent{
 		agent:     agent,
 		balancers: make(map[string]*Balancer),
 	}, nil
 }
 
-func ReattachBalancerAgent(
+func ReattachAgent(
 	shm *yanet.SharedMemory,
 	instanceIdx uint32,
 	size datasize.ByteSize,
 	log *zap.SugaredLogger,
-) (*BalancerAgent, error) {
+) (*Agent, error) {
 	agent, err := shm.AgentReattach("balancer", instanceIdx, size)
 	if err != nil {
 		return nil, fmt.Errorf("failed to reattach balancer agent: %w", err)
 	}
 
 	// Restore balancers
-	balancerAgent := &BalancerAgent{
+	balancerAgent := &Agent{
 		agent:     agent,
 		balancers: make(map[string]*Balancer),
 	}
@@ -59,18 +60,18 @@ func ReattachBalancerAgent(
 }
 
 // GetBalancer returns the balancer with the given name and whether it exists.
-func (a *BalancerAgent) GetBalancer(name string) (*Balancer, bool) {
+func (a *Agent) GetBalancer(name string) (*Balancer, bool) {
 	b, ok := a.balancers[name]
 	return b, ok
 }
 
 // PutBalancer registers a balancer under the given name.
-func (a *BalancerAgent) PutBalancer(name string, b *Balancer) {
+func (a *Agent) PutBalancer(name string, b *Balancer) {
 	a.balancers[name] = b
 }
 
 // BalancerNames returns the names of all registered balancers.
-func (a *BalancerAgent) BalancerNames() []string {
+func (a *Agent) BalancerNames() []string {
 	names := make([]string, 0, len(a.balancers))
 	for name := range a.balancers {
 		names = append(names, name)
@@ -79,10 +80,8 @@ func (a *BalancerAgent) BalancerNames() []string {
 }
 
 // AllBalancers returns a shallow copy of the balancers map.
-func (a *BalancerAgent) AllBalancers() map[string]*Balancer {
+func (a *Agent) AllBalancers() map[string]*Balancer {
 	result := make(map[string]*Balancer, len(a.balancers))
-	for k, v := range a.balancers {
-		result[k] = v
-	}
+	maps.Copy(result, a.balancers)
 	return result
 }
