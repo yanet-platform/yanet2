@@ -20,7 +20,7 @@ pub fn print_compact(state: &balancerpb::BalancerState) {
 
     println!("{:<46}{:<8}Flags", "VirtualService", "Sched",);
     println!(
-        "  -> {:<38}{:<8}{:<6}{:<8}{:<10}{:<12}",
+        "  -> {:<38}{:<10}{:<10}{:<10}{:<12}{:<12}",
         "RemoteAddress:Port", "Enabled", "Weight", "Conns", "Pkts", "Bytes",
     );
     println!("{}", "\u{2500}".repeat(LINE_WIDTH));
@@ -51,7 +51,7 @@ pub fn print_compact(state: &balancerpb::BalancerState) {
             let rs = real.real_stats.as_ref();
             let enabled = if real.enabled { "true" } else { "false" };
             println!(
-                "  -> {:<38}{:<8}{:<6}{:<8}{:<10}{:<12}",
+                "  -> {:<38}{:<10}{:<10}{:<10}{:<12}{:<12}",
                 real_addr,
                 enabled,
                 format_number(real.weight),
@@ -553,7 +553,7 @@ impl StatsRow {
 struct RealStatsRow {
     #[tabled(rename = "Real")]
     real: String,
-    #[tabled(rename = "Ena")]
+    #[tabled(rename = "Enabled")]
     enabled: String,
     #[tabled(rename = "Wght")]
     weight: String,
@@ -595,14 +595,14 @@ fn print_table<T: Tabled>(entries: Vec<T>) {
 /// Recursively walk a JSON value and prettify it for human-readable output:
 /// - Convert byte arrays (IP addresses) into IP strings.
 /// - Convert known enum integer values into short string names.
-pub fn prettify_config(value: &mut serde_json::Value) {
+pub fn prettify_json(value: &mut serde_json::Value) {
     match value {
         serde_json::Value::Array(arr) => {
             if let Some(ip) = try_bytes_to_ip_string(arr) {
                 *value = serde_json::Value::String(ip);
             } else {
                 for item in arr.iter_mut() {
-                    prettify_config(item);
+                    prettify_json(item);
                 }
             }
         }
@@ -620,7 +620,7 @@ pub fn prettify_config(value: &mut serde_json::Value) {
                 })
             });
             for (_, v) in map.iter_mut() {
-                prettify_config(v);
+                prettify_json(v);
             }
         }
         _ => {}
@@ -667,7 +667,7 @@ fn scheduler_str(scheduler: i32) -> &'static str {
         Ok(balancerpb::VsScheduler::Sh) => "sh",
         Ok(balancerpb::VsScheduler::Wrr) => "wrr",
         Ok(balancerpb::VsScheduler::Wlc) => "wlc",
-        _ => "??",
+        _ => "???",
     }
 }
 

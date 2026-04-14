@@ -116,7 +116,7 @@ pub struct ShowCmd {
 impl ShowCmd {
     /// Whether counters should be requested from the server.
     pub fn include_counters(&self) -> bool {
-        self.stats || self.detail
+        self.stats || self.detail || !self.needs_table()
     }
 
     /// Whether tabled output mode is active.
