@@ -49,9 +49,9 @@ compile_acl(
 ) {
 	int res;
 	if (ipv6) {
-		res = FILTER_INIT(filter, ipv6_vs_acl, rules, count, mctx);
+		res = filter_init(filter, ipv6_vs_acl, rules, count, mctx);
 	} else {
-		res = FILTER_INIT(filter, ipv4_vs_acl, rules, count, mctx);
+		res = filter_init(filter, ipv4_vs_acl, rules, count, mctx);
 	}
 
 	return res;
@@ -280,9 +280,9 @@ balancer_vs_free_acl(struct balancer_vs *vs, struct agent *agent) {
 
 	int ipv6 = vs->ip_proto == IPPROTO_IPV6;
 	if (ipv6) {
-		FILTER_FREE(filter, ipv6_vs_acl);
+		filter_free(filter, ipv6_vs_acl);
 	} else {
-		FILTER_FREE(filter, ipv4_vs_acl);
+		filter_free(filter, ipv4_vs_acl);
 	}
 	memory_bfree(mctx, filter, sizeof(struct filter));
 	SET_OFFSET_OF(&vs->acl, NULL);

@@ -49,7 +49,7 @@ filter_vs_group(
 
 	struct value_range *acl_results[group_size];
 	if (is_ipv6) {
-		FILTER_QUERY(
+		filter_query(
 			ADDR_OF(&vs->acl),
 			ipv6_vs_acl,
 			group_pkts,
@@ -57,7 +57,7 @@ filter_vs_group(
 			group_size
 		);
 	} else {
-		FILTER_QUERY(
+		filter_query(
 			ADDR_OF(&vs->acl),
 			ipv4_vs_acl,
 			group_pkts,
@@ -122,7 +122,7 @@ match_and_filter(
 	/* Batch VS lookup. */
 	struct value_range *vs_results[packets_count];
 	if (is_ipv6) {
-		FILTER_QUERY(
+		filter_query(
 			ADDR_OF(&context->packet_handler->ipv6_vs_matcher),
 			ipv6_vs_matcher,
 			packets,
@@ -130,7 +130,7 @@ match_and_filter(
 			packets_count
 		);
 	} else {
-		FILTER_QUERY(
+		filter_query(
 			ADDR_OF(&context->packet_handler->ipv4_vs_matcher),
 			ipv4_vs_matcher,
 			packets,

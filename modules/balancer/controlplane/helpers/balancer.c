@@ -253,14 +253,14 @@ balancer_free_decap_filters(struct balancer_packet_handler *handler) {
 
 	struct filter *filter_ipv4 = ADDR_OF(&handler->decap_ipv4_filter);
 	if (filter_ipv4 != NULL) {
-		FILTER_FREE(filter_ipv4, decap_ipv4);
+		filter_free(filter_ipv4, decap_ipv4);
 		memory_bfree(mctx, filter_ipv4, sizeof(struct filter));
 		SET_OFFSET_OF(&handler->decap_ipv4_filter, NULL);
 	}
 
 	struct filter *filter_ipv6 = ADDR_OF(&handler->decap_ipv6_filter);
 	if (filter_ipv6 != NULL) {
-		FILTER_FREE(filter_ipv6, decap_ipv6);
+		filter_free(filter_ipv6, decap_ipv6);
 		memory_bfree(mctx, filter_ipv6, sizeof(struct filter));
 		SET_OFFSET_OF(&handler->decap_ipv6_filter, NULL);
 	}
@@ -273,14 +273,14 @@ balancer_free_vs_matchers(struct balancer_packet_handler *handler) {
 
 	struct filter *ipv4 = ADDR_OF(&handler->ipv4_vs_matcher);
 	if (ipv4 != NULL) {
-		FILTER_FREE(ipv4, vs_matcher_ipv4);
+		filter_free(ipv4, vs_matcher_ipv4);
 		memory_bfree(mctx, ipv4, sizeof(struct filter));
 		SET_OFFSET_OF(&handler->ipv4_vs_matcher, NULL);
 	}
 
 	struct filter *ipv6 = ADDR_OF(&handler->ipv6_vs_matcher);
 	if (ipv6 != NULL) {
-		FILTER_FREE(ipv6, vs_matcher_ipv6);
+		filter_free(ipv6, vs_matcher_ipv6);
 		memory_bfree(mctx, ipv6, sizeof(struct filter));
 		SET_OFFSET_OF(&handler->ipv6_vs_matcher, NULL);
 	}
@@ -369,9 +369,9 @@ build_decap_filter(struct balancer_packet_handler *handler, int is_ipv6) {
 	size_t count = (size_t)res;
 
 	if (is_ipv6) {
-		res = FILTER_INIT(filter, decap_ipv6, rules, count, mctx);
+		res = filter_init(filter, decap_ipv6, rules, count, mctx);
 	} else {
-		res = FILTER_INIT(filter, decap_ipv4, rules, count, mctx);
+		res = filter_init(filter, decap_ipv4, rules, count, mctx);
 	}
 	free_rules(rules, count);
 
@@ -511,9 +511,9 @@ build_vs_matcher(
 	size_t count = (size_t)res;
 
 	if (ipproto == IPPROTO_IPV6) {
-		res = FILTER_INIT(filter, vs_matcher_ipv6, rules, count, mctx);
+		res = filter_init(filter, vs_matcher_ipv6, rules, count, mctx);
 	} else {
-		res = FILTER_INIT(filter, vs_matcher_ipv4, rules, count, mctx);
+		res = filter_init(filter, vs_matcher_ipv4, rules, count, mctx);
 	}
 	free_rules(rules, count);
 
