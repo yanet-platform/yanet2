@@ -32,5 +32,3 @@ sleep 3
 /mnt/target/release/yanet-cli-pipeline update --name=dummy
 
 /mnt/target/release/yanet-cli-device-plain update --name=01:00.0 --input test:1 --output dummy:1
-
-/mnt/target/release/yanet-cli-balancer stats --name=balancer0 --device=01:00.0 --pipeline=test --function=test --chain=ch0

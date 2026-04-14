@@ -19,10 +19,10 @@ import (
 type Service struct {
 	balancerpb.UnimplementedBalancerServer
 
-	agent           *Agent
-	mu              sync.Mutex
-	log             *zap.SugaredLogger
-	handlersMetrics methodMetrics
+	agent   *Agent
+	mu      sync.Mutex
+	log     *zap.SugaredLogger
+	metrics methodMetrics
 }
 
 func NewService(
@@ -40,9 +40,9 @@ func NewService(
 	}
 
 	s := &Service{
-		agent:           agent,
-		log:             log,
-		handlersMetrics: newMethodMetrics(),
+		agent:   agent,
+		log:     log,
+		metrics: newMethodMetrics(),
 	}
 
 	for _, balancer := range agent.AllBalancers() {
@@ -92,7 +92,7 @@ func (s *Service) SetConfig(
 	req *balancerpb.SetConfigRequest,
 ) (*balancerpb.SetConfigResponse, error) {
 	tracker := newMetricsTracker(
-		"set_config", s.handlersMetrics, defaultLatencyBoundsMS,
+		"set_config", s.metrics, defaultLatencyBoundsMS,
 		metrics.Labels{"config": req.GetName()},
 	)
 	defer tracker.Fix()
@@ -161,7 +161,7 @@ func (s *Service) GetConfig(
 	req *balancerpb.GetConfigRequest,
 ) (*balancerpb.GetConfigResponse, error) {
 	tracker := newMetricsTracker(
-		"get_config", s.handlersMetrics, defaultLatencyBoundsMS, metrics.Labels{},
+		"get_config", s.metrics, defaultLatencyBoundsMS, metrics.Labels{},
 	)
 	defer tracker.Fix()
 
@@ -185,7 +185,7 @@ func (s *Service) GetState(
 	req *balancerpb.GetStateRequest,
 ) (*balancerpb.GetStateResponse, error) {
 	tracker := newMetricsTracker(
-		"get_state", s.handlersMetrics, defaultLatencyBoundsMS, metrics.Labels{},
+		"get_state", s.metrics, defaultLatencyBoundsMS, metrics.Labels{},
 	)
 	defer tracker.Fix()
 
@@ -222,7 +222,7 @@ func (s *Service) ListSessions(
 	stream grpc.ServerStreamingServer[balancerpb.Session],
 ) error {
 	tracker := newMetricsTracker(
-		"list_sessions", s.handlersMetrics, defaultLatencyBoundsMS, metrics.Labels{},
+		"list_sessions", s.metrics, defaultLatencyBoundsMS, metrics.Labels{},
 	)
 	defer tracker.Fix()
 
@@ -244,7 +244,7 @@ func (s *Service) UpdateReals(
 	req *balancerpb.UpdateRealsRequest,
 ) (*balancerpb.UpdateRealsResponse, error) {
 	tracker := newMetricsTracker(
-		"update_reals", s.handlersMetrics, defaultLatencyBoundsMS, metrics.Labels{},
+		"update_reals", s.metrics, defaultLatencyBoundsMS, metrics.Labels{},
 	)
 	defer tracker.Fix()
 
@@ -279,7 +279,7 @@ func (s *Service) FlushReals(
 	req *balancerpb.FlushRealsRequest,
 ) (*balancerpb.FlushRealsResponse, error) {
 	tracker := newMetricsTracker(
-		"flush_reals", s.handlersMetrics, defaultLatencyBoundsMS, metrics.Labels{},
+		"flush_reals", s.metrics, defaultLatencyBoundsMS, metrics.Labels{},
 	)
 	defer tracker.Fix()
 
@@ -310,7 +310,7 @@ func (s *Service) UpdateVS(
 	req *balancerpb.UpdateVSRequest,
 ) (*balancerpb.UpdateVSResponse, error) {
 	tracker := newMetricsTracker(
-		"update_vs", s.handlersMetrics, defaultLatencyBoundsMS, metrics.Labels{},
+		"update_vs", s.metrics, defaultLatencyBoundsMS, metrics.Labels{},
 	)
 	defer tracker.Fix()
 
@@ -343,7 +343,7 @@ func (s *Service) DeleteVS(
 	req *balancerpb.DeleteVSRequest,
 ) (*balancerpb.DeleteVSResponse, error) {
 	tracker := newMetricsTracker(
-		"delete_vs", s.handlersMetrics, defaultLatencyBoundsMS, metrics.Labels{},
+		"delete_vs", s.metrics, defaultLatencyBoundsMS, metrics.Labels{},
 	)
 	defer tracker.Fix()
 
@@ -376,7 +376,7 @@ func (s *Service) GetMetrics(
 	_ *balancerpb.GetMetricsRequest,
 ) (*balancerpb.GetMetricsResponse, error) {
 	tracker := newMetricsTracker(
-		"get_metrics", s.handlersMetrics, defaultLatencyBoundsMS, metrics.Labels{},
+		"get_metrics", s.metrics, defaultLatencyBoundsMS, metrics.Labels{},
 	)
 	defer tracker.Fix()
 
@@ -393,7 +393,7 @@ func (s *Service) GetMetrics(
 		result = append(result, bMetrics...)
 	}
 
-	result = append(result, s.handlersMetrics.collect()...)
+	result = append(result, s.metrics.collect()...)
 
 	return &balancerpb.GetMetricsResponse{Metrics: result}, nil
 }

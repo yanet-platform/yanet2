@@ -11,7 +11,7 @@ import (
 	"github.com/yanet-platform/yanet2/tests/functional/framework"
 )
 
-func createTcpPacket(srcIP, dstIP net.IP, srcPort, dstPort int, payload []byte, SYN bool) []byte {
+func createTCPPacket(srcIP, dstIP net.IP, srcPort, dstPort int, payload []byte, SYN bool) []byte {
 	eth := layers.Ethernet{
 		SrcMAC:       framework.MustParseMAC(framework.SrcMAC),
 		DstMAC:       framework.MustParseMAC(framework.DstMAC),
@@ -72,9 +72,6 @@ func TestBalancer(t *testing.T) {
 			// Configure devices
 			"/mnt/target/release/yanet-cli-device-plain update --name=01:00.0 --input test:1 --output dummy:1",
 
-			// Show config stats
-			"/mnt/target/release/yanet-cli-balancer stats --name=balancer0 --device=01:00.0 --pipeline=test --function=test --chain=ch0",
-
 			// Enable single real
 			"/mnt/target/release/yanet-cli-balancer reals enable --name=balancer0 --vs 192.0.2.1:80/tcp --reals 10.1.1.1",
 			"/mnt/target/release/yanet-cli-balancer reals flush --name=balancer0",
@@ -85,7 +82,7 @@ func TestBalancer(t *testing.T) {
 	})
 
 	fw.Run("Test_IPv4_Packet", func(fw *framework.F, t *testing.T) {
-		packet := createTcpPacket(
+		packet := createTCPPacket(
 			net.ParseIP("192.168.2.2"),
 			net.ParseIP("192.0.2.1"),
 			12345,

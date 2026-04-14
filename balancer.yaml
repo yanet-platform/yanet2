@@ -28,11 +28,6 @@ packet_handler:
           weight: 100
           src_addr: "192.0.2.1"
           src_mask: "255.255.255.255"
-        - ip: "10.1.1.2"
-          port: 0
-          weight: 50
-          src_addr: "192.0.2.1"
-          src_mask: "255.255.255.255"
       peers:
         - "192.0.2.10"
         - "192.0.2.11"
