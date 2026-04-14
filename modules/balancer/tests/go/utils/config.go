@@ -327,7 +327,7 @@ func GenerateVSList(count, realsPerVS int, rng *rand.Rand) []*balancerpb.Virtual
 
 		// Random scheduler
 		if rng.Intn(2) == 0 {
-			b.WithScheduler(balancerpb.VsScheduler_ROUND_ROBIN)
+			b.WithScheduler(balancerpb.VsScheduler_WRR)
 		}
 
 		// Random flags

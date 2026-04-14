@@ -233,7 +233,7 @@ func (s *Service) ListSessions(
 
 	b, _, err := s.getBalancerWithAutoSelection(req.Name)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to auto-select balancer: %w", err)
 	}
 
 	return b.ListSessions(req.Filter, time.Now(), func(session *balancerpb.Session) error {
@@ -255,7 +255,7 @@ func (s *Service) UpdateReals(
 
 	b, name, err := s.getBalancerWithAutoSelection(req.Name)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to auto-select balancer %w", err)
 	}
 
 	count, err := b.UpdateReals(req.Updates, req.Buffer)
@@ -266,12 +266,12 @@ func (s *Service) UpdateReals(
 
 	resp := &balancerpb.UpdateRealsResponse{Name: name}
 	if req.Buffer {
-		resp.UpdatesBuffered = uint32(count)
-		s.log.Debugw("real updates buffered", "name", name, "count", count)
+		s.log.Infow("real updates buffered", "name", name, "count", count)
 	} else {
-		resp.UpdatesApplied = uint32(count)
 		s.log.Infow("real updates applied", "name", name, "count", count)
 	}
+
+	resp.UpdatesApplied = uint32(count)
 
 	return resp, nil
 }
@@ -290,7 +290,7 @@ func (s *Service) FlushReals(
 
 	b, name, err := s.getBalancerWithAutoSelection(req.Name)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to auto-select balancer: %w", err)
 	}
 
 	count, err := b.FlushRealUpdates()
@@ -321,7 +321,7 @@ func (s *Service) UpdateVS(
 
 	b, name, err := s.getBalancerWithAutoSelection(req.Name)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to auto-select balancer: %w", err)
 	}
 
 	s.log.Infow("updating virtual services", "name", name, "vs_count", len(req.Services))
@@ -354,7 +354,7 @@ func (s *Service) DeleteVS(
 
 	b, name, err := s.getBalancerWithAutoSelection(req.Name)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to auto-select balancer: %w", err)
 	}
 
 	s.log.Infow("deleting virtual services", "name", name, "vs_count", len(req.Services))

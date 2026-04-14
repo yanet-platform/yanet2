@@ -35,7 +35,7 @@ func makeValidVS() *balancerpb.VirtualService {
 			Port:  80,
 			Proto: balancerpb.TransportProto_TCP,
 		},
-		Scheduler: balancerpb.VsScheduler_SOURCE_HASH,
+		Scheduler: balancerpb.VsScheduler_SH,
 		Flags:     &balancerpb.VsFlags{},
 		Reals:     []*balancerpb.Real{makeValidReal()},
 	}
@@ -720,7 +720,7 @@ func TestValidateVS(t *testing.T) {
 
 	t.Run("round-robin-scheduler", func(t *testing.T) {
 		vs := makeValidVS()
-		vs.Scheduler = balancerpb.VsScheduler_ROUND_ROBIN
+		vs.Scheduler = balancerpb.VsScheduler_WRR
 		require.NoError(t, validateVS(vs))
 	})
 

@@ -102,6 +102,10 @@ func resolveSession(
 	portBytes := (*[2]byte)(unsafe.Pointer(&entry.Id.Client_port))
 	clientPort := binary.BigEndian.Uint16(portBytes[:])
 
+	createTimestamp := time.Unix(int64(entry.State.Create_timestamp), 0)
+	lastPacketTimestamp := time.Unix(int64(entry.State.Last_packet_timestamp), 0)
+	timeout := time.Duration(entry.State.Timeout) * time.Second
+
 	return &balancerpb.Session{
 		ClientAddr: clientAddr,
 		ClientPort: uint32(clientPort),
@@ -110,10 +114,8 @@ func resolveSession(
 			Vs:   vsID,
 			Real: realRelID,
 		},
-		CreateTimestamp: timestamppb.New(time.Unix(int64(entry.State.Create_timestamp), 0)),
-		LastPacketTimestamp: timestamppb.New(
-			time.Unix(int64(entry.State.Last_packet_timestamp), 0),
-		),
-		Timeout: durationpb.New(time.Duration(entry.State.Timeout) * time.Second),
+		CreateTimestamp:     timestamppb.New(createTimestamp),
+		LastPacketTimestamp: timestamppb.New(lastPacketTimestamp),
+		Timeout:             durationpb.New(timeout),
 	}, true
 }

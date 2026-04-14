@@ -45,7 +45,7 @@ enum VsScheduler {
   // - Applications with client-side caching
   // - When consistent routing is more important than perfect load
   // distribution
-  SOURCE_HASH = 0;
+  SH = 0;
 
   // Weighted Round Robin Scheduler.
   //
@@ -63,7 +63,9 @@ enum VsScheduler {
   // - Stateless applications
   // - When even load distribution is critical
   // - Applications that don't require session affinity
-  ROUND_ROBIN = 1;
+  WRR = 1;
+
+  WLC = 2;
 }
 
 // Virtual service unique identifier.
@@ -365,44 +367,6 @@ message VsFlags {
   // - Transparent proxying scenarios
   // - When port-based routing is not needed
   bool pure_l3 = 4;
-
-  // Enable Weighted Least Connection (WLC) dynamic weight adjustment.
-  //
-  // When true, the balancer dynamically adjusts real server weights
-  // based on active session counts to balance load more evenly.
-  //
-  // REQUIREMENTS:
-  // To enable WLC, ALL of the following must be configured:
-  // 1. Set this flag to true
-  // 2. Set StateConfig.refresh_period to a non-zero value (e.g., 1s-60s)
-  // 3. Set StateConfig.session_table_max_load_factor (e.g., 0.7-0.9)
-  // 4. Configure StateConfig.wlc with power and max_weight values
-  //
-  // If any of these requirements are missing, configuration will be
-  // rejected.
-  //
-  // BEHAVIOR:
-  // - During each refresh cycle (every refresh_period):
-  //	 * Scans session table to count active sessions per real
-  //	 * Calculates new effective weights using WLC algorithm
-  //	 * Updates real weights in the dataplane (state only, not config)
-  // - Formula: effective_weight = weight * max(1.0, power * (1.0 -
-  //	 ratio))
-  //	 where ratio =
-  //	 (real_sessions * total_weight) / (total_sessions *
-  //	 real_weight)
-  // - Effective weights are capped at wlc.max_weight
-  // - Original config weights are preserved for future calculations
-  //
-  // COMPATIBILITY:
-  // - Works with both SOURCE_HASH and ROUND_ROBIN schedulers
-  // - The adjustment is independent of the scheduling algorithm
-  // - Helps prevent overloading when session durations vary significantly
-  //
-  // PERFORMANCE IMPACT:
-  // - Adds overhead during refresh cycle (scan sessions + weight updates)
-  // - Impact depends on session count and refresh_period
-  bool wlc = 5;
 }
 
 // Real server update operation.
@@ -457,9 +421,6 @@ message SessionsTimeouts {
   // Timeout for UDP sessions (seconds)
   // UDP is connectionless, so this defines inactivity timeout
   uint32 udp = 5;
-
-  // Default timeout for other cases (seconds)
-  uint32 default = 6;
 }
 
 // Top-level balancer configuration.

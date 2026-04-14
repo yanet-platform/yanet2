@@ -99,7 +99,7 @@ func restoreVS(vs *VS) *balancerpb.VirtualService {
 			Port:  uint32(vs.Port),
 			Proto: proto,
 		},
-		Flags:       vsFlags(vs.Flags),
+		Flags:       vs.flags(),
 		Reals:       restoreReals(vs),
 		AllowedSrcs: restoreAllowedSources(vs, isV6),
 		Peers:       restorePeers(vs),

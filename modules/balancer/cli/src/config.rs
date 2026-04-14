@@ -58,8 +58,9 @@ pub struct Real {
 
 #[derive(Debug, Clone, Serialize)]
 pub enum Scheduler {
-    SourceHash,
-    RoundRobin,
+    Sh,
+    Wrr,
+    Wlc,
 }
 
 impl<'de> Deserialize<'de> for Scheduler {
@@ -68,11 +69,12 @@ impl<'de> Deserialize<'de> for Scheduler {
         D: serde::Deserializer<'de>,
     {
         let s = String::deserialize(deserializer)?;
-        match s.to_uppercase().as_str() {
-            "SOURCE_HASH" | "SH" => Ok(Scheduler::SourceHash),
-            "ROUND_ROBIN" | "RR" => Ok(Scheduler::RoundRobin),
+        match s.to_lowercase().as_str() {
+            "sh" => Ok(Scheduler::Sh),
+            "wrr" => Ok(Scheduler::Wrr),
+            "wlc" => Ok(Scheduler::Wlc),
             _ => Err(serde::de::Error::custom(format!(
-                "invalid scheduler: '{}'. Expected: SOURCE_HASH, SH, ROUND_ROBIN, RR",
+                "invalid scheduler: '{}'. Expected: sh, wrr or wlc",
                 s
             ))),
         }
@@ -112,8 +114,6 @@ pub struct VsFlags {
     pub ops: bool,
     #[serde(default)]
     pub pure_l3: bool,
-    #[serde(default)]
-    pub wlc: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -123,7 +123,6 @@ pub struct SessionsTimeouts {
     pub tcp_fin: u32,
     pub tcp: u32,
     pub udp: u32,
-    pub default: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -291,8 +290,9 @@ impl TryFrom<VirtualService> for balancerpb::VirtualService {
             Proto::Udp => balancerpb::TransportProto::Udp,
         };
         let scheduler = match vs.scheduler {
-            Scheduler::SourceHash => balancerpb::VsScheduler::SourceHash,
-            Scheduler::RoundRobin => balancerpb::VsScheduler::RoundRobin,
+            Scheduler::Sh => balancerpb::VsScheduler::Sh,
+            Scheduler::Wrr => balancerpb::VsScheduler::Wrr,
+            Scheduler::Wlc => balancerpb::VsScheduler::Wlc,
         };
 
         let allowed_srcs: Result<Vec<_>, String> = vs
@@ -355,7 +355,6 @@ impl From<VsFlags> for balancerpb::VsFlags {
             fix_mss: f.fix_mss,
             ops: f.ops,
             pure_l3: f.pure_l3,
-            wlc: f.wlc,
         }
     }
 }
@@ -387,7 +386,6 @@ impl From<SessionsTimeouts> for balancerpb::SessionsTimeouts {
             tcp_fin: t.tcp_fin,
             tcp: t.tcp,
             udp: t.udp,
-            default: t.default,
         }
     }
 }

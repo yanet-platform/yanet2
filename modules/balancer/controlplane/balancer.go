@@ -3,6 +3,7 @@ package balancer
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -123,7 +124,7 @@ func (b *Balancer) buildIndexes() {
 
 	for idx := range services {
 		vs := &services[idx]
-		if vs.Flags&VSFlagRemoved != 0 {
+		if vs.isRemoved() {
 			continue
 		}
 		slot := vsSlot{
@@ -530,7 +531,7 @@ func (b *Balancer) FlushRealUpdates() (int, error) {
 
 	updatesApplied, err := b.UpdateReals(updates, false)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("failed to update reals: %w", err)
 	}
 
 	b.realUpdateBuffer = nil

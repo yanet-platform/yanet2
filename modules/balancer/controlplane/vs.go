@@ -213,22 +213,25 @@ func (vs *VS) populatePeers(agent *Agent, peers [][]byte) error {
 }
 
 // protoVsFlagsToC converts protobuf VsFlags to the C bit field value.
-func protoVsFlagsToC(f *balancerpb.VsFlags) uint16 {
+func protoVsFlagsToC(f *balancerpb.VsFlags, s balancerpb.VsScheduler) uint16 {
 	var flags uint16
-	if f.GetPureL3() {
+	if f.PureL3 {
 		flags |= VSFlagPureL3
 	}
-	if f.GetFixMss() {
+	if f.FixMss {
 		flags |= VSFlagFixMSS
 	}
-	if f.GetGre() {
+	if f.Gre {
 		flags |= VSFlagGRE
 	}
-	if f.GetOps() {
+	if f.Ops {
 		flags |= VSFlagOPS
 	}
-	if f.GetWlc() {
+	if s == balancerpb.VsScheduler_WLC {
 		flags |= VSFlagWLC
+		flags |= VSFlagRoundRobin
+	} else if s == balancerpb.VsScheduler_WRR {
+		flags |= VSFlagRoundRobin
 	}
 	return flags
 }
@@ -374,8 +377,8 @@ func (vs *VS) populate(
 	if len(pb.Id.Addr) == 16 {
 		vs.Ip_proto = ipprotoIPv6
 	}
-	vs.Flags |= protoVsFlagsToC(pb.Flags)
-	if pb.Scheduler == balancerpb.VsScheduler_ROUND_ROBIN {
+	vs.Flags |= protoVsFlagsToC(pb.Flags, pb.Scheduler)
+	if pb.Scheduler == balancerpb.VsScheduler_WRR {
 		vs.Flags |= VSFlagRoundRobin
 	}
 
@@ -440,13 +443,12 @@ func transportProtoToPB(proto uint8) balancerpb.TransportProto {
 	return protoPB
 }
 
-func vsFlags(flags uint16) *balancerpb.VsFlags {
+func (vs *VS) flags() *balancerpb.VsFlags {
 	return &balancerpb.VsFlags{
-		PureL3: flags&VSFlagPureL3 != 0,
-		FixMss: flags&VSFlagFixMSS != 0,
-		Gre:    flags&VSFlagGRE != 0,
-		Ops:    flags&VSFlagOPS != 0,
-		Wlc:    flags&VSFlagWLC != 0,
+		PureL3: vs.Flags&VSFlagPureL3 != 0,
+		FixMss: vs.Flags&VSFlagFixMSS != 0,
+		Gre:    vs.Flags&VSFlagGRE != 0,
+		Ops:    vs.Flags&VSFlagOPS != 0,
 	}
 }
 
@@ -455,10 +457,13 @@ func (vs *VS) schedulerRoundRobin() bool {
 }
 
 func (vs *VS) scheduler() balancerpb.VsScheduler {
-	if vs.schedulerRoundRobin() {
-		return balancerpb.VsScheduler_ROUND_ROBIN
+	if vs.isWLC() {
+		return balancerpb.VsScheduler_WLC
 	}
-	return balancerpb.VsScheduler_SOURCE_HASH
+	if vs.schedulerRoundRobin() {
+		return balancerpb.VsScheduler_WRR
+	}
+	return balancerpb.VsScheduler_SH
 }
 
 func (vs *VS) state(workers uint32, now time.Time) *balancerpb.VsState {
@@ -480,7 +485,7 @@ func (vs *VS) state(workers uint32, now time.Time) *balancerpb.VsState {
 	isV6 := vs.Ip_proto == ipprotoIPv6
 	vsState := &balancerpb.VsState{
 		Id:                  vs.id(),
-		Flags:               vsFlags(vs.Flags),
+		Flags:               vs.flags(),
 		Scheduler:           vs.scheduler(),
 		Reals:               realsState,
 		ActiveSessions:      activeSessions,

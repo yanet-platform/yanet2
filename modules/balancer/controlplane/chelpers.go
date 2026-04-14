@@ -225,7 +225,7 @@ func (st *SessionTable) newSessionIter() SessionTableIter {
 func (it *SessionTableIter) nextBucket(now uint32, buf []SessionEntry) int {
 	var count C.int
 	ret := C.balancer_st_iter_next_bucket_buf(
-		(*C.struct_balancer_session_table_iter)(unsafe.Pointer(it)),
+		it.asCPtr(),
 		C.uint32_t(now),
 		(*C.struct_balancer_session_entry)(unsafe.Pointer(&buf[0])),
 		&count,

@@ -267,8 +267,8 @@ func validateVS(vs *balancerpb.VirtualService) error {
 	if len(vs.Id.Addr) != 4 && len(vs.Id.Addr) != 16 {
 		return fmt.Errorf("id.addr must be 4 or 16 bytes")
 	}
-	if vs.Scheduler != balancerpb.VsScheduler_SOURCE_HASH &&
-		vs.Scheduler != balancerpb.VsScheduler_ROUND_ROBIN {
+	if vs.Scheduler != balancerpb.VsScheduler_SH &&
+		vs.Scheduler != balancerpb.VsScheduler_WRR {
 		return fmt.Errorf("scheduler must be SOURCE_HASH or ROUND_ROBIN")
 	}
 	if vs.Id.Proto != balancerpb.TransportProto_TCP &&

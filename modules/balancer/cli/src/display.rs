@@ -74,7 +74,7 @@ fn print_module_stats(state: &balancerpb::BalancerState) {
             "Incoming Pkts",
             format_number(c.incoming_packets),
         ));
-        rows.push(StatsRow::new("", "Incoming Bytes", format_bytes(c.incoming_bytes)));
+        rows.push(StatsRow::new("", "Incoming Bytes", format_number(c.incoming_bytes)));
         rows.push(StatsRow::new(
             "",
             "Unexpected Proto",
@@ -83,7 +83,7 @@ fn print_module_stats(state: &balancerpb::BalancerState) {
         rows.push(StatsRow::new("", "Decap Success", format_number(c.decap_successful)));
         rows.push(StatsRow::new("", "Decap Failed", format_number(c.decap_failed)));
         rows.push(StatsRow::new("", "Outgoing Pkts", format_number(c.outgoing_packets)));
-        rows.push(StatsRow::new("", "Outgoing Bytes", format_bytes(c.outgoing_bytes)));
+        rows.push(StatsRow::new("", "Outgoing Bytes", format_number(c.outgoing_bytes)));
         rows.push(StatsRow::empty());
     }
 
@@ -276,22 +276,16 @@ fn print_table_view_vs(vs: &balancerpb::VsState, opts: &ShowOptions) {
                 Some(RealTableRow::Stats(RealStatsRow {
                     real: real_addr,
                     enabled: if real.enabled {
-                        "yes".to_string()
+                        "true".to_string()
                     } else {
-                        "no".to_string()
+                        "false".to_string()
                     },
-                    weight: format!(
-                        "{}/{}",
-                        format_number(real.weight),
-                        format_number(real.effective_weight)
-                    ),
+                    weight: format_number(real.weight),
+                    effective_weight: format_number(real.effective_weight),
                     packets: format_number(rs.map_or(0, |s| s.packets)),
-                    bytes: format_bytes(rs.map_or(0, |s| s.bytes)),
-                    sessions: format!(
-                        "{}/{}",
-                        format_number(rs.map_or(0, |s| s.created_sessions)),
-                        format_number(real.active_sessions)
-                    ),
+                    bytes: format_number(rs.map_or(0, |s| s.bytes)),
+                    active_sessions: format_number(real.active_sessions),
+                    created_sessions: format_number(real.real_stats.map_or(0, |s| s.created_sessions)),
                     last_packet: real
                         .last_packet_timestamp
                         .as_ref()
@@ -343,9 +337,9 @@ fn print_table_view_vs(vs: &balancerpb::VsState, opts: &ShowOptions) {
 
 fn print_vs_stats(stats: &balancerpb::VsStats) {
     println!("  Incoming Packets: {}", format_number(stats.incoming_packets));
-    println!("  Incoming Bytes: {}", format_bytes(stats.incoming_bytes));
+    println!("  Incoming Bytes: {}", format_number(stats.incoming_bytes));
     println!("  Outgoing Packets: {}", format_number(stats.outgoing_packets));
-    println!("  Outgoing Bytes: {}", format_bytes(stats.outgoing_bytes));
+    println!("  Outgoing Bytes: {}", format_number(stats.outgoing_bytes));
     println!("  Created Sessions: {}", format_number(stats.created_sessions));
     println!(
         "  Packet Src Not Allowed: {}",
@@ -549,20 +543,24 @@ struct RealStatsRow {
     real: String,
     #[tabled(rename = "Ena")]
     enabled: String,
-    #[tabled(rename = "Wght/Eff")]
+    #[tabled(rename = "Wght")]
     weight: String,
+    #[tabled(rename = "Eff Wght")]
+    effective_weight: String,
     #[tabled(rename = "Pkts")]
     packets: String,
     #[tabled(rename = "Bytes")]
     bytes: String,
-    #[tabled(rename = "Sess Crt/Act")]
-    sessions: String,
     #[tabled(rename = "Last Pkt")]
     last_packet: String,
     #[tabled(rename = "Dis Pkts")]
     disabled_pkts: String,
     #[tabled(rename = "ICMP Err")]
     icmp_pkts: String,
+    #[tabled(rename = "Sess Act")]
+    active_sessions: String,
+    #[tabled(rename = "Sess Crt")]
+    created_sessions: String,
 }
 
 // ─── Table Printing ─────────────────────────────────────────────────────────
@@ -598,10 +596,10 @@ pub fn prettify_config(value: &mut serde_json::Value) {
         }
         serde_json::Value::Object(map) => {
             prettify_enum(map, "scheduler", |v| {
-                balancerpb::VsScheduler::try_from(v).ok().map(|s| match s {
-                    balancerpb::VsScheduler::SourceHash => "sh",
-                    balancerpb::VsScheduler::RoundRobin => "rr",
-                })
+                balancerpb::VsScheduler::try_from(v)
+                    .ok()
+                    .map(|s| s as i32)
+                    .map(scheduler_str)
             });
             prettify_enum(map, "proto", |v| {
                 balancerpb::TransportProto::try_from(v).ok().map(|p| match p {
@@ -654,8 +652,9 @@ fn proto_str(proto: i32) -> &'static str {
 
 fn scheduler_str(scheduler: i32) -> &'static str {
     match balancerpb::VsScheduler::try_from(scheduler) {
-        Ok(balancerpb::VsScheduler::SourceHash) => "sh",
-        Ok(balancerpb::VsScheduler::RoundRobin) => "rr",
+        Ok(balancerpb::VsScheduler::Sh) => "sh",
+        Ok(balancerpb::VsScheduler::Wrr) => "wrr",
+        Ok(balancerpb::VsScheduler::Wlc) => "wlc",
         _ => "??",
     }
 }
@@ -676,9 +675,6 @@ fn flags_str(flags: Option<&balancerpb::VsFlags>) -> String {
     }
     if f.pure_l3 {
         parts.push("l3");
-    }
-    if f.wlc {
-        parts.push("wlc");
     }
     parts.join(",")
 }
@@ -715,26 +711,6 @@ pub fn format_number(n: u64) -> String {
         result.push(c);
     }
     result.chars().rev().collect()
-}
-
-fn format_bytes(bytes: u64) -> String {
-    const KB: f64 = 1024.0;
-    const MB: f64 = 1024.0 * 1024.0;
-    const GB: f64 = 1024.0 * 1024.0 * 1024.0;
-    const TB: f64 = 1024.0 * 1024.0 * 1024.0 * 1024.0;
-
-    let b = bytes as f64;
-    if b >= TB {
-        format!("{:.1} TB", b / TB)
-    } else if b >= GB {
-        format!("{:.1} GB", b / GB)
-    } else if b >= MB {
-        format!("{:.1} MB", b / MB)
-    } else if b >= KB {
-        format!("{:.1} KB", b / KB)
-    } else {
-        format!("{} B", bytes)
-    }
 }
 
 fn format_timestamp(ts: &prost_types::Timestamp) -> String {

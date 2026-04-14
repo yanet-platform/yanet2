@@ -64,7 +64,7 @@ func buildInitialConfig() *balancerpb.BalancerConfig {
 
 			// VS2: UDP IPv4, ROUND_ROBIN, 2 reals with different weights
 			utils.NewUDPVS(vs2AddrV4.String(), 12345).
-				WithScheduler(balancerpb.VsScheduler_ROUND_ROBIN).
+				WithScheduler(balancerpb.VsScheduler_WRR).
 				AllowAll().
 				AddReal(
 					utils.RW(real2a.String(), 2),

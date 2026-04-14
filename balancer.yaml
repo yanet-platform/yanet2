@@ -10,7 +10,7 @@ packet_handler:
     - addr: "192.0.2.1"
       port: 80
       proto: TCP  # Accepts: TCP, tcp
-      scheduler: SOURCE_HASH  # Accepts: SOURCE_HASH, source_hash, SH, sh
+      scheduler: sh
       flags:
         gre: false
         fix_mss: true
@@ -37,7 +37,7 @@ packet_handler:
     - addr: "192.0.2.2"
       port: 443
       proto: tcp  # Lowercase also accepted
-      scheduler: round_robin  # Accepts: ROUND_ROBIN, round_robin, RR, rr
+      scheduler: wrr
       flags:
         gre: false
         fix_mss: true
@@ -71,7 +71,7 @@ packet_handler:
     - addr: "192.0.2.4"
       port: 53
       proto: UDP
-      scheduler: SH  # Short form
+      scheduler: sh
       flags:
         gre: false
         fix_mss: false
@@ -99,7 +99,7 @@ packet_handler:
     - addr: "192.0.2.3"
       port: 0  # MUST be 0 for pure_l3 mode
       proto: tcp
-      scheduler: sh  # Short form lowercase
+      scheduler: rr
       flags:
         gre: false
         fix_mss: false
@@ -121,7 +121,7 @@ packet_handler:
     - addr: "2001:db8::1"
       port: 443
       proto: TCP
-      scheduler: RR
+      scheduler: rr
       flags:
         gre: false
         fix_mss: true
