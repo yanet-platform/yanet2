@@ -4,7 +4,6 @@ package balancer
 import (
 	"context"
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 
@@ -643,8 +642,7 @@ func mergeStateConfig(old, update *balancerpb.StateConfig) *balancerpb.StateConf
 }
 
 // Metrics reads dataplane counters for all positions where this balancer is
-// installed and returns a flat slice of commonpb.Metric without building any
-// intermediate BalancerState proto tree.
+// installed and returns a flat slice of commonpb.Metric.
 func (b *Balancer) Metrics(now time.Time) ([]*commonpb.Metric, error) {
 	dpConfig := b.agent.AsYanetAgent().DPConfig()
 	balancerName := b.handler.name()
@@ -672,143 +670,9 @@ func (b *Balancer) Metrics(now time.Time) ([]*commonpb.Metric, error) {
 			"balancer", balancerName, []string{},
 		)
 
-		var (
-			cmn *CommonStats
-			l4s *L4Stats
-			iv4 *IcmpStats
-			iv6 *IcmpStats
-		)
-
-		for _, counter := range counters {
-			name := counter.Name
-			switch {
-			case name == "cmn":
-				cmn = commonStats(counter.Values)
-
-			case name == "l4":
-				l4s = l4Stats(counter.Values)
-
-			case name == "iv4":
-				iv4 = icmpStats(counter.Values)
-
-			case name == "iv6":
-				iv6 = icmpStats(counter.Values)
-
-			case strings.HasPrefix(name, "vs_"):
-				vsIndex, ok := vsIndexFromCounterName(name)
-				if !ok {
-					continue
-				}
-				vs := &services[vsIndex]
-				if vs.isRemoved() {
-					continue
-				}
-				vsLabels := b.vsLabels(refLabels, vs)
-				stats := vsStats(counter.Values)
-				for _, c := range vsCounters {
-					result = append(result, &commonpb.Metric{
-						Name:   c.name,
-						Labels: vsLabels,
-						Value:  &commonpb.Metric_Counter{Counter: c.getter(stats)},
-					})
-				}
-
-			case strings.HasPrefix(name, "rl_"):
-				vsIndex, realIndex, ok := realIndexFromCounterName(name)
-				if !ok || int(vsIndex) >= len(services) {
-					continue
-				}
-				vs := &services[vsIndex]
-				if vs.isRemoved() {
-					continue
-				}
-				reals := relptr.Slice(&vs.Reals, vs.Reals_count)
-				if int(realIndex) >= len(reals) {
-					continue
-				}
-				r := &reals[realIndex]
-				if r.isRemoved() {
-					continue
-				}
-				realLabels := b.realLabels(refLabels, vs, r)
-				stats := realStats(counter.Values)
-				for _, c := range realCounters {
-					result = append(result, &commonpb.Metric{
-						Name:   c.name,
-						Labels: realLabels,
-						Value:  &commonpb.Metric_Counter{Counter: c.getter(stats)},
-					})
-				}
-
-			case strings.HasPrefix(name, "acl_"):
-				vsIndex, tag, ok := aclTagFromCounterName(name)
-				if !ok || int(vsIndex) >= len(services) {
-					continue
-				}
-				vs := &services[vsIndex]
-				if vs.isRemoved() {
-					continue
-				}
-				aclLabels := make([]*commonpb.Label, len(refLabels)+2)
-				copy(aclLabels, refLabels)
-				aclLabels[len(refLabels)] = &commonpb.Label{Name: "vs", Value: vs.String()}
-				aclLabels[len(refLabels)+1] = &commonpb.Label{Name: "acl_tag", Value: tag}
-				result = append(result, &commonpb.Metric{
-					Name:   "acl_passes",
-					Labels: aclLabels,
-					Value:  &commonpb.Metric_Counter{Counter: aggregateACLPasses(counter.Values)},
-				})
-			}
-		}
-
-		// Emit global (common + L4 + ICMP) metrics.
-		for _, c := range commonCounters {
-			result = append(result, &commonpb.Metric{
-				Name:   c.name,
-				Labels: refLabels,
-				Value:  &commonpb.Metric_Counter{Counter: c.getter(cmn, l4s, iv4, iv6)},
-			})
-		}
-
-		// Emit active-session gauges from shared-memory session trackers.
-		for vsIdx := range services {
-			vs := &services[vsIdx]
-			if vs.isRemoved() {
-				continue
-			}
-			reals := relptr.Slice(&vs.Reals, vs.Reals_count)
-			for realIdx := range reals {
-				r := &reals[realIdx]
-				if r.isRemoved() {
-					continue
-				}
-				active, _ := r.sessions(workers, now)
-				realLabels := b.realLabels(refLabels, vs, r)
-				result = append(result, &commonpb.Metric{
-					Name:   "real_active_sessions",
-					Labels: realLabels,
-					Value:  &commonpb.Metric_Gauge{Gauge: float64(active)},
-				})
-			}
-		}
+		result = append(result, collectCounterMetrics(services, counters, refLabels)...)
+		result = append(result, collectSessionMetrics(services, workers, now, refLabels)...)
 	}
 
 	return result, nil
-}
-
-// vsLabels returns a label set combining refLabels with a "vs" label identifying vs.
-func (b *Balancer) vsLabels(refLabels []*commonpb.Label, vs *VS) []*commonpb.Label {
-	labels := make([]*commonpb.Label, len(refLabels)+1)
-	copy(labels, refLabels)
-	labels[len(refLabels)] = &commonpb.Label{Name: "vs", Value: vs.String()}
-	return labels
-}
-
-// realLabels returns a label set combining refLabels with "vs" and "real" labels.
-func (b *Balancer) realLabels(refLabels []*commonpb.Label, vs *VS, r *Real) []*commonpb.Label {
-	labels := make([]*commonpb.Label, len(refLabels)+2)
-	copy(labels, refLabels)
-	labels[len(refLabels)] = &commonpb.Label{Name: "vs", Value: vs.String()}
-	labels[len(refLabels)+1] = &commonpb.Label{Name: "real", Value: r.String()}
-	return labels
 }

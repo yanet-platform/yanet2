@@ -363,8 +363,15 @@ func ValidateWeightDistribution(
 		if diff > tolerance {
 			t.Errorf(
 				"weight distribution mismatch for real %s: expected ratio %.3f (weight %d/%d), got %.3f (%d/%d packets), diff %.3f > tolerance %.3f",
-				realIP, expectedRatio, expectedWeight, totalWeight,
-				actualRatio, actualCount, totalPackets, diff, tolerance,
+				realIP,
+				expectedRatio,
+				expectedWeight,
+				totalWeight,
+				actualRatio,
+				actualCount,
+				totalPackets,
+				diff,
+				tolerance,
 			)
 		}
 	}
@@ -470,18 +477,18 @@ func validateSourceAddressCalculation(
 	t *testing.T,
 	clientIP net.IP,
 	tunnelSrcIP net.IP,
-	real *balancerpb.Real,
+	r *balancerpb.Real,
 ) {
 	t.Helper()
 
-	if real.Src == nil {
+	if r.Src == nil {
 		t.Error("real server has no Src configured")
 		return
 	}
 
-	realSrc := real.Src.Addr
-	realMask := real.Src.Mask
-	realIP := real.Id.Ip
+	realSrc := r.Src.Addr
+	realMask := r.Src.Mask
+	realIP := r.Id.Ip
 
 	realIsIPv6 := len(realIP) == 16
 	realIsIPv4 := len(realIP) == 4
@@ -526,8 +533,14 @@ func validateSourceAddressCalculation(
 		}
 
 		if !tunnelSrcIP.Equal(net.IP(expectedSrc)) {
-			t.Errorf("tunnel source address mismatch: expected %s, got %s (client=%s, src=%s, mask=%s)",
-				net.IP(expectedSrc), tunnelSrcIP, clientIP, net.IP(realSrc), net.IP(realMask))
+			t.Errorf(
+				"tunnel source address mismatch: expected %s, got %s (client=%s, src=%s, mask=%s)",
+				net.IP(expectedSrc),
+				tunnelSrcIP,
+				clientIP,
+				net.IP(realSrc),
+				net.IP(realMask),
+			)
 		}
 	} else {
 		tunnelSrcIPv4 := tunnelSrcIP.To4()

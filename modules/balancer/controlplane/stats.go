@@ -118,6 +118,25 @@ func aggregateACLPasses(counter [][]uint64) uint64 {
 	return counter[0][0]
 }
 
+func resolveVS(services []VS, vsStableIndex uint64) (*VS, bool) {
+	vsConfigIndex := configIndexOf(vsStableIndex)
+	vs := &services[vsConfigIndex]
+	if vs.isRemoved() || vs.Stable_idx != vsStableIndex {
+		return nil, false
+	}
+	return vs, true
+}
+
+func resolveReal(vs *VS, realStableIndex uint64) (*Real, bool) {
+	realConfigIndex := configIndexOf(realStableIndex)
+	reals := relptr.Slice(&vs.Reals, vs.Reals_count)
+	r := &reals[realConfigIndex]
+	if r.isRemoved() || r.Stable_idx != realStableIndex {
+		return nil, false
+	}
+	return r, true
+}
+
 func vsIndexFromCounterName(name string) (uint64, bool) {
 	stableIndex, err := strconv.ParseUint(strings.TrimPrefix(name, "vs_"), 10, 64)
 	if err != nil {
@@ -160,7 +179,6 @@ func applyCounter(
 	counter yanet.CounterInfo,
 ) {
 	name := counter.Name
-
 	services := relptr.Slice(&handler.Vs, handler.Vs_count)
 
 	switch {
@@ -169,54 +187,46 @@ func applyCounter(
 		if !ok {
 			return
 		}
-		vsConfigIndex := configIndexOf(vsStableIndex)
-		if services[vsConfigIndex].isRemoved() ||
-			services[vsConfigIndex].Stable_idx != vsStableIndex {
+		if _, ok = resolveVS(services, vsStableIndex); !ok {
 			return
 		}
-
-		vsState := state.VirtualServices[vsConfigIndex]
+		vsState := state.VirtualServices[configIndexOf(vsStableIndex)]
 		if vsState == nil {
 			return
 		}
 		vsState.Stats = vsStats(counter.Values).proto()
+
 	case strings.HasPrefix(name, "rl_"):
 		vsStableIndex, realStableIndex, ok := realIndexFromCounterName(name)
 		if !ok {
 			return
 		}
-		vsConfigIndex := configIndexOf(vsStableIndex)
-		if services[vsConfigIndex].isRemoved() ||
-			services[vsConfigIndex].Stable_idx != vsStableIndex {
+		vs, ok := resolveVS(services, vsStableIndex)
+		if !ok {
 			return
 		}
-		realConfigIndex := configIndexOf(realStableIndex)
-		vs := &services[vsConfigIndex]
-		reals := relptr.Slice(&vs.Reals, vs.Reals_count)
-		if reals[realConfigIndex].isRemoved() ||
-			reals[realConfigIndex].Stable_idx != realStableIndex {
+		if _, ok := resolveReal(vs, realStableIndex); !ok {
 			return
 		}
-		vsState := state.VirtualServices[vsConfigIndex]
+		vsState := state.VirtualServices[configIndexOf(vsStableIndex)]
 		if vsState == nil {
 			return
 		}
-		realState := vsState.Reals[realConfigIndex]
+		realState := vsState.Reals[configIndexOf(realStableIndex)]
 		if realState == nil {
 			return
 		}
 		realState.RealStats = realStats(counter.Values).proto()
+
 	case strings.HasPrefix(name, "acl_"):
 		vsStableIndex, tag, ok := aclTagFromCounterName(name)
 		if !ok {
 			return
 		}
-		vsConfigIndex := configIndexOf(vsStableIndex)
-		if services[vsConfigIndex].isRemoved() ||
-			services[vsConfigIndex].Stable_idx != vsStableIndex {
+		if _, ok := resolveVS(services, vsStableIndex); !ok {
 			return
 		}
-		vsState := state.VirtualServices[vsConfigIndex]
+		vsState := state.VirtualServices[configIndexOf(vsStableIndex)]
 		if vsState == nil {
 			return
 		}
@@ -224,6 +234,7 @@ func applyCounter(
 			Tag:    tag,
 			Passes: aggregateACLPasses(counter.Values),
 		})
+
 	case name == "cmn":
 		state.CommonStats = commonStats(counter.Values).proto()
 	case name == "iv4":

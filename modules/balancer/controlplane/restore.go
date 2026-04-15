@@ -76,9 +76,12 @@ func restoreDecapAddrs(ph *PacketHandler) [][]byte {
 
 func restoreVirtualServices(ph *PacketHandler) []*balancerpb.VirtualService {
 	vsSlice := relptr.Slice(&ph.Vs, ph.Vs_count)
-	result := make([]*balancerpb.VirtualService, len(vsSlice))
+	result := make([]*balancerpb.VirtualService, 0)
 	for i := range vsSlice {
-		result[i] = restoreVS(&vsSlice[i])
+		if vsSlice[i].isRemoved() {
+			continue
+		}
+		result = append(result, restoreVS(&vsSlice[i]))
 	}
 	return result
 }
@@ -109,17 +112,19 @@ func restoreVS(vs *VS) *balancerpb.VirtualService {
 
 func restoreReals(vs *VS) []*balancerpb.Real {
 	reals := relptr.Slice(&vs.Reals, vs.Reals_count)
-	result := make([]*balancerpb.Real, len(reals))
+	result := make([]*balancerpb.Real, 0)
 	for i := range reals {
-		result[i] = restoreReal(&reals[i])
+		if reals[i].isRemoved() {
+			continue
+		}
+		result = append(result, restoreReal(&reals[i]))
 	}
 	return result
 }
 
 func restoreReal(r *Real) *balancerpb.Real {
-	isV6 := r.Flags&RealFlagIPv6 != 0
 	ipProto := ipprotoIP
-	if isV6 {
+	if r.isIPv6() {
 		ipProto = ipprotoIPv6
 	}
 
@@ -128,7 +133,7 @@ func restoreReal(r *Real) *balancerpb.Real {
 	return &balancerpb.Real{
 		Id:     &balancerpb.RelativeRealIdentifier{Ip: ip},
 		Weight: r.Weight,
-		Src:    restoreIPNet(&r.Src, isV6),
+		Src:    restoreIPNet(&r.Src, r.isIPv6()),
 	}
 }
 
@@ -177,7 +182,7 @@ func restoreAllowedSource(src *AllowedSource, isV6 bool) *balancerpb.AllowedSour
 		Ports: pr,
 	}
 
-	tag := cStringToGo(src.Tag[:])
+	tag := restoreACLTag(src.Tag[:])
 	if len(tag) > 0 {
 		result.Tag = &tag
 	}
@@ -185,7 +190,7 @@ func restoreAllowedSource(src *AllowedSource, isV6 bool) *balancerpb.AllowedSour
 	return result
 }
 
-func cStringToGo(b []int8) string {
+func restoreACLTag(b []int8) string {
 	s := make([]byte, 0, len(b))
 	for _, c := range b {
 		if c == 0 {

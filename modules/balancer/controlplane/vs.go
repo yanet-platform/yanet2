@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"fmt"
 	"net"
+	"strconv"
 	"time"
 
+	"github.com/yanet-platform/yanet2/common/commonpb"
 	"github.com/yanet-platform/yanet2/common/go/relptr"
 	yanet "github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb"
@@ -63,18 +65,7 @@ func (vs *VS) free(agent *Agent) {
 
 	// Allowed sources.
 	allowedSources := relptr.Slice(&vs.Allowed_sources, vs.Allowed_sources_count)
-	for i := range allowedSources {
-		// Nets.
-		nets := relptr.Slice(&allowedSources[i].Nets, allowedSources[i].Nets_count)
-		yanet.FreeSlice(yanetAgent, nets)
-
-		// Port ranges.
-		portRanges := relptr.Slice(
-			&allowedSources[i].Port_ranges,
-			allowedSources[i].Port_ranges_count,
-		)
-		yanet.FreeSlice(yanetAgent, portRanges)
-	}
+	freeAllowedSources(agent, allowedSources)
 	yanet.FreeSlice(yanetAgent, allowedSources)
 
 	// Peers.
@@ -110,6 +101,8 @@ func (vs *VS) populateAllowedSources(
 
 	for i, pb := range pbSources {
 		if err := srcs[i].populate(agent, pb); err != nil {
+			freeAllowedSources(agent, srcs)
+			yanet.FreeSlice(agent.AsYanetAgent(), srcs)
 			return err
 		}
 	}
@@ -118,6 +111,24 @@ func (vs *VS) populateAllowedSources(
 	vs.Allowed_sources_count = uint32(count)
 
 	return nil
+}
+
+func freeAllowedSources(agent *Agent, allowedSources []AllowedSource) {
+	for i := range allowedSources {
+		allowedSources[i].free(agent)
+	}
+}
+
+func (as *AllowedSource) free(agent *Agent) {
+	yanetAgent := agent.AsYanetAgent()
+
+	// Nets.
+	nets := relptr.Slice(&as.Nets, as.Nets_count)
+	yanet.FreeSlice(yanetAgent, nets)
+
+	// Port ranges.
+	portRanges := relptr.Slice(&as.Port_ranges, as.Port_ranges_count)
+	yanet.FreeSlice(yanetAgent, portRanges)
 }
 
 func (as *AllowedSource) populate(agent *Agent, pbSrc *balancerpb.AllowedSources) error {
@@ -273,9 +284,9 @@ func placeNewVS(
 	prevVs []VS,
 	vsMap map[vsKey]int,
 	reuseReport *balancerpb.ReuseReport,
-) (noNewIPv4VS bool, noNewIPv6VS bool, err error) {
-	noNewIPv4VS = true
-	noNewIPv6VS = true
+) (noNewIPv4Vs bool, noNewIPv6Vs bool, err error) {
+	noNewIPv4Vs = true
+	noNewIPv6Vs = true
 
 	nextRemoved := 0
 	for idx, vs := range vsList {
@@ -285,9 +296,9 @@ func placeNewVS(
 		}
 
 		if k.addrLen == 4 {
-			noNewIPv4VS = false
+			noNewIPv4Vs = false
 		} else {
-			noNewIPv6VS = false
+			noNewIPv6Vs = false
 		}
 
 		for !targetVs[nextRemoved].isRemoved() {
@@ -312,7 +323,7 @@ func placeNewVS(
 		reuseReport.VsReuseReports = append(reuseReport.VsReuseReports, report)
 	}
 
-	return noNewIPv4VS, noNewIPv6VS, nil
+	return noNewIPv4Vs, noNewIPv6Vs, nil
 }
 
 // protoVsFlagsToC converts protobuf VsFlags to the C bit field value.
@@ -629,4 +640,22 @@ func (vs *VS) String() string {
 		vs.Addr.Bytes(int(vs.Ip_proto)),
 		uint32(vs.Port),
 	)
+}
+
+func (vs *VS) labels() []*commonpb.Label {
+	labels := make([]*commonpb.Label, 0, 3)
+
+	vip := vs.Addr.Bytes(int(vs.Ip_proto))
+	labels = append(labels, &commonpb.Label{Name: "vip", Value: net.IP(vip).String()})
+
+	port := vs.Port
+	labels = append(labels, &commonpb.Label{Name: "vs_port", Value: strconv.Itoa(int(port))})
+
+	proto := "UDP"
+	if vs.Transport_proto == ipprotoTCP {
+		proto = "TCP"
+	}
+	labels = append(labels, &commonpb.Label{Name: "proto", Value: proto})
+
+	return labels
 }

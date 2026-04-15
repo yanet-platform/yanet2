@@ -27,9 +27,9 @@ var (
 
 	DefaultSessionCapacity  uint64  = 20_000
 	DefaultMaxLoadFactor    float32 = 0.5
-	DefaultRefreshPeriodSec         = 0
-	DefaultWlcPower         uint64  = 0
-	DefaultWlcMaxWeight     uint32  = 0
+	DefaultRefreshPeriodSec int
+	DefaultWlcPower         uint64
+	DefaultWlcMaxWeight     uint32
 )
 
 // ---------------------------------------------------------------------------
@@ -81,8 +81,8 @@ func (b *ConfigBuilder) WithTimeouts(t *balancerpb.SessionsTimeouts) *ConfigBuil
 	return b
 }
 
-func (b *ConfigBuilder) WithSessionCapacity(cap uint64) *ConfigBuilder {
-	b.sessionCapacity = cap
+func (b *ConfigBuilder) WithSessionCapacity(capacity uint64) *ConfigBuilder {
+	b.sessionCapacity = capacity
 	return b
 }
 
@@ -103,7 +103,7 @@ func (b *ConfigBuilder) WithWLC(power uint64, maxWeight uint32) *ConfigBuilder {
 }
 
 func (b *ConfigBuilder) Build() *balancerpb.BalancerConfig {
-	cap := b.sessionCapacity
+	capacity := b.sessionCapacity
 	mlf := b.maxLoadFactor
 	wlcPower := b.wlcPower
 	wlcMaxWeight := b.wlcMaxWeight
@@ -117,7 +117,7 @@ func (b *ConfigBuilder) Build() *balancerpb.BalancerConfig {
 			SessionsTimeouts: b.timeouts,
 		},
 		State: &balancerpb.StateConfig{
-			SessionTableCapacity:      &cap,
+			SessionTableCapacity:      &capacity,
 			SessionTableMaxLoadFactor: &mlf,
 			Wlc: &balancerpb.WlcConfig{
 				Power:     &wlcPower,
@@ -399,7 +399,10 @@ func generateRealIP(index int, isV6 bool) netip.Addr {
 // ---------------------------------------------------------------------------
 
 // EnableReal creates a RealUpdate that enables a real.
-func EnableReal(vsID *balancerpb.VsIdentifier, realID *balancerpb.RelativeRealIdentifier) *balancerpb.RealUpdate {
+func EnableReal(
+	vsID *balancerpb.VsIdentifier,
+	realID *balancerpb.RelativeRealIdentifier,
+) *balancerpb.RealUpdate {
 	enable := true
 	return &balancerpb.RealUpdate{
 		RealId: &balancerpb.RealIdentifier{
@@ -411,7 +414,10 @@ func EnableReal(vsID *balancerpb.VsIdentifier, realID *balancerpb.RelativeRealId
 }
 
 // DisableReal creates a RealUpdate that disables a real.
-func DisableReal(vsID *balancerpb.VsIdentifier, realID *balancerpb.RelativeRealIdentifier) *balancerpb.RealUpdate {
+func DisableReal(
+	vsID *balancerpb.VsIdentifier,
+	realID *balancerpb.RelativeRealIdentifier,
+) *balancerpb.RealUpdate {
 	enable := false
 	return &balancerpb.RealUpdate{
 		RealId: &balancerpb.RealIdentifier{
@@ -423,7 +429,11 @@ func DisableReal(vsID *balancerpb.VsIdentifier, realID *balancerpb.RelativeRealI
 }
 
 // SetWeight creates a RealUpdate that changes a real's weight.
-func SetWeight(vsID *balancerpb.VsIdentifier, realID *balancerpb.RelativeRealIdentifier, weight uint32) *balancerpb.RealUpdate {
+func SetWeight(
+	vsID *balancerpb.VsIdentifier,
+	realID *balancerpb.RelativeRealIdentifier,
+	weight uint32,
+) *balancerpb.RealUpdate {
 	return &balancerpb.RealUpdate{
 		RealId: &balancerpb.RealIdentifier{
 			Vs:   vsID,

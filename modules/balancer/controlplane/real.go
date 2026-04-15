@@ -4,6 +4,7 @@ import (
 	"net"
 	"time"
 
+	"github.com/yanet-platform/yanet2/common/commonpb"
 	"github.com/yanet-platform/yanet2/common/go/relptr"
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -26,7 +27,7 @@ func (r *Real) key() realKey {
 	var k realKey
 	proto := ipprotoIP
 	addrLen := 4
-	if r.Flags&RealFlagIPv6 != 0 {
+	if r.isIPv6() {
 		proto = ipprotoIPv6
 		addrLen = 16
 	}
@@ -78,12 +79,12 @@ func (r *Real) epoch() uint32 {
 }
 
 func (r *Real) id() *balancerpb.RelativeRealIdentifier {
-	addrLen := 4
-	if r.Flags&RealFlagIPv6 != 0 {
-		addrLen = 16
+	proto := ipprotoIP
+	if r.isIPv6() {
+		proto = ipprotoIPv6
 	}
 	return &balancerpb.RelativeRealIdentifier{
-		Ip:   r.Addr.Bytes(addrLen),
+		Ip:   r.Addr.Bytes(proto),
 		Port: 0,
 	}
 }
@@ -170,18 +171,30 @@ func placeNewReals(
 	return noNewReals
 }
 
-func formatReal(addr []byte) string {
+func formatRealAddr(addr []byte) string {
 	return net.IP(addr).String()
 }
 
 func realIDToString(id *balancerpb.RelativeRealIdentifier) string {
-	return formatReal(id.Ip)
+	return formatRealAddr(id.Ip)
+}
+
+func (r *Real) isIPv6() bool {
+	return r.Flags&RealFlagIPv6 != 0
+}
+
+func (r *Real) ip() []byte {
+	proto := ipprotoIP
+	if r.isIPv6() {
+		proto = ipprotoIPv6
+	}
+	return r.Addr.Bytes(proto)
 }
 
 func (r *Real) String() string {
-	proto := ipprotoIP
-	if r.Flags&RealFlagIPv6 != 0 {
-		proto = ipprotoIPv6
-	}
-	return formatReal(r.Addr.Bytes(proto))
+	return formatRealAddr(r.ip())
+}
+
+func (r *Real) labels() []*commonpb.Label {
+	return []*commonpb.Label{{Name: "real_ip", Value: formatRealAddr(r.ip())}}
 }

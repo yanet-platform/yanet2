@@ -1,10 +1,13 @@
 package balancer
 
 import (
+	"strings"
 	"time"
 
 	"github.com/yanet-platform/yanet2/common/commonpb"
 	"github.com/yanet-platform/yanet2/common/go/metrics"
+	"github.com/yanet-platform/yanet2/common/go/relptr"
+	yanet "github.com/yanet-platform/yanet2/controlplane/ffi"
 )
 
 // commonCounters maps per-position metric names to getters over the four
@@ -222,4 +225,165 @@ func (m *methodMetricsTracker) Fix() {
 	m.metrics.latencies.GetOrCreate(m.metricID, func() *metrics.Histogram {
 		return metrics.NewHistogram(m.latencies)
 	}).Observe(float64(duration.Milliseconds()))
+}
+
+// collectCounterMetrics processes dataplane counters for a single position and
+// returns per-VS, per-real, ACL, and global (common/L4/ICMP) metrics.
+func collectCounterMetrics(
+	services []VS,
+	counters []yanet.CounterInfo,
+	refLabels []*commonpb.Label,
+) []*commonpb.Metric {
+	var result []*commonpb.Metric
+
+	var (
+		cmn *CommonStats
+		l4s *L4Stats
+		iv4 *IcmpStats
+		iv6 *IcmpStats
+	)
+
+	for _, counter := range counters {
+		name := counter.Name
+		switch {
+		case name == "cmn":
+			cmn = commonStats(counter.Values)
+		case name == "l4":
+			l4s = l4Stats(counter.Values)
+		case name == "iv4":
+			iv4 = icmpStats(counter.Values)
+		case name == "iv6":
+			iv6 = icmpStats(counter.Values)
+		case strings.HasPrefix(name, "vs_"):
+			result = append(result, collectVSMetrics(services, counter, refLabels)...)
+		case strings.HasPrefix(name, "rl_"):
+			result = append(result, collectRealMetrics(services, counter, refLabels)...)
+		case strings.HasPrefix(name, "acl_"):
+			result = append(result, collectACLMetrics(services, counter, refLabels)...)
+		}
+	}
+
+	for _, c := range commonCounters {
+		result = append(result, &commonpb.Metric{
+			Name:   c.name,
+			Labels: refLabels,
+			Value:  &commonpb.Metric_Counter{Counter: c.getter(cmn, l4s, iv4, iv6)},
+		})
+	}
+
+	return result
+}
+
+func collectVSMetrics(
+	services []VS,
+	counter yanet.CounterInfo,
+	refLabels []*commonpb.Label,
+) []*commonpb.Metric {
+	vsStableIndex, ok := vsIndexFromCounterName(counter.Name)
+	if !ok {
+		return nil
+	}
+	vs, ok := resolveVS(services, vsStableIndex)
+	if !ok {
+		return nil
+	}
+	vsLabels := append(vs.labels(), refLabels...)
+	stats := vsStats(counter.Values)
+	result := make([]*commonpb.Metric, 0, len(vsCounters))
+	for _, c := range vsCounters {
+		result = append(result, &commonpb.Metric{
+			Name:   c.name,
+			Labels: vsLabels,
+			Value:  &commonpb.Metric_Counter{Counter: c.getter(stats)},
+		})
+	}
+	return result
+}
+
+func collectRealMetrics(
+	services []VS,
+	counter yanet.CounterInfo,
+	refLabels []*commonpb.Label,
+) []*commonpb.Metric {
+	vsStableIndex, realStableIndex, ok := realIndexFromCounterName(counter.Name)
+	if !ok {
+		return nil
+	}
+	vs, ok := resolveVS(services, vsStableIndex)
+	if !ok {
+		return nil
+	}
+	r, ok := resolveReal(vs, realStableIndex)
+	if !ok {
+		return nil
+	}
+	realLabels := append(r.labels(), refLabels...)
+	realLabels = append(realLabels, vs.labels()...)
+	stats := realStats(counter.Values)
+	result := make([]*commonpb.Metric, 0, len(realCounters))
+	for _, c := range realCounters {
+		result = append(result, &commonpb.Metric{
+			Name:   c.name,
+			Labels: realLabels,
+			Value:  &commonpb.Metric_Counter{Counter: c.getter(stats)},
+		})
+	}
+	return result
+}
+
+func collectACLMetrics(
+	services []VS,
+	counter yanet.CounterInfo,
+	refLabels []*commonpb.Label,
+) []*commonpb.Metric {
+	vsStableIndex, tag, ok := aclTagFromCounterName(counter.Name)
+	if !ok {
+		return nil
+	}
+	vs, ok := resolveVS(services, vsStableIndex)
+	if !ok {
+		return nil
+	}
+	aclLabels := append(vs.labels(), refLabels...)
+	aclLabels = append(aclLabels, &commonpb.Label{Name: "acl_tag", Value: tag})
+	return []*commonpb.Metric{{
+		Name:   "acl_passes",
+		Labels: aclLabels,
+		Value:  &commonpb.Metric_Counter{Counter: aggregateACLPasses(counter.Values)},
+	}}
+}
+
+// collectSessionMetrics emits active-session gauges from shared-memory session
+// trackers for all non-removed VS/real pairs.
+func collectSessionMetrics(
+	services []VS,
+	workers uint32,
+	now time.Time,
+	refLabels []*commonpb.Label,
+) []*commonpb.Metric {
+	var result []*commonpb.Metric
+
+	for vsIdx := range services {
+		vs := &services[vsIdx]
+		if vs.isRemoved() {
+			continue
+		}
+		reals := relptr.Slice(&vs.Reals, vs.Reals_count)
+		for realIdx := range reals {
+			r := &reals[realIdx]
+			if r.isRemoved() {
+				continue
+			}
+			active, _ := r.sessions(workers, now)
+			realLabels := append(vs.labels(), refLabels...)
+			realLabels = append(realLabels, r.labels()...)
+			result = append(result, &commonpb.Metric{
+				Name:   "real_active_sessions",
+				Labels: realLabels,
+				Value:  &commonpb.Metric_Gauge{Gauge: float64(active)},
+			})
+		}
+	}
+
+	return result
 }
