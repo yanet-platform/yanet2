@@ -463,6 +463,14 @@ func (b *Balancer) buildState(
 			continue
 		}
 		state.VirtualServices[vsIdx] = vs.state(workers, now)
+		vsState := state.VirtualServices[vsIdx]
+		state.ActiveSessions += vsState.ActiveSessions
+		if vsState.LastPacketTimestamp != nil {
+			if state.LastPacketTimestamp == nil ||
+				vsState.LastPacketTimestamp.Seconds > state.LastPacketTimestamp.Seconds {
+				state.LastPacketTimestamp = vsState.LastPacketTimestamp
+			}
+		}
 	}
 
 	return state

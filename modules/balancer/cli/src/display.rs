@@ -16,7 +16,7 @@ pub fn print_compact(state: &balancerpb::BalancerState) {
     println!("Balancer: {}", state.balancer_name);
     println!("Active Sessions: {}", format_number(state.active_sessions));
     println!();
-    const LINE_WIDTH: usize = 124;
+    const LINE_WIDTH: usize = 112;
 
     println!("{:<46}{:<8}Flags", "VirtualService", "Sched",);
     println!(
@@ -206,15 +206,18 @@ fn print_table_view_state(state: &balancerpb::BalancerState, opts: &ShowOptions)
     if let Some(r) = &state.r#ref {
         print_ref_inline(r);
     }
-    println!("Active Sessions: {}", format_number(state.active_sessions));
-    println!(
-        "Last Packet: {}",
-        state
-            .last_packet_timestamp
-            .as_ref()
-            .map_or_else(|| "N/A".to_string(), format_timestamp),
-    );
-    println!();
+
+    if opts.stats {
+        println!("Active Sessions: {}", format_number(state.active_sessions));
+        println!(
+            "Last Packet: {}",
+            state
+                .last_packet_timestamp
+                .as_ref()
+                .map_or_else(|| "N/A".to_string(), format_timestamp),
+        );
+        println!();
+    }
 
     if opts.decap {
         print_decap(state);
@@ -301,9 +304,9 @@ fn print_table_view_vs(vs: &balancerpb::VsState, opts: &ShowOptions) {
                     weight: format_number(real.weight),
                     effective_weight: format_number(real.effective_weight),
                     enabled: if real.enabled {
-                        "yes".to_string()
+                        "true".to_string()
                     } else {
-                        "no".to_string()
+                        "false".to_string()
                     },
                 }))
             }
@@ -460,7 +463,7 @@ struct RealBasicRow {
 
 pub fn print_sessions_header() {
     println!(
-        "{:<5} {:<45} {:<45} {:<45} {:<8} {:<8}",
+        "{:<40} {:<40} {:<50} {:<8} {:<8} {:<8}",
         "VS", "Real", "Client", "Expires", "Timeout", "Age"
     );
 }
@@ -475,11 +478,11 @@ pub fn print_session(session: &balancerpb::Session) {
     let real = format_real_id(session.real_id.as_ref());
     let client = format_client(session);
     let expires = format_expires(session, now);
-    let timeout = format_timeout(session);
     let age = format_age(session, now);
+    let timeout = format_timeout(session);
 
     println!(
-        "{:<5} {:<45} {:<45} {:<45} {:<8} {:<8}",
+        "{:<40} {:<40} {:<50} {:<8} {:<8} {:<8}",
         vs, real, client, expires, timeout, age
     );
 }
