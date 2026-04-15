@@ -46,7 +46,7 @@ func NewService(
 		metrics: newMethodMetrics(),
 	}
 
-	for _, balancer := range agent.AllBalancers() {
+	for _, balancer := range agent.Balancers() {
 		balancer.startRefreshing(&s.mu)
 	}
 
@@ -201,7 +201,7 @@ func (s *Service) GetState(
 		}
 		balancers = map[string]*Balancer{*req.Name: b}
 	} else {
-		balancers = s.agent.AllBalancers()
+		balancers = s.agent.Balancers()
 	}
 
 	var allStates []*balancerpb.BalancerState
@@ -386,7 +386,7 @@ func (s *Service) GetMetrics(
 
 	result := make([]*commonpb.Metric, 0)
 
-	for _, b := range s.agent.AllBalancers() {
+	for _, b := range s.agent.Balancers() {
 		bMetrics, err := b.Metrics(time.Now())
 		if err != nil {
 			return nil, err

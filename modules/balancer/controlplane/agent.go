@@ -1,8 +1,6 @@
 package balancer
 
 import (
-	"maps"
-
 	"github.com/c2h5oh/datasize"
 	yanet "github.com/yanet-platform/yanet2/controlplane/ffi"
 	"go.uber.org/zap"
@@ -78,9 +76,14 @@ func (a *Agent) BalancerNames() []string {
 	return names
 }
 
-// AllBalancers returns a shallow copy of the balancers map.
-func (a *Agent) AllBalancers() map[string]*Balancer {
-	result := make(map[string]*Balancer, len(a.balancers))
-	maps.Copy(result, a.balancers)
-	return result
+// Balancers returns a shallow copy of the balancers map.
+func (a *Agent) Balancers() map[string]*Balancer {
+	return a.balancers
+}
+
+func (a *Agent) Close() error {
+	for _, balancer := range a.balancers {
+		balancer.refresher.Stop()
+	}
+	return nil
 }

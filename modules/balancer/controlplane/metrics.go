@@ -153,8 +153,6 @@ var realCounters = []struct {
 	{"packets_real_disabled", func(s *RealStats) uint64 { return s.Packets_real_disabled }},
 }
 
-////////////////////////////////////////////////////////////////////////////////
-
 type methodMetrics struct {
 	latencies *metrics.MetricMap[*metrics.Histogram]
 }
@@ -227,8 +225,6 @@ func (m *methodMetricsTracker) Fix() {
 	}).Observe(float64(duration.Milliseconds()))
 }
 
-// collectCounterMetrics processes dataplane counters for a single position and
-// returns per-VS, per-real, ACL, and global (common/L4/ICMP) metrics.
 func collectCounterMetrics(
 	services []VS,
 	counters []yanet.CounterInfo,
@@ -353,8 +349,6 @@ func collectACLMetrics(
 	}}
 }
 
-// collectSessionMetrics emits active-session gauges from shared-memory session
-// trackers for all non-removed VS/real pairs.
 func collectSessionMetrics(
 	services []VS,
 	workers uint32,

@@ -54,5 +54,10 @@ func (m *Module) RegisterService(server *grpc.Server) {
 }
 
 func (m *Module) Close() error {
+	m.service.mu.Lock()
+	defer m.service.mu.Unlock()
+
+	m.service.agent.Close()
+
 	return m.shm.Detach()
 }
