@@ -483,7 +483,7 @@ func (b *Balancer) applyCounters(
 		[]string{},
 	)
 	for _, counter := range counters {
-		applyCounter(state, counter)
+		applyCounter(b.handler, state, counter)
 	}
 }
 
@@ -746,7 +746,7 @@ func (b *Balancer) Metrics(now time.Time) ([]*commonpb.Metric, error) {
 				aclLabels[len(refLabels)] = &commonpb.Label{Name: "vs", Value: vs.String()}
 				aclLabels[len(refLabels)+1] = &commonpb.Label{Name: "acl_tag", Value: tag}
 				result = append(result, &commonpb.Metric{
-					Name:   "acl_hits",
+					Name:   "acl_passes",
 					Labels: aclLabels,
 					Value:  &commonpb.Metric_Counter{Counter: aggregateACLPasses(counter.Values)},
 				})

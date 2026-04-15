@@ -117,9 +117,9 @@ impl BalancerService {
         let response = self.client.get_config(request).await?.into_inner();
         log::debug!("get config response: {response:?}");
 
-        let mut yaml_value = serde_json::to_value(&response)?;
-        display::prettify_json(&mut yaml_value);
-        let yaml = serde_yaml::to_string(&yaml_value)?;
+        let mut json_value = serde_json::to_value(&response)?;
+        display::prettify_json(&mut json_value);
+        let yaml = serde_yaml::to_string(&json_value)?;
         print!("{yaml}");
 
         Ok(())
@@ -199,7 +199,7 @@ impl BalancerService {
 
         let mut json_value = serde_json::to_value(&response)?;
         display::prettify_json(&mut json_value);
-        let json = serde_json::to_string_pretty(&json_value)?;
+        let json = serde_json::to_string(&json_value)?;
         println!("{json}");
 
         Ok(())

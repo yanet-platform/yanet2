@@ -5,6 +5,7 @@ import (
 	"strings"
 	"unsafe"
 
+	"github.com/yanet-platform/yanet2/common/go/relptr"
 	yanet "github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb"
 )
@@ -117,15 +118,15 @@ func aggregateACLPasses(counter [][]uint64) uint64 {
 	return counter[0][0]
 }
 
-func vsIndexFromCounterName(name string) (uint32, bool) {
+func vsIndexFromCounterName(name string) (uint64, bool) {
 	stableIndex, err := strconv.ParseUint(strings.TrimPrefix(name, "vs_"), 10, 64)
 	if err != nil {
 		return 0, false
 	}
-	return configIndexOf(stableIndex), true
+	return stableIndex, true
 }
 
-func realIndexFromCounterName(name string) (uint32, uint32, bool) {
+func realIndexFromCounterName(name string) (uint64, uint64, bool) {
 	parts := strings.SplitN(strings.TrimPrefix(name, "rl_"), "_", 2)
 	if len(parts) != 2 {
 		return 0, 0, false
@@ -138,10 +139,10 @@ func realIndexFromCounterName(name string) (uint32, uint32, bool) {
 	if err != nil {
 		return 0, 0, false
 	}
-	return configIndexOf(vsStableIdx), configIndexOf(realStableIdx), true
+	return vsStableIdx, realStableIdx, true
 }
 
-func aclTagFromCounterName(name string) (uint32, string, bool) {
+func aclTagFromCounterName(name string) (uint64, string, bool) {
 	parts := strings.SplitN(strings.TrimPrefix(name, "acl_"), "_", 2)
 	if len(parts) != 2 {
 		return 0, "", false
@@ -150,33 +151,57 @@ func aclTagFromCounterName(name string) (uint32, string, bool) {
 	if err != nil {
 		return 0, "", false
 	}
-	return configIndexOf(vsStableIdx), parts[1], true
+	return vsStableIdx, parts[1], true
 }
 
-func applyCounter(state *balancerpb.BalancerState, counter yanet.CounterInfo) {
+func applyCounter(
+	handler *PacketHandler,
+	state *balancerpb.BalancerState,
+	counter yanet.CounterInfo,
+) {
 	name := counter.Name
+
+	services := relptr.Slice(&handler.Vs, handler.Vs_count)
 
 	switch {
 	case strings.HasPrefix(name, "vs_"):
-		vsIndex, ok := vsIndexFromCounterName(name)
+		vsStableIndex, ok := vsIndexFromCounterName(name)
 		if !ok {
 			return
 		}
-		vsState := state.VirtualServices[vsIndex]
+		vsConfigIndex := configIndexOf(vsStableIndex)
+		if services[vsConfigIndex].isRemoved() ||
+			services[vsConfigIndex].Stable_idx != vsStableIndex {
+			return
+		}
+
+		vsState := state.VirtualServices[vsConfigIndex]
 		if vsState == nil {
 			return
 		}
 		vsState.Stats = vsStats(counter.Values).proto()
 	case strings.HasPrefix(name, "rl_"):
-		vsIndex, realIndex, ok := realIndexFromCounterName(name)
+		vsStableIndex, realStableIndex, ok := realIndexFromCounterName(name)
 		if !ok {
 			return
 		}
-		vsState := state.VirtualServices[vsIndex]
+		vsConfigIndex := configIndexOf(vsStableIndex)
+		if services[vsConfigIndex].isRemoved() ||
+			services[vsConfigIndex].Stable_idx != vsStableIndex {
+			return
+		}
+		realConfigIndex := configIndexOf(realStableIndex)
+		vs := &services[vsConfigIndex]
+		reals := relptr.Slice(&vs.Reals, vs.Reals_count)
+		if reals[realConfigIndex].isRemoved() ||
+			reals[realConfigIndex].Stable_idx != realStableIndex {
+			return
+		}
+		vsState := state.VirtualServices[vsConfigIndex]
 		if vsState == nil {
 			return
 		}
-		realState := vsState.Reals[realIndex]
+		realState := vsState.Reals[realConfigIndex]
 		if realState == nil {
 			return
 		}
@@ -190,11 +215,16 @@ func applyCounter(state *balancerpb.BalancerState, counter yanet.CounterInfo) {
 	case name == "l4":
 		state.L4Stats = l4Stats(counter.Values).proto()
 	case strings.HasPrefix(name, "acl_"):
-		vsIndex, tag, ok := aclTagFromCounterName(name)
+		vsStableIndex, tag, ok := aclTagFromCounterName(name)
 		if !ok {
 			return
 		}
-		vsState := state.VirtualServices[vsIndex]
+		vsConfigIndex := configIndexOf(vsStableIndex)
+		if services[vsConfigIndex].isRemoved() ||
+			services[vsConfigIndex].Stable_idx != vsStableIndex {
+			return
+		}
+		vsState := state.VirtualServices[vsStableIndex]
 		if vsState == nil {
 			return
 		}

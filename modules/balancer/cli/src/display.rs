@@ -448,75 +448,91 @@ enum RealTableRow {
 struct RealBasicRow {
     #[tabled(rename = "Real")]
     real: String,
-    #[tabled(rename = "Weight")]
-    weight: String,
-    #[tabled(rename = "Eff.Weight")]
-    effective_weight: String,
     #[tabled(rename = "Enabled")]
     enabled: String,
+    #[tabled(rename = "Wght")]
+    weight: String,
+    #[tabled(rename = "Eff Wght")]
+    effective_weight: String,
 }
 
 // ─── Sessions Output ────────────────────────────────────────────────────────
 
 pub fn print_sessions_header() {
     println!(
-        "{:<46}{:<46}{:<46}{:<10}{:<10}{}",
-        "VS", "Real", "Client", "Expires", "Timeout", "Created",
+        "{:<5} {:<45} {:<45} {:<45} {:<8} {:<8}",
+        "VS", "Real", "Client", "Expires", "Timeout", "Age"
     );
 }
 
 pub fn print_session(session: &balancerpb::Session) {
-    let vs_id = session.vs_id.as_ref();
-    let real_id = session.real_id.as_ref();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
 
-    let vs = vs_id
+    let vs = format_vs_id(session.vs_id.as_ref());
+    let real = format_real_id(session.real_id.as_ref());
+    let client = format_client(session);
+    let expires = format_expires(session, now);
+    let timeout = format_timeout(session);
+    let age = format_age(session, now);
+
+    println!(
+        "{:<5} {:<45} {:<45} {:<45} {:<8} {:<8}",
+        vs, real, client, expires, timeout, age
+    );
+}
+
+fn format_vs_id(vs_id: Option<&balancerpb::VsIdentifier>) -> String {
+    vs_id
         .and_then(|id| {
             bytes_to_ip(&id.addr)
                 .ok()
                 .map(|ip| format!("{}/{}", format_ip_port(ip, id.port), proto_str(id.proto)))
         })
-        .unwrap_or_else(|| "-".to_string());
+        .unwrap_or_else(|| "-".to_string())
+}
 
-    let real_addr = real_id
+fn format_real_id(real_id: Option<&balancerpb::RealIdentifier>) -> String {
+    real_id
         .and_then(|id| {
             id.real
                 .as_ref()
                 .and_then(|r| bytes_to_ip(&r.ip).ok().map(|ip| format_ip_port(ip, r.port)))
         })
-        .unwrap_or_else(|| "-".to_string());
+        .unwrap_or_else(|| "-".to_string())
+}
 
-    let client = match bytes_to_ip(&session.client_addr) {
-        Ok(ip) => format_ip_port(ip, session.client_port),
-        Err(_) => "-".to_string(),
-    };
+fn format_client(session: &balancerpb::Session) -> String {
+    bytes_to_ip(&session.client_addr)
+        .ok()
+        .map(|ip| format_ip_port(ip, session.client_port))
+        .unwrap_or_else(|| "-".to_string())
+}
 
-    let expires = match (session.last_packet_timestamp.as_ref(), session.timeout.as_ref()) {
+fn format_expires(session: &balancerpb::Session, now: i64) -> String {
+    match (session.last_packet_timestamp.as_ref(), session.timeout.as_ref()) {
         (Some(last_packet), Some(timeout)) => {
-            let expire_at = last_packet.seconds + timeout.seconds;
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs() as i64;
-            let remaining = (expire_at - now).max(0);
-            format!("{}s", remaining)
+            let remaining = (last_packet.seconds + timeout.seconds - now).max(0);
+            format!("{}", remaining)
         }
         _ => "-".to_string(),
-    };
+    }
+}
 
-    let timeout = session
+fn format_timeout(session: &balancerpb::Session) -> String {
+    session
         .timeout
         .as_ref()
-        .map_or_else(|| "-".to_string(), |d| format!("{}s", d.seconds));
+        .map_or_else(|| "-".to_string(), |d| format!("{}", d.seconds))
+}
 
-    let created = session
+fn format_age(session: &balancerpb::Session, now: i64) -> String {
+    session
         .create_timestamp
         .as_ref()
-        .map_or_else(|| "-".to_string(), format_timestamp);
-
-    println!(
-        "{:<46}{:<46}{:<46}{:<10}{:<10}{}",
-        vs, real_addr, client, expires, timeout, created,
-    );
+        .map_or_else(|| "-".to_string(), |ts| format!("{}", (now - ts.seconds).max(0)))
 }
 
 // ─── Tabled Row Types ───────────────────────────────────────────────────────
@@ -711,18 +727,7 @@ fn print_ref_inline(r: &balancerpb::PacketHandlerRef) {
 }
 
 pub fn format_number(n: u64) -> String {
-    if n == 0 {
-        return "0".to_string();
-    }
-    let s = n.to_string();
-    let mut result = String::with_capacity(s.len() + s.len() / 3);
-    for (i, c) in s.chars().rev().enumerate() {
-        if i > 0 && i % 3 == 0 {
-            result.push(',');
-        }
-        result.push(c);
-    }
-    result.chars().rev().collect()
+    n.to_string()
 }
 
 fn format_timestamp(ts: &prost_types::Timestamp) -> String {
