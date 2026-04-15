@@ -99,7 +99,7 @@ packet_handler:
     - addr: "192.0.2.3"
       port: 0  # MUST be 0 for pure_l3 mode
       proto: tcp
-      scheduler: rr
+      scheduler: wrr
       flags:
         gre: false
         fix_mss: false
@@ -121,7 +121,7 @@ packet_handler:
     - addr: "2001:db8::1"
       port: 443
       proto: TCP
-      scheduler: rr
+      scheduler: wrr
       flags:
         gre: false
         fix_mss: true

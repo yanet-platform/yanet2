@@ -279,7 +279,7 @@ func allowedSourcesEqual(
 
 // canReuseACL checks whether the previous VS's compiled ACL can be reused.
 // Precondition: allowed sources in both prev and new config must be in the same sort order.
-// This is guaranteed by validatePacketHandlerConfig → validateVS → validateAllowedSources.
+// This is guaranteed by validatePacketHandlerConfig -> validateVS -> validateAllowedSources.
 func canReuseACL(prevVs *VS, pbVs *balancerpb.VirtualService) bool {
 	if prevVs == nil {
 		return false

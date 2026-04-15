@@ -74,7 +74,7 @@ func validateStateConfig(state *balancerpb.StateConfig) error {
 		return fmt.Errorf("wlc config is nil")
 	}
 	if err := validateWlcConfig(state.Wlc); err != nil {
-		return fmt.Errorf("wlc config: %w", err)
+		return fmt.Errorf("wlc: %w", err)
 	}
 	return nil
 }
@@ -316,7 +316,8 @@ func validatePacketHandlerConfig(config *balancerpb.PacketHandlerConfig) error {
 			return fmt.Errorf("decap_addresses %x at index %d: must be 4 or 16 bytes", addr, idx)
 		}
 	}
-	// Side effect: sorts decap addresses by family (IPv4 first, then IPv6), then by value.
+
+	// Sort decap addresses by family (IPv4 first, then IPv6), then by value.
 	// decapFiltersReusable depends on this ordering to find the IPv4/IPv6 split point.
 	slices.SortFunc(config.DecapAddresses, func(a, b []byte) int {
 		if c := cmp.Compare(len(a), len(b)); c != 0 {
