@@ -5,7 +5,8 @@ use std::{error::Error, net::IpAddr};
 use chrono::{DateTime, Utc};
 use colored::Colorize;
 use ptree::TreeBuilder;
-use tabled::{Table, Tabled, settings::Style};
+use tabled::Tabled;
+use ync::display::print_table;
 
 use crate::{
     entities::{addr_to_ip, format_bytes, format_number, opt_addr_to_ip},
@@ -794,8 +795,7 @@ fn print_show_config_table(response: &balancerpb::ShowConfigResponse) -> Result<
                                     })
                                     .collect();
 
-                                let real_table = Table::new(real_rows).with(Style::rounded()).to_string();
-                                println!("{}", real_table);
+                                print_table(real_rows);
                             }
 
                             println!();
@@ -845,8 +845,7 @@ pub fn print_list_configs(
                 .map(|name| ConfigRow { name: name.clone() })
                 .collect();
 
-            let table = Table::new(rows).with(Style::rounded()).to_string();
-            println!("{}", table);
+            print_table(rows);
         }
     }
     Ok(())
@@ -1005,8 +1004,7 @@ fn print_show_info_table(response: &balancerpb::ShowInfoResponse) -> Result<(), 
                                 })
                                 .collect();
 
-                            let table = Table::new(rows).with(Style::rounded()).to_string();
-                            println!("{}", table);
+                            print_table(rows);
                         }
                         println!();
                     }
@@ -1586,8 +1584,7 @@ fn print_show_stats_table(response: &balancerpb::ShowStatsResponse) -> Result<()
             });
         }
 
-        let table = Table::new(rows).with(Style::rounded()).to_string();
-        println!("{}", table);
+        print_table(rows);
         println!();
 
         // VS Stats (hierarchical display - reals nested under VS, similar to info)
@@ -1729,8 +1726,7 @@ fn print_show_stats_table(response: &balancerpb::ShowStatsResponse) -> Result<()
                                 })
                                 .collect();
 
-                            let table = Table::new(real_rows).with(Style::rounded()).to_string();
-                            println!("{}", table);
+                            print_table(real_rows);
                         }
                         println!();
                     }
@@ -1861,9 +1857,7 @@ fn print_show_sessions_table(response: &balancerpb::ShowSessionsResponse) -> Res
             })
             .collect();
 
-        let table = Table::new(rows).with(Style::rounded()).to_string();
-
-        println!("{}", table);
+        print_table(rows);
     }
 
     Ok(())
@@ -1988,8 +1982,7 @@ fn print_show_graph_table(response: &balancerpb::ShowGraphResponse) -> Result<()
                                 })
                                 .collect();
 
-                            let table = Table::new(rows).with(Style::rounded()).to_string();
-                            println!("{}", table);
+                            print_table(rows);
                         }
                         println!();
                     }

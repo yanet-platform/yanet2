@@ -7,13 +7,11 @@ pub fn main() -> Result<(), Box<dyn Error>> {
     tonic_build::configure()
         .emit_rerun_if_changed(false)
         .build_server(false)
-        .message_attribute(".", "#[derive(Serialize)]")
         .compile_protos(&["acl.proto"], &["../../..", "../controlplane/aclpb"])?;
 
     tonic_build::configure()
         .emit_rerun_if_changed(false)
         .build_server(false)
-        .message_attribute(".", "#[derive(Serialize)]")
         .compile_protos(&["common/filterpb/filter.proto"], &["../../.."])?;
 
     Ok(())

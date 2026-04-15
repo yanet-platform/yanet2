@@ -11,18 +11,11 @@ use code::{
     UpdateNeighbourTableRequest, UpdateNeighboursRequest,
 };
 use netip::MacAddr;
-use tabled::{
-    settings::{
-        object::Columns,
-        style::{BorderColor, HorizontalLine},
-        Color, Style,
-    },
-    Table,
-};
 use tonic::codec::CompressionEncoding;
 use yanet_cli_neighbour::{Age, NeighbourEntry, State, TableEntry};
 use ync::{
     client::{ConnectionArgs, LayeredChannel},
+    display::print_table,
     logging,
 };
 
@@ -228,16 +221,7 @@ impl NeighbourService {
 
         entries.sort_by(|a, b| (a.state, &a.next_hop).cmp(&(b.state, &b.next_hop)));
 
-        let mut table = Table::new(entries);
-        table.with(
-            Style::modern()
-                .horizontals([(1, HorizontalLine::inherit(Style::modern()))])
-                .remove_frame()
-                .remove_horizontal(),
-        );
-        table.modify(Columns::new(..), BorderColor::filled(Color::rgb_fg(0x4e, 0x4e, 0x4e)));
-
-        println!("{table}");
+        print_table(entries);
 
         Ok(())
     }
@@ -295,16 +279,7 @@ impl NeighbourService {
             })
             .collect();
 
-        let mut table = Table::new(entries);
-        table.with(
-            Style::modern()
-                .horizontals([(1, HorizontalLine::inherit(Style::modern()))])
-                .remove_frame()
-                .remove_horizontal(),
-        );
-        table.modify(Columns::new(..), BorderColor::filled(Color::rgb_fg(0x4e, 0x4e, 0x4e)));
-
-        println!("{table}");
+        print_table(entries);
         Ok(())
     }
 
