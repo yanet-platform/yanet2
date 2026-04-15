@@ -87,7 +87,7 @@ test_no_match_port_only(void *arena) {
 	memcpy(net.mask, mask, NET6_LEN);
 	builder_add_net6_src(&builder, net);
 	builder_add_port_src_range(&builder, 80, 90);
-	struct filter_rule rule = build_rule(&builder, 0);
+	struct filter_rule rule = build_rule(&builder);
 
 	// Test packets: IP matches but port doesn't
 	const struct {
@@ -142,9 +142,11 @@ test_no_match_port_only(void *arena) {
 	res = memory_context_init(&mctx, "test", &alloc);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize memory context");
 
+	const struct filter_rule *rule_ptr = &rule;
+
 	struct filter filter;
 	res = filter_init(
-		&filter, combo_net6_port_src_compile, &rule, 1, &mctx
+		&filter, combo_net6_port_src_compile, &rule_ptr, 1, &mctx
 	);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
 
@@ -181,7 +183,7 @@ test_no_match_ip_only(void *arena) {
 	memcpy(net.mask, mask, NET6_LEN);
 	builder_add_net6_src(&builder, net);
 	builder_add_port_src_range(&builder, 80, 90);
-	struct filter_rule rule = build_rule(&builder, 0);
+	struct filter_rule rule = build_rule(&builder);
 
 	// Test packets: Port matches but IP doesn't
 	const struct {
@@ -251,9 +253,11 @@ test_no_match_ip_only(void *arena) {
 	res = memory_context_init(&mctx, "test", &alloc);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize memory context");
 
+	const struct filter_rule *rule_ptr = &rule;
+
 	struct filter filter;
 	res = filter_init(
-		&filter, combo_net6_port_src_compile, &rule, 1, &mctx
+		&filter, combo_net6_port_src_compile, &rule_ptr, 1, &mctx
 	);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
 
@@ -290,7 +294,7 @@ test_both_match(void *arena) {
 	memcpy(net.mask, mask, NET6_LEN);
 	builder_add_net6_src(&builder, net);
 	builder_add_port_src_range(&builder, 80, 90);
-	struct filter_rule rule = build_rule(&builder, 0);
+	struct filter_rule rule = build_rule(&builder);
 
 	// Test packets: Both IP and port match
 	const struct {
@@ -362,9 +366,11 @@ test_both_match(void *arena) {
 	res = memory_context_init(&mctx, "test", &alloc);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize memory context");
 
+	const struct filter_rule *rule_ptr = &rule;
+
 	struct filter filter;
 	res = filter_init(
-		&filter, combo_net6_port_src_compile, &rule, 1, &mctx
+		&filter, combo_net6_port_src_compile, &rule_ptr, 1, &mctx
 	);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
 

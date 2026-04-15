@@ -45,7 +45,7 @@ test_no_match_proto_only(void *arena) {
 	builder_add_net4_dst(&builder, ip(10, 0, 0, 0), ip(255, 255, 255, 0));
 	builder_add_port_dst_range(&builder, 80, 90);
 	builder_set_proto(&builder, IPPROTO_TCP, 0, 0);
-	struct filter_rule rule = build_rule(&builder, 0);
+	struct filter_rule rule = build_rule(&builder);
 
 	// Test packets: IP and port match but protocol doesn't
 	const struct {
@@ -94,9 +94,11 @@ test_no_match_proto_only(void *arena) {
 	res = memory_context_init(&mctx, "test", &alloc);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize memory context");
 
+	const struct filter_rule *rule_ptr = &rule;
+
 	struct filter filter;
 	res = filter_init(
-		&filter, combo_net4_port_proto_dst_compile, &rule, 1, &mctx
+		&filter, combo_net4_port_proto_dst_compile, &rule_ptr, 1, &mctx
 	);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
 
@@ -131,7 +133,7 @@ test_all_match(void *arena) {
 	builder_add_net4_dst(&builder, ip(10, 0, 0, 0), ip(255, 255, 255, 0));
 	builder_add_port_dst_range(&builder, 80, 90);
 	builder_set_proto(&builder, IPPROTO_TCP, 0, 0);
-	struct filter_rule rule = build_rule(&builder, 0);
+	struct filter_rule rule = build_rule(&builder);
 
 	// Test packets: All match
 	const struct {
@@ -181,9 +183,11 @@ test_all_match(void *arena) {
 	res = memory_context_init(&mctx, "test", &alloc);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize memory context");
 
+	const struct filter_rule *rule_ptr = &rule;
+
 	struct filter filter;
 	res = filter_init(
-		&filter, combo_net4_port_proto_dst_compile, &rule, 1, &mctx
+		&filter, combo_net4_port_proto_dst_compile, &rule_ptr, 1, &mctx
 	);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
 
@@ -218,7 +222,7 @@ test_multiple_rules_overlap(void *arena) {
 	builder_add_net4_dst(&builder1, ip(10, 0, 0, 0), ip(255, 255, 255, 0));
 	builder_add_port_dst_range(&builder1, 80, 90);
 	builder_set_proto(&builder1, IPPROTO_TCP, 0, 0);
-	struct filter_rule rule1 = build_rule(&builder1, 0);
+	struct filter_rule rule1 = build_rule(&builder1);
 
 	// Rule 2: dst IP 10.0.0.0/16, dst port 85-95, TCP
 	struct filter_rule_builder builder2;
@@ -226,7 +230,7 @@ test_multiple_rules_overlap(void *arena) {
 	builder_add_net4_dst(&builder2, ip(10, 0, 0, 0), ip(255, 255, 0, 0));
 	builder_add_port_dst_range(&builder2, 85, 95);
 	builder_set_proto(&builder2, IPPROTO_TCP, 0, 0);
-	struct filter_rule rule2 = build_rule(&builder2, 1);
+	struct filter_rule rule2 = build_rule(&builder2);
 
 	// Rule 3: dst IP 10.0.0.0/24, dst port 80-90, UDP
 	struct filter_rule_builder builder3;
@@ -234,7 +238,7 @@ test_multiple_rules_overlap(void *arena) {
 	builder_add_net4_dst(&builder3, ip(10, 0, 0, 0), ip(255, 255, 255, 0));
 	builder_add_port_dst_range(&builder3, 80, 90);
 	builder_set_proto(&builder3, IPPROTO_UDP, 0, 0);
-	struct filter_rule rule3 = build_rule(&builder3, 2);
+	struct filter_rule rule3 = build_rule(&builder3);
 
 	struct filter_rule rules[] = {rule1, rule2, rule3};
 
@@ -301,9 +305,13 @@ test_multiple_rules_overlap(void *arena) {
 	res = memory_context_init(&mctx, "test", &alloc);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize memory context");
 
+	const struct filter_rule *rule_ptrs[3] = {
+		&rules[0], &rules[1], &rules[2]
+	};
+
 	struct filter filter;
 	res = filter_init(
-		&filter, combo_net4_port_proto_dst_compile, rules, 3, &mctx
+		&filter, combo_net4_port_proto_dst_compile, rule_ptrs, 3, &mctx
 	);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
 
@@ -338,7 +346,7 @@ test_tcp_flags(void *arena) {
 	builder_add_net4_dst(&builder1, ip(10, 0, 0, 0), ip(255, 255, 255, 0));
 	builder_add_port_dst_range(&builder1, 80, 80);
 	builder_set_proto(&builder1, IPPROTO_TCP, 0x02, 0); // SYN flag
-	struct filter_rule rule1 = build_rule(&builder1, 0);
+	struct filter_rule rule1 = build_rule(&builder1);
 
 	// Rule 2: dst IP 10.0.0.0/24, dst port 80, TCP with ACK flag
 	struct filter_rule_builder builder2;
@@ -346,7 +354,7 @@ test_tcp_flags(void *arena) {
 	builder_add_net4_dst(&builder2, ip(10, 0, 0, 0), ip(255, 255, 255, 0));
 	builder_add_port_dst_range(&builder2, 80, 80);
 	builder_set_proto(&builder2, IPPROTO_TCP, 0x10, 0); // ACK flag
-	struct filter_rule rule2 = build_rule(&builder2, 1);
+	struct filter_rule rule2 = build_rule(&builder2);
 
 	struct filter_rule rules[] = {rule1, rule2};
 
@@ -410,9 +418,11 @@ test_tcp_flags(void *arena) {
 	res = memory_context_init(&mctx, "test", &alloc);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize memory context");
 
+	const struct filter_rule *rule_ptrs[2] = {&rules[0], &rules[1]};
+
 	struct filter filter;
 	res = filter_init(
-		&filter, combo_net4_port_proto_dst_compile, rules, 2, &mctx
+		&filter, combo_net4_port_proto_dst_compile, rule_ptrs, 2, &mctx
 	);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
 

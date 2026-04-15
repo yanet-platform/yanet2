@@ -11,12 +11,18 @@ int
 FILTER_ATTR_COMPILER_INIT_FUNC(device)(
 	struct value_registry *registry,
 	void **data,
-	const struct filter_rule *rules,
+	const struct filter_rule **rules,
 	size_t rule_count,
 	struct memory_context *memory_context
 ) {
 	uint64_t max_device_id = 0;
-	for (const struct filter_rule *r = rules; r < rules + rule_count; ++r) {
+	for (const struct filter_rule **r_ptr = rules;
+	     r_ptr < rules + rule_count;
+	     ++r_ptr) {
+		if (*r_ptr == NULL)
+			continue;
+		const struct filter_rule *r = *r_ptr;
+
 		for (uint16_t idx = 0; idx < r->device_count; ++idx) {
 			if (r->devices[idx].id > max_device_id) {
 				max_device_id = r->devices[idx].id;
@@ -40,7 +46,13 @@ FILTER_ATTR_COMPILER_INIT_FUNC(device)(
 		goto error_remap_table;
 	}
 
-	for (const struct filter_rule *r = rules; r < rules + rule_count; ++r) {
+	for (const struct filter_rule **r_ptr = rules;
+	     r_ptr < rules + rule_count;
+	     ++r_ptr) {
+		if (*r_ptr == NULL)
+			continue;
+		const struct filter_rule *r = *r_ptr;
+
 		if (r->device_count == 0) {
 			continue;
 		}
@@ -59,8 +71,15 @@ FILTER_ATTR_COMPILER_INIT_FUNC(device)(
 	value_table_compact(t, &remap_table);
 	remap_table_free(&remap_table);
 
-	for (const struct filter_rule *r = rules; r < rules + rule_count; ++r) {
+	for (const struct filter_rule **r_ptr = rules;
+	     r_ptr < rules + rule_count;
+	     ++r_ptr) {
 		value_registry_start(registry);
+
+		if (*r_ptr == NULL)
+			continue;
+		const struct filter_rule *r = *r_ptr;
+
 		if (r->device_count == 0) {
 			for (uint64_t id = 0; id < max_device_id + 1; ++id) {
 				if (value_registry_collect(

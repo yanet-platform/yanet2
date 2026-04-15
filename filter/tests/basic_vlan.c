@@ -47,23 +47,23 @@ test_proto_1(void *memory) {
 	struct filter_rule_builder b1;
 	builder_init(&b1);
 	builder_set_vlan(&b1, 10);
-	struct filter_rule r1 = build_rule(&b1, 0);
+	struct filter_rule r1 = build_rule(&b1);
 
 	struct filter_rule_builder b2;
 	builder_init(&b2);
 	builder_set_vlan(&b2, 20);
-	struct filter_rule r2 = build_rule(&b2, 1);
+	struct filter_rule r2 = build_rule(&b2);
 
 	struct filter_rule_builder b3;
 	builder_init(&b3);
 	builder_set_vlan(&b3, 30);
-	struct filter_rule r3 = build_rule(&b3, 2);
+	struct filter_rule r3 = build_rule(&b3);
 
-	struct filter_rule rules[3] = {r1, r2, r3};
+	const struct filter_rule *rule_ptrs[3] = {&r1, &r2, &r3};
 
 	struct filter filter;
 	res = filter_init(
-		&filter, sign_vlan_compile, rules, 3, &memory_context
+		&filter, sign_vlan_compile, rule_ptrs, 3, &memory_context
 	);
 	assert(res == 0);
 

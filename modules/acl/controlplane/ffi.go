@@ -154,4 +154,3 @@ func (m *ModuleConfig) GetInfo() *AclConfigInfo {
 		FilterRuleCountVlan:    uint64(cInfo.filter_rule_count_vlan),
 	}
 }
-

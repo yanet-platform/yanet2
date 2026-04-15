@@ -144,10 +144,8 @@ builder_set_vlan(struct filter_rule_builder *b, uint16_t vlan) {
 }
 
 static inline struct filter_rule
-build_rule(struct filter_rule_builder *b, uint32_t action) {
+build_rule(struct filter_rule_builder *b) {
 	struct filter_rule r = {0};
-	r.action = action;
-
 	r.net4.src_count = (uint32_t)b->net4_src_count;
 	r.net4.srcs = b->net4_src;
 	r.net4.dst_count = (uint32_t)b->net4_dst_count;

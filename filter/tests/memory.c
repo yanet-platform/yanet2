@@ -100,7 +100,7 @@ test_src_dst_ports(void *memory) {
 	builder_init(&builder1);
 	builder_add_port_src_range(&builder1, 5, 7);
 	builder_add_port_dst_range(&builder1, 1, 5);
-	struct filter_rule action1 = build_rule(&builder1, 0);
+	struct filter_rule action1 = build_rule(&builder1);
 
 	// action 2:
 	//	src_port: [6..8]
@@ -109,14 +109,14 @@ test_src_dst_ports(void *memory) {
 	builder_init(&builder2);
 	builder_add_port_src_range(&builder2, 6, 8);
 	builder_add_port_dst_range(&builder2, 3, 4);
-	struct filter_rule action2 = build_rule(&builder2, 1);
+	struct filter_rule action2 = build_rule(&builder2);
 
-	struct filter_rule actions[2] = {action1, action2};
+	const struct filter_rule *action_ptrs[2] = {&action1, &action2};
 
 	// init filter
 	struct filter filter;
 	res = filter_init(
-		&filter, sign_ports_compile, actions, 2, &memory_context
+		&filter, sign_ports_compile, action_ptrs, 2, &memory_context
 	);
 	assert(res == 0);
 
@@ -145,21 +145,21 @@ test_src_port_only(void *memory) {
 	struct filter_rule_builder builder1;
 	builder_init(&builder1);
 	builder_add_port_src_range(&builder1, 500, 700);
-	struct filter_rule action1 = build_rule(&builder1, 0);
+	struct filter_rule action1 = build_rule(&builder1);
 
 	// action 2:
 	//	src_port: [600..800]
 	struct filter_rule_builder builder2;
 	builder_init(&builder2);
 	builder_add_port_src_range(&builder2, 600, 800);
-	struct filter_rule action2 = build_rule(&builder2, 1);
+	struct filter_rule action2 = build_rule(&builder2);
 
-	struct filter_rule actions[2] = {action1, action2};
+	const struct filter_rule *action_ptrs[2] = {&action1, &action2};
 
 	// init filter
 	struct filter filter;
 	res = filter_init(
-		&filter, sign_port_src_compile, actions, 2, &memory_context
+		&filter, sign_port_src_compile, action_ptrs, 2, &memory_context
 	);
 	assert(res == 0);
 

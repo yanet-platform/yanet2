@@ -62,7 +62,7 @@ test(void *memory) {
 	builder_add_port_dst_range(&b1, 200, 250);
 	builder_add_net4_src(&b1, ip(198, 233, 0, 0), ip(255, 255, 0, 0));
 	builder_add_net4_dst(&b1, ip(192, 0, 0, 0), ip(255, 0, 0, 0));
-	struct filter_rule a1 = build_rule(&b1, 0);
+	struct filter_rule a1 = build_rule(&b1);
 
 	// a2:
 	//  src_port: 200-300
@@ -75,14 +75,18 @@ test(void *memory) {
 	builder_add_port_dst_range(&b2, 100, 300);
 	builder_add_net4_src(&b2, ip(198, 233, 10, 0), ip(255, 255, 255, 0));
 	builder_add_net4_dst(&b2, ip(192, 0, 0, 0), ip(255, 0, 0, 0));
-	struct filter_rule a2 = build_rule(&b2, 1);
+	struct filter_rule a2 = build_rule(&b2);
 
-	struct filter_rule actions[2] = {a1, a2};
+	const struct filter_rule *action_ptrs[2] = {&a1, &a2};
 
 	// build filter
 	struct filter filter;
 	res = filter_init(
-		&filter, sign_net4_ports_compile, actions, 2, &memory_context
+		&filter,
+		sign_net4_ports_compile,
+		action_ptrs,
+		2,
+		&memory_context
 	);
 	assert(res == 0);
 

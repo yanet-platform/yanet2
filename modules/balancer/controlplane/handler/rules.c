@@ -97,7 +97,6 @@ make_filter_rules(
 			);
 			return -1;
 		}
-		rules[rule_idx].action = rule_idx;
 	}
 	*result_rules = rules;
 	return 0;
@@ -139,25 +138,39 @@ build_filter(
 	}
 
 	const size_t rules_count = vs_count;
+	const struct filter_rule **rule_ptrs = (const struct filter_rule **)
+		malloc(sizeof(struct filter_rule *) * rules_count);
+	if (rule_ptrs == NULL) {
+		memory_bfree(mctx, filter, sizeof(struct filter));
+		free_rules(rules_count, rules);
+		NEW_ERROR("no memory");
+		return -1;
+	}
+	for (size_t idx = 0; idx < rules_count; ++idx)
+		rule_ptrs[idx] = rules + idx;
+
 	if (proto == IPPROTO_IPV6) {
 		if (filter_init(
-			    filter, vs_lookup_ipv6, rules, rules_count, mctx
+			    filter, vs_lookup_ipv6, rule_ptrs, rules_count, mctx
 		    ) != 0) {
 			memory_bfree(mctx, filter, sizeof(struct filter));
 			free_rules(rules_count, rules);
+			free(rule_ptrs);
 			NEW_ERROR("no memory");
 			return -1;
 		}
 	} else {
 		if (filter_init(
-			    filter, vs_lookup_ipv4, rules, rules_count, mctx
+			    filter, vs_lookup_ipv4, rule_ptrs, rules_count, mctx
 		    ) != 0) {
 			memory_bfree(mctx, filter, sizeof(struct filter));
 			free_rules(rules_count, rules);
+			free(rule_ptrs);
 			NEW_ERROR("no memory");
 			return -1;
 		}
 	}
+	free(rule_ptrs);
 
 	SET_OFFSET_OF(&packet_handler_vs->filter, filter);
 

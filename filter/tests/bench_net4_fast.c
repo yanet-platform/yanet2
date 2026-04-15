@@ -227,7 +227,7 @@ generate_rules(
 			builder_set_proto(&builders[i], proto, 0, 0);
 		}
 
-		rules[i] = build_rule(&builders[i], i);
+		rules[i] = build_rule(&builders[i]);
 	}
 }
 
@@ -562,13 +562,18 @@ main(int argc, char **argv) {
 
 	// Initialize filter
 	printf("Initializing filter...\n");
+	const struct filter_rule **rule_ptrs =
+		malloc(sizeof(const struct filter_rule *) * config.num_rules);
+	for (size_t rp_i = 0; rp_i < config.num_rules; rp_i++)
+		rule_ptrs[rp_i] = &rules[rp_i];
+
 	struct filter filter;
 	switch (config.sig_type) {
 	case sig_net4_dst:
 		res = filter_init(
 			&filter,
 			bench_dst_compile,
-			rules,
+			rule_ptrs,
 			config.num_rules,
 			&memory_context
 		);
@@ -577,7 +582,7 @@ main(int argc, char **argv) {
 		res = filter_init(
 			&filter,
 			bench_dst_port_compile,
-			rules,
+			rule_ptrs,
 			config.num_rules,
 			&memory_context
 		);
@@ -586,7 +591,7 @@ main(int argc, char **argv) {
 		res = filter_init(
 			&filter,
 			bench_dst_port_proto_compile,
-			rules,
+			rule_ptrs,
 			config.num_rules,
 			&memory_context
 		);
@@ -712,6 +717,7 @@ main(int argc, char **argv) {
 	munmap(packet_alloc_arena, packet_alloc_size);
 	munmap(packet_buffers, packet_buffers_size);
 	munmap(packet_info_array, packet_info_size);
+	free(rule_ptrs);
 	munmap(builders, builders_size);
 	munmap(rules, rules_size);
 	munmap(arena, arena_size);

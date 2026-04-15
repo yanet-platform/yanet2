@@ -700,17 +700,28 @@ setup_acl(
 		rule->transport.srcs = ADDR_OF(&rule->transport.srcs);
 	}
 
+	const struct filter_rule **rule_ptrs = (const struct filter_rule **)
+		malloc(sizeof(struct filter_rule *) * rule_count);
+	if (rule_ptrs == NULL) {
+		PUSH_ERROR("no memory");
+		return -1;
+	}
+	for (size_t idx = 0; idx < rule_count; ++idx) {
+		rule_ptrs[idx] = rules + idx;
+	}
+
 	// Initialize filter with absolute pointers
 	int res;
 	if (vs->identifier.ip_proto == IPPROTO_IP) {
 		res = filter_init(
-			vs->acl, vs_acl_ipv4, rules, rule_count, mctx
+			vs->acl, vs_acl_ipv4, rule_ptrs, rule_count, mctx
 		);
 	} else { // IPPROTO_IPV6
 		res = filter_init(
-			vs->acl, vs_acl_ipv6, rules, rule_count, mctx
+			vs->acl, vs_acl_ipv6, rule_ptrs, rule_count, mctx
 		);
 	}
+	free(rule_ptrs);
 
 	// Restore relative pointers
 	for (size_t i = 0; i < rule_count; ++i) {
@@ -878,9 +889,6 @@ setup_acl_rules(
 			// counter is undefined, because tag not specified
 			rule_counters[i] = (uint64_t)-1;
 		}
-
-		// store actions equal rule stable index
-		rules[i].action = i;
 	}
 
 	// Store using relative pointers

@@ -10,7 +10,7 @@ int
 FILTER_ATTR_COMPILER_INIT_FUNC(vlan)(
 	struct value_registry *registry,
 	void **data,
-	const struct filter_rule *rules,
+	const struct filter_rule **rules,
 	size_t rule_count,
 	struct memory_context *memory_context
 ) {
@@ -30,7 +30,13 @@ FILTER_ATTR_COMPILER_INIT_FUNC(vlan)(
 		goto error_remap_table;
 	}
 
-	for (const struct filter_rule *r = rules; r < rules + rule_count; ++r) {
+	for (const struct filter_rule **r_ptr = rules;
+	     r_ptr < rules + rule_count;
+	     ++r_ptr) {
+		if (*r_ptr == NULL)
+			continue;
+		const struct filter_rule *r = *r_ptr;
+
 		if (r->vlan_range_count == 0) {
 			continue;
 		}
@@ -54,8 +60,15 @@ FILTER_ATTR_COMPILER_INIT_FUNC(vlan)(
 	value_table_compact(t, &remap_table);
 	remap_table_free(&remap_table);
 
-	for (const struct filter_rule *r = rules; r < rules + rule_count; ++r) {
+	for (const struct filter_rule **r_ptr = rules;
+	     r_ptr < rules + rule_count;
+	     ++r_ptr) {
+		// A value range should be created even for empty rules
 		value_registry_start(registry);
+		if (*r_ptr == NULL)
+			continue;
+		const struct filter_rule *r = *r_ptr;
+
 		if (r->vlan_range_count == 0) {
 			for (uint16_t vlan = 0; vlan <= 4095; ++vlan) {
 				value_registry_collect(

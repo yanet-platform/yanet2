@@ -100,25 +100,20 @@ typedef int (*route_mpls_rule_check_func)(
 	const struct route_mpls_rule *route_mpls_rule
 );
 
-static uint32_t
-filter_route_mpls_rules(
+static void
+make_filter_rules(
 	struct route_mpls_rule *route_mpls_rules,
 	uint32_t route_mpls_rule_count,
-	struct filter_rule *filter_rules,
-	route_mpls_rule_check_func check
-	// TODO: should be there an instantiation callback??
+	struct filter_rule *filter_rules
 ) {
-	uint32_t filter_rule_idx = 0;
 	for (uint32_t route_mpls_rule_idx = 0;
 	     route_mpls_rule_idx < route_mpls_rule_count;
 	     ++route_mpls_rule_idx) {
 		struct route_mpls_rule *route_mpls_rule =
 			route_mpls_rules + route_mpls_rule_idx;
-		if (!check(route_mpls_rule))
-			continue;
 
 		struct filter_rule *filter_rule =
-			filter_rules + filter_rule_idx++;
+			filter_rules + route_mpls_rule_idx;
 
 		memset(filter_rule, 0, sizeof(struct filter_rule));
 
@@ -127,8 +122,31 @@ filter_route_mpls_rules(
 
 		filter_rule->net6.dst_count = route_mpls_rule->net6s.count;
 		filter_rule->net6.dsts = route_mpls_rule->net6s.items;
+	}
+}
 
-		filter_rule->action = route_mpls_rule_idx;
+static uint32_t
+filter_route_mpls_rules(
+	struct route_mpls_rule *route_mpls_rules,
+	uint32_t route_mpls_rule_count,
+	const struct filter_rule *filter_rules,
+	const struct filter_rule **filter_rule_ptrs,
+	route_mpls_rule_check_func check
+) {
+	uint32_t filter_rule_idx = 0;
+	for (uint32_t route_mpls_rule_idx = 0;
+	     route_mpls_rule_idx < route_mpls_rule_count;
+	     ++route_mpls_rule_idx) {
+		struct route_mpls_rule *route_mpls_rule =
+			route_mpls_rules + route_mpls_rule_idx;
+
+		if (!check(route_mpls_rule)) {
+			filter_rule_ptrs[route_mpls_rule_idx] = NULL;
+		} else {
+			filter_rule_ptrs[route_mpls_rule_idx] =
+				filter_rules + route_mpls_rule_idx;
+			++filter_rule_idx;
+		}
 	}
 
 	return filter_rule_idx;
@@ -149,23 +167,25 @@ route_mpls_module_init_ip4(
 	struct cp_module *cp_module,
 	struct route_mpls_rule *route_mpls_rules,
 	uint64_t route_mpls_rule_count,
-	struct filter_rule *filter_rules
+	const struct filter_rule *filter_rules,
+	const struct filter_rule **filter_rule_ptrs
 ) {
 	struct module_config *config =
 		container_of(cp_module, struct module_config, cp_module);
 
-	uint32_t filter_rule_count = filter_route_mpls_rules(
+	filter_route_mpls_rules(
 		route_mpls_rules,
 		route_mpls_rule_count,
 		filter_rules,
+		filter_rule_ptrs,
 		check_route_mpls_rule_ip4
 	);
 
 	return filter_init(
 		&config->filter_ip4,
 		FILTER_IP4_TAG,
-		filter_rules,
-		filter_rule_count,
+		filter_rule_ptrs,
+		route_mpls_rule_count,
 		&cp_module->memory_context
 	);
 }
@@ -175,23 +195,25 @@ route_mpls_module_init_ip6(
 	struct cp_module *cp_module,
 	struct route_mpls_rule *route_mpls_rules,
 	uint64_t route_mpls_rule_count,
-	struct filter_rule *filter_rules
+	const struct filter_rule *filter_rules,
+	const struct filter_rule **filter_rule_ptrs
 ) {
 	struct module_config *config =
 		container_of(cp_module, struct module_config, cp_module);
 
-	uint32_t filter_rule_count = filter_route_mpls_rules(
+	filter_route_mpls_rules(
 		route_mpls_rules,
 		route_mpls_rule_count,
 		filter_rules,
+		filter_rule_ptrs,
 		check_route_mpls_rule_ip6
 	);
 
 	return filter_init(
 		&config->filter_ip6,
 		FILTER_IP6_TAG,
-		filter_rules,
-		filter_rule_count,
+		filter_rule_ptrs,
+		route_mpls_rule_count,
 		&cp_module->memory_context
 	);
 }
@@ -332,25 +354,46 @@ route_mpls_module_config_update(
 		goto error;
 	}
 
+	make_filter_rules(
+		route_mpls_rules, route_mpls_rule_count, filter_rules
+	);
+
+	const struct filter_rule **filter_rule_ptrs =
+		(const struct filter_rule **)malloc(
+			sizeof(struct filter_rule *) * route_mpls_rule_count
+		);
+	if (filter_rule_ptrs == NULL) {
+		goto error_rules;
+	}
+
 	if (route_mpls_module_init_ip4(
 		    cp_module,
 		    route_mpls_rules,
 		    route_mpls_rule_count,
-		    filter_rules
+		    filter_rules,
+		    filter_rule_ptrs
 	    ))
-		goto error;
+		goto error_rule_ptrs;
 
 	if (route_mpls_module_init_ip6(
 		    cp_module,
 		    route_mpls_rules,
 		    route_mpls_rule_count,
-		    filter_rules
+		    filter_rules,
+		    filter_rule_ptrs
 	    ))
-		goto error;
+		goto error_rule_ptrs;
 
+	free(filter_rule_ptrs);
 	free(filter_rules);
 
 	return 0;
+
+error_rule_ptrs:
+	free(filter_rule_ptrs);
+
+error_rules:
+	free(filter_rules);
 
 error:
 

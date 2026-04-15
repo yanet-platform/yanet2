@@ -143,12 +143,12 @@ test1(void *memory) {
 	};
 	make_addr(net.addr, 0xB, 16, 0xA, 16);
 	builder_add_net6_dst(&builder, net);
-	struct filter_rule rule = build_rule(&builder, 0);
-	const struct filter_rule rules[1] = {rule};
+	struct filter_rule rule = build_rule(&builder);
+	const struct filter_rule *rule_ptrs[1] = {&rule};
 
 	// init filter
 	struct filter filter;
-	res = filter_init(&filter, sign_net6_dst_compile, rules, 1, &mctx);
+	res = filter_init(&filter, sign_net6_dst_compile, rule_ptrs, 1, &mctx);
 	assert(res == 0);
 
 	// query packet 1
@@ -293,12 +293,12 @@ test2(void *memory) {
 	memset(net.addr, 0xBb, 8);
 	memset(net.addr + 8, 0xAa, 8);
 	builder_add_net6_dst(&builder, net);
-	struct filter_rule rule = build_rule(&builder, 0);
-	const struct filter_rule rules[1] = {rule};
+	struct filter_rule rule = build_rule(&builder);
+	const struct filter_rule *rule_ptrs[1] = {&rule};
 
 	// init filter
 	struct filter filter;
-	res = filter_init(&filter, sign_net6_dst_compile, rules, 1, &mctx);
+	res = filter_init(&filter, sign_net6_dst_compile, rule_ptrs, 1, &mctx);
 	assert(res == 0);
 
 	// query packet 1
@@ -449,7 +449,7 @@ test3(void *memory) {
 		make_addr(dst_net.addr, 0xB, 16, 0xA, 16);
 		builder_add_net6_dst(&builder1, dst_net);
 
-		rule1 = build_rule(&builder1, 0);
+		rule1 = build_rule(&builder1);
 	}
 
 	struct filter_rule rule2;
@@ -509,14 +509,14 @@ test3(void *memory) {
 		make_addr(dst_net.addr, 0xB, 16, 0xA, 16);
 		builder_add_net6_dst(&builder2, dst_net);
 
-		rule2 = build_rule(&builder2, 1);
+		rule2 = build_rule(&builder2);
 	}
 
-	const struct filter_rule rules[2] = {rule1, rule2};
+	const struct filter_rule *rule_ptrs[2] = {&rule1, &rule2};
 
 	// init filter
 	struct filter filter;
-	res = filter_init(&filter, sign_net6_compile, rules, 2, &mctx);
+	res = filter_init(&filter, sign_net6_compile, rule_ptrs, 2, &mctx);
 	assert(res == 0);
 
 	// query packet 1

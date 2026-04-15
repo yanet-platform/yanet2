@@ -71,7 +71,7 @@ test_src_dst_ports(void *memory) {
 	builder_init(&builder1);
 	builder_add_port_src_range(&builder1, 5, 7);
 	builder_add_port_dst_range(&builder1, 1, 5);
-	struct filter_rule action1 = build_rule(&builder1, 0);
+	struct filter_rule action1 = build_rule(&builder1);
 
 	// action 2:
 	//   src_port: [6..8]
@@ -80,13 +80,15 @@ test_src_dst_ports(void *memory) {
 	builder_init(&builder2);
 	builder_add_port_src_range(&builder2, 6, 8);
 	builder_add_port_dst_range(&builder2, 3, 4);
-	struct filter_rule action2 = build_rule(&builder2, 1);
+	struct filter_rule action2 = build_rule(&builder2);
 
-	struct filter_rule actions[2] = {action1, action2};
+	const struct filter_rule *action_ptrs[2] = {&action1, &action2};
 
 	// init filter
 	struct filter f;
-	res = filter_init(&f, sign_ports_compile, actions, 2, &memory_context);
+	res = filter_init(
+		&f, sign_ports_compile, action_ptrs, 2, &memory_context
+	);
 	assert(res == 0);
 
 	query_and_expect_action(&f, 6, 3, 0);
@@ -111,24 +113,28 @@ src_dst_ports(void *memory) {
 	builder_init(&builder1);
 	builder_add_port_src_range(&builder1, 1024, 5016);
 	builder_add_port_dst_range(&builder1, 500, 50000);
-	struct filter_rule action1 = build_rule(&builder1, 0);
+	struct filter_rule action1 = build_rule(&builder1);
 
 	struct filter_rule_builder builder2;
 	builder_init(&builder2);
 	builder_add_port_src_range(&builder2, 30, 500);
 	builder_add_port_dst_range(&builder2, 400, 12040);
-	struct filter_rule action2 = build_rule(&builder2, 1);
+	struct filter_rule action2 = build_rule(&builder2);
 
 	struct filter_rule_builder builder3;
 	builder_init(&builder3);
 	builder_add_port_src_range(&builder3, 100, 2014);
 	builder_add_port_dst_range(&builder3, 5000, 15000);
-	struct filter_rule action3 = build_rule(&builder3, 2);
+	struct filter_rule action3 = build_rule(&builder3);
 
-	struct filter_rule actions[3] = {action1, action2, action3};
+	const struct filter_rule *action_ptrs[3] = {
+		&action1, &action2, &action3
+	};
 
 	struct filter f;
-	res = filter_init(&f, sign_ports_compile, actions, 3, &memory_context);
+	res = filter_init(
+		&f, sign_ports_compile, action_ptrs, 3, &memory_context
+	);
 	assert(res == 0);
 
 	query_and_expect_action(&f, 30, 400, 1);
@@ -169,26 +175,30 @@ test_any_port(void *memory) {
 	builder_init(&builder1);
 	builder_add_port_src_range(&builder1, 1024, 5016);
 	builder_add_port_dst_range(&builder1, 0, 65535);
-	struct filter_rule action1 = build_rule(&builder1, 0);
+	struct filter_rule action1 = build_rule(&builder1);
 
 	// rule 2: src any, dst [400..12040]
 	struct filter_rule_builder builder2;
 	builder_init(&builder2);
 	builder_add_port_src_range(&builder2, 0, 65535);
 	builder_add_port_dst_range(&builder2, 400, 12040);
-	struct filter_rule action2 = build_rule(&builder2, 1);
+	struct filter_rule action2 = build_rule(&builder2);
 
 	// rule 3: src [100..2014], dst [5000..15000]
 	struct filter_rule_builder builder3;
 	builder_init(&builder3);
 	builder_add_port_src_range(&builder3, 100, 2014);
 	builder_add_port_dst_range(&builder3, 5000, 15000);
-	struct filter_rule action3 = build_rule(&builder3, 2);
+	struct filter_rule action3 = build_rule(&builder3);
 
-	struct filter_rule actions[3] = {action1, action2, action3};
+	const struct filter_rule *action_ptrs[3] = {
+		&action1, &action2, &action3
+	};
 
 	struct filter f;
-	res = filter_init(&f, sign_ports_compile, actions, 3, &memory_context);
+	res = filter_init(
+		&f, sign_ports_compile, action_ptrs, 3, &memory_context
+	);
 	assert(res == 0);
 
 	query_and_expect_action(&f, 1025, 11111, 0);

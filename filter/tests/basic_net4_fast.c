@@ -182,7 +182,7 @@ test_basic(void *arena, enum filter_sign sign) {
 		memcpy(builder->net4_src[0].addr, nets[net_idx].addr, 4);
 		memcpy(builder->net4_src[0].mask, &mask, 4);
 
-		rules[net_idx] = build_rule(builder, net_idx);
+		rules[net_idx] = build_rule(builder);
 
 		uint8_t mask_byte = ((uint8_t *)&mask
 		)[3]; // Get the 4th byte of the BE mask
@@ -210,14 +210,26 @@ test_basic(void *arena, enum filter_sign sign) {
 	res = memory_context_init(&mctx, "test", &alloc);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize memory context");
 
+	const struct filter_rule *rule_ptrs[nets_count];
+	for (size_t i = 0; i < nets_count; i++)
+		rule_ptrs[i] = &rules[i];
+
 	struct filter filter;
 	if (sign == src) {
 		res = filter_init(
-			&filter, sign_fast_src_compile, rules, nets_count, &mctx
+			&filter,
+			sign_fast_src_compile,
+			rule_ptrs,
+			nets_count,
+			&mctx
 		);
 	} else {
 		res = filter_init(
-			&filter, sign_fast_dst_compile, rules, nets_count, &mctx
+			&filter,
+			sign_fast_dst_compile,
+			rule_ptrs,
+			nets_count,
+			&mctx
 		);
 	}
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
@@ -349,7 +361,7 @@ test_multiple_nets_per_rule(void *arena, enum filter_sign sign) {
 			);
 		}
 	}
-	rules[0] = build_rule(&builders[0], 0);
+	rules[0] = build_rule(&builders[0]);
 
 	// Rule 2: Add 2 networks
 	builder_init(&builders[1]);
@@ -369,7 +381,7 @@ test_multiple_nets_per_rule(void *arena, enum filter_sign sign) {
 			);
 		}
 	}
-	rules[1] = build_rule(&builders[1], 1);
+	rules[1] = build_rule(&builders[1]);
 
 	// Rule 3: Add 2 networks
 	builder_init(&builders[2]);
@@ -389,7 +401,7 @@ test_multiple_nets_per_rule(void *arena, enum filter_sign sign) {
 			);
 		}
 	}
-	rules[2] = build_rule(&builders[2], 2);
+	rules[2] = build_rule(&builders[2]);
 
 	struct block_allocator alloc;
 	int res = block_allocator_init(&alloc);
@@ -400,14 +412,26 @@ test_multiple_nets_per_rule(void *arena, enum filter_sign sign) {
 	res = memory_context_init(&mctx, "test", &alloc);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize memory context");
 
+	const struct filter_rule *rule_ptrs[num_rules];
+	for (size_t i = 0; i < num_rules; i++)
+		rule_ptrs[i] = &rules[i];
+
 	struct filter filter;
 	if (sign == src) {
 		res = filter_init(
-			&filter, sign_fast_src_compile, rules, num_rules, &mctx
+			&filter,
+			sign_fast_src_compile,
+			rule_ptrs,
+			num_rules,
+			&mctx
 		);
 	} else {
 		res = filter_init(
-			&filter, sign_fast_dst_compile, rules, num_rules, &mctx
+			&filter,
+			sign_fast_dst_compile,
+			rule_ptrs,
+			num_rules,
+			&mctx
 		);
 	}
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
@@ -498,7 +522,7 @@ stress(void *arena,
 			}
 		}
 
-		rules[rule_idx] = build_rule(&builders[rule_idx], rule_idx);
+		rules[rule_idx] = build_rule(&builders[rule_idx]);
 	}
 
 	struct value_range **expected_ranges =
@@ -511,13 +535,18 @@ stress(void *arena,
 	}
 
 	// Initialize both filters
+	const struct filter_rule **rule_ptrs =
+		malloc(sizeof(const struct filter_rule *) * num_rules);
+	for (size_t i = 0; i < num_rules; i++)
+		rule_ptrs[i] = &rules[i];
+
 	struct filter filter;
 	switch (sign) {
 	case src:
 		res = filter_init(
 			&filter,
 			sign_fast_src_compile,
-			rules,
+			rule_ptrs,
 			num_rules,
 			&memory_context
 		);
@@ -526,7 +555,7 @@ stress(void *arena,
 		res = filter_init(
 			&filter,
 			sign_fast_dst_compile,
-			rules,
+			rule_ptrs,
 			num_rules,
 			&memory_context
 		);
@@ -535,7 +564,7 @@ stress(void *arena,
 		res = filter_init(
 			&filter,
 			sign_fast_src_dst_compile,
-			rules,
+			rule_ptrs,
 			num_rules,
 			&memory_context
 		);
@@ -605,6 +634,7 @@ stress(void *arena,
 		result, "failed to query packets and compare with old filter"
 	);
 
+	free(rule_ptrs);
 	free(rules);
 	free(builders);
 	for (size_t packet_idx = 0; packet_idx < num_packets; ++packet_idx) {
@@ -683,7 +713,7 @@ test_no_match(void *arena, enum filter_sign sign) {
 				(const uint8_t *)&mask
 			);
 		}
-		rules[net_idx] = build_rule(&builders[net_idx], net_idx);
+		rules[net_idx] = build_rule(&builders[net_idx]);
 	}
 
 	// Expected: no matches for any packet
@@ -703,14 +733,26 @@ test_no_match(void *arena, enum filter_sign sign) {
 	res = memory_context_init(&mctx, "test", &alloc);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize memory context");
 
+	const struct filter_rule *rule_ptrs[nets_count];
+	for (size_t i = 0; i < nets_count; i++)
+		rule_ptrs[i] = &rules[i];
+
 	struct filter filter;
 	if (sign == src) {
 		res = filter_init(
-			&filter, sign_fast_src_compile, rules, nets_count, &mctx
+			&filter,
+			sign_fast_src_compile,
+			rule_ptrs,
+			nets_count,
+			&mctx
 		);
 	} else {
 		res = filter_init(
-			&filter, sign_fast_dst_compile, rules, nets_count, &mctx
+			&filter,
+			sign_fast_dst_compile,
+			rule_ptrs,
+			nets_count,
+			&mctx
 		);
 	}
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
@@ -793,7 +835,7 @@ test_overlapping_networks(void *arena, enum filter_sign sign) {
 				(const uint8_t *)&mask
 			);
 		}
-		rules[net_idx] = build_rule(&builders[net_idx], net_idx);
+		rules[net_idx] = build_rule(&builders[net_idx]);
 	}
 
 	// Expected matches
@@ -825,14 +867,26 @@ test_overlapping_networks(void *arena, enum filter_sign sign) {
 	res = memory_context_init(&mctx, "test", &alloc);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize memory context");
 
+	const struct filter_rule *rule_ptrs[nets_count];
+	for (size_t i = 0; i < nets_count; i++)
+		rule_ptrs[i] = &rules[i];
+
 	struct filter filter;
 	if (sign == src) {
 		res = filter_init(
-			&filter, sign_fast_src_compile, rules, nets_count, &mctx
+			&filter,
+			sign_fast_src_compile,
+			rule_ptrs,
+			nets_count,
+			&mctx
 		);
 	} else {
 		res = filter_init(
-			&filter, sign_fast_dst_compile, rules, nets_count, &mctx
+			&filter,
+			sign_fast_dst_compile,
+			rule_ptrs,
+			nets_count,
+			&mctx
 		);
 	}
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
@@ -912,7 +966,7 @@ test_boundary_conditions(void *arena, enum filter_sign sign) {
 				(const uint8_t *)&mask
 			);
 		}
-		rules[net_idx] = build_rule(&builders[net_idx], net_idx);
+		rules[net_idx] = build_rule(&builders[net_idx]);
 	}
 
 	// Expected: first 4 match, last 2 don't
@@ -936,14 +990,26 @@ test_boundary_conditions(void *arena, enum filter_sign sign) {
 	res = memory_context_init(&mctx, "test", &alloc);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize memory context");
 
+	const struct filter_rule *rule_ptrs[nets_count];
+	for (size_t i = 0; i < nets_count; i++)
+		rule_ptrs[i] = &rules[i];
+
 	struct filter filter;
 	if (sign == src) {
 		res = filter_init(
-			&filter, sign_fast_src_compile, rules, nets_count, &mctx
+			&filter,
+			sign_fast_src_compile,
+			rule_ptrs,
+			nets_count,
+			&mctx
 		);
 	} else {
 		res = filter_init(
-			&filter, sign_fast_dst_compile, rules, nets_count, &mctx
+			&filter,
+			sign_fast_dst_compile,
+			rule_ptrs,
+			nets_count,
+			&mctx
 		);
 	}
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
@@ -1025,7 +1091,7 @@ test_single_host_networks(void *arena, enum filter_sign sign) {
 				(const uint8_t *)&mask
 			);
 		}
-		rules[net_idx] = build_rule(&builders[net_idx], net_idx);
+		rules[net_idx] = build_rule(&builders[net_idx]);
 	}
 
 	// Expected: first 3 match their respective rules, last 3 don't match
@@ -1058,14 +1124,26 @@ test_single_host_networks(void *arena, enum filter_sign sign) {
 	res = memory_context_init(&mctx, "test", &alloc);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize memory context");
 
+	const struct filter_rule *rule_ptrs[nets_count];
+	for (size_t i = 0; i < nets_count; i++)
+		rule_ptrs[i] = &rules[i];
+
 	struct filter filter;
 	if (sign == src) {
 		res = filter_init(
-			&filter, sign_fast_src_compile, rules, nets_count, &mctx
+			&filter,
+			sign_fast_src_compile,
+			rule_ptrs,
+			nets_count,
+			&mctx
 		);
 	} else {
 		res = filter_init(
-			&filter, sign_fast_dst_compile, rules, nets_count, &mctx
+			&filter,
+			sign_fast_dst_compile,
+			rule_ptrs,
+			nets_count,
+			&mctx
 		);
 	}
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
@@ -1148,7 +1226,7 @@ test_adjacent_networks(void *arena, enum filter_sign sign) {
 				(const uint8_t *)&mask
 			);
 		}
-		rules[net_idx] = build_rule(&builders[net_idx], net_idx);
+		rules[net_idx] = build_rule(&builders[net_idx]);
 	}
 
 	// Expected: packets 0,1,4 match rule 1; packets 2,3,5 match rule 2
@@ -1179,14 +1257,26 @@ test_adjacent_networks(void *arena, enum filter_sign sign) {
 	res = memory_context_init(&mctx, "test", &alloc);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize memory context");
 
+	const struct filter_rule *rule_ptrs[nets_count];
+	for (size_t i = 0; i < nets_count; i++)
+		rule_ptrs[i] = &rules[i];
+
 	struct filter filter;
 	if (sign == src) {
 		res = filter_init(
-			&filter, sign_fast_src_compile, rules, nets_count, &mctx
+			&filter,
+			sign_fast_src_compile,
+			rule_ptrs,
+			nets_count,
+			&mctx
 		);
 	} else {
 		res = filter_init(
-			&filter, sign_fast_dst_compile, rules, nets_count, &mctx
+			&filter,
+			sign_fast_dst_compile,
+			rule_ptrs,
+			nets_count,
+			&mctx
 		);
 	}
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");

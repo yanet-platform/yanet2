@@ -60,23 +60,23 @@ test_proto_1(void *memory) {
 	struct filter_rule_builder b1;
 	builder_init(&b1);
 	builder_set_proto(&b1, IPPROTO_TCP, 0b101, 0b010);
-	struct filter_rule r1 = build_rule(&b1, 0);
+	struct filter_rule r1 = build_rule(&b1);
 
 	struct filter_rule_builder b2;
 	builder_init(&b2);
 	builder_set_proto(&b2, IPPROTO_UDP, 0, 0);
-	struct filter_rule r2 = build_rule(&b2, 1);
+	struct filter_rule r2 = build_rule(&b2);
 
 	struct filter_rule_builder b3;
 	builder_init(&b3);
 	builder_set_proto(&b3, PROTO_UNSPEC, 0, 0);
-	struct filter_rule r3 = build_rule(&b3, 2);
+	struct filter_rule r3 = build_rule(&b3);
 
-	struct filter_rule rules[3] = {r1, r2, r3};
+	const struct filter_rule *rule_ptrs[3] = {&r1, &r2, &r3};
 
 	struct filter filter;
 	res = filter_init(
-		&filter, sign_proto_compile, rules, 3, &memory_context
+		&filter, sign_proto_compile, rule_ptrs, 3, &memory_context
 	);
 	assert(res == 0);
 

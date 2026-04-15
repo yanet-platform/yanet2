@@ -148,23 +148,17 @@ acl_module_config_free(struct cp_module *cp_module) {
 
 typedef int (*acl_rule_check_func)(const struct acl_rule *acl_rule);
 
-static uint32_t
-filter_acl_rules(
+static void
+make_filter_rules(
 	struct acl_rule *acl_rules,
 	uint32_t acl_rule_count,
-	struct filter_rule *filter_rules,
-	acl_rule_check_func check
-	// TODO: should be there an instantiation callback??
+	struct filter_rule *filter_rules
 ) {
-	uint32_t filter_rule_idx = 0;
 	for (uint32_t acl_rule_idx = 0; acl_rule_idx < acl_rule_count;
 	     ++acl_rule_idx) {
 		struct acl_rule *acl_rule = acl_rules + acl_rule_idx;
-		if (!check(acl_rule))
-			continue;
 
-		struct filter_rule *filter_rule =
-			filter_rules + filter_rule_idx++;
+		struct filter_rule *filter_rule = filter_rules + acl_rule_idx;
 		filter_rule->device_count = acl_rule->devices.count;
 		filter_rule->devices = acl_rule->devices.items;
 
@@ -192,8 +186,31 @@ filter_acl_rules(
 		filter_rule->transport.dst_count =
 			acl_rule->dst_port_ranges.count;
 		filter_rule->transport.dsts = acl_rule->dst_port_ranges.items;
+	}
+}
 
-		filter_rule->action = acl_rule_idx;
+static uint32_t
+filter_acl_rules(
+	struct acl_rule *acl_rules,
+	uint32_t acl_rule_count,
+	const struct filter_rule *filter_rules,
+	const struct filter_rule **filter_rule_ptrs,
+	acl_rule_check_func check
+) {
+	uint32_t filter_rule_idx = 0;
+	for (uint32_t acl_rule_idx = 0; acl_rule_idx < acl_rule_count;
+	     ++acl_rule_idx) {
+		struct acl_rule *acl_rule = acl_rules + acl_rule_idx;
+
+		const struct filter_rule *filter_rule =
+			filter_rules + acl_rule_idx;
+
+		if (!check(acl_rule)) {
+			filter_rule_ptrs[acl_rule_idx] = NULL;
+		} else {
+			filter_rule_ptrs[acl_rule_idx] = filter_rule;
+			++filter_rule_idx;
+		}
 	}
 
 	return filter_rule_idx;
@@ -260,22 +277,25 @@ acl_module_init_l2(
 	struct cp_module *cp_module,
 	struct acl_rule *acl_rules,
 	uint32_t acl_rule_count,
-	struct filter_rule *filter_rules
+	struct filter_rule *filter_rules,
+	const struct filter_rule **filter_rule_ptrs
 ) {
 	struct acl_module_config *config =
 		container_of(cp_module, struct acl_module_config, cp_module);
 
-	uint32_t filter_rule_count = filter_acl_rules(
-		acl_rules, acl_rule_count, filter_rules, check_acl_rule_l2
+	config->filter_rule_count_vlan = filter_acl_rules(
+		acl_rules,
+		acl_rule_count,
+		filter_rules,
+		filter_rule_ptrs,
+		check_acl_rule_l2
 	);
-
-	config->filter_rule_count_vlan = filter_rule_count;
 
 	return filter_init(
 		&config->filter_vlan,
 		ACL_FILTER_VLAN_TAG,
-		filter_rules,
-		filter_rule_count,
+		filter_rule_ptrs,
+		acl_rule_count,
 		&cp_module->memory_context
 	);
 }
@@ -285,22 +305,25 @@ acl_module_init_ip4(
 	struct cp_module *cp_module,
 	struct acl_rule *acl_rules,
 	uint32_t acl_rule_count,
-	struct filter_rule *filter_rules
+	struct filter_rule *filter_rules,
+	const struct filter_rule **filter_rule_ptrs
 ) {
 	struct acl_module_config *config =
 		container_of(cp_module, struct acl_module_config, cp_module);
 
-	uint32_t filter_rule_count = filter_acl_rules(
-		acl_rules, acl_rule_count, filter_rules, check_acl_rule_ip4
+	config->filter_rule_count_ip4 = filter_acl_rules(
+		acl_rules,
+		acl_rule_count,
+		filter_rules,
+		filter_rule_ptrs,
+		check_acl_rule_ip4
 	);
-
-	config->filter_rule_count_ip4 = filter_rule_count;
 
 	return filter_init(
 		&config->filter_ip4,
 		ACL_FILTER_IP4_TAG,
-		filter_rules,
-		filter_rule_count,
+		filter_rule_ptrs,
+		acl_rule_count,
 		&cp_module->memory_context
 	);
 }
@@ -310,22 +333,25 @@ acl_module_init_ip4_port(
 	struct cp_module *cp_module,
 	struct acl_rule *acl_rules,
 	uint32_t acl_rule_count,
-	struct filter_rule *filter_rules
+	struct filter_rule *filter_rules,
+	const struct filter_rule **filter_rule_ptrs
 ) {
 	struct acl_module_config *config =
 		container_of(cp_module, struct acl_module_config, cp_module);
 
-	uint32_t filter_rule_count = filter_acl_rules(
-		acl_rules, acl_rule_count, filter_rules, check_acl_rule_ip4_port
+	config->filter_rule_count_ip4_port = filter_acl_rules(
+		acl_rules,
+		acl_rule_count,
+		filter_rules,
+		filter_rule_ptrs,
+		check_acl_rule_ip4_port
 	);
-
-	config->filter_rule_count_ip4_port = filter_rule_count;
 
 	return filter_init(
 		&config->filter_ip4_port,
 		ACL_FILTER_IP4_PROTO_PORT_TAG,
-		filter_rules,
-		filter_rule_count,
+		filter_rule_ptrs,
+		acl_rule_count,
 		&cp_module->memory_context
 	);
 }
@@ -335,22 +361,25 @@ acl_module_init_ip6(
 	struct cp_module *cp_module,
 	struct acl_rule *acl_rules,
 	uint32_t acl_rule_count,
-	struct filter_rule *filter_rules
+	struct filter_rule *filter_rules,
+	const struct filter_rule **filter_rule_ptrs
 ) {
 	struct acl_module_config *config =
 		container_of(cp_module, struct acl_module_config, cp_module);
 
-	uint32_t filter_rule_count = filter_acl_rules(
-		acl_rules, acl_rule_count, filter_rules, check_acl_rule_ip6
+	config->filter_rule_count_ip6 = filter_acl_rules(
+		acl_rules,
+		acl_rule_count,
+		filter_rules,
+		filter_rule_ptrs,
+		check_acl_rule_ip6
 	);
-
-	config->filter_rule_count_ip6 = filter_rule_count;
 
 	return filter_init(
 		&config->filter_ip6,
 		ACL_FILTER_IP6_TAG,
-		filter_rules,
-		filter_rule_count,
+		filter_rule_ptrs,
+		acl_rule_count,
 		&cp_module->memory_context
 	);
 }
@@ -360,22 +389,25 @@ acl_module_init_ip6_port(
 	struct cp_module *cp_module,
 	struct acl_rule *acl_rules,
 	uint32_t acl_rule_count,
-	struct filter_rule *filter_rules
+	struct filter_rule *filter_rules,
+	const struct filter_rule **filter_rule_ptrs
 ) {
 	struct acl_module_config *config =
 		container_of(cp_module, struct acl_module_config, cp_module);
 
-	uint32_t filter_rule_count = filter_acl_rules(
-		acl_rules, acl_rule_count, filter_rules, check_acl_rule_ip6_port
+	config->filter_rule_count_ip6_port = filter_acl_rules(
+		acl_rules,
+		acl_rule_count,
+		filter_rules,
+		filter_rule_ptrs,
+		check_acl_rule_ip6_port
 	);
-
-	config->filter_rule_count_ip6_port = filter_rule_count;
 
 	return filter_init(
 		&config->filter_ip6_port,
 		ACL_FILTER_IP6_PROTO_PORT_TAG,
-		filter_rules,
-		filter_rule_count,
+		filter_rule_ptrs,
+		acl_rule_count,
 		&cp_module->memory_context
 	);
 }
@@ -441,27 +473,63 @@ acl_module_config_update(
 		goto error_target;
 	}
 
+	const struct filter_rule **filter_rule_ptrs =
+		(const struct filter_rule **)malloc(
+			sizeof(struct filter_rule *) * rule_count
+		);
+	if (filter_rule_ptrs == NULL) {
+		goto error_rules;
+	}
+
 	struct timespec ts_start, ts_end;
 	clock_gettime(CLOCK_MONOTONIC, &ts_start);
 
-	if (acl_module_init_l2(cp_module, acl_rules, rule_count, filter_rules))
-		goto error_target;
+	make_filter_rules(acl_rules, rule_count, filter_rules);
 
-	if (acl_module_init_ip4(cp_module, acl_rules, rule_count, filter_rules))
-		goto error_target;
+	if (acl_module_init_l2(
+		    cp_module,
+		    acl_rules,
+		    rule_count,
+		    filter_rules,
+		    filter_rule_ptrs
+	    ))
+		goto error_rule_ptrs;
+
+	if (acl_module_init_ip4(
+		    cp_module,
+		    acl_rules,
+		    rule_count,
+		    filter_rules,
+		    filter_rule_ptrs
+	    ))
+		goto error_rule_ptrs;
 
 	if (acl_module_init_ip4_port(
-		    cp_module, acl_rules, rule_count, filter_rules
+		    cp_module,
+		    acl_rules,
+		    rule_count,
+		    filter_rules,
+		    filter_rule_ptrs
 	    ))
-		goto error_target;
+		goto error_rule_ptrs;
 
-	if (acl_module_init_ip6(cp_module, acl_rules, rule_count, filter_rules))
-		goto error_target;
+	if (acl_module_init_ip6(
+		    cp_module,
+		    acl_rules,
+		    rule_count,
+		    filter_rules,
+		    filter_rule_ptrs
+	    ))
+		goto error_rule_ptrs;
 
 	if (acl_module_init_ip6_port(
-		    cp_module, acl_rules, rule_count, filter_rules
+		    cp_module,
+		    acl_rules,
+		    rule_count,
+		    filter_rules,
+		    filter_rule_ptrs
 	    ))
-		goto error_target;
+		goto error_rule_ptrs;
 
 	clock_gettime(CLOCK_MONOTONIC, &ts_end);
 	config->compilation_time_ns =
@@ -469,9 +537,16 @@ acl_module_config_update(
 				   1000000000LL +
 			   (ts_end.tv_nsec - ts_start.tv_nsec));
 
+	free(filter_rule_ptrs);
 	free(filter_rules);
 
 	return 0;
+
+error_rule_ptrs:
+	free(filter_rule_ptrs);
+
+error_rules:
+	free(filter_rules);
 
 error_target:
 	free(filter_rules);

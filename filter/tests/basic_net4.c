@@ -110,6 +110,7 @@ test_stress_seed12_regression(void *memory, size_t memory_size) {
 	// Build all 20 rules
 	struct filter_rule_builder builders[20];
 	struct filter_rule rules[20];
+	const struct filter_rule *rule_ptrs[20];
 
 	for (size_t i = 0; i < 20; i++) {
 		builder_init(&builders[i]);
@@ -125,13 +126,14 @@ test_stress_seed12_regression(void *memory, size_t memory_size) {
 			&builders[i], rule_specs[i].dst_addr, dst_mask
 		);
 
-		rules[i] = build_rule(&builders[i], i);
+		rules[i] = build_rule(&builders[i]);
+		rule_ptrs[i] = rules + i;
 	}
 
 	// Initialize filter with all 20 rules
 	struct filter filter;
 	res = filter_init(
-		&filter, sign_net4_compile, rules, 20, &memory_context
+		&filter, sign_net4_compile, rule_ptrs, 20, &memory_context
 	);
 	assert(res == 0);
 
@@ -188,12 +190,13 @@ main() {
 	builder_add_net4_dst(
 		&builder1, ip(192, 255, 168, 0), ip(255, 255, 255, 0)
 	);
-	struct filter_rule action1 = build_rule(&builder1, 0);
+	struct filter_rule action1 = build_rule(&builder1);
+	const struct filter_rule *action_ptr = &action1;
 
 	// init filter
 	struct filter filter;
 	res = filter_init(
-		&filter, sign_net4_compile, &action1, 1, &memory_context
+		&filter, sign_net4_compile, &action_ptr, 1, &memory_context
 	);
 	assert(res == 0);
 
@@ -226,11 +229,13 @@ main() {
 	builder_add_net4_dst(
 		&builder2, ip(7, 4, 132, 134), ip(255, 255, 128, 0)
 	);
-	struct filter_rule action2 = build_rule(&builder2, 0);
+	struct filter_rule action2 = build_rule(&builder2);
+
+	const struct filter_rule *action2_ptr = &action2;
 
 	struct filter filter2;
 	res = filter_init(
-		&filter2, sign_net4_compile, &action2, 1, &memory_context
+		&filter2, sign_net4_compile, &action2_ptr, 1, &memory_context
 	);
 	assert(res == 0);
 

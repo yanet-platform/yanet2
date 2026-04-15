@@ -15,7 +15,7 @@ typedef void (*action_get_port_range_func)(
 static int
 collect_port_values(
 	struct memory_context *memory_context,
-	const struct filter_rule *actions,
+	const struct filter_rule **actions,
 	uint32_t count,
 	action_get_port_range_func get_port_range,
 	struct value_table *table,
@@ -29,11 +29,15 @@ collect_port_values(
 		goto error_remap_table;
 	}
 
-	for (const struct filter_rule *action = actions;
-	     action < actions + count;
-	     ++action) {
+	for (const struct filter_rule **action_ptr = actions;
+	     action_ptr < actions + count;
+	     ++action_ptr) {
 
 		remap_table_new_gen(&remap_table);
+
+		if (*action_ptr == NULL)
+			continue;
+		const struct filter_rule *action = *action_ptr;
 
 		struct filter_port_range *port_ranges;
 		uint32_t port_range_count;
@@ -60,10 +64,14 @@ collect_port_values(
 	value_table_compact(table, &remap_table);
 	remap_table_free(&remap_table);
 
-	for (const struct filter_rule *action = actions;
-	     action < actions + count;
-	     ++action) {
+	for (const struct filter_rule **action_ptr = actions;
+	     action_ptr < actions + count;
+	     ++action_ptr) {
+		// A value range should be created even for empty rules
 		value_registry_start(registry);
+		if (*action_ptr == NULL)
+			continue;
+		const struct filter_rule *action = *action_ptr;
 
 		struct filter_port_range *port_ranges;
 		uint32_t port_range_count;
@@ -132,7 +140,7 @@ int
 FILTER_ATTR_COMPILER_INIT_FUNC(port_dst)(
 	struct value_registry *registry,
 	void **data,
-	const struct filter_rule *actions,
+	const struct filter_rule **actions,
 	size_t actions_count,
 	struct memory_context *memory_context
 ) {
@@ -156,7 +164,7 @@ int
 FILTER_ATTR_COMPILER_INIT_FUNC(port_src)(
 	struct value_registry *registry,
 	void **data,
-	const struct filter_rule *actions,
+	const struct filter_rule **actions,
 	size_t actions_count,
 	struct memory_context *memory_context
 ) {

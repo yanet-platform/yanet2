@@ -186,7 +186,7 @@ test_basic(void *arena, enum filter_sign sign) {
 			);
 		}
 
-		rules[range_idx] = build_rule(builder, range_idx);
+		rules[range_idx] = build_rule(builder);
 
 		for (size_t check_idx = 0; check_idx < checks_count;
 		     ++check_idx) {
@@ -209,12 +209,16 @@ test_basic(void *arena, enum filter_sign sign) {
 	res = memory_context_init(&mctx, "test", &alloc);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize memory context");
 
+	const struct filter_rule *rule_ptrs[ranges_count];
+	for (size_t rp_i = 0; rp_i < ranges_count; rp_i++)
+		rule_ptrs[rp_i] = &rules[rp_i];
+
 	struct filter filter;
 	if (sign == src) {
 		res = filter_init(
 			&filter,
 			sign_fast_src_compile,
-			rules,
+			rule_ptrs,
 			ranges_count,
 			&mctx
 		);
@@ -222,7 +226,7 @@ test_basic(void *arena, enum filter_sign sign) {
 		res = filter_init(
 			&filter,
 			sign_fast_dst_compile,
-			rules,
+			rule_ptrs,
 			ranges_count,
 			&mctx
 		);
@@ -326,7 +330,7 @@ test_multiple_ranges_per_rule(void *arena, enum filter_sign sign) {
 		builder_add_port_dst_range(&builders[0], 443, 443);
 		builder_add_port_dst_range(&builders[0], 8080, 8080);
 	}
-	rules[0] = build_rule(&builders[0], 0);
+	rules[0] = build_rule(&builders[0]);
 
 	// Rule 2: Add 2 port ranges (22, 3389)
 	builder_init(&builders[1]);
@@ -337,7 +341,7 @@ test_multiple_ranges_per_rule(void *arena, enum filter_sign sign) {
 		builder_add_port_dst_range(&builders[1], 22, 22);
 		builder_add_port_dst_range(&builders[1], 3389, 3389);
 	}
-	rules[1] = build_rule(&builders[1], 1);
+	rules[1] = build_rule(&builders[1]);
 
 	// Rule 3: Add 2 port ranges (3306, 5432)
 	builder_init(&builders[2]);
@@ -348,7 +352,7 @@ test_multiple_ranges_per_rule(void *arena, enum filter_sign sign) {
 		builder_add_port_dst_range(&builders[2], 3306, 3306);
 		builder_add_port_dst_range(&builders[2], 5432, 5432);
 	}
-	rules[2] = build_rule(&builders[2], 2);
+	rules[2] = build_rule(&builders[2]);
 
 	struct block_allocator alloc;
 	int res = block_allocator_init(&alloc);
@@ -359,14 +363,26 @@ test_multiple_ranges_per_rule(void *arena, enum filter_sign sign) {
 	res = memory_context_init(&mctx, "test", &alloc);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize memory context");
 
+	const struct filter_rule *rule_ptrs[num_rules];
+	for (size_t rp_i = 0; rp_i < num_rules; rp_i++)
+		rule_ptrs[rp_i] = &rules[rp_i];
+
 	struct filter filter;
 	if (sign == src) {
 		res = filter_init(
-			&filter, sign_fast_src_compile, rules, num_rules, &mctx
+			&filter,
+			sign_fast_src_compile,
+			rule_ptrs,
+			num_rules,
+			&mctx
 		);
 	} else {
 		res = filter_init(
-			&filter, sign_fast_dst_compile, rules, num_rules, &mctx
+			&filter,
+			sign_fast_dst_compile,
+			rule_ptrs,
+			num_rules,
+			&mctx
 		);
 	}
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
@@ -447,7 +463,7 @@ stress(void *arena,
 			}
 		}
 
-		rules[rule_idx] = build_rule(&builders[rule_idx], rule_idx);
+		rules[rule_idx] = build_rule(&builders[rule_idx]);
 	}
 
 	struct value_range **expected_ranges =
@@ -460,13 +476,18 @@ stress(void *arena,
 	}
 
 	// Initialize filter
+	const struct filter_rule **rule_ptrs =
+		malloc(sizeof(const struct filter_rule *) * num_rules);
+	for (size_t rp_i = 0; rp_i < num_rules; rp_i++)
+		rule_ptrs[rp_i] = &rules[rp_i];
+
 	struct filter filter;
 	switch (sign) {
 	case src:
 		res = filter_init(
 			&filter,
 			sign_fast_src_compile,
-			rules,
+			rule_ptrs,
 			num_rules,
 			&memory_context
 		);
@@ -475,7 +496,7 @@ stress(void *arena,
 		res = filter_init(
 			&filter,
 			sign_fast_dst_compile,
-			rules,
+			rule_ptrs,
 			num_rules,
 			&memory_context
 		);
@@ -484,7 +505,7 @@ stress(void *arena,
 		res = filter_init(
 			&filter,
 			sign_fast_src_dst_compile,
-			rules,
+			rule_ptrs,
 			num_rules,
 			&memory_context
 		);
@@ -599,6 +620,7 @@ stress(void *arena,
 		result, "failed to query packets and compare with expected"
 	);
 
+	free(rule_ptrs);
 	free(rules);
 	free(builders);
 	for (size_t packet_idx = 0; packet_idx < num_packets; ++packet_idx) {
@@ -688,7 +710,7 @@ test_no_match(void *arena, enum filter_sign sign) {
 				ranges[range_idx].to
 			);
 		}
-		rules[range_idx] = build_rule(&builders[range_idx], range_idx);
+		rules[range_idx] = build_rule(&builders[range_idx]);
 	}
 
 	// Expected: no matches for any packet
@@ -708,12 +730,16 @@ test_no_match(void *arena, enum filter_sign sign) {
 	res = memory_context_init(&mctx, "test", &alloc);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize memory context");
 
+	const struct filter_rule *rule_ptrs[ranges_count];
+	for (size_t rp_i = 0; rp_i < ranges_count; rp_i++)
+		rule_ptrs[rp_i] = &rules[rp_i];
+
 	struct filter filter;
 	if (sign == src) {
 		res = filter_init(
 			&filter,
 			sign_fast_src_compile,
-			rules,
+			rule_ptrs,
 			ranges_count,
 			&mctx
 		);
@@ -721,7 +747,7 @@ test_no_match(void *arena, enum filter_sign sign) {
 		res = filter_init(
 			&filter,
 			sign_fast_dst_compile,
-			rules,
+			rule_ptrs,
 			ranges_count,
 			&mctx
 		);
@@ -814,7 +840,7 @@ test_overlapping_ranges(void *arena, enum filter_sign sign) {
 				ranges[range_idx].to
 			);
 		}
-		rules[range_idx] = build_rule(&builders[range_idx], range_idx);
+		rules[range_idx] = build_rule(&builders[range_idx]);
 	}
 
 	// Expected matches
@@ -846,12 +872,16 @@ test_overlapping_ranges(void *arena, enum filter_sign sign) {
 	res = memory_context_init(&mctx, "test", &alloc);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize memory context");
 
+	const struct filter_rule *rule_ptrs[ranges_count];
+	for (size_t rp_i = 0; rp_i < ranges_count; rp_i++)
+		rule_ptrs[rp_i] = &rules[rp_i];
+
 	struct filter filter;
 	if (sign == src) {
 		res = filter_init(
 			&filter,
 			sign_fast_src_compile,
-			rules,
+			rule_ptrs,
 			ranges_count,
 			&mctx
 		);
@@ -859,7 +889,7 @@ test_overlapping_ranges(void *arena, enum filter_sign sign) {
 		res = filter_init(
 			&filter,
 			sign_fast_dst_compile,
-			rules,
+			rule_ptrs,
 			ranges_count,
 			&mctx
 		);
@@ -949,7 +979,7 @@ test_boundary_conditions(void *arena, enum filter_sign sign) {
 				ranges[range_idx].to
 			);
 		}
-		rules[range_idx] = build_rule(&builders[range_idx], range_idx);
+		rules[range_idx] = build_rule(&builders[range_idx]);
 	}
 
 	// Expected: first 4 match, last 2 don't
@@ -973,12 +1003,16 @@ test_boundary_conditions(void *arena, enum filter_sign sign) {
 	res = memory_context_init(&mctx, "test", &alloc);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize memory context");
 
+	const struct filter_rule *rule_ptrs[ranges_count];
+	for (size_t rp_i = 0; rp_i < ranges_count; rp_i++)
+		rule_ptrs[rp_i] = &rules[rp_i];
+
 	struct filter filter;
 	if (sign == src) {
 		res = filter_init(
 			&filter,
 			sign_fast_src_compile,
-			rules,
+			rule_ptrs,
 			ranges_count,
 			&mctx
 		);
@@ -986,7 +1020,7 @@ test_boundary_conditions(void *arena, enum filter_sign sign) {
 		res = filter_init(
 			&filter,
 			sign_fast_dst_compile,
-			rules,
+			rule_ptrs,
 			ranges_count,
 			&mctx
 		);
@@ -1081,7 +1115,7 @@ test_single_port_ranges(void *arena, enum filter_sign sign) {
 				ranges[range_idx].to
 			);
 		}
-		rules[range_idx] = build_rule(&builders[range_idx], range_idx);
+		rules[range_idx] = build_rule(&builders[range_idx]);
 	}
 
 	// Expected: first 4 match their respective rules, last 4 don't match
@@ -1116,12 +1150,16 @@ test_single_port_ranges(void *arena, enum filter_sign sign) {
 	res = memory_context_init(&mctx, "test", &alloc);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize memory context");
 
+	const struct filter_rule *rule_ptrs[ranges_count];
+	for (size_t rp_i = 0; rp_i < ranges_count; rp_i++)
+		rule_ptrs[rp_i] = &rules[rp_i];
+
 	struct filter filter;
 	if (sign == src) {
 		res = filter_init(
 			&filter,
 			sign_fast_src_compile,
-			rules,
+			rule_ptrs,
 			ranges_count,
 			&mctx
 		);
@@ -1129,7 +1167,7 @@ test_single_port_ranges(void *arena, enum filter_sign sign) {
 		res = filter_init(
 			&filter,
 			sign_fast_dst_compile,
-			rules,
+			rule_ptrs,
 			ranges_count,
 			&mctx
 		);
@@ -1221,7 +1259,7 @@ test_adjacent_ranges(void *arena, enum filter_sign sign) {
 				ranges[range_idx].to
 			);
 		}
-		rules[range_idx] = build_rule(&builders[range_idx], range_idx);
+		rules[range_idx] = build_rule(&builders[range_idx]);
 	}
 
 	// Expected: ports 0,1,4 match rule 1; ports 2,3,5 match rule 2
@@ -1252,12 +1290,16 @@ test_adjacent_ranges(void *arena, enum filter_sign sign) {
 	res = memory_context_init(&mctx, "test", &alloc);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize memory context");
 
+	const struct filter_rule *rule_ptrs[ranges_count];
+	for (size_t rp_i = 0; rp_i < ranges_count; rp_i++)
+		rule_ptrs[rp_i] = &rules[rp_i];
+
 	struct filter filter;
 	if (sign == src) {
 		res = filter_init(
 			&filter,
 			sign_fast_src_compile,
-			rules,
+			rule_ptrs,
 			ranges_count,
 			&mctx
 		);
@@ -1265,7 +1307,7 @@ test_adjacent_ranges(void *arena, enum filter_sign sign) {
 		res = filter_init(
 			&filter,
 			sign_fast_dst_compile,
-			rules,
+			rule_ptrs,
 			ranges_count,
 			&mctx
 		);
@@ -1359,7 +1401,7 @@ test_extreme_ports(void *arena, enum filter_sign sign) {
 				ranges[range_idx].to
 			);
 		}
-		rules[range_idx] = build_rule(&builders[range_idx], range_idx);
+		rules[range_idx] = build_rule(&builders[range_idx]);
 	}
 
 	// Expected matches
@@ -1394,12 +1436,16 @@ test_extreme_ports(void *arena, enum filter_sign sign) {
 	res = memory_context_init(&mctx, "test", &alloc);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize memory context");
 
+	const struct filter_rule *rule_ptrs[ranges_count];
+	for (size_t rp_i = 0; rp_i < ranges_count; rp_i++)
+		rule_ptrs[rp_i] = &rules[rp_i];
+
 	struct filter filter;
 	if (sign == src) {
 		res = filter_init(
 			&filter,
 			sign_fast_src_compile,
-			rules,
+			rule_ptrs,
 			ranges_count,
 			&mctx
 		);
@@ -1407,7 +1453,7 @@ test_extreme_ports(void *arena, enum filter_sign sign) {
 		res = filter_init(
 			&filter,
 			sign_fast_dst_compile,
-			rules,
+			rule_ptrs,
 			ranges_count,
 			&mctx
 		);

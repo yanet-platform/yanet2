@@ -28,11 +28,12 @@ run_case(void) {
 	struct filter_rule_builder b;
 	builder_init(&b);
 	builder_add_port_src_range(&b, 1024, 5016);
-	struct filter_rule r = build_rule(&b, 0);
+	struct filter_rule r = build_rule(&b);
 
 	// init filter
+	const struct filter_rule *r_ptr = &r;
 	struct filter f;
-	res = filter_init(&f, sign, &r, 1, &memory_context);
+	res = filter_init(&f, sign, &r_ptr, 1, &memory_context);
 	assert(res == 0);
 
 	// craft packet: UDP 4000

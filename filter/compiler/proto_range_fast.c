@@ -23,12 +23,14 @@ validate_proto_ranges(struct filter_proto_ranges ranges) {
 }
 
 static int
-validate_and_count(const struct filter_rule *rules, size_t rules_count) {
+validate_and_count(const struct filter_rule **rules, size_t rules_count) {
 	int cnt = 0;
 	for (size_t i = 0; i < rules_count; ++i) {
+		if (rules[i] == NULL)
+			continue;
 		struct filter_proto_ranges ranges;
-		ranges.count = rules[i].transport.proto_count;
-		ranges.items = rules[i].transport.protos;
+		ranges.count = rules[i]->transport.proto_count;
+		ranges.items = rules[i]->transport.protos;
 		if (!validate_proto_ranges(ranges)) {
 			return -1;
 		}
@@ -43,7 +45,7 @@ int
 FILTER_ATTR_COMPILER_INIT_FUNC(proto_range_fast)(
 	struct value_registry *registry,
 	void **data,
-	const struct filter_rule *rules,
+	const struct filter_rule **rules,
 	size_t rule_count,
 	struct memory_context *mctx
 ) {
@@ -67,7 +69,9 @@ FILTER_ATTR_COMPILER_INIT_FUNC(proto_range_fast)(
 
 	size_t segment_idx = 0;
 	for (size_t rule_idx = 0; rule_idx < rule_count; ++rule_idx) {
-		const struct filter_rule *rule = &rules[rule_idx];
+		const struct filter_rule *rule = rules[rule_idx];
+		if (rule == NULL)
+			continue;
 		struct filter_proto_range *proto_ranges =
 			rule->transport.protos;
 		size_t proto_count = rule->transport.proto_count;

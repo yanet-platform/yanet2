@@ -74,7 +74,7 @@ test_no_match_port_only(void *arena) {
 	uint32_t mask = prefix_mask(24);
 	builder_add_net4_src(&builder, ip(10, 0, 0, 0), (const uint8_t *)&mask);
 	builder_add_port_src_range(&builder, 80, 90);
-	struct filter_rule rule = build_rule(&builder, 0);
+	struct filter_rule rule = build_rule(&builder);
 
 	// Test packets: IP matches but port doesn't
 	const struct {
@@ -122,9 +122,11 @@ test_no_match_port_only(void *arena) {
 	res = memory_context_init(&mctx, "test", &alloc);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize memory context");
 
+	const struct filter_rule *rule_ptr = &rule;
+
 	struct filter filter;
 	res = filter_init(
-		&filter, combo_net4_port_src_compile, &rule, 1, &mctx
+		&filter, combo_net4_port_src_compile, &rule_ptr, 1, &mctx
 	);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
 
@@ -154,7 +156,7 @@ test_no_match_ip_only(void *arena) {
 	uint32_t mask = prefix_mask(24);
 	builder_add_net4_src(&builder, ip(10, 0, 0, 0), (const uint8_t *)&mask);
 	builder_add_port_src_range(&builder, 80, 90);
-	struct filter_rule rule = build_rule(&builder, 0);
+	struct filter_rule rule = build_rule(&builder);
 
 	// Test packets: Port matches but IP doesn't
 	const struct {
@@ -202,9 +204,11 @@ test_no_match_ip_only(void *arena) {
 	res = memory_context_init(&mctx, "test", &alloc);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize memory context");
 
+	const struct filter_rule *rule_ptr = &rule;
+
 	struct filter filter;
 	res = filter_init(
-		&filter, combo_net4_port_src_compile, &rule, 1, &mctx
+		&filter, combo_net4_port_src_compile, &rule_ptr, 1, &mctx
 	);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
 
@@ -234,7 +238,7 @@ test_both_match(void *arena) {
 	uint32_t mask = prefix_mask(24);
 	builder_add_net4_src(&builder, ip(10, 0, 0, 0), (const uint8_t *)&mask);
 	builder_add_port_src_range(&builder, 80, 90);
-	struct filter_rule rule = build_rule(&builder, 0);
+	struct filter_rule rule = build_rule(&builder);
 
 	// Test packets: Both IP and port match
 	const struct {
@@ -283,9 +287,11 @@ test_both_match(void *arena) {
 	res = memory_context_init(&mctx, "test", &alloc);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize memory context");
 
+	const struct filter_rule *rule_ptr = &rule;
+
 	struct filter filter;
 	res = filter_init(
-		&filter, combo_net4_port_src_compile, &rule, 1, &mctx
+		&filter, combo_net4_port_src_compile, &rule_ptr, 1, &mctx
 	);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
 
@@ -321,7 +327,7 @@ test_overlapping(void *arena) {
 		&builders[0], ip(10, 0, 0, 0), (const uint8_t *)&mask1
 	);
 	builder_add_port_src_range(&builders[0], 80, 100);
-	rules[0] = build_rule(&builders[0], 0);
+	rules[0] = build_rule(&builders[0]);
 
 	builder_init(&builders[1]);
 	uint32_t mask2 = prefix_mask(16);
@@ -329,7 +335,7 @@ test_overlapping(void *arena) {
 		&builders[1], ip(10, 1, 0, 0), (const uint8_t *)&mask2
 	);
 	builder_add_port_src_range(&builders[1], 90, 110);
-	rules[1] = build_rule(&builders[1], 1);
+	rules[1] = build_rule(&builders[1]);
 
 	builder_init(&builders[2]);
 	uint32_t mask3 = prefix_mask(24);
@@ -337,7 +343,7 @@ test_overlapping(void *arena) {
 		&builders[2], ip(10, 1, 1, 0), (const uint8_t *)&mask3
 	);
 	builder_add_port_src_range(&builders[2], 95, 105);
-	rules[2] = build_rule(&builders[2], 2);
+	rules[2] = build_rule(&builders[2]);
 
 	// Test packets
 	const struct {
@@ -392,9 +398,13 @@ test_overlapping(void *arena) {
 	res = memory_context_init(&mctx, "test", &alloc);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize memory context");
 
+	const struct filter_rule *rule_ptrs[3] = {
+		&rules[0], &rules[1], &rules[2]
+	};
+
 	struct filter filter;
 	res = filter_init(
-		&filter, combo_net4_port_src_compile, rules, 3, &mctx
+		&filter, combo_net4_port_src_compile, rule_ptrs, 3, &mctx
 	);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
 

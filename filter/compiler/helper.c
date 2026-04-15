@@ -30,55 +30,18 @@ init_dummy_registry(
 ////////////////////////////////////////////////////////////////////////////////
 
 struct value_set_ctx {
-	const struct filter_rule *rules;
 	struct value_table *table;
 	struct value_registry *registry;
 	struct remap_table remap_table;
 };
 
 static int
-action_list_is_term(struct value_registry *registry, uint32_t range_idx) {
-	struct value_range *range = ADDR_OF(&registry->ranges) + range_idx;
-	if (range->count == 0)
-		return 0;
-
-	return 1;
-}
-
-static int
 value_table_set_action(uint32_t v1, uint32_t v2, uint32_t idx, void *data) {
 	struct value_set_ctx *set_ctx = (struct value_set_ctx *)data;
-	uint32_t prev_value = value_table_get(set_ctx->table, v1, v2);
-
-	if (!action_list_is_term(set_ctx->registry, prev_value)) {
-		uint32_t *value = value_table_get_ptr(set_ctx->table, v1, v2);
-		/*
-		 * FIXME: we assume value table produces increasing sequence
-		 * of values - this is important for value registry handling.
-		 */
-		int res =
-			remap_table_touch(&set_ctx->remap_table, *value, value);
-
-		if (res <= 0)
-			return res;
-
-		if (value_registry_start(set_ctx->registry))
-			return -1;
-
-		struct value_range *copy_range =
-			ADDR_OF(&set_ctx->registry->ranges) + prev_value;
-
-		for (uint32_t ridx = 0; ridx < copy_range->count; ++ridx) {
-			value_registry_collect(
-				set_ctx->registry,
-				ADDR_OF(&copy_range->values)[ridx]
-			);
-		}
-
-		value_registry_collect(
-			set_ctx->registry, set_ctx->rules[idx].action
-		);
-	}
+	uint32_t *value = value_table_get_ptr(set_ctx->table, v1, v2);
+	if (*value)
+		return 0;
+	*value = idx + 1;
 
 	return 0;
 }
@@ -86,7 +49,6 @@ value_table_set_action(uint32_t v1, uint32_t v2, uint32_t idx, void *data) {
 int
 merge_and_set_registry_values(
 	struct memory_context *memory_context,
-	const struct filter_rule *rules,
 	struct value_registry *registry1,
 	struct value_registry *registry2,
 	struct value_table *table,
@@ -109,21 +71,14 @@ merge_and_set_registry_values(
 		goto error_merge;
 
 	struct value_set_ctx set_ctx;
-	set_ctx.rules = rules;
 	set_ctx.table = table;
 	set_ctx.registry = registry;
-	if (remap_table_init(
-		    &set_ctx.remap_table,
-		    memory_context,
-		    value_registry_capacity(registry1) *
-			    value_registry_capacity(registry2)
-	    )) {
-		goto error_merge;
-	}
 
 	for (uint32_t range_idx = 0; range_idx < registry1->range_count;
 	     ++range_idx) {
-		remap_table_new_gen(&set_ctx.remap_table);
+		if (value_registry_start(registry) ||
+		    value_registry_collect(registry, range_idx))
+			goto error_join;
 		if (value_registry_join_range(
 			    registry1,
 			    registry2,
@@ -134,12 +89,9 @@ merge_and_set_registry_values(
 			goto error_join;
 	}
 
-	remap_table_free(&set_ctx.remap_table);
-
 	return 0;
 
 error_join:
-	remap_table_free(&set_ctx.remap_table);
 
 error_merge:
 	value_registry_free(registry);

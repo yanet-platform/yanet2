@@ -55,11 +55,13 @@ net6_part_from_to(struct net6 *n, int part, uint64_t *from, uint64_t *to) {
 
 static int
 validate_and_count(
-	const struct filter_rule *rules, size_t rules_count, get_net getter
+	const struct filter_rule **rules, size_t rules_count, get_net getter
 ) {
 	int cnt = 0;
 	for (size_t i = 0; i < rules_count; ++i) {
-		struct net6_count n6_count = getter(rules + i);
+		if (rules[i] == NULL)
+			continue;
+		struct net6_count n6_count = getter(rules[i]);
 		for (size_t j = 0; j < n6_count.count; ++j) {
 			if (!validate_net6(n6_count.nets + j)) {
 				return -1;
@@ -78,7 +80,7 @@ init_classifier_part(
 	size_t segments_count,
 	struct segments_u64_classifier *classifier,
 	int part /* 0/1 */,
-	const struct filter_rule *rules,
+	const struct filter_rule **rules,
 	size_t rules_count
 ) {
 	struct segment_u64 *segments =
@@ -89,7 +91,9 @@ init_classifier_part(
 
 	size_t segment_idx = 0;
 	for (size_t rule_idx = 0; rule_idx < rules_count; ++rule_idx) {
-		struct net6_count cur = getter(&rules[rule_idx]);
+		if (rules[rule_idx] == NULL)
+			continue;
+		struct net6_count cur = getter(rules[rule_idx]);
 		for (size_t j = 0; j < cur.count; ++j) {
 			uint64_t from, to;
 			net6_part_from_to(cur.nets + j, part, &from, &to);
@@ -117,7 +121,7 @@ init_classifier(
 	get_net getter,
 	struct memory_context *mctx,
 	struct net6_fast_classifier *classifier,
-	const struct filter_rule *rules,
+	const struct filter_rule **rules,
 	size_t rules_count,
 	struct value_registry *registry
 ) {
@@ -216,7 +220,7 @@ int
 FILTER_ATTR_COMPILER_INIT_FUNC(net6_fast_dst)(
 	struct value_registry *registry,
 	void **data,
-	const struct filter_rule *rules,
+	const struct filter_rule **rules,
 	size_t rules_count,
 	struct memory_context *memory_context
 ) {
@@ -241,7 +245,7 @@ int
 FILTER_ATTR_COMPILER_INIT_FUNC(net6_fast_src)(
 	struct value_registry *registry,
 	void **data,
-	const struct filter_rule *rules,
+	const struct filter_rule **rules,
 	size_t rules_count,
 	struct memory_context *memory_context
 ) {

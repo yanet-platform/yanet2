@@ -31,7 +31,7 @@
 typedef int (*filter_lookup_init_func)(
 	struct value_registry *registry,
 	void **data,
-	const struct filter_rule *rules,
+	const struct filter_rule **rules,
 	size_t rule_count,
 	struct memory_context *mctx
 );
@@ -81,7 +81,7 @@ static inline int
 filter_init(
 	struct filter *filter,
 	const struct filter_compiler *filter_compiler,
-	const struct filter_rule *rules,
+	const struct filter_rule **rules,
 	uint32_t rule_count,
 	struct memory_context *memory_context
 ) {
@@ -129,7 +129,6 @@ filter_init(
 
 		if (merge_and_set_registry_values(
 			    &filter->memory_context,
-			    (rules),
 			    &dummy,
 			    &filter->v[1].registry,
 			    &filter->v[0].table,
@@ -157,7 +156,6 @@ filter_init(
 
 	if (merge_and_set_registry_values(
 		    &filter->memory_context,
-		    rules,
 		    &filter->v[2 * 1].registry,
 		    &filter->v[2 * 1 + 1].registry,
 		    &filter->v[1].table,

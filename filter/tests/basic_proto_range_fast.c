@@ -66,16 +66,20 @@ test_basic_tcp_udp(void *memory) {
 	builder_add_proto_range(
 		&b1, 256 * IPPROTO_TCP, 256 * IPPROTO_TCP + 255
 	);
-	struct filter_rule r1 = build_rule(&b1, 0);
+	struct filter_rule r1 = build_rule(&b1);
 
 	struct filter_rule_builder b2;
 	builder_init(&b2);
 	builder_add_proto_range(
 		&b2, 256 * IPPROTO_UDP, 256 * IPPROTO_UDP + 255
 	);
-	struct filter_rule r2 = build_rule(&b2, 1);
+	struct filter_rule r2 = build_rule(&b2);
 
 	struct filter_rule rules[2] = {r1, r2};
+
+	const struct filter_rule *rule_ptrs[2];
+	for (size_t rp_i = 0; rp_i < 2; rp_i++)
+		rule_ptrs[rp_i] = &rules[rp_i];
 
 	struct filter filter;
 
@@ -83,7 +87,7 @@ test_basic_tcp_udp(void *memory) {
 	res = filter_init(
 		&filter,
 		sign_proto_range_fast_compile,
-		rules,
+		rule_ptrs,
 		2,
 		&memory_context
 	);
@@ -118,7 +122,7 @@ test_tcp_flags(void *memory) {
 	builder_add_proto_range(
 		&b1, 256 * IPPROTO_TCP + 0x02, 256 * IPPROTO_TCP + 0x02
 	);
-	struct filter_rule r1 = build_rule(&b1, 0);
+	struct filter_rule r1 = build_rule(&b1);
 
 	// Rule 2: TCP ACK (flag 0x10)
 	struct filter_rule_builder b2;
@@ -126,7 +130,7 @@ test_tcp_flags(void *memory) {
 	builder_add_proto_range(
 		&b2, 256 * IPPROTO_TCP + 0x10, 256 * IPPROTO_TCP + 0x10
 	);
-	struct filter_rule r2 = build_rule(&b2, 1);
+	struct filter_rule r2 = build_rule(&b2);
 
 	// Rule 3: TCP FIN (flag 0x01)
 	struct filter_rule_builder b3;
@@ -134,15 +138,19 @@ test_tcp_flags(void *memory) {
 	builder_add_proto_range(
 		&b3, 256 * IPPROTO_TCP + 0x01, 256 * IPPROTO_TCP + 0x01
 	);
-	struct filter_rule r3 = build_rule(&b3, 2);
+	struct filter_rule r3 = build_rule(&b3);
 
 	struct filter_rule rules[3] = {r1, r2, r3};
+
+	const struct filter_rule *rule_ptrs[3];
+	for (size_t rp_i = 0; rp_i < 3; rp_i++)
+		rule_ptrs[rp_i] = &rules[rp_i];
 
 	struct filter filter;
 	res = filter_init(
 		&filter,
 		sign_proto_range_fast_compile,
-		rules,
+		rule_ptrs,
 		3,
 		&memory_context
 	);
@@ -183,15 +191,19 @@ test_multiple_ranges_per_rule(void *memory) {
 	builder_add_proto_range(
 		&b1, 256 * IPPROTO_UDP, 256 * IPPROTO_UDP + 255
 	);
-	struct filter_rule r1 = build_rule(&b1, 0);
+	struct filter_rule r1 = build_rule(&b1);
 
 	struct filter_rule rules[1] = {r1};
+
+	const struct filter_rule *rule_ptrs[1];
+	for (size_t rp_i = 0; rp_i < 1; rp_i++)
+		rule_ptrs[rp_i] = &rules[rp_i];
 
 	struct filter filter;
 	res = filter_init(
 		&filter,
 		sign_proto_range_fast_compile,
-		rules,
+		rule_ptrs,
 		1,
 		&memory_context
 	);
@@ -224,21 +236,25 @@ test_boundary_values(void *memory) {
 	struct filter_rule_builder b1;
 	builder_init(&b1);
 	builder_add_proto_range(&b1, 0, 100);
-	struct filter_rule r1 = build_rule(&b1, 0);
+	struct filter_rule r1 = build_rule(&b1);
 
 	// Rule 2: Proto range 65435-65535 (near max uint16_t)
 	struct filter_rule_builder b2;
 	builder_init(&b2);
 	builder_add_proto_range(&b2, 65435, 65535);
-	struct filter_rule r2 = build_rule(&b2, 1);
+	struct filter_rule r2 = build_rule(&b2);
 
 	struct filter_rule rules[2] = {r1, r2};
+
+	const struct filter_rule *rule_ptrs[2];
+	for (size_t rp_i = 0; rp_i < 2; rp_i++)
+		rule_ptrs[rp_i] = &rules[rp_i];
 
 	struct filter filter;
 	res = filter_init(
 		&filter,
 		sign_proto_range_fast_compile,
-		rules,
+		rule_ptrs,
 		2,
 		&memory_context
 	);

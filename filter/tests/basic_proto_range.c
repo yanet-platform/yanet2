@@ -60,22 +60,22 @@ test_proto_1(void *memory) {
 	builder_add_proto_range(
 		&b1, 256 * IPPROTO_TCP, 256 * IPPROTO_TCP + 255
 	);
-	struct filter_rule r1 = build_rule(&b1, 0);
+	struct filter_rule r1 = build_rule(&b1);
 
 	struct filter_rule_builder b2;
 	builder_init(&b2);
 	builder_add_proto_range(
 		&b2, 256 * IPPROTO_UDP, 256 * IPPROTO_UDP + 255
 	);
-	struct filter_rule r2 = build_rule(&b2, 1);
+	struct filter_rule r2 = build_rule(&b2);
 
-	struct filter_rule rules[2] = {r1, r2};
+	const struct filter_rule *rule_ptrs[2] = {&r1, &r2};
 
 	struct filter filter;
 
 	LOG(INFO, "filter init...");
 	res = filter_init(
-		&filter, sign_proto_range_compile, rules, 2, &memory_context
+		&filter, sign_proto_range_compile, rule_ptrs, 2, &memory_context
 	);
 	assert(res == 0);
 
