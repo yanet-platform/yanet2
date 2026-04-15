@@ -129,7 +129,7 @@ func (r *Refresher) refresh() {
 
 // vsCalcEffectiveWeights computes active session count for the VS and, when
 // the VS has WLC enabled, updates effective_weight on each enabled real using
-// the formula from common.proto:
+// the following formula:
 //
 //	ratio      = (real_sessions * total_weight) / (total_sessions * real_weight)
 //	wlc_factor = max(1.0, power * (1.0 - ratio))

@@ -3,7 +3,7 @@ package balancer
 
 import (
 	"context"
-	"fmt"
+	"slices"
 	"sync"
 	"time"
 
@@ -332,7 +332,7 @@ func (b *Balancer) UpdateVS(
 		vsMap[makeVsKey(vs.Id)] = idx
 	}
 
-	newVsList := append([]*balancerpb.VirtualService(nil), currentVs...)
+	newVsList := slices.Clone(currentVs)
 	for _, vs := range vsList {
 		key := makeVsKey(vs.Id)
 		if idx, ok := vsMap[key]; ok {
@@ -538,7 +538,7 @@ func (b *Balancer) FlushRealUpdates() (int, error) {
 
 	updatesApplied, err := b.UpdateReals(updates, false)
 	if err != nil {
-		return 0, fmt.Errorf("failed to update reals: %w", err)
+		return 0, NewError("failed to update reals: %w", err)
 	}
 
 	b.realUpdateBuffer = nil

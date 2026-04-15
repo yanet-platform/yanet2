@@ -2,7 +2,6 @@ package balancer
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"time"
 
@@ -38,7 +37,7 @@ func NewService(
 	agent, err := ReattachAgent(shm, instanceIdx, size, log)
 	if err != nil {
 		log.Errorw("failed to reattach balancer agent", "error", err)
-		return nil, fmt.Errorf("failed to reattach balancer agent: %w", err)
+		return nil, NewError("failed to reattach balancer agent: %w", err)
 	}
 
 	s := &Service{
@@ -172,7 +171,7 @@ func (s *Service) GetConfig(
 
 	b, name, err := s.getBalancerWithAutoSelection(req.Name)
 	if err != nil {
-		return nil, fmt.Errorf("failed to auto-select balancer: %w", err)
+		return nil, NewError("failed to auto-select balancer: %w", err)
 	}
 
 	return &balancerpb.GetConfigResponse{
@@ -233,7 +232,7 @@ func (s *Service) ListSessions(
 
 	b, _, err := s.getBalancerWithAutoSelection(req.Name)
 	if err != nil {
-		return fmt.Errorf("failed to auto-select balancer: %w", err)
+		return NewError("failed to auto-select balancer: %w", err)
 	}
 
 	return b.ListSessions(req.Filter, time.Now(), func(session *balancerpb.Session) error {
@@ -255,7 +254,7 @@ func (s *Service) UpdateReals(
 
 	b, name, err := s.getBalancerWithAutoSelection(req.Name)
 	if err != nil {
-		return nil, fmt.Errorf("failed to auto-select balancer %w", err)
+		return nil, NewError("failed to auto-select balancer %w", err)
 	}
 
 	count, err := b.UpdateReals(req.Updates, req.Buffer)
@@ -290,7 +289,7 @@ func (s *Service) FlushReals(
 
 	b, name, err := s.getBalancerWithAutoSelection(req.Name)
 	if err != nil {
-		return nil, fmt.Errorf("failed to auto-select balancer: %w", err)
+		return nil, NewError("failed to auto-select balancer: %w", err)
 	}
 
 	count, err := b.FlushRealUpdates()
@@ -321,7 +320,7 @@ func (s *Service) UpdateVS(
 
 	b, name, err := s.getBalancerWithAutoSelection(req.Name)
 	if err != nil {
-		return nil, fmt.Errorf("failed to auto-select balancer: %w", err)
+		return nil, NewError("failed to auto-select balancer: %w", err)
 	}
 
 	s.log.Infow("updating virtual services", "name", name, "vs_count", len(req.Services))
@@ -354,7 +353,7 @@ func (s *Service) DeleteVS(
 
 	b, name, err := s.getBalancerWithAutoSelection(req.Name)
 	if err != nil {
-		return nil, fmt.Errorf("failed to auto-select balancer: %w", err)
+		return nil, NewError("failed to auto-select balancer: %w", err)
 	}
 
 	s.log.Infow("deleting virtual services", "name", name, "vs_count", len(req.Services))

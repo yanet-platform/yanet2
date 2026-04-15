@@ -262,7 +262,7 @@ func placeExistingVS(
 		target.Flags &^= uint16(VSFlagRemoved)
 		report, err := target.populate(agent, pbVS[pbIdx], prev.Stable_idx, prev, ph)
 		if err != nil {
-			return false, false, fmt.Errorf("vs %s: %w", prev, err)
+			return false, false, NewError("vs %s: %w", prev, err)
 		}
 
 		reuseReport.VsReuseReports = append(reuseReport.VsReuseReports, report)
@@ -315,7 +315,7 @@ func placeNewVS(
 		target.Flags &^= uint16(VSFlagRemoved)
 		report, err := target.populate(agent, vsList[idx], stableIdx, nil, ph)
 		if err != nil {
-			return false, false, fmt.Errorf("vs %d: %w", idx, err)
+			return false, false, NewError("vs %s: %w", vsIDToString(vs.Id), err)
 		}
 
 		nextRemoved++

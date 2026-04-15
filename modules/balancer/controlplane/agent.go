@@ -1,7 +1,6 @@
 package balancer
 
 import (
-	"fmt"
 	"maps"
 
 	"github.com/c2h5oh/datasize"
@@ -25,7 +24,7 @@ func AttachNewAgent(
 ) (*Agent, error) {
 	agent, err := shm.AgentAttach("balancer", instanceIdx, size)
 	if err != nil {
-		return nil, fmt.Errorf("failed to attach balancer agent: %w", err)
+		return nil, NewError("failed to attach balancer agent: %w", err)
 	}
 	return &Agent{
 		agent:     agent,
