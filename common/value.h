@@ -14,7 +14,6 @@
 
 struct value_table {
 	struct memory_context *memory_context;
-	struct remap_table remap_table;
 	uint32_t h_dim;
 	uint32_t v_dim;
 	uint32_t **values;
@@ -22,7 +21,6 @@ struct value_table {
 
 static inline void
 value_table_free(struct value_table *value_table) {
-	remap_table_free(&value_table->remap_table);
 	struct memory_context *memory_context =
 		ADDR_OF(&value_table->memory_context);
 
@@ -55,12 +53,6 @@ value_table_init(
 ) {
 	SET_OFFSET_OF(&value_table->memory_context, memory_context);
 
-	if (remap_table_init(
-		    &value_table->remap_table, memory_context, h_dim * v_dim
-	    )) {
-		return -1;
-	}
-
 	value_table->h_dim = h_dim;
 	value_table->v_dim = v_dim;
 
@@ -73,11 +65,9 @@ value_table_init(
 	uint32_t **values = (uint32_t **)memory_balloc(
 		memory_context, chunk_count * sizeof(uint32_t *)
 	);
-
-	if (values == NULL) {
-		remap_table_free(&value_table->remap_table);
+	if (values == NULL)
 		return -1;
-	}
+
 	memset(values, 0, chunk_count * sizeof(uint32_t *));
 	SET_OFFSET_OF(&value_table->values, values);
 
@@ -97,11 +87,6 @@ value_table_init(
 	return 0;
 }
 
-static inline void
-value_table_new_gen(struct value_table *value_table) {
-	remap_table_new_gen(&value_table->remap_table);
-}
-
 static inline uint32_t *
 value_table_get_ptr(
 	struct value_table *value_table, uint32_t h_idx, uint32_t v_idx
@@ -117,29 +102,13 @@ static inline uint32_t
 value_table_get(
 	struct value_table *value_table, uint32_t h_idx, uint32_t v_idx
 ) {
-	uint32_t **values = ADDR_OF(&value_table->values);
-	uint64_t idx = (v_idx * value_table->h_dim) + h_idx;
-
-	return ADDR_OF(
-		values + idx / VALUE_TABLE_CHUNK_SIZE
-	)[idx % VALUE_TABLE_CHUNK_SIZE];
-}
-
-static inline int
-value_table_touch(
-	struct value_table *value_table, uint32_t h_idx, uint32_t v_idx
-) {
-	uint32_t **values = ADDR_OF(&value_table->values);
-	uint64_t idx = (v_idx * value_table->h_dim) + h_idx;
-
-	uint32_t *value = ADDR_OF(values + idx / VALUE_TABLE_CHUNK_SIZE) +
-			  (idx % VALUE_TABLE_CHUNK_SIZE);
-	return remap_table_touch(&value_table->remap_table, *value, value);
+	return *value_table_get_ptr(value_table, h_idx, v_idx);
 }
 
 static inline void
-value_table_compact(struct value_table *value_table) {
-	remap_table_compact(&value_table->remap_table);
+value_table_compact(
+	struct value_table *value_table, struct remap_table *remap_table
+) {
 
 	uint32_t **values = ADDR_OF(&value_table->values);
 
@@ -149,8 +118,6 @@ value_table_compact(struct value_table *value_table) {
 			ADDR_OF(values + idx / VALUE_TABLE_CHUNK_SIZE) +
 			(idx % VALUE_TABLE_CHUNK_SIZE);
 
-		*value = remap_table_compacted(
-			&value_table->remap_table, *value
-		);
+		*value = remap_table_compacted(remap_table, *value);
 	}
 }

@@ -143,6 +143,15 @@ merge_net6_range(
 		return -1;
 	}
 
+	struct remap_table remap_table;
+	if (remap_table_init(
+		    &remap_table,
+		    memory_context,
+		    (ri_hi->max_value + 1) * (ri_lo->max_value + 1)
+	    )) {
+		goto error_remap_table;
+	}
+
 	uint32_t net_cnt = 0;
 
 	struct radix rdx;
@@ -152,7 +161,7 @@ merge_net6_range(
 	     action < actions + count;
 	     ++action) {
 
-		value_table_new_gen(table);
+		remap_table_new_gen(&remap_table);
 
 		uint32_t *values_hi = ADDR_OF(&ri_hi->values);
 		uint32_t *values_lo = ADDR_OF(&ri_lo->values);
@@ -209,18 +218,27 @@ merge_net6_range(
 					for (uint32_t idx_lo = start_lo;
 					     idx_lo < stop_lo;
 					     ++idx_lo) {
-						if (value_table_touch(
-							    table,
-							    values_hi[idx_hi],
-							    values_lo[idx_lo]
+						uint32_t *value =
+							value_table_get_ptr(
+								table,
+								values_hi
+									[idx_hi],
+								values_lo
+									[idx_lo]
+							);
+						if (remap_table_touch(
+							    &remap_table,
+							    *value,
+							    value
 						    ) < 0) {
-							return -1;
+							goto error_touch;
 						}
 					}
 				}
 			}
 		}
 	}
+	remap_table_free(&remap_table);
 
 	uint32_t *values_hi = ADDR_OF(&ri_hi->values);
 	uint32_t *values_lo = ADDR_OF(&ri_lo->values);
@@ -331,6 +349,14 @@ merge_net6_range(
 	// FIXME: free temporary resources
 
 	return 0;
+
+error_touch:
+	remap_table_free(&remap_table);
+
+error_remap_table:
+	value_table_free(table);
+
+	return -1;
 }
 
 ////////////////////////////////////////////////////////////////////////////////

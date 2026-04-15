@@ -19,25 +19,41 @@ FILTER_ATTR_COMPILER_INIT_FUNC(vlan)(
 	if (t == NULL) {
 		return -1;
 	}
-	int res = value_table_init(t, memory_context, 1, 4096);
-	if (res < 0) {
-		return res;
+
+	if (value_table_init(t, memory_context, 1, 4096)) {
+		goto error_init;
 	}
 	SET_OFFSET_OF(data, t);
+
+	struct remap_table remap_table;
+	if (remap_table_init(&remap_table, memory_context, 4096)) {
+		goto error_remap_table;
+	}
+
 	for (const struct filter_rule *r = rules; r < rules + rule_count; ++r) {
 		if (r->vlan_range_count == 0) {
 			continue;
 		}
-		value_table_new_gen(t);
+		remap_table_new_gen(&remap_table);
 		for (uint32_t idx = 0; idx < r->vlan_range_count; ++idx) {
 			for (uint16_t vlan = r->vlan_ranges[idx].from;
 			     vlan <= r->vlan_ranges[idx].to;
 			     ++vlan) {
-				value_table_touch(t, 0, vlan);
+				uint32_t *value =
+					value_table_get_ptr(t, 0, vlan);
+				if (remap_table_touch(
+					    &remap_table, *value, value
+				    ) < 0) {
+					goto error_touch;
+				}
 			}
 		}
 	}
-	value_table_compact(t);
+
+	remap_table_compact(&remap_table);
+	value_table_compact(t, &remap_table);
+	remap_table_free(&remap_table);
+
 	for (const struct filter_rule *r = rules; r < rules + rule_count; ++r) {
 		value_registry_start(registry);
 		if (r->vlan_range_count == 0) {
@@ -51,13 +67,29 @@ FILTER_ATTR_COMPILER_INIT_FUNC(vlan)(
 			for (uint16_t vlan = r->vlan_ranges[idx].from;
 			     vlan <= r->vlan_ranges[idx].to;
 			     ++vlan) {
-				value_registry_collect(
-					registry, value_table_get(t, 0, vlan)
-				);
+				if (value_registry_collect(
+					    registry,
+					    value_table_get(t, 0, vlan)
+				    )) {
+					goto error_collect;
+				}
 			}
 		}
 	}
 	return 0;
+
+error_touch:
+	remap_table_free(&remap_table);
+
+error_collect:
+error_remap_table:
+	value_table_free(t);
+	SET_OFFSET_OF(data, NULL);
+
+error_init:
+	memory_bfree(memory_context, t, sizeof(struct value_table));
+
+	return -1;
 }
 
 void

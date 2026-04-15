@@ -24,10 +24,19 @@ collect_proto_values(
 	    ))
 		return -1;
 
+	struct remap_table remap_table;
+	if (remap_table_init(
+		    &remap_table,
+		    memory_context,
+		    PROTO_RANGE_CLASSIFIER_MAX_VALUE
+	    )) {
+		goto error_remap_table;
+	}
+
 	for (const struct filter_rule *rule = rules; rule < rules + count;
 	     ++rule) {
 
-		value_table_new_gen(table);
+		remap_table_new_gen(&remap_table);
 
 		struct filter_proto_range *proto_ranges =
 			rule->transport.protos;
@@ -39,12 +48,20 @@ collect_proto_values(
 			for (uint32_t proto = proto_range->from;
 			     proto <= proto_range->to;
 			     ++proto) {
-				value_table_touch(table, 0, proto);
+				uint32_t *value =
+					value_table_get_ptr(table, 0, proto);
+				if (remap_table_touch(
+					    &remap_table, *value, value
+				    ) < 0) {
+					goto error_touch;
+				}
 			}
 		}
 	}
 
-	value_table_compact(table);
+	remap_table_compact(&remap_table);
+	value_table_compact(table, &remap_table);
+	remap_table_free(&remap_table);
 
 	for (const struct filter_rule *rule = rules; rule < rules + count;
 	     ++rule) {
@@ -60,15 +77,26 @@ collect_proto_values(
 			for (uint32_t proto = proto_range->from;
 			     proto <= proto_range->to;
 			     ++proto) {
-				value_registry_collect(
-					registry,
-					value_table_get(table, 0, proto)
-				);
+				if (value_registry_collect(
+					    registry,
+					    value_table_get(table, 0, proto)
+				    )) {
+					goto error_collect;
+				}
 			}
 		}
 	}
 
 	return 0;
+
+error_touch:
+	remap_table_free(&remap_table);
+
+error_collect:
+error_remap_table:
+
+	value_table_free(table);
+	return -1;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -87,9 +115,14 @@ FILTER_ATTR_COMPILER_INIT_FUNC(proto_range)(
 		return -1;
 	}
 	SET_OFFSET_OF(data, classifier);
-	return collect_proto_values(
-		mctx, rules, rule_count, &classifier->table, registry
-	);
+	if (collect_proto_values(
+		    mctx, rules, rule_count, &classifier->table, registry
+	    )) {
+		SET_OFFSET_OF(data, NULL);
+		return -1;
+	}
+
+	return 0;
 }
 
 void

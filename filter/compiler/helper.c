@@ -33,6 +33,7 @@ struct value_set_ctx {
 	const struct filter_rule *rules;
 	struct value_table *table;
 	struct value_registry *registry;
+	struct remap_table remap_table;
 };
 
 static int
@@ -50,11 +51,13 @@ value_table_set_action(uint32_t v1, uint32_t v2, uint32_t idx, void *data) {
 	uint32_t prev_value = value_table_get(set_ctx->table, v1, v2);
 
 	if (!action_list_is_term(set_ctx->registry, prev_value)) {
+		uint32_t *value = value_table_get_ptr(set_ctx->table, v1, v2);
 		/*
 		 * FIXME: we assume value table produces increasing sequence
 		 * of values - this is important for value registry handling.
 		 */
-		int res = value_table_touch(set_ctx->table, v1, v2);
+		int res =
+			remap_table_touch(&set_ctx->remap_table, *value, value);
 
 		if (res <= 0)
 			return res;
@@ -109,10 +112,18 @@ merge_and_set_registry_values(
 	set_ctx.rules = rules;
 	set_ctx.table = table;
 	set_ctx.registry = registry;
+	if (remap_table_init(
+		    &set_ctx.remap_table,
+		    memory_context,
+		    value_registry_capacity(registry1) *
+			    value_registry_capacity(registry2)
+	    )) {
+		goto error_merge;
+	}
 
 	for (uint32_t range_idx = 0; range_idx < registry1->range_count;
 	     ++range_idx) {
-		value_table_new_gen(table);
+		remap_table_new_gen(&set_ctx.remap_table);
 		if (value_registry_join_range(
 			    registry1,
 			    registry2,
@@ -120,10 +131,15 @@ merge_and_set_registry_values(
 			    value_table_set_action,
 			    &set_ctx
 		    ))
-			goto error_merge;
+			goto error_join;
 	}
 
+	remap_table_free(&set_ctx.remap_table);
+
 	return 0;
+
+error_join:
+	remap_table_free(&set_ctx.remap_table);
 
 error_merge:
 	value_registry_free(registry);
@@ -134,11 +150,18 @@ error_registry:
 	return -1;
 }
 
+struct collect_ctx {
+	struct value_table *value_table;
+	struct remap_table remap_table;
+};
+
 static int
 value_table_touch_action(uint32_t v1, uint32_t v2, uint32_t idx, void *data) {
 	(void)idx;
-	struct value_table *table = (struct value_table *)data;
-	if (value_table_touch(table, v1, v2) < 0)
+	struct collect_ctx *collect_ctx = (struct collect_ctx *)data;
+
+	uint32_t *value = value_table_get_ptr(collect_ctx->value_table, v1, v2);
+	if (remap_table_touch(&collect_ctx->remap_table, *value, value))
 		return -1;
 	return 0;
 }
@@ -159,21 +182,39 @@ merge_registry_values(
 		return -1;
 	}
 
+	struct collect_ctx collect_ctx;
+	collect_ctx.value_table = table;
+	if (remap_table_init(
+		    &collect_ctx.remap_table,
+		    memory_context,
+		    value_registry_capacity(registry1) *
+			    value_registry_capacity(registry2)
+	    )) {
+		goto error_remap_table;
+	}
+
 	for (uint32_t range_idx = 0; range_idx < registry1->range_count;
 	     ++range_idx) {
-		value_table_new_gen(table);
+		remap_table_new_gen(&collect_ctx.remap_table);
 		value_registry_join_range(
 			registry1,
 			registry2,
 			range_idx,
 			value_table_touch_action,
-			table
+			&collect_ctx
 		);
 	}
 
-	value_table_compact(table);
+	remap_table_compact(&collect_ctx.remap_table);
+	value_table_compact(table, &collect_ctx.remap_table);
+	remap_table_free(&collect_ctx.remap_table);
 
 	return 0;
+
+error_remap_table:
+	value_table_free(table);
+
+	return -1;
 }
 
 struct value_collect_ctx {
