@@ -155,7 +155,6 @@ packet_handler:
     tcp_fin: 10
     tcp: 60
     udp: 30
-    default: 60
 
 # State management configuration
 state:

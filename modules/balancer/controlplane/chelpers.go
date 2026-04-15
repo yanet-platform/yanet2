@@ -170,11 +170,11 @@ func (vs *VS) freeRealSelector(agent *Agent) {
 	C.balancer_vs_free_real_selector(vs.asCPtr(), agent.asCPtr())
 }
 
-func (vs *VS) setSessionsTracker(agent *Agent) error {
+func (vs *VS) setSessionsTrackers(agent *Agent) error {
 	return errFromCode(C.balancer_vs_set_session_trackers(vs.asCPtr(), agent.asCPtr()))
 }
 
-func (vs *VS) freeSessionTracker(agent *Agent) {
+func (vs *VS) freeSessionTrackers(agent *Agent) {
 	C.balancer_vs_free_session_trackers(vs.asCPtr(), agent.asCPtr())
 }
 

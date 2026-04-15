@@ -53,10 +53,9 @@ func (vs *VS) key() vsKey {
 func (vs *VS) free(agent *Agent) {
 	yanetAgent := agent.AsYanetAgent()
 
-	// Compiled filters.
 	vs.freeACL(agent)
 	vs.freeRealSelector(agent)
-	vs.freeSessionTracker(agent)
+	vs.freeSessionTrackers(agent)
 
 	// Rule counter IDs.
 	ruleCounterIDs := relptr.Slice(&vs.Rule_counter_ids, vs.Allowed_sources_count)
@@ -65,8 +64,11 @@ func (vs *VS) free(agent *Agent) {
 	// Allowed sources.
 	allowedSources := relptr.Slice(&vs.Allowed_sources, vs.Allowed_sources_count)
 	for i := range allowedSources {
+		// Nets.
 		nets := relptr.Slice(&allowedSources[i].Nets, allowedSources[i].Nets_count)
 		yanet.FreeSlice(yanetAgent, nets)
+
+		// Port ranges.
 		portRanges := relptr.Slice(
 			&allowedSources[i].Port_ranges,
 			allowedSources[i].Port_ranges_count,
@@ -89,10 +91,9 @@ func (vs *VS) free(agent *Agent) {
 // populateAllowedSources allocates and fills the allowed sources array for a VS.
 func (vs *VS) populateAllowedSources(
 	agent *Agent,
-	sources []*balancerpb.AllowedSources,
+	pbSources []*balancerpb.AllowedSources,
 ) error {
-	count := len(sources)
-
+	count := len(pbSources)
 	if count == 0 {
 		return nil
 	}
@@ -102,14 +103,13 @@ func (vs *VS) populateAllowedSources(
 		return errNoAgentMemory
 	}
 
-	// Explicit zero-init: AllocSlice returns shared memory which is not
-	// guaranteed to be zeroed by Go's allocator.
+	// Explicit zero-init for safe freeing.
 	for idx := range srcs {
 		srcs[idx] = AllowedSource{}
 	}
 
-	for i, ps := range sources {
-		if err := srcs[i].populate(agent, ps); err != nil {
+	for i, pb := range pbSources {
+		if err := srcs[i].populate(agent, pb); err != nil {
 			return err
 		}
 	}
@@ -120,9 +120,9 @@ func (vs *VS) populateAllowedSources(
 	return nil
 }
 
-func (as *AllowedSource) populate(agent *Agent, src *balancerpb.AllowedSources) error {
+func (as *AllowedSource) populate(agent *Agent, pbSrc *balancerpb.AllowedSources) error {
 	// Nets.
-	nets := src.Nets
+	nets := pbSrc.Nets
 	if len(nets) > 0 {
 		netSlice := yanet.AllocSlice[Net](agent.AsYanetAgent(), len(nets))
 		if netSlice == nil {
@@ -136,7 +136,7 @@ func (as *AllowedSource) populate(agent *Agent, src *balancerpb.AllowedSources) 
 	}
 
 	// Port ranges.
-	ports := src.Ports
+	ports := pbSrc.Ports
 	if len(ports) > 0 {
 		prSlice := yanet.AllocSlice[PortRange](agent.AsYanetAgent(), len(ports))
 		if prSlice == nil {
@@ -151,8 +151,8 @@ func (as *AllowedSource) populate(agent *Agent, src *balancerpb.AllowedSources) 
 	}
 
 	// Tag (null-terminated C string in fixed-size buffer).
-	if src.Tag != nil {
-		tag := *src.Tag
+	if pbSrc.Tag != nil {
+		tag := *pbSrc.Tag
 		for i := range tag {
 			as.Tag[i] = int8(tag[i])
 		}
@@ -227,12 +227,15 @@ func protoVsFlagsToC(f *balancerpb.VsFlags, s balancerpb.VsScheduler) uint16 {
 	if f.Ops {
 		flags |= VSFlagOPS
 	}
-	if s == balancerpb.VsScheduler_WLC {
+
+	switch s {
+	case balancerpb.VsScheduler_WLC:
 		flags |= VSFlagWLC
 		flags |= VSFlagRoundRobin
-	} else if s == balancerpb.VsScheduler_WRR {
+	case balancerpb.VsScheduler_WRR:
 		flags |= VSFlagRoundRobin
 	}
+
 	return flags
 }
 
@@ -395,7 +398,7 @@ func (vs *VS) populate(
 		return nil, err
 	}
 
-	if err := vs.setSessionsTracker(agent); err != nil {
+	if err := vs.setSessionsTrackers(agent); err != nil {
 		return nil, err
 	}
 
