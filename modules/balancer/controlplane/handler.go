@@ -230,133 +230,36 @@ func (ph *PacketHandler) decapFiltersReusable(addrs [][]byte) (ipv4Reused, ipv6R
 	return ipv4Reused, ipv6Reused
 }
 
-// placeExistingVS places virtual services that exist in both the previous and new configs
-// into their original slot positions in targetVs. Each placed VS is deleted from vsMap,
-// so after this call vsMap contains only genuinely new VSes for placeNewVS to handle.
-func placeExistingVS(
-	ph *PacketHandler,
-	agent *Agent,
-	vsList []*balancerpb.VirtualService,
-	targetVs []VS,
-	prevVs []VS,
-	vsMap map[vsKey]int,
-	reuseReport *balancerpb.ReuseReport,
-) (ipv4MatcherReused bool, ipv6MatcherReused bool, err error) {
-	ipv4MatcherReused = true
-	ipv6MatcherReused = true
-
-	for idx := range prevVs {
-		prev := &prevVs[idx]
-		if prev.isRemoved() {
-			continue
-		}
-		k := prev.key()
-		configIdx, ok := vsMap[k]
-		if !ok {
-			// This VS not present in new config
-			if k.addrLen == 4 {
-				ipv4MatcherReused = false
-			} else {
-				ipv6MatcherReused = false
-			}
-			continue
-		}
-
-		delete(vsMap, k)
-
-		target := &targetVs[idx]
-		target.Flags &^= uint16(VSFlagRemoved)
-		report, err := target.populate(agent, vsList[configIdx], prev.Stable_idx, prev, ph)
-		if err != nil {
-			return false, false, fmt.Errorf("vs %d: %w", configIdx, err)
-		}
-
-		reuseReport.VsReuseReports = append(reuseReport.VsReuseReports, report)
-	}
-
-	return ipv4MatcherReused, ipv6MatcherReused, nil
-}
-
-// placeNewVS places virtual services that are new in the config (remaining in vsMap
-// after placeExistingVS) into removed (empty) slots in targetVs.
-// Invariant: there are always enough removed slots because targetVs has len(vsList) slots,
-// placeExistingVS and placeNewVS together account for exactly len(vsList) entries,
-// and each entry fills exactly one slot.
-func placeNewVS(
-	ph *PacketHandler,
-	agent *Agent,
-	vsList []*balancerpb.VirtualService,
-	targetVs []VS,
-	prevVs []VS,
-	vsMap map[vsKey]int,
-	reuseReport *balancerpb.ReuseReport,
-) (ipv4MatcherReused bool, ipv6MatcherReused bool, err error) {
-	ipv4MatcherReused = true
-	ipv6MatcherReused = true
-
-	nextRemoved := 0
-	for idx, vs := range vsList {
-		k := makeVsKey(vs.Id)
-		if _, ok := vsMap[k]; !ok {
-			continue
-		}
-
-		if k.addrLen == 4 {
-			ipv4MatcherReused = false
-		} else {
-			ipv6MatcherReused = false
-		}
-
-		for !targetVs[nextRemoved].isRemoved() {
-			nextRemoved++
-		}
-
-		epoch := uint32(0)
-		if nextRemoved < len(prevVs) {
-			epoch = prevVs[nextRemoved].epoch() + 1
-		}
-		stableIdx := makeStableIdx(epoch, uint32(nextRemoved))
-
-		target := &targetVs[nextRemoved]
-		target.Flags &^= uint16(VSFlagRemoved)
-		report, err := target.populate(agent, vsList[idx], stableIdx, nil, ph)
-		if err != nil {
-			return false, false, fmt.Errorf("vs %d: %w", idx, err)
-		}
-
-		nextRemoved++
-
-		reuseReport.VsReuseReports = append(reuseReport.VsReuseReports, report)
-	}
-
-	return ipv4MatcherReused, ipv6MatcherReused, nil
-}
-
 func (ph *PacketHandler) populateVS(
 	agent *Agent,
-	vsList []*balancerpb.VirtualService,
+	pbVS []*balancerpb.VirtualService,
 	prevPh *PacketHandler,
 	reuseReport *balancerpb.ReuseReport,
 ) error {
-	vsMap := make(map[vsKey]int, len(vsList))
-	for i, vs := range vsList {
+	vsMap := make(map[vsKey]int, len(pbVS))
+	for i, vs := range pbVS {
 		k := makeVsKey(vs.Id)
 		vsMap[k] = i
 	}
 
-	var prevVs []VS
+	var prevVS []VS
 	if prevPh != nil {
-		prevVs = relptr.Slice(&prevPh.Vs, prevPh.Vs_count)
+		prevVS = relptr.Slice(&prevPh.Vs, prevPh.Vs_count)
 	}
 
-	slotCount := max(len(vsList), len(prevVs))
+	slotCount := max(len(pbVS), len(prevVS))
 	services := yanet.AllocSlice[VS](agent.AsYanetAgent(), slotCount)
 	if services == nil {
 		return errNoAgentMemory
 	}
 	for idx := range services {
+		stableIdx := uint64(0)
+		if idx < len(prevVS) {
+			stableIdx = prevVS[idx].Stable_idx
+		}
 		services[idx] = VS{
-			Flags: VSFlagRemoved,
+			Flags:      VSFlagRemoved,
+			Stable_idx: stableIdx,
 		}
 	}
 
@@ -370,15 +273,15 @@ func (ph *PacketHandler) populateVS(
 		yanet.FreeSlice(agent.AsYanetAgent(), services)
 	}
 
-	reuseReport.VsReuseReports = make([]*balancerpb.VsReuseReport, 0, len(vsList))
+	reuseReport.VsReuseReports = make([]*balancerpb.VsReuseReport, 0, len(pbVS))
 
 	// First, write virtual services which are present in the previous config
-	oldIPv4Matches, oldIPv6Matches, err := placeExistingVS(
+	oldIPv4VsMatches, oldIPv6VsMatches, err := placeExistingVS(
 		ph,
 		agent,
-		vsList,
+		pbVS,
 		services,
-		prevVs,
+		prevVS,
 		vsMap,
 		reuseReport,
 	)
@@ -388,12 +291,12 @@ func (ph *PacketHandler) populateVS(
 	}
 
 	// Then, write virtual services which are new in the new config
-	newIPv4Unchanged, newIPv6Unchanged, err := placeNewVS(
+	noNewIPv4Vs, noNewIPv6Vs, err := placeNewVS(
 		ph,
 		agent,
-		vsList,
+		pbVS,
 		services,
-		prevVs,
+		prevVS,
 		vsMap,
 		reuseReport,
 	)
@@ -402,8 +305,8 @@ func (ph *PacketHandler) populateVS(
 		return err
 	}
 
-	reuseReport.Ipv4VsMatcherReused = prevPh != nil && oldIPv4Matches && newIPv4Unchanged
-	reuseReport.Ipv6VsMatcherReused = prevPh != nil && oldIPv6Matches && newIPv6Unchanged
+	reuseReport.Ipv4VsMatcherReused = prevPh != nil && oldIPv4VsMatches && noNewIPv4Vs
+	reuseReport.Ipv6VsMatcherReused = prevPh != nil && oldIPv6VsMatches && noNewIPv6Vs
 
 	ph.Vs_count = uint32(len(services))
 	relptr.SetSlice(&ph.Vs, services)

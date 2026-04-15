@@ -212,6 +212,109 @@ func (vs *VS) populatePeers(agent *Agent, peers [][]byte) error {
 	return nil
 }
 
+// placeExistingVS places virtual services that exist in both the previous and new configs
+// into their original slot positions in targetVs. Each placed VS is deleted from vsMap,
+// so after this call vsMap contains only genuinely new VSes for placeNewVS to handle.
+func placeExistingVS(
+	ph *PacketHandler,
+	agent *Agent,
+	pbVS []*balancerpb.VirtualService,
+	targetVs []VS,
+	prevVs []VS,
+	vsMap map[vsKey]int,
+	reuseReport *balancerpb.ReuseReport,
+) (oldIPv4VsMatches bool, oldIPv6VsMatches bool, err error) {
+	oldIPv4VsMatches = true
+	oldIPv6VsMatches = true
+
+	for idx := range prevVs {
+		prev := &prevVs[idx]
+		if prev.isRemoved() {
+			continue
+		}
+
+		k := prev.key()
+		pbIdx, ok := vsMap[k]
+		if !ok {
+			// This VS not present in new config
+			if k.addrLen == 4 {
+				oldIPv4VsMatches = false
+			} else {
+				oldIPv6VsMatches = false
+			}
+			continue
+		}
+
+		delete(vsMap, k)
+
+		target := &targetVs[idx]
+		target.Flags &^= uint16(VSFlagRemoved)
+		report, err := target.populate(agent, pbVS[pbIdx], prev.Stable_idx, prev, ph)
+		if err != nil {
+			return false, false, fmt.Errorf("vs %s: %w", prev, err)
+		}
+
+		reuseReport.VsReuseReports = append(reuseReport.VsReuseReports, report)
+	}
+
+	return oldIPv4VsMatches, oldIPv6VsMatches, nil
+}
+
+// placeNewVS places virtual services that are new in the config (remaining in vsMap
+// after placeExistingVS) into removed (empty) slots in targetVs.
+// Invariant: there are always enough removed slots because targetVs has len(vsList) slots,
+// placeExistingVS and placeNewVS together account for exactly len(vsList) entries,
+// and each entry fills exactly one slot.
+func placeNewVS(
+	ph *PacketHandler,
+	agent *Agent,
+	vsList []*balancerpb.VirtualService,
+	targetVs []VS,
+	prevVs []VS,
+	vsMap map[vsKey]int,
+	reuseReport *balancerpb.ReuseReport,
+) (noNewIPv4VS bool, noNewIPv6VS bool, err error) {
+	noNewIPv4VS = true
+	noNewIPv6VS = true
+
+	nextRemoved := 0
+	for idx, vs := range vsList {
+		k := makeVsKey(vs.Id)
+		if _, ok := vsMap[k]; !ok {
+			continue
+		}
+
+		if k.addrLen == 4 {
+			noNewIPv4VS = false
+		} else {
+			noNewIPv6VS = false
+		}
+
+		for !targetVs[nextRemoved].isRemoved() {
+			nextRemoved++
+		}
+
+		epoch := uint32(0)
+		if nextRemoved < len(prevVs) {
+			epoch = prevVs[nextRemoved].epoch() + 1
+		}
+		stableIdx := makeStableIdx(epoch, uint32(nextRemoved))
+
+		target := &targetVs[nextRemoved]
+		target.Flags &^= uint16(VSFlagRemoved)
+		report, err := target.populate(agent, vsList[idx], stableIdx, nil, ph)
+		if err != nil {
+			return false, false, fmt.Errorf("vs %d: %w", idx, err)
+		}
+
+		nextRemoved++
+
+		reuseReport.VsReuseReports = append(reuseReport.VsReuseReports, report)
+	}
+
+	return noNewIPv4VS, noNewIPv6VS, nil
+}
+
 // protoVsFlagsToC converts protobuf VsFlags to the C bit field value.
 func protoVsFlagsToC(f *balancerpb.VsFlags, s balancerpb.VsScheduler) uint16 {
 	var flags uint16
@@ -308,8 +411,8 @@ func (vs *VS) populateReals(
 	pbReals []*balancerpb.Real,
 	prevVs *VS,
 ) (reuseSelector bool, err error) {
-	wlcDisabled := prevVs != nil && !vs.isWLC() && prevVs.isWLC()
-	schedulerChanged := prevVs != nil && vs.scheduler() != prevVs.scheduler()
+	wlcChanged := prevVs != nil && vs.isWLC() != prevVs.isWLC()
+	wrrChanged := prevVs != nil && vs.isWRR() != prevVs.isWRR()
 
 	var prevReals []Real
 	if prevVs != nil {
@@ -322,8 +425,13 @@ func (vs *VS) populateReals(
 		return false, errNoAgentMemory
 	}
 	for idx := range newReals {
+		stableIdx := uint64(0)
+		if idx < len(prevReals) {
+			stableIdx = prevReals[idx].Stable_idx
+		}
 		newReals[idx] = Real{
-			Flags: RealFlagRemoved,
+			Flags:      RealFlagRemoved,
+			Stable_idx: stableIdx,
 		}
 	}
 
@@ -333,7 +441,8 @@ func (vs *VS) populateReals(
 		pbRealIndex[k] = idx
 	}
 
-	inheritEffectiveWeights := !wlcDisabled
+	inheritEffectiveWeights := !wlcChanged
+	inheritWRR := !wrrChanged
 
 	prevRealsUnchanged := placeExistingReals(
 		pbReals,
@@ -342,7 +451,7 @@ func (vs *VS) populateReals(
 		pbRealIndex,
 		inheritEffectiveWeights,
 	)
-	newRealsUnchanged := placeNewReals(
+	noNewReals := placeNewReals(
 		pbReals,
 		newReals,
 		prevReals,
@@ -355,11 +464,10 @@ func (vs *VS) populateReals(
 	// The real selector can be reused only when all four conditions hold:
 	// 1. prevRealsUnchanged: old reals were not changed.
 	// 2. newRealsUnchanged: no new reals were placed.
-	// 3. inheritEffectiveWeights: WLC was not just disabled, so effective weights
+	// 3. inheritEffectiveWeights: WLC was not just changed, so effective weights
 	//    were inherited from the previous config.
-	// 4. !schedulerChanged: the scheduler was not just changed.
-	return prevRealsUnchanged && newRealsUnchanged && inheritEffectiveWeights &&
-		!schedulerChanged, nil
+	// 4. inheritWRR: WRR flag was not just changed, so selector logic inherited.
+	return prevRealsUnchanged && noNewReals && inheritEffectiveWeights && inheritWRR, nil
 }
 
 func (vs *VS) populate(
@@ -455,7 +563,7 @@ func (vs *VS) flags() *balancerpb.VsFlags {
 	}
 }
 
-func (vs *VS) schedulerRoundRobin() bool {
+func (vs *VS) isWRR() bool {
 	return vs.Flags&VSFlagRoundRobin != 0
 }
 
@@ -463,7 +571,7 @@ func (vs *VS) scheduler() balancerpb.VsScheduler {
 	if vs.isWLC() {
 		return balancerpb.VsScheduler_WLC
 	}
-	if vs.schedulerRoundRobin() {
+	if vs.isWRR() {
 		return balancerpb.VsScheduler_WRR
 	}
 	return balancerpb.VsScheduler_SH

@@ -52,7 +52,7 @@ func (r *Real) populate(
 	if len(pb.Id.Ip) == 16 {
 		r.Flags |= RealFlagIPv6
 	}
-	if prevReal != nil && prevReal.Flags&RealFlagEnabled != 0 {
+	if prevReal != nil && prevReal.isEnabled() {
 		r.Flags |= RealFlagEnabled
 	}
 	if inheritEffectiveWeight {
@@ -116,35 +116,34 @@ func placeExistingReals(
 		if prevReal.isRemoved() {
 			continue
 		}
+
 		k := prevReal.key()
 		if _, ok := pbRealIndex[k]; !ok {
 			realsUnchanged = false
 			continue
 		}
-		configIdx := pbRealIndex[k]
+		pbIdx := pbRealIndex[k]
 		delete(pbRealIndex, k)
 
-		pbReal := pbReals[configIdx]
+		pbReal := pbReals[pbIdx]
 		if pbReal.Weight != uint32(prevReal.Weight) {
 			realsUnchanged = false
 		}
-		stableIdx := prevReal.Stable_idx
-		targetReals[idx].populate(pbReal, stableIdx, prevReal, inheritEffectiveWeights)
+		targetReals[idx].populate(pbReal, prevReal.Stable_idx, prevReal, inheritEffectiveWeights)
 	}
 	return realsUnchanged
 }
 
 // placeNewReals places genuinely new reals (remaining in pbRealIndex after placeExistingReals)
-// into removed (empty) slots in targetReals. New reals have no previous state, so they
-// always get prevReal=nil and inheritEffectiveWeight=false.
+// into removed (empty) slots in targetReals.
 // Invariant: same slot-availability guarantee as placeNewVS — see its comment.
 func placeNewReals(
 	pbReals []*balancerpb.Real,
 	targetReals []Real,
 	prevReals []Real,
 	pbRealIndex map[realKey]int,
-) (realsUnchanged bool) {
-	realsUnchanged = true
+) (noNewReals bool) {
+	noNewReals = true
 
 	nextRemoved := 0
 
@@ -153,7 +152,7 @@ func placeNewReals(
 		if _, ok := pbRealIndex[k]; !ok {
 			continue
 		}
-		realsUnchanged = false
+		noNewReals = false
 
 		for !targetReals[nextRemoved].isRemoved() {
 			nextRemoved++
@@ -168,7 +167,7 @@ func placeNewReals(
 		targetReals[nextRemoved].populate(pbReals[idx], stableIdx, nil, false)
 	}
 
-	return realsUnchanged
+	return noNewReals
 }
 
 func formatReal(addr []byte) string {
