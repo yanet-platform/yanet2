@@ -255,6 +255,8 @@ acl_handle_packets(
 		if (action_count)
 			target = ADDR_OF(&acl_config->targets) + actions[0];
 
+		const uint64_t pkt_len = packet_data_len(packet);
+
 		if (target != NULL) {
 			uint64_t *counters = counter_get_address(
 				target->counter_id,
@@ -262,25 +264,67 @@ acl_handle_packets(
 				ADDR_OF(&module_ectx->counter_storage)
 			);
 			counters[0] += 1;
-			counters[1] += packet_data_len(packet);
+			counters[1] += pkt_len;
 
 			enum sync_packet_direction push_sync_packet = SYNC_NONE;
 
 			switch (target->action) {
-			case ACL_ACTION_ALLOW:
+			case ACL_ACTION_ALLOW: {
+				uint64_t *c = counter_get_address(
+					acl_config->action_allow_counter_id,
+					dp_worker->idx,
+					ADDR_OF(&module_ectx->counter_storage)
+				);
+				c[0] += 1;
+				c[1] += pkt_len;
 				packet_front_output(packet_front, packet);
 				break;
-			case ACL_ACTION_DENY:
+			}
+			case ACL_ACTION_DENY: {
+				uint64_t *c = counter_get_address(
+					acl_config->action_deny_counter_id,
+					dp_worker->idx,
+					ADDR_OF(&module_ectx->counter_storage)
+				);
+				c[0] += 1;
+				c[1] += pkt_len;
 				packet_front_drop(packet_front, packet);
 				break;
-			case ACL_ACTION_COUNT:
+			}
+			case ACL_ACTION_COUNT: {
+				uint64_t *c = counter_get_address(
+					acl_config->action_count_counter_id,
+					dp_worker->idx,
+					ADDR_OF(&module_ectx->counter_storage)
+				);
+				c[0] += 1;
+				c[1] += pkt_len;
 				packet_front_output(packet_front, packet);
 				break;
-			case ACL_ACTION_CREATE_STATE:
+			}
+			case ACL_ACTION_CREATE_STATE: {
+				uint64_t *c = counter_get_address(
+					acl_config
+						->action_create_state_counter_id,
+					dp_worker->idx,
+					ADDR_OF(&module_ectx->counter_storage)
+				);
+				c[0] += 1;
+				c[1] += pkt_len;
 				packet_front_output(packet_front, packet);
 				push_sync_packet = SYNC_INGRESS;
 				break;
-			case ACL_ACTION_CHECK_STATE:
+			}
+			case ACL_ACTION_CHECK_STATE: {
+				uint64_t *c = counter_get_address(
+					acl_config
+						->action_check_state_counter_id,
+					dp_worker->idx,
+					ADDR_OF(&module_ectx->counter_storage)
+				);
+				c[0] += 1;
+				c[1] += pkt_len;
+
 				if (fwstate_check_state(
 					    state_table,
 					    packet,
@@ -291,11 +335,31 @@ acl_handle_packets(
 						packet_front, packet
 					);
 				} else {
+					uint64_t *miss = counter_get_address(
+						acl_config
+							->state_miss_counter_id,
+						dp_worker->idx,
+						ADDR_OF(&module_ectx
+								 ->counter_storage
+						)
+					);
+					miss[0] += 1;
+					miss[1] += pkt_len;
+
 					packet_front_drop(packet_front, packet);
 				}
 				break;
-			default:
+			}
+			default: {
+				uint64_t *c = counter_get_address(
+					acl_config->action_unknown_counter_id,
+					dp_worker->idx,
+					ADDR_OF(&module_ectx->counter_storage)
+				);
+				c[0] += 1;
+				c[1] += pkt_len;
 				packet_front_drop(packet_front, packet);
+			}
 			}
 
 			if (push_sync_packet != SYNC_NONE) {
@@ -321,10 +385,26 @@ acl_handle_packets(
 					continue;
 				}
 
+				uint64_t *sc = counter_get_address(
+					acl_config->sync_sent_counter_id,
+					dp_worker->idx,
+					ADDR_OF(&module_ectx->counter_storage)
+				);
+				sc[0] += 1;
+				sc[1] += packet_data_len(sync_pkt);
+
 				packet_front_output(packet_front, sync_pkt);
 			}
 
 		} else {
+			uint64_t *c = counter_get_address(
+				acl_config->no_match_counter_id,
+				dp_worker->idx,
+				ADDR_OF(&module_ectx->counter_storage)
+			);
+			c[0] += 1;
+			c[1] += pkt_len;
+
 			packet_front_drop(packet_front, packet);
 		}
 	}

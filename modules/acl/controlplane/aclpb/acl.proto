@@ -3,9 +3,11 @@ syntax = "proto3";
 package aclpb;
 
 import "common/filterpb/filter.proto";
+import "common/commonpb/metric.proto";
 
 option go_package = "github.com/yanet-platform/yanet2/modules/acl/controlplane/aclpb;aclpb";
 
+// ACLService is a service for ACL module.
 service ACLService {
   // Updates the complete ACL configuration with a new set of rules
   rpc UpdateConfig(UpdateConfigRequest) returns (UpdateConfigResponse);
@@ -16,6 +18,8 @@ service ACLService {
   rpc ShowConfig(ShowConfigRequest) returns (ShowConfigResponse);
   // List all ACL configurations across instances
   rpc ListConfigs(ListConfigsRequest) returns (ListConfigsResponse);
+  // Returns module-level metrics
+  rpc GetMetrics(GetMetricsRequest) returns (GetMetricsResponse);
 }
 
 message UpdateConfigRequest {
@@ -72,3 +76,7 @@ message DeleteConfigResponse { bool deleted = 1; }
 message ListConfigsRequest {}
 
 message ListConfigsResponse { repeated string configs = 1; }
+
+message GetMetricsRequest {}
+
+message GetMetricsResponse { repeated commonpb.Metric metrics = 1; }

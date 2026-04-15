@@ -1,10 +1,11 @@
 #include <errno.h>
 #include <stdint.h>
+#include <time.h>
 
 #include "controlplane.h"
 
+#include "../dataplane/config.h"
 #include "common/memory_address.h"
-#include "config.h"
 #include "modules/fwstate/api/fwstate_cp.h"
 #include "modules/fwstate/dataplane/config.h"
 
@@ -77,6 +78,42 @@ acl_module_config_init(struct agent *agent, const char *name) {
 
 	// Initialize fwstate_cfg with NULL pointers
 	memset(&config->fwstate_cfg, 0, sizeof(struct fwstate_config));
+
+	// Register module-level counters
+	struct {
+		const char *name;
+		uint64_t size;
+		uint64_t *dst;
+	} counters[] = {
+		{"acl_no_match", 2, &config->no_match_counter_id},
+		{"acl_action_allow", 2, &config->action_allow_counter_id},
+		{"acl_action_deny", 2, &config->action_deny_counter_id},
+		{"acl_action_count", 2, &config->action_count_counter_id},
+		{"acl_action_check_state",
+		 2,
+		 &config->action_check_state_counter_id},
+		{"acl_action_create_state",
+		 2,
+		 &config->action_create_state_counter_id},
+		{"acl_action_unknown", 2, &config->action_unknown_counter_id},
+		{"acl_state_miss", 2, &config->state_miss_counter_id},
+		{"acl_sync_sent", 2, &config->sync_sent_counter_id},
+	};
+
+	for (size_t i = 0; i < sizeof(counters) / sizeof(counters[0]); ++i) {
+		uint64_t id = counter_registry_register(
+			&config->cp_module.counter_registry,
+			counters[i].name,
+			counters[i].size
+		);
+		if (id == (uint64_t)-1) {
+			int prev_errno = errno;
+			acl_module_config_free(&config->cp_module);
+			errno = prev_errno;
+			return NULL;
+		}
+		*counters[i].dst = id;
+	}
 
 	return &config->cp_module;
 }
@@ -232,6 +269,8 @@ acl_module_init_l2(
 		acl_rules, acl_rule_count, filter_rules, check_acl_rule_l2
 	);
 
+	config->filter_rule_count_vlan = filter_rule_count;
+
 	return filter_init(
 		&config->filter_vlan,
 		ACL_FILTER_VLAN_TAG,
@@ -254,6 +293,8 @@ acl_module_init_ip4(
 	uint32_t filter_rule_count = filter_acl_rules(
 		acl_rules, acl_rule_count, filter_rules, check_acl_rule_ip4
 	);
+
+	config->filter_rule_count_ip4 = filter_rule_count;
 
 	return filter_init(
 		&config->filter_ip4,
@@ -278,6 +319,8 @@ acl_module_init_ip4_port(
 		acl_rules, acl_rule_count, filter_rules, check_acl_rule_ip4_port
 	);
 
+	config->filter_rule_count_ip4_port = filter_rule_count;
+
 	return filter_init(
 		&config->filter_ip4_port,
 		ACL_FILTER_IP4_PROTO_PORT_TAG,
@@ -300,6 +343,8 @@ acl_module_init_ip6(
 	uint32_t filter_rule_count = filter_acl_rules(
 		acl_rules, acl_rule_count, filter_rules, check_acl_rule_ip6
 	);
+
+	config->filter_rule_count_ip6 = filter_rule_count;
 
 	return filter_init(
 		&config->filter_ip6,
@@ -324,6 +369,8 @@ acl_module_init_ip6_port(
 		acl_rules, acl_rule_count, filter_rules, check_acl_rule_ip6_port
 	);
 
+	config->filter_rule_count_ip6_port = filter_rule_count;
+
 	return filter_init(
 		&config->filter_ip6_port,
 		ACL_FILTER_IP6_PROTO_PORT_TAG,
@@ -344,11 +391,12 @@ acl_module_config_update(
 
 	for (uint64_t idx = 0; idx < rule_count; ++idx) {
 		struct acl_rule *rule = acl_rules + idx;
-		for (uint64_t idx = 0; idx < rule->devices.count; ++idx) {
+		for (uint64_t dev_idx = 0; dev_idx < rule->devices.count;
+		     ++dev_idx) {
 			if (cp_module_link_device(
 				    cp_module,
-				    rule->devices.items[idx].name,
-				    &rule->devices.items[idx].id
+				    rule->devices.items[dev_idx].name,
+				    &rule->devices.items[dev_idx].id
 			    )) {
 				goto error;
 			}
@@ -365,6 +413,8 @@ acl_module_config_update(
 
 	SET_OFFSET_OF(&config->targets, targets);
 	config->target_count = rule_count;
+
+	struct filter_rule *filter_rules = NULL;
 
 	for (uint32_t idx = 0; idx < rule_count; ++idx) {
 		struct acl_rule *acl_rule = acl_rules + idx;
@@ -384,12 +434,15 @@ acl_module_config_update(
 	}
 
 	// Create per filter rule list
-	struct filter_rule *filter_rules = (struct filter_rule *)malloc(
+	filter_rules = (struct filter_rule *)malloc(
 		sizeof(struct filter_rule) * rule_count
 	);
 	if (filter_rules == NULL) {
 		goto error_target;
 	}
+
+	struct timespec ts_start, ts_end;
+	clock_gettime(CLOCK_MONOTONIC, &ts_start);
 
 	if (acl_module_init_l2(cp_module, acl_rules, rule_count, filter_rules))
 		goto error_target;
@@ -410,16 +463,25 @@ acl_module_config_update(
 	    ))
 		goto error_target;
 
+	clock_gettime(CLOCK_MONOTONIC, &ts_end);
+	config->compilation_time_ns =
+		(uint64_t)((int64_t)(ts_end.tv_sec - ts_start.tv_sec) *
+				   1000000000LL +
+			   (ts_end.tv_nsec - ts_start.tv_nsec));
+
 	free(filter_rules);
 
 	return 0;
 
 error_target:
+	free(filter_rules);
 	memory_bfree(
 		&cp_module->memory_context,
 		targets,
 		sizeof(struct acl_target) * rule_count
 	);
+	SET_OFFSET_OF(&config->targets, NULL);
+	config->target_count = 0;
 
 error:
 	return -1;
@@ -467,4 +529,19 @@ acl_module_config_transfer_fwstate_config(
 		&new_config->fwstate_cfg.fw6state,
 		&old_config->fwstate_cfg.fw6state
 	);
+}
+
+void
+acl_module_config_get_info(
+	struct cp_module *cp_module, struct acl_config_info *info
+) {
+	struct acl_module_config *config =
+		container_of(cp_module, struct acl_module_config, cp_module);
+
+	info->compilation_time_ns = config->compilation_time_ns;
+	info->filter_rule_count_ip4 = config->filter_rule_count_ip4;
+	info->filter_rule_count_ip4_port = config->filter_rule_count_ip4_port;
+	info->filter_rule_count_ip6 = config->filter_rule_count_ip6;
+	info->filter_rule_count_ip6_port = config->filter_rule_count_ip6_port;
+	info->filter_rule_count_vlan = config->filter_rule_count_vlan;
 }

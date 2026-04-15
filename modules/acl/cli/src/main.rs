@@ -1,22 +1,30 @@
 use core::error::Error;
-use std::{fs::File, path::Path};
+use std::{collections::HashMap, fs::File, path::Path};
 
 use aclpb::{
-    DeleteConfigRequest, ListConfigsRequest, ShowConfigRequest, UpdateConfigRequest,
+    DeleteConfigRequest, GetMetricsRequest, ListConfigsRequest, ShowConfigRequest, UpdateConfigRequest,
     acl_service_client::AclServiceClient,
 };
-use args::{DeleteCmd, ModeCmd, ShowCmd, UpdateCmd};
+use args::{DeleteCmd, MetricsCmd, ModeCmd, OutputFormat, ShowCmd, UpdateCmd};
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
+use metric::Metric;
 use netip::IpNetwork;
 use serde::{Deserialize, Serialize};
+use tabled::Tabled;
 use tonic::codec::CompressionEncoding;
 use ync::{
     client::{ConnectionArgs, LayeredChannel},
+    display::print_table,
     logging,
 };
 
 mod args;
+mod metric;
+
+mod commonpb {
+    tonic::include_proto!("commonpb");
+}
 
 #[allow(non_snake_case)]
 pub mod filterpb {
@@ -53,6 +61,311 @@ struct SerializableAction {
     counter: String,
     keep_state: bool,
     kind: i32,
+}
+
+#[derive(Tabled)]
+struct CounterRow {
+    #[tabled(rename = "Counter")]
+    counter: String,
+    #[tabled(rename = "Packets")]
+    packets: String,
+    #[tabled(rename = "Bytes")]
+    bytes: String,
+}
+
+#[derive(Tabled)]
+struct GaugeRow {
+    #[tabled(rename = "Metric")]
+    metric: String,
+    #[tabled(rename = "Value")]
+    value: String,
+}
+
+#[derive(Tabled)]
+struct HistRow {
+    #[tabled(rename = "Handler")]
+    handler: String,
+    #[tabled(rename = "Total Calls")]
+    total: String,
+    #[tabled(rename = "P50")]
+    p50: String,
+    #[tabled(rename = "P95")]
+    p95: String,
+    #[tabled(rename = "P99")]
+    p99: String,
+}
+
+fn print_counter_table(rows: Vec<CounterRow>) {
+    let show_packets = rows.iter().any(|r| r.packets != "-");
+    let show_bytes = rows.iter().any(|r| r.bytes != "-");
+
+    if !show_packets && !show_bytes {
+        return;
+    }
+
+    let mut builder = tabled::builder::Builder::new();
+    let mut header = vec!["Counter".to_string()];
+    if show_packets {
+        header.push("Packets".to_string());
+    }
+    if show_bytes {
+        header.push("Bytes".to_string());
+    }
+    builder.push_record(header);
+
+    for r in rows {
+        let mut row = vec![r.counter];
+        if show_packets {
+            row.push(r.packets);
+        }
+        if show_bytes {
+            row.push(r.bytes);
+        }
+        builder.push_record(row);
+    }
+
+    let mut table = builder.build();
+    ync::display::apply_style(&mut table);
+    println!("{table}");
+}
+
+fn format_number(n: u64) -> String {
+    let s = n.to_string();
+    let mut result = String::new();
+    for (i, c) in s.chars().rev().enumerate() {
+        if i > 0 && i % 3 == 0 {
+            result.push(',');
+        }
+        result.push(c);
+    }
+    result.chars().rev().collect()
+}
+
+fn format_gauge_value(name: &str, value: f64) -> String {
+    if name.ends_with("_ns") {
+        if value < 1_000.0 {
+            format!("{:.0}ns", value)
+        } else if value < 1_000_000.0 {
+            format!("{:.2}µs", value / 1_000.0)
+        } else if value < 1_000_000_000.0 {
+            format!("{:.2}ms", value / 1_000_000.0)
+        } else {
+            format!("{:.2}s", value / 1_000_000_000.0)
+        }
+    } else if name.ends_with("_bytes") {
+        if value < 1024.0 {
+            format!("{:.0} B", value)
+        } else if value < 1024.0 * 1024.0 {
+            format!("{:.2} KB", value / 1024.0)
+        } else if value < 1024.0 * 1024.0 * 1024.0 {
+            format!("{:.2} MB", value / (1024.0 * 1024.0))
+        } else {
+            format!("{:.2} GB", value / (1024.0 * 1024.0 * 1024.0))
+        }
+    } else {
+        format_number(value as u64)
+    }
+}
+
+fn metric_display_name(name: &str) -> String {
+    let stripped = name.strip_prefix("acl_").unwrap_or(name);
+    stripped
+        .split('_')
+        .map(|word| {
+            let mut c = word.chars();
+            match c.next() {
+                None => String::new(),
+                Some(first) => first.to_uppercase().collect::<String>() + c.as_str(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn print_metrics_table(metrics: &[Metric]) {
+    if metrics.is_empty() {
+        println!("No metrics found.");
+        return;
+    }
+
+    struct CounterPair {
+        display: String,
+        packets: Option<u64>,
+        bytes: Option<u64>,
+    }
+
+    let mut location_keys: Vec<String> = Vec::new();
+    let mut location_map: HashMap<String, Vec<&Metric>> = HashMap::new();
+    let mut gauge_keys: Vec<String> = Vec::new();
+    let mut gauge_map: HashMap<String, Vec<&Metric>> = HashMap::new();
+    let mut histograms: Vec<&Metric> = Vec::new();
+
+    for m in metrics {
+        match m.kind {
+            metric::Kind::Histogram => histograms.push(m),
+            metric::Kind::Gauge => {
+                let cfg = m.label_value("config").unwrap_or("global").to_string();
+                if !gauge_map.contains_key(&cfg) {
+                    gauge_keys.push(cfg.clone());
+                }
+                gauge_map.entry(cfg).or_default().push(m);
+            }
+            metric::Kind::Counter => {
+                let key = format!(
+                    "{}\0{}\0{}\0{}\0{}",
+                    m.label_value("config").unwrap_or(""),
+                    m.label_value("device").unwrap_or(""),
+                    m.label_value("pipeline").unwrap_or(""),
+                    m.label_value("function").unwrap_or(""),
+                    m.label_value("chain").unwrap_or(""),
+                );
+                if !location_map.contains_key(&key) {
+                    location_keys.push(key.clone());
+                }
+                location_map.entry(key).or_default().push(m);
+            }
+            metric::Kind::Unknown => {}
+        }
+    }
+
+    for (loc_idx, key) in location_keys.iter().enumerate() {
+        if loc_idx > 0 {
+            println!();
+        }
+        let counters = &location_map[key];
+        let parts: Vec<&str> = key.split('\0').collect();
+        let (cfg, device, pipeline, function, chain) = (parts[0], parts[1], parts[2], parts[3], parts[4]);
+        println!("ACL COUNTERS  config={cfg} device={device} pipeline={pipeline} function={function} chain={chain}");
+        println!();
+
+        let std_counters: Vec<&&Metric> = counters.iter().filter(|m| m.label_value("counter").is_none()).collect();
+        let rule_counters: Vec<&&Metric> = counters.iter().filter(|m| m.label_value("counter").is_some()).collect();
+
+        let mut pair_order: Vec<String> = Vec::new();
+        let mut pair_map: HashMap<String, CounterPair> = HashMap::new();
+
+        for m in &std_counters {
+            let val = m.value.unwrap_or(0.0) as u64;
+            let stripped = m.name.strip_prefix("acl_").unwrap_or(&m.name);
+            if let Some(base) = stripped.strip_suffix("_packets") {
+                let pair = pair_map.entry(base.to_string()).or_insert_with(|| {
+                    pair_order.push(base.to_string());
+                    CounterPair {
+                        display: metric_display_name(base),
+                        packets: None,
+                        bytes: None,
+                    }
+                });
+                pair.packets = Some(val);
+            } else if let Some(base) = stripped.strip_suffix("_bytes") {
+                let pair = pair_map.entry(base.to_string()).or_insert_with(|| {
+                    pair_order.push(base.to_string());
+                    CounterPair {
+                        display: metric_display_name(base),
+                        packets: None,
+                        bytes: None,
+                    }
+                });
+                pair.bytes = Some(val);
+            }
+        }
+
+        if !pair_order.is_empty() {
+            let rows: Vec<CounterRow> = pair_order
+                .iter()
+                .map(|k| {
+                    let p = &pair_map[k];
+                    CounterRow {
+                        counter: p.display.clone(),
+                        packets: p.packets.map(format_number).unwrap_or_else(|| "-".into()),
+                        bytes: p.bytes.map(format_number).unwrap_or_else(|| "-".into()),
+                    }
+                })
+                .collect();
+            print_counter_table(rows);
+        }
+
+        if !rule_counters.is_empty() {
+            println!();
+            println!("Per-Rule Counters:");
+
+            let mut rule_order: Vec<String> = Vec::new();
+            let mut rule_map_inner: HashMap<String, (Option<u64>, Option<u64>)> = HashMap::new();
+
+            for m in &rule_counters {
+                let rule_name = m.label_value("counter").unwrap_or("unknown").to_string();
+                let val = m.value.unwrap_or(0.0) as u64;
+                if !rule_map_inner.contains_key(&rule_name) {
+                    rule_order.push(rule_name.clone());
+                    rule_map_inner.insert(rule_name.clone(), (None, None));
+                }
+                let entry = rule_map_inner.get_mut(&rule_name).unwrap();
+                if m.name.ends_with("_packets") {
+                    entry.0 = Some(val);
+                } else if m.name.ends_with("_bytes") {
+                    entry.1 = Some(val);
+                }
+            }
+
+            let rows: Vec<CounterRow> = rule_order
+                .iter()
+                .map(|name| {
+                    let (pkts, b) = rule_map_inner[name];
+                    CounterRow {
+                        counter: name.clone(),
+                        packets: pkts.map(format_number).unwrap_or_else(|| "-".into()),
+                        bytes: b.map(format_number).unwrap_or_else(|| "-".into()),
+                    }
+                })
+                .collect();
+            print_counter_table(rows);
+        }
+
+        println!();
+    }
+
+    for cfg in &gauge_keys {
+        let gauges = &gauge_map[cfg];
+        println!("ACL CONFIG INFO  config={cfg}");
+        println!();
+        let rows: Vec<GaugeRow> = gauges
+            .iter()
+            .map(|m| GaugeRow {
+                metric: metric_display_name(&m.name),
+                value: format_gauge_value(&m.name, m.value.unwrap_or(0.0)),
+            })
+            .collect();
+        print_table(rows);
+        println!();
+    }
+
+    if !histograms.is_empty() {
+        println!("ACL HANDLER LATENCIES");
+        println!();
+        let rows: Vec<HistRow> = histograms
+            .iter()
+            .map(|m| {
+                let handler = m.label_value("handler").unwrap_or("unknown").to_string();
+                match &m.histogram {
+                    Some(h) => HistRow {
+                        handler,
+                        total: format_number(h.total_count),
+                        p50: metric::histogram_percentile(&h.buckets, h.total_count, 50.0),
+                        p95: metric::histogram_percentile(&h.buckets, h.total_count, 95.0),
+                        p99: metric::histogram_percentile(&h.buckets, h.total_count, 99.0),
+                    },
+                    None => HistRow {
+                        handler,
+                        total: "-".into(),
+                        p50: "-".into(),
+                        p95: "-".into(),
+                        p99: "-".into(),
+                    },
+                }
+            })
+            .collect();
+        print_table(rows);
+    }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -120,7 +433,6 @@ impl TryFrom<&Range> for filterpb::ProtoRange {
     type Error = Box<dyn Error>;
 
     fn try_from(r: &Range) -> Result<Self, Self::Error> {
-        // Protocol is 16 bits, so valid range is 0-65535
         if r.from > r.to {
             return Err(format!("protocol 'from' value {} is greater than 'to' value {}", r.from, r.to).into());
         }
@@ -132,7 +444,6 @@ impl TryFrom<&Range> for filterpb::VlanRange {
     type Error = Box<dyn Error>;
 
     fn try_from(r: &Range) -> Result<Self, Self::Error> {
-        // VLAN ID is 12 bits, so valid range is 0-4095
         if r.from > 4095 {
             return Err(format!("VLAN 'from' value {} exceeds maximum 4095", r.from).into());
         }
@@ -350,6 +661,40 @@ impl ACLService {
         log::debug!("UpdateConfigResponse: {response:?}");
         Ok(())
     }
+
+    pub async fn metrics(&mut self, cmd: MetricsCmd) -> Result<(), Box<dyn Error>> {
+        let response = self.client.get_metrics(GetMetricsRequest {}).await?.into_inner();
+
+        let label_filters: Vec<(&str, &str)> = cmd
+            .labels
+            .iter()
+            .filter_map(|s| {
+                let mut it = s.splitn(2, '=');
+                Some((it.next()?, it.next()?))
+            })
+            .collect();
+
+        let metrics: Vec<Metric> = response
+            .metrics
+            .into_iter()
+            .map(Metric::from_proto)
+            .filter(|m| {
+                if let Some(ref f) = cmd.name {
+                    if !m.name.contains(f.as_filter()) {
+                        return false;
+                    }
+                }
+                label_filters.iter().all(|(k, v)| m.label_value(k) == Some(v))
+            })
+            .collect();
+
+        match cmd.format {
+            OutputFormat::Json => println!("{}", serde_json::to_string(&metrics)?),
+            OutputFormat::Table => print_metrics_table(&metrics),
+        }
+
+        Ok(())
+    }
 }
 
 async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
@@ -359,6 +704,7 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
         ModeCmd::Delete(cmd) => service.delete_config(cmd).await,
         ModeCmd::Update(cmd) => service.update_config(cmd).await,
         ModeCmd::Show(cmd) => service.show_config(cmd).await,
+        ModeCmd::Metrics(cmd) => service.metrics(cmd).await,
     }
 }
 

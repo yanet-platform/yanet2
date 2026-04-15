@@ -30,4 +30,23 @@ struct acl_module_config {
 	struct acl_target *targets;
 
 	struct fwstate_config fwstate_cfg;
+
+	// Metrics
+	uint64_t compilation_time_ns;
+	uint64_t filter_rule_count_ip4;
+	uint64_t filter_rule_count_ip4_port;
+	uint64_t filter_rule_count_ip6;
+	uint64_t filter_rule_count_ip6_port;
+	uint64_t filter_rule_count_vlan;
+
+	// Module-level counters, registered by acl_module_config_init
+	uint64_t no_match_counter_id;
+	uint64_t action_allow_counter_id;
+	uint64_t action_deny_counter_id;
+	uint64_t action_count_counter_id;
+	uint64_t action_check_state_counter_id;
+	uint64_t action_create_state_counter_id;
+	uint64_t action_unknown_counter_id;
+	uint64_t state_miss_counter_id;
+	uint64_t sync_sent_counter_id;
 };

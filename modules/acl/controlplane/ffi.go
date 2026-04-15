@@ -131,3 +131,27 @@ func (m *ModuleConfig) SetFwStateConfig(fwstateConfig *fwstate.FwStateConfig) {
 	ffiModule := fwstateConfig.AsFFIModule()
 	C.acl_module_config_set_fwstate_config(m.asRawPtr(), (*C.struct_cp_module)(ffiModule.AsRawPtr()))
 }
+
+// AclConfigInfo holds metadata about the compiled ACL configuration
+type AclConfigInfo struct {
+	CompilationTimeNs      uint64
+	FilterRuleCountIp4     uint64
+	FilterRuleCountIp4Port uint64
+	FilterRuleCountIp6     uint64
+	FilterRuleCountIp6Port uint64
+	FilterRuleCountVlan    uint64
+}
+
+func (m *ModuleConfig) GetInfo() *AclConfigInfo {
+	var cInfo C.struct_acl_config_info
+	C.acl_module_config_get_info(m.asRawPtr(), &cInfo)
+	return &AclConfigInfo{
+		CompilationTimeNs:      uint64(cInfo.compilation_time_ns),
+		FilterRuleCountIp4:     uint64(cInfo.filter_rule_count_ip4),
+		FilterRuleCountIp4Port: uint64(cInfo.filter_rule_count_ip4_port),
+		FilterRuleCountIp6:     uint64(cInfo.filter_rule_count_ip6),
+		FilterRuleCountIp6Port: uint64(cInfo.filter_rule_count_ip6_port),
+		FilterRuleCountVlan:    uint64(cInfo.filter_rule_count_vlan),
+	}
+}
+
