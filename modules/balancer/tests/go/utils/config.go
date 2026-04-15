@@ -23,7 +23,6 @@ var (
 		TcpFin:    15,
 		Tcp:       60,
 		Udp:       30,
-		Default:   60,
 	}
 
 	DefaultSessionCapacity  uint64  = 20_000
@@ -187,7 +186,7 @@ func (b *VSBuilder) PureL3() *VSBuilder {
 }
 
 func (b *VSBuilder) WLC() *VSBuilder {
-	b.flags.Wlc = true
+	b.scheduler = balancerpb.VsScheduler_WLC
 	return b
 }
 
