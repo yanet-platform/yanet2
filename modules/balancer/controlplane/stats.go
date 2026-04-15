@@ -206,14 +206,6 @@ func applyCounter(
 			return
 		}
 		realState.RealStats = realStats(counter.Values).proto()
-	case name == "cmn":
-		state.CommonStats = commonStats(counter.Values).proto()
-	case name == "iv4":
-		state.IcmpIpv4Stats = icmpStats(counter.Values).proto()
-	case name == "iv6":
-		state.IcmpIpv6Stats = icmpStats(counter.Values).proto()
-	case name == "l4":
-		state.L4Stats = l4Stats(counter.Values).proto()
 	case strings.HasPrefix(name, "acl_"):
 		vsStableIndex, tag, ok := aclTagFromCounterName(name)
 		if !ok {
@@ -224,7 +216,7 @@ func applyCounter(
 			services[vsConfigIndex].Stable_idx != vsStableIndex {
 			return
 		}
-		vsState := state.VirtualServices[vsStableIndex]
+		vsState := state.VirtualServices[vsConfigIndex]
 		if vsState == nil {
 			return
 		}
@@ -232,6 +224,14 @@ func applyCounter(
 			Tag:    tag,
 			Passes: aggregateACLPasses(counter.Values),
 		})
+	case name == "cmn":
+		state.CommonStats = commonStats(counter.Values).proto()
+	case name == "iv4":
+		state.IcmpIpv4Stats = icmpStats(counter.Values).proto()
+	case name == "iv6":
+		state.IcmpIpv6Stats = icmpStats(counter.Values).proto()
+	case name == "l4":
+		state.L4Stats = l4Stats(counter.Values).proto()
 	}
 }
 
