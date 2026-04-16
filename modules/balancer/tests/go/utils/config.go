@@ -1,3 +1,4 @@
+// Package utils provides utils for balancer tests.
 package utils
 
 import (
