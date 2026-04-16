@@ -1,12 +1,6 @@
-use tabled::{
-    Table, Tabled,
-    settings::{
-        Color, Style,
-        object::{Columns, Rows},
-        style::{BorderColor, HorizontalLine},
-    },
-};
+use tabled::Tabled;
 use yanet_cli_balancer::balancerpb;
+use ync::display::print_table;
 
 use crate::{bytes_to_ip, format_ip_port};
 
@@ -588,21 +582,6 @@ struct RealStatsRow {
     active_sessions: String,
     #[tabled(rename = "Sess Crt")]
     created_sessions: String,
-}
-
-// ─── Table Printing ─────────────────────────────────────────────────────────
-
-fn print_table<T: Tabled>(entries: Vec<T>) {
-    let mut table = Table::new(entries);
-    table.with(
-        Style::modern()
-            .horizontals([(1, HorizontalLine::inherit(Style::modern()))])
-            .remove_horizontal(),
-    );
-    table.modify(Columns::new(..), BorderColor::filled(Color::rgb_fg(0x4e, 0x4e, 0x4e)));
-    table.modify(Rows::first(), Color::BOLD);
-
-    println!("{table}");
 }
 
 // ─── JSON Prettification ────────────────────────────────────────────────────
