@@ -191,7 +191,7 @@ func EnableAllReals(t *testing.T, ts *TestSetup) {
 	}
 }
 
-func StateRef() *balancerpb.PacketHandlerRef {
+func PacketHandlerRef() *balancerpb.PacketHandlerRef {
 	return &balancerpb.PacketHandlerRef{
 		Device:   &DeviceName,
 		Pipeline: &PipelineName,

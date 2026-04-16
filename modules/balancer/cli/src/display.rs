@@ -497,13 +497,9 @@ fn format_vs_id(vs_id: Option<&balancerpb::VsIdentifier>) -> String {
         .unwrap_or_else(|| "-".to_string())
 }
 
-fn format_real_id(real_id: Option<&balancerpb::RealIdentifier>) -> String {
+fn format_real_id(real_id: Option<&balancerpb::RelativeRealIdentifier>) -> String {
     real_id
-        .and_then(|id| {
-            id.real
-                .as_ref()
-                .and_then(|r| bytes_to_ip(&r.ip).ok().map(|ip| format_ip_port(ip, r.port)))
-        })
+        .and_then(|r| bytes_to_ip(&r.ip).ok().map(|ip| format_ip_port(ip, r.port)))
         .unwrap_or_else(|| "-".to_string())
 }
 

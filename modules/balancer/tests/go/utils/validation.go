@@ -21,7 +21,7 @@ func ValidatePacket(
 	config *balancerpb.BalancerConfig,
 	originalGoPacket gopacket.Packet,
 	resultPacket *framework.PacketInfo,
-) {
+) PacketInfo {
 	t.Helper()
 
 	parser := framework.NewPacketParser()
@@ -30,9 +30,22 @@ func ValidatePacket(
 
 	validateTunnelStructure(t, originalPacket, resultPacket, originalGoPacket)
 	validateTosPreservation(t, originalPacket, originalGoPacket, resultPacket)
+
 	packetProto := validateProtocol(t, originalPacket, resultPacket)
-	validateServiceAndReal(t, config, originalPacket, resultPacket, packetProto)
+	vs, rl := validateServiceAndReal(t, config, originalPacket, resultPacket, packetProto)
+
 	validateTunnelSourceAddress(t, config, originalPacket, resultPacket)
+
+	clientIP, _ := netip.AddrFromSlice(originalPacket.SrcIP)
+	clientPort := originalPacket.SrcPort
+
+	return PacketInfo{
+		VsID:       VsIDFromPb(vs.Id),
+		ClientAddr: clientIP,
+		ClientPort: clientPort,
+		RealID:     RealIDFromPb(rl.Id),
+		Packet:     resultPacket,
+	}
 }
 
 func validateTunnelStructure(
@@ -138,24 +151,29 @@ func getOuterTos(
 	t.Helper()
 
 	var tos uint8
-	if resultPacket.IsIPv4 {
-		if ipv4 := tunneled.Layer(layers.LayerTypeIPv4); ipv4 != nil {
-			tos = ipv4.(*layers.IPv4).TOS
-		} else {
+
+	switch {
+	case resultPacket.IsIPv4:
+		ipv4 := tunneled.Layer(layers.LayerTypeIPv4)
+		if ipv4 == nil {
 			t.Error("no outer IPv4 layer")
 			return nil
 		}
-	} else if resultPacket.IsIPv6 {
-		if ipv6 := tunneled.Layer(layers.LayerTypeIPv6); ipv6 != nil {
-			tos = ipv6.(*layers.IPv6).TrafficClass
-		} else {
+		tos = ipv4.(*layers.IPv4).TOS
+
+	case resultPacket.IsIPv6:
+		ipv6 := tunneled.Layer(layers.LayerTypeIPv6)
+		if ipv6 == nil {
 			t.Error("no outer IPv6 layer")
 			return nil
 		}
-	} else {
+		tos = ipv6.(*layers.IPv6).TrafficClass
+
+	default:
 		t.Error("unknown outer IP version")
 		return nil
 	}
+
 	return &tos
 }
 
@@ -229,12 +247,12 @@ func validateServiceAndReal(
 	originalPacket *framework.PacketInfo,
 	resultPacket *framework.PacketInfo,
 	packetProto balancerpb.TransportProto,
-) {
+) (*balancerpb.VirtualService, *balancerpb.Real) {
 	t.Helper()
 
 	if config.PacketHandler == nil {
 		t.Error("packet handler config is nil")
-		return
+		return nil, nil
 	}
 
 	originalDstIP := netip.MustParseAddr(originalPacket.DstIP.String())
@@ -248,20 +266,22 @@ func validateServiceAndReal(
 
 			validateTunnelType(t, service, vsAddr, resultPacket)
 
-			if findMatchingReal(t, service, resultPacket) {
-				return
+			if rl := findMatchingReal(t, service, resultPacket); rl != nil {
+				return service, rl
 			}
 
 			t.Error("no real found that matches packet destination")
 			t.Logf("original: %v", originalPacket)
 			t.Logf("result: %v", resultPacket)
-			return
+			return nil, nil
 		}
 	}
 
 	t.Error("no service found that matches packet")
 	t.Logf("original: %v", originalPacket)
 	t.Logf("result: %v", resultPacket)
+
+	return nil, nil
 }
 
 func validateTunnelType(
@@ -286,7 +306,7 @@ func findMatchingReal(
 	t *testing.T,
 	service *balancerpb.VirtualService,
 	resultPacket *framework.PacketInfo,
-) bool {
+) *balancerpb.Real {
 	t.Helper()
 
 	resultDstIP := netip.MustParseAddr(resultPacket.DstIP.String())
@@ -294,10 +314,10 @@ func findMatchingReal(
 	for _, real := range service.Reals {
 		realAddr, _ := netip.AddrFromSlice(real.Id.Ip)
 		if realAddr.Compare(resultDstIP) == 0 {
-			return true
+			return real
 		}
 	}
-	return false
+	return nil
 }
 
 // ExtractDestinationReal extracts the destination IP (real server) from a tunneled packet.
@@ -314,16 +334,16 @@ func ExtractDestinationReal(packet *framework.PacketInfo) (netip.Addr, error) {
 }
 
 // CountPacketsPerReal counts how many packets went to each real server.
-func CountPacketsPerReal(packets []*framework.PacketInfo) map[netip.Addr]int {
+func CountPacketsPerReal(packets []PacketInfo) (map[netip.Addr]int, error) {
 	counts := make(map[netip.Addr]int)
 	for _, packet := range packets {
-		realIP, err := ExtractDestinationReal(packet)
+		realIP, err := ExtractDestinationReal(packet.Packet)
 		if err != nil {
-			continue
+			return nil, err
 		}
 		counts[realIP]++
 	}
-	return counts
+	return counts, nil
 }
 
 // ValidateWeightDistribution checks if packet distribution matches expected weights.
@@ -377,18 +397,18 @@ func ValidateWeightDistribution(
 	}
 }
 
-// AllPacketsToSameReal checks if all packets went to the same real server.
-func AllPacketsToSameReal(packets []*framework.PacketInfo) (netip.Addr, bool) {
-	if len(packets) == 0 {
-		return netip.Addr{}, false
+// AllSessionsToSameReal checks if all packets went to the same real server.
+func AllSessionsToSameReal(sessions []PacketInfo) (netip.Addr, bool) {
+	if len(sessions) == 0 {
+		return netip.Addr{}, true
 	}
 
 	var firstReal netip.Addr
 	firstSet := false
 
-	for _, packet := range packets {
-		realIP, err := ExtractDestinationReal(packet)
-		if err != nil {
+	for _, packet := range sessions {
+		realIP, ok := netip.AddrFromSlice(packet.RealID.addr[:])
+		if !ok {
 			return netip.Addr{}, false
 		}
 		if !firstSet {
@@ -400,12 +420,6 @@ func AllPacketsToSameReal(packets []*framework.PacketInfo) (netip.Addr, bool) {
 	}
 
 	return firstReal, true
-}
-
-// PacketsDistributedAcrossReals checks if packets are distributed across multiple reals.
-func PacketsDistributedAcrossReals(packets []*framework.PacketInfo) bool {
-	counts := CountPacketsPerReal(packets)
-	return len(counts) > 1
 }
 
 func validateTunnelSourceAddress(
@@ -499,32 +513,32 @@ func validateSourceAddressCalculation(
 	}
 
 	var clientIPBytes []byte
-	if len(clientIP) == 4 || (len(clientIP) == 16 && clientIP.To4() != nil) {
+	switch {
+	case len(clientIP) == 4:
 		clientIPv4 := clientIP.To4()
 		if clientIPv4 == nil {
 			t.Error("failed to convert client IP to IPv4")
 			return
 		}
 		clientIPBytes = []byte(clientIPv4)
-	} else if len(clientIP) == 16 {
+
+	case len(clientIP) == 16:
 		clientIPBytes = []byte(clientIP)
-	} else {
+
+	default:
 		t.Errorf("unexpected client IP address length: %d", len(clientIP))
 		return
 	}
 
 	if realIsIPv6 {
-		if len(tunnelSrcIP) != 16 || tunnelSrcIP.To4() != nil {
+		if len(tunnelSrcIP) != 16 {
 			t.Errorf("tunnel source IP should be IPv6 for IPv6 real, got %s", tunnelSrcIP)
 			return
 		}
 
 		expectedSrc := make([]byte, 16)
-		clientLen := len(clientIPBytes)
-		if clientLen > 16 {
-			clientLen = 16
-		}
-		for i := 0; i < 16; i++ {
+		clientLen := min(len(clientIPBytes), 16)
+		for i := range 16 {
 			var clientByte byte
 			if i < clientLen {
 				clientByte = clientIPBytes[i]
@@ -550,7 +564,7 @@ func validateSourceAddressCalculation(
 		}
 
 		expectedSrc := make([]byte, 4)
-		for i := 0; i < 4; i++ {
+		for i := range 4 {
 			var clientByte byte
 			if i < len(clientIPBytes) {
 				clientByte = clientIPBytes[i]

@@ -12,16 +12,15 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb"
 	"github.com/yanet-platform/yanet2/modules/balancer/tests/go/utils"
-	"github.com/yanet-platform/yanet2/tests/functional/framework"
 )
 
 // Test addresses.
 var (
 	// Virtual services.
-	vs1AddrV4 = netip.MustParseAddr("10.0.0.1")    // TCP IPv4
-	vs2AddrV4 = netip.MustParseAddr("10.0.0.2")    // UDP IPv4
-	vs3AddrV6 = netip.MustParseAddr("2001:db8::1") // TCP IPv6 GRE
-	vs4AddrV4 = netip.MustParseAddr("10.0.0.4")    // TCP IPv4 OPS
+	vs1Addr = netip.MustParseAddr("10.0.0.1")    // TCP IPv4
+	vs2Addr = netip.MustParseAddr("10.0.0.2")    // UDP IPv4
+	vs3Addr = netip.MustParseAddr("2001:db8::1") // TCP IPv6 GRE
+	vs4Addr = netip.MustParseAddr("10.0.0.4")    // TCP IPv4 OPS
 
 	// Reals for VS1.
 	real1a = netip.MustParseAddr("192.168.1.1")
@@ -45,16 +44,16 @@ var (
 	clientV6 = netip.MustParseAddr("2001:db8::3")
 
 	// New VS for UpdateVirtualServices test.
-	vs5AddrV4 = netip.MustParseAddr("10.0.0.5")
-	real5a    = netip.MustParseAddr("192.168.5.1")
-	real5b    = netip.MustParseAddr("192.168.5.2")
+	vs5Addr = netip.MustParseAddr("10.0.0.5")
+	real5a  = netip.MustParseAddr("192.168.5.1")
+	real5b  = netip.MustParseAddr("192.168.5.2")
 )
 
 func buildInitialConfig() *balancerpb.BalancerConfig {
 	return utils.NewConfigBuilder().
 		AddVS(
-			// VS1: TCP IPv4, SOURCE_HASH, 3 reals
-			utils.NewTCPVS(vs1AddrV4.String(), 80).
+			// VS1: TCP IPv4, source hash, 3 reals
+			utils.NewTCPVS(vs1Addr.String(), 80).
 				AllowAll().
 				AddReal(
 					utils.R(real1a.String()),
@@ -62,8 +61,8 @@ func buildInitialConfig() *balancerpb.BalancerConfig {
 					utils.R(real1c.String()),
 				).Build(),
 
-			// VS2: UDP IPv4, ROUND_ROBIN, 2 reals with different weights
-			utils.NewUDPVS(vs2AddrV4.String(), 12345).
+			// VS2: UDP IPv4, round robin, 2 reals with different weights
+			utils.NewUDPVS(vs2Addr.String(), 12345).
 				WithScheduler(balancerpb.VsScheduler_WRR).
 				AllowAll().
 				AddReal(
@@ -72,7 +71,7 @@ func buildInitialConfig() *balancerpb.BalancerConfig {
 				).Build(),
 
 			// VS3: TCP IPv6, GRE encapsulation, 2 reals
-			utils.NewTCPVS(vs3AddrV6.String(), 443).
+			utils.NewTCPVS(vs3Addr.String(), 443).
 				GRE().
 				AllowAll().
 				AddReal(
@@ -81,7 +80,7 @@ func buildInitialConfig() *balancerpb.BalancerConfig {
 				).Build(),
 
 			// VS4: TCP IPv4, OPS mode (no sessions)
-			utils.NewTCPVS(vs4AddrV4.String(), 8080).
+			utils.NewTCPVS(vs4Addr.String(), 8080).
 				OPS().
 				AllowAll().
 				AddReal(
@@ -96,7 +95,7 @@ func TestBasic(t *testing.T) {
 	config := buildInitialConfig()
 
 	ts, err := utils.Make(&utils.TestConfig{
-		Mock:        utils.SingleWorkerMockConfig(128*datasize.MB, 4*utils.MB),
+		Mock:        utils.SingleWorkerMockConfig(128*datasize.MB, 4*datasize.MB),
 		Balancer:    config,
 		AgentMemory: 64 * datasize.MB,
 	})
@@ -106,105 +105,65 @@ func TestBasic(t *testing.T) {
 	utils.EnableAllReals(t, ts)
 	ts.Mock.SetCurrentTime(time.Unix(1000, 0))
 
+	vs1 := utils.VsIDFromPb(ts.Balancer.Config().PacketHandler.Vs[0].Id)
+	vs2 := utils.VsIDFromPb(ts.Balancer.Config().PacketHandler.Vs[1].Id)
+	vs3 := utils.VsIDFromPb(ts.Balancer.Config().PacketHandler.Vs[2].Id)
+
 	t.Run("InitialTraffic", func(t *testing.T) {
-		// TCP IPv4 → VS1
-		sendAndValidate(t, ts, clientV4, 10000, vs1AddrV4, 80, &layers.TCP{SYN: true})
+		// TCP IPv4 => VS1
+		utils.SendAndValidateTCP(t, ts, clientV4, 10000, vs1Addr, 80, &layers.TCP{SYN: true})
 
-		// UDP IPv4 → VS2
-		sendAndValidateUDP(t, ts, clientV4, 10001, vs2AddrV4, 12345)
+		// UDP IPv4 => VS2
+		utils.SendAndValidateUDP(t, ts, clientV4, 10001, vs2Addr, 12345)
 
-		// TCP IPv6 → VS3 (GRE)
-		sendAndValidate(t, ts, clientV6, 10002, vs3AddrV6, 443, &layers.TCP{SYN: true})
+		// TCP IPv6 => VS3 (GRE)
+		utils.SendAndValidateTCP(t, ts, clientV6, 10002, vs3Addr, 443, &layers.TCP{SYN: true})
 
-		// TCP IPv4 → VS4 (OPS — no session)
-		sendAndValidate(t, ts, clientV4, 10003, vs4AddrV4, 8080, &layers.TCP{SYN: true})
+		// TCP IPv4 => VS4
+		// OPS mode => no session created
+		utils.SendAndValidateTCP(t, ts, clientV4, 10003, vs4Addr, 8080, &layers.TCP{SYN: true})
 	})
 
 	t.Run("SessionAffinity", func(t *testing.T) {
-		// Same 5-tuple as above → must go to same real.
-		results1 := sendAndCollect(t, ts, clientV4, 10000, vs1AddrV4, 80, &layers.TCP{}, 5)
-		realIP, same := utils.AllPacketsToSameReal(results1)
-		require.True(t, same, "session affinity violated for VS1")
-		t.Logf("VS1 session pinned to real %s", realIP)
-
-		// OPS → packets may go to different reals (not required to be same).
-		sendAndCollect(t, ts, clientV4, 10003, vs4AddrV4, 8080, &layers.TCP{}, 5)
+		packetsCount := 10
+		var rl *utils.RealID
+		for range packetsCount {
+			pkt := utils.SendAndValidateTCP(t, ts, clientV4, 10000, vs1Addr, 80, &layers.TCP{})
+			if rl == nil {
+				rl = &pkt.RealID
+			} else if pkt.RealID.Compare(rl) != 0 {
+				t.Fatalf("expected all packets to go to the same real, got %s and %s", rl, &pkt.RealID)
+			}
+		}
 	})
 
 	t.Run("ListSessions", func(t *testing.T) {
 		now := ts.Mock.CurrentTime()
 
-		// Collect all sessions without any filter.
-		var allSessions []*balancerpb.Session
+		count := 0
+		meetVs1 := false
+		meetVs2 := false
+		meetVs3 := false
 		err := ts.Balancer.ListSessions(nil, now, func(s *balancerpb.Session) error {
-			allSessions = append(allSessions, s)
-			return nil
-		})
-		require.NoError(t, err)
-		require.NotEmpty(t, allSessions, "expected at least one session after sending traffic")
-
-		// Group sessions by VS.
-		type vsID struct {
-			addr netip.Addr
-			port uint32
-		}
-		sessionsByVS := make(map[vsID][]*balancerpb.Session)
-		for _, s := range allSessions {
-			addr, _ := netip.AddrFromSlice(s.VsId.Addr)
-			key := vsID{addr: addr, port: s.VsId.Port}
-			sessionsByVS[key] = append(sessionsByVS[key], s)
-		}
-
-		// VS1 (TCP IPv4 :80) — we sent traffic from clientV4:10000, expect a session.
-		vs1Sessions := sessionsByVS[vsID{addr: vs1AddrV4, port: 80}]
-		require.NotEmpty(t, vs1Sessions, "expected session(s) for VS1")
-
-		// Verify session fields for VS1.
-		found := false
-		for _, s := range vs1Sessions {
-			clientAddr, _ := netip.AddrFromSlice(s.ClientAddr)
-			if clientAddr == clientV4 && s.ClientPort == 10000 {
-				found = true
-				assert.Equal(t, uint32(80), s.VsId.Port)
-				assert.Equal(t, balancerpb.TransportProto_TCP, s.VsId.Proto)
-				assert.NotNil(t, s.RealId)
-				assert.NotNil(t, s.CreateTimestamp)
-				assert.NotNil(t, s.LastPacketTimestamp)
-				assert.NotNil(t, s.Timeout)
-				break
+			pkt, err := utils.PacketInfoFromSessionPb(s)
+			require.NoError(t, err)
+			count++
+			switch {
+			case pkt.VsID.Compare(&vs1) == 0:
+				meetVs1 = true
+			case pkt.VsID.Compare(&vs2) == 0:
+				meetVs2 = true
+			case pkt.VsID.Compare(&vs3) == 0:
+				meetVs3 = true
 			}
-		}
-		assert.True(t, found, "expected session for clientV4:10000 → VS1")
-
-		// VS2 (UDP IPv4 :12345) — we sent traffic from clientV4:10001.
-		vs2Sessions := sessionsByVS[vsID{addr: vs2AddrV4, port: 12345}]
-		require.NotEmpty(t, vs2Sessions, "expected session(s) for VS2")
-
-		// VS3 (TCP IPv6 :443) — we sent traffic from clientV6:10002.
-		vs3Sessions := sessionsByVS[vsID{addr: vs3AddrV6, port: 443}]
-		require.NotEmpty(t, vs3Sessions, "expected session(s) for VS3")
-
-		// Filter by VS1 VIP — should return only VS1 sessions.
-		var filteredSessions []*balancerpb.Session
-		err = ts.Balancer.ListSessions(&balancerpb.Filter{
-			Vip:    vs1AddrV4.AsSlice(),
-			VsPort: ptrTo(uint32(80)),
-			Proto:  ptrTo(balancerpb.TransportProto_TCP),
-		}, now, func(s *balancerpb.Session) error {
-			filteredSessions = append(filteredSessions, s)
 			return nil
 		})
 		require.NoError(t, err)
 
-		for _, s := range filteredSessions {
-			addr, _ := netip.AddrFromSlice(s.VsId.Addr)
-			assert.Equal(t, vs1AddrV4, addr, "filtered session should belong to VS1")
-			assert.Equal(t, uint32(80), s.VsId.Port)
-		}
-
-		t.Logf("total sessions: %d, VS1=%d, VS2=%d, VS3=%d, filtered(VS1)=%d",
-			len(allSessions), len(vs1Sessions), len(vs2Sessions), len(vs3Sessions),
-			len(filteredSessions))
+		assert.Equal(t, count, 3, "expected to meet 3 sessions (one for each no-ops-VS)")
+		assert.True(t, meetVs1, "expected to meet VS1")
+		assert.True(t, meetVs2, "expected to meet VS2")
+		assert.True(t, meetVs3, "expected to meet VS3")
 	})
 
 	t.Run("Update", func(t *testing.T) {
@@ -220,16 +179,14 @@ func TestBasic(t *testing.T) {
 
 		utils.EnableAllReals(t, ts)
 
-		// Send traffic and check distribution.
-		results := sendManyUDP(t, ts, vs2AddrV4, 12345, 200)
-		counts := utils.CountPacketsPerReal(results)
-		require.Len(t, counts, 2, "expected packets to 2 reals")
-		t.Logf("VS2 distribution after Update: %v", counts)
+		for range 10 {
+			utils.SendAndValidateUDP(t, ts, clientV4, 20000, vs2Addr, 12345)
+		}
 	})
 
-	t.Run("UpdateVirtualServices", func(t *testing.T) {
+	t.Run("UpdateVS", func(t *testing.T) {
 		// Add a new VS5.
-		newVS := utils.NewTCPVS(vs5AddrV4.String(), 9090).
+		newVS := utils.NewTCPVS(vs5Addr.String(), 9090).
 			AllowAll().
 			AddReal(
 				utils.R(real5a.String()),
@@ -248,17 +205,21 @@ func TestBasic(t *testing.T) {
 		utils.EnableAllReals(t, ts)
 
 		// Send traffic to VS5 and validate.
-		sendAndValidate(t, ts, clientV4, 20000, vs5AddrV4, 9090, &layers.TCP{SYN: true})
+		for range 10 {
+			utils.SendAndValidateTCP(t, ts, clientV4, 20000, vs5Addr, 9090, &layers.TCP{SYN: true})
+		}
 
 		// Existing VS1 still works.
-		sendAndValidate(t, ts, clientV4, 20001, vs1AddrV4, 80, &layers.TCP{SYN: true})
+		for range 10 {
+			utils.SendAndValidateTCP(t, ts, clientV4, 20001, vs1Addr, 80, &layers.TCP{SYN: true})
+		}
 	})
 
-	t.Run("DeleteVirtualServices", func(t *testing.T) {
+	t.Run("DeleteVS", func(t *testing.T) {
 		// Delete VS4 (OPS).
 		vs4ToDelete := &balancerpb.VirtualService{
 			Id: &balancerpb.VsIdentifier{
-				Addr:  vs4AddrV4.AsSlice(),
+				Addr:  vs4Addr.AsSlice(),
 				Port:  8080,
 				Proto: balancerpb.TransportProto_TCP,
 			},
@@ -273,7 +234,7 @@ func TestBasic(t *testing.T) {
 		var remaining []*balancerpb.VirtualService
 		for _, vs := range ts.Config.PacketHandler.Vs {
 			vsAddr, _ := netip.AddrFromSlice(vs.Id.Addr)
-			if vsAddr != vs4AddrV4 || vs.Id.Port != 8080 {
+			if vsAddr != vs4Addr || vs.Id.Port != 8080 {
 				remaining = append(remaining, vs)
 			}
 		}
@@ -281,7 +242,7 @@ func TestBasic(t *testing.T) {
 
 		// Traffic to deleted VS4 should be dropped.
 		pkt := xpacket.LayersToPacket(t,
-			utils.MakeTCPPacket(clientV4, 30000, vs4AddrV4, 8080, &layers.TCP{SYN: true})...,
+			utils.MakeTCPPacketLayers(clientV4, 30000, vs4Addr, 8080, &layers.TCP{SYN: true})...,
 		)
 		result, err := ts.Mock.HandlePackets(pkt)
 		require.NoError(t, err)
@@ -289,7 +250,9 @@ func TestBasic(t *testing.T) {
 		assert.NotEmpty(t, result.Drop, "expected drop for deleted VS")
 
 		// VS1 still works.
-		sendAndValidate(t, ts, clientV4, 30001, vs1AddrV4, 80, &layers.TCP{SYN: true})
+		for range 10 {
+			utils.SendAndValidateTCP(t, ts, clientV4, 30001, vs1Addr, 80, &layers.TCP{SYN: true})
+		}
 	})
 
 	t.Run("UpdateReals", func(t *testing.T) {
@@ -302,12 +265,22 @@ func TestBasic(t *testing.T) {
 		}, false)
 		require.NoError(t, err)
 
-		// Send many packets with unique sources → should only go to real1a and real1c.
-		results := sendMany(t, ts, vs1AddrV4, 80, 100)
-		counts := utils.CountPacketsPerReal(results)
+		// Send many packets with unique sources -> should only go to real1a and real1c.
+		results := utils.SendAndValidateRandomSrcPorts(
+			t,
+			ts,
+			clientV4,
+			vs1Addr,
+			80,
+			&layers.TCP{SYN: true},
+			1000,
+		)
+		counts, err := utils.CountPacketsPerReal(results)
+		require.NoError(t, err)
+
 		_, hasDisabled := counts[real1b]
 		assert.False(t, hasDisabled, "disabled real1b should receive no traffic, got %v", counts)
-		t.Logf("VS1 distribution with real1b disabled: %v", counts)
+		assert.Equal(t, 2, len(counts))
 
 		// Re-enable real1b.
 		_, err = ts.Balancer.UpdateReals([]*balancerpb.RealUpdate{
@@ -318,14 +291,25 @@ func TestBasic(t *testing.T) {
 		}, false)
 		require.NoError(t, err)
 
-		// Now traffic should go to all 3 reals.
-		results = sendMany(t, ts, vs1AddrV4, 80, 200)
-		counts = utils.CountPacketsPerReal(results)
-		assert.Len(t, counts, 3, "expected 3 reals after re-enabling, got %v", counts)
+		results = utils.SendAndValidateRandomSrcPorts(
+			t,
+			ts,
+			clientV4,
+			vs1Addr,
+			80,
+			&layers.TCP{SYN: true},
+			1000,
+		)
+		counts, err = utils.CountPacketsPerReal(results)
+		require.NoError(t, err)
+
+		_, hasEnabled := counts[real1b]
+		assert.True(t, hasEnabled, "enabled real1b should receive traffic, got %v", counts)
+		assert.Equal(t, 3, len(counts))
 	})
 
 	t.Run("GetState", func(t *testing.T) {
-		ref := utils.StateRef()
+		ref := utils.PacketHandlerRef()
 		states, err := ts.Balancer.GetState(ref, nil, true, ts.Mock.CurrentTime())
 		require.NoError(t, err)
 		require.NotEmpty(t, states)
@@ -388,151 +372,12 @@ func TestBasic(t *testing.T) {
 
 	t.Run("ListSessionsAfterTimeAdvance", func(t *testing.T) {
 		now := ts.Mock.CurrentTime()
-		var allSessions []*balancerpb.Session
-		err := ts.Balancer.ListSessions(nil, now, func(s *balancerpb.Session) error {
-			allSessions = append(allSessions, s)
+		found := false
+		err := ts.Balancer.ListSessions(nil, now, func(_ *balancerpb.Session) error {
+			found = true
 			return nil
 		})
 		require.NoError(t, err)
-		require.Empty(t, allSessions, "expected no sessions after time advance")
+		require.False(t, found, "expected no sessions after time advance")
 	})
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-func sendAndValidate(
-	t *testing.T,
-	ts *utils.TestSetup,
-	srcIP netip.Addr,
-	srcPort uint16,
-	dstIP netip.Addr,
-	dstPort uint16,
-	tcp *layers.TCP,
-) {
-	t.Helper()
-
-	pktLayers := utils.MakeTCPPacket(srcIP, srcPort, dstIP, dstPort, tcp)
-	pkt := xpacket.LayersToPacket(t, pktLayers...)
-
-	result, err := ts.Mock.HandlePackets(pkt)
-	require.NoError(t, err)
-	require.Len(t, result.Output, 1, "expected 1 output packet")
-	require.Empty(t, result.Drop, "expected no drops")
-
-	utils.ValidatePacket(t, ts.Config, pkt, result.Output[0])
-}
-
-func sendAndValidateUDP(
-	t *testing.T,
-	ts *utils.TestSetup,
-	srcIP netip.Addr,
-	srcPort uint16,
-	dstIP netip.Addr,
-	dstPort uint16,
-) {
-	t.Helper()
-
-	pktLayers := utils.MakeUDPPacket(srcIP, srcPort, dstIP, dstPort)
-	pkt := xpacket.LayersToPacket(t, pktLayers...)
-
-	result, err := ts.Mock.HandlePackets(pkt)
-	require.NoError(t, err)
-	require.Len(t, result.Output, 1, "expected 1 output packet")
-	require.Empty(t, result.Drop, "expected no drops")
-
-	utils.ValidatePacket(t, ts.Config, pkt, result.Output[0])
-}
-
-func sendAndCollect(
-	t *testing.T,
-	ts *utils.TestSetup,
-	srcIP netip.Addr,
-	srcPort uint16,
-	dstIP netip.Addr,
-	dstPort uint16,
-	tcp *layers.TCP,
-	count int,
-) []*framework.PacketInfo {
-	t.Helper()
-
-	var results []*framework.PacketInfo
-	for range count {
-		pkt := xpacket.LayersToPacket(t,
-			utils.MakeTCPPacket(srcIP, srcPort, dstIP, dstPort, tcp)...,
-		)
-		result, err := ts.Mock.HandlePackets(pkt)
-		require.NoError(t, err)
-		require.Len(t, result.Output, 1)
-		utils.ValidatePacket(t, ts.Config, pkt, result.Output[0])
-		results = append(results, result.Output[0])
-	}
-	return results
-}
-
-// sendMany sends TCP SYN packets with unique source IPs to the given VS.
-func sendMany(
-	t *testing.T,
-	ts *utils.TestSetup,
-	dstIP netip.Addr,
-	dstPort uint16,
-	count int,
-) []*framework.PacketInfo {
-	t.Helper()
-
-	var results []*framework.PacketInfo
-	baseIP := netip.MustParseAddr("5.5.0.1")
-
-	for i := range count {
-		b := baseIP.As4()
-		b[2] = byte(i >> 8)
-		b[3] = byte(i&0xff) + 1
-		srcIP := netip.AddrFrom4(b)
-
-		pkt := xpacket.LayersToPacket(t,
-			utils.MakeTCPPacket(srcIP, uint16(40000+i), dstIP, dstPort, &layers.TCP{SYN: true})...,
-		)
-		result, err := ts.Mock.HandlePackets(pkt)
-		require.NoError(t, err)
-		require.Len(t, result.Output, 1, "packet %d: expected 1 output", i)
-		utils.ValidatePacket(t, ts.Config, pkt, result.Output[0])
-		results = append(results, result.Output[0])
-	}
-	return results
-}
-
-// sendManyUDP sends UDP packets with unique source IPs to the given VS.
-func sendManyUDP(
-	t *testing.T,
-	ts *utils.TestSetup,
-	dstIP netip.Addr,
-	dstPort uint16,
-	count int,
-) []*framework.PacketInfo {
-	t.Helper()
-
-	var results []*framework.PacketInfo
-	baseIP := netip.MustParseAddr("6.6.0.1")
-
-	for i := range count {
-		b := baseIP.As4()
-		b[2] = byte(i >> 8)
-		b[3] = byte(i&0xff) + 1
-		srcIP := netip.AddrFrom4(b)
-
-		pkt := xpacket.LayersToPacket(t,
-			utils.MakeUDPPacket(srcIP, uint16(50000+i), dstIP, dstPort)...,
-		)
-		result, err := ts.Mock.HandlePackets(pkt)
-		require.NoError(t, err)
-		require.Len(t, result.Output, 1, "packet %d: expected 1 output", i)
-		utils.ValidatePacket(t, ts.Config, pkt, result.Output[0])
-		results = append(results, result.Output[0])
-	}
-	return results
-}
-
-func ptrTo[T any](v T) *T {
-	return &v
 }

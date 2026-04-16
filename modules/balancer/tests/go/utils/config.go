@@ -4,6 +4,7 @@ import (
 	"math/rand"
 	"net/netip"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/yanet-platform/yanet2/common/filterpb"
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb"
 	"google.golang.org/protobuf/types/known/durationpb"
@@ -455,15 +456,10 @@ func QuickConfig(vs ...*balancerpb.VirtualService) *balancerpb.BalancerConfig {
 // QuickTestSetup is a shorthand for creating a single-worker test setup with sensible memory defaults.
 func QuickTestSetup(config *balancerpb.BalancerConfig) *TestConfig {
 	return &TestConfig{
-		Mock:     SingleWorkerMockConfig(64*MB, 4*MB),
+		Mock:     SingleWorkerMockConfig(64*datasize.MB, 4*datasize.MB),
 		Balancer: config,
 	}
 }
-
-// Memory size constants for convenience.
-const (
-	MB = 1 << 20
-)
 
 // ---------------------------------------------------------------------------
 // Address helpers

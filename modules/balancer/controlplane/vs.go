@@ -63,7 +63,7 @@ func (vs *VS) free(agent *Agent) {
 	ruleCounterIDs := relptr.Slice(&vs.Rule_counter_ids, vs.Allowed_sources_count)
 	yanet.FreeSlice(yanetAgent, ruleCounterIDs)
 
-	// Allowed sources.
+	// Allowed sources.t
 	allowedSources := relptr.Slice(&vs.Allowed_sources, vs.Allowed_sources_count)
 	freeAllowedSources(agent, allowedSources)
 	yanet.FreeSlice(yanetAgent, allowedSources)

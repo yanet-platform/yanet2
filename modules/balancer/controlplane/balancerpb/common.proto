@@ -713,11 +713,8 @@ message Session {
   VsIdentifier vs_id = 3;
 
   // Real server this session is assigned to.
-  //
-  // Identifies which real server is handling this session.
-  // Once assigned, all packets for this session are forwarded
-  // to this real (unless the real becomes unavailable).
-  RealIdentifier real_id = 4;
+  // Relative to the virtual service.
+  RelativeRealIdentifier real_id = 4;
 
   // Session creation timestamp.
   //
