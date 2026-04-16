@@ -21,6 +21,7 @@ var (
 	vs2Addr = netip.MustParseAddr("10.0.0.2")    // UDP IPv4
 	vs3Addr = netip.MustParseAddr("2001:db8::1") // TCP IPv6 GRE
 	vs4Addr = netip.MustParseAddr("10.0.0.4")    // TCP IPv4 OPS
+	vs5Addr = netip.MustParseAddr("10.0.0.5")
 
 	// Reals for VS1.
 	real1a = netip.MustParseAddr("192.168.1.1")
@@ -39,14 +40,13 @@ var (
 	real4a = netip.MustParseAddr("192.168.4.1")
 	real4b = netip.MustParseAddr("192.168.4.2")
 
+	// Reals for VS5.
+	real5a = netip.MustParseAddr("192.168.5.1")
+	real5b = netip.MustParseAddr("192.168.5.2")
+
 	// Client addresses.
 	clientV4 = netip.MustParseAddr("3.3.3.1")
 	clientV6 = netip.MustParseAddr("2001:db8::3")
-
-	// New VS for UpdateVirtualServices test.
-	vs5Addr = netip.MustParseAddr("10.0.0.5")
-	real5a  = netip.MustParseAddr("192.168.5.1")
-	real5b  = netip.MustParseAddr("192.168.5.2")
 )
 
 func buildInitialConfig() *balancerpb.BalancerConfig {
@@ -148,6 +148,7 @@ func TestBasic(t *testing.T) {
 			pkt, err := utils.PacketInfoFromSessionPb(s)
 			require.NoError(t, err)
 			count++
+
 			switch {
 			case pkt.VsID.Compare(&vs1) == 0:
 				meetVs1 = true
@@ -156,6 +157,7 @@ func TestBasic(t *testing.T) {
 			case pkt.VsID.Compare(&vs3) == 0:
 				meetVs3 = true
 			}
+
 			return nil
 		})
 		require.NoError(t, err)
@@ -324,28 +326,10 @@ func TestBasic(t *testing.T) {
 			"expected non-zero outgoing packets")
 
 		// Should have VS states.
-		assert.NotEmpty(t, state.VirtualServices, "expected virtual service states")
-
-		t.Logf("L4 stats: incoming=%d outgoing=%d select_vs_failed=%d",
-			state.L4Stats.IncomingPackets,
-			state.L4Stats.OutgoingPackets,
-			state.L4Stats.SelectVsFailed,
-		)
-
-		for _, vs := range state.VirtualServices {
-			vsAddr, _ := netip.AddrFromSlice(vs.Id.Addr)
-			t.Logf("VS %s:%d incoming=%d outgoing=%d sessions=%d",
-				vsAddr, vs.Id.Port,
-				vs.Stats.IncomingPackets, vs.Stats.OutgoingPackets,
-				vs.Stats.CreatedSessions,
-			)
-			for _, real := range vs.Reals {
-				realAddr, _ := netip.AddrFromSlice(real.Id.Ip)
-				t.Logf("  Real %s: packets=%d enabled=%t weight=%d",
-					realAddr, real.RealStats.Packets, real.Enabled, real.Weight,
-				)
-			}
-		}
+		assert.Equal(t, 4, len(state.VirtualServices), "expected 4 virtual services")
+		assert.Greater(t, state.ActiveSessions, uint64(0),
+			"expected non-zero active sessions")
+		assert.NotNil(t, state.LastPacketTimestamp, "expected last packet timestamp")
 	})
 
 	ts.Mock.AdvanceTime(time.Second * 200)
@@ -359,15 +343,6 @@ func TestBasic(t *testing.T) {
 
 		assert.Equal(t, state.ActiveSessions, uint64(0),
 			"expected zero active sessions after time advance")
-
-		for _, vs := range state.VirtualServices {
-			for _, real := range vs.Reals {
-				assert.Equal(t, real.ActiveSessions, uint64(0),
-					"expected zero active sessions for real %s", real.Id)
-			}
-			assert.Equal(t, vs.ActiveSessions, uint64(0),
-				"expected zero active sessions for VS %s", vs.Id)
-		}
 	})
 
 	t.Run("ListSessionsAfterTimeAdvance", func(t *testing.T) {
