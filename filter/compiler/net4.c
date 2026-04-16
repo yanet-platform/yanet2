@@ -34,7 +34,8 @@ net4_collect_values(
 	struct net4 *start,
 	uint32_t count,
 	struct range_index *range_index,
-	struct value_table *table
+	struct value_table *table,
+	struct remap_table *remap_table
 ) {
 	uint32_t *values = ADDR_OF(&range_index->values);
 
@@ -54,7 +55,9 @@ net4_collect_values(
 			);
 
 		for (uint32_t idx = start; idx < stop; ++idx) {
-			if (value_table_touch(table, 0, values[idx]) < 0) {
+			uint32_t *value =
+				value_table_get_ptr(table, 0, values[idx]);
+			if (remap_table_touch(remap_table, *value, value) < 0) {
 				return -1;
 			}
 		}
@@ -121,42 +124,44 @@ collect_net4_values(
 		}
 	}
 	if (lpm_init(lpm, memory_context)) {
-		goto error_lpm;
+		goto error_collector;
 	}
 	struct range_index range_index;
 	if (range_index_init(&range_index, memory_context)) {
-		lpm_free(lpm);
-		goto error_collector;
+		goto error_lpm;
 	}
 
 	if (range_collector_collect(&collector, 4, lpm, &range_index)) {
-		goto error_collector;
+		goto error_range_collect;
 	}
 
 	struct value_table table;
 	if (value_table_init(&table, memory_context, 1, collector.count))
-		goto error_vtab;
+		goto error_table;
+
+	struct remap_table remap_table;
+	if (remap_table_init(&remap_table, memory_context, collector.count))
+		goto error_remap;
 
 	for (const struct filter_rule *action = actions;
 	     action < actions + count;
 	     ++action) {
 
-		value_table_new_gen(&table);
+		remap_table_new_gen(&remap_table);
 
 		struct net4 *nets;
 		uint32_t net_count;
 		get_net4(action, &nets, &net_count);
 
 		if (net4_collect_values(
-			    nets, net_count, &range_index, &table
+			    nets, net_count, &range_index, &table, &remap_table
 		    )) {
-			// FIXME: error
+			goto error_net_collect;
 		}
 	}
 
-	range_index_free(&range_index);
-
-	value_table_compact(&table);
+	remap_table_compact(&remap_table);
+	value_table_compact(&table, &remap_table);
 	lpm4_remap(lpm, &table);
 	lpm4_compact(lpm);
 	for (const struct filter_rule *action = actions;
@@ -171,16 +176,28 @@ collect_net4_values(
 		net4_collect_registry(nets, net_count, lpm, registry);
 	}
 
+	remap_table_free(&remap_table);
 	value_table_free(&table);
+	range_index_free(&range_index);
 	range_collector_free(&collector, 4);
 	return 0;
 
-error_collector:
-	range_collector_free(&collector, 4);
+error_net_collect:
+	remap_table_free(&remap_table);
+
+error_remap:
+	value_table_free(&table);
+
+error_table:
+
+error_range_collect:
+	range_index_free(&range_index);
+
 error_lpm:
 	lpm_free(lpm);
 
-error_vtab:
+error_collector:
+	range_collector_free(&collector, 4);
 
 error:
 	return -1;

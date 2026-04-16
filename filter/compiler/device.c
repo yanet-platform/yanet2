@@ -33,39 +33,64 @@ FILTER_ATTR_COMPILER_INIT_FUNC(device)(
 	if (res < 0) {
 		goto error_init;
 	}
-	// FIXME: handle errors
 	SET_OFFSET_OF(data, t);
+
+	struct remap_table remap_table;
+	if (remap_table_init(&remap_table, memory_context, max_device_id + 1)) {
+		goto error_remap_table;
+	}
+
 	for (const struct filter_rule *r = rules; r < rules + rule_count; ++r) {
 		if (r->device_count == 0) {
 			continue;
 		}
-		value_table_new_gen(t);
+		remap_table_new_gen(&remap_table);
 		for (uint16_t idx = 0; idx < r->device_count; ++idx) {
-			value_table_touch(t, 0, r->devices[idx].id);
+			uint32_t *value =
+				value_table_get_ptr(t, 0, r->devices[idx].id);
+			if (remap_table_touch(&remap_table, *value, value) <
+			    0) {
+				goto error_touch;
+			}
 		}
 	}
-	value_table_compact(t);
+
+	remap_table_compact(&remap_table);
+	value_table_compact(t, &remap_table);
+	remap_table_free(&remap_table);
 
 	for (const struct filter_rule *r = rules; r < rules + rule_count; ++r) {
 		value_registry_start(registry);
 		if (r->device_count == 0) {
 			for (uint64_t id = 0; id < max_device_id + 1; ++id) {
-				value_registry_collect(
-					registry, value_table_get(t, 0, id)
-				);
+				if (value_registry_collect(
+					    registry, value_table_get(t, 0, id)
+				    )) {
+					goto error_collect;
+				}
 			}
 		} else {
 			for (uint16_t idx = 0; idx < r->device_count; ++idx) {
-				value_registry_collect(
-					registry,
-					value_table_get(
-						t, 0, r->devices[idx].id
-					)
-				);
+				if (value_registry_collect(
+					    registry,
+					    value_table_get(
+						    t, 0, r->devices[idx].id
+					    )
+				    )) {
+					goto error_collect;
+				}
 			}
 		}
 	}
 	return 0;
+
+error_touch:
+	remap_table_free(&remap_table);
+
+error_collect:
+error_remap_table:
+	value_table_free(t);
+	SET_OFFSET_OF(data, NULL);
 
 error_init:
 	memory_bfree(memory_context, t, sizeof(struct value_table));

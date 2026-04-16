@@ -20,22 +20,46 @@ mod args;
 
 #[allow(non_snake_case)]
 pub mod filterpb {
-    use serde::Serialize;
-
     tonic::include_proto!("filterpb");
 }
 
 #[allow(non_snake_case)]
 pub mod aclpb {
-    use serde::Serialize;
-
     tonic::include_proto!("aclpb");
 }
 
-/// ACL module.
+////////////////////////////////////////////////////////////////////////////////
+
+#[derive(Serialize)]
+struct SerializableShowConfigResponse {
+    name: String,
+    rules: Vec<SerializableRule>,
+}
+
+#[derive(Serialize)]
+struct SerializableRule {
+    srcs: Vec<String>,
+    dsts: Vec<String>,
+    src_port_ranges: Vec<String>,
+    dst_port_ranges: Vec<String>,
+    proto_ranges: Vec<String>,
+    vlan_ranges: Vec<String>,
+    devices: Vec<String>,
+    action: Option<SerializableAction>,
+}
+
+#[derive(Serialize)]
+struct SerializableAction {
+    counter: String,
+    keep_state: bool,
+    kind: i32,
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+/// ACL module
 #[derive(Debug, Clone, Parser)]
 #[command(version, about)]
-#[command(flatten_help = true)]
 pub struct Cmd {
     #[clap(subcommand)]
     pub mode: ModeCmd,
@@ -51,21 +75,27 @@ impl TryFrom<&String> for filterpb::IpNet {
 
     fn try_from(value: &String) -> Result<Self, Self::Error> {
         let net = IpNetwork::parse(value)?;
-
         match net {
-            IpNetwork::V4(net) => {
-                let addr = net.addr().octets().to_vec();
-                let mask = net.mask().octets().to_vec();
-
-                Ok(filterpb::IpNet { addr, mask })
-            }
-            IpNetwork::V6(net) => {
-                let addr = net.addr().octets().to_vec();
-                let mask = net.mask().octets().to_vec();
-
-                Ok(filterpb::IpNet { addr, mask })
-            }
+            IpNetwork::V4(net) => Ok(filterpb::IpNet {
+                addr: net.addr().octets().to_vec(),
+                mask: net.mask().octets().to_vec(),
+            }),
+            IpNetwork::V6(net) => Ok(filterpb::IpNet {
+                addr: net.addr().octets().to_vec(),
+                mask: net.mask().octets().to_vec(),
+            }),
         }
+    }
+}
+
+fn format_ip_net(net: &filterpb::IpNet) -> String {
+    let prefix_len: u32 = net.mask.iter().map(|b| b.count_ones()).sum();
+    if let Ok(arr) = <[u8; 4]>::try_from(net.addr.as_slice()) {
+        format!("{}/{}", std::net::Ipv4Addr::from(arr), prefix_len)
+    } else if let Ok(arr) = <[u8; 16]>::try_from(net.addr.as_slice()) {
+        format!("{}/{}", std::net::Ipv6Addr::from(arr), prefix_len)
+    } else {
+        format!("{:?}/{}", net.addr, prefix_len)
     }
 }
 
@@ -226,19 +256,17 @@ impl TryFrom<ACLConfig> for Vec<aclpb::Rule> {
     }
 }
 
-////////////////////////////////////////////////////////////////////////////////
-
 impl ACLConfig {
     pub fn from_file<P>(path: P) -> Result<Self, Box<dyn Error>>
     where
         P: AsRef<Path>,
     {
         let rd = File::open(path)?;
-        let cfg = serde_yaml::from_reader(rd)?;
-
-        Ok(cfg)
+        Ok(serde_yaml::from_reader(rd)?)
     }
 }
+
+////////////////////////////////////////////////////////////////////////////////
 
 pub struct ACLService {
     client: AclServiceClient<LayeredChannel>,
@@ -265,7 +293,45 @@ impl ACLService {
     pub async fn show_config(&mut self, cmd: ShowCmd) -> Result<(), Box<dyn Error>> {
         let request = ShowConfigRequest { name: cmd.config_name.clone() };
         let response = self.client.show_config(request).await?.into_inner();
-        println!("{}", serde_json::to_string(&response)?);
+
+        let out = SerializableShowConfigResponse {
+            name: response.name,
+            rules: response
+                .rules
+                .into_iter()
+                .map(|rule| SerializableRule {
+                    srcs: rule.srcs.iter().map(format_ip_net).collect(),
+                    dsts: rule.dsts.iter().map(format_ip_net).collect(),
+                    src_port_ranges: rule
+                        .src_port_ranges
+                        .iter()
+                        .map(|r| format!("{}-{}", r.from, r.to))
+                        .collect(),
+                    dst_port_ranges: rule
+                        .dst_port_ranges
+                        .iter()
+                        .map(|r| format!("{}-{}", r.from, r.to))
+                        .collect(),
+                    proto_ranges: rule
+                        .proto_ranges
+                        .iter()
+                        .map(|r| format!("{}-{}", r.from, r.to))
+                        .collect(),
+                    vlan_ranges: rule
+                        .vlan_ranges
+                        .iter()
+                        .map(|r| format!("{}-{}", r.from, r.to))
+                        .collect(),
+                    devices: rule.devices.iter().map(|d| d.name.clone()).collect(),
+                    action: rule.action.map(|a| SerializableAction {
+                        counter: a.counter,
+                        keep_state: a.keep_state,
+                        kind: a.kind,
+                    }),
+                })
+                .collect(),
+        };
+        println!("{}", serde_json::to_string(&out)?);
         Ok(())
     }
 
@@ -288,7 +354,6 @@ impl ACLService {
 
 async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
     let mut service = ACLService::new(&cmd.connection).await?;
-
     match cmd.mode {
         ModeCmd::List => service.list_configs().await,
         ModeCmd::Delete(cmd) => service.delete_config(cmd).await,

@@ -27,6 +27,10 @@ proto_classifier_init_internal(
 	if (res < 0) {
 		return res;
 	}
+	struct remap_table remap_table;
+	if (remap_table_init(&remap_table, mem, 1 << TCP_FLAGS)) {
+		goto error_remap_table;
+	}
 	for (const struct filter_rule *r = rules; r < rules + rule_count; ++r) {
 		const struct filter_proto *proto = &r->transport.proto;
 		if (proto->proto != IPPROTO_TCP) { // not TCP
@@ -36,18 +40,29 @@ proto_classifier_init_internal(
 			// impossible
 			continue;
 		}
-		value_table_new_gen(&c->tcp_flags);
+		remap_table_new_gen(&remap_table);
 		int16_t mask = proto->disable_bits ^ ((1 << TCP_FLAGS) - 1) ^
 			       proto->enable_bits;
 		for (int16_t m = mask; m > 0; m = (m - 1) & mask) {
-			value_table_touch(
+			uint32_t *value = value_table_get_ptr(
 				&c->tcp_flags, 0, m | proto->enable_bits
 			);
+			if (remap_table_touch(&remap_table, *value, value) <
+			    0) {
+				goto error_touch;
+			}
 		}
-		value_table_touch(&c->tcp_flags, 0, proto->enable_bits);
+		uint32_t *value = value_table_get_ptr(
+			&c->tcp_flags, 0, proto->enable_bits
+		);
+		if (remap_table_touch(&remap_table, *value, value)) {
+			goto error_touch;
+		}
 	}
 
-	value_table_compact(&c->tcp_flags);
+	remap_table_compact(&remap_table);
+	value_table_compact(&c->tcp_flags, &remap_table);
+	remap_table_free(&remap_table);
 	c->max_tcp_class = 0;
 	for (uint16_t i = 0; i < (1 << TCP_FLAGS); ++i) {
 		uint32_t value = value_table_get(&c->tcp_flags, 0, i);
@@ -98,6 +113,14 @@ proto_classifier_init_internal(
 	}
 
 	return 0;
+
+error_touch:
+	remap_table_free(&remap_table);
+
+error_remap_table:
+	value_table_free(&c->tcp_flags);
+
+	return -1;
 }
 
 ////////////////////////////////////////////////////////////////////////////////

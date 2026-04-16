@@ -3091,6 +3091,7 @@ dependencies = [
  "serde_json",
  "simple_logger",
  "ssh-key",
+ "tabled",
  "thiserror",
  "tokio",
  "tonic",
@@ -3104,7 +3105,6 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "clap_complete",
- "colored",
  "log",
  "netip",
  "prost",
@@ -3113,6 +3113,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
+ "tabled",
  "tokio",
  "tonic",
  "tonic-build",

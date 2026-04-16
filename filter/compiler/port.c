@@ -24,11 +24,16 @@ collect_port_values(
 	if (value_table_init(table, memory_context, 1, 65536))
 		return -1;
 
+	struct remap_table remap_table;
+	if (remap_table_init(&remap_table, memory_context, 65536)) {
+		goto error_remap_table;
+	}
+
 	for (const struct filter_rule *action = actions;
 	     action < actions + count;
 	     ++action) {
 
-		value_table_new_gen(table);
+		remap_table_new_gen(&remap_table);
 
 		struct filter_port_range *port_ranges;
 		uint32_t port_range_count;
@@ -40,12 +45,20 @@ collect_port_values(
 				continue;
 			for (uint32_t port = ports->from; port <= ports->to;
 			     ++port) {
-				value_table_touch(table, 0, port);
+				uint32_t *value =
+					value_table_get_ptr(table, 0, port);
+				if (remap_table_touch(
+					    &remap_table, *value, value
+				    ) < 0) {
+					goto error_touch;
+				}
 			}
 		}
 	}
 
-	value_table_compact(table);
+	remap_table_compact(&remap_table);
+	value_table_compact(table, &remap_table);
+	remap_table_free(&remap_table);
 
 	for (const struct filter_rule *action = actions;
 	     action < actions + count;
@@ -60,25 +73,37 @@ collect_port_values(
 		     ++ports) {
 			for (uint32_t port = ports->from; port <= ports->to;
 			     ++port) {
-				value_registry_collect(
-					registry,
-					value_table_get(table, 0, port)
-				);
+				if (value_registry_collect(
+					    registry,
+					    value_table_get(table, 0, port)
+				    )) {
+					goto error_collect;
+				}
 			}
 		}
 
 		// Handle default - the full range
 		if (!port_range_count) {
 			for (uint32_t port = 0; port <= 65535; ++port) {
-				value_registry_collect(
-					registry,
-					value_table_get(table, 0, port)
-				);
+				if (value_registry_collect(
+					    registry,
+					    value_table_get(table, 0, port)
+				    )) {
+					goto error_collect;
+				}
 			}
 		}
 	}
 
 	return 0;
+
+error_touch:
+	remap_table_free(&remap_table);
+
+error_collect:
+error_remap_table:
+	value_table_free(table);
+	return -1;
 }
 
 static void
@@ -141,14 +166,19 @@ FILTER_ATTR_COMPILER_INIT_FUNC(port_src)(
 		return -1;
 	}
 	SET_OFFSET_OF(data, table);
-	return collect_port_values(
-		memory_context,
-		actions,
-		actions_count,
-		get_port_range_src,
-		table,
-		registry
-	);
+	if (collect_port_values(
+		    memory_context,
+		    actions,
+		    actions_count,
+		    get_port_range_src,
+		    table,
+		    registry
+	    )) {
+		SET_OFFSET_OF(data, NULL);
+		return -1;
+	}
+
+	return 0;
 }
 
 void
