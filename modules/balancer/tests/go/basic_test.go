@@ -111,24 +111,29 @@ func TestBasic(t *testing.T) {
 
 	t.Run("InitialTraffic", func(t *testing.T) {
 		// TCP IPv4 => VS1
-		utils.SendAndValidateTCP(t, ts, clientV4, 10000, vs1Addr, 80, &layers.TCP{SYN: true})
+		_, err := utils.SendAndValidateTCP(ts, clientV4, 10000, vs1Addr, 80, &layers.TCP{SYN: true})
+		require.NoError(t, err, "failed to send packet to vs1: %w", err)
 
 		// UDP IPv4 => VS2
-		utils.SendAndValidateUDP(t, ts, clientV4, 10001, vs2Addr, 12345)
+		_, err = utils.SendAndValidateUDP(ts, clientV4, 10001, vs2Addr, 12345)
+		require.NoError(t, err, "failed to send packet to vs2: %w", err)
 
 		// TCP IPv6 => VS3 (GRE)
-		utils.SendAndValidateTCP(t, ts, clientV6, 10002, vs3Addr, 443, &layers.TCP{SYN: true})
+		_, err = utils.SendAndValidateTCP(ts, clientV6, 10002, vs3Addr, 443, &layers.TCP{SYN: true})
+		require.NoError(t, err, "failed to send packet to vs3: %w", err)
 
 		// TCP IPv4 => VS4
 		// OPS mode => no session created
-		utils.SendAndValidateTCP(t, ts, clientV4, 10003, vs4Addr, 8080, &layers.TCP{SYN: true})
+		_, err = utils.SendAndValidateTCP(ts, clientV4, 10003, vs4Addr, 8080, &layers.TCP{SYN: true})
+		require.NoError(t, err, "failed to send packet to vs4")
 	})
 
 	t.Run("SessionAffinity", func(t *testing.T) {
 		packetsCount := 10
 		var rl *utils.RealID
-		for range packetsCount {
-			pkt := utils.SendAndValidateTCP(t, ts, clientV4, 10000, vs1Addr, 80, &layers.TCP{})
+		for idx := range packetsCount {
+			pkt, err := utils.SendAndValidateTCP(ts, clientV4, 10000, vs1Addr, 80, &layers.TCP{})
+			require.NoError(t, err, "failed to send packet %d", idx)
 			if rl == nil {
 				rl = &pkt.RealID
 			} else if pkt.RealID.Compare(rl) != 0 {
@@ -177,12 +182,12 @@ func TestBasic(t *testing.T) {
 		now := ts.Mock.CurrentTime()
 		_, err := ts.Balancer.Update(updatedConfig, &now)
 		require.NoError(t, err)
-		ts.Config = updatedConfig
 
 		utils.EnableAllReals(t, ts)
 
 		for range 10 {
-			utils.SendAndValidateUDP(t, ts, clientV4, 20000, vs2Addr, 12345)
+			_, err := utils.SendAndValidateUDP(ts, clientV4, 20000, vs2Addr, 12345)
+			require.NoError(t, err, "failed to send packet: %w", err)
 		}
 	})
 
@@ -200,20 +205,19 @@ func TestBasic(t *testing.T) {
 		)
 		require.NoError(t, err)
 
-		// UpdateVirtualServices clones b.config, so ts.Config is now stale.
-		ts.Config = ts.Balancer.Config()
-
 		// Enable reals for the new VS.
 		utils.EnableAllReals(t, ts)
 
 		// Send traffic to VS5 and validate.
-		for range 10 {
-			utils.SendAndValidateTCP(t, ts, clientV4, 20000, vs5Addr, 9090, &layers.TCP{SYN: true})
+		for idx := range 10 {
+			_, err := utils.SendAndValidateTCP(ts, clientV4, 20000, vs5Addr, 9090, &layers.TCP{SYN: true})
+			require.NoError(t, err, "failed to send packet %d: %w", idx, err)
 		}
 
 		// Existing VS1 still works.
-		for range 10 {
-			utils.SendAndValidateTCP(t, ts, clientV4, 20001, vs1Addr, 80, &layers.TCP{SYN: true})
+		for idx := range 10 {
+			_, err := utils.SendAndValidateTCP(ts, clientV4, 20001, vs1Addr, 80, &layers.TCP{SYN: true})
+			require.NoError(t, err, "failed to send packet %d: %w", idx, err)
 		}
 	})
 
@@ -232,16 +236,6 @@ func TestBasic(t *testing.T) {
 		)
 		require.NoError(t, err)
 
-		// Remove from stored config.
-		var remaining []*balancerpb.VirtualService
-		for _, vs := range ts.Config.PacketHandler.Vs {
-			vsAddr, _ := netip.AddrFromSlice(vs.Id.Addr)
-			if vsAddr != vs4Addr || vs.Id.Port != 8080 {
-				remaining = append(remaining, vs)
-			}
-		}
-		ts.Config.PacketHandler.Vs = remaining
-
 		// Traffic to deleted VS4 should be dropped.
 		pkt := xpacket.LayersToPacket(t,
 			utils.MakeTCPPacketLayers(clientV4, 30000, vs4Addr, 8080, &layers.TCP{SYN: true})...,
@@ -252,24 +246,25 @@ func TestBasic(t *testing.T) {
 		assert.NotEmpty(t, result.Drop, "expected drop for deleted VS")
 
 		// VS1 still works.
-		for range 10 {
-			utils.SendAndValidateTCP(t, ts, clientV4, 30001, vs1Addr, 80, &layers.TCP{SYN: true})
+		for idx := range 10 {
+			_, err := utils.SendAndValidateTCP(ts, clientV4, 30001, vs1Addr, 80, &layers.TCP{SYN: true})
+			require.NoError(t, err, "failed to send packet %d: %w", idx, err)
 		}
 	})
 
 	t.Run("UpdateReals", func(t *testing.T) {
 		// Disable real1b in VS1.
+		config := ts.Balancer.Config()
 		_, err := ts.Balancer.UpdateReals([]*balancerpb.RealUpdate{
 			utils.DisableReal(
-				ts.Config.PacketHandler.Vs[0].Id,
-				ts.Config.PacketHandler.Vs[0].Reals[1].Id,
+				config.PacketHandler.Vs[0].Id,
+				config.PacketHandler.Vs[0].Reals[1].Id,
 			),
 		}, false)
 		require.NoError(t, err)
 
 		// Send many packets with unique sources -> should only go to real1a and real1c.
-		results := utils.SendAndValidateRandomSrcPorts(
-			t,
+		results, err := utils.SendAndValidateRandomSrcPorts(
 			ts,
 			clientV4,
 			vs1Addr,
@@ -277,24 +272,27 @@ func TestBasic(t *testing.T) {
 			&layers.TCP{SYN: true},
 			1000,
 		)
+		require.NoError(t, err, "failed to send packets: %w", err)
+
 		counts, err := utils.CountPacketsPerReal(results)
-		require.NoError(t, err)
+		require.NoError(t, err, "failed to count packets per real: %w")
 
 		_, hasDisabled := counts[real1b]
 		assert.False(t, hasDisabled, "disabled real1b should receive no traffic, got %v", counts)
 		assert.Equal(t, 2, len(counts))
 
+		config = ts.Balancer.Config()
+
 		// Re-enable real1b.
 		_, err = ts.Balancer.UpdateReals([]*balancerpb.RealUpdate{
 			utils.EnableReal(
-				ts.Config.PacketHandler.Vs[0].Id,
-				ts.Config.PacketHandler.Vs[0].Reals[1].Id,
+				config.PacketHandler.Vs[0].Id,
+				config.PacketHandler.Vs[0].Reals[1].Id,
 			),
 		}, false)
 		require.NoError(t, err)
 
-		results = utils.SendAndValidateRandomSrcPorts(
-			t,
+		results, err = utils.SendAndValidateRandomSrcPorts(
 			ts,
 			clientV4,
 			vs1Addr,
@@ -302,6 +300,7 @@ func TestBasic(t *testing.T) {
 			&layers.TCP{SYN: true},
 			1000,
 		)
+		require.NoError(t, err, "failed to send packets: %w", err)
 		counts, err = utils.CountPacketsPerReal(results)
 		require.NoError(t, err)
 

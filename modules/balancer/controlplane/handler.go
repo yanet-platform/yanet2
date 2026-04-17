@@ -306,6 +306,8 @@ func (ph *PacketHandler) populateVS(
 
 	reuseReport.Ipv4VsMatcherReused = prevPh != nil && oldIPv4VsMatches && noNewIPv4Vs
 	reuseReport.Ipv6VsMatcherReused = prevPh != nil && oldIPv6VsMatches && noNewIPv6Vs
+	reuseReport.Ipv4VsMatcherReused = false
+	reuseReport.Ipv6VsMatcherReused = false
 
 	ph.Vs_count = uint32(len(services))
 	relptr.SetSlice(&ph.Vs, services)

@@ -59,6 +59,10 @@ func writeNetAddr(dst *NetAddr, addr []byte) {
 // The Net union is 32 bytes: for IPv4 it uses Net4 (addr[4] + mask[4]),
 // for IPv6 it uses Net6 (addr[16] + mask[16]).
 // Src must be IPv4 or IPv6.
+//
+// The address is pre-masked (addr[i] &= mask[i]) before writing to satisfy
+// the dataplane invariant documented in real.h: the tunnel code relies on
+// addr having zero bits in every position where mask is zero.
 func writeNet(dst *Net, src *filterpb.IPNet) {
 	addr := src.Addr
 	mask := src.Mask
@@ -66,7 +70,10 @@ func writeNet(dst *Net, src *filterpb.IPNet) {
 	if len(mask) == 16 {
 		proto = ipprotoIPv6
 	}
-	copy(dst.AddrBytes(proto), addr)
+	dstAddr := dst.AddrBytes(proto)
+	for i := range len(addr) {
+		dstAddr[i] = addr[i] & mask[i]
+	}
 	copy(dst.MaskBytes(proto), mask)
 }
 

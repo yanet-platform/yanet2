@@ -30,7 +30,6 @@ type TestSetup struct {
 	Mock     *mock.YanetMock
 	Agent    *balancer.Agent
 	Balancer *balancer.Balancer
-	Config   *balancerpb.BalancerConfig
 }
 
 func SingleWorkerMockConfig(
@@ -101,7 +100,6 @@ func Make(config *TestConfig) (*TestSetup, error) {
 		Mock:     m,
 		Agent:    agent,
 		Balancer: b,
-		Config:   config.Balancer,
 	}, nil
 }
 
@@ -166,7 +164,7 @@ func (ts *TestSetup) Free() {
 func EnableAllReals(t *testing.T, ts *TestSetup) {
 	t.Helper()
 
-	config := ts.Config
+	config := ts.Balancer.Config()
 	if config.PacketHandler == nil {
 		return
 	}

@@ -6,11 +6,9 @@ import (
 	"math/rand"
 	"net"
 	"net/netip"
-	"testing"
 
 	"github.com/gopacket/gopacket"
 	"github.com/gopacket/gopacket/layers"
-	"github.com/stretchr/testify/require"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb"
 	"github.com/yanet-platform/yanet2/tests/functional/framework"
@@ -199,96 +197,123 @@ func PacketInfoFromSessionPb(s *balancerpb.Session) (PacketInfo, error) {
 }
 
 func SendAndValidateTCP(
-	t *testing.T,
 	ts *TestSetup,
 	srcIP netip.Addr,
 	srcPort uint16,
 	dstIP netip.Addr,
 	dstPort uint16,
 	tcp *layers.TCP,
-) PacketInfo {
-	t.Helper()
-
+) (PacketInfo, error) {
 	pktLayers := MakeTCPPacketLayers(srcIP, srcPort, dstIP, dstPort, tcp)
-	pkt := xpacket.LayersToPacket(t, pktLayers...)
+	pkt, err := xpacket.LayersToPacketChecked(pktLayers...)
+	if err != nil {
+		return PacketInfo{}, fmt.Errorf("failed to convert layers to packet: %w", err)
+	}
 
 	result, err := ts.Mock.HandlePackets(pkt)
-	require.NoError(t, err)
-	require.Len(t, result.Output, 1, "expected 1 output packet")
-	require.Empty(t, result.Drop, "expected no drops")
+	if err != nil {
+		return PacketInfo{}, fmt.Errorf("failed to handle packet: %w", err)
+	}
 
-	return ValidatePacket(t, ts.Config, pkt, result.Output[0])
+	if len(result.Output) != 1 {
+		return PacketInfo{}, fmt.Errorf("expected 1 output packet, got %d", len(result.Output))
+	}
+
+	if len(result.Drop) != 0 {
+		return PacketInfo{}, fmt.Errorf("expected no drops, got %d", len(result.Drop))
+	}
+
+	return ValidatePacket(ts.Balancer.Config(), pkt, result.Output[0])
 }
 
 func SendAndValidateUDP(
-	t *testing.T,
 	ts *TestSetup,
 	srcIP netip.Addr,
 	srcPort uint16,
 	dstIP netip.Addr,
 	dstPort uint16,
-) PacketInfo {
-	t.Helper()
-
+) (PacketInfo, error) {
 	pktLayers := MakeUDPPacketLayers(srcIP, srcPort, dstIP, dstPort)
-	pkt := xpacket.LayersToPacket(t, pktLayers...)
+	pkt, err := xpacket.LayersToPacketChecked(pktLayers...)
+	if err != nil {
+		return PacketInfo{}, fmt.Errorf("failed to convert layers to packet: %w", err)
+	}
 
 	result, err := ts.Mock.HandlePackets(pkt)
-	require.NoError(t, err)
-	require.Len(t, result.Output, 1, "expected 1 output packet")
-	require.Empty(t, result.Drop, "expected no drops")
+	if err != nil {
+		return PacketInfo{}, fmt.Errorf("failed to handle packet: %w", err)
+	}
 
-	return ValidatePacket(t, ts.Config, pkt, result.Output[0])
+	if len(result.Output) != 1 {
+		return PacketInfo{}, fmt.Errorf("expected 1 output packet, got %d", len(result.Output))
+	}
+
+	if len(result.Drop) != 0 {
+		return PacketInfo{}, fmt.Errorf("expected no drops, got %d", len(result.Drop))
+	}
+
+	return ValidatePacket(ts.Balancer.Config(), pkt, result.Output[0])
 }
 
 func SendAndValidate(
-	t *testing.T,
 	ts *TestSetup,
 	srcIP netip.Addr,
 	srcPort uint16,
 	dstIP netip.Addr,
 	dstPort uint16,
 	tcp *layers.TCP,
-) PacketInfo {
-	t.Helper()
+) (PacketInfo, error) {
 	if tcp == nil {
-		return SendAndValidateUDP(t, ts, srcIP, srcPort, dstIP, dstPort)
+		return SendAndValidateUDP(ts, srcIP, srcPort, dstIP, dstPort)
 	}
-	return SendAndValidateTCP(t, ts, srcIP, srcPort, dstIP, dstPort, tcp)
+	return SendAndValidateTCP(ts, srcIP, srcPort, dstIP, dstPort, tcp)
 }
 
 func SendAndValidateRandomSrcPorts(
-	t *testing.T,
 	ts *TestSetup,
 	srcIP netip.Addr,
 	dstIP netip.Addr,
 	dstPort uint16,
 	tcp *layers.TCP,
 	count int,
-) []PacketInfo {
-	t.Helper()
-
+) ([]PacketInfo, error) {
 	inputPackets := make([]gopacket.Packet, 0, count)
 
-	for range count {
-		var layers []gopacket.SerializableLayer
+	for idx := range count {
+		var pktLayers []gopacket.SerializableLayer
 		if tcp == nil {
-			layers = MakeUDPPacketLayers(srcIP, uint16(rand.Uint32()%60000+1024), dstIP, dstPort)
+			pktLayers = MakeUDPPacketLayers(srcIP, uint16(rand.Uint32()%60000+1024), dstIP, dstPort)
 		} else {
-			layers = MakeTCPPacketLayers(srcIP, uint16(rand.Uint32()%60000+1024), dstIP, dstPort, tcp)
+			pktLayers = MakeTCPPacketLayers(srcIP, uint16(rand.Uint32()%60000+1024), dstIP, dstPort, tcp)
 		}
-		inputPackets = append(inputPackets, xpacket.LayersToPacket(t, layers...))
+		pkt, err := xpacket.LayersToPacketChecked(pktLayers...)
+		if err != nil {
+			return nil, fmt.Errorf("failed to convert layers to packet at index %d: %w", idx, err)
+		}
+		inputPackets = append(inputPackets, pkt)
+	}
+
+	result, err := ts.Mock.HandlePackets(inputPackets...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to handle packets: %w", err)
+	}
+
+	if len(result.Output) != count {
+		return nil, fmt.Errorf("expected %d output packets, got %d", count, len(result.Output))
+	}
+
+	if len(result.Drop) != 0 {
+		return nil, fmt.Errorf("expected no drops, got %d", len(result.Drop))
 	}
 
 	outputPackets := make([]PacketInfo, 0, count)
-	result, err := ts.Mock.HandlePackets(inputPackets...)
-	require.NoError(t, err)
-	require.Len(t, result.Output, count, "expected %d output packets", count)
-	require.Empty(t, result.Drop, "expected no drops")
-
 	for i, output := range result.Output {
-		outputPackets = append(outputPackets, ValidatePacket(t, ts.Config, inputPackets[i], output))
+		pktInfo, err := ValidatePacket(ts.Balancer.Config(), inputPackets[i], output)
+		if err != nil {
+			return nil, fmt.Errorf("validation failed for packet %d: %w", i, err)
+		}
+		outputPackets = append(outputPackets, pktInfo)
 	}
 
-	return outputPackets
+	return outputPackets, nil
 }

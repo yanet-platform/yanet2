@@ -1,40 +1,51 @@
 package utils
 
 import (
+	"bytes"
 	"fmt"
 	"math"
 	"net"
 	"net/netip"
-	"testing"
 
 	"github.com/gopacket/gopacket"
 	"github.com/gopacket/gopacket/layers"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb"
 	"github.com/yanet-platform/yanet2/tests/functional/framework"
 )
 
 // ValidatePacket validates that a packet has been properly processed by the balancer.
 func ValidatePacket(
-	t *testing.T,
 	config *balancerpb.BalancerConfig,
 	originalGoPacket gopacket.Packet,
 	resultPacket *framework.PacketInfo,
-) PacketInfo {
-	t.Helper()
-
+) (PacketInfo, error) {
 	parser := framework.NewPacketParser()
 	originalPacket, err := parser.ParsePacket(originalGoPacket.Data())
-	require.NoError(t, err, "failed to parse original packet")
+	if err != nil {
+		return PacketInfo{}, fmt.Errorf("failed to parse packet: %w", err)
+	}
 
-	validateTunnelStructure(t, originalPacket, resultPacket, originalGoPacket)
-	validateTosPreservation(t, originalPacket, originalGoPacket, resultPacket)
+	if err := validateTunnelStructure(originalPacket, resultPacket, originalGoPacket); err != nil {
+		return PacketInfo{}, fmt.Errorf("tunnel structure validation failed: %w", err)
+	}
 
-	packetProto := validateProtocol(t, originalPacket, resultPacket)
-	vs, rl := validateServiceAndReal(t, config, originalPacket, resultPacket, packetProto)
+	if err := validateTosPreservation(originalPacket, originalGoPacket, resultPacket); err != nil {
+		return PacketInfo{}, fmt.Errorf("ToS preservation validation failed: %w", err)
+	}
 
-	validateTunnelSourceAddress(t, config, originalPacket, resultPacket)
+	packetProto, err := validateProtocol(originalPacket, resultPacket)
+	if err != nil {
+		return PacketInfo{}, fmt.Errorf("protocol validation failed: %w", err)
+	}
+
+	vs, rl, err := validateServiceAndReal(config, originalPacket, resultPacket, packetProto)
+	if err != nil {
+		return PacketInfo{}, fmt.Errorf("service/real validation failed: %w", err)
+	}
+
+	if err := validateTunnelSourceAddress(config, originalPacket, resultPacket); err != nil {
+		return PacketInfo{}, fmt.Errorf("tunnel source address validation failed: %w", err)
+	}
 
 	clientIP, _ := netip.AddrFromSlice(originalPacket.SrcIP)
 	clientPort := originalPacket.SrcPort
@@ -45,50 +56,49 @@ func ValidatePacket(
 		ClientPort: clientPort,
 		RealID:     RealIDFromPb(rl.Id),
 		Packet:     resultPacket,
-	}
+	}, nil
 }
 
 func validateTunnelStructure(
-	t *testing.T,
 	originalPacket *framework.PacketInfo,
 	resultPacket *framework.PacketInfo,
 	originalGoPacket gopacket.Packet,
-) {
-	t.Helper()
-
-	require.True(t, resultPacket.IsTunneled, "result packet is not tunneled")
+) error {
+	if !resultPacket.IsTunneled {
+		return fmt.Errorf("result packet is not tunneled")
+	}
 
 	resultInner := resultPacket.InnerPacket
-	require.NotNil(t, resultInner, "no inner packet in result")
+	if resultInner == nil {
+		return fmt.Errorf("no inner packet in result")
+	}
 
-	assert.Equal(t,
-		originalPacket.DstIP.String(),
-		resultInner.DstIP.String(),
-		"encapsulated packet dst ip mismatch",
-	)
-	assert.Equal(t,
-		originalPacket.SrcIP.String(),
-		resultInner.SrcIP.String(),
-		"encapsulated packet src ip mismatch",
-	)
-	assert.Equal(t,
-		originalGoPacket.ApplicationLayer().Payload(),
-		resultPacket.Payload,
-		"payload mismatch",
-	)
+	if !originalPacket.DstIP.Equal(resultInner.DstIP) {
+		return fmt.Errorf("encapsulated packet dst ip mismatch")
+	}
+
+	if !originalPacket.SrcIP.Equal(resultInner.SrcIP) {
+		return fmt.Errorf("encapsulated packet src ip mismatch")
+	}
+
+	if !bytes.Equal(originalGoPacket.ApplicationLayer().Payload(), resultPacket.Payload) {
+		return fmt.Errorf("payload mismatch")
+	}
+
+	return nil
 }
 
 func validateTosPreservation(
-	t *testing.T,
 	originalPacket *framework.PacketInfo,
 	originalGoPacket gopacket.Packet,
 	resultPacket *framework.PacketInfo,
-) {
-	t.Helper()
-
-	originalToS := getOriginalTos(t, originalPacket, originalGoPacket)
+) error {
+	originalToS, err := getOriginalTos(originalPacket, originalGoPacket)
+	if err != nil {
+		return fmt.Errorf("failed to get original ToS: %w", err)
+	}
 	if originalToS == nil {
-		return
+		return nil
 	}
 
 	tunneled := gopacket.NewPacket(
@@ -97,89 +107,91 @@ func validateTosPreservation(
 		gopacket.Default,
 	)
 	if tunneled.ErrorLayer() != nil {
-		t.Errorf("failed to parse tunneled packet: %v", tunneled.ErrorLayer().Error())
-		return
+		return fmt.Errorf("failed to parse tunneled packet: %v", tunneled.ErrorLayer().Error())
 	}
 
-	outerToS := getOuterTos(t, resultPacket, tunneled)
+	outerToS, err := getOuterTos(resultPacket, tunneled)
+	if err != nil {
+		return fmt.Errorf("failed to get outer ToS: %w", err)
+	}
 	if outerToS == nil {
-		return
+		return nil
 	}
 
-	innerToS := getInnerTos(t, tunneled)
+	innerToS, err := getInnerTos(tunneled)
+	if err != nil {
+		return fmt.Errorf("failed to get inner ToS: %w", err)
+	}
 	if innerToS == nil {
-		return
+		return nil
 	}
 
-	assert.Equal(t, *originalToS, *outerToS,
-		"outer packet ToS/TrafficClass mismatch with original")
-	assert.Equal(t, *originalToS, *innerToS,
-		"inner packet ToS/TrafficClass mismatch with original")
+	if *originalToS != *outerToS {
+		return fmt.Errorf(
+			"outer packet ToS/TrafficClass mismatch with original: expected %d, got %d",
+			*originalToS, *outerToS,
+		)
+	}
+	if *originalToS != *innerToS {
+		return fmt.Errorf(
+			"inner packet ToS/TrafficClass mismatch with original: expected %d, got %d",
+			*originalToS, *innerToS,
+		)
+	}
+
+	return nil
 }
 
 func getOriginalTos(
-	t *testing.T,
 	originalPacket *framework.PacketInfo,
 	originalGoPacket gopacket.Packet,
-) *uint8 {
-	t.Helper()
-
+) (*uint8, error) {
 	var tos uint8
 	if originalPacket.IsIPv4 {
 		if ipv4 := originalGoPacket.Layer(layers.LayerTypeIPv4); ipv4 != nil {
 			tos = ipv4.(*layers.IPv4).TOS
 		} else {
-			t.Error("no IPv4 layer in original packet")
-			return nil
+			return nil, fmt.Errorf("no IPv4 layer in original packet")
 		}
 	} else if originalPacket.IsIPv6 {
 		if ipv6 := originalGoPacket.Layer(layers.LayerTypeIPv6); ipv6 != nil {
 			tos = ipv6.(*layers.IPv6).TrafficClass
 		} else {
-			t.Error("no IPv6 layer in original packet")
-			return nil
+			return nil, fmt.Errorf("no IPv6 layer in original packet")
 		}
 	}
-	return &tos
+	return &tos, nil
 }
 
 func getOuterTos(
-	t *testing.T,
 	resultPacket *framework.PacketInfo,
 	tunneled gopacket.Packet,
-) *uint8 {
-	t.Helper()
-
+) (*uint8, error) {
 	var tos uint8
 
 	switch {
 	case resultPacket.IsIPv4:
 		ipv4 := tunneled.Layer(layers.LayerTypeIPv4)
 		if ipv4 == nil {
-			t.Error("no outer IPv4 layer")
-			return nil
+			return nil, fmt.Errorf("no outer IPv4 layer")
 		}
 		tos = ipv4.(*layers.IPv4).TOS
 
 	case resultPacket.IsIPv6:
 		ipv6 := tunneled.Layer(layers.LayerTypeIPv6)
 		if ipv6 == nil {
-			t.Error("no outer IPv6 layer")
-			return nil
+			return nil, fmt.Errorf("no outer IPv6 layer")
 		}
 		tos = ipv6.(*layers.IPv6).TrafficClass
 
 	default:
-		t.Error("unknown outer IP version")
-		return nil
+		return nil, fmt.Errorf("unknown outer IP version")
 	}
 
-	return &tos
+	return &tos, nil
 }
 
-func getInnerTos(t *testing.T, tunneled gopacket.Packet) *uint8 {
-	t.Helper()
-
+func getInnerTos(tunneled gopacket.Packet) (*uint8, error) {
 	var innerToS uint8
 	ipCount := 0
 	found := false
@@ -205,54 +217,53 @@ func getInnerTos(t *testing.T, tunneled gopacket.Packet) *uint8 {
 	}
 
 	if !found {
-		t.Error("failed to locate inner IP header")
-		return nil
+		return nil, fmt.Errorf("failed to locate inner IP header")
 	}
-	return &innerToS
+	return &innerToS, nil
 }
 
 func validateProtocol(
-	t *testing.T,
 	originalPacket *framework.PacketInfo,
 	resultPacket *framework.PacketInfo,
-) balancerpb.TransportProto {
-	t.Helper()
-
+) (balancerpb.TransportProto, error) {
 	resultInner := resultPacket.InnerPacket
 	var originPacketProto layers.IPProtocol
 
 	if originalPacket.IsIPv4 {
-		assert.Equal(t, originalPacket.Protocol, resultInner.Protocol,
-			"encapsulated packet protocol mismatch")
+		if originalPacket.Protocol != resultInner.Protocol {
+			return 0, fmt.Errorf(
+				"encapsulated packet protocol mismatch: original %v, result %v",
+				originalPacket.Protocol, resultInner.Protocol,
+			)
+		}
 		originPacketProto = originalPacket.Protocol
 	} else {
-		assert.Equal(t, originalPacket.NextHeader, resultInner.NextHeader,
-			"encapsulated packet protocol mismatch")
+		if originalPacket.NextHeader != resultInner.NextHeader {
+			return 0, fmt.Errorf(
+				"encapsulated packet protocol mismatch: original %v, result %v",
+				originalPacket.NextHeader, resultInner.NextHeader,
+			)
+		}
 		originPacketProto = originalPacket.NextHeader
 	}
 
 	if originPacketProto.LayerType() == layers.LayerTypeTCP {
-		return balancerpb.TransportProto_TCP
+		return balancerpb.TransportProto_TCP, nil
 	}
 	if originPacketProto.LayerType() == layers.LayerTypeUDP {
-		return balancerpb.TransportProto_UDP
+		return balancerpb.TransportProto_UDP, nil
 	}
-	t.Errorf("invalid packet protocol: %s", originPacketProto.String())
-	return balancerpb.TransportProto_TCP
+	return 0, fmt.Errorf("invalid packet protocol: %s", originPacketProto.String())
 }
 
 func validateServiceAndReal(
-	t *testing.T,
 	config *balancerpb.BalancerConfig,
 	originalPacket *framework.PacketInfo,
 	resultPacket *framework.PacketInfo,
 	packetProto balancerpb.TransportProto,
-) (*balancerpb.VirtualService, *balancerpb.Real) {
-	t.Helper()
-
+) (*balancerpb.VirtualService, *balancerpb.Real, error) {
 	if config.PacketHandler == nil {
-		t.Error("packet handler config is nil")
-		return nil, nil
+		return nil, nil, fmt.Errorf("packet handler config is nil")
 	}
 
 	originalDstIP := netip.MustParseAddr(originalPacket.DstIP.String())
@@ -264,51 +275,51 @@ func validateServiceAndReal(
 			(service.Id.Port == uint32(originalPacket.DstPort) || service.Flags.PureL3) &&
 			service.Id.Proto == packetProto {
 
-			validateTunnelType(t, service, vsAddr, resultPacket)
-
-			if rl := findMatchingReal(t, service, resultPacket); rl != nil {
-				return service, rl
+			if err := validateTunnelType(service, vsAddr, resultPacket); err != nil {
+				return nil, nil, err
 			}
 
-			t.Error("no real found that matches packet destination")
-			t.Logf("original: %v", originalPacket)
-			t.Logf("result: %v", resultPacket)
-			return nil, nil
+			if rl := findMatchingReal(service, resultPacket); rl != nil {
+				return service, rl, nil
+			}
+
+			return nil, nil, fmt.Errorf(
+				"no real found that matches packet destination (original: %v, result: %v)",
+				originalPacket, resultPacket,
+			)
 		}
 	}
 
-	t.Error("no service found that matches packet")
-	t.Logf("original: %v", originalPacket)
-	t.Logf("result: %v", resultPacket)
-
-	return nil, nil
+	return nil, nil, fmt.Errorf(
+		"no service found that matches packet (original: %v, result: %v)",
+		originalPacket, resultPacket,
+	)
 }
 
 func validateTunnelType(
-	t *testing.T,
 	service *balancerpb.VirtualService,
 	vsAddr netip.Addr,
 	resultPacket *framework.PacketInfo,
-) {
-	t.Helper()
-
+) error {
 	if service.Flags.Gre {
 		expectedTunnelType := "gre-ip4"
 		if vsAddr.Is6() {
 			expectedTunnelType = "gre-ip6"
 		}
-		assert.Equal(t, expectedTunnelType, resultPacket.TunnelType,
-			"packet tunnel type must be gre")
+		if resultPacket.TunnelType != expectedTunnelType {
+			return fmt.Errorf(
+				"packet tunnel type must be %s, got %s",
+				expectedTunnelType, resultPacket.TunnelType,
+			)
+		}
 	}
+	return nil
 }
 
 func findMatchingReal(
-	t *testing.T,
 	service *balancerpb.VirtualService,
 	resultPacket *framework.PacketInfo,
 ) *balancerpb.Real {
-	t.Helper()
-
 	resultDstIP := netip.MustParseAddr(resultPacket.DstIP.String())
 
 	for _, real := range service.Reals {
@@ -348,13 +359,10 @@ func CountPacketsPerReal(packets []PacketInfo) (map[netip.Addr]int, error) {
 
 // ValidateWeightDistribution checks if packet distribution matches expected weights.
 func ValidateWeightDistribution(
-	t *testing.T,
 	counts map[netip.Addr]int,
 	expectedWeights map[netip.Addr]uint32,
 	tolerance float64,
-) {
-	t.Helper()
-
+) error {
 	totalPackets := 0
 	for _, count := range counts {
 		totalPackets += count
@@ -366,12 +374,10 @@ func ValidateWeightDistribution(
 	}
 
 	if totalPackets == 0 {
-		t.Error("no packets to validate")
-		return
+		return fmt.Errorf("no packets to validate")
 	}
 	if totalWeight == 0 {
-		t.Error("total weight is zero")
-		return
+		return fmt.Errorf("total weight is zero")
 	}
 
 	for realIP, expectedWeight := range expectedWeights {
@@ -381,7 +387,7 @@ func ValidateWeightDistribution(
 
 		diff := math.Abs(actualRatio - expectedRatio)
 		if diff > tolerance {
-			t.Errorf(
+			return fmt.Errorf(
 				"weight distribution mismatch for real %s: expected ratio %.3f (weight %d/%d), got %.3f (%d/%d packets), diff %.3f > tolerance %.3f",
 				realIP,
 				expectedRatio,
@@ -395,6 +401,8 @@ func ValidateWeightDistribution(
 			)
 		}
 	}
+
+	return nil
 }
 
 // AllSessionsToSameReal checks if all packets went to the same real server.
@@ -423,27 +431,22 @@ func AllSessionsToSameReal(sessions []PacketInfo) (netip.Addr, bool) {
 }
 
 func validateTunnelSourceAddress(
-	t *testing.T,
 	config *balancerpb.BalancerConfig,
 	originalPacket *framework.PacketInfo,
 	resultPacket *framework.PacketInfo,
-) {
-	t.Helper()
-
+) error {
 	if !resultPacket.IsTunneled {
-		return
+		return nil
 	}
 
 	clientIP := originalPacket.SrcIP
 	if clientIP == nil {
-		t.Error("original packet has no source IP")
-		return
+		return fmt.Errorf("original packet has no source IP")
 	}
 
 	tunnelSrcIP := resultPacket.SrcIP
 	if tunnelSrcIP == nil {
-		t.Error("result packet has no source IP")
-		return
+		return fmt.Errorf("result packet has no source IP")
 	}
 
 	originalDstIP := netip.MustParseAddr(originalPacket.DstIP.String())
@@ -465,8 +468,7 @@ func validateTunnelSourceAddress(
 	}
 
 	if config.PacketHandler == nil {
-		t.Error("packet handler config is nil")
-		return
+		return fmt.Errorf("packet handler config is nil")
 	}
 
 	for _, service := range config.PacketHandler.Vs {
@@ -479,25 +481,22 @@ func validateTunnelSourceAddress(
 			for _, real := range service.Reals {
 				realAddr, _ := netip.AddrFromSlice(real.Id.Ip)
 				if realAddr.Compare(resultDstIP) == 0 {
-					validateSourceAddressCalculation(t, clientIP, tunnelSrcIP, real)
-					return
+					return validateSourceAddressCalculation(clientIP, tunnelSrcIP, real)
 				}
 			}
 		}
 	}
+
+	return nil
 }
 
 func validateSourceAddressCalculation(
-	t *testing.T,
 	clientIP net.IP,
 	tunnelSrcIP net.IP,
 	r *balancerpb.Real,
-) {
-	t.Helper()
-
+) error {
 	if r.Src == nil {
-		t.Error("real server has no Src configured")
-		return
+		return fmt.Errorf("real server has no Src configured")
 	}
 
 	realSrc := r.Src.Addr
@@ -508,8 +507,7 @@ func validateSourceAddressCalculation(
 	realIsIPv4 := len(realIP) == 4
 
 	if !realIsIPv4 && !realIsIPv6 {
-		t.Errorf("unexpected real IP address length: %d", len(realIP))
-		return
+		return fmt.Errorf("unexpected real IP address length: %d", len(realIP))
 	}
 
 	var clientIPBytes []byte
@@ -517,8 +515,7 @@ func validateSourceAddressCalculation(
 	case len(clientIP) == 4:
 		clientIPv4 := clientIP.To4()
 		if clientIPv4 == nil {
-			t.Error("failed to convert client IP to IPv4")
-			return
+			return fmt.Errorf("failed to convert client IP to IPv4")
 		}
 		clientIPBytes = []byte(clientIPv4)
 
@@ -526,14 +523,12 @@ func validateSourceAddressCalculation(
 		clientIPBytes = []byte(clientIP)
 
 	default:
-		t.Errorf("unexpected client IP address length: %d", len(clientIP))
-		return
+		return fmt.Errorf("unexpected client IP address length: %d", len(clientIP))
 	}
 
 	if realIsIPv6 {
 		if len(tunnelSrcIP) != 16 {
-			t.Errorf("tunnel source IP should be IPv6 for IPv6 real, got %s", tunnelSrcIP)
-			return
+			return fmt.Errorf("tunnel source IP should be IPv6 for IPv6 real, got %s", tunnelSrcIP)
 		}
 
 		expectedSrc := make([]byte, 16)
@@ -547,7 +542,7 @@ func validateSourceAddressCalculation(
 		}
 
 		if !tunnelSrcIP.Equal(net.IP(expectedSrc)) {
-			t.Errorf(
+			return fmt.Errorf(
 				"tunnel source address mismatch: expected %s, got %s (client=%s, src=%s, mask=%s)",
 				net.IP(expectedSrc),
 				tunnelSrcIP,
@@ -559,8 +554,7 @@ func validateSourceAddressCalculation(
 	} else {
 		tunnelSrcIPv4 := tunnelSrcIP.To4()
 		if tunnelSrcIPv4 == nil {
-			t.Errorf("tunnel source IP should be IPv4 for IPv4 real, got %s", tunnelSrcIP)
-			return
+			return fmt.Errorf("tunnel source IP should be IPv4 for IPv4 real, got %s", tunnelSrcIP)
 		}
 
 		expectedSrc := make([]byte, 4)
@@ -573,8 +567,12 @@ func validateSourceAddressCalculation(
 		}
 
 		if !tunnelSrcIPv4.Equal(net.IP(expectedSrc)) {
-			t.Errorf("tunnel source address mismatch: expected %s, got %s (client=%s, src=%s, mask=%s)",
-				net.IP(expectedSrc), tunnelSrcIPv4, clientIP, net.IP(realSrc), net.IP(realMask))
+			return fmt.Errorf(
+				"tunnel source address mismatch: expected %s, got %s (client=%s, src=%s, mask=%s)",
+				net.IP(expectedSrc), tunnelSrcIPv4, clientIP, net.IP(realSrc), net.IP(realMask),
+			)
 		}
 	}
+
+	return nil
 }
