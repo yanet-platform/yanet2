@@ -131,8 +131,7 @@ filter_init(
 			    &filter->memory_context,
 			    &dummy,
 			    &filter->v[1].registry,
-			    &filter->v[0].table,
-			    &filter->v[0].registry
+			    &filter->v[0].table
 		    )) {
 			value_registry_free(&dummy);
 			goto init_failed;
@@ -158,8 +157,7 @@ filter_init(
 		    &filter->memory_context,
 		    &filter->v[2 * 1].registry,
 		    &filter->v[2 * 1 + 1].registry,
-		    &filter->v[1].table,
-		    &filter->v[1].registry
+		    &filter->v[1].table
 	    )) {
 		goto init_failed;
 	}

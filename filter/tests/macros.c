@@ -45,10 +45,9 @@ run_case(void) {
 
 	// query via header-only API
 	struct packet *packet_ptr = &p;
-	struct value_range *actions;
+	uint32_t actions;
 	filter_query(&f, sign_compile, &packet_ptr, &actions, 1);
-	assert(actions->count == 1);
-	assert(ADDR_OF(&actions->values)[0] == 0);
+	assert(actions == 0);
 
 	free_packet(&p);
 	filter_free(&f, sign);

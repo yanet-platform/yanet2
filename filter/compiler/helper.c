@@ -1,6 +1,6 @@
 #include "filter/compiler/helper.h"
 #include "common/registry.h"
-#include "filter/rule.h"
+#include "filter/filter.h"
 
 int
 init_dummy_registry(
@@ -31,17 +31,15 @@ init_dummy_registry(
 
 struct value_set_ctx {
 	struct value_table *table;
-	struct value_registry *registry;
-	struct remap_table remap_table;
 };
 
 static int
 value_table_set_action(uint32_t v1, uint32_t v2, uint32_t idx, void *data) {
 	struct value_set_ctx *set_ctx = (struct value_set_ctx *)data;
 	uint32_t *value = value_table_get_ptr(set_ctx->table, v1, v2);
-	if (*value)
+	if (*value != FILTER_RULE_INVALID)
 		return 0;
-	*value = idx + 1;
+	*value = idx;
 
 	return 0;
 }
@@ -51,8 +49,7 @@ merge_and_set_registry_values(
 	struct memory_context *memory_context,
 	struct value_registry *registry1,
 	struct value_registry *registry2,
-	struct value_table *table,
-	struct value_registry *registry
+	struct value_table *table
 ) {
 	if (value_table_init(
 		    table,
@@ -63,22 +60,21 @@ merge_and_set_registry_values(
 		return -1;
 	}
 
-	if (value_registry_init(registry, memory_context)) {
-		goto error_registry;
+	for (uint64_t v_idx = 0; v_idx < value_registry_capacity(registry2);
+	     ++v_idx) {
+		for (uint64_t h_idx = 0;
+		     h_idx < value_registry_capacity(registry1);
+		     ++h_idx) {
+			*value_table_get_ptr(table, h_idx, v_idx) =
+				FILTER_RULE_INVALID;
+		}
 	}
-
-	if (value_registry_start(registry))
-		goto error_merge;
 
 	struct value_set_ctx set_ctx;
 	set_ctx.table = table;
-	set_ctx.registry = registry;
 
 	for (uint32_t range_idx = 0; range_idx < registry1->range_count;
 	     ++range_idx) {
-		if (value_registry_start(registry) ||
-		    value_registry_collect(registry, range_idx))
-			goto error_join;
 		if (value_registry_join_range(
 			    registry1,
 			    registry2,
@@ -92,11 +88,6 @@ merge_and_set_registry_values(
 	return 0;
 
 error_join:
-
-error_merge:
-	value_registry_free(registry);
-
-error_registry:
 	value_table_free(table);
 
 	return -1;

@@ -32,6 +32,8 @@
 #include <stdint.h>
 #include <threads.h>
 
+#define FILTER_RULE_INVALID (uint32_t)0xffffffff
+
 /**
  * @def MAX_ATTRIBUTES
  * @brief Upper bound on attribute count in a filter signature.

@@ -20,8 +20,7 @@ merge_and_set_registry_values(
 	struct memory_context *memory_context,
 	struct value_registry *registry1,
 	struct value_registry *registry2,
-	struct value_table *table,
-	struct value_registry *registry
+	struct value_table *table
 );
 
 int

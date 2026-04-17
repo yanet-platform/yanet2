@@ -181,56 +181,15 @@ build_rule(struct filter_rule_builder *b) {
 
 static inline int
 compare_expected_ranges(
-	struct value_range **ranges,
-	struct value_range **expected,
-	size_t packets_count
+	uint32_t *ranges, uint32_t *expected, size_t packets_count
 ) {
 	for (size_t packet_idx = 0; packet_idx < packets_count; ++packet_idx) {
-		struct value_range *range = ranges[packet_idx];
-		uint32_t *range_values = ADDR_OF(&range->values);
-
-		struct value_range *expected_range = expected[packet_idx];
-		uint32_t *expected_range_values = expected_range->values;
-
-		for (size_t expected_value_idx = 0;
-		     expected_value_idx < expected_range->count;
-		     ++expected_value_idx) {
-			int found = 0;
-			for (size_t got_idx = 0; got_idx < range->count;
-			     ++got_idx) {
-				if (expected_range_values[expected_value_idx] ==
-				    range_values[got_idx]) {
-					found = 1;
-					break;
-				}
-			}
-
-			TEST_ASSERT(
-				found,
-				"packet at idx %zu: not got expected action %u",
-				packet_idx,
-				expected_range_values[expected_value_idx]
-			);
-		}
-
-		for (size_t got_idx = 0; got_idx < range->count; ++got_idx) {
-			int found = 0;
-			for (size_t expected_value_idx = 0;
-			     expected_value_idx < expected_range->count;
-			     ++expected_value_idx) {
-				if (expected_range_values[expected_value_idx] ==
-				    range_values[got_idx]) {
-					found = 1;
-					break;
-				}
-			}
-			TEST_ASSERT(
-				found,
-				"packet at idx %zu: got unexpected action %u",
-				packet_idx,
-				range_values[got_idx]
-			);
-		}
+		TEST_ASSERT(
+			ranges[packet_idx] == expected[packet_idx],
+			"packet at idx %zu: not got expected action %u",
+			packet_idx,
+			expected[packet_idx]
+		);
 	}
 
 	return TEST_SUCCESS;

@@ -381,9 +381,8 @@ run_benchmark(
 	stats->total_packets = batch_size * num_batches;
 
 	// Allocate ranges using hugepages
-	size_t ranges_size = sizeof(struct value_range *) * batch_size;
-	struct value_range **ranges =
-		(struct value_range **)allocate_hugepage_memory(ranges_size);
+	size_t ranges_size = sizeof(uint32_t) * batch_size;
+	uint32_t *ranges = (uint32_t *)allocate_hugepage_memory(ranges_size);
 	if (ranges == NULL) {
 		return -1;
 	}

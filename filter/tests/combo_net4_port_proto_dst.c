@@ -78,11 +78,9 @@ test_no_match_proto_only(void *arena) {
 	}
 
 	// Expected: no matches
-	struct value_range *expected_ranges[test_count];
+	uint32_t expected_ranges[test_count];
 	for (size_t i = 0; i < test_count; ++i) {
-		expected_ranges[i] = malloc(sizeof(struct value_range));
-		expected_ranges[i]->count = 0;
-		expected_ranges[i]->values = malloc(sizeof(uint32_t));
+		expected_ranges[i] = FILTER_RULE_INVALID;
 	}
 
 	struct block_allocator alloc;
@@ -102,22 +100,19 @@ test_no_match_proto_only(void *arena) {
 	);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
 
-	struct value_range **ranges =
-		malloc(sizeof(struct value_range *) * test_count);
+	uint32_t *actions = malloc(sizeof(uint32_t) * test_count);
 	filter_query(
-		&filter, combo_net4_port_proto_dst, packets, ranges, test_count
+		&filter, combo_net4_port_proto_dst, packets, actions, test_count
 	);
 
-	res = compare_expected_ranges(ranges, expected_ranges, test_count);
+	res = compare_expected_ranges(actions, expected_ranges, test_count);
 	TEST_ASSERT_SUCCESS(res, "some checks failed");
 
 	for (size_t i = 0; i < test_count; ++i) {
-		free(expected_ranges[i]->values);
-		free(expected_ranges[i]);
 		free_packet(packets[i]);
 		free(packets[i]);
 	}
-	free(ranges);
+	free(actions);
 
 	return TEST_SUCCESS;
 }
@@ -166,12 +161,9 @@ test_all_match(void *arena) {
 	}
 
 	// Expected: all match
-	struct value_range *expected_ranges[test_count];
+	uint32_t expected_ranges[test_count];
 	for (size_t i = 0; i < test_count; ++i) {
-		expected_ranges[i] = malloc(sizeof(struct value_range));
-		expected_ranges[i]->count = 1;
-		expected_ranges[i]->values = malloc(sizeof(uint32_t) * 2);
-		expected_ranges[i]->values[0] = 0;
+		expected_ranges[i] = 0;
 	}
 
 	struct block_allocator alloc;
@@ -191,8 +183,7 @@ test_all_match(void *arena) {
 	);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
 
-	struct value_range **ranges =
-		malloc(sizeof(struct value_range *) * test_count);
+	uint32_t *ranges = malloc(sizeof(uint32_t) * test_count);
 	filter_query(
 		&filter, combo_net4_port_proto_dst, packets, ranges, test_count
 	);
@@ -201,8 +192,6 @@ test_all_match(void *arena) {
 	TEST_ASSERT_SUCCESS(res, "some checks failed");
 
 	for (size_t i = 0; i < test_count; ++i) {
-		free(expected_ranges[i]->values);
-		free(expected_ranges[i]);
 		free_packet(packets[i]);
 		free(packets[i]);
 	}
@@ -261,9 +250,14 @@ test_multiple_rules_overlap(void *arena) {
 		// IP: 10.0.0.50, Port: 95, TCP -> matches rule2 only
 		{{10, 0, 0, 50}, 95, IPPROTO_TCP, 1, {1, 0, 0}},
 		// IP: 10.0.0.50, Port: 100, TCP -> no match
-		{{10, 0, 0, 50}, 100, IPPROTO_TCP, 0, {0, 0, 0}},
+		{{10, 0, 0, 50},
+		 100,
+		 IPPROTO_TCP,
+		 0,
+		 {FILTER_RULE_INVALID, 0, 0}},
 		// IP: 10.1.0.50, Port: 85, TCP -> no match (outside /16)
-		{{10, 1, 0, 50}, 85, IPPROTO_TCP, 0, {0, 0, 0}},
+		{{10, 1, 0, 50}, 85, IPPROTO_TCP, 0, {FILTER_RULE_INVALID, 0, 0}
+		},
 	};
 	const size_t test_count = sizeof(test_cases) / sizeof(test_cases[0]);
 
@@ -285,15 +279,9 @@ test_multiple_rules_overlap(void *arena) {
 	}
 
 	// Expected ranges
-	struct value_range *expected_ranges[test_count];
+	uint32_t expected_ranges[test_count];
 	for (size_t i = 0; i < test_count; ++i) {
-		expected_ranges[i] = malloc(sizeof(struct value_range));
-		expected_ranges[i]->count = test_cases[i].expected_count;
-		expected_ranges[i]->values = malloc(sizeof(uint32_t) * 4);
-		for (size_t j = 0; j < test_cases[i].expected_count; ++j) {
-			expected_ranges[i]->values[j] =
-				test_cases[i].expected_actions[j];
-		}
+		expected_ranges[i] = test_cases[i].expected_actions[0];
 	}
 
 	struct block_allocator alloc;
@@ -315,8 +303,7 @@ test_multiple_rules_overlap(void *arena) {
 	);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
 
-	struct value_range **ranges =
-		malloc(sizeof(struct value_range *) * test_count);
+	uint32_t *ranges = malloc(sizeof(uint32_t) * test_count);
 	filter_query(
 		&filter, combo_net4_port_proto_dst, packets, ranges, test_count
 	);
@@ -325,8 +312,6 @@ test_multiple_rules_overlap(void *arena) {
 	TEST_ASSERT_SUCCESS(res, "some checks failed");
 
 	for (size_t i = 0; i < test_count; ++i) {
-		free(expected_ranges[i]->values);
-		free(expected_ranges[i]);
 		free_packet(packets[i]);
 		free(packets[i]);
 	}
@@ -374,9 +359,19 @@ test_tcp_flags(void *arena) {
 		// SYN+ACK flags -> matches both rules
 		{{10, 0, 0, 1}, 80, IPPROTO_TCP, 0x12, 1, {0, 0}},
 		// FIN flag -> no match
-		{{10, 0, 0, 1}, 80, IPPROTO_TCP, 0x01, 0, {0, 0}},
+		{{10, 0, 0, 1},
+		 80,
+		 IPPROTO_TCP,
+		 0x01,
+		 0,
+		 {FILTER_RULE_INVALID, 0}},
 		// No flags -> no match
-		{{10, 0, 0, 1}, 80, IPPROTO_TCP, 0x00, 0, {0, 0}},
+		{{10, 0, 0, 1},
+		 80,
+		 IPPROTO_TCP,
+		 0x00,
+		 0,
+		 {FILTER_RULE_INVALID, 0}},
 	};
 	const size_t test_count = sizeof(test_cases) / sizeof(test_cases[0]);
 
@@ -398,15 +393,9 @@ test_tcp_flags(void *arena) {
 	}
 
 	// Expected ranges
-	struct value_range *expected_ranges[test_count];
+	uint32_t expected_ranges[test_count];
 	for (size_t i = 0; i < test_count; ++i) {
-		expected_ranges[i] = malloc(sizeof(struct value_range));
-		expected_ranges[i]->count = test_cases[i].expected_count;
-		expected_ranges[i]->values = malloc(sizeof(uint32_t) * 3);
-		for (size_t j = 0; j < test_cases[i].expected_count; ++j) {
-			expected_ranges[i]->values[j] =
-				test_cases[i].expected_actions[j];
-		}
+		expected_ranges[i] = test_cases[i].expected_actions[0];
 	}
 
 	struct block_allocator alloc;
@@ -426,8 +415,7 @@ test_tcp_flags(void *arena) {
 	);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
 
-	struct value_range **ranges =
-		malloc(sizeof(struct value_range *) * test_count);
+	uint32_t *ranges = malloc(sizeof(uint32_t) * test_count);
 	filter_query(
 		&filter, combo_net4_port_proto_dst, packets, ranges, test_count
 	);
@@ -436,8 +424,6 @@ test_tcp_flags(void *arena) {
 	TEST_ASSERT_SUCCESS(res, "some checks failed");
 
 	for (size_t i = 0; i < test_count; ++i) {
-		free(expected_ranges[i]->values);
-		free(expected_ranges[i]);
 		free_packet(packets[i]);
 		free(packets[i]);
 	}

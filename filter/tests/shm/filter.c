@@ -47,7 +47,7 @@ filter_packets(struct common *common) {
 		}
 
 		struct packet *packet_ptr = &packet;
-		struct value_range *actions;
+		uint32_t actions;
 		filter_query(
 			&common->filter, filter_sign, &packet_ptr, &actions, 1
 		);
@@ -57,7 +57,7 @@ filter_packets(struct common *common) {
 			    "error occurred durring classification: %d",
 			    res);
 			++errors;
-		} else if (actions->count > 0) {
+		} else if (actions != FILTER_RULE_INVALID) {
 			++found;
 		}
 	}

@@ -34,10 +34,9 @@ query_and_expect_actions(
 	struct filter *filter,
 	struct packet **packets,
 	size_t packets_count,
-	struct value_range **expected
+	uint32_t *expected
 ) {
-	struct value_range **ranges =
-		malloc(sizeof(struct value_range *) * packets_count);
+	uint32_t *ranges = malloc(sizeof(uint32_t) * packets_count);
 
 	filter_query(
 		filter, combo_net4_port_src, packets, ranges, packets_count
@@ -106,11 +105,9 @@ test_no_match_port_only(void *arena) {
 	}
 
 	// Expected: no matches
-	struct value_range *expected_ranges[test_count];
+	uint32_t expected_ranges[test_count];
 	for (size_t i = 0; i < test_count; ++i) {
-		expected_ranges[i] = malloc(sizeof(struct value_range));
-		expected_ranges[i]->count = 0;
-		expected_ranges[i]->values = malloc(sizeof(uint32_t));
+		expected_ranges[i] = FILTER_RULE_INVALID;
 	}
 
 	struct block_allocator alloc;
@@ -136,8 +133,6 @@ test_no_match_port_only(void *arena) {
 	TEST_ASSERT_SUCCESS(res, "some checks failed");
 
 	for (size_t i = 0; i < test_count; ++i) {
-		free(expected_ranges[i]->values);
-		free(expected_ranges[i]);
 		free_packet(packets[i]);
 		free(packets[i]);
 	}
@@ -188,11 +183,9 @@ test_no_match_ip_only(void *arena) {
 	}
 
 	// Expected: no matches
-	struct value_range *expected_ranges[test_count];
+	uint32_t expected_ranges[test_count];
 	for (size_t i = 0; i < test_count; ++i) {
-		expected_ranges[i] = malloc(sizeof(struct value_range));
-		expected_ranges[i]->count = 0;
-		expected_ranges[i]->values = malloc(sizeof(uint32_t));
+		expected_ranges[i] = FILTER_RULE_INVALID;
 	}
 
 	struct block_allocator alloc;
@@ -218,8 +211,6 @@ test_no_match_ip_only(void *arena) {
 	TEST_ASSERT_SUCCESS(res, "some checks failed");
 
 	for (size_t i = 0; i < test_count; ++i) {
-		free(expected_ranges[i]->values);
-		free(expected_ranges[i]);
 		free_packet(packets[i]);
 		free(packets[i]);
 	}
@@ -270,12 +261,9 @@ test_both_match(void *arena) {
 	}
 
 	// Expected: all match
-	struct value_range *expected_ranges[test_count];
+	uint32_t expected_ranges[test_count];
 	for (size_t i = 0; i < test_count; ++i) {
-		expected_ranges[i] = malloc(sizeof(struct value_range));
-		expected_ranges[i]->count = 1;
-		expected_ranges[i]->values = malloc(sizeof(uint32_t) * 2);
-		expected_ranges[i]->values[0] = 0;
+		expected_ranges[i] = 0;
 	}
 
 	struct block_allocator alloc;
@@ -301,8 +289,6 @@ test_both_match(void *arena) {
 	TEST_ASSERT_SUCCESS(res, "some checks failed");
 
 	for (size_t i = 0; i < test_count; ++i) {
-		free(expected_ranges[i]->values);
-		free(expected_ranges[i]);
 		free_packet(packets[i]);
 		free(packets[i]);
 	}
@@ -353,7 +339,7 @@ test_overlapping(void *arena) {
 		size_t expected_count;
 	} test_cases[] = {
 		{{10, 2, 0, 1}, 85, {0, 0, 0}, 1}, // Only rule 1 matches
-		{{10, 1, 1, 100}, 79, {0, 0, 0}, 0
+		{{10, 1, 1, 100}, 79, {FILTER_RULE_INVALID, 0, 0}, 0
 		}, // IP matches all but port matches none
 		{{10, 1, 1, 100}, 106, {1, 0, 0}, 1
 		}, // Only rule 2 matches (port 106 in 90-110, not in 80-100 or
@@ -378,15 +364,9 @@ test_overlapping(void *arena) {
 		);
 	}
 
-	struct value_range *expected_ranges[test_count];
+	uint32_t expected_ranges[test_count];
 	for (size_t i = 0; i < test_count; ++i) {
-		expected_ranges[i] = malloc(sizeof(struct value_range));
-		expected_ranges[i]->count = test_cases[i].expected_count;
-		expected_ranges[i]->values = malloc(sizeof(uint32_t) * 4);
-		for (size_t j = 0; j < test_cases[i].expected_count; ++j) {
-			expected_ranges[i]->values[j] =
-				test_cases[i].expected_actions[j];
-		}
+		expected_ranges[i] = test_cases[i].expected_actions[0];
 	}
 
 	struct block_allocator alloc;
@@ -414,8 +394,6 @@ test_overlapping(void *arena) {
 	TEST_ASSERT_SUCCESS(res, "some checks failed");
 
 	for (size_t i = 0; i < test_count; ++i) {
-		free(expected_ranges[i]->values);
-		free(expected_ranges[i]);
 		free_packet(packets[i]);
 		free(packets[i]);
 	}

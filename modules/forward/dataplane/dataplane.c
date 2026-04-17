@@ -32,16 +32,15 @@ forward_handle_packets(
 	);
 
 	struct packet *vlan_packets[packet_list_count(&packet_front->input)];
-	struct value_range
-		*vlan_result[packet_list_count(&packet_front->input)];
+	uint32_t vlan_result[packet_list_count(&packet_front->input)];
 	uint64_t vlan_idx = 0;
 
 	struct packet *ip4_packets[packet_list_count(&packet_front->input)];
-	struct value_range *ip4_result[packet_list_count(&packet_front->input)];
+	uint32_t ip4_result[packet_list_count(&packet_front->input)];
 	uint64_t ip4_idx = 0;
 
 	struct packet *ip6_packets[packet_list_count(&packet_front->input)];
-	struct value_range *ip6_result[packet_list_count(&packet_front->input)];
+	uint32_t ip6_result[packet_list_count(&packet_front->input)];
 	uint64_t ip6_idx = 0;
 
 	for (struct packet *packet = packet_list_first(&packet_front->input);
@@ -93,42 +92,21 @@ forward_handle_packets(
 	while ((packet = packet_list_pop(&packet_front->input)) != NULL) {
 		struct forward_target *target = NULL;
 
-		const uint32_t *actions = NULL;
-		uint32_t action_count = 0;
-
-		// Set vlan as default
-		actions = ADDR_OF(&vlan_result[vlan_idx]->values);
-		action_count = vlan_result[vlan_idx]->count;
+		uint32_t action = vlan_result[vlan_idx];
 		++vlan_idx;
 
 		if (packet->network_header.type ==
 		    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
-			const uint32_t *ip4_actions =
-				ADDR_OF(&ip4_result[ip4_idx]->values);
-			uint32_t ip4_action_count = ip4_result[ip4_idx]->count;
-			++ip4_idx;
-
-			if (ip4_action_count && (action_count == 0 ||
-						 ip4_actions[0] < actions[0])) {
-				actions = ip4_actions;
-				action_count = ip4_action_count;
-			}
+			if (ip4_result[ip4_idx] < action)
+				action = ip4_result[ip4_idx];
 		} else if (packet->network_header.type ==
 			   rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
-			const uint32_t *ip6_actions =
-				ADDR_OF(&ip6_result[ip6_idx]->values);
-			uint32_t ip6_action_count = ip6_result[ip6_idx]->count;
-			++ip6_idx;
-
-			if (ip6_action_count && (action_count == 0 ||
-						 ip6_actions[0] < actions[0])) {
-				actions = ip6_actions;
-				action_count = ip6_action_count;
-			}
+			if (ip6_result[ip6_idx] < action)
+				action = ip6_result[ip6_idx];
 		}
 
-		if (action_count)
-			target = ADDR_OF(&forward_config->targets) + actions[0];
+		if (action != FILTER_RULE_INVALID)
+			target = ADDR_OF(&forward_config->targets) + action;
 
 		if (target != NULL) {
 			uint64_t *counters = counter_get_address(

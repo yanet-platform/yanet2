@@ -24,10 +24,9 @@ query_tcp_packet(struct filter *filter, uint16_t flags, uint32_t expected) {
 	int res = fill_packet_net4(&packet, sip, dip, 0, 0, IPPROTO_TCP, flags);
 	assert(res == 0);
 	struct packet *packet_ptr = &packet;
-	struct value_range *actions;
+	uint32_t actions;
 	filter_query(filter, sign_proto_range_fast, &packet_ptr, &actions, 1);
-	assert(actions->count >= 1);
-	assert(ADDR_OF(&actions->values)[0] == expected);
+	assert(actions == expected);
 	free_packet(&packet);
 }
 
@@ -39,10 +38,9 @@ query_udp_packet(struct filter *filter, uint32_t expected) {
 	int res = fill_packet_net4(&packet, sip, dip, 0, 0, IPPROTO_UDP, 0);
 	assert(res == 0);
 	struct packet *packet_ptr = &packet;
-	struct value_range *actions;
+	uint32_t actions;
 	filter_query(filter, sign_proto_range_fast, &packet_ptr, &actions, 1);
-	assert(actions->count >= 1);
-	assert(ADDR_OF(&actions->values)[0] == expected);
+	assert(actions == expected);
 	free_packet(&packet);
 }
 
@@ -268,14 +266,11 @@ test_boundary_values(void *memory) {
 	TEST_ASSERT_EQUAL(res, 0, "failed to fill packet");
 
 	struct packet *packet_ptr1 = &packet1;
-	struct value_range *actions1;
+	uint32_t actions1;
 	filter_query(
 		&filter, sign_proto_range_fast, &packet_ptr1, &actions1, 1
 	);
-	TEST_ASSERT_EQUAL(actions1->count, 1, "proto 0 should match rule 1");
-	TEST_ASSERT_EQUAL(
-		ADDR_OF(&actions1->values)[0], 0, "proto 0 should match rule 1"
-	);
+	TEST_ASSERT_EQUAL(actions1, 0, "proto 0 should match rule 1");
 	free_packet(&packet1);
 
 	filter_free(&filter, sign_proto_range_fast_compile);

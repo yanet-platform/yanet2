@@ -22,10 +22,9 @@ query_tcp_packet(struct filter *filter, uint16_t flags, uint32_t expected) {
 	int res = fill_packet_net4(&packet, sip, dip, 0, 0, IPPROTO_TCP, flags);
 	assert(res == 0);
 	struct packet *packet_ptr = &packet;
-	struct value_range *actions;
+	uint32_t actions;
 	filter_query(filter, sign_proto, &packet_ptr, &actions, 1);
-	assert(actions->count >= 1);
-	assert(ADDR_OF(&actions->values)[0] == expected);
+	assert(actions == expected);
 	free_packet(&packet);
 }
 
@@ -37,10 +36,9 @@ query_udp_packet(struct filter *filter, uint32_t expected) {
 	int res = fill_packet_net4(&packet, sip, dip, 0, 0, IPPROTO_UDP, 0);
 	assert(res == 0);
 	struct packet *packet_ptr = &packet;
-	struct value_range *actions;
+	uint32_t actions;
 	filter_query(filter, sign_proto, &packet_ptr, &actions, 1);
-	assert(actions->count >= 1);
-	assert(ADDR_OF(&actions->values)[0] == expected);
+	assert(actions == expected);
 	free_packet(&packet);
 }
 

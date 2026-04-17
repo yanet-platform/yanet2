@@ -28,10 +28,9 @@ query_and_expect_action(
 	);
 	assert(res == 0);
 	struct packet *packet_ptr = &p;
-	struct value_range *actions;
+	uint32_t actions;
 	filter_query(filter, sign_ports, &packet_ptr, &actions, 1);
-	assert(actions->count >= 1);
-	assert(ADDR_OF(&actions->values)[0] == expected);
+	assert(actions == expected);
 	free_packet(&p);
 }
 
@@ -47,9 +46,9 @@ query_and_expect_no_action(
 	);
 	assert(res == 0);
 	struct packet *packet_ptr = &p;
-	struct value_range *actions;
+	uint32_t actions;
 	filter_query(filter, sign_ports, &packet_ptr, &actions, 1);
-	assert(actions->count == 0);
+	assert(actions == FILTER_RULE_INVALID);
 	free_packet(&p);
 }
 

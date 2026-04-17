@@ -29,7 +29,7 @@ FILTER_QUERY_DECLARE(vs_acl_ipv4, net4_fast_src, port_fast_src);
 
 static inline uint32_t
 vs_v4_table_lookup(struct packet_handler *handler, struct packet *packet) {
-	struct value_range *result;
+	uint32_t result;
 	filter_query(
 		ADDR_OF(&handler->vs_ipv4.filter),
 		vs_lookup_ipv4,
@@ -37,12 +37,7 @@ vs_v4_table_lookup(struct packet_handler *handler, struct packet *packet) {
 		&result,
 		1
 	);
-	if (result->count == 0) {
-		return -1;
-	}
-	/// @todo: actions_count > 1 ?
-	uint32_t service_id = ADDR_OF(&result->values)[0];
-	return service_id;
+	return result;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -54,7 +49,7 @@ FILTER_QUERY_DECLARE(vs_acl_ipv6, net6_fast_src, port_fast_src);
 
 static inline uint32_t
 vs_v6_table_lookup(struct packet_handler *handler, struct packet *packet) {
-	struct value_range *result;
+	uint32_t result;
 	filter_query(
 		ADDR_OF(&handler->vs_ipv6.filter),
 		vs_lookup_ipv6,
@@ -62,12 +57,7 @@ vs_v6_table_lookup(struct packet_handler *handler, struct packet *packet) {
 		&result,
 		1
 	);
-	if (result->count == 0) {
-		return -1;
-	}
-	/// @todo: actions_count > 1 ?
-	uint32_t service_id = ADDR_OF(&result->values)[0];
-	return service_id;
+	return result;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -89,12 +79,9 @@ vs_v4_lookup(struct packet_ctx *ctx) {
 }
 
 static inline bool
-check_fw_and_inc_stats(
-	struct packet_ctx *ctx, struct vs *vs, struct value_range *result
-) {
-	if (result->count > 0) {
-		assert(result->count == 1);
-		uint32_t rule_idx = ADDR_OF(&result->values)[0];
+check_fw_and_inc_stats(struct packet_ctx *ctx, struct vs *vs, uint32_t result) {
+	if (result != FILTER_RULE_INVALID) {
+		uint32_t rule_idx = result;
 		uint64_t counter_id = ADDR_OF(&vs->rule_counters)[rule_idx];
 		if (counter_id != (uint64_t)-1) {
 			counter_get_address(
@@ -109,7 +96,7 @@ check_fw_and_inc_stats(
 static inline bool
 vs_v4_fw(struct packet_ctx *ctx, struct vs *vs, struct packet *packet) {
 	(void)ctx;
-	struct value_range *result;
+	uint32_t result;
 	filter_query(ADDR_OF(&vs->acl), vs_acl_ipv4, &packet, &result, 1);
 	return check_fw_and_inc_stats(ctx, vs, result);
 }
@@ -164,7 +151,7 @@ vs_v6_lookup(struct packet_ctx *ctx) {
 static inline bool
 vs_v6_fw(struct packet_ctx *ctx, struct vs *vs, struct packet *packet) {
 	(void)ctx;
-	struct value_range *result;
+	uint32_t result;
 	filter_query(ADDR_OF(&vs->acl), vs_acl_ipv6, &packet, &result, 1);
 	return check_fw_and_inc_stats(ctx, vs, result);
 }
