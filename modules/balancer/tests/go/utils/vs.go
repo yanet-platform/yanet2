@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"cmp"
 	"fmt"
+	"math/rand/v2"
 	"net/netip"
 
+	balancer "github.com/yanet-platform/yanet2/modules/balancer/controlplane"
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb"
 )
 
@@ -60,4 +62,94 @@ func VsIDFromPb(vs *balancerpb.VsIdentifier) VsID {
 		port:    uint16(vs.Port),
 		proto:   vs.Proto,
 	}
+}
+
+func VsStatsEquals(a *balancerpb.VsStats, b *balancerpb.VsStats) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return a.IncomingPackets == b.IncomingPackets &&
+		a.IncomingBytes == b.IncomingBytes &&
+		a.PacketSrcNotAllowed == b.PacketSrcNotAllowed &&
+		a.NoReals == b.NoReals &&
+		a.SessionTableOverflow == b.SessionTableOverflow &&
+		a.EchoIcmpPackets == b.EchoIcmpPackets &&
+		a.ErrorIcmpPackets == b.ErrorIcmpPackets &&
+		a.RealIsDisabled == b.RealIsDisabled &&
+		a.RealIsRemoved == b.RealIsRemoved &&
+		a.NotRescheduledPackets == b.NotRescheduledPackets &&
+		a.BroadcastedIcmpPackets == b.BroadcastedIcmpPackets &&
+		a.CreatedSessions == b.CreatedSessions &&
+		a.OutgoingPackets == b.OutgoingPackets &&
+		a.OutgoingBytes == b.OutgoingBytes
+}
+
+func VsCount(b *balancer.Balancer) int {
+	return len(b.Config().PacketHandler.Vs)
+}
+
+func SelectVS(
+	cnt int,
+	vs []*balancerpb.VirtualService,
+	rng *rand.Rand,
+) []*balancerpb.VirtualService {
+	if cnt >= len(vs) {
+		panic(fmt.Sprintf("selectVS: cnt >= len(vs): %d >= %d", cnt, len(vs)))
+	}
+	indices := make([]int, len(vs))
+	for i := range indices {
+		indices[i] = i
+	}
+	for i := len(indices) - 1; i > 0; i-- {
+		j := rng.IntN(i + 1)
+		indices[i], indices[j] = indices[j], indices[i]
+	}
+	result := make([]*balancerpb.VirtualService, cnt)
+	for i := range cnt {
+		result[i] = vs[indices[i]]
+	}
+	return result
+}
+
+func VSUpdateSomeReals(
+	vs *balancerpb.VirtualService,
+	rng *rand.Rand,
+) *balancerpb.VirtualService {
+	reals := make([]*balancerpb.Real, len(vs.Reals))
+	copy(reals, vs.Reals)
+	for i := len(reals) - 1; i > 0; i-- {
+		j := rng.IntN(i + 1)
+		reals[i], reals[j] = reals[j], reals[i]
+	}
+	delta := 2 - rng.IntN(5) // -2 to 2
+	replaceCnt := max(0, min(len(reals), len(reals)/2+delta))
+	for i := range replaceCnt {
+		reals[i] = GenerateReal(rng)
+	}
+	newCnt := rng.IntN(3)
+	for range newCnt {
+		reals = append(reals, GenerateReal(rng))
+	}
+	return &balancerpb.VirtualService{
+		Id:          vs.Id,
+		AllowedSrcs: vs.AllowedSrcs,
+		Flags:       vs.Flags,
+		Scheduler:   vs.Scheduler,
+		Reals:       reals,
+	}
+}
+
+func GenerateRealUpdates(
+	services []*balancerpb.VirtualService,
+	rng *rand.Rand,
+) []*balancerpb.RealUpdate {
+	updates := make([]*balancerpb.RealUpdate, 0)
+	for _, vs := range services {
+		upd := VSGenerateRealUpdates(vs, rng)
+		updates = append(updates, upd...)
+	}
+	return updates
 }

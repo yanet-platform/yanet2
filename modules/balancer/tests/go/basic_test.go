@@ -124,7 +124,14 @@ func TestBasic(t *testing.T) {
 
 		// TCP IPv4 => VS4
 		// OPS mode => no session created
-		_, err = utils.SendAndValidateTCP(ts, clientV4, 10003, vs4Addr, 8080, &layers.TCP{SYN: true})
+		_, err = utils.SendAndValidateTCP(
+			ts,
+			clientV4,
+			10003,
+			vs4Addr,
+			8080,
+			&layers.TCP{SYN: true},
+		)
 		require.NoError(t, err, "failed to send packet to vs4")
 	})
 
@@ -210,13 +217,27 @@ func TestBasic(t *testing.T) {
 
 		// Send traffic to VS5 and validate.
 		for idx := range 10 {
-			_, err := utils.SendAndValidateTCP(ts, clientV4, 20000, vs5Addr, 9090, &layers.TCP{SYN: true})
+			_, err := utils.SendAndValidateTCP(
+				ts,
+				clientV4,
+				20000,
+				vs5Addr,
+				9090,
+				&layers.TCP{SYN: true},
+			)
 			require.NoError(t, err, "failed to send packet %d: %w", idx, err)
 		}
 
 		// Existing VS1 still works.
 		for idx := range 10 {
-			_, err := utils.SendAndValidateTCP(ts, clientV4, 20001, vs1Addr, 80, &layers.TCP{SYN: true})
+			_, err := utils.SendAndValidateTCP(
+				ts,
+				clientV4,
+				20001,
+				vs1Addr,
+				80,
+				&layers.TCP{SYN: true},
+			)
 			require.NoError(t, err, "failed to send packet %d: %w", idx, err)
 		}
 	})
@@ -247,7 +268,14 @@ func TestBasic(t *testing.T) {
 
 		// VS1 still works.
 		for idx := range 10 {
-			_, err := utils.SendAndValidateTCP(ts, clientV4, 30001, vs1Addr, 80, &layers.TCP{SYN: true})
+			_, err := utils.SendAndValidateTCP(
+				ts,
+				clientV4,
+				30001,
+				vs1Addr,
+				80,
+				&layers.TCP{SYN: true},
+			)
 			require.NoError(t, err, "failed to send packet %d: %w", idx, err)
 		}
 	})

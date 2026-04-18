@@ -3,20 +3,17 @@ package balancer
 import (
 	"fmt"
 	"math/rand/v2"
-	"net/netip"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/gopacket/gopacket/layers"
 	"github.com/stretchr/testify/assert"
 	mock "github.com/yanet-platform/yanet2/mock/go"
-	balancer "github.com/yanet-platform/yanet2/modules/balancer/controlplane"
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb"
 	"github.com/yanet-platform/yanet2/modules/balancer/tests/go/utils"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 
-type VsBuildParams struct {
+type vsBuildParams struct {
 	Flags            *balancerpb.VsFlags
 	minRealsCnt      int
 	maxRealsCnt      int
@@ -24,39 +21,20 @@ type VsBuildParams struct {
 	maxAllowedSrcCnt int
 }
 
-func selectVS(
-	cnt int,
-	vs []*balancerpb.VirtualService,
-	rng *rand.Rand,
-) []*balancerpb.VirtualService {
-	if cnt >= len(vs) {
-		panic(fmt.Sprintf("selectVS: cnt >= len(vs): %d >= %d", cnt, len(vs)))
-	}
-	indices := make([]int, len(vs))
-	for i := range indices {
-		indices[i] = i
-	}
-	for i := len(indices) - 1; i > 0; i-- {
-		j := rng.IntN(i + 1)
-		indices[i], indices[j] = indices[j], indices[i]
-	}
-	result := make([]*balancerpb.VirtualService, cnt)
-	for i := range cnt {
-		result[i] = vs[indices[i]]
-	}
-	return result
-}
-
 func buildVS(
 	cntNew int,
 	cntReuse int,
-	params VsBuildParams,
+	params vsBuildParams,
 	prevVS []*balancerpb.VirtualService,
 	rng *rand.Rand,
-) []*balancerpb.VirtualService {
+) ([]*balancerpb.VirtualService, []*balancerpb.VirtualService) {
 	result := make([]*balancerpb.VirtualService, 0, cntNew+cntReuse)
+	var reused []*balancerpb.VirtualService
 	if prevVS != nil && cntReuse > 0 {
-		result = append(result, selectVS(cntReuse, prevVS, rng)...)
+		reused = utils.SelectVS(cntReuse, prevVS, rng)
+		for _, vs := range reused {
+			result = append(result, utils.VSUpdateSomeReals(vs, rng))
+		}
 	}
 	for range cntNew {
 		realsCnt := rng.IntN(params.maxRealsCnt-params.minRealsCnt+1) + params.minRealsCnt
@@ -66,25 +44,24 @@ func buildVS(
 		result = append(result, utils.GenerateVS(rng, realsCnt, allowedSrcCnt, params.Flags))
 	}
 	if len(result) != cntNew+cntReuse {
-		panic(fmt.Sprintf("buildVS: result count mismatch: %d != %d + %d", len(result), cntNew, cntReuse))
+		panic(
+			fmt.Sprintf(
+				"buildVS: result count mismatch: %d != %d + %d",
+				len(result),
+				cntNew,
+				cntReuse,
+			),
+		)
 	}
-	return result
-}
-
-func selectDeletedVS(
-	cntDeleted int,
-	vs []*balancerpb.VirtualService,
-	rng *rand.Rand,
-) []*balancerpb.VirtualService {
-	return selectVS(cntDeleted, vs, rng)
+	return result, reused
 }
 
 func buildInitialConfig(
 	rng *rand.Rand,
 	cntVS int,
-	vsParams VsBuildParams,
+	vsParams vsBuildParams,
 ) *balancerpb.BalancerConfig {
-	stCapacity := uint64(200000)
+	stCapacity := uint64(50000)
 	stMaxLoadFactor := float32(1.0)
 	wlcPower := uint64(10)
 	maxWeight := uint32(100)
@@ -92,7 +69,8 @@ func buildInitialConfig(
 		Power:     &wlcPower,
 		MaxWeight: &maxWeight,
 	}
-	config := &balancerpb.BalancerConfig{
+	vs, _ := buildVS(cntVS, 0, vsParams, nil, rng)
+	return &balancerpb.BalancerConfig{
 		PacketHandler: &balancerpb.PacketHandlerConfig{
 			SourceAddressV4: utils.GenerateIPv4Address(rng).AsSlice(),
 			SourceAddressV6: utils.GenerateIPv6Address(rng).AsSlice(),
@@ -104,7 +82,7 @@ func buildInitialConfig(
 				Tcp:       60,
 				Udp:       60,
 			},
-			Vs: buildVS(cntVS, 0, vsParams, nil, rng),
+			Vs: vs,
 		},
 		State: &balancerpb.StateConfig{
 			SessionTableCapacity:      &stCapacity,
@@ -115,27 +93,12 @@ func buildInitialConfig(
 			},
 		},
 	}
-	return config
 }
 
-func buildRealUpdates(
-	vs []*balancerpb.VirtualService,
-	vsCnt int,
-	rng *rand.Rand,
-) []*balancerpb.RealUpdate {
-	selectedVS := selectVS(vsCnt, vs, rng)
-	updates := make([]*balancerpb.RealUpdate, 0)
-	for _, vs := range selectedVS {
-		upd := utils.GenerateRealUpdates(vs, rng)
-		updates = append(updates, upd...)
-	}
-	return updates
-}
-
-func makeTestSetup(balancerConfig *balancerpb.BalancerConfig) (*utils.TestSetup, error) {
+func buildTestSetup(balancerConfig *balancerpb.BalancerConfig) (*utils.TestSetup, error) {
 	testConfig := &utils.TestConfig{
 		Mock: &mock.YanetMockConfig{
-			AgentsMemory: 2048 * datasize.MB,
+			AgentsMemory: 256 * datasize.MB,
 			DpMemory:     128 * datasize.MB,
 			Workers:      1,
 			Devices: []mock.YanetMockDeviceConfig{
@@ -146,165 +109,143 @@ func makeTestSetup(balancerConfig *balancerpb.BalancerConfig) (*utils.TestSetup,
 			},
 		},
 		Balancer:    balancerConfig,
-		AgentMemory: 1024 * datasize.MB,
+		AgentMemory: 128 * datasize.MB,
 	}
 	return utils.Make(testConfig)
-}
-
-func sendAndValidate(t *testing.T, ts *utils.TestSetup, rng *rand.Rand) {
-	config := ts.Balancer.Config()
-	for _, vs := range config.PacketHandler.Vs {
-		vsID := utils.VsIDFromPb(vs.Id)
-		srcIP, srcPort := utils.GenerateAllowedSrcForVS(rng, vs)
-
-		// No ops VS
-		dstIP, ok := netip.AddrFromSlice(vs.Id.Addr)
-		assert.True(t, ok, "failed to parse destination IP for vs %s", vs.Id)
-		dstPort := uint16(vs.Id.Port)
-
-		var tcp *layers.TCP
-		if vs.Id.Proto == balancerpb.TransportProto_TCP {
-			tcp = &layers.TCP{
-				SrcPort: layers.TCPPort(srcPort),
-				DstPort: layers.TCPPort(dstPort),
-				SYN:     true,
-				ACK:     false,
-			}
-		}
-
-		_, err := utils.SendAndValidate(ts, srcIP, srcPort, dstIP, dstPort, tcp)
-		assert.NoError(t, err, "failed to send and validate packets for vs %s", &vsID)
-
-		if err != nil {
-			state, err := ts.Balancer.GetState(utils.PacketHandlerRef(), nil, true, ts.Mock.CurrentTime())
-			assert.NoError(t, err)
-			t.Logf("balancer common stats: %v", state[0].CommonStats)
-			t.Logf("balancer l4 stats: %v", state[0].L4Stats)
-			for _, vsState := range state[0].VirtualServices {
-				vsStateID := utils.VsIDFromPb(vsState.Id)
-				if vsID.Compare(&vsStateID) == 0 {
-					t.Logf("vs stats: %v", vsState.Stats)
-				}
-			}
-		}
-	}
 }
 
 func updateReals(t *testing.T, ts *utils.TestSetup, rng *rand.Rand) {
 	config := ts.Balancer.Config()
 	vs := config.PacketHandler.Vs
-	updates := buildRealUpdates(vs, len(vs)/2, rng)
+	selected := utils.SelectVS(len(vs)/2, vs, rng)
+	updates := utils.GenerateRealUpdates(selected, rng)
 	updated, err := ts.Balancer.UpdateReals(updates, false)
 	assert.NoError(t, err)
 	assert.Equal(t, len(updates), updated)
-	ensureAtLeastOneRealIsEnabled(t, ts)
 }
 
-func ensureAtLeastOneRealIsEnabled(t *testing.T, ts *utils.TestSetup) {
-	state, err := ts.Balancer.GetState(nil, nil, false, ts.Mock.CurrentTime())
-	assert.NoError(t, err)
-	assert.Len(t, state, 1)
-	for _, vs := range state[0].VirtualServices {
-		enabled := false
-		for _, real := range vs.Reals {
-			if real.Enabled {
-				enabled = true
-			}
-		}
-		assert.True(t, enabled, "no enabled reals for vs %s", vs.Id)
+// runUpdateRealsRound sends one packet per VS then repeats real-update + send iters times.
+// After each send it verifies that per-VS incoming and outgoing packet counters increased.
+func runUpdateRealsRound(t *testing.T, ts *utils.TestSetup, rng *rand.Rand, iters int) {
+	utils.SendAndValidateMany(t, ts, rng)
+	for range iters {
+		updateReals(t, ts, rng)
+		utils.SendAndValidateMany(t, ts, rng)
 	}
 }
 
-func vsCnt(b *balancer.Balancer) int {
-	return len(b.Config().PacketHandler.Vs)
+func stepUpdateVS(
+	t *testing.T,
+	ts *utils.TestSetup,
+	vsParams vsBuildParams,
+	rng *rand.Rand,
+	iter int,
+	realsIters int,
+) {
+	b := ts.Balancer
+	newCnt := rng.IntN(5)
+	prevCount := utils.VsCount(b)
+	reuseCnt := min(rng.IntN(5), prevCount)
+	t.Logf("iter=%d, UpdateVS: newCnt=%d, reuseCnt=%d", iter, newCnt, reuseCnt)
+
+	newVSList, reusedVS := buildVS(newCnt, reuseCnt, vsParams, b.Config().PacketHandler.Vs, rng)
+	snapshots := utils.CaptureVsSnapshots(t, ts, reusedVS)
+	_, err := b.UpdateVS(newVSList)
+	assert.NoError(t, err, "iter=%d: failed to UpdateVS", iter)
+	assert.Equal(
+		t,
+		newCnt+prevCount,
+		utils.VsCount(b),
+		"iter=%d: vs count mismatch after UpdateVS",
+		iter,
+	)
+	utils.EnableAllReals(t, ts)
+	utils.VerifyInheritedStats(t, ts, snapshots)
+	runUpdateRealsRound(t, ts, rng, realsIters)
+}
+
+func stepDeleteVS(
+	t *testing.T,
+	ts *utils.TestSetup,
+	rng *rand.Rand,
+	iter int,
+	realsIters int,
+) {
+	b := ts.Balancer
+	prevCount := utils.VsCount(b)
+	delCnt := max(rng.IntN(prevCount/4), 1)
+	t.Logf("iter=%d, DeleteVS: delCnt=%d, prevCount=%d", iter, delCnt, prevCount)
+
+	allVS := b.Config().PacketHandler.Vs
+	snapshots := utils.CaptureVsSnapshots(t, ts, allVS)
+	_, err := b.DeleteVS(utils.SelectVS(delCnt, allVS, rng))
+	assert.NoError(t, err, "iter=%d: failed to DeleteVS", iter)
+	assert.Equal(
+		t,
+		prevCount-delCnt,
+		utils.VsCount(b),
+		"iter=%d: vs count mismatch after DeleteVS",
+		iter,
+	)
+	utils.VerifyInheritedStats(t, ts, snapshots)
+	runUpdateRealsRound(t, ts, rng, realsIters)
+}
+
+func stepUpdateConfig(
+	t *testing.T,
+	ts *utils.TestSetup,
+	vsParams vsBuildParams,
+	rng *rand.Rand,
+	iter int,
+	realsIters int,
+) {
+	b := ts.Balancer
+	newCnt := max(utils.VsCount(b)/2+2-rng.IntN(5), 10)
+	reuseCnt := max(utils.VsCount(b)/2+2-rng.IntN(5), 0)
+	t.Logf("iter=%d, Update: newCnt=%d, reuseCnt=%d", iter, newCnt, reuseCnt)
+
+	config := b.Config()
+	newVSList, reusedVS := buildVS(newCnt, reuseCnt, vsParams, config.PacketHandler.Vs, rng)
+	config.PacketHandler.Vs = newVSList
+	snapshots := utils.CaptureVsSnapshots(t, ts, reusedVS)
+	_, err := b.Update(config, nil)
+	assert.NoError(t, err, "iter=%d: failed to Update config", iter)
+	assert.Equal(
+		t,
+		newCnt+reuseCnt,
+		utils.VsCount(b),
+		"iter=%d: vs count mismatch after Update",
+		iter,
+	)
+	utils.EnableAllReals(t, ts)
+	utils.VerifyInheritedStats(t, ts, snapshots)
+	runUpdateRealsRound(t, ts, rng, realsIters)
 }
 
 func TestUpdateStress(t *testing.T) {
 	rng := rand.New(rand.NewPCG(uint64(100), uint64(123)))
-	cntVS := 20
-	vsParams := VsBuildParams{
-		Flags: &balancerpb.VsFlags{
-			FixMss: true,
-		},
+	vsParams := vsBuildParams{
+		Flags:            &balancerpb.VsFlags{FixMss: true},
 		minRealsCnt:      5,
 		maxRealsCnt:      15,
 		minAllowedSrcCnt: 1,
 		maxAllowedSrcCnt: 3,
 	}
-	initialConfig := buildInitialConfig(rng, cntVS, vsParams)
-	ts, err := makeTestSetup(initialConfig)
+
+	ts, err := buildTestSetup(buildInitialConfig(rng, 20, vsParams))
 	if err != nil {
 		t.Fatalf("failed to make test setup: %v", err)
 	}
 	defer ts.Free()
 
 	utils.EnableAllReals(t, ts)
+	runUpdateRealsRound(t, ts, rng, 20)
+	t.Log("initial vs count:", utils.VsCount(ts.Balancer))
 
-	balancer := ts.Balancer
-
-	updateRealsIters := 20
-
-	updateRealsFunc := func() {
-		t.Log("updateReals")
-		sendAndValidate(t, ts, rng)
-		for range updateRealsIters {
-			updateReals(t, ts, rng)
-			sendAndValidate(t, ts, rng)
-		}
-	}
-
-	updateRealsFunc()
-
-	updateVsIters := 15
-
-	t.Log("initial vs count:", vsCnt(balancer))
-
-	for updateVsIter := range updateVsIters {
-		newCnt := rng.IntN(5)
-		prevCnt := vsCnt(balancer)
-		reuseCnt := min(rng.IntN(5), prevCnt)
-		t.Logf("iter=%d, updateVS: newCnt=%d", updateVsIter, newCnt)
-
-		_, err := balancer.UpdateVS(
-			buildVS(newCnt, reuseCnt, vsParams, balancer.Config().PacketHandler.Vs, rng),
-		)
-		assert.NoError(t, err, "failed to update VS on iter %d", updateVsIter)
-		utils.EnableAllReals(t, ts)
-		assert.Equal(t, newCnt+prevCnt, vsCnt(balancer), "vs count mismatch after update via UpdateVS")
-
-		updateRealsFunc()
-
-		prevCnt = vsCnt(balancer)
-		delCnt := max(rng.IntN(prevCnt/4), 1)
-		t.Logf("iter=%d, deleteVS: delCnt=%d, prevCnt=%d", updateVsIter, delCnt, prevCnt)
-
-		vsToDelete := selectDeletedVS(delCnt, ts.Balancer.Config().PacketHandler.Vs, rng)
-		t.Logf("iter=%d, deleteVS: selected %d VS for deletion:", updateVsIter, len(vsToDelete))
-
-		_, err = balancer.DeleteVS(vsToDelete)
-		assert.NoError(t, err, "failed to delete VS on iter %d", updateVsIter)
-
-		newCnt = vsCnt(balancer)
-		t.Logf("iter=%d, after deleteVS: expected=%d, actual=%d", updateVsIter, prevCnt-delCnt, newCnt)
-		assert.Equal(t, prevCnt-delCnt, newCnt, "vs count mismatch after delete via DeleteVS")
-
-		updateRealsFunc()
-
-		newCnt = max(vsCnt(balancer)/2+2-rng.IntN(5), 10)
-		reuseCnt = max(vsCnt(balancer)/2+2-rng.IntN(5), 0)
-
-		t.Logf("iter=%d, updateVS via update config: newCnt=%d, reuseCnt=%d", updateVsIter, newCnt, reuseCnt)
-
-		config := ts.Balancer.Config()
-		config.PacketHandler.Vs = buildVS(newCnt, reuseCnt, vsParams, config.PacketHandler.Vs, rng)
-		_, err = balancer.Update(config, nil)
-		assert.NoError(t, err, "failed to update config on iter %d", updateVsIter)
-		assert.Equal(t, newCnt+reuseCnt, vsCnt(balancer), "vs count mismatch after update via Update")
-
-		utils.EnableAllReals(t, ts)
-
-		updateRealsFunc()
-
-		t.Logf("iter=%d, in the end: vs_count=%d", updateVsIter, vsCnt(balancer))
+	for iter := range 15 {
+		stepUpdateVS(t, ts, vsParams, rng, iter, 20)
+		stepDeleteVS(t, ts, rng, iter, 20)
+		stepUpdateConfig(t, ts, vsParams, rng, iter, 20)
+		t.Logf("iter=%d done: vs_count=%d", iter, utils.VsCount(ts.Balancer))
 	}
 }

@@ -3,9 +3,10 @@ package utils
 import (
 	"cmp"
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 	"net"
 	"net/netip"
+	"testing"
 
 	"github.com/gopacket/gopacket"
 	"github.com/gopacket/gopacket/layers"
@@ -316,4 +317,59 @@ func SendAndValidateRandomSrcPorts(
 	}
 
 	return outputPackets, nil
+}
+
+func SendAndValidateMany(t *testing.T, ts *TestSetup, rng *rand.Rand) error {
+	config := ts.Balancer.Config()
+	for _, vs := range config.PacketHandler.Vs {
+		vsID := VsIDFromPb(vs.Id)
+		srcIP, srcPort := GenerateAllowedSrcForVS(rng, vs)
+
+		dstIP, ok := netip.AddrFromSlice(vs.Id.Addr)
+		if !ok {
+			return fmt.Errorf("failed to parse destination IP for vs %s", vs.Id)
+		}
+
+		dstPort := uint16(vs.Id.Port)
+
+		var tcp *layers.TCP
+		if vs.Id.Proto == balancerpb.TransportProto_TCP {
+			tcp = &layers.TCP{
+				SrcPort: layers.TCPPort(srcPort),
+				DstPort: layers.TCPPort(dstPort),
+				SYN:     true,
+				ACK:     false,
+			}
+		}
+
+		_, err := SendAndValidate(ts, srcIP, srcPort, dstIP, dstPort, tcp)
+		if err == nil {
+			continue
+		}
+
+		resErr := fmt.Errorf("failed to send and validate packets for vs %s: %w", &vsID, err)
+
+		state, err := ts.Balancer.GetState(
+			PacketHandlerRef(),
+			nil,
+			true,
+			ts.Mock.CurrentTime(),
+		)
+		if err != nil {
+			return resErr
+		}
+
+		t.Logf("balancer common stats: %v", state[0].CommonStats)
+		t.Logf("balancer l4 stats: %v", state[0].L4Stats)
+		for _, vsState := range state[0].VirtualServices {
+			vsStateID := VsIDFromPb(vsState.Id)
+			if vsID.Compare(&vsStateID) == 0 {
+				t.Logf("vs stats: %v", vsState.Stats)
+			}
+		}
+
+		return resErr
+	}
+
+	return nil
 }

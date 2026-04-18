@@ -190,7 +190,12 @@ func GenerateVS(
 	vsAddr := GenerateAddress(rng)
 	allowedSrcs := make([]*balancerpb.AllowedSources, allowedSrcCount)
 	for i := range allowedSrcCount {
-		allowedSrcs[i] = GenerateAllowedSources(rng, rand.IntN(10)+1, rand.IntN(10)+1, !vsAddr.Is4())
+		allowedSrcs[i] = GenerateAllowedSources(
+			rng,
+			rand.IntN(10)+1,
+			rand.IntN(10)+1,
+			!vsAddr.Is4(),
+		)
 	}
 	proto := balancerpb.TransportProto_TCP
 	if rng.IntN(2) == 0 {
@@ -210,7 +215,7 @@ func GenerateVS(
 	}
 }
 
-func GenerateRealUpdates(vs *balancerpb.VirtualService, rng *rand.Rand) []*balancerpb.RealUpdate {
+func VSGenerateRealUpdates(vs *balancerpb.VirtualService, rng *rand.Rand) []*balancerpb.RealUpdate {
 	reals := vs.Reals
 	updates := make([]*balancerpb.RealUpdate, 0, 2*len(reals)/3)
 	for _, r := range reals {

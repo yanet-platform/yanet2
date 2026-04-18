@@ -33,3 +33,18 @@ func RealIDFromPb(r *balancerpb.RelativeRealIdentifier) RealID {
 		addr:    addr,
 	}
 }
+
+func RealStatsEqual(a, b *balancerpb.RealStats) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return a.PacketsRealDisabled == b.PacketsRealDisabled &&
+		a.OpsPackets == b.OpsPackets &&
+		a.ErrorIcmpPackets == b.ErrorIcmpPackets &&
+		a.CreatedSessions == b.CreatedSessions &&
+		a.Packets == b.Packets &&
+		a.Bytes == b.Bytes
+}
