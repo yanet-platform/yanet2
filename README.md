@@ -22,7 +22,6 @@ YANET is a high-performance modular software router built on DPDK (Data Plane De
 
 ### 🛡️ Safe Initialization Process
 
-- Multi-stage configuration process orchestrated by the Coordinator component.
 - Controlled system initialization with failsafe mechanisms.
 - BGP route announcement control based on system health.
 
@@ -43,15 +42,6 @@ YANET follows a modular architecture with clear separation between control and d
 - Handles configuration and management functions.
 - Manages routing tables and policy.
 - ACL compilation (TDB).
-
-### Key Components
-
-1. **Module System** - Pluggable modules (route, acl, balancer, etc.) providing specific network functions.
-2. **Pipeline System** - Configurable packet processing chains.
-3. **Coordinator** - Orchestrates multi-stage system configuration.
-4. **Announcer (TDB)** - Monitors system health and controls BGP announcements.
-5. **CLI Tools** - Management interfaces with consistent command structure.
-6. **Web UI (TDB)** - Browser-based management interface.
 
 ## 🛠️ Technologies
 
