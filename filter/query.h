@@ -39,7 +39,7 @@ filter_query(
 	struct filter *filter,
 	const struct filter_query *filter_query,
 	struct packet **packets,
-	struct value_range **results,
+	uint32_t *results,
 	uint32_t packet_count
 ) {
 	/* Local slots storage */
@@ -80,8 +80,6 @@ filter_query(
 				: __slots[(__root << 1) * packet_count + idx],
 			__slots[(__root << 1 | 1) * packet_count + idx]
 		);
-		struct value_range *__range =
-			ADDR_OF(&__r->registry.ranges) + __res;
-		(results)[idx] = __range;
+		(results)[idx] = __res;
 	}
 }

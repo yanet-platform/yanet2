@@ -140,9 +140,5 @@ struct filter_rule {
 
 	uint16_t vlan;
 
-	// first 15 bits are for user action
-	// 16th bit is for terminate flag
-	// the oldest 16 bits are for category mask,
-	// which is 0 if rule is for all categories.
 	uint32_t action;
 };

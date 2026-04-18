@@ -43,11 +43,11 @@ route_mpls_handle_packets(
 	);
 
 	struct packet *ip4_packets[packet_list_count(&packet_front->input)];
-	struct value_range *ip4_result[packet_list_count(&packet_front->input)];
+	uint32_t ip4_result[packet_list_count(&packet_front->input)];
 	uint64_t ip4_idx = 0;
 
 	struct packet *ip6_packets[packet_list_count(&packet_front->input)];
-	struct value_range *ip6_result[packet_list_count(&packet_front->input)];
+	uint32_t ip6_result[packet_list_count(&packet_front->input)];
 	uint64_t ip6_idx = 0;
 
 	for (struct packet *packet = packet_list_first(&packet_front->input);
@@ -90,28 +90,26 @@ route_mpls_handle_packets(
 
 		if (packet->network_header.type ==
 		    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
-			if (!ip4_result[ip4_idx]->count) {
+			if (ip4_result[ip4_idx] == FILTER_RULE_INVALID) {
 				++ip4_idx;
 				continue;
 			}
 
 			target =
 				ADDR_OF(ADDR_OF(&module_config->targets) +
-					ADDR_OF(&ip4_result[ip4_idx]->values)[0]
-				);
+					ip4_result[ip4_idx]);
 
 			++ip4_idx;
 		} else if (packet->network_header.type ==
 			   rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
-			if (!ip6_result[ip6_idx]->count) {
+			if (ip6_result[ip6_idx] == FILTER_RULE_INVALID) {
 				++ip6_idx;
 				continue;
 			}
 
 			target =
 				ADDR_OF(ADDR_OF(&module_config->targets) +
-					ADDR_OF(&ip6_result[ip6_idx]->values)[0]
-				);
+					ip6_result[ip6_idx]);
 
 			++ip6_idx;
 		}

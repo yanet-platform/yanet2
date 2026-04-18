@@ -48,11 +48,13 @@ net4_from_to(struct net4 *n, uint32_t *from, uint32_t *to) {
 
 static int
 validate_and_count(
-	const struct filter_rule *rules, size_t rules_count, net_getter getter
+	const struct filter_rule **rules, size_t rules_count, net_getter getter
 ) {
 	int cnt = 0;
 	for (size_t i = 0; i < rules_count; ++i) {
-		struct net4_count n4_count = getter(rules + i);
+		if (rules[i] == NULL)
+			continue;
+		struct net4_count n4_count = getter(rules[i]);
 		for (size_t j = 0; j < n4_count.count; ++j) {
 			if (!validate_net4(n4_count.net4 + j)) {
 				return -1;
@@ -67,7 +69,7 @@ static int
 classifier_init(
 	struct value_registry *registry,
 	void **data,
-	const struct filter_rule *rules,
+	const struct filter_rule **rules,
 	size_t rules_count,
 	struct memory_context *mctx,
 	net_getter getter
@@ -92,7 +94,9 @@ classifier_init(
 
 	size_t segment_idx = 0;
 	for (size_t rule_idx = 0; rule_idx < rules_count; ++rule_idx) {
-		struct net4_count cur = getter(&rules[rule_idx]);
+		if (rules[rule_idx] == NULL)
+			continue;
+		struct net4_count cur = getter(rules[rule_idx]);
 		for (size_t j = 0; j < cur.count; ++j) {
 			uint32_t from, to;
 			net4_from_to(cur.net4 + j, &from, &to);
@@ -120,7 +124,7 @@ int
 FILTER_ATTR_COMPILER_INIT_FUNC(net4_fast_dst)(
 	struct value_registry *registry,
 	void **data,
-	const struct filter_rule *rules,
+	const struct filter_rule **rules,
 	size_t actions_count,
 	struct memory_context *memory_context
 ) {
@@ -146,7 +150,7 @@ int
 FILTER_ATTR_COMPILER_INIT_FUNC(net4_fast_src)(
 	struct value_registry *registry,
 	void **data,
-	const struct filter_rule *rules,
+	const struct filter_rule **rules,
 	size_t actions_count,
 	struct memory_context *memory_context
 ) {

@@ -23,6 +23,7 @@ build_filter(struct common *common, struct memory_context *mctx) {
 	const size_t rule_count = 100;
 	struct filter_rule_builder builders[rule_count];
 	struct filter_rule rules[rule_count];
+	const struct filter_rule *rule_ptrs[rule_count];
 	uint64_t rng = 1231231;
 	for (size_t i = 0; i < rule_count; ++i) {
 		struct filter_rule_builder *builder = &builders[i];
@@ -39,11 +40,12 @@ build_filter(struct common *common, struct memory_context *mctx) {
 		builder_set_proto(
 			builder, i % 2 == 0 ? IPPROTO_TCP : IPPROTO_UDP, 0, 0
 		);
-		rules[i] = build_rule(builder, i);
+		rules[i] = build_rule(builder);
+		rule_ptrs[i] = rules + i;
 	}
 	LOG(INFO, "compiling %zu rules...", rule_count);
 	int res = filter_init(
-		&common->filter, filter_sign, rules, rule_count, mctx
+		&common->filter, filter_sign, rule_ptrs, rule_count, mctx
 	);
 	if (res < 0) {
 		LOG(ERROR, "compilation failed: %d", res);

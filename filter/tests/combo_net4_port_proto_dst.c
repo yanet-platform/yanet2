@@ -45,7 +45,7 @@ test_no_match_proto_only(void *arena) {
 	builder_add_net4_dst(&builder, ip(10, 0, 0, 0), ip(255, 255, 255, 0));
 	builder_add_port_dst_range(&builder, 80, 90);
 	builder_set_proto(&builder, IPPROTO_TCP, 0, 0);
-	struct filter_rule rule = build_rule(&builder, 0);
+	struct filter_rule rule = build_rule(&builder);
 
 	// Test packets: IP and port match but protocol doesn't
 	const struct {
@@ -78,11 +78,9 @@ test_no_match_proto_only(void *arena) {
 	}
 
 	// Expected: no matches
-	struct value_range *expected_ranges[test_count];
+	uint32_t expected_ranges[test_count];
 	for (size_t i = 0; i < test_count; ++i) {
-		expected_ranges[i] = malloc(sizeof(struct value_range));
-		expected_ranges[i]->count = 0;
-		expected_ranges[i]->values = malloc(sizeof(uint32_t));
+		expected_ranges[i] = FILTER_RULE_INVALID;
 	}
 
 	struct block_allocator alloc;
@@ -94,28 +92,27 @@ test_no_match_proto_only(void *arena) {
 	res = memory_context_init(&mctx, "test", &alloc);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize memory context");
 
+	const struct filter_rule *rule_ptr = &rule;
+
 	struct filter filter;
 	res = filter_init(
-		&filter, combo_net4_port_proto_dst_compile, &rule, 1, &mctx
+		&filter, combo_net4_port_proto_dst_compile, &rule_ptr, 1, &mctx
 	);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
 
-	struct value_range **ranges =
-		malloc(sizeof(struct value_range *) * test_count);
+	uint32_t *actions = malloc(sizeof(uint32_t) * test_count);
 	filter_query(
-		&filter, combo_net4_port_proto_dst, packets, ranges, test_count
+		&filter, combo_net4_port_proto_dst, packets, actions, test_count
 	);
 
-	res = compare_expected_ranges(ranges, expected_ranges, test_count);
+	res = compare_expected_ranges(actions, expected_ranges, test_count);
 	TEST_ASSERT_SUCCESS(res, "some checks failed");
 
 	for (size_t i = 0; i < test_count; ++i) {
-		free(expected_ranges[i]->values);
-		free(expected_ranges[i]);
 		free_packet(packets[i]);
 		free(packets[i]);
 	}
-	free(ranges);
+	free(actions);
 
 	return TEST_SUCCESS;
 }
@@ -131,7 +128,7 @@ test_all_match(void *arena) {
 	builder_add_net4_dst(&builder, ip(10, 0, 0, 0), ip(255, 255, 255, 0));
 	builder_add_port_dst_range(&builder, 80, 90);
 	builder_set_proto(&builder, IPPROTO_TCP, 0, 0);
-	struct filter_rule rule = build_rule(&builder, 0);
+	struct filter_rule rule = build_rule(&builder);
 
 	// Test packets: All match
 	const struct {
@@ -164,12 +161,9 @@ test_all_match(void *arena) {
 	}
 
 	// Expected: all match
-	struct value_range *expected_ranges[test_count];
+	uint32_t expected_ranges[test_count];
 	for (size_t i = 0; i < test_count; ++i) {
-		expected_ranges[i] = malloc(sizeof(struct value_range));
-		expected_ranges[i]->count = 1;
-		expected_ranges[i]->values = malloc(sizeof(uint32_t) * 2);
-		expected_ranges[i]->values[0] = 0;
+		expected_ranges[i] = 0;
 	}
 
 	struct block_allocator alloc;
@@ -181,14 +175,15 @@ test_all_match(void *arena) {
 	res = memory_context_init(&mctx, "test", &alloc);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize memory context");
 
+	const struct filter_rule *rule_ptr = &rule;
+
 	struct filter filter;
 	res = filter_init(
-		&filter, combo_net4_port_proto_dst_compile, &rule, 1, &mctx
+		&filter, combo_net4_port_proto_dst_compile, &rule_ptr, 1, &mctx
 	);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
 
-	struct value_range **ranges =
-		malloc(sizeof(struct value_range *) * test_count);
+	uint32_t *ranges = malloc(sizeof(uint32_t) * test_count);
 	filter_query(
 		&filter, combo_net4_port_proto_dst, packets, ranges, test_count
 	);
@@ -197,8 +192,6 @@ test_all_match(void *arena) {
 	TEST_ASSERT_SUCCESS(res, "some checks failed");
 
 	for (size_t i = 0; i < test_count; ++i) {
-		free(expected_ranges[i]->values);
-		free(expected_ranges[i]);
 		free_packet(packets[i]);
 		free(packets[i]);
 	}
@@ -218,7 +211,7 @@ test_multiple_rules_overlap(void *arena) {
 	builder_add_net4_dst(&builder1, ip(10, 0, 0, 0), ip(255, 255, 255, 0));
 	builder_add_port_dst_range(&builder1, 80, 90);
 	builder_set_proto(&builder1, IPPROTO_TCP, 0, 0);
-	struct filter_rule rule1 = build_rule(&builder1, 0);
+	struct filter_rule rule1 = build_rule(&builder1);
 
 	// Rule 2: dst IP 10.0.0.0/16, dst port 85-95, TCP
 	struct filter_rule_builder builder2;
@@ -226,7 +219,7 @@ test_multiple_rules_overlap(void *arena) {
 	builder_add_net4_dst(&builder2, ip(10, 0, 0, 0), ip(255, 255, 0, 0));
 	builder_add_port_dst_range(&builder2, 85, 95);
 	builder_set_proto(&builder2, IPPROTO_TCP, 0, 0);
-	struct filter_rule rule2 = build_rule(&builder2, 1);
+	struct filter_rule rule2 = build_rule(&builder2);
 
 	// Rule 3: dst IP 10.0.0.0/24, dst port 80-90, UDP
 	struct filter_rule_builder builder3;
@@ -234,7 +227,7 @@ test_multiple_rules_overlap(void *arena) {
 	builder_add_net4_dst(&builder3, ip(10, 0, 0, 0), ip(255, 255, 255, 0));
 	builder_add_port_dst_range(&builder3, 80, 90);
 	builder_set_proto(&builder3, IPPROTO_UDP, 0, 0);
-	struct filter_rule rule3 = build_rule(&builder3, 2);
+	struct filter_rule rule3 = build_rule(&builder3);
 
 	struct filter_rule rules[] = {rule1, rule2, rule3};
 
@@ -257,9 +250,14 @@ test_multiple_rules_overlap(void *arena) {
 		// IP: 10.0.0.50, Port: 95, TCP -> matches rule2 only
 		{{10, 0, 0, 50}, 95, IPPROTO_TCP, 1, {1, 0, 0}},
 		// IP: 10.0.0.50, Port: 100, TCP -> no match
-		{{10, 0, 0, 50}, 100, IPPROTO_TCP, 0, {0, 0, 0}},
+		{{10, 0, 0, 50},
+		 100,
+		 IPPROTO_TCP,
+		 0,
+		 {FILTER_RULE_INVALID, 0, 0}},
 		// IP: 10.1.0.50, Port: 85, TCP -> no match (outside /16)
-		{{10, 1, 0, 50}, 85, IPPROTO_TCP, 0, {0, 0, 0}},
+		{{10, 1, 0, 50}, 85, IPPROTO_TCP, 0, {FILTER_RULE_INVALID, 0, 0}
+		},
 	};
 	const size_t test_count = sizeof(test_cases) / sizeof(test_cases[0]);
 
@@ -281,15 +279,9 @@ test_multiple_rules_overlap(void *arena) {
 	}
 
 	// Expected ranges
-	struct value_range *expected_ranges[test_count];
+	uint32_t expected_ranges[test_count];
 	for (size_t i = 0; i < test_count; ++i) {
-		expected_ranges[i] = malloc(sizeof(struct value_range));
-		expected_ranges[i]->count = test_cases[i].expected_count;
-		expected_ranges[i]->values = malloc(sizeof(uint32_t) * 4);
-		for (size_t j = 0; j < test_cases[i].expected_count; ++j) {
-			expected_ranges[i]->values[j] =
-				test_cases[i].expected_actions[j];
-		}
+		expected_ranges[i] = test_cases[i].expected_actions[0];
 	}
 
 	struct block_allocator alloc;
@@ -301,14 +293,17 @@ test_multiple_rules_overlap(void *arena) {
 	res = memory_context_init(&mctx, "test", &alloc);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize memory context");
 
+	const struct filter_rule *rule_ptrs[3] = {
+		&rules[0], &rules[1], &rules[2]
+	};
+
 	struct filter filter;
 	res = filter_init(
-		&filter, combo_net4_port_proto_dst_compile, rules, 3, &mctx
+		&filter, combo_net4_port_proto_dst_compile, rule_ptrs, 3, &mctx
 	);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
 
-	struct value_range **ranges =
-		malloc(sizeof(struct value_range *) * test_count);
+	uint32_t *ranges = malloc(sizeof(uint32_t) * test_count);
 	filter_query(
 		&filter, combo_net4_port_proto_dst, packets, ranges, test_count
 	);
@@ -317,8 +312,6 @@ test_multiple_rules_overlap(void *arena) {
 	TEST_ASSERT_SUCCESS(res, "some checks failed");
 
 	for (size_t i = 0; i < test_count; ++i) {
-		free(expected_ranges[i]->values);
-		free(expected_ranges[i]);
 		free_packet(packets[i]);
 		free(packets[i]);
 	}
@@ -338,7 +331,7 @@ test_tcp_flags(void *arena) {
 	builder_add_net4_dst(&builder1, ip(10, 0, 0, 0), ip(255, 255, 255, 0));
 	builder_add_port_dst_range(&builder1, 80, 80);
 	builder_set_proto(&builder1, IPPROTO_TCP, 0x02, 0); // SYN flag
-	struct filter_rule rule1 = build_rule(&builder1, 0);
+	struct filter_rule rule1 = build_rule(&builder1);
 
 	// Rule 2: dst IP 10.0.0.0/24, dst port 80, TCP with ACK flag
 	struct filter_rule_builder builder2;
@@ -346,7 +339,7 @@ test_tcp_flags(void *arena) {
 	builder_add_net4_dst(&builder2, ip(10, 0, 0, 0), ip(255, 255, 255, 0));
 	builder_add_port_dst_range(&builder2, 80, 80);
 	builder_set_proto(&builder2, IPPROTO_TCP, 0x10, 0); // ACK flag
-	struct filter_rule rule2 = build_rule(&builder2, 1);
+	struct filter_rule rule2 = build_rule(&builder2);
 
 	struct filter_rule rules[] = {rule1, rule2};
 
@@ -366,9 +359,19 @@ test_tcp_flags(void *arena) {
 		// SYN+ACK flags -> matches both rules
 		{{10, 0, 0, 1}, 80, IPPROTO_TCP, 0x12, 1, {0, 0}},
 		// FIN flag -> no match
-		{{10, 0, 0, 1}, 80, IPPROTO_TCP, 0x01, 0, {0, 0}},
+		{{10, 0, 0, 1},
+		 80,
+		 IPPROTO_TCP,
+		 0x01,
+		 0,
+		 {FILTER_RULE_INVALID, 0}},
 		// No flags -> no match
-		{{10, 0, 0, 1}, 80, IPPROTO_TCP, 0x00, 0, {0, 0}},
+		{{10, 0, 0, 1},
+		 80,
+		 IPPROTO_TCP,
+		 0x00,
+		 0,
+		 {FILTER_RULE_INVALID, 0}},
 	};
 	const size_t test_count = sizeof(test_cases) / sizeof(test_cases[0]);
 
@@ -390,15 +393,9 @@ test_tcp_flags(void *arena) {
 	}
 
 	// Expected ranges
-	struct value_range *expected_ranges[test_count];
+	uint32_t expected_ranges[test_count];
 	for (size_t i = 0; i < test_count; ++i) {
-		expected_ranges[i] = malloc(sizeof(struct value_range));
-		expected_ranges[i]->count = test_cases[i].expected_count;
-		expected_ranges[i]->values = malloc(sizeof(uint32_t) * 3);
-		for (size_t j = 0; j < test_cases[i].expected_count; ++j) {
-			expected_ranges[i]->values[j] =
-				test_cases[i].expected_actions[j];
-		}
+		expected_ranges[i] = test_cases[i].expected_actions[0];
 	}
 
 	struct block_allocator alloc;
@@ -410,14 +407,15 @@ test_tcp_flags(void *arena) {
 	res = memory_context_init(&mctx, "test", &alloc);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize memory context");
 
+	const struct filter_rule *rule_ptrs[2] = {&rules[0], &rules[1]};
+
 	struct filter filter;
 	res = filter_init(
-		&filter, combo_net4_port_proto_dst_compile, rules, 2, &mctx
+		&filter, combo_net4_port_proto_dst_compile, rule_ptrs, 2, &mctx
 	);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
 
-	struct value_range **ranges =
-		malloc(sizeof(struct value_range *) * test_count);
+	uint32_t *ranges = malloc(sizeof(uint32_t) * test_count);
 	filter_query(
 		&filter, combo_net4_port_proto_dst, packets, ranges, test_count
 	);
@@ -426,8 +424,6 @@ test_tcp_flags(void *arena) {
 	TEST_ASSERT_SUCCESS(res, "some checks failed");
 
 	for (size_t i = 0; i < test_count; ++i) {
-		free(expected_ranges[i]->values);
-		free(expected_ranges[i]);
 		free_packet(packets[i]);
 		free(packets[i]);
 	}

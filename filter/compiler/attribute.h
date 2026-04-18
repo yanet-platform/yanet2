@@ -11,7 +11,7 @@
 	int FILTER_ATTR_COMPILER_INIT_FUNC(name)(                              \
 		struct value_registry * registry,                              \
 		void **data,                                                   \
-		const struct filter_rule *rules,                               \
+		const struct filter_rule **rules,                              \
 		size_t rule_count,                                             \
 		struct memory_context *mctx                                    \
 	);                                                                     \

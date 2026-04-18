@@ -1,8 +1,11 @@
 package rib
 
 import (
+	"fmt"
 	"net/netip"
 
+	"github.com/yanet-platform/yanet2/common/filterpb"
+	"github.com/yanet-platform/yanet2/modules/route-mpls/controlplane/routemplspb"
 	"github.com/yanet-platform/yanet2/modules/route/controlplane/routepb"
 )
 
@@ -116,5 +119,41 @@ func ToPBRoute(route *Route) *routepb.Route {
 		Pref:             route.Pref,
 		Source:           routepb.RouteSourceID(route.SourceID),
 		LargeCommunities: communities,
+	}
+}
+
+func ToPBMPLSRoute(route *Route, source netip.Addr) *routemplspb.Rule {
+	weight := uint64(1)
+	for _, community := range route.LargeCommunities {
+		if community.ASN == 13238 && community.Function == 1 {
+			weight = uint64(community.Value)
+		}
+	}
+
+	destination := route.NextHop
+	if route.Prefix.Addr().Is4() {
+		// Unmap NextHop in case of V4 nexthop
+		destination = destination.Unmap()
+	}
+
+	label := uint32(0)
+	if len(route.MplsLabelStack) > 0 {
+		label = route.MplsLabelStack[0]
+	}
+	return &routemplspb.Rule{
+		Prefix: &filterpb.IPPrefix{
+			Addr:   route.Prefix.Addr().AsSlice(),
+			Length: uint32(route.Prefix.Bits()),
+		},
+		Nexthop: &routemplspb.NextHop{
+			Kind:          routemplspb.ActionKind_ACTION_KIND_TUNNEL,
+			Label:         label,
+			DestinationIp: destination.AsSlice(),
+			SourceIp:      source.AsSlice(),
+
+			Weight: weight,
+
+			Counter: fmt.Sprintf("%s/%s/%d", route.Prefix.String(), destination.String(), label),
+		},
 	}
 }

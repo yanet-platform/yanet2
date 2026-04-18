@@ -62,7 +62,7 @@ net6_normalize(struct net6 *src, struct net6 *dst) {
 static inline int
 collect_net6_range(
 	struct memory_context *memory_context,
-	const struct filter_rule *actions,
+	const struct filter_rule **actions,
 	uint32_t count,
 	action_get_net6_func get_net6,
 	net6_get_part_func get_part,
@@ -73,9 +73,13 @@ collect_net6_range(
 	if (range_collector_init(&collector, memory_context))
 		goto error;
 
-	for (const struct filter_rule *action = actions;
-	     action < actions + count;
-	     ++action) {
+	for (const struct filter_rule **action_ptr = actions;
+	     action_ptr < actions + count;
+	     ++action_ptr) {
+
+		if (*action_ptr == NULL)
+			continue;
+		const struct filter_rule *action = *action_ptr;
 
 		struct net6 *nets;
 		uint32_t net_count;
@@ -126,7 +130,7 @@ error:
 static inline int
 merge_net6_range(
 	struct memory_context *memory_context,
-	const struct filter_rule *actions,
+	const struct filter_rule **actions,
 	uint32_t count,
 	action_get_net6_func get_net6,
 	const struct range_index *ri_hi,
@@ -157,9 +161,13 @@ merge_net6_range(
 	struct radix rdx;
 	radix_init(&rdx, memory_context);
 
-	for (const struct filter_rule *action = actions;
-	     action < actions + count;
-	     ++action) {
+	for (const struct filter_rule **action_ptr = actions;
+	     action_ptr < actions + count;
+	     ++action_ptr) {
+
+		if (*action_ptr == NULL)
+			continue;
+		const struct filter_rule *action = *action_ptr;
 
 		remap_table_new_gen(&remap_table);
 
@@ -246,9 +254,13 @@ merge_net6_range(
 	struct value_registry net_registry;
 	value_registry_init(&net_registry, memory_context);
 
-	for (const struct filter_rule *action = actions;
-	     action < actions + count;
-	     ++action) {
+	for (const struct filter_rule **action_ptr = actions;
+	     action_ptr < actions + count;
+	     ++action_ptr) {
+
+		if (*action_ptr == NULL)
+			continue;
+		const struct filter_rule *action = *action_ptr;
 
 		struct net6 *nets;
 		uint32_t net_count;
@@ -313,12 +325,16 @@ merge_net6_range(
 
 	value_registry_init(registry, memory_context);
 
-	for (const struct filter_rule *action = actions;
-	     action < actions + count;
-	     ++action) {
-
+	for (const struct filter_rule **action_ptr = actions;
+	     action_ptr < actions + count;
+	     ++action_ptr) {
+		// A value range should be created even for empty rules
 		if (value_registry_start(registry))
 			return -1;
+
+		if (*action_ptr == NULL)
+			continue;
+		const struct filter_rule *action = *action_ptr;
 
 		struct net6 *nets;
 		uint32_t net_count;
@@ -368,7 +384,7 @@ init_net6(
 	struct value_registry *registry,
 	action_get_net6_func get_net6,
 	void **data,
-	const struct filter_rule *actions,
+	const struct filter_rule **actions,
 	size_t count,
 	struct memory_context *memory_context
 ) {
@@ -441,7 +457,7 @@ int
 FILTER_ATTR_COMPILER_INIT_FUNC(net6_src)(
 	struct value_registry *registry,
 	void **data,
-	const struct filter_rule *rules,
+	const struct filter_rule **rules,
 	size_t actions_count,
 	struct memory_context *memory_context
 ) {
@@ -460,7 +476,7 @@ int
 FILTER_ATTR_COMPILER_INIT_FUNC(net6_dst)(
 	struct value_registry *registry,
 	void **data,
-	const struct filter_rule *rules,
+	const struct filter_rule **rules,
 	size_t actions_count,
 	struct memory_context *memory_context
 ) {

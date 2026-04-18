@@ -46,5 +46,19 @@ acl_module_config_set_fwstate_config(
 
 void
 acl_module_config_transfer_fwstate_config(
-	struct cp_module *old_cp_module, struct cp_module *new_cp_module
+	struct cp_module *new_cp_module, struct cp_module *old_cp_module
+);
+
+struct acl_config_info {
+	uint64_t compilation_time_ns;
+	uint64_t filter_rule_count_ip4;
+	uint64_t filter_rule_count_ip4_port;
+	uint64_t filter_rule_count_ip6;
+	uint64_t filter_rule_count_ip6_port;
+	uint64_t filter_rule_count_vlan;
+};
+
+void
+acl_module_config_get_info(
+	struct cp_module *cp_module, struct acl_config_info *info
 );

@@ -28,11 +28,12 @@ run_case(void) {
 	struct filter_rule_builder b;
 	builder_init(&b);
 	builder_add_port_src_range(&b, 1024, 5016);
-	struct filter_rule r = build_rule(&b, 0);
+	struct filter_rule r = build_rule(&b);
 
 	// init filter
+	const struct filter_rule *r_ptr = &r;
 	struct filter f;
-	res = filter_init(&f, sign, &r, 1, &memory_context);
+	res = filter_init(&f, sign, &r_ptr, 1, &memory_context);
 	assert(res == 0);
 
 	// craft packet: UDP 4000
@@ -44,10 +45,9 @@ run_case(void) {
 
 	// query via header-only API
 	struct packet *packet_ptr = &p;
-	struct value_range *actions;
+	uint32_t actions;
 	filter_query(&f, sign_compile, &packet_ptr, &actions, 1);
-	assert(actions->count == 1);
-	assert(ADDR_OF(&actions->values)[0] == 0);
+	assert(actions == 0);
 
 	free_packet(&p);
 	filter_free(&f, sign);

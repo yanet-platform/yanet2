@@ -61,10 +61,9 @@ query_and_expect_actions(
 	enum filter_sign type,
 	struct packet **packets,
 	size_t packets_count,
-	struct value_range **expected
+	uint32_t *expected
 ) {
-	struct value_range **ranges =
-		malloc(sizeof(struct value_range *) * packets_count);
+	uint32_t *ranges = malloc(sizeof(uint32_t) * packets_count);
 
 	switch (type) {
 	case src:
@@ -158,12 +157,9 @@ test_basic(void *arena, enum filter_sign sign) {
 	};
 	const size_t nets_count = sizeof(nets) / sizeof(nets[0]);
 
-	struct value_range *expected_ranges[checks_count];
+	uint32_t expected_ranges[checks_count];
 	for (size_t i = 0; i < checks_count; ++i) {
-		expected_ranges[i] = malloc(sizeof(struct value_range));
-		expected_ranges[i]->count = 0;
-		expected_ranges[i]->values =
-			malloc(sizeof(uint32_t) * nets_count); // reserve
+		expected_ranges[i] = FILTER_RULE_INVALID;
 	}
 
 	struct filter_rule rules[nets_count];
@@ -182,7 +178,7 @@ test_basic(void *arena, enum filter_sign sign) {
 		memcpy(builder->net4_src[0].addr, nets[net_idx].addr, 4);
 		memcpy(builder->net4_src[0].mask, &mask, 4);
 
-		rules[net_idx] = build_rule(builder, net_idx);
+		rules[net_idx] = build_rule(builder);
 
 		uint8_t mask_byte = ((uint8_t *)&mask
 		)[3]; // Get the 4th byte of the BE mask
@@ -193,10 +189,8 @@ test_basic(void *arena, enum filter_sign sign) {
 		     ++check_idx) {
 			if (from <= checks[check_idx] &&
 			    checks[check_idx] <= to &&
-			    !expected_ranges[check_idx]->count) {
-				expected_ranges[check_idx]
-					->values[expected_ranges[check_idx]
-							 ->count++] = net_idx;
+			    expected_ranges[check_idx] == FILTER_RULE_INVALID) {
+				expected_ranges[check_idx] = net_idx;
 			}
 		}
 	}
@@ -210,14 +204,26 @@ test_basic(void *arena, enum filter_sign sign) {
 	res = memory_context_init(&mctx, "test", &alloc);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize memory context");
 
+	const struct filter_rule *rule_ptrs[nets_count];
+	for (size_t i = 0; i < nets_count; i++)
+		rule_ptrs[i] = &rules[i];
+
 	struct filter filter;
 	if (sign == src) {
 		res = filter_init(
-			&filter, sign_fast_src_compile, rules, nets_count, &mctx
+			&filter,
+			sign_fast_src_compile,
+			rule_ptrs,
+			nets_count,
+			&mctx
 		);
 	} else {
 		res = filter_init(
-			&filter, sign_fast_dst_compile, rules, nets_count, &mctx
+			&filter,
+			sign_fast_dst_compile,
+			rule_ptrs,
+			nets_count,
+			&mctx
 		);
 	}
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
@@ -228,8 +234,6 @@ test_basic(void *arena, enum filter_sign sign) {
 	TEST_ASSERT_SUCCESS(res, "some checks failed");
 
 	for (size_t i = 0; i < checks_count; ++i) {
-		free(expected_ranges[i]->values);
-		free(expected_ranges[i]);
 		free_packet(packets[i]);
 		free(packets[i]);
 	}
@@ -304,27 +308,16 @@ test_multiple_nets_per_rule(void *arena, enum filter_sign sign) {
 	// Expected actions for each test packet
 	// Packets 0-2 match rule 1, packets 3-4 match rule 2, packets 5-6 match
 	// rule 3, packet 7 matches nothing
-	uint32_t expected_actions[][3] = {
-		{0, 0, 0}, // Packet 0: Rule 1
-		{0, 0, 0}, // Packet 1: Rule 1
-		{0, 0, 0}, // Packet 2: Rule 1
-		{1, 0, 0}, // Packet 3: Rule 2
-		{1, 0, 0}, // Packet 4: Rule 2
-		{2, 0, 0}, // Packet 5: Rule 3
-		{2, 0, 0}, // Packet 6: Rule 3
-		{0, 0, 0}, // Packet 7: No match
+	uint32_t expected_actions[] = {
+		0,		     // Packet 0: Rule 1
+		0,		     // Packet 1: Rule 1
+		0,		     // Packet 2: Rule 1
+		1,		     // Packet 3: Rule 2
+		1,		     // Packet 4: Rule 2
+		2,		     // Packet 5: Rule 3
+		2,		     // Packet 6: Rule 3
+		FILTER_RULE_INVALID, // Packet 7: No match
 	};
-	uint32_t expected_counts[] = {1, 1, 1, 1, 1, 1, 1, 0};
-
-	struct value_range *expected_ranges[test_ips_count];
-	for (size_t i = 0; i < test_ips_count; ++i) {
-		expected_ranges[i] = malloc(sizeof(struct value_range));
-		expected_ranges[i]->count = expected_counts[i];
-		expected_ranges[i]->values = malloc(sizeof(uint32_t) * 3);
-		for (size_t j = 0; j < expected_counts[i]; ++j) {
-			expected_ranges[i]->values[j] = expected_actions[i][j];
-		}
-	}
 
 	// Build the 3 rules
 	const size_t num_rules = 3;
@@ -349,7 +342,7 @@ test_multiple_nets_per_rule(void *arena, enum filter_sign sign) {
 			);
 		}
 	}
-	rules[0] = build_rule(&builders[0], 0);
+	rules[0] = build_rule(&builders[0]);
 
 	// Rule 2: Add 2 networks
 	builder_init(&builders[1]);
@@ -369,7 +362,7 @@ test_multiple_nets_per_rule(void *arena, enum filter_sign sign) {
 			);
 		}
 	}
-	rules[1] = build_rule(&builders[1], 1);
+	rules[1] = build_rule(&builders[1]);
 
 	// Rule 3: Add 2 networks
 	builder_init(&builders[2]);
@@ -389,7 +382,7 @@ test_multiple_nets_per_rule(void *arena, enum filter_sign sign) {
 			);
 		}
 	}
-	rules[2] = build_rule(&builders[2], 2);
+	rules[2] = build_rule(&builders[2]);
 
 	struct block_allocator alloc;
 	int res = block_allocator_init(&alloc);
@@ -400,26 +393,36 @@ test_multiple_nets_per_rule(void *arena, enum filter_sign sign) {
 	res = memory_context_init(&mctx, "test", &alloc);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize memory context");
 
+	const struct filter_rule *rule_ptrs[num_rules];
+	for (size_t i = 0; i < num_rules; i++)
+		rule_ptrs[i] = &rules[i];
+
 	struct filter filter;
 	if (sign == src) {
 		res = filter_init(
-			&filter, sign_fast_src_compile, rules, num_rules, &mctx
+			&filter,
+			sign_fast_src_compile,
+			rule_ptrs,
+			num_rules,
+			&mctx
 		);
 	} else {
 		res = filter_init(
-			&filter, sign_fast_dst_compile, rules, num_rules, &mctx
+			&filter,
+			sign_fast_dst_compile,
+			rule_ptrs,
+			num_rules,
+			&mctx
 		);
 	}
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
 
 	res = query_and_expect_actions(
-		&filter, sign, packets, test_ips_count, expected_ranges
+		&filter, sign, packets, test_ips_count, expected_actions
 	);
 	TEST_ASSERT_SUCCESS(res, "some checks failed");
 
 	for (size_t i = 0; i < test_ips_count; ++i) {
-		free(expected_ranges[i]->values);
-		free(expected_ranges[i]);
 		free_packet(packets[i]);
 		free(packets[i]);
 	}
@@ -498,26 +501,27 @@ stress(void *arena,
 			}
 		}
 
-		rules[rule_idx] = build_rule(&builders[rule_idx], rule_idx);
+		rules[rule_idx] = build_rule(&builders[rule_idx]);
 	}
 
-	struct value_range **expected_ranges =
-		malloc(sizeof(struct value_range *) * num_packets);
+	uint32_t *expected_ranges = malloc(sizeof(uint32_t) * num_packets);
 	for (size_t range_idx = 0; range_idx < num_packets; ++range_idx) {
-		expected_ranges[range_idx] = malloc(sizeof(struct value_range));
-		expected_ranges[range_idx]->count = 0;
-		expected_ranges[range_idx]->values =
-			malloc(sizeof(uint32_t) * num_rules); // reserve
+		expected_ranges[range_idx] = FILTER_RULE_INVALID;
 	}
 
 	// Initialize both filters
+	const struct filter_rule **rule_ptrs =
+		malloc(sizeof(const struct filter_rule *) * num_rules);
+	for (size_t i = 0; i < num_rules; i++)
+		rule_ptrs[i] = &rules[i];
+
 	struct filter filter;
 	switch (sign) {
 	case src:
 		res = filter_init(
 			&filter,
 			sign_fast_src_compile,
-			rules,
+			rule_ptrs,
 			num_rules,
 			&memory_context
 		);
@@ -526,7 +530,7 @@ stress(void *arena,
 		res = filter_init(
 			&filter,
 			sign_fast_dst_compile,
-			rules,
+			rule_ptrs,
 			num_rules,
 			&memory_context
 		);
@@ -535,7 +539,7 @@ stress(void *arena,
 		res = filter_init(
 			&filter,
 			sign_fast_src_dst_compile,
-			rules,
+			rule_ptrs,
 			num_rules,
 			&memory_context
 		);
@@ -588,12 +592,9 @@ stress(void *arena,
 			    !is_ip_from_net(&rule->net4.dsts[0], dst_ip)) {
 				ok = 0;
 			}
-			if (ok) {
-				struct value_range *range =
-					expected_ranges[packet_idx];
-				if (!range->count)
-					range->values[range->count++] =
-						rule_idx;
+			if (ok && expected_ranges[packet_idx] ==
+					  FILTER_RULE_INVALID) {
+				expected_ranges[packet_idx] = rule_idx;
 			}
 		}
 	}
@@ -605,11 +606,10 @@ stress(void *arena,
 		result, "failed to query packets and compare with old filter"
 	);
 
+	free(rule_ptrs);
 	free(rules);
 	free(builders);
 	for (size_t packet_idx = 0; packet_idx < num_packets; ++packet_idx) {
-		free(expected_ranges[packet_idx]->values);
-		free(expected_ranges[packet_idx]);
 		free_packet(packets[packet_idx]);
 		free(packets[packet_idx]);
 	}
@@ -683,15 +683,13 @@ test_no_match(void *arena, enum filter_sign sign) {
 				(const uint8_t *)&mask
 			);
 		}
-		rules[net_idx] = build_rule(&builders[net_idx], net_idx);
+		rules[net_idx] = build_rule(&builders[net_idx]);
 	}
 
 	// Expected: no matches for any packet
-	struct value_range *expected_ranges[test_ips_count];
+	uint32_t expected_ranges[test_ips_count];
 	for (size_t i = 0; i < test_ips_count; ++i) {
-		expected_ranges[i] = malloc(sizeof(struct value_range));
-		expected_ranges[i]->count = 0;
-		expected_ranges[i]->values = malloc(sizeof(uint32_t));
+		expected_ranges[i] = FILTER_RULE_INVALID;
 	}
 
 	struct block_allocator alloc;
@@ -703,14 +701,26 @@ test_no_match(void *arena, enum filter_sign sign) {
 	res = memory_context_init(&mctx, "test", &alloc);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize memory context");
 
+	const struct filter_rule *rule_ptrs[nets_count];
+	for (size_t i = 0; i < nets_count; i++)
+		rule_ptrs[i] = &rules[i];
+
 	struct filter filter;
 	if (sign == src) {
 		res = filter_init(
-			&filter, sign_fast_src_compile, rules, nets_count, &mctx
+			&filter,
+			sign_fast_src_compile,
+			rule_ptrs,
+			nets_count,
+			&mctx
 		);
 	} else {
 		res = filter_init(
-			&filter, sign_fast_dst_compile, rules, nets_count, &mctx
+			&filter,
+			sign_fast_dst_compile,
+			rule_ptrs,
+			nets_count,
+			&mctx
 		);
 	}
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
@@ -721,8 +731,6 @@ test_no_match(void *arena, enum filter_sign sign) {
 	TEST_ASSERT_SUCCESS(res, "some checks failed");
 
 	for (size_t i = 0; i < test_ips_count; ++i) {
-		free(expected_ranges[i]->values);
-		free(expected_ranges[i]);
 		free_packet(packets[i]);
 		free(packets[i]);
 	}
@@ -793,28 +801,17 @@ test_overlapping_networks(void *arena, enum filter_sign sign) {
 				(const uint8_t *)&mask
 			);
 		}
-		rules[net_idx] = build_rule(&builders[net_idx], net_idx);
+		rules[net_idx] = build_rule(&builders[net_idx]);
 	}
 
 	// Expected matches
-	uint32_t expected_actions[][4] = {
-		{0, 0, 0, 0}, // Packet 0: rules 1,2,3
-		{0, 0, 0, 0}, // Packet 1: rules 1,2
-		{0, 0, 0, 0}, // Packet 2: rule 1
-		{3, 0, 0, 0}, // Packet 3: rule 4
-		{0, 0, 0, 0}, // Packet 4: no match
+	uint32_t expected_actions[] = {
+		0,		     // Packet 0: rules 1,2,3
+		0,		     // Packet 1: rules 1,2
+		0,		     // Packet 2: rule 1
+		3,		     // Packet 3: rule 4
+		FILTER_RULE_INVALID, // Packet 4: no match
 	};
-	uint32_t expected_counts[] = {1, 1, 1, 1, 0};
-
-	struct value_range *expected_ranges[test_ips_count];
-	for (size_t i = 0; i < test_ips_count; ++i) {
-		expected_ranges[i] = malloc(sizeof(struct value_range));
-		expected_ranges[i]->count = expected_counts[i];
-		expected_ranges[i]->values = malloc(sizeof(uint32_t) * 4);
-		for (size_t j = 0; j < expected_counts[i]; ++j) {
-			expected_ranges[i]->values[j] = expected_actions[i][j];
-		}
-	}
 
 	struct block_allocator alloc;
 	int res = block_allocator_init(&alloc);
@@ -825,26 +822,36 @@ test_overlapping_networks(void *arena, enum filter_sign sign) {
 	res = memory_context_init(&mctx, "test", &alloc);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize memory context");
 
+	const struct filter_rule *rule_ptrs[nets_count];
+	for (size_t i = 0; i < nets_count; i++)
+		rule_ptrs[i] = &rules[i];
+
 	struct filter filter;
 	if (sign == src) {
 		res = filter_init(
-			&filter, sign_fast_src_compile, rules, nets_count, &mctx
+			&filter,
+			sign_fast_src_compile,
+			rule_ptrs,
+			nets_count,
+			&mctx
 		);
 	} else {
 		res = filter_init(
-			&filter, sign_fast_dst_compile, rules, nets_count, &mctx
+			&filter,
+			sign_fast_dst_compile,
+			rule_ptrs,
+			nets_count,
+			&mctx
 		);
 	}
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
 
 	res = query_and_expect_actions(
-		&filter, sign, packets, test_ips_count, expected_ranges
+		&filter, sign, packets, test_ips_count, expected_actions
 	);
 	TEST_ASSERT_SUCCESS(res, "some checks failed");
 
 	for (size_t i = 0; i < test_ips_count; ++i) {
-		free(expected_ranges[i]->values);
-		free(expected_ranges[i]);
 		free_packet(packets[i]);
 		free(packets[i]);
 	}
@@ -912,20 +919,13 @@ test_boundary_conditions(void *arena, enum filter_sign sign) {
 				(const uint8_t *)&mask
 			);
 		}
-		rules[net_idx] = build_rule(&builders[net_idx], net_idx);
+		rules[net_idx] = build_rule(&builders[net_idx]);
 	}
 
 	// Expected: first 4 match, last 2 don't
-	uint32_t expected_counts[] = {1, 1, 1, 1, 0, 0};
-	struct value_range *expected_ranges[test_ips_count];
-	for (size_t i = 0; i < test_ips_count; ++i) {
-		expected_ranges[i] = malloc(sizeof(struct value_range));
-		expected_ranges[i]->count = expected_counts[i];
-		expected_ranges[i]->values = malloc(sizeof(uint32_t) * 2);
-		if (expected_counts[i] > 0) {
-			expected_ranges[i]->values[0] = 0;
-		}
-	}
+	uint32_t expected_actions[] = {
+		0, 0, 0, 0, FILTER_RULE_INVALID, FILTER_RULE_INVALID
+	};
 
 	struct block_allocator alloc;
 	int res = block_allocator_init(&alloc);
@@ -936,26 +936,36 @@ test_boundary_conditions(void *arena, enum filter_sign sign) {
 	res = memory_context_init(&mctx, "test", &alloc);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize memory context");
 
+	const struct filter_rule *rule_ptrs[nets_count];
+	for (size_t i = 0; i < nets_count; i++)
+		rule_ptrs[i] = &rules[i];
+
 	struct filter filter;
 	if (sign == src) {
 		res = filter_init(
-			&filter, sign_fast_src_compile, rules, nets_count, &mctx
+			&filter,
+			sign_fast_src_compile,
+			rule_ptrs,
+			nets_count,
+			&mctx
 		);
 	} else {
 		res = filter_init(
-			&filter, sign_fast_dst_compile, rules, nets_count, &mctx
+			&filter,
+			sign_fast_dst_compile,
+			rule_ptrs,
+			nets_count,
+			&mctx
 		);
 	}
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
 
 	res = query_and_expect_actions(
-		&filter, sign, packets, test_ips_count, expected_ranges
+		&filter, sign, packets, test_ips_count, expected_actions
 	);
 	TEST_ASSERT_SUCCESS(res, "some checks failed");
 
 	for (size_t i = 0; i < test_ips_count; ++i) {
-		free(expected_ranges[i]->values);
-		free(expected_ranges[i]);
 		free_packet(packets[i]);
 		free(packets[i]);
 	}
@@ -1025,29 +1035,18 @@ test_single_host_networks(void *arena, enum filter_sign sign) {
 				(const uint8_t *)&mask
 			);
 		}
-		rules[net_idx] = build_rule(&builders[net_idx], net_idx);
+		rules[net_idx] = build_rule(&builders[net_idx]);
 	}
 
 	// Expected: first 3 match their respective rules, last 3 don't match
-	uint32_t expected_actions[][1] = {
-		{0},
-		{1},
-		{2},
-		{0},
-		{0},
-		{0},
+	uint32_t expected_actions[] = {
+		0,
+		1,
+		2,
+		FILTER_RULE_INVALID,
+		FILTER_RULE_INVALID,
+		FILTER_RULE_INVALID,
 	};
-	uint32_t expected_counts[] = {1, 1, 1, 0, 0, 0};
-
-	struct value_range *expected_ranges[test_ips_count];
-	for (size_t i = 0; i < test_ips_count; ++i) {
-		expected_ranges[i] = malloc(sizeof(struct value_range));
-		expected_ranges[i]->count = expected_counts[i];
-		expected_ranges[i]->values = malloc(sizeof(uint32_t) * 2);
-		if (expected_counts[i] > 0) {
-			expected_ranges[i]->values[0] = expected_actions[i][0];
-		}
-	}
 
 	struct block_allocator alloc;
 	int res = block_allocator_init(&alloc);
@@ -1058,26 +1057,36 @@ test_single_host_networks(void *arena, enum filter_sign sign) {
 	res = memory_context_init(&mctx, "test", &alloc);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize memory context");
 
+	const struct filter_rule *rule_ptrs[nets_count];
+	for (size_t i = 0; i < nets_count; i++)
+		rule_ptrs[i] = &rules[i];
+
 	struct filter filter;
 	if (sign == src) {
 		res = filter_init(
-			&filter, sign_fast_src_compile, rules, nets_count, &mctx
+			&filter,
+			sign_fast_src_compile,
+			rule_ptrs,
+			nets_count,
+			&mctx
 		);
 	} else {
 		res = filter_init(
-			&filter, sign_fast_dst_compile, rules, nets_count, &mctx
+			&filter,
+			sign_fast_dst_compile,
+			rule_ptrs,
+			nets_count,
+			&mctx
 		);
 	}
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
 
 	res = query_and_expect_actions(
-		&filter, sign, packets, test_ips_count, expected_ranges
+		&filter, sign, packets, test_ips_count, expected_actions
 	);
 	TEST_ASSERT_SUCCESS(res, "some checks failed");
 
 	for (size_t i = 0; i < test_ips_count; ++i) {
-		free(expected_ranges[i]->values);
-		free(expected_ranges[i]);
 		free_packet(packets[i]);
 		free(packets[i]);
 	}
@@ -1148,27 +1157,18 @@ test_adjacent_networks(void *arena, enum filter_sign sign) {
 				(const uint8_t *)&mask
 			);
 		}
-		rules[net_idx] = build_rule(&builders[net_idx], net_idx);
+		rules[net_idx] = build_rule(&builders[net_idx]);
 	}
 
 	// Expected: packets 0,1,4 match rule 1; packets 2,3,5 match rule 2
-	uint32_t expected_actions[][1] = {
-		{0}, // Packet 0
-		{0}, // Packet 1
-		{1}, // Packet 2
-		{1}, // Packet 3
-		{0}, // Packet 4
-		{1}, // Packet 5
+	uint32_t expected_actions[] = {
+		0, // Packet 0
+		0, // Packet 1
+		1, // Packet 2
+		1, // Packet 3
+		0, // Packet 4
+		1, // Packet 5
 	};
-	uint32_t expected_counts[] = {1, 1, 1, 1, 1, 1};
-
-	struct value_range *expected_ranges[test_ips_count];
-	for (size_t i = 0; i < test_ips_count; ++i) {
-		expected_ranges[i] = malloc(sizeof(struct value_range));
-		expected_ranges[i]->count = expected_counts[i];
-		expected_ranges[i]->values = malloc(sizeof(uint32_t) * 2);
-		expected_ranges[i]->values[0] = expected_actions[i][0];
-	}
 
 	struct block_allocator alloc;
 	int res = block_allocator_init(&alloc);
@@ -1179,26 +1179,36 @@ test_adjacent_networks(void *arena, enum filter_sign sign) {
 	res = memory_context_init(&mctx, "test", &alloc);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize memory context");
 
+	const struct filter_rule *rule_ptrs[nets_count];
+	for (size_t i = 0; i < nets_count; i++)
+		rule_ptrs[i] = &rules[i];
+
 	struct filter filter;
 	if (sign == src) {
 		res = filter_init(
-			&filter, sign_fast_src_compile, rules, nets_count, &mctx
+			&filter,
+			sign_fast_src_compile,
+			rule_ptrs,
+			nets_count,
+			&mctx
 		);
 	} else {
 		res = filter_init(
-			&filter, sign_fast_dst_compile, rules, nets_count, &mctx
+			&filter,
+			sign_fast_dst_compile,
+			rule_ptrs,
+			nets_count,
+			&mctx
 		);
 	}
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
 
 	res = query_and_expect_actions(
-		&filter, sign, packets, test_ips_count, expected_ranges
+		&filter, sign, packets, test_ips_count, expected_actions
 	);
 	TEST_ASSERT_SUCCESS(res, "some checks failed");
 
 	for (size_t i = 0; i < test_ips_count; ++i) {
-		free(expected_ranges[i]->values);
-		free(expected_ranges[i]);
 		free_packet(packets[i]);
 		free(packets[i]);
 	}

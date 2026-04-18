@@ -50,12 +50,10 @@ sequenceDiagram
 ## System layer pyramid
 
 ```text
-                                                        +----------------+
-                                                        | Cluster        |
-                                                   +----+----------------+----+
-                                                   | Coordinator              |
+                                                   +--------------------------+
+                                                   | Cluster(?)               |
                   +------------+--------------+----+--------------------------+----+
-                  | CLI        | Web UI       | Network function agents            |
+                  | CLI        | Web UI       | Network function operators         |
              +----+------------+--------------+------------------[gRPC ]-----------+----+
              | Gateway - single entry point to modules' gRPC APIs, proxy                |
         +----+---------------------------------------------------[gRPC ]----------------+----+

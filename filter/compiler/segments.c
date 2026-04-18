@@ -152,12 +152,9 @@ fill_registry_from_segments_u16(
 ) {
 	for (size_t segment_idx = 0; segment_idx < segment_count;
 	     ++segment_idx) {
-		if (segment_idx == 0 ||
-		    segments[segment_idx].label !=
-			    segments[segment_idx - 1].label) {
-			if (value_registry_start(registry) != 0) {
+		while (segments[segment_idx].label >= registry->range_count) {
+			if (value_registry_start(registry))
 				return -1;
-			}
 		}
 
 		struct segment_u16 *segment = &segments[segment_idx];
@@ -350,12 +347,9 @@ fill_registry_from_segments_u32(
 ) {
 	for (size_t segment_idx = 0; segment_idx < segment_count;
 	     ++segment_idx) {
-		if (segment_idx == 0 ||
-		    segments[segment_idx].label !=
-			    segments[segment_idx - 1].label) {
-			if (value_registry_start(registry) != 0) {
+		while (segments[segment_idx].label >= registry->range_count) {
+			if (value_registry_start(registry))
 				return -1;
-			}
 		}
 
 		struct segment_u32 *segment = &segments[segment_idx];
@@ -549,12 +543,9 @@ fill_registry_from_segments_u64(
 ) {
 	for (size_t segment_idx = 0; segment_idx < segment_count;
 	     ++segment_idx) {
-		if (segment_idx == 0 ||
-		    segments[segment_idx].label !=
-			    segments[segment_idx - 1].label) {
-			if (value_registry_start(registry) != 0) {
+		while (segments[segment_idx].label >= registry->range_count) {
+			if (value_registry_start(registry))
 				return -1;
-			}
 		}
 
 		struct segment_u64 *segment = &segments[segment_idx];

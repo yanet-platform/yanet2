@@ -14,7 +14,7 @@
 static int
 collect_proto_values(
 	struct memory_context *memory_context,
-	const struct filter_rule *rules,
+	const struct filter_rule **rules,
 	uint32_t count,
 	struct value_table *table,
 	struct value_registry *registry
@@ -33,8 +33,12 @@ collect_proto_values(
 		goto error_remap_table;
 	}
 
-	for (const struct filter_rule *rule = rules; rule < rules + count;
-	     ++rule) {
+	for (const struct filter_rule **rule_ptr = rules;
+	     rule_ptr < rules + count;
+	     ++rule_ptr) {
+		if (*rule_ptr == NULL)
+			continue;
+		const struct filter_rule *rule = *rule_ptr;
 
 		remap_table_new_gen(&remap_table);
 
@@ -63,9 +67,15 @@ collect_proto_values(
 	value_table_compact(table, &remap_table);
 	remap_table_free(&remap_table);
 
-	for (const struct filter_rule *rule = rules; rule < rules + count;
-	     ++rule) {
+	for (const struct filter_rule **rule_ptr = rules;
+	     rule_ptr < rules + count;
+	     ++rule_ptr) {
+		// A value range should be created even for empty rules
 		value_registry_start(registry);
+		if (*rule_ptr == NULL)
+			continue;
+
+		const struct filter_rule *rule = *rule_ptr;
 
 		struct filter_proto_range *proto_ranges =
 			rule->transport.protos;
@@ -105,7 +115,7 @@ int
 FILTER_ATTR_COMPILER_INIT_FUNC(proto_range)(
 	struct value_registry *registry,
 	void **data,
-	const struct filter_rule *rules,
+	const struct filter_rule **rules,
 	size_t rule_count,
 	struct memory_context *mctx
 ) {

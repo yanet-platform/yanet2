@@ -153,7 +153,7 @@ func setupCp(agent *ffi.Agent) error {
 }
 
 func (ctx *TestSetup) Free() {
-	// ctx.module.Close()
+	ctx.module.Free()
 	ctx.agent.Close()
 	ctx.mock.Free()
 }

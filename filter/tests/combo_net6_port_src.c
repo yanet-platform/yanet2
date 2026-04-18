@@ -35,10 +35,9 @@ query_and_expect_actions(
 	struct filter *filter,
 	struct packet **packets,
 	size_t packets_count,
-	struct value_range **expected
+	uint32_t *expected
 ) {
-	struct value_range **ranges =
-		malloc(sizeof(struct value_range *) * packets_count);
+	uint32_t *ranges = malloc(sizeof(uint32_t) * packets_count);
 
 	filter_query(
 		filter, combo_net6_port_src, packets, ranges, packets_count
@@ -87,7 +86,7 @@ test_no_match_port_only(void *arena) {
 	memcpy(net.mask, mask, NET6_LEN);
 	builder_add_net6_src(&builder, net);
 	builder_add_port_src_range(&builder, 80, 90);
-	struct filter_rule rule = build_rule(&builder, 0);
+	struct filter_rule rule = build_rule(&builder);
 
 	// Test packets: IP matches but port doesn't
 	const struct {
@@ -126,11 +125,9 @@ test_no_match_port_only(void *arena) {
 	}
 
 	// Expected: no matches
-	struct value_range *expected_ranges[test_count];
+	uint32_t expected_ranges[test_count];
 	for (size_t i = 0; i < test_count; ++i) {
-		expected_ranges[i] = malloc(sizeof(struct value_range));
-		expected_ranges[i]->count = 0;
-		expected_ranges[i]->values = malloc(sizeof(uint32_t));
+		expected_ranges[i] = FILTER_RULE_INVALID;
 	}
 
 	struct block_allocator alloc;
@@ -142,9 +139,11 @@ test_no_match_port_only(void *arena) {
 	res = memory_context_init(&mctx, "test", &alloc);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize memory context");
 
+	const struct filter_rule *rule_ptr = &rule;
+
 	struct filter filter;
 	res = filter_init(
-		&filter, combo_net6_port_src_compile, &rule, 1, &mctx
+		&filter, combo_net6_port_src_compile, &rule_ptr, 1, &mctx
 	);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
 
@@ -154,8 +153,6 @@ test_no_match_port_only(void *arena) {
 	TEST_ASSERT_SUCCESS(res, "some checks failed");
 
 	for (size_t i = 0; i < test_count; ++i) {
-		free(expected_ranges[i]->values);
-		free(expected_ranges[i]);
 		free_packet(packets[i]);
 		free(packets[i]);
 	}
@@ -181,7 +178,7 @@ test_no_match_ip_only(void *arena) {
 	memcpy(net.mask, mask, NET6_LEN);
 	builder_add_net6_src(&builder, net);
 	builder_add_port_src_range(&builder, 80, 90);
-	struct filter_rule rule = build_rule(&builder, 0);
+	struct filter_rule rule = build_rule(&builder);
 
 	// Test packets: Port matches but IP doesn't
 	const struct {
@@ -235,11 +232,9 @@ test_no_match_ip_only(void *arena) {
 	}
 
 	// Expected: no matches
-	struct value_range *expected_ranges[test_count];
+	uint32_t expected_ranges[test_count];
 	for (size_t i = 0; i < test_count; ++i) {
-		expected_ranges[i] = malloc(sizeof(struct value_range));
-		expected_ranges[i]->count = 0;
-		expected_ranges[i]->values = malloc(sizeof(uint32_t));
+		expected_ranges[i] = FILTER_RULE_INVALID;
 	}
 
 	struct block_allocator alloc;
@@ -251,9 +246,11 @@ test_no_match_ip_only(void *arena) {
 	res = memory_context_init(&mctx, "test", &alloc);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize memory context");
 
+	const struct filter_rule *rule_ptr = &rule;
+
 	struct filter filter;
 	res = filter_init(
-		&filter, combo_net6_port_src_compile, &rule, 1, &mctx
+		&filter, combo_net6_port_src_compile, &rule_ptr, 1, &mctx
 	);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
 
@@ -263,8 +260,6 @@ test_no_match_ip_only(void *arena) {
 	TEST_ASSERT_SUCCESS(res, "some checks failed");
 
 	for (size_t i = 0; i < test_count; ++i) {
-		free(expected_ranges[i]->values);
-		free(expected_ranges[i]);
 		free_packet(packets[i]);
 		free(packets[i]);
 	}
@@ -290,7 +285,7 @@ test_both_match(void *arena) {
 	memcpy(net.mask, mask, NET6_LEN);
 	builder_add_net6_src(&builder, net);
 	builder_add_port_src_range(&builder, 80, 90);
-	struct filter_rule rule = build_rule(&builder, 0);
+	struct filter_rule rule = build_rule(&builder);
 
 	// Test packets: Both IP and port match
 	const struct {
@@ -345,12 +340,9 @@ test_both_match(void *arena) {
 	}
 
 	// Expected: all match
-	struct value_range *expected_ranges[test_count];
+	uint32_t expected_ranges[test_count];
 	for (size_t i = 0; i < test_count; ++i) {
-		expected_ranges[i] = malloc(sizeof(struct value_range));
-		expected_ranges[i]->count = 1;
-		expected_ranges[i]->values = malloc(sizeof(uint32_t) * 2);
-		expected_ranges[i]->values[0] = 0;
+		expected_ranges[i] = 0;
 	}
 
 	struct block_allocator alloc;
@@ -362,9 +354,11 @@ test_both_match(void *arena) {
 	res = memory_context_init(&mctx, "test", &alloc);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize memory context");
 
+	const struct filter_rule *rule_ptr = &rule;
+
 	struct filter filter;
 	res = filter_init(
-		&filter, combo_net6_port_src_compile, &rule, 1, &mctx
+		&filter, combo_net6_port_src_compile, &rule_ptr, 1, &mctx
 	);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
 
@@ -374,8 +368,6 @@ test_both_match(void *arena) {
 	TEST_ASSERT_SUCCESS(res, "some checks failed");
 
 	for (size_t i = 0; i < test_count; ++i) {
-		free(expected_ranges[i]->values);
-		free(expected_ranges[i]);
 		free_packet(packets[i]);
 		free(packets[i]);
 	}

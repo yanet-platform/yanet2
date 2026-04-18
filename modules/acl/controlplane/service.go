@@ -9,17 +9,19 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/yanet-platform/yanet2/common/filterpb"
+	"github.com/yanet-platform/yanet2/common/go/metrics"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/acl/controlplane/aclpb"
 )
 
-// ACLService implements the gRPC service for ACL management.
 type ACLService struct {
 	aclpb.UnimplementedACLServiceServer
 
-	mu      sync.Mutex
-	agent   *ffi.Agent
-	configs map[string]aclConfig
+	mu             sync.Mutex
+	agent          *ffi.Agent
+	configs        map[string]aclConfig
+	memoryBytes    uint64
+	handlerMetrics handlersMetrics
 
 	log *zap.SugaredLogger
 }
@@ -30,13 +32,35 @@ type aclConfig struct {
 	fwstateName string
 }
 
-// NewACLService creates a new ACL service
-func NewACLService(agent *ffi.Agent, log *zap.SugaredLogger) *ACLService {
+func NewACLService(agent *ffi.Agent, memoryBytes uint64, log *zap.SugaredLogger) *ACLService {
 	return &ACLService{
-		agent:   agent,
-		configs: make(map[string]aclConfig),
-		log:     log,
+		agent:          agent,
+		configs:        make(map[string]aclConfig),
+		memoryBytes:    memoryBytes,
+		handlerMetrics: newHandlersMetrics(),
+		log:            log,
 	}
+}
+
+// newHandlerTracker creates a latency tracker for a gRPC handler.
+//
+// Usage pattern in handlers:
+//
+//	tracker := m.newHandlerTracker("HandlerName")
+//	m.mu.Lock()
+//	defer m.mu.Unlock()
+//	defer tracker.Fix()
+//
+// Defers execute LIFO, so tracker.Fix() runs before m.mu.Unlock().
+// This is intentional: the recorded latency covers the full time the
+// handler holds the lock, which is where the actual work happens.
+func (m *ACLService) newHandlerTracker(name string) *handlerMetricTracker {
+	return newHandlerMetricTracker(
+		"acl_handler_call_latency_ms",
+		&m.handlerMetrics,
+		defaultLatencyBoundsMS,
+		metrics.Labels{"handler": name},
+	)
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -118,23 +142,21 @@ func (m *ACLService) UpdateConfig(
 	ctx context.Context,
 	req *aclpb.UpdateConfigRequest,
 ) (*aclpb.UpdateConfigResponse, error) {
-	// TODO: what the fuck?
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	name := req.GetName()
 	if name == "" {
 		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
 
-	reqRules := req.Rules
-
-	rules, err := convertRules(reqRules) // TODO: invalid argument error here.
+	rules, err := convertRules(req.Rules) // TODO: invalid argument error here.
 	if err != nil {
 		return nil, err
 	}
 
-	// TODO: mutex here.
+	tracker := m.newHandlerTracker("UpdateConfig")
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	defer tracker.Fix()
+
 	config, err := NewModuleConfig(m.agent, name)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to create module config: %v", err)
@@ -156,13 +178,12 @@ func (m *ACLService) UpdateConfig(
 		return nil, status.Errorf(codes.Internal, "failed to update module: %v", err)
 	}
 
-	// Module was updated - it is time to delete an old one
 	if oldConfigs.acl != nil {
 		oldConfigs.acl.Free()
 	}
 
 	m.configs[name] = aclConfig{
-		rules:       reqRules,
+		rules:       req.Rules,
 		acl:         config,
 		fwstateName: oldConfigs.fwstateName,
 	}
@@ -174,8 +195,10 @@ func (m *ACLService) ShowConfig(
 	ctx context.Context,
 	req *aclpb.ShowConfigRequest,
 ) (*aclpb.ShowConfigResponse, error) {
+	tracker := m.newHandlerTracker("ShowConfig")
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	defer tracker.Fix()
 
 	name := req.GetName()
 	if name == "" {
@@ -200,8 +223,10 @@ func (m *ACLService) ListConfigs(
 	ctx context.Context,
 	req *aclpb.ListConfigsRequest,
 ) (*aclpb.ListConfigsResponse, error) {
+	tracker := m.newHandlerTracker("ListConfigs")
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	defer tracker.Fix()
 
 	response := &aclpb.ListConfigsResponse{
 		Configs: make([]string, 0, len(m.configs)),
@@ -218,8 +243,10 @@ func (m *ACLService) DeleteConfig(
 	ctx context.Context,
 	req *aclpb.DeleteConfigRequest,
 ) (*aclpb.DeleteConfigResponse, error) {
+	tracker := m.newHandlerTracker("DeleteConfig")
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	defer tracker.Fix()
 
 	name := req.GetName()
 	if name == "" {
@@ -244,4 +271,23 @@ func (m *ACLService) DeleteConfig(
 	response := &aclpb.DeleteConfigResponse{}
 
 	return response, nil
+}
+
+func (m *ACLService) GetMetrics(
+	ctx context.Context,
+	req *aclpb.GetMetricsRequest,
+) (*aclpb.GetMetricsResponse, error) {
+	tracker := m.newHandlerTracker("GetMetrics")
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	defer tracker.Fix()
+
+	metrics, err := m.collectMetrics()
+	if err != nil {
+		return nil, err
+	}
+
+	return &aclpb.GetMetricsResponse{
+		Metrics: metrics,
+	}, nil
 }

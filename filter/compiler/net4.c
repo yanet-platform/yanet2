@@ -90,7 +90,7 @@ net4_collect_registry(
 static inline int
 collect_net4_values(
 	struct memory_context *memory_context,
-	const struct filter_rule *actions,
+	const struct filter_rule **actions,
 	uint32_t count,
 	rule_get_net4_func get_net4,
 	struct lpm *lpm,
@@ -100,9 +100,13 @@ collect_net4_values(
 	if (range_collector_init(&collector, memory_context))
 		goto error;
 
-	for (const struct filter_rule *action = actions;
-	     action < actions + count;
-	     ++action) {
+	for (const struct filter_rule **action_ptr = actions;
+	     action_ptr < actions + count;
+	     ++action_ptr) {
+		if (*action_ptr == NULL)
+			continue;
+		const struct filter_rule *action = *action_ptr;
+
 		if (action->net4.src_count == 0 &&
 		    action->net4.dst_count == 0) {
 			continue;
@@ -143,11 +147,16 @@ collect_net4_values(
 	if (remap_table_init(&remap_table, memory_context, collector.count))
 		goto error_remap;
 
-	for (const struct filter_rule *action = actions;
-	     action < actions + count;
-	     ++action) {
+	for (const struct filter_rule **action_ptr = actions;
+	     action_ptr < actions + count;
+	     ++action_ptr) {
 
 		remap_table_new_gen(&remap_table);
+
+		if (*action_ptr == NULL)
+			continue;
+
+		const struct filter_rule *action = *action_ptr;
 
 		struct net4 *nets;
 		uint32_t net_count;
@@ -164,10 +173,15 @@ collect_net4_values(
 	value_table_compact(&table, &remap_table);
 	lpm4_remap(lpm, &table);
 	lpm4_compact(lpm);
-	for (const struct filter_rule *action = actions;
-	     action < actions + count;
-	     ++action) {
+	for (const struct filter_rule **action_ptr = actions;
+	     action_ptr < actions + count;
+	     ++action_ptr) {
+		// A value range should be created even for empty rules
 		value_registry_start(registry);
+
+		if (*action_ptr == NULL)
+			continue;
+		const struct filter_rule *action = *action_ptr;
 
 		struct net4 *nets;
 		uint32_t net_count;
@@ -210,7 +224,7 @@ int
 FILTER_ATTR_COMPILER_INIT_FUNC(net4_src)(
 	struct value_registry *registry,
 	void **data,
-	const struct filter_rule *actions,
+	const struct filter_rule **actions,
 	size_t actions_count,
 	struct memory_context *memory_context
 ) {
@@ -231,7 +245,7 @@ int
 FILTER_ATTR_COMPILER_INIT_FUNC(net4_dst)(
 	struct value_registry *registry,
 	void **data,
-	const struct filter_rule *actions,
+	const struct filter_rule **actions,
 	size_t actions_count,
 	struct memory_context *memory_context
 ) {

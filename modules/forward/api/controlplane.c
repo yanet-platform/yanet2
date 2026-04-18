@@ -83,25 +83,20 @@ forward_module_config_free(struct cp_module *cp_module) {
 
 typedef int (*forward_rule_check_func)(const struct forward_rule *forward_rule);
 
-static uint32_t
-filter_forward_rules(
+static void
+make_filter_rules(
 	struct forward_rule *forward_rules,
 	uint32_t forward_rule_count,
-	struct filter_rule *filter_rules,
-	forward_rule_check_func check
-	// TODO: should be there an instantiation callback??
+	struct filter_rule *filter_rules
 ) {
-	uint32_t filter_rule_idx = 0;
 	for (uint32_t forward_rule_idx = 0;
 	     forward_rule_idx < forward_rule_count;
 	     ++forward_rule_idx) {
 		struct forward_rule *forward_rule =
 			forward_rules + forward_rule_idx;
-		if (!check(forward_rule))
-			continue;
 
 		struct filter_rule *filter_rule =
-			filter_rules + filter_rule_idx++;
+			filter_rules + forward_rule_idx;
 		filter_rule->device_count = forward_rule->devices.count;
 		filter_rule->devices = forward_rule->devices.items;
 
@@ -117,8 +112,31 @@ filter_forward_rules(
 		filter_rule->net6.srcs = forward_rule->src_net6s.items;
 		filter_rule->net6.dst_count = forward_rule->dst_net6s.count;
 		filter_rule->net6.dsts = forward_rule->dst_net6s.items;
+	}
+}
 
-		filter_rule->action = forward_rule_idx;
+static uint32_t
+filter_forward_rules(
+	struct forward_rule *forward_rules,
+	uint32_t forward_rule_count,
+	const struct filter_rule *filter_rules,
+	const struct filter_rule **filter_rule_ptrs,
+	forward_rule_check_func check
+) {
+	uint32_t filter_rule_idx = 0;
+	for (uint32_t forward_rule_idx = 0;
+	     forward_rule_idx < forward_rule_count;
+	     ++forward_rule_idx) {
+		struct forward_rule *forward_rule =
+			forward_rules + forward_rule_idx;
+
+		if (!check(forward_rule)) {
+			filter_rule_ptrs[forward_rule_idx] = NULL;
+		} else {
+			filter_rule_ptrs[forward_rule_idx] =
+				filter_rules + forward_rule_idx;
+			++filter_rule_idx;
+		}
 	}
 
 	return filter_rule_idx;
@@ -156,24 +174,26 @@ forward_module_init_l2(
 	struct cp_module *cp_module,
 	struct forward_rule *forward_rules,
 	uint32_t forward_rule_count,
-	struct filter_rule *filter_rules
+	struct filter_rule *filter_rules,
+	const struct filter_rule **filter_rule_ptrs
 ) {
 	struct forward_module_config *config = container_of(
 		cp_module, struct forward_module_config, cp_module
 	);
 
-	uint32_t filter_rule_count = filter_forward_rules(
+	filter_forward_rules(
 		forward_rules,
 		forward_rule_count,
 		filter_rules,
+		filter_rule_ptrs,
 		check_forward_rule_l2
 	);
 
 	return filter_init(
 		&config->filter_vlan,
 		FWD_FILTER_VLAN_TAG,
-		filter_rules,
-		filter_rule_count,
+		filter_rule_ptrs,
+		forward_rule_count,
 		&cp_module->memory_context
 	);
 }
@@ -183,24 +203,26 @@ forward_module_init_ip4(
 	struct cp_module *cp_module,
 	struct forward_rule *forward_rules,
 	uint32_t forward_rule_count,
-	struct filter_rule *filter_rules
+	struct filter_rule *filter_rules,
+	const struct filter_rule **filter_rule_ptrs
 ) {
 	struct forward_module_config *config = container_of(
 		cp_module, struct forward_module_config, cp_module
 	);
 
-	uint32_t filter_rule_count = filter_forward_rules(
+	filter_forward_rules(
 		forward_rules,
 		forward_rule_count,
 		filter_rules,
+		filter_rule_ptrs,
 		check_forward_rule_ip4
 	);
 
 	return filter_init(
 		&config->filter_ip4,
 		FWD_FILTER_IP4_TAG,
-		filter_rules,
-		filter_rule_count,
+		filter_rule_ptrs,
+		forward_rule_count,
 		&cp_module->memory_context
 	);
 }
@@ -210,24 +232,26 @@ forward_module_init_ip6(
 	struct cp_module *cp_module,
 	struct forward_rule *forward_rules,
 	uint32_t forward_rule_count,
-	struct filter_rule *filter_rules
+	struct filter_rule *filter_rules,
+	const struct filter_rule **filter_rule_ptrs
 ) {
 	struct forward_module_config *config = container_of(
 		cp_module, struct forward_module_config, cp_module
 	);
 
-	uint32_t filter_rule_count = filter_forward_rules(
+	filter_forward_rules(
 		forward_rules,
 		forward_rule_count,
 		filter_rules,
+		filter_rule_ptrs,
 		check_forward_rule_ip6
 	);
 
 	return filter_init(
 		&config->filter_ip6,
 		FWD_FILTER_IP6_TAG,
-		filter_rules,
-		filter_rule_count,
+		filter_rule_ptrs,
+		forward_rule_count,
 		&cp_module->memory_context
 	);
 }
@@ -290,24 +314,53 @@ forward_module_config_update(
 		goto error_target;
 	}
 
+	make_filter_rules(forward_rules, rule_count, filter_rules);
+
+	const struct filter_rule **filter_rule_ptrs =
+		(const struct filter_rule **)malloc(
+			sizeof(struct filter_rule *) * rule_count
+		);
+	if (filter_rule_ptrs == NULL) {
+		goto error_rules;
+	}
+
 	if (forward_module_init_l2(
-		    cp_module, forward_rules, rule_count, filter_rules
+		    cp_module,
+		    forward_rules,
+		    rule_count,
+		    filter_rules,
+		    filter_rule_ptrs
 	    ))
-		goto error_target;
+		goto error_rule_ptrs;
 
 	if (forward_module_init_ip4(
-		    cp_module, forward_rules, rule_count, filter_rules
+		    cp_module,
+		    forward_rules,
+		    rule_count,
+		    filter_rules,
+		    filter_rule_ptrs
 	    ))
-		goto error_target;
+		goto error_rule_ptrs;
 
 	if (forward_module_init_ip6(
-		    cp_module, forward_rules, rule_count, filter_rules
+		    cp_module,
+		    forward_rules,
+		    rule_count,
+		    filter_rules,
+		    filter_rule_ptrs
 	    ))
-		goto error_target;
+		goto error_rule_ptrs;
 
+	free(filter_rule_ptrs);
 	free(filter_rules);
 
 	return 0;
+
+error_rule_ptrs:
+	free(filter_rule_ptrs);
+
+error_rules:
+	free(filter_rules);
 
 error_target:
 	memory_bfree(
