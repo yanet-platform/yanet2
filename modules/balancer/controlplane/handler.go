@@ -90,7 +90,7 @@ func (ph *PacketHandler) setupFilters(
 		relptr.Equate(&ph.Ipv4_vs_matcher, &prev.Ipv4_vs_matcher)
 	} else {
 		if err := ph.setIpv4VsMatcher(); err != nil {
-			return NewError("set ipv4 vs matcher: %w", err)
+			return Wrapf("set ipv4 vs matcher: %w", err)
 		}
 	}
 
@@ -98,7 +98,7 @@ func (ph *PacketHandler) setupFilters(
 		relptr.Equate(&ph.Ipv6_vs_matcher, &prev.Ipv6_vs_matcher)
 	} else {
 		if err := ph.setIpv6VsMatcher(); err != nil {
-			return NewError("set ipv6 vs matcher: %w", err)
+			return Wrapf("set ipv6 vs matcher: %w", err)
 		}
 	}
 
@@ -106,7 +106,7 @@ func (ph *PacketHandler) setupFilters(
 		relptr.Equate(&ph.Decap_ipv4_filter, &prev.Decap_ipv4_filter)
 	} else {
 		if err := ph.setIpv4DecapFilter(); err != nil {
-			return NewError("set ipv4 decap filter: %w", err)
+			return Wrapf("set ipv4 decap filter: %w", err)
 		}
 	}
 
@@ -114,7 +114,7 @@ func (ph *PacketHandler) setupFilters(
 		relptr.Equate(&ph.Decap_ipv6_filter, &prev.Decap_ipv6_filter)
 	} else {
 		if err := ph.setIpv6DecapFilter(); err != nil {
-			return NewError("set ipv6 decap filter: %w", err)
+			return Wrapf("set ipv6 decap filter: %w", err)
 		}
 	}
 
@@ -150,20 +150,20 @@ func NewPacketHandler(
 	}()
 
 	if err := handler.initialSetup(agent, name, sessionTable); err != nil {
-		return nil, nil, NewError("initial setup: %w", err)
+		return nil, nil, Wrapf("initial setup: %w", err)
 	}
 
 	handler.populateSourceAddrs(phConfig)
 	handler.populateSessionTimeouts(phConfig.SessionsTimeouts)
 
 	if err := handler.populateDecapAddresses(agent, phConfig.DecapAddresses); err != nil {
-		return nil, nil, NewError("populate decap addrs: %w", err)
+		return nil, nil, Wrapf("populate decap addrs: %w", err)
 	}
 
 	reuseReport := &balancerpb.ReuseReport{}
 
 	if err := handler.populateVS(agent, phConfig.Vs, prev, reuseReport); err != nil {
-		return nil, nil, NewError("populate virtual services: %w", err)
+		return nil, nil, Wrapf("populate virtual services: %w", err)
 	}
 
 	reuseReport.Ipv4DecapFilterReused, reuseReport.Ipv6DecapFilterReused = prev.decapFiltersReusable(
@@ -175,7 +175,7 @@ func NewPacketHandler(
 	}
 
 	if err := handler.registerCounters(); err != nil {
-		return nil, nil, NewError("register counters: %w", err)
+		return nil, nil, Wrapf("register counters: %w", err)
 	}
 
 	handler.setState(stateConfig, sessionTable)

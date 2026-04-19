@@ -13,7 +13,7 @@ import (
 // invalidArg is a validator-local shorthand for leaf errors that should carry
 // codes.InvalidArgument through the RPC boundary.
 func invalidArg(format string, args ...any) error {
-	return NewStatusError(codes.InvalidArgument, format, args...)
+	return Errorf(codes.InvalidArgument, format, args...)
 }
 
 func compareIPNet(a, b *filterpb.IPNet) int {
@@ -80,7 +80,7 @@ func validateStateConfig(state *balancerpb.StateConfig) error {
 		return invalidArg("wlc config is nil")
 	}
 	if err := validateWlcConfig(state.Wlc); err != nil {
-		return NewError("wlc: %w", err)
+		return Wrapf("wlc: %w", err)
 	}
 	return nil
 }
@@ -146,11 +146,11 @@ func validateNet(net *filterpb.IPNet, isV6 bool) error {
 	}
 	if isV6 {
 		if err := validateMask6(net.Mask); err != nil {
-			return NewError("IPv6 net mask: %w", err)
+			return Wrapf("IPv6 net mask: %w", err)
 		}
 	} else {
 		if err := validateMask4(net.Mask); err != nil {
-			return NewError("IPv4 net mask: %w", err)
+			return Wrapf("IPv4 net mask: %w", err)
 		}
 	}
 	return nil
@@ -172,7 +172,7 @@ func validateAllowedSrc(
 ) error {
 	for i, net := range allowedSrc.Nets {
 		if err := validateNet(net, isIPv6); err != nil {
-			return NewError("net %x/%x at index %d: %w", net.Addr, net.Mask, i, err)
+			return Wrapf("net %x/%x at index %d: %w", net.Addr, net.Mask, i, err)
 		}
 	}
 	slices.SortFunc(allowedSrc.Nets, compareIPNet)
@@ -181,7 +181,7 @@ func validateAllowedSrc(
 	})
 	for i, port := range allowedSrc.Ports {
 		if err := validatePortRange(port); err != nil {
-			return NewError("port range [%d-%d] at index %d: %w", port.From, port.To, i, err)
+			return Wrapf("port range [%d-%d] at index %d: %w", port.From, port.To, i, err)
 		}
 	}
 	slices.SortFunc(allowedSrc.Ports, comparePortRange)
@@ -233,7 +233,7 @@ func validateAllowedSources(
 			return nil, invalidArg("allowed_src at index %d is nil", i)
 		}
 		if err := validateAllowedSrc(allowedSrc, isIPv6); err != nil {
-			return nil, NewError("allowed_src at index %d: %w", i, err)
+			return nil, Wrapf("allowed_src at index %d: %w", i, err)
 		}
 	}
 	slices.SortFunc(allowedSources, compareAllowedSourcesPb)
@@ -250,7 +250,7 @@ func validateReals(reals []*balancerpb.Real) error {
 			return invalidArg("real at index %d is nil", i)
 		}
 		if err := validateReal(r); err != nil {
-			return NewError("real %s at index %d: %w", realIDToString(r.Id), i, err)
+			return Wrapf("real %s at index %d: %w", realIDToString(r.Id), i, err)
 		}
 		key := makeRealKey(r.Id)
 		if prevIdx, ok := realsMap[key]; ok {
@@ -315,7 +315,7 @@ func validatePacketHandlerConfig(config *balancerpb.PacketHandlerConfig) error {
 		return invalidArg("sessions_timeouts is nil")
 	}
 	if err := validateSessionsTimeouts(config.SessionsTimeouts); err != nil {
-		return NewError("sessions_timeouts: %w", err)
+		return Wrapf("sessions_timeouts: %w", err)
 	}
 	for idx, addr := range config.DecapAddresses {
 		if len(addr) != 4 && len(addr) != 16 {
@@ -339,11 +339,11 @@ func validatePacketHandlerConfig(config *balancerpb.PacketHandlerConfig) error {
 			return invalidArg("vs at index %d is nil", i)
 		}
 		if err := validateVS(vs); err != nil {
-			return NewError("vs %s at index %d: %w", vsIDToString(vs.Id), i, err)
+			return Wrapf("vs %s at index %d: %w", vsIDToString(vs.Id), i, err)
 		}
 		key := makeVsKey(vs.Id)
 		if prevIdx, ok := vsMap[key]; ok {
-			return NewError(
+			return Wrapf(
 				"vs %s at index %d: duplicated at index %d",
 				vsIDToString(vs.Id),
 				i,
@@ -366,13 +366,13 @@ func validateBalancerConfig(config *balancerpb.BalancerConfig) error {
 		return invalidArg("packet_handler is nil")
 	}
 	if err := validatePacketHandlerConfig(config.PacketHandler); err != nil {
-		return NewError("packet_handler: %w", err)
+		return Wrapf("packet_handler: %w", err)
 	}
 	if config.State == nil {
 		return invalidArg("state is nil")
 	}
 	if err := validateStateConfig(config.State); err != nil {
-		return NewError("state: %w", err)
+		return Wrapf("state: %w", err)
 	}
 	return nil
 }

@@ -22,7 +22,7 @@ func AttachNewAgent(
 ) (*Agent, error) {
 	agent, err := shm.AgentAttach("balancer", instanceIdx, size)
 	if err != nil {
-		return nil, NewError("failed to attach balancer agent: %w", err)
+		return nil, Wrapf("failed to attach balancer agent: %w", err)
 	}
 	return &Agent{
 		agent:     agent,

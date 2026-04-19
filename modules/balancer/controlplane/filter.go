@@ -14,7 +14,7 @@ func validateFilter(filter *balancerpb.Filter) error {
 		switch *filter.Proto {
 		case balancerpb.TransportProto_TCP, balancerpb.TransportProto_UDP:
 		default:
-			return NewError("invalid filter proto: %v", *filter.Proto)
+			return Wrapf("invalid filter proto: %v", *filter.Proto)
 		}
 	}
 	return nil

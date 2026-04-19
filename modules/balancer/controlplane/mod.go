@@ -21,13 +21,13 @@ func NewModule(
 
 	shm, err := yanet.AttachSharedMemory(cfg.MemoryPath.Unwrap())
 	if err != nil {
-		return nil, NewError("failed to attach shared memory: %w", err)
+		return nil, Wrapf("failed to attach shared memory: %w", err)
 	}
 
 	svc, err := NewService(shm, cfg.InstanceID, cfg.MemoryRequirements.Unwrap(), log)
 	if err != nil {
 		_ = shm.Detach()
-		return nil, NewError("failed to create balancer service: %w", err)
+		return nil, Wrapf("failed to create balancer service: %w", err)
 	}
 
 	return &Module{
