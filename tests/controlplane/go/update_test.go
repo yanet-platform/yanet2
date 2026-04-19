@@ -2,15 +2,52 @@ package controlplane_test
 
 import (
 	"fmt"
-	"net/netip"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	mock "github.com/yanet-platform/yanet2/mock/go"
-	balancer "github.com/yanet-platform/yanet2/modules/balancer/agent/go/ffi"
+	balancer "github.com/yanet-platform/yanet2/modules/balancer/controlplane"
+	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb"
+	"go.uber.org/zap"
+	"google.golang.org/protobuf/types/known/durationpb"
 )
+
+func minimalBalancerConfig() *balancerpb.BalancerConfig {
+	var (
+		capacity  uint64  = 1
+		mlf       float32 = 0.5
+		power     uint64  = 0
+		maxWeight uint32  = 0
+	)
+	return &balancerpb.BalancerConfig{
+		PacketHandler: &balancerpb.PacketHandlerConfig{
+			SourceAddressV4: []byte{1, 1, 1, 1},
+			SourceAddressV6: []byte{
+				0, 0, 0, 0, 0, 0, 0, 0,
+				0, 0, 0, 0, 0, 0, 0, 1,
+			},
+			DecapAddresses: [][]byte{},
+			SessionsTimeouts: &balancerpb.SessionsTimeouts{
+				TcpSynAck: 25,
+				TcpSyn:    20,
+				TcpFin:    15,
+				Tcp:       60,
+				Udp:       30,
+			},
+		},
+		State: &balancerpb.StateConfig{
+			SessionTableCapacity:      &capacity,
+			SessionTableMaxLoadFactor: &mlf,
+			Wlc: &balancerpb.WlcConfig{
+				Power:     &power,
+				MaxWeight: &maxWeight,
+			},
+			RefreshPeriod: durationpb.New(0),
+		},
+	}
+}
 
 func TestControlplaneUpdates(t *testing.T) {
 	config := mock.YanetMockConfig{
@@ -115,24 +152,15 @@ func TestControlplaneUpdates(t *testing.T) {
 		require.Equal(t, []string{"function0", "function1"}, pipelines[0].Functions)
 	})
 
-	balancerAgent, err := balancer.NewBalancerAgent(yanet.SharedMemory(), uint(64*datasize.MB))
+	balancerAgent, err := balancer.AttachNewAgent(yanet.SharedMemory(), 0, 64*datasize.MB)
 	require.NoError(t, err, "failed to create balancer agent")
 
 	// Register only balancer0 first, leaving balancer1 unresolved in function0.
 	t.Run("RegisterBalancer0", func(t *testing.T) {
-		config := balancer.BalancerManagerConfig{
-			Balancer: balancer.BalancerConfig{
-				Handler: balancer.PacketHandlerConfig{
-					SourceV4: netip.MustParseAddr("1.1.1.1"),
-					SourceV6: netip.MustParseAddr("::1"),
-				},
-				State: balancer.StateConfig{
-					TableCapacity: 1,
-				},
-			},
-		}
-		_, err := balancerAgent.NewManager("balancer0", &config)
-		require.NoError(t, err, "failed to create balancer manager")
+		log := zap.NewNop().Sugar()
+		b, err := balancer.NewBalancer(balancerAgent, "balancer0", minimalBalancerConfig(), log)
+		require.NoError(t, err, "failed to create balancer")
+		balancerAgent.PutBalancer("balancer0", b)
 	})
 
 	// Add function1 with a fully defined module config so pipeline0 can reference it.
@@ -211,19 +239,10 @@ func TestControlplaneUpdates(t *testing.T) {
 
 	// Register balancer1 so all module references used by pipeline0 become valid.
 	t.Run("RegisterBalancer1", func(t *testing.T) {
-		config := balancer.BalancerManagerConfig{
-			Balancer: balancer.BalancerConfig{
-				Handler: balancer.PacketHandlerConfig{
-					SourceV4: netip.MustParseAddr("1.1.1.1"),
-					SourceV6: netip.MustParseAddr("::1"),
-				},
-				State: balancer.StateConfig{
-					TableCapacity: 1,
-				},
-			},
-		}
-		_, err := balancerAgent.NewManager("balancer1", &config)
-		require.NoError(t, err, "failed to create balancer manager")
+		log := zap.NewNop().Sugar()
+		b, err := balancer.NewBalancer(balancerAgent, "balancer1", minimalBalancerConfig(), log)
+		require.NoError(t, err, "failed to create balancer")
+		balancerAgent.PutBalancer("balancer1", b)
 	})
 
 	// Device linking should also fail when the referenced input pipeline does not exist.

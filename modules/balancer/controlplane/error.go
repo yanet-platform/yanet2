@@ -4,8 +4,32 @@ import (
 	"errors"
 	"fmt"
 
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
+
+// NewStatusError creates a sentinel error carrying a gRPC status code but with
+// a plain Error() message (no "rpc error: code = ..." prefix). This keeps
+// wrapped error chains readable while still letting NewError inherit the code.
+func NewStatusError(code codes.Code, format string, args ...any) error {
+	msg := fmt.Sprintf(format, args...)
+	return &wrappedStatusError{
+		st:    status.New(code, msg),
+		cause: errors.New(msg),
+	}
+}
+
+// WrapStatusError converts an error to a gRPC status error at the RPC boundary,
+// preserving any code inherited through NewError/NewStatusError. Falls back to
+// `fallback` when no status is attached. The formatted context is prepended.
+func WrapStatusError(fallback codes.Code, err error, format string, args ...any) error {
+	code := fallback
+	if st := extractStatus(err); st != nil {
+		code = st.Code()
+	}
+	ctx := fmt.Sprintf(format, args...)
+	return status.Errorf(code, "%s: %s", ctx, err.Error())
+}
 
 type wrappedStatusError struct {
 	st    *status.Status

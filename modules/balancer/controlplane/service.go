@@ -13,7 +13,6 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 type Service struct {
@@ -62,7 +61,7 @@ func (s *Service) getBalancerWithAutoSelection(
 	if name != nil {
 		b, ok := s.agent.GetBalancer(*name)
 		if !ok {
-			return nil, "", status.Errorf(codes.NotFound, "balancer %q not found", *name)
+			return nil, "", NewStatusError(codes.NotFound, "balancer %q not found", *name)
 		}
 		return b, *name, nil
 	}
@@ -70,14 +69,13 @@ func (s *Service) getBalancerWithAutoSelection(
 	names := s.agent.BalancerNames()
 
 	if len(names) == 0 {
-		return nil, "", status.Error(codes.NotFound, "no balancers found")
+		return nil, "", NewStatusError(codes.NotFound, "no balancers found")
 	}
 
 	if len(names) > 1 {
-		return nil, "", status.Errorf(
+		return nil, "", NewStatusError(
 			codes.InvalidArgument,
-			"multiple balancers found (%d), please specify name explicitly",
-			len(names),
+			"multiple balancers found (%d), please specify name explicitly", len(names),
 		)
 	}
 
@@ -103,7 +101,7 @@ func (s *Service) SetConfig(
 
 	name := req.GetName()
 	if name == "" {
-		return nil, status.Error(codes.InvalidArgument, "name is required")
+		return nil, NewStatusError(codes.InvalidArgument, "name is required")
 	}
 
 	b, exists := s.agent.GetBalancer(name)
@@ -197,7 +195,7 @@ func (s *Service) GetState(
 	if req.Name != nil {
 		b, ok := s.agent.GetBalancer(*req.Name)
 		if !ok {
-			return nil, status.Errorf(codes.NotFound, "balancer %q not found", *req.Name)
+			return nil, NewStatusError(codes.NotFound, "balancer %q not found", *req.Name)
 		}
 		balancers = map[string]*Balancer{*req.Name: b}
 	} else {
@@ -254,7 +252,7 @@ func (s *Service) UpdateReals(
 
 	b, name, err := s.getBalancerWithAutoSelection(req.Name)
 	if err != nil {
-		return nil, NewError("failed to auto-select balancer %w", err)
+		return nil, NewError("failed to auto-select balancer: %w", err)
 	}
 
 	count, err := b.UpdateReals(req.Updates, req.Buffer)

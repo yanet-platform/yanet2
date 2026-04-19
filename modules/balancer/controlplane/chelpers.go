@@ -24,13 +24,11 @@ package balancer
 import "C"
 
 import (
-	"fmt"
 	"time"
 	"unsafe"
 
 	"github.com/yanet-platform/yanet2/common/go/relptr"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 func errFromCode(res C.int) error {
@@ -40,9 +38,9 @@ func errFromCode(res C.int) error {
 	case -1:
 		return errNoAgentMemory
 	case -2:
-		return status.Error(codes.ResourceExhausted, "no heap memory")
+		return NewStatusError(codes.ResourceExhausted, "no heap memory")
 	default:
-		return status.Error(codes.Unknown, fmt.Sprintf("unknown error code=%d", res))
+		return NewStatusError(codes.Unknown, "unknown error code=%d", res)
 	}
 }
 

@@ -401,6 +401,10 @@ func Free[T any](m *Agent, ptr *T) {
 // AllocSlice allocates a contiguous block of memory for `count` elements of type T
 // and returns it as a Go slice (backed by the allocated memory).
 func AllocSlice[T any](m *Agent, count int) []T {
+	if count == 0 {
+		return []T{}
+	}
+
 	var zero T
 	elemSize := unsafe.Sizeof(zero)
 	totalSize := elemSize * uintptr(count)
@@ -413,7 +417,7 @@ func AllocSlice[T any](m *Agent, count int) []T {
 
 // FreeSlice frees memory previously allocated with AllocSlice.
 func FreeSlice[T any](m *Agent, s []T) {
-	if len(s) == 0 {
+	if cap(s) == 0 {
 		return
 	}
 	var zero T

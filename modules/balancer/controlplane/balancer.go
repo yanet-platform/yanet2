@@ -13,7 +13,6 @@ import (
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -25,7 +24,7 @@ const (
 	ipprotoUDP  = 17
 )
 
-var errNoAgentMemory = status.Error(codes.ResourceExhausted, "no agent memory")
+var errNoAgentMemory = NewStatusError(codes.ResourceExhausted, "no agent memory")
 
 // Balancer manages a single balancer instance including its shared-memory
 // packet handler, session table, and lookup indices.
@@ -174,7 +173,7 @@ func (b *Balancer) Update(
 	if now != nil && config.State.SessionTableCapacity != nil {
 		newStSize := int(*config.State.SessionTableCapacity)
 		if err := b.handler.resizeSessionTable(st, newStSize, *now); err != nil {
-			return nil, status.Errorf(codes.Internal, "resize session table: %v", err)
+			return nil, WrapStatusError(codes.Internal, err, "resize session table")
 		}
 	}
 
@@ -191,7 +190,7 @@ func (b *Balancer) Update(
 	}
 
 	if err := validatePacketHandlerConfig(config.PacketHandler); err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "invalid packet handler config: %v", err)
+		return nil, WrapStatusError(codes.InvalidArgument, err, "invalid packet handler config")
 	}
 
 	handler, reuseReport, err := NewPacketHandler(
@@ -202,13 +201,13 @@ func (b *Balancer) Update(
 		b.handler,
 	)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "create packet handler: %v", err)
+		return nil, WrapStatusError(codes.Internal, err, "create packet handler")
 	}
 
 	if err := b.agent.install(handler); err != nil {
 		handler.free(b.agent)
 		yanet.Free(b.agent.AsYanetAgent(), handler)
-		return nil, status.Errorf(codes.Internal, "install handler: %v", err)
+		return nil, WrapStatusError(codes.Internal, err, "install handler")
 	}
 
 	// The ordering below is critical:
@@ -266,7 +265,7 @@ func NewBalancer(
 	log *zap.SugaredLogger,
 ) (*Balancer, error) {
 	if err := validateBalancerConfig(config); err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "invalid config: %v", err)
+		return nil, WrapStatusError(codes.InvalidArgument, err, "invalid config")
 	}
 
 	stateConfig := config.State
@@ -279,7 +278,7 @@ func NewBalancer(
 	handler, _, err := NewPacketHandler(config, name, st, agent, nil)
 	if err != nil {
 		agent.destroySessionTable(st)
-		return nil, status.Errorf(codes.Internal, "create handler: %v", err)
+		return nil, WrapStatusError(codes.Internal, err, "create handler")
 	}
 
 	// From this point on, handler is properly initialized and Destroy
@@ -295,13 +294,13 @@ func NewBalancer(
 	// Register handler in agent storage, then install into dataplane.
 	if err := agent.register(handler); err != nil {
 		b.Destroy()
-		return nil, status.Errorf(codes.Internal, "register handler: %v", err)
+		return nil, WrapStatusError(codes.Internal, err, "register handler")
 	}
 
 	if err := agent.install(handler); err != nil {
 		agent.forget(handler)
 		b.Destroy()
-		return nil, status.Errorf(codes.Internal, "install handler: %v", err)
+		return nil, WrapStatusError(codes.Internal, err, "install handler")
 	}
 
 	b.buildIndexes()
@@ -354,10 +353,9 @@ func (b *Balancer) DeleteVS(
 	for _, vs := range vsList {
 		k := makeVsKey(vs.Id)
 		if _, ok := b.vsIndex[k]; !ok {
-			return nil, status.Errorf(
+			return nil, NewStatusError(
 				codes.NotFound,
-				"virtual service %s not found",
-				vsIDToString(vs.Id),
+				"virtual service %s not found", vsIDToString(vs.Id),
 			)
 		}
 	}
@@ -559,20 +557,18 @@ func (b *Balancer) UpdateReals(updates []*balancerpb.RealUpdate, buffer bool) (i
 		serviceKey := makeVsKey(update.RealId.Vs)
 		serviceSlot, ok := b.vsIndex[serviceKey]
 		if !ok {
-			return 0, status.Errorf(
+			return 0, NewStatusError(
 				codes.NotFound,
 				"real update at index %d: virtual service %s not found",
-				updateIdx,
-				vsIDToString(update.RealId.Vs),
+				updateIdx, vsIDToString(update.RealId.Vs),
 			)
 		}
 		realSlot, ok := serviceSlot.realSlots[makeRealKey(update.RealId.Real)]
 		if !ok {
-			return 0, status.Errorf(
+			return 0, NewStatusError(
 				codes.NotFound,
 				"real update at index %d: real %s not found",
-				updateIdx,
-				realIDToString(update.RealId.Real),
+				updateIdx, realIDToString(update.RealId.Real),
 			)
 		}
 		vs := &services[serviceSlot.index]
@@ -594,11 +590,10 @@ func (b *Balancer) UpdateReals(updates []*balancerpb.RealUpdate, buffer bool) (i
 	for _, idx := range affectedVs {
 		vs := &services[idx]
 		if err := vs.updateRealSelector(&b.handler.Rcu, b.agent); err != nil {
-			return 0, status.Errorf(
+			return 0, WrapStatusError(
 				codes.Internal,
-				"failed to update ring for virtual service %s: %v",
-				vs,
 				err,
+				"failed to update ring for virtual service %s", vs,
 			)
 		}
 	}
