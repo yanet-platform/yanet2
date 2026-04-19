@@ -47,13 +47,22 @@ compile_acl(
 	struct memory_context *mctx,
 	int ipv6
 ) {
-	int res;
-	if (ipv6) {
-		res = filter_init(filter, ipv6_vs_acl, rules, count, mctx);
-	} else {
-		res = filter_init(filter, ipv4_vs_acl, rules, count, mctx);
+	const struct filter_rule **ptrs = calloc(count, sizeof(*ptrs));
+	if (ptrs == NULL && count > 0) {
+		return -1;
+	}
+	for (size_t i = 0; i < count; ++i) {
+		ptrs[i] = &rules[i];
 	}
 
+	int res;
+	if (ipv6) {
+		res = filter_init(filter, ipv6_vs_acl, ptrs, count, mctx);
+	} else {
+		res = filter_init(filter, ipv4_vs_acl, ptrs, count, mctx);
+	}
+
+	free(ptrs);
 	return res;
 }
 

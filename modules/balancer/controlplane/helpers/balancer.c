@@ -368,11 +368,21 @@ build_decap_filter(struct balancer_packet_handler *handler, int is_ipv6) {
 	}
 	size_t count = (size_t)res;
 
-	if (is_ipv6) {
-		res = filter_init(filter, decap_ipv6, rules, count, mctx);
-	} else {
-		res = filter_init(filter, decap_ipv4, rules, count, mctx);
+	const struct filter_rule **ptrs = calloc(count, sizeof(*ptrs));
+	if (ptrs == NULL && count > 0) {
+		free_rules(rules, count);
+		memory_bfree(mctx, filter, sizeof(struct filter));
+		return -1;
 	}
+	for (size_t i = 0; i < count; ++i) {
+		ptrs[i] = &rules[i];
+	}
+	if (is_ipv6) {
+		res = filter_init(filter, decap_ipv6, ptrs, count, mctx);
+	} else {
+		res = filter_init(filter, decap_ipv4, ptrs, count, mctx);
+	}
+	free(ptrs);
 	free_rules(rules, count);
 
 	if (res != 0) {
@@ -448,22 +458,13 @@ make_vs_matcher_rules(
 	struct balancer_vs *services,
 	uint32_t service_count
 ) {
-	size_t rule_count = 0;
-	for (size_t i = 0; i < service_count; ++i) {
-		if (services[i].ip_proto == ipproto &&
-		    !(services[i].flags & balancer_vs_removed)) {
-			++rule_count;
-		}
-	}
-
 	struct filter_rule *rules =
-		calloc(rule_count, sizeof(struct filter_rule));
-	if (rules == NULL && rule_count > 0) {
+		calloc(service_count, sizeof(struct filter_rule));
+	if (rules == NULL && service_count > 0) {
 		return -1;
 	}
 	// Calloc initializes the memory to zero.
 
-	size_t rule_idx = 0;
 	for (size_t i = 0; i < service_count; ++i) {
 		struct balancer_vs *vs = &services[i];
 		if (vs->ip_proto != ipproto ||
@@ -471,19 +472,16 @@ make_vs_matcher_rules(
 			continue;
 		}
 
-		struct filter_rule *rule = &rules[rule_idx];
+		struct filter_rule *rule = &rules[i];
 
 		if (make_vs_matcher_rule(rule, vs) != 0) {
-			free_rules(rules, rule_count);
+			free_rules(rules, service_count);
 			return -1;
 		}
-
-		rule->action = i;
-		++rule_idx;
 	}
 
 	*out = rules;
-	return rule_count;
+	return service_count;
 }
 
 static int
@@ -510,11 +508,26 @@ build_vs_matcher(
 	}
 	size_t count = (size_t)res;
 
-	if (ipproto == IPPROTO_IPV6) {
-		res = filter_init(filter, vs_matcher_ipv6, rules, count, mctx);
-	} else {
-		res = filter_init(filter, vs_matcher_ipv4, rules, count, mctx);
+	const struct filter_rule **ptrs = calloc(count, sizeof(*ptrs));
+	if (ptrs == NULL && count > 0) {
+		free_rules(rules, count);
+		memory_bfree(mctx, filter, sizeof(struct filter));
+		return -1;
 	}
+	for (size_t i = 0; i < count; ++i) {
+		if (vs[i].ip_proto != ipproto ||
+		    (vs[i].flags & balancer_vs_removed)) {
+			ptrs[i] = NULL;
+		} else {
+			ptrs[i] = &rules[i];
+		}
+	}
+	if (ipproto == IPPROTO_IPV6) {
+		res = filter_init(filter, vs_matcher_ipv6, ptrs, count, mctx);
+	} else {
+		res = filter_init(filter, vs_matcher_ipv4, ptrs, count, mctx);
+	}
+	free(ptrs);
 	free_rules(rules, count);
 
 	if (res != 0) {

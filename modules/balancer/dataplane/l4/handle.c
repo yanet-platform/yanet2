@@ -3,6 +3,7 @@
 #include "common/likely.h"
 #include "common/memory_address.h"
 #include "common/network.h"
+#include "filter.h"
 #include "lib/dataplane/module/packet_front.h"
 
 #include "filter/query.h"
@@ -47,7 +48,7 @@ filter_vs_group(
 	struct balancer_vs_stats *vs_stats =
 		vs_get_stats(vs, context->worker_idx, context->counter_storage);
 
-	struct value_range *acl_results[group_size];
+	uint32_t acl_results[group_size];
 	if (is_ipv6) {
 		filter_query(
 			ADDR_OF(&vs->acl),
@@ -68,7 +69,8 @@ filter_vs_group(
 
 	size_t passed = 0;
 	for (size_t i = 0; i < group_size; ++i) {
-		if (unlikely(acl_results[i]->count == 0)) {
+		uint32_t rule_idx = acl_results[i];
+		if (unlikely(rule_idx == FILTER_RULE_INVALID)) {
 			vs_stats->packet_src_not_allowed += 1;
 			packet_front_drop(context->packet_front, group_pkts[i]);
 			continue;
@@ -77,7 +79,6 @@ filter_vs_group(
 		vs_stats->incoming_packets += 1;
 		vs_stats->incoming_bytes += group_pkts[i]->mbuf->pkt_len;
 
-		uint32_t rule_idx = ADDR_OF(&acl_results[i]->values)[0];
 		uint64_t *rule_counter = vs_get_acl_stats(
 			vs,
 			context->worker_idx,
@@ -120,7 +121,7 @@ match_and_filter(
 	bool is_ipv6
 ) {
 	/* Batch VS lookup. */
-	struct value_range *vs_results[packets_count];
+	uint32_t vs_results[packets_count];
 	if (is_ipv6) {
 		filter_query(
 			ADDR_OF(&context->packet_handler->ipv6_vs_matcher),
@@ -145,13 +146,12 @@ match_and_filter(
 	size_t matched_count = 0;
 
 	for (size_t i = 0; i < packets_count; ++i) {
-		if (unlikely(vs_results[i]->count == 0)) {
+		uint32_t vs_id = vs_results[i];
+		if (unlikely(vs_id == FILTER_RULE_INVALID)) {
 			context->l4_stats->select_vs_failed += 1;
 			packet_front_drop(context->packet_front, packets[i]);
 			continue;
 		}
-
-		uint32_t vs_id = ADDR_OF(&vs_results[i]->values)[0];
 
 		order[matched_count] = i;
 		vs_ids[matched_count] = vs_id;

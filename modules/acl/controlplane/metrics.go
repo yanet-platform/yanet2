@@ -127,7 +127,7 @@ func (m *ACLService) collectMetrics() ([]*commonpb.Metric, error) {
 
 	result := make([]*commonpb.Metric, 0)
 	gaugesEmitted := make(map[string]struct{})
-	for _, pos := range positions {
+	for pos := range positions {
 		configName := pos.ModuleName
 
 		baseLabels := []*commonpb.Label{
