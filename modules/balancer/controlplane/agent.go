@@ -1,6 +1,8 @@
 package balancer
 
 import (
+	"fmt"
+
 	"github.com/c2h5oh/datasize"
 	yanet "github.com/yanet-platform/yanet2/controlplane/ffi"
 	"go.uber.org/zap"
@@ -22,7 +24,7 @@ func AttachNewAgent(
 ) (*Agent, error) {
 	agent, err := shm.AgentAttach("balancer", instanceIdx, size)
 	if err != nil {
-		return nil, Wrapf("failed to attach balancer agent: %w", err)
+		return nil, fmt.Errorf("failed to attach balancer agent: %w", err)
 	}
 	return &Agent{
 		agent:     agent,
@@ -56,18 +58,15 @@ func ReattachAgent(
 	return balancerAgent, nil
 }
 
-// GetBalancer returns the balancer with the given name and whether it exists.
 func (a *Agent) GetBalancer(name string) (*Balancer, bool) {
 	b, ok := a.balancers[name]
 	return b, ok
 }
 
-// PutBalancer registers a balancer under the given name.
 func (a *Agent) PutBalancer(name string, b *Balancer) {
 	a.balancers[name] = b
 }
 
-// BalancerNames returns the names of all registered balancers.
 func (a *Agent) BalancerNames() []string {
 	names := make([]string, 0, len(a.balancers))
 	for name := range a.balancers {
@@ -76,7 +75,6 @@ func (a *Agent) BalancerNames() []string {
 	return names
 }
 
-// Balancers returns a shallow copy of the balancers map.
 func (a *Agent) Balancers() map[string]*Balancer {
 	return a.balancers
 }

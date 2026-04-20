@@ -2,6 +2,7 @@ package balancer
 
 import (
 	"bytes"
+	"fmt"
 
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb"
 )
@@ -14,7 +15,7 @@ func validateFilter(filter *balancerpb.Filter) error {
 		switch *filter.Proto {
 		case balancerpb.TransportProto_TCP, balancerpb.TransportProto_UDP:
 		default:
-			return Wrapf("invalid filter proto: %v", *filter.Proto)
+			return fmt.Errorf("invalid filter proto: %v", *filter.Proto)
 		}
 	}
 	return nil

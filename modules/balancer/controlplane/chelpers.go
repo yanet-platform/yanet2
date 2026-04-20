@@ -38,9 +38,9 @@ func errFromCode(res C.int) error {
 	case -1:
 		return errNoAgentMemory
 	case -2:
-		return Errorf(codes.ResourceExhausted, "no heap memory")
+		return CodedErrorf(codes.ResourceExhausted, "no heap memory")
 	default:
-		return Errorf(codes.Unknown, "unknown error code=%d", res)
+		return CodedErrorf(codes.Unknown, "unknown error code=%d", res)
 	}
 }
 

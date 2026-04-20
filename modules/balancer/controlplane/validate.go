@@ -3,6 +3,7 @@ package balancer
 import (
 	"bytes"
 	"cmp"
+	"fmt"
 	"slices"
 
 	"github.com/yanet-platform/yanet2/common/filterpb"
@@ -13,7 +14,7 @@ import (
 // invalidArg is a validator-local shorthand for leaf errors that should carry
 // codes.InvalidArgument through the RPC boundary.
 func invalidArg(format string, args ...any) error {
-	return Errorf(codes.InvalidArgument, format, args...)
+	return CodedErrorf(codes.InvalidArgument, format, args...)
 }
 
 func compareIPNet(a, b *filterpb.IPNet) int {
@@ -80,7 +81,7 @@ func validateStateConfig(state *balancerpb.StateConfig) error {
 		return invalidArg("wlc config is nil")
 	}
 	if err := validateWlcConfig(state.Wlc); err != nil {
-		return Wrapf("wlc: %w", err)
+		return fmt.Errorf("wlc: %w", err)
 	}
 	return nil
 }
@@ -146,11 +147,11 @@ func validateNet(net *filterpb.IPNet, isV6 bool) error {
 	}
 	if isV6 {
 		if err := validateMask6(net.Mask); err != nil {
-			return Wrapf("IPv6 net mask: %w", err)
+			return fmt.Errorf("IPv6 net mask: %w", err)
 		}
 	} else {
 		if err := validateMask4(net.Mask); err != nil {
-			return Wrapf("IPv4 net mask: %w", err)
+			return fmt.Errorf("IPv4 net mask: %w", err)
 		}
 	}
 	return nil
@@ -172,7 +173,7 @@ func validateAllowedSrc(
 ) error {
 	for i, net := range allowedSrc.Nets {
 		if err := validateNet(net, isIPv6); err != nil {
-			return Wrapf("net %x/%x at index %d: %w", net.Addr, net.Mask, i, err)
+			return fmt.Errorf("net %x/%x at index %d: %w", net.Addr, net.Mask, i, err)
 		}
 	}
 	slices.SortFunc(allowedSrc.Nets, compareIPNet)
@@ -181,7 +182,7 @@ func validateAllowedSrc(
 	})
 	for i, port := range allowedSrc.Ports {
 		if err := validatePortRange(port); err != nil {
-			return Wrapf("port range [%d-%d] at index %d: %w", port.From, port.To, i, err)
+			return fmt.Errorf("port range [%d-%d] at index %d: %w", port.From, port.To, i, err)
 		}
 	}
 	slices.SortFunc(allowedSrc.Ports, comparePortRange)
@@ -233,7 +234,7 @@ func validateAllowedSources(
 			return nil, invalidArg("allowed_src at index %d is nil", i)
 		}
 		if err := validateAllowedSrc(allowedSrc, isIPv6); err != nil {
-			return nil, Wrapf("allowed_src at index %d: %w", i, err)
+			return nil, fmt.Errorf("allowed_src at index %d: %w", i, err)
 		}
 	}
 	slices.SortFunc(allowedSources, compareAllowedSourcesPb)
@@ -250,7 +251,7 @@ func validateReals(reals []*balancerpb.Real) error {
 			return invalidArg("real at index %d is nil", i)
 		}
 		if err := validateReal(r); err != nil {
-			return Wrapf("real %s at index %d: %w", realIDToString(r.Id), i, err)
+			return fmt.Errorf("real %s at index %d: %w", realIDToString(r.Id), i, err)
 		}
 		key := makeRealKey(r.Id)
 		if prevIdx, ok := realsMap[key]; ok {
@@ -315,7 +316,7 @@ func validatePacketHandlerConfig(config *balancerpb.PacketHandlerConfig) error {
 		return invalidArg("sessions_timeouts is nil")
 	}
 	if err := validateSessionsTimeouts(config.SessionsTimeouts); err != nil {
-		return Wrapf("sessions_timeouts: %w", err)
+		return fmt.Errorf("sessions_timeouts: %w", err)
 	}
 	for idx, addr := range config.DecapAddresses {
 		if len(addr) != 4 && len(addr) != 16 {
@@ -339,11 +340,11 @@ func validatePacketHandlerConfig(config *balancerpb.PacketHandlerConfig) error {
 			return invalidArg("vs at index %d is nil", i)
 		}
 		if err := validateVS(vs); err != nil {
-			return Wrapf("vs %s at index %d: %w", vsIDToString(vs.Id), i, err)
+			return fmt.Errorf("vs %s at index %d: %w", vsIDToString(vs.Id), i, err)
 		}
 		key := makeVsKey(vs.Id)
 		if prevIdx, ok := vsMap[key]; ok {
-			return Wrapf(
+			return fmt.Errorf(
 				"vs %s at index %d: duplicated at index %d",
 				vsIDToString(vs.Id),
 				i,
@@ -366,13 +367,13 @@ func validateBalancerConfig(config *balancerpb.BalancerConfig) error {
 		return invalidArg("packet_handler is nil")
 	}
 	if err := validatePacketHandlerConfig(config.PacketHandler); err != nil {
-		return Wrapf("packet_handler: %w", err)
+		return fmt.Errorf("packet_handler: %w", err)
 	}
 	if config.State == nil {
 		return invalidArg("state is nil")
 	}
 	if err := validateStateConfig(config.State); err != nil {
-		return Wrapf("state: %w", err)
+		return fmt.Errorf("state: %w", err)
 	}
 	return nil
 }

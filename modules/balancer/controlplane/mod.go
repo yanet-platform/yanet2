@@ -1,6 +1,8 @@
 package balancer
 
 import (
+	"fmt"
+
 	yanet "github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/balancer/controlplane/balancerpb"
 	"go.uber.org/zap"
@@ -21,13 +23,13 @@ func NewModule(
 
 	shm, err := yanet.AttachSharedMemory(cfg.MemoryPath.Unwrap())
 	if err != nil {
-		return nil, Wrapf("failed to attach shared memory: %w", err)
+		return nil, fmt.Errorf("failed to attach shared memory: %w", err)
 	}
 
 	svc, err := NewService(shm, cfg.InstanceID, cfg.MemoryRequirements.Unwrap(), log)
 	if err != nil {
 		_ = shm.Detach()
-		return nil, Wrapf("failed to create balancer service: %w", err)
+		return nil, fmt.Errorf("failed to create balancer service: %w", err)
 	}
 
 	return &Module{

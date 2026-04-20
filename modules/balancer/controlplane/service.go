@@ -2,6 +2,7 @@ package balancer
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -36,7 +37,7 @@ func NewService(
 	agent, err := ReattachAgent(shm, instanceIdx, size, log)
 	if err != nil {
 		log.Errorw("failed to reattach balancer agent", "error", err)
-		return nil, Wrapf("failed to reattach balancer agent: %w", err)
+		return nil, fmt.Errorf("failed to reattach balancer agent: %w", err)
 	}
 
 	s := &Service{
@@ -61,7 +62,7 @@ func (s *Service) getBalancerWithAutoSelection(
 	if name != nil {
 		b, ok := s.agent.GetBalancer(*name)
 		if !ok {
-			return nil, "", Errorf(codes.NotFound, "balancer %q not found", *name)
+			return nil, "", CodedErrorf(codes.NotFound, "balancer %q not found", *name)
 		}
 		return b, *name, nil
 	}
@@ -69,11 +70,11 @@ func (s *Service) getBalancerWithAutoSelection(
 	names := s.agent.BalancerNames()
 
 	if len(names) == 0 {
-		return nil, "", Errorf(codes.NotFound, "no balancers found")
+		return nil, "", CodedErrorf(codes.NotFound, "no balancers found")
 	}
 
 	if len(names) > 1 {
-		return nil, "", Errorf(
+		return nil, "", CodedErrorf(
 			codes.InvalidArgument,
 			"multiple balancers found (%d), please specify name explicitly", len(names),
 		)
@@ -101,7 +102,7 @@ func (s *Service) SetConfig(
 
 	name := req.GetName()
 	if name == "" {
-		return nil, Errorf(codes.InvalidArgument, "name is required")
+		return nil, CodedErrorf(codes.InvalidArgument, "name is required")
 	}
 
 	b, exists := s.agent.GetBalancer(name)
@@ -169,7 +170,7 @@ func (s *Service) GetConfig(
 
 	b, name, err := s.getBalancerWithAutoSelection(req.Name)
 	if err != nil {
-		return nil, Wrapf("failed to auto-select balancer: %w", err)
+		return nil, fmt.Errorf("failed to auto-select balancer: %w", err)
 	}
 
 	return &balancerpb.GetConfigResponse{
@@ -195,7 +196,7 @@ func (s *Service) GetState(
 	if req.Name != nil {
 		b, ok := s.agent.GetBalancer(*req.Name)
 		if !ok {
-			return nil, Errorf(codes.NotFound, "balancer %q not found", *req.Name)
+			return nil, CodedErrorf(codes.NotFound, "balancer %q not found", *req.Name)
 		}
 		balancers = map[string]*Balancer{*req.Name: b}
 	} else {
@@ -230,7 +231,7 @@ func (s *Service) ListSessions(
 
 	b, _, err := s.getBalancerWithAutoSelection(req.Name)
 	if err != nil {
-		return Wrapf("failed to auto-select balancer: %w", err)
+		return fmt.Errorf("failed to auto-select balancer: %w", err)
 	}
 
 	return b.ListSessions(req.Filter, time.Now(), func(session *balancerpb.Session) error {
@@ -252,7 +253,7 @@ func (s *Service) UpdateReals(
 
 	b, name, err := s.getBalancerWithAutoSelection(req.Name)
 	if err != nil {
-		return nil, Wrapf("failed to auto-select balancer %w", err)
+		return nil, fmt.Errorf("failed to auto-select balancer: %w", err)
 	}
 
 	count, err := b.UpdateReals(req.Updates, req.Buffer)
@@ -287,7 +288,7 @@ func (s *Service) FlushReals(
 
 	b, name, err := s.getBalancerWithAutoSelection(req.Name)
 	if err != nil {
-		return nil, Wrapf("failed to auto-select balancer: %w", err)
+		return nil, fmt.Errorf("failed to auto-select balancer: %w", err)
 	}
 
 	count, err := b.FlushRealUpdates()
@@ -318,7 +319,7 @@ func (s *Service) UpdateVS(
 
 	b, name, err := s.getBalancerWithAutoSelection(req.Name)
 	if err != nil {
-		return nil, Wrapf("failed to auto-select balancer: %w", err)
+		return nil, fmt.Errorf("failed to auto-select balancer: %w", err)
 	}
 
 	s.log.Infow("updating virtual services", "name", name, "vs_count", len(req.Services))
@@ -351,7 +352,7 @@ func (s *Service) DeleteVS(
 
 	b, name, err := s.getBalancerWithAutoSelection(req.Name)
 	if err != nil {
-		return nil, Wrapf("failed to auto-select balancer: %w", err)
+		return nil, fmt.Errorf("failed to auto-select balancer: %w", err)
 	}
 
 	s.log.Infow("deleting virtual services", "name", name, "vs_count", len(req.Services))

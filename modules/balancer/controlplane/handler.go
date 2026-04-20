@@ -2,6 +2,7 @@ package balancer
 
 import (
 	"bytes"
+	"fmt"
 	"time"
 
 	"github.com/yanet-platform/yanet2/common/go/relptr"
@@ -90,7 +91,7 @@ func (ph *PacketHandler) setupFilters(
 		relptr.Equate(&ph.Ipv4_vs_matcher, &prev.Ipv4_vs_matcher)
 	} else {
 		if err := ph.setIpv4VsMatcher(); err != nil {
-			return Wrapf("set ipv4 vs matcher: %w", err)
+			return fmt.Errorf("set ipv4 vs matcher: %w", err)
 		}
 	}
 
@@ -98,7 +99,7 @@ func (ph *PacketHandler) setupFilters(
 		relptr.Equate(&ph.Ipv6_vs_matcher, &prev.Ipv6_vs_matcher)
 	} else {
 		if err := ph.setIpv6VsMatcher(); err != nil {
-			return Wrapf("set ipv6 vs matcher: %w", err)
+			return fmt.Errorf("set ipv6 vs matcher: %w", err)
 		}
 	}
 
@@ -106,7 +107,7 @@ func (ph *PacketHandler) setupFilters(
 		relptr.Equate(&ph.Decap_ipv4_filter, &prev.Decap_ipv4_filter)
 	} else {
 		if err := ph.setIpv4DecapFilter(); err != nil {
-			return Wrapf("set ipv4 decap filter: %w", err)
+			return fmt.Errorf("set ipv4 decap filter: %w", err)
 		}
 	}
 
@@ -114,7 +115,7 @@ func (ph *PacketHandler) setupFilters(
 		relptr.Equate(&ph.Decap_ipv6_filter, &prev.Decap_ipv6_filter)
 	} else {
 		if err := ph.setIpv6DecapFilter(); err != nil {
-			return Wrapf("set ipv6 decap filter: %w", err)
+			return fmt.Errorf("set ipv6 decap filter: %w", err)
 		}
 	}
 
@@ -150,20 +151,20 @@ func NewPacketHandler(
 	}()
 
 	if err := handler.initialSetup(agent, name, sessionTable); err != nil {
-		return nil, nil, Wrapf("initial setup: %w", err)
+		return nil, nil, fmt.Errorf("initial setup: %w", err)
 	}
 
 	handler.populateSourceAddrs(phConfig)
 	handler.populateSessionTimeouts(phConfig.SessionsTimeouts)
 
 	if err := handler.populateDecapAddresses(agent, phConfig.DecapAddresses); err != nil {
-		return nil, nil, Wrapf("populate decap addrs: %w", err)
+		return nil, nil, fmt.Errorf("populate decap addrs: %w", err)
 	}
 
 	reuseReport := &balancerpb.ReuseReport{}
 
 	if err := handler.populateVS(agent, phConfig.Vs, prev, reuseReport); err != nil {
-		return nil, nil, Wrapf("populate virtual services: %w", err)
+		return nil, nil, fmt.Errorf("populate virtual services: %w", err)
 	}
 
 	reuseReport.Ipv4DecapFilterReused, reuseReport.Ipv6DecapFilterReused = prev.decapFiltersReusable(
@@ -175,7 +176,7 @@ func NewPacketHandler(
 	}
 
 	if err := handler.registerCounters(); err != nil {
-		return nil, nil, Wrapf("register counters: %w", err)
+		return nil, nil, fmt.Errorf("register counters: %w", err)
 	}
 
 	handler.setState(stateConfig, sessionTable)
@@ -306,8 +307,6 @@ func (ph *PacketHandler) populateVS(
 
 	reuseReport.Ipv4VsMatcherReused = prevPh != nil && oldIPv4VsMatches && noNewIPv4Vs
 	reuseReport.Ipv6VsMatcherReused = prevPh != nil && oldIPv6VsMatches && noNewIPv6Vs
-	reuseReport.Ipv4VsMatcherReused = false
-	reuseReport.Ipv6VsMatcherReused = false
 
 	ph.Vs_count = uint32(len(services))
 	relptr.SetSlice(&ph.Vs, services)
