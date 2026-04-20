@@ -127,7 +127,7 @@ func (m *ACLService) collectMetrics() ([]*commonpb.Metric, error) {
 
 	result := make([]*commonpb.Metric, 0)
 	gaugesEmitted := make(map[string]struct{})
-	for _, pos := range positions {
+	for pos := range positions {
 		configName := pos.ModuleName
 
 		baseLabels := []*commonpb.Label{
@@ -213,7 +213,10 @@ func (m *ACLService) collectMetrics() ([]*commonpb.Metric, error) {
 				)
 
 			default:
-				ruleLabels := append(baseLabels, &commonpb.Label{Name: "counter", Value: counter.Name})
+				ruleLabels := append(
+					baseLabels,
+					&commonpb.Label{Name: "counter", Value: counter.Name},
+				)
 				result = append(result,
 					makeCounter("acl_rule_packets", packets, ruleLabels...),
 					makeCounter("acl_rule_bytes", bytes, ruleLabels...),
@@ -230,13 +233,32 @@ func (m *ACLService) collectMetrics() ([]*commonpb.Metric, error) {
 
 			if cfg, ok := m.configs[configName]; ok && cfg.acl != nil {
 				info := cfg.acl.GetInfo()
-				result = append(result,
-					makeGauge("acl_compilation_time_ns", float64(info.CompilationTimeNs), configLabels...),
-					makeGauge("acl_filter_rule_count_vlan", float64(info.FilterRuleCountVlan), configLabels...),
-					makeGauge("acl_filter_rule_count_ip4", float64(info.FilterRuleCountIp4), configLabels...),
-					makeGauge("acl_filter_rule_count_ip4_port", float64(info.FilterRuleCountIp4Port), configLabels...),
-					makeGauge("acl_filter_rule_count_ip6", float64(info.FilterRuleCountIp6), configLabels...),
-					makeGauge("acl_filter_rule_count_ip6_port", float64(info.FilterRuleCountIp6Port), configLabels...),
+				result = append(
+					result,
+					makeGauge(
+						"acl_compilation_time_ns",
+						float64(info.CompilationTimeNs),
+						configLabels...),
+					makeGauge(
+						"acl_filter_rule_count_vlan",
+						float64(info.FilterRuleCountVlan),
+						configLabels...),
+					makeGauge(
+						"acl_filter_rule_count_ip4",
+						float64(info.FilterRuleCountIp4),
+						configLabels...),
+					makeGauge(
+						"acl_filter_rule_count_ip4_port",
+						float64(info.FilterRuleCountIp4Port),
+						configLabels...),
+					makeGauge(
+						"acl_filter_rule_count_ip6",
+						float64(info.FilterRuleCountIp6),
+						configLabels...),
+					makeGauge(
+						"acl_filter_rule_count_ip6_port",
+						float64(info.FilterRuleCountIp6Port),
+						configLabels...),
 					makeGauge("acl_memory_bytes", float64(m.memoryBytes), configLabels...),
 				)
 			}
