@@ -242,7 +242,7 @@ impl RouteService {
 
         let mut entries = response.routes.into_iter().map(RouteEntry::from).collect::<Vec<_>>();
 
-        entries.sort_by(|a, b| a.prefix.0.cmp(&b.prefix.0));
+        entries.sort_by_key(|a| a.prefix.0);
 
         print_table(entries);
 

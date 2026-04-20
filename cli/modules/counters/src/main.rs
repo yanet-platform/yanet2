@@ -448,16 +448,8 @@ fn format_batch_counter(counter: &PerfCounter, next_min_batch: Option<u32>, widt
     let total_bytes = counter.bytes;
 
     // Average latency per packet and per batch
-    let avg_latency_per_packet = if total_packets > 0 {
-        counter.summary_latency / total_packets
-    } else {
-        0
-    };
-    let avg_latency_per_batch = if total_batches > 0 {
-        counter.summary_latency / total_batches
-    } else {
-        0
-    };
+    let avg_latency_per_packet = counter.summary_latency.checked_div(total_packets).unwrap_or(0);
+    let avg_latency_per_batch = counter.summary_latency.checked_div(total_batches).unwrap_or(0);
 
     // Line 1: Total batches, packets, and bytes
     let total_content = format!(
