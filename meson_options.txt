@@ -33,3 +33,10 @@ option(
   value: 'haswell',
   description: 'Target CPU architecture for -march flag.',
 )
+
+option(
+  'dataplane_only',
+  type: 'boolean',
+  value: false,
+  description: 'Build only the dataplane binary, skip Go/protobuf targets.',
+)

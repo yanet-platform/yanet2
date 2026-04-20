@@ -51,11 +51,15 @@ yanet_conf.set_quoted('YANET_BUILD_DATE', build_date.stdout().strip())
 build_cfg = 'yanet_build_config.h'
 configure_file(output: build_cfg, configuration: yanet_conf)
 
-# Define common programs once to avoid duplication
-go = find_program('go', required: true)
-protoc = find_program('protoc', required: true)
-protoc_gen_go = find_program('protoc-gen-go', required: true, version: '>=1.36.5')
-protoc_gen_go_grpc = find_program('protoc-gen-go-grpc', required: true, version: '>=1.5.1')
+dataplane_only = get_option('dataplane_only')
+
+if not dataplane_only
+  # Define common programs once to avoid duplication
+  go = find_program('go', required: true)
+  protoc = find_program('protoc', required: true)
+  protoc_gen_go = find_program('protoc-gen-go', required: true, version: '>=1.36.5')
+  protoc_gen_go_grpc = find_program('protoc-gen-go-grpc', required: true, version: '>=1.5.1')
+endif
 
 # Build CGO flags based on b_sanitize option
 yanet_go_env = {}
@@ -140,11 +144,14 @@ subdir('lib')
 subdir('filter')
 subdir('modules')
 subdir('devices')
-subdir('agents')
-subdir('controlplane')
 subdir('dataplane')
-subdir('mock')
-subdir('tests')
+
+if not dataplane_only
+  subdir('agents')
+  subdir('controlplane')
+  subdir('mock')
+  subdir('tests')
+endif
 
 # Define a default test setup that excludes large tests
 add_test_setup(

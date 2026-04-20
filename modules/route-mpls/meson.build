@@ -1,3 +1,6 @@
 subdir('dataplane')
-subdir('api')
-subdir('controlplane')
+
+if not dataplane_only
+  subdir('api')
+  subdir('controlplane')
+endif
