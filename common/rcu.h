@@ -180,10 +180,7 @@ typedef struct {
 	 * or 1) This packs both fields into a single atomic to reduce cache
 	 * traffic */
 	atomic_uint state;
-
-	/** Padding to cache line size (64 bytes) to prevent false sharing */
-	uint8_t pad[64 - sizeof(atomic_uint)];
-} rcu_worker_t;
+} __attribute__((aligned(64))) rcu_worker_t;
 
 // Bit positions in the packed state field
 #define RCU_STATE_ACTIVE_BIT 0
@@ -201,11 +198,11 @@ typedef struct {
  *       cache-line alignment of worker states.
  */
 typedef struct {
-	/** Global epoch counter (0 or 1), flipped during updates */
-	atomic_uint global_epoch;
-
 	/** Per-worker state array, one entry per worker thread */
 	rcu_worker_t workers[RCU_WORKERS];
+
+	/** Global epoch counter (0 or 1), flipped during updates */
+	atomic_uint global_epoch;
 } rcu_t;
 
 /**
