@@ -1,4 +1,7 @@
-subdir('api')
-subdir('controlplane')
 subdir('dataplane')
-subdir('fuzzing')
+
+if not dataplane_only
+  subdir('api')
+  subdir('controlplane')
+  subdir('fuzzing')
+endif
