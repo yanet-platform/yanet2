@@ -1,2 +1,6 @@
+build/
+build-*/
+target/
 *.img
 *.qcow2
+*.log

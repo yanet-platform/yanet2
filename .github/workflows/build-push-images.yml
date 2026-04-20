@@ -1,0 +1,132 @@
+name: Build and push images
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Image tag (leave empty for latest)'
+        required: false
+        default: ''
+        type: string
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-deb:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache rust
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-24.04
+
+      - uses: awalsh128/cache-apt-pkgs-action@latest
+        with:
+          packages: devscripts equivs
+          version: 1.1
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+          cache: false
+          check-latest: true
+
+      # https://github.com/actions/setup-go/issues/358
+      - name: Get Go environment
+        run: |
+          echo "cache=$(go env GOCACHE)" >> $GITHUB_ENV
+          echo "modcache=$(go env GOMODCACHE)" >> $GITHUB_ENV
+
+      - name: Set up go cache
+        uses: actions/cache@v3
+        with:
+          path: |
+            ${{ env.cache }}
+            ${{ env.modcache }}
+          key: deb-build-24.04-${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}-${{ hashFiles('**/go.mod') }}-24.04
+          restore-keys: |
+            deb-build-24.04-${{ runner.os }}-go-24.04
+
+      - name: Install Go Protobuf Plugins
+        run: |
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+
+      - name: Build packages
+        run: |
+          sudo -E env "PATH=$PATH" ./scripts/build-deb.sh
+          sudo chown -R $(id -u) ~/.cargo
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: debs-24.04
+          path: outdeb/*
+
+  build-images:
+    needs: build-deb
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        include:
+          - component: dataplane
+            image: ghcr.io/yanet-platform/yanet2/dataplane
+            dockerfile: deploy/dataplane.Dockerfile
+          - component: controlplane
+            image: ghcr.io/yanet-platform/yanet2/controlplane
+            dockerfile: deploy/controlplane.Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download deb packages
+        uses: actions/download-artifact@v4
+        with:
+          name: debs-24.04
+          path: deploy/packages/
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ matrix.image }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=${{ inputs.tag }},enable=${{ github.event_name == 'workflow_dispatch' && inputs.tag != '' }}
+            type=raw,value=latest,enable=${{ github.event_name == 'workflow_dispatch' && inputs.tag == '' }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.component }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.component }}

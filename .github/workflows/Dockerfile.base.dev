@@ -1,38 +1,19 @@
 FROM ubuntu:24.04
 
-# Image metadata
 LABEL maintainer="YANET Team" \
     description="Development environment for YANET2" \
     version="1.0"
 
-# Environment variables
 ENV DEBIAN_FRONTEND=noninteractive \
     GOCACHE=/tmp/gocache \
     GOMODCACHE=/tmp/gomodcache \
     PATH="/usr/local/go/bin:${PATH}"
 
-# Tool versions
-ARG GO_VERSION=latest
+ARG GO_VERSION=1.24.13
 ARG PROTOC_GEN_GO_VERSION=latest
 ARG PROTOC_GEN_GO_GRPC_VERSION=latest
 
-RUN <<EOF
-#!/bin/bash
-set -euo pipefail
-
-# Function to install packages with error checking
-install_packages() {
-    if ! apt-get install -y "$@"; then
-        echo "Error installing packages: $*" >&2
-        exit 1
-    fi
-}
-
-# Update package lists
-apt-get update -y
-
-echo "Installing build tools..."
-install_packages \
+RUN apt-get update -y && apt-get install -y \
     meson \
     clang \
     clang-format-19 \
@@ -40,20 +21,15 @@ install_packages \
     curl \
     git \
     just \
-    make
-
-echo "Installing development dependencies..."
-install_packages \
+    make \
     python3-pyelftools \
     python3-dev \
     libnuma-dev \
     libpcap-dev \
     libyaml-dev \
     protobuf-compiler \
-    rustup
-
-echo "Installing Debian packaging tools..."
-install_packages \
+    libprotobuf-dev \
+    rustup \
     dpkg-dev \
     debhelper \
     lintian \
@@ -63,40 +39,23 @@ install_packages \
     dh-make \
     equivs \
     pbuilder \
-    quilt
-
-echo "Installing debugging tools..."
-install_packages \
+    quilt \
     gdb \
     lldb \
-    lcov
+    lcov \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
-echo "Installing Go..."
-# Download and install Go from official source (Ubuntu package is outdated)
-GO_TARBALL="go1.24.13.linux-amd64.tar.gz"
-curl -fsSL "https://go.dev/dl/${GO_TARBALL}" -o "/tmp/${GO_TARBALL}"
-rm -rf /usr/local/go
-tar -C /usr/local -xzf "/tmp/${GO_TARBALL}"
-rm "/tmp/${GO_TARBALL}"
+RUN curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" \
+    | tar -C /usr/local -xz
 
-echo "Installing Go modules..."
-GOBIN=/usr/bin go install google.golang.org/protobuf/cmd/protoc-gen-go@${PROTOC_GEN_GO_VERSION}
-GOBIN=/usr/bin go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@${PROTOC_GEN_GO_GRPC_VERSION}
+RUN GOBIN=/usr/bin go install google.golang.org/protobuf/cmd/protoc-gen-go@${PROTOC_GEN_GO_VERSION} \
+    && GOBIN=/usr/bin go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@${PROTOC_GEN_GO_GRPC_VERSION}
 
-echo "Install rust..."
-# fix "rustup is not installed at '/root/.cargo'" error
-rustup set auto-self-update disable
-rustup install stable
+RUN rustup set auto-self-update disable \
+    && rustup install stable
 
-# Clean up caches
-echo "Cleaning up caches..."
-apt-get clean
-rm -rf /var/lib/apt/lists/*
+RUN mkdir -p /tmp/gocache /tmp/gomodcache \
+    && chmod 777 /tmp/gocache /tmp/gomodcache
 
-# Create cache directories
-mkdir -p /tmp/gocache /tmp/gomodcache
-chmod 777 /tmp/gocache /tmp/gomodcache
-EOF
-
-# Default working directory
 WORKDIR /yanet2

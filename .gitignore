@@ -134,3 +134,6 @@ outdeb/
 debian/tmp/
 debian/debhelper-build-stamp
 cscope.*
+
+# Pre-built .deb packages for container image builds.
+deploy/packages/
