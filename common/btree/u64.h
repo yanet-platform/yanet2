@@ -5,7 +5,6 @@
 #include <immintrin.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <stdio.h>
 #include <string.h>
 
 /**
@@ -304,7 +303,7 @@ btree_u64_init(
 	// Initialize all blocks with maximum value (last element)
 	// This ensures sentinel values for incomplete blocks
 	if (n > 0) {
-		uint64_t max_val = data[n - 1];
+		uint64_t max_val = data[n - 1] ^ 0x8000000000000000ULL;
 		size_t total_values = nblocks * BTREE_U64_BLOCK_SIZE;
 		for (size_t i = 0; i < total_values; ++i) {
 			uint64_t *ptr = (uint64_t *)big_array_get(
