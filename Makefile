@@ -96,7 +96,7 @@ fuzz:
 install: dataplane cli-install
 	meson install -C build --skip-subprojects
 	install -d $(DESTDIR)/etc/yanet2
-	install -m 644 controlplane.yaml $(DESTDIR)/etc/yanet2/controlplane.yaml
+	install -m 644 controlplane/etc/yanet/controlplane-director.yaml $(DESTDIR)/etc/yanet2/controlplane.yaml
 	install -m 644 dataplane.yaml $(DESTDIR)/etc/yanet2/dataplane.yaml
 	install -m 644 controlplane/etc/yanet/bird-adapter.yaml $(DESTDIR)/etc/yanet2/bird-adapter.yaml
 

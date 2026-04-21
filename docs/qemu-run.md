@@ -282,7 +282,7 @@ To run YANET:
 
 4. In another terminal, start controlplane:
     ```bash
-    ./build/controlplane/yanet-controlplane -c controlplane.yaml
+    ./build/controlplane/yanet-controlplane -c controlplane/etc/yanet/controlplane-director.yaml
     ```
 
 ### Checking Functionality
