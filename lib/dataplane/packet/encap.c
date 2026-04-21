@@ -31,7 +31,7 @@ packet_network_prepend(
 ) {
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 
-	if (rte_pktmbuf_prepend(mbuf, size) == NULL)
+	if (unlikely(rte_pktmbuf_prepend(mbuf, size) == NULL))
 		return -1;
 	memmove(rte_pktmbuf_mtod(mbuf, char *),
 		rte_pktmbuf_mtod_offset(mbuf, char *, size),
@@ -46,7 +46,7 @@ packet_network_prepend(
 
 	packet->transport_header.offset += size;
 
-	// FIXME previos heade type (ex: vlan)
+	// FIXME previos header type (ex: vlan)
 	uint16_t *next_hdr_type = rte_pktmbuf_mtod_offset(
 		mbuf, uint16_t *, packet->network_header.offset - 2
 	);
@@ -117,14 +117,12 @@ packet_ip4_encap(
 	header.hdr_checksum = 0;
 	header.hdr_checksum = rte_ipv4_cksum(&header);
 
-	packet_network_prepend(
+	return packet_network_prepend(
 		packet,
 		rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4),
 		&header,
 		sizeof(header)
 	);
-
-	return 0;
 }
 
 int
@@ -165,7 +163,7 @@ packet_ip6_encap(
 		header.payload_len = ipv4_hdr_inner->total_length;
 		header.proto = IPPROTO_IPIP;
 		header.hop_limits = ipv4_hdr_inner->time_to_live;
-	} else if (ipv6_hdr_inner != NULL) {
+	} else {
 		header.vtc_flow = ipv6_hdr_inner->vtc_flow;
 		header.payload_len = rte_cpu_to_be_16(
 			sizeof(struct rte_ipv6_hdr) +
@@ -175,16 +173,12 @@ packet_ip6_encap(
 		header.hop_limits = ipv6_hdr_inner->hop_limits;
 	}
 
-	// FIXME: update udp cksum if embedded
-
-	packet_network_prepend(
+	return packet_network_prepend(
 		packet,
 		rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6),
 		&header,
 		sizeof(header)
 	);
-
-	return 0;
 }
 
 int
