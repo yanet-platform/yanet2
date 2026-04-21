@@ -98,6 +98,7 @@ install: dataplane cli-install
 	install -d $(DESTDIR)/etc/yanet2
 	install -m 644 controlplane.yaml $(DESTDIR)/etc/yanet2/controlplane.yaml
 	install -m 644 dataplane.yaml $(DESTDIR)/etc/yanet2/dataplane.yaml
+	install -m 644 controlplane/etc/yanet/bird-adapter.yaml $(DESTDIR)/etc/yanet2/bird-adapter.yaml
 
 clean: go-cache-clean $(foreach module,$(MODULES),cli-clean/$(module))
 	@echo "Cleaning build directories..."
