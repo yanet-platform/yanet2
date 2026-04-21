@@ -9,6 +9,7 @@ sources = files(
   'dscp.c',
   'encap.c',
   'packet.c',
+  'mss.c',
 )
 
 lib_packet_dp = static_library(
