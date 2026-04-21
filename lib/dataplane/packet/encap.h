@@ -46,7 +46,7 @@ packet_mpls_encap(
 );
 
 int
-packet_ipv4_encap_udp(
+packet_ip4_encap_udp(
 	struct packet *packet,
 	const uint8_t *src_ip,
 	const uint8_t *dst_ip,

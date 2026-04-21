@@ -153,7 +153,7 @@ route_mpls_handle_packets(
 		uint16_t dst_port = htobe16(6635);
 
 		if (nexthop->type == ROUTE_TYPE_V4) {
-			if (packet_ipv4_encap_udp(
+			if (packet_ip4_encap_udp(
 				    packet,
 				    nexthop->ip4_tunnel.src,
 				    nexthop->ip4_tunnel.dst,
