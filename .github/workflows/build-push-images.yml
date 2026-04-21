@@ -89,6 +89,9 @@ jobs:
           - component: controlplane
             image: ghcr.io/yanet-platform/yanet2/controlplane
             dockerfile: deploy/controlplane.Dockerfile
+          - component: bird-adapter
+            image: ghcr.io/yanet-platform/yanet2/bird-adapter
+            dockerfile: deploy/bird-adapter.Dockerfile
     steps:
       - uses: actions/checkout@v4
 
