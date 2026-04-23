@@ -320,12 +320,12 @@ agent_resize(struct agent *agent, size_t new_size) {
 			arenas[i].size = prev_arenas[i].size;
 		}
 		SET_OFFSET_OF(&agent->arenas, arenas);
-		agent->arena_count = need_arena_count;
 		memory_bfree(
 			&cp_config->memory_context,
 			prev_arenas,
 			agent->arena_count * sizeof(struct agent_arena)
 		);
+		agent->arena_count = need_arena_count;
 	}
 
 unlock:
