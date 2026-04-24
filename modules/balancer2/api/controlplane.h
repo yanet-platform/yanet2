@@ -218,12 +218,6 @@ extern const char *const balancer_vs_acl_counter_prefix;
  */
 extern const char *const balancer_real_counter_prefix;
 
-/*
- * Common counter name:    "cmn"
- */
 extern const char *const balancer_common_counter_name;
 
-/*
- * L4 counter name:        "l4"
- */
 extern const char *const balancer_l4_counter_name;
