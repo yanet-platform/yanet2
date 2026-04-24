@@ -54,13 +54,13 @@ enum balancer_vs_sched {
 /*
  * Configuration of a virtual service.
  *
- * A VS is identified by the tuple (dst, ip_family, port,
- * transport_proto).
+ * A VS is identified by the tuple (destination address, address family,
+ * destination port, transport protocol).
  *
- * If `port` is 0 the VS is L3-only and matches all destination ports
- * of the given `transport_proto`. `transport_proto` is always applied;
- * "any transport" is not expressible through a single VS — use
- * separate VS entries.
+ * If the destination port is 0 the VS is L3-only and matches all
+ * destination ports of the given transport protocol. The transport
+ * protocol is always applied; "any transport" is not expressible
+ * through a single VS — use separate VS entries.
  */
 struct balancer_vs_config {
 	struct net_addr dst;
@@ -80,9 +80,9 @@ struct balancer_vs_config {
 };
 
 /*
- * Creates a VS handle from `config`. The handle is used to mutate
- * per-real state (weights, enabled flags) after the containing
- * balancer is installed.
+ * Creates a VS handle from the supplied configuration. The handle is
+ * used to mutate per-real state (weights, enabled flags) after the
+ * containing balancer is installed.
  */
 struct vs_handle *
 balancer_create_vs(
@@ -97,7 +97,8 @@ int
 balancer_free_vs(struct agent *agent, struct vs_handle *vs);
 
 /*
- * Creates a session table. `capacity` is the number of session entries.
+ * Creates a session table with the given capacity (number of session
+ * entries).
  */
 struct session_table *
 balancer_create_session_table(struct agent *agent, size_t capacity);
@@ -115,7 +116,7 @@ balancer_free_session_table(struct agent *agent, struct session_table *table);
 /*
  * Creates a balancer handle from its full configuration.
  *
- * The session `table` and each `vs` handle must outlive the returned
+ * The session table and each VS handle must outlive the returned
  * balancer handle; they are not owned by it.
  */
 struct balancer_handle *
@@ -129,7 +130,7 @@ balancer_create(
 );
 
 /*
- * Pushes `table` as the new front (primary) session table.
+ * Pushes the given table as the new front (primary) session table.
  *
  * Workers look up sessions in the front table first and fall back to
  * the previous (back) table; a session found in the back table is
@@ -153,11 +154,11 @@ int
 balancer_session_table_pop_back(struct balancer_handle *balancer);
 
 /*
- * Installs `handle` in the dataplane.
+ * Installs a balancer handle in the dataplane.
  *
  * If a balancer with the same name is already installed, it is
  * replaced; the previous handle becomes unused and the caller is
- * responsible for freeing it with `free_balancer`.
+ * responsible for freeing it.
  *
  * Returns -1 on error, 0 on success.
  */
@@ -165,28 +166,28 @@ int
 balancer_install(struct agent *agent, struct balancer_handle *handle);
 
 /*
- * Frees a balancer handle. The session tables passed to
- * `create_balancer` and `balancer_session_table_push_front`, and the
- * VS handles passed to `create_balancer`, are not freed — the caller
- * owns them.
+ * Frees a balancer handle. The session tables and VS handles
+ * attached to the balancer are not freed — the caller owns them.
  */
 void
 balancer_free(struct agent *agent, struct balancer_handle *handle);
 
 /*
- * Updates per-real weights for `vs`. `weights` must have length equal
- * to the VS's `real_count` and be indexed in the same order as the
- * `reals` array passed to `create_vs`.
- * Returns 0 on success, -1 if the length of `weights` does not match
- * the VS's `real_count`, or -2 on allocation failure.
+ * Updates per-real weights for a VS. The weights array must have
+ * length equal to the number of reals configured for the VS and be
+ * indexed in the same order as they were passed at VS creation.
+ * Returns 0 on success, -1 if the length does not match the number
+ * of reals, or -2 on allocation failure.
  */
 int
 balancer_vs_update_real_weights(struct vs_handle *vs, const uint32_t *weights);
 
 /*
- * Updates per-real enabled flags for `vs`. `states` follows the same
- * length and ordering as in `vs_update_real_weights`. Same return
- * codes as `vs_update_real_weights`.
+ * Updates per-real enabled flags for a VS. The states array must have
+ * length equal to the number of reals configured for the VS and be
+ * indexed in the same order as they were passed at VS creation.
+ * Returns 0 on success, -1 if the length does not match the number
+ * of reals, or -2 on allocation failure.
  */
 int
 balancer_vs_update_real_states(struct vs_handle *vs, const bool *states);
