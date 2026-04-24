@@ -76,8 +76,7 @@ struct vs_config {
 
 	uint8_t transport_proto;
 
-	/* Required; must not be NULL. */
-	struct allowed_sources *allowed_sources;
+	struct allowed_sources allowed_sources;
 
 	enum vs_scheduler scheduler;
 
