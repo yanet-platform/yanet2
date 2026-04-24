@@ -282,7 +282,9 @@ agent_resize(struct agent *agent, size_t new_size) {
 				for (size_t i = 0; i < alloc; ++i) {
 					memory_bfree(
 						&cp_config->memory_context,
-						ADDR_OF(&arenas[i].data),
+						ADDR_OF(&arenas[agent->arena_count +
+								i]
+								 .data),
 						MEMORY_BLOCK_ALLOCATOR_MAX_SIZE
 					);
 				}
