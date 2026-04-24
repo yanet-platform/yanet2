@@ -289,7 +289,8 @@ agent_resize(struct agent *agent, size_t new_size) {
 				memory_bfree(
 					&cp_config->memory_context,
 					arenas,
-					need_arena_count * sizeof(void *)
+					need_arena_count *
+						sizeof(struct agent_arena)
 				);
 				ret = -1;
 				goto unlock;
