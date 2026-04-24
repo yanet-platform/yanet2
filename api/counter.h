@@ -49,6 +49,12 @@ yanet_get_chain_counters(
 	const char *chain_name
 );
 
+struct counter_handle_list *
+yanet_get_nic_counters(
+	struct dp_config *dp_config,
+	const char *device_name
+);
+
 // Get module counters, optionally filtered by name.
 struct counter_handle_list *
 yanet_get_module_counters(
