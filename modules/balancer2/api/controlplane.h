@@ -6,9 +6,9 @@
 #include "modules/balancer2/dataplane/types/session.h"
 
 struct agent;
-struct session_table;
+struct balancer_session_table;
 struct balancer_handle;
-struct vs_handle;
+struct balancer_vs_handle;
 
 enum balancer_tunnel_kind {
 	balancer_tunnel_kind_ip,
@@ -84,7 +84,7 @@ struct balancer_vs_config {
  * used to mutate per-real state (weights, enabled flags) after the
  * containing balancer is installed.
  */
-struct vs_handle *
+struct balancer_vs_handle *
 balancer_create_vs(
 	struct agent *agent, const struct balancer_vs_config *config
 );
@@ -94,13 +94,13 @@ balancer_create_vs(
  * it was actually freed.
  */
 int
-balancer_free_vs(struct agent *agent, struct vs_handle *vs);
+balancer_free_vs(struct agent *agent, struct balancer_vs_handle *vs);
 
 /*
  * Creates a session table with the given capacity (number of session
  * entries).
  */
-struct session_table *
+struct balancer_session_table *
 balancer_create_session_table(struct agent *agent, size_t capacity);
 
 /*
@@ -108,7 +108,9 @@ balancer_create_session_table(struct agent *agent, size_t capacity);
  * if it was actually freed.
  */
 int
-balancer_free_session_table(struct agent *agent, struct session_table *table);
+balancer_free_session_table(
+	struct agent *agent, struct balancer_session_table *table
+);
 
 // TODO:
 // session table iter.
@@ -123,9 +125,9 @@ struct balancer_handle *
 balancer_create(
 	struct agent *agent,
 	const char *name,
-	struct session_table *table,
+	struct balancer_session_table *table,
 	struct balancer_session_timeouts *timeouts,
-	struct vs_handle **vs,
+	struct balancer_vs_handle **vs,
 	size_t vs_count
 );
 
@@ -140,7 +142,7 @@ balancer_create(
  */
 int
 balancer_session_table_push_front(
-	struct balancer_handle *balancer, struct session_table *table
+	struct balancer_handle *balancer, struct balancer_session_table *table
 );
 
 /*
@@ -180,7 +182,9 @@ balancer_free(struct agent *agent, struct balancer_handle *handle);
  * of reals, or -2 on allocation failure.
  */
 int
-balancer_vs_update_real_weights(struct vs_handle *vs, const uint32_t *weights);
+balancer_vs_update_real_weights(
+	struct balancer_vs_handle *vs, const uint32_t *weights
+);
 
 /*
  * Updates per-real enabled flags for a VS. The states array must have
@@ -190,7 +194,9 @@ balancer_vs_update_real_weights(struct vs_handle *vs, const uint32_t *weights);
  * of reals, or -2 on allocation failure.
  */
 int
-balancer_vs_update_real_states(struct vs_handle *vs, const bool *states);
+balancer_vs_update_real_states(
+	struct balancer_vs_handle *vs, const bool *states
+);
 
 /*
  * Counters are registered by API with their names. The
