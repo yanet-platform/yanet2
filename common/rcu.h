@@ -72,8 +72,10 @@
  * @subsection rcu_init_example Initialization
  * @code{.c}
  * rcu_t rcu;
- * rcu_init(&rcu);
+ * rcu_init(&rcu, mctx, worker_count);
  * atomic_ulong shared_value = 0;
+ * // ...later, on teardown:
+ * rcu_free(&rcu, mctx);
  * @endcode
  *
  * @subsection rcu_reader_example Reader (Worker Thread)
@@ -96,7 +98,7 @@
  * @li Multiple readers can execute concurrently without blocking
  * @li Writers are serialized (external synchronization required for multiple
  * writers)
- * @li Each worker must use a unique worker ID (0 to RCU_WORKERS-1)
+ * @li Each worker must use a unique worker ID (0 to worker_count-1)
  * @li Workers must not nest read-side critical sections
  * @li Read-side critical sections should be short and non-blocking
  *
@@ -110,14 +112,14 @@
  * @li Throughput: 50-100M ops/sec per worker (measured on modern x86_64)
  *
  * @subsection rcu_perf_updates Update Operations
- * @li Complexity: O(RCU_WORKERS)
+ * @li Complexity: O(worker_count)
  * @li Blocks until all active readers finish
  * @li Typical latency: 100-500 nanoseconds (depends on reader activity)
  * @li Throughput: 2-10K ops/sec (limited by grace period overhead)
  *
  * @subsection rcu_perf_memory Memory Overhead
  * @li 64 bytes per worker (cache-line aligned to prevent false sharing)
- * @li Total: 64 * (RCU_WORKERS + 1) bytes
+ * @li Total: sizeof(rcu_t) + 64 * worker_count bytes
  * @li Minimal metadata overhead
  *
  * @subsection rcu_perf_scalability Scalability
@@ -148,21 +150,15 @@
  * writers. The RCU mechanism does not serialize writers.
  */
 
+#include "memory.h"
+#include "memory_address.h"
+
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
 
 ////////////////////////////////////////////////////////////////////////////////
-
-/**
- * @brief Maximum number of worker threads supported by RCU
- *
- * This constant defines the maximum number of concurrent readers that can
- * use the RCU mechanism. Each worker must have a unique ID from 0 to
- * RCU_WORKERS-1.
- */
-#define RCU_WORKERS 8
 
 /**
  * @brief Per-worker RCU state
@@ -192,14 +188,14 @@ typedef struct {
  * @brief Main RCU control structure
  *
  * This structure maintains the global epoch and per-worker state for the
- * RCU mechanism. It should be initialized with rcu_init() before use.
- *
- * @note The total size is approximately 64 * (RCU_WORKERS + 1) bytes due to
- *       cache-line alignment of worker states.
+ * RCU mechanism.
  */
 typedef struct {
-	/** Per-worker state array, one entry per worker thread */
-	rcu_worker_t workers[RCU_WORKERS];
+	/** Per-worker state array, stored as a relative offset */
+	rcu_worker_t *workers;
+
+	/** Number of worker slots in the workers array */
+	size_t worker_count;
 
 	/** Global epoch counter (0 or 1), flipped during updates */
 	atomic_uint global_epoch;
@@ -213,7 +209,7 @@ typedef struct {
  * This allows the RCU mechanism to track which workers are reading old data.
  *
  * @param rcu Pointer to the RCU control structure
- * @param w Worker ID (must be in range [0, RCU_WORKERS))
+ * @param w Worker ID (must be in range [0, worker_count))
  *
  * @note This function uses relaxed memory ordering for the epoch read and
  *       release ordering for the active flag to ensure proper synchronization.
@@ -225,7 +221,7 @@ typedef struct {
  */
 static inline void
 rcu_read_begin(rcu_t *rcu, size_t w) {
-	rcu_worker_t *me = &rcu->workers[w];
+	rcu_worker_t *me = &ADDR_OF(&rcu->workers)[w];
 	// Sample epoch, then pack both active=1 and epoch into single atomic
 	// store
 	unsigned e =
@@ -243,7 +239,7 @@ rcu_read_begin(rcu_t *rcu, size_t w) {
  * workers have finished their critical sections.
  *
  * @param rcu Pointer to the RCU control structure
- * @param w Worker ID (must be in range [0, RCU_WORKERS))
+ * @param w Worker ID (must be in range [0, worker_count))
  *
  * @note This function uses release memory ordering to ensure all reads in
  *       the critical section complete before marking inactive.
@@ -254,7 +250,7 @@ rcu_read_begin(rcu_t *rcu, size_t w) {
  */
 static inline void
 rcu_read_end(rcu_t *rcu, size_t w) {
-	rcu_worker_t *me = &rcu->workers[w];
+	rcu_worker_t *me = &ADDR_OF(&rcu->workers)[w];
 	// Clear active bit (set state to 0)
 	atomic_store_explicit(&me->state, 0, memory_order_release);
 }
@@ -268,7 +264,7 @@ rcu_read_end(rcu_t *rcu, size_t w) {
  * epoch change are visible.
  *
  * @param rcu Pointer to the RCU control structure
- * @param w Worker ID (must be in range [0, RCU_WORKERS))
+ * @param w Worker ID (must be in range [0, worker_count))
  * @param addr Pointer to atomic variable to load (e.g., atomic_ulong*)
  * @return The loaded value
  *
@@ -296,7 +292,7 @@ rcu_read_end(rcu_t *rcu, size_t w) {
  * It's provided for symmetry with RCU_READ_BEGIN().
  *
  * @param rcu Pointer to the RCU control structure
- * @param w Worker ID (must be in range [0, RCU_WORKERS))
+ * @param w Worker ID (must be in range [0, worker_count))
  */
 #define RCU_READ_END(rcu, w) rcu_read_end(rcu, w)
 
@@ -339,10 +335,11 @@ cpu_relax(void) {
  */
 static void
 wait_epoch_flush(rcu_t *rcu, unsigned e) {
+	rcu_worker_t *workers = ADDR_OF(&rcu->workers);
 	for (;;) {
 		bool any = false;
-		for (size_t i = 0; i < RCU_WORKERS; i++) {
-			rcu_worker_t *w = &rcu->workers[i];
+		for (size_t i = 0; i < rcu->worker_count; i++) {
+			rcu_worker_t *w = &workers[i];
 			// Load packed state once - gets both active and epoch
 			unsigned state = atomic_load_explicit(
 				&w->state, memory_order_acquire
@@ -482,29 +479,42 @@ rcu_update(rcu_t *rcu, atomic_ulong *value, uint64_t upd) {
 /**
  * @brief Initialize an RCU control structure
  *
- * This function initializes all fields of the RCU structure to their default
- * values. It must be called before any other RCU operations.
+ * Allocates the per-worker state array from the given memory context and
+ * sets the global epoch and every worker slot to zero (idle, epoch 0).
+ * Must be called before any other RCU operation and paired with rcu_free.
  *
- * Initial state:
- * - Global epoch: 0
- * - All workers: inactive (active = 0)
- * - All worker epochs: 0
+ * Returns 0 on success, -1 if the per-worker array could not be allocated.
  *
- * @param rcu Pointer to the RCU control structure to initialize
+ * Not thread-safe; must complete before any concurrent reader or writer
+ * touches the structure.
+ */
+static inline int
+rcu_init(rcu_t *rcu, struct memory_context *mctx, size_t worker_count) {
+	size_t bytes = sizeof(rcu_worker_t) * worker_count;
+	rcu_worker_t *workers = memory_balloc(mctx, bytes);
+	if (workers == NULL && worker_count > 0) {
+		return -1;
+	}
+	memset(workers, 0, bytes);
+	SET_OFFSET_OF(&rcu->workers, workers);
+	rcu->worker_count = worker_count;
+	atomic_store_explicit(&rcu->global_epoch, 0, memory_order_relaxed);
+	return 0;
+}
+
+/**
+ * @brief Release the per-worker state array previously allocated by rcu_init
  *
- * @note This function is NOT thread-safe. It must be called before any
- *       concurrent access to the RCU structure.
- * @note After initialization, the RCU structure is ready for use by readers
- *       and writers.
- *
- * Example:
- * ```c
- * rcu_t rcu;
- * rcu_init(&rcu);
- * // Now ready for use
- * ```
+ * Must be called with the same memory context that was passed to rcu_init.
+ * After this call the RCU structure must not be used.
  */
 static inline void
-rcu_init(rcu_t *rcu) {
-	memset(rcu, 0, sizeof(rcu_t));
+rcu_free(rcu_t *rcu, struct memory_context *mctx) {
+	memory_bfree(
+		mctx,
+		ADDR_OF(&rcu->workers),
+		sizeof(rcu_worker_t) * rcu->worker_count
+	);
+	rcu->workers = NULL;
+	rcu->worker_count = 0;
 }
