@@ -1,5 +1,4 @@
 #include "bench.h"
-#include "controlplane/diag/diag.h"
 #include "mock/config.h"
 #include "mock/mock.h"
 #include "mock/packet.h"
@@ -10,17 +9,18 @@
 #define DP_MEMORY (1 << 20)
 
 int
-bench_init(struct bench *bench, struct bench_config *config) {
+bench_init(
+	struct bench *bench, struct bench_config *config, yanet_error **err
+) {
 	// Initialize fields to safe defaults before any operation that might
 	// fail
 	memset(&bench->yanet, 0, sizeof(bench->yanet));
 	bench->shared_memory = NULL;
 	bench->total_memory = 0;
 
-	diag_reset(&bench->diag);
-
 	if (config->total_memory < DP_MEMORY + config->cp_memory) {
-		NEW_ERROR(
+		yanet_error_add(
+			err,
 			"memory is to small (required at least %lu)",
 			DP_MEMORY + config->cp_memory
 		);
@@ -36,7 +36,7 @@ bench_init(struct bench *bench, struct bench_config *config) {
 		     -1,
 		     0);
 	if (shared_memory == MAP_FAILED) {
-		NEW_ERROR("mmap failed: %s", strerror(errno));
+		yanet_error_add(err, "mmap failed: %s", strerror(errno));
 		goto error;
 	}
 
@@ -57,7 +57,7 @@ bench_init(struct bench *bench, struct bench_config *config) {
 	};
 
 	if (yanet_mock_init(&bench->yanet, &yanet_config, shared_memory) != 0) {
-		NEW_ERROR("failed to init mock");
+		yanet_error_add(err, "failed to init mock");
 		goto error_unmap;
 	}
 
@@ -73,16 +73,10 @@ error_unmap:
 	munmap(shared_memory, config->total_memory);
 
 error:
-	diag_fill(&bench->diag);
 	return -1;
 }
 
 #undef DP_MEMORY
-
-const char *
-bench_take_error(struct bench *bench) {
-	return diag_take_msg(&bench->diag);
-}
 
 void
 bench_free(struct bench *bench) {

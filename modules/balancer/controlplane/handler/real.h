@@ -7,6 +7,7 @@
 #include "api/vs.h"
 #include "common/network.h"
 #include "counters/counters.h"
+#include "lib/errors/errors.h"
 #include "modules/balancer/dataplane/active_sessions.h"
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -67,7 +68,8 @@ real_init(
 	struct named_real_config *named_config,
 	struct counter_registry *registry,
 	size_t workers,
-	struct memory_context *mctx
+	struct memory_context *mctx,
+	yanet_error **err
 );
 
 void

@@ -8,6 +8,8 @@
 
 #include "controlplane/config/registry.h"
 
+#include "lib/errors/errors.h"
+
 struct cp_pipeline_function {
 	char name[CP_FUNCTION_NAME_LEN];
 	uint64_t tsc_counter_id;
@@ -49,7 +51,8 @@ struct cp_pipeline *
 cp_pipeline_create(
 	struct memory_context *memory_context,
 	struct cp_config_gen *cp_config_gen,
-	struct cp_pipeline_config *cp_pipeline_config
+	struct cp_pipeline_config *cp_pipeline_config,
+	yanet_error **err
 );
 
 void
@@ -72,14 +75,16 @@ struct cp_pipeline_registry {
 int
 cp_pipeline_registry_init(
 	struct memory_context *memory_context,
-	struct cp_pipeline_registry *registry
+	struct cp_pipeline_registry *registry,
+	yanet_error **err
 );
 
 int
 cp_pipeline_registry_copy(
 	struct memory_context *memory_context,
 	struct cp_pipeline_registry *new_pipeline_registry,
-	struct cp_pipeline_registry *old_pipeline_registry
+	struct cp_pipeline_registry *old_pipeline_registry,
+	yanet_error **err
 );
 
 void
@@ -106,7 +111,8 @@ int
 cp_pipeline_registry_upsert(
 	struct cp_pipeline_registry *pipeline_registry,
 	const char *name,
-	struct cp_pipeline *pipeline
+	struct cp_pipeline *pipeline,
+	yanet_error **err
 );
 
 int

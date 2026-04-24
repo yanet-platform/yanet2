@@ -7,6 +7,8 @@
 
 #include "counters/counters.h"
 
+#include "lib/errors/errors.h"
+
 #define ROUTE_MPLS_TYPE_NONE 0
 #define ROUTE_MPLS_TYPE_V4 1
 #define ROUTE_MPLS_TYPE_V6 2
@@ -45,7 +47,9 @@ struct route_mpls_rule {
 };
 
 struct cp_module *
-route_mpls_module_config_create(struct agent *agent, const char *name);
+route_mpls_module_config_create(
+	struct agent *agent, const char *name, yanet_error **err
+);
 
 void
 route_mpls_module_config_free(struct cp_module *cp_module);
@@ -54,5 +58,6 @@ int
 route_mpls_module_config_update(
 	struct cp_module *cp_module,
 	struct route_mpls_rule *route_mpls_rules,
-	uint64_t route_mpls_rule_count
+	uint64_t route_mpls_rule_count,
+	yanet_error **err
 );

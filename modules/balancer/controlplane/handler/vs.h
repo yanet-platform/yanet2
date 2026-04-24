@@ -5,6 +5,7 @@
 
 #include "common/memory.h"
 #include "filter.h"
+#include "lib/errors/errors.h"
 #include "selector.h"
 #include <stddef.h>
 
@@ -79,7 +80,7 @@ struct vs {
 
 /**
  * Initialize handler-side VS view.
- * Returns 0 on success, -1 on error.
+ * Returns 0 on success, -1 on error. Sets err on failure.
  */
 int
 vs_with_identifier_and_registry_idx_init(
@@ -90,7 +91,8 @@ vs_with_identifier_and_registry_idx_init(
 	struct named_vs_config *config,
 	struct counter_registry *registry,
 	struct memory_context *mctx,
-	struct balancer_update_info *update_info
+	struct balancer_update_info *update_info,
+	yanet_error **err
 );
 
 /**
@@ -101,10 +103,10 @@ vs_free(struct vs *vs, struct memory_context *mctx);
 
 /**
  * Refresh real selector and related data from the current state.
- * Returns 0 on success, -1 on error.
+ * Returns 0 on success, -1 on error. Sets err on failure.
  */
 int
-vs_update_reals(struct vs *vs);
+vs_update_reals(struct vs *vs, yanet_error **err);
 
 /**
  * Resolve VS registry index from a counter handle.

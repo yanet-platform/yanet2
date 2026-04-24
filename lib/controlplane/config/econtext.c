@@ -4,7 +4,7 @@
 
 // cp_config and cp_config_gen
 #include "lib/controlplane/config/zone.h"
-#include "lib/controlplane/diag/diag.h"
+#include "lib/errors/errors.h"
 
 static void
 module_ectx_free(
@@ -48,7 +48,8 @@ module_ectx_create(
 	struct device_ectx *device_ectx,
 	struct pipeline_ectx *pipeline_ectx,
 	struct function_ectx *function_ectx,
-	struct chain_ectx *chain_ectx
+	struct chain_ectx *chain_ectx,
+	yanet_error **err
 ) {
 	struct cp_config *cp_config = ADDR_OF(&cp_config_gen->cp_config);
 	struct dp_config *dp_config = ADDR_OF(&cp_config->dp_config);
@@ -58,7 +59,8 @@ module_ectx_create(
 	struct module_ectx *module_ectx =
 		(struct module_ectx *)memory_balloc(memory_context, ectx_size);
 	if (module_ectx == NULL) {
-		NEW_ERROR(
+		yanet_error_add(
+			err,
 			"failed to allocate memory for module execution context"
 		);
 		return NULL;
@@ -104,7 +106,8 @@ module_ectx_create(
 		&cp_module->counter_registry
 	);
 	if (counter_storage == NULL) {
-		NEW_ERROR(
+		yanet_error_add(
+			err,
 			"failed to spawn counter storage for module '%s:%s'",
 			cp_module->type,
 			cp_module->name
@@ -120,9 +123,11 @@ module_ectx_create(
 		    cp_chain->name,
 		    cp_module->type,
 		    cp_module->name,
-		    counter_storage
+		    counter_storage,
+		    err
 	    )) {
-		PUSH_ERROR(
+		yanet_error_add(
+			err,
 			"failed to insert counter storage for module '%s:%s'",
 			cp_module->type,
 			cp_module->name
@@ -177,7 +182,8 @@ chain_ectx_create(
 	struct config_gen_ectx *config_gen_ectx,
 	struct device_ectx *device_ectx,
 	struct pipeline_ectx *pipeline_ectx,
-	struct function_ectx *function_ectx
+	struct function_ectx *function_ectx,
+	yanet_error **err
 ) {
 	struct cp_config *cp_config = ADDR_OF(&cp_config_gen->cp_config);
 	struct memory_context *memory_context = &cp_config->memory_context;
@@ -188,7 +194,8 @@ chain_ectx_create(
 	struct chain_ectx *chain_ectx =
 		(struct chain_ectx *)memory_balloc(memory_context, ectx_size);
 	if (chain_ectx == NULL) {
-		NEW_ERROR(
+		yanet_error_add(
+			err,
 			"failed to allocate memory for chain execution context"
 		);
 		return NULL;
@@ -218,7 +225,8 @@ chain_ectx_create(
 		&cp_chain->counter_registry
 	);
 	if (counter_storage == NULL) {
-		NEW_ERROR(
+		yanet_error_add(
+			err,
 			"failed to spawn counter storage for chain '%s'",
 			cp_chain->name
 		);
@@ -231,9 +239,11 @@ chain_ectx_create(
 		    cp_pipeline->name,
 		    cp_function->name,
 		    cp_chain->name,
-		    counter_storage
+		    counter_storage,
+		    err
 	    )) {
-		PUSH_ERROR(
+		yanet_error_add(
+			err,
 			"failed to insert counter storage for chain '%s'",
 			cp_chain->name
 		);
@@ -251,7 +261,8 @@ chain_ectx_create(
 		);
 
 		if (cp_module == NULL) {
-			NEW_ERROR(
+			yanet_error_add(
+				err,
 				"module '%s:%s' not found in chain '%s'",
 				cp_chain->modules[idx].type,
 				cp_chain->modules[idx].name,
@@ -268,10 +279,12 @@ chain_ectx_create(
 			device_ectx,
 			pipeline_ectx,
 			function_ectx,
-			chain_ectx
+			chain_ectx,
+			err
 		);
 		if (module_ectx == NULL) {
-			PUSH_ERROR(
+			yanet_error_add(
+				err,
 				"failed to create module execution context for "
 				"module '%s:%s' in chain '%s'",
 				cp_module->type,
@@ -337,7 +350,8 @@ function_ectx_create(
 	struct cp_config_gen *old_config_gen,
 	struct config_gen_ectx *config_gen_ectx,
 	struct device_ectx *device_ectx,
-	struct pipeline_ectx *pipeline_ectx
+	struct pipeline_ectx *pipeline_ectx,
+	yanet_error **err
 ) {
 	struct cp_config *cp_config = ADDR_OF(&cp_config_gen->cp_config);
 	struct memory_context *memory_context = &cp_config->memory_context;
@@ -353,8 +367,11 @@ function_ectx_create(
 	struct function_ectx *function_ectx = (struct function_ectx *)
 		memory_balloc(memory_context, ectx_size);
 	if (function_ectx == NULL) {
-		NEW_ERROR("failed to allocate memory for function execution "
-			  "context");
+		yanet_error_add(
+			err,
+			"failed to allocate memory for function "
+			"execution context"
+		);
 		return NULL;
 	}
 
@@ -367,7 +384,8 @@ function_ectx_create(
 		sizeof(struct chain_ectx *) * cp_function->chain_count
 	);
 	if (chains == NULL) {
-		NEW_ERROR(
+		yanet_error_add(
+			err,
 			"failed to allocate memory for chains array in "
 			"function '%s'",
 			cp_function->name
@@ -397,7 +415,8 @@ function_ectx_create(
 		&cp_function->counter_registry
 	);
 	if (counter_storage == NULL) {
-		NEW_ERROR(
+		yanet_error_add(
+			err,
 			"failed to spawn counter storage for function '%s'",
 			cp_function->name
 		);
@@ -409,9 +428,11 @@ function_ectx_create(
 		    cp_device->name,
 		    cp_pipeline->name,
 		    cp_function->name,
-		    counter_storage
+		    counter_storage,
+		    err
 	    )) {
-		PUSH_ERROR(
+		yanet_error_add(
+			err,
 			"failed to insert counter storage for function '%s'",
 			cp_function->name
 		);
@@ -443,10 +464,12 @@ function_ectx_create(
 			config_gen_ectx,
 			device_ectx,
 			pipeline_ectx,
-			function_ectx
+			function_ectx,
+			err
 		);
 		if (chain_ectx == NULL) {
-			PUSH_ERROR(
+			yanet_error_add(
+				err,
 				"failed to create chain execution context for "
 				"chain '%s' in function '%s'",
 				cp_chain->name,
@@ -505,7 +528,8 @@ pipeline_ectx_create(
 	struct cp_pipeline *cp_pipeline,
 	struct cp_config_gen *old_config_gen,
 	struct config_gen_ectx *config_gen_ectx,
-	struct device_ectx *device_ectx
+	struct device_ectx *device_ectx,
+	yanet_error **err
 ) {
 	struct cp_config *cp_config = ADDR_OF(&cp_config_gen->cp_config);
 	struct memory_context *memory_context = &cp_config->memory_context;
@@ -516,8 +540,11 @@ pipeline_ectx_create(
 	struct pipeline_ectx *pipeline_ectx = (struct pipeline_ectx *)
 		memory_balloc(memory_context, ectx_size);
 	if (pipeline_ectx == NULL) {
-		NEW_ERROR("failed to allocate memory for pipeline execution "
-			  "context");
+		yanet_error_add(
+			err,
+			"failed to allocate memory for pipeline "
+			"execution context"
+		);
 		return NULL;
 	}
 	memset(pipeline_ectx, 0, ectx_size);
@@ -540,7 +567,8 @@ pipeline_ectx_create(
 		&cp_pipeline->counter_registry
 	);
 	if (counter_storage == NULL) {
-		NEW_ERROR(
+		yanet_error_add(
+			err,
 			"failed to spawn counter storage for pipeline '%s'",
 			cp_pipeline->name
 		);
@@ -551,9 +579,11 @@ pipeline_ectx_create(
 		    &cp_config_gen->counter_storage_registry,
 		    cp_device->name,
 		    cp_pipeline->name,
-		    counter_storage
+		    counter_storage,
+		    err
 	    )) {
-		PUSH_ERROR(
+		yanet_error_add(
+			err,
 			"failed to insert counter storage for pipeline '%s'",
 			cp_pipeline->name
 		);
@@ -579,7 +609,8 @@ pipeline_ectx_create(
 			cp_config_gen, cp_pipeline->functions[idx].name
 		);
 		if (cp_function == NULL) {
-			NEW_ERROR(
+			yanet_error_add(
+				err,
 				"function '%s' not found for pipeline '%s'",
 				cp_pipeline->functions[idx].name,
 				cp_pipeline->name
@@ -593,10 +624,12 @@ pipeline_ectx_create(
 			old_config_gen,
 			config_gen_ectx,
 			device_ectx,
-			pipeline_ectx
+			pipeline_ectx,
+			err
 		);
 		if (function_ectx == NULL) {
-			PUSH_ERROR(
+			yanet_error_add(
+				err,
 				"failed to create function execution context "
 				"for function '%s' in pipeline '%s'",
 				cp_function->name,
@@ -658,7 +691,8 @@ device_entry_ectx_create(
 	struct device_ectx *device_ectx,
 	device_handler handler,
 	struct cp_device_entry *cp_device_entry,
-	struct cp_config_gen *old_config_gen
+	struct cp_config_gen *old_config_gen,
+	yanet_error **err
 ) {
 	struct cp_config *cp_config = ADDR_OF(&new_config_gen->cp_config);
 	struct memory_context *memory_context = &cp_config->memory_context;
@@ -676,8 +710,11 @@ device_entry_ectx_create(
 			memory_context, ectx_size
 		);
 	if (device_entry_ectx == NULL) {
-		NEW_ERROR("failed to allocate memory for device entry "
-			  "execution context");
+		yanet_error_add(
+			err,
+			"failed to allocate memory for device "
+			"entry execution context"
+		);
 		return NULL;
 	}
 
@@ -691,8 +728,11 @@ device_entry_ectx_create(
 				cp_device_entry->pipeline_count
 		);
 	if (pipelines == NULL && cp_device_entry->pipeline_count > 0) {
-		NEW_ERROR("failed to allocate memory for pipelines array in "
-			  "device entry");
+		yanet_error_add(
+			err,
+			"failed to allocate memory for pipelines "
+			"array in device entry"
+		);
 		goto error;
 	}
 	device_entry_ectx->pipeline_count = cp_device_entry->pipeline_count;
@@ -713,7 +753,8 @@ device_entry_ectx_create(
 			new_config_gen, cp_device_entry->pipelines[idx].name
 		);
 		if (cp_pipeline == NULL) {
-			NEW_ERROR(
+			yanet_error_add(
+				err,
 				"pipeline '%s' not found in device entry",
 				cp_device_entry->pipelines[idx].name
 			);
@@ -724,10 +765,12 @@ device_entry_ectx_create(
 			cp_pipeline,
 			old_config_gen,
 			config_gen_ectx,
-			device_ectx
+			device_ectx,
+			err
 		);
 		if (pipeline_ectx == NULL) {
-			PUSH_ERROR(
+			yanet_error_add(
+				err,
 				"failed to create pipeline execution context "
 				"for pipeline '%s' in device entry",
 				cp_pipeline->name
@@ -782,7 +825,8 @@ device_ectx_create(
 	struct cp_config_gen *cp_config_gen,
 	struct cp_device *cp_device,
 	struct config_gen_ectx *config_gen_ectx,
-	struct cp_config_gen *old_config_gen
+	struct cp_config_gen *old_config_gen,
+	yanet_error **err
 ) {
 	struct cp_config *cp_config = ADDR_OF(&cp_config_gen->cp_config);
 	struct dp_config *dp_config = ADDR_OF(&cp_config->dp_config);
@@ -793,7 +837,8 @@ device_ectx_create(
 	struct device_ectx *device_ectx =
 		(struct device_ectx *)memory_balloc(memory_context, ectx_size);
 	if (device_ectx == NULL) {
-		NEW_ERROR(
+		yanet_error_add(
+			err,
 			"failed to allocate memory for device execution context"
 		);
 		return NULL;
@@ -815,7 +860,8 @@ device_ectx_create(
 		&cp_device->counter_registry
 	);
 	if (counter_storage == NULL) {
-		NEW_ERROR(
+		yanet_error_add(
+			err,
 			"failed to spawn counter storage for device '%s'",
 			cp_device->name
 		);
@@ -825,9 +871,11 @@ device_ectx_create(
 	if (cp_config_counter_storage_registry_insert_device(
 		    &cp_config_gen->counter_storage_registry,
 		    cp_device->name,
-		    counter_storage
+		    counter_storage,
+		    err
 	    )) {
-		PUSH_ERROR(
+		yanet_error_add(
+			err,
 			"failed to insert counter storage for device '%s'",
 			cp_device->name
 		);
@@ -853,10 +901,12 @@ device_ectx_create(
 		device_ectx,
 		dp_device->input_handler,
 		ADDR_OF(&cp_device->input_pipelines),
-		old_config_gen
+		old_config_gen,
+		err
 	);
 	if (input == NULL) {
-		PUSH_ERROR(
+		yanet_error_add(
+			err,
 			"failed to create input device entry execution context "
 			"for device '%s'",
 			cp_device->name
@@ -871,10 +921,12 @@ device_ectx_create(
 		device_ectx,
 		dp_device->output_handler,
 		ADDR_OF(&cp_device->output_pipelines),
-		old_config_gen
+		old_config_gen,
+		err
 	);
 	if (output == NULL) {
-		PUSH_ERROR(
+		yanet_error_add(
+			err,
 			"failed to create output device entry execution "
 			"context for device '%s'",
 			cp_device->name
@@ -926,7 +978,8 @@ link_module_ectx(
 	struct pipeline_ectx *pipeline_ectx,
 	struct function_ectx *function_ectx,
 	struct chain_ectx *chain_ectx,
-	struct module_ectx *module_ectx
+	struct module_ectx *module_ectx,
+	yanet_error **err
 ) {
 	(void)device_ectx;
 	(void)device_entry_ectx;
@@ -945,7 +998,8 @@ link_module_ectx(
 		memory_context, sizeof(uint64_t) * config_gen_ectx->device_count
 	);
 	if (config_gen_ectx->device_count && cm_index == NULL) {
-		NEW_ERROR(
+		yanet_error_add(
+			err,
 			"failed to allocate memory for cm_index in module "
 			"'%s:%s'",
 			cp_module->type,
@@ -962,7 +1016,8 @@ link_module_ectx(
 		memory_context, sizeof(uint64_t) * cp_module->device_count
 	);
 	if (cp_module->device_count && mc_index == NULL) {
-		NEW_ERROR(
+		yanet_error_add(
+			err,
 			"failed to allocate memory for mc_index in module "
 			"'%s:%s'",
 			cp_module->type,
@@ -1010,7 +1065,8 @@ link_chain_ectx(
 	struct device_entry_ectx *device_entry_ectx,
 	struct pipeline_ectx *pipeline_ectx,
 	struct function_ectx *function_ectx,
-	struct chain_ectx *chain_ectx
+	struct chain_ectx *chain_ectx,
+	yanet_error **err
 ) {
 	for (uint64_t idx = 0; idx < chain_ectx->length; ++idx) {
 		struct module_ectx *module_ectx =
@@ -1024,9 +1080,12 @@ link_chain_ectx(
 			    pipeline_ectx,
 			    function_ectx,
 			    chain_ectx,
-			    module_ectx
+			    module_ectx,
+			    err
 		    )) {
-			PUSH_ERROR("failed to link module execution context");
+			yanet_error_add(
+				err, "failed to link module execution context"
+			);
 			goto error;
 		}
 	}
@@ -1043,7 +1102,8 @@ link_function_ectx(
 	struct device_ectx *device_ectx,
 	struct device_entry_ectx *device_entry_ectx,
 	struct pipeline_ectx *pipeline_ectx,
-	struct function_ectx *function_ectx
+	struct function_ectx *function_ectx,
+	yanet_error **err
 ) {
 	struct chain_ectx **chains = ADDR_OF(&function_ectx->chains);
 	for (uint64_t idx = 0; idx < function_ectx->chain_count; ++idx) {
@@ -1056,9 +1116,12 @@ link_function_ectx(
 			    device_entry_ectx,
 			    pipeline_ectx,
 			    function_ectx,
-			    chain_ectx
+			    chain_ectx,
+			    err
 		    )) {
-			PUSH_ERROR("failed to link chain execution context");
+			yanet_error_add(
+				err, "failed to link chain execution context"
+			);
 			goto error;
 		}
 	}
@@ -1074,7 +1137,8 @@ link_pipeline_ectx(
 	struct config_gen_ectx *config_gen_ectx,
 	struct device_ectx *device_ectx,
 	struct device_entry_ectx *device_entry_ectx,
-	struct pipeline_ectx *pipeline_ectx
+	struct pipeline_ectx *pipeline_ectx,
+	yanet_error **err
 ) {
 	for (uint64_t idx = 0; idx < pipeline_ectx->length; ++idx) {
 		struct function_ectx *function_ectx =
@@ -1086,9 +1150,12 @@ link_pipeline_ectx(
 			    device_ectx,
 			    device_entry_ectx,
 			    pipeline_ectx,
-			    function_ectx
+			    function_ectx,
+			    err
 		    )) {
-			PUSH_ERROR("failed to link function execution context");
+			yanet_error_add(
+				err, "failed to link function execution context"
+			);
 			goto error;
 		}
 	}
@@ -1103,7 +1170,8 @@ static int
 link_device_entry_ectx(
 	struct config_gen_ectx *config_gen_ectx,
 	struct device_ectx *device_ectx,
-	struct device_entry_ectx *device_entry_ectx
+	struct device_entry_ectx *device_entry_ectx,
+	yanet_error **err
 ) {
 	struct pipeline_ectx **pipelines =
 		ADDR_OF(&device_entry_ectx->pipelines);
@@ -1115,9 +1183,12 @@ link_device_entry_ectx(
 			    config_gen_ectx,
 			    device_ectx,
 			    device_entry_ectx,
-			    pipeline_ectx
+			    pipeline_ectx,
+			    err
 		    )) {
-			PUSH_ERROR("failed to link pipeline execution context");
+			yanet_error_add(
+				err, "failed to link pipeline execution context"
+			);
 			goto error;
 		}
 	}
@@ -1130,23 +1201,30 @@ error:
 
 static int
 link_device_ectx(
-	struct config_gen_ectx *config_gen_ectx, struct device_ectx *device_ectx
+	struct config_gen_ectx *config_gen_ectx,
+	struct device_ectx *device_ectx,
+	yanet_error **err
 ) {
 	if (link_device_entry_ectx(
 		    config_gen_ectx,
 		    device_ectx,
-		    ADDR_OF(&device_ectx->input_pipelines)
+		    ADDR_OF(&device_ectx->input_pipelines),
+		    err
 	    )) {
-		PUSH_ERROR("failed to link input device entry execution context"
+		yanet_error_add(
+			err,
+			"failed to link input device entry execution context"
 		);
 		goto error;
 	}
 	if (link_device_entry_ectx(
 		    config_gen_ectx,
 		    device_ectx,
-		    ADDR_OF(&device_ectx->output_pipelines)
+		    ADDR_OF(&device_ectx->output_pipelines),
+		    err
 	    )) {
-		PUSH_ERROR(
+		yanet_error_add(
+			err,
 			"failed to link output device entry execution context"
 		);
 		goto error;
@@ -1159,14 +1237,18 @@ error:
 }
 
 static int
-link_config_gen_ectx(struct config_gen_ectx *config_gen_ectx) {
+link_config_gen_ectx(
+	struct config_gen_ectx *config_gen_ectx, yanet_error **err
+) {
 	for (uint64_t idx = 0; idx < config_gen_ectx->device_count; ++idx) {
 		struct device_ectx *device_ectx =
 			ADDR_OF(config_gen_ectx->devices + idx);
 		if (device_ectx == NULL)
 			continue;
-		if (link_device_ectx(config_gen_ectx, device_ectx)) {
-			PUSH_ERROR("failed to link device execution context");
+		if (link_device_ectx(config_gen_ectx, device_ectx, err)) {
+			yanet_error_add(
+				err, "failed to link device execution context"
+			);
 			goto error;
 		}
 	}
@@ -1180,7 +1262,8 @@ error:
 struct config_gen_ectx *
 config_gen_ectx_create(
 	struct cp_config_gen *cp_config_gen,
-	struct cp_config_gen *old_config_gen
+	struct cp_config_gen *old_config_gen,
+	yanet_error **err
 ) {
 	struct cp_config *cp_config = ADDR_OF(&cp_config_gen->cp_config);
 	struct memory_context *memory_context = &cp_config->memory_context;
@@ -1194,8 +1277,11 @@ config_gen_ectx_create(
 	struct config_gen_ectx *config_gen_ectx = (struct config_gen_ectx *)
 		memory_balloc(memory_context, ectx_size);
 	if (config_gen_ectx == NULL) {
-		NEW_ERROR("failed to allocate memory for config generation "
-			  "execution context");
+		yanet_error_add(
+			err,
+			"failed to allocate memory for config "
+			"generation execution context"
+		);
 		return NULL;
 	}
 	memset(config_gen_ectx, 0, ectx_size);
@@ -1222,10 +1308,13 @@ config_gen_ectx_create(
 			cp_config_gen,
 			cp_device,
 			config_gen_ectx,
-			old_config_gen
+			old_config_gen,
+			err
 		);
 		if (device_ectx == NULL) {
-			PUSH_ERROR("failed to create device execution context");
+			yanet_error_add(
+				err, "failed to create device execution context"
+			);
 			goto error;
 		}
 		SET_OFFSET_OF(
@@ -1233,8 +1322,10 @@ config_gen_ectx_create(
 		);
 	}
 
-	if (link_config_gen_ectx(config_gen_ectx)) {
-		PUSH_ERROR("failed to link config generation execution context"
+	if (link_config_gen_ectx(config_gen_ectx, err)) {
+		yanet_error_add(
+			err,
+			"failed to link config generation execution context"
 		);
 		goto error;
 	}

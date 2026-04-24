@@ -31,6 +31,7 @@ import (
 	"runtime"
 	"unsafe"
 
+	"github.com/yanet-platform/yanet2/bindings/go/cerrors"
 	"github.com/yanet-platform/yanet2/bindings/go/filter"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 )
@@ -43,13 +44,10 @@ func NewModuleConfig(agent *ffi.Agent, name string) (*ModuleConfig, error) {
 	cName := C.CString(name)
 	defer C.free(unsafe.Pointer(cName))
 
-	C.reset_errno()
-	ptr, err := C.route_mpls_module_config_create((*C.struct_agent)(agent.AsRawPtr()), cName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize module config: %w", err)
-	}
+	var cErr *C.yanet_error
+	ptr := C.route_mpls_module_config_create((*C.struct_agent)(agent.AsRawPtr()), cName, &cErr)
 	if ptr == nil {
-		return nil, fmt.Errorf("failed to initialize module config: module %q not found", name)
+		return nil, fmt.Errorf("failed to initialize module config: %w", cerrors.FromC(unsafe.Pointer(cErr)))
 	}
 
 	return &ModuleConfig{
@@ -141,18 +139,15 @@ func (m *ModuleConfig) Update(rules []routeMPLSRule) error {
 		cRule.nexthop_count = C.uint64_t(len(cNextHops))
 	}
 
-	C.reset_errno()
-	rc, err := C.route_mpls_module_config_update(
+	var cErr *C.yanet_error
+	rc := C.route_mpls_module_config_update(
 		m.asRawPtr(),
 		&cRules[0],
 		C.uint64_t(len(cRules)),
+		&cErr,
 	)
-
-	if err != nil {
-		return fmt.Errorf("failed to update config %w", err)
-	}
 	if rc != 0 {
-		return fmt.Errorf("failed to update config with return code=%d", rc)
+		return fmt.Errorf("failed to update config: %w", cerrors.FromC(unsafe.Pointer(cErr)))
 	}
 	return nil
 }

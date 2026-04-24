@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "lib/errors/errors.h"
 #include "lib/fwstate/fwmap.h"
 #include "lib/fwstate/fwstate_cursor.h"
 
@@ -16,7 +17,9 @@ struct layermap_list;
 typedef struct fwstate_outdated_layers fwstate_outdated_layers_t;
 
 struct cp_module *
-fwstate_module_config_init(struct agent *agent, const char *name);
+fwstate_module_config_init(
+	struct agent *agent, const char *name, yanet_error **err
+);
 
 void
 fwstate_module_config_propogate(

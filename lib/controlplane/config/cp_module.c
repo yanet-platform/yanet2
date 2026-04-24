@@ -8,13 +8,12 @@
 #include "dataplane/config/zone.h"
 
 #include "controlplane/agent/agent.h"
-
 #include "controlplane/config/zone.h"
-#include "lib/controlplane/diag/diag.h"
+
 #include <stdio.h>
 
 static int
-cp_module_build_perf_counters(struct cp_module *cp_module) {
+cp_module_build_perf_counters(struct cp_module *cp_module, yanet_error **err) {
 	for (size_t counter_idx = 0; counter_idx < MODULE_ECTX_PERF_COUNTERS;
 	     ++counter_idx) {
 		char name[16];
@@ -23,14 +22,15 @@ cp_module_build_perf_counters(struct cp_module *cp_module) {
 			counter_registry_register(
 				&cp_module->counter_registry,
 				name,
-				MODULE_ECTX_PERF_COUNTER_SIZE
+				MODULE_ECTX_PERF_COUNTER_SIZE,
+				err
 			);
 		if (cp_module->perf_counters_indices[counter_idx] ==
 		    COUNTER_INVALID) {
-			NEW_ERROR(
+			yanet_error_add(
+				err,
 				"failed to register histogram counter at index "
-				"%zu for module "
-				"'%s:%s'",
+				"%zu for module '%s:%s'",
 				counter_idx,
 				cp_module->type,
 				cp_module->name
@@ -47,7 +47,8 @@ cp_module_init(
 	struct cp_module *cp_module,
 	struct agent *agent,
 	const char *module_type,
-	const char *module_name
+	const char *module_name,
+	yanet_error **err
 ) {
 	memset(cp_module, 0, sizeof(struct cp_module));
 
@@ -56,11 +57,11 @@ cp_module_init(
 	if (dp_config_lookup_module(
 		    dp_config, module_type, &cp_module->dp_module_idx
 	    )) {
-		NEW_ERROR(
+		yanet_error_add(
+			err,
 			"module type '%s' not found in dataplane config",
 			module_type
 		);
-		errno = ENXIO;
 		return -1;
 	}
 
@@ -77,7 +78,8 @@ cp_module_init(
 	if (counter_registry_init(
 		    &cp_module->counter_registry, &cp_module->memory_context, 0
 	    )) {
-		NEW_ERROR(
+		yanet_error_add(
+			err,
 			"failed to initialize counter registry for module "
 			"'%s:%s'",
 			module_type,
@@ -87,10 +89,11 @@ cp_module_init(
 	}
 
 	cp_module->rx_counter_id = counter_registry_register(
-		&cp_module->counter_registry, "rx", 1
+		&cp_module->counter_registry, "rx", 1, err
 	);
 	if (cp_module->rx_counter_id == COUNTER_INVALID) {
-		NEW_ERROR(
+		yanet_error_add(
+			err,
 			"failed to register 'rx' counter for module '%s:%s'",
 			module_type,
 			module_name
@@ -98,10 +101,11 @@ cp_module_init(
 		return -1;
 	}
 	cp_module->tx_counter_id = counter_registry_register(
-		&cp_module->counter_registry, "tx", 1
+		&cp_module->counter_registry, "tx", 1, err
 	);
 	if (cp_module->tx_counter_id == COUNTER_INVALID) {
-		NEW_ERROR(
+		yanet_error_add(
+			err,
 			"failed to register 'tx' counter for module '%s:%s'",
 			module_type,
 			module_name
@@ -109,10 +113,11 @@ cp_module_init(
 		return -1;
 	}
 	cp_module->rx_bytes_counter_id = counter_registry_register(
-		&cp_module->counter_registry, "rx_bytes", 1
+		&cp_module->counter_registry, "rx_bytes", 1, err
 	);
 	if (cp_module->rx_bytes_counter_id == COUNTER_INVALID) {
-		NEW_ERROR(
+		yanet_error_add(
+			err,
 			"failed to register 'rx_bytes' counter for module "
 			"'%s:%s'",
 			module_type,
@@ -121,10 +126,11 @@ cp_module_init(
 		return -1;
 	}
 	cp_module->tx_bytes_counter_id = counter_registry_register(
-		&cp_module->counter_registry, "tx_bytes", 1
+		&cp_module->counter_registry, "tx_bytes", 1, err
 	);
 	if (cp_module->tx_bytes_counter_id == COUNTER_INVALID) {
-		NEW_ERROR(
+		yanet_error_add(
+			err,
 			"failed to register 'tx_bytes' counter for module "
 			"'%s:%s'",
 			module_type,
@@ -133,13 +139,17 @@ cp_module_init(
 		return -1;
 	}
 
-	if (cp_module_build_perf_counters(cp_module)) {
+	if (cp_module_build_perf_counters(cp_module, err)) {
+		yanet_error_add(
+			err, "failed to build perf counters for module"
+		);
 		return -1;
 	}
 
 	uint64_t any_idx;
-	if (cp_module_link_device(cp_module, "", &any_idx)) {
-		PUSH_ERROR(
+	if (cp_module_link_device(cp_module, "", &any_idx, err)) {
+		yanet_error_add(
+			err,
 			"in cp_module_init for module '%s:%s'",
 			module_type,
 			module_name
@@ -167,7 +177,10 @@ cp_module_fini(struct cp_module *cp_module) {
 
 int
 cp_module_link_device(
-	struct cp_module *cp_module, const char *name, uint64_t *index
+	struct cp_module *cp_module,
+	const char *name,
+	uint64_t *index,
+	yanet_error **err
 ) {
 	struct cp_module_device *devices = ADDR_OF(&cp_module->devices);
 	for (uint64_t idx = 0; idx < cp_module->device_count; ++idx) {
@@ -184,7 +197,12 @@ cp_module_link_device(
 		sizeof(struct cp_module_device) * (cp_module->device_count + 1)
 	);
 	if (devices == NULL) {
-		NEW_ERROR("failed to reallocate devices array for module");
+		yanet_error_add(
+			err,
+			"failed to reallocate devices array for module '%s:%s'",
+			cp_module->type,
+			cp_module->name
+		);
 		return -1;
 	}
 
@@ -200,10 +218,11 @@ cp_module_link_device(
 int
 cp_module_registry_init(
 	struct memory_context *memory_context,
-	struct cp_module_registry *new_module_registry
+	struct cp_module_registry *new_module_registry,
+	yanet_error **err
 ) {
 	if (registry_init(memory_context, &new_module_registry->registry, 8)) {
-		NEW_ERROR("failed to initialize module registry");
+		yanet_error_add(err, "failed to initialize module registry");
 		return -1;
 	}
 
@@ -215,14 +234,15 @@ int
 cp_module_registry_copy(
 	struct memory_context *memory_context,
 	struct cp_module_registry *new_module_registry,
-	struct cp_module_registry *old_module_registry
+	struct cp_module_registry *old_module_registry,
+	yanet_error **err
 ) {
 	if (registry_copy(
 		    memory_context,
 		    &new_module_registry->registry,
 		    &old_module_registry->registry
 	    )) {
-		NEW_ERROR("failed to copy module registry");
+		yanet_error_add(err, "failed to copy module registry");
 		return -1;
 	};
 
@@ -333,7 +353,8 @@ cp_module_registry_upsert(
 	struct cp_module_registry *module_registry,
 	const char *type,
 	const char *name,
-	struct cp_module *new_module
+	struct cp_module *new_module,
+	yanet_error **err
 ) {
 	struct cp_module_cmp_data cmp_data = {
 		.type = type,
@@ -345,7 +366,8 @@ cp_module_registry_upsert(
 
 	counter_registry_link(
 		&new_module->counter_registry,
-		(old_module != NULL) ? &old_module->counter_registry : NULL
+		(old_module != NULL) ? &old_module->counter_registry : NULL,
+		err
 	);
 
 	return registry_replace(

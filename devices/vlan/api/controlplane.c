@@ -1,5 +1,3 @@
-#include <errno.h>
-
 #include "controlplane.h"
 
 #include "config.h"
@@ -8,21 +6,28 @@
 
 #include "controlplane/agent/agent.h"
 
+#include "lib/errors/errors.h"
+
 struct cp_device *
 cp_device_vlan_create(
-	struct agent *agent, const struct cp_device_vlan_config *config
+	struct agent *agent,
+	const struct cp_device_vlan_config *config,
+	yanet_error **err
 ) {
 	struct cp_device_vlan *cp_device_vlan =
 		(struct cp_device_vlan *)memory_balloc(
 			&agent->memory_context, sizeof(struct cp_device_vlan)
 		);
 	if (cp_device_vlan == NULL) {
-		errno = ENOMEM;
+		yanet_error_add(err, "memory allocation failed");
 		return NULL;
 	}
 
 	if (cp_device_init(
-		    &cp_device_vlan->cp_device, agent, &config->cp_device_config
+		    &cp_device_vlan->cp_device,
+		    agent,
+		    &config->cp_device_config,
+		    err
 	    )) {
 		goto fail;
 	}
@@ -32,9 +37,7 @@ cp_device_vlan_create(
 	return &cp_device_vlan->cp_device;
 
 fail: {
-	int prev_errno = errno;
 	cp_device_vlan_free(&cp_device_vlan->cp_device);
-	errno = prev_errno;
 	return NULL;
 }
 }
@@ -61,14 +64,16 @@ cp_device_vlan_config_create(
 	const char *name,
 	uint64_t input_count,
 	uint64_t output_count,
-	uint16_t vlan
+	uint16_t vlan,
+	yanet_error **err
 ) {
 	struct cp_device_vlan_config *cp_device_vlan_config =
 		(struct cp_device_vlan_config *)malloc(
 			sizeof(struct cp_device_vlan_config)
 		);
 	if (cp_device_vlan_config == NULL) {
-		goto error;
+		yanet_error_add(err, "memory allocation failed");
+		return NULL;
 	}
 
 	if (cp_device_config_init(
@@ -76,7 +81,8 @@ cp_device_vlan_config_create(
 		    "vlan",
 		    name,
 		    input_count,
-		    output_count
+		    output_count,
+		    err
 	    )) {
 		goto error_init;
 	}
@@ -88,7 +94,6 @@ cp_device_vlan_config_create(
 error_init:
 	free(cp_device_vlan_config);
 
-error:
 	return NULL;
 }
 

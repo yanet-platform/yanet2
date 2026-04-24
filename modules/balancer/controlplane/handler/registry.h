@@ -4,6 +4,7 @@
 #include "api/vs.h"
 #include "common/big_array.h"
 #include "common/memory.h"
+#include "lib/errors/errors.h"
 #include <stddef.h>
 
 typedef int (*registry_cmp)(const void *left, const void *right);
@@ -27,7 +28,8 @@ service_registry_init(
 	size_t elem_size,
 	size_t elems_count,
 	registry_cmp cmp,
-	struct service_registry *prev
+	struct service_registry *prev,
+	yanet_error **err
 );
 
 void
@@ -49,7 +51,8 @@ vs_registry_init(
 	struct memory_context *mctx,
 	struct vs_identifier *vs,
 	size_t vs_count,
-	vs_registry_t *prev
+	vs_registry_t *prev,
+	yanet_error **err
 );
 
 void
@@ -69,7 +72,8 @@ reals_registry_init(
 	struct memory_context *mctx,
 	struct real_identifier *reals,
 	size_t reals_count,
-	reals_registry_t *prev
+	reals_registry_t *prev,
+	yanet_error **err
 );
 
 void

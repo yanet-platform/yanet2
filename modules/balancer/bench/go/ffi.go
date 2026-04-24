@@ -18,6 +18,7 @@ package main
 #cgo LDFLAGS: -L../../../../build/devices/plain/dataplane -lplain_dp
 #cgo LDFLAGS: -L../../../../build/devices/vlan/dataplane -lvlan_dp
 #include <stdlib.h>
+#include "lib/errors/errors.h"
 #include "bench.h"
 #include <stdalign.h>
 enum { packet_list_align = _Alignof(struct packet_list) };
@@ -29,6 +30,7 @@ import (
 	"fmt"
 	"unsafe"
 
+	"github.com/yanet-platform/yanet2/bindings/go/cerrors"
 	yanet "github.com/yanet-platform/yanet2/controlplane/ffi"
 	dataplane "github.com/yanet-platform/yanet2/lib/utils/go"
 
@@ -46,13 +48,11 @@ func NewBench(workers, totalMemory, cpMemory int) (*Bench, error) {
 	config.workers = C.size_t(workers)
 	config.total_memory = C.size_t(totalMemory)
 	config.cp_memory = C.size_t(cpMemory)
-	ec := C.bench_init(&b.bench, &config)
+
+	var cErr *C.struct_yanet_error
+	ec := C.bench_init(&b.bench, &config, &cErr)
 	if ec != 0 {
-		str := C.bench_take_error(&b.bench)
-		return nil, fmt.Errorf(
-			"failed to initialize bench: %s",
-			C.GoString(str),
-		)
+		return nil, fmt.Errorf("failed to initialize bench: %w", cerrors.FromC(unsafe.Pointer(cErr)))
 	}
 	return b, nil
 }

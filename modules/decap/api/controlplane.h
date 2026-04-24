@@ -2,13 +2,17 @@
 
 #include <stdint.h>
 
+#include "lib/errors/errors.h"
+
 struct agent;
 struct cp_module;
 struct memory_context;
 struct decap_module_config;
 
 struct cp_module *
-decap_module_config_create(struct agent *agent, const char *name);
+decap_module_config_create(
+	struct agent *agent, const char *name, yanet_error **err
+);
 
 void
 decap_module_config_free(struct cp_module *cp_module);

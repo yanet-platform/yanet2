@@ -1,4 +1,3 @@
-#include <errno.h>
 #include <stdlib.h>
 
 #include "controlplane.h"
@@ -9,23 +8,28 @@
 
 #include "controlplane/agent/agent.h"
 
+#include "lib/errors/errors.h"
+
 struct cp_device *
 cp_device_plain_create(
-	struct agent *agent, const struct cp_device_plain_config *config
+	struct agent *agent,
+	const struct cp_device_plain_config *config,
+	yanet_error **err
 ) {
 	struct cp_device_plain *cp_device_plain =
 		(struct cp_device_plain *)memory_balloc(
 			&agent->memory_context, sizeof(struct cp_device_plain)
 		);
 	if (cp_device_plain == NULL) {
-		errno = ENOMEM;
+		yanet_error_add(err, "memory allocation failed");
 		return NULL;
 	}
 
 	if (cp_device_init(
 		    &cp_device_plain->cp_device,
 		    agent,
-		    &config->cp_device_config
+		    &config->cp_device_config,
+		    err
 	    )) {
 		goto fail;
 	}
@@ -33,9 +37,7 @@ cp_device_plain_create(
 	return &cp_device_plain->cp_device;
 
 fail: {
-	int prev_errno = errno;
 	cp_device_plain_free(&cp_device_plain->cp_device);
-	errno = prev_errno;
 	return NULL;
 }
 }
@@ -59,14 +61,18 @@ cp_device_plain_free(struct cp_device *cp_device) {
 
 struct cp_device_plain_config *
 cp_device_plain_config_create(
-	const char *name, uint64_t input_count, uint64_t output_count
+	const char *name,
+	uint64_t input_count,
+	uint64_t output_count,
+	yanet_error **err
 ) {
 	struct cp_device_plain_config *cp_device_plain_config =
 		(struct cp_device_plain_config *)malloc(
 			sizeof(struct cp_device_plain_config)
 		);
 	if (cp_device_plain_config == NULL) {
-		goto error;
+		yanet_error_add(err, "memory allocation failed");
+		return NULL;
 	}
 
 	if (cp_device_config_init(
@@ -74,7 +80,8 @@ cp_device_plain_config_create(
 		    "plain",
 		    name,
 		    input_count,
-		    output_count
+		    output_count,
+		    err
 	    )) {
 		goto error_init;
 	}
@@ -83,8 +90,6 @@ cp_device_plain_config_create(
 
 error_init:
 	free(cp_device_plain_config);
-
-error:
 	return NULL;
 }
 

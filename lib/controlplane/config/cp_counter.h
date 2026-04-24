@@ -4,6 +4,7 @@
 
 #include "controlplane/config/defines.h"
 #include "controlplane/config/registry.h"
+#include "lib/errors/errors.h"
 
 struct memory_context;
 
@@ -15,7 +16,8 @@ struct cp_config_counter_storage_registry {
 int
 cp_config_counter_storage_registry_init(
 	struct memory_context *memory_context,
-	struct cp_config_counter_storage_registry *registry
+	struct cp_config_counter_storage_registry *registry,
+	yanet_error **err
 );
 
 void
@@ -33,7 +35,8 @@ int
 cp_config_counter_storage_registry_insert_device(
 	struct cp_config_counter_storage_registry *registry,
 	const char *device_name,
-	struct counter_storage *counter_storage
+	struct counter_storage *counter_storage,
+	yanet_error **err
 );
 
 struct counter_storage *
@@ -48,7 +51,8 @@ cp_config_counter_storage_registry_insert_pipeline(
 	struct cp_config_counter_storage_registry *registry,
 	const char *device_name,
 	const char *pipeline_name,
-	struct counter_storage *counter_storage
+	struct counter_storage *counter_storage,
+	yanet_error **err
 );
 
 struct counter_storage *
@@ -65,7 +69,8 @@ cp_config_counter_storage_registry_insert_function(
 	const char *device_name,
 	const char *pipeline_name,
 	const char *function_name,
-	struct counter_storage *counter_storage
+	struct counter_storage *counter_storage,
+	yanet_error **err
 );
 
 struct counter_storage *
@@ -84,7 +89,8 @@ cp_config_counter_storage_registry_insert_chain(
 	const char *pipeline_name,
 	const char *function_name,
 	const char *chain_name,
-	struct counter_storage *counter_storage
+	struct counter_storage *counter_storage,
+	yanet_error **err
 );
 
 struct counter_storage *
@@ -107,5 +113,6 @@ cp_config_counter_storage_registry_insert_module(
 	const char *chain_name,
 	const char *module_type,
 	const char *module_name,
-	struct counter_storage *counter_storage
+	struct counter_storage *counter_storage,
+	yanet_error **err
 );

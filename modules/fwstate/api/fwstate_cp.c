@@ -5,6 +5,7 @@
 
 #include "common/container_of.h"
 #include "controlplane/agent/agent.h"
+#include "lib/errors/errors.h"
 #include "lib/fwstate/config.h"
 #include "lib/fwstate/layermap.h"
 #include "modules/fwstate/dataplane/config.h"
@@ -36,23 +37,24 @@ fwstate_config_set_defaults(struct fwstate_config *config) {
 }
 
 struct cp_module *
-fwstate_module_config_init(struct agent *agent, const char *name) {
+fwstate_module_config_init(
+	struct agent *agent, const char *name, yanet_error **err
+) {
 	struct fwstate_module_config *config =
 		(struct fwstate_module_config *)memory_balloc(
 			&agent->memory_context,
 			sizeof(struct fwstate_module_config)
 		);
 	if (config == NULL) {
-		errno = ENOMEM;
+		yanet_error_add(err, "failed to allocate config");
 		return NULL;
 	}
 
 	if (cp_module_init(
-		    &config->cp_module, agent, FWSTATE_MODULE_NAME, name
+		    &config->cp_module, agent, FWSTATE_MODULE_NAME, name, err
 	    )) {
-		int prev_errno = errno;
+		yanet_error_add(err, "failed to init module");
 		fwstate_module_config_free(&config->cp_module);
-		errno = prev_errno;
 		return NULL;
 	}
 	fwstate_config_set_defaults(&config->cfg);

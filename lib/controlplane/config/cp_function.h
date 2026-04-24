@@ -7,6 +7,8 @@
 #include "controlplane/config/defines.h"
 #include "controlplane/config/registry.h"
 
+#include "lib/errors/errors.h"
+
 struct cp_chain;
 
 struct cp_function_chain {
@@ -58,7 +60,8 @@ cp_function_create(
 	struct memory_context *memory_context,
 	struct dp_config *dp_config,
 	struct cp_config_gen *cp_config_gen,
-	struct cp_function_config *cp_function_config
+	struct cp_function_config *cp_function_config,
+	yanet_error **err
 );
 
 void
@@ -81,14 +84,16 @@ struct cp_function_registry {
 int
 cp_function_registry_init(
 	struct memory_context *memory_context,
-	struct cp_function_registry *registry
+	struct cp_function_registry *registry,
+	yanet_error **err
 );
 
 int
 cp_function_registry_copy(
 	struct memory_context *memory_context,
 	struct cp_function_registry *new_function_registry,
-	struct cp_function_registry *old_function_registry
+	struct cp_function_registry *old_function_registry,
+	yanet_error **err
 );
 
 void
@@ -115,7 +120,8 @@ int
 cp_function_registry_upsert(
 	struct cp_function_registry *function_registry,
 	const char *name,
-	struct cp_function *function
+	struct cp_function *function,
+	yanet_error **err
 );
 
 int

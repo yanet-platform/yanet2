@@ -9,7 +9,6 @@
 #include "lib/dataplane/config/zone.h"
 
 #include "lib/controlplane/agent/agent.h"
-#include "lib/controlplane/diag/diag.h"
 
 bool
 cp_config_try_lock(struct cp_config *cp_config) {
@@ -64,14 +63,18 @@ cp_config_gen_free(
 
 static inline struct cp_config_gen *
 cp_config_gen_create_from(
-	struct cp_config *cp_config, struct cp_config_gen *old_config_gen
+	struct cp_config *cp_config,
+	struct cp_config_gen *old_config_gen,
+	yanet_error **err
 ) {
 	struct cp_config_gen *new_config_gen =
 		(struct cp_config_gen *)memory_balloc(
 			&cp_config->memory_context, sizeof(struct cp_config_gen)
 		);
 	if (new_config_gen == NULL) {
-		NEW_ERROR("failed to allocate memory for new config generation"
+		yanet_error_add(
+			err,
+			"failed to allocate memory for new config generation"
 		);
 		return NULL;
 	}
@@ -89,44 +92,49 @@ cp_config_gen_create_from(
 	if (cp_module_registry_copy(
 		    &cp_config->memory_context,
 		    &new_config_gen->module_registry,
-		    &old_config_gen->module_registry
+		    &old_config_gen->module_registry,
+		    err
 	    )) {
-		NEW_ERROR("failed to copy module registry");
+		yanet_error_add(err, "failed to copy module registry");
 		goto error;
 	}
 
 	if (cp_function_registry_copy(
 		    &cp_config->memory_context,
 		    &new_config_gen->function_registry,
-		    &old_config_gen->function_registry
+		    &old_config_gen->function_registry,
+		    err
 	    )) {
-		NEW_ERROR("failed to copy function registry");
+		yanet_error_add(err, "failed to copy function registry");
 		goto error;
 	}
 
 	if (cp_pipeline_registry_copy(
 		    &cp_config->memory_context,
 		    &new_config_gen->pipeline_registry,
-		    &old_config_gen->pipeline_registry
+		    &old_config_gen->pipeline_registry,
+		    err
 	    )) {
-		NEW_ERROR("failed to copy pipeline registry");
+		yanet_error_add(err, "failed to copy pipeline registry");
 		goto error;
 	}
 
 	if (cp_device_registry_copy(
 		    &cp_config->memory_context,
 		    &new_config_gen->device_registry,
-		    &old_config_gen->device_registry
+		    &old_config_gen->device_registry,
+		    err
 	    )) {
-		NEW_ERROR("failed to copy device registry");
+		yanet_error_add(err, "failed to copy device registry");
 		goto error;
 	}
 
 	if (cp_config_counter_storage_registry_init(
 		    &cp_config->memory_context,
-		    &new_config_gen->counter_storage_registry
+		    &new_config_gen->counter_storage_registry,
+		    err
 	    )) {
-		NEW_ERROR("failed to initialize counter storage registry");
+		yanet_error_add(err, "failed to init counter storage registry");
 		goto error;
 	}
 
@@ -170,15 +178,16 @@ static inline int
 cp_config_gen_install(
 	struct dp_config *dp_config,
 	struct cp_config *cp_config,
-	struct cp_config_gen *new_config_gen
+	struct cp_config_gen *new_config_gen,
+	yanet_error **err
 ) {
 	struct cp_config_gen *old_config_gen =
 		ADDR_OF(&cp_config->cp_config_gen);
 
 	struct config_gen_ectx *new_config_gen_ectx =
-		config_gen_ectx_create(new_config_gen, old_config_gen);
+		config_gen_ectx_create(new_config_gen, old_config_gen, err);
 	if (new_config_gen_ectx == NULL) {
-		PUSH_ERROR("in cp_config_gen_install");
+		yanet_error_add(err, "failed to create config_gen_ectx");
 		return -1;
 	}
 
@@ -196,7 +205,8 @@ cp_config_delete_module(
 	struct dp_config *dp_config,
 	struct cp_config *cp_config,
 	const char *module_type,
-	const char *module_name
+	const char *module_name,
+	yanet_error **err
 ) {
 	cp_config_lock(cp_config);
 
@@ -204,17 +214,17 @@ cp_config_delete_module(
 		ADDR_OF(&cp_config->cp_config_gen);
 
 	struct cp_config_gen *new_config_gen =
-		cp_config_gen_create_from(cp_config, old_config_gen);
+		cp_config_gen_create_from(cp_config, old_config_gen, err);
 	if (new_config_gen == NULL) {
-		PUSH_ERROR("failed to create new config generation in "
-			   "cp_config_delete_module");
+		yanet_error_add(err, "failed to create new config generation");
 		goto error_unlock;
 	}
 
 	if (cp_module_registry_delete(
 		    &new_config_gen->module_registry, module_type, module_name
 	    )) {
-		NEW_ERROR(
+		yanet_error_add(
+			err,
 			"failed to delete module '%s:%s' from registry",
 			module_type,
 			module_name
@@ -222,9 +232,8 @@ cp_config_delete_module(
 		goto error_free;
 	}
 
-	if (cp_config_gen_install(dp_config, cp_config, new_config_gen)) {
-		PUSH_ERROR("failed to install config generation in "
-			   "cp_config_delete_module");
+	if (cp_config_gen_install(dp_config, cp_config, new_config_gen, err)) {
+		yanet_error_add(err, "failed to install config generation");
 		goto error_free;
 	}
 	cp_config_unlock(cp_config);
@@ -243,17 +252,17 @@ cp_config_update_modules(
 	struct dp_config *dp_config,
 	struct cp_config *cp_config,
 	uint64_t module_count,
-	struct cp_module **cp_modules
+	struct cp_module **cp_modules,
+	yanet_error **err
 ) {
 	cp_config_lock(cp_config);
 
 	struct cp_config_gen *old_config_gen =
 		ADDR_OF(&cp_config->cp_config_gen);
 	struct cp_config_gen *new_config_gen =
-		cp_config_gen_create_from(cp_config, old_config_gen);
+		cp_config_gen_create_from(cp_config, old_config_gen, err);
 	if (new_config_gen == NULL) {
-		PUSH_ERROR("failed to create new config generation in "
-			   "cp_config_update_modules");
+		yanet_error_add(err, "failed to create new config generation");
 		goto error_unlock;
 	}
 
@@ -264,9 +273,11 @@ cp_config_update_modules(
 			    &new_config_gen->module_registry,
 			    new_cp_module->type,
 			    new_cp_module->name,
-			    new_cp_module
+			    new_cp_module,
+			    err
 		    )) {
-			NEW_ERROR(
+			yanet_error_add(
+				err,
 				"failed to upsert module '%s:%s' into registry",
 				new_cp_module->type,
 				new_cp_module->name
@@ -275,9 +286,8 @@ cp_config_update_modules(
 		}
 	}
 
-	if (cp_config_gen_install(dp_config, cp_config, new_config_gen)) {
-		PUSH_ERROR("failed to install config generation in "
-			   "cp_config_update_modules");
+	if (cp_config_gen_install(dp_config, cp_config, new_config_gen, err)) {
+		yanet_error_add(err, "failed to install config generation");
 		goto error_free;
 	}
 	cp_config_unlock(cp_config);
@@ -299,17 +309,17 @@ cp_config_update_functions(
 	struct dp_config *dp_config,
 	struct cp_config *cp_config,
 	uint64_t function_count,
-	struct cp_function_config **cp_function_configs
+	struct cp_function_config **cp_function_configs,
+	yanet_error **err
 ) {
 	cp_config_lock(cp_config);
 
 	struct cp_config_gen *old_config_gen =
 		ADDR_OF(&cp_config->cp_config_gen);
 	struct cp_config_gen *new_config_gen =
-		cp_config_gen_create_from(cp_config, old_config_gen);
+		cp_config_gen_create_from(cp_config, old_config_gen, err);
 	if (new_config_gen == NULL) {
-		PUSH_ERROR("failed to create new config generation in "
-			   "cp_config_update_functions");
+		yanet_error_add(err, "failed to create new config generation");
 		goto error_unlock;
 	}
 
@@ -318,30 +328,34 @@ cp_config_update_functions(
 			&cp_config->memory_context,
 			dp_config,
 			new_config_gen,
-			cp_function_configs[idx]
+			cp_function_configs[idx],
+			err
 		);
 		if (new_cp_function == NULL) {
-			PUSH_ERROR("failed to create function in "
-				   "cp_config_update_functions");
+			yanet_error_add(
+				err,
+				"failed to create function '%s'",
+				cp_function_configs[idx]->name
+			);
 			goto error_free;
 		}
 
 		if (cp_function_registry_upsert(
 			    &new_config_gen->function_registry,
 			    new_cp_function->name,
-			    new_cp_function
+			    new_cp_function,
+			    err
 		    )) {
-			NEW_ERROR(
-				"failed to upsert function '%s' into registry",
+			yanet_error_add(
+				err,
+				"failed to upsert function '%s'",
 				new_cp_function->name
 			);
 			goto error_free;
 		}
 	}
 
-	if (cp_config_gen_install(dp_config, cp_config, new_config_gen)) {
-		PUSH_ERROR("failed to install config generation in "
-			   "cp_config_update_functions");
+	if (cp_config_gen_install(dp_config, cp_config, new_config_gen, err)) {
 		goto error_free;
 	}
 	cp_config_unlock(cp_config);
@@ -359,32 +373,30 @@ int
 cp_config_delete_function(
 	struct dp_config *dp_config,
 	struct cp_config *cp_config,
-	const char *name
+	const char *name,
+	yanet_error **err
 ) {
-
 	cp_config_lock(cp_config);
 
 	struct cp_config_gen *old_config_gen =
 		ADDR_OF(&cp_config->cp_config_gen);
 
 	struct cp_config_gen *new_config_gen =
-		cp_config_gen_create_from(cp_config, old_config_gen);
+		cp_config_gen_create_from(cp_config, old_config_gen, err);
 	if (new_config_gen == NULL) {
-		PUSH_ERROR("failed to create new config generation in "
-			   "cp_config_delete_function");
+		yanet_error_add(err, "failed to create new config generation");
 		goto error_unlock;
 	}
 
 	if (cp_function_registry_delete(
 		    &new_config_gen->function_registry, name
 	    )) {
-		NEW_ERROR("failed to delete function '%s' from registry", name);
+		yanet_error_add(err, "failed to delete function from registry");
 		goto error_free;
 	}
 
-	if (cp_config_gen_install(dp_config, cp_config, new_config_gen)) {
-		PUSH_ERROR("failed to install config generation in "
-			   "cp_config_delete_function");
+	if (cp_config_gen_install(dp_config, cp_config, new_config_gen, err)) {
+		yanet_error_add(err, "failed to install config generation");
 		goto error_free;
 	}
 	cp_config_unlock(cp_config);
@@ -406,18 +418,18 @@ cp_config_update_pipelines(
 	struct dp_config *dp_config,
 	struct cp_config *cp_config,
 	uint64_t pipeline_count,
-	struct cp_pipeline_config **cp_pipeline_configs
+	struct cp_pipeline_config **cp_pipeline_configs,
+	yanet_error **err
 ) {
 	cp_config_lock(cp_config);
 
 	struct cp_config_gen *old_config_gen =
 		ADDR_OF(&cp_config->cp_config_gen);
 	struct cp_config_gen *new_config_gen =
-		cp_config_gen_create_from(cp_config, old_config_gen);
+		cp_config_gen_create_from(cp_config, old_config_gen, err);
 
 	if (new_config_gen == NULL) {
-		PUSH_ERROR("failed to create new config generation in "
-			   "cp_config_update_pipelines");
+		yanet_error_add(err, "failed to create new config generation");
 		goto error_unlock;
 	}
 
@@ -425,30 +437,35 @@ cp_config_update_pipelines(
 		struct cp_pipeline *new_cp_pipeline = cp_pipeline_create(
 			&cp_config->memory_context,
 			new_config_gen,
-			cp_pipeline_configs[idx]
+			cp_pipeline_configs[idx],
+			err
 		);
 		if (new_cp_pipeline == NULL) {
-			PUSH_ERROR("failed to create pipeline in "
-				   "cp_config_update_pipelines");
+			yanet_error_add(
+				err,
+				"failed to create pipeline '%s'",
+				cp_pipeline_configs[idx]->name
+			);
 			goto error_free;
 		}
 
 		if (cp_pipeline_registry_upsert(
 			    &new_config_gen->pipeline_registry,
 			    new_cp_pipeline->name,
-			    new_cp_pipeline
+			    new_cp_pipeline,
+			    err
 		    )) {
-			NEW_ERROR(
-				"failed to upsert pipeline '%s' into registry",
+			yanet_error_add(
+				err,
+				"failed to upsert pipeline '%s'",
 				new_cp_pipeline->name
 			);
 			goto error_free;
 		}
 	}
 
-	if (cp_config_gen_install(dp_config, cp_config, new_config_gen)) {
-		PUSH_ERROR("failed to install config generation in "
-			   "cp_config_update_pipelines");
+	if (cp_config_gen_install(dp_config, cp_config, new_config_gen, err)) {
+		yanet_error_add(err, "failed to install config generation");
 		goto error_free;
 	}
 	cp_config_unlock(cp_config);
@@ -466,9 +483,9 @@ int
 cp_config_delete_pipeline(
 	struct dp_config *dp_config,
 	struct cp_config *cp_config,
-	const char *name
+	const char *name,
+	yanet_error **err
 ) {
-
 	cp_config_lock(cp_config);
 
 	struct cp_config_gen *old_config_gen =
@@ -476,28 +493,26 @@ cp_config_delete_pipeline(
 
 	uint64_t index;
 	if (cp_config_gen_lookup_pipeline_index(old_config_gen, name, &index)) {
-		NEW_ERROR("pipeline '%s' not found", name);
+		yanet_error_add(err, "pipeline '%s' not found", name);
 		goto error_unlock;
 	}
 
 	struct cp_config_gen *new_config_gen =
-		cp_config_gen_create_from(cp_config, old_config_gen);
+		cp_config_gen_create_from(cp_config, old_config_gen, err);
 	if (new_config_gen == NULL) {
-		PUSH_ERROR("failed to create new config generation in "
-			   "cp_config_delete_pipeline");
+		yanet_error_add(err, "failed to create new config generation");
 		goto error_unlock;
 	}
 
 	if (cp_pipeline_registry_delete(
 		    &new_config_gen->pipeline_registry, name
 	    )) {
-		NEW_ERROR("failed to delete pipeline '%s' from registry", name);
+		yanet_error_add(err, "failed to delete pipeline");
 		goto error_free;
 	}
 
-	if (cp_config_gen_install(dp_config, cp_config, new_config_gen)) {
-		PUSH_ERROR("failed to install config generation in "
-			   "cp_config_delete_pipeline");
+	if (cp_config_gen_install(dp_config, cp_config, new_config_gen, err)) {
+		yanet_error_add(err, "failed to install config generation");
 		goto error_free;
 	}
 	cp_config_unlock(cp_config);
@@ -561,7 +576,8 @@ cp_config_update_devices(
 	struct dp_config *dp_config,
 	struct cp_config *cp_config,
 	uint64_t device_count,
-	struct cp_device *devices[]
+	struct cp_device *devices[],
+	yanet_error **err
 ) {
 	// TODO weight clamp
 	cp_config_lock(cp_config);
@@ -569,10 +585,9 @@ cp_config_update_devices(
 	struct cp_config_gen *old_config_gen =
 		ADDR_OF(&cp_config->cp_config_gen);
 	struct cp_config_gen *new_config_gen =
-		cp_config_gen_create_from(cp_config, old_config_gen);
+		cp_config_gen_create_from(cp_config, old_config_gen, err);
 	if (new_config_gen == NULL) {
-		PUSH_ERROR("failed to create new config generation in "
-			   "cp_config_update_devices");
+		yanet_error_add(err, "failed to create new config generation");
 		goto error_unlock;
 	}
 
@@ -580,19 +595,20 @@ cp_config_update_devices(
 		if (cp_device_registry_upsert(
 			    &new_config_gen->device_registry,
 			    devices[idx]->name,
-			    devices[idx]
+			    devices[idx],
+			    err
 		    )) {
-			NEW_ERROR(
-				"failed to upsert device '%s' into registry",
+			yanet_error_add(
+				err,
+				"failed to upsert device '%s'",
 				devices[idx]->name
 			);
 			goto error_free;
 		}
 	}
 
-	if (cp_config_gen_install(dp_config, cp_config, new_config_gen)) {
-		PUSH_ERROR("failed to install config generation in "
-			   "cp_config_update_devices");
+	if (cp_config_gen_install(dp_config, cp_config, new_config_gen, err)) {
+		yanet_error_add(err, "failed to install config generation");
 		goto error_free;
 	}
 	cp_config_unlock(cp_config);
@@ -607,7 +623,7 @@ error_unlock:
 }
 
 struct cp_config_gen *
-cp_config_gen_create(struct agent *agent) {
+cp_config_gen_create(struct agent *agent, yanet_error **err) {
 	struct dp_config *dp_config = ADDR_OF(&agent->dp_config);
 	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
 	struct cp_config_gen *cp_config_gen =
@@ -616,10 +632,12 @@ cp_config_gen_create(struct agent *agent) {
 		);
 
 	if (cp_config_gen == NULL) {
-		NEW_ERROR("failed to allocate memory for initial config "
-			  "generation");
+		yanet_error_add(
+			err, "failed to allocate memory for cp_config_gen"
+		);
 		return NULL;
 	}
+
 	cp_config_gen->gen = 0;
 	cp_config_gen->config_gen_ectx = NULL;
 	SET_OFFSET_OF(
@@ -628,40 +646,47 @@ cp_config_gen_create(struct agent *agent) {
 	SET_OFFSET_OF(&cp_config_gen->cp_config, cp_config);
 
 	if (cp_module_registry_init(
-		    &cp_config->memory_context, &cp_config_gen->module_registry
+		    &cp_config->memory_context,
+		    &cp_config_gen->module_registry,
+		    err
 	    )) {
-		NEW_ERROR("failed to initialize module registry");
+		yanet_error_add(err, "failed to init module registry");
 		goto error;
 	}
 
 	if (cp_function_registry_init(
 		    &cp_config->memory_context,
-		    &cp_config_gen->function_registry
+		    &cp_config_gen->function_registry,
+		    err
 	    )) {
-		NEW_ERROR("failed to initialize function registry");
+		yanet_error_add(err, "failed to init function registry");
 		goto error;
 	}
 
 	if (cp_pipeline_registry_init(
 		    &cp_config->memory_context,
-		    &cp_config_gen->pipeline_registry
+		    &cp_config_gen->pipeline_registry,
+		    err
 	    )) {
-		NEW_ERROR("failed to initialize pipeline registry");
+		yanet_error_add(err, "failed to init pipeline registry");
 		goto error;
 	}
 
 	if (cp_device_registry_init(
-		    &cp_config->memory_context, &cp_config_gen->device_registry
+		    &cp_config->memory_context,
+		    &cp_config_gen->device_registry,
+		    err
 	    )) {
-		NEW_ERROR("failed to initialize device registry");
+		yanet_error_add(err, "failed to init device registry");
 		goto error;
 	}
 
 	if (cp_config_counter_storage_registry_init(
 		    &cp_config->memory_context,
-		    &cp_config_gen->counter_storage_registry
+		    &cp_config_gen->counter_storage_registry,
+		    err
 	    )) {
-		NEW_ERROR("failed to initialize counter storage registry");
+		yanet_error_add(err, "failed to init counter storage registry");
 		goto error;
 	}
 
@@ -681,25 +706,27 @@ cp_config_gen_create(struct agent *agent) {
 		device_config.input_pipelines = &pipe_cfg;
 		device_config.output_pipelines = &pipe_cfg;
 		struct cp_device *cp_device =
-			cp_device_create(agent, &device_config);
+			cp_device_create(agent, &device_config, err);
 		if (cp_device == NULL) {
-			NEW_ERROR(
-				"failed to create physical device '%s'",
+			yanet_error_add(
+				err,
+				"failed to create device '%s'",
 				device_config.name
 			);
-			return NULL;
+			goto error;
 		}
 		if (cp_device_registry_upsert(
 			    &cp_config_gen->device_registry,
 			    device_config.name,
-			    cp_device
+			    cp_device,
+			    err
 		    )) {
-			NEW_ERROR(
-				"failed to upsert physical device '%s' into "
-				"registry",
+			yanet_error_add(
+				err,
+				"failed to upsert device '%s'",
 				device_config.name
 			);
-			return NULL;
+			goto error;
 		}
 	}
 

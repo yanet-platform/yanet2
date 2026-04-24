@@ -7,6 +7,7 @@
 #include "controlplane/config/econtext.h"
 #include "controlplane/config/zone.h"
 #include "dataplane/config/zone.h"
+#include "lib/errors/errors.h"
 
 #include <assert.h>
 #include <stdlib.h>
@@ -69,7 +70,8 @@ main(void) {
 	SET_OFFSET_OF(&agent.dp_config, dp);
 	SET_OFFSET_OF(&agent.cp_config, cp);
 
-	struct cp_config_gen *gen = cp_config_gen_create(&agent);
+	yanet_error *err = NULL;
+	struct cp_config_gen *gen = cp_config_gen_create(&agent, &err);
 	TEST_ASSERT_NOT_NULL(gen, "cp_config_gen_create failed");
 
 	// Reproduce the worker's code path:

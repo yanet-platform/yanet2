@@ -16,15 +16,13 @@
 
 #include "controlplane/config/cp_module.h"
 #include "controlplane/config/zone.h"
-#include "controlplane/diag/diag.h"
 #include "dataplane/config/zone.h"
+
+#include "lib/errors/errors.h"
 
 #include "api/agent.h"
 
 #include <stdio.h>
-
-#define AGENT_TRY(agent, call, ...)                                            \
-	DIAG_TRY(&(agent->diag), call, ##__VA_ARGS__);
 
 struct yanet_shm *
 yanet_shm_attach(const char *path) {
@@ -93,7 +91,8 @@ agent_attach(
 	struct yanet_shm *shm,
 	uint32_t instance_idx,
 	const char *agent_name,
-	size_t memory_limit
+	size_t memory_limit,
+	yanet_error **err
 ) {
 	struct dp_config *dp_config = yanet_shm_dp_config(shm, instance_idx);
 
@@ -105,6 +104,7 @@ agent_attach(
 		&cp_config->memory_context, sizeof(struct agent)
 	);
 	if (new_agent == NULL) {
+		yanet_error_add(err, "failed to allocate memory for agent");
 		goto unlock;
 	}
 	memset(new_agent, 0, sizeof(struct agent));
@@ -138,6 +138,7 @@ agent_attach(
 		sizeof(struct agent_arena) * arena_count
 	);
 	if (arenas == NULL) {
+		yanet_error_add(err, "failed to allocate memory for arenas");
 		agent_cleanup(new_agent);
 		new_agent = NULL;
 		goto unlock;
@@ -155,6 +156,9 @@ agent_attach(
 		void *arena =
 			memory_balloc(&cp_config->memory_context, arena_size);
 		if (arena == NULL) {
+			yanet_error_add(
+				err, "failed to allocate memory for arena"
+			);
 			agent_cleanup(new_agent);
 			new_agent = NULL;
 			goto unlock;
@@ -196,6 +200,10 @@ agent_attach(
 						sizeof(struct agent *)
 			);
 		if (new_registry == NULL) {
+			yanet_error_add(
+				err,
+				"failed to allocate memory for agent registry"
+			);
 			agent_cleanup(new_agent);
 			new_agent = NULL;
 			goto unlock;
@@ -244,7 +252,7 @@ unlock:
 }
 
 int
-agent_resize(struct agent *agent, size_t new_size) {
+agent_resize(struct agent *agent, size_t new_size, yanet_error **err) {
 	int ret = 0;
 	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
 	cp_config_lock(cp_config);
@@ -262,7 +270,7 @@ agent_resize(struct agent *agent, size_t new_size) {
 			need_arena_count * sizeof(struct agent_arena)
 		);
 		if (arenas == NULL) {
-			NEW_ERROR("failed to allocate arenas array");
+			yanet_error_add(err, "failed to allocate arenas array");
 			ret = -1;
 			goto unlock;
 		}
@@ -274,7 +282,8 @@ agent_resize(struct agent *agent, size_t new_size) {
 				MEMORY_BLOCK_ALLOCATOR_MAX_SIZE
 			);
 			if (arena == NULL) {
-				NEW_ERROR(
+				yanet_error_add(
+					err,
 					"failed to allocate arena of size %u "
 					"bytes",
 					MEMORY_BLOCK_ALLOCATOR_MAX_SIZE
@@ -332,12 +341,6 @@ agent_resize(struct agent *agent, size_t new_size) {
 	}
 
 unlock:
-	if (ret != -1) {
-		diag_fill(&agent->diag);
-	} else {
-		diag_reset(&agent->diag);
-	}
-
 	cp_config_unlock(cp_config);
 
 	return ret;
@@ -350,7 +353,8 @@ agent_reattach(
 	struct yanet_shm *shm,
 	uint32_t instance_idx,
 	const char *agent_name,
-	size_t memory_limit
+	size_t memory_limit,
+	yanet_error **err
 ) {
 	struct dp_config *dp_config = yanet_shm_dp_config(shm, instance_idx);
 
@@ -365,8 +369,7 @@ agent_reattach(
 		struct agent *agent = ADDR_OF(&registry->agents[agent_idx]);
 		if (!strncmp(agent->name, agent_name, 80)) {
 			cp_config_unlock(cp_config);
-			int resize_result = agent_resize(agent, memory_limit);
-			if (resize_result != 0) {
+			if (agent_resize(agent, memory_limit, err) != 0) {
 				return NULL;
 			}
 			return agent;
@@ -375,7 +378,7 @@ agent_reattach(
 
 	// new agent
 	cp_config_unlock(cp_config);
-	return agent_attach(shm, instance_idx, agent_name, memory_limit);
+	return agent_attach(shm, instance_idx, agent_name, memory_limit, err);
 }
 
 void
@@ -422,42 +425,49 @@ agent_detach(struct agent *agent) {
 
 int
 agent_update_modules(
-	struct agent *agent, size_t module_count, struct cp_module **modules
+	struct agent *agent,
+	size_t module_count,
+	struct cp_module **modules,
+	yanet_error **err
 ) {
-	int res = AGENT_TRY(
-		agent,
-		cp_config_update_modules(
-			ADDR_OF(&agent->dp_config),
-			ADDR_OF(&agent->cp_config),
-			module_count,
-			modules
-		),
-		"failed to update modules"
+	int ret = cp_config_update_modules(
+		ADDR_OF(&agent->dp_config),
+		ADDR_OF(&agent->cp_config),
+		module_count,
+		modules,
+		err
 	);
+
+	if (ret != 0) {
+		return -1;
+	}
 
 	agent_free_unused_agents(agent);
 
-	return res;
+	return 0;
 }
 
 int
 agent_delete_module(
-	struct agent *agent, const char *module_type, const char *module_name
+	struct agent *agent,
+	const char *module_type,
+	const char *module_name,
+	yanet_error **err
 ) {
 	struct dp_config *dp_config = ADDR_OF(&agent->dp_config);
 	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
 
-	int res = AGENT_TRY(
-		agent,
-		cp_config_delete_module(
-			dp_config, cp_config, module_type, module_name
-		),
-		"failed to delete module"
+	int ret = cp_config_delete_module(
+		dp_config, cp_config, module_type, module_name, err
 	);
+
+	if (ret != 0) {
+		return -1;
+	}
 
 	agent_free_unused_agents(agent);
 
-	return res;
+	return 0;
 }
 
 struct cp_chain_config *
@@ -542,62 +552,80 @@ int
 agent_update_functions(
 	struct agent *agent,
 	uint64_t function_count,
-	struct cp_function_config *functions[]
+	struct cp_function_config *functions[],
+	yanet_error **err
 ) {
-	return AGENT_TRY(
-		agent,
-		cp_config_update_functions(
-			ADDR_OF(&agent->dp_config),
-			ADDR_OF(&agent->cp_config),
-			function_count,
-			functions
-		),
-		"failed to update functions"
+	int ret = cp_config_update_functions(
+		ADDR_OF(&agent->dp_config),
+		ADDR_OF(&agent->cp_config),
+		function_count,
+		functions,
+		err
 	);
+
+	if (ret != 0) {
+		return -1;
+	}
+
+	return 0;
 }
 
 int
-agent_delete_function(struct agent *agent, const char *function_name) {
-	return AGENT_TRY(
-		agent,
-		cp_config_delete_function(
-			ADDR_OF(&agent->dp_config),
-			ADDR_OF(&agent->cp_config),
-			function_name
-		),
-		"failed to delete function"
+agent_delete_function(
+	struct agent *agent, const char *function_name, yanet_error **err
+) {
+	int ret = cp_config_delete_function(
+		ADDR_OF(&agent->dp_config),
+		ADDR_OF(&agent->cp_config),
+		function_name,
+		err
 	);
+
+	if (ret != 0) {
+		return -1;
+	}
+
+	return 0;
 }
 
 int
 agent_update_pipelines(
 	struct agent *agent,
 	size_t pipeline_count,
-	struct cp_pipeline_config *pipelines[]
+	struct cp_pipeline_config *pipelines[],
+	yanet_error **err
 ) {
-	return AGENT_TRY(
-		agent,
-		cp_config_update_pipelines(
-			ADDR_OF(&agent->dp_config),
-			ADDR_OF(&agent->cp_config),
-			pipeline_count,
-			pipelines
-		),
-		"failed to update pipelines"
+	int ret = cp_config_update_pipelines(
+		ADDR_OF(&agent->dp_config),
+		ADDR_OF(&agent->cp_config),
+		pipeline_count,
+		pipelines,
+		err
 	);
+
+	if (ret != 0) {
+		return -1;
+	}
+
+	return 0;
 }
 
 int
-agent_delete_pipeline(struct agent *agent, const char *pipeline_name) {
-	return AGENT_TRY(
-		agent,
-		cp_config_delete_pipeline(
-			ADDR_OF(&agent->dp_config),
-			ADDR_OF(&agent->cp_config),
-			pipeline_name
-		),
-		"failed to delete pipeline"
+agent_delete_pipeline(
+	struct agent *agent, const char *pipeline_name, yanet_error **err
+) {
+	int ret = cp_config_delete_pipeline(
+		ADDR_OF(&agent->dp_config),
+		ADDR_OF(&agent->cp_config),
+		pipeline_name,
+		err
 	);
+
+	if (ret != 0) {
+		return -1;
+	}
+
+	return 0;
 }
 
 struct cp_pipeline_config *
@@ -634,18 +662,24 @@ cp_pipeline_config_set_function(
 
 int
 agent_update_devices(
-	struct agent *agent, uint64_t device_count, struct cp_device *devices[]
+	struct agent *agent,
+	uint64_t device_count,
+	struct cp_device *devices[],
+	yanet_error **err
 ) {
-	return AGENT_TRY(
-		agent,
-		cp_config_update_devices(
-			ADDR_OF(&agent->dp_config),
-			ADDR_OF(&agent->cp_config),
-			device_count,
-			devices
-		),
-		"failed to update devices"
+	int ret = cp_config_update_devices(
+		ADDR_OF(&agent->dp_config),
+		ADDR_OF(&agent->cp_config),
+		device_count,
+		devices,
+		err
 	);
+
+	if (ret != 0) {
+		return -1;
+	}
+
+	return 0;
 }
 
 int
@@ -1723,16 +1757,6 @@ agent_dp_config(struct agent *agent) {
 	return ADDR_OF(&agent->dp_config);
 }
 
-const char *
-agent_take_error(struct agent *agent) {
-	return diag_take_msg(&agent->diag);
-}
-
-void
-agent_clean_error(struct agent *agent) {
-	diag_reset(&agent->diag);
-}
-
 void *
 agent_storage_read(struct agent *agent, const char *name) {
 	struct agent_storage *storage = ADDR_OF(&agent->storage);
@@ -1747,7 +1771,11 @@ agent_storage_read(struct agent *agent, const char *name) {
 
 int
 agent_storage_put(
-	struct agent *agent, const char *name, void *data, size_t size
+	struct agent *agent,
+	const char *name,
+	void *data,
+	size_t size,
+	yanet_error **err
 ) {
 	struct agent_storage *storage = ADDR_OF(&agent->storage);
 	struct agent_storage *prev = NULL;
@@ -1756,7 +1784,7 @@ agent_storage_put(
 	struct agent_storage *new_storage =
 		memory_balloc(mctx, sizeof(struct agent_storage) + size);
 	if (new_storage == NULL) {
-		NEW_ERROR("memory not enough");
+		yanet_error_add(err, "memory not enough");
 		return -1;
 	}
 
@@ -1800,11 +1828,10 @@ yanet_module_performance_counters(
 	const char *chain_name,
 	const char *module_type,
 	const char *module_name,
-	struct diag *diag
+	yanet_error **err
 ) {
-	diag_reset(diag);
 	if (counters == NULL) {
-		NEW_ERROR("counters parameter is NULL");
+		yanet_error_add(err, "counters parameter is NULL");
 		goto err;
 	}
 
@@ -1821,7 +1848,8 @@ yanet_module_performance_counters(
 	);
 
 	if (counter_list == NULL) {
-		NEW_ERROR(
+		yanet_error_add(
+			err,
 			"module counters not found for device='%s', "
 			"pipeline='%s', function='%s', chain='%s', "
 			"module_type='%s', module_name='%s'",
@@ -1849,7 +1877,10 @@ yanet_module_performance_counters(
 	);
 	if (counters->counters == NULL) {
 		yanet_counter_handle_list_free(counter_list);
-		NEW_ERROR("failed to allocate memory for performance counters");
+		yanet_error_add(
+			err,
+			"failed to allocate memory for performance counters"
+		);
 		goto err;
 	}
 
@@ -1894,14 +1925,11 @@ yanet_module_performance_counters(
 
 			if (result < 0) {
 				// Error parsing tx/rx counter
-				NEW_ERROR(
-					"failed to parse tx/rx counter '%s'",
-					counter_handle->name
-				);
-				PUSH_ERROR(
-					"in yanet_module_performance_counters "
-					"for "
-					"module '%s:%s'",
+				yanet_error_add(
+					err,
+					"failed to parse tx/rx counter '%s' "
+					"for module '%s:%s'",
+					counter_handle->name,
 					module_type,
 					module_name
 				);
@@ -1926,7 +1954,6 @@ yanet_module_performance_counters(
 	return 0;
 
 err:
-	diag_fill(diag);
 	return -1;
 }
 

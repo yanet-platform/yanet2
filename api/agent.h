@@ -9,6 +9,8 @@
 #include "counter.h"
 #include "info.h"
 
+#include "lib/errors/errors.h"
+
 // Handle to YANET shared memory segment.
 struct yanet_shm;
 // Handle to dataplane configuration.
@@ -72,6 +74,7 @@ yanet_shm_dp_config(struct yanet_shm *shm, uint32_t instance_idx);
 // operate
 // @param agent_name Name of the module agent (e.g. "route", "balancer")
 // @param memory_limit Maximum memory limit for this agent
+// @param err Error output parameter
 //
 // @return Handle to the module agent, NULL on failure
 struct agent *
@@ -79,12 +82,14 @@ agent_attach(
 	struct yanet_shm *shm,
 	uint32_t instance_idx,
 	const char *agent_name,
-	size_t memory_limit
+	size_t memory_limit,
+	yanet_error **err
 );
 
 // Extend agent size.
+// @return 0 on success, -1 on error.
 int
-agent_resize(struct agent *agent, size_t new_size);
+agent_resize(struct agent *agent, size_t new_size, yanet_error **err);
 
 // Attach a module agent to shared memory,
 // use previous agents memory.
@@ -93,7 +98,8 @@ agent_reattach(
 	struct yanet_shm *shm,
 	uint32_t instance_idx,
 	const char *agent_name,
-	size_t memory_limit
+	size_t memory_limit,
+	yanet_error **err
 );
 
 // Returns number of dataplane instances in the specified shared memory segment.
@@ -142,7 +148,10 @@ agent_dp_config(struct agent *agent);
 
 int
 agent_update_modules(
-	struct agent *agent, size_t module_count, struct cp_module **cp_modules
+	struct agent *agent,
+	size_t module_count,
+	struct cp_module **cp_modules,
+	yanet_error **err
 );
 
 // Delete module with specified type and name.
@@ -151,64 +160,57 @@ agent_update_modules(
 // exist, 0 on success.
 int
 agent_delete_module(
-	struct agent *agent, const char *module_type, const char *module_name
+	struct agent *agent,
+	const char *module_type,
+	const char *module_name,
+	yanet_error **err
 );
 
 int
 agent_update_functions(
 	struct agent *agent,
 	uint64_t function_count,
-	struct cp_function_config *functions[]
+	struct cp_function_config *functions[],
+	yanet_error **err
 );
 
 int
-agent_delete_function(struct agent *agent, const char *function_name);
+agent_delete_function(
+	struct agent *agent, const char *function_name, yanet_error **err
+);
 
 int
 agent_update_pipelines(
 	struct agent *agent,
 	size_t pipeline_count,
-	struct cp_pipeline_config *pipelines[]
+	struct cp_pipeline_config *pipelines[],
+	yanet_error **err
 );
 
 // Delete pipeline with specified name.
 // @return -1 if pipeline not exists or is assigned to some device, 0 on
 // success.
 int
-agent_delete_pipeline(struct agent *agent, const char *pipeline_name);
+agent_delete_pipeline(
+	struct agent *agent, const char *pipeline_name, yanet_error **err
+);
 
 int
 agent_update_devices(
-	struct agent *agent, uint64_t device_count, struct cp_device *devices[]
+	struct agent *agent,
+	uint64_t device_count,
+	struct cp_device *devices[],
+	yanet_error **err
 );
-
-// Retrieves and clears the last error from the agent's diagnostic system.
-// Transfers ownership of the error message to the caller.
-//
-// @param agent Handle to the module agent
-// @return Heap-allocated error message string that must be freed by the caller,
-//         or NULL if no error occurred. Sets errno=ENOMEM if memory allocation
-//         failed while capturing the error.
-//
-// Note: The caller MUST free the returned string when it's not NULL.
-//       After this call, the agent's error state is cleared.
-const char *
-agent_take_error(struct agent *agent);
-
-// Clears any error stored in the agent's diagnostic system without retrieving
-// it. This discards the error message and resets the diagnostic state.
-//
-// @param agent Handle to the module agent
-//
-// Note: Use this when you want to discard an error without processing it.
-//       Use agent_take_error() if you need to retrieve the error message.
-void
-agent_clean_error(struct agent *agent);
 
 void *
 agent_storage_read(struct agent *agent, const char *name);
 
 int
 agent_storage_put(
-	struct agent *agent, const char *name, void *data, size_t size
+	struct agent *agent,
+	const char *name,
+	void *data,
+	size_t size,
+	yanet_error **err
 );

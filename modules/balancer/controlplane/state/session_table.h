@@ -4,6 +4,8 @@
 #include "common/rcu.h"
 #include "common/ttlmap/detail/ttlmap.h"
 
+#include "lib/errors/errors.h"
+
 #include "state/session.h"
 
 #include <stdatomic.h>
@@ -53,7 +55,10 @@ session_table_current_gen(struct session_table *table) {
  */
 int
 session_table_init(
-	struct session_table *table, struct memory_context *mctx, size_t size
+	struct session_table *table,
+	struct memory_context *mctx,
+	size_t size,
+	yanet_error **err
 );
 
 /**
@@ -74,7 +79,10 @@ session_table_capacity(struct session_table *table);
  */
 int
 session_table_resize(
-	struct session_table *table, size_t new_size, uint32_t now
+	struct session_table *table,
+	size_t new_size,
+	uint32_t now,
+	yanet_error **err
 );
 
 ////////////////////////////////////////////////////////////////////////////////

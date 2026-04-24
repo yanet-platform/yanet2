@@ -4,6 +4,7 @@
 
 #include "common/container_of.h"
 #include "common/memory_address.h"
+#include "lib/errors/errors.h"
 
 #include "controlplane/agent/agent.h"
 
@@ -13,22 +14,27 @@ FILTER_COMPILER_DECLARE(FILTER_IP4_TAG, net4_dst);
 FILTER_COMPILER_DECLARE(FILTER_IP6_TAG, net6_dst);
 
 struct cp_module *
-route_mpls_module_config_create(struct agent *agent, const char *name) {
+route_mpls_module_config_create(
+	struct agent *agent, const char *name, yanet_error **err
+) {
 	struct module_config *config = (struct module_config *)memory_balloc(
 		&agent->memory_context, sizeof(struct module_config)
 	);
 	if (config == NULL) {
-		errno = ENOMEM;
+		yanet_error_add(err, "failed to allocate config");
 		return NULL;
 	}
 
-	if (cp_module_init(&config->cp_module, agent, "route-mpls", name)) {
+	if (cp_module_init(
+		    &config->cp_module, agent, "route-mpls", name, err
+	    )) {
+		yanet_error_add(err, "failed to init module");
 		memory_bfree(
 			&agent->memory_context,
 			config,
 			sizeof(struct module_config)
 		);
-		return 0;
+		return NULL;
 	}
 
 	memset(&config->filter_ip4, 0, sizeof(config->filter_ip4));
@@ -220,7 +226,9 @@ route_mpls_module_init_ip6(
 
 static struct target *
 route_mpls_rule_target_create(
-	struct cp_module *cp_module, struct route_mpls_rule *route_mpls_rule
+	struct cp_module *cp_module,
+	struct route_mpls_rule *route_mpls_rule,
+	yanet_error **err
 ) {
 	struct memory_context *memory_context = &cp_module->memory_context;
 
@@ -265,7 +273,8 @@ route_mpls_rule_target_create(
 		if ((nexthops[idx].counter_id = counter_registry_register(
 			     &cp_module->counter_registry,
 			     route_mpls_nexthop->counter,
-			     2
+			     2,
+			     err
 		     )) == COUNTER_INVALID) {
 			goto error_counter;
 		}
@@ -317,7 +326,8 @@ int
 route_mpls_module_config_update(
 	struct cp_module *cp_module,
 	struct route_mpls_rule *route_mpls_rules,
-	uint64_t route_mpls_rule_count
+	uint64_t route_mpls_rule_count,
+	yanet_error **err
 ) {
 	struct memory_context *memory_context = &cp_module->memory_context;
 
@@ -337,7 +347,7 @@ route_mpls_module_config_update(
 
 	for (uint64_t idx = 0; idx < route_mpls_rule_count; ++idx) {
 		struct target *target = route_mpls_rule_target_create(
-			cp_module, route_mpls_rules + idx
+			cp_module, route_mpls_rules + idx, err
 		);
 
 		if (target == NULL)

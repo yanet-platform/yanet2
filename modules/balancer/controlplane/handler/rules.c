@@ -5,7 +5,7 @@
 #include "filter/compiler.h"
 #include "filter/rule.h"
 #include "handler.h"
-#include "lib/controlplane/diag/diag.h"
+#include "lib/errors/errors.h"
 
 #include <netinet/in.h>
 #include <stdlib.h>
@@ -21,7 +21,9 @@ FILTER_COMPILER_DECLARE(
 
 static int
 init_transport_rule(
-	struct filter_rule *rule, struct named_vs_config *vs_config
+	struct filter_rule *rule,
+	struct named_vs_config *vs_config,
+	yanet_error **err
 ) {
 	rule->transport.dst_count = 1;
 	rule->transport.dsts = calloc(1, sizeof(struct filter_port_range));
@@ -38,9 +40,10 @@ init_transport_rule(
 
 	if (vs_config->identifier.transport_proto != IPPROTO_TCP &&
 	    vs_config->identifier.transport_proto != IPPROTO_UDP) {
-		NEW_ERROR(
-			"unsupported transport protocol %d: only TCP (%d) and "
-			"UDP (%d) are supported",
+		yanet_error_add(
+			err,
+			"invalid transport protocol: %d, supported: TCP (%d) "
+			"and UDP (%d)",
 			vs_config->identifier.transport_proto,
 			IPPROTO_TCP,
 			IPPROTO_UDP
@@ -81,7 +84,8 @@ make_filter_rules(
 	struct filter_rule **result_rules,
 	size_t count,
 	struct named_vs_config *vs_configs,
-	size_t *vs_initial_idx
+	size_t *initial_vs_idx,
+	yanet_error **err
 ) {
 	*result_rules = NULL;
 	struct filter_rule *rules = malloc(sizeof(struct filter_rule) * count);
@@ -89,11 +93,14 @@ make_filter_rules(
 		const size_t vs_idx = rule_idx;
 		init_dst_rule(rules + rule_idx, vs_configs + vs_idx);
 		if (init_transport_rule(
-			    rules + rule_idx, vs_configs + vs_idx
+			    rules + rule_idx, vs_configs + vs_idx, err
 		    ) != 0) {
 			free(rules);
-			PUSH_ERROR(
-				"service at index %zu", vs_initial_idx[vs_idx]
+			yanet_error_add(
+				err,
+				"failed to init transport rule for service at "
+				"index %zu",
+				initial_vs_idx[vs_idx]
 			);
 			return -1;
 		}
@@ -120,20 +127,22 @@ build_filter(
 	size_t *initial_vs_idx,
 	struct named_vs_config *vs_configs,
 	struct memory_context *mctx,
-	int proto
+	int proto,
+	yanet_error **err
 ) {
 	struct filter *filter = memory_balloc(mctx, sizeof(struct filter));
 	if (filter == NULL) {
-		NEW_ERROR("no memory");
+		yanet_error_add(err, "failed to allocate memory");
 		return -1;
 	}
 
 	struct filter_rule *rules = NULL;
 	const size_t vs_count = packet_handler_vs->vs_count;
-	if (make_filter_rules(&rules, vs_count, vs_configs, initial_vs_idx) !=
-	    0) {
-		PUSH_ERROR("invalid VS configs");
+	if (make_filter_rules(
+		    &rules, vs_count, vs_configs, initial_vs_idx, err
+	    ) != 0) {
 		memory_bfree(mctx, filter, sizeof(struct filter));
+		yanet_error_add(err, "failed to make filter rules");
 		return -1;
 	}
 
@@ -143,7 +152,7 @@ build_filter(
 	if (rule_ptrs == NULL) {
 		memory_bfree(mctx, filter, sizeof(struct filter));
 		free_rules(rules_count, rules);
-		NEW_ERROR("no memory");
+		yanet_error_add(err, "failed to allocate memory");
 		return -1;
 	}
 	for (size_t idx = 0; idx < rules_count; ++idx)
@@ -156,7 +165,9 @@ build_filter(
 			memory_bfree(mctx, filter, sizeof(struct filter));
 			free_rules(rules_count, rules);
 			free(rule_ptrs);
-			NEW_ERROR("no memory");
+			yanet_error_add(
+				err, "failed to init filter for protocol IPv6"
+			);
 			return -1;
 		}
 	} else {
@@ -166,7 +177,9 @@ build_filter(
 			memory_bfree(mctx, filter, sizeof(struct filter));
 			free_rules(rules_count, rules);
 			free(rule_ptrs);
-			NEW_ERROR("no memory");
+			yanet_error_add(
+				err, "failed to init filter for protocol IPv4"
+			);
 			return -1;
 		}
 	}

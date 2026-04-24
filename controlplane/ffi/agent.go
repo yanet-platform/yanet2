@@ -2,8 +2,6 @@ package ffi
 
 //#cgo CFLAGS: -I../../ -I../../lib
 //#cgo LDFLAGS: -L../../build/lib/controlplane/agent -lagent
-//#cgo LDFLAGS: -L../../build/lib/controlplane/diag -ldiag
-//#cgo LDFLAGS: -L../../build/common/tls_stack -ltls_stack
 //#cgo LDFLAGS: -L../../build/lib/controlplane/config -lconfig_cp
 //#cgo LDFLAGS: -L../../build/lib/counters/ -lcounters
 //#cgo LDFLAGS: -L../../build/lib/dataplane/config -lconfig_dp
@@ -23,6 +21,8 @@ import "C"
 import (
 	"fmt"
 	"unsafe"
+
+	"github.com/yanet-platform/yanet2/bindings/go/cerrors"
 )
 
 // ModuleConfig is a Go wrapper around a C cp_module pointer, representing a
@@ -98,42 +98,6 @@ func (m *Agent) CleanUp() error {
 	return err
 }
 
-// TakeError retrieves and clears the last error from the agent's diagnostic system.
-// It takes ownership of the error message from the C layer and returns it as a Go error.
-//
-// Returns:
-//   - nil if there is no error
-//   - An error containing the diagnostic message if an error occurred
-//   - An ENOMEM error if memory allocation failed while capturing the error
-func (m *Agent) TakeError() error {
-	cMsg, err := C.agent_take_error(m.ptr)
-	if cMsg == nil && err == nil {
-		return nil
-	}
-	if err != nil {
-		// then, it is enomem
-		return err
-	}
-
-	// Copy the C string to Go string before freeing
-	goMsg := C.GoString(cMsg)
-
-	// Free the C string - agent_take_error transfers ownership to the caller
-	C.free(unsafe.Pointer(cMsg))
-
-	return fmt.Errorf("%s", goMsg)
-}
-
-// CleanError clears any error stored in the agent's diagnostic system without
-// retrieving it. This is useful when you want to discard an error without
-// processing it.
-//
-// Unlike TakeError, this method does not return the error message and simply
-// resets the diagnostic state.
-func (m *Agent) CleanError() {
-	C.agent_clean_error(m.ptr)
-}
-
 func (m *Agent) AsRawPtr() unsafe.Pointer {
 	return unsafe.Pointer(m.ptr)
 }
@@ -155,16 +119,15 @@ func (m *Agent) UpdateModules(modules []ModuleConfig) error {
 		return fmt.Errorf("no module configs to update")
 	}
 
-	rc, err := C.agent_update_modules(
+	var cErr *C.yanet_error
+	rc := C.agent_update_modules(
 		(*C.struct_agent)(m.AsRawPtr()),
 		C.size_t(len(modules)),
 		&configs[0],
+		&cErr,
 	)
 	if rc != 0 {
-		return m.TakeError()
-	}
-	if err != nil {
-		return fmt.Errorf("failed to update modules: %w", err)
+		return fmt.Errorf("failed to update modules: %w", cerrors.FromC(unsafe.Pointer(cErr)))
 	}
 
 	return nil
@@ -186,16 +149,15 @@ func (m *Agent) UpdateFunction(functionConfig FunctionConfig) error {
 	functions := make([]*C.struct_cp_function_config, 1)
 	functions[0] = function.AsRawPtr()
 
-	rc, err := C.agent_update_functions(
+	var cErr *C.yanet_error
+	rc := C.agent_update_functions(
 		m.ptr,
 		1,
 		&functions[0],
+		&cErr,
 	)
 	if rc != 0 {
-		return m.TakeError()
-	}
-	if err != nil {
-		return fmt.Errorf("failed to update function: %w", err)
+		return fmt.Errorf("failed to update functions: %w", cerrors.FromC(unsafe.Pointer(cErr)))
 	}
 
 	return nil
@@ -212,16 +174,15 @@ func (m *Agent) UpdatePipeline(pipelineConfig PipelineConfig) error {
 
 	pipelines = append(pipelines, pipeline.AsRawPtr())
 
-	rc, err := C.agent_update_pipelines(
+	var cErr *C.yanet_error
+	rc := C.agent_update_pipelines(
 		m.ptr,
 		1,
 		&pipelines[0],
+		&cErr,
 	)
 	if rc != 0 {
-		return m.TakeError()
-	}
-	if err != nil {
-		return fmt.Errorf("failed to update pipelines: %w", err)
+		return fmt.Errorf("failed to update pipelines: %w", cerrors.FromC(unsafe.Pointer(cErr)))
 	}
 
 	return nil
@@ -240,11 +201,16 @@ func (m *Agent) UpdatePlainDevices(devices []DeviceConfig) error {
 		cName := C.CString(name)
 		defer C.free(unsafe.Pointer(cName))
 
+		var cErr *C.struct_yanet_error
 		cCfg := C.cp_device_plain_config_create(
 			cName,
 			C.uint64_t(len(input)),
 			C.uint64_t(len(output)),
+			&cErr,
 		)
+		if cerr := cerrors.FromC(unsafe.Pointer(cErr)); cerr != nil {
+			return fmt.Errorf("failed to initialize plain device config: %w", cerr)
+		}
 
 		for idx := range input {
 			pipeline := &input[idx]
@@ -270,20 +236,15 @@ func (m *Agent) UpdatePlainDevices(devices []DeviceConfig) error {
 			)
 		}
 
-		ptr, err := C.cp_device_plain_create(
+		ptr := C.cp_device_plain_create(
 			(*C.struct_agent)(m.AsRawPtr()),
 			cCfg,
+			&cErr,
 		)
-		if err != nil {
-			return fmt.Errorf(
-				"failed to initialize plain device config: %w",
-				err,
-			)
-		}
 		if ptr == nil {
 			return fmt.Errorf(
-				"failed to initialize plain device config: device %q not found",
-				name,
+				"failed to create plain device: %w",
+				cerrors.FromC(unsafe.Pointer(cErr)),
 			)
 		}
 
@@ -309,16 +270,15 @@ func (m *Agent) UpdateDevices(devices []ShmDeviceConfig) error {
 		configs[i] = (*C.struct_cp_device)(device.AsRawPtr())
 	}
 
-	rc, err := C.agent_update_devices(
+	var cErr *C.yanet_error
+	rc := C.agent_update_devices(
 		(*C.struct_agent)(m.AsRawPtr()),
 		C.size_t(len(devices)),
 		&configs[0],
+		&cErr,
 	)
 	if rc != 0 {
-		return m.TakeError()
-	}
-	if err != nil {
-		return fmt.Errorf("failed to update devices: %w", err)
+		return fmt.Errorf("failed to update devices: %w", cerrors.FromC(unsafe.Pointer(cErr)))
 	}
 
 	return nil
@@ -333,12 +293,10 @@ func (m *Agent) DeleteFunction(name string) error {
 	cName := C.CString(name)
 	defer C.free(unsafe.Pointer(cName))
 
-	rc, err := C.agent_delete_function(m.ptr, cName)
+	var cErr *C.yanet_error
+	rc := C.agent_delete_function(m.ptr, cName, &cErr)
 	if rc != 0 {
-		return m.TakeError()
-	}
-	if err != nil {
-		return err
+		return fmt.Errorf("failed to delete function %q: %w", name, cerrors.FromC(unsafe.Pointer(cErr)))
 	}
 
 	return nil
@@ -348,12 +306,10 @@ func (m *Agent) DeletePipeline(name string) error {
 	cName := C.CString(name)
 	defer C.free(unsafe.Pointer(cName))
 
-	rc, err := C.agent_delete_pipeline(m.ptr, cName)
+	var cErr *C.yanet_error
+	rc := C.agent_delete_pipeline(m.ptr, cName, &cErr)
 	if rc != 0 {
-		return m.TakeError()
-	}
-	if err != nil {
-		return err
+		return fmt.Errorf("failed to delete pipeline %q: %w", name, cerrors.FromC(unsafe.Pointer(cErr)))
 	}
 
 	return nil
@@ -366,13 +322,15 @@ func (m *Agent) DeleteModuleConfig(configName string) error {
 	cConfigName := C.CString(configName)
 	defer C.free(unsafe.Pointer(cConfigName))
 
+	var cErr *C.yanet_error
 	result := C.agent_delete_module(
 		(*C.struct_agent)(m.AsRawPtr()),
 		cTypeName,
 		cConfigName,
+		&cErr,
 	)
 	if result != 0 {
-		return m.TakeError()
+		return fmt.Errorf("failed to delete module config %q: %w", configName, cerrors.FromC(unsafe.Pointer(cErr)))
 	}
 	return nil
 }
