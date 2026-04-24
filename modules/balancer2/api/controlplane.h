@@ -10,20 +10,15 @@ struct session_table;
 struct balancer_handle;
 struct vs_handle;
 
-enum ip_family {
-	ip_family_ip4,
-	ip_family_ip6,
-};
-
-enum tunnel_kind {
-	tunnel_kind_ip,
-	tunnel_kind_gre,
+enum balancer_tunnel_kind {
+	balancer_tunnel_kind_ip,
+	balancer_tunnel_kind_gre,
 };
 
 /*
  * Configuration of a single real (backend).
  */
-struct real_config {
+struct balancer_real_config {
 	struct net_addr dst;
 	enum ip_family ip_family;
 
@@ -32,7 +27,7 @@ struct real_config {
 
 	struct net src;
 
-	enum tunnel_kind tunnel;
+	enum balancer_tunnel_kind tunnel;
 };
 
 /*
@@ -41,19 +36,19 @@ struct real_config {
  * port matches one of the listed ranges. An empty set of networks
  * disallows all networks; an empty set of ports allows all ports.
  */
-struct allowed_sources {
+struct balancer_allowed_sources {
 	struct filter_net4s net4s;
 	struct filter_net6s net6s;
 	struct filter_port_ranges port_ranges;
 };
 
-enum vs_scheduler {
-	vs_sched_wlc,
+enum balancer_vs_sched {
+	balancer_vs_sched_wlc,
 	/* Stateless one-packet scheduler: weighted round-robin without a
 	   session table. */
-	vs_sched_op,
-	vs_sched_wrr,
-	vs_sched_sh,
+	balancer_vs_sched_op,
+	balancer_vs_sched_wrr,
+	balancer_vs_sched_sh,
 };
 
 /*
@@ -67,7 +62,7 @@ enum vs_scheduler {
  * "any transport" is not expressible through a single VS — use
  * separate VS entries.
  */
-struct vs_config {
+struct balancer_vs_config {
 	struct net_addr dst;
 	enum ip_family ip_family;
 
@@ -76,11 +71,11 @@ struct vs_config {
 
 	uint8_t transport_proto;
 
-	struct allowed_sources allowed_sources;
+	struct balancer_allowed_sources allowed_sources;
 
-	enum vs_scheduler scheduler;
+	enum balancer_vs_sched scheduler;
 
-	struct real_config *reals;
+	struct balancer_real_config *reals;
 	size_t real_count;
 };
 
@@ -90,27 +85,29 @@ struct vs_config {
  * balancer is installed.
  */
 struct vs_handle *
-create_vs(struct agent *agent, const struct vs_config *config);
+balancer_create_vs(
+	struct agent *agent, const struct balancer_vs_config *config
+);
 
 /*
  * Returns 0 if the handle is still referenced by a balancer, or 1 if
  * it was actually freed.
  */
 int
-free_vs(struct agent *agent, struct vs_handle *vs);
+balancer_free_vs(struct agent *agent, struct vs_handle *vs);
 
 /*
  * Creates a session table. `capacity` is the number of session entries.
  */
 struct session_table *
-create_session_table(struct agent *agent, size_t capacity);
+balancer_create_session_table(struct agent *agent, size_t capacity);
 
 /*
- * Returns 0 if the session table is still referenced by someone, or 1
+ * Returns 0 if the session table is still referenced by a balancer, or 1
  * if it was actually freed.
  */
 int
-free_session_table(struct agent *agent, struct session_table *table);
+balancer_free_session_table(struct agent *agent, struct session_table *table);
 
 // TODO:
 // session table iter.
@@ -122,7 +119,7 @@ free_session_table(struct agent *agent, struct session_table *table);
  * balancer handle; they are not owned by it.
  */
 struct balancer_handle *
-create_balancer(
+balancer_create(
 	struct agent *agent,
 	const char *name,
 	struct session_table *table,
@@ -165,7 +162,7 @@ balancer_session_table_pop_back(struct balancer_handle *balancer);
  * Returns -1 on error, 0 on success.
  */
 int
-install_balancer(struct agent *agent, struct balancer_handle *handle);
+balancer_install(struct agent *agent, struct balancer_handle *handle);
 
 /*
  * Frees a balancer handle. The session tables passed to
@@ -174,7 +171,7 @@ install_balancer(struct agent *agent, struct balancer_handle *handle);
  * owns them.
  */
 void
-free_balancer(struct agent *agent, struct balancer_handle *handle);
+balancer_free(struct agent *agent, struct balancer_handle *handle);
 
 /*
  * Updates per-real weights for `vs`. `weights` must have length equal
@@ -184,7 +181,7 @@ free_balancer(struct agent *agent, struct balancer_handle *handle);
  * the VS's `real_count`, or -2 on allocation failure.
  */
 int
-vs_update_real_weights(struct vs_handle *vs, const uint32_t *weights);
+balancer_vs_update_real_weights(struct vs_handle *vs, const uint32_t *weights);
 
 /*
  * Updates per-real enabled flags for `vs`. `states` follows the same
@@ -192,7 +189,7 @@ vs_update_real_weights(struct vs_handle *vs, const uint32_t *weights);
  * codes as `vs_update_real_weights`.
  */
 int
-vs_update_real_states(struct vs_handle *vs, const bool *states);
+balancer_vs_update_real_states(struct vs_handle *vs, const bool *states);
 
 /*
  * Counters are registered by API with their names. The
