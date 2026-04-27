@@ -4,17 +4,17 @@
 
 struct packet;
 
-enum packet_fix_mss_result {
+enum packet_set_mss_result {
 	/* MSS was clamped, inserted, or the packet did not need fixing. */
-	packet_fix_mss_ok = 0,
+	packet_set_mss_ok = 0,
 	/*
 	 * TCP header or options are malformed, or the header already
 	 * occupies the full 60 bytes so a new option cannot fit in the
 	 * data_off field. The packet is left untouched.
 	 */
-	packet_fix_mss_malformed,
+	packet_set_mss_malformed,
 	/* mbuf has no headroom at the front to prepend the new option. */
-	packet_fix_mss_no_headroom,
+	packet_set_mss_no_headroom,
 };
 
 /*
@@ -29,5 +29,5 @@ enum packet_fix_mss_result {
  *
  * TCP checksum and IPv6 payload length are updated as needed.
  */
-enum packet_fix_mss_result
-packet_fix_mss(struct packet *packet, uint16_t clamp_mss, uint16_t insert_mss);
+enum packet_set_mss_result
+packet_set_mss(struct packet *packet, uint16_t clamp_mss, uint16_t insert_mss);

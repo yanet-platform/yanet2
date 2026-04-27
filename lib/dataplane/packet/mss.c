@@ -8,6 +8,7 @@
 
 #include "common/checksum.h"
 
+#include "data.h"
 #include "lib/dataplane/packet/packet.h"
 #include "rte_branch_prediction.h"
 
@@ -43,7 +44,7 @@ struct tcp_option {
  * so the fixed 20-byte TCP header is safe to dereference here.
  */
 static struct rte_tcp_hdr *
-get_syn_tcp_header(struct packet *packet) {
+tcp_hdr(struct packet *packet) {
 	if (unlikely(
 		    packet->network_header.type !=
 		    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)
@@ -76,7 +77,7 @@ get_syn_tcp_header(struct packet *packet) {
  * the packet end.
  */
 static uint16_t
-tcp_header_length(struct packet *packet, struct rte_tcp_hdr *tcp) {
+tcp_hdr_len(struct packet *packet, struct rte_tcp_hdr *tcp) {
 	uint16_t hdr_len = (tcp->data_off >> 4) * 4;
 
 	/* Declared header shorter than the fixed TCP header => malformed. */
@@ -101,8 +102,8 @@ enum find_result {
 };
 
 /*
- * Walk the TCP options area looking for an MSS option. On success
- * (mss_scan_found) writes a pointer to the option into *out.
+ * Walk the TCP options area looking for an MSS option. On `found`,
+ * writes a pointer to the option into *out.
  */
 static enum find_result
 find_mss_option(
@@ -117,7 +118,6 @@ find_mss_option(
 			packet->transport_header.offset + offset
 		);
 
-		/* End Of Option List: remaining bytes are padding — stop. */
 		if (opt->kind == TCP_OPTION_KIND_EOL) {
 			return absent;
 		}
@@ -127,10 +127,6 @@ find_mss_option(
 			continue;
 		}
 
-		/*
-		 * Variable-length option: must have at least a kind+len pair,
-		 * and its declared length must not overrun the options area.
-		 */
 		if (unlikely(
 			    offset + TCP_OPTION_MIN_LEN > hdr_len ||
 			    opt->len < TCP_OPTION_MIN_LEN ||
@@ -169,87 +165,93 @@ clamp_mss_option(
 		return;
 	}
 
-	/*
-	 * Incremental TCP checksum update per RFC 1624: subtract the old
-	 * 16-bit word, write the new one, add it back. The `== 0xffff`
-	 * guard preserves an all-ones checksum instead of flipping it to zero.
-	 */
+	/* Incremental TCP checksum update per RFC 1624. */
 	uint16_t cksum = ~tcp->cksum;
 	cksum = csum_minus(cksum, *mss_ptr);
 	*mss_ptr = rte_cpu_to_be_16(clamp_mss);
 	cksum = csum_plus(cksum, *mss_ptr);
+	/* preserve all-ones checksum (RFC 1624). */
 	tcp->cksum = (cksum == 0xffff) ? cksum : ~cksum;
 }
 
 /*
- * Insert a new MSS option with value `insert_mss` right after the fixed
- * TCP header. Moves L2 + L3 + fixed TCP header to a lower address by
- * 4 bytes, writes the option into the freed gap, then updates the TCP
- * data offset, TCP checksum, and IPv6 payload length.
- *
- * Precondition: the packet is IPv6 (IPv6 payload length is the only L3
- * length field updated here).
+ * Prepend 4 bytes of headroom to the mbuf and shift the first `prefix_len`
+ * bytes (L2 + L3 + fixed TCP header) down by 4, opening a 4-byte gap right
+ * after the fixed TCP header.
  */
-static enum packet_fix_mss_result
-insert_mss_option(
-	struct packet *packet, struct rte_tcp_hdr *tcp, uint16_t insert_mss
-) {
-	/* TCP header length in bytes (high nibble = 32-bit word count). */
-	uint16_t hdr_len = (tcp->data_off >> 4) * 4;
-
-	/* Not enough room in data_off to represent one more option word. */
-	if (unlikely(hdr_len + TCP_OPTION_MSS_LEN > TCP_HDR_LEN_MAX)) {
-		return packet_fix_mss_malformed;
-	}
-
-	struct rte_mbuf *mbuf = packet->mbuf;
-
+static enum packet_set_mss_result
+insert_mss_gap(struct rte_mbuf *mbuf, uint16_t prefix_len) {
 	if (unlikely(rte_pktmbuf_prepend(mbuf, TCP_OPTION_MSS_LEN) == NULL)) {
-		return packet_fix_mss_no_headroom;
+		return packet_set_mss_no_headroom;
 	}
-
-	/* Move L2 + L3 + fixed TCP header to a lower address to open a 4-byte
-	 * gap. */
-	uint16_t prefix_len =
-		packet->transport_header.offset + sizeof(struct rte_tcp_hdr);
 	memmove(rte_pktmbuf_mtod(mbuf, char *),
 		rte_pktmbuf_mtod_offset(mbuf, char *, TCP_OPTION_MSS_LEN),
 		prefix_len);
+	return packet_set_mss_ok;
+}
 
-	/* Write the MSS option into the gap. */
+static struct tcp_option *
+write_into_mss_gap(struct rte_mbuf *mbuf, uint16_t offset, uint16_t mss) {
 	struct tcp_option *opt =
-		rte_pktmbuf_mtod_offset(mbuf, struct tcp_option *, prefix_len);
+		rte_pktmbuf_mtod_offset(mbuf, struct tcp_option *, offset);
 	opt->kind = TCP_OPTION_KIND_MSS;
 	opt->len = TCP_OPTION_MSS_LEN;
-	*(uint16_t *)opt->data = rte_cpu_to_be_16(insert_mss);
+	*(uint16_t *)opt->data = rte_cpu_to_be_16(mss);
+	return opt;
+}
 
-	/* Re-fetch TCP header (moved due to prepend). */
-	tcp = rte_pktmbuf_mtod_offset(
-		mbuf, struct rte_tcp_hdr *, packet->transport_header.offset
-	);
-
-	/* Grow the TCP header by one 32-bit word (our newly inserted MSS
-	 * option). */
-	tcp->data_off += TCP_DATA_OFF_ONE_WORD;
-
-	/*
-	 * Update TCP checksum incrementally (RFC 1624).
-	 *
-	 * `data_off` is the high byte of a 16-bit aligned pair inside the
-	 * TCP header, so adding TCP_DATA_OFF_ONE_WORD to a host-order 16-bit
-	 * accumulator matches the change to the byte stream. The `opt`
-	 * fields are already in network order in memory, so they are
-	 * summed as-is. The MSS length term compensates for the growth
-	 * of the TCP length in the pseudo-header.
-	 */
+/*
+ * Update TCP checksum incrementally for a freshly-inserted MSS option:
+ * data_off grew by one word, the option (kind+len, value) is new, and the
+ * pseudo-header TCP length grew by TCP_OPTION_MSS_LEN.
+ */
+static void
+tcp_cksum_add_mss(struct rte_tcp_hdr *tcp, struct tcp_option *opt) {
 	uint16_t cksum = ~tcp->cksum;
 	cksum = csum_plus(cksum, TCP_DATA_OFF_ONE_WORD);
 	cksum = csum_plus(cksum, *(uint16_t *)opt);
 	cksum = csum_plus(cksum, *(uint16_t *)opt->data);
 	cksum = csum_plus(cksum, rte_cpu_to_be_16(TCP_OPTION_MSS_LEN));
+	/* preserve all-ones checksum (RFC 1624). */
 	tcp->cksum = (cksum == 0xffff) ? cksum : ~cksum;
+}
 
-	/* Update IPv6 payload length. */
+/*
+ * Insert a new MSS option with value `insert_mss` right after the fixed
+ * TCP header, then update the TCP data offset, TCP checksum, and IPv6
+ * payload length.
+ *
+ * Precondition: the packet is IPv6 (IPv6 payload length is the only L3
+ * length field updated here).
+ */
+static enum packet_set_mss_result
+insert_mss_option(
+	struct packet *packet, struct rte_tcp_hdr *tcp, uint16_t insert_mss
+) {
+	uint16_t hdr_len = (tcp->data_off >> 4) * 4;
+	if (unlikely(hdr_len + TCP_OPTION_MSS_LEN > TCP_HDR_LEN_MAX)) {
+		return packet_set_mss_malformed;
+	}
+
+	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
+	uint16_t prefix_len =
+		packet->transport_header.offset + sizeof(struct rte_tcp_hdr);
+
+	enum packet_set_mss_result rc = insert_mss_gap(mbuf, prefix_len);
+	if (unlikely(rc != packet_set_mss_ok)) {
+		return rc;
+	}
+
+	struct tcp_option *opt =
+		write_into_mss_gap(mbuf, prefix_len, insert_mss);
+
+	/* Need refetch tcp header as it moved in memory on inserting. */
+	tcp = rte_pktmbuf_mtod_offset(
+		mbuf, struct rte_tcp_hdr *, packet->transport_header.offset
+	);
+	tcp->data_off += TCP_DATA_OFF_ONE_WORD;
+	tcp_cksum_add_mss(tcp, opt);
+
 	struct rte_ipv6_hdr *ip6 = rte_pktmbuf_mtod_offset(
 		mbuf, struct rte_ipv6_hdr *, packet->network_header.offset
 	);
@@ -257,30 +259,30 @@ insert_mss_option(
 		rte_be_to_cpu_16(ip6->payload_len) + TCP_OPTION_MSS_LEN
 	);
 
-	return packet_fix_mss_ok;
+	return packet_set_mss_ok;
 }
 
-enum packet_fix_mss_result
-packet_fix_mss(struct packet *packet, uint16_t clamp_mss, uint16_t insert_mss) {
-	struct rte_tcp_hdr *tcp = get_syn_tcp_header(packet);
+enum packet_set_mss_result
+packet_set_mss(struct packet *packet, uint16_t clamp_mss, uint16_t insert_mss) {
+	struct rte_tcp_hdr *tcp = tcp_hdr(packet);
 	if (tcp == NULL) {
-		return packet_fix_mss_ok;
+		return packet_set_mss_ok;
 	}
 
-	uint16_t hdr_len = tcp_header_length(packet, tcp);
+	uint16_t hdr_len = tcp_hdr_len(packet, tcp);
 	if (unlikely(hdr_len == 0)) {
-		return packet_fix_mss_malformed;
+		return packet_set_mss_malformed;
 	}
 
 	struct tcp_option *mss_opt = NULL;
 	switch (find_mss_option(packet, hdr_len, &mss_opt)) {
 	case found:
 		clamp_mss_option(tcp, mss_opt, clamp_mss);
-		return packet_fix_mss_ok;
-	case malformed:
-		return packet_fix_mss_malformed;
+		return packet_set_mss_ok;
 	case absent:
 		return insert_mss_option(packet, tcp, insert_mss);
+	case malformed:
+		return packet_set_mss_malformed;
 	}
 
 	__builtin_unreachable();
