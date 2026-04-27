@@ -59,56 +59,117 @@ packet_network_prepend(
 	return 0;
 }
 
+/*
+ * Fill the inner-derived fields of an outer IPv4 header from the packet's
+ * current inner network header: type_of_service, packet_id, fragment_offset,
+ * time_to_live and next_proto_id (set to IPIP / IPV6 based on inner type;
+ * the caller may overwrite it for tunnel protocols such as GRE).
+ *
+ * Returns the size in bytes of the inner packet starting at its network
+ * header (so the caller can compute total_length as
+ * sizeof(outer) + return-value), or -1 if the inner network type is
+ * unsupported. Address fields, version_ihl, total_length and hdr_checksum
+ * are left to the caller.
+ */
+static int
+fill_outer_ip4_from_inner(struct rte_ipv4_hdr *outer, struct packet *inner) {
+	struct rte_mbuf *mbuf = packet_to_mbuf(inner);
+
+	if (inner->network_header.type ==
+	    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
+		struct rte_ipv4_hdr *inner_hdr = rte_pktmbuf_mtod_offset(
+			mbuf,
+			struct rte_ipv4_hdr *,
+			inner->network_header.offset
+		);
+		outer->type_of_service = inner_hdr->type_of_service;
+		outer->packet_id = inner_hdr->packet_id;
+		outer->fragment_offset = inner_hdr->fragment_offset;
+		outer->time_to_live = inner_hdr->time_to_live;
+		outer->next_proto_id = IPPROTO_IPIP;
+		return rte_be_to_cpu_16(inner_hdr->total_length);
+	}
+
+	if (inner->network_header.type ==
+	    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
+		struct rte_ipv6_hdr *inner_hdr = rte_pktmbuf_mtod_offset(
+			mbuf,
+			struct rte_ipv6_hdr *,
+			inner->network_header.offset
+		);
+		outer->type_of_service =
+			(rte_be_to_cpu_32(inner_hdr->vtc_flow) >> 20) & 0xFF;
+		outer->packet_id = rte_cpu_to_be_16(0x01);
+		outer->fragment_offset = 0;
+		outer->time_to_live = inner_hdr->hop_limits;
+		outer->next_proto_id = IPPROTO_IPV6;
+		return sizeof(struct rte_ipv6_hdr) +
+		       rte_be_to_cpu_16(inner_hdr->payload_len);
+	}
+
+	return -1;
+}
+
+/*
+ * IPv6 counterpart of fill_outer_ipv4_from_inner. Fills vtc_flow,
+ * hop_limits and proto (IPIP / IPV6) from the inner header.
+ *
+ * Returns the size in bytes of the inner packet starting at its network
+ * header (so the caller can compute payload_len), or -1 if the inner
+ * network type is unsupported. Address fields and payload_len are left to
+ * the caller.
+ */
+static int
+fill_outer_ip6_from_inner(struct rte_ipv6_hdr *outer, struct packet *inner) {
+	struct rte_mbuf *mbuf = packet_to_mbuf(inner);
+
+	if (inner->network_header.type ==
+	    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
+		struct rte_ipv4_hdr *inner_hdr = rte_pktmbuf_mtod_offset(
+			mbuf,
+			struct rte_ipv4_hdr *,
+			inner->network_header.offset
+		);
+		outer->vtc_flow = rte_cpu_to_be_32(
+			(0x6 << 28) | (inner_hdr->type_of_service << 20)
+		); // TODO: flow label?
+		outer->proto = IPPROTO_IPIP;
+		outer->hop_limits = inner_hdr->time_to_live;
+		return rte_be_to_cpu_16(inner_hdr->total_length);
+	}
+
+	if (inner->network_header.type ==
+	    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
+		struct rte_ipv6_hdr *inner_hdr = rte_pktmbuf_mtod_offset(
+			mbuf,
+			struct rte_ipv6_hdr *,
+			inner->network_header.offset
+		);
+		outer->vtc_flow = inner_hdr->vtc_flow;
+		outer->proto = IPPROTO_IPV6;
+		outer->hop_limits = inner_hdr->hop_limits;
+		return sizeof(struct rte_ipv6_hdr) +
+		       rte_be_to_cpu_16(inner_hdr->payload_len);
+	}
+
+	return -1;
+}
+
 int
 packet_ip4_encap(
 	struct packet *packet, const uint8_t *dst, const uint8_t *src
 ) {
-	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
-
 	struct rte_ipv4_hdr outer_hdr;
 	rte_memcpy(&outer_hdr.src_addr, src, NET4_LEN);
 	rte_memcpy(&outer_hdr.dst_addr, dst, NET4_LEN);
 	outer_hdr.version_ihl = 0x45;
 
-	if (packet->network_header.type ==
-	    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
-		struct rte_ipv4_hdr *inner_hdr = rte_pktmbuf_mtod_offset(
-			mbuf,
-			struct rte_ipv4_hdr *,
-			packet->network_header.offset
-		);
-		outer_hdr.type_of_service = inner_hdr->type_of_service;
-		outer_hdr.total_length = rte_cpu_to_be_16(
-			sizeof(struct rte_ipv4_hdr) +
-			rte_be_to_cpu_16(inner_hdr->total_length)
-		);
-
-		outer_hdr.packet_id = inner_hdr->packet_id;
-		outer_hdr.fragment_offset = inner_hdr->fragment_offset;
-		outer_hdr.time_to_live = inner_hdr->time_to_live;
-		outer_hdr.next_proto_id = IPPROTO_IPIP;
-	} else if (packet->network_header.type ==
-		   rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
-		struct rte_ipv6_hdr *inner_hdr = rte_pktmbuf_mtod_offset(
-			mbuf,
-			struct rte_ipv6_hdr *,
-			packet->network_header.offset
-		);
-		outer_hdr.type_of_service =
-			(rte_be_to_cpu_32(inner_hdr->vtc_flow) >> 20) & 0xFF;
-		outer_hdr.total_length = rte_cpu_to_be_16(
-			sizeof(struct rte_ipv4_hdr) +
-			sizeof(struct rte_ipv6_hdr) +
-			rte_be_to_cpu_16(inner_hdr->payload_len)
-		);
-
-		outer_hdr.packet_id = rte_cpu_to_be_16(0x01);
-		outer_hdr.fragment_offset = 0;
-		outer_hdr.time_to_live = inner_hdr->hop_limits;
-		outer_hdr.next_proto_id = IPPROTO_IPV6;
-	} else {
+	int inner_size = fill_outer_ip4_from_inner(&outer_hdr, packet);
+	if (inner_size < 0) {
 		return -1;
 	}
+	outer_hdr.total_length =
+		rte_cpu_to_be_16(sizeof(outer_hdr) + inner_size);
 
 	outer_hdr.hdr_checksum = 0;
 	outer_hdr.hdr_checksum = rte_ipv4_cksum(&outer_hdr);
@@ -125,42 +186,15 @@ int
 packet_ip6_encap(
 	struct packet *packet, const uint8_t *dst, const uint8_t *src
 ) {
-	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
-
 	struct rte_ipv6_hdr outer_hdr;
 	rte_memcpy(&outer_hdr.src_addr, src, NET6_LEN);
 	rte_memcpy(&outer_hdr.dst_addr, dst, NET6_LEN);
 
-	if (packet->network_header.type ==
-	    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
-		struct rte_ipv4_hdr *inner_hdr = rte_pktmbuf_mtod_offset(
-			mbuf,
-			struct rte_ipv4_hdr *,
-			packet->network_header.offset
-		);
-		outer_hdr.vtc_flow = rte_cpu_to_be_32(
-			(0x6 << 28) | (inner_hdr->type_of_service << 20)
-		); // TODO: flow label?
-		outer_hdr.payload_len = inner_hdr->total_length;
-		outer_hdr.proto = IPPROTO_IPIP;
-		outer_hdr.hop_limits = inner_hdr->time_to_live;
-	} else if (packet->network_header.type ==
-		   rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
-		struct rte_ipv6_hdr *inner_hdr = rte_pktmbuf_mtod_offset(
-			mbuf,
-			struct rte_ipv6_hdr *,
-			packet->network_header.offset
-		);
-		outer_hdr.vtc_flow = inner_hdr->vtc_flow;
-		outer_hdr.payload_len = rte_cpu_to_be_16(
-			sizeof(struct rte_ipv6_hdr) +
-			rte_be_to_cpu_16(inner_hdr->payload_len)
-		);
-		outer_hdr.proto = IPPROTO_IPV6;
-		outer_hdr.hop_limits = inner_hdr->hop_limits;
-	} else {
+	int inner_size = fill_outer_ip6_from_inner(&outer_hdr, packet);
+	if (inner_size < 0) {
 		return -1;
 	}
+	outer_hdr.payload_len = rte_cpu_to_be_16(inner_size);
 
 	return packet_network_prepend(
 		packet,
@@ -317,129 +351,57 @@ int
 packet_ip4_encap_gre(
 	struct packet *packet, const uint8_t *dst, const uint8_t *src
 ) {
-	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
-
 	struct {
 		struct rte_ipv4_hdr ip;
 		struct rte_gre_hdr gre;
 	} __rte_packed outer;
 
-	rte_memcpy(&outer.ip.src_addr, src, 4);
-	rte_memcpy(&outer.ip.dst_addr, dst, 4);
+	rte_memcpy(&outer.ip.src_addr, src, NET4_LEN);
+	rte_memcpy(&outer.ip.dst_addr, dst, NET4_LEN);
 	outer.ip.version_ihl = 0x45;
-	outer.ip.next_proto_id = IPPROTO_GRE;
 
-	memset(&outer.gre, 0, sizeof(outer.gre));
-
-	if (packet->network_header.type ==
-	    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
-		struct rte_ipv4_hdr *inner = rte_pktmbuf_mtod_offset(
-			mbuf,
-			struct rte_ipv4_hdr *,
-			packet->network_header.offset
-		);
-		outer.ip.type_of_service = inner->type_of_service;
-		outer.ip.total_length = rte_cpu_to_be_16(
-			sizeof(outer) + rte_be_to_cpu_16(inner->total_length)
-		);
-		outer.ip.packet_id = inner->packet_id;
-		outer.ip.fragment_offset = inner->fragment_offset;
-		outer.ip.time_to_live = inner->time_to_live;
-		outer.gre.proto = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4);
-	} else if (packet->network_header.type ==
-		   rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
-		struct rte_ipv6_hdr *inner = rte_pktmbuf_mtod_offset(
-			mbuf,
-			struct rte_ipv6_hdr *,
-			packet->network_header.offset
-		);
-		outer.ip.type_of_service =
-			(rte_be_to_cpu_32(inner->vtc_flow) >> 20) & 0xFF;
-		outer.ip.total_length = rte_cpu_to_be_16(
-			sizeof(outer) + sizeof(struct rte_ipv6_hdr) +
-			rte_be_to_cpu_16(inner->payload_len)
-		);
-		outer.ip.packet_id = rte_cpu_to_be_16(0x01);
-		outer.ip.fragment_offset = 0;
-		outer.ip.time_to_live = inner->hop_limits;
-		outer.gre.proto = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6);
-	} else {
+	int inner_size = fill_outer_ip4_from_inner(&outer.ip, packet);
+	if (inner_size < 0) {
 		return -1;
 	}
+	outer.ip.total_length = rte_cpu_to_be_16(sizeof(outer) + inner_size);
+	outer.ip.next_proto_id = IPPROTO_GRE;
+
+	outer.gre.proto = packet->network_header.type;
 
 	outer.ip.hdr_checksum = 0;
 	outer.ip.hdr_checksum = rte_ipv4_cksum(&outer.ip);
 
-	if (packet_network_prepend(
-		    packet,
-		    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4),
-		    &outer,
-		    sizeof(outer)
-	    ))
-		return -1;
-
-	return 0;
+	return packet_network_prepend(
+		packet,
+		rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4),
+		&outer,
+		sizeof(outer)
+	);
 }
 
 int
 packet_ip6_encap_gre(
 	struct packet *packet, const uint8_t *dst, const uint8_t *src
 ) {
-	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
-
 	struct {
 		struct rte_ipv6_hdr ip;
 		struct rte_gre_hdr gre;
 	} __rte_packed outer;
 
-	rte_memcpy(&outer.ip.src_addr, src, 16);
-	rte_memcpy(&outer.ip.dst_addr, dst, 16);
+	rte_memcpy(&outer.ip.src_addr, src, NET6_LEN);
+	rte_memcpy(&outer.ip.dst_addr, dst, NET6_LEN);
+
+	int inner_size = fill_outer_ip6_from_inner(&outer.ip, packet);
+	outer.ip.payload_len = rte_cpu_to_be_16(sizeof(outer.gre) + inner_size);
 	outer.ip.proto = IPPROTO_GRE;
 
-	memset(&outer.gre, 0, sizeof(outer.gre));
+	outer.gre.proto = packet->network_header.type;
 
-	if (packet->network_header.type ==
-	    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
-		struct rte_ipv4_hdr *inner = rte_pktmbuf_mtod_offset(
-			mbuf,
-			struct rte_ipv4_hdr *,
-			packet->network_header.offset
-		);
-		outer.ip.vtc_flow = rte_cpu_to_be_32(
-			(0x6 << 28) | (inner->type_of_service << 20)
-		);
-		outer.ip.payload_len = rte_cpu_to_be_16(
-			sizeof(struct rte_gre_hdr) +
-			rte_be_to_cpu_16(inner->total_length)
-		);
-		outer.ip.hop_limits = inner->time_to_live;
-		outer.gre.proto = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4);
-	} else if (packet->network_header.type ==
-		   rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
-		struct rte_ipv6_hdr *inner = rte_pktmbuf_mtod_offset(
-			mbuf,
-			struct rte_ipv6_hdr *,
-			packet->network_header.offset
-		);
-		outer.ip.vtc_flow = inner->vtc_flow;
-		outer.ip.payload_len = rte_cpu_to_be_16(
-			sizeof(struct rte_gre_hdr) +
-			sizeof(struct rte_ipv6_hdr) +
-			rte_be_to_cpu_16(inner->payload_len)
-		);
-		outer.ip.hop_limits = inner->hop_limits;
-		outer.gre.proto = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6);
-	} else {
-		return -1;
-	}
-
-	if (packet_network_prepend(
-		    packet,
-		    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6),
-		    &outer,
-		    sizeof(outer)
-	    ))
-		return -1;
-
-	return 0;
+	return packet_network_prepend(
+		packet,
+		rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6),
+		&outer,
+		sizeof(outer)
+	);
 }
