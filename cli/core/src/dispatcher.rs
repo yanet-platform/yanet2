@@ -8,7 +8,7 @@ use std::{
     process::{self, Stdio},
 };
 
-use clap::{ArgMatches, Command};
+use clap::{builder::Str, Arg, ArgMatches, Command};
 use clap_complete::CompleteEnv;
 
 pub trait Dispatch {
@@ -110,8 +110,7 @@ pub fn add_subcommands(mut command: Command, modules: &HashSet<String>) -> Comma
     let mut list = modules.iter().cloned().collect::<Vec<_>>();
     list.sort();
     for module in list {
-        let name: &'static str = Box::leak(module.into_boxed_str());
-        command = command.subcommand(external_subcommand(name));
+        command = command.subcommand(external_subcommand(module));
     }
 
     command
@@ -131,9 +130,7 @@ pub fn add_subcommands(mut command: Command, modules: &HashSet<String>) -> Comma
 ///
 /// This ensures that, for example, `yanet-cli inspect -h` behaves the same as
 /// calling `yanet-cli-inspect -h` directly.
-fn external_subcommand(name: &'static str) -> Command {
-    use clap::Arg;
-
+fn external_subcommand(name: impl Into<Str>) -> Command {
     Command::new(name)
         .disable_help_flag(true)
         .disable_help_subcommand(true)
