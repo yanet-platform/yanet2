@@ -1,7 +1,5 @@
 #include <netinet/in.h>
-#include <stdalign.h>
 #include <stdint.h>
-#include <stdlib.h>
 #include <string.h>
 
 #include <rte_byteorder.h>
@@ -12,9 +10,12 @@
 #include <rte_udp.h>
 
 #include "common/test_assert.h"
+
+#include "lib/dataplane/packet/data.h"
 #include "lib/dataplane/packet/mss.h"
 #include "lib/dataplane/packet/packet.h"
-#include "logging/log.h"
+#include "lib/logging/log.h"
+#include "lib/utils/packet.h"
 
 #define TCP_OPT_KIND_EOL 0
 #define TCP_OPT_KIND_NOP 1
@@ -25,47 +26,7 @@
 
 #define SNAPSHOT_CAP 512
 
-////////////////////////////////////////////////////////////////////////////////
 // Packet construction helpers
-
-struct test_pkt {
-	struct packet packet;
-	struct rte_mbuf *mbuf;
-};
-
-static void
-free_test_pkt(struct test_pkt *tp) {
-	free(tp->mbuf);
-	tp->mbuf = NULL;
-}
-
-static int
-alloc_mbuf(struct test_pkt *tp, uint16_t headroom, uint16_t pkt_len, uint16_t tailroom) {
-	size_t buf_len = (size_t)headroom + pkt_len;
-	size_t mbuf_size = sizeof(struct rte_mbuf) + buf_len + tailroom;
-	size_t align = alignof(struct rte_mbuf);
-	if (mbuf_size % align != 0) {
-		mbuf_size += align - mbuf_size % align;
-	}
-	struct rte_mbuf *mbuf = aligned_alloc(align, mbuf_size);
-	if (!mbuf) {
-		return -1;
-	}
-	memset(mbuf, 0, sizeof(*mbuf));
-	mbuf->buf_addr = (char *)mbuf + sizeof(struct rte_mbuf);
-	mbuf->buf_len = buf_len;
-	mbuf->data_off = headroom;
-	mbuf->data_len = pkt_len;
-	mbuf->pkt_len = pkt_len;
-	mbuf->nb_segs = 1;
-	rte_mbuf_refcnt_set(mbuf, 1);
-
-	memset(rte_pktmbuf_mtod(mbuf, void *), 0, pkt_len);
-	tp->mbuf = mbuf;
-	memset(&tp->packet, 0, sizeof(tp->packet));
-	tp->packet.mbuf = mbuf;
-	return 0;
-}
 
 /* Build IPv6 + TCP packet. `data_off_override` = 0 means compute from opt_len,
  * otherwise write the given value verbatim (allowing malformed headers).
@@ -73,7 +34,7 @@ alloc_mbuf(struct test_pkt *tp, uint16_t headroom, uint16_t pkt_len, uint16_t ta
  * at whatever memset produced. */
 static int
 build_ip6_tcp(
-	struct test_pkt *tp,
+	struct packet *p,
 	uint8_t tcp_flags,
 	const uint8_t *opts,
 	uint16_t opt_len,
@@ -85,11 +46,13 @@ build_ip6_tcp(
 	uint16_t pkt_len = sizeof(struct rte_ether_hdr) +
 			   sizeof(struct rte_ipv6_hdr) + l4_len;
 
-	if (alloc_mbuf(tp, headroom, pkt_len, DEFAULT_TAILROOM) != 0) {
+	memset(p, 0, sizeof(*p));
+	p->mbuf = alloc_mbuf(headroom, pkt_len, DEFAULT_TAILROOM);
+	if (!p->mbuf) {
 		return -1;
 	}
 
-	uint8_t *data = rte_pktmbuf_mtod(tp->mbuf, uint8_t *);
+	uint8_t *data = rte_pktmbuf_mtod(p->mbuf, uint8_t *);
 	struct rte_ether_hdr *eth = (struct rte_ether_hdr *)data;
 	eth->ether_type = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6);
 
@@ -126,24 +89,26 @@ build_ip6_tcp(
 		tcp->cksum = rte_ipv6_udptcp_cksum(ip6, tcp);
 	}
 
-	if (parse_packet(&tp->packet) != 0) {
-		free_test_pkt(tp);
+	if (parse_packet(p) != 0) {
+		free_packet(p);
 		return -1;
 	}
 	return 0;
 }
 
 static int
-build_ip6_udp(struct test_pkt *tp) {
+build_ip6_udp(struct packet *p) {
 	uint16_t l4_len = sizeof(struct rte_udp_hdr);
 	uint16_t pkt_len = sizeof(struct rte_ether_hdr) +
 			   sizeof(struct rte_ipv6_hdr) + l4_len;
 
-	if (alloc_mbuf(tp, DEFAULT_HEADROOM, pkt_len, DEFAULT_TAILROOM) != 0) {
+	memset(p, 0, sizeof(*p));
+	p->mbuf = alloc_mbuf(DEFAULT_HEADROOM, pkt_len, DEFAULT_TAILROOM);
+	if (!p->mbuf) {
 		return -1;
 	}
 
-	uint8_t *data = rte_pktmbuf_mtod(tp->mbuf, uint8_t *);
+	uint8_t *data = rte_pktmbuf_mtod(p->mbuf, uint8_t *);
 	struct rte_ether_hdr *eth = (struct rte_ether_hdr *)data;
 	eth->ether_type = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6);
 
@@ -162,20 +127,22 @@ build_ip6_udp(struct test_pkt *tp) {
 	udp->dgram_len = rte_cpu_to_be_16(sizeof(*udp));
 	udp->dgram_cksum = 0;
 
-	return parse_packet(&tp->packet);
+	return parse_packet(p);
 }
 
 static int
-build_ip4_tcp_syn(struct test_pkt *tp) {
+build_ip4_tcp_syn(struct packet *p) {
 	uint16_t pkt_len = sizeof(struct rte_ether_hdr) +
 			   sizeof(struct rte_ipv4_hdr) +
 			   sizeof(struct rte_tcp_hdr);
 
-	if (alloc_mbuf(tp, DEFAULT_HEADROOM, pkt_len, DEFAULT_TAILROOM) != 0) {
+	memset(p, 0, sizeof(*p));
+	p->mbuf = alloc_mbuf(DEFAULT_HEADROOM, pkt_len, DEFAULT_TAILROOM);
+	if (!p->mbuf) {
 		return -1;
 	}
 
-	uint8_t *data = rte_pktmbuf_mtod(tp->mbuf, uint8_t *);
+	uint8_t *data = rte_pktmbuf_mtod(p->mbuf, uint8_t *);
 	struct rte_ether_hdr *eth = (struct rte_ether_hdr *)data;
 	eth->ether_type = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4);
 
@@ -197,10 +164,9 @@ build_ip4_tcp_syn(struct test_pkt *tp) {
 	tcp->rx_win = rte_cpu_to_be_16(65535);
 	tcp->cksum = 0;
 
-	return parse_packet(&tp->packet);
+	return parse_packet(p);
 }
 
-////////////////////////////////////////////////////////////////////////////////
 // Accessors and verifiers
 
 static struct rte_ipv6_hdr *
@@ -253,9 +219,7 @@ snapshot(struct packet *p, struct pkt_snapshot *s) {
 
 static int
 assert_unchanged(struct packet *p, const struct pkt_snapshot *s) {
-	TEST_ASSERT_EQUAL(
-		rte_pktmbuf_pkt_len(p->mbuf), s->pkt_len, "pkt_len changed"
-	);
+	TEST_ASSERT_EQUAL(packet_data_len(p), s->pkt_len, "pkt_len changed");
 	TEST_ASSERT_EQUAL(p->mbuf->data_off, s->data_off, "data_off changed");
 	TEST_ASSERT(
 		memcmp(rte_pktmbuf_mtod(p->mbuf, void *), s->data, s->pkt_len
@@ -265,7 +229,6 @@ assert_unchanged(struct packet *p, const struct pkt_snapshot *s) {
 	return TEST_SUCCESS;
 }
 
-////////////////////////////////////////////////////////////////////////////////
 // MSS option builders
 
 static void
@@ -276,43 +239,41 @@ write_mss_opt(uint8_t *dst, uint16_t mss) {
 	memcpy(dst + 2, &be, 2);
 }
 
-////////////////////////////////////////////////////////////////////////////////
 // Test cases
 
 static int
 test_clamp_gt(void) {
 	uint8_t opts[4];
 	write_mss_opt(opts, 1460);
-	struct test_pkt tp;
+	struct packet p;
 	TEST_ASSERT_SUCCESS(
 		build_ip6_tcp(
-			&tp, RTE_TCP_SYN_FLAG, opts, 4, 0, DEFAULT_HEADROOM, 1
+			&p, RTE_TCP_SYN_FLAG, opts, 4, 0, DEFAULT_HEADROOM, 1
 		),
 		"build"
 	);
 
-	uint16_t ip6_len_before =
-		rte_be_to_cpu_16(pkt_ip6(&tp.packet)->payload_len);
-	uint8_t data_off_before = pkt_tcp(&tp.packet)->data_off;
+	uint16_t ip6_len_before = rte_be_to_cpu_16(pkt_ip6(&p)->payload_len);
+	uint8_t data_off_before = pkt_tcp(&p)->data_off;
 
-	enum packet_fix_mss_result rc = packet_fix_mss(&tp.packet, 1200, 1300);
-	TEST_ASSERT_EQUAL(rc, packet_fix_mss_ok, "rc");
+	enum packet_set_mss_result rc = packet_set_mss(&p, 1200, 1300);
+	TEST_ASSERT_EQUAL(rc, packet_set_mss_ok, "rc");
 
-	struct rte_tcp_hdr *tcp = pkt_tcp(&tp.packet);
+	struct rte_tcp_hdr *tcp = pkt_tcp(&p);
 	uint16_t *mss_field =
 		(uint16_t *)((uint8_t *)(tcp + 1) + 2); /* after kind+len */
 	TEST_ASSERT_EQUAL(
 		rte_be_to_cpu_16(*mss_field), 1200, "MSS not clamped"
 	);
 	TEST_ASSERT_EQUAL(
-		rte_be_to_cpu_16(pkt_ip6(&tp.packet)->payload_len),
+		rte_be_to_cpu_16(pkt_ip6(&p)->payload_len),
 		ip6_len_before,
 		"payload_len changed"
 	);
 	TEST_ASSERT_EQUAL(tcp->data_off, data_off_before, "data_off changed");
-	TEST_ASSERT_SUCCESS(verify_ip6_tcp_cksum(&tp.packet), "cksum");
+	TEST_ASSERT_SUCCESS(verify_ip6_tcp_cksum(&p), "cksum");
 
-	free_test_pkt(&tp);
+	free_packet(&p);
 	return TEST_SUCCESS;
 }
 
@@ -320,22 +281,22 @@ static int
 test_clamp_lt(void) {
 	uint8_t opts[4];
 	write_mss_opt(opts, 1000);
-	struct test_pkt tp;
+	struct packet p;
 	TEST_ASSERT_SUCCESS(
 		build_ip6_tcp(
-			&tp, RTE_TCP_SYN_FLAG, opts, 4, 0, DEFAULT_HEADROOM, 1
+			&p, RTE_TCP_SYN_FLAG, opts, 4, 0, DEFAULT_HEADROOM, 1
 		),
 		"build"
 	);
 	struct pkt_snapshot s;
-	snapshot(&tp.packet, &s);
+	snapshot(&p, &s);
 
 	TEST_ASSERT_EQUAL(
-		packet_fix_mss(&tp.packet, 1200, 1300), packet_fix_mss_ok, "rc"
+		packet_set_mss(&p, 1200, 1300), packet_set_mss_ok, "rc"
 	);
-	TEST_ASSERT_SUCCESS(assert_unchanged(&tp.packet, &s), "unchanged");
+	TEST_ASSERT_SUCCESS(assert_unchanged(&p, &s), "unchanged");
 
-	free_test_pkt(&tp);
+	free_packet(&p);
 	return TEST_SUCCESS;
 }
 
@@ -343,121 +304,123 @@ static int
 test_clamp_eq(void) {
 	uint8_t opts[4];
 	write_mss_opt(opts, 1200);
-	struct test_pkt tp;
+	struct packet p;
 	TEST_ASSERT_SUCCESS(
 		build_ip6_tcp(
-			&tp, RTE_TCP_SYN_FLAG, opts, 4, 0, DEFAULT_HEADROOM, 1
+			&p, RTE_TCP_SYN_FLAG, opts, 4, 0, DEFAULT_HEADROOM, 1
 		),
 		"build"
 	);
 	struct pkt_snapshot s;
-	snapshot(&tp.packet, &s);
+	snapshot(&p, &s);
 
 	TEST_ASSERT_EQUAL(
-		packet_fix_mss(&tp.packet, 1200, 1300), packet_fix_mss_ok, "rc"
+		packet_set_mss(&p, 1200, 1300), packet_set_mss_ok, "rc"
 	);
-	TEST_ASSERT_SUCCESS(assert_unchanged(&tp.packet, &s), "unchanged");
+	TEST_ASSERT_SUCCESS(assert_unchanged(&p, &s), "unchanged");
 
-	free_test_pkt(&tp);
+	free_packet(&p);
 	return TEST_SUCCESS;
 }
 
 static int
 test_insert_no_mss(void) {
-	struct test_pkt tp;
+	struct packet p;
 	TEST_ASSERT_SUCCESS(
 		build_ip6_tcp(
-			&tp, RTE_TCP_SYN_FLAG, NULL, 0, 0, DEFAULT_HEADROOM, 1
+			&p, RTE_TCP_SYN_FLAG, NULL, 0, 0, DEFAULT_HEADROOM, 1
 		),
 		"build"
 	);
-	uint32_t pkt_len_before = rte_pktmbuf_pkt_len(tp.mbuf);
-	uint16_t ip6_len_before =
-		rte_be_to_cpu_16(pkt_ip6(&tp.packet)->payload_len);
-	uint8_t data_off_before = pkt_tcp(&tp.packet)->data_off;
+	uint32_t pkt_len_before = rte_pktmbuf_pkt_len(p.mbuf);
+	uint16_t ip6_len_before = rte_be_to_cpu_16(pkt_ip6(&p)->payload_len);
+	uint8_t data_off_before = pkt_tcp(&p)->data_off;
 
 	TEST_ASSERT_EQUAL(
-		packet_fix_mss(&tp.packet, 1200, 1300), packet_fix_mss_ok, "rc"
+		packet_set_mss(&p, 1200, 1300), packet_set_mss_ok, "rc"
 	);
 
 	TEST_ASSERT_EQUAL(
-		rte_pktmbuf_pkt_len(tp.mbuf),
+		rte_pktmbuf_pkt_len(p.mbuf),
 		pkt_len_before + 4u,
 		"pkt_len did not grow by 4"
 	);
-	struct rte_tcp_hdr *tcp = pkt_tcp(&tp.packet);
+
+	struct rte_tcp_hdr *tcp = pkt_tcp(&p);
 	TEST_ASSERT_EQUAL(
 		tcp->data_off,
 		data_off_before + (1 << 4),
 		"data_off not +1 word"
 	);
+
 	TEST_ASSERT_EQUAL(
-		rte_be_to_cpu_16(pkt_ip6(&tp.packet)->payload_len),
+		rte_be_to_cpu_16(pkt_ip6(&p)->payload_len),
 		ip6_len_before + 4,
 		"IPv6 payload_len not +4"
 	);
+
 	uint8_t *opt = (uint8_t *)(tcp + 1);
 	TEST_ASSERT_EQUAL(opt[0], TCP_OPT_KIND_MSS, "opt kind");
 	TEST_ASSERT_EQUAL(opt[1], 4, "opt len");
 	uint16_t mss_be;
 	memcpy(&mss_be, opt + 2, 2);
 	TEST_ASSERT_EQUAL(rte_be_to_cpu_16(mss_be), 1300, "inserted MSS");
-	TEST_ASSERT_SUCCESS(verify_ip6_tcp_cksum(&tp.packet), "cksum");
+	TEST_ASSERT_SUCCESS(verify_ip6_tcp_cksum(&p), "cksum");
 
-	free_test_pkt(&tp);
+	free_packet(&p);
 	return TEST_SUCCESS;
 }
 
 static int
 test_skip_ipv4(void) {
-	struct test_pkt tp;
-	TEST_ASSERT_SUCCESS(build_ip4_tcp_syn(&tp), "build");
+	struct packet p;
+	TEST_ASSERT_SUCCESS(build_ip4_tcp_syn(&p), "build");
 	struct pkt_snapshot s;
-	snapshot(&tp.packet, &s);
+	snapshot(&p, &s);
 
 	TEST_ASSERT_EQUAL(
-		packet_fix_mss(&tp.packet, 1200, 1300), packet_fix_mss_ok, "rc"
+		packet_set_mss(&p, 1200, 1300), packet_set_mss_ok, "rc"
 	);
-	TEST_ASSERT_SUCCESS(assert_unchanged(&tp.packet, &s), "unchanged");
+	TEST_ASSERT_SUCCESS(assert_unchanged(&p, &s), "unchanged");
 
-	free_test_pkt(&tp);
+	free_packet(&p);
 	return TEST_SUCCESS;
 }
 
 static int
 test_skip_non_tcp(void) {
-	struct test_pkt tp;
-	TEST_ASSERT_SUCCESS(build_ip6_udp(&tp), "build");
+	struct packet p;
+	TEST_ASSERT_SUCCESS(build_ip6_udp(&p), "build");
 	struct pkt_snapshot s;
-	snapshot(&tp.packet, &s);
+	snapshot(&p, &s);
 
 	TEST_ASSERT_EQUAL(
-		packet_fix_mss(&tp.packet, 1200, 1300), packet_fix_mss_ok, "rc"
+		packet_set_mss(&p, 1200, 1300), packet_set_mss_ok, "rc"
 	);
-	TEST_ASSERT_SUCCESS(assert_unchanged(&tp.packet, &s), "unchanged");
+	TEST_ASSERT_SUCCESS(assert_unchanged(&p, &s), "unchanged");
 
-	free_test_pkt(&tp);
+	free_packet(&p);
 	return TEST_SUCCESS;
 }
 
 static int
 test_skip_non_syn(void) {
-	struct test_pkt tp;
+	struct packet p;
 	TEST_ASSERT_SUCCESS(
 		build_ip6_tcp(
-			&tp, RTE_TCP_ACK_FLAG, NULL, 0, 0, DEFAULT_HEADROOM, 1
+			&p, RTE_TCP_ACK_FLAG, NULL, 0, 0, DEFAULT_HEADROOM, 1
 		),
 		"build"
 	);
 	struct pkt_snapshot s;
-	snapshot(&tp.packet, &s);
+	snapshot(&p, &s);
 
 	TEST_ASSERT_EQUAL(
-		packet_fix_mss(&tp.packet, 1200, 1300), packet_fix_mss_ok, "rc"
+		packet_set_mss(&p, 1200, 1300), packet_set_mss_ok, "rc"
 	);
-	TEST_ASSERT_SUCCESS(assert_unchanged(&tp.packet, &s), "unchanged");
+	TEST_ASSERT_SUCCESS(assert_unchanged(&p, &s), "unchanged");
 
-	free_test_pkt(&tp);
+	free_packet(&p);
 	return TEST_SUCCESS;
 }
 
@@ -465,10 +428,10 @@ static int
 test_skip_syn_rst(void) {
 	uint8_t opts[4];
 	write_mss_opt(opts, 1460);
-	struct test_pkt tp;
+	struct packet p;
 	TEST_ASSERT_SUCCESS(
 		build_ip6_tcp(
-			&tp,
+			&p,
 			RTE_TCP_SYN_FLAG | RTE_TCP_RST_FLAG,
 			opts,
 			4,
@@ -479,36 +442,34 @@ test_skip_syn_rst(void) {
 		"build"
 	);
 	struct pkt_snapshot s;
-	snapshot(&tp.packet, &s);
+	snapshot(&p, &s);
 
 	TEST_ASSERT_EQUAL(
-		packet_fix_mss(&tp.packet, 1200, 1300), packet_fix_mss_ok, "rc"
+		packet_set_mss(&p, 1200, 1300), packet_set_mss_ok, "rc"
 	);
-	TEST_ASSERT_SUCCESS(assert_unchanged(&tp.packet, &s), "unchanged");
+	TEST_ASSERT_SUCCESS(assert_unchanged(&p, &s), "unchanged");
 
-	free_test_pkt(&tp);
+	free_packet(&p);
 	return TEST_SUCCESS;
 }
 
 static int
 test_malformed_len_zero(void) {
-	/* kind=8 (TS) but len=0 — variable-length option must have len >= 2. */
+	/* kind=8 but len=0 — variable-length option must have len >= 2. */
 	uint8_t opts[4] = {8, 0, 0, 0};
-	struct test_pkt tp;
+	struct packet p;
 	TEST_ASSERT_SUCCESS(
 		build_ip6_tcp(
-			&tp, RTE_TCP_SYN_FLAG, opts, 4, 0, DEFAULT_HEADROOM, 1
+			&p, RTE_TCP_SYN_FLAG, opts, 4, 0, DEFAULT_HEADROOM, 1
 		),
 		"build"
 	);
 
 	TEST_ASSERT_EQUAL(
-		packet_fix_mss(&tp.packet, 1200, 1300),
-		packet_fix_mss_malformed,
-		"rc"
+		packet_set_mss(&p, 1200, 1300), packet_set_mss_malformed, "rc"
 	);
 
-	free_test_pkt(&tp);
+	free_packet(&p);
 	return TEST_SUCCESS;
 }
 
@@ -518,68 +479,65 @@ test_malformed_overrun(void) {
 	 * actually declares 4 bytes; we use an 8-byte options area with an
 	 * initial non-MSS variable-length option whose len overruns. */
 	uint8_t opts[8] = {30, 10, 0, 0, 0, 0, 0, 0};
-	struct test_pkt tp;
+	struct packet p;
 	TEST_ASSERT_SUCCESS(
 		build_ip6_tcp(
-			&tp, RTE_TCP_SYN_FLAG, opts, 8, 0, DEFAULT_HEADROOM, 1
+			&p, RTE_TCP_SYN_FLAG, opts, 8, 0, DEFAULT_HEADROOM, 1
 		),
 		"build"
 	);
 
 	TEST_ASSERT_EQUAL(
-		packet_fix_mss(&tp.packet, 1200, 1300),
-		packet_fix_mss_malformed,
-		"rc"
+		packet_set_mss(&p, 1200, 1300), packet_set_mss_malformed, "rc"
 	);
 
-	free_test_pkt(&tp);
+	free_packet(&p);
 	return TEST_SUCCESS;
 }
 
 static int
 test_eol_respected(void) {
 	uint8_t opts[4] = {TCP_OPT_KIND_NOP, TCP_OPT_KIND_EOL, 0xFF, 0xFF};
-	struct test_pkt tp;
+	struct packet p;
 	TEST_ASSERT_SUCCESS(
 		build_ip6_tcp(
-			&tp, RTE_TCP_SYN_FLAG, opts, 4, 0, DEFAULT_HEADROOM, 1
+			&p, RTE_TCP_SYN_FLAG, opts, 4, 0, DEFAULT_HEADROOM, 1
 		),
 		"build"
 	);
-	uint32_t pkt_len_before = rte_pktmbuf_pkt_len(tp.mbuf);
+	uint32_t pkt_len_before = rte_pktmbuf_pkt_len(p.mbuf);
 
 	TEST_ASSERT_EQUAL(
-		packet_fix_mss(&tp.packet, 1200, 1300), packet_fix_mss_ok, "rc"
+		packet_set_mss(&p, 1200, 1300), packet_set_mss_ok, "rc"
 	);
 	TEST_ASSERT_EQUAL(
-		rte_pktmbuf_pkt_len(tp.mbuf),
+		rte_pktmbuf_pkt_len(p.mbuf),
 		pkt_len_before + 4u,
 		"insert did not grow packet"
 	);
-	struct rte_tcp_hdr *tcp = pkt_tcp(&tp.packet);
+	struct rte_tcp_hdr *tcp = pkt_tcp(&p);
 	uint8_t *new_opt = (uint8_t *)(tcp + 1);
 	TEST_ASSERT_EQUAL(new_opt[0], TCP_OPT_KIND_MSS, "new opt kind");
 	TEST_ASSERT_EQUAL(new_opt[1], 4, "new opt len");
-	TEST_ASSERT_SUCCESS(verify_ip6_tcp_cksum(&tp.packet), "cksum");
 
-	free_test_pkt(&tp);
+	TEST_ASSERT_SUCCESS(verify_ip6_tcp_cksum(&p), "cksum");
+
+	free_packet(&p);
 	return TEST_SUCCESS;
 }
 
 static int
 test_no_headroom(void) {
-	struct test_pkt tp;
+	struct packet p;
 	TEST_ASSERT_SUCCESS(
-		build_ip6_tcp(&tp, RTE_TCP_SYN_FLAG, NULL, 0, 0, 0, 1), "build"
+		build_ip6_tcp(&p, RTE_TCP_SYN_FLAG, NULL, 0, 0, 0, 1), "build"
 	);
 
 	TEST_ASSERT_EQUAL(
-		packet_fix_mss(&tp.packet, 1200, 1300),
-		packet_fix_mss_no_headroom,
-		"rc"
+		packet_set_mss(&p, 1200, 1300), packet_set_mss_no_headroom, "rc"
 	);
 
-	free_test_pkt(&tp);
+	free_packet(&p);
 	return TEST_SUCCESS;
 }
 
@@ -587,31 +545,29 @@ static int
 test_malformed_mss_wrong_len(void) {
 	/* MSS with len=6 instead of 4. */
 	uint8_t opts[8] = {TCP_OPT_KIND_MSS, 6, 0x05, 0xB4, 0, 0, 0, 0};
-	struct test_pkt tp;
+	struct packet p;
 	TEST_ASSERT_SUCCESS(
 		build_ip6_tcp(
-			&tp, RTE_TCP_SYN_FLAG, opts, 8, 0, DEFAULT_HEADROOM, 1
+			&p, RTE_TCP_SYN_FLAG, opts, 8, 0, DEFAULT_HEADROOM, 1
 		),
 		"build"
 	);
 
 	TEST_ASSERT_EQUAL(
-		packet_fix_mss(&tp.packet, 1200, 1300),
-		packet_fix_mss_malformed,
-		"rc"
+		packet_set_mss(&p, 1200, 1300), packet_set_mss_malformed, "rc"
 	);
 
-	free_test_pkt(&tp);
+	free_packet(&p);
 	return TEST_SUCCESS;
 }
 
 static int
 test_malformed_data_off_short(void) {
 	/* data_off = 4 (16 bytes) < fixed 20-byte TCP header. */
-	struct test_pkt tp;
+	struct packet p;
 	TEST_ASSERT_SUCCESS(
 		build_ip6_tcp(
-			&tp,
+			&p,
 			RTE_TCP_SYN_FLAG,
 			NULL,
 			0,
@@ -623,12 +579,10 @@ test_malformed_data_off_short(void) {
 	);
 
 	TEST_ASSERT_EQUAL(
-		packet_fix_mss(&tp.packet, 1200, 1300),
-		packet_fix_mss_malformed,
-		"rc"
+		packet_set_mss(&p, 1200, 1300), packet_set_mss_malformed, "rc"
 	);
 
-	free_test_pkt(&tp);
+	free_packet(&p);
 	return TEST_SUCCESS;
 }
 
@@ -639,10 +593,10 @@ test_malformed_hdr_full_60(void) {
 	 * hdr_len + 4 > 60. */
 	uint8_t opts[40];
 	memset(opts, TCP_OPT_KIND_NOP, sizeof(opts));
-	struct test_pkt tp;
+	struct packet p;
 	TEST_ASSERT_SUCCESS(
 		build_ip6_tcp(
-			&tp,
+			&p,
 			RTE_TCP_SYN_FLAG,
 			opts,
 			sizeof(opts),
@@ -654,12 +608,10 @@ test_malformed_hdr_full_60(void) {
 	);
 
 	TEST_ASSERT_EQUAL(
-		packet_fix_mss(&tp.packet, 1200, 1300),
-		packet_fix_mss_malformed,
-		"rc"
+		packet_set_mss(&p, 1200, 1300), packet_set_mss_malformed, "rc"
 	);
 
-	free_test_pkt(&tp);
+	free_packet(&p);
 	return TEST_SUCCESS;
 }
 
@@ -667,10 +619,10 @@ static int
 test_clamp_syn_ack(void) {
 	uint8_t opts[4];
 	write_mss_opt(opts, 1460);
-	struct test_pkt tp;
+	struct packet p;
 	TEST_ASSERT_SUCCESS(
 		build_ip6_tcp(
-			&tp,
+			&p,
 			RTE_TCP_SYN_FLAG | RTE_TCP_ACK_FLAG,
 			opts,
 			4,
@@ -682,51 +634,66 @@ test_clamp_syn_ack(void) {
 	);
 
 	TEST_ASSERT_EQUAL(
-		packet_fix_mss(&tp.packet, 1200, 1300), packet_fix_mss_ok, "rc"
+		packet_set_mss(&p, 1200, 1300), packet_set_mss_ok, "rc"
 	);
-	struct rte_tcp_hdr *tcp = pkt_tcp(&tp.packet);
+	struct rte_tcp_hdr *tcp = pkt_tcp(&p);
 	uint16_t *mss_field = (uint16_t *)((uint8_t *)(tcp + 1) + 2);
 	TEST_ASSERT_EQUAL(
 		rte_be_to_cpu_16(*mss_field), 1200, "MSS not clamped on SYN+ACK"
 	);
-	TEST_ASSERT_SUCCESS(verify_ip6_tcp_cksum(&tp.packet), "cksum");
+	TEST_ASSERT_SUCCESS(verify_ip6_tcp_cksum(&p), "cksum");
 
-	free_test_pkt(&tp);
+	free_packet(&p);
 	return TEST_SUCCESS;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-
 int
 main(void) {
-	log_enable_name("debug");
+	log_enable_name("info");
 
-	LOG(INFO, "running mss tests...");
+	LOG(INFO, "=== Starting MSS Test Suite ===");
 
-	TEST_ASSERT_SUCCESS(test_clamp_gt(), "clamp_gt");
-	TEST_ASSERT_SUCCESS(test_clamp_lt(), "clamp_lt");
-	TEST_ASSERT_SUCCESS(test_clamp_eq(), "clamp_eq");
-	TEST_ASSERT_SUCCESS(test_insert_no_mss(), "insert_no_mss");
-	TEST_ASSERT_SUCCESS(test_skip_ipv4(), "skip_ipv4");
-	TEST_ASSERT_SUCCESS(test_skip_non_tcp(), "skip_non_tcp");
-	TEST_ASSERT_SUCCESS(test_skip_non_syn(), "skip_non_syn");
-	TEST_ASSERT_SUCCESS(test_skip_syn_rst(), "skip_syn_rst");
-	TEST_ASSERT_SUCCESS(test_malformed_len_zero(), "malformed_len_zero");
-	TEST_ASSERT_SUCCESS(test_malformed_overrun(), "malformed_overrun");
-	TEST_ASSERT_SUCCESS(test_eol_respected(), "eol_respected");
-	TEST_ASSERT_SUCCESS(test_no_headroom(), "no_headroom");
-	TEST_ASSERT_SUCCESS(
-		test_malformed_mss_wrong_len(), "malformed_mss_wrong_len"
-	);
-	TEST_ASSERT_SUCCESS(
-		test_malformed_data_off_short(), "malformed_data_off_short"
-	);
-	TEST_ASSERT_SUCCESS(
-		test_malformed_hdr_full_60(), "malformed_hdr_full_60"
-	);
-	TEST_ASSERT_SUCCESS(test_clamp_syn_ack(), "clamp_syn_ack");
+	struct {
+		const char *name;
+		int (*fn)(void);
+	} tests[] = {
+		{"clamp_gt", test_clamp_gt},
+		{"clamp_lt", test_clamp_lt},
+		{"clamp_eq", test_clamp_eq},
+		{"insert_no_mss", test_insert_no_mss},
+		{"skip_ipv4", test_skip_ipv4},
+		{"skip_non_tcp", test_skip_non_tcp},
+		{"skip_non_syn", test_skip_non_syn},
+		{"skip_syn_rst", test_skip_syn_rst},
+		{"malformed_len_zero", test_malformed_len_zero},
+		{"malformed_overrun", test_malformed_overrun},
+		{"eol_respected", test_eol_respected},
+		{"no_headroom", test_no_headroom},
+		{"malformed_mss_wrong_len", test_malformed_mss_wrong_len},
+		{"malformed_data_off_short", test_malformed_data_off_short},
+		{"malformed_hdr_full_60", test_malformed_hdr_full_60},
+		{"clamp_syn_ack", test_clamp_syn_ack},
+	};
 
-	LOG(INFO, "all mss tests passed");
+	size_t total = sizeof(tests) / sizeof(tests[0]);
+	size_t failed = 0;
 
-	return 0;
+	for (size_t i = 0; i < total; i++) {
+		LOG(INFO, "[%zu/%zu] running %s...", i + 1, total, tests[i].name
+		);
+		if (tests[i].fn() != TEST_SUCCESS) {
+			LOG(ERROR, "%s FAILED", tests[i].name);
+			failed++;
+		} else {
+			LOG(INFO, "%s passed", tests[i].name);
+		}
+	}
+
+	if (failed == 0) {
+		LOG(INFO, "=== All %zu MSS tests passed! ===", total);
+	} else {
+		LOG(ERROR, "=== %zu/%zu MSS tests failed ===", failed, total);
+	}
+
+	return failed == 0 ? TEST_SUCCESS : TEST_FAILED;
 }

@@ -29,12 +29,3 @@ lib_packet_dp_dep = declare_dependency(
   include_directories: yanet_libdir,
 )
 
-mss_test = executable(
-  'mss_test',
-  'tests/mss_test.c',
-  c_args: yanet_c_args,
-  link_args: yanet_link_args,
-  dependencies: [lib_packet_dp_dep, lib_logging_dep, libdpdk_dep],
-  include_directories: yanet_rootdir,
-)
-test('mss', mss_test, suite: 'lib_packet')
