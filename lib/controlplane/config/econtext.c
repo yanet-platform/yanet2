@@ -253,7 +253,6 @@ chain_ectx_create(
 	SET_OFFSET_OF(&chain_ectx->counter_storage, counter_storage);
 
 	for (uint64_t idx = 0; idx < cp_chain->length; ++idx) {
-
 		struct cp_module *cp_module = cp_config_gen_lookup_module(
 			cp_config_gen,
 			cp_chain->modules[idx].type,
@@ -263,10 +262,13 @@ chain_ectx_create(
 		if (cp_module == NULL) {
 			yanet_error_add(
 				err,
-				"module '%s:%s' not found in chain '%s'",
+				"module '%s:%s' not found in chain '%s' of "
+				"function '%s' in pipeline '%s'",
 				cp_chain->modules[idx].type,
 				cp_chain->modules[idx].name,
-				cp_chain->name
+				cp_chain->name,
+				cp_function->name,
+				cp_pipeline->name
 			);
 			goto error;
 		}
@@ -468,13 +470,6 @@ function_ectx_create(
 			err
 		);
 		if (chain_ectx == NULL) {
-			yanet_error_add(
-				err,
-				"failed to create chain execution context for "
-				"chain '%s' in function '%s'",
-				cp_chain->name,
-				cp_function->name
-			);
 			goto error;
 		}
 		SET_OFFSET_OF(chains + idx, chain_ectx);
@@ -628,13 +623,6 @@ pipeline_ectx_create(
 			err
 		);
 		if (function_ectx == NULL) {
-			yanet_error_add(
-				err,
-				"failed to create function execution context "
-				"for function '%s' in pipeline '%s'",
-				cp_function->name,
-				cp_pipeline->name
-			);
 			goto error;
 		}
 
@@ -769,12 +757,6 @@ device_entry_ectx_create(
 			err
 		);
 		if (pipeline_ectx == NULL) {
-			yanet_error_add(
-				err,
-				"failed to create pipeline execution context "
-				"for pipeline '%s' in device entry",
-				cp_pipeline->name
-			);
 			goto error;
 		}
 
@@ -905,12 +887,6 @@ device_ectx_create(
 		err
 	);
 	if (input == NULL) {
-		yanet_error_add(
-			err,
-			"failed to create input device entry execution context "
-			"for device '%s'",
-			cp_device->name
-		);
 		goto error;
 	}
 	SET_OFFSET_OF(&device_ectx->input_pipelines, input);
@@ -925,12 +901,6 @@ device_ectx_create(
 		err
 	);
 	if (output == NULL) {
-		yanet_error_add(
-			err,
-			"failed to create output device entry execution "
-			"context for device '%s'",
-			cp_device->name
-		);
 		goto error;
 	}
 	SET_OFFSET_OF(&device_ectx->output_pipelines, output);
@@ -1312,9 +1282,6 @@ config_gen_ectx_create(
 			err
 		);
 		if (device_ectx == NULL) {
-			yanet_error_add(
-				err, "failed to create device execution context"
-			);
 			goto error;
 		}
 		SET_OFFSET_OF(

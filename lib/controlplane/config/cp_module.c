@@ -140,20 +140,11 @@ cp_module_init(
 	}
 
 	if (cp_module_build_perf_counters(cp_module, err)) {
-		yanet_error_add(
-			err, "failed to build perf counters for module"
-		);
 		return -1;
 	}
 
 	uint64_t any_idx;
 	if (cp_module_link_device(cp_module, "", &any_idx, err)) {
-		yanet_error_add(
-			err,
-			"in cp_module_init for module '%s:%s'",
-			module_type,
-			module_name
-		);
 		return -1;
 	}
 

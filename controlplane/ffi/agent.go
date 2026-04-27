@@ -278,7 +278,7 @@ func (m *Agent) UpdateDevices(devices []ShmDeviceConfig) error {
 		&cErr,
 	)
 	if rc != 0 {
-		return fmt.Errorf("failed to update devices: %w", cerrors.FromC(unsafe.Pointer(cErr)))
+		return cerrors.FromC(unsafe.Pointer(cErr))
 	}
 
 	return nil

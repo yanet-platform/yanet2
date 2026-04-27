@@ -187,7 +187,6 @@ cp_config_gen_install(
 	struct config_gen_ectx *new_config_gen_ectx =
 		config_gen_ectx_create(new_config_gen, old_config_gen, err);
 	if (new_config_gen_ectx == NULL) {
-		yanet_error_add(err, "failed to create config_gen_ectx");
 		return -1;
 	}
 
@@ -216,7 +215,6 @@ cp_config_delete_module(
 	struct cp_config_gen *new_config_gen =
 		cp_config_gen_create_from(cp_config, old_config_gen, err);
 	if (new_config_gen == NULL) {
-		yanet_error_add(err, "failed to create new config generation");
 		goto error_unlock;
 	}
 
@@ -233,7 +231,6 @@ cp_config_delete_module(
 	}
 
 	if (cp_config_gen_install(dp_config, cp_config, new_config_gen, err)) {
-		yanet_error_add(err, "failed to install config generation");
 		goto error_free;
 	}
 	cp_config_unlock(cp_config);
@@ -262,7 +259,6 @@ cp_config_update_modules(
 	struct cp_config_gen *new_config_gen =
 		cp_config_gen_create_from(cp_config, old_config_gen, err);
 	if (new_config_gen == NULL) {
-		yanet_error_add(err, "failed to create new config generation");
 		goto error_unlock;
 	}
 
@@ -287,7 +283,6 @@ cp_config_update_modules(
 	}
 
 	if (cp_config_gen_install(dp_config, cp_config, new_config_gen, err)) {
-		yanet_error_add(err, "failed to install config generation");
 		goto error_free;
 	}
 	cp_config_unlock(cp_config);
@@ -319,7 +314,6 @@ cp_config_update_functions(
 	struct cp_config_gen *new_config_gen =
 		cp_config_gen_create_from(cp_config, old_config_gen, err);
 	if (new_config_gen == NULL) {
-		yanet_error_add(err, "failed to create new config generation");
 		goto error_unlock;
 	}
 
@@ -384,7 +378,6 @@ cp_config_delete_function(
 	struct cp_config_gen *new_config_gen =
 		cp_config_gen_create_from(cp_config, old_config_gen, err);
 	if (new_config_gen == NULL) {
-		yanet_error_add(err, "failed to create new config generation");
 		goto error_unlock;
 	}
 
@@ -396,7 +389,6 @@ cp_config_delete_function(
 	}
 
 	if (cp_config_gen_install(dp_config, cp_config, new_config_gen, err)) {
-		yanet_error_add(err, "failed to install config generation");
 		goto error_free;
 	}
 	cp_config_unlock(cp_config);
@@ -429,7 +421,6 @@ cp_config_update_pipelines(
 		cp_config_gen_create_from(cp_config, old_config_gen, err);
 
 	if (new_config_gen == NULL) {
-		yanet_error_add(err, "failed to create new config generation");
 		goto error_unlock;
 	}
 
@@ -465,7 +456,6 @@ cp_config_update_pipelines(
 	}
 
 	if (cp_config_gen_install(dp_config, cp_config, new_config_gen, err)) {
-		yanet_error_add(err, "failed to install config generation");
 		goto error_free;
 	}
 	cp_config_unlock(cp_config);
@@ -500,7 +490,6 @@ cp_config_delete_pipeline(
 	struct cp_config_gen *new_config_gen =
 		cp_config_gen_create_from(cp_config, old_config_gen, err);
 	if (new_config_gen == NULL) {
-		yanet_error_add(err, "failed to create new config generation");
 		goto error_unlock;
 	}
 
@@ -512,7 +501,6 @@ cp_config_delete_pipeline(
 	}
 
 	if (cp_config_gen_install(dp_config, cp_config, new_config_gen, err)) {
-		yanet_error_add(err, "failed to install config generation");
 		goto error_free;
 	}
 	cp_config_unlock(cp_config);
@@ -587,7 +575,6 @@ cp_config_update_devices(
 	struct cp_config_gen *new_config_gen =
 		cp_config_gen_create_from(cp_config, old_config_gen, err);
 	if (new_config_gen == NULL) {
-		yanet_error_add(err, "failed to create new config generation");
 		goto error_unlock;
 	}
 
@@ -608,7 +595,6 @@ cp_config_update_devices(
 	}
 
 	if (cp_config_gen_install(dp_config, cp_config, new_config_gen, err)) {
-		yanet_error_add(err, "failed to install config generation");
 		goto error_free;
 	}
 	cp_config_unlock(cp_config);
