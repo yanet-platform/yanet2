@@ -22,9 +22,6 @@ struct balancer_real_config {
 	struct net_addr dst;
 	enum ip_family ip_family;
 
-	uint32_t weight;
-	bool enabled;
-
 	struct net src;
 
 	enum balancer_tunnel_kind tunnel;
@@ -43,7 +40,6 @@ struct balancer_allowed_sources {
 };
 
 enum balancer_vs_sched {
-	balancer_vs_sched_wlc,
 	/* Stateless one-packet scheduler: weighted round-robin without a
 	   session table. */
 	balancer_vs_sched_op,
@@ -116,6 +112,43 @@ balancer_free_session_table(
 // session table iter.
 
 /*
+ * Bounded chain of session tables consulted by workers on each packet.
+ *
+ * At most two tables are attached at any time: a front table, into
+ * which workers insert new sessions, and an optional back table used
+ * only as a lookup fallback. When a session is found in the back
+ * table its entry is copied into the front table so subsequent
+ * lookups hit the front directly.
+ *
+ * The two-slot arrangement lets the controlplane swap the active
+ * session table (for example, to resize it) without dropping
+ * in-flight sessions: push the replacement to the front, leaving the
+ * old table as a back fallback, then pop the back once it has drained.
+ *
+ * At least one table must be attached for workers to handle packets.
+ */
+struct balancer_session_table_chain;
+
+/*
+ * Creates a session table chain seeded with the given front table.
+ * The table is not owned by the chain and must outlive it.
+ * Returns NULL on allocation failure.
+ */
+struct balancer_session_table_chain *
+balancer_create_session_table_chain(
+	struct agent *agent, struct balancer_session_table *front_table
+);
+
+/*
+ * Frees the session table chain. The session tables it referenced
+ * are not freed — the caller owns them.
+ */
+void
+balancer_free_session_table_chain(
+	struct agent *agent, struct balancer_session_table_chain *chain
+);
+
+/*
  * Creates a balancer handle from its full configuration.
  *
  * The session table and each VS handle must outlive the returned
@@ -125,7 +158,7 @@ struct balancer_handle *
 balancer_create(
 	struct agent *agent,
 	const char *name,
-	struct balancer_session_table *table,
+	struct balancer_session_table_chain *session_table_chain,
 	struct balancer_session_timeouts *timeouts,
 	struct balancer_vs_handle **vs,
 	size_t vs_count
@@ -141,8 +174,9 @@ balancer_create(
  * Returns -1 if two session tables are already attached.
  */
 int
-balancer_session_table_push_front(
-	struct balancer_handle *balancer, struct balancer_session_table *table
+balancer_session_table_chain_push_front(
+	struct balancer_session_table_chain *session_table_chain,
+	struct balancer_session_table *front_table
 );
 
 /*
@@ -153,7 +187,9 @@ balancer_session_table_push_front(
  * Returns -1 if only one session table is attached.
  */
 int
-balancer_session_table_pop_back(struct balancer_handle *balancer);
+balancer_session_table_chain_pop_back(
+	struct balancer_session_table_chain *session_table_chain
+);
 
 /*
  * Installs a balancer handle in the dataplane.
