@@ -282,14 +282,17 @@ agent_resize(struct agent *agent, size_t new_size) {
 				for (size_t i = 0; i < alloc; ++i) {
 					memory_bfree(
 						&cp_config->memory_context,
-						ADDR_OF(&arenas[i].data),
+						ADDR_OF(&arenas[agent->arena_count +
+								i]
+								 .data),
 						MEMORY_BLOCK_ALLOCATOR_MAX_SIZE
 					);
 				}
 				memory_bfree(
 					&cp_config->memory_context,
 					arenas,
-					need_arena_count * sizeof(void *)
+					need_arena_count *
+						sizeof(struct agent_arena)
 				);
 				ret = -1;
 				goto unlock;
@@ -320,12 +323,12 @@ agent_resize(struct agent *agent, size_t new_size) {
 			arenas[i].size = prev_arenas[i].size;
 		}
 		SET_OFFSET_OF(&agent->arenas, arenas);
-		agent->arena_count = need_arena_count;
 		memory_bfree(
 			&cp_config->memory_context,
 			prev_arenas,
 			agent->arena_count * sizeof(struct agent_arena)
 		);
+		agent->arena_count = need_arena_count;
 	}
 
 unlock:

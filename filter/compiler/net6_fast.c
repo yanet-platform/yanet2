@@ -8,8 +8,6 @@
 #include "compiler/segments.h"
 #include "declare.h"
 #include "rule.h"
-#include <assert.h>
-#include <stdlib.h>
 
 static int
 validate_net6_half(uint8_t *bytes) {
@@ -183,6 +181,7 @@ init_classifier(
 		value_registry_free(&low_registry);
 		free_classifier_part(&classifier->high, mctx);
 		free_classifier_part(&classifier->low, mctx);
+		return -1;
 	}
 
 	value_registry_free(&high_registry);

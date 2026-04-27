@@ -56,3 +56,8 @@ struct net {
 		struct net6 v6;
 	};
 };
+
+enum ip_family {
+	ip_family_ip4,
+	ip_family_ip6,
+};

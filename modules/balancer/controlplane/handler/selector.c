@@ -96,11 +96,15 @@ selector_init(
 	enum vs_scheduler scheduler
 ) {
 	memory_context_init_from(&selector->mctx, mctx, "real_selector");
-	rcu_init(&selector->rcu);
+	if (rcu_init(&selector->rcu, &selector->mctx, MAX_WORKERS_NUM) != 0) {
+		PUSH_ERROR("failed to init rcu");
+		return -1;
+	}
 	selector->use_rr = scheduler == round_robin ? 1 : 0;
 	selector->ring_id = 0;
 	if (ring_init(&selector->rings[0], &selector->mctx, 0, NULL) != 0) {
 		PUSH_ERROR("failed to init ring");
+		rcu_free(&selector->rcu, &selector->mctx);
 		return -1;
 	}
 	uint64_t rng = 0xdeadbeef;
@@ -114,4 +118,5 @@ void
 selector_free(struct real_selector *selector) {
 	size_t cur_ring_id = selector->ring_id;
 	ring_free(&selector->rings[cur_ring_id], &selector->mctx);
+	rcu_free(&selector->rcu, &selector->mctx);
 }

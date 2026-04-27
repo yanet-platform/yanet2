@@ -13,6 +13,7 @@ import "C"
 
 import (
 	"fmt"
+	"iter"
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
@@ -764,7 +765,7 @@ type ModuleReference struct {
 	ModuleName string
 }
 
-func (m *DPConfig) AllModulePositions(moduleType string) []ModuleReference {
+func (m *DPConfig) AllModulePositions(moduleType string) iter.Seq[ModuleReference] {
 	deviceList := m.Devices()
 
 	pipelineList := m.Pipelines()
@@ -779,19 +780,29 @@ func (m *DPConfig) AllModulePositions(moduleType string) []ModuleReference {
 		functions[function.Name] = function.Chains
 	}
 
-	count := 0
-	for _, device := range deviceList {
-		pipelineVariants := [][]DevicePipelineInfo{
-			device.InputPipelines,
-			device.OutputPipelines,
-		}
-		for _, pipelines := range pipelineVariants {
-			for _, pipeline := range pipelines {
-				for _, function := range pipelineFunctions[pipeline.Name] {
-					for _, chain := range functions[function] {
-						for _, module := range chain.Modules {
-							if module.Type == moduleType {
-								count += 1
+	return func(yield func(ModuleReference) bool) {
+		for _, device := range deviceList {
+			pipelineVariants := [][]DevicePipelineInfo{
+				device.InputPipelines,
+				device.OutputPipelines,
+			}
+			for _, pipelines := range pipelineVariants {
+				for _, pipeline := range pipelines {
+					for _, function := range pipelineFunctions[pipeline.Name] {
+						for _, chain := range functions[function] {
+							for _, module := range chain.Modules {
+								if module.Type == moduleType {
+									if !yield(ModuleReference{
+										Device:     device.Name,
+										Pipeline:   pipeline.Name,
+										Function:   function,
+										Chain:      chain.Name,
+										ModuleType: module.Type,
+										ModuleName: module.Name,
+									}) {
+										return
+									}
+								}
 							}
 						}
 					}
@@ -799,34 +810,4 @@ func (m *DPConfig) AllModulePositions(moduleType string) []ModuleReference {
 			}
 		}
 	}
-
-	result := make([]ModuleReference, 0, count)
-	for _, device := range deviceList {
-		pipelineVariants := [][]DevicePipelineInfo{
-			device.InputPipelines,
-			device.OutputPipelines,
-		}
-		for _, pipelines := range pipelineVariants {
-			for _, pipeline := range pipelines {
-				for _, function := range pipelineFunctions[pipeline.Name] {
-					for _, chain := range functions[function] {
-						for _, module := range chain.Modules {
-							if module.Type == moduleType {
-								result = append(result, ModuleReference{
-									Device:     device.Name,
-									Pipeline:   pipeline.Name,
-									Function:   function,
-									Chain:      chain.Name,
-									ModuleType: module.Type,
-									ModuleName: module.Name,
-								})
-							}
-						}
-					}
-				}
-			}
-		}
-	}
-
-	return result
 }

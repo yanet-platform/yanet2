@@ -2212,6 +2212,144 @@ test_btree_u64_upper_bounds_large_batch() {
 	return TEST_SUCCESS;
 }
 
+static int
+test_btree_u16_sentinel_high_bit() {
+	LOG(INFO, "Test: btree_u16 sentinel with high-bit last element");
+
+	struct block_allocator ba;
+	struct memory_context mctx;
+	void *raw_mem = NULL;
+	const size_t arena_size = 1 << 26;
+
+	TEST_ASSERT(
+		setup_allocator(&ba, &mctx, &raw_mem, arena_size) ==
+			TEST_SUCCESS,
+		"setup_allocator failed"
+	);
+
+	const size_t n = 65;
+	uint16_t data[65];
+	for (size_t i = 0; i < 64; ++i) {
+		data[i] = (uint16_t)(i + 1);
+	}
+	const uint16_t high = 0xA000u;
+	const uint16_t under_high = 0x5000u;
+	data[64] = high;
+
+	struct btree_u16 tree;
+	int ret = btree_u16_init(&tree, data, n, &mctx);
+	TEST_ASSERT_EQUAL(ret, 0, "btree_u16 initialization failed");
+
+	size_t idx = btree_u16_lower_bound(&tree, under_high);
+	TEST_ASSERT_EQUAL(idx, n - 1, "must return n-1");
+
+	idx = btree_u16_lower_bound(&tree, high);
+	TEST_ASSERT_EQUAL(idx, n - 1, "must return n-1");
+
+	idx = btree_u16_upper_bound(&tree, under_high);
+	TEST_ASSERT_EQUAL(idx, n - 1, "must return n-1");
+
+	idx = btree_u16_upper_bound(&tree, high);
+	TEST_ASSERT_EQUAL(idx, n, "must return n");
+
+	btree_u16_free(&tree);
+	free(raw_mem);
+	LOG(INFO, "✓ u16 high-bit sentinel test passed");
+	return TEST_SUCCESS;
+}
+
+static int
+test_btree_u32_sentinel_high_bit() {
+	LOG(INFO, "Test: btree_u32 sentinel with high-bit last element");
+
+	struct block_allocator ba;
+	struct memory_context mctx;
+	void *raw_mem = NULL;
+	const size_t arena_size = 1 << 26;
+
+	TEST_ASSERT(
+		setup_allocator(&ba, &mctx, &raw_mem, arena_size) ==
+			TEST_SUCCESS,
+		"setup_allocator failed"
+	);
+
+	const size_t n = 33;
+	uint32_t data[33];
+	for (size_t i = 0; i < 32; ++i) {
+		data[i] = (uint32_t)(i + 1);
+	}
+	const uint32_t high = 0xA0000000u;
+	const uint32_t under_high = 0x50000000u;
+	data[32] = high;
+
+	struct btree_u32 tree;
+	int ret = btree_u32_init(&tree, data, n, &mctx);
+	TEST_ASSERT_EQUAL(ret, 0, "btree_u32 initialization failed");
+
+	size_t idx = btree_u32_lower_bound(&tree, under_high);
+	TEST_ASSERT_EQUAL(idx, n - 1, "must return n-1");
+
+	idx = btree_u32_lower_bound(&tree, high);
+	TEST_ASSERT_EQUAL(idx, n - 1, "must return n-1");
+
+	idx = btree_u32_upper_bound(&tree, under_high);
+	TEST_ASSERT_EQUAL(idx, n - 1, "must return n-1");
+
+	idx = btree_u32_upper_bound(&tree, high);
+	TEST_ASSERT_EQUAL(idx, n, "must return n");
+
+	btree_u32_free(&tree);
+	free(raw_mem);
+	LOG(INFO, "✓ u32 high-bit sentinel test passed");
+	return TEST_SUCCESS;
+}
+
+static int
+test_btree_u64_sentinel_high_bit() {
+	LOG(INFO, "Test: btree_u64 sentinel with high-bit last element");
+
+	struct block_allocator ba;
+	struct memory_context mctx;
+	void *raw_mem = NULL;
+	const size_t arena_size = 1 << 26;
+
+	TEST_ASSERT(
+		setup_allocator(&ba, &mctx, &raw_mem, arena_size) ==
+			TEST_SUCCESS,
+		"setup_allocator failed"
+	);
+
+	const size_t n = 17;
+	uint64_t data[17];
+	for (size_t i = 0; i < 16; ++i) {
+		data[i] = (uint64_t)(i + 1);
+	}
+	const uint64_t high = 0xA000000000000000ULL;
+	const uint64_t under_high = 0x5000000000000000ULL;
+	data[16] = high;
+
+	struct btree_u64 tree;
+	int ret = btree_u64_init(&tree, data, n, &mctx);
+	TEST_ASSERT_EQUAL(ret, 0, "btree_u64 initialization failed");
+
+	size_t idx = btree_u64_lower_bound(&tree, under_high);
+	TEST_ASSERT_EQUAL(idx, n - 1, "must return n-1");
+
+	idx = btree_u64_lower_bound(&tree, high);
+	TEST_ASSERT_EQUAL(idx, n - 1, "must return n-1");
+
+	idx = btree_u64_upper_bound(&tree, under_high);
+	TEST_ASSERT_EQUAL(idx, n - 1, "must return n-1");
+
+	idx = btree_u64_upper_bound(&tree, high);
+	TEST_ASSERT_EQUAL(idx, n, "must return n");
+
+	btree_u64_free(&tree);
+	free(raw_mem);
+	LOG(INFO, "✓ u64 high-bit sentinel test passed");
+	return TEST_SUCCESS;
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // Main test runner
 ////////////////////////////////////////////////////////////////////////////////
@@ -2249,6 +2387,8 @@ main() {
 		failed++;
 	if (test_btree_u16_upper_bounds_large_batch() != TEST_SUCCESS)
 		failed++;
+	if (test_btree_u16_sentinel_high_bit() != TEST_SUCCESS)
+		failed++;
 
 	// Run uint32_t tests
 	if (test_btree_u32_init_free() != TEST_SUCCESS)
@@ -2274,6 +2414,8 @@ main() {
 	if (test_btree_u32_upper_bounds_batch() != TEST_SUCCESS)
 		failed++;
 	if (test_btree_u32_upper_bounds_large_batch() != TEST_SUCCESS)
+		failed++;
+	if (test_btree_u32_sentinel_high_bit() != TEST_SUCCESS)
 		failed++;
 
 	// Run uint64_t tests
@@ -2302,6 +2444,8 @@ main() {
 	if (test_btree_u64_upper_bounds_batch() != TEST_SUCCESS)
 		failed++;
 	if (test_btree_u64_upper_bounds_large_batch() != TEST_SUCCESS)
+		failed++;
+	if (test_btree_u64_sentinel_high_bit() != TEST_SUCCESS)
 		failed++;
 
 	// Run various size tests

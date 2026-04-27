@@ -3,6 +3,7 @@
 #include "common/rcu.h"
 #include "common/ttlmap/detail/ttlmap.h"
 #include "common/ttlmap/ttlmap.h"
+#include "state/worker.h"
 
 #include "lib/controlplane/diag/diag.h"
 
@@ -46,9 +47,10 @@ session_table_init(
 
 	ttlmap_init_empty(&table->maps[1]);
 
-	// Init generation count
-	// (guarded with rcu)
-	rcu_init(&table->rcu);
+	if (rcu_init(&table->rcu, &table->mctx, MAX_WORKERS_NUM) != 0) {
+		TTLMAP_FREE(&table->maps[0]);
+		return -1;
+	}
 	table->current_gen = 0;
 
 	return 0;
@@ -59,6 +61,7 @@ session_table_free(struct session_table *table) {
 	for (size_t i = 0; i < 2; ++i) {
 		TTLMAP_FREE(&table->maps[i]);
 	}
+	rcu_free(&table->rcu, &table->mctx);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

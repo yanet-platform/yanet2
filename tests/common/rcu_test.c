@@ -13,6 +13,9 @@
  * - Aggressive race detection tests
  */
 
+#include "common/memory.h"
+#include "common/memory_address.h"
+#include "common/memory_block.h"
 #include "common/rcu.h"
 #include "lib/logging/log.h"
 #include "tests/common/helpers.h"
@@ -21,12 +24,21 @@
 #include <pthread.h>
 #include <stdatomic.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <sys/time.h>
 #include <unistd.h>
 
 // Helper macros to extract active and epoch from packed state
 #define GET_ACTIVE(state) ((state) & 1u)
 #define GET_EPOCH(state) (((state) >> 1) & 1u)
+
+#define TEST_WORKERS 8
+
+// Shared test memory context, initialised once in main() and used as the
+// rcu_init allocator for every test. rcu_fini is intentionally omitted in
+// individual tests: the process exits after main() returns.
+static struct block_allocator g_balloc;
+static struct memory_context g_mctx;
 
 ////////////////////////////////////////////////////////////////////////////////
 // Test 1: Basic Initialization
@@ -40,7 +52,7 @@ test_basic_init(void) {
 	LOG(INFO, "Running test_basic_init...");
 
 	rcu_t rcu;
-	rcu_init(&rcu);
+	rcu_init(&rcu, &g_mctx, TEST_WORKERS);
 
 	// Check global epoch is 0
 	unsigned global_epoch =
@@ -49,10 +61,12 @@ test_basic_init(void) {
 		global_epoch, 0, "global_epoch should be 0 after init"
 	);
 
+	rcu_worker_t *workers = ADDR_OF(&rcu.workers);
+
 	// Check all workers are inactive with epoch 0
-	for (size_t i = 0; i < RCU_WORKERS; i++) {
+	for (size_t i = 0; i < TEST_WORKERS; i++) {
 		unsigned state = atomic_load_explicit(
-			&rcu.workers[i].state, memory_order_relaxed
+			&workers[i].state, memory_order_relaxed
 		);
 		unsigned epoch = GET_EPOCH(state);
 		unsigned active = GET_ACTIVE(state);
@@ -80,17 +94,18 @@ test_single_reader(void) {
 	LOG(INFO, "Running test_single_reader...");
 
 	rcu_t rcu;
-	rcu_init(&rcu);
+	rcu_init(&rcu, &g_mctx, TEST_WORKERS);
 	atomic_ulong value = 42;
+
+	rcu_worker_t *workers = ADDR_OF(&rcu.workers);
 
 	// Begin read-side critical section
 	uint64_t read_value = RCU_READ_BEGIN(&rcu, 0, &value);
 	TEST_ASSERT_EQUAL(read_value, 42, "should read correct value");
 
 	// Check worker 0 is now active
-	unsigned state = atomic_load_explicit(
-		&rcu.workers[0].state, memory_order_relaxed
-	);
+	unsigned state =
+		atomic_load_explicit(&workers[0].state, memory_order_relaxed);
 	unsigned active = GET_ACTIVE(state);
 	TEST_ASSERT_EQUAL(active, 1, "worker should be active during read");
 
@@ -98,9 +113,7 @@ test_single_reader(void) {
 	RCU_READ_END(&rcu, 0);
 
 	// Check worker 0 is now inactive
-	state = atomic_load_explicit(
-		&rcu.workers[0].state, memory_order_relaxed
-	);
+	state = atomic_load_explicit(&workers[0].state, memory_order_relaxed);
 	active = GET_ACTIVE(state);
 	TEST_ASSERT_EQUAL(
 		active, 0, "worker should be inactive after read end"
@@ -122,7 +135,7 @@ test_single_writer(void) {
 	LOG(INFO, "Running test_single_writer...");
 
 	rcu_t rcu;
-	rcu_init(&rcu);
+	rcu_init(&rcu, &g_mctx, TEST_WORKERS);
 	atomic_ulong value = 10;
 
 	// Update value
@@ -155,7 +168,7 @@ test_multiple_updates(void) {
 	LOG(INFO, "Running test_multiple_updates...");
 
 	rcu_t rcu;
-	rcu_init(&rcu);
+	rcu_init(&rcu, &g_mctx, TEST_WORKERS);
 	atomic_ulong value = 0;
 
 	// Perform multiple updates
@@ -182,7 +195,7 @@ test_reader_writer_interaction(void) {
 	LOG(INFO, "Running test_reader_writer_interaction...");
 
 	rcu_t rcu;
-	rcu_init(&rcu);
+	rcu_init(&rcu, &g_mctx, TEST_WORKERS);
 	atomic_ulong value = 100;
 
 	// Start read-side critical section
@@ -218,12 +231,14 @@ test_multiple_workers(void) {
 	LOG(INFO, "Running test_multiple_workers...");
 
 	rcu_t rcu;
-	rcu_init(&rcu);
+	rcu_init(&rcu, &g_mctx, TEST_WORKERS);
 	atomic_ulong value = 777;
 
+	rcu_worker_t *workers = ADDR_OF(&rcu.workers);
+
 	// Start read-side critical sections for all workers
-	uint64_t values[RCU_WORKERS];
-	for (size_t i = 0; i < RCU_WORKERS; i++) {
+	uint64_t values[TEST_WORKERS];
+	for (size_t i = 0; i < TEST_WORKERS; i++) {
 		values[i] = RCU_READ_BEGIN(&rcu, i, &value);
 		TEST_ASSERT_EQUAL(
 			values[i], 777, "all workers should read same value"
@@ -231,19 +246,19 @@ test_multiple_workers(void) {
 
 		// Verify worker is active
 		unsigned state = atomic_load_explicit(
-			&rcu.workers[i].state, memory_order_relaxed
+			&workers[i].state, memory_order_relaxed
 		);
 		unsigned active = GET_ACTIVE(state);
 		TEST_ASSERT_EQUAL(active, 1, "worker should be active");
 	}
 
 	// End all read-side critical sections
-	for (size_t i = 0; i < RCU_WORKERS; i++) {
+	for (size_t i = 0; i < TEST_WORKERS; i++) {
 		RCU_READ_END(&rcu, i);
 
 		// Verify worker is inactive
 		unsigned state = atomic_load_explicit(
-			&rcu.workers[i].state, memory_order_relaxed
+			&workers[i].state, memory_order_relaxed
 		);
 		unsigned active = GET_ACTIVE(state);
 		TEST_ASSERT_EQUAL(active, 0, "worker should be inactive");
@@ -265,16 +280,17 @@ test_epoch_synchronization(void) {
 	LOG(INFO, "Running test_epoch_synchronization...");
 
 	rcu_t rcu;
-	rcu_init(&rcu);
+	rcu_init(&rcu, &g_mctx, TEST_WORKERS);
 	atomic_ulong value = 1;
+
+	rcu_worker_t *workers = ADDR_OF(&rcu.workers);
 
 	// Start read with worker 0
 	uint64_t read1 = RCU_READ_BEGIN(&rcu, 0, &value);
 	TEST_ASSERT_EQUAL(read1, 1, "initial read should be 1");
 
-	unsigned state0 = atomic_load_explicit(
-		&rcu.workers[0].state, memory_order_relaxed
-	);
+	unsigned state0 =
+		atomic_load_explicit(&workers[0].state, memory_order_relaxed);
 	unsigned epoch0 = GET_EPOCH(state0);
 	TEST_ASSERT_EQUAL(epoch0, 0, "worker should be in epoch 0");
 
@@ -287,9 +303,8 @@ test_epoch_synchronization(void) {
 	uint64_t read2 = RCU_READ_BEGIN(&rcu, 0, &value);
 	TEST_ASSERT_EQUAL(read2, 2, "read after update should be 2");
 
-	unsigned state1 = atomic_load_explicit(
-		&rcu.workers[0].state, memory_order_relaxed
-	);
+	unsigned state1 =
+		atomic_load_explicit(&workers[0].state, memory_order_relaxed);
 	unsigned epoch1 = GET_EPOCH(state1);
 	TEST_ASSERT_EQUAL(
 		epoch1, 0, "worker should be in epoch 0 after full cycle"
@@ -342,15 +357,15 @@ test_concurrent_readers(void) {
 	LOG(INFO, "Running test_concurrent_readers...");
 
 	rcu_t rcu;
-	rcu_init(&rcu);
+	rcu_init(&rcu, &g_mctx, TEST_WORKERS);
 	atomic_ulong value = 42;
 	atomic_uint error_count = 0;
 
-	pthread_t threads[RCU_WORKERS];
-	struct reader_thread_args args[RCU_WORKERS];
+	pthread_t threads[TEST_WORKERS];
+	struct reader_thread_args args[TEST_WORKERS];
 
 	// Create reader threads
-	for (size_t i = 0; i < RCU_WORKERS; i++) {
+	for (size_t i = 0; i < TEST_WORKERS; i++) {
 		args[i].rcu = &rcu;
 		args[i].value = &value;
 		args[i].worker_id = i;
@@ -364,7 +379,7 @@ test_concurrent_readers(void) {
 	}
 
 	// Wait for all threads
-	for (size_t i = 0; i < RCU_WORKERS; i++) {
+	for (size_t i = 0; i < TEST_WORKERS; i++) {
 		int res = pthread_join(threads[i], NULL);
 		TEST_ASSERT_EQUAL(res, 0, "pthread_join should succeed");
 	}
@@ -419,16 +434,16 @@ test_concurrent_readers_with_writer(void) {
 	LOG(INFO, "Running test_concurrent_readers_with_writer...");
 
 	rcu_t rcu;
-	rcu_init(&rcu);
+	rcu_init(&rcu, &g_mctx, TEST_WORKERS);
 	atomic_ulong value = 0;
 	atomic_bool stop = false;
 	atomic_uint read_count = 0;
 
-	pthread_t threads[RCU_WORKERS];
-	struct reader_writer_args args[RCU_WORKERS];
+	pthread_t threads[TEST_WORKERS];
+	struct reader_writer_args args[TEST_WORKERS];
 
 	// Create reader threads
-	for (size_t i = 0; i < RCU_WORKERS; i++) {
+	for (size_t i = 0; i < TEST_WORKERS; i++) {
 		args[i].rcu = &rcu;
 		args[i].value = &value;
 		args[i].stop = &stop;
@@ -452,7 +467,7 @@ test_concurrent_readers_with_writer(void) {
 	atomic_store(&stop, true);
 
 	// Wait for all threads
-	for (size_t i = 0; i < RCU_WORKERS; i++) {
+	for (size_t i = 0; i < TEST_WORKERS; i++) {
 		int res = pthread_join(threads[i], NULL);
 		TEST_ASSERT_EQUAL(res, 0, "pthread_join should succeed");
 	}
@@ -481,7 +496,7 @@ test_rapid_updates(void) {
 	LOG(INFO, "Running test_rapid_updates...");
 
 	rcu_t rcu;
-	rcu_init(&rcu);
+	rcu_init(&rcu, &g_mctx, TEST_WORKERS);
 	atomic_ulong value = 0;
 
 	// Perform many rapid updates
@@ -499,10 +514,12 @@ test_rapid_updates(void) {
 		"final value should match iteration count"
 	);
 
+	rcu_worker_t *workers = ADDR_OF(&rcu.workers);
+
 	// Verify all workers are inactive
-	for (size_t i = 0; i < RCU_WORKERS; i++) {
+	for (size_t i = 0; i < TEST_WORKERS; i++) {
 		unsigned state = atomic_load_explicit(
-			&rcu.workers[i].state, memory_order_relaxed
+			&workers[i].state, memory_order_relaxed
 		);
 		unsigned active = GET_ACTIVE(state);
 		TEST_ASSERT_EQUAL(active, 0, "all workers should be inactive");
@@ -521,25 +538,27 @@ test_all_workers_active(void) {
 	LOG(INFO, "Running test_all_workers_active...");
 
 	rcu_t rcu;
-	rcu_init(&rcu);
+	rcu_init(&rcu, &g_mctx, TEST_WORKERS);
 	atomic_ulong value = 999;
 
+	rcu_worker_t *workers = ADDR_OF(&rcu.workers);
+
 	// Activate all workers
-	for (size_t i = 0; i < RCU_WORKERS; i++) {
+	for (size_t i = 0; i < TEST_WORKERS; i++) {
 		RCU_READ_BEGIN(&rcu, i, &value);
 	}
 
 	// Verify all are active
-	for (size_t i = 0; i < RCU_WORKERS; i++) {
+	for (size_t i = 0; i < TEST_WORKERS; i++) {
 		unsigned state = atomic_load_explicit(
-			&rcu.workers[i].state, memory_order_relaxed
+			&workers[i].state, memory_order_relaxed
 		);
 		unsigned active = GET_ACTIVE(state);
 		TEST_ASSERT_EQUAL(active, 1, "worker should be active");
 	}
 
 	// Deactivate all workers
-	for (size_t i = 0; i < RCU_WORKERS; i++) {
+	for (size_t i = 0; i < TEST_WORKERS; i++) {
 		RCU_READ_END(&rcu, i);
 	}
 
@@ -563,7 +582,7 @@ test_memory_ordering(void) {
 	LOG(INFO, "Running test_memory_ordering...");
 
 	rcu_t rcu;
-	rcu_init(&rcu);
+	rcu_init(&rcu, &g_mctx, TEST_WORKERS);
 	atomic_ulong value = 0;
 	atomic_ulong auxiliary = 0;
 
@@ -595,7 +614,7 @@ test_rcu_load(void) {
 	LOG(INFO, "Running test_rcu_load...");
 
 	rcu_t rcu;
-	rcu_init(&rcu);
+	rcu_init(&rcu, &g_mctx, TEST_WORKERS);
 	atomic_ulong value = 555;
 
 	// Test rcu_load
@@ -668,17 +687,17 @@ test_aggressive_race_detection(void) {
 	LOG(INFO, "Running test_aggressive_race_detection...");
 
 	rcu_t rcu;
-	rcu_init(&rcu);
+	rcu_init(&rcu, &g_mctx, TEST_WORKERS);
 	atomic_ulong value = 0;
 	atomic_bool stop = false;
 	atomic_uint stale_reads = 0;
 	atomic_uint read_count = 0;
 
-	pthread_t threads[RCU_WORKERS];
-	struct hammer_reader_args args[RCU_WORKERS];
+	pthread_t threads[TEST_WORKERS];
+	struct hammer_reader_args args[TEST_WORKERS];
 
 	// Create aggressive reader threads
-	for (size_t i = 0; i < RCU_WORKERS; i++) {
+	for (size_t i = 0; i < TEST_WORKERS; i++) {
 		args[i].rcu = &rcu;
 		args[i].value = &value;
 		args[i].worker_id = i;
@@ -703,7 +722,7 @@ test_aggressive_race_detection(void) {
 	atomic_store_explicit(&stop, true, memory_order_release);
 
 	// Wait for all threads
-	for (size_t i = 0; i < RCU_WORKERS; i++) {
+	for (size_t i = 0; i < TEST_WORKERS; i++) {
 		int res = pthread_join(threads[i], NULL);
 		TEST_ASSERT_EQUAL(res, 0, "pthread_join should succeed");
 	}
@@ -715,7 +734,7 @@ test_aggressive_race_detection(void) {
 	LOG(INFO,
 	    "Completed %u reads across %d workers, stale reads: %u",
 	    reads,
-	    RCU_WORKERS,
+	    TEST_WORKERS,
 	    stales);
 
 	TEST_ASSERT_EQUAL(
@@ -738,43 +757,86 @@ main(void) {
 
 	LOG(INFO, "=== Starting RCU Test Suite ===");
 
-	int result = TEST_SUCCESS;
-
-	// Run all tests
-	if (test_basic_init() != TEST_SUCCESS)
-		result = TEST_FAILED;
-	if (test_single_reader() != TEST_SUCCESS)
-		result = TEST_FAILED;
-	if (test_single_writer() != TEST_SUCCESS)
-		result = TEST_FAILED;
-	if (test_multiple_updates() != TEST_SUCCESS)
-		result = TEST_FAILED;
-	if (test_reader_writer_interaction() != TEST_SUCCESS)
-		result = TEST_FAILED;
-	if (test_multiple_workers() != TEST_SUCCESS)
-		result = TEST_FAILED;
-	if (test_epoch_synchronization() != TEST_SUCCESS)
-		result = TEST_FAILED;
-	if (test_concurrent_readers() != TEST_SUCCESS)
-		result = TEST_FAILED;
-	if (test_concurrent_readers_with_writer() != TEST_SUCCESS)
-		result = TEST_FAILED;
-	if (test_rapid_updates() != TEST_SUCCESS)
-		result = TEST_FAILED;
-	if (test_all_workers_active() != TEST_SUCCESS)
-		result = TEST_FAILED;
-	if (test_memory_ordering() != TEST_SUCCESS)
-		result = TEST_FAILED;
-	if (test_rcu_load() != TEST_SUCCESS)
-		result = TEST_FAILED;
-	if (test_aggressive_race_detection() != TEST_SUCCESS)
-		result = TEST_FAILED;
-
-	if (result == TEST_SUCCESS) {
-		LOG(INFO, "=== All RCU tests passed! ===");
-	} else {
-		LOG(ERROR, "=== Some RCU tests failed ===");
+	const size_t arena_size = 1 << 20;
+	void *arena = malloc(arena_size);
+	if (arena == NULL) {
+		LOG(ERROR, "failed to allocate test arena");
+		return TEST_FAILED;
+	}
+	if (block_allocator_init(&g_balloc) != 0) {
+		LOG(ERROR, "block_allocator_init failed");
+		return TEST_FAILED;
+	}
+	block_allocator_put_arena(&g_balloc, arena, arena_size);
+	if (memory_context_init(&g_mctx, "rcu_test", &g_balloc) < 0) {
+		LOG(ERROR, "memory_context_init failed");
+		return TEST_FAILED;
 	}
 
-	return result;
+	int failed = 0;
+	if (test_basic_init() != TEST_SUCCESS) {
+		LOG(ERROR, "FAILED: test_basic_init");
+		failed++;
+	}
+	if (test_single_reader() != TEST_SUCCESS) {
+		LOG(ERROR, "FAILED: test_single_reader");
+		failed++;
+	}
+	if (test_single_writer() != TEST_SUCCESS) {
+		LOG(ERROR, "FAILED: test_single_writer");
+		failed++;
+	}
+	if (test_multiple_updates() != TEST_SUCCESS) {
+		LOG(ERROR, "FAILED: test_multiple_updates");
+		failed++;
+	}
+	if (test_reader_writer_interaction() != TEST_SUCCESS) {
+		LOG(ERROR, "FAILED: test_reader_writer_interaction");
+		failed++;
+	}
+	if (test_multiple_workers() != TEST_SUCCESS) {
+		LOG(ERROR, "FAILED: test_multiple_workers");
+		failed++;
+	}
+	if (test_epoch_synchronization() != TEST_SUCCESS) {
+		LOG(ERROR, "FAILED: test_epoch_synchronization");
+		failed++;
+	}
+	if (test_concurrent_readers() != TEST_SUCCESS) {
+		LOG(ERROR, "FAILED: test_concurrent_readers");
+		failed++;
+	}
+	if (test_concurrent_readers_with_writer() != TEST_SUCCESS) {
+		LOG(ERROR, "FAILED: test_concurrent_readers_with_writer");
+		failed++;
+	}
+	if (test_rapid_updates() != TEST_SUCCESS) {
+		LOG(ERROR, "FAILED: test_rapid_updates");
+		failed++;
+	}
+	if (test_all_workers_active() != TEST_SUCCESS) {
+		LOG(ERROR, "FAILED: test_all_workers_active");
+		failed++;
+	}
+	if (test_memory_ordering() != TEST_SUCCESS) {
+		LOG(ERROR, "FAILED: test_memory_ordering");
+		failed++;
+	}
+	if (test_rcu_load() != TEST_SUCCESS) {
+		LOG(ERROR, "FAILED: test_rcu_load");
+		failed++;
+	}
+	if (test_aggressive_race_detection() != TEST_SUCCESS) {
+		LOG(ERROR, "FAILED: test_aggressive_race_detection");
+		failed++;
+	}
+
+	free(arena);
+
+	if (failed == 0) {
+		LOG(INFO, "=== All RCU tests passed! ===");
+		return TEST_SUCCESS;
+	}
+	LOG(ERROR, "=== %d RCU test(s) failed ===", failed);
+	return TEST_FAILED;
 }

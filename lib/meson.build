@@ -1,6 +1,7 @@
 yanet_libdir = include_directories('.')
 
 subdir('logging')
+subdir('errors')
 subdir('counters')
 subdir('dataplane')
 subdir('controlplane')
