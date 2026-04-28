@@ -34,7 +34,9 @@ setup_cp(struct agent *agent, struct cp_module *cp_module) {
 
 	LOG(INFO, "update modules...");
 
-	int res = agent_update_modules(agent, 1, &cp_module);
+	yanet_error *err = NULL;
+
+	int res = agent_update_modules(agent, 1, &cp_module, &err);
 	TEST_ASSERT_EQUAL(res, 0, "failed to update cp modules");
 
 	// setup chain config
@@ -56,7 +58,7 @@ setup_cp(struct agent *agent, struct cp_module *cp_module) {
 
 	LOG(INFO, "update functions...");
 
-	res = agent_update_functions(agent, 1, &function_config);
+	res = agent_update_functions(agent, 1, &function_config, &err);
 	TEST_ASSERT_EQUAL(res, 0, "failed to update functions in controlplane");
 
 	// setup pipelines
@@ -72,7 +74,7 @@ setup_cp(struct agent *agent, struct cp_module *cp_module) {
 
 	LOG(INFO, "update pipelines...");
 
-	res = agent_update_pipelines(agent, 1, &pipeline_config);
+	res = agent_update_pipelines(agent, 1, &pipeline_config, &err);
 	TEST_ASSERT_EQUAL(res, 0, "failed to update pipelines in controlplane");
 
 	struct cp_pipeline_config *dummy_pipeline_config =
@@ -81,12 +83,13 @@ setup_cp(struct agent *agent, struct cp_module *cp_module) {
 		dummy_pipeline_config, "failed to create dummy pipeline config"
 	);
 
-	res = agent_update_pipelines(agent, 1, &dummy_pipeline_config);
+	res = agent_update_pipelines(agent, 1, &dummy_pipeline_config, &err);
 	TEST_ASSERT_EQUAL(res, 0, "failed to update pipelines in controlplane");
 
 	struct cp_device_plain_config *device_config =
-		cp_device_plain_config_create("01:00.0", 1, 1);
+		cp_device_plain_config_create("01:00.0", 1, 1, &err);
 	TEST_ASSERT_NOT_NULL(device_config, "failed to create device config");
+	TEST_ASSERT_NULL(err, "unexpected error creating device config");
 
 	res = cp_device_plain_config_set_input_pipeline(
 		device_config, 0, "p0", 1
@@ -99,11 +102,12 @@ setup_cp(struct agent *agent, struct cp_module *cp_module) {
 	TEST_ASSERT_EQUAL(res, 0, "failed to set output pipeline for device");
 
 	struct cp_device *cp_device =
-		cp_device_plain_create(agent, device_config);
+		cp_device_plain_create(agent, device_config, &err);
 	TEST_ASSERT_NOT_NULL(cp_device, "failed to create plain cp device");
+	TEST_ASSERT_NULL(err, "unexpected error creating cp device");
 
 	LOG(INFO, "update devices...");
-	res = agent_update_devices(agent, 1, &cp_device);
+	res = agent_update_devices(agent, 1, &cp_device, &err);
 	TEST_ASSERT_EQUAL(res, 0, "failed to update devices in controlplane");
 
 	// free allocated memory
@@ -202,7 +206,8 @@ main() {
 
 	LOG(INFO, "attach agent...");
 
-	struct agent *agent = agent_attach(shm, 0, "agent", 1 << 20);
+	yanet_error *err = NULL;
+	struct agent *agent = agent_attach(shm, 0, "agent", 1 << 20, &err);
 	TEST_ASSERT_NOT_NULL(agent, "failed to attach agent: agent is null");
 
 	LOG(INFO, "init module...");

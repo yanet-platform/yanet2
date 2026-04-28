@@ -4,6 +4,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "lib/errors/errors.h"
+
 struct agent;
 struct cp_module;
 struct memory_context;
@@ -17,12 +19,13 @@ struct nat64_module_config;
  *
  * @param agent Pointer to the agent structure
  * @param name Name of the module instance
- * @return Pointer to cp_module on success, NULL on failure with errno set:
- *         - ENXIO: Module not found in configuration
- *         - ENOMEM: Memory allocation failed
+ * @param err Pointer to error.
+ * @return Pointer to cp_module on success, NULL on failure.
  */
 struct cp_module *
-nat64_module_config_create(struct agent *agent, const char *name);
+nat64_module_config_create(
+	struct agent *agent, const char *name, yanet_error **err
+);
 
 /**
  * @brief Frees NAT64 module configuration resources

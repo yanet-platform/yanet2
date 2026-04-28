@@ -2,6 +2,8 @@
 
 #include "lib/dataplane/pipeline/econtext.h"
 
+#include "lib/errors/errors.h"
+
 static inline struct device_ectx *
 config_gen_ectx_get_device(
 	struct config_gen_ectx *config_gen_ectx, uint64_t index
@@ -13,7 +15,9 @@ config_gen_ectx_get_device(
 
 struct config_gen_ectx *
 config_gen_ectx_create(
-	struct cp_config_gen *config_gen, struct cp_config_gen *old_config_gen
+	struct cp_config_gen *config_gen,
+	struct cp_config_gen *old_config_gen,
+	yanet_error **err
 );
 
 void

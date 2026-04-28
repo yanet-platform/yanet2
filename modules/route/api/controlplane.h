@@ -6,6 +6,8 @@
 
 #include "common/network.h"
 
+#include "lib/errors/errors.h"
+
 struct agent;
 struct cp_module;
 struct memory_context;
@@ -21,7 +23,9 @@ struct route_module_config;
 struct fib_iter;
 
 struct cp_module *
-route_module_config_create(struct agent *agent, const char *name);
+route_module_config_create(
+	struct agent *agent, const char *name, yanet_error **err
+);
 
 void
 route_module_config_free(struct cp_module *cp_module);
@@ -37,7 +41,8 @@ route_module_config_add_route(
 	struct cp_module *cp_module,
 	struct ether_addr dst_addr,
 	struct ether_addr src_addr,
-	const char *device_name
+	const char *device_name,
+	yanet_error **err
 );
 
 int

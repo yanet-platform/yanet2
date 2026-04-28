@@ -1,5 +1,6 @@
 dependencies = [
   lib_common_dep,
+  lib_errors_dep,
 ]
 
 sources = files(

@@ -88,7 +88,7 @@ pub async fn main() {
     CompleteEnv::with_factory(Cmd::command).complete();
 
     let cmd = Cmd::parse();
-    logging::init(cmd.verbose as usize).expect("no error expected");
+    let _ = logging::init(cmd.verbose as usize);
 
     if let Err(err) = run(cmd).await {
         log::error!("ERROR: {err}");

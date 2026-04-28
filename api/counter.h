@@ -3,7 +3,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "lib/controlplane/diag/diag.h"
+#include "lib/errors/errors.h"
 
 struct dp_config;
 
@@ -178,11 +178,10 @@ struct module_performance_counters {
  * @param chain_name Name of the chain
  * @param module_type Type identifier of the module
  * @param module_name Name identifier of the module
- * @param diag Diagnostic structure for error reporting. On failure, this will
- *             contain a detailed error message that can be retrieved using
- *             diag_msg() or diag_take_msg(). The caller must call diag_reset()
- *             to free the error message when done.
- * @return 0 on success, -1 on failure (check diag for error details)
+ * @param err Error pointer for error reporting. On failure, this will
+ *            contain a detailed error message. The caller must call
+ *            yanet_error_free() to free the error when done.
+ * @return 0 on success, -1 on failure (check err for error details)
  */
 int
 yanet_module_performance_counters(
@@ -194,7 +193,7 @@ yanet_module_performance_counters(
 	const char *chain_name,
 	const char *module_type,
 	const char *module_name,
-	struct diag *diag
+	yanet_error **err
 );
 
 /**

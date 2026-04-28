@@ -1,7 +1,7 @@
 #include "registry.h"
 #include "common/big_array.h"
 #include "common/memory.h"
-#include "controlplane/diag/diag.h"
+#include "lib/errors/errors.h"
 #include <assert.h>
 #include <netinet/in.h>
 #include <stdlib.h>
@@ -22,11 +22,11 @@ service_registry_init(
 	size_t elem_size,
 	size_t elems_count,
 	registry_cmp cmp,
-	struct service_registry *prev
+	struct service_registry *prev,
+	yanet_error **err
 ) {
 	if (prev != NULL && prev->elem_size != elem_size) {
-		NEW_ERROR("internal error: incompatible registry: "
-			  "prev->elem_size != elem_size");
+		yanet_error_add(err, "incompatible registry");
 		return -1;
 	}
 
@@ -35,15 +35,15 @@ service_registry_init(
 
 	if (big_array_init(&registry->elems, elem_size * elems_count, mctx) !=
 	    0) {
-		NEW_ERROR("no memory");
+		yanet_error_add(err, "failed to allocate registry elements");
 		return -1;
 	}
 
 	if (big_array_init(
 		    &registry->indices, elems_count * sizeof(size_t), mctx
 	    ) != 0) {
+		yanet_error_add(err, "failed to allocate registry indices");
 		big_array_free(&registry->elems);
-		NEW_ERROR("no memory");
 		return -1;
 	}
 
@@ -200,7 +200,8 @@ vs_registry_init(
 	struct memory_context *mctx,
 	struct vs_identifier *vs,
 	size_t vs_count,
-	vs_registry_t *prev
+	vs_registry_t *prev,
+	yanet_error **err
 ) {
 	return service_registry_init(
 		registry,
@@ -209,7 +210,8 @@ vs_registry_init(
 		sizeof(struct vs_identifier),
 		vs_count,
 		vs_identifier_cmp,
-		prev
+		prev,
+		err
 	);
 }
 
@@ -234,7 +236,8 @@ reals_registry_init(
 	struct memory_context *mctx,
 	struct real_identifier *reals,
 	size_t reals_count,
-	reals_registry_t *prev
+	reals_registry_t *prev,
+	yanet_error **err
 ) {
 	return service_registry_init(
 		registry,
@@ -243,7 +246,8 @@ reals_registry_init(
 		sizeof(struct real_identifier),
 		reals_count,
 		real_identifier_cmp,
-		prev
+		prev,
+		err
 	);
 }
 

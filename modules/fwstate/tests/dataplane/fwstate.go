@@ -6,9 +6,11 @@ package fwstate
 //#cgo LDFLAGS: -L../../../../build/lib/dataplane/packet -lpacket
 //#cgo LDFLAGS: -L../../../../build/lib/fwstate -lfwstate
 //#cgo LDFLAGS: -L../../../../build/lib/logging -llogging
+//#cgo LDFLAGS: -L../../../../build/lib/errors -lerrors
 /*
 #include <stdlib.h>
 #include <time.h>
+#include "lib/errors/errors.h"
 #include "modules/fwstate/dataplane/config.h"
 #include "modules/fwstate/api/fwstate_cp.h"
 #include "lib/fwstate/config.h"
@@ -61,7 +63,8 @@ cp_module_init(
 	struct cp_module *cp_module,
 	struct agent *agent,
 	const char *module_type,
-	const char *module_name
+	const char *module_name,
+	yanet_error **err
 ) {
 	// Minimal initialization for tests (based on lib/controlplane/config/cp_module.c:13-74)
 	memset(cp_module, 0, sizeof(struct cp_module));
@@ -95,6 +98,7 @@ import (
 	"github.com/gopacket/gopacket"
 	"github.com/gopacket/gopacket/layers"
 
+	"github.com/yanet-platform/yanet2/bindings/go/cerrors"
 	"github.com/yanet-platform/yanet2/common/go/dataplane"
 	"github.com/yanet-platform/yanet2/common/go/testutils"
 )
@@ -123,23 +127,21 @@ func fwstateModuleConfig(memCtx testutils.MemoryContext) *C.struct_cp_module {
 	cName := C.CString("test")
 	defer C.free(unsafe.Pointer(cName))
 
-	cpModule, err := C.fwstate_module_config_init(agent, cName)
+	var cErr *C.yanet_error
+	cpModule := C.fwstate_module_config_init(agent, cName, &cErr)
 	if cpModule == nil {
-		if err != nil {
-			panic(fmt.Sprintf("failed to initialize fwstate module config: %v", err))
-		}
-		panic("failed to initialize fwstate module config")
+		panic(fmt.Sprintf("failed to initialize fwstate module config: %v", cerrors.FromC(unsafe.Pointer(cErr))))
 	}
 
 	// Create maps using the proper API
-	rc, cErr := C.fwstate_config_create_maps(
+	rc := C.fwstate_config_create_maps(
 		cpModule,
 		C.uint32_t(1024),
 		C.uint32_t(64),
 		C.uint16_t(1),
 	)
 	if rc != 0 {
-		panic(fmt.Sprintf("failed to create maps: rc=%d, err=%v", rc, cErr))
+		panic(fmt.Sprintf("failed to create maps: rc=%d", rc))
 	}
 
 	// Get the fwstate_module_config to set sync settings

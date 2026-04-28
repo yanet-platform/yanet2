@@ -6,9 +6,7 @@
 #include "modules/balancer2/dataplane/types/session.h"
 
 struct agent;
-struct balancer_session_table;
 struct balancer_handle;
-struct balancer_vs_handle;
 
 enum balancer_tunnel_kind {
 	balancer_tunnel_kind_ip,
@@ -20,11 +18,8 @@ enum balancer_tunnel_kind {
  */
 struct balancer_real_config {
 	struct net_addr dst;
-	enum ip_family ip_family;
-
 	struct net src;
-
-	enum balancer_tunnel_kind tunnel;
+	enum ip_family ip_family;
 };
 
 /*
@@ -37,6 +32,7 @@ struct balancer_allowed_sources {
 	struct filter_net4s net4s;
 	struct filter_net6s net6s;
 	struct filter_port_ranges port_ranges;
+	const char *tag;
 };
 
 enum balancer_vs_sched {
@@ -65,51 +61,19 @@ struct balancer_vs_config {
 	/* Destination port, host byte order. */
 	uint16_t port;
 
-	uint8_t transport_proto;
+	enum transport_proto transport;
 
-	struct balancer_allowed_sources allowed_sources;
+	struct balancer_allowed_sources *allowed_sources;
+	size_t allowed_sources_count;
 
 	enum balancer_vs_sched scheduler;
+	enum balancer_tunnel_kind tunnel;
 
 	struct balancer_real_config *reals;
 	size_t real_count;
+
+	bool fix_mss;
 };
-
-/*
- * Creates a VS handle from the supplied configuration. The handle is
- * used to mutate per-real state (weights, enabled flags) after the
- * containing balancer is installed.
- */
-struct balancer_vs_handle *
-balancer_create_vs(
-	struct agent *agent, const struct balancer_vs_config *config
-);
-
-/*
- * Returns 0 if the handle is still referenced by a balancer, or 1 if
- * it was actually freed.
- */
-int
-balancer_free_vs(struct agent *agent, struct balancer_vs_handle *vs);
-
-/*
- * Creates a session table with the given capacity (number of session
- * entries).
- */
-struct balancer_session_table *
-balancer_create_session_table(struct agent *agent, size_t capacity);
-
-/*
- * Returns 0 if the session table is still referenced by a balancer, or 1
- * if it was actually freed.
- */
-int
-balancer_free_session_table(
-	struct agent *agent, struct balancer_session_table *table
-);
-
-// TODO:
-// session table iter.
 
 /*
  * Bounded chain of session tables consulted by workers on each packet.
@@ -130,29 +94,10 @@ balancer_free_session_table(
 struct balancer_session_table_chain;
 
 /*
- * Creates a session table chain seeded with the given front table.
- * The table is not owned by the chain and must outlive it.
- * Returns NULL on allocation failure.
- */
-struct balancer_session_table_chain *
-balancer_create_session_table_chain(
-	struct agent *agent, struct balancer_session_table *front_table
-);
-
-/*
- * Frees the session table chain. The session tables it referenced
- * are not freed — the caller owns them.
- */
-void
-balancer_free_session_table_chain(
-	struct agent *agent, struct balancer_session_table_chain *chain
-);
-
-/*
  * Creates a balancer handle from its full configuration.
  *
- * The session table and each VS handle must outlive the returned
- * balancer handle; they are not owned by it.
+ * The session table chain must outlive the returned balancer handle;
+ * it is referenced, not owned.
  */
 struct balancer_handle *
 balancer_create(
@@ -160,9 +105,97 @@ balancer_create(
 	const char *name,
 	struct balancer_session_table_chain *session_table_chain,
 	struct balancer_session_timeouts *timeouts,
-	struct balancer_vs_handle **vs,
-	size_t vs_count
+	struct balancer_vs_config *vs,
+	uint32_t vs_count
 );
+
+/*
+ * Installs a balancer handle in the dataplane.
+ *
+ * If a balancer with the same name is already installed, it is
+ * replaced; the previous handle becomes unused and the caller is
+ * responsible for freeing it.
+ *
+ * Returns -1 on error, 0 on success.
+ */
+int
+balancer_install(struct agent *agent, struct balancer_handle *handle);
+
+/*
+ * Frees a balancer handle. The session table chain attached to the
+ * balancer is not freed — the caller owns it.
+ */
+void
+balancer_free(struct agent *agent, struct balancer_handle *handle);
+
+/*
+ * Updates per-real weights for a VS. The weights array must have
+ * length equal to the number of reals configured for the VS and be
+ * indexed in the same order as they were passed at VS creation.
+ * Returns 0 on success, -1 if the length does not match the number
+ * of reals, or -2 on allocation failure.
+ */
+int
+balancer_vs_update_real_weights(
+	struct balancer_handle *balancer,
+	uint32_t vs_idx,
+	const uint32_t *weights
+);
+
+/*
+ * Updates per-real enabled flags for a VS. The states array must have
+ * length equal to the number of reals configured for the VS and be
+ * indexed in the same order as they were passed at VS creation.
+ * Returns 0 on success, -1 if the length does not match the number
+ * of reals, or -2 on allocation failure.
+ */
+int
+balancer_vs_update_real_states(
+	struct balancer_handle *balancer, uint32_t vs_idx, const bool *states
+);
+
+/*
+ * Counters are registered by API with their names. The
+ * controlplane parses emitted counter names against these to route
+ * values back to their VS, real, or balancer-level source.
+ *
+ * VS counter format:      vs_<vip>:<port>/<proto>
+ *   where proto is "tcp" or "udp".
+ */
+extern const char *const balancer_vs_counter_prefix;
+
+/*
+ * VS ACL counter format:  vs_acl_<vip>:<port>/<proto>_<tag>
+ */
+extern const char *const balancer_vs_acl_counter_prefix;
+
+/*
+ * Real counter format:    real_<vip>:<port>/<proto>_<real_dst>
+ */
+extern const char *const balancer_real_counter_prefix;
+
+extern const char *const balancer_common_counter_name;
+
+extern const char *const balancer_l4_counter_name;
+
+/*
+ * A session table holds active session entries — one per tracked
+ * flow — mapping a connection key to its selected real. The table
+ * has a fixed capacity, set at creation time, that bounds the number
+ * of concurrent sessions it can store.
+ *
+ * A session table is used by a balancer through a session table
+ * chain; see the balancer_session_table_chain documentation above
+ * for how front and back tables interact during lookups and inserts.
+ */
+struct balancer_session_table;
+
+/*
+ * Creates a session table with the given capacity (number of session
+ * entries).
+ */
+struct balancer_session_table *
+balancer_create_session_table(struct agent *agent, size_t capacity);
 
 /*
  * Pushes the given table as the new front (primary) session table.
@@ -192,68 +225,32 @@ balancer_session_table_chain_pop_back(
 );
 
 /*
- * Installs a balancer handle in the dataplane.
- *
- * If a balancer with the same name is already installed, it is
- * replaced; the previous handle becomes unused and the caller is
- * responsible for freeing it.
- *
- * Returns -1 on error, 0 on success.
+ * Returns 0 if the session table is still referenced by a balancer, or 1
+ * if it was actually freed.
  */
 int
-balancer_install(struct agent *agent, struct balancer_handle *handle);
+balancer_free_session_table(
+	struct agent *agent, struct balancer_session_table *table
+);
+
+// TODO:
+// session table iter.
 
 /*
- * Frees a balancer handle. The session tables and VS handles
- * attached to the balancer are not freed — the caller owns them.
+ * Creates a session table chain seeded with the given front table.
+ * The table is not owned by the chain and must outlive it.
+ * Returns NULL on allocation failure.
+ */
+struct balancer_session_table_chain *
+balancer_create_session_table_chain(
+	struct agent *agent, struct balancer_session_table *front_table
+);
+
+/*
+ * Frees the session table chain. The session tables it referenced
+ * are not freed — the caller owns them.
  */
 void
-balancer_free(struct agent *agent, struct balancer_handle *handle);
-
-/*
- * Updates per-real weights for a VS. The weights array must have
- * length equal to the number of reals configured for the VS and be
- * indexed in the same order as they were passed at VS creation.
- * Returns 0 on success, -1 if the length does not match the number
- * of reals, or -2 on allocation failure.
- */
-int
-balancer_vs_update_real_weights(
-	struct balancer_vs_handle *vs, const uint32_t *weights
+balancer_free_session_table_chain(
+	struct agent *agent, struct balancer_session_table_chain *chain
 );
-
-/*
- * Updates per-real enabled flags for a VS. The states array must have
- * length equal to the number of reals configured for the VS and be
- * indexed in the same order as they were passed at VS creation.
- * Returns 0 on success, -1 if the length does not match the number
- * of reals, or -2 on allocation failure.
- */
-int
-balancer_vs_update_real_states(
-	struct balancer_vs_handle *vs, const bool *states
-);
-
-/*
- * Counters are registered by API with their names. The
- * controlplane parses emitted counter names against these to route
- * values back to their VS, real, or balancer-level source.
- *
- * VS counter format:      vs_<vip>:<port>/<proto>
- *   where proto is "tcp" or "udp".
- */
-extern const char *const balancer_vs_counter_prefix;
-
-/*
- * VS ACL counter format:  vs_acl_<vip>:<port>/<proto>_<tag>
- */
-extern const char *const balancer_vs_acl_counter_prefix;
-
-/*
- * Real counter format:    real_<vip>:<port>/<proto>_<real_dst>
- */
-extern const char *const balancer_real_counter_prefix;
-
-extern const char *const balancer_common_counter_name;
-
-extern const char *const balancer_l4_counter_name;

@@ -6,5 +6,4 @@ if not dataplane_only
   subdir('commonpb')
   subdir('filterpb')
 endif
-subdir('tls_stack')
 

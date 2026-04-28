@@ -8,6 +8,7 @@
 #include "controlplane/config/registry.h"
 
 #include "lib/dataplane/counters/module.h"
+#include "lib/errors/errors.h"
 
 struct counter_handle;
 struct module_performance_counter;
@@ -85,11 +86,15 @@ struct cp_module {
  * @param cp_module Pointer to the module configuration
  * @param name Name of the device to link
  * @param index Output parameter for the device index
+ * @param err Error output parameter
  * @return 0 on success, negative error code on failure
  */
 int
 cp_module_link_device(
-	struct cp_module *cp_module, const char *name, uint64_t *index
+	struct cp_module *cp_module,
+	const char *name,
+	uint64_t *index,
+	yanet_error **err
 );
 
 /**
@@ -102,6 +107,7 @@ cp_module_link_device(
  * @param agent Pointer to the controlplane agent owning this module
  * @param module_type Type identifier for the module
  * @param module_name Name identifier for the module
+ * @param err Error output parameter
  * @return 0 on success, negative error code on failure
  */
 int
@@ -109,7 +115,8 @@ cp_module_init(
 	struct cp_module *cp_module,
 	struct agent *agent,
 	const char *module_type,
-	const char *module_name
+	const char *module_name,
+	yanet_error **err
 );
 
 /**
@@ -135,12 +142,14 @@ struct cp_module_registry {
  *
  * @param memory_context Memory context for registry allocations
  * @param registry Pointer to the registry structure to initialize
+ * @param err Error output parameter
  * @return 0 on success, negative error code on failure
  */
 int
 cp_module_registry_init(
 	struct memory_context *memory_context,
-	struct cp_module_registry *registry
+	struct cp_module_registry *registry,
+	yanet_error **err
 );
 
 /**
@@ -152,13 +161,15 @@ cp_module_registry_init(
  * @param memory_context Memory context for the new registry
  * @param new_module_registry Pointer to the destination registry
  * @param old_module_registry Pointer to the source registry to copy
+ * @param err Error output parameter
  * @return 0 on success, negative error code on failure
  */
 int
 cp_module_registry_copy(
 	struct memory_context *memory_context,
 	struct cp_module_registry *new_module_registry,
-	struct cp_module_registry *old_module_registry
+	struct cp_module_registry *old_module_registry,
+	yanet_error **err
 );
 
 /**
@@ -219,7 +230,8 @@ cp_module_registry_upsert(
 	struct cp_module_registry *module_registry,
 	const char *type,
 	const char *name,
-	struct cp_module *module
+	struct cp_module *module,
+	yanet_error **err
 );
 
 /**

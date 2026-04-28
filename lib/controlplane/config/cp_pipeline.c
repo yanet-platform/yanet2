@@ -3,8 +3,10 @@
 #include "common/container_of.h"
 
 #include "controlplane/config/zone.h"
-#include "lib/controlplane/diag/diag.h"
 
+#include "lib/errors/errors.h"
+
+#include <stdio.h>
 #include <string.h>
 
 static inline uint64_t
@@ -17,7 +19,8 @@ struct cp_pipeline *
 cp_pipeline_create(
 	struct memory_context *memory_context,
 	struct cp_config_gen *cp_config_gen,
-	struct cp_pipeline_config *cp_pipeline_config
+	struct cp_pipeline_config *cp_pipeline_config,
+	yanet_error **err
 ) {
 	// FIXME
 	(void)cp_config_gen;
@@ -27,7 +30,8 @@ cp_pipeline_create(
 		cp_pipeline_alloc_size(cp_pipeline_config->length)
 	);
 	if (new_pipeline == NULL) {
-		NEW_ERROR(
+		yanet_error_add(
+			err,
 			"failed to allocate memory for pipeline '%s'",
 			cp_pipeline_config->name
 		);
@@ -47,7 +51,8 @@ cp_pipeline_create(
 	if (counter_registry_init(
 		    &new_pipeline->counter_registry, memory_context, 0
 	    )) {
-		NEW_ERROR(
+		yanet_error_add(
+			err,
 			"failed to initialize counter registry for pipeline "
 			"'%s'",
 			cp_pipeline_config->name
@@ -56,10 +61,11 @@ cp_pipeline_create(
 	}
 
 	new_pipeline->counter_packet_in_count = counter_registry_register(
-		&new_pipeline->counter_registry, "input", 1
+		&new_pipeline->counter_registry, "input", 1, err
 	);
 	if (new_pipeline->counter_packet_in_count == COUNTER_INVALID) {
-		NEW_ERROR(
+		yanet_error_add(
+			err,
 			"failed to register 'input' counter for pipeline '%s'",
 			cp_pipeline_config->name
 		);
@@ -67,10 +73,11 @@ cp_pipeline_create(
 	}
 
 	new_pipeline->counter_packet_out_count = counter_registry_register(
-		&new_pipeline->counter_registry, "output", 1
+		&new_pipeline->counter_registry, "output", 1, err
 	);
 	if (new_pipeline->counter_packet_out_count == COUNTER_INVALID) {
-		NEW_ERROR(
+		yanet_error_add(
+			err,
 			"failed to register 'output' counter for pipeline '%s'",
 			cp_pipeline_config->name
 		);
@@ -78,10 +85,11 @@ cp_pipeline_create(
 	}
 
 	new_pipeline->counter_packet_drop_count = counter_registry_register(
-		&new_pipeline->counter_registry, "drop", 1
+		&new_pipeline->counter_registry, "drop", 1, err
 	);
 	if (new_pipeline->counter_packet_drop_count == COUNTER_INVALID) {
-		NEW_ERROR(
+		yanet_error_add(
+			err,
 			"failed to register 'drop' counter for pipeline '%s'",
 			cp_pipeline_config->name
 		);
@@ -89,10 +97,11 @@ cp_pipeline_create(
 	}
 
 	new_pipeline->counter_packet_in_bytes = counter_registry_register(
-		&new_pipeline->counter_registry, "input_bytes", 1
+		&new_pipeline->counter_registry, "input_bytes", 1, err
 	);
 	if (new_pipeline->counter_packet_in_bytes == COUNTER_INVALID) {
-		NEW_ERROR(
+		yanet_error_add(
+			err,
 			"failed to register 'input_bytes' counter for pipeline "
 			"'%s'",
 			cp_pipeline_config->name
@@ -101,10 +110,11 @@ cp_pipeline_create(
 	}
 
 	new_pipeline->counter_packet_out_bytes = counter_registry_register(
-		&new_pipeline->counter_registry, "output_bytes", 1
+		&new_pipeline->counter_registry, "output_bytes", 1, err
 	);
 	if (new_pipeline->counter_packet_out_bytes == COUNTER_INVALID) {
-		NEW_ERROR(
+		yanet_error_add(
+			err,
 			"failed to register 'output_bytes' counter for "
 			"pipeline "
 			"'%s'",
@@ -114,10 +124,11 @@ cp_pipeline_create(
 	}
 
 	new_pipeline->counter_packet_drop_bytes = counter_registry_register(
-		&new_pipeline->counter_registry, "drop_bytes", 1
+		&new_pipeline->counter_registry, "drop_bytes", 1, err
 	);
 	if (new_pipeline->counter_packet_drop_bytes == COUNTER_INVALID) {
-		NEW_ERROR(
+		yanet_error_add(
+			err,
 			"failed to register 'drop_bytes' counter for pipeline "
 			"'%s'",
 			cp_pipeline_config->name
@@ -126,10 +137,11 @@ cp_pipeline_create(
 	}
 
 	new_pipeline->counter_packet_in_hist = counter_registry_register(
-		&new_pipeline->counter_registry, "input histogram", 8
+		&new_pipeline->counter_registry, "input histogram", 8, err
 	);
 	if (new_pipeline->counter_packet_in_hist == COUNTER_INVALID) {
-		NEW_ERROR(
+		yanet_error_add(
+			err,
 			"failed to register 'input histogram' counter for "
 			"pipeline '%s'",
 			cp_pipeline_config->name
@@ -151,11 +163,15 @@ cp_pipeline_create(
 
 		new_pipeline->functions[idx].tsc_counter_id =
 			counter_registry_register(
-				&new_pipeline->counter_registry, counter_name, 8
+				&new_pipeline->counter_registry,
+				counter_name,
+				8,
+				err
 			);
 		if (new_pipeline->functions[idx].tsc_counter_id ==
 		    COUNTER_INVALID) {
-			NEW_ERROR(
+			yanet_error_add(
+				err,
 				"failed to register '%s' counter for pipeline "
 				"'%s'",
 				counter_name,
@@ -192,12 +208,13 @@ cp_pipeline_free(
 int
 cp_pipeline_registry_init(
 	struct memory_context *memory_context,
-	struct cp_pipeline_registry *new_pipeline_registry
+	struct cp_pipeline_registry *new_pipeline_registry,
+	yanet_error **err
 ) {
 	if (registry_init(
 		    memory_context, &new_pipeline_registry->registry, 8
 	    )) {
-		NEW_ERROR("failed to initialize pipeline registry");
+		yanet_error_add(err, "failed to initialize pipeline registry");
 		return -1;
 	}
 
@@ -209,14 +226,15 @@ int
 cp_pipeline_registry_copy(
 	struct memory_context *memory_context,
 	struct cp_pipeline_registry *new_pipeline_registry,
-	struct cp_pipeline_registry *old_pipeline_registry
+	struct cp_pipeline_registry *old_pipeline_registry,
+	yanet_error **err
 ) {
 	if (registry_copy(
 		    memory_context,
 		    &new_pipeline_registry->registry,
 		    &old_pipeline_registry->registry
 	    )) {
-		NEW_ERROR("failed to copy pipeline registry");
+		yanet_error_add(err, "failed to copy pipeline registry");
 		return -1;
 	};
 
@@ -302,7 +320,8 @@ int
 cp_pipeline_registry_upsert(
 	struct cp_pipeline_registry *pipeline_registry,
 	const char *name,
-	struct cp_pipeline *new_pipeline
+	struct cp_pipeline *new_pipeline,
+	yanet_error **err
 ) {
 	struct cp_pipeline *old_pipeline =
 		cp_pipeline_registry_lookup(pipeline_registry, name);
@@ -310,9 +329,11 @@ cp_pipeline_registry_upsert(
 	if (counter_registry_link(
 		    &new_pipeline->counter_registry,
 		    (old_pipeline != NULL) ? &old_pipeline->counter_registry
-					   : NULL
+					   : NULL,
+		    err
 	    )) {
-		NEW_ERROR(
+		yanet_error_add(
+			err,
 			"failed to link counter registry for pipeline '%s'",
 			name
 		);

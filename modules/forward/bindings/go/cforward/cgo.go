@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"unsafe"
 
+	"github.com/yanet-platform/yanet2/bindings/go/cerrors"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 )
 
@@ -27,12 +28,10 @@ func NewModuleConfig(agent *ffi.Agent, name string) (*ModuleConfig, error) {
 	cName := C.CString(name)
 	defer C.free(unsafe.Pointer(cName))
 
-	ptr, err := C.forward_module_config_init((*C.struct_agent)(agent.AsRawPtr()), cName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize module config: %w", err)
-	}
+	var cErr *C.yanet_error
+	ptr := C.forward_module_config_init((*C.struct_agent)(agent.AsRawPtr()), cName, &cErr)
 	if ptr == nil {
-		return nil, fmt.Errorf("failed to initialize module config: module %q not found", name)
+		return nil, fmt.Errorf("failed to initialize module config: %w", cerrors.FromC(unsafe.Pointer(cErr)))
 	}
 
 	return &ModuleConfig{
@@ -61,12 +60,10 @@ func (m *ModuleConfig) Free() {
 
 // update maps 1:1 to forward_module_config_update.
 func (m *ModuleConfig) update(rules *C.struct_forward_rule, count C.uint32_t) error {
-	rc, err := C.forward_module_config_update(m.asRawPtr(), rules, count)
-	if err != nil {
-		return fmt.Errorf("failed to update config: %w", err)
-	}
+	var cErr *C.yanet_error
+	rc := C.forward_module_config_update(m.asRawPtr(), rules, count, &cErr)
 	if rc != 0 {
-		return fmt.Errorf("failed to update config: %d", rc)
+		return fmt.Errorf("failed to update forward config: %w", cerrors.FromC(unsafe.Pointer(cErr)))
 	}
 	return nil
 }

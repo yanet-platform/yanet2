@@ -1,7 +1,8 @@
 #include "cp_chain.h"
 
 #include "controlplane/config/zone.h"
-#include "lib/controlplane/diag/diag.h"
+
+#include <stdio.h>
 
 static inline size_t
 cp_chain_alloc_size(uint64_t length) {
@@ -14,7 +15,8 @@ cp_chain_create(
 	struct memory_context *memory_context,
 	struct dp_config *dp_config,
 	struct cp_config_gen *cp_config_gen,
-	struct cp_chain_config *cp_chain_config
+	struct cp_chain_config *cp_chain_config,
+	yanet_error **err
 ) {
 	(void)dp_config;
 	(void)cp_config_gen;
@@ -23,7 +25,8 @@ cp_chain_create(
 		memory_context, cp_chain_alloc_size(cp_chain_config->length)
 	);
 	if (new_chain == NULL) {
-		NEW_ERROR(
+		yanet_error_add(
+			err,
 			"failed to allocate memory for chain '%s'",
 			cp_chain_config->name
 		);
@@ -33,7 +36,8 @@ cp_chain_create(
 	if (counter_registry_init(
 		    &new_chain->counter_registry, memory_context, 0
 	    )) {
-		NEW_ERROR(
+		yanet_error_add(
+			err,
 			"failed to initialize counter registry for chain '%s'",
 			cp_chain_config->name
 		);
@@ -65,8 +69,19 @@ cp_chain_create(
 			counter_registry_register(
 				&new_chain->counter_registry,
 				tsc_counter_name,
-				8
+				8,
+				err
 			);
+		if (new_chain->modules[idx].tsc_counter_id == COUNTER_INVALID) {
+			yanet_error_add(
+				err,
+				"failed to register '%s' counter for chain "
+				"'%s'",
+				tsc_counter_name,
+				cp_chain_config->name
+			);
+			goto error;
+		}
 	}
 
 	return new_chain;

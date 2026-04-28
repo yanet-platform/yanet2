@@ -6,11 +6,15 @@
 
 #include "counters/counters.h"
 
+#include "lib/errors/errors.h"
+
 struct agent;
 struct cp_module;
 
 struct cp_module *
-acl_module_config_init(struct agent *agent, const char *name);
+acl_module_config_init(
+	struct agent *agent, const char *name, yanet_error **err
+);
 
 void
 acl_module_config_free(struct cp_module *cp_module);
@@ -36,7 +40,10 @@ struct acl_rule {
 
 int
 acl_module_config_update(
-	struct cp_module *cp_module, struct acl_rule *rules, uint32_t rule_count
+	struct cp_module *cp_module,
+	struct acl_rule *rules,
+	uint32_t rule_count,
+	yanet_error **err
 );
 
 void

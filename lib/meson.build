@@ -8,3 +8,4 @@ subdir('controlplane')
 subdir('utils')
 subdir('fwstate') # depends on dataplane lib
 subdir('fuzzing')
+subdir('tests') # depends on utils lib

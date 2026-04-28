@@ -1,4 +1,4 @@
-use core::{error::Error, ops::Deref};
+use core::error::Error;
 use std::{
     fs::File,
     path::{Path, PathBuf},
@@ -23,36 +23,6 @@ pub mod forwardpb {
     use serde::Serialize;
 
     tonic::include_proto!("forwardpb");
-}
-
-#[allow(non_snake_case)]
-pub mod filterpb {
-    use netip::{Ipv4Network, Ipv6Network};
-    use serde::{Serialize, Serializer};
-
-    tonic::include_proto!("filterpb");
-
-    impl Serialize for IpNet {
-        fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-            match (self.addr.len(), self.mask.len()) {
-                (4, 4) => {
-                    let addr = u32::from_be_bytes(<[u8; 4]>::try_from(self.addr.as_slice()).expect("checked above"));
-                    let mask = u32::from_be_bytes(<[u8; 4]>::try_from(self.mask.as_slice()).expect("checked above"));
-                    let net = Ipv4Network::from_bits(addr, mask);
-                    s.serialize_str(&net.to_string())
-                }
-                (16, 16) => {
-                    let addr = u128::from_be_bytes(<[u8; 16]>::try_from(self.addr.as_slice()).expect("checked above"));
-                    let mask = u128::from_be_bytes(<[u8; 16]>::try_from(self.mask.as_slice()).expect("checked above"));
-                    let net = Ipv6Network::from_bits(addr, mask);
-                    s.serialize_str(&net.to_string())
-                }
-                (a, n) => Err(serde::ser::Error::custom(
-                    format!("invalid addr/mask lengths: {a}/{n}",),
-                )),
-            }
-        }
-    }
 }
 
 /// Forward module.
@@ -101,45 +71,15 @@ pub struct UpdateCmd {
     pub rules: PathBuf,
 }
 
-impl From<String> for filterpb::Device {
-    #[inline]
-    fn from(name: String) -> Self {
-        Self { name }
-    }
-}
-
 #[derive(Debug, Serialize, Deserialize)]
 struct VlanRange {
     from: u32,
     to: u32,
 }
 
-impl From<VlanRange> for filterpb::VlanRange {
+impl From<VlanRange> for filterpb::pb::VlanRange {
     fn from(r: VlanRange) -> Self {
         Self { from: r.from, to: r.to }
-    }
-}
-
-impl TryFrom<&str> for filterpb::IpNet {
-    type Error = Box<dyn Error>;
-
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        let net = Contiguous::<IpNetwork>::parse(value)?;
-
-        match net.deref() {
-            IpNetwork::V4(net) => {
-                let addr = net.addr().octets().to_vec();
-                let mask = net.mask().octets().to_vec();
-
-                Ok(Self { addr, mask })
-            }
-            IpNetwork::V6(net) => {
-                let addr = net.addr().octets().to_vec();
-                let mask = net.mask().octets().to_vec();
-
-                Ok(Self { addr, mask })
-            }
-        }
     }
 }
 
@@ -176,16 +116,16 @@ impl TryFrom<ForwardRule> for forwardpb::Rule {
                 counter: forward_rule.counter,
             }),
             devices: forward_rule.devices.into_iter().map(|m| m.into()).collect(),
-            vlan_ranges: forward_rule.vlan_ranges.into_iter().map(|m| m.into()).collect(),
+            vlan_ranges: forward_rule.vlan_ranges.into_iter().map(Into::into).collect(),
             srcs: forward_rule
                 .srcs
                 .into_iter()
-                .map(|n| filterpb::IpNet::try_from(n.as_str()))
+                .map(|n| Contiguous::<IpNetwork>::parse(&n).map(filterpb::pb::IpNet::from))
                 .collect::<Result<Vec<_>, _>>()?,
             dsts: forward_rule
                 .dsts
                 .into_iter()
-                .map(|n| filterpb::IpNet::try_from(n.as_str()))
+                .map(|n| Contiguous::<IpNetwork>::parse(&n).map(filterpb::pb::IpNet::from))
                 .collect::<Result<Vec<_>, _>>()?,
         })
     }

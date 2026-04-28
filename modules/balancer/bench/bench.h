@@ -1,7 +1,7 @@
 #pragma once
 
 #include "dataplane/packet/packet.h"
-#include "lib/controlplane/diag/diag.h"
+#include "lib/errors/errors.h"
 #include "mock/mock.h"
 
 #include "config.h"
@@ -9,20 +9,16 @@
 
 struct bench {
 	struct yanet_mock yanet;
-	struct diag diag;
 	void *shared_memory;
 	size_t total_memory;
 	struct allocator alloc;
 };
 
 int
-bench_init(struct bench *bench, struct bench_config *config);
+bench_init(struct bench *bench, struct bench_config *config, yanet_error **err);
 
 void *
 bench_shared_memory(struct bench *bench);
-
-const char *
-bench_take_error(struct bench *bench);
 
 void
 bench_free(struct bench *bench);
