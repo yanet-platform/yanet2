@@ -36,9 +36,9 @@ pub enum ModeCmd {
     Device(DeviceCmd),
     /// Show pipeline counters.
     Pipeline(PipelineCmd),
-    /// Show pipeline counters.
+    /// Show function counters.
     Function(FunctionCmd),
-    /// Show pipeline counters.
+    /// Show chain counters.
     Chain(ChainCmd),
     /// Show counters of module assigned to a pipeline.
     Module(ModuleCmd),
