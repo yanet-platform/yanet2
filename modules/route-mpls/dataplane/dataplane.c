@@ -92,6 +92,7 @@ route_mpls_handle_packets(
 		    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
 			if (ip4_result[ip4_idx] == FILTER_RULE_INVALID) {
 				++ip4_idx;
+				packet_front_drop(packet_front, packet);
 				continue;
 			}
 
@@ -104,6 +105,7 @@ route_mpls_handle_packets(
 			   rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
 			if (ip6_result[ip6_idx] == FILTER_RULE_INVALID) {
 				++ip6_idx;
+				packet_front_drop(packet_front, packet);
 				continue;
 			}
 
