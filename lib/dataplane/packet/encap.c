@@ -356,6 +356,8 @@ packet_ip4_encap_gre(
 		struct rte_gre_hdr gre;
 	} __rte_packed outer;
 
+	memset(&outer.gre, 0, sizeof(outer.gre));
+
 	rte_memcpy(&outer.ip.src_addr, src, NET4_LEN);
 	rte_memcpy(&outer.ip.dst_addr, dst, NET4_LEN);
 	outer.ip.version_ihl = 0x45;
@@ -389,10 +391,15 @@ packet_ip6_encap_gre(
 		struct rte_gre_hdr gre;
 	} __rte_packed outer;
 
+	memset(&outer.gre, 0, sizeof(outer.gre));
+
 	rte_memcpy(&outer.ip.src_addr, src, NET6_LEN);
 	rte_memcpy(&outer.ip.dst_addr, dst, NET6_LEN);
 
 	int inner_size = fill_outer_ip6_from_inner(&outer.ip, packet);
+	if (inner_size < 0) {
+		return -1;
+	}
 	outer.ip.payload_len = rte_cpu_to_be_16(sizeof(outer.gre) + inner_size);
 	outer.ip.proto = IPPROTO_GRE;
 
