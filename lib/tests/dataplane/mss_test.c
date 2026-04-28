@@ -5,17 +5,17 @@
 #include <rte_byteorder.h>
 #include <rte_ether.h>
 #include <rte_ip.h>
-#include <rte_mbuf.h>
 #include <rte_tcp.h>
 #include <rte_udp.h>
 
 #include "common/test_assert.h"
 
-#include "lib/dataplane/packet/data.h"
 #include "lib/dataplane/packet/mss.h"
 #include "lib/dataplane/packet/packet.h"
 #include "lib/logging/log.h"
 #include "lib/utils/packet.h"
+
+#include "snapshot.h"
 
 #define TCP_OPT_KIND_EOL 0
 #define TCP_OPT_KIND_NOP 1
@@ -23,8 +23,6 @@
 
 #define DEFAULT_HEADROOM 128
 #define DEFAULT_TAILROOM 256
-
-#define SNAPSHOT_CAP 512
 
 // Packet construction helpers
 
@@ -203,32 +201,6 @@ verify_ip6_tcp_cksum(struct packet *p) {
 	return TEST_SUCCESS;
 }
 
-struct pkt_snapshot {
-	uint16_t pkt_len;
-	uint16_t data_off;
-	uint8_t data[SNAPSHOT_CAP];
-};
-
-static void
-snapshot(struct packet *p, struct pkt_snapshot *s) {
-	uint16_t len = rte_pktmbuf_pkt_len(p->mbuf);
-	s->pkt_len = len;
-	s->data_off = p->mbuf->data_off;
-	memcpy(s->data, rte_pktmbuf_mtod(p->mbuf, void *), len);
-}
-
-static int
-assert_unchanged(struct packet *p, const struct pkt_snapshot *s) {
-	TEST_ASSERT_EQUAL(packet_data_len(p), s->pkt_len, "pkt_len changed");
-	TEST_ASSERT_EQUAL(p->mbuf->data_off, s->data_off, "data_off changed");
-	TEST_ASSERT(
-		memcmp(rte_pktmbuf_mtod(p->mbuf, void *), s->data, s->pkt_len
-		) == 0,
-		"packet bytes changed"
-	);
-	return TEST_SUCCESS;
-}
-
 // MSS option builders
 
 static void
@@ -332,7 +304,7 @@ test_insert_no_mss(void) {
 		),
 		"build"
 	);
-	uint32_t pkt_len_before = rte_pktmbuf_pkt_len(p.mbuf);
+	uint32_t pkt_len_before = packet_data_len(&p);
 	uint16_t ip6_len_before = rte_be_to_cpu_16(pkt_ip6(&p)->payload_len);
 	uint8_t data_off_before = pkt_tcp(&p)->data_off;
 
@@ -341,7 +313,7 @@ test_insert_no_mss(void) {
 	);
 
 	TEST_ASSERT_EQUAL(
-		rte_pktmbuf_pkt_len(p.mbuf),
+		packet_data_len(&p),
 		pkt_len_before + 4u,
 		"pkt_len did not grow by 4"
 	);
@@ -505,13 +477,13 @@ test_eol_respected(void) {
 		),
 		"build"
 	);
-	uint32_t pkt_len_before = rte_pktmbuf_pkt_len(p.mbuf);
+	uint32_t pkt_len_before = packet_data_len(&p);
 
 	TEST_ASSERT_EQUAL(
 		packet_set_mss(&p, 1200, 1300), packet_set_mss_ok, "rc"
 	);
 	TEST_ASSERT_EQUAL(
-		rte_pktmbuf_pkt_len(p.mbuf),
+		packet_data_len(&p),
 		pkt_len_before + 4u,
 		"insert did not grow packet"
 	);
