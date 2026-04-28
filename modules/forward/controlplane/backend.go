@@ -41,3 +41,7 @@ func (m *backend) UpdateModule(name string, rules []cforward.ForwardRule) (Modul
 func (m *backend) DeleteModule(name string) error {
 	return m.agent.DeleteModuleConfig(name)
 }
+
+func (m *backend) Agent() FFIAgent {
+	return m.agent
+}
