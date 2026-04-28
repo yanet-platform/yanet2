@@ -133,7 +133,7 @@ balancer_free(struct agent *agent, struct balancer_handle *handle);
  * length equal to the number of reals configured for the VS and be
  * indexed in the same order as they were passed at VS creation.
  * Returns 0 on success, -1 if the length does not match the number
- * of reals, or -2 on allocation failure.
+ * of reals or vs_idx exceeds the number of VS, or -2 on allocation failure.
  */
 int
 balancer_vs_update_real_weights(
@@ -147,7 +147,7 @@ balancer_vs_update_real_weights(
  * length equal to the number of reals configured for the VS and be
  * indexed in the same order as they were passed at VS creation.
  * Returns 0 on success, -1 if the length does not match the number
- * of reals, or -2 on allocation failure.
+ * of reals or vs_idx exceeds the number of VS, or -2 on allocation failure.
  */
 int
 balancer_vs_update_real_states(
