@@ -77,3 +77,13 @@ Description: Yanet2 BIRD adapter component
  Control plane for Yanet2 BIRD import adapter.
  .
  This package contains the control-plane services that manage the BIRD import configurations that enable the BIRD import feed to push routes into route-instance configurations.
+
+Package: yanet2-pipeline-operator
+Architecture: any
+Depends: ${shlibs:Depends}
+ , ${misc:Depends}
+Description: YANET2 pipeline operator
+ Autonomous YANET2 pipeline lifecycle management operator.
+ .
+ This package contains the pipeline operator that owns pipelines
+ and device-to-pipeline bindings.

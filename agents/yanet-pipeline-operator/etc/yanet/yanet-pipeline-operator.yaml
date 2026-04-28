@@ -1,0 +1,55 @@
+logging:
+  level: debug
+
+server:
+  endpoint: "[::1]:50001"
+
+gateways:
+  - name: numa0
+    endpoint: "[::1]:8080"
+
+reconcile:
+  interval: 30s
+  initial_backoff: 500ms
+  max_backoff: 30s
+
+stages:
+  - name: bootstrap
+    pipelines:
+      - name: main
+        functions:
+          - "fn:decap"
+          - "fn:acl"
+          - "fn:route"
+      - name: bypass
+        functions: []
+    devices:
+      plain:
+        - name: virtio_user_kni0
+          input:
+            - name: main
+              weight: 1
+          output:
+            - name: bypass
+              weight: 1
+      vlan: []
+  - name: production
+    pipelines:
+      - name: main
+        functions:
+          - "fn:decap"
+          - "fn:acl"
+          - "fn:route"
+          - "fn:balancer"
+      - name: bypass
+        functions: []
+    devices:
+      plain:
+        - name: virtio_user_kni0
+          input:
+            - name: main
+              weight: 1
+          output:
+            - name: bypass
+              weight: 1
+      vlan: []
