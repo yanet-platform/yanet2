@@ -149,16 +149,24 @@ route_mpls_handle_packets(
 		}
 
 		// IANA-specified values
-		uint16_t src_port = htobe16(0xc000 | (0x3fff & packet->hash));
-		uint16_t dst_port = htobe16(6635);
+		uint16_t src_port_value = 0xc000 | (0x3fff & packet->hash);
+		uint16_t dst_port_value = 6635;
+		uint8_t src_port[2] = {
+			(uint8_t)(src_port_value >> 8),
+			(uint8_t)(src_port_value & 0xff),
+		};
+		uint8_t dst_port[2] = {
+			(uint8_t)(dst_port_value >> 8),
+			(uint8_t)(dst_port_value & 0xff),
+		};
 
 		if (nexthop->type == ROUTE_TYPE_V4) {
 			if (packet_ip4_encap_udp(
 				    packet,
 				    nexthop->ip4_tunnel.src,
 				    nexthop->ip4_tunnel.dst,
-				    (uint8_t *)&src_port,
-				    (uint8_t *)&dst_port
+				    src_port,
+				    dst_port
 			    )) {
 				// FIXME update error counter
 				packet_front_drop(packet_front, packet);
@@ -169,8 +177,8 @@ route_mpls_handle_packets(
 				    packet,
 				    nexthop->ip6_tunnel.src,
 				    nexthop->ip6_tunnel.dst,
-				    (uint8_t *)&src_port,
-				    (uint8_t *)&dst_port
+				    src_port,
+				    dst_port
 			    )) {
 				// FIXME update error counter
 				packet_front_drop(packet_front, packet);
