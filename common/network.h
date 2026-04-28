@@ -61,3 +61,5 @@ enum ip_family {
 	ip_family_ip4,
 	ip_family_ip6,
 };
+
+enum transport_proto { tcp, udp };
