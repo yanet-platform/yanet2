@@ -104,3 +104,15 @@ fill_packet_from_data(struct packet *packet, struct packet_info *data);
 
 void
 init_mbuf(struct rte_mbuf *m, struct packet_info *data, uint16_t buf_len);
+
+////////////////////////////////////////////////////////////////////////////////
+
+/// Allocate an mbuf using the default C allocator (aligned_alloc).
+///
+/// The buffer is laid out as `headroom + pkt_len + tailroom`; the data area is
+/// zeroed and refcount is initialised to 1. The caller owns the returned mbuf
+/// and must release it with free().
+///
+/// Returns NULL on allocation failure.
+struct rte_mbuf *
+alloc_mbuf(uint16_t headroom, uint16_t pkt_len, uint16_t tailroom);

@@ -6,6 +6,7 @@
 
 struct agent;
 struct cp_device;
+struct yanet_error;
 
 struct cp_device_vlan_config {
 	struct cp_device_config cp_device_config;
@@ -14,7 +15,9 @@ struct cp_device_vlan_config {
 
 struct cp_device *
 cp_device_vlan_create(
-	struct agent *agent, const struct cp_device_vlan_config *config
+	struct agent *agent,
+	const struct cp_device_vlan_config *config,
+	yanet_error **err
 );
 
 void
@@ -24,8 +27,9 @@ struct cp_device_vlan_config *
 cp_device_vlan_config_create(
 	const char *name,
 	uint64_t input_count,
-	uint64_t poutput_count,
-	uint16_t vlan
+	uint64_t output_count,
+	uint16_t vlan,
+	yanet_error **err
 );
 
 int

@@ -51,6 +51,7 @@
 #include "dataplane/packet/icmp.h"
 #include "dataplane/packet/packet.h"
 #include "lib/dataplane/module/packet_front.h"
+#include "lib/dataplane/pipeline/econtext.h"
 #include "modules/nat64/dataplane/nat64dp.h"
 
 /**

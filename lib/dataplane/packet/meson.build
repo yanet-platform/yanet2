@@ -9,6 +9,7 @@ sources = files(
   'dscp.c',
   'encap.c',
   'packet.c',
+  'mss.c',
 )
 
 lib_packet_dp = static_library(
@@ -27,3 +28,4 @@ lib_packet_dp_dep = declare_dependency(
   dependencies: dependencies,
   include_directories: yanet_libdir,
 )
+

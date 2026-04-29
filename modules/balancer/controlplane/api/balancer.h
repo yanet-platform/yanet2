@@ -8,17 +8,17 @@
 #include "stats.h"
 #include "vs.h"
 
+#include "lib/errors/errors.h"
+
 /**
- * Diagnostics
+ * Error handling
  *
- * Unless otherwise stated, on error each API function records a human-readable
- * diagnostic message associated with the balancer handle. Retrieve it via
- * balancer_take_error_msg().
+ * Unless otherwise stated, each API function takes an optional yanet_error**
+ * output parameter for error reporting. If an error occurs, *err is set to
+ * a newly allocated error object. The caller is responsible for freeing it
+ * with yanet_error_free().
  *
- * Ownership: The returned message is heap-allocated and must be freed by the
- * caller with free().
- *
- * For creation-time failures use the diag parameter of balancer_create().
+ * For creation-time failures the function returns NULL.
  */
 
 /**
@@ -93,40 +93,7 @@ struct agent;
  */
 struct balancer_handle;
 
-struct diag;
-
-/**
- * Create a new balancer instance and register it.
- *
- * On success returns a handle to the created balancer. On failure returns
- * NULL and records diagnostic information in the provided diag object.
- *
- * Diagnostics: On error, details are written into 'diag'. After a successful
- * creation, subsequent API calls record diagnostics on the balancer and can be
- * retrieved via balancer_take_error_msg().
- *
- * @param agent   Agent that will own the balancer.
- * @param name    Human-readable balancer name (used for identification).
- * @param config  Initial configuration.
- * @param diag    Diagnostics sink for error details (must not be NULL).
- * @return Newly created balancer handle on success, or NULL on error.
- */
-struct balancer_handle *
-balancer_create(
-	struct agent *agent, const char *name, struct balancer_config *config
-);
-
-/**
- * Retrieve the last diagnostic error message for this balancer.
- *
- * Ownership: The returned string is heap-allocated for the caller; you must
- * free() it when no longer needed. Returns NULL if no message is available.
- *
- * @param handle Balancer handle.
- * @return Null-terminated error message string to be freed by caller, or NULL.
- */
-const char *
-balancer_take_error_msg(struct balancer_handle *handle);
+struct yanet_error;
 
 /**
  * Get the name of the balancer instance.
@@ -143,17 +110,18 @@ balancer_name(struct balancer_handle *handle);
 /**
  * Resize the session table used by the balancer.
  *
- * Diagnostics: On error, a message is recorded and retrievable via
- * balancer_take_error_msg(handle).
- *
  * @param handle    Balancer handle.
  * @param new_size  New number of entries to allocate.
  * @param now       Current monotonic timestamp used for migration bookkeeping.
+ * @param err       Error output parameter. Only set if function returns -1.
  * @return 0 on success, -1 on error.
  */
 int
 balancer_resize_session_table(
-	struct balancer_handle *handle, size_t new_size, uint32_t now
+	struct balancer_handle *handle,
+	size_t new_size,
+	uint32_t now,
+	yanet_error **err
 );
 
 /**
@@ -174,26 +142,41 @@ size_t
 balancer_session_table_capacity(struct balancer_handle *handle);
 
 /**
- * Update packet handler configuration.
+ * Create a new balancer instance.
  *
- * This call applies changes such as timeouts, VS list or source addresses.
- * Returns information about filter reuse decisions in the update_info
- * parameter.
+ * Allocates memory and initializes internal data structures for a new load
+ * balancer with the given configuration. The balancer will be owned by the
+ * specified agent.
  *
- * Diagnostics: On error, a message is recorded and retrievable via
- * balancer_take_error_msg(balancer).
+ * @param agent   Agent that will own the balancer.
+ * @param name    Human-readable balancer name (used for identification).
+ * @param config  Initial configuration.
+ * @param err     Error output parameter.
+ * @return Newly created balancer handle on success, or NULL on error.
+ */
+struct balancer_handle *
+balancer_create(
+	struct agent *agent,
+	const char *name,
+	struct balancer_config *config,
+	yanet_error **err
+);
+
+/**
+ * Update the packet handler configuration for an existing balancer.
  *
- * @param balancer    Balancer handle.
- * @param config      New packet handler configuration.
- * @param update_info Output structure filled with update information.
- *                    May be NULL if caller doesn't need this information.
+ * @param handle     Balancer handle to update.
+ * @param config     New packet handler configuration.
+ * @param update_info Output parameter for update information (can be NULL).
+ * @param err        Error output parameter.
  * @return 0 on success, -1 on error.
  */
 int
 balancer_update_packet_handler(
-	struct balancer_handle *balancer,
+	struct balancer_handle *handle,
 	struct packet_handler_config *config,
-	struct balancer_update_info *update_info
+	struct balancer_update_info *update_info,
+	yanet_error **err
 );
 
 /**
@@ -217,19 +200,18 @@ balancer_update_info_free(struct balancer_update_info *update_info);
  * Each update may change weight and/or enabled state; to skip a field
  * use DONT_UPDATE_REAL_WEIGHT and DONT_UPDATE_REAL_ENABLED.
  *
- * Diagnostics: On error, a message is recorded and retrievable via
- * balancer_take_error_msg(balancer).
- *
  * @param balancer Balancer handle.
  * @param count    Number of updates in the array.
  * @param updates  Array of updates.
+ * @param err      Error output parameter.
  * @return 0 on success, -1 on error.
  */
 int
 balancer_update_reals(
 	struct balancer_handle *balancer,
 	size_t count,
-	struct real_update *updates
+	struct real_update *updates,
+	yanet_error **err
 );
 
 // Stats
@@ -250,19 +232,18 @@ struct packet_handler_ref {
 /**
  * Read balancer statistics, optionally filtered by packet handler reference.
  *
- * Diagnostics: On error, a message is recorded and retrievable via
- * balancer_take_error_msg(balancer).
- *
  * @param balancer Balancer handle.
  * @param stats    Output structure to be filled.
  * @param ref      Optional filter; pass NULL for aggregate stats.
+ * @param err      Error output parameter. Only set if function returns -1.
  * @return 0 on success, -1 on error.
  */
 int
 balancer_stats(
 	struct balancer_handle *balancer,
 	struct balancer_stats *stats,
-	struct packet_handler_ref *ref
+	struct packet_handler_ref *ref,
+	yanet_error **err
 );
 
 /**
@@ -356,9 +337,6 @@ struct balancer_info {
  * On success fills the provided structure and allocates arrays inside it.
  * Release all memory with balancer_info_free().
  *
- * Diagnostics: On error, a message is recorded and retrievable via
- * balancer_take_error_msg(balancer).
- *
  * @param balancer Balancer handle.
  * @param info     Output structure to be filled.
  * @return 0 on success, -1 on error.
@@ -392,9 +370,6 @@ balancer_info_free(struct balancer_info *info);
  * Returns a heap-allocated array of named_session_info entries representing
  * a point-in-time snapshot. The caller owns the array and must
  * balancer_sessions_free() it.
- *
- * Diagnostics: On error, a message is recorded and retrievable via
- * balancer_take_error_msg(balancer).
  *
  * @param balancer Balancer handle.
  * @param sessions Output pointer to a heap-allocated array of session infos.
@@ -496,19 +471,18 @@ balancer_graph_free(struct balancer_graph *graph);
  * coordinate between the high-level balancer API and the low-level
  * packet handler implementation.
  *
- * Diagnostics: On error, a message is recorded and retrievable via
- * balancer_take_error_msg(handle).
- *
  * @param handle   Balancer handle.
  * @param real     Real server identifier (VS + real address/port).
  * @param real_idx Output structure to be filled with indices.
+ * @param err      Error output parameter.
  * @return 0 on success, -1 on error (e.g., real not found).
  */
 int
 balancer_real_ph_idx(
 	struct balancer_handle *handle,
 	struct real_identifier *real,
-	struct real_ph_index *real_idx
+	struct real_ph_index *real_idx,
+	yanet_error **err
 );
 
 void

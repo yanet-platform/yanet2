@@ -10,6 +10,7 @@
 #include "filter/filter.h"
 
 #include "common/lpm.h"
+#include "lib/errors/errors.h"
 #include "map.h"
 #include "registry.h"
 
@@ -145,8 +146,7 @@ struct packet_handler {
  * Creates/configures a handler bound to the provided balancer_state.
  * Returns pointer on success, or NULL on error.
  *
- * Diagnostics: errors are recorded and retrievable via
- * balancer_take_error_msg() on the balancer associated with this handler.
+ * Error handling: On error, *err is set with detailed message.
  *
  * @param agent        Agent that will own the handler.
  * @param name         Handler name.
@@ -155,6 +155,7 @@ struct packet_handler {
  * @param prev_handler Previous handler for filter reuse (may be NULL).
  * @param update_info  Output structure filled with update information.
  *                     May be NULL if caller doesn't need this information.
+ * @param err          Error output parameter.
  * @return Pointer to new handler on success, NULL on error.
  */
 struct packet_handler *
@@ -164,7 +165,8 @@ packet_handler_setup(
 	struct packet_handler_config *config,
 	struct balancer_state *state,
 	struct packet_handler *prev_handler,
-	struct balancer_update_info *update_info
+	struct balancer_update_info *update_info,
+	yanet_error **err
 );
 
 /**
@@ -173,13 +175,15 @@ packet_handler_setup(
  * @param handler Handler instance.
  * @param count   Number of updates.
  * @param updates Array of real_update entries.
+ * @param err     Error output parameter.
  * @return 0 on success, -1 on error.
  */
 int
 packet_handler_update_reals(
 	struct packet_handler *handler,
 	size_t count,
-	struct real_update *updates
+	struct real_update *updates,
+	yanet_error **err
 );
 
 struct packet_handler_ref;
@@ -193,13 +197,15 @@ struct balancer_stats;
  * @param handler Packet handler instance
  * @param stats   Output structure to fill with statistics
  * @param ref     Reference to packet handler for counter access
+ * @param err     Error output parameter.
  * @return 0 on success, -1 on error
  */
 int
 packet_handler_fill_stats(
 	struct packet_handler *handler,
 	struct balancer_stats *stats,
-	struct packet_handler_ref *ref
+	struct packet_handler_ref *ref,
+	yanet_error **err
 );
 
 /**
@@ -211,13 +217,15 @@ packet_handler_fill_stats(
  * @param handler Packet handler instance
  * @param real    Real server identifier to look up
  * @param idx     Output structure filled with VS and real indices
+ * @param err     Error output parameter.
  * @return 0 on success, -1 if real not found
  */
 int
 packet_handler_real_idx(
 	struct packet_handler *handler,
 	struct real_identifier *real,
-	struct real_ph_index *idx
+	struct real_ph_index *idx,
+	yanet_error **err
 );
 
 /**

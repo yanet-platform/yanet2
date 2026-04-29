@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"unsafe"
 
+	"github.com/yanet-platform/yanet2/bindings/go/cerrors"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 )
 
@@ -25,12 +26,10 @@ func NewModuleConfig(agent *ffi.Agent, name string) (*ModuleConfig, error) {
 	cName := C.CString(name)
 	defer C.free(unsafe.Pointer(cName))
 
-	ptr, err := C.route_module_config_create((*C.struct_agent)(agent.AsRawPtr()), cName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize module config: %w", err)
-	}
+	var cErr *C.yanet_error
+	ptr := C.route_module_config_create((*C.struct_agent)(agent.AsRawPtr()), cName, &cErr)
 	if ptr == nil {
-		return nil, fmt.Errorf("failed to initialize module config: module %q not found", name)
+		return nil, fmt.Errorf("failed to initialize module config: %w", cerrors.FromC(unsafe.Pointer(cErr)))
 	}
 
 	return &ModuleConfig{
@@ -62,17 +61,16 @@ func (m *ModuleConfig) addRoute(dstMAC [6]byte, srcMAC [6]byte, device string) (
 	cName := C.CString(device)
 	defer C.free(unsafe.Pointer(cName))
 
-	idx, err := C.route_module_config_add_route(
+	var cErr *C.yanet_error
+	idx := C.route_module_config_add_route(
 		m.asRawPtr(),
 		*(*C.struct_ether_addr)(unsafe.Pointer(&dstMAC)),
 		*(*C.struct_ether_addr)(unsafe.Pointer(&srcMAC)),
 		cName,
+		&cErr,
 	)
-	if err != nil {
-		return -1, fmt.Errorf("route_module_config_add_route: %w", err)
-	}
 	if idx < 0 {
-		return -1, fmt.Errorf("route_module_config_add_route: unknown error")
+		return -1, fmt.Errorf("failed to add route: %w", cerrors.FromC(unsafe.Pointer(cErr)))
 	}
 
 	return int(idx), nil

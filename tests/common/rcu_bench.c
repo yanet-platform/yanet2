@@ -12,14 +12,24 @@
  * Run with: ./rcu_bench
  */
 
+#include "common/memory.h"
+#include "common/memory_block.h"
 #include "common/rcu.h"
 #include "lib/logging/log.h"
 
 #include <pthread.h>
 #include <stdatomic.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <sys/time.h>
 #include <unistd.h>
+
+#define BENCH_WORKERS 8
+
+// Shared benchmark memory context, initialised once in main() and used as
+// the rcu_init allocator for every benchmark.
+static struct block_allocator g_balloc;
+static struct memory_context g_mctx;
 
 ////////////////////////////////////////////////////////////////////////////////
 // Benchmark Helper Functions
@@ -62,24 +72,24 @@ benchmark_reader_func(void *arg) {
 
 static void
 benchmark_multiworker_throughput(size_t num_workers) {
-	if (num_workers > RCU_WORKERS) {
+	if (num_workers > BENCH_WORKERS) {
 		LOG(ERROR,
 		    "Cannot benchmark with %zu workers (max: %d)",
 		    num_workers,
-		    RCU_WORKERS);
+		    BENCH_WORKERS);
 		return;
 	}
 
 	LOG(INFO, "Benchmarking RCU with %zu workers...", num_workers);
 
 	rcu_t rcu;
-	rcu_init(&rcu);
+	rcu_init(&rcu, &g_mctx, BENCH_WORKERS);
 	atomic_ulong value = 0;
 	atomic_bool stop = false;
 	atomic_ullong total_reads = 0;
 
-	pthread_t threads[RCU_WORKERS];
-	struct benchmark_args args[RCU_WORKERS];
+	pthread_t threads[BENCH_WORKERS];
+	struct benchmark_args args[BENCH_WORKERS];
 
 	// Create reader threads
 	for (size_t i = 0; i < num_workers; i++) {
@@ -185,20 +195,20 @@ benchmark_contention(void) {
 	LOG(INFO, "Running contention benchmark...");
 
 	rcu_t rcu;
-	rcu_init(&rcu);
+	rcu_init(&rcu, &g_mctx, BENCH_WORKERS);
 	atomic_ulong value = 0;
 	atomic_ullong total_ops = 0;
-	uint64_t worker_times[RCU_WORKERS] = {0};
+	uint64_t worker_times[BENCH_WORKERS] = {0};
 
 	const size_t iterations_per_worker = 500000;
 
-	pthread_t threads[RCU_WORKERS];
-	struct contention_args args[RCU_WORKERS];
+	pthread_t threads[BENCH_WORKERS];
+	struct contention_args args[BENCH_WORKERS];
 
 	uint64_t start_time = get_time_us();
 
 	// Create all workers simultaneously for maximum contention
-	for (size_t i = 0; i < RCU_WORKERS; i++) {
+	for (size_t i = 0; i < BENCH_WORKERS; i++) {
 		args[i].rcu = &rcu;
 		args[i].value = &value;
 		args[i].worker_id = i;
@@ -216,7 +226,7 @@ benchmark_contention(void) {
 	}
 
 	// Wait for all workers
-	for (size_t i = 0; i < RCU_WORKERS; i++) {
+	for (size_t i = 0; i < BENCH_WORKERS; i++) {
 		pthread_join(threads[i], NULL);
 	}
 
@@ -232,7 +242,7 @@ benchmark_contention(void) {
 	uint64_t max_time = worker_times[0];
 	uint64_t sum_time = 0;
 
-	for (size_t i = 0; i < RCU_WORKERS; i++) {
+	for (size_t i = 0; i < BENCH_WORKERS; i++) {
 		if (worker_times[i] < min_time)
 			min_time = worker_times[i];
 		if (worker_times[i] > max_time)
@@ -240,11 +250,11 @@ benchmark_contention(void) {
 		sum_time += worker_times[i];
 	}
 
-	double avg_time = (double)sum_time / RCU_WORKERS;
+	double avg_time = (double)sum_time / BENCH_WORKERS;
 	double fairness = (double)min_time / (double)max_time;
 
 	LOG(INFO, "=== Contention Benchmark Results ===");
-	LOG(INFO, "  Workers: %d", RCU_WORKERS);
+	LOG(INFO, "  Workers: %d", BENCH_WORKERS);
 	LOG(INFO, "  Iterations per worker: %zu", iterations_per_worker);
 	LOG(INFO, "  Total operations: %lu", ops);
 	LOG(INFO, "  Total time: %.3f seconds", (double)total_time / 1000000.0);
@@ -253,7 +263,7 @@ benchmark_contention(void) {
 	    total_throughput / 1000000.0);
 	LOG(INFO,
 	    "  Per-worker throughput: %.2f Mops/sec",
-	    total_throughput / RCU_WORKERS / 1000000.0);
+	    total_throughput / BENCH_WORKERS / 1000000.0);
 	LOG(INFO,
 	    "  Worker time - min: %.3f ms, max: %.3f ms, avg: %.3f ms",
 	    (double)min_time / 1000.0,
@@ -272,7 +282,7 @@ benchmark_latency_distribution(void) {
 	LOG(INFO, "Running latency distribution benchmark...");
 
 	rcu_t rcu;
-	rcu_init(&rcu);
+	rcu_init(&rcu, &g_mctx, BENCH_WORKERS);
 	atomic_ulong value = 0;
 
 	const size_t num_samples = 10000;
@@ -395,11 +405,11 @@ writer_bench_func(void *arg) {
 
 static void
 benchmark_reader_writer_interaction(size_t num_readers) {
-	if (num_readers >= RCU_WORKERS) {
+	if (num_readers >= BENCH_WORKERS) {
 		LOG(ERROR,
 		    "Need at least 1 worker for writer (readers: %zu, max: %d)",
 		    num_readers,
-		    RCU_WORKERS - 1);
+		    BENCH_WORKERS - 1);
 		return;
 	}
 
@@ -408,7 +418,7 @@ benchmark_reader_writer_interaction(size_t num_readers) {
 	    num_readers);
 
 	rcu_t rcu;
-	rcu_init(&rcu);
+	rcu_init(&rcu, &g_mctx, BENCH_WORKERS);
 	atomic_ulong value = 0;
 	atomic_bool stop = false;
 	atomic_ullong total_reads = 0;
@@ -417,9 +427,9 @@ benchmark_reader_writer_interaction(size_t num_readers) {
 	const size_t max_latencies = 10000;
 	uint64_t update_latencies[max_latencies];
 
-	pthread_t reader_threads[RCU_WORKERS];
+	pthread_t reader_threads[BENCH_WORKERS];
 	pthread_t writer_thread;
-	struct reader_writer_bench_args reader_args[RCU_WORKERS];
+	struct reader_writer_bench_args reader_args[BENCH_WORKERS];
 	struct writer_bench_args writer_args;
 
 	// Create reader threads
@@ -529,15 +539,31 @@ main(void) {
 	log_enable_name("info");
 
 	LOG(INFO, "=== RCU Performance Benchmark Suite ===");
-	LOG(INFO, "RCU_WORKERS: %d", RCU_WORKERS);
+	LOG(INFO, "BENCH_WORKERS: %d", BENCH_WORKERS);
 	LOG(INFO, "");
+
+	const size_t arena_size = 1 << 20;
+	void *arena = malloc(arena_size);
+	if (arena == NULL) {
+		LOG(ERROR, "failed to allocate benchmark arena");
+		return 1;
+	}
+	if (block_allocator_init(&g_balloc) != 0) {
+		LOG(ERROR, "block_allocator_init failed");
+		return 1;
+	}
+	block_allocator_put_arena(&g_balloc, arena, arena_size);
+	if (memory_context_init(&g_mctx, "rcu_bench", &g_balloc) < 0) {
+		LOG(ERROR, "memory_context_init failed");
+		return 1;
+	}
 
 	// Benchmark 1: Throughput with varying worker counts
 	LOG(INFO, "--- Benchmark 1: Throughput Scalability ---");
 	size_t worker_counts[] = {1, 2, 4, 8};
 	for (size_t i = 0; i < sizeof(worker_counts) / sizeof(worker_counts[0]);
 	     i++) {
-		if (worker_counts[i] <= RCU_WORKERS) {
+		if (worker_counts[i] <= BENCH_WORKERS) {
 			benchmark_multiworker_throughput(worker_counts[i]);
 		}
 	}
@@ -555,12 +581,14 @@ main(void) {
 	size_t reader_counts[] = {1, 2, 4, 7};
 	for (size_t i = 0; i < sizeof(reader_counts) / sizeof(reader_counts[0]);
 	     i++) {
-		if (reader_counts[i] < RCU_WORKERS) {
+		if (reader_counts[i] < BENCH_WORKERS) {
 			benchmark_reader_writer_interaction(reader_counts[i]);
 		}
 	}
 
 	LOG(INFO, "=== Benchmark Suite Completed ===");
+
+	free(arena);
 
 	return 0;
 }

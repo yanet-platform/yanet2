@@ -8,6 +8,8 @@
 
 #include "controlplane/config/defines.h"
 
+#include "lib/errors/errors.h"
+
 #define FORWARD_MODE_NONE 0
 #define FORWARD_MODE_IN 1
 #define FORWARD_MODE_OUT 2
@@ -16,7 +18,9 @@ struct agent;
 struct cp_module;
 
 struct cp_module *
-forward_module_config_init(struct agent *agent, const char *name);
+forward_module_config_init(
+	struct agent *agent, const char *name, yanet_error **err
+);
 
 void
 forward_module_config_free(struct cp_module *cp_module);
@@ -41,7 +45,8 @@ int
 forward_module_config_update(
 	struct cp_module *cp_module,
 	struct forward_rule *rules,
-	uint32_t rule_count
+	uint32_t rule_count,
+	yanet_error **err
 );
 
 // Enables deletion of configurations for the forwarding module.

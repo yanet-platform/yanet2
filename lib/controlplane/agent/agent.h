@@ -6,7 +6,7 @@
 
 #include "common/memory.h"
 
-#include "lib/controlplane/diag/diag.h"
+#include "lib/errors/errors.h"
 
 struct dp_config;
 struct cp_config;
@@ -46,8 +46,6 @@ struct agent {
 	struct agent_storage *storage;
 
 	struct cp_module *unused_module;
-
-	struct diag diag;
 };
 
 struct dp_config *
@@ -60,7 +58,10 @@ struct cp_module;
 
 int
 agent_update_modules(
-	struct agent *agent, size_t module_count, struct cp_module **cp_modules
+	struct agent *agent,
+	size_t module_count,
+	struct cp_module **cp_modules,
+	yanet_error **err
 );
 
 /*
@@ -70,7 +71,10 @@ agent_update_modules(
  */
 int
 agent_delete_module(
-	struct agent *agent, const char *module_type, const char *module_name
+	struct agent *agent,
+	const char *module_type,
+	const char *module_name,
+	yanet_error **err
 );
 
 struct cp_chain_config *
@@ -104,7 +108,13 @@ int
 agent_update_functions(
 	struct agent *agent,
 	uint64_t function_count,
-	struct cp_function_config *functions[]
+	struct cp_function_config *functions[],
+	yanet_error **err
+);
+
+int
+agent_delete_function(
+	struct agent *agent, const char *function_name, yanet_error **err
 );
 
 struct cp_pipeline_config;
@@ -124,11 +134,24 @@ int
 agent_update_pipelines(
 	struct agent *agent,
 	size_t pipeline_count,
-	struct cp_pipeline_config *pipelines[]
+	struct cp_pipeline_config *pipelines[],
+	yanet_error **err
 );
 
 int
-agent_delete_pipeline(struct agent *agent, const char *pipeline_name);
+agent_delete_pipeline(
+	struct agent *agent, const char *pipeline_name, yanet_error **err
+);
+
+struct cp_device;
+
+int
+agent_update_devices(
+	struct agent *agent,
+	uint64_t device_count,
+	struct cp_device *devices[],
+	yanet_error **err
+);
 
 struct cp_device_config;
 

@@ -6,6 +6,7 @@ package ffi
 #cgo CFLAGS: -I../../ -I../../../../../
 #cgo LDFLAGS: -L../../../../../build/modules/balancer/agent -lbalancer_agent -L../../../../../build/modules/balancer/controlplane/api -lbalancer_cp -L../../../../../build/modules/balancer/controlplane/handler -lbalancer_packet_handler -L../../../../../build/modules/balancer/controlplane/state -lbalancer_state -lbalancer_packet_handler -lbalancer_state
 #include "agent.h"
+#include "lib/errors/errors.h"
 #include "modules/balancer/controlplane/api/inspect.h"
 #include <stdlib.h>
 */
@@ -15,6 +16,7 @@ import (
 	"fmt"
 	"unsafe"
 
+	"github.com/yanet-platform/yanet2/bindings/go/cerrors"
 	yanet "github.com/yanet-platform/yanet2/controlplane/ffi"
 )
 
@@ -35,9 +37,10 @@ func NewBalancerAgent(
 	cShm := (*C.struct_yanet_shm)(shm.AsRawPtr())
 	cMemory := C.size_t(memory)
 
-	handle := C.balancer_agent(cShm, cMemory)
+	var cErr *C.yanet_error
+	handle := C.balancer_agent(cShm, cMemory, &cErr)
 	if handle == nil {
-		return nil, fmt.Errorf("failed to attach balancer agent")
+		return nil, fmt.Errorf("failed to attach balancer agent: %w", cerrors.FromC(unsafe.Pointer(cErr)))
 	}
 
 	return &BalancerAgent{handle: handle}, nil
@@ -85,16 +88,10 @@ func (a *BalancerAgent) NewManager(
 	}
 	defer freeCBalancerManagerConfig(cConfig)
 
-	handle := C.balancer_agent_new_manager(a.handle, cName, cConfig)
+	var cErr *C.yanet_error
+	handle := C.balancer_agent_new_manager(a.handle, cName, cConfig, &cErr)
 	if handle == nil {
-		// Get error message from agent
-		cErr := C.balancer_agent_take_error(a.handle)
-		if cErr != nil {
-			errMsg := C.GoString(cErr)
-			C.free(unsafe.Pointer(cErr))
-			return nil, fmt.Errorf("%s", errMsg)
-		}
-		return nil, fmt.Errorf("unknown error")
+		return nil, fmt.Errorf("failed to create new balancer manager: %w", cerrors.FromC(unsafe.Pointer(cErr)))
 	}
 
 	return &BalancerManager{handle: handle}, nil

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "lib/errors/errors.h"
 #include <stddef.h>
 
 struct packet_handler;
@@ -54,6 +55,7 @@ can_reuse_filter(int current_vs_count, int prev_vs_count, int match_count);
  * @param configs Array of VS configurations (will be reordered)
  * @param ipv4_count Output: number of IPv4 services
  * @param ipv6_count Output: number of IPv6 services
+ * @param err Error pointer for reporting
  * @return 0 on success, -1 on error
  */
 int
@@ -62,7 +64,8 @@ validate_and_reorder_vs_configs(
 	size_t count,
 	struct named_vs_config *configs,
 	size_t *ipv4_count,
-	size_t *ipv6_count
+	size_t *ipv6_count,
+	yanet_error **err
 );
 
 /**
@@ -74,6 +77,7 @@ validate_and_reorder_vs_configs(
  * @param configs Array of VS configurations
  * @param prev_handler Previous packet handler (may be NULL)
  * @param match Output: number of matching VS with previous config
+ * @param err Error pointer for reporting
  * @return 0 on success, -1 on error
  */
 int
@@ -83,7 +87,8 @@ register_virtual_services(
 	const size_t *initial_vs_idx,
 	struct named_vs_config *configs,
 	struct packet_handler *prev_handler,
-	size_t *match
+	size_t *match,
+	yanet_error **err
 );
 
 /**
@@ -98,6 +103,7 @@ register_virtual_services(
  * @param virtual_services Array of VS structures to initialize
  * @param update_info Update information structure (may be NULL)
  * @param reuse_filter Output: 1 if filter can be reused, 0 otherwise
+ * @param err Error pointer for reporting
  * @return 0 on success, -1 on error
  */
 int
@@ -110,7 +116,8 @@ register_and_prepare_vs(
 	size_t *initial_vs_idx,
 	struct vs *virtual_services,
 	struct balancer_update_info *update_info,
-	int *reuse_filter
+	int *reuse_filter,
+	yanet_error **err
 );
 
 /**
@@ -126,6 +133,7 @@ register_and_prepare_vs(
  * @param reals_counter Counter for reals (will be incremented)
  * @param update_info Update information structure (may be NULL)
  * @param initial_vs_idx Array of initial VS indices for error reporting
+ * @param err Error pointer for reporting
  * @return 0 on success, -1 on error
  */
 int
@@ -139,30 +147,33 @@ init_packet_handler_vs(
 	struct real *reals,
 	size_t *reals_counter,
 	struct balancer_update_info *update_info,
-	size_t *initial_vs_idx
+	size_t *initial_vs_idx,
+	yanet_error **err
 );
 
 /**
- * Initialize VS filter for a packet handler VS.
+ * Initialize VS filter for a packet handler.
  *
  * @param packet_handler_vs Packet handler VS structure
  * @param prev_packet_handler_vs Previous packet handler VS (may be NULL)
+ * @param initial_vs_idx Array of initial VS indices for error reporting
  * @param vs_configs Array of VS configurations
  * @param reuse_filter 1 if filter should be reused, 0 otherwise
  * @param mctx Memory context
- * @param initial_vs_idx Array of initial VS indices for error reporting
  * @param proto IP protocol (IPPROTO_IP or IPPROTO_IPV6)
+ * @param err Error pointer for reporting
  * @return 0 on success, -1 on error
  */
 int
 init_vs_filter(
 	struct packet_handler_vs *packet_handler_vs,
 	struct packet_handler_vs *prev_packet_handler_vs,
+	size_t *initial_vs_idx,
 	struct named_vs_config *vs_configs,
 	int reuse_filter,
 	struct memory_context *mctx,
-	size_t *initial_vs_idx,
-	int proto
+	int proto,
+	yanet_error **err
 );
 
 /**
@@ -172,6 +183,8 @@ init_vs_filter(
  * @param mctx Memory context
  * @param vs_configs Array of VS configurations
  * @param proto IP protocol (IPPROTO_IP or IPPROTO_IPV6)
+ * @param initial_vs_idx Array of initial VS indices for error reporting
+ * @param err Error pointer for reporting
  * @return 0 on success, -1 on error
  */
 int
@@ -179,7 +192,9 @@ init_announce(
 	struct packet_handler_vs *handler,
 	struct memory_context *mctx,
 	struct named_vs_config *vs_configs,
-	int proto
+	int proto,
+	const size_t *initial_vs_idx,
+	yanet_error **err
 );
 
 /**
@@ -189,6 +204,7 @@ init_announce(
  * @param virtual_services Array of VS structures
  * @param initial_vs_idx Array of initial VS indices for error reporting
  * @param mctx Memory context
+ * @param err Error pointer for reporting
  * @return 0 on success, -1 on error
  */
 int
@@ -196,5 +212,6 @@ setup_vs_index(
 	struct packet_handler *handler,
 	struct vs *virtual_services,
 	size_t *initial_vs_idx,
-	struct memory_context *mctx
+	struct memory_context *mctx,
+	yanet_error **err
 );

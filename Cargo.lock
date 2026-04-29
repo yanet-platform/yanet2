@@ -3118,6 +3118,7 @@ dependencies = [
  "tonic",
  "tonic-build",
  "yanet-cli",
+ "yanet-filterpb",
 ]
 
 [[package]]
@@ -3279,6 +3280,7 @@ dependencies = [
  "tonic",
  "tonic-build",
  "yanet-cli",
+ "yanet-filterpb",
 ]
 
 [[package]]
@@ -3456,6 +3458,17 @@ dependencies = [
 name = "yanet-commonpb"
 version = "0.1.0"
 dependencies = [
+ "prost",
+ "serde",
+ "tonic",
+ "tonic-build",
+]
+
+[[package]]
+name = "yanet-filterpb"
+version = "0.1.0"
+dependencies = [
+ "netip",
  "prost",
  "serde",
  "tonic",

@@ -1,7 +1,7 @@
 #include "state.h"
 
 #include "common/memory.h"
-#include "controlplane/diag/diag.h"
+#include "lib/errors/errors.h"
 #include "session_table.h"
 #include <assert.h>
 #include <stdalign.h>
@@ -12,7 +12,8 @@ balancer_state_init(
 	struct balancer_state *state,
 	struct memory_context *mctx,
 	size_t workers,
-	size_t table_size
+	size_t table_size,
+	yanet_error **err
 ) {
 	assert((uintptr_t)state % alignof(struct balancer_state) == 0);
 
@@ -20,9 +21,11 @@ balancer_state_init(
 	state->workers = workers;
 
 	// init session table
-	int res = session_table_init(&state->session_table, mctx, table_size);
+	int res = session_table_init(
+		&state->session_table, mctx, table_size, err
+	);
 	if (res != 0) {
-		NEW_ERROR("failed to initialize session table");
+		yanet_error_add(err, "failed to initialize session table");
 		return -1;
 	}
 
@@ -38,9 +41,12 @@ balancer_state_free(struct balancer_state *state) {
 
 int
 balancer_state_resize_session_table(
-	struct balancer_state *state, size_t new_size, uint32_t now
+	struct balancer_state *state,
+	size_t new_size,
+	uint32_t now,
+	yanet_error **err
 ) {
-	return session_table_resize(&state->session_table, new_size, now);
+	return session_table_resize(&state->session_table, new_size, now, err);
 }
 
 size_t

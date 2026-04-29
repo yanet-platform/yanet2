@@ -2,7 +2,7 @@ dependencies = [
   lib_common_dep,
   lib_config_dp_dep,
   lib_config_cp_dep,
-  lib_diag_dep,
+  lib_errors_dep,
 ]
 
 sources = files(
@@ -20,5 +20,6 @@ lib_agent_cp = static_library(
 
 lib_agent_cp_dep = declare_dependency(
   link_with: lib_agent_cp,
+  dependencies: [lib_errors_dep],
   include_directories: yanet_libdir,
 )

@@ -1,7 +1,7 @@
 #include "agent.h"
 #include "api/agent.h"
 #include "controlplane/agent/agent.h"
-#include "controlplane/diag/diag.h"
+#include "lib/errors/errors.h"
 #include "manager.h"
 #include "modules/balancer/controlplane/api/balancer.h"
 #include <assert.h>
@@ -16,10 +16,10 @@ const char *storage_name = "balancer_storage";
 ////////////////////////////////////////////////////////////////////////////////
 
 struct balancer_agent *
-balancer_agent(struct yanet_shm *shm, size_t memory) {
-	struct agent *agent = agent_reattach(shm, 0, agent_name, memory);
+balancer_agent(struct yanet_shm *shm, size_t memory, yanet_error **err) {
+	struct agent *agent = agent_reattach(shm, 0, agent_name, memory, err);
 	if (agent == NULL) {
-		PUSH_ERROR("failed to reattach balancer agent");
+		yanet_error_add(err, "failed to reattach balancer agent");
 		return NULL;
 	}
 
@@ -27,20 +27,21 @@ balancer_agent(struct yanet_shm *shm, size_t memory) {
 		struct balancer_managers managers;
 		memset(&managers, 0, sizeof(managers));
 		if (agent_storage_put(
-			    agent, storage_name, &managers, sizeof(managers)
+			    agent,
+			    storage_name,
+			    &managers,
+			    sizeof(managers),
+			    err
 		    ) != 0) {
-			PUSH_ERROR("failed to allocate balancer storage");
+			yanet_error_add(
+				err, "failed to allocate balancer storage"
+			);
 			agent_cleanup(agent);
 			return NULL;
 		}
 	}
 
 	return (struct balancer_agent *)agent;
-}
-
-const char *
-balancer_agent_take_error(struct balancer_agent *agent) {
-	return agent_take_error((struct agent *)agent);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

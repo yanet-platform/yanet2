@@ -314,14 +314,12 @@ balancer_manager_config(
  * WLC parameters, refresh period, and load factor. This may trigger
  * reconfiguration of underlying balancer instances.
  *
- * Diagnostics: On error, a message is recorded and retrievable via
- * balancer_manager_take_error().
- *
  * @param manager     Manager handle.
  * @param config      New configuration to apply.
  * @param update_info Optional output structure to receive update metadata.
  *                    Pass NULL if metadata is not needed.
  * @param now         Current monotonic timestamp for bookkeeping.
+ * @param err         Error output pointer. Set on error.
  * @return 0 on success, -1 on error.
  */
 int
@@ -329,7 +327,8 @@ balancer_manager_update(
 	struct balancer_manager *manager,
 	struct balancer_manager_config *config,
 	struct balancer_update_info *update_info,
-	uint32_t now
+	uint32_t now,
+	yanet_error **err
 );
 
 /**
@@ -338,19 +337,18 @@ balancer_manager_update(
  * Updates the state (weight, enabled status) of one or more real servers
  * managed by this manager. Each update may change weight and/or enabled state.
  *
- * Diagnostics: On error, a message is recorded and retrievable via
- * balancer_manager_take_error().
- *
  * @param manager Manager handle.
  * @param count   Number of updates in the array.
  * @param updates Array of real server updates to apply.
+ * @param err     Error output pointer. Set on error.
  * @return 0 on success, -1 on error.
  */
 int
 balancer_manager_update_reals(
 	struct balancer_manager *manager,
 	size_t count,
-	struct real_update *updates
+	struct real_update *updates,
+	yanet_error **err
 );
 
 /**
@@ -405,21 +403,20 @@ balancer_manager_update_reals(
  * when WLC is enabled. Manual calls are rare and should be done with
  * caution to avoid interfering with the WLC algorithm.
  *
- * Diagnostics: On error, a message is recorded and retrievable via
- * balancer_manager_take_error().
- *
  * @param manager Manager handle.
  * @param count   Number of updates in the array.
  * @param updates Array of real server weight updates. Each update MUST:
  *                - Have weight != DONT_UPDATE_REAL_WEIGHT
  *                - Have enabled == DONT_UPDATE_REAL_ENABLED
+ * @param err     Error output pointer. Set on error.
  * @return 0 on success, -1 on error (including validation failures).
  */
 int
 balancer_manager_update_reals_wlc(
 	struct balancer_manager *manager,
 	size_t count,
-	struct real_update *updates
+	struct real_update *updates,
+	yanet_error **err
 );
 
 /**
@@ -429,17 +426,18 @@ balancer_manager_update_reals_wlc(
  * concurrent sessions. This operation may involve memory reallocation and
  * session migration.
  *
- * Diagnostics: On error, a message is recorded and retrievable via
- * balancer_manager_take_error().
- *
  * @param manager  Manager handle.
  * @param new_size New number of session table entries to allocate.
  * @param now      Current monotonic timestamp for migration bookkeeping.
+ * @param err      Error output pointer. Set on error.
  * @return 0 on success, -1 on error.
  */
 int
 balancer_manager_resize_session_table(
-	struct balancer_manager *manager, size_t new_size, uint32_t now
+	struct balancer_manager *manager,
+	size_t new_size,
+	uint32_t now,
+	yanet_error **err
 );
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -452,9 +450,6 @@ balancer_manager_resize_session_table(
  * Retrieves comprehensive information including active sessions, virtual
  * services, and real server states. On success, allocates arrays inside
  * the info structure that must be freed with balancer_manager_info_free().
- *
- * Diagnostics: On error, a message is recorded and retrievable via
- * balancer_manager_take_error().
  *
  * @param manager Manager handle.
  * @param info    Output structure to be filled with balancer information.
@@ -493,20 +488,19 @@ balancer_manager_sessions(
  * by packet handler reference. On success, allocates data inside the stats
  * structure that must be freed with balancer_manager_stats_free().
  *
- * Diagnostics: On error, a message is recorded and retrievable via
- * balancer_manager_take_error().
- *
  * @param manager Manager handle.
  * @param stats   Output structure to be filled with statistics.
  * @param ref     Optional filter for specific packet handler; pass NULL for
  * aggregate.
+ * @param err     Error output pointer. Set on error.
  * @return 0 on success, -1 on error.
  */
 int
 balancer_manager_stats(
 	struct balancer_manager *manager,
 	struct balancer_stats *stats,
-	struct packet_handler_ref *ref
+	struct packet_handler_ref *ref,
+	yanet_error **err
 );
 
 /**
@@ -602,21 +596,6 @@ balancer_manager_inspect(
  */
 void
 balancer_manager_inspect_free(struct balancer_inspect *inspect);
-
-/**
- * Retrieve the last diagnostic error message for this manager.
- *
- * Returns the most recent error message recorded by manager operations.
- * After calling this function, the error state is cleared.
- *
- * Ownership: The returned string is heap-allocated for the caller; you must
- * free() it when no longer needed. Returns NULL if no error is available.
- *
- * @param manager Manager handle.
- * @return Null-terminated error message string to be freed by caller, or NULL.
- */
-const char *
-balancer_manager_take_error(struct balancer_manager *manager);
 
 void
 balancer_manager_active_sessions(

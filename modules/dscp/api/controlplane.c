@@ -7,12 +7,15 @@
 #include "common/container_of.h"
 #include "common/memory_address.h"
 #include "common/strutils.h"
+#include "lib/errors/errors.h"
 
 #include "controlplane/agent/agent.h"
 #include "dataplane/config/zone.h"
 
 struct cp_module *
-dscp_module_config_create(struct agent *agent, const char *name) {
+dscp_module_config_create(
+	struct agent *agent, const char *name, yanet_error **err
+) {
 	// Allocate a new dscp module config
 	struct dscp_module_config *config =
 		(struct dscp_module_config *)memory_balloc(
@@ -20,11 +23,12 @@ dscp_module_config_create(struct agent *agent, const char *name) {
 			sizeof(struct dscp_module_config)
 		);
 	if (config == NULL) {
-		errno = ENOMEM;
+		yanet_error_add(err, "failed to allocate config");
 		return NULL;
 	}
 
-	if (cp_module_init(&config->cp_module, agent, "dscp", name)) {
+	if (cp_module_init(&config->cp_module, agent, "dscp", name, err)) {
+		yanet_error_add(err, "failed to init module");
 		memory_bfree(
 			&agent->memory_context,
 			config,
@@ -37,6 +41,7 @@ dscp_module_config_create(struct agent *agent, const char *name) {
 	if (dscp_module_config_data_init(
 		    config, &config->cp_module.memory_context
 	    )) {
+		yanet_error_add(err, "failed to init config data");
 		memory_bfree(
 			&agent->memory_context,
 			config,
