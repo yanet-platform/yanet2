@@ -355,6 +355,11 @@ test_v6_in_v4(void) {
 		),
 		"post-encap state"
 	);
+	TEST_ASSERT_EQUAL(
+		pkt_eth(&p)->ether_type,
+		rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4),
+		"ether type"
+	);
 
 	struct rte_ipv4_hdr *outer = pkt_outer_ip4(&p);
 	TEST_ASSERT_EQUAL(
@@ -390,6 +395,15 @@ test_v6_in_v4(void) {
 	);
 	TEST_ASSERT_SUCCESS(assert_gre_flags_zero(gre), "GRE flags zero");
 
+	struct rte_ipv6_hdr *inner = (struct rte_ipv6_hdr *)(gre + 1);
+	TEST_ASSERT(
+		memcmp(inner->src_addr, inner_src6, NET6_LEN) == 0,
+		"inner src preserved"
+	);
+	TEST_ASSERT(
+		memcmp(inner->dst_addr, inner_dst6, NET6_LEN) == 0,
+		"inner dst preserved"
+	);
 	TEST_ASSERT_SUCCESS(
 		assert_inner_payload_preserved(
 			&p, added, sizeof(struct rte_ipv6_hdr)
@@ -470,6 +484,15 @@ test_v4_in_v6(void) {
 	);
 	TEST_ASSERT_SUCCESS(assert_gre_flags_zero(gre), "GRE flags zero");
 
+	struct rte_ipv4_hdr *inner = (struct rte_ipv4_hdr *)(gre + 1);
+	TEST_ASSERT(
+		memcmp(&inner->src_addr, inner_src4, NET4_LEN) == 0,
+		"inner src preserved"
+	);
+	TEST_ASSERT(
+		memcmp(&inner->dst_addr, inner_dst4, NET4_LEN) == 0,
+		"inner dst preserved"
+	);
 	TEST_ASSERT_SUCCESS(
 		assert_inner_payload_preserved(
 			&p, added, sizeof(struct rte_ipv4_hdr)
@@ -522,6 +545,12 @@ test_v6_in_v6(void) {
 			   sizeof(struct rte_ipv6_hdr) + INNER_PAYLOAD_LEN),
 		"payload_len = gre + inner"
 	);
+	TEST_ASSERT(
+		memcmp(outer->src_addr, outer_src6, NET6_LEN) == 0, "outer src"
+	);
+	TEST_ASSERT(
+		memcmp(outer->dst_addr, outer_dst6, NET6_LEN) == 0, "outer dst"
+	);
 
 	struct rte_gre_hdr *gre = pkt_gre_after_ip6(&p);
 	TEST_ASSERT_EQUAL(
@@ -531,6 +560,15 @@ test_v6_in_v6(void) {
 	);
 	TEST_ASSERT_SUCCESS(assert_gre_flags_zero(gre), "GRE flags zero");
 
+	struct rte_ipv6_hdr *inner = (struct rte_ipv6_hdr *)(gre + 1);
+	TEST_ASSERT(
+		memcmp(inner->src_addr, inner_src6, NET6_LEN) == 0,
+		"inner src preserved"
+	);
+	TEST_ASSERT(
+		memcmp(inner->dst_addr, inner_dst6, NET6_LEN) == 0,
+		"inner dst preserved"
+	);
 	TEST_ASSERT_SUCCESS(
 		assert_inner_payload_preserved(
 			&p, added, sizeof(struct rte_ipv6_hdr)
