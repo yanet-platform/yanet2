@@ -12,7 +12,6 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/encoding/gzip"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
@@ -120,7 +119,7 @@ func NewGateway(cfg *Config, shm *ffi.SharedMemory, options ...GatewayOption) (*
 		return proxy.One2One, []proxy.Backend{backend}, nil
 	}
 
-	server := grpc.NewServer(
+	serverOpts := []grpc.ServerOption{
 		grpc.ChainUnaryInterceptor(
 			auth.UnaryServerInterceptor(authManager, log.Desugar()),
 			xgrpc.AccessLogInterceptor(log.Desugar()),
@@ -128,13 +127,21 @@ func NewGateway(cfg *Config, shm *ffi.SharedMemory, options ...GatewayOption) (*
 		grpc.ChainStreamInterceptor(
 			auth.StreamServerInterceptor(authManager, log.Desugar()),
 		),
-		grpc.MaxRecvMsgSize(1024*1024*256),
-		grpc.MaxSendMsgSize(1024*1024*256),
+		grpc.MaxRecvMsgSize(1024 * 1024 * 256),
+		grpc.MaxSendMsgSize(1024 * 1024 * 256),
 		grpc.ForceServerCodecV2(proxy.Codec()),
 		grpc.UnknownServiceHandler(
 			proxy.TransparentHandler(director),
 		),
-	)
+	}
+	if cfg.Server.TLS != nil {
+		creds, err := cfg.Server.TLS.ServerCredentials()
+		if err != nil {
+			return nil, fmt.Errorf("load gateway TLS: %w", err)
+		}
+		serverOpts = append(serverOpts, grpc.Creds(creds))
+	}
+	server := grpc.NewServer(serverOpts...)
 
 	gatewayService := NewGatewayService(registry, opts.Log)
 	loggingService := NewLoggingService(opts.LogLevel, opts.Log)
@@ -164,14 +171,17 @@ func NewGateway(cfg *Config, shm *ffi.SharedMemory, options ...GatewayOption) (*
 	ynpb.RegisterAuthServiceServer(server, authService)
 	log.Infow("registered service", zap.String("service", fmt.Sprintf("%T", authService)))
 
-	// Register built-in services in the registry for HTTP gateway access
-	registerBuiltInServices(registry, cfg.Server.Endpoint, log)
+	// Register built-in services in the registry for HTTP gateway access.
+	if err := registerBuiltInServices(registry, cfg.Server.Endpoint, cfg.Server.TLS, log); err != nil {
+		return nil, fmt.Errorf("failed to register built-in services: %w", err)
+	}
 
 	builtInModules := make([]*BuiltInModuleRunner, 0)
 	for _, mod := range opts.BuiltInModules {
 		builtInModules = append(builtInModules, NewBuiltInModuleRunner(
 			mod,
 			cfg.Server.Endpoint,
+			cfg.Server.TLS,
 			log,
 		))
 	}
@@ -258,8 +268,22 @@ func (m *Gateway) runHTTPServer(ctx context.Context) error {
 		}
 	}()
 
-	m.log.Infow("exposing HTTP <-> gRPC gateway", zap.String("addr", m.cfg.Server.HTTPEndpoint))
-	if err := server.ListenAndServe(); err != http.ErrServerClosed {
+	scheme := "http"
+	listen := server.ListenAndServe
+	if tlsCfg := m.cfg.Server.TLS; tlsCfg != nil {
+		scheme = "https"
+		cert, key := tlsCfg.CertFile.Unwrap(), tlsCfg.KeyFile.Unwrap()
+
+		listen = func() error {
+			return server.ListenAndServeTLS(cert, key)
+		}
+	}
+
+	m.log.Infow("exposing HTTP <-> gRPC gateway",
+		zap.String("scheme", scheme),
+		zap.String("addr", m.cfg.Server.HTTPEndpoint),
+	)
+	if err := listen(); err != http.ErrServerClosed {
 		return fmt.Errorf("failed to serve: %w", err)
 	}
 
@@ -268,7 +292,12 @@ func (m *Gateway) runHTTPServer(ctx context.Context) error {
 
 // registerBuiltInServices registers built-in services in the registry for HTTP
 // gateway access.
-func registerBuiltInServices(registry *BackendRegistry, endpoint string, log *zap.SugaredLogger) {
+func registerBuiltInServices(registry *BackendRegistry, endpoint string, tlsCfg *TLSConfig, log *zap.SugaredLogger) error {
+	creds, err := transportCredentials(tlsCfg, endpoint)
+	if err != nil {
+		return fmt.Errorf("failed to build loopback TLS credentials: %w", err)
+	}
+
 	conn, err := grpc.NewClient(
 		"passthrough:target",
 		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
@@ -279,11 +308,10 @@ func registerBuiltInServices(registry *BackendRegistry, endpoint string, log *za
 			grpc.ForceCodecV2(proxy.Codec()),
 			grpc.UseCompressor(gzip.Name),
 		),
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithTransportCredentials(creds),
 	)
 	if err != nil {
-		log.Warnw("failed to create gRPC client for built-in services", zap.Error(err))
-		return
+		return fmt.Errorf("failed to create gRPC client for built-in services: %w", err)
 	}
 
 	backend := &proxy.SingleBackend{
@@ -308,4 +336,6 @@ func registerBuiltInServices(registry *BackendRegistry, endpoint string, log *za
 		registry.RegisterBackend(serviceName, backend)
 		log.Debugw("registered built-in service in registry", zap.String("service", serviceName))
 	}
+
+	return nil
 }
