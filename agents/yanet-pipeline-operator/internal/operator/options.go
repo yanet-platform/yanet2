@@ -26,18 +26,20 @@ func WithLog(log *zap.Logger) Option {
 }
 
 type reconcilerOptions struct {
-	Log            *zap.Logger
 	Interval       time.Duration
 	InitialBackoff time.Duration
 	MaxBackoff     time.Duration
+	Metrics        ReconcilerMetricsObserver
+	Log            *zap.Logger
 }
 
 func newReconcilerOptions() *reconcilerOptions {
 	return &reconcilerOptions{
-		Log:            zap.NewNop(),
 		Interval:       DefaultReconcileInterval,
 		InitialBackoff: DefaultReconcileInitialBackoff,
 		MaxBackoff:     DefaultReconcileMaxBackoff,
+		Metrics:        noopReconcilerMetricsObserver{},
+		Log:            zap.NewNop(),
 	}
 }
 
@@ -67,13 +69,21 @@ func WithReconcileBackoff(initial, max time.Duration) ReconcilerOption {
 	}
 }
 
+func WithReconcilerMetrics(metrics ReconcilerMetricsObserver) ReconcilerOption {
+	return func(o *reconcilerOptions) {
+		o.Metrics = metrics
+	}
+}
+
 type serviceOptions struct {
-	Log *zap.Logger
+	Metrics MetricsCollector
+	Log     *zap.Logger
 }
 
 func newServiceOptions() *serviceOptions {
 	return &serviceOptions{
-		Log: zap.NewNop(),
+		Metrics: noopMetricsCollector{},
+		Log:     zap.NewNop(),
 	}
 }
 
@@ -85,13 +95,25 @@ func WithServiceLog(log *zap.Logger) ServiceOption {
 	}
 }
 
+// WithServiceMetrics attaches the metrics sink that GetMetrics serves
+// from.
+//
+// When unset, GetMetrics returns an empty response.
+func WithServiceMetrics(m MetricsCollector) ServiceOption {
+	return func(o *serviceOptions) {
+		o.Metrics = m
+	}
+}
+
 type gatewayActuatorOptions struct {
-	Log *zap.Logger
+	Metrics GatewayActuatorMetricsObserver
+	Log     *zap.Logger
 }
 
 func newGatewayActuatorOptions() *gatewayActuatorOptions {
 	return &gatewayActuatorOptions{
-		Log: zap.NewNop(),
+		Metrics: noopGatewayActuatorMetricsObserver{},
+		Log:     zap.NewNop(),
 	}
 }
 
@@ -100,6 +122,12 @@ type GatewayActuatorOption func(*gatewayActuatorOptions)
 func WithGatewayActuatorLog(log *zap.Logger) GatewayActuatorOption {
 	return func(o *gatewayActuatorOptions) {
 		o.Log = log
+	}
+}
+
+func WithGatewayActuatorMetrics(metrics GatewayActuatorMetricsObserver) GatewayActuatorOption {
+	return func(o *gatewayActuatorOptions) {
+		o.Metrics = metrics
 	}
 }
 

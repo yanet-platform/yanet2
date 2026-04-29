@@ -22,7 +22,8 @@ type GatewayActuator struct {
 	plain     plainpb.DevicePlainServiceClient
 	vlan      vlanpb.DeviceVlanServiceClient
 
-	log *zap.Logger
+	metrics GatewayActuatorMetricsObserver
+	log     *zap.Logger
 }
 
 // NewGatewayActuator dials the Gateway endpoint and returns a ready-to-use
@@ -51,6 +52,7 @@ func NewGatewayActuator(
 		pipelines: ynpb.NewPipelineServiceClient(conn),
 		plain:     plainpb.NewDevicePlainServiceClient(conn),
 		vlan:      vlanpb.NewDeviceVlanServiceClient(conn),
+		metrics:   opts.Metrics,
 		log:       opts.Log.With(zap.String("gateway", cfg.Name)),
 	}, nil
 }
@@ -64,7 +66,9 @@ func (m *GatewayActuator) Close() error {
 //
 // Garbage collection failures are logged as warnings and never propagate.
 func (m *GatewayActuator) Apply(ctx context.Context, stage *StageConfig) error {
-	if err := m.applyStage(ctx, stage); err != nil {
+	err := m.applyStage(ctx, stage)
+	m.metrics.OnApplyCompleted(err)
+	if err != nil {
 		return fmt.Errorf("failed to apply stage to gateway %q: %w", m.name, err)
 	}
 
@@ -72,7 +76,7 @@ func (m *GatewayActuator) Apply(ctx context.Context, stage *StageConfig) error {
 		zap.String("stage", stage.Name),
 	)
 
-	if err := m.collectGarbage(ctx, stage); err != nil {
+	if err := m.gc(ctx, stage); err != nil {
 		m.log.Warn("garbage collection failed", zap.Error(err))
 	}
 
@@ -85,8 +89,14 @@ func (m *GatewayActuator) Apply(ctx context.Context, stage *StageConfig) error {
 // them.
 func (m *GatewayActuator) applyStage(ctx context.Context, stage *StageConfig) error {
 	for _, p := range stage.Pipelines {
-		req := &ynpb.UpdatePipelineRequest{Pipeline: pipelineToProto(p)}
-		if _, err := m.pipelines.Update(ctx, req); err != nil {
+		_, err := m.pipelines.Update(
+			ctx,
+			&ynpb.UpdatePipelineRequest{
+				Pipeline: pipelineToProto(p),
+			},
+		)
+		m.metrics.OnResourceUpdated(kindPipeline, err)
+		if err != nil {
 			return fmt.Errorf("update pipeline %q: %w", p.Name, err)
 		}
 
@@ -97,8 +107,9 @@ func (m *GatewayActuator) applyStage(ctx context.Context, stage *StageConfig) er
 	}
 
 	for _, d := range stage.Devices.Plain {
-		req := plainDeviceToProto(d)
-		if _, err := m.plain.UpdateDevice(ctx, req); err != nil {
+		_, err := m.plain.UpdateDevice(ctx, plainDeviceToProto(d))
+		m.metrics.OnResourceUpdated(kindDevicePlain, err)
+		if err != nil {
 			return fmt.Errorf("update plain device %q: %w", d.Name, err)
 		}
 
@@ -110,8 +121,9 @@ func (m *GatewayActuator) applyStage(ctx context.Context, stage *StageConfig) er
 	}
 
 	for _, d := range stage.Devices.VLAN {
-		req := vlanDeviceToProto(d)
-		if _, err := m.vlan.UpdateDevice(ctx, req); err != nil {
+		_, err := m.vlan.UpdateDevice(ctx, vlanDeviceToProto(d))
+		m.metrics.OnResourceUpdated(kindDeviceVlan, err)
+		if err != nil {
 			return fmt.Errorf("update vlan device %q: %w", d.Name, err)
 		}
 
@@ -126,7 +138,7 @@ func (m *GatewayActuator) applyStage(ctx context.Context, stage *StageConfig) er
 	return nil
 }
 
-// collectGarbage deletes pipelines that exist on the Gateway but are not
+// gc deletes pipelines that exist on the Gateway but are not
 // part of the desired stage.
 //
 // Per-pipeline Delete failures are logged and skipped: pipelines still
@@ -136,7 +148,7 @@ func (m *GatewayActuator) applyStage(ctx context.Context, stage *StageConfig) er
 //
 // Functions are intentionally not GC'd here: they are owned by their own
 // per-function operators (route-operator, acl-operator, ...).
-func (m *GatewayActuator) collectGarbage(ctx context.Context, stage *StageConfig) error {
+func (m *GatewayActuator) gc(ctx context.Context, stage *StageConfig) error {
 	desired := make(map[string]struct{}, len(stage.Pipelines))
 	for _, p := range stage.Pipelines {
 		desired[p.Name] = struct{}{}
@@ -144,9 +156,11 @@ func (m *GatewayActuator) collectGarbage(ctx context.Context, stage *StageConfig
 
 	list, err := m.pipelines.List(ctx, &ynpb.ListPipelinesRequest{})
 	if err != nil {
+		m.metrics.OnGC(0, 0, err)
 		return fmt.Errorf("list pipelines: %w", err)
 	}
 
+	deleted, failed := 0, 0
 	for _, id := range list.GetIds() {
 		if _, ok := desired[id.GetName()]; ok {
 			continue
@@ -154,6 +168,7 @@ func (m *GatewayActuator) collectGarbage(ctx context.Context, stage *StageConfig
 
 		req := &ynpb.DeletePipelineRequest{Id: id}
 		if _, err := m.pipelines.Delete(ctx, req); err != nil {
+			failed++
 			m.log.Warn("failed to delete stale pipeline",
 				zap.String("pipeline", id.GetName()),
 				zap.Error(err),
@@ -161,10 +176,12 @@ func (m *GatewayActuator) collectGarbage(ctx context.Context, stage *StageConfig
 			continue
 		}
 
+		deleted++
 		m.log.Info("deleted stale pipeline",
 			zap.String("pipeline", id.GetName()),
 		)
 	}
 
+	m.metrics.OnGC(deleted, failed, nil)
 	return nil
 }

@@ -4,11 +4,18 @@ package operatorpb;
 
 option go_package = "github.com/yanet-platform/yanet2/agents/yanet-pipeline-operator/operatorpb;operatorpb";
 
+import "common/commonpb/metric.proto";
+
 // PipelineOperatorService is the intent surface for pipeline lifecycle
 // management.
 //
 // Intentionally deferred: RPCs (SetTargetStage / Activate / Deactivate) will
 // be added once the YAML-bootstrap workflow proves out.
-// Until then this service exists to reserve the gRPC name and ensure Gateway
-// routing is wired.
-service PipelineOperatorService {}
+service PipelineOperatorService {
+  // GetMetrics returns a snapshot of operator runtime metrics.
+  rpc GetMetrics(GetMetricsRequest) returns (GetMetricsResponse);
+}
+
+message GetMetricsRequest {}
+
+message GetMetricsResponse { repeated commonpb.Metric metrics = 1; }

@@ -33,7 +33,8 @@ type Reconciler struct {
 
 	wakeCh chan struct{}
 
-	log *zap.Logger
+	metrics ReconcilerMetricsObserver
+	log     *zap.Logger
 }
 
 // NewReconciler constructs a Reconciler bound to the given Actuator.
@@ -54,8 +55,9 @@ func NewReconciler(actuator Actuator, options ...ReconcilerOption) *Reconciler {
 		actuator: actuator,
 		backoff:  backoff,
 		interval: opts.Interval,
-		log:      opts.Log,
 		wakeCh:   make(chan struct{}, 1),
+		metrics:  opts.Metrics,
+		log:      opts.Log,
 	}
 }
 
@@ -64,6 +66,15 @@ func NewReconciler(actuator Actuator, options ...ReconcilerOption) *Reconciler {
 //
 // An empty or nil slice returns the reconciler to the idle state.
 func (m *Reconciler) SetStages(stages []*StageConfig) {
+	depth := m.replaceStages(stages)
+
+	m.metrics.OnQueueChanged(depth)
+}
+
+// replaceStages swaps the queue under the lock and signals Run. It
+// returns the resulting queue depth so the caller can publish metrics
+// outside the lock.
+func (m *Reconciler) replaceStages(stages []*StageConfig) int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -73,6 +84,8 @@ func (m *Reconciler) SetStages(stages []*StageConfig) {
 	case m.wakeCh <- struct{}{}:
 	default:
 	}
+
+	return len(m.stages)
 }
 
 // Switch replaces the queue with a single target stage and wakes Run
@@ -104,6 +117,7 @@ func (m *Reconciler) Run(ctx context.Context) error {
 	for {
 		target := m.snapshot()
 		if target == nil {
+			m.metrics.OnStateChanged(ReconcilerStateIdle)
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
@@ -114,6 +128,7 @@ func (m *Reconciler) Run(ctx context.Context) error {
 		}
 
 		var d time.Duration
+		m.metrics.OnStateChanged(ReconcilerStateApplying)
 		err := m.actuator.Apply(ctx, target)
 		if err != nil {
 			if ctx.Err() != nil {
@@ -125,12 +140,17 @@ func (m *Reconciler) Run(ctx context.Context) error {
 				zap.Error(err),
 			)
 			d = m.backoff.NextBackOff()
+			m.metrics.OnReconcileCompleted(err)
+			m.metrics.OnBackoffScheduled(d)
 		} else {
 			m.advance(target)
 			d = m.interval
 			m.backoff.Reset()
+			m.metrics.OnReconcileCompleted(nil)
+			m.metrics.OnBackoffReset()
 		}
 
+		m.metrics.OnStateChanged(ReconcilerStateSleeping)
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -168,20 +188,38 @@ func (m *Reconciler) snapshot() *StageConfig {
 // advance drops the just-applied head from the queue, exposing the
 // next stage. The tail stage is preserved as the steady-state target.
 //
+// The mutation runs under the lock in popHead; metric observers are
+// invoked here, after the lock has been released, so they never
+// contend with concurrent reconciler state changes.
+func (m *Reconciler) advance(applied *StageConfig) {
+	advanced, depth := m.popHead(applied)
+	if !advanced {
+		return
+	}
+
+	m.metrics.OnStageAdvanced()
+	m.metrics.OnQueueChanged(depth)
+}
+
+// popHead drops the just-applied head if it is still at the front of
+// the queue. It runs entirely under the lock and returns whether a
+// transition happened along with the resulting queue depth so the
+// caller can publish metrics outside the lock.
+//
 // If the queue was concurrently replaced by SetStages while Apply was
 // in flight, the stage we just applied may no longer be at the head;
-// in that case we leave the queue alone so the new head wins on the
-// next iteration.
-func (m *Reconciler) advance(applied *StageConfig) {
+// in that case the queue is left alone so the new head wins on the
+// next iteration. The single-element queue is also preserved as the
+// steady-state target.
+func (m *Reconciler) popHead(applied *StageConfig) (bool, int) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	if len(m.stages) == 0 || m.stages[0] != applied {
-		return
+		return false, 0
 	}
-
 	if len(m.stages) == 1 {
-		return
+		return false, 0
 	}
 
 	next := m.stages[1]
@@ -195,4 +233,6 @@ func (m *Reconciler) advance(applied *StageConfig) {
 	case m.wakeCh <- struct{}{}:
 	default:
 	}
+
+	return true, len(m.stages)
 }

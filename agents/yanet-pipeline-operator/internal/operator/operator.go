@@ -24,16 +24,23 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 
 	log := opts.Log
 
+	gatewayMetrics := make([]*GatewayMetrics, len(cfg.Gateways))
+	for idx := range cfg.Gateways {
+		gatewayMetrics[idx] = NewGatewayMetrics(cfg.Gateways[idx].Name)
+	}
+	metrics := NewMetrics(gatewayMetrics)
+
 	server := NewGRPCServer(
 		cfg.Server,
-		NewService(WithServiceLog(log)),
+		NewService(WithServiceLog(log), WithServiceMetrics(metrics)),
 		WithGRPCLog(log),
 	)
 
 	actuators := make([]Actuator, 0, len(cfg.Gateways))
-	for _, gw := range cfg.Gateways {
+	for idx, gw := range cfg.Gateways {
 		actuator, err := NewGatewayActuator(
 			gw,
+			WithGatewayActuatorMetrics(gatewayMetrics[idx]),
 			WithGatewayActuatorLog(log),
 		)
 		if err != nil {
@@ -53,7 +60,6 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 
 	reconciler := NewReconciler(
 		actuator,
-		WithReconcilerLog(log),
 		WithReconcileInterval(
 			cfg.Reconcile.Interval.Unwrap(),
 		),
@@ -61,6 +67,8 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 			cfg.Reconcile.InitialBackoff.Unwrap(),
 			cfg.Reconcile.MaxBackoff.Unwrap(),
 		),
+		WithReconcilerMetrics(metrics),
+		WithReconcilerLog(log),
 	)
 
 	m := &Operator{
