@@ -3,6 +3,7 @@
 
 #include "../../lib/controlplane/config/zone.h"
 #include "dataplane/config/zone.h"
+#include "dataplane/pipeline/econtext.h"
 #include "dataplane/pipeline/pipeline.h"
 #include "dataplane/time/clock.h"
 #include "lib/dataplane/module/packet_front.h"

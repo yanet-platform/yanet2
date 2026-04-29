@@ -22,6 +22,7 @@ package nat64_test
 #include "config.h"
 #include "dataplane/module/module.h"
 #include "dataplane/packet/packet.h"
+#include "lib/dataplane/pipeline/econtext.h"
 #include "logging/log.h"
 
 void

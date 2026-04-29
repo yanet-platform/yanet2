@@ -11,6 +11,7 @@ package fwstate
 #include <stdlib.h>
 #include <time.h>
 #include "lib/errors/errors.h"
+#include "lib/dataplane/pipeline/econtext.h"
 #include "modules/fwstate/dataplane/config.h"
 #include "modules/fwstate/api/fwstate_cp.h"
 #include "lib/fwstate/config.h"

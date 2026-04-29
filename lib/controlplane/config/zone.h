@@ -19,8 +19,6 @@
 
 #include "controlplane/config/cp_counter.h"
 
-#include "controlplane/config/econtext.h"
-
 #include "lib/errors/errors.h"
 
 struct dp_config;
