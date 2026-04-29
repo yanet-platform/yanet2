@@ -1649,15 +1649,13 @@ yanet_get_device_counters(
 }
 
 struct counter_handle_list *
-yanet_get_nic_counters(
-	struct dp_config *dp_config
-) {
-	const char* query[] = {
-			"nic_rx",
-			"nic_tx",
-			"nic_rx_tx_errors",
-			"nic_rx_nombuf",
-		};
+yanet_get_nic_counters(struct dp_config *dp_config) {
+	const char *query[] = {
+		"nic_rx",
+		"nic_tx",
+		"nic_rx_tx_errors",
+		"nic_rx_nombuf",
+	};
 	int query_count = sizeof(query) / sizeof(query[0]);
 
 	struct counter_registry *counter_registry = &dp_config->worker_counters;
@@ -1668,9 +1666,11 @@ yanet_get_nic_counters(
 	struct counter *names = ADDR_OF(&counter_registry->names);
 
 	uint64_t match_count = 0;
-	
+
 	for (uint64_t idx = 0; idx < count; ++idx) {
-		if (!counter_name_matches_query(names[idx].name, query, query_count)) {
+		if (!counter_name_matches_query(
+			    names[idx].name, query, query_count
+		    )) {
 			continue;
 		}
 
@@ -1688,8 +1688,7 @@ yanet_get_nic_counters(
 
 	if (list == NULL)
 		return NULL;
-	list->instance_count =
-		ADDR_OF(&storage->allocator)->instance_count;
+	list->instance_count = ADDR_OF(&storage->allocator)->instance_count;
 	list->count = count;
 	struct counter_handle *handlers = list->counters;
 

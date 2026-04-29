@@ -19,7 +19,6 @@ message DeviceCountersRequest { string device = 1; }
 
 message NICCounterRequest { string device = 1; }
 
-
 message PipelineCountersRequest {
   string device = 1;
   string pipeline = 2;

@@ -50,9 +50,7 @@ yanet_get_chain_counters(
 );
 
 struct counter_handle_list *
-yanet_get_nic_counters(
-	struct dp_config *dp_config
-);
+yanet_get_nic_counters(struct dp_config *dp_config);
 
 // Get module counters, optionally filtered by name.
 struct counter_handle_list *
