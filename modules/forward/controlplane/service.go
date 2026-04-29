@@ -27,48 +27,7 @@ type Backend interface {
 	// DeleteModule removes a module config.
 	DeleteModule(name string) error
 	// Agent returns the FFI agent.
-	Agent() FFIAgent
-}
-
-// TODO: delete dependence from ffi to interfaces
-type ModuleAgent interface {
-	DeleteModuleConfig(configName string) error
-	UpdateModules(modules []ffi.ModuleConfig) error
-}
-
-type PipelineAgent interface {
-	DeletePipeline(name string) error
-	UpdatePipeline(pipelineConfig ffi.PipelineConfig) error
-}
-
-type FunctionAgent interface {
-	DeleteFunction(name string) error
-	UpdateFunction(functionConfig ffi.FunctionConfig) error
-}
-
-type DeviceAgent interface {
-	UpdateDevices(devices []ffi.ShmDeviceConfig) error
-	UpdatePlainDevices(devices []ffi.DeviceConfig) error
-}
-
-type FFIAgent interface {
-	DPAgent
-	CountersProvider
-}
-
-type DPAgent interface {
-	ModuleAgent
-	PipelineAgent
-	FunctionAgent
-	DeviceAgent
-	TakeError() error
-	CleanError()
-	CleanUp() error
-	Close() error
-}
-
-type CountersProvider interface {
-	DPConfig() *ffi.DPConfig
+	Agent() ffi.FFIAgent
 }
 
 type forwardConfig struct {
