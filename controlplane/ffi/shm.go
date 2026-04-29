@@ -46,7 +46,6 @@ type CounterAggregator interface {
 	ChainCounters(deviceName string, pipelineName string, functionName string, chainName string) []CounterInfo
 	ModuleCounters(deviceName string, pipelineName string, functionName string, chainName string, moduleType string, moduleName string, counterQuery []string) []CounterInfo
 	PerformanceCounters(deviceName string, pipelineName string, functionName string, chainName string, moduleType string, moduleName string) (*PerformanceCounters, error)
-	NicCounters(deivceName string) []CounterInfo
 }
 
 // SharedMemory represents a handle to YANET shared memory segment.

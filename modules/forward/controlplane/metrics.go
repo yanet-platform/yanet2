@@ -28,14 +28,7 @@ func makeCounter(name string, value uint64, labels ...*commonpb.Label) *commonpb
 
 func (m *ForwardService) collectMetrics() ([]*commonpb.Metric, error) {
 	dpConfig := m.backend.Agent().DPConfig()
-	positions := dpConfig.AllModulePositions("acl")
-
-	setCountersNames := make(map[string]struct{}, 0)
-	for _, config := range m.configs {
-		for _, rule := range config.rules {
-			setCountersNames[rule.Action.Counter] = struct{}{}
-		}
-	}
+	positions := dpConfig.AllModulePositions("forward")
 
 	result := make([]*commonpb.Metric, 0)
 	for _, pos := range positions {
@@ -54,7 +47,7 @@ func (m *ForwardService) collectMetrics() ([]*commonpb.Metric, error) {
 			pos.Pipeline,
 			pos.Function,
 			pos.Chain,
-			"acl",
+			"forward",
 			configName,
 			nil,
 		)
