@@ -755,10 +755,8 @@ func (m *DPConfig) PerformanceCounters(
 	return result, nil
 }
 
-func (m *DPConfig) NicCounters(deviceName string) []CounterInfo {
-	cDeviceName := C.CString(deviceName)
-	defer C.free(unsafe.Pointer(cDeviceName))
-	counters := C.yanet_get_nic_counters(m.ptr, cDeviceName)
+func (m *DPConfig) NICCounters() []CounterInfo {
+	counters := C.yanet_get_nic_counters(m.ptr)
 	defer C.yanet_counter_handle_list_free(counters)
 
 	if counters == nil {

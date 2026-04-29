@@ -1650,8 +1650,7 @@ yanet_get_device_counters(
 
 struct counter_handle_list *
 yanet_get_nic_counters(
-	struct dp_config *dp_config,
-	const char *device_name
+	struct dp_config *dp_config
 ) {
 	const char* query[] = {
 			"nic_rx",
@@ -1659,42 +1658,38 @@ yanet_get_nic_counters(
 			"nic_rx_tx_errors",
 			"nic_rx_nombuf",
 		};
-	int query_count = 4;
+	int query_count = sizeof(query) / sizeof(query[0]);
 
-	struct cp_config *cp_config = ADDR_OF(&dp_config->cp_config);
-	cp_config_lock(cp_config);
-	struct cp_config_gen *cp_config_gen =
-		ADDR_OF(&cp_config->cp_config_gen);
-
-	struct counter_registry *counter_registry;
-	struct counter_storage *counter_storage;
-
-	struct counter_storage *cs = cp_config_gen_get_nic_counter_storage(
-		cp_config_gen, device_name
-	);
-
-	if (cs == NULL) {
-		cp_config_unlock(cp_config);
-		return NULL;
-	}
-	counter_storage = cs;
-	counter_registry = ADDR_OF(&counter_storage->registry);
+	struct counter_registry *counter_registry = &dp_config->worker_counters;
+	struct counter_storage *storage =
+		ADDR_OF(&dp_config->worker_counter_storage);
 
 	uint64_t count = counter_registry->count;
 	struct counter *names = ADDR_OF(&counter_registry->names);
 
-	// FIXME: unlock is correct
-	cp_config_unlock(cp_config);
+	uint64_t match_count = 0;
+	
+	for (uint64_t idx = 0; idx < count; ++idx) {
+		if (!counter_name_matches_query(names[idx].name, query, query_count)) {
+			continue;
+		}
+
+		match_count++;
+	}
+
+	if (match_count == 0) {
+		return NULL;
+	}
 
 	struct counter_handle_list *list = (struct counter_handle_list *)malloc(
 		sizeof(struct counter_handle_list) +
-		sizeof(struct counter_handle) * count
+		sizeof(struct counter_handle) * match_count
 	);
 
 	if (list == NULL)
 		return NULL;
 	list->instance_count =
-		ADDR_OF(&counter_storage->allocator)->instance_count;
+		ADDR_OF(&storage->allocator)->instance_count;
 	list->count = count;
 	struct counter_handle *handlers = list->counters;
 
@@ -1709,7 +1704,7 @@ yanet_get_nic_counters(
 		handlers[out_idx].size = names[idx].size;
 		handlers[out_idx].gen = names[idx].gen;
 		handlers[out_idx].value_handle =
-			counter_get_value_handle(idx, counter_storage);
+			counter_get_value_handle(idx, storage);
 		out_idx++;
 	}
 

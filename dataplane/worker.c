@@ -55,7 +55,7 @@
 
 #include <rte_ethdev.h>
 
-#define NIC_STATS_FREAQUENCY 1000
+#define NIC_STATS_FREQUENCY 1000
 
 static void
 worker_read(struct dataplane_worker *worker, struct packet_list *packets) {
@@ -273,42 +273,11 @@ worker_write(struct dataplane_worker *worker, struct packet_list *packets) {
 	}
 }
 
-struct nic_stat {
-	uint64_t ibytes;
-	uint64_t obytes;
-	uint64_t ipackets;
-	uint64_t opackets;
-	uint64_t ierrors;
-	uint64_t oerrors;
-	uint64_t rx_nombuf;
-};
-
 void worker_unload_nic_stats(struct dataplane_worker *worker) {
 	struct rte_eth_stats stats1;
     struct dp_worker *dp_worker = worker->dp_worker;
-    
-	// const struct nic_stat stats0 = {
-	// 	.ibytes = *dp_worker->nic_rx_bytes,
-	// 	.obytes = *dp_worker->nic_tx_bytes,
-	// 	.ipackets = *dp_worker->nic_rx_packets,
-	// 	.opackets = *dp_worker->nic_tx_packets,
-	// 	.ierrors = *dp_worker->nic_rx_errors,
-	// 	.oerrors = *dp_worker->nic_tx_errors,
-	// 	.rx_nombuf = *dp_worker->nic_rx_nombuf
-	// };
-
 
 	rte_eth_stats_get(worker->port_id, &stats1);
-	
-	// struct nic_stat diff = {
-	// 	.ibytes = stats1.ibytes - stats0.ibytes,
-	// 	.obytes = stats1.obytes - stats0.obytes,
-	// 	.ipackets = stats1.ipackets - stats0.ipackets,
-	// 	.opackets = stats1.opackets - stats0.opackets,
-	// 	.ierrors = stats1.ierrors - stats0.ierrors,
-	// 	.oerrors = stats1.oerrors - stats0.oerrors,
-	// 	.rx_nombuf = stats1.rx_nombuf - stats0.rx_nombuf
-	// };
 
 	*dp_worker->nic_rx_bytes = stats1.ibytes;
 	*dp_worker->nic_tx_bytes = stats1.obytes;
@@ -360,12 +329,11 @@ worker_loop_round(struct dataplane_worker *worker) {
 	uint64_t device_count =
 		cp_config_gen->device_registry.registry.capacity;
 
-	uint64_t iterations = 0;
-
 	while (1) {
-		iterations = (iterations + 1) % NIC_STATS_FREAQUENCY;
-		if (iterations == 0) worker_unload_nic_stats(worker);
-
+		if (*worker->dp_worker->iterations % NIC_STATS_FREQUENCY == 0) {
+			worker_unload_nic_stats(worker);
+		}
+		
 		struct packet_front schedule_input[device_count];
 		for (uint64_t idx = 0; idx < device_count; ++idx)
 			packet_front_init(schedule_input + idx);
@@ -467,7 +435,7 @@ static const struct {
     {"rx", 2, (const size_t[]){offsetof(struct dp_worker, rx_count), offsetof(struct dp_worker, rx_size)}},
 	{"tx", 2, (const size_t[]){offsetof(struct dp_worker, tx_count), offsetof(struct dp_worker, tx_size)}},
 	{"remote_rx", 1, (const size_t[]){offsetof(struct dp_worker, remote_rx_count)}},
-	{"remote_tx", 1, (const size_t[]){offsetof(struct dp_worker, remote_tx_count)},},
+	{"remote_tx", 1, (const size_t[]){offsetof(struct dp_worker, remote_tx_count)}},
 	{"nic_rx", 2, (const size_t[]){offsetof(struct dp_worker, nic_rx_packets), offsetof(struct dp_worker, nic_rx_bytes)}},
 	{"nic_tx", 2, (const size_t[]){offsetof(struct dp_worker, nic_tx_packets), offsetof(struct dp_worker, nic_tx_bytes)}},
 	{"nic_rx_tx_errors", 2, (const size_t[]){offsetof(struct dp_worker, nic_rx_errors), offsetof(struct dp_worker, nic_tx_errors)}},
@@ -475,7 +443,7 @@ static const struct {
 };
 
 uint64_t**
-get_worker_field_ptr(struct dp_worker *worker, int info_index, int offset_index) {
+get_worker_field_ptr(struct dp_worker *worker, size_t info_index, size_t offset_index) {
 	return (uint64_t**)((char*)worker + worker_counter_info[info_index].offset[offset_index]);
 }
 
