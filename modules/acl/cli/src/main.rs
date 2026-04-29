@@ -8,6 +8,7 @@ use aclpb::{
 use args::{DeleteCmd, MetricsCmd, ModeCmd, OutputFormat, ShowCmd, UpdateCmd};
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
+use filterpb::pb::{Device, IpNet, PortRange, ProtoRange, VlanRange};
 use metric::Metric;
 use netip::IpNetwork;
 use serde::{Deserialize, Serialize};
@@ -27,16 +28,9 @@ mod commonpb {
 }
 
 #[allow(non_snake_case)]
-pub mod filterpb {
-    tonic::include_proto!("filterpb");
-}
-
-#[allow(non_snake_case)]
 pub mod aclpb {
     tonic::include_proto!("aclpb");
 }
-
-////////////////////////////////////////////////////////////////////////////////
 
 #[derive(Serialize)]
 struct SerializableShowConfigResponse {
@@ -368,8 +362,6 @@ fn print_metrics_table(metrics: &[Metric]) {
     }
 }
 
-////////////////////////////////////////////////////////////////////////////////
-
 /// ACL module
 #[derive(Debug, Clone, Parser)]
 #[command(version, about)]
@@ -383,86 +375,11 @@ pub struct Cmd {
     pub verbose: u8,
 }
 
-impl TryFrom<&String> for filterpb::IpNet {
-    type Error = Box<dyn Error>;
-
-    fn try_from(value: &String) -> Result<Self, Self::Error> {
-        let net = IpNetwork::parse(value)?;
-        match net {
-            IpNetwork::V4(net) => Ok(filterpb::IpNet {
-                addr: net.addr().octets().to_vec(),
-                mask: net.mask().octets().to_vec(),
-            }),
-            IpNetwork::V6(net) => Ok(filterpb::IpNet {
-                addr: net.addr().octets().to_vec(),
-                mask: net.mask().octets().to_vec(),
-            }),
-        }
-    }
-}
-
-fn format_ip_net(net: &filterpb::IpNet) -> String {
-    let prefix_len: u32 = net.mask.iter().map(|b| b.count_ones()).sum();
-    if let Ok(arr) = <[u8; 4]>::try_from(net.addr.as_slice()) {
-        format!("{}/{}", std::net::Ipv4Addr::from(arr), prefix_len)
-    } else if let Ok(arr) = <[u8; 16]>::try_from(net.addr.as_slice()) {
-        format!("{}/{}", std::net::Ipv6Addr::from(arr), prefix_len)
-    } else {
-        format!("{:?}/{}", net.addr, prefix_len)
-    }
-}
-
+/// Local range type for YAML deserialization
 #[derive(Debug, Serialize, Deserialize)]
 struct Range {
     from: u16,
     to: u16,
-}
-
-impl TryFrom<&Range> for filterpb::PortRange {
-    type Error = Box<dyn Error>;
-
-    fn try_from(r: &Range) -> Result<Self, Self::Error> {
-        if r.from > r.to {
-            return Err(format!("port 'from' value {} is greater than 'to' value {}", r.from, r.to).into());
-        }
-        Ok(Self { from: r.from as u32, to: r.to as u32 })
-    }
-}
-
-impl TryFrom<&Range> for filterpb::ProtoRange {
-    type Error = Box<dyn Error>;
-
-    fn try_from(r: &Range) -> Result<Self, Self::Error> {
-        if r.from > r.to {
-            return Err(format!("protocol 'from' value {} is greater than 'to' value {}", r.from, r.to).into());
-        }
-        Ok(Self { from: r.from as u32, to: r.to as u32 })
-    }
-}
-
-impl TryFrom<&Range> for filterpb::VlanRange {
-    type Error = Box<dyn Error>;
-
-    fn try_from(r: &Range) -> Result<Self, Self::Error> {
-        if r.from > 4095 {
-            return Err(format!("VLAN 'from' value {} exceeds maximum 4095", r.from).into());
-        }
-        if r.to > 4095 {
-            return Err(format!("VLAN 'to' value {} exceeds maximum 4095", r.to).into());
-        }
-        if r.from > r.to {
-            return Err(format!("VLAN 'from' value {} is greater than 'to' value {}", r.from, r.to).into());
-        }
-        Ok(Self { from: r.from as u32, to: r.to as u32 })
-    }
-}
-
-impl TryFrom<&String> for filterpb::Device {
-    type Error = Box<dyn Error>;
-
-    fn try_from(n: &String) -> Result<Self, Self::Error> {
-        Ok(Self { name: n.to_string() })
-    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -487,6 +404,48 @@ struct ACLRule {
     action: ActionKind,
 }
 
+/// Converts a YAML `Range` to a protobuf `PortRange`, validating that
+/// `from <= to`.
+fn port_range(r: &Range) -> Result<PortRange, Box<dyn Error>> {
+    if r.from > r.to {
+        return Err(format!("port 'from' value {} is greater than 'to' value {}", r.from, r.to).into());
+    }
+    Ok(PortRange {
+        from: u32::from(r.from),
+        to: u32::from(r.to),
+    })
+}
+
+/// Converts a YAML `Range` to a protobuf `ProtoRange`, validating that
+/// `from <= to`.
+fn proto_range(r: &Range) -> Result<ProtoRange, Box<dyn Error>> {
+    if r.from > r.to {
+        return Err(format!("protocol 'from' value {} is greater than 'to' value {}", r.from, r.to).into());
+    }
+    Ok(ProtoRange {
+        from: u32::from(r.from),
+        to: u32::from(r.to),
+    })
+}
+
+/// Converts a YAML `Range` to a protobuf `VlanRange`, validating both the
+/// 12-bit VLAN-id bound (4095) and `from <= to`.
+fn vlan_range(r: &Range) -> Result<VlanRange, Box<dyn Error>> {
+    if r.from > 4095 {
+        return Err(format!("VLAN 'from' value {} exceeds maximum 4095", r.from).into());
+    }
+    if r.to > 4095 {
+        return Err(format!("VLAN 'to' value {} exceeds maximum 4095", r.to).into());
+    }
+    if r.from > r.to {
+        return Err(format!("VLAN 'from' value {} is greater than 'to' value {}", r.from, r.to).into());
+    }
+    Ok(VlanRange {
+        from: u32::from(r.from),
+        to: u32::from(r.to),
+    })
+}
+
 impl TryFrom<ACLRule> for aclpb::Rule {
     type Error = Box<dyn Error>;
 
@@ -495,38 +454,22 @@ impl TryFrom<ACLRule> for aclpb::Rule {
             srcs: acl_rule
                 .srcs
                 .iter()
-                .map(filterpb::IpNet::try_from)
+                .map(|s| IpNetwork::parse(s).map(IpNet::from))
                 .collect::<Result<_, _>>()?,
             dsts: acl_rule
                 .dsts
                 .iter()
-                .map(filterpb::IpNet::try_from)
+                .map(|s| IpNetwork::parse(s).map(IpNet::from))
                 .collect::<Result<_, _>>()?,
-            vlan_ranges: acl_rule
-                .vlan_ranges
-                .iter()
-                .map(filterpb::VlanRange::try_from)
-                .collect::<Result<_, _>>()?,
-            src_port_ranges: acl_rule
-                .src_ports
-                .iter()
-                .map(filterpb::PortRange::try_from)
-                .collect::<Result<_, _>>()?,
-            dst_port_ranges: acl_rule
-                .dst_ports
-                .iter()
-                .map(filterpb::PortRange::try_from)
-                .collect::<Result<_, _>>()?,
+            src_port_ranges: acl_rule.src_ports.iter().map(port_range).collect::<Result<_, _>>()?,
+            dst_port_ranges: acl_rule.dst_ports.iter().map(port_range).collect::<Result<_, _>>()?,
             proto_ranges: acl_rule
                 .proto_ranges
                 .iter()
-                .map(filterpb::ProtoRange::try_from)
+                .map(proto_range)
                 .collect::<Result<_, _>>()?,
-            devices: acl_rule
-                .devices
-                .iter()
-                .map(filterpb::Device::try_from)
-                .collect::<Result<_, _>>()?,
+            vlan_ranges: acl_rule.vlan_ranges.iter().map(vlan_range).collect::<Result<_, _>>()?,
+            devices: acl_rule.devices.iter().cloned().map(Device::from).collect(),
             action: Some(aclpb::Action {
                 counter: acl_rule.counter,
                 keep_state: false,
@@ -542,8 +485,6 @@ impl TryFrom<ACLRule> for aclpb::Rule {
         })
     }
 }
-
-////////////////////////////////////////////////////////////////////////////////
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ACLConfig {
@@ -577,8 +518,6 @@ impl ACLConfig {
     }
 }
 
-////////////////////////////////////////////////////////////////////////////////
-
 pub struct ACLService {
     client: AclServiceClient<LayeredChannel>,
 }
@@ -611,8 +550,8 @@ impl ACLService {
                 .rules
                 .into_iter()
                 .map(|rule| SerializableRule {
-                    srcs: rule.srcs.iter().map(format_ip_net).collect(),
-                    dsts: rule.dsts.iter().map(format_ip_net).collect(),
+                    srcs: rule.srcs.iter().map(IpNet::to_string).collect(),
+                    dsts: rule.dsts.iter().map(IpNet::to_string).collect(),
                     src_port_ranges: rule
                         .src_port_ranges
                         .iter()

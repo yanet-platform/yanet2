@@ -4,22 +4,26 @@
 #include "common/memory.h"
 
 #include "controlplane/config/defines.h"
-#include "lib/controlplane/diag/diag.h"
+#include "lib/errors/errors.h"
 
 #define COUNTER_REGISTRY_PREALLOC 8
 
 int
 cp_config_counter_storage_registry_init(
 	struct memory_context *memory_context,
-	struct cp_config_counter_storage_registry *registry
+	struct cp_config_counter_storage_registry *registry,
+	yanet_error **err
 ) {
 	if (registry_init(
 		    memory_context,
 		    &registry->device_registry,
 		    COUNTER_REGISTRY_PREALLOC
 	    )) {
-		NEW_ERROR("failed to initialize device registry for counter "
-			  "storage");
+		yanet_error_add(
+			err,
+			"failed to initialize device registry for counter "
+			"storage"
+		);
 		return -1;
 	}
 
@@ -221,14 +225,16 @@ int
 cp_config_counter_storage_registry_insert_device(
 	struct cp_config_counter_storage_registry *registry,
 	const char *device_name,
-	struct counter_storage *counter_storage
+	struct counter_storage *counter_storage,
+	yanet_error **err
 ) {
 	struct cp_config_counter_storage_device *device =
 		cp_config_counter_storage_registry_lookup_device_item(
 			registry, device_name
 		);
 	if (device != NULL) {
-		NEW_ERROR(
+		yanet_error_add(
+			err,
 			"device '%s' already exists in counter storage "
 			"registry",
 			device_name
@@ -243,7 +249,8 @@ cp_config_counter_storage_registry_insert_device(
 		memory_context, sizeof(struct cp_config_counter_storage_device)
 	);
 	if (device == NULL) {
-		NEW_ERROR(
+		yanet_error_add(
+			err,
 			"failed to allocate memory for device '%s' in counter "
 			"storage",
 			device_name
@@ -258,7 +265,8 @@ cp_config_counter_storage_registry_insert_device(
 		    &device->pipeline_registry,
 		    COUNTER_REGISTRY_PREALLOC
 	    )) {
-		NEW_ERROR(
+		yanet_error_add(
+			err,
 			"failed to initialize pipeline registry for device "
 			"'%s'",
 			device_name
@@ -268,7 +276,8 @@ cp_config_counter_storage_registry_insert_device(
 	SET_OFFSET_OF(&device->counter_storage, counter_storage);
 
 	if (registry_insert(&registry->device_registry, &device->item)) {
-		NEW_ERROR(
+		yanet_error_add(
+			err,
 			"failed to insert device '%s' into counter storage "
 			"registry",
 			device_name
@@ -360,7 +369,8 @@ cp_config_counter_storage_registry_insert_pipeline(
 	struct cp_config_counter_storage_registry *registry,
 	const char *device_name,
 	const char *pipeline_name,
-	struct counter_storage *counter_storage
+	struct counter_storage *counter_storage,
+	yanet_error **err
 ) {
 	struct cp_config_counter_storage_device *device =
 		cp_config_counter_storage_registry_lookup_device_item(
@@ -368,7 +378,8 @@ cp_config_counter_storage_registry_insert_pipeline(
 		);
 
 	if (device == NULL) {
-		NEW_ERROR(
+		yanet_error_add(
+			err,
 			"device '%s' not found in counter storage registry",
 			device_name
 		);
@@ -381,7 +392,8 @@ cp_config_counter_storage_registry_insert_pipeline(
 		);
 
 	if (pipeline != NULL) {
-		NEW_ERROR(
+		yanet_error_add(
+			err,
 			"pipeline '%s' already exists for device '%s' in "
 			"counter storage",
 			pipeline_name,
@@ -398,7 +410,8 @@ cp_config_counter_storage_registry_insert_pipeline(
 		sizeof(struct cp_config_counter_storage_pipeline)
 	);
 	if (pipeline == NULL) {
-		NEW_ERROR(
+		yanet_error_add(
+			err,
 			"failed to allocate memory for pipeline '%s' on device "
 			"'%s'",
 			pipeline_name,
@@ -416,7 +429,8 @@ cp_config_counter_storage_registry_insert_pipeline(
 		    &pipeline->function_registry,
 		    COUNTER_REGISTRY_PREALLOC
 	    )) {
-		NEW_ERROR(
+		yanet_error_add(
+			err,
 			"failed to initialize function registry for pipeline "
 			"'%s'",
 			pipeline_name
@@ -426,7 +440,8 @@ cp_config_counter_storage_registry_insert_pipeline(
 	SET_OFFSET_OF(&pipeline->counter_storage, counter_storage);
 
 	if (registry_insert(&device->pipeline_registry, &pipeline->item)) {
-		NEW_ERROR(
+		yanet_error_add(
+			err,
 			"failed to insert pipeline '%s' into device '%s' "
 			"registry",
 			pipeline_name,
@@ -524,14 +539,16 @@ cp_config_counter_storage_registry_insert_function(
 	const char *device_name,
 	const char *pipeline_name,
 	const char *function_name,
-	struct counter_storage *counter_storage
+	struct counter_storage *counter_storage,
+	yanet_error **err
 ) {
 	struct cp_config_counter_storage_device *device =
 		cp_config_counter_storage_registry_lookup_device_item(
 			registry, device_name
 		);
 	if (device == NULL) {
-		NEW_ERROR(
+		yanet_error_add(
+			err,
 			"device '%s' not found in counter storage registry",
 			device_name
 		);
@@ -544,7 +561,8 @@ cp_config_counter_storage_registry_insert_function(
 		);
 
 	if (pipeline == NULL) {
-		NEW_ERROR(
+		yanet_error_add(
+			err,
 			"pipeline '%s' not found on device '%s'",
 			pipeline_name,
 			device_name
@@ -558,7 +576,8 @@ cp_config_counter_storage_registry_insert_function(
 		);
 
 	if (function != NULL) {
-		NEW_ERROR(
+		yanet_error_add(
+			err,
 			"function '%s' already exists for pipeline '%s' in "
 			"counter storage",
 			function_name,
@@ -575,7 +594,8 @@ cp_config_counter_storage_registry_insert_function(
 		sizeof(struct cp_config_counter_storage_function)
 	);
 	if (function == NULL) {
-		NEW_ERROR(
+		yanet_error_add(
+			err,
 			"failed to allocate memory for function '%s' on "
 			"pipeline '%s'",
 			function_name,
@@ -593,7 +613,8 @@ cp_config_counter_storage_registry_insert_function(
 		    &function->chain_registry,
 		    COUNTER_REGISTRY_PREALLOC
 	    )) {
-		NEW_ERROR(
+		yanet_error_add(
+			err,
 			"failed to initialize chain registry for function '%s'",
 			function_name
 		);
@@ -602,10 +623,10 @@ cp_config_counter_storage_registry_insert_function(
 	SET_OFFSET_OF(&function->counter_storage, counter_storage);
 
 	if (registry_insert(&pipeline->function_registry, &function->item)) {
-		NEW_ERROR(
-			"failed to insert function '%s' into pipeline '%s' "
-			"registry",
-			function_name,
+		yanet_error_add(
+			err,
+			"failed to initialize function registry for pipeline "
+			"'%s'",
 			pipeline_name
 		);
 		goto error_insert;
@@ -707,14 +728,16 @@ cp_config_counter_storage_registry_insert_chain(
 	const char *pipeline_name,
 	const char *function_name,
 	const char *chain_name,
-	struct counter_storage *counter_storage
+	struct counter_storage *counter_storage,
+	yanet_error **err
 ) {
 	struct cp_config_counter_storage_device *device =
 		cp_config_counter_storage_registry_lookup_device_item(
 			registry, device_name
 		);
 	if (device == NULL) {
-		NEW_ERROR(
+		yanet_error_add(
+			err,
 			"device '%s' not found in counter storage registry",
 			device_name
 		);
@@ -726,7 +749,8 @@ cp_config_counter_storage_registry_insert_chain(
 			device, pipeline_name
 		);
 	if (pipeline == NULL) {
-		NEW_ERROR(
+		yanet_error_add(
+			err,
 			"pipeline '%s' not found on device '%s'",
 			pipeline_name,
 			device_name
@@ -739,7 +763,8 @@ cp_config_counter_storage_registry_insert_chain(
 			pipeline, function_name
 		);
 	if (function == NULL) {
-		NEW_ERROR(
+		yanet_error_add(
+			err,
 			"function '%s' not found on pipeline '%s'",
 			function_name,
 			pipeline_name
@@ -752,6 +777,13 @@ cp_config_counter_storage_registry_insert_chain(
 			function, chain_name
 		);
 	if (chain != NULL) {
+		yanet_error_add(
+			err,
+			"chain '%s' already exists for function '%s' in "
+			"counter storage",
+			chain_name,
+			function_name
+		);
 		return -1;
 	}
 
@@ -762,7 +794,8 @@ cp_config_counter_storage_registry_insert_chain(
 		memory_context, sizeof(struct cp_config_counter_storage_chain)
 	);
 	if (chain == NULL) {
-		NEW_ERROR(
+		yanet_error_add(
+			err,
 			"failed to allocate memory for chain '%s' on function "
 			"'%s'",
 			chain_name,
@@ -778,7 +811,8 @@ cp_config_counter_storage_registry_insert_chain(
 		    &chain->module_registry,
 		    COUNTER_REGISTRY_PREALLOC
 	    )) {
-		NEW_ERROR(
+		yanet_error_add(
+			err,
 			"failed to initialize module registry for chain '%s'",
 			chain_name
 		);
@@ -787,11 +821,12 @@ cp_config_counter_storage_registry_insert_chain(
 	SET_OFFSET_OF(&chain->counter_storage, counter_storage);
 
 	if (registry_insert(&function->chain_registry, &chain->item)) {
-		NEW_ERROR(
-			"failed to insert chain '%s' into function '%s' "
+		yanet_error_add(
+			err,
+			"failed to insert pipeline '%s' into device '%s' "
 			"registry",
-			chain_name,
-			function_name
+			pipeline_name,
+			device_name
 		);
 		goto error_insert;
 	}
@@ -924,14 +959,16 @@ cp_config_counter_storage_registry_insert_module(
 	const char *chain_name,
 	const char *module_type,
 	const char *module_name,
-	struct counter_storage *counter_storage
+	struct counter_storage *counter_storage,
+	yanet_error **err
 ) {
 	struct cp_config_counter_storage_device *device =
 		cp_config_counter_storage_registry_lookup_device_item(
 			registry, device_name
 		);
 	if (device == NULL) {
-		NEW_ERROR(
+		yanet_error_add(
+			err,
 			"device '%s' not found in counter storage registry",
 			device_name
 		);
@@ -943,7 +980,8 @@ cp_config_counter_storage_registry_insert_module(
 			device, pipeline_name
 		);
 	if (pipeline == NULL) {
-		NEW_ERROR(
+		yanet_error_add(
+			err,
 			"pipeline '%s' not found on device '%s'",
 			pipeline_name,
 			device_name
@@ -956,7 +994,8 @@ cp_config_counter_storage_registry_insert_module(
 			pipeline, function_name
 		);
 	if (function == NULL) {
-		NEW_ERROR(
+		yanet_error_add(
+			err,
 			"function '%s' not found on pipeline '%s'",
 			function_name,
 			pipeline_name
@@ -969,7 +1008,8 @@ cp_config_counter_storage_registry_insert_module(
 			function, chain_name
 		);
 	if (chain == NULL) {
-		NEW_ERROR(
+		yanet_error_add(
+			err,
 			"chain '%s' not found on function '%s'",
 			chain_name,
 			function_name
@@ -982,7 +1022,8 @@ cp_config_counter_storage_registry_insert_module(
 			chain, module_type, module_name
 		);
 	if (module != NULL) {
-		NEW_ERROR(
+		yanet_error_add(
+			err,
 			"module '%s:%s' already exists for chain '%s' in "
 			"counter storage",
 			module_type,
@@ -999,7 +1040,8 @@ cp_config_counter_storage_registry_insert_module(
 		memory_context, sizeof(struct cp_config_counter_storage_module)
 	);
 	if (module == NULL) {
-		NEW_ERROR(
+		yanet_error_add(
+			err,
 			"failed to allocate memory for module '%s:%s' on chain "
 			"'%s'",
 			module_type,
@@ -1015,7 +1057,8 @@ cp_config_counter_storage_registry_insert_module(
 	SET_OFFSET_OF(&module->counter_storage, counter_storage);
 
 	if (registry_insert(&chain->module_registry, &module->item)) {
-		NEW_ERROR(
+		yanet_error_add(
+			err,
 			"failed to insert module '%s:%s' into chain '%s' "
 			"registry",
 			module_type,

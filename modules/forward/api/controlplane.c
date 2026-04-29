@@ -7,6 +7,7 @@
 #include <filter/compiler.h>
 
 #include "common/container_of.h"
+#include "lib/errors/errors.h"
 
 #include "controlplane/agent/agent.h"
 #include "controlplane/config/cp_module.h"
@@ -18,18 +19,21 @@ FILTER_COMPILER_DECLARE(FWD_FILTER_IP4_TAG, device, vlan, net4_src, net4_dst);
 FILTER_COMPILER_DECLARE(FWD_FILTER_IP6_TAG, device, vlan, net6_src, net6_dst);
 
 struct cp_module *
-forward_module_config_init(struct agent *agent, const char *name) {
+forward_module_config_init(
+	struct agent *agent, const char *name, yanet_error **err
+) {
 	struct forward_module_config *config =
 		(struct forward_module_config *)memory_balloc(
 			&agent->memory_context,
 			sizeof(struct forward_module_config)
 		);
 	if (config == NULL) {
-		errno = ENOMEM;
+		yanet_error_add(err, "failed to allocate config");
 		return NULL;
 	}
 
-	if (cp_module_init(&config->cp_module, agent, "forward", name)) {
+	if (cp_module_init(&config->cp_module, agent, "forward", name, err)) {
+		yanet_error_add(err, "failed to init module");
 		goto fail;
 	}
 
@@ -45,9 +49,7 @@ forward_module_config_init(struct agent *agent, const char *name) {
 	return &config->cp_module;
 
 fail: {
-	int prev_errno = errno;
 	forward_module_config_free(&config->cp_module);
-	errno = prev_errno;
 	return NULL;
 }
 }
@@ -260,7 +262,8 @@ int
 forward_module_config_update(
 	struct cp_module *cp_module,
 	struct forward_rule *forward_rules,
-	uint32_t rule_count
+	uint32_t rule_count,
+	yanet_error **err
 ) {
 	struct forward_module_config *config = container_of(
 		cp_module, struct forward_module_config, cp_module
@@ -282,7 +285,10 @@ forward_module_config_update(
 		struct forward_rule *rule = forward_rules + idx;
 
 		if (cp_module_link_device(
-			    cp_module, rule->target, &targets[idx].device_id
+			    cp_module,
+			    rule->target,
+			    &targets[idx].device_id,
+			    err
 		    )) {
 			goto error_target;
 		}
@@ -290,7 +296,7 @@ forward_module_config_update(
 		targets[idx].mode = rule->mode;
 
 		if ((targets[idx].counter_id = counter_registry_register(
-			     &cp_module->counter_registry, rule->counter, 2
+			     &cp_module->counter_registry, rule->counter, 2, err
 		     )) == (uint64_t)-1) {
 			goto error_target;
 		}
@@ -299,7 +305,8 @@ forward_module_config_update(
 			if (cp_module_link_device(
 				    cp_module,
 				    rule->devices.items[idx].name,
-				    &rule->devices.items[idx].id
+				    &rule->devices.items[idx].id,
+				    err
 			    )) {
 				goto error_target;
 			}
@@ -376,7 +383,9 @@ error:
 
 int
 forward_module_config_delete(struct cp_module *cp_module) {
+	// TODO: either pass "err" and adapt other modules or make
+	// "agent_delete_module" infallible.
 	return agent_delete_module(
-		cp_module->agent, "forward", cp_module->name
+		cp_module->agent, "forward", cp_module->name, NULL
 	);
 }

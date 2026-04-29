@@ -8,8 +8,8 @@
 #include "common/memory_address.h"
 #include "common/network.h"
 #include "handler.h"
-#include "lib/controlplane/diag/diag.h"
 #include "lib/counters/counters.h"
+#include "lib/errors/errors.h"
 #include "modules/balancer/dataplane/active_sessions.h"
 #include "registry.h"
 
@@ -24,7 +24,8 @@ real_init_active_sessions_tracker(
 	struct real *real,
 	struct real *prev_real,
 	size_t workers,
-	struct memory_context *mctx
+	struct memory_context *mctx,
+	yanet_error **err
 ) {
 	real->tracker_reused = false;
 
@@ -39,7 +40,9 @@ real_init_active_sessions_tracker(
 	struct active_sessions_tracker_shard *tracker_shards =
 		active_sessions_tracker_create(mctx, workers, 0);
 	if (tracker_shards == NULL) {
-		NEW_ERROR("no memory");
+		yanet_error_add(
+			err, "failed to allocate active sessions tracker"
+		);
 		return -1;
 	}
 	SET_OFFSET_OF(&real->tracker_shards, tracker_shards);
@@ -56,7 +59,8 @@ real_init(
 	struct named_real_config *named_config,
 	struct counter_registry *registry,
 	size_t workers,
-	struct memory_context *mctx
+	struct memory_context *mctx,
+	yanet_error **err
 ) {
 	// Build full real identifier
 	struct real_identifier identifier;
@@ -69,7 +73,7 @@ real_init(
 	ssize_t stable_idx =
 		reals_registry_lookup(&handler->reals_registry, &identifier);
 	if (stable_idx < 0) {
-		NEW_ERROR("real not found in registry");
+		yanet_error_add(err, "real not found in registry");
 		return -1;
 	}
 
@@ -77,10 +81,13 @@ real_init(
 	char name[60];
 	sprintf(name, "rl_%zu", (size_t)stable_idx);
 	uint64_t counter_id = counter_registry_register(
-		registry, name, sizeof(struct real_stats) / sizeof(uint64_t)
+		registry,
+		name,
+		sizeof(struct real_stats) / sizeof(uint64_t),
+		err
 	);
 	if (counter_id == (size_t)-1) {
-		NEW_ERROR("failed to register counter");
+		yanet_error_add(err, "failed to register real counter");
 		return -1;
 	}
 
@@ -137,8 +144,10 @@ real_init(
 	memcpy(real, &r, sizeof(struct real));
 
 	// Initialize active sessions tracker
-	if (real_init_active_sessions_tracker(real, prev_real, workers, mctx) !=
-	    0) {
+	if (real_init_active_sessions_tracker(
+		    real, prev_real, workers, mctx, err
+	    ) != 0) {
+		yanet_error_add(err, "failed to initialize real");
 		return -1;
 	}
 	assert(real->tracker_shards != NULL);

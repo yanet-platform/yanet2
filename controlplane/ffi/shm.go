@@ -3,19 +3,21 @@ package ffi
 //#cgo CFLAGS: -I../../
 //#cgo LDFLAGS: -L../../build/lib/controlplane/agent -lagent
 //#cgo LDFLAGS: -L../../build/lib/controlplane/config -lconfig_cp
-//#cgo LDFLAGS: -L../../build/lib/controlplane/diag -ldiag
 //#cgo LDFLAGS: -L../../build/lib/counters -lcounters
 //#cgo LDFLAGS: -L../../build/lib/dataplane/config -lconfig_dp
+//#cgo LDFLAGS: -L../../build/lib/errors -lerrors
 //#include "api/agent.h"
 //#include "api/counter.h"
-//#include "lib/controlplane/diag/diag.h"
 import "C"
 
 import (
 	"fmt"
+	"iter"
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
+
+	"github.com/yanet-platform/yanet2/bindings/go/cerrors"
 )
 
 type DPDataProvider interface {
@@ -108,9 +110,10 @@ func (m *SharedMemory) AgentAttach(
 	cName := C.CString(name)
 	defer C.free(unsafe.Pointer(cName))
 
-	ptr := C.agent_attach(m.ptr, C.uint32_t(instanceIdx), cName, C.size_t(size))
+	var cErr *C.yanet_error
+	ptr := C.agent_attach(m.ptr, C.uint32_t(instanceIdx), cName, C.size_t(size), &cErr)
 	if ptr == nil {
-		return nil, fmt.Errorf("failed to attach agent: %s", name)
+		return nil, fmt.Errorf("failed to attach agent %q: %w", name, cerrors.FromC(unsafe.Pointer(cErr)))
 	}
 
 	return &Agent{name: name, ptr: ptr}, nil
@@ -126,14 +129,16 @@ func (m *SharedMemory) AgentReattach(
 	cName := C.CString(name)
 	defer C.free(unsafe.Pointer(cName))
 
+	var cErr *C.yanet_error
 	ptr := C.agent_reattach(
 		m.ptr,
 		C.uint32_t(instanceIdx),
 		cName,
 		C.size_t(size),
+		&cErr,
 	)
 	if ptr == nil {
-		return nil, fmt.Errorf("failed to attach agent: %s", name)
+		return nil, fmt.Errorf("failed to reattach agent %q: %w", name, cerrors.FromC(unsafe.Pointer(cErr)))
 	}
 
 	return &Agent{name: name, ptr: ptr}, nil
@@ -708,10 +713,7 @@ func (m *DPConfigImpl) PerformanceCounters(
 	cModuleName := C.CString(moduleName)
 	defer C.free(unsafe.Pointer(cModuleName))
 
-	// Create diag struct for error reporting
-	var diag C.struct_diag
-	C.diag_reset(&diag)
-
+	var cErr *C.yanet_error
 	var counters C.struct_module_performance_counters
 	rc := C.yanet_module_performance_counters(
 		&counters,
@@ -722,18 +724,15 @@ func (m *DPConfigImpl) PerformanceCounters(
 		cChainName,
 		cModuleType,
 		cModuleName,
-		&diag,
+		&cErr,
 	)
 	defer C.yanet_module_performance_counters_free(&counters)
 
 	if rc != 0 {
-		// Extract error message from diag
-		errMsg := C.diag_msg(&diag)
-		if errMsg != nil {
-			defer C.free(unsafe.Pointer(errMsg))
+		if err := cerrors.FromC(unsafe.Pointer(cErr)); err != nil {
 			return nil, fmt.Errorf(
-				"failed to get module performance counters: %s",
-				C.GoString(errMsg),
+				"failed to get module performance counters: %w",
+				err,
 			)
 		}
 		return nil, fmt.Errorf("failed to get module performance counters")
@@ -795,7 +794,7 @@ type ModuleReference struct {
 	ModuleName string
 }
 
-func (m *DPConfigImpl) AllModulePositions(moduleType string) []ModuleReference {
+func (m *DPConfig) AllModulePositions(moduleType string) iter.Seq[ModuleReference] {
 	deviceList := m.Devices()
 
 	pipelineList := m.Pipelines()
@@ -810,19 +809,29 @@ func (m *DPConfigImpl) AllModulePositions(moduleType string) []ModuleReference {
 		functions[function.Name] = function.Chains
 	}
 
-	count := 0
-	for _, device := range deviceList {
-		pipelineVariants := [][]DevicePipelineInfo{
-			device.InputPipelines,
-			device.OutputPipelines,
-		}
-		for _, pipelines := range pipelineVariants {
-			for _, pipeline := range pipelines {
-				for _, function := range pipelineFunctions[pipeline.Name] {
-					for _, chain := range functions[function] {
-						for _, module := range chain.Modules {
-							if module.Type == moduleType {
-								count += 1
+	return func(yield func(ModuleReference) bool) {
+		for _, device := range deviceList {
+			pipelineVariants := [][]DevicePipelineInfo{
+				device.InputPipelines,
+				device.OutputPipelines,
+			}
+			for _, pipelines := range pipelineVariants {
+				for _, pipeline := range pipelines {
+					for _, function := range pipelineFunctions[pipeline.Name] {
+						for _, chain := range functions[function] {
+							for _, module := range chain.Modules {
+								if module.Type == moduleType {
+									if !yield(ModuleReference{
+										Device:     device.Name,
+										Pipeline:   pipeline.Name,
+										Function:   function,
+										Chain:      chain.Name,
+										ModuleType: module.Type,
+										ModuleName: module.Name,
+									}) {
+										return
+									}
+								}
 							}
 						}
 					}
@@ -830,34 +839,4 @@ func (m *DPConfigImpl) AllModulePositions(moduleType string) []ModuleReference {
 			}
 		}
 	}
-
-	result := make([]ModuleReference, 0, count)
-	for _, device := range deviceList {
-		pipelineVariants := [][]DevicePipelineInfo{
-			device.InputPipelines,
-			device.OutputPipelines,
-		}
-		for _, pipelines := range pipelineVariants {
-			for _, pipeline := range pipelines {
-				for _, function := range pipelineFunctions[pipeline.Name] {
-					for _, chain := range functions[function] {
-						for _, module := range chain.Modules {
-							if module.Type == moduleType {
-								result = append(result, ModuleReference{
-									Device:     device.Name,
-									Pipeline:   pipeline.Name,
-									Function:   function,
-									Chain:      chain.Name,
-									ModuleType: module.Type,
-									ModuleName: module.Name,
-								})
-							}
-						}
-					}
-				}
-			}
-		}
-	}
-
-	return result
 }

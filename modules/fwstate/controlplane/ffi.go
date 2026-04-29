@@ -20,6 +20,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/yanet-platform/yanet2/bindings/go/cerrors"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/fwstate/controlplane/fwstatepb"
 )
@@ -40,12 +41,10 @@ func NewFWStateModuleConfig(agent *ffi.Agent, name string) (*FwStateConfig, erro
 	cName := C.CString(name)
 	defer C.free(unsafe.Pointer(cName))
 
-	ptr, err := C.fwstate_module_config_init((*C.struct_agent)(agent.AsRawPtr()), cName)
+	var cErr *C.yanet_error
+	ptr := C.fwstate_module_config_init((*C.struct_agent)(agent.AsRawPtr()), cName, &cErr)
 	if ptr == nil {
-		if err != nil {
-			return nil, fmt.Errorf("failed to initialize FWState module config: %w", err)
-		}
-		return nil, fmt.Errorf("failed to initialize FWState module config: module '%s' not found", name)
+		return nil, fmt.Errorf("failed to initialize FWState module config: %w", cerrors.FromC(unsafe.Pointer(cErr)))
 	}
 
 	return &FwStateConfig{

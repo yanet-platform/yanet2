@@ -14,30 +14,35 @@
 #include "common/lpm.h"
 #include "common/memory_address.h"
 #include "common/strutils.h"
+#include "lib/errors/errors.h"
 #include "logging/log.h"
 
 #include "controlplane/agent/agent.h"
 #include "dataplane/config/zone.h"
 
 struct cp_module *
-nat64_module_config_create(struct agent *agent, const char *name) {
+nat64_module_config_create(
+	struct agent *agent, const char *name, yanet_error **err
+) {
 	struct nat64_module_config *config =
 		(struct nat64_module_config *)memory_balloc(
 			&agent->memory_context,
 			sizeof(struct nat64_module_config)
 		);
 	if (config == NULL) {
-		errno = ENOMEM;
+		yanet_error_add(err, "failed to allocate config");
 		return NULL;
 	}
 
-	if (cp_module_init(&config->cp_module, agent, "nat64", name)) {
+	if (cp_module_init(&config->cp_module, agent, "nat64", name, err)) {
+		yanet_error_add(err, "failed to init module");
 		goto error_init;
 	}
 
 	if (nat64_module_config_data_init(
 		    config, &config->cp_module.memory_context
 	    )) {
+		yanet_error_add(err, "failed to init config data");
 		goto error_init;
 	}
 
@@ -49,7 +54,6 @@ error_init:
 		config,
 		sizeof(struct nat64_module_config)
 	);
-	errno = ENOMEM;
 	return NULL;
 }
 

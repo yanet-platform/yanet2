@@ -7,7 +7,7 @@
 #include "common/memory_address.h"
 #include "common/swap.h"
 #include "handler.h"
-#include "lib/controlplane/diag/diag.h"
+#include "lib/errors/errors.h"
 #include "map.h"
 #include "registry.h"
 #include "rules.h"
@@ -51,12 +51,13 @@ can_reuse_filter(int current_vs_count, int prev_vs_count, int match_count) {
 }
 
 static int
-validate_vs_config(struct named_vs_config *config) {
+validate_vs_config(struct named_vs_config *config, yanet_error **err) {
 	int proto = config->identifier.ip_proto;
 	if (proto != IPPROTO_IP && proto != IPPROTO_IPV6) {
-		NEW_ERROR(
-			"network protocol is invalid: got %d, but only IPv4 "
-			"(%d) and IPv6 (%d) are supported",
+		yanet_error_add(
+			err,
+			"invalid network protocol: %d, supported: IPv4 (%d) "
+			"and IPv6 (%d)",
 			proto,
 			IPPROTO_IP,
 			IPPROTO_IPV6
@@ -66,9 +67,10 @@ validate_vs_config(struct named_vs_config *config) {
 
 	if (config->identifier.transport_proto != IPPROTO_TCP &&
 	    config->identifier.transport_proto != IPPROTO_UDP) {
-		NEW_ERROR(
-			"transport protocol is invalid: got %d, but only TCP "
-			"(%d) and UDP (%d) are supported",
+		yanet_error_add(
+			err,
+			"invalid transport protocol: %d, supported: TCP (%d) "
+			"and UDP (%d)",
 			config->identifier.transport_proto,
 			IPPROTO_TCP,
 			IPPROTO_UDP
@@ -98,7 +100,8 @@ validate_and_reorder_vs_configs(
 	size_t count,
 	struct named_vs_config *configs,
 	size_t *ipv4_count,
-	size_t *ipv6_count
+	size_t *ipv6_count,
+	yanet_error **err
 ) {
 	// move ipv4 services first, and ipv6 then.
 
@@ -107,8 +110,12 @@ validate_and_reorder_vs_configs(
 		struct named_vs_config *current = &configs[idx];
 
 		// validate service
-		if (validate_vs_config(current) != 0) {
-			PUSH_ERROR("at index %zu", idx);
+		if (validate_vs_config(current, err) != 0) {
+			yanet_error_add(
+				err,
+				"invalid virtual service config at index %zu",
+				initial_vs_idx[idx]
+			);
 			return -1;
 		}
 
@@ -144,7 +151,8 @@ register_virtual_services(
 	const size_t *initial_vs_idx,
 	struct named_vs_config *configs,
 	struct packet_handler *prev_handler,
-	size_t *match
+	size_t *match,
+	yanet_error **err
 ) {
 	for (size_t vs_idx = 0; vs_idx < vs_count; ++vs_idx) {
 		struct named_vs_config *vs_config = &configs[vs_idx];
@@ -154,7 +162,8 @@ register_virtual_services(
 			&handler->vs_registry, &vs_config->identifier
 		);
 		if (stable_idx == -1) {
-			PUSH_ERROR(
+			yanet_error_add(
+				err,
 				"VS not found in registry at index %zu",
 				initial_vs_idx[vs_idx]
 			);
@@ -187,7 +196,8 @@ register_and_prepare_vs(
 	size_t *initial_vs_idx,
 	struct vs *virtual_services,
 	struct balancer_update_info *update_info,
-	int *reuse_filter
+	int *reuse_filter,
+	yanet_error **err
 ) {
 	// only IPv4 and IPv6 are supported
 	assert(proto == IPPROTO_IP || proto == IPPROTO_IPV6);
@@ -200,9 +210,14 @@ register_and_prepare_vs(
 		    initial_vs_idx,
 		    vs_configs,
 		    prev_handler,
-		    &match
+		    &match,
+		    err
 	    ) != 0) {
-		PUSH_ERROR("registration failed");
+		yanet_error_add(
+			err,
+			"failed to register virtual services for protocol %s",
+			proto == IPPROTO_IP ? "IPv4" : "IPv6"
+		);
 		return -1;
 	}
 
@@ -273,7 +288,8 @@ init_packet_handler_vs(
 	struct real *reals,
 	size_t *reals_counter,
 	struct balancer_update_info *update_info,
-	size_t *initial_vs_idx
+	size_t *initial_vs_idx,
+	yanet_error **err
 ) {
 	// only IPv4 and IPv6 are supported
 	assert(proto == IPPROTO_IP || proto == IPPROTO_IPV6);
@@ -291,7 +307,9 @@ init_packet_handler_vs(
 	// Build key-value pairs for the index map (stable_idx -> config_idx)
 	struct key_value *entries = malloc(sizeof(struct key_value) * vs_count);
 	if (entries == NULL && vs_count > 0) {
-		NEW_ERROR("failed to allocate memory for VS index entries");
+		yanet_error_add(
+			err, "failed to allocate memory for index entries"
+		);
 		return -1;
 	}
 
@@ -329,12 +347,16 @@ init_packet_handler_vs(
 			    current_vs_config,
 			    registry,
 			    mctx,
-			    update_info
+			    update_info,
+			    err
 		    ) != 0) {
-			PUSH_ERROR(
-				"service at index %zu", initial_vs_idx[vs_idx]
-			);
 			free(entries);
+			yanet_error_add(
+				err,
+				"failed to initialize virtual service at "
+				"index %zu",
+				initial_vs_idx[vs_idx]
+			);
 			return -1;
 		}
 
@@ -344,8 +366,8 @@ init_packet_handler_vs(
 
 	// Initialize the index map
 	if (map_init(&packet_handler_vs->index, mctx, entries, vs_count) != 0) {
-		NEW_ERROR("failed to initialize VS index map");
 		free(entries);
+		yanet_error_add(err, "failed to initialize VS index map");
 		return -1;
 	}
 
@@ -357,11 +379,12 @@ int
 init_vs_filter(
 	struct packet_handler_vs *packet_handler_vs,
 	struct packet_handler_vs *prev_packet_handler_vs,
+	size_t *initial_vs_idx,
 	struct named_vs_config *vs_configs,
 	int reuse_filter,
 	struct memory_context *mctx,
-	size_t *initial_vs_idx,
-	int proto
+	int proto,
+	yanet_error **err
 ) {
 	packet_handler_vs->filter_reused = 0;
 	if (reuse_filter) {
@@ -377,9 +400,14 @@ init_vs_filter(
 			    initial_vs_idx,
 			    vs_configs,
 			    mctx,
-			    proto
+			    proto,
+			    err
 		    ) != 0) {
-			PUSH_ERROR("build failed");
+			yanet_error_add(
+				err,
+				"failed to build filter for protocol %s",
+				proto == IPPROTO_IP ? "IPv4" : "IPv6"
+			);
 			return -1;
 		}
 	}
@@ -391,11 +419,17 @@ init_announce(
 	struct packet_handler_vs *handler,
 	struct memory_context *mctx,
 	struct named_vs_config *vs_configs,
-	int proto
+	int proto,
+	const size_t *initial_vs_idx,
+	yanet_error **err
 ) {
 	struct lpm *lpm = &handler->announce;
 	if (lpm_init(lpm, mctx) != 0) {
-		NEW_ERROR("no memory");
+		yanet_error_add(
+			err,
+			"failed to initialize LPM for protocol %s",
+			proto == IPPROTO_IP ? "IPv4" : "IPv6"
+		);
 		return -1;
 	}
 
@@ -419,7 +453,12 @@ init_announce(
 		}
 		if (res != 0) {
 			lpm_free(lpm);
-			NEW_ERROR("no memory");
+			yanet_error_add(
+				err,
+				"failed to insert into LPM for virtual service "
+				"at index %zu",
+				initial_vs_idx[vs_idx]
+			);
 			return -1;
 		}
 	}
@@ -432,13 +471,17 @@ setup_vs_index(
 	struct packet_handler *handler,
 	struct vs *virtual_services,
 	size_t *initial_vs_idx,
-	struct memory_context *mctx
+	struct memory_context *mctx,
+	yanet_error **err
 ) {
+
 	// Build key-value pairs for the map (stable_idx -> config_idx)
 	struct key_value *entries =
 		malloc(sizeof(struct key_value) * handler->vs_count);
 	if (entries == NULL && handler->vs_count > 0) {
-		NEW_ERROR("failed to allocate memory for VS index entries");
+		yanet_error_add(
+			err, "failed to allocate memory for vs index entries"
+		);
 		return -1;
 	}
 
@@ -448,9 +491,11 @@ setup_vs_index(
 		// Check for duplicates
 		for (size_t i = 0; i < vs_idx; i++) {
 			if (entries[i].key == vs->stable_idx) {
-				NEW_ERROR(
+				yanet_error_add(
+					err,
 					"service at index %zu matches with "
-					"service at index %zu",
+					"service at "
+					"index %zu",
 					initial_vs_idx[vs_idx],
 					initial_vs_idx[i]
 				);
@@ -466,8 +511,8 @@ setup_vs_index(
 	// Initialize the map
 	if (map_init(&handler->vs_index, mctx, entries, handler->vs_count) !=
 	    0) {
-		NEW_ERROR("failed to initialize VS index map");
 		free(entries);
+		yanet_error_add(err, "failed to initialize VS index map");
 		return -1;
 	}
 

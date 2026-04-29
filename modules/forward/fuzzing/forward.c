@@ -19,7 +19,7 @@
 static struct fuzzing_params fuzz_params = {0};
 
 static int
-forward_test_config(struct cp_module **cp_module) {
+forward_test_config(struct cp_module **cp_module, yanet_error **err) {
 	struct forward_module_config *config =
 		(struct forward_module_config *)memory_balloc(
 			&fuzz_params.mctx, sizeof(struct forward_module_config)
@@ -130,14 +130,17 @@ forward_test_config(struct cp_module **cp_module) {
 	rules[2].dst_net6s.items = &dst6;
 	rules[2].dst_net6s.count = 1;
 
-	int rc = forward_module_config_update(&config->cp_module, rules, 3);
+	int rc =
+		forward_module_config_update(&config->cp_module, rules, 3, err);
 	if (rc != 0) {
 		goto fail;
 	}
 
 	// Set up counter storage, because "forward_handle_packets" accesses
 	// counters.
-	if (counter_registry_link(&config->cp_module.counter_registry, NULL)) {
+	if (counter_registry_link(
+		    &config->cp_module.counter_registry, NULL, err
+	    )) {
 		goto fail;
 	}
 
@@ -181,7 +184,7 @@ fail:
 }
 
 static int
-fuzz_setup() {
+fuzz_setup(yanet_error **err) {
 	if (fuzzing_params_init(
 		    &fuzz_params, "forward fuzzing", new_module_forward
 	    ) != 0) {
@@ -205,13 +208,14 @@ fuzz_setup() {
 	}
 	memset(fuzz_params.worker, 0, sizeof(struct dp_worker));
 
-	return forward_test_config(&fuzz_params.cp_module);
+	return forward_test_config(&fuzz_params.cp_module, err);
 }
 
 int
 LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) { // NOLINT
 	if (fuzz_params.module == NULL) {
-		if (fuzz_setup() != 0) {
+		yanet_error *err = NULL;
+		if (fuzz_setup(&err) != 0) {
 			exit(1); // Proper setup is essential for continuing
 		}
 	}

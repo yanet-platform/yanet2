@@ -12,7 +12,7 @@
 static struct fuzzing_params fuzz_params = {0};
 
 static int
-route_test_config(struct cp_module **cp_module) {
+route_test_config(struct cp_module **cp_module, yanet_error **err) {
 	struct route_module_config *config =
 		(struct route_module_config *)memory_balloc(
 			&fuzz_params.mctx, sizeof(struct route_module_config)
@@ -64,7 +64,8 @@ route_test_config(struct cp_module **cp_module) {
 		(struct ether_addr){
 			.addr = {0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c},
 		},
-		"dev0"
+		"dev0",
+		err
 	);
 	if (route_idx == -1) {
 		goto error_lpm_v6;
@@ -114,14 +115,14 @@ error_lpm_v4:
 }
 
 static int
-fuzz_setup() {
+fuzz_setup(yanet_error **err) {
 	if (fuzzing_params_init(
 		    &fuzz_params, "route fuzzing", new_module_route
 	    ) != 0) {
 		return EXIT_FAILURE;
 	}
 
-	if (route_test_config(&fuzz_params.cp_module) != 0) {
+	if (route_test_config(&fuzz_params.cp_module, err) != 0) {
 		return EXIT_FAILURE;
 	}
 
@@ -148,7 +149,8 @@ fuzz_setup() {
 int
 LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) { // NOLINT
 	if (fuzz_params.module == NULL) {
-		if (fuzz_setup() != 0) {
+		yanet_error *err = NULL;
+		if (fuzz_setup(&err) != 0) {
 			exit(1); // Proper setup is essential for continuing
 		}
 	}

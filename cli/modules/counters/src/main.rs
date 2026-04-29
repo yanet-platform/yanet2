@@ -36,9 +36,9 @@ pub enum ModeCmd {
     Device(DeviceCmd),
     /// Show pipeline counters.
     Pipeline(PipelineCmd),
-    /// Show pipeline counters.
+    /// Show function counters.
     Function(FunctionCmd),
-    /// Show pipeline counters.
+    /// Show chain counters.
     Chain(ChainCmd),
     /// Show counters of module assigned to a pipeline.
     Module(ModuleCmd),
@@ -125,7 +125,7 @@ pub async fn main() {
     CompleteEnv::with_factory(Cmd::command).complete();
 
     let cmd = Cmd::parse();
-    logging::init(cmd.verbose as usize).expect("no error expected");
+    let _ = logging::init(cmd.verbose as usize);
 
     if let Err(err) = run(cmd).await {
         log::error!("ERROR: {err}");

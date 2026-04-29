@@ -28,6 +28,7 @@
 
 #include "lib/dataplane/packet/data.h"
 #include "lib/dataplane/packet/packet.h"
+#include "lib/errors/errors.h"
 
 #include <unistd.h>
 
@@ -517,8 +518,16 @@ dataplane_init(
 			}
 		}
 
+		yanet_error *err = NULL;
 		struct cp_config_gen *cp_config_gen =
-			cp_config_gen_create(&agent);
+			cp_config_gen_create(&agent, &err);
+		if (cp_config_gen == NULL) {
+			LOG(ERROR,
+			    "failed to create cp_config_gen: %s",
+			    yanet_error_message(err));
+			yanet_error_free(err);
+			return -1;
+		}
 		SET_OFFSET_OF(
 			&instance->cp_config->cp_config_gen, cp_config_gen
 		);
@@ -592,7 +601,16 @@ dataplane_init(
 			dp_config->worker_count
 		);
 
-		counter_registry_link(&dp_config->worker_counters, NULL);
+		yanet_error *err = NULL;
+		if (counter_registry_link(
+			    &dp_config->worker_counters, NULL, &err
+		    )) {
+			LOG(ERROR,
+			    "failed to link counter registry: %s",
+			    yanet_error_message(err));
+			yanet_error_free(err);
+			return -1;
+		}
 
 		SET_OFFSET_OF(
 			&dp_config->worker_counter_storage,

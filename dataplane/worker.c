@@ -34,6 +34,7 @@
  */
 
 #include "dataplane/time/clock.h"
+#include "errors.h"
 #include "yanet_build_config.h"
 
 #include "worker.h"
@@ -406,6 +407,26 @@ worker_thread_start(void *arg) {
 	return NULL;
 }
 
+static int
+worker_register_counter(
+	struct dp_config *dp_config, const char *name, uint64_t size
+) {
+	yanet_error *err = NULL;
+	uint64_t rc = counter_registry_register(
+		&dp_config->worker_counters, name, size, &err
+	);
+	if (rc == COUNTER_INVALID) {
+		LOG(ERROR,
+		    "failed to register '%s' counter: %s",
+		    name,
+		    yanet_error_message(err));
+		yanet_error_free(err);
+		return -1;
+	}
+
+	return 0;
+}
+
 int
 dataplane_worker_init(
 	struct dataplane *dataplane,
@@ -552,13 +573,21 @@ dataplane_worker_init(
 		&dp_config->worker_counters, &dp_config->memory_context, 0
 	);
 
-	counter_registry_register(&dp_config->worker_counters, "iterations", 1);
-
-	counter_registry_register(&dp_config->worker_counters, "rx", 2);
-	counter_registry_register(&dp_config->worker_counters, "tx", 2);
-	counter_registry_register(&dp_config->worker_counters, "remote_rx", 2);
-
-	counter_registry_register(&dp_config->worker_counters, "remote_tx", 2);
+	if (worker_register_counter(dp_config, "iterations", 1)) {
+		return -1;
+	}
+	if (worker_register_counter(dp_config, "rx", 2)) {
+		return -1;
+	}
+	if (worker_register_counter(dp_config, "tx", 2)) {
+		return -1;
+	}
+	if (worker_register_counter(dp_config, "remote_rx", 2)) {
+		return -1;
+	}
+	if (worker_register_counter(dp_config, "remote_tx", 2)) {
+		return -1;
+	}
 
 	return 0;
 

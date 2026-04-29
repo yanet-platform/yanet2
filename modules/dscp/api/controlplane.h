@@ -2,6 +2,8 @@
 
 #include <stdint.h>
 
+#include "lib/errors/errors.h"
+
 struct agent;
 struct cp_module;
 struct memory_context;
@@ -9,7 +11,9 @@ struct dscp_module_config;
 
 // Create a new configuration for the DSCP module
 struct cp_module *
-dscp_module_config_create(struct agent *agent, const char *name);
+dscp_module_config_create(
+	struct agent *agent, const char *name, yanet_error **err
+);
 
 void
 dscp_module_config_free(struct cp_module *cp_module);

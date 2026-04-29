@@ -3,6 +3,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "lib/errors/errors.h"
+
 struct filter_rule;
 struct named_vs_config;
 struct packet_handler_vs;
@@ -14,7 +16,8 @@ struct memory_context;
  * @param result_rules Output pointer to allocated filter rules array
  * @param count Number of VS configurations
  * @param vs_configs Array of VS configurations
- * @param vs_initial_idx Array of initial VS indices for error reporting
+ * @param initial_vs_idx Array of initial VS indices for error reporting
+ * @param err Error pointer for reporting failures
  * @return 0 on success, -1 on error
  */
 int
@@ -22,7 +25,8 @@ make_filter_rules(
 	struct filter_rule **result_rules,
 	size_t count,
 	struct named_vs_config *vs_configs,
-	size_t *vs_initial_idx
+	size_t *initial_vs_idx,
+	yanet_error **err
 );
 
 /**
@@ -42,6 +46,7 @@ free_rules(size_t rules_count, struct filter_rule *rules);
  * @param vs_configs Array of VS configurations
  * @param mctx Memory context for allocations
  * @param proto IP protocol (IPPROTO_IP or IPPROTO_IPV6)
+ * @param err Error pointer for reporting failures
  * @return 0 on success, -1 on error
  */
 int
@@ -50,7 +55,8 @@ build_filter(
 	size_t *initial_vs_idx,
 	struct named_vs_config *vs_configs,
 	struct memory_context *mctx,
-	int proto
+	int proto,
+	yanet_error **err
 );
 
 /**

@@ -3,6 +3,7 @@
 #include <stdint.h>
 
 #include "common/memory.h"
+#include "lib/errors/errors.h"
 
 #define COUNTER_MAX_SIZE_EXP 5
 #define COUNTER_POOL_SIZE (COUNTER_MAX_SIZE_EXP + 1)
@@ -42,7 +43,10 @@ counter_registry_init(
 
 uint64_t
 counter_registry_register(
-	struct counter_registry *registry, const char *name, uint64_t size
+	struct counter_registry *registry,
+	const char *name,
+	uint64_t size,
+	yanet_error **err
 );
 
 void
@@ -50,7 +54,9 @@ counter_registry_free(struct counter_registry *registry);
 
 int
 counter_registry_link(
-	struct counter_registry *dst, struct counter_registry *src
+	struct counter_registry *dst,
+	struct counter_registry *src,
+	yanet_error **err
 );
 
 struct counter_storage_page {

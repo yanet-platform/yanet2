@@ -9,12 +9,12 @@
 #include <rte_udp.h>
 
 #include <assert.h>
+#include <stdalign.h>
 #include <stdlib.h>
 
 #include <rte_build_config.h>
 #include <string.h>
 
-#include "lib/dataplane/module/packet_front.h"
 #include "lib/dataplane/packet/data.h"
 #include "lib/dataplane/packet/packet.h"
 #include "yanet_build_config.h"
@@ -234,6 +234,28 @@ free_packet(struct packet *packet) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+
+struct rte_mbuf *
+alloc_mbuf(uint16_t headroom, uint16_t pkt_len, uint16_t tailroom) {
+	size_t buf_len = (size_t)headroom + pkt_len;
+	size_t mbuf_size = sizeof(struct rte_mbuf) + buf_len + tailroom;
+	size_t align = alignof(struct rte_mbuf);
+	mbuf_size += (align - mbuf_size % align) % align;
+	struct rte_mbuf *mbuf = aligned_alloc(align, mbuf_size);
+	if (!mbuf) {
+		return NULL;
+	}
+	memset(mbuf, 0, sizeof(*mbuf));
+	mbuf->buf_addr = (char *)mbuf + sizeof(struct rte_mbuf);
+	mbuf->buf_len = buf_len;
+	mbuf->data_off = headroom;
+	mbuf->data_len = pkt_len;
+	mbuf->pkt_len = pkt_len;
+	mbuf->nb_segs = 1;
+	rte_mbuf_refcnt_set(mbuf, 1);
+	memset(rte_pktmbuf_mtod(mbuf, void *), 0, pkt_len);
+	return mbuf;
+}
 
 void
 init_mbuf(struct rte_mbuf *m, struct packet_info *data, uint16_t buf_len) {

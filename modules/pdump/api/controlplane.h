@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 
+#include "lib/errors/errors.h"
 #include "mode.h"
 #include "ring.h"
 
@@ -38,7 +39,9 @@ enum pdump_log_level {
 
 // Create a new configuration for the pdump module
 struct cp_module *
-pdump_module_config_create(struct agent *agent, const char *name);
+pdump_module_config_create(
+	struct agent *agent, const char *name, yanet_error **err
+);
 
 void
 pdump_module_config_free(struct cp_module *module);

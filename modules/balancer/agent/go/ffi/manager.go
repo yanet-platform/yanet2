@@ -8,6 +8,7 @@ package ffi
 #cgo CFLAGS: -I../../ -I../../../../../
 #cgo LDFLAGS: -L../../../../../build/modules/balancer/agent -lbalancer_agent -L../../../../../build/modules/balancer/controlplane/api -lbalancer_cp -L../../../../../build/modules/balancer/controlplane/handler -lbalancer_packet_handler -L../../../../../build/modules/balancer/controlplane/state -lbalancer_state -lbalancer_packet_handler -L../../../../../build/filter -lfilter_compiler
 #include "manager.h"
+#include "lib/errors/errors.h"
 #include "modules/balancer/controlplane/api/balancer.h"
 #include <stdlib.h>
 */
@@ -17,6 +18,8 @@ import (
 	"fmt"
 	"time"
 	"unsafe"
+
+	"github.com/yanet-platform/yanet2/bindings/go/cerrors"
 )
 
 var (
@@ -63,11 +66,9 @@ func (m *BalancerManager) Update(
 
 	cNow := C.uint32_t(now.Unix())
 
-	if C.balancer_manager_update(m.handle, cConfig, &cUpdateInfo, cNow) != 0 {
-		cErr := C.balancer_manager_take_error(m.handle)
-		errMsg := C.GoString(cErr)
-		C.free(unsafe.Pointer(cErr))
-		return nil, fmt.Errorf("failed to perform update: %s", errMsg)
+	var cErr *C.struct_yanet_error
+	if C.balancer_manager_update(m.handle, cConfig, &cUpdateInfo, cNow, &cErr) != 0 {
+		return nil, fmt.Errorf("failed to perform update: %w", cerrors.FromC(unsafe.Pointer(cErr)))
 	}
 
 	// Convert C update_info to Go, copying all data
@@ -91,15 +92,14 @@ func (m *BalancerManager) UpdateReals(updates []RealUpdate) error {
 		cUpdates[i] = goToCRealUpdate(update)
 	}
 
+	var cErr *C.struct_yanet_error
 	if C.balancer_manager_update_reals(
 		m.handle,
 		C.size_t(len(updates)),
 		&cUpdates[0],
+		&cErr,
 	) != 0 {
-		cErr := C.balancer_manager_take_error(m.handle)
-		errMsg := C.GoString(cErr)
-		C.free(unsafe.Pointer(cErr))
-		return fmt.Errorf("%s", errMsg)
+		return fmt.Errorf("failed to update reals: %w", cerrors.FromC(unsafe.Pointer(cErr)))
 	}
 
 	return nil
@@ -119,15 +119,14 @@ func (m *BalancerManager) UpdateRealsWlc(updates []RealUpdate) error {
 		cUpdates[i] = goToCRealUpdate(update)
 	}
 
+	var cErr *C.struct_yanet_error
 	if C.balancer_manager_update_reals_wlc(
 		m.handle,
 		C.size_t(len(updates)),
 		&cUpdates[0],
+		&cErr,
 	) != 0 {
-		cErr := C.balancer_manager_take_error(m.handle)
-		errMsg := C.GoString(cErr)
-		C.free(unsafe.Pointer(cErr))
-		return fmt.Errorf("%s", errMsg)
+		return fmt.Errorf("failed to update reals WLC: %w", cerrors.FromC(unsafe.Pointer(cErr)))
 	}
 
 	return nil
@@ -140,15 +139,14 @@ func (m *BalancerManager) ResizeSessionTable(
 ) error {
 	cNow := C.uint32_t(now.Unix())
 
+	var cErr *C.struct_yanet_error
 	if C.balancer_manager_resize_session_table(
 		m.handle,
 		C.size_t(newSize),
 		cNow,
+		&cErr,
 	) != 0 {
-		cErr := C.balancer_manager_take_error(m.handle)
-		errMsg := C.GoString(cErr)
-		C.free(unsafe.Pointer(cErr))
-		return fmt.Errorf("%s", errMsg)
+		return fmt.Errorf("failed to resize session table: %w", cerrors.FromC(unsafe.Pointer(cErr)))
 	}
 
 	return nil
@@ -160,10 +158,7 @@ func (m *BalancerManager) Info(now time.Time) (*BalancerInfo, error) {
 	cNow := C.uint32_t(now.Unix())
 
 	if C.balancer_manager_info(m.handle, &cInfo, cNow) != 0 {
-		cErr := C.balancer_manager_take_error(m.handle)
-		errMsg := C.GoString(cErr)
-		C.free(unsafe.Pointer(cErr))
-		return nil, fmt.Errorf("%s", errMsg)
+		return nil, fmt.Errorf("failed to get info")
 	}
 
 	// Convert C info to Go, copying all data
@@ -211,11 +206,9 @@ func (m *BalancerManager) Stats(ref *PacketHandlerRef) (*BalancerStats, error) {
 	cRef := goToCPacketHandlerRef(ref)
 	defer freeCPacketHandlerRef(cRef)
 
-	if C.balancer_manager_stats(m.handle, &cStats, cRef) != 0 {
-		cErr := C.balancer_manager_take_error(m.handle)
-		errMsg := C.GoString(cErr)
-		C.free(unsafe.Pointer(cErr))
-		return nil, fmt.Errorf("%s", errMsg)
+	var cErr *C.struct_yanet_error
+	if C.balancer_manager_stats(m.handle, &cStats, cRef, &cErr) != 0 {
+		return nil, fmt.Errorf("failed to get stats: %w", cerrors.FromC(unsafe.Pointer(cErr)))
 	}
 
 	// Convert C stats to Go, copying all data

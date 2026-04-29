@@ -22,18 +22,21 @@ struct fib_iter {
 };
 
 struct cp_module *
-route_module_config_create(struct agent *agent, const char *name) {
+route_module_config_create(
+	struct agent *agent, const char *name, yanet_error **err
+) {
 	struct route_module_config *config =
 		(struct route_module_config *)memory_balloc(
 			&agent->memory_context,
 			sizeof(struct route_module_config)
 		);
 	if (config == NULL) {
-		errno = ENOMEM;
+		yanet_error_add(err, "failed to allocate config");
 		return NULL;
 	}
 
-	if (cp_module_init(&config->cp_module, agent, "route", name)) {
+	if (cp_module_init(&config->cp_module, agent, "route", name, err)) {
+		yanet_error_add(err, "failed to init module");
 		memory_bfree(
 			&agent->memory_context,
 			config,
@@ -45,6 +48,7 @@ route_module_config_create(struct agent *agent, const char *name) {
 	if (route_module_config_data_init(
 		    config, &config->cp_module.memory_context
 	    )) {
+		yanet_error_add(err, "failed to init config data");
 		memory_bfree(
 			&agent->memory_context,
 			config,
@@ -125,14 +129,15 @@ route_module_config_add_route(
 	struct cp_module *cp_module,
 	struct ether_addr dst_addr,
 	struct ether_addr src_addr,
-	const char *device_name
+	const char *device_name,
+	yanet_error **err
 ) {
 	struct route_module_config *config =
 		container_of(cp_module, struct route_module_config, cp_module);
 	struct route *routes = ADDR_OF(&config->routes);
 
 	uint64_t device_index;
-	if (cp_module_link_device(cp_module, device_name, &device_index)) {
+	if (cp_module_link_device(cp_module, device_name, &device_index, err)) {
 		return -1;
 	}
 

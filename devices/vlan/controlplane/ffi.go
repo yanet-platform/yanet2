@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"unsafe"
 
+	"github.com/yanet-platform/yanet2/bindings/go/cerrors"
 	"github.com/yanet-platform/yanet2/common/commonpb"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 )
@@ -42,7 +43,11 @@ func NewDeviceConfig(
 	input := device.GetInput()
 	output := device.GetOutput()
 
-	cCfg := C.cp_device_vlan_config_create(cName, C.uint64_t(len(input)), C.uint64_t(len(output)), C.uint16_t(vlan))
+	var cErr *C.struct_yanet_error
+	cCfg := C.cp_device_vlan_config_create(cName, C.uint64_t(len(input)), C.uint64_t(len(output)), C.uint16_t(vlan), &cErr)
+	if cCfg == nil {
+		return nil, fmt.Errorf("failed to initialize vlan device config: %w", cerrors.FromC(unsafe.Pointer(cErr)))
+	}
 
 	for idx, pipeline := range input {
 		cName := C.CString(pipeline.GetName())
@@ -66,12 +71,9 @@ func NewDeviceConfig(
 		)
 	}
 
-	ptr, err := C.cp_device_vlan_create((*C.struct_agent)(agent.AsRawPtr()), cCfg)
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize vlan device config: %w", err)
-	}
+	ptr := C.cp_device_vlan_create((*C.struct_agent)(agent.AsRawPtr()), cCfg, &cErr)
 	if ptr == nil {
-		return nil, fmt.Errorf("failed to initialize vlan device config: device %q not found", name)
+		return nil, fmt.Errorf("failed to create vlan device: %w", cerrors.FromC(unsafe.Pointer(cErr)))
 	}
 
 	return &DeviceConfig{

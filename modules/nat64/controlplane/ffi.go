@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"unsafe"
 
+	"github.com/yanet-platform/yanet2/bindings/go/cerrors"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 )
 
@@ -29,12 +30,10 @@ func NewModuleConfig(agent *ffi.Agent, name string) (*ModuleConfig, error) {
 	cName := C.CString(name)
 	defer C.free(unsafe.Pointer(cName))
 
-	ptr, err := C.nat64_module_config_create((*C.struct_agent)(agent.AsRawPtr()), cName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize NAT64 module config: %w", err)
-	}
+	var cErr *C.yanet_error
+	ptr := C.nat64_module_config_create((*C.struct_agent)(agent.AsRawPtr()), cName, &cErr)
 	if ptr == nil {
-		return nil, fmt.Errorf("failed to initialize NAT64 module config: module %q not found", name)
+		return nil, fmt.Errorf("failed to initialize NAT64 module config: %w", cerrors.FromC(unsafe.Pointer(cErr)))
 	}
 
 	return &ModuleConfig{

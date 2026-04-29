@@ -1,5 +1,6 @@
 #include "common/memory_address.h"
-#include "lib/controlplane/diag/diag.h"
+
+#include "lib/errors/errors.h"
 
 #include "real.h"
 #include "registry.h"
@@ -34,13 +35,17 @@ unmark_vs_updated(size_t ph_idx) {
 }
 
 static int
-validate_update(struct packet_handler *handler, struct real_update *update) {
+validate_update(
+	struct packet_handler *handler,
+	struct real_update *update,
+	yanet_error **err
+) {
 	// validate real - check if it exists in handler's registry
 	ssize_t real_stable_idx = reals_registry_lookup(
 		&handler->reals_registry, &update->identifier
 	);
 	if (real_stable_idx < 0) {
-		NEW_ERROR("real not found in registry");
+		yanet_error_add(err, "real not found in registry");
 		return -1;
 	}
 
@@ -49,7 +54,8 @@ validate_update(struct packet_handler *handler, struct real_update *update) {
 	if (map_find(
 		    &handler->reals_index, real_stable_idx, &real_config_idx
 	    ) != 0) {
-		NEW_ERROR("real is not present in current handler configuration"
+		yanet_error_add(
+			err, "real is not present in current configuration"
 		);
 		return -1;
 	}
@@ -59,22 +65,26 @@ validate_update(struct packet_handler *handler, struct real_update *update) {
 		&handler->vs_registry, &update->identifier.vs_identifier
 	);
 	if (vs_stable_idx < 0) {
-		NEW_ERROR("virtual service not found in registry");
+		yanet_error_add(err, "virtual service not found in registry");
 		return -1;
 	}
 
 	// check if VS is present in current handler config
 	size_t vs_config_idx;
 	if (map_find(&handler->vs_index, vs_stable_idx, &vs_config_idx) != 0) {
-		NEW_ERROR("virtual service is not present in current handler "
-			  "configuration");
+		yanet_error_add(
+			err,
+			"virtual service is not present in current "
+			"handler configuration"
+		);
 		return -1;
 	}
 
 	// check update params
 	if (update->enabled != DONT_UPDATE_REAL_ENABLED) {
 		if (update->enabled != 0 && update->enabled != 1) {
-			NEW_ERROR(
+			yanet_error_add(
+				err,
 				"incorrect enabled field: %u (0, 1 or -1 "
 				"expected)",
 				update->enabled
@@ -91,7 +101,8 @@ validate_update(struct packet_handler *handler, struct real_update *update) {
 
 	if (update->weight != DONT_UPDATE_REAL_WEIGHT &&
 	    update->weight > MAX_REAL_WEIGHT) {
-		NEW_ERROR(
+		yanet_error_add(
+			err,
 			"weight %u is too big (max is %u)",
 			update->weight,
 			MAX_REAL_WEIGHT
@@ -152,7 +163,11 @@ update_real(struct packet_handler *handler, struct real_update *update) {
 }
 
 static int
-update_vs(struct packet_handler *handler, struct real_update *update) {
+update_vs(
+	struct packet_handler *handler,
+	struct real_update *update,
+	yanet_error **err
+) {
 	// Find VS stable index
 	ssize_t vs_stable_idx = vs_registry_lookup(
 		&handler->vs_registry, &update->identifier.vs_identifier
@@ -170,8 +185,8 @@ update_vs(struct packet_handler *handler, struct real_update *update) {
 
 	struct vs *vss = ADDR_OF(&handler->vs);
 	struct vs *vs = &vss[vs_config_idx];
-	if (vs_update_reals(vs) != 0) {
-		PUSH_ERROR("failed to update reals");
+	if (vs_update_reals(vs, err) != 0) {
+		yanet_error_add(err, "failed to update virtual service");
 		return -1;
 	}
 
@@ -184,13 +199,14 @@ int
 packet_handler_update_reals(
 	struct packet_handler *handler,
 	size_t count,
-	struct real_update *updates
+	struct real_update *updates,
+	yanet_error **err
 ) {
 	// validate
 	for (size_t i = 0; i < count; ++i) {
 		struct real_update *update = &updates[i];
-		if (validate_update(handler, update) != 0) {
-			PUSH_ERROR("update at index %lu is invalid", i);
+		if (validate_update(handler, update, err) != 0) {
+			yanet_error_add(err, "failed to validate real update");
 			return -1;
 		}
 	}
@@ -204,11 +220,11 @@ packet_handler_update_reals(
 	// update virtual services that were marked as updated
 	for (size_t i = 0; i < count; ++i) {
 		struct real_update *update = &updates[i];
-		if (update_vs(handler, update) != 0) {
-			PUSH_ERROR(
+		if (update_vs(handler, update, err) != 0) {
+			yanet_error_add(
+				err,
 				"failed to update virtual service for update "
-				"at "
-				"index %lu",
+				"at index %lu",
 				i
 			);
 			return -1;
