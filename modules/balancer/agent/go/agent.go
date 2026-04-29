@@ -143,7 +143,7 @@ func (a *BalancerAgent) Inspect() *balancerpb.AgentInspect {
 }
 
 func (a *BalancerAgent) Metrics() ([]*commonpb.Metric, error) {
-	dpConfig := a.handle.DPConfig()
+	dpConfig := *a.handle.DPConfig()
 	positions := dpConfig.AllModulePositions("balancer")
 
 	managers := make([]*BalancerManager, 0, len(positions))
@@ -207,7 +207,7 @@ func (a *BalancerAgent) StatsEntries(
 	name *string,
 	refFilter *balancerpb.PacketHandlerRef,
 ) ([]*balancerpb.StatsEntry, error) {
-	dpConfig := a.handle.DPConfig()
+	dpConfig := *a.handle.DPConfig()
 	positions := dpConfig.AllModulePositions("balancer")
 
 	// Snapshot managers under lock to avoid holding agent mutex during per-position stats reads.

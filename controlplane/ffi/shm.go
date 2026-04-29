@@ -25,7 +25,7 @@ type DPDataProvider interface {
 type DPConfig interface {
 	DPObserver
 	CounterAggregator
-	AllModulePositions()
+	AllModulePositions(string) []ModuleReference
 }
 
 type DPObserver interface {
@@ -35,18 +35,18 @@ type DPObserver interface {
 	CPConfigs() []CPConfig
 	Functions() []Function
 	Pipelines() []Pipeline
-	Agents() []Agent
+	Agents() []AgentInfo
 	Devices() []DeviceInfo
 }
 
 type CounterAggregator interface {
-	DeviceCounters()
-	PipelineCounters()
-	FunctionCounters()
-	ChainCounters()
-	ModuleCounters()
-	PerformanceCounters()
-	NicCounters()
+	DeviceCounters(deviceName string) []CounterInfo
+	PipelineCounters(deviceName string, pipelineName string) []CounterInfo
+	FunctionCounters(deviceName string, pipelineName string, functionName string) []CounterInfo
+	ChainCounters(deviceName string, pipelineName string, functionName string, chainName string) []CounterInfo
+	ModuleCounters(deviceName string, pipelineName string, functionName string, chainName string, moduleType string, moduleName string, counterQuery []string) []CounterInfo
+	PerformanceCounters(deviceName string, pipelineName string, functionName string, chainName string, moduleType string, moduleName string) (*PerformanceCounters, error)
+	NicCounters(deivceName string) []CounterInfo
 }
 
 // SharedMemory represents a handle to YANET shared memory segment.
@@ -93,10 +93,10 @@ func (m *SharedMemory) AsRawPtr() unsafe.Pointer {
 }
 
 // DPConfig gets configuration of the dataplane instance from shared memory.
-func (m *SharedMemory) DPConfig(instanceIdx uint32) *DPConfig {
+func (m *SharedMemory) DPConfig(instanceIdx uint32) DPConfig {
 	ptr := C.yanet_shm_dp_config(m.ptr, C.uint32_t(instanceIdx))
 
-	return &DPConfig{ptr: ptr}
+	return &DPConfigImpl{ptr: ptr}
 }
 
 // AgentAttach attaches a module agent to shared memory on the dataplane instance.
@@ -162,24 +162,24 @@ func (m *SharedMemory) AgentsAttach(
 }
 
 // DPConfig represents a handle to dataplane configuration.
-type DPConfig struct {
+type DPConfigImpl struct {
 	ptr *C.struct_dp_config
 }
 
-func NewDPConfigFromRaw(ptr unsafe.Pointer) *DPConfig {
-	return &DPConfig{ptr: (*C.struct_dp_config)(ptr)}
+func NewDPConfigFromRaw(ptr unsafe.Pointer) *DPConfigImpl {
+	return &DPConfigImpl{ptr: (*C.struct_dp_config)(ptr)}
 }
 
-func (m *DPConfig) NumaIdx() uint32 {
+func (m *DPConfigImpl) NumaIdx() uint32 {
 	return uint32(C.dataplane_instance_numa_idx(m.ptr))
 }
 
-func (m *DPConfig) WorkerCount() uint32 {
+func (m *DPConfigImpl) WorkerCount() uint32 {
 	return uint32(C.dataplane_instance_worker_count(m.ptr))
 }
 
 // Modules returns a list of dataplane modules available.
-func (m *DPConfig) Modules() []DPModule {
+func (m *DPConfigImpl) Modules() []DPModule {
 	ptr := C.yanet_get_dp_module_list_info(m.ptr)
 	defer C.dp_module_list_info_free(ptr)
 
@@ -200,7 +200,7 @@ func (m *DPConfig) Modules() []DPModule {
 	return out
 }
 
-func (m *DPConfig) CPConfigs() []CPConfig {
+func (m *DPConfigImpl) CPConfigs() []CPConfig {
 	cpModulesListInfo := C.yanet_get_cp_module_list_info(m.ptr)
 	defer C.cp_module_list_info_free(cpModulesListInfo)
 
@@ -236,7 +236,7 @@ type Function struct {
 }
 
 // Functions returns all functions configurations from the dataplane.
-func (m *DPConfig) Functions() []Function {
+func (m *DPConfigImpl) Functions() []Function {
 	functionListInfo := C.yanet_get_cp_function_list_info(m.ptr)
 	defer C.cp_function_list_info_free(functionListInfo)
 
@@ -277,7 +277,7 @@ func (m *DPConfig) Functions() []Function {
 }
 
 // Pipelines returns all pipeline configurations from the dataplane.
-func (m *DPConfig) Pipelines() []Pipeline {
+func (m *DPConfigImpl) Pipelines() []Pipeline {
 	pipelineListInfo := C.yanet_get_cp_pipeline_list_info(m.ptr)
 	defer C.cp_pipeline_list_info_free(pipelineListInfo)
 
@@ -304,7 +304,7 @@ func (m *DPConfig) Pipelines() []Pipeline {
 }
 
 // Agents returns all agent information from the dataplane.
-func (m *DPConfig) Agents() []AgentInfo {
+func (m *DPConfigImpl) Agents() []AgentInfo {
 	agentListInfo := C.yanet_get_cp_agent_list_info(m.ptr)
 	defer C.cp_agent_list_info_free(agentListInfo)
 
@@ -410,7 +410,7 @@ type DeviceInfo struct {
 }
 
 // Devices returns all device information from the dataplane.
-func (m *DPConfig) Devices() []DeviceInfo {
+func (m *DPConfigImpl) Devices() []DeviceInfo {
 	deviceListInfo := C.yanet_get_cp_device_list_info(m.ptr)
 	if deviceListInfo == nil {
 		return nil
@@ -472,7 +472,7 @@ type CounterInfo struct {
 	Values [][]uint64
 }
 
-func (m *DPConfig) encodeCounters(
+func (m *DPConfigImpl) encodeCounters(
 	counters *C.struct_counter_handle_list,
 ) []CounterInfo {
 	res := make([]CounterInfo, 0)
@@ -507,7 +507,7 @@ func (m *DPConfig) encodeCounters(
 	return res
 }
 
-func (m *DPConfig) DeviceCounters(
+func (m *DPConfigImpl) DeviceCounters(
 	deviceName string,
 ) []CounterInfo {
 	cDeviceName := C.CString(deviceName)
@@ -523,7 +523,7 @@ func (m *DPConfig) DeviceCounters(
 }
 
 // PipelineCounters returns pipeline counters
-func (m *DPConfig) PipelineCounters(
+func (m *DPConfigImpl) PipelineCounters(
 	deviceName string,
 	pipelineName string,
 ) []CounterInfo {
@@ -541,7 +541,7 @@ func (m *DPConfig) PipelineCounters(
 	return m.encodeCounters(counters)
 }
 
-func (m *DPConfig) FunctionCounters(
+func (m *DPConfigImpl) FunctionCounters(
 	deviceName string,
 	pipelineName string,
 	functionName string,
@@ -567,7 +567,7 @@ func (m *DPConfig) FunctionCounters(
 	return m.encodeCounters(counters)
 }
 
-func (m *DPConfig) ChainCounters(
+func (m *DPConfigImpl) ChainCounters(
 	deviceName string,
 	pipelineName string,
 	functionName string,
@@ -600,7 +600,7 @@ func (m *DPConfig) ChainCounters(
 // ModuleCounters returns module counters, optionally filtered by name.
 //
 // If counterQuery is nil or empty, returns all counters.
-func (m *DPConfig) ModuleCounters(
+func (m *DPConfigImpl) ModuleCounters(
 	deviceName string,
 	pipelineName string,
 	functionName string,
@@ -687,7 +687,7 @@ type PerformanceCounters struct {
 // Performance counters provide detailed timing and batch processing statistics
 // for module execution, including mean latency and latency distribution across
 // different batch sizes, as well as tx/rx packet and byte counters.
-func (m *DPConfig) PerformanceCounters(
+func (m *DPConfigImpl) PerformanceCounters(
 	deviceName string,
 	pipelineName string,
 	functionName string,
@@ -786,7 +786,7 @@ func (m *DPConfig) PerformanceCounters(
 	return result, nil
 }
 
-func (m *DPConfig) NicCounters(deviceName string) []CounterInfo {
+func (m *DPConfigImpl) NicCounters(deivceName string) []CounterInfo {
 	cDeviceName := C.CString(deviceName)
 	defer C.free(unsafe.Pointer(cDeviceName))
 	counters := C.yanet_get_nic_counters(m.ptr, cDeviceName)
@@ -808,7 +808,7 @@ type ModuleReference struct {
 	ModuleName string
 }
 
-func (m *DPConfig) AllModulePositions(moduleType string) []ModuleReference {
+func (m *DPConfigImpl) AllModulePositions(moduleType string) []ModuleReference {
 	deviceList := m.Devices()
 
 	pipelineList := m.Pipelines()

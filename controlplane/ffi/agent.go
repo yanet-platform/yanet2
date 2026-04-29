@@ -206,8 +206,8 @@ func (m *Agent) UpdateModules(modules []ModuleConfig) error {
 	return nil
 }
 
-func (m *Agent) DPConfig() *DPConfig {
-	return &DPConfig{
+func (m *Agent) DPConfig() DPConfig {
+	return &DPConfigImpl{
 		ptr: C.agent_dp_config(m.ptr),
 	}
 }
