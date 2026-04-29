@@ -77,6 +77,42 @@ func (m ShmDeviceConfig) AsRawPtr() unsafe.Pointer {
 	return unsafe.Pointer(m.ptr)
 }
 
+type FFIAgent interface {
+	DPAgent
+	CountersProvider
+}
+
+type DPAgent interface {
+	ModuleAgent
+	FunctionAgent
+	PipelineAgent
+	DeviceAgent
+	TakeError() error
+	CleanError()
+	CleanUp() error
+	Close() error
+}
+
+type ModuleAgent interface {
+	UpdateModules(modules []ModuleConfig) error
+	DeleteModuleConfig(configName string) error
+}
+
+type FunctionAgent interface {
+	UpdateFunction(functionConfig FunctionConfig) error
+	DeleteFunction(name string) error
+}
+
+type PipelineAgent interface {
+	UpdatePipeline(pipelineConfig PipelineConfig) error
+	DeletePipeline(name string) error
+}
+
+type DeviceAgent interface {
+	UpdatePlainDevices(devices []DeviceConfig) error
+	UpdateDevices(devices []ShmDeviceConfig) error
+}
+
 type Agent struct {
 	name string
 	ptr  *C.struct_agent
