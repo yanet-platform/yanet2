@@ -79,7 +79,7 @@ func (m ShmDeviceConfig) AsRawPtr() unsafe.Pointer {
 
 type FFIAgent interface {
 	DPAgent
-	CountersProvider
+	DPDataProvider
 }
 
 type DPAgent interface {

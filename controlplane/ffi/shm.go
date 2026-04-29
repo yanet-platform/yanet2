@@ -18,6 +18,37 @@ import (
 	"github.com/c2h5oh/datasize"
 )
 
+type DPDataProvider interface {
+	DPConfig() DPConfig
+}
+
+type DPConfig interface {
+	DPObserver
+	CounterAggregator
+	AllModulePositions()
+}
+
+type DPObserver interface {
+	NumaIdx() uint32
+	WorkerCount() uint32
+	Modules() []DPModule
+	CPConfigs() []CPConfig
+	Functions() []Function
+	Pipelines() []Pipeline
+	Agents() []Agent
+	Devices() []DeviceInfo
+}
+
+type CounterAggregator interface {
+	DeviceCounters()
+	PipelineCounters()
+	FunctionCounters()
+	ChainCounters()
+	ModuleCounters()
+	PerformanceCounters()
+	NicCounters()
+}
+
 // SharedMemory represents a handle to YANET shared memory segment.
 type SharedMemory struct {
 	ptr *C.struct_yanet_shm
