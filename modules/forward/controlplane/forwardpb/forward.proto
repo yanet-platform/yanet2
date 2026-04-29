@@ -21,6 +21,8 @@ service ForwardService {
   // Allows to delete forward config if it is not referenced
   // by any pipeline.
   rpc DeleteConfig(DeleteConfigRequest) returns (DeleteConfigResponse);
+
+  rpc GetMetrics(GetMetricsRequest) returns (GetMetricsResponse);
 }
 
 message Config {
