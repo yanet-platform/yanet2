@@ -62,21 +62,6 @@ struct dp_worker {
 	struct rte_mempool *rx_mempool;
 
 	uint8_t pad[24];
-
-	// trade-off: nic stats unload not often
-	// bcs put it in second cache line
-	uint64_t *nic_rx_packets;
-	uint64_t *nic_rx_bytes;
-	
-	uint64_t *nic_tx_packets;
-	uint64_t *nic_tx_bytes;
-	
-	uint64_t *nic_rx_errors;
-	uint64_t *nic_tx_errors;
-
-	uint64_t *nic_rx_nombuf;
-	
-	uint8_t pad2[8];
 };
 struct dp_config {
 	uint32_t instance_count;

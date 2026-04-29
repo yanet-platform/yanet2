@@ -11,14 +11,10 @@ service CountersService {
   rpc Function(FunctionCountersRequest) returns (CountersResponse) {}
   rpc Chain(ChainCountersRequest) returns (CountersResponse) {}
   rpc Module(ModuleCountersRequest) returns (CountersResponse) {}
-  rpc Nic(NicCounterRequest) returns (CountersResponse) {}
   rpc Perf(PerfCountersRequest) returns (PerfCountersResponse) {}
 }
 
 message DeviceCountersRequest { string device = 1; }
-
-message NicCounterRequest { string device = 1; }
-
 
 message PipelineCountersRequest {
   string device = 1;

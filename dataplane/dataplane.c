@@ -617,11 +617,11 @@ stat_thread(void *arg) {
 	struct rte_eth_xstat_name names[4096];
 	struct rte_eth_xstat xstats0[dataplane->device_count][4096];
 
-	// struct rte_eth_stats stats0[dataplane->device_count];
+	struct rte_eth_stats stats0[dataplane->device_count];
 	for (uint16_t idx = 0; idx < dataplane->device_count; ++idx) {
-		// rte_eth_stats_get(
-		// 	dataplane->devices[idx].port_id, &stats0[idx]
-		// );
+		rte_eth_stats_get(
+			dataplane->devices[idx].port_id, &stats0[idx]
+		);
 		rte_eth_xstats_get(
 			dataplane->devices[idx].port_id, xstats0[idx], 4096
 		);
@@ -631,25 +631,25 @@ stat_thread(void *arg) {
 		sleep(1);
 
 		for (uint16_t idx = 0; idx < dataplane->device_count; ++idx) {
-			// struct rte_eth_stats stats1;
-			// rte_eth_stats_get(
-			// 	dataplane->devices[idx].port_id, &stats1
-			// );
-			// fprintf(log,
-			// 	"dev %u ib %li ob %li ip %li op %li ie %li oe "
-			// 	"%li\n",
-			// 	idx,
-			// 	(int64_t)(stats1.ibytes - stats0[idx].ibytes),
-			// 	(int64_t)(stats1.obytes - stats0[idx].obytes),
-			// 	(int64_t)(stats1.ipackets - stats0[idx].ipackets
-			// 	),
-			// 	(int64_t)(stats1.opackets - stats0[idx].opackets
-			// 	),
-			// 	(int64_t)(stats1.ierrors - stats0[idx].ierrors),
-			// 	(int64_t)(stats1.oerrors - stats0[idx].oerrors)
-			// );
+			struct rte_eth_stats stats1;
+			rte_eth_stats_get(
+				dataplane->devices[idx].port_id, &stats1
+			);
+			fprintf(log,
+				"dev %u ib %li ob %li ip %li op %li ie %li oe "
+				"%li\n",
+				idx,
+				(int64_t)(stats1.ibytes - stats0[idx].ibytes),
+				(int64_t)(stats1.obytes - stats0[idx].obytes),
+				(int64_t)(stats1.ipackets - stats0[idx].ipackets
+				),
+				(int64_t)(stats1.opackets - stats0[idx].opackets
+				),
+				(int64_t)(stats1.ierrors - stats0[idx].ierrors),
+				(int64_t)(stats1.oerrors - stats0[idx].oerrors)
+			);
 
-			// memcpy(&stats0[idx], &stats1, sizeof(stats1));
+			memcpy(&stats0[idx], &stats1, sizeof(stats1));
 
 			struct rte_eth_xstat xstats1[4096];
 			rte_eth_xstats_get_names(

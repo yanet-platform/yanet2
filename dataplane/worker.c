@@ -55,8 +55,6 @@
 
 #include <rte_ethdev.h>
 
-#define NIC_STATS_FREAQUENCY 1000
-
 static void
 worker_read(struct dataplane_worker *worker, struct packet_list *packets) {
 	struct worker_read_ctx *ctx = &worker->read_ctx;
@@ -273,52 +271,6 @@ worker_write(struct dataplane_worker *worker, struct packet_list *packets) {
 	}
 }
 
-struct nic_stat {
-	uint64_t ibytes;
-	uint64_t obytes;
-	uint64_t ipackets;
-	uint64_t opackets;
-	uint64_t ierrors;
-	uint64_t oerrors;
-	uint64_t rx_nombuf;
-};
-
-void worker_unload_nic_stats(struct dataplane_worker *worker) {
-	struct rte_eth_stats stats1;
-    struct dp_worker *dp_worker = worker->dp_worker;
-    
-	// const struct nic_stat stats0 = {
-	// 	.ibytes = *dp_worker->nic_rx_bytes,
-	// 	.obytes = *dp_worker->nic_tx_bytes,
-	// 	.ipackets = *dp_worker->nic_rx_packets,
-	// 	.opackets = *dp_worker->nic_tx_packets,
-	// 	.ierrors = *dp_worker->nic_rx_errors,
-	// 	.oerrors = *dp_worker->nic_tx_errors,
-	// 	.rx_nombuf = *dp_worker->nic_rx_nombuf
-	// };
-
-
-	rte_eth_stats_get(worker->port_id, &stats1);
-	
-	// struct nic_stat diff = {
-	// 	.ibytes = stats1.ibytes - stats0.ibytes,
-	// 	.obytes = stats1.obytes - stats0.obytes,
-	// 	.ipackets = stats1.ipackets - stats0.ipackets,
-	// 	.opackets = stats1.opackets - stats0.opackets,
-	// 	.ierrors = stats1.ierrors - stats0.ierrors,
-	// 	.oerrors = stats1.oerrors - stats0.oerrors,
-	// 	.rx_nombuf = stats1.rx_nombuf - stats0.rx_nombuf
-	// };
-
-	*dp_worker->nic_rx_bytes = stats1.ibytes;
-	*dp_worker->nic_tx_bytes = stats1.obytes;
-	*dp_worker->nic_rx_packets = stats1.ipackets;
-	*dp_worker->nic_tx_packets = stats1.opackets;
-	*dp_worker->nic_rx_errors = stats1.ierrors;
-	*dp_worker->nic_tx_errors = stats1.oerrors;
-	*dp_worker->nic_rx_nombuf = stats1.rx_nombuf;
-}
-
 static void
 worker_loop_round(struct dataplane_worker *worker) {
 	// Initialize current worker time
@@ -360,11 +312,7 @@ worker_loop_round(struct dataplane_worker *worker) {
 	uint64_t device_count =
 		cp_config_gen->device_registry.registry.capacity;
 
-	uint64_t iterations = 0;
-
 	while (1) {
-		iterations = (iterations + 1) % NIC_STATS_FREAQUENCY;
-		if (iterations == 0) worker_unload_nic_stats(worker);
 
 		struct packet_front schedule_input[device_count];
 		for (uint64_t idx = 0; idx < device_count; ++idx)
@@ -457,32 +405,6 @@ worker_thread_start(void *arg) {
 
 	return NULL;
 }
-
-static const struct {
-    const char *name;
-    uint64_t size;
-	const size_t *offset;
-} worker_counter_info[] = {
-    {"iterations", 1, (const size_t[]){offsetof(struct dp_worker, iterations)}},
-    {"rx", 2, (const size_t[]){offsetof(struct dp_worker, rx_count), offsetof(struct dp_worker, rx_size)}},
-	{"tx", 2, (const size_t[]){offsetof(struct dp_worker, tx_count), offsetof(struct dp_worker, tx_size)}},
-	{"remote_rx", 1, (const size_t[]){offsetof(struct dp_worker, remote_rx_count)}},
-	{"remote_tx", 1, (const size_t[]){offsetof(struct dp_worker, remote_tx_count)},},
-	{"nic_rx", 2, (const size_t[]){offsetof(struct dp_worker, nic_rx_packets), offsetof(struct dp_worker, nic_rx_bytes)}},
-	{"nic_tx", 2, (const size_t[]){offsetof(struct dp_worker, nic_tx_packets), offsetof(struct dp_worker, nic_tx_bytes)}},
-	{"nic_rx_tx_errors", 2, (const size_t[]){offsetof(struct dp_worker, nic_rx_errors), offsetof(struct dp_worker, nic_tx_errors)}},
-	{"nic_rx_nombuf", 1, (const size_t[]){offsetof(struct dp_worker, nic_rx_nombuf)}},
-};
-
-uint64_t**
-get_worker_field_ptr(struct dp_worker *worker, int info_index, int offset_index) {
-	return (uint64_t**)((char*)worker + worker_counter_info[info_index].offset[offset_index]);
-}
-
-#define ARRAY_SIZE(arr) (size_t)(sizeof(arr) / sizeof((arr)[0]))
-
-static uint64_t
-worker_counter_ids[ARRAY_SIZE(worker_counter_info)];
 
 int
 dataplane_worker_init(
@@ -629,14 +551,14 @@ dataplane_worker_init(
 	counter_registry_init(
 		&dp_config->worker_counters, &dp_config->memory_context, 0
 	);
-	
-	for (size_t i = 0; i < ARRAY_SIZE(worker_counter_info); ++i) {
-		worker_counter_ids[i] = counter_registry_register(
-			&dp_config->worker_counters,
-			worker_counter_info[i].name,
-			worker_counter_info[i].size
-		);
-	}
+
+	counter_registry_register(&dp_config->worker_counters, "iterations", 1);
+
+	counter_registry_register(&dp_config->worker_counters, "rx", 2);
+	counter_registry_register(&dp_config->worker_counters, "tx", 2);
+	counter_registry_register(&dp_config->worker_counters, "remote_rx", 2);
+
+	counter_registry_register(&dp_config->worker_counters, "remote_tx", 2);
 
 	return 0;
 
@@ -652,18 +574,53 @@ dataplane_worker_start(struct dataplane_worker *worker) {
 	struct dp_worker *dp_worker = worker->dp_worker;
 	struct dp_config *dp_config = worker->instance->dp_config;
 	// FIXME: do not use hard-coded counter identifiers
+	dp_worker->iterations = counter_get_address(
+		0, dp_worker->idx, ADDR_OF(&dp_config->worker_counter_storage)
+	);
 
-	for (size_t i = 0; i < ARRAY_SIZE(worker_counter_info); ++i) {
-		for (size_t j = 0; j < worker_counter_info[i].size; ++j) {
-			uint64_t **field_ptr = get_worker_field_ptr(dp_worker, i, j);
-			*field_ptr = counter_get_address(
-				worker_counter_ids[i],
-				dp_worker->idx,
-				ADDR_OF(&dp_config->worker_counter_storage)
-			) + j;
-		}
-	}
+	dp_worker->rx_count =
+		counter_get_address(
+			1,
+			dp_worker->idx,
+			ADDR_OF(&dp_config->worker_counter_storage)
+		) +
+		0;
+	dp_worker->rx_size = counter_get_address(
+				     1,
+				     dp_worker->idx,
+				     ADDR_OF(&dp_config->worker_counter_storage)
+			     ) +
+			     1;
 
+	dp_worker->tx_count =
+		counter_get_address(
+			2,
+			dp_worker->idx,
+			ADDR_OF(&dp_config->worker_counter_storage)
+		) +
+		0;
+	dp_worker->tx_size = counter_get_address(
+				     2,
+				     dp_worker->idx,
+				     ADDR_OF(&dp_config->worker_counter_storage)
+			     ) +
+			     1;
+
+	dp_worker->remote_rx_count =
+		counter_get_address(
+			3,
+			dp_worker->idx,
+			ADDR_OF(&dp_config->worker_counter_storage)
+		) +
+		0;
+
+	dp_worker->remote_tx_count =
+		counter_get_address(
+			4,
+			dp_worker->idx,
+			ADDR_OF(&dp_config->worker_counter_storage)
+		) +
+		0;
 
 	pthread_attr_t wrk_th_attr;
 	pthread_attr_init(&wrk_th_attr);

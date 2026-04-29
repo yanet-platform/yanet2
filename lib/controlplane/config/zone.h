@@ -279,13 +279,6 @@ cp_config_gen_get_device_counter_storage(
 	);
 }
 
-static inline struct counter_storage *
-cp_config_gen_get_nic_counter_storage(
-	struct cp_config_gen *config_gen, const char *device_name
-) {
-	return cp_config_gen_get_device_counter_storage(config_gen, device_name);
-}
-
 struct cp_module *
 cp_config_gen_lookup_module(
 	struct cp_config_gen *config_gen, const char *type, const char *name
