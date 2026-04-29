@@ -2,7 +2,7 @@
 
 #include "common/network.h"
 #include "filter/rule.h"
-
+#include "lib/errors/errors.h"
 #include "modules/balancer2/dataplane/types/session.h"
 
 struct agent;
@@ -96,8 +96,10 @@ struct balancer_session_table_chain;
 /*
  * Creates a balancer handle from its full configuration.
  *
- * The session table chain must outlive the returned balancer handle;
- * it is referenced, not owned.
+ * The session table chain and session timeouts must be non-NULL. The
+ * session table chain must outlive the returned balancer handle; it
+ * is referenced, not owned. The session timeouts are copied into the
+ * handle.
  */
 struct balancer_handle *
 balancer_create(
@@ -105,8 +107,9 @@ balancer_create(
 	const char *name,
 	struct balancer_session_table_chain *session_table_chain,
 	struct balancer_session_timeouts *timeouts,
-	struct balancer_vs_config *vs,
-	uint32_t vs_count
+	const struct balancer_vs_config *vs,
+	uint32_t vs_count,
+	yanet_error **error
 );
 
 /*
@@ -119,7 +122,9 @@ balancer_create(
  * Returns -1 on error, 0 on success.
  */
 int
-balancer_install(struct agent *agent, struct balancer_handle *handle);
+balancer_install(
+	struct agent *agent, struct balancer_handle *handle, yanet_error **error
+);
 
 /*
  * Frees a balancer handle. The session table chain attached to the
@@ -132,26 +137,33 @@ balancer_free(struct agent *agent, struct balancer_handle *handle);
  * Updates per-real weights for a VS. The weights array must have
  * length equal to the number of reals configured for the VS and be
  * indexed in the same order as they were passed at VS creation.
- * Returns 0 on success, -1 if the length does not match the number
- * of reals, or -2 on allocation failure.
+ * Returns 0 on success, -1 on error.
  */
 int
 balancer_vs_update_real_weights(
 	struct balancer_handle *balancer,
 	uint32_t vs_idx,
-	const uint32_t *weights
+	const uint32_t *weights,
+	yanet_error **error
 );
 
 /*
  * Updates per-real enabled flags for a VS. The states array must have
  * length equal to the number of reals configured for the VS and be
  * indexed in the same order as they were passed at VS creation.
- * Returns 0 on success, -1 if the length does not match the number
- * of reals, or -2 on allocation failure.
+ *
+ * Reals start disabled after balancer_create. Until this function is
+ * called with a state of true for a given real, that real does not
+ * receive traffic.
+ *
+ * Returns 0 on success, -1 on error.
  */
 int
 balancer_vs_update_real_states(
-	struct balancer_handle *balancer, uint32_t vs_idx, const bool *states
+	struct balancer_handle *balancer,
+	uint32_t vs_idx,
+	const bool *states,
+	yanet_error **error
 );
 
 /*
@@ -195,7 +207,9 @@ struct balancer_session_table;
  * entries).
  */
 struct balancer_session_table *
-balancer_create_session_table(struct agent *agent, size_t capacity);
+balancer_create_session_table(
+	struct agent *agent, size_t capacity, yanet_error **error
+);
 
 /*
  * Pushes the given table as the new front (primary) session table.
@@ -209,7 +223,8 @@ balancer_create_session_table(struct agent *agent, size_t capacity);
 int
 balancer_session_table_chain_push_front(
 	struct balancer_session_table_chain *session_table_chain,
-	struct balancer_session_table *front_table
+	struct balancer_session_table *front_table,
+	yanet_error **error
 );
 
 /*
@@ -221,14 +236,11 @@ balancer_session_table_chain_push_front(
  */
 int
 balancer_session_table_chain_pop_back(
-	struct balancer_session_table_chain *session_table_chain
+	struct balancer_session_table_chain *session_table_chain,
+	yanet_error **error
 );
 
-/*
- * Returns 0 if the session table is still referenced by a balancer, or 1
- * if it was actually freed.
- */
-int
+void
 balancer_free_session_table(
 	struct agent *agent, struct balancer_session_table *table
 );
@@ -243,7 +255,9 @@ balancer_free_session_table(
  */
 struct balancer_session_table_chain *
 balancer_create_session_table_chain(
-	struct agent *agent, struct balancer_session_table *front_table
+	struct agent *agent,
+	struct balancer_session_table *front_table,
+	yanet_error **error
 );
 
 /*
