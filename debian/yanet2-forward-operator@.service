@@ -1,0 +1,17 @@
+[Unit]
+Description=yanet2 forward operator (function: %i)
+After=yanet2-controlplane.service
+Wants=yanet2-controlplane.service
+StartLimitBurst=3600000
+StartLimitIntervalSec=0
+
+[Service]
+User=root
+Group=yanet
+ExecStart=/usr/bin/yanet-forward-operator /etc/yanet2/forward.d/%i.yaml
+TimeoutSec=1200
+Restart=always
+RestartSec=1
+
+[Install]
+WantedBy=multi-user.target

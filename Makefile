@@ -100,6 +100,9 @@ install: dataplane cli-install
 	install -m 644 dataplane.yaml $(DESTDIR)/etc/yanet2/dataplane.yaml
 	install -m 644 controlplane/etc/yanet/bird-adapter.yaml $(DESTDIR)/etc/yanet2/bird-adapter.yaml
 	install -m 644 agents/yanet-pipeline-operator/etc/yanet/yanet-pipeline-operator.yaml $(DESTDIR)/etc/yanet2/yanet-pipeline-operator.yaml
+	install -d $(DESTDIR)/etc/yanet2/forward.d
+	install -m 644 agents/yanet-forward-operator/etc/yanet/forward.d/vlan-phy.yaml $(DESTDIR)/etc/yanet2/forward.d/vlan-phy.yaml
+	install -m 644 agents/yanet-forward-operator/etc/yanet/forward.d/phy-vlan.yaml $(DESTDIR)/etc/yanet2/forward.d/phy-vlan.yaml
 
 clean: go-cache-clean $(foreach module,$(MODULES),cli-clean/$(module))
 	@echo "Cleaning build directories..."
