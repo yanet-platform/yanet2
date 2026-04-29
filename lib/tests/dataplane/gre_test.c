@@ -16,19 +16,27 @@
 #include "lib/logging/log.h"
 #include "lib/utils/packet.h"
 
+#include "snapshot.h"
+
+static const uint8_t inner_payload[] = "GRE TEST PAYLOAD 123 111 987 TEST";
+
+#define INNER_PAYLOAD_LEN (sizeof(inner_payload) - 1)
+
 #define DEFAULT_HEADROOM 128
 #define DEFAULT_TAILROOM 256
 
-#define INNER_PAYLOAD_LEN 20
 #define INNER_TOS 0x88
 #define INNER_TTL 32
+#define INNER_PACKET_ID 0xabcd
+/* Bits 0..2 of the IPv4 fragment_offset field (DF set, MF clear, frag=0). */
+#define INNER_FRAG_FLAGS 0x4000
 
 static const uint8_t outer_src4[NET4_LEN] = {10, 0, 0, 1};
 static const uint8_t outer_dst4[NET4_LEN] = {10, 0, 0, 2};
 static const uint8_t inner_src4[NET4_LEN] = {192, 168, 1, 1};
 static const uint8_t inner_dst4[NET4_LEN] = {192, 168, 1, 2};
 
-static const uint8_t outer_sr6[NET6_LEN] = {
+static const uint8_t outer_src6[NET6_LEN] = {
 	0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1
 };
 static const uint8_t outer_dst6[NET6_LEN] = {
@@ -41,14 +49,19 @@ static const uint8_t inner_dst6[NET6_LEN] = {
 	0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2
 };
 
-// Packet construction helpers
+/* Packet construction helpers
+ *
+ * The inner protocol is set to UDP, but the bytes following the IP header are
+ * the inner_payload string rather than a real UDP datagram — these tests
+ * exercise the GRE encap, not transport parsing. parse_packet will read the
+ * first 8 bytes as a UDP header for hashing purposes; that's harmless. */
 
 static int
-build_eth_ip4(struct packet *p) {
+build_eth_ip4(struct packet *p, uint16_t headroom) {
 	uint16_t pkt_len = sizeof(struct rte_ether_hdr) +
 			   sizeof(struct rte_ipv4_hdr) + INNER_PAYLOAD_LEN;
 	memset(p, 0, sizeof(*p));
-	p->mbuf = alloc_mbuf(DEFAULT_HEADROOM, pkt_len, DEFAULT_TAILROOM);
+	p->mbuf = alloc_mbuf(headroom, pkt_len, DEFAULT_TAILROOM);
 	if (!p->mbuf) {
 		return -1;
 	}
@@ -61,8 +74,8 @@ build_eth_ip4(struct packet *p) {
 	ip4->version_ihl = 0x45;
 	ip4->type_of_service = INNER_TOS;
 	ip4->total_length = rte_cpu_to_be_16(sizeof(*ip4) + INNER_PAYLOAD_LEN);
-	ip4->packet_id = rte_cpu_to_be_16(0xabcd);
-	ip4->fragment_offset = rte_cpu_to_be_16(0x4000);
+	ip4->packet_id = rte_cpu_to_be_16(INNER_PACKET_ID);
+	ip4->fragment_offset = rte_cpu_to_be_16(INNER_FRAG_FLAGS);
 	ip4->time_to_live = INNER_TTL;
 	ip4->next_proto_id = IPPROTO_UDP;
 	memcpy(&ip4->src_addr, inner_src4, NET4_LEN);
@@ -70,15 +83,17 @@ build_eth_ip4(struct packet *p) {
 	ip4->hdr_checksum = 0;
 	ip4->hdr_checksum = rte_ipv4_cksum(ip4);
 
+	memcpy(ip4 + 1, inner_payload, INNER_PAYLOAD_LEN);
+
 	return parse_packet(p);
 }
 
 static int
-build_eth_ip6(struct packet *p) {
+build_eth_ip6(struct packet *p, uint16_t headroom) {
 	uint16_t pkt_len = sizeof(struct rte_ether_hdr) +
 			   sizeof(struct rte_ipv6_hdr) + INNER_PAYLOAD_LEN;
 	memset(p, 0, sizeof(*p));
-	p->mbuf = alloc_mbuf(DEFAULT_HEADROOM, pkt_len, DEFAULT_TAILROOM);
+	p->mbuf = alloc_mbuf(headroom, pkt_len, DEFAULT_TAILROOM);
 	if (!p->mbuf) {
 		return -1;
 	}
@@ -96,12 +111,14 @@ build_eth_ip6(struct packet *p) {
 	memcpy(ip6->src_addr, inner_src6, NET6_LEN);
 	memcpy(ip6->dst_addr, inner_dst6, NET6_LEN);
 
+	memcpy(ip6 + 1, inner_payload, INNER_PAYLOAD_LEN);
+
 	return parse_packet(p);
 }
 
-/* Packet whose ether type is neither IPv4 nor IPv6 — parse_packet leaves
- * network_header.type set to that ether type, which the encap functions
- * must reject. */
+/* Packet whose ether type is QinQ (0x88a8) — neither IPv4 nor IPv6 — so
+ * parse_packet leaves network_header.type set to that ether type and the
+ * encap functions must reject it. */
 static int
 build_eth_unknown(struct packet *p) {
 	uint16_t pkt_len = sizeof(struct rte_ether_hdr) + 8;
@@ -112,11 +129,11 @@ build_eth_unknown(struct packet *p) {
 	}
 	uint8_t *data = rte_pktmbuf_mtod(p->mbuf, uint8_t *);
 	struct rte_ether_hdr *eth = (struct rte_ether_hdr *)data;
-	eth->ether_type = rte_cpu_to_be_16(0x88a8);
+	eth->ether_type = rte_cpu_to_be_16(RTE_ETHER_TYPE_QINQ);
 	return parse_packet(p);
 }
 
-// Accessors
+/* Accessors */
 
 static struct rte_ether_hdr *
 pkt_eth(struct packet *p) {
@@ -155,7 +172,7 @@ pkt_gre_after_ip6(struct packet *p) {
 	);
 }
 
-// Verifiers
+/* Verifiers */
 
 static int
 assert_gre_flags_zero(struct rte_gre_hdr *gre) {
@@ -179,13 +196,52 @@ assert_outer_ip4_cksum_ok(struct rte_ipv4_hdr *outer) {
 	return TEST_SUCCESS;
 }
 
-// Test cases
+static int
+assert_post_encap_state(
+	struct packet *p,
+	uint16_t outer_ether_be,
+	uint16_t expected_transport_offset
+) {
+	TEST_ASSERT_EQUAL(
+		p->network_header.offset,
+		sizeof(struct rte_ether_hdr),
+		"network_header.offset"
+	);
+	TEST_ASSERT_EQUAL(
+		p->network_header.type, outer_ether_be, "network_header.type"
+	);
+	TEST_ASSERT_EQUAL(
+		p->transport_header.offset,
+		expected_transport_offset,
+		"transport_header.offset"
+	);
+	return TEST_SUCCESS;
+}
 
 static int
-test_ip4_encap_gre_v4_inner(void) {
+assert_inner_payload_preserved(
+	struct packet *p, size_t outer_size, size_t inner_ip_size
+) {
+	uint8_t *got = rte_pktmbuf_mtod_offset(
+		p->mbuf,
+		uint8_t *,
+		p->network_header.offset + outer_size + inner_ip_size
+	);
+	TEST_ASSERT(
+		memcmp(got, inner_payload, INNER_PAYLOAD_LEN) == 0,
+		"inner payload corrupted"
+	);
+	return TEST_SUCCESS;
+}
+
+/* Test cases */
+
+static int
+test_v4_in_v4(void) {
 	struct packet p;
-	TEST_ASSERT_SUCCESS(build_eth_ip4(&p), "build");
+	TEST_ASSERT_SUCCESS(build_eth_ip4(&p, DEFAULT_HEADROOM), "build");
 	uint32_t pkt_len_before = rte_pktmbuf_pkt_len(p.mbuf);
+	uint16_t tp_off_before = p.transport_header.offset;
 
 	TEST_ASSERT_EQUAL(
 		packet_ip4_encap_gre(&p, outer_dst4, outer_src4), 0, "rc"
@@ -197,6 +253,14 @@ test_ip4_encap_gre_v4_inner(void) {
 		rte_pktmbuf_pkt_len(p.mbuf),
 		pkt_len_before + added,
 		"pkt_len grew by outer ip4 + gre"
+	);
+	TEST_ASSERT_SUCCESS(
+		assert_post_encap_state(
+			&p,
+			rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4),
+			tp_off_before + added
+		),
+		"post-encap state"
 	);
 	TEST_ASSERT_EQUAL(
 		pkt_eth(&p)->ether_type,
@@ -213,6 +277,16 @@ test_ip4_encap_gre_v4_inner(void) {
 		outer->type_of_service, INNER_TOS, "TOS copied from inner"
 	);
 	TEST_ASSERT_EQUAL(outer->time_to_live, INNER_TTL, "TTL copied");
+	TEST_ASSERT_EQUAL(
+		outer->packet_id,
+		rte_cpu_to_be_16(INNER_PACKET_ID),
+		"packet_id copied from inner"
+	);
+	TEST_ASSERT_EQUAL(
+		outer->fragment_offset,
+		rte_cpu_to_be_16(INNER_FRAG_FLAGS),
+		"fragment_offset copied from inner"
+	);
 	TEST_ASSERT_EQUAL(
 		rte_be_to_cpu_16(outer->total_length),
 		(uint16_t)(added + sizeof(struct rte_ipv4_hdr) +
@@ -244,18 +318,42 @@ test_ip4_encap_gre_v4_inner(void) {
 		memcmp(&inner->dst_addr, inner_dst4, NET4_LEN) == 0,
 		"inner dst preserved"
 	);
+	TEST_ASSERT_SUCCESS(
+		assert_inner_payload_preserved(
+			&p, added, sizeof(struct rte_ipv4_hdr)
+		),
+		"inner payload"
+	);
 
 	free_packet(&p);
 	return TEST_SUCCESS;
 }
 
 static int
-test_ip4_encap_gre_v6_inner(void) {
+test_v6_in_v4(void) {
 	struct packet p;
-	TEST_ASSERT_SUCCESS(build_eth_ip6(&p), "build");
+	TEST_ASSERT_SUCCESS(build_eth_ip6(&p, DEFAULT_HEADROOM), "build");
+	uint32_t pkt_len_before = rte_pktmbuf_pkt_len(p.mbuf);
+	uint16_t tp_off_before = p.transport_header.offset;
 
 	TEST_ASSERT_EQUAL(
 		packet_ip4_encap_gre(&p, outer_dst4, outer_src4), 0, "rc"
+	);
+
+	uint32_t added =
+		sizeof(struct rte_ipv4_hdr) + sizeof(struct rte_gre_hdr);
+	TEST_ASSERT_EQUAL(
+		rte_pktmbuf_pkt_len(p.mbuf),
+		pkt_len_before + added,
+		"pkt_len grew by outer ip4 + gre"
+	);
+	TEST_ASSERT_SUCCESS(
+		assert_post_encap_state(
+			&p,
+			rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4),
+			tp_off_before + added
+		),
+		"post-encap state"
 	);
 
 	struct rte_ipv4_hdr *outer = pkt_outer_ip4(&p);
@@ -271,10 +369,15 @@ test_ip4_encap_gre_v6_inner(void) {
 		outer->time_to_live, INNER_TTL, "TTL from hop_limits"
 	);
 	TEST_ASSERT_EQUAL(
+		outer->packet_id,
+		rte_cpu_to_be_16(0x01),
+		"packet_id set when inner has no equivalent"
+	);
+	TEST_ASSERT_EQUAL(outer->fragment_offset, 0, "fragment_offset zeroed");
+	TEST_ASSERT_EQUAL(
 		rte_be_to_cpu_16(outer->total_length),
-		(uint16_t)(sizeof(struct rte_ipv4_hdr) +
-			   sizeof(struct rte_gre_hdr) +
-			   sizeof(struct rte_ipv6_hdr) + INNER_PAYLOAD_LEN),
+		(uint16_t)(added + sizeof(struct rte_ipv6_hdr) +
+			   INNER_PAYLOAD_LEN),
 		"total_length"
 	);
 	TEST_ASSERT_SUCCESS(assert_outer_ip4_cksum_ok(outer), "cksum");
@@ -287,19 +390,43 @@ test_ip4_encap_gre_v6_inner(void) {
 	);
 	TEST_ASSERT_SUCCESS(assert_gre_flags_zero(gre), "GRE flags zero");
 
+	TEST_ASSERT_SUCCESS(
+		assert_inner_payload_preserved(
+			&p, added, sizeof(struct rte_ipv6_hdr)
+		),
+		"inner payload"
+	);
+
 	free_packet(&p);
 	return TEST_SUCCESS;
 }
 
 static int
-test_ip6_encap_gre_v4_inner(void) {
+test_v4_in_v6(void) {
 	struct packet p;
-	TEST_ASSERT_SUCCESS(build_eth_ip4(&p), "build");
+	TEST_ASSERT_SUCCESS(build_eth_ip4(&p, DEFAULT_HEADROOM), "build");
+	uint32_t pkt_len_before = rte_pktmbuf_pkt_len(p.mbuf);
+	uint16_t tp_off_before = p.transport_header.offset;
 
 	TEST_ASSERT_EQUAL(
-		packet_ip6_encap_gre(&p, outer_dst6, outer_sr6), 0, "rc"
+		packet_ip6_encap_gre(&p, outer_dst6, outer_src6), 0, "rc"
 	);
 
+	uint32_t added =
+		sizeof(struct rte_ipv6_hdr) + sizeof(struct rte_gre_hdr);
+	TEST_ASSERT_EQUAL(
+		rte_pktmbuf_pkt_len(p.mbuf),
+		pkt_len_before + added,
+		"pkt_len grew by outer ip6 + gre"
+	);
+	TEST_ASSERT_SUCCESS(
+		assert_post_encap_state(
+			&p,
+			rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6),
+			tp_off_before + added
+		),
+		"post-encap state"
+	);
 	TEST_ASSERT_EQUAL(
 		pkt_eth(&p)->ether_type,
 		rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6),
@@ -318,13 +445,18 @@ test_ip6_encap_gre_v4_inner(void) {
 		"traffic class copied from inner TOS"
 	);
 	TEST_ASSERT_EQUAL(
+		rte_be_to_cpu_32(outer->vtc_flow) & 0xFFFFF,
+		0,
+		"flow label zeroed when synthesised from v4 inner"
+	);
+	TEST_ASSERT_EQUAL(
 		rte_be_to_cpu_16(outer->payload_len),
 		(uint16_t)(sizeof(struct rte_gre_hdr) +
 			   sizeof(struct rte_ipv4_hdr) + INNER_PAYLOAD_LEN),
 		"payload_len = gre + inner"
 	);
 	TEST_ASSERT(
-		memcmp(outer->src_addr, outer_sr6, NET6_LEN) == 0, "outer src"
+		memcmp(outer->src_addr, outer_src6, NET6_LEN) == 0, "outer src"
 	);
 	TEST_ASSERT(
 		memcmp(outer->dst_addr, outer_dst6, NET6_LEN) == 0, "outer dst"
@@ -338,22 +470,52 @@ test_ip6_encap_gre_v4_inner(void) {
 	);
 	TEST_ASSERT_SUCCESS(assert_gre_flags_zero(gre), "GRE flags zero");
 
+	TEST_ASSERT_SUCCESS(
+		assert_inner_payload_preserved(
+			&p, added, sizeof(struct rte_ipv4_hdr)
+		),
+		"inner payload"
+	);
+
 	free_packet(&p);
 	return TEST_SUCCESS;
 }
 
 static int
-test_ip6_encap_gre_v6_inner(void) {
+test_v6_in_v6(void) {
 	struct packet p;
-	TEST_ASSERT_SUCCESS(build_eth_ip6(&p), "build");
+	TEST_ASSERT_SUCCESS(build_eth_ip6(&p, DEFAULT_HEADROOM), "build");
+	uint32_t pkt_len_before = rte_pktmbuf_pkt_len(p.mbuf);
+	uint16_t tp_off_before = p.transport_header.offset;
 
 	TEST_ASSERT_EQUAL(
-		packet_ip6_encap_gre(&p, outer_dst6, outer_sr6), 0, "rc"
+		packet_ip6_encap_gre(&p, outer_dst6, outer_src6), 0, "rc"
+	);
+
+	uint32_t added =
+		sizeof(struct rte_ipv6_hdr) + sizeof(struct rte_gre_hdr);
+	TEST_ASSERT_EQUAL(
+		rte_pktmbuf_pkt_len(p.mbuf),
+		pkt_len_before + added,
+		"pkt_len grew by outer ip6 + gre"
+	);
+	TEST_ASSERT_SUCCESS(
+		assert_post_encap_state(
+			&p,
+			rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6),
+			tp_off_before + added
+		),
+		"post-encap state"
 	);
 
 	struct rte_ipv6_hdr *outer = pkt_outer_ip6(&p);
 	TEST_ASSERT_EQUAL(outer->proto, IPPROTO_GRE, "next header GRE");
 	TEST_ASSERT_EQUAL(outer->hop_limits, INNER_TTL, "hop_limits");
+	TEST_ASSERT_EQUAL(
+		outer->vtc_flow,
+		rte_cpu_to_be_32((0x6u << 28) | ((uint32_t)INNER_TOS << 20)),
+		"vtc_flow copied verbatim from inner"
+	);
 	TEST_ASSERT_EQUAL(
 		rte_be_to_cpu_16(outer->payload_len),
 		(uint16_t)(sizeof(struct rte_gre_hdr) +
@@ -369,35 +531,88 @@ test_ip6_encap_gre_v6_inner(void) {
 	);
 	TEST_ASSERT_SUCCESS(assert_gre_flags_zero(gre), "GRE flags zero");
 
+	TEST_ASSERT_SUCCESS(
+		assert_inner_payload_preserved(
+			&p, added, sizeof(struct rte_ipv6_hdr)
+		),
+		"inner payload"
+	);
+
 	free_packet(&p);
 	return TEST_SUCCESS;
 }
 
 static int
-test_ip4_encap_gre_unknown_inner(void) {
+test_unknown_in_v4(void) {
 	struct packet p;
 	TEST_ASSERT_SUCCESS(build_eth_unknown(&p), "build");
+	struct pkt_snapshot s;
+	snapshot(&p, &s);
 
 	TEST_ASSERT_EQUAL(
 		packet_ip4_encap_gre(&p, outer_dst4, outer_src4),
 		-1,
 		"must reject unsupported inner network type"
 	);
+	TEST_ASSERT_SUCCESS(assert_unchanged(&p, &s), "packet untouched on -1");
 
 	free_packet(&p);
 	return TEST_SUCCESS;
 }
 
 static int
-test_ip6_encap_gre_unknown_inner(void) {
+test_unknown_in_v6(void) {
 	struct packet p;
 	TEST_ASSERT_SUCCESS(build_eth_unknown(&p), "build");
+	struct pkt_snapshot s;
+	snapshot(&p, &s);
 
 	TEST_ASSERT_EQUAL(
-		packet_ip6_encap_gre(&p, outer_dst6, outer_sr6),
+		packet_ip6_encap_gre(&p, outer_dst6, outer_src6),
 		-1,
 		"must reject unsupported inner network type"
 	);
+	TEST_ASSERT_SUCCESS(assert_unchanged(&p, &s), "packet untouched on -1");
+
+	free_packet(&p);
+	return TEST_SUCCESS;
+}
+
+static int
+test_short_headroom_v4(void) {
+	uint16_t required =
+		sizeof(struct rte_ipv4_hdr) + sizeof(struct rte_gre_hdr);
+	struct packet p;
+	TEST_ASSERT_SUCCESS(build_eth_ip4(&p, required - 2), "build");
+	struct pkt_snapshot s;
+	snapshot(&p, &s);
+
+	TEST_ASSERT_EQUAL(
+		packet_ip4_encap_gre(&p, outer_dst4, outer_src4),
+		-1,
+		"must fail when headroom is below the required prepend size"
+	);
+	TEST_ASSERT_SUCCESS(assert_unchanged(&p, &s), "packet untouched on -1");
+
+	free_packet(&p);
+	return TEST_SUCCESS;
+}
+
+static int
+test_short_headroom_v6(void) {
+	uint16_t required =
+		sizeof(struct rte_ipv6_hdr) + sizeof(struct rte_gre_hdr);
+	struct packet p;
+	TEST_ASSERT_SUCCESS(build_eth_ip6(&p, required - 2), "build");
+	struct pkt_snapshot s;
+	snapshot(&p, &s);
+
+	TEST_ASSERT_EQUAL(
+		packet_ip6_encap_gre(&p, outer_dst6, outer_src6),
+		-1,
+		"must fail when headroom is below the required prepend size"
+	);
+	TEST_ASSERT_SUCCESS(assert_unchanged(&p, &s), "packet untouched on -1");
 
 	free_packet(&p);
 	return TEST_SUCCESS;
@@ -413,14 +628,14 @@ main(void) {
 		const char *name;
 		int (*fn)(void);
 	} tests[] = {
-		{"ip4_encap_gre_v4_inner", test_ip4_encap_gre_v4_inner},
-		{"ip4_encap_gre_v6_inner", test_ip4_encap_gre_v6_inner},
-		{"ip6_encap_gre_v4_inner", test_ip6_encap_gre_v4_inner},
-		{"ip6_encap_gre_v6_inner", test_ip6_encap_gre_v6_inner},
-		{"ip4_encap_gre_unknown_inner", test_ip4_encap_gre_unknown_inner
-		},
-		{"ip6_encap_gre_unknown_inner", test_ip6_encap_gre_unknown_inner
-		},
+		{"v4_in_v4", test_v4_in_v4},
+		{"v6_in_v4", test_v6_in_v4},
+		{"v4_in_v6", test_v4_in_v6},
+		{"v6_in_v6", test_v6_in_v6},
+		{"unknown_in_v4", test_unknown_in_v4},
+		{"unknown_in_v6", test_unknown_in_v6},
+		{"short_headroom_v4", test_short_headroom_v4},
+		{"short_headroom_v6", test_short_headroom_v6},
 	};
 
 	size_t total = sizeof(tests) / sizeof(tests[0]);
