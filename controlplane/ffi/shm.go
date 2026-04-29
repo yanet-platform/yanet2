@@ -786,7 +786,7 @@ func (m *DPConfigImpl) PerformanceCounters(
 	return result, nil
 }
 
-func (m *DPConfigImpl) NicCounters(deivceName string) []CounterInfo {
+func (m *DPConfigImpl) NicCounters(deviceName string) []CounterInfo {
 	cDeviceName := C.CString(deviceName)
 	defer C.free(unsafe.Pointer(cDeviceName))
 	counters := C.yanet_get_nic_counters(m.ptr, cDeviceName)
