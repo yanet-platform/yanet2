@@ -1,2 +1,0 @@
-subdir('api')
-# subdir('dataplane')

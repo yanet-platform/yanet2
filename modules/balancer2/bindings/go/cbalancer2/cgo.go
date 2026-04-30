@@ -60,8 +60,8 @@ const (
 type TransportProto int
 
 const (
-	TransportTCP TransportProto = C.tcp
-	TransportUDP TransportProto = C.udp
+	TransportTCP TransportProto = C.transport_proto_tcp
+	TransportUDP TransportProto = C.transport_proto_udp
 )
 
 // Balancer is an opaque handle to a balancer configuration in shared memory.
@@ -86,11 +86,11 @@ type SessionTableChain struct {
 // becomes unused; the caller is responsible for freeing it.
 func (b *Balancer) Install(agent *ffi.Agent) error {
 	if b.ptr == nil {
-		return errors.New("balancer handle is freed")
+		return errors.New("balancer handle is nil")
 	}
 	var cErr *C.yanet_error
 	if rc := C.balancer_install((*C.struct_agent)(agent.AsRawPtr()), b.ptr, &cErr); rc != 0 {
-		return fmt.Errorf("failed to install balancer: %w", cerrors.FromC(unsafe.Pointer(cErr)))
+		return cerrors.FromC(unsafe.Pointer(cErr))
 	}
 	return nil
 }
@@ -126,7 +126,7 @@ func (b *Balancer) UpdateVSRealWeights(vsIdx uint32, weights []uint32) error {
 
 	var cErr *C.yanet_error
 	if rc := C.balancer_vs_update_real_weights(b.ptr, C.uint32_t(vsIdx), cWeightsPtr, &cErr); rc != 0 {
-		return fmt.Errorf("failed to update real weights: %w", cerrors.FromC(unsafe.Pointer(cErr)))
+		return cerrors.FromC(unsafe.Pointer(cErr))
 	}
 	return nil
 }
@@ -137,7 +137,7 @@ func (b *Balancer) UpdateVSRealWeights(vsIdx uint32, weights []uint32) error {
 // VS creation.
 func (b *Balancer) UpdateVSRealStates(vsIdx uint32, states []bool) error {
 	if b.ptr == nil {
-		return errors.New("balancer handle is freed")
+		return errors.New("balancer handle is nil")
 	}
 
 	var cStatesPtr *C.bool
@@ -151,7 +151,7 @@ func (b *Balancer) UpdateVSRealStates(vsIdx uint32, states []bool) error {
 
 	var cErr *C.yanet_error
 	if rc := C.balancer_vs_update_real_states(b.ptr, C.uint32_t(vsIdx), cStatesPtr, &cErr); rc != 0 {
-		return fmt.Errorf("failed to update real states: %w", cerrors.FromC(unsafe.Pointer(cErr)))
+		return cerrors.FromC(unsafe.Pointer(cErr))
 	}
 	return nil
 }
@@ -196,7 +196,7 @@ func (c *SessionTableChain) PushFront(table *SessionTable) error {
 	}
 	var cErr *C.yanet_error
 	if rc := C.balancer_session_table_chain_push_front(c.ptr, table.ptr, &cErr); rc != 0 {
-		return fmt.Errorf("failed to push front session table: %w", cerrors.FromC(unsafe.Pointer(cErr)))
+		return cerrors.FromC(unsafe.Pointer(cErr))
 	}
 	return nil
 }
@@ -205,11 +205,11 @@ func (c *SessionTableChain) PushFront(table *SessionTable) error {
 // session table is attached.
 func (c *SessionTableChain) PopBack() error {
 	if c.ptr == nil {
-		return errors.New("chain is freed")
+		return errors.New("chain is nil")
 	}
 	var cErr *C.yanet_error
 	if rc := C.balancer_session_table_chain_pop_back(c.ptr, &cErr); rc != 0 {
-		return fmt.Errorf("failed to pop back session table: %w", cerrors.FromC(unsafe.Pointer(cErr)))
+		return cerrors.FromC(unsafe.Pointer(cErr))
 	}
 	return nil
 }
@@ -253,6 +253,10 @@ type cVSConfig struct {
 
 func (v *VSConfig) cBuild(pinner *runtime.Pinner) (cVSConfig, error) {
 	var out cVSConfig
+
+	if !v.Dst.IsValid() {
+		return cVSConfig{}, errors.New("destination address is invalid")
+	}
 
 	cAddr, family := netipToCNetAddr(v.Dst)
 	out.c.dst = cAddr
@@ -300,10 +304,22 @@ func (v *cVSConfig) free() {
 }
 
 func (r *RealConfig) cBuild() (C.struct_balancer_real_config, error) {
+	if !r.Dst.IsValid() {
+		return C.struct_balancer_real_config{}, errors.New("destination address is invalid")
+	}
+	if !r.Src.IsValid() {
+		return C.struct_balancer_real_config{}, errors.New("source network is invalid")
+	}
+	if r.Dst.Is4() != r.Src.Addr.Is4() {
+		return C.struct_balancer_real_config{}, errors.New(
+			"destination and source address families differ",
+		)
+	}
+
 	cDst, family := netipToCNetAddr(r.Dst)
 	cSrc, err := netWithMaskToCNet(r.Src)
 	if err != nil {
-		return C.struct_balancer_real_config{}, fmt.Errorf("source: %w", err)
+		return C.struct_balancer_real_config{}, fmt.Errorf("source net: %w", err)
 	}
 	return C.struct_balancer_real_config{
 		dst:       cDst,
@@ -330,7 +346,7 @@ func createBalancer(
 	vs []VSConfig,
 ) (*Balancer, error) {
 	if chain == nil || chain.ptr == nil {
-		return nil, errors.New("session table chain is nil or freed")
+		return nil, errors.New("chain is nil")
 	}
 
 	cName := C.CString(name)
@@ -374,7 +390,7 @@ func createBalancer(
 		&cErr,
 	)
 	if ptr == nil {
-		return nil, fmt.Errorf("failed to create balancer: %w", cerrors.FromC(unsafe.Pointer(cErr)))
+		return nil, cerrors.FromC(unsafe.Pointer(cErr))
 	}
 	return &Balancer{ptr: ptr}, nil
 }
@@ -387,14 +403,14 @@ func createSessionTable(agent *ffi.Agent, capacity uint64) (*SessionTable, error
 		&cErr,
 	)
 	if ptr == nil {
-		return nil, fmt.Errorf("failed to create session table: %w", cerrors.FromC(unsafe.Pointer(cErr)))
+		return nil, cerrors.FromC(unsafe.Pointer(cErr))
 	}
 	return &SessionTable{ptr: ptr}, nil
 }
 
 func createSessionTableChain(agent *ffi.Agent, front *SessionTable) (*SessionTableChain, error) {
 	if front == nil || front.ptr == nil {
-		return nil, errors.New("front table is nil or freed")
+		return nil, errors.New("front table is nil")
 	}
 	var cErr *C.yanet_error
 	ptr := C.balancer_create_session_table_chain(
@@ -403,7 +419,7 @@ func createSessionTableChain(agent *ffi.Agent, front *SessionTable) (*SessionTab
 		&cErr,
 	)
 	if ptr == nil {
-		return nil, fmt.Errorf("failed to create session table chain: %w", cerrors.FromC(unsafe.Pointer(cErr)))
+		return nil, cerrors.FromC(unsafe.Pointer(cErr))
 	}
 	return &SessionTableChain{ptr: ptr}, nil
 }

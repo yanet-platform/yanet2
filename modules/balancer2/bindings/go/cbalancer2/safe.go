@@ -32,26 +32,6 @@ type RealConfig struct {
 	Src xnetip.NetWithMask
 }
 
-func (r *RealConfig) validate() error {
-	if !r.Dst.IsValid() {
-		return errors.New("destination address is invalid")
-	}
-	if !r.Src.IsValid() {
-		return errors.New("source network is invalid")
-	}
-	if r.Dst.Is4() != r.Src.Addr.Is4() {
-		return errors.New("destination and source address families differ")
-	}
-	expectedMask := 4
-	if r.Src.Addr.Is6() {
-		expectedMask = 16
-	}
-	if len(r.Src.Mask) != expectedMask {
-		return fmt.Errorf("source mask length %d does not match address family", len(r.Src.Mask))
-	}
-	return nil
-}
-
 // AllowedSources describes one entry in a virtual service's source allow
 // list. A packet is admitted only if its source address matches one of the
 // listed networks AND its source port matches one of the listed ranges. An
@@ -80,18 +60,6 @@ type VSConfig struct {
 	FixMSS         bool
 }
 
-func (v *VSConfig) validate() error {
-	if !v.Dst.IsValid() {
-		return errors.New("destination address is invalid")
-	}
-	for i := range v.Reals {
-		if err := v.Reals[i].validate(); err != nil {
-			return fmt.Errorf("real[%d]: %w", i, err)
-		}
-	}
-	return nil
-}
-
 // NewBalancer builds a balancer handle from its full configuration.
 //
 // The session table chain is referenced, not owned, and must outlive the
@@ -108,11 +76,6 @@ func NewBalancer(
 	}
 	if uint64(len(vs)) > math.MaxUint32 {
 		return nil, fmt.Errorf("too many virtual services: %d", len(vs))
-	}
-	for i := range vs {
-		if err := vs[i].validate(); err != nil {
-			return nil, fmt.Errorf("vs[%d]: %w", i, err)
-		}
 	}
 	return createBalancer(agent, name, chain, timeouts, vs)
 }
