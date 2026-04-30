@@ -358,12 +358,12 @@ dataplane_globalstat_storage_init(
 	uint64_t dp_memory = config->globalstat.dp_memory;
 	uint64_t cp_memory = config->globalstat.cp_memory;
 
-	struct dp_config *dp_config = dataplane->global_dp_config;
-	struct cp_config *cp_config = dataplane->global_cp_config;
+	struct dp_config *dp_config = (struct dp_config *)storage;
+	dataplane->global_dp_config = dp_config;
 
-	block_allocator_init(&dataplane->global_dp_config->block_allocator);
+	block_allocator_init(&dp_config->block_allocator);
 	block_allocator_put_arena(
-		&dataplane->global_dp_config->block_allocator,
+		&dp_config->block_allocator,
 		storage + sizeof(struct dp_config),
 		dp_memory - sizeof(struct dp_config)
 	);
@@ -381,6 +381,7 @@ dataplane_globalstat_storage_init(
 
 	struct cp_config *cp_config =
 		(struct cp_config *)((uintptr_t)storage + dp_memory);
+	dataplane->global_cp_config = cp_config;
 
 	block_allocator_init(&cp_config->block_allocator);
 	block_allocator_put_arena(
