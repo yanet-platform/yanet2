@@ -2,11 +2,13 @@ package operator
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
-	"github.com/cenkalti/backoff/v5"
 	"go.uber.org/zap"
+
+	"github.com/yanet-platform/yanet2/common/go/xbackoff"
 )
 
 // Actuator applies a desired stage configuration.
@@ -25,7 +27,7 @@ type Actuator interface {
 // interval.
 type Reconciler struct {
 	actuator Actuator
-	backoff  backoff.ExponentialBackOff
+	backoff  *xbackoff.Backoff
 	interval time.Duration
 
 	mu     sync.Mutex
@@ -44,18 +46,30 @@ func NewReconciler(actuator Actuator, options ...ReconcilerOption) *Reconciler {
 		o(opts)
 	}
 
-	backoff := backoff.ExponentialBackOff{
-		InitialInterval:     opts.InitialBackoff,
-		RandomizationFactor: backoff.DefaultRandomizationFactor,
-		Multiplier:          backoff.DefaultMultiplier,
-		MaxInterval:         opts.MaxBackoff,
-	}
+	wakeCh := make(chan struct{}, 1)
+
+	backoff := xbackoff.New(opts.InitialBackoff,
+		xbackoff.WithMax(opts.MaxBackoff),
+		xbackoff.WithSleeper(reconcilerSleeper{wake: wakeCh}),
+		xbackoff.WithOnRetry(func(_ int, d time.Duration, err error) {
+			opts.Log.Warn("reconcile failed",
+				zap.Duration("backoff", d),
+				zap.Error(err),
+			)
+			opts.Metrics.OnReconcileCompleted(err)
+			opts.Metrics.OnBackoffScheduled(d)
+			opts.Metrics.OnStateChanged(ReconcilerStateSleeping)
+		}),
+		xbackoff.WithOnReset(func() {
+			opts.Metrics.OnBackoffReset()
+		}),
+	)
 
 	return &Reconciler{
 		actuator: actuator,
 		backoff:  backoff,
 		interval: opts.Interval,
-		wakeCh:   make(chan struct{}, 1),
+		wakeCh:   wakeCh,
 		metrics:  opts.Metrics,
 		log:      opts.Log,
 	}
@@ -112,8 +126,7 @@ func (m *Reconciler) Run(ctx context.Context) error {
 	m.log.Info("running reconciler loop")
 	defer m.log.Info("stopped reconciler loop")
 
-	m.backoff.Reset()
-
+	sleeper := reconcilerSleeper{wake: m.wakeCh}
 	for {
 		target := m.snapshot()
 		if target == nil {
@@ -127,36 +140,49 @@ func (m *Reconciler) Run(ctx context.Context) error {
 			continue
 		}
 
-		var d time.Duration
 		m.metrics.OnStateChanged(ReconcilerStateApplying)
-		err := m.actuator.Apply(ctx, target)
-		if err != nil {
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
-
-			m.log.Warn("reconcile failed",
-				zap.String("stage", target.Name),
-				zap.Error(err),
-			)
-			d = m.backoff.NextBackOff()
-			m.metrics.OnReconcileCompleted(err)
-			m.metrics.OnBackoffScheduled(d)
-		} else {
-			m.advance(target)
-			d = m.interval
-			m.backoff.Reset()
+		err := m.backoff.RunContext(ctx, func() error {
+			return m.actuator.Apply(ctx, target)
+		})
+		switch {
+		case err == nil:
 			m.metrics.OnReconcileCompleted(nil)
-			m.metrics.OnBackoffReset()
-		}
+			m.advance(target)
 
-		m.metrics.OnStateChanged(ReconcilerStateSleeping)
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-m.wakeCh:
-		case <-time.After(d):
+			m.metrics.OnStateChanged(ReconcilerStateSleeping)
+			if err := sleeper.Sleep(ctx, m.interval); err != nil {
+				if errors.Is(err, xbackoff.ErrInterrupted) {
+					continue
+				}
+				return err
+			}
+		case errors.Is(err, xbackoff.ErrInterrupted):
+			continue
+		default:
+			return err
 		}
+	}
+}
+
+// reconcilerSleeper interrupts the backoff sleep on a wake signal.
+type reconcilerSleeper struct {
+	wake <-chan struct{}
+}
+
+func (m reconcilerSleeper) Sleep(ctx context.Context, d time.Duration) error {
+	if d <= 0 {
+		return nil
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-m.wake:
+		return xbackoff.ErrInterrupted
+	case <-t.C:
+		return nil
 	}
 }
 
