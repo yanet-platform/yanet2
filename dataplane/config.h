@@ -33,6 +33,12 @@ struct dataplane_connection_config {
 	uint64_t dst_device_id;
 };
 
+struct dataplane_globalstat_config {
+	uint64_t dp_memory;
+	uint64_t cp_memory;
+};
+
+
 struct dataplane_config {
 	char storage[80];
 	uint64_t dpdk_memory;
@@ -46,6 +52,8 @@ struct dataplane_config {
 	struct dataplane_device_config *devices;
 	uint64_t connection_count;
 	struct dataplane_connection_config *connections;
+
+	struct dataplane_globalstat_config globalstat;
 	char loglevel[32];
 };
 

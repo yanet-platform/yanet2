@@ -38,6 +38,11 @@ enum state {
 	state_connection_dst,
 
 	state_loglevel,
+
+	state_globalstats,
+	state_globalstat,
+	state_globalstat_dp_memory,
+	state_globalstat_cp_memory,
 };
 
 int
@@ -128,6 +133,18 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 				if (*end != '\0')
 					goto error;
 				state = state_instance;
+				break;
+			case state_globalstat_dp_memory:
+				dataplane->globalstat.dp_memory = strtol(start, &end, 10);
+				if (*end != '\0')
+					goto error;
+				state = state_globalstat;
+				break;
+			case state_globalstat_cp_memory:
+				dataplane->globalstat.cp_memory = strtol(start, &end, 10);
+				if (*end != '\0')
+					goto error;
+				state = state_globalstat;
 				break;
 
 			case state_device_port_name:
@@ -226,6 +243,8 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 					state = state_devices;
 				} else if (!strcmp("connections", start)) {
 					state = state_connections;
+				} else if (!strcmp("globalstats", start)) { 
+					state = state_globalstats;
 				} else if (!strcmp("loglevel", start)) {
 					state = state_loglevel;
 				} else {
@@ -287,7 +306,16 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 				}
 				break;
 			}
+			case state_globalstat:
+				if (!strcmp("dp_memory", start)) {
+					state = state_globalstat_dp_memory;
+				} else if (!strcmp("cp_memory", start)) {
+					state = state_globalstat_cp_memory;
+				} else {
+					goto error;
+				}
 
+				break;
 			default:
 				goto error;
 			}
@@ -322,6 +350,9 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 			case state_connections:
 				state = state_dataplane;
 				break;
+			case state_globalstats:
+				state = state_dataplane;
+				break;
 			default:
 				goto error;
 			}
@@ -333,6 +364,10 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 				break;
 			case state_dataplane:
 				break;
+			case state_globalstats: {
+				state = state_globalstat;
+				break;
+			}
 			case state_instances: {
 				++dataplane->instance_count;
 
@@ -432,6 +467,9 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 				break;
 			case state_connection:
 				state = state_connections;
+				break;
+			case state_globalstat:
+				state = state_dataplane;
 				break;
 			default:
 				goto error;
