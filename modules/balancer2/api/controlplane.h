@@ -99,10 +99,12 @@ struct balancer_session_table_chain;
 /*
  * Creates a balancer handle from its full configuration.
  *
- * The session table chain and session timeouts must be non-NULL. The
- * session table chain must outlive the returned balancer handle; it
- * is referenced, not owned. The session timeouts are copied into the
- * handle.
+ * The agent, session table chain, and session timeouts must be
+ * non-NULL, and the name must be non-empty. The session table chain
+ * must outlive the returned balancer handle; it is referenced, not
+ * owned. The session timeouts are copied into the handle.
+ *
+ * Returns NULL on error.
  */
 struct balancer_handle *
 balancer_create(
@@ -119,6 +121,8 @@ balancer_create(
 
 /*
  * Installs a balancer handle in the dataplane.
+ *
+ * The agent and handle must be non-NULL.
  *
  * If a balancer with the same name is already installed, it is
  * replaced; the previous handle becomes unused and the caller is
@@ -139,9 +143,11 @@ void
 balancer_free(struct agent *agent, struct balancer_handle *handle);
 
 /*
- * Updates per-real weights for a VS. The weights array must have
- * length equal to the number of reals configured for the VS and be
- * indexed in the same order as they were passed at VS creation.
+ * Updates per-real weights for a VS. The balancer handle must be
+ * non-NULL. The weights array must have length equal to the number
+ * of reals configured for the VS and be indexed in the same order
+ * as they were passed at VS creation.
+ *
  * Returns 0 on success, -1 on error.
  */
 int
@@ -153,9 +159,10 @@ balancer_vs_update_real_weights(
 );
 
 /*
- * Updates per-real enabled flags for a VS. The states array must have
- * length equal to the number of reals configured for the VS and be
- * indexed in the same order as they were passed at VS creation.
+ * Updates per-real enabled flags for a VS. The balancer handle must
+ * be non-NULL. The states array must have length equal to the number
+ * of reals configured for the VS and be indexed in the same order
+ * as they were passed at VS creation.
  *
  * Reals start disabled after balancer_create. Until this function is
  * called with a state of true for a given real, that real does not
@@ -185,7 +192,10 @@ struct balancer_session_table;
 
 /*
  * Creates a session table with the given capacity (number of session
- * entries).
+ * entries). The agent must be non-NULL and the capacity must be
+ * non-zero.
+ *
+ * Returns NULL on error.
  */
 struct balancer_session_table *
 balancer_create_session_table(
@@ -194,6 +204,7 @@ balancer_create_session_table(
 
 /*
  * Pushes the given table as the new front (primary) session table.
+ * The chain and front table must be non-NULL.
  *
  * Workers look up sessions in the front table first and fall back to
  * the previous (back) table; a session found in the back table is
@@ -209,7 +220,7 @@ balancer_session_table_chain_push_front(
 );
 
 /*
- * Detaches the back session table.
+ * Detaches the back session table. The chain must be non-NULL.
  *
  * After this call, new workers ignore the detached table for lookups.
  *
@@ -231,8 +242,10 @@ balancer_free_session_table(
 
 /*
  * Creates a session table chain seeded with the given front table.
- * The table is not owned by the chain and must outlive it.
- * Returns NULL on allocation failure.
+ * The agent and front table must be non-NULL. The table is not owned
+ * by the chain and must outlive it.
+ *
+ * Returns NULL on error.
  */
 struct balancer_session_table_chain *
 balancer_create_session_table_chain(

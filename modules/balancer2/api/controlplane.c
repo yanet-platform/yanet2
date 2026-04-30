@@ -997,6 +997,14 @@ balancer_create(
 ) {
 	yanet_error_reset(error);
 
+	if (agent == NULL) {
+		yanet_error_add(error, "missing agent");
+		return NULL;
+	}
+	if (name == NULL || strlen(name) == 0) {
+		yanet_error_add(error, "missing name");
+		return NULL;
+	}
 	if (session_table_chain == NULL) {
 		yanet_error_add(error, "missing session table chain");
 		return NULL;
@@ -1038,13 +1046,22 @@ balancer_install(
 ) {
 	yanet_error_reset(error);
 
+	if (agent == NULL) {
+		yanet_error_add(error, "missing agent");
+		return -1;
+	}
+	if (handle == NULL) {
+		yanet_error_add(error, "missing balancer handle");
+		return -1;
+	}
+
 	struct cp_module *module = &handle->module_config.cp_module;
 	return agent_update_modules(agent, 1, &module, error);
 }
 
 void
 balancer_free(struct agent *agent, struct balancer_handle *handle) {
-	if (handle == NULL) {
+	if (agent == NULL || handle == NULL) {
 		return;
 	}
 	struct memory_context *mctx = &agent->memory_context;
@@ -1119,6 +1136,11 @@ balancer_vs_update_real_weights(
 ) {
 	yanet_error_reset(error);
 
+	if (balancer == NULL) {
+		yanet_error_add(error, "missing balancer handle");
+		return -1;
+	}
+
 	struct balancer_module_config *cfg = &balancer->module_config;
 	if (vs_idx >= cfg->vs_count) {
 		yanet_error_add(
@@ -1167,6 +1189,11 @@ balancer_vs_update_real_states(
 ) {
 	yanet_error_reset(error);
 
+	if (balancer == NULL) {
+		yanet_error_add(error, "missing balancer handle");
+		return -1;
+	}
+
 	struct balancer_module_config *cfg = &balancer->module_config;
 	if (vs_idx >= cfg->vs_count) {
 		yanet_error_add(
@@ -1207,6 +1234,10 @@ balancer_create_session_table(
 ) {
 	yanet_error_reset(error);
 
+	if (agent == NULL) {
+		yanet_error_add(error, "missing agent");
+		return NULL;
+	}
 	if (capacity == 0) {
 		yanet_error_add(error, "zero capacity");
 		return NULL;
@@ -1252,6 +1283,15 @@ balancer_session_table_chain_push_front(
 ) {
 	yanet_error_reset(error);
 
+	if (chain == NULL) {
+		yanet_error_add(error, "missing session table chain");
+		return -1;
+	}
+	if (front_table == NULL) {
+		yanet_error_add(error, "missing front table");
+		return -1;
+	}
+
 	uint64_t gen = rcu_load(&chain->rcu, &chain->gen);
 	if (gen & 1) {
 		yanet_error_add(error, "the back table still exists");
@@ -1273,6 +1313,11 @@ balancer_session_table_chain_pop_back(
 ) {
 	yanet_error_reset(error);
 
+	if (chain == NULL) {
+		yanet_error_add(error, "missing session table chain");
+		return -1;
+	}
+
 	uint64_t gen = rcu_load(&chain->rcu, &chain->gen);
 	if ((gen & 1) == 0) {
 		yanet_error_add(error, "no back table to pop");
@@ -1293,7 +1338,7 @@ void
 balancer_free_session_table(
 	struct agent *agent, struct balancer_session_table *table
 ) {
-	if (table == NULL) {
+	if (agent == NULL || table == NULL) {
 		return;
 	}
 	struct memory_context *mctx = &agent->memory_context;
@@ -1309,6 +1354,15 @@ balancer_create_session_table_chain(
 	yanet_error **error
 ) {
 	yanet_error_reset(error);
+
+	if (agent == NULL) {
+		yanet_error_add(error, "missing agent");
+		return NULL;
+	}
+	if (front_table == NULL) {
+		yanet_error_add(error, "missing front table");
+		return NULL;
+	}
 
 	struct memory_context *mctx = &agent->memory_context;
 	const size_t workers = ADDR_OF(&agent->dp_config)->worker_count;
@@ -1342,7 +1396,7 @@ void
 balancer_free_session_table_chain(
 	struct agent *agent, struct balancer_session_table_chain *chain
 ) {
-	if (chain == NULL) {
+	if (agent == NULL || chain == NULL) {
 		return;
 	}
 	struct memory_context *mctx = &agent->memory_context;
