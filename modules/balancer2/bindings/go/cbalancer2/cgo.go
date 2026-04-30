@@ -17,6 +17,7 @@ import (
 	"runtime"
 	"unsafe"
 
+	"github.com/yanet-platform/yanet2/bindings/go/cerrors"
 	"github.com/yanet-platform/yanet2/bindings/go/filter"
 	"github.com/yanet-platform/yanet2/common/go/xnetip"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
@@ -34,8 +35,6 @@ var (
 	// L4CounterName is the name of the balancer-level L4 counter.
 	L4CounterName = C.GoString(C.balancer_l4_counter_name)
 )
-
-var errAllocationFailed = errors.New("allocation failed")
 
 // TunnelKind selects the encapsulation used to forward client traffic to the
 // selected real.
@@ -89,8 +88,9 @@ func (b *Balancer) Install(agent *ffi.Agent) error {
 	if b.ptr == nil {
 		return errors.New("balancer handle is freed")
 	}
-	if rc := C.balancer_install((*C.struct_agent)(agent.AsRawPtr()), b.ptr); rc != 0 {
-		return fmt.Errorf("error code=%d", rc)
+	var cErr *C.yanet_error
+	if rc := C.balancer_install((*C.struct_agent)(agent.AsRawPtr()), b.ptr, &cErr); rc != 0 {
+		return fmt.Errorf("failed to install balancer: %w", cerrors.FromC(unsafe.Pointer(cErr)))
 	}
 	return nil
 }
@@ -124,20 +124,11 @@ func (b *Balancer) UpdateVSRealWeights(vsIdx uint32, weights []uint32) error {
 		cWeightsPtr = &cWeights[0]
 	}
 
-	rc, err := C.balancer_vs_update_real_weights(b.ptr, C.uint32_t(vsIdx), cWeightsPtr)
-	switch rc {
-	case 0:
-		return nil
-	case -1:
-		return errors.New("weights length does not match real count")
-	case -2:
-		if err != nil {
-			return err
-		}
-		return errAllocationFailed
-	default:
-		return fmt.Errorf("error code=%d", rc)
+	var cErr *C.yanet_error
+	if rc := C.balancer_vs_update_real_weights(b.ptr, C.uint32_t(vsIdx), cWeightsPtr, &cErr); rc != 0 {
+		return fmt.Errorf("failed to update real weights: %w", cerrors.FromC(unsafe.Pointer(cErr)))
 	}
+	return nil
 }
 
 // UpdateVSRealStates updates per-real enabled flags for the VS at the given
@@ -158,45 +149,23 @@ func (b *Balancer) UpdateVSRealStates(vsIdx uint32, states []bool) error {
 		cStatesPtr = &cStates[0]
 	}
 
-	rc, err := C.balancer_vs_update_real_states(b.ptr, C.uint32_t(vsIdx), cStatesPtr)
-	switch rc {
-	case 0:
-		return nil
-	case -1:
-		return errors.New("states length does not match real count")
-	case -2:
-		if err != nil {
-			return err
-		}
-		return errAllocationFailed
-	default:
-		return fmt.Errorf("error code=%d", rc)
+	var cErr *C.yanet_error
+	if rc := C.balancer_vs_update_real_states(b.ptr, C.uint32_t(vsIdx), cStatesPtr, &cErr); rc != 0 {
+		return fmt.Errorf("failed to update real states: %w", cerrors.FromC(unsafe.Pointer(cErr)))
 	}
+	return nil
 }
 
 // Free releases the session table.
 //
-// Returns true if the table was actually freed, or false if it is still
-// referenced by a balancer (in which case the caller may retry after
-// detaching the table from every chain that references it).
-//
-// Safe to call multiple times: subsequent calls return false and do nothing.
-func (t *SessionTable) Free(agent *ffi.Agent) (bool, error) {
-	if t.ptr == nil {
-		return false, nil
-	}
-	rc := C.balancer_free_session_table(
-		(*C.struct_agent)(agent.AsRawPtr()),
-		t.ptr,
-	)
-	switch rc {
-	case 1:
+// Safe to call multiple times: subsequent calls are no-ops.
+func (t *SessionTable) Free(agent *ffi.Agent) {
+	if t.ptr != nil {
+		C.balancer_free_session_table(
+			(*C.struct_agent)(agent.AsRawPtr()),
+			t.ptr,
+		)
 		t.ptr = nil
-		return true, nil
-	case 0:
-		return false, nil
-	default:
-		return false, fmt.Errorf("error code=%d", rc)
 	}
 }
 
@@ -225,8 +194,9 @@ func (c *SessionTableChain) PushFront(table *SessionTable) error {
 	if table == nil || table.ptr == nil {
 		return errors.New("table is nil or freed")
 	}
-	if rc := C.balancer_session_table_chain_push_front(c.ptr, table.ptr); rc != 0 {
-		return errors.New("two session tables already attached")
+	var cErr *C.yanet_error
+	if rc := C.balancer_session_table_chain_push_front(c.ptr, table.ptr, &cErr); rc != 0 {
+		return fmt.Errorf("failed to push front session table: %w", cerrors.FromC(unsafe.Pointer(cErr)))
 	}
 	return nil
 }
@@ -237,8 +207,9 @@ func (c *SessionTableChain) PopBack() error {
 	if c.ptr == nil {
 		return errors.New("chain is freed")
 	}
-	if rc := C.balancer_session_table_chain_pop_back(c.ptr); rc != 0 {
-		return errors.New("only one session table attached")
+	var cErr *C.yanet_error
+	if rc := C.balancer_session_table_chain_pop_back(c.ptr, &cErr); rc != 0 {
+		return fmt.Errorf("failed to pop back session table: %w", cerrors.FromC(unsafe.Pointer(cErr)))
 	}
 	return nil
 }
@@ -392,33 +363,31 @@ func createBalancer(
 		cVSPtr = &cVS[0]
 	}
 
-	ptr, err := C.balancer_create(
+	var cErr *C.yanet_error
+	ptr := C.balancer_create(
 		(*C.struct_agent)(agent.AsRawPtr()),
 		cName,
 		chain.ptr,
 		&cTimeouts,
 		cVSPtr,
 		C.uint32_t(len(vs)),
+		&cErr,
 	)
 	if ptr == nil {
-		if err != nil {
-			return nil, err
-		}
-		return nil, errAllocationFailed
+		return nil, fmt.Errorf("failed to create balancer: %w", cerrors.FromC(unsafe.Pointer(cErr)))
 	}
 	return &Balancer{ptr: ptr}, nil
 }
 
 func createSessionTable(agent *ffi.Agent, capacity uint64) (*SessionTable, error) {
-	ptr, err := C.balancer_create_session_table(
+	var cErr *C.yanet_error
+	ptr := C.balancer_create_session_table(
 		(*C.struct_agent)(agent.AsRawPtr()),
 		C.size_t(capacity),
+		&cErr,
 	)
 	if ptr == nil {
-		if err != nil {
-			return nil, err
-		}
-		return nil, errAllocationFailed
+		return nil, fmt.Errorf("failed to create session table: %w", cerrors.FromC(unsafe.Pointer(cErr)))
 	}
 	return &SessionTable{ptr: ptr}, nil
 }
@@ -427,15 +396,14 @@ func createSessionTableChain(agent *ffi.Agent, front *SessionTable) (*SessionTab
 	if front == nil || front.ptr == nil {
 		return nil, errors.New("front table is nil or freed")
 	}
-	ptr, err := C.balancer_create_session_table_chain(
+	var cErr *C.yanet_error
+	ptr := C.balancer_create_session_table_chain(
 		(*C.struct_agent)(agent.AsRawPtr()),
 		front.ptr,
+		&cErr,
 	)
 	if ptr == nil {
-		if err != nil {
-			return nil, err
-		}
-		return nil, errAllocationFailed
+		return nil, fmt.Errorf("failed to create session table chain: %w", cerrors.FromC(unsafe.Pointer(cErr)))
 	}
 	return &SessionTableChain{ptr: ptr}, nil
 }
