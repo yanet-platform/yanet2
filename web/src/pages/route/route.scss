@@ -102,24 +102,11 @@
     }
 }
 
-// Page Header
-.route-page-header {
-    width: 100%;
-    align-items: center;
-
-    &__spacer {
-        flex: 1;
-    }
-
-    &__actions {
-        @include flex-row($spacing-lg);
-    }
-
-    &__mock-controls {
-        @include flex-row($spacing-sm);
-        padding: 0 $spacing-lg;
-        border-right: 1px solid var(--g-color-line-generic);
-    }
+// Page Header — mock controls grouped together with a right separator.
+.route-page-header__mock-controls {
+    @include flex-row($spacing-sm);
+    padding: 0 $spacing-lg;
+    border-right: 1px solid var(--g-color-line-generic);
 }
 
 // Table Header
@@ -139,27 +126,6 @@
     &--disabled {
         cursor: default;
         opacity: 0.6;
-    }
-}
-
-// Delete Route Dialog
-.delete-route-dialog {
-    &__message {
-        margin-bottom: $spacing-lg;
-    }
-
-    &__list {
-        max-height: 300px;
-        overflow-y: auto;
-        margin-top: $spacing-lg;
-    }
-
-    &__list-header {
-        margin-bottom: $spacing-sm;
-    }
-
-    &__list-items {
-        @include flex-column($spacing-xs);
     }
 }
 

@@ -11,6 +11,6 @@ export * from './CreateEntityDialog';
 export * from './SortableDataTable';
 export * from './SortableTableHeader';
 export * from './TableSearchBar';
-export * from './GraphEditor';
 export * from './CounterDisplay';
 export * from './CountersContext';
+export * from './ConfigTabs';

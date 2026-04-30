@@ -362,28 +362,3 @@ export const useAclData = (): UseAclDataResult => {
     };
 };
 
-// Hook for container height measurement
-export const useContainerHeight = (containerRef: React.RefObject<HTMLDivElement | null>): number => {
-    const [height, setHeight] = useState(0);
-
-    useEffect(() => {
-        const updateHeight = (): void => {
-            if (containerRef.current) {
-                setHeight(containerRef.current.clientHeight);
-            }
-        };
-
-        updateHeight();
-
-        const resizeObserver = new ResizeObserver(updateHeight);
-        if (containerRef.current) {
-            resizeObserver.observe(containerRef.current);
-        }
-
-        return () => {
-            resizeObserver.disconnect();
-        };
-    }, [containerRef]);
-
-    return height;
-};

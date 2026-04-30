@@ -3,7 +3,7 @@ import { Box, Text, Icon, Label } from '@gravity-ui/uikit';
 import { ChevronDown, ChevronRight, CurlyBracketsFunction } from '@gravity-ui/icons';
 import type { InstanceInfo, FunctionInfo, FunctionChainInfo, ChainModuleInfo } from '../../../api/inspect';
 import { InspectSection } from '../InspectSection';
-import { formatUint64 } from '../utils';
+import { formatUint64 } from '../../../utils';
 import '../inspect.scss';
 
 export interface FunctionsSectionProps {

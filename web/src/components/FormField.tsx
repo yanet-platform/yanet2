@@ -1,6 +1,6 @@
 import React from 'react';
 import { Box, Text } from '@gravity-ui/uikit';
-import './common.css';
+import './common.scss';
 
 export interface FormFieldProps {
     label: string;

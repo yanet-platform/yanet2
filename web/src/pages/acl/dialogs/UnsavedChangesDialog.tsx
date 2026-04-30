@@ -1,7 +1,7 @@
 import React from 'react';
 import { Box, Text, Dialog, Button } from '@gravity-ui/uikit';
 import type { UnsavedChangesDialogProps } from '../types';
-import '../acl.css';
+import '../acl.scss';
 
 export const UnsavedChangesDialog: React.FC<UnsavedChangesDialogProps> = ({
     open,

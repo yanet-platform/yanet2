@@ -5,9 +5,8 @@ import { HardDrive } from '@gravity-ui/icons';
 import type { InstanceInfo, DevicePipelineInfo } from '../../../api/inspect';
 import { useDeviceCounters, type DeviceAbsoluteData } from '../../../hooks';
 import { SortableDataTable } from '../../../components';
-import { compareNullableStrings } from '../../../utils/sorting';
+import { compareNullableStrings, formatBytes } from '../../../utils';
 import { InspectSection } from '../InspectSection';
-import { formatBytes } from '../utils';
 import '../inspect.scss';
 
 export interface DevicesSectionProps {

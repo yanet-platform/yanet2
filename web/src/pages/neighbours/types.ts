@@ -16,13 +16,6 @@ export interface EditNeighbourDialogProps {
     table: string;
 }
 
-export interface RemoveNeighboursDialogProps {
-    open: boolean;
-    onClose: () => void;
-    onConfirm: () => Promise<void>;
-    selectedCount: number;
-}
-
 export interface CreateTableDialogProps {
     open: boolean;
     onClose: () => void;

@@ -4,9 +4,9 @@ import type { TableColumnConfig } from '@gravity-ui/uikit';
 import { Cpu } from '@gravity-ui/icons';
 import type { InstanceInfo, AgentInfo, AgentInstanceInfo } from '../../../api/inspect';
 import { SortableDataTable } from '../../../components';
-import { compareBigIntValues, compareNullableNumbers } from '../../../utils/sorting';
+import { compareBigIntValues, compareNullableNumbers, formatUint64 } from '../../../utils';
 import { InspectSection } from '../InspectSection';
-import { formatAgentName, formatUint64 } from '../utils';
+import { formatAgentName } from '../utils';
 import '../inspect.scss';
 
 export interface AgentsSectionProps {

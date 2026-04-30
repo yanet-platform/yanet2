@@ -1,12 +1,16 @@
 import React, { useCallback } from 'react';
 import { Box, Text, Button, Card } from '@gravity-ui/uikit';
 import { InputFormField } from '../../components';
-import { getBytes } from '../../utils/bytes';
-import { formatIPv6FromBytes, parseIPv6ToBytes } from '../../utils/netip';
-import { formatMACFromBytes, parseMACToBytes } from '../../utils/mac';
+import {
+    formatIPv6FromBytes,
+    formatMACFromBytes,
+    getBytes,
+    parseIPv6ToBytes,
+    parseMACToBytes,
+} from '../../utils';
 import type { FWStateFormProps } from './types';
 import type { SyncConfig } from '../../api/acl';
-import './FWStateForm.css';
+import './FWStateForm.scss';
 
 // Format bytes array to IPv6 string (wrapper for base64/bytes input)
 const formatIPv6 = (input: string | Uint8Array | number[] | undefined): string => {

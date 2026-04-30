@@ -7,7 +7,7 @@ import {
     CreateFunctionDialog,
     useFunctionData,
 } from './functions';
-import './FunctionsPage.css';
+import './FunctionsPage.scss';
 
 const FunctionsPage: React.FC = () => {
     const {

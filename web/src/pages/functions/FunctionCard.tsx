@@ -3,15 +3,15 @@ import { Box, Card, Alert } from '@gravity-ui/uikit';
 import type { FunctionId } from '../../api/common';
 import type { Function as APIFunction } from '../../api/functions';
 import { API } from '../../api';
-import { CardHeader, PageLoader } from '../../components';
+import { CardHeader, PageLoader, ConfirmDialog } from '../../components';
 import { FunctionGraph } from './FunctionGraph';
-import { DeleteFunctionDialog, ModuleEditorDialog, SingleWeightEditorDialog } from './dialogs';
+import { ModuleEditorDialog, SingleWeightEditorDialog } from './dialogs';
 import type { ChainEditorResult } from './dialogs/SingleWeightEditorDialog';
 import { CountersProvider } from '../../components';
 import { useFunctionGraph, useModuleCounters } from './hooks';
 import type { FunctionNode, FunctionEdge, ModuleNodeData } from './types';
 import { NODE_TYPE_MODULE, INPUT_NODE_ID, OUTPUT_NODE_ID } from './types';
-import '../FunctionsPage.css';
+import '../FunctionsPage.scss';
 
 export interface FunctionCardProps {
     functionId: FunctionId;
@@ -333,12 +333,16 @@ export const FunctionCard: React.FC<FunctionCardProps> = ({
             </Box>
 
             {/* Dialogs */}
-            <DeleteFunctionDialog
+            <ConfirmDialog
                 open={deleteDialogOpen}
                 onClose={() => setDeleteDialogOpen(false)}
                 onConfirm={handleDelete}
-                functionName={functionId.name || ''}
+                title="Delete Function"
+                message={`Are you sure you want to delete function "${functionId.name || ''}"?`}
+                secondaryMessage="This action cannot be undone."
+                confirmText="Delete"
                 loading={deleting}
+                danger
             />
 
             <ModuleEditorDialog

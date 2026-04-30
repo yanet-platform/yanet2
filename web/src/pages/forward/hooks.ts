@@ -1,8 +1,12 @@
-import { useState, useLayoutEffect } from 'react';
 import type { Rule, IPNet, VlanRange, Device } from '../../api/forward';
 import { ForwardMode, FORWARD_MODE_LABELS } from '../../api/forward';
 import type { RuleItem } from './types';
-import { formatIPNet } from '../../utils';
+import {
+    bytesToBase64,
+    formatIPNet,
+    parseIPToBytes,
+    prefixLengthToMaskBytes,
+} from '../../utils';
 
 /**
  * Convert rules array to RuleItem array with unique ids
@@ -77,32 +81,6 @@ export const formatMode = (mode: ForwardMode | undefined): string => {
 };
 
 /**
- * Hook for measuring container height
- */
-export const useContainerHeight = (containerRef: React.RefObject<HTMLDivElement | null>) => {
-    const [containerHeight, setContainerHeight] = useState(0);
-
-    useLayoutEffect(() => {
-        const updateHeight = () => {
-            if (containerRef.current) {
-                const rect = containerRef.current.getBoundingClientRect();
-                const availableHeight = window.innerHeight - rect.top - 20;
-                setContainerHeight(Math.max(300, availableHeight));
-            }
-        };
-
-        updateHeight();
-        window.addEventListener('resize', updateHeight);
-
-        return () => {
-            window.removeEventListener('resize', updateHeight);
-        };
-    }, [containerRef]);
-
-    return containerHeight;
-};
-
-/**
  * Parse comma-separated string to Device array
  */
 export const parseDevices = (input: string): Device[] => {
@@ -126,122 +104,38 @@ export const parseVlanRanges = (input: string): VlanRange[] => {
 };
 
 /**
- * Convert bytes array to base64 string (required for gRPC-gateway)
- */
-export const bytesToBase64 = (bytes: number[]): string => {
-    const binary = String.fromCharCode(...bytes);
-    return btoa(binary);
-};
-
-/**
  * Parse comma-separated CIDR prefixes to IPNet array with base64-encoded bytes
  */
 export const parsePrefixesToIPNets = (input: string): IPNet[] => {
     if (!input.trim()) return [];
-    
-    const parseIPToBytes = (ipStr: string): number[] | undefined => {
-        if (ipStr.includes(':')) {
-            // IPv6
-            return parseIPv6ToBytes(ipStr);
-        }
-        return parseIPv4ToBytes(ipStr);
-    };
-    
+
     const results: IPNet[] = [];
-    
+
     for (const part of input.split(',')) {
         const prefix = part.trim();
         if (!prefix) continue;
-        
+
         const parts = prefix.split('/');
         if (parts.length !== 2) continue;
-        
+
         const [ipPart, maskStr] = parts;
         const prefixLength = parseInt(maskStr, 10);
         if (isNaN(prefixLength)) continue;
-        
+
         const addrBytes = parseIPToBytes(ipPart);
         if (!addrBytes) continue;
-        
+
         const isIPv4 = addrBytes.length === 4;
         const maxPrefix = isIPv4 ? 32 : 128;
         if (prefixLength < 0 || prefixLength > maxPrefix) continue;
-        
+
         const maskBytes = prefixLengthToMaskBytes(prefixLength, isIPv4 ? 4 : 16);
-        
+
         results.push({
             addr: bytesToBase64(addrBytes),
             mask: bytesToBase64(maskBytes),
         });
     }
-    
+
     return results;
-};
-
-/**
- * Parse IPv4 string to bytes array
- */
-const parseIPv4ToBytes = (ipStr: string): number[] | undefined => {
-    const parts = ipStr.split('.');
-    if (parts.length !== 4) return undefined;
-    
-    const bytes: number[] = [];
-    for (const part of parts) {
-        const num = parseInt(part, 10);
-        if (isNaN(num) || num < 0 || num > 255) return undefined;
-        bytes.push(num);
-    }
-    return bytes;
-};
-
-/**
- * Parse IPv6 string to bytes array
- */
-const parseIPv6ToBytes = (ipStr: string): number[] | undefined => {
-    const trimmed = ipStr.trim();
-    if (!trimmed) return undefined;
-
-    // Handle :: expansion
-    let fullAddr = trimmed;
-    if (trimmed.includes('::')) {
-        const parts = trimmed.split('::');
-        const left = parts[0] ? parts[0].split(':') : [];
-        const right = parts[1] ? parts[1].split(':') : [];
-        const missing = 8 - left.length - right.length;
-        if (missing < 0) return undefined;
-        const middle = Array(missing).fill('0');
-        fullAddr = [...left, ...middle, ...right].join(':');
-    }
-
-    const parts = fullAddr.split(':');
-    if (parts.length !== 8) return undefined;
-
-    const bytes: number[] = [];
-    for (const part of parts) {
-        const num = parseInt(part || '0', 16);
-        if (isNaN(num) || num < 0 || num > 0xffff) return undefined;
-        bytes.push((num >> 8) & 0xff);
-        bytes.push(num & 0xff);
-    }
-    return bytes;
-};
-
-/**
- * Create mask bytes from prefix length
- */
-const prefixLengthToMaskBytes = (prefixLen: number, totalBytes: number): number[] => {
-    const mask: number[] = [];
-    let remaining = prefixLen;
-    for (let i = 0; i < totalBytes; i++) {
-        if (remaining >= 8) {
-            mask.push(255);
-            remaining -= 8;
-        } else if (remaining > 0) {
-            mask.push((0xff << (8 - remaining)) & 0xff);
-            remaining = 0;
-        } else {
-            mask.push(0);
-        }
-    }
-    return mask;
 };

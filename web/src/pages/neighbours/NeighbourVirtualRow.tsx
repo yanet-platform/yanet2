@@ -1,8 +1,7 @@
 import { Checkbox, Button, Icon } from '@gravity-ui/uikit';
 import { Pencil } from '@gravity-ui/icons';
 import type { Neighbour } from '../../api/neighbours';
-import { getNUDStateString } from '../../utils/nud';
-import { formatUnixSeconds } from '../../utils/sorting';
+import { formatUnixSeconds, getNUDStateString } from '../../utils';
 import { cellStyles, TOTAL_WIDTH, ROW_HEIGHT } from './constants';
 
 export interface NeighbourVirtualRowProps {

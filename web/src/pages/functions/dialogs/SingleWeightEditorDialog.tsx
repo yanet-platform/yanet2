@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { TextInput, Box } from '@gravity-ui/uikit';
 import { FormDialog, FormField } from '../../../components';
-import '../../FunctionsPage.css';
+import '../../FunctionsPage.scss';
 
 export interface ChainEditorResult {
     chainName: string;

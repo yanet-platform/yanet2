@@ -1,3 +1,13 @@
+import { getBigIntValue } from './sorting';
+
+/**
+ * Format an uint64-like value for display, returning "-" when null/undefined.
+ */
+export const formatUint64 = (value: string | number | bigint | undefined): string => {
+    const parsed = getBigIntValue(value);
+    return parsed === null ? '-' : parsed.toString();
+};
+
 /**
  * Format packets per second value for display.
  * Examples: "1.2K pps", "3.5M pps", "1.1G pps"

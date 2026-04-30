@@ -2,7 +2,7 @@ import React, { useState, useCallback, useEffect } from 'react';
 import { Box, Dialog, TextInput, Select } from '@gravity-ui/uikit';
 import { FormField } from '../../components';
 import { useDialogKeyboardShortcut } from '../../hooks';
-import { isValidMAC } from '../../utils/mac';
+import { isValidMAC } from '../../utils';
 import type { Neighbour } from '../../api/neighbours';
 import type { AddNeighbourDialogProps } from './types';
 

@@ -48,35 +48,28 @@ export class IPv4Address {
             return err(IPv4ParseError.EmptyString);
         }
 
-        try {
-            // Use URL constructor to validate - it throws for invalid IPs
-            new URL(`http://${ip}`);
-            // Additional check: ensure it doesn't contain port or path
-            const parts = ip.split('.');
-            if (parts.length !== 4) {
-                return err(IPv4ParseError.InvalidFormat);
-            }
-
-            // Check each octet is between 0-255 and has no leading zeros
-            const octets: number[] = [];
-            for (const octet of parts) {
-                if (octet.length > 1 && octet.startsWith('0')) {
-                    return err(IPv4ParseError.LeadingZero);
-                }
-                const num = parseInt(octet, 10);
-                if (isNaN(num) || num < 0 || num > 255) {
-                    return err(IPv4ParseError.InvalidOctet);
-                }
-                if (octet !== num.toString()) {
-                    return err(IPv4ParseError.InvalidFormat);
-                }
-                octets.push(num);
-            }
-
-            return ok(new IPv4Address(octets as [number, number, number, number]));
-        } catch {
+        const parts = ip.split('.');
+        if (parts.length !== 4) {
             return err(IPv4ParseError.InvalidFormat);
         }
+
+        // Check each octet is between 0-255 and has no leading zeros
+        const octets: number[] = [];
+        for (const octet of parts) {
+            if (octet.length > 1 && octet.startsWith('0')) {
+                return err(IPv4ParseError.LeadingZero);
+            }
+            const num = parseInt(octet, 10);
+            if (isNaN(num) || num < 0 || num > 255) {
+                return err(IPv4ParseError.InvalidOctet);
+            }
+            if (octet !== num.toString()) {
+                return err(IPv4ParseError.InvalidFormat);
+            }
+            octets.push(num);
+        }
+
+        return ok(new IPv4Address(octets as [number, number, number, number]));
     }
 
     /**

@@ -1,12 +1,17 @@
 import React from 'react';
-import { TabProvider, TabList, Tab, Text, Box } from '@gravity-ui/uikit';
-import type { ConfigTabsProps, ConfigState } from './types';
-import './acl.css';
+import { Box, Text } from '@gravity-ui/uikit';
+import { ConfigTabs as SharedConfigTabs } from '../../components';
+import type { ConfigState, ConfigTabsProps } from './types';
+import './acl.scss';
 
 const getStateIndicator = (state: ConfigState): React.ReactNode => {
     if (state === 'new') {
         return (
-            <Text variant="body-1" color="info" className="acl-config-tabs__state-new">
+            <Text
+                variant="body-1"
+                color="info"
+                className="acl-config-tabs__state-new"
+            >
                 (new)
             </Text>
         );
@@ -22,26 +27,17 @@ export const ConfigTabs: React.FC<ConfigTabsProps> = ({
     activeConfig,
     configStates,
     onConfigChange,
-}) => {
-    if (configs.length === 0) {
-        return null;
-    }
-
-    return (
-        <TabProvider value={activeConfig} onUpdate={onConfigChange}>
-            <TabList className="acl-config-tabs">
-                {configs.map((configName) => {
-                    const state = configStates.get(configName) || 'saved';
-                    return (
-                        <Tab key={configName} value={configName}>
-                            <Box className="acl-config-tabs__tab-content">
-                                {configName}
-                                {getStateIndicator(state)}
-                            </Box>
-                        </Tab>
-                    );
-                })}
-            </TabList>
-        </TabProvider>
-    );
-};
+}) => (
+    <SharedConfigTabs
+        configs={configs}
+        activeConfig={activeConfig}
+        onConfigChange={onConfigChange}
+        className="acl-config-tabs"
+        renderTabLabel={(configName) => (
+            <Box className="acl-config-tabs__tab-content">
+                {configName}
+                {getStateIndicator(configStates.get(configName) ?? 'saved')}
+            </Box>
+        )}
+    />
+);

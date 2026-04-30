@@ -1,5 +1,5 @@
 import React from 'react';
-import { formatTCPFlags } from '../../utils/packetParser';
+import { formatTCPFlags } from '../../utils';
 import { cellStyles, TOTAL_WIDTH, ROW_HEIGHT } from './constants';
 import type { CapturedPacket } from './types';
 

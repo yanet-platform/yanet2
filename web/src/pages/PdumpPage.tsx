@@ -1,12 +1,16 @@
 import React, { useState, useCallback } from 'react';
 import { Box, Flex } from '@gravity-ui/uikit';
-import { PageLayout, PageLoader, EmptyState } from '../components';
+import {
+    PageLayout,
+    PageLoader,
+    EmptyState,
+    ConfirmDialog,
+} from '../components';
 import {
     usePdumpConfigs,
     usePdumpCapture,
     ConfigCard,
     ConfigDialog,
-    DeleteConfigDialog,
     PacketTable,
     PacketDetailsDialog,
     PdumpPageHeader,
@@ -100,9 +104,7 @@ const PdumpPage: React.FC = () => {
     if (configs.length === 0) {
         return (
             <PageLayout header={headerContent}>
-                <Box className="pdump-page__empty">
-                    <EmptyState message="No pdump configurations found. Click 'New Configuration' to create one." />
-                </Box>
+                <EmptyState message="No pdump configurations found. Click 'New Configuration' to create one." />
 
                 <ConfigDialog
                     open={isCreateDialogOpen}
@@ -177,13 +179,16 @@ const PdumpPage: React.FC = () => {
                 />
             )}
 
-            {/* Delete config confirmation dialog */}
-            <DeleteConfigDialog
+            <ConfirmDialog
                 open={deletingConfigName !== null}
                 onClose={handleCloseDeleteDialog}
                 onConfirm={handleConfirmDelete}
-                configName={deletingConfigName ?? ''}
+                title="Delete Pdump Config"
+                message={`Are you sure you want to delete the pdump config "${deletingConfigName ?? ''}"?`}
+                secondaryMessage="This action cannot be undone."
+                confirmText="Delete"
                 loading={isDeleting}
+                danger
             />
         </PageLayout>
     );

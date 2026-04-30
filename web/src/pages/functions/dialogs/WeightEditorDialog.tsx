@@ -2,7 +2,7 @@ import React, { useState, useCallback, useEffect } from 'react';
 import { Dialog, TextInput, Box, Text } from '@gravity-ui/uikit';
 import { useDialogKeyboardShortcut } from '../../../hooks';
 import type { FunctionEdge } from '../types';
-import '../../FunctionsPage.css';
+import '../../FunctionsPage.scss';
 
 export interface WeightEditorDialogProps {
     open: boolean;

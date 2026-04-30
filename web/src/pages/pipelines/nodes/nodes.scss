@@ -1,8 +1,8 @@
 /* Import shared graph styles */
-@import '../../../components/GraphEditor/GraphEditor.css';
+@import '../../../components/GraphEditor/GraphEditor.scss';
 
 /* ============================================
-   Input/Output Node Styles (use shared classes)
+   Input/Output Node Styles
    ============================================ */
 .input-node {
     width: 70px;
@@ -45,61 +45,61 @@
 }
 
 /* ============================================
-   Module Node Styles (uses shared .graph-node base)
+   Function Reference Node Styles
    ============================================ */
-.module-node {
+.function-ref-node {
     padding: 10px 14px;
     border-radius: 8px;
     background: var(--g-color-base-float);
     border: 2px solid var(--g-color-line-generic);
     min-width: 140px;
-    height: 120px;
+    /* Fixed height to prevent layout shifts when counters update */
+    height: 110px;
     box-sizing: border-box;
     transition: border-color 0.15s ease, background-color 0.15s ease;
     cursor: pointer;
 }
 
-.module-node:hover {
+.function-ref-node:hover {
     border-color: var(--g-color-line-generic-hover);
     background: var(--g-color-base-generic-ultralight);
 }
 
-.module-node.selected {
+.function-ref-node.selected {
     border-color: var(--g-color-line-brand);
 }
 
-.module-node__content {
+.function-ref-node__content {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 4px;
 }
 
-.module-node__row {
+.function-ref-node__row {
     display: flex;
     align-items: center;
-    gap: 6px;
 }
 
-.module-node__label {
+.function-ref-node__label {
     color: var(--g-color-text-secondary);
     font-weight: 500;
     font-size: 11px;
-    flex-shrink: 0;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
 }
 
-.module-node__separator {
-    flex: 1;
-    border-bottom: 1px dotted var(--g-color-line-generic);
-    min-width: 8px;
-    height: 1px;
-}
-
-.module-node__counters {
+/* ============================================
+   Counter Display Wrapper (uses shared CounterDisplay component)
+   ============================================ */
+.function-ref-node__counters {
     margin-top: 6px;
     padding-top: 6px;
     border-top: 1px solid var(--g-color-line-generic);
 }
 
+/* ============================================
+   Handle Styles
+   ============================================ */
 .node-handle {
     width: 10px !important;
     height: 10px !important;
@@ -113,4 +113,8 @@
     height: 14px !important;
     background: var(--g-color-base-brand) !important;
     border-color: var(--g-color-line-brand) !important;
+}
+
+.counter-edge-label {
+    position: absolute;
 }

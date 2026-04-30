@@ -16,7 +16,6 @@ export * from './useRouteData';
 export * from './RouteTable';
 export * from './RoutePageHeader';
 export * from './RouteListItem';
-export * from './DeleteRouteDialog';
 export * from './AddRouteDialog';
 export * from './EditRouteDialog';
 export * from './ConfigTabs';

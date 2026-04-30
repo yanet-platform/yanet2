@@ -1,15 +1,16 @@
 import yaml from 'js-yaml';
 import type { Rule, IPNet, PortRange, ProtoRange, VlanRange, ActionKind, Action } from '../../api/acl';
 import type { YamlAclConfig, YamlAclRule } from './types';
-import { bytesToBase64, getBytes } from '../../utils/bytes';
 import {
-    parseIPToBytes,
+    bytesToBase64,
+    countPrefixLength,
     formatIPv4FromBytes,
     formatIPv6FromBytes,
+    getBytes,
     isContiguousMask,
-    countPrefixLength,
+    parseIPToBytes,
     prefixLengthToMaskBytes,
-} from '../../utils/netip';
+} from '../../utils';
 
 // Parse IP address string to bytes array (throws on error)
 const parseIPAddressBytes = (ipStr: string): number[] => {

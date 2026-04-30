@@ -1,6 +1,6 @@
 import React from 'react';
 import { Box, Text, Card, Flex } from '@gravity-ui/uikit';
-import { formatHexDump, formatTCPFlags } from '../../utils/packetParser';
+import { formatHexDump, formatTCPFlags } from '../../utils';
 import type { CapturedPacket } from './types';
 import './pdump.scss';
 

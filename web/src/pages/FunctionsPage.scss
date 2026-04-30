@@ -1,3 +1,6 @@
+@use '../styles/variables' as *;
+@use '../styles/mixins' as *;
+
 .react-flow__panel.react-flow__attribution.bottom.right {
     display: none;
 }
@@ -10,16 +13,13 @@
     width: 100%;
     flex: 1;
     min-width: 0;
-    padding: 20px;
-    display: flex;
-    flex-direction: column;
+    padding: $spacing-xl;
+    @include flex-column;
     overflow: hidden;
 }
 
 .functions-page__list {
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
+    @include flex-column($gap: $spacing-lg);
     overflow-y: auto;
     flex: 1;
     min-height: 0;
@@ -30,21 +30,20 @@
    ============================================ */
 
 .function-card {
-    margin-bottom: 16px;
+    margin-bottom: $spacing-lg;
 }
 
 .function-card__content {
-    display: flex;
-    flex-direction: column;
+    @include flex-column;
     height: 450px;
 }
 
 .function-card__loading {
-    padding: 16px;
+    padding: $spacing-lg;
 }
 
 .function-card__validation-errors {
-    padding: 8px 16px;
+    padding: $spacing-sm $spacing-lg;
 }
 
 .function-card__graph {
@@ -57,9 +56,7 @@
    ============================================ */
 
 .weight-editor-dialog__body {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
+    @include flex-column($gap: $spacing-md);
     width: 400px;
     max-width: 90vw;
     max-height: 400px;
@@ -67,23 +64,19 @@
 }
 
 .weight-editor-dialog__row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
+    @include flex-row($gap: $spacing-sm);
 }
 
 .weight-editor-dialog__chain-name {
     flex-shrink: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    @include text-truncate;
     max-width: 200px;
 }
 
 .weight-editor-dialog__separator {
     flex: 1;
     border-bottom: 1px dotted var(--g-color-line-generic);
-    min-width: 20px;
+    min-width: $spacing-xl;
     height: 1px;
     align-self: center;
 }
@@ -98,9 +91,7 @@
    ============================================ */
 
 .single-weight-editor-dialog__body {
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
+    @include flex-column($gap: $spacing-lg);
 }
 
 .single-weight-editor-dialog__input {
@@ -112,9 +103,7 @@
    ============================================ */
 
 .module-editor-dialog__body {
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
+    @include flex-column($gap: $spacing-lg);
 }
 
 .module-editor-dialog__input {

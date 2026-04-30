@@ -1,14 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Box, TabProvider, TabList, Tab, Button, Flex, Text } from '@gravity-ui/uikit';
+import { Box, TabProvider, TabList, Tab, Button, Flex, Divider } from '@gravity-ui/uikit';
 import { toaster } from '../utils';
 import { API } from '../api';
 import type { Neighbour, NeighbourTableInfo } from '../api/neighbours';
-import { PageLayout, PageLoader } from '../components';
+import { PageLayout, PageLoader, PageHeader, ConfirmDialog } from '../components';
 import {
     AddNeighbourDialog,
     EditNeighbourDialog,
-    RemoveNeighboursDialog,
     CreateTableDialog,
     EditTableDialog,
     RemoveTableDialog,
@@ -310,41 +309,44 @@ const NeighboursPage = (): React.JSX.Element => {
     const defaultAddTable = isMergedView ? 'static' : activeTab;
 
     const headerContent = (
-        <Flex gap={2} alignItems="center" style={{ width: '100%' }}>
-            <Text variant="header-1">Neighbours</Text>
-            <Box style={{ flex: 1 }} />
-            <Button view="action" onClick={() => setAddDialogOpen(true)}>
-                Add Neighbour
-            </Button>
-            <Button
-                view="outlined-danger"
-                onClick={() => setRemoveDialogOpen(true)}
-                disabled={isMergedView || selectedIds.size === 0}
-            >
-                Remove Selected
-            </Button>
-            <Box style={{ width: 1, height: 24, backgroundColor: 'var(--g-color-line-generic)' }} />
-            <Button view="normal" onClick={() => setCreateTableDialogOpen(true)}>
-                Create Table
-            </Button>
-            {!isMergedView && (
+        <PageHeader
+            title="Neighbours"
+            actions={
                 <>
-                    <Button
-                        view="normal"
-                        onClick={() => setEditTableDialogOpen(true)}
-                    >
-                        Edit Table
+                    <Button view="action" onClick={() => setAddDialogOpen(true)}>
+                        Add Neighbour
                     </Button>
                     <Button
                         view="outlined-danger"
-                        onClick={() => setRemoveTableDialogOpen(true)}
-                        disabled={isBuiltIn}
+                        onClick={() => setRemoveDialogOpen(true)}
+                        disabled={isMergedView || selectedIds.size === 0}
                     >
-                        Remove Table
+                        Remove Selected
                     </Button>
+                    <Divider orientation="vertical" />
+                    <Button view="normal" onClick={() => setCreateTableDialogOpen(true)}>
+                        Create Table
+                    </Button>
+                    {!isMergedView && (
+                        <>
+                            <Button
+                                view="normal"
+                                onClick={() => setEditTableDialogOpen(true)}
+                            >
+                                Edit Table
+                            </Button>
+                            <Button
+                                view="outlined-danger"
+                                onClick={() => setRemoveTableDialogOpen(true)}
+                                disabled={isBuiltIn}
+                            >
+                                Remove Table
+                            </Button>
+                        </>
+                    )}
                 </>
-            )}
-        </Flex>
+            }
+        />
     );
 
     if (initialLoading) {
@@ -405,11 +407,18 @@ const NeighboursPage = (): React.JSX.Element => {
                 table={editTable()}
             />
 
-            <RemoveNeighboursDialog
+            <ConfirmDialog
                 open={removeDialogOpen}
                 onClose={() => setRemoveDialogOpen(false)}
-                onConfirm={handleRemoveConfirm}
-                selectedCount={selectedIds.size}
+                onConfirm={async () => {
+                    await handleRemoveConfirm();
+                    setRemoveDialogOpen(false);
+                }}
+                title="Remove Neighbours"
+                message={`Are you sure you want to remove ${selectedIds.size} neighbour(s)?`}
+                confirmText="Remove"
+                danger
+                disabled={selectedIds.size === 0}
             />
 
             {/* Table dialogs */}

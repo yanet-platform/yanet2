@@ -1,7 +1,7 @@
 import React from 'react';
 import { TabProvider, TabList, Tab, Box } from '@gravity-ui/uikit';
 import type { InnerTabsProps } from './types';
-import './acl.css';
+import './acl.scss';
 
 export const InnerTabs: React.FC<InnerTabsProps> = ({
     activeTab,
