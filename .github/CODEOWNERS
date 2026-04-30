@@ -1,1 +1,54 @@
-dataplane/**/*                       @yanet-core
+# Catch-all: cross-cutting changes need core review.
+*                                       @yanet-platform/yanet-core
+
+# Core
+/common/                                @yanet-platform/yanet-core
+/lib/                                   @yanet-platform/yanet-core
+/subprojects/                           @yanet-platform/yanet-core
+
+# Tests / functional.
+/tests/                                 @yanet-platform/yanet-core
+
+# Classifier —> /lib/
+/filter/                                @yanet-platform/yanet-core
+
+# Build / packaging / CI.
+/.github/                               @yanet-platform/yanet-core
+/debian/                                @yanet-platform/yanet-core
+/deploy/                                @yanet-platform/yanet-core
+/Makefile                               @yanet-platform/yanet-core
+/meson.build                            @yanet-platform/yanet-core
+
+# Dataplane core.
+/api/                                   @yanet-platform/yanet-core
+/dataplane/                             @yanet-platform/yanet-core
+/mock/                                  @yanet-platform/yanet-core
+
+# Controlplane.
+/controlplane/                          @yanet-platform/yanet-controlplane
+
+# Bindings.
+/bindings/go/                           @yanet-platform/yanet-controlplane
+
+# Operators.
+/agents/                                @yanet-platform/yanet-controlplane
+
+# Modules.
+/modules/balancer/                      @yanet-platform/yanet-module-balancer
+/modules/balancer2/                     @yanet-platform/yanet-module-balancer
+/modules/route/                         @yanet-platform/yanet-module-route
+/modules/route-mpls/                    @yanet-platform/yanet-module-route
+/modules/acl/                           @yanet-platform/yanet-module-acl
+/modules/fwstate/                       @yanet-platform/yanet-module-acl
+/modules/dscp/                          @yanet-platform/yanet-core
+/modules/pdump/                         @yanet-platform/yanet-core
+/modules/decap/                         @yanet-platform/yanet-core
+/modules/forward/                       @yanet-platform/yanet-core
+/modules/nat64/                         @yanet-platform/yanet-core
+
+# CLI.
+/cli/                                   @yanet-platform/yanet-cli
+/modules/*/cli/                         @yanet-platform/yanet-cli
+
+# Web.
+/web/                                   @yanet-platform/yanet-web
