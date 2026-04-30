@@ -129,6 +129,20 @@ func (m *CountersService) Module(
 	return response, nil
 }
 
+func (m *CountersService) NIC(
+	ctx context.Context,
+	request *ynpb.NICCounterRequest,
+) (*ynpb.CountersResponse, error) {
+	dpConfig := m.shm.DPGlobalConfig()
+	counterValues := dpConfig.NICCounters()
+
+	response := &ynpb.CountersResponse{
+		Counters: m.encodeCounters(counterValues),
+	}
+
+	return response, nil
+}
+
 func (m *CountersService) Perf(
 	ctx context.Context,
 	request *ynpb.PerfCountersRequest,

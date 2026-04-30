@@ -64,6 +64,9 @@ yanet_shm_detach(struct yanet_shm *shm);
 struct dp_config *
 yanet_shm_dp_config(struct yanet_shm *shm, uint32_t instance_idx);
 
+struct dp_config *
+yanet_shm_global_dp_config(struct yanet_shm *shm);
+
 // Attaches a module agent to shared memory.
 //
 // Creates a new agent for a specific module in the given dataplane instance.

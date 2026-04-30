@@ -70,6 +70,12 @@ func (m *SharedMemory) DPConfig(instanceIdx uint32) *DPConfig {
 	return &DPConfig{ptr: ptr}
 }
 
+func (m *SharedMemory) DPGlobalConfig() *DPConfig {
+	ptr := C.yanet_shm_global_dp_config(m.ptr)
+
+	return &DPConfig{ptr: ptr}
+}
+
 // AgentAttach attaches a module agent to shared memory on the dataplane instance.
 func (m *SharedMemory) AgentAttach(
 	name string,
