@@ -754,6 +754,17 @@ func (m *DPConfig) PerformanceCounters(
 	return result, nil
 }
 
+func (m *DPConfig) NICCounters() []CounterInfo {
+	counters := C.yanet_get_nic_counters(m.ptr)
+	defer C.yanet_counter_handle_list_free(counters)
+
+	if counters == nil {
+		return nil
+	}
+
+	return m.encodeCounters(counters)
+}
+
 type ModuleReference struct {
 	Device     string
 	Pipeline   string

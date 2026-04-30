@@ -3,6 +3,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "globalstat.h"
+
 struct dataplane_config;
 struct dataplane_device;
 
@@ -21,7 +23,9 @@ struct dataplane {
 	uint32_t device_count;
 
 	struct dp_config *global_dp_config;
-	struct cp_config *global_cp_config;	
+	struct cp_config *global_cp_config;
+
+	struct dataplane_stats global_stats;
 };
 
 int

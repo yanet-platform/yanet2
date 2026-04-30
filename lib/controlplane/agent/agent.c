@@ -1634,6 +1634,36 @@ yanet_get_pipeline_counters(
 }
 
 struct counter_handle_list *
+yanet_get_nic_counters(struct dp_config *dp_config) {
+	struct counter_registry *counter_registry = &dp_config->counters;
+	struct counter_storage *storage =
+		ADDR_OF(&dp_config->counter_storage);
+
+	uint64_t count = counter_registry->count;
+	struct counter *names = ADDR_OF(&counter_registry->names);
+
+	struct counter_handle_list *list = (struct counter_handle_list *)malloc(
+		sizeof(struct counter_handle_list) +
+		sizeof(struct counter_handle) * count
+	);
+
+	if (list == NULL)
+		return NULL;
+	list->instance_count = ADDR_OF(&storage->allocator)->instance_count;
+	list->count = count;
+	struct counter_handle *handlers = list->counters;
+
+	for (uint64_t idx = 0; idx < count; ++idx) {
+		strtcpy(handlers[idx].name, names[idx].name, 60);
+		handlers[idx].size = names[idx].size;
+		handlers[idx].gen = names[idx].gen;
+		handlers[idx].value_handle =
+			counter_get_value_handle(idx, storage);
+	}
+	return list;
+}
+
+struct counter_handle_list *
 yanet_get_device_counters(
 	struct dp_config *dp_config, const char *device_name
 ) {
@@ -1703,9 +1733,9 @@ yanet_get_counter_value(
 
 struct counter_handle_list *
 yanet_get_worker_counters(struct dp_config *dp_config) {
-	struct counter_registry *counter_registry = &dp_config->worker_counters;
+	struct counter_registry *counter_registry = &dp_config->counters;
 	struct counter_storage *storage =
-		ADDR_OF(&dp_config->worker_counter_storage);
+		ADDR_OF(&dp_config->counter_storage);
 
 	uint64_t count = counter_registry->count;
 	struct counter *names = ADDR_OF(&counter_registry->names);

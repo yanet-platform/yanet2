@@ -414,7 +414,7 @@ worker_register_counter(
 ) {
 	yanet_error *err = NULL;
 	uint64_t rc = counter_registry_register(
-		&dp_config->worker_counters, name, size, &err
+		&dp_config->counters, name, size, &err
 	);
 	if (rc == COUNTER_INVALID) {
 		LOG(ERROR,
@@ -571,7 +571,7 @@ dataplane_worker_init(
 
 	// Prepare counter registry
 	counter_registry_init(
-		&dp_config->worker_counters, &dp_config->memory_context, 0
+		&dp_config->counters, &dp_config->memory_context, 0
 	);
 
 	if (worker_register_counter(dp_config, "iterations", 1)) {
@@ -605,20 +605,20 @@ dataplane_worker_start(struct dataplane_worker *worker) {
 	struct dp_config *dp_config = worker->instance->dp_config;
 	// FIXME: do not use hard-coded counter identifiers
 	dp_worker->iterations = counter_get_address(
-		0, dp_worker->idx, ADDR_OF(&dp_config->worker_counter_storage)
+		0, dp_worker->idx, ADDR_OF(&dp_config->counter_storage)
 	);
 
 	dp_worker->rx_count =
 		counter_get_address(
 			1,
 			dp_worker->idx,
-			ADDR_OF(&dp_config->worker_counter_storage)
+			ADDR_OF(&dp_config->counter_storage)
 		) +
 		0;
 	dp_worker->rx_size = counter_get_address(
 				     1,
 				     dp_worker->idx,
-				     ADDR_OF(&dp_config->worker_counter_storage)
+				     ADDR_OF(&dp_config->counter_storage)
 			     ) +
 			     1;
 
@@ -626,13 +626,13 @@ dataplane_worker_start(struct dataplane_worker *worker) {
 		counter_get_address(
 			2,
 			dp_worker->idx,
-			ADDR_OF(&dp_config->worker_counter_storage)
+			ADDR_OF(&dp_config->counter_storage)
 		) +
 		0;
 	dp_worker->tx_size = counter_get_address(
 				     2,
 				     dp_worker->idx,
-				     ADDR_OF(&dp_config->worker_counter_storage)
+				     ADDR_OF(&dp_config->counter_storage)
 			     ) +
 			     1;
 
@@ -640,7 +640,7 @@ dataplane_worker_start(struct dataplane_worker *worker) {
 		counter_get_address(
 			3,
 			dp_worker->idx,
-			ADDR_OF(&dp_config->worker_counter_storage)
+			ADDR_OF(&dp_config->counter_storage)
 		) +
 		0;
 
@@ -648,7 +648,7 @@ dataplane_worker_start(struct dataplane_worker *worker) {
 		counter_get_address(
 			4,
 			dp_worker->idx,
-			ADDR_OF(&dp_config->worker_counter_storage)
+			ADDR_OF(&dp_config->counter_storage)
 		) +
 		0;
 

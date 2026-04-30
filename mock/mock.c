@@ -255,7 +255,7 @@ dataplane_initialize(
 	);
 
 	err = NULL;
-	if (counter_registry_link(&dp_config->worker_counters, NULL, &err)) {
+	if (counter_registry_link(&dp_config->counters, NULL, &err)) {
 		LOG(ERROR,
 		    "failed to link counter registry: %s",
 		    yanet_error_message(err));

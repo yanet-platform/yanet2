@@ -93,8 +93,8 @@ struct dp_config {
 	struct dp_worker **workers;
 
 	struct counter_storage_allocator counter_storage_allocator;
-	struct counter_registry worker_counters;
-	struct counter_storage *worker_counter_storage;
+	struct counter_registry counters;
+	struct counter_storage *counter_storage;
 };
 
 /*
