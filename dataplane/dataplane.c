@@ -442,9 +442,14 @@ dataplane_init(
 			instance_config->cp_memory + instance_config->dp_memory;
 	}
 
-	// storage_size += config->globalstat.cp_memory + config->globalstat.dp_memory;
-	storage_size += (1 << 20) + (1 << 20);
-
+	LOG(INFO,
+		"storage size is %ld bytes",
+		(uint64_t)storage_size);
+	storage_size += config->globalstat.cp_memory + config->globalstat.dp_memory;
+	
+	LOG(INFO,
+		"storage size is %ld bytes after globalstat_configs",
+		(uint64_t)storage_size);
 	// FIXME: handle errors
 	int mem_fd = open(
 		config->storage, O_CREAT | O_TRUNC | O_RDWR, S_IRUSR | S_IWUSR
@@ -745,12 +750,6 @@ dataplane_init(
 			dp_config->worker_count
 		);
 
-		if (dataplane_globalstat_register_counters(dp_config)) {
-			LOG(ERROR,
-			    "failed to register global NIC counters");
-			return -1;
-		}
-
 		yanet_error *err = NULL;
 		if (counter_registry_link(
 			    &dp_config->counters, NULL, &err
@@ -759,6 +758,12 @@ dataplane_init(
 			    "failed to link counter registry: %s",
 			    yanet_error_message(err));
 			yanet_error_free(err);
+			return -1;
+		}
+
+		if (dataplane_globalstat_register_counters(dp_config)) {
+			LOG(ERROR,
+			    "failed to register global NIC counters");
 			return -1;
 		}
 
