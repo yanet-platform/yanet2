@@ -2,7 +2,6 @@
 package cbalancer2
 
 import (
-	"errors"
 	"fmt"
 	"math"
 	"net/netip"
@@ -71,9 +70,6 @@ func NewBalancer(
 	timeouts SessionTimeouts,
 	vs []VSConfig,
 ) (*Balancer, error) {
-	if name == "" {
-		return nil, errors.New("balancer name must not be empty")
-	}
 	if uint64(len(vs)) > math.MaxUint32 {
 		return nil, fmt.Errorf("too many virtual services: %d", len(vs))
 	}
