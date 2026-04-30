@@ -36,7 +36,7 @@ counter_register_counter(
 		return -1;
 	}
 
-	return 0;
+	return rc;
 }
 
 static const struct {
@@ -49,6 +49,29 @@ static const struct {
 	{"nic_rx_tx_errors", 2, (const size_t[]){offsetof(struct dataplane, global_stats.nic_stats.remote_rx_count), offsetof(struct dataplane, global_stats.nic_stats.remote_tx_count)}},
 	{"nic_rx_nombuf", 1, (const size_t[]){offsetof(struct dataplane, global_stats.nic_stats.rx_nombuf_count)}},
 };
+
+static uint64_t global_counter_ids[ARRAY_SIZE(global_counter_info)];
+
+int
+dataplane_globalstat_register_counters(struct dp_config *dp_config) {
+	counter_registry_init(
+		&dp_config->counters, &dp_config->memory_context, 0
+	);
+
+	for (size_t i = 0; i < ARRAY_SIZE(global_counter_info); ++i) {
+		uint64_t id = counter_register_counter(
+			dp_config,
+			global_counter_info[i].name,
+			global_counter_info[i].size
+		);
+		if (id == COUNTER_INVALID) {
+			return -1;
+		}
+		global_counter_ids[i] = id;
+	}
+
+	return 0;
+}
 
 uint64_t**
 get_worker_field_ptr(struct dataplane *dataplane, size_t info_index, size_t offset_index) {
@@ -77,19 +100,9 @@ void thread_unload_nic_stats(struct dataplane *dataplane) {
 
 void *
 stat_thread(void *arg) {
-	static uint64_t global_counter_ids[ARRAY_SIZE(global_counter_info)];
-	
 	struct dataplane *dataplane = (struct dataplane *)arg;
 
 	struct dp_config *dp_config = dataplane->global_dp_config;
-
-	for (size_t i = 0; i < ARRAY_SIZE(global_counter_info); ++i) {
-		global_counter_ids[i] = counter_register_counter(
-			dp_config,
-			global_counter_info[i].name,
-			global_counter_info[i].size
-		);
-	}
 
 	for (size_t i = 0; i < ARRAY_SIZE(global_counter_info); ++i) {
 		for (size_t j = 0; j < global_counter_info[i].size; ++j) {

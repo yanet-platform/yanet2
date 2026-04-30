@@ -442,7 +442,8 @@ dataplane_init(
 			instance_config->cp_memory + instance_config->dp_memory;
 	}
 
-	storage_size += config->globalstat.cp_memory + config->globalstat.dp_memory;
+	// storage_size += config->globalstat.cp_memory + config->globalstat.dp_memory;
+	storage_size += (1 << 20) + (1 << 20);
 
 	// FIXME: handle errors
 	int mem_fd = open(
@@ -743,6 +744,12 @@ dataplane_init(
 			&cp_config->memory_context,
 			dp_config->worker_count
 		);
+
+		if (dataplane_globalstat_register_counters(dp_config)) {
+			LOG(ERROR,
+			    "failed to register global NIC counters");
+			return -1;
+		}
 
 		yanet_error *err = NULL;
 		if (counter_registry_link(

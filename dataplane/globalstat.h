@@ -30,4 +30,10 @@ struct globalstats {
     struct globalstat* stats;
 };
 
-void *stat_thread(void* arg);
+struct dp_config;
+
+int
+dataplane_globalstat_register_counters(struct dp_config *dp_config);
+
+void *
+stat_thread(void* arg);
