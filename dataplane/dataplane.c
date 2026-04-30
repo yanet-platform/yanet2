@@ -350,6 +350,64 @@ dataplane_init_storage(
 }
 
 int
+dataplane_globalstat_storage_init(
+	struct dataplane *dataplane,
+	void *storage,
+	struct dataplane_config *config
+) {
+	uint64_t dp_memory = config->globalstat.dp_memory;
+	uint64_t cp_memory = config->globalstat.cp_memory;
+
+	struct dp_config *dp_config = dataplane->global_dp_config;
+	struct cp_config *cp_config = dataplane->global_cp_config;
+
+	block_allocator_init(&dataplane->global_dp_config->block_allocator);
+	block_allocator_put_arena(
+		&dataplane->global_dp_config->block_allocator,
+		storage + sizeof(struct dp_config),
+		dp_memory - sizeof(struct dp_config)
+	);
+	memory_context_init(
+		&dp_config->memory_context, "dp", &dp_config->block_allocator
+	);
+
+	dp_config->config_lock = 0;
+
+	dp_config->dp_modules = NULL;
+	dp_config->module_count = 0;
+
+	dp_config->workers = NULL;
+	dp_config->worker_count = 0;
+
+	struct cp_config *cp_config =
+		(struct cp_config *)((uintptr_t)storage + dp_memory);
+
+	block_allocator_init(&cp_config->block_allocator);
+	block_allocator_put_arena(
+		&cp_config->block_allocator,
+		storage + dp_memory + sizeof(struct cp_config),
+		cp_memory - sizeof(struct cp_config)
+	);
+	memory_context_init(
+		&cp_config->memory_context, "cp", &cp_config->block_allocator
+	);
+
+	// FIXME: cp_config bootstrap routine
+	struct cp_agent_registry *cp_agent_registry =
+		(struct cp_agent_registry *)memory_balloc(
+			&cp_config->memory_context,
+			sizeof(struct cp_agent_registry)
+		);
+	cp_agent_registry->count = 0;
+	SET_OFFSET_OF(&cp_config->agent_registry, cp_agent_registry);
+
+	SET_OFFSET_OF(&dp_config->cp_config, cp_config);
+	SET_OFFSET_OF(&cp_config->dp_config, dp_config);
+
+	return 0;
+}
+
+int
 dataplane_init(
 	struct dataplane *dataplane,
 	const char *binary,
@@ -380,6 +438,8 @@ dataplane_init(
 		storage_size +=
 			instance_config->cp_memory + instance_config->dp_memory;
 	}
+
+	storage_size += config->globalstat.cp_memory + config->globalstat.dp_memory;
 
 	// FIXME: handle errors
 	int mem_fd = open(
@@ -536,6 +596,46 @@ dataplane_init(
 			instance_config->dp_memory + instance_config->cp_memory;
 	}
 
+	{
+		LOG(INFO, "initialize storage for globalstats");
+		int rc = dataplane_globalstat_storage_init(
+			dataplane,
+			storage + instance_offset,
+			config
+		);
+
+		if (rc == -1) {
+			LOG(ERROR,
+			    "failed to initialize storage for globalstats");
+			return -1;
+		}
+
+		// FIXME: Stub agent for the instance configuration
+		struct agent agent;
+		memory_context_init_from(
+			&agent.memory_context,
+			&dataplane->global_cp_config->memory_context,
+			"stub agent"
+		);
+		SET_OFFSET_OF(&agent.dp_config, dataplane->global_dp_config);
+		SET_OFFSET_OF(&agent.cp_config, dataplane->global_cp_config);
+
+		yanet_error *err = NULL;
+		struct cp_config_gen *cp_config_gen =
+			cp_config_gen_create(&agent, &err);
+		if (cp_config_gen == NULL) {
+			LOG(ERROR,
+			    "failed to create cp_config_gen: %s",
+			    yanet_error_message(err));
+			yanet_error_free(err);
+			return -1;
+		}
+		SET_OFFSET_OF(
+			&dataplane->global_cp_config->cp_config_gen, cp_config_gen
+		);
+	}
+	
+
 	size_t pci_port_count = 0;
 	const char **pci_port_names =
 		(const char **)malloc(sizeof(char *) * config->device_count);
@@ -622,6 +722,8 @@ dataplane_init(
 			)
 		);
 	}
+
+	
 
 	return 0;
 }

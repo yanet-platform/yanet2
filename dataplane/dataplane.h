@@ -19,6 +19,9 @@ struct dataplane {
 
 	struct dataplane_device *devices;
 	uint32_t device_count;
+
+	struct dp_config *global_dp_config;
+	struct cp_config *global_cp_config;	
 };
 
 int
