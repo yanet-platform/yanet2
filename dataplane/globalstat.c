@@ -2,8 +2,6 @@
 
 #include "dataplane.h"
 
-#include <stdint.h>
-
 #include <unistd.h>
 
 #include <rte_ethdev.h>
@@ -78,30 +76,41 @@ get_worker_field_ptr(struct dataplane *dataplane, size_t info_index, size_t offs
 	return (uint64_t**)((char*)dataplane + global_counter_info[info_index].offset[offset_index]);
 }
 
-void thread_unload_nic_stats(struct dataplane *dataplane) {
+static void
+calculate_and_update_stats(
+	struct dataplane *dataplane,
+	struct rte_eth_stats *prev_stats,
+	struct rte_eth_stats *cur_stats
+) {
 	struct nic_stats *nic_stats = &dataplane->global_stats.nic_stats;
-	struct rte_eth_stats stats0[dataplane->device_count];
+
+	uint64_t rx_count = 0, tx_count = 0;
+	uint64_t rx_size = 0, tx_size = 0;
+	uint64_t rx_errors = 0, tx_errors = 0;
+	uint64_t rx_nombuf = 0;
 
 	for (uint16_t idx = 0; idx < dataplane->device_count; ++idx) {
-		rte_eth_stats_get(
-			dataplane->devices[idx].port_id, &stats0[idx]
-		);
+		rx_count += cur_stats[idx].ipackets - prev_stats[idx].ipackets;
+		tx_count += cur_stats[idx].opackets - prev_stats[idx].opackets;
+		rx_size += cur_stats[idx].ibytes - prev_stats[idx].ibytes;
+		tx_size += cur_stats[idx].obytes - prev_stats[idx].obytes;
+		rx_errors += cur_stats[idx].ierrors - prev_stats[idx].ierrors;
+		tx_errors += cur_stats[idx].oerrors - prev_stats[idx].oerrors;
+		rx_nombuf += cur_stats[idx].rx_nombuf - prev_stats[idx].rx_nombuf;
 	}
-	for (uint16_t idx = 0; idx < dataplane->device_count; ++idx) {
-		*nic_stats->rx_size += stats0[idx].ibytes;
-		*nic_stats->tx_size = stats0[idx].obytes;
-		*nic_stats->rx_count = stats0[idx].ipackets;
-		*nic_stats->tx_count = stats0[idx].opackets;
-		*nic_stats->remote_rx_count = stats0[idx].ierrors;
-		*nic_stats->remote_tx_count = stats0[idx].oerrors;
-		*nic_stats->rx_nombuf_count = stats0[idx].rx_nombuf;
-	}
+
+	*nic_stats->rx_count = rx_count;
+	*nic_stats->tx_count = tx_count;
+	*nic_stats->rx_size = rx_size;
+	*nic_stats->tx_size = tx_size;
+	*nic_stats->remote_rx_count = rx_errors;
+	*nic_stats->remote_tx_count = tx_errors;
+	*nic_stats->rx_nombuf_count = rx_nombuf;
 }
 
 void *
 stat_thread(void *arg) {
 	struct dataplane *dataplane = (struct dataplane *)arg;
-
 	struct dp_config *dp_config = dataplane->global_dp_config;
 
 	for (size_t i = 0; i < ARRAY_SIZE(global_counter_info); ++i) {
@@ -115,45 +124,26 @@ stat_thread(void *arg) {
 		}
 	}
 
-	struct rte_eth_stats stats0[dataplane->device_count];
-	struct rte_eth_xstat_name names[4096];
-	struct rte_eth_xstat xstats0[dataplane->device_count][4096];
+	struct rte_eth_stats stats_prev[dataplane->device_count];
+	struct rte_eth_stats stats_cur[dataplane->device_count];
+
+	memset(stats_prev, 0, sizeof(stats_prev));
+	memset(stats_cur, 0, sizeof(stats_cur));
 
 	for (uint16_t idx = 0; idx < dataplane->device_count; ++idx) {
-		rte_eth_stats_get(
-			dataplane->devices[idx].port_id, &stats0[idx]
-		);
-		rte_eth_xstats_get(
-			dataplane->devices[idx].port_id, xstats0[idx], 4096
-		);
+		rte_eth_stats_get(dataplane->devices[idx].port_id, &stats_prev[idx]);
 	}
 
 	while (1) {
 		sleep(1);
 
-		thread_unload_nic_stats(dataplane);
-
 		for (uint16_t idx = 0; idx < dataplane->device_count; ++idx) {
-			struct rte_eth_stats stats1;
-			rte_eth_stats_get(
-				dataplane->devices[idx].port_id, &stats1
-			);
-			
-			memcpy(&stats0[idx], &stats1, sizeof(stats1));
-
-			struct rte_eth_xstat xstats1[4096];
-			rte_eth_xstats_get_names(
-				dataplane->devices[idx].port_id, names, 4096
-			);
-			int cnt = rte_eth_xstats_get(
-				dataplane->devices[idx].port_id, xstats1, 4096
-			);
-
-			memcpy(&xstats0[idx],
-			       xstats1,
-			       sizeof(struct rte_eth_xstat) * cnt);
+			rte_eth_stats_get(dataplane->devices[idx].port_id, &stats_cur[idx]);
 		}
 
+		calculate_and_update_stats(dataplane, stats_prev, stats_cur);
+
+		memcpy(stats_prev, stats_cur, sizeof(stats_prev));
 	}
 
 	return NULL;
