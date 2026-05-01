@@ -1,14 +1,25 @@
 import React, { useMemo } from 'react';
-import { Box, Text } from '@gravity-ui/uikit';
-import { LayoutCellsLarge } from '@gravity-ui/icons';
 import type { InstanceInfo } from '../../../api/inspect';
-import { InspectSection } from '../InspectSection';
+import { InspectCard } from '../InspectCard';
 import { ModuleCard } from '../ModuleCard';
-import '../inspect.scss';
+import { EmptyState } from '../../../components';
 
 export interface ModulesSectionProps {
     instance: InstanceInfo;
 }
+
+const ModulesLegend: React.FC = () => (
+    <span className="inspect-legend">
+        <span>
+            <span className="inspect-legend-dot" style={{ background: 'var(--inspect-ok)' }} />
+            in use
+        </span>
+        <span>
+            <span className="inspect-legend-dot" style={{ background: 'var(--inspect-idle)' }} />
+            available
+        </span>
+    </span>
+);
 
 export const ModulesSection: React.FC<ModulesSectionProps> = ({ instance }) => {
     const modules = instance.dp_modules ?? [];
@@ -57,16 +68,9 @@ export const ModulesSection: React.FC<ModulesSectionProps> = ({ instance }) => {
     }, [instance]);
 
     return (
-        <InspectSection
-            title="Dataplane Modules"
-            icon={LayoutCellsLarge}
-            count={modules.length}
-            variant="modules"
-            collapsible
-            defaultExpanded
-        >
+        <InspectCard title="Dataplane modules" count={modules.length} right={<ModulesLegend />}>
             {modules.length > 0 ? (
-                <Box className="modules-grid">
+                <div className="inspect-mod-grid">
                     {modules.map((module) => {
                         const t = module.name?.toLowerCase() ?? '';
                         return (
@@ -78,12 +82,10 @@ export const ModulesSection: React.FC<ModulesSectionProps> = ({ instance }) => {
                             />
                         );
                     })}
-                </Box>
+                </div>
             ) : (
-                <Text variant="body-1" color="secondary" className="inspect-text--block">
-                    No modules
-                </Text>
+                <EmptyState message="No modules" compact />
             )}
-        </InspectSection>
+        </InspectCard>
     );
 };

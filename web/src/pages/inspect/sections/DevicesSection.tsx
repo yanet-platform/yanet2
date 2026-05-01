@@ -1,16 +1,21 @@
 import React, { useMemo } from 'react';
-import { Box, Text, Label } from '@gravity-ui/uikit';
+import { Box } from '@gravity-ui/uikit';
 import type { TableColumnConfig } from '@gravity-ui/uikit';
-import { HardDrive } from '@gravity-ui/icons';
+import { Link as RouterLink } from 'react-router-dom';
 import type { InstanceInfo, DevicePipelineInfo } from '../../../api/inspect';
-import { useDeviceCounters, type DeviceAbsoluteData } from '../../../hooks';
-import { SortableDataTable } from '../../../components';
-import { compareNullableStrings, formatBytes } from '../../../utils';
-import { InspectSection } from '../InspectSection';
-import '../inspect.scss';
+import type { DeviceAbsoluteData, DeviceCounterData } from '../../../hooks';
+import { SortableDataTable, EmptyState } from '../../../components';
+import { compareNullableStrings } from '../../../utils';
+import { InspectCard } from '../InspectCard';
+import { Sparkline } from '../Sparkline';
+import { StatusPill } from '../StatusPill';
+import { fmtPkts, fmtBytes } from '../formatters';
+import { useDeviceTrendSeries } from '../hooks';
 
 export interface DevicesSectionProps {
     instance: InstanceInfo;
+    rateCounters: Map<string, DeviceCounterData>;
+    absoluteCounters: Map<string, DeviceAbsoluteData>;
 }
 
 interface DeviceRowData {
@@ -19,51 +24,41 @@ interface DeviceRowData {
     type: string;
     input_pipelines: DevicePipelineInfo[];
     output_pipelines: DevicePipelineInfo[];
-    absoluteCounters: DeviceAbsoluteData | undefined;
+    absolute: DeviceAbsoluteData | undefined;
+    rxSeries: number[];
+    txSeries: number[];
+    status: 'ok' | 'idle';
 }
 
-// Format pipeline names as comma-separated list
-const formatPipelines = (pipelines: DevicePipelineInfo[]): string => {
-    if (pipelines.length === 0) return '-';
-    return pipelines.map(p => p.name || 'unnamed').join(', ');
-};
-
-// Format packet count for display
-const formatPackets = (value: number): string => {
-    return Math.floor(value).toLocaleString();
-};
-
-// Format bytes from number (interpolated value) for display
-const formatBytesFromNumber = (value: number): string => {
-    return formatBytes(BigInt(Math.floor(value)));
-};
-
-export const DevicesSection: React.FC<DevicesSectionProps> = ({ instance }) => {
+export const DevicesSection: React.FC<DevicesSectionProps> = ({
+    instance,
+    rateCounters,
+    absoluteCounters,
+}) => {
     const devices = instance.devices ?? [];
 
-    // Extract device names for the counter hook
-    const deviceNames = useMemo(() => {
-        return devices.map((device, idx) => device.name || `Device ${idx}`);
-    }, [devices]);
+    const rxTrend = useDeviceTrendSeries(rateCounters, 'rx');
+    const txTrend = useDeviceTrendSeries(rateCounters, 'tx');
 
-    // Use interpolated device counters
-    const { absoluteCounters: absoluteCountersMap } = useDeviceCounters(deviceNames, devices.length > 0);
-
-    // Transform devices to row data
     const rowData: DeviceRowData[] = useMemo(() => {
         return devices.map((device, idx) => {
-            const deviceName = device.name || `Device ${idx}`;
+            const name = device.name ?? `device-${idx}`;
+            const abs = absoluteCounters.get(name);
+            const isOk = !!abs && (abs.rx.packets > 0 || abs.tx.packets > 0);
             return {
-                name: deviceName,
-                type: device.type || '-',
+                name,
+                type: device.type ?? '-',
                 input_pipelines: device.input_pipelines ?? [],
                 output_pipelines: device.output_pipelines ?? [],
-                absoluteCounters: absoluteCountersMap.get(deviceName),
+                absolute: abs,
+                rxSeries: rxTrend.get(name) ?? [],
+                txSeries: txTrend.get(name) ?? [],
+                status: isOk ? 'ok' : 'idle',
             };
         });
-    }, [devices, absoluteCountersMap]);
+    }, [devices, absoluteCounters, rxTrend, txTrend]);
 
-    const columns = useMemo((): TableColumnConfig<DeviceRowData>[] => [
+    const columns: TableColumnConfig<DeviceRowData>[] = useMemo(() => [
         {
             id: 'name',
             name: 'Device',
@@ -71,9 +66,7 @@ export const DevicesSection: React.FC<DevicesSectionProps> = ({ instance }) => {
                 sort: (a: DeviceRowData, b: DeviceRowData) => compareNullableStrings(a.name, b.name),
             },
             template: (item: DeviceRowData) => (
-                <Text variant="body-1" className="devices-table__name">
-                    {item.name}
-                </Text>
+                <span className="inspect-mono">{item.name}</span>
             ),
         },
         {
@@ -83,93 +76,112 @@ export const DevicesSection: React.FC<DevicesSectionProps> = ({ instance }) => {
                 sort: (a: DeviceRowData, b: DeviceRowData) => compareNullableStrings(a.type, b.type),
             },
             template: (item: DeviceRowData) => (
-                <Label theme="info" size="s">{item.type}</Label>
+                <span className="inspect-pill">{item.type}</span>
             ),
         },
         {
             id: 'rx',
             name: 'RX',
+            align: 'right',
             template: (item: DeviceRowData) => {
-                const counters = item.absoluteCounters;
-                if (!counters) {
+                const abs = item.absolute;
+                if (!abs) {
                     return (
-                        <Box className="devices-table__counter devices-table__counter--loading">
-                            <Text variant="body-2" color="hint">-- pkts</Text>
-                            <Text variant="caption-2" color="hint">-- B</Text>
-                        </Box>
+                        <div className="inspect-pkts inspect-pkts--loading">
+                            <div className="inspect-pkts-main inspect-num">-- <span>pkts</span></div>
+                            <div className="inspect-pkts-sub inspect-num">-- B</div>
+                        </div>
                     );
                 }
                 return (
-                    <Box className="devices-table__counter">
-                        <Text variant="body-2">{formatPackets(counters.rx.packets)} pkts</Text>
-                        <Text variant="caption-2" color="secondary">{formatBytesFromNumber(counters.rx.bytes)}</Text>
-                    </Box>
+                    <div className="inspect-pkts">
+                        <div className="inspect-pkts-main inspect-num">
+                            {fmtPkts(abs.rx.packets)} <span>pkts</span>
+                        </div>
+                        <div className="inspect-pkts-sub inspect-num">
+                            {fmtBytes(abs.rx.bytes)}
+                        </div>
+                    </div>
                 );
             },
+        },
+        {
+            id: 'rxTrend',
+            name: 'Trend',
+            template: (item: DeviceRowData) => (
+                <Sparkline
+                    data={item.rxSeries}
+                    color={item.status === 'ok' ? 'var(--inspect-ok)' : 'var(--inspect-idle)'}
+                    w={70}
+                    h={20}
+                />
+            ),
         },
         {
             id: 'tx',
             name: 'TX',
+            align: 'right',
             template: (item: DeviceRowData) => {
-                const counters = item.absoluteCounters;
-                if (!counters) {
+                const abs = item.absolute;
+                if (!abs) {
                     return (
-                        <Box className="devices-table__counter devices-table__counter--loading">
-                            <Text variant="body-2" color="hint">-- pkts</Text>
-                            <Text variant="caption-2" color="hint">-- B</Text>
-                        </Box>
+                        <div className="inspect-pkts inspect-pkts--loading">
+                            <div className="inspect-pkts-main inspect-num">-- <span>pkts</span></div>
+                            <div className="inspect-pkts-sub inspect-num">-- B</div>
+                        </div>
                     );
                 }
                 return (
-                    <Box className="devices-table__counter">
-                        <Text variant="body-2">{formatPackets(counters.tx.packets)} pkts</Text>
-                        <Text variant="caption-2" color="secondary">{formatBytesFromNumber(counters.tx.bytes)}</Text>
-                    </Box>
+                    <div className="inspect-pkts">
+                        <div className="inspect-pkts-main inspect-num">
+                            {fmtPkts(abs.tx.packets)} <span>pkts</span>
+                        </div>
+                        <div className="inspect-pkts-sub inspect-num">
+                            {fmtBytes(abs.tx.bytes)}
+                        </div>
+                    </div>
                 );
             },
         },
         {
-            id: 'input_pipelines',
-            name: 'Input Pipelines',
-            template: (item: DeviceRowData) => (
-                <Text variant="body-2" color={item.input_pipelines.length === 0 ? 'secondary' : undefined}>
-                    {formatPipelines(item.input_pipelines)}
-                </Text>
-            ),
+            id: 'pipelines',
+            name: 'Pipelines (in → out)',
+            template: (item: DeviceRowData) => {
+                const inName = item.input_pipelines[0]?.name ?? '—';
+                const outName = item.output_pipelines[0]?.name ?? '—';
+                return (
+                    <div className="inspect-pipe-cell">
+                        <span className="inspect-pipe-chip">{inName}</span>
+                        <span className="inspect-pipe-arrow">→</span>
+                        <span className="inspect-pipe-chip">{outName}</span>
+                    </div>
+                );
+            },
         },
         {
-            id: 'output_pipelines',
-            name: 'Output Pipelines',
+            id: 'status',
+            name: 'Status',
             template: (item: DeviceRowData) => (
-                <Text variant="body-2" color={item.output_pipelines.length === 0 ? 'secondary' : undefined}>
-                    {formatPipelines(item.output_pipelines)}
-                </Text>
+                <StatusPill state={item.status} label={item.status} />
             ),
         },
     ], []);
 
+    const right = (
+        <RouterLink to="/devices" className="inspect-link">
+            Open all →
+        </RouterLink>
+    );
+
     return (
-        <InspectSection
-            title="Devices"
-            icon={HardDrive}
-            count={devices.length}
-            variant="devices"
-            collapsible
-            defaultExpanded
-        >
+        <InspectCard title="Devices" count={devices.length} right={right}>
             {devices.length > 0 ? (
-                <Box className="devices-table-wrapper">
-                    <SortableDataTable
-                        data={rowData}
-                        columns={columns as any}
-                        width="max"
-                    />
+                <Box className="inspect-table-host">
+                    <SortableDataTable data={rowData} columns={columns as any} width="max" />
                 </Box>
             ) : (
-                <Text variant="body-1" color="secondary" className="inspect-text--block">
-                    No devices
-                </Text>
+                <EmptyState message="No devices" compact />
             )}
-        </InspectSection>
+        </InspectCard>
     );
 };

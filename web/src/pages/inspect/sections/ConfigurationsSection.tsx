@@ -1,12 +1,10 @@
 import React, { useMemo } from 'react';
-import { Box, Text } from '@gravity-ui/uikit';
+import { Box } from '@gravity-ui/uikit';
 import type { TableColumnConfig } from '@gravity-ui/uikit';
-import { Gear } from '@gravity-ui/icons';
 import type { InstanceInfo, CPConfigInfo } from '../../../api/inspect';
-import { SortableDataTable } from '../../../components';
+import { SortableDataTable, EmptyState } from '../../../components';
 import { compareBigIntValues, compareNullableStrings, formatUint64 } from '../../../utils';
-import { InspectSection } from '../InspectSection';
-import '../inspect.scss';
+import { InspectCard } from '../InspectCard';
 
 export interface ConfigurationsSectionProps {
     instance: InstanceInfo;
@@ -15,14 +13,16 @@ export interface ConfigurationsSectionProps {
 export const ConfigurationsSection: React.FC<ConfigurationsSectionProps> = ({ instance }) => {
     const configs = instance.cp_configs ?? [];
 
-    const cpConfigColumns: TableColumnConfig<CPConfigInfo>[] = useMemo(() => [
+    const columns: TableColumnConfig<CPConfigInfo>[] = useMemo(() => [
         {
             id: 'type',
             name: 'Type',
             meta: {
                 sort: (a: CPConfigInfo, b: CPConfigInfo) => compareNullableStrings(a.type, b.type),
             },
-            template: (item: CPConfigInfo) => item.type || '-',
+            template: (item: CPConfigInfo) => (
+                <span className="inspect-mono">{item.type || '-'}</span>
+            ),
         },
         {
             id: 'name',
@@ -30,40 +30,33 @@ export const ConfigurationsSection: React.FC<ConfigurationsSectionProps> = ({ in
             meta: {
                 sort: (a: CPConfigInfo, b: CPConfigInfo) => compareNullableStrings(a.name, b.name),
             },
-            template: (item: CPConfigInfo) => item.name || '-',
+            template: (item: CPConfigInfo) => (
+                <span className="inspect-mono">{item.name || '-'}</span>
+            ),
         },
         {
             id: 'generation',
             name: 'Generation',
+            align: 'right',
             meta: {
-                sort: (a: CPConfigInfo, b: CPConfigInfo) => compareBigIntValues(a.generation, b.generation),
+                sort: (a: CPConfigInfo, b: CPConfigInfo) =>
+                    compareBigIntValues(a.generation, b.generation),
             },
-            template: (item: CPConfigInfo) => formatUint64(item.generation),
+            template: (item: CPConfigInfo) => (
+                <span className="inspect-mono inspect-muted">{formatUint64(item.generation)}</span>
+            ),
         },
     ], []);
 
     return (
-        <InspectSection
-            title="Controlplane Configurations"
-            icon={Gear}
-            count={configs.length}
-            variant="configs"
-            collapsible
-            defaultExpanded
-        >
+        <InspectCard title="Controlplane configs" count={configs.length}>
             {configs.length > 0 ? (
-                <Box className="configs-table-wrapper">
-                    <SortableDataTable
-                        data={configs}
-                        columns={cpConfigColumns}
-                        width="max"
-                    />
+                <Box className="inspect-table-host">
+                    <SortableDataTable data={configs} columns={columns} width="max" />
                 </Box>
             ) : (
-                <Text variant="body-1" color="secondary" className="inspect-text--block">
-                    No configurations
-                </Text>
+                <EmptyState message="No configurations" compact />
             )}
-        </InspectSection>
+        </InspectCard>
     );
 };
