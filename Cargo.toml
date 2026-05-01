@@ -23,7 +23,6 @@ members = [
     "modules/route/cli/neighbour",
     "modules/route/cli/route",
     "modules/route-mpls/cli",
-    "devices/cli",
     "devices/plain/cli",
     "devices/vlan/cli",
 ]
