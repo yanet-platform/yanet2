@@ -3363,6 +3363,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "yanet-cli-operator-pipeline"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "clap_complete",
+ "log",
+ "prost",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tonic",
+ "tonic-build",
+ "yanet-cli",
+ "yanet-commonpb",
+]
+
+[[package]]
 name = "yanet-cli-pdump"
 version = "0.1.0"
 dependencies = [

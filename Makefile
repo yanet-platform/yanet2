@@ -34,7 +34,8 @@ CLI_MODULES := \
 	route-mpls \
 	forward \
 	nat64 \
-	pdump
+	pdump \
+	operator-pipeline
 
 CLI_MODULE_BINARIES := $(addprefix yanet-cli-,$(CLI_MODULES))
 

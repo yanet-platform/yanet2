@@ -52,6 +52,7 @@ func NewGRPCServer(
 
 	server := grpc.NewServer()
 	operatorpb.RegisterPipelineOperatorServiceServer(server, service)
+	operatorpb.RegisterMetricsServiceServer(server, service)
 
 	return &GRPCServer{
 		cfg:    cfg,
@@ -60,19 +61,12 @@ func NewGRPCServer(
 	}
 }
 
-func (m *GRPCServer) Run(ctx context.Context) error {
-	endpoint := m.cfg.Endpoint.Unwrap()
-	listener, err := net.Listen("tcp", endpoint)
-	if err != nil {
-		return fmt.Errorf("failed to listen gRPC on %q: %w", endpoint, err)
-	}
-
-	m.log.Info("exposing gRPC server",
-		zap.String("addr", listener.Addr().String()),
-	)
-
+func (m *GRPCServer) Run(ctx context.Context, listener net.Listener) error {
 	serveErr := make(chan error, 1)
 	go func() {
+		m.log.Info("exposing gRPC server",
+			zap.Stringer("addr", listener.Addr()),
+		)
 		serveErr <- m.server.Serve(listener)
 	}()
 

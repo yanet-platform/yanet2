@@ -40,7 +40,6 @@ stages:
           - "fn:decap"
           - "fn:acl"
           - "fn:route"
-          - "fn:balancer"
       - name: bypass
         functions: []
     devices:

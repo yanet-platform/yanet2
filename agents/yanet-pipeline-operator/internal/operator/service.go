@@ -11,6 +11,7 @@ import (
 // Service implements the PipelineOperatorService gRPC API.
 type Service struct {
 	operatorpb.UnimplementedPipelineOperatorServiceServer
+	operatorpb.UnimplementedMetricsServiceServer
 
 	metrics MetricsCollector
 	log     *zap.Logger

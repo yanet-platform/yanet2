@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
+	_ "google.golang.org/grpc/encoding/gzip"
 
 	"github.com/yanet-platform/yanet2/agents/yanet-pipeline-operator/internal/operator"
 	"github.com/yanet-platform/yanet2/common/go/logging"
