@@ -17,6 +17,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	"github.com/yanet-platform/yanet2/controlplane/gateway"
 	"github.com/yanet-platform/yanet2/controlplane/internal/auth"
 	"github.com/yanet-platform/yanet2/controlplane/internal/xgrpc"
 	"github.com/yanet-platform/yanet2/controlplane/ynpb"
@@ -292,8 +293,8 @@ func (m *Gateway) runHTTPServer(ctx context.Context) error {
 
 // registerBuiltInServices registers built-in services in the registry for HTTP
 // gateway access.
-func registerBuiltInServices(registry *BackendRegistry, endpoint string, tlsCfg *TLSConfig, log *zap.SugaredLogger) error {
-	creds, err := transportCredentials(tlsCfg, endpoint)
+func registerBuiltInServices(registry *BackendRegistry, endpoint string, tlsCfg *gateway.TLSConfig, log *zap.SugaredLogger) error {
+	creds, err := gateway.TransportCredentials(tlsCfg, endpoint)
 	if err != nil {
 		return fmt.Errorf("failed to build loopback TLS credentials: %w", err)
 	}

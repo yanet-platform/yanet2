@@ -3,17 +3,13 @@ package operator
 import (
 	"context"
 	"fmt"
-	"io"
 	"net"
 
-	"github.com/cenkalti/backoff/v5"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 
+	"github.com/yanet-platform/yanet2/controlplane/gateway"
 	"github.com/yanet-platform/yanet2/agents/yanet-pipeline-operator/operatorpb"
-	"github.com/yanet-platform/yanet2/controlplane/ynpb"
 )
 
 var (
@@ -155,64 +151,22 @@ func (m *Operator) registerInGateway(ctx context.Context, cfg GatewayConfig, end
 	)
 	log.Info("registering services in gateway", zap.Any("services", serviceNames))
 
-	client, conn, err := newGatewayClient(cfg.Endpoint.Unwrap())
-	if err != nil {
-		return err
-	}
-	defer conn.Close()
-
-	wg, ctx := errgroup.WithContext(ctx)
-	for _, serviceName := range serviceNames {
-		wg.Go(func() error {
-			return registerServiceInGateway(ctx, client, cfg.Name, serviceName, endpoint, log)
-		})
-	}
-
-	return wg.Wait()
-}
-
-func newGatewayClient(endpoint string) (ynpb.GatewayClient, io.Closer, error) {
-	conn, err := grpc.NewClient(
-		endpoint,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	registrar, err := gateway.NewGatewayRegistrar(
+		cfg.Endpoint.Unwrap(),
+		nil,
+		gateway.WithLog(log),
 	)
 	if err != nil {
-		return nil, nil, fmt.Errorf(
-			"failed to create gRPC client for gateway %q: %w",
-			endpoint,
-			err,
-		)
+		return fmt.Errorf("failed to create gateway registrar for %q: %w", cfg.Name, err)
 	}
-
-	return ynpb.NewGatewayClient(conn), conn, nil
-}
-
-func registerServiceInGateway(
-	ctx context.Context,
-	client ynpb.GatewayClient,
-	gatewayName string,
-	serviceName string,
-	endpoint net.Addr,
-	log *zap.Logger,
-) error {
-	request := &ynpb.RegisterRequest{
-		Name:     serviceName,
-		Endpoint: endpoint.String(),
-	}
-
-	log = log.With(zap.String("service", serviceName))
-	_, err := backoff.Retry(ctx, func() (*ynpb.RegisterResponse, error) {
-		resp, err := client.Register(ctx, request)
-		if err != nil {
-			log.Warn("failed to register operator service in gateway", zap.Error(err))
-			return nil, err
+	defer func() {
+		if err := registrar.Close(); err != nil {
+			log.Warn("failed to close gateway registrar", zap.Error(err))
 		}
+	}()
 
-		log.Info("successfully registered operator service in gateway")
-		return resp, nil
-	}, backoff.WithBackOff(backoff.NewExponentialBackOff()))
-	if err != nil {
-		return fmt.Errorf("failed to register service %q in gateway %q: %w", serviceName, gatewayName, err)
+	if err := registrar.RegisterServices(ctx, serviceNames, endpoint.String()); err != nil {
+		return fmt.Errorf("failed to register services in gateway %q: %w", cfg.Name, err)
 	}
 
 	return nil

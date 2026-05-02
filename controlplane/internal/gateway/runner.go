@@ -8,14 +8,12 @@ import (
 	"path"
 	"strings"
 
-	"github.com/cenkalti/backoff/v5"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/encoding/gzip"
 
+	"github.com/yanet-platform/yanet2/controlplane/gateway"
 	"github.com/yanet-platform/yanet2/controlplane/internal/xgrpc"
-	"github.com/yanet-platform/yanet2/controlplane/ynpb"
 )
 
 type BuiltInModule interface {
@@ -33,7 +31,7 @@ type BackgroundBuiltInModule interface {
 type BuiltInModuleRunner struct {
 	module          BuiltInModule
 	gatewayEndpoint string
-	gatewayTLS      *TLSConfig
+	gatewayTLS      *gateway.TLSConfig
 	server          *grpc.Server
 	log             *zap.SugaredLogger
 }
@@ -41,7 +39,7 @@ type BuiltInModuleRunner struct {
 func NewBuiltInModuleRunner(
 	module BuiltInModule,
 	gatewayEndpoint string,
-	gatewayTLS *TLSConfig,
+	gatewayTLS *gateway.TLSConfig,
 	log *zap.SugaredLogger,
 ) *BuiltInModuleRunner {
 	log = log.Named(module.Name()).With(zap.String("module", module.Name()))
@@ -118,45 +116,18 @@ func (m *BuiltInModuleRunner) listen() (net.Listener, error) {
 }
 
 func (m *BuiltInModuleRunner) register(ctx context.Context, addr net.Addr) error {
-	creds, err := transportCredentials(m.gatewayTLS, m.gatewayEndpoint)
-	if err != nil {
-		return fmt.Errorf("failed to create loopback TLS for gateway: %w", err)
-	}
-
-	gatewayConn, err := grpc.NewClient(
+	registrar, err := gateway.NewGatewayRegistrar(
 		m.gatewayEndpoint,
-		grpc.WithTransportCredentials(creds),
-		grpc.WithDefaultCallOptions(grpc.UseCompressor(gzip.Name)),
+		m.gatewayTLS,
+		gateway.WithLog(m.log.Desugar()),
 	)
 	if err != nil {
-		return fmt.Errorf("failed to initialize gateway gRPC client: %w", err)
+		return fmt.Errorf("failed to initialize gateway registrar: %w", err)
 	}
-	defer gatewayConn.Close()
+	defer registrar.Close()
 
-	client := ynpb.NewGatewayClient(gatewayConn)
-
-	wg, ctx := errgroup.WithContext(ctx)
-	for _, serviceName := range m.module.ServicesNames() {
-		req := &ynpb.RegisterRequest{
-			Name:     serviceName,
-			Endpoint: addr.String(),
-		}
-
-		wg.Go(func() error {
-			_, err := backoff.Retry(ctx, func() (*ynpb.RegisterResponse, error) {
-				resp, err := client.Register(ctx, req)
-				if err != nil {
-					m.log.Warnf("failed to register %q in the Gateway API: %v", serviceName, err)
-					return nil, err
-				}
-
-				m.log.Infof("successfully registered %q in the Gateway API", serviceName)
-				return resp, nil
-			}, backoff.WithBackOff(backoff.NewExponentialBackOff()))
-
-			return err
-		})
+	if err = registrar.RegisterServices(ctx, m.module.ServicesNames(), addr.String()); err != nil {
+		return fmt.Errorf("failed to register services: %w", err)
 	}
-
-	return wg.Wait()
+	return nil
 }

@@ -4,11 +4,9 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
-	"net"
 	"os"
 
 	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
 )
@@ -48,7 +46,9 @@ func (m *TLSConfig) ServerCredentials() (credentials.TransportCredentials, error
 // Used by self-dials inside the controlplane-director process.
 //
 // fallbackHost is used as ServerName when m.ServerName is empty.
-func (m *TLSConfig) LoopbackClientCredentials(fallbackHost string) (credentials.TransportCredentials, error) {
+func (m *TLSConfig) LoopbackClientCredentials(
+	fallbackHost string,
+) (credentials.TransportCredentials, error) {
 	certFile := m.CertFile.Unwrap()
 	pem, err := os.ReadFile(certFile)
 	if err != nil {
@@ -70,20 +70,4 @@ func (m *TLSConfig) LoopbackClientCredentials(fallbackHost string) (credentials.
 		ServerName: name,
 		MinVersion: tls.VersionTLS12,
 	}), nil
-}
-
-func transportCredentials(tlsCfg *TLSConfig, endpoint string) (credentials.TransportCredentials, error) {
-	if tlsCfg == nil {
-		return insecure.NewCredentials(), nil
-	}
-	return tlsCfg.LoopbackClientCredentials(hostFromEndpoint(endpoint))
-}
-
-func hostFromEndpoint(endpoint string) string {
-	host, _, err := net.SplitHostPort(endpoint)
-	if err != nil {
-		return endpoint
-	}
-
-	return host
 }
