@@ -61,7 +61,7 @@ struct filter_rule;
  *
  * The structure used to store attribute specific temporary compilation data.
  */
-struct filter_compile_attr;
+struct filter_compile_attr {};
 /*
  * Compilation attribute virtual table forward declaration.
  *
