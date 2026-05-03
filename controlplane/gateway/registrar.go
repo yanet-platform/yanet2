@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/cenkalti/backoff/v5"
 	"go.uber.org/zap"
@@ -14,14 +15,17 @@ import (
 )
 
 type gatewayRegistrarOptions struct {
-	log *zap.Logger
+	backoff        func() backoff.BackOff
+	maxElapsedTime time.Duration
+	log            *zap.Logger
 }
 
 type GatewayRegistrarOption func(*gatewayRegistrarOptions)
 
 func newGatewayRegistrarOptions() *gatewayRegistrarOptions {
 	return &gatewayRegistrarOptions{
-		log: zap.NewNop(),
+		backoff: func() backoff.BackOff { return backoff.NewExponentialBackOff() },
+		log:     zap.NewNop(),
 	}
 }
 
@@ -32,14 +36,39 @@ func WithLog(log *zap.Logger) GatewayRegistrarOption {
 	}
 }
 
+// WithBackOff overrides the backoff strategy used when retrying per-service
+// Register RPCs.
+//
+// The factory is invoked once per service registration attempt inside
+// RegisterServices, because backoff.BackOff instances are stateful and must
+// not be shared across concurrent retries.
+func WithBackOff(factory func() backoff.BackOff) GatewayRegistrarOption {
+	return func(o *gatewayRegistrarOptions) {
+		o.backoff = factory
+	}
+}
+
+// WithMaxElapsedTime caps the total time RegisterServices will spend retrying
+// a single service.
+//
+// A zero value (the default) leaves the cap up to the underlying retry
+// implementation.
+func WithMaxElapsedTime(d time.Duration) GatewayRegistrarOption {
+	return func(o *gatewayRegistrarOptions) {
+		o.maxElapsedTime = d
+	}
+}
+
 // GatewayRegistrar registers service backends in a single gateway endpoint.
 //
 // A single GatewayRegistrar instance is tied to exactly one endpoint.
 type GatewayRegistrar struct {
-	endpoint string
-	client   ynpb.GatewayClient
-	conn     *grpc.ClientConn
-	log      *zap.Logger
+	endpoint       string
+	client         ynpb.GatewayClient
+	conn           *grpc.ClientConn
+	backoff        func() backoff.BackOff
+	maxElapsedTime time.Duration
+	log            *zap.Logger
 }
 
 // NewGatewayRegistrar creates a registrar for the given gateway endpoint.
@@ -68,10 +97,12 @@ func NewGatewayRegistrar(
 	}
 
 	return &GatewayRegistrar{
-		endpoint: endpoint,
-		client:   ynpb.NewGatewayClient(conn),
-		conn:     conn,
-		log:      opts.log,
+		endpoint:       endpoint,
+		client:         ynpb.NewGatewayClient(conn),
+		conn:           conn,
+		backoff:        opts.backoff,
+		maxElapsedTime: opts.maxElapsedTime,
+		log:            opts.log,
 	}, nil
 }
 
@@ -80,24 +111,40 @@ func (m *GatewayRegistrar) Close() error {
 	return m.conn.Close()
 }
 
+// Endpoint returns the gateway endpoint this registrar is bound to.
+func (m *GatewayRegistrar) Endpoint() string {
+	return m.endpoint
+}
+
 // RegisterServices registers services with the same backend endpoint.
-func (m *GatewayRegistrar) RegisterServices(ctx context.Context, serviceNames []string, backendEndpoint string) error {
+func (m *GatewayRegistrar) RegisterServices(
+	ctx context.Context,
+	services []string,
+	backendEndpoint string,
+) error {
 	wg, ctx := errgroup.WithContext(ctx)
 
-	for _, serviceName := range serviceNames {
+	for _, name := range services {
 		request := &ynpb.RegisterRequest{
 			Backend: &ynpb.BackendDesc{
-				Name:     serviceName,
+				Name:     name,
 				Endpoint: backendEndpoint,
 			},
 		}
 
 		wg.Go(func() error {
+			retryOpts := []backoff.RetryOption{
+				backoff.WithBackOff(m.backoff()),
+			}
+			if m.maxElapsedTime > 0 {
+				retryOpts = append(retryOpts, backoff.WithMaxElapsedTime(m.maxElapsedTime))
+			}
+
 			_, err := backoff.Retry(ctx, func() (*ynpb.RegisterResponse, error) {
 				resp, err := m.client.Register(ctx, request)
 				if err != nil {
 					m.log.Warn("failed to register in gateway",
-						zap.String("service", serviceName),
+						zap.String("service", name),
 						zap.String("gateway", m.endpoint),
 						zap.Error(err),
 					)
@@ -105,11 +152,11 @@ func (m *GatewayRegistrar) RegisterServices(ctx context.Context, serviceNames []
 				}
 
 				m.log.Info("successfully registered in gateway",
-					zap.String("service", serviceName),
+					zap.String("service", name),
 					zap.String("gateway", m.endpoint),
 				)
 				return resp, nil
-			}, backoff.WithBackOff(backoff.NewExponentialBackOff()))
+			}, retryOpts...)
 
 			return err
 		})

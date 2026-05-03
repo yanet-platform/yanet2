@@ -16,6 +16,7 @@ const (
 	DefaultReconcileInterval       = 30 * time.Second
 	DefaultReconcileInitialBackoff = 500 * time.Millisecond
 	DefaultReconcileMaxBackoff     = 30 * time.Second
+	DefaultRegisterInterval        = 30 * time.Second
 )
 
 // Config is the top-level YAML configuration for yanet-pipeline-operator.
@@ -23,6 +24,7 @@ type Config struct {
 	Logging   logging.Config    `yaml:"logging"`
 	Server    *GRPCServerConfig `yaml:"server"`
 	Gateways  []GatewayConfig   `yaml:"gateways"`
+	Register  RegisterConfig    `yaml:"register"`
 	Reconcile ReconcileConfig   `yaml:"reconcile"`
 	Stages    []StageConfig     `yaml:"stages"`
 }
@@ -33,6 +35,12 @@ type GatewayConfig struct {
 	Name string `yaml:"name"`
 	// Endpoint is the gRPC address of the Gateway.
 	Endpoint xcfg.NonEmptyString `yaml:"endpoint"`
+}
+
+// RegisterConfig holds the gateway registration heartbeat parameter.
+type RegisterConfig struct {
+	// Interval sets heartbeat period between registration refreshes.
+	Interval xcfg.NonZero[time.Duration] `yaml:"interval"`
 }
 
 // ReconcileConfig holds timing parameters for the reconcile loop.
@@ -80,6 +88,9 @@ func DefaultConfig() *Config {
 			Interval:       xcfg.MustNonZero(DefaultReconcileInterval),
 			InitialBackoff: xcfg.MustNonZero(DefaultReconcileInitialBackoff),
 			MaxBackoff:     xcfg.MustNonZero(DefaultReconcileMaxBackoff),
+		},
+		Register: RegisterConfig{
+			Interval: xcfg.MustNonZero(DefaultRegisterInterval),
 		},
 	}
 }

@@ -8,6 +8,9 @@ gateways:
   - name: numa0
     endpoint: "[::1]:8080"
 
+register:
+  interval: 30s
+
 reconcile:
   interval: 30s
   initial_backoff: 500ms
