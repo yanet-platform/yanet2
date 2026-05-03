@@ -22,10 +22,8 @@
 
 ////////////////////////////////////////////////////////////////////////////////
 
-FILTER_COMPILER_DECLARE(
-	combo_net4_port_src_compile, net4_fast_src, port_fast_src
-);
-FILTER_QUERY_DECLARE(combo_net4_port_src, net4_fast_src, port_fast_src);
+FILTER_COMPILER_DECLARE(combo_net4_port_src_compile, net4_src, port_src);
+FILTER_QUERY_DECLARE(combo_net4_port_src, net4_src, port_src);
 
 ////////////////////////////////////////////////////////////////////////////////
 

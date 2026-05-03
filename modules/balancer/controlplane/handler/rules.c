@@ -12,12 +12,8 @@
 #include <string.h>
 
 // Declare filter compiler signatures for VS lookup tables
-FILTER_COMPILER_DECLARE(
-	vs_lookup_ipv4, net4_fast_dst, port_fast_dst, proto_range_fast
-);
-FILTER_COMPILER_DECLARE(
-	vs_lookup_ipv6, net6_fast_dst, port_fast_dst, proto_range_fast
-);
+FILTER_COMPILER_DECLARE(vs_lookup_ipv4, net4_dst, port_dst, proto_range);
+FILTER_COMPILER_DECLARE(vs_lookup_ipv6, net6_dst, port_dst, proto_range);
 
 static int
 init_transport_rule(

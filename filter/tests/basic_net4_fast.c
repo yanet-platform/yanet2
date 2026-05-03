@@ -24,16 +24,14 @@
 
 ////////////////////////////////////////////////////////////////////////////////
 
-FILTER_COMPILER_DECLARE(
-	sign_fast_src_dst_compile, net4_fast_src, net4_fast_dst
-);
-FILTER_QUERY_DECLARE(sign_fast_src_dst, net4_fast_src, net4_fast_dst);
+FILTER_COMPILER_DECLARE(sign_src_dst_compile, net4_src, net4_dst);
+FILTER_QUERY_DECLARE(sign_src_dst, net4_src, net4_dst);
 
-FILTER_COMPILER_DECLARE(sign_fast_src_compile, net4_fast_src);
-FILTER_QUERY_DECLARE(sign_fast_src, net4_fast_src);
+FILTER_COMPILER_DECLARE(sign_src_compile, net4_src);
+FILTER_QUERY_DECLARE(sign_src, net4_src);
 
-FILTER_COMPILER_DECLARE(sign_fast_dst_compile, net4_fast_dst);
-FILTER_QUERY_DECLARE(sign_fast_dst, net4_fast_dst);
+FILTER_COMPILER_DECLARE(sign_dst_compile, net4_dst);
+FILTER_QUERY_DECLARE(sign_dst, net4_dst);
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -67,22 +65,14 @@ query_and_expect_actions(
 
 	switch (type) {
 	case src:
-		filter_query(
-			filter, sign_fast_src, packets, ranges, packets_count
-		);
+		filter_query(filter, sign_src, packets, ranges, packets_count);
 		break;
 	case dst:
-		filter_query(
-			filter, sign_fast_dst, packets, ranges, packets_count
-		);
+		filter_query(filter, sign_dst, packets, ranges, packets_count);
 		break;
 	case src_dst:
 		filter_query(
-			filter,
-			sign_fast_src_dst,
-			packets,
-			ranges,
-			packets_count
+			filter, sign_src_dst, packets, ranges, packets_count
 		);
 		break;
 	}
@@ -211,19 +201,11 @@ test_basic(void *arena, enum filter_sign sign) {
 	struct filter filter;
 	if (sign == src) {
 		res = filter_init(
-			&filter,
-			sign_fast_src_compile,
-			rule_ptrs,
-			nets_count,
-			&mctx
+			&filter, sign_src_compile, rule_ptrs, nets_count, &mctx
 		);
 	} else {
 		res = filter_init(
-			&filter,
-			sign_fast_dst_compile,
-			rule_ptrs,
-			nets_count,
-			&mctx
+			&filter, sign_dst_compile, rule_ptrs, nets_count, &mctx
 		);
 	}
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
@@ -400,19 +382,11 @@ test_multiple_nets_per_rule(void *arena, enum filter_sign sign) {
 	struct filter filter;
 	if (sign == src) {
 		res = filter_init(
-			&filter,
-			sign_fast_src_compile,
-			rule_ptrs,
-			num_rules,
-			&mctx
+			&filter, sign_src_compile, rule_ptrs, num_rules, &mctx
 		);
 	} else {
 		res = filter_init(
-			&filter,
-			sign_fast_dst_compile,
-			rule_ptrs,
-			num_rules,
-			&mctx
+			&filter, sign_dst_compile, rule_ptrs, num_rules, &mctx
 		);
 	}
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
@@ -520,7 +494,7 @@ stress(void *arena,
 	case src:
 		res = filter_init(
 			&filter,
-			sign_fast_src_compile,
+			sign_src_compile,
 			rule_ptrs,
 			num_rules,
 			&memory_context
@@ -529,7 +503,7 @@ stress(void *arena,
 	case dst:
 		res = filter_init(
 			&filter,
-			sign_fast_dst_compile,
+			sign_dst_compile,
 			rule_ptrs,
 			num_rules,
 			&memory_context
@@ -538,7 +512,7 @@ stress(void *arena,
 	case src_dst:
 		res = filter_init(
 			&filter,
-			sign_fast_src_dst_compile,
+			sign_src_dst_compile,
 			rule_ptrs,
 			num_rules,
 			&memory_context
@@ -708,19 +682,11 @@ test_no_match(void *arena, enum filter_sign sign) {
 	struct filter filter;
 	if (sign == src) {
 		res = filter_init(
-			&filter,
-			sign_fast_src_compile,
-			rule_ptrs,
-			nets_count,
-			&mctx
+			&filter, sign_src_compile, rule_ptrs, nets_count, &mctx
 		);
 	} else {
 		res = filter_init(
-			&filter,
-			sign_fast_dst_compile,
-			rule_ptrs,
-			nets_count,
-			&mctx
+			&filter, sign_dst_compile, rule_ptrs, nets_count, &mctx
 		);
 	}
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
@@ -829,19 +795,11 @@ test_overlapping_networks(void *arena, enum filter_sign sign) {
 	struct filter filter;
 	if (sign == src) {
 		res = filter_init(
-			&filter,
-			sign_fast_src_compile,
-			rule_ptrs,
-			nets_count,
-			&mctx
+			&filter, sign_src_compile, rule_ptrs, nets_count, &mctx
 		);
 	} else {
 		res = filter_init(
-			&filter,
-			sign_fast_dst_compile,
-			rule_ptrs,
-			nets_count,
-			&mctx
+			&filter, sign_dst_compile, rule_ptrs, nets_count, &mctx
 		);
 	}
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
@@ -943,19 +901,11 @@ test_boundary_conditions(void *arena, enum filter_sign sign) {
 	struct filter filter;
 	if (sign == src) {
 		res = filter_init(
-			&filter,
-			sign_fast_src_compile,
-			rule_ptrs,
-			nets_count,
-			&mctx
+			&filter, sign_src_compile, rule_ptrs, nets_count, &mctx
 		);
 	} else {
 		res = filter_init(
-			&filter,
-			sign_fast_dst_compile,
-			rule_ptrs,
-			nets_count,
-			&mctx
+			&filter, sign_dst_compile, rule_ptrs, nets_count, &mctx
 		);
 	}
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
@@ -1064,19 +1014,11 @@ test_single_host_networks(void *arena, enum filter_sign sign) {
 	struct filter filter;
 	if (sign == src) {
 		res = filter_init(
-			&filter,
-			sign_fast_src_compile,
-			rule_ptrs,
-			nets_count,
-			&mctx
+			&filter, sign_src_compile, rule_ptrs, nets_count, &mctx
 		);
 	} else {
 		res = filter_init(
-			&filter,
-			sign_fast_dst_compile,
-			rule_ptrs,
-			nets_count,
-			&mctx
+			&filter, sign_dst_compile, rule_ptrs, nets_count, &mctx
 		);
 	}
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
@@ -1186,19 +1128,11 @@ test_adjacent_networks(void *arena, enum filter_sign sign) {
 	struct filter filter;
 	if (sign == src) {
 		res = filter_init(
-			&filter,
-			sign_fast_src_compile,
-			rule_ptrs,
-			nets_count,
-			&mctx
+			&filter, sign_src_compile, rule_ptrs, nets_count, &mctx
 		);
 	} else {
 		res = filter_init(
-			&filter,
-			sign_fast_dst_compile,
-			rule_ptrs,
-			nets_count,
-			&mctx
+			&filter, sign_dst_compile, rule_ptrs, nets_count, &mctx
 		);
 	}
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");

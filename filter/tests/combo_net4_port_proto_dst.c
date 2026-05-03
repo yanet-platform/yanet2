@@ -24,13 +24,10 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 FILTER_COMPILER_DECLARE(
-	combo_net4_port_proto_dst_compile,
-	net4_fast_dst,
-	port_fast_dst,
-	proto_range
+	combo_net4_port_proto_dst_compile, net4_dst, port_dst, proto_range
 );
 FILTER_QUERY_DECLARE(
-	combo_net4_port_proto_dst, net4_fast_dst, port_fast_dst, proto_range
+	combo_net4_port_proto_dst, net4_dst, port_dst, proto_range
 );
 
 ////////////////////////////////////////////////////////////////////////////////

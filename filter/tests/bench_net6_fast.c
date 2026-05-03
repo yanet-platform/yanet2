@@ -1,6 +1,6 @@
 /**
- * @file bench_net6_fast.c
- * @brief Performance benchmark for net6_fast filter
+ * @file bench_net6.c
+ * @brief Performance benchmark for net6 filter
  *
  * This benchmark uses hugepages for optimal memory performance.
  *
@@ -51,18 +51,16 @@
 ////////////////////////////////////////////////////////////////////////////////
 // Filter signature declarations
 
-FILTER_COMPILER_DECLARE(bench_dst_compile, net6_fast_dst);
-FILTER_QUERY_DECLARE(bench_dst, net6_fast_dst);
+FILTER_COMPILER_DECLARE(bench_dst_compile, net6_dst);
+FILTER_QUERY_DECLARE(bench_dst, net6_dst);
 
-FILTER_COMPILER_DECLARE(bench_dst_port_compile, net6_fast_dst, port_dst);
-FILTER_QUERY_DECLARE(bench_dst_port, net6_fast_dst, port_dst);
+FILTER_COMPILER_DECLARE(bench_dst_port_compile, net6_dst, port_dst);
+FILTER_QUERY_DECLARE(bench_dst_port, net6_dst, port_dst);
 
 FILTER_COMPILER_DECLARE(
-	bench_dst_port_proto_compile, net6_fast_dst, port_dst, proto_range
+	bench_dst_port_proto_compile, net6_dst, port_dst, proto_range
 );
-FILTER_QUERY_DECLARE(
-	bench_dst_port_proto, net6_fast_dst, port_dst, proto_range
-);
+FILTER_QUERY_DECLARE(bench_dst_port_proto, net6_dst, port_dst, proto_range);
 
 ////////////////////////////////////////////////////////////////////////////////
 // Configuration and types
@@ -454,7 +452,7 @@ print_results(const struct bench_config *config, struct bench_stats *stats) {
 	double mpps = pps / 1e6;
 
 	printf("\n");
-	printf("=== Filter Benchmark: net6_fast ===\n");
+	printf("=== Filter Benchmark: net6 ===\n");
 	printf("Signature: %s\n", signature_type_to_string(config->sig_type));
 	printf("Rules: %zu\n", config->num_rules);
 	printf("Batch Size: %zu\n", config->batch_size);
