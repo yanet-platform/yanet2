@@ -208,7 +208,6 @@ remap_table_new_key(struct remap_table *table, uint32_t *key) {
 
 static inline int
 remap_table_touch(struct remap_table *table, uint32_t key, uint32_t *value) {
-	int res = 0;
 	struct remap_item *item = remap_table_item(table, key);
 
 	if (item->gen != table->gen) {
@@ -218,7 +217,6 @@ remap_table_touch(struct remap_table *table, uint32_t key, uint32_t *value) {
 			return -1;
 		item->gen = table->gen;
 		item->value = new_key;
-		res = 1;
 	}
 
 	struct remap_item *new_item = remap_table_item(table, item->value);
@@ -235,7 +233,7 @@ remap_table_touch(struct remap_table *table, uint32_t key, uint32_t *value) {
 		table->free_list = key;
 	}
 
-	return res;
+	return 0;
 }
 
 /*

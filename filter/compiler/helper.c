@@ -60,12 +60,12 @@ merge_and_set_registry_values(
 		return -1;
 	}
 
-	for (uint64_t v_idx = 0; v_idx < value_registry_capacity(registry2);
+	for (uint64_t v_idx = 0; v_idx < value_registry_capacity(registry1);
 	     ++v_idx) {
 		for (uint64_t h_idx = 0;
-		     h_idx < value_registry_capacity(registry1);
+		     h_idx < value_registry_capacity(registry2);
 		     ++h_idx) {
-			*value_table_get_ptr(table, h_idx, v_idx) =
+			*value_table_get_ptr(table, v_idx, h_idx) =
 				FILTER_RULE_INVALID;
 		}
 	}

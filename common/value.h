@@ -14,8 +14,8 @@
 
 struct value_table {
 	struct memory_context *memory_context;
-	uint32_t h_dim;
 	uint32_t v_dim;
+	uint32_t h_dim;
 	uint32_t **values;
 };
 
@@ -48,13 +48,13 @@ static inline int
 value_table_init(
 	struct value_table *value_table,
 	struct memory_context *memory_context,
-	uint32_t h_dim,
-	uint32_t v_dim
+	uint32_t v_dim,
+	uint32_t h_dim
 ) {
 	SET_OFFSET_OF(&value_table->memory_context, memory_context);
 
-	value_table->h_dim = h_dim;
 	value_table->v_dim = v_dim;
+	value_table->h_dim = h_dim;
 
 	uint64_t value_count = h_dim;
 	value_count *= v_dim;
@@ -89,7 +89,7 @@ value_table_init(
 
 static inline uint32_t *
 value_table_get_ptr(
-	struct value_table *value_table, uint32_t h_idx, uint32_t v_idx
+	struct value_table *value_table, uint32_t v_idx, uint32_t h_idx
 ) {
 	uint32_t **values = ADDR_OF(&value_table->values);
 	uint64_t idx = (v_idx * value_table->h_dim) + h_idx;
@@ -100,9 +100,9 @@ value_table_get_ptr(
 
 static inline uint32_t
 value_table_get(
-	struct value_table *value_table, uint32_t h_idx, uint32_t v_idx
+	struct value_table *value_table, uint32_t v_idx, uint32_t h_idx
 ) {
-	return *value_table_get_ptr(value_table, h_idx, v_idx);
+	return *value_table_get_ptr(value_table, v_idx, h_idx);
 }
 
 static inline void

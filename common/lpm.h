@@ -273,6 +273,9 @@ lpm_lookup(const struct lpm *lpm, uint8_t key_size, const uint8_t *key) {
 		page = ADDR_OF(&value->page);
 	}
 
+	if (value->value == LPM_VALUE_INVALID)
+		return LPM_VALUE_INVALID;
+
 	return LPM_VALUE_GET(value->value);
 }
 

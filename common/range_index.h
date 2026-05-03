@@ -95,17 +95,6 @@ range_index_insert(
 }
 
 static inline void
-range_index_remap(
-	struct range_index *range_index, struct value_table *value_table
-) {
-	uint32_t *values = ADDR_OF(&range_index->values);
-
-	for (uint32_t idx = 0; idx < range_index->count; ++idx) {
-		values[idx] = value_table_get(value_table, 0, values[idx]);
-	}
-}
-
-static inline void
 range_index_free(struct range_index *range_index) {
 	uint64_t capacity = 1 << uint64_log_up(range_index->count);
 	memory_bfree(
