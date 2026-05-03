@@ -10,10 +10,11 @@ static inline void
 FILTER_ATTR_QUERY_FUNC(vlan)(
 	void *data, struct packet **packets, uint32_t *result, uint32_t count
 ) {
-	struct value_table *t = (struct value_table *)data;
+	struct filter_query_attr_proto_range *c =
+		(struct filter_query_attr_proto_range *)data;
 
 	for (uint32_t idx = 0; idx < count; ++idx) {
 		uint16_t vlan = packets[idx]->vlan;
-		result[idx] = value_table_get(t, 0, vlan);
+		result[idx] = value_table_get(&c->value_table, 0, vlan);
 	}
 }
