@@ -15,7 +15,7 @@
 
 #include <filter/query.h>
 
-FILTER_QUERY_DECLARE(filter_sign, net4_dst, port_dst, proto);
+FILTER_QUERY_DECLARE(filter_sign, net4_dst, port_dst, proto_range);
 
 static int
 filter_packets(struct common *common) {

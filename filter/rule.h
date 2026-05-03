@@ -59,12 +59,6 @@ struct filter_port_range {
 
 #define PROTO_UNSPEC ((uint8_t)-1)
 
-struct filter_proto {
-	uint8_t proto;	       // 1 ICMP, 6 TCP, 17 UDP
-	uint16_t enable_bits;  // only for TCP
-	uint16_t disable_bits; // only for TCP
-};
-
 struct filter_proto_range {
 	uint16_t from;
 	uint16_t to;
@@ -73,9 +67,6 @@ struct filter_proto_range {
 struct filter_transport {
 	uint16_t proto_count;
 	struct filter_proto_range *protos;
-
-	// deprecated
-	struct filter_proto proto;
 
 	uint16_t src_count;
 	struct filter_port_range *srcs;

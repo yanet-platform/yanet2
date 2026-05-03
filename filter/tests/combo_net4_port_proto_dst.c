@@ -24,10 +24,13 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 FILTER_COMPILER_DECLARE(
-	combo_net4_port_proto_dst_compile, net4_fast_dst, port_fast_dst, proto
+	combo_net4_port_proto_dst_compile,
+	net4_fast_dst,
+	port_fast_dst,
+	proto_range
 );
 FILTER_QUERY_DECLARE(
-	combo_net4_port_proto_dst, net4_fast_dst, port_fast_dst, proto
+	combo_net4_port_proto_dst, net4_fast_dst, port_fast_dst, proto_range
 );
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -330,7 +333,12 @@ test_tcp_flags(void *arena) {
 	builder_init(&builder1);
 	builder_add_net4_dst(&builder1, ip(10, 0, 0, 0), ip(255, 255, 255, 0));
 	builder_add_port_dst_range(&builder1, 80, 80);
-	builder_set_proto(&builder1, IPPROTO_TCP, 0x02, 0); // SYN flag
+	builder_add_proto_range(
+		&builder1, IPPROTO_TCP * 256 + 0x02, IPPROTO_TCP * 256 + 0x02
+	); // SYN flag
+	builder_add_proto_range(
+		&builder1, IPPROTO_TCP * 256 + 0x12, IPPROTO_TCP * 256 + 0x12
+	); // SYN + ACK flag
 	struct filter_rule rule1 = build_rule(&builder1);
 
 	// Rule 2: dst IP 10.0.0.0/24, dst port 80, TCP with ACK flag
@@ -338,7 +346,9 @@ test_tcp_flags(void *arena) {
 	builder_init(&builder2);
 	builder_add_net4_dst(&builder2, ip(10, 0, 0, 0), ip(255, 255, 255, 0));
 	builder_add_port_dst_range(&builder2, 80, 80);
-	builder_set_proto(&builder2, IPPROTO_TCP, 0x10, 0); // ACK flag
+	builder_add_proto_range(
+		&builder2, IPPROTO_TCP * 256 + 0x10, IPPROTO_TCP * 256 + 0x10
+	); // ACK flag
 	struct filter_rule rule2 = build_rule(&builder2);
 
 	struct filter_rule rules[] = {rule1, rule2};

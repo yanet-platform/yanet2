@@ -16,7 +16,7 @@
 
 #include <filter/compiler.h>
 
-FILTER_COMPILER_DECLARE(filter_sign, net4_dst, port_dst, proto);
+FILTER_COMPILER_DECLARE(filter_sign, net4_dst, port_dst, proto_range);
 
 static int
 build_filter(struct common *common, struct memory_context *mctx) {

@@ -92,16 +92,6 @@ test_filter_memory = executable('memory',
 )
 test('memory', test_filter_memory, suite: ['filter'])
 
-# test proto
-test_filter_proto = executable('basic_proto',
-  ['basic_proto.c'],
-  c_args: yanet_test_c_args,
-  link_args: yanet_link_args,
-  dependencies: test_deps,
-  link_language: 'c'
-)
-test('basic_proto', test_filter_proto, suite: ['filter'])
-
 # test vlan
 test_filter_vlan = executable('basic_vlan',
   ['basic_vlan.c'],
