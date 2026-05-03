@@ -13,8 +13,8 @@ static inline void
 FILTER_ATTR_QUERY_FUNC(proto_range)(
 	void *data, struct packet **packets, uint32_t *result, uint32_t count
 ) {
-	struct proto_range_classifier *c =
-		(struct proto_range_classifier *)data;
+	struct filter_query_attr_proto_range *c =
+		(struct filter_query_attr_proto_range *)data;
 
 	for (uint32_t idx = 0; idx < count; ++idx) {
 		struct packet *packet = packets[idx];
@@ -48,6 +48,6 @@ FILTER_ATTR_QUERY_FUNC(proto_range)(
 			proto += icmp_header->icmp_type;
 		}
 
-		result[idx] = value_table_get(&c->table, 0, proto);
+		result[idx] = value_table_get(&c->value_table, 0, proto);
 	}
 }
