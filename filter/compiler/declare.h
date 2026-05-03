@@ -1,5 +1,8 @@
 #pragma once
 
+#include "common/registry.h"
+#include "common/remap.h"
+
 #include "common/for_each.h"
 
 #define FILTER_ATTR_COMPILER(name) name##_attr_compiler
@@ -156,3 +159,154 @@ struct filter_compile_attr_handlers {
 	filter_compile_attr_free_compile_func free_compile;
 	filter_compile_attr_free_query_func free_query;
 };
+
+static inline int
+filter_compile_attr_touch(uint32_t *value, void *data) {
+	struct remap_table *remap_table = (struct remap_table *)data;
+	return remap_table_touch(remap_table, *value, value);
+}
+
+static inline int
+filter_compile_attr_collect(uint32_t *value, void *data) {
+	struct value_registry *value_registry = (struct value_registry *)data;
+	return value_registry_collect(value_registry, *value);
+}
+
+static inline int
+filter_compile_attr_compact(uint32_t *value, void *data) {
+	struct remap_table *remap_table = (struct remap_table *)data;
+	*value = remap_table_compacted(remap_table, *value);
+	return 0;
+}
+
+/*
+ * The routine provides the backward compatibility with the current
+ * compilation procedure and defined attributes.
+ */
+static inline int
+filter_compile_attr_build(
+	const struct filter_compile_attr_handlers *attr_handlers,
+	struct value_registry *registry,
+	void **data,
+	const struct filter_rule **rules,
+	size_t rule_count,
+	struct memory_context *memory_context
+) {
+	/*
+	 * Splits the definition area int regions and initialize all of them
+	 * with zero values.
+	 */
+	struct filter_compile_attr *attr = attr_handlers->create(
+		memory_context, attr_handlers, rules, rule_count
+	);
+	if (attr == NULL)
+		return -1;
+
+	/*
+	 * `remap_table is used to enumerate regions - each rule touch its
+	 * regions so each region gains a value specific to matching set of
+	 * rules.
+	 */
+	struct remap_table remap_table;
+	if (remap_table_init(
+		    &remap_table, memory_context, attr_handlers->size(attr)
+	    )) {
+		goto error;
+	}
+
+	for (uint32_t idx = 0; idx < rule_count; ++idx) {
+		if (rules[idx] == NULL)
+			continue;
+		/*
+		 * If a rule covers the whole area there is no meaning to
+		 * touch values - all of them just gain update without any
+		 * distinction result.
+		 */
+		if (attr_handlers->rule_is_any(attr, attr_handlers, rules[idx]))
+			continue;
+
+		remap_table_new_gen(&remap_table);
+
+		// Touch the rule matching values
+		if (attr_handlers->rule_iter(
+			    attr,
+			    attr_handlers,
+			    rules[idx],
+			    filter_compile_attr_touch,
+			    &remap_table
+		    )) {
+			remap_table_free(&remap_table);
+			goto error;
+		}
+	}
+
+	/*
+	 * Remap table compaction removes gaps of unused values and makes the
+	 * resulting set of values smaller
+	 */
+
+	remap_table_compact(&remap_table);
+
+	/*
+	 * Now reassign compacted values to each region defined for the
+	 * attribute.
+	 */
+
+	if (attr_handlers->iter(
+		    attr,
+		    attr_handlers,
+		    filter_compile_attr_compact,
+		    &remap_table
+	    )) {
+		remap_table_free(&remap_table);
+		goto error;
+	}
+
+	remap_table_free(&remap_table);
+
+	for (uint32_t idx = 0; idx < rule_count; ++idx) {
+		if (value_registry_start(registry))
+			goto error;
+		if (rules[idx] == NULL)
+			continue;
+		/*
+		 * Collect rule matching values - there are two options:
+		 *  - collect all known values in case if rule is matching any
+		 *  - collect rule specific attributes
+		 * In the first case we could collect all the values only
+		 * once which is the subject of further investigation.
+		 */
+		if (attr_handlers->rule_is_any(
+			    attr, attr_handlers, rules[idx]
+		    )) {
+			if (attr_handlers->iter(
+				    attr,
+				    attr_handlers,
+				    filter_compile_attr_collect,
+				    registry
+			    ))
+				goto error;
+
+		} else {
+			if (attr_handlers->rule_iter(
+				    attr,
+				    attr_handlers,
+				    rules[idx],
+				    filter_compile_attr_collect,
+				    registry
+			    ))
+				goto error;
+		}
+	}
+
+	void *dp_data = attr_handlers->commit(memory_context, attr);
+	SET_OFFSET_OF(data, dp_data);
+	if (dp_data == NULL)
+		goto error;
+
+	return 0;
+
+error:
+	attr_handlers->free_compile(memory_context, attr);
+	return -1;
+}
