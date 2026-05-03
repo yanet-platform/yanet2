@@ -29,6 +29,14 @@ action_get_net4_dst(
 	*count = action->net4.dst_count;
 }
 
+static inline void
+net4_normalize(struct net4 *src, struct net4 *dst) {
+	memcpy(dst->addr, src->addr, 4);
+	memcpy(dst->mask, src->mask, 4);
+	for (uint8_t idx = 0; idx < 4; ++idx)
+		dst->addr[idx] &= src->mask[idx];
+}
+
 static inline int
 net4_collect_values(
 	struct net4 *start,
@@ -42,12 +50,14 @@ net4_collect_values(
 	for (struct net4 *net4 = start; net4 < start + count; ++net4) {
 		if (*(uint32_t *)net4->mask == 0x00000000)
 			continue;
-		uint32_t to =
-			*(uint32_t *)net4->addr | ~*(uint32_t *)net4->mask;
+		struct net4 normalized;
+		net4_normalize(net4, &normalized);
+		uint32_t to = *(uint32_t *)normalized.addr |
+			      ~*(uint32_t *)normalized.mask;
 		filter_key_inc(4, (uint8_t *)&to);
 
 		uint32_t start =
-			radix_lookup(&range_index->radix, 4, net4->addr);
+			radix_lookup(&range_index->radix, 4, normalized.addr);
 		uint32_t stop = range_index->count;
 		if (to != 0)
 			stop = radix_lookup(
@@ -74,8 +84,10 @@ net4_collect_registry(
 	struct value_registry *registry
 ) {
 	for (struct net4 *net4 = start; net4 < start + count; ++net4) {
-		uint32_t addr = *(uint32_t *)net4->addr;
-		uint32_t mask = *(uint32_t *)net4->mask;
+		struct net4 normalized;
+		net4_normalize(net4, &normalized);
+		uint32_t addr = *(uint32_t *)normalized.addr;
+		uint32_t mask = *(uint32_t *)normalized.mask;
 		uint32_t to = addr | ~mask;
 		lpm4_collect_values(
 			lpm,
@@ -118,10 +130,13 @@ collect_net4_values(
 
 		for (struct net4 *net4 = nets; net4 < nets + net_count;
 		     ++net4) {
+			struct net4 normalized;
+			net4_normalize(net4, &normalized);
 			if (range4_collector_add(
 				    &collector,
-				    net4->addr,
-				    __builtin_popcountll(*(uint32_t *)net4->mask
+				    normalized.addr,
+				    __builtin_popcountll(
+					    *(uint32_t *)normalized.mask
 				    )
 			    ))
 				goto error_collector;
