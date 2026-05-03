@@ -85,10 +85,11 @@ func (m *GatewayRegistrar) RegisterServices(ctx context.Context, serviceNames []
 	wg, ctx := errgroup.WithContext(ctx)
 
 	for _, serviceName := range serviceNames {
-		serviceName := serviceName
 		request := &ynpb.RegisterRequest{
-			Name:     serviceName,
-			Endpoint: backendEndpoint,
+			Backend: &ynpb.BackendDesc{
+				Name:     serviceName,
+				Endpoint: backendEndpoint,
+			},
 		}
 
 		wg.Go(func() error {

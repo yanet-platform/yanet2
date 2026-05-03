@@ -334,7 +334,7 @@ func registerBuiltInServices(registry *BackendRegistry, endpoint string, tlsCfg 
 	}
 
 	for _, serviceName := range builtInServices {
-		registry.RegisterBackend(serviceName, backend)
+		registry.RegisterBackend(serviceName, backend, endpoint)
 		log.Debugw("registered built-in service in registry", zap.String("service", serviceName))
 	}
 

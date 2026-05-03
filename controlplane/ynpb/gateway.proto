@@ -2,21 +2,42 @@ syntax = "proto3";
 
 package ynpb;
 
+import "google/protobuf/timestamp.proto";
+
 option go_package = "github.com/yanet-platform/yanet2/controlplane/ynpb;ynpb";
 
 // Gateway API service.
 service Gateway {
-  // Register registers a new module.
-  rpc Register(RegisterRequest) returns (RegisterResponse) {}
+  // ListServices returns all registered backends.
+  rpc ListServices(ListServicesRequest) returns (ListServicesResponse);
+  // Register registers a new backend.
+  rpc Register(RegisterRequest) returns (RegisterResponse);
 }
 
-// RegisterRequest is the request to register a new module.
-message RegisterRequest {
-  // Name is the name of the module.
+// ListServicesRequest defines request for listing registered backends.
+message ListServicesRequest {}
+
+// BackendDesc identifies a backend endpoint.
+message BackendDesc {
+  // Name is the name of the service in gRPC format.
   string name = 1;
-  // Endpoint is the endpoint of the module.
+  // Endpoint is the backend endpoint.
   string endpoint = 2;
 }
+
+// RegisteredBackend identifies a registered backend in the Gateway registry.
+message RegisteredBackend {
+  BackendDesc backend = 1;
+  // LastSeenAt is the timestamp when the service was last successfully
+  // registered or updated.
+  google.protobuf.Timestamp last_seen_at = 2;
+}
+
+// ListServicesResponse contains all known services in the registry.
+message ListServicesResponse { repeated RegisteredBackend services = 1; }
+
+// RegisterRequest is the request to register a new module.
+message RegisterRequest { BackendDesc backend = 1; }
 
 // RegisterResponse is the response to the RegisterRequest.
 message RegisterResponse {}
