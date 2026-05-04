@@ -124,3 +124,14 @@ data_pipe_test = executable(
   include_directories: yanet_rootdir,
 )
 test('data_pipe', data_pipe_test, suite: ['common'])
+
+flatmap_test = executable(
+  'flatmap_test',
+  ['flatmap_test.c'],
+  c_args: yanet_test_c_args,
+  link_args: yanet_link_args,
+  dependencies: [lib_common_dep, lib_logging_dep, lib_errors_dep],
+  include_directories: yanet_rootdir,
+)
+test('flatmap', flatmap_test, suite: ['common'])
+
