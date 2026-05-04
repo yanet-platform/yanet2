@@ -7,7 +7,6 @@
 #include "common/rng.h"
 #include "common/ttlmap/ttlmap.h"
 
-#include "errors.h"
 #include "filter/compiler.h"
 #include "filter/rule.h"
 
@@ -22,7 +21,6 @@
 #include "lib/controlplane/config/cp_module.h"
 #include "lib/dataplane/config/zone.h"
 
-#include <arpa/inet.h>
 #include <assert.h>
 #include <netinet/in.h>
 #include <stdalign.h>
@@ -35,6 +33,7 @@ static const char *agent_alloc_failed = "agent: allocation failed";
 static const char *heap_alloc_failed = "allocation failed";
 
 #define VS_PREFIX_LEN 64
+#define MAX_ADDR_LEN (2 * NET6_LEN + 1)
 
 const char *const balancer_vs_counter_prefix = "vs";
 const char *const balancer_vs_acl_counter_prefix = "vs_acl";
@@ -62,42 +61,69 @@ real_selector_size(size_t workers) {
 	       sizeof(struct rr_counter) * workers;
 }
 
-static void
-vs_prefix(const struct balancer_vs_config *config, char *buf, size_t buf_size) {
-	char addr_str[INET6_ADDRSTRLEN];
-	if (config->ip_family == ip_family_ip4) {
-		inet_ntop(
-			AF_INET,
-			config->dst.v4.bytes,
-			addr_str,
-			sizeof(addr_str)
-		);
+static int
+extract_nibble(const uint8_t *a, size_t i) {
+	if (i % 2 == 1) {
+		return a[i / 2] & 0xF;
 	} else {
-		inet_ntop(
-			AF_INET6,
-			config->dst.v6.bytes,
-			addr_str,
-			sizeof(addr_str)
-		);
+		return a[i / 2] >> 4;
 	}
-	snprintf(
-		buf,
-		buf_size,
-		"%s:%u/%s",
-		addr_str,
-		config->port,
-		config->transport == transport_proto_tcp ? "tcp" : "udp"
-	);
+}
+
+static char
+nibble_to_hex(int d) {
+	if (d < 10) {
+		return '0' + d;
+	} else {
+		return 'a' + d - 10;
+	}
+}
+
+/* Translate IP address into string of hex digits.
+ * It is incorrect to put raw bytes into buf, because some
+ * byte in the middle of IP can be null. Also, it can introduce
+ * non-ascii string, which will lead to issues for readers.
+ */
+static void
+encode_ip(const uint8_t *ip, enum ip_family ip_family, char *buf) {
+	size_t len = NET4_LEN;
+	if (ip_family == ip_family_ip6) {
+		len = NET6_LEN;
+	}
+	for (size_t i = 0; i < 2 * len; ++i) {
+		int d = extract_nibble(ip, i);
+		buf[i] = nibble_to_hex(d);
+	}
+	buf[2 * len] = 0;
 }
 
 static void
-real_addr_str(
-	const struct balancer_real_config *config, char *buf, size_t buf_size
-) {
-	if (config->ip_family == ip_family_ip4) {
-		inet_ntop(AF_INET, config->dst.v4.bytes, buf, buf_size);
-	} else {
-		inet_ntop(AF_INET6, config->dst.v6.bytes, buf, buf_size);
+vs_str(const struct balancer_vs_config *config, char *buf) {
+	char ip[MAX_ADDR_LEN];
+	switch (config->ip_family) {
+	case ip_family_ip4:
+		encode_ip(config->dst.v4.bytes, config->ip_family, ip);
+		break;
+	case ip_family_ip6:
+		encode_ip(config->dst.v6.bytes, config->ip_family, ip);
+		break;
+	}
+	sprintf(buf,
+		"%s:%u/%s",
+		ip,
+		config->port,
+		config->transport == transport_proto_tcp ? "tcp" : "udp");
+}
+
+static void
+real_str(const struct balancer_real_config *config, char *buf) {
+	switch (config->ip_family) {
+	case ip_family_ip4:
+		encode_ip(config->dst.v4.bytes, config->ip_family, buf);
+		break;
+	case ip_family_ip6:
+		encode_ip(config->dst.v6.bytes, config->ip_family, buf);
+		break;
 	}
 }
 
@@ -463,8 +489,8 @@ register_real_counters(
 ) {
 	struct real *reals = ADDR_OF(&vs->reals);
 	for (size_t idx = 0; idx < vs->reals_count; ++idx) {
-		char dst_str[INET6_ADDRSTRLEN];
-		real_addr_str(&real_configs[idx], dst_str, sizeof(dst_str));
+		char real[MAX_ADDR_LEN];
+		real_str(&real_configs[idx], real);
 
 		char name[COUNTER_NAME_LEN];
 		snprintf(
@@ -473,7 +499,7 @@ register_real_counters(
 			"%s_%s_%s",
 			balancer_real_counter_prefix,
 			prefix,
-			dst_str
+			real
 		);
 		reals[idx].counter_id = counter_registry_register(
 			registry,
@@ -498,7 +524,7 @@ register_vs_counters(
 	yanet_error **error
 ) {
 	char prefix[VS_PREFIX_LEN];
-	vs_prefix(config, prefix, sizeof(prefix));
+	vs_str(config, prefix);
 
 	char name[COUNTER_NAME_LEN];
 	snprintf(
