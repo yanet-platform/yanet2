@@ -199,24 +199,32 @@ pub fn try_complete(name: &str, prefix: &str, behavior: &impl Dispatch) {
     let args = env::args().collect::<Vec<_>>();
 
     // If args are ["<self>", "--", "<self>", "<module>", ..], forward the
-    // completion request to the module binary.
-    if args.len() >= 4 {
+    // completion request to the module binary — but only when the cursor
+    // is past the module name. When the cursor is still on the module
+    // name itself (e.g. `yanet-cli route<TAB>`), fall through so the
+    // top-level command can offer all modules sharing that prefix
+    // (e.g. `route` and `route-mpls`).
+    let cursor: u32 = env::var("_CLAP_COMPLETE_INDEX")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+    if args.len() >= 4 && args[0].ends_with(name) && args[1] == "--" && args[2].ends_with(name) {
         let cmd = &args[3];
 
-        if args[0].ends_with(name) && args[1] == "--" && args[2].ends_with(name) {
-            // Direct module: "yanet-cli <module> ..."
-            if submodules.contains(cmd) {
-                forward_completion(prefix, cmd, env::args().skip(4), 1);
-                return;
-            }
-            // Namespaced: "yanet-cli <namespace> <module> ..."
-            if let Some(ns) = namespaces.iter().find(|ns| ns.name == cmd) {
-                if let Some(child) = args.get(4) {
+        // Direct module: "yanet-cli <module> ..."
+        if cursor > 1 && submodules.contains(cmd) {
+            forward_completion(prefix, cmd, env::args().skip(4), 1);
+            process::exit(0);
+        }
+        // Namespaced: "yanet-cli <namespace> <module> ..."
+        if let Some(ns) = namespaces.iter().find(|ns| ns.name == cmd) {
+            if let Some(child) = args.get(4) {
+                if cursor > 2 {
                     let ns_prefix = format!("{prefix}{}-", ns.name);
                     let children = locate_modules(&ns_prefix).unwrap_or_default();
                     if children.contains(child) {
                         forward_completion(&ns_prefix, child, env::args().skip(5), 2);
-                        return;
+                        process::exit(0);
                     }
                 }
             }
