@@ -89,7 +89,7 @@ value_table_init(
 
 static inline uint32_t *
 value_table_get_ptr(
-	struct value_table *value_table, uint32_t v_idx, uint32_t h_idx
+	const struct value_table *value_table, uint32_t v_idx, uint32_t h_idx
 ) {
 	uint32_t **values = ADDR_OF(&value_table->values);
 	uint64_t idx = (v_idx * value_table->h_dim) + h_idx;
@@ -100,7 +100,7 @@ value_table_get_ptr(
 
 static inline uint32_t
 value_table_get(
-	struct value_table *value_table, uint32_t v_idx, uint32_t h_idx
+	const struct value_table *value_table, uint32_t v_idx, uint32_t h_idx
 ) {
 	return *value_table_get_ptr(value_table, v_idx, h_idx);
 }
