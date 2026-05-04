@@ -102,20 +102,31 @@ real_addr_str(
 }
 
 static bool
+mask64_is_prefix(uint64_t mask) {
+	return mask == ((uint64_t)(-1) << __builtin_ctz(mask));
+}
+
+static bool
+mask32_is_prefix(uint32_t mask) {
+	return mask == ((uint32_t)(-1) << __builtin_ctz(mask));
+}
+
+static bool
 mask_is_prefix(const uint8_t *mask, size_t len) {
-	bool seen_zero = false;
-	for (size_t byte_idx = 0; byte_idx < len; ++byte_idx) {
-		for (int bit_pos = 7; bit_pos >= 0; --bit_pos) {
-			bool bit = (mask[byte_idx] >> bit_pos) & 1;
-			if (bit && seen_zero) {
-				return false;
-			}
-			if (!bit) {
-				seen_zero = true;
-			}
-		}
+	switch (len) {
+	case NET4_LEN: {
+		uint32_t val;
+		memcpy(&val, mask, NET4_LEN);
+		return mask32_is_prefix(val);
 	}
-	return true;
+	case NET6_LEN / 2: {
+		uint64_t val;
+		memcpy(&val, mask, NET6_LEN / 2);
+		return mask64_is_prefix(val);
+	}
+	default:
+		return false;
+	}
 }
 
 static int
