@@ -2,36 +2,28 @@
 
 #include "common/lpm.h"
 #include "common/range_collector.h"
-
 #include "common/registry.h"
 
-#include "../classifiers/net6.h"
+#include "filter/classifiers/net6.h"
 
 #include "declare.h"
 
-////////////////////////////////////////////////////////////////////////////////
-
-typedef void (*action_get_net6_func)(
-	const struct filter_rule *rule, struct net6 **net, uint32_t *count
+typedef void (*filter_rule_get_net6s_func)(
+	const struct filter_rule *filter_rule, struct filter_net6s *net6s
 );
 
-static inline void
-action_get_net6_src(
-	const struct filter_rule *rule, struct net6 **net, uint32_t *count
-) {
-	*net = rule->net6.srcs;
-	*count = rule->net6.src_count;
-}
+struct filter_compile_net6s_attr {
+	struct filter_compile_attr attr;
+	struct filter_query_attr_net6 *query_attr;
 
-static inline void
-action_get_net6_dst(
-	const struct filter_rule *action, struct net6 **net, uint32_t *count
-) {
-	*net = action->net6.dsts;
-	*count = action->net6.dst_count;
-}
+	struct range_index ri_hi;
+	struct range_index ri_lo;
+};
 
-////////////////////////////////////////////////////////////////////////////////
+struct filter_compile_attr_net6s_handlers {
+	struct filter_compile_attr_handlers attr_handlers;
+	filter_rule_get_net6s_func get_net6s;
+};
 
 typedef void (*net6_get_part_func)(
 	struct net6 *net, uint8_t **addr, uint8_t **mask
@@ -49,10 +41,8 @@ net6_get_lo_part(struct net6 *net, uint8_t **addr, uint8_t **mask) {
 	*mask = net->mask + 8;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-
 static inline void
-net6_normalize(struct net6 *src, struct net6 *dst) {
+net6_normalize(const struct net6 *src, struct net6 *dst) {
 	memcpy(dst->addr, src->addr, 16);
 	memcpy(dst->mask, src->mask, 16);
 	for (uint8_t idx = 0; idx < 16; ++idx)
@@ -60,11 +50,11 @@ net6_normalize(struct net6 *src, struct net6 *dst) {
 }
 
 static inline int
-collect_net6_range(
+create_net6_range(
 	struct memory_context *memory_context,
-	const struct filter_rule **actions,
-	uint32_t count,
-	action_get_net6_func get_net6,
+	const struct filter_rule **rules,
+	uint32_t rule_count,
+	filter_rule_get_net6s_func get_net6,
 	net6_get_part_func get_part,
 	struct lpm *lpm,
 	struct range_index *ri
@@ -73,20 +63,20 @@ collect_net6_range(
 	if (range_collector_init(&collector, memory_context))
 		goto error;
 
-	for (const struct filter_rule **action_ptr = actions;
-	     action_ptr < actions + count;
-	     ++action_ptr) {
+	for (uint32_t rule_idx = 0; rule_idx < rule_count; ++rule_idx) {
+		const struct filter_rule *rule = rules[rule_idx];
 
-		if (*action_ptr == NULL)
+		if (rule == NULL)
 			continue;
-		const struct filter_rule *action = *action_ptr;
 
-		struct net6 *nets;
-		uint32_t net_count;
-		get_net6(action, &nets, &net_count);
+		struct filter_net6s net6s;
+		get_net6(rule, &net6s);
+		const struct filter_net6s *nets = &net6s;
 
-		for (struct net6 *rule_net = nets; rule_net < nets + net_count;
+		for (struct net6 *rule_net = nets->items;
+		     rule_net < nets->items + nets->count;
 		     ++rule_net) {
+
 			struct net6 net6;
 			net6_normalize(rule_net, &net6);
 
@@ -127,231 +117,218 @@ error:
 	return -1;
 }
 
-static inline int
-merge_net6_range(
+static inline struct filter_compile_attr *
+filter_compile_attr_net6s_create(
 	struct memory_context *memory_context,
-	const struct filter_rule **actions,
-	uint32_t count,
-	action_get_net6_func get_net6,
-	const struct range_index *ri_hi,
-	const struct range_index *ri_lo,
-	struct value_table *table,
-	struct value_registry *registry
+	const struct filter_compile_attr_handlers *attr_handlers,
+	const struct filter_rule **rules,
+	uint32_t rule_count
 ) {
-	if (value_table_init(
-		    table,
-		    memory_context,
-		    ri_hi->max_value + 1,
-		    ri_lo->max_value + 1
-	    )) {
-		return -1;
+	struct filter_compile_attr_net6s_handlers *net6s_handlers =
+		container_of(
+			attr_handlers,
+			struct filter_compile_attr_net6s_handlers,
+			attr_handlers
+		);
+
+	struct filter_compile_net6s_attr *attr = memory_balloc(
+		memory_context, sizeof(struct filter_compile_net6s_attr)
+	);
+	if (attr == NULL) {
+		return NULL;
 	}
 
-	struct remap_table remap_table;
-	if (remap_table_init(
-		    &remap_table,
-		    memory_context,
-		    (ri_hi->max_value + 1) * (ri_lo->max_value + 1)
-	    )) {
-		goto error_remap_table;
-	}
+	attr->query_attr = (struct filter_query_attr_net6 *)memory_balloc(
+		memory_context, sizeof(struct filter_query_attr_net6)
+	);
+	if (attr->query_attr == NULL)
+		goto error_query;
 
-	uint32_t net_cnt = 0;
+	create_net6_range(
+		memory_context,
+		rules,
+		rule_count,
+		net6s_handlers->get_net6s,
+		net6_get_hi_part,
+		&attr->query_attr->hi,
+		&attr->ri_hi
+	);
 
-	struct radix rdx;
-	radix_init(&rdx, memory_context);
+	create_net6_range(
+		memory_context,
+		rules,
+		rule_count,
+		net6s_handlers->get_net6s,
+		net6_get_lo_part,
+		&attr->query_attr->lo,
+		&attr->ri_lo
+	);
 
-	for (const struct filter_rule **action_ptr = actions;
-	     action_ptr < actions + count;
-	     ++action_ptr) {
+	value_table_init(
+		&attr->query_attr->comb,
+		memory_context,
+		attr->ri_hi.max_value + 1,
+		attr->ri_lo.max_value + 1
+	);
 
-		if (*action_ptr == NULL)
-			continue;
-		const struct filter_rule *action = *action_ptr;
+	return &attr->attr;
 
-		remap_table_new_gen(&remap_table);
+error_query:
+	memory_bfree(
+		memory_context, attr, sizeof(struct filter_compile_net6s_attr)
+	);
 
-		uint32_t *values_hi = ADDR_OF(&ri_hi->values);
-		uint32_t *values_lo = ADDR_OF(&ri_lo->values);
+	return NULL;
+}
 
-		struct net6 *nets;
-		uint32_t net_count;
-		get_net6(action, &nets, &net_count);
+static inline uint32_t
+filter_compile_attr_net6s_size(const struct filter_compile_attr *attr) {
+	struct filter_compile_net6s_attr *net6s_attr =
+		container_of(attr, struct filter_compile_net6s_attr, attr);
 
-		for (struct net6 *rule_net = nets; rule_net < nets + net_count;
-		     ++rule_net) {
-			struct net6 net6;
-			net6_normalize(rule_net, &net6);
+	return net6s_attr->query_attr->comb.h_dim *
+	       net6s_attr->query_attr->comb.v_dim;
+}
 
-			if (radix_lookup(&rdx, 32, net6.addr) !=
-			    RADIX_VALUE_INVALID)
-				continue;
+static inline int
+filter_compile_attr_net6s_iter(
+	struct filter_compile_attr *attr,
+	const struct filter_compile_attr_handlers *attr_handlers,
+	filter_compile_attr_iter_cb_func iter_cb_func,
+	void *cb_func_data
+) {
+	(void)attr_handlers;
 
-			radix_insert(&rdx, 32, net6.addr, net_cnt++);
+	struct filter_compile_net6s_attr *net6s_attr =
+		container_of(attr, struct filter_compile_net6s_attr, attr);
 
-			uint8_t *from_hi;
-			uint8_t *mask_hi;
-			net6_get_hi_part(&net6, &from_hi, &mask_hi);
-			uint8_t to_hi[8];
-			*(uint64_t *)to_hi =
-				*(uint64_t *)from_hi | ~*(uint64_t *)mask_hi;
-			filter_key_inc(8, to_hi);
-			uint32_t start_hi =
-				radix_lookup(&ri_hi->radix, 8, from_hi);
-			uint32_t stop_hi = ri_hi->count;
-			if (*(uint64_t *)to_hi != 0)
-				stop_hi = radix_lookup(&ri_hi->radix, 8, to_hi);
-
-			uint8_t *from_lo;
-			uint8_t *mask_lo;
-			net6_get_lo_part(&net6, &from_lo, &mask_lo);
-			uint8_t to_lo[8];
-			*(uint64_t *)to_lo =
-				*(uint64_t *)from_lo | ~*(uint64_t *)mask_lo;
-			filter_key_inc(8, to_lo);
-			uint32_t start_lo =
-				radix_lookup(&ri_lo->radix, 8, from_lo);
-			uint32_t stop_lo = ri_lo->count;
-			if (*(uint64_t *)to_lo != 0)
-				stop_lo = radix_lookup(&ri_lo->radix, 8, to_lo);
-
-			if (!(*(uint64_t *)from_hi == 0 &&
-			      *(uint64_t *)to_hi == 0 &&
-			      *(uint64_t *)from_lo == 0 &&
-			      *(uint64_t *)to_lo == 0)) {
-
-				for (uint32_t idx_hi = start_hi;
-				     idx_hi < stop_hi;
-				     ++idx_hi) {
-					for (uint32_t idx_lo = start_lo;
-					     idx_lo < stop_lo;
-					     ++idx_lo) {
-						uint32_t *value =
-							value_table_get_ptr(
-								table,
-								values_hi
-									[idx_hi],
-								values_lo
-									[idx_lo]
-							);
-						if (remap_table_touch(
-							    &remap_table,
-							    *value,
-							    value
-						    ) < 0) {
-							goto error_touch;
-						}
-					}
-				}
-			}
-		}
-	}
-	remap_table_free(&remap_table);
-
-	uint32_t *values_hi = ADDR_OF(&ri_hi->values);
-	uint32_t *values_lo = ADDR_OF(&ri_lo->values);
-
-	struct value_registry net_registry;
-	value_registry_init(&net_registry, memory_context);
-
-	for (const struct filter_rule **action_ptr = actions;
-	     action_ptr < actions + count;
-	     ++action_ptr) {
-
-		if (*action_ptr == NULL)
-			continue;
-		const struct filter_rule *action = *action_ptr;
-
-		struct net6 *nets;
-		uint32_t net_count;
-		get_net6(action, &nets, &net_count);
-
-		for (struct net6 *rule_net = nets; rule_net < nets + net_count;
-		     ++rule_net) {
-			struct net6 net6;
-			net6_normalize(rule_net, &net6);
-
-			uint32_t net_idx = radix_lookup(&rdx, 32, net6.addr);
-			if (net_idx < net_registry.range_count)
-				continue;
-
-			value_registry_start(&net_registry);
-
-			uint8_t *from_hi;
-			uint8_t *mask_hi;
-			net6_get_hi_part(&net6, &from_hi, &mask_hi);
-			uint8_t to_hi[8];
-			*(uint64_t *)to_hi =
-				*(uint64_t *)from_hi | ~*(uint64_t *)mask_hi;
-			filter_key_inc(8, to_hi);
-			uint32_t start_hi =
-				radix_lookup(&ri_hi->radix, 8, from_hi);
-			uint32_t stop_hi = ri_hi->count;
-			if (*(uint64_t *)to_hi != 0)
-				stop_hi = radix_lookup(&ri_hi->radix, 8, to_hi);
-
-			uint8_t *from_lo;
-			uint8_t *mask_lo;
-			net6_get_lo_part(&net6, &from_lo, &mask_lo);
-			uint8_t to_lo[8];
-			*(uint64_t *)to_lo =
-				*(uint64_t *)from_lo | ~*(uint64_t *)mask_lo;
-			filter_key_inc(8, to_lo);
-			uint32_t start_lo =
-				radix_lookup(&ri_lo->radix, 8, from_lo);
-			uint32_t stop_lo = ri_lo->count;
-			if (*(uint64_t *)to_lo != 0)
-				stop_lo = radix_lookup(&ri_lo->radix, 8, to_lo);
-
-			for (uint32_t idx_hi = start_hi; idx_hi < stop_hi;
-			     ++idx_hi) {
-				for (uint32_t idx_lo = start_lo;
-				     idx_lo < stop_lo;
-				     ++idx_lo) {
-					if (value_registry_collect(
-						    &net_registry,
-						    value_table_get(
-							    table,
-							    values_hi[idx_hi],
-							    values_lo[idx_lo]
-						    )
-					    )) {
-						return -1;
-					}
-				}
+	struct value_table *value_table = &net6s_attr->query_attr->comb;
+	for (uint32_t v_idx = 0; v_idx < value_table->v_dim; ++v_idx) {
+		for (uint32_t h_idx = 0; h_idx < value_table->h_dim; ++h_idx) {
+			if (iter_cb_func(
+				    value_table_get_ptr(
+					    value_table, v_idx, h_idx
+				    ),
+				    cb_func_data
+			    )) {
+				return -1;
 			}
 		}
 	}
 
-	value_registry_init(registry, memory_context);
+	return 0;
+}
 
-	for (const struct filter_rule **action_ptr = actions;
-	     action_ptr < actions + count;
-	     ++action_ptr) {
-		// A value range should be created even for empty rules
-		if (value_registry_start(registry))
-			return -1;
+static inline int
+filter_compile_attr_net6s_rule_is_any(
+	const struct filter_compile_attr *attr,
+	const struct filter_compile_attr_handlers *attr_handlers,
+	const struct filter_rule *rule
+) {
 
-		if (*action_ptr == NULL)
-			continue;
-		const struct filter_rule *action = *action_ptr;
+	struct filter_compile_attr_net6s_handlers *net6s_handlers =
+		container_of(
+			attr_handlers,
+			struct filter_compile_attr_net6s_handlers,
+			attr_handlers
+		);
 
-		struct net6 *nets;
-		uint32_t net_count;
-		get_net6(action, &nets, &net_count);
-		for (struct net6 *rule_net = nets; rule_net < nets + net_count;
-		     ++rule_net) {
-			struct net6 net6;
-			net6_normalize(rule_net, &net6);
+	(void)attr;
 
-			uint32_t net_idx = radix_lookup(&rdx, 32, net6.addr);
+	struct filter_net6s nets;
+	net6s_handlers->get_net6s(rule, &nets);
 
-			struct value_range *rng =
-				ADDR_OF(&net_registry.ranges) + net_idx;
-			uint32_t *vls = ADDR_OF(&rng->values);
-			for (uint32_t idx = 0; idx < rng->count; ++idx) {
-				if (value_registry_collect(
-					    registry, vls[idx]
+	if (nets.count == 0)
+		return 1;
+
+	struct net6 net6_normalized;
+	net6_normalize(nets.items + 0, &net6_normalized);
+
+	return *(uint64_t *)(net6_normalized.mask + 0) == 0 &&
+	       *(uint64_t *)(net6_normalized.mask + 8) == 0;
+}
+
+static inline int
+filter_compile_attr_net6s_rule_iter(
+	struct filter_compile_attr *attr,
+	const struct filter_compile_attr_handlers *attr_handlers,
+	const struct filter_rule *rule,
+	filter_compile_attr_iter_cb_func iter_cb_func,
+	void *cb_func_data
+) {
+	struct filter_compile_attr_net6s_handlers *net6s_handlers =
+		container_of(
+			attr_handlers,
+			struct filter_compile_attr_net6s_handlers,
+			attr_handlers
+		);
+
+	struct filter_compile_net6s_attr *net6s_attr =
+		container_of(attr, struct filter_compile_net6s_attr, attr);
+
+	struct filter_net6s nets;
+	net6s_handlers->get_net6s(rule, &nets);
+	const struct filter_net6s *net6s = &nets;
+
+	uint32_t *values_hi = ADDR_OF(&net6s_attr->ri_hi.values);
+	uint32_t *values_lo = ADDR_OF(&net6s_attr->ri_lo.values);
+
+	for (uint32_t net_idx = 0; net_idx < net6s->count; ++net_idx) {
+		const struct net6 *net = net6s->items + net_idx;
+
+		struct net6 net6_normalized;
+		net6_normalize(net, &net6_normalized);
+		struct net6 *net6 = &net6_normalized;
+
+		uint8_t from_hi[8];
+		uint8_t to_hi[8];
+		for (uint32_t idx = 0; idx < 8; ++idx) {
+			from_hi[idx] = net6->addr[idx];
+			to_hi[idx] = net6->addr[idx] | ~net6->mask[idx];
+		}
+		filter_key_inc(8, to_hi);
+		uint32_t start_hi =
+			radix_lookup(&net6s_attr->ri_hi.radix, 8, from_hi);
+		uint32_t stop_hi =
+			radix_lookup(&net6s_attr->ri_hi.radix, 8, to_hi);
+		if (stop_hi == 0) {
+			/*
+			 * The only chance get zero here is for the last one
+			 * item.
+			 */
+			stop_hi = net6s_attr->ri_hi.count;
+		}
+
+		uint8_t from_lo[8];
+		uint8_t to_lo[8];
+		for (uint32_t idx = 0; idx < 8; ++idx) {
+			from_lo[idx] = net6->addr[idx + 8];
+			to_lo[idx] = net6->addr[idx + 8] | ~net6->mask[idx + 8];
+		}
+		filter_key_inc(8, to_lo);
+		uint32_t start_lo =
+			radix_lookup(&net6s_attr->ri_lo.radix, 8, from_lo);
+		uint32_t stop_lo =
+			radix_lookup(&net6s_attr->ri_lo.radix, 8, to_lo);
+		if (stop_lo == 0) {
+			/*
+			 * The only chance get zero here is for the last one
+			 * item.
+			 */
+			stop_lo = net6s_attr->ri_lo.count;
+		}
+
+		for (uint32_t idx_hi = start_hi; idx_hi < stop_hi; ++idx_hi) {
+			for (uint32_t idx_lo = start_lo; idx_lo < stop_lo;
+			     ++idx_lo) {
+				if (iter_cb_func(
+					    value_table_get_ptr(
+						    &net6s_attr->query_attr
+							     ->comb,
+						    values_hi[idx_hi],
+						    values_lo[idx_lo]
+					    ),
+					    cb_func_data
 				    )) {
 					return -1;
 				}
@@ -359,98 +336,86 @@ merge_net6_range(
 		}
 	}
 
-	radix_free(&rdx);
-	value_registry_free(&net_registry);
-
-	// FIXME: free temporary resources
-
 	return 0;
-
-error_touch:
-	remap_table_free(&remap_table);
-
-error_remap_table:
-	value_table_free(table);
-
-	return -1;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-// Initialization
-////////////////////////////////////////////////////////////////////////////////
-
-static inline int
-init_net6(
-	struct value_registry *registry,
-	action_get_net6_func get_net6,
-	void **data,
-	const struct filter_rule **actions,
-	size_t count,
-	struct memory_context *memory_context
+static inline void
+filter_compile_attr_net6s_free(
+	struct memory_context *memory_context, struct filter_compile_attr *attr
 ) {
-	struct net6_classifier *net6 =
-		memory_balloc(memory_context, sizeof(struct net6_classifier));
-	if (net6 == NULL)
-		return -1;
-	SET_OFFSET_OF(data, net6);
+	struct filter_compile_net6s_attr *net6s_attr =
+		container_of(attr, struct filter_compile_net6s_attr, attr);
 
-	struct range_index ri_hi;
-	if (collect_net6_range(
-		    memory_context,
-		    actions,
-		    count,
-		    get_net6,
-		    net6_get_hi_part,
-		    &net6->hi,
-		    &ri_hi
-	    )) {
-		goto error_hi;
+	range_index_free(&net6s_attr->ri_hi);
+	range_index_free(&net6s_attr->ri_lo);
+
+	if (net6s_attr->query_attr != NULL) {
+		lpm_free(&net6s_attr->query_attr->hi);
+		lpm_free(&net6s_attr->query_attr->lo);
+		value_table_free(&net6s_attr->query_attr->comb);
+
+		memory_bfree(
+			memory_context,
+			net6s_attr->query_attr,
+			sizeof(struct filter_query_attr_net6)
+		);
 	}
 
-	struct range_index ri_lo;
-	if (collect_net6_range(
-		    memory_context,
-		    actions,
-		    count,
-		    get_net6,
-		    net6_get_lo_part,
-		    &net6->lo,
-		    &ri_lo
-	    )) {
-		goto error_lo;
-	}
-
-	if (merge_net6_range(
-		    memory_context,
-		    actions,
-		    count,
-		    get_net6,
-		    &ri_hi,
-		    &ri_lo,
-		    &net6->comb,
-		    registry
-	    )) {
-		goto error_merge;
-	}
-
-	range_index_free(&ri_hi);
-	range_index_free(&ri_lo);
-
-	return 0;
-
-error_merge:
-	range_index_free(&ri_lo);
-	lpm_free(&net6->lo);
-
-error_lo:
-	range_index_free(&ri_hi);
-	lpm_free(&net6->hi);
-
-error_hi:
-	memory_bfree(memory_context, net6, sizeof(struct net6_classifier));
-
-	return -1;
+	memory_bfree(
+		memory_context, attr, sizeof(struct filter_compile_net6s_attr)
+	);
 }
+
+static inline struct filter_query_attr *
+filter_compile_attr_net6s_commit(
+	struct memory_context *memory_context, struct filter_compile_attr *attr
+) {
+	(void)memory_context;
+	struct filter_compile_net6s_attr *net6s_attr =
+		container_of(attr, struct filter_compile_net6s_attr, attr);
+
+	struct filter_query_attr_net6 *query_attr = net6s_attr->query_attr;
+	net6s_attr->query_attr = NULL;
+
+	filter_compile_attr_net6s_free(memory_context, attr);
+
+	return &query_attr->attr;
+}
+
+static const struct filter_compile_attr_handlers filter_compile_get_net6s = {
+	.create = filter_compile_attr_net6s_create,
+	.size = filter_compile_attr_net6s_size,
+	.iter = filter_compile_attr_net6s_iter,
+	.rule_iter = filter_compile_attr_net6s_rule_iter,
+	.rule_is_any = filter_compile_attr_net6s_rule_is_any,
+	.commit = filter_compile_attr_net6s_commit,
+	.free_compile = filter_compile_attr_net6s_free,
+	.free_query = filter_query_attr_net6_free,
+};
+
+static inline void
+get_net6s_src(const struct filter_rule *rule, struct filter_net6s *net6s) {
+	net6s->count = rule->net6.src_count;
+	net6s->items = rule->net6.srcs;
+}
+
+static inline void
+get_net6s_dst(const struct filter_rule *rule, struct filter_net6s *net6s) {
+	net6s->count = rule->net6.dst_count;
+	net6s->items = rule->net6.dsts;
+}
+
+static const struct filter_compile_attr_net6s_handlers
+	filter_compile_attr_net6_src = {
+		.attr_handlers = filter_compile_get_net6s,
+		.get_net6s = get_net6s_src,
+};
+
+static const struct filter_compile_attr_net6s_handlers
+	filter_compile_attr_net6_dst = {
+		.attr_handlers = filter_compile_get_net6s,
+		.get_net6s = get_net6s_dst,
+};
 
 // Allows to initialize attribute for IPv6 destination address.
 int
@@ -458,16 +423,17 @@ FILTER_ATTR_COMPILER_INIT_FUNC(net6_src)(
 	struct value_registry *registry,
 	void **data,
 	const struct filter_rule **rules,
-	size_t actions_count,
+	size_t rule_count,
 	struct memory_context *memory_context
 ) {
-	return init_net6(
+	return filter_compile_attr_build(
+		&filter_compile_attr_net6_src.attr_handlers,
 		registry,
-		action_get_net6_src,
 		data,
 		rules,
-		actions_count,
+		rule_count,
 		memory_context
+
 	);
 }
 
@@ -477,16 +443,17 @@ FILTER_ATTR_COMPILER_INIT_FUNC(net6_dst)(
 	struct value_registry *registry,
 	void **data,
 	const struct filter_rule **rules,
-	size_t actions_count,
+	size_t rule_count,
 	struct memory_context *memory_context
 ) {
-	return init_net6(
+	return filter_compile_attr_build(
+		&filter_compile_attr_net6_dst.attr_handlers,
 		registry,
-		action_get_net6_dst,
 		data,
 		rules,
-		actions_count,
+		rule_count,
 		memory_context
+
 	);
 }
 
@@ -499,13 +466,14 @@ static inline void
 free_net6(void *data, struct memory_context *memory_context) {
 	if (data == NULL)
 		return;
-	struct net6_classifier *c = (struct net6_classifier *)data;
+	struct filter_query_attr_net6 *c =
+		(struct filter_query_attr_net6 *)data;
 	if (c == NULL)
 		return;
 	lpm_free(&c->lo);
 	lpm_free(&c->hi);
 	value_table_free(&c->comb);
-	memory_bfree(memory_context, c, sizeof(struct net6_classifier));
+	memory_bfree(memory_context, c, sizeof(struct filter_query_attr_net6));
 }
 
 void

@@ -14,7 +14,8 @@ static inline void
 FILTER_ATTR_QUERY_FUNC(net6_dst)(
 	void *data, struct packet **packets, uint32_t *result, uint32_t count
 ) {
-	struct net6_classifier *c = (struct net6_classifier *)data;
+	struct filter_query_attr_net6 *c =
+		(struct filter_query_attr_net6 *)data;
 
 	for (uint32_t idx = 0; idx < count; ++idx) {
 		struct rte_mbuf *mbuf = packet_to_mbuf(packets[idx]);
@@ -39,7 +40,8 @@ static inline void
 FILTER_ATTR_QUERY_FUNC(net6_src)(
 	void *data, struct packet **packets, uint32_t *result, uint32_t count
 ) {
-	struct net6_classifier *c = (struct net6_classifier *)data;
+	struct filter_query_attr_net6 *c =
+		(struct filter_query_attr_net6 *)data;
 
 	for (uint32_t idx = 0; idx < count; ++idx) {
 		struct rte_mbuf *mbuf = packet_to_mbuf(packets[idx]);
