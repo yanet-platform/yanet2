@@ -56,9 +56,10 @@ var (
 		// Configure L2 and L3 forwarding
 		CLIForward + " update --cfg=forward0 --rules /mnt/yanet2/forward.yaml",
 
-		// Configure routing
-		CLIRoute + " insert --cfg route0 --via " + VMIPv6Gateway + " ::/0",
-		CLIRoute + " insert --cfg route0 --via " + VMIPv4Gateway + " 0.0.0.0/0",
+		// Bootstrap the default IPv4/IPv6 FIB for the "route0" config.
+		// The YAML payload is created on the host before this command
+		// runs; see framework_test.go.
+		CLIRoute + " fib update --cfg=route0 --rules /mnt/config/route0.yaml",
 
 		CLIFunction + " update --name=virt --chains chain0:10=forward:forward0",
 		CLIFunction + " update --name=test --chains chain2:1=forward:forward0,route:route0",
@@ -983,7 +984,7 @@ func (f *F) StartYANET(dataplaneConfig string, controlplaneConfig string) error 
 	f.log.Debug("Verifying YANET services are running...")
 
 	err = f.WaitOutputPresent("cat /mnt/logs/yanet-controlplane.log", func(output string) bool {
-		return strings.Contains(output, "updated nexthop cache")
+		return strings.Contains(output, "all built-in modules ready")
 	}, 10*time.Second)
 	if err != nil {
 		return fmt.Errorf("failed to start controlplane: %w", err)

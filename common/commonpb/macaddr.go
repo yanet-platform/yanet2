@@ -1,4 +1,4 @@
-package routepb
+package commonpb
 
 import (
 	"encoding/binary"
@@ -32,7 +32,8 @@ func (m *MACAddress) MarshalJSON() ([]byte, error) {
 	return fmt.Appendf(nil, `{"addr":"%s"}`, net.HardwareAddr(eui48[:])), nil
 }
 
-// UnmarshalJSON accepts addr as a MAC address string in various EUI-48 formats.
+// UnmarshalJSON accepts addr as a MAC address string in various EUI-48
+// formats.
 func (m *MACAddress) UnmarshalJSON(data []byte) error {
 	var raw struct {
 		Addr string `json:"addr"`

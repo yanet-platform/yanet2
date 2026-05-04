@@ -33,6 +33,7 @@ type BuiltInModuleRunner struct {
 	gatewayEndpoint string
 	gatewayTLS      *gateway.TLSConfig
 	server          *grpc.Server
+	ready           chan struct{}
 	log             *zap.SugaredLogger
 }
 
@@ -52,8 +53,17 @@ func NewBuiltInModuleRunner(
 			grpc.ChainUnaryInterceptor(xgrpc.AccessLogInterceptor(log.Desugar())),
 			grpc.MaxRecvMsgSize(1024*1024*256), grpc.MaxSendMsgSize(1024*1024*256),
 		),
-		log: log,
+		ready: make(chan struct{}),
+		log:   log,
 	}
+}
+
+// Ready returns a channel that is closed when the runner has finished
+// the initial service registration phase against the gateway. The
+// channel is closed exactly once; consumers can use it to detect that
+// the module is reachable through the gateway.
+func (m *BuiltInModuleRunner) Ready() <-chan struct{} {
+	return m.ready
 }
 
 func (m *BuiltInModuleRunner) Close() error {
@@ -84,6 +94,7 @@ func (m *BuiltInModuleRunner) Run(ctx context.Context) error {
 	if err = m.register(ctx, listener.Addr()); err != nil {
 		return fmt.Errorf("failed to register services: %w", err)
 	}
+	close(m.ready)
 
 	<-ctx.Done()
 

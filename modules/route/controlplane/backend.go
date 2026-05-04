@@ -3,33 +3,30 @@ package route
 import (
 	"fmt"
 	"net/netip"
-	"time"
-
-	"go.uber.org/zap"
 
 	"github.com/yanet-platform/yanet2/common/go/bitset"
-	"github.com/yanet-platform/yanet2/common/go/maptrie"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/route/bindings/go/croute"
-	"github.com/yanet-platform/yanet2/modules/route/internal/discovery/neigh"
-	"github.com/yanet-platform/yanet2/modules/route/internal/rib"
+	"github.com/yanet-platform/yanet2/modules/route/controlplane/routepb"
 )
 
-// ModuleHandle is a handle to a module configuration.
+// ModuleHandle is a handle to a route module configuration in shared
+// memory.
 type ModuleHandle interface {
 	DumpFIB() ([]croute.FIBEntry, error)
 	Free()
 }
 
-// Backend abstracts shared memory operations.
+// Compile-time assertion that *croute.ModuleConfig satisfies the
+// ModuleHandle interface; catches drift in the bindings layer.
+var _ ModuleHandle = (*croute.ModuleConfig)(nil)
+
+// Backend abstracts shared memory write-path operations for the route
+// module.
 type Backend interface {
-	// UpdateModule resolves RIB routes against the neighbour table and
-	// publishes the result to the dataplane.
-	UpdateModule(
-		name string,
-		ribDump maptrie.MapTrie[netip.Prefix, netip.Addr, rib.RoutesList],
-		neighbours neigh.NexthopCacheView,
-	) (ModuleHandle, error)
+	// UpdateModule builds a fresh ModuleConfig from the supplied FIB
+	// entries and publishes it to the dataplane atomically.
+	UpdateModule(name string, entries []*routepb.FIBEntry) (ModuleHandle, error)
 	// DeleteModule removes a module config from the dataplane.
 	DeleteModule(name string) error
 }
@@ -37,154 +34,113 @@ type Backend interface {
 // backend is the real Backend implementation backed by shared memory.
 type backend struct {
 	agent *ffi.Agent
-	log   *zap.Logger
 }
 
 // NewBackend creates a Backend that operates on real shared memory.
-func NewBackend(agent *ffi.Agent, log *zap.Logger) Backend {
+func NewBackend(agent *ffi.Agent) Backend {
 	return &backend{
 		agent: agent,
-		log:   log,
 	}
 }
 
-func (m *backend) UpdateModule(
-	name string,
-	ribDump maptrie.MapTrie[netip.Prefix, netip.Addr, rib.RoutesList],
-	neighbours neigh.NexthopCacheView,
-) (ModuleHandle, error) {
-	config, err := croute.NewModuleConfig(m.agent, name)
+func (m *backend) UpdateModule(name string, entries []*routepb.FIBEntry) (ModuleHandle, error) {
+	module, err := croute.NewModuleConfig(m.agent, name)
 	if err != nil {
-		m.log.Error("failed to create module config",
-			zap.Error(err),
-			zap.String("name", name),
-		)
-		return nil, fmt.Errorf("failed to create %q module config: %w", name, err)
+		return nil, fmt.Errorf("failed to create module config: %w", err)
 	}
 
-	// Statistics for summary logging.
-	var stats struct {
-		totalPrefixes       int
-		totalRoutes         int
-		skippedPrefixes     int
-		neighbourNotFound   int
-		hardwareRoutesAdded int
-		prefixesAdded       int
-	}
+	// Defensively dedup hardware routes per-prefix using TinyBitset:
+	// the operator already feeds deduplicated entries, but the wire
+	// format encodes a list-of-nexthops per prefix and we keep the
+	// route module robust to mistakes upstream.
+	hardwareIndex := map[hardwareKey]uint32{}
+	routeListIndex := map[bitset.TinyBitset]uint32{}
 
-	hardwareRoutes := map[neigh.HardwareRoute]uint32{}
-	routesListsSet := map[bitset.TinyBitset]int{}
+	for _, entry := range entries {
+		prefix, err := netip.ParsePrefix(entry.GetPrefix())
+		if err != nil {
+			module.Free()
+			return nil, fmt.Errorf("failed to parse prefix %q: %w", entry.GetPrefix(), err)
+		}
 
-	routeInsertionStart := time.Now()
-
-	for prefixLen := range ribDump {
-		for prefix, routesList := range ribDump[prefixLen] {
-			stats.totalPrefixes++
-			routesListSetKey := bitset.TinyBitset{}
-
-			if len(routesList.Routes) == 0 {
-				stats.skippedPrefixes++
-				continue
+		key := bitset.TinyBitset{}
+		for _, nh := range entry.GetNexthops() {
+			hk, err := newHardwareKey(nh)
+			if err != nil {
+				module.Free()
+				return nil, fmt.Errorf("failed to parse nexthop %v: %w", nh, err)
 			}
 
-			stats.totalRoutes += len(routesList.Routes)
-
-			for _, route := range routesList.Routes {
-				// Lookup hwaddress for the route.
-				entry, ok := neighbours.Lookup(route.NextHop.Unmap())
-				if !ok {
-					m.log.Warn("neighbour not found for nexthop",
-						zap.Stringer("nexthop", route.NextHop),
-						zap.Stringer("prefix", prefix),
-						zap.String("name", name),
-					)
-					stats.neighbourNotFound++
-					continue
-				}
-
-				if idx, ok := hardwareRoutes[entry.HardwareRoute]; ok {
-					routesListSetKey.Insert(idx)
-					continue
-				}
-
-				idx, err := config.AddRoute(
-					entry.HardwareRoute.SourceMAC[:],
-					entry.HardwareRoute.DestinationMAC[:],
-					entry.HardwareRoute.Device,
-				)
-				if err != nil {
-					m.log.Error("failed to add hardware route",
-						zap.Error(err),
-						zap.Stringer("hardware_route", entry.HardwareRoute),
-						zap.Stringer("prefix", prefix),
-						zap.String("name", name),
-					)
-					config.Free()
-					return nil, fmt.Errorf("failed to add hardware route %v for prefix %s: %w", entry.HardwareRoute, prefix, err)
-				}
-				stats.hardwareRoutesAdded++
-				hardwareRoutes[entry.HardwareRoute] = uint32(idx)
-				routesListSetKey.Insert(uint32(idx))
-			}
-
-			if routesListSetKey.Count() == 0 {
-				continue
-			}
-
-			idx, ok := routesListsSet[routesListSetKey]
+			idx, ok := hardwareIndex[hk]
 			if !ok {
-				routeListIdx, err := config.AddRouteList(routesListSetKey.AsSlice())
+				added, err := module.AddRoute(hk.SrcMAC[:], hk.DstMAC[:], hk.Device)
 				if err != nil {
-					m.log.Error("failed to add route list",
-						zap.Error(err),
-						zap.Uint32s("route_indices", routesListSetKey.AsSlice()),
-						zap.Stringer("prefix", prefix),
-						zap.String("name", name),
-					)
-					config.Free()
-					return nil, fmt.Errorf("failed to add routes list: %w", err)
+					module.Free()
+					return nil, fmt.Errorf("failed to add hardware route: %w", err)
 				}
-				idx = routeListIdx
-				routesListsSet[routesListSetKey] = idx
+				idx = uint32(added)
+				hardwareIndex[hk] = idx
 			}
+			key.Insert(idx)
+		}
 
-			if err := config.AddPrefix(prefix, uint32(idx)); err != nil {
-				m.log.Error("failed to add prefix",
-					zap.Error(err),
-					zap.Stringer("prefix", prefix),
-					zap.Int("route_list_index", idx),
-					zap.String("name", name),
-				)
-				config.Free()
-				return nil, fmt.Errorf("failed to add prefix %q: %w", prefix, err)
+		if key.Count() == 0 {
+			continue
+		}
+
+		listIdx, ok := routeListIndex[key]
+		if !ok {
+			added, err := module.AddRouteList(key.AsSlice())
+			if err != nil {
+				module.Free()
+				return nil, fmt.Errorf("failed to add route list: %w", err)
 			}
-			stats.prefixesAdded++
+			listIdx = uint32(added)
+			routeListIndex[key] = listIdx
+		}
+
+		if err := module.AddPrefix(prefix, listIdx); err != nil {
+			module.Free()
+			return nil, fmt.Errorf("failed to add prefix %q: %w", prefix, err)
 		}
 	}
 
-	m.log.Info("finished processing routes",
-		zap.String("module", name),
-		zap.Int("total_prefixes", stats.totalPrefixes),
-		zap.Int("total_routes", stats.totalRoutes),
-		zap.Int("skipped_prefixes", stats.skippedPrefixes),
-		zap.Int("neighbour_not_found", stats.neighbourNotFound),
-		zap.Int("hardware_routes_added", stats.hardwareRoutesAdded),
-		zap.Int("prefixes_added", stats.prefixesAdded),
-		zap.Duration("processing_duration", time.Since(routeInsertionStart)),
-	)
-
-	if err := m.agent.UpdateModules([]ffi.ModuleConfig{config.AsFFIModule()}); err != nil {
-		m.log.Error("failed to update modules via FFI",
-			zap.Error(err),
-			zap.String("name", name),
-		)
-		config.Free()
-		return nil, fmt.Errorf("failed to update module: %w", err)
+	if err := m.agent.UpdateModules([]ffi.ModuleConfig{module.AsFFIModule()}); err != nil {
+		module.Free()
+		return nil, fmt.Errorf("failed to update modules: %w", err)
 	}
 
-	return config, nil
+	return module, nil
 }
 
 func (m *backend) DeleteModule(name string) error {
 	return m.agent.DeleteModuleConfig(name)
+}
+
+// hardwareKey is a comparable form of a hardware route used to
+// deduplicate AddRoute calls.
+type hardwareKey struct {
+	SrcMAC [6]byte
+	DstMAC [6]byte
+	Device string
+}
+
+func newHardwareKey(nh *routepb.FIBNexthop) (hardwareKey, error) {
+	src := nh.GetSrcMac()
+	if src == nil {
+		return hardwareKey{}, fmt.Errorf("src_mac is required")
+	}
+	dst := nh.GetDstMac()
+	if dst == nil {
+		return hardwareKey{}, fmt.Errorf("dst_mac is required")
+	}
+	device := nh.GetDevice()
+	if device == "" {
+		return hardwareKey{}, fmt.Errorf("device is required")
+	}
+	return hardwareKey{
+		SrcMAC: src.EUI48(),
+		DstMAC: dst.EUI48(),
+		Device: device,
+	}, nil
 }

@@ -1,4 +1,4 @@
-package routepb
+package commonpb
 
 import (
 	"encoding/json"

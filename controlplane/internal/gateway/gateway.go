@@ -239,6 +239,28 @@ func (m *Gateway) Run(ctx context.Context) error {
 		})
 	}
 
+	// Emit a single deterministic readiness marker once every built-in
+	// module has finished its initial service registration. Functional
+	// tests grep for this exact line to know the gateway is ready to
+	// accept module RPCs.
+	if len(m.builtInModules) > 0 {
+		wg.Go(func() error {
+			for _, builtInModule := range m.builtInModules {
+				select {
+				case <-ctx.Done():
+					return nil
+				case <-builtInModule.Ready():
+				}
+			}
+			m.log.Infow("all built-in modules ready",
+				zap.Int("count", len(m.builtInModules)),
+			)
+			return nil
+		})
+	} else {
+		m.log.Infow("all built-in modules ready", zap.Int("count", 0))
+	}
+
 	<-ctx.Done()
 
 	m.log.Infow("stopping gRPC gateway", zap.Stringer("addr", listener.Addr()))

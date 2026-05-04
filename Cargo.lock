@@ -3346,7 +3346,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "yanet-cli-neighbour"
+name = "yanet-cli-operator-neighbour"
 version = "0.1.0"
 dependencies = [
  "clap",
@@ -3354,12 +3354,12 @@ dependencies = [
  "log",
  "netip",
  "prost",
- "prost-types",
  "tabled",
  "tokio",
  "tonic",
  "tonic-build",
  "yanet-cli",
+ "yanet-commonpb",
 ]
 
 [[package]]
@@ -3377,6 +3377,23 @@ dependencies = [
  "tonic-build",
  "yanet-cli",
  "yanet-commonpb",
+]
+
+[[package]]
+name = "yanet-cli-operator-route"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "clap_complete",
+ "colored",
+ "log",
+ "netip",
+ "prost",
+ "tabled",
+ "tokio",
+ "tonic",
+ "tonic-build",
+ "yanet-cli",
 ]
 
 [[package]]
@@ -3425,18 +3442,17 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "clap_complete",
- "colored",
  "log",
  "netip",
  "prost",
- "prost-types",
- "ptree",
+ "serde",
+ "serde_yaml",
  "tabled",
  "tokio",
  "tonic",
  "tonic-build",
- "tower",
  "yanet-cli",
+ "yanet-commonpb",
 ]
 
 [[package]]

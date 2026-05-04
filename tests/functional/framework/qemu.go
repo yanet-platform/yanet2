@@ -212,7 +212,9 @@ func (q *QEMUManager) Start() error {
 		"-drive", fmt.Sprintf("file=%s,if=virtio,format=qcow2", q.ImagePath),
 	)
 
-	// Network interface configuration
+	// Network interface configuration. SSH forwarding is added in
+	// keep-alive mode for manual debugging.
+	netdev := "user,id=net0"
 	if ShouldKeepVMAlive() {
 		// Get a random free port for SSH forwarding to support multiple VMs
 		var err error
@@ -221,10 +223,9 @@ func (q *QEMUManager) Start() error {
 			return fmt.Errorf("failed to get free port for SSH forwarding: %w", err)
 		}
 		q.log.Infof("Keep VM alive mode enabled: SSH port forwarding 127.0.0.1:%d -> VM:22", q.sshPort)
-		args = append(args, "-netdev", fmt.Sprintf("user,id=net0,hostfwd=tcp:127.0.0.1:%d-:22", q.sshPort))
-	} else {
-		args = append(args, "-netdev", "user,id=net0")
+		netdev += fmt.Sprintf(",hostfwd=tcp:127.0.0.1:%d-:22", q.sshPort)
 	}
+	args = append(args, "-netdev", netdev)
 
 	args = append(args,
 		"-device", "virtio-net-pci,netdev=net0,mac=AA:BB:CC:DD:CA:B0",
@@ -466,7 +467,7 @@ func (q *QEMUManager) captureStderr(stderr io.ReadCloser, logWriter *os.File) {
 // connectToMonitor connects to QEMU monitor interface via unix socket
 func (q *QEMUManager) connectToMonitor() error {
 	// Try multiple times to connect to monitor
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		// Create connection for monitoring
 		conn, err := net.Dial("unix", q.MonitorPath)
 		if err != nil {
@@ -488,7 +489,7 @@ func (q *QEMUManager) connectToMonitor() error {
 // connectToSerial connects to QEMU serial console via unix socket
 func (q *QEMUManager) connectToSerial() error {
 	// Try multiple times to connect to serial console
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		// Create connection for commands
 		conn, err := net.Dial("unix", q.SerialPath)
 		if err != nil {

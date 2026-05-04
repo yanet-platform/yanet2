@@ -95,6 +95,9 @@ jobs:
           - component: pipeline-operator
             image: ghcr.io/yanet-platform/yanet2/pipeline-operator
             dockerfile: deploy/yanet-pipeline-operator.Dockerfile
+          - component: route-operator
+            image: ghcr.io/yanet-platform/yanet2/route-operator
+            dockerfile: deploy/yanet-route-operator.Dockerfile
     steps:
       - uses: actions/checkout@v4
 

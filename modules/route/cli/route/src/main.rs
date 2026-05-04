@@ -1,11 +1,16 @@
 //! CLI for YANET "route" module.
 
-use core::{error::Error, net::IpAddr};
+use core::error::Error;
+use std::{
+    fs::File,
+    path::{Path, PathBuf},
+};
 
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
-use netip::{Contiguous, IpNetwork};
-use ptree::TreeBuilder;
+use commonpb::pb::MacAddress;
+use netip::MacAddr;
+use serde::{Deserialize, Serialize};
 use tabled::{
     settings::{
         object::{Columns, Rows},
@@ -16,18 +21,76 @@ use tabled::{
 };
 use tonic::codec::CompressionEncoding;
 use yanet_cli_route::{
-    routepb::{
-        route_service_client::RouteServiceClient, DeleteConfigRequest, DeleteRouteRequest, FlushRoutesRequest,
-        InsertRouteRequest, ListConfigsRequest, LookupRouteRequest, RouteSourceId, ShowFibRequest, ShowRoutesRequest,
-    },
-    FibDisplayEntry, RouteEntry,
+    routepb::{route_service_client::RouteServiceClient, ShowFibRequest, UpdateFibRequest},
+    FibDisplayEntry,
 };
 use ync::{
     client::{ConnectionArgs, LayeredChannel},
     logging,
 };
 
-/// Route module.
+#[derive(Debug, Serialize, Deserialize)]
+struct FibNexthop {
+    dst_mac: String,
+    src_mac: String,
+    device: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct FibEntry {
+    prefix: String,
+    #[serde(default)]
+    nexthops: Vec<FibNexthop>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct FibConfig {
+    #[serde(default)]
+    entries: Vec<FibEntry>,
+}
+
+impl FibConfig {
+    fn load<P>(path: P) -> Result<Self, Box<dyn Error>>
+    where
+        P: AsRef<Path>,
+    {
+        let file = File::open(path)?;
+        let config = serde_yaml::from_reader(file)?;
+        Ok(config)
+    }
+}
+
+fn parse_mac(s: &str) -> Result<MacAddress, Box<dyn Error>> {
+    let mac: MacAddr = s.parse()?;
+    Ok(MacAddress { addr: mac.as_u64() })
+}
+
+impl TryFrom<FibNexthop> for yanet_cli_route::routepb::FibNexthop {
+    type Error = Box<dyn Error>;
+
+    fn try_from(nh: FibNexthop) -> Result<Self, Self::Error> {
+        Ok(Self {
+            dst_mac: Some(parse_mac(&nh.dst_mac)?),
+            src_mac: Some(parse_mac(&nh.src_mac)?),
+            device: nh.device,
+        })
+    }
+}
+
+impl TryFrom<FibEntry> for yanet_cli_route::routepb::FibEntry {
+    type Error = Box<dyn Error>;
+
+    fn try_from(entry: FibEntry) -> Result<Self, Self::Error> {
+        let nexthops = entry
+            .nexthops
+            .into_iter()
+            .map(yanet_cli_route::routepb::FibNexthop::try_from)
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Self { prefix: entry.prefix, nexthops })
+    }
+}
+
+/// Route module CLI.
 #[derive(Debug, Clone, Parser)]
 #[command(version, about)]
 #[command(flatten_help = true)]
@@ -43,94 +106,8 @@ pub struct Cmd {
 
 #[derive(Debug, Clone, Parser)]
 pub enum ModeCmd {
-    /// List all route configurations.
-    List,
-    /// Show routes currently stored in RIB (route information base).
-    Show(RouteShowCmd),
-    /// Perform RIB route lookup.
-    Lookup(RouteLookupCmd),
-    /// Inserts a unicast static route.
-    Insert(RouteInsertCmd),
-    /// Removes a unicast static route.
-    Remove(RouteRemoveCmd),
-    /// Deletes a route configuration (RIB).
-    Delete(RouteDeleteConfigCmd),
-    /// Flush RIB to FIB for a configuration.
-    Flush(RouteFlushCmd),
     /// FIB (Forwarding Information Base) operations.
     Fib(FibCmd),
-}
-
-#[derive(Debug, Clone, Parser)]
-pub struct RouteShowCmd {
-    /// Show only IPv4 routes.
-    #[arg(long)]
-    pub ipv4: bool,
-    /// Show only IPv6 routes.
-    #[arg(long)]
-    pub ipv6: bool,
-    /// Route config name.
-    #[arg(long = "cfg", short)]
-    pub config_name: String,
-}
-
-#[derive(Debug, Clone, Parser)]
-pub struct RouteLookupCmd {
-    /// The IP address to lookup in the routing table.
-    pub addr: IpAddr,
-    /// Route config name.
-    #[arg(long = "cfg", short)]
-    pub config_name: String,
-}
-
-#[derive(Debug, Clone, Parser)]
-pub struct RouteInsertCmd {
-    /// The destination prefix of the route.
-    ///
-    /// The prefix must be an IPv4 or IPv6 address followed by "/" and the
-    /// length of the prefix.
-    pub prefix: Contiguous<IpNetwork>,
-    /// Route config name.
-    #[arg(long = "cfg", short)]
-    pub config_name: String,
-    /// The IP address of the nexthop router.
-    #[arg(long = "via")]
-    pub nexthop_addr: IpAddr,
-    /// Route source type (static or bird). Defaults to static.
-    #[arg(long = "source", default_value = "static")]
-    pub source: RouteSource,
-}
-
-#[derive(Debug, Clone, Parser)]
-pub struct RouteRemoveCmd {
-    /// The destination prefix of the route to remove.
-    ///
-    /// The prefix must be an IPv4 or IPv6 address followed by "/" and the
-    /// length of the prefix.
-    pub prefix: Contiguous<IpNetwork>,
-    /// Route config name.
-    #[arg(long = "cfg", short)]
-    pub config_name: String,
-    /// The IP address of the nexthop router.
-    #[arg(long = "via")]
-    pub nexthop_addr: IpAddr,
-    /// Route source type (static or bird). Defaults to static.
-    #[arg(long = "source", default_value = "static")]
-    pub source: RouteSource,
-}
-
-#[derive(Debug, Clone, Parser)]
-pub struct RouteDeleteConfigCmd {
-    /// Route config name to delete.
-    #[arg(long = "cfg", short)]
-    pub config_name: String,
-}
-
-#[derive(Debug, Clone, Parser)]
-pub struct RouteFlushCmd {
-    /// Route config name.
-    #[arg(long = "cfg", short)]
-    pub config_name: String,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -143,6 +120,18 @@ pub struct FibCmd {
 pub enum FibAction {
     /// Dump FIB entries.
     Show(FibShowCmd),
+    /// Replace the FIB atomically with entries from a YAML file.
+    Update(FibUpdateCmd),
+}
+
+#[derive(Debug, Clone, Parser)]
+pub struct FibUpdateCmd {
+    /// Route module config name.
+    #[arg(long = "cfg", short)]
+    pub config_name: String,
+    /// Path to the FIB YAML file.
+    #[arg(required = true, long = "rules", value_name = "PATH")]
+    pub rules: PathBuf,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -156,21 +145,6 @@ pub struct FibShowCmd {
     /// Route config name.
     #[arg(long = "cfg", short)]
     pub config_name: String,
-}
-
-#[derive(Debug, Clone, clap::ValueEnum)]
-pub enum RouteSource {
-    Static,
-    Bird,
-}
-
-impl RouteSource {
-    fn to_proto(&self) -> RouteSourceId {
-        match self {
-            RouteSource::Static => RouteSourceId::Static,
-            RouteSource::Bird => RouteSourceId::Bird,
-        }
-    }
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -190,15 +164,9 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
     let mut service = RouteService::new(&cmd.connection).await?;
 
     match cmd.mode {
-        ModeCmd::List => service.list_configs().await,
-        ModeCmd::Show(cmd) => service.show_routes(cmd).await,
-        ModeCmd::Lookup(cmd) => service.lookup_route(cmd).await,
-        ModeCmd::Insert(cmd) => service.insert_route(cmd).await,
-        ModeCmd::Remove(cmd) => service.remove_route(cmd).await,
-        ModeCmd::Delete(cmd) => service.delete_config(cmd).await,
-        ModeCmd::Flush(cmd) => service.flush_routes(cmd).await,
         ModeCmd::Fib(cmd) => match cmd.action {
             FibAction::Show(cmd) => service.show_fib(cmd).await,
+            FibAction::Update(cmd) => service.update_fib(cmd).await,
         },
     }
 }
@@ -216,117 +184,20 @@ impl RouteService {
         Ok(Self { client })
     }
 
-    pub async fn list_configs(&mut self) -> Result<(), Box<dyn Error>> {
-        let request = ListConfigsRequest {};
-        log::trace!("list configs request: {request:?}");
-        let response = self.client.list_configs(request).await?.into_inner();
-        log::debug!("list configs response: {response:?}");
-
-        let mut tree = TreeBuilder::new("List Route Configs".to_string());
-        for config in response.configs {
-            tree.add_empty_child(config);
-        }
-        let tree = tree.build();
-        ptree::print_tree(&tree)?;
-        Ok(())
-    }
-
-    pub async fn show_routes(&mut self, cmd: RouteShowCmd) -> Result<(), Box<dyn Error>> {
-        let request = ShowRoutesRequest {
-            name: cmd.config_name.clone(),
-            ipv4_only: cmd.ipv4,
-            ipv6_only: cmd.ipv6,
+    pub async fn update_fib(&mut self, cmd: FibUpdateCmd) -> Result<(), Box<dyn Error>> {
+        let config = FibConfig::load(&cmd.rules)?;
+        let entries = config
+            .entries
+            .into_iter()
+            .map(yanet_cli_route::routepb::FibEntry::try_from)
+            .collect::<Result<Vec<_>, _>>()?;
+        let request = UpdateFibRequest {
+            module_name: cmd.config_name,
+            entries,
         };
+        self.client.update_fib(request).await?;
 
-        let response = self.client.show_routes(request).await?.into_inner();
-
-        let mut entries = response.routes.into_iter().map(RouteEntry::from).collect::<Vec<_>>();
-
-        entries.sort_by_key(|a| a.prefix.0);
-
-        print_table(entries);
-
-        Ok(())
-    }
-
-    pub async fn lookup_route(&mut self, cmd: RouteLookupCmd) -> Result<(), Box<dyn Error>> {
-        let request = LookupRouteRequest {
-            name: cmd.config_name.clone(),
-            ip_addr: cmd.addr.to_string(),
-        };
-
-        let response = self.client.lookup_route(request).await?.into_inner();
-
-        if response.routes.is_empty() {
-            log::info!("No routes found for {}", cmd.addr);
-            return Ok(());
-        }
-
-        // NOTE: no sorting here, since routes are already sorted by their best.
-        print_table(response.routes.into_iter().map(RouteEntry::from));
-
-        Ok(())
-    }
-
-    pub async fn insert_route(&mut self, cmd: RouteInsertCmd) -> Result<(), Box<dyn Error>> {
-        let request = InsertRouteRequest {
-            name: cmd.config_name.clone(),
-            prefix: cmd.prefix.to_string(),
-            nexthop_addr: cmd.nexthop_addr.to_string(),
-            do_flush: true,
-            source_id: cmd.source.to_proto().into(),
-        };
-
-        self.client.insert_route(request).await?;
-
-        log::info!(
-            "Route inserted successfully: {} via {} (source: {:?})",
-            cmd.prefix,
-            cmd.nexthop_addr,
-            cmd.source
-        );
-
-        Ok(())
-    }
-
-    pub async fn remove_route(&mut self, cmd: RouteRemoveCmd) -> Result<(), Box<dyn Error>> {
-        let request = DeleteRouteRequest {
-            name: cmd.config_name.clone(),
-            prefix: cmd.prefix.to_string(),
-            nexthop_addr: cmd.nexthop_addr.to_string(),
-            do_flush: true,
-            source_id: cmd.source.to_proto().into(),
-        };
-
-        self.client.delete_route(request).await?;
-
-        log::info!(
-            "Route removed successfully: {} via {} (source: {:?})",
-            cmd.prefix,
-            cmd.nexthop_addr,
-            cmd.source
-        );
-
-        Ok(())
-    }
-
-    pub async fn delete_config(&mut self, cmd: RouteDeleteConfigCmd) -> Result<(), Box<dyn Error>> {
-        let request = DeleteConfigRequest { name: cmd.config_name.clone() };
-
-        self.client.delete_config(request).await?;
-
-        log::info!("Config deleted successfully: {}", cmd.config_name);
-
-        Ok(())
-    }
-
-    pub async fn flush_routes(&mut self, cmd: RouteFlushCmd) -> Result<(), Box<dyn Error>> {
-        let request = FlushRoutesRequest { name: cmd.config_name.clone() };
-
-        self.client.flush_routes(request).await?;
-
-        log::info!("Routes flushed successfully");
-
+        println!("OK");
         Ok(())
     }
 

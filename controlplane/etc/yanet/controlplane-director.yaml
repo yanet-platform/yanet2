@@ -27,10 +27,10 @@ gateway:
     permissions_path: /etc/yanet/auth/permissions.yaml
 modules:
   route:
-    # MemoryPathPrefix is the path to the shared-memory file that is used to
-    # communicate with dataplane.
+    # MemoryPath is the path to the shared-memory file that is used
+    # to communicate with the dataplane.
     memory_path: *memory_path
-    # Memory requirements for a single transaction.
+    # Memory requirements for a single FIB-push transaction.
     memory_requirements: 16MB
     endpoint: "[::1]:0"
     gateway_endpoint: *gateway_endpoint

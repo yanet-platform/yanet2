@@ -130,21 +130,3 @@ func WithGatewayActuatorMetrics(metrics GatewayActuatorMetricsObserver) GatewayA
 		o.Metrics = metrics
 	}
 }
-
-type fanOutActuatorOptions struct {
-	Log *zap.Logger
-}
-
-func newFanOutActuatorOptions() *fanOutActuatorOptions {
-	return &fanOutActuatorOptions{
-		Log: zap.NewNop(),
-	}
-}
-
-type FanOutActuatorOption func(*fanOutActuatorOptions)
-
-func WithFanOutActuatorLog(log *zap.Logger) FanOutActuatorOption {
-	return func(o *fanOutActuatorOptions) {
-		o.Log = log
-	}
-}

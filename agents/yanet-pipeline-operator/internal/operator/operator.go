@@ -10,6 +10,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/yanet-platform/yanet2/agents/yanet-pipeline-operator/operatorpb"
+	"github.com/yanet-platform/yanet2/common/go/operator"
 	"github.com/yanet-platform/yanet2/controlplane/gateway"
 )
 
@@ -65,9 +66,9 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 		actuators = append(actuators, actuator)
 	}
 
-	actuator := NewFanOutActuator(
+	actuator := operator.NewFanOutActuator[*StageConfig](
 		actuators,
-		WithFanOutActuatorLog(log),
+		operator.WithFanOutLog(log),
 	)
 
 	reconciler := NewReconciler(

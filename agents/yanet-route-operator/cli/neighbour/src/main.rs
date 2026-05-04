@@ -1,30 +1,41 @@
-//! CLI for YANET "neighbour" module.
+//! CLI for YANET route operator (neighbour-side commands).
+//!
+//! Connects to a gRPC endpoint exposing the operator's NeighbourService
+//! (the operator process directly, or the gateway once registration
+//! has propagated) and drives the operator-owned neighbour tables.
 
-use core::{error::Error, time::Duration};
-use std::time::UNIX_EPOCH;
+use core::{
+    error::Error,
+    fmt::{self, Display, Formatter},
+    net::IpAddr,
+    time::Duration,
+};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
-use code::{
-    neighbour_client::NeighbourClient, CreateNeighbourTableRequest, ListNeighbourTablesRequest, ListNeighboursRequest,
-    MacAddress, NeighbourEntry as ProtoNeighbourEntry, RemoveNeighbourTableRequest, RemoveNeighboursRequest,
-    UpdateNeighbourTableRequest, UpdateNeighboursRequest,
-};
+use commonpb::pb::MacAddress;
 use netip::MacAddr;
+use tabled::Tabled;
 use tonic::codec::CompressionEncoding;
-use yanet_cli_neighbour::{Age, NeighbourEntry, State, TableEntry};
 use ync::{
     client::{ConnectionArgs, LayeredChannel},
     display::print_table,
     logging,
 };
 
-#[allow(non_snake_case)]
-pub mod code {
-    tonic::include_proto!("routepb");
+use crate::operatorpb::{
+    CreateNeighbourTableRequest, ListNeighbourTablesRequest, ListNeighboursRequest,
+    NeighbourEntry as ProtoNeighbourEntry, RemoveNeighbourTableRequest, RemoveNeighboursRequest,
+    UpdateNeighbourTableRequest, UpdateNeighboursRequest, neighbour_service_client::NeighbourServiceClient,
+};
+
+#[allow(clippy::all, non_snake_case)]
+pub mod operatorpb {
+    tonic::include_proto!("operatorpb");
 }
 
-/// Neighbour module.
+/// Neighbour operator CLI (neighbour table management).
 #[derive(Debug, Clone, Parser)]
 #[command(version, about)]
 #[command(flatten_help = true)]
@@ -40,7 +51,7 @@ pub struct Cmd {
 
 #[derive(Debug, Clone, Parser)]
 pub enum ModeCmd {
-    /// Show current neighbors.
+    /// Show current neighbours.
     Show(ShowCmd),
     /// Add one or more static neighbour entries.
     Add(AddCmd),
@@ -89,15 +100,11 @@ pub struct AddCmd {
     /// Network interface name.
     #[arg(long)]
     pub device: Option<String>,
-    /// Neighbour table name.
-    ///
-    /// Defaults to "static".
+    /// Neighbour table name. Defaults to "static".
     #[arg(long)]
     pub table: Option<String>,
-    /// Priority for this entry.
-    ///
-    /// Lower value means higher priority.
-    /// Defaults to the table's default priority.
+    /// Priority for this entry (lower wins). Defaults to the table's
+    /// default priority.
     #[arg(long)]
     pub priority: Option<u32>,
 }
@@ -106,9 +113,7 @@ pub struct AddCmd {
 pub struct RemoveCmd {
     /// Next-hop IP address(es) to remove.
     pub next_hops: Vec<String>,
-    /// Neighbour table name.
-    ///
-    /// Defaults to "static".
+    /// Neighbour table name. Defaults to "static".
     #[arg(long)]
     pub table: Option<String>,
 }
@@ -166,26 +171,19 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
     }
 }
 
-/// Service for interacting with the neighbour module of the YANET router.
-///
-/// Provides methods to retrieve and display neighbor information through
-/// gRPC communication with the control plane.
 pub struct NeighbourService {
-    client: NeighbourClient<LayeredChannel>,
+    client: NeighbourServiceClient<LayeredChannel>,
 }
 
 impl NeighbourService {
-    /// Creates a new NeighbourService connected to the specified endpoint.
     pub async fn new(connection: &ConnectionArgs) -> Result<Self, Box<dyn Error>> {
         let channel = ync::client::connect(connection).await?;
-        let client = NeighbourClient::new(channel)
+        let client = NeighbourServiceClient::new(channel)
             .send_compressed(CompressionEncoding::Gzip)
             .accept_compressed(CompressionEncoding::Gzip);
         Ok(Self { client })
     }
 
-    /// Retrieves and displays the current neighbor table in a formatted
-    /// table.
     pub async fn show_neighbours(&mut self, table: Option<String>) -> Result<(), Box<dyn Error>> {
         let request = ListNeighboursRequest { table: table.unwrap_or_default() };
         let response = self.client.list(request).await?.into_inner();
@@ -222,11 +220,9 @@ impl NeighbourService {
         entries.sort_by(|a, b| (a.state, &a.next_hop).cmp(&(b.state, &b.next_hop)));
 
         print_table(entries);
-
         Ok(())
     }
 
-    /// Adds or updates a neighbour entry.
     pub async fn update_neighbour(&mut self, args: AddCmd) -> Result<(), Box<dyn Error>> {
         let link_addr = parse_mac(&args.link_addr)?;
         let hardware_addr = parse_mac(&args.hardware_addr)?;
@@ -248,7 +244,6 @@ impl NeighbourService {
         Ok(())
     }
 
-    /// Removes one or more neighbour entries.
     pub async fn remove_neighbours(&mut self, args: RemoveCmd) -> Result<(), Box<dyn Error>> {
         let request = RemoveNeighboursRequest {
             table: args.table.unwrap_or_default(),
@@ -260,7 +255,6 @@ impl NeighbourService {
         Ok(())
     }
 
-    /// Lists all neighbour tables.
     pub async fn list_tables(&mut self) -> Result<(), Box<dyn Error>> {
         let response = self
             .client
@@ -283,34 +277,28 @@ impl NeighbourService {
         Ok(())
     }
 
-    /// Creates a new neighbour table.
     pub async fn create_table(&mut self, args: CreateTableCmd) -> Result<(), Box<dyn Error>> {
         let request = CreateNeighbourTableRequest {
             name: args.name,
             default_priority: args.default_priority,
         };
-
         self.client.create_table(request).await?;
         println!("OK");
         Ok(())
     }
 
-    /// Updates an existing neighbour table.
     pub async fn update_table(&mut self, args: UpdateTableCmd) -> Result<(), Box<dyn Error>> {
         let request = UpdateNeighbourTableRequest {
             name: args.name,
             default_priority: args.default_priority,
         };
-
         self.client.update_table(request).await?;
         println!("OK");
         Ok(())
     }
 
-    /// Removes a neighbour table.
     pub async fn remove_table(&mut self, args: RemoveTableCmd) -> Result<(), Box<dyn Error>> {
         let request = RemoveNeighbourTableRequest { name: args.name };
-
         self.client.remove_table(request).await?;
         println!("OK");
         Ok(())
@@ -320,4 +308,70 @@ impl NeighbourService {
 fn parse_mac(s: &str) -> Result<MacAddress, Box<dyn Error>> {
     let mac: MacAddr = s.parse()?;
     Ok(MacAddress { addr: mac.as_u64() })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct State(pub i32);
+
+impl Display for State {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
+        let v = match self {
+            Self(0x00) => "NONE",
+            Self(0x01) => "INCOMPLETE",
+            Self(0x02) => "REACHABLE",
+            Self(0x04) => "STALE",
+            Self(0x08) => "DELAY",
+            Self(0x10) => "PROBE",
+            Self(0x20) => "FAILED",
+            Self(0x40) => "NOARP",
+            Self(0x80) => "PERMANENT",
+            Self(..) => "UNKNOWN",
+        };
+        write!(f, "{v}")
+    }
+}
+
+#[derive(Debug)]
+pub struct Age(pub SystemTime);
+
+impl Display for Age {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
+        let now = SystemTime::now();
+        let duration = match self {
+            Self(timestamp) => now.duration_since(*timestamp).unwrap_or_default(),
+        };
+        write!(f, "{duration:.2?}")
+    }
+}
+
+#[derive(Debug, Tabled)]
+pub struct NeighbourEntry {
+    #[tabled(rename = "NEXTHOP")]
+    pub next_hop: IpAddr,
+    #[tabled(rename = "NEIGHBOUR MAC")]
+    pub link_addr: MacAddr,
+    #[tabled(rename = "INTERFACE MAC")]
+    pub hardware_addr: MacAddr,
+    #[tabled(rename = "DEVICE")]
+    pub device: String,
+    #[tabled(rename = "STATE")]
+    pub state: State,
+    #[tabled(rename = "AGE")]
+    pub age: Age,
+    #[tabled(rename = "SOURCE")]
+    pub source: String,
+    #[tabled(rename = "PRIORITY")]
+    pub priority: u32,
+}
+
+#[derive(Debug, Tabled)]
+pub struct TableEntry {
+    #[tabled(rename = "NAME")]
+    pub name: String,
+    #[tabled(rename = "DEFAULT PRIORITY")]
+    pub default_priority: u32,
+    #[tabled(rename = "ENTRIES")]
+    pub entry_count: i64,
+    #[tabled(rename = "BUILT-IN")]
+    pub built_in: bool,
 }

@@ -1,15 +1,16 @@
-package routepb
+package operatorpb
 
 import (
 	"fmt"
 	"net/netip"
 	"time"
 
-	"github.com/yanet-platform/yanet2/modules/route/internal/rib"
+	"github.com/yanet-platform/yanet2/agents/yanet-route-operator/internal/rib"
 )
 
+// FromRIBRoute converts an internal rib.Route to the wire Route message.
 func FromRIBRoute(route *rib.Route, isBest bool) *Route {
-	communities := make([]*LargeCommunity, len(route.LargeCommunities))
+	communities := make([]*LargeCommunity, 0, len(route.LargeCommunities))
 	for _, c := range route.LargeCommunities {
 		communities = append(communities, convertLargeCommunity(c))
 	}
@@ -41,6 +42,8 @@ func convertLargeCommunity(community rib.LargeCommunity) *LargeCommunity {
 	}
 }
 
+// ToRIBRoute converts a wire Route message to the internal rib.Route
+// representation.
 func ToRIBRoute(route *Route, toRemove bool) (*rib.Route, error) {
 	if route == nil {
 		return nil, fmt.Errorf("update.Route cannot be nil")
@@ -59,7 +62,6 @@ func ToRIBRoute(route *Route, toRemove bool) (*rib.Route, error) {
 		return nil, err
 	}
 	largeCommunities := make([]rib.LargeCommunity, 0, len(route.LargeCommunities))
-
 	for _, community := range route.LargeCommunities {
 		largeCommunities = append(largeCommunities, rib.LargeCommunity{
 			GlobalAdministrator: community.GetGlobalAdministrator(),
@@ -91,11 +93,10 @@ func ToRIBRoute(route *Route, toRemove bool) (*rib.Route, error) {
 		SourceID:         sourceID,
 		ToRemove:         toRemove,
 	}, nil
-
 }
 
-// RouteSourceID returns the internal rib.RouteSourceID from InsertRouteRequest
-// Defaults to RouteSourceStatic if unknown or unspecified
+// RouteSourceID returns the internal rib.RouteSourceID for an
+// InsertRouteRequest. Defaults to RouteSourceStatic.
 func (m *InsertRouteRequest) RouteSourceID() rib.RouteSourceID {
 	switch m.GetSourceId() {
 	case RouteSourceID_ROUTE_SOURCE_ID_BIRD:
@@ -105,8 +106,8 @@ func (m *InsertRouteRequest) RouteSourceID() rib.RouteSourceID {
 	}
 }
 
-// RouteSourceID returns the internal rib.RouteSourceID from DeleteRouteRequest
-// Defaults to RouteSourceStatic if unknown or unspecified
+// RouteSourceID returns the internal rib.RouteSourceID for a
+// DeleteRouteRequest. Defaults to RouteSourceStatic.
 func (m *DeleteRouteRequest) RouteSourceID() rib.RouteSourceID {
 	switch m.GetSourceId() {
 	case RouteSourceID_ROUTE_SOURCE_ID_BIRD:
