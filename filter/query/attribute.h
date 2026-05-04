@@ -15,23 +15,3 @@ typedef void (*filter_attr_query_func)(
 struct filter_attr_query {
 	filter_attr_query_func query;
 };
-
-#define REGISTER_ATTRIBUTE(name)                                               \
-	static inline void FILTER_ATTR_QUERY_FUNC(name)(                       \
-		void *data,                                                    \
-		struct packet **packets,                                       \
-		uint32_t *result,                                              \
-		uint32_t count                                                 \
-	);
-
-REGISTER_ATTRIBUTE(port_src);
-REGISTER_ATTRIBUTE(port_dst);
-REGISTER_ATTRIBUTE(proto_range);
-REGISTER_ATTRIBUTE(net4_src);
-REGISTER_ATTRIBUTE(net4_dst);
-REGISTER_ATTRIBUTE(net6_src);
-REGISTER_ATTRIBUTE(net6_dst);
-REGISTER_ATTRIBUTE(vlan);
-REGISTER_ATTRIBUTE(device);
-
-#undef REGISTER_ATTRIBUTE

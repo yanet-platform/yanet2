@@ -5,24 +5,11 @@
 
 #include "common/for_each.h"
 
-#define FILTER_ATTR_COMPILER(name) name##_attr_compiler
-
-#define FILTER_ATTR_COMPILER_INIT_FUNC(name) name##_attr_init
-#define FILTER_ATTR_COMPILER_FREE_FUNC(name) name##_attr_free
-
-#define FILTER_ATTR_LOOKUP_HANDLER(name)                                       \
-	{                                                                      \
-		name##_attr_init,                                              \
-		name##_attr_free,                                              \
-	}
+#define FILTER_ATTR_COMPILE(name) &filter_compile_attr_##name.attr_handlers
 
 #define FILTER_COMPILER_DECLARE(tag, ...)                                      \
-	static const struct filter_compiler *tag = &(struct filter_compiler){  \
-		sizeof((struct filter_lookup_handler[]                         \
-		){FOR_EACH(FILTER_ATTR_LOOKUP_HANDLER, __VA_ARGS__)}) /        \
-			sizeof(struct filter_lookup_handler),                  \
-		(struct filter_lookup_handler[]                                \
-		){FOR_EACH(FILTER_ATTR_LOOKUP_HANDLER, __VA_ARGS__)},          \
+	static const struct filter_compile_attr_handlers *tag[] = {            \
+		FOR_EACH(FILTER_ATTR_COMPILE, __VA_ARGS__),                    \
 	};
 
 /*
@@ -183,11 +170,10 @@ filter_compile_attr_compact(uint32_t *value, void *data) {
  * The routine provides the backward compatibility with the current
  * compilation procedure and defined attributes.
  */
-static inline int
+static inline struct filter_query_attr *
 filter_compile_attr_build(
 	const struct filter_compile_attr_handlers *attr_handlers,
 	struct value_registry *registry,
-	void **data,
 	const struct filter_rule **rules,
 	size_t rule_count,
 	struct memory_context *memory_context
@@ -200,7 +186,7 @@ filter_compile_attr_build(
 		memory_context, attr_handlers, rules, rule_count
 	);
 	if (attr == NULL)
-		return -1;
+		return NULL;
 
 	/*
 	 * `remap_table is used to enumerate regions - each rule touch its
@@ -299,14 +285,14 @@ filter_compile_attr_build(
 		}
 	}
 
-	void *dp_data = attr_handlers->commit(memory_context, attr);
-	SET_OFFSET_OF(data, dp_data);
-	if (dp_data == NULL)
+	struct filter_query_attr *query_attr =
+		attr_handlers->commit(memory_context, attr);
+	if (query_attr == NULL)
 		goto error;
 
-	return 0;
+	return query_attr;
 
 error:
 	attr_handlers->free_compile(memory_context, attr);
-	return -1;
+	return NULL;
 }

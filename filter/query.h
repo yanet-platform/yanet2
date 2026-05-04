@@ -22,64 +22,81 @@
 
 ////////////////////////////////////////////////////////////////////////////////
 
-typedef void (*filter_lookup_query_func)(
-	void *data,
-	struct packet **packets,
-	uint32_t *results,
-	uint32_t packet_count
-);
-
-struct filter_query {
-	uint64_t lookup_count;
-	filter_lookup_query_func *lookups;
-};
+static inline void
+filter_process_joint(
+	struct value_table *value_table,
+	uint32_t *v_values,
+	uint32_t *h_values,
+	uint32_t *o_values,
+	uint32_t count
+) {
+	for (uint32_t idx = 0; idx < count; ++idx) {
+		o_values[idx] = value_table_get(
+			value_table, v_values[idx], h_values[idx]
+		);
+	}
+}
 
 static inline void
-filter_query(
+filter_lookup(
 	struct filter *filter,
-	const struct filter_query *filter_query,
-	struct packet **packets,
+	const struct filter_query_attr_handlers *attr_handlers[],
+	uint32_t attr_handler_count,
+	const struct packet **packets,
 	uint32_t *results,
 	uint32_t packet_count
 ) {
-	/* Local slots storage */
-	uint32_t __slots[2 * MAX_ATTRIBUTES * packet_count + 1];
-	/* compute classifiers for leaf attributes into parent slots
+	if (packet_count == 0)
+		return;
+	uint32_t joint_count = attr_handler_count - 1;
+	uint32_t values[packet_count * (attr_handler_count + joint_count)];
+	uint32_t values_pos = 0;
+
+	struct filter_query_attr **attrs = ADDR_OF(&filter->attrs);
+	/*
+	 * Retrieve attribute values for each rule
 	 */
-	for (size_t __ai = 0; __ai < filter_query->lookup_count; ++__ai) {
-		size_t __vtx = filter_query->lookup_count + __ai;
-		const struct filter_vertex *__v = &(filter)->v[__vtx];
-		filter_query->lookups[__ai](
-			ADDR_OF(&__v->data),
+	for (uint32_t attr_idx = 0; attr_idx < attr_handler_count; ++attr_idx) {
+		const struct filter_query_attr *attr =
+			ADDR_OF(attrs + attr_idx);
+		attr_handlers[attr_idx]->lookup(
+			attr,
+			attr_handlers[attr_idx],
 			packets,
-			__slots + __vtx * packet_count,
+			values + values_pos,
 			packet_count
 		);
+
+		values_pos += packet_count;
 	}
-	/* compute inner vertices except root, pushing up to parent */
-	for (size_t __vtx = filter_query->lookup_count - 1; __vtx >= 2;
-	     --__vtx) {
-		struct filter_vertex *__v = &(filter)->v[__vtx];
-		for (uint32_t idx = 0; idx < packet_count; ++idx) {
-			uint32_t __c = value_table_get(
-				&__v->table,
-				__slots[(__vtx << 1) * packet_count + idx],
-				__slots[(__vtx << 1 | 1) * packet_count + idx]
-			);
-			__slots[__vtx * packet_count + idx] = __c;
-		}
-	}
-	/* root (1 when n>1, else 0) */
-	const size_t __root = filter_query->lookup_count > 1;
-	struct filter_vertex *__r = &(filter)->v[__root];
-	for (uint32_t idx = 0; idx < packet_count; ++idx) {
-		uint32_t __res = value_table_get(
-			&__r->table,
-			__root == 0
-				? 0
-				: __slots[(__root << 1) * packet_count + idx],
-			__slots[(__root << 1 | 1) * packet_count + idx]
+
+	/*
+	 * Combine pair of values to get a next one value. The last of the
+	 * values for each packet is a rule index.
+	 */
+	struct value_table *joints = ADDR_OF(&filter->joints);
+	for (uint32_t joint_idx = 0; joint_idx < joint_count; ++joint_idx) {
+		filter_process_joint(
+			joints + joint_idx,
+			values + joint_idx * 2 * packet_count,
+			values + (joint_idx * 2 + 1) * packet_count,
+			values + values_pos,
+			packet_count
 		);
-		(results)[idx] = __res;
+		values_pos += packet_count;
 	}
+
+	memcpy(results,
+	       values + values_pos - packet_count,
+	       sizeof(uint32_t) * packet_count);
 }
+
+#define filter_query(filter, sign, packets, results, count)                    \
+	filter_lookup(                                                         \
+		filter,                                                        \
+		sign,                                                          \
+		sizeof(sign) / sizeof(*sign),                                  \
+		(const struct packet **)packets,                               \
+		results,                                                       \
+		count                                                          \
+	)

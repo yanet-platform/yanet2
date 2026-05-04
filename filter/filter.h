@@ -36,41 +36,15 @@
 
 struct filter_query_attr {};
 
-/**
- * @def MAX_ATTRIBUTES
- * @brief Upper bound on attribute count in a filter signature.
- * Increase with care; affects vertex storage and slot sizing.
- */
-#define MAX_ATTRIBUTES 10
-
-/**
- * @brief A node of the classification tree (leaf or inner).
- *
- * Leaf:
- *  - registry: holds per-attribute value ranges
- *  - data:     attribute-specific payload used by query helper
- * Inner:
- *  - table:    value_table merged from children
- *  - registry: merged registry for next level
- */
-struct filter_vertex {
-	struct value_registry registry;
-	struct value_table table;
-	void *data; // relative pointer compatible
-};
-
-/**
- * @brief Filter instance built for a fixed attribute signature.
- *
- * Layout:
- *  - v: array-based binary tree (1..n-1 inner, n..2n-1 leaves, 0 root when n=1)
- *  - memory_context: owns all registries/tables backing the filter
- *
- * Notes:
- *  - Query is read-only and can be called concurrently.
- *  - Memory of returned actions belongs to this filter.
- */
 struct filter {
-	struct filter_vertex v[2 * MAX_ATTRIBUTES];
+	struct filter_query_attr **attrs;
+	struct value_table *joints;
 	struct memory_context memory_context;
 };
+
+static inline uint64_t
+filter_memory_usage(struct filter *filter) {
+	struct memory_context *mctx = &filter->memory_context;
+	assert(mctx->balloc_size >= mctx->bfree_size);
+	return mctx->balloc_size - mctx->bfree_size;
+}

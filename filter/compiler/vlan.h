@@ -230,8 +230,8 @@ filter_rule_get_vlan_ranges(
 	vlan_ranges->items = rule->vlan_ranges;
 }
 
-static const struct filter_compile_attr_vlan_handlers
-	filter_compile_attr_vlan = {
+static const struct filter_compile_attr_vlan_handlers filter_compile_attr_vlan =
+	{
 		.attr_handlers = filter_compile_attr_vlan_handlers,
 		.get_vlan_ranges = filter_rule_get_vlan_ranges,
 };
