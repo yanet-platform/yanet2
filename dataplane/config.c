@@ -497,6 +497,9 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 			case state_globalstat:
 				state = state_dataplane;
 				break;
+			case state_updatetime:
+				state = state_dataplane;
+				break;
 			default:
 				goto error;
 			}

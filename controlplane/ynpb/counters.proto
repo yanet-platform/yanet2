@@ -17,7 +17,7 @@ service CountersService {
 
 message DeviceCountersRequest { string device = 1; }
 
-message NICCounterRequest { string device = 1; }
+message NICCounterRequest {}
 
 message PipelineCountersRequest {
   string device = 1;
