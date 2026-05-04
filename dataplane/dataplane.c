@@ -791,12 +791,18 @@ dataplane_daemons_start(struct dataplane *dataplane, struct dataplane_config *co
 	struct stat_thread_args {
 		struct dataplane *dataplane;
 		struct dataplane_config *config;
-	} args = {
-		.dataplane = dataplane,
-		.config = config,
 	};
+	
+	struct stat_thread_args *args = malloc(sizeof(struct stat_thread_args));
+	if (args == NULL) {
+		LOG(ERROR, "failed to allocate memory for stat_thread_args");
+		return -1;
+	}
 
-	pthread_create(&thread_id, NULL, stat_nic_thread, &args);
+	args->dataplane = dataplane;
+	args->config = config;
+
+	pthread_create(&thread_id, NULL, stat_nic_thread, args);
 
 	return 0;
 }

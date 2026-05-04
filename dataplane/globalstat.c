@@ -115,6 +115,10 @@ stat_nic_thread(void *arg) {
 		struct dataplane_config *config;
 	} *args = (struct stat_thread_args *)arg;
 	struct dataplane *dataplane = args->dataplane;
+	struct dataplane_config *config = args->config;
+	
+	free(args);
+
 	struct dp_config *dp_config = dataplane->global_dp_config;
 	
 	for (size_t i = 0; i < ARRAY_SIZE(global_counter_info); ++i) {
@@ -139,7 +143,7 @@ stat_nic_thread(void *arg) {
 	}
 
 	while (1) {
-		sleep(args->config->updatetimes.nic_updatetime);
+		sleep(config->updatetimes.nic_updatetime);
 
 		for (uint16_t idx = 0; idx < dataplane->device_count; ++idx) {
 			rte_eth_stats_get(dataplane->devices[idx].port_id, &stats_cur[idx]);
