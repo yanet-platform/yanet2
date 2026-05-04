@@ -90,6 +90,9 @@ main(int argc, char **argv) {
 	LOG(INFO, "start dataplane");
 	dataplane_start(&dataplane);
 
+	LOG(INFO, "start dataplane daemons");
+	dataplane_daemons_start(&dataplane, config);
+
 	// FIXME: infinite sleep effectively
 	LOG(INFO, "wait dataplane");
 	dataplane_stop(&dataplane);

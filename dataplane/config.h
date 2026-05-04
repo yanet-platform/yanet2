@@ -38,6 +38,10 @@ struct dataplane_globalstat_config {
 	uint64_t cp_memory;
 };
 
+struct dataplane_events_updatetime {
+    uint64_t nic_updatetime;
+};
+
 
 struct dataplane_config {
 	char storage[80];
@@ -54,6 +58,8 @@ struct dataplane_config {
 	struct dataplane_connection_config *connections;
 
 	struct dataplane_globalstat_config globalstat;
+	struct dataplane_events_updatetime updatetimes;
+	
 	char loglevel[32];
 };
 

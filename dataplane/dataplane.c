@@ -442,14 +442,8 @@ dataplane_init(
 			instance_config->cp_memory + instance_config->dp_memory;
 	}
 
-	LOG(INFO,
-		"storage size is %ld bytes",
-		(uint64_t)storage_size);
 	storage_size += config->globalstat.cp_memory + config->globalstat.dp_memory;
-	
-	LOG(INFO,
-		"storage size is %ld bytes after globalstat_configs",
-		(uint64_t)storage_size);
+
 	// FIXME: handle errors
 	int mem_fd = open(
 		config->storage, O_CREAT | O_TRUNC | O_RDWR, S_IRUSR | S_IWUSR
@@ -740,7 +734,7 @@ dataplane_init(
 		counter_storage_allocator_init(
 			&dp_config->counter_storage_allocator,
 			&dp_config->memory_context,
-			1
+			1 // only for global counters
 		);
 		
 		struct cp_config *cp_config = dataplane->global_cp_config;
@@ -786,8 +780,23 @@ dataplane_start(struct dataplane *dataplane) {
 	for (size_t dev_idx = 0; dev_idx < dataplane->device_count; ++dev_idx) {
 		dataplane_device_start(dataplane, dataplane->devices + dev_idx);
 	}
+	
+	return 0;
+}
+
+int
+dataplane_daemons_start(struct dataplane *dataplane, struct dataplane_config *config) {
 	pthread_t thread_id;
-	pthread_create(&thread_id, NULL, stat_thread, dataplane);
+
+	struct stat_thread_args {
+		struct dataplane *dataplane;
+		struct dataplane_config *config;
+	} args = {
+		.dataplane = dataplane,
+		.config = config,
+	};
+
+	pthread_create(&thread_id, NULL, stat_nic_thread, &args);
 
 	return 0;
 }

@@ -39,6 +39,9 @@ int
 dataplane_start(struct dataplane *dataplane);
 
 int
+dataplane_daemons_start(struct dataplane *dataplane, struct dataplane_config *config);
+
+int
 dataplane_stop(struct dataplane *dataplane);
 
 struct dp_config;

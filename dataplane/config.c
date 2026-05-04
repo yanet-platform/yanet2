@@ -43,6 +43,10 @@ enum state {
 	state_globalstat,
 	state_globalstat_dp_memory,
 	state_globalstat_cp_memory,
+
+	state_updatetimes,
+	state_updatetime,
+	state_updatetime_nic_updatetime,
 };
 
 int
@@ -224,6 +228,13 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 					goto error;
 				state = state_connection;
 				break;
+			case state_updatetime_nic_updatetime:
+				dataplane->updatetimes.nic_updatetime =
+					strtol(start, &end, 10);
+				if (*end != '\0')
+					goto error;
+				state = state_updatetime;
+				break;
 
 			case state_empty:
 				if (!strcmp("dataplane", start)) {
@@ -245,6 +256,8 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 					state = state_connections;
 				} else if (!strcmp("globalstats", start)) { 
 					state = state_globalstats;
+				} else if (!strcmp("updatetimes", start)) {
+					state = state_updatetimes;
 				} else if (!strcmp("loglevel", start)) {
 					state = state_loglevel;
 				} else {
@@ -314,7 +327,13 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 				} else {
 					goto error;
 				}
-
+				break;
+			case state_updatetime:
+				if (!strcmp("nic_updatetime", start)) {
+					state = state_updatetime_nic_updatetime;
+				} else {
+					goto error;
+				}
 				break;
 			default:
 				goto error;
@@ -353,6 +372,9 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 			case state_globalstats:
 				state = state_dataplane;
 				break;
+			case state_updatetimes:
+				state = state_dataplane;
+				break;
 			default:
 				goto error;
 			}
@@ -366,6 +388,10 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 				break;
 			case state_globalstats: {
 				state = state_globalstat;
+				break;
+			}
+			case state_updatetimes: {
+				state = state_updatetime;
 				break;
 			}
 			case state_instances: {
@@ -490,6 +516,7 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 	// TODO: delete
 	dataplane->globalstat.cp_memory = (1 << 30) / 2;
 	dataplane->globalstat.dp_memory = (1 << 30) / 2;
+	dataplane->updatetimes.nic_updatetime = 1;
 
 	*config = dataplane;
 

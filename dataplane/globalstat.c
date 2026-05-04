@@ -109,10 +109,14 @@ calculate_and_update_stats(
 }
 
 void *
-stat_thread(void *arg) {
-	struct dataplane *dataplane = (struct dataplane *)arg;
+stat_nic_thread(void *arg) {
+	struct stat_thread_args {
+		struct dataplane *dataplane;
+		struct dataplane_config *config;
+	} *args = (struct stat_thread_args *)arg;
+	struct dataplane *dataplane = args->dataplane;
 	struct dp_config *dp_config = dataplane->global_dp_config;
-
+	
 	for (size_t i = 0; i < ARRAY_SIZE(global_counter_info); ++i) {
 		for (size_t j = 0; j < global_counter_info[i].size; ++j) {
 			uint64_t **field_ptr = get_worker_field_ptr(dataplane, i, j);
@@ -135,7 +139,7 @@ stat_thread(void *arg) {
 	}
 
 	while (1) {
-		sleep(1);
+		sleep(args->config->updatetimes.nic_updatetime);
 
 		for (uint16_t idx = 0; idx < dataplane->device_count; ++idx) {
 			rte_eth_stats_get(dataplane->devices[idx].port_id, &stats_cur[idx]);

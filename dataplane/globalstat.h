@@ -20,20 +20,10 @@ struct dataplane_stats {
     struct nic_stats nic_stats;
 };
 
-struct globalstat {
-    const char* stat_name;
-    uint64_t size;
-    uint64_t stat_updatetime;
-};
-
-struct globalstats {
-    struct globalstat* stats;
-};
-
 struct dp_config;
 
 int
 dataplane_globalstat_register_counters(struct dp_config *dp_config);
 
 void *
-stat_thread(void* arg);
+stat_nic_thread(void* arg);
