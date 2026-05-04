@@ -197,7 +197,7 @@ install: dataplane cli-install
 	install -d $(DESTDIR)/etc/yanet2
 	install -m 644 controlplane/etc/yanet/controlplane-director.yaml $(DESTDIR)/etc/yanet2/controlplane.yaml
 	install -m 644 dataplane.yaml $(DESTDIR)/etc/yanet2/dataplane.yaml
-	install -m 644 controlplane/etc/yanet/bird-adapter.yaml $(DESTDIR)/etc/yanet2/bird-adapter.yaml
+	install -m 644 agents/bird-adapter/etc/yanet/bird-adapter.yaml $(DESTDIR)/etc/yanet2/bird-adapter.yaml
 	install -m 644 agents/yanet-pipeline-operator/etc/yanet/yanet-pipeline-operator.yaml $(DESTDIR)/etc/yanet2/yanet-pipeline-operator.yaml
 	install -d $(DESTDIR)/etc/yanet2/forward.d
 	install -m 644 agents/yanet-forward-operator/etc/yanet/forward.d/vlan-phy.yaml $(DESTDIR)/etc/yanet2/forward.d/vlan-phy.yaml

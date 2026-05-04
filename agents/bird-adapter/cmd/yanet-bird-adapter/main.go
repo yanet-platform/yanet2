@@ -6,7 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/yanet-platform/yanet2/controlplane/internal/version"
+	"github.com/yanet-platform/yanet2/agents/bird-adapter/internal/version"
 )
 
 var rootCmd = &cobra.Command{
