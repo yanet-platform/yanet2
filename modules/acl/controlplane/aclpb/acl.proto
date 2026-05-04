@@ -38,7 +38,7 @@ message ShowConfigResponse {
 }
 
 message Rule {
-  Action action = 1;
+  repeated Action actions = 1;
 
   repeated filterpb.Device devices = 2;
   repeated filterpb.VlanRange vlan_ranges = 3;
@@ -52,7 +52,6 @@ message Rule {
 message Action {
   ActionKind kind = 1;
   string counter = 2;
-  bool keep_state = 3;
 }
 
 // Defines possible actions for matched traffic
@@ -60,8 +59,10 @@ enum ActionKind {
   ACTION_KIND_PASS = 0;
   ACTION_KIND_DENY = 1;
   ACTION_KIND_COUNT = 2;
-  ACTION_KIND_CHECK_STATE = 3;
-  ACTION_KIND_CREATE_STATE = 4;
+  ACTION_KIND_SKIPTO = 3;
+  ACTION_KIND_CHECK_STATE = 4;
+  ACTION_KIND_CREATE_STATE = 5;
+  ACTION_KIND_LOG = 6;
 }
 
 // Delete config with specified name.

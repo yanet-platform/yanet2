@@ -63,7 +63,33 @@ func (m *ACLService) newHandlerTracker(name string) *handlerMetricTracker {
 	)
 }
 
-////////////////////////////////////////////////////////////////////////////////
+// //////////////////////////////////////////////////////////////////////////////
+func terminalAction(protoActions []*aclpb.Action) AclAction {
+	const (
+		cACLActionAllow       = 0
+		cACLActionDeny        = 1
+		cACLActionCheckState  = 3
+		cACLActionCreateState = 4
+	)
+
+	if len(protoActions) == 0 {
+		return AclAction{ID: cACLActionAllow}
+	}
+
+	a := protoActions[len(protoActions)-1]
+	switch a.GetKind() {
+	case aclpb.ActionKind_ACTION_KIND_PASS:
+		return AclAction{ID: cACLActionAllow, Counter: a.GetCounter()}
+	case aclpb.ActionKind_ACTION_KIND_DENY:
+		return AclAction{ID: cACLActionDeny, Counter: a.GetCounter()}
+	case aclpb.ActionKind_ACTION_KIND_CHECK_STATE:
+		return AclAction{ID: cACLActionCheckState, Counter: a.GetCounter()}
+	case aclpb.ActionKind_ACTION_KIND_CREATE_STATE:
+		return AclAction{ID: cACLActionCreateState, Counter: a.GetCounter()}
+	default:
+		return AclAction{ID: cACLActionDeny, Counter: a.GetCounter()}
+	}
+}
 
 func convertRules(reqRules []*aclpb.Rule) ([]AclRule, error) {
 	rules := make([]AclRule, 0, len(reqRules))
@@ -106,7 +132,7 @@ func convertRules(reqRules []*aclpb.Rule) ([]AclRule, error) {
 		}
 
 		rule := AclRule{
-			Counter:       reqRule.Action.Counter,
+			Actions:       []AclAction{terminalAction(reqRule.Actions)},
 			Devices:       devices,
 			VlanRanges:    vlanRanges,
 			Src4s:         src4s,
@@ -116,21 +142,6 @@ func convertRules(reqRules []*aclpb.Rule) ([]AclRule, error) {
 			ProtoRanges:   protoRanges,
 			SrcPortRanges: srcPortRanges,
 			DstPortRanges: dstPortRanges,
-		}
-
-		switch reqRule.Action.Kind {
-		case aclpb.ActionKind_ACTION_KIND_PASS:
-			rule.Action = 0 // ACL_ACTION_ALLOW
-		case aclpb.ActionKind_ACTION_KIND_DENY:
-			rule.Action = 1 // ACL_ACTION_DENY
-		case aclpb.ActionKind_ACTION_KIND_COUNT:
-			rule.Action = 2 // ACL_ACTION_COUNT
-		case aclpb.ActionKind_ACTION_KIND_CHECK_STATE:
-			rule.Action = 3 // ACL_ACTION_CHECK_STATE
-		case aclpb.ActionKind_ACTION_KIND_CREATE_STATE:
-			rule.Action = 4 // ACL_ACTION_CREATE_STATE
-		default:
-			rule.Action = 1 // ACL_ACTION_DENY
 		}
 
 		rules = append(rules, rule)

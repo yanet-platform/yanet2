@@ -89,8 +89,7 @@ func gaugeVal(m *commonpb.Metric) float64 {
 // passRule builds a simple IPv4 UDP PASS rule for the default device
 func passRule(src, dst, counter string) acl.AclRule {
 	return acl.AclRule{
-		Action:        0,
-		Counter:       counter,
+		Actions:       []acl.AclAction{{ID: 0, Counter: counter}}, // PASS
 		Devices:       []filter.Device{{Name: defaultDeviceName}},
 		Src4s:         []filter.IPNet{{Addr: netip.MustParseAddr(src), Mask: netip.MustParseAddr("255.255.255.255")}},
 		Dst4s:         []filter.IPNet{{Addr: netip.MustParseAddr(dst), Mask: netip.MustParseAddr("255.255.255.255")}},
@@ -104,7 +103,7 @@ func passRule(src, dst, counter string) acl.AclRule {
 
 func denyRule(src, dst string) acl.AclRule {
 	r := passRule(src, dst, "")
-	r.Action = 1
+	r.Actions = []acl.AclAction{{ID: 1}} // DENY
 	return r
 }
 
@@ -216,7 +215,7 @@ func ip4b(addr string) []byte { return net.ParseIP(addr).To4() }
 func makeProtoRule(src, dst string, kind aclpb.ActionKind) *aclpb.Rule {
 	mask := ip4b("255.255.255.255")
 	return &aclpb.Rule{
-		Action:        &aclpb.Action{Kind: kind},
+		Actions:       []*aclpb.Action{{Kind: kind}},
 		Devices:       []*filterpb.Device{{Name: defaultDeviceName}},
 		Srcs:          []*filterpb.IPNet{{Addr: ip4b(src), Mask: mask}},
 		Dsts:          []*filterpb.IPNet{{Addr: ip4b(dst), Mask: mask}},
