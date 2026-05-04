@@ -1,3 +1,4 @@
+#include "filter/classifiers/net4.h"
 #include "../rule.h"
 #include "common/lpm.h"
 #include "common/range_collector.h"
@@ -7,67 +8,216 @@
 #include "declare.h"
 #include "helper.h"
 
-////////////////////////////////////////////////////////////////////////////////
-
-typedef void (*rule_get_net4_func)(
-	const struct filter_rule *rule, struct net4 **net, uint32_t *count
+typedef void (*filter_rule_get_net4s_func)(
+	const struct filter_rule *filter_rule, struct filter_net4s *net
 );
 
-static inline void
-action_get_net4_src(
-	const struct filter_rule *rule, struct net4 **net, uint32_t *count
+struct filter_compile_net_attr {
+	struct filter_compile_attr attr;
+	struct filter_query_attr_net4 *query_attr;
+
+	struct range_index range_index;
+	struct value_table value_table;
+};
+
+struct filter_compile_attr_net4_handlers {
+	struct filter_compile_attr_handlers attr_handlers;
+	filter_rule_get_net4s_func get_net4s;
+};
+
+static inline struct filter_compile_attr *
+filter_compile_attr_net_create(
+	struct memory_context *memory_context,
+	const struct filter_compile_attr_handlers *attr_handlers,
+	const struct filter_rule **rules,
+	uint32_t rule_count
 ) {
-	*net = rule->net4.srcs;
-	*count = rule->net4.src_count;
+	struct filter_compile_attr_net4_handlers *net_handlers = container_of(
+		attr_handlers,
+		struct filter_compile_attr_net4_handlers,
+		attr_handlers
+	);
+
+	struct filter_compile_net_attr *attr = memory_balloc(
+		memory_context, sizeof(struct filter_compile_net_attr)
+	);
+	if (attr == NULL) {
+		return NULL;
+	}
+
+	struct range_collector collector;
+	if (range_collector_init(&collector, memory_context))
+		goto error_free;
+
+	for (uint32_t rule_idx = 0; rule_idx < rule_count; ++rule_idx) {
+		const struct filter_rule *rule = rules[rule_idx];
+		if (rule == NULL)
+			continue;
+
+		struct filter_net4s nets;
+		net_handlers->get_net4s(rule, &nets);
+		const struct filter_net4s *net = &nets;
+
+		for (struct net4 *net4 = net->items;
+		     net4 < net->items + net->count;
+		     ++net4) {
+			uint8_t from[4];
+			for (uint32_t idx = 0; idx < 4; ++idx) {
+				from[idx] = net4->addr[idx] & net4->mask[idx];
+			}
+
+			if (range4_collector_add(
+				    &collector,
+				    from,
+				    __builtin_popcountll(*(uint32_t *)net4->mask
+				    )
+			    )) {
+				goto error_collector;
+			}
+		}
+	}
+
+	if (range_index_init(&attr->range_index, memory_context)) {
+		goto error_collector;
+	}
+
+	attr->query_attr = (struct filter_query_attr_net4 *)memory_balloc(
+		memory_context, sizeof(struct filter_query_attr_net4)
+	);
+	if (attr->query_attr == NULL)
+		goto error_range_index;
+
+	// FIXME lpm should be built while commit
+	if (lpm_init(&attr->query_attr->lpm, memory_context)) {
+		goto error_query;
+	}
+
+	if (range_collector_collect(
+		    &collector, 4, &attr->query_attr->lpm, &attr->range_index
+	    )) {
+		goto error_collect;
+	}
+
+	if (value_table_init(
+		    &attr->value_table, memory_context, 1, collector.count
+	    )) {
+		goto error_collect;
+	}
+
+	range_collector_free(&collector, 4);
+
+	return &attr->attr;
+
+error_collect:
+	lpm_free(&attr->query_attr->lpm);
+
+error_query:
+	memory_bfree(
+		memory_context,
+		attr->query_attr,
+		sizeof(struct filter_query_attr_net4)
+	);
+
+error_range_index:
+	range_index_free(&attr->range_index);
+
+error_collector:
+	range_collector_free(&collector, 4);
+
+error_free:
+	memory_bfree(
+		memory_context, attr, sizeof(struct filter_compile_net_attr)
+	);
+
+	return NULL;
 }
 
-static inline void
-action_get_net4_dst(
-	const struct filter_rule *action, struct net4 **net, uint32_t *count
-) {
-	*net = action->net4.dsts;
-	*count = action->net4.dst_count;
-}
+static inline uint32_t
+filter_compile_attr_net_size(const struct filter_compile_attr *attr) {
+	struct filter_compile_net_attr *net_attr =
+		container_of(attr, struct filter_compile_net_attr, attr);
 
-static inline void
-net4_normalize(struct net4 *src, struct net4 *dst) {
-	memcpy(dst->addr, src->addr, 4);
-	memcpy(dst->mask, src->mask, 4);
-	for (uint8_t idx = 0; idx < 4; ++idx)
-		dst->addr[idx] &= src->mask[idx];
+	return net_attr->value_table.v_dim * net_attr->value_table.h_dim;
 }
 
 static inline int
-net4_collect_values(
-	struct net4 *start,
-	uint32_t count,
-	struct range_index *range_index,
-	struct value_table *table,
-	struct remap_table *remap_table
+filter_compile_attr_net_rule_is_any(
+	const struct filter_compile_attr *attr,
+	const struct filter_compile_attr_handlers *attr_handlers,
+	const struct filter_rule *rule
 ) {
-	uint32_t *values = ADDR_OF(&range_index->values);
 
-	for (struct net4 *net4 = start; net4 < start + count; ++net4) {
-		if (*(uint32_t *)net4->mask == 0x00000000)
-			continue;
-		struct net4 normalized;
-		net4_normalize(net4, &normalized);
-		uint32_t to = *(uint32_t *)normalized.addr |
-			      ~*(uint32_t *)normalized.mask;
-		filter_key_inc(4, (uint8_t *)&to);
+	struct filter_compile_attr_net4_handlers *net_handlers = container_of(
+		attr_handlers,
+		struct filter_compile_attr_net4_handlers,
+		attr_handlers
+	);
+
+	(void)attr;
+
+	struct filter_net4s nets;
+	net_handlers->get_net4s(rule, &nets);
+
+	return nets.count == 0 ||
+	       (nets.items[0].mask[0] == 0 && nets.items[0].mask[1] == 0 &&
+		nets.items[0].mask[2] == 0 && nets.items[0].mask[3] == 0);
+}
+
+static inline int
+filter_compile_attr_net_iterate(
+	struct filter_compile_attr *attr,
+	const struct filter_compile_attr_handlers *attr_handlers,
+	const struct filter_rule *rule,
+	filter_compile_attr_iter_cb_func iter_cb_func,
+	void *cb_func_data
+) {
+	struct filter_compile_attr_net4_handlers *net_handlers = container_of(
+		attr_handlers,
+		struct filter_compile_attr_net4_handlers,
+		attr_handlers
+	);
+
+	struct filter_compile_net_attr *net_attr =
+		container_of(attr, struct filter_compile_net_attr, attr);
+
+	struct filter_net4s nets;
+	net_handlers->get_net4s(rule, &nets);
+	const struct filter_net4s *net = &nets;
+
+	uint32_t *range_index_values = ADDR_OF(&net_attr->range_index.values);
+
+	for (uint32_t net_idx = 0; net_idx < net->count; ++net_idx) {
+		const struct net4 *net4 = net->items + net_idx;
+
+		uint8_t from[4];
+		uint8_t to[4];
+		for (uint32_t idx = 0; idx < 4; ++idx) {
+			from[idx] = net4->addr[idx] & net4->mask[idx];
+			to[idx] = net4->addr[idx] | ~net4->mask[idx];
+		}
+		filter_key_inc(4, to);
 
 		uint32_t start =
-			radix_lookup(&range_index->radix, 4, normalized.addr);
-		uint32_t stop = range_index->count;
-		if (to != 0)
-			stop = radix_lookup(
-				&range_index->radix, 4, (uint8_t *)&to
-			);
+			radix_lookup(&net_attr->range_index.radix, 4, from);
+		uint32_t stop =
+			radix_lookup(&net_attr->range_index.radix, 4, to);
+		if (stop == 0) {
+			/*
+			 * The only chance get zero here is for the last one
+			 * item.
+			 */
+			stop = net_attr->range_index.count;
+		}
 
 		for (uint32_t idx = start; idx < stop; ++idx) {
-			uint32_t *value =
-				value_table_get_ptr(table, 0, values[idx]);
-			if (remap_table_touch(remap_table, *value, value) < 0) {
+			if (iter_cb_func(
+				    value_table_get_ptr(
+					    &net_attr->value_table,
+					    0,
+					    range_index_values[idx]
+				    ),
+				    cb_func_data
+			    )) {
 				return -1;
 			}
 		}
@@ -76,226 +226,168 @@ net4_collect_values(
 	return 0;
 }
 
-static inline void
-net4_collect_registry(
-	struct net4 *start,
-	uint32_t count,
-	struct lpm *lpm,
-	struct value_registry *registry
+static inline int
+filter_compile_attr_net_iterate_any(
+	struct filter_compile_attr *attr,
+	const struct filter_compile_attr_handlers *attr_handlers,
+	filter_compile_attr_iter_cb_func iter_cb_func,
+	void *cb_func_data
 ) {
-	for (struct net4 *net4 = start; net4 < start + count; ++net4) {
-		struct net4 normalized;
-		net4_normalize(net4, &normalized);
-		uint32_t addr = *(uint32_t *)normalized.addr;
-		uint32_t mask = *(uint32_t *)normalized.mask;
-		uint32_t to = addr | ~mask;
-		lpm4_collect_values(
-			lpm,
-			(uint8_t *)&addr,
-			(uint8_t *)&to,
-			lpm_collect_registry_iterator,
-			registry
+	(void)attr_handlers;
+
+	struct filter_compile_net_attr *net_attr =
+		container_of(attr, struct filter_compile_net_attr, attr);
+
+	for (uint32_t idx = 0; idx < net_attr->value_table.h_dim; ++idx) {
+		if (iter_cb_func(
+			    value_table_get_ptr(&net_attr->value_table, 0, idx),
+			    cb_func_data
+		    )) {
+			return -1;
+		}
+	}
+
+	return 0;
+}
+
+static inline void
+filter_compile_attr_net_free(
+	struct memory_context *memory_context, struct filter_compile_attr *attr
+) {
+	struct filter_compile_net_attr *net_attr =
+		container_of(attr, struct filter_compile_net_attr, attr);
+
+	if (net_attr->query_attr != NULL) {
+		lpm_free(&net_attr->query_attr->lpm);
+		memory_bfree(
+			memory_context,
+			net_attr->query_attr,
+			sizeof(struct filter_query_attr_net4)
 		);
 	}
+
+	range_index_free(&net_attr->range_index);
+	value_table_free(&net_attr->value_table);
+
+	memory_bfree(
+		memory_context, attr, sizeof(struct filter_compile_net_attr)
+	);
 }
 
-static inline int
-collect_net4_values(
-	struct memory_context *memory_context,
-	const struct filter_rule **actions,
-	uint32_t count,
-	rule_get_net4_func get_net4,
-	struct lpm *lpm,
-	struct value_registry *registry
+static inline struct filter_query_attr *
+filter_compile_attr_net_commit(
+	struct memory_context *memory_context, struct filter_compile_attr *attr
 ) {
-	struct range_collector collector;
-	if (range_collector_init(&collector, memory_context))
-		goto error;
+	struct filter_compile_net_attr *net_attr =
+		container_of(attr, struct filter_compile_net_attr, attr);
 
-	for (const struct filter_rule **action_ptr = actions;
-	     action_ptr < actions + count;
-	     ++action_ptr) {
-		if (*action_ptr == NULL)
-			continue;
-		const struct filter_rule *action = *action_ptr;
+	struct filter_query_attr_net4 *query_attr = net_attr->query_attr;
 
-		if (action->net4.src_count == 0 &&
-		    action->net4.dst_count == 0) {
-			continue;
-		}
+	struct lpm *lpm = &query_attr->lpm;
 
-		struct net4 *nets;
-		uint32_t net_count;
-		get_net4(action, &nets, &net_count);
-
-		for (struct net4 *net4 = nets; net4 < nets + net_count;
-		     ++net4) {
-			struct net4 normalized;
-			net4_normalize(net4, &normalized);
-			if (range4_collector_add(
-				    &collector,
-				    normalized.addr,
-				    __builtin_popcountll(
-					    *(uint32_t *)normalized.mask
-				    )
-			    ))
-				goto error_collector;
-		}
-	}
-	if (lpm_init(lpm, memory_context)) {
-		goto error_collector;
-	}
-	struct range_index range_index;
-	if (range_index_init(&range_index, memory_context)) {
-		goto error_lpm;
-	}
-
-	if (range_collector_collect(&collector, 4, lpm, &range_index)) {
-		goto error_range_collect;
-	}
-
-	struct value_table table;
-	if (value_table_init(&table, memory_context, 1, collector.count))
-		goto error_table;
-
-	struct remap_table remap_table;
-	if (remap_table_init(&remap_table, memory_context, collector.count))
-		goto error_remap;
-
-	for (const struct filter_rule **action_ptr = actions;
-	     action_ptr < actions + count;
-	     ++action_ptr) {
-
-		remap_table_new_gen(&remap_table);
-
-		if (*action_ptr == NULL)
-			continue;
-
-		const struct filter_rule *action = *action_ptr;
-
-		struct net4 *nets;
-		uint32_t net_count;
-		get_net4(action, &nets, &net_count);
-
-		if (net4_collect_values(
-			    nets, net_count, &range_index, &table, &remap_table
-		    )) {
-			goto error_net_collect;
-		}
-	}
-
-	remap_table_compact(&remap_table);
-	value_table_compact(&table, &remap_table);
-	lpm4_remap(lpm, &table);
+	lpm4_remap(lpm, &net_attr->value_table);
 	lpm4_compact(lpm);
-	for (const struct filter_rule **action_ptr = actions;
-	     action_ptr < actions + count;
-	     ++action_ptr) {
-		// A value range should be created even for empty rules
-		value_registry_start(registry);
 
-		if (*action_ptr == NULL)
-			continue;
-		const struct filter_rule *action = *action_ptr;
+	net_attr->query_attr = NULL;
 
-		struct net4 *nets;
-		uint32_t net_count;
-		get_net4(action, &nets, &net_count);
+	filter_compile_attr_net_free(memory_context, attr);
 
-		net4_collect_registry(nets, net_count, lpm, registry);
-	}
-
-	remap_table_free(&remap_table);
-	value_table_free(&table);
-	range_index_free(&range_index);
-	range_collector_free(&collector, 4);
-	return 0;
-
-error_net_collect:
-	remap_table_free(&remap_table);
-
-error_remap:
-	value_table_free(&table);
-
-error_table:
-
-error_range_collect:
-	range_index_free(&range_index);
-
-error_lpm:
-	lpm_free(lpm);
-
-error_collector:
-	range_collector_free(&collector, 4);
-
-error:
-	return -1;
+	return &query_attr->attr;
 }
 
-////////////////////////////////////////////////////////////////////////////////
+static const struct filter_compile_attr_handlers filter_compile_get_net = {
+	.create = filter_compile_attr_net_create,
+	.size = filter_compile_attr_net_size,
+	.rule_iter = filter_compile_attr_net_iterate,
+	.rule_is_any = filter_compile_attr_net_rule_is_any,
+	.iter = filter_compile_attr_net_iterate_any,
+	.commit = filter_compile_attr_net_commit,
+	.free_compile = filter_compile_attr_net_free,
+	.free_query = filter_query_attr_net4_free,
+};
 
-// Allows to initialize attribute for IPv4 source address.
+static inline void
+get_net_src(const struct filter_rule *rule, struct filter_net4s *net) {
+	net->count = rule->net4.src_count;
+	net->items = rule->net4.srcs;
+}
+
+static inline void
+get_net_dst(const struct filter_rule *rule, struct filter_net4s *net) {
+	net->count = rule->net4.dst_count;
+	net->items = rule->net4.dsts;
+}
+
+static const struct filter_compile_attr_net4_handlers
+	filter_compile_attr_net4_src = {
+		.attr_handlers = filter_compile_get_net,
+		.get_net4s = get_net_src,
+};
+
+static const struct filter_compile_attr_net4_handlers
+	filter_compile_attr_net4_dst = {
+		.attr_handlers = filter_compile_get_net,
+		.get_net4s = get_net_dst,
+};
+
 int
 FILTER_ATTR_COMPILER_INIT_FUNC(net4_src)(
 	struct value_registry *registry,
 	void **data,
-	const struct filter_rule **actions,
-	size_t actions_count,
+	const struct filter_rule **rules,
+	size_t rule_count,
 	struct memory_context *memory_context
 ) {
-	struct lpm *lpm = memory_balloc(memory_context, sizeof(struct lpm));
-	SET_OFFSET_OF(data, lpm);
-	return collect_net4_values(
-		memory_context,
-		actions,
-		actions_count,
-		action_get_net4_src,
-		lpm,
-		registry
+	return filter_compile_attr_build(
+		&filter_compile_attr_net4_src.attr_handlers,
+		registry,
+		data,
+		rules,
+		rule_count,
+		memory_context
+
 	);
 }
 
-// Allows to initialize attribute for IPv4 destination address.
 int
 FILTER_ATTR_COMPILER_INIT_FUNC(net4_dst)(
 	struct value_registry *registry,
 	void **data,
-	const struct filter_rule **actions,
-	size_t actions_count,
+	const struct filter_rule **rules,
+	size_t rule_count,
 	struct memory_context *memory_context
 ) {
-	struct lpm *lpm = memory_balloc(memory_context, sizeof(struct lpm));
-	SET_OFFSET_OF(data, lpm);
-	return collect_net4_values(
-		memory_context,
-		actions,
-		actions_count,
-		action_get_net4_dst,
-		lpm,
-		registry
-	);
-}
+	return filter_compile_attr_build(
+		&filter_compile_attr_net4_dst.attr_handlers,
+		registry,
+		data,
+		rules,
+		rule_count,
+		memory_context
 
-// Allows to free data for IPv4 classification.
-static void
-free_net4(void *data, struct memory_context *memory_context) {
-	struct lpm *lpm = (struct lpm *)data;
-	if (lpm == NULL)
-		return;
-	lpm_free(lpm);
-	memory_bfree(memory_context, lpm, sizeof(struct lpm));
+	);
 }
 
 void
 FILTER_ATTR_COMPILER_FREE_FUNC(net4_src)(
 	void *data, struct memory_context *memory_context
 ) {
-	free_net4(data, memory_context);
+	struct filter_query_attr_net4 *attr =
+		(struct filter_query_attr_net4 *)data;
+	if (attr == NULL)
+		return;
+
+	filter_query_attr_net4_free(memory_context, &attr->attr);
 }
 
 void
 FILTER_ATTR_COMPILER_FREE_FUNC(net4_dst)(
 	void *data, struct memory_context *memory_context
 ) {
-	free_net4(data, memory_context);
+	struct filter_query_attr_net4 *attr =
+		(struct filter_query_attr_net4 *)data;
+	if (attr == NULL)
+		return;
+
+	filter_query_attr_net4_free(memory_context, &attr->attr);
 }
