@@ -73,7 +73,7 @@ extract_tcp(
 
 	session->id.client_port = hdr->src_port;
 	session->id.vs_port = hdr->dst_port;
-	session->id.transport = tcp;
+	session->id.transport = transport_proto_tcp;
 
 	session->timeout = tcp_timeout(timeouts, flags);
 	session->can_reschedule = (flags & (RTE_TCP_SYN_FLAG | RTE_TCP_RST_FLAG)
@@ -94,7 +94,7 @@ extract_udp(
 
 	session->id.client_port = hdr->src_port;
 	session->id.vs_port = hdr->dst_port;
-	session->id.transport = udp;
+	session->id.transport = transport_proto_udp;
 
 	session->timeout = timeouts->udp;
 	session->can_reschedule = true;
