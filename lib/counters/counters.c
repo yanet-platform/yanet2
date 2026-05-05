@@ -4,6 +4,7 @@
 #include "common/strutils.h"
 
 #include "lib/errors/errors.h"
+#include <string.h>
 
 int
 counter_registry_init(
@@ -149,10 +150,29 @@ counter_registry_register(
 	uint64_t size,
 	yanet_error **err
 ) {
-	if (size == 0)
+	if (name == NULL) {
+		yanet_error_add(err, "name is required");
 		return -1;
-	if (size > (1 << COUNTER_MAX_SIZE_EXP))
+	}
+	if (size == 0) {
+		yanet_error_add(err, "zero size");
 		return -1;
+	}
+	if (size > (1 << COUNTER_MAX_SIZE_EXP)) {
+		yanet_error_add(
+			err,
+			"counter size %lu exceeds max %d",
+			size,
+			(1 << COUNTER_MAX_SIZE_EXP)
+		);
+		return -1;
+	}
+	if (strnlen(name, COUNTER_NAME_LEN) == COUNTER_NAME_LEN) {
+		yanet_error_add(
+			err, "name length exceeds max %d", COUNTER_NAME_LEN
+		);
+		return -1;
+	}
 
 	uint64_t idx = counter_registry_lookup_index(registry, name, size);
 
