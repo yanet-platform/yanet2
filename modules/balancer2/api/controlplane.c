@@ -7,6 +7,7 @@
 #include "common/rng.h"
 #include "common/ttlmap/ttlmap.h"
 
+#include "errors/errors.h"
 #include "filter/compiler.h"
 #include "filter/rule.h"
 
@@ -35,12 +36,6 @@ static const char *heap_alloc_failed = "allocation failed";
 #define VS_PREFIX_LEN 64
 #define MAX_ADDR_LEN (2 * NET6_LEN + 1)
 
-const char *const balancer_vs_counter_prefix = "vs";
-const char *const balancer_vs_acl_counter_prefix = "vs_acl";
-const char *const balancer_real_counter_prefix = "real";
-const char *const balancer_common_counter_name = "common";
-const char *const balancer_l4_counter_name = "l4";
-
 FILTER_COMPILER_DECLARE(vs_acl_ip4, net4_fast_src, port_fast_src);
 FILTER_COMPILER_DECLARE(vs_acl_ip6, net6_fast_src, port_fast_src);
 
@@ -59,72 +54,6 @@ static size_t
 real_selector_size(size_t workers) {
 	return sizeof(struct real_selector) +
 	       sizeof(struct rr_counter) * workers;
-}
-
-static int
-extract_nibble(const uint8_t *a, size_t i) {
-	if (i % 2 == 1) {
-		return a[i / 2] & 0xF;
-	} else {
-		return a[i / 2] >> 4;
-	}
-}
-
-static char
-nibble_to_hex(int d) {
-	if (d < 10) {
-		return '0' + d;
-	} else {
-		return 'a' + d - 10;
-	}
-}
-
-/* Translate IP address into string of hex digits.
- * It is incorrect to put raw bytes into buf, because some
- * byte in the middle of IP can be null. Also, it can introduce
- * non-ascii string, which will lead to issues for readers.
- */
-static void
-encode_ip(const uint8_t *ip, enum ip_family ip_family, char *buf) {
-	size_t len = NET4_LEN;
-	if (ip_family == ip_family_ip6) {
-		len = NET6_LEN;
-	}
-	for (size_t i = 0; i < 2 * len; ++i) {
-		int d = extract_nibble(ip, i);
-		buf[i] = nibble_to_hex(d);
-	}
-	buf[2 * len] = 0;
-}
-
-static void
-vs_str(const struct balancer_vs_config *config, char *buf) {
-	char ip[MAX_ADDR_LEN];
-	switch (config->ip_family) {
-	case ip_family_ip4:
-		encode_ip(config->dst.v4.bytes, config->ip_family, ip);
-		break;
-	case ip_family_ip6:
-		encode_ip(config->dst.v6.bytes, config->ip_family, ip);
-		break;
-	}
-	sprintf(buf,
-		"%s:%u/%s",
-		ip,
-		config->port,
-		config->transport == transport_proto_tcp ? "tcp" : "udp");
-}
-
-static void
-real_str(const struct balancer_real_config *config, char *buf) {
-	switch (config->ip_family) {
-	case ip_family_ip4:
-		encode_ip(config->dst.v4.bytes, config->ip_family, buf);
-		break;
-	case ip_family_ip6:
-		encode_ip(config->dst.v6.bytes, config->ip_family, buf);
-		break;
-	}
 }
 
 static bool
@@ -432,7 +361,6 @@ register_acl_counters(
 	struct memory_context *mctx,
 	struct counter_registry *registry,
 	struct virtual_service *vs,
-	const char *prefix,
 	const struct balancer_allowed_sources *sources,
 	size_t source_count,
 	yanet_error **error
@@ -443,29 +371,11 @@ register_acl_counters(
 		return -1;
 	}
 	for (size_t idx = 0; idx < source_count; ++idx) {
-		if (sources[idx].tag == NULL) {
+		if (sources[idx].counter_name == NULL) {
 			ids[idx] = COUNTER_INVALID;
 			continue;
 		}
-		char name[COUNTER_NAME_LEN];
-		int written = snprintf(
-			name,
-			sizeof(name),
-			"%s_%s_%s",
-			balancer_vs_acl_counter_prefix,
-			prefix,
-			sources[idx].tag
-		);
-		if (written < 0 || (size_t)written >= sizeof(name)) {
-			yanet_error_add(
-				error, "rule[%zu]: tag is too long", idx
-			);
-			memory_bfree(
-				mctx, ids, sizeof(uint64_t) * source_count
-			);
-			return -1;
-		}
-		ids[idx] = counter_registry_register(registry, name, 1, error);
+		ids[idx] = counter_registry_register(registry, sources[idx].counter_name, 1, error);
 		if (ids[idx] == COUNTER_INVALID) {
 			yanet_error_add(error, "rule[%zu]", idx);
 			memory_bfree(
@@ -483,27 +393,19 @@ static int
 register_real_counters(
 	struct counter_registry *registry,
 	struct virtual_service *vs,
-	const char *prefix,
 	const struct balancer_real_config *real_configs,
 	yanet_error **error
 ) {
 	struct real *reals = ADDR_OF(&vs->reals);
 	for (size_t idx = 0; idx < vs->reals_count; ++idx) {
-		char real[MAX_ADDR_LEN];
-		real_str(&real_configs[idx], real);
-
-		char name[COUNTER_NAME_LEN];
-		snprintf(
-			name,
-			sizeof(name),
-			"%s_%s_%s",
-			balancer_real_counter_prefix,
-			prefix,
-			real
-		);
+		const struct balancer_real_config *cur_real_config = &real_configs[idx];
+		if (cur_real_config->counter_name == NULL) {
+			yanet_error_add(error, "real[%zu]: counter name is required", idx);
+			return -1;
+		}
 		reals[idx].counter_id = counter_registry_register(
 			registry,
-			name,
+			cur_real_config->counter_name,
 			sizeof(struct balancer_real_stats) / sizeof(uint64_t),
 			error
 		);
@@ -523,16 +425,13 @@ register_vs_counters(
 	const struct balancer_vs_config *config,
 	yanet_error **error
 ) {
-	char prefix[VS_PREFIX_LEN];
-	vs_str(config, prefix);
-
-	char name[COUNTER_NAME_LEN];
-	snprintf(
-		name, sizeof(name), "%s_%s", balancer_vs_counter_prefix, prefix
-	);
+	if (config->counter_name == NULL) {
+		yanet_error_add(error, "counter name is required");
+		return -1;
+	}
 	vs->counter_id = counter_registry_register(
 		registry,
-		name,
+		config->counter_name,
 		sizeof(struct balancer_vs_stats) / sizeof(uint64_t),
 		error
 	);
@@ -544,7 +443,6 @@ register_vs_counters(
 		    mctx,
 		    registry,
 		    vs,
-		    prefix,
 		    config->allowed_sources,
 		    config->allowed_sources_count,
 		    error
@@ -553,7 +451,7 @@ register_vs_counters(
 	}
 
 	if (register_real_counters(
-		    registry, vs, prefix, config->reals, error
+		    registry, vs, config->reals, error
 	    ) != 0) {
 		return -1;
 	}
@@ -654,15 +552,26 @@ static int
 register_balancer_counters(
 	struct balancer_module_config *cfg,
 	struct counter_registry *registry,
+	const char *common_counter_name,
+	const char *l4_counter_name,
 	yanet_error **error
 ) {
+	if (common_counter_name == NULL) {
+		yanet_error_add(error, "common counter name is required");
+		return -1;
+	}
 	cfg->common_counter_id = counter_registry_register(
 		registry,
-		balancer_common_counter_name,
+		common_counter_name,
 		sizeof(struct balancer_common_stats) / sizeof(uint64_t),
 		error
 	);
 	if (cfg->common_counter_id == COUNTER_INVALID) {
+		return -1;
+	}
+
+	if (l4_counter_name == NULL) {
+		yanet_error_add(error, "l4 counter name is required");
 		return -1;
 	}
 	cfg->l4_counter_id = counter_registry_register(
@@ -674,6 +583,7 @@ register_balancer_counters(
 	if (cfg->l4_counter_id == COUNTER_INVALID) {
 		return -1;
 	}
+
 	return 0;
 }
 
@@ -969,6 +879,8 @@ init_module_config(
 	struct balancer_session_timeouts *timeouts,
 	const struct balancer_vs_config *vs_configs,
 	size_t vs_count,
+	const char *common_counter_name,
+	const char *l4_counter_name,
 	yanet_error **error
 ) {
 	struct memory_context *mctx = &agent->memory_context;
@@ -986,7 +898,7 @@ init_module_config(
 
 	struct counter_registry *registry = &cfg->cp_module.counter_registry;
 
-	if (register_balancer_counters(cfg, registry, error) != 0) {
+	if (register_balancer_counters(cfg, registry, common_counter_name, l4_counter_name, error) != 0) {
 		yanet_error_add(error, "register counters");
 		free_module_config(agent, cfg);
 		return -1;
@@ -1030,6 +942,8 @@ balancer_create(
 	struct balancer_session_timeouts *timeouts,
 	const struct balancer_vs_config *vs_configs,
 	uint32_t vs_count,
+	const char *common_counter_name,
+	const char *l4_counter_name,
 	yanet_error **error
 ) {
 	yanet_error_reset(error);
@@ -1068,6 +982,8 @@ balancer_create(
 		    timeouts,
 		    vs_configs,
 		    vs_count,
+			common_counter_name,
+			l4_counter_name,
 		    error
 	    ) != 0) {
 		memory_bfree(mctx, handle, sizeof(*handle));
