@@ -14,7 +14,7 @@ import (
 	"github.com/yanet-platform/yanet2/modules/balancer2/controlplane/balancerpb"
 )
 
-type Config struct {
+type ConfigParams struct {
 	Vs       *balancerpb.VsConfigList
 	Timeouts *balancerpb.SessionsTimeouts
 	Addr     *balancerpb.AddrConfig
@@ -45,7 +45,7 @@ type vsSlot struct {
 type ModuleConfig struct {
 	handle   cbalancer2.Balancer
 	name     string
-	cfg      *Config
+	cfg      *ConfigParams
 	sessions *SessionsState
 	agent    *ffi.Agent
 	index    map[vsID]*vsSlot
@@ -54,7 +54,7 @@ type ModuleConfig struct {
 func NewModuleConfig(
 	name string,
 	agent *ffi.Agent,
-	config *Config,
+	config *ConfigParams,
 	st *SessionsState,
 ) (*ModuleConfig, error) {
 	if config == nil || config.Vs == nil {
@@ -99,7 +99,7 @@ func NewModuleConfig(
 	}, nil
 }
 
-func (m *ModuleConfig) Update(newConfig *Config, st *SessionsState) error {
+func (m *ModuleConfig) Update(newConfig *ConfigParams, st *SessionsState) error {
 	merged := mergeConfig(m.cfg, newConfig)
 	if merged.Vs == nil {
 		return errors.New("vs configuration is required")
@@ -148,8 +148,12 @@ func (m *ModuleConfig) Free() {
 	m.handle.Free(m.agent)
 }
 
-func (m *ModuleConfig) Config() *Config {
+func (m *ModuleConfig) Params() *ConfigParams {
 	return m.cfg
+}
+
+func (m *ModuleConfig) SessionsStateName() string {
+	return m.sessions.Name()
 }
 
 func (m *ModuleConfig) UpdateVS(vs []*balancerpb.VsConfig) error {
@@ -166,7 +170,7 @@ func (m *ModuleConfig) UpdateVS(vs []*balancerpb.VsConfig) error {
 			merged = append(merged, v)
 		}
 	}
-	return m.Update(&Config{Vs: &balancerpb.VsConfigList{Vs: merged}}, nil)
+	return m.Update(&ConfigParams{Vs: &balancerpb.VsConfigList{Vs: merged}}, nil)
 }
 
 func (m *ModuleConfig) DeleteVS(vs []*balancerpb.VsIdentifier) error {
@@ -194,7 +198,7 @@ func (m *ModuleConfig) DeleteVS(vs []*balancerpb.VsIdentifier) error {
 		}
 		kept = append(kept, v)
 	}
-	return m.Update(&Config{Vs: &balancerpb.VsConfigList{Vs: kept}}, nil)
+	return m.Update(&ConfigParams{Vs: &balancerpb.VsConfigList{Vs: kept}}, nil)
 }
 
 func (m *ModuleConfig) UpdateReals(updates []*balancerpb.RealUpdate) error {
@@ -345,7 +349,7 @@ func makeRealID(id *balancerpb.RelativeRealIdentifier) (realID, error) {
 	return realID{addr: addr}, nil
 }
 
-func mergeConfig(prev, upd *Config) *Config {
+func mergeConfig(prev, upd *ConfigParams) *ConfigParams {
 	out := *prev
 	if upd.Vs != nil {
 		out.Vs = upd.Vs
