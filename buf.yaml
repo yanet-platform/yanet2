@@ -1,0 +1,28 @@
+version: v2
+modules:
+  - path: .
+    excludes:
+      - subprojects
+      # List of dirs to be refactored
+      - agents
+      # - common # acl, which already linted, depends on common, so common can not be excluded
+      - controlplane
+      - devices
+      - modules/balancer
+      - modules/balancer2
+      - modules/decap
+      - modules/dscp
+      - modules/forward
+      - modules/fwstate
+      - modules/nat64
+      - modules/pdump
+      - modules/route
+      - modules/route-mpls
+lint:
+  use:
+    - STANDARD
+  ignore:
+    - common
+breaking:
+  use:
+    - PACKAGE

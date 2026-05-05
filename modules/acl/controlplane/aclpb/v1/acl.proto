@@ -1,11 +1,11 @@
 syntax = "proto3";
 
-package aclpb;
+package modules.acl.controlplane.aclpb.v1;
 
-import "common/filterpb/filter.proto";
 import "common/commonpb/metric.proto";
+import "common/filterpb/filter.proto";
 
-option go_package = "github.com/yanet-platform/yanet2/modules/acl/controlplane/aclpb;aclpb";
+option go_package = "github.com/yanet-platform/yanet2/modules/acl/controlplane/aclpb/v1;aclpb";
 
 // ACLService is a service for ACL module.
 service ACLService {
@@ -29,7 +29,9 @@ message UpdateConfigRequest {
 
 message UpdateConfigResponse {}
 
-message ShowConfigRequest { string name = 1; }
+message ShowConfigRequest {
+  string name = 1;
+}
 
 message ShowConfigResponse {
   string name = 1;
@@ -56,13 +58,14 @@ message Action {
 
 // Defines possible actions for matched traffic
 enum ActionKind {
-  ACTION_KIND_PASS = 0;
-  ACTION_KIND_DENY = 1;
-  ACTION_KIND_COUNT = 2;
-  ACTION_KIND_SKIPTO = 3;
-  ACTION_KIND_CHECK_STATE = 4;
-  ACTION_KIND_CREATE_STATE = 5;
-  ACTION_KIND_LOG = 6;
+  ACTION_KIND_UNSPECIFIED = 0;
+  ACTION_KIND_PASS = 1;
+  ACTION_KIND_DENY = 2;
+  ACTION_KIND_COUNT = 3;
+  ACTION_KIND_SKIPTO = 4;
+  ACTION_KIND_CHECK_STATE = 5;
+  ACTION_KIND_CREATE_STATE = 6;
+  ACTION_KIND_LOG = 7;
 }
 
 // Delete config with specified name.
@@ -72,12 +75,18 @@ message DeleteConfigRequest {
   string name = 1;
 }
 
-message DeleteConfigResponse { bool deleted = 1; }
+message DeleteConfigResponse {
+  bool deleted = 1;
+}
 
 message ListConfigsRequest {}
 
-message ListConfigsResponse { repeated string configs = 1; }
+message ListConfigsResponse {
+  repeated string configs = 1;
+}
 
 message GetMetricsRequest {}
 
-message GetMetricsResponse { repeated commonpb.Metric metrics = 1; }
+message GetMetricsResponse {
+  repeated commonpb.Metric metrics = 1;
+}

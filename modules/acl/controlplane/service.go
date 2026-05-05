@@ -11,7 +11,7 @@ import (
 	"github.com/yanet-platform/yanet2/common/filterpb"
 	"github.com/yanet-platform/yanet2/common/go/metrics"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	"github.com/yanet-platform/yanet2/modules/acl/controlplane/aclpb"
+	"github.com/yanet-platform/yanet2/modules/acl/controlplane/aclpb/v1"
 )
 
 type ACLService struct {

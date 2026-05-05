@@ -17,7 +17,7 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	acl "github.com/yanet-platform/yanet2/modules/acl/controlplane"
-	"github.com/yanet-platform/yanet2/modules/acl/controlplane/aclpb"
+	"github.com/yanet-platform/yanet2/modules/acl/controlplane/aclpb/v1"
 )
 
 // helpers

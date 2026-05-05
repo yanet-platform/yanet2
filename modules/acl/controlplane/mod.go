@@ -7,7 +7,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	"github.com/yanet-platform/yanet2/modules/acl/controlplane/aclpb"
+	"github.com/yanet-platform/yanet2/modules/acl/controlplane/aclpb/v1"
 	fwstate "github.com/yanet-platform/yanet2/modules/fwstate/controlplane"
 	"github.com/yanet-platform/yanet2/modules/fwstate/controlplane/fwstatepb"
 )
