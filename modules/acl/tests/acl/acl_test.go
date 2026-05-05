@@ -47,8 +47,7 @@ func (te *testEnv) testPacket(t *testing.T, packetLayers []gopacket.Serializable
 func createBasicRules() []acl.AclRule {
 	return []acl.AclRule{
 		{
-			Action:     0, // PASS
-			Counter:    "",
+			Actions: []acl.AclAction{{ID: 0}}, // PASS
 			Devices:    []filter.Device{{Name: defaultDeviceName}},
 			VlanRanges: []filter.VlanRange{},
 			Src4s: []filter.IPNet{
@@ -71,8 +70,7 @@ func createBasicRules() []acl.AclRule {
 			},
 		},
 		{
-			Action:     1, // DENY
-			Counter:    "",
+			Actions: []acl.AclAction{{ID: 1}}, // DENY
 			Devices:    []filter.Device{{Name: defaultDeviceName}},
 			VlanRanges: []filter.VlanRange{},
 			Src4s: []filter.IPNet{
@@ -129,7 +127,7 @@ func TestAcl_BasicRules(t *testing.T) {
 func createProtocolRules() []acl.AclRule {
 	return []acl.AclRule{
 		{
-			Action:  0, // PASS
+			Actions: []acl.AclAction{{ID: 0}}, // PASS
 			Devices: []filter.Device{{Name: defaultDeviceName}},
 			Src4s: []filter.IPNet{
 				{Addr: netip.MustParseAddr("192.0.2.2"), Mask: netip.MustParseAddr("255.255.255.255")},
@@ -181,7 +179,7 @@ func createProtocolRules() []acl.AclRule {
 			},
 		},
 		{
-			Action:  1, // DENY
+			Actions: []acl.AclAction{{ID: 1}}, // DENY
 			Devices: []filter.Device{{Name: defaultDeviceName}},
 			Src4s: []filter.IPNet{
 				{Addr: netip.MustParseAddr("0.0.0.0"), Mask: netip.MustParseAddr("0.0.0.0")},
@@ -217,7 +215,7 @@ func createProtocolRules() []acl.AclRule {
 			},
 		},
 		{
-			Action:  0, // PASS
+			Actions: []acl.AclAction{{ID: 0}}, // PASS
 			Devices: []filter.Device{{Name: defaultDeviceName}},
 			Src4s: []filter.IPNet{
 				{Addr: netip.MustParseAddr("192.0.2.2"), Mask: netip.MustParseAddr("255.255.255.255")},
@@ -268,7 +266,7 @@ func TestAcl_ProtocolRules(t *testing.T) {
 func createPortRangeRules() []acl.AclRule {
 	return []acl.AclRule{
 		{
-			Action:  0, // PASS
+			Actions: []acl.AclAction{{ID: 0}}, // PASS
 			Devices: []filter.Device{{Name: defaultDeviceName}},
 			Src4s: []filter.IPNet{
 				{Addr: netip.MustParseAddr("192.0.2.2"), Mask: netip.MustParseAddr("255.255.255.255")},
@@ -309,7 +307,7 @@ func TestAcl_PortRangeRules(t *testing.T) {
 func createSubnetRules() []acl.AclRule {
 	return []acl.AclRule{
 		{
-			Action:  0, // PASS
+			Actions: []acl.AclAction{{ID: 0}}, // PASS
 			Devices: []filter.Device{{Name: defaultDeviceName}},
 			Src4s: []filter.IPNet{
 				{Addr: netip.MustParseAddr("192.0.2.0"), Mask: netip.MustParseAddr("255.255.255.0")},
@@ -330,7 +328,7 @@ func createSubnetRules() []acl.AclRule {
 			},
 		},
 		{
-			Action:  1, // DENY
+			Actions: []acl.AclAction{{ID: 1}}, // DENY
 			Devices: []filter.Device{{Name: defaultDeviceName}},
 			Src4s: []filter.IPNet{
 				{Addr: netip.MustParseAddr("192.0.99.0"), Mask: netip.MustParseAddr("255.255.255.0")},
@@ -373,7 +371,7 @@ func TestAcl_SubnetRules(t *testing.T) {
 func createIPv6Rules() []acl.AclRule {
 	return []acl.AclRule{
 		{
-			Action:  0, // PASS
+			Actions: []acl.AclAction{{ID: 0}}, // PASS
 			Devices: []filter.Device{{Name: defaultDeviceName}},
 			Src4s:   []filter.IPNet{},
 			Dst4s:   []filter.IPNet{},
@@ -394,7 +392,7 @@ func createIPv6Rules() []acl.AclRule {
 			},
 		},
 		{
-			Action:  0, // PASS
+			Actions: []acl.AclAction{{ID: 0}}, // PASS
 			Devices: []filter.Device{{Name: defaultDeviceName}},
 			Src4s:   []filter.IPNet{},
 			Dst4s:   []filter.IPNet{},
@@ -415,7 +413,7 @@ func createIPv6Rules() []acl.AclRule {
 			},
 		},
 		{
-			Action:  1, // DENY
+			Actions: []acl.AclAction{{ID: 1}}, // DENY
 			Devices: []filter.Device{{Name: defaultDeviceName}},
 			Src4s:   []filter.IPNet{},
 			Dst4s:   []filter.IPNet{},
@@ -480,7 +478,7 @@ func TestAcl_IPv6Rules(t *testing.T) {
 func createOverlappingRules() []acl.AclRule {
 	return []acl.AclRule{
 		{
-			Action:  0, // PASS
+			Actions: []acl.AclAction{{ID: 0}}, // PASS
 			Devices: []filter.Device{{Name: defaultDeviceName}},
 			Src4s: []filter.IPNet{
 				{Addr: netip.MustParseAddr("192.0.2.0"), Mask: netip.MustParseAddr("255.255.255.254")},
@@ -501,7 +499,7 @@ func createOverlappingRules() []acl.AclRule {
 			},
 		},
 		{
-			Action:  1, // DENY
+			Actions: []acl.AclAction{{ID: 1}}, // DENY
 			Devices: []filter.Device{{Name: defaultDeviceName}},
 			Src4s: []filter.IPNet{
 				{Addr: netip.MustParseAddr("192.0.2.0"), Mask: netip.MustParseAddr("255.255.255.240")},
@@ -522,7 +520,7 @@ func createOverlappingRules() []acl.AclRule {
 			},
 		},
 		{
-			Action:  0, // PASS
+			Actions: []acl.AclAction{{ID: 0}}, // PASS
 			Devices: []filter.Device{{Name: defaultDeviceName}},
 			Src4s: []filter.IPNet{
 				{Addr: netip.MustParseAddr("192.0.2.0"), Mask: netip.MustParseAddr("255.255.255.0")},
@@ -543,7 +541,7 @@ func createOverlappingRules() []acl.AclRule {
 			},
 		},
 		{
-			Action:  1, // DENY
+			Actions: []acl.AclAction{{ID: 1}}, // DENY
 			Devices: []filter.Device{{Name: defaultDeviceName}},
 			Src4s: []filter.IPNet{
 				{Addr: netip.MustParseAddr("192.0.0.0"), Mask: netip.MustParseAddr("255.255.0.0")},

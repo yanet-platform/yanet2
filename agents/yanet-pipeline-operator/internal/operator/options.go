@@ -4,6 +4,8 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+
+	"github.com/yanet-platform/yanet2/common/go/operator"
 )
 
 type options struct {
@@ -35,9 +37,9 @@ type reconcilerOptions struct {
 
 func newReconcilerOptions() *reconcilerOptions {
 	return &reconcilerOptions{
-		Interval:       DefaultReconcileInterval,
-		InitialBackoff: DefaultReconcileInitialBackoff,
-		MaxBackoff:     DefaultReconcileMaxBackoff,
+		Interval:       operator.DefaultReconcileInterval,
+		InitialBackoff: operator.DefaultReconcileInitialBackoff,
+		MaxBackoff:     operator.DefaultReconcileMaxBackoff,
 		Metrics:        noopReconcilerMetricsObserver{},
 		Log:            zap.NewNop(),
 	}
@@ -128,23 +130,5 @@ func WithGatewayActuatorLog(log *zap.Logger) GatewayActuatorOption {
 func WithGatewayActuatorMetrics(metrics GatewayActuatorMetricsObserver) GatewayActuatorOption {
 	return func(o *gatewayActuatorOptions) {
 		o.Metrics = metrics
-	}
-}
-
-type fanOutActuatorOptions struct {
-	Log *zap.Logger
-}
-
-func newFanOutActuatorOptions() *fanOutActuatorOptions {
-	return &fanOutActuatorOptions{
-		Log: zap.NewNop(),
-	}
-}
-
-type FanOutActuatorOption func(*fanOutActuatorOptions)
-
-func WithFanOutActuatorLog(log *zap.Logger) FanOutActuatorOption {
-	return func(o *fanOutActuatorOptions) {
-		o.Log = log
 	}
 }

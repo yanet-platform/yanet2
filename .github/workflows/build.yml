@@ -73,7 +73,7 @@ jobs:
             ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-
       - uses: awalsh128/cache-apt-pkgs-action@latest
         with:
-          packages: meson clang python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler jq clang-tidy-19
+          packages: meson clang cmake python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler jq clang-tidy-19
           version: 1.1
 
       - name: Install LLVM 19 toolchain

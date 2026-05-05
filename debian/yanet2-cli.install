@@ -11,10 +11,11 @@ usr/bin/yanet-cli-forward
 usr/bin/yanet-cli-nat64
 usr/bin/yanet-cli-route
 usr/bin/yanet-cli-route-mpls
-usr/bin/yanet-cli-neighbour
 usr/bin/yanet-cli-pdump
 usr/bin/yanet-cli-counters
 usr/bin/yanet-cli-device-plain
 usr/bin/yanet-cli-device-vlan
 usr/bin/yanet-cli-balancer
 usr/bin/yanet-cli-operator-pipeline
+usr/bin/yanet-cli-operator-neighbour
+usr/bin/yanet-cli-operator-route

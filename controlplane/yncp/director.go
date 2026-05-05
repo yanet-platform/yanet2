@@ -6,6 +6,10 @@ import (
 
 	"go.uber.org/zap"
 
+	// Blank import registers operator proto descriptors in the global
+	// protobuf registry so the gateway HTTP/gRPC proxy can resolve
+	// operatorpb services.
+	_ "github.com/yanet-platform/yanet2/agents/yanet-route-operator/operatorpb"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/controlplane/internal/gateway"
 	acl "github.com/yanet-platform/yanet2/modules/acl/controlplane"
@@ -84,7 +88,7 @@ func NewDirector(cfg *Config, options ...DirectorOption) (*Director, error) {
 	}
 	log.Debugw("attached to shared memory", zap.String("path", cfg.MemoryPath))
 
-	routeModule, err := route.NewRouteModule(cfg.Modules.Route, log.Desugar())
+	routeModule, err := route.NewRouteModule(cfg.Modules.Route, route.WithLog(log.Desugar()))
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize route built-in module: %w", err)
 	}

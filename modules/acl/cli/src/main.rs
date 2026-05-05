@@ -47,14 +47,13 @@ struct SerializableRule {
     proto_ranges: Vec<String>,
     vlan_ranges: Vec<String>,
     devices: Vec<String>,
-    action: Option<SerializableAction>,
+    actions: Vec<SerializableAction>,
 }
 
 #[derive(Serialize)]
 struct SerializableAction {
+    kind: String,
     counter: String,
-    keep_state: bool,
-    kind: i32,
 }
 
 #[derive(Tabled)]
@@ -387,8 +386,17 @@ enum ActionKind {
     Allow,
     Deny,
     Count,
+    SkipTo,
     CheckState,
     CreateState,
+    Log,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ACLAction {
+    kind: ActionKind,
+    #[serde(default)]
+    counter: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -400,8 +408,7 @@ struct ACLRule {
     proto_ranges: Vec<Range>,
     vlan_ranges: Vec<Range>,
     devices: Vec<String>,
-    counter: String,
-    action: ActionKind,
+    actions: Vec<ACLAction>,
 }
 
 /// Converts a YAML `Range` to a protobuf `PortRange`, validating that
@@ -470,18 +477,23 @@ impl TryFrom<ACLRule> for aclpb::Rule {
                 .collect::<Result<_, _>>()?,
             vlan_ranges: acl_rule.vlan_ranges.iter().map(vlan_range).collect::<Result<_, _>>()?,
             devices: acl_rule.devices.iter().cloned().map(Device::from).collect(),
-            action: Some(aclpb::Action {
-                counter: acl_rule.counter,
-                keep_state: false,
-                kind: match acl_rule.action {
-                    ActionKind::Allow => aclpb::ActionKind::Pass,
-                    ActionKind::Deny => aclpb::ActionKind::Deny,
-                    ActionKind::Count => aclpb::ActionKind::Count,
-                    ActionKind::CheckState => aclpb::ActionKind::CheckState,
-                    ActionKind::CreateState => aclpb::ActionKind::CreateState,
-                }
-                .into(),
-            }),
+            actions: acl_rule
+                .actions
+                .iter()
+                .map(|a| aclpb::Action {
+                    kind: match a.kind {
+                        ActionKind::Allow => aclpb::ActionKind::Pass,
+                        ActionKind::Deny => aclpb::ActionKind::Deny,
+                        ActionKind::Count => aclpb::ActionKind::Count,
+                        ActionKind::SkipTo => aclpb::ActionKind::Skipto,
+                        ActionKind::CheckState => aclpb::ActionKind::CheckState,
+                        ActionKind::CreateState => aclpb::ActionKind::CreateState,
+                        ActionKind::Log => aclpb::ActionKind::Log,
+                    }
+                    .into(),
+                    counter: a.counter.clone(),
+                })
+                .collect(),
         })
     }
 }
@@ -573,11 +585,16 @@ impl ACLService {
                         .map(|r| format!("{}-{}", r.from, r.to))
                         .collect(),
                     devices: rule.devices.iter().map(|d| d.name.clone()).collect(),
-                    action: rule.action.map(|a| SerializableAction {
-                        counter: a.counter,
-                        keep_state: a.keep_state,
-                        kind: a.kind,
-                    }),
+                    actions: rule
+                        .actions
+                        .iter()
+                        .map(|a| SerializableAction {
+                            kind: aclpb::ActionKind::try_from(a.kind)
+                                .map(|k| k.as_str_name().to_string())
+                                .unwrap_or_else(|_| a.kind.to_string()),
+                            counter: a.counter.clone(),
+                        })
+                        .collect(),
                 })
                 .collect(),
         };

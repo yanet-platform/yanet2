@@ -13,8 +13,8 @@ rules:
   # === IPv4 ===
 
   # Create state for outgoing TCP to port 80
-  - action: CreateState
-    counter: ""
+  - actions:
+      - kind: CreateState
     devices: []
     dst_ports:
       - from: 80
@@ -32,8 +32,8 @@ rules:
     vlan_ranges: []
 
   # Check state for return traffic
-  - action: CheckState
-    counter: ""
+  - actions:
+      - kind: CheckState
     devices: []
     dst_ports:
       - from: 0
@@ -51,8 +51,8 @@ rules:
     vlan_ranges: []
 
   # Create state for outgoing UDP to port 80
-  - action: CreateState
-    counter: ""
+  - actions:
+      - kind: CreateState
     devices: []
     dst_ports:
       - from: 80
@@ -70,8 +70,8 @@ rules:
     vlan_ranges: []
 
   # Check state for return UDP traffic
-  - action: CheckState
-    counter: ""
+  - actions:
+      - kind: CheckState
     devices: []
     dst_ports:
       - from: 0
@@ -91,8 +91,8 @@ rules:
   # === IPv6 ===
 
   # Create state for outgoing TCPv6 to port 80
-  - action: CreateState
-    counter: ""
+  - actions:
+      - kind: CreateState
     devices: []
     dst_ports:
       - from: 80
@@ -110,8 +110,8 @@ rules:
     vlan_ranges: []
 
   # Check state for return TCPv6 traffic
-  - action: CheckState
-    counter: ""
+  - actions:
+      - kind: CheckState
     devices: []
     dst_ports:
       - from: 0
@@ -133,8 +133,8 @@ rules:
   # Allow external fwstate sync frames (IPv6 UDP to multicast ff02::1 port 9999).
   # These packets are processed by the fwstate module to create external state
   # entries and then dropped.
-  - action: Allow
-    counter: ""
+  - actions:
+      - kind: Allow
     devices: []
     dst_ports:
       - from: 9999

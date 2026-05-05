@@ -15,10 +15,13 @@ ARG PROTOC_GEN_GO_GRPC_VERSION=latest
 
 RUN apt-get update -y && apt-get install -y \
     meson \
+    cmake \
     clang \
     clang-format-19 \
     clang-tidy-19 \
     curl \
+    flex \
+    bison \
     git \
     just \
     make \

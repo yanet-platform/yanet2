@@ -3,6 +3,7 @@ common_proto_dir = meson.current_source_dir()
 common_proto_files = [
     join_paths(common_proto_dir, 'target.proto'),
     join_paths(common_proto_dir, 'metric.proto'),
+    join_paths(common_proto_dir, 'macaddr.proto'),
 ]
 
 # Generate protobuf files
@@ -11,6 +12,7 @@ common_protoc_gen = custom_target(
     output: [
         'target.pb.go',
         'metric.pb.go',
+        'macaddr.pb.go',
     ],
     input: common_proto_files,
     command: [

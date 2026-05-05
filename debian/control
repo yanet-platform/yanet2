@@ -88,6 +88,16 @@ Description: YANET2 pipeline operator
  This package contains the pipeline operator that owns pipelines
  and device-to-pipeline bindings.
 
+Package: yanet2-route-operator
+Architecture: any
+Depends: ${shlibs:Depends}
+ , ${misc:Depends}
+Description: YANET2 route operator
+ Autonomous YANET2 route lifecycle management operator.
+ .
+ This package contains the route operator that owns FIB programming
+ and neighbour discovery.
+
 Package: yanet2-forward-operator
 Architecture: all
 Depends: ${misc:Depends}

@@ -30,8 +30,8 @@ const flattenEntries = (entries: FIBEntry[]): FIBRow[] => {
                 rows.push({
                     id: `${prefix}-${idx}`,
                     prefix,
-                    dst_mac: nh.dst_mac || '',
-                    src_mac: nh.src_mac || '',
+                    dst_mac: nh.dst_mac?.addr || '',
+                    src_mac: nh.src_mac?.addr || '',
                     device: nh.device || '',
                 });
             });

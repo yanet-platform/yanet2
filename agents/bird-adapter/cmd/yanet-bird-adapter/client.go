@@ -14,6 +14,7 @@ import (
 	"google.golang.org/grpc/encoding/gzip"
 
 	adapterpb "github.com/yanet-platform/yanet2/agents/bird-adapter/adapterpb"
+	"github.com/yanet-platform/yanet2/common/go/xcfg"
 )
 
 // logLevelFlag wraps zapcore.Level to implement pflag.Value interface.
@@ -67,7 +68,7 @@ func runClient() error {
 	}
 
 	// Load server config to get the adapter address
-	serverCfg, err := LoadServerConfig(clientCmdArgs.ServerConfigPath)
+	serverCfg, err := xcfg.LoadConfig[ServerConfig](clientCmdArgs.ServerConfigPath)
 	if err != nil {
 		return fmt.Errorf("failed to load server config: %w", err)
 	}
@@ -137,7 +138,7 @@ func init() {
 
 func runListSessions() error {
 	// Load server config to get the adapter address
-	serverCfg, err := LoadServerConfig(listSessionsCmdArgs.ServerConfigPath)
+	serverCfg, err := xcfg.LoadConfig[ServerConfig](listSessionsCmdArgs.ServerConfigPath)
 	if err != nil {
 		return fmt.Errorf("failed to load server config: %w", err)
 	}

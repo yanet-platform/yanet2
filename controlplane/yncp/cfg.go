@@ -2,13 +2,11 @@ package yncp
 
 import (
 	"fmt"
-	"os"
 
 	"go.uber.org/zap/zapcore"
 	"gopkg.in/yaml.v3"
 
 	"github.com/yanet-platform/yanet2/common/go/logging"
-	"github.com/yanet-platform/yanet2/common/go/xcfg"
 	"github.com/yanet-platform/yanet2/controlplane/internal/gateway"
 
 	acl "github.com/yanet-platform/yanet2/modules/acl/controlplane"
@@ -40,6 +38,10 @@ type config struct {
 	Devices DevicesConfig `json:"devices" yaml:"devices"`
 }
 
+func (m *Config) Default() {
+	*m = *DefaultConfig()
+}
+
 func DefaultConfig() *Config {
 	return &Config{
 		Logging: logging.Config{
@@ -63,21 +65,6 @@ func DefaultConfig() *Config {
 			Vlan:  vlan.DefaultConfig(),
 		},
 	}
-}
-
-// LoadConfig loads the configuration from the given path.
-func LoadConfig(path string) (*Config, error) {
-	buf, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read config file: %w", err)
-	}
-
-	cfg := DefaultConfig()
-	if err := xcfg.Decode(buf, cfg); err != nil {
-		return nil, fmt.Errorf("failed to deserialize config: %w", err)
-	}
-
-	return cfg, nil
 }
 
 // ModulesConfig describes built-in modules.

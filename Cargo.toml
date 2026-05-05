@@ -20,12 +20,13 @@ members = [
     "modules/nat64/cli",
     "modules/pdump/cli",
     "modules/balancer/cli",
-    "modules/route/cli/neighbour",
     "modules/route/cli/route",
     "modules/route-mpls/cli",
     "devices/plain/cli",
     "devices/vlan/cli",
     "agents/yanet-pipeline-operator/cli",
+    "agents/yanet-route-operator/cli/route",
+    "agents/yanet-route-operator/cli/neighbour",
 ]
 
 [profile.release]

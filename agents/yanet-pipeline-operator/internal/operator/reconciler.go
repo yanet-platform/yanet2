@@ -8,14 +8,12 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/yanet-platform/yanet2/common/go/operator"
 	"github.com/yanet-platform/yanet2/common/go/xbackoff"
 )
 
 // Actuator applies a desired stage configuration.
-type Actuator interface {
-	Apply(ctx context.Context, stage *StageConfig) error
-	Close() error
-}
+type Actuator = operator.Actuator[*StageConfig]
 
 // Reconciler drives the system through an ordered queue of target
 // StageConfigs.
