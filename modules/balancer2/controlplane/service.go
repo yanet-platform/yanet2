@@ -3,58 +3,105 @@ package balancer2
 import (
 	"context"
 	"fmt"
+	"sort"
 	"sync"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	"github.com/yanet-platform/yanet2/modules/balancer2/controlplane/balancerpb"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	"github.com/yanet-platform/yanet2/modules/balancer2/controlplane/balancerpb"
 )
 
 var (
 	errConfigNameRequired        = status.Error(codes.InvalidArgument, "config name is required")
-	errSessionsStateNameRequired = status.Error(codes.InvalidArgument, "sessions state name is required")
+	errSessionsStateNameRequired = status.Error(
+		codes.InvalidArgument,
+		"sessions state name is required",
+	)
 )
+
+// ServiceOption configures the Service constructor.
+type ServiceOption func(*serviceOptions)
+
+type serviceOptions struct {
+	Log *zap.Logger
+}
+
+func newServiceOptions() *serviceOptions {
+	return &serviceOptions{
+		Log: zap.NewNop(),
+	}
+}
+
+// WithServiceLog sets the logger for the Service.
+func WithServiceLog(log *zap.Logger) ServiceOption {
+	return func(o *serviceOptions) {
+		o.Log = log
+	}
+}
 
 type Service struct {
 	balancerpb.UnimplementedBalancerServer
 
-	agent          *ffi.Agent
-	mu             *sync.Mutex
-	log            *zap.SugaredLogger
+	agent *ffi.Agent
+
+	mu             sync.Mutex
 	moduleConfigs  map[string]*ModuleConfig
 	sessionsStates map[string]*SessionsState
+
+	log *zap.Logger
 }
 
 func NewService(
 	shm *ffi.SharedMemory,
 	instanceIdx uint32,
 	size datasize.ByteSize,
-	log *zap.SugaredLogger,
+	options ...ServiceOption,
 ) (*Service, error) {
-	log.Info("initializing balancer service")
+	opts := newServiceOptions()
+	for _, o := range options {
+		o(opts)
+	}
 
 	agent, err := shm.AgentAttach("balancer", instanceIdx, size)
 	if err != nil {
-		log.Errorw("failed to reattach balancer agent", "error", err)
-		return nil, fmt.Errorf("failed to reattach balancer agent: %w", err)
+		return nil, fmt.Errorf("failed to attach balancer agent: %w", err)
 	}
 
-	s := &Service{
+	opts.Log.Info("balancer service initialized")
+
+	return &Service{
 		agent:          agent,
-		log:            log,
-		mu:             &sync.Mutex{},
 		moduleConfigs:  map[string]*ModuleConfig{},
 		sessionsStates: map[string]*SessionsState{},
-	}
-
-	return s, nil
+		log:            opts.Log,
+	}, nil
 }
 
-func (s *Service) UpdateConfig(
+// Close releases all module configs, session states, and the underlying
+// agent. After Close the Service must not be used.
+func (m *Service) Close() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for _, mc := range m.moduleConfigs {
+		mc.Free()
+	}
+	m.moduleConfigs = nil
+
+	for _, st := range m.sessionsStates {
+		st.Free()
+	}
+	m.sessionsStates = nil
+
+	return m.agent.Close()
+}
+
+func (m *Service) UpdateConfig(
 	ctx context.Context,
 	req *balancerpb.UpdateConfigRequest,
 ) (*balancerpb.UpdateConfigResponse, error) {
@@ -63,9 +110,6 @@ func (s *Service) UpdateConfig(
 		return nil, errConfigNameRequired
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	params := &ConfigParams{
 		Vs:       req.GetVs(),
 		Timeouts: req.GetTimeouts(),
@@ -73,42 +117,59 @@ func (s *Service) UpdateConfig(
 		Wlc:      req.GetWlc(),
 	}
 
-	sessionsName := req.GetSessionsStateName()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
-	if cur, ok := s.moduleConfigs[name]; ok {
-		var st *SessionsState
-		if sessionsName != "" {
-			found, ok := s.sessionsStates[sessionsName]
-			if !ok {
-				return nil, status.Errorf(codes.NotFound, "sessions state %q not found", sessionsName)
-			}
-			st = found
-		}
-		if err := cur.Update(params, st); err != nil {
-			return nil, status.Errorf(codes.Internal, "failed to update config %q: %v", name, err)
-		}
-		return &balancerpb.UpdateConfigResponse{}, nil
+	if cur, ok := m.moduleConfigs[name]; ok {
+		return m.updateExisting(name, cur, params, req.GetSessionsStateName())
 	}
+	return m.createNew(name, params, req.GetSessionsStateName())
+}
 
+func (m *Service) updateExisting(
+	name string,
+	cur *ModuleConfig,
+	params *ConfigParams,
+	sessionsName string,
+) (*balancerpb.UpdateConfigResponse, error) {
+	var st *SessionsState
+	if sessionsName != "" {
+		found, ok := m.sessionsStates[sessionsName]
+		if !ok {
+			return nil, status.Errorf(codes.NotFound, "sessions state %q not found", sessionsName)
+		}
+		st = found
+	}
+	if err := cur.Update(params, st); err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to update config %q: %v", name, err)
+	}
+	return &balancerpb.UpdateConfigResponse{}, nil
+}
+
+func (m *Service) createNew(
+	name string,
+	params *ConfigParams,
+	sessionsName string,
+) (*balancerpb.UpdateConfigResponse, error) {
 	if sessionsName == "" {
-		return nil, status.Error(codes.InvalidArgument, "sessions state name is required on create")
+		return nil, errSessionsStateNameRequired
 	}
 
-	st, ok := s.sessionsStates[sessionsName]
+	st, ok := m.sessionsStates[sessionsName]
 	if !ok {
 		return nil, status.Errorf(codes.NotFound, "sessions state %q not found", sessionsName)
 	}
 
-	mc, err := NewModuleConfig(name, s.agent, params, st)
+	mc, err := NewModuleConfig(name, m.agent, params, st)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to create config %q: %v", name, err)
 	}
-	s.moduleConfigs[name] = mc
+	m.moduleConfigs[name] = mc
 
 	return &balancerpb.UpdateConfigResponse{}, nil
 }
 
-func (s *Service) GetConfig(
+func (m *Service) GetConfig(
 	ctx context.Context,
 	req *balancerpb.GetConfigRequest,
 ) (*balancerpb.GetConfigResponse, error) {
@@ -117,10 +178,10 @@ func (s *Service) GetConfig(
 		return nil, errConfigNameRequired
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
-	mc, ok := s.moduleConfigs[name]
+	mc, ok := m.moduleConfigs[name]
 	if !ok {
 		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
@@ -136,21 +197,22 @@ func (s *Service) GetConfig(
 	}, nil
 }
 
-func (s *Service) ListConfigs(
+func (m *Service) ListConfigs(
 	ctx context.Context,
 	req *balancerpb.ListConfigsRequest,
 ) (*balancerpb.ListConfigsResponse, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
-	names := make([]string, 0, len(s.moduleConfigs))
-	for name := range s.moduleConfigs {
+	names := make([]string, 0, len(m.moduleConfigs))
+	for name := range m.moduleConfigs {
 		names = append(names, name)
 	}
+	sort.Strings(names)
 	return &balancerpb.ListConfigsResponse{Names: names}, nil
 }
 
-func (s *Service) UpdateReals(
+func (m *Service) UpdateReals(
 	ctx context.Context,
 	req *balancerpb.UpdateRealsRequest,
 ) (*balancerpb.UpdateRealsResponse, error) {
@@ -159,10 +221,10 @@ func (s *Service) UpdateReals(
 		return nil, errConfigNameRequired
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
-	mc, ok := s.moduleConfigs[name]
+	mc, ok := m.moduleConfigs[name]
 	if !ok {
 		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
@@ -172,7 +234,7 @@ func (s *Service) UpdateReals(
 	return &balancerpb.UpdateRealsResponse{}, nil
 }
 
-func (s *Service) UpdateVS(
+func (m *Service) UpdateVS(
 	ctx context.Context,
 	req *balancerpb.UpdateVSRequest,
 ) (*balancerpb.UpdateVSResponse, error) {
@@ -181,10 +243,10 @@ func (s *Service) UpdateVS(
 		return nil, errConfigNameRequired
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
-	mc, ok := s.moduleConfigs[name]
+	mc, ok := m.moduleConfigs[name]
 	if !ok {
 		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
@@ -194,7 +256,7 @@ func (s *Service) UpdateVS(
 	return &balancerpb.UpdateVSResponse{}, nil
 }
 
-func (s *Service) DeleteVS(
+func (m *Service) DeleteVS(
 	ctx context.Context,
 	req *balancerpb.DeleteVSRequest,
 ) (*balancerpb.DeleteVSResponse, error) {
@@ -203,10 +265,10 @@ func (s *Service) DeleteVS(
 		return nil, errConfigNameRequired
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
-	mc, ok := s.moduleConfigs[name]
+	mc, ok := m.moduleConfigs[name]
 	if !ok {
 		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
@@ -216,7 +278,7 @@ func (s *Service) DeleteVS(
 	return &balancerpb.DeleteVSResponse{}, nil
 }
 
-func (s *Service) UpdateSessionsState(
+func (m *Service) UpdateSessionsState(
 	ctx context.Context,
 	req *balancerpb.UpdateSessionsStateRequest,
 ) (*balancerpb.UpdateSessionsStateResponse, error) {
@@ -225,54 +287,57 @@ func (s *Service) UpdateSessionsState(
 		return nil, errSessionsStateNameRequired
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
-	if _, ok := s.sessionsStates[name]; ok {
+	if _, ok := m.sessionsStates[name]; ok {
+		return nil, status.Errorf(codes.AlreadyExists, "sessions state %q already exists", name)
+	}
+
+	st, err := NewSessionsState(m.agent, name, req.GetCapacity())
+	if err != nil {
 		return nil, status.Errorf(
-			codes.AlreadyExists,
-			"sessions state %q already exists; resize is not yet implemented", name,
+			codes.Internal,
+			"failed to create sessions state %q: %v",
+			name,
+			err,
 		)
 	}
-
-	st, err := NewSessionsState(s.agent, name, req.GetCapacity())
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to create sessions state %q: %v", name, err)
-	}
-	s.sessionsStates[name] = st
+	m.sessionsStates[name] = st
 
 	return &balancerpb.UpdateSessionsStateResponse{}, nil
 }
 
-func (s *Service) ListSessionsStates(
+func (m *Service) ListSessionsStates(
 	ctx context.Context,
 	req *balancerpb.ListSessionsStatesRequest,
 ) (*balancerpb.ListSessionsStatesResponse, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
-	names := make([]string, 0, len(s.sessionsStates))
-	for name := range s.sessionsStates {
+	names := make([]string, 0, len(m.sessionsStates))
+	for name := range m.sessionsStates {
 		names = append(names, name)
 	}
+	sort.Strings(names)
 	return &balancerpb.ListSessionsStatesResponse{Names: names}, nil
 }
 
-func (s *Service) GetState(
+func (m *Service) GetState(
 	ctx context.Context,
 	req *balancerpb.GetStateRequest,
 ) (*balancerpb.GetStateResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "GetState is not implemented")
 }
 
-func (s *Service) ListSessions(
+func (m *Service) ListSessions(
 	req *balancerpb.ListSessionsRequest,
 	stream grpc.ServerStreamingServer[balancerpb.Session],
 ) error {
 	return status.Error(codes.Unimplemented, "ListSessions is not implemented")
 }
 
-func (s *Service) GetMetrics(
+func (m *Service) GetMetrics(
 	ctx context.Context,
 	req *balancerpb.GetMetricsRequest,
 ) (*balancerpb.GetMetricsResponse, error) {
