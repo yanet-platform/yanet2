@@ -4,7 +4,14 @@ import (
 	"context"
 
 	"github.com/yanet-platform/yanet2/agents/yanet-route-operator/operatorpb"
+	"github.com/yanet-platform/yanet2/common/commonpb"
 )
+
+// MetricsCollector renders the current state of the operator metrics
+// as a flat slice of commonpb.Metric values.
+type MetricsCollector interface {
+	Collect() []*commonpb.Metric
+}
 
 // MetricsService exposes operator runtime metrics over gRPC.
 type MetricsService struct {

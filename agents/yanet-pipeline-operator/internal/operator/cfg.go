@@ -24,6 +24,12 @@ func (m *Config) Default() {
 	*m = *DefaultConfig()
 }
 
+// LoggingConfig exposes the embedded logging configuration to the
+// generic operator CLI helper.
+func (m *Config) LoggingConfig() *logging.Config {
+	return &m.Logging
+}
+
 func (m *Config) Validate() error {
 	if len(m.Gateways) == 0 {
 		return errors.New("at least one gateway must be configured")

@@ -28,13 +28,6 @@ func WithFanOutLog(log *zap.Logger) FanOutOption {
 	}
 }
 
-// Actuator applies a desired state of type T to a single downstream
-// target, typically a single gateway.
-type Actuator[T any] interface {
-	Apply(ctx context.Context, state T) error
-	Close() error
-}
-
 // FanOutActuator applies state to several Actuators concurrently.
 type FanOutActuator[T any] struct {
 	actuators []Actuator[T]

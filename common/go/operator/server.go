@@ -35,28 +35,30 @@ type GRPCServer struct {
 	log    *zap.Logger
 }
 
-// NewGRPCServer constructs a GRPCServer with the supplied registrars
-// applied to a fresh grpc.Server.
+// NewGRPCServer constructs a GRPCServer with the supplied service
+// registrars applied to a fresh grpc.Server and returns registered
+// service names.
 func NewGRPCServer(
 	cfg *GRPCServerConfig,
-	registrars []func(*grpc.Server),
+	services []ServiceRegistrar,
 	options ...GRPCServerOption,
-) *GRPCServer {
+) (*GRPCServer, []string) {
 	opts := newGRPCServerOptions()
 	for _, o := range options {
 		o(opts)
 	}
 
 	server := grpc.NewServer()
-	for _, register := range registrars {
-		register(server)
+	serviceNames := make([]string, len(services))
+	for idx, register := range services {
+		serviceNames[idx] = register(server)
 	}
 
 	return &GRPCServer{
 		cfg:    cfg,
 		server: server,
 		log:    opts.Log,
-	}
+	}, serviceNames
 }
 
 // Run serves until the supplied context is cancelled.

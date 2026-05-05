@@ -6,7 +6,14 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/yanet-platform/yanet2/agents/yanet-pipeline-operator/operatorpb"
+	"github.com/yanet-platform/yanet2/common/commonpb"
 )
+
+// MetricsCollector renders the current state of the operator metrics
+// as a flat slice of commonpb.Metric values.
+type MetricsCollector interface {
+	Collect() []*commonpb.Metric
+}
 
 // Service implements the PipelineOperatorService gRPC API.
 type Service struct {

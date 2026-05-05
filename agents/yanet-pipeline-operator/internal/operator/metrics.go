@@ -5,6 +5,7 @@ import (
 
 	"github.com/yanet-platform/yanet2/common/commonpb"
 	"github.com/yanet-platform/yanet2/common/go/metrics"
+	"github.com/yanet-platform/yanet2/common/go/operator"
 )
 
 // Resource kinds reported via OnResourceUpdated.
@@ -14,10 +15,10 @@ const (
 	kindDeviceVlan  = "device-vlan"
 )
 
-var reconcilerStateNames = map[ReconcilerState]string{
-	ReconcilerStateIdle:     "idle",
-	ReconcilerStateApplying: "applying",
-	ReconcilerStateSleeping: "sleeping",
+var reconcilerStateNames = map[operator.ReconcilerState]string{
+	operator.ReconcilerStateIdle:     "idle",
+	operator.ReconcilerStateApplying: "applying",
+	operator.ReconcilerStateSleeping: "sleeping",
 }
 
 // Metrics is the single observability sink for the operator.
@@ -26,7 +27,7 @@ type Metrics struct {
 	reconcileErrors metrics.Counter
 	stageAdvance    metrics.Counter
 
-	states         map[ReconcilerState]*metrics.Gauge
+	states         map[operator.ReconcilerState]*metrics.Gauge
 	queueDepth     metrics.Gauge
 	backoffSeconds metrics.Gauge
 
@@ -34,7 +35,7 @@ type Metrics struct {
 }
 
 func NewMetrics(gateways []*GatewayMetrics) *Metrics {
-	states := make(map[ReconcilerState]*metrics.Gauge, len(reconcilerStateNames))
+	states := make(map[operator.ReconcilerState]*metrics.Gauge, len(reconcilerStateNames))
 	for state := range reconcilerStateNames {
 		states[state] = &metrics.Gauge{}
 	}
@@ -68,7 +69,7 @@ func (m *Metrics) OnQueueChanged(depth int) {
 	m.queueDepth.Store(float64(depth))
 }
 
-func (m *Metrics) OnStateChanged(state ReconcilerState) {
+func (m *Metrics) OnStateChanged(state operator.ReconcilerState) {
 	for k, g := range m.states {
 		if k == state {
 			g.Store(1)
