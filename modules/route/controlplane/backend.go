@@ -1,7 +1,10 @@
 package route
 
 import (
+	"bytes"
+	"cmp"
 	"fmt"
+	"net"
 	"net/netip"
 
 	"github.com/yanet-platform/yanet2/common/go/bitset"
@@ -53,7 +56,7 @@ func (m *backend) UpdateModule(name string, entries []*routepb.FIBEntry) (Module
 	// the operator already feeds deduplicated entries, but the wire
 	// format encodes a list-of-nexthops per prefix and we keep the
 	// route module robust to mistakes upstream.
-	hardwareIndex := map[hardwareKey]uint32{}
+	hardwareIndex := map[HardwareRoute]uint32{}
 	routeListIndex := map[bitset.TinyBitset]uint32{}
 
 	for _, entry := range entries {
@@ -65,21 +68,21 @@ func (m *backend) UpdateModule(name string, entries []*routepb.FIBEntry) (Module
 
 		key := bitset.TinyBitset{}
 		for _, nh := range entry.GetNexthops() {
-			hk, err := newHardwareKey(nh)
+			hardwareRoute, err := newHardwareRoute(nh)
 			if err != nil {
 				module.Free()
 				return nil, fmt.Errorf("failed to parse nexthop %v: %w", nh, err)
 			}
 
-			idx, ok := hardwareIndex[hk]
+			idx, ok := hardwareIndex[hardwareRoute]
 			if !ok {
-				added, err := module.AddRoute(hk.SrcMAC[:], hk.DstMAC[:], hk.Device)
+				added, err := module.AddRoute(hardwareRoute.SourceMAC[:], hardwareRoute.DestinationMAC[:], hardwareRoute.Device)
 				if err != nil {
 					module.Free()
 					return nil, fmt.Errorf("failed to add hardware route: %w", err)
 				}
 				idx = uint32(added)
-				hardwareIndex[hk] = idx
+				hardwareIndex[hardwareRoute] = idx
 			}
 			key.Insert(idx)
 		}
@@ -117,30 +120,49 @@ func (m *backend) DeleteModule(name string) error {
 	return m.agent.DeleteModuleConfig(name)
 }
 
-// hardwareKey is a comparable form of a hardware route used to
-// deduplicate AddRoute calls.
-type hardwareKey struct {
-	SrcMAC [6]byte
-	DstMAC [6]byte
+// HardwareRoute represents a route in the Layer 2 (L2) networking stack.
+type HardwareRoute struct {
+	// SourceMAC is the MAC address of the local interface that observed
+	// the neighbour.
+	SourceMAC [6]byte
+	// DestinationMAC is the MAC address of the next hop.
+	DestinationMAC [6]byte
+	// Device is the interface name.
 	Device string
 }
 
-func newHardwareKey(nh *routepb.FIBNexthop) (hardwareKey, error) {
+func (m HardwareRoute) String() string {
+	return fmt.Sprintf("%s -> %s", net.HardwareAddr(m.SourceMAC[:]), net.HardwareAddr(m.DestinationMAC[:]))
+}
+
+// Compare compares two hardware routes lexicographically for deterministic sorting.
+func (m HardwareRoute) Compare(other HardwareRoute) int {
+	if c := bytes.Compare(m.SourceMAC[:], other.SourceMAC[:]); c != 0 {
+		return c
+	}
+	if c := bytes.Compare(m.DestinationMAC[:], other.DestinationMAC[:]); c != 0 {
+		return c
+	}
+
+	return cmp.Compare(m.Device, other.Device)
+}
+
+func newHardwareRoute(nh *routepb.FIBNexthop) (HardwareRoute, error) {
 	src := nh.GetSrcMac()
 	if src == nil {
-		return hardwareKey{}, fmt.Errorf("src_mac is required")
+		return HardwareRoute{}, fmt.Errorf("src_mac is required")
 	}
 	dst := nh.GetDstMac()
 	if dst == nil {
-		return hardwareKey{}, fmt.Errorf("dst_mac is required")
+		return HardwareRoute{}, fmt.Errorf("dst_mac is required")
 	}
 	device := nh.GetDevice()
 	if device == "" {
-		return hardwareKey{}, fmt.Errorf("device is required")
+		return HardwareRoute{}, fmt.Errorf("device is required")
 	}
-	return hardwareKey{
-		SrcMAC: src.EUI48(),
-		DstMAC: dst.EUI48(),
-		Device: device,
+	return HardwareRoute{
+		SourceMAC:      src.EUI48(),
+		DestinationMAC: dst.EUI48(),
+		Device:         device,
 	}, nil
 }

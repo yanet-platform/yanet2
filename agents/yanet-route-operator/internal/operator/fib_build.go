@@ -2,22 +2,12 @@ package operator
 
 import (
 	"net/netip"
+	"slices"
 
 	"github.com/yanet-platform/yanet2/agents/yanet-route-operator/internal/discovery/neigh"
 	"github.com/yanet-platform/yanet2/agents/yanet-route-operator/internal/rib"
-	"github.com/yanet-platform/yanet2/common/go/bitset"
 	"github.com/yanet-platform/yanet2/common/go/maptrie"
 )
-
-// FIBNexthop describes a hardware-level nexthop (resolved neighbour).
-type FIBNexthop struct {
-	// SourceMAC is the local interface MAC.
-	SourceMAC [6]byte
-	// DestinationMAC is the next-hop MAC.
-	DestinationMAC [6]byte
-	// Device is the egress interface name.
-	Device string
-}
 
 // FIBEntry describes a single FIB prefix and its ECMP nexthops.
 type FIBEntry struct {
@@ -25,7 +15,7 @@ type FIBEntry struct {
 	Prefix netip.Prefix
 	// Nexthops are the resolved hardware routes for the prefix. The slice
 	// is deduplicated.
-	Nexthops []FIBNexthop
+	Nexthops []neigh.HardwareRoute
 }
 
 // FIB is the complete forwarding table for one module config.
@@ -47,20 +37,13 @@ type FIBBuildStats struct {
 }
 
 // BuildFIB resolves a RIB dump against the supplied neighbour view and
-// produces a deduplicated FIB. The function is pure: no shared memory
-// is touched and no errors are returned because every individual route
-// resolution failure is best-effort (recorded in stats).
+// produces a deduplicated FIB.
 func BuildFIB(
 	ribDump maptrie.MapTrie[netip.Prefix, netip.Addr, rib.RoutesList],
 	neighbours neigh.NexthopCacheView,
 ) (FIB, FIBBuildStats) {
 	var stats FIBBuildStats
 
-	// Track hardware-route uniqueness so the resulting FIB nexthops are
-	// deduplicated per prefix using TinyBitset semantics, mirroring the
-	// behaviour of the legacy backend.
-	hardwareIndex := map[neigh.HardwareRoute]uint32{}
-	hardwareSlice := []neigh.HardwareRoute{}
 	entries := make([]FIBEntry, 0)
 
 	for prefixLen := range ribDump {
@@ -73,43 +56,31 @@ func BuildFIB(
 
 			stats.TotalRoutes += len(routesList.Routes)
 
-			key := bitset.TinyBitset{}
-			for _, route := range routesList.Routes {
-				entry, ok := neighbours.Lookup(route.NextHop.Unmap())
+			nexthops := make([]neigh.HardwareRoute, 0, len(routesList.Routes))
+			for _, r := range routesList.Routes {
+				entry, ok := neighbours.Lookup(r.NextHop.Unmap())
 				if !ok {
 					stats.NeighbourNotFound++
 					continue
 				}
-				idx, ok := hardwareIndex[entry.HardwareRoute]
-				if !ok {
-					idx = uint32(len(hardwareSlice))
-					hardwareIndex[entry.HardwareRoute] = idx
-					hardwareSlice = append(hardwareSlice, entry.HardwareRoute)
-					stats.HardwareRoutes++
-				}
-				key.Insert(idx)
+
+				routeHardware := entry.HardwareRoute
+				nexthops = append(nexthops, routeHardware)
 			}
 
-			if key.Count() == 0 {
+			if len(nexthops) == 0 {
 				continue
 			}
 
-			indices := key.AsSlice()
-			nexthops := make([]FIBNexthop, 0, len(indices))
-			for _, idx := range indices {
-				hr := hardwareSlice[idx]
-				nexthops = append(nexthops, FIBNexthop{
-					SourceMAC:      hr.SourceMAC,
-					DestinationMAC: hr.DestinationMAC,
-					Device:         hr.Device,
-				})
-			}
+			slices.SortFunc(nexthops, neigh.HardwareRoute.Compare)
+			nexthops = slices.Compact(nexthops)
 
 			entries = append(entries, FIBEntry{
 				Prefix:   prefix,
 				Nexthops: nexthops,
 			})
 			stats.PrefixesAdded++
+			stats.HardwareRoutes += len(nexthops)
 		}
 	}
 

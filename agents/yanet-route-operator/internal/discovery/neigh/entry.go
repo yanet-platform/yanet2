@@ -1,10 +1,10 @@
 package neigh
 
 import (
-	"fmt"
-	"net"
 	"net/netip"
 	"time"
+
+	route "github.com/yanet-platform/yanet2/modules/route/controlplane"
 )
 
 // NeighbourEntry stores information about a neighbor with resolved hardware
@@ -29,17 +29,4 @@ type NeighbourEntry struct {
 	Priority uint32
 }
 
-// HardwareRoute is a hashable pair of MAC addresses.
-type HardwareRoute struct {
-	// SourceMAC is the MAC address of the local interface that observed
-	// the neighbour.
-	SourceMAC [6]byte
-	// DestinationMAC is the MAC address of the next hop.
-	DestinationMAC [6]byte
-	// Device name
-	Device string
-}
-
-func (m HardwareRoute) String() string {
-	return fmt.Sprintf("%s -> %s", net.HardwareAddr(m.SourceMAC[:]), net.HardwareAddr(m.DestinationMAC[:]))
-}
+type HardwareRoute = route.HardwareRoute

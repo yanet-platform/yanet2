@@ -123,7 +123,7 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 		operator.WithFanOutLog(log),
 	)
 
-	snapshot := func() []FIB {
+	snapshot := SnapshotFunc(func() []FIB {
 		ribs := routeSvc.Snapshot()
 		view := neighTable.View()
 
@@ -134,7 +134,7 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 			fibs = append(fibs, fib)
 		}
 		return fibs
-	}
+	})
 
 	reconciler = NewReconciler(
 		actuator,

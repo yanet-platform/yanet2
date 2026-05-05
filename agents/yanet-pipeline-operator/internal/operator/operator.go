@@ -66,7 +66,7 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 		actuators = append(actuators, actuator)
 	}
 
-	actuator := operator.NewFanOutActuator[*StageConfig](
+	actuator := operator.NewFanOutActuator(
 		actuators,
 		operator.WithFanOutLog(log),
 	)

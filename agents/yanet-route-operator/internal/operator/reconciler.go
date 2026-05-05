@@ -15,15 +15,22 @@ import (
 // targets (gateways).
 type Actuator = operator.Actuator[[]FIB]
 
-// SnapshotFunc returns the current desired FIB set. It is called once
-// per reconcile pass under no held locks; implementations are
-// responsible for their own concurrency control.
+// SnapshotProvider supplies the current desired FIB set for one reconcile pass.
+type SnapshotProvider interface {
+	Snapshot() []FIB
+}
+
+// SnapshotFunc adapts a plain function to SnapshotProvider.
 type SnapshotFunc func() []FIB
+
+func (m SnapshotFunc) Snapshot() []FIB {
+	return m()
+}
 
 // Reconciler is the route-operator reconcile loop.
 type Reconciler struct {
 	actuator Actuator
-	snapshot SnapshotFunc
+	snapshot SnapshotProvider
 	backoff  *xbackoff.Backoff
 	interval time.Duration
 
@@ -37,7 +44,7 @@ type Reconciler struct {
 // and snapshot source.
 func NewReconciler(
 	actuator Actuator,
-	snapshot SnapshotFunc,
+	snapshot SnapshotProvider,
 	options ...ReconcilerOption,
 ) *Reconciler {
 	opts := newReconcilerOptions()
@@ -93,7 +100,7 @@ func (m *Reconciler) Run(ctx context.Context) error {
 	sleeper := reconcilerSleeper{wake: m.wakeCh}
 	for {
 		m.metrics.OnStateChanged(ReconcilerStateApplying)
-		fibs := m.snapshot()
+		fibs := m.snapshot.Snapshot()
 		err := m.backoff.RunContext(ctx, func() error {
 			return m.actuator.Apply(ctx, fibs)
 		})
