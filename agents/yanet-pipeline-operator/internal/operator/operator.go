@@ -8,6 +8,7 @@ import (
 	"github.com/cenkalti/backoff/v5"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc"
 
 	"github.com/yanet-platform/yanet2/agents/yanet-pipeline-operator/operatorpb"
 	"github.com/yanet-platform/yanet2/common/go/operator"
@@ -23,7 +24,7 @@ var (
 
 type Operator struct {
 	cfg        *Config
-	server     *GRPCServer
+	server     *operator.GRPCServer
 	reconciler *Reconciler
 	actuator   Actuator
 	log        *zap.Logger
@@ -43,10 +44,14 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 	}
 	metrics := NewMetrics(gatewayMetrics)
 
-	server := NewGRPCServer(
+	service := NewService(WithServiceLog(log), WithServiceMetrics(metrics))
+	server := operator.NewGRPCServer(
 		cfg.Server,
-		NewService(WithServiceLog(log), WithServiceMetrics(metrics)),
-		WithGRPCLog(log),
+		[]func(*grpc.Server){
+			func(s *grpc.Server) { operatorpb.RegisterPipelineOperatorServiceServer(s, service) },
+			func(s *grpc.Server) { operatorpb.RegisterMetricsServiceServer(s, service) },
+		},
+		operator.WithGRPCLog(log),
 	)
 
 	actuators := make([]Actuator, 0, len(cfg.Gateways))

@@ -7,26 +7,39 @@ import (
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
-
-	"github.com/yanet-platform/yanet2/agents/yanet-route-operator/operatorpb"
-	"github.com/yanet-platform/yanet2/common/go/operator"
 )
+
+type grpcServerOptions struct {
+	Log *zap.Logger
+}
+
+func newGRPCServerOptions() *grpcServerOptions {
+	return &grpcServerOptions{
+		Log: zap.NewNop(),
+	}
+}
+
+type GRPCServerOption func(*grpcServerOptions)
+
+// WithGRPCLog sets the logger used by the gRPC server wrapper.
+func WithGRPCLog(log *zap.Logger) GRPCServerOption {
+	return func(o *grpcServerOptions) {
+		o.Log = log
+	}
+}
 
 // GRPCServer wraps a grpc.Server with the operator's service set.
 type GRPCServer struct {
-	cfg    *operator.GRPCServerConfig
+	cfg    *GRPCServerConfig
 	server *grpc.Server
 	log    *zap.Logger
 }
 
-// NewGRPCServer registers all operator services on a fresh grpc.Server
-// and returns the ready-to-run wrapper.
+// NewGRPCServer constructs a GRPCServer with the supplied registrars
+// applied to a fresh grpc.Server.
 func NewGRPCServer(
-	cfg *operator.GRPCServerConfig,
-	routeSvc *RouteService,
-	neighbourSvc *NeighbourService,
-	metricsSvc *MetricsService,
-	operatorSvc *RouteOperatorService,
+	cfg *GRPCServerConfig,
+	registrars []func(*grpc.Server),
 	options ...GRPCServerOption,
 ) *GRPCServer {
 	opts := newGRPCServerOptions()
@@ -35,10 +48,9 @@ func NewGRPCServer(
 	}
 
 	server := grpc.NewServer()
-	operatorpb.RegisterRouteServiceServer(server, routeSvc)
-	operatorpb.RegisterNeighbourServiceServer(server, neighbourSvc)
-	operatorpb.RegisterMetricsServiceServer(server, metricsSvc)
-	operatorpb.RegisterRouteOperatorServiceServer(server, operatorSvc)
+	for _, register := range registrars {
+		register(server)
+	}
 
 	return &GRPCServer{
 		cfg:    cfg,
@@ -47,8 +59,9 @@ func NewGRPCServer(
 	}
 }
 
-// Run serves until the supplied context is cancelled. On cancellation
-// it performs a graceful stop and drains Serve's return value.
+// Run serves until the supplied context is cancelled.
+//
+// On cancellation it performs a graceful stop and drains Serve's return value.
 func (m *GRPCServer) Run(ctx context.Context, listener net.Listener) error {
 	serveErr := make(chan error, 1)
 	go func() {
@@ -64,14 +77,12 @@ func (m *GRPCServer) Run(ctx context.Context, listener net.Listener) error {
 		defer m.log.Info("stopped gRPC server", zap.Stringer("addr", listener.Addr()))
 
 		m.server.GracefulStop()
-		// Drain Serve's return value; after GracefulStop it returns nil
-		// on clean shutdown.
+		// Drain Serve's return value.
 		if err := <-serveErr; err != nil {
 			return fmt.Errorf("failed to serve gRPC: %w", err)
 		}
 		return nil
 	case err := <-serveErr:
-		// Serve returned before ctx was cancelled — treat as fatal.
 		if err != nil {
 			return fmt.Errorf("failed to serve gRPC: %w", err)
 		}

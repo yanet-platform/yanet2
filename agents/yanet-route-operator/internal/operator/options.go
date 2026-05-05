@@ -166,25 +166,6 @@ func newOperatorServiceOptions() *operatorServiceOptions {
 
 type OperatorServiceOption func(*operatorServiceOptions)
 
-type grpcServerOptions struct {
-	Log *zap.Logger
-}
-
-func newGRPCServerOptions() *grpcServerOptions {
-	return &grpcServerOptions{
-		Log: zap.NewNop(),
-	}
-}
-
-type GRPCServerOption func(*grpcServerOptions)
-
-// WithGRPCLog sets the logger used by the gRPC server wrapper.
-func WithGRPCLog(log *zap.Logger) GRPCServerOption {
-	return func(o *grpcServerOptions) {
-		o.Log = log
-	}
-}
-
 type gatewayActuatorOptions struct {
 	Function FunctionConfig
 	Log      *zap.Logger

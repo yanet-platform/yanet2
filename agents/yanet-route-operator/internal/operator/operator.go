@@ -10,6 +10,7 @@ import (
 	"github.com/cenkalti/backoff/v5"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc"
 
 	"github.com/yanet-platform/yanet2/agents/yanet-route-operator/internal/discovery/neigh"
 	"github.com/yanet-platform/yanet2/agents/yanet-route-operator/internal/rib"
@@ -37,7 +38,7 @@ var (
 // and reconciler for the route operator.
 type Operator struct {
 	cfg          *Config
-	server       *GRPCServer
+	server       *operator.GRPCServer
 	reconciler   *Reconciler
 	actuator     Actuator
 	routeSvc     *RouteService
@@ -92,13 +93,15 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 	)
 	operatorSvc := NewRouteOperatorService()
 
-	server := NewGRPCServer(
+	server := operator.NewGRPCServer(
 		cfg.Server,
-		routeSvc,
-		neighbourSvc,
-		metricsSvc,
-		operatorSvc,
-		WithGRPCLog(log),
+		[]func(*grpc.Server){
+			func(s *grpc.Server) { operatorpb.RegisterRouteServiceServer(s, routeSvc) },
+			func(s *grpc.Server) { operatorpb.RegisterNeighbourServiceServer(s, neighbourSvc) },
+			func(s *grpc.Server) { operatorpb.RegisterMetricsServiceServer(s, metricsSvc) },
+			func(s *grpc.Server) { operatorpb.RegisterRouteOperatorServiceServer(s, operatorSvc) },
+		},
+		operator.WithGRPCLog(log),
 	)
 
 	actuators := make([]Actuator, 0, len(cfg.Gateways))
