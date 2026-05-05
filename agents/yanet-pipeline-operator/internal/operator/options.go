@@ -4,6 +4,8 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+
+	"github.com/yanet-platform/yanet2/common/go/operator"
 )
 
 type options struct {
@@ -35,9 +37,9 @@ type reconcilerOptions struct {
 
 func newReconcilerOptions() *reconcilerOptions {
 	return &reconcilerOptions{
-		Interval:       DefaultReconcileInterval,
-		InitialBackoff: DefaultReconcileInitialBackoff,
-		MaxBackoff:     DefaultReconcileMaxBackoff,
+		Interval:       operator.DefaultReconcileInterval,
+		InitialBackoff: operator.DefaultReconcileInitialBackoff,
+		MaxBackoff:     operator.DefaultReconcileMaxBackoff,
 		Metrics:        noopReconcilerMetricsObserver{},
 		Log:            zap.NewNop(),
 	}

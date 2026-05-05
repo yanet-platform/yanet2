@@ -2,30 +2,22 @@ package operator
 
 import (
 	"errors"
-	"fmt"
-	"time"
 
 	"go.uber.org/zap/zapcore"
 
 	"github.com/yanet-platform/yanet2/common/go/logging"
+	"github.com/yanet-platform/yanet2/common/go/operator"
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
-)
-
-const (
-	DefaultReconcileInterval       = 30 * time.Second
-	DefaultReconcileInitialBackoff = 500 * time.Millisecond
-	DefaultReconcileMaxBackoff     = 30 * time.Second
-	DefaultRegisterInterval        = 30 * time.Second
 )
 
 // Config is the top-level YAML configuration for yanet-pipeline-operator.
 type Config struct {
-	Logging   logging.Config    `yaml:"logging"`
-	Server    *GRPCServerConfig `yaml:"server"`
-	Gateways  []GatewayConfig   `yaml:"gateways"`
-	Register  RegisterConfig    `yaml:"register"`
-	Reconcile ReconcileConfig   `yaml:"reconcile"`
-	Stages    []StageConfig     `yaml:"stages"`
+	Logging   logging.Config             `yaml:"logging"`
+	Server    *operator.GRPCServerConfig `yaml:"server"`
+	Gateways  []operator.GatewayConfig   `yaml:"gateways"`
+	Register  operator.RegisterConfig    `yaml:"register"`
+	Reconcile operator.ReconcileConfig   `yaml:"reconcile"`
+	Stages    []StageConfig              `yaml:"stages"`
 }
 
 func (m *Config) Default() {
@@ -46,54 +38,16 @@ func DefaultConfig() *Config {
 		Logging: logging.Config{
 			Level: zapcore.InfoLevel,
 		},
-		Server: &GRPCServerConfig{
+		Server: &operator.GRPCServerConfig{
 			Endpoint: xcfg.MustNonEmptyString("localhost:50001"),
 		},
-		Reconcile: ReconcileConfig{
-			Interval:       xcfg.MustNonZero(DefaultReconcileInterval),
-			InitialBackoff: xcfg.MustNonZero(DefaultReconcileInitialBackoff),
-			MaxBackoff:     xcfg.MustNonZero(DefaultReconcileMaxBackoff),
+		Reconcile: operator.ReconcileConfig{
+			Interval:       xcfg.MustNonZero(operator.DefaultReconcileInterval),
+			InitialBackoff: xcfg.MustNonZero(operator.DefaultReconcileInitialBackoff),
+			MaxBackoff:     xcfg.MustNonZero(operator.DefaultReconcileMaxBackoff),
 		},
-		Register: RegisterConfig{
-			Interval: xcfg.MustNonZero(DefaultRegisterInterval),
+		Register: operator.RegisterConfig{
+			Interval: xcfg.MustNonZero(operator.DefaultRegisterInterval),
 		},
 	}
-}
-
-// GatewayConfig holds the name and gRPC endpoint of a single Gateway.
-type GatewayConfig struct {
-	// Name is a human-readable label used in logs and status reports.
-	Name string `yaml:"name"`
-	// Endpoint is the gRPC address of the Gateway.
-	Endpoint xcfg.NonEmptyString `yaml:"endpoint"`
-}
-
-// RegisterConfig holds the gateway registration heartbeat parameter.
-type RegisterConfig struct {
-	// Interval sets heartbeat period between registration refreshes.
-	Interval xcfg.NonZero[time.Duration] `yaml:"interval"`
-}
-
-// ReconcileConfig holds timing parameters for the reconcile loop.
-type ReconcileConfig struct {
-	// Interval is the steady-state period between successful reconcile
-	// passes.
-	Interval xcfg.NonZero[time.Duration] `yaml:"interval"`
-	// InitialBackoff is the first sleep after a failed pass; grows
-	// exponentially.
-	InitialBackoff xcfg.NonZero[time.Duration] `yaml:"initial_backoff"`
-	// MaxBackoff caps the exponential backoff sleep.
-	MaxBackoff xcfg.NonZero[time.Duration] `yaml:"max_backoff"`
-}
-
-func (m *ReconcileConfig) Validate() error {
-	if m.MaxBackoff.Unwrap() < m.InitialBackoff.Unwrap() {
-		return fmt.Errorf(
-			"max_backoff (%s) must be >= initial_backoff (%s)",
-			m.MaxBackoff.Unwrap(),
-			m.InitialBackoff.Unwrap(),
-		)
-	}
-
-	return nil
 }

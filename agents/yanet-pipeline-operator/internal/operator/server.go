@@ -9,7 +9,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/yanet-platform/yanet2/agents/yanet-pipeline-operator/operatorpb"
-	"github.com/yanet-platform/yanet2/common/go/xcfg"
+	"github.com/yanet-platform/yanet2/common/go/operator"
 )
 
 type grpcServerOptions struct {
@@ -30,18 +30,14 @@ func WithGRPCLog(log *zap.Logger) GRPCServerOption {
 	}
 }
 
-type GRPCServerConfig struct {
-	Endpoint xcfg.NonEmptyString `yaml:"endpoint"`
-}
-
 type GRPCServer struct {
-	cfg    *GRPCServerConfig
+	cfg    *operator.GRPCServerConfig
 	server *grpc.Server
 	log    *zap.Logger
 }
 
 func NewGRPCServer(
-	cfg *GRPCServerConfig,
+	cfg *operator.GRPCServerConfig,
 	service *Service,
 	options ...GRPCServerOption,
 ) *GRPCServer {

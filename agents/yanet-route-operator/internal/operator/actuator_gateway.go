@@ -10,6 +10,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/yanet-platform/yanet2/common/commonpb"
+	"github.com/yanet-platform/yanet2/common/go/operator"
 	"github.com/yanet-platform/yanet2/controlplane/ynpb"
 	"github.com/yanet-platform/yanet2/modules/route/controlplane/routepb"
 )
@@ -28,7 +29,7 @@ type GatewayActuator struct {
 // NewGatewayActuator dials the Gateway endpoint and returns a
 // ready-to-use actuator.
 func NewGatewayActuator(
-	cfg GatewayConfig,
+	cfg operator.GatewayConfig,
 	options ...GatewayActuatorOption,
 ) (*GatewayActuator, error) {
 	opts := newGatewayActuatorOptions()

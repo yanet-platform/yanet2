@@ -9,17 +9,12 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/yanet-platform/yanet2/agents/yanet-route-operator/operatorpb"
-	"github.com/yanet-platform/yanet2/common/go/xcfg"
+	"github.com/yanet-platform/yanet2/common/go/operator"
 )
-
-// GRPCServerConfig describes how to expose the operator's gRPC server.
-type GRPCServerConfig struct {
-	Endpoint xcfg.NonEmptyString `yaml:"endpoint"`
-}
 
 // GRPCServer wraps a grpc.Server with the operator's service set.
 type GRPCServer struct {
-	cfg    *GRPCServerConfig
+	cfg    *operator.GRPCServerConfig
 	server *grpc.Server
 	log    *zap.Logger
 }
@@ -27,7 +22,7 @@ type GRPCServer struct {
 // NewGRPCServer registers all operator services on a fresh grpc.Server
 // and returns the ready-to-run wrapper.
 func NewGRPCServer(
-	cfg *GRPCServerConfig,
+	cfg *operator.GRPCServerConfig,
 	routeSvc *RouteService,
 	neighbourSvc *NeighbourService,
 	metricsSvc *MetricsService,
