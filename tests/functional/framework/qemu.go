@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -32,25 +33,28 @@ import (
 // All operations are thread-safe and support concurrent access patterns
 // required for comprehensive network testing scenarios.
 type QEMUManager struct {
-	Name        string
-	ImagePath   string             // Path to the QEMU disk image file
-	WorkDir     string             // Temporary working directory for VM instance
-	Command     *exec.Cmd          // QEMU process command handle
-	LogsDir     string             // Directory for logs
-	ConfigDir   string             // Directory for configuration files
-	BuildDir    string             // Project build directory (shared with VM)
-	TargetDir   string             // Project target directory (shared with VM)
-	SerialPath  string             // Unix socket path for serial console access
-	MonitorPath string             // Unix socket path for QEMU monitor interface
-	SocketPaths []string           // Unix socket paths for network interfaces
-	isReady     bool               // VM readiness state flag
-	readySignal chan bool          // Channel for VM readiness notification
-	monitorConn net.Conn           // Connection to QEMU monitor interface
-	serialConn  net.Conn           // Connection to VM serial console
-	log         *zap.SugaredLogger // Logger for debugging and monitoring
-	readyMutex  sync.RWMutex       // Protects concurrent access to isReady field
-	instanceID  string             // Unique identifier for this VM instance
-	sshPort     int                // SSH port - used when debug mode
+	Name         string
+	ImagePath    string             // Path to the QEMU disk image file
+	WorkDir      string             // Temporary working directory for VM instance
+	Command      *exec.Cmd          // QEMU process command handle
+	LogsDir      string             // Directory for logs
+	ConfigDir    string             // Directory for configuration files
+	BuildDir     string             // Project build directory (shared with VM)
+	TargetDir    string             // Project target directory (shared with VM)
+	SerialPath   string             // Unix socket path for serial console access
+	MonitorPath  string             // Unix socket path for QEMU monitor interface
+	SocketPaths  []string           // Unix socket paths for network interfaces
+	isReady      bool               // VM readiness state flag
+	readySignal  chan bool          // Channel for VM readiness notification
+	monitorConn  net.Conn           // Connection to QEMU monitor interface
+	serialConn   net.Conn           // Connection to VM serial console
+	serialBuffer strings.Builder    // Buffer accumulating all serial console output
+	serialMutex  sync.Mutex         // Protects serialBuffer
+	serialLog    atomic.Value       // Holds *zap.SugaredLogger used by readSerial
+	log          *zap.SugaredLogger // Logger for debugging and monitoring
+	readyMutex   sync.RWMutex       // Protects concurrent access to isReady field
+	instanceID   string             // Unique identifier for this VM instance
+	sshPort      int                // SSH port - used when debug mode
 }
 
 // NewQEMUManager creates and initializes a new QEMU manager instance for virtual
@@ -92,7 +96,8 @@ func NewQEMUManager(name string, imagePath string, logger *zap.SugaredLogger) (*
 	buildDir := filepath.Join(projectRoot, "build")
 	targetDir := filepath.Join(projectRoot, "target")
 
-	return &QEMUManager{
+	qemuLog := logger.Named("QEMU")
+	q := &QEMUManager{
 		Name:        name,
 		ImagePath:   imagePath,
 		WorkDir:     workDir,
@@ -101,11 +106,13 @@ func NewQEMUManager(name string, imagePath string, logger *zap.SugaredLogger) (*
 		BuildDir:    buildDir,
 		TargetDir:   targetDir,
 		readySignal: make(chan bool, 1),
-		log:         logger.Named("QEMU"),
+		log:         qemuLog,
 		instanceID:  instanceID,
 		SerialPath:  filepath.Join(workDir, "serial.sock"),
 		MonitorPath: filepath.Join(workDir, "monitor.sock"),
-	}, nil
+	}
+	q.serialLog.Store(qemuLog)
+	return q, nil
 }
 
 // Start launches a QEMU virtual machine with comprehensive configuration for
@@ -337,7 +344,7 @@ func (q *QEMUManager) Start() error {
 	}
 	q.log.Debugf("Successfully connected to serial console at %s", q.SerialPath)
 
-	go q.monitorVMReadiness()
+	go q.readSerial()
 
 	return nil
 }
@@ -433,16 +440,28 @@ func (q *QEMUManager) GetStdin() io.WriteCloser {
 	return q.serialConn
 }
 
-// GetStdout returns the stdout pipe for the QEMU process
-func (q *QEMUManager) GetStdout() io.ReadCloser {
-	// Try to connect if not already connected
-	if q.serialConn == nil {
-		if err := q.connectToSerial(); err != nil {
-			q.log.Errorf("Failed to connect to serial console: %v", err)
-			return nil
-		}
-	}
-	return q.serialConn
+// resetSerialBuffer clears the accumulated serial console output buffer.
+func (q *QEMUManager) resetSerialBuffer() {
+	q.serialMutex.Lock()
+	defer q.serialMutex.Unlock()
+	q.serialBuffer.Reset()
+}
+
+// serialBufferSnapshot returns the current contents of the serial console output buffer.
+func (q *QEMUManager) serialBufferSnapshot() string {
+	q.serialMutex.Lock()
+	defer q.serialMutex.Unlock()
+	return q.serialBuffer.String()
+}
+
+// setSerialLogger atomically replaces the logger used by the readSerial goroutine.
+func (q *QEMUManager) setSerialLogger(log *zap.SugaredLogger) {
+	q.serialLog.Store(log)
+}
+
+// getSerialLog returns the current serial logger.
+func (q *QEMUManager) getSerialLog() *zap.SugaredLogger {
+	return q.serialLog.Load().(*zap.SugaredLogger)
 }
 
 // captureStderr captures QEMU stderr for logging
@@ -508,39 +527,43 @@ func (q *QEMUManager) connectToSerial() error {
 	return fmt.Errorf("failed to connect to serial console after 10 attempts")
 }
 
-// monitorVMReadiness monitors serial console output to detect when VM is ready
-func (q *QEMUManager) monitorVMReadiness() {
+// readSerial is the single permanent goroutine that owns q.serialConn reads.
+// It accumulates all output into serialBuffer and detects VM readiness exactly once.
+func (q *QEMUManager) readSerial() {
 	if q.serialConn == nil {
-		q.log.Error("Failed to monitor VM readiness: serial connection is nil")
+		q.log.Error("Failed to start serial reader: serial connection is nil")
 		return
 	}
 
 	scanner := bufio.NewScanner(q.serialConn)
+	readyOnce := false
 
 	for scanner.Scan() {
 		line := scanner.Text()
-		q.log.Debugf("VM output: %s", line)
 
-		// If we see the unminimize message, send Enter to activate prompt
+		q.serialMutex.Lock()
+		q.serialBuffer.WriteString(line + "\n")
+		q.serialMutex.Unlock()
+
+		q.getSerialLog().Debugf("VM output: %s", line)
+
+		// If we see the unminimize message, send Enter to activate prompt.
 		if strings.Contains(line, "To restore this content, you can run the 'unminimize' command") {
 			q.log.Debug("Unminimize message seen, sending Enter to activate prompt")
-			if q.serialConn != nil {
-				if _, err := q.serialConn.Write([]byte("\n")); err != nil {
-					q.log.Errorf("Failed to send Enter to serial console: %v", err)
-				}
+			if _, err := q.serialConn.Write([]byte("\n")); err != nil {
+				q.log.Errorf("Failed to send Enter to serial console: %v", err)
 			}
 		}
 
-		// Check if VM is ready - look for shell prompt
-		if strings.Contains(line, "root@yanet-vm:~#") {
+		// Detect readiness exactly once; keep reading after signalling.
+		if !readyOnce && strings.Contains(line, "root@yanet-vm:~#") {
+			readyOnce = true
 			q.setVMReady(true)
 			q.log.Debug("VM is ready!")
 			close(q.readySignal)
-			return
 		}
 	}
 
-	// Check for scanner errors
 	if err := scanner.Err(); err != nil {
 		q.log.Errorf("Error reading from serial console: %v", err)
 	}

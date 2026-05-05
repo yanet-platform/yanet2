@@ -421,13 +421,6 @@ func (f *F) Stop() error {
 	f.socketClients.clients = make(map[int]*SocketClient)
 	f.socketClients.mutex.Unlock()
 
-	// Close CLI connections
-	if f.cli != nil {
-		if err := f.cli.Close(); err != nil {
-			errs = append(errs, fmt.Errorf("failed to close CLI: %w", err))
-		}
-	}
-
 	// Stop QEMU VM
 	if err := f.qemu.Stop(); err != nil {
 		errs = append(errs, fmt.Errorf("failed to stop QEMU: %w", err))

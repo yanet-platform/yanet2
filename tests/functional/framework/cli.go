@@ -1,13 +1,11 @@
 package framework
 
 import (
-	"bufio"
 	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -22,17 +20,8 @@ var (
 // between CLIManager instances. This allows multiple CLIManager wrappers
 // with different loggers to share the same underlying connection.
 type cliManagerInner struct {
-	qemu         *QEMUManager    // QEMU virtual machine manager instance
-	outputBuffer strings.Builder // Buffer for collecting command output
-	mutex        sync.Mutex      // Protects access to outputBuffer
-	reader       *bufio.Scanner  // Scanner for reading VM stdout
-	cmdMutex     sync.Mutex      // Ensures sequential command execution
-	log          atomic.Value    // Shared logger (*zap.SugaredLogger), updated atomically
-}
-
-// getLog returns the current logger from atomic storage
-func (inner *cliManagerInner) getLog() *zap.SugaredLogger {
-	return inner.log.Load().(*zap.SugaredLogger)
+	qemu     *QEMUManager // QEMU virtual machine manager instance
+	cmdMutex sync.Mutex   // Ensures sequential command execution
 }
 
 // CLIManager handles YANET CLI operations within a QEMU virtual machine environment.
@@ -83,7 +72,6 @@ func NewCLIManager(qemu *QEMUManager, opts ...CLIOption) (*CLIManager, error) {
 	inner := &cliManagerInner{
 		qemu: qemu,
 	}
-	inner.log.Store(defaultLog)
 
 	cm := &CLIManager{
 		inner: inner,
@@ -137,27 +125,17 @@ func (c *CLIManager) ExecuteCommand(command string) (string, error) {
 		return "", fmt.Errorf("VM not ready")
 	}
 
-	// Check if we have stdin/stdout pipes
+	// Check if we have a stdin pipe.
 	stdin := c.inner.qemu.GetStdin()
-	stdout := c.inner.qemu.GetStdout()
 
-	if stdin == nil || stdout == nil {
+	if stdin == nil {
 		return "", fmt.Errorf("failed to connect to QEMU serial console")
 	}
 
 	c.log.Debugf("DEBUG: Executing command in VM %s: %s", c.inner.qemu.Name, command)
 
-	// Initialize reader if not already done
-	if c.inner.reader == nil {
-		c.inner.reader = bufio.NewScanner(stdout)
-		// Start background reader to capture output
-		go c.readOutput()
-	}
-
-	// Clear output buffer
-	c.inner.mutex.Lock()
-	c.inner.outputBuffer.Reset()
-	c.inner.mutex.Unlock()
+	// Clear the serial output buffer before issuing the command.
+	c.inner.qemu.resetSerialBuffer()
 
 	// Send command to VM with a unique marker for better parsing
 	tm := time.Now().UnixNano()
@@ -211,32 +189,6 @@ func (c *CLIManager) ExecuteCommands(commands ...string) ([]string, error) {
 	return outputs, nil
 }
 
-// readOutput continuously reads and buffers output from the QEMU virtual machine's
-// stdout stream in a separate goroutine. This background process ensures that all
-// VM output is captured and made available for command parsing.
-//
-// The method runs indefinitely until the scanner encounters an error or EOF,
-// thread-safely appending each line to the output buffer. All captured output
-// is logged at debug level for troubleshooting purposes.
-//
-// This is an internal method that should not be called directly by users.
-func (c *CLIManager) readOutput() {
-	for c.inner.reader.Scan() {
-		line := c.inner.reader.Text()
-
-		c.inner.mutex.Lock()
-		c.inner.outputBuffer.WriteString(line + "\n")
-		c.inner.mutex.Unlock()
-
-		// Use shared logger from inner (updated atomically via WithLog)
-		c.inner.getLog().Debugf("DEBUG: VM output: %s", line)
-	}
-
-	if err := c.inner.reader.Err(); err != nil {
-		c.inner.getLog().Debugf("DEBUG: Error reading VM output: %v", err)
-	}
-}
-
 // waitForCommandCompletionWithMarkers waits for command completion by monitoring
 // the output buffer for specific start and end markers. This approach provides
 // reliable command boundary detection even when multiple commands are executed
@@ -261,9 +213,7 @@ func (c *CLIManager) waitForCommandCompletionWithMarkers(command, fullCommand, s
 	foundStart := false
 
 	for time.Now().Before(deadline) {
-		c.inner.mutex.Lock()
-		output := c.inner.outputBuffer.String()
-		c.inner.mutex.Unlock()
+		output := c.inner.qemu.serialBufferSnapshot()
 		output = strings.ReplaceAll(output, fullCommand, "")
 
 		// Look for start marker
@@ -281,11 +231,8 @@ func (c *CLIManager) waitForCommandCompletionWithMarkers(command, fullCommand, s
 		time.Sleep(100 * time.Millisecond)
 	}
 
-	// Return whatever output we have, even if incomplete
-	c.inner.mutex.Lock()
-	output := c.inner.outputBuffer.String()
-	c.inner.mutex.Unlock()
-
+	// Return whatever output we have, even if incomplete.
+	output := c.inner.qemu.serialBufferSnapshot()
 	return output, fmt.Errorf("command timeout after %v (start found: %v)", timeout, foundStart)
 }
 
@@ -313,9 +260,9 @@ func (c *CLIManager) extractCommandOutputWithMarkers(output, startMarker, endMar
 	lines := strings.Split(output, "\n")
 
 	// Find the LAST occurrence of startMarker before endMarker.
-	// This handles the race condition where a stale marker from a previous
-	// command leaks into the buffer after Reset() due to the readOutput
-	// goroutine writing a line it had already scanned.
+	// This handles the case where a stale marker from a previous command
+	// leaks into the buffer after resetSerialBuffer() because readSerial
+	// had already appended the line before the reset took effect.
 	lastStartIdx := -1
 	endIdx := -1
 	for i, line := range lines {
@@ -422,25 +369,6 @@ func (c *CLIManager) cleanControlCharacters(line string) string {
 	return cleaned
 }
 
-// Close performs cleanup operations for the CLI manager, ensuring proper
-// resource deallocation and stopping background processes. This method should
-// be called when the CLI manager is no longer needed to prevent resource leaks.
-//
-// Currently, this method primarily handles mutex cleanup and prepares for
-// future resource management needs. It's safe to call multiple times.
-//
-// Returns:
-//   - error: Always returns nil in the current implementation, but the error
-//     return type is maintained for future compatibility and consistency
-//     with the io.Closer interface pattern
-func (c *CLIManager) Close() error {
-	// Stop the background reader
-	c.inner.mutex.Lock()
-	defer c.inner.mutex.Unlock()
-
-	return nil
-}
-
 // WithLog creates a new CLIManager instance with a different logger
 // while sharing the same underlying connection (inner state).
 // This allows each test to have its own logging context while sharing
@@ -456,8 +384,9 @@ func (c *CLIManager) Close() error {
 //
 //	namedCLI := cli.WithLog(logger.Named("test1"))
 func (c *CLIManager) WithLog(log *zap.SugaredLogger) *CLIManager {
-	// Update shared logger atomically so background goroutine uses it
-	c.inner.log.Store(log)
+	// Update the serial reader's logger atomically so VM output is attributed
+	// to the current test's logger.
+	c.inner.qemu.setSerialLogger(log)
 
 	return &CLIManager{
 		inner: c.inner, // Share the same inner state (connection)
