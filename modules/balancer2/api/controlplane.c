@@ -375,7 +375,9 @@ register_acl_counters(
 			ids[idx] = COUNTER_INVALID;
 			continue;
 		}
-		ids[idx] = counter_registry_register(registry, sources[idx].counter_name, 1, error);
+		ids[idx] = counter_registry_register(
+			registry, sources[idx].counter_name, 1, error
+		);
 		if (ids[idx] == COUNTER_INVALID) {
 			yanet_error_add(error, "rule[%zu]", idx);
 			memory_bfree(
@@ -398,9 +400,14 @@ register_real_counters(
 ) {
 	struct real *reals = ADDR_OF(&vs->reals);
 	for (size_t idx = 0; idx < vs->reals_count; ++idx) {
-		const struct balancer_real_config *cur_real_config = &real_configs[idx];
+		const struct balancer_real_config *cur_real_config =
+			&real_configs[idx];
 		if (cur_real_config->counter_name == NULL) {
-			yanet_error_add(error, "real[%zu]: counter name is required", idx);
+			yanet_error_add(
+				error,
+				"real[%zu]: counter name is required",
+				idx
+			);
 			return -1;
 		}
 		reals[idx].counter_id = counter_registry_register(
@@ -450,9 +457,7 @@ register_vs_counters(
 		return -1;
 	}
 
-	if (register_real_counters(
-		    registry, vs, config->reals, error
-	    ) != 0) {
+	if (register_real_counters(registry, vs, config->reals, error) != 0) {
 		return -1;
 	}
 
@@ -576,7 +581,7 @@ register_balancer_counters(
 	}
 	cfg->l4_counter_id = counter_registry_register(
 		registry,
-		balancer_l4_counter_name,
+		l4_counter_name,
 		sizeof(struct balancer_l4_stats) / sizeof(uint64_t),
 		error
 	);
@@ -898,7 +903,9 @@ init_module_config(
 
 	struct counter_registry *registry = &cfg->cp_module.counter_registry;
 
-	if (register_balancer_counters(cfg, registry, common_counter_name, l4_counter_name, error) != 0) {
+	if (register_balancer_counters(
+		    cfg, registry, common_counter_name, l4_counter_name, error
+	    ) != 0) {
 		yanet_error_add(error, "register counters");
 		free_module_config(agent, cfg);
 		return -1;
@@ -982,8 +989,8 @@ balancer_create(
 		    timeouts,
 		    vs_configs,
 		    vs_count,
-			common_counter_name,
-			l4_counter_name,
+		    common_counter_name,
+		    l4_counter_name,
 		    error
 	    ) != 0) {
 		memory_bfree(mctx, handle, sizeof(*handle));
