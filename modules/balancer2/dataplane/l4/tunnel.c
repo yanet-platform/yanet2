@@ -6,12 +6,18 @@
 
 #include "common/network.h"
 
+#include "dataplane/packet/mss.h"
 #include "lib/dataplane/packet/data.h"
 #include "lib/dataplane/packet/encap.h"
 
 #include "packet.h"
 #include "real.h"
 #include "tunnel.h"
+#include "types/stats.h"
+#include "vs.h"
+
+#define CLAMP_MSS 1220
+#define INSERT_MSS 576
 
 /*
  * Build an outer IPv4 tunnel source by embedding client source bits into
@@ -45,7 +51,7 @@ build_outer_src6(
  * client source address into the outer header.
  */
 static int
-encapsulate_ipv4(struct packet *packet, struct real *real) {
+encapsulate_ipv4(struct packet *packet, struct real *real, bool gre) {
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 	bool is_outer_ipv6 = real_flags(real) & real_ip6;
 
@@ -59,16 +65,32 @@ encapsulate_ipv4(struct packet *packet, struct real *real) {
 		build_outer_src6(
 			outer_src, client_src, NET4_LEN, &real->src.v6
 		);
-		return packet_ip6_encap(packet, real->addr.v6.bytes, outer_src);
+		if (!gre) {
+			return packet_ip6_encap(
+				packet, real->addr.v6.bytes, outer_src
+			);
+		} else {
+			return packet_ip6_encap_gre(
+				packet, real->addr.v6.bytes, outer_src
+			);
+		}
 	} else {
 		uint8_t outer_src[NET4_LEN];
 		build_outer_src4(outer_src, client_src, &real->src.v4);
-		return packet_ip4_encap(packet, real->addr.v4.bytes, outer_src);
+		if (!gre) {
+			return packet_ip4_encap(
+				packet, real->addr.v4.bytes, outer_src
+			);
+		} else {
+			return packet_ip4_encap_gre(
+				packet, real->addr.v4.bytes, outer_src
+			);
+		}
 	}
 }
 
 static int
-encapsulate_ipv6(struct packet *packet, struct real *real) {
+encapsulate_ipv6(struct packet *packet, struct real *real, bool gre) {
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 	bool is_outer_ipv6 = real_flags(real) & real_ip6;
 
@@ -82,11 +104,27 @@ encapsulate_ipv6(struct packet *packet, struct real *real) {
 		build_outer_src6(
 			outer_src, client_src, NET6_LEN, &real->src.v6
 		);
-		return packet_ip6_encap(packet, real->addr.v6.bytes, outer_src);
+		if (!gre) {
+			return packet_ip6_encap(
+				packet, real->addr.v6.bytes, outer_src
+			);
+		} else {
+			return packet_ip6_encap_gre(
+				packet, real->addr.v6.bytes, outer_src
+			);
+		}
 	} else {
 		uint8_t outer_src[NET4_LEN];
 		build_outer_src4(outer_src, client_src, &real->src.v4);
-		return packet_ip4_encap(packet, real->addr.v4.bytes, outer_src);
+		if (!gre) {
+			return packet_ip4_encap(
+				packet, real->addr.v4.bytes, outer_src
+			);
+		} else {
+			return packet_ip4_encap_gre(
+				packet, real->addr.v4.bytes, outer_src
+			);
+		}
 	}
 }
 
@@ -97,28 +135,37 @@ int
 tunnel_ip4_packet(struct packet_context *pkt_ctx) {
 	struct packet *packet = pkt_ctx->packet;
 	struct real *real = pkt_ctx->selected_real;
+	struct virtual_service *vs = pkt_ctx->matched_vs;
 
 	/* No MSS clamping for inner IPv4. */
 
-	/* TODO: check GRE encapsulation */
-
-	return encapsulate_ipv4(packet, real);
+	return encapsulate_ipv4(packet, real, vs->flags & vs_gre);
 }
 
 /*
  * Tunnel a packet whose inner layer is IPv6.
  *
- * MSS clamping is applied when the VS has balancer_vs_fix_mss set.
+ * MSS clamping is applied when the VS has fix mss flag set.
  */
 int
 tunnel_ip6_packet(struct packet_context *pkt_ctx) {
 	struct packet *packet = pkt_ctx->packet;
 	struct real *real = pkt_ctx->selected_real;
+	struct virtual_service *vs = pkt_ctx->matched_vs;
+	struct balancer_vs_stats *vs_stats = pkt_ctx->matched_vs_stats;
 
-	/* TODO: fix mss */
-	/* On error, update corresponding VS counter and continue (no drop). */
+	if (vs->flags & vs_fix_mss) {
+		switch (packet_set_mss(packet, CLAMP_MSS, INSERT_MSS)) {
+		case packet_set_mss_ok:
+			break;
+		case packet_set_mss_malformed:
+			vs_stats->mss_malformed_packet += 1;
+			break;
+		case packet_set_mss_no_headroom:
+			vs_stats->mss_no_headroom += 1;
+			break;
+		}
+	}
 
-	/* TODO: check GRE encapsulation */
-
-	return encapsulate_ipv6(packet, real);
+	return encapsulate_ipv6(packet, real, vs->flags & vs_gre);
 }
