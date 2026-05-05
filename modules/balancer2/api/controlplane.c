@@ -26,15 +26,11 @@
 #include <netinet/in.h>
 #include <stdalign.h>
 #include <stdatomic.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 static const char *agent_alloc_failed = "agent: allocation failed";
 static const char *heap_alloc_failed = "allocation failed";
-
-#define VS_PREFIX_LEN 64
-#define MAX_ADDR_LEN (2 * NET6_LEN + 1)
 
 FILTER_COMPILER_DECLARE(vs_acl_ip4, net4_fast_src, port_fast_src);
 FILTER_COMPILER_DECLARE(vs_acl_ip6, net6_fast_src, port_fast_src);
@@ -58,11 +54,17 @@ real_selector_size(size_t workers) {
 
 static bool
 mask64_is_prefix(uint64_t mask) {
-	return mask == ((uint64_t)(-1) << __builtin_ctz(mask));
+	if (mask == 0) {
+		return true;
+	}
+	return mask == ((uint64_t)(-1) << __builtin_ctzll(mask));
 }
 
 static bool
 mask32_is_prefix(uint32_t mask) {
+	if (mask == 0) {
+		return true;
+	}
 	return mask == ((uint32_t)(-1) << __builtin_ctz(mask));
 }
 
@@ -72,12 +74,12 @@ mask_is_prefix(const uint8_t *mask, size_t len) {
 	case NET4_LEN: {
 		uint32_t val;
 		memcpy(&val, mask, NET4_LEN);
-		return mask32_is_prefix(val);
+		return mask32_is_prefix(be32toh(val));
 	}
 	case NET6_LEN / 2: {
 		uint64_t val;
 		memcpy(&val, mask, NET6_LEN / 2);
-		return mask64_is_prefix(val);
+		return mask64_is_prefix(be64toh(val));
 	}
 	default:
 		return false;
@@ -269,15 +271,15 @@ build_real(struct real *real, const struct balancer_real_config *config) {
 		 * source bits can be embedded directly into the unmasked
 		 * positions. Mask here so callers do not need to pre-mask.
 		 */
-		for (size_t i = 0; i < NET4_LEN; ++i) {
-			real->src.v4.addr[i] &= real->src.v4.mask[i];
+		for (size_t idx = 0; idx < NET4_LEN; ++idx) {
+			real->src.v4.addr[idx] &= real->src.v4.mask[idx];
 		}
 		break;
 	case ip_family_ip6:
 		real->addr.v6 = config->dst.v6;
 		real->src.v6 = config->src.v6;
-		for (size_t i = 0; i < NET6_LEN; ++i) {
-			real->src.v6.addr[i] &= real->src.v6.mask[i];
+		for (size_t idx = 0; idx < NET6_LEN; ++idx) {
+			real->src.v6.addr[idx] &= real->src.v6.mask[idx];
 		}
 		real->flags |= real_ip6;
 		break;
@@ -467,9 +469,6 @@ register_vs_counters(
 static void
 free_vs_reals(struct memory_context *mctx, struct virtual_service *vs) {
 	struct real *reals = ADDR_OF(&vs->reals);
-	if (reals == NULL) {
-		return;
-	}
 	memory_bfree(mctx, reals, sizeof(struct real) * vs->reals_count);
 	SET_OFFSET_OF(&vs->reals, NULL);
 	vs->reals_count = 0;
