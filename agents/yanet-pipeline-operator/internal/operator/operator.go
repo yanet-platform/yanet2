@@ -5,14 +5,12 @@ import (
 	"fmt"
 	"net"
 
-	"github.com/cenkalti/backoff/v5"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 
 	"github.com/yanet-platform/yanet2/agents/yanet-pipeline-operator/operatorpb"
 	"github.com/yanet-platform/yanet2/common/go/operator"
-	"github.com/yanet-platform/yanet2/controlplane/gateway"
 )
 
 var (
@@ -123,64 +121,18 @@ func (m *Operator) Run(ctx context.Context) error {
 		return m.server.Run(ctx, listener)
 	})
 	wg.Go(func() error {
-		return m.runGatewayRegistration(ctx, listener.Addr())
+		runner := operator.NewGatewayRegRunner(
+			m.cfg.Gateways,
+			serviceNames,
+			listener.Addr(),
+			operator.WithGatewayRegInterval(m.cfg.Register.Interval.Unwrap()),
+			operator.WithGatewayRegLog(m.log),
+		)
+		return runner.Run(ctx)
 	})
 	wg.Go(func() error {
 		return m.reconciler.Run(ctx)
 	})
-
-	return wg.Wait()
-}
-
-func (m *Operator) runGatewayRegistration(
-	ctx context.Context,
-	endpoint net.Addr,
-) error {
-	if len(m.cfg.Gateways) == 0 {
-		m.log.Warn("no gateways configured for operator registration",
-			zap.Strings("services", serviceNames),
-		)
-		return nil
-	}
-
-	interval := m.cfg.Register.Interval.Unwrap()
-	shortBackOff := func() backoff.BackOff {
-		return backoff.NewExponentialBackOff()
-	}
-
-	wg, ctx := errgroup.WithContext(ctx)
-	for _, cfg := range m.cfg.Gateways {
-		log := m.log.With(
-			zap.String("gateway", cfg.Name),
-			zap.String("gateway_endpoint", cfg.Endpoint.Unwrap()),
-		)
-		registrar, err := gateway.NewGatewayRegistrar(
-			cfg.Endpoint.Unwrap(),
-			nil,
-			gateway.WithLog(log),
-			gateway.WithBackOff(shortBackOff),
-			gateway.WithMaxElapsedTime(interval/2),
-		)
-		if err != nil {
-			return fmt.Errorf("failed to create gateway registrar for %q: %w", cfg.Name, err)
-		}
-
-		wg.Go(func() error {
-			defer func() {
-				if err := registrar.Close(); err != nil {
-					log.Warn("failed to close gateway registrar", zap.Error(err))
-				}
-			}()
-			loop := gateway.NewRegistrationLoop(
-				registrar,
-				serviceNames,
-				endpoint.String(),
-				gateway.WithLoopInterval(interval),
-				gateway.WithLoopLog(log),
-			)
-			return loop.Run(ctx)
-		})
-	}
 
 	return wg.Wait()
 }
