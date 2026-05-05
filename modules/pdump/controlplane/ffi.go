@@ -1,9 +1,8 @@
 package pdump
 
-//#cgo CFLAGS: -I../../../ -I../dataplane
-//#cgo CFLAGS: -I../../../build/modules/pdump/api/external/libpcap-install/include
+//#cgo CFLAGS: -I../../../ -I../dataplane -I../../../subprojects/libpcap
 //#cgo LDFLAGS: -L../../../build/modules/pdump/api -lpdump_cp
-//#cgo LDFLAGS: -L../../../build/modules/pdump/api/external/libpcap-install/lib -Wl,-Bstatic -lpcap -Wl,-Bdynamic
+//#cgo LDFLAGS: -L../../../build/subprojects/libpcap -l:libpcap_static.a
 //
 //#include <stdlib.h>
 //#include "modules/pdump/api/controlplane.h"
