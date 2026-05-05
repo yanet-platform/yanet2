@@ -25,6 +25,8 @@ struct acl_action {
 };
 
 struct acl_rule {
+	struct filter_rule filter_rule;
+
 	struct acl_action *actions;
 	uint64_t action_count;
 
