@@ -1,6 +1,5 @@
+use commonpb::pb as commonpb;
 use serde::Serialize;
-
-use crate::commonpb;
 
 #[derive(Serialize, Clone, PartialEq)]
 #[serde(rename_all = "lowercase")]

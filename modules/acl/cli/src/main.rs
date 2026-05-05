@@ -23,13 +23,9 @@ use ync::{
 mod args;
 mod metric;
 
-mod commonpb {
-    tonic::include_proto!("commonpb");
-}
-
 #[allow(non_snake_case)]
 pub mod aclpb {
-    tonic::include_proto!("aclpb");
+    tonic::include_proto!("modules.acl.controlplane.aclpb.v1");
 }
 
 #[derive(Serialize)]
