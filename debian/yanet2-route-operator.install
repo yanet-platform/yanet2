@@ -1,2 +1,2 @@
 usr/bin/yanet-route-operator
-etc/yanet2/yanet-route-operator.yaml
+etc/yanet2/yanet-route-operator-default.yaml

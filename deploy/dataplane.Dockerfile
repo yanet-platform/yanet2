@@ -13,3 +13,4 @@ RUN apt-get update -y \
     && rm -rf /tmp/*.deb /var/lib/apt/lists/*
 
 ENTRYPOINT ["yanet-dataplane"]
+CMD ["/etc/yanet2/dataplane-default.yaml"]

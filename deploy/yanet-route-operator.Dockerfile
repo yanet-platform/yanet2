@@ -12,4 +12,5 @@ RUN apt-get update -y \
     && apt-get install -y --no-install-recommends /tmp/*.deb \
     && rm -rf /tmp/*.deb /var/lib/apt/lists/*
 
-ENTRYPOINT ["yanet-route-operator", "-c", "/etc/yanet2/yanet-route-operator.yaml"]
+ENTRYPOINT ["yanet-route-operator"]
+CMD ["-c", "/etc/yanet2/yanet-route-operator-default.yaml"]
