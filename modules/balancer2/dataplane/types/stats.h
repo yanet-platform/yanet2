@@ -124,11 +124,11 @@ struct balancer_vs_stats {
 	/* Packets successfully forwarded to real servers. */
 	uint64_t outgoing_packets;
 
-	/* Failed to fix MSS because of malformed TCP options. */
-	uint64_t malformed_tcp;
+	/* Failed to fix MSS because of malformed packet options. */
+	uint64_t mss_malformed_packet;
 
 	/* Failed to fix MSS because of rte_mbuf_prepend failure. */
-	uint64_t mss_prepend_failed;
+	uint64_t mss_no_headroom;
 
 	/* Bytes successfully forwarded to real servers (IP layer). */
 	uint64_t outgoing_bytes;
