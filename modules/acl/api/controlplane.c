@@ -458,10 +458,20 @@ acl_module_config_update(
 
 	for (uint32_t idx = 0; idx < rule_count; ++idx) {
 		struct acl_rule *acl_rule = acl_rules + idx;
+
+		uint64_t action_count = acl_rule->action_count;
+		if (action_count > ACL_MAX_ACTIONS) {
+			action_count = ACL_MAX_ACTIONS;
+		}
+		for (uint64_t action_idx = 0; action_idx < action_count;
+		     ++action_idx) {
+			targets[idx].actions[action_idx] =
+				acl_rule->actions[action_idx].id;
+		}
+		targets[idx].action_count = action_count;
+
 		struct acl_action *terminal =
 			&acl_rule->actions[acl_rule->action_count - 1];
-		targets[idx].action = terminal->id;
-
 		const char *counter_name = terminal->counter;
 		char default_counter[COUNTER_NAME_LEN];
 		if (counter_name[0] == '\0') {
