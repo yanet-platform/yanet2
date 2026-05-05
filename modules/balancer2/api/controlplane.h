@@ -20,6 +20,7 @@ struct balancer_real_config {
 	struct net_addr dst;
 	struct net src;
 	enum ip_family ip_family;
+	const char *counter_name;
 };
 
 /*
@@ -32,7 +33,7 @@ struct balancer_allowed_sources {
 	struct filter_net4s net4s;
 	struct filter_net6s net6s;
 	struct filter_port_ranges port_ranges;
-	const char *tag;
+	const char *counter_name;
 };
 
 enum balancer_vs_sched {
@@ -73,6 +74,8 @@ struct balancer_vs_config {
 	size_t real_count;
 
 	bool fix_mss;
+
+	const char *counter_name;
 };
 
 /*
@@ -109,6 +112,8 @@ balancer_create(
 	struct balancer_session_timeouts *timeouts,
 	const struct balancer_vs_config *vs,
 	uint32_t vs_count,
+	const char *common_counter_name,
+	const char *l4_counter_name,
 	yanet_error **error
 );
 
@@ -165,30 +170,6 @@ balancer_vs_update_real_states(
 	const bool *states,
 	yanet_error **error
 );
-
-/*
- * Counters are registered by API with their names. The
- * controlplane parses emitted counter names against these to route
- * values back to their VS, real, or balancer-level source.
- *
- * VS counter format:      vs_<vip>:<port>/<proto>
- *   where proto is "tcp" or "udp".
- */
-extern const char *const balancer_vs_counter_prefix;
-
-/*
- * VS ACL counter format:  vs_acl_<vip>:<port>/<proto>_<tag>
- */
-extern const char *const balancer_vs_acl_counter_prefix;
-
-/*
- * Real counter format:    real_<vip>:<port>/<proto>_<real_dst>
- */
-extern const char *const balancer_real_counter_prefix;
-
-extern const char *const balancer_common_counter_name;
-
-extern const char *const balancer_l4_counter_name;
 
 /*
  * A session table holds active session entries — one per tracked

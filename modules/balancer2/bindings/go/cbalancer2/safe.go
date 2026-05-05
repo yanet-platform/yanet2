@@ -27,8 +27,9 @@ type SessionTimeouts struct {
 // the encapsulation source (for the IPIP/GRE tunnel); its mask may be any
 // (possibly non-contiguous) bitmask, and its address family must match Dst.
 type RealConfig struct {
-	Dst netip.Addr
-	Src xnetip.NetWithMask
+	Dst         netip.Addr
+	Src         xnetip.NetWithMask
+	CounterName string
 }
 
 // AllowedSources describes one entry in a virtual service's source allow
@@ -37,10 +38,10 @@ type RealConfig struct {
 // empty set of networks disallows all networks; an empty set of ports allows
 // all ports.
 type AllowedSources struct {
-	Net4s      filter.IPNets
-	Net6s      filter.IPNets
-	PortRanges filter.PortRanges
-	Tag        string
+	Net4s       filter.IPNets
+	Net6s       filter.IPNets
+	PortRanges  filter.PortRanges
+	CounterName string
 }
 
 // VSConfig describes a single virtual service.
@@ -57,6 +58,7 @@ type VSConfig struct {
 	Tunnel         TunnelKind
 	Reals          []RealConfig
 	FixMSS         bool
+	CounterName    string
 }
 
 // NewBalancer builds a balancer handle from its full configuration.
@@ -69,11 +71,13 @@ func NewBalancer(
 	chain *SessionTableChain,
 	timeouts SessionTimeouts,
 	vs []VSConfig,
+	commonCounterName string,
+	l4CounterName string,
 ) (*Balancer, error) {
 	if uint64(len(vs)) > math.MaxUint32 {
 		return nil, fmt.Errorf("too many virtual services: %d", len(vs))
 	}
-	return createBalancer(agent, name, chain, timeouts, vs)
+	return createBalancer(agent, name, chain, timeouts, vs, commonCounterName, l4CounterName)
 }
 
 // NewSessionTable creates a session table with the given capacity (number of

@@ -23,19 +23,6 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 )
 
-var (
-	// VSCounterPrefix is the name prefix used for per-VS counters.
-	VSCounterPrefix = C.GoString(C.balancer_vs_counter_prefix)
-	// VSACLCounterPrefix is the name prefix used for per-VS ACL counters.
-	VSACLCounterPrefix = C.GoString(C.balancer_vs_acl_counter_prefix)
-	// RealCounterPrefix is the name prefix used for per-real counters.
-	RealCounterPrefix = C.GoString(C.balancer_real_counter_prefix)
-	// CommonCounterName is the name of the balancer-level common counter.
-	CommonCounterName = C.GoString(C.balancer_common_counter_name)
-	// L4CounterName is the name of the balancer-level L4 counter.
-	L4CounterName = C.GoString(C.balancer_l4_counter_name)
-)
-
 // TunnelKind selects the encapsulation used to forward client traffic to the
 // selected real.
 type TunnelKind int
@@ -194,12 +181,9 @@ func (m *SessionTableChain) PopBack() error {
 	return nil
 }
 
-// cAllowedSources pairs a balancer_allowed_sources C struct with the C string
-// memory referenced by its tag field, so the latter can be released with the
-// former.
 type cAllowedSources struct {
-	c   C.struct_balancer_allowed_sources
-	tag *C.char
+	c           C.struct_balancer_allowed_sources
+	counterName *C.char
 }
 
 func (m *AllowedSources) cBuild(pinner *runtime.Pinner) cAllowedSources {
@@ -209,30 +193,37 @@ func (m *AllowedSources) cBuild(pinner *runtime.Pinner) cAllowedSources {
 	filter.CBuildNet6s(&out.c.net6s, m.Net6s, pinner)
 	filter.CBuildPortRanges(&out.c.port_ranges, m.PortRanges, pinner)
 
-	if m.Tag != "" {
-		out.tag = C.CString(m.Tag)
-		out.c.tag = out.tag
+	if m.CounterName != "" {
+		out.counterName = C.CString(m.CounterName)
+		out.c.counter_name = out.counterName
 	}
 	return out
 }
 
 func (m *cAllowedSources) free() {
-	if m.tag != nil {
-		C.free(unsafe.Pointer(m.tag))
-		m.tag = nil
+	if m.counterName != nil {
+		C.free(unsafe.Pointer(m.counterName))
+		m.counterName = nil
 	}
 }
 
-// cVSConfig owns the C strings referenced by a balancer_vs_config during a
-// balancer_create call, transitively through the cAllowedSources entries it
-// holds.
 type cVSConfig struct {
-	c       C.struct_balancer_vs_config
-	allowed []cAllowedSources
+	c           C.struct_balancer_vs_config
+	reals       []cRealConfig
+	allowed     []cAllowedSources
+	counterName *C.char
 }
 
 func (m *VSConfig) cBuild(pinner *runtime.Pinner) (cVSConfig, error) {
 	var out cVSConfig
+
+	success := false
+
+	defer func() {
+		if !success {
+			out.free()
+		}
+	}()
 
 	if !m.Dst.IsValid() {
 		return cVSConfig{}, errors.New("destination address is invalid")
@@ -247,14 +238,21 @@ func (m *VSConfig) cBuild(pinner *runtime.Pinner) (cVSConfig, error) {
 	out.c.tunnel = C.enum_balancer_tunnel_kind(m.Tunnel)
 	out.c.fix_mss = C.bool(m.FixMSS)
 
+	if m.CounterName != "" {
+		out.counterName = C.CString(m.CounterName)
+		out.c.counter_name = out.counterName
+	}
+
 	if len(m.Reals) > 0 {
+		out.reals = make([]cRealConfig, len(m.Reals))
 		cReals := make([]C.struct_balancer_real_config, len(m.Reals))
 		for i := range m.Reals {
 			cReal, err := m.Reals[i].cBuild()
 			if err != nil {
 				return cVSConfig{}, fmt.Errorf("real[%d]: %w", i, err)
 			}
-			cReals[i] = cReal
+			out.reals[i] = cReal
+			cReals[i] = cReal.c
 		}
 		pinner.Pin(&cReals[0])
 		out.c.reals = &cReals[0]
@@ -273,25 +271,47 @@ func (m *VSConfig) cBuild(pinner *runtime.Pinner) (cVSConfig, error) {
 		out.c.allowed_sources_count = C.size_t(len(m.AllowedSources))
 	}
 
+	success = true
+
 	return out, nil
 }
 
 func (m *cVSConfig) free() {
+	for i := range m.reals {
+		m.reals[i].free()
+	}
+	m.reals = nil
 	for i := range m.allowed {
 		m.allowed[i].free()
 	}
 	m.allowed = nil
+	if m.counterName != nil {
+		C.free(unsafe.Pointer(m.counterName))
+		m.counterName = nil
+	}
 }
 
-func (m *RealConfig) cBuild() (C.struct_balancer_real_config, error) {
+type cRealConfig struct {
+	c           C.struct_balancer_real_config
+	counterName *C.char
+}
+
+func (m *cRealConfig) free() {
+	if m.counterName != nil {
+		C.free(unsafe.Pointer(m.counterName))
+		m.counterName = nil
+	}
+}
+
+func (m *RealConfig) cBuild() (cRealConfig, error) {
 	if !m.Dst.IsValid() {
-		return C.struct_balancer_real_config{}, errors.New("destination address is invalid")
+		return cRealConfig{}, errors.New("destination address is invalid")
 	}
 	if !m.Src.IsValid() {
-		return C.struct_balancer_real_config{}, errors.New("source network is invalid")
+		return cRealConfig{}, errors.New("source network is invalid")
 	}
 	if m.Dst.Is4() != m.Src.Addr.Is4() {
-		return C.struct_balancer_real_config{}, errors.New(
+		return cRealConfig{}, errors.New(
 			"destination and source address families differ",
 		)
 	}
@@ -299,13 +319,20 @@ func (m *RealConfig) cBuild() (C.struct_balancer_real_config, error) {
 	cDst, family := netipToCNetAddr(m.Dst)
 	cSrc, err := netWithMaskToCNet(m.Src)
 	if err != nil {
-		return C.struct_balancer_real_config{}, fmt.Errorf("source net: %w", err)
+		return cRealConfig{}, fmt.Errorf("source net: %w", err)
 	}
-	return C.struct_balancer_real_config{
-		dst:       cDst,
-		src:       cSrc,
-		ip_family: family,
-	}, nil
+	out := cRealConfig{
+		c: C.struct_balancer_real_config{
+			dst:       cDst,
+			src:       cSrc,
+			ip_family: family,
+		},
+	}
+	if m.CounterName != "" {
+		out.counterName = C.CString(m.CounterName)
+		out.c.counter_name = out.counterName
+	}
+	return out, nil
 }
 
 func (m SessionTimeouts) toC() C.struct_balancer_session_timeouts {
@@ -324,9 +351,23 @@ func createBalancer(
 	chain *SessionTableChain,
 	timeouts SessionTimeouts,
 	vs []VSConfig,
+	commonCounterName string,
+	l4CounterName string,
 ) (*Balancer, error) {
 	cName := C.CString(name)
 	defer C.free(unsafe.Pointer(cName))
+
+	var cCommonCounter *C.char
+	if commonCounterName != "" {
+		cCommonCounter = C.CString(commonCounterName)
+		defer C.free(unsafe.Pointer(cCommonCounter))
+	}
+
+	var cL4Counter *C.char
+	if l4CounterName != "" {
+		cL4Counter = C.CString(l4CounterName)
+		defer C.free(unsafe.Pointer(cL4Counter))
+	}
 
 	cTimeouts := timeouts.toC()
 
@@ -363,6 +404,8 @@ func createBalancer(
 		&cTimeouts,
 		cVSPtr,
 		C.uint32_t(len(vs)),
+		cCommonCounter,
+		cL4Counter,
 		&cErr,
 	)
 	if ptr == nil {
