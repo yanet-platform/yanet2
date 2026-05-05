@@ -8,6 +8,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"google.golang.org/protobuf/proto"
+
 	"github.com/yanet-platform/yanet2/common/filterpb"
 	"github.com/yanet-platform/yanet2/common/go/metrics"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
@@ -149,6 +151,18 @@ func convertRules(reqRules []*aclpb.Rule) ([]AclRule, error) {
 	return rules, nil
 }
 
+func rulesEqual(a, b []*aclpb.Rule) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for idx := range a {
+		if !proto.Equal(a[idx], b[idx]) {
+			return false
+		}
+	}
+	return true
+}
+
 func (m *ACLService) UpdateConfig(
 	ctx context.Context,
 	req *aclpb.UpdateConfigRequest,
@@ -158,15 +172,19 @@ func (m *ACLService) UpdateConfig(
 		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
 
-	rules, err := convertRules(req.Rules) // TODO: invalid argument error here.
-	if err != nil {
-		return nil, err
-	}
-
 	tracker := m.newHandlerTracker("UpdateConfig")
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	defer tracker.Fix()
+
+	if existing, ok := m.configs[name]; ok && rulesEqual(existing.rules, req.Rules) {
+		return &aclpb.UpdateConfigResponse{}, nil
+	}
+
+	rules, err := convertRules(req.Rules)
+	if err != nil {
+		return nil, err
+	}
 
 	config, err := NewModuleConfig(m.agent, name)
 	if err != nil {
