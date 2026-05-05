@@ -12,11 +12,11 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	_ "google.golang.org/grpc/encoding/gzip"
-	"gopkg.in/yaml.v3"
 
 	birdAdapter "github.com/yanet-platform/yanet2/agents/bird-adapter"
 	adapterpb "github.com/yanet-platform/yanet2/agents/bird-adapter/adapterpb"
 	"github.com/yanet-platform/yanet2/common/go/logging"
+	"github.com/yanet-platform/yanet2/common/go/xcfg"
 	"github.com/yanet-platform/yanet2/common/go/xcmd"
 )
 
@@ -54,6 +54,10 @@ type ServerConfig struct {
 	GatewayEndpoint string `yaml:"gateway_endpoint"`
 }
 
+func (m *ServerConfig) Default() {
+	*m = *DefaultServerConfig()
+}
+
 // DefaultServerConfig returns the default configuration.
 func DefaultServerConfig() *ServerConfig {
 	return &ServerConfig{
@@ -65,23 +69,8 @@ func DefaultServerConfig() *ServerConfig {
 	}
 }
 
-// LoadServerConfig loads the configuration from the given path.
-func LoadServerConfig(path string) (*ServerConfig, error) {
-	buf, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read config file: %w", err)
-	}
-
-	cfg := DefaultServerConfig()
-	if err := yaml.Unmarshal(buf, cfg); err != nil {
-		return nil, fmt.Errorf("failed to deserialize config: %w", err)
-	}
-
-	return cfg, nil
-}
-
 func runServer() error {
-	cfg, err := LoadServerConfig(serverCmdArgs.ConfigPath)
+	cfg, err := xcfg.LoadConfig[ServerConfig](serverCmdArgs.ConfigPath)
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
 	}

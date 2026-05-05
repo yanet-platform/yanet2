@@ -10,6 +10,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/yanet-platform/yanet2/common/go/logging"
+	"github.com/yanet-platform/yanet2/common/go/xcfg"
 	"github.com/yanet-platform/yanet2/common/go/xcmd"
 	"github.com/yanet-platform/yanet2/controlplane/yncp"
 )
@@ -51,7 +52,7 @@ func main() {
 }
 
 func run(cmd Cmd) error {
-	cfg, err := yncp.LoadConfig(cmd.ConfigPath)
+	cfg, err := xcfg.LoadConfig[yncp.Config](cmd.ConfigPath)
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
 	}

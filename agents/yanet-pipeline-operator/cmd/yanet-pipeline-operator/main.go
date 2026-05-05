@@ -13,6 +13,7 @@ import (
 
 	"github.com/yanet-platform/yanet2/agents/yanet-pipeline-operator/internal/operator"
 	"github.com/yanet-platform/yanet2/common/go/logging"
+	"github.com/yanet-platform/yanet2/common/go/xcfg"
 	"github.com/yanet-platform/yanet2/common/go/xcmd"
 )
 
@@ -53,7 +54,7 @@ func main() {
 }
 
 func run() error {
-	cfg, err := operator.LoadConfig(rootArgs.ConfigPath)
+	cfg, err := xcfg.LoadConfig[operator.Config](rootArgs.ConfigPath)
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
 	}

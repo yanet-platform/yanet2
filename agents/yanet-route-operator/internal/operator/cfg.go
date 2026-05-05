@@ -3,7 +3,6 @@ package operator
 import (
 	"errors"
 	"fmt"
-	"os"
 	"time"
 
 	"go.uber.org/zap/zapcore"
@@ -34,6 +33,50 @@ type Config struct {
 	LinkMap        map[string]string    `yaml:"link_map"`
 	RIBTTL         time.Duration        `yaml:"rib_ttl"`
 	NetlinkMonitor NetlinkMonitorConfig `yaml:"netlink_monitor"`
+}
+
+func (m *Config) Default() {
+	*m = *DefaultConfig()
+}
+
+func (m *Config) Validate() error {
+	if len(m.Gateways) == 0 {
+		return errors.New("at least one gateway must be configured")
+	}
+
+	return nil
+}
+
+// DefaultConfig returns a Config populated with sensible defaults.
+func DefaultConfig() *Config {
+	return &Config{
+		Logging: logging.Config{
+			Level: zapcore.InfoLevel,
+		},
+		Server: &GRPCServerConfig{
+			Endpoint: xcfg.MustNonEmptyString("localhost:50002"),
+		},
+		Reconcile: ReconcileConfig{
+			Interval:       xcfg.MustNonZero(DefaultReconcileInterval),
+			InitialBackoff: xcfg.MustNonZero(DefaultReconcileInitialBackoff),
+			MaxBackoff:     xcfg.MustNonZero(DefaultReconcileMaxBackoff),
+		},
+		Register: RegisterConfig{
+			Interval: xcfg.MustNonZero(DefaultRegisterInterval),
+		},
+		Function: FunctionConfig{
+			Name:   xcfg.MustNonEmptyString("fn:route"),
+			Chain:  xcfg.MustNonEmptyString("default"),
+			Weight: 1,
+			Module: xcfg.MustNonEmptyString("route0"),
+		},
+		RIBTTL:  DefaultRIBTTL,
+		LinkMap: map[string]string{},
+		NetlinkMonitor: NetlinkMonitorConfig{
+			TableName:       "kernel",
+			DefaultPriority: 100,
+		},
+	}
 }
 
 // GatewayConfig holds the name and gRPC endpoint of a single Gateway.
@@ -133,63 +176,4 @@ type NetlinkMonitorConfig struct {
 	// DefaultPriority is the default priority for kernel-learned
 	// neighbour entries.
 	DefaultPriority uint32 `yaml:"default_priority"`
-}
-
-func (m *Config) Validate() error {
-	if len(m.Gateways) == 0 {
-		return errors.New("at least one gateway must be configured")
-	}
-
-	return nil
-}
-
-// DefaultConfig returns a Config populated with sensible defaults.
-func DefaultConfig() *Config {
-	return &Config{
-		Logging: logging.Config{
-			Level: zapcore.InfoLevel,
-		},
-		Server: &GRPCServerConfig{
-			Endpoint: xcfg.MustNonEmptyString("localhost:50002"),
-		},
-		Reconcile: ReconcileConfig{
-			Interval:       xcfg.MustNonZero(DefaultReconcileInterval),
-			InitialBackoff: xcfg.MustNonZero(DefaultReconcileInitialBackoff),
-			MaxBackoff:     xcfg.MustNonZero(DefaultReconcileMaxBackoff),
-		},
-		Register: RegisterConfig{
-			Interval: xcfg.MustNonZero(DefaultRegisterInterval),
-		},
-		Function: FunctionConfig{
-			Name:   xcfg.MustNonEmptyString("fn:route"),
-			Chain:  xcfg.MustNonEmptyString("default"),
-			Weight: 1,
-			Module: xcfg.MustNonEmptyString("route0"),
-		},
-		RIBTTL:  DefaultRIBTTL,
-		LinkMap: map[string]string{},
-		NetlinkMonitor: NetlinkMonitorConfig{
-			TableName:       "kernel",
-			DefaultPriority: 100,
-		},
-	}
-}
-
-// LoadConfig reads a YAML file from path and returns the parsed Config.
-//
-// Default values are applied before unmarshalling so any absent field
-// retains its default. Validation is driven by xcfg.Decode, which calls
-// Validate() on every field whose type implements it.
-func LoadConfig(path string) (*Config, error) {
-	buf, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read config file: %w", err)
-	}
-
-	cfg := DefaultConfig()
-	if err := xcfg.Decode(buf, cfg); err != nil {
-		return nil, fmt.Errorf("failed to parse config file: %w", err)
-	}
-
-	return cfg, nil
 }

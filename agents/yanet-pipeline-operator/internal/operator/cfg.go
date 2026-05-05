@@ -3,7 +3,6 @@ package operator
 import (
 	"errors"
 	"fmt"
-	"os"
 	"time"
 
 	"go.uber.org/zap/zapcore"
@@ -27,6 +26,38 @@ type Config struct {
 	Register  RegisterConfig    `yaml:"register"`
 	Reconcile ReconcileConfig   `yaml:"reconcile"`
 	Stages    []StageConfig     `yaml:"stages"`
+}
+
+func (m *Config) Default() {
+	*m = *DefaultConfig()
+}
+
+func (m *Config) Validate() error {
+	if len(m.Gateways) == 0 {
+		return errors.New("at least one gateway must be configured")
+	}
+
+	return nil
+}
+
+// DefaultConfig returns a Config populated with sensible defaults.
+func DefaultConfig() *Config {
+	return &Config{
+		Logging: logging.Config{
+			Level: zapcore.InfoLevel,
+		},
+		Server: &GRPCServerConfig{
+			Endpoint: xcfg.MustNonEmptyString("localhost:50001"),
+		},
+		Reconcile: ReconcileConfig{
+			Interval:       xcfg.MustNonZero(DefaultReconcileInterval),
+			InitialBackoff: xcfg.MustNonZero(DefaultReconcileInitialBackoff),
+			MaxBackoff:     xcfg.MustNonZero(DefaultReconcileMaxBackoff),
+		},
+		Register: RegisterConfig{
+			Interval: xcfg.MustNonZero(DefaultRegisterInterval),
+		},
+	}
 }
 
 // GatewayConfig holds the name and gRPC endpoint of a single Gateway.
@@ -65,51 +96,4 @@ func (m *ReconcileConfig) Validate() error {
 	}
 
 	return nil
-}
-
-func (m *Config) Validate() error {
-	if len(m.Gateways) == 0 {
-		return errors.New("at least one gateway must be configured")
-	}
-
-	return nil
-}
-
-// DefaultConfig returns a Config populated with sensible defaults.
-func DefaultConfig() *Config {
-	return &Config{
-		Logging: logging.Config{
-			Level: zapcore.InfoLevel,
-		},
-		Server: &GRPCServerConfig{
-			Endpoint: xcfg.MustNonEmptyString("localhost:50001"),
-		},
-		Reconcile: ReconcileConfig{
-			Interval:       xcfg.MustNonZero(DefaultReconcileInterval),
-			InitialBackoff: xcfg.MustNonZero(DefaultReconcileInitialBackoff),
-			MaxBackoff:     xcfg.MustNonZero(DefaultReconcileMaxBackoff),
-		},
-		Register: RegisterConfig{
-			Interval: xcfg.MustNonZero(DefaultRegisterInterval),
-		},
-	}
-}
-
-// LoadConfig reads a YAML file from path and returns the parsed Config.
-//
-// Default values are applied before unmarshalling so any absent field
-// retains its default. Validation is driven by xcfg.Decode, which calls
-// Validate() on every field whose type implements it.
-func LoadConfig(path string) (*Config, error) {
-	buf, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read config file: %w", err)
-	}
-
-	cfg := DefaultConfig()
-	if err := xcfg.Decode(buf, cfg); err != nil {
-		return nil, fmt.Errorf("failed to parse config file: %w", err)
-	}
-
-	return cfg, nil
 }
