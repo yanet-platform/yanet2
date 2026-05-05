@@ -3,12 +3,11 @@ package balancer2
 import (
 	"errors"
 	"fmt"
-	"net"
+	"math"
 	"net/netip"
 	"slices"
+	"sort"
 
-	"github.com/yanet-platform/yanet2/common/filterpb"
-	"github.com/yanet-platform/yanet2/common/go/xnetip"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/balancer2/bindings/go/cbalancer2"
 	"github.com/yanet-platform/yanet2/modules/balancer2/controlplane/balancerpb"
@@ -17,8 +16,11 @@ import (
 type ConfigParams struct {
 	Vs       *balancerpb.VsConfigList
 	Timeouts *balancerpb.SessionsTimeouts
-	Addr     *balancerpb.AddrConfig
-	Wlc      *balancerpb.WlcConfig
+	// Addr is stored and surfaced via GetConfig but not yet propagated
+	// to the dataplane; ICMP source/decap support is not implemented.
+	Addr *balancerpb.AddrConfig
+	// Wlc is stored and surfaced via GetConfig but not yet implemented.
+	Wlc *balancerpb.WlcConfig
 }
 
 type vsID struct {
@@ -27,8 +29,24 @@ type vsID struct {
 	proto balancerpb.TransportProto
 }
 
+func (m vsID) String() string {
+	addrPort := netip.AddrPortFrom(m.addr, m.port)
+	switch m.proto {
+	case balancerpb.TransportProto_TCP:
+		return fmt.Sprintf("%s/tcp", addrPort)
+	case balancerpb.TransportProto_UDP:
+		return fmt.Sprintf("%s/udp", addrPort)
+	}
+	// unreachable: unknown protos rejected on id create.
+	return fmt.Sprintf("%s/unknown", addrPort)
+}
+
 type realID struct {
 	addr netip.Addr
+}
+
+func (m realID) String() string {
+	return m.addr.String()
 }
 
 type realSlot struct {
@@ -43,7 +61,7 @@ type vsSlot struct {
 }
 
 type ModuleConfig struct {
-	handle   cbalancer2.Balancer
+	handle   *cbalancer2.Balancer
 	name     string
 	cfg      *ConfigParams
 	sessions *SessionsState
@@ -57,40 +75,17 @@ func NewModuleConfig(
 	config *ConfigParams,
 	st *SessionsState,
 ) (*ModuleConfig, error) {
-	if config == nil || config.Vs == nil {
-		return nil, errors.New("vs configuration is required")
-	}
-	if config.Timeouts == nil {
-		return nil, errors.New("session timeouts are required")
+	if config == nil {
+		return nil, errors.New("configuration is required")
 	}
 
-	vs, err := toCVSConfigs(config.Vs.Vs)
+	handle, index, err := build(agent, name, config, st, nil)
 	if err != nil {
-		return nil, fmt.Errorf("convert vs: %w", err)
-	}
-	index, err := buildIndex(config.Vs.Vs, nil)
-	if err != nil {
-		return nil, fmt.Errorf("build index: %w", err)
-	}
-	timeouts := toCSessionTimeouts(config.Timeouts)
-
-	handle, err := cbalancer2.NewBalancer(agent, name, st.stChain, timeouts, vs)
-	if err != nil {
-		return nil, fmt.Errorf("create balancer: %w", err)
-	}
-	for _, slot := range index {
-		if err := pushVSRealState(handle, uint32(slot.idx), slot); err != nil {
-			handle.Free(agent)
-			return nil, fmt.Errorf("seed real state: %w", err)
-		}
-	}
-	if err := handle.Install(agent); err != nil {
-		handle.Free(agent)
-		return nil, fmt.Errorf("install balancer: %w", err)
+		return nil, err
 	}
 
 	return &ModuleConfig{
-		handle:   *handle,
+		handle:   handle,
 		name:     name,
 		cfg:      config,
 		sessions: st,
@@ -101,43 +96,17 @@ func NewModuleConfig(
 
 func (m *ModuleConfig) Update(newConfig *ConfigParams, st *SessionsState) error {
 	merged := mergeConfig(m.cfg, newConfig)
-	if merged.Vs == nil {
-		return errors.New("vs configuration is required")
-	}
-	if merged.Timeouts == nil {
-		return errors.New("session timeouts are required")
-	}
 	if st == nil {
 		st = m.sessions
 	}
 
-	vs, err := toCVSConfigs(merged.Vs.Vs)
+	handle, index, err := build(m.agent, m.name, merged, st, m.index)
 	if err != nil {
-		return fmt.Errorf("convert vs: %w", err)
-	}
-	index, err := buildIndex(merged.Vs.Vs, m.index)
-	if err != nil {
-		return fmt.Errorf("build index: %w", err)
-	}
-	timeouts := toCSessionTimeouts(merged.Timeouts)
-
-	handle, err := cbalancer2.NewBalancer(m.agent, m.name, st.stChain, timeouts, vs)
-	if err != nil {
-		return fmt.Errorf("create balancer: %w", err)
-	}
-	for _, slot := range index {
-		if err := pushVSRealState(handle, uint32(slot.idx), slot); err != nil {
-			handle.Free(m.agent)
-			return fmt.Errorf("seed real state: %w", err)
-		}
-	}
-	if err := handle.Install(m.agent); err != nil {
-		handle.Free(m.agent)
-		return fmt.Errorf("install balancer: %w", err)
+		return err
 	}
 
 	m.handle.Free(m.agent)
-	m.handle = *handle
+	m.handle = handle
 	m.cfg = merged
 	m.sessions = st
 	m.index = index
@@ -201,321 +170,139 @@ func (m *ModuleConfig) DeleteVS(vs []*balancerpb.VsIdentifier) error {
 	return m.Update(&ConfigParams{Vs: &balancerpb.VsConfigList{Vs: kept}}, nil)
 }
 
+type vsUpdate struct {
+	id            vsID
+	stateChanged  bool
+	weightChanged bool
+	reals         map[realID]*realSlot
+}
+
 func (m *ModuleConfig) UpdateReals(updates []*balancerpb.RealUpdate) error {
-	type vsUpdate struct {
-		state  bool
-		weight bool
+	staged, err := m.stageRealUpdates(updates)
+	if err != nil {
+		return err
 	}
+	return m.commitRealUpdates(staged)
+}
 
-	vsUpdates := make(map[int]*vsUpdate)
-
+func (m *ModuleConfig) stageRealUpdates(
+	updates []*balancerpb.RealUpdate,
+) (map[int]*vsUpdate, error) {
+	staged := map[int]*vsUpdate{}
 	for idx, update := range updates {
-		vsID, err := makeVsID(update.RealId.Vs)
+		if update == nil || update.RealId == nil {
+			return nil, fmt.Errorf("update[%d]: real identifier required", idx)
+		}
+		vid, err := makeVsID(update.RealId.Vs)
 		if err != nil {
-			return fmt.Errorf("update[%d]: vs: %w", idx, err)
+			return nil, fmt.Errorf("update[%d]: vs: %w", idx, err)
 		}
-		realID, err := makeRealID(update.RealId.Real)
+		rid, err := makeRealID(update.RealId.Real)
 		if err != nil {
-			return fmt.Errorf("update[%d]: real: %w", idx, err)
+			return nil, fmt.Errorf("update[%d]: real: %w", idx, err)
 		}
-		if _, found := m.index[vsID]; !found {
-			return fmt.Errorf("update[%d]: vs not found", idx)
+		slot, ok := m.index[vid]
+		if !ok {
+			return nil, fmt.Errorf("update[%d]: vs not found", idx)
 		}
-		vsSlot := m.index[vsID]
-		if _, found := vsSlot.reals[realID]; !found {
-			return fmt.Errorf("update[%d]: vs not found", idx)
+		next, ok := staged[slot.idx]
+		if !ok {
+			cloned := make(map[realID]*realSlot, len(slot.reals))
+			for k, v := range slot.reals {
+				cp := *v
+				cloned[k] = &cp
+			}
+			next = &vsUpdate{
+				id:    vid,
+				reals: cloned,
+			}
+			staged[slot.idx] = next
 		}
-		realSlot := vsSlot.reals[realID]
-		if _, found := vsUpdates[vsSlot.idx]; !found {
-			vsUpdates[vsSlot.idx] = &vsUpdate{}
+		rs, ok := next.reals[rid]
+		if !ok {
+			return nil, fmt.Errorf("update[%d]: real not found", idx)
 		}
-		vsUpdate := vsUpdates[vsSlot.idx]
 		if update.Enable != nil {
-			realSlot.enabled = *update.Enable
-			vsUpdate.state = true
+			rs.enabled = *update.Enable
+			next.stateChanged = true
 		}
 		if update.Weight != nil {
-			realSlot.weight = *update.Weight
-			vsUpdate.weight = true
+			rs.weight = *update.Weight
+			next.weightChanged = true
 		}
 	}
+	return staged, nil
+}
 
-	for vsIdx, updateInfo := range vsUpdates {
-		vsID, err := makeVsID(m.cfg.Vs.Vs[vsIdx].Id)
-		if err != nil {
-			return errors.New("internal error")
-		}
-		vsSlot := m.index[vsID]
-		if updateInfo.state {
-			states := make([]bool, len(vsSlot.reals))
-			for _, realSlot := range vsSlot.reals {
-				states[realSlot.idx] = realSlot.enabled
+// commitRealUpdates pushes staged changes to the dataplane and writes
+// each successful push back to index, so on a partial failure the
+// index always reflects what the dataplane currently holds. Updates
+// are applied in vsIdx order so retries are reproducible.
+func (m *ModuleConfig) commitRealUpdates(staged map[int]*vsUpdate) error {
+	order := make([]int, 0, len(staged))
+	for vsIdx := range staged {
+		order = append(order, vsIdx)
+	}
+	sort.Ints(order)
+	for _, vsIdx := range order {
+		info := staged[vsIdx]
+		live := m.index[info.id].reals
+		if info.stateChanged {
+			states := make([]bool, len(info.reals))
+			for _, rs := range info.reals {
+				states[rs.idx] = rs.enabled
 			}
 			if err := m.handle.UpdateVSRealStates(uint32(vsIdx), states); err != nil {
-				return fmt.Errorf("failed to update real states: %w", err)
+				return fmt.Errorf("vs[%d]: update real states: %w", vsIdx, err)
+			}
+			for k, rs := range info.reals {
+				live[k].enabled = rs.enabled
 			}
 		}
-		if updateInfo.weight {
-			weights := make([]uint32, len(vsSlot.reals))
-			for _, realSlot := range vsSlot.reals {
-				weights[realSlot.idx] = realSlot.weight
+		if info.weightChanged {
+			weights := make([]uint32, len(info.reals))
+			for _, rs := range info.reals {
+				weights[rs.idx] = rs.weight
 			}
 			if err := m.handle.UpdateVSRealWeights(uint32(vsIdx), weights); err != nil {
-				return fmt.Errorf("failed to update real weights: %w", err)
+				return fmt.Errorf("vs[%d]: update real weights: %w", vsIdx, err)
+			}
+			for k, rs := range info.reals {
+				live[k].weight = rs.weight
 			}
 		}
-	}
-
-	return nil
-}
-
-func pushVSRealState(handle *cbalancer2.Balancer, vsIdx uint32, slot *vsSlot) error {
-	states := make([]bool, len(slot.reals))
-	weights := make([]uint32, len(slot.reals))
-	for _, rs := range slot.reals {
-		states[rs.idx] = rs.enabled
-		weights[rs.idx] = rs.weight
-	}
-	if err := handle.UpdateVSRealStates(vsIdx, states); err != nil {
-		return fmt.Errorf("vs[%d]: update real states: %w", vsIdx, err)
-	}
-	if err := handle.UpdateVSRealWeights(vsIdx, weights); err != nil {
-		return fmt.Errorf("vs[%d]: update real weights: %w", vsIdx, err)
 	}
 	return nil
-}
-
-func buildIndex(vs []*balancerpb.VsConfig, prev map[vsID]*vsSlot) (map[vsID]*vsSlot, error) {
-	out := make(map[vsID]*vsSlot, len(vs))
-	for vsIdx, v := range vs {
-		key, err := makeVsID(v.Id)
-		if err != nil {
-			return nil, fmt.Errorf("vs[%d]: %w", vsIdx, err)
-		}
-		if _, dup := out[key]; dup {
-			return nil, fmt.Errorf("vs[%d]: duplicate found", vsIdx)
-		}
-		slot := &vsSlot{idx: vsIdx, reals: make(map[realID]*realSlot, len(v.Reals))}
-		var prevSlot *vsSlot
-		if prev != nil {
-			prevSlot = prev[key]
-		}
-		for rIdx, r := range v.Reals {
-			rk, err := makeRealID(r.Id)
-			if err != nil {
-				return nil, fmt.Errorf("vs[%d]: real[%d]: %w", vsIdx, rIdx, err)
-			}
-			if _, dup := slot.reals[rk]; dup {
-				return nil, fmt.Errorf("vs[%d]: real[%d]: duplicate found", vsIdx, rIdx)
-			}
-			enabled := false
-			weight := r.Weight
-			if prevSlot != nil {
-				if prevRealSlot, exists := prevSlot.reals[rk]; exists {
-					enabled = prevRealSlot.enabled
-					weight = prevRealSlot.weight
-				}
-			}
-			slot.reals[rk] = &realSlot{
-				idx:     rIdx,
-				enabled: enabled,
-				weight:  weight,
-			}
-		}
-		out[key] = slot
-	}
-	return out, nil
 }
 
 func makeVsID(id *balancerpb.VsIdentifier) (vsID, error) {
 	if id == nil {
-		return vsID{}, errors.New("nil vs identifier")
+		return vsID{}, errors.New("identifier required")
 	}
 	addr, ok := netip.AddrFromSlice(id.Addr)
 	if !ok {
 		return vsID{}, fmt.Errorf("invalid vs address: %x", id.Addr)
+	}
+	if id.Proto != balancerpb.TransportProto_TCP && id.Proto != balancerpb.TransportProto_UDP {
+		return vsID{}, fmt.Errorf("invalid transport proto: %v", id.Proto)
+	}
+	if id.Port > math.MaxUint16 {
+		return vsID{}, fmt.Errorf("port out of range: %d", id.Port)
 	}
 	return vsID{addr: addr, port: uint16(id.Port), proto: id.Proto}, nil
 }
 
 func makeRealID(id *balancerpb.RelativeRealIdentifier) (realID, error) {
 	if id == nil {
-		return realID{}, errors.New("real identifier required")
+		return realID{}, errors.New("identifier required")
 	}
 	addr, ok := netip.AddrFromSlice(id.Ip)
 	if !ok {
 		return realID{}, fmt.Errorf("invalid real address: %x", id.Ip)
 	}
+	if id.Port > math.MaxUint16 {
+		return realID{}, fmt.Errorf("port out of range: %d", id.Port)
+	}
+	// real ports not used in current implementation
 	return realID{addr: addr}, nil
-}
-
-func mergeConfig(prev, upd *ConfigParams) *ConfigParams {
-	out := *prev
-	if upd.Vs != nil {
-		out.Vs = upd.Vs
-	}
-	if upd.Timeouts != nil {
-		out.Timeouts = upd.Timeouts
-	}
-	if upd.Addr != nil {
-		out.Addr = upd.Addr
-	}
-	if upd.Wlc != nil {
-		out.Wlc = upd.Wlc
-	}
-	return &out
-}
-
-func toCSessionTimeouts(t *balancerpb.SessionsTimeouts) cbalancer2.SessionTimeouts {
-	return cbalancer2.SessionTimeouts{
-		TCPSynAck: t.TcpSynAck,
-		TCPSyn:    t.TcpSyn,
-		TCPFin:    t.TcpFin,
-		TCP:       t.Tcp,
-		UDP:       t.Udp,
-	}
-}
-
-func toCVSConfigs(vs []*balancerpb.VsConfig) ([]cbalancer2.VSConfig, error) {
-	out := make([]cbalancer2.VSConfig, len(vs))
-	for idx, v := range vs {
-		c, err := toCVSConfig(v)
-		if err != nil {
-			return nil, fmt.Errorf("vs[%d]: %w", idx, err)
-		}
-		out[idx] = c
-	}
-	return out, nil
-}
-
-func toCVSConfig(v *balancerpb.VsConfig) (cbalancer2.VSConfig, error) {
-	dst, ok := netip.AddrFromSlice(v.Id.Addr)
-	if !ok {
-		return cbalancer2.VSConfig{}, errors.New("invalid address")
-	}
-
-	transport, err := toCTransport(v.Id.Proto)
-	if err != nil {
-		return cbalancer2.VSConfig{}, err
-	}
-
-	scheduler, err := toCScheduler(v.Scheduler)
-	if err != nil {
-		return cbalancer2.VSConfig{}, err
-	}
-
-	allowed := make([]cbalancer2.AllowedSources, len(v.AllowedSources))
-	for idx, a := range v.AllowedSources {
-		c, err := toCAllowedSources(a)
-		if err != nil {
-			return cbalancer2.VSConfig{}, fmt.Errorf("allowed sources at index %d: %w", idx, err)
-		}
-		allowed[idx] = c
-	}
-
-	reals := make([]cbalancer2.RealConfig, len(v.Reals))
-	for idx, r := range v.Reals {
-		c, err := toCRealConfig(r)
-		if err != nil {
-			return cbalancer2.VSConfig{}, fmt.Errorf("real at index %d: %w", idx, err)
-		}
-		reals[idx] = c
-	}
-
-	tunnel := cbalancer2.TunnelKindIP
-	fixMSS := false
-	if v.Flags != nil {
-		if v.Flags.Gre {
-			tunnel = cbalancer2.TunnelKindGRE
-		}
-		fixMSS = v.Flags.FixMss
-	}
-
-	return cbalancer2.VSConfig{
-		Dst:            dst,
-		Port:           uint16(v.Id.Port),
-		Transport:      transport,
-		AllowedSources: allowed,
-		Scheduler:      scheduler,
-		Tunnel:         tunnel,
-		Reals:          reals,
-		FixMSS:         fixMSS,
-	}, nil
-}
-
-func toCTransport(p balancerpb.TransportProto) (cbalancer2.TransportProto, error) {
-	switch p {
-	case balancerpb.TransportProto_TCP:
-		return cbalancer2.TransportTCP, nil
-	case balancerpb.TransportProto_UDP:
-		return cbalancer2.TransportUDP, nil
-	default:
-		return 0, fmt.Errorf("unsupported transport: %s", p)
-	}
-}
-
-func toCScheduler(s balancerpb.VsScheduler) (cbalancer2.VSScheduler, error) {
-	switch s {
-	case balancerpb.VsScheduler_SH:
-		return cbalancer2.VSSchedulerSH, nil
-	case balancerpb.VsScheduler_WRR:
-		return cbalancer2.VSSchedulerWRR, nil
-	case balancerpb.VsScheduler_WLC:
-		return cbalancer2.VSSchedulerWRR, nil
-	case balancerpb.VsScheduler_OP:
-		return cbalancer2.VSSchedulerOP, nil
-	default:
-		return 0, fmt.Errorf("unsupported scheduler: %s", s)
-	}
-}
-
-func toCAllowedSources(a *balancerpb.AllowedSources) (cbalancer2.AllowedSources, error) {
-	net4s, err := filterpb.ToNet4s(a.Nets)
-	if err != nil {
-		return cbalancer2.AllowedSources{}, fmt.Errorf("net4s: %w", err)
-	}
-	net6s, err := filterpb.ToNet6s(a.Nets)
-	if err != nil {
-		return cbalancer2.AllowedSources{}, fmt.Errorf("net6s: %w", err)
-	}
-	ports, err := filterpb.ToPortRanges(a.Ports)
-	if err != nil {
-		return cbalancer2.AllowedSources{}, fmt.Errorf("ports: %w", err)
-	}
-	tag := ""
-	if a.Tag != nil {
-		tag = *a.Tag
-	}
-	return cbalancer2.AllowedSources{
-		Net4s:      net4s,
-		Net6s:      net6s,
-		PortRanges: ports,
-		Tag:        tag,
-	}, nil
-}
-
-func toCRealConfig(r *balancerpb.RealConfig) (cbalancer2.RealConfig, error) {
-	dst, ok := netip.AddrFromSlice(r.Id.Ip)
-	if !ok {
-		return cbalancer2.RealConfig{}, errors.New("invalid address")
-	}
-	src, err := toCNetWithMask(r.Src)
-	if err != nil {
-		return cbalancer2.RealConfig{}, fmt.Errorf("source: %w", err)
-	}
-	return cbalancer2.RealConfig{
-		Dst: dst,
-		Src: src,
-	}, nil
-}
-
-func toCNetWithMask(n *filterpb.IPNet) (xnetip.NetWithMask, error) {
-	ipNet, err := filterpb.ToIPNet(n)
-	if err != nil {
-		return xnetip.NetWithMask{}, err
-	}
-	return xnetip.NetWithMask{
-		Addr: ipNet.Addr,
-		Mask: net.IPMask(ipNet.Mask.AsSlice()),
-	}, nil
 }

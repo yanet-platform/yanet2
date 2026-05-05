@@ -19,6 +19,7 @@ func NewSessionsState(agent *ffi.Agent, name string, capacity uint64) (*Sessions
 	}
 	stChain, err := cbalancer2.NewSessionTableChain(agent, st)
 	if err != nil {
+		st.Free(agent)
 		return nil, err
 	}
 	return &SessionsState{
