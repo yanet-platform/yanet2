@@ -18,6 +18,7 @@ import (
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/controlplane/gateway"
+	"github.com/yanet-platform/yanet2/controlplane/httpproxy"
 	"github.com/yanet-platform/yanet2/controlplane/internal/auth"
 	"github.com/yanet-platform/yanet2/controlplane/internal/xgrpc"
 	"github.com/yanet-platform/yanet2/controlplane/ynpb"
@@ -275,8 +276,13 @@ func (m *Gateway) Run(ctx context.Context) error {
 // via HTTP.
 func (m *Gateway) runHTTPServer(ctx context.Context) error {
 	server := &http.Server{
-		Addr:    m.cfg.Server.HTTPEndpoint,
-		Handler: GzipMiddleware(NewHTTPHandler(m.registry, m.log)),
+		Addr: m.cfg.Server.HTTPEndpoint,
+		Handler: httpproxy.GzipMiddleware(
+			httpproxy.NewHTTPHandler(
+				m.registry,
+				m.log.Desugar(),
+			),
+		),
 	}
 
 	// Set up graceful shutdown.

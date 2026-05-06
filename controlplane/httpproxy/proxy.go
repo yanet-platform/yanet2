@@ -1,4 +1,4 @@
-package gateway
+package httpproxy
 
 import (
 	"compress/gzip"
@@ -21,15 +21,20 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/internal/xgrpc"
 )
 
+// BackendRegistry is the subset of backend lookup API required by the HTTP proxy.
+type BackendRegistry interface {
+	GetBackend(service string) (proxy.Backend, bool)
+}
+
 // TransparentWebGRPCProxy is an HTTP handler that translates HTTP requests
 // with binary protobuf payloads to gRPC calls.
 type TransparentWebGRPCProxy struct {
-	registry *BackendRegistry
-	log      *zap.SugaredLogger
+	registry BackendRegistry
+	log      *zap.Logger
 }
 
 // NewHTTPHandler creates a new HTTPHandler.
-func NewHTTPHandler(registry *BackendRegistry, log *zap.SugaredLogger) *TransparentWebGRPCProxy {
+func NewHTTPHandler(registry BackendRegistry, log *zap.Logger) *TransparentWebGRPCProxy {
 	return &TransparentWebGRPCProxy{
 		registry: registry,
 		log:      log,
@@ -47,26 +52,22 @@ func (m *TransparentWebGRPCProxy) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Only support POST method for actual gRPC calls.
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed. Only POST is supported", http.StatusMethodNotAllowed)
 		return
 	}
 
-	// Convert URL path to gRPC fullMethodName format.
 	fullMethodName := r.URL.Path
 	fullMethodName = strings.TrimPrefix(fullMethodName, "/api")
 	if !strings.HasPrefix(fullMethodName, "/") {
 		fullMethodName = "/" + fullMethodName
 	}
 
-	// Check if this is a server streaming method and handle accordingly.
 	if m.isServerStreaming(fullMethodName) {
 		m.handleServerStreaming(w, r, fullMethodName)
 		return
 	}
 
-	// Handle unary gRPC calls.
 	m.handleUnary(w, r, fullMethodName)
 }
 
@@ -101,7 +102,6 @@ func (m *TransparentWebGRPCProxy) handleUnary(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// Create context with metadata from HTTP headers.
 	ctx := r.Context()
 	md := metadata.New(nil)
 	for k, v := range r.Header {
@@ -114,7 +114,7 @@ func (m *TransparentWebGRPCProxy) handleUnary(w http.ResponseWriter, r *http.Req
 
 	outCtx, conn, err := backend.GetConnection(ctx, fullMethodName)
 	if err != nil {
-		m.log.Errorw("failed to get connection to backend",
+		m.log.Error("failed to get connection to backend",
 			zap.String("service", service),
 			zap.String("method", method),
 			zap.Error(err),
@@ -123,10 +123,7 @@ func (m *TransparentWebGRPCProxy) handleUnary(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// We use a custom codec to directly send/receive binary protobuf data.
 	responseBuffer := proxy.NewFrame(nil)
-
-	// Invoke the gRPC method with the binary protobuf payload.
 	err = conn.Invoke(
 		outCtx,
 		fullMethodName,
@@ -135,13 +132,11 @@ func (m *TransparentWebGRPCProxy) handleUnary(w http.ResponseWriter, r *http.Req
 		grpc.ForceCodecV2(proxy.Codec()),
 	)
 	if err != nil {
-		m.log.Errorw("failed to proxy gRPC",
+		m.log.Error("failed to proxy gRPC",
 			zap.String("service", service),
 			zap.String("method", method),
 			zap.Error(err),
 		)
-
-		// Convert gRPC error to HTTP error
 		statusErr, ok := status.FromError(err)
 		if ok {
 			code := statusErr.Code()
@@ -152,11 +147,10 @@ func (m *TransparentWebGRPCProxy) handleUnary(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// We need to re-marshal the response to get the binary data.
 	codec := proxy.Codec()
 	bufSlice, err := codec.Marshal(responseBuffer)
 	if err != nil {
-		m.log.Errorw("failed to marshal response",
+		m.log.Error("failed to marshal response",
 			zap.String("service", service),
 			zap.String("method", method),
 			zap.Error(err),
@@ -165,7 +159,6 @@ func (m *TransparentWebGRPCProxy) handleUnary(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// Materialize the buffer slice.
 	respData := bufSlice.Materialize()
 	responseMessage, err := m.protobufToMessage(fullMethodName, respData, false)
 	if err != nil {
@@ -176,7 +169,7 @@ func (m *TransparentWebGRPCProxy) handleUnary(w http.ResponseWriter, r *http.Req
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(responseMessage); err != nil {
-		m.log.Errorw("failed to encode JSON response",
+		m.log.Error("failed to encode JSON response",
 			zap.String("service", service),
 			zap.String("method", method),
 			zap.Error(err),
@@ -302,7 +295,6 @@ func (m *TransparentWebGRPCProxy) handleServerStreaming(w http.ResponseWriter, r
 		return
 	}
 
-	// Create context with metadata from HTTP headers.
 	ctx := r.Context()
 	md := metadata.New(nil)
 	for k, v := range r.Header {
@@ -315,7 +307,7 @@ func (m *TransparentWebGRPCProxy) handleServerStreaming(w http.ResponseWriter, r
 
 	outCtx, conn, err := backend.GetConnection(ctx, fullMethodName)
 	if err != nil {
-		m.log.Errorw("failed to get connection to backend",
+		m.log.Error("failed to get connection to backend",
 			zap.String("service", service),
 			zap.String("method", method),
 			zap.Error(err),
@@ -324,13 +316,11 @@ func (m *TransparentWebGRPCProxy) handleServerStreaming(w http.ResponseWriter, r
 		return
 	}
 
-	// Set SSE headers.
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
-	// Create a client stream.
 	streamDesc := &grpc.StreamDesc{
 		StreamName:    method,
 		ServerStreams: true,
@@ -338,7 +328,7 @@ func (m *TransparentWebGRPCProxy) handleServerStreaming(w http.ResponseWriter, r
 
 	clientStream, err := conn.NewStream(outCtx, streamDesc, fullMethodName, grpc.ForceCodecV2(proxy.Codec()))
 	if err != nil {
-		m.log.Errorw("failed to create stream",
+		m.log.Error("failed to create stream",
 			zap.String("service", service),
 			zap.String("method", method),
 			zap.Error(err),
@@ -347,9 +337,8 @@ func (m *TransparentWebGRPCProxy) handleServerStreaming(w http.ResponseWriter, r
 		return
 	}
 
-	// Send the request message.
 	if err := clientStream.SendMsg(proxy.NewFrame(protobufBody)); err != nil {
-		m.log.Errorw("failed to send request",
+		m.log.Error("failed to send request",
 			zap.String("service", service),
 			zap.String("method", method),
 			zap.Error(err),
@@ -358,9 +347,8 @@ func (m *TransparentWebGRPCProxy) handleServerStreaming(w http.ResponseWriter, r
 		return
 	}
 
-	// Close the send side of the stream.
 	if err := clientStream.CloseSend(); err != nil {
-		m.log.Errorw("failed to close send",
+		m.log.Error("failed to close send",
 			zap.String("service", service),
 			zap.String("method", method),
 			zap.Error(err),
@@ -377,18 +365,16 @@ func (m *TransparentWebGRPCProxy) handleServerStreaming(w http.ResponseWriter, r
 
 	codec := proxy.Codec()
 
-	// Read streaming responses.
 	for {
 		responseBuffer := proxy.NewFrame(nil)
 		err := clientStream.RecvMsg(responseBuffer)
 		if err == io.EOF {
-			// Stream ended normally.
 			m.writeSSEEvent(w, "end", "{}")
 			flusher.Flush()
 			return
 		}
 		if err != nil {
-			m.log.Errorw("failed to receive stream message",
+			m.log.Error("failed to receive stream message",
 				zap.String("service", service),
 				zap.String("method", method),
 				zap.Error(err),
@@ -398,10 +384,9 @@ func (m *TransparentWebGRPCProxy) handleServerStreaming(w http.ResponseWriter, r
 			return
 		}
 
-		// Marshal the response to get binary data.
 		bufSlice, err := codec.Marshal(responseBuffer)
 		if err != nil {
-			m.log.Errorw("failed to marshal response",
+			m.log.Error("failed to marshal response",
 				zap.String("service", service),
 				zap.String("method", method),
 				zap.Error(err),
@@ -412,7 +397,7 @@ func (m *TransparentWebGRPCProxy) handleServerStreaming(w http.ResponseWriter, r
 		respData := bufSlice.Materialize()
 		responseMessage, err := m.protobufToMessage(fullMethodName, respData, false)
 		if err != nil {
-			m.log.Errorw("failed to unmarshal protobuf response",
+			m.log.Error("failed to unmarshal protobuf response",
 				zap.String("service", service),
 				zap.String("method", method),
 				zap.Error(err),
@@ -422,7 +407,7 @@ func (m *TransparentWebGRPCProxy) handleServerStreaming(w http.ResponseWriter, r
 
 		jsonData, err := json.Marshal(responseMessage)
 		if err != nil {
-			m.log.Errorw("failed to marshal JSON response",
+			m.log.Error("failed to marshal JSON response",
 				zap.String("service", service),
 				zap.String("method", method),
 				zap.Error(err),
@@ -513,23 +498,22 @@ func (m *gzipResponseWriter) Write(b []byte) (int, error) {
 
 // Flush flushes buffered data to the client for SSE streaming support.
 func (m *gzipResponseWriter) Flush() {
-	// Flush gzip writer first to ensure compressed data is written.
 	if gz, ok := m.Writer.(*gzip.Writer); ok {
 		gz.Flush()
 	}
-	// Then flush the underlying ResponseWriter.
 	if f, ok := m.ResponseWriter.(http.Flusher); ok {
 		f.Flush()
 	}
 }
 
 // GzipMiddleware compresses HTTP responses and decompresses requests.
+//
 // It handles both request decompression (Content-Encoding: gzip) and
 // response compression (Accept-Encoding: gzip).
+//
 // Requests without compression are handled normally for backward compatibility.
 func GzipMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Decompress request body if gzip encoded.
 		if r.Header.Get("Content-Encoding") == "gzip" {
 			gr, err := gzip.NewReader(r.Body)
 			if err != nil {
@@ -541,7 +525,6 @@ func GzipMiddleware(next http.Handler) http.Handler {
 			r.Header.Del("Content-Encoding")
 		}
 
-		// Compress response if client accepts gzip.
 		if strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
 			w.Header().Set("Content-Encoding", "gzip")
 			gz := gzip.NewWriter(w)
