@@ -99,7 +99,8 @@ func ToNet4sFromPrefixes(pb []*IPPrefix) (filter.IPNets, error) {
 		if len(p.Addr) != 4 && len(p.Addr) != 16 {
 			return nil, status.Error(
 				codes.InvalidArgument,
-				"invalid network address length")
+				"invalid network address length",
+			)
 		}
 
 		if len(p.Addr) != 4 {
@@ -122,7 +123,8 @@ func ToNet6sFromPrefixes(pb []*IPPrefix) (filter.IPNets, error) {
 		if len(p.Addr) != 4 && len(p.Addr) != 16 {
 			return nil, status.Error(
 				codes.InvalidArgument,
-				"invalid network address length")
+				"invalid network address length",
+			)
 		}
 
 		if len(p.Addr) != 16 {
