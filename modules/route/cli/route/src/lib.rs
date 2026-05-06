@@ -1,7 +1,4 @@
-use core::fmt::{self, Display, Formatter};
-
-use colored::Colorize;
-use netip::{Contiguous, IpNetwork};
+use commonpb::pb::MacAddress;
 use tabled::Tabled;
 
 #[allow(clippy::all, non_snake_case)]
@@ -9,111 +6,12 @@ pub mod routepb {
     tonic::include_proto!("routepb");
 }
 
-/// BGP Large Community value.
-#[derive(Debug)]
-pub struct LargeCommunity {
-    pub global_administrator: u32,
-    pub local_data_part1: u32,
-    pub local_data_part2: u32,
-}
-
-impl From<routepb::LargeCommunity> for LargeCommunity {
-    fn from(community: routepb::LargeCommunity) -> Self {
-        Self {
-            global_administrator: community.global_administrator,
-            local_data_part1: community.local_data_part1,
-            local_data_part2: community.local_data_part2,
-        }
-    }
-}
-
-impl Display for LargeCommunity {
-    fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
-        write!(
-            f,
-            "{}:{}:{}",
-            self.global_administrator, self.local_data_part1, self.local_data_part2
-        )
-    }
-}
-
-/// List of BGP Large Communities.
-#[derive(Debug)]
-pub struct Communities(pub Vec<LargeCommunity>);
-
-impl Display for Communities {
-    fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
-        let communities: Vec<String> = self.0.iter().map(|c| c.to_string()).collect();
-        write!(f, "{}", communities.join(" "))
-    }
-}
-
-/// Route entry in the routing table.
-#[derive(Debug, Tabled)]
-pub struct RouteEntry {
-    #[tabled(rename = "Prefix")]
-    pub prefix: Prefix,
-    #[tabled(rename = "Next Hop")]
-    pub next_hop: String,
-    #[tabled(rename = "Peer")]
-    pub peer: String,
-    #[tabled(rename = "Source")]
-    pub source: String,
-    #[tabled(rename = "Peer AS")]
-    pub peer_as: u32,
-    #[tabled(rename = "Origin")]
-    pub origin_as: u32,
-    #[tabled(rename = "Pref")]
-    pub pref: u32,
-    #[tabled(rename = "MED")]
-    pub med: u32,
-    #[tabled(rename = "Communities")]
-    pub communities: Communities,
-}
-
-impl From<routepb::Route> for RouteEntry {
-    fn from(route: routepb::Route) -> Self {
-        let communities = route.large_communities.into_iter().map(|c| c.into()).collect();
-
-        // TODO: migrate to strongly-typed protobuf messages for IPNetwork.
-        let prefix = Contiguous::<IpNetwork>::parse(&route.prefix).expect("must be valid prefix");
-
-        let source = routepb::RouteSourceId::try_from(route.source)
-            .unwrap_or_default()
-            .as_str_name()
-            .strip_prefix("ROUTE_SOURCE_ID_")
-            .unwrap_or_default()
-            .to_lowercase();
-
-        Self {
-            prefix: Prefix(prefix, route.is_best),
-            next_hop: route.next_hop,
-            peer: route.peer,
-            source,
-            peer_as: route.peer_as,
-            origin_as: route.origin_as,
-            pref: route.pref,
-            med: route.med,
-            communities: Communities(communities),
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct Prefix(pub Contiguous<IpNetwork>, pub bool);
-
-impl Display for Prefix {
-    fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
-        let Prefix(ref prefix, is_best) = self;
-        let prefix = prefix.to_string();
-        let prefix = if *is_best {
-            prefix.into()
-        } else {
-            prefix.truecolor(127, 127, 127)
-        };
-
-        write!(f, "{prefix}")
-    }
+fn format_mac(mac: Option<MacAddress>) -> String {
+    let bytes = mac.map(|m| m.addr.to_be_bytes()).unwrap_or_default();
+    format!(
+        "{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
+        bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+    )
 }
 
 /// FIB entry for display in the CLI table.
@@ -139,8 +37,8 @@ impl FibDisplayEntry {
             .into_iter()
             .map(|nh| FibDisplayEntry {
                 prefix: prefix.clone(),
-                dst_mac: nh.dst_mac,
-                src_mac: nh.src_mac,
+                dst_mac: format_mac(nh.dst_mac),
+                src_mac: format_mac(nh.src_mac),
                 device: nh.device,
             })
             .collect()

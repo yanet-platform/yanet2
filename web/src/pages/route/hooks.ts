@@ -1,4 +1,4 @@
-import { useMemo, useCallback, useState, useRef, useLayoutEffect } from 'react';
+import { useMemo, useCallback, useState, useRef } from 'react';
 import type { TableColumnConfig } from '@gravity-ui/uikit';
 import type { Route } from '../../api/routes';
 import type { ConfigRoutesData, SortState, SortableColumn } from './types';
@@ -7,7 +7,7 @@ import {
     compareBooleans,
     compareNullableNumbers,
     compareNullableStrings,
-} from '../../utils/sorting';
+} from '../../utils';
 
 /**
  * Hook that returns table column configuration for routes
@@ -129,32 +129,6 @@ export const useSortState = () => {
     }, [sortState]);
 
     return { sortState, handleSort, sortData };
-};
-
-/**
- * Hook for measuring container height
- */
-export const useContainerHeight = (containerRef: React.RefObject<HTMLDivElement | null>) => {
-    const [containerHeight, setContainerHeight] = useState(0);
-
-    useLayoutEffect(() => {
-        const updateHeight = () => {
-            if (containerRef.current) {
-                const rect = containerRef.current.getBoundingClientRect();
-                const availableHeight = window.innerHeight - rect.top - 20;
-                setContainerHeight(Math.max(300, availableHeight));
-            }
-        };
-
-        updateHeight();
-        window.addEventListener('resize', updateHeight);
-
-        return () => {
-            window.removeEventListener('resize', updateHeight);
-        };
-    }, [containerRef]);
-
-    return containerHeight;
 };
 
 /**

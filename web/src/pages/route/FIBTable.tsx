@@ -4,7 +4,7 @@ import { Box, Text } from '@gravity-ui/uikit';
 import { EmptyState, TableSearchBar, SortableTableHeader } from '../../components';
 import type { FIBEntry, FIBNexthop } from '../../api/routes';
 import type { FIBRow, FIBSortableColumn, FIBSortState } from './types';
-import { useContainerHeight } from './hooks';
+import { useContainerHeight } from '../../hooks';
 import { ROW_HEIGHT, OVERSCAN, SEARCH_BAR_HEIGHT, HEADER_HEIGHT, FOOTER_HEIGHT, FIB_TOTAL_WIDTH, fibCellStyles } from './constants';
 import './route.scss';
 
@@ -30,8 +30,8 @@ const flattenEntries = (entries: FIBEntry[]): FIBRow[] => {
                 rows.push({
                     id: `${prefix}-${idx}`,
                     prefix,
-                    dst_mac: nh.dst_mac || '',
-                    src_mac: nh.src_mac || '',
+                    dst_mac: nh.dst_mac?.addr || '',
+                    src_mac: nh.src_mac?.addr || '',
                     device: nh.device || '',
                 });
             });

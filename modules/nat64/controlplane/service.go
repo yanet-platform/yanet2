@@ -19,7 +19,7 @@ type NAT64Service struct {
 
 	mu      sync.Mutex
 	agent   *ffi.Agent
-	log     *zap.SugaredLogger
+	log     *zap.Logger
 	configs map[string]*NAT64Config
 }
 
@@ -45,7 +45,7 @@ type MTUConfig struct {
 	IPv6MTU uint32
 }
 
-func NewNAT64Service(agent *ffi.Agent, log *zap.SugaredLogger) *NAT64Service {
+func NewNAT64Service(agent *ffi.Agent, log *zap.Logger) *NAT64Service {
 	return &NAT64Service{
 		agent:   agent,
 		log:     log,
@@ -137,7 +137,7 @@ func (m *NAT64Service) AddPrefix(ctx context.Context, req *nat64pb.AddPrefixRequ
 		return nil, fmt.Errorf("failed to update module config: %w", err)
 	}
 
-	m.log.Infow("successfully added prefix",
+	m.log.Info("successfully added prefix",
 		zap.String("name", name),
 		zap.Binary("prefix", req.Prefix),
 	)
@@ -179,7 +179,7 @@ func (m *NAT64Service) AddMapping(ctx context.Context, req *nat64pb.AddMappingRe
 		return nil, fmt.Errorf("failed to update module config: %w", err)
 	}
 
-	m.log.Infow("successfully added mapping",
+	m.log.Info("successfully added mapping",
 		zap.String("name", name),
 		zap.Binary("ipv4", req.Ipv4),
 		zap.Binary("ipv6", req.Ipv6),
@@ -219,7 +219,7 @@ func (m *NAT64Service) SetMTU(ctx context.Context, req *nat64pb.SetMTURequest) (
 		return nil, fmt.Errorf("failed to update module config: %w", err)
 	}
 
-	m.log.Infow("successfully set MTU",
+	m.log.Info("successfully set MTU",
 		zap.String("name", name),
 		zap.Uint32("ipv4_mtu", req.Mtu.Ipv4Mtu),
 		zap.Uint32("ipv6_mtu", req.Mtu.Ipv6Mtu),
@@ -252,7 +252,7 @@ func (m *NAT64Service) SetDropUnknown(ctx context.Context, req *nat64pb.SetDropU
 		return nil, fmt.Errorf("failed to update module config: %w", err)
 	}
 
-	m.log.Infow("successfully set drop unknown flags",
+	m.log.Info("successfully set drop unknown flags",
 		zap.String("name", name),
 		zap.Bool("drop_unknown_prefix", req.DropUnknownPrefix),
 		zap.Bool("drop_unknown_mapping", req.DropUnknownMapping),

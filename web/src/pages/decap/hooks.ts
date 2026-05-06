@@ -1,7 +1,7 @@
-import { useMemo, useState, useLayoutEffect } from 'react';
+import { useMemo } from 'react';
 import type { TableColumnConfig } from '@gravity-ui/uikit';
 import type { PrefixItem } from './types';
-import { compareNullableStrings } from '../../utils/sorting';
+import { compareNullableStrings } from '../../utils';
 
 /**
  * Hook that returns table column configuration for prefixes
@@ -29,28 +29,3 @@ export const prefixesToItems = (prefixes: string[]): PrefixItem[] => {
     }));
 };
 
-/**
- * Hook for measuring container height
- */
-export const useContainerHeight = (containerRef: React.RefObject<HTMLDivElement | null>) => {
-    const [containerHeight, setContainerHeight] = useState(0);
-
-    useLayoutEffect(() => {
-        const updateHeight = () => {
-            if (containerRef.current) {
-                const rect = containerRef.current.getBoundingClientRect();
-                const availableHeight = window.innerHeight - rect.top - 20;
-                setContainerHeight(Math.max(300, availableHeight));
-            }
-        };
-
-        updateHeight();
-        window.addEventListener('resize', updateHeight);
-
-        return () => {
-            window.removeEventListener('resize', updateHeight);
-        };
-    }, [containerRef]);
-
-    return containerHeight;
-};

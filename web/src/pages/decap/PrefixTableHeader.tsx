@@ -2,7 +2,7 @@ import React from 'react';
 import { Box, Text, Icon, Checkbox } from '@gravity-ui/uikit';
 import { ChevronUp, ChevronDown } from '@gravity-ui/icons';
 import { HEADER_HEIGHT, TOTAL_WIDTH, cellStyles } from './constants';
-import './decap.css';
+import './decap.scss';
 
 export interface PrefixTableHeaderProps {
     sortDirection: 'asc' | 'desc';

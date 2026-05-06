@@ -125,6 +125,8 @@ logging:
   level: debug
 
 gateway:
+  server:
+    endpoint: "0.0.0.0:8080"
   auth:
     disabled: true
 
@@ -195,6 +197,27 @@ rules:
 
 	if err := gfw.CreateConfigFile("forward.yaml", forwardConfig); err != nil {
 		sugar.Errorf("Failed to create forward config: %v", err)
+		return 1
+	}
+
+	// Bootstrap the default IPv4/IPv6 FIB for route0. The YAML is
+	// consumed by the "yanet-cli-route fib update" entry appended to
+	// CommonConfigCommands.
+	route0Config := `
+entries:
+  - prefix: "0.0.0.0/0"
+    nexthops:
+      - dst_mac: "` + framework.SrcMAC + `"
+        src_mac: "` + framework.DstMAC + `"
+        device: "01:00.0"
+  - prefix: "::/0"
+    nexthops:
+      - dst_mac: "` + framework.SrcMAC + `"
+        src_mac: "` + framework.DstMAC + `"
+        device: "01:00.0"
+`
+	if err := gfw.CreateConfigFile("route0.yaml", route0Config); err != nil {
+		sugar.Errorf("Failed to create route0 config: %v", err)
 		return 1
 	}
 

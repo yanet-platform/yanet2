@@ -3,7 +3,7 @@ import { TextInput, Box, Select } from '@gravity-ui/uikit';
 import type { SelectOption } from '@gravity-ui/uikit';
 import { FormDialog, FormField } from '../../../components';
 import type { ModuleNodeData } from '../types';
-import '../../FunctionsPage.css';
+import '../../FunctionsPage.scss';
 
 export interface ModuleEditorDialogProps {
     open: boolean;

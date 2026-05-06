@@ -4,7 +4,7 @@ import type { SelectOption } from '@gravity-ui/uikit';
 import { FormDialog, FormField } from '../../../components';
 import type { FunctionRefNodeData } from '../types';
 import type { FunctionId } from '../../../api/common';
-import '../pipelines.css';
+import '../pipelines.scss';
 
 export interface FunctionRefEditorDialogProps {
     open: boolean;

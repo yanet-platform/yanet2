@@ -4,7 +4,7 @@ import { FormField } from '../../components';
 import { useDialogKeyboardShortcut } from '../../hooks';
 import type { AddPrefixDialogProps } from './types';
 import { parseCIDRPrefix, CIDRParseError } from '../../utils';
-import './decap.css';
+import './decap.scss';
 
 export const AddPrefixDialog: React.FC<AddPrefixDialogProps> = ({
     open,

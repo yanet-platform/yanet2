@@ -28,13 +28,13 @@ type BalancerAgent struct {
 
 	handlersMetrics handlersMetrics
 
-	log *zap.SugaredLogger
+	log *zap.Logger
 }
 
 func NewBalancerAgent(
 	shm *yanet.SharedMemory,
 	memory datasize.ByteSize,
-	log *zap.SugaredLogger,
+	log *zap.Logger,
 ) (*BalancerAgent, error) {
 	if log == nil {
 		return nil, fmt.Errorf("logger cannot be nil")
@@ -74,10 +74,10 @@ func (a *BalancerAgent) NewBalancerManager(
 	)
 	defer tracker.Fix()
 
-	a.log.Infow("creating new balancer manager", "name", name)
+	a.log.Info("creating new balancer manager", zap.String("name", name))
 
 	if _, ok := a.managers[name]; ok {
-		a.log.Warnw("balancer manager already exists", "name", name)
+		a.log.Warn("balancer manager already exists", zap.String("name", name))
 		return fmt.Errorf(
 			"balancer manager with name '%s' already exists",
 			name,
@@ -87,27 +87,25 @@ func (a *BalancerAgent) NewBalancerManager(
 	// Convert and validate config
 	managerConfig, err := ProtoToManagerConfig(config)
 	if err != nil {
-		a.log.Errorw("failed to convert config", "name", name, "error", err)
+		a.log.Error("failed to convert config", zap.String("name", name), zap.Error(err))
 		return fmt.Errorf("config is invalid: %w", err)
 	}
 
 	managerHandle, err := a.handle.NewManager(name, managerConfig)
 	if err != nil {
-		a.log.Errorw(
+		a.log.Error(
 			"failed to create balancer manager",
-			"name",
-			name,
-			"error",
-			err,
+			zap.String("name", name),
+			zap.Error(err),
 		)
 		return fmt.Errorf("failed to create new balancer manager: %v", err)
 	}
 
 	a.managers[name] = NewBalancerManager(
 		managerHandle,
-		a.log.With("balancer", name),
+		a.log.With(zap.String("balancer", name)),
 	)
-	a.log.Infow("balancer manager created successfully", "name", name)
+	a.log.Info("balancer manager created successfully", zap.String("name", name))
 	return nil
 }
 
@@ -158,10 +156,9 @@ func (a *BalancerAgent) Metrics() ([]*commonpb.Metric, error) {
 			position := &positions[idx]
 			manager := a.managers[positions[idx].ModuleName]
 			if manager == nil {
-				a.log.Warnw(
+				a.log.Warn(
 					"metrics: balancer manager not found",
-					"config",
-					position.ModuleName,
+					zap.String("config", position.ModuleName),
 				)
 			}
 			managers = append(managers, manager)
@@ -187,7 +184,7 @@ func (a *BalancerAgent) Metrics() ([]*commonpb.Metric, error) {
 
 		metrics, err := manager.Metrics(time.Now(), &ref)
 		if err != nil {
-			a.log.Errorf("failed to get metrics", "balancer", manager.Name())
+			a.log.Error("failed to get metrics", zap.String("balancer", manager.Name()))
 		} else {
 			result = append(result, metrics...)
 		}
@@ -264,10 +261,9 @@ func (a *BalancerAgent) StatsEntries(
 
 		manager := managersByName[position.ModuleName]
 		if manager == nil {
-			a.log.Warnw(
+			a.log.Warn(
 				"stats: balancer manager not found",
-				"config",
-				position.ModuleName,
+				zap.String("config", position.ModuleName),
 			)
 			continue
 		}
@@ -281,16 +277,15 @@ func (a *BalancerAgent) StatsEntries(
 
 		stats, err := manager.Stats(ref)
 		if err != nil {
-			a.log.Warnw(
+			a.log.Warn(
 				"failed to get stats for position",
-				"config", position.ModuleName,
-				"device", position.Device,
-				"pipeline", position.Pipeline,
-				"function", position.Function,
-				"chain", position.Chain,
-				"error", err,
+				zap.String("config", position.ModuleName),
+				zap.String("device", position.Device),
+				zap.String("pipeline", position.Pipeline),
+				zap.String("function", position.Function),
+				zap.String("chain", position.Chain),
+				zap.Error(err),
 			)
-			continue
 		}
 
 		entries = append(entries, &balancerpb.StatsEntry{

@@ -40,13 +40,6 @@ export interface RouteListItemProps {
 }
 
 // Dialog props
-export interface DeleteRouteDialogProps {
-    open: boolean;
-    onClose: () => void;
-    onConfirm: () => void;
-    selectedRoutes: Route[];
-}
-
 export interface AddRouteDialogProps {
     open: boolean;
     onClose: () => void;

@@ -14,5 +14,3 @@ export * from './PrefixTable';
 export * from './PrefixRow';
 export * from './PrefixTableHeader';
 export * from './AddPrefixDialog';
-export * from './DeletePrefixDialog';
-export * from './ConfigTabs';

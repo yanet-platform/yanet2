@@ -7,7 +7,7 @@ import {
     CreatePipelineDialog,
     usePipelineData,
 } from './pipelines';
-import './pipelines/pipelines.css';
+import './pipelines/pipelines.scss';
 
 const PipelinesPage: React.FC = () => {
     const {

@@ -4,7 +4,7 @@ import { Box, Text, TextInput, Label, Loader } from '@gravity-ui/uikit';
 import { EmptyState } from '../../components';
 import type { Rule } from '../../api/acl';
 import type { AclTableProps } from './types';
-import { useContainerHeight } from './hooks';
+import { useContainerHeight } from '../../hooks';
 import {
     ROW_HEIGHT,
     HEADER_HEIGHT,
@@ -16,7 +16,7 @@ import {
     ACTION_LABELS,
 } from './constants';
 import { formatIPNet, formatPortRange, formatProtoRange, formatVlanRange } from './yamlParser';
-import './VirtualizedAclTable.css';
+import './VirtualizedAclTable.scss';
 
 // Format multiple IPNets for display
 const formatIPNets = (nets: Rule['srcs']): string => {

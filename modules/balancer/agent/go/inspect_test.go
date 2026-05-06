@@ -31,7 +31,7 @@ func TestBalancerAgentInspect(t *testing.T) {
 	defer m.Free()
 
 	// Create logger for tests
-	log := zap.NewNop().Sugar()
+	log := zap.NewNop()
 
 	// Create balancer agent
 	agent, err := NewBalancerAgent(m.SharedMemory(), 32*datasize.MB, log)

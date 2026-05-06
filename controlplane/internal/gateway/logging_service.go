@@ -17,11 +17,11 @@ type LoggingService struct {
 	ynpb.UnimplementedLoggingServer
 
 	atom *zap.AtomicLevel
-	log  *zap.SugaredLogger
+	log  *zap.Logger
 }
 
 // NewLoggingService creates a new LoggingService.
-func NewLoggingService(atom *zap.AtomicLevel, log *zap.SugaredLogger) *LoggingService {
+func NewLoggingService(atom *zap.AtomicLevel, log *zap.Logger) *LoggingService {
 	return &LoggingService{
 		atom: atom,
 		log:  log,
@@ -43,7 +43,7 @@ func (m *LoggingService) UpdateLevel(
 	}
 
 	m.atom.SetLevel(level)
-	m.log.Infof("updated log level to %q", level)
+	m.log.Info("updated log level", zap.Stringer("level", level))
 
 	return &ynpb.UpdateLevelResponse{}, nil
 }

@@ -2,7 +2,7 @@ import React from 'react';
 import { Icon } from '@gravity-ui/uikit';
 import { Layers, ArrowUpArrowDown } from '@gravity-ui/icons';
 import { formatPps, formatBps } from '../../utils';
-import './CounterDisplay.css';
+import './CounterDisplay.scss';
 
 export interface CounterDisplayProps {
     pps: number;

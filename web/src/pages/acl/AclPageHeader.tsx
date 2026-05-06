@@ -2,7 +2,7 @@ import React from 'react';
 import { Flex, Text, Box, Button } from '@gravity-ui/uikit';
 import { Plus, FloppyDisk, TrashBin } from '@gravity-ui/icons';
 import type { AclPageHeaderProps } from './types';
-import './acl.css';
+import './acl.scss';
 
 export const AclPageHeader: React.FC<AclPageHeaderProps> = ({
     onUploadYaml,

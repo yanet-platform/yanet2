@@ -11,8 +11,11 @@
 #define ACL_ACTION_CHECK_STATE 3
 #define ACL_ACTION_CREATE_STATE 4
 
+#define ACL_MAX_ACTIONS 8
+
 struct acl_target {
-	uint64_t action;
+	uint64_t actions[ACL_MAX_ACTIONS];
+	uint64_t action_count;
 	uint64_t counter_id;
 };
 

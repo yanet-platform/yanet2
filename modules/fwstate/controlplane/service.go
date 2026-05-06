@@ -39,11 +39,11 @@ type FWStateService struct {
 	// Pending outdated layers to be freed after successful UpdateModules
 	pendingOutdatedLayers []*OutdatedLayers
 
-	log *zap.SugaredLogger
+	log *zap.Logger
 }
 
 // NewFWStateService creates a new FWState service
-func NewFWStateService(agent *ffi.Agent, aclProvider ACLServiceProvider, log *zap.SugaredLogger) *FWStateService {
+func NewFWStateService(agent *ffi.Agent, aclProvider ACLServiceProvider, log *zap.Logger) *FWStateService {
 	return &FWStateService{
 		agent:       agent,
 		configs:     make(map[string]*FwStateConfig),
@@ -69,7 +69,7 @@ func (m *FWStateService) UpdateConfig(
 		return nil, status.Error(codes.InvalidArgument, "map_config is required")
 	}
 
-	m.log.Debugw("update fwstate config", zap.String("config", name))
+	m.log.Debug("update fwstate config", zap.String("config", name))
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -78,7 +78,7 @@ func (m *FWStateService) UpdateConfig(
 
 	newConfig, err := NewFWStateModuleConfig(m.agent, name)
 	if err != nil {
-		m.log.Errorw("failed to create fwstate config",
+		m.log.Error("failed to create fwstate config",
 			zap.String("config", name),
 			zap.Error(err),
 		)
@@ -96,7 +96,7 @@ func (m *FWStateService) UpdateConfig(
 			// Only nil on memory allocation failure
 			newConfig.DetachMaps()
 			newConfig.Free()
-			m.log.Errorw("failed to allocate memory for outdated layers", zap.String("config", name))
+			m.log.Error("failed to allocate memory for outdated layers", zap.String("config", name))
 			return nil, status.Error(codes.Internal, "failed to allocate memory for outdated layer list")
 		}
 		// Always add to pending list - will be freed after successful UpdateModules
@@ -111,7 +111,7 @@ func (m *FWStateService) UpdateConfig(
 	if err := validateSyncConfig(syncConfig); err != nil {
 		newConfig.DetachMaps()
 		newConfig.Free()
-		m.log.Errorw("invalid sync config", zap.String("config", name), zap.Error(err))
+		m.log.Error("invalid sync config", zap.String("config", name), zap.Error(err))
 		return nil, status.Errorf(codes.InvalidArgument, "invalid sync config: %v", err)
 	}
 
@@ -120,11 +120,11 @@ func (m *FWStateService) UpdateConfig(
 	if err = newConfig.CreateMaps(req.MapConfig, uint16(dpConfig.WorkerCount()), m.log); err != nil {
 		newConfig.DetachMaps() // in order not to pull them out from under the feet of another module
 		newConfig.Free()
-		m.log.Errorw("failed to create fwstate maps", zap.String("config", name), zap.Error(err))
+		m.log.Error("failed to create fwstate maps", zap.String("config", name), zap.Error(err))
 		return nil, status.Errorf(codes.Internal, "failed to create fwstate maps: %v", err)
 	}
 
-	m.log.Debugw("update fwstate module config", zap.String("config", name))
+	m.log.Debug("update fwstate module config", zap.String("config", name))
 
 	// Get linked ACL configs and update them with new fwstate
 	m.aclProvider.Lock()
@@ -141,7 +141,7 @@ func (m *FWStateService) UpdateConfig(
 		if err != nil {
 			newConfig.DetachMaps()
 			newConfig.Free()
-			m.log.Errorw("failed to create linked ACL configs", zap.String("config", name), zap.Error(err))
+			m.log.Error("failed to create linked ACL configs", zap.String("config", name), zap.Error(err))
 			return nil, status.Errorf(codes.Internal, "failed to create linked ACL configs: %v", err)
 		}
 	}
@@ -155,7 +155,7 @@ func (m *FWStateService) UpdateConfig(
 		}
 		newConfig.DetachMaps()
 		newConfig.Free()
-		m.log.Errorw("failed to update modules", zap.String("config", name), zap.Error(err))
+		m.log.Error("failed to update modules", zap.String("config", name), zap.Error(err))
 		return nil, status.Errorf(codes.Internal, "failed to update modules: %v", err)
 	}
 
@@ -178,7 +178,7 @@ func (m *FWStateService) UpdateConfig(
 
 	m.configs[name] = newConfig
 
-	m.log.Infow("successfully updated FWState module", zap.String("config", name))
+	m.log.Info("successfully updated FWState module", zap.String("config", name))
 
 	return &fwstatepb.UpdateConfigResponse{}, nil
 }
@@ -237,7 +237,7 @@ func (m *FWStateService) LinkFWState(
 	// Commit the transaction
 	aclConfigsTx.Commit()
 
-	m.log.Infow("successfully linked FWState to ACL configs",
+	m.log.Info("successfully linked FWState to ACL configs",
 		zap.String("fwstate", fwstateName),
 		zap.Strings("acl_configs", aclConfigNames),
 	)
@@ -319,7 +319,7 @@ func (m *FWStateService) DeleteConfig(
 		return nil, status.Errorf(codes.Internal, "could not delete fwstate module config '%s': %v", name, err)
 	}
 
-	m.log.Infow("successfully deleted FWState module config", zap.String("name", name))
+	m.log.Info("successfully deleted FWState module config", zap.String("name", name))
 	config.Free()
 
 	delete(m.configs, name)

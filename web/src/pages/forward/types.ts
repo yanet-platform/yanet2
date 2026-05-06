@@ -25,14 +25,6 @@ export interface EditRuleDialogProps {
     ruleIndex: number;
 }
 
-// Props for DeleteRuleDialog
-export interface DeleteRuleDialogProps {
-    open: boolean;
-    onClose: () => void;
-    onConfirm: () => Promise<void>;
-    selectedCount: number;
-}
-
 // Props for RuleTable
 export interface RuleTableProps {
     rules: RuleItem[];
@@ -41,10 +33,3 @@ export interface RuleTableProps {
     onEditRule: (ruleItem: RuleItem) => void;
 }
 
-// Props for ConfigTabs
-export interface ConfigTabsProps {
-    configs: string[];
-    activeConfig: string;
-    onConfigChange: (config: string) => void;
-    renderContent: (configName: string) => React.ReactNode;
-}

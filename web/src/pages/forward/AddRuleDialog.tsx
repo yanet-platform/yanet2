@@ -1,7 +1,6 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import { Box, Dialog, TextInput, Select } from '@gravity-ui/uikit';
-import { FormField } from '../../components';
-import { useDialogKeyboardShortcut } from '../../hooks';
+import { TextInput, Select, Flex } from '@gravity-ui/uikit';
+import { FormDialog, FormField } from '../../components';
 import type { AddRuleDialogProps } from './types';
 import type { Rule } from '../../api/forward';
 import { ForwardMode } from '../../api/forward';
@@ -39,7 +38,7 @@ export const AddRuleDialog: React.FC<AddRuleDialogProps> = ({
     const [dsts, setDsts] = useState<string>('');
     const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
-    // Reset form when dialog opens
+    // Reset form when dialog opens.
     useEffect(() => {
         if (open) {
             setConfigName(currentConfig || existingConfigs[0] || '');
@@ -53,10 +52,6 @@ export const AddRuleDialog: React.FC<AddRuleDialogProps> = ({
             setIsSubmitting(false);
         }
     }, [open, currentConfig, existingConfigs]);
-
-    const handleClose = useCallback(() => {
-        onClose();
-    }, [onClose]);
 
     const validateForm = useCallback((): string | undefined => {
         if (!configName.trim()) {
@@ -87,112 +82,104 @@ export const AddRuleDialog: React.FC<AddRuleDialogProps> = ({
             };
 
             await onConfirm(configName.trim(), rule);
-            handleClose();
+            onClose();
         } finally {
             setIsSubmitting(false);
         }
-    }, [configName, target, mode, counter, devices, vlans, srcs, dsts, validateForm, onConfirm, handleClose]);
+    }, [configName, target, mode, counter, devices, vlans, srcs, dsts, validateForm, onConfirm, onClose]);
 
     const formError = validateForm();
     const isConfigEmpty = configName.trim().length === 0;
     const isTargetEmpty = target.trim().length === 0;
     const canSubmit = !formError && !isSubmitting;
 
-    // Handle Ctrl+Enter / Cmd+Enter
-    useDialogKeyboardShortcut({ open, canSubmit, onConfirm: handleConfirm });
-
     return (
-        <Dialog open={open} onClose={handleClose}>
-            <Dialog.Header caption="Add Forward Rule" />
-            <Dialog.Body>
-                <Box className="forward-dialog__body">
-                    <FormField label="Config Name" required>
-                        <TextInput
-                            value={configName}
-                            onUpdate={setConfigName}
-                            placeholder="Enter config name"
-                            className="forward-dialog__text-input"
-                            validationState={!isConfigEmpty && !configName.trim() ? 'invalid' : undefined}
-                        />
-                    </FormField>
+        <FormDialog
+            open={open}
+            onClose={onClose}
+            onConfirm={handleConfirm}
+            title="Add Forward Rule"
+            confirmText="Add Rule"
+            loading={isSubmitting}
+            disabled={!canSubmit}
+            width={450}
+        >
+            <Flex direction="column" gap={4}>
+            <FormField label="Config Name" required>
+                <TextInput
+                    value={configName}
+                    onUpdate={setConfigName}
+                    placeholder="Enter config name"
+                    className="forward-dialog__text-input"
+                    validationState={!isConfigEmpty && !configName.trim() ? 'invalid' : undefined}
+                />
+            </FormField>
 
-                    <FormField label="Target" required hint="The target to forward traffic to">
-                        <TextInput
-                            value={target}
-                            onUpdate={setTarget}
-                            placeholder="e.g., eth0"
-                            className="forward-dialog__text-input"
-                            validationState={!isTargetEmpty && !target.trim() ? 'invalid' : undefined}
-                            autoFocus
-                        />
-                    </FormField>
+            <FormField label="Target" required hint="The target to forward traffic to">
+                <TextInput
+                    value={target}
+                    onUpdate={setTarget}
+                    placeholder="e.g., eth0"
+                    className="forward-dialog__text-input"
+                    validationState={!isTargetEmpty && !target.trim() ? 'invalid' : undefined}
+                    autoFocus
+                />
+            </FormField>
 
-                    <FormField label="Mode" hint="Forward direction mode">
-                        <Select
-                            value={mode}
-                            onUpdate={setMode}
-                            options={MODE_OPTIONS}
-                            className="forward-dialog__select"
-                        />
-                    </FormField>
+            <FormField label="Mode" hint="Forward direction mode">
+                <Select
+                    value={mode}
+                    onUpdate={setMode}
+                    options={MODE_OPTIONS}
+                    className="forward-dialog__select"
+                />
+            </FormField>
 
-                    <FormField label="Counter" hint="Optional counter name">
-                        <TextInput
-                            value={counter}
-                            onUpdate={setCounter}
-                            placeholder="e.g., my_counter"
-                            className="forward-dialog__text-input"
-                        />
-                    </FormField>
+            <FormField label="Counter" hint="Optional counter name">
+                <TextInput
+                    value={counter}
+                    onUpdate={setCounter}
+                    placeholder="e.g., my_counter"
+                    className="forward-dialog__text-input"
+                />
+            </FormField>
 
-                    <FormField label="Devices" hint="Comma-separated device names">
-                        <TextInput
-                            value={devices}
-                            onUpdate={setDevices}
-                            placeholder="e.g., eth0, eth1"
-                            className="forward-dialog__text-input"
-                        />
-                    </FormField>
+            <FormField label="Devices" hint="Comma-separated device names">
+                <TextInput
+                    value={devices}
+                    onUpdate={setDevices}
+                    placeholder="e.g., eth0, eth1"
+                    className="forward-dialog__text-input"
+                />
+            </FormField>
 
-                    <FormField label="VLAN Ranges" hint="Format: 1-100, 200, 300-400">
-                        <TextInput
-                            value={vlans}
-                            onUpdate={setVlans}
-                            placeholder="e.g., 1-100, 200"
-                            className="forward-dialog__text-input"
-                        />
-                    </FormField>
+            <FormField label="VLAN Ranges" hint="Format: 1-100, 200, 300-400">
+                <TextInput
+                    value={vlans}
+                    onUpdate={setVlans}
+                    placeholder="e.g., 1-100, 200"
+                    className="forward-dialog__text-input"
+                />
+            </FormField>
 
-                    <FormField label="Sources" hint="Comma-separated CIDR prefixes">
-                        <TextInput
-                            value={srcs}
-                            onUpdate={setSrcs}
-                            placeholder="e.g., 10.0.0.0/8, 192.168.0.0/16"
-                            className="forward-dialog__text-input"
-                        />
-                    </FormField>
+            <FormField label="Sources" hint="Comma-separated CIDR prefixes">
+                <TextInput
+                    value={srcs}
+                    onUpdate={setSrcs}
+                    placeholder="e.g., 10.0.0.0/8, 192.168.0.0/16"
+                    className="forward-dialog__text-input"
+                />
+            </FormField>
 
-                    <FormField label="Destinations" hint="Comma-separated CIDR prefixes">
-                        <TextInput
-                            value={dsts}
-                            onUpdate={setDsts}
-                            placeholder="e.g., 10.0.0.0/8, 192.168.0.0/16"
-                            className="forward-dialog__text-input"
-                        />
-                    </FormField>
-                </Box>
-            </Dialog.Body>
-            <Dialog.Footer
-                onClickButtonApply={handleConfirm}
-                onClickButtonCancel={handleClose}
-                textButtonApply="Add Rule"
-                textButtonCancel="Cancel"
-                propsButtonApply={{
-                    view: 'action' as const,
-                    disabled: !canSubmit,
-                    loading: isSubmitting,
-                }}
-            />
-        </Dialog>
+            <FormField label="Destinations" hint="Comma-separated CIDR prefixes">
+                <TextInput
+                    value={dsts}
+                    onUpdate={setDsts}
+                    placeholder="e.g., 10.0.0.0/8, 192.168.0.0/16"
+                    className="forward-dialog__text-input"
+                />
+            </FormField>
+            </Flex>
+        </FormDialog>
     );
 };

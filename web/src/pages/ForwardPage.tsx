@@ -1,6 +1,12 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback } from 'react';
 import { Box } from '@gravity-ui/uikit';
-import { PageLayout, PageLoader, EmptyState } from '../components';
+import {
+    PageLayout,
+    PageLoader,
+    EmptyState,
+    ConfirmDialog,
+    ConfigTabs,
+} from '../components';
 import type { Rule } from '../api/forward';
 import type { RuleItem } from './forward/types';
 import {
@@ -8,8 +14,6 @@ import {
     RuleTable,
     AddRuleDialog,
     EditRuleDialog,
-    DeleteRuleDialog,
-    ConfigTabs,
     useForwardData,
     rulesToItems,
 } from './forward';
@@ -97,9 +101,7 @@ const ForwardPage: React.FC = () => {
     if (configs.length === 0) {
         return (
             <PageLayout header={headerContent}>
-                <Box className="forward-page__empty">
-                    <EmptyState message="No forward configurations found. Click 'Add Rule' to create one." />
-                </Box>
+                <EmptyState message="No forward configurations found. Click 'Add Rule' to create one." />
 
                 <AddRuleDialog
                     open={addRuleDialogOpen}
@@ -154,11 +156,18 @@ const ForwardPage: React.FC = () => {
                 ruleIndex={editingRule?.index ?? -1}
             />
 
-            <DeleteRuleDialog
+            <ConfirmDialog
                 open={deleteRuleDialogOpen}
                 onClose={() => setDeleteRuleDialogOpen(false)}
-                onConfirm={handleDeleteRuleConfirm}
-                selectedCount={currentSelected.size}
+                onConfirm={async () => {
+                    await handleDeleteRuleConfirm();
+                    setDeleteRuleDialogOpen(false);
+                }}
+                title="Delete Rules"
+                message={`Are you sure you want to delete ${currentSelected.size} rule(s)?`}
+                confirmText="Delete"
+                danger
+                disabled={currentSelected.size === 0}
             />
         </PageLayout>
     );

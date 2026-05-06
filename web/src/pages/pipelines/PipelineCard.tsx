@@ -2,14 +2,14 @@ import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { Box, Card, Alert } from '@gravity-ui/uikit';
 import type { PipelineId, Pipeline } from '../../api/pipelines';
 import type { FunctionId } from '../../api/common';
-import { CardHeader, CountersProvider, PageLoader } from '../../components';
+import { CardHeader, CountersProvider, PageLoader, ConfirmDialog } from '../../components';
 import { PipelineGraph } from './PipelineGraph';
-import { DeletePipelineDialog, FunctionRefEditorDialog } from './dialogs';
+import { FunctionRefEditorDialog } from './dialogs';
 import { usePipelineGraph, useFunctionCounters, usePipelineCounters } from './hooks';
 import type { PipelineNode, PipelineEdge, FunctionRefNodeData } from './types';
 import { NODE_TYPE_FUNCTION_REF } from './types';
 import { toaster } from '../../utils';
-import './pipelines.css';
+import './pipelines.scss';
 
 export interface PipelineCardProps {
     pipelineId: PipelineId;
@@ -255,12 +255,16 @@ export const PipelineCard: React.FC<PipelineCardProps> = ({
             </Box>
 
             {/* Dialogs */}
-            <DeletePipelineDialog
+            <ConfirmDialog
                 open={deleteDialogOpen}
                 onClose={() => setDeleteDialogOpen(false)}
                 onConfirm={handleDelete}
-                pipelineName={pipelineId.name || ''}
+                title="Delete Pipeline"
+                message={`Are you sure you want to delete pipeline "${pipelineId.name || ''}"?`}
+                secondaryMessage="This action cannot be undone."
+                confirmText="Delete"
                 loading={deleting}
+                danger
             />
 
             <FunctionRefEditorDialog

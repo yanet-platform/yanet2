@@ -1,8 +1,7 @@
 import { useCallback, useRef, useState } from 'react';
 import { useAsyncData } from '../../hooks/useAsyncData';
 import { pdumpApi, type PdumpConfig, type PdumpRecord } from '../../api/pdump';
-import { parsePacket, base64ToUint8Array } from '../../utils/packetParser';
-import { toaster } from '../../utils';
+import { base64ToUint8Array, parsePacket, toaster } from '../../utils';
 import type { PdumpConfigInfo, CapturedPacket, CaptureState } from './types';
 
 const MAX_PACKETS = 10000;
@@ -78,6 +77,33 @@ export const usePdumpCapture = () => {
 
     const abortControllerRef = useRef<AbortController | null>(null);
     const packetIdRef = useRef(0);
+    const bufferRef = useRef<CapturedPacket[]>([]);
+    const flushScheduledRef = useRef(false);
+
+    const scheduleFlush = useCallback(() => {
+        if (flushScheduledRef.current) {
+            return;
+        }
+        flushScheduledRef.current = true;
+        requestAnimationFrame(() => {
+            flushScheduledRef.current = false;
+            const incoming = bufferRef.current;
+            if (incoming.length === 0) {
+                return;
+            }
+            bufferRef.current = [];
+            setState((prev) => {
+                const total = prev.packets.length + incoming.length;
+                const combined = total > MAX_PACKETS
+                    ? [
+                        ...prev.packets.slice(total - MAX_PACKETS),
+                        ...incoming,
+                    ]
+                    : [...prev.packets, ...incoming];
+                return { ...prev, packets: combined };
+            });
+        });
+    }, []);
 
     const startCapture = useCallback((configName: string) => {
         // Stop any existing capture
@@ -88,6 +114,7 @@ export const usePdumpCapture = () => {
         const abortController = new AbortController();
         abortControllerRef.current = abortController;
         packetIdRef.current = 0;
+        bufferRef.current = [];
 
         setState({
             isCapturing: true,
@@ -114,14 +141,8 @@ export const usePdumpCapture = () => {
                         parsed,
                     };
 
-                    setState((prev) => {
-                        const newPackets = [...prev.packets, capturedPacket];
-                        // Keep only the last MAX_PACKETS packets
-                        if (newPackets.length > MAX_PACKETS) {
-                            newPackets.splice(0, newPackets.length - MAX_PACKETS);
-                        }
-                        return { ...prev, packets: newPackets };
-                    });
+                    bufferRef.current.push(capturedPacket);
+                    scheduleFlush();
                 },
                 onError: (error: Error) => {
                     setState((prev) => ({
@@ -139,13 +160,14 @@ export const usePdumpCapture = () => {
             },
             abortController.signal
         );
-    }, []);
+    }, [scheduleFlush]);
 
     const stopCapture = useCallback(() => {
         if (abortControllerRef.current) {
             abortControllerRef.current.abort();
             abortControllerRef.current = null;
         }
+        bufferRef.current = [];
         setState((prev) => ({
             ...prev,
             isCapturing: false,
@@ -154,6 +176,7 @@ export const usePdumpCapture = () => {
 
     const clearPackets = useCallback(() => {
         packetIdRef.current = 0;
+        bufferRef.current = [];
         setState((prev) => ({
             ...prev,
             packets: [],

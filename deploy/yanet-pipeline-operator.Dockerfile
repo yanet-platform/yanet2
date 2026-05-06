@@ -12,4 +12,5 @@ RUN apt-get update -y \
     && apt-get install -y --no-install-recommends /tmp/*.deb \
     && rm -rf /tmp/*.deb /var/lib/apt/lists/*
 
-ENTRYPOINT ["yanet-pipeline-operator", "-c", "/etc/yanet2/yanet-pipeline-operator.yaml"]
+ENTRYPOINT ["yanet-pipeline-operator"]
+CMD ["-c", "/etc/yanet2/yanet-pipeline-operator-default.yaml"]

@@ -1,9 +1,7 @@
 import React from 'react';
-import { Box, Text } from '@gravity-ui/uikit';
 import { MODULE_DESCRIPTIONS } from './constants';
 import { formatModuleName } from './utils';
-import './inspect.scss';
-import { DPModuleInfo } from '../../api';
+import type { DPModuleInfo } from '../../api';
 
 export interface ModuleCardProps {
     module: DPModuleInfo;
@@ -16,30 +14,28 @@ export const ModuleCard: React.FC<ModuleCardProps> = ({
     configCount,
     pipelineUsage,
 }) => {
+    const inUse = configCount > 0 || pipelineUsage > 0;
+    const cls = inUse ? 'inspect-mod' : 'inspect-mod is-off';
+    const desc = module.name ? MODULE_DESCRIPTIONS[module.name.toLowerCase()] ?? '' : '';
+
     return (
-        <Box className="module-card">
-            <Box className="module-card__content">
-                <Box className="module-card__header">
-                    <Text variant="subheader-1" className="module-card__name">
-                        {formatModuleName(module.name)}
-                    </Text>
-                    {module.name && MODULE_DESCRIPTIONS[module.name.toLowerCase()] && (
-                        <Text variant="body-1" color="secondary">
-                            {MODULE_DESCRIPTIONS[module.name.toLowerCase()]}
-                        </Text>
-                    )}
-                </Box>
-                <Box className="module-card__row">
-                    <Text variant="body-1" color="secondary">Configs</Text>
-                    <Box className="module-card__separator" />
-                    <Text variant="body-1" className="module-card__value">{configCount}</Text>
-                </Box>
-                <Box className="module-card__row">
-                    <Text variant="body-1" color="secondary">Pipelines</Text>
-                    <Box className="module-card__separator" />
-                    <Text variant="body-1" className="module-card__value">{pipelineUsage}</Text>
-                </Box>
-            </Box>
-        </Box>
+        <div className={cls}>
+            <div className="inspect-mod-head">
+                <span className="inspect-mod-name">{formatModuleName(module.name ?? '')}</span>
+                <span
+                    className="inspect-mod-dot"
+                    style={{ background: inUse ? 'var(--inspect-ok)' : 'var(--inspect-idle)' }}
+                />
+            </div>
+            <div className="inspect-mod-desc">{desc}</div>
+            <div className="inspect-mod-meta">
+                <span>
+                    <b className="inspect-num">{configCount}</b> cfg
+                </span>
+                <span>
+                    <b className="inspect-num">{pipelineUsage}</b> pipe
+                </span>
+            </div>
+        </div>
     );
 };

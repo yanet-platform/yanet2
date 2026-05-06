@@ -2,15 +2,20 @@ package functional
 
 import (
 	"net"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/gopacket/gopacket"
 	"github.com/gopacket/gopacket/layers"
 	"github.com/stretchr/testify/require"
+
 	"github.com/yanet-platform/yanet2/tests/functional/framework"
 )
+
+// routeMPLSCfgName is the route module config used by the route-mpls
+// tests. The route-mpls module shares the cfg name with the route
+// module that backs its egress lookups.
+const routeMPLSCfgName = "route-mpls"
 
 // createRouteMPLSTestPacket creates a TCP packet for route testing
 func createRouteMPLSTestPacket(srcIP, dstIP net.IP, payload []byte) []byte {
@@ -102,40 +107,11 @@ func TestRouteMPLS(t *testing.T) {
 	fw := globalFramework.ForTest(t)
 	require.NotNil(t, fw, "Global framework should be initialized")
 
-	fw.Run("Insert_Static_Route4", func(fw *framework.F, t *testing.T) {
-		// Add neighbour for the nexthop
-		_, err := fw.ExecuteCommand("ip nei add 192.0.2.1 lladdr " + framework.SrcMAC + " dev kni0")
-		require.NoError(t, err, "Failed to add neighbour")
-
-		// Wait for neighbour to appear in yanet
-		err = fw.WaitOutputPresent("/mnt/target/release/yanet-cli-neighbour show", func(output string) bool {
-			return strings.Contains(output, "192.0.2.1")
-		}, 10*time.Second)
-		require.NoError(t, err, "Neighbour 192.0.2.1 did not appear in yanet")
-
-		// Insert route with the nexthop (do_flush is automatic in insert command)
-		output, err := fw.ExecuteCommand("/mnt/target/release/yanet-cli-route insert --cfg route-mpls 10.0.0.0/8 --via 192.0.2.1")
-		require.NoError(t, err, "Failed to insert route")
-		t.Logf("Insert route output: %s", output)
-		t.Logf("Successfully inserted route 10.0.0.0/8 via 192.0.2.1")
-	})
-
-	fw.Run("Insert_Static_Route6", func(fw *framework.F, t *testing.T) {
-		// Add neighbour for the nexthop
-		_, err := fw.ExecuteCommand("ip -6 nei add aabb::1 lladdr " + framework.SrcMAC + " dev kni0")
-		require.NoError(t, err, "Failed to add neighbour")
-
-		// Wait for neighbour to appear in yanet
-		err = fw.WaitOutputPresent("/mnt/target/release/yanet-cli-neighbour show", func(output string) bool {
-			return strings.Contains(output, "aabb::1")
-		}, 10*time.Second)
-		require.NoError(t, err, "Neighbour aabb::1 did not appear in yanet")
-
-		// Insert route with the nexthop (do_flush is automatic in insert command)
-		output, err := fw.ExecuteCommand("/mnt/target/release/yanet-cli-route insert --cfg route-mpls ccee::0/16 --via aabb::1")
-		require.NoError(t, err, "Failed to insert route")
-		t.Logf("Insert route output: %s", output)
-		t.Logf("Successfully inserted route ccee::0/16 via aabb::1")
+	fw.Run("Insert_Static_Routes", func(fw *framework.F, t *testing.T) {
+		// Push the IPv4 and IPv6 prefixes the MPLS tunnel decisions
+		// depend on as a single atomic FIB update.
+		applyFIB(t, fw, routeMPLSCfgName, "setup", "10.0.0.0/8", "ccee::0/16")
+		t.Logf("Successfully inserted routes 10.0.0.0/8 and ccee::0/16")
 	})
 
 	fw.Run("Insert_Static_RouteMPLS-4-4", func(fw *framework.F, t *testing.T) {
@@ -263,14 +239,4 @@ func TestRouteMPLS(t *testing.T) {
 		require.Equal(t, outputPacket.DstPort, uint16(6635), "Invalid destination port")
 	})
 
-	fw.Run("Delete_Static_Route", func(fw *framework.F, t *testing.T) {
-		output, err := fw.ExecuteCommand("/mnt/target/release/yanet-cli-route remove --cfg route-mpls 10.0.0.0/24 --via 192.0.2.1")
-		require.NoError(t, err, "Failed to delete route")
-		t.Logf("Delete route output: %s", output)
-		t.Logf("Successfully deleted route 10.0.0.0/8 via 192.0.2.1")
-
-		// Clean up neighbour
-		_, err = fw.ExecuteCommand("ip nei del 192.0.2.1 dev kni0")
-		require.NoError(t, err, "Failed to delete neighbour")
-	})
 }

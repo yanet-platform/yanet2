@@ -1,4 +1,5 @@
 import { createService, type CallOptions } from './client';
+import type { MACAddress } from './neighbours';
 
 // Route types
 
@@ -90,28 +91,29 @@ export interface FIBEntry {
 }
 
 export interface FIBNexthop {
-    dst_mac?: string;
-    src_mac?: string;
+    dst_mac?: MACAddress;
+    src_mac?: MACAddress;
     device?: string;
 }
 
 const routeService = createService('routepb.RouteService');
+const operatorRouteService = createService('operatorpb.RouteService');
 
 export const route = {
     listConfigs: (options?: CallOptions): Promise<ListConfigsResponse> => {
-        return routeService.call<ListConfigsResponse>('ListConfigs', options);
+        return operatorRouteService.call<ListConfigsResponse>('ListConfigs', options);
     },
     showRoutes: (request: ShowRoutesRequest, options?: CallOptions): Promise<ShowRoutesResponse> => {
-        return routeService.callWithBody<ShowRoutesResponse>('ShowRoutes', request, options);
+        return operatorRouteService.callWithBody<ShowRoutesResponse>('ShowRoutes', request, options);
     },
     insertRoute: (request: InsertRouteRequest, options?: CallOptions): Promise<InsertRouteResponse> => {
-        return routeService.callWithBody<InsertRouteResponse>('InsertRoute', request, options);
+        return operatorRouteService.callWithBody<InsertRouteResponse>('InsertRoute', request, options);
     },
     deleteRoute: (request: DeleteRouteRequest, options?: CallOptions): Promise<DeleteRouteResponse> => {
-        return routeService.callWithBody<DeleteRouteResponse>('DeleteRoute', request, options);
+        return operatorRouteService.callWithBody<DeleteRouteResponse>('DeleteRoute', request, options);
     },
     flushRoutes: (request: FlushRoutesRequest, options?: CallOptions): Promise<FlushRoutesResponse> => {
-        return routeService.callWithBody<FlushRoutesResponse>('FlushRoutes', request, options);
+        return operatorRouteService.callWithBody<FlushRoutesResponse>('FlushRoutes', request, options);
     },
     showFIB: (request: ShowFIBRequest, options?: CallOptions): Promise<ShowFIBResponse> => {
         return routeService.callWithBody<ShowFIBResponse>('ShowFIB', request, options);

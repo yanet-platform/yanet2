@@ -27,7 +27,7 @@ import type {
     OnSelectionChangeParams,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import './nodes/nodes.css';
+import './nodes/nodes.scss';
 import { Button } from '@gravity-ui/uikit';
 import { LayoutCells } from '@gravity-ui/icons';
 

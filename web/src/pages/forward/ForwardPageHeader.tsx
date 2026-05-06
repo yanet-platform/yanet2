@@ -1,6 +1,6 @@
 import React from 'react';
-import { Box, Text, Flex, Button } from '@gravity-ui/uikit';
-import './forward.scss';
+import { Button } from '@gravity-ui/uikit';
+import { PageHeader } from '../../components';
 
 export interface ForwardPageHeaderProps {
     onAddRule: () => void;
@@ -13,20 +13,21 @@ export const ForwardPageHeader: React.FC<ForwardPageHeaderProps> = ({
     onDeleteRules,
     isDeleteDisabled,
 }) => (
-    <Flex className="forward-page-header">
-        <Text variant="header-1">Forward</Text>
-        <Box className="forward-page-header__spacer" />
-        <Box className="forward-page-header__actions">
-            <Button view="action" onClick={onAddRule}>
-                Add Rule
-            </Button>
-            <Button
-                view="outlined-danger"
-                onClick={onDeleteRules}
-                disabled={isDeleteDisabled}
-            >
-                Delete Rules
-            </Button>
-        </Box>
-    </Flex>
+    <PageHeader
+        title="Forward"
+        actions={
+            <>
+                <Button view="action" onClick={onAddRule}>
+                    Add Rule
+                </Button>
+                <Button
+                    view="outlined-danger"
+                    onClick={onDeleteRules}
+                    disabled={isDeleteDisabled}
+                >
+                    Delete Rules
+                </Button>
+            </>
+        }
+    />
 );

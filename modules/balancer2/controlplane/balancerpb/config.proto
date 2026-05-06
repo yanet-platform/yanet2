@@ -1,0 +1,101 @@
+syntax = "proto3";
+
+package balancerpb;
+
+import "common/filterpb/filter.proto";
+
+import "google/protobuf/duration.proto";
+
+option go_package = "github.com/yanet-platform/yanet2/modules/balancer2/controlplane/balancerpb;balancerpb";
+
+enum TransportProto {
+  TCP = 0;
+  UDP = 1;
+}
+
+enum VsScheduler {
+  SH = 0;
+  WRR = 1;
+  WLC = 2;
+  OP = 3;
+}
+
+message WlcConfig {
+  uint32 power = 1;
+  uint32 max_weight = 2;
+  optional google.protobuf.Duration refresh_period = 3;
+}
+
+message AddrConfig {
+  // Source address of every broadcasted ICMP packet.
+  bytes source_ip4 = 1;
+  bytes source_ip6 = 2;
+
+  // Try decap every packet if source address
+  // matches with these addresses.
+  // On successful decap, try ICMP path for the packet.
+  repeated bytes decaps = 3;
+}
+
+message VsIdentifier {
+  bytes addr = 1;
+
+  // Pure L3 mode requires port = 0.
+  uint32 port = 2;
+
+  TransportProto proto = 3;
+}
+
+// Behavior:
+// - If allowed_srcs list is empty: All sources are denied (no traffic allowed)
+// - If allowed_srcs contains entries: Only matching sources are permitted
+// - Multiple AllowedSrc entries are evaluated with OR logic (any match allows)
+message AllowedSources {
+  repeated filterpb.IPNet nets = 1;
+  repeated filterpb.PortRange ports = 2;
+  optional string tag = 3;
+}
+
+message VsConfig {
+  VsIdentifier id = 1;
+  VsScheduler scheduler = 2;
+  repeated AllowedSources allowed_sources = 3;
+  repeated RealConfig reals = 4;
+  VsFlags flags = 5;
+
+  // Addresses of peer balancers
+  // for which unmatched ICMP packets will be broadcasted.
+  repeated bytes peers = 6;
+}
+
+message VsConfigList { repeated VsConfig vs = 1; }
+
+message RelativeRealIdentifier {
+  bytes ip = 1;
+  uint32 port = 2;
+}
+
+message RealIdentifier {
+  VsIdentifier vs = 1;
+  RelativeRealIdentifier real = 2;
+}
+
+message RealConfig {
+  RelativeRealIdentifier id = 1;
+  uint32 weight = 2;
+  filterpb.IPNet src = 3;
+}
+
+message VsFlags {
+  bool gre = 1;
+  bool fix_mss = 2;
+  bool pure_l3 = 3;
+}
+
+message SessionsTimeouts {
+  uint32 tcp_syn_ack = 1;
+  uint32 tcp_syn = 2;
+  uint32 tcp_fin = 3;
+  uint32 tcp = 4;
+  uint32 udp = 5;
+}

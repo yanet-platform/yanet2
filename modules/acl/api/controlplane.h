@@ -19,9 +19,14 @@ acl_module_config_init(
 void
 acl_module_config_free(struct cp_module *cp_module);
 
-struct acl_rule {
-	uint64_t action;
+struct acl_action {
+	uint64_t id;
 	char counter[COUNTER_NAME_LEN];
+};
+
+struct acl_rule {
+	struct acl_action *actions;
+	uint64_t action_count;
 
 	struct filter_devices devices;
 	struct filter_vlan_ranges vlan_ranges;

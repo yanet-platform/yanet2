@@ -55,7 +55,6 @@ export interface ConfigTabsProps {
     activeConfig: string;
     configStates: Map<string, ConfigState>;
     onConfigChange: (config: string) => void;
-    onTryChangeConfig: (config: string) => void; // Called when user tries to change config
 }
 
 // Inner tabs props
@@ -95,13 +94,6 @@ export interface CreateConfigDialogProps {
     onClose: () => void;
     onConfirm: (configName: string) => void;
     existingConfigs: string[];
-}
-
-export interface DeleteConfigDialogProps {
-    open: boolean;
-    onClose: () => void;
-    onConfirm: () => void;
-    configName: string;
 }
 
 export interface UnsavedChangesDialogProps {

@@ -18,10 +18,10 @@ type PdumpModule struct {
 	shm     *ffi.SharedMemory
 	agent   *ffi.Agent
 	service *PdumpService
-	log     *zap.SugaredLogger
+	log     *zap.Logger
 }
 
-func NewPdumpModule(cfg *Config, log *zap.SugaredLogger) (*PdumpModule, error) {
+func NewPdumpModule(cfg *Config, log *zap.Logger) (*PdumpModule, error) {
 	log = log.With(zap.String("module", "pdumppb.PdumpService"))
 
 	// setup CGO export logger
@@ -36,7 +36,7 @@ func NewPdumpModule(cfg *Config, log *zap.SugaredLogger) (*PdumpModule, error) {
 		return nil, err
 	}
 
-	log.Debugw("mapping shared memory",
+	log.Debug("mapping shared memory",
 		zap.Uint32("instance_id", cfg.InstanceID),
 		zap.Stringer("size", cfg.MemoryRequirements),
 	)
@@ -86,11 +86,11 @@ func (m *PdumpModule) Run(ctx context.Context) error {
 // Close closes the module.
 func (m *PdumpModule) Close() error {
 	if err := m.agent.Close(); err != nil {
-		m.log.Warnw("failed to close shared memory agent", zap.Error(err))
+		m.log.Warn("failed to close shared memory agent", zap.Error(err))
 	}
 
 	if err := m.shm.Detach(); err != nil {
-		m.log.Warnw("failed to detach from shared memory mapping", zap.Error(err))
+		m.log.Warn("failed to detach from shared memory mapping", zap.Error(err))
 	}
 
 	return nil

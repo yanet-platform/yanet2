@@ -1,68 +1,54 @@
-import React, { useEffect, useState } from 'react';
-import { Box, Text } from '@gravity-ui/uikit';
+import React, { useCallback, useEffect, useState } from 'react';
 import { toaster } from '../utils';
 import { API } from '../api';
 import type { InstanceInfo } from '../api/inspect';
-import { PageLayout, PageLoader } from '../components';
-import { InstanceCard } from './inspect';
+import { PageLayout, PageLoader, EmptyState } from '../components';
+import {
+    InstanceCard,
+    InspectPageHeader,
+    InspectPageFooter,
+} from './inspect';
 import './inspect/inspect.scss';
 
 const InspectPage = (): React.JSX.Element => {
     const [instanceInfo, setInstanceInfo] = useState<InstanceInfo | null>(null);
-    const [loading, setLoading] = useState<boolean>(true);
+    const [initialLoading, setInitialLoading] = useState<boolean>(true);
+    const [refreshing, setRefreshing] = useState<boolean>(false);
+    const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
 
-    useEffect(() => {
-        let isMounted = true;
-
-        const loadInspect = async (): Promise<void> => {
-            setLoading(true);
-
-            try {
-                const data = await API.inspect.inspect();
-                if (!isMounted) return;
-                setInstanceInfo(data.instance_info || null);
-            } catch (err) {
-                if (!isMounted) return;
-                toaster.error('inspect-error', 'Failed to fetch inspect data', err);
-            } finally {
-                if (isMounted) {
-                    setLoading(false);
-                }
-            }
-        };
-
-        loadInspect();
-
-        return () => {
-            isMounted = false;
-        };
+    const loadInspect = useCallback(async (): Promise<void> => {
+        try {
+            setRefreshing(true);
+            const data = await API.inspect.inspect();
+            setInstanceInfo(data.instance_info ?? null);
+            setLastUpdate(new Date());
+        } catch (err) {
+            toaster.error('inspect-error', 'Failed to fetch inspect data', err);
+        } finally {
+            setRefreshing(false);
+            setInitialLoading(false);
+        }
     }, []);
 
-    if (loading) {
-        return (
-            <PageLayout title="Inspect">
-                <PageLoader loading={loading} size="l" />
-            </PageLayout>
-        );
-    }
-
-    if (!instanceInfo) {
-        return (
-            <PageLayout title="Inspect">
-                <Box className="inspect-page__content">
-                    <Text variant="body-1" color="secondary" className="inspect-page__no-data">
-                        No instance data found
-                    </Text>
-                </Box>
-            </PageLayout>
-        );
-    }
+    useEffect(() => {
+        loadInspect();
+    }, [loadInspect]);
 
     return (
-        <PageLayout title="Inspect">
-            <Box className="inspect-page__content">
-                <InstanceCard instance={instanceInfo} />
-            </Box>
+        <PageLayout>
+            <div className="inspect-page">
+                <InspectPageHeader onRefresh={loadInspect} refreshing={refreshing} />
+                <div className="inspect-page-body">
+                    {initialLoading ? (
+                        <PageLoader loading size="l" />
+                    ) : !instanceInfo ? (
+                        <EmptyState message="No instance data found" />
+                    ) : (
+                        <InstanceCard instance={instanceInfo} />
+                    )}
+                </div>
+                <InspectPageFooter lastUpdate={lastUpdate} />
+            </div>
         </PageLayout>
     );
 };

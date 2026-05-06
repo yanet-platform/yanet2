@@ -45,7 +45,7 @@ func TestManager(t *testing.T) {
 	// Create logger
 	logger, err := zap.NewDevelopment()
 	require.NoError(t, err, "failed to create logger")
-	sugaredLogger := logger.Sugar()
+	sugaredLogger := logger
 
 	// Create protobuf config with zero refresh_period to prevent background tasks
 	capacity := uint64(1000)
@@ -879,7 +879,7 @@ func TestMergeBalancerConfigRecursive(t *testing.T) {
 	// Create logger
 	logger, err := zap.NewDevelopment()
 	require.NoError(t, err, "failed to create logger")
-	sugaredLogger := logger.Sugar()
+	sugaredLogger := logger
 
 	// Create initial full config
 	capacity := uint64(1000)
@@ -1348,7 +1348,7 @@ func TestManagerTagFieldInConfig(t *testing.T) {
 	// Create logger
 	logger, err := zap.NewDevelopment()
 	require.NoError(t, err, "failed to create logger")
-	sugaredLogger := logger.Sugar()
+	sugaredLogger := logger
 
 	// Create config with specific tag values
 	capacity := uint64(1000)

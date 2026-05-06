@@ -1,5 +1,5 @@
 import type { PdumpConfig, PdumpRecord } from '../../api/pdump';
-import type { ParsedPacket } from '../../utils/packetParser';
+import type { ParsedPacket } from '../../utils';
 
 export interface PdumpConfigInfo {
     name: string;

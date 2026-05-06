@@ -12,4 +12,5 @@ RUN apt-get update -y \
     && apt-get install -y --no-install-recommends /tmp/*.deb \
     && rm -rf /tmp/*.deb /var/lib/apt/lists/*
 
-ENTRYPOINT ["yanet-bird-adapter", "server", "-c", "/etc/yanet2/bird-adapter.yaml"]
+ENTRYPOINT ["yanet-bird-adapter"]
+CMD ["server", "-c", "/etc/yanet2/bird-adapter-default.yaml"]

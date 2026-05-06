@@ -2,6 +2,7 @@ import React, { useRef, useMemo, useState, useCallback, useEffect } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { Box, Text } from '@gravity-ui/uikit';
 import { EmptyState } from '../../components';
+import { useContainerHeight } from '../../hooks';
 import { ROW_HEIGHT, SEARCH_BAR_HEIGHT, HEADER_HEIGHT, FOOTER_HEIGHT, OVERSCAN, TOTAL_WIDTH } from './constants';
 import { PacketTableRow } from './PacketTableRow';
 import { PacketTableHeader } from './PacketTableHeader';
@@ -100,23 +101,10 @@ export const PacketTable: React.FC<PacketTableProps> = ({
 }) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const parentRef = useRef<HTMLDivElement>(null);
-    const [containerHeight, setContainerHeight] = useState(0);
+    const containerHeight = useContainerHeight(containerRef);
     const [searchQuery, setSearchQuery] = useState('');
     const [autoScroll, setAutoScroll] = useState(true);
     const [sortState, setSortState] = useState<PacketSortState>({ column: null, direction: 'asc' });
-
-    // Measure container height
-    useEffect(() => {
-        if (!containerRef.current) return;
-        const resizeObserver = new ResizeObserver((entries) => {
-            const entry = entries[0];
-            if (entry) {
-                setContainerHeight(entry.contentRect.height);
-            }
-        });
-        resizeObserver.observe(containerRef.current);
-        return () => resizeObserver.disconnect();
-    }, []);
 
     // Handle sort
     const handleSort = useCallback((column: PacketSortColumn) => {

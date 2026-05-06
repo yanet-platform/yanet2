@@ -4,7 +4,7 @@ import { FileArrowUp } from '@gravity-ui/icons';
 import type { UploadYamlDialogProps } from '../types';
 import type { Rule } from '../../../api/acl';
 import { parseYamlConfig } from '../yamlParser';
-import './UploadYamlDialog.css';
+import './UploadYamlDialog.scss';
 
 export const UploadYamlDialog: React.FC<UploadYamlDialogProps> = ({
     open,

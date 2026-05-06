@@ -16,11 +16,11 @@ type NAT64Module struct {
 	shm          *ffi.SharedMemory
 	agent        *ffi.Agent
 	nat64Service *NAT64Service
-	log          *zap.SugaredLogger
+	log          *zap.Logger
 }
 
 // NewNAT64Module creates a new NAT64 module instance
-func NewNAT64Module(cfg *Config, log *zap.SugaredLogger) (*NAT64Module, error) {
+func NewNAT64Module(cfg *Config, log *zap.Logger) (*NAT64Module, error) {
 	log = log.With(zap.String("module", "nat64pb.NAT64Service"))
 
 	shm, err := ffi.AttachSharedMemory(cfg.MemoryPath.Unwrap())
@@ -28,7 +28,7 @@ func NewNAT64Module(cfg *Config, log *zap.SugaredLogger) (*NAT64Module, error) {
 		return nil, err
 	}
 
-	log.Debugw("mapping shared memory",
+	log.Debug("mapping shared memory",
 		zap.Uint32("instance_id", cfg.InstanceID),
 		zap.Stringer("size", cfg.MemoryRequirements),
 	)
@@ -68,11 +68,11 @@ func (m *NAT64Module) RegisterService(server *grpc.Server) {
 // Close closes the module and releases all resources
 func (m *NAT64Module) Close() error {
 	if err := m.agent.Close(); err != nil {
-		m.log.Warnw("failed to close shared memory agent", zap.Error(err))
+		m.log.Warn("failed to close shared memory agent", zap.Error(err))
 	}
 
 	if err := m.shm.Detach(); err != nil {
-		m.log.Warnw("failed to detach from shared memory mapping", zap.Error(err))
+		m.log.Warn("failed to detach from shared memory mapping", zap.Error(err))
 	}
 
 	return nil

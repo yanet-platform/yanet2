@@ -10,10 +10,8 @@ export * from './useForwardData';
 
 // Components
 export * from './ForwardPageHeader';
-export * from './ConfigTabs';
 export * from './RuleTable';
 export * from './RuleRow';
 export * from './RuleTableHeader';
 export * from './AddRuleDialog';
 export * from './EditRuleDialog';
-export * from './DeleteRuleDialog';

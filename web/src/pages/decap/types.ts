@@ -12,10 +12,3 @@ export interface AddPrefixDialogProps {
     existingConfigs: string[];
 }
 
-// Props for DeletePrefixDialog
-export interface DeletePrefixDialogProps {
-    open: boolean;
-    onClose: () => void;
-    onConfirm: () => Promise<void>;
-    selectedPrefixes: string[];
-}

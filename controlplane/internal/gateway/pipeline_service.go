@@ -28,11 +28,11 @@ type PipelineService struct {
 
 	instanceID uint32
 	shm        *ffi.SharedMemory
-	log        *zap.SugaredLogger
+	log        *zap.Logger
 }
 
 // NewPipelineService creates a new PipelineService.
-func NewPipelineService(instanceID uint32, shm *ffi.SharedMemory, log *zap.SugaredLogger) *PipelineService {
+func NewPipelineService(instanceID uint32, shm *ffi.SharedMemory, log *zap.Logger) *PipelineService {
 	return &PipelineService{
 		instanceID: instanceID,
 		shm:        shm,

@@ -12,4 +12,5 @@ RUN apt-get update -y \
     && apt-get install -y --no-install-recommends /tmp/*.deb \
     && rm -rf /tmp/*.deb /var/lib/apt/lists/*
 
-ENTRYPOINT ["yanet-controlplane", "-c", "/etc/yanet2/controlplane.yaml"]
+ENTRYPOINT ["yanet-controlplane"]
+CMD ["-c", "/etc/yanet2/controlplane-default.yaml"]

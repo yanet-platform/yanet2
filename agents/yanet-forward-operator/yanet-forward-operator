@@ -1,0 +1,126 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+YANET_CLI_FORWARD="${YANET_CLI_FORWARD:-yanet-cli-forward}"
+YANET_CLI_FUNCTION="${YANET_CLI_FUNCTION:-yanet-cli-function}"
+
+usage() {
+    cat >&2 <<EOF
+Usage: $(basename "$0") [OPTIONS] <RULES_FILE>
+
+Manages exactly ONE forward function on the gateway. Run multiple
+instances (e.g. via systemd template yanet2-forward-operator@) to
+manage multiple functions.
+
+Arguments:
+  RULES_FILE                 Path to a single *.yaml forward-rules file.
+                             Function is named <prefix><basename>, where
+                             <basename> is the file name without .yaml.
+
+Options:
+  -g, --gateway URI          gRPC endpoint, repeatable
+                             (default: grpc://[::1]:8080)
+  -i, --interval SECONDS     Pause between iterations (default: 30)
+  -p, --function-prefix STR  Function name prefix (default: fn:forward-)
+  -h, --help                 Show this help.
+EOF
+}
+
+GATEWAYS=()
+INTERVAL=30
+PREFIX="fn:forward-"
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -g|--gateway)
+            GATEWAYS+=("$2")
+            shift 2
+            ;;
+        --gateway=*)
+            GATEWAYS+=("${1#*=}")
+            shift
+            ;;
+        -i|--interval)
+            INTERVAL="$2"
+            shift 2
+            ;;
+        --interval=*)
+            INTERVAL="${1#*=}"
+            shift
+            ;;
+        -p|--function-prefix)
+            PREFIX="$2"
+            shift 2
+            ;;
+        --function-prefix=*)
+            PREFIX="${1#*=}"
+            shift
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        --)
+            shift
+            break
+            ;;
+        -*)
+            printf 'Unknown option: %s\n' "$1" >&2
+            usage >&2
+            exit 1
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
+
+RULES_FILE="${1:-}"
+
+if [[ -z "$RULES_FILE" ]]; then
+    printf 'ERROR: RULES_FILE is required\n' >&2
+    usage
+    exit 1
+fi
+
+if [[ ! -f "$RULES_FILE" ]]; then
+    printf 'ERROR: not a file: %s\n' "$RULES_FILE" >&2
+    exit 1
+fi
+
+if [[ "$RULES_FILE" != *.yaml ]]; then
+    printf 'ERROR: RULES_FILE must end with .yaml: %s\n' "$RULES_FILE" >&2
+    exit 1
+fi
+
+if [[ ${#GATEWAYS[@]} -eq 0 ]]; then
+    GATEWAYS=("grpc://[::1]:8080")
+fi
+
+cfg="$(basename "$RULES_FILE" .yaml)"
+fn="${PREFIX}${cfg}"
+
+trap 'exit 0' INT TERM
+
+while true; do
+    for gw in "${GATEWAYS[@]}"; do
+        if "$YANET_CLI_FORWARD" update --endpoint "$gw" -c "$cfg" --rules "$RULES_FILE"; then
+            printf '[%s]: applied module-config %s from %s to %s\n' \
+                "$(date -Is)" "$cfg" "$RULES_FILE" "$gw"
+        else
+            printf '[%s]: failed to apply module-config %s from %s to %s\n' \
+                "$(date -Is)" "$cfg" "$RULES_FILE" "$gw" >&2
+            continue
+        fi
+
+        if "$YANET_CLI_FUNCTION" update --endpoint "$gw" --name "$fn" \
+                --chains "default:1=forward:${cfg}"; then
+            printf '[%s]: ensured function %s on %s\n' \
+                "$(date -Is)" "$fn" "$gw"
+        else
+            printf '[%s]: failed to ensure function %s on %s\n' \
+                "$(date -Is)" "$fn" "$gw" >&2
+        fi
+    done
+    sleep "$INTERVAL"
+done

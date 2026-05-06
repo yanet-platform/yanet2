@@ -1,0 +1,149 @@
+syntax = "proto3";
+
+package operatorpb;
+
+option go_package = "github.com/yanet-platform/yanet2/agents/yanet-route-operator/operatorpb;operatorpb";
+
+// RouteService is the operator-owned routing surface.
+service RouteService {
+  // ShowRoutes returns all routes in the routing table.
+  rpc ShowRoutes(ShowRoutesRequest) returns (ShowRoutesResponse);
+
+  // LookupRoute looks up possible routes for the given IP address.
+  rpc LookupRoute(LookupRouteRequest) returns (LookupRouteResponse);
+
+  // InsertRoute inserts a route into the routing table.
+  rpc InsertRoute(InsertRouteRequest) returns (InsertRouteResponse);
+
+  // DeleteRoute deletes a route from the routing table.
+  rpc DeleteRoute(DeleteRouteRequest) returns (DeleteRouteResponse);
+
+  // FlushRoutes triggers a reconcile pass that rebuilds the FIB from
+  // the current RIB and pushes it to the dataplane via the route module.
+  rpc FlushRoutes(FlushRoutesRequest) returns (FlushRoutesResponse);
+
+  // FeedRIB receives a stream of route updates (typically from BIRD) and
+  // applies them to the operator's RIB. Session semantics match the
+  // legacy route-module FeedRIB.
+  rpc FeedRIB(stream Update) returns (UpdateSummary);
+
+  // ListConfigs returns the names of all RIB configs known to the
+  // operator.
+  rpc ListConfigs(ListConfigsRequest) returns (ListConfigsResponse);
+}
+
+// ShowRoutesRequest contains filters for route listing.
+message ShowRoutesRequest {
+  string name = 1;
+  // Filter to show only IPv4 routes.
+  bool ipv4_only = 2;
+  // Filter to show only IPv6 routes.
+  bool ipv6_only = 3;
+}
+
+// ShowRoutesResponse contains the list of routes.
+message ShowRoutesResponse {
+  // List of routes in the routing table.
+  repeated Route routes = 1;
+}
+
+// LookupRouteRequest contains the IP address to lookup.
+message LookupRouteRequest {
+  string name = 1;
+  // IP address to lookup.
+  string ip_addr = 2;
+}
+
+// LookupRouteResponse contains the matching routes for the IP address.
+message LookupRouteResponse {
+  // Prefix is the prefix that matched with the IP address.
+  string prefix = 1;
+  // Matching routes for the IP address, sorted with best path first.
+  repeated Route routes = 2;
+}
+
+// InsertRouteRequest is the request to insert a route.
+message InsertRouteRequest {
+  string name = 1;
+  // The destination prefix of the route.
+  string prefix = 2;
+  // The IP address of the nexthop router.
+  string nexthop_addr = 3;
+
+  // Indicates whether the RIB should be flushed to the FIB after this
+  // request.
+  bool do_flush = 4;
+
+  // Route source identifier (e.g., Static, BIRD).
+  RouteSourceID source_id = 5;
+}
+
+// InsertRouteResponse is the response of "InsertRoute" request.
+message InsertRouteResponse {}
+
+// DeleteRouteRequest is the request to delete a route.
+message DeleteRouteRequest {
+  string name = 1;
+  string prefix = 2;
+  string nexthop_addr = 3;
+
+  bool do_flush = 4;
+  RouteSourceID source_id = 5;
+}
+
+// DeleteRouteResponse is the response of "DeleteRoute" request.
+message DeleteRouteResponse {}
+
+// FlushRoutesRequest specifies which module config should be reconciled.
+message FlushRoutesRequest { string name = 1; }
+
+message FlushRoutesResponse {}
+
+// Update represents a message in the stream for inserting one route
+// into the operator's RIB.
+message Update {
+  // The module config name where the RIB should be updated.
+  string name = 1;
+  // Indicates whether this is a route deletion event.
+  bool is_delete = 2;
+  // The route to add to the RIB.
+  Route route = 3;
+}
+
+message UpdateSummary {}
+
+// ListConfigsRequest is the request for ListConfigs.
+message ListConfigsRequest {}
+
+// ListConfigsResponse contains the list of known RIB config names.
+message ListConfigsResponse { repeated string configs = 1; }
+
+// Route represents a routing table entry.
+message Route {
+  string prefix = 1;
+  string next_hop = 2;
+  string peer = 3;
+  uint64 route_distinguisher = 4;
+  uint32 peer_as = 5;
+  uint32 origin_as = 6;
+  uint32 med = 7;
+  uint32 pref = 8;
+  uint32 as_path_len = 9;
+  RouteSourceID source = 10;
+  repeated LargeCommunity large_communities = 11;
+  bool is_best = 12;
+}
+
+// LargeCommunity represents a BGP Large Community value.
+message LargeCommunity {
+  uint32 global_administrator = 1;
+  uint32 local_data_part1 = 2;
+  uint32 local_data_part2 = 3;
+}
+
+// RouteSourceID identifies the origin protocol of a route.
+enum RouteSourceID {
+  ROUTE_SOURCE_ID_UNKNOWN = 0;
+  ROUTE_SOURCE_ID_STATIC = 1;
+  ROUTE_SOURCE_ID_BIRD = 2;
+}

@@ -1,10 +1,10 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { Box } from '@gravity-ui/uikit';
+import { Box, Text } from '@gravity-ui/uikit';
 import { API } from '../api';
 import { toaster } from '../utils';
 import type { Route, FIBEntry } from '../api/routes';
 import { RouteSourceID } from '../api/routes';
-import { PageLayout, PageLoader, EmptyState } from '../components';
+import { PageLayout, PageLoader, EmptyState, ConfirmDialog } from '../components';
 import { parseCIDRPrefix, parseIPAddress, CIDRParseError, IPParseError } from '../utils';
 import {
     type AddRouteFormData,
@@ -13,13 +13,14 @@ import {
     validatePrefix,
     validateNexthop,
     RoutePageHeader,
-    DeleteRouteDialog,
+    RouteListItem,
     AddRouteDialog,
     EditRouteDialog,
     RouteConfigContent,
     VirtualizedRouteTable,
     useMockMode,
     useRouteData,
+    formatRouteCount,
 } from './route';
 import './route/route.scss';
 
@@ -311,9 +312,7 @@ const RoutePage: React.FC = () => {
     if (configs.length === 0) {
         return (
             <PageLayout header={headerContent}>
-                <Box className="route-page__empty">
-                    <EmptyState message="No configs found. Use 'Add Route' to create a new configuration." />
-                </Box>
+                <EmptyState message="No configs found. Use 'Add Route' to create a new configuration." />
 
                 <AddRouteDialog
                     open={addDialogOpen}
@@ -357,12 +356,30 @@ const RoutePage: React.FC = () => {
                 />
             </Box>
 
-            <DeleteRouteDialog
+            <ConfirmDialog
                 open={deleteDialogOpen}
                 onClose={() => setDeleteDialogOpen(false)}
-                onConfirm={handleDeleteConfirm}
-                selectedRoutes={selectedRoutesForDialog}
-            />
+                onConfirm={async () => {
+                    await handleDeleteConfirm();
+                    setDeleteDialogOpen(false);
+                }}
+                title="Delete Routes"
+                message={`Are you sure you want to delete ${selectedRoutesForDialog.length} ${formatRouteCount(selectedRoutesForDialog.length)}?`}
+                confirmText="Delete"
+                danger
+                disabled={selectedRoutesForDialog.length === 0}
+            >
+                {selectedRoutesForDialog.length > 0 && (
+                    <Box style={{ maxHeight: 300, overflowY: 'auto', marginTop: 16 }}>
+                        <Text variant="subheader-2">Selected routes:</Text>
+                        <Box style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 8 }}>
+                            {selectedRoutesForDialog.map((route, idx) => (
+                                <RouteListItem key={idx} route={route} />
+                            ))}
+                        </Box>
+                    </Box>
+                )}
+            </ConfirmDialog>
 
             <AddRouteDialog
                 open={addDialogOpen}

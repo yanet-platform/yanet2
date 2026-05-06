@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import { Box } from '@gravity-ui/uikit';
-import { PageLayout, PageLoader, EmptyState } from '../components';
+import { PageLayout, PageLoader, EmptyState, ConfirmDialog } from '../components';
 import type { Rule } from '../api/acl';
 import { useSidebarContext } from '../types';
 import {
@@ -12,10 +12,9 @@ import {
     FWStateForm,
     UploadYamlDialog,
     CreateConfigDialog,
-    DeleteConfigDialog,
     UnsavedChangesDialog,
 } from './acl';
-import './acl/acl.css';
+import './acl/acl.scss';
 
 const AclPage: React.FC = () => {
     const { setSidebarDisabled } = useSidebarContext();
@@ -211,9 +210,7 @@ const AclPage: React.FC = () => {
     if (configs.length === 0) {
         return (
             <PageLayout header={headerContent}>
-                <Box className="acl-page__empty-content">
-                    <EmptyState message="No ACL configurations found. Click 'Upload YAML' to create one." />
-                </Box>
+                <EmptyState message="No ACL configurations found. Click 'Upload YAML' to create one." />
 
                 <UploadYamlDialog
                     open={uploadDialogOpen}
@@ -233,7 +230,6 @@ const AclPage: React.FC = () => {
                     activeConfig={activeConfigTab}
                     configStates={configStates}
                     onConfigChange={handleTryConfigChange}
-                    onTryChangeConfig={handleTryConfigChange}
                 />
 
                 <InnerTabs
@@ -277,11 +273,15 @@ const AclPage: React.FC = () => {
                 existingConfigs={configs}
             />
 
-            <DeleteConfigDialog
+            <ConfirmDialog
                 open={deleteDialogOpen}
                 onClose={() => setDeleteDialogOpen(false)}
                 onConfirm={handleDeleteConfirm}
-                configName={activeConfigTab}
+                title="Delete ACL Config"
+                message={`Are you sure you want to delete ACL config "${activeConfigTab}"?`}
+                secondaryMessage="This action cannot be undone."
+                confirmText="Delete"
+                danger
             />
 
             <UnsavedChangesDialog

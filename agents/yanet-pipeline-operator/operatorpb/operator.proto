@@ -1,5 +1,6 @@
 syntax = "proto3";
 
+// TODO: package yanet.operator.pipeline.v1;
 package operatorpb;
 
 option go_package = "github.com/yanet-platform/yanet2/agents/yanet-pipeline-operator/operatorpb;operatorpb";
@@ -11,7 +12,9 @@ import "common/commonpb/metric.proto";
 //
 // Intentionally deferred: RPCs (SetTargetStage / Activate / Deactivate) will
 // be added once the YAML-bootstrap workflow proves out.
-service PipelineOperatorService {
+service PipelineOperatorService {}
+
+service MetricsService {
   // GetMetrics returns a snapshot of operator runtime metrics.
   rpc GetMetrics(GetMetricsRequest) returns (GetMetricsResponse);
 }

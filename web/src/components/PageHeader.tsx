@@ -1,6 +1,6 @@
 import React from 'react';
 import { Flex, Text } from '@gravity-ui/uikit';
-import './common.css';
+import './common.scss';
 
 export interface PageHeaderProps {
     /** Page title displayed in header */

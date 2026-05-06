@@ -1,0 +1,43 @@
+syntax = "proto3";
+
+// TODO: package yanet.operator.route.v1;
+package operatorpb;
+
+option go_package = "github.com/yanet-platform/yanet2/agents/yanet-route-operator/operatorpb;operatorpb";
+
+import "common/commonpb/metric.proto";
+
+// RouteOperatorService is the intent surface for RIB / FIB-build lifecycle
+// management owned by the route operator.
+//
+// The Switch / Status RPCs are placeholders for the upcoming
+// declarative-target workflow; their request and response messages are
+// intentionally empty in this scaffold and will be fleshed out in a
+// follow-up phase.
+service RouteOperatorService {
+  // Switch atomically replaces the desired target the operator drives
+  // toward.
+  rpc Switch(SwitchRequest) returns (SwitchResponse);
+
+  // Status returns a snapshot of the operator's current target and
+  // reconciliation state.
+  rpc Status(StatusRequest) returns (StatusResponse);
+}
+
+// MetricsService exposes operator runtime metrics.
+service MetricsService {
+  // GetMetrics returns a snapshot of operator runtime metrics.
+  rpc GetMetrics(GetMetricsRequest) returns (GetMetricsResponse);
+}
+
+message SwitchRequest {}
+
+message SwitchResponse {}
+
+message StatusRequest {}
+
+message StatusResponse {}
+
+message GetMetricsRequest {}
+
+message GetMetricsResponse { repeated commonpb.Metric metrics = 1; }

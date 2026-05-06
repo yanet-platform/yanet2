@@ -27,7 +27,7 @@ type BalancerService struct {
 
 	agent *BalancerAgent
 
-	log *zap.SugaredLogger
+	log *zap.Logger
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -35,13 +35,13 @@ type BalancerService struct {
 func NewBalancerService(
 	shm *yanet.SharedMemory,
 	memory datasize.ByteSize,
-	log *zap.SugaredLogger,
+	log *zap.Logger,
 ) (*BalancerService, error) {
 	log.Info("initializing balancer service")
 
 	agent, err := NewBalancerAgent(shm, memory, log)
 	if err != nil {
-		log.Errorw("failed to create balancer agent", "error", err)
+		log.Error("failed to create balancer agent", zap.Error(err))
 		return nil, err
 	}
 
@@ -92,7 +92,7 @@ func (m *BalancerService) getManagerWithAutoSelection(
 
 	// Exactly one manager - auto-select it
 	selectedName := managers[0]
-	m.log.Infow("auto-selected balancer manager", "name", selectedName)
+	m.log.Info("auto-selected balancer manager", zap.String("name", selectedName))
 
 	manager, err := m.agent.BalancerManager(selectedName)
 	if err != nil {
@@ -119,19 +119,17 @@ func (m *BalancerService) UpdateConfig(
 
 	manager, _ := m.agent.BalancerManager(name)
 	if manager != nil {
-		m.log.Infow("updating balancer config", "name", name)
+		m.log.Info("updating balancer config", zap.String("name", name))
 		updateInfo, err := manager.Update(req.Config, time.Now())
 		if err != nil {
-			m.log.Errorw(
+			m.log.Error(
 				"failed to update balancer",
-				"name",
-				name,
-				"error",
-				err,
+				zap.String("name", name),
+				zap.Error(err),
 			)
 			return nil, fmt.Errorf("failed to update balancer: %v", err)
 		}
-		m.log.Infow("balancer config updated", "name", name)
+		m.log.Info("balancer config updated", zap.String("name", name))
 		return &balancerpb.UpdateConfigResponse{
 			Name: req.Name,
 			UpdateInfo: ConvertUpdateInfoToProto(
@@ -140,12 +138,12 @@ func (m *BalancerService) UpdateConfig(
 			), // created=false for updates
 		}, nil
 	} else {
-		m.log.Infow("creating new balancer", "name", name)
+		m.log.Info("creating new balancer", zap.String("name", name))
 		if err := m.agent.NewBalancerManager(name, req.Config); err != nil {
-			m.log.Errorw("failed to create balancer", "name", name, "error", err)
+			m.log.Error("failed to create balancer", zap.String("name", name), zap.Error(err))
 			return nil, fmt.Errorf("failed to create balancer: %v", err)
 		}
-		m.log.Infow("balancer created", "name", name)
+		m.log.Info("balancer created", zap.String("name", name))
 		return &balancerpb.UpdateConfigResponse{
 			Name: req.Name,
 			// Return update info with created=true for new balancer
@@ -172,15 +170,19 @@ func (m *BalancerService) UpdateReals(
 
 	count, err := manager.UpdateReals(req.Updates, req.Buffer)
 	if err != nil {
-		m.log.Errorw("failed to update reals", "name", name, "error", err)
+		m.log.Error(
+			"failed to update reals",
+			zap.String("name", name),
+			zap.Error(err),
+		)
 		msg := fmt.Sprintf("failed to make reals update: %v", err)
 		return nil, status.Error(codes.Internal, msg)
 	}
 
 	if req.Buffer {
-		m.log.Debugw("real updates buffered", "name", name, "count", count)
+		m.log.Debug("real updates buffered", zap.String("name", name), zap.Int("count", count))
 	} else {
-		m.log.Infow("real updates applied", "name", name, "count", count)
+		m.log.Info("real updates applied", zap.String("name", name), zap.Int("count", count))
 	}
 
 	return &balancerpb.UpdateRealsResponse{
@@ -203,12 +205,16 @@ func (m *BalancerService) FlushRealUpdates(
 
 	count, err := manager.FlushRealUpdates()
 	if err != nil {
-		m.log.Errorw("failed to flush updates", "name", name, "error", err)
+		m.log.Error(
+			"failed to flush updates",
+			zap.String("name", name),
+			zap.Error(err),
+		)
 		msg := fmt.Sprintf("failed to flush updates: %v", err)
 		return nil, status.Error(codes.Internal, msg)
 	}
 
-	m.log.Infow("real updates flushed", "name", name, "count", count)
+	m.log.Info("real updates flushed", zap.String("name", name), zap.Int("count", count))
 
 	return &balancerpb.FlushRealUpdatesResponse{
 		UpdatesFlushed: uint32(count),
@@ -245,7 +251,7 @@ func (m *BalancerService) ListConfigs(
 	req *balancerpb.ListConfigsRequest,
 ) (*balancerpb.ListConfigsResponse, error) {
 	managers := m.agent.Managers()
-	m.log.Debugw("listing managers", "count", len(managers))
+	m.log.Debug("listing managers", zap.Int("count", len(managers)))
 	return &balancerpb.ListConfigsResponse{
 		Configs: managers,
 	}, nil
@@ -388,30 +394,26 @@ func (m *BalancerService) UpdateVS(
 		return nil, err
 	}
 
-	m.log.Infow(
+	m.log.Info(
 		"updating virtual services",
-		"name",
-		name,
-		"vs_count",
-		len(req.Vs),
+		zap.String("name", name),
+		zap.Int("vs_count", len(req.Vs)),
 	)
 
 	updateInfo, err := manager.UpdateVS(req.Vs, time.Now())
 	if err != nil {
-		m.log.Errorw(
+		m.log.Error(
 			"failed to update virtual services",
-			"name", name,
-			"error", err,
+			zap.String("name", name),
+			zap.Error(err),
 		)
 		return nil, fmt.Errorf("failed to update virtual services: %v", err)
 	}
 
-	m.log.Infow(
+	m.log.Info(
 		"virtual services updated",
-		"name",
-		name,
-		"vs_count",
-		len(req.Vs),
+		zap.String("name", name),
+		zap.Int("vs_count", len(req.Vs)),
 	)
 
 	return &balancerpb.UpdateVSResponse{
@@ -432,30 +434,26 @@ func (m *BalancerService) DeleteVS(
 		return nil, err
 	}
 
-	m.log.Infow(
+	m.log.Info(
 		"deleting virtual services",
-		"name",
-		name,
-		"vs_count",
-		len(req.Vs),
+		zap.String("name", name),
+		zap.Int("vs_count", len(req.Vs)),
 	)
 
 	updateInfo, err := manager.DeleteVS(req.Vs, time.Now())
 	if err != nil {
-		m.log.Errorw(
+		m.log.Error(
 			"failed to delete virtual services",
-			"name", name,
-			"error", err,
+			zap.String("name", name),
+			zap.Error(err),
 		)
 		return nil, fmt.Errorf("failed to delete virtual services: %v", err)
 	}
 
-	m.log.Infow(
+	m.log.Info(
 		"virtual services deleted",
-		"name",
-		name,
-		"vs_count",
-		len(req.Vs),
+		zap.String("name", name),
+		zap.Int("vs_count", len(req.Vs)),
 	)
 
 	return &balancerpb.DeleteVSResponse{

@@ -477,7 +477,7 @@ func TestWlc(t *testing.T) {
 	t.Run("Stage2_New_Agent_State_Persistence", func(t *testing.T) {
 		// Create new balancer agent using same shared memory
 		logLevel := zapcore.InfoLevel
-		sugaredLogger, _, _ := logging.Init(&logging.Config{
+		logger, _, _ := logging.Init(&logging.Config{
 			Level: logLevel,
 		})
 
@@ -485,7 +485,7 @@ func TestWlc(t *testing.T) {
 		newAgent, err := balancer.NewBalancerAgent(
 			ts.Mock.SharedMemory(), // Same shared memory
 			agentMemory,
-			sugaredLogger,
+			logger,
 		)
 		require.NoError(t, err, "failed to create new balancer agent")
 
@@ -931,7 +931,7 @@ func TestWlc(t *testing.T) {
 		t.Run("Verify_Config_Persistence_With_New_Agent", func(t *testing.T) {
 			// Create third balancer agent using same shared memory
 			logLevel := zapcore.InfoLevel
-			sugaredLogger, _, _ := logging.Init(&logging.Config{
+			logger, _, _ := logging.Init(&logging.Config{
 				Level: logLevel,
 			})
 
@@ -939,7 +939,7 @@ func TestWlc(t *testing.T) {
 			thirdAgent, err := balancer.NewBalancerAgent(
 				ts.Mock.SharedMemory(), // Same shared memory
 				agentMemory,
-				sugaredLogger,
+				logger,
 			)
 			require.NoError(t, err, "failed to create third balancer agent")
 

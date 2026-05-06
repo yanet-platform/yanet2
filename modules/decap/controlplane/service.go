@@ -7,7 +7,6 @@ import (
 	"slices"
 	"sync"
 
-	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -49,14 +48,12 @@ type DecapService struct {
 	mu      sync.RWMutex
 	backend Backend
 	configs map[string]*config
-	log     *zap.SugaredLogger
 }
 
-func NewDecapService(backend Backend, log *zap.SugaredLogger) *DecapService {
+func NewDecapService(backend Backend) *DecapService {
 	return &DecapService{
 		backend: backend,
 		configs: map[string]*config{},
-		log:     log,
 	}
 }
 
@@ -203,10 +200,6 @@ func (m *DecapService) RemovePrefixes(
 }
 
 func (m *DecapService) updateConfig(name string, cfg *config) error {
-	m.log.Debugw("updating config",
-		zap.String("config", name),
-	)
-
 	mod, err := m.backend.UpdateModule(name, cfg.Prefixes)
 	if err != nil {
 		return fmt.Errorf("failed to update module config %q: %w", name, err)

@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package balancerpb;
+
+import "modules/balancer2/controlplane/balancerpb/config.proto";
+
+option go_package = "github.com/yanet-platform/yanet2/modules/balancer2/controlplane/balancerpb;balancerpb";
+
+message Filter {
+  optional bytes vip = 1;
+  optional uint32 vs_port = 2;
+  optional TransportProto proto = 3;
+  optional bytes real_ip = 4;
+  optional uint32 real_port = 5;
+}

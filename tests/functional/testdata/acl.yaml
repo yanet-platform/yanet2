@@ -5,8 +5,9 @@
 #
 # Structure:
 # rules:
-#   - action: Allow|Deny                         # Action to take
-#     counter: string                           # Counter for the rule (currently empty)
+#   - actions:                                    # List of actions (last one is terminal)
+#       - kind: Allow|Deny|Count|...              # Action kind
+#         counter: string                         # Optional counter name
 #     devices: [string]                         # List of devices (currently empty array)
 #     dst_ports: array                          # Destination port ranges
 #       - from: int                               # Start of port range
@@ -28,8 +29,8 @@ rules:
   # Allow UDP 192.0.2.2 -> 192.0.3.1 ports 150-450,600
   # 1
   # add allow udp from 192.0.2.2 to 192.0.3.1 150-450,600
-  - action: Allow
-    counter: ""
+  - actions:
+      - kind: Allow
     devices: []
     dst_ports:
       - from: 150
@@ -51,8 +52,8 @@ rules:
   # Deny UDP 192.0.2.99 -> 192.0.3.1 port 600
   # 2
   # add deny udp from 192.0.2.99 to 192.0.3.1 600
-  - action: Deny
-    counter: ""
+  - actions:
+      - kind: Deny
     devices: []
     dst_ports:
       - from: 600
@@ -73,8 +74,8 @@ rules:
   # Allow TCP SYN (setup flag)
   # 3
   # add allow tcp from 192.0.2.2 to 192.0.3.1 600 tcpflags syn
-  - action: Allow
-    counter: ""
+  - actions:
+      - kind: Allow
     devices:
       - ""
     dst_ports:
@@ -221,8 +222,8 @@ rules:
   # Deny TCP RST
   # 4
   # add deny tcp from any to any tcpflags rst
-  - action: Deny
-    counter: ""
+  - actions:
+      - kind: Deny
     devices:
       - ""
     dst_ports:
@@ -307,8 +308,8 @@ rules:
   # Allow ICMP Echo
   # 5
   # add allow icmp from 192.0.2.2 to 192.0.3.1 icmptypes 8
-  - action: Allow
-    counter: ""
+  - actions:
+      - kind: Allow
     devices:
       - ""
     dst_ports:
@@ -330,8 +331,8 @@ rules:
   # Allow subnet 192.0.2.0/24
   # 6
   # add allow udp from 192.0.2.0/24 to 192.0.3.1 600
-  - action: Allow
-    counter: ""
+  - actions:
+      - kind: Allow
     devices:
       - ""
     dst_ports:
@@ -352,8 +353,8 @@ rules:
   # Deny subnet 192.0.99.0/24
   # 7
   # add deny udp from 192.0.99.0/24 to any
-  - action: Deny
-    counter: ""
+  - actions:
+      - kind: Deny
     devices:
       - ""
     dst_ports:
@@ -376,8 +377,8 @@ rules:
   # Allow TCPv6
   # 8
   # add allow tcp from 2001:db8::1 to 2001:db8::2 600
-  - action: Allow
-    counter: ""
+  - actions:
+      - kind: Allow
     devices:
       - ""
     dst_ports:
@@ -398,8 +399,8 @@ rules:
   # Allow ICMPv6 Echo
   # 9
   # add allow ipv6-icmp from 2001:db8::1 to 2001:db8::2 icmp6types 128,129
-  - action: Allow
-    counter: ""
+  - actions:
+      - kind: Allow
     devices:
       - ""
     dst_ports:
@@ -422,8 +423,8 @@ rules:
   # Deny UDPv6
   # 10
   # add deny udp from 2001:db8::99 to 2001:db8::2 600
-  - action: Deny
-    counter: ""
+  - actions:
+      - kind: Deny
     devices:
       - ""
     dst_ports:
@@ -445,8 +446,8 @@ rules:
   # Rule pyramid (ordered from most specific to most general)
   # 11
   # add allow udp from 192.0.2.0/31 to any 100-200
-  - action: Allow
-    counter: ""
+  - actions:
+      - kind: Allow
     devices:
       - ""
     dst_ports:
@@ -467,8 +468,8 @@ rules:
 
   # 12
   # add deny udp from 192.0.2.0/28 to any
-  - action: Deny
-    counter: ""
+  - actions:
+      - kind: Deny
     devices:
       - ""
     dst_ports:
@@ -489,8 +490,8 @@ rules:
 
   # 13
   # add allow udp from 192.0.2.0/24 to any
-  - action: Allow
-    counter: ""
+  - actions:
+      - kind: Allow
     devices:
       - ""
     dst_ports:
@@ -511,8 +512,8 @@ rules:
 
   # 14
   # add deny udp from 192.0.0.0/16 to any
-  - action: Deny
-    counter: ""
+  - actions:
+      - kind: Deny
     devices:
       - ""
     dst_ports:

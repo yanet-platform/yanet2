@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import { Box, Text, Dialog } from '@gravity-ui/uikit';
 import { useDialogKeyboardShortcut } from '../hooks';
-import './common.css';
+import './common.scss';
 
 export interface ConfirmDialogProps {
     /** Whether the dialog is open */

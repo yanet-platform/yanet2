@@ -6,7 +6,7 @@ import type { PrefixItem } from './types';
 import { ROW_HEIGHT, OVERSCAN, TOTAL_WIDTH, SEARCH_BAR_HEIGHT, HEADER_HEIGHT, FOOTER_HEIGHT } from './constants';
 import { PrefixRow } from './PrefixRow';
 import { PrefixTableHeader } from './PrefixTableHeader';
-import './decap.css';
+import './decap.scss';
 
 export interface PrefixTableProps {
     prefixes: PrefixItem[];

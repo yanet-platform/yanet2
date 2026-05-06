@@ -1,16 +1,20 @@
 import React, { useState, useCallback, useMemo } from 'react';
-import { Box } from '@gravity-ui/uikit';
-import { PageLayout, PageLoader, EmptyState } from '../components';
+import { Box, Flex, Text } from '@gravity-ui/uikit';
+import {
+    PageLayout,
+    PageLoader,
+    EmptyState,
+    ConfirmDialog,
+    ConfigTabs,
+} from '../components';
 import {
     DecapPageHeader,
     PrefixTable,
     AddPrefixDialog,
-    DeletePrefixDialog,
     useDecapData,
     prefixesToItems,
-    ConfigTabs,
 } from './decap';
-import './decap/decap.css';
+import './decap/decap.scss';
 
 const DecapPage: React.FC = () => {
     const {
@@ -82,9 +86,7 @@ const DecapPage: React.FC = () => {
     if (configs.length === 0) {
         return (
             <PageLayout header={headerContent}>
-                <Box className="decap-page__empty">
-                    <EmptyState message="No decap configurations found. Click 'Add Prefix' to create one." />
-                </Box>
+                <EmptyState message="No decap configurations found. Click 'Add Prefix' to create one." />
 
                 <AddPrefixDialog
                     open={addPrefixDialogOpen}
@@ -126,12 +128,40 @@ const DecapPage: React.FC = () => {
                 existingConfigs={configs}
             />
 
-            <DeletePrefixDialog
+            <ConfirmDialog
                 open={deletePrefixDialogOpen}
                 onClose={() => setDeletePrefixDialogOpen(false)}
-                onConfirm={handleDeletePrefixConfirm}
-                selectedPrefixes={selectedPrefixesList}
-            />
+                onConfirm={async () => {
+                    await handleDeletePrefixConfirm();
+                    setDeletePrefixDialogOpen(false);
+                }}
+                title="Delete Prefixes"
+                message={`Are you sure you want to delete ${selectedPrefixesList.length} prefix(es)?`}
+                confirmText="Delete"
+                danger
+                disabled={selectedPrefixesList.length === 0}
+            >
+                <Box
+                    style={{
+                        backgroundColor: 'var(--g-color-base-generic)',
+                        borderRadius: 8,
+                        padding: 12,
+                        maxHeight: 200,
+                        overflow: 'auto',
+                    }}
+                >
+                    <Flex direction="column" gap={1}>
+                        {selectedPrefixesList.slice(0, 10).map((prefix, idx) => (
+                            <Text key={idx} variant="code-1">{prefix}</Text>
+                        ))}
+                        {selectedPrefixesList.length > 10 && (
+                            <Text variant="body-1" color="secondary">
+                                ... and {selectedPrefixesList.length - 10} more
+                            </Text>
+                        )}
+                    </Flex>
+                </Box>
+            </ConfirmDialog>
         </PageLayout>
     );
 };
