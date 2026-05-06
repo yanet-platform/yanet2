@@ -150,10 +150,6 @@ counter_registry_register(
 	uint64_t size,
 	yanet_error **err
 ) {
-	if (name == NULL) {
-		yanet_error_add(err, "name is required");
-		return -1;
-	}
 	if (size == 0) {
 		yanet_error_add(err, "zero size");
 		return -1;
