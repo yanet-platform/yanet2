@@ -5,44 +5,46 @@ import (
 	"os"
 
 	"github.com/yanet-platform/yanet2/common/go/logging"
-	"github.com/yanet-platform/yanet2/common/go/xcfg"
+	"go.uber.org/zap/zapcore"
+	"gopkg.in/yaml.v3"
 )
 
 type Config struct {
-	Port          int            `yaml:"port"`
-	ModulesAdress string         `yaml:"endpoint"`
-	Format        string         `yaml:"format"`
-	Modules       []string       `yaml:"modules"`
-	Logging       logging.Config `yaml:"logging"`
+	Logging         logging.Config `yaml:"logging"`
+	Port            int            `yaml:"port"`
+	ModulesEndpoint string         `yaml:"endpoint"`
+	Format          string         `yaml:"format"`
+	Modules         []string       `yaml:"modules"`
 }
 
 func DefaultConfig() *Config {
 	return &Config{
-		Port:          8080,
-		ModulesAdress: "[::1]:8080",
-		Format:        "prometheus",
 		Logging: logging.Config{
-			Level: 0,
+			Level: zapcore.InfoLevel,
 		},
+		Port:            8080,
+		ModulesEndpoint: "[::1]:8080",
+		Format:          "prometheus",
+		Modules:         []string{},
 	}
 }
 
-func Load(path string) (*Config, error) {
+func LoadConfig(path string) (*Config, error) {
 	buf, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read config file: %w", err)
 	}
 
 	cfg := DefaultConfig()
-	if err := xcfg.Decode(buf, cfg); err != nil {
-		return nil, fmt.Errorf("failed to parse config file: %w", err)
+	if err := yaml.Unmarshal(buf, cfg); err != nil {
+		return nil, fmt.Errorf("failed to deserialize config: %w", err)
 	}
 
 	return cfg, nil
 }
 
 func MustLoad(path string) *Config {
-	cfg, err := Load(path)
+	cfg, err := LoadConfig(path)
 	if err != nil {
 		panic(fmt.Sprintf("failed to load config: %v", err))
 	}

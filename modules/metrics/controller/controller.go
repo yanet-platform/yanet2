@@ -2,41 +2,54 @@ package controller
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/yanet-platform/yanet2/common/commonpb"
 	"github.com/yanet-platform/yanet2/modules/metrics/adapter"
 	metric "github.com/yanet-platform/yanet2/modules/metrics/domain"
 	"github.com/yanet-platform/yanet2/modules/metrics/format"
 	"github.com/yanet-platform/yanet2/modules/metrics/metricspb"
+	"go.uber.org/zap"
 )
 
 type Controller struct {
-	Formatter format.Formatter
-	Collector adapter.Collector
+	formatter format.Formatter
+	collector adapter.Collector
+	log       *zap.Logger
 }
 
-func NewContoller(formatter format.Formatter, collector adapter.Collector) *Controller {
+func NewController(formatter format.Formatter, collector adapter.Collector, log *zap.Logger) *Controller {
+	if log == nil {
+		log = zap.NewNop()
+	}
 	return &Controller{
-		Formatter: formatter,
-		Collector: collector,
+		formatter: formatter,
+		collector: collector,
+		log:       log,
 	}
 }
 
-func (m *Controller) GetMetrics(ctx context.Context, req *metricspb.GetMetricsRequest) (*metricspb.GetMetricsResponse, error) {
-	//TODO: validate and errors and logs
-
-	messyMetrics, err := m.Collector.Collect(ctx)
+func (m *Controller) GetMetrics(ctx context.Context, _ *metricspb.GetMetricsRequest) (*metricspb.GetMetricsResponse, error) {
+	raw, err := m.collector.Collect(ctx)
 	if err != nil {
-		// TODO: error handling
+		m.log.Error("failed to collect metrics", zap.Error(err))
+		return nil, fmt.Errorf("collect metrics: %w", err)
 	}
 
-	metrics := m.convertMetrics(messyMetrics)
-	m.Formatter.Write(ctx, metrics)
+	metrics := m.convertMetrics(raw)
 
-	metricFormatted := m.Formatter.Metrics()
+	if err := m.formatter.Write(ctx, metrics); err != nil {
+		m.log.Error("failed to format metrics", zap.Error(err))
+		return nil, fmt.Errorf("format metrics: %w", err)
+	}
+
+	m.log.Debug("metrics collected",
+		zap.Int("raw_count", len(raw)),
+		zap.Int("converted_count", len(metrics)),
+	)
 
 	return &metricspb.GetMetricsResponse{
-		Metrics: metricFormatted,
+		Metrics: m.formatter.Metrics(),
 	}, nil
 }
 
@@ -55,7 +68,7 @@ func (m *Controller) convertMetrics(req []*commonpb.Metric) []metric.Metric {
 			})
 		}
 
-		value := m.Formatter.MetricValue(mtc)
+		value := m.formatter.MetricValue(mtc)
 
 		metrics = append(metrics, metric.Metric{
 			Name:   name,

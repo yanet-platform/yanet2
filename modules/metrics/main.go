@@ -1,79 +1,103 @@
-package metrics
+package main
 
 import (
 	"context"
+	"errors"
+	"flag"
 	"fmt"
 	"net"
 	"os"
-	"strings"
 
+	"github.com/yanet-platform/yanet2/common/commonpb"
 	"github.com/yanet-platform/yanet2/common/go/logging"
+	"github.com/yanet-platform/yanet2/common/go/xcmd"
 	"github.com/yanet-platform/yanet2/modules/metrics/adapter"
 	"github.com/yanet-platform/yanet2/modules/metrics/config"
 	"github.com/yanet-platform/yanet2/modules/metrics/controller"
 	"github.com/yanet-platform/yanet2/modules/metrics/format"
-	"github.com/yanet-platform/yanet2/modules/metrics/format/prometheues"
 	grpchandler "github.com/yanet-platform/yanet2/modules/metrics/grpc"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 func main() {
-	cfg := config.MustLoad("metrics.yaml")
+	var configPath string
+	flag.StringVar(&configPath, "config", "metrics.yaml", "Path to the configuration file")
+	flag.Parse()
 
-	log, _, err := logging.Init(&cfg.Logging)
-	if err != nil {
-		fmt.Printf("failed to initialize logging: %v\n", err)
+	if err := runServer(configPath); err != nil {
+		if errors.Is(err, xcmd.Interrupted{}) {
+			return
+		}
+
+		fmt.Printf("ERROR: %v\n", err)
 		os.Exit(1)
 	}
-	defer log.Sync()
+}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+func runServer(configPath string) error {
+	cfg, err := config.LoadConfig(configPath)
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	sugar, _, err := logging.Init(&cfg.Logging)
+	if err != nil {
+		return fmt.Errorf("failed to initialize logging: %w", err)
+	}
+	defer sugar.Sync()
+	log := sugar.Desugar()
+
+	log.Info("starting metric adapter server")
+
+	formatKind, err := format.ParseFormat(cfg.Format)
+	if err != nil {
+		return fmt.Errorf("parse format: %w", err)
+	}
+
+	formatter, err := format.NewFormatter(formatKind, log.Named("formatter"))
+	if err != nil {
+		return fmt.Errorf("create formatter: %w", err)
+	}
+
+	clientConn, err := grpc.NewClient(
+		cfg.ModulesEndpoint,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		return fmt.Errorf("create modules client: %w", err)
+	}
+	defer func() { _ = clientConn.Close() }()
+
+	mclient := commonpb.NewMetricsServiceClient(clientConn)
+	collector := adapter.NewCollector(mclient, cfg.Modules, log.Named("collector"))
+	ctrl := controller.NewController(formatter, collector, log.Named("controller"))
 
 	grpcServer := grpc.NewServer()
-	defer grpcServer.Stop()
+	grpchandler.Register(grpcServer, ctrl, log.Named("grpc"))
 
 	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", cfg.Port))
 	if err != nil {
-		log.Fatal("failed to listen", zap.Error(err))
+		return fmt.Errorf("listen on :%d: %w", cfg.Port, err)
 	}
 
-	log.Info("Starting metric adapter server", zap.Int("port", cfg.Port))
+	wg, ctx := errgroup.WithContext(context.Background())
 
-	typeFormat := format.Format(format.ConfigFormat(cfg.Format))
-
-	if typeFormat == format.ConverterUndefined {
-		log.Fatal("unsupported format type", zap.String("format", cfg.Format))
-	}
-
-	var builder prometheues.FormatBuilder = &strings.Builder{}
-
-	formatter := format.NewFormatter(builder, typeFormat)
-	if formatter == nil {
-		log.Fatal("failed to create formatter", zap.String("format", cfg.Format))
-	}
-
-	clientConn, err := grpc.NewClient(cfg.ModulesAdress)
-	if err != nil {
-		log.Fatal("failed to connect to modules", zap.Error(err))
-	}
-	defer clientConn.Close()
-
-	collector := adapter.NewCollector(clientConn, cfg.Modules)
-
-	ctrl := controller.NewContoller(formatter, collector)
-
-	grpchandler.Register(grpcServer, ctrl)
-
-	go func() {
+	wg.Go(func() error {
 		if err := grpcServer.Serve(lis); err != nil {
-			log.Error("failed to serve", zap.Error(err))
+			return fmt.Errorf("grpc serve: %w", err)
 		}
-	}()
+		return nil
+	})
 
-	log.Info("Metric adapter server started successfully")
+	wg.Go(func() error {
+		err := xcmd.WaitInterrupted(ctx)
+		log.Info("caught signal, shutting down gRPC server", zap.Error(err))
+		grpcServer.GracefulStop()
+		return err
+	})
 
-	<-ctx.Done()
-	log.Info("Shutting down metric adapter server")
+	return wg.Wait()
 }
