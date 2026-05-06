@@ -1,4 +1,8 @@
+use std::net::IpAddr;
+
 use clap::Parser;
+
+use crate::VsId;
 
 #[derive(Debug, Clone, Parser)]
 pub struct RealsCmd {
@@ -21,11 +25,11 @@ pub struct EnableRealCmd {
     pub name: String,
     /// Virtual service identifier: "ip:port/proto" or "[ipv6]:port/proto".
     #[arg(long)]
-    pub vs: String,
+    pub vs: VsId,
     /// Real server IPs to enable (port assumed 0; matches reals configured
     /// with relative port 0).
     #[arg(long, required = true, num_args = 1..)]
-    pub reals: Vec<String>,
+    pub reals: Vec<IpAddr>,
     /// Optional new weight for the real servers.
     #[arg(long)]
     pub weight: Option<u32>,
@@ -38,9 +42,9 @@ pub struct DisableRealCmd {
     pub name: String,
     /// Virtual service identifier: "ip:port/proto" or "[ipv6]:port/proto".
     #[arg(long)]
-    pub vs: String,
+    pub vs: VsId,
     /// Real server IPs to disable (port assumed 0; matches reals configured
     /// with relative port 0).
     #[arg(long, required = true, num_args = 1..)]
-    pub reals: Vec<String>,
+    pub reals: Vec<IpAddr>,
 }

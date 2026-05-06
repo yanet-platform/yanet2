@@ -25,7 +25,6 @@ fn print_module_stats(state: &balancerpb::BalancerState) {
         rows.push(StatsRow::new("", "Outgoing Pkts", c.outgoing_packets));
         rows.push(StatsRow::new("", "Outgoing Bytes", c.outgoing_bytes));
         rows.push(StatsRow::new("", "No Headroom Pkts", c.no_headroom_packets));
-        rows.push(StatsRow::empty());
     }
 
     if let Some(l) = &state.l4_stats {
@@ -34,20 +33,14 @@ fn print_module_stats(state: &balancerpb::BalancerState) {
         rows.push(StatsRow::new("", "Select VS Fail", l.select_vs_failed));
         rows.push(StatsRow::new("", "Select Real Fail", l.select_real_failed));
         rows.push(StatsRow::new("", "Invalid Pkts", l.invalid_packets));
-        rows.push(StatsRow::empty());
     }
 
     if let Some(icmp) = &state.icmp_ip4_stats {
         push_icmp_rows(&mut rows, "ICMPv4", icmp);
-        rows.push(StatsRow::empty());
     }
 
     if let Some(icmp) = &state.icmp_ip6_stats {
         push_icmp_rows(&mut rows, "ICMPv6", icmp);
-    }
-
-    if rows.last().is_some_and(StatsRow::is_blank) {
-        rows.pop();
     }
 
     print_table(rows);
@@ -183,37 +176,61 @@ fn print_table_view_vs(vs: &balancerpb::VsState, opts: &ShowOptions) {
 }
 
 fn real_basic_row(real: &balancerpb::RealState) -> Option<RealBasicRow> {
-    let rcfg = real.config.as_ref()?;
-    let rid = rcfg.id.as_ref()?;
-    let rip = bytes_to_ip(&rid.ip).ok()?;
+    let Some(rcfg) = real.config.as_ref() else {
+        log::warn!("dropped real row: missing config");
+        return None;
+    };
+    let Some(rid) = rcfg.id.as_ref() else {
+        log::warn!("dropped real row: missing real id");
+        return None;
+    };
+    let rip = match bytes_to_ip(&rid.ip) {
+        Ok(ip) => ip,
+        Err(e) => {
+            log::warn!("dropped real row: invalid ip bytes: {e}");
+            return None;
+        }
+    };
     Some(RealBasicRow {
         real: format_ip_port(rip, rid.port),
-        enabled: real.enabled.to_string(),
-        weight: rcfg.weight.to_string(),
-        effective_weight: real.effective_weight.to_string(),
+        enabled: real.enabled,
+        weight: rcfg.weight,
+        effective_weight: real.effective_weight,
     })
 }
 
 fn real_stats_row(real: &balancerpb::RealState) -> Option<RealStatsRow> {
-    let rcfg = real.config.as_ref()?;
-    let rid = rcfg.id.as_ref()?;
-    let rip = bytes_to_ip(&rid.ip).ok()?;
+    let Some(rcfg) = real.config.as_ref() else {
+        log::warn!("dropped real stats row: missing config");
+        return None;
+    };
+    let Some(rid) = rcfg.id.as_ref() else {
+        log::warn!("dropped real stats row: missing real id");
+        return None;
+    };
+    let rip = match bytes_to_ip(&rid.ip) {
+        Ok(ip) => ip,
+        Err(e) => {
+            log::warn!("dropped real stats row: invalid ip bytes: {e}");
+            return None;
+        }
+    };
     let rs = real.stats.as_ref();
     Some(RealStatsRow {
         real: format_ip_port(rip, rid.port),
-        enabled: real.enabled.to_string(),
-        weight: rcfg.weight.to_string(),
-        effective_weight: real.effective_weight.to_string(),
-        packets: rs.map_or(0, |s| s.packets).to_string(),
-        bytes: rs.map_or(0, |s| s.bytes).to_string(),
-        active_sessions: real.active_sessions.to_string(),
-        created_sessions: rs.map_or(0, |s| s.created_sessions).to_string(),
+        enabled: real.enabled,
+        weight: rcfg.weight,
+        effective_weight: real.effective_weight,
+        packets: rs.map_or(0, |s| s.packets),
+        bytes: rs.map_or(0, |s| s.bytes),
+        active_sessions: real.active_sessions,
+        created_sessions: rs.map_or(0, |s| s.created_sessions),
         last_packet: real
             .last_packet_timestamp
             .as_ref()
             .map_or_else(|| "-".to_string(), format_timestamp),
-        disabled_pkts: rs.map_or(0, |s| s.packets_real_disabled).to_string(),
-        icmp_pkts: rs.map_or(0, |s| s.error_icmp_packets).to_string(),
+        disabled_pkts: rs.map_or(0, |s| s.packets_real_disabled),
+        icmp_pkts: rs.map_or(0, |s| s.error_icmp_packets),
     })
 }
 
@@ -312,11 +329,11 @@ struct RealBasicRow {
     #[tabled(rename = "Real")]
     real: String,
     #[tabled(rename = "Enabled")]
-    enabled: String,
+    enabled: bool,
     #[tabled(rename = "Wght")]
-    weight: String,
+    weight: u32,
     #[tabled(rename = "Eff Wght")]
-    effective_weight: String,
+    effective_weight: u64,
 }
 
 // Streaming session output uses fixed-width columns rather than `Tabled`,
@@ -377,7 +394,7 @@ struct StatsRow {
     #[tabled(rename = "Metric")]
     metric: String,
     #[tabled(rename = "Value")]
-    value: String,
+    value: u64,
 }
 
 impl StatsRow {
@@ -385,20 +402,8 @@ impl StatsRow {
         Self {
             category: category.to_string(),
             metric: metric.to_string(),
-            value: value.to_string(),
+            value,
         }
-    }
-
-    fn empty() -> Self {
-        Self {
-            category: String::new(),
-            metric: String::new(),
-            value: String::new(),
-        }
-    }
-
-    fn is_blank(&self) -> bool {
-        self.category.is_empty() && self.metric.is_empty() && self.value.is_empty()
     }
 }
 
@@ -407,25 +412,25 @@ struct RealStatsRow {
     #[tabled(rename = "Real")]
     real: String,
     #[tabled(rename = "Enabled")]
-    enabled: String,
+    enabled: bool,
     #[tabled(rename = "Wght")]
-    weight: String,
+    weight: u32,
     #[tabled(rename = "Eff Wght")]
-    effective_weight: String,
+    effective_weight: u64,
     #[tabled(rename = "Pkts")]
-    packets: String,
+    packets: u64,
     #[tabled(rename = "Bytes")]
-    bytes: String,
+    bytes: u64,
     #[tabled(rename = "Last Pkt")]
     last_packet: String,
     #[tabled(rename = "Dis Pkts")]
-    disabled_pkts: String,
+    disabled_pkts: u64,
     #[tabled(rename = "ICMP Err")]
-    icmp_pkts: String,
+    icmp_pkts: u64,
     #[tabled(rename = "Sess Act")]
-    active_sessions: String,
+    active_sessions: u64,
     #[tabled(rename = "Sess Crt")]
-    created_sessions: String,
+    created_sessions: u64,
 }
 
 pub fn prettify_json(value: &mut serde_json::Value) {

@@ -6,7 +6,9 @@ mod sessions;
 
 use std::{
     error::Error,
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    fmt::{self, Display, Formatter},
+    net::{AddrParseError, IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    str::FromStr,
 };
 
 use clap::{ArgAction, CommandFactory, Parser};
@@ -120,7 +122,7 @@ pub struct MetricsCmd {}
 pub struct FilterFlags {
     /// Filter by VIP address.
     #[arg(long)]
-    pub vip: Option<String>,
+    pub vip: Option<IpAddr>,
     /// Filter by virtual service port.
     #[arg(long)]
     pub vs_port: Option<u32>,
@@ -129,7 +131,7 @@ pub struct FilterFlags {
     pub proto: Option<Proto>,
     /// Filter by real server IP.
     #[arg(long)]
-    pub real_ip: Option<String>,
+    pub real_ip: Option<IpAddr>,
     /// Filter by real server port.
     #[arg(long)]
     pub real_port: Option<u32>,
@@ -143,31 +145,81 @@ pub enum Proto {
     Udp,
 }
 
-/// Parse a VS identifier string: "ip:port/proto" or "[ipv6]:port/proto".
-pub fn parse_vs_identifier(vs: &str) -> Result<(IpAddr, u16, balancerpb::TransportProto), Box<dyn Error>> {
-    let vs_parts: Vec<&str> = vs.split('/').collect();
-    if vs_parts.len() != 2 {
-        return Err(format!(
-            "invalid --vs format: '{}'. Expected: 'ip:port/proto' or '[ipv6]:port/proto'",
-            vs
-        )
-        .into());
+#[derive(Debug, Clone)]
+pub struct VsId {
+    pub addr: IpAddr,
+    pub port: u16,
+    pub proto: balancerpb::TransportProto,
+}
+
+#[derive(Debug)]
+pub enum VsIdParseError {
+    MissingProto,
+    InvalidSocket(AddrParseError),
+    InvalidProto(String),
+}
+
+impl Display for VsIdParseError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), fmt::Error> {
+        match self {
+            Self::MissingProto => f.write_str("invalid --vs format: expected 'ip:port/proto' or '[ipv6]:port/proto'"),
+            Self::InvalidSocket(e) => write!(f, "invalid address:port: {e}"),
+            Self::InvalidProto(p) => write!(f, "invalid proto: '{p}'. Expected 'tcp' or 'udp'"),
+        }
     }
+}
 
-    let addr_port = vs_parts[0];
-    let proto = if vs_parts[1].eq_ignore_ascii_case("tcp") {
-        balancerpb::TransportProto::Tcp
-    } else if vs_parts[1].eq_ignore_ascii_case("udp") {
-        balancerpb::TransportProto::Udp
-    } else {
-        return Err(format!("invalid proto: '{}'. Expected 'tcp' or 'udp'", vs_parts[1]).into());
-    };
+impl Error for VsIdParseError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::InvalidSocket(e) => Some(e),
+            _ => None,
+        }
+    }
+}
 
-    let socket: SocketAddr = addr_port
-        .parse()
-        .map_err(|e| format!("invalid address:port '{}': {}", addr_port, e))?;
+impl FromStr for VsId {
+    type Err = VsIdParseError;
 
-    Ok((socket.ip(), socket.port(), proto))
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let (addr_port, proto_str) = s.rsplit_once('/').ok_or(VsIdParseError::MissingProto)?;
+
+        let proto = if proto_str.eq_ignore_ascii_case("tcp") {
+            balancerpb::TransportProto::Tcp
+        } else if proto_str.eq_ignore_ascii_case("udp") {
+            balancerpb::TransportProto::Udp
+        } else {
+            return Err(VsIdParseError::InvalidProto(proto_str.to_string()));
+        };
+
+        let socket: SocketAddr = addr_port.parse().map_err(VsIdParseError::InvalidSocket)?;
+
+        Ok(Self {
+            addr: socket.ip(),
+            port: socket.port(),
+            proto,
+        })
+    }
+}
+
+impl Display for VsId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), fmt::Error> {
+        let proto = match self.proto {
+            balancerpb::TransportProto::Tcp => "tcp",
+            balancerpb::TransportProto::Udp => "udp",
+        };
+        write!(f, "{}/{}", format_ip_port(self.addr, u32::from(self.port)), proto)
+    }
+}
+
+impl From<&VsId> for balancerpb::VsIdentifier {
+    fn from(vs: &VsId) -> Self {
+        Self {
+            addr: ip_to_bytes(vs.addr),
+            port: u32::from(vs.port),
+            proto: vs.proto as i32,
+        }
+    }
 }
 
 pub fn ip_to_bytes(ip: IpAddr) -> Vec<u8> {
@@ -211,41 +263,26 @@ pub fn format_ip_port(ip: IpAddr, port: u32) -> String {
 }
 
 impl FilterFlags {
-    pub fn to_proto(&self) -> Result<Option<balancerpb::Filter>, Box<dyn Error>> {
+    pub fn to_proto(&self) -> Option<balancerpb::Filter> {
         if self.vip.is_none()
             && self.vs_port.is_none()
             && self.proto.is_none()
             && self.real_ip.is_none()
             && self.real_port.is_none()
         {
-            return Ok(None);
+            return None;
         }
 
-        let vip = match &self.vip {
-            Some(s) => {
-                let ip: IpAddr = s.parse().map_err(|e| format!("invalid VIP '{}': {}", s, e))?;
-                Some(ip_to_bytes(ip))
-            }
-            None => None,
-        };
-        let real_ip = match &self.real_ip {
-            Some(s) => {
-                let ip: IpAddr = s.parse().map_err(|e| format!("invalid real IP '{}': {}", s, e))?;
-                Some(ip_to_bytes(ip))
-            }
-            None => None,
-        };
-
-        Ok(Some(balancerpb::Filter {
-            vip,
+        Some(balancerpb::Filter {
+            vip: self.vip.map(ip_to_bytes),
             vs_port: self.vs_port,
             proto: self.proto.as_ref().map(|p| match p {
                 Proto::Tcp => balancerpb::TransportProto::Tcp as i32,
                 Proto::Udp => balancerpb::TransportProto::Udp as i32,
             }),
-            real_ip,
+            real_ip: self.real_ip.map(ip_to_bytes),
             real_port: self.real_port,
-        }))
+        })
     }
 }
 

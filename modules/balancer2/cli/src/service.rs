@@ -1,4 +1,4 @@
-use std::{error::Error, net::IpAddr};
+use std::{error::Error, net::IpAddr, time};
 
 use ptree::TreeBuilder;
 use tonic::codec::CompressionEncoding;
@@ -10,9 +10,9 @@ use yanet_cli_balancer2::balancerpb::{
 use ync::client::{ConnectionArgs, LayeredChannel};
 
 use crate::{
-    ConfigCmd, MetricsCmd, ModeCmd, ShowCmd, UpdateCmd,
+    ConfigCmd, MetricsCmd, ModeCmd, ShowCmd, UpdateCmd, VsId,
     config::{BalancerConfig, ConfigParts},
-    display, ip_to_bytes, parse_vs_identifier,
+    display, ip_to_bytes,
     reals::{DisableRealCmd, EnableRealCmd, RealsMode},
     sessions::{SessionsMode, SessionsShowCmd, SessionsUpdateCmd},
 };
@@ -122,7 +122,7 @@ impl Balancer2Service {
                 None
             };
 
-        let filter = cmd.filter.to_proto()?;
+        let filter = cmd.filter.to_proto();
         let request = GetStateRequest {
             config_name: cmd.name,
             packet_handler_ref,
@@ -163,19 +163,19 @@ impl Balancer2Service {
     async fn sessions_show(&mut self, cmd: SessionsShowCmd) -> Result<(), Box<dyn Error>> {
         let request = ListSessionsRequest {
             sessions_state_name: cmd.name,
-            filter: cmd.filter.to_proto()?,
+            filter: cmd.filter.to_proto(),
         };
         log::trace!("list sessions request: {request:?}");
 
         let mut stream = self.client.list_sessions(request).await?.into_inner();
 
         display::print_sessions_header();
+        let now = time::SystemTime::now()
+            .duration_since(time::UNIX_EPOCH)
+            .expect("system clock before UNIX epoch")
+            .as_secs() as i64;
         let mut printed = 0usize;
         while let Some(session) = stream.message().await? {
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("system clock before UNIX epoch")
-                .as_secs() as i64;
             display::print_session(&session, now);
             printed += 1;
         }
@@ -217,53 +217,42 @@ impl Balancer2Service {
     }
 
     async fn enable_real(&mut self, cmd: EnableRealCmd) -> Result<(), Box<dyn Error>> {
-        let updates = build_real_updates(&cmd.vs, &cmd.reals, Some(true), cmd.weight)?;
+        let updates = build_real_updates(&cmd.vs, &cmd.reals, Some(true), cmd.weight);
         self.send_real_updates(cmd.name, updates).await
     }
 
     async fn disable_real(&mut self, cmd: DisableRealCmd) -> Result<(), Box<dyn Error>> {
-        let updates = build_real_updates(&cmd.vs, &cmd.reals, Some(false), None)?;
+        let updates = build_real_updates(&cmd.vs, &cmd.reals, Some(false), None);
         self.send_real_updates(cmd.name, updates).await
     }
 
     async fn send_real_updates(&mut self, config_name: String, updates: Vec<RealUpdate>) -> Result<(), Box<dyn Error>> {
-        let success_msg = format!("balancer '{}' reals updated", config_name);
-        let request = UpdateRealsRequest { config_name, updates };
+        let request = UpdateRealsRequest {
+            config_name: config_name.clone(),
+            updates,
+        };
         log::trace!("update reals request: {request:?}");
 
         let response = self.client.update_reals(request).await?.into_inner();
         log::debug!("update reals response: {response:?}");
 
-        println!("{success_msg}");
+        println!("balancer '{config_name}' reals updated");
         Ok(())
     }
 }
 
-fn build_real_updates(
-    vs: &str,
-    reals: &[String],
-    enable: Option<bool>,
-    weight: Option<u32>,
-) -> Result<Vec<RealUpdate>, Box<dyn Error>> {
-    let (ip, port, proto) = parse_vs_identifier(vs)?;
-    let vs_id = balancerpb::VsIdentifier {
-        addr: ip_to_bytes(ip),
-        port: port as u32,
-        proto: proto as i32,
-    };
+fn build_real_updates(vs: &VsId, reals: &[IpAddr], enable: Option<bool>, weight: Option<u32>) -> Vec<RealUpdate> {
+    let vs_id: balancerpb::VsIdentifier = vs.into();
 
     reals
         .iter()
-        .map(|r| {
-            let real_ip: IpAddr = r.parse().map_err(|e| format!("invalid real IP '{}': {}", r, e))?;
-            Ok(RealUpdate {
-                real_id: Some(balancerpb::RealIdentifier {
-                    vs: Some(vs_id.clone()),
-                    real: Some(balancerpb::RelativeRealIdentifier { ip: ip_to_bytes(real_ip), port: 0 }),
-                }),
-                enable,
-                weight,
-            })
+        .map(|real_ip| RealUpdate {
+            real_id: Some(balancerpb::RealIdentifier {
+                vs: Some(vs_id.clone()),
+                real: Some(balancerpb::RelativeRealIdentifier { ip: ip_to_bytes(*real_ip), port: 0 }),
+            }),
+            enable,
+            weight,
         })
         .collect()
 }
