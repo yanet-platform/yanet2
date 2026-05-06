@@ -610,45 +610,35 @@ dataplane_worker_start(struct dataplane_worker *worker) {
 
 	dp_worker->rx_count =
 		counter_get_address(
-			1,
-			dp_worker->idx,
-			ADDR_OF(&dp_config->counter_storage)
+			1, dp_worker->idx, ADDR_OF(&dp_config->counter_storage)
 		) +
 		0;
-	dp_worker->rx_size = counter_get_address(
-				     1,
-				     dp_worker->idx,
-				     ADDR_OF(&dp_config->counter_storage)
-			     ) +
-			     1;
+	dp_worker->rx_size =
+		counter_get_address(
+			1, dp_worker->idx, ADDR_OF(&dp_config->counter_storage)
+		) +
+		1;
 
 	dp_worker->tx_count =
 		counter_get_address(
-			2,
-			dp_worker->idx,
-			ADDR_OF(&dp_config->counter_storage)
+			2, dp_worker->idx, ADDR_OF(&dp_config->counter_storage)
 		) +
 		0;
-	dp_worker->tx_size = counter_get_address(
-				     2,
-				     dp_worker->idx,
-				     ADDR_OF(&dp_config->counter_storage)
-			     ) +
-			     1;
+	dp_worker->tx_size =
+		counter_get_address(
+			2, dp_worker->idx, ADDR_OF(&dp_config->counter_storage)
+		) +
+		1;
 
 	dp_worker->remote_rx_count =
 		counter_get_address(
-			3,
-			dp_worker->idx,
-			ADDR_OF(&dp_config->counter_storage)
+			3, dp_worker->idx, ADDR_OF(&dp_config->counter_storage)
 		) +
 		0;
 
 	dp_worker->remote_tx_count =
 		counter_get_address(
-			4,
-			dp_worker->idx,
-			ADDR_OF(&dp_config->counter_storage)
+			4, dp_worker->idx, ADDR_OF(&dp_config->counter_storage)
 		) +
 		0;
 

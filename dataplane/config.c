@@ -139,13 +139,15 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 				state = state_instance;
 				break;
 			case state_globalstat_dp_memory:
-				dataplane->globalstat.dp_memory = strtol(start, &end, 10);
+				dataplane->globalstat.dp_memory =
+					strtol(start, &end, 10);
 				if (*end != '\0')
 					goto error;
 				state = state_globalstat;
 				break;
 			case state_globalstat_cp_memory:
-				dataplane->globalstat.cp_memory = strtol(start, &end, 10);
+				dataplane->globalstat.cp_memory =
+					strtol(start, &end, 10);
 				if (*end != '\0')
 					goto error;
 				state = state_globalstat;
@@ -254,7 +256,7 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 					state = state_devices;
 				} else if (!strcmp("connections", start)) {
 					state = state_connections;
-				} else if (!strcmp("globalstats", start)) { 
+				} else if (!strcmp("globalstats", start)) {
 					state = state_globalstats;
 				} else if (!strcmp("updatetimes", start)) {
 					state = state_updatetimes;

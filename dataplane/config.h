@@ -39,9 +39,8 @@ struct dataplane_globalstat_config {
 };
 
 struct dataplane_events_updatetime {
-    uint64_t nic_updatetime;
+	uint64_t nic_updatetime;
 };
-
 
 struct dataplane_config {
 	char storage[80];
@@ -59,7 +58,7 @@ struct dataplane_config {
 
 	struct dataplane_globalstat_config globalstat;
 	struct dataplane_events_updatetime updatetimes;
-	
+
 	char loglevel[32];
 };
 

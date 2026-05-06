@@ -442,7 +442,8 @@ dataplane_init(
 			instance_config->cp_memory + instance_config->dp_memory;
 	}
 
-	storage_size += config->globalstat.cp_memory + config->globalstat.dp_memory;
+	storage_size +=
+		config->globalstat.cp_memory + config->globalstat.dp_memory;
 
 	// FIXME: handle errors
 	int mem_fd = open(
@@ -599,13 +600,11 @@ dataplane_init(
 			instance_config->dp_memory + instance_config->cp_memory;
 	}
 
-	//alloc global
+	// alloc global
 	{
 		LOG(INFO, "initialize storage for globalstats");
 		int rc = dataplane_globalstat_storage_init(
-			dataplane,
-			storage + instance_offset,
-			config
+			dataplane, storage + instance_offset, config
 		);
 
 		if (rc == -1) {
@@ -635,10 +634,10 @@ dataplane_init(
 			return -1;
 		}
 		SET_OFFSET_OF(
-			&dataplane->global_cp_config->cp_config_gen, cp_config_gen
+			&dataplane->global_cp_config->cp_config_gen,
+			cp_config_gen
 		);
 	}
-	
 
 	size_t pci_port_count = 0;
 	const char **pci_port_names =
@@ -706,9 +705,7 @@ dataplane_init(
 		);
 
 		yanet_error *err = NULL;
-		if (counter_registry_link(
-			    &dp_config->counters, NULL, &err
-		    )) {
+		if (counter_registry_link(&dp_config->counters, NULL, &err)) {
 			LOG(ERROR,
 			    "failed to link counter registry: %s",
 			    yanet_error_message(err));
@@ -727,7 +724,7 @@ dataplane_init(
 		);
 	}
 
-	//init dataplane global
+	// init dataplane global
 	{
 		struct dp_config *dp_config = dataplane->global_dp_config;
 
@@ -736,7 +733,7 @@ dataplane_init(
 			&dp_config->memory_context,
 			1 // only for global counters
 		);
-		
+
 		struct cp_config *cp_config = dataplane->global_cp_config;
 		counter_storage_allocator_init(
 			&cp_config->counter_storage_allocator,
@@ -745,22 +742,19 @@ dataplane_init(
 		);
 
 		if (dataplane_globalstat_register_counters(dp_config)) {
-			LOG(ERROR,
-			    "failed to register global NIC counters");
+			LOG(ERROR, "failed to register global NIC counters");
 			return -1;
 		}
 
 		yanet_error *err = NULL;
-		if (counter_registry_link(
-			    &dp_config->counters, NULL, &err
-		    )) {
+		if (counter_registry_link(&dp_config->counters, NULL, &err)) {
 			LOG(ERROR,
 			    "failed to link counter registry: %s",
 			    yanet_error_message(err));
 			yanet_error_free(err);
 			return -1;
 		}
-	
+
 		SET_OFFSET_OF(
 			&dp_config->counter_storage,
 			counter_storage_spawn(
@@ -780,19 +774,21 @@ dataplane_start(struct dataplane *dataplane) {
 	for (size_t dev_idx = 0; dev_idx < dataplane->device_count; ++dev_idx) {
 		dataplane_device_start(dataplane, dataplane->devices + dev_idx);
 	}
-	
+
 	return 0;
 }
 
 int
-dataplane_daemons_start(struct dataplane *dataplane, struct dataplane_config *config) {
+dataplane_daemons_start(
+	struct dataplane *dataplane, struct dataplane_config *config
+) {
 	pthread_t thread_id;
 
 	struct stat_thread_args {
 		struct dataplane *dataplane;
 		struct dataplane_config *config;
 	};
-	
+
 	struct stat_thread_args *args = malloc(sizeof(struct stat_thread_args));
 	if (args == NULL) {
 		LOG(ERROR, "failed to allocate memory for stat_thread_args");

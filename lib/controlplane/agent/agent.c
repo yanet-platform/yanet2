@@ -72,7 +72,9 @@ yanet_shm_dp_config(struct yanet_shm *shm, uint32_t instance_idx) {
 
 struct dp_config *
 yanet_shm_global_dp_config(struct yanet_shm *shm) {
-    return dp_config_nextk((struct dp_config *)shm, yanet_shm_instance_count(shm));
+	return dp_config_nextk(
+		(struct dp_config *)shm, yanet_shm_instance_count(shm)
+	);
 }
 
 uint32_t
@@ -1641,8 +1643,7 @@ yanet_get_pipeline_counters(
 struct counter_handle_list *
 yanet_get_nic_counters(struct dp_config *dp_config) {
 	struct counter_registry *counter_registry = &dp_config->counters;
-	struct counter_storage *storage =
-		ADDR_OF(&dp_config->counter_storage);
+	struct counter_storage *storage = ADDR_OF(&dp_config->counter_storage);
 
 	uint64_t count = counter_registry->count;
 	struct counter *names = ADDR_OF(&counter_registry->names);
@@ -1739,8 +1740,7 @@ yanet_get_counter_value(
 struct counter_handle_list *
 yanet_get_worker_counters(struct dp_config *dp_config) {
 	struct counter_registry *counter_registry = &dp_config->counters;
-	struct counter_storage *storage =
-		ADDR_OF(&dp_config->counter_storage);
+	struct counter_storage *storage = ADDR_OF(&dp_config->counter_storage);
 
 	uint64_t count = counter_registry->count;
 	struct counter *names = ADDR_OF(&counter_registry->names);
