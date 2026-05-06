@@ -27,10 +27,10 @@ func New(service MetricsAdapter, log *zap.Logger) *Handler {
 	}
 }
 
-func (h *Handler) GetMetrics(ctx context.Context, req *metricspb.GetMetricsRequest) (*metricspb.GetMetricsResponse, error) {
-	resp, err := h.service.GetMetrics(ctx, req)
+func (m *Handler) GetMetrics(ctx context.Context, req *metricspb.GetMetricsRequest) (*metricspb.GetMetricsResponse, error) {
+	resp, err := m.service.GetMetrics(ctx, req)
 	if err != nil {
-		h.log.Error("GetMetrics RPC failed", zap.Error(err))
+		m.log.Error("GetMetrics RPC failed", zap.Error(err))
 		return nil, err
 	}
 	return resp, nil
