@@ -1,0 +1,23 @@
+port: 8080
+
+endpoint: "[::1]:8080"
+
+format: "prometheus"
+
+modules:
+  [
+    "forward",
+    "route",
+    "decap",
+    "dscp",
+    "nat64",
+    "balancer",
+    "pdump",
+    "acl",
+    "fwstate",
+    "route_mpls",
+  ]
+
+logging:
+  level: 0
+
