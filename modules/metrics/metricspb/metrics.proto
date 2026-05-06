@@ -1,10 +1,9 @@
 syntax = "proto3";
 
-package metrics;
-option go_package = "github.com/yanet-platform/yanet2/modules/metrics/metricspb";
+package metricspb;
+option go_package = "github.com/yanet-platform/yanet2/modules/metrics/metricspb;metricspb";
 
 import "commonpb/metric.proto";
-
 
 service MetricsAdapter {
   rpc GetMetrics(GetMetricsRequest) returns (GetMetricsResponse) {}
@@ -12,6 +11,4 @@ service MetricsAdapter {
 
 message GetMetricsRequest {}
 
-message GetMetricsResponse {
-  string metrics = 1;
-}
+message GetMetricsResponse { string metrics = 1; }
