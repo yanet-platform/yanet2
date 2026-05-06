@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/yanet-platform/yanet2/common/go/logging"
+	"github.com/yanet-platform/yanet2/modules/metrics/adapter"
 	"github.com/yanet-platform/yanet2/modules/metrics/config"
 	"github.com/yanet-platform/yanet2/modules/metrics/controller"
 	"github.com/yanet-platform/yanet2/modules/metrics/format"
@@ -38,7 +39,7 @@ func main() {
 		log.Fatal("failed to listen", zap.Error(err))
 	}
 
-	log.Info("Starting metric adapter server", zap.String("endpoint", cfg.Endpoint), zap.Int("port", cfg.Port))
+	log.Info("Starting metric adapter server", zap.Int("port", cfg.Port))
 
 	typeFormat := format.Format(format.ConfigFormat(cfg.Format))
 
@@ -53,7 +54,15 @@ func main() {
 		log.Fatal("failed to create formatter", zap.String("format", cfg.Format))
 	}
 
-	ctrl := controller.NewContoller(formatter)
+	clientConn, err := grpc.NewClient(cfg.ModulesAdress)
+	if err != nil {
+		log.Fatal("failed to connect to modules", zap.Error(err))
+	}
+	defer clientConn.Close()
+
+	collector := adapter.NewCollector(clientConn, cfg.Modules)
+
+	ctrl := controller.NewContoller(formatter, collector)
 
 	grpchandler.Register(grpcServer, ctrl)
 

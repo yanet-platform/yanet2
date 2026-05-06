@@ -12,7 +12,7 @@ type MetricsService interface {
 }
 
 type Handler struct {
-	metricspb.UnimplementedMetricsServiceServer
+	metricspb.UnimplementedMetricsAdapterServer
 	service MetricsService
 }
 
@@ -23,5 +23,5 @@ func New(service MetricsService) *Handler {
 }
 
 func Register(gRPC *grpc.Server, service MetricsService) {
-	metricspb.RegisterMetricsServiceServer(gRPC, New(service))
+	metricspb.RegisterMetricsAdapterServer(gRPC, New(service))
 }

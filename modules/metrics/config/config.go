@@ -9,18 +9,18 @@ import (
 )
 
 type Config struct {
-	Port     int            `yaml:"port"`
-	Endpoint string         `yaml:"endpoint"`
-	Format   string         `yaml:"format"`
-	Modules  []string       `yaml:"modules"`
-	Logging  logging.Config `yaml:"logging"`
+	Port          int            `yaml:"port"`
+	ModulesAdress string         `yaml:"endpoint"`
+	Format        string         `yaml:"format"`
+	Modules       []string       `yaml:"modules"`
+	Logging       logging.Config `yaml:"logging"`
 }
 
 func DefaultConfig() *Config {
 	return &Config{
-		Port:     8080,
-		Endpoint: "[::1]:8080",
-		Format:   "prometheus",
+		Port:          8080,
+		ModulesAdress: "[::1]:8080",
+		Format:        "prometheus",
 		Logging: logging.Config{
 			Level: 0,
 		},

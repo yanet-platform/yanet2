@@ -4,6 +4,14 @@ package commonpb;
 
 option go_package = "github.com/yanet-platform/yanet2/common/commonpb;commonpb";
 
+service MetricsService {
+  rpc GetMetrics(GetMetricsRequest) returns (GetMetricsResponse) {}
+}
+
+message GetMetricsRequest {}
+
+message GetMetricsResponse { repeated commonpb.Metric metrics = 1; }
+
 message Metric {
   string name = 1;
   repeated Label labels = 2;
