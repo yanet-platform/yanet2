@@ -4,7 +4,10 @@ mod reals;
 mod service;
 mod sessions;
 
-use std::error::Error;
+use std::{
+    error::Error,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+};
 
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
@@ -45,8 +48,6 @@ pub enum ModeCmd {
     Reals(reals::RealsCmd),
 }
 
-// ─── Update ──────────────────────────────────────────────────────────────────
-
 #[derive(Debug, Clone, Parser)]
 pub struct UpdateCmd {
     /// Balancer configuration name.
@@ -61,28 +62,18 @@ pub struct UpdateCmd {
     pub sessions: Option<String>,
 }
 
-// ─── Config ──────────────────────────────────────────────────────────────────
-
 #[derive(Debug, Clone, Parser)]
 pub struct ConfigCmd {
-    /// Balancer configuration name (optional, auto-selects if only one
-    /// exists).
+    /// Balancer configuration name.
     #[arg(long, short = 'n')]
-    pub name: Option<String>,
+    pub name: String,
 }
-
-// ─── Show ────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Parser)]
 pub struct ShowCmd {
-    /// Balancer configuration name (optional, auto-selects if only one
-    /// exists).
+    /// Balancer configuration name.
     #[arg(long, short = 'n')]
-    pub name: Option<String>,
-
-    /// Tabled output: VS info, scheduler, flags, reals with weights.
-    #[arg(long, short = 't')]
-    pub table: bool,
+    pub name: String,
 
     /// Show all counters, active sessions and last packet timestamps.
     #[arg(long, short = 's')]
@@ -101,7 +92,7 @@ pub struct ShowCmd {
     #[arg(long)]
     pub decap: bool,
 
-    /// Enable all output sections (--table --stats --acl --peers --decap).
+    /// Enable all output sections (--stats --acl --peers --decap).
     #[arg(long, short = 'd')]
     pub detail: bool,
 
@@ -122,19 +113,8 @@ pub struct ShowCmd {
     pub chain: Option<String>,
 }
 
-impl ShowCmd {
-    /// Whether tabled output mode is active.
-    pub fn needs_table(&self) -> bool {
-        self.table || self.stats || self.acl || self.peers || self.decap || self.detail
-    }
-}
-
-// ─── Metrics ────────────────────────────────────────────────────────────────
-
 #[derive(Debug, Clone, Parser)]
 pub struct MetricsCmd {}
-
-// ─── Shared Filter Flags ─────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Parser)]
 pub struct FilterFlags {
@@ -155,89 +135,72 @@ pub struct FilterFlags {
     pub real_port: Option<u32>,
 }
 
+// Mirrors config::Proto for CLI filter flags; the two cannot share a type
+// because of orphan-rule + derive constraints.
 #[derive(Debug, Clone, clap::ValueEnum)]
 pub enum Proto {
     Tcp,
     Udp,
 }
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
-/// Parse a VS identifier string: "ip:port/proto", "[ipv6]:port/proto", or
-/// "ipv6:port/proto".
-pub fn parse_vs_identifier(vs_str: &str) -> Result<(std::net::IpAddr, u16, balancerpb::TransportProto), String> {
-    let vs_parts: Vec<&str> = vs_str.split('/').collect();
+/// Parse a VS identifier string: "ip:port/proto" or "[ipv6]:port/proto".
+pub fn parse_vs_identifier(vs: &str) -> Result<(IpAddr, u16, balancerpb::TransportProto), Box<dyn Error>> {
+    let vs_parts: Vec<&str> = vs.split('/').collect();
     if vs_parts.len() != 2 {
         return Err(format!(
-            "invalid --vs format: '{}'. Expected: 'ip:port/proto', '[ipv6]:port/proto'",
-            vs_str
-        ));
+            "invalid --vs format: '{}'. Expected: 'ip:port/proto' or '[ipv6]:port/proto'",
+            vs
+        )
+        .into());
     }
 
     let addr_port = vs_parts[0];
-    let proto = match vs_parts[1].to_uppercase().as_str() {
-        "TCP" => balancerpb::TransportProto::Tcp,
-        "UDP" => balancerpb::TransportProto::Udp,
-        other => return Err(format!("invalid proto: '{}'. Expected 'tcp' or 'udp'", other)),
-    };
-
-    let (ip_str, port_str) = if addr_port.starts_with('[') {
-        let bracket_end = addr_port
-            .find(']')
-            .ok_or_else(|| format!("invalid IPv6 bracket notation: '{}'", addr_port))?;
-        let ip_part = &addr_port[1..bracket_end];
-        let remaining = &addr_port[bracket_end + 1..];
-        if !remaining.starts_with(':') {
-            return Err(format!("expected ':' after ']' in '{}'", addr_port));
-        }
-        (ip_part, &remaining[1..])
+    let proto = if vs_parts[1].eq_ignore_ascii_case("tcp") {
+        balancerpb::TransportProto::Tcp
+    } else if vs_parts[1].eq_ignore_ascii_case("udp") {
+        balancerpb::TransportProto::Udp
     } else {
-        let parts: Vec<&str> = addr_port.rsplitn(2, ':').collect();
-        if parts.len() != 2 {
-            return Err(format!("invalid address:port format: '{}'", addr_port));
-        }
-        (parts[1], parts[0])
+        return Err(format!("invalid proto: '{}'. Expected 'tcp' or 'udp'", vs_parts[1]).into());
     };
 
-    let port: u16 = port_str
+    let socket: SocketAddr = addr_port
         .parse()
-        .map_err(|e| format!("invalid port '{}': {}", port_str, e))?;
-    let ip: std::net::IpAddr = ip_str.parse().map_err(|e| format!("invalid IP '{}': {}", ip_str, e))?;
+        .map_err(|e| format!("invalid address:port '{}': {}", addr_port, e))?;
 
-    Ok((ip, port, proto))
+    Ok((socket.ip(), socket.port(), proto))
 }
 
-pub fn ip_to_bytes(ip: std::net::IpAddr) -> Vec<u8> {
+pub fn ip_to_bytes(ip: IpAddr) -> Vec<u8> {
     match ip {
-        std::net::IpAddr::V4(v4) => v4.octets().to_vec(),
-        std::net::IpAddr::V6(v6) => v6.octets().to_vec(),
+        IpAddr::V4(v4) => v4.octets().to_vec(),
+        IpAddr::V6(v6) => v6.octets().to_vec(),
     }
 }
 
-pub fn bytes_to_ip(bytes: &[u8]) -> Result<std::net::IpAddr, String> {
+pub fn bytes_to_ip(bytes: &[u8]) -> Result<IpAddr, String> {
     match bytes.len() {
         4 => {
             let arr: [u8; 4] = bytes.try_into().map_err(|_| "invalid IPv4 bytes")?;
-            Ok(std::net::IpAddr::V4(std::net::Ipv4Addr::from(arr)))
+            Ok(IpAddr::V4(Ipv4Addr::from(arr)))
         }
         16 => {
             let arr: [u8; 16] = bytes.try_into().map_err(|_| "invalid IPv6 bytes")?;
-            Ok(std::net::IpAddr::V6(std::net::Ipv6Addr::from(arr)))
+            Ok(IpAddr::V6(Ipv6Addr::from(arr)))
         }
         n => Err(format!("invalid IP address length: {}", n)),
     }
 }
 
-pub fn format_ip_port(ip: std::net::IpAddr, port: u32) -> String {
+pub fn format_ip_port(ip: IpAddr, port: u32) -> String {
     match ip {
-        std::net::IpAddr::V4(_) => {
+        IpAddr::V4(_) => {
             if port == 0 {
                 format!("{}", ip)
             } else {
                 format!("{}:{}", ip, port)
             }
         }
-        std::net::IpAddr::V6(_) => {
+        IpAddr::V6(_) => {
             if port == 0 {
                 format!("{}", ip)
             } else {
@@ -248,7 +211,7 @@ pub fn format_ip_port(ip: std::net::IpAddr, port: u32) -> String {
 }
 
 impl FilterFlags {
-    pub fn to_proto(&self) -> Result<Option<balancerpb::Filter>, String> {
+    pub fn to_proto(&self) -> Result<Option<balancerpb::Filter>, Box<dyn Error>> {
         if self.vip.is_none()
             && self.vs_port.is_none()
             && self.proto.is_none()
@@ -260,14 +223,14 @@ impl FilterFlags {
 
         let vip = match &self.vip {
             Some(s) => {
-                let ip: std::net::IpAddr = s.parse().map_err(|e| format!("invalid VIP '{}': {}", s, e))?;
+                let ip: IpAddr = s.parse().map_err(|e| format!("invalid VIP '{}': {}", s, e))?;
                 Some(ip_to_bytes(ip))
             }
             None => None,
         };
         let real_ip = match &self.real_ip {
             Some(s) => {
-                let ip: std::net::IpAddr = s.parse().map_err(|e| format!("invalid real IP '{}': {}", s, e))?;
+                let ip: IpAddr = s.parse().map_err(|e| format!("invalid real IP '{}': {}", s, e))?;
                 Some(ip_to_bytes(ip))
             }
             None => None,
@@ -285,8 +248,6 @@ impl FilterFlags {
         }))
     }
 }
-
-// ─── Entry Point ─────────────────────────────────────────────────────────────
 
 async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
     let mut service = Balancer2Service::connect(&cmd.connection).await?;

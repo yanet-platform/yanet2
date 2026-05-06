@@ -16,10 +16,9 @@ pub enum RealsMode {
 
 #[derive(Debug, Clone, Parser)]
 pub struct EnableRealCmd {
-    /// Balancer configuration name (optional, auto-selects if only one
-    /// exists).
+    /// Balancer configuration name.
     #[arg(long, short = 'n')]
-    pub name: Option<String>,
+    pub name: String,
     /// Virtual service identifier: "ip:port/proto" or "[ipv6]:port/proto".
     #[arg(long)]
     pub vs: String,
@@ -34,10 +33,9 @@ pub struct EnableRealCmd {
 
 #[derive(Debug, Clone, Parser)]
 pub struct DisableRealCmd {
-    /// Balancer configuration name (optional, auto-selects if only one
-    /// exists).
+    /// Balancer configuration name.
     #[arg(long, short = 'n')]
-    pub name: Option<String>,
+    pub name: String,
     /// Virtual service identifier: "ip:port/proto" or "[ipv6]:port/proto".
     #[arg(long)]
     pub vs: String,

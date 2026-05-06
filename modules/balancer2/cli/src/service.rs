@@ -1,4 +1,4 @@
-use std::error::Error;
+use std::{error::Error, net::IpAddr};
 
 use ptree::TreeBuilder;
 use tonic::codec::CompressionEncoding;
@@ -66,7 +66,7 @@ impl Balancer2Service {
         let response = self.client.update_config(request).await?.into_inner();
         log::debug!("update config response: {response:?}");
 
-        log::info!("balancer '{}' updated", cmd.name);
+        println!("balancer '{}' updated", cmd.name);
         Ok(())
     }
 
@@ -88,8 +88,7 @@ impl Balancer2Service {
     }
 
     async fn config(&mut self, cmd: ConfigCmd) -> Result<(), Box<dyn Error>> {
-        let name = self.resolve_config_name(cmd.name).await?;
-        let request = GetConfigRequest { config_name: name };
+        let request = GetConfigRequest { config_name: cmd.name };
         log::trace!("get config request: {request:?}");
 
         let response = self.client.get_config(request).await?.into_inner();
@@ -104,8 +103,6 @@ impl Balancer2Service {
     }
 
     async fn show(&mut self, cmd: ShowCmd) -> Result<(), Box<dyn Error>> {
-        let needs_table = cmd.needs_table();
-
         let opts = display::ShowOptions {
             stats: cmd.stats || cmd.detail,
             acl: cmd.acl || cmd.detail,
@@ -126,9 +123,8 @@ impl Balancer2Service {
             };
 
         let filter = cmd.filter.to_proto()?;
-        let name = self.resolve_config_name(cmd.name).await?;
         let request = GetStateRequest {
-            config_name: name,
+            config_name: cmd.name,
             packet_handler_ref,
             filter,
         };
@@ -142,11 +138,7 @@ impl Balancer2Service {
             return Ok(());
         }
 
-        if needs_table {
-            display::print_table_view(&response.states, &opts);
-        } else {
-            display::print_compact(&response.states[0]);
-        }
+        display::print_table_view(&response.states, &opts);
 
         Ok(())
     }
@@ -175,16 +167,15 @@ impl Balancer2Service {
         };
         log::trace!("list sessions request: {request:?}");
 
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_err(|e| format!("system clock before unix epoch: {e}"))?
-            .as_secs() as i64;
-
         let mut stream = self.client.list_sessions(request).await?.into_inner();
 
         display::print_sessions_header();
         let mut printed = 0usize;
         while let Some(session) = stream.message().await? {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock before UNIX epoch")
+                .as_secs() as i64;
             display::print_session(&session, now);
             printed += 1;
         }
@@ -206,7 +197,7 @@ impl Balancer2Service {
         let response = self.client.update_sessions_state(request).await?.into_inner();
         log::debug!("update sessions state response: {response:?}");
 
-        log::info!("sessions state '{}' updated (capacity: {})", cmd.name, cmd.capacity);
+        println!("sessions state '{}' updated (capacity: {})", cmd.name, cmd.capacity);
         Ok(())
     }
 
@@ -227,44 +218,23 @@ impl Balancer2Service {
 
     async fn enable_real(&mut self, cmd: EnableRealCmd) -> Result<(), Box<dyn Error>> {
         let updates = build_real_updates(&cmd.vs, &cmd.reals, Some(true), cmd.weight)?;
-        let name = self.resolve_config_name(cmd.name).await?;
-        self.send_real_updates(name, updates).await
+        self.send_real_updates(cmd.name, updates).await
     }
 
     async fn disable_real(&mut self, cmd: DisableRealCmd) -> Result<(), Box<dyn Error>> {
         let updates = build_real_updates(&cmd.vs, &cmd.reals, Some(false), None)?;
-        let name = self.resolve_config_name(cmd.name).await?;
-        self.send_real_updates(name, updates).await
-    }
-
-    /// Resolve a balancer configuration name. If `name` is `Some`, it is
-    /// returned verbatim. If `None`, the gateway is queried with
-    /// `ListConfigs`: when exactly one configuration exists it is auto-
-    /// selected; otherwise an error is returned listing the available names.
-    async fn resolve_config_name(&mut self, name: Option<String>) -> Result<String, Box<dyn Error>> {
-        if let Some(name) = name {
-            return Ok(name);
-        }
-
-        let response = self.client.list_configs(ListConfigsRequest {}).await?.into_inner();
-        match response.names.as_slice() {
-            [one] => Ok(one.clone()),
-            [] => Err("no balancer configs registered".into()),
-            many => Err(format!("specify --name (configs found: {})", many.join(", ")).into()),
-        }
+        self.send_real_updates(cmd.name, updates).await
     }
 
     async fn send_real_updates(&mut self, config_name: String, updates: Vec<RealUpdate>) -> Result<(), Box<dyn Error>> {
-        let request = UpdateRealsRequest {
-            config_name: config_name.clone(),
-            updates,
-        };
+        let success_msg = format!("balancer '{}' reals updated", config_name);
+        let request = UpdateRealsRequest { config_name, updates };
         log::trace!("update reals request: {request:?}");
 
         let response = self.client.update_reals(request).await?.into_inner();
         log::debug!("update reals response: {response:?}");
 
-        log::info!("balancer '{}' reals updated", config_name);
+        println!("{success_msg}");
         Ok(())
     }
 }
@@ -274,7 +244,7 @@ fn build_real_updates(
     reals: &[String],
     enable: Option<bool>,
     weight: Option<u32>,
-) -> Result<Vec<RealUpdate>, String> {
+) -> Result<Vec<RealUpdate>, Box<dyn Error>> {
     let (ip, port, proto) = parse_vs_identifier(vs)?;
     let vs_id = balancerpb::VsIdentifier {
         addr: ip_to_bytes(ip),
@@ -285,7 +255,7 @@ fn build_real_updates(
     reals
         .iter()
         .map(|r| {
-            let real_ip: std::net::IpAddr = r.parse().map_err(|e| format!("invalid real IP '{}': {}", r, e))?;
+            let real_ip: IpAddr = r.parse().map_err(|e| format!("invalid real IP '{}': {}", r, e))?;
             Ok(RealUpdate {
                 real_id: Some(balancerpb::RealIdentifier {
                     vs: Some(vs_id.clone()),

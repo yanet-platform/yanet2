@@ -1,70 +1,10 @@
+use std::collections::HashMap;
+
 use tabled::Tabled;
 use yanet_cli_balancer2::balancerpb;
 use ync::display::print_table;
 
 use crate::{bytes_to_ip, format_ip_port};
-
-pub fn print_compact(state: &balancerpb::BalancerState) {
-    println!("Balancer: {}", state.config_name);
-    if !state.sessions_state_name.is_empty() {
-        println!(
-            "Sessions State: {} (capacity: {})",
-            state.sessions_state_name,
-            format_number(state.sessions_state_capacity),
-        );
-    }
-    println!("Active Sessions: {}", format_number(state.active_sessions));
-    println!();
-    const LINE_WIDTH: usize = 112;
-
-    println!("{:<46}{:<8}Flags", "VirtualService", "Sched");
-    println!(
-        "  -> {:<38}{:<10}{:<10}{:<12}{:<18}{:<18}",
-        "RemoteAddress:Port", "Enabled", "Weight", "Conns", "Pkts", "Bytes",
-    );
-    println!("{}", "\u{2500}".repeat(LINE_WIDTH));
-
-    let mut printed = 0usize;
-    for vs in state.vs.iter() {
-        let Some(cfg) = &vs.config else { continue };
-        let Some(id) = &cfg.id else { continue };
-        let ip = match bytes_to_ip(&id.addr) {
-            Ok(ip) => ip,
-            Err(_) => continue,
-        };
-        if printed > 0 {
-            println!("{}", "\u{2500}".repeat(LINE_WIDTH));
-        }
-        let proto = proto_str(id.proto);
-        let scheduler = scheduler_str(cfg.scheduler);
-        let flags = flags_str(cfg.flags.as_ref());
-        let vs_str = format!("{}/{}", format_ip_port(ip, id.port), proto);
-
-        println!("{:<46}{:<8}{}", vs_str, scheduler, flags);
-
-        for real in &vs.reals {
-            let Some(rcfg) = &real.config else { continue };
-            let Some(rid) = &rcfg.id else { continue };
-            let rip = match bytes_to_ip(&rid.ip) {
-                Ok(ip) => ip,
-                Err(_) => continue,
-            };
-            let real_addr = format_ip_port(rip, rid.port);
-            let rs = real.stats.as_ref();
-            let enabled = if real.enabled { "true" } else { "false" };
-            println!(
-                "  -> {:<38}{:<10}{:<10}{:<12}{:<18}{:<18}",
-                real_addr,
-                enabled,
-                format_number(rcfg.weight as u64),
-                format_number(real.active_sessions),
-                format_number(rs.map_or(0, |s| s.packets)),
-                format_number(rs.map_or(0, |s| s.bytes)),
-            );
-        }
-        printed += 1;
-    }
-}
 
 fn print_module_stats(state: &balancerpb::BalancerState) {
     println!("Module:");
@@ -72,44 +12,28 @@ fn print_module_stats(state: &balancerpb::BalancerState) {
     let mut rows: Vec<StatsRow> = Vec::new();
 
     if let Some(c) = &state.common_stats {
-        rows.push(StatsRow::new(
-            "Common",
-            "Incoming Pkts",
-            format_number(c.incoming_packets),
-        ));
-        rows.push(StatsRow::new("", "Incoming Bytes", format_number(c.incoming_bytes)));
-        rows.push(StatsRow::new(
-            "",
-            "Unexpected Net Proto",
-            format_number(c.unexpected_network_proto),
-        ));
+        rows.push(StatsRow::new("Common", "Incoming Pkts", c.incoming_packets));
+        rows.push(StatsRow::new("", "Incoming Bytes", c.incoming_bytes));
+        rows.push(StatsRow::new("", "Unexpected Net Proto", c.unexpected_network_proto));
         rows.push(StatsRow::new(
             "",
             "Unexpected Trans Proto",
-            format_number(c.unexpected_transport_proto),
+            c.unexpected_transport_proto,
         ));
-        rows.push(StatsRow::new("", "Decap Success", format_number(c.decap_successful)));
-        rows.push(StatsRow::new("", "Decap Failed", format_number(c.decap_failed)));
-        rows.push(StatsRow::new("", "Outgoing Pkts", format_number(c.outgoing_packets)));
-        rows.push(StatsRow::new("", "Outgoing Bytes", format_number(c.outgoing_bytes)));
-        rows.push(StatsRow::new(
-            "",
-            "No Headroom Pkts",
-            format_number(c.no_headroom_packets),
-        ));
+        rows.push(StatsRow::new("", "Decap Success", c.decap_successful));
+        rows.push(StatsRow::new("", "Decap Failed", c.decap_failed));
+        rows.push(StatsRow::new("", "Outgoing Pkts", c.outgoing_packets));
+        rows.push(StatsRow::new("", "Outgoing Bytes", c.outgoing_bytes));
+        rows.push(StatsRow::new("", "No Headroom Pkts", c.no_headroom_packets));
         rows.push(StatsRow::empty());
     }
 
     if let Some(l) = &state.l4_stats {
-        rows.push(StatsRow::new("L4", "Incoming Pkts", format_number(l.incoming_packets)));
-        rows.push(StatsRow::new("", "Outgoing Pkts", format_number(l.outgoing_packets)));
-        rows.push(StatsRow::new("", "Select VS Fail", format_number(l.select_vs_failed)));
-        rows.push(StatsRow::new(
-            "",
-            "Select Real Fail",
-            format_number(l.select_real_failed),
-        ));
-        rows.push(StatsRow::new("", "Invalid Pkts", format_number(l.invalid_packets)));
+        rows.push(StatsRow::new("L4", "Incoming Pkts", l.incoming_packets));
+        rows.push(StatsRow::new("", "Outgoing Pkts", l.outgoing_packets));
+        rows.push(StatsRow::new("", "Select VS Fail", l.select_vs_failed));
+        rows.push(StatsRow::new("", "Select Real Fail", l.select_real_failed));
+        rows.push(StatsRow::new("", "Invalid Pkts", l.invalid_packets));
         rows.push(StatsRow::empty());
     }
 
@@ -122,10 +46,7 @@ fn print_module_stats(state: &balancerpb::BalancerState) {
         push_icmp_rows(&mut rows, "ICMPv6", icmp);
     }
 
-    if rows
-        .last()
-        .is_some_and(|r| r.category.is_empty() && r.metric.is_empty())
-    {
+    if rows.last().is_some_and(StatsRow::is_blank) {
         rows.pop();
     }
 
@@ -133,64 +54,29 @@ fn print_module_stats(state: &balancerpb::BalancerState) {
     println!();
 }
 
+type IcmpField = (&'static str, fn(&balancerpb::IcmpStats) -> u64);
+
+const ICMP_FIELDS: &[IcmpField] = &[
+    ("Incoming Pkts", |s| s.incoming_packets),
+    ("Src Not Allowed", |s| s.src_not_allowed),
+    ("Echo Responses", |s| s.echo_responses),
+    ("Payload Short IP", |s| s.payload_too_short_ip),
+    ("Unmatch Src Orig", |s| s.unmatching_src_from_original),
+    ("Payload Short Port", |s| s.payload_too_short_port),
+    ("Unexpected Trans", |s| s.unexpected_transport),
+    ("Unrecognized VS", |s| s.unrecognized_vs),
+    ("Forwarded Pkts", |s| s.forwarded_packets),
+    ("Broadcasted Pkts", |s| s.broadcasted_packets),
+    ("Clones Sent", |s| s.packet_clones_sent),
+    ("Clones Received", |s| s.packet_clones_received),
+    ("Clone Failures", |s| s.packet_clone_failures),
+];
+
 fn push_icmp_rows(rows: &mut Vec<StatsRow>, category: &str, icmp: &balancerpb::IcmpStats) {
-    rows.push(StatsRow::new(
-        category,
-        "Incoming Pkts",
-        format_number(icmp.incoming_packets),
-    ));
-    rows.push(StatsRow::new(
-        "",
-        "Src Not Allowed",
-        format_number(icmp.src_not_allowed),
-    ));
-    rows.push(StatsRow::new("", "Echo Responses", format_number(icmp.echo_responses)));
-    rows.push(StatsRow::new(
-        "",
-        "Payload Short IP",
-        format_number(icmp.payload_too_short_ip),
-    ));
-    rows.push(StatsRow::new(
-        "",
-        "Unmatch Src Orig",
-        format_number(icmp.unmatching_src_from_original),
-    ));
-    rows.push(StatsRow::new(
-        "",
-        "Payload Short Port",
-        format_number(icmp.payload_too_short_port),
-    ));
-    rows.push(StatsRow::new(
-        "",
-        "Unexpected Trans",
-        format_number(icmp.unexpected_transport),
-    ));
-    rows.push(StatsRow::new(
-        "",
-        "Unrecognized VS",
-        format_number(icmp.unrecognized_vs),
-    ));
-    rows.push(StatsRow::new(
-        "",
-        "Forwarded Pkts",
-        format_number(icmp.forwarded_packets),
-    ));
-    rows.push(StatsRow::new(
-        "",
-        "Broadcasted Pkts",
-        format_number(icmp.broadcasted_packets),
-    ));
-    rows.push(StatsRow::new("", "Clones Sent", format_number(icmp.packet_clones_sent)));
-    rows.push(StatsRow::new(
-        "",
-        "Clones Received",
-        format_number(icmp.packet_clones_received),
-    ));
-    rows.push(StatsRow::new(
-        "",
-        "Clone Failures",
-        format_number(icmp.packet_clone_failures),
-    ));
+    for (idx, (name, get)) in ICMP_FIELDS.iter().enumerate() {
+        let cat = if idx == 0 { category } else { "" };
+        rows.push(StatsRow::new(cat, name, get(icmp)));
+    }
 }
 
 pub struct ShowOptions {
@@ -214,8 +100,7 @@ fn print_table_view_state(state: &balancerpb::BalancerState, opts: &ShowOptions)
     if !state.sessions_state_name.is_empty() {
         println!(
             "Sessions State: {} (capacity: {})",
-            state.sessions_state_name,
-            format_number(state.sessions_state_capacity),
+            state.sessions_state_name, state.sessions_state_capacity,
         );
     }
     if let Some(r) = &state.r#ref {
@@ -223,7 +108,7 @@ fn print_table_view_state(state: &balancerpb::BalancerState, opts: &ShowOptions)
     }
 
     if opts.stats {
-        println!("Active Sessions: {}", format_number(state.active_sessions));
+        println!("Active Sessions: {}", state.active_sessions);
         println!(
             "Last Packet: {}",
             state
@@ -254,9 +139,9 @@ fn print_table_view_vs(vs: &balancerpb::VsState, opts: &ShowOptions) {
         Ok(ip) => ip,
         Err(_) => return,
     };
-    let proto = proto_str(id.proto).to_uppercase();
+    let proto = proto_str(id.proto).unwrap_or("???");
     let addr_port = format_ip_port(ip, id.port);
-    let scheduler = scheduler_str(cfg.scheduler);
+    let scheduler = scheduler_str(cfg.scheduler).unwrap_or("???");
     let flags = flags_str(cfg.flags.as_ref());
 
     println!("VS {}/{}:", addr_port, proto);
@@ -266,7 +151,7 @@ fn print_table_view_vs(vs: &balancerpb::VsState, opts: &ShowOptions) {
     }
 
     if opts.stats {
-        println!("  Active Sessions: {}", format_number(vs.active_sessions));
+        println!("  Active Sessions: {}", vs.active_sessions);
         if let Some(ts) = &vs.last_packet_timestamp {
             println!("  Last Packet: {}", format_timestamp(ts));
         }
@@ -283,106 +168,70 @@ fn print_table_view_vs(vs: &balancerpb::VsState, opts: &ShowOptions) {
         print_vs_acl(cfg, &vs.allowed_sources_stats, opts.stats);
     }
 
-    let real_rows: Vec<_> = vs
-        .reals
-        .iter()
-        .filter_map(|real| {
-            let rcfg = real.config.as_ref()?;
-            let rid = rcfg.id.as_ref()?;
-            let rip = bytes_to_ip(&rid.ip).ok()?;
-            let real_addr = format_ip_port(rip, rid.port);
-
-            if opts.stats {
-                let rs = real.stats.as_ref();
-                Some(RealTableRow::Stats(RealStatsRow {
-                    real: real_addr,
-                    enabled: if real.enabled {
-                        "true".to_string()
-                    } else {
-                        "false".to_string()
-                    },
-                    weight: format_number(rcfg.weight as u64),
-                    effective_weight: format_number(real.effective_weight),
-                    packets: format_number(rs.map_or(0, |s| s.packets)),
-                    bytes: format_number(rs.map_or(0, |s| s.bytes)),
-                    active_sessions: format_number(real.active_sessions),
-                    created_sessions: format_number(rs.map_or(0, |s| s.created_sessions)),
-                    last_packet: real
-                        .last_packet_timestamp
-                        .as_ref()
-                        .map_or_else(|| "-".to_string(), format_timestamp),
-                    disabled_pkts: format_number(rs.map_or(0, |s| s.packets_real_disabled)),
-                    icmp_pkts: format_number(rs.map_or(0, |s| s.error_icmp_packets)),
-                }))
-            } else {
-                Some(RealTableRow::Basic(RealBasicRow {
-                    real: real_addr,
-                    weight: format_number(rcfg.weight as u64),
-                    effective_weight: format_number(real.effective_weight),
-                    enabled: if real.enabled {
-                        "true".to_string()
-                    } else {
-                        "false".to_string()
-                    },
-                }))
-            }
-        })
-        .collect();
-
-    if !real_rows.is_empty() {
-        match &real_rows[0] {
-            RealTableRow::Stats(_) => {
-                let rows: Vec<RealStatsRow> = real_rows
-                    .into_iter()
-                    .filter_map(|r| match r {
-                        RealTableRow::Stats(s) => Some(s),
-                        _ => None,
-                    })
-                    .collect();
-                print_table(rows);
-            }
-            RealTableRow::Basic(_) => {
-                let rows: Vec<RealBasicRow> = real_rows
-                    .into_iter()
-                    .filter_map(|r| match r {
-                        RealTableRow::Basic(b) => Some(b),
-                        _ => None,
-                    })
-                    .collect();
-                print_table(rows);
-            }
+    if opts.stats {
+        let rows: Vec<RealStatsRow> = vs.reals.iter().filter_map(real_stats_row).collect();
+        if !rows.is_empty() {
+            print_table(rows);
+        }
+    } else {
+        let rows: Vec<RealBasicRow> = vs.reals.iter().filter_map(real_basic_row).collect();
+        if !rows.is_empty() {
+            print_table(rows);
         }
     }
     println!();
 }
 
+fn real_basic_row(real: &balancerpb::RealState) -> Option<RealBasicRow> {
+    let rcfg = real.config.as_ref()?;
+    let rid = rcfg.id.as_ref()?;
+    let rip = bytes_to_ip(&rid.ip).ok()?;
+    Some(RealBasicRow {
+        real: format_ip_port(rip, rid.port),
+        enabled: real.enabled.to_string(),
+        weight: rcfg.weight.to_string(),
+        effective_weight: real.effective_weight.to_string(),
+    })
+}
+
+fn real_stats_row(real: &balancerpb::RealState) -> Option<RealStatsRow> {
+    let rcfg = real.config.as_ref()?;
+    let rid = rcfg.id.as_ref()?;
+    let rip = bytes_to_ip(&rid.ip).ok()?;
+    let rs = real.stats.as_ref();
+    Some(RealStatsRow {
+        real: format_ip_port(rip, rid.port),
+        enabled: real.enabled.to_string(),
+        weight: rcfg.weight.to_string(),
+        effective_weight: real.effective_weight.to_string(),
+        packets: rs.map_or(0, |s| s.packets).to_string(),
+        bytes: rs.map_or(0, |s| s.bytes).to_string(),
+        active_sessions: real.active_sessions.to_string(),
+        created_sessions: rs.map_or(0, |s| s.created_sessions).to_string(),
+        last_packet: real
+            .last_packet_timestamp
+            .as_ref()
+            .map_or_else(|| "-".to_string(), format_timestamp),
+        disabled_pkts: rs.map_or(0, |s| s.packets_real_disabled).to_string(),
+        icmp_pkts: rs.map_or(0, |s| s.error_icmp_packets).to_string(),
+    })
+}
+
 fn print_vs_stats(stats: &balancerpb::VsStats) {
-    println!("  Incoming Packets: {}", format_number(stats.incoming_packets));
-    println!("  Incoming Bytes: {}", format_number(stats.incoming_bytes));
-    println!("  Outgoing Packets: {}", format_number(stats.outgoing_packets));
-    println!("  Outgoing Bytes: {}", format_number(stats.outgoing_bytes));
-    println!("  Created Sessions: {}", format_number(stats.created_sessions));
-    println!(
-        "  Packet Src Not Allowed: {}",
-        format_number(stats.packet_src_not_allowed)
-    );
-    println!("  No Reals: {}", format_number(stats.no_reals));
-    println!(
-        "  Session Table Overflow: {}",
-        format_number(stats.session_table_overflow)
-    );
-    println!("  Echo ICMP Packets: {}", format_number(stats.echo_icmp_packets));
-    println!("  Error ICMP Packets: {}", format_number(stats.error_icmp_packets));
-    println!("  Real Is Disabled: {}", format_number(stats.real_is_disabled));
-    println!(
-        "  Not Rescheduled Packets: {}",
-        format_number(stats.not_rescheduled_packets)
-    );
-    println!(
-        "  Broadcasted ICMP Packets: {}",
-        format_number(stats.broadcasted_icmp_packets)
-    );
-    println!("  Fix MSS Malformed: {}", format_number(stats.fix_mss_malformed));
+    println!("  Incoming Packets: {}", stats.incoming_packets);
+    println!("  Incoming Bytes: {}", stats.incoming_bytes);
+    println!("  Outgoing Packets: {}", stats.outgoing_packets);
+    println!("  Outgoing Bytes: {}", stats.outgoing_bytes);
+    println!("  Created Sessions: {}", stats.created_sessions);
+    println!("  Packet Src Not Allowed: {}", stats.packet_src_not_allowed);
+    println!("  No Reals: {}", stats.no_reals);
+    println!("  Session Table Overflow: {}", stats.session_table_overflow);
+    println!("  Echo ICMP Packets: {}", stats.echo_icmp_packets);
+    println!("  Error ICMP Packets: {}", stats.error_icmp_packets);
+    println!("  Real Is Disabled: {}", stats.real_is_disabled);
+    println!("  Not Rescheduled Packets: {}", stats.not_rescheduled_packets);
+    println!("  Broadcasted ICMP Packets: {}", stats.broadcasted_icmp_packets);
+    println!("  Fix MSS Malformed: {}", stats.fix_mss_malformed);
 }
 
 fn print_vs_acl(cfg: &balancerpb::VsConfig, stats: &[balancerpb::AllowedSourcesStats], with_stats: bool) {
@@ -390,34 +239,33 @@ fn print_vs_acl(cfg: &balancerpb::VsConfig, stats: &[balancerpb::AllowedSourcesS
         return;
     }
 
-    let stats_map: std::collections::HashMap<&str, u64> = stats.iter().map(|s| (s.tag.as_str(), s.passes)).collect();
+    let stats_map: HashMap<&str, u64> = stats.iter().map(|s| (s.tag.as_str(), s.passes)).collect();
 
     println!("  Allowed Sources:");
     for src in &cfg.allowed_sources {
-        let tag = src.tag.as_deref().unwrap_or("");
-        if !tag.is_empty() {
-            if with_stats {
-                let passes = stats_map.get(tag).copied().unwrap_or(0);
-                println!("    Tag: {} (passes: {})", tag, format_number(passes));
-            } else {
-                println!("    Tag: {}", tag);
+        print_allowed_source(src, with_stats.then_some(&stats_map));
+    }
+}
+
+fn print_allowed_source(src: &balancerpb::AllowedSources, stats_map: Option<&HashMap<&str, u64>>) {
+    let tag = src.tag.as_deref().unwrap_or("");
+    if !tag.is_empty() {
+        match stats_map {
+            Some(map) => {
+                let passes = map.get(tag).copied().unwrap_or(0);
+                println!("    Tag: {} (passes: {})", tag, passes);
             }
+            None => println!("    Tag: {}", tag),
         }
-        for net in &src.nets {
-            let addr = bytes_to_ip(&net.addr)
-                .map(|ip| ip.to_string())
-                .unwrap_or_else(|_| "?".to_string());
-            let mask = bytes_to_ip(&net.mask)
-                .map(|ip| ip.to_string())
-                .unwrap_or_else(|_| "?".to_string());
-            println!("    Net: {}/{}", addr, mask);
-        }
-        for pr in &src.ports {
-            if pr.from == pr.to {
-                println!("    Port: {}", pr.from);
-            } else {
-                println!("    Ports: {}-{}", pr.from, pr.to);
-            }
+    }
+    for net in &src.nets {
+        println!("    Net: {}", net);
+    }
+    for pr in &src.ports {
+        if pr.from == pr.to {
+            println!("    Port: {}", pr.from);
+        } else {
+            println!("    Ports: {}-{}", pr.from, pr.to);
         }
     }
 }
@@ -459,11 +307,6 @@ fn print_decap(state: &balancerpb::BalancerState) {
     println!();
 }
 
-enum RealTableRow {
-    Basic(RealBasicRow),
-    Stats(RealStatsRow),
-}
-
 #[derive(Tabled)]
 struct RealBasicRow {
     #[tabled(rename = "Real")]
@@ -476,6 +319,8 @@ struct RealBasicRow {
     effective_weight: String,
 }
 
+// Streaming session output uses fixed-width columns rather than `Tabled`,
+// which would buffer the full result set.
 pub fn print_sessions_header() {
     println!(
         "{:<40} {:<40} {:<50} {:<8} {:<8} {:<8}",
@@ -484,62 +329,45 @@ pub fn print_sessions_header() {
 }
 
 pub fn print_session(session: &balancerpb::Session, now: i64) {
-    println!(
-        "{:<40} {:<40} {:<50} {:<8} {:<8} {:<8}",
-        format_vs_id(session.vs_id.as_ref()),
-        format_real_id(session.real_id.as_ref()),
-        format_client(session),
-        format_expires(session, now),
-        format_timeout(session),
-        format_age(session, now),
-    );
-}
-
-fn format_vs_id(vs_id: Option<&balancerpb::VsIdentifier>) -> String {
-    vs_id
+    let vs = session
+        .vs_id
+        .as_ref()
         .and_then(|id| {
-            bytes_to_ip(&id.addr)
-                .ok()
-                .map(|ip| format!("{}/{}", format_ip_port(ip, id.port), proto_str(id.proto)))
+            bytes_to_ip(&id.addr).ok().map(|ip| {
+                format!(
+                    "{}/{}",
+                    format_ip_port(ip, id.port),
+                    proto_str(id.proto).unwrap_or("???")
+                )
+            })
         })
-        .unwrap_or_else(|| "-".to_string())
-}
-
-fn format_real_id(real_id: Option<&balancerpb::RelativeRealIdentifier>) -> String {
-    real_id
+        .unwrap_or_else(|| "-".to_string());
+    let real = session
+        .real_id
+        .as_ref()
         .and_then(|r| bytes_to_ip(&r.ip).ok().map(|ip| format_ip_port(ip, r.port)))
-        .unwrap_or_else(|| "-".to_string())
-}
-
-fn format_client(session: &balancerpb::Session) -> String {
-    bytes_to_ip(&session.client_addr)
+        .unwrap_or_else(|| "-".to_string());
+    let client = bytes_to_ip(&session.client_addr)
         .ok()
         .map(|ip| format_ip_port(ip, session.client_port))
-        .unwrap_or_else(|| "-".to_string())
-}
-
-fn format_expires(session: &balancerpb::Session, now: i64) -> String {
-    match (session.last_packet_timestamp.as_ref(), session.timeout.as_ref()) {
-        (Some(last_packet), Some(timeout)) => {
-            let remaining = (last_packet.seconds + timeout.seconds - now).max(0);
-            format!("{}", remaining)
-        }
+        .unwrap_or_else(|| "-".to_string());
+    let expires = match (session.last_packet_timestamp.as_ref(), session.timeout.as_ref()) {
+        (Some(last), Some(timeout)) => format!("{}", (last.seconds + timeout.seconds - now).max(0)),
         _ => "-".to_string(),
-    }
-}
-
-fn format_timeout(session: &balancerpb::Session) -> String {
-    session
+    };
+    let timeout = session
         .timeout
         .as_ref()
-        .map_or_else(|| "-".to_string(), |d| format!("{}", d.seconds))
-}
-
-fn format_age(session: &balancerpb::Session, now: i64) -> String {
-    session
+        .map_or_else(|| "-".to_string(), |d| d.seconds.to_string());
+    let age = session
         .create_timestamp
         .as_ref()
-        .map_or_else(|| "-".to_string(), |ts| format!("{}", (now - ts.seconds).max(0)))
+        .map_or_else(|| "-".to_string(), |ts| (now - ts.seconds).max(0).to_string());
+
+    println!(
+        "{:<40} {:<40} {:<50} {:<8} {:<8} {:<8}",
+        vs, real, client, expires, timeout, age,
+    );
 }
 
 #[derive(Tabled)]
@@ -553,11 +381,11 @@ struct StatsRow {
 }
 
 impl StatsRow {
-    fn new(category: &str, metric: &str, value: String) -> Self {
+    fn new(category: &str, metric: &str, value: u64) -> Self {
         Self {
             category: category.to_string(),
             metric: metric.to_string(),
-            value,
+            value: value.to_string(),
         }
     }
 
@@ -567,6 +395,10 @@ impl StatsRow {
             metric: String::new(),
             value: String::new(),
         }
+    }
+
+    fn is_blank(&self) -> bool {
+        self.category.is_empty() && self.metric.is_empty() && self.value.is_empty()
     }
 }
 
@@ -599,7 +431,7 @@ struct RealStatsRow {
 pub fn prettify_json(value: &mut serde_json::Value) {
     match value {
         serde_json::Value::Array(arr) => {
-            if let Some(ip) = try_bytes_to_ip_string(arr) {
+            if let Some(ip) = bytes_array_to_ip_string(arr) {
                 *value = serde_json::Value::String(ip);
             } else {
                 for item in arr.iter_mut() {
@@ -608,18 +440,8 @@ pub fn prettify_json(value: &mut serde_json::Value) {
             }
         }
         serde_json::Value::Object(map) => {
-            prettify_enum(map, "scheduler", |v| {
-                balancerpb::VsScheduler::try_from(v)
-                    .ok()
-                    .map(|s| s as i32)
-                    .map(scheduler_str)
-            });
-            prettify_enum(map, "proto", |v| {
-                balancerpb::TransportProto::try_from(v).ok().map(|p| match p {
-                    balancerpb::TransportProto::Tcp => "tcp",
-                    balancerpb::TransportProto::Udp => "udp",
-                })
-            });
+            prettify_enum(map, "scheduler", scheduler_str);
+            prettify_enum(map, "proto", proto_str);
             for (_, v) in map.iter_mut() {
                 prettify_json(v);
             }
@@ -631,16 +453,16 @@ pub fn prettify_json(value: &mut serde_json::Value) {
 fn prettify_enum(
     map: &mut serde_json::Map<String, serde_json::Value>,
     key: &str,
-    to_str: impl FnOnce(i32) -> Option<&'static str>,
+    to_str: fn(i32) -> Option<&'static str>,
 ) {
-    if let Some(val) = map.get(key).and_then(|v| v.as_i64()) {
-        if let Some(name) = to_str(val as i32) {
-            map.insert(key.to_string(), serde_json::Value::String(name.to_string()));
-        }
+    if let Some(val) = map.get(key).and_then(|v| v.as_i64())
+        && let Some(name) = to_str(val as i32)
+    {
+        map.insert(key.to_string(), serde_json::Value::String(name.to_string()));
     }
 }
 
-fn try_bytes_to_ip_string(arr: &[serde_json::Value]) -> Option<String> {
+fn bytes_array_to_ip_string(arr: &[serde_json::Value]) -> Option<String> {
     if arr.len() != 4 && arr.len() != 16 {
         return None;
     }
@@ -648,26 +470,22 @@ fn try_bytes_to_ip_string(arr: &[serde_json::Value]) -> Option<String> {
         .iter()
         .map(|v| v.as_u64().and_then(|n| u8::try_from(n).ok()))
         .collect::<Option<Vec<_>>>()?;
-
-    let ip = crate::bytes_to_ip(&bytes).ok()?;
-    Some(ip.to_string())
+    Some(crate::bytes_to_ip(&bytes).ok()?.to_string())
 }
 
-fn proto_str(proto: i32) -> &'static str {
-    match balancerpb::TransportProto::try_from(proto) {
-        Ok(balancerpb::TransportProto::Tcp) => "TCP",
-        Ok(balancerpb::TransportProto::Udp) => "UDP",
-        _ => "???",
+fn proto_str(proto: i32) -> Option<&'static str> {
+    match balancerpb::TransportProto::try_from(proto).ok()? {
+        balancerpb::TransportProto::Tcp => Some("tcp"),
+        balancerpb::TransportProto::Udp => Some("udp"),
     }
 }
 
-fn scheduler_str(scheduler: i32) -> &'static str {
-    match balancerpb::VsScheduler::try_from(scheduler) {
-        Ok(balancerpb::VsScheduler::Sh) => "sh",
-        Ok(balancerpb::VsScheduler::Wrr) => "wrr",
-        Ok(balancerpb::VsScheduler::Wlc) => "wlc",
-        Ok(balancerpb::VsScheduler::Op) => "op",
-        _ => "???",
+fn scheduler_str(scheduler: i32) -> Option<&'static str> {
+    match balancerpb::VsScheduler::try_from(scheduler).ok()? {
+        balancerpb::VsScheduler::Sh => Some("sh"),
+        balancerpb::VsScheduler::Wrr => Some("wrr"),
+        balancerpb::VsScheduler::Wlc => Some("wlc"),
+        balancerpb::VsScheduler::Op => Some("op"),
     }
 }
 
@@ -705,10 +523,6 @@ fn print_ref_inline(r: &balancerpb::PacketHandlerRef) {
     if !parts.is_empty() {
         println!("{}", parts.join(" | "));
     }
-}
-
-pub fn format_number(n: u64) -> String {
-    n.to_string()
 }
 
 fn format_timestamp(ts: &prost_types::Timestamp) -> String {
