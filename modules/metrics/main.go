@@ -42,12 +42,11 @@ func runServer(configPath string) error {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
-	sugar, _, err := logging.Init(&cfg.Logging)
+	log, _, err := logging.Init(&cfg.Logging)
 	if err != nil {
 		return fmt.Errorf("failed to initialize logging: %w", err)
 	}
-	defer sugar.Sync()
-	log := sugar.Desugar()
+	defer log.Sync()
 
 	log.Info("starting metric adapter server")
 
