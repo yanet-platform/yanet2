@@ -4,7 +4,6 @@
 #include "common/strutils.h"
 
 #include "lib/errors/errors.h"
-#include <string.h>
 
 int
 counter_registry_init(
