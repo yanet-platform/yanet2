@@ -1,4 +1,4 @@
-package prometheues
+package prometheus
 
 import (
 	"io"

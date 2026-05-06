@@ -1,35 +1,41 @@
-package prometheues
+package prometheus
 
 import (
 	"context"
-	"io"
+	"strings"
 
 	"github.com/yanet-platform/yanet2/common/commonpb"
 	metric "github.com/yanet-platform/yanet2/modules/metrics/domain"
+	"go.uber.org/zap"
 )
 
-type FormatBuilder interface {
-	io.Writer
-	String() string
-}
-
 type Converter struct {
-	Writer FormatBuilder
+	log    *zap.Logger
+	result string
 }
 
-func NewConverter(w FormatBuilder) *Converter {
-	return &Converter{Writer: w}
-}
-
-func (m *Converter) Write(ctx context.Context, metrics []metric.Metric) error {
-	for _, metric := range metrics {
-		metric.Write(m.Writer)
+func NewConverter(log *zap.Logger) *Converter {
+	if log == nil {
+		log = zap.NewNop()
 	}
+	return &Converter{log: log}
+}
+
+func (m *Converter) Write(_ context.Context, metrics []metric.Metric) error {
+	var b strings.Builder
+	for _, mt := range metrics {
+		if mt.Value == nil {
+			m.log.Debug("skipping metric with nil value", zap.String("name", mt.Name))
+			continue
+		}
+		mt.Write(&b)
+	}
+	m.result = b.String()
 	return nil
 }
 
 func (m *Converter) Metrics() string {
-	return m.Writer.String()
+	return m.result
 }
 
 func (m *Converter) MetricValue(metrics *commonpb.Metric) metric.Value {
@@ -52,6 +58,7 @@ func (m *Converter) MetricValue(metrics *commonpb.Metric) metric.Value {
 			TotalCount: h.TotalCount,
 		}
 	default:
+		m.log.Debug("unrecognised metric value type", zap.String("name", metrics.GetName()))
 		return &Undefine{}
 	}
 }

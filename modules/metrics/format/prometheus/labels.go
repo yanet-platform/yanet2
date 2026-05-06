@@ -1,4 +1,4 @@
-package prometheues
+package prometheus
 
 import (
 	"io"
@@ -9,7 +9,7 @@ import (
 )
 
 func formatLabels(labels []metric.Label, extra ...metric.Label) string {
-	if len(labels) == 0 || len(extra) == 0 {
+	if len(labels) == 0 && len(extra) == 0 {
 		return ""
 	}
 
@@ -24,7 +24,7 @@ func formatLabels(labels []metric.Label, extra ...metric.Label) string {
 		first = false
 		b.WriteString(l.Name)
 		b.WriteByte('=')
-		b.WriteString(strconv.Quote(escapeLabelValue(l.Value)))
+		b.WriteString(strconv.Quote(l.Value))
 	}
 
 	for _, l := range labels {
@@ -37,13 +37,6 @@ func formatLabels(labels []metric.Label, extra ...metric.Label) string {
 
 	b.WriteByte('}')
 	return b.String()
-}
-
-func escapeLabelValue(v string) string {
-	if !strings.ContainsAny(v, "\n") {
-		return v
-	}
-	return strings.ReplaceAll(v, "\n", `\n`)
 }
 
 func writeTypeHeader(w io.Writer, name, kind string) {
