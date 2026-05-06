@@ -10,29 +10,31 @@ import (
 	"google.golang.org/grpc"
 )
 
-type MetricsClient interface {
-	GetMetrics(ctx context.Context, in *commonpb.GetMetricsRequest, opts ...grpc.CallOption) (*commonpb.GetMetricsResponse, error)
-}
+const methodTemplate = "/yanet.%s.MetricsService/Collect"
 
 type (
+	Invoker interface {
+		Invoke(ctx context.Context, method string, args, reply any, opts ...grpc.CallOption) error
+	}
+
 	Collector interface {
 		Collect(ctx context.Context) ([]*commonpb.Metric, error)
 	}
 
 	ModuleAdapter struct {
 		modules []string
-		client  MetricsClient
+		conn    Invoker
 		log     *zap.Logger
 	}
 )
 
-func NewCollector(client MetricsClient, modules []string, log *zap.Logger) Collector {
+func NewCollector(conn Invoker, modules []string, log *zap.Logger) Collector {
 	if log == nil {
 		log = zap.NewNop()
 	}
 	return &ModuleAdapter{
 		modules: modules,
-		client:  client,
+		conn:    conn,
 		log:     log,
 	}
 }
@@ -82,10 +84,13 @@ func (m *ModuleAdapter) Collect(ctx context.Context) ([]*commonpb.Metric, error)
 	return metrics, nil
 }
 
-func (m *ModuleAdapter) collectModule(ctx context.Context, _ string) ([]*commonpb.Metric, error) {
-	resp, err := m.client.GetMetrics(ctx, &commonpb.GetMetricsRequest{})
-	if err != nil {
-		return nil, err
+func (m *ModuleAdapter) collectModule(ctx context.Context, module string) ([]*commonpb.Metric, error) {
+	method := fmt.Sprintf(methodTemplate, module)
+	req := &commonpb.GetMetricsRequest{}
+	resp := &commonpb.GetMetricsResponse{}
+
+	if err := m.conn.Invoke(ctx, method, req, resp); err != nil {
+		return nil, fmt.Errorf("invoke %s: %w", method, err)
 	}
 	return resp.GetMetrics(), nil
 }

@@ -8,7 +8,6 @@ import (
 	"net"
 	"os"
 
-	"github.com/yanet-platform/yanet2/common/commonpb"
 	"github.com/yanet-platform/yanet2/common/go/logging"
 	"github.com/yanet-platform/yanet2/common/go/xcmd"
 	"github.com/yanet-platform/yanet2/modules/metrics/adapter"
@@ -71,8 +70,7 @@ func runServer(configPath string) error {
 	}
 	defer func() { _ = clientConn.Close() }()
 
-	mclient := commonpb.NewMetricsServiceClient(clientConn)
-	collector := adapter.NewCollector(mclient, cfg.Modules, log.Named("collector"))
+	collector := adapter.NewCollector(clientConn, cfg.Modules, log.Named("collector"))
 	ctrl := controller.NewController(formatter, collector, log.Named("controller"))
 
 	grpcServer := grpc.NewServer()
