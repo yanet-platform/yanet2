@@ -28,11 +28,11 @@ type FunctionService struct {
 
 	instanceID uint32
 	shm        *ffi.SharedMemory
-	log        *zap.SugaredLogger
+	log        *zap.Logger
 }
 
 // NewFunctionService creates a new FunctionService.
-func NewFunctionService(instanceID uint32, shm *ffi.SharedMemory, log *zap.SugaredLogger) *FunctionService {
+func NewFunctionService(instanceID uint32, shm *ffi.SharedMemory, log *zap.Logger) *FunctionService {
 	return &FunctionService{
 		instanceID: instanceID,
 		shm:        shm,

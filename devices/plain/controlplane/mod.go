@@ -16,11 +16,11 @@ type DevicePlainDevice struct {
 	shm     *ffi.SharedMemory
 	agent   *ffi.Agent
 	service *DevicePlainService
-	log     *zap.SugaredLogger
+	log     *zap.Logger
 }
 
 // NewDevicePlainDevice creates a new DevicePlain device instance
-func NewDevicePlainDevice(cfg *Config, log *zap.SugaredLogger) (*DevicePlainDevice, error) {
+func NewDevicePlainDevice(cfg *Config, log *zap.Logger) (*DevicePlainDevice, error) {
 	log = log.With(zap.String("module", "plainpb.DevicePlainService"))
 
 	shm, err := ffi.AttachSharedMemory(cfg.MemoryPath.Unwrap())
@@ -28,7 +28,7 @@ func NewDevicePlainDevice(cfg *Config, log *zap.SugaredLogger) (*DevicePlainDevi
 		return nil, err
 	}
 
-	log.Debugw("mapping shared memory",
+	log.Debug("mapping shared memory",
 		zap.Uint32("instance_id", cfg.InstanceID),
 		zap.Stringer("size", cfg.MemoryRequirements),
 	)
@@ -68,11 +68,11 @@ func (m *DevicePlainDevice) RegisterService(server *grpc.Server) {
 // Close closes the device and releases all resources
 func (m *DevicePlainDevice) Close() error {
 	if err := m.agent.Close(); err != nil {
-		m.log.Warnw("failed to close shared memory agent", zap.Error(err))
+		m.log.Warn("failed to close shared memory agent", zap.Error(err))
 	}
 
 	if err := m.shm.Detach(); err != nil {
-		m.log.Warnw("failed to detach from shared memory mapping", zap.Error(err))
+		m.log.Warn("failed to detach from shared memory mapping", zap.Error(err))
 	}
 
 	return nil

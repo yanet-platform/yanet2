@@ -125,5 +125,5 @@ func initLogging(cfg any) (*zap.Logger, error) {
 		return nil, fmt.Errorf("failed to initialize logging: %w", err)
 	}
 
-	return log.Desugar(), nil
+	return log, nil
 }

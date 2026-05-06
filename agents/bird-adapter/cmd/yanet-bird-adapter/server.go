@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
@@ -81,13 +82,13 @@ func runServer() error {
 	}
 	defer log.Sync()
 
-	log.Infow("starting BIRD adapter service",
-		"listen_addr", cfg.ListenAddr,
-		"gateway_endpoint", cfg.GatewayEndpoint,
+	log.Info("starting BIRD adapter service",
+		zap.String("listen_addr", cfg.ListenAddr),
+		zap.String("gateway_endpoint", cfg.GatewayEndpoint),
 	)
 
 	// Create the adapter service
-	adapterService := birdAdapter.NewAdapterService(cfg.GatewayEndpoint, log.Desugar())
+	adapterService := birdAdapter.NewAdapterService(cfg.GatewayEndpoint, log)
 
 	// Create gRPC server
 	grpcServer := grpc.NewServer()
@@ -103,7 +104,7 @@ func runServer() error {
 
 	// Start gRPC server
 	wg.Go(func() error {
-		log.Infof("gRPC server listening on %s", cfg.ListenAddr)
+		log.Info("gRPC server listening", zap.String("addr", cfg.ListenAddr))
 		if err := grpcServer.Serve(listener); err != nil {
 			return fmt.Errorf("gRPC server failed: %w", err)
 		}
@@ -113,7 +114,7 @@ func runServer() error {
 	// Wait for interrupt signal
 	wg.Go(func() error {
 		err := xcmd.WaitInterrupted(ctx)
-		log.Infof("caught signal: %v", err)
+		log.Info("caught signal", zap.Error(err))
 		log.Info("shutting down gRPC server")
 		grpcServer.GracefulStop()
 		return err

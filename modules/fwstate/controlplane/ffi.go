@@ -80,7 +80,7 @@ func (m *FwStateConfig) Generation() uint64 {
 func (m *FwStateConfig) CreateMaps(
 	mapConfig *fwstatepb.MapConfig,
 	workerCount uint16,
-	log *zap.SugaredLogger,
+	log *zap.Logger,
 ) error {
 	mapConfigChanged := false
 	mapsStats := m.GetMapsStats()
@@ -104,7 +104,7 @@ func (m *FwStateConfig) CreateMaps(
 			return nil
 		}
 
-		log.Infow("inserting new fwstate layer",
+		log.Info("inserting new fwstate layer",
 			zap.Uint32("index_size", currentIndexSize),
 			zap.Uint32("extra_bucket_count", currentExtraBucketCount),
 			zap.Uint16("worker_count", workerCount),
@@ -123,7 +123,7 @@ func (m *FwStateConfig) CreateMaps(
 		return nil
 	}
 
-	log.Infow("creating fwstate maps",
+	log.Info("creating fwstate maps",
 		zap.Uint32("index_size", mapConfig.IndexSize),
 		zap.Uint32("extra_bucket_count", mapConfig.ExtraBucketCount),
 		zap.Uint16("worker_count", workerCount),

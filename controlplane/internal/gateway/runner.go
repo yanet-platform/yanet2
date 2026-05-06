@@ -34,14 +34,14 @@ type BuiltInModuleRunner struct {
 	gatewayTLS      *gateway.TLSConfig
 	server          *grpc.Server
 	ready           chan struct{}
-	log             *zap.SugaredLogger
+	log             *zap.Logger
 }
 
 func NewBuiltInModuleRunner(
 	module BuiltInModule,
 	gatewayEndpoint string,
 	gatewayTLS *gateway.TLSConfig,
-	log *zap.SugaredLogger,
+	log *zap.Logger,
 ) *BuiltInModuleRunner {
 	log = log.Named(module.Name()).With(zap.String("module", module.Name()))
 
@@ -50,7 +50,7 @@ func NewBuiltInModuleRunner(
 		gatewayEndpoint: gatewayEndpoint,
 		gatewayTLS:      gatewayTLS,
 		server: grpc.NewServer(
-			grpc.ChainUnaryInterceptor(xgrpc.AccessLogInterceptor(log.Desugar())),
+			grpc.ChainUnaryInterceptor(xgrpc.AccessLogInterceptor(log)),
 			grpc.MaxRecvMsgSize(1024*1024*256), grpc.MaxSendMsgSize(1024*1024*256),
 		),
 		ready: make(chan struct{}),
@@ -80,14 +80,14 @@ func (m *BuiltInModuleRunner) Run(ctx context.Context) error {
 
 	wg, ctx := errgroup.WithContext(ctx)
 	if mod, ok := m.module.(BackgroundBuiltInModule); ok {
-		m.log.Infow("running background jobs")
+		m.log.Info("running background jobs")
 
 		wg.Go(func() error {
 			return mod.Run(ctx)
 		})
 	}
 	wg.Go(func() error {
-		m.log.Infow("exposing gRPC API", zap.Stringer("addr", listener.Addr()))
+		m.log.Info("exposing gRPC API", zap.Stringer("addr", listener.Addr()))
 		return m.server.Serve(listener)
 	})
 
@@ -98,8 +98,8 @@ func (m *BuiltInModuleRunner) Run(ctx context.Context) error {
 
 	<-ctx.Done()
 
-	m.log.Infow("stopping gRPC API", zap.Stringer("addr", listener.Addr()))
-	defer m.log.Infow("stopped gRPC API", zap.Stringer("addr", listener.Addr()))
+	m.log.Info("stopping gRPC API", zap.Stringer("addr", listener.Addr()))
+	defer m.log.Info("stopped gRPC API", zap.Stringer("addr", listener.Addr()))
 
 	m.server.GracefulStop()
 
@@ -130,7 +130,7 @@ func (m *BuiltInModuleRunner) register(ctx context.Context, addr net.Addr) error
 	registrar, err := gateway.NewGatewayRegistrar(
 		m.gatewayEndpoint,
 		m.gatewayTLS,
-		gateway.WithLog(m.log.Desugar()),
+		gateway.WithLog(m.log),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to initialize gateway registrar: %w", err)

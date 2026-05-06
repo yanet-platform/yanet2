@@ -26,13 +26,13 @@ import (
 
 type gatewayOptions struct {
 	BuiltInModules []BuiltInModule
-	Log            *zap.SugaredLogger
+	Log            *zap.Logger
 	LogLevel       *zap.AtomicLevel
 }
 
 func newGatewayOptions() *gatewayOptions {
 	return &gatewayOptions{
-		Log: zap.NewNop().Sugar(),
+		Log: zap.NewNop(),
 	}
 }
 
@@ -54,7 +54,7 @@ func WithBuiltInDevice(device BuiltInModule) GatewayOption {
 }
 
 // WithLog sets the logger for the Gateway.
-func WithLog(log *zap.SugaredLogger) GatewayOption {
+func WithLog(log *zap.Logger) GatewayOption {
 	return func(o *gatewayOptions) {
 		o.Log = log
 	}
@@ -85,7 +85,7 @@ type Gateway struct {
 	server         *grpc.Server
 	builtInModules []*BuiltInModuleRunner
 	registry       *BackendRegistry
-	log            *zap.SugaredLogger
+	log            *zap.Logger
 }
 
 // NewGateway creates a new Gateway API.
@@ -97,7 +97,7 @@ func NewGateway(cfg *Config, shm *ffi.SharedMemory, options ...GatewayOption) (*
 	log := opts.Log
 	registry := NewBackendRegistry()
 
-	authManager, err := auth.NewManager(&cfg.Auth, auth.WithLog(log.Desugar()))
+	authManager, err := auth.NewManager(&cfg.Auth, auth.WithLog(log))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create auth manager: %w", err)
 	}
@@ -116,18 +116,21 @@ func NewGateway(cfg *Config, shm *ffi.SharedMemory, options ...GatewayOption) (*
 			return proxy.One2One, nil, status.Errorf(codes.NotFound, "unknown service")
 		}
 
-		log.Debugf("proxying request %q to %q", fullMethodName, service)
+		log.Debug("proxying request",
+			zap.String("method", fullMethodName),
+			zap.String("service", service),
+		)
 
 		return proxy.One2One, []proxy.Backend{backend}, nil
 	}
 
 	serverOpts := []grpc.ServerOption{
 		grpc.ChainUnaryInterceptor(
-			auth.UnaryServerInterceptor(authManager, log.Desugar()),
-			xgrpc.AccessLogInterceptor(log.Desugar()),
+			auth.UnaryServerInterceptor(authManager, log),
+			xgrpc.AccessLogInterceptor(log),
 		),
 		grpc.ChainStreamInterceptor(
-			auth.StreamServerInterceptor(authManager, log.Desugar()),
+			auth.StreamServerInterceptor(authManager, log),
 		),
 		grpc.MaxRecvMsgSize(1024 * 1024 * 256),
 		grpc.MaxSendMsgSize(1024 * 1024 * 256),
@@ -153,25 +156,25 @@ func NewGateway(cfg *Config, shm *ffi.SharedMemory, options ...GatewayOption) (*
 	countersService := NewCountersService(cfg.InstanceID, shm)
 
 	ynpb.RegisterGatewayServer(server, gatewayService)
-	log.Infow("registered service", zap.String("service", fmt.Sprintf("%T", gatewayService)))
+	log.Info("registered service", zap.String("service", fmt.Sprintf("%T", gatewayService)))
 
 	ynpb.RegisterLoggingServer(server, loggingService)
-	log.Infow("registered service", zap.String("service", fmt.Sprintf("%T", loggingService)))
+	log.Info("registered service", zap.String("service", fmt.Sprintf("%T", loggingService)))
 
 	ynpb.RegisterInspectServiceServer(server, inspectService)
-	log.Infow("registered service", zap.String("service", fmt.Sprintf("%T", inspectService)))
+	log.Info("registered service", zap.String("service", fmt.Sprintf("%T", inspectService)))
 
 	ynpb.RegisterPipelineServiceServer(server, pipelineService)
-	log.Infow("registered service", zap.String("service", fmt.Sprintf("%T", pipelineService)))
+	log.Info("registered service", zap.String("service", fmt.Sprintf("%T", pipelineService)))
 
 	ynpb.RegisterFunctionServiceServer(server, functionService)
-	log.Infow("registered service", zap.String("service", fmt.Sprintf("%T", functionService)))
+	log.Info("registered service", zap.String("service", fmt.Sprintf("%T", functionService)))
 
 	ynpb.RegisterCountersServiceServer(server, countersService)
-	log.Infow("registered service", zap.String("service", fmt.Sprintf("%T", countersService)))
+	log.Info("registered service", zap.String("service", fmt.Sprintf("%T", countersService)))
 
 	ynpb.RegisterAuthServiceServer(server, authService)
-	log.Infow("registered service", zap.String("service", fmt.Sprintf("%T", authService)))
+	log.Info("registered service", zap.String("service", fmt.Sprintf("%T", authService)))
 
 	// Register built-in services in the registry for HTTP gateway access.
 	if err := registerBuiltInServices(registry, cfg.Server.Endpoint, cfg.Server.TLS, log); err != nil {
@@ -201,7 +204,7 @@ func NewGateway(cfg *Config, shm *ffi.SharedMemory, options ...GatewayOption) (*
 func (m *Gateway) Close() error {
 	for _, builtInModule := range m.builtInModules {
 		if err := builtInModule.Close(); err != nil {
-			m.log.Warnw("failed to close built-in module",
+			m.log.Warn("failed to close built-in module",
 				zap.String("module", fmt.Sprintf("%T", builtInModule)),
 				zap.Error(err),
 			)
@@ -213,14 +216,14 @@ func (m *Gateway) Close() error {
 
 // Run runs the gateway API until the specified context is canceled.
 func (m *Gateway) Run(ctx context.Context) error {
-	m.log.Infof("starting gRPC gateway")
+	m.log.Info("starting gRPC gateway")
 
 	listener, err := net.Listen("tcp", m.cfg.Server.Endpoint)
 	if err != nil {
 		return fmt.Errorf("failed to initialize gRPC listener: %w", err)
 	}
 
-	m.log.Infow("exposing gRPC gateway", zap.Stringer("addr", listener.Addr()))
+	m.log.Info("exposing gRPC gateway", zap.Stringer("addr", listener.Addr()))
 
 	wg, ctx := errgroup.WithContext(ctx)
 
@@ -235,7 +238,7 @@ func (m *Gateway) Run(ctx context.Context) error {
 
 	for _, builtInModule := range m.builtInModules {
 		wg.Go(func() error {
-			m.log.Infow("starting built-in module", zap.String("module", fmt.Sprintf("%T", builtInModule.module)))
+			m.log.Info("starting built-in module", zap.String("module", fmt.Sprintf("%T", builtInModule.module)))
 			return builtInModule.Run(ctx)
 		})
 	}
@@ -253,19 +256,19 @@ func (m *Gateway) Run(ctx context.Context) error {
 				case <-builtInModule.Ready():
 				}
 			}
-			m.log.Infow("all built-in modules ready",
+			m.log.Info("all built-in modules ready",
 				zap.Int("count", len(m.builtInModules)),
 			)
 			return nil
 		})
 	} else {
-		m.log.Infow("all built-in modules ready", zap.Int("count", 0))
+		m.log.Info("all built-in modules ready", zap.Int("count", 0))
 	}
 
 	<-ctx.Done()
 
-	m.log.Infow("stopping gRPC gateway", zap.Stringer("addr", listener.Addr()))
-	defer m.log.Infow("stopped gRPC gateway", zap.Stringer("addr", listener.Addr()))
+	m.log.Info("stopping gRPC gateway", zap.Stringer("addr", listener.Addr()))
+	defer m.log.Info("stopped gRPC gateway", zap.Stringer("addr", listener.Addr()))
 
 	m.server.GracefulStop()
 
@@ -280,7 +283,7 @@ func (m *Gateway) runHTTPServer(ctx context.Context) error {
 		Handler: httpproxy.GzipMiddleware(
 			httpproxy.NewHTTPHandler(
 				m.registry,
-				m.log.Desugar(),
+				m.log,
 			),
 		),
 	}
@@ -291,9 +294,9 @@ func (m *Gateway) runHTTPServer(ctx context.Context) error {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		m.log.Infow("shutting down HTTP server", zap.String("addr", m.cfg.Server.HTTPEndpoint))
+		m.log.Info("shutting down HTTP server", zap.String("addr", m.cfg.Server.HTTPEndpoint))
 		if err := server.Shutdown(shutdownCtx); err != nil {
-			m.log.Warnw("failed to shut down HTTP server", zap.Error(err))
+			m.log.Warn("failed to shut down HTTP server", zap.Error(err))
 		}
 	}()
 
@@ -308,7 +311,7 @@ func (m *Gateway) runHTTPServer(ctx context.Context) error {
 		}
 	}
 
-	m.log.Infow("exposing HTTP <-> gRPC gateway",
+	m.log.Info("exposing HTTP <-> gRPC gateway",
 		zap.String("scheme", scheme),
 		zap.String("addr", m.cfg.Server.HTTPEndpoint),
 	)
@@ -321,7 +324,7 @@ func (m *Gateway) runHTTPServer(ctx context.Context) error {
 
 // registerBuiltInServices registers built-in services in the registry for HTTP
 // gateway access.
-func registerBuiltInServices(registry *BackendRegistry, endpoint string, tlsCfg *gateway.TLSConfig, log *zap.SugaredLogger) error {
+func registerBuiltInServices(registry *BackendRegistry, endpoint string, tlsCfg *gateway.TLSConfig, log *zap.Logger) error {
 	creds, err := gateway.TransportCredentials(tlsCfg, endpoint)
 	if err != nil {
 		return fmt.Errorf("failed to build loopback TLS credentials: %w", err)
@@ -363,7 +366,7 @@ func registerBuiltInServices(registry *BackendRegistry, endpoint string, tlsCfg 
 
 	for _, serviceName := range builtInServices {
 		registry.RegisterBackend(serviceName, backend, endpoint)
-		log.Debugw("registered built-in service in registry", zap.String("service", serviceName))
+		log.Debug("registered built-in service in registry", zap.String("service", serviceName))
 	}
 
 	return nil

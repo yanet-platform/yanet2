@@ -23,11 +23,11 @@ import (
 type GatewayService struct {
 	ynpb.UnimplementedGatewayServer
 	registry *BackendRegistry
-	log      *zap.SugaredLogger
+	log      *zap.Logger
 }
 
 // NewGatewayService creates a new GatewayService.
-func NewGatewayService(registry *BackendRegistry, log *zap.SugaredLogger) *GatewayService {
+func NewGatewayService(registry *BackendRegistry, log *zap.Logger) *GatewayService {
 	return &GatewayService{
 		registry: registry,
 		log:      log,
@@ -78,7 +78,11 @@ func (m *GatewayService) Register(
 		)
 	}
 
-	m.log.Infof("registering backend %q on %q", backendDesc.GetName(), backendDesc.GetEndpoint())
+	m.log.Info(
+		"registering backend",
+		zap.String("name", backendDesc.GetName()),
+		zap.String("endpoint", backendDesc.GetEndpoint()),
+	)
 
 	conn, err := grpc.NewClient(
 		"passthrough:target",

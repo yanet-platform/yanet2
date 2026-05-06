@@ -27,13 +27,13 @@ import (
 )
 
 type options struct {
-	Log      *zap.SugaredLogger
+	Log      *zap.Logger
 	LogLevel *zap.AtomicLevel
 }
 
 func newOptions() *options {
 	return &options{
-		Log: zap.NewNop().Sugar(),
+		Log: zap.NewNop(),
 	}
 }
 
@@ -42,7 +42,7 @@ func newOptions() *options {
 type DirectorOption func(*options)
 
 // WithLog sets the logger for the YANET controlplane director.
-func WithLog(log *zap.SugaredLogger) DirectorOption {
+func WithLog(log *zap.Logger) DirectorOption {
 	return func(o *options) {
 		o.Log = log
 	}
@@ -67,7 +67,7 @@ type Director struct {
 	cfg     *Config
 	shm     *ffi.SharedMemory
 	gateway *gateway.Gateway
-	log     *zap.SugaredLogger
+	log     *zap.Logger
 }
 
 // NewDirector creates a new YANET controlplane director using specified
@@ -79,16 +79,16 @@ func NewDirector(cfg *Config, options ...DirectorOption) (*Director, error) {
 	}
 
 	log := opts.Log
-	log.Infof("initializing YANET controlplane ...")
-	log.Debugw("parsed config", zap.Any("config", cfg))
+	log.Info("initializing YANET controlplane ...")
+	log.Info("parsed config", zap.Any("config", cfg))
 
 	shm, err := ffi.AttachSharedMemory(cfg.MemoryPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to attach to shared memory %q: %w", cfg.MemoryPath, err)
 	}
-	log.Debugw("attached to shared memory", zap.String("path", cfg.MemoryPath))
+	log.Debug("attached to shared memory", zap.String("path", cfg.MemoryPath))
 
-	routeModule, err := route.NewRouteModule(cfg.Modules.Route, route.WithLog(log.Desugar()))
+	routeModule, err := route.NewRouteModule(cfg.Modules.Route, route.WithLog(log))
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize route built-in module: %w", err)
 	}
@@ -103,12 +103,12 @@ func NewDirector(cfg *Config, options ...DirectorOption) (*Director, error) {
 		return nil, fmt.Errorf("failed to initialize decap built-in module: %w", err)
 	}
 
-	dscpModule, err := dscp.NewDSCPModule(cfg.Modules.DSCP, log.Desugar())
+	dscpModule, err := dscp.NewDSCPModule(cfg.Modules.DSCP, log)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize dscp built-in module: %w", err)
 	}
 
-	forwardModule, err := forward.NewForwardModule(cfg.Modules.Forward, log.Desugar())
+	forwardModule, err := forward.NewForwardModule(cfg.Modules.Forward, log)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize forward built-in module: %w", err)
 	}

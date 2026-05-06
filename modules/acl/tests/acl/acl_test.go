@@ -47,7 +47,7 @@ func (te *testEnv) testPacket(t *testing.T, packetLayers []gopacket.Serializable
 func createBasicRules() []acl.AclRule {
 	return []acl.AclRule{
 		{
-			Actions: []acl.AclAction{{ID: 0}}, // PASS
+			Actions:    []acl.AclAction{{ID: 0}}, // PASS
 			Devices:    []filter.Device{{Name: defaultDeviceName}},
 			VlanRanges: []filter.VlanRange{},
 			Src4s: []filter.IPNet{
@@ -70,7 +70,7 @@ func createBasicRules() []acl.AclRule {
 			},
 		},
 		{
-			Actions: []acl.AclAction{{ID: 1}}, // DENY
+			Actions:    []acl.AclAction{{ID: 1}}, // DENY
 			Devices:    []filter.Device{{Name: defaultDeviceName}},
 			VlanRanges: []filter.VlanRange{},
 			Src4s: []filter.IPNet{

@@ -31,20 +31,20 @@ type BalancerManager struct {
 	mu sync.Mutex
 
 	// Logger
-	log *zap.SugaredLogger
+	log *zap.Logger
 
 	handlerMetrics handlersMetrics
 }
 
 func NewBalancerManager(
 	handle *ffi.BalancerManager,
-	log *zap.SugaredLogger,
+	log *zap.Logger,
 ) *BalancerManager {
 	name := handle.Name()
 	manager := &BalancerManager{
 		handle:           handle,
 		realUpdateBuffer: []ffi.RealUpdate{},
-		log:              log.With("balancer", name),
+		log:              log.With(zap.String("balancer", name)),
 		handlerMetrics:   newHandlersMetrics(),
 	}
 	manager.startBackgroundTasks()
@@ -75,26 +75,26 @@ func (b *BalancerManager) Update(
 	tracker := b.newHandlerTracker("update")
 	defer tracker.Fix()
 
-	b.log.Debugw("updating balancer configuration")
+	b.log.Debug("updating balancer configuration")
 
 	// Merge new config with current config for UPDATE mode
 	mergedConfig, err := mergeBalancerConfig(config, b.handle.Config())
 	if err != nil {
-		b.log.Errorw("failed to merge config", "error", err)
+		b.log.Error("failed to merge config", zap.Error(err))
 		return nil, fmt.Errorf("failed to merge config: %w", err)
 	}
 
 	// Convert merged protobuf to FFI config
 	ffiConfig, err := ProtoToFFIConfig(mergedConfig)
 	if err != nil {
-		b.log.Errorw("failed to convert config", "error", err)
+		b.log.Error("failed to convert config", zap.Error(err))
 		return nil, fmt.Errorf("failed to convert config: %w", err)
 	}
 
 	// Create WLC configuration with validation
 	wlcConfig, err := createWlcConfig(mergedConfig)
 	if err != nil {
-		b.log.Errorw("failed to create WLC config", "error", err)
+		b.log.Error("failed to create WLC config", zap.Error(err))
 		return nil, fmt.Errorf("failed to create WLC config: %w", err)
 	}
 
@@ -109,20 +109,24 @@ func (b *BalancerManager) Update(
 	// Update via FFI
 	updateInfo, err := b.handle.Update(managerConfig, now)
 	if err != nil {
-		b.log.Errorw("failed to update manager", "error", err)
+		b.log.Error("failed to update manager", zap.Error(err))
 		return nil, fmt.Errorf("failed to update manager: %w", err)
 	}
 
 	// Log update information
-	b.log.Infow("balancer configuration updated successfully",
-		"vs_ipv4_matcher_reused", updateInfo.VsIpv4MatcherReused,
-		"vs_ipv6_matcher_reused", updateInfo.VsIpv6MatcherReused,
-		"acl_reused_vs_count", len(updateInfo.ACLReusedVs))
+	b.log.Info(
+		"balancer configuration updated successfully",
+		zap.Bool("vs_ipv4_matcher_reused", updateInfo.VsIpv4MatcherReused),
+		zap.Bool("vs_ipv6_matcher_reused", updateInfo.VsIpv6MatcherReused),
+		zap.Int("acl_reused_vs_count", len(updateInfo.ACLReusedVs)),
+	)
 
 	if len(updateInfo.ACLReusedVs) > 0 {
-		b.log.Debugw("ACL filters reused for virtual services",
-			"count", len(updateInfo.ACLReusedVs),
-			"vs_identifiers", updateInfo.ACLReusedVs)
+		b.log.Debug(
+			"ACL filters reused for virtual services",
+			zap.Int("count", len(updateInfo.ACLReusedVs)),
+			zap.Any("vs_identifiers", updateInfo.ACLReusedVs),
+		)
 	}
 
 	// restart background tasks
@@ -141,14 +145,18 @@ func (b *BalancerManager) UpdateReals(
 	tracker := b.newHandlerTracker("update_reals", metrics.Labels{"buffer": strconv.FormatBool(buffer)})
 	defer tracker.Fix()
 
-	b.log.Debugw("updating reals", "count", len(updates), "buffer", buffer)
+	b.log.Debug("updating reals", zap.Int("count", len(updates)), zap.Bool("buffer", buffer))
 
 	// Convert protobuf updates to FFI updates
 	ffiUpdates := make([]ffi.RealUpdate, 0, len(updates))
 	for i, update := range updates {
 		ffiUpdate, err := NewRealUpdateFromProto(update)
 		if err != nil {
-			b.log.Errorw("failed to convert update", "index", i, "error", err)
+			b.log.Error(
+				"failed to convert update",
+				zap.Int("index", i),
+				zap.Error(err),
+			)
 			return 0, fmt.Errorf(
 				"failed to convert update at index %d: %w",
 				i,
@@ -161,23 +169,21 @@ func (b *BalancerManager) UpdateReals(
 	if buffer {
 		// Buffer the updates
 		b.realUpdateBuffer = append(b.realUpdateBuffer, ffiUpdates...)
-		b.log.Debugw(
+		b.log.Debug(
 			"real updates buffered",
-			"count",
-			len(updates),
-			"total_buffered",
-			len(b.realUpdateBuffer),
+			zap.Int("count", len(updates)),
+			zap.Int("total_buffered", len(b.realUpdateBuffer)),
 		)
 		return len(updates), nil
 	}
 
 	// Apply immediately
 	if err := b.handle.UpdateReals(ffiUpdates); err != nil {
-		b.log.Errorw("failed to update reals", "error", err)
+		b.log.Error("failed to update reals", zap.Error(err))
 		return 0, err
 	}
 
-	b.log.Infow("real updates applied", "count", len(updates))
+	b.log.Info("real updates applied", zap.Int("count", len(updates)))
 	return len(updates), nil
 }
 
@@ -190,22 +196,22 @@ func (b *BalancerManager) FlushRealUpdates() (int, error) {
 
 	count := len(b.realUpdateBuffer)
 	if count == 0 {
-		b.log.Debugw("no buffered updates to flush")
+		b.log.Debug("no buffered updates to flush")
 		return 0, nil
 	}
 
-	b.log.Debugw("flushing buffered real updates", "count", count)
+	b.log.Debug("flushing buffered real updates", zap.Int("count", count))
 
 	// Apply buffered updates
 	if err := b.handle.UpdateReals(b.realUpdateBuffer); err != nil {
-		b.log.Errorw("failed to flush real updates", "error", err)
+		b.log.Error("failed to flush real updates", zap.Error(err))
 		return 0, err
 	}
 
 	// Clear buffer
 	b.realUpdateBuffer = b.realUpdateBuffer[:0]
 
-	b.log.Infow("buffered real updates flushed", "count", count)
+	b.log.Info("buffered real updates flushed", zap.Int("count", count))
 	return count, nil
 }
 
@@ -523,16 +529,14 @@ func (b *BalancerManager) backgroundRefreshTask(ctx context.Context) {
 
 		// If refresh period is zero, stop the task
 		if refreshPeriod == 0 {
-			b.log.Debugw(
-				"background refresh task stopped (refresh_period is zero)",
-			)
+			b.log.Debug("background refresh task stopped (refresh_period is zero)")
 			return
 		}
 
 		// Wait for refresh period or context cancellation
 		select {
 		case <-ctx.Done():
-			b.log.Debugw("background refresh task stopped (context cancelled)")
+			b.log.Debug("background refresh task stopped (context cancelled)")
 			return
 		case <-time.After(refreshPeriod):
 			// Continue with refresh
@@ -542,7 +546,7 @@ func (b *BalancerManager) backgroundRefreshTask(ctx context.Context) {
 
 		// Perform refresh with error handling
 		if err := b.Refresh(now); err != nil {
-			b.log.Errorw("background refresh failed", "error", err)
+			b.log.Error("background refresh failed", zap.Error(err))
 		}
 	}
 }
@@ -573,39 +577,43 @@ func (b *BalancerManager) Refresh(now time.Time) error {
 
 	currentLoadFactor := float32(activeSessions) / float32(capacity)
 
-	b.log.Debugw("fetched balancer info",
-		"current_capacity", capacity,
-		"active_sessions", activeSessions,
-		"current_load_factor", currentLoadFactor,
-		"max_load_factor", maxLoadFactor)
+	b.log.Debug(
+		"fetched balancer info",
+		zap.Uint64("current_capacity", uint64(capacity)),
+		zap.Uint64("active_sessions", activeSessions),
+		zap.Float32("current_load_factor", currentLoadFactor),
+		zap.Float32("max_load_factor", maxLoadFactor),
+	)
 
 	if currentLoadFactor > maxLoadFactor {
 		newCapacity := capacity * 2
-		b.log.Infow("resizing session table",
-			"current_capacity", capacity,
-			"new_capacity", newCapacity,
-			"active_sessions", activeSessions,
-			"current_load_factor", currentLoadFactor,
-			"max_load_factor", maxLoadFactor)
+		b.log.Info(
+			"resizing session table",
+			zap.Uint64("current_capacity", uint64(capacity)),
+			zap.Uint64("new_capacity", uint64(newCapacity)),
+			zap.Uint64("active_sessions", activeSessions),
+			zap.Float32("current_load_factor", currentLoadFactor),
+			zap.Float32("max_load_factor", maxLoadFactor),
+		)
 
 		if err := b.handle.ResizeSessionTable(newCapacity, now); err != nil {
-			b.log.Errorw("failed to resize session table", "error", err)
+			b.log.Error("failed to resize session table", zap.Error(err))
 		} else {
-			b.log.Infow("session table resized successfully", "new_capacity", newCapacity)
+			b.log.Info("session table resized successfully", zap.Uint64("new_capacity", uint64(newCapacity)))
 		}
 	}
 
 	// WLC real updates - use UpdateRealsWlc to preserve config weights
 	updates := WlcUpdates(b.handle.Config(), b.handle.Graph(), info)
 
-	b.log.Debugw("calculated WLC updates", "count", len(updates))
+	b.log.Debug("calculated WLC updates", zap.Int("count", len(updates)))
 
 	if len(updates) > 0 {
-		b.log.Infow("applying WLC updates", "count", len(updates))
+		b.log.Info("applying WLC updates", zap.Int("count", len(updates)))
 		if err := b.handle.UpdateRealsWlc(updates); err != nil {
-			b.log.Errorw("failed to apply WLC updates", "error", err)
+			b.log.Error("failed to apply WLC updates", zap.Error(err))
 		} else {
-			b.log.Infow("WLC updates applied successfully", "count", len(updates))
+			b.log.Info("WLC updates applied successfully", zap.Int("count", len(updates)))
 		}
 	}
 
@@ -647,14 +655,18 @@ func (b *BalancerManager) UpdateVS(
 	tracker := b.newHandlerTracker("update_vs")
 	defer tracker.Fix()
 
-	b.log.Debugw("updating virtual services", "vs_count", len(vsList))
+	b.log.Debug("updating virtual services", zap.Int("vs_count", len(vsList)))
 
 	// Convert protobuf VS list to FFI format
 	ffiVsList := make([]ffi.VsConfig, 0, len(vsList))
 	for i, protoVs := range vsList {
 		ffiVs, err := protoToVsConfig(protoVs)
 		if err != nil {
-			b.log.Errorw("failed to convert VS", "index", i, "error", err)
+			b.log.Error(
+				"failed to convert VS",
+				zap.Int("index", i),
+				zap.Error(err),
+			)
 			return nil, fmt.Errorf(
 				"failed to convert VS at index %d: %w",
 				i,
@@ -740,7 +752,7 @@ func (b *BalancerManager) UpdateVS(
 	// Update via FFI
 	updateInfo, err := b.handle.Update(updatedConfig, now)
 	if err != nil {
-		b.log.Errorw("failed to update manager", "error", err)
+		b.log.Error("failed to update manager", zap.Error(err))
 		return nil, fmt.Errorf("failed to update manager: %w", err)
 	}
 
@@ -750,11 +762,13 @@ func (b *BalancerManager) UpdateVS(
 		requestedVsIds,
 	)
 
-	b.log.Infow("virtual services updated successfully",
-		"vs_count", len(vsList),
-		"vs_ipv4_matcher_reused", filteredUpdateInfo.VsIpv4MatcherReused,
-		"vs_ipv6_matcher_reused", filteredUpdateInfo.VsIpv6MatcherReused,
-		"acl_reused_vs_count", len(filteredUpdateInfo.ACLReusedVs))
+	b.log.Info(
+		"virtual services updated successfully",
+		zap.Int("vs_count", len(vsList)),
+		zap.Bool("vs_ipv4_matcher_reused", filteredUpdateInfo.VsIpv4MatcherReused),
+		zap.Bool("vs_ipv6_matcher_reused", filteredUpdateInfo.VsIpv6MatcherReused),
+		zap.Int("acl_reused_vs_count", len(filteredUpdateInfo.ACLReusedVs)),
+	)
 
 	return filteredUpdateInfo, nil
 }
@@ -780,7 +794,7 @@ func (b *BalancerManager) DeleteVS(
 	tracker := b.newHandlerTracker("delete_vs")
 	defer tracker.Fix()
 
-	b.log.Debugw("deleting virtual services", "vs_count", len(vsList))
+	b.log.Debug("deleting virtual services", zap.Int("vs_count", len(vsList)))
 
 	// Get current config
 	currentConfig := b.handle.Config()
@@ -843,17 +857,19 @@ func (b *BalancerManager) DeleteVS(
 	// Update via FFI
 	updateInfo, err := b.handle.Update(updatedConfig, now)
 	if err != nil {
-		b.log.Errorw("failed to update manager", "error", err)
+		b.log.Error("failed to update manager", zap.Error(err))
 		return nil, fmt.Errorf("failed to update manager: %w", err)
 	}
 
 	// For delete, ACL reuse list should be empty
 	updateInfo.ACLReusedVs = []ffi.VsIdentifier{}
 
-	b.log.Infow("virtual services deleted successfully",
-		"vs_count", len(vsList),
-		"vs_ipv4_matcher_reused", updateInfo.VsIpv4MatcherReused,
-		"vs_ipv6_matcher_reused", updateInfo.VsIpv6MatcherReused)
+	b.log.Info(
+		"virtual services deleted successfully",
+		zap.Int("vs_count", len(vsList)),
+		zap.Bool("vs_ipv4_matcher_reused", updateInfo.VsIpv4MatcherReused),
+		zap.Bool("vs_ipv6_matcher_reused", updateInfo.VsIpv6MatcherReused),
+	)
 
 	return updateInfo, nil
 }

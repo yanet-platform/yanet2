@@ -1314,7 +1314,7 @@ func testCfgPhase6StateWithNewAgent(t *testing.T, ts *utils.TestSetup) {
 	t.Run("CreateNewAgentAndAttach", func(t *testing.T) {
 		// Create new BalancerAgent using same shared memory
 		logLevel := zapcore.InfoLevel
-		sugaredLogger, _, _ := logging.Init(&logging.Config{
+		logger, _, _ := logging.Init(&logging.Config{
 			Level: logLevel,
 		})
 
@@ -1322,7 +1322,7 @@ func testCfgPhase6StateWithNewAgent(t *testing.T, ts *utils.TestSetup) {
 		newAgent, err := balancer.NewBalancerAgent(
 			ts.Mock.SharedMemory(), // Same shared memory
 			agentMemory,
-			sugaredLogger,
+			logger,
 		)
 		require.NoError(t, err, "failed to create new balancer agent")
 
