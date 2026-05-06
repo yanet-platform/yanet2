@@ -12,13 +12,15 @@
         "@gravity-ui/navigation": "^3",
         "@gravity-ui/uikit": "^7",
         "@tanstack/react-virtual": "^3.13.12",
+        "@xyflow/react": "^12",
+        "diff": "^9.0.0",
         "js-yaml": "^4.1.0",
         "react": "^19",
         "react-dom": "^19",
-        "react-router-dom": "^7.9.6",
-        "@xyflow/react": "^12"
+        "react-router-dom": "^7.9.6"
     },
     "devDependencies": {
+        "@types/diff": "^7.0.2",
         "@types/js-yaml": "^4.0.9",
         "@types/react": "^19",
         "@types/react-dom": "^19",

@@ -1,0 +1,169 @@
+import React, { memo, useCallback } from 'react';
+import type { Module, DragPayload } from '../types';
+import { metaFor } from '../moduleMeta';
+import { InlineEdit } from './InlineEdit';
+import { Sparkline } from './Sparkline';
+import { formatPps } from '../../../../utils';
+import { useSparklineHistory } from '../hooks/useSparklineHistory';
+import type { InterpolatedCounterData } from '../../../../hooks';
+
+const MODULE_NAME_REGEX = /^[a-z0-9_-]+$/;
+
+interface ModuleCardProps {
+    module: Module;
+    fnId: string;
+    chainId: string;
+    modIdx: number;
+    isDragging: boolean;
+    /** True when this card is the source being dragged in the same chain. */
+    isSourceDuringDrag?: boolean;
+    isInvalidDragTarget: boolean;
+    counter?: InterpolatedCounterData;
+    onDragStart: (payload: DragPayload) => void;
+    onDragEnd: () => void;
+    onRename: (newName: string) => void;
+    onOpenDrawer: () => void;
+    siblingNames: string[];
+}
+
+const validateModuleName = (name: string, siblingNames: string[]): string | null => {
+    if (!name || name.trim() === '') {
+        return 'Name cannot be empty';
+    }
+    if (name.length > 32) {
+        return 'Name must be 32 chars or fewer';
+    }
+    if (!MODULE_NAME_REGEX.test(name)) {
+        return 'Only a-z, 0-9, _ and - allowed';
+    }
+    if (siblingNames.includes(name)) {
+        return 'Name must be unique within chain';
+    }
+    return null;
+};
+
+/** Small kebab / more-options icon. */
+const KebabIcon = (): React.JSX.Element => (
+    <svg
+        width="12"
+        height="12"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+    >
+        <circle cx="12" cy="5" r="1" fill="currentColor" />
+        <circle cx="12" cy="12" r="1" fill="currentColor" />
+        <circle cx="12" cy="19" r="1" fill="currentColor" />
+    </svg>
+);
+
+/**
+ * A single module card rendered inside a lane track.
+ * Draggable (native HTML5), inline-editable name, opens drawer on click.
+ * Layout: 3px left accent bar, row 1 (type chip + name + kebab),
+ * row 2 (sparkline + pps number).
+ */
+export const ModuleCard: React.FC<ModuleCardProps> = memo(({
+    module,
+    fnId,
+    chainId,
+    modIdx,
+    isDragging,
+    isSourceDuringDrag,
+    isInvalidDragTarget,
+    counter,
+    onDragStart,
+    onDragEnd,
+    onRename,
+    onOpenDrawer,
+    siblingNames,
+}) => {
+    const meta = metaFor(module.type);
+    const sparklineData = useSparklineHistory(module.id, counter?.pps ?? 0);
+
+    const handleDragStart = useCallback((e: React.DragEvent<HTMLDivElement>): void => {
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', module.id);
+        onDragStart({ fromFnId: fnId, fromChainId: chainId, fromModIdx: modIdx, moduleId: module.id });
+    }, [fnId, chainId, modIdx, module.id, onDragStart]);
+
+    const validate = useCallback((name: string): string | null => {
+        return validateModuleName(name, siblingNames.filter(n => n !== module.name));
+    }, [siblingNames, module.name]);
+
+    const borderColor = isInvalidDragTarget
+        ? 'var(--fng-danger)'
+        : 'var(--fng-line)';
+
+    return (
+        <div
+            className={[
+                'fng-module-card',
+                isDragging ? 'fng-module-card--dragging' : '',
+                isSourceDuringDrag ? 'fng-module-card--drag-source' : '',
+                isInvalidDragTarget ? 'fng-module-card--invalid-target' : '',
+            ].filter(Boolean).join(' ')}
+            style={{ borderColor }}
+            draggable
+            onDragStart={handleDragStart}
+            onDragEnd={onDragEnd}
+            onClick={onOpenDrawer}
+            title={isSourceDuringDrag ? 'Drop here to cancel' : undefined}
+        >
+            <div
+                className="fng-module-card__accent-bar"
+                style={{ background: meta.color }}
+            />
+            <div className="fng-module-card__content">
+                <div className="fng-module-card__top-row">
+                    <span
+                        className="fng-module-card__type-chip"
+                        style={{
+                            background: `${meta.color}1f`,
+                            color: meta.color,
+                        }}
+                        title={meta.desc}
+                    >
+                        {module.type}
+                    </span>
+                    <div className="fng-module-card__name">
+                        <InlineEdit
+                            value={module.name}
+                            onChange={onRename}
+                            validate={validate}
+                            placeholder="name"
+                            hintVariant="module"
+                        />
+                    </div>
+                    <button
+                        className="fng-module-card__kebab"
+                        onClick={e => { e.stopPropagation(); onOpenDrawer(); }}
+                        type="button"
+                        title="Module options"
+                        aria-label="Module options"
+                    >
+                        <KebabIcon />
+                    </button>
+                </div>
+                <div className="fng-module-card__sparkline-row">
+                    <Sparkline
+                        data={sparklineData}
+                        width={120}
+                        height={15}
+                        color={meta.color}
+                    />
+                    <span className="fng-module-card__counter">
+                        {counter ? formatPps(counter.pps) : '—'}{' '}
+                        <span className="fng-module-card__counter-unit">pps</span>
+                    </span>
+                </div>
+            </div>
+        </div>
+    );
+});
+
+ModuleCard.displayName = 'ModuleCard';
