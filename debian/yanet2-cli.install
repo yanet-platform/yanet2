@@ -16,6 +16,7 @@ usr/bin/yanet-cli-counters
 usr/bin/yanet-cli-device-plain
 usr/bin/yanet-cli-device-vlan
 usr/bin/yanet-cli-balancer
+usr/bin/yanet-cli-balancer2
 usr/bin/yanet-cli-operator-pipeline
 usr/bin/yanet-cli-operator-neighbour
 usr/bin/yanet-cli-operator-route
