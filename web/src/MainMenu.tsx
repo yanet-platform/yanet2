@@ -4,6 +4,7 @@ import type { MenuItem as AsideHeaderMenuItem } from '@gravity-ui/navigation';
 import { Link, Eye, Route, CurlyBracketsFunction, ListUl, HardDrive, LayoutCellsLarge, CirclePlay, Shield, ArrowRight } from '@gravity-ui/icons';
 import Logo from './icons/Logo';
 import type { PageId } from './types';
+import './MainMenu.scss';
 
 interface MainMenuProps {
     currentPage: PageId;
@@ -12,15 +13,15 @@ interface MainMenuProps {
     disabled?: boolean;
 }
 
-type MenuItem = AsideHeaderMenuItem & {
-    id: PageId;
+type NavMenuItem = AsideHeaderMenuItem & {
+    id: string;
     current: boolean;
-}
+};
 
 const MainMenu = ({ currentPage, onPageChange, renderContent, disabled = false }: MainMenuProps): React.JSX.Element => {
     const [compact, setCompact] = useState<boolean>(false);
 
-    const createMenuItem = (id: PageId, title: string, icon: MenuItem['icon']): MenuItem => ({
+    const createMenuItem = (id: PageId, title: string, icon: NavMenuItem['icon']): NavMenuItem => ({
         id,
         title,
         icon,
@@ -31,17 +32,47 @@ const MainMenu = ({ currentPage, onPageChange, renderContent, disabled = false }
         className: disabled ? 'main-menu__item--disabled' : undefined,
     });
 
-    const menuItems: MenuItem[] = [
-        createMenuItem('inspect', 'Inspect', Eye),
-        createMenuItem('functions', 'Functions', CurlyBracketsFunction),
-        createMenuItem('pipelines', 'Pipelines', ListUl),
-        createMenuItem('devices', 'Devices', HardDrive),
-        createMenuItem('neighbours', 'Neighbours', Link),
-        createMenuItem('route', 'Route', Route),
-        createMenuItem('forward', 'Forward', ArrowRight),
-        createMenuItem('decap', 'Decap', LayoutCellsLarge),
-        createMenuItem('acl', 'ACL', Shield),
-        createMenuItem('pdump', 'Pdump', CirclePlay),
+    const createSectionHeader = (id: string, title: string): NavMenuItem => ({
+        id,
+        title,
+        current: false,
+        onItemClick: undefined,
+        className: 'main-menu__section-header',
+        itemWrapper: (_params, _makeItem, opts) => {
+            if (opts?.collapsed) {
+                return null;
+            }
+            return (
+                <span className="main-menu__section-label">{title}</span>
+            );
+        },
+    });
+
+    const createDivider = (id: string): NavMenuItem => ({
+        id,
+        title: '',
+        type: 'divider' as const,
+        current: false,
+        onItemClick: undefined,
+    });
+
+    const menuItems: NavMenuItem[] = [
+        createSectionHeader('__section_builtin', 'Builtin'),
+        createMenuItem('builtin/inspect', 'Inspect', Eye),
+        createMenuItem('builtin/functions', 'Functions', CurlyBracketsFunction),
+        createMenuItem('builtin/pipelines', 'Pipelines', ListUl),
+        createMenuItem('builtin/devices', 'Devices', HardDrive),
+        createDivider('__div_1'),
+        createSectionHeader('__section_modules', 'Modules'),
+        createMenuItem('modules/forward', 'Forward', ArrowRight),
+        createMenuItem('modules/decap', 'Decap', LayoutCellsLarge),
+        createMenuItem('modules/acl', 'ACL', Shield),
+        createMenuItem('modules/pdump', 'Pdump', CirclePlay),
+        createMenuItem('modules/route', 'Route (FIB)', Route),
+        createDivider('__div_2'),
+        createSectionHeader('__section_operators', 'Operators'),
+        createMenuItem('operators/route', 'Route (RIB)', Route),
+        createMenuItem('operators/neighbours', 'Neighbours', Link),
     ];
 
     return (

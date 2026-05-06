@@ -1,6 +1,18 @@
 import { createContext, useContext } from 'react';
 
-export const PAGE_IDS = ['inspect', 'functions', 'pipelines', 'devices', 'neighbours', 'route', 'forward', 'decap', 'pdump', 'acl'] as const;
+export const PAGE_IDS = [
+    'builtin/inspect',
+    'builtin/functions',
+    'builtin/pipelines',
+    'builtin/devices',
+    'modules/forward',
+    'modules/decap',
+    'modules/acl',
+    'modules/pdump',
+    'modules/route',
+    'operators/route',
+    'operators/neighbours',
+] as const;
 
 export type PageId = typeof PAGE_IDS[number];
 

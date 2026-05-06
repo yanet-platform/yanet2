@@ -1,0 +1,116 @@
+/* Import shared graph styles */
+@import '../../../../components/GraphEditor/GraphEditor.scss';
+
+/* ============================================
+   Input/Output Node Styles (use shared classes)
+   ============================================ */
+.input-node {
+    width: 70px;
+    height: 70px;
+    border-radius: 50%;
+    background: var(--g-color-base-float);
+    border: 2px solid var(--g-color-line-generic);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--g-color-text-secondary);
+    transition: border-color 0.15s ease, background-color 0.15s ease;
+    cursor: pointer;
+}
+
+.output-node {
+    width: 70px;
+    height: 70px;
+    border-radius: 50%;
+    background: var(--g-color-base-float);
+    border: 2px solid var(--g-color-line-generic);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--g-color-text-secondary);
+    transition: border-color 0.15s ease, background-color 0.15s ease;
+    cursor: pointer;
+}
+
+.input-node:hover,
+.output-node:hover {
+    border-color: var(--g-color-line-generic-hover);
+    background: var(--g-color-base-generic-ultralight);
+}
+
+.input-node.selected,
+.output-node.selected {
+    border-color: var(--g-color-line-brand);
+    color: var(--g-color-text-brand);
+}
+
+/* ============================================
+   Module Node Styles (uses shared .graph-node base)
+   ============================================ */
+.module-node {
+    padding: 10px 14px;
+    border-radius: 8px;
+    background: var(--g-color-base-float);
+    border: 2px solid var(--g-color-line-generic);
+    min-width: 140px;
+    height: 120px;
+    box-sizing: border-box;
+    transition: border-color 0.15s ease, background-color 0.15s ease;
+    cursor: pointer;
+}
+
+.module-node:hover {
+    border-color: var(--g-color-line-generic-hover);
+    background: var(--g-color-base-generic-ultralight);
+}
+
+.module-node.selected {
+    border-color: var(--g-color-line-brand);
+}
+
+.module-node__content {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.module-node__row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.module-node__label {
+    color: var(--g-color-text-secondary);
+    font-weight: 500;
+    font-size: 11px;
+    flex-shrink: 0;
+}
+
+.module-node__separator {
+    flex: 1;
+    border-bottom: 1px dotted var(--g-color-line-generic);
+    min-width: 8px;
+    height: 1px;
+}
+
+.module-node__counters {
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px solid var(--g-color-line-generic);
+}
+
+.node-handle {
+    width: 10px !important;
+    height: 10px !important;
+    background: var(--g-color-base-float) !important;
+    border: 2px solid var(--g-color-line-generic) !important;
+    transition: all 0.15s ease;
+}
+
+.node-handle:hover {
+    width: 14px !important;
+    height: 14px !important;
+    background: var(--g-color-base-brand) !important;
+    border-color: var(--g-color-line-brand) !important;
+}
