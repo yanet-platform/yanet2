@@ -1,29 +1,47 @@
-package gateway
+package builtin
 
 import (
 	"context"
+
+	"google.golang.org/grpc"
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/controlplane/ynpb"
 )
 
-// InspectService is a gRPC service for inspecting the dataplane configuration.
-type InspectService struct {
+// Inspect is an in-process gRPC service for inspecting the dataplane
+// configuration.
+type Inspect struct {
 	ynpb.UnimplementedInspectServiceServer
 
 	instanceID uint32
 	shm        *ffi.SharedMemory
 }
 
-// NewInspectService creates a new InspectService.
-func NewInspectService(instanceID uint32, shm *ffi.SharedMemory) *InspectService {
-	return &InspectService{
+// NewInspect creates a new Inspect service.
+func NewInspect(instanceID uint32, shm *ffi.SharedMemory) *Inspect {
+	return &Inspect{
 		instanceID: instanceID,
 		shm:        shm,
 	}
 }
 
-func (m *InspectService) Inspect(
+// Name returns the service name.
+func (m *Inspect) Name() string { return "inspect" }
+
+// Endpoint returns empty string indicating in-process service.
+func (m *Inspect) Endpoint() string { return "" }
+
+// ServicesNames returns the gRPC service names served by this service.
+func (m *Inspect) ServicesNames() []string { return []string{"ynpb.InspectService"} }
+
+// RegisterService registers the service on the given gRPC server.
+func (m *Inspect) RegisterService(server *grpc.Server) {
+	ynpb.RegisterInspectServiceServer(server, m)
+}
+
+// Inspect returns inspection data for the dataplane instance.
+func (m *Inspect) Inspect(
 	ctx context.Context,
 	request *ynpb.InspectRequest,
 ) (*ynpb.InspectResponse, error) {
@@ -47,7 +65,7 @@ func (m *InspectService) Inspect(
 	return response, nil
 }
 
-func (m *InspectService) dpModules(dpConfig *ffi.DPConfig) []*ynpb.DPModuleInfo {
+func (m *Inspect) dpModules(dpConfig *ffi.DPConfig) []*ynpb.DPModuleInfo {
 	modules := dpConfig.Modules()
 
 	out := make([]*ynpb.DPModuleInfo, len(modules))
@@ -60,7 +78,7 @@ func (m *InspectService) dpModules(dpConfig *ffi.DPConfig) []*ynpb.DPModuleInfo 
 	return out
 }
 
-func (m *InspectService) cpConfigs(dpConfig *ffi.DPConfig) []*ynpb.CPConfigInfo {
+func (m *Inspect) cpConfigs(dpConfig *ffi.DPConfig) []*ynpb.CPConfigInfo {
 	configs := dpConfig.CPConfigs()
 
 	out := make([]*ynpb.CPConfigInfo, len(configs))
@@ -75,7 +93,7 @@ func (m *InspectService) cpConfigs(dpConfig *ffi.DPConfig) []*ynpb.CPConfigInfo 
 	return out
 }
 
-func (m *InspectService) functions(dpConfig *ffi.DPConfig) []*ynpb.FunctionInfo {
+func (m *Inspect) functions(dpConfig *ffi.DPConfig) []*ynpb.FunctionInfo {
 	functions := dpConfig.Functions()
 	if len(functions) == 0 {
 		return nil
@@ -109,7 +127,7 @@ func (m *InspectService) functions(dpConfig *ffi.DPConfig) []*ynpb.FunctionInfo 
 	return out
 }
 
-func (m *InspectService) pipelines(dpConfig *ffi.DPConfig) []*ynpb.PipelineInfo {
+func (m *Inspect) pipelines(dpConfig *ffi.DPConfig) []*ynpb.PipelineInfo {
 	pipelines := dpConfig.Pipelines()
 
 	out := make([]*ynpb.PipelineInfo, len(pipelines))
@@ -128,7 +146,7 @@ func (m *InspectService) pipelines(dpConfig *ffi.DPConfig) []*ynpb.PipelineInfo 
 	return out
 }
 
-func (m *InspectService) agents(dpConfig *ffi.DPConfig) []*ynpb.AgentInfo {
+func (m *Inspect) agents(dpConfig *ffi.DPConfig) []*ynpb.AgentInfo {
 	agents := dpConfig.Agents()
 
 	out := make([]*ynpb.AgentInfo, len(agents))
@@ -154,7 +172,7 @@ func (m *InspectService) agents(dpConfig *ffi.DPConfig) []*ynpb.AgentInfo {
 	return out
 }
 
-func (m *InspectService) devices(dpConfig *ffi.DPConfig) []*ynpb.DeviceInfo {
+func (m *Inspect) devices(dpConfig *ffi.DPConfig) []*ynpb.DeviceInfo {
 	devices := dpConfig.Devices()
 	if len(devices) == 0 {
 		return nil
@@ -189,6 +207,6 @@ func (m *InspectService) devices(dpConfig *ffi.DPConfig) []*ynpb.DeviceInfo {
 	return out
 }
 
-func (m *InspectService) numaIdx(dpConfig *ffi.DPConfig) uint32 {
+func (m *Inspect) numaIdx(dpConfig *ffi.DPConfig) uint32 {
 	return dpConfig.NumaIdx()
 }

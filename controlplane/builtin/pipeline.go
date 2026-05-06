@@ -1,12 +1,13 @@
-package gateway
+package builtin
 
 import (
 	"context"
 	"fmt"
 
-	"go.uber.org/zap"
-
 	"github.com/c2h5oh/datasize"
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
+
 	"github.com/yanet-platform/yanet2/common/commonpb"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/controlplane/ynpb"
@@ -15,15 +16,15 @@ import (
 const agentName = "pipeline"
 
 // Pipeline agent is not persistent: it is created
-// on every call of update/assign/delete
+// on every call of update/assign/delete.
 // Memory, allocated for pipeline agent, will be free after
 // corresponding call is done. So, on every call we need to allocate
 // memory for temporary operations only. For now, 1MB is
 // sufficient.
 const defaultAgentMemory = datasize.MB
 
-// PipelineService is a gRPC service for managing pipelines.
-type PipelineService struct {
+// Pipeline is an in-process gRPC service for managing pipelines.
+type Pipeline struct {
 	ynpb.UnimplementedPipelineServiceServer
 
 	instanceID uint32
@@ -31,16 +32,31 @@ type PipelineService struct {
 	log        *zap.Logger
 }
 
-// NewPipelineService creates a new PipelineService.
-func NewPipelineService(instanceID uint32, shm *ffi.SharedMemory, log *zap.Logger) *PipelineService {
-	return &PipelineService{
+// NewPipeline creates a new Pipeline service.
+func NewPipeline(instanceID uint32, shm *ffi.SharedMemory, log *zap.Logger) *Pipeline {
+	return &Pipeline{
 		instanceID: instanceID,
 		shm:        shm,
 		log:        log,
 	}
 }
 
-func (m *PipelineService) List(
+// Name returns the service name.
+func (m *Pipeline) Name() string { return "pipeline" }
+
+// Endpoint returns empty string indicating in-process service.
+func (m *Pipeline) Endpoint() string { return "" }
+
+// ServicesNames returns the gRPC service names served by this service.
+func (m *Pipeline) ServicesNames() []string { return []string{"ynpb.PipelineService"} }
+
+// RegisterService registers the service on the given gRPC server.
+func (m *Pipeline) RegisterService(server *grpc.Server) {
+	ynpb.RegisterPipelineServiceServer(server, m)
+}
+
+// List returns all pipeline IDs.
+func (m *Pipeline) List(
 	ctx context.Context,
 	request *ynpb.ListPipelinesRequest,
 ) (*ynpb.ListPipelinesResponse, error) {
@@ -60,7 +76,8 @@ func (m *PipelineService) List(
 	return response, nil
 }
 
-func (m *PipelineService) Get(
+// Get returns the pipeline with the given ID.
+func (m *Pipeline) Get(
 	ctx context.Context,
 	request *ynpb.GetPipelineRequest,
 ) (*ynpb.GetPipelineResponse, error) {
@@ -92,11 +109,10 @@ func (m *PipelineService) Get(
 	}
 
 	return nil, fmt.Errorf("not found")
-
 }
 
 // Update updates or inserts a pipeline.
-func (m *PipelineService) Update(
+func (m *Pipeline) Update(
 	ctx context.Context,
 	request *ynpb.UpdatePipelineRequest,
 ) (*ynpb.UpdatePipelineResponse, error) {
@@ -124,7 +140,8 @@ func (m *PipelineService) Update(
 	return &ynpb.UpdatePipelineResponse{}, nil
 }
 
-func (m *PipelineService) Delete(
+// Delete deletes the pipeline with the given ID.
+func (m *Pipeline) Delete(
 	ctx context.Context,
 	request *ynpb.DeletePipelineRequest,
 ) (*ynpb.DeletePipelineResponse, error) {

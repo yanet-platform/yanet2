@@ -12,40 +12,30 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 
-	"github.com/yanet-platform/yanet2/controlplane/gateway"
 	"github.com/yanet-platform/yanet2/controlplane/internal/xgrpc"
 )
 
-type BuiltInModule interface {
-	Name() string
-	Endpoint() string
-	ServicesNames() []string
-	RegisterService(server *grpc.Server)
-	Close() error
-}
-
-type BackgroundBuiltInModule interface {
-	Run(ctx context.Context) error
-}
-
-type BuiltInModuleRunner struct {
-	module          BuiltInModule
+// ServiceRunner runs an out-of-process Service on its own listener and
+// registers it with the gateway.
+type ServiceRunner struct {
+	module          Service
 	gatewayEndpoint string
-	gatewayTLS      *gateway.TLSConfig
+	gatewayTLS      *TLSConfig
 	server          *grpc.Server
 	ready           chan struct{}
 	log             *zap.Logger
 }
 
-func NewBuiltInModuleRunner(
-	module BuiltInModule,
+// NewServiceRunner creates a new ServiceRunner for the given service.
+func NewServiceRunner(
+	module Service,
 	gatewayEndpoint string,
-	gatewayTLS *gateway.TLSConfig,
+	gatewayTLS *TLSConfig,
 	log *zap.Logger,
-) *BuiltInModuleRunner {
+) *ServiceRunner {
 	log = log.Named(module.Name()).With(zap.String("module", module.Name()))
 
-	return &BuiltInModuleRunner{
+	return &ServiceRunner{
 		module:          module,
 		gatewayEndpoint: gatewayEndpoint,
 		gatewayTLS:      gatewayTLS,
@@ -62,15 +52,20 @@ func NewBuiltInModuleRunner(
 // the initial service registration phase against the gateway. The
 // channel is closed exactly once; consumers can use it to detect that
 // the module is reachable through the gateway.
-func (m *BuiltInModuleRunner) Ready() <-chan struct{} {
+func (m *ServiceRunner) Ready() <-chan struct{} {
 	return m.ready
 }
 
-func (m *BuiltInModuleRunner) Close() error {
-	return m.module.Close()
+// Close closes the underlying service if it implements ClosableService.
+func (m *ServiceRunner) Close() error {
+	if c, ok := m.module.(ClosableService); ok {
+		return c.Close()
+	}
+	return nil
 }
 
-func (m *BuiltInModuleRunner) Run(ctx context.Context) error {
+// Run runs the service until the context is canceled.
+func (m *ServiceRunner) Run(ctx context.Context) error {
 	listener, err := m.listen()
 	if err != nil {
 		return fmt.Errorf("failed to initialize gRPC listener: %w", err)
@@ -79,11 +74,11 @@ func (m *BuiltInModuleRunner) Run(ctx context.Context) error {
 	m.module.RegisterService(m.server)
 
 	wg, ctx := errgroup.WithContext(ctx)
-	if mod, ok := m.module.(BackgroundBuiltInModule); ok {
+	if bg, ok := m.module.(BackgroundService); ok {
 		m.log.Info("running background jobs")
 
 		wg.Go(func() error {
-			return mod.Run(ctx)
+			return bg.Run(ctx)
 		})
 	}
 	wg.Go(func() error {
@@ -106,7 +101,7 @@ func (m *BuiltInModuleRunner) Run(ctx context.Context) error {
 	return wg.Wait()
 }
 
-func (m *BuiltInModuleRunner) listen() (net.Listener, error) {
+func (m *ServiceRunner) listen() (net.Listener, error) {
 	endpoint := m.module.Endpoint()
 
 	if strings.HasPrefix(endpoint, "/") {
@@ -126,11 +121,11 @@ func (m *BuiltInModuleRunner) listen() (net.Listener, error) {
 	return net.Listen("tcp", endpoint)
 }
 
-func (m *BuiltInModuleRunner) register(ctx context.Context, addr net.Addr) error {
-	registrar, err := gateway.NewGatewayRegistrar(
+func (m *ServiceRunner) register(ctx context.Context, addr net.Addr) error {
+	registrar, err := NewGatewayRegistrar(
 		m.gatewayEndpoint,
 		m.gatewayTLS,
-		gateway.WithLog(m.log),
+		WithRegistrarLog(m.log),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to initialize gateway registrar: %w", err)

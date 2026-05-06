@@ -1,4 +1,4 @@
-package gateway
+package builtin
 
 import (
 	"context"
@@ -6,30 +6,46 @@ import (
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	"github.com/yanet-platform/yanet2/controlplane/ynpb"
 )
 
-// LoggingService is a service that exposes logging configuration at runtime.
-type LoggingService struct {
+// Logging is an in-process gRPC service that exposes logging configuration
+// at runtime.
+type Logging struct {
 	ynpb.UnimplementedLoggingServer
 
 	atom *zap.AtomicLevel
 	log  *zap.Logger
 }
 
-// NewLoggingService creates a new LoggingService.
-func NewLoggingService(atom *zap.AtomicLevel, log *zap.Logger) *LoggingService {
-	return &LoggingService{
-		atom: atom,
+// NewLogging creates a new Logging service.
+func NewLogging(level *zap.AtomicLevel, log *zap.Logger) *Logging {
+	return &Logging{
+		atom: level,
 		log:  log,
 	}
 }
 
+// Name returns the service name.
+func (m *Logging) Name() string { return "logging" }
+
+// Endpoint returns empty string indicating in-process service.
+func (m *Logging) Endpoint() string { return "" }
+
+// ServicesNames returns the gRPC service names served by this service.
+func (m *Logging) ServicesNames() []string { return []string{"ynpb.Logging"} }
+
+// RegisterService registers the service on the given gRPC server.
+func (m *Logging) RegisterService(server *grpc.Server) {
+	ynpb.RegisterLoggingServer(server, m)
+}
+
 // UpdateLevel updates the minimum logging level.
-func (m *LoggingService) UpdateLevel(
+func (m *Logging) UpdateLevel(
 	ctx context.Context,
 	req *ynpb.UpdateLevelRequest,
 ) (*ynpb.UpdateLevelResponse, error) {

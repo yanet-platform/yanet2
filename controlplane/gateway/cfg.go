@@ -1,7 +1,6 @@
 package gateway
 
 import (
-	"github.com/yanet-platform/yanet2/controlplane/gateway"
 	"github.com/yanet-platform/yanet2/controlplane/internal/auth"
 )
 
@@ -24,9 +23,10 @@ type ServerConfig struct {
 	HTTPEndpoint string `yaml:"http_endpoint"`
 	// TLS configures TLS for both gRPC and HTTP listeners. When nil,
 	// both listen in plaintext.
-	TLS *gateway.TLSConfig `yaml:"tls,omitempty"`
+	TLS *TLSConfig `yaml:"tls,omitempty"`
 }
 
+// DefaultConfig returns a Config with sensible defaults.
 func DefaultConfig() *Config {
 	return &Config{
 		Server: ServerConfig{

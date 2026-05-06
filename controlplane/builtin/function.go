@@ -1,12 +1,13 @@
-package gateway
+package builtin
 
 import (
 	"context"
 	"fmt"
 
-	"go.uber.org/zap"
-
 	"github.com/c2h5oh/datasize"
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
+
 	"github.com/yanet-platform/yanet2/common/commonpb"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/controlplane/ynpb"
@@ -15,15 +16,15 @@ import (
 const functionAgentName = "function"
 
 // Function agent is not persistent: it is created
-// on every call of update/assign/delete
+// on every call of update/assign/delete.
 // Memory, allocated for function agent, will be free after
 // corresponding call is done. So, on every call we need to allocate
 // memory for temporary operations only. For now, 1MB is
 // sufficient.
 const functionAgentMemory = datasize.MB
 
-// FunctionService is a gRPC service for managing functions.
-type FunctionService struct {
+// Function is an in-process gRPC service for managing functions.
+type Function struct {
 	ynpb.UnimplementedFunctionServiceServer
 
 	instanceID uint32
@@ -31,16 +32,31 @@ type FunctionService struct {
 	log        *zap.Logger
 }
 
-// NewFunctionService creates a new FunctionService.
-func NewFunctionService(instanceID uint32, shm *ffi.SharedMemory, log *zap.Logger) *FunctionService {
-	return &FunctionService{
+// NewFunction creates a new Function service.
+func NewFunction(instanceID uint32, shm *ffi.SharedMemory, log *zap.Logger) *Function {
+	return &Function{
 		instanceID: instanceID,
 		shm:        shm,
 		log:        log,
 	}
 }
 
-func (m *FunctionService) List(
+// Name returns the service name.
+func (m *Function) Name() string { return "function" }
+
+// Endpoint returns empty string indicating in-process service.
+func (m *Function) Endpoint() string { return "" }
+
+// ServicesNames returns the gRPC service names served by this service.
+func (m *Function) ServicesNames() []string { return []string{"ynpb.FunctionService"} }
+
+// RegisterService registers the service on the given gRPC server.
+func (m *Function) RegisterService(server *grpc.Server) {
+	ynpb.RegisterFunctionServiceServer(server, m)
+}
+
+// List returns all function IDs.
+func (m *Function) List(
 	ctx context.Context,
 	request *ynpb.ListFunctionsRequest,
 ) (*ynpb.ListFunctionsResponse, error) {
@@ -60,7 +76,8 @@ func (m *FunctionService) List(
 	return response, nil
 }
 
-func (m *FunctionService) Get(
+// Get returns the function with the given ID.
+func (m *Function) Get(
 	ctx context.Context,
 	request *ynpb.GetFunctionRequest,
 ) (*ynpb.GetFunctionResponse, error) {
@@ -106,11 +123,10 @@ func (m *FunctionService) Get(
 	}
 
 	return nil, fmt.Errorf("not found")
-
 }
 
 // Update updates or inserts a function.
-func (m *FunctionService) Update(
+func (m *Function) Update(
 	ctx context.Context,
 	request *ynpb.UpdateFunctionRequest,
 ) (*ynpb.UpdateFunctionResponse, error) {
@@ -153,7 +169,8 @@ func (m *FunctionService) Update(
 	return &ynpb.UpdateFunctionResponse{}, nil
 }
 
-func (m *FunctionService) Delete(
+// Delete deletes the function with the given name.
+func (m *Function) Delete(
 	ctx context.Context,
 	request *ynpb.DeleteFunctionRequest,
 ) (*ynpb.DeleteFunctionResponse, error) {

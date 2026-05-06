@@ -16,18 +16,43 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
-	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	"github.com/yanet-platform/yanet2/controlplane/gateway"
 	"github.com/yanet-platform/yanet2/controlplane/httpproxy"
 	"github.com/yanet-platform/yanet2/controlplane/internal/auth"
 	"github.com/yanet-platform/yanet2/controlplane/internal/xgrpc"
 	"github.com/yanet-platform/yanet2/controlplane/ynpb"
 )
 
+// Service is the interface that gateway services must implement.
+//
+// When Endpoint returns an empty string the service is in-process:
+// it shares the gateway's gRPC server. When Endpoint returns a
+// non-empty host:port or unix path the service runs its own listener
+// and registers itself with the gateway client.
+type Service interface {
+	Name() string
+	// Endpoint returns "" for in-process services, or a host:port / unix
+	// path for out-of-process services that run their own listener.
+	Endpoint() string
+	ServicesNames() []string
+	RegisterService(server *grpc.Server)
+}
+
+// BackgroundService is an optional interface for services that need to run
+// background work while the gateway is active.
+type BackgroundService interface {
+	Run(ctx context.Context) error
+}
+
+// ClosableService is an optional interface for services that hold resources
+// that must be released on shutdown.
+type ClosableService interface {
+	Close() error
+}
+
 type gatewayOptions struct {
-	BuiltInModules []BuiltInModule
-	Log            *zap.Logger
-	LogLevel       *zap.AtomicLevel
+	Services []Service
+	Log      *zap.Logger
+	LogLevel *zap.AtomicLevel
 }
 
 func newGatewayOptions() *gatewayOptions {
@@ -39,17 +64,10 @@ func newGatewayOptions() *gatewayOptions {
 // GatewayOption is a function that configures the Gateway.
 type GatewayOption func(*gatewayOptions)
 
-// WithBuiltInModule adds a built-in module to the Gateway.
-func WithBuiltInModule(module BuiltInModule) GatewayOption {
+// WithService adds a service to the Gateway.
+func WithService(service Service) GatewayOption {
 	return func(o *gatewayOptions) {
-		o.BuiltInModules = append(o.BuiltInModules, module)
-	}
-}
-
-// WithBuiltInModule adds a built-in device to the Gateway.
-func WithBuiltInDevice(device BuiltInModule) GatewayOption {
-	return func(o *gatewayOptions) {
-		o.BuiltInModules = append(o.BuiltInModules, device)
+		o.Services = append(o.Services, service)
 	}
 }
 
@@ -83,13 +101,14 @@ func WithAtomicLogLevel(level *zap.AtomicLevel) GatewayOption {
 type Gateway struct {
 	cfg            *Config
 	server         *grpc.Server
-	builtInModules []*BuiltInModuleRunner
+	services       []Service
+	serviceRunners []*ServiceRunner
 	registry       *BackendRegistry
 	log            *zap.Logger
 }
 
 // NewGateway creates a new Gateway API.
-func NewGateway(cfg *Config, shm *ffi.SharedMemory, options ...GatewayOption) (*Gateway, error) {
+func NewGateway(cfg *Config, options ...GatewayOption) (*Gateway, error) {
 	opts := newGatewayOptions()
 	for _, o := range options {
 		o(opts)
@@ -102,7 +121,6 @@ func NewGateway(cfg *Config, shm *ffi.SharedMemory, options ...GatewayOption) (*
 		return nil, fmt.Errorf("failed to create auth manager: %w", err)
 	}
 
-	// Create AuthService for authentication introspection.
 	authService := NewAuthService(authManager)
 
 	director := func(ctx context.Context, fullMethodName string) (proxy.Mode, []proxy.Backend, error) {
@@ -148,64 +166,102 @@ func NewGateway(cfg *Config, shm *ffi.SharedMemory, options ...GatewayOption) (*
 	}
 	server := grpc.NewServer(serverOpts...)
 
-	gatewayService := NewGatewayService(registry, opts.Log)
-	loggingService := NewLoggingService(opts.LogLevel, opts.Log)
-	inspectService := NewInspectService(cfg.InstanceID, shm)
-	pipelineService := NewPipelineService(cfg.InstanceID, shm, opts.Log)
-	functionService := NewFunctionService(cfg.InstanceID, shm, opts.Log)
-	countersService := NewCountersService(cfg.InstanceID, shm)
-
+	gatewayService := NewGatewayService(registry, log)
 	ynpb.RegisterGatewayServer(server, gatewayService)
 	log.Info("registered service", zap.String("service", fmt.Sprintf("%T", gatewayService)))
-
-	ynpb.RegisterLoggingServer(server, loggingService)
-	log.Info("registered service", zap.String("service", fmt.Sprintf("%T", loggingService)))
-
-	ynpb.RegisterInspectServiceServer(server, inspectService)
-	log.Info("registered service", zap.String("service", fmt.Sprintf("%T", inspectService)))
-
-	ynpb.RegisterPipelineServiceServer(server, pipelineService)
-	log.Info("registered service", zap.String("service", fmt.Sprintf("%T", pipelineService)))
-
-	ynpb.RegisterFunctionServiceServer(server, functionService)
-	log.Info("registered service", zap.String("service", fmt.Sprintf("%T", functionService)))
-
-	ynpb.RegisterCountersServiceServer(server, countersService)
-	log.Info("registered service", zap.String("service", fmt.Sprintf("%T", countersService)))
 
 	ynpb.RegisterAuthServiceServer(server, authService)
 	log.Info("registered service", zap.String("service", fmt.Sprintf("%T", authService)))
 
-	// Register built-in services in the registry for HTTP gateway access.
-	if err := registerBuiltInServices(registry, cfg.Server.Endpoint, cfg.Server.TLS, log); err != nil {
-		return nil, fmt.Errorf("failed to register built-in services: %w", err)
+	// Register Gateway and Auth as loopback backends for HTTP proxy access.
+	loopback, err := newLoopbackBackend(cfg.Server.Endpoint, cfg.Server.TLS)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create loopback backend for built-in services: %w", err)
 	}
+	registry.RegisterBackend("ynpb.Gateway", loopback, cfg.Server.Endpoint)
+	log.Debug("registered built-in service in registry", zap.String("service", "ynpb.Gateway"))
+	registry.RegisterBackend("ynpb.Auth", loopback, cfg.Server.Endpoint)
+	log.Debug("registered built-in service in registry", zap.String("service", "ynpb.Auth"))
 
-	builtInModules := make([]*BuiltInModuleRunner, 0)
-	for _, mod := range opts.BuiltInModules {
-		builtInModules = append(builtInModules, NewBuiltInModuleRunner(
-			mod,
-			cfg.Server.Endpoint,
-			cfg.Server.TLS,
-			log,
-		))
+	var allServices []Service
+	var serviceRunners []*ServiceRunner
+
+	for _, service := range opts.Services {
+		if service.Endpoint() == "" {
+			// In-process: register on the shared server.
+			service.RegisterService(server)
+			log.Info("registered in-process service", zap.String("service", service.Name()))
+
+			// Share one loopback backend across all service names for this service.
+			inprocBackend, err := newLoopbackBackend(cfg.Server.Endpoint, cfg.Server.TLS)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create loopback backend for service %q: %w", service.Name(), err)
+			}
+			for _, name := range service.ServicesNames() {
+				registry.RegisterBackend(name, inprocBackend, cfg.Server.Endpoint)
+				log.Debug("registered in-process service in registry", zap.String("service", name))
+			}
+		} else {
+			// Out-of-process: wrap in a ServiceRunner.
+			runner := NewServiceRunner(service, cfg.Server.Endpoint, cfg.Server.TLS, log)
+			serviceRunners = append(serviceRunners, runner)
+		}
+		allServices = append(allServices, service)
 	}
 
 	return &Gateway{
 		cfg:            cfg,
 		server:         server,
-		builtInModules: builtInModules,
+		services:       allServices,
+		serviceRunners: serviceRunners,
 		registry:       registry,
 		log:            log,
 	}, nil
 }
 
+// newLoopbackBackend creates a gRPC proxy backend that dials back to the
+// gateway's own listener.
+func newLoopbackBackend(endpoint string, tlsCfg *TLSConfig) (proxy.Backend, error) {
+	creds, err := TransportCredentials(tlsCfg, endpoint)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build loopback TLS credentials: %w", err)
+	}
+
+	conn, err := grpc.NewClient(
+		"passthrough:target",
+		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
+			dialer := net.Dialer{}
+			return dialer.DialContext(ctx, "tcp", endpoint)
+		}),
+		grpc.WithDefaultCallOptions(
+			grpc.ForceCodecV2(proxy.Codec()),
+			grpc.UseCompressor(gzip.Name),
+		),
+		grpc.WithTransportCredentials(creds),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create loopback gRPC client: %w", err)
+	}
+
+	return &proxy.SingleBackend{
+		GetConn: func(ctx context.Context) (context.Context, *grpc.ClientConn, error) {
+			md, _ := metadata.FromIncomingContext(ctx)
+			outCtx := metadata.NewOutgoingContext(ctx, md.Copy())
+			return outCtx, conn, nil
+		},
+	}, nil
+}
+
 // Close closes the gateway API.
 func (m *Gateway) Close() error {
-	for _, builtInModule := range m.builtInModules {
-		if err := builtInModule.Close(); err != nil {
-			m.log.Warn("failed to close built-in module",
-				zap.String("module", fmt.Sprintf("%T", builtInModule)),
+	for _, service := range m.services {
+		closer, ok := service.(ClosableService)
+		if !ok {
+			continue
+		}
+		if err := closer.Close(); err != nil {
+			m.log.Warn("failed to close service",
+				zap.String("service", fmt.Sprintf("%T", service)),
 				zap.Error(err),
 			)
 		}
@@ -236,28 +292,39 @@ func (m *Gateway) Run(ctx context.Context) error {
 		})
 	}
 
-	for _, builtInModule := range m.builtInModules {
+	for _, runner := range m.serviceRunners {
 		wg.Go(func() error {
-			m.log.Info("starting built-in module", zap.String("module", fmt.Sprintf("%T", builtInModule.module)))
-			return builtInModule.Run(ctx)
+			m.log.Info("starting out-of-process service", zap.String("service", fmt.Sprintf("%T", runner.module)))
+			return runner.Run(ctx)
 		})
 	}
 
-	// Emit a single deterministic readiness marker once every built-in
-	// module has finished its initial service registration. Functional
-	// tests grep for this exact line to know the gateway is ready to
-	// accept module RPCs.
-	if len(m.builtInModules) > 0 {
+	// Schedule Run for any in-process BackgroundService.
+	for _, service := range m.services {
+		if service.Endpoint() == "" {
+			if background, ok := service.(BackgroundService); ok {
+				wg.Go(func() error {
+					return background.Run(ctx)
+				})
+			}
+		}
+	}
+
+	// Emit a single deterministic readiness marker once every out-of-process
+	// service runner has finished its initial service registration. Functional
+	// tests grep for this exact line to know the gateway is ready to accept
+	// module RPCs.
+	if len(m.serviceRunners) > 0 {
 		wg.Go(func() error {
-			for _, builtInModule := range m.builtInModules {
+			for _, runner := range m.serviceRunners {
 				select {
 				case <-ctx.Done():
 					return nil
-				case <-builtInModule.Ready():
+				case <-runner.Ready():
 				}
 			}
 			m.log.Info("all built-in modules ready",
-				zap.Int("count", len(m.builtInModules)),
+				zap.Int("count", len(m.serviceRunners)),
 			)
 			return nil
 		})
@@ -317,56 +384,6 @@ func (m *Gateway) runHTTPServer(ctx context.Context) error {
 	)
 	if err := listen(); err != http.ErrServerClosed {
 		return fmt.Errorf("failed to serve: %w", err)
-	}
-
-	return nil
-}
-
-// registerBuiltInServices registers built-in services in the registry for HTTP
-// gateway access.
-func registerBuiltInServices(registry *BackendRegistry, endpoint string, tlsCfg *gateway.TLSConfig, log *zap.Logger) error {
-	creds, err := gateway.TransportCredentials(tlsCfg, endpoint)
-	if err != nil {
-		return fmt.Errorf("failed to build loopback TLS credentials: %w", err)
-	}
-
-	conn, err := grpc.NewClient(
-		"passthrough:target",
-		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
-			dialer := net.Dialer{}
-			return dialer.DialContext(ctx, "tcp", endpoint)
-		}),
-		grpc.WithDefaultCallOptions(
-			grpc.ForceCodecV2(proxy.Codec()),
-			grpc.UseCompressor(gzip.Name),
-		),
-		grpc.WithTransportCredentials(creds),
-	)
-	if err != nil {
-		return fmt.Errorf("failed to create gRPC client for built-in services: %w", err)
-	}
-
-	backend := &proxy.SingleBackend{
-		GetConn: func(ctx context.Context) (context.Context, *grpc.ClientConn, error) {
-			md, _ := metadata.FromIncomingContext(ctx)
-			outCtx := metadata.NewOutgoingContext(ctx, md.Copy())
-			return outCtx, conn, nil
-		},
-	}
-
-	builtInServices := []string{
-		"ynpb.Gateway",
-		"ynpb.Logging",
-		"ynpb.InspectService",
-		"ynpb.PipelineService",
-		"ynpb.FunctionService",
-		"ynpb.CountersService",
-		"ynpb.Auth",
-	}
-
-	for _, serviceName := range builtInServices {
-		registry.RegisterBackend(serviceName, backend, endpoint)
-		log.Debug("registered built-in service in registry", zap.String("service", serviceName))
 	}
 
 	return nil

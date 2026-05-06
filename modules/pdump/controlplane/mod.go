@@ -74,8 +74,7 @@ func (m *PdumpModule) RegisterService(server *grpc.Server) {
 }
 
 // Run runs the module until the specified context is canceled.
-// Implements the BackgroundBuiltInModule interface from
-// controlplane/internal/gateway/runner.go
+// Implements the gateway.BackgroundService interface.
 func (m *PdumpModule) Run(ctx context.Context) error {
 	<-ctx.Done()
 	m.log.Info("closing pdump service")

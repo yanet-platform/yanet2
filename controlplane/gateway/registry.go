@@ -14,6 +14,7 @@ type BackendRegistry struct {
 	backends map[string]BackendEntry
 }
 
+// BackendEntry holds metadata about a single registered backend.
 type BackendEntry struct {
 	service    string
 	backend    proxy.Backend
@@ -21,14 +22,17 @@ type BackendEntry struct {
 	lastSeenAt time.Time
 }
 
+// Service returns the service name of the entry.
 func (m *BackendEntry) Service() string {
 	return m.service
 }
 
+// Endpoint returns the endpoint of the entry.
 func (m *BackendEntry) Endpoint() string {
 	return m.endpoint
 }
 
+// LastSeenAt returns the time the entry was last registered.
 func (m *BackendEntry) LastSeenAt() time.Time {
 	return m.lastSeenAt
 }

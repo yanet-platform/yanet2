@@ -1,29 +1,45 @@
-package gateway
+package builtin
 
 import (
 	"context"
+
+	"google.golang.org/grpc"
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/controlplane/ynpb"
 )
 
-// CountersService is a gRPC service for retrieving counters.
-type CountersService struct {
+// Counters is an in-process gRPC service for retrieving counters.
+type Counters struct {
 	ynpb.UnimplementedCountersServiceServer
 
 	instanceID uint32
 	shm        *ffi.SharedMemory
 }
 
-// NewCountersService creates a new CountersService.
-func NewCountersService(instanceID uint32, shm *ffi.SharedMemory) *CountersService {
-	return &CountersService{
+// NewCounters creates a new Counters service.
+func NewCounters(instanceID uint32, shm *ffi.SharedMemory) *Counters {
+	return &Counters{
 		instanceID: instanceID,
 		shm:        shm,
 	}
 }
 
-func (m *CountersService) encodeCounters(
+// Name returns the service name.
+func (m *Counters) Name() string { return "counters" }
+
+// Endpoint returns empty string indicating in-process service.
+func (m *Counters) Endpoint() string { return "" }
+
+// ServicesNames returns the gRPC service names served by this service.
+func (m *Counters) ServicesNames() []string { return []string{"ynpb.CountersService"} }
+
+// RegisterService registers the service on the given gRPC server.
+func (m *Counters) RegisterService(server *grpc.Server) {
+	ynpb.RegisterCountersServiceServer(server, m)
+}
+
+func (m *Counters) encodeCounters(
 	counterValues []ffi.CounterInfo,
 ) []*ynpb.CounterInfo {
 	res := make([]*ynpb.CounterInfo, 0, len(counterValues))
@@ -48,7 +64,8 @@ func (m *CountersService) encodeCounters(
 	return res
 }
 
-func (m *CountersService) Device(
+// Device returns device counters.
+func (m *Counters) Device(
 	ctx context.Context,
 	request *ynpb.DeviceCountersRequest,
 ) (*ynpb.CountersResponse, error) {
@@ -62,7 +79,8 @@ func (m *CountersService) Device(
 	return response, nil
 }
 
-func (m *CountersService) Pipeline(
+// Pipeline returns pipeline counters.
+func (m *Counters) Pipeline(
 	ctx context.Context,
 	request *ynpb.PipelineCountersRequest,
 ) (*ynpb.CountersResponse, error) {
@@ -79,7 +97,8 @@ func (m *CountersService) Pipeline(
 	return response, nil
 }
 
-func (m *CountersService) Function(
+// Function returns function counters.
+func (m *Counters) Function(
 	ctx context.Context,
 	request *ynpb.FunctionCountersRequest,
 ) (*ynpb.CountersResponse, error) {
@@ -93,7 +112,8 @@ func (m *CountersService) Function(
 	return response, nil
 }
 
-func (m *CountersService) Chain(
+// Chain returns chain counters.
+func (m *Counters) Chain(
 	ctx context.Context,
 	request *ynpb.ChainCountersRequest,
 ) (*ynpb.CountersResponse, error) {
@@ -107,7 +127,8 @@ func (m *CountersService) Chain(
 	return response, nil
 }
 
-func (m *CountersService) Module(
+// Module returns module counters.
+func (m *Counters) Module(
 	ctx context.Context,
 	request *ynpb.ModuleCountersRequest,
 ) (*ynpb.CountersResponse, error) {
@@ -129,7 +150,8 @@ func (m *CountersService) Module(
 	return response, nil
 }
 
-func (m *CountersService) Perf(
+// Perf returns performance counters.
+func (m *Counters) Perf(
 	ctx context.Context,
 	request *ynpb.PerfCountersRequest,
 ) (*ynpb.PerfCountersResponse, error) {

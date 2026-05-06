@@ -6,24 +6,10 @@ import (
 
 	"go.uber.org/zap"
 
-	// Blank import registers operator proto descriptors in the global
-	// protobuf registry so the gateway HTTP/gRPC proxy can resolve
-	// operatorpb services.
-	_ "github.com/yanet-platform/yanet2/agents/yanet-route-operator/operatorpb"
+	"github.com/yanet-platform/yanet2/controlplane/builtin"
+	"github.com/yanet-platform/yanet2/controlplane/bundle"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	"github.com/yanet-platform/yanet2/controlplane/internal/gateway"
-	acl "github.com/yanet-platform/yanet2/modules/acl/controlplane"
-	balancer "github.com/yanet-platform/yanet2/modules/balancer/agent/go"
-	decap "github.com/yanet-platform/yanet2/modules/decap/controlplane"
-	dscp "github.com/yanet-platform/yanet2/modules/dscp/controlplane"
-	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
-	nat64 "github.com/yanet-platform/yanet2/modules/nat64/controlplane"
-	pdump "github.com/yanet-platform/yanet2/modules/pdump/controlplane"
-	route_mpls "github.com/yanet-platform/yanet2/modules/route-mpls/controlplane"
-	route "github.com/yanet-platform/yanet2/modules/route/controlplane"
-
-	plain "github.com/yanet-platform/yanet2/devices/plain/controlplane"
-	vlan "github.com/yanet-platform/yanet2/devices/vlan/controlplane"
+	"github.com/yanet-platform/yanet2/controlplane/gateway"
 )
 
 type options struct {
@@ -88,100 +74,35 @@ func NewDirector(cfg *Config, options ...DirectorOption) (*Director, error) {
 	}
 	log.Debug("attached to shared memory", zap.String("path", cfg.MemoryPath))
 
-	routeModule, err := route.NewRouteModule(cfg.Modules.Route, route.WithLog(log))
+	bundle, err := bundle.NewBundle(cfg.Modules, cfg.Devices, log)
 	if err != nil {
-		return nil, fmt.Errorf("failed to initialize route built-in module: %w", err)
+		return nil, fmt.Errorf("failed to initialize bundle: %w", err)
 	}
 
-	routeMPLSModule, err := route_mpls.NewRouteMPLSModule(cfg.Modules.RouteMPLS, log)
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize route mpls built-in module: %w", err)
-	}
-
-	decapModule, err := decap.NewDecapModule(cfg.Modules.Decap, log)
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize decap built-in module: %w", err)
-	}
-
-	dscpModule, err := dscp.NewDSCPModule(cfg.Modules.DSCP, log)
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize dscp built-in module: %w", err)
-	}
-
-	forwardModule, err := forward.NewForwardModule(cfg.Modules.Forward, log)
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize forward built-in module: %w", err)
-	}
-
-	nat64Module, err := nat64.NewNAT64Module(cfg.Modules.NAT64, log)
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize nat64 built-in module: %w", err)
-	}
-
-	pdumpModule, err := pdump.NewPdumpModule(cfg.Modules.Pdump, log)
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize pdump built-in module: %w", err)
-	}
-
-	aclModule, err := acl.NewACLModule(cfg.Modules.ACL, log)
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize acl built-in module: %w", err)
-	}
-
-	balancerModule, err := balancer.NewBalancerModule(cfg.Modules.Balancer, log)
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize balancer built-in module: %w", err)
-	}
-
-	plainDevice, err := plain.NewDevicePlainDevice(cfg.Devices.Plain, log)
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize plain built-in device: %w", err)
-	}
-
-	vlanDevice, err := vlan.NewDeviceVlanDevice(cfg.Devices.Vlan, log)
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize vlan built-in device: %w", err)
-	}
-
-	gateway, err := gateway.NewGateway(
-		cfg.Gateway,
-		shm,
-		gateway.WithBuiltInModule(
-			routeModule,
+	gatewayOptions := []gateway.GatewayOption{
+		gateway.WithService(
+			builtin.NewLogging(opts.LogLevel, log),
 		),
-		gateway.WithBuiltInModule(
-			routeMPLSModule,
+		gateway.WithService(
+			builtin.NewInspect(cfg.Gateway.InstanceID, shm),
 		),
-		gateway.WithBuiltInModule(
-			decapModule,
+		gateway.WithService(
+			builtin.NewPipeline(cfg.Gateway.InstanceID, shm, log),
 		),
-		gateway.WithBuiltInModule(
-			dscpModule,
+		gateway.WithService(
+			builtin.NewFunction(cfg.Gateway.InstanceID, shm, log),
 		),
-		gateway.WithBuiltInModule(
-			forwardModule,
-		),
-		gateway.WithBuiltInModule(
-			nat64Module,
-		),
-		gateway.WithBuiltInModule(
-			pdumpModule,
-		),
-		gateway.WithBuiltInModule(
-			aclModule,
-		),
-		gateway.WithBuiltInModule(
-			balancerModule,
-		),
-		gateway.WithBuiltInDevice(
-			plainDevice,
-		),
-		gateway.WithBuiltInDevice(
-			vlanDevice,
+		gateway.WithService(
+			builtin.NewCounters(cfg.Gateway.InstanceID, shm),
 		),
 		gateway.WithLog(log),
 		gateway.WithAtomicLogLevel(opts.LogLevel),
-	)
+	}
+	for _, service := range bundle.Services() {
+		gatewayOptions = append(gatewayOptions, gateway.WithService(service))
+	}
+
+	gw, err := gateway.NewGateway(cfg.Gateway, gatewayOptions...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create gateway: %w", err)
 	}
@@ -189,7 +110,7 @@ func NewDirector(cfg *Config, options ...DirectorOption) (*Director, error) {
 	return &Director{
 		cfg:     cfg,
 		shm:     shm,
-		gateway: gateway,
+		gateway: gw,
 		log:     log,
 	}, nil
 }
