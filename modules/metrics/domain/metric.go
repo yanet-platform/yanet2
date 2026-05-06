@@ -2,6 +2,15 @@ package metric
 
 import "io"
 
+type MetricType int
+
+const (
+	Undefine MetricType = iota
+	Counter
+	Gauge
+	Histogram
+)
+
 type (
 	Label struct {
 		Name  string
@@ -16,6 +25,8 @@ type (
 
 	Value interface {
 		IsValue()
+		Type() MetricType
+		TypeName() string
 		Write(w io.Writer, name string, labels []Label)
 	}
 )

@@ -10,5 +10,13 @@ type Undefine struct{}
 
 func (*Undefine) IsValue() {}
 
+func (*Undefine) Type() metric.MetricType {
+	return metric.Undefine
+}
+
+func (*Undefine) TypeName() string {
+	return "undefined"
+}
+
 func (*Undefine) Write(w io.Writer, n string, l []metric.Label) {
 }

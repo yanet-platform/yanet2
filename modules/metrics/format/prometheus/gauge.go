@@ -11,8 +11,15 @@ type Gauge float64
 
 func (Gauge) IsValue() {}
 
+func (Gauge) Type() metric.MetricType {
+	return metric.Gauge
+}
+
+func (Gauge) TypeName() string {
+	return "gauge"
+}
+
 func (m Gauge) Write(w io.Writer, name string, labels []metric.Label) {
-	writeTypeHeader(w, name, "gauge")
 	_, _ = io.WriteString(w, name)
 	_, _ = io.WriteString(w, formatLabels(labels))
 	_, _ = io.WriteString(w, " ")

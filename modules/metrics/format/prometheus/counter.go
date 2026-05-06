@@ -11,8 +11,15 @@ type Counter uint64
 
 func (Counter) IsValue() {}
 
+func (Counter) Type() metric.MetricType {
+	return metric.Counter
+}
+
+func (Counter) TypeName() string {
+	return "counter"
+}
+
 func (m Counter) Write(w io.Writer, name string, labels []metric.Label) {
-	writeTypeHeader(w, name, "counter")
 	_, _ = io.WriteString(w, name)
 	_, _ = io.WriteString(w, formatLabels(labels))
 	_, _ = io.WriteString(w, " ")

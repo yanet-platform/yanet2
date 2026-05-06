@@ -11,7 +11,6 @@ import (
 type Histogram struct {
 	Buckets    []Bucket
 	TotalCount uint64
-	// Sum        float64
 }
 
 type Bucket struct {
@@ -19,15 +18,23 @@ type Bucket struct {
 	Count      uint64
 }
 
-func (*Histogram) IsValue() {}
+func (m *Histogram) IsValue() {}
+
+func (m *Histogram) Type() metric.MetricType {
+	return metric.Histogram
+}
+
+func (m *Histogram) TypeName() string {
+	return "histogram"
+}
 
 func (m *Histogram) Write(w io.Writer, name string, labels []metric.Label) {
 	if m == nil {
 		return
 	}
-	writeTypeHeader(w, name, "histogram")
 
 	hasInf := false
+	var sum uint64 = 0
 	for _, b := range m.Buckets {
 		le := formatFloat(b.UpperBound)
 		if math.IsInf(b.UpperBound, +1) {
@@ -39,6 +46,8 @@ func (m *Histogram) Write(w io.Writer, name string, labels []metric.Label) {
 		_, _ = io.WriteString(w, " ")
 		_, _ = io.WriteString(w, strconv.FormatUint(b.Count, 10))
 		_, _ = io.WriteString(w, "\n")
+
+		sum += b.Count
 	}
 	if !hasInf {
 		_, _ = io.WriteString(w, name)
@@ -51,13 +60,12 @@ func (m *Histogram) Write(w io.Writer, name string, labels []metric.Label) {
 
 	labelStr := formatLabels(labels)
 
-	// только приближенно если
-	// _, _ = io.WriteString(w, name)
-	// _, _ = io.WriteString(w, "_sum")
-	// _, _ = io.WriteString(w, labelStr)
-	// _, _ = io.WriteString(w, " ")
-	// _, _ = io.WriteString(w, formatFloat(h.Sum))
-	// _, _ = io.WriteString(w, "\n")
+	_, _ = io.WriteString(w, name)
+	_, _ = io.WriteString(w, "_sum")
+	_, _ = io.WriteString(w, labelStr)
+	_, _ = io.WriteString(w, " ")
+	_, _ = io.WriteString(w, strconv.FormatUint(sum/uint64(len(m.Buckets)), 10))
+	_, _ = io.WriteString(w, "\n")
 
 	_, _ = io.WriteString(w, name)
 	_, _ = io.WriteString(w, "_count")
