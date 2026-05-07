@@ -1,5 +1,6 @@
 @use '../../../styles/variables' as *;
 @use '../../../styles/mixins' as *;
+@use '../_shared/lane-editor/lane-editor';
 
 // Design tokens scoped to this page — warm dark-brown palette.
 // All fn-* tokens are overridden here so other pages stay Gravity-default.
@@ -46,6 +47,17 @@
         --fn-text-2:   #5C4E3A;
         --fn-text-3:   #9C8B74;
     }
+}
+
+// ─── Neutral lane-editor var aliases (consumed by shared lane-editor.scss) ────
+
+.fn-page {
+    --lane-bg-3:        var(--fn-bg-3);
+    --lane-line-2:      var(--fn-line-2);
+    --lane-text-2:      var(--fn-text-2);
+    --lane-accent:      var(--fn-accent);
+    --lane-accent-soft: var(--fn-accent-soft);
+    --lane-r-sm:        var(--fn-r-sm);
 }
 
 // ─── Page container ───────────────────────────────────────────────────────────
@@ -480,36 +492,6 @@
     font-family: var(--fn-font-mono);
 }
 
-// ─── Flow connector ───────────────────────────────────────────────────────────
-
-.fn-flow-link {
-    width: 22px;
-    height: 2px;
-    background: repeating-linear-gradient(
-        to right,
-        var(--fn-line-2) 0 4px,
-        transparent 4px 8px
-    );
-    flex-shrink: 0;
-    align-self: center;
-}
-
-// ─── Endpoint ─────────────────────────────────────────────────────────────────
-
-.fn-endpoint {
-    width: 36px;
-    height: 36px;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-    background: var(--fn-bg-3);
-    border: 1px solid var(--fn-line-2);
-    color: var(--fn-text-2);
-    margin: 8px 0;
-}
-
 // ─── Module card ──────────────────────────────────────────────────────────────
 
 .fn-module-card {
@@ -646,46 +628,6 @@
 
 .fn-module-card__counter-unit {
     color: var(--fn-text-3);
-}
-
-// ─── Insert slot ──────────────────────────────────────────────────────────────
-
-.fn-insert-slot {
-    width: 22px;
-    height: 56px;
-    flex-shrink: 0;
-    border-radius: var(--fn-r-sm);
-    pointer-events: none;
-    transition: width 0.12s ease;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-
-    &--active {
-        width: 40px;
-
-        .fn-insert-slot__inner {
-            width: 36px;
-            height: 56px;
-            background: var(--fn-accent-soft);
-            border: 1.5px dashed var(--fn-accent);
-            border-radius: var(--fn-r-md);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 18px;
-            color: var(--fn-accent);
-            font-weight: 300;
-        }
-    }
-}
-
-.fn-insert-slot__inner {
-    width: 2px;
-    height: 28px;
-    background: var(--fn-line-2);
-    border-radius: 1px;
-    transition: all 0.12s ease;
 }
 
 // ─── Weight badge ─────────────────────────────────────────────────────────────

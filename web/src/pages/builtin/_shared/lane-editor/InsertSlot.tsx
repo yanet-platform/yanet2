@@ -17,11 +17,11 @@ export const InsertSlot: React.FC<InsertSlotProps> = ({ idx, active, hidden }) =
     }
     return (
         <div
-            className={`fn-insert-slot${active ? ' fn-insert-slot--active' : ''}`}
+            className={`lane-insert-slot${active ? ' lane-insert-slot--active' : ''}`}
             data-slot-idx={idx}
             aria-hidden="true"
         >
-            <div className="fn-insert-slot__inner">
+            <div className="lane-insert-slot__inner">
                 {active ? '+' : ''}
             </div>
         </div>

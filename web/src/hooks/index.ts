@@ -4,8 +4,6 @@ export type { UseAsyncDataOptions, UseAsyncDataResult } from './useAsyncData';
 export { useDialogKeyboardShortcut } from './useDialogKeyboardShortcut';
 export type { UseDialogKeyboardShortcutOptions } from './useDialogKeyboardShortcut';
 
-export { useGraphEditor } from './useGraphEditor';
-export type { GraphState, UseGraphEditorOptions, UseGraphEditorResult } from './useGraphEditor';
 
 export { useInterpolatedCounters } from './useInterpolatedCounters';
 export type {

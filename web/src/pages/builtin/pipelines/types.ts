@@ -1,44 +1,23 @@
-import type { Node, Edge } from '@xyflow/react';
+export type { DragPayload } from '../_shared/lane-editor';
 
-// Node types
-export const NODE_TYPE_INPUT = 'input' as const;
-export const NODE_TYPE_OUTPUT = 'output' as const;
-export const NODE_TYPE_FUNCTION_REF = 'functionRef' as const;
-
-export const INPUT_NODE_ID = 'input';
-export const OUTPUT_NODE_ID = 'output';
-
-// Node data types with index signature for ReactFlow compatibility
-export interface InputNodeData extends Record<string, unknown> {
-    label: string;
+/** A reference to a globally-named function inside a pipeline track. */
+export interface FunctionRef {
+    /** Synthetic stable id derived from pipeline name + position + function name. */
+    id: string;
+    /** The referenced function name (FunctionId.name). May be empty for a freshly-added ref. */
+    name: string;
 }
 
-export interface OutputNodeData extends Record<string, unknown> {
-    label: string;
+export interface Pipeline {
+    id: string;
+    functions: FunctionRef[];
 }
 
-export interface FunctionRefNodeData extends Record<string, unknown> {
-    functionName: string;
-}
-
-// Custom node types
-export type InputNode = Node<InputNodeData, typeof NODE_TYPE_INPUT>;
-export type OutputNode = Node<OutputNodeData, typeof NODE_TYPE_OUTPUT>;
-export type FunctionRefNode = Node<FunctionRefNodeData, typeof NODE_TYPE_FUNCTION_REF>;
-
-export type PipelineNode = InputNode | OutputNode | FunctionRefNode;
-
-// Edge without weight data (simple linked-list)
-export type PipelineEdge = Edge<Record<string, unknown>>;
-
-// Graph state
-export interface PipelineGraphState {
-    nodes: PipelineNode[];
-    edges: PipelineEdge[];
-}
-
-// Validation result
-export interface ValidationResult {
-    isValid: boolean;
-    errors: string[];
-}
+export type PipelinesAction =
+    | { type: 'MOVE_FUNCTION_REF';   pipelineId: string; refId: string; toIdx: number }
+    | { type: 'ADD_FUNCTION_REF';    pipelineId: string; toIdx: number; ref: FunctionRef }
+    | { type: 'REMOVE_FUNCTION_REF'; pipelineId: string; refId: string }
+    | { type: 'UPDATE_FUNCTION_REF'; pipelineId: string; refId: string; name: string }
+    | { type: 'ADD_PIPELINE';        pipeline: Pipeline }
+    | { type: 'REMOVE_PIPELINE';     pipelineId: string }
+    | { type: 'LOAD_PIPELINE';       pipeline: Pipeline };
