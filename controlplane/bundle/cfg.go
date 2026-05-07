@@ -5,7 +5,6 @@ import (
 
 	acl "github.com/yanet-platform/yanet2/modules/acl/controlplane"
 	balancer "github.com/yanet-platform/yanet2/modules/balancer/agent/go"
-	balancer2 "github.com/yanet-platform/yanet2/modules/balancer2/controlplane"
 	decap "github.com/yanet-platform/yanet2/modules/decap/controlplane"
 	dscp "github.com/yanet-platform/yanet2/modules/dscp/controlplane"
 	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
@@ -36,8 +35,6 @@ type ModulesConfig struct {
 	Pdump *pdump.Config `yaml:"pdump"`
 	// Balancer is the configuration for the balancer module.
 	Balancer *balancer.Config `yaml:"balancer"`
-	// Balancer is the configuration for the balancer2 module.
-	Balancer2 *balancer2.Config `yaml:"balancer"`
 	// ACL is the configuration for the acl module.
 	ACL *acl.Config `yaml:"acl"`
 }

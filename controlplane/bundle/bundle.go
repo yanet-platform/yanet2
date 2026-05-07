@@ -14,7 +14,6 @@ import (
 	vlan "github.com/yanet-platform/yanet2/devices/vlan/controlplane"
 	acl "github.com/yanet-platform/yanet2/modules/acl/controlplane"
 	balancer "github.com/yanet-platform/yanet2/modules/balancer/agent/go"
-	balancer2 "github.com/yanet-platform/yanet2/modules/balancer2/controlplane"
 	decap "github.com/yanet-platform/yanet2/modules/decap/controlplane"
 	dscp "github.com/yanet-platform/yanet2/modules/dscp/controlplane"
 	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
@@ -112,12 +111,6 @@ func buildServices(
 			name: "balancer module",
 			new: func() (gateway.Service, error) {
 				return balancer.NewBalancerModule(modulesCfg.Balancer, log)
-			},
-		},
-		{
-			name: "balancer2 module",
-			new: func() (gateway.Service, error) {
-				return balancer2.NewBalancerModule(modulesCfg.Balancer2, balancer2.WithLog(log))
 			},
 		},
 		{

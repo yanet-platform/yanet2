@@ -12,11 +12,9 @@ import (
 	"github.com/yanet-platform/yanet2/modules/fwstate/controlplane/fwstatepb"
 )
 
-const (
-	agentName          = "acl"
-	serviceName        = "aclpb.ACLService"
-	fwstateServiceName = "fwstatepb.FWStateService"
-)
+const agentName = "acl"
+const serviceName = "aclpb.ACLService"
+const fwstateServiceName = "fwstatepb.FWStateService"
 
 // ACLModule is a control-plane component for ACL (Access Control List) module
 // with integrated firewall state management

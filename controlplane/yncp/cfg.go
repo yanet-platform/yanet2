@@ -10,22 +10,20 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/gateway"
 )
 
-type (
-	Config config
-	config struct {
-		// Logging configuration.
-		Logging logging.Config `json:"logging" yaml:"logging"`
-		// MemoryPath is the path to the shared-memory file that is used to
-		// communicate with dataplane.
-		MemoryPath string `yaml:"memory_path"`
-		// Gateway configuration.
-		Gateway *gateway.Config `json:"gateway" yaml:"gateway"`
-		// Modules configuration.
-		Modules bundle.ModulesConfig `json:"modules" yaml:"modules"`
-		// Devices configuration.
-		Devices bundle.DevicesConfig `json:"devices" yaml:"devices"`
-	}
-)
+type Config config
+type config struct {
+	// Logging configuration.
+	Logging logging.Config `json:"logging" yaml:"logging"`
+	// MemoryPath is the path to the shared-memory file that is used to
+	// communicate with dataplane.
+	MemoryPath string `yaml:"memory_path"`
+	// Gateway configuration.
+	Gateway *gateway.Config `json:"gateway" yaml:"gateway"`
+	// Modules configuration.
+	Modules bundle.ModulesConfig `json:"modules" yaml:"modules"`
+	// Devices configuration.
+	Devices bundle.DevicesConfig `json:"devices" yaml:"devices"`
+}
 
 func (m *Config) Default() {
 	*m = *DefaultConfig()
