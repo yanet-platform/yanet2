@@ -39,25 +39,25 @@ ip nei add 203.0.113.1 lladdr 52:54:00:6b:ff:a1 dev kni0
 sleep 3
 
 # Enable L2 forwarding between devices
-/mnt/target/release/yanet-cli-forward l2-enable --cfg=forward0 --src 0 --dst 1
-/mnt/target/release/yanet-cli-forward l2-enable --cfg=forward0 --src 1 --dst 0
+/mnt/target/release/yanet-cli-forward l2-enable --name=forward0 --src 0 --dst 1
+/mnt/target/release/yanet-cli-forward l2-enable --name=forward0 --src 1 --dst 0
 
 # Add L3 forwarding rules
-/mnt/target/release/yanet-cli-forward l3-add --cfg=forward0 --src 1 --dst 0 --net 0.0.0.0/0
-/mnt/target/release/yanet-cli-forward l3-add --cfg=forward0 --src 1 --dst 0 --net ::/0
-/mnt/target/release/yanet-cli-forward l3-add --cfg=forward0 --src 0 --dst 1 --net 203.0.113.14/32
-/mnt/target/release/yanet-cli-forward l3-add --cfg=forward0 --src 0 --dst 1 --net fe80::5054:ff:fe6b:ffa5/64
-/mnt/target/release/yanet-cli-forward l3-add --cfg=forward0 --src 0 --dst 1 --net ff02::/16
+/mnt/target/release/yanet-cli-forward l3-add --name=forward0 --src 1 --dst 0 --net 0.0.0.0/0
+/mnt/target/release/yanet-cli-forward l3-add --name=forward0 --src 1 --dst 0 --net ::/0
+/mnt/target/release/yanet-cli-forward l3-add --name=forward0 --src 0 --dst 1 --net 203.0.113.14/32
+/mnt/target/release/yanet-cli-forward l3-add --name=forward0 --src 0 --dst 1 --net fe80::5054:ff:fe6b:ffa5/64
+/mnt/target/release/yanet-cli-forward l3-add --name=forward0 --src 0 --dst 1 --net ff02::/16
 
 # Route
-/mnt/target/release/yanet-cli-route insert --cfg route0 --via fe80::1 ::/0
-/mnt/target/release/yanet-cli-route insert --cfg route0 --via 203.0.113.1 0.0.0.0/0
+/mnt/target/release/yanet-cli-route insert --name route0 --via fe80::1 ::/0
+/mnt/target/release/yanet-cli-route insert --name route0 --via 203.0.113.1 0.0.0.0/0
 
 # Add decap prefixes (outer tunnel destination addresses)
 # IPv4 prefix for IPIP6 (IPv6-in-IPv4) tunnels
-/mnt/target/release/yanet-cli-decap prefix-add --cfg decap0 -p 4.5.6.7/32
+/mnt/target/release/yanet-cli-decap prefix-add --name decap0 -p 4.5.6.7/32
 # IPv6 prefix for IP6IP (IPv4-in-IPv6) tunnels
-/mnt/target/release/yanet-cli-decap prefix-add --cfg decap0 -p 1:2:3:4::abcd/128
+/mnt/target/release/yanet-cli-decap prefix-add --name decap0 -p 1:2:3:4::abcd/128
 
 # Configure pipelines (following docs/virtual-run.org)
 /mnt/target/release/yanet-cli-pipeline update --name=bootstrap --modules forward:forward0
@@ -70,4 +70,4 @@ sleep 3
 
 # Inspect configuration
 /mnt/target/release/yanet-cli-inspect
-/mnt/target/release/yanet-cli-route show --cfg route0
+/mnt/target/release/yanet-cli-route show --name route0

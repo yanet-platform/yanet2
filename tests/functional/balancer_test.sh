@@ -18,8 +18,8 @@ ip nei add fe80::1 lladdr 52:54:00:6b:ff:a1 dev kni0
 ip nei add 203.0.113.1 lladdr 52:54:00:6b:ff:a1 dev kni0
 sleep 3
 
-/mnt/target/release/yanet-cli-route insert --cfg route0 --via fe80::1 ::/0
-/mnt/target/release/yanet-cli-route insert --cfg route0 --via 203.0.113.1 0.0.0.0/0
+/mnt/target/release/yanet-cli-route insert --name route0 --via fe80::1 ::/0
+/mnt/target/release/yanet-cli-route insert --name route0 --via 203.0.113.1 0.0.0.0/0
 
 /mnt/target/release/yanet-cli-balancer update --name balancer0 --config /mnt/yanet2/balancer.yaml
 
