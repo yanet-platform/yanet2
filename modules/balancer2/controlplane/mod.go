@@ -34,11 +34,12 @@ func WithLog(log *zap.Logger) Option {
 type Module struct {
 	cfg     *Config
 	shm     *ffi.SharedMemory
+	agent   *ffi.Agent
 	service *Service
 	log     *zap.Logger
 }
 
-func NewModule(cfg *Config, options ...Option) (*Module, error) {
+func NewBalancerModule(cfg *Config, options ...Option) (*Module, error) {
 	opts := newModuleOptions()
 	for _, o := range options {
 		o(opts)
@@ -51,30 +52,28 @@ func NewModule(cfg *Config, options ...Option) (*Module, error) {
 		return nil, fmt.Errorf("failed to attach shared memory: %w", err)
 	}
 
-	service, err := NewService(
-		shm,
-		cfg.InstanceID,
-		cfg.MemoryRequirements.Unwrap(),
-		WithServiceLog(log),
-	)
+	agent, err := shm.AgentReattach("balancer2", cfg.InstanceID, cfg.MemoryRequirements.Unwrap())
 	if err != nil {
-		err = fmt.Errorf("failed to create balancer service: %w", err)
+		err = fmt.Errorf("failed to reattach balancer agent: %w", err)
 		if detachErr := shm.Detach(); detachErr != nil {
 			err = errors.Join(err, fmt.Errorf("detach shared memory: %w", detachErr))
 		}
 		return nil, err
 	}
 
+	service := NewService(agent, WithServiceLog(log))
+
 	return &Module{
 		cfg:     cfg,
 		shm:     shm,
+		agent:   agent,
 		service: service,
 		log:     log,
 	}, nil
 }
 
 func (m *Module) Name() string {
-	return "balancer"
+	return "balancer2"
 }
 
 func (m *Module) Endpoint() string {
@@ -89,11 +88,15 @@ func (m *Module) RegisterService(server *grpc.Server) {
 	balancerpb.RegisterBalancerServer(server, m.service)
 }
 
-// Close releases the service and detaches from shared memory.
+// Close releases the service, the shared memory agent, and detaches from
+// shared memory, in reverse order of construction.
 func (m *Module) Close() error {
 	var errs []error
 	if err := m.service.Close(); err != nil {
 		errs = append(errs, fmt.Errorf("close balancer service: %w", err))
+	}
+	if err := m.agent.Close(); err != nil {
+		errs = append(errs, fmt.Errorf("close balancer agent: %w", err))
 	}
 	if err := m.shm.Detach(); err != nil {
 		errs = append(errs, fmt.Errorf("detach shared memory: %w", err))
