@@ -44,6 +44,14 @@ jobs:
         with:
           submodules: true
 
+      - uses: hendrikmuhs/ccache-action@v1.2.18
+        name: ccache
+        with:
+          key: ${{ runner.os }}-deb-ccache-${{ matrix.unbtver }}
+          max-size: 2G
+          verbose: 2
+          create-symlink: true
+
       - name: update apt (act hack)
         if: ${{ env.ACT }}
         run: |
@@ -59,7 +67,10 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-${{ matrix.unbtver }}
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('**/Cargo.toml') }}-${{ matrix.unbtver }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-${{ matrix.unbtver }}
+            ${{ runner.os }}-cargo-${{ matrix.unbtver }}
 
       - uses: awalsh128/cache-apt-pkgs-action@latest
         with:

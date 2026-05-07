@@ -67,10 +67,10 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('**/*.rs') }}-${{ hashFiles('**/Cargo.toml') }}
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('**/Cargo.toml') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('**/*.rs') }}-
             ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-
+            ${{ runner.os }}-cargo-
       - uses: awalsh128/cache-apt-pkgs-action@latest
         with:
           packages: meson clang cmake python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler jq clang-tidy-19
@@ -91,6 +91,8 @@ jobs:
         name: ccache
         with:
           key: ${{ runner.os }}-build-cache
+          max-size: 2G
+          verbose: 2
 
       - uses: actions/setup-go@v5
         with:
@@ -108,9 +110,9 @@ jobs:
           path: |
             ${{ env.cache }}
             ${{ env.modcache }}
-          key: ${{ env.cache_name }}-${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}-${{ hashFiles('**/go.mod') }}-${{ hashFiles('**/*.go') }}
+          key: ${{ env.cache_name }}-${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}-${{ hashFiles('**/go.mod') }}
           restore-keys: |
-            ${{ env.cache_name }}-${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}-${{ hashFiles('**/go.mod') }}-
+            ${{ env.cache_name }}-${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}-
             ${{ env.cache_name }}-${{ runner.os }}-go-
 
       - name: Install Go Protobuf Plugins
