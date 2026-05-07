@@ -27,7 +27,7 @@ const matchesPipeline = (pl: Pipeline, query: string): boolean => {
  * Pipelines page: track editor with function references, drag-and-drop, and live counters.
  */
 const PipelinesPage = (): React.JSX.Element => {
-    const { pipelines, loading, isDirty, getServerPipeline, dispatch, savePipeline, discardPipeline, createPipeline, loadFunctionList } = usePipelinesData();
+    const { pipelines, loading, isDirty, getServerPipeline, dispatch, savePipeline, discardPipeline, createPipeline, deletePipeline, loadFunctionList } = usePipelinesData();
     const [createDialogOpen, setCreateDialogOpen] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const searchRef = useRef<HTMLInputElement>(null);
@@ -59,6 +59,7 @@ const PipelinesPage = (): React.JSX.Element => {
 
     const handleSave = useCallback((pipelineId: string) => (): Promise<void> => savePipeline(pipelineId), [savePipeline]);
     const handleDiscard = useCallback((pipelineId: string) => (): void => discardPipeline(pipelineId), [discardPipeline]);
+    const handleDelete = useCallback((pipelineId: string) => (): Promise<boolean> => deletePipeline(pipelineId), [deletePipeline]);
 
     const pageHeader = (
         <Flex alignItems="center" gap={4} style={{ width: '100%' }}>
@@ -118,6 +119,7 @@ const PipelinesPage = (): React.JSX.Element => {
                             dispatch={dispatch}
                             onSave={handleSave(pl.id)}
                             onDiscard={handleDiscard(pl.id)}
+                            onDelete={handleDelete(pl.id)}
                             loadFunctionList={loadFunctionList}
                         />
                     ))

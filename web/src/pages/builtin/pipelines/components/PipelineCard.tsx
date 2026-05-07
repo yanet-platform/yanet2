@@ -16,6 +16,7 @@ interface PipelineCardProps {
     dispatch: (action: PipelinesAction) => void;
     onSave: () => Promise<void>;
     onDiscard: () => void;
+    onDelete: () => Promise<boolean>;
     loadFunctionList: () => Promise<FunctionId[]>;
 }
 
@@ -29,6 +30,7 @@ export const PipelineCard: React.FC<PipelineCardProps> = ({
     dispatch,
     onSave,
     onDiscard,
+    onDelete,
     loadFunctionList,
 }) => {
     const [collapsed, setCollapsed] = useState(false);
@@ -121,7 +123,7 @@ export const PipelineCard: React.FC<PipelineCardProps> = ({
                 onToggleCollapse={() => setCollapsed(c => !c)}
                 onOpenDiff={() => setDiffOpen(true)}
                 onDiscard={onDiscard}
-                onDelete={() => dispatch({ type: 'REMOVE_PIPELINE', pipelineId: pipeline.id })}
+                onDelete={onDelete}
             />
 
             {!collapsed && (

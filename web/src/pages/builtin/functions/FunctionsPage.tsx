@@ -36,7 +36,7 @@ const matchesFn = (fn: NetworkFunction, query: string): boolean => {
  * Functions page: Tracks editor with horizontal lanes, inline edit, DnD and live counters.
  */
 const FunctionsPage = (): React.JSX.Element => {
-    const { functions, loading, isDirty, getServerFn, dispatch, saveFn, discardFn, createFn } = useFunctionsData();
+    const { functions, loading, isDirty, getServerFn, dispatch, saveFn, discardFn, createFn, deleteFn } = useFunctionsData();
     const [availableModuleTypes, setAvailableModuleTypes] = useState<string[]>([]);
     const [createDialogOpen, setCreateDialogOpen] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
@@ -83,6 +83,7 @@ const FunctionsPage = (): React.JSX.Element => {
 
     const handleSave = useCallback((fnId: string) => (): Promise<void> => saveFn(fnId), [saveFn]);
     const handleDiscard = useCallback((fnId: string) => (): void => discardFn(fnId), [discardFn]);
+    const handleDelete = useCallback((fnId: string) => (): Promise<boolean> => deleteFn(fnId), [deleteFn]);
 
     const pageHeader = (
         <Flex alignItems="center" gap={4} style={{ width: '100%' }}>
@@ -143,6 +144,7 @@ const FunctionsPage = (): React.JSX.Element => {
                             dispatch={dispatch}
                             onSave={handleSave(fn.id)}
                             onDiscard={handleDiscard(fn.id)}
+                            onDelete={handleDelete(fn.id)}
                         />
                     ))
                 )}

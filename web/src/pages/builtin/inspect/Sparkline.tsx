@@ -9,6 +9,12 @@ export interface SparklineProps {
     strokeWidth?: number;
 }
 
+const isFlat = (data: number[]): boolean => {
+    if (data.length < 2) return true;
+    const first = data[0];
+    return data.every(v => v === first);
+};
+
 export const Sparkline: React.FC<SparklineProps> = ({
     data,
     color = 'currentColor',
@@ -17,8 +23,19 @@ export const Sparkline: React.FC<SparklineProps> = ({
     fill = false,
     strokeWidth = 1.25,
 }) => {
-    if (!data || data.length === 0) {
-        return <svg width={w} height={h} aria-hidden style={{ display: 'block' }} />;
+    if (isFlat(data ?? [])) {
+        const cy = h / 2;
+        return (
+            <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} aria-hidden style={{ overflow: 'visible', display: 'block' }}>
+                <line
+                    x1={0} y1={cy} x2={w} y2={cy}
+                    stroke="var(--g-color-line-generic)"
+                    strokeWidth="1"
+                    strokeDasharray="3 4"
+                    strokeOpacity="0.6"
+                />
+            </svg>
+        );
     }
 
     const max = Math.max(...data, 1);
@@ -42,6 +59,7 @@ export const Sparkline: React.FC<SparklineProps> = ({
             width={w}
             height={h}
             viewBox={`0 0 ${w} ${h}`}
+            aria-hidden
             style={{ overflow: 'visible', display: 'block' }}
         >
             {fill && area && <path d={area} fill={color} opacity="0.12" />}

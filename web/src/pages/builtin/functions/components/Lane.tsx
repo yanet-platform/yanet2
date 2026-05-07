@@ -47,21 +47,10 @@ export const Lane: React.FC<LaneProps> = ({
     );
 
     const aggCounter: InterpolatedCounterData | undefined = useMemo(() => {
-        let totalPps = 0;
-        let totalBps = 0;
-        let hasData = false;
-        for (const m of chain.modules) {
-            const c = counterMap.get(m.id);
-            if (c) {
-                totalPps += c.pps;
-                totalBps += c.bps;
-                hasData = true;
-            }
-        }
-        if (!hasData) {
-            return undefined;
-        }
-        return { pps: totalPps, bps: totalBps };
+        if (chain.modules.length === 0) return undefined;
+        const c = counterMap.get(chain.modules[0].id);
+        if (!c) return undefined;
+        return { pps: c.pps, bps: c.bps };
     }, [chain.modules, counterMap]);
 
     const handleRename = (name: string): void => {

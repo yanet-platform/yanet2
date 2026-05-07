@@ -43,6 +43,9 @@ export const useRollingSeries = (
     useEffect(() => {
         const id = setInterval(() => {
             setSeries((prev) => {
+                if (prev.length === 0 && valueRef.current === 0) {
+                    return prev;
+                }
                 const next = [...prev, valueRef.current];
                 if (next.length > maxLen) next.shift();
                 return next;
@@ -77,16 +80,26 @@ export const useDeviceTrendSeries = (
     kind: 'rx' | 'tx',
     maxLen: number = DEFAULT_MAX_LEN,
 ): Map<string, number[]> => {
+    const deviceCountersRef = useRef(deviceCounters);
+    deviceCountersRef.current = deviceCounters;
+    const kindRef = useRef(kind);
+    kindRef.current = kind;
+
     const [series, setSeries] = useState<Map<string, number[]>>(() => new Map());
 
     useEffect(() => {
         const id = setInterval(() => {
+            const counters = deviceCountersRef.current;
+            const k = kindRef.current;
             setSeries((prev) => {
                 const next = new Map<string, number[]>();
-                deviceCounters.forEach((d, name) => {
-                    const v = (kind === 'rx' ? d.rx?.pps : d.tx?.pps) ?? 0;
-                    const old = prev.get(name) ?? [];
-                    const grown = [...old, v];
+                counters.forEach((d, name) => {
+                    const v = (k === 'rx' ? d.rx?.pps : d.tx?.pps) ?? 0;
+                    const old = prev.get(name);
+                    if (old === undefined && v === 0) {
+                        return;
+                    }
+                    const grown = [...(old ?? []), v];
                     if (grown.length > maxLen) grown.shift();
                     next.set(name, grown);
                 });
@@ -94,7 +107,7 @@ export const useDeviceTrendSeries = (
             });
         }, DEFAULT_INTERVAL_MS);
         return () => clearInterval(id);
-    }, [deviceCounters, kind, maxLen]);
+    }, [maxLen]);
 
     return series;
 };
@@ -177,22 +190,23 @@ export const usePipelineCounters = (
                         });
                     });
                 }
-            } else {
-                pipelines.forEach((p) => newRates.set(p, { pps: 0, bps: 0 }));
             }
 
+            const hadPrev = prevRef.current !== null;
             prevRef.current = { timestamp: now, values: totals };
 
-            setSeries((prev) => {
-                const next = new Map<string, number[]>();
-                newRates.forEach((r, name) => {
-                    const old = prev.get(name) ?? [];
-                    const grown = [...old, r.pps];
-                    if (grown.length > DEFAULT_MAX_LEN) grown.shift();
-                    next.set(name, grown);
+            if (hadPrev) {
+                setSeries((prev) => {
+                    const next = new Map<string, number[]>();
+                    newRates.forEach((r, name) => {
+                        const old = prev.get(name) ?? [];
+                        const grown = [...old, r.pps];
+                        if (grown.length > DEFAULT_MAX_LEN) grown.shift();
+                        next.set(name, grown);
+                    });
+                    return next;
                 });
-                return next;
-            });
+            }
 
             setRates(newRates);
         };
@@ -291,22 +305,23 @@ export const useFunctionCounters = (
                         });
                     });
                 }
-            } else {
-                functions.forEach((f) => newRates.set(f, { pps: 0, bps: 0 }));
             }
 
+            const hadPrev = prevRef.current !== null;
             prevRef.current = { timestamp: now, values: totals };
 
-            setSeries((prev) => {
-                const next = new Map<string, number[]>();
-                newRates.forEach((r, name) => {
-                    const old = prev.get(name) ?? [];
-                    const grown = [...old, r.pps];
-                    if (grown.length > DEFAULT_MAX_LEN) grown.shift();
-                    next.set(name, grown);
+            if (hadPrev) {
+                setSeries((prev) => {
+                    const next = new Map<string, number[]>();
+                    newRates.forEach((r, name) => {
+                        const old = prev.get(name) ?? [];
+                        const grown = [...old, r.pps];
+                        if (grown.length > DEFAULT_MAX_LEN) grown.shift();
+                        next.set(name, grown);
+                    });
+                    return next;
                 });
-                return next;
-            });
+            }
 
             setRates(newRates);
         };

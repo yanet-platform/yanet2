@@ -17,6 +17,7 @@ interface FunctionCardProps {
     dispatch: (action: FunctionsAction) => void;
     onSave: () => Promise<void>;
     onDiscard: () => void;
+    onDelete: () => Promise<boolean>;
 }
 
 /** Validate a single function, returning error messages (editing-time only; weight=0 is allowed). */
@@ -55,6 +56,7 @@ export const FunctionCard: React.FC<FunctionCardProps> = ({
     dispatch,
     onSave,
     onDiscard,
+    onDelete,
 }) => {
     const [collapsed, setCollapsed] = useState(false);
     const [diffOpen, setDiffOpen] = useState(false);
@@ -220,7 +222,7 @@ export const FunctionCard: React.FC<FunctionCardProps> = ({
                 onToggleCollapse={() => setCollapsed(c => !c)}
                 onOpenDiff={handleOpenDiff}
                 onDiscard={onDiscard}
-                onDelete={() => dispatch({ type: 'REMOVE_FUNCTION', fnId: fn.id })}
+                onDelete={onDelete}
             />
 
             {!collapsed && (

@@ -82,6 +82,7 @@ export const DevicesSection: React.FC<DevicesSectionProps> = ({
         {
             id: 'rx',
             name: 'RX',
+            width: 140,
             align: 'right',
             template: (item: DeviceRowData) => {
                 const abs = item.absolute;
@@ -108,11 +109,12 @@ export const DevicesSection: React.FC<DevicesSectionProps> = ({
         {
             id: 'rxTrend',
             name: 'Trend',
+            width: 220,
             template: (item: DeviceRowData) => (
                 <Sparkline
                     data={item.rxSeries}
                     color={item.status === 'ok' ? 'var(--inspect-ok)' : 'var(--inspect-idle)'}
-                    w={70}
+                    w={200}
                     h={20}
                 />
             ),
@@ -120,6 +122,7 @@ export const DevicesSection: React.FC<DevicesSectionProps> = ({
         {
             id: 'tx',
             name: 'TX',
+            width: 140,
             align: 'right',
             template: (item: DeviceRowData) => {
                 const abs = item.absolute;

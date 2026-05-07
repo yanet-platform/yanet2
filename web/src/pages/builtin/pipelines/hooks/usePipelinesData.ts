@@ -15,6 +15,7 @@ export interface UsePipelinesDataResult {
     savePipeline: (pipelineId: string) => Promise<void>;
     discardPipeline: (pipelineId: string) => void;
     createPipeline: (name: string) => Promise<boolean>;
+    deletePipeline: (pipelineId: string) => Promise<boolean>;
     loadFunctionList: () => Promise<FunctionId[]>;
 }
 
@@ -109,9 +110,22 @@ export const usePipelinesData = (): UsePipelinesDataResult => {
         }
     }, []);
 
+    const deletePipeline = useCallback(async (pipelineId: string): Promise<boolean> => {
+        try {
+            await API.pipelines.delete({ id: { name: pipelineId } });
+            rawDispatch({ type: 'REMOVE_PIPELINE', pipelineId });
+            setPipelineIds(prev => prev.filter(id => id !== pipelineId));
+            toaster.success(`pl-delete-${pipelineId}`, `Pipeline "${pipelineId}" deleted.`);
+            return true;
+        } catch (err) {
+            toaster.error(`pl-delete-err-${pipelineId}`, `Failed to delete "${pipelineId}"`, err);
+            return false;
+        }
+    }, []);
+
     const pipelines = pipelineIds
         .map(id => state.local[id])
         .filter((p): p is Pipeline => !!p);
 
-    return { pipelines, loading, isDirty, getServerPipeline, dispatch, savePipeline, discardPipeline, createPipeline, loadFunctionList };
+    return { pipelines, loading, isDirty, getServerPipeline, dispatch, savePipeline, discardPipeline, createPipeline, deletePipeline, loadFunctionList };
 };

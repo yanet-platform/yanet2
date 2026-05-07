@@ -14,6 +14,7 @@ export interface UseFunctionsDataResult {
     saveFn: (fnId: string) => Promise<void>;
     discardFn: (fnId: string) => void;
     createFn: (name: string) => Promise<boolean>;
+    deleteFn: (fnId: string) => Promise<boolean>;
 }
 
 /**
@@ -98,9 +99,22 @@ export const useFunctionsData = (): UseFunctionsDataResult => {
         }
     }, [load]);
 
+    const deleteFn = useCallback(async (fnId: string): Promise<boolean> => {
+        try {
+            await API.functions.delete({ id: { name: fnId } });
+            rawDispatch({ type: 'REMOVE_FUNCTION', fnId });
+            setFnIds(prev => prev.filter(id => id !== fnId));
+            toaster.success(`fn-ng-delete-${fnId}`, `Function "${fnId}" deleted.`);
+            return true;
+        } catch (err) {
+            toaster.error(`fn-ng-delete-err-${fnId}`, `Failed to delete "${fnId}"`, err);
+            return false;
+        }
+    }, []);
+
     const functions = fnIds
         .map(id => state.local[id])
         .filter((f): f is NetworkFunction => !!f);
 
-    return { functions, loading, isDirty, getServerFn, dispatch, saveFn, discardFn, createFn };
+    return { functions, loading, isDirty, getServerFn, dispatch, saveFn, discardFn, createFn, deleteFn };
 };
