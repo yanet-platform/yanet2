@@ -39,7 +39,7 @@ const MainMenu = ({ currentPage, onPageChange, renderContent, disabled = false }
         onItemClick: undefined,
         className: 'main-menu__section-header',
         itemWrapper: (_params, _makeItem, opts) => {
-            if (opts?.collapsed) {
+            if (opts?.compact || opts?.collapsed) {
                 return null;
             }
             return (
@@ -69,10 +69,10 @@ const MainMenu = ({ currentPage, onPageChange, renderContent, disabled = false }
         createMenuItem('modules/decap', 'Decap', LayoutCellsLarge),
         createMenuItem('modules/acl', 'ACL', Shield),
         createMenuItem('modules/pdump', 'Pdump', CirclePlay),
-        createMenuItem('modules/route', 'Route (FIB)', Route),
+        createMenuItem('modules/route', 'Route', Route),
         createDivider('__div_2'),
         createSectionHeader('__section_operators', 'Operators'),
-        createMenuItem('operators/route', 'Route (RIB)', Route),
+        createMenuItem('operators/route', 'Route', Route),
         createMenuItem('operators/neighbours', 'Neighbours', Link),
     ];
 

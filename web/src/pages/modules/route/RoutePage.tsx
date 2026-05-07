@@ -82,12 +82,12 @@ const RoutePage: React.FC = () => {
     }, [configFIB]);
 
     const headerContent = (
-        <PageHeader title="Route (FIB)" />
+        <PageHeader title="Route FIB" />
     );
 
     if (loading) {
         return (
-            <PageLayout title="Route (FIB)">
+            <PageLayout title="Route FIB">
                 <PageLoader loading={loading} size="l" />
             </PageLayout>
         );

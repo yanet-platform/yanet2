@@ -22,7 +22,7 @@ export const RoutePageHeader: React.FC<RoutePageHeaderProps> = ({
     onMockSizeChange,
 }) => (
     <PageHeader
-        title="Route"
+        title="Routing Table"
         actions={
             <>
                 <Box className="route-page-header__mock-controls">

@@ -294,7 +294,7 @@ const RoutePage: React.FC = () => {
 
     if (loading && !mockEnabled) {
         return (
-            <PageLayout title="Route (RIB)">
+            <PageLayout title="Routing Table">
                 <PageLoader loading={loading} size="l" />
             </PageLayout>
         );
