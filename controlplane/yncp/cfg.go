@@ -11,6 +11,7 @@ import (
 
 	acl "github.com/yanet-platform/yanet2/modules/acl/controlplane"
 	balancer "github.com/yanet-platform/yanet2/modules/balancer/agent/go"
+	balancer2 "github.com/yanet-platform/yanet2/modules/balancer2/controlplane"
 	decap "github.com/yanet-platform/yanet2/modules/decap/controlplane"
 	dscp "github.com/yanet-platform/yanet2/modules/dscp/controlplane"
 	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
@@ -23,20 +24,22 @@ import (
 	vlan "github.com/yanet-platform/yanet2/devices/vlan/controlplane"
 )
 
-type Config config
-type config struct {
-	// Logging configuration.
-	Logging logging.Config `json:"logging" yaml:"logging"`
-	// MemoryPath is the path to the shared-memory file that is used to
-	// communicate with dataplane.
-	MemoryPath string `yaml:"memory_path"`
-	// Gateway configuration.
-	Gateway *gateway.Config `json:"gateway" yaml:"gateway"`
-	// Modules configuration.
-	Modules ModulesConfig `json:"modules" yaml:"modules"`
-	// Devices configuration.
-	Devices DevicesConfig `json:"devices" yaml:"devices"`
-}
+type (
+	Config config
+	config struct {
+		// Logging configuration.
+		Logging logging.Config `json:"logging" yaml:"logging"`
+		// MemoryPath is the path to the shared-memory file that is used to
+		// communicate with dataplane.
+		MemoryPath string `               yaml:"memory_path"`
+		// Gateway configuration.
+		Gateway *gateway.Config `json:"gateway" yaml:"gateway"`
+		// Modules configuration.
+		Modules ModulesConfig `json:"modules" yaml:"modules"`
+		// Devices configuration.
+		Devices DevicesConfig `json:"devices" yaml:"devices"`
+	}
+)
 
 func (m *Config) Default() {
 	*m = *DefaultConfig()
@@ -92,6 +95,9 @@ type ModulesConfig struct {
 
 	// Balancer is the configuration for the balancer module.
 	Balancer *balancer.Config `yaml:"balancer"`
+
+	// Balancer2 is the configuration for the balancer2 module.
+	Balancer2 *balancer2.Config `yaml:"balancer2"`
 
 	// ACL is the configuration for the acl module.
 	ACL *acl.Config `yaml:"acl"`

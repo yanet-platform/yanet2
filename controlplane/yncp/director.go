@@ -14,6 +14,7 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/internal/gateway"
 	acl "github.com/yanet-platform/yanet2/modules/acl/controlplane"
 	balancer "github.com/yanet-platform/yanet2/modules/balancer/agent/go"
+	balancer2 "github.com/yanet-platform/yanet2/modules/balancer2/controlplane"
 	decap "github.com/yanet-platform/yanet2/modules/decap/controlplane"
 	dscp "github.com/yanet-platform/yanet2/modules/dscp/controlplane"
 	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
@@ -133,6 +134,14 @@ func NewDirector(cfg *Config, options ...DirectorOption) (*Director, error) {
 		return nil, fmt.Errorf("failed to initialize balancer built-in module: %w", err)
 	}
 
+	balancer2Module, err := balancer2.NewBalancerModule(
+		cfg.Modules.Balancer2,
+		balancer2.WithLog(log.Desugar()),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize balancer2 built-in module: %w", err)
+	}
+
 	plainDevice, err := plain.NewDevicePlainDevice(cfg.Devices.Plain, log)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize plain built-in device: %w", err)
@@ -172,6 +181,9 @@ func NewDirector(cfg *Config, options ...DirectorOption) (*Director, error) {
 		),
 		gateway.WithBuiltInModule(
 			balancerModule,
+		),
+		gateway.WithBuiltInModule(
+			balancer2Module,
 		),
 		gateway.WithBuiltInDevice(
 			plainDevice,

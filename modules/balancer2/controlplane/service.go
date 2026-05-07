@@ -2,13 +2,10 @@ package balancer2
 
 import (
 	"context"
-	"fmt"
 	"sort"
 	"sync"
 
-	"github.com/c2h5oh/datasize"
 	"go.uber.org/zap"
-	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -56,20 +53,10 @@ type Service struct {
 	log *zap.Logger
 }
 
-func NewService(
-	shm *ffi.SharedMemory,
-	instanceIdx uint32,
-	size datasize.ByteSize,
-	options ...ServiceOption,
-) (*Service, error) {
+func NewService(agent *ffi.Agent, options ...ServiceOption) *Service {
 	opts := newServiceOptions()
 	for _, o := range options {
 		o(opts)
-	}
-
-	agent, err := shm.AgentAttach("balancer", instanceIdx, size)
-	if err != nil {
-		return nil, fmt.Errorf("failed to attach balancer agent: %w", err)
 	}
 
 	opts.Log.Info("balancer service initialized")
@@ -79,11 +66,12 @@ func NewService(
 		moduleConfigs:  map[string]*ModuleConfig{},
 		sessionsStates: map[string]*SessionsState{},
 		log:            opts.Log,
-	}, nil
+	}
 }
 
-// Close releases all module configs, session states, and the underlying
-// agent. After Close the Service must not be used.
+// Close releases all module configs and session states held by the service.
+// The agent lifecycle is owned by the parent module. After Close the Service
+// must not be used.
 func (m *Service) Close() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -98,7 +86,7 @@ func (m *Service) Close() error {
 	}
 	m.sessionsStates = nil
 
-	return m.agent.Close()
+	return nil
 }
 
 func (m *Service) UpdateConfig(
@@ -321,25 +309,4 @@ func (m *Service) ListSessionsStates(
 	}
 	sort.Strings(names)
 	return &balancerpb.ListSessionsStatesResponse{Names: names}, nil
-}
-
-func (m *Service) GetState(
-	ctx context.Context,
-	req *balancerpb.GetStateRequest,
-) (*balancerpb.GetStateResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "GetState is not implemented")
-}
-
-func (m *Service) ListSessions(
-	req *balancerpb.ListSessionsRequest,
-	stream grpc.ServerStreamingServer[balancerpb.Session],
-) error {
-	return status.Error(codes.Unimplemented, "ListSessions is not implemented")
-}
-
-func (m *Service) GetMetrics(
-	ctx context.Context,
-	req *balancerpb.GetMetricsRequest,
-) (*balancerpb.GetMetricsResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "GetMetrics is not implemented")
 }
