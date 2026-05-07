@@ -1,2 +1,2 @@
 usr/bin/yanet-pipeline-operator
-etc/yanet2/yanet-pipeline-operator.yaml
+etc/yanet2/yanet-pipeline-operator-default.yaml

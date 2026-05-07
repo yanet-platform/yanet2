@@ -1,2 +1,2 @@
 usr/bin/yanet-dataplane
-etc/yanet2/dataplane.yaml
+etc/yanet2/dataplane-default.yaml

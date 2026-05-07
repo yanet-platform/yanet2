@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Flex, Loader, LoaderProps } from '@gravity-ui/uikit';
-import './common.css';
+import './common.scss';
 
 export interface PageLoaderProps extends LoaderProps {
     /** Whether the loader should be shown */
@@ -18,7 +18,7 @@ export interface PageLoaderProps extends LoaderProps {
  * <PageLoader loading={isLoading} size="l" delay={200} />
  * ```
  */
-export const PageLoader = ({ loading, size = 'l', delay = 200 }: PageLoaderProps): React.JSX.Element => {
+export const PageLoader = ({ loading, size = 'l', delay = 200 }: PageLoaderProps): React.JSX.Element | null => {
     const [showLoader, setShowLoader] = useState(false);
 
     useEffect(() => {
@@ -42,7 +42,7 @@ export const PageLoader = ({ loading, size = 'l', delay = 200 }: PageLoaderProps
     }, [loading, delay]);
 
     if (!showLoader) {
-        return <></>;
+        return null;
     }
 
     return (

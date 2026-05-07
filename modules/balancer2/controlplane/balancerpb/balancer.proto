@@ -1,0 +1,128 @@
+syntax = "proto3";
+
+package balancerpb;
+
+import "modules/balancer2/controlplane/balancerpb/config.proto";
+import "modules/balancer2/controlplane/balancerpb/filter.proto";
+import "modules/balancer2/controlplane/balancerpb/state.proto";
+
+import "common/commonpb/metric.proto";
+
+option go_package = "github.com/yanet-platform/yanet2/modules/balancer2/controlplane/balancerpb;balancerpb";
+
+// Balancer service.
+//
+// Provides management operations for load balancer instances including
+// configuration, real server updates, statistics, and runtime information.
+service Balancer {
+  rpc UpdateConfig(UpdateConfigRequest) returns (UpdateConfigResponse);
+
+  rpc GetConfig(GetConfigRequest) returns (GetConfigResponse);
+
+  rpc ListConfigs(ListConfigsRequest) returns (ListConfigsResponse);
+
+  rpc UpdateReals(UpdateRealsRequest) returns (UpdateRealsResponse);
+
+  rpc UpdateVS(UpdateVSRequest) returns (UpdateVSResponse);
+
+  rpc DeleteVS(DeleteVSRequest) returns (DeleteVSResponse);
+
+  rpc GetState(GetStateRequest) returns (GetStateResponse);
+
+  rpc UpdateSessionsState(UpdateSessionsStateRequest) returns (UpdateSessionsStateResponse);
+
+  rpc ListSessionsStates(ListSessionsStatesRequest) returns (ListSessionsStatesResponse);
+
+  rpc ListSessions(ListSessionsRequest) returns (stream Session);
+
+  rpc GetMetrics(GetMetricsRequest) returns (GetMetricsResponse);
+}
+
+// On create (first update), all fields are required.
+// On update, all updating fields are optional.
+// If field is not specified, it is not updated.
+message UpdateConfigRequest {
+  string config_name = 1;
+  optional string sessions_state_name = 2;
+  optional VsConfigList vs = 3;
+  optional SessionsTimeouts timeouts = 4;
+  optional AddrConfig addr = 5;
+  optional WlcConfig wlc = 6;
+}
+
+message UpdateConfigResponse {}
+
+message GetConfigRequest { string config_name = 1; }
+
+message GetConfigResponse {
+  string config_name = 1;
+  string sessions_state_name = 2;
+  VsConfigList vs = 3;
+  SessionsTimeouts timeouts = 4;
+  AddrConfig addr = 5;
+  WlcConfig wlc = 6;
+}
+
+message RealUpdate {
+  RealIdentifier real_id = 1;
+  optional bool enable = 2;
+  optional uint32 weight = 3;
+}
+
+message UpdateRealsRequest {
+  string config_name = 1;
+  repeated RealUpdate updates = 2;
+}
+
+message UpdateRealsResponse {}
+
+// Allows partial updates to the VS configuration by specifying only
+// the virtual services that need to be updated or added.
+message UpdateVSRequest {
+  string config_name = 1;
+  repeated VsConfig vs = 2;
+}
+
+message UpdateVSResponse {}
+
+// Removes the specified virtual services from the balancer configuration
+// while leaving other virtual services unchanged.
+message DeleteVSRequest {
+  string config_name = 1;
+  repeated VsIdentifier vs = 2;
+}
+
+message DeleteVSResponse {}
+
+message ListConfigsRequest {}
+
+message ListConfigsResponse { repeated string names = 1; }
+
+message ListSessionsStatesRequest {}
+
+message ListSessionsStatesResponse { repeated string names = 1; }
+
+// Request to show active sessions.
+message ListSessionsRequest {
+  string sessions_state_name = 1;
+  optional Filter filter = 2;
+}
+
+message GetStateRequest {
+  string config_name = 1;
+  optional PacketHandlerRef packet_handler_ref = 2;
+  optional Filter filter = 3;
+}
+
+message GetStateResponse { repeated BalancerState states = 1; }
+
+message UpdateSessionsStateRequest {
+  string sessions_state_name = 1;
+  uint64 capacity = 2;
+}
+
+message UpdateSessionsStateResponse {}
+
+message GetMetricsRequest {}
+
+message GetMetricsResponse { repeated commonpb.Metric metrics = 1; }

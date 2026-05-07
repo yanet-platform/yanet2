@@ -10,7 +10,7 @@ import (
 )
 
 // Init initializes the logging subsystem.
-func Init(cfg *Config) (*zap.SugaredLogger, zap.AtomicLevel, error) {
+func Init(cfg *Config) (*zap.Logger, zap.AtomicLevel, error) {
 	encoderConfig := zap.NewDevelopmentEncoderConfig()
 
 	if term.IsTerminal(int(os.Stderr.Fd())) {
@@ -33,5 +33,5 @@ func Init(cfg *Config) (*zap.SugaredLogger, zap.AtomicLevel, error) {
 		return nil, zap.AtomicLevel{}, fmt.Errorf("failed to initialize logger: %w", err)
 	}
 
-	return logger.Sugar(), config.Level, nil
+	return logger, config.Level, nil
 }

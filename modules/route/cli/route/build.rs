@@ -6,7 +6,8 @@ pub fn main() -> Result<(), Box<dyn Error>> {
     tonic_build::configure()
         .emit_rerun_if_changed(false)
         .build_server(false)
-        .compile_protos(&["routepb/route.proto"], &["../../controlplane"])?;
+        .extern_path(".commonpb", "::commonpb::pb")
+        .compile_protos(&["modules/route/controlplane/routepb/route.proto"], &["../../../../"])?;
 
     Ok(())
 }

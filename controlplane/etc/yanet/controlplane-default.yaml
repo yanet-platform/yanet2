@@ -1,0 +1,46 @@
+# Logging configuration.
+logging:
+  # Logging priority.
+  #
+  # Higher levels are more important.
+  #
+  # Possible values: "debug", "info", "warning", "error".
+  level: debug
+# MemoryPathPrefix is the path to the shared-memory file that is used to
+# communicate with dataplane.
+memory_path: &memory_path /dev/hugepages/yanet
+gateway:
+  server:
+    endpoint: &gateway_endpoint "[::1]:8080"
+    http_endpoint: "[::1]:8081"
+    # TLS is optional. When present both gRPC and HTTP listeners use it.
+    # The certificate's SubjectAltName must include whatever host the
+    # in-process loopback uses (defaults to the host from `endpoint`,
+    # i.e. ::1). Override via `server_name` if you need a different SNI.
+    # Cert rotation requires a director restart.
+    # tls:
+    #   cert_file: /etc/yanet/tls/server.pem
+    #   key_file:  /etc/yanet/tls/server.key
+    #   server_name: localhost
+  auth:
+    disabled: true
+    permissions_path: /etc/yanet/auth/permissions.yaml
+modules:
+  route:
+    # MemoryPath is the path to the shared-memory file that is used
+    # to communicate with the dataplane.
+    memory_path: *memory_path
+    # Memory requirements for a single FIB-push transaction.
+    memory_requirements: 16MB
+    endpoint: "[::1]:0"
+    gateway_endpoint: *gateway_endpoint
+  decap:
+    memory_path_prefix: /dev/hugepages/yanet
+    memory_requirements: 16MB
+    endpoint: "[::1]:0"
+    gateway_endpoint: *gateway_endpoint
+  acl:
+    memory_path_prefix: /dev/hugepages/yanet
+    memory_requirements: 8GB
+    endpoint: "[::1]:0"
+    gateway_endpoint: *gateway_endpoint

@@ -27,7 +27,7 @@ echo "Started dataplane with PID: $DATAPLANE_PID"
 sleep 5
 
 # Start controlplane with logging
-/mnt/build/controlplane/yanet-controlplane -c /mnt/yanet2/controlplane/etc/yanet/controlplane-director.yaml > /mnt/build/yanet-controlplane.log 2>&1 &
+/mnt/build/controlplane/yanet-controlplane -c /mnt/yanet2/controlplane/etc/yanet/controlplane-default.yaml > /mnt/build/yanet-controlplane.log 2>&1 &
 CONTROLPLANE_PID=$!
 echo "Started controlplane with PID: $CONTROLPLANE_PID"
 sleep 5

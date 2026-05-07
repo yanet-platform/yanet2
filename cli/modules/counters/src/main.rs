@@ -48,53 +48,53 @@ pub enum ModeCmd {
 
 #[derive(Debug, Clone, Parser)]
 pub struct DeviceCmd {
-    #[arg(long)]
+    #[arg(short = 'd', long)]
     pub device_name: String,
 }
 
 #[derive(Debug, Clone, Parser)]
 pub struct PipelineCmd {
-    #[arg(long)]
+    #[arg(short = 'd', long)]
     pub device_name: String,
-    #[arg(long)]
+    #[arg(short = 'p', long)]
     pub pipeline_name: String,
 }
 
 #[derive(Debug, Clone, Parser)]
 pub struct FunctionCmd {
-    #[arg(long)]
+    #[arg(short = 'd', long)]
     pub device_name: String,
-    #[arg(long)]
+    #[arg(short = 'p', long)]
     pub pipeline_name: String,
-    #[arg(long)]
+    #[arg(short = 'f', long)]
     pub function_name: String,
 }
 
 #[derive(Debug, Clone, Parser)]
 pub struct ChainCmd {
-    #[arg(long)]
+    #[arg(short = 'd', long)]
     pub device_name: String,
-    #[arg(long)]
+    #[arg(short = 'p', long)]
     pub pipeline_name: String,
-    #[arg(long)]
+    #[arg(short = 'f', long)]
     pub function_name: String,
-    #[arg(long)]
+    #[arg(short = 'c', long)]
     pub chain_name: String,
 }
 
 #[derive(Debug, Clone, Parser)]
 pub struct ModuleCmd {
-    #[arg(long)]
+    #[arg(short = 'd', long)]
     pub device_name: String,
-    #[arg(long)]
+    #[arg(short = 'p', long)]
     pub pipeline_name: String,
-    #[arg(long)]
+    #[arg(short = 'f', long)]
     pub function_name: String,
-    #[arg(long)]
+    #[arg(short = 'c', long)]
     pub chain_name: String,
-    #[arg(long)]
+    #[arg(short = 't', long)]
     pub module_type: String,
-    #[arg(long)]
+    #[arg(short = 'm', long)]
     pub module_name: String,
 }
 

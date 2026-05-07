@@ -36,7 +36,7 @@ type PdumpService struct {
 	// Used to manage and terminate these readers during config updates or shutdown.
 	ringReaders []ringReader
 	quitCh      chan bool // Channel used to signal a graceful shutdown to all active ReadDump streams.
-	log         *zap.SugaredLogger
+	log         *zap.Logger
 }
 
 // pdumpConfig stores the configuration for a pdump module,
@@ -57,7 +57,7 @@ type ringReader struct {
 }
 
 // NewPdumpService initializes a new packet capture service with the specified agent and logger.
-func NewPdumpService(agent *ffi.Agent, log *zap.SugaredLogger) *PdumpService {
+func NewPdumpService(agent *ffi.Agent, log *zap.Logger) *PdumpService {
 	return &PdumpService{
 		agent:   agent,
 		configs: map[string]*pdumpConfig{},
@@ -170,7 +170,7 @@ func (m *PdumpService) SetConfig(
 
 				snaplen := request.Config.GetSnaplen()
 				if snaplen == 0 {
-					m.log.Infof("snaplen is zero, resetting to default value %d", defaultSnaplen)
+					m.log.Info("snaplen is zero, resetting to default value", zap.Uint32("defaultSnaplen", defaultSnaplen))
 					snaplen = defaultSnaplen
 				}
 
@@ -221,7 +221,7 @@ func (m *PdumpService) DeleteConfig(
 	for _, rr := range m.ringReaders {
 		if rr.name == name {
 			rr.cancel(fmt.Errorf("terminated by config deletion"))
-			m.log.Infow("waiting for ring reader to complete",
+			m.log.Info("waiting for ring reader to complete",
 				zap.String("name", name),
 			)
 			<-rr.doneCh
@@ -242,7 +242,7 @@ func (m *PdumpService) DeleteConfig(
 	}
 
 	delete(m.configs, name)
-	m.log.Infow("deleted pdump config",
+	m.log.Info("deleted pdump config",
 		zap.String("name", name),
 	)
 
@@ -256,22 +256,22 @@ func (m *PdumpService) transferConfigParameters(
 	oldConfig *pdumpConfig,
 	ffiConfig *ModuleConfig,
 ) error {
-	m.log.Debugw("set dump mode", zap.String("module", name))
+	m.log.Debug("set dump mode", zap.String("module", name))
 	if err := ffiConfig.SetDumpMode(oldConfig.dumpMode); err != nil {
 		return fmt.Errorf("failed to set dump mode for %s: %w", name, err)
 	}
 
-	m.log.Debugw("set snaplen", zap.String("module", name))
+	m.log.Debug("set snaplen", zap.String("module", name))
 	if err := ffiConfig.SetSnapLen(oldConfig.snaplen); err != nil {
 		return fmt.Errorf("failed to set snaplen for %s: %w", name, err)
 	}
 
-	m.log.Debugw("set filter", zap.String("module", name))
+	m.log.Debug("set filter", zap.String("module", name))
 	if err := ffiConfig.SetFilter(oldConfig.filter); err != nil {
 		return fmt.Errorf("failed to set pdump filter for %s: %w", name, err)
 	}
 
-	m.log.Debugw("setup ring", zap.String("module", name))
+	m.log.Debug("setup ring", zap.String("module", name))
 	if err := ffiConfig.SetupRing(oldConfig.ring, m.log); err != nil {
 		return fmt.Errorf("failed to setup ring buffers for %s: %w", name, err)
 	}
@@ -302,7 +302,7 @@ func (m *PdumpService) updateModuleConfig(
 	for _, rr := range m.ringReaders {
 		if rr.name == name {
 			rr.cancel(fmt.Errorf("terminated by config update"))
-			m.log.Infof("waiting for ring reader %s to complete", name)
+			m.log.Info("waiting for ring reader to complete", zap.String("name", name))
 			<-rr.doneCh
 		}
 	}
@@ -312,7 +312,7 @@ func (m *PdumpService) updateModuleConfig(
 		return rr.name == name
 	})
 
-	m.log.Debugw("update config", zap.String("module", name))
+	m.log.Debug("update config", zap.String("module", name))
 
 	modConfig := m.configs[name]
 
@@ -429,10 +429,10 @@ func (m *PdumpService) spawnRingReaders(ctx context.Context, name string, ring *
 	}
 	m.ringReaders = append(m.ringReaders, reader)
 
-	m.log.Infof("start %d ring readers", len(ring.workers))
+	m.log.Info("start ring readers", zap.Int("count", len(ring.workers)))
 	go func() {
 		info := ring.runReaders(ctx, recordCh)
-		m.log.Infof("ring readers stopped due to %v", info)
+		m.log.Info("ring readers stopped", zap.Any("info", info))
 		close(recordCh)
 		close(reader.doneCh)
 	}()

@@ -8,10 +8,19 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
+	"github.com/yanet-platform/yanet2/common/go/operator"
 	"github.com/yanet-platform/yanet2/controlplane/ynpb"
 	"github.com/yanet-platform/yanet2/devices/plain/controlplane/plainpb"
 	"github.com/yanet-platform/yanet2/devices/vlan/controlplane/vlanpb"
 )
+
+// GatewayActuatorMetricsObserver receives semantic events from a
+// single gateway actuator and translates them into metrics.
+type GatewayActuatorMetricsObserver interface {
+	OnApplyCompleted(err error)
+	OnResourceUpdated(kind string, err error)
+	OnGC(deleted, failed int, err error)
+}
 
 // GatewayActuator applies a StageConfig to a single Gateway and prunes
 // pipelines that are no longer part of the desired stage.
@@ -29,7 +38,7 @@ type GatewayActuator struct {
 // NewGatewayActuator dials the Gateway endpoint and returns a ready-to-use
 // actuator.
 func NewGatewayActuator(
-	cfg GatewayConfig,
+	cfg operator.GatewayConfig,
 	options ...GatewayActuatorOption,
 ) (*GatewayActuator, error) {
 	opts := newGatewayActuatorOptions()

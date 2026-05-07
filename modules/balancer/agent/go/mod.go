@@ -19,7 +19,7 @@ type BalancerModule struct {
 
 func NewBalancerModule(
 	cfg *Config,
-	log *zap.SugaredLogger,
+	log *zap.Logger,
 ) (*BalancerModule, error) {
 	log = log.With(zap.String("module", "balancerpb.BalancerService"))
 

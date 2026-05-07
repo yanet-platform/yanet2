@@ -20,14 +20,14 @@ pub enum ModeCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct DeleteCmd {
     /// ACL config name
-    #[arg(long = "cfg", short)]
+    #[arg(long = "name", short = 'n')]
     pub config_name: String,
 }
 
 #[derive(Debug, Clone, Parser)]
 pub struct UpdateCmd {
     /// ACL config name
-    #[arg(long = "cfg", short)]
+    #[arg(long = "name", short = 'n')]
     pub config_name: String,
     /// Path to the ruleset YAML file
     #[arg(required = true, long = "rules", value_name = "PATH")]
@@ -37,7 +37,7 @@ pub struct UpdateCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct ShowCmd {
     /// ACL config name
-    #[arg(long = "cfg", short)]
+    #[arg(long = "name", short = 'n')]
     pub config_name: String,
 }
 

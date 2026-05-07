@@ -38,7 +38,7 @@ pub type LayeredChannel = AuthService<Channel>;
 #[derive(Debug, Clone, clap::Args)]
 pub struct ConnectionArgs {
     /// Gateway endpoint.
-    #[arg(long, default_value = "grpc://[::1]:8080", global = true)]
+    #[arg(long, default_value = "grpc://[::1]:8080", global = true, env = "YANET_ENDPOINT")]
     pub endpoint: String,
     /// Authentication options.
     #[command(flatten)]

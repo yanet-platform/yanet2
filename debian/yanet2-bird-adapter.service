@@ -1,0 +1,18 @@
+[Unit]
+Description=yanet2 BIRD route adapter
+After=yanet2-controlplane.service
+Wants=yanet2-controlplane.service
+StartLimitBurst=3600000
+StartLimitIntervalSec=0
+
+[Service]
+User=root
+Group=yanet
+ExecStart=/usr/bin/yanet-bird-adapter server -c /etc/yanet2/bird-adapter.yaml
+TimeoutSec=1200
+Restart=always
+RestartSec=1
+LimitCORE=infinity
+
+[Install]
+WantedBy=multi-user.target

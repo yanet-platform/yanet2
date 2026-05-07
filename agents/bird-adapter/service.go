@@ -21,8 +21,8 @@ import (
 	"github.com/yanet-platform/yanet2/agents/bird-adapter/internal/bird"
 	"github.com/yanet-platform/yanet2/agents/bird-adapter/internal/mpls"
 	"github.com/yanet-platform/yanet2/agents/bird-adapter/internal/rib"
+	routepb "github.com/yanet-platform/yanet2/agents/yanet-route-operator/operatorpb"
 	"github.com/yanet-platform/yanet2/modules/route-mpls/controlplane/routemplspb"
-	"github.com/yanet-platform/yanet2/modules/route/controlplane/routepb"
 )
 
 // levelFilterCore wraps a zapcore.Core and filters log entries by level.
