@@ -1,5 +1,6 @@
 #pragma once
 
+#include "lib/errors/errors.h"
 #include "modules/balancer/controlplane/api/inspect.h"
 
 #include <stddef.h>
@@ -30,10 +31,11 @@ struct yanet_shm;
  *
  * @param shm     Pointer to the shared memory region to use for allocations.
  * @param memory  Amount of memory (in bytes) to allocate for the agent.
+ * @param err     Error output parameter.
  * @return Newly created agent handle on success, or NULL on error.
  */
 struct balancer_agent *
-balancer_agent(struct yanet_shm *shm, size_t memory);
+balancer_agent(struct yanet_shm *shm, size_t memory, yanet_error **err);
 
 struct balancer_manager;
 
@@ -72,24 +74,20 @@ struct balancer_manager_config;
  * then registers it with the agent. The manager will be included in
  * subsequent calls to balancer_agent_managers().
  *
- * Diagnostics: On error, a message is recorded and retrievable via
- * balancer_agent_take_error().
- *
  * @param agent   Agent that will own the manager.
  * @param name    Human-readable manager name (used for identification).
  * @param config  Initial configuration for the manager.
+ * @param err     Error output parameter.
  * @return Newly created manager handle on success, or NULL on error.
  */
 struct balancer_manager *
 balancer_agent_new_manager(
 	struct balancer_agent *agent,
 	const char *name,
-	struct balancer_manager_config *config
+	struct balancer_manager_config *config,
+	yanet_error **err
 );
 
-/**
- * Named balancer inspection with name and memory usage details.
- */
 struct named_balancer_inspect {
 	const char *name;
 	struct balancer_inspect inspect;
@@ -141,21 +139,6 @@ balancer_agent_inspect(
  */
 void
 balancer_agent_inspect_free(struct agent_inspect *inspect);
-
-/**
- * Retrieve the last diagnostic error message for this agent.
- *
- * Returns the most recent error message recorded by agent operations.
- * After calling this function, the error state is cleared.
- *
- * Ownership: The returned string is heap-allocated for the caller; you must
- * free() it when no longer needed. Returns NULL if no error is available.
- *
- * @param agent Agent handle.
- * @return Null-terminated error message string to be freed by caller, or NULL.
- */
-const char *
-balancer_agent_take_error(struct balancer_agent *agent);
 
 struct dp_config;
 

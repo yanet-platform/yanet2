@@ -8,6 +8,8 @@
 
 #include "controlplane/config/registry.h"
 
+#include "lib/errors/errors.h"
+
 struct agent;
 
 struct cp_device_pipeline {
@@ -68,11 +70,16 @@ cp_device_config_init(
 	const char *type,
 	const char *name,
 	uint64_t input_pipeline_count,
-	uint64_t output_pipeline_count
+	uint64_t output_pipeline_count,
+	yanet_error **err
 );
 
 struct cp_device *
-cp_device_create(struct agent *agent, struct cp_device_config *device_config);
+cp_device_create(
+	struct agent *agent,
+	struct cp_device_config *device_config,
+	yanet_error **err
+);
 
 void
 cp_device_free(
@@ -83,7 +90,8 @@ int
 cp_device_init(
 	struct cp_device *cp_device,
 	struct agent *agent,
-	const struct cp_device_config *cp_device_config
+	const struct cp_device_config *cp_device_config,
+	yanet_error **err
 );
 
 void
@@ -106,14 +114,16 @@ struct cp_device_registry {
 int
 cp_device_registry_init(
 	struct memory_context *memory_context,
-	struct cp_device_registry *registry
+	struct cp_device_registry *registry,
+	yanet_error **err
 );
 
 int
 cp_device_registry_copy(
 	struct memory_context *memory_context,
 	struct cp_device_registry *new_device_registry,
-	struct cp_device_registry *old_device_registry
+	struct cp_device_registry *old_device_registry,
+	yanet_error **err
 );
 
 void
@@ -133,7 +143,8 @@ int
 cp_device_registry_upsert(
 	struct cp_device_registry *device_registry,
 	const char *name,
-	struct cp_device *device
+	struct cp_device *device,
+	yanet_error **err
 );
 
 int

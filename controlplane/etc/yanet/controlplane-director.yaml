@@ -13,6 +13,15 @@ gateway:
   server:
     endpoint: &gateway_endpoint "[::1]:8080"
     http_endpoint: "[::1]:8081"
+    # TLS is optional. When present both gRPC and HTTP listeners use it.
+    # The certificate's SubjectAltName must include whatever host the
+    # in-process loopback uses (defaults to the host from `endpoint`,
+    # i.e. ::1). Override via `server_name` if you need a different SNI.
+    # Cert rotation requires a director restart.
+    # tls:
+    #   cert_file: /etc/yanet/tls/server.pem
+    #   key_file:  /etc/yanet/tls/server.key
+    #   server_name: localhost
   auth:
     disabled: true
     permissions_path: /etc/yanet/auth/permissions.yaml

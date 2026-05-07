@@ -7,8 +7,8 @@
 
 #include "compiler/declare.h"
 #include "counters/counters.h"
-#include "lib/controlplane/diag/diag.h"
 
+#include "lib/errors/errors.h"
 #include "rule.h"
 #include "rules.h"
 #include "selector.h"
@@ -27,18 +27,21 @@
 #define MAX_TAG_LENGTH 240
 
 static int
-validate_tag(const char *tag) {
+validate_tag(const char *tag, yanet_error **err) {
 	if (tag == NULL) {
 		return 0; // NULL is valid (means no tracking)
 	}
 	size_t len = strnlen(tag, MAX_TAG_LENGTH + 1);
 	if (len == 0) {
-		NEW_ERROR("tag must be at least 1 character long");
+		yanet_error_add(err, "tag must be at least 1 character long");
 		return -1;
 	}
 	if (len > MAX_TAG_LENGTH) {
-		NEW_ERROR(
-			"tag length %zu exceeds maximum %d", len, MAX_TAG_LENGTH
+		yanet_error_add(
+			err,
+			"tag length %zu exceeds maximum %d",
+			len,
+			MAX_TAG_LENGTH
 		);
 		return -1;
 	}
@@ -60,31 +63,35 @@ setup_reals(
 
 static int
 setup_selector(
-	struct vs *vs, struct memory_context *mctx, struct vs_config *config
+	struct vs *vs,
+	struct memory_context *mctx,
+	struct vs_config *config,
+	yanet_error **err
 ) {
 	const struct real *reals = ADDR_OF(&vs->reals);
-	if (selector_init(&vs->selector, mctx, config->scheduler) != 0) {
-		PUSH_ERROR("failed to setup selector");
+	if (selector_init(&vs->selector, mctx, config->scheduler, err) != 0) {
+		yanet_error_add(err, "failed to initialize selector");
 		return -1;
 	}
-	if (selector_update(&vs->selector, vs->reals_count, reals) != 0) {
+	if (selector_update(&vs->selector, vs->reals_count, reals, err) != 0) {
 		selector_free(&vs->selector);
-		PUSH_ERROR("failed to setup selector reals");
+		yanet_error_add(err, "failed to update selector");
 		return -1;
 	}
 	return 0;
 }
 
 static int
-register_counter(struct vs *vs, struct counter_registry *registry) {
+register_counter(
+	struct vs *vs, struct counter_registry *registry, yanet_error **err
+) {
 	char name[60];
 	sprintf(name, "vs_%zu", vs->stable_idx);
 	vs->counter_id = counter_registry_register(
-		registry, name, sizeof(struct vs_stats) / sizeof(uint64_t)
+		registry, name, sizeof(struct vs_stats) / sizeof(uint64_t), err
 	);
 	if (vs->counter_id == (size_t)-1) {
-		PUSH_ERROR("failed to register counter in the counter registry"
-		);
+		yanet_error_add(err, "failed to register vs counter");
 		return -1;
 	}
 	return 0;
@@ -92,7 +99,10 @@ register_counter(struct vs *vs, struct counter_registry *registry) {
 
 static int
 setup_peers(
-	struct vs *vs, struct memory_context *mctx, struct vs_config *config
+	struct vs *vs,
+	struct memory_context *mctx,
+	struct vs_config *config,
+	yanet_error **err
 ) {
 	vs->peers_v4_count = config->peers_v4_count;
 	vs->peers_v6_count = config->peers_v6_count;
@@ -101,7 +111,9 @@ setup_peers(
 		mctx, sizeof(struct net4_addr) * vs->peers_v4_count
 	);
 	if (peers_v4_ptr == NULL && vs->peers_v4_count > 0) {
-		NEW_ERROR("failed to allocate memory for IPv4 peers");
+		yanet_error_add(
+			err, "failed to allocate memory for IPv4 peers"
+		);
 		return -1;
 	}
 	SET_OFFSET_OF(&vs->peers_v4, peers_v4_ptr);
@@ -117,11 +129,13 @@ setup_peers(
 		mctx, sizeof(struct net6_addr) * vs->peers_v6_count
 	);
 	if (peers_v6_ptr == NULL && vs->peers_v6_count > 0) {
-		NEW_ERROR("failed to allocate memory for IPv6 peers");
 		memory_bfree(
 			mctx,
 			peers_v4_ptr,
 			sizeof(struct net4_addr) * vs->peers_v4_count
+		);
+		yanet_error_add(
+			err, "failed to allocate memory for IPv6 peers"
 		);
 		return -1;
 	}
@@ -138,12 +152,13 @@ setup_peers(
 }
 
 static int
-setup_flags(struct vs *vs, struct named_vs_config *config) {
+setup_flags(struct vs *vs, struct named_vs_config *config, yanet_error **err) {
 	if ((config->config.flags & VS_PURE_L3_FLAG) &&
 	    config->identifier.port != 0) {
-		NEW_ERROR(
-			"PureL3 mode "
-			"requires port=0, but port=%u was specified",
+		yanet_error_add(
+			err,
+			"PureL3 mode requires port=0, but port=%u was "
+			"specified",
 			config->identifier.port
 		);
 		return -1;
@@ -153,14 +168,14 @@ setup_flags(struct vs *vs, struct named_vs_config *config) {
 }
 
 static int
-validate_net4(struct net4 *net4) {
+validate_net4(struct net4 *net4, yanet_error **err) {
 	int prev = 1;
 	for (int bit = 31; bit >= 0; --bit) {
 		int byte = (31 - bit) / 8;
 		int inner_bit = bit % 8;
 		int cur = net4->mask[byte] & (1 << inner_bit);
 		if (cur && !prev) {
-			NEW_ERROR("mask bits must be consecutive");
+			yanet_error_add(err, "mask bits must be consecutive");
 			return -1;
 		}
 		prev = cur != 0;
@@ -170,14 +185,16 @@ validate_net4(struct net4 *net4) {
 }
 
 static int
-validate_net6_half(const uint8_t *mask) { // bytes are in big-endian
+validate_net6_half(
+	const uint8_t *mask, yanet_error **err
+) { // bytes are in big-endian
 	int prev = 1;
 	for (int bit = 63; bit >= 0; --bit) {
 		int byte = (63 - bit) / 8;
 		int inner_bit = bit % 8;
 		int cur = mask[byte] & (1 << inner_bit);
 		if (cur && !prev) {
-			NEW_ERROR("mask bits must be consecutive");
+			yanet_error_add(err, "mask bits must be consecutive");
 			return -1;
 		}
 		prev = cur != 0;
@@ -186,13 +203,13 @@ validate_net6_half(const uint8_t *mask) { // bytes are in big-endian
 }
 
 static int
-validate_net6(struct net6 *net6) {
-	if (validate_net6_half(net6->mask) != 0) {
-		PUSH_ERROR("high mask bits are invalid");
+validate_net6(struct net6 *net6, yanet_error **err) {
+	if (validate_net6_half(net6->mask, err) != 0) {
+		yanet_error_add(err, "high mask bits are invalid");
 		return -1;
 	}
-	if (validate_net6_half(net6->mask + 8) != 0) {
-		PUSH_ERROR("low mask bits are invalid");
+	if (validate_net6_half(net6->mask + 8, err) != 0) {
+		yanet_error_add(err, "low mask bits are invalid");
 		return -1;
 	}
 	return 0;
@@ -207,7 +224,8 @@ fill_rule(
 	struct filter_rule *rule,
 	size_t src_idx,
 	struct allowed_sources *src,
-	struct memory_context *mctx
+	struct memory_context *mctx,
+	yanet_error **err
 ) {
 	rule->action = (uint32_t)src_idx;
 
@@ -216,8 +234,9 @@ fill_rule(
 		rule->net4.dsts = NULL;
 
 		for (size_t net_idx = 0; net_idx < src->nets_count; ++net_idx) {
-			if (validate_net4(&src->nets[net_idx].v4) != 0) {
-				PUSH_ERROR(
+			if (validate_net4(&src->nets[net_idx].v4, err) != 0) {
+				yanet_error_add(
+					err,
 					"IPv4 network at index %zu is invalid",
 					net_idx
 				);
@@ -230,7 +249,7 @@ fill_rule(
 			mctx, sizeof(struct net4) * src->nets_count
 		);
 		if (net4_srcs == NULL) {
-			NEW_ERROR("failed to allocate net4 srcs");
+			yanet_error_add(err, "failed to allocate net4 srcs");
 			return -1;
 		}
 
@@ -244,8 +263,9 @@ fill_rule(
 		rule->net6.dsts = NULL;
 
 		for (size_t net_idx = 0; net_idx < src->nets_count; ++net_idx) {
-			if (validate_net6(&src->nets[net_idx].v6) != 0) {
-				PUSH_ERROR(
+			if (validate_net6(&src->nets[net_idx].v6, err) != 0) {
+				yanet_error_add(
+					err,
 					"IPv6 network at index %zu is invalid",
 					net_idx
 				);
@@ -258,7 +278,7 @@ fill_rule(
 			mctx, sizeof(struct net6) * src->nets_count
 		);
 		if (net6_srcs == NULL) {
-			NEW_ERROR("failed to allocate net6 srcs");
+			yanet_error_add(err, "failed to allocate net6 srcs");
 			return -1;
 		}
 
@@ -275,7 +295,9 @@ fill_rule(
 		struct filter_port_range *port_srcs =
 			memory_balloc(mctx, sizeof(struct filter_port_range));
 		if (port_srcs == NULL) {
-			NEW_ERROR("failed to allocate port srcs");
+			yanet_error_add(
+				err, "failed to allocate default port range"
+			);
 			return -1;
 		}
 		port_srcs[0].from = 0;
@@ -289,7 +311,7 @@ fill_rule(
 				src->port_ranges_count
 		);
 		if (port_srcs == NULL) {
-			NEW_ERROR("failed to allocate port srcs");
+			yanet_error_add(err, "failed to allocate port ranges");
 			return -1;
 		}
 		for (size_t port_range_idx = 0;
@@ -302,7 +324,9 @@ fill_rule(
 			filter_port_range->from = port_range->from;
 			filter_port_range->to = port_range->to;
 			if (filter_port_range->from > filter_port_range->to) {
-				PUSH_ERROR("port range is invalid");
+				yanet_error_add(
+					err, "invalid port range: from > to"
+				);
 				return -1;
 			}
 		}
@@ -320,11 +344,13 @@ src_filter_rules(
 	struct vs_config *config,
 	struct filter_rule **rules,
 	size_t *rule_count,
-	struct memory_context *mctx
+	struct memory_context *mctx,
+	yanet_error **err
 ) {
 	if (vs->identifier.ip_proto != IPPROTO_IP &&
 	    vs->identifier.ip_proto != IPPROTO_IPV6) {
-		NEW_ERROR(
+		yanet_error_add(
+			err,
 			"virtual service IP protocol is incorrect: %u "
 			"(expected IPv4 %u or IPv6 %u)",
 			vs->identifier.ip_proto,
@@ -344,7 +370,7 @@ src_filter_rules(
 	struct filter_rule *r =
 		memory_balloc(mctx, sizeof(struct filter_rule) * count);
 	if (r == NULL) {
-		NEW_ERROR("failed to allocate rules");
+		yanet_error_add(err, "failed to allocate rules");
 		return -1;
 	}
 	memset(r, 0, sizeof(struct filter_rule) * count);
@@ -355,9 +381,12 @@ src_filter_rules(
 			    &r[rule_idx],
 			    rule_idx,
 			    &config->allowed_src[rule_idx],
-			    mctx
+			    mctx,
+			    err
 		    ) != 0) {
-			PUSH_ERROR("rule at index %zu is invalid", rule_idx);
+			yanet_error_add(
+				err, "rule at index %zu is invalid", rule_idx
+			);
 			// Free already allocated rules (using absolute
 			// pointers)
 			for (size_t j = 0; j < rule_idx; ++j) {
@@ -651,7 +680,8 @@ setup_acl(
 	struct vs *vs,
 	struct vs *prev_vs,
 	struct memory_context *mctx,
-	struct balancer_update_info *update_info
+	struct balancer_update_info *update_info,
+	yanet_error **err
 ) {
 	// Check if we can reuse ACL from previous VS
 	// Both current and previous VS rules have relative pointers at this
@@ -684,7 +714,7 @@ setup_acl(
 	// Need to create new ACL
 	vs->acl = memory_balloc(mctx, sizeof(struct filter));
 	if (vs->acl == NULL) {
-		PUSH_ERROR("no memory");
+		yanet_error_add(err, "no memory for ACL");
 		return -1;
 	}
 	vs->acl_reused = 0;
@@ -703,7 +733,7 @@ setup_acl(
 	const struct filter_rule **rule_ptrs = (const struct filter_rule **)
 		malloc(sizeof(struct filter_rule *) * rule_count);
 	if (rule_ptrs == NULL) {
-		PUSH_ERROR("no memory");
+		yanet_error_add(err, "no memory for rule pointers");
 		return -1;
 	}
 	for (size_t idx = 0; idx < rule_count; ++idx) {
@@ -732,7 +762,7 @@ setup_acl(
 	}
 
 	if (res != 0) {
-		NEW_ERROR("no memory");
+		yanet_error_add(err, "no memory");
 		return -1;
 	}
 
@@ -808,14 +838,16 @@ setup_acl_rules(
 	struct vs *vs,
 	struct counter_registry *counters,
 	struct vs_config *config,
-	struct memory_context *mctx
+	struct memory_context *mctx,
+	yanet_error **err
 ) {
 	// Create filter rules from config (already uses memory_balloc and
 	// relative pointers)
 	struct filter_rule *rules = NULL;
 	size_t rules_count = 0;
-	if (src_filter_rules(vs, config, &rules, &rules_count, mctx) != 0) {
-		PUSH_ERROR("failed to create filter rules");
+	if (src_filter_rules(vs, config, &rules, &rules_count, mctx, err) !=
+	    0) {
+		yanet_error_add(err, "failed to create filter rules");
 		return -1;
 	}
 
@@ -848,7 +880,9 @@ setup_acl_rules(
 	uint64_t *rule_counters =
 		memory_balloc(mctx, sizeof(uint64_t) * rules_count);
 	if (rule_counters == NULL && rules_count > 0) {
-		NEW_ERROR("failed to allocate rule counters: no memory");
+		yanet_error_add(
+			err, "failed to allocate rule counters: no memory"
+		);
 		return -1;
 	}
 
@@ -861,11 +895,8 @@ setup_acl_rules(
 		const char *rule_tag = config->allowed_src[allowed_src_idx].tag;
 
 		// Validate tag before using it
-		if (validate_tag(rule_tag) != 0) {
-			PUSH_ERROR(
-				"invalid tag at allowed_src index %u",
-				allowed_src_idx
-			);
+		if (validate_tag(rule_tag, err) != 0) {
+			yanet_error_add(err, "failed to validate tag");
 			return -1;
 		}
 
@@ -876,11 +907,12 @@ setup_acl_rules(
 				vs->stable_idx,
 				rule_tag);
 			uint64_t counter_id = counter_registry_register(
-				counters, counter_name, 1
+				counters, counter_name, 1, err
 			);
 			if (counter_id == (uint64_t)-1) {
-				NEW_ERROR("failed to register counter for "
-					  "rule: no memory");
+				yanet_error_add(
+					err, "failed to register ACL counter"
+				);
 				return -1;
 			}
 
@@ -908,40 +940,40 @@ vs_with_identifier_and_registry_idx_init(
 	struct named_vs_config *config,
 	struct counter_registry *counters,
 	struct memory_context *mctx,
-	struct balancer_update_info *update_info
+	struct balancer_update_info *update_info,
+	yanet_error **err
 ) {
-	if (setup_flags(vs, config) != 0) {
-		PUSH_ERROR("failed to setup flags");
+	if (setup_flags(vs, config, err) != 0) {
+		yanet_error_add(err, "invalid flags");
 		return -1;
 	}
 
-	if (setup_peers(vs, mctx, &config->config) != 0) {
-		PUSH_ERROR("failed to setup peers");
-		return -1;
+	if (setup_peers(vs, mctx, &config->config, err) != 0) {
+		yanet_error_add(err, "failed to setup peers");
+		goto free_nothing;
 	}
 
 	if (setup_reals(vs, &config->config, first_real_idx, reals) != 0) {
-		PUSH_ERROR("failed to setup reals");
+		yanet_error_add(err, "failed to setup reals");
 		goto free_peers;
 	}
 
-	if (setup_selector(vs, mctx, &config->config) != 0) {
-		PUSH_ERROR("failed to setup selector");
+	if (setup_selector(vs, mctx, &config->config, err) != 0) {
 		goto free_peers;
 	}
 
-	if (register_counter(vs, counters) != 0) {
-		PUSH_ERROR("failed to register counter");
+	if (register_counter(vs, counters, err) != 0) {
+		yanet_error_add(err, "failed to register counter");
 		goto free_selector;
 	}
 
-	if (setup_acl_rules(vs, counters, &config->config, mctx) != 0) {
-		PUSH_ERROR("failed to store acl rules");
+	if (setup_acl_rules(vs, counters, &config->config, mctx, err) != 0) {
+		yanet_error_add(err, "failed to setup ACL rules");
 		goto free_selector;
 	}
 
-	if (setup_acl(vs, prev_vs, mctx, update_info) != 0) {
-		PUSH_ERROR("failed to setup acl");
+	if (setup_acl(vs, prev_vs, mctx, update_info, err) != 0) {
+		yanet_error_add(err, "failed to setup ACL");
 		goto free_acl_rules;
 	}
 
@@ -965,6 +997,7 @@ free_peers:
 		sizeof(struct net6_addr) * vs->peers_v6_count
 	);
 
+free_nothing:
 	return -1;
 }
 
@@ -984,11 +1017,11 @@ vs_free(struct vs *vs, struct memory_context *mctx) {
 }
 
 int
-vs_update_reals(struct vs *vs) {
+vs_update_reals(struct vs *vs, yanet_error **err) {
 	if (selector_update(
-		    &vs->selector, vs->reals_count, ADDR_OF(&vs->reals)
+		    &vs->selector, vs->reals_count, ADDR_OF(&vs->reals), err
 	    ) != 0) {
-		PUSH_ERROR("failed to update real selector");
+		yanet_error_add(err, "failed to update selector");
 		return -1;
 	}
 	return 0;

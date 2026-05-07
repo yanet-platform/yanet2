@@ -92,6 +92,9 @@ jobs:
           - component: bird-adapter
             image: ghcr.io/yanet-platform/yanet2/bird-adapter
             dockerfile: deploy/bird-adapter.Dockerfile
+          - component: pipeline-operator
+            image: ghcr.io/yanet-platform/yanet2/pipeline-operator
+            dockerfile: deploy/yanet-pipeline-operator.Dockerfile
     steps:
       - uses: actions/checkout@v4
 

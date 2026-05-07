@@ -19,7 +19,7 @@
 
 #include "controlplane/config/cp_counter.h"
 
-#include "controlplane/config/econtext.h"
+#include "lib/errors/errors.h"
 
 struct dp_config;
 struct cp_config;
@@ -52,12 +52,10 @@ struct cp_config_gen {
 	struct cp_config_counter_storage_registry counter_storage_registry;
 };
 
-struct agent;
 /*
  * The structure contains agents attached to controplane configuration
  * zone.
  */
-struct cp_agent_registry;
 struct cp_agent_registry {
 	uint64_t count;
 	struct agent *agents[];
@@ -140,7 +138,8 @@ cp_config_update_modules(
 	struct dp_config *dp_config,
 	struct cp_config *cp_config,
 	uint64_t module_count,
-	struct cp_module **cp_modules
+	struct cp_module **cp_modules,
+	yanet_error **err
 );
 
 int
@@ -148,14 +147,16 @@ cp_config_update_functions(
 	struct dp_config *dp_config,
 	struct cp_config *cp_config,
 	uint64_t function_count,
-	struct cp_function_config **functions
+	struct cp_function_config **functions,
+	yanet_error **err
 );
 
 int
 cp_config_delete_function(
 	struct dp_config *dp_config,
 	struct cp_config *cp_config,
-	const char *name
+	const char *name,
+	yanet_error **err
 );
 
 int
@@ -163,14 +164,16 @@ cp_config_update_pipelines(
 	struct dp_config *dp_config,
 	struct cp_config *cp_config,
 	uint64_t pipeline_count,
-	struct cp_pipeline_config **pipelines
+	struct cp_pipeline_config **pipelines,
+	yanet_error **err
 );
 
 int
 cp_config_delete_pipeline(
 	struct dp_config *dp_config,
 	struct cp_config *cp_config,
-	const char *name
+	const char *name,
+	yanet_error **err
 );
 
 int
@@ -178,11 +181,12 @@ cp_config_update_devices(
 	struct dp_config *dp_config,
 	struct cp_config *cp_config,
 	uint64_t device_count,
-	struct cp_device *devices[]
+	struct cp_device *devices[],
+	yanet_error **err
 );
 
 struct cp_config_gen *
-cp_config_gen_create(struct agent *agent);
+cp_config_gen_create(struct agent *agent, yanet_error **err);
 
 static inline struct cp_module *
 cp_config_gen_get_module(struct cp_config_gen *config_gen, uint64_t index) {
@@ -309,5 +313,6 @@ cp_config_delete_module(
 	struct dp_config *dp_config,
 	struct cp_config *cp_config,
 	const char *module_type,
-	const char *module_name
+	const char *module_name,
+	yanet_error **err
 );

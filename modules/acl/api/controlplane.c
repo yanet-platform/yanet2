@@ -6,6 +6,7 @@
 
 #include "../dataplane/config.h"
 #include "common/memory_address.h"
+#include "lib/errors/errors.h"
 #include "modules/fwstate/api/fwstate_cp.h"
 #include "modules/fwstate/dataplane/config.h"
 
@@ -48,20 +49,21 @@ FILTER_COMPILER_DECLARE(
 );
 
 struct cp_module *
-acl_module_config_init(struct agent *agent, const char *name) {
+acl_module_config_init(
+	struct agent *agent, const char *name, yanet_error **err
+) {
 	struct acl_module_config *config =
 		(struct acl_module_config *)memory_balloc(
 			&agent->memory_context, sizeof(struct acl_module_config)
 		);
 	if (config == NULL) {
-		errno = ENOMEM;
+		yanet_error_add(err, "failed to allocate config");
 		return NULL;
 	}
 
-	if (cp_module_init(&config->cp_module, agent, "acl", name)) {
-		int prev_errno = errno;
+	if (cp_module_init(&config->cp_module, agent, "acl", name, err)) {
+		yanet_error_add(err, "failed to init module");
 		acl_module_config_free(&config->cp_module);
-		errno = prev_errno;
 		return NULL;
 	}
 
@@ -104,12 +106,16 @@ acl_module_config_init(struct agent *agent, const char *name) {
 		uint64_t id = counter_registry_register(
 			&config->cp_module.counter_registry,
 			counters[i].name,
-			counters[i].size
+			counters[i].size,
+			err
 		);
 		if (id == (uint64_t)-1) {
-			int prev_errno = errno;
+			yanet_error_add(
+				err,
+				"failed to register counter '%s'",
+				counters[i].name
+			);
 			acl_module_config_free(&config->cp_module);
-			errno = prev_errno;
 			return NULL;
 		}
 		*counters[i].dst = id;
@@ -416,7 +422,8 @@ int
 acl_module_config_update(
 	struct cp_module *cp_module,
 	struct acl_rule *acl_rules,
-	uint32_t rule_count
+	uint32_t rule_count,
+	yanet_error **err
 ) {
 	struct acl_module_config *config =
 		container_of(cp_module, struct acl_module_config, cp_module);
@@ -428,7 +435,8 @@ acl_module_config_update(
 			if (cp_module_link_device(
 				    cp_module,
 				    rule->devices.items[dev_idx].name,
-				    &rule->devices.items[dev_idx].id
+				    &rule->devices.items[dev_idx].id,
+				    err
 			    )) {
 				goto error;
 			}
@@ -459,7 +467,10 @@ acl_module_config_update(
 				idx
 			);
 		if ((targets[idx].counter_id = counter_registry_register(
-			     &cp_module->counter_registry, acl_rule->counter, 2
+			     &cp_module->counter_registry,
+			     acl_rule->counter,
+			     2,
+			     err
 		     )) == (uint64_t)-1) {
 			goto error_target;
 		}

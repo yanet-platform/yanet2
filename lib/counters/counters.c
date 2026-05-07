@@ -3,7 +3,7 @@
 #include "common/numutils.h"
 #include "common/strutils.h"
 
-#include "lib/controlplane/diag/diag.h"
+#include "lib/errors/errors.h"
 
 int
 counter_registry_init(
@@ -58,11 +58,14 @@ counter_registry_lookup_index(
 
 static int
 counter_registry_expand(
-	struct counter_registry *registry, uint64_t new_capacity
+	struct counter_registry *registry,
+	uint64_t new_capacity,
+	yanet_error **err
 ) {
 	uint64_t old_capacity = registry->capacity;
 	if (new_capacity < registry->capacity) {
-		NEW_ERROR(
+		yanet_error_add(
+			err,
 			"requested capacity (%lu) is smaller than current "
 			"capacity (%lu)",
 			new_capacity,
@@ -80,7 +83,7 @@ counter_registry_expand(
 		memory_context, sizeof(struct counter) * new_capacity
 	);
 	if (new_names == NULL) {
-		NEW_ERROR("failed to allocate counter names");
+		yanet_error_add(err, "failed to allocate counter names");
 		return -1;
 	}
 
@@ -109,7 +112,8 @@ counter_registry_insert(
 	struct counter_registry *registry,
 	const char *name,
 	uint64_t size,
-	uint64_t gen
+	uint64_t gen,
+	yanet_error **err
 ) {
 	if (!size)
 		return -1;
@@ -118,8 +122,10 @@ counter_registry_insert(
 		uint64_t new_capacity = registry->capacity * 2;
 		if (new_capacity == 0)
 			new_capacity = 8;
-		if (counter_registry_expand(registry, new_capacity)) {
-			PUSH_ERROR("failed to expand counter registry");
+		if (counter_registry_expand(registry, new_capacity, err)) {
+			yanet_error_add(
+				err, "failed to expand counter registry"
+			);
 			return -1;
 		}
 	}
@@ -138,7 +144,10 @@ counter_registry_insert(
 
 uint64_t
 counter_registry_register(
-	struct counter_registry *registry, const char *name, uint64_t size
+	struct counter_registry *registry,
+	const char *name,
+	uint64_t size,
+	yanet_error **err
 ) {
 	if (size == 0)
 		return -1;
@@ -154,12 +163,16 @@ counter_registry_register(
 		return idx;
 	}
 
-	return counter_registry_insert(registry, name, size, registry->gen);
+	return counter_registry_insert(
+		registry, name, size, registry->gen, err
+	);
 }
 
 int
 counter_registry_link(
-	struct counter_registry *dst, struct counter_registry *src
+	struct counter_registry *dst,
+	struct counter_registry *src,
+	yanet_error **err
 ) {
 	if (src != NULL) {
 		for (uint64_t pool_idx = 0; pool_idx < COUNTER_POOL_SIZE;
@@ -183,7 +196,8 @@ counter_registry_link(
 					dst,
 					src_name->name,
 					src_name->size,
-					src_name->gen
+					src_name->gen,
+					err
 				);
 			}
 			if (dst_idx == (uint64_t)-1) {

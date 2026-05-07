@@ -3,8 +3,9 @@
 #include "common/rcu.h"
 #include "common/ttlmap/detail/ttlmap.h"
 #include "common/ttlmap/ttlmap.h"
+#include "state/worker.h"
 
-#include "lib/controlplane/diag/diag.h"
+#include "lib/errors/errors.h"
 
 #include <arpa/inet.h>
 #include <assert.h>
@@ -29,7 +30,10 @@
 
 int
 session_table_init(
-	struct session_table *table, struct memory_context *mctx, size_t size
+	struct session_table *table,
+	struct memory_context *mctx,
+	size_t size,
+	yanet_error **err
 ) {
 	memory_context_init_from(&table->mctx, mctx, "session_table");
 
@@ -41,14 +45,16 @@ session_table_init(
 		size
 	);
 	if (res != 0) {
+		yanet_error_add(err, "failed to initialize session table map");
 		return -1;
 	}
 
 	ttlmap_init_empty(&table->maps[1]);
 
-	// Init generation count
-	// (guarded with rcu)
-	rcu_init(&table->rcu);
+	if (rcu_init(&table->rcu, &table->mctx, MAX_WORKERS_NUM) != 0) {
+		TTLMAP_FREE(&table->maps[0]);
+		return -1;
+	}
 	table->current_gen = 0;
 
 	return 0;
@@ -59,6 +65,7 @@ session_table_free(struct session_table *table) {
 	for (size_t i = 0; i < 2; ++i) {
 		TTLMAP_FREE(&table->maps[i]);
 	}
+	rcu_free(&table->rcu, &table->mctx);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -134,7 +141,10 @@ get_gen(struct session_table *table) {
 
 int
 session_table_resize(
-	struct session_table *table, size_t new_size, uint32_t now
+	struct session_table *table,
+	size_t new_size,
+	uint32_t now,
+	yanet_error **err
 ) {
 	uint32_t current_gen = get_gen(table);
 
@@ -149,8 +159,7 @@ session_table_resize(
 		new_size
 	);
 	if (init_result != 0) {
-		NEW_ERROR("failed to init new table");
-		// no memory
+		yanet_error_add(err, "failed to initialize session table map");
 		return -1;
 	}
 

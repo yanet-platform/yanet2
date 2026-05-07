@@ -17,7 +17,7 @@
 #include "lib/controlplane/agent/agent.h"
 #include "lib/controlplane/config/cp_module.h"
 #include "lib/controlplane/config/zone.h"
-#include "lib/controlplane/diag/diag.h"
+#include "lib/errors/errors.h"
 
 #include "handler/handler.h"
 #include "handler/inspect.h"
@@ -36,18 +36,11 @@ struct balancer {
 	struct balancer_handle handle;
 	struct balancer_state state;
 	struct packet_handler *handler;
-	struct diag diag;
 };
 
 struct balancer *
 balancer_handle_deref(struct balancer_handle *handle) {
 	return container_of(handle, struct balancer, handle);
-}
-
-const char *
-balancer_take_error_msg(struct balancer_handle *handle) {
-	struct balancer *balancer = balancer_handle_deref(handle);
-	return diag_take_msg(&balancer->diag);
 }
 
 const char *
@@ -59,23 +52,28 @@ balancer_name(struct balancer_handle *handle) {
 
 int
 balancer_resize_session_table(
-	struct balancer_handle *handle, size_t new_size, uint32_t now
+	struct balancer_handle *handle,
+	size_t new_size,
+	uint32_t now,
+	yanet_error **err
 ) {
 	struct balancer *balancer = balancer_handle_deref(handle);
-	return DIAG_TRY(
-		&balancer->diag,
-		balancer_state_resize_session_table(
-			&balancer->state, new_size, now
-		)
+	int res = balancer_state_resize_session_table(
+		&balancer->state, new_size, now, err
 	);
+	if (res != 0) {
+		yanet_error_add(err, "failed to resize session table");
+	}
+	return res;
 }
 
 struct balancer_handle *
 balancer_create(
-	struct agent *agent, const char *name, struct balancer_config *config
+	struct agent *agent,
+	const char *name,
+	struct balancer_config *config,
+	yanet_error **err
 ) {
-	agent_clean_error(agent);
-
 	struct dp_config *dp_config = ADDR_OF(&agent->dp_config);
 
 	struct memory_context *mctx = &agent->memory_context;
@@ -83,8 +81,8 @@ balancer_create(
 	struct balancer *balancer =
 		memory_balloc(mctx, sizeof(struct balancer));
 	if (balancer == NULL) {
-		NEW_ERROR("no memory");
-		goto error;
+		yanet_error_add(err, "failed to allocate balancer");
+		return NULL;
 	}
 	assert((uintptr_t)balancer % alignof(struct balancer) == 0);
 	memset(balancer, 0, sizeof(struct balancer));
@@ -93,39 +91,37 @@ balancer_create(
 		&balancer->state,
 		mctx,
 		dp_config->worker_count,
-		config->state.table_capacity
+		config->state.table_capacity,
+		err
 	);
 	if (init_state_result != 0) {
-		PUSH_ERROR("failed to initialize balancer state");
+		yanet_error_add(err, "failed to initialize balancer state");
+		balancer_state_free(&balancer->state);
 		memory_bfree(mctx, balancer, sizeof(struct balancer));
-		goto error;
+		return NULL;
 	}
 
 	struct packet_handler *handler = packet_handler_setup(
-		agent, name, &config->handler, &balancer->state, NULL, NULL
+		agent, name, &config->handler, &balancer->state, NULL, NULL, err
 	);
 	if (handler == NULL) {
-		PUSH_ERROR("packet handler");
+		yanet_error_add(err, "failed to setup packet handler");
 		balancer_state_free(&balancer->state);
 		memory_bfree(mctx, balancer, sizeof(struct balancer));
-		goto error;
+		return NULL;
 	}
 
 	SET_OFFSET_OF(&balancer->handler, handler);
 
 	return &balancer->handle;
-
-error:
-	diag_fill(&agent->diag);
-
-	return NULL;
 }
 
 int
 balancer_update_packet_handler(
 	struct balancer_handle *handle,
 	struct packet_handler_config *config,
-	struct balancer_update_info *update_info
+	struct balancer_update_info *update_info,
+	yanet_error **err
 ) {
 	int ret;
 
@@ -143,14 +139,18 @@ balancer_update_packet_handler(
 
 	// TODO: pass prev config here
 	struct packet_handler *handler = packet_handler_setup(
-		agent, name, config, &balancer->state, prev_handler, update_info
+		agent,
+		name,
+		config,
+		&balancer->state,
+		prev_handler,
+		update_info,
+		err
 	);
 	if (handler == NULL) {
-		PUSH_ERROR("failed to setup packet handler");
-		diag_fill(&balancer->diag);
+		yanet_error_add(err, "failed to setup packet handler");
 		ret = -1;
 	} else {
-		diag_reset(&balancer->diag);
 		SET_OFFSET_OF(&balancer->handler, handler);
 		packet_handler_free(prev_handler);
 		ret = 0;
@@ -161,15 +161,18 @@ balancer_update_packet_handler(
 
 int
 balancer_update_reals(
-	struct balancer_handle *handle, size_t count, struct real_update *update
+	struct balancer_handle *handle,
+	size_t count,
+	struct real_update *update,
+	yanet_error **err
 ) {
 	struct balancer *balancer = balancer_handle_deref(handle);
 	struct packet_handler *handler = ADDR_OF(&balancer->handler);
-	return DIAG_TRY(
-		&balancer->diag,
-		packet_handler_update_reals(handler, count, update),
-		"failed to update reals in packet handler"
-	);
+	int res = packet_handler_update_reals(handler, count, update, err);
+	if (res != 0) {
+		yanet_error_add(err, "failed to update reals");
+	}
+	return res;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -199,44 +202,40 @@ int
 balancer_stats(
 	struct balancer_handle *handle,
 	struct balancer_stats *stats,
-	struct packet_handler_ref *ref
+	struct packet_handler_ref *ref,
+	yanet_error **err
 ) {
 	struct balancer *balancer = balancer_handle_deref(handle);
 	struct packet_handler *handler = ADDR_OF(&balancer->handler);
 
 	if (ref->device == NULL) {
-		NEW_ERROR("device is required");
+		yanet_error_add(err, "device is required");
 		goto err;
 	}
 
 	if (ref->pipeline == NULL) {
-		NEW_ERROR("pipeline is required");
+		yanet_error_add(err, "pipeline is required");
 		goto err;
 	}
 
 	if (ref->function == NULL) {
-		NEW_ERROR("function is required");
+		yanet_error_add(err, "function is required");
 		goto err;
 	}
 
 	if (ref->chain == NULL) {
-		NEW_ERROR("chain is required");
+		yanet_error_add(err, "chain is required");
 		goto err;
 	}
 
-	// Reset diagnostics only after all validation passes
-	diag_reset(&balancer->diag);
-
-	int res = packet_handler_fill_stats(handler, stats, ref);
+	int res = packet_handler_fill_stats(handler, stats, ref, err);
 	if (res != 0) {
-		PUSH_ERROR("invalid balancer reference");
 		goto err;
 	}
 
 	return 0;
 
 err:
-	diag_fill(&balancer->diag);
 	return -1;
 }
 
@@ -365,11 +364,12 @@ int
 balancer_real_ph_idx(
 	struct balancer_handle *handle,
 	struct real_identifier *real,
-	struct real_ph_index *real_idx
+	struct real_ph_index *real_idx,
+	yanet_error **err
 ) {
 	struct balancer *balancer = balancer_handle_deref(handle);
 	struct packet_handler *handler = ADDR_OF(&balancer->handler);
-	return packet_handler_real_idx(handler, real, real_idx);
+	return packet_handler_real_idx(handler, real, real_idx, err);
 }
 
 void

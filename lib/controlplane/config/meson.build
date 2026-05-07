@@ -2,7 +2,7 @@ dependencies = [
   lib_counters_dep,
   lib_module_dp_dep,
   lib_pipeline_dp_dep,
-  lib_diag_dep,
+  lib_errors_dep,
 ]
 
 sources = files(
@@ -26,7 +26,7 @@ lib_config_cp = static_library(
 )
 
 lib_config_cp_dep = declare_dependency(
-  link_with: [lib_config_cp],
-  dependencies : lib_counters_dep,
+  link_with: lib_config_cp,
+  dependencies : [lib_counters_dep, lib_errors_dep],
   include_directories: yanet_libdir,
 )

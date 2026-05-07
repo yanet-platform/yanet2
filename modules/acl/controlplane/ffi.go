@@ -15,6 +15,7 @@ import (
 	"runtime"
 	"unsafe"
 
+	"github.com/yanet-platform/yanet2/bindings/go/cerrors"
 	"github.com/yanet-platform/yanet2/bindings/go/filter"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	fwstate "github.com/yanet-platform/yanet2/modules/fwstate/controlplane"
@@ -31,12 +32,10 @@ func NewModuleConfig(agent *ffi.Agent, name string) (*ModuleConfig, error) {
 	defer C.free(unsafe.Pointer(cName))
 
 	// Create a new module config using the C API
-	ptr, err := C.acl_module_config_init((*C.struct_agent)(agent.AsRawPtr()), cName)
+	var cErr *C.yanet_error
+	ptr := C.acl_module_config_init((*C.struct_agent)(agent.AsRawPtr()), cName, &cErr)
 	if ptr == nil {
-		if err != nil {
-			return nil, fmt.Errorf("failed to initialize ACL module config: %w", err)
-		}
-		return nil, fmt.Errorf("failed to initialize ACL module config: module %q not found", name)
+		return nil, fmt.Errorf("failed to initialize ACL module config: %w", cerrors.FromC(unsafe.Pointer(cErr)))
 	}
 
 	return &ModuleConfig{
@@ -107,16 +106,15 @@ func (m *ModuleConfig) Update(rules []AclRule) error {
 		cRulesPtr = &cRules[0]
 	}
 
-	rc, err := C.acl_module_config_update(
+	var cErr *C.yanet_error
+	rc := C.acl_module_config_update(
 		m.asRawPtr(),
 		cRulesPtr,
 		C.uint32_t(len(cRules)),
+		&cErr,
 	)
-	if err != nil {
-		return fmt.Errorf("failed to update config %w", err)
-	}
 	if rc != 0 {
-		return fmt.Errorf("failed to update config with return code=%d", rc)
+		return fmt.Errorf("failed to update ACL config: %w", cerrors.FromC(unsafe.Pointer(cErr)))
 	}
 	return nil
 }

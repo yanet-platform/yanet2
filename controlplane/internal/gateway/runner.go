@@ -12,7 +12,6 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/encoding/gzip"
 
 	"github.com/yanet-platform/yanet2/controlplane/internal/xgrpc"
@@ -34,6 +33,7 @@ type BackgroundBuiltInModule interface {
 type BuiltInModuleRunner struct {
 	module          BuiltInModule
 	gatewayEndpoint string
+	gatewayTLS      *TLSConfig
 	server          *grpc.Server
 	log             *zap.SugaredLogger
 }
@@ -41,6 +41,7 @@ type BuiltInModuleRunner struct {
 func NewBuiltInModuleRunner(
 	module BuiltInModule,
 	gatewayEndpoint string,
+	gatewayTLS *TLSConfig,
 	log *zap.SugaredLogger,
 ) *BuiltInModuleRunner {
 	log = log.Named(module.Name()).With(zap.String("module", module.Name()))
@@ -48,6 +49,7 @@ func NewBuiltInModuleRunner(
 	return &BuiltInModuleRunner{
 		module:          module,
 		gatewayEndpoint: gatewayEndpoint,
+		gatewayTLS:      gatewayTLS,
 		server: grpc.NewServer(
 			grpc.ChainUnaryInterceptor(xgrpc.AccessLogInterceptor(log.Desugar())),
 			grpc.MaxRecvMsgSize(1024*1024*256), grpc.MaxSendMsgSize(1024*1024*256),
@@ -116,9 +118,14 @@ func (m *BuiltInModuleRunner) listen() (net.Listener, error) {
 }
 
 func (m *BuiltInModuleRunner) register(ctx context.Context, addr net.Addr) error {
+	creds, err := transportCredentials(m.gatewayTLS, m.gatewayEndpoint)
+	if err != nil {
+		return fmt.Errorf("failed to create loopback TLS for gateway: %w", err)
+	}
+
 	gatewayConn, err := grpc.NewClient(
 		m.gatewayEndpoint,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithTransportCredentials(creds),
 		grpc.WithDefaultCallOptions(grpc.UseCompressor(gzip.Name)),
 	)
 	if err != nil {

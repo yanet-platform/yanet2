@@ -6,8 +6,8 @@
 #include "handler.h"
 
 #include "api/counter.h"
+#include "lib/errors/errors.h"
 
-#include "lib/controlplane/diag/diag.h"
 #include "vs.h"
 #include <stdlib.h>
 
@@ -23,15 +23,16 @@ const char *l4_module_counter_name = "l4";
 ////////////////////////////////////////////////////////////////////////////////
 
 uint64_t
-register_common_counter(struct counter_registry *registry) {
+register_common_counter(struct counter_registry *registry, yanet_error **err) {
 	uint64_t res = counter_registry_register(
 		registry,
 		common_module_counter_name,
-		sizeof(struct balancer_common_stats) / sizeof(uint64_t)
+		sizeof(struct balancer_common_stats) / sizeof(uint64_t),
+		err
 	);
 
 	if (res == (uint64_t)-1) {
-		PUSH_ERROR("failed to register counter in registry");
+		yanet_error_add(err, "failed to register common counter");
 		return -1;
 	}
 
@@ -39,15 +40,16 @@ register_common_counter(struct counter_registry *registry) {
 }
 
 uint64_t
-register_icmp_v4_counter(struct counter_registry *registry) {
+register_icmp_v4_counter(struct counter_registry *registry, yanet_error **err) {
 	uint64_t res = counter_registry_register(
 		registry,
 		icmp_v4_module_counter_name,
-		sizeof(struct balancer_icmp_stats) / sizeof(uint64_t)
+		sizeof(struct balancer_icmp_stats) / sizeof(uint64_t),
+		err
 	);
 
 	if (res == (uint64_t)-1) {
-		PUSH_ERROR("failed to register counter in registry");
+		yanet_error_add(err, "failed to register ICMPv4 counter");
 		return -1;
 	}
 
@@ -55,15 +57,16 @@ register_icmp_v4_counter(struct counter_registry *registry) {
 }
 
 uint64_t
-register_icmp_v6_counter(struct counter_registry *registry) {
+register_icmp_v6_counter(struct counter_registry *registry, yanet_error **err) {
 	uint64_t res = counter_registry_register(
 		registry,
 		icmp_v6_module_counter_name,
-		sizeof(struct balancer_icmp_stats) / sizeof(uint64_t)
+		sizeof(struct balancer_icmp_stats) / sizeof(uint64_t),
+		err
 	);
 
 	if (res == (uint64_t)-1) {
-		PUSH_ERROR("failed to register counter in registry");
+		yanet_error_add(err, "failed to register ICMPv6 counter");
 		return -1;
 	}
 
@@ -71,15 +74,16 @@ register_icmp_v6_counter(struct counter_registry *registry) {
 }
 
 uint64_t
-register_l4_counter(struct counter_registry *registry) {
+register_l4_counter(struct counter_registry *registry, yanet_error **err) {
 	uint64_t res = counter_registry_register(
 		registry,
 		l4_module_counter_name,
-		sizeof(struct balancer_l4_stats) / sizeof(uint64_t)
+		sizeof(struct balancer_l4_stats) / sizeof(uint64_t),
+		err
 	);
 
 	if (res == (uint64_t)-1) {
-		PUSH_ERROR("failed to register counter in registry");
+		yanet_error_add(err, "failed to register L4 counter");
 		return -1;
 	}
 
@@ -297,7 +301,8 @@ int
 packet_handler_fill_stats(
 	struct packet_handler *handler,
 	struct balancer_stats *stats,
-	struct packet_handler_ref *ref
+	struct packet_handler_ref *ref,
+	yanet_error **err
 ) {
 	struct agent *agent = ADDR_OF(&handler->cp_module.agent);
 	struct dp_config *dp_config = ADDR_OF(&agent->dp_config);
@@ -316,7 +321,7 @@ packet_handler_fill_stats(
 		(size_t)-1
 	);
 	if (counter_handles == NULL) {
-		NEW_ERROR("failed to find stats");
+		yanet_error_add(err, "failed to get module counters");
 		return -1;
 	}
 

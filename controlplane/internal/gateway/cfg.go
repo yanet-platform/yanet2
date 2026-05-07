@@ -21,6 +21,9 @@ type ServerConfig struct {
 	// HTTPEndpoint is the endpoint for the HTTP server that provides
 	// access to gRPC services for web clients.
 	HTTPEndpoint string `yaml:"http_endpoint"`
+	// TLS configures TLS for both gRPC and HTTP listeners. When nil,
+	// both listen in plaintext.
+	TLS *TLSConfig `yaml:"tls,omitempty"`
 }
 
 func DefaultConfig() *Config {

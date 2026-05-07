@@ -144,7 +144,11 @@ func (a *BalancerAgent) Inspect() *balancerpb.AgentInspect {
 
 func (a *BalancerAgent) Metrics() ([]*commonpb.Metric, error) {
 	dpConfig := a.handle.DPConfig()
-	positions := dpConfig.AllModulePositions("balancer")
+	positionsIter := dpConfig.AllModulePositions("balancer")
+	positions := make([]yanet.ModuleReference, 0)
+	for position := range positionsIter {
+		positions = append(positions, position)
+	}
 
 	managers := make([]*BalancerManager, 0, len(positions))
 	{
@@ -208,7 +212,11 @@ func (a *BalancerAgent) StatsEntries(
 	refFilter *balancerpb.PacketHandlerRef,
 ) ([]*balancerpb.StatsEntry, error) {
 	dpConfig := a.handle.DPConfig()
-	positions := dpConfig.AllModulePositions("balancer")
+	positionsIter := dpConfig.AllModulePositions("balancer")
+	positions := make([]yanet.ModuleReference, 0)
+	for position := range positionsIter {
+		positions = append(positions, position)
+	}
 
 	// Snapshot managers under lock to avoid holding agent mutex during per-position stats reads.
 	managersByName := make(map[string]*BalancerManager, len(a.managers))

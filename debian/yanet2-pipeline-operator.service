@@ -1,0 +1,19 @@
+[Unit]
+Description=yanet2 pipeline operator
+After=yanet2-controlplane.service
+Wants=yanet2-controlplane.service
+StartLimitBurst=3600000
+StartLimitIntervalSec=0
+
+[Service]
+User=root
+Group=yanet
+
+ExecStart=/usr/bin/yanet-pipeline-operator -c /etc/yanet2/yanet-pipeline-operator.yaml
+TimeoutSec=1200
+Restart=always
+RestartSec=1
+LimitCORE=infinity
+
+[Install]
+WantedBy=multi-user.target

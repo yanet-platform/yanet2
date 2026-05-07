@@ -35,6 +35,7 @@
 #include "dataplane/nat64dp.h"
 #include "lib/dataplane/module/packet_front.h"
 #include "lib/dataplane/packet/data.h"
+#include "lib/dataplane/pipeline/econtext.h"
 #include "logging/log.h"
 #include "test.h"
 

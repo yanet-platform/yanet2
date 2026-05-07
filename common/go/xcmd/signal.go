@@ -15,6 +15,11 @@ func (m Interrupted) Error() string {
 	return m.String()
 }
 
+func (m Interrupted) Is(target error) bool {
+	_, ok := target.(Interrupted)
+	return ok
+}
+
 // WaitInterrupted blocks until either SIGINT or SIGTERM signal is received or
 // the provided context is canceled.
 func WaitInterrupted(ctx context.Context) error {

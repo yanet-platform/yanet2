@@ -147,8 +147,8 @@ subdir('devices')
 subdir('dataplane')
 
 if not dataplane_only
-  subdir('agents')
   subdir('controlplane')
+  subdir('agents')
   subdir('mock')
   subdir('tests')
 endif

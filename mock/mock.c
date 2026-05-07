@@ -13,6 +13,8 @@
 #include "controlplane/agent/agent.h"
 #include "dataplane/config/zone.h"
 #include "lib/controlplane/config/zone.h"
+#include "lib/errors/errors.h"
+#include "logging/log.h"
 #include "worker.h"
 #include "worker_mempool.h"
 
@@ -211,7 +213,13 @@ dataplane_initialize(
 	SET_OFFSET_OF(&agent.dp_config, dp_config);
 	SET_OFFSET_OF(&agent.cp_config, cp_config);
 
-	struct cp_config_gen *cp_config_gen = cp_config_gen_create(&agent);
+	yanet_error *err = NULL;
+	struct cp_config_gen *cp_config_gen =
+		cp_config_gen_create(&agent, &err);
+	if (cp_config_gen == NULL) {
+		yanet_error_free(err);
+		return -1;
+	}
 	SET_OFFSET_OF(&cp_config->cp_config_gen, cp_config_gen);
 
 	struct dp_worker **workers_array = memory_balloc(
@@ -246,7 +254,14 @@ dataplane_initialize(
 		dp_config->worker_count
 	);
 
-	counter_registry_link(&dp_config->worker_counters, NULL);
+	err = NULL;
+	if (counter_registry_link(&dp_config->worker_counters, NULL, &err)) {
+		LOG(ERROR,
+		    "failed to link counter registry: %s",
+		    yanet_error_message(err));
+		yanet_error_free(err);
+		return -1;
+	}
 
 	*res_dp_config = dp_config;
 	*res_cp_config = cp_config;

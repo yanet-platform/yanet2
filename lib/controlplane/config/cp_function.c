@@ -4,7 +4,8 @@
 
 #include "controlplane/config/cp_chain.h"
 #include "controlplane/config/zone.h"
-#include "lib/controlplane/diag/diag.h"
+
+#include "lib/errors/errors.h"
 
 #include <string.h>
 
@@ -19,14 +20,16 @@ cp_function_create(
 	struct memory_context *memory_context,
 	struct dp_config *dp_config,
 	struct cp_config_gen *cp_config_gen,
-	struct cp_function_config *cp_function_config
+	struct cp_function_config *cp_function_config,
+	yanet_error **err
 ) {
 	const size_t alloc_size =
 		cp_function_alloc_size(cp_function_config->chain_count);
 	struct cp_function *new_function =
 		(struct cp_function *)memory_balloc(memory_context, alloc_size);
 	if (new_function == NULL) {
-		NEW_ERROR(
+		yanet_error_add(
+			err,
 			"failed to allocate memory for function '%s'",
 			cp_function_config->name
 		);
@@ -45,8 +48,10 @@ cp_function_create(
 	if (counter_registry_init(
 		    &new_function->counter_registry, memory_context, 0
 	    )) {
-		NEW_ERROR(
-			"failed to initialize counter registry for function "
+		yanet_error_add(
+			err,
+			"failed to initialize counter registry for "
+			"function "
 			"'%s'",
 			cp_function_config->name
 		);
@@ -54,44 +59,52 @@ cp_function_create(
 	}
 
 	new_function->counter_packet_in_count = counter_registry_register(
-		&new_function->counter_registry, "input", 1
+		&new_function->counter_registry, "input", 1, err
 	);
 	if (new_function->counter_packet_in_count == COUNTER_INVALID) {
-		NEW_ERROR(
-			"failed to register 'input' counter for function '%s'",
+		yanet_error_add(
+			err,
+			"failed to register 'input' counter for "
+			"function '%s'",
 			cp_function_config->name
 		);
 		goto error;
 	}
 
 	new_function->counter_packet_out_count = counter_registry_register(
-		&new_function->counter_registry, "output", 1
+		&new_function->counter_registry, "output", 1, err
 	);
 	if (new_function->counter_packet_out_count == COUNTER_INVALID) {
-		NEW_ERROR(
-			"failed to register 'output' counter for function '%s'",
+		yanet_error_add(
+			err,
+			"failed to register 'output' counter for "
+			"function '%s'",
 			cp_function_config->name
 		);
 		goto error;
 	}
 
 	new_function->counter_packet_drop_count = counter_registry_register(
-		&new_function->counter_registry, "drop", 1
+		&new_function->counter_registry, "drop", 1, err
 	);
 	if (new_function->counter_packet_drop_count == COUNTER_INVALID) {
-		NEW_ERROR(
-			"failed to register 'drop' counter for function '%s'",
+		yanet_error_add(
+			err,
+			"failed to register 'drop' counter for "
+			"function '%s'",
 			cp_function_config->name
 		);
 		goto error;
 	}
 
 	new_function->counter_packet_in_bytes = counter_registry_register(
-		&new_function->counter_registry, "input_bytes", 1
+		&new_function->counter_registry, "input_bytes", 1, err
 	);
 	if (new_function->counter_packet_in_bytes == COUNTER_INVALID) {
-		NEW_ERROR(
-			"failed to register 'input_bytes' counter for function "
+		yanet_error_add(
+			err,
+			"failed to register 'input_bytes' counter for "
+			"function "
 			"'%s'",
 			cp_function_config->name
 		);
@@ -99,10 +112,11 @@ cp_function_create(
 	}
 
 	new_function->counter_packet_out_bytes = counter_registry_register(
-		&new_function->counter_registry, "output_bytes", 1
+		&new_function->counter_registry, "output_bytes", 1, err
 	);
 	if (new_function->counter_packet_out_bytes == COUNTER_INVALID) {
-		NEW_ERROR(
+		yanet_error_add(
+			err,
 			"failed to register 'output_bytes' counter for "
 			"function "
 			"'%s'",
@@ -112,11 +126,13 @@ cp_function_create(
 	}
 
 	new_function->counter_packet_drop_bytes = counter_registry_register(
-		&new_function->counter_registry, "drop_bytes", 1
+		&new_function->counter_registry, "drop_bytes", 1, err
 	);
 	if (new_function->counter_packet_drop_bytes == COUNTER_INVALID) {
-		NEW_ERROR(
-			"failed to register 'drop_bytes' counter for function "
+		yanet_error_add(
+			err,
+			"failed to register 'drop_bytes' counter for "
+			"function "
 			"'%s'",
 			cp_function_config->name
 		);
@@ -124,11 +140,13 @@ cp_function_create(
 	}
 
 	new_function->counter_packet_in_hist = counter_registry_register(
-		&new_function->counter_registry, "input histogram", 8
+		&new_function->counter_registry, "input histogram", 8, err
 	);
 	if (new_function->counter_packet_in_hist == COUNTER_INVALID) {
-		NEW_ERROR(
-			"failed to register 'input histogram' counter for "
+		yanet_error_add(
+			err,
+			"failed to register 'input histogram' counter "
+			"for "
 			"function '%s'",
 			cp_function_config->name
 		);
@@ -143,12 +161,14 @@ cp_function_create(
 			memory_context,
 			dp_config,
 			cp_config_gen,
-			cp_function_config->chains[chain_idx].chain
+			cp_function_config->chains[chain_idx].chain,
+			err
 		);
 
 		if (new_chain == NULL) {
-			PUSH_ERROR(
-				"in cp_function_create for function '%s'",
+			yanet_error_add(
+				err,
+				"failed to create chain for function '%s'",
 				cp_function_config->name
 			);
 			goto error;
@@ -195,12 +215,13 @@ cp_function_free(
 int
 cp_function_registry_init(
 	struct memory_context *memory_context,
-	struct cp_function_registry *new_function_registry
+	struct cp_function_registry *new_function_registry,
+	yanet_error **err
 ) {
 	if (registry_init(
 		    memory_context, &new_function_registry->registry, 8
 	    )) {
-		NEW_ERROR("failed to initialize function registry");
+		yanet_error_add(err, "failed to initialize function registry");
 		return -1;
 	}
 
@@ -212,14 +233,15 @@ int
 cp_function_registry_copy(
 	struct memory_context *memory_context,
 	struct cp_function_registry *new_function_registry,
-	struct cp_function_registry *old_function_registry
+	struct cp_function_registry *old_function_registry,
+	yanet_error **err
 ) {
 	if (registry_copy(
 		    memory_context,
 		    &new_function_registry->registry,
 		    &old_function_registry->registry
 	    )) {
-		NEW_ERROR("failed to copy function registry");
+		yanet_error_add(err, "failed to copy function registry");
 		return -1;
 	};
 
@@ -305,7 +327,8 @@ int
 cp_function_registry_upsert(
 	struct cp_function_registry *function_registry,
 	const char *name,
-	struct cp_function *new_function
+	struct cp_function *new_function,
+	yanet_error **err
 ) {
 	struct cp_function *old_function =
 		cp_function_registry_lookup(function_registry, name);
@@ -313,12 +336,10 @@ cp_function_registry_upsert(
 	if (counter_registry_link(
 		    &new_function->counter_registry,
 		    (old_function != NULL) ? &old_function->counter_registry
-					   : NULL
+					   : NULL,
+		    err
 	    )) {
-		NEW_ERROR(
-			"failed to link counter registry for function '%s'",
-			name
-		);
+		yanet_error_add(err, "failed to link counter registry");
 		return -1;
 	}
 
@@ -342,48 +363,28 @@ cp_function_registry_upsert(
 				break;
 			}
 		}
+		// TODO: unlink on fail?
 		counter_registry_link(
 			&new_chain->counter_registry,
 			(old_chain != NULL) ? &old_chain->counter_registry
-					    : NULL
+					    : NULL,
+			err
 		);
 	}
 
-	for (uint64_t idx = 0; idx < new_function->chain_count; ++idx) {
-		struct cp_chain *new_chain =
-			ADDR_OF(&new_function->chains[idx].cp_chain);
-
-		struct cp_chain *old_chain = NULL;
-		for (uint64_t idx = 0;
-		     old_function != NULL && idx < old_function->chain_count;
-		     ++idx) {
-			if (!strncmp(
-				    new_chain->name,
-				    ADDR_OF(&old_function->chains[idx].cp_chain)
-					    ->name,
-				    CP_CHAIN_NAME_LEN
-			    )) {
-				old_chain = ADDR_OF(
-					&old_function->chains[idx].cp_chain
-				);
-				break;
-			}
-		}
-		counter_registry_link(
-			&new_chain->counter_registry,
-			(old_chain != NULL) ? &old_chain->counter_registry
-					    : NULL
-		);
+	if (registry_replace(
+		    &function_registry->registry,
+		    cp_function_registry_item_cmp,
+		    name,
+		    &new_function->config_item,
+		    cp_function_registry_item_free_cb,
+		    ADDR_OF(&function_registry->memory_context)
+	    )) {
+		yanet_error_add(err, "failed to replace function in registry");
+		return -1;
 	}
 
-	return registry_replace(
-		&function_registry->registry,
-		cp_function_registry_item_cmp,
-		name,
-		&new_function->config_item,
-		cp_function_registry_item_free_cb,
-		ADDR_OF(&function_registry->memory_context)
-	);
+	return 0;
 }
 
 int

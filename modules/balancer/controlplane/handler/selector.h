@@ -8,6 +8,7 @@
 #include "common/rcu.h"
 
 #include "api/vs.h"
+#include "lib/errors/errors.h"
 #include "state/worker.h"
 
 #include "real.h"
@@ -64,7 +65,8 @@ int
 selector_init(
 	struct real_selector *selector,
 	struct memory_context *mctx,
-	enum vs_scheduler scheduler
+	enum vs_scheduler scheduler,
+	yanet_error **err
 );
 
 /**
@@ -81,7 +83,8 @@ int
 selector_update(
 	struct real_selector *selector,
 	size_t reals_count,
-	const struct real *reals
+	const struct real *reals,
+	yanet_error **err
 );
 
 static inline bool

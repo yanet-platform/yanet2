@@ -14,6 +14,7 @@
 #include "dataplane/pipeline/pipeline.h"
 #include "lib/dataplane/module/packet_front.h"
 #include "lib/dataplane/packet/data.h"
+#include "lib/dataplane/pipeline/econtext.h"
 
 struct route_module {
 	struct module module;

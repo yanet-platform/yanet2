@@ -2,6 +2,8 @@
 
 #include "common/memory.h"
 
+#include "lib/errors/errors.h"
+
 #include "session_table.h"
 
 #include "api/inspect.h"
@@ -31,7 +33,8 @@ balancer_state_init(
 	struct balancer_state *state,
 	struct memory_context *mctx,
 	size_t workers,
-	size_t table_size
+	size_t table_size,
+	yanet_error **err
 );
 
 /**
@@ -47,7 +50,10 @@ balancer_state_free(struct balancer_state *state);
  */
 int
 balancer_state_resize_session_table(
-	struct balancer_state *state, size_t new_size, uint32_t now
+	struct balancer_state *state,
+	size_t new_size,
+	uint32_t now,
+	yanet_error **err
 );
 
 // TODO: docs

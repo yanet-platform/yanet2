@@ -18,6 +18,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/yanet-platform/yanet2/bindings/go/cerrors"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 )
 
@@ -104,9 +105,10 @@ func NewModuleConfig(agent *ffi.Agent, name string) (*ModuleConfig, error) {
 	defer C.free(unsafe.Pointer(cName))
 
 	// Create a new module config using the C API
-	ptr, err := C.pdump_module_config_create((*C.struct_agent)(agent.AsRawPtr()), cName)
+	var cErr *C.yanet_error
+	ptr := C.pdump_module_config_create((*C.struct_agent)(agent.AsRawPtr()), cName, &cErr)
 	if ptr == nil {
-		return nil, errors.Join(fmt.Errorf("failed to create module config: module %q not found", name), err)
+		return nil, fmt.Errorf("failed to create module config: %w", cerrors.FromC(unsafe.Pointer(cErr)))
 	}
 
 	return &ModuleConfig{

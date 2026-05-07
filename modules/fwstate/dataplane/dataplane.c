@@ -14,6 +14,7 @@
 #include "lib/dataplane/module/packet_front.h"
 #include "lib/dataplane/packet/data.h"
 #include "lib/dataplane/packet/packet.h"
+#include "lib/dataplane/pipeline/econtext.h"
 #include "lib/dataplane/time/clock.h"
 #include "logging/log.h"
 
