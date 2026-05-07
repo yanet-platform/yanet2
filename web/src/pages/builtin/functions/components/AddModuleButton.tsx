@@ -9,7 +9,7 @@ interface AddModuleButtonProps {
  */
 export const AddModuleButton: React.FC<AddModuleButtonProps> = ({ onClick }) => (
     <button
-        className="fng-add-module-btn"
+        className="fn-add-module-btn"
         onClick={onClick}
         type="button"
         title="Add module"

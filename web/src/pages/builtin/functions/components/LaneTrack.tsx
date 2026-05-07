@@ -1,10 +1,7 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import type { Module, DragPayload } from '../types';
-import { getDragPayload } from '../hooks/useDragState';
+import { getDragPayload, InsertSlot, Endpoint, FlowLink } from '../../_shared/lane-editor';
 import { ModuleCard } from './ModuleCard';
-import { InsertSlot } from './InsertSlot';
-import { Endpoint } from './Endpoint';
-import { FlowLink } from './FlowLink';
 import { AddModuleButton } from './AddModuleButton';
 import type { InterpolatedCounterData } from '../../../../hooks';
 
@@ -162,8 +159,8 @@ export const LaneTrack: React.FC<LaneTrackProps> = ({
     return (
         <div
             className={[
-                'fng-lane-track',
-                isActiveDrag && isCrossFunction ? 'fng-lane-track--reject' : '',
+                'fn-lane-track',
+                isActiveDrag && isCrossFunction ? 'fn-lane-track--reject' : '',
             ].filter(Boolean).join(' ')}
             ref={containerRef}
             onDragOver={handleDragOver}
@@ -204,7 +201,7 @@ export const LaneTrack: React.FC<LaneTrackProps> = ({
             {modules.length === 0 && (
                 <>
                     <FlowLink />
-                    <div className="fng-lane-track__empty">
+                    <div className="fn-lane-track__empty">
                         passthrough
                     </div>
                 </>

@@ -7,7 +7,6 @@ import { PAGE_IDS, SidebarContext } from './types';
 
 const importInspect = () => import('./pages/builtin/inspect/InspectPage');
 const importFunctions = () => import('./pages/builtin/functions/FunctionsPage');
-const importFunctionsNg = () => import('./pages/builtin/functions-ng/FunctionsNgPage');
 const importPipelines = () => import('./pages/builtin/pipelines/PipelinesPage');
 const importDevices = () => import('./pages/builtin/devices/DevicesPage');
 const importForward = () => import('./pages/modules/forward/ForwardPage');
@@ -21,7 +20,6 @@ const importNeighbours = () => import('./pages/operators/neighbours/NeighboursPa
 const pageImporters = [
     importInspect,
     importFunctions,
-    importFunctionsNg,
     importPipelines,
     importDevices,
     importForward,
@@ -35,7 +33,6 @@ const pageImporters = [
 
 const InspectPage = lazy(importInspect);
 const FunctionsPage = lazy(importFunctions);
-const FunctionsNgPage = lazy(importFunctionsNg);
 const PipelinesPage = lazy(importPipelines);
 const DevicesPage = lazy(importDevices);
 const ForwardPage = lazy(importForward);
@@ -143,7 +140,7 @@ const AppContent = (): React.JSX.Element => {
                             <Route path="/" element={<Navigate to="/builtin/inspect" replace />} />
                             <Route path="/builtin/inspect" element={<InspectPage />} />
                             <Route path="/builtin/functions" element={<FunctionsPage />} />
-                            <Route path="/builtin/functions-ng" element={<FunctionsNgPage />} />
+                            <Route path="/builtin/functions-ng" element={<Navigate to="/builtin/functions" replace />} />
                             <Route path="/builtin/pipelines" element={<PipelinesPage />} />
                             <Route path="/builtin/devices" element={<DevicesPage />} />
                             <Route path="/modules/forward" element={<ForwardPage />} />

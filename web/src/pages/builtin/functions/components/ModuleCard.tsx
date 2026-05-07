@@ -2,9 +2,8 @@ import React, { memo, useCallback } from 'react';
 import type { Module, DragPayload } from '../types';
 import { metaFor } from '../moduleMeta';
 import { InlineEdit } from './InlineEdit';
-import { Sparkline } from './Sparkline';
+import { Sparkline, useSparklineHistory } from '../../_shared/lane-editor';
 import { formatPps } from '../../../../utils';
-import { useSparklineHistory } from '../hooks/useSparklineHistory';
 import type { InterpolatedCounterData } from '../../../../hooks';
 
 const MODULE_NAME_REGEX = /^[a-z0-9_-]+$/;
@@ -96,16 +95,16 @@ export const ModuleCard: React.FC<ModuleCardProps> = memo(({
     }, [siblingNames, module.name]);
 
     const borderColor = isInvalidDragTarget
-        ? 'var(--fng-danger)'
-        : 'var(--fng-line)';
+        ? 'var(--fn-danger)'
+        : 'var(--fn-line)';
 
     return (
         <div
             className={[
-                'fng-module-card',
-                isDragging ? 'fng-module-card--dragging' : '',
-                isSourceDuringDrag ? 'fng-module-card--drag-source' : '',
-                isInvalidDragTarget ? 'fng-module-card--invalid-target' : '',
+                'fn-module-card',
+                isDragging ? 'fn-module-card--dragging' : '',
+                isSourceDuringDrag ? 'fn-module-card--drag-source' : '',
+                isInvalidDragTarget ? 'fn-module-card--invalid-target' : '',
             ].filter(Boolean).join(' ')}
             style={{ borderColor }}
             draggable
@@ -115,13 +114,13 @@ export const ModuleCard: React.FC<ModuleCardProps> = memo(({
             title={isSourceDuringDrag ? 'Drop here to cancel' : undefined}
         >
             <div
-                className="fng-module-card__accent-bar"
+                className="fn-module-card__accent-bar"
                 style={{ background: meta.color }}
             />
-            <div className="fng-module-card__content">
-                <div className="fng-module-card__top-row">
+            <div className="fn-module-card__content">
+                <div className="fn-module-card__top-row">
                     <span
-                        className="fng-module-card__type-chip"
+                        className="fn-module-card__type-chip"
                         style={{
                             background: `${meta.color}1f`,
                             color: meta.color,
@@ -130,7 +129,7 @@ export const ModuleCard: React.FC<ModuleCardProps> = memo(({
                     >
                         {module.type}
                     </span>
-                    <div className="fng-module-card__name">
+                    <div className="fn-module-card__name">
                         <InlineEdit
                             value={module.name}
                             onChange={onRename}
@@ -140,7 +139,7 @@ export const ModuleCard: React.FC<ModuleCardProps> = memo(({
                         />
                     </div>
                     <button
-                        className="fng-module-card__kebab"
+                        className="fn-module-card__kebab"
                         onClick={e => { e.stopPropagation(); onOpenDrawer(); }}
                         type="button"
                         title="Module options"
@@ -149,16 +148,16 @@ export const ModuleCard: React.FC<ModuleCardProps> = memo(({
                         <KebabIcon />
                     </button>
                 </div>
-                <div className="fng-module-card__sparkline-row">
+                <div className="fn-module-card__sparkline-row">
                     <Sparkline
                         data={sparklineData}
                         width={120}
                         height={15}
                         color={meta.color}
                     />
-                    <span className="fng-module-card__counter">
+                    <span className="fn-module-card__counter">
                         {counter ? formatPps(counter.pps) : '— pps'}{' '}
-                        <span className="fng-module-card__counter-unit"></span>
+                        <span className="fn-module-card__counter-unit"></span>
                     </span>
                 </div>
             </div>

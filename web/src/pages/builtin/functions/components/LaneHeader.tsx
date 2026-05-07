@@ -50,11 +50,11 @@ export const LaneHeader: React.FC<LaneHeaderProps> = ({
     }, [chain.name, siblingChainNames]);
 
     return (
-        <div className="fng-lane-header" onClick={onSelect}>
-            <div className="fng-lane-header__name-row">
-                <div className="fng-lane-header__accent-bar" />
+        <div className="fn-lane-header" onClick={onSelect}>
+            <div className="fn-lane-header__name-row">
+                <div className="fn-lane-header__accent-bar" />
                 <div
-                    className="fng-lane-header__name"
+                    className="fn-lane-header__name"
                     onClick={e => e.stopPropagation()}
                 >
                     <InlineEdit
@@ -65,17 +65,17 @@ export const LaneHeader: React.FC<LaneHeaderProps> = ({
                     />
                 </div>
             </div>
-            <div className="fng-lane-header__weight-row">
+            <div className="fn-lane-header__weight-row">
                 <WeightBadge weight={chain.weight} onChange={onWeightChange} />
-                <span className="fng-lane-header__share">{share.toFixed(0)}% of traffic</span>
+                <span className="fn-lane-header__share">{share.toFixed(0)}% of traffic</span>
             </div>
-            <div className="fng-lane-header__share-bar" title={`${share.toFixed(1)}%`}>
+            <div className="fn-lane-header__share-bar" title={`${share.toFixed(1)}%`}>
                 <div
-                    className="fng-lane-header__share-fill"
+                    className="fn-lane-header__share-fill"
                     style={{ width: `${share}%` }}
                 />
             </div>
-            <div className="fng-lane-header__pps">
+            <div className="fn-lane-header__pps">
                 {aggCounter ? `${formatPps(aggCounter.pps)}` : '— pps'}
             </div>
         </div>

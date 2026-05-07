@@ -37,9 +37,9 @@ export const WeightBadge: React.FC<WeightBadgeProps> = ({ weight, onChange }) =>
     }, [commit]);
 
     return (
-        <span className="fng-weight-badge-wrapper">
+        <span className="fn-weight-badge-wrapper">
             <button
-                className="fng-weight-badge"
+                className="fn-weight-badge"
                 onClick={e => { e.stopPropagation(); openPopover(); }}
                 title="Click to change weight"
                 type="button"
@@ -47,11 +47,11 @@ export const WeightBadge: React.FC<WeightBadgeProps> = ({ weight, onChange }) =>
                 ×{weight}
             </button>
             {open && (
-                <div className="fng-weight-popover">
-                    <label className="fng-weight-popover__label">Weight</label>
+                <div className="fn-weight-popover">
+                    <label className="fn-weight-popover__label">Weight</label>
                     <input
                         ref={inputRef}
-                        className="fng-weight-popover__input"
+                        className="fn-weight-popover__input"
                         type="number"
                         min={0}
                         max={1000}

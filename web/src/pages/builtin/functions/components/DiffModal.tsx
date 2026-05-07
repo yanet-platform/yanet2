@@ -62,7 +62,7 @@ const CELL_STYLE: React.CSSProperties = {
     flex: 1,
     minWidth: 0,
     overflowX: 'auto',
-    fontFamily: 'var(--fng-font-mono, ui-monospace, monospace)',
+    fontFamily: 'var(--fn-font-mono, ui-monospace, monospace)',
     fontSize: 12,
     lineHeight: '1.6',
     whiteSpace: 'pre',
@@ -105,7 +105,7 @@ const SideBySideDiff = ({ changes }: { changes: Change[] }): React.JSX.Element =
     return (
         <div style={{
             display: 'flex',
-            fontFamily: 'var(--fng-font-mono, ui-monospace, monospace)',
+            fontFamily: 'var(--fn-font-mono, ui-monospace, monospace)',
             fontSize: 12,
             lineHeight: '1.6',
             border: '1px solid var(--g-color-line-generic)',
@@ -218,18 +218,18 @@ export const DiffModal: React.FC<DiffModalProps> = ({
             open
             onClose={onClose}
             size="l"
-            className="fng-diff-dialog"
+            className="fn-diff-dialog"
             contentOverflow="auto"
         >
             <Dialog.Header caption={`Review changes — ${fn.id}`} />
-            <Dialog.Body className="fng-diff-dialog__body">
-                <Flex direction="column" className="fng-diff-dialog__content">
+            <Dialog.Body className="fn-diff-dialog__body">
+                <Flex direction="column" className="fn-diff-dialog__content">
                     {errorMsg && (
-                        <div className="fng-diff-dialog__error-bar">
+                        <div className="fn-diff-dialog__error-bar">
                             <Text variant="caption-1" color="danger">{errorMsg}</Text>
                         </div>
                     )}
-                    <div className="fng-diff-dialog__scroll">
+                    <div className="fn-diff-dialog__scroll">
                         <SideBySideDiff changes={changes} />
                     </div>
                 </Flex>

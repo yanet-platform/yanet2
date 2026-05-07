@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import type { NetworkFunction } from '../types';
 import { metaFor } from '../moduleMeta';
-import { Sparkline } from './Sparkline';
+import { Sparkline } from '../../_shared/lane-editor';
 import { ConfirmDialog } from '../../../../components';
 
 interface FunctionCardHeaderProps {
@@ -61,14 +61,14 @@ interface MiniStatProps {
 
 /** Stat cell: value on top, label on bottom, right-aligned. */
 const MiniStat = ({ label, value, accent }: MiniStatProps): React.JSX.Element => (
-    <div className="fng-card-header__stat">
+    <div className="fn-card-header__stat">
         <span
-            className="fng-card-header__stat-value"
-            style={accent ? { color: 'var(--fng-accent)' } : undefined}
+            className="fn-card-header__stat-value"
+            style={accent ? { color: 'var(--fn-accent)' } : undefined}
         >
             {value}
         </span>
-        <span className="fng-card-header__stat-label">{label}</span>
+        <span className="fn-card-header__stat-label">{label}</span>
     </div>
 );
 
@@ -101,7 +101,7 @@ export const FunctionCardHeader: React.FC<FunctionCardHeaderProps> = ({
 
     const chipColor: string | undefined =
         distinctTypes.length === 1 ? metaFor(distinctTypes[0]).color : undefined;
-    const sparklineColor = chipColor ?? 'var(--fng-text-3)';
+    const sparklineColor = chipColor ?? 'var(--fn-text-3)';
 
     const totalChains = fn.chains.length;
     const totalModules = useMemo(
@@ -110,17 +110,17 @@ export const FunctionCardHeader: React.FC<FunctionCardHeaderProps> = ({
     );
 
     return (
-        <div className="fng-card-header">
-            <div className="fng-card-header__main-row">
+        <div className="fn-card-header">
+            <div className="fn-card-header__main-row">
                 <button
-                    className="fng-card-header__collapse-btn"
+                    className="fn-card-header__collapse-btn"
                     onClick={onToggleCollapse}
                     type="button"
                     aria-expanded={!collapsed}
                     aria-label={collapsed ? 'Expand function' : 'Collapse function'}
                 >
                     <span
-                        className={`fng-card-header__chevron${collapsed ? '' : ' fng-card-header__chevron--open'}`}
+                        className={`fn-card-header__chevron${collapsed ? '' : ' fn-card-header__chevron--open'}`}
                     >
                         <ChevronDownIcon />
                     </span>
@@ -130,7 +130,7 @@ export const FunctionCardHeader: React.FC<FunctionCardHeaderProps> = ({
                     const meta = metaFor(distinctTypes[0]);
                     return (
                         <span
-                            className="fng-card-header__type-chip"
+                            className="fn-card-header__type-chip"
                             style={{ background: `${meta.color}1f`, color: meta.color }}
                             title={meta.desc}
                         >
@@ -140,10 +140,10 @@ export const FunctionCardHeader: React.FC<FunctionCardHeaderProps> = ({
                 })()}
                 {distinctTypes.length >= 2 && (
                     <span
-                        className="fng-card-header__type-chip"
+                        className="fn-card-header__type-chip"
                         style={{
-                            background: 'color-mix(in srgb, var(--fng-text-3) 12%, transparent)',
-                            color: 'var(--fng-text-3)',
+                            background: 'color-mix(in srgb, var(--fn-text-3) 12%, transparent)',
+                            color: 'var(--fn-text-3)',
                         }}
                         title={distinctTypes.join(', ')}
                     >
@@ -151,28 +151,28 @@ export const FunctionCardHeader: React.FC<FunctionCardHeaderProps> = ({
                     </span>
                 )}
 
-                <span className="fng-card-header__fn-id">{fn.id}</span>
+                <span className="fn-card-header__fn-id">{fn.id}</span>
 
                 {isDirty && !hasErrors && (
-                    <span className="fng-card-header__unsaved-pill">unsaved</span>
+                    <span className="fn-card-header__unsaved-pill">unsaved</span>
                 )}
                 {hasErrors && (
-                    <span className="fng-card-header__error-pill">errors</span>
+                    <span className="fn-card-header__error-pill">errors</span>
                 )}
 
                 {fn.description && (
-                    <span className="fng-card-header__desc">{fn.description}</span>
+                    <span className="fn-card-header__desc">{fn.description}</span>
                 )}
 
-                <div className="fng-card-header__spacer" />
+                <div className="fn-card-header__spacer" />
 
-                <div className="fng-card-header__stats">
+                <div className="fn-card-header__stats">
                     <MiniStat label="CHAINS" value={totalChains} />
-                    <div className="fng-card-header__stat-sep" />
+                    <div className="fn-card-header__stat-sep" />
                     <MiniStat label="MODULES" value={totalModules} />
-                    <div className="fng-card-header__stat-sep" />
+                    <div className="fn-card-header__stat-sep" />
                     <MiniStat label="PPS" value={fmtPps(totalPps)} accent />
-                    <div className="fng-card-header__sparkline">
+                    <div className="fn-card-header__sparkline">
                         <Sparkline
                             data={sparklineData}
                             width={64}
@@ -182,10 +182,10 @@ export const FunctionCardHeader: React.FC<FunctionCardHeaderProps> = ({
                     </div>
                 </div>
 
-                <div className="fng-card-header__actions">
+                <div className="fn-card-header__actions">
                     {isDirty && (
                         <button
-                            className="fng-card-header__icon-btn fng-card-header__icon-btn--discard"
+                            className="fn-card-header__icon-btn fn-card-header__icon-btn--discard"
                             type="button"
                             title="Discard changes"
                             aria-label="Discard local changes"
@@ -195,7 +195,7 @@ export const FunctionCardHeader: React.FC<FunctionCardHeaderProps> = ({
                         </button>
                     )}
                     <button
-                        className="fng-card-header__icon-btn fng-card-header__icon-btn--save"
+                        className="fn-card-header__icon-btn fn-card-header__icon-btn--save"
                         onClick={onOpenDiff}
                         disabled={!isDirty || hasErrors}
                         type="button"
@@ -205,7 +205,7 @@ export const FunctionCardHeader: React.FC<FunctionCardHeaderProps> = ({
                         <SaveIcon />
                     </button>
                     <button
-                        className="fng-card-header__icon-btn fng-card-header__icon-btn--delete"
+                        className="fn-card-header__icon-btn fn-card-header__icon-btn--delete"
                         onClick={() => setConfirmDelete(true)}
                         type="button"
                         title="Delete function"

@@ -2,9 +2,8 @@ import React, { useCallback, useEffect, useRef } from 'react';
 import type { Module, Chain } from '../types';
 import { metaFor } from '../moduleMeta';
 import { InlineEdit } from './InlineEdit';
-import { Sparkline } from './Sparkline';
+import { Sparkline, useSparklineHistory } from '../../_shared/lane-editor';
 import { formatPps, formatBps } from '../../../../utils';
-import { useSparklineHistory } from '../hooks/useSparklineHistory';
 import { ConfirmDialog } from '../../../../components';
 import type { InterpolatedCounterData } from '../../../../hooks';
 
@@ -75,7 +74,7 @@ interface DrawerActionProps {
 
 const DrawerAction = ({ icon, label, danger, onClick }: DrawerActionProps): React.JSX.Element => (
     <button
-        className={`fng-drawer__action-btn${danger ? ' fng-drawer__action-btn--danger' : ''}`}
+        className={`fn-drawer__action-btn${danger ? ' fn-drawer__action-btn--danger' : ''}`}
         type="button"
         onClick={onClick}
     >
@@ -91,10 +90,10 @@ interface BigStatProps {
 }
 
 const BigStat = ({ label, value, accent }: BigStatProps): React.JSX.Element => (
-    <div className="fng-drawer__big-stat">
-        <div className="fng-drawer__big-stat-label">{label}</div>
+    <div className="fn-drawer__big-stat">
+        <div className="fn-drawer__big-stat-label">{label}</div>
         <div
-            className="fng-drawer__big-stat-value"
+            className="fn-drawer__big-stat-value"
             style={accent ? { color: accent } : undefined}
         >
             {value}
@@ -121,10 +120,10 @@ const ModuleDrawerContent = ({
 
     return (
         <>
-            <div className="fng-drawer__header">
-                <div className="fng-drawer__title">
+            <div className="fn-drawer__header">
+                <div className="fn-drawer__title">
                     <div
-                        className="fng-drawer__subtitle"
+                        className="fn-drawer__subtitle"
                         style={{ color: accent }}
                     >
                         MODULE · {module.type.toUpperCase()}
@@ -133,11 +132,11 @@ const ModuleDrawerContent = ({
                         value={module.name}
                         onChange={onRename}
                         validate={validateName}
-                        className="fng-drawer__name-edit"
+                        className="fn-drawer__name-edit"
                     />
                 </div>
                 <button
-                    className="fng-drawer__close-btn"
+                    className="fn-drawer__close-btn"
                     onClick={onClose}
                     type="button"
                     aria-label="Close drawer"
@@ -146,16 +145,16 @@ const ModuleDrawerContent = ({
                 </button>
             </div>
 
-            <div className="fng-drawer__section">
-                <div className="fng-drawer__section-label">Live counters</div>
-                <div className="fng-drawer__counters-grid">
+            <div className="fn-drawer__section">
+                <div className="fn-drawer__section-label">Live counters</div>
+                <div className="fn-drawer__counters-grid">
                     <BigStat label="PPS" value={counter ? formatPps(counter.pps) : '—'} accent={accent} />
                     <BigStat label="BPS" value={counter ? formatBps(counter.bps) : '—'} />
                 </div>
                 {sparklineData.length >= 4 && (
                     <div>
-                        <div className="fng-drawer__sparkline-label">pps · last {sparklineData.length} samples</div>
-                        <div className="fng-drawer__sparkline">
+                        <div className="fn-drawer__sparkline-label">pps · last {sparklineData.length} samples</div>
+                        <div className="fn-drawer__sparkline">
                             <Sparkline
                                 data={sparklineData}
                                 width={364}
@@ -167,12 +166,12 @@ const ModuleDrawerContent = ({
                 )}
             </div>
 
-            <div className="fng-drawer__section">
-                <div className="fng-drawer__section-label">Configuration</div>
-                <div className="fng-drawer__field">
-                    <div className="fng-drawer__field-label">Module type</div>
+            <div className="fn-drawer__section">
+                <div className="fn-drawer__section-label">Configuration</div>
+                <div className="fn-drawer__field">
+                    <div className="fn-drawer__field-label">Module type</div>
                     <select
-                        className="fng-drawer__type-select"
+                        className="fn-drawer__type-select"
                         value={module.type}
                         onChange={e => onChangeType(e.target.value)}
                     >
@@ -184,8 +183,8 @@ const ModuleDrawerContent = ({
                         }
                     </select>
                 </div>
-                <div className="fng-drawer__field">
-                    <div className="fng-drawer__field-label">Instance name</div>
+                <div className="fn-drawer__field">
+                    <div className="fn-drawer__field-label">Instance name</div>
                     <InlineEdit
                         value={module.name}
                         onChange={onRename}
@@ -193,18 +192,18 @@ const ModuleDrawerContent = ({
                     />
                 </div>
                 {chain && (
-                    <div className="fng-drawer__field">
-                        <div className="fng-drawer__field-label">Chain</div>
-                        <div className="fng-drawer__chain-info">
+                    <div className="fn-drawer__field">
+                        <div className="fn-drawer__field-label">Chain</div>
+                        <div className="fn-drawer__chain-info">
                             {chain.name} · weight ×{chain.weight}
                         </div>
                     </div>
                 )}
             </div>
 
-            <div className="fng-drawer__section">
-                <div className="fng-drawer__section-label">Actions</div>
-                <div className="fng-drawer__actions" style={{ padding: 0 }}>
+            <div className="fn-drawer__section">
+                <div className="fn-drawer__section-label">Actions</div>
+                <div className="fn-drawer__actions" style={{ padding: 0 }}>
                     <DrawerAction
                         icon={<TrashIcon />}
                         label="Remove from chain"
@@ -249,19 +248,19 @@ const ChainDrawerContent = ({
 
     return (
         <>
-            <div className="fng-drawer__header">
-                <div className="fng-drawer__title">
-                    <div className="fng-drawer__subtitle">
+            <div className="fn-drawer__header">
+                <div className="fn-drawer__title">
+                    <div className="fn-drawer__subtitle">
                         CHAIN · weight ×{chain.weight}
                     </div>
                     <InlineEdit
                         value={chain.name}
                         onChange={name => onUpdateChain({ name })}
-                        className="fng-drawer__name-edit"
+                        className="fn-drawer__name-edit"
                     />
                 </div>
                 <button
-                    className="fng-drawer__close-btn"
+                    className="fn-drawer__close-btn"
                     onClick={onClose}
                     type="button"
                     aria-label="Close drawer"
@@ -270,20 +269,20 @@ const ChainDrawerContent = ({
                 </button>
             </div>
 
-            <div className="fng-drawer__section">
-                <div className="fng-drawer__section-label">Routing</div>
-                <div className="fng-drawer__field">
-                    <div className="fng-drawer__field-label">Chain name</div>
+            <div className="fn-drawer__section">
+                <div className="fn-drawer__section-label">Routing</div>
+                <div className="fn-drawer__field">
+                    <div className="fn-drawer__field-label">Chain name</div>
                     <InlineEdit
                         value={chain.name}
                         onChange={name => onUpdateChain({ name })}
                     />
                 </div>
-                <div className="fng-drawer__field">
-                    <div className="fng-drawer__field-label">Weight (load balancing)</div>
+                <div className="fn-drawer__field">
+                    <div className="fn-drawer__field-label">Weight (load balancing)</div>
                     <input
                         type="number"
-                        className="fng-drawer__weight-input"
+                        className="fn-drawer__weight-input"
                         value={chain.weight}
                         min={0}
                         onChange={e => onUpdateChain({ weight: parseInt(e.target.value || '0', 10) })}
@@ -291,19 +290,19 @@ const ChainDrawerContent = ({
                 </div>
             </div>
 
-            <div className="fng-drawer__section">
-                <div className="fng-drawer__section-label">Modules ({chain.modules.length})</div>
+            <div className="fn-drawer__section">
+                <div className="fn-drawer__section-label">Modules ({chain.modules.length})</div>
                 {chain.modules.length === 0 ? (
-                    <div className="fng-drawer__empty-chain">
+                    <div className="fn-drawer__empty-chain">
                         Empty chain — packets pass through unmodified
                     </div>
                 ) : (
-                    <div className="fng-drawer__module-list">
+                    <div className="fn-drawer__module-list">
                         {chain.modules.map((m, idx) => (
-                            <div key={m.id} className="fng-drawer__module-row">
-                                <span className="fng-drawer__module-idx">{idx + 1}</span>
+                            <div key={m.id} className="fn-drawer__module-row">
+                                <span className="fn-drawer__module-idx">{idx + 1}</span>
                                 <span
-                                    className="fng-drawer__module-type-chip"
+                                    className="fn-drawer__module-type-chip"
                                     style={{
                                         background: `${metaFor(m.type).color}1f`,
                                         color: metaFor(m.type).color,
@@ -311,9 +310,9 @@ const ChainDrawerContent = ({
                                 >
                                     {m.type}
                                 </span>
-                                <span className="fng-drawer__module-name">{m.name}</span>
+                                <span className="fn-drawer__module-name">{m.name}</span>
                                 <button
-                                    className="fng-drawer__reorder-btn"
+                                    className="fn-drawer__reorder-btn"
                                     type="button"
                                     disabled={idx === 0}
                                     onClick={() => onReorderModule(idx, idx - 1)}
@@ -322,7 +321,7 @@ const ChainDrawerContent = ({
                                     <UpIcon />
                                 </button>
                                 <button
-                                    className="fng-drawer__reorder-btn"
+                                    className="fn-drawer__reorder-btn"
                                     type="button"
                                     disabled={idx === chain.modules.length - 1}
                                     onClick={() => onReorderModule(idx, idx + 2)}
@@ -335,7 +334,7 @@ const ChainDrawerContent = ({
                     </div>
                 )}
                 <button
-                    className="fng-drawer__add-module-btn"
+                    className="fn-drawer__add-module-btn"
                     type="button"
                     onClick={() => {
                         const existingNames = new Set(chain.modules.map(m => m.name));
@@ -358,9 +357,9 @@ const ChainDrawerContent = ({
                 </button>
             </div>
 
-            <div className="fng-drawer__section">
-                <div className="fng-drawer__section-label">Actions</div>
-                <div className="fng-drawer__actions" style={{ padding: 0 }}>
+            <div className="fn-drawer__section">
+                <div className="fn-drawer__section-label">Actions</div>
+                <div className="fn-drawer__actions" style={{ padding: 0 }}>
                     <DrawerAction
                         icon={<TrashIcon />}
                         label="Delete chain"
@@ -424,9 +423,9 @@ export const Drawer: React.FC<DrawerProps> = (props) => {
 
     return (
         <>
-            <div className="fng-drawer__backdrop" onClick={props.onClose} />
+            <div className="fn-drawer__backdrop" onClick={props.onClose} />
             <div
-                className="fng-drawer"
+                className="fn-drawer"
                 ref={drawerRef}
                 role="dialog"
                 aria-label={props.mode === 'module' ? 'Module inspector' : 'Chain inspector'}

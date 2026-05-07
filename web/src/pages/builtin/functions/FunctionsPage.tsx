@@ -1,75 +1,162 @@
-import React, { useState, useCallback } from 'react';
-import { Box } from '@gravity-ui/uikit';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { Button, Flex, Icon, Text, TextInput } from '@gravity-ui/uikit';
+import { Magnifier, Plus } from '@gravity-ui/icons';
 import { PageLayout, PageLoader, EmptyState } from '../../../components';
-import {
-    FunctionPageHeader,
-    FunctionCard,
-    CreateFunctionDialog,
-    useFunctionData,
-} from '.';
+import { useFunctionsData } from './hooks/useFunctionsData';
+import { useUnsavedChangesBlocker } from '../_shared/lane-editor';
+import { FunctionCard } from './components/FunctionCard';
+import { CreateFunctionDialog } from './dialogs';
+import type { NetworkFunction } from './types';
+import { API } from '../../../api';
 import './FunctionsPage.scss';
 
-const FunctionsPage: React.FC = () => {
-    const {
-        functionIds,
-        loading,
-        functions,
-        loadFunction,
-        createFunction,
-        updateFunction,
-        deleteFunction,
-    } = useFunctionData();
+/** Returns true if the function matches the query string (case-insensitive substring). */
+const matchesFn = (fn: NetworkFunction, query: string): boolean => {
+    const q = query.toLowerCase();
+    if (fn.id.toLowerCase().includes(q)) {
+        return true;
+    }
+    if (fn.type.toLowerCase().includes(q)) {
+        return true;
+    }
+    for (const chain of fn.chains) {
+        if (chain.name.toLowerCase().includes(q)) {
+            return true;
+        }
+        for (const m of chain.modules) {
+            if (m.name.toLowerCase().includes(q) || m.type.toLowerCase().includes(q)) {
+                return true;
+            }
+        }
+    }
+    return false;
+};
 
+/**
+ * Functions page: Tracks editor with horizontal lanes, inline edit, DnD and live counters.
+ */
+const FunctionsPage = (): React.JSX.Element => {
+    const { functions, loading, isDirty, getServerFn, dispatch, saveFn, discardFn, createFn } = useFunctionsData();
+    const [availableModuleTypes, setAvailableModuleTypes] = useState<string[]>([]);
     const [createDialogOpen, setCreateDialogOpen] = useState(false);
+    const [searchQuery, setSearchQuery] = useState('');
+    const searchRef = useRef<HTMLInputElement>(null);
 
-    const handleCreateFunction = useCallback(() => {
-        setCreateDialogOpen(true);
+    useEffect(() => {
+        const fetchTypes = async (): Promise<void> => {
+            try {
+                const resp = await API.inspect.inspect();
+                const cpConfigs = resp.instance_info?.cp_configs ?? [];
+                const types = [...new Set(cpConfigs.map(c => c.type ?? '').filter(Boolean))];
+                setAvailableModuleTypes(types);
+            } catch {
+                // Non-critical; drawer will show current module type only.
+            }
+        };
+        fetchTypes();
     }, []);
 
-    const handleCreateConfirm = useCallback(async (name: string) => {
-        const success = await createFunction(name);
-        if (success) {
-            setCreateDialogOpen(false);
-        }
-    }, [createFunction]);
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent): void => {
+            if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+                e.preventDefault();
+                searchRef.current?.focus();
+            }
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, []);
 
-    const headerContent = (
-        <FunctionPageHeader onCreateFunction={handleCreateFunction} />
+    const filteredFunctions = useMemo(() => {
+        if (!searchQuery.trim()) {
+            return functions;
+        }
+        return functions.filter(fn => matchesFn(fn, searchQuery));
+    }, [functions, searchQuery]);
+
+    const anyDirty = useMemo(
+        () => functions.some(fn => isDirty(fn.id)),
+        [functions, isDirty],
+    );
+
+    useUnsavedChangesBlocker(anyDirty);
+
+    const handleSave = useCallback((fnId: string) => (): Promise<void> => saveFn(fnId), [saveFn]);
+    const handleDiscard = useCallback((fnId: string) => (): void => discardFn(fnId), [discardFn]);
+
+    const pageHeader = (
+        <Flex alignItems="center" gap={4} style={{ width: '100%' }}>
+            <Text variant="header-1">Functions</Text>
+            <Flex grow />
+            <div style={{ flexBasis: 380, flexShrink: 1 }}>
+                <TextInput
+                    controlRef={searchRef}
+                    value={searchQuery}
+                    onUpdate={setSearchQuery}
+                    placeholder="Search functions, chains, modules… (⌘K)"
+                    startContent={
+                        <Flex alignItems="center" justifyContent="center" style={{ paddingInline: 8, color: 'var(--g-color-text-hint)' }}>
+                            <Icon data={Magnifier} size={16} />
+                        </Flex>
+                    }
+                    size="l"
+                    hasClear
+                    type="search"
+                />
+            </div>
+            <Button
+                view="action"
+                size="l"
+                onClick={() => setCreateDialogOpen(true)}
+            >
+                <Icon data={Plus} size={16} />
+                Create function
+            </Button>
+        </Flex>
     );
 
     if (loading) {
         return (
-            <PageLayout title="Functions">
-                <PageLoader loading={loading} size="l" />
+            <PageLayout header={pageHeader}>
+                <PageLoader loading size="l" />
             </PageLayout>
         );
     }
 
     return (
-        <PageLayout header={headerContent}>
-            <Box className="functions-page__content">
-                <Box className="functions-page__list">
-                    {functionIds.length === 0 ? (
-                        <EmptyState message="No functions found. Click 'Create function' to add one." />
-                    ) : (
-                        functionIds.map((funcId) => (
-                            <FunctionCard
-                                key={funcId.name}
-                                functionId={funcId}
-                                initialFunction={functions[funcId.name || '']}
-                                loadFunction={loadFunction}
-                                updateFunction={updateFunction}
-                                deleteFunction={deleteFunction}
-                            />
-                        ))
-                    )}
-                </Box>
-            </Box>
+        <PageLayout header={pageHeader}>
+            <div className="fn-page">
+                {filteredFunctions.length === 0 ? (
+                    <EmptyState message={
+                        searchQuery.trim()
+                            ? `No functions match "${searchQuery}".`
+                            : 'No functions found. Click "Create function" to add one.'
+                    } />
+                ) : (
+                    filteredFunctions.map(fn => (
+                        <FunctionCard
+                            key={fn.id}
+                            fn={fn}
+                            serverFn={getServerFn(fn.id)}
+                            isDirty={isDirty(fn.id)}
+                            availableModuleTypes={availableModuleTypes}
+                            dispatch={dispatch}
+                            onSave={handleSave(fn.id)}
+                            onDiscard={handleDiscard(fn.id)}
+                        />
+                    ))
+                )}
+            </div>
 
             <CreateFunctionDialog
                 open={createDialogOpen}
                 onClose={() => setCreateDialogOpen(false)}
-                onConfirm={handleCreateConfirm}
+                onConfirm={async (name) => {
+                    const ok = await createFn(name);
+                    if (ok) {
+                        setCreateDialogOpen(false);
+                    }
+                }}
             />
         </PageLayout>
     );

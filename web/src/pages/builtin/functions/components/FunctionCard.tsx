@@ -1,9 +1,7 @@
 import React, { useState, useCallback, useMemo } from 'react';
 import type { NetworkFunction, FunctionsAction, DragPayload, Module, Chain } from '../types';
-import { useModuleCounters, type ModuleInfo } from '../../functions/hooks';
-import { useDragState } from '../hooks/useDragState';
-import { getDragPayload } from '../hooks/useDragState';
-import { useSparklineHistory } from '../hooks/useSparklineHistory';
+import { useModuleCounters, type ModuleInfo } from '../hooks/useModuleCounters';
+import { useDragState, getDragPayload, useSparklineHistory } from '../../_shared/lane-editor';
 import { FunctionCardHeader } from './FunctionCardHeader';
 import { Lane } from './Lane';
 import { AddChainButton } from './AddChainButton';
@@ -207,7 +205,7 @@ export const FunctionCard: React.FC<FunctionCardProps> = ({
     }, []);
 
     return (
-        <div className={`fng-function-card${collapsed ? ' fng-function-card--collapsed' : ''}`}>
+        <div className={`fn-function-card${collapsed ? ' fn-function-card--collapsed' : ''}`}>
             <FunctionCardHeader
                 fn={fn}
                 isDirty={isDirty}
@@ -222,32 +220,32 @@ export const FunctionCard: React.FC<FunctionCardProps> = ({
             />
 
             {!collapsed && (
-                <div className="fng-function-card__body">
+                <div className="fn-function-card__body">
                     {hasErrors && (
-                        <div className="fng-function-card__errors">
+                        <div className="fn-function-card__errors">
                             {errors.map((e, idx) => (
-                                <div key={idx} className="fng-function-card__error-item">{e}</div>
+                                <div key={idx} className="fn-function-card__error-item">{e}</div>
                             ))}
                         </div>
                     )}
 
-                    <div className="fng-function-card__sub-header">
-                        <span className="fng-function-card__sub-header-item fng-function-card__sub-header-item--bold">
+                    <div className="fn-function-card__sub-header">
+                        <span className="fn-function-card__sub-header-item fn-function-card__sub-header-item--bold">
                             {fn.chains.length} chains
                         </span>
-                        <span className="fng-function-card__sub-header-sep" />
-                        <span className="fng-function-card__sub-header-item">
+                        <span className="fn-function-card__sub-header-sep" />
+                        <span className="fn-function-card__sub-header-item">
                             {fn.chains.reduce((s, c) => s + c.modules.length, 0)} modules
                         </span>
-                        <span className="fng-function-card__sub-header-sep" />
-                        <span className="fng-function-card__sub-header-item">
+                        <span className="fn-function-card__sub-header-sep" />
+                        <span className="fn-function-card__sub-header-item">
                             Σ weight {totalWeight}
                         </span>
                         <div style={{ flex: 1 }} />
                         <AddChainButton onClick={handleAddChain} />
                     </div>
 
-                    <div className="fng-function-card__lanes">
+                    <div className="fn-function-card__lanes">
                         {fn.chains.map(chain => (
                             <Lane
                                 key={chain.id}

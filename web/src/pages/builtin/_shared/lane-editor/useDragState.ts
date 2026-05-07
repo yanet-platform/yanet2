@@ -1,5 +1,12 @@
 import { useState } from 'react';
-import type { DragPayload } from '../types';
+
+/** Payload describing a module being dragged between lane slots. */
+export interface DragPayload {
+    fromFnId: string;
+    fromChainId: string;
+    fromModIdx: number;
+    moduleId: string;
+}
 
 /** Module-level singleton holding the active drag payload (HTML5 dataTransfer is opaque during dragover). */
 let activeDragPayload: DragPayload | null = null;

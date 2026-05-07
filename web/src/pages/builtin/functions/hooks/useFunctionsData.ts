@@ -5,7 +5,7 @@ import type { NetworkFunction, FunctionsAction } from '../types';
 import { functionsReducer, initialState, discardEdits } from '../reducer';
 import { apiToLocal, localToApi } from '../wire';
 
-export interface UseFunctionsNgDataResult {
+export interface UseFunctionsDataResult {
     functions: NetworkFunction[];
     loading: boolean;
     isDirty: (fnId: string) => boolean;
@@ -20,7 +20,7 @@ export interface UseFunctionsNgDataResult {
  * Loads all network functions from the API, manages local edit state via useReducer,
  * and exposes per-function save/discard/create operations.
  */
-export const useFunctionsNgData = (): UseFunctionsNgDataResult => {
+export const useFunctionsData = (): UseFunctionsDataResult => {
     const [state, rawDispatch] = useReducer(functionsReducer, initialState);
     const [loading, setLoading] = useState(true);
     const [fnIds, setFnIds] = useState<string[]>([]);

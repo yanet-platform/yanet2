@@ -60,7 +60,6 @@ const MainMenu = ({ currentPage, onPageChange, renderContent, disabled = false }
         createSectionHeader('__section_builtin', 'Builtin'),
         createMenuItem('builtin/inspect', 'Inspect', Eye),
         createMenuItem('builtin/functions', 'Functions', CurlyBracketsFunction),
-        createMenuItem('builtin/functions-ng', 'Functions (NG)', CurlyBracketsFunction),
         createMenuItem('builtin/pipelines', 'Pipelines', ListUl),
         createMenuItem('builtin/devices', 'Devices', HardDrive),
         createDivider('__div_1'),

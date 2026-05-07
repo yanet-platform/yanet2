@@ -1,57 +1,55 @@
-import type { Node, Edge } from '@xyflow/react';
+export type { DragPayload } from '../_shared/lane-editor';
 
-// Node types
-export const NODE_TYPE_INPUT = 'input' as const;
-export const NODE_TYPE_OUTPUT = 'output' as const;
-export const NODE_TYPE_MODULE = 'module' as const;
+export type ModuleType =
+    | 'route' | 'pdump' | 'acl' | 'decap' | 'nat64'
+    | 'balancer' | 'forward' | string;
 
-export const INPUT_NODE_ID = 'input';
-export const OUTPUT_NODE_ID = 'output';
+export type ModuleStatus = 'ok' | 'hot' | 'error' | 'unknown';
 
-// Node data types with index signature for ReactFlow compatibility
-export interface InputNodeData extends Record<string, unknown> {
-    label: string;
-}
-
-export interface OutputNodeData extends Record<string, unknown> {
-    label: string;
-}
-
-export interface ModuleNodeData extends Record<string, unknown> {
-    type: string;
+export interface Module {
+    id: string;
+    type: ModuleType;
     name: string;
+    config?: Record<string, unknown>;
 }
 
-// Custom node types
-export type InputNode = Node<InputNodeData, typeof NODE_TYPE_INPUT>;
-export type OutputNode = Node<OutputNodeData, typeof NODE_TYPE_OUTPUT>;
-export type ModuleNode = Node<ModuleNodeData, typeof NODE_TYPE_MODULE>;
-
-export type FunctionNode = InputNode | OutputNode | ModuleNode;
-
-// Edge with weight (only edges from input have weights)
-export interface WeightedEdgeData extends Record<string, unknown> {
-    weight?: string | number;
-    chainName?: string;
+export interface Chain {
+    id: string;
+    name: string;
+    weight: number;
+    modules: Module[];
 }
 
-export type FunctionEdge = Edge<WeightedEdgeData>;
+export type FunctionType = ModuleType;
 
-// Graph state
-export interface FunctionGraphState {
-    nodes: FunctionNode[];
-    edges: FunctionEdge[];
+export interface NetworkFunction {
+    id: string;
+    type: FunctionType;
+    description?: string;
+    chains: Chain[];
 }
 
-// Validation result
-export interface ValidationResult {
-    isValid: boolean;
-    errors: string[];
+export interface Counters {
+    pps: number;
+    bps: number;
+    latencyP50?: number;
+    latencyP99?: number;
+    drops?: number;
+    status: ModuleStatus;
+    history?: number[];
 }
 
-// Chain path representation for conversion
-export interface ChainPath {
-    chainName: string;
-    weight: string | number;
-    moduleIds: string[]; // node IDs in order
-}
+export type CountersByModuleId = Record<string, Counters>;
+
+export type FunctionsAction =
+    | { type: 'MOVE_MODULE';          fnId: string; fromChainId: string; toChainId: string; moduleId: string; toIdx: number }
+    | { type: 'ADD_MODULE';           fnId: string; chainId: string; toIdx: number; module: Module }
+    | { type: 'REMOVE_MODULE';        fnId: string; chainId: string; moduleId: string }
+    | { type: 'RENAME_MODULE';        fnId: string; moduleId: string; name: string }
+    | { type: 'UPDATE_MODULE_CONFIG'; fnId: string; moduleId: string; patch: Partial<Module> }
+    | { type: 'UPDATE_CHAIN';         fnId: string; chainId: string; patch: Partial<Chain> }
+    | { type: 'ADD_CHAIN';            fnId: string; chain: Chain; toIdx?: number }
+    | { type: 'REMOVE_CHAIN';         fnId: string; chainId: string }
+    | { type: 'ADD_FUNCTION';         fn: NetworkFunction }
+    | { type: 'REMOVE_FUNCTION';      fnId: string }
+    | { type: 'LOAD_FUNCTION';        fn: NetworkFunction };

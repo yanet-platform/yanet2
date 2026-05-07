@@ -26,7 +26,7 @@ const ArrowIcon = (): React.JSX.Element => (
  */
 export const Endpoint: React.FC<EndpointProps> = ({ kind }) => (
     <div
-        className={`fng-endpoint fng-endpoint--${kind}`}
+        className={`fn-endpoint fn-endpoint--${kind}`}
         title={kind === 'in' ? 'Ingress' : 'Egress'}
         aria-label={kind === 'in' ? 'Ingress' : 'Egress'}
     >

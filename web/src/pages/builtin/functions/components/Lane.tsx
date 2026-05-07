@@ -94,7 +94,7 @@ export const Lane: React.FC<LaneProps> = ({
 
     return (
         <div
-            className="fng-lane"
+            className="fn-lane"
             style={{ minHeight: `${laneHeight}px` }}
         >
             <LaneHeader
