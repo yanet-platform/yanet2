@@ -176,7 +176,7 @@ the dataplane through the gateway, distinct from per-module gRPC services.
 ### Shared Memory Pattern
 
 1. Module control plane attaches via `ffi.SharedMemory` (Go CGO)
-2. Creates agent via `shm.AgentReattach(name, instanceIdx, size)`
+2. Creates agent via `shm.AgentAttach(name, instanceIdx, size)`
 3. Writes C-level config through FFI functions (e.g., `acl_module_config_update()`)
 4. Uses `runtime.Pinner` to pin Go memory during C calls
 5. Dataplane reads updated config atomically

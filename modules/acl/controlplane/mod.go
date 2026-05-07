@@ -12,9 +12,11 @@ import (
 	"github.com/yanet-platform/yanet2/modules/fwstate/controlplane/fwstatepb"
 )
 
-const agentName = "acl"
-const serviceName = "aclpb.ACLService"
-const fwstateServiceName = "fwstatepb.FWStateService"
+const (
+	agentName          = "acl"
+	serviceName        = "aclpb.ACLService"
+	fwstateServiceName = "fwstatepb.FWStateService"
+)
 
 // ACLModule is a control-plane component for ACL (Access Control List) module
 // with integrated firewall state management
@@ -41,7 +43,7 @@ func NewACLModule(cfg *Config, log *zap.Logger) (*ACLModule, error) {
 		zap.Stringer("size", cfg.MemoryRequirements),
 	)
 
-	agent, err := shm.AgentReattach(agentName, cfg.InstanceID, cfg.MemoryRequirements.Unwrap())
+	agent, err := shm.AgentAttach(agentName, cfg.InstanceID, cfg.MemoryRequirements.Unwrap())
 	if err != nil {
 		return nil, fmt.Errorf("failed to attach agent to shared memory: %w", err)
 	}

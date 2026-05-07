@@ -46,7 +46,7 @@ func SetupTest(config *TestConfig) (*TestSetup, error) {
 	}
 
 	agent, err := m.SharedMemory().
-		AgentReattach("forward", 0, config.mock.GetAgentsMemory())
+		AgentAttach("forward", 0, config.mock.GetAgentsMemory())
 	if err != nil {
 		return nil, fmt.Errorf("failed to attach agent: %w", err)
 	}
