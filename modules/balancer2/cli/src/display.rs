@@ -128,12 +128,10 @@ fn print_table_view_state(state: &balancerpb::BalancerState, opts: &ShowOptions)
 fn print_table_view_vs(vs: &balancerpb::VsState, opts: &ShowOptions) {
     let Some(cfg) = &vs.config else { return };
     let Some(id) = &cfg.id else { return };
-    let ip = match bytes_to_ip(&id.addr) {
-        Ok(ip) => ip,
-        Err(_) => return,
+    let Some(addr_port) = fmt_addr_port(&id.addr, id.port) else {
+        return;
     };
     let proto = proto_str(id.proto).unwrap_or("???");
-    let addr_port = format_ip_port(ip, id.port);
     let scheduler = scheduler_str(cfg.scheduler).unwrap_or("???");
     let flags = flags_str(cfg.flags.as_ref());
 
@@ -175,7 +173,7 @@ fn print_table_view_vs(vs: &balancerpb::VsState, opts: &ShowOptions) {
     println!();
 }
 
-fn real_basic_row(real: &balancerpb::RealState) -> Option<RealBasicRow> {
+fn real_display_addr(real: &balancerpb::RealState) -> Option<(String, &balancerpb::RealConfig)> {
     let Some(rcfg) = real.config.as_ref() else {
         log::warn!("dropped real row: missing config");
         return None;
@@ -191,8 +189,20 @@ fn real_basic_row(real: &balancerpb::RealState) -> Option<RealBasicRow> {
             return None;
         }
     };
+    let rport = match u16::try_from(rid.port) {
+        Ok(p) => p,
+        Err(_) => {
+            log::warn!("dropped real row: port out of u16 range: {}", rid.port);
+            return None;
+        }
+    };
+    Some((format_ip_port(rip, rport), rcfg))
+}
+
+fn real_basic_row(real: &balancerpb::RealState) -> Option<RealBasicRow> {
+    let (real_str, rcfg) = real_display_addr(real)?;
     Some(RealBasicRow {
-        real: format_ip_port(rip, rid.port),
+        real: real_str,
         enabled: real.enabled,
         weight: rcfg.weight,
         effective_weight: real.effective_weight,
@@ -200,24 +210,10 @@ fn real_basic_row(real: &balancerpb::RealState) -> Option<RealBasicRow> {
 }
 
 fn real_stats_row(real: &balancerpb::RealState) -> Option<RealStatsRow> {
-    let Some(rcfg) = real.config.as_ref() else {
-        log::warn!("dropped real stats row: missing config");
-        return None;
-    };
-    let Some(rid) = rcfg.id.as_ref() else {
-        log::warn!("dropped real stats row: missing real id");
-        return None;
-    };
-    let rip = match bytes_to_ip(&rid.ip) {
-        Ok(ip) => ip,
-        Err(e) => {
-            log::warn!("dropped real stats row: invalid ip bytes: {e}");
-            return None;
-        }
-    };
+    let (real_str, rcfg) = real_display_addr(real)?;
     let rs = real.stats.as_ref();
     Some(RealStatsRow {
-        real: format_ip_port(rip, rid.port),
+        real: real_str,
         enabled: real.enabled,
         weight: rcfg.weight,
         effective_weight: real.effective_weight,
@@ -345,29 +341,32 @@ pub fn print_sessions_header() {
     );
 }
 
+/// Format a wire-format addr+port pair. Returns None on bad address bytes
+/// or u16 overflow; port 0 is omitted from the output.
+fn fmt_addr_port(addr: &[u8], port: u32) -> Option<String> {
+    let ip = bytes_to_ip(addr).ok()?;
+    let port = u16::try_from(port).ok()?;
+    Some(format_ip_port(ip, port))
+}
+
 pub fn print_session(session: &balancerpb::Session, now: i64) {
     let vs = session
         .vs_id
         .as_ref()
         .and_then(|id| {
-            bytes_to_ip(&id.addr).ok().map(|ip| {
-                format!(
-                    "{}/{}",
-                    format_ip_port(ip, id.port),
-                    proto_str(id.proto).unwrap_or("???")
-                )
-            })
+            Some(format!(
+                "{}/{}",
+                fmt_addr_port(&id.addr, id.port)?,
+                proto_str(id.proto).unwrap_or("???")
+            ))
         })
         .unwrap_or_else(|| "-".to_string());
     let real = session
         .real_id
         .as_ref()
-        .and_then(|r| bytes_to_ip(&r.ip).ok().map(|ip| format_ip_port(ip, r.port)))
+        .and_then(|r| fmt_addr_port(&r.ip, r.port))
         .unwrap_or_else(|| "-".to_string());
-    let client = bytes_to_ip(&session.client_addr)
-        .ok()
-        .map(|ip| format_ip_port(ip, session.client_port))
-        .unwrap_or_else(|| "-".to_string());
+    let client = fmt_addr_port(&session.client_addr, session.client_port).unwrap_or_else(|| "-".to_string());
     let expires = match (session.last_packet_timestamp.as_ref(), session.timeout.as_ref()) {
         (Some(last), Some(timeout)) => format!("{}", (last.seconds + timeout.seconds - now).max(0)),
         _ => "-".to_string(),

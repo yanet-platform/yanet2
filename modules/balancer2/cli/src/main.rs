@@ -125,7 +125,7 @@ pub struct FilterFlags {
     pub vip: Option<IpAddr>,
     /// Filter by virtual service port.
     #[arg(long)]
-    pub vs_port: Option<u32>,
+    pub vs_port: Option<u16>,
     /// Filter by transport protocol (tcp or udp).
     #[arg(long)]
     pub proto: Option<Proto>,
@@ -134,7 +134,7 @@ pub struct FilterFlags {
     pub real_ip: Option<IpAddr>,
     /// Filter by real server port.
     #[arg(long)]
-    pub real_port: Option<u32>,
+    pub real_port: Option<u16>,
 }
 
 // Mirrors config::Proto for CLI filter flags; the two cannot share a type
@@ -208,7 +208,7 @@ impl Display for VsId {
             balancerpb::TransportProto::Tcp => "tcp",
             balancerpb::TransportProto::Udp => "udp",
         };
-        write!(f, "{}/{}", format_ip_port(self.addr, u32::from(self.port)), proto)
+        write!(f, "{}/{}", format_ip_port(self.addr, self.port), proto)
     }
 }
 
@@ -229,36 +229,42 @@ pub fn ip_to_bytes(ip: IpAddr) -> Vec<u8> {
     }
 }
 
-pub fn bytes_to_ip(bytes: &[u8]) -> Result<IpAddr, String> {
-    match bytes.len() {
-        4 => {
-            let arr: [u8; 4] = bytes.try_into().map_err(|_| "invalid IPv4 bytes")?;
-            Ok(IpAddr::V4(Ipv4Addr::from(arr)))
+#[derive(Debug)]
+pub enum BytesToIpError {
+    InvalidLength(usize),
+}
+
+impl Display for BytesToIpError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), fmt::Error> {
+        match self {
+            Self::InvalidLength(n) => write!(f, "invalid IP address length: {n}"),
         }
-        16 => {
-            let arr: [u8; 16] = bytes.try_into().map_err(|_| "invalid IPv6 bytes")?;
-            Ok(IpAddr::V6(Ipv6Addr::from(arr)))
-        }
-        n => Err(format!("invalid IP address length: {}", n)),
     }
 }
 
-pub fn format_ip_port(ip: IpAddr, port: u32) -> String {
-    match ip {
-        IpAddr::V4(_) => {
-            if port == 0 {
-                format!("{}", ip)
-            } else {
-                format!("{}:{}", ip, port)
-            }
+impl Error for BytesToIpError {}
+
+pub fn bytes_to_ip(bytes: &[u8]) -> Result<IpAddr, BytesToIpError> {
+    match bytes.len() {
+        4 => {
+            let arr = <[u8; 4]>::try_from(bytes).expect("length already checked");
+            Ok(Ipv4Addr::from(arr).into())
         }
-        IpAddr::V6(_) => {
-            if port == 0 {
-                format!("{}", ip)
-            } else {
-                format!("[{}]:{}", ip, port)
-            }
+        16 => {
+            let arr = <[u8; 16]>::try_from(bytes).expect("length already checked");
+            Ok(Ipv6Addr::from(arr).into())
         }
+        n => Err(BytesToIpError::InvalidLength(n)),
+    }
+}
+
+/// Format an IP/port pair. Port 0 means a pure-L3 VS or "same port as VS"
+/// for reals, so the port is omitted from the output.
+pub fn format_ip_port(ip: IpAddr, port: u16) -> String {
+    if port == 0 {
+        ip.to_string()
+    } else {
+        SocketAddr::new(ip, port).to_string()
     }
 }
 
@@ -275,13 +281,13 @@ impl FilterFlags {
 
         Some(balancerpb::Filter {
             vip: self.vip.map(ip_to_bytes),
-            vs_port: self.vs_port,
+            vs_port: self.vs_port.map(u32::from),
             proto: self.proto.as_ref().map(|p| match p {
                 Proto::Tcp => balancerpb::TransportProto::Tcp as i32,
                 Proto::Udp => balancerpb::TransportProto::Udp as i32,
             }),
             real_ip: self.real_ip.map(ip_to_bytes),
-            real_port: self.real_port,
+            real_port: self.real_port.map(u32::from),
         })
     }
 }
