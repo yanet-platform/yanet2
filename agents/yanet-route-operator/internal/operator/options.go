@@ -5,7 +5,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/yanet-platform/yanet2/common/go/operator"
+	"github.com/yanet-platform/yanet2/common/commonpb"
 )
 
 type options struct {
@@ -18,6 +18,7 @@ func newOptions() *options {
 	}
 }
 
+// Option configures NewOperator.
 type Option func(*options)
 
 // WithLog sets the logger for the Operator and all sub-components.
@@ -27,59 +28,8 @@ func WithLog(log *zap.Logger) Option {
 	}
 }
 
-type reconcilerOptions struct {
-	Interval       time.Duration
-	InitialBackoff time.Duration
-	MaxBackoff     time.Duration
-	Metrics        ReconcilerMetricsObserver
-	Log            *zap.Logger
-}
-
-func newReconcilerOptions() *reconcilerOptions {
-	return &reconcilerOptions{
-		Interval:       operator.DefaultReconcileInterval,
-		InitialBackoff: operator.DefaultReconcileInitialBackoff,
-		MaxBackoff:     operator.DefaultReconcileMaxBackoff,
-		Metrics:        noopReconcilerMetricsObserver{},
-		Log:            zap.NewNop(),
-	}
-}
-
-type ReconcilerOption func(*reconcilerOptions)
-
-// WithReconcilerLog sets the logger used by the reconcile loop.
-func WithReconcilerLog(log *zap.Logger) ReconcilerOption {
-	return func(o *reconcilerOptions) {
-		o.Log = log
-	}
-}
-
-// WithReconcileInterval sets the steady-state period between successful
-// reconcile passes.
-func WithReconcileInterval(d time.Duration) ReconcilerOption {
-	return func(o *reconcilerOptions) {
-		o.Interval = d
-	}
-}
-
-// WithReconcileBackoff sets the initial and maximum sleep durations for
-// the exponential backoff applied after failed reconcile passes.
-func WithReconcileBackoff(initial, max time.Duration) ReconcilerOption {
-	return func(o *reconcilerOptions) {
-		o.InitialBackoff = initial
-		o.MaxBackoff = max
-	}
-}
-
-// WithReconcilerMetrics attaches the metrics observer for the reconcile
-// loop.
-func WithReconcilerMetrics(metrics ReconcilerMetricsObserver) ReconcilerOption {
-	return func(o *reconcilerOptions) {
-		o.Metrics = metrics
-	}
-}
-
 type routeServiceOptions struct {
+	RIBs      *RIBStore
 	RIBTTL    time.Duration
 	OnChanged func()
 	Log       *zap.Logger
@@ -87,18 +37,20 @@ type routeServiceOptions struct {
 
 func newRouteServiceOptions() *routeServiceOptions {
 	return &routeServiceOptions{
+		RIBs:      newRIBStore(zap.NewNop()),
 		RIBTTL:    DefaultRIBTTL,
 		OnChanged: func() {},
 		Log:       zap.NewNop(),
 	}
 }
 
+// RouteServiceOption configures NewRouteService.
 type RouteServiceOption func(*routeServiceOptions)
 
-// WithRouteServiceLog sets the logger for the RouteService.
-func WithRouteServiceLog(log *zap.Logger) RouteServiceOption {
+// WithRouteServiceRIBStore injects an explicit shared RIB storage instance.
+func WithRouteServiceRIBStore(store *RIBStore) RouteServiceOption {
 	return func(o *routeServiceOptions) {
-		o.Log = log
+		o.RIBs = store
 	}
 }
 
@@ -117,6 +69,13 @@ func WithRouteServiceOnChanged(fn func()) RouteServiceOption {
 	}
 }
 
+// WithRouteServiceLog sets the logger for the RouteService.
+func WithRouteServiceLog(log *zap.Logger) RouteServiceOption {
+	return func(o *routeServiceOptions) {
+		o.Log = log
+	}
+}
+
 type neighbourServiceOptions struct {
 	OnChanged func()
 }
@@ -127,6 +86,7 @@ func newNeighbourServiceOptions() *neighbourServiceOptions {
 	}
 }
 
+// NeighbourServiceOption configures NewNeighbourService.
 type NeighbourServiceOption func(*neighbourServiceOptions)
 
 // WithNeighbourServiceOnChanged registers a callback fired whenever
@@ -135,6 +95,14 @@ func WithNeighbourServiceOnChanged(fn func()) NeighbourServiceOption {
 	return func(o *neighbourServiceOptions) {
 		o.OnChanged = fn
 	}
+}
+
+// noopMetricsCollector is the default MetricsCollector wired into
+// metrics-service options when the caller does not pass a real one.
+type noopMetricsCollector struct{}
+
+func (noopMetricsCollector) Collect() []*commonpb.Metric {
+	return nil
 }
 
 type metricsServiceOptions struct {
@@ -147,6 +115,7 @@ func newMetricsServiceOptions() *metricsServiceOptions {
 	}
 }
 
+// MetricsServiceOption configures NewMetricsService.
 type MetricsServiceOption func(*metricsServiceOptions)
 
 // WithMetricsServiceCollector attaches the metrics collector that
@@ -164,6 +133,7 @@ func newOperatorServiceOptions() *operatorServiceOptions {
 	return &operatorServiceOptions{}
 }
 
+// OperatorServiceOption configures NewRouteOperatorService.
 type OperatorServiceOption func(*operatorServiceOptions)
 
 type gatewayActuatorOptions struct {
@@ -177,6 +147,7 @@ func newGatewayActuatorOptions() *gatewayActuatorOptions {
 	}
 }
 
+// GatewayActuatorOption configures NewGatewayActuator.
 type GatewayActuatorOption func(*gatewayActuatorOptions)
 
 // WithGatewayActuatorLog sets the logger for a single gateway actuator.

@@ -3,31 +3,23 @@ package operator
 import (
 	"context"
 	"fmt"
-	"net"
 
-	"go.uber.org/zap"
-	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 
 	"github.com/yanet-platform/yanet2/agents/yanet-pipeline-operator/operatorpb"
 	"github.com/yanet-platform/yanet2/common/go/operator"
 )
 
-var (
-	serviceNames = []string{
-		operatorpb.PipelineOperatorService_ServiceDesc.ServiceName,
-		operatorpb.MetricsService_ServiceDesc.ServiceName,
-	}
-)
+// Actuator applies a desired stage configuration.
+type Actuator = operator.Actuator[*StageConfig]
 
+// Operator is the pipeline operator's thin wrapper around the generic
+// operator framework.
 type Operator struct {
-	cfg        *Config
-	server     *operator.GRPCServer
-	reconciler *Reconciler
-	actuator   Actuator
-	log        *zap.Logger
+	app *operator.Operator[*StageConfig]
 }
 
+// NewOperator constructs a pipeline operator from the supplied config.
 func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 	opts := newOptions()
 	for _, o := range options {
@@ -42,14 +34,9 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 	}
 	metrics := NewMetrics(gatewayMetrics)
 
-	service := NewService(WithServiceLog(log), WithServiceMetrics(metrics))
-	server := operator.NewGRPCServer(
-		cfg.Server,
-		[]func(*grpc.Server){
-			func(s *grpc.Server) { operatorpb.RegisterPipelineOperatorServiceServer(s, service) },
-			func(s *grpc.Server) { operatorpb.RegisterMetricsServiceServer(s, service) },
-		},
-		operator.WithGRPCLog(log),
+	service := NewService(
+		WithServiceMetrics(metrics),
+		WithServiceLog(log),
 	)
 
 	actuators := make([]Actuator, 0, len(cfg.Gateways))
@@ -69,70 +56,63 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 		actuators = append(actuators, actuator)
 	}
 
-	actuator := operator.NewFanOutActuator(
+	fanOut := operator.NewFanOutActuator(
 		actuators,
 		operator.WithFanOutLog(log),
 	)
 
-	reconciler := NewReconciler(
-		actuator,
-		WithReconcileInterval(
-			cfg.Reconcile.Interval.Unwrap(),
-		),
-		WithReconcileBackoff(
-			cfg.Reconcile.InitialBackoff.Unwrap(),
-			cfg.Reconcile.MaxBackoff.Unwrap(),
-		),
-		WithReconcilerMetrics(metrics),
-		WithReconcilerLog(log),
+	source := NewStageQueueSource(
+		WithStageQueueMetrics(metrics),
+		WithStageQueueLog(log),
 	)
 
-	m := &Operator{
-		cfg:        cfg,
-		server:     server,
-		reconciler: reconciler,
-		actuator:   actuator,
-		log:        log,
+	stages := cfg.Stages
+	services := []operator.ServiceRegistrar{
+		func(s *grpc.Server) string {
+			operatorpb.RegisterPipelineOperatorServiceServer(s, service)
+			return operatorpb.PipelineOperatorService_ServiceDesc.ServiceName
+		},
+		func(s *grpc.Server) string {
+			operatorpb.RegisterMetricsServiceServer(s, service)
+			return operatorpb.MetricsService_ServiceDesc.ServiceName
+		},
 	}
 
-	return m, nil
+	app := operator.NewOperator(
+		cfg.Server,
+		fanOut,
+		source,
+		services,
+		operator.WithReconcile(cfg.Reconcile),
+		operator.WithGateways(cfg.Register, cfg.Gateways...),
+		operator.WithPreRun(func(ctx context.Context) error {
+			if len(stages) == 0 {
+				return nil
+			}
+
+			queue := make([]*StageConfig, len(stages))
+			for idx := range stages {
+				queue[idx] = &stages[idx]
+			}
+			source.SetStages(queue)
+
+			return nil
+		}),
+		operator.WithMetrics(metrics),
+		operator.WithLog(log),
+	)
+
+	return &Operator{
+		app: app,
+	}, nil
 }
 
+// Close releases resources owned by the operator.
 func (m *Operator) Close() error {
-	return m.actuator.Close()
+	return m.app.Close()
 }
 
+// Run drives the operator until the supplied context is cancelled.
 func (m *Operator) Run(ctx context.Context) error {
-	if len(m.cfg.Stages) > 0 {
-		queue := make([]*StageConfig, len(m.cfg.Stages))
-		for idx := range m.cfg.Stages {
-			queue[idx] = &m.cfg.Stages[idx]
-		}
-		m.reconciler.SetStages(queue)
-	}
-
-	wg, ctx := errgroup.WithContext(ctx)
-	listener, err := net.Listen("tcp", m.cfg.Server.Endpoint.Unwrap())
-	if err != nil {
-		return fmt.Errorf("failed to listen gRPC operator endpoint %q: %w", m.cfg.Server.Endpoint.Unwrap(), err)
-	}
-
-	wg.Go(func() error {
-		return m.server.Run(ctx, listener)
-	})
-	wg.Go(func() error {
-		runner := operator.NewGatewayRegRunner(
-			m.cfg.Gateways,
-			serviceNames,
-			listener.Addr(),
-			operator.WithGatewayRegInterval(m.cfg.Register.Interval.Unwrap()),
-			operator.WithGatewayRegLog(m.log),
-		)
-		return runner.Run(ctx)
-	})
-	wg.Go(func() error {
-		return m.reconciler.Run(ctx)
-	})
-
-	return wg.Wait()
+	return m.app.Run(ctx)
 }

@@ -212,17 +212,16 @@ export const useInterpolatedCounters = <K extends string = string>(
             // Need keys to display
             if (currentKeys.length === 0) return;
 
-            // Need at least 2 rate snapshots for interpolation
-            // This ensures counters stay in "loading" state until we can animate smoothly
-            if (rates.length < 2) return;
+            // Need at least one rate snapshot to publish anything.
+            if (rates.length === 0) return;
 
             const newCounters = new Map<K, InterpolatedCounterData>();
             const newAbsoluteCounters = new Map<K, InterpolatedAbsoluteData>();
             const now = Date.now();
 
-            // Two rates - interpolate between them
-            const prevRate = rates[0];
-            const currRate = rates[1];
+            // When two rates are available, interpolate; otherwise use the single rate directly.
+            const prevRate = rates.length >= 2 ? rates[0] : null;
+            const currRate = rates[rates.length - 1];
 
             // Get the latest raw snapshot for absolute value extrapolation
             const latestSnapshot = snapshots[snapshots.length - 1];
@@ -235,7 +234,7 @@ export const useInterpolatedCounters = <K extends string = string>(
             const elapsedSinceSnapshot = (now - (latestSnapshot?.timestamp ?? now)) / 1000;
 
             for (const key of currentKeys) {
-                const prev = prevRate.rates.get(key);
+                const prev = prevRate?.rates.get(key);
                 const curr = currRate.rates.get(key);
                 const latestValue = latestSnapshot?.values.get(key);
 

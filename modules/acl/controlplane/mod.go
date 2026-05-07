@@ -12,9 +12,11 @@ import (
 	"github.com/yanet-platform/yanet2/modules/fwstate/controlplane/fwstatepb"
 )
 
-const agentName = "acl"
-const serviceName = "aclpb.ACLService"
-const fwstateServiceName = "fwstatepb.FWStateService"
+const (
+	agentName          = "acl"
+	serviceName        = "aclpb.ACLService"
+	fwstateServiceName = "fwstatepb.FWStateService"
+)
 
 // ACLModule is a control-plane component for ACL (Access Control List) module
 // with integrated firewall state management
@@ -24,11 +26,11 @@ type ACLModule struct {
 	agent          *ffi.Agent
 	aclService     *ACLService
 	fwstateService *fwstate.FWStateService
-	log            *zap.SugaredLogger
+	log            *zap.Logger
 }
 
 // NewACLModule creates a new ACL module instance
-func NewACLModule(cfg *Config, log *zap.SugaredLogger) (*ACLModule, error) {
+func NewACLModule(cfg *Config, log *zap.Logger) (*ACLModule, error) {
 	log = log.With(zap.String("module", serviceName))
 
 	shm, err := ffi.AttachSharedMemory(cfg.MemoryPath.Unwrap())
@@ -36,7 +38,7 @@ func NewACLModule(cfg *Config, log *zap.SugaredLogger) (*ACLModule, error) {
 		return nil, fmt.Errorf("failed to attach shared memory: %w", err)
 	}
 
-	log.Debugw("mapping shared memory",
+	log.Debug("mapping shared memory",
 		zap.Uint32("instance_id", cfg.InstanceID),
 		zap.Stringer("size", cfg.MemoryRequirements),
 	)
@@ -84,10 +86,10 @@ func (m *ACLModule) ACLAdapter() *ACLAdapter {
 
 func (m *ACLModule) Close() error {
 	if err := m.agent.Close(); err != nil {
-		m.log.Warnw("failed to close shared memory agent", "error", err)
+		m.log.Warn("failed to close shared memory agent", zap.Error(err))
 	}
 	if err := m.shm.Detach(); err != nil {
-		m.log.Warnw("failed to detach shared memory", "error", err)
+		m.log.Warn("failed to detach shared memory", zap.Error(err))
 	}
 
 	return nil

@@ -65,7 +65,7 @@ func Make(config *TestConfig) (*TestSetup, error) {
 		return nil, fmt.Errorf("failed to create new mock: %v", err)
 	}
 	logLevel := zapcore.InfoLevel
-	sugaredLogger, _, _ := logging.Init(&logging.Config{
+	logger, _, _ := logging.Init(&logging.Config{
 		Level: logLevel,
 	})
 	agentMemory := 4 * datasize.MB
@@ -75,7 +75,7 @@ func Make(config *TestConfig) (*TestSetup, error) {
 	agent, err := balancer.NewBalancerAgent(
 		mock.SharedMemory(),
 		agentMemory,
-		sugaredLogger,
+		logger,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create new balancer agent: %v", err)

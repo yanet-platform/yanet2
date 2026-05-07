@@ -99,7 +99,7 @@ func (m *GatewayRegRunner) Run(ctx context.Context) error {
 			nil,
 			gateway.WithBackOff(shortBackOff),
 			gateway.WithMaxElapsedTime(m.interval/2),
-			gateway.WithLog(log),
+			gateway.WithRegistrarLog(log),
 		)
 		if err != nil {
 			return fmt.Errorf("failed to create gateway registrar for %q: %w", cfg.Name, err)

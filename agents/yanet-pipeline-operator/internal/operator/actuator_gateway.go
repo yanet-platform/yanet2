@@ -14,6 +14,14 @@ import (
 	"github.com/yanet-platform/yanet2/devices/vlan/controlplane/vlanpb"
 )
 
+// GatewayActuatorMetricsObserver receives semantic events from a
+// single gateway actuator and translates them into metrics.
+type GatewayActuatorMetricsObserver interface {
+	OnApplyCompleted(err error)
+	OnResourceUpdated(kind string, err error)
+	OnGC(deleted, failed int, err error)
+}
+
 // GatewayActuator applies a StageConfig to a single Gateway and prunes
 // pipelines that are no longer part of the desired stage.
 type GatewayActuator struct {

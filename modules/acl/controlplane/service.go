@@ -25,7 +25,7 @@ type ACLService struct {
 	memoryBytes    uint64
 	handlerMetrics handlersMetrics
 
-	log *zap.SugaredLogger
+	log *zap.Logger
 }
 
 type aclConfig struct {
@@ -34,7 +34,7 @@ type aclConfig struct {
 	fwstateName string
 }
 
-func NewACLService(agent *ffi.Agent, memoryBytes uint64, log *zap.SugaredLogger) *ACLService {
+func NewACLService(agent *ffi.Agent, memoryBytes uint64, log *zap.Logger) *ACLService {
 	return &ACLService{
 		agent:          agent,
 		configs:        make(map[string]aclConfig),
@@ -198,7 +198,7 @@ func (m *ACLService) UpdateConfig(
 
 	oldConfigs, ok := m.configs[name]
 	if ok && oldConfigs.fwstateName != "" {
-		m.log.Infow("transfer fwstate config for ACL module", zap.String("config", name))
+		m.log.Info("transfer fwstate config for ACL module", zap.String("config", name))
 		config.TransferFwStateConfig(oldConfigs.acl)
 	}
 
@@ -291,7 +291,7 @@ func (m *ACLService) DeleteConfig(
 		if err := m.agent.DeleteModuleConfig(name); err != nil {
 			return nil, status.Errorf(codes.Internal, "could not delete acl module config '%s': %v", name, err)
 		}
-		m.log.Infow("successfully deleted ACL module config", zap.String("name", name))
+		m.log.Info("successfully deleted ACL module config", zap.String("name", name))
 		config.acl.Free()
 	}
 

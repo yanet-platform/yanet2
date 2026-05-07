@@ -1,0 +1,72 @@
+// Shared styles for lane-editor components: Endpoint, FlowLink, InsertSlot.
+// CSS variables (--lane-*) must be provided by the parent page container.
+
+// ─── Flow connector ───────────────────────────────────────────────────────────
+
+.lane-flow-link {
+    width: 22px;
+    height: 2px;
+    background: repeating-linear-gradient(
+        to right,
+        var(--lane-line-2) 0 4px,
+        transparent 4px 8px
+    );
+    flex-shrink: 0;
+    align-self: center;
+}
+
+// ─── Endpoint ─────────────────────────────────────────────────────────────────
+
+.lane-endpoint {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    background: var(--lane-bg-3);
+    border: 1px solid var(--lane-line-2);
+    color: var(--lane-text-2);
+    margin: 8px 0;
+}
+
+// ─── Insert slot ──────────────────────────────────────────────────────────────
+
+.lane-insert-slot {
+    width: 22px;
+    height: 56px;
+    flex-shrink: 0;
+    border-radius: var(--lane-r-sm);
+    pointer-events: none;
+    transition: width 0.12s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    &--active {
+        width: 40px;
+
+        .lane-insert-slot__inner {
+            width: 36px;
+            height: 56px;
+            background: var(--lane-accent-soft);
+            border: 1.5px dashed var(--lane-accent);
+            border-radius: var(--lane-r-sm);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            color: var(--lane-accent);
+            font-weight: 300;
+        }
+    }
+}
+
+.lane-insert-slot__inner {
+    width: 2px;
+    height: 28px;
+    background: var(--lane-line-2);
+    border-radius: 1px;
+    transition: all 0.12s ease;
+}

@@ -29,8 +29,8 @@ func newGatewayRegistrarOptions() *gatewayRegistrarOptions {
 	}
 }
 
-// WithLog sets the logger for the GatewayRegistrar.
-func WithLog(log *zap.Logger) GatewayRegistrarOption {
+// WithRegistrarLog sets the logger for the GatewayRegistrar.
+func WithRegistrarLog(log *zap.Logger) GatewayRegistrarOption {
 	return func(o *gatewayRegistrarOptions) {
 		o.log = log
 	}

@@ -3,9 +3,7 @@ package operator
 import (
 	"context"
 	"io"
-	"maps"
 	"net/netip"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -26,8 +24,7 @@ import (
 type RouteService struct {
 	operatorpb.UnimplementedRouteServiceServer
 
-	ribsLock   sync.RWMutex
-	ribs       map[string]*rib.RIB
+	ribs       *RIBStore
 	neighTable *neigh.NeighTable
 
 	ribTTL    time.Duration
@@ -49,7 +46,7 @@ func NewRouteService(
 	}
 
 	return &RouteService{
-		ribs:       map[string]*rib.RIB{},
+		ribs:       opts.RIBs,
 		neighTable: neighTable,
 		ribTTL:     opts.RIBTTL,
 		quitCh:     make(chan bool),
@@ -67,14 +64,7 @@ func (m *RouteService) Close() error {
 
 // Configs returns a snapshot of all known RIB config names.
 func (m *RouteService) Configs() []string {
-	m.ribsLock.RLock()
-	defer m.ribsLock.RUnlock()
-
-	out := make([]string, 0, len(m.ribs))
-	for name := range m.ribs {
-		out = append(out, name)
-	}
-	return out
+	return m.ribs.Configs()
 }
 
 // ListConfigs returns the names of all RIB configs known to the
@@ -90,12 +80,7 @@ func (m *RouteService) ListConfigs(
 
 // Snapshot returns a snapshot of all RIBs keyed by config name.
 func (m *RouteService) Snapshot() map[string]*rib.RIB {
-	m.ribsLock.RLock()
-	defer m.ribsLock.RUnlock()
-
-	out := make(map[string]*rib.RIB, len(m.ribs))
-	maps.Copy(out, m.ribs)
-	return out
+	return m.ribs.Snapshot()
 }
 
 func (m *RouteService) ShowRoutes(
@@ -345,23 +330,9 @@ func (m *RouteService) FeedRIB(stream operatorpb.RouteService_FeedRIBServer) err
 }
 
 func (m *RouteService) getRib(name string) (*rib.RIB, bool) {
-	m.ribsLock.RLock()
-	defer m.ribsLock.RUnlock()
-	ribRef, ok := m.ribs[name]
-	return ribRef, ok
+	return m.ribs.Get(name)
 }
 
 func (m *RouteService) getOrCreateRib(name string) *rib.RIB {
-	m.ribsLock.Lock()
-	defer m.ribsLock.Unlock()
-
-	ribRef, ok := m.ribs[name]
-	if !ok {
-		m.log.Info("created new RIB",
-			zap.String("name", name),
-		)
-		ribRef = rib.NewRIB(m.log)
-		m.ribs[name] = ribRef
-	}
-	return ribRef
+	return m.ribs.GetOrCreate(name)
 }

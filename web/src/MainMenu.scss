@@ -1,0 +1,19 @@
+.main-menu__section-label {
+    display: block;
+    padding: 4px 12px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--g-color-text-secondary);
+    user-select: none;
+    pointer-events: none;
+}
+
+.main-menu__section-header {
+    cursor: default;
+
+    &:hover {
+        background: transparent;
+    }
+}

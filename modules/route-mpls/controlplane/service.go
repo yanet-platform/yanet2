@@ -25,7 +25,7 @@ type RouteMPLSService struct {
 	agent   *ffi.Agent
 	configs map[string]routeMPLSConfig
 
-	log *zap.SugaredLogger
+	log *zap.Logger
 }
 
 type NextHop struct {
@@ -74,7 +74,7 @@ type routeMPLSConfig struct {
 
 func NewRouteMPLSService(
 	agent *ffi.Agent,
-	log *zap.SugaredLogger,
+	log *zap.Logger,
 ) *RouteMPLSService {
 	return &RouteMPLSService{
 		agent:   agent,
@@ -170,9 +170,14 @@ func (m *RouteMPLSService) DeleteConfig(
 
 	if config.routeMPLS != nil {
 		if err := m.agent.DeleteModuleConfig(name); err != nil {
-			return nil, status.Errorf(codes.Internal, "could not delete acl module config '%s': %v", name, err)
+			return nil, status.Errorf(
+				codes.Internal,
+				"could not delete acl module config '%s': %v",
+				name,
+				err,
+			)
 		}
-		m.log.Infow("successfully deleted ACL module config", zap.String("name", name))
+		m.log.Info("successfully deleted ACL module config", zap.String("name", name))
 		config.routeMPLS.Free()
 	}
 
@@ -224,7 +229,7 @@ func (m *routeMPLSConfig) submit() error {
 	ffiRules = append(ffiRules, routeMPLSRule{
 		Dst4s: default4Dst,
 		NextHops: []routeMPLSNextHop{
-			routeMPLSNextHop{
+			{
 				Kind:    routeMPLSKindNone,
 				Weight:  1,
 				Counter: "no route mpls v4",
@@ -238,7 +243,7 @@ func (m *routeMPLSConfig) submit() error {
 	ffiRules = append(ffiRules, routeMPLSRule{
 		Dst6s: default16Dst,
 		NextHops: []routeMPLSNextHop{
-			routeMPLSNextHop{
+			{
 				Kind:    routeMPLSKindNone,
 				Weight:  1,
 				Counter: "no route mpls v6",
@@ -320,7 +325,6 @@ func (m *RouteMPLSService) CreateConfig(
 	}
 
 	module, err := NewModuleConfig(m.agent, name)
-
 	if err != nil {
 		return nil, err
 	}
@@ -447,5 +451,4 @@ func (m *RouteMPLSService) UpdateConfig(
 	response := &routemplspb.UpdateConfigResponse{}
 
 	return response, nil
-
 }

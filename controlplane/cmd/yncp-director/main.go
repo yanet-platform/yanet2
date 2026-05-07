@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/yanet-platform/yanet2/common/go/logging"
@@ -76,7 +77,7 @@ func run(cmd Cmd) error {
 	})
 	wg.Go(func() error {
 		err := xcmd.WaitInterrupted(ctx)
-		log.Infof("caught signal: %v", err)
+		log.Info("caught signal", zap.Error(err))
 		return err
 	})
 

@@ -113,7 +113,7 @@ func udpPacket(t *testing.T, src, dst string) gopacket.Packet {
 }
 
 func newService(agent *ffi.Agent) *acl.ACLService {
-	return acl.NewACLService(agent, 64*1024*1024, zap.NewNop().Sugar())
+	return acl.NewACLService(agent, 64*1024*1024, zap.NewNop())
 }
 
 // 1. Compilation info (ffi.GetInfo)
@@ -231,7 +231,7 @@ func TestMetrics_ServiceGauges(t *testing.T) {
 	require.NoError(t, err)
 	defer setup.Free()
 
-	svc := acl.NewACLService(setup.agent, memBytes, zap.NewNop().Sugar())
+	svc := acl.NewACLService(setup.agent, memBytes, zap.NewNop())
 	_, err = svc.UpdateConfig(context.Background(), &aclpb.UpdateConfigRequest{
 		Name:  defaultConfigName,
 		Rules: []*aclpb.Rule{makeProtoRule("10.0.0.1", "10.0.0.2", aclpb.ActionKind_ACTION_KIND_PASS)},

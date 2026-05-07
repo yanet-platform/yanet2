@@ -1,11 +1,9 @@
 package operator
 
 import (
-	"time"
-
 	"go.uber.org/zap"
 
-	"github.com/yanet-platform/yanet2/common/go/operator"
+	"github.com/yanet-platform/yanet2/common/commonpb"
 )
 
 type options struct {
@@ -18,6 +16,7 @@ func newOptions() *options {
 	}
 }
 
+// Option configures NewOperator.
 type Option func(*options)
 
 // WithLog sets the logger for the Operator and all sub-components.
@@ -27,54 +26,12 @@ func WithLog(log *zap.Logger) Option {
 	}
 }
 
-type reconcilerOptions struct {
-	Interval       time.Duration
-	InitialBackoff time.Duration
-	MaxBackoff     time.Duration
-	Metrics        ReconcilerMetricsObserver
-	Log            *zap.Logger
-}
+// noopMetricsCollector is the default MetricsCollector wired into
+// service options when the caller does not pass a real one.
+type noopMetricsCollector struct{}
 
-func newReconcilerOptions() *reconcilerOptions {
-	return &reconcilerOptions{
-		Interval:       operator.DefaultReconcileInterval,
-		InitialBackoff: operator.DefaultReconcileInitialBackoff,
-		MaxBackoff:     operator.DefaultReconcileMaxBackoff,
-		Metrics:        noopReconcilerMetricsObserver{},
-		Log:            zap.NewNop(),
-	}
-}
-
-type ReconcilerOption func(*reconcilerOptions)
-
-// WithReconcilerLog sets the logger used by the reconcile loop.
-func WithReconcilerLog(log *zap.Logger) ReconcilerOption {
-	return func(o *reconcilerOptions) {
-		o.Log = log
-	}
-}
-
-// WithReconcileInterval sets the steady-state period between successful
-// reconcile passes.
-func WithReconcileInterval(d time.Duration) ReconcilerOption {
-	return func(o *reconcilerOptions) {
-		o.Interval = d
-	}
-}
-
-// WithReconcileBackoff sets the initial and maximum sleep durations for
-// the exponential backoff applied after failed reconcile passes.
-func WithReconcileBackoff(initial, max time.Duration) ReconcilerOption {
-	return func(o *reconcilerOptions) {
-		o.InitialBackoff = initial
-		o.MaxBackoff = max
-	}
-}
-
-func WithReconcilerMetrics(metrics ReconcilerMetricsObserver) ReconcilerOption {
-	return func(o *reconcilerOptions) {
-		o.Metrics = metrics
-	}
+func (noopMetricsCollector) Collect() []*commonpb.Metric {
+	return nil
 }
 
 type serviceOptions struct {
@@ -89,8 +46,10 @@ func newServiceOptions() *serviceOptions {
 	}
 }
 
+// ServiceOption configures NewService.
 type ServiceOption func(*serviceOptions)
 
+// WithServiceLog sets the logger for the Service.
 func WithServiceLog(log *zap.Logger) ServiceOption {
 	return func(o *serviceOptions) {
 		o.Log = log
@@ -98,14 +57,21 @@ func WithServiceLog(log *zap.Logger) ServiceOption {
 }
 
 // WithServiceMetrics attaches the metrics sink that GetMetrics serves
-// from.
-//
-// When unset, GetMetrics returns an empty response.
+// from. When unset, GetMetrics returns an empty response.
 func WithServiceMetrics(m MetricsCollector) ServiceOption {
 	return func(o *serviceOptions) {
 		o.Metrics = m
 	}
 }
+
+// noopGatewayActuatorMetricsObserver is the default
+// GatewayActuatorMetricsObserver wired into gateway-actuator options
+// when no metrics sink is attached.
+type noopGatewayActuatorMetricsObserver struct{}
+
+func (noopGatewayActuatorMetricsObserver) OnApplyCompleted(error)          {}
+func (noopGatewayActuatorMetricsObserver) OnResourceUpdated(string, error) {}
+func (noopGatewayActuatorMetricsObserver) OnGC(int, int, error)            {}
 
 type gatewayActuatorOptions struct {
 	Metrics GatewayActuatorMetricsObserver
@@ -119,14 +85,17 @@ func newGatewayActuatorOptions() *gatewayActuatorOptions {
 	}
 }
 
+// GatewayActuatorOption configures NewGatewayActuator.
 type GatewayActuatorOption func(*gatewayActuatorOptions)
 
+// WithGatewayActuatorLog sets the logger for the gateway actuator.
 func WithGatewayActuatorLog(log *zap.Logger) GatewayActuatorOption {
 	return func(o *gatewayActuatorOptions) {
 		o.Log = log
 	}
 }
 
+// WithGatewayActuatorMetrics attaches the per-gateway metrics observer.
 func WithGatewayActuatorMetrics(metrics GatewayActuatorMetricsObserver) GatewayActuatorOption {
 	return func(o *gatewayActuatorOptions) {
 		o.Metrics = metrics

@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"go.uber.org/zap"
-	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 
 	"github.com/yanet-platform/yanet2/agents/yanet-route-operator/internal/discovery/neigh"
@@ -23,26 +22,19 @@ const (
 	staticTablePriority = 10
 )
 
-var (
-	serviceNames = []string{
-		operatorpb.RouteService_ServiceDesc.ServiceName,
-		operatorpb.NeighbourService_ServiceDesc.ServiceName,
-		operatorpb.RouteOperatorService_ServiceDesc.ServiceName,
-		operatorpb.MetricsService_ServiceDesc.ServiceName,
-	}
-)
+// Actuator applies a desired set of FIBs to one or more downstream
+// targets (gateways).
+type Actuator = operator.Actuator[[]FIB]
 
-// Operator wires together the gRPC server, gateway-registration loop
-// and reconciler for the route operator.
+// Operator is the route operator's thin wrapper around the generic
+// operator framework.
 type Operator struct {
 	cfg          *Config
-	server       *operator.GRPCServer
-	reconciler   *Reconciler
-	actuator     Actuator
+	app          *operator.Operator[[]FIB]
 	routeSvc     *RouteService
-	neighbourSvc *NeighbourService
 	neighTable   *neigh.NeighTable
 	neighMonitor *neigh.NeighMonitor
+	source       *RouteSource
 	log          *zap.Logger
 }
 
@@ -66,22 +58,18 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 		return nil, fmt.Errorf("failed to create neighbour monitor: %w", err)
 	}
 
-	// Reconciler needs services for snapshot + services need a wake
-	// callback. Construct a placeholder closure first; once both sides
-	// exist we resolve the closure to the real reconciler.
-	var reconciler *Reconciler
-	wake := func() {
-		if reconciler != nil {
-			reconciler.Wake()
-		}
-	}
+	routeRIBStore := newRIBStore(log)
+	source := NewRouteSource(neighTable, routeRIBStore)
+	wake := source.WakeFunc()
 
 	routeSvc := NewRouteService(
 		neighTable,
-		WithRouteServiceLog(log),
+		WithRouteServiceRIBStore(routeRIBStore),
 		WithRouteServiceRIBTTL(ribTTL(cfg)),
 		WithRouteServiceOnChanged(wake),
+		WithRouteServiceLog(log),
 	)
+
 	neighbourSvc := NewNeighbourService(
 		neighTable,
 		WithNeighbourServiceOnChanged(wake),
@@ -90,17 +78,6 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 		WithMetricsServiceCollector(metrics),
 	)
 	operatorSvc := NewRouteOperatorService()
-
-	server := operator.NewGRPCServer(
-		cfg.Server,
-		[]func(*grpc.Server){
-			func(s *grpc.Server) { operatorpb.RegisterRouteServiceServer(s, routeSvc) },
-			func(s *grpc.Server) { operatorpb.RegisterNeighbourServiceServer(s, neighbourSvc) },
-			func(s *grpc.Server) { operatorpb.RegisterMetricsServiceServer(s, metricsSvc) },
-			func(s *grpc.Server) { operatorpb.RegisterRouteOperatorServiceServer(s, operatorSvc) },
-		},
-		operator.WithGRPCLog(log),
-	)
 
 	actuators := make([]Actuator, 0, len(cfg.Gateways))
 	for _, gw := range cfg.Gateways {
@@ -119,45 +96,62 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 		actuators = append(actuators, actuator)
 	}
 
-	actuator := operator.NewFanOutActuator(
+	fanOut := operator.NewFanOutActuator(
 		actuators,
 		operator.WithFanOutLog(log),
 	)
 
-	snapshot := SnapshotFunc(func() []FIB {
-		ribs := routeSvc.Snapshot()
-		view := neighTable.View()
+	services := []operator.ServiceRegistrar{
+		func(s *grpc.Server) string {
+			operatorpb.RegisterRouteServiceServer(s, routeSvc)
+			return operatorpb.RouteService_ServiceDesc.ServiceName
+		},
+		func(s *grpc.Server) string {
+			operatorpb.RegisterNeighbourServiceServer(s, neighbourSvc)
+			return operatorpb.NeighbourService_ServiceDesc.ServiceName
+		},
+		func(s *grpc.Server) string {
+			operatorpb.RegisterMetricsServiceServer(s, metricsSvc)
+			return operatorpb.MetricsService_ServiceDesc.ServiceName
+		},
+		func(s *grpc.Server) string {
+			operatorpb.RegisterRouteOperatorServiceServer(s, operatorSvc)
+			return operatorpb.RouteOperatorService_ServiceDesc.ServiceName
+		},
+	}
 
-		fibs := make([]FIB, 0, len(ribs))
-		for name, ribRef := range ribs {
-			fib, _ := BuildFIB(ribRef.DumpRoutes(), view)
-			fib.Name = name
-			fibs = append(fibs, fib)
-		}
-		return fibs
-	})
+	app := operator.NewOperator(
+		cfg.Server,
+		fanOut,
+		source,
+		services,
+		operator.WithLog(log),
+		operator.WithReconcile(cfg.Reconcile),
+		operator.WithGateways(cfg.Register, cfg.Gateways...),
+		operator.WithMetrics(metrics),
+		operator.WithPreRun(func(ctx context.Context) error {
+			if err := applyStaticSeed(cfg, routeSvc, neighTable); err != nil {
+				return err
+			}
 
-	reconciler = NewReconciler(
-		actuator,
-		snapshot,
-		WithReconcileInterval(cfg.Reconcile.Interval.Unwrap()),
-		WithReconcileBackoff(
-			cfg.Reconcile.InitialBackoff.Unwrap(),
-			cfg.Reconcile.MaxBackoff.Unwrap(),
-		),
-		WithReconcilerMetrics(metrics),
-		WithReconcilerLog(log),
+			// The route source is woken so the first reconcile pass observes
+			// the seeded state.
+			if len(cfg.Static.Routes) > 0 || len(cfg.Static.Neighbours) > 0 {
+				source.WakeFunc()()
+			}
+
+			return nil
+		}),
+		operator.WithWorkers(neighbourMonitorRunner(neighMonitor)),
 	)
 
 	return &Operator{
 		cfg:          cfg,
-		server:       server,
-		reconciler:   reconciler,
-		actuator:     actuator,
+		app:          app,
 		routeSvc:     routeSvc,
-		neighbourSvc: neighbourSvc,
 		neighTable:   neighTable,
 		neighMonitor: neighMonitor,
+		source:       source,
 		log:          log,
 	}, nil
 }
@@ -167,6 +161,7 @@ func ribTTL(cfg *Config) time.Duration {
 	if cfg.RIBTTL > 0 {
 		return cfg.RIBTTL
 	}
+
 	return DefaultRIBTTL
 }
 
@@ -205,92 +200,73 @@ func (m *Operator) Close() error {
 	if err := m.routeSvc.Close(); err != nil {
 		m.log.Warn("failed to close route service", zap.Error(err))
 	}
-	return m.actuator.Close()
+	return m.app.Close()
 }
 
-// Run starts the gRPC server, gateway-registration loops and reconcile
-// loop. It blocks until the supplied context is cancelled or any
-// goroutine returns an error.
+// Run drives the operator until the supplied context is cancelled.
 func (m *Operator) Run(ctx context.Context) error {
-	if err := m.applyStaticSeed(); err != nil {
-		return fmt.Errorf("failed to apply static seed: %w", err)
-	}
-
-	wg, ctx := errgroup.WithContext(ctx)
-	listener, err := net.Listen("tcp", m.cfg.Server.Endpoint.Unwrap())
-	if err != nil {
-		return fmt.Errorf("failed to listen gRPC operator endpoint %q: %w", m.cfg.Server.Endpoint.Unwrap(), err)
-	}
-
-	wg.Go(func() error {
-		return m.server.Run(ctx, listener)
-	})
-	wg.Go(func() error {
-		runner := operator.NewGatewayRegRunner(
-			m.cfg.Gateways,
-			serviceNames,
-			listener.Addr(),
-			operator.WithGatewayRegInterval(m.cfg.Register.Interval.Unwrap()),
-			operator.WithGatewayRegLog(m.log),
-		)
-		return runner.Run(ctx)
-	})
-	wg.Go(func() error {
-		return m.reconciler.Run(ctx)
-	})
-	wg.Go(func() error {
-		return m.runNeighbourMonitor(ctx)
-	})
-
-	return wg.Wait()
+	return m.app.Run(ctx)
 }
 
-// runNeighbourMonitor runs the netlink monitor when enabled.
-func (m *Operator) runNeighbourMonitor(ctx context.Context) error {
-	if m.neighMonitor == nil {
-		<-ctx.Done()
-		return ctx.Err()
+// neighbourMonitorRunner adapts a NeighMonitor (or its absence) to the
+// framework's Runner type.
+func neighbourMonitorRunner(monitor *neigh.NeighMonitor) operator.Runner {
+	return func(ctx context.Context) error {
+		if monitor == nil {
+			return nil
+		}
+
+		return monitor.Run(ctx)
 	}
-	return m.neighMonitor.Run(ctx)
 }
 
 // applyStaticSeed seeds the operator state from the YAML static config.
-func (m *Operator) applyStaticSeed() error {
-	module := m.cfg.Function.Module.Unwrap()
-	for _, route := range m.cfg.Static.Routes {
+func applyStaticSeed(
+	cfg *Config,
+	routeSvc *RouteService,
+	neighTable *neigh.NeighTable,
+) error {
+	module := cfg.Function.Module.Unwrap()
+	for _, route := range cfg.Static.Routes {
 		prefix, err := netip.ParsePrefix(route.Prefix)
 		if err != nil {
 			return fmt.Errorf("failed to parse static route prefix %q: %w", route.Prefix, err)
 		}
+
 		nexthop, err := netip.ParseAddr(route.NexthopAddr)
 		if err != nil {
 			return fmt.Errorf("failed to parse static route nexthop %q: %w", route.NexthopAddr, err)
 		}
-		holder := m.routeSvc.getOrCreateRib(module)
+
+		holder := routeSvc.getOrCreateRib(module)
 		if err := holder.AddUnicastRoute(prefix, nexthop, rib.RouteSourceStatic); err != nil {
 			return fmt.Errorf("failed to seed static route %s via %s: %w", prefix, nexthop, err)
 		}
 	}
 
-	if len(m.cfg.Static.Neighbours) > 0 {
+	if len(cfg.Static.Neighbours) > 0 {
 		grouped := map[string][]neigh.NeighbourEntry{}
-		for _, n := range m.cfg.Static.Neighbours {
+		for _, n := range cfg.Static.Neighbours {
 			table := n.Table
 			if table == "" {
 				table = defaultStaticTable
 			}
+
 			addr, err := netip.ParseAddr(n.NextHop)
 			if err != nil {
 				return fmt.Errorf("failed to parse static neighbour next_hop %q: %w", n.NextHop, err)
 			}
+
 			linkMAC, err := parseMAC(n.LinkAddr)
 			if err != nil {
 				return fmt.Errorf("failed to parse static neighbour link_addr %q: %w", n.LinkAddr, err)
 			}
+
 			hwMAC, err := parseMAC(n.HardwareAddr)
 			if err != nil {
 				return fmt.Errorf("failed to parse static neighbour hardware_addr %q: %w", n.HardwareAddr, err)
 			}
+
 			grouped[table] = append(grouped[table], neigh.NeighbourEntry{
 				NextHop: addr,
 				HardwareRoute: neigh.HardwareRoute{
@@ -303,15 +279,12 @@ func (m *Operator) applyStaticSeed() error {
 				Priority:  n.Priority,
 			})
 		}
+
 		for table, entries := range grouped {
-			if err := m.neighTable.Add(table, entries); err != nil {
+			if err := neighTable.Add(table, entries); err != nil {
 				return fmt.Errorf("failed to seed neighbours into table %q: %w", table, err)
 			}
 		}
-	}
-
-	if len(m.cfg.Static.Routes) > 0 || len(m.cfg.Static.Neighbours) > 0 {
-		m.reconciler.Wake()
 	}
 
 	return nil

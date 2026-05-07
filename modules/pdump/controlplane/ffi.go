@@ -23,7 +23,7 @@ import (
 )
 
 var (
-	logger    *zap.SugaredLogger
+	logger    *zap.Logger
 	debugEBPF bool
 
 	defaultSnaplen = uint32(C.default_snaplen)
@@ -41,9 +41,9 @@ func pdumpGoControlplaneLog(level C.uint32_t, msg *C.char) {
 	goMsg := C.GoString(msg)
 	switch level {
 	case C.log_emerg, C.log_alert, C.log_crit:
-		logger.Errorf("CRIT: %s", replacer.Replace(goMsg))
+		logger.Sugar().Errorf("CRIT: %s", replacer.Replace(goMsg))
 	case C.log_error:
-		logger.Errorf("%s", goMsg) // format for suppressing trace
+		logger.Sugar().Errorf("%s", goMsg) // format for suppressing trace
 
 	case C.log_warn:
 		logger.Warn(replacer.Replace(goMsg))
@@ -198,7 +198,7 @@ func (m *ModuleConfig) SetSnapLen(snaplen uint32) error {
 	return nil
 }
 
-func (m *ModuleConfig) SetupRing(ring *ringBuffer, log *zap.SugaredLogger) error {
+func (m *ModuleConfig) SetupRing(ring *ringBuffer, log *zap.Logger) error {
 	var workerCount C.uint64_t
 
 	errCtx := newErrorCallbackContext()
@@ -227,7 +227,7 @@ func (m *ModuleConfig) SetupRing(ring *ringBuffer, log *zap.SugaredLogger) error
 			readIdx:     0,
 			data:        unsafe.Slice((*byte)(dataPtr), rings[idx].size),
 			mask:        uint64(rings[idx].mask),
-			log:         log.With("ringIdx", idx).Desugar(),
+			log:         log.With(zap.Int("ringIdx", idx)),
 		}
 		ring.workers = append(ring.workers, worker)
 	}
