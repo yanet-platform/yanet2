@@ -15,6 +15,6 @@ export const AddModuleButton: React.FC<AddModuleButtonProps> = ({ onClick }) => 
         title="Add module"
         aria-label="Add module"
     >
-        + module
+        +
     </button>
 );

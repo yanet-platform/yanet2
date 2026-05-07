@@ -4,6 +4,7 @@ import * as yaml from 'js-yaml';
 import { diffLines } from 'diff';
 import type { Change } from 'diff';
 import type { NetworkFunction } from '../types';
+import { localToApi } from '../wire';
 
 interface DiffModalProps {
     fn: NetworkFunction;
@@ -13,26 +14,14 @@ interface DiffModalProps {
     onApply: () => Promise<void>;
 }
 
-/** Strip volatile / non-config fields before serialising for diff. */
-const toComparableObj = (fn: NetworkFunction): object => ({
-    id: fn.id,
-    type: fn.type,
-    ...(fn.description ? { description: fn.description } : {}),
-    chains: fn.chains.map(c => ({
-        id: c.id,
-        name: c.name,
-        weight: c.weight,
-        modules: c.modules.map(m => ({
-            id: m.id,
-            type: m.type,
-            name: m.name,
-            ...(m.config && Object.keys(m.config).length > 0 ? { config: m.config } : {}),
-        })),
-    })),
-});
-
 const toYaml = (fn: NetworkFunction): string =>
-    yaml.dump(toComparableObj(fn), { sortKeys: false, lineWidth: 120, noRefs: true });
+    yaml.dump(
+        (() => {
+            const { id, ...fnBody } = localToApi(fn);
+            return { name: id?.name ?? '', ...fnBody };
+        })(),
+        { sortKeys: false, lineWidth: 120, noRefs: true },
+    );
 
 /** One row in the side-by-side diff: left content (removed/context), right content (added/context). */
 interface SbsRow {

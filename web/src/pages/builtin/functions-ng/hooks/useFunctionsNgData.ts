@@ -13,11 +13,12 @@ export interface UseFunctionsNgDataResult {
     dispatch: (action: FunctionsAction) => void;
     saveFn: (fnId: string) => Promise<void>;
     discardFn: (fnId: string) => void;
+    createFn: (name: string) => Promise<boolean>;
 }
 
 /**
  * Loads all network functions from the API, manages local edit state via useReducer,
- * and exposes per-function save/discard operations.
+ * and exposes per-function save/discard/create operations.
  */
 export const useFunctionsNgData = (): UseFunctionsNgDataResult => {
     const [state, rawDispatch] = useReducer(functionsReducer, initialState);
@@ -28,44 +29,34 @@ export const useFunctionsNgData = (): UseFunctionsNgDataResult => {
         rawDispatch(action);
     }, []);
 
-    useEffect(() => {
-        let cancelled = false;
+    const load = useCallback(async (): Promise<void> => {
+        setLoading(true);
+        try {
+            const listResp = await API.functions.list({});
+            const ids = listResp.ids ?? [];
+            const names = ids.map(id => id.name ?? '').filter(Boolean);
+            setFnIds(names);
 
-        const load = async (): Promise<void> => {
-            setLoading(true);
-            try {
-                const listResp = await API.functions.list({});
-                const ids = listResp.ids ?? [];
-
-                if (cancelled) {
-                    return;
-                }
-
-                const names = ids.map(id => id.name ?? '').filter(Boolean);
-                setFnIds(names);
-
-                await Promise.all(ids.map(async (fid) => {
-                    try {
-                        const resp = await API.functions.get({ id: fid });
-                        if (resp.function && !cancelled) {
-                            rawDispatch({ type: 'LOAD_FUNCTION', fn: apiToLocal(resp.function) });
-                        }
-                    } catch (err) {
-                        toaster.error('fn-ng-load', `Failed to load function ${fid.name}`, err);
+            await Promise.all(ids.map(async (fid) => {
+                try {
+                    const resp = await API.functions.get({ id: fid });
+                    if (resp.function) {
+                        rawDispatch({ type: 'LOAD_FUNCTION', fn: apiToLocal(resp.function) });
                     }
-                }));
-            } catch (err) {
-                toaster.error('fn-ng-list', 'Failed to load functions', err);
-            } finally {
-                if (!cancelled) {
-                    setLoading(false);
+                } catch (err) {
+                    toaster.error('fn-ng-load', `Failed to load function ${fid.name}`, err);
                 }
-            }
-        };
-
-        load();
-        return () => { cancelled = true; };
+            }));
+        } catch (err) {
+            toaster.error('fn-ng-list', 'Failed to load functions', err);
+        } finally {
+            setLoading(false);
+        }
     }, []);
+
+    useEffect(() => {
+        load();
+    }, [load]);
 
     const saveFn = useCallback(async (fnId: string): Promise<void> => {
         const fn = state.local[fnId];
@@ -95,9 +86,21 @@ export const useFunctionsNgData = (): UseFunctionsNgDataResult => {
     const getServerFn = useCallback((fnId: string): NetworkFunction | null =>
         state.server[fnId] ?? null, [state.server]);
 
+    const createFn = useCallback(async (name: string): Promise<boolean> => {
+        try {
+            await API.functions.update({ function: { id: { name }, chains: [] } });
+            await load();
+            toaster.success(`fn-ng-create-${name}`, `Function "${name}" created.`);
+            return true;
+        } catch (err) {
+            toaster.error(`fn-ng-create-err-${name}`, `Failed to create "${name}"`, err);
+            return false;
+        }
+    }, [load]);
+
     const functions = fnIds
         .map(id => state.local[id])
         .filter((f): f is NetworkFunction => !!f);
 
-    return { functions, loading, isDirty, getServerFn, dispatch, saveFn, discardFn };
+    return { functions, loading, isDirty, getServerFn, dispatch, saveFn, discardFn, createFn };
 };

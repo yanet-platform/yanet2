@@ -1,4 +1,5 @@
 import type { NetworkFunction, Chain, FunctionsAction } from './types';
+import { localToApi } from './wire';
 
 export interface FunctionsState {
     /** Server-authoritative snapshots, keyed by fn id. */
@@ -18,11 +19,27 @@ export const initialState: FunctionsState = {
 const findFn = (state: FunctionsState, fnId: string): NetworkFunction | undefined =>
     state.local[fnId];
 
-const updateFn = (state: FunctionsState, fnId: string, updated: NetworkFunction): FunctionsState => ({
-    ...state,
-    local: { ...state.local, [fnId]: updated },
-    dirty: new Set([...state.dirty, fnId]),
-});
+/** Returns true when the local function differs from the server snapshot. */
+const isDirty = (updated: NetworkFunction, server: NetworkFunction | undefined): boolean => {
+    if (!server) {
+        return true;
+    }
+    return JSON.stringify(localToApi(updated)) !== JSON.stringify(localToApi(server));
+};
+
+const updateFn = (state: FunctionsState, fnId: string, updated: NetworkFunction): FunctionsState => {
+    const dirty = new Set(state.dirty);
+    if (isDirty(updated, state.server[fnId])) {
+        dirty.add(fnId);
+    } else {
+        dirty.delete(fnId);
+    }
+    return {
+        ...state,
+        local: { ...state.local, [fnId]: updated },
+        dirty,
+    };
+};
 
 const mapChains = (fn: NetworkFunction, chainId: string, mapper: (c: Chain) => Chain): NetworkFunction => ({
     ...fn,

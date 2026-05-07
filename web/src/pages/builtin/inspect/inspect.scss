@@ -1,5 +1,11 @@
 @use '../../../styles/variables' as *;
 
+.inspect-page-sub {
+    margin-top: 4px;
+    font-size: 12.5px;
+    color: var(--inspect-fg-2);
+}
+
 .inspect-page {
     --inspect-bg-0: var(--g-color-base-background);
     --inspect-bg-1: color-mix(in srgb, var(--g-color-base-float) 50%, #000 24%);
@@ -40,36 +46,6 @@
 
     .inspect-muted {
         color: var(--inspect-fg-3);
-    }
-
-    .inspect-page-header {
-        display: flex;
-        align-items: flex-start;
-        justify-content: space-between;
-        gap: 16px;
-        padding-bottom: 18px;
-        border-bottom: 1px solid var(--inspect-line-1);
-    }
-
-    .inspect-page-title {
-        font-size: 20px;
-        font-weight: 600;
-        margin: 0;
-        line-height: 1.2;
-        color: var(--inspect-fg-0);
-    }
-
-    .inspect-page-sub {
-        margin-top: 4px;
-        font-size: 12.5px;
-        color: var(--inspect-fg-2);
-    }
-
-    .inspect-page-actions {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        flex-shrink: 0;
     }
 
     .inspect-page-body {

@@ -202,9 +202,12 @@ export const LaneTrack: React.FC<LaneTrackProps> = ({
             ))}
 
             {modules.length === 0 && (
-                <div className="fng-lane-track__empty">
-                    empty chain — passthrough
-                </div>
+                <>
+                    <FlowLink />
+                    <div className="fng-lane-track__empty">
+                        passthrough
+                    </div>
+                </>
             )}
 
             {isActiveDrag && isSameFn && (

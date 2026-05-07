@@ -5,6 +5,7 @@ import { PageLayout, PageLoader, EmptyState } from '../../../components';
 import { useFunctionsNgData } from './hooks/useFunctionsNgData';
 import { useUnsavedChangesBlocker } from './hooks/useUnsavedChangesBlocker';
 import { FunctionCard } from './components/FunctionCard';
+import { CreateFunctionDialog } from '../functions/dialogs';
 import type { NetworkFunction } from './types';
 import { API } from '../../../api';
 import './FunctionsNgPage.scss';
@@ -35,8 +36,9 @@ const matchesFn = (fn: NetworkFunction, query: string): boolean => {
  * Functions (NG) page: Tracks editor with horizontal lanes, inline edit, DnD and live counters.
  */
 const FunctionsNgPage = (): React.JSX.Element => {
-    const { functions, loading, isDirty, getServerFn, dispatch, saveFn, discardFn } = useFunctionsNgData();
+    const { functions, loading, isDirty, getServerFn, dispatch, saveFn, discardFn, createFn } = useFunctionsNgData();
     const [availableModuleTypes, setAvailableModuleTypes] = useState<string[]>([]);
+    const [createDialogOpen, setCreateDialogOpen] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const searchRef = useRef<HTMLInputElement>(null);
 
@@ -105,7 +107,7 @@ const FunctionsNgPage = (): React.JSX.Element => {
             <Button
                 view="action"
                 size="l"
-                onClick={() => console.log('create function')}
+                onClick={() => setCreateDialogOpen(true)}
             >
                 <Icon data={Plus} size={16} />
                 Create function
@@ -128,7 +130,7 @@ const FunctionsNgPage = (): React.JSX.Element => {
                     <EmptyState message={
                         searchQuery.trim()
                             ? `No functions match "${searchQuery}".`
-                            : 'No functions found. Use the Functions page to create one.'
+                            : 'No functions found. Click "Create function" to add one.'
                     } />
                 ) : (
                     filteredFunctions.map(fn => (
@@ -145,6 +147,17 @@ const FunctionsNgPage = (): React.JSX.Element => {
                     ))
                 )}
             </div>
+
+            <CreateFunctionDialog
+                open={createDialogOpen}
+                onClose={() => setCreateDialogOpen(false)}
+                onConfirm={async (name) => {
+                    const ok = await createFn(name);
+                    if (ok) {
+                        setCreateDialogOpen(false);
+                    }
+                }}
+            />
         </PageLayout>
     );
 };

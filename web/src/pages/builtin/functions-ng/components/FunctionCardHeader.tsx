@@ -90,7 +90,18 @@ export const FunctionCardHeader: React.FC<FunctionCardHeaderProps> = ({
 }) => {
     const [confirmDelete, setConfirmDelete] = useState(false);
     const [confirmDiscard, setConfirmDiscard] = useState(false);
-    const meta = metaFor(fn.type);
+
+    const distinctTypes = useMemo(
+        () => {
+            const types = fn.chains.flatMap(c => c.modules.map(m => m.type)).filter(t => t !== '');
+            return [...new Set(types)].sort();
+        },
+        [fn.chains],
+    );
+
+    const chipColor: string | undefined =
+        distinctTypes.length === 1 ? metaFor(distinctTypes[0]).color : undefined;
+    const sparklineColor = chipColor ?? 'var(--fng-text-3)';
 
     const totalChains = fn.chains.length;
     const totalModules = useMemo(
@@ -115,13 +126,30 @@ export const FunctionCardHeader: React.FC<FunctionCardHeaderProps> = ({
                     </span>
                 </button>
 
-                <span
-                    className="fng-card-header__type-chip"
-                    style={{ background: `${meta.color}1f`, color: meta.color }}
-                    title={meta.desc}
-                >
-                    {fn.type}
-                </span>
+                {distinctTypes.length === 1 && (() => {
+                    const meta = metaFor(distinctTypes[0]);
+                    return (
+                        <span
+                            className="fng-card-header__type-chip"
+                            style={{ background: `${meta.color}1f`, color: meta.color }}
+                            title={meta.desc}
+                        >
+                            {distinctTypes[0]}
+                        </span>
+                    );
+                })()}
+                {distinctTypes.length >= 2 && (
+                    <span
+                        className="fng-card-header__type-chip"
+                        style={{
+                            background: 'color-mix(in srgb, var(--fng-text-3) 12%, transparent)',
+                            color: 'var(--fng-text-3)',
+                        }}
+                        title={distinctTypes.join(', ')}
+                    >
+                        mixed
+                    </span>
+                )}
 
                 <span className="fng-card-header__fn-id">{fn.id}</span>
 
@@ -149,7 +177,7 @@ export const FunctionCardHeader: React.FC<FunctionCardHeaderProps> = ({
                             data={sparklineData}
                             width={64}
                             height={22}
-                            color={meta.color}
+                            color={sparklineColor}
                         />
                     </div>
                 </div>

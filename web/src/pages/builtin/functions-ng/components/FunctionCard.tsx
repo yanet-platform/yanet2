@@ -244,6 +244,7 @@ export const FunctionCard: React.FC<FunctionCardProps> = ({
                             Σ weight {totalWeight}
                         </span>
                         <div style={{ flex: 1 }} />
+                        <AddChainButton onClick={handleAddChain} />
                     </div>
 
                     <div className="fng-function-card__lanes">
@@ -264,7 +265,6 @@ export const FunctionCard: React.FC<FunctionCardProps> = ({
                                 onOpenChainDrawer={handleOpenChainDrawer}
                             />
                         ))}
-                        <AddChainButton onClick={handleAddChain} />
                     </div>
                 </div>
             )}

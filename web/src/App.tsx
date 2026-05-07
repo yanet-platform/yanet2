@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback, useEffect, lazy, Suspense } from 'react';
+import React, { useState, useMemo, useCallback, useEffect, useRef, lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, useLocation, useNavigate, Navigate } from 'react-router-dom';
 import MainMenu from './MainMenu';
 import { PageLoader } from './components';
@@ -54,6 +54,7 @@ const AppContent = (): React.JSX.Element => {
     const location = useLocation();
     const navigate = useNavigate();
     const [sidebarDisabled, setSidebarDisabled] = useState(false);
+    const unsavedGuardRef = useRef<(() => boolean) | null>(null);
 
     useEffect(() => {
         let cancelled = false;
@@ -107,6 +108,13 @@ const AppContent = (): React.JSX.Element => {
     const currentPage = getCurrentPage();
 
     const handlePageChange = (pageId: PageId): void => {
+        const guard = unsavedGuardRef.current;
+        if (guard && guard()) {
+            const ok = window.confirm('You have unsaved changes. Leave this page anyway?');
+            if (!ok) {
+                return;
+            }
+        }
         navigate(`/${pageId}`);
     };
 
@@ -114,9 +122,14 @@ const AppContent = (): React.JSX.Element => {
         setSidebarDisabled(disabled);
     }, []);
 
+    const setUnsavedGuard = useCallback((cb: (() => boolean) | null) => {
+        unsavedGuardRef.current = cb;
+    }, []);
+
     const sidebarContextValue: SidebarContextValue = useMemo(() => ({
         setSidebarDisabled: handleSetSidebarDisabled,
-    }), [handleSetSidebarDisabled]);
+        setUnsavedGuard,
+    }), [handleSetSidebarDisabled, setUnsavedGuard]);
 
     return (
         <SidebarContext.Provider value={sidebarContextValue}>

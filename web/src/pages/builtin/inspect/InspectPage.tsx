@@ -34,10 +34,11 @@ const InspectPage = (): React.JSX.Element => {
         loadInspect();
     }, [loadInspect]);
 
+    const header = <InspectPageHeader onRefresh={loadInspect} refreshing={refreshing} />;
+
     return (
-        <PageLayout>
+        <PageLayout header={header}>
             <div className="inspect-page">
-                <InspectPageHeader onRefresh={loadInspect} refreshing={refreshing} />
                 <div className="inspect-page-body">
                     {initialLoading ? (
                         <PageLoader loading size="l" />

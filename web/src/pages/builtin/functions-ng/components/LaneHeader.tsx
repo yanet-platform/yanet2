@@ -76,7 +76,7 @@ export const LaneHeader: React.FC<LaneHeaderProps> = ({
                 />
             </div>
             <div className="fng-lane-header__pps">
-                {aggCounter ? `${formatPps(aggCounter.pps)} pps` : '— pps'}
+                {aggCounter ? `${formatPps(aggCounter.pps)}` : '— pps'}
             </div>
         </div>
     );

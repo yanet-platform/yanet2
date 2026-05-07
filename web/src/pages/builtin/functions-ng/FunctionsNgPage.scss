@@ -12,7 +12,7 @@
     --fng-panel:         #1C1814;
     --fng-bg-2:          #181410;
     --fng-bg-3:          #221C16;
-    --fng-line:          rgba(255, 200, 140, 0.06);
+    --fng-line:          rgba(255, 199, 140, 0.02);
     --fng-line-2:        rgba(255, 200, 140, 0.12);
     --fng-text:          #F2EEE8;
     --fng-text-2:        #B8B0A4;
@@ -471,6 +471,7 @@
 }
 
 .fng-lane-track__empty {
+    background: var(--fng-bg-3);
     padding: 8px 16px;
     border: 1px dashed var(--fng-line-2);
     border-radius: var(--fng-r-md);
@@ -752,13 +753,13 @@
 // ─── Add module / chain ghost buttons ─────────────────────────────────────────
 
 .fng-add-module-btn {
-    background: none;
+    background: var(--fng-bg-2);
     border: 1px dashed var(--fng-line-2);
     border-radius: var(--fng-r-md);
     color: var(--fng-text-3);
-    font-size: 11px;
+    font-size: 12px;
     font-family: var(--fng-font-ui);
-    padding: 6px 10px;
+    padding: 10px 14px;
     cursor: pointer;
     white-space: nowrap;
     flex-shrink: 0;
@@ -766,25 +767,6 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    transition: border-color 0.12s, color 0.12s;
-
-    &:hover {
-        border-color: var(--fng-accent);
-        color: var(--fng-accent);
-    }
-}
-
-.fng-add-chain-btn {
-    background: none;
-    border: 1.5px dashed var(--fng-line-2);
-    border-radius: var(--fng-r-md);
-    color: var(--fng-text-3);
-    font-size: 12px;
-    font-family: var(--fng-font-ui);
-    padding: 8px 16px;
-    cursor: pointer;
-    margin: 8px 16px;
-    text-align: left;
     transition: border-color 0.12s, color 0.12s;
 
     &:hover {

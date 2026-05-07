@@ -157,8 +157,8 @@ export const ModuleCard: React.FC<ModuleCardProps> = memo(({
                         color={meta.color}
                     />
                     <span className="fng-module-card__counter">
-                        {counter ? formatPps(counter.pps) : '—'}{' '}
-                        <span className="fng-module-card__counter-unit">pps</span>
+                        {counter ? formatPps(counter.pps) : '— pps'}{' '}
+                        <span className="fng-module-card__counter-unit"></span>
                     </span>
                 </div>
             </div>

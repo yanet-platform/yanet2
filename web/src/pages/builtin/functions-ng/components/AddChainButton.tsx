@@ -1,20 +1,23 @@
 import React from 'react';
+import { Button, Icon } from '@gravity-ui/uikit';
+import { Plus } from '@gravity-ui/icons';
 
 interface AddChainButtonProps {
     onClick: () => void;
 }
 
 /**
- * Ghost button below all lanes to append a new chain to the function.
+ * Compact icon-button to append a new chain to the function, rendered in the sub-header bar.
  */
 export const AddChainButton: React.FC<AddChainButtonProps> = ({ onClick }) => (
-    <button
-        className="fng-add-chain-btn"
+    <Button
+        view="outlined-action"
+        size="s"
         onClick={onClick}
-        type="button"
         title="Add chain"
         aria-label="Add chain"
     >
-        + Chain
-    </button>
+        <Icon data={Plus} size={14} />
+        Chain
+    </Button>
 );
