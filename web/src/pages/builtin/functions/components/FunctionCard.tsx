@@ -98,11 +98,15 @@ export const FunctionCard: React.FC<FunctionCardProps> = ({
 
     const totalPps = useMemo(() => {
         let sum = 0;
-        for (const c of counterMap.values()) {
-            sum += c.pps;
+        for (const chain of fn.chains) {
+            if (chain.modules.length === 0) {
+                continue;
+            }
+            const firstModule = chain.modules[0];
+            sum += counterMap.get(firstModule.id)?.pps ?? 0;
         }
         return sum;
-    }, [counterMap]);
+    }, [counterMap, fn.chains]);
 
     const sparklineData = useSparklineHistory(`fn:${fn.id}:total`, totalPps);
 

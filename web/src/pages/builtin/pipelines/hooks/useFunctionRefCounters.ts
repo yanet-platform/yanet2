@@ -80,47 +80,59 @@ export const useFunctionRefCounters = (
                 newValues.set(ref.nodeId, { packets: BigInt(0), bytes: BigInt(0) });
             }
 
+            // Build flat list of all (device, ref) pairs and fetch in parallel.
+            const pairs: Array<{ deviceName: string; ref: FunctionRefInfo }> = [];
             for (const device of devices) {
                 const deviceName = device.name ?? '';
                 for (const ref of refs) {
-                    try {
-                        const response = await API.counters.function({
-                            device: deviceName,
-                            pipeline: pipelineName,
-                            function: ref.functionName,
-                        });
-                        const rxPackets = sumCounterValues(findCounter(response.counters, 'input'));
-                        const rxBytes = sumCounterValues(findCounter(response.counters, 'input_bytes'));
-                        const current = newValues.get(ref.nodeId)!;
-                        newValues.set(ref.nodeId, {
-                            packets: current.packets + rxPackets,
-                            bytes: current.bytes + rxBytes,
-                        });
-                    } catch {
-                        // Ignore errors for individual function counters.
-                    }
+                    pairs.push({ deviceName, ref });
                 }
+            }
+
+            const results = await Promise.allSettled(
+                pairs.map(({ deviceName, ref }) =>
+                    API.counters.function({
+                        device: deviceName,
+                        pipeline: pipelineName,
+                        function: ref.functionName,
+                    }).then(response => ({ ref, response }))
+                )
+            );
+
+            for (const result of results) {
+                if (result.status !== 'fulfilled') continue;
+                const { ref, response } = result.value;
+                const rxPackets = sumCounterValues(findCounter(response.counters, 'input'));
+                const rxBytes = sumCounterValues(findCounter(response.counters, 'input_bytes'));
+                const current = newValues.get(ref.nodeId)!;
+                newValues.set(ref.nodeId, {
+                    packets: current.packets + rxPackets,
+                    bytes: current.bytes + rxBytes,
+                });
             }
         } else {
             newValues.set(PIPELINE_COUNTER_KEY, { packets: BigInt(0), bytes: BigInt(0) });
 
-            for (const device of devices) {
-                const deviceName = device.name ?? '';
-                try {
-                    const response = await API.counters.pipeline({
-                        device: deviceName,
+            // Fetch all device pipeline counters in parallel.
+            const results = await Promise.allSettled(
+                devices.map(device =>
+                    API.counters.pipeline({
+                        device: device.name ?? '',
                         pipeline: pipelineName,
-                    });
-                    const rxPackets = sumCounterValues(findCounter(response.counters, 'input'));
-                    const rxBytes = sumCounterValues(findCounter(response.counters, 'input_bytes'));
-                    const current = newValues.get(PIPELINE_COUNTER_KEY)!;
-                    newValues.set(PIPELINE_COUNTER_KEY, {
-                        packets: current.packets + rxPackets,
-                        bytes: current.bytes + rxBytes,
-                    });
-                } catch {
-                    // Ignore errors for individual device counters.
-                }
+                    })
+                )
+            );
+
+            for (const result of results) {
+                if (result.status !== 'fulfilled') continue;
+                const response = result.value;
+                const rxPackets = sumCounterValues(findCounter(response.counters, 'input'));
+                const rxBytes = sumCounterValues(findCounter(response.counters, 'input_bytes'));
+                const current = newValues.get(PIPELINE_COUNTER_KEY)!;
+                newValues.set(PIPELINE_COUNTER_KEY, {
+                    packets: current.packets + rxPackets,
+                    bytes: current.bytes + rxBytes,
+                });
             }
         }
 

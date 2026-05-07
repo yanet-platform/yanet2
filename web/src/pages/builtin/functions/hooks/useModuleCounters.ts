@@ -91,35 +91,41 @@ export const useModuleCounters = (
             newValues.set(moduleInfo.nodeId, { packets: BigInt(0), bytes: BigInt(0) });
         }
 
+        // Build flat list of all (device, pipeline, moduleInfo) triples and fetch in parallel.
+        const triples: Array<{ deviceName: string; pipelineName: string; moduleInfo: ModuleInfo }> = [];
         for (const device of devices) {
             const deviceName = device.name || '';
-
             for (const pipelineName of pipelineNames) {
                 for (const moduleInfo of moduleInfoList) {
-                    try {
-                        const response = await API.counters.module({
-                            device: deviceName,
-                            pipeline: pipelineName,
-                            function: functionName,
-                            chain: moduleInfo.chainName,
-                            module_type: moduleInfo.moduleType,
-                            module_name: moduleInfo.moduleName,
-                            counter_query: ['rx', 'rx_bytes'],
-                        });
-
-                        const rxPackets = sumCounterValues(findCounter(response.counters, 'rx'));
-                        const rxBytes = sumCounterValues(findCounter(response.counters, 'rx_bytes'));
-
-                        const current = newValues.get(moduleInfo.nodeId)!;
-                        newValues.set(moduleInfo.nodeId, {
-                            packets: current.packets + rxPackets,
-                            bytes: current.bytes + rxBytes,
-                        });
-                    } catch {
-                        // Ignore errors for individual module counters.
-                    }
+                    triples.push({ deviceName, pipelineName, moduleInfo });
                 }
             }
+        }
+
+        const results = await Promise.allSettled(
+            triples.map(({ deviceName, pipelineName, moduleInfo }) =>
+                API.counters.module({
+                    device: deviceName,
+                    pipeline: pipelineName,
+                    function: functionName,
+                    chain: moduleInfo.chainName,
+                    module_type: moduleInfo.moduleType,
+                    module_name: moduleInfo.moduleName,
+                    counter_query: ['rx', 'rx_bytes'],
+                }).then(response => ({ moduleInfo, response }))
+            )
+        );
+
+        for (const result of results) {
+            if (result.status !== 'fulfilled') continue;
+            const { moduleInfo, response } = result.value;
+            const rxPackets = sumCounterValues(findCounter(response.counters, 'rx'));
+            const rxBytes = sumCounterValues(findCounter(response.counters, 'rx_bytes'));
+            const current = newValues.get(moduleInfo.nodeId)!;
+            newValues.set(moduleInfo.nodeId, {
+                packets: current.packets + rxPackets,
+                bytes: current.bytes + rxBytes,
+            });
         }
 
         return newValues;

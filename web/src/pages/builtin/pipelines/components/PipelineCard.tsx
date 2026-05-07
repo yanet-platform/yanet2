@@ -55,12 +55,9 @@ export const PipelineCard: React.FC<PipelineCardProps> = ({
         if (pipeline.functions.length === 0) {
             return counterMap.get(PIPELINE_COUNTER_KEY)?.pps ?? 0;
         }
-        let sum = 0;
-        for (const c of counterMap.values()) {
-            sum += c.pps;
-        }
-        return sum;
-    }, [counterMap, pipeline.functions.length]);
+        const first = pipeline.functions[0];
+        return counterMap.get(first.id)?.pps ?? 0;
+    }, [counterMap, pipeline.functions]);
 
     const sparklineData = useSparklineHistory(`pl:${pipeline.id}:total`, totalPps);
 
