@@ -15,14 +15,14 @@ pub enum ModeCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct DeleteCmd {
     /// Pdump config name to delete.
-    #[arg(long = "cfg", short)]
+    #[arg(long = "name", short = 'n')]
     pub config_name: String,
 }
 
 #[derive(Debug, Clone, Parser)]
 pub struct ShowConfigCmd {
     /// Pdump config name to operate on.
-    #[arg(long = "cfg", short)]
+    #[arg(long = "name", short = 'n')]
     pub config_name: String,
     /// Output format.
     #[clap(long, value_enum, default_value_t = ConfigOutputFormat::Tree)]
@@ -32,11 +32,11 @@ pub struct ShowConfigCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct SetConfigCmd {
     /// Pdump config name to operate on.
-    #[arg(long = "cfg", short)]
+    #[arg(long = "name", short = 'n')]
     pub config_name: String,
 
     /// Filter represents a pcap-style filter expression
-    #[arg(long, short)]
+    #[arg(long)]
     pub filter: Option<String>,
 
     /// Determine the packet list to capture packets from.
@@ -55,7 +55,7 @@ pub struct SetConfigCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct ReadCmd {
     /// Pdump config name to operate on.
-    #[arg(long = "cfg", short)]
+    #[arg(long = "name", short = 'n')]
     pub config_name: String,
 
     /// Dump output format.

@@ -29,21 +29,21 @@ pub enum ModeCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct DeleteCmd {
     /// The name of the fwstate config to delete
-    #[arg(long = "cfg", short)]
+    #[arg(long = "name", short = 'n')]
     pub config_name: String,
 }
 
 #[derive(Debug, Clone, Parser)]
 pub struct ShowCmd {
     /// FWState config name to show
-    #[arg(long = "cfg", short)]
+    #[arg(long = "name", short = 'n')]
     pub config_name: String,
 }
 
 #[derive(Debug, Clone, Parser)]
 pub struct LinkCmd {
     /// FWState config name to link
-    #[arg(long = "cfg", short)]
+    #[arg(long = "name", short = 'n')]
     pub config_name: String,
 
     /// ACL config names to link (can be specified multiple times)
@@ -54,14 +54,14 @@ pub struct LinkCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct StatsCmd {
     /// FWState config name to get statistics for
-    #[arg(long = "cfg", short)]
+    #[arg(long = "name", short = 'n')]
     pub config_name: String,
 }
 
 #[derive(Debug, Clone, Parser)]
 pub struct UpdateCmd {
     /// FWState config name to operate on
-    #[arg(long = "cfg", short)]
+    #[arg(long = "name", short = 'n')]
     pub config_name: String,
 
     /// Size of the hash table index for firewall state maps
@@ -130,7 +130,7 @@ pub enum DirectionArg {
 #[derive(Debug, Clone, Parser)]
 pub struct EntriesCmd {
     /// FWState config name
-    #[arg(long = "cfg", short)]
+    #[arg(long = "name", short = 'n')]
     pub config_name: String,
 
     /// Use IPv6 map instead of IPv4

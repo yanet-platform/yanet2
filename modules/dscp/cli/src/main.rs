@@ -49,7 +49,7 @@ pub enum ModeCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct ShowConfigCmd {
     /// DSCP module name to operate on.
-    #[arg(long = "cfg", short)]
+    #[arg(long = "name", short = 'n')]
     pub config_name: String,
     /// Output format.
     #[clap(long, value_enum, default_value_t = OutputFormat::Tree)]
@@ -59,7 +59,7 @@ pub struct ShowConfigCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct AddPrefixesCmd {
     /// DSCP module name to operate on.
-    #[arg(long = "cfg", short)]
+    #[arg(long = "name", short = 'n')]
     pub config_name: String,
     /// Prefix to be added to the input filter of the DSCP module.
     #[arg(long, short, required = true)]
@@ -69,7 +69,7 @@ pub struct AddPrefixesCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct RemovePrefixesCmd {
     /// DSCP module name to operate on.
-    #[arg(long = "cfg", short)]
+    #[arg(long = "name", short = 'n')]
     pub config_name: String,
     /// Prefix to be removed from the input filter of the DSCP module.
     #[arg(long, short, required = true)]
@@ -79,7 +79,7 @@ pub struct RemovePrefixesCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct SetDscpMarkingCmd {
     /// DSCP module name to operate on.
-    #[arg(long = "cfg", short)]
+    #[arg(long = "name", short = 'n')]
     pub config_name: String,
     /// DSCP marking flag: 0 - Never, 1 - Default (only if original DSCP is 0),
     /// 2 - Always

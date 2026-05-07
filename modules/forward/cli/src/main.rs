@@ -50,21 +50,21 @@ pub enum ModeCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct ShowCmd {
     /// The name of the module config to show.
-    #[arg(long = "cfg", short)]
+    #[arg(long = "name", short = 'n')]
     pub config_name: String,
 }
 
 #[derive(Debug, Clone, Parser)]
 pub struct DeleteCmd {
     /// The name of the module config to delete.
-    #[arg(long = "cfg", short)]
+    #[arg(long = "name", short = 'n')]
     pub config: String,
 }
 
 #[derive(Debug, Clone, Parser)]
 pub struct UpdateCmd {
     /// The name of the module config to operate on.
-    #[arg(long = "cfg", short)]
+    #[arg(long = "name", short = 'n')]
     pub config: String,
     /// Ruleset file path.
     #[arg(required = true, long = "rules", value_name = "PATH")]

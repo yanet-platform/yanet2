@@ -127,7 +127,7 @@ pub enum FibAction {
 #[derive(Debug, Clone, Parser)]
 pub struct FibUpdateCmd {
     /// Route module config name.
-    #[arg(long = "cfg", short)]
+    #[arg(long = "name", short = 'n')]
     pub config_name: String,
     /// Path to the FIB YAML file.
     #[arg(required = true, long = "rules", value_name = "PATH")]
@@ -143,7 +143,7 @@ pub struct FibShowCmd {
     #[arg(long)]
     pub ipv6: bool,
     /// Route config name.
-    #[arg(long = "cfg", short)]
+    #[arg(long = "name", short = 'n')]
     pub config_name: String,
 }
 

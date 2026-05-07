@@ -33,7 +33,7 @@ use ync::logging;
 pub struct Cmd {
     #[clap(subcommand)]
     pub mode: ModeCmd,
-    /// Gateway endpoint.
+    /// gRPC endpoint URL.
     #[clap(long, default_value = "grpc://[::1]:8080", global = true)]
     pub endpoint: String,
     /// Be verbose in terms of logging.
@@ -60,28 +60,28 @@ pub enum ModeCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct RouteShowCmd {
     /// Route config name.
-    #[arg(long = "cfg", short)]
+    #[arg(long = "name", short = 'n')]
     pub config_name: String,
 }
 
 #[derive(Debug, Clone, Parser)]
 pub struct RouteCreateCmd {
     /// Route config name.
-    #[arg(long = "cfg", short)]
+    #[arg(long = "name", short = 'n')]
     pub config_name: String,
 }
 
 #[derive(Debug, Clone, Parser)]
 pub struct RouteDeleteCmd {
     /// Route config name.
-    #[arg(long = "cfg", short)]
+    #[arg(long = "name", short = 'n')]
     pub config_name: String,
 }
 
 #[derive(Debug, Clone, Parser)]
 pub struct RouteUpdateCmd {
     /// Route config name.
-    #[arg(long = "cfg", short)]
+    #[arg(long = "name", short = 'n')]
     pub config_name: String,
     /// Route prefix
     #[arg(long = "prefix", short)]
@@ -106,7 +106,7 @@ pub struct RouteUpdateCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct RouteWithdrawCmd {
     /// Route config name.
-    #[arg(long = "cfg", short)]
+    #[arg(long = "name", short = 'n')]
     pub config_name: String,
     /// Route prefix
     #[arg(long = "prefix", short)]
