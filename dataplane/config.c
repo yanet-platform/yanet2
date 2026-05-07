@@ -519,8 +519,8 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 	yaml_parser_delete(&parser);
 
 	// TODO: delete
-	dataplane->globalstat.cp_memory = (1 << 30) / 2;
-	dataplane->globalstat.dp_memory = (1 << 30) / 2;
+	dataplane->globalstat.cp_memory = (1 << 28) / 2;
+	dataplane->globalstat.dp_memory = (1 << 28) / 2;
 	dataplane->updatetimes.nic_updatetime = 1;
 
 	*config = dataplane;
