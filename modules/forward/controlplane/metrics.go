@@ -31,7 +31,7 @@ func (m *ForwardService) collectMetrics() ([]*commonpb.Metric, error) {
 	positions := dpConfig.AllModulePositions("forward")
 
 	result := make([]*commonpb.Metric, 0)
-	for _, pos := range positions {
+	for pos := range positions {
 		configName := pos.ModuleName
 
 		baseLabels := []*commonpb.Label{

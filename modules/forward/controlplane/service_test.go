@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
 	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
 	"github.com/yanet-platform/yanet2/modules/forward/controlplane/forwardpb"
@@ -27,7 +28,7 @@ func (m *mockBackend) DeleteModule(name string) error {
 	return nil
 }
 
-func (m *mockBackend) Agent() forward.FFIAgent {
+func (m *mockBackend) Agent() ffi.FFIAgent {
 	return nil
 }
 

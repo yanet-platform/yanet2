@@ -87,8 +87,6 @@ type DPAgent interface {
 	FunctionAgent
 	PipelineAgent
 	DeviceAgent
-	TakeError() error
-	CleanError()
 	CleanUp() error
 	Close() error
 }

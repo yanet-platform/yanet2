@@ -25,6 +25,10 @@ pub mod forwardpb {
     tonic::include_proto!("forwardpb");
 }
 
+pub mod commonpb {
+    tonic::include_proto!("commonpb");
+}
+
 /// Forward module.
 #[derive(Debug, Clone, Parser)]
 #[command(version, about)]
