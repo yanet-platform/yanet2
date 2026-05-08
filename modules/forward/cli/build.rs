@@ -9,10 +9,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
         .extern_path(".filterpb", "::filterpb::pb")
         .message_attribute(".forwardpb", "#[derive(Serialize)]")
         .field_attribute(".forwardpb.GetMetricsResponse.metrics", "#[serde(skip)]")
-        .compile_protos(
-            &["forwardpb/forward.proto"],
-            &["../../..", "../controlplane"],
-        )?;
+        .compile_protos(&["forwardpb/forward.proto"], &["../../..", "../controlplane"])?;
 
     Ok(())
 }
