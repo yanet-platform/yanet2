@@ -97,7 +97,7 @@ export interface FIBNexthop {
 }
 
 const routeService = createService('routepb.RouteService');
-const operatorRouteService = createService('operatorpb.RouteService');
+const operatorRouteService = createService('operators.route.operatorpb.v1.RouteService');
 
 export const route = {
     listConfigs: (options?: CallOptions): Promise<ListConfigsResponse> => {

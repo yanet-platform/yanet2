@@ -20,7 +20,7 @@ import (
 	pdump "github.com/yanet-platform/yanet2/modules/pdump/controlplane"
 	route_mpls "github.com/yanet-platform/yanet2/modules/route-mpls/controlplane"
 	route "github.com/yanet-platform/yanet2/modules/route/controlplane"
-	_ "github.com/yanet-platform/yanet2/operators/yanet-route-operator/operatorpb"
+	_ "github.com/yanet-platform/yanet2/operators/route/operatorpb/v1"
 )
 
 type serviceConstructor func() (gateway.Service, error)

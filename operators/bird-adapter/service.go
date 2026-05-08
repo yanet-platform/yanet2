@@ -17,12 +17,12 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/encoding/gzip"
 
+	"github.com/yanet-platform/yanet2/modules/route-mpls/controlplane/routemplspb"
 	adapterpb "github.com/yanet-platform/yanet2/operators/bird-adapter/adapterpb"
 	"github.com/yanet-platform/yanet2/operators/bird-adapter/internal/bird"
 	"github.com/yanet-platform/yanet2/operators/bird-adapter/internal/mpls"
 	"github.com/yanet-platform/yanet2/operators/bird-adapter/internal/rib"
-	routepb "github.com/yanet-platform/yanet2/operators/yanet-route-operator/operatorpb"
-	"github.com/yanet-platform/yanet2/modules/route-mpls/controlplane/routemplspb"
+	routepb "github.com/yanet-platform/yanet2/operators/route/operatorpb/v1"
 )
 
 // levelFilterCore wraps a zapcore.Core and filters log entries by level.

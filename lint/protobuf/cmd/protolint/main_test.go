@@ -80,8 +80,8 @@ func TestCollectProtoFilesExclude(t *testing.T) {
 	if len(files) != 1 {
 		t.Fatalf("got %d files, want 1: %v", len(files), files)
 	}
-	if files[0].pkg != "goodpb" {
-		t.Errorf("got package %q, want %q", files[0].pkg, "goodpb")
+	if files[0].GoPkgFound {
+		t.Errorf("expected no go_package in good.proto")
 	}
 }
 
@@ -113,7 +113,7 @@ func TestLintFile(t *testing.T) {
 		wantOK  bool
 	}{
 		{
-			name:    "valid: package matches dir, no go_package",
+			name:    "valid: no go_package — nothing to check",
 			dirName: "mypb",
 			content: `syntax = "proto3";
 package mypb;
@@ -121,64 +121,83 @@ package mypb;
 			wantOK: true,
 		},
 		{
-			name:    "valid: package matches dir, correct go_package with alias",
-			dirName: "mypb",
+			name:    "valid: correct go_package with alias and version",
+			dirName: "mypb/v1",
 			content: `syntax = "proto3";
-package mypb;
-option go_package = "github.com/yanet-platform/yanet2/mypb;mypb";
+package modules.acl.controlplane.aclpb.v1;
+option go_package = "github.com/example/mypb/v1;mypb";
 `,
 			wantOK: true,
 		},
 		{
-			name:    "error: package does not match dir",
-			dirName: "mypb",
+			name:    "valid: v2 version",
+			dirName: "mypb/v2",
 			content: `syntax = "proto3";
-package otherpb;
+package mypb;
+option go_package = "github.com/example/mypb/v2;mypb";
 `,
-			wantOK: false,
+			wantOK: true,
+		},
+		{
+			name:    "valid: v0 version",
+			dirName: "mypb/v0",
+			content: `syntax = "proto3";
+package mypb;
+option go_package = "github.com/example/mypb/v0;mypb";
+`,
+			wantOK: true,
+		},
+		{
+			name:    "valid: v1beta version",
+			dirName: "mypb/v1beta",
+			content: `syntax = "proto3";
+package mypb;
+option go_package = "github.com/example/mypb/v1beta;mypb";
+`,
+			wantOK: true,
+		},
+		{
+			name:    "valid: v12 version",
+			dirName: "mypb/v12",
+			content: `syntax = "proto3";
+package mypb;
+option go_package = "github.com/example/mypb/v12;mypb";
+`,
+			wantOK: true,
 		},
 		{
 			name:    "error: go_package is multiline (no semicolon at end of line)",
-			dirName: "mypb",
+			dirName: "mypb/v1",
 			content: `syntax = "proto3";
 package mypb;
-option go_package = "github.com/yanet-platform/yanet2/mypb;mypb"
+option go_package = "github.com/example/mypb/v1;mypb"
 `,
 			wantOK: false,
 		},
 		{
 			name:    "error: go_package missing alias",
-			dirName: "mypb",
+			dirName: "mypb/v1",
 			content: `syntax = "proto3";
 package mypb;
-option go_package = "github.com/yanet-platform/yanet2/mypb";
+option go_package = "github.com/example/mypb/v1";
 `,
 			wantOK: false,
 		},
 		{
-			name:    "error: go_package alias does not match package",
-			dirName: "mypb",
+			name:    "error: go_package alias does not match penultimate segment",
+			dirName: "mypb/v1",
 			content: `syntax = "proto3";
 package mypb;
-option go_package = "github.com/yanet-platform/yanet2/mypb;wrongalias";
+option go_package = "github.com/example/mypb/v1;wrongalias";
 `,
 			wantOK: false,
 		},
 		{
-			name:    "error: go_package import path does not match file location",
+			name:    "error: last segment is not a version",
 			dirName: "mypb",
 			content: `syntax = "proto3";
 package mypb;
-option go_package = "github.com/yanet-platform/yanet2/wrong/path;mypb";
-`,
-			wantOK: false,
-		},
-		{
-			name:    "error: package mismatch AND go_package alias mismatch",
-			dirName: "mypb",
-			content: `syntax = "proto3";
-package otherpb;
-option go_package = "github.com/yanet-platform/yanet2/mypb;wrongalias";
+option go_package = "github.com/example/mypb;mypb";
 `,
 			wantOK: false,
 		},
@@ -186,14 +205,14 @@ option go_package = "github.com/yanet-platform/yanet2/mypb;wrongalias";
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			path, root := writeProto(t, tc.dirName, tc.content)
+			path, _ := writeProto(t, tc.dirName, tc.content)
 
 			pf, err := parseProtoFile(path)
 			if err != nil {
 				t.Fatalf("parseProtoFile: %v", err)
 			}
 
-			got := lintFile(pf, root)
+			got := lintFile(pf)
 			if got != tc.wantOK {
 				t.Errorf("lintFile() = %v, want %v", got, tc.wantOK)
 			}
@@ -206,22 +225,19 @@ func TestParseProtoFile(t *testing.T) {
 		name          string
 		dirName       string
 		content       string
-		wantPkg       string
 		wantGoPkgLine string
 		wantFound     bool
 	}{
 		{
-			name:      "package only",
+			name:      "no go_package",
 			dirName:   "mypb",
 			content:   "syntax = \"proto3\";\npackage mypb;\n",
-			wantPkg:   "mypb",
 			wantFound: false,
 		},
 		{
-			name:          "package and go_package",
+			name:          "with go_package",
 			dirName:       "mypb",
 			content:       "syntax = \"proto3\";\npackage mypb;\noption go_package = \"github.com/example/mypb;mypb\";\n",
-			wantPkg:       "mypb",
 			wantGoPkgLine: `option go_package = "github.com/example/mypb;mypb";`,
 			wantFound:     true,
 		},
@@ -229,7 +245,6 @@ func TestParseProtoFile(t *testing.T) {
 			name:          "go_package without semicolon at end",
 			dirName:       "mypb",
 			content:       "syntax = \"proto3\";\npackage mypb;\noption go_package = \"github.com/example/mypb;mypb\"\n",
-			wantPkg:       "mypb",
 			wantGoPkgLine: `option go_package = "github.com/example/mypb;mypb"`,
 			wantFound:     true,
 		},
@@ -244,14 +259,11 @@ func TestParseProtoFile(t *testing.T) {
 				t.Fatalf("parseProtoFile: %v", err)
 			}
 
-			if pf.pkg != tc.wantPkg {
-				t.Errorf("pkg = %q, want %q", pf.pkg, tc.wantPkg)
+			if pf.GoPkgFound != tc.wantFound {
+				t.Errorf("GoPkgFound = %v, want %v", pf.GoPkgFound, tc.wantFound)
 			}
-			if pf.goPkgFound != tc.wantFound {
-				t.Errorf("goPkgFound = %v, want %v", pf.goPkgFound, tc.wantFound)
-			}
-			if pf.goPkgLine != tc.wantGoPkgLine {
-				t.Errorf("goPkgLine = %q, want %q", pf.goPkgLine, tc.wantGoPkgLine)
+			if pf.GoPkgLine != tc.wantGoPkgLine {
+				t.Errorf("GoPkgLine = %q, want %q", pf.GoPkgLine, tc.wantGoPkgLine)
 			}
 		})
 	}
@@ -300,6 +312,56 @@ func TestParseGoPkg(t *testing.T) {
 			}
 			if alias != tc.wantAlias {
 				t.Errorf("alias = %q, want %q", alias, tc.wantAlias)
+			}
+		})
+	}
+}
+
+func TestIsSemver(t *testing.T) {
+	tests := []struct {
+		input string
+		want  bool
+	}{
+		{"v1", true},
+		{"v2", true},
+		{"v12", true},
+		{"v100", true},
+		{"v0", true},
+		{"v1beta", true},
+		{"v1.0", true},
+		{"v", false},
+		{"1", false},
+		{"", false},
+		{"mypb", false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.input, func(t *testing.T) {
+			got := isSemver(tc.input)
+			if got != tc.want {
+				t.Errorf("isSemver(%q) = %v, want %v", tc.input, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestPenultimateSegment(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"github.com/org/repo/aclpb/v1", "aclpb"},
+		{"github.com/org/repo/mypb/v2", "mypb"},
+		{"github.com/org/repo", "org"},
+		{"single", ""},
+		{"a/b", "a"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.input, func(t *testing.T) {
+			got := penultimateSegment(tc.input)
+			if got != tc.want {
+				t.Errorf("penultimateSegment(%q) = %q, want %q", tc.input, got, tc.want)
 			}
 		})
 	}

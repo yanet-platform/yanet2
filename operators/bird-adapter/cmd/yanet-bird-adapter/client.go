@@ -13,8 +13,8 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/encoding/gzip"
 
-	adapterpb "github.com/yanet-platform/yanet2/operators/bird-adapter/adapterpb"
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
+	adapterpb "github.com/yanet-platform/yanet2/operators/bird-adapter/adapterpb"
 )
 
 // logLevelFlag wraps zapcore.Level to implement pflag.Value interface.

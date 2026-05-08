@@ -24,9 +24,9 @@ members = [
     "modules/route-mpls/cli",
     "devices/plain/cli",
     "devices/vlan/cli",
-    "operators/yanet-pipeline-operator/cli",
-    "operators/yanet-route-operator/cli/route",
-    "operators/yanet-route-operator/cli/neighbour",
+    "operators/pipeline/cli",
+    "operators/route/cli/route",
+    "operators/route/cli/neighbour",
 ]
 
 [profile.release]

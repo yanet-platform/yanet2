@@ -4,8 +4,8 @@ import (
 	"net/netip"
 	"slices"
 
-	"github.com/yanet-platform/yanet2/operators/bird-adapter/internal/rib"
 	"github.com/yanet-platform/yanet2/common/go/maptrie"
+	"github.com/yanet-platform/yanet2/operators/bird-adapter/internal/rib"
 )
 
 // Route is identified by destination (nexthop) and route distinguisher

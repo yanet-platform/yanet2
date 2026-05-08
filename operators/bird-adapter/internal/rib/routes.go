@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"net/netip"
 
-	routepb "github.com/yanet-platform/yanet2/operators/yanet-route-operator/operatorpb"
 	"github.com/yanet-platform/yanet2/common/filterpb"
 	"github.com/yanet-platform/yanet2/modules/route-mpls/controlplane/routemplspb"
+	routepb "github.com/yanet-platform/yanet2/operators/route/operatorpb/v1"
 )
 
 type RouteSourceID uint8
