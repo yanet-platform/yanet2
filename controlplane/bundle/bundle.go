@@ -8,7 +8,6 @@ import (
 	// Blank import registers operator proto descriptors in the global
 	// protobuf registry so the gateway HTTP/gRPC proxy can resolve
 	// operatorpb services.
-	_ "github.com/yanet-platform/yanet2/agents/yanet-route-operator/operatorpb"
 	"github.com/yanet-platform/yanet2/controlplane/gateway"
 	plain "github.com/yanet-platform/yanet2/devices/plain/controlplane"
 	vlan "github.com/yanet-platform/yanet2/devices/vlan/controlplane"
@@ -21,6 +20,7 @@ import (
 	pdump "github.com/yanet-platform/yanet2/modules/pdump/controlplane"
 	route_mpls "github.com/yanet-platform/yanet2/modules/route-mpls/controlplane"
 	route "github.com/yanet-platform/yanet2/modules/route/controlplane"
+	_ "github.com/yanet-platform/yanet2/operators/yanet-route-operator/operatorpb"
 )
 
 type serviceConstructor func() (gateway.Service, error)

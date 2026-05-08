@@ -31,7 +31,7 @@
 /bindings/go/                           @yanet-platform/yanet-controlplane
 
 # Operators.
-/agents/                                @yanet-platform/yanet-controlplane
+/operators/                             @yanet-platform/yanet-controlplane
 
 # Modules.
 /modules/balancer/                      @yanet-platform/yanet-module-balancer

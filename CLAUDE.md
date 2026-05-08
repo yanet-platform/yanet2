@@ -61,7 +61,7 @@ Top-level directories and their roles:
 - `controlplane/`  — Go gateway, CGO bindings (`ffi/`), root protos (`ynpb/`), control-plane package (`yncp/`), entrypoints (`cmd/`).
 - `modules/`       — packet-processing modules (see Module Structure).
 - `devices/`       — device adapters (`plain`, `vlan`); same layout as modules.
-- `agents/`        — long-running orchestration daemons (see Agents).
+- `operators/`     — long-running orchestration daemons (see Operators).
 - `filter/`        — filter compiler, classifiers, and query engine (C).
 - `lib/`           — C support libraries: `controlplane`, `counters`, `dataplane`, `errors`, `fwstate`, `logging`, `utils`, plus `tests/` and `fuzzing/`.
 - `api/`           — public C API headers exposed to control plane (`agent.h`, `config.h`, `counter.h`, `info.h`).
@@ -88,7 +88,8 @@ A single Go gRPC server that proxies requests to module backends. Modules regist
 Key packages:
 
 - `cmd/` — binary entrypoints: `yncp-director` (gateway daemon), `bird-adapter` (legacy build of the BIRD adapter).
-- `internal/gateway/` — actual proxy implementation: `proxy`, `director`, `registry`.
+- `gateway/` — flat package: API gateway server (`gateway.go`, `runner.go`, `registry.go`, `service.go`, `auth_service.go`, `cfg.go`) plus client-side helpers used by built-in services and operators (`registrar.go`, `registration_loop.go`, `tls.go`, `credentials.go`).
+- `builtin/` — in-process built-in services: `pipeline`, `inspect`, `function`, `counters`, `logging`. Each implements the structural `gateway.Service` interface and is constructed by the director, then passed to `NewGateway` via `gateway.WithService(...)`.
 - `internal/auth/`, `internal/version/`, `internal/xgrpc/` — supporting packages.
 - `ffi/` — CGO bindings for shared memory (`shm.go`, `agent.go`, `pipeline.go`).
 - `ynpb/` — root protobuf definitions: pipeline, device, counters, inspect, logging, auth, function, gateway, module.
@@ -143,15 +144,15 @@ fwstate, dscp, pdump, route-mpls`.
 `cli/`) but for device adapters rather than packet-processing modules.
 Active devices: `plain`, `vlan`.
 
-### Agents
+### Operators
 
-`agents/` holds long-running Go control-plane processes that orchestrate
+`operators/` holds long-running Go control-plane processes that orchestrate
 the dataplane through the gateway, distinct from per-module gRPC services.
 
-- `agents/yanet-pipeline-operator` — declarative reconciliation operator
+- `operators/yanet-pipeline-operator` — declarative reconciliation operator
   (`cmd/`, `internal/`, `operatorpb/`). Structural template for future
   operators (route, acl, balancer).
-- `agents/bird-adapter` — BIRD routing-daemon adapter (canonical agent
+- `operators/bird-adapter` — BIRD routing-daemon adapter (canonical agent
   layout: `adapterpb/`, `internal/`, `service.go`). Note:
   `modules/route/bird-adapter/` is a separate proto-contract subtree
   (`adapterpb/`, `proto/`) consumed by the agent — not a duplicate binary.
