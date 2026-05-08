@@ -60,19 +60,6 @@ route_module_config_create(
 	return &config->cp_module;
 }
 
-void
-route_module_config_free(struct cp_module *cp_module) {
-	struct route_module_config *config =
-		container_of(cp_module, struct route_module_config, cp_module);
-
-	struct agent *agent = ADDR_OF(&cp_module->agent);
-	memory_bfree(
-		&agent->memory_context,
-		config,
-		sizeof(struct route_module_config)
-	);
-};
-
 int
 route_module_config_data_init(
 	struct route_module_config *config,
@@ -122,6 +109,21 @@ route_module_config_data_destroy(struct route_module_config *config) {
 
 	lpm_free(&config->lpm_v6);
 	lpm_free(&config->lpm_v4);
+}
+
+void
+route_module_config_free(struct cp_module *cp_module) {
+	struct route_module_config *config =
+		container_of(cp_module, struct route_module_config, cp_module);
+
+	route_module_config_data_destroy(config);
+
+	struct agent *agent = ADDR_OF(&cp_module->agent);
+	memory_bfree(
+		&agent->memory_context,
+		config,
+		sizeof(struct route_module_config)
+	);
 }
 
 int
