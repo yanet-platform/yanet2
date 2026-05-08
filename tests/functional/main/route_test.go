@@ -109,7 +109,7 @@ func applyFIB(t *testing.T, fw *framework.F, cfgName, suffix string, prefixes ..
 	require.NoError(t, fw.CreateConfigFile(name, string(body)),
 		"failed to create FIB config file")
 
-	cmd := framework.CLIRoute + " fib update --cfg=" + cfgName +
+	cmd := framework.CLIRoute + " fib update --name=" + cfgName +
 		" --rules /mnt/config/" + name
 	_, err = fw.ExecuteCommand(cmd)
 	require.NoError(t, err, "failed to update FIB")

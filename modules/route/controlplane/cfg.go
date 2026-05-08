@@ -6,10 +6,6 @@ import (
 )
 
 // Config is the route module shim configuration.
-//
-// All RIB / neighbour / link-map fields moved to the route operator
-// (see agents/yanet-route-operator). The shim only owns shared-memory
-// access and a gRPC endpoint for the operator to push FIBs into.
 type Config struct {
 	// InstanceID specifies which dataplane instance this module serves.
 	InstanceID uint32 `yaml:"instance_id"`

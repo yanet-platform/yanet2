@@ -31,7 +31,7 @@ export interface ListNeighbourTablesResponse {
     tables?: NeighbourTableInfo[];
 }
 
-const neighbourService = createService('operatorpb.NeighbourService');
+const neighbourService = createService('operators.route.operatorpb.v1.NeighbourService');
 
 export const neighbours = {
     list: (table?: string, options?: CallOptions): Promise<ListNeighboursResponse> => {

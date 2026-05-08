@@ -5,23 +5,26 @@ on:
     paths:
       - '**/*.proto'
       - 'lint/protobuf/**'
+      - 'buf.yaml'
   pull_request:
     paths:
       - '**/*.proto'
       - 'lint/protobuf/**'
+      - 'buf.yaml'
 
 jobs:
-  proto-fmt:
-    name: Proto formatting
-    runs-on: ubuntu-24.04
+  buf-lint:
+    name: Buf lint
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Run clang-format
-        uses: ./.github/actions/clang-format
+
+      - uses: bufbuild/buf-action@v1
         with:
-          include: |
-            *.proto
-          exclude-regex: '^./subprojects/'
+          setup_only: true
+
+      - name: Run buf lint
+        run: buf lint
 
   protolint:
     name: Custom protolint linter
@@ -37,4 +40,20 @@ jobs:
         run: go test ./lint/protobuf/cmd/protolint/
 
       - name: Run linter
-        run: go run ./lint/protobuf/cmd/protolint/ --exclude subprojects
+        run: |
+          go run ./lint/protobuf/cmd/protolint/ --exclude subprojects \
+                                                --exclude common \
+                                                --exclude controlplane \
+                                                --exclude devices \
+                                                --exclude operators/bird-adapter \
+                                                --exclude modules/acl \
+                                                --exclude modules/balancer \
+                                                --exclude modules/balancer2 \
+                                                --exclude modules/decap \
+                                                --exclude modules/dscp \
+                                                --exclude modules/forward \
+                                                --exclude modules/fwstate \
+                                                --exclude modules/nat64 \
+                                                --exclude modules/pdump \
+                                                --exclude modules/route \
+                                                --exclude modules/route-mpls

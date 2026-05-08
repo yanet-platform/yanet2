@@ -54,12 +54,12 @@ var (
 		"ip addr add " + VMIPv4Host + "/24 dev kni0",
 
 		// Configure L2 and L3 forwarding
-		CLIForward + " update --cfg=forward0 --rules /mnt/yanet2/forward.yaml",
+		CLIForward + " update --name=forward0 --rules /mnt/yanet2/forward.yaml",
 
 		// Bootstrap the default IPv4/IPv6 FIB for the "route0" config.
 		// The YAML payload is created on the host before this command
 		// runs; see framework_test.go.
-		CLIRoute + " fib update --cfg=route0 --rules /mnt/config/route0.yaml",
+		CLIRoute + " fib update --name=route0 --rules /mnt/config/route0.yaml",
 
 		CLIFunction + " update --name=virt --chains chain0:10=forward:forward0",
 		CLIFunction + " update --name=test --chains chain2:1=forward:forward0,route:route0",

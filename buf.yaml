@@ -1,0 +1,36 @@
+version: v2
+modules:
+  - path: .
+    excludes:
+      - subprojects
+      # Operators not yet migrated to versioned proto layout.
+      - operators/bird-adapter
+      # Modules not yet migrated.
+      - controlplane
+      - devices
+      - modules/acl
+      - modules/balancer
+      - modules/balancer2
+      - modules/decap
+      - modules/dscp
+      - modules/forward
+      - modules/fwstate
+      - modules/nat64
+      - modules/pdump
+      - modules/route
+      - modules/route-mpls
+lint:
+  use:
+    - STANDARD
+  except:
+    - ENUM_VALUE_PREFIX
+    - ENUM_ZERO_VALUE_SUFFIX
+    - RPC_REQUEST_STANDARD_NAME
+    - RPC_RESPONSE_STANDARD_NAME
+    - RPC_REQUEST_RESPONSE_UNIQUE
+    - SERVICE_SUFFIX
+  ignore:
+    - common
+breaking:
+  use:
+    - PACKAGE
