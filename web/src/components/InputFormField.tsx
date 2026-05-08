@@ -1,7 +1,7 @@
 import React from 'react';
 import { TextInput } from '@gravity-ui/uikit';
 import { FormField } from './FormField';
-import './common.css';
+import './common.scss';
 
 export interface InputFormFieldProps {
     /** Field label */

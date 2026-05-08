@@ -118,7 +118,7 @@ func TestDuplicateVsRejected(t *testing.T) {
 	defer m.Free()
 
 	// Create logger for tests
-	log := zap.NewNop().Sugar()
+	log := zap.NewNop()
 
 	// Create balancer agent
 	agent, err := NewBalancerAgent(m.SharedMemory(), 256*datasize.MB, log)

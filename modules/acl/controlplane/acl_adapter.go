@@ -3,6 +3,8 @@ package acl
 import (
 	"fmt"
 
+	"go.uber.org/zap"
+
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	fwstate "github.com/yanet-platform/yanet2/modules/fwstate/controlplane"
 )
@@ -166,7 +168,11 @@ func (m *ACLService) createACLConfigs(aclConfigNames []string, fwstateConfig *fw
 		ffiConfigs = append(ffiConfigs, newConfigs[name].AsFFIModule())
 	}
 
-	m.log.Infow("successfully created ACL configs", "acl_configs", aclConfigNames, "fwstate", fwstateConfig.Name())
+	m.log.Info(
+		"successfully created ACL configs",
+		zap.Strings("acl_configs", aclConfigNames),
+		zap.String("fwstate", fwstateConfig.Name()),
+	)
 
 	return ffiConfigs, transaction, nil
 }

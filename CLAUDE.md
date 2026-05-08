@@ -61,7 +61,7 @@ Top-level directories and their roles:
 - `controlplane/`  — Go gateway, CGO bindings (`ffi/`), root protos (`ynpb/`), control-plane package (`yncp/`), entrypoints (`cmd/`).
 - `modules/`       — packet-processing modules (see Module Structure).
 - `devices/`       — device adapters (`plain`, `vlan`); same layout as modules.
-- `agents/`        — long-running orchestration daemons (see Agents).
+- `operators/`     — long-running orchestration daemons (see Operators).
 - `filter/`        — filter compiler, classifiers, and query engine (C).
 - `lib/`           — C support libraries: `controlplane`, `counters`, `dataplane`, `errors`, `fwstate`, `logging`, `utils`, plus `tests/` and `fuzzing/`.
 - `api/`           — public C API headers exposed to control plane (`agent.h`, `config.h`, `counter.h`, `info.h`).
@@ -88,7 +88,8 @@ A single Go gRPC server that proxies requests to module backends. Modules regist
 Key packages:
 
 - `cmd/` — binary entrypoints: `yncp-director` (gateway daemon), `bird-adapter` (legacy build of the BIRD adapter).
-- `internal/gateway/` — actual proxy implementation: `proxy`, `director`, `registry`.
+- `gateway/` — flat package: API gateway server (`gateway.go`, `runner.go`, `registry.go`, `service.go`, `auth_service.go`, `cfg.go`) plus client-side helpers used by built-in services and operators (`registrar.go`, `registration_loop.go`, `tls.go`, `credentials.go`).
+- `builtin/` — in-process built-in services: `pipeline`, `inspect`, `function`, `counters`, `logging`. Each implements the structural `gateway.Service` interface and is constructed by the director, then passed to `NewGateway` via `gateway.WithService(...)`.
 - `internal/auth/`, `internal/version/`, `internal/xgrpc/` — supporting packages.
 - `ffi/` — CGO bindings for shared memory (`shm.go`, `agent.go`, `pipeline.go`).
 - `ynpb/` — root protobuf definitions: pipeline, device, counters, inspect, logging, auth, function, gateway, module.
@@ -143,15 +144,15 @@ fwstate, dscp, pdump, route-mpls`.
 `cli/`) but for device adapters rather than packet-processing modules.
 Active devices: `plain`, `vlan`.
 
-### Agents
+### Operators
 
-`agents/` holds long-running Go control-plane processes that orchestrate
+`operators/` holds long-running Go control-plane processes that orchestrate
 the dataplane through the gateway, distinct from per-module gRPC services.
 
-- `agents/yanet-pipeline-operator` — declarative reconciliation operator
+- `operators/yanet-pipeline-operator` — declarative reconciliation operator
   (`cmd/`, `internal/`, `operatorpb/`). Structural template for future
   operators (route, acl, balancer).
-- `agents/bird-adapter` — BIRD routing-daemon adapter (canonical agent
+- `operators/bird-adapter` — BIRD routing-daemon adapter (canonical agent
   layout: `adapterpb/`, `internal/`, `service.go`). Note:
   `modules/route/bird-adapter/` is a separate proto-contract subtree
   (`adapterpb/`, `proto/`) consumed by the agent — not a duplicate binary.
@@ -292,64 +293,40 @@ Web UI lives in `web/` (`package.json`, `index.html`, `dist/`).
 
 ## Agent Memory & Feedback
 
-**`.claude/agent-memory/<agent>/`** — per-agent persistent memory (corrections, confirmed approaches, project notes).
-Each agent's directory already exists — agents write to it directly with the Write tool.
-Anything codified in this `CLAUDE.md` should be removed from agent memory to avoid duplication; agent memory holds the "Why" and lessons that are still settling.
+**`.claude/agent-memory/<agent>/MEMORY.md`** — single flat file per agent. No backing files, no YAML frontmatter. The file is auto-loaded into conversation context, so keep it tight.
 
-### Memory file format
-
-Each memory is a standalone `.md` file with frontmatter:
+### Format
 
 ```markdown
----
-name: {{memory name}}
-description: {{one-line description — used to decide relevance, so be specific}}
-type: {{user | feedback | project | reference}}
----
+# <agent> memory
 
-{{memory content}}
+## Rules
+- <imperative rule>. Why: <one-clause reason>.
+
+## Project context
+- <fact / pattern>. Why: <one-clause reason>.
+
+## References
+- <external resource>: <where>.
 ```
 
-### Memory index
-
-Each agent maintains a `MEMORY.md` index in its memory directory. `MEMORY.md` is loaded into conversation context automatically — keep it under 200 lines. Each entry is one line under ~150 characters:
-
-```
-- [Title](file.md) — one-line hook
-```
-
-Never write memory content directly into `MEMORY.md` — it is only an index.
-
-### Memory types
-
-| Type | What to store | When to save |
-|------|--------------|--------------|
-| **user** | User's role, goals, preferences, knowledge level | When you learn details about the user that affect how you should respond |
-| **feedback** | User corrections AND confirmed approaches | When user says "don't do X" or confirms a non-obvious approach worked |
-| **project** | Ongoing work, goals, decisions, constraints not in code/git | When you learn who/what/why/when about project work. Convert relative dates to absolute |
-| **reference** | Pointers to external systems (Linear, Grafana, Slack, etc.) | When you learn about external resources and their purpose |
-
-### Feedback and project memory structure
-
-Lead with the rule/fact, then:
-
-- **Why:** the motivation or incident behind it.
-- **How to apply:** when/where this kicks in.
+- One bullet per rule, ≤ 200 chars. No multi-line bodies, no examples, no code fences.
+- All sections optional — omit empty ones.
+- Section determines memory type (rule = feedback, project context = project, references = reference). User-profile facts go under `## Rules` prefixed `User: …`.
 
 ### What NOT to save
 
-- Code patterns, conventions, architecture, file paths — derivable from the codebase.
-- Git history, recent changes — use `git log` / `git blame`.
-- Debugging solutions — the fix is in the code, context is in the commit message.
-- Anything already documented in this CLAUDE.md.
-- Ephemeral task details or current conversation context.
+- Anything already in this `CLAUDE.md` (Coding Conventions, Architecture, etc.) — duplicates waste tokens.
+- Code patterns, file paths, architecture — derivable from the codebase.
+- Git history or recent changes — use `git log` / `git blame`.
+- Debugging fix recipes — the fix is in the code; the commit message has the context.
+- Ephemeral task state.
 
-### Memory hygiene
+### Hygiene
 
-- Check for existing memories before creating new ones — update rather than duplicate.
-- Verify memories before acting on them: file paths may have moved, functions may have been renamed.
-- If a memory conflicts with current code state, trust the code and update or remove the stale memory.
-- A memory that summarizes repo state is frozen in time — prefer `git log` or reading code for current state.
+- Update an existing line in place; never duplicate.
+- Before acting on a memory, verify the referenced file/symbol still exists — trust the code over a stale line.
+- Promote a recurring lesson into this `CLAUDE.md` after 3+ occurrences, then delete its line from agent memory.
 
 ## Key Dependencies
 

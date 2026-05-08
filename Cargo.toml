@@ -20,12 +20,14 @@ members = [
     "modules/nat64/cli",
     "modules/pdump/cli",
     "modules/balancer/cli",
-    "modules/route/cli/neighbour",
+    "modules/balancer2/cli",
     "modules/route/cli/route",
     "modules/route-mpls/cli",
-    "devices/cli",
     "devices/plain/cli",
     "devices/vlan/cli",
+    "operators/pipeline/cli",
+    "operators/route/cli/route",
+    "operators/route/cli/neighbour",
 ]
 
 [profile.release]

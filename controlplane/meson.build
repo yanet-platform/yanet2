@@ -18,6 +18,7 @@ custom_target(
     depends: [
         # go proto gen deps
         ynpb_gen,
+        common_protoc_gen,
         decap_protoc_gen,
         dscp_protoc_gen,
         forward_protoc_gen,

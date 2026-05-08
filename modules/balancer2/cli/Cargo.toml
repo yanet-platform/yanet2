@@ -1,0 +1,33 @@
+[package]
+name = "yanet-cli-balancer2"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+rust-version = "1.85"
+
+[dependencies]
+ync = { path = "../../../cli/core", version = "0.1", package = "yanet-cli" }
+filterpb = { path = "../../../common/rust/filterpb", version = "0.1", package = "yanet-filterpb" }
+commonpb = { path = "../../../common/rust/commonpb", version = "0.1", package = "yanet-commonpb" }
+clap = { version = "4.5", features = ["derive"] }
+clap_complete = { version = "4.5", features = ["unstable-dynamic"] }
+tokio = { version = "1", features = ["rt", "net", "time", "macros", "sync"] }
+tonic = { version = "0.13", features = ["gzip"] }
+prost = "0.13"
+prost-types = "0.13"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+ptree = "0.5"
+tabled = { version = "0.18", features = ["ansi"] }
+log = "0.4"
+chrono = "0.4"
+netip = "0.2"
+
+[build-dependencies]
+tonic-build = "0.13"
+
+[lib]
+name = "yanet_cli_balancer2"
+path = "src/lib.rs"

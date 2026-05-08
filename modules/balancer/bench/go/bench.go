@@ -19,6 +19,7 @@ import (
 	dataplane "github.com/yanet-platform/yanet2/lib/utils/go"
 	"github.com/yanet-platform/yanet2/modules/balancer/agent/balancerpb"
 	balancer "github.com/yanet-platform/yanet2/modules/balancer/agent/go"
+	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"golang.org/x/sys/unix"
 )
@@ -512,14 +513,15 @@ func Run(config *BenchConfig) error {
 		}
 		for idx := range packetLists {
 			if idx%100 == 0 {
-				logger.Infow(
+				logger.Info(
 					"generating packets",
-					"worker",
-					worker,
-					"progress",
-					fmt.Sprintf(
-						"%.2f%%",
-						100.0*float32(idx)/float32(len(packetLists)),
+					zap.Int("worker", worker),
+					zap.String(
+						"progress",
+						fmt.Sprintf(
+							"%.2f%%",
+							100.0*float32(idx)/float32(len(packetLists)),
+						),
 					),
 				)
 			}
@@ -535,7 +537,10 @@ func Run(config *BenchConfig) error {
 				)
 			}
 		}
-		logger.Infow("generated all packets", "worker", worker)
+		logger.Info(
+			"generated all packets",
+			zap.Int("worker", worker),
+		)
 
 		go workerRoutine(
 			bench,
@@ -573,10 +578,18 @@ func Run(config *BenchConfig) error {
 
 	for info := range info {
 		if info.isErr {
-			logger.Errorw(info.info, "worker", info.idx, "tid", info.tid)
+			logger.Error(
+				info.info,
+				zap.Int("worker", info.idx),
+				zap.Int("tid", info.tid),
+			)
 			isErr = true
 		} else {
-			logger.Infow(info.info, "worker", info.idx, "tid", info.tid)
+			logger.Info(
+				info.info,
+				zap.Int("worker", info.idx),
+				zap.Int("tid", info.tid),
+			)
 		}
 	}
 
@@ -586,7 +599,7 @@ func Run(config *BenchConfig) error {
 		workerPerfs = append(workerPerfs, p)
 	}
 
-	logger.Infow("done")
+	logger.Info("done")
 
 	// Print comprehensive balancer stats
 	printSeparator()

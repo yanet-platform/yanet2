@@ -1,6 +1,6 @@
 import React from 'react';
 import { Box, TextInput, Loader, Label, Text } from '@gravity-ui/uikit';
-import './TableSearchBar.css';
+import './TableSearchBar.scss';
 
 export interface TableSearchBarProps {
     searchQuery: string;

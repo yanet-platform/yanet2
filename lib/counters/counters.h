@@ -14,7 +14,7 @@
 #define CP_PIPELINE_NAME_LEN 80
 #endif
 
-#define COUNTER_NAME_LEN 64
+#define COUNTER_NAME_LEN 128
 #define COUNTER_INVALID (uint64_t)-1
 
 struct counter {

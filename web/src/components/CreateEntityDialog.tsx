@@ -2,7 +2,7 @@ import React, { useState, useCallback, useEffect } from 'react';
 import { TextInput } from '@gravity-ui/uikit';
 import { FormDialog } from './FormDialog';
 import { FormField } from './FormField';
-import './common.css';
+import './common.scss';
 
 export interface CreateEntityDialogProps {
     /** Whether the dialog is open */

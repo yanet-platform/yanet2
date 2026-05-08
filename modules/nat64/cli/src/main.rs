@@ -72,7 +72,7 @@ pub enum MappingCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct ShowConfigCmd {
     /// The name of the config to operate on.
-    #[arg(long = "cfg", short)]
+    #[arg(long = "name", short = 'n')]
     pub config_name: String,
     /// Output format.
     #[clap(long, value_enum, default_value_t = OutputFormat::Tree)]
@@ -82,7 +82,7 @@ pub struct ShowConfigCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct AddPrefixCmd {
     /// The name of the config to operate on.
-    #[arg(long = "cfg", short)]
+    #[arg(long = "name", short = 'n')]
     pub config_name: String,
     /// IPv6 prefix (12 bytes) to be added.
     #[arg(long)]
@@ -92,7 +92,7 @@ pub struct AddPrefixCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct AddMappingCmd {
     /// The name of the config to operate on.
-    #[arg(long = "cfg", short)]
+    #[arg(long = "name", short = 'n')]
     pub config_name: String,
     /// IPv4 address (4 bytes).
     #[arg(long)]
@@ -108,7 +108,7 @@ pub struct AddMappingCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct MtuCmd {
     /// The name of the config to operate on.
-    #[arg(long = "cfg", short)]
+    #[arg(long = "name", short = 'n')]
     pub config_name: String,
     /// MTU value for IPv4.
     #[arg(long)]
@@ -122,7 +122,7 @@ pub struct MtuCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct DropCmd {
     /// The name of the config to operate on.
-    #[arg(long = "cfg", short)]
+    #[arg(long = "name", short = 'n')]
     pub config_name: String,
     /// Drop packets with unknown prefix
     #[arg(long)]

@@ -18,7 +18,7 @@ import (
 // setAndWaitForNAT64DropFlags sets NAT64 drop flags and waits for them to be applied
 func setAndWaitForNAT64DropFlags(fw *framework.F, dropUnknownPrefix, dropUnknownMapping bool, timeout time.Duration) error {
 	// Build the drop command
-	cmd := "/mnt/target/release/yanet-cli-nat64 drop --cfg nat64_0"
+	cmd := "/mnt/target/release/yanet-cli-nat64 drop --name nat64_0"
 	if dropUnknownPrefix {
 		cmd += " --drop-unknown-prefix"
 	}
@@ -36,7 +36,7 @@ func setAndWaitForNAT64DropFlags(fw *framework.F, dropUnknownPrefix, dropUnknown
 	deadline := time.Now().Add(timeout)
 
 	for time.Now().Before(deadline) {
-		output, err := fw.ExecuteCommand("/mnt/target/release/yanet-cli-nat64 show --cfg nat64_0 --format json")
+		output, err := fw.ExecuteCommand("/mnt/target/release/yanet-cli-nat64 show --name nat64_0 --format json")
 		if err != nil {
 			return fmt.Errorf("failed to check NAT64 status: %w", err)
 		}
@@ -96,9 +96,9 @@ func TestNAT64(t *testing.T) {
 		// NAT64-specific configuration
 		commands := []string{
 			// Configure NAT64 mappings (using addresses from unit tests)
-			"/mnt/target/release/yanet-cli-nat64 prefix add --cfg nat64_0 --prefix 2001:db8::/96",
-			"/mnt/target/release/yanet-cli-nat64 mapping add --cfg nat64_0 --ipv4 198.51.100.1 --ipv6 2001:db8::4 --prefix-index 0",
-			"/mnt/target/release/yanet-cli-nat64 mapping add --cfg nat64_0 --ipv4 198.51.100.2 --ipv6 2001:db8::3 --prefix-index 0",
+			"/mnt/target/release/yanet-cli-nat64 prefix add --name nat64_0 --prefix 2001:db8::/96",
+			"/mnt/target/release/yanet-cli-nat64 mapping add --name nat64_0 --ipv4 198.51.100.1 --ipv6 2001:db8::4 --prefix-index 0",
+			"/mnt/target/release/yanet-cli-nat64 mapping add --name nat64_0 --ipv4 198.51.100.2 --ipv6 2001:db8::3 --prefix-index 0",
 
 			"/mnt/target/release/yanet-cli-function update --name=test --chains chain0:1=forward:forward0,nat64:nat64_0,route:route0",
 			// Configure pipeline

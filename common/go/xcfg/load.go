@@ -1,14 +1,44 @@
 package xcfg
 
 import (
+	"fmt"
+	"os"
 	"reflect"
 	"strings"
 
 	"gopkg.in/yaml.v3"
 )
 
+type defaultable interface {
+	Default()
+}
+
 type validatable interface {
 	Validate() error
+}
+
+// LoadConfig reads a YAML file from path and returns the parsed Config.
+//
+// Default values are applied before unmarshalling so any absent field retains
+// its default.
+//
+// Validation is driven by Decode, which calls Validate() on every field whose
+// type implements it.
+func LoadConfig[T any](path string) (*T, error) {
+	buf, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read config file: %w", err)
+	}
+
+	cfg := new(T)
+	if def, ok := any(cfg).(defaultable); ok {
+		def.Default()
+	}
+	if err := Decode(buf, cfg); err != nil {
+		return nil, fmt.Errorf("failed to parse config file: %w", err)
+	}
+
+	return cfg, nil
 }
 
 // Decode deserializes YAML data into dst and then recursively validates all

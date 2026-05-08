@@ -458,19 +458,33 @@ acl_module_config_update(
 
 	for (uint32_t idx = 0; idx < rule_count; ++idx) {
 		struct acl_rule *acl_rule = acl_rules + idx;
-		targets[idx].action = acl_rule->action;
-		if (acl_rule->counter[0] == '\0')
+
+		uint64_t action_count = acl_rule->action_count;
+		if (action_count > ACL_MAX_ACTIONS) {
+			action_count = ACL_MAX_ACTIONS;
+		}
+		for (uint64_t action_idx = 0; action_idx < action_count;
+		     ++action_idx) {
+			targets[idx].actions[action_idx] =
+				acl_rule->actions[action_idx].id;
+		}
+		targets[idx].action_count = action_count;
+
+		struct acl_action *terminal =
+			&acl_rule->actions[acl_rule->action_count - 1];
+		const char *counter_name = terminal->counter;
+		char default_counter[COUNTER_NAME_LEN];
+		if (counter_name[0] == '\0') {
 			snprintf(
-				acl_rule->counter,
-				sizeof(acl_rule->counter),
+				default_counter,
+				sizeof(default_counter),
 				"rule %d",
 				idx
 			);
+			counter_name = default_counter;
+		}
 		if ((targets[idx].counter_id = counter_registry_register(
-			     &cp_module->counter_registry,
-			     acl_rule->counter,
-			     2,
-			     err
+			     &cp_module->counter_registry, counter_name, 2, err
 		     )) == (uint64_t)-1) {
 			goto error_target;
 		}

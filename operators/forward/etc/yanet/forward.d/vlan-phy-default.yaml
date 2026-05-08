@@ -1,0 +1,10 @@
+rules:
+  - target: 0000:81:00.0
+    counter: to_0000:81:00.0
+    vlan_ranges:
+      - from: 0
+        to: 4095
+    srcs: []
+    dsts: []
+    devices: []
+    mode: Out

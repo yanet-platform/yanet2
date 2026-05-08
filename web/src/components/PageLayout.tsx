@@ -1,6 +1,6 @@
 import React from 'react';
 import { Flex, Box, Text, Divider } from '@gravity-ui/uikit';
-import './common.css';
+import './common.scss';
 
 export interface PageLayoutProps {
     /** Page title displayed in header. If not provided, header is not shown. */

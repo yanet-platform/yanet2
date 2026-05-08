@@ -9,7 +9,6 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -33,7 +32,7 @@ func (m *mockBackend) UpdateModule(
 
 func newTestService(t *testing.T) *DecapService {
 	t.Helper()
-	return NewDecapService(&mockBackend{}, zap.NewNop().Sugar())
+	return NewDecapService(&mockBackend{})
 }
 
 // flakyBackend succeeds on the first UpdateModule call and fails thereafter.
@@ -200,7 +199,7 @@ func Test_DecapService_EmptyConfigName(t *testing.T) {
 }
 
 func Test_DecapService_UpdateFailureAtomic(t *testing.T) {
-	service := NewDecapService(&flakyBackend{}, zap.NewNop().Sugar())
+	service := NewDecapService(&flakyBackend{})
 	ctx := t.Context()
 	name := "decap0"
 

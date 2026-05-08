@@ -1,7 +1,7 @@
 import React from 'react';
 import { Text, Button, Label, Box } from '@gravity-ui/uikit';
 import { FloppyDisk, TrashBin } from '@gravity-ui/icons';
-import './CardHeader.css';
+import './CardHeader.scss';
 
 export interface CardHeaderProps {
     /** Card title */

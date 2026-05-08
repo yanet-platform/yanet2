@@ -1,51 +1,61 @@
 package route
 
 import (
-	"context"
 	"fmt"
 
 	"go.uber.org/zap"
-	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 
 	cpffi "github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/route/controlplane/routepb"
-	"github.com/yanet-platform/yanet2/modules/route/internal/discovery/neigh"
 )
 
 const (
 	agentName = "route"
-
-	// defaultStaticPriority is the default priority for statically
-	// configured neighbours.
-	defaultStaticPriority = 10
 )
 
-// RouteModule is a controlplane part of a module that is responsible for
-// routing configuration.
+// Option configures the RouteModule constructor.
+type Option func(*moduleOptions)
+
+type moduleOptions struct {
+	Log *zap.Logger
+}
+
+func newModuleOptions() *moduleOptions {
+	return &moduleOptions{
+		Log: zap.NewNop(),
+	}
+}
+
+// WithLog sets the logger for the route module.
+func WithLog(log *zap.Logger) Option {
+	return func(o *moduleOptions) {
+		o.Log = log
+	}
+}
+
+// RouteModule is the slim route-module shim that owns shared memory and
+// exposes the routepb.RouteService gRPC surface.
+//
+// The module no longer owns a RIB or a neighbour table; the
+// yanet-route-operator agent rebuilds the FIB and pushes it via
+// UpdateFIB.
 type RouteModule struct {
-	cfg              *Config
-	shm              *cpffi.SharedMemory
-	agent            *cpffi.Agent
-	neighbourMonitor *neigh.NeighMonitor
-	routeService     *RouteService
-	neighbourService *NeighbourService
-	log              *zap.Logger
+	cfg     *Config
+	shm     *cpffi.SharedMemory
+	agent   *cpffi.Agent
+	service *RouteService
+	log     *zap.Logger
 }
 
 // NewRouteModule creates a new RouteModule.
-func NewRouteModule(cfg *Config, log *zap.Logger) (*RouteModule, error) {
-	log = log.With(zap.String("module", "routepb.RouteService"))
-
-	neighbourTable := neigh.NewNeighTable()
-	if _, err := neighbourTable.CreateSource("static", defaultStaticPriority, true); err != nil {
-		return nil, fmt.Errorf("failed to create static neighbour source: %w", err)
+func NewRouteModule(cfg *Config, options ...Option) (*RouteModule, error) {
+	opts := newModuleOptions()
+	for _, o := range options {
+		o(opts)
 	}
 
-	neighbourMonitor, err := newNeighbourMonitor(cfg, neighbourTable, log)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create neighbour monitor: %w", err)
-	}
+	log := opts.Log.With(zap.String("module", "routepb.RouteService"))
 
 	shm, err := cpffi.AttachSharedMemory(cfg.MemoryPath.Unwrap())
 	if err != nil {
@@ -62,68 +72,37 @@ func NewRouteModule(cfg *Config, log *zap.Logger) (*RouteModule, error) {
 		return nil, fmt.Errorf("failed to attach agent to shared memory: %w", err)
 	}
 
-	routeService := NewRouteService(NewBackend(agent, log), neighbourTable, cfg.RibTTL, log)
-	neighbourService := NewNeighbourService(neighbourTable)
+	service := NewRouteService(NewBackend(agent), WithRouteServiceLog(log))
 
 	return &RouteModule{
-		cfg:              cfg,
-		shm:              shm,
-		agent:            agent,
-		neighbourMonitor: neighbourMonitor,
-		routeService:     routeService,
-		neighbourService: neighbourService,
-		log:              log,
+		cfg:     cfg,
+		shm:     shm,
+		agent:   agent,
+		service: service,
+		log:     log,
 	}, nil
 }
 
-// newNeighbourMonitor creates a new neighbour monitor if netlink discovery is
-// enabled.
-func newNeighbourMonitor(
-	cfg *Config,
-	neighTable *neigh.NeighTable,
-	log *zap.Logger,
-) (*neigh.NeighMonitor, error) {
-	if cfg.NetlinkMonitor.Disabled {
-		return nil, nil
-	}
-
-	source, err := neighTable.CreateSource(
-		cfg.NetlinkMonitor.TableName,
-		cfg.NetlinkMonitor.DefaultPriority,
-		true,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create kernel neighbour source: %w", err)
-	}
-
-	neighbourMonitor := neigh.NewNeighMonitor(
-		neighTable,
-		source,
-		neigh.WithLog(log),
-		neigh.WithLinkMap(cfg.LinkMap),
-	)
-
-	return neighbourMonitor, nil
-}
-
+// Name returns the module name.
 func (m *RouteModule) Name() string {
 	return agentName
 }
 
+// Endpoint returns the gRPC endpoint for the route module shim.
 func (m *RouteModule) Endpoint() string {
 	return m.cfg.Endpoint.Unwrap()
 }
 
+// ServicesNames returns the gRPC service names exposed by the module.
 func (m *RouteModule) ServicesNames() []string {
 	return []string{
 		"routepb.RouteService",
-		"routepb.Neighbour",
 	}
 }
 
+// RegisterService registers the route module's gRPC service.
 func (m *RouteModule) RegisterService(server *grpc.Server) {
-	routepb.RegisterRouteServiceServer(server, m.routeService)
-	routepb.RegisterNeighbourServer(server, m.neighbourService)
+	routepb.RegisterRouteServiceServer(server, m.service)
 }
 
 // Close closes the module.
@@ -131,36 +110,8 @@ func (m *RouteModule) Close() error {
 	if err := m.agent.Close(); err != nil {
 		m.log.Warn("failed to close shared memory agent", zap.Error(err))
 	}
-
 	if err := m.shm.Detach(); err != nil {
 		m.log.Warn("failed to detach from shared memory mapping", zap.Error(err))
 	}
-
 	return nil
-}
-
-// Run runs the module until the specified context is canceled.
-// Implements the BackgroundBuiltInModule interface from
-// controlplane/internal/gateway/runner.go
-func (m *RouteModule) Run(ctx context.Context) error {
-	wg, ctx := errgroup.WithContext(ctx)
-
-	wg.Go(func() error {
-		return m.runNeighbourMonitor(ctx)
-	})
-	wg.Go(func() error {
-		<-ctx.Done()
-		close(m.routeService.quitCh)
-		return ctx.Err()
-	})
-
-	return wg.Wait()
-}
-
-func (m *RouteModule) runNeighbourMonitor(ctx context.Context) error {
-	if m.neighbourMonitor == nil {
-		return nil
-	}
-
-	return m.neighbourMonitor.Run(ctx)
 }

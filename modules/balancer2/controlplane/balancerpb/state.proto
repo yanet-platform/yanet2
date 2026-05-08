@@ -1,0 +1,128 @@
+syntax = "proto3";
+
+package balancerpb;
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+
+import "modules/balancer2/controlplane/balancerpb/config.proto";
+
+option go_package = "github.com/yanet-platform/yanet2/modules/balancer2/controlplane/balancerpb;balancerpb";
+
+message BalancerState {
+  string config_name = 1;
+  string sessions_state_name = 2;
+  uint64 sessions_state_capacity = 3;
+  PacketHandlerRef ref = 4;
+  L4Stats l4_stats = 5;
+  CommonStats common_stats = 6;
+  IcmpStats icmp_ip4_stats = 7;
+  IcmpStats icmp_ip6_stats = 8;
+  uint64 active_sessions = 9;
+  google.protobuf.Timestamp last_packet_timestamp = 10;
+  repeated VsState vs = 11;
+  AddrConfig addr = 12;
+}
+
+message VsState {
+  // VsConfig.reals and VsConfig.allowed_sources are meaningless here
+  VsConfig config = 1;
+  VsStats stats = 2;
+  uint64 active_sessions = 3;
+  google.protobuf.Timestamp last_packet_timestamp = 4;
+  repeated AllowedSourcesStats allowed_sources_stats = 5;
+  repeated RealState reals = 6;
+}
+
+message RealState {
+  RealConfig config = 1;
+  RealStats stats = 2;
+  uint64 active_sessions = 3;
+  google.protobuf.Timestamp last_packet_timestamp = 4;
+  uint64 effective_weight = 5;
+  bool enabled = 6;
+}
+
+// TCP/UDP packet processing statistics.
+message L4Stats {
+  uint64 incoming_packets = 1;
+  uint64 select_vs_failed = 2;
+  uint64 invalid_packets = 3;
+  uint64 select_real_failed = 4;
+  uint64 outgoing_packets = 5;
+}
+
+message IcmpStats {
+  uint64 incoming_packets = 1;
+  uint64 src_not_allowed = 2;
+  uint64 echo_responses = 3;
+  uint64 payload_too_short_ip = 4;
+  uint64 unmatching_src_from_original = 5;
+  uint64 payload_too_short_port = 6;
+  uint64 unexpected_transport = 7;
+  uint64 unrecognized_vs = 8;
+  uint64 forwarded_packets = 9;
+  uint64 broadcasted_packets = 10;
+  uint64 packet_clones_sent = 11;
+  uint64 packet_clones_received = 12;
+  uint64 packet_clone_failures = 13;
+}
+
+message CommonStats {
+  uint64 incoming_packets = 1;
+  uint64 incoming_bytes = 2;
+  uint64 unexpected_network_proto = 3;
+  uint64 unexpected_transport_proto = 4;
+  uint64 decap_successful = 5;
+  uint64 decap_failed = 6;
+  uint64 outgoing_packets = 7;
+  uint64 outgoing_bytes = 8;
+  uint64 no_headroom_packets = 9;
+}
+
+message VsStats {
+  uint64 incoming_packets = 1;
+  uint64 incoming_bytes = 2;
+  uint64 packet_src_not_allowed = 3;
+  uint64 no_reals = 4;
+  uint64 session_table_overflow = 5;
+  uint64 echo_icmp_packets = 6;
+  uint64 error_icmp_packets = 7;
+  uint64 real_is_disabled = 8;
+  uint64 not_rescheduled_packets = 9;
+  uint64 broadcasted_icmp_packets = 10;
+  uint64 created_sessions = 11;
+  uint64 outgoing_packets = 12;
+  uint64 outgoing_bytes = 13;
+  uint64 fix_mss_malformed = 14;
+}
+
+message RealStats {
+  uint64 packets_real_disabled = 1;
+  uint64 error_icmp_packets = 2;
+  uint64 created_sessions = 3;
+  uint64 packets = 4;
+  uint64 bytes = 5;
+}
+
+message AllowedSourcesStats {
+  string tag = 1;
+  uint64 passes = 2;
+}
+
+message Session {
+  bytes client_addr = 1;
+  uint32 client_port = 2;
+  VsIdentifier vs_id = 3;
+  RelativeRealIdentifier real_id = 4;
+  google.protobuf.Timestamp create_timestamp = 5;
+  google.protobuf.Timestamp last_packet_timestamp = 6;
+  google.protobuf.Duration timeout = 7;
+}
+
+message PacketHandlerRef {
+  optional string device = 1;
+  optional string pipeline = 2;
+  optional string function = 3;
+  optional string chain = 4;
+}

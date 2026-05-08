@@ -17,10 +17,10 @@ type DecapModule struct {
 	shm          *ffi.SharedMemory
 	agent        *ffi.Agent
 	decapService *DecapService
-	log          *zap.SugaredLogger
+	log          *zap.Logger
 }
 
-func NewDecapModule(cfg *Config, log *zap.SugaredLogger) (*DecapModule, error) {
+func NewDecapModule(cfg *Config, log *zap.Logger) (*DecapModule, error) {
 	log = log.With(zap.String("module", "decappb.DecapService"))
 
 	shm, err := ffi.AttachSharedMemory(cfg.MemoryPath.Unwrap())
@@ -28,7 +28,7 @@ func NewDecapModule(cfg *Config, log *zap.SugaredLogger) (*DecapModule, error) {
 		return nil, err
 	}
 
-	log.Debugw("mapping shared memory",
+	log.Debug("mapping shared memory",
 		zap.Uint32("instance_id", cfg.InstanceID),
 		zap.Stringer("size", cfg.MemoryRequirements),
 	)
@@ -38,7 +38,7 @@ func NewDecapModule(cfg *Config, log *zap.SugaredLogger) (*DecapModule, error) {
 		return nil, fmt.Errorf("failed to attach agent to shared memory: %w", err)
 	}
 
-	decapService := NewDecapService(NewBackend(agent), log)
+	decapService := NewDecapService(NewBackend(agent))
 
 	return &DecapModule{
 		cfg:          cfg,
@@ -68,11 +68,11 @@ func (m *DecapModule) RegisterService(server *grpc.Server) {
 // Close closes the module.
 func (m *DecapModule) Close() error {
 	if err := m.agent.Close(); err != nil {
-		m.log.Warnw("failed to close shared memory agent", zap.Error(err))
+		m.log.Warn("failed to close shared memory agent", zap.Error(err))
 	}
 
 	if err := m.shm.Detach(); err != nil {
-		m.log.Warnw("failed to detach from shared memory mapping", zap.Error(err))
+		m.log.Warn("failed to detach from shared memory mapping", zap.Error(err))
 	}
 
 	return nil

@@ -1,0 +1,489 @@
+package bird
+
+import (
+	"encoding/binary"
+	"errors"
+	"fmt"
+	"net"
+	"net/netip"
+	"unsafe"
+
+	"go.uber.org/zap"
+
+	"github.com/yanet-platform/yanet2/operators/bird-adapter/internal/rib"
+)
+
+const (
+	sizeOfUpdateStruct = unsafe.Sizeof(update{})
+	attrAreaSizeOffset = unsafe.Offsetof(update{}.attrsAreaSize)
+	sizeOfNetAddrUnion = 40
+	sizeOfBaseType     = unsafe.Sizeof(baseType{})
+	sizeOfBaseTypeTail = sizeOfNetAddrUnion - sizeOfBaseType
+
+	sizeOfLargeCommunityStruct = int(unsafe.Sizeof(rib.LargeCommunity{}))
+
+	NetIP4  = 1
+	NetIP6  = 2
+	NetVPN4 = 3
+	NetVPN6 = 4
+	//NetROA4    = 5
+	//NetROA6    = 6
+	//NetFLOW4   = 7
+	//NetFLOW6   = 8
+	//NetIP6SAdr = 9
+	//NetMPLS    = 10
+	//NetMAX     = 11
+
+	// yabird/proto/export/export.c#L94
+	AttrOrigin        AttributeType = 0x01 /* RFC 4271 */ /* WM */
+	AttrLocalPref     AttributeType = 0x05 /* WD */
+	AttrMultiExitDisc AttributeType = 0x04 /* ON */
+	AttrOriginatorID  AttributeType = 0x09 /* RFC 4456 */ /* ON */
+
+	AttrASPath         AttributeType = 0x02 /* WM */
+	AttrNextHop        AttributeType = 0x03 /* WM */
+	AttrCommunity      AttributeType = 0x08 /* RFC 1997 */ /* OT */
+	AttrExtCommunity   AttributeType = 0x10 /* RFC 4360 */
+	AttrLargeCommunity AttributeType = 0x20 /* RFC 8092 */
+	AttrMPLSLabelStack AttributeType = 0xfe /* MPLS label stack transfer attribute */
+	AttrClusterList    AttributeType = 0x0a /* RFC 4456 */ /* ON */
+
+	AttrMPReachNLRI   AttributeType = 0x0e /* RFC 4760 */
+	AttrMPUnreachNLRI AttributeType = 0x0f /* RFC 4760 */
+
+	// AtomicAggr     AttributeType = 0x06 /* WD */
+	// Aggregator     AttributeType = 0x07 /* OT */
+	// AS4Path        AttributeType = 0x11 /* RFC 6793 */
+	// AS4Aggregator  AttributeType = 0x12 /* RFC 6793 */
+	// AIGP           AttributeType = 0x1a /* RFC 7311 */
+	// OnlyToCustomer AttributeType = 0x23 /* RFC 9234 */
+
+	// ASPathSet      = 1 /* Types of path segments */
+	ASPathSequence       = 2
+	ASPathConfedSequence = 3
+	// ASPathConfedSet      = 4
+
+	OpInsert Operation = 1
+	OpRemove Operation = 2
+)
+
+var (
+	ErrUpdateDecode        = errors.New("decode error")
+	ErrUnsupportedPrefix   = fmt.Errorf("unsupported prefix type: %w", ErrUpdateDecode)
+	ErrDataTooSmall        = fmt.Errorf("data buf is too small: %w", ErrUpdateDecode)
+	ErrUnknownAddrUnion    = fmt.Errorf("unknown addr union: %w", ErrUpdateDecode)
+	ErrAttributesTruncated = fmt.Errorf("attributes area truncated: %w", ErrUpdateDecode)
+	ErrAttrsUnexpectedEOD  = fmt.Errorf("unexpected End Of Data: %w", ErrUpdateDecode)
+	ErrBadPrefix           = fmt.Errorf("bad prefix: %w", ErrUpdateDecode)
+
+	ErrUnsupportedRDType = errors.New("ErrUnsupportedRDType")
+)
+
+type AttributeType uint8
+
+func (m AttributeType) String() string {
+	switch m {
+	case AttrOrigin:
+		return "ORIGIN"
+	case AttrLocalPref:
+		return "LOCAL_PREF"
+	case AttrMultiExitDisc:
+		return "MED"
+	case AttrOriginatorID:
+		return "ORIGINATOR_ID"
+	case AttrASPath:
+		return "AS_PATH"
+	case AttrNextHop:
+		return "NEXT_HOP"
+	case AttrCommunity:
+		return "COMMUNITY"
+	case AttrExtCommunity:
+		return "EXT_COMMUNITY"
+	case AttrLargeCommunity:
+		return "LARGE_COMMUNITY"
+	case AttrMPLSLabelStack:
+		return "MPLS_LABEL_STACK"
+	case AttrClusterList:
+		return "CLUSTER_LIST"
+	case AttrMPReachNLRI:
+		return "MP_REACH_NLRI"
+	case AttrMPUnreachNLRI:
+		return "MP_UNREACH_NLRI"
+	default:
+		return fmt.Sprintf("UNKNOWN: %x", uint8(m))
+	}
+}
+
+func (m AttributeType) isU32Attribute() bool {
+	switch m {
+	case AttrOrigin:
+	case AttrOriginatorID:
+	case AttrLocalPref:
+	case AttrMultiExitDisc:
+	default:
+		return false
+	}
+	return true
+}
+
+type Operation uint32
+
+func (m Operation) isRemove() bool {
+	return m == OpRemove
+}
+
+type IP4Addr [4]byte
+type IP6Addr [16]byte
+
+type baseType struct {
+	typ       uint8
+	prefixLen uint8
+	length    uint16
+}
+
+func (m *baseType) String() string {
+	switch m.typ {
+	case NetIP4:
+		return fmt.Sprintf("ip4/%d", m.prefixLen)
+	case NetIP6:
+		return fmt.Sprintf("ip6/%d", m.prefixLen)
+	case NetVPN4:
+		return fmt.Sprintf("vpn4/%d", m.prefixLen)
+	case NetVPN6:
+		return fmt.Sprintf("vpn6/%d", m.prefixLen)
+	}
+	return fmt.Sprintf("Unknown(%x)/%d", m.typ, m.prefixLen)
+}
+
+type netAddrIP4 struct {
+	baseType
+	prefix IP4Addr
+}
+
+type netAddrIP6 struct {
+	baseType
+	prefix IP6Addr
+}
+
+type netAddrVPN4 struct {
+	baseType
+	prefix IP4Addr
+	rd     uint64
+}
+
+type netAddrVPN6 struct {
+	baseType
+	prefix IP6Addr
+	_      uint32 // padding
+	rd     uint64
+}
+
+// update represents a BIRD route update message.
+// WARNING: Do not add fields to this struct! It is cast directly from raw byte data
+// using unsafe.Pointer. The struct is followed by variable-length attribute data in memory
+// that is not represented by any field. Adding fields would shift the memory layout and
+// corrupt access to the trailing attribute data.
+type update struct {
+	base          baseType
+	baseTail      [sizeOfBaseTypeTail]byte // NetAddrUnion data
+	opType        Operation
+	peerAddr      IP6Addr
+	attrsAreaSize uint32
+}
+
+// updateDecoder wraps update with a logger for per-client logging.
+type updateDecoder struct {
+	update *update
+	log    *zap.Logger
+}
+
+func newUpdate(data []byte) (*update, error) {
+	if len(data) < int(sizeOfUpdateStruct) {
+		return nil, fmt.Errorf("data[:%d] is too small to hold an update(len=%d): %w",
+			len(data), sizeOfUpdateStruct, ErrDataTooSmall)
+	}
+
+	u := (*update)(unsafe.Pointer(&data[0]))
+	// BIRD writes attrsAreaSize EXCLUDING the 4-byte size field itself
+	// (see yabird/proto/export/export.c:133)
+	// So attrsAreaSize=0 means no attributes
+	actualAttrsAreaSize := len(data[attrAreaSizeOffset:]) // includes size of u.attrsAreaSize field (4 bytes)
+	// attrsAreaSize is the size of attributes data AFTER the attrsAreaSize field
+	// So we need: 4 (attrsAreaSize field) + attrsAreaSize (attributes) <= actualAttrsAreaSize
+	if int64(sizeOfUint32)+int64(u.attrsAreaSize) > int64(actualAttrsAreaSize) {
+		return nil, fmt.Errorf("attributes area is too small want=4+%d, actual=%d: %w",
+			u.attrsAreaSize, actualAttrsAreaSize, ErrAttributesTruncated)
+	}
+	return u, nil
+}
+
+// newUpdateDecoder creates a new updateDecoder from raw data with the provided logger.
+// If logger is nil, a nop logger will be used.
+func newUpdateDecoder(data []byte, log *zap.Logger) (*updateDecoder, error) {
+	u, err := newUpdate(data)
+	if err != nil {
+		return nil, err
+	}
+
+	if log == nil {
+		log = zap.NewNop()
+	}
+
+	return &updateDecoder{
+		update: u,
+		log:    log,
+	}, nil
+}
+
+func (m *updateDecoder) Decode(route *rib.Route) error {
+	if m.update.base.length > sizeOfNetAddrUnion {
+		return fmt.Errorf("update type(%s) is too big: %d > max known size %d: %w",
+			m.update.base.String(), m.update.base.length, sizeOfNetAddrUnion, ErrUnknownAddrUnion)
+	}
+	route.Peer = netipAddrFrom4U32(m.update.peerAddr)
+	route.ToRemove = m.update.opType.isRemove()
+
+	if err := m.decodePrefixAndRD(route); err != nil {
+		return fmt.Errorf("%w: update.decodePrefixAndRD: %w", ErrUpdateDecode, err)
+	}
+	if err := m.decodeAttributes(route); err != nil {
+		return fmt.Errorf("%w: update.Attributes: %w", ErrUpdateDecode, err)
+	}
+	return nil
+}
+
+func isSupportedRDType(rd uint64) bool {
+	// https://datatracker.ietf.org/doc/html/rfc4364#section-4.2
+	return rd>>48 == 1
+}
+
+func (m *updateDecoder) decodePrefixAndRD(route *rib.Route) error {
+	var addr netip.Addr
+	switch m.update.base.typ {
+	case NetIP4:
+		m4 := (*netAddrIP4)(unsafe.Pointer(m.update))
+		addr = netip.AddrFrom4([4]byte{m4.prefix[3], m4.prefix[2], m4.prefix[1], m4.prefix[0]})
+	case NetIP6:
+		m6 := (*netAddrIP6)(unsafe.Pointer(m.update))
+		addr = netipAddrFrom4U32(m6.prefix)
+	case NetVPN4:
+		m4 := (*netAddrVPN4)(unsafe.Pointer(m.update))
+		addr = netip.AddrFrom4([4]byte{m4.prefix[3], m4.prefix[2], m4.prefix[1], m4.prefix[0]})
+		if ok := isSupportedRDType(m4.rd); !ok {
+			return ErrUnsupportedRDType
+		}
+		route.RD = m4.rd
+	case NetVPN6:
+		m6 := (*netAddrVPN6)(unsafe.Pointer(m.update))
+		addr = netipAddrFrom4U32(m6.prefix)
+		if ok := isSupportedRDType(m6.rd); !ok {
+			return ErrUnsupportedRDType
+		}
+		route.RD = m6.rd
+	default:
+		return fmt.Errorf("%w: %s", ErrUnsupportedPrefix, m.update.base.String())
+	}
+	prefix, err := addr.Prefix(int(m.update.base.prefixLen))
+	if err != nil {
+		return fmt.Errorf("%w: addr(%s).Prefix(%d): %w", ErrBadPrefix, addr, m.update.base.prefixLen, err)
+	}
+	route.Prefix = prefix
+	return nil
+}
+
+func ExtendedAttributeID(attributeID uint32) AttributeType {
+	return AttributeType(attributeID & 0xff)
+}
+
+func (m *updateDecoder) decodeAttributes(route *rib.Route) error {
+	// BIRD writes attrsAreaSize EXCLUDING the 4-byte size field itself
+	// So attrsAreaSize=0 means no attributes
+	if m.update.attrsAreaSize == 0 {
+		return nil // no attributes
+	}
+
+	// SAFETY: newUpdate checks for data boundaries.
+	// Skip the attrsAreaSize field (4 bytes) and get slice of attribute data
+	data := unsafe.Slice((*byte)(
+		unsafe.Pointer(uintptr(unsafe.Pointer(&m.update.attrsAreaSize))+sizeOfUint32)),
+		m.update.attrsAreaSize,
+	)
+
+	for len(data) > int(sizeOfUint32) {
+
+		typ := ExtendedAttributeID(binary.LittleEndian.Uint32(data))
+		data = data[sizeOfUint32:]
+
+		if len(data) < int(sizeOfUint32) {
+			return fmt.Errorf("unexpected end of data during decoding attribute type %s: %w", typ.String(), ErrAttributesTruncated)
+		}
+
+		var attrSize uint32
+		if typ.isU32Attribute() {
+			attrSize = uint32(sizeOfUint32)
+			val := binary.LittleEndian.Uint32(data)
+			switch typ {
+			case AttrOrigin, AttrOriginatorID:
+				// NOTE: currently unused
+			case AttrLocalPref:
+				route.Pref = val
+			case AttrMultiExitDisc:
+				route.Med = val
+			}
+		} else {
+			attrSize = binary.LittleEndian.Uint32(data)
+			data = data[sizeOfUint32:] // size of chunk size
+			if len(data) < int(attrSize) {
+				return fmt.Errorf("unexpected end of data len=%d, want=%d: %w", len(data), attrSize, ErrAttributesTruncated)
+			}
+			if err := m.decodeComplexAttribute(route, data[:attrSize], typ); err != nil {
+				return fmt.Errorf("decode attribute %s: %w", typ.String(), err)
+			}
+		}
+		data = data[attrSize:]
+	}
+	if len(data) != 0 {
+		return fmt.Errorf("unhandled attributes data len=%d: %#v: %w", len(data), data, ErrAttrsUnexpectedEOD)
+	}
+	return nil
+}
+
+func (m *updateDecoder) decodeComplexAttribute(route *rib.Route, data []byte, typ AttributeType) error {
+	switch typ {
+	case AttrOrigin, AttrLocalPref, AttrMultiExitDisc, AttrOriginatorID:
+	case AttrASPath:
+		// https://datatracker.ietf.org/doc/html/rfc4271#section-5.1.2
+		for len(data) >= 2 { // traverse all segments
+			segmentType := data[0]
+			asPathLen := data[1]
+			if asPathLen == 0 {
+				return nil
+			}
+			data = data[2:]
+			asPathBytesSize := int(asPathLen) * int(sizeOfUint32)
+
+			// OriginAS is the last one
+			if asPathBytesSize > len(data) {
+				return fmt.Errorf("ASPath attribute truncated want=%d, actual=%d: %w",
+					asPathBytesSize, len(data), ErrAttrsUnexpectedEOD)
+			}
+
+			if segmentType != ASPathSequence && segmentType != ASPathConfedSequence {
+				// return fmt.Errorf("unsupported ASPath segment type: %d", segmentType)
+				// Silently skip unsupported AS path segment types (e.g., AS_SET, AS_CONFED_SET).
+				// These segment types are valid per RFC 4271, but we only process sequence types
+				// for determining peer and origin AS values.
+				// Note: Routes with only AS_SET or AS_CONFED_SET segments (no sequence types)
+				// will have empty peer/origin AS values, which is acceptable as these routes
+				// typically represent aggregated paths where specific AS information is less relevant.
+				data = data[asPathBytesSize:]
+				continue
+			}
+
+			for idx := uint8(0); idx < asPathLen; idx++ {
+				route.ASPath = append(route.ASPath, binary.BigEndian.Uint32(data[int(idx)*int(sizeOfUint32):]))
+			}
+
+			// stop decoding upon encountering the first successful match
+			return nil
+		}
+		if len(data) != 0 {
+			return fmt.Errorf("unhandled ASPath attribute data len=%d: %#v: %w", len(data), data, ErrAttrsUnexpectedEOD)
+		}
+	case AttrNextHop:
+		switch len(data) {
+		case net.IPv6len:
+			route.NextHop = netipAddrFrom4U32([16]byte(data[:net.IPv6len]))
+		case net.IPv6len * 2: // Link-Local next hop?
+			// Try to use the second addr.
+			route.NextHop = netipAddrFrom4U32([16]byte(data[net.IPv6len:]))
+			if route.NextHop.IsUnspecified() {
+				// If the second addr is zero, use the first addr.
+				route.NextHop = netipAddrFrom4U32([16]byte(data[:net.IPv6len]))
+			}
+		default:
+			m.log.Debug("unexpected next_hop attribute length", zap.Int("data_len", len(data)))
+		}
+	case AttrCommunity:
+		if len(data)%(int(sizeOfUint16)+int(sizeOfUint16)) != 0 {
+			return fmt.Errorf("invalid Communities size: %d", len(data))
+		}
+		for len(data) >= int(sizeOfUint16)+int(sizeOfUint16) {
+			route.Communities = append(
+				route.Communities,
+				rib.Community{
+					ASN:   binary.NativeEndian.Uint16(data),
+					Value: binary.NativeEndian.Uint16(data[sizeOfUint16:]),
+				},
+			)
+			data = data[sizeOfUint16+sizeOfUint16:]
+		}
+	case AttrExtCommunity:
+		if len(data)%int(sizeOfUint64) != 0 {
+			return fmt.Errorf("invalid Extended Communities size: %d", len(data))
+		}
+		for len(data) >= int(sizeOfUint64) {
+			route.ExtCommunities = append(
+				route.ExtCommunities,
+				rib.ExtCommunity{
+					Type:    data[0],
+					SubType: data[1],
+					Value:   binary.BigEndian.Uint64(append([]byte{0, 0}, data[2:sizeOfUint64]...)),
+				},
+			)
+			data = data[sizeOfUint64:]
+		}
+	case AttrLargeCommunity:
+		if len(data)%sizeOfLargeCommunityStruct != 0 {
+			return fmt.Errorf("invalid Large Communities size: %d", len(data))
+		}
+		for len(data) >= sizeOfLargeCommunityStruct {
+			route.LargeCommunities = append(
+				route.LargeCommunities,
+				rib.LargeCommunity{
+					ASN:      binary.NativeEndian.Uint32(data),
+					Function: binary.NativeEndian.Uint32(data[sizeOfUint32:]),
+					Value:    binary.NativeEndian.Uint32(data[sizeOfUint32+sizeOfUint32:]),
+				},
+			)
+			data = data[sizeOfLargeCommunityStruct:]
+		}
+	case AttrMPLSLabelStack:
+		if len(data)%int(sizeOfUint32) != 0 {
+			return fmt.Errorf("invalid MPLS Label Stack size: %d", len(data))
+		}
+		for len(data) >= int(sizeOfUint32) {
+			route.MplsLabelStack = append(route.MplsLabelStack, binary.NativeEndian.Uint32(data))
+			data = data[sizeOfUint32:]
+		}
+	case AttrClusterList:
+		if len(data)%int(sizeOfUint32) != 0 {
+			return fmt.Errorf("invalid Cluster List size: %d", len(data))
+		}
+		for len(data) >= int(sizeOfUint32) {
+			route.ClusterList = append(route.ClusterList, binary.NativeEndian.Uint32(data))
+			data = data[sizeOfUint32:]
+		}
+	case AttrMPReachNLRI:
+		m.log.Debug("received MP_REACH_NLRI attribute",
+			zap.Int("data_len", len(data)),
+		)
+	case AttrMPUnreachNLRI:
+		m.log.Debug("received MP_UNREACH_NLRI attribute",
+			zap.Int("data_len", len(data)),
+		)
+	default:
+		return fmt.Errorf("unexpected attribute: %s", typ.String())
+	}
+	return nil
+}
+
+func netipAddrFrom4U32(b [16]byte) netip.Addr {
+	return netip.AddrFrom16([16]byte{
+		b[3], b[2], b[1], b[0],
+		b[7], b[6], b[5], b[4],
+		b[11], b[10], b[9], b[8],
+		b[15], b[14], b[13], b[12],
+	})
+
+}

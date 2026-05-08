@@ -11,6 +11,9 @@ on:
       - "go.mod"
       - "go.sum"
       - "Makefile"
+      - "**.rs"
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
   pull_request:
     branches: ["main"]
     paths:
@@ -21,6 +24,9 @@ on:
       - "go.mod"
       - "go.sum"
       - "Makefile"
+      - "**.rs"
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
 
 jobs:
   build:
@@ -73,7 +79,7 @@ jobs:
             ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-
       - uses: awalsh128/cache-apt-pkgs-action@latest
         with:
-          packages: meson clang python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler jq clang-tidy-19
+          packages: meson clang cmake python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler jq clang-tidy-19
           version: 1.1
 
       - name: Install LLVM 19 toolchain

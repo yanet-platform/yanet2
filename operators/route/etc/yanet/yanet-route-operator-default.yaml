@@ -1,0 +1,69 @@
+# YANET Route Operator Configuration
+---
+# Logging configuration.
+logging:
+  level: debug
+
+# gRPC server exposed by the operator.
+server:
+  endpoint: "[::1]:50002"
+
+# One entry per dataplane instance (typically one per NUMA node).
+#
+# The operator pushes the same computed FIB to every gateway listed
+# below via the route-module UpdateFIB RPC.
+gateways:
+  - name: numa0
+    endpoint: "[::1]:8080"
+
+# Heartbeat interval for self-registration with each gateway's module
+# registry.
+register:
+  interval: 30s
+
+# Reconcile loop: snapshot RIB + neighbour-table -> build FIB ->
+# fan-out per-gateway.
+#
+# Backoffs apply on per-gateway push errors.
+reconcile:
+  interval: 30s
+  initial_backoff: 500ms
+  max_backoff: 30s
+
+# The single network function published by the operator on every
+# gateway.
+#
+# Re-applied every reconcile pass (idempotent). One operator manages exactly
+# one function with one chain and one route module.
+function:
+  name: "fn:route"
+  chain: "default"
+  weight: 1
+  module: "route0"
+
+# Static seed data applied on startup, before serving requests.
+static:
+  # Static routes seeded into the operator RIB (module above).
+  routes:
+    - prefix: 2a02:6b8:c00::/40
+      nexthop_addr: fe80::1
+    - prefix: 2a02:6b8:fc00::/40
+      nexthop_addr: fe80::1
+  # Static neighbour entries seeded into operator-managed tables.
+  neighbours: []
+
+# Mapping from logical link names (as carried in routes) to OS
+# interface names used by the netlink monitor.
+link_map: {}
+
+# RIB session TTL — stale FeedRIB sessions are garbage-collected
+# after this duration once superseded by a newer session id.
+rib_ttl: 5m
+
+# Kernel neighbour discovery via netlink (ND/ARP). Disable when
+# the operator is not running on a host with the same network
+# namespace as the dataplane.
+netlink_monitor:
+  disabled: false
+  table_name: kernel
+  default_priority: 100
