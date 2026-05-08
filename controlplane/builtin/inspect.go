@@ -65,7 +65,7 @@ func (m *Inspect) Inspect(
 	return response, nil
 }
 
-func (m *InspectService) dpModules(dpConfig ffi.DPConfig) []*ynpb.DPModuleInfo {
+func (m *Inspect) dpModules(dpConfig ffi.DPConfig) []*ynpb.DPModuleInfo {
 	modules := dpConfig.Modules()
 
 	out := make([]*ynpb.DPModuleInfo, len(modules))
@@ -78,7 +78,7 @@ func (m *InspectService) dpModules(dpConfig ffi.DPConfig) []*ynpb.DPModuleInfo {
 	return out
 }
 
-func (m *InspectService) cpConfigs(dpConfig ffi.DPConfig) []*ynpb.CPConfigInfo {
+func (m *Inspect) cpConfigs(dpConfig ffi.DPConfig) []*ynpb.CPConfigInfo {
 	configs := dpConfig.CPConfigs()
 
 	out := make([]*ynpb.CPConfigInfo, len(configs))
@@ -93,7 +93,7 @@ func (m *InspectService) cpConfigs(dpConfig ffi.DPConfig) []*ynpb.CPConfigInfo {
 	return out
 }
 
-func (m *InspectService) functions(dpConfig ffi.DPConfig) []*ynpb.FunctionInfo {
+func (m *Inspect) functions(dpConfig ffi.DPConfig) []*ynpb.FunctionInfo {
 	functions := dpConfig.Functions()
 	if len(functions) == 0 {
 		return nil
@@ -127,7 +127,7 @@ func (m *InspectService) functions(dpConfig ffi.DPConfig) []*ynpb.FunctionInfo {
 	return out
 }
 
-func (m *InspectService) pipelines(dpConfig ffi.DPConfig) []*ynpb.PipelineInfo {
+func (m *Inspect) pipelines(dpConfig ffi.DPConfig) []*ynpb.PipelineInfo {
 	pipelines := dpConfig.Pipelines()
 
 	out := make([]*ynpb.PipelineInfo, len(pipelines))
@@ -146,7 +146,7 @@ func (m *InspectService) pipelines(dpConfig ffi.DPConfig) []*ynpb.PipelineInfo {
 	return out
 }
 
-func (m *InspectService) agents(dpConfig ffi.DPConfig) []*ynpb.AgentInfo {
+func (m *Inspect) agents(dpConfig ffi.DPConfig) []*ynpb.AgentInfo {
 	agents := dpConfig.Agents()
 
 	out := make([]*ynpb.AgentInfo, len(agents))
@@ -172,7 +172,7 @@ func (m *InspectService) agents(dpConfig ffi.DPConfig) []*ynpb.AgentInfo {
 	return out
 }
 
-func (m *InspectService) devices(dpConfig ffi.DPConfig) []*ynpb.DeviceInfo {
+func (m *Inspect) devices(dpConfig ffi.DPConfig) []*ynpb.DeviceInfo {
 	devices := dpConfig.Devices()
 	if len(devices) == 0 {
 		return nil
@@ -207,6 +207,6 @@ func (m *InspectService) devices(dpConfig ffi.DPConfig) []*ynpb.DeviceInfo {
 	return out
 }
 
-func (m *InspectService) numaIdx(dpConfig ffi.DPConfig) uint32 {
+func (m *Inspect) numaIdx(dpConfig ffi.DPConfig) uint32 {
 	return dpConfig.NumaIdx()
 }
