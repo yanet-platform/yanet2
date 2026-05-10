@@ -2449,7 +2449,6 @@ icmp_v4_to_v6(
 			}
 		}
 
-		// move(because overlap) icmp payload
 		uint16_t move_len =
 			new_payload_len - sizeof(struct rte_icmp_hdr);
 		uint16_t available_for_move =
@@ -2465,6 +2464,7 @@ icmp_v4_to_v6(
 			return -1;
 		}
 
+		// move(because overlap) icmp payload
 		memmove(rte_pktmbuf_mtod_offset(
 				mbuf,
 				void *,

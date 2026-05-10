@@ -5213,125 +5213,151 @@ test_default_values(void) {
 }
 
 /**
+ * @brief Build embedded IPv4+ICMP Echo payload for ICMP error tests
+ *
+ * Creates a raw byte buffer containing an embedded IPv4 header followed by
+ * an ICMP Echo Request. The embedded IPv4 total_length is set to
+ * @a embedded_total_len (can be inflated for overflow testing).
+ *
+ * Caller must free the returned buffer with rte_free().
+ *
+ * @param embedded_total_len Value to set in embedded IPv4 total_length
+ * @param[out] out_len Size of the returned buffer
+ * @return Heap-allocated buffer, or NULL on failure
+ */
+static uint8_t *
+build_embedded_icmp_echo(uint16_t embedded_total_len, uint16_t *out_len) {
+	*out_len = sizeof(struct rte_ipv4_hdr) + sizeof(struct icmphdr);
+	uint8_t *buf = rte_malloc(NULL, *out_len, 0);
+	if (!buf)
+		return NULL;
+
+	struct rte_ipv4_hdr *ip4 = (struct rte_ipv4_hdr *)buf;
+	ip4->version_ihl = RTE_IPV4_VHL_DEF;
+	ip4->type_of_service = 0;
+	ip4->total_length = rte_cpu_to_be_16(embedded_total_len);
+	ip4->packet_id = 0;
+	ip4->fragment_offset = 0;
+	ip4->time_to_live = 64;
+	ip4->next_proto_id = IPPROTO_ICMP;
+	ip4->src_addr = config_data.mapping[0].ip4;
+	ip4->dst_addr = outer_ip4;
+	ip4->hdr_checksum = 0;
+
+	struct icmphdr *icmp = (struct icmphdr *)(ip4 + 1);
+	icmp->type = ICMP_ECHO;
+	icmp->code = 0;
+	icmp->un.echo.id = rte_cpu_to_be_16(1);
+	icmp->un.echo.sequence = rte_cpu_to_be_16(1);
+	icmp->checksum = 0;
+
+	return buf;
+}
+
+/**
+ * @brief Build ICMPv4 Dest Unreach upkt with embedded payload
+ *
+ * @param outer_total_len Outer IPv4 total_length (correct or inflated)
+ * @param embedded_data Raw embedded packet bytes
+ * @param embedded_data_len Length of embedded data
+ * @return Filled upkt (stack-allocated by caller pattern not possible,
+ *         so caller should copy)
+ */
+static struct upkt
+build_icmp_dest_unreach_pkt(
+	uint16_t outer_total_len, void *embedded_data, uint16_t embedded_data_len
+) {
+	struct upkt pkt = {
+		.eth =
+			{
+				.dst_addr.addr_bytes =
+					{0xff, 0xff, 0xff, 0xff, 0xff, 0xff},
+				.src_addr.addr_bytes =
+					{0x02, 0x00, 0x00, 0x00, 0x00, 0x00},
+				.ether_type =
+					RTE_BE16(RTE_ETHER_TYPE_IPV4),
+			},
+		.ip.ipv4 =
+			{
+				.version_ihl = RTE_IPV4_VHL_DEF,
+				.time_to_live = DEFAULT_TTL,
+				.next_proto_id = IPPROTO_ICMP,
+				.total_length =
+					rte_cpu_to_be_16(outer_total_len),
+				.src_addr = outer_ip4,
+				.dst_addr = config_data.mapping[0].ip4,
+			},
+		.proto.icmp =
+			{
+				.type = ICMP_DEST_UNREACH,
+				.code = ICMP_HOST_UNREACH,
+			},
+		.data_len = embedded_data_len,
+		.data = embedded_data,
+	};
+	return pkt;
+}
+
+/**
  * @brief Test ICMPv4 error with embedded payload_len overflow (v4->v6)
  *
  * Constructs an ICMPv4 Destination Unreachable packet with an embedded IPv4
- * header whose total_length claims 1000 bytes of ICMP payload but only 8 bytes
- * actually exist. After NAT64 translates the embedded IPv4 to IPv6, the
- * resulting payload_len (980) will exceed the available mbuf data, triggering
- * the bounds check before __rte_raw_cksum.
+ * header whose total_length claims 1000 bytes but only 28 bytes exist.
+ * After NAT64 translates the embedded IPv4 to IPv6, the resulting payload_len
+ * (980) exceeds the available mbuf data, triggering the bounds check before
+ * __rte_raw_cksum.
  *
- * This is a regression test for the heap-buffer-overflow found by the nat64w
- * fuzzer where __rte_raw_cksum read past the mbuf buffer.
+ * Regression test for the heap-buffer-overflow found by the nat64w fuzzer.
  *
  * @return TEST_SUCCESS on success, error code on failure
  */
 static inline int
 test_nat64_icmp_v4tov6_embedded_cksum_overflow(void) {
+	packet_list_cleanup(&test_params.packet_front.input);
+	packet_list_cleanup(&test_params.packet_front.output);
+	packet_list_cleanup(&test_params.packet_front.drop);
+
 	TEST_ASSERT_SUCCESS(
 		nat64_test_config(&test_params.module_config),
 		"nat64_test_config failed\n"
 	);
 
-	struct rte_mbuf *mbuf = rte_pktmbuf_alloc(test_params.mbuf_pool);
-	TEST_ASSERT_NOT_NULL(mbuf, "Failed to allocate mbuf\n");
+	uint16_t embedded_len;
+	uint8_t *embedded = build_embedded_icmp_echo(1000, &embedded_len);
+	TEST_ASSERT_NOT_NULL(embedded, "Failed to build embedded packet\n");
 
-	// Eth(14) + IPv4(20) + ICMP Dest Unreach(8) + embedded IPv4(20) + ICMP Echo(8)
-	uint16_t total_len =
+	uint16_t outer_total = sizeof(struct rte_ipv4_hdr) +
+			       sizeof(struct icmphdr) + embedded_len;
+	struct upkt pkt = build_icmp_dest_unreach_pkt(
+		outer_total, embedded, embedded_len
+	);
+
+	TEST_ASSERT_SUCCESS(
+		push_packet(&pkt),
+		"Failed to push ICMP packet\n"
+	);
+
+	// Patch embedded IPv4 total_length to inflated value (1000)
+	struct rte_mbuf *mbuf =
+		test_params.packet_front.input.first->mbuf;
+	struct rte_ipv4_hdr *emb_ipv4 = rte_pktmbuf_mtod_offset(
+		mbuf,
+		struct rte_ipv4_hdr *,
 		sizeof(struct rte_ether_hdr) + sizeof(struct rte_ipv4_hdr) +
-		sizeof(struct icmphdr) + sizeof(struct rte_ipv4_hdr) +
-		sizeof(struct icmphdr);
-
-	rte_pktmbuf_append(mbuf, total_len);
-
-	// Ethernet header
-	struct rte_ether_hdr *eth =
-		rte_pktmbuf_mtod(mbuf, struct rte_ether_hdr *);
-	rte_memcpy(
-		eth->dst_addr.addr_bytes,
-		(uint8_t[6]){0xff, 0xff, 0xff, 0xff, 0xff, 0xff},
-		6
+			sizeof(struct icmphdr)
 	);
-	rte_memcpy(
-		eth->src_addr.addr_bytes,
-		(uint8_t[6]){0x02, 0x00, 0x00, 0x00, 0x00, 0x00},
-		6
-	);
-	eth->ether_type = RTE_BE16(RTE_ETHER_TYPE_IPV4);
+	emb_ipv4->total_length = rte_cpu_to_be_16(1000);
 
-	// Outer IPv4 header
-	struct rte_ipv4_hdr *outer_ipv4 = (struct rte_ipv4_hdr *)(eth + 1);
-	outer_ipv4->version_ihl = RTE_IPV4_VHL_DEF;
-	outer_ipv4->type_of_service = 0;
-	outer_ipv4->total_length = rte_cpu_to_be_16(
-		sizeof(struct rte_ipv4_hdr) + sizeof(struct icmphdr) +
-		sizeof(struct rte_ipv4_hdr) + sizeof(struct icmphdr)
-	);
-	outer_ipv4->packet_id = 0;
-	outer_ipv4->fragment_offset = 0;
-	outer_ipv4->time_to_live = 64;
-	outer_ipv4->next_proto_id = IPPROTO_ICMP;
-	outer_ipv4->src_addr = outer_ip4;
-	outer_ipv4->dst_addr = config_data.mapping[0].ip4;
-	outer_ipv4->hdr_checksum = 0;
-	outer_ipv4->hdr_checksum = rte_ipv4_cksum(outer_ipv4);
+	rte_free(embedded);
 
-	// ICMPv4 Destination Unreachable
-	struct icmphdr *icmp = (struct icmphdr *)(outer_ipv4 + 1);
-	icmp->type = ICMP_DEST_UNREACH;
-	icmp->code = ICMP_HOST_UNREACH;
-	icmp->checksum = 0;
-	icmp->un.gateway = 0;
-
-	// Embedded IPv4 header (inflated total_length)
-	struct rte_ipv4_hdr *embedded_ipv4 =
-		(struct rte_ipv4_hdr *)(icmp + 1);
-	embedded_ipv4->version_ihl = RTE_IPV4_VHL_DEF;
-	embedded_ipv4->type_of_service = 0;
-	embedded_ipv4->total_length =
-		rte_cpu_to_be_16(1000); // inflated: claims 1000 bytes
-	embedded_ipv4->packet_id = 0;
-	embedded_ipv4->fragment_offset = 0;
-	embedded_ipv4->time_to_live = 64;
-	embedded_ipv4->next_proto_id = IPPROTO_ICMP;
-	embedded_ipv4->src_addr = config_data.mapping[0].ip4;
-	embedded_ipv4->dst_addr = outer_ip4;
-	embedded_ipv4->hdr_checksum = 0;
-
-	// Embedded ICMP Echo
-	struct icmphdr *embedded_icmp = (struct icmphdr *)(embedded_ipv4 + 1);
-	embedded_icmp->type = ICMP_ECHO;
-	embedded_icmp->code = 0;
-	embedded_icmp->un.echo.id = rte_cpu_to_be_16(1);
-	embedded_icmp->un.echo.sequence = rte_cpu_to_be_16(1);
-	embedded_icmp->checksum = 0;
-
-	// Calculate outer ICMP checksum
-	uint16_t icmp_len = total_len - sizeof(struct rte_ether_hdr) -
-			    sizeof(struct rte_ipv4_hdr);
-	icmp->checksum = ~rte_raw_cksum(icmp, icmp_len);
-
-	// Create and parse packet
-	struct packet *packet = mbuf_to_packet(mbuf);
-	memset(packet, 0, sizeof(struct packet));
-	packet->mbuf = mbuf;
-	packet->mbuf->port = 0;
-
-	struct packet_front pf;
-	packet_front_init(&pf);
-	packet_list_add(&pf.input, packet);
-
-	(void)parse_packet(packet);
-
-	// Run NAT64
 	struct module_ectx module_ectx;
 	SET_OFFSET_OF(
 		&module_ectx.cp_module, &test_params.module_config.cp_module
 	);
-	test_params.module->handler(NULL, &module_ectx, &pf);
+	test_params.module->handler(NULL, &module_ectx, &test_params.packet_front);
 
-	// Packet should be dropped due to embedded payload_len overflow
-	int drop_count = packet_list_count(&pf.drop);
+	int drop_count =
+		packet_list_count(&test_params.packet_front.drop);
 	TEST_ASSERT_EQUAL(
 		drop_count,
 		1,
@@ -5340,12 +5366,6 @@ test_nat64_icmp_v4tov6_embedded_cksum_overflow(void) {
 		drop_count
 	);
 
-	packet_list_cleanup(&pf.input);
-	packet_list_cleanup(&pf.output);
-	packet_list_cleanup(&pf.drop);
-	packet_list_cleanup(&pf.pending_input);
-	packet_list_cleanup(&pf.pending_output);
-
 	return TEST_SUCCESS;
 }
 
@@ -5353,100 +5373,46 @@ test_nat64_icmp_v4tov6_embedded_cksum_overflow(void) {
  * @brief Test ICMPv4 error memmove overflow (v4->v6)
  *
  * Constructs an ICMPv4 error packet where the outer IPv4 total_length is
- * inflated to claim a much larger ICMP payload than actually exists in the
- * mbuf. After IPv4->IPv6 translation, the computed move_len will exceed the
- * available mbuf data, triggering the bounds check before memmove.
+ * inflated to claim a much larger ICMP payload than actually exists.
+ * After IPv4->IPv6 translation, the computed move_len exceeds available mbuf
+ * data, triggering the bounds check before memmove.
  *
- * Because parse_packet() validates total_length against mbuf data, this test
- * manually sets packet offsets to bypass that validation and test the NAT64
- * module's internal bounds checking directly.
+ * Uses push_packet_malformed to bypass parse_packet() validation and test
+ * NAT64's internal bounds checking directly.
  *
  * @return TEST_SUCCESS on success, error code on failure
  */
 static inline int
 test_nat64_icmp_v4tov6_memmove_overflow(void) {
+	packet_list_cleanup(&test_params.packet_front.input);
+	packet_list_cleanup(&test_params.packet_front.output);
+	packet_list_cleanup(&test_params.packet_front.drop);
+
 	TEST_ASSERT_SUCCESS(
 		nat64_test_config(&test_params.module_config),
 		"nat64_test_config failed\n"
 	);
 
-	struct rte_mbuf *mbuf = rte_pktmbuf_alloc(test_params.mbuf_pool);
-	TEST_ASSERT_NOT_NULL(mbuf, "Failed to allocate mbuf\n");
+	uint16_t embedded_len;
+	uint8_t *embedded =
+		build_embedded_icmp_echo(
+			sizeof(struct rte_ipv4_hdr) + sizeof(struct icmphdr),
+			&embedded_len
+		);
+	TEST_ASSERT_NOT_NULL(embedded, "Failed to build embedded packet\n");
 
-	// Eth(14) + IPv4(20) + ICMP Dest Unreach(8) + embedded IPv4(20) + ICMP Echo(8)
-	uint16_t actual_len =
-		sizeof(struct rte_ether_hdr) + sizeof(struct rte_ipv4_hdr) +
-		sizeof(struct icmphdr) + sizeof(struct rte_ipv4_hdr) +
-		sizeof(struct icmphdr);
-
-	rte_pktmbuf_append(mbuf, actual_len);
-
-	// Ethernet header
-	struct rte_ether_hdr *eth =
-		rte_pktmbuf_mtod(mbuf, struct rte_ether_hdr *);
-	rte_memcpy(
-		eth->dst_addr.addr_bytes,
-		(uint8_t[6]){0xff, 0xff, 0xff, 0xff, 0xff, 0xff},
-		6
+	uint16_t claimed_total = 1020; // inflated: claims 1000 bytes of payload
+	struct upkt pkt = build_icmp_dest_unreach_pkt(
+		claimed_total, embedded, embedded_len
 	);
-	rte_memcpy(
-		eth->src_addr.addr_bytes,
-		(uint8_t[6]){0x02, 0x00, 0x00, 0x00, 0x00, 0x00},
-		6
+
+	TEST_ASSERT_SUCCESS(
+		push_packet_malformed(&pkt, claimed_total, 0),
+		"Failed to push malformed ICMP packet\n"
 	);
-	eth->ether_type = RTE_BE16(RTE_ETHER_TYPE_IPV4);
 
-	// Outer IPv4 header (inflated total_length)
-	struct rte_ipv4_hdr *outer_ipv4 = (struct rte_ipv4_hdr *)(eth + 1);
-	outer_ipv4->version_ihl = RTE_IPV4_VHL_DEF;
-	outer_ipv4->type_of_service = 0;
-	outer_ipv4->total_length =
-		rte_cpu_to_be_16(1020); // inflated: claims 1000 bytes of payload
-	outer_ipv4->packet_id = 0;
-	outer_ipv4->fragment_offset = 0;
-	outer_ipv4->time_to_live = 64;
-	outer_ipv4->next_proto_id = IPPROTO_ICMP;
-	outer_ipv4->src_addr = outer_ip4;
-	outer_ipv4->dst_addr = config_data.mapping[0].ip4;
-	outer_ipv4->hdr_checksum = 0;
-	// Skip checksum to avoid validate errors
-
-	// ICMPv4 Destination Unreachable
-	struct icmphdr *icmp = (struct icmphdr *)(outer_ipv4 + 1);
-	icmp->type = ICMP_DEST_UNREACH;
-	icmp->code = ICMP_HOST_UNREACH;
-	icmp->checksum = 0;
-	icmp->un.gateway = 0;
-
-	// Embedded IPv4 header
-	struct rte_ipv4_hdr *embedded_ipv4 =
-		(struct rte_ipv4_hdr *)(icmp + 1);
-	embedded_ipv4->version_ihl = RTE_IPV4_VHL_DEF;
-	embedded_ipv4->type_of_service = 0;
-	embedded_ipv4->total_length = rte_cpu_to_be_16(
-		sizeof(struct rte_ipv4_hdr) + sizeof(struct icmphdr)
-	);
-	embedded_ipv4->packet_id = 0;
-	embedded_ipv4->fragment_offset = 0;
-	embedded_ipv4->time_to_live = 64;
-	embedded_ipv4->next_proto_id = IPPROTO_ICMP;
-	embedded_ipv4->src_addr = config_data.mapping[0].ip4;
-	embedded_ipv4->dst_addr = outer_ip4;
-	embedded_ipv4->hdr_checksum = 0;
-
-	// Embedded ICMP Echo
-	struct icmphdr *embedded_icmp = (struct icmphdr *)(embedded_ipv4 + 1);
-	embedded_icmp->type = ICMP_ECHO;
-	embedded_icmp->code = 0;
-	embedded_icmp->un.echo.id = rte_cpu_to_be_16(1);
-	embedded_icmp->un.echo.sequence = rte_cpu_to_be_16(1);
-	embedded_icmp->checksum = 0;
-
-	// Create packet with manual offset setup (bypass parse_packet)
-	struct packet *packet = mbuf_to_packet(mbuf);
-	memset(packet, 0, sizeof(struct packet));
-	packet->mbuf = mbuf;
-	packet->mbuf->port = 0;
+	// Manually set offsets (push_packet_malformed skips parse_packet)
+	struct packet *packet = test_params.packet_front.input.first;
 	packet->network_header.type =
 		rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4);
 	packet->network_header.offset = sizeof(struct rte_ether_hdr);
@@ -5454,19 +5420,16 @@ test_nat64_icmp_v4tov6_memmove_overflow(void) {
 	packet->transport_header.offset =
 		sizeof(struct rte_ether_hdr) + sizeof(struct rte_ipv4_hdr);
 
-	struct packet_front pf;
-	packet_front_init(&pf);
-	packet_list_add(&pf.input, packet);
+	rte_free(embedded);
 
-	// Run NAT64
 	struct module_ectx module_ectx;
 	SET_OFFSET_OF(
 		&module_ectx.cp_module, &test_params.module_config.cp_module
 	);
-	test_params.module->handler(NULL, &module_ectx, &pf);
+	test_params.module->handler(NULL, &module_ectx, &test_params.packet_front);
 
-	// Packet should be dropped due to memmove bounds check
-	int drop_count = packet_list_count(&pf.drop);
+	int drop_count =
+		packet_list_count(&test_params.packet_front.drop);
 	TEST_ASSERT_EQUAL(
 		drop_count,
 		1,
@@ -5474,12 +5437,6 @@ test_nat64_icmp_v4tov6_memmove_overflow(void) {
 		"got %d drops\n",
 		drop_count
 	);
-
-	packet_list_cleanup(&pf.input);
-	packet_list_cleanup(&pf.output);
-	packet_list_cleanup(&pf.drop);
-	packet_list_cleanup(&pf.pending_input);
-	packet_list_cleanup(&pf.pending_output);
 
 	return TEST_SUCCESS;
 }
