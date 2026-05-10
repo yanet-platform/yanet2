@@ -2451,10 +2451,9 @@ icmp_v4_to_v6(
 
 		uint16_t move_len =
 			new_payload_len - sizeof(struct rte_icmp_hdr);
-		uint16_t available_for_move =
-			rte_pktmbuf_data_len(mbuf) -
-			(packet->transport_header.offset +
-			 sizeof(struct rte_icmp_hdr));
+		uint16_t available_for_move = rte_pktmbuf_data_len(mbuf) -
+					      (packet->transport_header.offset +
+					       sizeof(struct rte_icmp_hdr));
 		if (move_len > available_for_move) {
 			LOG_DBG(NAT64,
 				"ICMP payload move length (%u) "
@@ -2545,9 +2544,9 @@ icmp_v4_to_v6(
 
 				// Recalculate ICMP checksum for IPv6 embeded
 				icmp_header_payload->icmp_cksum = 0;
-				uint16_t embedded_payload_len = rte_be_to_cpu_16(
-					new_ipv6_payload_header->payload_len
-				);
+				uint16_t embedded_payload_len =
+					rte_be_to_cpu_16(new_ipv6_payload_header
+								 ->payload_len);
 				uint16_t available_embedded_len =
 					rte_pktmbuf_data_len(mbuf) -
 					payload_offset;

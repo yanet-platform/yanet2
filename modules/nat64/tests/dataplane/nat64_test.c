@@ -5265,7 +5265,9 @@ build_embedded_icmp_echo(uint16_t embedded_total_len, uint16_t *out_len) {
  */
 static struct upkt
 build_icmp_dest_unreach_pkt(
-	uint16_t outer_total_len, void *embedded_data, uint16_t embedded_data_len
+	uint16_t outer_total_len,
+	void *embedded_data,
+	uint16_t embedded_data_len
 ) {
 	struct upkt pkt = {
 		.eth =
@@ -5274,8 +5276,7 @@ build_icmp_dest_unreach_pkt(
 					{0xff, 0xff, 0xff, 0xff, 0xff, 0xff},
 				.src_addr.addr_bytes =
 					{0x02, 0x00, 0x00, 0x00, 0x00, 0x00},
-				.ether_type =
-					RTE_BE16(RTE_ETHER_TYPE_IPV4),
+				.ether_type = RTE_BE16(RTE_ETHER_TYPE_IPV4),
 			},
 		.ip.ipv4 =
 			{
@@ -5332,14 +5333,10 @@ test_nat64_icmp_v4tov6_embedded_cksum_overflow(void) {
 		outer_total, embedded, embedded_len
 	);
 
-	TEST_ASSERT_SUCCESS(
-		push_packet(&pkt),
-		"Failed to push ICMP packet\n"
-	);
+	TEST_ASSERT_SUCCESS(push_packet(&pkt), "Failed to push ICMP packet\n");
 
 	// Patch embedded IPv4 total_length to inflated value (1000)
-	struct rte_mbuf *mbuf =
-		test_params.packet_front.input.first->mbuf;
+	struct rte_mbuf *mbuf = test_params.packet_front.input.first->mbuf;
 	struct rte_ipv4_hdr *emb_ipv4 = rte_pktmbuf_mtod_offset(
 		mbuf,
 		struct rte_ipv4_hdr *,
@@ -5354,10 +5351,11 @@ test_nat64_icmp_v4tov6_embedded_cksum_overflow(void) {
 	SET_OFFSET_OF(
 		&module_ectx.cp_module, &test_params.module_config.cp_module
 	);
-	test_params.module->handler(NULL, &module_ectx, &test_params.packet_front);
+	test_params.module->handler(
+		NULL, &module_ectx, &test_params.packet_front
+	);
 
-	int drop_count =
-		packet_list_count(&test_params.packet_front.drop);
+	int drop_count = packet_list_count(&test_params.packet_front.drop);
 	TEST_ASSERT_EQUAL(
 		drop_count,
 		1,
@@ -5394,11 +5392,10 @@ test_nat64_icmp_v4tov6_memmove_overflow(void) {
 	);
 
 	uint16_t embedded_len;
-	uint8_t *embedded =
-		build_embedded_icmp_echo(
-			sizeof(struct rte_ipv4_hdr) + sizeof(struct icmphdr),
-			&embedded_len
-		);
+	uint8_t *embedded = build_embedded_icmp_echo(
+		sizeof(struct rte_ipv4_hdr) + sizeof(struct icmphdr),
+		&embedded_len
+	);
 	TEST_ASSERT_NOT_NULL(embedded, "Failed to build embedded packet\n");
 
 	uint16_t claimed_total = 1020; // inflated: claims 1000 bytes of payload
@@ -5413,8 +5410,7 @@ test_nat64_icmp_v4tov6_memmove_overflow(void) {
 
 	// Manually set offsets (push_packet_malformed skips parse_packet)
 	struct packet *packet = test_params.packet_front.input.first;
-	packet->network_header.type =
-		rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4);
+	packet->network_header.type = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4);
 	packet->network_header.offset = sizeof(struct rte_ether_hdr);
 	packet->transport_header.type = IPPROTO_ICMP;
 	packet->transport_header.offset =
@@ -5426,10 +5422,11 @@ test_nat64_icmp_v4tov6_memmove_overflow(void) {
 	SET_OFFSET_OF(
 		&module_ectx.cp_module, &test_params.module_config.cp_module
 	);
-	test_params.module->handler(NULL, &module_ectx, &test_params.packet_front);
+	test_params.module->handler(
+		NULL, &module_ectx, &test_params.packet_front
+	);
 
-	int drop_count =
-		packet_list_count(&test_params.packet_front.drop);
+	int drop_count = packet_list_count(&test_params.packet_front.drop);
 	TEST_ASSERT_EQUAL(
 		drop_count,
 		1,
