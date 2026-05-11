@@ -143,6 +143,8 @@ acl_module_config_free(struct cp_module *cp_module) {
 	filter_free(&config->filter_ip6, ACL_FILTER_IP6_TAG);
 	filter_free(&config->filter_ip6_port, ACL_FILTER_IP6_PROTO_PORT_TAG);
 
+	cp_module_fini(cp_module);
+
 	// Note: We don't destroy fwstate_cfg maps here because they're owned by
 	// the fwstate module. We only stored offsets to them.
 	memory_bfree(

@@ -89,6 +89,8 @@ fwstate_module_config_free(struct cp_module *cp_module) {
 		fwstate_config_destroy(&config->cfg, agent);
 	}
 
+	cp_module_fini(cp_module);
+
 	memory_bfree(
 		&agent->memory_context,
 		config,
