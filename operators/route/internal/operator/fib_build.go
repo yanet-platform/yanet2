@@ -1,6 +1,7 @@
 package operator
 
 import (
+	"fmt"
 	"net/netip"
 	"slices"
 
@@ -46,8 +47,11 @@ func BuildFIB(
 
 	entries := make([]FIBEntry, 0)
 
+	fmt.Printf("RIB %+v\n", ribDump)
+
 	for prefixLen := range ribDump {
 		for prefix, routesList := range ribDump[prefixLen] {
+			fmt.Printf("Prefix %v %v\n", prefix, routesList)
 			stats.TotalPrefixes++
 			if len(routesList.Routes) == 0 {
 				stats.SkippedPrefixes++
@@ -60,6 +64,7 @@ func BuildFIB(
 			for _, r := range routesList.Routes {
 				entry, ok := neighbours.Lookup(r.NextHop.Unmap())
 				if !ok {
+					fmt.Printf("Loojup failed nh %v\n", r.NextHop.Unmap())
 					stats.NeighbourNotFound++
 					continue
 				}
