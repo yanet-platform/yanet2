@@ -60,6 +60,9 @@ decap_module_config_free(struct cp_module *cp_module) {
 	decap_module_config_data_destroy(config);
 
 	struct agent *agent = ADDR_OF(&cp_module->agent);
+
+	cp_module_fini(cp_module);
+
 	memory_bfree(
 		&agent->memory_context,
 		config,

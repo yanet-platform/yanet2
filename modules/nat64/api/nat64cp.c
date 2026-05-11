@@ -70,6 +70,9 @@ nat64_module_config_free(struct cp_module *cp_module) {
 
 	// Free main config structure
 	struct agent *agent = ADDR_OF(&cp_module->agent);
+
+	cp_module_fini(cp_module);
+
 	if (cp_module->agent) {
 		LOG(DEBUG,
 		    "Freeing main config structure: size=%zu bytes, address=%p",

@@ -179,6 +179,9 @@ pdump_module_config_free(struct cp_module *module) {
 			sizeof(struct ring_buffer) * wc
 		);
 	}
+
+	cp_module_fini(module);
+
 	memory_bfree(
 		&agent->memory_context,
 		config,
