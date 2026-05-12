@@ -104,7 +104,7 @@ trap 'exit 0' INT TERM
 
 while true; do
     for gw in "${GATEWAYS[@]}"; do
-        if "$YANET_CLI_FORWARD" update --endpoint "$gw" -c "$cfg" --rules "$RULES_FILE"; then
+        if "$YANET_CLI_FORWARD" update --endpoint "$gw" --name "$cfg" --rules "$RULES_FILE"; then
             printf '[%s]: applied module-config %s from %s to %s\n' \
                 "$(date -Is)" "$cfg" "$RULES_FILE" "$gw"
         else
