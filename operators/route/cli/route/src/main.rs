@@ -76,27 +76,27 @@ pub struct RouteShowCmd {
     /// Show only IPv6 routes.
     #[arg(long)]
     pub ipv6: bool,
-    /// Route config name.
-    #[arg(long = "cfg", short)]
-    pub config_name: String,
+    /// Configuration name.
+    #[arg(long = "name", short = 'n')]
+    pub name: String,
 }
 
 #[derive(Debug, Clone, Parser)]
 pub struct RouteLookupCmd {
     /// IP address to look up.
     pub addr: IpAddr,
-    /// Route config name.
-    #[arg(long = "cfg", short)]
-    pub config_name: String,
+    /// Configuration name.
+    #[arg(long = "name", short = 'n')]
+    pub name: String,
 }
 
 #[derive(Debug, Clone, Parser)]
 pub struct RouteInsertCmd {
     /// Destination prefix in CIDR notation.
     pub prefix: Contiguous<IpNetwork>,
-    /// Route config name.
-    #[arg(long = "cfg", short)]
-    pub config_name: String,
+    /// Configuration name.
+    #[arg(long = "name", short = 'n')]
+    pub name: String,
     /// Next-hop IP address.
     #[arg(long = "via")]
     pub nexthop_addr: IpAddr,
@@ -109,9 +109,9 @@ pub struct RouteInsertCmd {
 pub struct RouteRemoveCmd {
     /// Destination prefix in CIDR notation.
     pub prefix: Contiguous<IpNetwork>,
-    /// Route config name.
-    #[arg(long = "cfg", short)]
-    pub config_name: String,
+    /// Configuration name.
+    #[arg(long = "name", short = 'n')]
+    pub name: String,
     /// Next-hop IP address.
     #[arg(long = "via")]
     pub nexthop_addr: IpAddr,
@@ -122,9 +122,9 @@ pub struct RouteRemoveCmd {
 
 #[derive(Debug, Clone, Parser)]
 pub struct RouteFlushCmd {
-    /// Route config name.
-    #[arg(long = "cfg", short)]
-    pub config_name: String,
+    /// Configuration name.
+    #[arg(long = "name", short = 'n')]
+    pub name: String,
 }
 
 #[derive(Debug, Clone, clap::ValueEnum)]
@@ -193,7 +193,7 @@ impl RouteService {
 
     pub async fn show_routes(&mut self, cmd: RouteShowCmd) -> Result<(), Box<dyn Error>> {
         let request = ShowRoutesRequest {
-            name: cmd.config_name.clone(),
+            name: cmd.name.clone(),
             ipv4_only: cmd.ipv4,
             ipv6_only: cmd.ipv6,
         };
@@ -209,7 +209,7 @@ impl RouteService {
 
     pub async fn lookup_route(&mut self, cmd: RouteLookupCmd) -> Result<(), Box<dyn Error>> {
         let request = LookupRouteRequest {
-            name: cmd.config_name.clone(),
+            name: cmd.name.clone(),
             ip_addr: cmd.addr.to_string(),
         };
 
@@ -225,7 +225,7 @@ impl RouteService {
 
     pub async fn insert_route(&mut self, cmd: RouteInsertCmd) -> Result<(), Box<dyn Error>> {
         let request = InsertRouteRequest {
-            name: cmd.config_name.clone(),
+            name: cmd.name.clone(),
             prefix: cmd.prefix.to_string(),
             nexthop_addr: cmd.nexthop_addr.to_string(),
             do_flush: true,
@@ -244,7 +244,7 @@ impl RouteService {
 
     pub async fn remove_route(&mut self, cmd: RouteRemoveCmd) -> Result<(), Box<dyn Error>> {
         let request = DeleteRouteRequest {
-            name: cmd.config_name.clone(),
+            name: cmd.name.clone(),
             prefix: cmd.prefix.to_string(),
             nexthop_addr: cmd.nexthop_addr.to_string(),
             do_flush: true,
@@ -262,7 +262,7 @@ impl RouteService {
     }
 
     pub async fn flush_routes(&mut self, cmd: RouteFlushCmd) -> Result<(), Box<dyn Error>> {
-        let request = FlushRoutesRequest { name: cmd.config_name.clone() };
+        let request = FlushRoutesRequest { name: cmd.name.clone() };
         self.client.flush_routes(request).await?;
         log::info!("Routes flushed successfully");
         Ok(())
