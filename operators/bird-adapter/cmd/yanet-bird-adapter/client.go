@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/netip"
 	"os"
 	"strings"
 	"time"
@@ -31,6 +32,8 @@ var clientCmdArgs struct {
 	ConfigName       string
 	Sockets          []string
 	LogLevel         logLevelFlag
+	SourceV4         string
+	SourceV6         string
 }
 
 func init() {
@@ -56,15 +59,35 @@ func init() {
 	clientCmd.Flags().StringVar(&clientCmdArgs.ConfigName, "config", "", "Configuration name (required)")
 	clientCmd.Flags().StringSliceVar(&clientCmdArgs.Sockets, "sockets", nil, "List of BIRD socket paths (required)")
 	clientCmd.Flags().Var(&clientCmdArgs.LogLevel, "log-level", "Log level for this client. If not set, logging is disabled.")
+	clientCmd.Flags().StringVar(&clientCmdArgs.SourceV4, "source-v4", "", "MPLS source IPv4 address (required)")
+	clientCmd.Flags().StringVar(&clientCmdArgs.SourceV6, "source-v6", "", "MPLS source IPv6 address (required)")
 
 	clientCmd.MarkFlagRequired("server-config")
 	clientCmd.MarkFlagRequired("config")
 	clientCmd.MarkFlagRequired("sockets")
+	clientCmd.MarkFlagRequired("source-v4")
+	clientCmd.MarkFlagRequired("source-v6")
 }
 
 func runClient() error {
 	if len(clientCmdArgs.Sockets) == 0 {
 		return fmt.Errorf("at least one BIRD socket path must be provided")
+	}
+
+	addrV4, err := netip.ParseAddr(clientCmdArgs.SourceV4)
+	if err != nil {
+		return fmt.Errorf("failed to parse --source-v4: %w", err)
+	}
+	if !addrV4.Is4() {
+		return fmt.Errorf("--source-v4 must be an IPv4 address, got %q", clientCmdArgs.SourceV4)
+	}
+
+	addrV6, err := netip.ParseAddr(clientCmdArgs.SourceV6)
+	if err != nil {
+		return fmt.Errorf("failed to parse --source-v6: %w", err)
+	}
+	if !addrV6.Is6() || addrV6.Is4In6() {
+		return fmt.Errorf("--source-v6 must be an IPv6 address, got %q", clientCmdArgs.SourceV6)
 	}
 
 	// Load server config to get the adapter address
@@ -98,8 +121,12 @@ func runClient() error {
 		logLevel = clientCmdArgs.LogLevel.String()
 	}
 
+	b4 := addrV4.As4()
+	b6 := addrV6.As16()
 	req := &adapterpb.SetupConfigRequest{
-		Name: clientCmdArgs.ConfigName,
+		Name:     clientCmdArgs.ConfigName,
+		SourceV4: b4[:],
+		SourceV6: b6[:],
 		Config: &adapterpb.ImportConfig{
 			Sockets:  clientCmdArgs.Sockets,
 			LogLevel: logLevel,
