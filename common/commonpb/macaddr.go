@@ -26,6 +26,12 @@ func (m *MACAddress) EUI48() [6]byte {
 	return [6]byte(buf[2:])
 }
 
+// AsLogValue implements xgrpc.ProtoLogValue for compact gRPC logging.
+func (m *MACAddress) AsLogValue() any {
+	eui48 := m.EUI48()
+	return net.HardwareAddr(eui48[:]).String()
+}
+
 // MarshalJSON serializes addr as a human-readable MAC address string.
 func (m *MACAddress) MarshalJSON() ([]byte, error) {
 	eui48 := m.EUI48()
