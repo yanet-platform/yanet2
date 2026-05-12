@@ -1313,8 +1313,7 @@ cp_device_config_create(
 
 void
 cp_device_config_free(struct cp_device_config *config) {
-	free(config->output_pipelines);
-	free(config->input_pipelines);
+	cp_device_config_deinit(config);
 	free(config);
 }
 

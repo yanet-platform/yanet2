@@ -121,7 +121,6 @@ void
 cp_device_plain_config_free(
 	struct cp_device_plain_config *cp_device_plain_config
 ) {
-	free(cp_device_plain_config->cp_device_config.input_pipelines);
-	free(cp_device_plain_config->cp_device_config.output_pipelines);
+	cp_device_config_deinit(&cp_device_plain_config->cp_device_config);
 	free(cp_device_plain_config);
 }

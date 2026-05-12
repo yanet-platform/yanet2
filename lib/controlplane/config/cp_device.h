@@ -74,6 +74,17 @@ cp_device_config_init(
 	yanet_error **err
 );
 
+/*
+ * Releases heap memory owned by the embedded fields of *config.
+ *
+ * Does NOT free config itself.
+ *
+ * After this call config is safe to either free (if heap-allocated) or leave
+ * to its enclosing storage.
+ */
+void
+cp_device_config_deinit(struct cp_device_config *config);
+
 struct cp_device *
 cp_device_create(
 	struct agent *agent,

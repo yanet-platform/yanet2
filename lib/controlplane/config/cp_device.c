@@ -68,6 +68,14 @@ error:
 	return -1;
 }
 
+void
+cp_device_config_deinit(struct cp_device_config *config) {
+	free(config->output_pipelines);
+	free(config->input_pipelines);
+	config->output_pipelines = NULL;
+	config->input_pipelines = NULL;
+}
+
 static inline uint64_t
 cp_device_entry_alloc_size(uint64_t pipeline_count) {
 	return sizeof(struct cp_device_entry) +
