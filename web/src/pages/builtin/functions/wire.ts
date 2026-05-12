@@ -20,7 +20,7 @@ const apiChainToLocal = (fnName: string, fc: FunctionChain, chainIdx: number): C
     return {
         id: makeChainId(fnName, chainName, chainIdx),
         name: chainName,
-        weight: Number(fc.weight ?? 1),
+        weight: Number(fc.weight ?? 0),
         modules,
     };
 };
