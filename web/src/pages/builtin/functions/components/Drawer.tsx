@@ -7,8 +7,6 @@ import { formatPps, formatBps } from '../../../../utils';
 import { ConfirmDialog } from '../../../../components';
 import type { InterpolatedCounterData } from '../../../../hooks';
 
-const MODULE_NAME_REGEX = /^[a-z0-9_-]+$/;
-
 /** Props for module-mode drawer. */
 interface DrawerModuleProps {
     mode: 'module';
@@ -16,7 +14,6 @@ interface DrawerModuleProps {
     chain: Chain | null;
     counter?: InterpolatedCounterData;
     availableTypes: string[];
-    siblingNames: string[];
     onClose: () => void;
     onRename: (newName: string) => void;
     onChangeType: (newType: string) => void;
@@ -408,18 +405,8 @@ export const Drawer: React.FC<DrawerProps> = (props) => {
         if (!name.trim()) {
             return 'Name cannot be empty';
         }
-        if (name.length > 32) {
-            return 'Name must be 32 chars or fewer';
-        }
-        if (!MODULE_NAME_REGEX.test(name)) {
-            return 'Only a-z, 0-9, _ and - allowed';
-        }
-        const others = props.siblingNames.filter(n => n !== props.module.name);
-        if (others.includes(name)) {
-            return 'Name must be unique within chain';
-        }
         return null;
-    }, [props]);
+    }, [props.mode]);
 
     return (
         <>

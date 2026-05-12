@@ -6,8 +6,6 @@ import { Sparkline, useSparklineHistory } from '../../_shared/lane-editor';
 import { formatPps } from '../../../../utils';
 import type { InterpolatedCounterData } from '../../../../hooks';
 
-const MODULE_NAME_REGEX = /^[a-z0-9_-]+$/;
-
 interface ModuleCardProps {
     module: Module;
     fnId: string;
@@ -22,21 +20,11 @@ interface ModuleCardProps {
     onDragEnd: () => void;
     onRename: (newName: string) => void;
     onOpenDrawer: () => void;
-    siblingNames: string[];
 }
 
-const validateModuleName = (name: string, siblingNames: string[]): string | null => {
+const validateModuleName = (name: string): string | null => {
     if (!name || name.trim() === '') {
         return 'Name cannot be empty';
-    }
-    if (name.length > 32) {
-        return 'Name must be 32 chars or fewer';
-    }
-    if (!MODULE_NAME_REGEX.test(name)) {
-        return 'Only a-z, 0-9, _ and - allowed';
-    }
-    if (siblingNames.includes(name)) {
-        return 'Name must be unique within chain';
     }
     return null;
 };
@@ -79,7 +67,6 @@ export const ModuleCard: React.FC<ModuleCardProps> = memo(({
     onDragEnd,
     onRename,
     onOpenDrawer,
-    siblingNames,
 }) => {
     const meta = metaFor(module.type);
     const sparklineData = useSparklineHistory(module.id, counter?.pps ?? 0);
@@ -91,8 +78,8 @@ export const ModuleCard: React.FC<ModuleCardProps> = memo(({
     }, [fnId, chainId, modIdx, module.id, onDragStart]);
 
     const validate = useCallback((name: string): string | null => {
-        return validateModuleName(name, siblingNames.filter(n => n !== module.name));
-    }, [siblingNames, module.name]);
+        return validateModuleName(name);
+    }, []);
 
     const borderColor = isInvalidDragTarget
         ? 'var(--fn-danger)'

@@ -154,8 +154,6 @@ export const LaneTrack: React.FC<LaneTrackProps> = ({
         }
     }, [onDragEnd]);
 
-    const siblingNames = modules.map(m => m.name);
-
     return (
         <div
             className={[
@@ -193,7 +191,6 @@ export const LaneTrack: React.FC<LaneTrackProps> = ({
                         onDragEnd={handleDragEnd}
                         onRename={name => onRenameModule(m.id, name)}
                         onOpenDrawer={() => onOpenDrawer(m.id)}
-                        siblingNames={siblingNames.filter((_, i) => i !== idx)}
                     />
                 </React.Fragment>
             ))}

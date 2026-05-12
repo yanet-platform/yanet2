@@ -192,14 +192,6 @@ export const FunctionCard: React.FC<FunctionCardProps> = ({
         return fn.chains.find(c => c.id === chainId) ?? null;
     }, [fn.chains, drawerSelection]);
 
-    const drawerSiblingNames: string[] = useMemo(() => {
-        if (drawerSelection?.kind !== 'module') {
-            return [];
-        }
-        const chain = fn.chains.find(c => c.id === drawerSelection.chainId);
-        return chain ? chain.modules.map(m => m.name) : [];
-    }, [fn.chains, drawerSelection]);
-
     const saveErrors = useMemo(() => validateSave(fn), [fn]);
 
     const handleOpenDiff = useCallback((): void => {
@@ -280,7 +272,6 @@ export const FunctionCard: React.FC<FunctionCardProps> = ({
                     chain={drawerChain}
                     counter={counterMap.get(drawerSelection.moduleId)}
                     availableTypes={availableModuleTypes}
-                    siblingNames={drawerSiblingNames}
                     onClose={handleCloseDrawer}
                     onRename={name => {
                         dispatch({ type: 'RENAME_MODULE', fnId: fn.id, moduleId: drawerModule.id, name });
