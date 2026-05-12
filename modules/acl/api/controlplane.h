@@ -8,6 +8,13 @@
 
 #include "lib/errors/errors.h"
 
+#define ACL_RULE_ACTION_ALLOW 0
+#define ACL_RULE_ACTION_DENY 1
+#define ACL_RULE_ACTION_COUNT 2
+#define ACL_RULE_ACTION_CHECK_STATE 3
+#define ACL_RULE_ACTION_CREATE_STATE 4
+#define ACL_RULE_ACTION_LOG 5
+
 struct agent;
 struct cp_module;
 
@@ -20,13 +27,14 @@ void
 acl_module_config_free(struct cp_module *cp_module);
 
 struct acl_action {
-	uint64_t id;
-	char counter[COUNTER_NAME_LEN];
+	uint64_t kind;
 };
 
 struct acl_rule {
 	struct acl_action *actions;
 	uint64_t action_count;
+
+	char counter[COUNTER_NAME_LEN];
 
 	struct filter_devices devices;
 	struct filter_vlan_ranges vlan_ranges;

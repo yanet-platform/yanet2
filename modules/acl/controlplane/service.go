@@ -66,31 +66,26 @@ func (m *ACLService) newHandlerTracker(name string) *handlerMetricTracker {
 }
 
 // //////////////////////////////////////////////////////////////////////////////
-func terminalAction(protoActions []*aclpb.Action) AclAction {
-	const (
-		cACLActionAllow       = 0
-		cACLActionDeny        = 1
-		cACLActionCheckState  = 3
-		cACLActionCreateState = 4
-	)
-
-	if len(protoActions) == 0 {
-		return AclAction{ID: cACLActionAllow}
+func convertActions(protoActions []*aclpb.Action) []AclAction {
+	result := make([]AclAction, len(protoActions))
+	for idx, reqAction := range protoActions {
+		switch reqAction.GetKind() {
+		case aclpb.ActionKind_ACTION_KIND_PASS:
+			result[idx].Kind = ActionAllow
+		case aclpb.ActionKind_ACTION_KIND_DENY:
+			result[idx].Kind = ActionDeny
+		case aclpb.ActionKind_ACTION_KIND_COUNT:
+			result[idx].Kind = ActionCount
+		case aclpb.ActionKind_ACTION_KIND_CHECK_STATE:
+			result[idx].Kind = ActionCheckState
+		case aclpb.ActionKind_ACTION_KIND_CREATE_STATE:
+			result[idx].Kind = ActionCreateState
+		case aclpb.ActionKind_ACTION_KIND_LOG:
+			result[idx].Kind = ActionLog
+		}
 	}
 
-	a := protoActions[len(protoActions)-1]
-	switch a.GetKind() {
-	case aclpb.ActionKind_ACTION_KIND_PASS:
-		return AclAction{ID: cACLActionAllow, Counter: a.GetCounter()}
-	case aclpb.ActionKind_ACTION_KIND_DENY:
-		return AclAction{ID: cACLActionDeny, Counter: a.GetCounter()}
-	case aclpb.ActionKind_ACTION_KIND_CHECK_STATE:
-		return AclAction{ID: cACLActionCheckState, Counter: a.GetCounter()}
-	case aclpb.ActionKind_ACTION_KIND_CREATE_STATE:
-		return AclAction{ID: cACLActionCreateState, Counter: a.GetCounter()}
-	default:
-		return AclAction{ID: cACLActionDeny, Counter: a.GetCounter()}
-	}
+	return result
 }
 
 func convertRules(reqRules []*aclpb.Rule) ([]AclRule, error) {
@@ -134,7 +129,7 @@ func convertRules(reqRules []*aclpb.Rule) ([]AclRule, error) {
 		}
 
 		rule := AclRule{
-			Actions:       []AclAction{terminalAction(reqRule.Actions)},
+			Actions:       convertActions(reqRule.Actions),
 			Devices:       devices,
 			VlanRanges:    vlanRanges,
 			Src4s:         src4s,

@@ -10,16 +10,17 @@
 #define ACL_ACTION_COUNT 2
 #define ACL_ACTION_CHECK_STATE 3
 #define ACL_ACTION_CREATE_STATE 4
+#define ACL_ACTION_LOG 5
 
 #define ACL_MAX_ACTIONS 8
 
 struct acl_target {
+	// FIXME: use dynamic allocation
 	uint64_t actions[ACL_MAX_ACTIONS];
 	uint64_t action_count;
 	uint64_t counter_id;
 };
 
-// FIXME: make the structure private?
 struct acl_module_config {
 	struct cp_module cp_module;
 
@@ -46,10 +47,8 @@ struct acl_module_config {
 	uint64_t no_match_counter_id;
 	uint64_t action_allow_counter_id;
 	uint64_t action_deny_counter_id;
-	uint64_t action_count_counter_id;
-	uint64_t action_check_state_counter_id;
+	uint64_t action_check_pass_counter_id;
+	uint64_t action_check_miss_counter_id;
 	uint64_t action_create_state_counter_id;
-	uint64_t action_unknown_counter_id;
-	uint64_t state_miss_counter_id;
 	uint64_t sync_sent_counter_id;
 };

@@ -87,18 +87,18 @@ acl_module_config_init(
 		uint64_t size;
 		uint64_t *dst;
 	} counters[] = {
-		{"acl_no_match", 2, &config->no_match_counter_id},
-		{"acl_action_allow", 2, &config->action_allow_counter_id},
-		{"acl_action_deny", 2, &config->action_deny_counter_id},
-		{"acl_action_count", 2, &config->action_count_counter_id},
-		{"acl_action_check_state",
-		 2,
-		 &config->action_check_state_counter_id},
+		{"acl_no_match", 1, &config->no_match_counter_id},
+		{"acl_action_allow", 1, &config->action_allow_counter_id},
+		{"acl_action_deny", 1, &config->action_deny_counter_id},
+		{"acl_action_check_pass",
+		 1,
+		 &config->action_check_pass_counter_id},
+		{"acl_action_check_miss",
+		 1,
+		 &config->action_check_miss_counter_id},
 		{"acl_action_create_state",
-		 2,
+		 1,
 		 &config->action_create_state_counter_id},
-		{"acl_action_unknown", 2, &config->action_unknown_counter_id},
-		{"acl_state_miss", 2, &config->state_miss_counter_id},
 		{"acl_sync_sent", 2, &config->sync_sent_counter_id},
 	};
 
@@ -463,18 +463,19 @@ acl_module_config_update(
 
 		uint64_t action_count = acl_rule->action_count;
 		if (action_count > ACL_MAX_ACTIONS) {
-			action_count = ACL_MAX_ACTIONS;
+			/*
+			 * Could not reach a terminal one action
+			 */
+			goto error_target;
 		}
 		for (uint64_t action_idx = 0; action_idx < action_count;
 		     ++action_idx) {
 			targets[idx].actions[action_idx] =
-				acl_rule->actions[action_idx].id;
+				acl_rule->actions[action_idx].kind;
 		}
 		targets[idx].action_count = action_count;
 
-		struct acl_action *terminal =
-			&acl_rule->actions[acl_rule->action_count - 1];
-		const char *counter_name = terminal->counter;
+		const char *counter_name = acl_rule->counter;
 		char default_counter[COUNTER_NAME_LEN];
 		if (counter_name[0] == '\0') {
 			snprintf(
