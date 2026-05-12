@@ -1,2 +1,4 @@
 usr/bin/yanet-bird-adapter
 etc/yanet2/bird-adapter-default.yaml
+etc/yanet2/bird-adapter-bootstrap.env
+usr/lib/systemd/system/yanet2-bird-adapter-bootstrap.service
