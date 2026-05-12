@@ -1,5 +1,15 @@
 subdir('adapterpb')
 
+install_data(
+    'etc/yanet/yanet2-bird-adapter-bootstrap.service',
+    install_dir: '/usr/lib/systemd/system',
+)
+
+install_data(
+    'etc/yanet/bird-adapter-bootstrap.env',
+    install_dir: '/etc/yanet2',
+)
+
 bird_adapter_ld_flags = '-X github.com/yanet-platform/yanet2/operators/bird-adapter/internal/version.version=' + meson.project_version()
 
 # Skip bird-adapter when fuzzing — it does not use CGO but still gets sanitizer

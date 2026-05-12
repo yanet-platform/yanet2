@@ -1,0 +1,24 @@
+[Unit]
+Description=yanet2 BIRD adapter bootstrap (SetupConfig)
+After=yanet2-bird-adapter.service
+Requires=yanet2-bird-adapter.service
+PartOf=yanet2-bird-adapter.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+EnvironmentFile=/etc/yanet2/bird-adapter-bootstrap.env
+User=root
+Group=yanet
+ExecStart=/bin/bash -c '/usr/bin/yanet-bird-adapter client \
+  --server-config /etc/yanet2/bird-adapter.yaml \
+  --config "$NAME" \
+  --sockets "$SOCKETS" \
+  --source-v4 "$SOURCE_V4" \
+  --source-v6 "$SOURCE_V6" \
+  --log-level "$LOG_LEVEL"'
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
