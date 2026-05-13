@@ -167,7 +167,7 @@ test_layermap_basic_operations(void *arena) {
 	fwmap_t *layer = active_layer;
 	while (layer) {
 		fwmap_t *next = (fwmap_t *)ADDR_OF(&layer->next);
-		fwmap_destroy(layer, ctx);
+		fwmap_free(layer, ctx);
 		layer = next;
 	}
 
@@ -338,7 +338,7 @@ test_layermap_multithreaded(void *arena) {
 	fwmap_t *layer = active_layer;
 	while (layer) {
 		fwmap_t *next = (fwmap_t *)ADDR_OF(&layer->next);
-		fwmap_destroy(layer, ctx);
+		fwmap_free(layer, ctx);
 		layer = next;
 	}
 

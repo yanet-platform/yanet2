@@ -123,7 +123,7 @@ benchmark_performance(void *arena) {
 	printf("    Max chain length: %u\n", stats.max_chain_length);
 	printf("    Memory used: %zu KB\n", stats.memory_used / 1024);
 
-	fwmap_destroy(map, ctx);
+	fwmap_free(map, ctx);
 
 	// Verify memory leaks.
 	verify_memory_leaks(ctx, "benchmark_performance");

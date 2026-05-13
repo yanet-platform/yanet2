@@ -84,7 +84,7 @@ test_env_create(void *arena, const char *name) {
  */
 static void
 test_env_destroy(test_env_t *env) {
-	fwmap_destroy(env->map, env->ctx);
+	fwmap_free(env->map, env->ctx);
 	verify_memory_leaks(env->ctx, env->name);
 }
 

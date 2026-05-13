@@ -109,7 +109,7 @@ test_lifecycle(void *arena) {
 	assert(ret >= 0);
 	assert(*retrieved == 200);
 
-	fwmap_destroy(map, ctx);
+	fwmap_free(map, ctx);
 	verify_memory_leaks(ctx, "lifecycle");
 	printf("  Lifecycle test passed\n");
 }
@@ -173,7 +173,7 @@ test_bulk_operations(void *arena) {
 		assert(*value == expected);
 	}
 
-	fwmap_destroy(map, ctx);
+	fwmap_free(map, ctx);
 	verify_memory_leaks(ctx, "bulk_ops");
 	printf("  Bulk operations test passed\n");
 }
@@ -240,7 +240,7 @@ test_collision_chains(void *arena) {
 	fwmap_stats_t stats = fwmap_get_stats(map);
 	printf("    Memory usage: %zu bytes\n", stats.memory_used);
 
-	fwmap_destroy(map, ctx);
+	fwmap_free(map, ctx);
 
 	/* Restore original hash function */
 	fwmap_func_registry[FWMAP_HASH_FNV1A] = original_hash;
@@ -285,7 +285,7 @@ test_ttl_expiration(void *arena) {
 	ret = fwmap_get(map, now, &key, (void **)&retrieved, NULL);
 	assert(ret < 0); /* Must fail to find expired entry */
 
-	fwmap_destroy(map, ctx);
+	fwmap_free(map, ctx);
 	verify_memory_leaks(ctx, "ttl_expiry");
 	printf("  TTL expiration test passed\n");
 }
@@ -335,7 +335,7 @@ test_entry_access(void *arena) {
 	assert(ret >= 0);
 	assert(*retrieved == 2000);
 
-	fwmap_destroy(map, ctx);
+	fwmap_free(map, ctx);
 	verify_memory_leaks(ctx, "entry_access");
 	printf("  Entry access test passed\n");
 }
@@ -456,7 +456,7 @@ test_capacity_limits(void *arena) {
 
 	free(key_buf);
 	free(val_buf);
-	fwmap_destroy(map, ctx);
+	fwmap_free(map, ctx);
 	verify_memory_leaks(ctx, "capacity");
 	printf("  Capacity limits test passed\n");
 }

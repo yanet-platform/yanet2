@@ -14,12 +14,12 @@ static void
 fwstate_config_destroy(struct fwstate_config *config, struct agent *agent) {
 	if (config->fw4state != NULL) {
 		fwmap_t *fw4 = ADDR_OF(&config->fw4state);
-		fwmap_destroy(fw4, &agent->memory_context);
+		fwmap_free(fw4, &agent->memory_context);
 		config->fw4state = NULL;
 	}
 	if (config->fw6state != NULL) {
 		fwmap_t *fw6 = ADDR_OF(&config->fw6state);
-		fwmap_destroy(fw6, &agent->memory_context);
+		fwmap_free(fw6, &agent->memory_context);
 		config->fw6state = NULL;
 	}
 }
@@ -199,7 +199,7 @@ fwstate_config_create_maps(
 	fwmap_t *fw6state = fwmap_new(&fw6_config, &agent->memory_context);
 	if (fw6state == NULL) {
 		fwmap_t *fw4 = ADDR_OF(&config->cfg.fw4state);
-		fwmap_destroy(fw4, &agent->memory_context);
+		fwmap_free(fw4, &agent->memory_context);
 		config->cfg.fw4state = NULL;
 		return -1;
 	}
@@ -267,7 +267,7 @@ fwstate_config_insert_new_layer(
 		fwmap_t *fw4_active = ADDR_OF(&config->cfg.fw4state);
 		fwmap_t *fw4_old = ADDR_OF(&fw4_active->next);
 		SET_OFFSET_OF(&config->cfg.fw4state, fw4_old);
-		fwmap_destroy(fw4_active, &agent->memory_context);
+		fwmap_free(fw4_active, &agent->memory_context);
 		return -1;
 	}
 
@@ -383,7 +383,7 @@ fwstate_outdated_layers_free(
 			(layermap_list_t *)ADDR_OF(&v4_node->next);
 
 		// Free the layer
-		fwmap_destroy(layer, &agent->memory_context);
+		fwmap_free(layer, &agent->memory_context);
 
 		// Free the list node
 		memory_bfree(&agent->memory_context, v4_node, sizeof(*v4_node));
@@ -399,7 +399,7 @@ fwstate_outdated_layers_free(
 			(layermap_list_t *)ADDR_OF(&v6_node->next);
 
 		// Free the layer
-		fwmap_destroy(layer, &agent->memory_context);
+		fwmap_free(layer, &agent->memory_context);
 
 		// Free the list node
 		memory_bfree(&agent->memory_context, v6_node, sizeof(*v6_node));
