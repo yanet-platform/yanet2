@@ -34,7 +34,17 @@ forward_module_config_init(
 
 	if (cp_module_init(&config->cp_module, agent, "forward", name, err)) {
 		yanet_error_add(err, "failed to init module");
-		goto fail;
+		// TODO: better to call `cp_module_fini` inside
+		// `cp_module_init`, since in case of error, the `*_init`
+		// functions are expected to free the allocated resources, but
+		// now its not the case.
+		cp_module_fini(&config->cp_module);
+		memory_bfree(
+			&agent->memory_context,
+			config,
+			sizeof(struct forward_module_config)
+		);
+		return NULL;
 	}
 
 	SET_OFFSET_OF(&config->targets, NULL);
@@ -47,11 +57,6 @@ forward_module_config_init(
 	memset(&config->filter_ip6, 0, sizeof(config->filter_ip6));
 
 	return &config->cp_module;
-
-fail: {
-	forward_module_config_free(&config->cp_module);
-	return NULL;
-}
 }
 
 void
@@ -73,14 +78,11 @@ forward_module_config_free(struct cp_module *cp_module) {
 	cp_module_fini(cp_module);
 
 	struct agent *agent = ADDR_OF(&cp_module->agent);
-	// FIXME: remove the check as agent should be assigned
-	if (agent != NULL) {
-		memory_bfree(
-			&agent->memory_context,
-			config,
-			sizeof(struct forward_module_config)
-		);
-	}
+	memory_bfree(
+		&agent->memory_context,
+		config,
+		sizeof(struct forward_module_config)
+	);
 }
 
 typedef int (*forward_rule_check_func)(const struct forward_rule *forward_rule);
@@ -375,17 +377,10 @@ error_target:
 		targets,
 		sizeof(struct forward_target) * rule_count
 	);
+	SET_OFFSET_OF(&config->targets, NULL);
+	config->target_count = 0;
 
 error:
 
 	return -1;
-}
-
-int
-forward_module_config_delete(struct cp_module *cp_module) {
-	// TODO: either pass "err" and adapt other modules or make
-	// "agent_delete_module" infallible.
-	return agent_delete_module(
-		cp_module->agent, "forward", cp_module->name, NULL
-	);
 }
