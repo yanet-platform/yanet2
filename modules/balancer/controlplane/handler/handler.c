@@ -455,16 +455,16 @@ packet_handler_setup(
 		&handler->cp_module.counter_registry;
 
 	if (init_counters(handler, counter_registry, err) != 0) {
-		goto free_handler;
+		goto free_cp_module;
 	}
 
 	if (init_sources(handler, mctx, config) != 0) {
 		yanet_error_add(err, "failed to setup source addresses");
-		goto free_handler;
+		goto free_cp_module;
 	}
 
 	if (init_decaps(handler, mctx, config, err) != 0) {
-		goto free_handler;
+		goto free_cp_module;
 	}
 
 	size_t workers = ADDR_OF(&agent->dp_config)->worker_count;
@@ -500,6 +500,9 @@ free_vs:
 free_decap:
 	lpm_free(&handler->decap_ipv4);
 	lpm_free(&handler->decap_ipv6);
+
+free_cp_module:
+	cp_module_fini(&handler->cp_module);
 
 free_handler:
 	memory_bfree(mctx, handler, sizeof(struct packet_handler));
