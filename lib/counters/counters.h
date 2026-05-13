@@ -15,7 +15,7 @@
 #endif
 
 #define COUNTER_NAME_LEN 128
-#define COUNTER_INVALID (uint64_t) - 1
+#define COUNTER_INVALID (uint64_t)-1
 
 struct counter {
 	char name[COUNTER_NAME_LEN];
