@@ -34,11 +34,6 @@ forward_module_config_init(
 
 	if (cp_module_init(&config->cp_module, agent, "forward", name, err)) {
 		yanet_error_add(err, "failed to init module");
-		// TODO: better to call `cp_module_fini` inside
-		// `cp_module_init`, since in case of error, the `*_init`
-		// functions are expected to free the allocated resources, but
-		// now its not the case.
-		cp_module_fini(&config->cp_module);
 		memory_bfree(
 			&agent->memory_context,
 			config,
@@ -75,9 +70,11 @@ forward_module_config_free(struct cp_module *cp_module) {
 	filter_free(&config->filter_ip4, FWD_FILTER_IP4_TAG);
 	filter_free(&config->filter_ip6, FWD_FILTER_IP6_TAG);
 
+	// Capture agent before fini zeroes it.
+	struct agent *agent = ADDR_OF(&cp_module->agent);
+
 	cp_module_fini(cp_module);
 
-	struct agent *agent = ADDR_OF(&cp_module->agent);
 	memory_bfree(
 		&agent->memory_context,
 		config,

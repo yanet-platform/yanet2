@@ -63,7 +63,11 @@ acl_module_config_init(
 
 	if (cp_module_init(&config->cp_module, agent, "acl", name, err)) {
 		yanet_error_add(err, "failed to init module");
-		acl_module_config_free(&config->cp_module);
+		memory_bfree(
+			&agent->memory_context,
+			config,
+			sizeof(struct acl_module_config)
+		);
 		return NULL;
 	}
 
@@ -129,8 +133,6 @@ acl_module_config_free(struct cp_module *cp_module) {
 	struct acl_module_config *config =
 		container_of(cp_module, struct acl_module_config, cp_module);
 
-	struct agent *agent = ADDR_OF(&cp_module->agent);
-
 	memory_bfree(
 		&cp_module->memory_context,
 		ADDR_OF(&config->targets),
@@ -142,6 +144,9 @@ acl_module_config_free(struct cp_module *cp_module) {
 	filter_free(&config->filter_ip4_port, ACL_FILTER_IP4_PROTO_PORT_TAG);
 	filter_free(&config->filter_ip6, ACL_FILTER_IP6_TAG);
 	filter_free(&config->filter_ip6_port, ACL_FILTER_IP6_PROTO_PORT_TAG);
+
+	// Capture agent before fini zeroes it.
+	struct agent *agent = ADDR_OF(&cp_module->agent);
 
 	cp_module_fini(cp_module);
 

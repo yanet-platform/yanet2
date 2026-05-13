@@ -70,22 +70,20 @@ nat64_module_config_free(struct cp_module *cp_module) {
 		config, &config->cp_module.memory_context
 	);
 
-	// Free main config structure
+	// Capture agent before fini zeroes it.
 	struct agent *agent = ADDR_OF(&cp_module->agent);
 
 	cp_module_fini(cp_module);
 
-	if (cp_module->agent) {
-		LOG(DEBUG,
-		    "Freeing main config structure: size=%zu bytes, address=%p",
-		    sizeof(struct nat64_module_config),
-		    (void *)config);
-		memory_bfree(
-			&agent->memory_context,
-			config,
-			sizeof(struct nat64_module_config)
-		);
-	}
+	LOG(DEBUG,
+	    "Freeing main config structure: size=%zu bytes, address=%p",
+	    sizeof(struct nat64_module_config),
+	    (void *)config);
+	memory_bfree(
+		&agent->memory_context,
+		config,
+		sizeof(struct nat64_module_config)
+	);
 
 	LOG(DEBUG, "Completed cleanup of NAT64 module '%s'", cp_module->name);
 }

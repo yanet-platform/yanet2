@@ -85,7 +85,7 @@ cp_module_init(
 			module_type,
 			module_name
 		);
-		return -1;
+		goto fail;
 	}
 
 	cp_module->rx_counter_id = counter_registry_register(
@@ -98,7 +98,7 @@ cp_module_init(
 			module_type,
 			module_name
 		);
-		return -1;
+		goto fail;
 	}
 	cp_module->tx_counter_id = counter_registry_register(
 		&cp_module->counter_registry, "tx", 1, err
@@ -110,7 +110,7 @@ cp_module_init(
 			module_type,
 			module_name
 		);
-		return -1;
+		goto fail;
 	}
 	cp_module->rx_bytes_counter_id = counter_registry_register(
 		&cp_module->counter_registry, "rx_bytes", 1, err
@@ -123,7 +123,7 @@ cp_module_init(
 			module_type,
 			module_name
 		);
-		return -1;
+		goto fail;
 	}
 	cp_module->tx_bytes_counter_id = counter_registry_register(
 		&cp_module->counter_registry, "tx_bytes", 1, err
@@ -136,24 +136,31 @@ cp_module_init(
 			module_type,
 			module_name
 		);
-		return -1;
+		goto fail;
 	}
 
 	if (cp_module_build_perf_counters(cp_module, err)) {
-		return -1;
+		goto fail;
 	}
 
 	uint64_t any_idx;
 	if (cp_module_link_device(cp_module, "", &any_idx, err)) {
-		return -1;
+		goto fail;
 	}
 
 	return 0;
+
+fail:
+	cp_module_fini(cp_module);
+	return -1;
 }
 
 void
 cp_module_fini(struct cp_module *cp_module) {
 	counter_registry_free(&cp_module->counter_registry);
+	memset(&cp_module->counter_registry,
+	       0,
+	       sizeof(cp_module->counter_registry));
 
 	struct cp_module_device *devices = ADDR_OF(&cp_module->devices);
 	if (devices != NULL) {
@@ -164,6 +171,10 @@ cp_module_fini(struct cp_module *cp_module) {
 				cp_module->device_count
 		);
 	}
+	SET_OFFSET_OF(&cp_module->devices, NULL);
+	cp_module->device_count = 0;
+
+	SET_OFFSET_OF(&cp_module->agent, NULL);
 }
 
 int

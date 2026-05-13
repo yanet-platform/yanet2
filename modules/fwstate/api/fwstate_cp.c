@@ -54,7 +54,11 @@ fwstate_module_config_init(
 		    &config->cp_module, agent, FWSTATE_MODULE_NAME, name, err
 	    )) {
 		yanet_error_add(err, "failed to init module");
-		fwstate_module_config_free(&config->cp_module);
+		memory_bfree(
+			&agent->memory_context,
+			config,
+			sizeof(struct fwstate_module_config)
+		);
 		return NULL;
 	}
 	fwstate_config_set_defaults(&config->cfg);
@@ -84,10 +88,10 @@ fwstate_module_config_free(struct cp_module *cp_module) {
 		cp_module, struct fwstate_module_config, cp_module
 	);
 
+	// Capture agent before fini zeroes it.
 	struct agent *agent = ADDR_OF(&cp_module->agent);
-	if (agent) {
-		fwstate_config_destroy(&config->cfg, agent);
-	}
+
+	fwstate_config_destroy(&config->cfg, agent);
 
 	cp_module_fini(cp_module);
 
