@@ -149,6 +149,8 @@ lpm_free(struct lpm *lpm) {
 	memory_bfree(
 		memory_context, pages, sizeof(struct lpm_page *) * chunk_count
 	);
+
+	memory_context_fini(&lpm->memory_context);
 }
 
 static inline int

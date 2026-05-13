@@ -28,6 +28,7 @@ cp_device_vlan_create(
 	if (cp_device_init(
 		    &cp_device_vlan->cp_device,
 		    agent,
+		    &agent->memory_context,
 		    &config->cp_device_config,
 		    err
 	    )) {
@@ -52,7 +53,7 @@ cp_device_vlan_free(struct cp_device *cp_device) {
 	struct agent *agent = ADDR_OF(&cp_device->agent);
 	// FIXME: remove the check as agent should be assigned
 	if (agent != NULL) {
-		cp_device_destroy(&agent->memory_context, cp_device);
+		cp_device_fini(&agent->memory_context, cp_device);
 		memory_bfree(
 			&agent->memory_context,
 			cp_device_vlan,

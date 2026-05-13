@@ -8,7 +8,6 @@
 #include "memory_block.h"
 #include "strutils.h"
 
-// TODO: link parent and child context
 struct memory_context {
 	struct block_allocator *block_allocator;
 	size_t balloc_count;
@@ -17,6 +16,17 @@ struct memory_context {
 	size_t bfree_size;
 
 	char name[64];
+
+	// Tree links for per-subsystem memory diagnostics.
+	//
+	// All three are shared-memory offset pointers. Use ADDR_OF and
+	// SET_OFFSET_OF to dereference or assign them.
+	//
+	// A NULL parent marks a root context (agent, dataplane bootstrap,
+	// cp_config bootstrap).
+	struct memory_context *parent;
+	struct memory_context *first_child;
+	struct memory_context *next_sibling;
 };
 
 static inline int
@@ -32,6 +42,11 @@ memory_context_init(
 
 	SET_OFFSET_OF(&context->block_allocator, block_allocator);
 	(void)strtcpy(context->name, name, sizeof(context->name));
+
+	// Root context has no parent and no children yet.
+	SET_OFFSET_OF(&context->parent, NULL);
+	SET_OFFSET_OF(&context->first_child, NULL);
+	SET_OFFSET_OF(&context->next_sibling, NULL);
 
 	return 0;
 }
@@ -52,7 +67,54 @@ memory_context_init_from(
 	);
 	(void)strtcpy(context->name, name, sizeof(context->name));
 
+	// Remember which context contains us.
+	//
+	// Required for unlink on teardown.
+	SET_OFFSET_OF(&context->parent, parent);
+	SET_OFFSET_OF(&context->first_child, NULL);
+
+	// Insert at the head of the parent's child list.
+	//
+	// Write next_sibling before updating parent->first_child so a
+	// concurrent reader always sees a consistent chain.
+	EQUATE_OFFSET(&context->next_sibling, &parent->first_child);
+	SET_OFFSET_OF(&parent->first_child, context);
+
 	return 0;
+}
+
+// Remove this context from its parent's child list.
+//
+// Safe to call multiple times on the same context (idempotent).
+//
+// No-op when parent is NULL.
+static inline void
+memory_context_fini(struct memory_context *context) {
+	struct memory_context *parent = ADDR_OF(&context->parent);
+	if (parent == NULL) {
+		return;
+	}
+
+	// Walk the sibling chain to find and unlink ourselves.
+	struct memory_context **cursor = &parent->first_child;
+	for (;;) {
+		struct memory_context *child = ADDR_OF(cursor);
+		if (child == NULL) {
+			// Not found — already unlinked or never linked.
+			break;
+		}
+		if (child == context) {
+			// Bridge over ourselves: predecessor now points at our
+			// next sibling.
+			EQUATE_OFFSET(cursor, &context->next_sibling);
+			break;
+		}
+		cursor = &child->next_sibling;
+	}
+
+	// Clear parent so repeat calls become no-ops.
+	SET_OFFSET_OF(&context->parent, NULL);
+	SET_OFFSET_OF(&context->next_sibling, NULL);
 }
 
 static inline void *

@@ -693,8 +693,12 @@ cp_config_gen_create(struct agent *agent, yanet_error **err) {
 		pipe_cfg.count = 0;
 		device_config.input_pipelines = &pipe_cfg;
 		device_config.output_pipelines = &pipe_cfg;
-		struct cp_device *cp_device =
-			cp_device_create(agent, &device_config, err);
+		// Use cp_config->memory_context as the tree parent so that
+		// the device's memory_context outlives any transient stub
+		// agent that may have been used to call cp_config_gen_create.
+		struct cp_device *cp_device = cp_device_create(
+			agent, &cp_config->memory_context, &device_config, err
+		);
 		if (cp_device == NULL) {
 			yanet_error_add(
 				err,

@@ -32,11 +32,21 @@ export interface PipelineInfo {
     functions?: string[];
 }
 
+export interface MemoryNode {
+    name?: string;
+    parent_idx?: number;
+    balloc_count?: string | number;
+    bfree_count?: string | number;
+    balloc_size?: string | number;
+    bfree_size?: string | number;
+}
+
 export interface AgentInstanceInfo {
     pid?: number;
     memory_limit?: string | number; // uint64 — serialized as string in JSON
     free_bytes?: string | number; // uint64 — serialized as string in JSON
     generation?: string | number; // uint64 — serialized as string in JSON
+    memory_tree?: MemoryNode[];
 }
 
 export interface AgentInfo {

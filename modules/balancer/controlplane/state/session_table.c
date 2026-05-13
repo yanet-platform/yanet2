@@ -66,6 +66,7 @@ session_table_free(struct session_table *table) {
 		TTLMAP_FREE(&table->maps[i]);
 	}
 	rcu_free(&table->rcu, &table->mctx);
+	memory_context_fini(&table->mctx);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

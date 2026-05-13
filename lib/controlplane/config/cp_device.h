@@ -88,6 +88,7 @@ cp_device_config_deinit(struct cp_device_config *config);
 struct cp_device *
 cp_device_create(
 	struct agent *agent,
+	struct memory_context *mctx_parent,
 	struct cp_device_config *device_config,
 	yanet_error **err
 );
@@ -97,16 +98,21 @@ cp_device_free(
 	struct memory_context *memory_context, struct cp_device *cp_device
 );
 
+// Initialize *cp_device in shared memory.
+//
+// mctx_parent is the memory_context that will appear as the parent of the
+// device's own context in the per-subsystem memory tree.
 int
 cp_device_init(
 	struct cp_device *cp_device,
 	struct agent *agent,
+	struct memory_context *mctx_parent,
 	const struct cp_device_config *cp_device_config,
 	yanet_error **err
 );
 
 void
-cp_device_destroy(
+cp_device_fini(
 	struct memory_context *memory_context, struct cp_device *cp_device
 );
 

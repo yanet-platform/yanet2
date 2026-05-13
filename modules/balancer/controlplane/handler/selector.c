@@ -123,4 +123,5 @@ selector_free(struct real_selector *selector) {
 	size_t cur_ring_id = selector->ring_id;
 	ring_free(&selector->rings[cur_ring_id], &selector->mctx);
 	rcu_free(&selector->rcu, &selector->mctx);
+	memory_context_fini(&selector->mctx);
 }

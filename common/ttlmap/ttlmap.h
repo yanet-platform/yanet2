@@ -19,7 +19,11 @@ typedef struct ttlmap ttlmap_t;
 		map_ptr, mctx_ptr, key_type, value_type, kv_entries            \
 	)
 
-#define TTLMAP_FREE(map_ptr) __TTLMAP_FREE_INTERNAL(map_ptr)
+#define TTLMAP_FREE(map_ptr)                                                   \
+	do {                                                                   \
+		__TTLMAP_FREE_INTERNAL(map_ptr);                               \
+		memory_context_fini(&(map_ptr)->mctx);                         \
+	} while (0)
 
 #define TTLMAP_GET(                                                            \
 	map_ptr, key_ptr, value_ptr_ptr, lock_ptr_ptr, now, timeout            \

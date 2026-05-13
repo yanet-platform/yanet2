@@ -1172,7 +1172,7 @@ yanet_get_cp_agent_instance_info(
 		return -1;
 	}
 
-	*instance_info = agent_info->instances + index;
+	*instance_info = agent_info->instances[index];
 
 	return 0;
 }
@@ -1193,12 +1193,110 @@ yanet_get_cp_agent_info(
 
 void
 cp_agent_list_info_free(struct cp_agent_list_info *agent_list_info) {
+	if (agent_list_info == NULL) {
+		return;
+	}
+
 	for (uint64_t agent_idx = 0; agent_idx < agent_list_info->count;
 	     ++agent_idx) {
-		free(agent_list_info->agents[agent_idx]);
+		struct cp_agent_info *agent_info =
+			agent_list_info->agents[agent_idx];
+		if (agent_info == NULL) {
+			continue;
+		}
+
+		// Free each instance block, which includes its trailing
+		// memory_nodes array.
+		for (uint64_t inst_idx = 0;
+		     inst_idx < agent_info->instance_count;
+		     ++inst_idx) {
+			free(agent_info->instances[inst_idx]);
+		}
+
+		free(agent_info);
 	}
 
 	free(agent_list_info);
+}
+
+// Walk the memory_context tree rooted at ctx in depth-first order and count
+// the total number of nodes (including ctx itself).
+static uint64_t
+memory_context_count_nodes(struct memory_context *ctx) {
+	uint64_t count = 1;
+	struct memory_context *child = ADDR_OF(&ctx->first_child);
+	while (child != NULL) {
+		count += memory_context_count_nodes(child);
+		child = ADDR_OF(&child->next_sibling);
+	}
+	return count;
+}
+
+// Walk the memory_context tree in depth-first order and fill consecutive
+// entries in the nodes array, starting at *next_idx. parent_idx is the array
+// index of the node that owns ctx (UINT32_MAX for the root).
+//
+// Returns the updated *next_idx after all descendants are recorded.
+static void
+memory_context_fill_nodes(
+	struct memory_context *ctx,
+	struct cp_memory_node_info *nodes,
+	uint32_t parent_idx,
+	uint32_t *next_idx
+) {
+	uint32_t my_idx = (*next_idx)++;
+	struct cp_memory_node_info *node = &nodes[my_idx];
+
+	strtcpy(node->name, ctx->name, sizeof(node->name));
+	node->parent_idx = parent_idx;
+	node->_pad = 0;
+	node->balloc_count = ctx->balloc_count;
+	node->bfree_count = ctx->bfree_count;
+	node->balloc_size = ctx->balloc_size;
+	node->bfree_size = ctx->bfree_size;
+
+	// Recurse into children so that each child knows its parent's index.
+	struct memory_context *child = ADDR_OF(&ctx->first_child);
+	while (child != NULL) {
+		// Snapshot next_sibling before descending in case a concurrent
+		// writer modifies the chain; we skip any node that looks
+		// obviously broken rather than crashing.
+		struct memory_context *sibling = ADDR_OF(&child->next_sibling);
+		memory_context_fill_nodes(child, nodes, my_idx, next_idx);
+		child = sibling;
+	}
+}
+
+// Build a cp_agent_instance_info block (including trailing memory_nodes) for
+// a single agent instance. Returns NULL on allocation failure.
+static struct cp_agent_instance_info *
+build_instance_info(struct agent *agent) {
+	// Two-pass approach: count nodes first, then allocate and fill.
+	uint64_t node_count =
+		memory_context_count_nodes(&agent->memory_context);
+
+	struct cp_agent_instance_info *info = (struct cp_agent_instance_info *)
+		malloc(sizeof(struct cp_agent_instance_info) +
+		       sizeof(struct cp_memory_node_info) * node_count);
+	if (info == NULL) {
+		return NULL;
+	}
+
+	info->pid = agent->pid;
+	info->memory_limit = agent->memory_limit;
+	info->gen = agent->gen;
+	info->free_bytes = block_allocator_free_size(&agent->block_allocator);
+	info->memory_node_count = node_count;
+
+	uint32_t next_idx = 0;
+	memory_context_fill_nodes(
+		&agent->memory_context,
+		info->memory_nodes,
+		UINT32_MAX,
+		&next_idx
+	);
+
+	return info;
 }
 
 struct cp_agent_list_info *
@@ -1223,6 +1321,8 @@ yanet_get_cp_agent_list_info(struct dp_config *dp_config) {
 	     ++agent_idx) {
 		struct agent *agent =
 			ADDR_OF(&agent_registry->agents[agent_idx]);
+
+		// Count how many historical instances exist in the prev chain.
 		uint64_t instance_count = 1;
 		struct agent *prev_agent = ADDR_OF(&agent->prev);
 		while (prev_agent != NULL) {
@@ -1230,9 +1330,11 @@ yanet_get_cp_agent_list_info(struct dp_config *dp_config) {
 			++instance_count;
 		}
 
+		// Allocate the agent info header plus the pointer array for
+		// its instances. Each instance block is allocated separately.
 		struct cp_agent_info *agent_info = (struct cp_agent_info *)
 			malloc(sizeof(struct cp_agent_info) +
-			       sizeof(struct cp_agent_instance_info) *
+			       sizeof(struct cp_agent_instance_info *) *
 				       instance_count);
 		if (agent_info == NULL) {
 			cp_agent_list_info_free(agent_list_info);
@@ -1243,18 +1345,27 @@ yanet_get_cp_agent_list_info(struct dp_config *dp_config) {
 		strtcpy(agent_info->name, agent->name, sizeof(agent_info->name)
 		);
 		agent_info->instance_count = 0;
-		while (agent_info->instance_count < instance_count) {
-			struct cp_agent_instance_info *instance =
-				agent_info->instances +
-				agent_info->instance_count++;
-			instance->pid = agent->pid;
-			instance->memory_limit = agent->memory_limit;
-			instance->gen = agent->gen;
-			instance->free_bytes = block_allocator_free_size(
-				&agent->block_allocator
-			);
 
-			agent = ADDR_OF(&agent->prev);
+		// Walk the prev chain and build one instance block per entry.
+		struct agent *cur = agent;
+		while (agent_info->instance_count < instance_count) {
+			struct cp_agent_instance_info *inst =
+				build_instance_info(cur);
+			if (inst == NULL) {
+				// Free the instance blocks already allocated.
+				for (uint64_t k = 0;
+				     k < agent_info->instance_count;
+				     ++k) {
+					free(agent_info->instances[k]);
+				}
+				free(agent_info);
+				cp_agent_list_info_free(agent_list_info);
+				agent_list_info = NULL;
+				goto unlock;
+			}
+			agent_info->instances[agent_info->instance_count++] =
+				inst;
+			cur = ADDR_OF(&cur->prev);
 		}
 
 		agent_list_info->agents[agent_list_info->count++] = agent_info;

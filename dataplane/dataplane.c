@@ -532,6 +532,10 @@ dataplane_init(
 			&instance->cp_config->cp_config_gen, cp_config_gen
 		);
 
+		// The stub agent is stack-allocated; unlink it from the tree
+		// before it goes out of scope.
+		memory_context_fini(&agent.memory_context);
+
 		instance_offset +=
 			instance_config->dp_memory + instance_config->cp_memory;
 	}

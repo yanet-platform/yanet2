@@ -218,6 +218,9 @@ dataplane_initialize(
 		cp_config_gen_create(&agent, &err);
 	if (cp_config_gen == NULL) {
 		yanet_error_free(err);
+		// The stub agent is stack-allocated; unlink it from the tree
+		// before it goes out of scope.
+		memory_context_fini(&agent.memory_context);
 		return -1;
 	}
 	SET_OFFSET_OF(&cp_config->cp_config_gen, cp_config_gen);
@@ -227,6 +230,7 @@ dataplane_initialize(
 		workers_count * sizeof(struct dp_worker *)
 	);
 	if (workers_array == NULL) {
+		memory_context_fini(&agent.memory_context);
 		return -1;
 	}
 
@@ -260,11 +264,16 @@ dataplane_initialize(
 		    "failed to link counter registry: %s",
 		    yanet_error_message(err));
 		yanet_error_free(err);
+		memory_context_fini(&agent.memory_context);
 		return -1;
 	}
 
 	*res_dp_config = dp_config;
 	*res_cp_config = cp_config;
+
+	// The stub agent is stack-allocated; unlink it from the tree
+	// before it goes out of scope.
+	memory_context_fini(&agent.memory_context);
 
 	return 0;
 }

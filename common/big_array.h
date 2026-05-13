@@ -312,6 +312,7 @@ big_array_free(struct big_array *array) {
 	memory_bfree(
 		&array->mctx, subarrays, sizeof(void *) * array->subarrays_count
 	);
+	memory_context_fini(&array->mctx);
 	memset(array, 0, sizeof(struct big_array));
 }
 

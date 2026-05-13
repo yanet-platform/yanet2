@@ -11,7 +11,7 @@ use ync::{
     client::{ConnectionArgs, LayeredChannel},
     logging,
 };
-use ynpb::pb::{inspect_service_client::InspectServiceClient, InspectRequest, InspectResponse};
+use ynpb::pb::{inspect_service_client::InspectServiceClient, InspectRequest, InspectResponse, MemoryNode};
 
 /// Inspect module - displays system introspection information.
 #[derive(Debug, Clone, Parser)]
@@ -120,6 +120,9 @@ impl InspectService {
                     tree.add_empty_child(format!("Used:         {}", ByteSize::b(used)));
                     tree.add_empty_child(format!("Free:         {}", ByteSize::b(instance.free_bytes)));
                     tree.add_empty_child(format!("Generation: {}", instance.generation));
+                    if !instance.memory_tree.is_empty() {
+                        add_memory_tree(&mut tree, &instance.memory_tree);
+                    }
                     tree.end_child();
                 }
 
@@ -181,4 +184,67 @@ impl InspectService {
 
         Ok(())
     }
+}
+
+/// Live bytes held by a memory node: allocated minus freed, floored at zero.
+fn node_live(node: &MemoryNode) -> u64 {
+    node.balloc_size.saturating_sub(node.bfree_size)
+}
+
+/// Subtree total: self live bytes plus the live bytes of all descendants.
+fn subtree_live(nodes: &[MemoryNode], children_of: &[Vec<usize>], idx: usize) -> u64 {
+    let self_live = node_live(&nodes[idx]);
+    let children_total: u64 = children_of[idx]
+        .iter()
+        .map(|&c| subtree_live(nodes, children_of, c))
+        .sum();
+    self_live.saturating_add(children_total)
+}
+
+/// Recursively render one node and its children into the ptree builder.
+///
+/// Children are sorted by subtree total descending so the heaviest subtrees
+/// appear first, and nodes with zero subtree total are skipped.
+fn render_memory_node(tree: &mut TreeBuilder, nodes: &[MemoryNode], idx: usize, children_of: &[Vec<usize>]) {
+    let node = &nodes[idx];
+    let total = subtree_live(nodes, children_of, idx);
+    tree.begin_child(format!("{} (Used: {})", node.name, ByteSize::b(total)));
+
+    let mut kids: Vec<usize> = children_of[idx].clone();
+    kids.sort_by_key(|&c| std::cmp::Reverse(subtree_live(nodes, children_of, c)));
+    for kid in kids {
+        if subtree_live(nodes, children_of, kid) > 0 {
+            render_memory_node(tree, nodes, kid, children_of);
+        }
+    }
+
+    tree.end_child();
+}
+
+/// Build a children index and render the memory context tree under a
+/// "Memory tree:" branch in the ptree builder.
+fn add_memory_tree(tree: &mut TreeBuilder, nodes: &[MemoryNode]) {
+    // Build a flat children list: children_of[i] holds the indices of all
+    // nodes whose parent is i.
+    let mut children_of: Vec<Vec<usize>> = vec![Vec::new(); nodes.len()];
+    let mut root_idx: Option<usize> = None;
+
+    for (idx, node) in nodes.iter().enumerate() {
+        if node.parent_idx == u32::MAX {
+            root_idx = Some(idx);
+        } else {
+            let parent = node.parent_idx as usize;
+            if parent < nodes.len() {
+                children_of[parent].push(idx);
+            }
+        }
+    }
+
+    let Some(root) = root_idx else {
+        return;
+    };
+
+    tree.begin_child("Memory tree:".to_string());
+    render_memory_node(tree, nodes, root, &children_of);
+    tree.end_child();
 }

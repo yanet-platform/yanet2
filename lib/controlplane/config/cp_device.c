@@ -118,6 +118,7 @@ int
 cp_device_init(
 	struct cp_device *cp_device,
 	struct agent *agent,
+	struct memory_context *mctx_parent,
 	const struct cp_device_config *cp_device_config,
 	yanet_error **err
 ) {
@@ -140,9 +141,7 @@ cp_device_init(
 	strtcpy(cp_device->name, cp_device_config->name, sizeof(cp_device->name)
 	);
 	memory_context_init_from(
-		&cp_device->memory_context,
-		&agent->memory_context,
-		cp_device_config->name
+		&cp_device->memory_context, mctx_parent, cp_device_config->name
 	);
 
 	SET_OFFSET_OF(&cp_device->agent, agent);
@@ -238,6 +237,7 @@ cp_device_init(
 struct cp_device *
 cp_device_create(
 	struct agent *agent,
+	struct memory_context *mctx_parent,
 	struct cp_device_config *device_config,
 	yanet_error **err
 ) {
@@ -253,7 +253,9 @@ cp_device_create(
 		return NULL;
 	}
 
-	if (cp_device_init(new_device, agent, device_config, err)) {
+	if (cp_device_init(
+		    new_device, agent, mctx_parent, device_config, err
+	    )) {
 		yanet_error_add(
 			err,
 			"failed to initialize device '%s'",
@@ -281,7 +283,7 @@ cp_device_entry_free(
 }
 
 void
-cp_device_destroy(
+cp_device_fini(
 	struct memory_context *memory_context, struct cp_device *cp_device
 ) {
 	cp_device_entry_free(
@@ -291,13 +293,15 @@ cp_device_destroy(
 	cp_device_entry_free(
 		memory_context, ADDR_OF(&cp_device->input_pipelines)
 	);
+
+	memory_context_fini(&cp_device->memory_context);
 }
 
 void
 cp_device_free(
 	struct memory_context *memory_context, struct cp_device *cp_device
 ) {
-	cp_device_destroy(memory_context, cp_device);
+	cp_device_fini(memory_context, cp_device);
 	memory_bfree(memory_context, cp_device, sizeof(struct cp_device));
 }
 
