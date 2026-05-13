@@ -43,11 +43,13 @@ nat64_module_config_create(
 		    config, &config->cp_module.memory_context
 	    )) {
 		yanet_error_add(err, "failed to init config data");
-		goto error_init;
+		goto error_data;
 	}
 
 	return &config->cp_module;
 
+error_data:
+	cp_module_fini(&config->cp_module);
 error_init:
 	memory_bfree(
 		&agent->memory_context,
