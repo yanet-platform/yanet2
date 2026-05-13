@@ -9,10 +9,17 @@ struct dp_config;
 
 struct counter_value_handle;
 
+struct counter_tag {
+	const char *key;
+	const char *value;
+};
+
 struct counter_handle {
 	char name[60];
 	uint64_t size;
 	uint64_t gen;
+	const struct counter_tag *tags;
+	size_t tag_count;
 	struct counter_value_handle *value_handle;
 };
 
@@ -74,6 +81,36 @@ yanet_get_counter_value(
 	struct counter_value_handle *value_handle,
 	uint64_t value_idx,
 	uint64_t worker_idx
+);
+
+// Return counters that match every tag and one of the names in query.
+// Pass tag_count == 0 to impose no per-attribute constraint and
+// query_count == 0 to match any name; passing both as zero returns
+// every counter known to the dataplane.
+//
+// Each tag's key selects an attribute and value is the required match. A
+// NULL value inverts the check: the counter must not carry the attribute
+// at all. The NULL form is how callers pin a counter to a specific
+// hierarchy level; for example, {"device", "d1"} together with
+// {"pipeline", NULL} selects counters of device "d1" only.
+//
+// Recognized keys are "device", "pipeline", "function", "chain",
+// "module_type", "module_name" and correspond one-to-one with the path
+// components of the typed yanet_get_*_counters family. An unrecognized
+// key is reported through err and NULL is returned. Tag strings are
+// borrowed only for the duration of the call.
+//
+// The returned list must be released with yanet_counter_handle_list_free.
+// On failure NULL is returned and err is filled; an empty match is a
+// non-NULL empty list.
+struct counter_handle_list *
+yanet_get_counters_by_tags(
+	struct dp_config *dp_config,
+	const struct counter_tag *tags,
+	size_t tag_count,
+	const char *const *query,
+	size_t query_count,
+	yanet_error **err
 );
 
 void
