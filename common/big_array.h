@@ -286,6 +286,11 @@ big_array_get(struct big_array *array, size_t index) {
 static inline void
 big_array_free(struct big_array *array) {
 	if (array->subarrays == NULL) {
+		// Zero-size arrays have no subarray data but still have a
+		// linked memory context that must be unlinked before the
+		// embedding block can be safely reused.
+		memory_context_fini(&array->mctx);
+		memset(array, 0, sizeof(struct big_array));
 		return;
 	}
 	void **subarrays = ADDR_OF(&array->subarrays);

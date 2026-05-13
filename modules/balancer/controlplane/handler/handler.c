@@ -613,6 +613,9 @@ packet_handler_free(struct packet_handler *handler) {
 	lpm_free(&handler->decap_ipv4);
 	lpm_free(&handler->decap_ipv6);
 
+	// Unlink and release the controlplane module.
+	cp_module_fini(&handler->cp_module);
+
 	// Free the handler itself
 	memory_bfree(mctx, handler, sizeof(struct packet_handler));
 }
