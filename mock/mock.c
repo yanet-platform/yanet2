@@ -362,6 +362,18 @@ yanet_mock_free(struct yanet_mock *mock) {
 		}
 	}
 
+	// Honour the counter_storage_allocator lifecycle contract.
+	if (mock->dp_config != NULL) {
+		counter_storage_allocator_fini(
+			&mock->dp_config->counter_storage_allocator
+		);
+	}
+	if (mock->cp_config != NULL) {
+		counter_storage_allocator_fini(
+			&mock->cp_config->counter_storage_allocator
+		);
+	}
+
 	if (mock->arena != NULL) {
 		free(mock->arena);
 	}

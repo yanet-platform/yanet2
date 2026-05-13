@@ -236,6 +236,23 @@ counter_storage_allocator_init(
 	counter_storage_allocator->instance_count = instance_count;
 }
 
+void
+counter_storage_allocator_fini(struct counter_storage_allocator *self) {
+	if (self == NULL) {
+		return;
+	}
+
+	// Nothing is owned directly here.
+	//
+	// The allocator is a factory: pages it produces are owned by
+	// counter_storage_block objects inside counter_storage_pool and are
+	// freed through counter_storage_free / counter_storage_pool_fini.
+	//
+	// Zero the fields for idempotency.
+	SET_OFFSET_OF(&self->memory_context, NULL);
+	self->instance_count = 0;
+}
+
 static struct counter_storage_page *
 counter_storage_allocator_new_pages(struct counter_storage_allocator *allocator
 ) {
@@ -418,7 +435,7 @@ error:
 }
 
 static void
-counter_storage_pool_destroy(
+counter_storage_pool_fini(
 	struct counter_storage *storage, struct counter_storage_pool *pool
 ) {
 	if (ADDR_OF(&pool->blocks) == NULL)
@@ -470,7 +487,7 @@ counter_storage_free(struct counter_storage *storage) {
 
 	for (uint64_t pool_idx = 0; pool_idx < COUNTER_POOL_SIZE; ++pool_idx) {
 		struct counter_storage_pool *pool = storage->pools + pool_idx;
-		counter_storage_pool_destroy(storage, pool);
+		counter_storage_pool_fini(storage, pool);
 	}
 }
 

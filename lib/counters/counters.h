@@ -15,7 +15,7 @@
 #endif
 
 #define COUNTER_NAME_LEN 128
-#define COUNTER_INVALID (uint64_t)-1
+#define COUNTER_INVALID (uint64_t) - 1
 
 struct counter {
 	char name[COUNTER_NAME_LEN];
@@ -84,6 +84,9 @@ counter_storage_allocator_init(
 	struct memory_context *memory_context,
 	uint64_t instance_count
 );
+
+void
+counter_storage_allocator_fini(struct counter_storage_allocator *self);
 
 struct counter_value_handle;
 
