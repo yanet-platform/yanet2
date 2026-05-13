@@ -129,8 +129,6 @@ acl_module_config_free(struct cp_module *cp_module) {
 	struct acl_module_config *config =
 		container_of(cp_module, struct acl_module_config, cp_module);
 
-	struct agent *agent = ADDR_OF(&cp_module->agent);
-
 	memory_bfree(
 		&cp_module->memory_context,
 		ADDR_OF(&config->targets),
@@ -147,11 +145,17 @@ acl_module_config_free(struct cp_module *cp_module) {
 
 	// Note: We don't destroy fwstate_cfg maps here because they're owned by
 	// the fwstate module. We only stored offsets to them.
-	memory_bfree(
-		&agent->memory_context,
-		cp_module,
-		sizeof(struct acl_module_config)
-	);
+	struct agent *agent = ADDR_OF(&cp_module->agent);
+	// FIXME: remove the check as agent should be assigned
+	// cp_module_init can fail before agent is set; acl_module_config_init
+	// calls free on that path.
+	if (agent != NULL) {
+		memory_bfree(
+			&agent->memory_context,
+			cp_module,
+			sizeof(struct acl_module_config)
+		);
+	}
 }
 
 typedef int (*acl_rule_check_func)(const struct acl_rule *acl_rule);
@@ -574,6 +578,7 @@ error_rule_ptrs:
 
 error_rules:
 	free(filter_rules);
+	filter_rules = NULL;
 
 error_target:
 	free(filter_rules);
