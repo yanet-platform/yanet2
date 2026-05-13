@@ -1249,9 +1249,11 @@ yanet_get_cp_agent_list_info(struct dp_config *dp_config) {
 				agent_info->instance_count++;
 			instance->pid = agent->pid;
 			instance->memory_limit = agent->memory_limit;
-			instance->allocated = agent->memory_context.balloc_size;
-			instance->freed = agent->memory_context.bfree_size;
 			instance->gen = agent->gen;
+			instance->free_bytes = block_allocator_free_size(
+				&agent->block_allocator
+			);
+
 			agent = ADDR_OF(&agent->prev);
 		}
 

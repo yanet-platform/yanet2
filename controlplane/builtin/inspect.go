@@ -160,8 +160,7 @@ func (m *Inspect) agents(dpConfig *ffi.DPConfig) []*ynpb.AgentInfo {
 			agentInfo.Instances[instanceIdx] = &ynpb.AgentInstanceInfo{
 				Pid:         instance.PID,
 				MemoryLimit: instance.MemoryLimit,
-				Allocated:   instance.Allocated,
-				Freed:       instance.Freed,
+				FreeBytes:   instance.FreeBytes,
 				Generation:  instance.Gen,
 			}
 		}

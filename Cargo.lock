@@ -3310,6 +3310,7 @@ dependencies = [
 name = "yanet-cli-inspect"
 version = "0.1.0"
 dependencies = [
+ "bytesize",
  "clap",
  "clap_complete",
  "colored",

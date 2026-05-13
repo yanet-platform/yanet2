@@ -280,8 +280,7 @@ func (m *DPConfig) Agents() []AgentInfo {
 			instances[instIdx] = AgentInstanceInfo{
 				PID:         uint32(instanceInfo.pid),
 				MemoryLimit: uint64(instanceInfo.memory_limit),
-				Allocated:   uint64(instanceInfo.allocated),
-				Freed:       uint64(instanceInfo.freed),
+				FreeBytes:   uint64(instanceInfo.free_bytes),
 				Gen:         uint64(instanceInfo.gen),
 			}
 		}
@@ -325,8 +324,7 @@ type AgentInfo struct {
 type AgentInstanceInfo struct {
 	PID         uint32
 	MemoryLimit uint64
-	Allocated   uint64
-	Freed       uint64
+	FreeBytes   uint64
 	Gen         uint64
 }
 
