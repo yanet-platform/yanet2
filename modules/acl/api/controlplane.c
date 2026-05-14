@@ -581,7 +581,6 @@ error_rules:
 	free(filter_rules);
 
 error_target:
-	free(filter_rules);
 	memory_bfree(
 		&cp_module->memory_context,
 		targets,
