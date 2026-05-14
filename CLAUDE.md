@@ -125,17 +125,12 @@ modules/<name>/
 **Legacy** (acl, fwstate, nat64, pdump, route-mpls): no `bindings/`,
 CGO calls live directly in `controlplane/ffi.go`, no `backend.go`.
 
-**Special**: `balancer` does not follow the canonical layout.
-- `agent/` — CGO surface: `agent.c/h`, `manager.c/h`, `config.c`, `balancerpb/`, `go/`.
-- `controlplane/` — `api/`, `balancerpb/`, `handler/`, `state/`.
-- Top-level `bench/`, `tests/`, `cli/`, `dataplane/` complete the module.
-
-`balancer2` is an early-stage rewrite — only `api/` and `dataplane/`
+**Special**: `balancer2` is an early-stage module — only `api/` and `dataplane/`
 exist today.
 
 Module dataplane symbols are exported via meson linker defsym: `new_module_<name>`.
 
-Active modules: `route, acl, balancer, balancer2, forward, decap, nat64,
+Active modules: `route, acl, balancer2, forward, decap, nat64,
 fwstate, dscp, pdump, route-mpls`.
 
 ### Devices
@@ -151,7 +146,7 @@ the dataplane through the gateway, distinct from per-module gRPC services.
 
 - `operators/yanet-pipeline-operator` — declarative reconciliation operator
   (`cmd/`, `internal/`, `operatorpb/`). Structural template for future
-  operators (route, acl, balancer).
+  operators (route, acl).
 - `operators/bird-adapter` — BIRD routing-daemon adapter (canonical agent
   layout: `adapterpb/`, `internal/`, `service.go`). Note:
   `modules/route/bird-adapter/` is a separate proto-contract subtree

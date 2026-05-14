@@ -38,10 +38,10 @@ my_module_handle_packets(
 }
 
 struct module *
-new_module_balancer() {
+new_module_acl() {
 	struct module *my_module = malloc(sizeof(struct module));
 	memset(my_module->name, 0, sizeof(my_module->name));
-	sprintf(my_module->name, "balancer");
+	sprintf(my_module->name, "acl");
 	my_module->handler = my_module_handle_packets;
 	return my_module;
 }

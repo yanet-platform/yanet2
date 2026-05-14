@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	acl "github.com/yanet-platform/yanet2/modules/acl/controlplane"
-	balancer "github.com/yanet-platform/yanet2/modules/balancer/agent/go"
 	decap "github.com/yanet-platform/yanet2/modules/decap/controlplane"
 	dscp "github.com/yanet-platform/yanet2/modules/dscp/controlplane"
 	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
@@ -33,8 +32,6 @@ type ModulesConfig struct {
 	NAT64 *nat64.Config `yaml:"nat64"`
 	// Pdump is the configuration for the packet dump module.
 	Pdump *pdump.Config `yaml:"pdump"`
-	// Balancer is the configuration for the balancer module.
-	Balancer *balancer.Config `yaml:"balancer"`
 	// ACL is the configuration for the acl module.
 	ACL *acl.Config `yaml:"acl"`
 }
@@ -57,7 +54,6 @@ func DefaultModulesConfig() ModulesConfig {
 		Forward:   forward.DefaultConfig(),
 		NAT64:     nat64.DefaultConfig(),
 		Pdump:     pdump.DefaultConfig(),
-		Balancer:  balancer.DefaultConfig(),
 		ACL:       acl.DefaultConfig(),
 	}
 }
@@ -86,9 +82,6 @@ func (m *ModulesConfig) Validate() error {
 	}
 	if m.NAT64 == nil {
 		return fmt.Errorf("nat64 module is not configured")
-	}
-	if m.Balancer == nil {
-		return fmt.Errorf("balancer module is not configured")
 	}
 	if m.ACL == nil {
 		return fmt.Errorf("acl module is not configured")

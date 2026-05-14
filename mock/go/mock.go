@@ -7,7 +7,6 @@ package mock
 #cgo CFLAGS: -I../../build/subprojects/dpdk/lib
 #cgo CFLAGS: -I../../build/mock
 
-#cgo LDFLAGS: -L../../build/modules/balancer/dataplane -lbalancer_dp
 #cgo LDFLAGS: -L../../build/modules/decap/dataplane -ldecap_dp
 #cgo LDFLAGS: -L../../build/modules/dscp/dataplane -ldscp_dp
 // fwstate depends on acl, so the acl should come first
@@ -44,7 +43,6 @@ package mock
 
 void
 keep_refs(void **ptrs) {
-	extern struct module *new_module_balancer(void);
 	extern struct module *new_module_decap(void);
 	extern struct module *new_module_dscp(void);
 	extern struct module *new_module_acl(void);
@@ -58,7 +56,6 @@ keep_refs(void **ptrs) {
 	extern struct device *new_device_vlan(void);
 
 	static void *funcs[] = {
-		new_module_balancer,
 		new_module_decap,
 		new_module_dscp,
 		new_module_acl,

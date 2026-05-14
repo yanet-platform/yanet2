@@ -23,7 +23,6 @@ CLI_CORE_BINARIES := yanet-cli $(addprefix yanet-cli-,$(CLI_CORE_MODULES))
 # If a new module CLI appears, add its module name here.
 CLI_MODULES := \
 	acl \
-	balancer \
 	balancer2 \
 	decap \
 	device-plain \
@@ -90,7 +89,6 @@ proto-lint:
 		--exclude devices \
 		--exclude operators/bird-adapter \
 		--exclude modules/acl \
-		--exclude modules/balancer \
 		--exclude modules/balancer2 \
 		--exclude modules/decap \
 		--exclude modules/dscp \

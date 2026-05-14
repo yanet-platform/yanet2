@@ -26,7 +26,6 @@ custom_target(
         route_protoc_gen,
         route_mpls_protoc_gen,
         pdump_protoc_gen,
-        balancer_protoc_gen,
         acl_protoc_gen,
         plain_protoc_gen,
         vlan_protoc_gen,
@@ -34,8 +33,6 @@ custom_target(
         # cgo linker deps
         lib_acl_cp,
         lib_acl_dp,
-        lib_balancer_cp,
-        lib_balancer_dp,
         lib_decap_cp,
         lib_decap_dp,
         lib_dscp_cp,

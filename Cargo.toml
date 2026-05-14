@@ -19,7 +19,6 @@ members = [
     "modules/forward/cli",
     "modules/nat64/cli",
     "modules/pdump/cli",
-    "modules/balancer/cli",
     "modules/balancer2/cli",
     "modules/route/cli/route",
     "modules/route-mpls/cli",

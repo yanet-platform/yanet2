@@ -3095,28 +3095,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "yanet-cli-balancer"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "clap",
- "clap_complete",
- "colored",
- "log",
- "prost",
- "prost-types",
- "ptree",
- "serde",
- "serde_json",
- "serde_yaml",
- "tabled",
- "tokio",
- "tonic",
- "tonic-build",
- "yanet-cli",
-]
-
-[[package]]
 name = "yanet-cli-balancer2"
 version = "0.1.0"
 dependencies = [

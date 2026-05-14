@@ -178,10 +178,6 @@ dataplane_initialize(
 	if (rc == -1) {
 		return -6;
 	}
-	rc = dataplane_load_module(dp_config, bin_hndl, "balancer");
-	if (rc == -1) {
-		return -7;
-	}
 	rc = dataplane_load_module(dp_config, bin_hndl, "pdump");
 	if (rc == -1) {
 		return -8;

@@ -20,13 +20,7 @@
 #include <stdio.h>
 #include <time.h>
 
-#include "lib/controlplane/config/econtext.h"
-
-////////////////////////////////////////////////////////////////////////////////
-
 const char *module_name = "my_module";
-
-////////////////////////////////////////////////////////////////////////////////
 
 static int
 setup_cp(struct agent *agent, struct cp_module *cp_module) {
@@ -40,7 +34,7 @@ setup_cp(struct agent *agent, struct cp_module *cp_module) {
 	TEST_ASSERT_EQUAL(res, 0, "failed to update cp modules");
 
 	// setup chain config
-	const char *module_type = "balancer";
+	const char *module_type = "acl";
 	struct cp_chain_config *chain_config =
 		cp_chain_config_create("ch0", 1, &module_type, &module_name);
 	TEST_ASSERT_NOT_NULL(chain_config, "failed to create chain config");

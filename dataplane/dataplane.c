@@ -493,7 +493,6 @@ dataplane_init(
 			"decap",
 			"dscp",
 			"nat64",
-			"balancer",
 			"pdump",
 			"acl",
 			"fwstate",

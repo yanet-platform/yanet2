@@ -15,7 +15,6 @@ lib_dependencies = [
 ]
 
 modules_dep = [
-    lib_balancer_dp_dep,
     lib_decap_dp_dep,
     lib_dscp_dp_dep,
     lib_acl_dp_dep,
