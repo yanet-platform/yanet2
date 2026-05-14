@@ -284,17 +284,7 @@ cp_device_fini(struct cp_device *self) {
 	struct memory_context *memory_context = &self->memory_context;
 
 	// Release the device's counter table.
-	//
-	// Safe on zero-init because counter_registry_free guards on the names
-	// offset being zero.
-	//
-	// NOTE: reset names and capacity here for defensive idempotency,
-	// because counter_registry itself does not zero its own state after.
-	//
-	// TODO: ^^^
-	counter_registry_free(&self->counter_registry);
-	SET_OFFSET_OF(&self->counter_registry.names, NULL);
-	self->counter_registry.capacity = 0;
+	counter_registry_fini(&self->counter_registry);
 
 	cp_device_entry_free(memory_context, ADDR_OF(&self->output_pipelines));
 	SET_OFFSET_OF(&self->output_pipelines, NULL);

@@ -106,5 +106,5 @@ err_out:
 
 void
 cp_chain_fini(struct cp_chain *self) {
-	counter_registry_free(&self->counter_registry);
+	counter_registry_fini(&self->counter_registry);
 }

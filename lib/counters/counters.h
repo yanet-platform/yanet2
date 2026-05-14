@@ -50,7 +50,7 @@ counter_registry_register(
 );
 
 void
-counter_registry_free(struct counter_registry *registry);
+counter_registry_fini(struct counter_registry *registry);
 
 int
 counter_registry_link(

@@ -157,10 +157,7 @@ fail:
 
 void
 cp_module_fini(struct cp_module *cp_module) {
-	counter_registry_free(&cp_module->counter_registry);
-	memset(&cp_module->counter_registry,
-	       0,
-	       sizeof(cp_module->counter_registry));
+	counter_registry_fini(&cp_module->counter_registry);
 
 	struct cp_module_device *devices = ADDR_OF(&cp_module->devices);
 	if (devices != NULL) {

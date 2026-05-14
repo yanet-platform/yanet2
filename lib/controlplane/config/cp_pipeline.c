@@ -196,7 +196,7 @@ err_out:
 
 void
 cp_pipeline_fini(struct cp_pipeline *self) {
-	counter_registry_free(&self->counter_registry);
+	counter_registry_fini(&self->counter_registry);
 }
 
 // Pipeline registry

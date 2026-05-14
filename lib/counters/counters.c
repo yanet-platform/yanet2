@@ -26,7 +26,7 @@ counter_registry_init(
 }
 
 void
-counter_registry_free(struct counter_registry *registry) {
+counter_registry_fini(struct counter_registry *registry) {
 	struct memory_context *memory_context =
 		ADDR_OF(&registry->memory_context);
 	struct counter *names = ADDR_OF(&registry->names);
@@ -37,6 +37,9 @@ counter_registry_free(struct counter_registry *registry) {
 			sizeof(struct counter) * registry->capacity
 		);
 	}
+
+	// Reset to zero-init state so a second fini is a safe no-op.
+	memset(registry, 0, sizeof(*registry));
 }
 
 uint64_t

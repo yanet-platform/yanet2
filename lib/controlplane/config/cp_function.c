@@ -206,7 +206,7 @@ cp_function_fini(struct cp_function *self) {
 		SET_OFFSET_OF(&self->chains[idx].cp_chain, NULL);
 	}
 
-	counter_registry_free(&self->counter_registry);
+	counter_registry_fini(&self->counter_registry);
 }
 
 // Pipeline registry
