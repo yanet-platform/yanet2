@@ -68,7 +68,7 @@ func testIsolation(t *testing.T, fw *framework.F) {
 		outputClient, err := fw.GetSocketClient(0)
 		require.NoError(t, err)
 
-		// Note: fw.Run() already called resetAllConnections() before this step,
+		// Note: fw.Run() already called ResetConnections() before this step,
 		// so the connection is fresh. Attempt to read with a short timeout.
 		require.NoError(t, outputClient.Connect())
 		_, err = outputClient.ReceivePacket(100*time.Millisecond, "")

@@ -859,24 +859,23 @@ func (f *F) GetSocketClient(ifaceIndex int) (*SocketClient, error) {
 	return client.WithLog(f.log.With("interface", ifaceIndex)), nil
 }
 
-// resetAllConnections closes and reconnects all socket clients.
-// This ensures a clean state before starting a new test, preventing
-// packet leakage between tests. Unlike draining, this approach
-// guarantees a completely clean stream by discarding any buffered
-// data with the old connection.
+// ResetConnections closes and reconnects all socket clients.
+// This ensures a clean state after a snapshot restore, preventing stale
+// connections from causing false heartbeat failures. Unlike draining,
+// this approach guarantees a completely clean stream by discarding any
+// buffered data with the old connection.
 //
-// The method iterates through all existing socket clients and
-// resets their connections. Errors during reset are logged but
-// do not cause the operation to fail.
+// Must be called after loadvm and before any packet operations
+// (WaitForDatapathReady, SendPacketAndCapture, etc.) because loadvm
+// restores QEMU's internal stream-netdev state but the host-side UNIX
+// socket connections are stale — Connect() short-circuits on the dead
+// net.Conn and never reconnects.
 //
-// Example:
-//
-//	f.resetAllConnections()
-func (f *F) resetAllConnections() {
+// Errors during reset are logged but do not cause the operation to fail.
+func (f *F) ResetConnections() {
 	f.socketClients.mutex.Lock()
 	defer f.socketClients.mutex.Unlock()
 
-	// Reset all existing socket clients
 	for i, client := range f.socketClients.clients {
 		if err := client.ResetConnection(); err != nil {
 			f.log.Warnf("Failed to reset connection for interface %d: %v", i, err)
@@ -884,6 +883,12 @@ func (f *F) resetAllConnections() {
 			f.log.Debugf("Reset connection for interface %d", i)
 		}
 	}
+}
+
+// resetAllConnections is an unexported alias for ResetConnections,
+// kept for backward compatibility with internal callers.
+func (f *F) resetAllConnections() {
+	f.ResetConnections()
 }
 
 // ExecuteCommand executes a single CLI command within the QEMU virtual machine
@@ -1386,7 +1391,7 @@ func (f *F) Run(name string, fn func(fw *F, t *testing.T)) bool {
 	// This prevents packet leakage between tests by discarding any
 	// buffered data with the old connection
 	f.log.Debugf("Resetting socket connections before test '%s'", name)
-	f.resetAllConnections()
+	f.ResetConnections()
 
 	return f.t.Run(name, func(t *testing.T) {
 		// Create a new TestFramework with the subtest's full name
@@ -1641,99 +1646,84 @@ func (f *F) RestoreClean(snapshot string) error {
 //  3. Reconnect serial console
 //  4. Wait for shell prompts
 //  5. Mount 9P shares
-//  6. Wait for dataplane ready (ICMP heartbeat, 10s per attempt)
+//  6. Reset socket connections (close stale connections, reconnect)
+//  7. Wait for dataplane ready (ICMP heartbeat)
 //
-// On macOS TCG and Linux KVM, DPDK virtio-user reconnect after loadvm
-// can fail non-deterministically. After loadvm, DPDK's virtio PMDs have
-// stale virtqueue descriptors and DMA mappings — the dataplane process
-// resumes running but packets never flow. The only reliable fix is to
-// restart the dataplane process so DPDK reinitializes from scratch.
-//
-// Strategy: try heartbeat first (fast path, works on macOS). If it fails,
-// restart YANET (reliable fallback, ~15s) and try heartbeat again. Only
-// retry the full loadvm cycle if the restart itself fails.
+// Socket connections MUST be reset before the heartbeat because loadvm
+// restores QEMU's internal stream-netdev state but the host-side UNIX
+// socket connections are stale. Without reset, Connect() short-circuits
+// on the dead net.Conn and heartbeat fails silently.
 func (f *F) RestoreAndReconnect(snapshot string) error {
-	const maxAttempts = 2
+	f.log.Infof("Restoring snapshot %q...", snapshot)
+
+	if err := f.Unmount9P(); err != nil {
+		f.log.Debugf("Pre-restore unmount (may be already unmounted): %v", err)
+	}
+
+	if err := f.qemu.RestoreSnapshot(snapshot); err != nil {
+		return fmt.Errorf("failed to restore snapshot %q: %w", snapshot, err)
+	}
+
+	f.qemu.stopSerialReader()
+
+	if err := f.qemu.ReconnectSerial(); err != nil {
+		return fmt.Errorf("failed to reconnect serial after restore: %w", err)
+	}
+
+	f.qemu.setVMReady(false)
+	f.qemu.readySignal = make(chan bool, 1)
+	f.qemu.resetSerialBuffer()
+	go f.qemu.readSerial()
+
+	stdin := f.qemu.GetStdin()
+	if stdin == nil {
+		return fmt.Errorf("serial console unavailable after restore")
+	}
+	for range 3 {
+		_, _ = stdin.Write([]byte{0x03})
+		time.Sleep(20 * time.Millisecond)
+	}
+	const restoreTimeout = 30 * time.Second
+	deadline := time.Now().Add(restoreTimeout)
+	_, _ = stdin.Write([]byte("\n\n"))
+	for !f.qemu.IsVMReady() && time.Now().Before(deadline) {
+		select {
+		case <-f.qemu.readySignal:
+		case <-time.After(1 * time.Second):
+			if !f.qemu.IsVMReady() {
+				_, _ = stdin.Write([]byte("\n\n"))
+			}
+		}
+	}
+	if !f.qemu.IsVMReady() {
+		return fmt.Errorf("VM did not respond within %v after restoring %q", restoreTimeout, snapshot)
+	}
+
+	if err := f.Mount9P(); err != nil {
+		return fmt.Errorf("post-restore remount failed: %w", err)
+	}
+
+	f.resetAllConnections()
+
 	const heartbeatTimeout = 10 * time.Second
+	if err := f.WaitForDatapathReady(heartbeatTimeout); err != nil {
+		f.log.Warnf("Heartbeat failed after loadvm: %v", err)
+		f.runKni0Diagnostic("pre-restart")
 
-	var lastErr error
-	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		if attempt > 1 {
-			f.log.Warnf("Restore attempt %d/%d after previous failure: %v", attempt, maxAttempts, lastErr)
-		}
-		f.log.Infof("Restoring snapshot %q (attempt %d/%d)...", snapshot, attempt, maxAttempts)
-
-		if err := f.Unmount9P(); err != nil {
-			f.log.Debugf("Pre-restore unmount (may be already unmounted): %v", err)
-		}
-
-		if err := f.qemu.RestoreSnapshot(snapshot); err != nil {
-			return fmt.Errorf("failed to restore snapshot %q: %w", snapshot, err)
-		}
-
-		f.qemu.stopSerialReader()
-
-		if err := f.qemu.ReconnectSerial(); err != nil {
-			return fmt.Errorf("failed to reconnect serial after restore: %w", err)
-		}
-
-		f.qemu.setVMReady(false)
-		f.qemu.readySignal = make(chan bool, 1)
-		f.qemu.resetSerialBuffer()
-		go f.qemu.readSerial()
-
-		stdin := f.qemu.GetStdin()
-		if stdin == nil {
-			return fmt.Errorf("serial console unavailable after restore")
-		}
-		for range 3 {
-			_, _ = stdin.Write([]byte{0x03})
-			time.Sleep(20 * time.Millisecond)
-		}
-		const restoreTimeout = 30 * time.Second
-		deadline := time.Now().Add(restoreTimeout)
-		_, _ = stdin.Write([]byte("\n\n"))
-		for !f.qemu.IsVMReady() && time.Now().Before(deadline) {
-			select {
-			case <-f.qemu.readySignal:
-			case <-time.After(1 * time.Second):
-				if !f.qemu.IsVMReady() {
-					_, _ = stdin.Write([]byte("\n\n"))
-				}
-			}
-		}
-		if !f.qemu.IsVMReady() {
-			lastErr = fmt.Errorf("VM did not respond within %v", restoreTimeout)
-			continue
-		}
-
-		if err := f.Mount9P(); err != nil {
-			return fmt.Errorf("post-restore remount failed: %w", err)
-		}
-
-		if err := f.WaitForDatapathReady(heartbeatTimeout); err != nil {
-			f.log.Warnf("Heartbeat failed after loadvm (attempt %d): %v", attempt, err)
-			f.runKni0Diagnostic(fmt.Sprintf("pre-restart-%d", attempt))
-
-			f.log.Info("Restarting YANET to reinitialize DPDK device state...")
-			if restartErr := f.RestartYANET(); restartErr != nil {
-				lastErr = fmt.Errorf("heartbeat failed, restart also failed: %w", restartErr)
-				continue
-			}
-
-			if err := f.WaitForDatapathReady(heartbeatTimeout); err != nil {
-				lastErr = fmt.Errorf("heartbeat failed after YANET restart: %w", err)
-				continue
-			}
+		f.log.Info("Restarting YANET to reinitialize DPDK device state...")
+		if restartErr := f.RestartYANET(); restartErr != nil {
+			return fmt.Errorf("heartbeat failed, restart also failed: %w", restartErr)
 		}
 
 		f.resetAllConnections()
 
-		f.log.Infof("Snapshot %q restore complete", snapshot)
-		return nil
+		if err := f.WaitForDatapathReady(heartbeatTimeout); err != nil {
+			return fmt.Errorf("heartbeat failed after YANET restart: %w", err)
+		}
 	}
 
-	return fmt.Errorf("dataplane not ready after %d restore attempts: %w", maxAttempts, lastErr)
+	f.log.Infof("Snapshot %q restore complete", snapshot)
+	return nil
 }
 
 // WaitForDatapathReady sends ICMP heartbeat packets until the dataplane
@@ -1863,7 +1853,7 @@ func (f *F) RestoreBooted() error {
 	}
 
 	// Reset socket connections (forces DPDK virtio-user reconnect).
-	f.resetAllConnections()
+	f.ResetConnections()
 
 	f.log.Infof("Booted restore complete")
 	return nil

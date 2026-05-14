@@ -187,8 +187,8 @@ func dumpMemoryDiagnostics(fw *framework.F, log *zap.SugaredLogger) {
 	}
 }
 
-// Baseline configs stored at package level so RestartYANET and
-// YANET_BOOTED_BASELINE restore can access them.
+// Baseline configs stored at package level so RestartYANET and the
+// preyanet fallback in restoreBooted can access them.
 var (
 	baselineDP = dataplaneConfig()
 	baselineCP = controlplaneConfig()
@@ -206,7 +206,7 @@ func configureBaseline(fw *framework.F, log *zap.SugaredLogger) error {
 
 	// Save "preyanet" snapshot -- OS booted, binaries copied to
 	// /tmp/yanet/, config files written, 9P unmounted, no YANET running.
-	// YANET_BOOTED_BASELINE restores from this to get clean DPDK state.
+	// Used as fallback when baseline restore fails.
 	if err := fw.SaveSnapshotKeepUnmounted("preyanet"); err != nil {
 		return err
 	}
@@ -304,37 +304,47 @@ func testFramework(t *testing.T) *framework.F {
 	return fw
 }
 
-// restoreBooted restores the VM to a working YANET state, respecting
-// YANET_BOOTED_BASELINE for fresh-start mode.
+// restoreBooted restores the VM to a working YANET state. It tries the
+// fast path (baseline snapshot with YANET already running) first, and
+// falls back to the slow path (preyanet snapshot + fresh StartYANET)
+// only when baseline restore fails.
+//
+// Fast path (~3-5s): loadvm to "baseline" (YANET running, configured).
+//   Requires connection reset to clear stale host-side sockets.
+//
+// Slow path (~20-50s): loadvm to "preyanet" (no YANET), StartYANET from
+//   scratch, configure. Used when DPDK device state is genuinely broken
+//   after loadvm and the heartbeat cannot succeed.
 func restoreBooted(t *testing.T, fw *framework.F) {
 	t.Helper()
-	if os.Getenv("YANET_BOOTED_BASELINE") != "" {
-		if err := fw.RestoreClean("preyanet"); err != nil {
-			t.Fatalf("failed to restore VM to preyanet: %v", err)
+
+	if err := fw.RestoreAndReconnect("baseline"); err == nil {
+		return
+	}
+
+	t.Logf("baseline restore failed, falling back to preyanet + fresh StartYANET")
+
+	if err := fw.RestoreClean("preyanet"); err != nil {
+		t.Fatalf("failed to restore VM to preyanet: %v", err)
+	}
+	if err := fw.StartYANET(baselineDP, baselineCP); err != nil {
+		t.Fatalf("failed to start YANET: %v", err)
+	}
+	if _, err := fw.ExecuteCommands(fw.CommonConfigCommands()...); err != nil {
+		t.Fatalf("failed to configure YANET: %v", err)
+	}
+
+	fw.ResetConnections()
+
+	const dpTimeout = 15 * time.Second
+	if err := fw.WaitForDatapathReady(dpTimeout); err != nil {
+		t.Logf("dataplane not ready after %v, restarting YANET...", dpTimeout)
+		if restartErr := fw.RestartYANET(); restartErr != nil {
+			t.Fatalf("YANET restart failed: %v", restartErr)
 		}
-		if err := fw.StartYANET(baselineDP, baselineCP); err != nil {
-			t.Fatalf("failed to start YANET: %v", err)
-		}
-		if _, err := fw.ExecuteCommands(fw.CommonConfigCommands()...); err != nil {
-			t.Fatalf("failed to configure YANET: %v", err)
-		}
-		// Wait for dataplane. On macOS TCG with pool=4, DPDK init can
-		// take longer than usual due to CPU contention.
-		const dpTimeout = 30 * time.Second
+		fw.ResetConnections()
 		if err := fw.WaitForDatapathReady(dpTimeout); err != nil {
-			t.Logf("dataplane not ready after %v, restarting YANET...", dpTimeout)
-			if restartErr := fw.RestartYANET(); restartErr != nil {
-				t.Fatalf("YANET restart failed: %v", restartErr)
-			}
-			if err := fw.WaitForDatapathReady(dpTimeout); err != nil {
-				t.Fatalf("dataplane not ready after preyanet restore + restart: %v", err)
-			}
-		}
-		// Brief settle period for virtio socket queues
-		time.Sleep(200 * time.Millisecond)
-	} else {
-		if err := fw.RestoreAndReconnect("baseline"); err != nil {
-			t.Fatalf("failed to restore VM to baseline: %v", err)
+			t.Fatalf("dataplane not ready after preyanet restore + restart: %v", err)
 		}
 	}
 }
