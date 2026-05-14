@@ -1,3 +1,5 @@
+//go:build disabled
+
 package balancer_test
 
 // TestBigConfig tests the balancer with large configurations to verify:

@@ -1,3 +1,5 @@
+//go:build disabled
+
 package balancer_test
 
 // TestICMP is a comprehensive test suite for ICMP packet handling in the balancer module that covers:

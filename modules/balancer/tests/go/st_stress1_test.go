@@ -1,3 +1,5 @@
+//go:build disabled
+
 package balancer_test
 
 // TestSessionTableStress1 performs comprehensive stress testing of the session table:

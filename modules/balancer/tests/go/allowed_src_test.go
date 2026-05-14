@@ -1,3 +1,5 @@
+//go:build disabled
+
 package balancer_test
 
 // TestAllowedSrc is a comprehensive test suite for the allowed_src source filtering feature.

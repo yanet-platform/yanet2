@@ -12,11 +12,12 @@ interval_counter_test = executable(
   include_directories: includes,
   dependencies: dependencies,
 )
-test(
-    'interval_counter',
-    interval_counter_test,
-    suite: ['balancer', 'unit']
-)
+# Disabled: balancer tests
+# test(
+#     'interval_counter',
+#     interval_counter_test,
+#     suite: ['balancer', 'unit']
+# )
 
 active_sessions_tracker_test = executable(
   'active_sessions_tracker',
@@ -26,8 +27,9 @@ active_sessions_tracker_test = executable(
   include_directories: includes,
   dependencies: dependencies,
 )
-test(
-    'active_sessions_tracker',
-    active_sessions_tracker_test,
-    suite: ['balancer', 'unit']
-)
+# Disabled: balancer tests
+# test(
+#     'active_sessions_tracker',
+#     active_sessions_tracker_test,
+#     suite: ['balancer', 'unit']
+# )

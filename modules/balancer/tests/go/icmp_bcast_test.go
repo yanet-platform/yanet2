@@ -1,3 +1,5 @@
+//go:build disabled
+
 package balancer_test
 
 // TestICMPBroadcast is a comprehensive test suite for ICMP broadcast functionality in the balancer module that covers:

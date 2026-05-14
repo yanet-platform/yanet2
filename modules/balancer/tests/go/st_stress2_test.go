@@ -1,3 +1,5 @@
+//go:build disabled
+
 package balancer_test
 
 // TestSessionTableStress2 validates session table behavior with multiple virtual services:

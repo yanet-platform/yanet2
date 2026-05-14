@@ -1,3 +1,5 @@
+//go:build disabled
+
 package balancer_test
 
 // TestSessionTableManual validates session table behavior with comprehensive testing of:

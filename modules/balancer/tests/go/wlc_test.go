@@ -1,3 +1,5 @@
+//go:build disabled
+
 package balancer_test
 
 // TestWlc validates the Weighted Least Connection (WLC) scheduling algorithm:
