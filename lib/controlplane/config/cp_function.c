@@ -157,20 +157,26 @@ cp_function_create(
 	     chain_idx < cp_function_config->chain_count;
 	     ++chain_idx) {
 
-		struct cp_chain *new_chain = cp_chain_create(
+		struct cp_chain *new_chain = cp_chain_new(
 			memory_context,
-			dp_config,
-			cp_config_gen,
-			cp_function_config->chains[chain_idx].chain,
-			err
+			cp_function_config->chains[chain_idx].chain->length
 		);
-
 		if (new_chain == NULL) {
 			yanet_error_add(
 				err,
-				"failed to create chain for function '%s'",
+				"failed to allocate chain for function '%s'",
 				cp_function_config->name
 			);
+			goto error;
+		}
+		if (cp_chain_init(
+			    new_chain,
+			    dp_config,
+			    cp_config_gen,
+			    cp_function_config->chains[chain_idx].chain,
+			    err
+		    )) {
+			cp_chain_free(new_chain);
 			goto error;
 		}
 
@@ -200,7 +206,8 @@ cp_function_free(
 		if (cp_chain == NULL)
 			continue;
 
-		cp_chain_free(memory_context, cp_chain);
+		cp_chain_fini(cp_chain);
+		cp_chain_free(cp_chain);
 	}
 
 	memory_bfree(
