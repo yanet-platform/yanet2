@@ -2,4 +2,5 @@
 *.qcow2
 *.iso
 *.log
+*.test
 ubuntu-*.img

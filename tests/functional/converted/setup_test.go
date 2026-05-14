@@ -71,7 +71,7 @@ func testMainWrapper(m *testing.M) (code int) {
 	}()
 
 	// Start framework
-	if err := gfw.Start(); err != nil {
+	if _, err := gfw.Start(); err != nil {
 		sugar.Errorf("Failed to start framework: %v", err)
 		return 1
 	}
@@ -86,11 +86,11 @@ func testMainWrapper(m *testing.M) (code int) {
 	dataplaneConfig := `
 dataplane:
   storage: /dev/hugepages/yanet
-  dpdk_memory: 1024
+  dpdk_memory: 128
   loglevel: trace
   instances:
-    - dp_memory: 1073741824
-      cp_memory: 1610612736
+    - dp_memory: 100663296
+      cp_memory: 134217728
       numa_id: 0
   devices:
     - port_name: 01:00.0
@@ -103,6 +103,7 @@ dataplane:
           instance_id: 0
           rx_queue_len: 1024
           tx_queue_len: 1024
+          num_mbufs: 2048
     - port_name: virtio_user_kni0
       mac_addr: 52:54:00:6b:ff:a5
       mtu: 7000
@@ -113,6 +114,7 @@ dataplane:
           instance_id: 0
           rx_queue_len: 1024
           tx_queue_len: 1024
+          num_mbufs: 2048
   connections:
     - src_device_id: 0
       dst_device_id: 1
@@ -134,6 +136,29 @@ modules:
   route:
     link_map:
       kni0: 01:00.0
+    memory_requirements: 8MB
+  route-mpls:
+    memory_requirements: 8MB
+  decap:
+    memory_requirements: 8MB
+  dscp:
+    memory_requirements: 8MB
+  forward:
+    memory_requirements: 8MB
+  nat64:
+    memory_requirements: 8MB
+  pdump:
+    memory_requirements: 8MB
+  balancer:
+    memory_requirements: 16MB
+  acl:
+    memory_requirements: 16MB
+
+devices:
+  plain:
+    memory_requirements: 8MB
+  vlan:
+    memory_requirements: 8MB
 `
 
 	forwardConfig := `

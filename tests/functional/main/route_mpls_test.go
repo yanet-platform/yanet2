@@ -5,8 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gopacket/gopacket"
-	"github.com/gopacket/gopacket/layers"
 	"github.com/stretchr/testify/require"
 
 	"github.com/yanet-platform/yanet2/tests/functional/framework"
@@ -17,95 +15,15 @@ import (
 // module that backs its egress lookups.
 const routeMPLSCfgName = "route-mpls"
 
-// createRouteMPLSTestPacket creates a TCP packet for route testing
-func createRouteMPLSTestPacket(srcIP, dstIP net.IP, payload []byte) []byte {
-	eth := layers.Ethernet{
-		SrcMAC:       framework.MustParseMAC(framework.SrcMAC),
-		DstMAC:       framework.MustParseMAC(framework.DstMAC),
-		EthernetType: layers.EthernetTypeIPv4,
-	}
-
-	ip4 := layers.IPv4{
-		Version:  4,
-		IHL:      5,
-		Id:       1,
-		TTL:      64,
-		Protocol: layers.IPProtocolTCP,
-		SrcIP:    srcIP,
-		DstIP:    dstIP,
-	}
-
-	tcp := layers.TCP{
-		SrcPort: 12345,
-		DstPort: 80,
-		Seq:     1,
-		Ack:     1,
-		Window:  1024,
-		PSH:     true,
-		ACK:     true,
-	}
-	err := tcp.SetNetworkLayerForChecksum(&ip4)
-	if err != nil {
-		panic(err)
-	}
-
-	buf := gopacket.NewSerializeBuffer()
-	opts := gopacket.SerializeOptions{
-		FixLengths:       true,
-		ComputeChecksums: true,
-	}
-	err = gopacket.SerializeLayers(buf, opts, &eth, &ip4, &tcp, gopacket.Payload(payload))
-	if err != nil {
-		panic(err)
-	}
-	return buf.Bytes()
-}
-
-func createRoute6MPLSTestPacket(srcIP, dstIP net.IP, payload []byte) []byte {
-	eth := layers.Ethernet{
-		SrcMAC:       framework.MustParseMAC(framework.SrcMAC),
-		DstMAC:       framework.MustParseMAC(framework.DstMAC),
-		EthernetType: layers.EthernetTypeIPv6,
-	}
-
-	ip6 := layers.IPv6{
-		Version:    6,
-		HopLimit:   64,
-		NextHeader: layers.IPProtocolTCP,
-		SrcIP:      srcIP,
-		DstIP:      dstIP,
-	}
-
-	tcp := layers.TCP{
-		SrcPort: 12345,
-		DstPort: 80,
-		Seq:     1,
-		Ack:     1,
-		Window:  1024,
-		PSH:     true,
-		ACK:     true,
-	}
-	err := tcp.SetNetworkLayerForChecksum(&ip6)
-	if err != nil {
-		panic(err)
-	}
-
-	buf := gopacket.NewSerializeBuffer()
-	opts := gopacket.SerializeOptions{
-		FixLengths:       true,
-		ComputeChecksums: true,
-	}
-	err = gopacket.SerializeLayers(buf, opts, &eth, &ip6, &tcp, gopacket.Payload(payload))
-	if err != nil {
-		panic(err)
-	}
-	return buf.Bytes()
-}
-
 // TestRouteMPLS tests route module functionality including static route insertion and deletion
 func TestRouteMPLS(t *testing.T) {
-	fw := globalFramework.ForTest(t)
-	require.NotNil(t, fw, "Global framework should be initialized")
+	t.Parallel()
+	withBootedVM(t, func(fw *framework.F) {
+		testRouteMPLS(t, fw)
+	})
+}
+
+func testRouteMPLS(t *testing.T, fw *framework.F) {
 
 	fw.Run("Insert_Static_Routes", func(fw *framework.F, t *testing.T) {
 		// Push the IPv4 and IPv6 prefixes the MPLS tunnel decisions
@@ -116,28 +34,28 @@ func TestRouteMPLS(t *testing.T) {
 
 	fw.Run("Insert_Static_RouteMPLS-4-4", func(fw *framework.F, t *testing.T) {
 		// Insert route with the nexthop (do_flush is automatic in insert command)
-		output, err := fw.ExecuteCommand("/mnt/target/release/yanet-cli-route-mpls update --name route-mpls -p 5.0.0.0/9 --dst 10.12.1.1 --src 4.2.4.2 --label 45 --weight 5 --counter 4-4")
+		output, err := fw.ExecuteCommand(framework.CLIRouteMPLS + " update --cfg route-mpls -p 5.0.0.0/9 --dst 10.12.1.1 --src 4.2.4.2 --label 45 --weight 5 --counter 4-4")
 		require.NoError(t, err, "Failed to insert route")
 		t.Logf("Insert route output: %s", output)
 	})
 
 	fw.Run("Insert_Static_RouteMPLS-4-6", func(fw *framework.F, t *testing.T) {
 		// Insert route with the nexthop (do_flush is automatic in insert command)
-		output, err := fw.ExecuteCommand("/mnt/target/release/yanet-cli-route-mpls update --name route-mpls -p 6.0.0.0/10 --dst ccee::11 --src 2424::1212 --label 45 --weight 5 --counter 4-6")
+		output, err := fw.ExecuteCommand(framework.CLIRouteMPLS + " update --cfg route-mpls -p 6.0.0.0/10 --dst ccee::11 --src 2424::1212 --label 45 --weight 5 --counter 4-6")
 		require.NoError(t, err, "Failed to insert route")
 		t.Logf("Insert route output: %s", output)
 	})
 
 	fw.Run("Insert_Static_RouteMPLS-6-4", func(fw *framework.F, t *testing.T) {
 		// Insert route with the nexthop (do_flush is automatic in insert command)
-		output, err := fw.ExecuteCommand("/mnt/target/release/yanet-cli-route-mpls update --name route-mpls -p 0066::0/17 --dst 10.12.1.1 --src 4.2.4.2 --label 45 --weight 5 --counter 6-4")
+		output, err := fw.ExecuteCommand(framework.CLIRouteMPLS + " update --cfg route-mpls -p 0066::0/17 --dst 10.12.1.1 --src 4.2.4.2 --label 45 --weight 5 --counter 6-4")
 		require.NoError(t, err, "Failed to insert route")
 		t.Logf("Insert route output: %s", output)
 	})
 
 	fw.Run("Insert_Static_RouteMPLS-6-6", func(fw *framework.F, t *testing.T) {
 		// Insert route with the nexthop (do_flush is automatic in insert command)
-		output, err := fw.ExecuteCommand("/mnt/target/release/yanet-cli-route-mpls update --name route-mpls -p 0088::0/19 --dst ccee::11 --src 2424::1212 --label 45 --weight 5 --counter 6-6")
+		output, err := fw.ExecuteCommand(framework.CLIRouteMPLS + " update --cfg route-mpls -p 0088::0/19 --dst ccee::11 --src 2424::1212 --label 45 --weight 5 --counter 6-6")
 		require.NoError(t, err, "Failed to insert route")
 		t.Logf("Insert route output: %s", output)
 	})
@@ -154,7 +72,7 @@ func TestRouteMPLS(t *testing.T) {
 	})
 
 	fw.Run("List_Configs", func(fw *framework.F, t *testing.T) {
-		output, err := fw.ExecuteCommand("/mnt/target/release/yanet-cli-route-mpls list")
+		output, err := fw.ExecuteCommand(framework.CLIRouteMPLS + " list")
 		require.NoError(t, err, "Failed to list configs")
 		t.Logf("Available configs: %s", output)
 	})
@@ -162,10 +80,11 @@ func TestRouteMPLS(t *testing.T) {
 	fw.Run("Test_Packet_Routing_With_RouteMPLS-4-4", func(fw *framework.F, t *testing.T) {
 
 		// Create packet destined to our routed network
-		packet := createRouteMPLSTestPacket(
+		packet := framework.CreateTCPIPv4Packet(
 			net.ParseIP("192.0.2.100"), // src IP
 			net.ParseIP("5.0.0.10"),    // dst IP in our mpls network
 			[]byte("route test"),
+			nil,
 		)
 
 		// Send packet and check if it's routed
@@ -182,10 +101,11 @@ func TestRouteMPLS(t *testing.T) {
 	fw.Run("Test_Packet_Routing_With_RouteMPLS-4-6", func(fw *framework.F, t *testing.T) {
 
 		// Create packet destined to our routed network
-		packet := createRouteMPLSTestPacket(
+		packet := framework.CreateTCPIPv4Packet(
 			net.ParseIP("192.0.2.100"), // src IP
 			net.ParseIP("6.0.0.10"),    // dst IP in our mpls network
 			[]byte("route test"),
+			nil,
 		)
 
 		// Send packet and check if it's routed
@@ -202,10 +122,11 @@ func TestRouteMPLS(t *testing.T) {
 	fw.Run("Test_Packet_Routing_With_RouteMPLS-6-4", func(fw *framework.F, t *testing.T) {
 
 		// Create packet destined to our routed network
-		packet := createRoute6MPLSTestPacket(
+		packet := framework.CreateTCPIPv6Packet(
 			net.ParseIP("aa66:2212::1"),      // src IP
 			net.ParseIP("0066:1223:34:3::1"), // dst IP in our mpls network
 			[]byte("route test"),
+			nil,
 		)
 
 		// Send packet and check if it's routed
@@ -222,10 +143,11 @@ func TestRouteMPLS(t *testing.T) {
 	fw.Run("Test_Packet_Routing_With_RouteMPLS-6-6", func(fw *framework.F, t *testing.T) {
 
 		// Create packet destined to our routed network
-		packet := createRoute6MPLSTestPacket(
+		packet := framework.CreateTCPIPv6Packet(
 			net.ParseIP("aa66:2212::1"),      // src IP
 			net.ParseIP("0088:1223:34:3::1"), // dst IP in our mpls network
 			[]byte("route test"),
+			nil,
 		)
 
 		// Send packet and check if it's routed

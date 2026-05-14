@@ -13,8 +13,13 @@ import (
 )
 
 func TestACL(t *testing.T) {
-	fw := globalFramework.ForTest(t)
-	require.NotNil(t, fw, "Test framework must be initialized")
+	t.Parallel()
+	withBootedVM(t, func(fw *framework.F) {
+		testACL(t, fw)
+	})
+}
+
+func testACL(t *testing.T, fw *framework.F) {
 	pg := NewPacketGenerator()
 
 	// 1. ACL Configuration Tests
@@ -501,8 +506,13 @@ func (pg *PacketGenerator) ICMPv6(
 }
 
 func TestACLMbufLeak(t *testing.T) {
-	fw := globalFramework.ForTest(t)
-	require.NotNil(t, fw, "Test framework must be initialized")
+	t.Parallel()
+	withBootedVM(t, func(fw *framework.F) {
+		testACLMbufLeak(t, fw)
+	})
+}
+
+func testACLMbufLeak(t *testing.T, fw *framework.F) {
 	pg := NewPacketGenerator()
 
 	fw.Run("Configure", func(fw *framework.F, t *testing.T) {

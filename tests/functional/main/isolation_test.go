@@ -14,7 +14,12 @@ import (
 // between tests. The test sends a packet, intentionally does not read it,
 // then resets the connection and confirms the buffered packet is gone.
 func TestIsolation(t *testing.T) {
-	fw := globalFramework.ForTest(t)
+	withBootedVM(t, func(fw *framework.F) {
+		testIsolation(t, fw)
+	})
+}
+
+func testIsolation(t *testing.T, fw *framework.F) {
 	require.NotNil(t, fw, "Global framework should be initialized")
 
 	fw.Run("Configure_Forward_Module", func(fw *framework.F, t *testing.T) {
@@ -52,8 +57,8 @@ func TestIsolation(t *testing.T) {
 		// Send second packet but do NOT read it — it will be buffered
 		require.NoError(t, inputClient.SendPacket(packet, ""))
 
-		// Give the VM time to process and forward the packet to the output socket
-		time.Sleep(100 * time.Millisecond)
+		// Give the VM time to process and forward the packet to the output socket.
+		time.Sleep(500 * time.Millisecond)
 	})
 
 	// Step 2: Reset the connection and verify the buffered packet is gone.
@@ -89,6 +94,6 @@ func TestIsolation(t *testing.T) {
 
 		require.NoError(t, inputClient.SendPacket(packet, ""))
 		_, err = outputClient.ReceivePacket(500*time.Millisecond, "")
-		require.NoError(t, err, "Packet should arrive after reset — connection must be functional")
+		require.NoError(t, err, "Packet should arrive after reset -- connection must be functional")
 	})
 }

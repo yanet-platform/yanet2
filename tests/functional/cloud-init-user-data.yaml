@@ -177,7 +177,7 @@ runcmd:
   - rustup set auto-self-update disable
   - rustup install stable
   # Configure hugepages
-  - echo 'vm.nr_hugepages = 2048' >> /etc/sysctl.conf
+  - echo 'vm.nr_hugepages = 192' >> /etc/sysctl.conf
   - sysctl -p
   - mkdir -p /dev/hugepages
   - mount -t hugetlbfs nodev /dev/hugepages

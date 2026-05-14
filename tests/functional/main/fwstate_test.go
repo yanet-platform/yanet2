@@ -29,8 +29,13 @@ var expectedEntries = []struct {
 }
 
 func TestFWStateListEntries(t *testing.T) {
-	fw := globalFramework.ForTest(t)
-	require.NotNil(t, fw, "Test framework must be initialized")
+	t.Parallel()
+	withBootedVM(t, func(fw *framework.F) {
+		testFWStateListEntries(t, fw)
+	})
+}
+
+func testFWStateListEntries(t *testing.T, fw *framework.F) {
 
 	// 1. Configure fwstate module with maps and sync settings.
 	fw.Run("Configure_fwstate", func(fw *framework.F, t *testing.T) {
@@ -350,8 +355,13 @@ func TestFWStateListEntries(t *testing.T) {
 // return traffic will be dropped because the stored ports won't match
 // the lookup key.
 func TestFWStateUDPEndianness(t *testing.T) {
-	fw := globalFramework.ForTest(t)
-	require.NotNil(t, fw, "Test framework must be initialized")
+	t.Parallel()
+	withBootedVM(t, func(fw *framework.F) {
+		testFWStateUDPEndianness(t, fw)
+	})
+}
+
+func testFWStateUDPEndianness(t *testing.T, fw *framework.F) {
 
 	// 1. Configure fwstate + ACL (reuse existing config from TestFWStateListEntries)
 	fw.Run("Configure_fwstate", func(fw *framework.F, t *testing.T) {
@@ -591,8 +601,13 @@ func buildExternalSyncPacket(syncFrame []byte, srcIPv6 net.IP) []byte {
 // as opposed to internally-generated ones where the port is taken from the
 // same config used for matching.
 func TestFWStateExternalSyncFrame(t *testing.T) {
-	fw := globalFramework.ForTest(t)
-	require.NotNil(t, fw, "Test framework must be initialized")
+	t.Parallel()
+	withBootedVM(t, func(fw *framework.F) {
+		testFWStateExternalSyncFrame(t, fw)
+	})
+}
+
+func testFWStateExternalSyncFrame(t *testing.T, fw *framework.F) {
 
 	// 1. Configure fwstate module.
 	fw.Run("Configure_fwstate", func(fw *framework.F, t *testing.T) {

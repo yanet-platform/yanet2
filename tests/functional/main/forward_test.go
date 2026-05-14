@@ -12,50 +12,6 @@ import (
 	"github.com/yanet-platform/yanet2/tests/functional/framework"
 )
 
-// createForwardPacket creates a simple TCP packet for forwarding testing
-func createForwardPacket(srcIP, dstIP net.IP, payload []byte) []byte {
-	eth := layers.Ethernet{
-		SrcMAC:       framework.MustParseMAC(framework.SrcMAC),
-		DstMAC:       framework.MustParseMAC(framework.DstMAC),
-		EthernetType: layers.EthernetTypeIPv4,
-	}
-
-	ip4 := layers.IPv4{
-		Version:  4,
-		IHL:      5,
-		Id:       1,
-		TTL:      64,
-		Protocol: layers.IPProtocolTCP,
-		SrcIP:    srcIP,
-		DstIP:    dstIP,
-	}
-
-	tcp := layers.TCP{
-		SrcPort: 12345,
-		DstPort: 80,
-		Seq:     1,
-		Ack:     1,
-		Window:  1024,
-		PSH:     true,
-		ACK:     true,
-	}
-	err := tcp.SetNetworkLayerForChecksum(&ip4)
-	if err != nil {
-		panic(err)
-	}
-
-	buf := gopacket.NewSerializeBuffer()
-	opts := gopacket.SerializeOptions{
-		FixLengths:       true,
-		ComputeChecksums: true,
-	}
-	err = gopacket.SerializeLayers(buf, opts, &eth, &ip4, &tcp, gopacket.Payload(payload))
-	if err != nil {
-		panic(err)
-	}
-	return buf.Bytes()
-}
-
 // createICMPPacket creates a simple ICMP echo request packet for testing
 func createICMPPacket(srcIP, dstIP net.IP, payload []byte) []byte {
 	eth := layers.Ethernet{
@@ -128,9 +84,15 @@ func createICMPv6Packet(srcIP, dstIP net.IP, payload []byte) []byte {
 	return buf.Bytes()
 }
 
-// TestForward_BasicFunctionality tests basic forward module functionality
+// TestForward tests basic forward module functionality including L2 forwarding
+// and ICMP echo through the kni0 kernel interface.
 func TestForward(t *testing.T) {
-	fw := globalFramework.ForTest(t)
+	withBootedVM(t, func(fw *framework.F) {
+		testForward(t, fw)
+	})
+}
+
+func testForward(t *testing.T, fw *framework.F) {
 	require.NotNil(t, fw, "Global framework should be initialized")
 
 	fw.Run("Configure_Forward_Module", func(fw *framework.F, t *testing.T) {
@@ -146,13 +108,14 @@ func TestForward(t *testing.T) {
 	})
 
 	fw.Run("Test_Forwarding", func(fw *framework.F, t *testing.T) {
-		packet := createForwardPacket(
+		packet := framework.CreateTCPIPv4Packet(
 			net.ParseIP("192.0.2.1"), // src IP (within 192.0.2.0/24)
 			net.ParseIP("192.0.2.2"), // dst IP (within 192.0.2.0/24)
 			[]byte("forward test"),
+			nil,
 		)
 
-		inputPacket, outputPacket, err := fw.SendPacketAndParse(0, 0, packet, 100*time.Millisecond)
+		inputPacket, outputPacket, err := fw.SendPacketAndParse(0, 0, packet, 500*time.Millisecond)
 		require.NoError(t, err, "Failed to send packet")
 
 		require.NotNil(t, inputPacket, "Input packet should be parsed")
@@ -171,7 +134,7 @@ func TestForward(t *testing.T) {
 		)
 
 		// Send packet and wait for response
-		inputPacket, outputPacket, err := fw.SendPacketAndParse(0, 0, packet, 100*time.Millisecond)
+		inputPacket, outputPacket, err := fw.SendPacketAndParse(0, 0, packet, 500*time.Millisecond)
 		require.NoError(t, err, "Failed to send ICMP packet")
 
 		require.NotNil(t, inputPacket, "Input packet should be parsed")
@@ -190,7 +153,7 @@ func TestForward(t *testing.T) {
 		)
 
 		// Send packet and wait for response
-		inputPacket, outputPacket, err := fw.SendPacketAndParse(0, 0, packet, 100*time.Millisecond)
+		inputPacket, outputPacket, err := fw.SendPacketAndParse(0, 0, packet, 500*time.Millisecond)
 		require.NoError(t, err, "Failed to send ICMPv6 packet")
 
 		require.NotNil(t, inputPacket, "Input packet should be parsed")

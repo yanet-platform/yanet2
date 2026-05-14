@@ -1,5 +1,7 @@
 # Test configuration
 QEMU_IMAGE := yanet-test.qcow2
+BOOTED_TEMPLATE := yanet-test-booted.qcow2
+
 UBUNTU_IMAGE := ubuntu-24.04-minimal-cloudimg-amd64.img
 UBUNTU_URL := https://cloud-images.ubuntu.com/minimal/releases/noble/release/$(UBUNTU_IMAGE)
 CLOUD_INIT_AUTOLOGIN_ISO := cloud-init-autologin.iso
@@ -27,7 +29,10 @@ all: test
 
 
 
-# Prepare test environment with autologin
+# Prepare test environment: base image only.
+# The booted template overlay (yanet-test-booted.qcow2) is created automatically
+# on the first 'make test-main' run if it does not already exist.
+# To force recreation of the booted template: rm yanet-test-booted.qcow2
 prepare-vm: check-deps $(QEMU_IMAGE)
 	@echo "Test environment ready"
 
@@ -51,7 +56,7 @@ test: prepare-vm
 # Run main functional tests
 test-main: prepare-vm
 	@echo "Running main functional tests..."
-	go test -count=1 -v ./main/...
+	go test -count=1 -v -failfast ./main/...
 
 # Run specific test
 test-run:
@@ -130,7 +135,7 @@ define run_qemu
 		-machine q35,kernel-irqchip=split \
 		-cpu max \
 		-smp 4 \
-		-m 8G $(QEMU_ACCEL) \
+		-m 1G $(QEMU_ACCEL) \
 		-device intel-iommu,intremap=on,device-iotlb=on \
 		-device ioh3420,id=pcie.1,chassis=1 \
 		-device ioh3420,id=pcie.2,chassis=2 \
@@ -173,7 +178,7 @@ define run_qemu_ssh
 		-machine q35,kernel-irqchip=split \
 		-cpu max \
 		-smp 4 \
-		-m 8G $(QEMU_ACCEL) \
+		-m 1G $(QEMU_ACCEL) \
 		-device intel-iommu,intremap=on,device-iotlb=on \
 		-device ioh3420,id=pcie.1,chassis=1 \
 		-device ioh3420,id=pcie.2,chassis=2 \

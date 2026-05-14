@@ -14,8 +14,13 @@ import (
 
 // TestDecap_BasicFunctionality tests basic decap module functionality
 func TestDecap(t *testing.T) {
-	fw := globalFramework.ForTest(t)
-	require.NotNil(t, fw, "Global framework should be initialized")
+	t.Parallel()
+	withBootedVM(t, func(fw *framework.F) {
+		testDecap(t, fw)
+	})
+}
+
+func testDecap(t *testing.T, fw *framework.F) {
 
 	fw.Run("Configure_Decap_Module", func(fw *framework.F, t *testing.T) {
 		// Decap-specific configuration

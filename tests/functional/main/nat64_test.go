@@ -87,9 +87,13 @@ func extractJSON(s string) string {
 
 // TestNAT64_BasicFunctionality tests basic NAT64 module functionality
 func TestNAT64(t *testing.T) {
-	// Use global framework instance like in TestYANETStartup
-	fw := globalFramework.ForTest(t)
-	require.NotNil(t, fw, "Global framework should be initialized")
+	t.Parallel()
+	withBootedVM(t, func(fw *framework.F) {
+		testNAT64(t, fw)
+	})
+}
+
+func testNAT64(t *testing.T, fw *framework.F) {
 
 	fw.Run("Configure_NAT64_Module", func(fw *framework.F, t *testing.T) {
 

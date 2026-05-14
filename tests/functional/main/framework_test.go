@@ -1,6 +1,7 @@
 package functional
 
 import (
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -11,102 +12,18 @@ import (
 	"go.uber.org/zap"
 )
 
-// Global framework instance shared across all tests
-var globalFramework *framework.GlobalFramework
+// Global VM pool used for test isolation. Works for any pool size >= 1.
+var globalPool *framework.VMPool
 
-// TestMain is the entry point for running tests in this package.
-// It wraps the standard testing.M.Run() with additional setup/teardown logic
-// via testMainWrapper. The exit code from testMainWrapper is passed to os.Exit.
-func TestMain(m *testing.M) {
-	os.Exit(testMainWrapper(m))
-}
-
-// testMainWrapper is a test framework wrapper function that:
-// 1. Initializes logging based on YANET_TEST_DEBUG environment variable
-// 2. Creates and configures test framework with QEMU image
-// 3. Starts YANET with predefined dataplane and controlplane configurations
-// 4. Executes common configuration commands
-// 5. Runs all tests via testing.M.Run()
-//
-// The function handles framework lifecycle:
-// - Starts framework and QEMU VM
-// - Waits for VM readiness
-// - Ensures proper cleanup on exit
-// - Returns test execution status code
-//
-// Parameters:
-//   - m: testing.M instance for running tests
-//
-// Returns:
-//   - int: Test execution result code
-func testMainWrapper(m *testing.M) (code int) {
-	// Create logger for detailed logging
-	lg := zap.NewDevelopmentConfig()
-	if !framework.IsDebugEnabled() {
-		// no env - set error level
-		lg.Level = zap.NewAtomicLevelAt(zap.ErrorLevel)
-	} else {
-		// save debug log to test.log
-		lg.OutputPaths = []string{"test.log"}
-		lg.ErrorOutputPaths = []string{"stderr", "test.log"}
-	}
-	logger, err := lg.Build()
-	if err != nil {
-		panic(err)
-	}
-	defer logger.Sync()
-	sugar := logger.Sugar()
-
-	// Get QEMU image path (relative to parent functional directory)
-	qemuImage := os.Getenv("YANET_QEMU_IMAGE")
-	if qemuImage == "" {
-		qemuImage = "../yanet-test.qcow2"
-	}
-	// Initialize framework once for all tests
-	fw, err := framework.New(&framework.Config{
-		Name:      "main",
-		QEMUImage: qemuImage,
-	}, framework.WithLog(sugar))
-	if err != nil {
-		sugar.Errorf("Failed to create framework: %v", err)
-		return 1
-	}
-
-	globalFramework = fw
-
-	// Get global framework instance for TestMain operations
-	gfw := fw.Global()
-
-	// Start test environment
-	if err := gfw.Start(); err != nil {
-		sugar.Errorf("Failed to start framework: %v", err)
-		return 1
-	}
-
-	defer func() {
-		if fw != nil {
-			if err := gfw.Stop(); err != nil {
-				sugar.Errorf("Failed to stop framework: %v", err)
-				code = 12
-			}
-		}
-	}()
-
-	// Wait for VM to be ready
-	if err := gfw.WaitForReady(60 * time.Second); err != nil {
-		sugar.Errorf("Failed to wait for VM readiness: %v", err)
-		return 1
-	}
-
-	// Start YANET with decap module configuration
-	dataplaneConfig := `
+func dataplaneConfig() string {
+	return `
 dataplane:
   storage: /dev/hugepages/yanet
-  dpdk_memory: 1024
+  dpdk_memory: 128
   loglevel: trace
   instances:
-    - dp_memory: 1073741824
-      cp_memory: 1610612736
+    - dp_memory: 100663296
+      cp_memory: 134217728
       numa_id: 0
   devices:
     - port_name: 01:00.0
@@ -119,6 +36,7 @@ dataplane:
           instance_id: 0
           rx_queue_len: 1024
           tx_queue_len: 1024
+          num_mbufs: 2048
     - port_name: virtio_user_kni0
       mac_addr: 52:54:00:6b:ff:a5
       mtu: 7000
@@ -129,14 +47,17 @@ dataplane:
           instance_id: 0
           rx_queue_len: 1024
           tx_queue_len: 1024
+          num_mbufs: 2048
   connections:
     - src_device_id: 0
       dst_device_id: 1
     - src_device_id: 1
       dst_device_id: 0
 `
+}
 
-	controlplaneConfig := `
+func controlplaneConfig() string {
+	return `
 logging:
   level: debug
 
@@ -150,9 +71,34 @@ modules:
   route:
     link_map:
       kni0: 01:00.0
-`
+    memory_requirements: 8MB
+  route-mpls:
+    memory_requirements: 8MB
+  decap:
+    memory_requirements: 8MB
+  dscp:
+    memory_requirements: 8MB
+  forward:
+    memory_requirements: 8MB
+  nat64:
+    memory_requirements: 8MB
+  pdump:
+    memory_requirements: 8MB
+  balancer:
+    memory_requirements: 16MB
+  acl:
+    memory_requirements: 16MB
 
-	forwardConfig := `
+devices:
+  plain:
+    memory_requirements: 8MB
+  vlan:
+    memory_requirements: 8MB
+`
+}
+
+func forwardConfig() string {
+	return `
 rules:
   - target: virtio_user_kni0
     counter: to_virtio_user_kni0
@@ -204,21 +150,10 @@ rules:
     devices:
       - virtio_user_kni0
 `
+}
 
-	if err := gfw.StartYANET(dataplaneConfig, controlplaneConfig); err != nil {
-		sugar.Errorf("Failed to start YANET: %v", err)
-		return 1
-	}
-
-	if err := gfw.CreateConfigFile("forward.yaml", forwardConfig); err != nil {
-		sugar.Errorf("Failed to create forward config: %v", err)
-		return 1
-	}
-
-	// Bootstrap the default IPv4/IPv6 FIB for route0. The YAML is
-	// consumed by the "yanet-cli-route fib update" entry appended to
-	// CommonConfigCommands below.
-	route0Config := `
+func route0Config() string {
+	return `
 entries:
   - prefix: "0.0.0.0/0"
     nexthops:
@@ -231,15 +166,245 @@ entries:
         src_mac: "` + framework.DstMAC + `"
         device: "01:00.0"
 `
-	if err := gfw.CreateConfigFile("route0.yaml", route0Config); err != nil {
-		sugar.Errorf("Failed to create route0 config: %v", err)
+}
+
+func dumpMemoryDiagnostics(fw *framework.F, log *zap.SugaredLogger) {
+	diagCmds := []string{
+		"echo '=== HUGEPAGES ===' && cat /proc/meminfo | grep -i huge",
+		"echo '=== FREE ===' && free -h",
+		"echo '=== PROCESS MEMORY ===' && ps aux | grep yanet",
+		"echo '=== HUGEPAGE FILE ===' && ls -lh /dev/hugepages/yanet",
+		"echo '=== DATAPLANE LOG ===' && cat /tmp/yanet/logs/yanet-dataplane.log",
+		"echo '=== CONTROLPLANE LOG ===' && cat /tmp/yanet/logs/yanet-controlplane.log",
+	}
+	outputs, err := fw.ExecuteCommands(diagCmds...)
+	if err != nil {
+		log.Errorf("MEMORY DIAG: error collecting diagnostics: %v", err)
+		return
+	}
+	for i, cmd := range diagCmds {
+		log.Infof("MEMORY DIAG: %s\n%s\n---", cmd, outputs[i])
+	}
+}
+
+func configureBaseline(fw *framework.F, log *zap.SugaredLogger) error {
+	if err := fw.StartYANET(dataplaneConfig(), controlplaneConfig()); err != nil {
+		return err
+	}
+
+	dumpMemoryDiagnostics(fw, log)
+
+	// Write forward.yaml to the path that CommonConfigCommands will reference.
+	// In 9P mode this is /mnt/config/forward.yaml (via host filesystem).
+	// In local mode this is /tmp/yanet/forward.yaml (via serial console).
+	if err := fw.CreateForwardConfig(forwardConfig()); err != nil {
+		return err
+	}
+
+	if err := fw.CreateConfigFile("route0.yaml", route0Config()); err != nil {
+		return err
+	}
+
+	if _, err := fw.ExecuteCommands(fw.CommonConfigCommands()...); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func saveBaselineSnapshot(fw *framework.F, log *zap.SugaredLogger) error {
+	if err := fw.SaveSnapshotKeepUnmounted("baseline"); err != nil {
+		return err
+	}
+
+	framework.MarkBaselineSaved()
+	log.Info("Baseline snapshot saved successfully")
+	return nil
+}
+
+// withBootedVM acquires a VM from the pool, restores it to the booted snapshot
+// (which includes YANET running with baseline config), then calls fn with the
+// test framework. All fw.Run(...) calls inside fn share the same VM session.
+// The VM is released back to the pool when t finishes.
+//
+// Use this when subtests share state (e.g. configure → test1 → test2).
+func withBootedVM(t *testing.T, fn func(fw *framework.F)) {
+	t.Helper()
+	if globalPool == nil {
+		t.Fatal("VM pool is not initialized")
+	}
+	base := globalPool.Acquire()
+	t.Cleanup(func() {
+		globalPool.Release(base)
+	})
+	fw := base.ForTest(t)
+	if err := fw.RestoreAndReconnect("baseline"); err != nil {
+		t.Fatalf("failed to restore VM to baseline: %v", err)
+	}
+	fn(fw)
+}
+
+// bootedRunner runs subtests each in their own isolated booted restore.
+type bootedRunner struct {
+	t *testing.T
+}
+
+// newBootedRunner creates a runner where each RunBooted call gets a fresh
+// booted restore: acquire → RestoreBooted → run → release.
+//
+// Use this when each subtest must start from a clean state.
+func newBootedRunner(t *testing.T) *bootedRunner {
+	t.Helper()
+	if globalPool == nil {
+		t.Fatal("VM pool is not initialized")
+	}
+	return &bootedRunner{t: t}
+}
+
+// RunBooted acquires a VM slot, restores it to the booted snapshot, runs
+// the named subtest, then releases the slot back to the pool.
+func (r *bootedRunner) RunBooted(name string, fn func(fw *framework.F, t *testing.T)) bool {
+	return r.t.Run(name, func(t *testing.T) {
+		base := globalPool.Acquire()
+		t.Cleanup(func() {
+			globalPool.Release(base)
+		})
+		fw := base.ForTest(t)
+		if err := fw.RestoreAndReconnect("baseline"); err != nil {
+			t.Fatalf("failed to restore VM to baseline for subtest %q: %v", name, err)
+		}
+		fn(fw, t)
+	})
+}
+
+// testFramework is kept for backward compatibility. New tests should use
+// withBootedVM or newBootedRunner instead.
+func testFramework(t *testing.T) *framework.F {
+	t.Helper()
+	if globalPool == nil {
+		t.Fatal("test pool is not initialized")
+	}
+	base := globalPool.Acquire()
+	t.Cleanup(func() {
+		globalPool.Release(base)
+	})
+	fw := base.ForTest(t)
+	if err := fw.RestoreAndReconnect("baseline"); err != nil {
+		t.Fatalf("failed to restore baseline snapshot: %v", err)
+	}
+	return fw
+}
+
+// TestMain is the entry point for running tests in this package.
+// It wraps the standard testing.M.Run() with additional setup/teardown logic
+// via testMainWrapper. The exit code from testMainWrapper is passed to os.Exit.
+func TestMain(m *testing.M) {
+	os.Exit(testMainWrapper(m))
+}
+
+// testMainWrapper is a test framework wrapper function that:
+// 1. Initializes logging based on YANET_TEST_DEBUG environment variable
+// 2. Creates and configures test framework with QEMU image
+// 3. Starts YANET with predefined dataplane and controlplane configurations
+// 4. Executes common configuration commands
+// 5. Runs all tests via testing.M.Run()
+//
+// The function handles framework lifecycle:
+// - Starts framework and QEMU VM
+// - Waits for VM readiness
+// - Ensures proper cleanup on exit
+// - Returns test execution status code
+//
+// Parameters:
+//   - m: testing.M instance for running tests
+//
+// Returns:
+//   - int: Test execution result code
+func testMainWrapper(m *testing.M) (code int) {
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Fprintf(os.Stderr, "testMainWrapper recovered panic: %v\n", r)
+			code = 1
+		}
+	}()
+
+	// Create logger for detailed logging
+	lg := zap.NewDevelopmentConfig()
+	if !framework.IsDebugEnabled() {
+		// no env - set error level
+		lg.Level = zap.NewAtomicLevelAt(zap.ErrorLevel)
+	} else {
+		// save debug log to test.log
+		lg.OutputPaths = []string{"test.log"}
+		lg.ErrorOutputPaths = []string{"stderr", "test.log"}
+	}
+	logger, err := lg.Build()
+	if err != nil {
+		panic(err)
+	}
+	defer logger.Sync()
+	sugar := logger.Sugar()
+
+	// Get QEMU image path (relative to parent functional directory)
+	qemuImage := os.Getenv("YANET_QEMU_IMAGE")
+	if qemuImage == "" {
+		qemuImage = "../yanet-test.qcow2"
+	}
+	// Booted template is stored alongside the base image.
+	// It is created by 'make prepare-vm'; if missing it is bootstrapped at runtime.
+	bootedTemplate := framework.BootedImagePath(qemuImage)
+
+	sugar.Infof("Starting VM pool with size %d (booted template: %s)", framework.PoolSize(), bootedTemplate)
+
+	pool, err := framework.NewVMPool(framework.PoolSize(), "main", qemuImage, bootedTemplate, sugar)
+	if err != nil {
+		sugar.Errorf("Failed to create VM pool: %v", err)
+		return 1
+	}
+	globalPool = pool
+
+	if err := pool.StartAll(); err != nil {
+		sugar.Errorf("Failed to start VM pool: %v", err)
 		return 1
 	}
 
-	if _, err := gfw.ExecuteCommands(framework.CommonConfigCommands...); err != nil {
-		sugar.Errorf("Failed to execute common configuration commands: %v", err)
+	defer func() {
+		if globalPool != nil {
+			if err := globalPool.Shutdown(); err != nil {
+				sugar.Errorf("Failed to shut down VM pool: %v", err)
+				code = 12
+			}
+		}
+	}()
+
+	if err := pool.WaitAllReady(120 * time.Second); err != nil {
+		sugar.Errorf("Failed to wait for VM pool readiness: %v", err)
 		return 1
 	}
+
+	if err := pool.ForEachParallel(func(idx int, fw *framework.F) error {
+		// Copy YANET binaries from 9P mounts to guest tmpfs so that
+		// no YANET process holds open fids on 9P. This makes savevm work.
+		if err := fw.PrepareLocalStorage(); err != nil {
+			return fmt.Errorf("vm %d local storage prep failed: %w", idx, err)
+		}
+		if err := configureBaseline(fw, sugar); err != nil {
+			return fmt.Errorf("vm %d baseline config failed: %w", idx, err)
+		}
+		if err := saveBaselineSnapshot(fw, sugar); err != nil {
+			return fmt.Errorf("vm %d baseline snapshot failed: %w", idx, err)
+		}
+		return nil
+	}); err != nil {
+		sugar.Errorf("Failed to configure VM pool baseline: %v", err)
+		return 1
+	}
+
+	// Pause all VM CPUs now that baseline snapshots are saved.
+	// Idle VMs would otherwise keep DPDK's busy-poll loop running and
+	// consume host CPU, starving the active VM's packet processing.
+	// Each VM resumes automatically when RestoreSnapshot calls loadvm+cont.
+	pool.StopAllCPU()
 
 	// Run tests
 	code = m.Run()
@@ -248,9 +413,13 @@ entries:
 
 // TestFramework - comprehensive test for checking all yanet functionality
 func TestFramework(t *testing.T) {
-	// Use global framework instance
-	fw := globalFramework.ForTest(t)
-	require.NotNil(t, fw, "Global framework should be initialized")
+	t.Parallel()
+	withBootedVM(t, func(fw *framework.F) {
+		testFrameworkSuite(t, fw)
+	})
+}
+
+func testFrameworkSuite(t *testing.T, fw *framework.F) {
 
 	// Test 1: Check basic command execution
 	fw.Run("Basic_Commands", func(fw *framework.F, t *testing.T) {
