@@ -20,7 +20,7 @@ import (
 // Test type: decap
 func TestTest_002_decap_default(t *testing.T) {
 	t.Parallel()
-	withBootedVM(t, func(fw *framework.F) {
+	withBootedVM(t, func(fw *framework.TestFramework) {
 		require.NotNil(t, fw, "Global framework should be initialized")
 		// Silence potentially unused imports PCAP vs AST parser
 		_ = cmp.Diff
@@ -29,7 +29,7 @@ func TestTest_002_decap_default(t *testing.T) {
 		_ = net.ParseIP
 		_ = strings.Join
 
-		fw.Run("Step_000_Configure_Decap_Environment", func(fw *framework.F, t *testing.T) {
+		fw.Run("Step_000_Configure_Decap_Environment", func(fw *framework.TestFramework, t *testing.T) {
 			// Configure Decap module
 			commands := []string{
 				"/mnt/target/release/yanet-cli-decap prefix-add --cfg decap0 -p 1:2:3:4::abcd/128",
@@ -44,7 +44,7 @@ func TestTest_002_decap_default(t *testing.T) {
 		// Wait 3 seconds for configuration changes to take effect (pipeline updates are asynchronous)
 		time.Sleep(3 * time.Second)
 
-		fw.Run("Step_001_Test_Packet", func(fw *framework.F, t *testing.T) {
+		fw.Run("Step_001_Test_Packet", func(fw *framework.TestFramework, t *testing.T) {
 			// Test case: send.pcap -> expect.pcap
 			sendPackets := create002_decap_defaultSendPacket1(t)
 			require.NotNil(t, sendPackets)

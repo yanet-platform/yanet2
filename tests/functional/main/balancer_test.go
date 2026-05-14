@@ -11,14 +11,14 @@ import (
 
 func TestBalancer(t *testing.T) {
 	t.Parallel()
-	withBootedVM(t, func(fw *framework.F) {
+	withBootedVM(t, func(fw *framework.TestFramework) {
 		testBalancer(t, fw)
 	})
 }
 
-func testBalancer(t *testing.T, fw *framework.F) {
+func testBalancer(t *testing.T, fw *framework.TestFramework) {
 
-	fw.Run("Configure_Balancer_Module", func(fw *framework.F, t *testing.T) {
+	fw.Run("Configure_Balancer_Module", func(fw *framework.TestFramework, t *testing.T) {
 		// Forward-specific configuration
 		commands := []string{
 			// Configure module
@@ -48,7 +48,7 @@ func testBalancer(t *testing.T, fw *framework.F) {
 		require.NoError(t, err, "Failed to configure balancer module")
 	})
 
-	fw.Run("Test_IPv4_Packet", func(fw *framework.F, t *testing.T) {
+	fw.Run("Test_IPv4_Packet", func(fw *framework.TestFramework, t *testing.T) {
 		packet := framework.CreateTCPIPv4Packet(
 			net.ParseIP("192.168.2.2"),
 			net.ParseIP("192.0.2.1"),

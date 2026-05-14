@@ -87,15 +87,15 @@ func createICMPv6Packet(srcIP, dstIP net.IP, payload []byte) []byte {
 // TestForward tests basic forward module functionality including L2 forwarding
 // and ICMP echo through the kni0 kernel interface.
 func TestForward(t *testing.T) {
-	withBootedVM(t, func(fw *framework.F) {
+	withBootedVM(t, func(fw *framework.TestFramework) {
 		testForward(t, fw)
 	})
 }
 
-func testForward(t *testing.T, fw *framework.F) {
+func testForward(t *testing.T, fw *framework.TestFramework) {
 	require.NotNil(t, fw, "Global framework should be initialized")
 
-	fw.Run("Configure_Forward_Module", func(fw *framework.F, t *testing.T) {
+	fw.Run("Configure_Forward_Module", func(fw *framework.TestFramework, t *testing.T) {
 		// Forward-specific configuration
 		commands := []string{
 			framework.CLIFunction + " update --name=test --chains ch0:4=forward:forward0,route:route0",
@@ -107,7 +107,7 @@ func testForward(t *testing.T, fw *framework.F) {
 		require.NoError(t, err, "Failed to configure forward module")
 	})
 
-	fw.Run("Test_Forwarding", func(fw *framework.F, t *testing.T) {
+	fw.Run("Test_Forwarding", func(fw *framework.TestFramework, t *testing.T) {
 		packet := framework.CreateTCPIPv4Packet(
 			net.ParseIP("192.0.2.1"), // src IP (within 192.0.2.0/24)
 			net.ParseIP("192.0.2.2"), // dst IP (within 192.0.2.0/24)
@@ -126,7 +126,7 @@ func testForward(t *testing.T, fw *framework.F) {
 		assert.Equal(t, "192.0.2.2", outputPacket.DstIP.String(), "Destination IP should be preserved")
 	})
 
-	fw.Run("Test_ICMP4_Echo", func(fw *framework.F, t *testing.T) {
+	fw.Run("Test_ICMP4_Echo", func(fw *framework.TestFramework, t *testing.T) {
 		packet := createICMPPacket(
 			net.ParseIP(framework.VMIPv4Gateway),
 			net.ParseIP(framework.VMIPv4Host),
@@ -144,7 +144,7 @@ func testForward(t *testing.T, fw *framework.F) {
 		assert.Equal(t, framework.VMIPv4Gateway, outputPacket.DstIP.String(), "Destination IP should be the source of the request")
 	})
 
-	fw.Run("Test_ICMP6_Echo", func(fw *framework.F, t *testing.T) {
+	fw.Run("Test_ICMP6_Echo", func(fw *framework.TestFramework, t *testing.T) {
 		// Test ICMPv6 echo request to VMIPv6Host
 		packet := createICMPv6Packet(
 			net.ParseIP(framework.VMIPv6Gateway), // src IP

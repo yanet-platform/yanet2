@@ -35,29 +35,29 @@ import (
 // required for comprehensive network testing scenarios.
 type QEMUManager struct {
 	Name           string
-	ImagePath      string             // Path to the QEMU disk image file
-	WorkDir        string             // Temporary working directory for VM instance
-	Command        *exec.Cmd          // QEMU process command handle
-	LogsDir        string             // Directory for logs
-	ConfigDir      string             // Directory for configuration files
-	BuildDir       string             // Project build directory (shared with VM)
-	TargetDir      string             // Project target directory (shared with VM)
-	SerialPath     string             // Unix socket path for serial console access
-	MonitorPath    string             // Unix socket path for QEMU monitor interface
-	SocketPaths    []string           // Unix socket paths for network interfaces
-	isReady        bool               // VM readiness state flag
-	readySignal    chan bool          // Channel for VM readiness notification
-	Ninepmounted atomic.Bool // Whether 9P shares are mounted in the guest
-	monitorConn    net.Conn           // Connection to QEMU monitor interface
-	serialConn     net.Conn           // Connection to VM serial console
-	serialBuffer   strings.Builder    // Buffer accumulating all serial console output
-	serialMutex    sync.Mutex         // Protects serialBuffer
-	serialLog      atomic.Value       // Holds *zap.SugaredLogger used by readSerial
-	log            *zap.SugaredLogger // Logger for debugging and monitoring
-	readyMutex     sync.RWMutex       // Protects concurrent access to isReady field
-	instanceID     string             // Unique identifier for this VM instance
-	sshPort        int                // SSH port - used when debug mode
-	serialReaderDone chan struct{} // Closed when readSerial goroutine exits
+	ImagePath      string
+	WorkDir        string
+	Command        *exec.Cmd
+	LogsDir        string
+	ConfigDir      string
+	BuildDir       string
+	TargetDir      string
+	SerialPath     string
+	MonitorPath    string
+	SocketPaths    []string
+	isReady        bool
+	readySignal    chan bool
+	Ninepmounted atomic.Bool
+	monitorConn    net.Conn
+	serialConn     net.Conn
+	serialBuffer   strings.Builder
+	serialMutex    sync.Mutex
+	serialLog      atomic.Value
+	log            *zap.SugaredLogger
+	readyMutex     sync.RWMutex
+	instanceID     string
+	sshPort        int
+	serialReaderDone chan struct{}
 	// TemplateOverlay is an optional path to a qcow2 overlay that already
 	// contains a "booted" snapshot. When set, Start() copies it instead of
 	// creating a blank overlay, then boots with -loadvm booted.
@@ -185,7 +185,7 @@ func (q *QEMUManager) Start() (bool, error) {
 
 	// Generate socket paths for Unix stream interface
 	q.log.Debug("Generating socket paths...")
-	q.SocketPaths = make([]string, 2) // Assuming 2 interfaces for now
+	q.SocketPaths = make([]string, 2)
 	for i := range q.SocketPaths {
 		// Use /tmp/ directory like in working Makefile configuration
 		q.SocketPaths[i] = filepath.Join("/tmp", fmt.Sprintf("yanetvm_%s_sockdev_%d.sock", q.instanceID, i))
@@ -291,7 +291,6 @@ func (q *QEMUManager) Start() (bool, error) {
 		"-fsdev", "local,id=fsdev1,path="+q.ConfigDir+",security_model=none",
 		"-device", "virtio-9p-pci,fsdev=fsdev1,mount_tag=config",
 		// Share build directory
-		//"-fsdev", "local,id=fsdev2,path="+q.BuildDir+",security_model=none,readonly=on",
 		"-fsdev", "local,id=fsdev2,path="+q.BuildDir+",security_model=none",
 		"-device", "virtio-9p-pci,fsdev=fsdev2,mount_tag=build",
 		// Share target directory
@@ -925,18 +924,6 @@ func (q *QEMUManager) RestoreSnapshot(name string) error {
 	return nil
 }
 
-// DeleteSnapshot removes a previously saved snapshot by name.
-func (q *QEMUManager) DeleteSnapshot(name string) error {
-	resp, err := q.SendMonitorCommand("delvm " + name)
-	if err != nil {
-		return fmt.Errorf("delvm %q failed: %w", name, err)
-	}
-	if resp != "" {
-		return fmt.Errorf("delvm %q returned unexpected output: %s", name, resp)
-	}
-	return nil
-}
-
 // ReconnectSerial closes the current serial connection and opens a new one.
 // The caller is responsible for resetting readySignal and launching a new
 // readSerial goroutine after this returns.
@@ -978,6 +965,7 @@ func (q *QEMUManager) RestoreBooted() error {
 
 	// Open new serial connection.
 	if err := q.connectToSerial(); err != nil {
+		close(q.serialReaderDone)
 		return fmt.Errorf("reconnect serial after booted restore: %w", err)
 	}
 

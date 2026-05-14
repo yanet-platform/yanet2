@@ -20,7 +20,7 @@ import (
 // Test type: route
 func TestTest_016_route(t *testing.T) {
 	t.Parallel()
-	withBootedVM(t, func(fw *framework.F) {
+	withBootedVM(t, func(fw *framework.TestFramework) {
 		require.NotNil(t, fw, "Global framework should be initialized")
 		// Silence potentially unused imports PCAP vs AST parser
 		_ = cmp.Diff
@@ -29,7 +29,7 @@ func TestTest_016_route(t *testing.T) {
 		_ = net.ParseIP
 		_ = strings.Join
 
-		fw.Run("Step_001_Configure_Routes", func(fw *framework.F, t *testing.T) {
+		fw.Run("Step_001_Configure_Routes", func(fw *framework.TestFramework, t *testing.T) {
 			// IPv4 routes configuration
 			// Original autotest.yaml step:
 			// ipv4Update:
@@ -56,7 +56,7 @@ entries:
 		// Wait 3 seconds for configuration changes to take effect (pipeline updates are asynchronous)
 		time.Sleep(3 * time.Second)
 
-		fw.Run("Step_001_Test_Packet", func(fw *framework.F, t *testing.T) {
+		fw.Run("Step_001_Test_Packet", func(fw *framework.TestFramework, t *testing.T) {
 			// Test case: 001-send.pcap -> 001-expect.pcap
 			sendPackets := create016_routeSendPacket1(t)
 			require.NotNil(t, sendPackets)

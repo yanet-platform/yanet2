@@ -27,7 +27,7 @@ type VMPool struct {
 
 type poolEntry struct {
 	manager *QEMUManager
-	fw      *F
+	fw      *TestFramework
 }
 
 // PoolSize returns the desired VM pool size from the environment.
@@ -71,7 +71,7 @@ func NewVMPool(size int, baseName string, qemuImage string, bootedTemplate strin
 			return nil, fmt.Errorf("failed to create QEMU manager for pool slot %d: %w", i, err)
 		}
 
-	fw := &F{
+	fw := &TestFramework{
 		qemu:  qemu,
 		log:   log.Named(name),
 		Paths: DefaultGuestPaths(),
@@ -127,7 +127,7 @@ func (p *VMPool) validateBootedTemplate() error {
 	}
 	valMgr.TemplateOverlay = p.bootedTemplate
 
-	valFW := &F{
+	valFW := &TestFramework{
 		qemu: valMgr,
 		log:  p.log.Named("validate-booted"),
 		socketClients: &socketClientsCache{
@@ -190,7 +190,7 @@ func (p *VMPool) startAllFromTemplate() error {
 	}
 	ch := make(chan result, len(p.vms))
 	for i, entry := range p.vms {
-		go func(idx int, fw *F) {
+		go func(idx int, fw *TestFramework) {
 			defer func() {
 				if r := recover(); r != nil {
 					p.log.Errorf("startAllFromTemplate goroutine %d recovered panic: %v", idx, r)
@@ -282,7 +282,7 @@ func (p *VMPool) bootstrapTemplate() error {
 	}
 	ch := make(chan result, len(p.vms))
 	for i, entry := range p.vms {
-		go func(idx int, fw *F) {
+		go func(idx int, fw *TestFramework) {
 			defer func() {
 				if r := recover(); r != nil {
 					p.log.Errorf("bootstrap goroutine %d recovered panic: %v", idx, r)
@@ -338,14 +338,14 @@ func (p *VMPool) WaitAllReady(timeout time.Duration) error {
 }
 
 // ForEachParallel calls fn for each VM's framework instance in parallel.
-func (p *VMPool) ForEachParallel(fn func(idx int, fw *F) error) error {
+func (p *VMPool) ForEachParallel(fn func(idx int, fw *TestFramework) error) error {
 	type result struct {
 		idx int
 		err error
 	}
 	ch := make(chan result, len(p.vms))
 	for i, entry := range p.vms {
-		go func(idx int, fw *F) {
+		go func(idx int, fw *TestFramework) {
 			defer func() {
 				if r := recover(); r != nil {
 					p.log.Errorf("ForEachParallel goroutine %d recovered panic: %v", idx, r)
@@ -370,7 +370,7 @@ func (p *VMPool) ForEachParallel(fn func(idx int, fw *F) error) error {
 func (p *VMPool) StopAllCPU() {
 	for i, entry := range p.vms {
 		if _, err := entry.manager.SendMonitorCommand("stop"); err != nil {
-			p.log.Debugf("VM %d stop: %v (non-fatal)", i, err)
+			p.log.Warnf("VM %d stop: %v (non-fatal)", i, err)
 		} else {
 			p.log.Debugf("VM %d CPU paused", i)
 		}
@@ -379,14 +379,14 @@ func (p *VMPool) StopAllCPU() {
 
 // Acquire blocks until a VM slot is available and returns its framework
 // instance. The caller MUST call Release when done.
-func (p *VMPool) Acquire() *F {
+func (p *VMPool) Acquire() *TestFramework {
 	idx := <-p.available
 	p.log.Debugf("Acquired VM slot %d", idx)
 	return p.vms[idx].fw
 }
 
 // Release returns a VM slot back to the pool.
-func (p *VMPool) Release(fw *F) {
+func (p *VMPool) Release(fw *TestFramework) {
 	for i, e := range p.vms {
 		if e.fw == fw {
 			p.log.Debugf("Released VM slot %d", i)

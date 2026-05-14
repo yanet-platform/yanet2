@@ -28,7 +28,7 @@ const routeEgressDevice = "01:00.0"
 //
 // An empty prefixes set produces an empty entries list, which the CLI
 // treats as a full FIB clear.
-func applyFIB(t *testing.T, fw *framework.F, cfgName, suffix string, prefixes ...string) {
+func applyFIB(t *testing.T, fw *framework.TestFramework, cfgName, suffix string, prefixes ...string) {
 	t.Helper()
 
 	type fibNexthopYAML struct {
@@ -72,18 +72,18 @@ func applyFIB(t *testing.T, fw *framework.F, cfgName, suffix string, prefixes ..
 // TestRoute tests route module functionality including static route insertion and deletion.
 func TestRoute(t *testing.T) {
 	t.Parallel()
-	withBootedVM(t, func(fw *framework.F) {
+	withBootedVM(t, func(fw *framework.TestFramework) {
 		testRoute(t, fw)
 	})
 }
 
-func testRoute(t *testing.T, fw *framework.F) {
+func testRoute(t *testing.T, fw *framework.TestFramework) {
 
-	fw.Run("Setup_Route_Config", func(fw *framework.F, t *testing.T) {
+	fw.Run("Setup_Route_Config", func(fw *framework.TestFramework, t *testing.T) {
 		applyFIB(t, fw, routeCfgName, "setup", "10.0.0.0/24")
 	})
 
-	fw.Run("Configure_Route_Module", func(fw *framework.F, t *testing.T) {
+	fw.Run("Configure_Route_Module", func(fw *framework.TestFramework, t *testing.T) {
 		commands := []string{
 			framework.CLIFunction + " update --name=test --chains ch0:4=route:" + routeCfgName,
 			framework.CLIPipeline + " update --name=test --functions test",
@@ -93,7 +93,7 @@ func testRoute(t *testing.T, fw *framework.F) {
 		require.NoError(t, err, "Failed to configure route module")
 	})
 
-	fw.Run("Test_Packet_Routing_With_Route", func(fw *framework.F, t *testing.T) {
+	fw.Run("Test_Packet_Routing_With_Route", func(fw *framework.TestFramework, t *testing.T) {
 		packet := framework.CreateTCPIPv4Packet(
 			net.ParseIP("192.0.2.100"),
 			net.ParseIP("10.0.0.10"),
@@ -110,14 +110,14 @@ func testRoute(t *testing.T, fw *framework.F) {
 		}
 	})
 
-	fw.Run("Delete_Static_Route", func(fw *framework.F, t *testing.T) {
+	fw.Run("Delete_Static_Route", func(fw *framework.TestFramework, t *testing.T) {
 		// fib update is a full atomic replacement; an empty entry set
 		// effectively removes all routes from the module.
 		applyFIB(t, fw, routeCfgName, "clear")
 		t.Logf("Successfully cleared route FIB")
 	})
 
-	fw.Run("Test_Packet_Without_Route", func(fw *framework.F, t *testing.T) {
+	fw.Run("Test_Packet_Without_Route", func(fw *framework.TestFramework, t *testing.T) {
 		packet := framework.CreateTCPIPv4Packet(
 			net.ParseIP("192.0.2.100"),
 			net.ParseIP("172.16.0.10"),
@@ -143,7 +143,7 @@ func testRoute(t *testing.T, fw *framework.F) {
 		t.Logf("Packet correctly dropped (no matching route)")
 	})
 
-	fw.Run("Test_Packet_With_Default_Route", func(fw *framework.F, t *testing.T) {
+	fw.Run("Test_Packet_With_Default_Route", func(fw *framework.TestFramework, t *testing.T) {
 		applyFIB(t, fw, routeCfgName, "default", "0.0.0.0/0")
 
 		packet := framework.CreateTCPIPv4Packet(

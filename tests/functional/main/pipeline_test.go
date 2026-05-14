@@ -9,7 +9,7 @@ import (
 	"github.com/yanet-platform/yanet2/tests/functional/framework"
 )
 
-func restoreBaselinePipelineCommands(fw *framework.F) []string {
+func restoreBaselinePipelineCommands(fw *framework.TestFramework) []string {
 	p := fw.Paths
 	return []string{
 		p.CLI("yanet-cli-function") + " update --name=virt --chains chain0:10=forward:forward0",
@@ -28,13 +28,13 @@ func restoreBaselinePipelineCommands(fw *framework.F) []string {
 func TestNoPipelines(t *testing.T) {
 	t.Parallel()
 	runner := newBootedRunner(t)
-	runner.RunBooted("Isolated_No_Pipelines", func(fw *framework.F, t *testing.T) {
+	runner.RunBooted("Isolated_No_Pipelines", func(fw *framework.TestFramework, t *testing.T) {
 		runNoPipelinesTest(fw, t)
 	})
 }
 
-func runNoPipelinesTest(fw *framework.F, t *testing.T) {
-	fw.Run("Configure_Device_No_Pipelines", func(fw *framework.F, t *testing.T) {
+func runNoPipelinesTest(fw *framework.TestFramework, t *testing.T) {
+	fw.Run("Configure_Device_No_Pipelines", func(fw *framework.TestFramework, t *testing.T) {
 		p := fw.Paths
 		commands := []string{
 			// Clear both device assignment maps entirely. Unlike dummy pipeline
@@ -48,7 +48,7 @@ func runNoPipelinesTest(fw *framework.F, t *testing.T) {
 		require.NoError(t, err, "Failed to configure device with empty pipelines")
 	})
 
-	fw.Run("Test_Packet_Dropped", func(fw *framework.F, t *testing.T) {
+	fw.Run("Test_Packet_Dropped", func(fw *framework.TestFramework, t *testing.T) {
 		// Use SrcMAC for both src and dst -- framework skips packets
 		// with MAC not equal to the framework one.
 		packet := framework.CreateTCPIPv4Packet(
@@ -69,7 +69,7 @@ func runNoPipelinesTest(fw *framework.F, t *testing.T) {
 		require.Nil(t, outputPacket, "Packet should be dropped - no pipelines")
 	})
 
-	fw.Run("Restore_Baseline_Device_Pipelines", func(fw *framework.F, t *testing.T) {
+	fw.Run("Restore_Baseline_Device_Pipelines", func(fw *framework.TestFramework, t *testing.T) {
 		_, err := fw.ExecuteCommands(restoreBaselinePipelineCommands(fw)...)
 		require.NoError(t, err, "Failed to restore baseline device and pipeline bindings")
 	})

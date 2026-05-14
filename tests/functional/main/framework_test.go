@@ -168,7 +168,7 @@ entries:
 `
 }
 
-func dumpMemoryDiagnostics(fw *framework.F, log *zap.SugaredLogger) {
+func dumpMemoryDiagnostics(fw *framework.TestFramework, log *zap.SugaredLogger) {
 	diagCmds := []string{
 		"echo '=== HUGEPAGES ===' && cat /proc/meminfo | grep -i huge",
 		"echo '=== FREE ===' && free -h",
@@ -194,7 +194,7 @@ var (
 	baselineCP = controlplaneConfig()
 )
 
-func configureBaseline(fw *framework.F, log *zap.SugaredLogger) error {
+func configureBaseline(fw *framework.TestFramework, log *zap.SugaredLogger) error {
 	// Write config files BEFORE starting YANET so the "preyanet"
 	// snapshot captures them on disk without a running dataplane.
 	if err := fw.CreateForwardConfig(forwardConfig()); err != nil {
@@ -231,7 +231,7 @@ func configureBaseline(fw *framework.F, log *zap.SugaredLogger) error {
 	return nil
 }
 
-func saveBaselineSnapshot(fw *framework.F, log *zap.SugaredLogger) error {
+func saveBaselineSnapshot(fw *framework.TestFramework, log *zap.SugaredLogger) error {
 	if err := fw.SaveSnapshotKeepUnmounted("baseline"); err != nil {
 		return err
 	}
@@ -243,7 +243,7 @@ func saveBaselineSnapshot(fw *framework.F, log *zap.SugaredLogger) error {
 
 // withBootedVM acquires a VM from the pool and restores it to a working
 // YANET state. See restoreBooted for the restore strategy.
-func withBootedVM(t *testing.T, fn func(fw *framework.F)) {
+func withBootedVM(t *testing.T, fn func(fw *framework.TestFramework)) {
 	t.Helper()
 	if globalPool == nil {
 		t.Fatal("VM pool is not initialized")
@@ -276,7 +276,7 @@ func newBootedRunner(t *testing.T) *bootedRunner {
 
 // RunBooted acquires a VM slot, restores it to the booted snapshot, runs
 // the named subtest, then releases the slot back to the pool.
-func (r *bootedRunner) RunBooted(name string, fn func(fw *framework.F, t *testing.T)) bool {
+func (r *bootedRunner) RunBooted(name string, fn func(fw *framework.TestFramework, t *testing.T)) bool {
 	return r.t.Run(name, func(t *testing.T) {
 		base := globalPool.Acquire()
 		t.Cleanup(func() {
@@ -290,7 +290,7 @@ func (r *bootedRunner) RunBooted(name string, fn func(fw *framework.F, t *testin
 
 // testFramework is kept for backward compatibility. New tests should use
 // withBootedVM or newBootedRunner instead.
-func testFramework(t *testing.T) *framework.F {
+func testFramework(t *testing.T) *framework.TestFramework {
 	t.Helper()
 	if globalPool == nil {
 		t.Fatal("test pool is not initialized")
@@ -315,7 +315,7 @@ func testFramework(t *testing.T) *framework.F {
 // Slow path (~20-50s): loadvm to "preyanet" (no YANET), StartYANET from
 //   scratch, configure. Used when DPDK device state is genuinely broken
 //   after loadvm and the heartbeat cannot succeed.
-func restoreBooted(t *testing.T, fw *framework.F) {
+func restoreBooted(t *testing.T, fw *framework.TestFramework) {
 	t.Helper()
 
 	if err := fw.RestoreAndReconnect("baseline"); err == nil {
@@ -436,7 +436,7 @@ func testMainWrapper(m *testing.M) (code int) {
 		return 1
 	}
 
-	if err := pool.ForEachParallel(func(idx int, fw *framework.F) error {
+	if err := pool.ForEachParallel(func(idx int, fw *framework.TestFramework) error {
 		// Copy YANET binaries from 9P mounts to guest tmpfs so that
 		// no YANET process holds open fids on 9P. This makes savevm work.
 		if err := fw.PrepareLocalStorage(); err != nil {
@@ -468,15 +468,15 @@ func testMainWrapper(m *testing.M) (code int) {
 // TestFramework - comprehensive test for checking all yanet functionality
 func TestFramework(t *testing.T) {
 	t.Parallel()
-	withBootedVM(t, func(fw *framework.F) {
+	withBootedVM(t, func(fw *framework.TestFramework) {
 		testFrameworkSuite(t, fw)
 	})
 }
 
-func testFrameworkSuite(t *testing.T, fw *framework.F) {
+func testFrameworkSuite(t *testing.T, fw *framework.TestFramework) {
 
 	// Test 1: Check basic command execution
-	fw.Run("Basic_Commands", func(fw *framework.F, t *testing.T) {
+	fw.Run("Basic_Commands", func(fw *framework.TestFramework, t *testing.T) {
 		// Check basic system commands
 		basicCommands := []struct {
 			name    string
@@ -511,7 +511,7 @@ func testFrameworkSuite(t *testing.T, fw *framework.F) {
 		}
 
 		for _, cmd := range basicCommands {
-			fw.Run(cmd.name, func(fw *framework.F, t *testing.T) {
+			fw.Run(cmd.name, func(fw *framework.TestFramework, t *testing.T) {
 				output, err := fw.ExecuteCommand(cmd.command)
 				require.NoError(t, err, "Command %s failed", cmd.command)
 				require.True(t, cmd.check(output), "Command %s output validation failed: %s", cmd.command, output)
@@ -520,7 +520,7 @@ func testFrameworkSuite(t *testing.T, fw *framework.F) {
 	})
 
 	// Test 3: Check filesystem and mounting
-	fw.Run("Filesystem_Check", func(fw *framework.F, t *testing.T) {
+	fw.Run("Filesystem_Check", func(fw *framework.TestFramework, t *testing.T) {
 		// Check main directories
 		directories := []string{
 			"/mnt/logs",
@@ -530,7 +530,7 @@ func testFrameworkSuite(t *testing.T, fw *framework.F) {
 		}
 
 		for _, dir := range directories {
-			fw.Run("check_"+strings.ReplaceAll(dir, "/", "_"), func(fw *framework.F, t *testing.T) {
+			fw.Run("check_"+strings.ReplaceAll(dir, "/", "_"), func(fw *framework.TestFramework, t *testing.T) {
 				output, err := fw.ExecuteCommand("ls -la " + dir)
 				require.NoError(t, err, "Failed to list directory %s", dir)
 				require.NotEmpty(t, output, "Directory %s appears to be empty", dir)
@@ -543,26 +543,21 @@ func testFrameworkSuite(t *testing.T, fw *framework.F) {
 	})
 
 	// Test 4: Check YANET binaries availability
-	fw.Run("YANET_Binaries", func(fw *framework.F, t *testing.T) {
+	fw.Run("YANET_Binaries", func(fw *framework.TestFramework, t *testing.T) {
 		// Check CLI binaries
-		cliBinaries := []struct {
+		cliBinaries := make([]struct {
 			name string
 			path string
-		}{
-			{"main_cli", "/mnt/target/release/yanet-cli"},
-			{"common_cli", "/mnt/target/release/yanet-cli-common"},
-			{"decap_cli", "/mnt/target/release/yanet-cli-decap"},
-			{"dscp_cli", "/mnt/target/release/yanet-cli-dscp"},
-			{"forward_cli", "/mnt/target/release/yanet-cli-forward"},
-			{"nat64_cli", "/mnt/target/release/yanet-cli-nat64"},
-			{"route_cli", "/mnt/target/release/yanet-cli-route"},
-			{"pipeline_cli", "/mnt/target/release/yanet-cli-pipeline"},
-			{"acl_cli", "/mnt/target/release/yanet-cli-acl"},
-			{"fwstate_cli", "/mnt/target/release/yanet-cli-fwstate"},
+		}, 0, len(framework.CLIBinaryNames))
+		for _, name := range framework.CLIBinaryNames {
+			cliBinaries = append(cliBinaries, struct {
+				name string
+				path string
+			}{name, "/mnt/target/release/" + name})
 		}
 
 		for _, binary := range cliBinaries {
-			fw.Run(binary.name, func(fw *framework.F, t *testing.T) {
+			fw.Run(binary.name, func(fw *framework.TestFramework, t *testing.T) {
 				// Check file existence
 				output, err := fw.ExecuteCommand("ls -la " + binary.path)
 				require.NoError(t, err, "⚠️  Binary %s check failed: %v", binary.name, err)
@@ -577,7 +572,7 @@ func testFrameworkSuite(t *testing.T, fw *framework.F) {
 		}
 
 		// Check main YANET components
-		fw.Run("yanet_components", func(fw *framework.F, t *testing.T) {
+		fw.Run("yanet_components", func(fw *framework.TestFramework, t *testing.T) {
 			components := []string{
 				"/mnt/build/dataplane/yanet-dataplane",
 				"/mnt/build/controlplane/yanet-controlplane",
@@ -592,14 +587,14 @@ func testFrameworkSuite(t *testing.T, fw *framework.F) {
 	})
 
 	// Test 5: Check network interfaces and socket devices
-	fw.Run("Network_Interfaces", func(fw *framework.F, t *testing.T) {
+	fw.Run("Network_Interfaces", func(fw *framework.TestFramework, t *testing.T) {
 		// Check network interfaces
 		output, err := fw.ExecuteCommand("ip link show")
 		require.NoError(t, err)
 		require.Contains(t, output, "lo", "Loopback interface should be present")
 
 		// Check framework socket clients
-		fw.Run("socket_clients", func(fw *framework.F, t *testing.T) {
+		fw.Run("socket_clients", func(fw *framework.TestFramework, t *testing.T) {
 			socketPaths := fw.GetSocketPaths()
 			for i := range 2 {
 				// Check if socket path exists
@@ -618,7 +613,7 @@ func testFrameworkSuite(t *testing.T, fw *framework.F) {
 	})
 
 	// Test 6: Check PacketParser
-	fw.Run("PacketParser", func(fw *framework.F, t *testing.T) {
+	fw.Run("PacketParser", func(fw *framework.TestFramework, t *testing.T) {
 		require.NotNil(t, fw.PacketParser, "PacketParser should be initialized")
 
 		// Create simple test packet
@@ -650,23 +645,23 @@ func testFrameworkSuite(t *testing.T, fw *framework.F) {
 	})
 
 	// Test 7: Check system resources
-	fw.Run("System_Resources", func(fw *framework.F, t *testing.T) {
+	fw.Run("System_Resources", func(fw *framework.TestFramework, t *testing.T) {
 		// Check memory
-		fw.Run("memory", func(fw *framework.F, t *testing.T) {
+		fw.Run("memory", func(fw *framework.TestFramework, t *testing.T) {
 			output, err := fw.ExecuteCommand("free -h")
 			require.NoError(t, err)
 			require.Contains(t, output, "Mem:", "Memory information should be available")
 		})
 
 		// Check CPU
-		fw.Run("cpu", func(fw *framework.F, t *testing.T) {
+		fw.Run("cpu", func(fw *framework.TestFramework, t *testing.T) {
 			output, err := fw.ExecuteCommand("nproc")
 			require.NoError(t, err)
 			require.NotEmpty(t, strings.TrimSpace(output), "CPU count should be available")
 		})
 
 		// Check hugepages (important for DPDK)
-		fw.Run("hugepages", func(fw *framework.F, t *testing.T) {
+		fw.Run("hugepages", func(fw *framework.TestFramework, t *testing.T) {
 			output, err := fw.ExecuteCommand("cat /proc/meminfo | grep -i huge")
 			require.NoErrorf(t, err, "Failed to get hugepages info: %s", output)
 		})

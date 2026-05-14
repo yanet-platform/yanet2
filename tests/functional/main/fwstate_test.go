@@ -30,15 +30,15 @@ var expectedEntries = []struct {
 
 func TestFWStateListEntries(t *testing.T) {
 	t.Parallel()
-	withBootedVM(t, func(fw *framework.F) {
+	withBootedVM(t, func(fw *framework.TestFramework) {
 		testFWStateListEntries(t, fw)
 	})
 }
 
-func testFWStateListEntries(t *testing.T, fw *framework.F) {
+func testFWStateListEntries(t *testing.T, fw *framework.TestFramework) {
 
 	// 1. Configure fwstate module with maps and sync settings.
-	fw.Run("Configure_fwstate", func(fw *framework.F, t *testing.T) {
+	fw.Run("Configure_fwstate", func(fw *framework.TestFramework, t *testing.T) {
 		commands := []string{
 			framework.CLIFWState + " update --name fwstate0" +
 				" --index-size 1024" +
@@ -55,7 +55,7 @@ func testFWStateListEntries(t *testing.T, fw *framework.F) {
 	})
 
 	// 2. Link fwstate to an ACL config so the dataplane module is active.
-	fw.Run("Link_fwstate_to_acl", func(fw *framework.F, t *testing.T) {
+	fw.Run("Link_fwstate_to_acl", func(fw *framework.TestFramework, t *testing.T) {
 		commands := []string{
 			framework.CLIACL + " update --name acl_fw --rules /mnt/yanet2/acl+fwstate.yaml",
 			framework.CLIFWState + " link --name fwstate0 --acl acl_fw",
@@ -67,7 +67,7 @@ func testFWStateListEntries(t *testing.T, fw *framework.F) {
 	})
 
 	// 3. Inject packets to create firewall state entries.
-	fw.Run("Create_state_entries", func(fw *framework.F, t *testing.T) {
+	fw.Run("Create_state_entries", func(fw *framework.TestFramework, t *testing.T) {
 		pg := NewPacketGenerator()
 
 		for i := range 3 {
@@ -88,7 +88,7 @@ func testFWStateListEntries(t *testing.T, fw *framework.F) {
 	})
 
 	// 4. Forward listing: verify exact entries.
-	fw.Run("Forward_listing", func(fw *framework.F, t *testing.T) {
+	fw.Run("Forward_listing", func(fw *framework.TestFramework, t *testing.T) {
 		output, err := fw.ExecuteCommand(
 			framework.CLIFWState + " entries --name fwstate0 --batch 100 --direction forward --include-expired",
 		)
@@ -104,7 +104,7 @@ func testFWStateListEntries(t *testing.T, fw *framework.F) {
 	})
 
 	// 5. Forward listing with JSON: parse and verify key fields.
-	fw.Run("Forward_listing_json", func(fw *framework.F, t *testing.T) {
+	fw.Run("Forward_listing_json", func(fw *framework.TestFramework, t *testing.T) {
 		output, err := fw.ExecuteCommand(
 			framework.CLIFWState + " entries --name fwstate0 --batch 100 --direction forward --include-expired --json",
 		)
@@ -158,7 +158,7 @@ func testFWStateListEntries(t *testing.T, fw *framework.F) {
 	})
 
 	// 6. Backward listing from last entry: verify all entries present.
-	fw.Run("Backward_listing", func(fw *framework.F, t *testing.T) {
+	fw.Run("Backward_listing", func(fw *framework.TestFramework, t *testing.T) {
 		output, err := fw.ExecuteCommand(
 			framework.CLIFWState + " entries --name fwstate0 --batch 100 --direction backward --index 4294967295 --include-expired",
 		)
@@ -171,7 +171,7 @@ func testFWStateListEntries(t *testing.T, fw *framework.F) {
 	})
 
 	// 7. Pagination: read with batch=1, verify all entries are still returned.
-	fw.Run("Pagination", func(fw *framework.F, t *testing.T) {
+	fw.Run("Pagination", func(fw *framework.TestFramework, t *testing.T) {
 		output, err := fw.ExecuteCommand(
 			framework.CLIFWState + " entries --name fwstate0 --batch 1 --direction forward --include-expired",
 		)
@@ -185,7 +185,7 @@ func testFWStateListEntries(t *testing.T, fw *framework.F) {
 	})
 
 	// 8. Config not found: request entries from a non-existent config.
-	fw.Run("Config_not_found", func(fw *framework.F, t *testing.T) {
+	fw.Run("Config_not_found", func(fw *framework.TestFramework, t *testing.T) {
 		_, err := fw.ExecuteCommand(
 			framework.CLIFWState + " entries --name nonexistent --batch 10",
 		)
@@ -193,7 +193,7 @@ func testFWStateListEntries(t *testing.T, fw *framework.F) {
 	})
 
 	// 9. CheckState: return traffic passes through ACL because forward state exists.
-	fw.Run("CheckState_return_traffic", func(fw *framework.F, t *testing.T) {
+	fw.Run("CheckState_return_traffic", func(fw *framework.TestFramework, t *testing.T) {
 		pg := NewPacketGenerator()
 
 		// Send a TCP SYN-ACK from 192.0.3.1:80 -> 192.0.2.10:10000.
@@ -212,7 +212,7 @@ func testFWStateListEntries(t *testing.T, fw *framework.F) {
 	})
 
 	// 10. CheckState: packet with no matching state is dropped.
-	fw.Run("CheckState_no_state_dropped", func(fw *framework.F, t *testing.T) {
+	fw.Run("CheckState_no_state_dropped", func(fw *framework.TestFramework, t *testing.T) {
 		pg := NewPacketGenerator()
 
 		// Send a TCP packet from 192.0.3.1:80 -> 192.0.2.99:55555.
@@ -230,7 +230,7 @@ func testFWStateListEntries(t *testing.T, fw *framework.F) {
 	})
 
 	// 11. Stats: verify total_elements matches the number of injected entries.
-	fw.Run("Stats_after_entries", func(fw *framework.F, t *testing.T) {
+	fw.Run("Stats_after_entries", func(fw *framework.TestFramework, t *testing.T) {
 		output, err := fw.ExecuteCommand(
 			framework.CLIFWState + " stats --name fwstate0",
 		)
@@ -253,7 +253,7 @@ func testFWStateListEntries(t *testing.T, fw *framework.F) {
 	// === IPv6 tests ===
 
 	// 12. Create IPv6 state entries via CreateState.
-	fw.Run("IPv6_create_state", func(fw *framework.F, t *testing.T) {
+	fw.Run("IPv6_create_state", func(fw *framework.TestFramework, t *testing.T) {
 		pg := NewPacketGenerator()
 
 		for i := range 3 {
@@ -274,7 +274,7 @@ func testFWStateListEntries(t *testing.T, fw *framework.F) {
 	})
 
 	// 13. IPv6 forward listing: verify entries were created.
-	fw.Run("IPv6_forward_listing", func(fw *framework.F, t *testing.T) {
+	fw.Run("IPv6_forward_listing", func(fw *framework.TestFramework, t *testing.T) {
 		output, err := fw.ExecuteCommand(
 			framework.CLIFWState + " entries --name fwstate0 --ipv6 --batch 100 --direction forward --include-expired",
 		)
@@ -289,7 +289,7 @@ func testFWStateListEntries(t *testing.T, fw *framework.F) {
 	})
 
 	// 14. IPv6 CheckState: return traffic passes because forward state exists.
-	fw.Run("IPv6_CheckState_return_traffic", func(fw *framework.F, t *testing.T) {
+	fw.Run("IPv6_CheckState_return_traffic", func(fw *framework.TestFramework, t *testing.T) {
 		pg := NewPacketGenerator()
 
 		// Reverse of first IPv6 entry: 2001:db8:2::1:80 -> 2001:db8:1::10:20000
@@ -306,7 +306,7 @@ func testFWStateListEntries(t *testing.T, fw *framework.F) {
 	})
 
 	// 15. IPv6 CheckState: packet with no matching state is dropped.
-	fw.Run("IPv6_CheckState_no_state_dropped", func(fw *framework.F, t *testing.T) {
+	fw.Run("IPv6_CheckState_no_state_dropped", func(fw *framework.TestFramework, t *testing.T) {
 		pg := NewPacketGenerator()
 
 		// No state for 2001:db8:1::99:55555
@@ -323,7 +323,7 @@ func testFWStateListEntries(t *testing.T, fw *framework.F) {
 	})
 
 	// 16. IPv6 stats: verify total_elements.
-	fw.Run("IPv6_stats", func(fw *framework.F, t *testing.T) {
+	fw.Run("IPv6_stats", func(fw *framework.TestFramework, t *testing.T) {
 		output, err := fw.ExecuteCommand(
 			framework.CLIFWState + " stats --name fwstate0",
 		)
@@ -356,15 +356,15 @@ func testFWStateListEntries(t *testing.T, fw *framework.F) {
 // the lookup key.
 func TestFWStateUDPEndianness(t *testing.T) {
 	t.Parallel()
-	withBootedVM(t, func(fw *framework.F) {
+	withBootedVM(t, func(fw *framework.TestFramework) {
 		testFWStateUDPEndianness(t, fw)
 	})
 }
 
-func testFWStateUDPEndianness(t *testing.T, fw *framework.F) {
+func testFWStateUDPEndianness(t *testing.T, fw *framework.TestFramework) {
 
 	// 1. Configure fwstate + ACL (reuse existing config from TestFWStateListEntries)
-	fw.Run("Configure_fwstate", func(fw *framework.F, t *testing.T) {
+	fw.Run("Configure_fwstate", func(fw *framework.TestFramework, t *testing.T) {
 		commands := []string{
 			framework.CLIFWState + " update --name fwstate_udp" +
 				" --index-size 1024" +
@@ -380,7 +380,7 @@ func testFWStateUDPEndianness(t *testing.T, fw *framework.F) {
 		require.NoError(t, err, "fwstate configuration failed")
 	})
 
-	fw.Run("Link_fwstate_to_acl", func(fw *framework.F, t *testing.T) {
+	fw.Run("Link_fwstate_to_acl", func(fw *framework.TestFramework, t *testing.T) {
 		commands := []string{
 			framework.CLIACL + " update --name acl_udp --rules /mnt/yanet2/acl+fwstate.yaml",
 			framework.CLIFWState + " link --name fwstate_udp --acl acl_udp",
@@ -396,7 +396,7 @@ func testFWStateUDPEndianness(t *testing.T, fw *framework.F) {
 	// Port 12345 = 0x3039, byte-swapped = 0x3930 = 14640
 	// If the endianness bug exists, the state will be stored with
 	// swapped port bytes and CheckState will fail to match.
-	fw.Run("Create_UDP_state", func(fw *framework.F, t *testing.T) {
+	fw.Run("Create_UDP_state", func(fw *framework.TestFramework, t *testing.T) {
 		pg := NewPacketGenerator()
 
 		pkt := pg.UDP(
@@ -411,7 +411,7 @@ func testFWStateUDPEndianness(t *testing.T, fw *framework.F) {
 	})
 
 	// 3. Verify state was created with correct ports via entries listing.
-	fw.Run("Verify_UDP_state_entries", func(fw *framework.F, t *testing.T) {
+	fw.Run("Verify_UDP_state_entries", func(fw *framework.TestFramework, t *testing.T) {
 		output, err := fw.ExecuteCommand(
 			framework.CLIFWState + " entries --name fwstate_udp --batch 100 --direction forward --include-expired",
 		)
@@ -428,7 +428,7 @@ func testFWStateUDPEndianness(t *testing.T, fw *framework.F) {
 	// This is the critical test — if the endianness bug is present, the return
 	// traffic will be dropped because the stored ports (in wrong byte order)
 	// won't match the lookup key (in correct host byte order).
-	fw.Run("CheckState_UDP_return_traffic", func(fw *framework.F, t *testing.T) {
+	fw.Run("CheckState_UDP_return_traffic", func(fw *framework.TestFramework, t *testing.T) {
 		pg := NewPacketGenerator()
 
 		// Send return UDP packet: 192.0.3.1:80 -> 192.0.2.10:12345
@@ -445,7 +445,7 @@ func testFWStateUDPEndianness(t *testing.T, fw *framework.F) {
 	})
 
 	// 5. Control test: TCP should work (TCP ports are correctly converted).
-	fw.Run("Create_TCP_state_control", func(fw *framework.F, t *testing.T) {
+	fw.Run("Create_TCP_state_control", func(fw *framework.TestFramework, t *testing.T) {
 		pg := NewPacketGenerator()
 
 		pkt := pg.TCP(
@@ -460,7 +460,7 @@ func testFWStateUDPEndianness(t *testing.T, fw *framework.F) {
 		require.NotNil(t, output, "CreateState should forward the original packet")
 	})
 
-	fw.Run("CheckState_TCP_return_traffic_control", func(fw *framework.F, t *testing.T) {
+	fw.Run("CheckState_TCP_return_traffic_control", func(fw *framework.TestFramework, t *testing.T) {
 		pg := NewPacketGenerator()
 
 		// Return TCP: 192.0.3.1:80 -> 192.0.2.20:12345
@@ -602,15 +602,15 @@ func buildExternalSyncPacket(syncFrame []byte, srcIPv6 net.IP) []byte {
 // same config used for matching.
 func TestFWStateExternalSyncFrame(t *testing.T) {
 	t.Parallel()
-	withBootedVM(t, func(fw *framework.F) {
+	withBootedVM(t, func(fw *framework.TestFramework) {
 		testFWStateExternalSyncFrame(t, fw)
 	})
 }
 
-func testFWStateExternalSyncFrame(t *testing.T, fw *framework.F) {
+func testFWStateExternalSyncFrame(t *testing.T, fw *framework.TestFramework) {
 
 	// 1. Configure fwstate module.
-	fw.Run("Configure_fwstate", func(fw *framework.F, t *testing.T) {
+	fw.Run("Configure_fwstate", func(fw *framework.TestFramework, t *testing.T) {
 		commands := []string{
 			framework.CLIFWState + " update --name fwstate_ext" +
 				" --index-size 1024" +
@@ -627,7 +627,7 @@ func testFWStateExternalSyncFrame(t *testing.T, fw *framework.F) {
 	})
 
 	// 2. Link fwstate to ACL with the sync frame allow rule.
-	fw.Run("Link_fwstate_to_acl", func(fw *framework.F, t *testing.T) {
+	fw.Run("Link_fwstate_to_acl", func(fw *framework.TestFramework, t *testing.T) {
 		commands := []string{
 			framework.CLIACL + " update --name acl_ext --rules /mnt/yanet2/acl+fwstate.yaml",
 			framework.CLIFWState + " link --name fwstate_ext --acl acl_ext",
@@ -639,7 +639,7 @@ func testFWStateExternalSyncFrame(t *testing.T, fw *framework.F) {
 	})
 
 	// 3. Verify no state entries exist initially.
-	fw.Run("Verify_empty_state", func(fw *framework.F, t *testing.T) {
+	fw.Run("Verify_empty_state", func(fw *framework.TestFramework, t *testing.T) {
 		output, err := fw.ExecuteCommand(
 			framework.CLIFWState + " stats --name fwstate_ext",
 		)
@@ -657,7 +657,7 @@ func testFWStateExternalSyncFrame(t *testing.T, fw *framework.F) {
 
 	// 4. Send an external sync frame and verify it is dropped.
 	// The sync frame carries a TCP SYN state for 10.0.0.1:5000 -> 10.0.0.2:80.
-	fw.Run("Send_external_sync_frame", func(fw *framework.F, t *testing.T) {
+	fw.Run("Send_external_sync_frame", func(fw *framework.TestFramework, t *testing.T) {
 		syncFrame := buildFWStateSyncFrame(
 			net.IPv4(10, 0, 0, 1), // src IP
 			net.IPv4(10, 0, 0, 2), // dst IP
@@ -677,7 +677,7 @@ func testFWStateExternalSyncFrame(t *testing.T, fw *framework.F) {
 	})
 
 	// 5. Verify that the external sync frame created a state entry.
-	fw.Run("Verify_state_created", func(fw *framework.F, t *testing.T) {
+	fw.Run("Verify_state_created", func(fw *framework.TestFramework, t *testing.T) {
 		output, err := fw.ExecuteCommand(
 			framework.CLIFWState + " entries --name fwstate_ext --batch 100 --direction forward --include-expired",
 		)
@@ -690,7 +690,7 @@ func testFWStateExternalSyncFrame(t *testing.T, fw *framework.F) {
 	})
 
 	// 6. Verify the state entry is marked as external via JSON listing.
-	fw.Run("Verify_state_is_external", func(fw *framework.F, t *testing.T) {
+	fw.Run("Verify_state_is_external", func(fw *framework.TestFramework, t *testing.T) {
 		output, err := fw.ExecuteCommand(
 			framework.CLIFWState + " entries --name fwstate_ext --batch 100 --direction forward --include-expired --json",
 		)
@@ -728,7 +728,7 @@ func testFWStateExternalSyncFrame(t *testing.T, fw *framework.F) {
 	})
 
 	// 7. Verify stats show exactly 1 entry.
-	fw.Run("Verify_stats", func(fw *framework.F, t *testing.T) {
+	fw.Run("Verify_stats", func(fw *framework.TestFramework, t *testing.T) {
 		output, err := fw.ExecuteCommand(
 			framework.CLIFWState + " stats --name fwstate_ext",
 		)

@@ -14,15 +14,15 @@ import (
 // between tests. The test sends a packet, intentionally does not read it,
 // then resets the connection and confirms the buffered packet is gone.
 func TestIsolation(t *testing.T) {
-	withBootedVM(t, func(fw *framework.F) {
+	withBootedVM(t, func(fw *framework.TestFramework) {
 		testIsolation(t, fw)
 	})
 }
 
-func testIsolation(t *testing.T, fw *framework.F) {
+func testIsolation(t *testing.T, fw *framework.TestFramework) {
 	require.NotNil(t, fw, "Global framework should be initialized")
 
-	fw.Run("Configure_Forward_Module", func(fw *framework.F, t *testing.T) {
+	fw.Run("Configure_Forward_Module", func(fw *framework.TestFramework, t *testing.T) {
 		commands := []string{
 			framework.CLIFunction + " update --name=test --chains ch0:4=forward:forward0,route:route0",
 			framework.CLIPipeline + " update --name=test --functions test",
@@ -34,7 +34,7 @@ func testIsolation(t *testing.T, fw *framework.F) {
 
 	// Step 1: Send a packet and verify it arrives on the output interface.
 	// Then send another packet but do NOT read it — it stays in the socket buffer.
-	fw.Run("Step_1_Send_packet_and_leave_unread", func(fw *framework.F, t *testing.T) {
+	fw.Run("Step_1_Send_packet_and_leave_unread", func(fw *framework.TestFramework, t *testing.T) {
 		inputClient, err := fw.GetSocketClient(0)
 		require.NoError(t, err)
 		require.NoError(t, inputClient.Connect())
@@ -64,7 +64,7 @@ func testIsolation(t *testing.T, fw *framework.F) {
 	// Step 2: Reset the connection and verify the buffered packet is gone.
 	// This is the key isolation test — after ResetConnection(), the unread
 	// packet from Step 1 must NOT be readable.
-	fw.Run("Step_2_Verify_buffer_is_clean_after_reset", func(fw *framework.F, t *testing.T) {
+	fw.Run("Step_2_Verify_buffer_is_clean_after_reset", func(fw *framework.TestFramework, t *testing.T) {
 		outputClient, err := fw.GetSocketClient(0)
 		require.NoError(t, err)
 
@@ -77,7 +77,7 @@ func testIsolation(t *testing.T, fw *framework.F) {
 
 	// Step 3: Verify the connection still works after reset.
 	// Send a new packet and confirm we can read it.
-	fw.Run("Step_3_Verify_connection_works_after_reset", func(fw *framework.F, t *testing.T) {
+	fw.Run("Step_3_Verify_connection_works_after_reset", func(fw *framework.TestFramework, t *testing.T) {
 		inputClient, err := fw.GetSocketClient(0)
 		require.NoError(t, err)
 		require.NoError(t, inputClient.Connect())

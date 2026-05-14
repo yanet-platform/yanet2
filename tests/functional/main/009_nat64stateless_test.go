@@ -20,7 +20,7 @@ import (
 // Test type: nat64
 func TestTest_009_nat64stateless(t *testing.T) {
 	t.Parallel()
-	withBootedVM(t, func(fw *framework.F) {
+	withBootedVM(t, func(fw *framework.TestFramework) {
 		require.NotNil(t, fw, "Global framework should be initialized")
 		// Silence potentially unused imports PCAP vs AST parser
 		_ = cmp.Diff
@@ -29,7 +29,7 @@ func TestTest_009_nat64stateless(t *testing.T) {
 		_ = net.ParseIP
 		_ = strings.Join
 
-		fw.Run("Step_000_Configure_NAT64_Environment", func(fw *framework.F, t *testing.T) {
+		fw.Run("Step_000_Configure_NAT64_Environment", func(fw *framework.TestFramework, t *testing.T) {
 			// Configure NAT64 module
 			commands := []string{
 				"/mnt/target/release/yanet-cli-nat64 prefix add --cfg nat64stateless0 --prefix 5555:5555:5555:5555:5555:5555::/96",
@@ -43,7 +43,7 @@ func TestTest_009_nat64stateless(t *testing.T) {
 
 		})
 
-		fw.Run("Step_001_Configure_Routes", func(fw *framework.F, t *testing.T) {
+		fw.Run("Step_001_Configure_Routes", func(fw *framework.TestFramework, t *testing.T) {
 			// IPv4 routes configuration
 			// Original autotest.yaml step:
 			// ipv4Update:
@@ -71,7 +71,7 @@ entries:
 			_, err = fw.ExecuteCommand("/mnt/target/release/yanet-cli-route fib update --cfg=route0 --rules /mnt/config/route0-step001.yaml")
 			require.NoError(t, err, "Failed to update FIB for IPv4 routes")
 		})
-		fw.Run("Step_002_Configure_Routes", func(fw *framework.F, t *testing.T) {
+		fw.Run("Step_002_Configure_Routes", func(fw *framework.TestFramework, t *testing.T) {
 			// IPv6 routes configuration
 			// Original autotest.yaml step:
 			// ipv6Update:
@@ -108,7 +108,7 @@ entries:
 		// Wait 3 seconds for configuration changes to take effect (pipeline updates are asynchronous)
 		time.Sleep(3 * time.Second)
 
-		fw.Run("Step_001_Test_Packet", func(fw *framework.F, t *testing.T) {
+		fw.Run("Step_001_Test_Packet", func(fw *framework.TestFramework, t *testing.T) {
 			// Test case: 001-send.pcap -> 001-expect.pcap
 			sendPackets := create009_nat64statelessSendPacket1(t)
 			require.NotNil(t, sendPackets)
@@ -158,7 +158,7 @@ entries:
 				require.Emptyf(t, diff, "Packet layers mismatch for index %d", idx)
 			}
 		})
-		fw.Run("Step_002_Test_Packet", func(fw *framework.F, t *testing.T) {
+		fw.Run("Step_002_Test_Packet", func(fw *framework.TestFramework, t *testing.T) {
 			// Test case: 002-send.pcap -> 002-expect.pcap
 			sendPackets := create009_nat64statelessSendPacket2(t)
 			require.NotNil(t, sendPackets)
@@ -208,7 +208,7 @@ entries:
 				require.Emptyf(t, diff, "Packet layers mismatch for index %d", idx)
 			}
 		})
-		fw.Run("Step_003_Test_Packet", func(fw *framework.F, t *testing.T) {
+		fw.Run("Step_003_Test_Packet", func(fw *framework.TestFramework, t *testing.T) {
 			// Test case: 007-send.pcap -> 007-expect.pcap
 			sendPackets := create009_nat64statelessSendPacket3(t)
 			require.NotNil(t, sendPackets)
@@ -258,7 +258,7 @@ entries:
 				require.Emptyf(t, diff, "Packet layers mismatch for index %d", idx)
 			}
 		})
-		fw.Run("Step_004_Test_Packet", func(fw *framework.F, t *testing.T) {
+		fw.Run("Step_004_Test_Packet", func(fw *framework.TestFramework, t *testing.T) {
 			// Test case: 008-send.pcap -> 008-expect.pcap
 			sendPackets := create009_nat64statelessSendPacket4(t)
 			require.NotNil(t, sendPackets)
