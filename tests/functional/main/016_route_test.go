@@ -1,4 +1,4 @@
-package converted
+package functional
 
 import (
 	"net"
@@ -11,6 +11,7 @@ import (
 	"github.com/gopacket/gopacket/layers"
 	"github.com/stretchr/testify/require"
 
+	"github.com/yanet-platform/yanet2/tests/functional/framework"
 	"github.com/yanet-platform/yanet2/tests/migration/converter/lib"
 )
 
@@ -18,79 +19,81 @@ import (
 // Original test: 016_route
 // Test type: route
 func TestTest_016_route(t *testing.T) {
-	fw := globalFramework
-	require.NotNil(t, fw, "Global framework should be initialized")
-	// Silence potentially unused imports PCAP vs AST parser
-	_ = cmp.Diff
-	_ = lib.CmpStdOpts
-	_ = lib.NewPacket
-	_ = net.ParseIP
-	_ = strings.Join
+	t.Parallel()
+	withBootedVM(t, func(fw *framework.F) {
+		require.NotNil(t, fw, "Global framework should be initialized")
+		// Silence potentially unused imports PCAP vs AST parser
+		_ = cmp.Diff
+		_ = lib.CmpStdOpts
+		_ = lib.NewPacket
+		_ = net.ParseIP
+		_ = strings.Join
 
-	t.Run("Step_001_Configure_Routes", func(t *testing.T) {
-		// IPv4 routes configuration
-		// Original autotest.yaml step:
-		// ipv4Update:
-		//   - "0.0.0.0/0 -> 200.0.0.1"
-		commands := []string{
-			"/mnt/target/release/yanet-cli-route insert --cfg route0 --instances 0 --via 203.0.113.1 0.0.0.0/0",
-		}
-		_, err := fw.CLI.ExecuteCommands(commands...)
-		require.NoError(t, err, "Failed to configure IPv4 routes")
-	})
+		fw.Run("Step_001_Configure_Routes", func(fw *framework.F, t *testing.T) {
+			// IPv4 routes configuration
+			// Original autotest.yaml step:
+			// ipv4Update:
+			//   - "0.0.0.0/0 -> 200.0.0.1"
+			commands := []string{
+				"/mnt/target/release/yanet-cli-route insert --cfg route0 --instances 0 --via 203.0.113.1 0.0.0.0/0",
+			}
+			_, err := fw.ExecuteCommands(commands...)
+			require.NoError(t, err, "Failed to configure IPv4 routes")
+		})
 
-	// Wait 3 seconds for configuration changes to take effect (pipeline updates are asynchronous)
-	time.Sleep(3 * time.Second)
+		// Wait 3 seconds for configuration changes to take effect (pipeline updates are asynchronous)
+		time.Sleep(3 * time.Second)
 
-	t.Run("Step_001_Test_Packet", func(t *testing.T) {
-		// Test case: 001-send.pcap -> 001-expect.pcap
-		sendPackets := create016_routeSendPacket1(t)
-		require.NotNil(t, sendPackets)
-		require.NotEqual(t, 0, len(sendPackets), "Expected at least one packet to send")
+		fw.Run("Step_001_Test_Packet", func(fw *framework.F, t *testing.T) {
+			// Test case: 001-send.pcap -> 001-expect.pcap
+			sendPackets := create016_routeSendPacket1(t)
+			require.NotNil(t, sendPackets)
+			require.NotEqual(t, 0, len(sendPackets), "Expected at least one packet to send")
 
-		expectedPackets := create016_routeExpectPacket1(t)
-		require.NotNil(t, expectedPackets)
+			expectedPackets := create016_routeExpectPacket1(t)
+			require.NotNil(t, expectedPackets)
 
-		// Get socket client
-		client, err := fw.GetSocketClient(0)
-		require.NoError(t, err, "Failed to get socket client")
-		defer client.Close()
-		require.NoError(t, client.Connect(), "Failed to connect to socket")
+			// Get socket client
+			client, err := fw.GetSocketClient(0)
+			require.NoError(t, err, "Failed to get socket client")
+			defer client.Close()
+			require.NoError(t, client.Connect(), "Failed to connect to socket")
 
-		var receivedPackets []gopacket.Packet
-		for idx, pkt := range sendPackets {
-			t.Logf("Sending packet %d of %d from 001-send.pcap", idx+1, len(sendPackets))
-			packetBytes := pkt.Data()
+			var receivedPackets []gopacket.Packet
+			for idx, pkt := range sendPackets {
+				t.Logf("Sending packet %d of %d from 001-send.pcap", idx+1, len(sendPackets))
+				packetBytes := pkt.Data()
 
-			// Send packet
-			require.NoError(t, client.SendPacket(packetBytes), "Failed to send packet %d", idx)
+				// Send packet
+				require.NoError(t, client.SendPacket(packetBytes, ""), "Failed to send packet %d", idx)
 
-			// Receive packet (ignore errors - packet may be dropped)
-			responseData, _ := client.ReceivePacket(100 * time.Millisecond)
-			if responseData != nil {
-				receivedPkt := gopacket.NewPacket(responseData, layers.LayerTypeEthernet, gopacket.Default)
-				receivedPackets = append(receivedPackets, receivedPkt)
+				// Receive packet (ignore errors - packet may be dropped)
+				responseData, _ := client.ReceivePacket(100*time.Millisecond, "")
+				if responseData != nil {
+					receivedPkt := gopacket.NewPacket(responseData, layers.LayerTypeEthernet, gopacket.Default)
+					receivedPackets = append(receivedPackets, receivedPkt)
+				}
+
+				// Small delay to prevent socket buffer overflow when sending many packets rapidly
+				// This gives the dataplane time to process packets before the socket buffer fills up
+				if idx < len(sendPackets)-1 {
+					time.Sleep(1 * time.Millisecond)
+				}
 			}
 
-			// Small delay to prevent socket buffer overflow when sending many packets rapidly
-			// This gives the dataplane time to process packets before the socket buffer fills up
-			if idx < len(sendPackets)-1 {
-				time.Sleep(1 * time.Millisecond)
+			// Validate all received packets against expected packets
+			t.Logf("Received %d packets, expected %d packets", len(receivedPackets), len(expectedPackets))
+
+			require.Equalf(t, len(expectedPackets), len(receivedPackets),
+				"Packet count mismatch: expected %d, received %d", len(expectedPackets), len(receivedPackets))
+
+			for idx, expectedPkt := range expectedPackets {
+				actualPkt := receivedPackets[idx]
+
+				diff := cmp.Diff(expectedPkt.Layers(), actualPkt.Layers(), lib.CmpStdOpts...)
+				require.Emptyf(t, diff, "Packet layers mismatch for index %d", idx)
 			}
-		}
-
-		// Validate all received packets against expected packets
-		t.Logf("Received %d packets, expected %d packets", len(receivedPackets), len(expectedPackets))
-
-		require.Equalf(t, len(expectedPackets), len(receivedPackets),
-			"Packet count mismatch: expected %d, received %d", len(expectedPackets), len(receivedPackets))
-
-		for idx, expectedPkt := range expectedPackets {
-			actualPkt := receivedPackets[idx]
-
-			diff := cmp.Diff(expectedPkt.Layers(), actualPkt.Layers(), lib.CmpStdOpts...)
-			require.Emptyf(t, diff, "Packet layers mismatch for index %d", idx)
-		}
+		})
 	})
 }
 
@@ -137,8 +140,8 @@ func TestTest_016_route(t *testing.T) {
 //
 // create016_routeSendPacket1Params holds varying parameters for packet generation
 type create016_routeSendPacket1Params struct {
-	Ipv4Chksum uint16
 	Ipv4Dst    string
+	Ipv4Chksum uint16
 	TcpChksum  uint16
 }
 
@@ -171,16 +174,16 @@ func create016_routeSendPacket1(t *testing.T) []gopacket.Packet {
 
 	// Packets 0-9 (using helper)
 	paramsList := []create016_routeSendPacket1Params{
-		{Ipv4Chksum: 48146, Ipv4Dst: "1.0.0.0", TcpChksum: 53441},
-		{Ipv4Chksum: 48145, Ipv4Dst: "1.1.0.0", TcpChksum: 53440},
-		{Ipv4Chksum: 48144, Ipv4Dst: "1.2.0.0", TcpChksum: 53439},
-		{Ipv4Chksum: 48143, Ipv4Dst: "1.3.0.0", TcpChksum: 53438},
-		{Ipv4Chksum: 48142, Ipv4Dst: "1.4.0.0", TcpChksum: 53437},
-		{Ipv4Chksum: 48141, Ipv4Dst: "1.5.0.0", TcpChksum: 53436},
-		{Ipv4Chksum: 48140, Ipv4Dst: "1.6.0.0", TcpChksum: 53435},
-		{Ipv4Chksum: 48139, Ipv4Dst: "1.7.0.0", TcpChksum: 53434},
-		{Ipv4Chksum: 48138, Ipv4Dst: "1.8.0.0", TcpChksum: 53433},
-		{Ipv4Chksum: 48137, Ipv4Dst: "1.9.0.0", TcpChksum: 53432},
+		{Ipv4Dst: "1.0.0.0", Ipv4Chksum: 48146, TcpChksum: 53441},
+		{Ipv4Dst: "1.1.0.0", Ipv4Chksum: 48145, TcpChksum: 53440},
+		{Ipv4Dst: "1.2.0.0", Ipv4Chksum: 48144, TcpChksum: 53439},
+		{Ipv4Dst: "1.3.0.0", Ipv4Chksum: 48143, TcpChksum: 53438},
+		{Ipv4Dst: "1.4.0.0", Ipv4Chksum: 48142, TcpChksum: 53437},
+		{Ipv4Dst: "1.5.0.0", Ipv4Chksum: 48141, TcpChksum: 53436},
+		{Ipv4Dst: "1.6.0.0", Ipv4Chksum: 48140, TcpChksum: 53435},
+		{Ipv4Dst: "1.7.0.0", Ipv4Chksum: 48139, TcpChksum: 53434},
+		{Ipv4Dst: "1.8.0.0", Ipv4Chksum: 48138, TcpChksum: 53433},
+		{Ipv4Dst: "1.9.0.0", Ipv4Chksum: 48137, TcpChksum: 53432},
 	}
 
 	for _, params := range paramsList {

@@ -44,8 +44,9 @@ import (
 type Config struct {
 	InputDir       string
 	OutputDir      string
-	Verbose        bool // Enable verbose output (user-facing progress messages)
-	Debug          bool // Enable debug logging (technical details, automatically enables Verbose)
+	PackageName    string // Go package name for generated test files (default: "functional")
+	Verbose        bool   // Enable verbose output (user-facing progress messages)
+	Debug          bool   // Enable debug logging (technical details, automatically enables Verbose)
 	SkiplistPath   string
 	ForceASTParser bool // Force use of AST parser (fail if unavailable)
 	ForcePCAP      bool // Force use of PCAP analyzer, even if AST is available
@@ -264,6 +265,10 @@ type SkiplistEntry struct {
 
 // NewConverter creates a new converter instance
 func NewConverter(config *Config) (*Converter, error) {
+	if config.PackageName == "" {
+		config.PackageName = "functional"
+	}
+
 	// Initialize optional AST-based system (PCAP path is default)
 	scapyASTParser, err := findScapyASTParser()
 	if err != nil {

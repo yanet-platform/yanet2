@@ -181,10 +181,10 @@ func (c *Converter) generateTestStepsInOrder(steps []ConvertedStep) string {
 			packetBytes := pkt.Data()
 
 			// Send packet
-			require.NoError(t, client.SendPacket(packetBytes), "Failed to send packet %%d", idx)
+			require.NoError(t, client.SendPacket(packetBytes, ""), "Failed to send packet %%d", idx)
 
 			// Receive packet (ignore errors - packet may be dropped)
-			responseData, _ := client.ReceivePacket(100 * time.Millisecond)
+			responseData, _ := client.ReceivePacket(100 * time.Millisecond, "")
 			if responseData != nil {
 				receivedPkt := gopacket.NewPacket(responseData, layers.LayerTypeEthernet, gopacket.Default)
 				receivedPackets = append(receivedPackets, receivedPkt)
@@ -251,6 +251,7 @@ func (c *Converter) generateTestHeader(testName, originalTestName, testType stri
 	"github.com/gopacket/gopacket/layers"
 	"github.com/stretchr/testify/require"
 
+	"github.com/yanet-platform/yanet2/tests/functional/framework"
 	"github.com/yanet-platform/yanet2/tests/migration/converter/lib"
 )`
 
@@ -262,7 +263,7 @@ func (c *Converter) generateTestHeader(testName, originalTestName, testType stri
 	_ = net.ParseIP
 	_ = strings.Join`
 
-	return fmt.Sprintf(`package converted
+	return fmt.Sprintf(`package %s
 
 %s
 
@@ -270,9 +271,10 @@ func (c *Converter) generateTestHeader(testName, originalTestName, testType stri
 // Original test: %s
 // Test type: %s
 func Test%s(t *testing.T) {
-	fw := globalFramework.ForTest(t)
+	t.Parallel()
+	withBootedVM(t, func(fw *framework.F) {
 	require.NotNil(t, fw, "Global framework should be initialized")%s
-`, imports, testName, originalTestName, testType, testName, silenceCode)
+`, c.config.PackageName, imports, testName, originalTestName, testType, testName, silenceCode)
 }
 
 // generateNAT64TestTemplate generates template for NAT64 tests
@@ -349,6 +351,7 @@ func (c *Converter) generateNAT64TestTemplate(testData *GoTestData, functions []
 	})
 
 %s
+	})
 }
 
 %s
@@ -393,6 +396,7 @@ func (c *Converter) generateBalancerTestTemplate(testData *GoTestData, functions
 	})
 
 %s
+	})
 }
 
 %s
@@ -409,6 +413,7 @@ func (c *Converter) generateRouteTestTemplate(testData *GoTestData, functions []
 	header := c.generateTestHeader(testData.TestName, testData.OriginalTestName, testData.TestType)
 	return fmt.Sprintf(`%s
 %s
+	})
 }
 
 %s
@@ -433,6 +438,7 @@ func (c *Converter) generateACLTestTemplate(testData *GoTestData, functions []st
 	})
 
 %s
+	})
 }
 
 %s
@@ -483,6 +489,7 @@ func (c *Converter) generateDecapTestTemplate(testData *GoTestData, functions []
 	})
 
 %s
+	})
 }
 
 %s
@@ -509,6 +516,7 @@ func (c *Converter) generateGenericTestTemplate(testData *GoTestData, functions 
 	})
 
 %s
+	})
 }
 
 %s

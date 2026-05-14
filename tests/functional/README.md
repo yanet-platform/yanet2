@@ -52,7 +52,7 @@ tests/functional/
 │   ├── pipeline_test.go   # Empty pipeline (no-forward) tests
 │   ├── route_test.go      # Route module tests
 │   └── route_mpls_test.go # Route MPLS module tests
-├── converted/             # Auto-generated tests migrated from yanet1
+│   └── 0*_test.go         # Auto-generated tests migrated from yanet1
 ├── testdata/              # YAML config files for tests
 ├── Makefile               # VM image creation and test targets
 ├── cloud-init-user-data.yaml  # Cloud-init configuration

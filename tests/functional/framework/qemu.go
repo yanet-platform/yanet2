@@ -91,9 +91,13 @@ type QEMUManager struct {
 //	    log.Fatalf("Failed to create QEMU manager: %v", err)
 //	}
 func NewQEMUManager(name string, imagePath string, logger *zap.SugaredLogger) (*QEMUManager, error) {
-	// Generate unique instance ID for parallel execution
-	instanceID := fmt.Sprintf("yanet-vm-%s-%d-%d", name, os.Getpid(), time.Now().UnixNano())
-	workDir := filepath.Join(os.TempDir(), instanceID)
+	// Use /tmp directly to keep UNIX socket paths under the 104-byte limit.
+	// macOS TMPDIR (/var/folders/.../) is too long for socket paths.
+	workDir, err := os.MkdirTemp("/tmp", fmt.Sprintf("yvm-%s-", name))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create work directory: %w", err)
+	}
+	instanceID := filepath.Base(workDir)
 
 	// Determine project root directory
 	projectRoot, err := findProjectRoot()

@@ -22,7 +22,7 @@ else
 	endif
 endif
 
-.PHONY: all test clean prepare-vm check-deps test-enhanced test-basic debug-vm debug-dry-run test-login convert convert-one test-converted clean-converted
+.PHONY: all test clean prepare-vm check-deps test-enhanced test-basic debug-vm debug-dry-run test-login convert convert-one
 
 # Default target
 all: test
@@ -51,7 +51,7 @@ endif
 # Run all functional tests
 test: prepare-vm
 	@echo "Running all functional tests..."
-	go test -count=1 -v ./...
+	go test -count=1 -v ./main/...
 
 # Run main functional tests
 test-main: prepare-vm
@@ -96,19 +96,6 @@ convert-one:
 	fi
 	@echo "Converting test $(TEST)..."
 	cd $(MIGRATION_DIR) && $(MAKE) convert-one TEST=$(TEST) YANET1_ROOT=$(YANET1_ROOT)
-
-# Run converted tests
-test-converted: prepare-vm
-	@echo "Running converted yanet1 tests..."
-	@if [ ! -d "converted" ] || [ -z "$$(ls -A converted/*.go 2>/dev/null)" ]; then \
-		echo "No converted tests found. Run 'make convert' or 'make convert-one TEST=name' first."; \
-		exit 1; \
-	fi
-ifdef TEST
-	go test -count=1 -v -run "$(TEST)" ./converted/
-else
-	go test -count=1 -v -run "^Test.*" ./converted/
-endif
 
 # Create QEMU image
 $(QEMU_IMAGE): $(UBUNTU_IMAGE) $(CLOUD_INIT_AUTOLOGIN_ISO)
@@ -255,7 +242,7 @@ help:
 	@echo "Available targets:"
 	@echo "  all              - Run all tests (default)"
 	@echo "  test             - Run all functional tests"
-	@echo "  test-main        - Run main functional tests (without converted)"
+	@echo "  test-main        - Run main functional tests"
 	@echo "  test-run TEST=X  - Run specific test by name"
 	@echo ""
 	@echo "  prepare-vm       - Prepare VM environment with autologin"
@@ -276,6 +263,5 @@ help:
 	@echo "Converted tests (yanet1 → yanet2 migration):"
 	@echo "  convert           - Convert all yanet1 tests"
 	@echo "  convert-one TEST=X - Convert single test"
-	@echo "  test-converted    - Run converted tests"
-	@echo "  clean-converted   - Remove converted tests"
+	@echo "  clean-converted   - Remove converted tests from main/"
 	@echo ""
