@@ -202,4 +202,67 @@ func TestForward(t *testing.T) {
 		assert.Equal(t, framework.VMIPv6Host, outputPacket.SrcIP.String(), "Source IP should be the destination of the request")
 		assert.Equal(t, framework.VMIPv6Gateway, outputPacket.DstIP.String(), "Destination IP should be the source of the request")
 	})
+
+	fw.Run("Test_Batch", func(fw *framework.F, t *testing.T) {
+		// Send two packets, the first one is passed through forward
+		// module whereas the second should be routed to a kernel and
+		// responded with an ICMP
+		packets := [][]byte{
+			createICMPPacket(
+				net.ParseIP(framework.VMIPv4Gateway),
+				net.ParseIP(framework.VMIPv4Host),
+				[]byte("icmp test"),
+			),
+			createForwardPacket(
+				net.ParseIP("192.0.2.1"), // src IP (within 192.0.2.0/24)
+				net.ParseIP("192.0.2.2"), // dst IP (within 192.0.2.0/24)
+				[]byte("forward test"),
+			),
+			createICMPPacket(
+				net.ParseIP(framework.VMIPv4Gateway),
+				net.ParseIP(framework.VMIPv4Host),
+				[]byte("icmp test"),
+			),
+			createForwardPacket(
+				net.ParseIP("192.0.2.1"), // src IP (within 192.0.2.0/24)
+				net.ParseIP("192.0.2.2"), // dst IP (within 192.0.2.0/24)
+				[]byte("forward test"),
+			),
+			createICMPPacket(
+				net.ParseIP(framework.VMIPv4Gateway),
+				net.ParseIP(framework.VMIPv4Host),
+				[]byte("icmp test"),
+			),
+			createForwardPacket(
+				net.ParseIP("192.0.2.1"), // src IP (within 192.0.2.0/24)
+				net.ParseIP("192.0.2.2"), // dst IP (within 192.0.2.0/24)
+				[]byte("forward test"),
+			),
+			createICMPPacket(
+				net.ParseIP(framework.VMIPv4Gateway),
+				net.ParseIP(framework.VMIPv4Host),
+				[]byte("icmp test"),
+			),
+			createForwardPacket(
+				net.ParseIP("192.0.2.1"), // src IP (within 192.0.2.0/24)
+				net.ParseIP("192.0.2.2"), // dst IP (within 192.0.2.0/24)
+				[]byte("forward test"),
+			),
+		}
+
+		outputPackets, err := fw.SendPacketsAndParseAll(0, 0, packets, 100*time.Millisecond)
+		require.NoError(t, err, "Failed to send batch")
+
+		assert.Equal(t, 8, len(outputPackets), "eight packets expected")
+		cntICMP := 0
+		for _, pack := range outputPackets {
+			if framework.VMIPv4Host == pack.SrcIP.String() &&
+				framework.VMIPv4Gateway == pack.DstIP.String() {
+				cntICMP++
+			}
+		}
+
+		assert.Equal(t, cntICMP, 4, "four ICMP replies are expected")
+	})
+
 }

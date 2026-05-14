@@ -277,6 +277,44 @@ func (sc *SocketClient) SendPacket(packet []byte, dumpPath string) error {
 	return nil
 }
 
+func (sc *SocketClient) SendPackets(packets [][]byte, dumpPath string) error {
+	if sc.inner.conn == nil {
+		return fmt.Errorf("not connected to socket")
+	}
+
+	if err := sc.inner.conn.SetWriteDeadline(time.Now().Add(sc.inner.timeout)); err != nil {
+		return fmt.Errorf("failed to set write deadline: %w", err)
+	}
+
+	headerSize := binary.Size(uint32(0))
+	// Evaluate buffer size
+	size := 0
+	for idx := range packets {
+		size = size + headerSize + len(packets[idx])
+	}
+	// Create a buffer with the packet length in network byte order followed by the packet data
+	packetWithLength := make([]byte, size)
+	current := packetWithLength[0:]
+	for idx := range packets {
+		binary.BigEndian.PutUint32(current, uint32(len(packets[idx])))
+		copy(current[headerSize:], packets[idx])
+		current = current[len(packets[idx])+headerSize:]
+	}
+
+	sc.log.Debugf("Sending packets with length prefixes: % x", packetWithLength)
+
+	// Write raw socket data to dump file if path is provided
+	if err := writeToDumpFile(dumpPath, packetWithLength); err != nil {
+		sc.log.Warnf("Failed to write to dump file: %v", err)
+	}
+
+	if _, err := sc.inner.conn.Write(packetWithLength); err != nil {
+		return fmt.Errorf("failed to send packet: %w", err)
+	}
+
+	return nil
+}
+
 // ReceivePacket captures a network packet from the QEMU socket connection with
 // MAC address filtering and timeout handling. The method implements the QEMU
 // socket protocol by reading length-prefixed packets and filtering based on

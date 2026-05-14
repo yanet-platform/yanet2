@@ -663,6 +663,59 @@ func (f *F) SendPacketAndParseAll(inputIfaceIndex int, outputIfaceIndex int, pac
 	return outputPacketInfos, nil
 }
 
+func (f *F) SendPacketsAndParseAll(inputIfaceIndex int, outputIfaceIndex int, packets [][]byte, timeout time.Duration) ([]*PacketInfo, error) {
+	f.log.Infof("Sending packets on interface %d and capturing response on interface %d", inputIfaceIndex, outputIfaceIndex)
+
+	// Get socket clients
+	inputClient, err := f.GetSocketClient(inputIfaceIndex)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get input socket client: %w", err)
+	}
+
+	outputClient, err := f.GetSocketClient(outputIfaceIndex)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get output socket client: %w", err)
+	}
+
+	// Get dump file paths for this test
+	inputDumpPath, outputDumpPath := f.getDumpFilePaths()
+
+	// Connect to sockets
+	if err := inputClient.Connect(); err != nil {
+		return nil, fmt.Errorf("failed to connect to input socket: %w", err)
+	}
+
+	if err := outputClient.Connect(); err != nil {
+		return nil, fmt.Errorf("failed to connect to output socket: %w", err)
+	}
+
+	_, _ = outputClient.ReceiveAllPackets(timeout, outputDumpPath)
+
+	// Send packets on input interface
+	if err := inputClient.SendPackets(packets, inputDumpPath); err != nil {
+		return nil, fmt.Errorf("failed to send packet: %w", err)
+	}
+
+	responses, err := outputClient.ReceiveAllPackets(timeout, outputDumpPath)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to receive output packets: %w", err)
+	}
+
+	// Parse all response packets
+	var outputPacketInfos []*PacketInfo
+	for i, responseData := range responses {
+		outputPacketInfo, err := f.PacketParser.ParsePacket(responseData)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse response packet %d: %w", i, err)
+		}
+		f.log.Debugf("Received packet %d: %s", i, outputPacketInfo.String())
+		outputPacketInfos = append(outputPacketInfos, outputPacketInfo)
+	}
+
+	return outputPacketInfos, nil
+}
+
 // GetSocketClient retrieves or creates a socket client for the specified network
 // interface. The method implements caching to reuse existing connections and
 // ensures thread-safe access to the socket client pool.
