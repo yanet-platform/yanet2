@@ -440,16 +440,29 @@ cp_config_update_pipelines(
 	}
 
 	for (uint64_t idx = 0; idx < pipeline_count; ++idx) {
-		struct cp_pipeline *new_cp_pipeline = cp_pipeline_create(
+		struct cp_pipeline *new_cp_pipeline = cp_pipeline_new(
 			&cp_config->memory_context,
-			new_config_gen,
-			cp_pipeline_configs[idx],
-			err
+			cp_pipeline_configs[idx]->length
 		);
 		if (new_cp_pipeline == NULL) {
 			yanet_error_add(
 				err,
-				"failed to create pipeline '%s'",
+				"failed to allocate pipeline '%s'",
+				cp_pipeline_configs[idx]->name
+			);
+			goto error_free;
+		}
+
+		if (cp_pipeline_init(
+			    new_cp_pipeline,
+			    new_config_gen,
+			    cp_pipeline_configs[idx],
+			    err
+		    )) {
+			cp_pipeline_free(new_cp_pipeline);
+			yanet_error_add(
+				err,
+				"failed to initialize pipeline '%s'",
 				cp_pipeline_configs[idx]->name
 			);
 			goto error_free;

@@ -20,6 +20,8 @@ struct cp_pipeline_function {
  * and indexes of modules to be processed inside module registry.
  */
 struct cp_pipeline {
+	struct memory_context *memory_context; // shm-relative pointer
+
 	struct registry_item config_item;
 
 	struct counter_registry counter_registry;
@@ -47,18 +49,37 @@ struct cp_pipeline_config {
 struct dp_config;
 struct cp_config_gen;
 
+// Allocate a new cp_pipeline with capacity for length functions.
+//
+// Returns NULL on allocation failure; caller is responsible for reporting the
+// error.
 struct cp_pipeline *
-cp_pipeline_create(
-	struct memory_context *memory_context,
+cp_pipeline_new(struct memory_context *memory_context, uint64_t length);
+
+// Free the memory backing self.
+//
+// NULL-safe no-op.
+//
+// Does not call cp_pipeline_fini: caller must do that separately first.
+void
+cp_pipeline_free(struct cp_pipeline *self);
+
+// Initialize pipeline resources.
+//
+// On failure, internally calls cp_pipeline_fini and returns -1.
+int
+cp_pipeline_init(
+	struct cp_pipeline *self,
 	struct cp_config_gen *cp_config_gen,
 	struct cp_pipeline_config *cp_pipeline_config,
 	yanet_error **err
 );
 
+// Tear down resources acquired by cp_pipeline_init.
+//
+// Idempotent on zero-init.
 void
-cp_pipeline_free(
-	struct memory_context *memory_context, struct cp_pipeline *pipeline
-);
+cp_pipeline_fini(struct cp_pipeline *self);
 
 /*
  * Pipeline registry contains all existing pipelines.

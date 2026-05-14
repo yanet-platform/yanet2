@@ -6,153 +6,164 @@
 
 #include "lib/errors/errors.h"
 
+#include <assert.h>
 #include <stdio.h>
 #include <string.h>
 
-static inline uint64_t
+static inline size_t
 cp_pipeline_alloc_size(uint64_t length) {
 	return sizeof(struct cp_pipeline) +
 	       sizeof(struct cp_pipeline_function) * length;
 }
 
 struct cp_pipeline *
-cp_pipeline_create(
-	struct memory_context *memory_context,
+cp_pipeline_new(struct memory_context *memory_context, uint64_t length) {
+	size_t alloc_size = cp_pipeline_alloc_size(length);
+	struct cp_pipeline *self =
+		(struct cp_pipeline *)memory_balloc(memory_context, alloc_size);
+	if (self == NULL) {
+		return NULL;
+	}
+
+	memset(self, 0, alloc_size);
+
+	SET_OFFSET_OF(&self->memory_context, memory_context);
+	self->length = length;
+
+	return self;
+}
+
+void
+cp_pipeline_free(struct cp_pipeline *self) {
+	if (self == NULL) {
+		return;
+	}
+
+	struct memory_context *mctx = ADDR_OF(&self->memory_context);
+	size_t alloc_size = cp_pipeline_alloc_size(self->length);
+	memory_bfree(mctx, self, alloc_size);
+}
+
+int
+cp_pipeline_init(
+	struct cp_pipeline *self,
 	struct cp_config_gen *cp_config_gen,
 	struct cp_pipeline_config *cp_pipeline_config,
 	yanet_error **err
 ) {
+	assert(self->length == cp_pipeline_config->length);
+
 	// FIXME
 	(void)cp_config_gen;
 
-	struct cp_pipeline *new_pipeline = (struct cp_pipeline *)memory_balloc(
-		memory_context,
-		cp_pipeline_alloc_size(cp_pipeline_config->length)
-	);
-	if (new_pipeline == NULL) {
-		yanet_error_add(
-			err,
-			"failed to allocate memory for pipeline '%s'",
-			cp_pipeline_config->name
-		);
-		return NULL;
-	}
+	struct memory_context *mctx = ADDR_OF(&self->memory_context);
 
-	memset(new_pipeline,
-	       0,
-	       cp_pipeline_alloc_size(cp_pipeline_config->length));
-	registry_item_init(&new_pipeline->config_item);
+	registry_item_init(&self->config_item);
 
-	new_pipeline->length = cp_pipeline_config->length;
-	strtcpy(new_pipeline->name,
-		cp_pipeline_config->name,
-		CP_PIPELINE_NAME_LEN);
+	strtcpy(self->name, cp_pipeline_config->name, CP_PIPELINE_NAME_LEN);
 
-	if (counter_registry_init(
-		    &new_pipeline->counter_registry, memory_context, 0
-	    )) {
+	if (counter_registry_init(&self->counter_registry, mctx, 0)) {
 		yanet_error_add(
 			err,
 			"failed to initialize counter registry for pipeline "
 			"'%s'",
 			cp_pipeline_config->name
 		);
-		goto error;
+		goto err_out;
 	}
 
-	new_pipeline->counter_packet_in_count = counter_registry_register(
-		&new_pipeline->counter_registry, "input", 1, err
+	self->counter_packet_in_count = counter_registry_register(
+		&self->counter_registry, "input", 1, err
 	);
-	if (new_pipeline->counter_packet_in_count == COUNTER_INVALID) {
+	if (self->counter_packet_in_count == COUNTER_INVALID) {
 		yanet_error_add(
 			err,
 			"failed to register 'input' counter for pipeline '%s'",
 			cp_pipeline_config->name
 		);
-		goto error;
+		goto err_out;
 	}
 
-	new_pipeline->counter_packet_out_count = counter_registry_register(
-		&new_pipeline->counter_registry, "output", 1, err
+	self->counter_packet_out_count = counter_registry_register(
+		&self->counter_registry, "output", 1, err
 	);
-	if (new_pipeline->counter_packet_out_count == COUNTER_INVALID) {
+	if (self->counter_packet_out_count == COUNTER_INVALID) {
 		yanet_error_add(
 			err,
 			"failed to register 'output' counter for pipeline '%s'",
 			cp_pipeline_config->name
 		);
-		goto error;
+		goto err_out;
 	}
 
-	new_pipeline->counter_packet_drop_count = counter_registry_register(
-		&new_pipeline->counter_registry, "drop", 1, err
+	self->counter_packet_drop_count = counter_registry_register(
+		&self->counter_registry, "drop", 1, err
 	);
-	if (new_pipeline->counter_packet_drop_count == COUNTER_INVALID) {
+	if (self->counter_packet_drop_count == COUNTER_INVALID) {
 		yanet_error_add(
 			err,
 			"failed to register 'drop' counter for pipeline '%s'",
 			cp_pipeline_config->name
 		);
-		goto error;
+		goto err_out;
 	}
 
-	new_pipeline->counter_packet_in_bytes = counter_registry_register(
-		&new_pipeline->counter_registry, "input_bytes", 1, err
+	self->counter_packet_in_bytes = counter_registry_register(
+		&self->counter_registry, "input_bytes", 1, err
 	);
-	if (new_pipeline->counter_packet_in_bytes == COUNTER_INVALID) {
+	if (self->counter_packet_in_bytes == COUNTER_INVALID) {
 		yanet_error_add(
 			err,
 			"failed to register 'input_bytes' counter for pipeline "
 			"'%s'",
 			cp_pipeline_config->name
 		);
-		goto error;
+		goto err_out;
 	}
 
-	new_pipeline->counter_packet_out_bytes = counter_registry_register(
-		&new_pipeline->counter_registry, "output_bytes", 1, err
+	self->counter_packet_out_bytes = counter_registry_register(
+		&self->counter_registry, "output_bytes", 1, err
 	);
-	if (new_pipeline->counter_packet_out_bytes == COUNTER_INVALID) {
+	if (self->counter_packet_out_bytes == COUNTER_INVALID) {
 		yanet_error_add(
 			err,
 			"failed to register 'output_bytes' counter for "
-			"pipeline "
-			"'%s'",
+			"pipeline '%s'",
 			cp_pipeline_config->name
 		);
-		goto error;
+		goto err_out;
 	}
 
-	new_pipeline->counter_packet_drop_bytes = counter_registry_register(
-		&new_pipeline->counter_registry, "drop_bytes", 1, err
+	self->counter_packet_drop_bytes = counter_registry_register(
+		&self->counter_registry, "drop_bytes", 1, err
 	);
-	if (new_pipeline->counter_packet_drop_bytes == COUNTER_INVALID) {
+	if (self->counter_packet_drop_bytes == COUNTER_INVALID) {
 		yanet_error_add(
 			err,
 			"failed to register 'drop_bytes' counter for pipeline "
 			"'%s'",
 			cp_pipeline_config->name
 		);
-		goto error;
+		goto err_out;
 	}
 
-	new_pipeline->counter_packet_in_hist = counter_registry_register(
-		&new_pipeline->counter_registry, "input histogram", 8, err
+	self->counter_packet_in_hist = counter_registry_register(
+		&self->counter_registry, "input histogram", 8, err
 	);
-	if (new_pipeline->counter_packet_in_hist == COUNTER_INVALID) {
+	if (self->counter_packet_in_hist == COUNTER_INVALID) {
 		yanet_error_add(
 			err,
 			"failed to register 'input histogram' counter for "
 			"pipeline '%s'",
 			cp_pipeline_config->name
 		);
-		goto error;
+		goto err_out;
 	}
 
 	for (uint64_t idx = 0; idx < cp_pipeline_config->length; ++idx) {
-		strtcpy(new_pipeline->functions[idx].name,
+		strtcpy(self->functions[idx].name,
 			cp_pipeline_config->functions[idx],
-			sizeof(new_pipeline->functions[idx].name));
+			sizeof(self->functions[idx].name));
 		char counter_name[COUNTER_NAME_LEN];
 		snprintf(
 			counter_name,
@@ -161,15 +172,10 @@ cp_pipeline_create(
 			idx
 		);
 
-		new_pipeline->functions[idx].tsc_counter_id =
-			counter_registry_register(
-				&new_pipeline->counter_registry,
-				counter_name,
-				8,
-				err
-			);
-		if (new_pipeline->functions[idx].tsc_counter_id ==
-		    COUNTER_INVALID) {
+		self->functions[idx].tsc_counter_id = counter_registry_register(
+			&self->counter_registry, counter_name, 8, err
+		);
+		if (self->functions[idx].tsc_counter_id == COUNTER_INVALID) {
 			yanet_error_add(
 				err,
 				"failed to register '%s' counter for pipeline "
@@ -177,30 +183,20 @@ cp_pipeline_create(
 				counter_name,
 				cp_pipeline_config->name
 			);
-			goto error;
+			goto err_out;
 		}
 	}
 
-	return new_pipeline;
+	return 0;
 
-error:
-	cp_pipeline_free(memory_context, new_pipeline);
-	return NULL;
+err_out:
+	cp_pipeline_fini(self);
+	return -1;
 }
 
 void
-cp_pipeline_free(
-	struct memory_context *memory_context, struct cp_pipeline *pipeline
-) {
-	//	counter_registry_destroy(&pipeline->counter_registry);
-
-	// FIXME free functions
-
-	memory_bfree(
-		memory_context,
-		pipeline,
-		cp_pipeline_alloc_size(pipeline->length)
-	);
+cp_pipeline_fini(struct cp_pipeline *self) {
+	counter_registry_free(&self->counter_registry);
 }
 
 // Pipeline registry
@@ -244,20 +240,21 @@ cp_pipeline_registry_copy(
 
 static void
 cp_pipeline_registry_item_free_cb(struct registry_item *item, void *data) {
+	// TODO: drop the data parameter from registry_item_free_func once all
+	// registry consumers move memory_context into their struct.
+	(void)data;
 	struct cp_pipeline *pipeline =
 		container_of(item, struct cp_pipeline, config_item);
-	struct memory_context *memory_context = (struct memory_context *)data;
-	cp_pipeline_free(memory_context, pipeline);
+	cp_pipeline_fini(pipeline);
+	cp_pipeline_free(pipeline);
 }
 
 void
 cp_pipeline_registry_destroy(struct cp_pipeline_registry *pipeline_registry) {
-	struct memory_context *memory_context =
-		ADDR_OF(&pipeline_registry->memory_context);
 	registry_destroy(
 		&pipeline_registry->registry,
 		cp_pipeline_registry_item_free_cb,
-		memory_context
+		NULL
 	);
 }
 
@@ -267,8 +264,9 @@ cp_pipeline_registry_get(
 ) {
 	struct registry_item *item =
 		registry_get(&pipeline_registry->registry, index);
-	if (item == NULL)
+	if (item == NULL) {
 		return NULL;
+	}
 	return container_of(item, struct cp_pipeline, config_item);
 }
 
@@ -346,7 +344,7 @@ cp_pipeline_registry_upsert(
 		name,
 		&new_pipeline->config_item,
 		cp_pipeline_registry_item_free_cb,
-		ADDR_OF(&pipeline_registry->memory_context)
+		NULL
 	);
 }
 
@@ -360,6 +358,6 @@ cp_pipeline_registry_delete(
 		name,
 		NULL,
 		cp_pipeline_registry_item_free_cb,
-		ADDR_OF(&pipeline_registry->memory_context)
+		NULL
 	);
 }
