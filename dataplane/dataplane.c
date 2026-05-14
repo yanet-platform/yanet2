@@ -459,15 +459,33 @@ dataplane_init(
 			return -1;
 		}
 
-		// FIXME: Stub agent for the instance configuration
-		struct agent agent;
-		memory_context_init_from(
-			&agent.memory_context,
+		// System agent for this instance.
+		//
+		// Owns the phy devices created in cp_config_gen_create
+		// and lives in shm so their parent_memory_context offsets
+		// remain valid in every process that maps the same shm region.
+		//
+		// FIXME: not paired with a free: released only when shm is torn
+		// down.
+		struct agent *agent = (struct agent *)memory_balloc(
 			&instance->cp_config->memory_context,
-			"stub agent"
+			sizeof(struct agent)
 		);
-		SET_OFFSET_OF(&agent.dp_config, instance->dp_config);
-		SET_OFFSET_OF(&agent.cp_config, instance->cp_config);
+		if (agent == NULL) {
+			LOG(ERROR,
+			    "failed to allocate system agent for instance %u",
+			    instance_idx);
+			return -1;
+		}
+		memset(agent, 0, sizeof(struct agent));
+		strtcpy(agent->name, "dataplane", sizeof(agent->name));
+		memory_context_init_from(
+			&agent->memory_context,
+			&instance->cp_config->memory_context,
+			"dataplane"
+		);
+		SET_OFFSET_OF(&agent->dp_config, instance->dp_config);
+		SET_OFFSET_OF(&agent->cp_config, instance->cp_config);
 
 		instance->dp_config->dp_topology.device_count =
 			config->device_count;
@@ -520,7 +538,7 @@ dataplane_init(
 
 		yanet_error *err = NULL;
 		struct cp_config_gen *cp_config_gen =
-			cp_config_gen_create(&agent, &err);
+			cp_config_gen_create(agent, &err);
 		if (cp_config_gen == NULL) {
 			LOG(ERROR,
 			    "failed to create cp_config_gen: %s",

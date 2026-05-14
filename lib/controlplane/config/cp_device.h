@@ -23,6 +23,23 @@ struct cp_device_entry {
 };
 
 struct cp_device {
+	// Offset pointer to the memory_context used to allocate this struct.
+	//
+	// Set by cp_device_new, or by a subclass create function before
+	// cp_device_init.
+	//
+	// Consumed by cp_device_free to reclaim the allocation.
+	struct memory_context *parent_memory_context;
+
+	// Number of bytes to pass to memory_bfree when freeing this struct.
+	//
+	// Set by cp_device_new OR by a subclass create function before
+	// cp_device_init.
+	//
+	// Subclasses MUST store sizeof their wrapper struct here so that
+	// cp_device_free reclaims the proper full allocation.
+	uint64_t alloc_size;
+
 	struct registry_item config_item;
 	char type[80];
 	char name[CP_DEVICE_NAME_LEN];
@@ -74,41 +91,44 @@ cp_device_config_init(
 	yanet_error **err
 );
 
-/*
- * Releases heap memory owned by the embedded fields of *config.
- *
- * Does NOT free config itself.
- *
- * After this call config is safe to either free (if heap-allocated) or leave
- * to its enclosing storage.
- */
+// Release the input/output pipeline arrays embedded in config.
+//
+// Leaves the config struct itself untouched: the caller decides whether to
+// free it or hand it back to its enclosing storage.
 void
-cp_device_config_deinit(struct cp_device_config *config);
+cp_device_config_fini(struct cp_device_config *config);
 
+// Allocate a new cp_device from mctx.
+//
+// Returns NULL on allocation failure; caller is responsible for reporting the
+// error.
 struct cp_device *
-cp_device_create(
-	struct agent *agent,
-	struct cp_device_config *device_config,
-	yanet_error **err
-);
+cp_device_new(struct memory_context *mctx);
 
+// Release the memory backing self.
+//
+// NULL-safe no-op.
+//
+// Does not call cp_device_fini: caller must do that separately first.
 void
-cp_device_free(
-	struct memory_context *memory_context, struct cp_device *cp_device
-);
+cp_device_free(struct cp_device *self);
 
+// Initialize device resources: sub-context, pipelines, counter registry.
+//
+// On failure, internally calls cp_device_fini and returns -1.
 int
 cp_device_init(
-	struct cp_device *cp_device,
+	struct cp_device *self,
 	struct agent *agent,
-	const struct cp_device_config *cp_device_config,
+	const struct cp_device_config *cfg,
 	yanet_error **err
 );
 
+// Tear down resources acquired by cp_device_init.
+//
+// Idempotent on zero-init.
 void
-cp_device_destroy(
-	struct memory_context *memory_context, struct cp_device *cp_device
-);
+cp_device_fini(struct cp_device *self);
 
 /*
  * Pipeline registry contains all existing devices.

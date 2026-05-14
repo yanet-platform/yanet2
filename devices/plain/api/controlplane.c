@@ -25,38 +25,34 @@ cp_device_plain_create(
 		return NULL;
 	}
 
+	memset(cp_device_plain, 0, sizeof(struct cp_device_plain));
+	SET_OFFSET_OF(
+		&cp_device_plain->cp_device.parent_memory_context,
+		&agent->memory_context
+	);
+	cp_device_plain->cp_device.alloc_size = sizeof(struct cp_device_plain);
+
 	if (cp_device_init(
 		    &cp_device_plain->cp_device,
 		    agent,
 		    &config->cp_device_config,
 		    err
 	    )) {
-		goto fail;
-	}
-
-	return &cp_device_plain->cp_device;
-
-fail: {
-	cp_device_plain_free(&cp_device_plain->cp_device);
-	return NULL;
-}
-}
-
-void
-cp_device_plain_free(struct cp_device *cp_device) {
-	struct cp_device_plain *cp_device_plain =
-		container_of(cp_device, struct cp_device_plain, cp_device);
-
-	struct agent *agent = ADDR_OF(&cp_device->agent);
-	// FIXME: remove the check as agent should be assigned
-	if (agent != NULL) {
-		cp_device_destroy(&agent->memory_context, cp_device);
 		memory_bfree(
 			&agent->memory_context,
 			cp_device_plain,
 			sizeof(struct cp_device_plain)
 		);
+		return NULL;
 	}
+
+	return &cp_device_plain->cp_device;
+}
+
+void
+cp_device_plain_free(struct cp_device *cp_device) {
+	cp_device_fini(cp_device);
+	cp_device_free(cp_device);
 }
 
 struct cp_device_plain_config *
@@ -121,6 +117,6 @@ void
 cp_device_plain_config_free(
 	struct cp_device_plain_config *cp_device_plain_config
 ) {
-	cp_device_config_deinit(&cp_device_plain_config->cp_device_config);
+	cp_device_config_fini(&cp_device_plain_config->cp_device_config);
 	free(cp_device_plain_config);
 }

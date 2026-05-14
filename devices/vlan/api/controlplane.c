@@ -25,40 +25,36 @@ cp_device_vlan_create(
 		return NULL;
 	}
 
+	memset(cp_device_vlan, 0, sizeof(struct cp_device_vlan));
+	SET_OFFSET_OF(
+		&cp_device_vlan->cp_device.parent_memory_context,
+		&agent->memory_context
+	);
+	cp_device_vlan->cp_device.alloc_size = sizeof(struct cp_device_vlan);
+
 	if (cp_device_init(
 		    &cp_device_vlan->cp_device,
 		    agent,
 		    &config->cp_device_config,
 		    err
 	    )) {
-		goto fail;
-	}
-
-	cp_device_vlan->vlan = config->vlan;
-
-	return &cp_device_vlan->cp_device;
-
-fail: {
-	cp_device_vlan_free(&cp_device_vlan->cp_device);
-	return NULL;
-}
-}
-
-void
-cp_device_vlan_free(struct cp_device *cp_device) {
-	struct cp_device_vlan *cp_device_vlan =
-		container_of(cp_device, struct cp_device_vlan, cp_device);
-
-	struct agent *agent = ADDR_OF(&cp_device->agent);
-	// FIXME: remove the check as agent should be assigned
-	if (agent != NULL) {
-		cp_device_destroy(&agent->memory_context, cp_device);
 		memory_bfree(
 			&agent->memory_context,
 			cp_device_vlan,
 			sizeof(struct cp_device_vlan)
 		);
+		return NULL;
 	}
+
+	cp_device_vlan->vlan = config->vlan;
+
+	return &cp_device_vlan->cp_device;
+}
+
+void
+cp_device_vlan_free(struct cp_device *cp_device) {
+	cp_device_fini(cp_device);
+	cp_device_free(cp_device);
 }
 
 struct cp_device_vlan_config *
@@ -126,6 +122,6 @@ cp_device_vlan_config_set_output_pipeline(
 void
 cp_device_vlan_config_free(struct cp_device_vlan_config *cp_device_vlan_config
 ) {
-	cp_device_config_deinit(&cp_device_vlan_config->cp_device_config);
+	cp_device_config_fini(&cp_device_vlan_config->cp_device_config);
 	free(cp_device_vlan_config);
 }

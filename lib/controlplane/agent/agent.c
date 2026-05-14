@@ -1315,7 +1315,7 @@ cp_device_config_create(
 
 void
 cp_device_config_free(struct cp_device_config *config) {
-	cp_device_config_deinit(config);
+	cp_device_config_fini(config);
 	free(config);
 }
 

@@ -720,11 +720,20 @@ cp_config_gen_create(struct agent *agent, yanet_error **err) {
 		device_config.input_pipelines = &pipe_cfg;
 		device_config.output_pipelines = &pipe_cfg;
 		struct cp_device *cp_device =
-			cp_device_create(agent, &device_config, err);
+			cp_device_new(&agent->memory_context);
 		if (cp_device == NULL) {
 			yanet_error_add(
 				err,
-				"failed to create device '%s'",
+				"failed to allocate memory for device '%s'",
+				device_config.name
+			);
+			goto error;
+		}
+		if (cp_device_init(cp_device, agent, &device_config, err)) {
+			cp_device_free(cp_device);
+			yanet_error_add(
+				err,
+				"failed to initialize device '%s'",
 				device_config.name
 			);
 			goto error;

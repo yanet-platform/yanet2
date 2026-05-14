@@ -69,7 +69,7 @@ error:
 }
 
 void
-cp_device_config_deinit(struct cp_device_config *config) {
+cp_device_config_fini(struct cp_device_config *config) {
 	free(config->output_pipelines);
 	free(config->input_pipelines);
 	config->output_pipelines = NULL;
@@ -114,156 +114,155 @@ cp_device_entry_create(
 	return cp_device_entry;
 }
 
+struct cp_device *
+cp_device_new(struct memory_context *mctx) {
+	struct cp_device *self = (struct cp_device *)memory_balloc(
+		mctx, sizeof(struct cp_device)
+	);
+	if (self == NULL) {
+		return NULL;
+	}
+
+	memset(self, 0, sizeof(struct cp_device));
+	SET_OFFSET_OF(&self->parent_memory_context, mctx);
+	self->alloc_size = sizeof(struct cp_device);
+
+	return self;
+}
+
+void
+cp_device_free(struct cp_device *self) {
+	if (self == NULL) {
+		return;
+	}
+
+	struct memory_context *mctx = ADDR_OF(&self->parent_memory_context);
+	memory_bfree(mctx, self, self->alloc_size);
+}
+
 int
 cp_device_init(
-	struct cp_device *cp_device,
+	struct cp_device *self,
 	struct agent *agent,
-	const struct cp_device_config *cp_device_config,
+	const struct cp_device_config *cfg,
 	yanet_error **err
 ) {
 	struct dp_config *dp_config = ADDR_OF(&agent->dp_config);
 
-	memset(cp_device, 0, sizeof(struct cp_device));
-
 	if (dp_config_lookup_device(
-		    dp_config, cp_device_config->type, &cp_device->dp_device_idx
+		    dp_config, cfg->type, &self->dp_device_idx
 	    )) {
 		yanet_error_add(
 			err,
 			"device type '%s' not found in dataplane config",
-			cp_device_config->type
+			cfg->type
 		);
-		return -1;
+		goto err_out;
 	}
-	strtcpy(cp_device->type, cp_device_config->type, sizeof(cp_device->type)
-	);
-	strtcpy(cp_device->name, cp_device_config->name, sizeof(cp_device->name)
-	);
+	strtcpy(self->type, cfg->type, sizeof(self->type));
+	strtcpy(self->name, cfg->name, sizeof(self->name));
 	memory_context_init_from(
-		&cp_device->memory_context,
-		&agent->memory_context,
-		cp_device_config->name
+		&self->memory_context, &agent->memory_context, cfg->name
 	);
 
-	SET_OFFSET_OF(&cp_device->agent, agent);
+	SET_OFFSET_OF(&self->agent, agent);
 
-	struct memory_context *memory_context = &cp_device->memory_context;
+	struct memory_context *memory_context = &self->memory_context;
 
 	SET_OFFSET_OF(
-		&cp_device->input_pipelines,
+		&self->input_pipelines,
 		cp_device_entry_create(
-			memory_context, cp_device_config->input_pipelines, err
+			memory_context, cfg->input_pipelines, err
 		)
 	);
-	if (cp_device->input_pipelines == NULL) {
+	if (self->input_pipelines == NULL) {
 		yanet_error_add(
 			err,
 			"failed to create input pipelines for device '%s'",
-			cp_device_config->name
+			cfg->name
 		);
-		return -1;
+		goto err_out;
 	}
 
 	SET_OFFSET_OF(
-		&cp_device->output_pipelines,
+		&self->output_pipelines,
 		cp_device_entry_create(
-			memory_context, cp_device_config->output_pipelines, err
+			memory_context, cfg->output_pipelines, err
 		)
 	);
-	if (cp_device->output_pipelines == NULL) {
+	if (self->output_pipelines == NULL) {
 		yanet_error_add(
 			err,
 			"failed to create output pipelines for device '%s'",
-			cp_device_config->name
+			cfg->name
 		);
-		return -1;
+		goto err_out;
 	}
 
-	registry_item_init(&cp_device->config_item);
+	registry_item_init(&self->config_item);
 
-	// FIXME: handle errors
-	counter_registry_init(&cp_device->counter_registry, memory_context, 0);
+	if (counter_registry_init(&self->counter_registry, memory_context, 0)) {
+		yanet_error_add(
+			err,
+			"failed to initialize counter registry for device '%s'",
+			cfg->name
+		);
+		goto err_out;
+	}
 
-	cp_device->counter_packet_rx_count = counter_registry_register(
-		&cp_device->counter_registry, "rx", 1, err
+	self->counter_packet_rx_count = counter_registry_register(
+		&self->counter_registry, "rx", 1, err
 	);
-	if (cp_device->counter_packet_rx_count == COUNTER_INVALID) {
+	if (self->counter_packet_rx_count == COUNTER_INVALID) {
 		yanet_error_add(
 			err,
 			"failed to register 'rx' counter for device '%s'",
-			cp_device_config->name
+			cfg->name
 		);
-		return -1;
+		goto err_out;
 	}
 
-	cp_device->counter_packet_tx_count = counter_registry_register(
-		&cp_device->counter_registry, "tx", 1, err
+	self->counter_packet_tx_count = counter_registry_register(
+		&self->counter_registry, "tx", 1, err
 	);
-	if (cp_device->counter_packet_tx_count == COUNTER_INVALID) {
+	if (self->counter_packet_tx_count == COUNTER_INVALID) {
 		yanet_error_add(
 			err,
 			"failed to register 'tx' counter for device '%s'",
-			cp_device_config->name
+			cfg->name
 		);
-		return -1;
+		goto err_out;
 	}
 
-	cp_device->counter_packet_rx_bytes = counter_registry_register(
-		&cp_device->counter_registry, "rx_bytes", 1, err
+	self->counter_packet_rx_bytes = counter_registry_register(
+		&self->counter_registry, "rx_bytes", 1, err
 	);
-	if (cp_device->counter_packet_rx_bytes == COUNTER_INVALID) {
+	if (self->counter_packet_rx_bytes == COUNTER_INVALID) {
 		yanet_error_add(
 			err,
 			"failed to register 'rx_bytes' counter for device '%s'",
-			cp_device_config->name
+			cfg->name
 		);
-		return -1;
+		goto err_out;
 	}
 
-	cp_device->counter_packet_tx_bytes = counter_registry_register(
-		&cp_device->counter_registry, "tx_bytes", 1, err
+	self->counter_packet_tx_bytes = counter_registry_register(
+		&self->counter_registry, "tx_bytes", 1, err
 	);
-	if (cp_device->counter_packet_tx_bytes == COUNTER_INVALID) {
+	if (self->counter_packet_tx_bytes == COUNTER_INVALID) {
 		yanet_error_add(
 			err,
 			"failed to register 'tx_bytes' counter for device '%s'",
-			cp_device_config->name
+			cfg->name
 		);
-		return -1;
+		goto err_out;
 	}
 
 	return 0;
-}
 
-struct cp_device *
-cp_device_create(
-	struct agent *agent,
-	struct cp_device_config *device_config,
-	yanet_error **err
-) {
-	struct cp_device *new_device = (struct cp_device *)memory_balloc(
-		&agent->memory_context, sizeof(struct cp_device)
-	);
-	if (new_device == NULL) {
-		yanet_error_add(
-			err,
-			"failed to allocate memory for device '%s'",
-			device_config->name
-		);
-		return NULL;
-	}
-
-	if (cp_device_init(new_device, agent, device_config, err)) {
-		yanet_error_add(
-			err,
-			"failed to initialize device '%s'",
-			device_config->name
-		);
-		cp_device_free(&agent->memory_context, new_device);
-		return NULL;
-	}
-
-	return new_device;
+err_out:
+	cp_device_fini(self);
+	return -1;
 }
 
 static void
@@ -281,24 +280,29 @@ cp_device_entry_free(
 }
 
 void
-cp_device_destroy(
-	struct memory_context *memory_context, struct cp_device *cp_device
-) {
-	cp_device_entry_free(
-		memory_context, ADDR_OF(&cp_device->output_pipelines)
-	);
+cp_device_fini(struct cp_device *self) {
+	struct memory_context *memory_context = &self->memory_context;
 
-	cp_device_entry_free(
-		memory_context, ADDR_OF(&cp_device->input_pipelines)
-	);
-}
+	// Release the device's counter table.
+	//
+	// Safe on zero-init because counter_registry_free guards on the names
+	// offset being zero.
+	//
+	// NOTE: reset names and capacity here for defensive idempotency,
+	// because counter_registry itself does not zero its own state after.
+	//
+	// TODO: ^^^
+	counter_registry_free(&self->counter_registry);
+	SET_OFFSET_OF(&self->counter_registry.names, NULL);
+	self->counter_registry.capacity = 0;
 
-void
-cp_device_free(
-	struct memory_context *memory_context, struct cp_device *cp_device
-) {
-	cp_device_destroy(memory_context, cp_device);
-	memory_bfree(memory_context, cp_device, sizeof(struct cp_device));
+	cp_device_entry_free(memory_context, ADDR_OF(&self->output_pipelines));
+	SET_OFFSET_OF(&self->output_pipelines, NULL);
+
+	cp_device_entry_free(memory_context, ADDR_OF(&self->input_pipelines));
+	SET_OFFSET_OF(&self->input_pipelines, NULL);
+
+	SET_OFFSET_OF(&self->agent, NULL);
 }
 
 int
@@ -338,20 +342,19 @@ cp_device_registry_copy(
 
 static void
 cp_device_registry_item_free_cb(struct registry_item *item, void *data) {
+	(void)data;
 	struct cp_device *device =
 		container_of(item, struct cp_device, config_item);
-	struct memory_context *memory_context = (struct memory_context *)data;
-	cp_device_free(memory_context, device);
+	cp_device_fini(device);
+	cp_device_free(device);
 }
 
 void
 cp_device_registry_destroy(struct cp_device_registry *device_registry) {
-	struct memory_context *memory_context =
-		ADDR_OF(&device_registry->memory_context);
 	registry_destroy(
 		&device_registry->registry,
 		cp_device_registry_item_free_cb,
-		memory_context
+		NULL
 	);
 }
 
@@ -427,7 +430,7 @@ cp_device_registry_upsert(
 		    name,
 		    &new_device->config_item,
 		    cp_device_registry_item_free_cb,
-		    ADDR_OF(&device_registry->memory_context)
+		    NULL
 	    )) {
 		yanet_error_add(err, "failed to replace device in registry");
 		return -1;
@@ -446,6 +449,6 @@ cp_device_registry_delete(
 		name,
 		NULL,
 		cp_device_registry_item_free_cb,
-		ADDR_OF(&device_registry->memory_context)
+		NULL
 	);
 }
