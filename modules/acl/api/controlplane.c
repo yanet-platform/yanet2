@@ -91,18 +91,21 @@ acl_module_config_init(
 		uint64_t size;
 		uint64_t *dst;
 	} counters[] = {
-		{"acl_no_match", 2, &config->no_match_counter_id},
-		{"acl_action_allow", 2, &config->action_allow_counter_id},
-		{"acl_action_deny", 2, &config->action_deny_counter_id},
-		{"acl_action_count", 2, &config->action_count_counter_id},
-		{"acl_action_check_state",
-		 2,
-		 &config->action_check_state_counter_id},
+		{"acl_no_match", 1, &config->no_match_counter_id},
+		{"acl_action_allow", 1, &config->action_allow_counter_id},
+		{"acl_action_deny", 1, &config->action_deny_counter_id},
+		{"acl_action_check_pass",
+		 1,
+		 &config->action_check_pass_counter_id},
+		{"acl_action_check_miss",
+		 1,
+		 &config->action_check_miss_counter_id},
 		{"acl_action_create_state",
-		 2,
+		 1,
 		 &config->action_create_state_counter_id},
-		{"acl_action_unknown", 2, &config->action_unknown_counter_id},
-		{"acl_state_miss", 2, &config->state_miss_counter_id},
+		{"acl_action_invalid", 1, &config->action_invalid_counter_id},
+		{"acl_action_non_term", 1, &config->action_non_term_counter_id},
+
 		{"acl_sync_sent", 2, &config->sync_sent_counter_id},
 	};
 
@@ -468,18 +471,40 @@ acl_module_config_update(
 
 		uint64_t action_count = acl_rule->action_count;
 		if (action_count > ACL_MAX_ACTIONS) {
-			action_count = ACL_MAX_ACTIONS;
+			/*
+			 * Could not reach a terminal one action
+			 */
+			goto error_target;
 		}
 		for (uint64_t action_idx = 0; action_idx < action_count;
 		     ++action_idx) {
-			targets[idx].actions[action_idx] =
-				acl_rule->actions[action_idx].id;
+			uint64_t *action = targets[idx].actions + action_idx;
+			switch (acl_rule->actions[action_idx].kind) {
+			case ACL_RULE_ACTION_KIND_ALLOW:
+				*action = ACTION_ALLOW;
+				break;
+			case ACL_RULE_ACTION_KIND_DENY:
+				*action = ACTION_DENY;
+				break;
+			case ACL_RULE_ACTION_KIND_COUNT:
+				*action = ACTION_COUNT;
+				break;
+			case ACL_RULE_ACTION_KIND_CHECK_STATE:
+				*action = ACTION_CHECK_STATE;
+				break;
+			case ACL_RULE_ACTION_KIND_CREATE_STATE:
+				*action = ACTION_CREATE_STATE;
+				break;
+			case ACL_RULE_ACTION_KIND_LOG:
+				*action = ACTION_LOG;
+				break;
+			default:
+				goto error_target;
+			}
 		}
 		targets[idx].action_count = action_count;
 
-		struct acl_action *terminal =
-			&acl_rule->actions[acl_rule->action_count - 1];
-		const char *counter_name = terminal->counter;
+		const char *counter_name = acl_rule->counter;
 		char default_counter[COUNTER_NAME_LEN];
 		if (counter_name[0] == '\0') {
 			snprintf(

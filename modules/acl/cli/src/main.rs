@@ -47,13 +47,13 @@ struct SerializableRule {
     proto_ranges: Vec<String>,
     vlan_ranges: Vec<String>,
     devices: Vec<String>,
+    counter: String,
     actions: Vec<SerializableAction>,
 }
 
 #[derive(Serialize)]
 struct SerializableAction {
     kind: String,
-    counter: String,
 }
 
 #[derive(Tabled)]
@@ -386,7 +386,6 @@ enum ActionKind {
     Allow,
     Deny,
     Count,
-    SkipTo,
     CheckState,
     CreateState,
     Log,
@@ -395,8 +394,6 @@ enum ActionKind {
 #[derive(Debug, Serialize, Deserialize)]
 struct ACLAction {
     kind: ActionKind,
-    #[serde(default)]
-    counter: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -408,6 +405,8 @@ struct ACLRule {
     proto_ranges: Vec<Range>,
     vlan_ranges: Vec<Range>,
     devices: Vec<String>,
+    #[serde(default)]
+    counter: String,
     actions: Vec<ACLAction>,
 }
 
@@ -477,6 +476,7 @@ impl TryFrom<ACLRule> for aclpb::Rule {
                 .collect::<Result<_, _>>()?,
             vlan_ranges: acl_rule.vlan_ranges.iter().map(vlan_range).collect::<Result<_, _>>()?,
             devices: acl_rule.devices.iter().cloned().map(Device::from).collect(),
+            counter: acl_rule.counter.clone(),
             actions: acl_rule
                 .actions
                 .iter()
@@ -485,13 +485,11 @@ impl TryFrom<ACLRule> for aclpb::Rule {
                         ActionKind::Allow => aclpb::ActionKind::Pass,
                         ActionKind::Deny => aclpb::ActionKind::Deny,
                         ActionKind::Count => aclpb::ActionKind::Count,
-                        ActionKind::SkipTo => aclpb::ActionKind::Skipto,
                         ActionKind::CheckState => aclpb::ActionKind::CheckState,
                         ActionKind::CreateState => aclpb::ActionKind::CreateState,
                         ActionKind::Log => aclpb::ActionKind::Log,
                     }
                     .into(),
-                    counter: a.counter.clone(),
                 })
                 .collect(),
         })
@@ -585,6 +583,7 @@ impl ACLService {
                         .map(|r| format!("{}-{}", r.from, r.to))
                         .collect(),
                     devices: rule.devices.iter().map(|d| d.name.clone()).collect(),
+                    counter: rule.counter.clone(),
                     actions: rule
                         .actions
                         .iter()
@@ -592,7 +591,6 @@ impl ACLService {
                             kind: aclpb::ActionKind::try_from(a.kind)
                                 .map(|k| k.as_str_name().to_string())
                                 .unwrap_or_else(|_| a.kind.to_string()),
-                            counter: a.counter.clone(),
                         })
                         .collect(),
                 })

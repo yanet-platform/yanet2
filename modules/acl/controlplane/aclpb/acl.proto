@@ -39,27 +39,24 @@ message ShowConfigResponse {
 
 message Rule {
   repeated Action actions = 1;
-
-  repeated filterpb.Device devices = 2;
-  repeated filterpb.VlanRange vlan_ranges = 3;
-  repeated filterpb.IPNet srcs = 4;
-  repeated filterpb.IPNet dsts = 5;
-  repeated filterpb.ProtoRange proto_ranges = 6;
-  repeated filterpb.PortRange src_port_ranges = 7;
-  repeated filterpb.PortRange dst_port_ranges = 8;
-}
-
-message Action {
-  ActionKind kind = 1;
   string counter = 2;
+
+  repeated filterpb.Device devices = 3;
+  repeated filterpb.VlanRange vlan_ranges = 4;
+  repeated filterpb.IPNet srcs = 5;
+  repeated filterpb.IPNet dsts = 6;
+  repeated filterpb.ProtoRange proto_ranges = 7;
+  repeated filterpb.PortRange src_port_ranges = 8;
+  repeated filterpb.PortRange dst_port_ranges = 9;
 }
+
+message Action { ActionKind kind = 1; }
 
 // Defines possible actions for matched traffic
 enum ActionKind {
   ACTION_KIND_PASS = 0;
   ACTION_KIND_DENY = 1;
   ACTION_KIND_COUNT = 2;
-  ACTION_KIND_SKIPTO = 3;
   ACTION_KIND_CHECK_STATE = 4;
   ACTION_KIND_CREATE_STATE = 5;
   ACTION_KIND_LOG = 6;

@@ -58,12 +58,12 @@ func (m *ModuleConfig) AsFFIModule() ffi.ModuleConfig {
 }
 
 type AclAction struct {
-	ID      uint64
-	Counter string
+	Kind uint32
 }
 
 type AclRule struct {
 	Actions       []AclAction
+	Counter       string
 	Devices       filter.Devices
 	VlanRanges    filter.VlanRanges
 	Src4s         filter.IPNets
@@ -75,6 +75,15 @@ type AclRule struct {
 	DstPortRanges filter.PortRanges
 }
 
+const (
+	ActionAllow       = C.ACL_RULE_ACTION_KIND_ALLOW
+	ActionDeny        = C.ACL_RULE_ACTION_KIND_DENY
+	ActionCount       = C.ACL_RULE_ACTION_KIND_COUNT
+	ActionCheckState  = C.ACL_RULE_ACTION_KIND_CHECK_STATE
+	ActionCreateState = C.ACL_RULE_ACTION_KIND_CREATE_STATE
+	ActionLog         = C.ACL_RULE_ACTION_KIND_LOG
+)
+
 // CBuildActions writes the C representation of AclActions into dst.
 func CBuildActions(dst *C.struct_acl_rule, actions []AclAction, pinner *runtime.Pinner) {
 	if len(actions) == 0 {
@@ -82,10 +91,7 @@ func CBuildActions(dst *C.struct_acl_rule, actions []AclAction, pinner *runtime.
 	}
 	cActions := make([]C.struct_acl_action, len(actions))
 	for idx, a := range actions {
-		cActions[idx].id = C.uint64_t(a.ID)
-		cCounter := C.CString(a.Counter)
-		C.strncpy(&cActions[idx].counter[0], cCounter, C.COUNTER_NAME_LEN)
-		C.free(unsafe.Pointer(cCounter))
+		cActions[idx].kind = a.Kind
 	}
 	pinner.Pin(&cActions[0])
 	dst.actions = &cActions[0]
@@ -96,6 +102,10 @@ func (m *AclRule) CBuild(pinner *runtime.Pinner) C.struct_acl_rule {
 	cRule := C.struct_acl_rule{}
 
 	CBuildActions(&cRule, m.Actions, pinner)
+
+	counter := unsafe.Slice((*byte)(unsafe.Pointer(&cRule.counter[0])), C.COUNTER_NAME_LEN)
+	copy(counter, m.Counter)
+
 	filter.CBuildDevices(&cRule.devices, m.Devices, pinner)
 	filter.CBuildVlanRanges(&cRule.vlan_ranges, m.VlanRanges, pinner)
 	filter.CBuildNet4s(&cRule.src_net4s, m.Src4s, pinner)

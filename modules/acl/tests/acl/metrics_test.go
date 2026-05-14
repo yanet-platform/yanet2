@@ -21,7 +21,7 @@ import (
 )
 
 // helpers
-func sumCounter(counters []ffi.CounterInfo, name string) (pkts, bytes uint64) {
+func sumCounter(counters []ffi.CounterInfo, name string) (pkts uint64) {
 	for _, c := range counters {
 		if c.Name != name {
 			continue
@@ -29,9 +29,6 @@ func sumCounter(counters []ffi.CounterInfo, name string) (pkts, bytes uint64) {
 		for _, w := range c.Values {
 			if len(w) > 0 {
 				pkts += w[0]
-			}
-			if len(w) > 1 {
-				bytes += w[1]
 			}
 		}
 	}
@@ -89,7 +86,8 @@ func gaugeVal(m *commonpb.Metric) float64 {
 // passRule builds a simple IPv4 UDP PASS rule for the default device
 func passRule(src, dst, counter string) acl.AclRule {
 	return acl.AclRule{
-		Actions:       []acl.AclAction{{ID: 0, Counter: counter}}, // PASS
+		Actions:       []acl.AclAction{{Kind: 2}, {Kind: 0}}, // COUNT + PASS
+		Counter:       counter,
 		Devices:       []filter.Device{{Name: defaultDeviceName}},
 		Src4s:         []filter.IPNet{{Addr: netip.MustParseAddr(src), Mask: netip.MustParseAddr("255.255.255.255")}},
 		Dst4s:         []filter.IPNet{{Addr: netip.MustParseAddr(dst), Mask: netip.MustParseAddr("255.255.255.255")}},
@@ -103,7 +101,7 @@ func passRule(src, dst, counter string) acl.AclRule {
 
 func denyRule(src, dst string) acl.AclRule {
 	r := passRule(src, dst, "")
-	r.Actions = []acl.AclAction{{ID: 1}} // DENY
+	r.Actions = []acl.AclAction{{Kind: 1}} // DENY
 	return r
 }
 
@@ -159,9 +157,8 @@ func TestMetrics_ActionCounters(t *testing.T) {
 			_, err = setup.mock.HandlePackets(udpPacket(t, tc.src, "10.0.0.2"))
 			require.NoError(t, err)
 
-			pkts, bytes := sumCounter(dpCounters(t, setup.agent), tc.counterName)
+			pkts := sumCounter(dpCounters(t, setup.agent), tc.counterName)
 			assert.Equal(t, uint64(1), pkts)
-			assert.Greater(t, bytes, uint64(0))
 		})
 	}
 }
@@ -176,9 +173,8 @@ func TestMetrics_PerRuleCounter(t *testing.T) {
 	_, err = setup.mock.HandlePackets(udpPacket(t, "10.0.0.1", "10.0.0.2"))
 	require.NoError(t, err)
 
-	pkts, bytes := sumCounter(dpCounters(t, setup.agent), name)
+	pkts := sumCounter(dpCounters(t, setup.agent), name)
 	assert.Equal(t, uint64(1), pkts)
-	assert.Greater(t, bytes, uint64(0))
 }
 
 // 4. ACLService.Metrics()

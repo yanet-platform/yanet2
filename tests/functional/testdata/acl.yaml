@@ -7,7 +7,7 @@
 # rules:
 #   - actions:                                    # List of actions (last one is terminal)
 #       - kind: Allow|Deny|Count|...              # Action kind
-#         counter: string                         # Optional counter name
+#     counter: string                         # Optional counter name
 #     devices: [string]                         # List of devices (currently empty array)
 #     dst_ports: array                          # Destination port ranges
 #       - from: int                               # Start of port range

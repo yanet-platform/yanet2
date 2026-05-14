@@ -8,6 +8,15 @@
 
 #include "lib/errors/errors.h"
 
+enum acl_rule_action_kind {
+	ACL_RULE_ACTION_KIND_ALLOW,
+	ACL_RULE_ACTION_KIND_DENY,
+	ACL_RULE_ACTION_KIND_COUNT,
+	ACL_RULE_ACTION_KIND_CHECK_STATE,
+	ACL_RULE_ACTION_KIND_CREATE_STATE,
+	ACL_RULE_ACTION_KIND_LOG
+};
+
 struct agent;
 struct cp_module;
 
@@ -20,13 +29,14 @@ void
 acl_module_config_free(struct cp_module *cp_module);
 
 struct acl_action {
-	uint64_t id;
-	char counter[COUNTER_NAME_LEN];
+	enum acl_rule_action_kind kind;
 };
 
 struct acl_rule {
 	struct acl_action *actions;
 	uint64_t action_count;
+
+	char counter[COUNTER_NAME_LEN];
 
 	struct filter_devices devices;
 	struct filter_vlan_ranges vlan_ranges;
