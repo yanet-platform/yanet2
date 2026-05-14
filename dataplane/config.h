@@ -14,6 +14,7 @@ struct dataplane_device_worker_config {
 	uint16_t instance_id;
 	uint16_t rx_queue_len;
 	uint16_t tx_queue_len;
+	uint32_t num_mbufs;
 };
 
 struct dataplane_device_config {

@@ -31,6 +31,7 @@ enum state {
 	state_worker_instance_id,
 	state_worker_rx_queue_len,
 	state_worker_tx_queue_len,
+	state_worker_num_mbufs,
 
 	state_connections,
 	state_connection,
@@ -192,6 +193,13 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 
 				state = state_worker;
 				break;
+			case state_worker_num_mbufs:
+				worker->num_mbufs = strtol(start, &end, 10);
+				if (*end != '\0')
+					goto error;
+
+				state = state_worker;
+				break;
 
 			case state_connection_src:
 				connection->src_device_id =
@@ -273,6 +281,8 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 					state = state_worker_rx_queue_len;
 				} else if (!strcmp("tx_queue_len", start)) {
 					state = state_worker_tx_queue_len;
+				} else if (!strcmp("num_mbufs", start)) {
+					state = state_worker_num_mbufs;
 				} else {
 					goto error;
 				}

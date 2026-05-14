@@ -520,9 +520,11 @@ dataplane_worker_init(
 		queue_id
 	);
 
+	uint32_t num_mbufs = config->num_mbufs ? config->num_mbufs : 16384;
+
 	worker->rx_mempool = rte_mempool_create(
 		mempool_name,
-		16384,
+		num_mbufs,
 		MBUF_MAX_SIZE,
 		0,
 		sizeof(struct rte_pktmbuf_pool_private),
