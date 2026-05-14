@@ -285,6 +285,15 @@ counter_storage_allocator_free_pages(
 	);
 }
 
+// Initialize a counter_storage_pool to the zero-init state.
+//
+// Pool entries are allocated lazily on first counter registration, so there
+// is nothing to set up beyond zeroing the struct.
+static void
+counter_storage_pool_init(struct counter_storage_pool *self) {
+	memset(self, 0, sizeof(*self));
+}
+
 static void
 counter_storage_init(
 	struct memory_context *memory_context,
@@ -295,9 +304,9 @@ counter_storage_init(
 	SET_OFFSET_OF(&storage->memory_context, memory_context);
 	SET_OFFSET_OF(&storage->allocator, allocator);
 	SET_OFFSET_OF(&storage->registry, registry);
-	memset(storage->pools,
-	       0,
-	       sizeof(struct counter_storage_pool) * COUNTER_POOL_SIZE);
+	for (uint64_t idx = 0; idx < COUNTER_POOL_SIZE; ++idx) {
+		counter_storage_pool_init(storage->pools + idx);
+	}
 }
 
 struct counter_storage *

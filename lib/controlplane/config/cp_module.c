@@ -172,6 +172,8 @@ cp_module_fini(struct cp_module *cp_module) {
 	cp_module->device_count = 0;
 
 	SET_OFFSET_OF(&cp_module->agent, NULL);
+
+	memory_context_fini(&cp_module->memory_context);
 }
 
 int

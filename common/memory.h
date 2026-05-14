@@ -55,6 +55,15 @@ memory_context_init_from(
 	return 0;
 }
 
+// Reset a memory_context to the zero-init state.
+//
+// The context owns no allocations of its own — it only stores a name and an
+// offset to the upstream block allocator... at least for now.
+static inline void
+memory_context_fini(struct memory_context *self) {
+	memset(self, 0, sizeof(*self));
+}
+
 static inline void *
 memory_balloc(struct memory_context *context, size_t size) {
 	void *result = block_allocator_balloc(

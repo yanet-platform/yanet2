@@ -293,6 +293,8 @@ cp_device_fini(struct cp_device *self) {
 	SET_OFFSET_OF(&self->input_pipelines, NULL);
 
 	SET_OFFSET_OF(&self->agent, NULL);
+
+	memory_context_fini(&self->memory_context);
 }
 
 int
