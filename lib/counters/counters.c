@@ -165,7 +165,7 @@ counter_registry_register(
 	}
 	if (strnlen(name, COUNTER_NAME_LEN) == COUNTER_NAME_LEN) {
 		yanet_error_add(
-			err, "name length exceeds max %d", COUNTER_NAME_LEN
+			err, "name length exceeds max %d", COUNTER_NAME_LEN - 1
 		);
 		return -1;
 	}
