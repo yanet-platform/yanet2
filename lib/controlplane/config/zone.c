@@ -165,13 +165,13 @@ cp_config_gen_free(
 
 	// Then, free registries of module configs, chains,
 	// functions and pipelines
-	cp_module_registry_destroy(&config_gen->module_registry);
-	cp_function_registry_destroy(&config_gen->function_registry);
-	cp_pipeline_registry_destroy(&config_gen->pipeline_registry);
-	cp_device_registry_destroy(&config_gen->device_registry);
+	cp_module_registry_fini(&config_gen->module_registry);
+	cp_function_registry_fini(&config_gen->function_registry);
+	cp_pipeline_registry_fini(&config_gen->pipeline_registry);
+	cp_device_registry_fini(&config_gen->device_registry);
 
 	// Finally, free counter storage registry
-	cp_config_counter_storage_registry_destroy(
+	cp_config_counter_storage_registry_fini(
 		&config_gen->counter_storage_registry
 	);
 }

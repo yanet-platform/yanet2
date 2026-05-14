@@ -250,8 +250,8 @@ cp_pipeline_registry_item_free_cb(struct registry_item *item, void *data) {
 }
 
 void
-cp_pipeline_registry_destroy(struct cp_pipeline_registry *pipeline_registry) {
-	registry_destroy(
+cp_pipeline_registry_fini(struct cp_pipeline_registry *pipeline_registry) {
+	registry_fini(
 		&pipeline_registry->registry,
 		cp_pipeline_registry_item_free_cb,
 		NULL

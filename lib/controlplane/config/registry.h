@@ -80,19 +80,28 @@ registry_init(
 	return 0;
 }
 
+// Release all items in the registry, free the items array, and zero the struct.
+//
+// Idempotent on zero-init: safe to call on a registry that was never
+// initialized or has already been finalized.
 static inline void
-registry_destroy(
+registry_fini(
 	struct registry *registry,
 	registry_item_free_func item_free_func,
 	void *item_free_func_data
 ) {
+	if (ADDR_OF(&registry->items) == NULL) {
+		return;
+	}
+
 	struct memory_context *memory_context =
 		ADDR_OF(&registry->memory_context);
 
 	for (uint64_t idx = 0; idx < registry->capacity; ++idx) {
 		struct registry_item *item = registry_get(registry, idx);
-		if (item == NULL)
+		if (item == NULL) {
 			continue;
+		}
 
 		registry_item_unref(item, item_free_func, item_free_func_data);
 	}
@@ -102,6 +111,8 @@ registry_destroy(
 		ADDR_OF(&registry->items),
 		sizeof(struct registry_item *) * registry->capacity
 	);
+
+	memset(registry, 0, sizeof(*registry));
 }
 
 static inline int

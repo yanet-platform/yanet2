@@ -158,7 +158,7 @@ cp_device_registry_copy(
 );
 
 void
-cp_device_registry_destroy(struct cp_device_registry *device_registry);
+cp_device_registry_fini(struct cp_device_registry *device_registry);
 
 struct cp_device *
 cp_device_registry_get(

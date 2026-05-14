@@ -172,15 +172,11 @@ cp_module_registry_copy(
 	yanet_error **err
 );
 
-/**
- * Destroy a module registry and free its resources.
- *
- * Cleans up all modules in the registry and releases associated memory.
- *
- * @param module_registry Pointer to the registry to destroy
- */
+// Release all modules in the registry and free its resources.
+//
+// Idempotent on zero-init.
 void
-cp_module_registry_destroy(struct cp_module_registry *module_registry);
+cp_module_registry_fini(struct cp_module_registry *module_registry);
 
 /**
  * Get a module from the registry by index.

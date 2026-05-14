@@ -340,8 +340,8 @@ cp_device_registry_item_free_cb(struct registry_item *item, void *data) {
 }
 
 void
-cp_device_registry_destroy(struct cp_device_registry *device_registry) {
-	registry_destroy(
+cp_device_registry_fini(struct cp_device_registry *device_registry) {
+	registry_fini(
 		&device_registry->registry,
 		cp_device_registry_item_free_cb,
 		NULL

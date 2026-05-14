@@ -21,7 +21,7 @@ cp_config_counter_storage_registry_init(
 );
 
 void
-cp_config_counter_storage_registry_destroy(
+cp_config_counter_storage_registry_fini(
 	struct cp_config_counter_storage_registry *registry
 );
 

@@ -260,8 +260,8 @@ cp_function_registry_item_free_cb(struct registry_item *item, void *data) {
 }
 
 void
-cp_function_registry_destroy(struct cp_function_registry *function_registry) {
-	registry_destroy(
+cp_function_registry_fini(struct cp_function_registry *function_registry) {
+	registry_fini(
 		&function_registry->registry,
 		cp_function_registry_item_free_cb,
 		NULL

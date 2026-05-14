@@ -118,7 +118,7 @@ cp_function_registry_copy(
 );
 
 void
-cp_function_registry_destroy(struct cp_function_registry *function_registry);
+cp_function_registry_fini(struct cp_function_registry *function_registry);
 
 struct cp_function *
 cp_function_registry_get(

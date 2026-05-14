@@ -262,10 +262,10 @@ cp_module_registry_item_free_cb(struct registry_item *item, void *data) {
 }
 
 void
-cp_module_registry_destroy(struct cp_module_registry *module_registry) {
+cp_module_registry_fini(struct cp_module_registry *module_registry) {
 	struct memory_context *memory_context =
 		ADDR_OF(&module_registry->memory_context);
-	registry_destroy(
+	registry_fini(
 		&module_registry->registry,
 		cp_module_registry_item_free_cb,
 		memory_context

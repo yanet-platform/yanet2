@@ -91,7 +91,7 @@ cb_cp_config_counter_storage_chain_free(
 		item, struct cp_config_counter_storage_chain, item
 	);
 
-	registry_destroy(
+	registry_fini(
 		&chain->module_registry,
 		cb_cp_config_counter_storage_module_free,
 		memory_context
@@ -111,7 +111,7 @@ cb_cp_config_counter_storage_function_free(
 		item, struct cp_config_counter_storage_function, item
 	);
 
-	registry_destroy(
+	registry_fini(
 		&function->chain_registry,
 		cb_cp_config_counter_storage_chain_free,
 		memory_context
@@ -131,7 +131,7 @@ cb_cp_config_counter_storage_pipeline_free(
 		item, struct cp_config_counter_storage_pipeline, item
 	);
 
-	registry_destroy(
+	registry_fini(
 		&pipeline->function_registry,
 		cb_cp_config_counter_storage_function_free,
 		memory_context
@@ -151,7 +151,7 @@ cb_cp_config_counter_storage_device_free(
 		item, struct cp_config_counter_storage_device, item
 	);
 
-	registry_destroy(
+	registry_fini(
 		&device->pipeline_registry,
 		cb_cp_config_counter_storage_pipeline_free,
 		memory_context
@@ -161,10 +161,10 @@ cb_cp_config_counter_storage_device_free(
 }
 
 void
-cp_config_counter_storage_registry_destroy(
+cp_config_counter_storage_registry_fini(
 	struct cp_config_counter_storage_registry *registry
 ) {
-	registry_destroy(
+	registry_fini(
 		&registry->device_registry,
 		cb_cp_config_counter_storage_device_free,
 		ADDR_OF(&registry->memory_context)
@@ -288,7 +288,7 @@ cp_config_counter_storage_registry_insert_device(
 	return 0;
 
 error_insert:
-	registry_destroy(
+	registry_fini(
 		&device->pipeline_registry,
 		cb_cp_config_counter_storage_pipeline_free,
 		memory_context
@@ -453,7 +453,7 @@ cp_config_counter_storage_registry_insert_pipeline(
 	return 0;
 
 error_insert:
-	registry_destroy(
+	registry_fini(
 		&pipeline->function_registry,
 		cb_cp_config_counter_storage_function_free,
 		memory_context
@@ -635,7 +635,7 @@ cp_config_counter_storage_registry_insert_function(
 	return 0;
 
 error_insert:
-	registry_destroy(
+	registry_fini(
 		&function->chain_registry,
 		cb_cp_config_counter_storage_chain_free,
 		memory_context
@@ -834,7 +834,7 @@ cp_config_counter_storage_registry_insert_chain(
 	return 0;
 
 error_insert:
-	registry_destroy(
+	registry_fini(
 		&chain->module_registry,
 		cb_cp_config_counter_storage_module_free,
 		memory_context

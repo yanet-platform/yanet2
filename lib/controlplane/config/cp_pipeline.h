@@ -109,7 +109,7 @@ cp_pipeline_registry_copy(
 );
 
 void
-cp_pipeline_registry_destroy(struct cp_pipeline_registry *pipeline_registry);
+cp_pipeline_registry_fini(struct cp_pipeline_registry *pipeline_registry);
 
 struct cp_pipeline *
 cp_pipeline_registry_get(
