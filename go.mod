@@ -6,6 +6,7 @@ require (
 	github.com/c2h5oh/datasize v0.0.0-20231215233829-aa82cc1e6500
 	github.com/cenkalti/backoff/v5 v5.0.2
 	github.com/gobwas/glob v0.2.3
+	github.com/golang/protobuf v1.5.4 // Somehow, it's used in the package build process for ubuntu 22.04
 	github.com/google/go-cmp v0.7.0
 	github.com/gopacket/gopacket v1.3.1
 	github.com/siderolabs/grpc-proxy v0.5.1
@@ -24,13 +25,12 @@ require (
 	gopkg.in/yaml.v3 v3.0.1
 )
 
-require github.com/klauspost/compress v1.18.4
-
 require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
+	github.com/klauspost/compress v1.18.4 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/spf13/pflag v1.0.6 // indirect
 	github.com/vishvananda/netns v0.0.5 // indirect
