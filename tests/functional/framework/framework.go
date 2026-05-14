@@ -1572,6 +1572,65 @@ func (f *F) SaveSnapshotKeepUnmounted(name string) error {
 	return nil
 }
 
+// RestoreClean reverts the VM to a previously saved snapshot and
+// re-establishes serial console and 9P mounts WITHOUT running the
+// dataplane heartbeat check. Use this for snapshots where YANET is
+// not yet running (e.g. "preyanet") -- StartYANET will be called
+// separately after restore.
+func (f *F) RestoreClean(snapshot string) error {
+	f.log.Infof("Restoring snapshot %q (clean, no heartbeat)...", snapshot)
+
+	if err := f.Unmount9P(); err != nil {
+		f.log.Debugf("Pre-restore unmount (may be already unmounted): %v", err)
+	}
+
+	if err := f.qemu.RestoreSnapshot(snapshot); err != nil {
+		return fmt.Errorf("failed to restore snapshot %q: %w", snapshot, err)
+	}
+
+	f.qemu.stopSerialReader()
+
+	if err := f.qemu.ReconnectSerial(); err != nil {
+		return fmt.Errorf("failed to reconnect serial after restore: %w", err)
+	}
+
+	f.qemu.setVMReady(false)
+	f.qemu.readySignal = make(chan bool, 1)
+	f.qemu.resetSerialBuffer()
+	go f.qemu.readSerial()
+
+	stdin := f.qemu.GetStdin()
+	if stdin == nil {
+		return fmt.Errorf("serial console unavailable after restore")
+	}
+	for range 3 {
+		_, _ = stdin.Write([]byte{0x03})
+		time.Sleep(20 * time.Millisecond)
+	}
+	const restoreTimeout = 30 * time.Second
+	deadline := time.Now().Add(restoreTimeout)
+	_, _ = stdin.Write([]byte("\n\n"))
+	for !f.qemu.IsVMReady() && time.Now().Before(deadline) {
+		select {
+		case <-f.qemu.readySignal:
+		case <-time.After(1 * time.Second):
+			if !f.qemu.IsVMReady() {
+				_, _ = stdin.Write([]byte("\n\n"))
+			}
+		}
+	}
+	if !f.qemu.IsVMReady() {
+		return fmt.Errorf("VM did not respond within %v", restoreTimeout)
+	}
+
+	if err := f.Mount9P(); err != nil {
+		return fmt.Errorf("post-restore remount failed: %w", err)
+	}
+
+	f.log.Infof("Snapshot %q clean restore complete", snapshot)
+	return nil
+}
+
 // RestoreAndReconnect reverts the VM to a previously saved snapshot and
 // re-establishes the serial console and socket connections that break
 // when the guest state is rolled back.
@@ -1652,7 +1711,7 @@ func (f *F) RestoreAndReconnect(snapshot string) error {
 			return fmt.Errorf("post-restore remount failed: %w", err)
 		}
 
-		if err := f.waitForDatapathReady(heartbeatTimeout); err != nil {
+		if err := f.WaitForDatapathReady(heartbeatTimeout); err != nil {
 			f.log.Warnf("Heartbeat failed after loadvm (attempt %d): %v", attempt, err)
 			f.runKni0Diagnostic(fmt.Sprintf("pre-restart-%d", attempt))
 
@@ -1662,7 +1721,7 @@ func (f *F) RestoreAndReconnect(snapshot string) error {
 				continue
 			}
 
-			if err := f.waitForDatapathReady(heartbeatTimeout); err != nil {
+			if err := f.WaitForDatapathReady(heartbeatTimeout); err != nil {
 				lastErr = fmt.Errorf("heartbeat failed after YANET restart: %w", err)
 				continue
 			}
@@ -1677,11 +1736,11 @@ func (f *F) RestoreAndReconnect(snapshot string) error {
 	return fmt.Errorf("dataplane not ready after %d restore attempts: %w", maxAttempts, lastErr)
 }
 
-// waitForDatapathReady sends ICMP heartbeat packets until the dataplane
+// WaitForDatapathReady sends ICMP heartbeat packets until the dataplane
 // responds, confirming DPDK virtio-user reconnect after a snapshot restore.
 // No operstate check — on macOS TCG and Linux KVM, kni0 operstate stays DOWN
 // even when DPDK is actively forwarding. Only an end-to-end packet test works.
-func (f *F) waitForDatapathReady(timeout time.Duration) error {
+func (f *F) WaitForDatapathReady(timeout time.Duration) error {
 	f.log.Debug("Waiting for dataplane to be ready...")
 	start := time.Now()
 

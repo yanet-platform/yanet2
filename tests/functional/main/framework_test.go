@@ -187,23 +187,42 @@ func dumpMemoryDiagnostics(fw *framework.F, log *zap.SugaredLogger) {
 	}
 }
 
+// Baseline configs stored at package level so RestartYANET and
+// YANET_BOOTED_BASELINE restore can access them.
+var (
+	baselineDP = dataplaneConfig()
+	baselineCP = controlplaneConfig()
+)
+
 func configureBaseline(fw *framework.F, log *zap.SugaredLogger) error {
-	if err := fw.StartYANET(dataplaneConfig(), controlplaneConfig()); err != nil {
+	// Write config files BEFORE starting YANET so the "preyanet"
+	// snapshot captures them on disk without a running dataplane.
+	if err := fw.CreateForwardConfig(forwardConfig()); err != nil {
+		return err
+	}
+	if err := fw.CreateConfigFile("route0.yaml", route0Config()); err != nil {
+		return err
+	}
+
+	// Save "preyanet" snapshot -- OS booted, binaries copied to
+	// /tmp/yanet/, config files written, 9P unmounted, no YANET running.
+	// YANET_BOOTED_BASELINE restores from this to get clean DPDK state.
+	if err := fw.SaveSnapshotKeepUnmounted("preyanet"); err != nil {
+		return err
+	}
+	log.Info("Pre-yanet snapshot saved")
+
+	// Remount 9P -- CommonConfigCommands needs /mnt/config/route0.yaml.
+	if err := fw.Mount9P(); err != nil {
+		return err
+	}
+
+	// Start YANET and apply runtime configurations
+	if err := fw.StartYANET(baselineDP, baselineCP); err != nil {
 		return err
 	}
 
 	dumpMemoryDiagnostics(fw, log)
-
-	// Write forward.yaml to the path that CommonConfigCommands will reference.
-	// In 9P mode this is /mnt/config/forward.yaml (via host filesystem).
-	// In local mode this is /tmp/yanet/forward.yaml (via serial console).
-	if err := fw.CreateForwardConfig(forwardConfig()); err != nil {
-		return err
-	}
-
-	if err := fw.CreateConfigFile("route0.yaml", route0Config()); err != nil {
-		return err
-	}
 
 	if _, err := fw.ExecuteCommands(fw.CommonConfigCommands()...); err != nil {
 		return err
@@ -222,12 +241,8 @@ func saveBaselineSnapshot(fw *framework.F, log *zap.SugaredLogger) error {
 	return nil
 }
 
-// withBootedVM acquires a VM from the pool, restores it to the booted snapshot
-// (which includes YANET running with baseline config), then calls fn with the
-// test framework. All fw.Run(...) calls inside fn share the same VM session.
-// The VM is released back to the pool when t finishes.
-//
-// Use this when subtests share state (e.g. configure → test1 → test2).
+// withBootedVM acquires a VM from the pool and restores it to a working
+// YANET state. See restoreBooted for the restore strategy.
 func withBootedVM(t *testing.T, fn func(fw *framework.F)) {
 	t.Helper()
 	if globalPool == nil {
@@ -238,9 +253,7 @@ func withBootedVM(t *testing.T, fn func(fw *framework.F)) {
 		globalPool.Release(base)
 	})
 	fw := base.ForTest(t)
-	if err := fw.RestoreAndReconnect("baseline"); err != nil {
-		t.Fatalf("failed to restore VM to baseline: %v", err)
-	}
+	restoreBooted(t, fw)
 	fn(fw)
 }
 
@@ -270,9 +283,7 @@ func (r *bootedRunner) RunBooted(name string, fn func(fw *framework.F, t *testin
 			globalPool.Release(base)
 		})
 		fw := base.ForTest(t)
-		if err := fw.RestoreAndReconnect("baseline"); err != nil {
-			t.Fatalf("failed to restore VM to baseline for subtest %q: %v", name, err)
-		}
+		restoreBooted(t, fw)
 		fn(fw, t)
 	})
 }
@@ -289,10 +300,43 @@ func testFramework(t *testing.T) *framework.F {
 		globalPool.Release(base)
 	})
 	fw := base.ForTest(t)
-	if err := fw.RestoreAndReconnect("baseline"); err != nil {
-		t.Fatalf("failed to restore baseline snapshot: %v", err)
-	}
+	restoreBooted(t, fw)
 	return fw
+}
+
+// restoreBooted restores the VM to a working YANET state, respecting
+// YANET_BOOTED_BASELINE for fresh-start mode.
+func restoreBooted(t *testing.T, fw *framework.F) {
+	t.Helper()
+	if os.Getenv("YANET_BOOTED_BASELINE") != "" {
+		if err := fw.RestoreClean("preyanet"); err != nil {
+			t.Fatalf("failed to restore VM to preyanet: %v", err)
+		}
+		if err := fw.StartYANET(baselineDP, baselineCP); err != nil {
+			t.Fatalf("failed to start YANET: %v", err)
+		}
+		if _, err := fw.ExecuteCommands(fw.CommonConfigCommands()...); err != nil {
+			t.Fatalf("failed to configure YANET: %v", err)
+		}
+		// Wait for dataplane. On macOS TCG with pool=4, DPDK init can
+		// take longer than usual due to CPU contention.
+		const dpTimeout = 30 * time.Second
+		if err := fw.WaitForDatapathReady(dpTimeout); err != nil {
+			t.Logf("dataplane not ready after %v, restarting YANET...", dpTimeout)
+			if restartErr := fw.RestartYANET(); restartErr != nil {
+				t.Fatalf("YANET restart failed: %v", restartErr)
+			}
+			if err := fw.WaitForDatapathReady(dpTimeout); err != nil {
+				t.Fatalf("dataplane not ready after preyanet restore + restart: %v", err)
+			}
+		}
+		// Brief settle period for virtio socket queues
+		time.Sleep(200 * time.Millisecond)
+	} else {
+		if err := fw.RestoreAndReconnect("baseline"); err != nil {
+			t.Fatalf("failed to restore VM to baseline: %v", err)
+		}
+	}
 }
 
 // TestMain is the entry point for running tests in this package.

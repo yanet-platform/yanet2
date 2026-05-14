@@ -32,11 +32,11 @@ func TestTest_009_nat64stateless(t *testing.T) {
 		fw.Run("Step_000_Configure_NAT64_Environment", func(fw *framework.F, t *testing.T) {
 			// Configure NAT64 module
 			commands := []string{
-				"/mnt/target/release/yanet-cli-nat64 prefix add --cfg nat64stateless0 --instances 0 --prefix 5555:5555:5555:5555:5555:5555::/96",
-				"/mnt/target/release/yanet-cli-nat64 mapping add --cfg nat64stateless0 --instances 0 --ipv4 153.153.153.153 --ipv6 aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa --prefix-index 0",
+				"/mnt/target/release/yanet-cli-nat64 prefix add --cfg nat64stateless0 --prefix 5555:5555:5555:5555:5555:5555::/96",
+				"/mnt/target/release/yanet-cli-nat64 mapping add --cfg nat64stateless0 --ipv4 153.153.153.153 --ipv6 aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa --prefix-index 0",
 
-				"/mnt/target/release/yanet-cli-function update --name=test --chains chain2:1=forward:forward0,nat64:nat64stateless0,route:route0 --instance=0",
-				"/mnt/target/release/yanet-cli-pipeline update --name=test --functions test --instance=0",
+				"/mnt/target/release/yanet-cli-function update --name=test --chains chain2:1=forward:forward0,nat64:nat64stateless0,route:route0",
+				"/mnt/target/release/yanet-cli-pipeline update --name=test --functions test",
 			}
 			_, err := fw.ExecuteCommands(commands...)
 			require.NoError(t, err, "Failed to configure NAT64 module")
@@ -48,22 +48,61 @@ func TestTest_009_nat64stateless(t *testing.T) {
 			// Original autotest.yaml step:
 			// ipv4Update:
 			//   - "102.102.102.102/31 -> 200.0.0.1"
-			commands := []string{
-				"/mnt/target/release/yanet-cli-route insert --cfg route0 --instances 0 --via 203.0.113.1 102.102.102.102/31",
-			}
-			_, err := fw.ExecuteCommands(commands...)
-			require.NoError(t, err, "Failed to configure IPv4 routes")
+			fibYAML := `
+entries:
+  - prefix: "0.0.0.0/0"
+    nexthops:
+      - dst_mac: "52:54:00:6b:ff:a1"
+        src_mac: "52:54:00:6b:ff:a5"
+        device: "01:00.0"
+  - prefix: "::/0"
+    nexthops:
+      - dst_mac: "52:54:00:6b:ff:a1"
+        src_mac: "52:54:00:6b:ff:a5"
+        device: "01:00.0"
+  - prefix: "102.102.102.102/31"
+    nexthops:
+      - dst_mac: "52:54:00:6b:ff:a1"
+        src_mac: "52:54:00:6b:ff:a5"
+        device: "01:00.0"
+`
+			err := fw.CreateConfigFile("route0-step001.yaml", fibYAML)
+			require.NoError(t, err, "Failed to create FIB config for IPv4 routes")
+			_, err = fw.ExecuteCommand("/mnt/target/release/yanet-cli-route fib update --cfg=route0 --rules /mnt/config/route0-step001.yaml")
+			require.NoError(t, err, "Failed to update FIB for IPv4 routes")
 		})
 		fw.Run("Step_002_Configure_Routes", func(fw *framework.F, t *testing.T) {
 			// IPv6 routes configuration
 			// Original autotest.yaml step:
 			// ipv6Update:
 			//   - "aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa/128 -> aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:1"
-			commands := []string{
-				"/mnt/target/release/yanet-cli-route insert --cfg route0 --instances 0 --via fe80::1 aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa/128",
-			}
-			_, err := fw.ExecuteCommands(commands...)
-			require.NoError(t, err, "Failed to configure IPv6 routes")
+			fibYAML := `
+entries:
+  - prefix: "0.0.0.0/0"
+    nexthops:
+      - dst_mac: "52:54:00:6b:ff:a1"
+        src_mac: "52:54:00:6b:ff:a5"
+        device: "01:00.0"
+  - prefix: "::/0"
+    nexthops:
+      - dst_mac: "52:54:00:6b:ff:a1"
+        src_mac: "52:54:00:6b:ff:a5"
+        device: "01:00.0"
+  - prefix: "102.102.102.102/31"
+    nexthops:
+      - dst_mac: "52:54:00:6b:ff:a1"
+        src_mac: "52:54:00:6b:ff:a5"
+        device: "01:00.0"
+  - prefix: "aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa/128"
+    nexthops:
+      - dst_mac: "52:54:00:6b:ff:a1"
+        src_mac: "52:54:00:6b:ff:a5"
+        device: "01:00.0"
+`
+			err := fw.CreateConfigFile("route0-step002.yaml", fibYAML)
+			require.NoError(t, err, "Failed to create FIB config for IPv6 routes")
+			_, err = fw.ExecuteCommand("/mnt/target/release/yanet-cli-route fib update --cfg=route0 --rules /mnt/config/route0-step002.yaml")
+			require.NoError(t, err, "Failed to update FIB for IPv6 routes")
 		})
 
 		// Wait 3 seconds for configuration changes to take effect (pipeline updates are asynchronous)
@@ -370,8 +409,8 @@ func create009_nat64statelessSendPacket1(t *testing.T) []gopacket.Packet {
 type create009_nat64statelessExpectPacket1Params struct {
 	Ipv4Chksum uint16
 	Ipv4Dst    string
-	TcpDport   uint16
 	TcpChksum  uint16
+	TcpDport   uint16
 }
 
 // create009_nat64statelessExpectPacket1Helper generates a single packet with varying parameters
@@ -403,14 +442,14 @@ func create009_nat64statelessExpectPacket1(t *testing.T) []gopacket.Packet {
 
 	// Packets 0-7 (using helper)
 	paramsList := []create009_nat64statelessExpectPacket1Params{
-		{Ipv4Chksum: 31697, Ipv4Dst: "102.102.102.102", TcpDport: 80, TcpChksum: 34707},
-		{Ipv4Chksum: 31697, Ipv4Dst: "102.102.102.102", TcpDport: 443, TcpChksum: 34344},
-		{Ipv4Chksum: 31696, Ipv4Dst: "102.102.102.103", TcpDport: 80, TcpChksum: 34706},
-		{Ipv4Chksum: 31696, Ipv4Dst: "102.102.102.103", TcpDport: 443, TcpChksum: 34343},
-		{Ipv4Chksum: 31697, Ipv4Dst: "102.102.102.102", TcpDport: 80, TcpChksum: 34707},
-		{Ipv4Chksum: 31697, Ipv4Dst: "102.102.102.102", TcpDport: 443, TcpChksum: 34344},
-		{Ipv4Chksum: 31696, Ipv4Dst: "102.102.102.103", TcpDport: 80, TcpChksum: 34706},
-		{Ipv4Chksum: 31696, Ipv4Dst: "102.102.102.103", TcpDport: 443, TcpChksum: 34343},
+		{Ipv4Chksum: 31697, Ipv4Dst: "102.102.102.102", TcpChksum: 34707, TcpDport: 80},
+		{Ipv4Chksum: 31697, Ipv4Dst: "102.102.102.102", TcpChksum: 34344, TcpDport: 443},
+		{Ipv4Chksum: 31696, Ipv4Dst: "102.102.102.103", TcpChksum: 34706, TcpDport: 80},
+		{Ipv4Chksum: 31696, Ipv4Dst: "102.102.102.103", TcpChksum: 34343, TcpDport: 443},
+		{Ipv4Chksum: 31697, Ipv4Dst: "102.102.102.102", TcpChksum: 34707, TcpDport: 80},
+		{Ipv4Chksum: 31697, Ipv4Dst: "102.102.102.102", TcpChksum: 34344, TcpDport: 443},
+		{Ipv4Chksum: 31696, Ipv4Dst: "102.102.102.103", TcpChksum: 34706, TcpDport: 80},
+		{Ipv4Chksum: 31696, Ipv4Dst: "102.102.102.103", TcpChksum: 34343, TcpDport: 443},
 	}
 
 	for _, params := range paramsList {

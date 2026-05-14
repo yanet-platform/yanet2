@@ -350,10 +350,10 @@ func (c *Converter) generateRouteCommands(routeStrings []string, operation strin
 		var cmd string
 		switch operation {
 		case "insert":
-			cmd = fmt.Sprintf(`"%s insert --cfg route0 --instances 0 --via %s %s"`,
+			cmd = fmt.Sprintf(`"%s insert --cfg route0 --via %s %s"`,
 				framework.CLIRoute, nexthop, prefix)
 		case "remove":
-			cmd = fmt.Sprintf(`"%s remove --cfg route0 --instances 0 %s"`,
+			cmd = fmt.Sprintf(`"%s remove --cfg route0 %s"`,
 				framework.CLIRoute, prefix)
 		default:
 			c.debugLog("  Unknown route operation: %s", operation)
@@ -366,7 +366,9 @@ func (c *Converter) generateRouteCommands(routeStrings []string, operation strin
 	return commands
 }
 
-// convertRouteUpdate is a unified function for both IPv4 and IPv6 route updates
+// convertRouteUpdate is a unified function for both IPv4 and IPv6 route updates.
+// It accumulates prefixes into the FIB state and generates code to atomically
+// replace the FIB via yanet-cli-route fib update.
 func (c *Converter) convertRouteUpdate(content interface{}, stepType string, isIPv6 bool) ConvertedStep {
 	protocol := "IPv4"
 	if isIPv6 {
@@ -393,18 +395,23 @@ func (c *Converter) convertRouteUpdate(content interface{}, stepType string, isI
 	// Generate YAML comment
 	yamlComment := c.generateYAMLComment(stepType, routeStrings)
 
-	// Generate route commands using helper
-	commands := c.generateRouteCommands(routeStrings, "insert", false)
+	// Parse prefixes and add to FIB state
+	var prefixes []string
+	for _, routeStr := range routeStrings {
+		prefix, _, ok := c.parseRouteString(routeStr, false)
+		if ok {
+			prefixes = append(prefixes, prefix)
+		}
+	}
 
-	if len(commands) == 0 {
+	if len(prefixes) == 0 {
 		return NewSkipStep(stepType, fmt.Sprintf("No valid %s routes found", protocol))
 	}
 
-	goCode := fmt.Sprintf(`%scommands := []string{
-		%s,
-	}
-	_, err := fw.ExecuteCommands(commands...)
-	require.NoError(t, err, "Failed to configure %s routes")`, yamlComment, strings.Join(commands, ",\n\t\t"), protocol)
+	c.addFIBEntries(prefixes)
+	fibCode := c.generateFIBUpdateGoCode(fmt.Sprintf("%s routes", protocol))
+
+	goCode := fmt.Sprintf(`%s%s`, yamlComment, fibCode)
 
 	return ConvertedStep{
 		Type:         stepType,
@@ -442,18 +449,23 @@ func (c *Converter) convertIPv4LabelledUpdate(content interface{}, stepType stri
 	// Generate YAML comment
 	yamlComment := c.generateYAMLComment(stepType, routeStrings)
 
-	// Generate route commands using helper (strip labels)
-	commands := c.generateRouteCommands(routeStrings, "insert", true)
+	// Parse prefixes (strip labels) and add to FIB state
+	var prefixes []string
+	for _, routeStr := range routeStrings {
+		prefix, _, ok := c.parseRouteString(routeStr, true)
+		if ok {
+			prefixes = append(prefixes, prefix)
+		}
+	}
 
-	if len(commands) == 0 {
+	if len(prefixes) == 0 {
 		return NewSkipStep(stepType, "No valid labelled routes found")
 	}
 
-	goCode := fmt.Sprintf(`%scommands := []string{
-		%s,
-	}
-	_, err := fw.ExecuteCommands(commands...)
-	require.NoError(t, err, "Failed to configure IPv4 labelled routes")`, yamlComment, strings.Join(commands, ",\n\t\t"))
+	c.addFIBEntries(prefixes)
+	fibCode := c.generateFIBUpdateGoCode("IPv4 labelled routes")
+
+	goCode := fmt.Sprintf(`%s%s`, yamlComment, fibCode)
 
 	return ConvertedStep{
 		Type:         "ipv4LabelledUpdate",
@@ -463,7 +475,9 @@ func (c *Converter) convertIPv4LabelledUpdate(content interface{}, stepType stri
 	}
 }
 
-// convertRouteRemove is a unified function for both regular and labelled route removals
+// convertRouteRemove is a unified function for both regular and labelled route removals.
+// It removes prefixes from the FIB state and generates code to atomically
+// replace the FIB via yanet-cli-route fib update.
 func (c *Converter) convertRouteRemove(content interface{}, stepType string, isLabelled bool) ConvertedStep {
 	c.debugLog("Converting %s route removal", stepType)
 	routes, ok := content.([]interface{})
@@ -483,49 +497,24 @@ func (c *Converter) convertRouteRemove(content interface{}, stepType string, isL
 	// Generate YAML comment
 	yamlComment := c.generateYAMLComment(stepType, routeStrings)
 
-	var commands []string
+	description := "IPv4 routes removal"
+	if isLabelled {
+		description = "IPv4 routes removal with labels"
+	}
+
+	// Parse prefixes to remove from FIB state
+	var prefixes []string
 	for _, routeStr := range routeStrings {
-		c.debugLog("  Route to remove: %s", routeStr)
-		// Parse "10.0.0.0/24 -> 192.168.1.1" or "10.0.0.0/24 -> 192.168.1.1 label:transport1"
 		parts := strings.Split(routeStr, " -> ")
 		if len(parts) >= 2 {
 			prefix := strings.TrimSpace(parts[0])
-			routeRest := strings.TrimSpace(parts[1])
-
-			// Extract nexthop and possibly label
-			nexthopParts := strings.Split(routeRest, " label:")
-			nexthop := strings.TrimSpace(nexthopParts[0])
-			var label string
-			if len(nexthopParts) > 1 {
-				label = strings.TrimSpace(nexthopParts[1])
-			}
-
-			// Adapt nexthop IP address to yanet2 infrastructure
-			adaptedNexthop := c.adaptIPAddress(nexthop)
-			c.debugLog("  Adapted nexthop: %s -> %s", nexthop, adaptedNexthop)
-
-			// Generate remove command (yanet2 CLI supports remove operation)
-			if isLabelled && label != "" {
-				// Labelled route removal
-				cmd := fmt.Sprintf(`"%s remove --cfg route0 --instances 0 --via %s %s --label %s"`, framework.CLIRoute, adaptedNexthop, prefix, label)
-				commands = append(commands, cmd)
-				c.debugLog("  Generated labelled route remove: %s", cmd)
-			} else {
-				// Regular route removal
-				cmd := fmt.Sprintf(`"%s remove --cfg route0 --instances 0 --via %s %s"`, framework.CLIRoute, adaptedNexthop, prefix)
-				commands = append(commands, cmd)
-				c.debugLog("  Generated route remove: %s", cmd)
-			}
+			prefixes = append(prefixes, prefix)
 		}
 	}
 
-	if len(commands) == 0 {
-		description := "IPv4 routes removal"
-		if isLabelled {
-			description = "IPv4 routes removal with labels"
-		}
+	if len(prefixes) == 0 {
 		goCode := fmt.Sprintf(`%s// No valid routes found for removal
-    t.Logf("No %s to process")`, yamlComment, strings.ToLower(description))
+	t.Logf("No %s to process")`, yamlComment, strings.ToLower(description))
 
 		return ConvertedStep{
 			Type:         stepType,
@@ -535,17 +524,10 @@ func (c *Converter) convertRouteRemove(content interface{}, stepType string, isL
 		}
 	}
 
-	protocol := "IPv4"
-	description := "IPv4 routes removal"
-	if isLabelled {
-		description = "IPv4 routes removal with labels"
-	}
+	c.removeFIBEntries(prefixes)
+	fibCode := c.generateFIBUpdateGoCode(description)
 
-	goCode := fmt.Sprintf(`%scommands := []string{
-		%s,
-	}
-	_, err := fw.ExecuteCommands(commands...)
-	require.NoError(t, err, "Failed to remove %s routes")`, yamlComment, strings.Join(commands, ",\n\t\t"), strings.ToLower(protocol))
+	goCode := fmt.Sprintf(`%s%s`, yamlComment, fibCode)
 
 	return ConvertedStep{
 		Type:         stepType,

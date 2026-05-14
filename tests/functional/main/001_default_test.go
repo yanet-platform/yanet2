@@ -34,11 +34,23 @@ func TestTest_001_default(t *testing.T) {
 			// Original autotest.yaml step:
 			// ipv4Update:
 			//   - "0.0.0.0/0 -> 200.0.0.1"
-			commands := []string{
-				"/mnt/target/release/yanet-cli-route insert --cfg route0 --instances 0 --via 203.0.113.1 0.0.0.0/0",
-			}
-			_, err := fw.ExecuteCommands(commands...)
-			require.NoError(t, err, "Failed to configure IPv4 routes")
+			fibYAML := `
+entries:
+  - prefix: "0.0.0.0/0"
+    nexthops:
+      - dst_mac: "52:54:00:6b:ff:a1"
+        src_mac: "52:54:00:6b:ff:a5"
+        device: "01:00.0"
+  - prefix: "::/0"
+    nexthops:
+      - dst_mac: "52:54:00:6b:ff:a1"
+        src_mac: "52:54:00:6b:ff:a5"
+        device: "01:00.0"
+`
+			err := fw.CreateConfigFile("route0-step001.yaml", fibYAML)
+			require.NoError(t, err, "Failed to create FIB config for IPv4 routes")
+			_, err = fw.ExecuteCommand("/mnt/target/release/yanet-cli-route fib update --cfg=route0 --rules /mnt/config/route0-step001.yaml")
+			require.NoError(t, err, "Failed to update FIB for IPv4 routes")
 		})
 
 		// Wait 3 seconds for configuration changes to take effect (pipeline updates are asynchronous)

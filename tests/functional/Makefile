@@ -49,14 +49,18 @@ endif
 	@which go > /dev/null || (echo "Please install Go" && exit 1)
 
 # Run all functional tests
+# YANET_BOOTED_BASELINE=1 restores a pre-YANET snapshot and starts
+# dataplane fresh, avoiding DPDK virtqueue staleness after loadvm.
+# Set YANET_BOOTED_BASELINE=0 to use the faster "baseline" snapshot
+# (YANET already running, but may fail heartbeat checks).
 test: prepare-vm
 	@echo "Running all functional tests..."
-	go test -count=1 -v ./main/...
+	YANET_BOOTED_BASELINE=1 go test -count=1 -v ./main/...
 
 # Run main functional tests
 test-main: prepare-vm
 	@echo "Running main functional tests..."
-	go test -count=1 -v -failfast ./main/...
+	YANET_BOOTED_BASELINE=1 go test -count=1 -v -failfast ./main/...
 
 # Run specific test
 test-run:

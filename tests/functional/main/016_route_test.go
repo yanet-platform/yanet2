@@ -34,11 +34,23 @@ func TestTest_016_route(t *testing.T) {
 			// Original autotest.yaml step:
 			// ipv4Update:
 			//   - "0.0.0.0/0 -> 200.0.0.1"
-			commands := []string{
-				"/mnt/target/release/yanet-cli-route insert --cfg route0 --instances 0 --via 203.0.113.1 0.0.0.0/0",
-			}
-			_, err := fw.ExecuteCommands(commands...)
-			require.NoError(t, err, "Failed to configure IPv4 routes")
+			fibYAML := `
+entries:
+  - prefix: "0.0.0.0/0"
+    nexthops:
+      - dst_mac: "52:54:00:6b:ff:a1"
+        src_mac: "52:54:00:6b:ff:a5"
+        device: "01:00.0"
+  - prefix: "::/0"
+    nexthops:
+      - dst_mac: "52:54:00:6b:ff:a1"
+        src_mac: "52:54:00:6b:ff:a5"
+        device: "01:00.0"
+`
+			err := fw.CreateConfigFile("route0-step001.yaml", fibYAML)
+			require.NoError(t, err, "Failed to create FIB config for IPv4 routes")
+			_, err = fw.ExecuteCommand("/mnt/target/release/yanet-cli-route fib update --cfg=route0 --rules /mnt/config/route0-step001.yaml")
+			require.NoError(t, err, "Failed to update FIB for IPv4 routes")
 		})
 
 		// Wait 3 seconds for configuration changes to take effect (pipeline updates are asynchronous)
@@ -140,8 +152,8 @@ func TestTest_016_route(t *testing.T) {
 //
 // create016_routeSendPacket1Params holds varying parameters for packet generation
 type create016_routeSendPacket1Params struct {
-	Ipv4Dst    string
 	Ipv4Chksum uint16
+	Ipv4Dst    string
 	TcpChksum  uint16
 }
 
@@ -174,16 +186,16 @@ func create016_routeSendPacket1(t *testing.T) []gopacket.Packet {
 
 	// Packets 0-9 (using helper)
 	paramsList := []create016_routeSendPacket1Params{
-		{Ipv4Dst: "1.0.0.0", Ipv4Chksum: 48146, TcpChksum: 53441},
-		{Ipv4Dst: "1.1.0.0", Ipv4Chksum: 48145, TcpChksum: 53440},
-		{Ipv4Dst: "1.2.0.0", Ipv4Chksum: 48144, TcpChksum: 53439},
-		{Ipv4Dst: "1.3.0.0", Ipv4Chksum: 48143, TcpChksum: 53438},
-		{Ipv4Dst: "1.4.0.0", Ipv4Chksum: 48142, TcpChksum: 53437},
-		{Ipv4Dst: "1.5.0.0", Ipv4Chksum: 48141, TcpChksum: 53436},
-		{Ipv4Dst: "1.6.0.0", Ipv4Chksum: 48140, TcpChksum: 53435},
-		{Ipv4Dst: "1.7.0.0", Ipv4Chksum: 48139, TcpChksum: 53434},
-		{Ipv4Dst: "1.8.0.0", Ipv4Chksum: 48138, TcpChksum: 53433},
-		{Ipv4Dst: "1.9.0.0", Ipv4Chksum: 48137, TcpChksum: 53432},
+		{Ipv4Chksum: 48146, Ipv4Dst: "1.0.0.0", TcpChksum: 53441},
+		{Ipv4Chksum: 48145, Ipv4Dst: "1.1.0.0", TcpChksum: 53440},
+		{Ipv4Chksum: 48144, Ipv4Dst: "1.2.0.0", TcpChksum: 53439},
+		{Ipv4Chksum: 48143, Ipv4Dst: "1.3.0.0", TcpChksum: 53438},
+		{Ipv4Chksum: 48142, Ipv4Dst: "1.4.0.0", TcpChksum: 53437},
+		{Ipv4Chksum: 48141, Ipv4Dst: "1.5.0.0", TcpChksum: 53436},
+		{Ipv4Chksum: 48140, Ipv4Dst: "1.6.0.0", TcpChksum: 53435},
+		{Ipv4Chksum: 48139, Ipv4Dst: "1.7.0.0", TcpChksum: 53434},
+		{Ipv4Chksum: 48138, Ipv4Dst: "1.8.0.0", TcpChksum: 53433},
+		{Ipv4Chksum: 48137, Ipv4Dst: "1.9.0.0", TcpChksum: 53432},
 	}
 
 	for _, params := range paramsList {
