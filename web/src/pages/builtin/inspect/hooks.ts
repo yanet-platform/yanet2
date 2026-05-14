@@ -58,14 +58,18 @@ export const useRollingSeries = (
 };
 
 /**
- * Aggregate device pps and produce a rolling throughput series.
+ * Aggregate device pps over physical devices only and produce a rolling
+ * throughput series. Restricting to physical devices avoids double-counting
+ * traffic that also appears on stacked virtual devices (e.g. vlan).
  */
 export const useThroughputSeries = (
     deviceCounters: Map<string, DeviceCounterData>,
+    physicalDeviceNames: Set<string>,
     maxLen: number = DEFAULT_MAX_LEN,
 ): { current: number; series: number[] } => {
     let current = 0;
-    deviceCounters.forEach((d) => {
+    deviceCounters.forEach((d, name) => {
+        if (!physicalDeviceNames.has(name)) return;
         current += (d.rx?.pps ?? 0) + (d.tx?.pps ?? 0);
     });
     const series = useRollingSeries(current, maxLen);

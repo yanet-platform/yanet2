@@ -26,7 +26,20 @@ export const InstanceCard: React.FC<InstanceCardProps> = ({ instance }) => {
         devices.length > 0,
     );
 
-    const { current: throughputPps, series: throughputSeries } = useThroughputSeries(rateCounters);
+    const physicalDeviceNames = useMemo(() => {
+        const result = new Set<string>();
+        devices.forEach((d, idx) => {
+            if (d.type === 'plain') {
+                result.add(d.name ?? `device-${idx}`);
+            }
+        });
+        return result;
+    }, [devices]);
+
+    const { current: throughputPps, series: throughputSeries } = useThroughputSeries(
+        rateCounters,
+        physicalDeviceNames,
+    );
 
     return (
         <div className="inspect-instance">
