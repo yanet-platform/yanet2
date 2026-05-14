@@ -21,6 +21,8 @@ struct cp_function_chain {
  * and indexes of modules to be processed inside module registry.
  */
 struct cp_function {
+	struct memory_context *memory_context; // shm-relative pointer
+
 	struct registry_item config_item;
 
 	struct counter_registry counter_registry;
@@ -55,19 +57,38 @@ struct cp_function_config {
 struct dp_config;
 struct cp_config_gen;
 
+// Allocate a new cp_function with capacity for chain_count chains.
+//
+// Returns NULL on allocation failure; caller is responsible for reporting the
+// error.
 struct cp_function *
-cp_function_create(
-	struct memory_context *memory_context,
+cp_function_new(struct memory_context *memory_context, uint64_t chain_count);
+
+// Free the memory backing self.
+//
+// NULL-safe no-op.
+//
+// Does not call cp_function_fini: caller must do that separately first.
+void
+cp_function_free(struct cp_function *self);
+
+// Initialize function resources.
+//
+// On failure, internally calls cp_function_fini and returns -1.
+int
+cp_function_init(
+	struct cp_function *self,
 	struct dp_config *dp_config,
 	struct cp_config_gen *cp_config_gen,
 	struct cp_function_config *cp_function_config,
 	yanet_error **err
 );
 
+// Tear down resources acquired by cp_function_init.
+//
+// Idempotent on zero-init.
 void
-cp_function_free(
-	struct memory_context *memory_context, struct cp_function *cp_function
-);
+cp_function_fini(struct cp_function *self);
 
 /*
  * Pipeline registry contains all existing functions.

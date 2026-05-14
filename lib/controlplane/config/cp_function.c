@@ -7,159 +7,160 @@
 
 #include "lib/errors/errors.h"
 
+#include <assert.h>
 #include <string.h>
 
-static inline uint64_t
+static inline size_t
 cp_function_alloc_size(uint64_t chain_count) {
 	return sizeof(struct cp_function) +
 	       sizeof(struct cp_function_chain) * chain_count;
 }
 
 struct cp_function *
-cp_function_create(
-	struct memory_context *memory_context,
+cp_function_new(struct memory_context *memory_context, uint64_t chain_count) {
+	size_t alloc_size = cp_function_alloc_size(chain_count);
+	struct cp_function *self =
+		(struct cp_function *)memory_balloc(memory_context, alloc_size);
+	if (self == NULL) {
+		return NULL;
+	}
+
+	memset(self, 0, alloc_size);
+
+	SET_OFFSET_OF(&self->memory_context, memory_context);
+	self->chain_count = chain_count;
+
+	return self;
+}
+
+void
+cp_function_free(struct cp_function *self) {
+	if (self == NULL) {
+		return;
+	}
+
+	struct memory_context *mctx = ADDR_OF(&self->memory_context);
+	size_t alloc_size = cp_function_alloc_size(self->chain_count);
+	memory_bfree(mctx, self, alloc_size);
+}
+
+int
+cp_function_init(
+	struct cp_function *self,
 	struct dp_config *dp_config,
 	struct cp_config_gen *cp_config_gen,
 	struct cp_function_config *cp_function_config,
 	yanet_error **err
 ) {
-	const size_t alloc_size =
-		cp_function_alloc_size(cp_function_config->chain_count);
-	struct cp_function *new_function =
-		(struct cp_function *)memory_balloc(memory_context, alloc_size);
-	if (new_function == NULL) {
+	assert(self->chain_count == cp_function_config->chain_count);
+
+	struct memory_context *mctx = ADDR_OF(&self->memory_context);
+
+	registry_item_init(&self->config_item);
+
+	if (counter_registry_init(&self->counter_registry, mctx, 0)) {
 		yanet_error_add(
 			err,
-			"failed to allocate memory for function '%s'",
-			cp_function_config->name
-		);
-		return NULL;
-	}
-
-	memset(new_function, 0, alloc_size);
-
-	registry_item_init(&new_function->config_item);
-
-	new_function->chain_count = cp_function_config->chain_count;
-	strtcpy(new_function->name,
-		cp_function_config->name,
-		CP_FUNCTION_NAME_LEN);
-
-	if (counter_registry_init(
-		    &new_function->counter_registry, memory_context, 0
-	    )) {
-		yanet_error_add(
-			err,
-			"failed to initialize counter registry for "
-			"function "
+			"failed to initialize counter registry for function "
 			"'%s'",
 			cp_function_config->name
 		);
-		goto error;
+		goto err_out;
 	}
 
-	new_function->counter_packet_in_count = counter_registry_register(
-		&new_function->counter_registry, "input", 1, err
+	strtcpy(self->name, cp_function_config->name, CP_PIPELINE_NAME_LEN);
+
+	self->counter_packet_in_count = counter_registry_register(
+		&self->counter_registry, "input", 1, err
 	);
-	if (new_function->counter_packet_in_count == COUNTER_INVALID) {
+	if (self->counter_packet_in_count == COUNTER_INVALID) {
 		yanet_error_add(
 			err,
-			"failed to register 'input' counter for "
-			"function '%s'",
+			"failed to register 'input' counter for function '%s'",
 			cp_function_config->name
 		);
-		goto error;
+		goto err_out;
 	}
 
-	new_function->counter_packet_out_count = counter_registry_register(
-		&new_function->counter_registry, "output", 1, err
+	self->counter_packet_out_count = counter_registry_register(
+		&self->counter_registry, "output", 1, err
 	);
-	if (new_function->counter_packet_out_count == COUNTER_INVALID) {
+	if (self->counter_packet_out_count == COUNTER_INVALID) {
 		yanet_error_add(
 			err,
-			"failed to register 'output' counter for "
-			"function '%s'",
+			"failed to register 'output' counter for function '%s'",
 			cp_function_config->name
 		);
-		goto error;
+		goto err_out;
 	}
 
-	new_function->counter_packet_drop_count = counter_registry_register(
-		&new_function->counter_registry, "drop", 1, err
+	self->counter_packet_drop_count = counter_registry_register(
+		&self->counter_registry, "drop", 1, err
 	);
-	if (new_function->counter_packet_drop_count == COUNTER_INVALID) {
+	if (self->counter_packet_drop_count == COUNTER_INVALID) {
 		yanet_error_add(
 			err,
-			"failed to register 'drop' counter for "
-			"function '%s'",
+			"failed to register 'drop' counter for function '%s'",
 			cp_function_config->name
 		);
-		goto error;
+		goto err_out;
 	}
 
-	new_function->counter_packet_in_bytes = counter_registry_register(
-		&new_function->counter_registry, "input_bytes", 1, err
+	self->counter_packet_in_bytes = counter_registry_register(
+		&self->counter_registry, "input_bytes", 1, err
 	);
-	if (new_function->counter_packet_in_bytes == COUNTER_INVALID) {
+	if (self->counter_packet_in_bytes == COUNTER_INVALID) {
 		yanet_error_add(
 			err,
-			"failed to register 'input_bytes' counter for "
-			"function "
+			"failed to register 'input_bytes' counter for function "
 			"'%s'",
 			cp_function_config->name
 		);
-		goto error;
+		goto err_out;
 	}
 
-	new_function->counter_packet_out_bytes = counter_registry_register(
-		&new_function->counter_registry, "output_bytes", 1, err
+	self->counter_packet_out_bytes = counter_registry_register(
+		&self->counter_registry, "output_bytes", 1, err
 	);
-	if (new_function->counter_packet_out_bytes == COUNTER_INVALID) {
+	if (self->counter_packet_out_bytes == COUNTER_INVALID) {
 		yanet_error_add(
 			err,
 			"failed to register 'output_bytes' counter for "
-			"function "
-			"'%s'",
-			cp_function_config->name
-		);
-		goto error;
-	}
-
-	new_function->counter_packet_drop_bytes = counter_registry_register(
-		&new_function->counter_registry, "drop_bytes", 1, err
-	);
-	if (new_function->counter_packet_drop_bytes == COUNTER_INVALID) {
-		yanet_error_add(
-			err,
-			"failed to register 'drop_bytes' counter for "
-			"function "
-			"'%s'",
-			cp_function_config->name
-		);
-		goto error;
-	}
-
-	new_function->counter_packet_in_hist = counter_registry_register(
-		&new_function->counter_registry, "input histogram", 8, err
-	);
-	if (new_function->counter_packet_in_hist == COUNTER_INVALID) {
-		yanet_error_add(
-			err,
-			"failed to register 'input histogram' counter "
-			"for "
 			"function '%s'",
 			cp_function_config->name
 		);
-		goto error;
+		goto err_out;
 	}
 
-	for (uint64_t chain_idx = 0;
-	     chain_idx < cp_function_config->chain_count;
-	     ++chain_idx) {
+	self->counter_packet_drop_bytes = counter_registry_register(
+		&self->counter_registry, "drop_bytes", 1, err
+	);
+	if (self->counter_packet_drop_bytes == COUNTER_INVALID) {
+		yanet_error_add(
+			err,
+			"failed to register 'drop_bytes' counter for function "
+			"'%s'",
+			cp_function_config->name
+		);
+		goto err_out;
+	}
 
+	self->counter_packet_in_hist = counter_registry_register(
+		&self->counter_registry, "input histogram", 8, err
+	);
+	if (self->counter_packet_in_hist == COUNTER_INVALID) {
+		yanet_error_add(
+			err,
+			"failed to register 'input histogram' counter for "
+			"function '%s'",
+			cp_function_config->name
+		);
+		goto err_out;
+	}
+
+	for (uint64_t idx = 0; idx < cp_function_config->chain_count; ++idx) {
 		struct cp_chain *new_chain = cp_chain_new(
-			memory_context,
-			cp_function_config->chains[chain_idx].chain->length
+			mctx, cp_function_config->chains[idx].chain->length
 		);
 		if (new_chain == NULL) {
 			yanet_error_add(
@@ -167,54 +168,45 @@ cp_function_create(
 				"failed to allocate chain for function '%s'",
 				cp_function_config->name
 			);
-			goto error;
+			goto err_out;
 		}
+
 		if (cp_chain_init(
 			    new_chain,
 			    dp_config,
 			    cp_config_gen,
-			    cp_function_config->chains[chain_idx].chain,
+			    cp_function_config->chains[idx].chain,
 			    err
 		    )) {
 			cp_chain_free(new_chain);
-			goto error;
+			goto err_out;
 		}
 
-		SET_OFFSET_OF(
-			&new_function->chains[chain_idx].cp_chain, new_chain
-		);
-		new_function->chains[chain_idx].weight =
-			cp_function_config->chains[chain_idx].weight;
+		SET_OFFSET_OF(&self->chains[idx].cp_chain, new_chain);
+		self->chains[idx].weight =
+			cp_function_config->chains[idx].weight;
 	}
 
-	return new_function;
+	return 0;
 
-error:
-	cp_function_free(memory_context, new_function);
-	return NULL;
+err_out:
+	cp_function_fini(self);
+	return -1;
 }
 
 void
-cp_function_free(
-	struct memory_context *memory_context, struct cp_function *function
-) {
-	//	counter_registry_destroy(&function->counter_registry);
-
-	for (uint64_t idx = 0; idx < function->chain_count; ++idx) {
-		struct cp_chain *cp_chain =
-			ADDR_OF(&function->chains[idx].cp_chain);
-		if (cp_chain == NULL)
+cp_function_fini(struct cp_function *self) {
+	for (uint64_t idx = 0; idx < self->chain_count; ++idx) {
+		struct cp_chain *chain = ADDR_OF(&self->chains[idx].cp_chain);
+		if (chain == NULL) {
 			continue;
-
-		cp_chain_fini(cp_chain);
-		cp_chain_free(cp_chain);
+		}
+		cp_chain_fini(chain);
+		cp_chain_free(chain);
+		SET_OFFSET_OF(&self->chains[idx].cp_chain, NULL);
 	}
 
-	memory_bfree(
-		memory_context,
-		function,
-		cp_function_alloc_size(function->chain_count)
-	);
+	counter_registry_free(&self->counter_registry);
 }
 
 // Pipeline registry
@@ -258,20 +250,21 @@ cp_function_registry_copy(
 
 static void
 cp_function_registry_item_free_cb(struct registry_item *item, void *data) {
+	// TODO: drop the data parameter from registry_item_free_func once all
+	// registry consumers move memory_context into their struct.
+	(void)data;
 	struct cp_function *function =
 		container_of(item, struct cp_function, config_item);
-	struct memory_context *memory_context = (struct memory_context *)data;
-	cp_function_free(memory_context, function);
+	cp_function_fini(function);
+	cp_function_free(function);
 }
 
 void
 cp_function_registry_destroy(struct cp_function_registry *function_registry) {
-	struct memory_context *memory_context =
-		ADDR_OF(&function_registry->memory_context);
 	registry_destroy(
 		&function_registry->registry,
 		cp_function_registry_item_free_cb,
-		memory_context
+		NULL
 	);
 }
 
@@ -281,8 +274,9 @@ cp_function_registry_get(
 ) {
 	struct registry_item *item =
 		registry_get(&function_registry->registry, index);
-	if (item == NULL)
+	if (item == NULL) {
 		return NULL;
+	}
 	return container_of(item, struct cp_function, config_item);
 }
 
@@ -385,7 +379,7 @@ cp_function_registry_upsert(
 		    name,
 		    &new_function->config_item,
 		    cp_function_registry_item_free_cb,
-		    ADDR_OF(&function_registry->memory_context)
+		    NULL
 	    )) {
 		yanet_error_add(err, "failed to replace function in registry");
 		return -1;
@@ -404,6 +398,6 @@ cp_function_registry_delete(
 		name,
 		NULL,
 		cp_function_registry_item_free_cb,
-		ADDR_OF(&function_registry->memory_context)
+		NULL
 	);
 }

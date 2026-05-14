@@ -320,17 +320,30 @@ cp_config_update_functions(
 	}
 
 	for (uint64_t idx = 0; idx < function_count; ++idx) {
-		struct cp_function *new_cp_function = cp_function_create(
+		struct cp_function *new_cp_function = cp_function_new(
 			&cp_config->memory_context,
-			dp_config,
-			new_config_gen,
-			cp_function_configs[idx],
-			err
+			cp_function_configs[idx]->chain_count
 		);
 		if (new_cp_function == NULL) {
 			yanet_error_add(
 				err,
-				"failed to create function '%s'",
+				"failed to allocate function '%s'",
+				cp_function_configs[idx]->name
+			);
+			goto error_free;
+		}
+
+		if (cp_function_init(
+			    new_cp_function,
+			    dp_config,
+			    new_config_gen,
+			    cp_function_configs[idx],
+			    err
+		    )) {
+			cp_function_free(new_cp_function);
+			yanet_error_add(
+				err,
+				"failed to initialize function '%s'",
 				cp_function_configs[idx]->name
 			);
 			goto error_free;
