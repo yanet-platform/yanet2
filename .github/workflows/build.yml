@@ -76,10 +76,15 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: true
-          # Full history so git-restore-mtime can attribute each file to its
-          # last-touch commit. Without this it can't walk the log and leaves
-          # every file at checkout-time mtime, defeating the build cache.
+          # Full history is required for git-restore-mtime to attribute each
+          # file to its last-touch commit; without it ninja sees all sources
+          # as checkout-time-fresh and rebuilds everything.
           fetch-depth: 0
+          # For pull_request events, actions/checkout defaults to the
+          # synthetic refs/pull/<n>/merge ref. git-restore-mtime auto-enables
+          # --first-parent on merge commits, which combined with the synthetic
+          # merge produces a broken history walk. Pin to the actual PR head.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - uses: ./.github/actions/setup
         id: setup
@@ -151,10 +156,15 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: true
-          # Full history so git-restore-mtime can attribute each file to its
-          # last-touch commit. Without this it can't walk the log and leaves
-          # every file at checkout-time mtime, defeating the build cache.
+          # Full history is required for git-restore-mtime to attribute each
+          # file to its last-touch commit; without it ninja sees all sources
+          # as checkout-time-fresh and rebuilds everything.
           fetch-depth: 0
+          # For pull_request events, actions/checkout defaults to the
+          # synthetic refs/pull/<n>/merge ref. git-restore-mtime auto-enables
+          # --first-parent on merge commits, which combined with the synthetic
+          # merge produces a broken history walk. Pin to the actual PR head.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - uses: ./.github/actions/setup
         id: setup
