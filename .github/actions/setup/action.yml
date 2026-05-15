@@ -39,23 +39,26 @@ runs:
 
     - uses: awalsh128/cache-apt-pkgs-action@v1.6.0
       with:
-        packages: meson clang cmake python3-pyelftools libnuma-dev libpcap-dev git git-restore-mtime protobuf-compiler jq clang-tidy-19
-        version: 1.2
+        packages: meson clang cmake python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler jq clang-tidy-19
+        version: 1.3
+
+    - name: Install latest git-restore-mtime
+      shell: bash
+      run: |
+        # Ubuntu 24.04 ships git-restore-mtime 2022.12, which uses `git
+        # whatchanged` internally. That command was deprecated in Git 2.51
+        # and the runner has Git 2.54+, so the walk silently misbehaves and
+        # ~25% of files end up in "WARNING: not found in the log" output,
+        # defeating the build cache. v2025.08 uses `git log --raw` instead.
+        VERSION=v2025.08
+        DEST=/usr/local/bin/git-restore-mtime
+        sudo curl -sSLo "$DEST" "https://raw.githubusercontent.com/MestreLion/git-tools/$VERSION/git-restore-mtime"
+        sudo chmod +x "$DEST"
+        echo "Installed git-restore-mtime $VERSION at $DEST"
 
     - name: Restore source mtimes from git history
       shell: bash
-      run: |
-        # The Ubuntu deb installs the binary at $(git --exec-path)/git-restore-mtime
-        # (git's subcommand path), not /usr/bin/. So it's not on $PATH and command -v
-        # misses it — but `git restore-mtime` (subcommand form) still resolves it.
-        if command -v git-restore-mtime >/dev/null; then
-            git-restore-mtime
-        elif [ -x "$(git --exec-path)/git-restore-mtime" ]; then
-            git restore-mtime
-        else
-            echo "ERROR: git-restore-mtime not available; build cache would be useless."
-            exit 1
-        fi
+      run: git-restore-mtime
 
     - name: Install LLVM 19 toolchain
       if: ${{ inputs.install-llvm == 'true' }}

@@ -419,6 +419,7 @@ agent_cleanup(struct agent *agent) {
 int
 agent_detach(struct agent *agent) {
 	(void)agent;
+	agent += 1;
 	// NOTE: Currently a no-op.
 	return 0;
 }
