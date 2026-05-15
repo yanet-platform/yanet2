@@ -1,0 +1,60 @@
+syntax = "proto3";
+
+package readinesspb;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/yanet-platform/yanet2/common/readinesspb;readinesspb";
+
+// ReadinessProbe allows external consumers to query whether a component is
+// ready to serve traffic. The concept is similar to Kubernetes readiness
+// probes: a component that reports NOT_READY should be excluded from the
+// serving path (e.g. removed from a load-balancer pool or withdrawn from BGP
+// announcements) until it becomes READY again.
+//
+// A single component implementing this service may expose multiple independent
+// scopes, each with its own readiness state.
+service ReadinessProbe {
+  // Ready returns the current readiness of all (or requested) scopes.
+  rpc Ready(ReadyRequest) returns (ReadyResponse);
+}
+
+// ReadyRequest selects which scopes to query.
+//
+// A component implementing ReadinessProbe may contain multiple scopes, each
+// representing an independent dimension of readiness. Callers may request a
+// subset of scopes by name; if the list is empty the component returns the
+// state of every known scope.
+message ReadyRequest {
+  // If empty, return state for all known scopes.
+  // Otherwise, return only the requested scopes.
+  repeated string scopes = 1;
+}
+
+message ReadyResponse {
+  repeated Scope scopes = 1;
+}
+
+// Scope describes the readiness of a single logical dimension within the
+// component.
+message Scope {
+  string name = 1;
+  State state = 2;
+  // Human-readable reasons explaining why the scope is not READY.
+  repeated Reason reasons = 3;
+  // Timestamp of the last observation, used for detecting stale answers.
+  google.protobuf.Timestamp observed_at = 4;
+}
+
+enum State {
+  STATE_UNSPECIFIED = 0;
+  STATE_READY = 1;
+  STATE_DEGRADED = 2;
+  STATE_NOT_READY = 3;
+  STATE_UNKNOWN = 4;
+}
+
+message Reason {
+  string code = 1;
+  string message = 2;
+}
