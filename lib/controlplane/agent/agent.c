@@ -413,6 +413,7 @@ agent_cleanup(struct agent *agent) {
 		storage = next;
 	}
 
+	memory_context_fini(&agent->memory_context);
 	memory_bfree(&cp_config->memory_context, agent, sizeof(struct agent));
 }
 

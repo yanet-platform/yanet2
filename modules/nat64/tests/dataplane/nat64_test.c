@@ -5456,6 +5456,7 @@ testsuite_teardown(void) {
 	packet_list_cleanup(&test_params.packet_front.input);
 	packet_list_cleanup(&test_params.packet_front.output);
 	packet_list_cleanup(&test_params.packet_front.drop);
+	memory_context_fini(test_params.memory_context);
 }
 
 /**
