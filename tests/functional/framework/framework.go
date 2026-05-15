@@ -2,6 +2,7 @@ package framework
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"net"
 	"os"
@@ -55,7 +56,7 @@ var CLIBinaryNames = []string{
 	"yanet-cli-balancer", "yanet-cli-nat64", "yanet-cli-acl",
 	"yanet-cli-fwstate", "yanet-cli-pipeline", "yanet-cli-function",
 	"yanet-cli-device-plain", "yanet-cli-decap", "yanet-cli-forward",
-	"yanet-cli-common", "yanet-cli-dscp",
+	"yanet-cli-common", "yanet-cli-dscp", "yanet-cli-counters",
 }
 
 // GuestPaths holds all guest-side filesystem paths used by the framework.
@@ -105,7 +106,7 @@ func (p GuestPaths) CLI(name string) string {
 // baselineSnapshotReady tracks whether the "baseline" VM snapshot
 // was successfully created during TestMain setup. Tests check this
 // before calling RunWith("baseline", ...) for per-test isolation.
-var baselineSnapshotReady bool
+var baselineSnapshotReady atomic.Bool
 
 // Global atomic counter for generating unique log IDs
 var logIDCounter atomic.Uint32
@@ -113,13 +114,13 @@ var logIDCounter atomic.Uint32
 // MarkBaselineSaved records that the "baseline" VM snapshot was successfully
 // created. Called once from TestMain after setup completes.
 func MarkBaselineSaved() {
-	baselineSnapshotReady = true
+	baselineSnapshotReady.Store(true)
 }
 
 // HasBaselineSnapshot returns true if the "baseline" VM snapshot is available
 // for per-test state isolation via RunWith("baseline", ...).
 func HasBaselineSnapshot() bool {
-	return baselineSnapshotReady
+	return baselineSnapshotReady.Load()
 }
 
 // CommonConfigCommands returns the shell commands that configure the
@@ -1282,6 +1283,47 @@ func (f *TestFramework) GetSocketPaths() []string {
 	return f.qemu.SocketPaths
 }
 
+// ValidateCounter queries a named counter via yanet-cli-counters and
+// compares its value against expect. Sums all instances for counters
+// with multiple instances. Returns an error if the counter is not found
+// or the value does not match.
+func (f *TestFramework) ValidateCounter(name string, expect uint64) error {
+	cmd := f.Paths.CLI("yanet-cli-counters") +
+		" pipeline --device-name kni0 --pipeline-name test"
+	output, err := f.ExecuteCommand(cmd)
+	if err != nil {
+		return fmt.Errorf("counters query failed: %w", err)
+	}
+
+	var resp struct {
+		Counters []struct {
+			Name      string `json:"name"`
+			Instances []struct {
+				Values []uint64 `json:"values"`
+			} `json:"instances"`
+		} `json:"counters"`
+	}
+	if err := json.Unmarshal([]byte(output), &resp); err != nil {
+		return fmt.Errorf("parse counters response: %w", err)
+	}
+
+	for _, c := range resp.Counters {
+		if c.Name == name {
+			var total uint64
+			for _, inst := range c.Instances {
+				for _, v := range inst.Values {
+					total += v
+				}
+			}
+			if total != expect {
+				return fmt.Errorf("counter %s: expected %d, got %d", name, expect, total)
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("counter %q not found", name)
+}
+
 // Run executes a subtest with the given name and function. This method wraps
 // t.Run() and automatically creates a new TestFramework instance with the
 // correct test name. This ensures that all framework operations within the
@@ -1321,9 +1363,6 @@ func (f *TestFramework) Run(name string, fn func(fw *TestFramework, t *testing.T
 		panic("Run() can only be called on TestFramework created via ForTest()")
 	}
 
-	// Reset socket connections before test to ensure clean state
-	// This prevents packet leakage between tests by discarding any
-	// buffered data with the old connection
 	f.log.Debugf("Resetting socket connections before test '%s'", name)
 	f.ResetConnections()
 
@@ -1773,7 +1812,7 @@ func (f *TestFramework) RestoreBooted() error {
 
 	// Restore via monitor + serial reconnect.
 	if err := f.qemu.RestoreBooted(); err != nil {
-		return fmt.Errorf("F.RestoreBooted: %w", err)
+		return fmt.Errorf("TestFramework.RestoreBooted: %w", err)
 	}
 
 	// Remount 9P for test access to binaries and config files.
