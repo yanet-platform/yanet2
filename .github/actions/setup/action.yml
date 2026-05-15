@@ -45,11 +45,17 @@ runs:
     - name: Restore source mtimes from git history
       shell: bash
       run: |
-        if ! command -v git-restore-mtime >/dev/null; then
+        # The Ubuntu deb installs the binary at $(git --exec-path)/git-restore-mtime
+        # (git's subcommand path), not /usr/bin/. So it's not on $PATH and command -v
+        # misses it — but `git restore-mtime` (subcommand form) still resolves it.
+        if command -v git-restore-mtime >/dev/null; then
+            git-restore-mtime
+        elif [ -x "$(git --exec-path)/git-restore-mtime" ]; then
+            git restore-mtime
+        else
             echo "ERROR: git-restore-mtime not available; build cache would be useless."
             exit 1
         fi
-        git-restore-mtime
 
     - name: Install LLVM 19 toolchain
       if: ${{ inputs.install-llvm == 'true' }}
