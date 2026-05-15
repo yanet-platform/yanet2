@@ -104,6 +104,7 @@ typedef struct ttlmap {
 				}                                              \
 			}                                                      \
 			(map_ptr)->buckets_exp = (size_t)-1;                   \
+			memory_context_fini(&(map_ptr)->mctx);                 \
 		}                                                              \
 	})
 

@@ -285,33 +285,38 @@ big_array_get(struct big_array *array, size_t index) {
  */
 static inline void
 big_array_free(struct big_array *array) {
-	if (array->subarrays == NULL) {
-		return;
-	}
-	void **subarrays = ADDR_OF(&array->subarrays);
-	size_t subarray_size = 1 << array->subarray_len_exp;
+	if (array->subarrays != NULL) {
+		void **subarrays = ADDR_OF(&array->subarrays);
+		size_t subarray_size = 1 << array->subarray_len_exp;
 
-	for (size_t i = 0; i < array->subarrays_count; ++i) {
-		void *subarray = ADDR_OF(subarrays + i);
-		if (subarray != NULL) {
-			// Last subarray may have a different size
-			size_t free_size = subarray_size;
-			if (i == array->subarrays_count - 1) {
-				size_t remainder =
-					array->size &
-					((1 << array->subarray_len_exp) - 1);
-				if (remainder != 0) {
-					free_size = remainder;
+		for (size_t i = 0; i < array->subarrays_count; ++i) {
+			void *subarray = ADDR_OF(subarrays + i);
+			if (subarray != NULL) {
+				// Last subarray may have a different size
+				size_t free_size = subarray_size;
+				if (i == array->subarrays_count - 1) {
+					size_t remainder =
+						array->size &
+						((1
+						  << array->subarray_len_exp) -
+						 1);
+					if (remainder != 0) {
+						free_size = remainder;
+					}
 				}
-			}
 
-			memory_bfree(&array->mctx, subarray, free_size);
-			subarrays[i] = NULL;
+				memory_bfree(&array->mctx, subarray, free_size);
+				subarrays[i] = NULL;
+			}
 		}
+		memory_bfree(
+			&array->mctx,
+			subarrays,
+			sizeof(void *) * array->subarrays_count
+		);
 	}
-	memory_bfree(
-		&array->mctx, subarrays, sizeof(void *) * array->subarrays_count
-	);
+
+	memory_context_fini(&array->mctx);
 	memset(array, 0, sizeof(struct big_array));
 }
 
