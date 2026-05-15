@@ -75,6 +75,7 @@ filter_free(
 		value_registry_free(&v0->registry);
 		value_table_free(&v0->table);
 	}
+	memory_context_fini(&filter->memory_context);
 }
 
 static inline int

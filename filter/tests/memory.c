@@ -127,6 +127,7 @@ test_src_dst_ports(void *memory) {
 	memory_bfree(&memory_context, memory, 1 << 24);
 	void *mem = memory_balloc(&memory_context, 1 << 24);
 	assert(mem == memory);
+	memory_context_fini(&memory_context);
 }
 
 static void
@@ -176,6 +177,7 @@ test_src_port_only(void *memory) {
 	memory_bfree(&memory_context, memory, 1 << 24);
 	void *mem = memory_balloc(&memory_context, 1 << 24);
 	assert(mem == memory);
+	memory_context_fini(&memory_context);
 }
 
 int

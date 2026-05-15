@@ -143,6 +143,7 @@ check_single_attribute(void *memory) {
 	}
 
 	filter_free(&filter, sign_port_src_compile);
+	memory_context_fini(&memory_context);
 }
 
 int

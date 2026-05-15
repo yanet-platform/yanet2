@@ -249,6 +249,7 @@ test1(void *memory) {
 	}
 
 	filter_free(&filter, sign_net6_dst_compile);
+	memory_context_fini(&mctx);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -373,6 +374,7 @@ test2(void *memory) {
 	}
 
 	filter_free(&filter, sign_net6_dst_compile);
+	memory_context_fini(&mctx);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -563,6 +565,7 @@ test3(void *memory) {
 	}
 
 	filter_free(&filter, sign_net6_compile);
+	memory_context_fini(&mctx);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

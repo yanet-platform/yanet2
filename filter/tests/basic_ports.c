@@ -94,6 +94,7 @@ test_src_dst_ports(void *memory) {
 	query_and_expect_action(&f, 8, 3, 1);
 
 	filter_free(&f, sign_ports_compile);
+	memory_context_fini(&memory_context);
 }
 
 static void
@@ -156,6 +157,7 @@ src_dst_ports(void *memory) {
 	query_and_expect_no_action(&f, 20, 3000);
 
 	filter_free(&f, sign_ports_compile);
+	memory_context_fini(&memory_context);
 }
 
 static void
@@ -207,6 +209,7 @@ test_any_port(void *memory) {
 	query_and_expect_no_action(&f, 1000, 200);
 
 	filter_free(&f, sign_ports_compile);
+	memory_context_fini(&memory_context);
 }
 
 int

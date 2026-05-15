@@ -71,6 +71,7 @@ test_proto_1(void *memory) {
 	query_packet(&filter, 30, 2);
 
 	filter_free(&filter, sign_vlan_compile);
+	memory_context_fini(&memory_context);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

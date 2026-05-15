@@ -157,6 +157,9 @@ test_no_match_port_only(void *arena) {
 		free(packets[i]);
 	}
 
+	filter_free(&filter, combo_net6_port_src_compile);
+	memory_context_fini(&mctx);
+
 	return TEST_SUCCESS;
 }
 
@@ -263,6 +266,9 @@ test_no_match_ip_only(void *arena) {
 		free_packet(packets[i]);
 		free(packets[i]);
 	}
+
+	filter_free(&filter, combo_net6_port_src_compile);
+	memory_context_fini(&mctx);
 
 	return TEST_SUCCESS;
 }
@@ -371,6 +377,9 @@ test_both_match(void *arena) {
 		free_packet(packets[i]);
 		free(packets[i]);
 	}
+
+	filter_free(&filter, combo_net6_port_src_compile);
+	memory_context_fini(&mctx);
 
 	return TEST_SUCCESS;
 }

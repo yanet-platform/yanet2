@@ -100,6 +100,7 @@ test(void *memory) {
 	);
 
 	filter_free(&filter, sign_net4_ports_compile);
+	memory_context_fini(&memory_context);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

@@ -162,6 +162,7 @@ test_stress_seed12_regression(void *memory, size_t memory_size) {
 	);
 
 	filter_free(&filter, sign_net4_compile);
+	memory_context_fini(&memory_context);
 
 	LOG(INFO, "Regression test passed!");
 }
@@ -264,6 +265,7 @@ main() {
 
 	(void)test_stress_seed12_regression;
 
+	memory_context_fini(&memory_context);
 	free(memory);
 
 	LOG(INFO, "OK!");

@@ -237,6 +237,13 @@ test_basic(void *arena, enum filter_sign sign) {
 		free(packets[i]);
 	}
 
+	if (sign == src) {
+		filter_free(&filter, sign_fast_src_compile);
+	} else {
+		filter_free(&filter, sign_fast_dst_compile);
+	}
+	memory_context_fini(&mctx);
+
 	return TEST_SUCCESS;
 }
 
@@ -377,6 +384,13 @@ test_multiple_ranges_per_rule(void *arena, enum filter_sign sign) {
 		free_packet(packets[i]);
 		free(packets[i]);
 	}
+
+	if (sign == src) {
+		filter_free(&filter, sign_fast_src_compile);
+	} else {
+		filter_free(&filter, sign_fast_dst_compile);
+	}
+	memory_context_fini(&mctx);
 
 	return TEST_SUCCESS;
 }
@@ -586,6 +600,19 @@ stress(void *arena,
 	free(packets);
 	free(expected_ranges);
 
+	switch (sign) {
+	case src:
+		filter_free(&filter, sign_fast_src_compile);
+		break;
+	case dst:
+		filter_free(&filter, sign_fast_dst_compile);
+		break;
+	case src_dst:
+		filter_free(&filter, sign_fast_src_dst_compile);
+		break;
+	}
+	memory_context_fini(&memory_context);
+
 	return TEST_SUCCESS;
 }
 
@@ -716,6 +743,13 @@ test_no_match(void *arena, enum filter_sign sign) {
 		free(packets[i]);
 	}
 
+	if (sign == src) {
+		filter_free(&filter, sign_fast_src_compile);
+	} else {
+		filter_free(&filter, sign_fast_dst_compile);
+	}
+	memory_context_fini(&mctx);
+
 	return TEST_SUCCESS;
 }
 
@@ -845,6 +879,13 @@ test_overlapping_ranges(void *arena, enum filter_sign sign) {
 		free(packets[i]);
 	}
 
+	if (sign == src) {
+		filter_free(&filter, sign_fast_src_compile);
+	} else {
+		filter_free(&filter, sign_fast_dst_compile);
+	}
+	memory_context_fini(&mctx);
+
 	return TEST_SUCCESS;
 }
 
@@ -966,6 +1007,13 @@ test_boundary_conditions(void *arena, enum filter_sign sign) {
 		free_packet(packets[i]);
 		free(packets[i]);
 	}
+
+	if (sign == src) {
+		filter_free(&filter, sign_fast_src_compile);
+	} else {
+		filter_free(&filter, sign_fast_dst_compile);
+	}
+	memory_context_fini(&mctx);
 
 	return TEST_SUCCESS;
 }
@@ -1101,6 +1149,13 @@ test_single_port_ranges(void *arena, enum filter_sign sign) {
 		free(packets[i]);
 	}
 
+	if (sign == src) {
+		filter_free(&filter, sign_fast_src_compile);
+	} else {
+		filter_free(&filter, sign_fast_dst_compile);
+	}
+	memory_context_fini(&mctx);
+
 	return TEST_SUCCESS;
 }
 
@@ -1229,6 +1284,13 @@ test_adjacent_ranges(void *arena, enum filter_sign sign) {
 		free_packet(packets[i]);
 		free(packets[i]);
 	}
+
+	if (sign == src) {
+		filter_free(&filter, sign_fast_src_compile);
+	} else {
+		filter_free(&filter, sign_fast_dst_compile);
+	}
+	memory_context_fini(&mctx);
 
 	return TEST_SUCCESS;
 }
@@ -1362,6 +1424,13 @@ test_extreme_ports(void *arena, enum filter_sign sign) {
 		free_packet(packets[i]);
 		free(packets[i]);
 	}
+
+	if (sign == src) {
+		filter_free(&filter, sign_fast_src_compile);
+	} else {
+		filter_free(&filter, sign_fast_dst_compile);
+	}
+	memory_context_fini(&mctx);
 
 	return TEST_SUCCESS;
 }

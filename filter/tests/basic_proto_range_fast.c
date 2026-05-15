@@ -98,6 +98,7 @@ test_basic_tcp_udp(void *memory) {
 	query_udp_packet(&filter, 1);
 
 	filter_free(&filter, sign_proto_range_fast_compile);
+	memory_context_fini(&memory_context);
 
 	return TEST_SUCCESS;
 }
@@ -164,6 +165,7 @@ test_tcp_flags(void *memory) {
 	query_tcp_packet(&filter, 0x01, 2);
 
 	filter_free(&filter, sign_proto_range_fast_compile);
+	memory_context_fini(&memory_context);
 
 	return TEST_SUCCESS;
 }
@@ -214,6 +216,7 @@ test_multiple_ranges_per_rule(void *memory) {
 	query_udp_packet(&filter, 0);
 
 	filter_free(&filter, sign_proto_range_fast_compile);
+	memory_context_fini(&memory_context);
 
 	return TEST_SUCCESS;
 }
@@ -274,6 +277,7 @@ test_boundary_values(void *memory) {
 	free_packet(&packet1);
 
 	filter_free(&filter, sign_proto_range_fast_compile);
+	memory_context_fini(&memory_context);
 
 	return TEST_SUCCESS;
 }

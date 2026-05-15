@@ -89,6 +89,7 @@ test_proto_1(void *memory) {
 	query_udp_packet(&filter, 1);
 
 	filter_free(&filter, sign_proto_compile);
+	memory_context_fini(&memory_context);
 }
 
 int

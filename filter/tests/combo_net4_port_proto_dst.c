@@ -114,6 +114,9 @@ test_no_match_proto_only(void *arena) {
 	}
 	free(actions);
 
+	filter_free(&filter, combo_net4_port_proto_dst_compile);
+	memory_context_fini(&mctx);
+
 	return TEST_SUCCESS;
 }
 
@@ -196,6 +199,9 @@ test_all_match(void *arena) {
 		free(packets[i]);
 	}
 	free(ranges);
+
+	filter_free(&filter, combo_net4_port_proto_dst_compile);
+	memory_context_fini(&mctx);
 
 	return TEST_SUCCESS;
 }
@@ -317,6 +323,9 @@ test_multiple_rules_overlap(void *arena) {
 	}
 	free(ranges);
 
+	filter_free(&filter, combo_net4_port_proto_dst_compile);
+	memory_context_fini(&mctx);
+
 	return TEST_SUCCESS;
 }
 
@@ -428,6 +437,9 @@ test_tcp_flags(void *arena) {
 		free(packets[i]);
 	}
 	free(ranges);
+
+	filter_free(&filter, combo_net4_port_proto_dst_compile);
+	memory_context_fini(&mctx);
 
 	return TEST_SUCCESS;
 }

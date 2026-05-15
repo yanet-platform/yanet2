@@ -51,6 +51,7 @@ run_case(void) {
 
 	free_packet(&p);
 	filter_free(&f, sign);
+	memory_context_fini(&memory_context);
 	free(memory);
 }
 
