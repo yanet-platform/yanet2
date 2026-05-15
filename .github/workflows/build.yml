@@ -7,187 +7,206 @@ on:
       - "**.h"
       - "**.c"
       - "**/meson.build"
+      - "meson_options.txt"
       - "**.go"
       - "go.mod"
       - "go.sum"
       - "Makefile"
+      - "cli/Makefile"
       - "**.rs"
+      - "**/build.rs"
       - "**/Cargo.toml"
       - "**/Cargo.lock"
+      - "tests/functional/**"
+      - "subprojects/dpdk"
+      - ".gitmodules"
+      - ".github/workflows/build.yml"
+      - ".github/actions/setup/**"
   pull_request:
     branches: ["main"]
     paths:
       - "**.h"
       - "**.c"
       - "**/meson.build"
+      - "meson_options.txt"
       - "**.go"
       - "go.mod"
       - "go.sum"
       - "Makefile"
+      - "cli/Makefile"
       - "**.rs"
+      - "**/build.rs"
       - "**/Cargo.toml"
       - "**/Cargo.lock"
+      - "tests/functional/**"
+      - "subprojects/dpdk"
+      - ".gitmodules"
+      - ".github/workflows/build.yml"
+      - ".github/actions/setup/**"
 
 jobs:
-  build:
+  build-sanitize:
     runs-on: ubuntu-24.04
-    env:
-      cache_name: build-and-test
+    name: build-sanitize (${{ matrix.profile.id }})
+    strategy:
+      fail-fast: false
+      matrix:
+        profile:
+          - id: asan
+            # Keep flags in sync with Makefile (test-asan)
+            flags: "-Dbuildtype=debug -Doptimization=0 -Dfuzzing=disabled -Db_sanitize=address,undefined"
+            builddir: build
+            test_target: test-asan
+          - id: tsan
+            flags: "-Dbuildtype=debug -Doptimization=0 -Db_sanitize=thread"
+            builddir: build-tsan
+            test_target: test-tsan
 
     steps:
       - name: Free up disk space on GitHub runner
         run: |
           echo "=== Initial disk space ==="
           df -h
-
-          echo "=== Removing unnecessary software ==="
-          # Remove large packages that are not needed
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /usr/local/lib/android
-          sudo rm -rf /opt/ghc
-          sudo rm -rf /opt/hostedtoolcache/CodeQL
-          sudo rm -rf /usr/local/share/boost
-          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
-
-          # Clean apt cache
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost "$AGENT_TOOLSDIRECTORY"
           sudo apt-get clean
-
-          # Remove docker images
-          docker rmi $(docker images -q) 2>/dev/null || true
-
+          docker image prune -af 2>/dev/null || true
           echo "=== Disk space after cleanup ==="
           df -h
-
-      - name: update apt (act hack)
-        if: ${{ env.ACT }}
-        run: apt-get update
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
-      - name: Cache rust
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('**/Cargo.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-
-            ${{ runner.os }}-cargo-
-      - uses: awalsh128/cache-apt-pkgs-action@latest
-        with:
-          packages: meson clang cmake python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler jq clang-tidy-19
-          version: 1.1
-
-      - name: Install LLVM 19 toolchain
-        id: llvm
-        uses: KyleMayes/install-llvm-action@v2
-        with:
-          version: "19.1.1"
-          directory: ${{ runner.temp }}/llvm
 
       - uses: actions/checkout@v4
         with:
           submodules: true
 
-      - uses: hendrikmuhs/ccache-action@v1.2.18
-        name: ccache
+      - uses: ./.github/actions/setup
+        id: setup
         with:
-          key: ${{ runner.os }}-build-cache
-          max-size: 2G
-          verbose: 2
+          profile: ${{ matrix.profile.id }}
 
-      - uses: actions/setup-go@v5
+      - name: Restore build cache
+        id: cache-build
+        uses: actions/cache/restore@v4
         with:
-          go-version: "1.24.x"
-          cache: false
-          check-latest: true
-      # https://github.com/actions/setup-go/issues/358
-      - name: Get Go environment
-        run: |
-          echo "cache=$(go env GOCACHE)" >>$GITHUB_ENV
-          echo "modcache=$(go env GOMODCACHE)" >>$GITHUB_ENV
-      - name: Set up go cache
-        uses: actions/cache@v3
-        with:
-          path: |
-            ${{ env.cache }}
-            ${{ env.modcache }}
-          key: ${{ env.cache_name }}-${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}-${{ hashFiles('**/go.mod') }}
+          path: ${{ matrix.profile.builddir }}
+          key: build-${{ matrix.profile.id }}-${{ runner.os }}-${{ steps.setup.outputs.dpdk-sha }}-${{ hashFiles('**/meson.build', 'meson_options.txt') }}-${{ github.sha }}
           restore-keys: |
-            ${{ env.cache_name }}-${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}-
-            ${{ env.cache_name }}-${{ runner.os }}-go-
+            build-${{ matrix.profile.id }}-${{ runner.os }}-${{ steps.setup.outputs.dpdk-sha }}-${{ hashFiles('**/meson.build', 'meson_options.txt') }}-
+            build-${{ matrix.profile.id }}-${{ runner.os }}-${{ steps.setup.outputs.dpdk-sha }}-
 
-      - name: Install Go Protobuf Plugins
-        run: |
-          go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
-          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
-
-      - name: Build YANET (sanitize)
+      - name: Build YANET
         run: |
           make go-cache-clean
-          meson setup build -Dbuildtype=debug -Doptimization=0 -Db_sanitize=address,undefined
-          make dataplane cli
+          if [ -f ${{ matrix.profile.builddir }}/meson-private/build.dat ]; then
+              meson setup --reconfigure ${{ matrix.profile.builddir }} ${{ matrix.profile.flags }}
+          else
+              meson setup ${{ matrix.profile.builddir }} ${{ matrix.profile.flags }}
+          fi
+          # TSAN only runs unit tests via `make test-tsan`, which builds its
+          # own test binaries through meson; the full dataplane and CLI are
+          # not exercised, so we skip building them.
+          if [ "${{ matrix.profile.id }}" != "tsan" ]; then
+              make dataplane cli
+          fi
 
-      - name: Build and run tests (sanitize)
+      - name: Run tests
         run: |
           make go-cache-clean
-          make test-asan
+          make ${{ matrix.profile.test_target }}
+
       - name: Show meson test log
-        run: grep -v 'Inherited environment' build/meson-logs/testlog.txt
-
-      - name: Run TSAN tests
-        run: make test-tsan
-      - name: Show TSAN test log
         if: always()
-        run: grep -v 'Inherited environment' build-tsan/meson-logs/testlog.txt || true
-
-      - name: Clean debug build artifacts to free space
         run: |
-          echo "=== Disk space before cleanup ==="
+          log="${{ matrix.profile.builddir }}/meson-logs/testlog.txt"
+          if [ -f "$log" ]; then
+              grep -v 'Inherited environment' "$log"
+          else
+              echo "WARNING: $log not found"
+          fi
+
+      - name: Save build cache
+        if: success() && steps.cache-build.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ matrix.profile.builddir }}
+          key: build-${{ matrix.profile.id }}-${{ runner.os }}-${{ steps.setup.outputs.dpdk-sha }}-${{ hashFiles('**/meson.build', 'meson_options.txt') }}-${{ github.sha }}
+
+  build-release:
+    runs-on: ubuntu-24.04
+    name: build-release
+
+    steps:
+      - name: Free up disk space on GitHub runner
+        run: |
+          echo "=== Initial disk space ==="
           df -h
-          echo "=== Build directory size ==="
-          du -sh build/ || true
-
-          echo "=== Cleaning debug build artifacts ==="
-          # Completely remove build directory to free maximum space
-          rm -rf build/
-
-          # Clean Docker build cache if exists
-          docker system prune -af 2>/dev/null || true
-
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost "$AGENT_TOOLSDIRECTORY"
+          sudo apt-get clean
+          docker image prune -af 2>/dev/null || true
           echo "=== Disk space after cleanup ==="
           df -h
 
-      - name: Build YANET (release)
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - uses: ./.github/actions/setup
+        id: setup
+        with:
+          profile: release
+          install-llvm: 'true'
+
+      - name: Restore build cache
+        id: cache-build
+        uses: actions/cache/restore@v4
+        with:
+          path: build
+          key: build-release-${{ runner.os }}-${{ steps.setup.outputs.dpdk-sha }}-${{ hashFiles('**/meson.build', 'meson_options.txt') }}-${{ github.sha }}
+          restore-keys: |
+            build-release-${{ runner.os }}-${{ steps.setup.outputs.dpdk-sha }}-${{ hashFiles('**/meson.build', 'meson_options.txt') }}-
+            build-release-${{ runner.os }}-${{ steps.setup.outputs.dpdk-sha }}-
+
+      - name: Build YANET
         run: |
           make go-cache-clean
-          meson setup build -Dbuildtype=release
+          if [ -f build/meson-private/build.dat ]; then
+              meson setup --reconfigure build -Dbuildtype=release
+          else
+              meson setup build -Dbuildtype=release
+          fi
           make dataplane cli
 
-      - name: Build and run tests (release)
-        run: make test
+      - name: Run tests
+        run: |
+          make go-cache-clean
+          make test
 
       - name: Show meson test log
-        run: grep -v 'Inherited environment' build/meson-logs/testlog.txt
+        if: always()
+        run: |
+          log="build/meson-logs/testlog.txt"
+          if [ -f "$log" ]; then
+              grep -v 'Inherited environment' "$log"
+          else
+              echo "WARNING: $log not found"
+          fi
+
+      - name: Save build cache
+        if: success() && steps.cache-build.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: build
+          key: build-release-${{ runner.os }}-${{ steps.setup.outputs.dpdk-sha }}-${{ hashFiles('**/meson.build', 'meson_options.txt') }}-${{ github.sha }}
 
       - name: Run clang-tidy
         env:
-          # Use the same directory we asked the install-llvm-action to install to
           LLVM_DIR: ${{ runner.temp }}/llvm
         run: |
           set -euo pipefail
-          # Ensure compilation database exists
           test -f build/compile_commands.json || {
               echo "ERROR: build/compile_commands.json not found"
               ls -la build || true
               exit 1
           }
 
-          # Force using the freshly installed LLVM 19 to avoid ABI/lib conflicts with system packages
           if [ ! -x "$LLVM_DIR/bin/clang-tidy" ]; then
               echo "ERROR: LLVM 19 clang-tidy not found at $LLVM_DIR/bin/clang-tidy"
               ls -la "$LLVM_DIR/bin" || true
@@ -197,7 +216,6 @@ jobs:
           export LD_LIBRARY_PATH="$LLVM_DIR/lib:${LD_LIBRARY_PATH:-}"
 
           CTIDY="$LLVM_DIR/bin/clang-tidy"
-          # Locate run-clang-tidy.py shipped with LLVM
           if [ -f "$LLVM_DIR/share/clang/run-clang-tidy.py" ]; then
               RTIDY="$LLVM_DIR/share/clang/run-clang-tidy.py"
           elif [ -f "$LLVM_DIR/lib/clang/run-clang-tidy.py" ]; then
@@ -209,7 +227,6 @@ jobs:
           echo "Using clang-tidy binary: $CTIDY"
           [ -n "$RTIDY" ] && echo "Using run-clang-tidy helper: $RTIDY"
 
-          # Build file list from database (C files, exclude subprojects)
           FILES="$(jq -r '.[].file' build/compile_commands.json | sort -u | grep '\.c$' | grep -v '/subprojects/' || true)"
           if [ -z "$FILES" ]; then
               echo "No source files to lint (after filtering)."
@@ -217,7 +234,6 @@ jobs:
           fi
 
           if [ -n "$RTIDY" ] && [ -f "$RTIDY" ]; then
-              # Use run-clang-tidy.py (handles DB well and parallelism)
               python3 "$RTIDY" \
                   -p build \
                   -j "$(nproc)" \
@@ -225,7 +241,6 @@ jobs:
                   -header-filter='^(?!.*\/subprojects\/).*' \
                   $FILES
           else
-              # Fallback: invoke clang-tidy directly from DB directory
               cd build
               printf "%s\n" $FILES |
                   xargs -P"$(nproc)" -I{} "$CTIDY" \
@@ -236,34 +251,19 @@ jobs:
 
       - name: Verify binaries before upload
         run: |
-          echo "=== DIAGNOSTIC: Verifying binaries before artifact upload ==="
+          echo "=== Verifying binaries before artifact upload ==="
           echo "Current git commit: $(git rev-parse HEAD)"
-          echo "Current git commit short: $(git rev-parse --short HEAD)"
-          echo ""
 
-          echo "yanet-dataplane:"
-          if [ -f "build/dataplane/yanet-dataplane" ]; then
-              stat build/dataplane/yanet-dataplane
-              md5sum build/dataplane/yanet-dataplane
-              strings build/dataplane/yanet-dataplane | grep -E "yanet|version" | head -20 || true
-          else
-              echo "ERROR: build/dataplane/yanet-dataplane not found!"
-              exit 1
-          fi
+          for f in build/dataplane/yanet-dataplane build/controlplane/yanet-controlplane; do
+              if [ -f "$f" ]; then
+                  stat "$f"
+                  md5sum "$f"
+              else
+                  echo "ERROR: $f not found!"
+                  exit 1
+              fi
+          done
 
-          echo ""
-          echo "yanet-controlplane:"
-          if [ -f "build/controlplane/yanet-controlplane" ]; then
-              stat build/controlplane/yanet-controlplane
-              md5sum build/controlplane/yanet-controlplane
-              strings build/controlplane/yanet-controlplane | grep -E "yanet|version" | head -20 || true
-          else
-              echo "ERROR: build/controlplane/yanet-controlplane not found!"
-              exit 1
-          fi
-
-          echo ""
-          echo "yanet-cli binaries:"
           if ls target/release/yanet-cli* 1>/dev/null 2>&1; then
               stat target/release/yanet-cli* || true
               md5sum target/release/yanet-cli* || true
@@ -285,7 +285,7 @@ jobs:
     name: Run Functional Tests
     runs-on: ubuntu-24.04
     timeout-minutes: 150
-    needs: build
+    needs: build-release
 
     steps:
       - uses: actions/checkout@v4
@@ -301,20 +301,19 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.24.x"
-          cache: true
+          go-version: "1.24.13"
+          cache: false
 
       - name: update apt (act hack)
         if: ${{ env.ACT }}
         run: apt-get update
-      - uses: awalsh128/cache-apt-pkgs-action@latest
+      - uses: awalsh128/cache-apt-pkgs-action@v1.6.0
         with:
           packages: qemu-system-x86 qemu-utils genisoimage cloud-image-utils wget curl jq
           version: 1.1
 
       - name: Configure system for QEMU
         run: |
-          # Enable KVM access if available
           if [ -e /dev/kvm ]; then
               echo "KVM is available, configuring KVM access"
               sudo usermod -aG kvm $USER || true
@@ -323,11 +322,9 @@ jobs:
               echo "KVM is not available, will use TCG emulation"
           fi
 
-          # Configure 9P filesystem support
           sudo modprobe 9p || true
           sudo modprobe 9pnet_virtio || true
 
-          # Check QEMU capabilities
           qemu-system-x86_64 --version
 
       - name: Cache Ubuntu cloud image
@@ -357,9 +354,6 @@ jobs:
 
           cd tests/functional
 
-          # Git checkout sets source files mtimes to "now". Cached artifacts keep old mtimes,
-          # so `make` treats them as stale and rebuilds QCOW2/ISO every run. Touch artifacts
-          # (deps first, then target) to keep make from doing unnecessary work.
           if [ -f ubuntu-24.04-minimal-cloudimg-amd64.img ]; then
               touch ubuntu-24.04-minimal-cloudimg-amd64.img
           fi
@@ -384,7 +378,7 @@ jobs:
           [ -f "./yanet-dataplane" ] && mv -f ./yanet-dataplane build/dataplane/
           [ -f "./yanet-controlplane" ] && mv -f ./yanet-controlplane build/controlplane/
           if ls ./yanet-cli* 1>/dev/null 2>&1; then
-              mv -f ./yanet-cli-* target/release/
+              mv -f ./yanet-cli* target/release/
           fi
           chmod +x build/dataplane/yanet-dataplane 2>/dev/null || true
           chmod +x build/controlplane/yanet-controlplane 2>/dev/null || true
@@ -393,15 +387,16 @@ jobs:
       - name: Prepare test environment
         working-directory: tests/functional
         run: |
+          set -uo pipefail
           make check-deps
 
           echo "=== Starting QEMU VM preparation ==="
 
-          # Run with timeout and monitoring
-          timeout 7200 make prepare-vm &
+          # Budgets must stack with margin: inner timeout < loop budget < step timeout.
+          # 110 min  <  120 min  <  130 min.
+          timeout 6600 make prepare-vm &
           QEMU_PID=$!
 
-          # Monitor QEMU progress
           for i in {1..120}; do
               echo "=== QEMU status check $i/120 ==="
               ps aux | grep qemu | grep -v grep || echo "QEMU process not found"
@@ -414,14 +409,12 @@ jobs:
 
               sleep 60
 
-              # Check if QEMU is still running
               if ! kill -0 $QEMU_PID 2>/dev/null; then
                   echo "QEMU process finished"
                   break
               fi
           done
 
-          # Wait for QEMU to finish
           wait $QEMU_PID
           QEMU_EXIT_CODE=$?
 
@@ -432,7 +425,10 @@ jobs:
               tail -50 qemu_debug.log
           fi
 
-          if [ $QEMU_EXIT_CODE -ne 0 ]; then
+          if [ $QEMU_EXIT_CODE -eq 124 ]; then
+              echo "QEMU preparation hit the inner 110-min timeout (exit 124)"
+              exit 124
+          elif [ $QEMU_EXIT_CODE -ne 0 ]; then
               echo "QEMU preparation failed with exit code $QEMU_EXIT_CODE"
               exit $QEMU_EXIT_CODE
           fi

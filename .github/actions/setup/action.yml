@@ -1,0 +1,109 @@
+name: 'YANET build setup'
+description: 'Common build environment setup for build-sanitize and build-release jobs.'
+
+inputs:
+  profile:
+    description: 'Profile id (asan, tsan, release) — scopes ccache and Go cache keys.'
+    required: true
+  install-llvm:
+    description: 'Install LLVM 19 toolchain (needed for clang-tidy). Defaults to false.'
+    required: false
+    default: 'false'
+
+outputs:
+  dpdk-sha:
+    description: 'DPDK submodule commit SHA pinned in the parent tree.'
+    value: ${{ steps.dpdk.outputs.sha }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: update apt (act hack)
+      if: ${{ env.ACT }}
+      shell: bash
+      run: apt-get update
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@1.84.0
+
+    - name: Cache rust
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-
+
+    - uses: awalsh128/cache-apt-pkgs-action@v1.6.0
+      with:
+        packages: meson clang cmake python3-pyelftools libnuma-dev libpcap-dev git git-restore-mtime protobuf-compiler jq clang-tidy-19
+        version: 1.2
+
+    - name: Restore source mtimes from git history
+      shell: bash
+      run: |
+        # The Ubuntu deb installs the binary at $(git --exec-path)/git-restore-mtime
+        # (git's subcommand path), not /usr/bin/. So it's not on $PATH and command -v
+        # misses it — but `git restore-mtime` (subcommand form) still resolves it.
+        if command -v git-restore-mtime >/dev/null; then
+            git-restore-mtime
+        elif [ -x "$(git --exec-path)/git-restore-mtime" ]; then
+            git restore-mtime
+        else
+            echo "ERROR: git-restore-mtime not available; build cache would be useless."
+            exit 1
+        fi
+
+    - name: Install LLVM 19 toolchain
+      if: ${{ inputs.install-llvm == 'true' }}
+      uses: KyleMayes/install-llvm-action@v2
+      with:
+        version: "19.1.1"
+        directory: ${{ runner.temp }}/llvm
+
+    - name: Resolve DPDK submodule SHA
+      id: dpdk
+      shell: bash
+      run: |
+        sha="$(git ls-tree HEAD subprojects/dpdk | awk '{print $3}')"
+        echo "sha=$sha" >> "$GITHUB_OUTPUT"
+        echo "DPDK pinned at $sha"
+
+    - uses: hendrikmuhs/ccache-action@v1.2.18
+      with:
+        key: ${{ runner.os }}-ccache-${{ inputs.profile }}
+        max-size: 2G
+        verbose: 2
+
+    - uses: actions/setup-go@v5
+      with:
+        go-version: "1.24.13"
+        cache: false
+        check-latest: true
+
+    - name: Get Go environment
+      id: goenv
+      shell: bash
+      run: |
+        echo "cache=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
+        echo "modcache=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
+
+    - name: Set up go cache
+      uses: actions/cache@v4
+      with:
+        path: |
+          ${{ steps.goenv.outputs.cache }}
+          ${{ steps.goenv.outputs.modcache }}
+        key: build-and-test-${{ inputs.profile }}-${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}-${{ hashFiles('**/go.mod') }}
+        restore-keys: |
+          build-and-test-${{ inputs.profile }}-${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}-
+          build-and-test-${{ inputs.profile }}-${{ runner.os }}-go-
+
+    - name: Install Go Protobuf Plugins
+      shell: bash
+      run: |
+        go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.11
+        go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.6.2
