@@ -1543,6 +1543,21 @@ func (f *TestFramework) SaveSnapshotKeepUnmounted(name string) error {
 	return nil
 }
 
+// ExportCurrentOverlay copies the VM's current qcow2 overlay to dst. This is
+// used to cache prepared template overlays (for example a prebuilt baseline)
+// and start future pool VMs from the same snapshot source.
+func (f *TestFramework) ExportCurrentOverlay(dst string) error {
+	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+		return fmt.Errorf("create overlay cache dir: %w", err)
+	}
+	src := filepath.Join(f.qemu.WorkDir, "overlay.qcow2")
+	if err := CopyFileQCOW2(src, dst); err != nil {
+		return fmt.Errorf("copy overlay %s -> %s: %w", src, dst, err)
+	}
+	f.log.Infof("Exported current overlay to %s", dst)
+	return nil
+}
+
 // RestoreClean reverts the VM to a previously saved snapshot and
 // re-establishes serial console and 9P mounts WITHOUT running the
 // dataplane heartbeat check. Use this for snapshots where YANET is

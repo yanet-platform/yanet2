@@ -236,8 +236,55 @@ func saveBaselineSnapshot(fw *framework.TestFramework, log *zap.SugaredLogger) e
 		return err
 	}
 
-	framework.MarkBaselineSaved()
 	log.Info("Baseline snapshot saved successfully")
+	return nil
+}
+
+func ensureBaselineTemplate(qemuImage string, bootedTemplate string, baselineTemplate string, log *zap.SugaredLogger) error {
+	if framework.OverlayHasSnapshot(baselineTemplate, "baseline") {
+		log.Infof("Using cached baseline template: %s", baselineTemplate)
+		return nil
+	}
+
+	log.Infof("Baseline template %s not found; bootstrapping from booted template", baselineTemplate)
+
+	prepPool, err := framework.NewVMPool(1, "baseline-prep", qemuImage, bootedTemplate, "", "", log)
+	if err != nil {
+		return fmt.Errorf("create baseline prep pool: %w", err)
+	}
+	defer func() {
+		if err := prepPool.Shutdown(); err != nil {
+			log.Errorf("Failed to shut down baseline prep pool: %v", err)
+		}
+	}()
+
+	if err := prepPool.StartAll(); err != nil {
+		return fmt.Errorf("start baseline prep pool: %w", err)
+	}
+	if err := prepPool.WaitAllReady(120 * time.Second); err != nil {
+		return fmt.Errorf("baseline prep pool not ready: %w", err)
+	}
+
+	prepFW := prepPool.Acquire()
+	defer prepPool.Release(prepFW)
+
+	if err := prepFW.PrepareLocalStorage(); err != nil {
+		return fmt.Errorf("prepare local storage: %w", err)
+	}
+	if err := configureBaseline(prepFW, log); err != nil {
+		return fmt.Errorf("configure baseline: %w", err)
+	}
+	if err := saveBaselineSnapshot(prepFW, log); err != nil {
+		return fmt.Errorf("save baseline snapshot: %w", err)
+	}
+	if err := prepFW.ExportCurrentOverlay(baselineTemplate); err != nil {
+		return fmt.Errorf("export baseline template: %w", err)
+	}
+	if !framework.OverlayHasSnapshot(baselineTemplate, "baseline") {
+		return fmt.Errorf("exported baseline template %s is missing snapshot %q", baselineTemplate, "baseline")
+	}
+
+	log.Infof("Baseline template cached at %s", baselineTemplate)
 	return nil
 }
 
@@ -310,11 +357,13 @@ func testFramework(t *testing.T) *framework.TestFramework {
 // only when baseline restore fails.
 //
 // Fast path (~3-5s): loadvm to "baseline" (YANET running, configured).
-//   Requires connection reset to clear stale host-side sockets.
+//
+//	Requires connection reset to clear stale host-side sockets.
 //
 // Slow path (~20-50s): loadvm to "preyanet" (no YANET), StartYANET from
-//   scratch, configure. Used when DPDK device state is genuinely broken
-//   after loadvm and the heartbeat cannot succeed.
+//
+//	scratch, configure. Used when DPDK device state is genuinely broken
+//	after loadvm and the heartbeat cannot succeed.
 func restoreBooted(t *testing.T, fw *framework.TestFramework) {
 	t.Helper()
 
@@ -407,20 +456,22 @@ func testMainWrapper(m *testing.M) (code int) {
 	// Booted template is stored alongside the base image.
 	// It is created by 'make prepare-vm'; if missing it is bootstrapped at runtime.
 	bootedTemplate := framework.BootedImagePath(qemuImage)
+	baselineTemplate := framework.BaselineImagePath(qemuImage)
 
-	sugar.Infof("Starting VM pool with size %d (booted template: %s)", framework.PoolSize(), bootedTemplate)
+	if err := ensureBaselineTemplate(qemuImage, bootedTemplate, baselineTemplate, sugar); err != nil {
+		sugar.Errorf("Failed to prepare baseline template: %v", err)
+		return 1
+	}
+	framework.MarkBaselineSaved()
 
-	pool, err := framework.NewVMPool(framework.PoolSize(), "main", qemuImage, bootedTemplate, sugar)
+	sugar.Infof("Starting VM pool with size %d (baseline template: %s)", framework.PoolSize(), baselineTemplate)
+
+	pool, err := framework.NewVMPool(framework.PoolSize(), "main", qemuImage, bootedTemplate, baselineTemplate, "baseline", sugar)
 	if err != nil {
 		sugar.Errorf("Failed to create VM pool: %v", err)
 		return 1
 	}
 	globalPool = pool
-
-	if err := pool.StartAll(); err != nil {
-		sugar.Errorf("Failed to start VM pool: %v", err)
-		return 1
-	}
 
 	defer func() {
 		if globalPool != nil {
@@ -428,29 +479,17 @@ func testMainWrapper(m *testing.M) (code int) {
 				sugar.Errorf("Failed to shut down VM pool: %v", err)
 				code = 12
 			}
+			globalPool = nil
 		}
 	}()
 
-	if err := pool.WaitAllReady(120 * time.Second); err != nil {
-		sugar.Errorf("Failed to wait for VM pool readiness: %v", err)
+	if err := pool.StartAll(); err != nil {
+		sugar.Errorf("Failed to start VM pool: %v", err)
 		return 1
 	}
 
-	if err := pool.ForEachParallel(func(idx int, fw *framework.TestFramework) error {
-		// Copy YANET binaries from 9P mounts to guest tmpfs so that
-		// no YANET process holds open fids on 9P. This makes savevm work.
-		if err := fw.PrepareLocalStorage(); err != nil {
-			return fmt.Errorf("vm %d local storage prep failed: %w", idx, err)
-		}
-		if err := configureBaseline(fw, sugar); err != nil {
-			return fmt.Errorf("vm %d baseline config failed: %w", idx, err)
-		}
-		if err := saveBaselineSnapshot(fw, sugar); err != nil {
-			return fmt.Errorf("vm %d baseline snapshot failed: %w", idx, err)
-		}
-		return nil
-	}); err != nil {
-		sugar.Errorf("Failed to configure VM pool baseline: %v", err)
+	if err := pool.WaitAllReady(120 * time.Second); err != nil {
+		sugar.Errorf("Failed to wait for VM pool readiness: %v", err)
 		return 1
 	}
 

@@ -34,34 +34,37 @@ import (
 // All operations are thread-safe and support concurrent access patterns
 // required for comprehensive network testing scenarios.
 type QEMUManager struct {
-	Name           string
-	ImagePath      string
-	WorkDir        string
-	Command        *exec.Cmd
-	LogsDir        string
-	ConfigDir      string
-	BuildDir       string
-	TargetDir      string
-	SerialPath     string
-	MonitorPath    string
-	SocketPaths    []string
-	isReady        bool
-	readySignal    chan bool
-	Ninepmounted atomic.Bool
-	monitorConn    net.Conn
-	serialConn     net.Conn
-	serialBuffer   strings.Builder
-	serialMutex    sync.Mutex
-	serialLog      atomic.Value
-	log            *zap.SugaredLogger
-	readyMutex     sync.RWMutex
-	instanceID     string
-	sshPort        int
+	Name             string
+	ImagePath        string
+	WorkDir          string
+	Command          *exec.Cmd
+	LogsDir          string
+	ConfigDir        string
+	BuildDir         string
+	TargetDir        string
+	SerialPath       string
+	MonitorPath      string
+	SocketPaths      []string
+	isReady          bool
+	readySignal      chan bool
+	Ninepmounted     atomic.Bool
+	monitorConn      net.Conn
+	serialConn       net.Conn
+	serialBuffer     strings.Builder
+	serialMutex      sync.Mutex
+	serialLog        atomic.Value
+	log              *zap.SugaredLogger
+	readyMutex       sync.RWMutex
+	instanceID       string
+	sshPort          int
 	serialReaderDone chan struct{}
 	// TemplateOverlay is an optional path to a qcow2 overlay that already
-	// contains a "booted" snapshot. When set, Start() copies it instead of
-	// creating a blank overlay, then boots with -loadvm booted.
+	// contains a reusable VM snapshot. When set, Start() copies it instead
+	// of creating a blank overlay, then boots with -loadvm TemplateSnapshotName.
 	TemplateOverlay string
+	// TemplateSnapshotName is the snapshot name loaded from TemplateOverlay.
+	// When empty, Start() falls back to BootedSnapshotName.
+	TemplateSnapshotName string
 }
 
 // NewQEMUManager creates and initializes a new QEMU manager instance for virtual
@@ -109,18 +112,18 @@ func NewQEMUManager(name string, imagePath string, logger *zap.SugaredLogger) (*
 
 	qemuLog := logger.Named("QEMU")
 	q := &QEMUManager{
-		Name:        name,
-		ImagePath:   imagePath,
-		WorkDir:     workDir,
-		LogsDir:     filepath.Join(workDir, "logs"),
-		ConfigDir:   filepath.Join(workDir, "config"),
-		BuildDir:    buildDir,
-		TargetDir:   targetDir,
-		readySignal: make(chan bool, 1),
-		log:         qemuLog,
-		instanceID:  instanceID,
-		SerialPath:  filepath.Join(workDir, "serial.sock"),
-		MonitorPath: filepath.Join(workDir, "monitor.sock"),
+		Name:             name,
+		ImagePath:        imagePath,
+		WorkDir:          workDir,
+		LogsDir:          filepath.Join(workDir, "logs"),
+		ConfigDir:        filepath.Join(workDir, "config"),
+		BuildDir:         buildDir,
+		TargetDir:        targetDir,
+		readySignal:      make(chan bool, 1),
+		log:              qemuLog,
+		instanceID:       instanceID,
+		SerialPath:       filepath.Join(workDir, "serial.sock"),
+		MonitorPath:      filepath.Join(workDir, "monitor.sock"),
 		serialReaderDone: make(chan struct{}),
 	}
 	q.serialLog.Store(qemuLog)
@@ -143,8 +146,8 @@ func OverlayHasSnapshot(imagePath, name string) bool {
 }
 
 // Start launches a QEMU virtual machine. When TemplateOverlay is set the
-// overlay is copied from it (containing a "booted" snapshot) and QEMU
-// starts with -loadvm booted, skipping the ~44s Linux boot.
+// overlay is copied from it and QEMU starts with -loadvm for the requested
+// TemplateSnapshotName, skipping the slow cold boot path.
 //
 // Returns (true, nil) when booted from snapshot, (false, nil) when doing
 // a full cold boot.
@@ -206,13 +209,17 @@ func (q *QEMUManager) Start() (bool, error) {
 	}
 
 	fromSnapshot := false
+	templateSnapshot := q.TemplateSnapshotName
+	if templateSnapshot == "" {
+		templateSnapshot = BootedSnapshotName
+	}
 	if q.TemplateOverlay != "" {
-		// Copy the template overlay (contains "booted" snapshot).
+		// Copy the template overlay and load the requested snapshot from it.
 		if err := CopyFileQCOW2(q.TemplateOverlay, overlayPath); err != nil {
 			return false, fmt.Errorf("failed to copy template overlay: %w", err)
 		}
 		fromSnapshot = true
-		q.log.Infof("Copied template overlay %s; will boot from %q snapshot", q.TemplateOverlay, BootedSnapshotName)
+		q.log.Infof("Copied template overlay %s; will boot from %q snapshot", q.TemplateOverlay, templateSnapshot)
 	} else {
 		// Create a blank overlay backed by the base image.
 		createOverlay := exec.Command("qemu-img", "create",
@@ -251,10 +258,9 @@ func (q *QEMUManager) Start() (bool, error) {
 		"-drive", fmt.Sprintf("file=%s,if=virtio,format=qcow2", overlayPath),
 	)
 
-	// When booting from a template overlay with a "booted" snapshot,
-	// restore VM state instantly via -loadvm.
+	// When booting from a template overlay, restore VM state instantly via -loadvm.
 	if fromSnapshot {
-		args = append(args, "-loadvm", BootedSnapshotName)
+		args = append(args, "-loadvm", templateSnapshot)
 	}
 
 	// Network interface configuration. SSH forwarding is added in
@@ -986,18 +992,25 @@ func (q *QEMUManager) RestoreBooted() error {
 	return nil
 }
 
-// SaveBootedOverlay saves the "booted" snapshot to the VM's current
-// overlay and returns the overlay file path. The caller can copy this
-// path to a cache location and use it as TemplateOverlay for other VMs.
+// SaveSnapshotOverlay saves the named snapshot to the VM's current overlay
+// and returns the overlay file path. The caller can copy this path to a
+// cache location and use it as TemplateOverlay for other VMs.
 //
 // The 9P shares must be unmounted before calling (savevm blocks when
 // VirtFS mounts are active).
-func (q *QEMUManager) SaveBootedOverlay() (string, error) {
+func (q *QEMUManager) SaveSnapshotOverlay(name string) (string, error) {
 	overlayPath := filepath.Join(q.WorkDir, "overlay.qcow2")
-	if err := q.SaveSnapshot(BootedSnapshotName); err != nil {
+	if err := q.SaveSnapshot(name); err != nil {
 		return "", err
 	}
 	return overlayPath, nil
+}
+
+// SaveBootedOverlay saves the "booted" snapshot to the VM's current
+// overlay and returns the overlay file path. The caller can copy this
+// path to a cache location and use it as TemplateOverlay for other VMs.
+func (q *QEMUManager) SaveBootedOverlay() (string, error) {
+	return q.SaveSnapshotOverlay(BootedSnapshotName)
 }
 
 // BootedImagePath returns the path to the booted snapshot image that
@@ -1005,21 +1018,28 @@ func (q *QEMUManager) SaveBootedOverlay() (string, error) {
 // image is "/path/to/yanet-test.qcow2", the booted image will be
 // "/path/to/yanet-test-booted.qcow2".
 func BootedImagePath(baseImagePath string) string {
+	return SnapshotImagePath(baseImagePath, BootedSnapshotName)
+}
+
+// BaselineImagePath returns the path to the cached baseline snapshot image
+// placed next to the base image.
+func BaselineImagePath(baseImagePath string) string {
+	return SnapshotImagePath(baseImagePath, "baseline")
+}
+
+// SnapshotImagePath returns the path to the cached image containing the
+// named snapshot next to the base image.
+func SnapshotImagePath(baseImagePath string, snapshotName string) string {
 	dir := filepath.Dir(baseImagePath)
 	base := filepath.Base(baseImagePath)
 	name := strings.TrimSuffix(base, filepath.Ext(base))
-	return filepath.Join(dir, name+"-booted.qcow2")
+	return filepath.Join(dir, name+"-"+snapshotName+".qcow2")
 }
 
 // HasBootedSnapshot checks if the given overlay file contains a
 // snapshot named "booted". Returns true if the snapshot exists.
 func HasBootedSnapshot(overlayPath string) bool {
-	cmd := exec.Command("qemu-img", "snapshot", "-l", overlayPath)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return false
-	}
-	return strings.Contains(string(output), BootedSnapshotName)
+	return OverlayHasSnapshot(overlayPath, BootedSnapshotName)
 }
 
 // CopyFileQCOW2 copies src to dst using a buffered file copy.

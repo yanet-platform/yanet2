@@ -12,17 +12,20 @@ import (
 
 // VMPool manages a pool of QEMU virtual machines for parallel test execution.
 // Each VM slot holds a long-lived QEMUManager + framework instance. Pool slots
-// are started from a pre-prepared booted template overlay and remain running
-// between tests. Per-test isolation is achieved via RestoreBooted(), which does
-// a fast loadvm+reconnect without restarting the QEMU process.
+// are started from a pre-prepared template overlay (typically baseline, falling
+// back to booted) and remain running between tests. Per-test isolation is
+// achieved via RestoreBooted(), which does a fast loadvm+reconnect without
+// restarting the QEMU process.
 //
 // Pool size is controlled by YANET_VM_POOL_SIZE (default 1).
 type VMPool struct {
-	vms            []*poolEntry
-	available      chan int // channel of available slot indices
-	size           int
-	bootedTemplate string // path to the canonical booted template overlay
-	log            *zap.SugaredLogger
+	vms                  []*poolEntry
+	available            chan int // channel of available slot indices
+	size                 int
+	bootedTemplate       string // path to the canonical booted template overlay
+	templateOverlay      string // preferred startup template overlay for pool VMs
+	templateSnapshotName string // snapshot loaded from templateOverlay
+	log                  *zap.SugaredLogger
 }
 
 type poolEntry struct {
@@ -44,44 +47,60 @@ func PoolSize() int {
 }
 
 // NewVMPool creates a pool of size VMs. The bootedTemplate overlay is the
-// canonical source for pool slots. If the template does not exist, StartAll
-// will bootstrap it by booting VM0 from scratch and saving the snapshot.
+// canonical fallback source for pool slots. If templateOverlay/templateSnapshotName
+// are provided and valid, StartAll prefers them. Otherwise it falls back to the
+// booted template and bootstraps it if needed.
 //
-// VMs are not started yet — call StartAll after creating the pool.
-func NewVMPool(size int, baseName string, qemuImage string, bootedTemplate string, log *zap.SugaredLogger) (*VMPool, error) {
+// VMs are not started yet - call StartAll after creating the pool.
+func NewVMPool(size int, baseName string, qemuImage string, bootedTemplate string, templateOverlay string, templateSnapshotName string, log *zap.SugaredLogger) (_ *VMPool, err error) {
 	if size < 1 {
 		size = 1
 	}
 
 	pool := &VMPool{
-		vms:            make([]*poolEntry, size),
-		available:      make(chan int, size),
-		size:           size,
-		bootedTemplate: bootedTemplate,
-		log:            log.Named("VMPool"),
+		vms:                  make([]*poolEntry, size),
+		available:            make(chan int, size),
+		size:                 size,
+		bootedTemplate:       bootedTemplate,
+		templateOverlay:      templateOverlay,
+		templateSnapshotName: templateSnapshotName,
+		log:                  log.Named("VMPool"),
 	}
+	defer func() {
+		if err == nil {
+			return
+		}
+		for _, entry := range pool.vms {
+			if entry == nil || entry.fw == nil {
+				continue
+			}
+			_ = entry.fw.Stop()
+		}
+	}()
 
 	for i := range size {
 		name := baseName
 		if size > 1 {
 			name = fmt.Sprintf("%s-%d", baseName, i)
 		}
-		qemu, err := NewQEMUManager(name, qemuImage, log)
-		if err != nil {
+		qemu, qemuErr := NewQEMUManager(name, qemuImage, log)
+		if qemuErr != nil {
+			err = qemuErr
 			return nil, fmt.Errorf("failed to create QEMU manager for pool slot %d: %w", i, err)
 		}
 
-	fw := &TestFramework{
-		qemu:  qemu,
-		log:   log.Named(name),
-		Paths: DefaultGuestPaths(),
-		socketClients: &socketClientsCache{
+		fw := &TestFramework{
+			qemu:  qemu,
+			log:   log.Named(name),
+			Paths: DefaultGuestPaths(),
+			socketClients: &socketClientsCache{
 				clients: make(map[int]*SocketClient),
 			},
 			PacketParser: NewPacketParser(),
 		}
-		cli, err := NewCLIManager(qemu, CLIWithLog(log))
-		if err != nil {
+		cli, cliErr := NewCLIManager(qemu, CLIWithLog(log))
+		if cliErr != nil {
+			err = cliErr
 			return nil, fmt.Errorf("failed to create CLI manager for pool slot %d: %w", i, err)
 		}
 		fw.cli = cli
@@ -97,18 +116,24 @@ func (p *VMPool) Size() int {
 	return p.size
 }
 
-// StartAll starts all VM slots. It uses a two-path strategy:
+// StartAll starts all VM slots. It prefers the configured template overlay when
+// available and otherwise falls back to the cached booted template.
 //
-//   - Fast path: booted template already exists → copy it to each slot and
-//     boot via -loadvm booted (no OS boot, ~1-2s per slot).
-//   - Slow path: template missing → boot VM0 from scratch, save the booted
-//     snapshot, cache it as the template, then restart all slots from it.
+//   - Fast path: preferred template or booted template already exists -> copy it
+//     to each slot and boot via -loadvm <snapshot>.
+//   - Slow path: booted template missing -> boot VM0 from scratch, save the
+//     booted snapshot, cache it as the template, then restart all slots from it.
 //
 // After StartAll all slots are added to the available channel.
 func (p *VMPool) StartAll() error {
+	if p.templateOverlay != "" && p.templateSnapshotName != "" && OverlayHasSnapshot(p.templateOverlay, p.templateSnapshotName) {
+		p.log.Infof("Preferred template found at %s; starting all slots from %q", p.templateOverlay, p.templateSnapshotName)
+		return p.startAllFromTemplate(p.templateOverlay, p.templateSnapshotName)
+	}
+
 	if _, err := os.Stat(p.bootedTemplate); err == nil && HasBootedSnapshot(p.bootedTemplate) {
 		p.log.Infof("Booted template found at %s; starting all slots from it", p.bootedTemplate)
-		return p.startAllFromTemplate()
+		return p.startAllFromTemplate(p.bootedTemplate, BootedSnapshotName)
 	}
 
 	// Slow path: bootstrap from a cold boot.
@@ -126,6 +151,7 @@ func (p *VMPool) validateBootedTemplate() error {
 		return fmt.Errorf("failed to create validation manager: %w", err)
 	}
 	valMgr.TemplateOverlay = p.bootedTemplate
+	valMgr.TemplateSnapshotName = BootedSnapshotName
 
 	valFW := &TestFramework{
 		qemu: valMgr,
@@ -177,11 +203,12 @@ func (p *VMPool) validateBootedTemplate() error {
 	return nil
 }
 
-// startAllFromTemplate starts all slots from the cached booted template.
-func (p *VMPool) startAllFromTemplate() error {
+// startAllFromTemplate starts all slots from the given cached template.
+func (p *VMPool) startAllFromTemplate(templateOverlay string, snapshotName string) error {
 	// Point every slot at the template so Start() copies it.
 	for _, entry := range p.vms {
-		entry.manager.TemplateOverlay = p.bootedTemplate
+		entry.manager.TemplateOverlay = templateOverlay
+		entry.manager.TemplateSnapshotName = snapshotName
 	}
 
 	type result struct {
@@ -197,7 +224,7 @@ func (p *VMPool) startAllFromTemplate() error {
 					ch <- result{idx: idx, err: fmt.Errorf("panic: %v", r)}
 				}
 			}()
-			p.log.Infof("Starting VM %d/%d (%s) from booted template...", idx+1, p.size, fw.qemu.Name)
+			p.log.Infof("Starting VM %d/%d (%s) from template %q...", idx+1, p.size, fw.qemu.Name, snapshotName)
 			_, err := fw.Start()
 			ch <- result{idx: idx, err: err}
 		}(i, entry.fw)
@@ -270,7 +297,7 @@ func (p *VMPool) bootstrapTemplate() error {
 			// Fall through to cold boot fallback below.
 		} else {
 			p.log.Infof("Booted template validation passed")
-			return p.startAllFromTemplate()
+			return p.startAllFromTemplate(p.bootedTemplate, BootedSnapshotName)
 		}
 	}
 
