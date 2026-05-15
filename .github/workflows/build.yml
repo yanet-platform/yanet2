@@ -76,6 +76,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: true
+          # Full history so git-restore-mtime can attribute each file to its
+          # last-touch commit. Without this it can't walk the log and leaves
+          # every file at checkout-time mtime, defeating the build cache.
+          fetch-depth: 0
 
       - uses: ./.github/actions/setup
         id: setup
@@ -147,6 +151,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: true
+          # Full history so git-restore-mtime can attribute each file to its
+          # last-touch commit. Without this it can't walk the log and leaves
+          # every file at checkout-time mtime, defeating the build cache.
+          fetch-depth: 0
 
       - uses: ./.github/actions/setup
         id: setup

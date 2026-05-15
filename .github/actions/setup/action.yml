@@ -24,7 +24,7 @@ runs:
       run: apt-get update
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@1.84.0
+      uses: dtolnay/rust-toolchain@1.85.0
 
     - name: Cache rust
       uses: actions/cache@v4
