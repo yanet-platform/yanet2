@@ -359,6 +359,7 @@ test_multithreaded_benchmark(void *mt_arena) {
 
 	fwmap_free(map, ctx);
 	verify_memory_leaks(ctx, "benchmark");
+	memory_context_fini(ctx);
 
 	printf("\n%s%sMulti-threaded benchmark test PASSED%s\n",
 	       C_BLUE,

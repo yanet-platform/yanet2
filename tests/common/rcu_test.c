@@ -831,6 +831,7 @@ main(void) {
 		failed++;
 	}
 
+	memory_context_fini(&g_mctx);
 	free(arena);
 
 	if (failed == 0) {

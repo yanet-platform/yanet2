@@ -86,6 +86,7 @@ static void
 test_env_destroy(test_env_t *env) {
 	fwmap_free(env->map, env->ctx);
 	verify_memory_leaks(env->ctx, env->name);
+	memory_context_fini(env->ctx);
 }
 
 /*

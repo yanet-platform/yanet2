@@ -172,6 +172,7 @@ test_layermap_basic_operations(void *arena) {
 	}
 
 	verify_memory_leaks(ctx, "layermap_basic_operations");
+	memory_context_fini(ctx);
 	fprintf(stderr, "Layermap basic operations test PASSED\n");
 }
 
@@ -345,6 +346,7 @@ test_layermap_multithreaded(void *arena) {
 	memory_bfree(ctx, active_layer_offset, sizeof(fwmap_t *));
 
 	verify_memory_leaks(ctx, "layermap_multithreaded");
+	memory_context_fini(ctx);
 	fprintf(stderr, "Layermap multithreaded test PASSED\n");
 }
 

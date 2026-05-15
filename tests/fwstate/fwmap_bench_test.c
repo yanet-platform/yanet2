@@ -127,6 +127,7 @@ benchmark_performance(void *arena) {
 
 	// Verify memory leaks.
 	verify_memory_leaks(ctx, "benchmark_performance");
+	memory_context_fini(ctx);
 }
 
 int

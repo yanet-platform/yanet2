@@ -288,6 +288,7 @@ ttlmap_init(void *memory, size_t memory_size, size_t kv_entries) {
 	assert(res == 0);
 
 	TTLMAP_FREE(&map);
+	memory_context_fini(&mctx);
 }
 
 void
@@ -343,6 +344,7 @@ ttlmap_init_and_get_buckets(
 		    (kv_entries * (sizeof(test_key_t) + sizeof(test_value_t))));
 
 	TTLMAP_FREE(&map);
+	memory_context_fini(&mctx);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -428,6 +430,7 @@ ttlmap_strike_entries(void *memory, size_t memory_size, size_t kv_entries) {
 
 	TTLMAP_FREE(&map);
 	assert(map.mctx.balloc_size == map.mctx.bfree_size);
+	memory_context_fini(&mctx);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -503,6 +506,9 @@ ttlmap_iter(void *memory, size_t memory_size) {
 	size_t cnt = 0;
 	TTLMAP_ITER(&map, test_key_t, test_value_t, 7, iter_callback, &cnt);
 	assert(cnt == inserted);
+
+	TTLMAP_FREE(&map);
+	memory_context_fini(&mctx);
 }
 
 int

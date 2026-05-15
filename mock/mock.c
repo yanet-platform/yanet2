@@ -214,6 +214,7 @@ dataplane_initialize(
 		cp_config_gen_create(&agent, &err);
 	if (cp_config_gen == NULL) {
 		yanet_error_free(err);
+		memory_context_fini(&agent.memory_context);
 		return -1;
 	}
 	SET_OFFSET_OF(&cp_config->cp_config_gen, cp_config_gen);
@@ -223,6 +224,7 @@ dataplane_initialize(
 		workers_count * sizeof(struct dp_worker *)
 	);
 	if (workers_array == NULL) {
+		memory_context_fini(&agent.memory_context);
 		return -1;
 	}
 
@@ -256,12 +258,14 @@ dataplane_initialize(
 		    "failed to link counter registry: %s",
 		    yanet_error_message(err));
 		yanet_error_free(err);
+		memory_context_fini(&agent.memory_context);
 		return -1;
 	}
 
 	*res_dp_config = dp_config;
 	*res_cp_config = cp_config;
 
+	memory_context_fini(&agent.memory_context);
 	return 0;
 }
 
@@ -368,6 +372,13 @@ yanet_mock_free(struct yanet_mock *mock) {
 		counter_storage_allocator_fini(
 			&mock->cp_config->counter_storage_allocator
 		);
+	}
+
+	if (mock->dp_config != NULL) {
+		memory_context_fini(&mock->dp_config->memory_context);
+	}
+	if (mock->cp_config != NULL) {
+		memory_context_fini(&mock->cp_config->memory_context);
 	}
 
 	if (mock->arena != NULL) {

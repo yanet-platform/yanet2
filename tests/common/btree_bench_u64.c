@@ -151,6 +151,7 @@ benchmark_btree_u64(size_t num_elements) {
 	size_t data_size = num_elements * sizeof(uint64_t);
 	uint64_t *data = (uint64_t *)allocate_hugepage_memory(data_size);
 	if (data == NULL) {
+		memory_context_fini(&mctx);
 		munmap(raw_mem, ARENA_SIZE);
 		return;
 	}
@@ -172,6 +173,7 @@ benchmark_btree_u64(size_t num_elements) {
 	if (ret != 0) {
 		LOG(ERROR, "Failed to initialize btree_u64");
 		munmap(data, data_size);
+		memory_context_fini(&mctx);
 		munmap(raw_mem, ARENA_SIZE);
 		return;
 	}
@@ -188,6 +190,7 @@ benchmark_btree_u64(size_t num_elements) {
 	if (search_values == NULL) {
 		btree_u64_free(&tree);
 		munmap(data, data_size);
+		memory_context_fini(&mctx);
 		munmap(raw_mem, ARENA_SIZE);
 		return;
 	}
@@ -287,6 +290,7 @@ benchmark_btree_u64(size_t num_elements) {
 	munmap(search_values, search_size);
 	btree_u64_free(&tree);
 	munmap(data, data_size);
+	memory_context_fini(&mctx);
 	munmap(raw_mem, ARENA_SIZE);
 }
 
@@ -317,6 +321,7 @@ benchmark_btree_u64_upper_bounds(size_t num_elements) {
 	size_t data_size = num_elements * sizeof(uint64_t);
 	uint64_t *data = (uint64_t *)allocate_hugepage_memory(data_size);
 	if (data == NULL) {
+		memory_context_fini(&mctx);
 		munmap(raw_mem, ARENA_SIZE);
 		return;
 	}
@@ -338,6 +343,7 @@ benchmark_btree_u64_upper_bounds(size_t num_elements) {
 	if (ret != 0) {
 		LOG(ERROR, "Failed to initialize btree_u64");
 		munmap(data, data_size);
+		memory_context_fini(&mctx);
 		munmap(raw_mem, ARENA_SIZE);
 		return;
 	}
@@ -354,6 +360,7 @@ benchmark_btree_u64_upper_bounds(size_t num_elements) {
 	if (search_values == NULL) {
 		btree_u64_free(&tree);
 		munmap(data, data_size);
+		memory_context_fini(&mctx);
 		munmap(raw_mem, ARENA_SIZE);
 		return;
 	}
@@ -453,6 +460,7 @@ benchmark_btree_u64_upper_bounds(size_t num_elements) {
 	munmap(search_values, search_size);
 	btree_u64_free(&tree);
 	munmap(data, data_size);
+	memory_context_fini(&mctx);
 	munmap(raw_mem, ARENA_SIZE);
 }
 

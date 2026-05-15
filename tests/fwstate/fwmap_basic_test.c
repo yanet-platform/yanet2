@@ -111,6 +111,7 @@ test_lifecycle(void *arena) {
 
 	fwmap_free(map, ctx);
 	verify_memory_leaks(ctx, "lifecycle");
+	memory_context_fini(ctx);
 	printf("  Lifecycle test passed\n");
 }
 
@@ -175,6 +176,7 @@ test_bulk_operations(void *arena) {
 
 	fwmap_free(map, ctx);
 	verify_memory_leaks(ctx, "bulk_ops");
+	memory_context_fini(ctx);
 	printf("  Bulk operations test passed\n");
 }
 
@@ -246,6 +248,7 @@ test_collision_chains(void *arena) {
 	fwmap_func_registry[FWMAP_HASH_FNV1A] = original_hash;
 
 	verify_memory_leaks(ctx, "collisions");
+	memory_context_fini(ctx);
 	printf("  Collision handling test passed\n");
 }
 
@@ -287,6 +290,7 @@ test_ttl_expiration(void *arena) {
 
 	fwmap_free(map, ctx);
 	verify_memory_leaks(ctx, "ttl_expiry");
+	memory_context_fini(ctx);
 	printf("  TTL expiration test passed\n");
 }
 
@@ -337,6 +341,7 @@ test_entry_access(void *arena) {
 
 	fwmap_free(map, ctx);
 	verify_memory_leaks(ctx, "entry_access");
+	memory_context_fini(ctx);
 	printf("  Entry access test passed\n");
 }
 
@@ -458,6 +463,7 @@ test_capacity_limits(void *arena) {
 	free(val_buf);
 	fwmap_free(map, ctx);
 	verify_memory_leaks(ctx, "capacity");
+	memory_context_fini(ctx);
 	printf("  Capacity limits test passed\n");
 }
 

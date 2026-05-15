@@ -94,6 +94,7 @@ test_overlapping_prefixes(void) {
 	}
 
 	lpm_free(&tree);
+	memory_context_fini(&mctx);
 	free(arena);
 	return rc;
 }
@@ -242,6 +243,7 @@ main(int argc, char **argv) {
 		return -1;
 	}
 
+	memory_context_fini(&mctx);
 	free(arena1);
 	free(arena0);
 	return 0;
