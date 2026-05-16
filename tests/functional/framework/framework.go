@@ -33,7 +33,7 @@ const (
 	CLIBasePath    = "/mnt/target/release"
 	CLIRoute       = CLIBasePath + "/yanet-cli-route"
 	CLIRouteMPLS   = CLIBasePath + "/yanet-cli-route-mpls"
-	CLIBalancer    = CLIBasePath + "/yanet-cli-balancer"
+	CLIBalancer    = CLIBasePath + "/yanet-cli-balancer2"
 	CLINAT64       = CLIBasePath + "/yanet-cli-nat64"
 	CLIACL         = CLIBasePath + "/yanet-cli-acl"
 	CLIFWState     = CLIBasePath + "/yanet-cli-fwstate"
@@ -52,11 +52,14 @@ const (
 // verification, PrepareLocalStorage, and test assertions to keep
 // binary lists in sync.
 var CLIBinaryNames = []string{
-	"yanet-cli", "yanet-cli-route", "yanet-cli-route-mpls",
-	"yanet-cli-balancer", "yanet-cli-nat64", "yanet-cli-acl",
+	"yanet-cli",
+	"yanet-cli-route", "yanet-cli-route-mpls",
+	"yanet-cli-balancer2", "yanet-cli-nat64", "yanet-cli-acl",
 	"yanet-cli-fwstate", "yanet-cli-pipeline", "yanet-cli-function",
-	"yanet-cli-device-plain", "yanet-cli-decap", "yanet-cli-forward",
+	"yanet-cli-device-plain", "yanet-cli-device-vlan",
+	"yanet-cli-decap", "yanet-cli-forward",
 	"yanet-cli-common", "yanet-cli-dscp", "yanet-cli-counters",
+	"yanet-cli-pdump", "yanet-cli-inspect",
 }
 
 // GuestPaths holds all guest-side filesystem paths used by the framework.
@@ -140,11 +143,11 @@ func (f *TestFramework) CommonConfigCommands() []string {
 		"ip addr replace " + VMIPv4Host + "/24 dev kni0",
 
 		// Configure L2 and L3 forwarding
-		p.CLI("yanet-cli-forward") + " update --cfg=forward0 --rules " + p.ForwardYAML,
+		p.CLI("yanet-cli-forward") + " update --name=forward0 --rules " + p.ForwardYAML,
 
 		// Bootstrap the default IPv4/IPv6 FIB for the "route0" config.
 		// route0.yaml is always at /mnt/config/ (written via host 9P).
-		p.CLI("yanet-cli-route") + " fib update --cfg=route0 --rules /mnt/config/route0.yaml",
+		p.CLI("yanet-cli-route") + " fib update --name=route0 --rules /mnt/config/route0.yaml",
 
 		p.CLI("yanet-cli-function") + " update --name=virt --chains chain0:10=forward:forward0",
 		p.CLI("yanet-cli-function") + " update --name=test --chains chain2:1=forward:forward0,route:route0",
@@ -728,46 +731,19 @@ func (f *TestFramework) SendPacketAndParseAll(inputIfaceIndex int, outputIfaceIn
 	return outputPacketInfos, nil
 }
 
-func (f *F) SendPacketsAndParseAll(inputIfaceIndex int, outputIfaceIndex int, packets [][]byte, timeout time.Duration) ([]*PacketInfo, error) {
-	f.log.Infof("Sending packets on interface %d and capturing response on interface %d", inputIfaceIndex, outputIfaceIndex)
+func (f *TestFramework) SendPacketsAndParseAll(inputIfaceIndex int, outputIfaceIndex int, packets [][]byte, timeout time.Duration) ([]*PacketInfo, error) {
+	f.log.Infof("Sending %d packets on interface %d and capturing responses on interface %d", len(packets), inputIfaceIndex, outputIfaceIndex)
 
-	// Get socket clients
-	inputClient, err := f.GetSocketClient(inputIfaceIndex)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get input socket client: %w", err)
+	var responses [][]byte
+	for idx, packet := range packets {
+		packetResponses, err := f.SendPacketAndCaptureAll(inputIfaceIndex, outputIfaceIndex, packet, timeout)
+		if err != nil {
+			return nil, fmt.Errorf("failed to send packet %d and capture responses: %w", idx, err)
+		}
+		responses = append(responses, packetResponses...)
 	}
 
-	outputClient, err := f.GetSocketClient(outputIfaceIndex)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get output socket client: %w", err)
-	}
-
-	// Get dump file paths for this test
-	inputDumpPath, outputDumpPath := f.getDumpFilePaths()
-
-	// Connect to sockets
-	if err := inputClient.Connect(); err != nil {
-		return nil, fmt.Errorf("failed to connect to input socket: %w", err)
-	}
-
-	if err := outputClient.Connect(); err != nil {
-		return nil, fmt.Errorf("failed to connect to output socket: %w", err)
-	}
-
-	_, _ = outputClient.ReceiveAllPackets(timeout, outputDumpPath)
-
-	// Send packets on input interface
-	if err := inputClient.SendPackets(packets, inputDumpPath); err != nil {
-		return nil, fmt.Errorf("failed to send packet: %w", err)
-	}
-
-	responses, err := outputClient.ReceiveAllPackets(timeout, outputDumpPath)
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to receive output packets: %w", err)
-	}
-
-	// Parse all response packets
+	// Parse all response packets.
 	var outputPacketInfos []*PacketInfo
 	for i, responseData := range responses {
 		outputPacketInfo, err := f.PacketParser.ParsePacket(responseData)

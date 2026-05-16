@@ -22,26 +22,20 @@ func testBalancer(t *testing.T, fw *framework.TestFramework) {
 		// Forward-specific configuration
 		commands := []string{
 			// Configure module
-			"/mnt/target/release/yanet-cli-balancer update --name balancer0 --config /mnt/yanet2/balancer.yaml",
+			framework.CLIBalancer + " update --name balancer0 --config /mnt/yanet2/balancer.yaml",
 
-			// See module stats
-			"/mnt/target/release/yanet-cli-balancer config --name balancer0",
+			framework.CLIBalancer + " config --name balancer0",
 
-			// Configure functions
-			"/mnt/target/release/yanet-cli-function update --name=test --chains ch0:2=balancer:balancer0,route:route0",
+			framework.CLIFunction + " update --name=test --chains ch0:2=balancer:balancer0,route:route0",
 
-			// Configure pipelines
-			"/mnt/target/release/yanet-cli-pipeline update --name=test --functions test",
+			framework.CLIPipeline + " update --name=test --functions test",
 
-			// Configure devices
-			"/mnt/target/release/yanet-cli-device-plain update --name=01:00.0 --input test:1 --output dummy:1",
+			framework.CLIDevicePlain + " update --name=01:00.0 --input test:1 --output dummy:1",
 
-			// Show config stats
-			"/mnt/target/release/yanet-cli-balancer stats --name=balancer0 --device=01:00.0 --pipeline=test --function=test --chain=ch0",
+			framework.CLIBalancer + " stats --name=balancer0 --device=01:00.0 --pipeline=test --function=test --chain=ch0",
 
-			// Enable single real
-			"/mnt/target/release/yanet-cli-balancer reals enable --name=balancer0 --vs 192.0.2.1:80/tcp --reals 10.1.1.1",
-			"/mnt/target/release/yanet-cli-balancer reals flush --name=balancer0",
+			framework.CLIBalancer + " reals enable --name=balancer0 --vs 192.0.2.1:80/tcp --reals 10.1.1.1",
+			framework.CLIBalancer + " reals flush --name=balancer0",
 		}
 
 		_, err := fw.ExecuteCommands(commands...)
