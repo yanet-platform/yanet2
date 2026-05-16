@@ -9,9 +9,24 @@ struct dp_config;
 
 struct counter_value_handle;
 
+// Predicate kind for a counter_tag. The counter must not carry the tag
+// (counter_tag_absent), must carry the tag with any value
+// (counter_tag_present), or must carry the tag with the exact string
+// stored in tag.value (counter_tag_match).
+enum counter_tag_predicate {
+	counter_tag_absent,
+	counter_tag_present,
+	counter_tag_match
+};
+
+// A single predicate over a counter's tags. key names the tag, and
+// predicate selects which check to apply (see counter_tag_predicate).
+// The implementation reads tag.value only when predicate is
+// counter_tag_match.
 struct counter_tag {
 	const char *key;
 	const char *value;
+	enum counter_tag_predicate predicate;
 };
 
 struct counter_handle {
@@ -83,22 +98,34 @@ yanet_get_counter_value(
 	uint64_t worker_idx
 );
 
-// Return counters that match every tag and one of the names in query.
-// Pass tag_count == 0 to impose no per-attribute constraint and
-// query_count == 0 to match any name; passing both as zero returns
-// every counter known to the dataplane.
+// Return counters that satisfy every predicate in tags and match at
+// least one name in query. Pass tag_count == 0 to impose no per-tag
+// constraint and query_count == 0 to match any name; passing both as
+// zero returns every counter known to the dataplane. tags and query
+// may be NULL when their respective counts are zero.
 //
-// Each tag's key selects an attribute and value is the required match. A
-// NULL value inverts the check: the counter must not carry the attribute
-// at all. The NULL form is how callers pin a counter to a specific
-// hierarchy level; for example, {"device", "d1"} together with
-// {"pipeline", NULL} selects counters of device "d1" only.
+// Each counter_tag is a predicate against the counter's tags; see
+// counter_tag_predicate for the meaning of each predicate kind. The
+// counter_tag_absent predicate is how callers pin a counter to a
+// specific hierarchy level; for example,
+//     { .key = "device",   .value = "d1", .predicate = counter_tag_match  }
+//     { .key = "pipeline",                .predicate = counter_tag_absent }
+// selects counters of device "d1" only.
 //
 // Recognized keys are "device", "pipeline", "function", "chain",
-// "module_type", "module_name" and correspond one-to-one with the path
-// components of the typed yanet_get_*_counters family. An unrecognized
-// key is reported through err and NULL is returned. Tag strings are
-// borrowed only for the duration of the call.
+// "module_type", "module_name", "shard". The first six correspond
+// one-to-one with the path components of the typed yanet_get_*_counters
+// family. "shard" identifies the dataplane shard that holds the
+// counter; the value is an opaque coordinate and may change in future
+// versions. A counter is stored independently per shard, so to obtain
+// a single aggregate the caller must sum across all matching shards.
+//
+// A tag is rejected with err filled and NULL returned if any of the
+// following holds: key is NULL; predicate is outside the
+// counter_tag_* set; predicate is counter_tag_match and value is
+// NULL; key is unrecognized; or tags contains another predicate with
+// the same key. Tag strings are borrowed only for the duration of the
+// call.
 //
 // The returned list must be released with yanet_counter_handle_list_free.
 // On failure NULL is returned and err is filled; an empty match is a
