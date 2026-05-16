@@ -10,8 +10,6 @@
 #include "memory.h"
 #include "remap.h"
 
-#define VALUE_TABLE_CHUNK_SIZE 16384
-
 struct value_table {
 	struct memory_context *memory_context;
 	uint32_t h_dim;
@@ -24,23 +22,19 @@ value_table_free(struct value_table *value_table) {
 	struct memory_context *memory_context =
 		ADDR_OF(&value_table->memory_context);
 
-	uint32_t chunk_count = (value_table->h_dim * value_table->v_dim +
-				VALUE_TABLE_CHUNK_SIZE - 1) /
-			       VALUE_TABLE_CHUNK_SIZE;
-
 	uint32_t **values = ADDR_OF(&value_table->values);
-	for (uint32_t chunk_idx = 0; chunk_idx < chunk_count; ++chunk_idx) {
-		uint32_t *chunk = ADDR_OF(values + chunk_idx);
-		if (chunk == NULL)
-			continue;
+	for (uint32_t v_idx = 0; v_idx < value_table->v_dim; ++v_idx) {
 		memory_bfree(
 			memory_context,
-			chunk,
-			VALUE_TABLE_CHUNK_SIZE * sizeof(uint32_t)
+			ADDR_OF(values + v_idx),
+			value_table->h_dim * sizeof(uint32_t)
 		);
-		SET_OFFSET_OF(values + chunk_idx, NULL);
 	}
-	memory_bfree(memory_context, values, chunk_count * sizeof(uint32_t *));
+
+	memory_bfree(
+		memory_context, values, value_table->v_dim * sizeof(uint32_t *)
+	);
+
 	SET_OFFSET_OF(&value_table->values, NULL);
 }
 
@@ -48,40 +42,33 @@ static inline int
 value_table_init(
 	struct value_table *value_table,
 	struct memory_context *memory_context,
-	uint32_t h_dim,
-	uint32_t v_dim
+	uint32_t v_dim,
+	uint32_t h_dim
 ) {
 	SET_OFFSET_OF(&value_table->memory_context, memory_context);
 
 	value_table->h_dim = h_dim;
 	value_table->v_dim = v_dim;
 
-	uint64_t value_count = h_dim;
-	value_count *= v_dim;
-
-	uint32_t chunk_count = (value_count + VALUE_TABLE_CHUNK_SIZE - 1) /
-			       VALUE_TABLE_CHUNK_SIZE;
-
 	uint32_t **values = (uint32_t **)memory_balloc(
-		memory_context, chunk_count * sizeof(uint32_t *)
+		memory_context, v_dim * sizeof(uint32_t *)
 	);
 	if (values == NULL)
 		return -1;
 
-	memset(values, 0, chunk_count * sizeof(uint32_t *));
+	memset(values, 0, v_dim * sizeof(uint32_t *));
 	SET_OFFSET_OF(&value_table->values, values);
 
-	for (uint32_t chunk_idx = 0; chunk_idx < chunk_count; ++chunk_idx) {
-		uint32_t *chunk = (uint32_t *)memory_balloc(
-			memory_context,
-			VALUE_TABLE_CHUNK_SIZE * sizeof(uint32_t)
+	for (uint32_t v_idx = 0; v_idx < v_dim; ++v_idx) {
+		uint32_t *line = (uint32_t *)memory_balloc(
+			memory_context, h_dim * sizeof(uint32_t)
 		);
-		if (chunk == NULL) {
+		if (line == NULL) {
 			value_table_free(value_table);
 			return -1;
 		}
-		memset(chunk, 0, VALUE_TABLE_CHUNK_SIZE * sizeof(uint32_t));
-		SET_OFFSET_OF(values + chunk_idx, chunk);
+		memset(line, 0, h_dim * sizeof(uint32_t));
+		SET_OFFSET_OF(values + v_idx, line);
 	}
 
 	return 0;
@@ -89,35 +76,32 @@ value_table_init(
 
 static inline uint32_t *
 value_table_get_ptr(
-	struct value_table *value_table, uint32_t h_idx, uint32_t v_idx
+	struct value_table *value_table, uint32_t v_idx, uint32_t h_idx
 ) {
+	if (v_idx >= value_table->v_dim || h_idx >= value_table->h_dim) {
+		*(uint64_t *)(0) = v_idx + h_idx;
+	}
 	uint32_t **values = ADDR_OF(&value_table->values);
-	uint64_t idx = (v_idx * value_table->h_dim) + h_idx;
-
-	return ADDR_OF(values + idx / VALUE_TABLE_CHUNK_SIZE) +
-	       idx % VALUE_TABLE_CHUNK_SIZE;
+	uint32_t *line = ADDR_OF(values + v_idx);
+	return line + h_idx;
 }
 
 static inline uint32_t
 value_table_get(
-	struct value_table *value_table, uint32_t h_idx, uint32_t v_idx
+	struct value_table *value_table, uint32_t v_idx, uint32_t h_idx
 ) {
-	return *value_table_get_ptr(value_table, h_idx, v_idx);
+	return *value_table_get_ptr(value_table, v_idx, h_idx);
 }
 
 static inline void
 value_table_compact(
 	struct value_table *value_table, struct remap_table *remap_table
 ) {
-
-	uint32_t **values = ADDR_OF(&value_table->values);
-
-	for (uint64_t idx = 0; idx < value_table->h_dim * value_table->v_dim;
-	     ++idx) {
-		uint32_t *value =
-			ADDR_OF(values + idx / VALUE_TABLE_CHUNK_SIZE) +
-			(idx % VALUE_TABLE_CHUNK_SIZE);
-
-		*value = remap_table_compacted(remap_table, *value);
+	for (uint32_t v_idx = 0; v_idx < value_table->v_dim; ++v_idx) {
+		for (uint32_t h_idx = 0; h_idx < value_table->h_dim; ++h_idx) {
+			uint32_t *value =
+				value_table_get_ptr(value_table, v_idx, h_idx);
+			*value = remap_table_compacted(remap_table, *value);
+		}
 	}
 }
