@@ -33,7 +33,6 @@ const (
 	CLIBasePath    = "/mnt/target/release"
 	CLIRoute       = CLIBasePath + "/yanet-cli-route"
 	CLIRouteMPLS   = CLIBasePath + "/yanet-cli-route-mpls"
-	CLIBalancer    = CLIBasePath + "/yanet-cli-balancer2"
 	CLINAT64       = CLIBasePath + "/yanet-cli-nat64"
 	CLIACL         = CLIBasePath + "/yanet-cli-acl"
 	CLIFWState     = CLIBasePath + "/yanet-cli-fwstate"
@@ -54,7 +53,7 @@ const (
 var CLIBinaryNames = []string{
 	"yanet-cli",
 	"yanet-cli-route", "yanet-cli-route-mpls",
-	"yanet-cli-balancer2", "yanet-cli-nat64", "yanet-cli-acl",
+	"yanet-cli-nat64", "yanet-cli-acl",
 	"yanet-cli-fwstate", "yanet-cli-pipeline", "yanet-cli-function",
 	"yanet-cli-device-plain", "yanet-cli-device-vlan",
 	"yanet-cli-decap", "yanet-cli-forward",
