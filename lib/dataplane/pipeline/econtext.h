@@ -73,7 +73,7 @@ struct function_ectx {
 	struct counter_storage *counter_storage;
 	uint64_t chain_count;
 	struct chain_ectx **chains;
-	uint64_t chain_map_size;
+	uint32_t chain_map_size;
 	uint64_t chain_map[];
 };
 
@@ -94,7 +94,7 @@ struct device_entry_ectx {
 	device_handler handler;
 	uint64_t pipeline_count;
 	struct pipeline_ectx **pipelines;
-	uint64_t pipeline_map_size;
+	uint32_t pipeline_map_size;
 	uint64_t pipeline_map[];
 };
 
