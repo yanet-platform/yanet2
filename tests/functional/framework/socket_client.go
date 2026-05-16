@@ -303,7 +303,7 @@ func (sc *SocketClient) SendPackets(packets [][]byte, dumpPath string) error {
 		sc.log.Warnf("Failed to write to dump file: %v", err)
 	}
 
-	if _, err := sc.writeFull(packetWithLength, sc.inner.timeout); err != nil {
+	if _, err := sc.inner.conn.Write(packetWithLength); err != nil {
 		return fmt.Errorf("failed to send packet: %w", err)
 	}
 

@@ -49,7 +49,7 @@ entries:
 `
 			err := fw.CreateConfigFile("route0-step001.yaml", fibYAML)
 			require.NoError(t, err, "Failed to create FIB config for IPv4 routes")
-			_, err = fw.ExecuteCommand("/mnt/target/release/yanet-cli-route fib update --name=route0 --rules /mnt/config/route0-step001.yaml")
+			_, err = fw.ExecuteCommand("/mnt/target/release/yanet-cli-route fib update --cfg=route0 --rules /mnt/config/route0-step001.yaml")
 			require.NoError(t, err, "Failed to update FIB for IPv4 routes")
 		})
 

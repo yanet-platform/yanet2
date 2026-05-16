@@ -84,6 +84,8 @@ modules:
     memory_requirements: 8MB
   pdump:
     memory_requirements: 8MB
+  balancer:
+    memory_requirements: 16MB
   acl:
     memory_requirements: 16MB
 

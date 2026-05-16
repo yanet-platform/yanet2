@@ -119,4 +119,3 @@ YANET2 is licensed under the Apache License, Version 2.0.
 
 - [Documentation](docs/)
 - [Contributing Guidelines](CONTRIBUTING.md)
-- [Development Container](.devcontainer/README.md) - Setting up a devcontainer for local development

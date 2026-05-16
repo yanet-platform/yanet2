@@ -32,8 +32,8 @@ func TestTest_009_nat64stateless(t *testing.T) {
 		fw.Run("Step_000_Configure_NAT64_Environment", func(fw *framework.TestFramework, t *testing.T) {
 			// Configure NAT64 module
 			commands := []string{
-				"/mnt/target/release/yanet-cli-nat64 prefix add --name nat64stateless0 --prefix 5555:5555:5555:5555:5555:5555::/96",
-				"/mnt/target/release/yanet-cli-nat64 mapping add --name nat64stateless0 --ipv4 153.153.153.153 --ipv6 aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa --prefix-index 0",
+				"/mnt/target/release/yanet-cli-nat64 prefix add --cfg nat64stateless0 --prefix 5555:5555:5555:5555:5555:5555::/96",
+				"/mnt/target/release/yanet-cli-nat64 mapping add --cfg nat64stateless0 --ipv4 153.153.153.153 --ipv6 aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa:aaaa --prefix-index 0",
 
 				"/mnt/target/release/yanet-cli-function update --name=test --chains chain2:1=forward:forward0,nat64:nat64stateless0,route:route0",
 				"/mnt/target/release/yanet-cli-pipeline update --name=test --functions test",
@@ -68,7 +68,7 @@ entries:
 `
 			err := fw.CreateConfigFile("route0-step001.yaml", fibYAML)
 			require.NoError(t, err, "Failed to create FIB config for IPv4 routes")
-			_, err = fw.ExecuteCommand("/mnt/target/release/yanet-cli-route fib update --name=route0 --rules /mnt/config/route0-step001.yaml")
+			_, err = fw.ExecuteCommand("/mnt/target/release/yanet-cli-route fib update --cfg=route0 --rules /mnt/config/route0-step001.yaml")
 			require.NoError(t, err, "Failed to update FIB for IPv4 routes")
 		})
 		fw.Run("Step_002_Configure_Routes", func(fw *framework.TestFramework, t *testing.T) {
@@ -101,7 +101,7 @@ entries:
 `
 			err := fw.CreateConfigFile("route0-step002.yaml", fibYAML)
 			require.NoError(t, err, "Failed to create FIB config for IPv6 routes")
-			_, err = fw.ExecuteCommand("/mnt/target/release/yanet-cli-route fib update --name=route0 --rules /mnt/config/route0-step002.yaml")
+			_, err = fw.ExecuteCommand("/mnt/target/release/yanet-cli-route fib update --cfg=route0 --rules /mnt/config/route0-step002.yaml")
 			require.NoError(t, err, "Failed to update FIB for IPv6 routes")
 		})
 

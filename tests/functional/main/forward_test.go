@@ -166,7 +166,7 @@ func testForward(t *testing.T, fw *framework.TestFramework) {
 		assert.Equal(t, framework.VMIPv6Gateway, outputPacket.DstIP.String(), "Destination IP should be the source of the request")
 	})
 
-	fw.Run("Test_Batch", func(fw *framework.TestFramework, t *testing.T) {
+	fw.Run("Test_Batch", func(fw *framework.F, t *testing.T) {
 		// Send two packets, the first one is passed through forward
 		// module whereas the second should be routed to a kernel and
 		// responded with an ICMP
@@ -176,48 +176,44 @@ func testForward(t *testing.T, fw *framework.TestFramework) {
 				net.ParseIP(framework.VMIPv4Host),
 				[]byte("icmp test"),
 			),
-			framework.CreateTCPIPv4Packet(
+			createForwardPacket(
 				net.ParseIP("192.0.2.1"), // src IP (within 192.0.2.0/24)
 				net.ParseIP("192.0.2.2"), // dst IP (within 192.0.2.0/24)
 				[]byte("forward test"),
-				nil,
 			),
 			createICMPPacket(
 				net.ParseIP(framework.VMIPv4Gateway),
 				net.ParseIP(framework.VMIPv4Host),
 				[]byte("icmp test"),
 			),
-			framework.CreateTCPIPv4Packet(
+			createForwardPacket(
 				net.ParseIP("192.0.2.1"), // src IP (within 192.0.2.0/24)
 				net.ParseIP("192.0.2.2"), // dst IP (within 192.0.2.0/24)
 				[]byte("forward test"),
-				nil,
 			),
 			createICMPPacket(
 				net.ParseIP(framework.VMIPv4Gateway),
 				net.ParseIP(framework.VMIPv4Host),
 				[]byte("icmp test"),
 			),
-			framework.CreateTCPIPv4Packet(
+			createForwardPacket(
 				net.ParseIP("192.0.2.1"), // src IP (within 192.0.2.0/24)
 				net.ParseIP("192.0.2.2"), // dst IP (within 192.0.2.0/24)
 				[]byte("forward test"),
-				nil,
 			),
 			createICMPPacket(
 				net.ParseIP(framework.VMIPv4Gateway),
 				net.ParseIP(framework.VMIPv4Host),
 				[]byte("icmp test"),
 			),
-			framework.CreateTCPIPv4Packet(
+			createForwardPacket(
 				net.ParseIP("192.0.2.1"), // src IP (within 192.0.2.0/24)
 				net.ParseIP("192.0.2.2"), // dst IP (within 192.0.2.0/24)
 				[]byte("forward test"),
-				nil,
 			),
 		}
 
-		outputPackets, err := fw.SendPacketsAndParseAll(0, 0, packets, 500*time.Millisecond)
+		outputPackets, err := fw.SendPacketsAndParseAll(0, 0, packets, 100*time.Millisecond)
 		require.NoError(t, err, "Failed to send batch")
 
 		assert.Equal(t, 8, len(outputPackets), "eight packets expected")
@@ -229,7 +225,7 @@ func testForward(t *testing.T, fw *framework.TestFramework) {
 			}
 		}
 
-		assert.Equal(t, 4, cntICMP, "four ICMP replies are expected")
+		assert.Equal(t, cntICMP, 4, "four ICMP replies are expected")
 	})
 
 }
