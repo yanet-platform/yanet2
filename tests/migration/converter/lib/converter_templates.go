@@ -401,7 +401,7 @@ func (c *Converter) generateBalancerTestTemplate(testData *GoTestData, functions
 
 %s
 `, header,
-		framework.CLIBalancer,
+		framework.CLIBasePath+"/yanet-cli-balancer2",
 		framework.CLIFunction,
 		framework.CLIPipeline,
 		c.generateTestStepsInOrder(testData.Steps),
