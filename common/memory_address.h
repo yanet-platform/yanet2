@@ -19,6 +19,13 @@
 							      : NULL));        \
 	})
 
+#define ADDR_OF_NC(OFFSET)                                                     \
+	__extension__({                                                        \
+		typeof(*(OFFSET)) offset_val = *(OFFSET);                      \
+		(typeof(offset_val))((uintptr_t)offset_val +                   \
+				     (uintptr_t)(OFFSET));                     \
+	})
+
 /**
  * @brief Set a relative pointer to point to a virtual address
  *

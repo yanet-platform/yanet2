@@ -81,8 +81,8 @@ value_table_get_ptr(
 	if (v_idx >= value_table->v_dim || h_idx >= value_table->h_dim) {
 		*(uint64_t *)(0) = v_idx + h_idx;
 	}
-	uint32_t **values = ADDR_OF(&value_table->values);
-	uint32_t *line = ADDR_OF(values + v_idx);
+	uint32_t **values = ADDR_OF_NC(&value_table->values);
+	uint32_t *line = ADDR_OF_NC(values + v_idx);
 	return line + h_idx;
 }
 

@@ -48,8 +48,8 @@ struct lpm {
 
 static inline struct lpm_page *
 lpm_page(const struct lpm *lpm, uint32_t page_idx) {
-	struct lpm_page **pages = ADDR_OF(&lpm->pages);
-	struct lpm_page *chunk = ADDR_OF(&pages[page_idx / LPM_CHUNK_SIZE]);
+	struct lpm_page **pages = ADDR_OF_NC(&lpm->pages);
+	struct lpm_page *chunk = ADDR_OF_NC(&pages[page_idx / LPM_CHUNK_SIZE]);
 	return chunk + page_idx % LPM_CHUNK_SIZE;
 }
 
@@ -227,7 +227,7 @@ lpm_insert(
 				} else {
 					key[hop] = 0;
 				}
-				pages[hop] = ADDR_OF(&stored_value->page);
+				pages[hop] = ADDR_OF_NC(&stored_value->page);
 				continue;
 			} else {
 				stored_value->value = LPM_VALUE_SET(value);
@@ -240,7 +240,7 @@ lpm_insert(
 			} else {
 				key[hop] = 0;
 			}
-			pages[hop] = ADDR_OF(&stored_value->page);
+			pages[hop] = ADDR_OF_NC(&stored_value->page);
 			continue;
 		}
 
@@ -270,7 +270,7 @@ lpm_lookup(const struct lpm *lpm, uint8_t key_size, const uint8_t *key) {
 		value = page->values + key[hop];
 		if (value->value & LPM_VALUE_FLAG)
 			break;
-		page = ADDR_OF(&value->page);
+		page = ADDR_OF_NC(&value->page);
 	}
 
 	return LPM_VALUE_GET(value->value);
