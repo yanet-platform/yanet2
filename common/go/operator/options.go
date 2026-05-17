@@ -9,14 +9,20 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
 )
 
+type grpcServerOption struct {
+	cfg      *GRPCServerConfig
+	services []ServiceRegistrar
+}
+
 type options struct {
-	Reconcile ReconcileConfig
-	Register  RegisterConfig
-	Gateways  []GatewayConfig
-	Workers   []Runner
-	PreRun    PreRun
-	Metrics   ReconcilerMetricsObserver
-	Log       *zap.Logger
+	Reconcile  ReconcileConfig
+	Register   RegisterConfig
+	Gateways   []GatewayConfig
+	Workers    []Runner
+	PreRun     PreRun
+	Metrics    ReconcilerMetricsObserver
+	GRPCServer *grpcServerOption
+	Log        *zap.Logger
 }
 
 func newOptions() *options {
@@ -64,10 +70,28 @@ func WithReconcile(cfg ReconcileConfig) Option {
 // supplied gateways using the supplied registration heartbeat config.
 //
 // When no gateways are provided the registration runner is not started.
+//
+// Registration requires WithGRPCServer.
 func WithGateways(register RegisterConfig, gateways ...GatewayConfig) Option {
 	return func(o *options) {
 		o.Register = register
 		o.Gateways = gateways
+	}
+}
+
+// WithGRPCServer enables an embedded gRPC server bound to cfg.Endpoint
+// that exposes the supplied service set.
+//
+// Gateway registration via WithGateways is optional; use gRPC alone for
+// metrics or operator APIs without director registration.
+//
+// When this option is not supplied, the operator does not bind a listener.
+func WithGRPCServer(cfg *GRPCServerConfig, services ...ServiceRegistrar) Option {
+	return func(o *options) {
+		o.GRPCServer = &grpcServerOption{
+			cfg:      cfg,
+			services: services,
+		}
 	}
 }
 
@@ -81,8 +105,7 @@ func WithWorkers(workers ...Runner) Option {
 	}
 }
 
-// WithPreRun registers a hook executed once after the gRPC listener is
-// bound and before any goroutine starts.
+// WithPreRun registers a hook executed once before any goroutine starts.
 //
 // Useful for seeding the source from static configuration.
 func WithPreRun(fn PreRun) Option {
@@ -157,5 +180,25 @@ func WithReconcileBackoff(initial, max time.Duration) ReconcilerOption {
 func WithReconcilerMetrics(metrics ReconcilerMetricsObserver) ReconcilerOption {
 	return func(o *reconcilerOptions) {
 		o.Metrics = metrics
+	}
+}
+
+type functionApplierOptions struct {
+	IgnorePdump bool
+}
+
+func newFunctionApplierOptions() *functionApplierOptions {
+	return &functionApplierOptions{}
+}
+
+// FunctionApplierOption configures NewFunctionApplier.
+type FunctionApplierOption func(*functionApplierOptions)
+
+// WithIgnorePdump sets whether Apply skips Update when the gateway already
+// holds a function whose named chain matches spec.Modules once every pdump
+// module is filtered out.
+func WithIgnorePdump(enabled bool) FunctionApplierOption {
+	return func(o *functionApplierOptions) {
+		o.IgnorePdump = enabled
 	}
 }

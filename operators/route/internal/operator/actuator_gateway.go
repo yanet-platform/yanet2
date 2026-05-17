@@ -18,12 +18,11 @@ import (
 // GatewayActuator applies route-operator state to a single Gateway via
 // the route module's UpdateFIB unary RPC.
 type GatewayActuator struct {
-	name      string
-	conn      *grpc.ClientConn
-	routes    routepb.RouteServiceClient
-	functions ynpb.FunctionServiceClient
-	fn        FunctionConfig
-	log       *zap.Logger
+	name        string
+	conn        *grpc.ClientConn
+	routes      routepb.RouteServiceClient
+	funcApplier *operator.FunctionApplier
+	log         *zap.Logger
 }
 
 // NewGatewayActuator dials the Gateway endpoint and returns a
@@ -50,13 +49,30 @@ func NewGatewayActuator(
 		return nil, fmt.Errorf("failed to dial gateway %q at %q: %w", cfg.Name, endpoint, err)
 	}
 
+	fn := opts.Function
+	spec := operator.FunctionChainSpec{
+		Name:   fn.Name.Unwrap(),
+		Chain:  fn.Chain.Unwrap(),
+		Weight: fn.Weight,
+		Modules: []*commonpb.ModuleId{{
+			Type: "route",
+			Name: fn.Module.Unwrap(),
+		}},
+	}
+
 	return &GatewayActuator{
-		name:      cfg.Name,
-		conn:      conn,
-		routes:    routepb.NewRouteServiceClient(conn),
-		functions: ynpb.NewFunctionServiceClient(conn),
-		fn:        opts.Function,
-		log:       opts.Log.With(zap.String("gateway", cfg.Name)),
+		name:   cfg.Name,
+		conn:   conn,
+		routes: routepb.NewRouteServiceClient(conn),
+		funcApplier: operator.NewFunctionApplier(
+			ynpb.NewFunctionServiceClient(conn),
+			spec,
+			operator.WithIgnorePdump(fn.IgnorePdump),
+		),
+		log: opts.Log.With(
+			zap.String("gateway", cfg.Name),
+			zap.String("function", fn.Name.Unwrap()),
+		),
 	}, nil
 }
 
@@ -85,29 +101,20 @@ func (m *GatewayActuator) Apply(ctx context.Context, fibs []FIB) error {
 	return errors.Join(err, m.applyFunction(ctx))
 }
 
-// applyFunction publishes the operator's single network-function
-// definition to the gateway via FunctionService.Update. Idempotent;
-// called every reconcile pass. The function has exactly one chain with
-// exactly one module of type "route".
+// applyFunction publishes the operator's single network-function definition to
+// the gateway.
 func (m *GatewayActuator) applyFunction(ctx context.Context) error {
-	modules := []*commonpb.ModuleId{{
-		Type: "route",
-		Name: m.fn.Module.Unwrap(),
-	}}
-	chains := []*ynpb.FunctionChain{{
-		Chain:  &ynpb.Chain{Name: m.fn.Chain.Unwrap(), Modules: modules},
-		Weight: m.fn.Weight,
-	}}
-	req := &ynpb.UpdateFunctionRequest{
-		Function: &ynpb.Function{
-			Id:     &commonpb.FunctionId{Name: m.fn.Name.Unwrap()},
-			Chains: chains,
-		},
+	skipped, err := m.funcApplier.Apply(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to update function on gateway %q: %w", m.name, err)
 	}
-	if _, err := m.functions.Update(ctx, req); err != nil {
-		return fmt.Errorf("failed to update function %q on gateway %q: %w", m.fn.Name.Unwrap(), m.name, err)
+
+	if skipped {
+		m.log.Debug("function already correct, skipped")
+	} else {
+		m.log.Info("updated function")
 	}
-	m.log.Debug("updated function", zap.String("function", m.fn.Name.Unwrap()))
+
 	return nil
 }
 

@@ -82,8 +82,12 @@ func DefaultConfig() *Config {
 }
 
 // FunctionConfig describes the single gateway-side function definition
-// this operator publishes. The architectural invariant is "one operator
-// manages exactly one network function with one chain and one module".
+// this operator publishes.
+//
+// The architectural invariant is "one operator manages exactly one network
+// function with one chain and one module".
+//
+// TODO: ^^^ - this is not true anymore :(
 type FunctionConfig struct {
 	// Name is the function identifier (e.g. "fn:route").
 	Name xcfg.NonEmptyString `yaml:"name"`
@@ -94,6 +98,9 @@ type FunctionConfig struct {
 	// Module is the route module config name this function targets
 	// (e.g. "route0").
 	Module xcfg.NonEmptyString `yaml:"module"`
+	// IgnorePdump skips function updates when the existing "default" chain
+	// already matches Modules once every pdump:* module is filtered out.
+	IgnorePdump bool `yaml:"ignore_pdump"`
 }
 
 // StaticConfig holds static RIB and neighbour seed data applied at

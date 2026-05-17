@@ -18,9 +18,6 @@ type Runner func(ctx context.Context) error
 // PreRun is an optional one-shot hook executed before the operator
 // starts its goroutines.
 //
-// It runs after the gRPC listener is bound but before the gRPC server,
-// gateway-registration loop, reconciler and workers start.
-//
 // Operators use it to seed in-memory state from static configuration so
 // the first reconcile pass observes a populated source.
 type PreRun func(ctx context.Context) error
@@ -33,13 +30,14 @@ type ServiceRegistrar func(server *grpc.Server) string
 
 // Operator is the generic operator skeleton.
 //
-// It owns the gRPC server, the gateway-registration loop and the
-// reconciler.
-// Per-operator code retains ownership of the actuator and any worker-internal
-// state.
+// It always runs the optional PreRun hook, the reconciler, and any
+// configured workers.
+//
+// The embedded gRPC server and gateway-registration loop are opt-in via
+// WithGRPCServer and WithGateways respectively.
 type Operator[T any] struct {
 	server       *GRPCServer
-	listener     net.Listener
+	endpoint     string
 	reconciler   *Reconciler[T]
 	actuator     Actuator[T]
 	preRun       PreRun
@@ -47,16 +45,13 @@ type Operator[T any] struct {
 	gateways     []GatewayConfig
 	register     RegisterConfig
 	serviceNames []string
-	endpoint     string
 
 	log *zap.Logger
 }
 
 func NewOperator[T any](
-	serverConfig *GRPCServerConfig,
 	actuator Actuator[T],
 	source StateSource[T],
-	services []ServiceRegistrar,
 	options ...Option,
 ) *Operator[T] {
 	opts := newOptions()
@@ -66,11 +61,20 @@ func NewOperator[T any](
 
 	log := opts.Log
 
-	server, serviceNames := NewGRPCServer(
-		serverConfig,
-		services,
-		WithGRPCLog(log),
+	var (
+		server       *GRPCServer
+		endpoint     string
+		serviceNames []string
 	)
+
+	if opts.GRPCServer != nil {
+		server, serviceNames = NewGRPCServer(
+			opts.GRPCServer.cfg,
+			opts.GRPCServer.services,
+			WithGRPCLog(log),
+		)
+		endpoint = opts.GRPCServer.cfg.Endpoint.Unwrap()
+	}
 
 	reconciler := NewReconciler(
 		actuator,
@@ -86,6 +90,7 @@ func NewOperator[T any](
 
 	return &Operator[T]{
 		server:       server,
+		endpoint:     endpoint,
 		reconciler:   reconciler,
 		actuator:     actuator,
 		preRun:       opts.PreRun,
@@ -93,7 +98,6 @@ func NewOperator[T any](
 		gateways:     opts.Gateways,
 		register:     opts.Register,
 		serviceNames: serviceNames,
-		endpoint:     serverConfig.Endpoint.Unwrap(),
 		log:          log,
 	}
 }
@@ -103,14 +107,23 @@ func (m *Operator[T]) Close() error {
 	return m.actuator.Close()
 }
 
-// Run binds the gRPC listener, runs the optional PreRun hook, then
-// runs the gRPC server, gateway-registration loop, reconciler and
-// every Worker in an errgroup.
+// Run runs the optional PreRun hook, then runs the reconciler and any
+// configured workers in an errgroup.
+//
+// When WithGRPCServer was supplied, it binds the listener and runs the gRPC
+// server. The gateway-registration loop runs only when WithGateways supplied
+// a non-empty gateway list.
 //
 // Run blocks until the supplied context is cancelled or any goroutine
 // returns a non-nil error.
 func (m *Operator[T]) Run(ctx context.Context) error {
-	listener, err := net.Listen("tcp", m.endpoint)
+	if len(m.gateways) > 0 && m.server == nil {
+		m.log.Warn(
+			"gateways configured but gRPC server is disabled; registration loop will not run",
+		)
+	}
+
+	listener, err := m.makeListener()
 	if err != nil {
 		return fmt.Errorf("failed to listen gRPC operator endpoint %q: %w", m.endpoint, err)
 	}
@@ -121,19 +134,26 @@ func (m *Operator[T]) Run(ctx context.Context) error {
 	}
 
 	wg, ctx := errgroup.WithContext(ctx)
-	wg.Go(func() error {
-		return m.server.Run(ctx, listener)
-	})
-	wg.Go(func() error {
-		runner := NewGatewayRegRunner(
-			m.gateways,
-			m.serviceNames,
-			listener.Addr(),
-			WithGatewayRegInterval(m.register.Interval.Unwrap()),
-			WithGatewayRegLog(m.log),
-		)
-		return runner.Run(ctx)
-	})
+
+	if m.server != nil {
+		wg.Go(func() error {
+			return m.server.Run(ctx, listener)
+		})
+
+		if len(m.gateways) > 0 {
+			wg.Go(func() error {
+				runner := NewGatewayRegRunner(
+					m.gateways,
+					m.serviceNames,
+					listener.Addr(),
+					WithGatewayRegInterval(m.register.Interval.Unwrap()),
+					WithGatewayRegLog(m.log),
+				)
+				return runner.Run(ctx)
+			})
+		}
+	}
+
 	wg.Go(func() error {
 		return m.reconciler.Run(ctx)
 	})
@@ -144,4 +164,26 @@ func (m *Operator[T]) Run(ctx context.Context) error {
 	}
 
 	return wg.Wait()
+}
+
+func (m *Operator[T]) makeListener() (net.Listener, error) {
+	if m.server == nil {
+		return &noopListener{}, nil
+	}
+
+	return net.Listen("tcp", m.endpoint)
+}
+
+type noopListener struct{}
+
+func (m *noopListener) Accept() (net.Conn, error) {
+	return nil, net.ErrClosed
+}
+
+func (m *noopListener) Close() error {
+	return nil
+}
+
+func (m *noopListener) Addr() net.Addr {
+	return nil
 }
