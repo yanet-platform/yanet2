@@ -139,7 +139,7 @@ func TestConvertRouteRemove_Regular(t *testing.T) {
 	result := converter.convertIPv4Remove(content, "ipv4Remove")
 
 	// Should generate route removal commands
-	require.Contains(t, result.GoCode, "remove", "Expected remove operation")
+	require.Contains(t, result.GoCode, "removal", "Expected removal operation")
 	require.Contains(t, result.GoCode, "10.0.0.0/24", "Expected prefix in command")
 	require.Contains(t, result.GoCode, "192.168.1.1", "Expected nexthop in command")
 	require.Equal(t, "ipv4Remove", result.Type, "Expected step type to be ipv4Remove")
@@ -157,7 +157,7 @@ func TestConvertRouteRemove_Labelled(t *testing.T) {
 	result := converter.convertIPv4LabelledRemove(content, "ipv4LabelledRemove")
 
 	// Should generate labelled route removal commands
-	require.Contains(t, result.GoCode, "remove", "Expected remove operation")
+	require.Contains(t, result.GoCode, "removal", "Expected removal operation")
 	require.Contains(t, result.GoCode, "label", "Expected label in command")
 	require.Contains(t, result.GoCode, "transport1", "Expected transport label")
 	require.Equal(t, "ipv4LabelledRemove", result.Type, "Expected step type to be ipv4LabelledRemove")
@@ -173,11 +173,11 @@ func TestConvertRouteRemove_PreservesOriginalBehavior(t *testing.T) {
 
 	// Test regular removal
 	regularResult := converter.convertIPv4Remove(content, "ipv4Remove")
-	require.Contains(t, regularResult.GoCode, "remove", "Regular result should contain remove operation")
+	require.Contains(t, regularResult.GoCode, "removal", "Regular result should contain removal operation")
 
 	// Test labelled removal
 	labelledResult := converter.convertIPv4LabelledRemove(content, "ipv4LabelledRemove")
-	require.Contains(t, labelledResult.GoCode, "remove", "Labelled result should contain remove operation")
+	require.Contains(t, labelledResult.GoCode, "removal", "Labelled result should contain removal operation")
 
 	// Results should be different because step types are different
 	require.NotEqual(t, regularResult.Type, labelledResult.Type, "Regular and labelled types should differ")
