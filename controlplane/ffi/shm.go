@@ -605,6 +605,17 @@ func (m *DPConfig) ModuleCounters(
 	return m.encodeCounters(counters)
 }
 
+func (m *DPConfig) WorkerCounters() []CounterInfo {
+	counters := C.yanet_get_worker_counters(m.ptr)
+	defer C.yanet_counter_handle_list_free(counters)
+
+	if counters == nil {
+		return nil
+	}
+
+	return m.encodeCounters(counters)
+}
+
 // PerformanceCounterLatencyRange represents a latency range in performance counters.
 type PerformanceCounterLatencyRange struct {
 	MinLatency uint64

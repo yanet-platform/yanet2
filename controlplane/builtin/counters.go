@@ -150,6 +150,21 @@ func (m *Counters) Module(
 	return response, nil
 }
 
+// Device returns device counters.
+func (m *Counters) Worker(
+	ctx context.Context,
+	request *ynpb.WorkerCountersRequest,
+) (*ynpb.CountersResponse, error) {
+	dpConfig := m.shm.DPConfig(m.instanceID)
+	counterValues := dpConfig.WorkerCounters()
+
+	response := &ynpb.CountersResponse{
+		Counters: m.encodeCounters(counterValues),
+	}
+
+	return response, nil
+}
+
 // Perf returns performance counters.
 func (m *Counters) Perf(
 	ctx context.Context,

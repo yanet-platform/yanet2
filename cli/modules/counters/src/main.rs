@@ -13,7 +13,7 @@ use ync::{
 use ynpb::pb::{
     counters_service_client::CountersServiceClient, ChainCountersRequest, DeviceCountersRequest,
     FunctionCountersRequest, LatencyRangeCounter, ModuleCountersRequest, PerfCounter, PerfCountersRequest,
-    PerfCountersResponse, PipelineCountersRequest,
+    PerfCountersResponse, PipelineCountersRequest, WorkerCountersRequest,
 };
 
 /// Counters module - displays counters information.
@@ -32,6 +32,8 @@ pub struct Cmd {
 
 #[derive(Debug, Clone, Parser)]
 pub enum ModeCmd {
+    /// Show worker counters.
+    Worker(WorkerCmd),
     /// Show device counters.
     Device(DeviceCmd),
     /// Show pipeline counters.
@@ -44,6 +46,10 @@ pub enum ModeCmd {
     Module(ModuleCmd),
     /// Show performance counters for a module.
     Perf(PerfCmd),
+}
+
+#[derive(Debug, Clone, Parser)]
+pub struct WorkerCmd {
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -137,6 +143,7 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
     let mut service = CountersService::new(&cmd.connection).await?;
 
     match cmd.mode {
+        ModeCmd::Worker(_cmd) => service.show_worker().await?,
         ModeCmd::Device(cmd) => service.show_device(cmd.device_name).await?,
         ModeCmd::Pipeline(cmd) => service.show_pipeline(cmd.device_name, cmd.pipeline_name).await?,
         ModeCmd::Function(cmd) => {
@@ -201,6 +208,13 @@ impl CountersService {
             .send_compressed(CompressionEncoding::Gzip)
             .accept_compressed(CompressionEncoding::Gzip);
         Ok(Self { client })
+    }
+
+    pub async fn show_worker(&mut self) -> Result<(), Box<dyn Error>> {
+        let request = WorkerCountersRequest { };
+        let response = self.client.worker(request).await?;
+        println!("{}", serde_json::to_string(response.get_ref())?);
+        Ok(())
     }
 
     pub async fn show_device(&mut self, device_name: String) -> Result<(), Box<dyn Error>> {
