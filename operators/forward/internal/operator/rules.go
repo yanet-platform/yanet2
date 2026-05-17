@@ -43,9 +43,9 @@ type yamlForwardConfig struct {
 	Rules []yamlForwardRule `yaml:"rules"`
 }
 
-// loadForwardRules reads a YAML forward-rules file and converts it to the
+// LoadForwardRules reads a YAML forward-rules file and converts it to the
 // proto representation used by ForwardService.UpdateConfig.
-func loadForwardRules(path string) ([]*forwardpb.Rule, error) {
+func LoadForwardRules(path string) ([]*forwardpb.Rule, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read rules file %q: %w", path, err)

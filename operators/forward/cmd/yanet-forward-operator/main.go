@@ -27,6 +27,7 @@ func main() {
 		interval    time.Duration
 		prefix      string
 		ignorePdump bool
+		logLevel    string
 	)
 
 	cmd := &cobra.Command{
@@ -41,7 +42,7 @@ is named <prefix><basename> where <basename> is the filename without .yaml.`,
 		Args:         cobra.ExactArgs(1),
 		SilenceUsage: true,
 		RunE: func(_ *cobra.Command, args []string) error {
-			return run(args[0], gateways, interval, prefix, ignorePdump)
+			return run(args[0], gateways, interval, prefix, ignorePdump, logLevel)
 		},
 	}
 
@@ -49,6 +50,7 @@ is named <prefix><basename> where <basename> is the filename without .yaml.`,
 	cmd.Flags().DurationVarP(&interval, "interval", "i", 30*time.Second, "pause between iterations")
 	cmd.Flags().StringVarP(&prefix, "function-prefix", "p", "fn:forward-", "function name prefix")
 	cmd.Flags().BoolVar(&ignorePdump, "ignore-pdump", false, "preserve pdump modules already present in the function's default chain")
+	cmd.Flags().StringVar(&logLevel, "log-level", "info", "log level: debug, info, warn, error")
 
 	if err := cmd.Execute(); err != nil {
 		os.Exit(1)
@@ -62,6 +64,7 @@ func run(
 	interval time.Duration,
 	prefix string,
 	ignorePdump bool,
+	logLevel string,
 ) error {
 	if err := validateRulesFile(rulesFile); err != nil {
 		return err
@@ -72,11 +75,21 @@ func run(
 	cfgName := strings.TrimSuffix(filepath.Base(rulesFile), ".yaml")
 	functionName := prefix + cfgName
 
-	log, _, err := logging.Init(&logging.Config{Level: zapcore.InfoLevel})
+	var level zapcore.Level
+	if err := level.UnmarshalText([]byte(logLevel)); err != nil {
+		return fmt.Errorf("invalid log level %q: %w", logLevel, err)
+	}
+
+	log, _, err := logging.Init(&logging.Config{Level: level})
 	if err != nil {
 		return fmt.Errorf("failed to initialize logging: %w", err)
 	}
 	defer func() { _ = log.Sync() }()
+
+	rules, err := forwardop.LoadForwardRules(rulesFile)
+	if err != nil {
+		return fmt.Errorf("failed to load rules: %w", err)
+	}
 
 	// Build per-gateway actuators. Each one dials once and holds the
 	// connection for its lifetime.
@@ -89,7 +102,7 @@ func run(
 		}
 	}
 	for _, gw := range gateways {
-		a, err := forwardop.NewGatewayActuator(gw, cfgName, functionName, ignorePdump, log)
+		a, err := forwardop.NewGatewayActuator(gw, cfgName, functionName, ignorePdump, forwardop.WithLog(log))
 		if err != nil {
 			closeActuators()
 			return err
@@ -99,11 +112,7 @@ func run(
 
 	fanOut := operator.NewFanOutActuator(actuators, operator.WithFanOutLog(log))
 
-	source, err := forwardop.NewPollingSource(rulesFile, log)
-	if err != nil {
-		closeActuators()
-		return err
-	}
+	source := forwardop.NewStaticSource(rules, forwardop.WithSourceLog(log))
 
 	op := operator.NewOperator(
 		fanOut,

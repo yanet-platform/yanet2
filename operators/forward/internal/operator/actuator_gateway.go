@@ -32,8 +32,13 @@ type GatewayActuator struct {
 func NewGatewayActuator(
 	endpoint, configName, functionName string,
 	ignorePdump bool,
-	log *zap.Logger,
+	options ...Option,
 ) (*GatewayActuator, error) {
+	opts := newOptions()
+	for _, o := range options {
+		o(opts)
+	}
+
 	dialTarget := strings.TrimPrefix(endpoint, "grpc://")
 	conn, err := grpc.NewClient(
 		dialTarget,
@@ -52,7 +57,7 @@ func NewGatewayActuator(
 			operator.WithIgnorePdump(ignorePdump),
 		),
 		configName: configName,
-		log: log.With(
+		log: opts.Log.With(
 			zap.String("gateway", endpoint),
 			zap.String("function", functionName),
 		),
