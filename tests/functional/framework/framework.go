@@ -1522,7 +1522,7 @@ func (f *TestFramework) ExportCurrentOverlay(dst string) error {
 		return fmt.Errorf("create overlay cache dir: %w", err)
 	}
 	src := filepath.Join(f.qemu.WorkDir, "overlay.qcow2")
-	if err := CopyFileQCOW2(src, dst); err != nil {
+	if err := copyFile(src, dst); err != nil {
 		return fmt.Errorf("copy overlay %s -> %s: %w", src, dst, err)
 	}
 	f.log.Infof("Exported current overlay to %s", dst)

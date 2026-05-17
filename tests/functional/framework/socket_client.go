@@ -3,6 +3,7 @@ package framework
 import (
 	"encoding/binary"
 	"fmt"
+	"io"
 	"net"
 	"sync"
 	"time"
@@ -565,26 +566,14 @@ func (sc *SocketClient) readFull(n int, timeout time.Duration) ([]byte, error) {
 		return nil, fmt.Errorf("not connected to socket")
 	}
 
-	err := sc.inner.conn.SetReadDeadline(time.Now().Add(timeout))
-	if err != nil {
+	if err := sc.inner.conn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
 		return nil, fmt.Errorf("failed to set read deadline: %w", err)
 	}
 
 	buf := make([]byte, n)
-	bytesRead := 0
-
-	for bytesRead < n {
-		nRead, err := sc.inner.conn.Read(buf[bytesRead:])
-		if err != nil {
-			if nRead > 0 {
-				// Partial read before error - report how much was read
-				return nil, fmt.Errorf("read %d/%d bytes before error: %w", bytesRead+nRead, n, err)
-			}
-			return nil, err
-		}
-		bytesRead += nRead
+	if _, err := io.ReadFull(sc.inner.conn, buf); err != nil {
+		return nil, err
 	}
-
 	return buf, nil
 }
 

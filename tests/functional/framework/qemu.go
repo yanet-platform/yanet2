@@ -215,7 +215,7 @@ func (q *QEMUManager) Start() (bool, error) {
 	}
 	if q.TemplateOverlay != "" {
 		// Copy the template overlay and load the requested snapshot from it.
-		if err := CopyFileQCOW2(q.TemplateOverlay, overlayPath); err != nil {
+		if err := copyFile(q.TemplateOverlay, overlayPath); err != nil {
 			return false, fmt.Errorf("failed to copy template overlay: %w", err)
 		}
 		fromSnapshot = true
@@ -1042,8 +1042,8 @@ func HasBootedSnapshot(overlayPath string) bool {
 	return OverlayHasSnapshot(overlayPath, BootedSnapshotName)
 }
 
-// CopyFileQCOW2 copies src to dst using a buffered file copy.
-func CopyFileQCOW2(src, dst string) error {
+// copyFile copies src to dst using a buffered file copy.
+func copyFile(src, dst string) error {
 	in, err := os.Open(src)
 	if err != nil {
 		return fmt.Errorf("open src: %w", err)

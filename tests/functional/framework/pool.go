@@ -33,6 +33,23 @@ type poolEntry struct {
 	fw      *TestFramework
 }
 
+type poolResult struct {
+	idx int
+	err error
+}
+
+// runWithRecovery runs fn in the current goroutine, sending the result to ch.
+// If fn panics, the panic is recovered and reported as an error result.
+func (p *VMPool) runWithRecovery(idx int, ch chan<- poolResult, fn func() error) {
+	defer func() {
+		if r := recover(); r != nil {
+			p.log.Errorf("pool goroutine %d recovered panic: %v", idx, r)
+			ch <- poolResult{idx: idx, err: fmt.Errorf("panic: %v", r)}
+		}
+	}()
+	ch <- poolResult{idx: idx, err: fn()}
+}
+
 // PoolSize returns the desired VM pool size from the environment.
 func PoolSize() int {
 	s := os.Getenv("YANET_VM_POOL_SIZE")
@@ -211,23 +228,14 @@ func (p *VMPool) startAllFromTemplate(templateOverlay string, snapshotName strin
 		entry.manager.TemplateSnapshotName = snapshotName
 	}
 
-	type result struct {
-		idx int
-		err error
-	}
-	ch := make(chan result, len(p.vms))
+	ch := make(chan poolResult, len(p.vms))
 	for i, entry := range p.vms {
-		go func(idx int, fw *TestFramework) {
-			defer func() {
-				if r := recover(); r != nil {
-					p.log.Errorf("startAllFromTemplate goroutine %d recovered panic: %v", idx, r)
-					ch <- result{idx: idx, err: fmt.Errorf("panic: %v", r)}
-				}
-			}()
-			p.log.Infof("Starting VM %d/%d (%s) from template %q...", idx+1, p.size, fw.qemu.Name, snapshotName)
+		fw := entry.fw
+		go p.runWithRecovery(i, ch, func() error {
+			p.log.Infof("Starting VM %d/%d (%s) from template %q...", i+1, p.size, fw.qemu.Name, snapshotName)
 			_, err := fw.Start()
-			ch <- result{idx: idx, err: err}
-		}(i, entry.fw)
+			return err
+		})
 	}
 	var firstErr error
 	for range p.vms {
@@ -276,7 +284,7 @@ func (p *VMPool) bootstrapTemplate() error {
 	// (Stop() removes WorkDir which contains the overlay).
 	if err := os.MkdirAll(filepath.Dir(p.bootedTemplate), 0755); err != nil {
 		p.log.Warnf("Failed to create template cache dir: %v", err)
-	} else if err := CopyFileQCOW2(overlayPath, p.bootedTemplate); err != nil {
+	} else if err := copyFile(overlayPath, p.bootedTemplate); err != nil {
 		p.log.Warnf("Failed to cache booted template: %v", err)
 		if rerr := os.Remove(p.bootedTemplate); rerr != nil && !os.IsNotExist(rerr) {
 			p.log.Warnf("Failed to remove stale booted template %s: %v", p.bootedTemplate, rerr)
@@ -307,22 +315,13 @@ func (p *VMPool) bootstrapTemplate() error {
 
 	// Template caching failed — fall back to cold boot for all slots.
 	p.log.Warn("Template caching failed; starting all slots with cold boot")
-	type result struct {
-		idx int
-		err error
-	}
-	ch := make(chan result, len(p.vms))
+	ch := make(chan poolResult, len(p.vms))
 	for i, entry := range p.vms {
-		go func(idx int, fw *TestFramework) {
-			defer func() {
-				if r := recover(); r != nil {
-					p.log.Errorf("bootstrap goroutine %d recovered panic: %v", idx, r)
-					ch <- result{idx: idx, err: fmt.Errorf("panic: %v", r)}
-				}
-			}()
+		fw := entry.fw
+		go p.runWithRecovery(i, ch, func() error {
 			_, err := fw.Start()
-			ch <- result{idx: idx, err: err}
-		}(i, entry.fw)
+			return err
+		})
 	}
 	var firstErr error
 	for range p.vms {
@@ -342,21 +341,12 @@ func (p *VMPool) bootstrapTemplate() error {
 
 // WaitAllReady waits for every VM in the pool to reach the shell prompt.
 func (p *VMPool) WaitAllReady(timeout time.Duration) error {
-	type result struct {
-		idx int
-		err error
-	}
-	ch := make(chan result, len(p.vms))
+	ch := make(chan poolResult, len(p.vms))
 	for i, entry := range p.vms {
-		go func(idx int, mgr *QEMUManager) {
-			defer func() {
-				if r := recover(); r != nil {
-					p.log.Errorf("WaitAllReady goroutine %d recovered panic: %v", idx, r)
-					ch <- result{idx: idx, err: fmt.Errorf("panic: %v", r)}
-				}
-			}()
-			ch <- result{idx: idx, err: mgr.WaitForReady(timeout)}
-		}(i, entry.manager)
+		mgr := entry.manager
+		go p.runWithRecovery(i, ch, func() error {
+			return mgr.WaitForReady(timeout)
+		})
 	}
 	var firstErr error
 	for range p.vms {
@@ -370,21 +360,12 @@ func (p *VMPool) WaitAllReady(timeout time.Duration) error {
 
 // ForEachParallel calls fn for each VM's framework instance in parallel.
 func (p *VMPool) ForEachParallel(fn func(idx int, fw *TestFramework) error) error {
-	type result struct {
-		idx int
-		err error
-	}
-	ch := make(chan result, len(p.vms))
+	ch := make(chan poolResult, len(p.vms))
 	for i, entry := range p.vms {
-		go func(idx int, fw *TestFramework) {
-			defer func() {
-				if r := recover(); r != nil {
-					p.log.Errorf("ForEachParallel goroutine %d recovered panic: %v", idx, r)
-					ch <- result{idx: idx, err: fmt.Errorf("panic: %v", r)}
-				}
-			}()
-			ch <- result{idx: idx, err: fn(idx, fw)}
-		}(i, entry.fw)
+		fw := entry.fw
+		go p.runWithRecovery(i, ch, func() error {
+			return fn(i, fw)
+		})
 	}
 	var firstErr error
 	for range p.vms {
