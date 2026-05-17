@@ -21,11 +21,35 @@ type FunctionChainSpec struct {
 	Modules []*commonpb.ModuleId
 }
 
+// chainModulesCompare reports whether current modules satisfy the desired
+// module list for a single chain.
+type chainModulesCompare func(current, want []*commonpb.ModuleId) bool
+
+func compareChainModulesExact(current, want []*commonpb.ModuleId) bool {
+	if len(current) != len(want) {
+		return false
+	}
+
+	for idx, mod := range current {
+		spec := want[idx]
+		if mod.GetType() != spec.GetType() || mod.GetName() != spec.GetName() {
+			return false
+		}
+	}
+
+	return true
+}
+
+func compareChainModulesIgnorePdump(gateway, want []*commonpb.ModuleId) bool {
+	survivors := filterPdump(gateway)
+	return compareChainModulesExact(survivors, want)
+}
+
 // FunctionApplier publishes a fixed function definition to a gateway.
 type FunctionApplier struct {
-	client      ynpb.FunctionServiceClient
-	spec        FunctionChainSpec
-	ignorePdump bool
+	client         ynpb.FunctionServiceClient
+	spec           FunctionChainSpec
+	compareModules chainModulesCompare
 }
 
 // NewFunctionApplier returns a FunctionApplier that will publish spec to
@@ -40,24 +64,27 @@ func NewFunctionApplier(
 		o(opts)
 	}
 
+	compare := compareChainModulesExact
+	if opts.IgnorePdump {
+		compare = compareChainModulesIgnorePdump
+	}
+
 	return &FunctionApplier{
-		client:      client,
-		spec:        spec,
-		ignorePdump: opts.IgnorePdump,
+		client:         client,
+		spec:           spec,
+		compareModules: compare,
 	}
 }
 
 // Apply publishes the captured spec to the gateway, or returns true
 // if the gateway is already correctly configured.
 func (m *FunctionApplier) Apply(ctx context.Context) (bool, error) {
-	if m.ignorePdump {
-		ok, err := m.alreadyCorrect(ctx)
-		if err != nil {
-			return false, err
-		}
-		if ok {
-			return true, nil
-		}
+	ok, err := m.alreadyCorrect(ctx)
+	if err != nil {
+		return false, err
+	}
+	if ok {
+		return true, nil
 	}
 
 	req := &ynpb.UpdateFunctionRequest{
@@ -100,19 +127,11 @@ func (m *FunctionApplier) alreadyCorrect(ctx context.Context) (bool, error) {
 			continue
 		}
 
-		survivors := filterPdump(fc.GetChain().GetModules())
-		if len(survivors) != len(m.spec.Modules) {
-			return false, nil
+		if m.compareModules(fc.GetChain().GetModules(), m.spec.Modules) {
+			return true, nil
 		}
 
-		for idx, mod := range survivors {
-			want := m.spec.Modules[idx]
-			if mod.GetType() != want.GetType() || mod.GetName() != want.GetName() {
-				return false, nil
-			}
-		}
-
-		return true, nil
+		return false, nil
 	}
 
 	return false, nil

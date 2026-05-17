@@ -92,6 +92,39 @@ func Test_FunctionApplier_Basic(t *testing.T) {
 	skipped, err := NewFunctionApplier(c, functionApplierSpec()).
 		Apply(t.Context())
 	require.NoError(t, err)
+	require.True(t, skipped)
+	require.Equal(t, 0, c.updates)
+}
+
+func Test_FunctionApplier_GetErrorAbortsWithoutUpdateDefaultStrategy(t *testing.T) {
+	c := &fakeFunctionClient{
+		getErr: errors.New("not found"),
+	}
+
+	skipped, err := NewFunctionApplier(c, functionApplierSpec()).
+		Apply(t.Context())
+	require.Error(t, err)
+	require.False(t, skipped)
+	require.Equal(t, 0, c.updates)
+}
+
+func Test_FunctionApplier_PdumpPresentExactStrategyNotSkipped(t *testing.T) {
+	c := &fakeFunctionClient{
+		getResp: makeGetResp(
+			&commonpb.ModuleId{
+				Type: "pdump",
+				Name: "pd0",
+			},
+			&commonpb.ModuleId{
+				Type: "forward",
+				Name: "fwd0",
+			},
+		),
+	}
+
+	skipped, err := NewFunctionApplier(c, functionApplierSpec()).
+		Apply(t.Context())
+	require.NoError(t, err)
 	require.False(t, skipped)
 	require.Equal(t, 1, c.updates)
 }
@@ -124,7 +157,7 @@ func Test_FunctionApplier_ChainMissingNotSkipped(t *testing.T) {
 		},
 	}
 
-	skipped, err := NewFunctionApplier(c, functionApplierSpec(), WithIgnorePdump(true)).
+	skipped, err := NewFunctionApplier(c, functionApplierSpec()).
 		Apply(t.Context())
 	require.NoError(t, err)
 	require.False(t, skipped)
