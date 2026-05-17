@@ -358,7 +358,7 @@ func (q *QEMUManager) Start() (bool, error) {
 	if err != nil || p == nil {
 		logContent, _ := os.ReadFile(logFile)
 		logContentQ, _ := os.ReadFile(qemuLogfile)
-		return false, fmt.Errorf("QEMU proccess not found. Log content: %s; QEMU log content: %s", string(logContent), string(logContentQ))
+		return false, fmt.Errorf("QEMU process not found. Log content: %s; QEMU log content: %s", string(logContent), string(logContentQ))
 	}
 	if err := p.Signal(syscall.Signal(0)); err != nil {
 		logContent, _ := os.ReadFile(logFile)

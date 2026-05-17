@@ -72,6 +72,7 @@ type GuestPaths struct {
 	LogDir         string // directory for log files
 	DPDKDevbindDir string // directory containing dpdk-devbind.py
 	ForwardYAML    string // path to forward.yaml
+	LocalMode      bool   // true when paths are on guest tmpfs (pool/snapshot mode)
 }
 
 // DefaultGuestPaths returns the standard 9P-backed paths used in single-VM mode.
@@ -83,6 +84,7 @@ func DefaultGuestPaths() GuestPaths {
 		LogDir:         "/mnt/logs",
 		DPDKDevbindDir: "/mnt/yanet2/subprojects/dpdk/usertools",
 		ForwardYAML:    "/mnt/config/forward.yaml",
+		LocalMode:      false,
 	}
 }
 
@@ -97,6 +99,7 @@ func LocalGuestPaths() GuestPaths {
 		LogDir:         "/tmp/yanet/logs",
 		DPDKDevbindDir: "/tmp/yanet/tools",
 		ForwardYAML:    "/tmp/yanet/forward.yaml",
+		LocalMode:      true,
 	}
 }
 
@@ -839,12 +842,6 @@ func (f *TestFramework) ResetConnections() {
 	}
 }
 
-// resetAllConnections is an unexported alias for ResetConnections,
-// kept for backward compatibility with internal callers.
-func (f *TestFramework) resetAllConnections() {
-	f.ResetConnections()
-}
-
 // ExecuteCommand executes a single CLI command within the QEMU virtual machine
 // via the serial console interface. This is a proxy method that delegates to the
 // underlying CLI manager.
@@ -1175,13 +1172,12 @@ func (f *TestFramework) createGuestFile(guestPath string, content string) error 
 // f.Paths.ForwardYAML. In 9P mode this writes to the host filesystem;
 // in local mode it writes via serial console to the guest tmpfs.
 func (f *TestFramework) CreateForwardConfig(config string) error {
-	p := f.Paths
-	if p.ForwardYAML == "/mnt/config/forward.yaml" {
-		// 9P mode: write to host filesystem, accessible via 9P mount.
-		return f.CreateConfigFile("forward.yaml", config)
+	if f.Paths.LocalMode {
+		// Local mode: write directly into guest filesystem via serial console.
+		return f.createGuestFile(f.Paths.ForwardYAML, config)
 	}
-	// Local mode: write directly into guest filesystem.
-	return f.createGuestFile(p.ForwardYAML, config)
+	// 9P mode: write to host filesystem, accessible via 9P mount.
+	return f.CreateConfigFile("forward.yaml", config)
 }
 
 // createConfigFiles creates YANET configuration files in the host filesystem
@@ -1533,14 +1529,11 @@ func (f *TestFramework) ExportCurrentOverlay(dst string) error {
 	return nil
 }
 
-// RestoreClean reverts the VM to a previously saved snapshot and
-// re-establishes serial console and 9P mounts WITHOUT running the
-// dataplane heartbeat check. Use this for snapshots where YANET is
-// not yet running (e.g. "preyanet") -- StartYANET will be called
-// separately after restore.
-func (f *TestFramework) RestoreClean(snapshot string) error {
-	f.log.Infof("Restoring snapshot %q (clean, no heartbeat)...", snapshot)
-
+// restoreSnapshotCore is the shared low-level sequence for both RestoreClean
+// and RestoreAndReconnect: unmount 9P → loadvm → serial reconnect → wait for
+// shell prompt → mount 9P. It does not reset socket connections or run a
+// heartbeat check — callers add that on top as needed.
+func (f *TestFramework) restoreSnapshotCore(snapshot string) error {
 	if err := f.Unmount9P(); err != nil {
 		f.log.Debugf("Pre-restore unmount (may be already unmounted): %v", err)
 	}
@@ -1552,79 +1545,6 @@ func (f *TestFramework) RestoreClean(snapshot string) error {
 	f.qemu.stopSerialReader()
 
 	if err := f.qemu.ReconnectSerial(); err != nil {
-		close(f.qemu.serialReaderDone)
-		return fmt.Errorf("failed to reconnect serial after restore: %w", err)
-	}
-
-	f.qemu.setVMReady(false)
-	f.qemu.readySignal = make(chan bool, 1)
-	f.qemu.resetSerialBuffer()
-	go f.qemu.readSerial()
-
-	stdin := f.qemu.GetStdin()
-	if stdin == nil {
-		return fmt.Errorf("serial console unavailable after restore")
-	}
-	for range 3 {
-		_, _ = stdin.Write([]byte{0x03})
-		time.Sleep(20 * time.Millisecond)
-	}
-	const restoreTimeout = 30 * time.Second
-	deadline := time.Now().Add(restoreTimeout)
-	_, _ = stdin.Write([]byte("\n\n"))
-	for !f.qemu.IsVMReady() && time.Now().Before(deadline) {
-		select {
-		case <-f.qemu.readySignal:
-		case <-time.After(1 * time.Second):
-			if !f.qemu.IsVMReady() {
-				_, _ = stdin.Write([]byte("\n\n"))
-			}
-		}
-	}
-	if !f.qemu.IsVMReady() {
-		return fmt.Errorf("VM did not respond within %v", restoreTimeout)
-	}
-
-	if err := f.Mount9P(); err != nil {
-		return fmt.Errorf("post-restore remount failed: %w", err)
-	}
-
-	f.log.Infof("Snapshot %q clean restore complete", snapshot)
-	return nil
-}
-
-// RestoreAndReconnect reverts the VM to a previously saved snapshot and
-// re-establishes the serial console and socket connections that break
-// when the guest state is rolled back.
-//
-// Call sequence after restore:
-//  1. Unmount 9P shares
-//  2. loadvm via QEMU monitor (monitor socket survives)
-//  3. Reconnect serial console
-//  4. Wait for shell prompts
-//  5. Mount 9P shares
-//  6. Reset socket connections (close stale connections, reconnect)
-//  7. Wait for dataplane ready (ICMP heartbeat)
-//
-// Socket connections MUST be reset before the heartbeat because loadvm
-// restores QEMU's internal stream-netdev state but the host-side UNIX
-// socket connections are stale. Without reset, Connect() short-circuits
-// on the dead net.Conn and heartbeat fails silently.
-func (f *TestFramework) RestoreAndReconnect(snapshot string) error {
-	f.log.Infof("Restoring snapshot %q...", snapshot)
-
-	if err := f.Unmount9P(); err != nil {
-		f.log.Debugf("Pre-restore unmount (may be already unmounted): %v", err)
-	}
-
-	if err := f.qemu.RestoreSnapshot(snapshot); err != nil {
-		return fmt.Errorf("failed to restore snapshot %q: %w", snapshot, err)
-	}
-
-	f.qemu.stopSerialReader()
-
-	if err := f.qemu.ReconnectSerial(); err != nil {
-		close(f.qemu.serialReaderDone)
 		return fmt.Errorf("failed to reconnect serial after restore: %w", err)
 	}
 
@@ -1661,7 +1581,47 @@ func (f *TestFramework) RestoreAndReconnect(snapshot string) error {
 		return fmt.Errorf("post-restore remount failed: %w", err)
 	}
 
-	f.resetAllConnections()
+	return nil
+}
+
+// RestoreClean reverts the VM to a previously saved snapshot and
+// re-establishes serial console and 9P mounts WITHOUT running the
+// dataplane heartbeat check. Use this for snapshots where YANET is
+// not yet running (e.g. "preyanet") -- StartYANET will be called
+// separately after restore.
+func (f *TestFramework) RestoreClean(snapshot string) error {
+	f.log.Infof("Restoring snapshot %q (clean, no heartbeat)...", snapshot)
+	if err := f.restoreSnapshotCore(snapshot); err != nil {
+		return err
+	}
+	f.log.Infof("Snapshot %q clean restore complete", snapshot)
+	return nil
+}
+
+// RestoreAndReconnect reverts the VM to a previously saved snapshot and
+// re-establishes the serial console and socket connections that break
+// when the guest state is rolled back.
+//
+// Call sequence after restore:
+//  1. Unmount 9P shares
+//  2. loadvm via QEMU monitor (monitor socket survives)
+//  3. Reconnect serial console
+//  4. Wait for shell prompts
+//  5. Mount 9P shares
+//  6. Reset socket connections (close stale connections, reconnect)
+//  7. Wait for dataplane ready (ICMP heartbeat)
+//
+// Socket connections MUST be reset before the heartbeat because loadvm
+// restores QEMU's internal stream-netdev state but the host-side UNIX
+// socket connections are stale. Without reset, Connect() short-circuits
+// on the dead net.Conn and heartbeat fails silently.
+func (f *TestFramework) RestoreAndReconnect(snapshot string) error {
+	f.log.Infof("Restoring snapshot %q...", snapshot)
+	if err := f.restoreSnapshotCore(snapshot); err != nil {
+		return err
+	}
+
+	f.ResetConnections()
 
 	const heartbeatTimeout = 10 * time.Second
 	if err := f.WaitForDatapathReady(heartbeatTimeout); err != nil {
@@ -1673,7 +1633,7 @@ func (f *TestFramework) RestoreAndReconnect(snapshot string) error {
 			return fmt.Errorf("heartbeat failed, restart also failed: %w", restartErr)
 		}
 
-		f.resetAllConnections()
+		f.ResetConnections()
 
 		if err := f.WaitForDatapathReady(heartbeatTimeout); err != nil {
 			return fmt.Errorf("heartbeat failed after YANET restart: %w", err)

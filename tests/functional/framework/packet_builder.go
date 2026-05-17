@@ -1,6 +1,7 @@
 package framework
 
 import (
+	"fmt"
 	"net"
 
 	"github.com/gopacket/gopacket"
@@ -170,6 +171,8 @@ func CreateICMPv4EchoPacket(srcIP, dstIP net.IP, id, seq uint16, payload []byte)
 	}
 	buf := gopacket.NewSerializeBuffer()
 	serOpts := gopacket.SerializeOptions{FixLengths: true, ComputeChecksums: true}
-	_ = gopacket.SerializeLayers(buf, serOpts, &eth, &ip4, &icmp, gopacket.Payload(payload))
+	if err := gopacket.SerializeLayers(buf, serOpts, &eth, &ip4, &icmp, gopacket.Payload(payload)); err != nil {
+		panic(fmt.Sprintf("CreateICMPv4EchoPacket: serialize failed: %v", err))
+	}
 	return buf.Bytes()
 }

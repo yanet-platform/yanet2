@@ -278,7 +278,9 @@ func (p *VMPool) bootstrapTemplate() error {
 		p.log.Warnf("Failed to create template cache dir: %v", err)
 	} else if err := CopyFileQCOW2(overlayPath, p.bootedTemplate); err != nil {
 		p.log.Warnf("Failed to cache booted template: %v", err)
-		os.Remove(p.bootedTemplate)
+		if rerr := os.Remove(p.bootedTemplate); rerr != nil && !os.IsNotExist(rerr) {
+			p.log.Warnf("Failed to remove stale booted template %s: %v", p.bootedTemplate, rerr)
+		}
 	} else {
 		p.log.Infof("Booted template cached at %s", p.bootedTemplate)
 	}
@@ -293,7 +295,9 @@ func (p *VMPool) bootstrapTemplate() error {
 		p.log.Infof("Validating booted template with 3 restore cycles...")
 		if err := p.validateBootedTemplate(); err != nil {
 			p.log.Warnf("Booted template validation failed: %v; recreating...", err)
-			os.Remove(p.bootedTemplate)
+			if rerr := os.Remove(p.bootedTemplate); rerr != nil && !os.IsNotExist(rerr) {
+				p.log.Warnf("Failed to remove stale booted template %s: %v", p.bootedTemplate, rerr)
+			}
 			// Fall through to cold boot fallback below.
 		} else {
 			p.log.Infof("Booted template validation passed")
