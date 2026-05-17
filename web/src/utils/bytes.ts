@@ -48,21 +48,26 @@ export const getBytes = (input: string | Uint8Array | number[] | undefined): num
  * Examples: "500 B", "1.2 KB", "3.5 MB", "1.1 GB", "0.50 TB".
  */
 export const formatBytes = (bytes: bigint): string => {
-    if (bytes < BigInt(1024)) {
+    if (bytes < 1024n) {
         return `${bytes} B`;
     }
-    if (bytes < BigInt(1024 * 1024)) {
-        const kb = Number(bytes) / 1024;
-        return `${kb.toFixed(1)} KB`;
+    const tiers: { divisor: number; label: string; digits: number }[] = [
+        { divisor: 1024, label: 'KB', digits: 1 },
+        { divisor: 1024 ** 2, label: 'MB', digits: 1 },
+        { divisor: 1024 ** 3, label: 'GB', digits: 2 },
+        { divisor: 1024 ** 4, label: 'TB', digits: 2 },
+    ];
+    for (let idx = 0; idx < tiers.length; idx++) {
+        const tier = tiers[idx];
+        const value = Number(bytes) / tier.divisor;
+        const formatted = value.toFixed(tier.digits);
+        // Rounding may push the value to the next prefix (e.g. 1023.99 KB → 1024.0 KB);
+        // in that case fall through to the next tier so we report 1.0 MB instead.
+        if (parseFloat(formatted) >= 1024 && idx < tiers.length - 1) {
+            continue;
+        }
+        return `${formatted} ${tier.label}`;
     }
-    if (bytes < BigInt(1024 * 1024 * 1024)) {
-        const mb = Number(bytes) / (1024 * 1024);
-        return `${mb.toFixed(1)} MB`;
-    }
-    if (bytes < BigInt(1024 * 1024 * 1024 * 1024)) {
-        const gb = Number(bytes) / (1024 * 1024 * 1024);
-        return `${gb.toFixed(2)} GB`;
-    }
-    const tb = Number(bytes) / (1024 * 1024 * 1024 * 1024);
+    const tb = Number(bytes) / 1024 ** 4;
     return `${tb.toFixed(2)} TB`;
 };
