@@ -288,7 +288,7 @@ Web UI lives in `web/` (`package.json`, `index.html`, `dist/`).
 
 ## Agent Memory & Feedback
 
-**`.claude/agent-memory/<agent>/MEMORY.md`** — single flat file per agent. No backing files, no YAML frontmatter. The file is auto-loaded into conversation context, so keep it tight.
+**`<REPO_ROOT>/.claude/agent-memory/<agent>/MEMORY.md`** — single flat file per agent, **always at the repository root**, never under a subdirectory like `web/.claude/…` or `controlplane/.claude/…`. The path is `<repo>/.claude/agent-memory/<agent>/MEMORY.md` regardless of the agent's current working directory. If you would write to a `.claude/` path that is not directly under the repo root, you are wrong — walk up to the repo root first. No backing files, no YAML frontmatter. The file is auto-loaded into conversation context, so keep it tight.
 
 ### Format
 

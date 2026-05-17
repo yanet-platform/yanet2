@@ -1,16 +1,15 @@
 import React, { useCallback, useMemo } from 'react';
-import { Box, TextInput, Button, Select } from '@gravity-ui/uikit';
-import { Plus, TrashBin } from '@gravity-ui/icons';
+import { IconPlus, IconTrash } from './components/Icons';
 import type { DevicePipeline } from '../../../api/devices';
 import type { PipelineId } from '../../../api/pipelines';
-import './devices.scss';
 
 export interface PipelineTableProps {
+    pipelineLabel: string;
     pipelines: DevicePipeline[];
     availablePipelines: PipelineId[];
     loadingPipelines?: boolean;
+    color?: string;
     onChange: (pipelines: DevicePipeline[]) => void;
-    pipelineLabel?: string;
 }
 
 const parseWeight = (weight: string | number | undefined): number => {
@@ -20,127 +19,104 @@ const parseWeight = (weight: string | number | undefined): number => {
 };
 
 export const PipelineTable: React.FC<PipelineTableProps> = ({
+    pipelineLabel,
     pipelines,
     availablePipelines,
     loadingPipelines = false,
+    color = 'var(--teal)',
     onChange,
-    pipelineLabel = 'Pipeline',
 }) => {
-    const pipelineOptions = useMemo(() => {
-        return availablePipelines
-            .filter(p => p.name)
-            .map(p => ({
-                value: p.name || '',
-                content: p.name || '',
-            }));
-    }, [availablePipelines]);
+    const pipelineOptions = useMemo(() => (
+        availablePipelines.filter(p => p.name).map(p => p.name || '')
+    ), [availablePipelines]);
 
-    const handlePipelineChange = useCallback((index: number, value: string[]) => {
-        if (value.length === 0) return;
-        const newPipelines = [...pipelines];
-        newPipelines[index] = {
-            ...newPipelines[index],
-            name: value[0],
-        };
-        onChange(newPipelines);
+    const handlePipelineChange = useCallback((index: number, value: string) => {
+        const next = [...pipelines];
+        next[index] = { ...next[index], name: value };
+        onChange(next);
     }, [pipelines, onChange]);
 
-    const handleWeightChange = useCallback((index: number, value: string) => {
-        const newWeight = parseInt(value, 10);
-        if (isNaN(newWeight) && value !== '') return;
-
-        const newPipelines = [...pipelines];
-        newPipelines[index] = {
-            ...newPipelines[index],
-            weight: value === '' ? 0 : newWeight,
-        };
-        onChange(newPipelines);
+    const handleWeightChange = useCallback((index: number, raw: string) => {
+        if (raw === '') {
+            const next = [...pipelines];
+            next[index] = { ...next[index], weight: 0 };
+            onChange(next);
+            return;
+        }
+        // Reject if the string contains a decimal point or is not a valid integer.
+        if (raw.includes('.') || raw.includes('e') || raw.includes('E')) {
+            return;
+        }
+        const n = parseInt(raw, 10);
+        if (isNaN(n)) {
+            return;
+        }
+        const next = [...pipelines];
+        next[index] = { ...next[index], weight: Math.max(0, n) };
+        onChange(next);
     }, [pipelines, onChange]);
 
     const handleRemove = useCallback((index: number) => {
-        const newPipelines = pipelines.filter((_, i) => i !== index);
-        onChange(newPipelines);
+        onChange(pipelines.filter((_, i) => i !== index));
     }, [pipelines, onChange]);
 
     const handleAdd = useCallback(() => {
-        const firstAvailable = availablePipelines[0]?.name || '';
-        const newPipeline: DevicePipeline = {
-            name: firstAvailable,
-            weight: 1,
-        };
-        onChange([...pipelines, newPipeline]);
-    }, [pipelines, availablePipelines, onChange]);
+        const firstName = pipelineOptions[0] || '';
+        onChange([...pipelines, { name: firstName, weight: 1 }]);
+    }, [pipelines, pipelineOptions, onChange]);
 
     return (
-        <Box className="pipeline-table">
-            <table className="pipeline-table__table">
-                <thead>
-                    <tr className="pipeline-table__header-row">
-                        <th className="pipeline-table__header-cell">
-                            {pipelineLabel}
-                        </th>
-                        <th className="pipeline-table__header-cell pipeline-table__header-cell--weight">
-                            Weight
-                        </th>
-                        <th className="pipeline-table__header-cell pipeline-table__header-cell--actions">
-                            <Button
-                                view="flat"
-                                size="s"
-                                onClick={handleAdd}
-                                disabled={loadingPipelines || pipelineOptions.length === 0}
+        <div className="dv-pipe-col">
+            <div className="dv-pipe-hd">
+                <span className="dv-pipe-hd-title">{pipelineLabel}</span>
+                <span className="dv-pipe-hd-weight">Weight</span>
+                <button
+                    className="dv-pipe-add"
+                    onClick={handleAdd}
+                    disabled={loadingPipelines || pipelineOptions.length === 0}
+                >
+                    <IconPlus size={12} /> Add
+                </button>
+            </div>
+
+            {pipelines.length === 0 ? (
+                <div className="dv-pipe-empty">No {pipelineLabel.toLowerCase()} pipelines attached.</div>
+            ) : (
+                pipelines.map((pipe, idx) => (
+                    <div key={idx} className="dv-pipe-row">
+                        <div className="dv-pipe-select">
+                            <span className="dv-pipe-tag" style={{ color }}>fn:</span>
+                            <select
+                                value={pipe.name || ''}
+                                onChange={e => handlePipelineChange(idx, e.target.value)}
+                                disabled={loadingPipelines}
                             >
-                                <Button.Icon>
-                                    <Plus />
-                                </Button.Icon>
-                                Add
-                            </Button>
-                        </th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {pipelines.length === 0 ? (
-                        <tr>
-                            <td colSpan={3} className="pipeline-table__empty-cell">
-                                No pipelines configured
-                            </td>
-                        </tr>
-                    ) : (
-                        pipelines.map((pipeline, index) => (
-                            <tr key={index} className="pipeline-table__body-row">
-                                <td className="pipeline-table__body-cell">
-                                    <Select
-                                        value={pipeline.name ? [pipeline.name] : []}
-                                        options={pipelineOptions}
-                                        onUpdate={(value) => handlePipelineChange(index, value)}
-                                        filterable
-                                        width="max"
-                                        disabled={loadingPipelines}
-                                    />
-                                </td>
-                                <td className="pipeline-table__body-cell">
-                                    <TextInput
-                                        value={String(parseWeight(pipeline.weight))}
-                                        onChange={(e) => handleWeightChange(index, e.target.value)}
-                                        size="m"
-                                        type="number"
-                                    />
-                                </td>
-                                <td className="pipeline-table__body-cell pipeline-table__body-cell--actions">
-                                    <Button
-                                        view="flat-danger"
-                                        size="s"
-                                        onClick={() => handleRemove(index)}
-                                    >
-                                        <Button.Icon>
-                                            <TrashBin />
-                                        </Button.Icon>
-                                    </Button>
-                                </td>
-                            </tr>
-                        ))
-                    )}
-                </tbody>
-            </table>
-        </Box>
+                                {pipelineOptions.map(name => (
+                                    <option key={name} value={name}>{name}</option>
+                                ))}
+                                {pipe.name && !pipelineOptions.includes(pipe.name) && (
+                                    <option value={pipe.name}>{pipe.name}</option>
+                                )}
+                            </select>
+                        </div>
+                        <input
+                            className="dv-pipe-weight mono"
+                            type="number"
+                            min={0}
+                            step={1}
+                            value={String(parseWeight(pipe.weight))}
+                            onChange={e => handleWeightChange(idx, e.target.value)}
+                        />
+                        <button
+                            className="dv-pipe-del"
+                            onClick={() => handleRemove(idx)}
+                            title="Remove pipeline"
+                        >
+                            <IconTrash size={13} />
+                        </button>
+                    </div>
+                ))
+            )}
+        </div>
     );
 };

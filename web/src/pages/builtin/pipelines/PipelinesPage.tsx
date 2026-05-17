@@ -76,14 +76,12 @@ const PipelinesPage = (): React.JSX.Element => {
                             <Icon data={Magnifier} size={16} />
                         </Flex>
                     }
-                    size="l"
                     hasClear
                     type="search"
                 />
             </div>
             <Button
                 view="action"
-                size="l"
                 onClick={() => setCreateDialogOpen(true)}
             >
                 <Icon data={Plus} size={16} />
