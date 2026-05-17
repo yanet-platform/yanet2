@@ -309,7 +309,7 @@ jobs:
         run: apt-get update
       - uses: awalsh128/cache-apt-pkgs-action@latest
         with:
-          packages: qemu-system-x86 qemu-utils genisoimage cloud-image-utils wget curl jq
+          packages: qemu-system-x86 qemu-utils genisoimage cloud-image-utils wget curl jq libpcap-dev
           version: 1.1
 
       - name: Configure system for QEMU
