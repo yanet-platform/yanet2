@@ -602,7 +602,7 @@ func testFrameworkSuite(t *testing.T, fw *framework.TestFramework) {
 				require.Contains(t, output, binary.path, "Binary file not found in listing")
 
 				// Check binary help
-				helpOutput, helpErr := fw.ExecuteCommand(binary.path + " --help")
+			helpOutput, helpErr := fw.ExecuteCommand("TERM=dumb " + binary.path + " --help")
 				require.NoError(t, helpErr, "Binary %s help check failed: %v", binary.name, helpErr)
 				require.NotEmpty(t, helpOutput, "Binary %s help check failed: %v", binary.name, helpErr)
 			})
