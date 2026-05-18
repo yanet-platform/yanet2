@@ -177,7 +177,6 @@ func (c *Converter) generateTestStepsInOrder(steps []ConvertedStep) string {
 
 		var receivedPackets []gopacket.Packet
 		for idx, pkt := range sendPackets {
-			t.Logf("Sending packet %%d of %%d from `+testCase.SendPcap+`", idx+1, len(sendPackets))
 			packetBytes := pkt.Data()
 
 			// Send packet

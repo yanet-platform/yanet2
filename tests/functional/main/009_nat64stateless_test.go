@@ -125,7 +125,6 @@ entries:
 
 			var receivedPackets []gopacket.Packet
 			for idx, pkt := range sendPackets {
-				t.Logf("Sending packet %d of %d from 001-send.pcap", idx+1, len(sendPackets))
 				packetBytes := pkt.Data()
 
 				// Send packet
@@ -175,7 +174,6 @@ entries:
 
 			var receivedPackets []gopacket.Packet
 			for idx, pkt := range sendPackets {
-				t.Logf("Sending packet %d of %d from 002-send.pcap", idx+1, len(sendPackets))
 				packetBytes := pkt.Data()
 
 				// Send packet
@@ -225,7 +223,6 @@ entries:
 
 			var receivedPackets []gopacket.Packet
 			for idx, pkt := range sendPackets {
-				t.Logf("Sending packet %d of %d from 007-send.pcap", idx+1, len(sendPackets))
 				packetBytes := pkt.Data()
 
 				// Send packet
@@ -275,7 +272,6 @@ entries:
 
 			var receivedPackets []gopacket.Packet
 			for idx, pkt := range sendPackets {
-				t.Logf("Sending packet %d of %d from 008-send.pcap", idx+1, len(sendPackets))
 				packetBytes := pkt.Data()
 
 				// Send packet
