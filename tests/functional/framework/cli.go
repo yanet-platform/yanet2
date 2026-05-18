@@ -135,10 +135,11 @@ func (c *CLIManager) ExecuteCommand(command string) (string, error) {
 
 	c.log.Debugf("DEBUG: Executing command in VM %s: %s", c.inner.qemu.Name, command)
 
-	// Clear the serial output buffer before issuing the command.
-	c.inner.qemu.resetSerialBuffer()
-
-	// Send command to VM with a unique marker for better parsing
+	// Send command to VM with a unique marker for better parsing.
+	// We do NOT reset the serial buffer here to avoid a race with the
+	// readSerial goroutine that may still be writing output from the
+	// previous command. The marker parser handles stale data by finding
+	// the LAST start marker before the end marker.
 	tm := time.Now().UnixNano()
 	commandMarker := fmt.Sprintf("CMD_START_%d", tm)
 	endMarker := fmt.Sprintf("CMD_END_%d", tm)
@@ -168,7 +169,6 @@ func (c *CLIManager) ExecuteCommandWithTimeout(command string, timeout time.Dura
 		return "", fmt.Errorf("failed to connect to QEMU serial console")
 	}
 	c.log.Debugf("DEBUG: Executing command in VM %s (timeout %v): %s", c.inner.qemu.Name, timeout, command)
-	c.inner.qemu.resetSerialBuffer()
 	tm := time.Now().UnixNano()
 	commandMarker := fmt.Sprintf("CMD_START_%d", tm)
 	endMarker := fmt.Sprintf("CMD_END_%d", tm)
@@ -242,8 +242,10 @@ func (c *CLIManager) waitForCommandCompletionWithMarkers(command, fullCommand, s
 	parseRetries := 0
 
 	for time.Now().Before(deadline) {
-		output := c.inner.qemu.serialBufferSnapshot()
-		output = strings.ReplaceAll(output, fullCommand, "")
+	output := c.inner.qemu.serialBufferSnapshot()
+	// Normalize \r\n → \n before stripping command echo so ReplaceAll
+	// matches even when the shell echoes the command with CRLF line endings.
+	output = strings.ReplaceAll(strings.ReplaceAll(output, "\r\n", "\n"), fullCommand, "")
 
 		// Look for start marker
 		if !foundStart && strings.Contains(output, startMarker) {
@@ -311,7 +313,9 @@ func (c *CLIManager) extractCommandOutputWithMarkers(output, startMarker, endMar
 		if strings.Contains(cleaned, startMarker) {
 			lastStartIdx = i
 		}
-		if strings.Contains(cleaned, endMarker) && lastStartIdx >= 0 {
+		// Require endIdx > lastStartIdx so the shell command echo (which
+		// contains both markers on the same line) does not fool the parser.
+		if strings.Contains(cleaned, endMarker) && lastStartIdx >= 0 && i > lastStartIdx {
 			endIdx = i
 			break
 		}
