@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	"github.com/yanet-platform/yanet2/common/commonpb"
 	"github.com/yanet-platform/yanet2/controlplane/ynpb"
 )
@@ -115,11 +118,10 @@ func (m *FunctionApplier) alreadyCorrect(ctx context.Context) (bool, error) {
 		},
 	})
 	if err != nil {
-		return false, fmt.Errorf(
-			"failed to get function %q: %w",
-			m.spec.Name,
-			err,
-		)
+		if status.Code(err) == codes.NotFound {
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to get function %q: %w", m.spec.Name, err)
 	}
 
 	for _, fc := range resp.GetFunction().GetChains() {
