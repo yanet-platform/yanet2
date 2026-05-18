@@ -1,6 +1,7 @@
 #include "agent.h"
 
 #include <linux/mman.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -10,11 +11,13 @@
 
 #include <errno.h>
 
+#include "api/counter.h"
 #include "common/memory.h"
 #include "common/memory_address.h"
 #include "common/memory_block.h"
 #include "common/strutils.h"
 
+#include "controlplane/config/cp_counter.h"
 #include "controlplane/config/cp_module.h"
 #include "controlplane/config/zone.h"
 #include "counters/counters.h"
@@ -1358,12 +1361,12 @@ cp_device_config_set_output_pipeline(
 
 // Check if counter name matches any query pattern.
 //
-// Returns true if query_count == -1 (return all) or name matches.
+// Returns true if query_count == 0 (return all) or name matches.
 static bool
 counter_name_matches_query(
 	const char *name, const char *const *query, size_t query_count
 ) {
-	if (query_count == (size_t)-1) {
+	if (query_count == (uint64_t)-1) {
 		return true;
 	}
 
@@ -1373,6 +1376,7 @@ counter_name_matches_query(
 			return true;
 		}
 	}
+
 	return false;
 }
 
