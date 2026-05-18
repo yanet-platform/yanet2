@@ -595,14 +595,13 @@ func testFrameworkSuite(t *testing.T, fw *framework.TestFramework) {
 
 		for _, binary := range cliBinaries {
 			fw.Run(binary.name, func(fw *framework.TestFramework, t *testing.T) {
-				// Check file existence
-				output, err := fw.ExecuteCommand("ls -la " + binary.path)
-				require.NoError(t, err, "⚠️  Binary %s check failed: %v", binary.name, err)
-				require.NotContainsf(t, output, "such", "⚠️  Binary %s not found: %v", binary.name)
-				require.Contains(t, output, binary.path, "Binary file not found in listing")
+				_, err := fw.ExecuteCommand("test -e " + binary.path)
+				require.NoError(t, err, "Binary %s not found at %s", binary.name, binary.path)
 
-				// Check binary help
-			helpOutput, helpErr := fw.ExecuteCommand("TERM=dumb " + binary.path + " --help")
+				_, err = fw.ExecuteCommand("test -x " + binary.path)
+				require.NoError(t, err, "Binary %s not executable", binary.name)
+
+				helpOutput, helpErr := fw.ExecuteCommand("TERM=dumb " + binary.path + " --help")
 				require.NoError(t, helpErr, "Binary %s help check failed: %v", binary.name, helpErr)
 				require.NotEmpty(t, helpOutput, "Binary %s help check failed: %v", binary.name, helpErr)
 			})
