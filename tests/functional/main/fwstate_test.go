@@ -163,6 +163,7 @@ func testFWStateListEntries(t *testing.T, fw *framework.TestFramework) {
 			framework.CLIFWState + " entries --name fwstate0 --batch 100 --direction backward --index 4294967295 --include-expired",
 		)
 		require.NoError(t, err, "list-entries backward failed")
+		require.NotEmpty(t, output, "backward listing returned empty output")
 		t.Log("Backward listing output:\n", output)
 
 		for _, e := range expectedEntries {

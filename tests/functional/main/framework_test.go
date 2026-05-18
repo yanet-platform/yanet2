@@ -600,9 +600,9 @@ func testFrameworkSuite(t *testing.T, fw *framework.TestFramework) {
 				_, err = fw.ExecuteCommand("test -x " + binary.path)
 				require.NoError(t, err, "Binary %s not executable", binary.name)
 
-				helpOutput, helpErr := fw.ExecuteCommand("TERM=dumb " + binary.path + " --help")
-				require.NoError(t, helpErr, "Binary %s help check failed: %v", binary.name, helpErr)
-				require.NotEmpty(t, helpOutput, "Binary %s help check failed: %v", binary.name, helpErr)
+				helpOutput, helpErr := fw.ExecuteCommand(binary.path + " --version")
+				require.NoError(t, helpErr, "Binary %s --version failed: %v", binary.name, helpErr)
+				require.NotEmpty(t, helpOutput, "Binary %s --version returned empty output", binary.name)
 			})
 		}
 
