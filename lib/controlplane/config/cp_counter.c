@@ -127,7 +127,7 @@ check_already_exists(
 		int equals = 1;
 		for (size_t j = 0; j < tag_count; ++j) {
 			if (strcmp(tags[j].key, cur->tags[j].key) != 0 ||
-			    strcmp(tags[j].value, cur->tags[j].value)) {
+			    strcmp(tags[j].value, cur->tags[j].value) != 0) {
 				equals = 0;
 				break;
 			}
@@ -152,7 +152,7 @@ cp_config_counter_storage_registry_insert(
 		yanet_error_add(err, "tag count exceeds max %d", MAX_TAG_COUNT);
 		return -1;
 	}
-	struct counter_tag tags[tag_count];
+	struct counter_tag tags[MAX_TAG_COUNT];
 	for (size_t i = 0; i < tag_count; ++i) {
 		tags[i].key = const_tags[i].key;
 		tags[i].value = const_tags[i].value;
@@ -244,7 +244,7 @@ cp_config_counter_storage_registry_find(
 		yanet_error_add(err, "tag count exceeds max %d", MAX_TAG_COUNT);
 		return NULL;
 	}
-	struct counter_tag tags[tag_count];
+	struct counter_tag tags[MAX_TAG_COUNT];
 	for (size_t i = 0; i < tag_count; ++i) {
 		tags[i].key = const_tags[i].key;
 		tags[i].value = const_tags[i].value;
