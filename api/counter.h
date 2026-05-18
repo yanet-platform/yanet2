@@ -9,24 +9,9 @@ struct dp_config;
 
 struct counter_value_handle;
 
-// Predicate kind for a counter_tag. The counter must not carry the tag
-// (counter_tag_absent), must carry the tag with any value
-// (counter_tag_present), or must carry the tag with the exact string
-// stored in tag.value (counter_tag_match).
-enum counter_tag_predicate {
-	counter_tag_absent,
-	counter_tag_present,
-	counter_tag_match
-};
-
-// A single predicate over a counter's tags. key names the tag, and
-// predicate selects which check to apply (see counter_tag_predicate).
-// The implementation reads tag.value only when predicate is
-// counter_tag_match.
 struct counter_tag {
 	const char *key;
 	const char *value;
-	enum counter_tag_predicate predicate;
 };
 
 struct counter_handle {
@@ -104,28 +89,21 @@ yanet_get_counter_value(
 // zero returns every counter known to the dataplane. tags and query
 // may be NULL when their respective counts are zero.
 //
-// Each counter_tag is a predicate against the counter's tags; see
-// counter_tag_predicate for the meaning of each predicate kind. The
-// counter_tag_absent predicate is how callers pin a counter to a
-// specific hierarchy level; for example,
-//     { .key = "device",   .value = "d1", .predicate = counter_tag_match  }
-//     { .key = "pipeline",                .predicate = counter_tag_absent }
-// selects counters of device "d1" only.
+// Each counter_tag is a predicate against the counter's tags, with
+// the check encoded in value: an empty string requires the tag to be
+// absent, "*" requires the tag to be present with any value, and any
+// other string requires the tag to be present with exactly that
+// value.
 //
 // Recognized keys are "device", "pipeline", "function", "chain",
-// "module_type", "module_name", "shard". The first six correspond
-// one-to-one with the path components of the typed yanet_get_*_counters
-// family. "shard" identifies the dataplane shard that holds the
-// counter; the value is an opaque coordinate and may change in future
-// versions. A counter is stored independently per shard, so to obtain
-// a single aggregate the caller must sum across all matching shards.
+// "module_type", "module_name", "shard". A counter is stored independently
+// per shard, so to obtain a single aggregate the caller must sum across
+// all matching shards.
 //
 // A tag is rejected with err filled and NULL returned if any of the
-// following holds: key is NULL; predicate is outside the
-// counter_tag_* set; predicate is counter_tag_match and value is
-// NULL; key is unrecognized; or tags contains another predicate with
-// the same key. Tag strings are borrowed only for the duration of the
-// call.
+// following holds: key is NULL; value is NULL; key is unrecognized;
+// or tags contains another predicate with the same key. Tag strings
+// are borrowed only for the duration of the call.
 //
 // The returned list must be released with yanet_counter_handle_list_free.
 // On failure NULL is returned and err is filled; an empty match is a
