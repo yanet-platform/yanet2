@@ -18,7 +18,7 @@ struct counter_handle {
 	char name[60];
 	uint64_t size;
 	uint64_t gen;
-	const struct counter_tag *tags;
+	struct counter_tag *tags;
 	size_t tag_count;
 	struct counter_value_handle *value_handle;
 };
@@ -85,9 +85,7 @@ yanet_get_counter_value(
 
 // Return counters that satisfy every predicate in tags and match at
 // least one name in query. Pass tag_count == 0 to impose no per-tag
-// constraint and query_count == 0 to match any name; passing both as
-// zero returns every counter known to the dataplane. tags and query
-// may be NULL when their respective counts are zero.
+// constraint and query_count == -1 to match any name.
 //
 // Each counter_tag is a predicate against the counter's tags, with
 // the check encoded in value: an empty string requires the tag to be
@@ -96,9 +94,7 @@ yanet_get_counter_value(
 // value.
 //
 // Recognized keys are "device", "pipeline", "function", "chain",
-// "module_type", "module_name", "shard". A counter is stored independently
-// per shard, so to obtain a single aggregate the caller must sum across
-// all matching shards.
+// "module_type", "module_name".
 //
 // A tag is rejected with err filled and NULL returned if any of the
 // following holds: key is NULL; value is NULL; key is unrecognized;

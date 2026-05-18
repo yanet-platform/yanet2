@@ -1,22 +1,55 @@
 #pragma once
 
+#include "api/counter.h"
 #include "counters/counters.h"
 
-#include "controlplane/config/defines.h"
-#include "controlplane/config/registry.h"
 #include "lib/errors/errors.h"
 
 struct memory_context;
 
+#define KEY_MAX_SIZE 80
+#define VALUE_MAX_SIZE 80
+#define MAX_TAG_COUNT 8
+
+struct cp_counter_tag {
+	char key[KEY_MAX_SIZE];
+	char value[VALUE_MAX_SIZE];
+};
+
+struct cp_counter_storage {
+	struct cp_counter_tag tags[MAX_TAG_COUNT];
+	size_t tag_count;
+	struct counter_storage *storage;
+};
+
 struct cp_config_counter_storage_registry {
 	struct memory_context *memory_context;
-	struct registry device_registry;
+	struct cp_counter_storage *items;
+	size_t count;
+	size_t capacity;
 };
 
 int
 cp_config_counter_storage_registry_init(
 	struct memory_context *memory_context,
 	struct cp_config_counter_storage_registry *registry,
+	yanet_error **err
+);
+
+int
+cp_config_counter_storage_registry_insert(
+	struct cp_config_counter_storage_registry *registry,
+	const struct counter_tag *tags,
+	size_t tag_count,
+	struct counter_storage *counter_storage,
+	yanet_error **err
+);
+
+struct cp_counter_storage **
+cp_config_counter_storage_registry_find(
+	struct cp_config_counter_storage_registry *registry,
+	const struct counter_tag *tags,
+	size_t tag_count,
 	yanet_error **err
 );
 
