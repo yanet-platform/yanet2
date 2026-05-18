@@ -11,11 +11,13 @@
 #include <errno.h>
 
 #include "common/memory.h"
+#include "common/memory_address.h"
 #include "common/memory_block.h"
 #include "common/strutils.h"
 
 #include "controlplane/config/cp_module.h"
 #include "controlplane/config/zone.h"
+#include "counters/counters.h"
 #include "dataplane/config/zone.h"
 
 #include "lib/errors/errors.h"
@@ -1399,33 +1401,17 @@ yanet_get_module_counters(
 	);
 }
 
-struct counter_storage_view {
-	struct counter_storage *storage;
-	struct counter *names;
-	uint64_t count;
-};
-
-static struct counter_storage_view
-cp_counter_storage_view(struct cp_counter_storage *item) {
-	struct counter_storage *storage = ADDR_OF(&item->storage);
-	struct counter_registry *reg = ADDR_OF(&storage->registry);
-	return (struct counter_storage_view){
-		.storage = storage,
-		.names = ADDR_OF(&reg->names),
-		.count = reg->count,
-	};
-}
-
 static size_t
-cp_counter_storage_count_matches(
-	struct counter_storage_view view,
+counter_registry_match_count(
+	struct counter_registry *registry,
 	const char *const *query,
 	size_t query_count
 ) {
+	struct counter *counters = ADDR_OF(&registry->names);
 	size_t matches = 0;
-	for (uint64_t i = 0; i < view.count; ++i) {
+	for (uint64_t i = 0; i < registry->count; ++i) {
 		if (counter_name_matches_query(
-			    view.names[i].name, query, query_count
+			    counters[i].name, query, query_count
 		    )) {
 			++matches;
 		}
@@ -1447,17 +1433,19 @@ cp_counter_storage_copy_tags(const struct cp_counter_storage *storage) {
 }
 
 static void
-fill_handle(
+fill_counter_handle(
 	struct counter_handle *dst,
-	struct counter_storage_view view,
+	struct counter_storage *counter_storage,
 	uint64_t idx,
 	struct counter_tag *tags,
 	size_t tag_count
 ) {
-	strtcpy(dst->name, view.names[idx].name, sizeof(dst->name));
-	dst->size = view.names[idx].size;
-	dst->gen = view.names[idx].gen;
-	dst->value_handle = counter_get_value_handle(idx, view.storage);
+	struct counter_registry *reg = ADDR_OF(&counter_storage->registry);
+	struct counter *counters = ADDR_OF(&reg->names);
+	strtcpy(dst->name, counters[idx].name, sizeof(dst->name));
+	dst->size = counters[idx].size;
+	dst->gen = counters[idx].gen;
+	dst->value_handle = counter_get_value_handle(idx, counter_storage);
 	dst->tags = tags;
 	dst->tag_count = tag_count;
 }
@@ -1491,8 +1479,10 @@ yanet_get_counters_by_tags(
 
 	size_t match_count = 0;
 	for (size_t i = 0; storages[i] != NULL; ++i) {
-		match_count += cp_counter_storage_count_matches(
-			cp_counter_storage_view(storages[i]), query, query_count
+		struct counter_storage *storage =
+			ADDR_OF(&storages[i]->storage);
+		match_count += counter_registry_match_count(
+			ADDR_OF(&storage->registry), query, query_count
 		);
 	}
 
@@ -1510,32 +1500,32 @@ yanet_get_counters_by_tags(
 
 	size_t next = 0;
 	for (size_t i = 0; storages[i] != NULL; ++i) {
-		struct cp_counter_storage *storage = storages[i];
-		struct counter_storage_view storage_view =
-			cp_counter_storage_view(storage);
+		struct cp_counter_storage *cp_storage = storages[i];
+		struct counter_storage *storage = ADDR_OF(&cp_storage->storage);
+		struct counter_registry *registry = ADDR_OF(&storage->registry);
+		struct counter *counters = ADDR_OF(&registry->names);
 		struct counter_tag *storage_tags = NULL;
-		for (uint64_t idx = 0; idx < storage_view.count; ++idx) {
+		for (uint64_t idx = 0; idx < registry->count; ++idx) {
 			if (!counter_name_matches_query(
-				    storage_view.names[idx].name,
-				    query,
-				    query_count
+				    counters[idx].name, query, query_count
 			    )) {
 				continue;
 			}
 			if (storage_tags == NULL) {
 				storage_tags =
-					cp_counter_storage_copy_tags(storage);
+					cp_counter_storage_copy_tags(cp_storage
+					);
 				if (storage_tags == NULL) {
 					yanet_error_add(err, "malloc failed");
 					goto err_list;
 				}
 			}
-			fill_handle(
+			fill_counter_handle(
 				&list->counters[next++],
-				storage_view,
+				storage,
 				idx,
 				storage_tags,
-				storage->tag_count
+				cp_storage->tag_count
 			);
 		}
 	}
