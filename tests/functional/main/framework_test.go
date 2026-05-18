@@ -568,11 +568,10 @@ func testFrameworkSuite(t *testing.T, fw *framework.TestFramework) {
 
 		for _, dir := range directories {
 			fw.Run("check_"+strings.ReplaceAll(dir, "/", "_"), func(fw *framework.TestFramework, t *testing.T) {
-				output, err := fw.ExecuteCommand("ls -la " + dir)
-				require.NoError(t, err, "Failed to list directory %s", dir)
-				require.NotEmpty(t, output, "Directory %s appears to be empty", dir)
-				require.NotContains(t, output, "such")
-				output, err = fw.ExecuteCommand("mount | grep " + dir)
+				_, err := fw.ExecuteCommand("test -d " + dir)
+				require.NoError(t, err, "Directory %s does not exist", dir)
+
+				output, err := fw.ExecuteCommand("mount | grep " + dir)
 				require.NoError(t, err, "Failed to check mount point %s", dir)
 				require.NotEmpty(t, output, "Mount point %s not found", dir)
 			})
@@ -615,9 +614,11 @@ func testFrameworkSuite(t *testing.T, fw *framework.TestFramework) {
 			}
 
 			for _, component := range components {
-				output, err := fw.ExecuteCommand("ls -la " + component)
+				_, err := fw.ExecuteCommand("test -e " + component)
 				require.NoError(t, err, "Component %s not found", component)
-				require.NotContains(t, output, "such")
+
+				_, err = fw.ExecuteCommand("test -x " + component)
+				require.NoError(t, err, "Component %s not executable", component)
 			}
 		})
 	})
