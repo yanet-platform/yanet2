@@ -1372,7 +1372,6 @@ counter_name_matches_query(
 			return true;
 		}
 	}
-
 	return false;
 }
 
