@@ -314,15 +314,15 @@ worker_loop_round(struct dataplane_worker *worker) {
 	uint64_t device_count =
 		cp_config_gen->device_registry.registry.capacity;
 
+	struct packet_front schedule_input[device_count];
+	for (uint64_t idx = 0; idx < device_count; ++idx)
+		packet_front_init(schedule_input + idx);
+
+	struct packet_front schedule_output[device_count];
+	for (uint64_t idx = 0; idx < device_count; ++idx)
+		packet_front_init(schedule_output + idx);
+
 	while (1) {
-
-		struct packet_front schedule_input[device_count];
-		for (uint64_t idx = 0; idx < device_count; ++idx)
-			packet_front_init(schedule_input + idx);
-
-		struct packet_front schedule_output[device_count];
-		for (uint64_t idx = 0; idx < device_count; ++idx)
-			packet_front_init(schedule_output + idx);
 
 		struct packet *packet;
 
