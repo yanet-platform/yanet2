@@ -178,7 +178,13 @@ cp_config_counter_storage_registry_insert(
 		}
 		struct cp_counter_storage *prev_items =
 			ADDR_OF(&registry->items);
-		memcpy(items, prev_items, registry->count * sizeof(*items));
+		for (size_t i = 0; i < registry->count; ++i) {
+			struct cp_counter_storage *dst = items + i;
+			struct cp_counter_storage *src = prev_items + i;
+			memcpy(dst->tags, src->tags, sizeof(dst->tags));
+			dst->tag_count = src->tag_count;
+			EQUATE_OFFSET(&dst->storage, &src->storage);
+		}
 		memory_bfree(
 			mctx, prev_items, registry->count * sizeof(*items)
 		);
