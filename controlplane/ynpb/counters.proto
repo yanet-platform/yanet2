@@ -12,7 +12,25 @@ service CountersService {
   rpc Chain(ChainCountersRequest) returns (CountersResponse) {}
   rpc Module(ModuleCountersRequest) returns (CountersResponse) {}
   rpc Perf(PerfCountersRequest) returns (PerfCountersResponse) {}
+  rpc ByTags(CountersByTagsRequest) returns (CountersByTagsResponse) {}
 }
+
+message CounterTag {
+  string key = 1;
+  string value = 2;
+}
+
+message CountersByTagsRequest {
+  repeated CounterTag tags = 1;
+  repeated string query = 2;
+}
+
+message CounterGroup {
+  repeated CounterTag tags = 1;
+  repeated CounterInfo counters = 2;
+}
+
+message CountersByTagsResponse { repeated CounterGroup groups = 1; }
 
 message DeviceCountersRequest { string device = 1; }
 

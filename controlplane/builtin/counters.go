@@ -196,3 +196,44 @@ func (m *Counters) Perf(
 
 	return response, nil
 }
+
+// ByTags returns counters grouped by tag set, filtered by the request's
+// tag and query predicates.
+func (m *Counters) ByTags(
+	ctx context.Context,
+	request *ynpb.CountersByTagsRequest,
+) (*ynpb.CountersByTagsResponse, error) {
+	reqTags := request.GetTags()
+	tags := make([]ffi.CounterTag, len(reqTags))
+	for idx, tag := range reqTags {
+		tags[idx] = ffi.CounterTag{
+			Key:   tag.GetKey(),
+			Value: tag.GetValue(),
+		}
+	}
+
+	dpConfig := m.shm.DPConfig(m.instanceID)
+	groups, err := dpConfig.CountersByTags(tags, request.GetQuery())
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ynpb.CountersByTagsResponse{
+		Groups: make([]*ynpb.CounterGroup, 0, len(groups)),
+	}
+	for _, group := range groups {
+		pbTags := make([]*ynpb.CounterTag, 0, len(group.Tags))
+		for _, tag := range group.Tags {
+			pbTags = append(pbTags, &ynpb.CounterTag{
+				Key:   tag.Key,
+				Value: tag.Value,
+			})
+		}
+		response.Groups = append(response.Groups, &ynpb.CounterGroup{
+			Tags:     pbTags,
+			Counters: m.encodeCounters(group.Counters),
+		})
+	}
+
+	return response, nil
+}

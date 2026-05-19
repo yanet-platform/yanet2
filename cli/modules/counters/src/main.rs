@@ -11,9 +11,9 @@ use ync::{
     logging,
 };
 use ynpb::pb::{
-    counters_service_client::CountersServiceClient, ChainCountersRequest, DeviceCountersRequest,
-    FunctionCountersRequest, LatencyRangeCounter, ModuleCountersRequest, PerfCounter, PerfCountersRequest,
-    PerfCountersResponse, PipelineCountersRequest,
+    counters_service_client::CountersServiceClient, ChainCountersRequest, CounterTag, CountersByTagsRequest,
+    DeviceCountersRequest, FunctionCountersRequest, LatencyRangeCounter, ModuleCountersRequest, PerfCounter,
+    PerfCountersRequest, PerfCountersResponse, PipelineCountersRequest,
 };
 
 /// Counters module - displays counters information.
@@ -22,12 +22,65 @@ use ynpb::pb::{
 #[command(flatten_help = true)]
 pub struct Cmd {
     #[clap(subcommand)]
-    pub mode: ModeCmd,
+    pub mode: Option<ModeCmd>,
+    #[command(flatten)]
+    pub by_tags: ByTagsCmd,
     #[command(flatten)]
     pub connection: ConnectionArgs,
     /// Be verbose in terms of logging.
     #[clap(short, action = ArgAction::Count, global = true)]
     pub verbose: u8,
+}
+
+#[derive(Debug, Clone, Parser, Default)]
+pub struct ByTagsCmd {
+    #[arg(short, long = "name")]
+    pub names: Vec<String>,
+    #[arg(short, long)]
+    pub device: Option<String>,
+    #[arg(short, long)]
+    pub pipeline: Option<String>,
+    #[arg(short, long)]
+    pub function: Option<String>,
+    #[arg(short, long)]
+    pub chain: Option<String>,
+    #[arg(short = 't', long)]
+    pub module_type: Option<String>,
+    #[arg(short = 'm', long)]
+    pub module_name: Option<String>,
+}
+
+impl From<ByTagsCmd> for CountersByTagsRequest {
+    fn from(cmd: ByTagsCmd) -> Self {
+        let mut tags = Vec::new();
+
+        if let Some(value) = cmd.device {
+            tags.push(CounterTag { key: "device".to_string(), value });
+        }
+        if let Some(value) = cmd.pipeline {
+            tags.push(CounterTag { key: "pipeline".to_string(), value });
+        }
+        if let Some(value) = cmd.function {
+            tags.push(CounterTag { key: "function".to_string(), value });
+        }
+        if let Some(value) = cmd.chain {
+            tags.push(CounterTag { key: "chain".to_string(), value });
+        }
+        if let Some(value) = cmd.module_type {
+            tags.push(CounterTag {
+                key: "module_type".to_string(),
+                value,
+            });
+        }
+        if let Some(value) = cmd.module_name {
+            tags.push(CounterTag {
+                key: "module_name".to_string(),
+                value,
+            });
+        }
+
+        Self { tags, query: cmd.names }
+    }
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -137,19 +190,20 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
     let mut service = CountersService::new(&cmd.connection).await?;
 
     match cmd.mode {
-        ModeCmd::Device(cmd) => service.show_device(cmd.device_name).await?,
-        ModeCmd::Pipeline(cmd) => service.show_pipeline(cmd.device_name, cmd.pipeline_name).await?,
-        ModeCmd::Function(cmd) => {
+        None => service.show_by_tags(cmd.by_tags.into()).await?,
+        Some(ModeCmd::Device(cmd)) => service.show_device(cmd.device_name).await?,
+        Some(ModeCmd::Pipeline(cmd)) => service.show_pipeline(cmd.device_name, cmd.pipeline_name).await?,
+        Some(ModeCmd::Function(cmd)) => {
             service
                 .show_function(cmd.device_name, cmd.pipeline_name, cmd.function_name)
                 .await?
         }
-        ModeCmd::Chain(cmd) => {
+        Some(ModeCmd::Chain(cmd)) => {
             service
                 .show_chain(cmd.device_name, cmd.pipeline_name, cmd.function_name, cmd.chain_name)
                 .await?
         }
-        ModeCmd::Module(cmd) => {
+        Some(ModeCmd::Module(cmd)) => {
             service
                 .show_module(
                     cmd.device_name,
@@ -161,7 +215,7 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
                 )
                 .await?
         }
-        ModeCmd::Perf(cmd) => {
+        Some(ModeCmd::Perf(cmd)) => {
             // Parse module format: module_type:module_name
             let parts: Vec<&str> = cmd.module.split(':').collect();
             if parts.len() != 2 {
@@ -201,6 +255,12 @@ impl CountersService {
             .send_compressed(CompressionEncoding::Gzip)
             .accept_compressed(CompressionEncoding::Gzip);
         Ok(Self { client })
+    }
+
+    pub async fn show_by_tags(&mut self, request: CountersByTagsRequest) -> Result<(), Box<dyn Error>> {
+        let response = self.client.by_tags(request).await?;
+        println!("{}", serde_json::to_string(response.get_ref())?);
+        Ok(())
     }
 
     pub async fn show_device(&mut self, device_name: String) -> Result<(), Box<dyn Error>> {
