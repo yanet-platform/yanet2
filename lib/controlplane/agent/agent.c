@@ -1652,6 +1652,9 @@ yanet_get_worker_counters(struct dp_config *dp_config) {
 
 void
 yanet_counter_handle_list_free(struct counter_handle_list *counters) {
+	if (counters == NULL) {
+		return;
+	}
 	struct counter_handle *handles = counters->counters;
 	for (size_t i = 0; i < counters->count; ++i) {
 		if (i == 0 || handles[i].tags != handles[i - 1].tags) {
