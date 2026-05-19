@@ -1,25 +1,9 @@
 import React, { memo, useCallback } from 'react';
 import type { FunctionRef, DragPayload } from '../types';
 import { Sparkline, useSparklineHistory } from '../../_shared/lane-editor';
+import { TrashIcon } from '../../_shared/icons';
 import { formatPps } from '../../../../utils';
 import type { InterpolatedCounterData } from '../../../../hooks';
-
-/** Small trash icon. */
-const TrashIcon = (): React.JSX.Element => (
-    <svg
-        width="12"
-        height="12"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        aria-hidden="true"
-    >
-        <path d="M5 7h14M9 7V5h6v2M7 7l1 12h8l1-12" />
-    </svg>
-);
 
 /** Small pencil icon. */
 const PencilIcon = (): React.JSX.Element => (
@@ -121,7 +105,7 @@ export const FunctionRefCard: React.FC<FunctionRefCardProps> = memo(({
                         title="Remove function reference"
                         aria-label="Remove function reference"
                     >
-                        <TrashIcon />
+                        <TrashIcon size={12} />
                     </button>
                 </div>
                 <div className="pl-ref-card__sparkline-row">

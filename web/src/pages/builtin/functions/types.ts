@@ -49,7 +49,4 @@ export type FunctionsAction =
     | { type: 'UPDATE_MODULE_CONFIG'; fnId: string; moduleId: string; patch: Partial<Module> }
     | { type: 'UPDATE_CHAIN';         fnId: string; chainId: string; patch: Partial<Chain> }
     | { type: 'ADD_CHAIN';            fnId: string; chain: Chain; toIdx?: number }
-    | { type: 'REMOVE_CHAIN';         fnId: string; chainId: string }
-    | { type: 'ADD_FUNCTION';         fn: NetworkFunction }
-    | { type: 'REMOVE_FUNCTION';      fnId: string }
-    | { type: 'LOAD_FUNCTION';        fn: NetworkFunction };
+    | { type: 'REMOVE_CHAIN';         fnId: string; chainId: string };

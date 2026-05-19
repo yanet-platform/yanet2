@@ -1,59 +1,31 @@
 import type { Pipeline, PipelinesAction } from './types';
 import { localToApi } from './wire';
+import type { EntityState, BaseEntityAction } from '../_shared/editableEntityStore';
+import {
+    createInitialEntityState,
+    applyEntityUpdate,
+    handleBaseEntityAction,
+} from '../_shared/editableEntityStore';
 
-export interface PipelinesState {
-    /** Server-authoritative snapshots, keyed by pipeline id. */
-    server: Record<string, Pipeline>;
-    /** Local edited state, keyed by pipeline id. */
-    local: Record<string, Pipeline>;
-    /** Which pipeline ids have unsaved edits. */
-    dirty: Set<string>;
-}
+export type PipelinesState = EntityState<Pipeline>;
 
-export const initialState: PipelinesState = {
-    server: {},
-    local: {},
-    dirty: new Set(),
-};
+export const initialState: PipelinesState = createInitialEntityState<Pipeline>();
 
 const findPipeline = (state: PipelinesState, pipelineId: string): Pipeline | undefined =>
     state.local[pipelineId];
 
-/** Returns true when the local pipeline differs from the server snapshot. */
-const isDirty = (updated: Pipeline, server: Pipeline | undefined): boolean => {
-    if (!server) {
-        return true;
-    }
-    return JSON.stringify(localToApi(updated)) !== JSON.stringify(localToApi(server));
-};
+const updatePipeline = (state: PipelinesState, pipelineId: string, updated: Pipeline): PipelinesState =>
+    applyEntityUpdate(state, pipelineId, updated, localToApi);
 
-const updatePipeline = (state: PipelinesState, pipelineId: string, updated: Pipeline): PipelinesState => {
-    const dirty = new Set(state.dirty);
-    if (isDirty(updated, state.server[pipelineId])) {
-        dirty.add(pipelineId);
-    } else {
-        dirty.delete(pipelineId);
-    }
-    return {
-        ...state,
-        local: { ...state.local, [pipelineId]: updated },
-        dirty,
-    };
-};
-
-export const pipelinesReducer = (state: PipelinesState, action: PipelinesAction): PipelinesState => {
+export const pipelinesReducer = (
+    state: PipelinesState,
+    action: PipelinesAction | BaseEntityAction<Pipeline>,
+): PipelinesState => {
     switch (action.type) {
-        case 'LOAD_PIPELINE': {
-            const pl = action.pipeline;
-            const dirty = new Set(state.dirty);
-            dirty.delete(pl.id);
-            return {
-                ...state,
-                server: { ...state.server, [pl.id]: pl },
-                local: { ...state.local, [pl.id]: pl },
-                dirty,
-            };
-        }
+        case 'LOAD_ENTITY':
+        case 'ADD_ENTITY':
+        case 'REMOVE_ENTITY':
+            return handleBaseEntityAction(state, action as BaseEntityAction<Pipeline>);
 
         case 'MOVE_FUNCTION_REF': {
             const pl = findPipeline(state, action.pipelineId);
@@ -70,8 +42,6 @@ export const pipelinesReducer = (state: PipelinesState, action: PipelinesAction)
             }
             const refs = [...pl.functions];
             const [moved] = refs.splice(fromIdx, 1);
-            // proof: fromIdx < toIdx → insert position after removal = toIdx - 1.
-            //        fromIdx > toIdx → insert position unchanged = toIdx.
             const insertAt = fromIdx < toIdx ? toIdx - 1 : toIdx;
             refs.splice(insertAt, 0, moved);
             return updatePipeline(state, action.pipelineId, { ...pl, functions: refs });
@@ -113,50 +83,7 @@ export const pipelinesReducer = (state: PipelinesState, action: PipelinesAction)
             return updatePipeline(state, action.pipelineId, updated);
         }
 
-        case 'ADD_PIPELINE': {
-            const pl = action.pipeline;
-            return {
-                ...state,
-                server: { ...state.server, [pl.id]: pl },
-                local: { ...state.local, [pl.id]: pl },
-            };
-        }
-
-        case 'REMOVE_PIPELINE': {
-            const { [action.pipelineId]: _s, ...serverRest } = state.server;
-            const { [action.pipelineId]: _l, ...localRest } = state.local;
-            const dirty = new Set(state.dirty);
-            dirty.delete(action.pipelineId);
-            return { server: serverRest, local: localRest, dirty };
-        }
-
         default:
             return state;
     }
-};
-
-/** Mark a pipeline as clean (after successful save). */
-export const markClean = (state: PipelinesState, pipelineId: string): PipelinesState => {
-    const dirty = new Set(state.dirty);
-    dirty.delete(pipelineId);
-    return {
-        ...state,
-        server: { ...state.server, [pipelineId]: state.local[pipelineId] },
-        dirty,
-    };
-};
-
-/** Discard local edits for a pipeline, reverting to server snapshot. */
-export const discardEdits = (state: PipelinesState, pipelineId: string): PipelinesState => {
-    const server = state.server[pipelineId];
-    if (!server) {
-        return state;
-    }
-    const dirty = new Set(state.dirty);
-    dirty.delete(pipelineId);
-    return {
-        ...state,
-        local: { ...state.local, [pipelineId]: server },
-        dirty,
-    };
 };

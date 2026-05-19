@@ -65,6 +65,7 @@ const MainMenu = ({ currentPage, onPageChange, renderContent, disabled = false }
         createDivider('__div_1'),
         createSectionHeader('__section_modules', 'Modules'),
         createMenuItem('modules/forward', 'Forward', ArrowRight),
+        createMenuItem('modules/forward-ng', 'Forward (NG)', ArrowRight),
         createMenuItem('modules/decap', 'Decap', LayoutCellsLarge),
         createMenuItem('modules/acl', 'ACL', Shield),
         createMenuItem('modules/pdump', 'Pdump', CirclePlay),

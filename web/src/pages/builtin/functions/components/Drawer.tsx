@@ -3,6 +3,7 @@ import type { Module, Chain } from '../types';
 import { metaFor } from '../moduleMeta';
 import { InlineEdit } from './InlineEdit';
 import { Sparkline, useSparklineHistory } from '../../_shared/lane-editor';
+import { CloseIcon, TrashIcon } from '../../_shared/icons';
 import { formatPps, formatBps } from '../../../../utils';
 import { ConfirmDialog } from '../../../../components';
 import type { InterpolatedCounterData } from '../../../../hooks';
@@ -33,20 +34,6 @@ interface DrawerChainProps {
 }
 
 type DrawerProps = DrawerModuleProps | DrawerChainProps;
-
-/** X close icon. */
-const CloseIcon = (): React.JSX.Element => (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <path d="M6 6l12 12M6 18 18 6" />
-    </svg>
-);
-
-/** Trash icon. */
-const TrashIcon = (): React.JSX.Element => (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <path d="M5 7h14M9 7V5h6v2M7 7l1 12h8l1-12" />
-    </svg>
-);
 
 /** Up arrow icon for module reorder. */
 const UpIcon = (): React.JSX.Element => (

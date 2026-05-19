@@ -17,7 +17,4 @@ export type PipelinesAction =
     | { type: 'MOVE_FUNCTION_REF';   pipelineId: string; refId: string; toIdx: number }
     | { type: 'ADD_FUNCTION_REF';    pipelineId: string; toIdx: number; ref: FunctionRef }
     | { type: 'REMOVE_FUNCTION_REF'; pipelineId: string; refId: string }
-    | { type: 'UPDATE_FUNCTION_REF'; pipelineId: string; refId: string; name: string }
-    | { type: 'ADD_PIPELINE';        pipeline: Pipeline }
-    | { type: 'REMOVE_PIPELINE';     pipelineId: string }
-    | { type: 'LOAD_PIPELINE';       pipeline: Pipeline };
+    | { type: 'UPDATE_FUNCTION_REF'; pipelineId: string; refId: string; name: string };

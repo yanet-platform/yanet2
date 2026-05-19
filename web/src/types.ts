@@ -6,6 +6,7 @@ export const PAGE_IDS = [
     'builtin/pipelines',
     'builtin/devices',
     'modules/forward',
+    'modules/forward-ng',
     'modules/decap',
     'modules/acl',
     'modules/pdump',

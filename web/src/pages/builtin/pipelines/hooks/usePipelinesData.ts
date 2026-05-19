@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useReducer, useState } from 'react';
+import { useCallback } from 'react';
 import { API } from '../../../../api';
 import { toaster } from '../../../../utils';
 import type { Pipeline, PipelinesAction } from '../types';
 import type { FunctionId } from '../../../../api/pipelines';
-import { pipelinesReducer, initialState, discardEdits } from '../reducer';
+import { pipelinesReducer, initialState } from '../reducer';
 import { apiToLocal, localToApi } from '../wire';
+import { useEditableEntityStore } from '../../_shared/editableEntityStore';
 
 export interface UsePipelinesDataResult {
     pipelines: Pipeline[];
@@ -24,81 +25,51 @@ export interface UsePipelinesDataResult {
  * and exposes per-pipeline save/discard/create operations.
  */
 export const usePipelinesData = (): UsePipelinesDataResult => {
-    const [state, rawDispatch] = useReducer(pipelinesReducer, initialState);
-    const [loading, setLoading] = useState(true);
-    const [pipelineIds, setPipelineIds] = useState<string[]>([]);
+    const store = useEditableEntityStore({
+        reducer: pipelinesReducer,
+        initialState,
+        api: API.pipelines,
+        getIds: resp => resp.ids ?? [],
+        idName: id => id.name ?? '',
+        getEntity: resp => resp.pipeline,
+        apiToLocal,
+        localToApi,
+        makeUpdateRequest: pl => ({ pipeline: pl }),
+        makeDeleteRequest: name => ({ id: { name } }),
+        makeCreateRequest: name => ({ pipeline: { id: { name }, functions: [] } }),
+        toastPrefix: 'pl',
+        entityLabel: 'Pipeline',
+    });
 
-    const dispatch = useCallback((action: PipelinesAction) => {
-        rawDispatch(action);
-    }, []);
+    const getServerPipeline = useCallback(
+        (pipelineId: string): Pipeline | null => store.getServer(pipelineId),
+        [store.getServer],
+    );
 
-    const load = useCallback(async (): Promise<void> => {
-        setLoading(true);
-        try {
-            const listResp = await API.pipelines.list({});
-            const ids = listResp.ids ?? [];
-            const names = ids.map(id => id.name ?? '').filter(Boolean);
-            setPipelineIds(names);
+    const savePipeline = useCallback(
+        (pipelineId: string): Promise<void> => store.save(pipelineId),
+        [store.save],
+    );
 
-            await Promise.all(ids.map(async (pid) => {
-                try {
-                    const resp = await API.pipelines.get({ id: pid });
-                    if (resp.pipeline) {
-                        rawDispatch({ type: 'LOAD_PIPELINE', pipeline: apiToLocal(resp.pipeline) });
-                    }
-                } catch (err) {
-                    toaster.error('pl-load', `Failed to load pipeline ${pid.name}`, err);
-                }
-            }));
-        } catch (err) {
-            toaster.error('pl-list', 'Failed to load pipelines', err);
-        } finally {
-            setLoading(false);
-        }
-    }, []);
+    const discardPipeline = useCallback(
+        (pipelineId: string): void => store.discard(pipelineId),
+        [store.discard],
+    );
 
-    useEffect(() => {
-        load();
-    }, [load]);
+    const isDirty = useCallback(
+        (pipelineId: string): boolean => store.isDirty(pipelineId),
+        [store.isDirty],
+    );
 
-    const savePipeline = useCallback(async (pipelineId: string): Promise<void> => {
-        const pl = state.local[pipelineId];
-        if (!pl) {
-            return;
-        }
-        try {
-            await API.pipelines.update({ pipeline: localToApi(pl) });
-            rawDispatch({ type: 'LOAD_PIPELINE', pipeline: pl });
-            toaster.success(`pl-save-${pipelineId}`, `Pipeline "${pipelineId}" saved.`);
-        } catch (err) {
-            toaster.error(`pl-save-err-${pipelineId}`, `Failed to save "${pipelineId}"`, err);
-        }
-    }, [state.local]);
+    const createPipeline = useCallback(
+        (name: string): Promise<boolean> => store.create(name),
+        [store.create],
+    );
 
-    const discardPipeline = useCallback((pipelineId: string): void => {
-        const next = discardEdits(state, pipelineId);
-        const reverted = next.local[pipelineId];
-        if (reverted) {
-            rawDispatch({ type: 'LOAD_PIPELINE', pipeline: reverted });
-        }
-    }, [state]);
-
-    const isDirty = useCallback((pipelineId: string): boolean => state.dirty.has(pipelineId), [state.dirty]);
-
-    const getServerPipeline = useCallback((pipelineId: string): Pipeline | null =>
-        state.server[pipelineId] ?? null, [state.server]);
-
-    const createPipeline = useCallback(async (name: string): Promise<boolean> => {
-        try {
-            await API.pipelines.update({ pipeline: { id: { name }, functions: [] } });
-            await load();
-            toaster.success(`pl-create-${name}`, `Pipeline "${name}" created.`);
-            return true;
-        } catch (err) {
-            toaster.error(`pl-create-err-${name}`, `Failed to create "${name}"`, err);
-            return false;
-        }
-    }, [load]);
+    const deletePipeline = useCallback(
+        (pipelineId: string): Promise<boolean> => store.remove(pipelineId),
+        [store.remove],
+    );
 
     const loadFunctionList = useCallback(async (): Promise<FunctionId[]> => {
         try {
@@ -110,22 +81,16 @@ export const usePipelinesData = (): UsePipelinesDataResult => {
         }
     }, []);
 
-    const deletePipeline = useCallback(async (pipelineId: string): Promise<boolean> => {
-        try {
-            await API.pipelines.delete({ id: { name: pipelineId } });
-            rawDispatch({ type: 'REMOVE_PIPELINE', pipelineId });
-            setPipelineIds(prev => prev.filter(id => id !== pipelineId));
-            toaster.success(`pl-delete-${pipelineId}`, `Pipeline "${pipelineId}" deleted.`);
-            return true;
-        } catch (err) {
-            toaster.error(`pl-delete-err-${pipelineId}`, `Failed to delete "${pipelineId}"`, err);
-            return false;
-        }
-    }, []);
-
-    const pipelines = pipelineIds
-        .map(id => state.local[id])
-        .filter((p): p is Pipeline => !!p);
-
-    return { pipelines, loading, isDirty, getServerPipeline, dispatch, savePipeline, discardPipeline, createPipeline, deletePipeline, loadFunctionList };
+    return {
+        pipelines: store.entities,
+        loading: store.loading,
+        isDirty,
+        getServerPipeline,
+        dispatch: store.dispatch,
+        savePipeline,
+        discardPipeline,
+        createPipeline,
+        deletePipeline,
+        loadFunctionList,
+    };
 };
