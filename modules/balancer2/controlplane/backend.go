@@ -59,9 +59,9 @@ func build(
 		return nil, nil, fmt.Errorf("create balancer: %w", err)
 	}
 	for _, slot := range index {
-		if err := pushVSRealState(handle, uint32(slot.idx), slot); err != nil {
+		if err := prepareVSReals(handle, uint32(slot.idx), slot); err != nil {
 			handle.Free(agent)
-			return nil, nil, fmt.Errorf("seed real state: %w", err)
+			return nil, nil, fmt.Errorf("set real states: %w", err)
 		}
 	}
 	if err := handle.Install(agent); err != nil {
@@ -71,7 +71,8 @@ func build(
 	return handle, index, nil
 }
 
-func pushVSRealState(handle *cbalancer2.Balancer, vsIdx uint32, slot *vsSlot) error {
+// Prepares virtual service reals for balancer config before installing it into dataplane.
+func prepareVSReals(handle *cbalancer2.Balancer, vsIdx uint32, slot *vsSlot) error {
 	states := make([]bool, len(slot.reals))
 	weights := make([]uint32, len(slot.reals))
 	for _, rs := range slot.reals {
@@ -110,18 +111,24 @@ func buildIndex(vs []*balancerpb.VsConfig, prev map[vsID]*vsSlot) (map[vsID]*vsS
 			if _, dup := slot.reals[rk]; dup {
 				return nil, fmt.Errorf("vs[%d]: real[%d]: duplicate found", vsIdx, rIdx)
 			}
-			enabled := false
+			enabled := r.State
 			weight := r.Weight
 			if prevSlot != nil {
 				if prevRealSlot, exists := prevSlot.reals[rk]; exists {
-					enabled = prevRealSlot.enabled
-					weight = prevRealSlot.weight
+					enabled = &prevRealSlot.enabled
+					weight = &prevRealSlot.weight
 				}
+			}
+			if enabled == nil {
+				return nil, fmt.Errorf("vs[%d]: real[%d]: 'enabled' required", vsIdx, rIdx)
+			}
+			if weight == nil {
+				return nil, fmt.Errorf("vs[%d]: real[%d]: 'weight' required", vsIdx, rIdx)
 			}
 			slot.reals[rk] = &realSlot{
 				idx:     rIdx,
-				enabled: enabled,
-				weight:  weight,
+				enabled: *enabled,
+				weight:  *weight,
 			}
 		}
 		out[key] = slot
