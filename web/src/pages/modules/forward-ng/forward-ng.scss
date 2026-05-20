@@ -280,7 +280,10 @@
 }
 
 
-// Virtualized table container
+// Virtualized table container.
+// position:relative is required so the floating edit-button overlay
+// (.fwng-row-action-slot) can use position:absolute with right:0 to
+// pin to the wrap's right edge — unaffected by the body's h-scroll.
 .fwng-tbl-wrap {
     flex: 1;
     min-height: 0;
@@ -290,6 +293,7 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    position: relative;
 }
 
 // Outer wrapper that aligns column-header row with the action button cluster.
@@ -413,11 +417,7 @@
     cursor: default;
     transition: background-color 0.06s;
 
-    &:hover {
-        background-color: var(--fwng-bg-hover) !important;
-
-        .fwng-row-edit-btn { opacity: 1; }
-    }
+    &:hover { background-color: var(--fwng-bg-hover) !important; }
 
     &--active {
         box-shadow: inset 2px 0 0 var(--fwng-accent);
@@ -459,6 +459,44 @@
     border: 1px solid var(--fwng-line-2);
 }
 
+/*
+ * Floating edit-button overlay.  Direct child of .fwng-tbl-wrap (position:relative,
+ * overflow:hidden).
+ *
+ *   right: 0   — resolves against .fwng-tbl-wrap's right edge = wrap_right.
+ *                Never shifts during horizontal scroll because the overlay lives
+ *                OUTSIDE the scroll body.
+ *   top        — set from JS: HEADER_HEIGHT + virtualizer_start − body.scrollTop
+ *                This keeps the slot aligned with the hovered row even as the
+ *                body scrolls vertically.
+ *
+ * Width geometry (aligned with header delete button):
+ *   slot: 40px wide, padding-right 8px → effective centering region: 32px
+ *   button: 26px centered in 32px:
+ *     left padding before button = (32 − 26) / 2 = 3px
+ *     button center from slot right = 8 + 3 + 13 = 24px
+ *   slot_right = wrap_right  →  button center = wrap_right − 24px
+ *
+ *   header delete: 32px wide, .fwng-tbl-actions padding-right: 8px
+ *     → delete center = wrap_right − 8 − 16 = wrap_right − 24px  ✓
+ *
+ * The overlay is clipped by .fwng-tbl-wrap (overflow:hidden) at the header/footer
+ * boundaries, so the button disappears naturally when the row scrolls out of view.
+ */
+.fwng-row-action-slot {
+    position: absolute;
+    right: 0;
+    width: 40px;
+    height: 40px; // matches ROW_HEIGHT constant
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding-right: 8px;
+    z-index: 3;
+    pointer-events: auto;
+    background: transparent;
+}
+
 .fwng-row-edit-btn {
     width: 26px;
     height: 26px;
@@ -467,17 +505,20 @@
     justify-content: center;
     border-radius: 4px;
     font-size: 14px;
-    color: var(--fwng-text-3);
-    background: none;
-    border: none;
+    color: var(--fwng-text-2);
+    background: var(--fwng-bg-3);
+    border: 1px solid var(--fwng-line-2);
     cursor: pointer;
-    opacity: 0;
-    transition: opacity 0.1s, background 0.08s, color 0.08s;
+    transition: background 0.08s, color 0.08s, border-color 0.08s;
 
-    &:hover { background: var(--fwng-bg-2); color: var(--fwng-text); }
+    &--visible { opacity: 1; }
+
+    &:hover {
+        background: var(--fwng-bg-2);
+        color: var(--fwng-text);
+        border-color: var(--fwng-text-3);
+    }
 }
-
-.fwng-row:hover .fwng-row-edit-btn { opacity: 1; }
 
 .fwng-table-empty {
     padding: 40px;

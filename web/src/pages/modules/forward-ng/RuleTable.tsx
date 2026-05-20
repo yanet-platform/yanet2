@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef, memo } from 'react';
+import React, { useCallback, useMemo, useRef, useState, useEffect, memo } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { Checkbox, Icon } from '@gravity-ui/uikit';
 import { ArrowUturnCcwLeft } from '@gravity-ui/icons';
@@ -41,8 +41,8 @@ const COLUMN_WIDTHS = {
     srcs: 200,
     dsts: 200,
     sparkline: 72,
-    actions: 44,
 } as const;
+
 
 const TOTAL_WIDTH = Object.values(COLUMN_WIDTHS).reduce((a, b) => a + b, 0);
 
@@ -56,10 +56,10 @@ const cellStyle = (col: ColKey): React.CSSProperties => ({
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
-    paddingRight: col === 'actions' || col === 'checkbox' ? 0 : 8,
+    paddingRight: col === 'checkbox' ? 0 : 8,
     display: 'flex',
     alignItems: 'center',
-    justifyContent: col === 'checkbox' || col === 'actions' || col === 'index' ? 'center' : 'flex-start',
+    justifyContent: col === 'checkbox' || col === 'index' ? 'center' : 'flex-start',
 });
 
 /** Compact mono list of values with overflow truncation. */
@@ -84,10 +84,10 @@ interface VirtualRowProps {
     active: boolean;
     sparklineValues: number[] | null;
     onToggleSelect: (id: string) => void;
-    onEdit: (item: RuleItem) => void;
+    onHoverChange: (item: RuleItem | null, start: number) => void;
 }
 
-/** Single virtualized rule row. */
+/** Single virtualized rule row — no per-row action slot; hover is reported to the parent overlay. */
 const VirtualRow: React.FC<VirtualRowProps> = memo(({
     item,
     start,
@@ -95,15 +95,19 @@ const VirtualRow: React.FC<VirtualRowProps> = memo(({
     active,
     sparklineValues,
     onToggleSelect,
-    onEdit,
+    onHoverChange,
 }) => {
     const handleCheckboxChange = useCallback((_checked: boolean): void => {
         onToggleSelect(item.id);
     }, [onToggleSelect, item.id]);
 
-    const handleEditClick = useCallback((): void => {
-        onEdit(item);
-    }, [onEdit, item]);
+    const handleMouseEnter = useCallback((): void => {
+        onHoverChange(item, start);
+    }, [onHoverChange, item, start]);
+
+    const handleMouseLeave = useCallback((): void => {
+        onHoverChange(null, 0);
+    }, [onHoverChange]);
 
     let rowBg = 'transparent';
     if (active) rowBg = 'var(--fwng-accent-soft)';
@@ -112,6 +116,8 @@ const VirtualRow: React.FC<VirtualRowProps> = memo(({
     return (
         <div
             className={`fwng-vrow${selected ? ' fwng-vrow--selected' : ''}${active ? ' fwng-vrow--active' : ''}`}
+            onMouseEnter={handleMouseEnter}
+            onMouseLeave={handleMouseLeave}
             style={{
                 position: 'absolute',
                 top: start,
@@ -124,7 +130,6 @@ const VirtualRow: React.FC<VirtualRowProps> = memo(({
                 borderBottom: '1px solid var(--fwng-line)',
                 backgroundColor: rowBg,
                 paddingLeft: 4,
-                paddingRight: 4,
             }}
         >
             <div
@@ -185,18 +190,6 @@ const VirtualRow: React.FC<VirtualRowProps> = memo(({
             <div style={cellStyle('sparkline')}>
                 <Sparkline values={sparklineValues} width={56} height={16} />
             </div>
-
-            <div style={cellStyle('actions')}>
-                <button
-                    type="button"
-                    className="fwng-row-edit-btn"
-                    onClick={handleEditClick}
-                    aria-label={`Edit rule ${item.index + 1}`}
-                    title="Edit rule"
-                >
-                    ✎
-                </button>
-            </div>
         </div>
     );
 });
@@ -232,12 +225,49 @@ const RuleTable: React.FC<RuleTableProps> = ({
 }) => {
     const scrollRef = useRef<HTMLDivElement>(null);
 
+    /**
+     * Pending hide timeout id. When the cursor leaves a row we schedule a
+     * short delay before clearing hoveredItem, giving the overlay time to
+     * receive its own mouseenter and cancel the hide.
+     */
+    const hideTimeoutRef = useRef<number | null>(null);
+
+    /**
+     * Hover state for the floating edit button overlay.
+     * hoveredItem is null when no row is hovered.
+     * hoveredStart is the virtualizer `start` offset (px from scroll content top).
+     */
+    const [hoveredItem, setHoveredItem] = useState<RuleItem | null>(null);
+    const [hoveredStart, setHoveredStart] = useState(0);
+
+    /**
+     * Tracks the vertical scroll offset of the body so the overlay (which is
+     * a child of .fwng-tbl-wrap, not the scroll body) can compute its correct
+     * top position: HEADER_HEIGHT + virtualizer_start - scrollTop.
+     */
+    const [bodyScrollTop, setBodyScrollTop] = useState(0);
+
     const rowVirtualizer = useVirtualizer({
         count: items.length,
         getScrollElement: () => scrollRef.current,
         estimateSize: () => ROW_HEIGHT,
         overscan: OVERSCAN,
     });
+
+    useEffect(() => {
+        const el = scrollRef.current;
+        if (!el) return;
+        const onScroll = (): void => setBodyScrollTop(el.scrollTop);
+        el.addEventListener('scroll', onScroll, { passive: true });
+        return () => el.removeEventListener('scroll', onScroll);
+    }, []);
+
+    // Cancel any pending hide timeout when the table unmounts.
+    useEffect(() => () => {
+        if (hideTimeoutRef.current !== null) {
+            window.clearTimeout(hideTimeoutRef.current);
+        }
+    }, []);
 
     const handleToggleSelect = useCallback((id: string): void => {
         const next = new Set(selectedIds);
@@ -254,6 +284,43 @@ const RuleTable: React.FC<RuleTableProps> = ({
         }
     }, [selectedIds.size, items, onSelectionChange]);
 
+    const handleHoverChange = useCallback((item: RuleItem | null, start: number): void => {
+        if (hideTimeoutRef.current !== null) {
+            window.clearTimeout(hideTimeoutRef.current);
+            hideTimeoutRef.current = null;
+        }
+        if (item === null) {
+            // Schedule the hide so the overlay can intercept if the cursor
+            // moved onto it rather than away from the table entirely.
+            hideTimeoutRef.current = window.setTimeout(() => {
+                hideTimeoutRef.current = null;
+                setHoveredItem(null);
+            }, 80);
+        } else {
+            setHoveredItem(item);
+            setHoveredStart(start);
+        }
+    }, []);
+
+    const handleOverlayEdit = useCallback((): void => {
+        if (hoveredItem) onEditRule(hoveredItem);
+    }, [hoveredItem, onEditRule]);
+
+    /**
+     * When the cursor moves from the row into the overlay, cancel the pending
+     * hide so the button stays mounted and clickable.
+     */
+    const handleOverlayMouseEnter = useCallback((): void => {
+        if (hideTimeoutRef.current !== null) {
+            window.clearTimeout(hideTimeoutRef.current);
+            hideTimeoutRef.current = null;
+        }
+    }, []);
+
+    const handleOverlayMouseLeave = useCallback((): void => {
+        setHoveredItem(null);
+    }, []);
+
     const isAllSelected = items.length > 0 && selectedIds.size === items.length;
     const isIndeterminate = selectedIds.size > 0 && selectedIds.size < items.length;
 
@@ -266,6 +333,25 @@ const RuleTable: React.FC<RuleTableProps> = ({
         const last = virtualRows[virtualRows.length - 1].index + 1;
         return `Shown ${first.toLocaleString()}–${last.toLocaleString()} of ${items.length.toLocaleString()}`;
     }, [virtualRows, items.length]);
+
+    /**
+     * Edit-button overlay y-offset relative to .fwng-tbl-wrap (position:relative).
+     *
+     * The overlay is a child of .fwng-tbl-wrap, NOT the scroll body.  This means:
+     *   • right: 0 resolves against .fwng-tbl-wrap's right edge = wrap_right (fixed).
+     *   • top must account for the header height and the current scroll position:
+     *       top = HEADER_HEIGHT + virtualizer_start - scrollTop
+     *
+     * Geometry (button center vs header delete button center):
+     *   header delete center  = wrap_right − 8px(padding-right) − 16px(half of 32px) = wrap_right − 24px
+     *   slot width 40px, padding-right 8px, button 26px:
+     *     button center from slot_right = (40 − 8 − 26) / 2 + 13 = 3 + 13 = 16px from content edge
+     *     = 16 + 8 = 24px from slot_right = wrap_right − 24px  ✓
+     *
+     * Horizontal scrolling: the overlay is outside the scroll body so h-scroll
+     * never moves it — it stays permanently at right: 0 of .fwng-tbl-wrap.
+     */
+    const overlayTopOffset = HEADER_HEIGHT + hoveredStart - bodyScrollTop;
 
     return (
         <div className="fwng-tbl-wrap">
@@ -311,7 +397,6 @@ const RuleTable: React.FC<RuleTableProps> = ({
                     <div style={cellStyle('sparkline')}>
                         <span className="fwng-th-text">pps</span>
                     </div>
-                    <div style={cellStyle('actions')} />
                 </div>
                 <div className="fwng-tbl-actions">
                     {currentIsDirty && (
@@ -374,12 +459,13 @@ const RuleTable: React.FC<RuleTableProps> = ({
                                     active={activeRowId === item.id}
                                     sparklineValues={counterValues.get(item.id) ?? null}
                                     onToggleSelect={handleToggleSelect}
-                                    onEdit={onEditRule}
+                                    onHoverChange={handleHoverChange}
                                 />
                             );
                         })}
                     </div>
                 )}
+
             </div>
 
             {/* Footer */}
@@ -391,6 +477,43 @@ const RuleTable: React.FC<RuleTableProps> = ({
                     </span>
                 )}
             </div>
+
+            {/*
+              * Floating edit button overlay — direct child of .fwng-tbl-wrap
+              * (position:relative), NOT inside the scroll body.
+              *
+              *  right: 0  → always at wrap_right, regardless of horizontal scroll.
+              *  top       → HEADER_HEIGHT + virtualizer_start − scrollTop
+              *              keeps the button vertically aligned with the hovered row
+              *              while the body scrolls.
+              *
+              * Button center geometry (aligns with header delete button):
+              *   slot: 40px wide, padding-right 8px, justify-content:center (32px effective)
+              *   button: 26px centered in 32px → center offset from slot right = 8 + 3 + 13 = 24px
+              *   wrap right − 24px  =  header delete button center  ✓
+              *
+              * The overlay is clipped by .fwng-tbl-wrap (overflow:hidden) so it never
+              * bleeds into the header or footer — rows at the very top/bottom that scroll
+              * into the boundary just have the button disappear naturally.
+              */}
+            {hoveredItem !== null && (
+                <div
+                    className="fwng-row-action-slot"
+                    style={{ top: overlayTopOffset }}
+                    onMouseEnter={handleOverlayMouseEnter}
+                    onMouseLeave={handleOverlayMouseLeave}
+                >
+                    <button
+                        type="button"
+                        className="fwng-row-edit-btn fwng-row-edit-btn--visible"
+                        onClick={handleOverlayEdit}
+                        aria-label={`Edit rule ${hoveredItem !== null ? hoveredItem.index + 1 : ''}`}
+                        title="Edit rule"
+                    >
+                        ✎
+                    </button>
+                </div>
+            )}
         </div>
     );
 };
