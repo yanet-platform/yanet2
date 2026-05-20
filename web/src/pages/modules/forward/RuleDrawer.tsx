@@ -109,28 +109,28 @@ const RuleDrawer = React.forwardRef<RuleDrawerHandle, RuleDrawerProps>(({
     return (
         <>
             <div
-                className={`fwng-backdrop${open ? ' fwng-backdrop--open' : ''}`}
+                className={`fw-backdrop${open ? ' fw-backdrop--open' : ''}`}
                 onClick={handleClose}
                 aria-hidden="true"
             />
             <aside
-                className={`fwng-drawer${open ? ' fwng-drawer--open' : ''}`}
+                className={`fw-drawer${open ? ' fw-drawer--open' : ''}`}
                 role="dialog"
                 aria-modal="true"
                 aria-label={mode === 'add' ? 'Add rule' : 'Edit rule'}
             >
-                <header className="fwng-drawer__head">
-                    <h2 className="fwng-drawer__title">
+                <header className="fw-drawer__head">
+                    <h2 className="fw-drawer__title">
                         {mode === 'add' ? 'New rule' : (
-                            <>Edit rule <span className="fwng-drawer__rule-num">#{ruleItem?.index !== undefined ? ruleItem.index + 1 : ''}</span></>
+                            <>Edit rule <span className="fw-drawer__rule-num">#{ruleItem?.index !== undefined ? ruleItem.index + 1 : ''}</span></>
                         )}
                     </h2>
-                    <div className="fwng-drawer__head-actions">
+                    <div className="fw-drawer__head-actions">
                         {mode === 'edit' && ruleItem && (
                             <>
                                 <button
                                     type="button"
-                                    className="fwng-icon-btn"
+                                    className="fw-icon-btn"
                                     onClick={() => onDuplicate(ruleItem)}
                                     title="Duplicate rule"
                                 >
@@ -138,7 +138,7 @@ const RuleDrawer = React.forwardRef<RuleDrawerHandle, RuleDrawerProps>(({
                                 </button>
                                 <button
                                     type="button"
-                                    className="fwng-icon-btn fwng-icon-btn--danger"
+                                    className="fw-icon-btn fw-icon-btn--danger"
                                     onClick={() => onDelete(ruleItem)}
                                     title="Delete rule"
                                 >
@@ -148,7 +148,7 @@ const RuleDrawer = React.forwardRef<RuleDrawerHandle, RuleDrawerProps>(({
                         )}
                         <button
                             type="button"
-                            className="fwng-icon-btn"
+                            className="fw-icon-btn"
                             onClick={handleClose}
                             aria-label="Close drawer"
                         >
@@ -157,68 +157,68 @@ const RuleDrawer = React.forwardRef<RuleDrawerHandle, RuleDrawerProps>(({
                     </div>
                 </header>
 
-                <div className="fwng-drawer__body">
-                    <section className="fwng-section">
-                        <div className="fwng-section-h">Identity</div>
-                        <div className="fwng-section__body">
-                            <div className="fwng-fgrid">
-                                <div className="fwng-field">
-                                    <label className="fwng-field__label">
-                                        Target <span className="fwng-field__req">*</span>
+                <div className="fw-drawer__body">
+                    <section className="fw-section">
+                        <div className="fw-section-h">Identity</div>
+                        <div className="fw-section__body">
+                            <div className="fw-fgrid">
+                                <div className="fw-field">
+                                    <label className="fw-field__label">
+                                        Target <span className="fw-field__req">*</span>
                                     </label>
                                     <input
-                                        className="fwng-input"
+                                        className="fw-input"
                                         placeholder="e.g. eth0"
                                         value={draft.target}
                                         onChange={(e) => updateField('target', e.target.value)}
                                     />
-                                    <span className="fwng-field__hint">Output target device matched traffic is forwarded to.</span>
+                                    <span className="fw-field__hint">Output target device matched traffic is forwarded to.</span>
                                 </div>
-                                <div className="fwng-field">
-                                    <label className="fwng-field__label">Mode</label>
-                                    <div className="fwng-segmented" role="radiogroup" aria-label="Direction mode">
+                                <div className="fw-field">
+                                    <label className="fw-field__label">Mode</label>
+                                    <div className="fw-segmented" role="radiogroup" aria-label="Direction mode">
                                         {modeOptions.map((opt) => (
                                             <button
                                                 key={opt.value}
                                                 type="button"
                                                 role="radio"
                                                 aria-checked={draft.mode === opt.value}
-                                                className={`fwng-segmented__opt fwng-segmented__opt--${opt.cls}${draft.mode === opt.value ? ' fwng-segmented__opt--on' : ''}`}
+                                                className={`fw-segmented__opt fw-segmented__opt--${opt.cls}${draft.mode === opt.value ? ' fw-segmented__opt--on' : ''}`}
                                                 onClick={() => updateField('mode', opt.value)}
                                             >
                                                 {opt.label}
                                             </button>
                                         ))}
                                     </div>
-                                    <span className="fwng-field__hint">
+                                    <span className="fw-field__hint">
                                         {draft.mode === ForwardMode.IN && 'Match traffic entering the device.'}
                                         {draft.mode === ForwardMode.OUT && 'Match traffic exiting the device.'}
                                         {draft.mode === ForwardMode.NONE && 'Match without direction binding.'}
                                     </span>
                                 </div>
                             </div>
-                            <div className="fwng-field">
-                                <label className="fwng-field__label">
-                                    Counter <span className="fwng-field__optional">optional</span>
+                            <div className="fw-field">
+                                <label className="fw-field__label">
+                                    Counter <span className="fw-field__optional">optional</span>
                                 </label>
                                 <input
-                                    className="fwng-input"
+                                    className="fw-input"
                                     placeholder={draft.target ? `to_${draft.target}` : 'e.g. my_counter'}
                                     value={draft.counter}
                                     onChange={(e) => updateField('counter', e.target.value)}
                                 />
-                                <span className="fwng-field__hint">Name shown in /stats. Leave empty to skip counting.</span>
+                                <span className="fw-field__hint">Name shown in /stats. Leave empty to skip counting.</span>
                             </div>
                         </div>
                     </section>
 
-                    <section className="fwng-section">
-                        <div className="fwng-section-h">Match criteria</div>
-                        <div className="fwng-section__body">
-                            <div className="fwng-field">
-                                <label className="fwng-field__label">
+                    <section className="fw-section">
+                        <div className="fw-section-h">Match criteria</div>
+                        <div className="fw-section__body">
+                            <div className="fw-field">
+                                <label className="fw-field__label">
                                     Devices
-                                    <span className="fwng-field__count">{draft.deviceNames.length || 'any'}</span>
+                                    <span className="fw-field__count">{draft.deviceNames.length || 'any'}</span>
                                 </label>
                                 <ChipInput
                                     ref={deviceNamesRef}
@@ -230,23 +230,23 @@ const RuleDrawer = React.forwardRef<RuleDrawerHandle, RuleDrawerProps>(({
                                     validator={isValidDeviceName}
                                 />
                             </div>
-                            <div className="fwng-field">
-                                <label className="fwng-field__label">VLAN ranges</label>
+                            <div className="fw-field">
+                                <label className="fw-field__label">VLAN ranges</label>
                                 <input
-                                    className="fwng-input fwng-input--mono"
+                                    className="fw-input fw-input--mono"
                                     placeholder="0-4095"
                                     value={draft.vlansRaw}
                                     onChange={(e) => updateField('vlansRaw', e.target.value)}
                                 />
-                                <span className="fwng-field__hint">
+                                <span className="fw-field__hint">
                                     Single value <code>100</code>, range <code>100-200</code>, list <code>100, 200, 300-400</code>. Empty = all VLANs.
                                 </span>
                             </div>
-                            <div className="fwng-fgrid">
-                                <div className="fwng-field">
-                                    <label className="fwng-field__label">
+                            <div className="fw-fgrid">
+                                <div className="fw-field">
+                                    <label className="fw-field__label">
                                         Sources
-                                        <span className="fwng-field__count">{draft.sourceCidrs.length || 'any'}</span>
+                                        <span className="fw-field__count">{draft.sourceCidrs.length || 'any'}</span>
                                     </label>
                                     <ChipInput
                                         ref={sourceCidrsRef}
@@ -258,10 +258,10 @@ const RuleDrawer = React.forwardRef<RuleDrawerHandle, RuleDrawerProps>(({
                                         validator={isValidCidr}
                                     />
                                 </div>
-                                <div className="fwng-field">
-                                    <label className="fwng-field__label">
+                                <div className="fw-field">
+                                    <label className="fw-field__label">
                                         Destinations
-                                        <span className="fwng-field__count">{draft.dstCidrs.length || 'any'}</span>
+                                        <span className="fw-field__count">{draft.dstCidrs.length || 'any'}</span>
                                     </label>
                                     <ChipInput
                                         ref={dstCidrsRef}
@@ -278,19 +278,19 @@ const RuleDrawer = React.forwardRef<RuleDrawerHandle, RuleDrawerProps>(({
                     </section>
                 </div>
 
-                <footer className="fwng-drawer__foot">
-                    <span className="fwng-drawer__foot-meta">
+                <footer className="fw-drawer__foot">
+                    <span className="fw-drawer__foot-meta">
                         {mode === 'add'
                             ? 'Will be appended to config.'
                             : `Rule #${(ruleItem?.index ?? -1) + 1}`}
                     </span>
-                    <div className="fwng-drawer__foot-actions">
-                        <button type="button" className="fwng-btn fwng-btn--ghost" onClick={handleClose}>
+                    <div className="fw-drawer__foot-actions">
+                        <button type="button" className="fw-btn fw-btn--ghost" onClick={handleClose}>
                             Cancel
                         </button>
                         <button
                             type="button"
-                            className="fwng-btn fwng-btn--primary"
+                            className="fw-btn fw-btn--primary"
                             disabled={!isValid}
                             onClick={handleApply}
                         >

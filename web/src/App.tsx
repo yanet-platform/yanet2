@@ -10,7 +10,6 @@ const importFunctions = () => import('./pages/builtin/functions/FunctionsPage');
 const importPipelines = () => import('./pages/builtin/pipelines/PipelinesPage');
 const importDevices = () => import('./pages/builtin/devices/DevicesPage');
 const importForward = () => import('./pages/modules/forward/ForwardPage');
-const importForwardNg = () => import('./pages/modules/forward-ng/ForwardNgPage');
 const importDecap = () => import('./pages/modules/decap/DecapPage');
 const importAcl = () => import('./pages/modules/acl/AclPage');
 const importPdump = () => import('./pages/modules/pdump/PdumpPage');
@@ -24,7 +23,6 @@ const pageImporters = [
     importPipelines,
     importDevices,
     importForward,
-    importForwardNg,
     importDecap,
     importAcl,
     importPdump,
@@ -38,7 +36,6 @@ const FunctionsPage = lazy(importFunctions);
 const PipelinesPage = lazy(importPipelines);
 const DevicesPage = lazy(importDevices);
 const ForwardPage = lazy(importForward);
-const ForwardNgPage = lazy(importForwardNg);
 const DecapPage = lazy(importDecap);
 const AclPage = lazy(importAcl);
 const PdumpPage = lazy(importPdump);
@@ -147,7 +144,6 @@ const AppContent = (): React.JSX.Element => {
                             <Route path="/builtin/pipelines" element={<PipelinesPage />} />
                             <Route path="/builtin/devices" element={<DevicesPage />} />
                             <Route path="/modules/forward" element={<ForwardPage />} />
-                            <Route path="/modules/forward-ng" element={<ForwardNgPage />} />
                             <Route path="/modules/decap" element={<DecapPage />} />
                             <Route path="/modules/acl" element={<AclPage />} />
                             <Route path="/modules/pdump" element={<PdumpPage />} />

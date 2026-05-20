@@ -17,13 +17,13 @@ const Sparkline: React.FC<SparklineProps> = ({
     values,
     width = 64,
     height = 18,
-    color = 'var(--fwng-accent)',
+    color = 'var(--fw-accent)',
     fill = true,
 }) => {
     if (!values || values.length < 2) {
         return (
             <span
-                className="fwng-spark-empty"
+                className="fw-spark-empty"
                 title="No counter history available from backend"
             >
                 --
@@ -53,7 +53,7 @@ const Sparkline: React.FC<SparklineProps> = ({
             width={width}
             height={height}
             viewBox={`0 0 ${width} ${height}`}
-            className="fwng-spark-svg"
+            className="fw-spark-svg"
             aria-hidden="true"
         >
             {fill && <path d={fillPath} fill={color} opacity="0.16" />}

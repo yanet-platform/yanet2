@@ -6,7 +6,7 @@ interface AnyBadgeProps {
 
 /** Muted pill badge used for wildcard values such as "any". */
 const AnyBadge: React.FC<AnyBadgeProps> = ({ label }) => (
-    <span className="fwng-badge-any">{label}</span>
+    <span className="fw-badge-any">{label}</span>
 );
 
 export default AnyBadge;

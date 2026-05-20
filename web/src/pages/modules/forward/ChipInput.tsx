@@ -100,18 +100,18 @@ const ChipInput = React.forwardRef<ChipInputHandle, ChipInputProps>(({
 
     return (
         <div
-            className="fwng-chip-input"
+            className="fw-chip-input"
             onClick={() => inputRef.current?.focus()}
         >
             {isWildcard && wildcardLabel && (
-                <span className="fwng-badge-any">{wildcardLabel}</span>
+                <span className="fw-badge-any">{wildcardLabel}</span>
             )}
             {value.map((v, idx) => {
                 const valid = validator(v);
                 return (
-                    <span key={idx} className={`fwng-chip${valid ? '' : ' fwng-chip--invalid'}`}>
+                    <span key={idx} className={`fw-chip${valid ? '' : ' fw-chip--invalid'}`}>
                         <span
-                            className="fwng-chip__label"
+                            className="fw-chip__label"
                             role="button"
                             tabIndex={0}
                             title="Click to edit"
@@ -137,7 +137,7 @@ const ChipInput = React.forwardRef<ChipInputHandle, ChipInputProps>(({
                         </span>
                         <button
                             type="button"
-                            className="fwng-chip__x"
+                            className="fw-chip__x"
                             onClick={(e) => {
                                 e.stopPropagation();
                                 onChange(value.filter((_, j) => j !== idx));
@@ -158,7 +158,7 @@ const ChipInput = React.forwardRef<ChipInputHandle, ChipInputProps>(({
                 onKeyDown={handleKeyDown}
                 onBlur={handleBlur}
                 onPaste={handlePaste}
-                className="fwng-chip-input__raw"
+                className="fw-chip-input__raw"
             />
         </div>
     );

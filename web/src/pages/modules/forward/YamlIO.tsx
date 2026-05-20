@@ -144,15 +144,15 @@ const YamlIO: React.FC<YamlIOProps> = ({ configName, rules, onImport }) => {
         a.download = `${configName}.yaml`;
         a.click();
         URL.revokeObjectURL(url);
-        toaster.success('fwng-yaml-download', 'Download started.');
+        toaster.success('fw-yaml-download', 'Download started.');
     };
 
     const handleCopy = async (): Promise<void> => {
         try {
             await navigator.clipboard.writeText(text);
-            toaster.success('fwng-yaml-copy', 'Copied to clipboard.');
+            toaster.success('fw-yaml-copy', 'Copied to clipboard.');
         } catch {
-            toaster.error('fwng-yaml-copy-fail', 'Copy failed.');
+            toaster.error('fw-yaml-copy-fail', 'Copy failed.');
         }
     };
 
@@ -163,7 +163,7 @@ const YamlIO: React.FC<YamlIOProps> = ({ configName, rules, onImport }) => {
             const targetConfig = importConfigName.trim() || configName;
             onImport(targetConfig, parsed);
             setShowModal(null);
-            toaster.success('fwng-yaml-import', `Imported ${parsed.length} rules into "${targetConfig}".`);
+            toaster.success('fw-yaml-import', `Imported ${parsed.length} rules into "${targetConfig}".`);
         } catch (e) {
             setParseError((e as Error).message);
         }
@@ -192,22 +192,22 @@ const YamlIO: React.FC<YamlIOProps> = ({ configName, rules, onImport }) => {
             </Button>
 
             {showModal && (
-                <div className="fwng-modal-backdrop" onClick={closeModal}>
-                    <div className="fwng-modal" onClick={(e) => e.stopPropagation()}>
-                        <header className="fwng-modal__head">
-                            <div className="fwng-modal__title-row">
-                                <span className="fwng-modal__title">
+                <div className="fw-modal-backdrop" onClick={closeModal}>
+                    <div className="fw-modal" onClick={(e) => e.stopPropagation()}>
+                        <header className="fw-modal__head">
+                            <div className="fw-modal__title-row">
+                                <span className="fw-modal__title">
                                     {showModal === 'import' ? 'Import YAML' : 'Export YAML'}
                                 </span>
                                 {showModal === 'export' && (
-                                    <span className="fwng-modal__meta">
+                                    <span className="fw-modal__meta">
                                         {configName} · {rules.length} rules
                                     </span>
                                 )}
                             </div>
                             <button
                                 type="button"
-                                className="fwng-icon-btn"
+                                className="fw-icon-btn"
                                 onClick={closeModal}
                                 aria-label="Close"
                             >
@@ -215,12 +215,12 @@ const YamlIO: React.FC<YamlIOProps> = ({ configName, rules, onImport }) => {
                             </button>
                         </header>
 
-                        <div className="fwng-modal__body">
+                        <div className="fw-modal__body">
                             {showModal === 'import' && (
                                 <>
-                                    <div className="fwng-modal__import-header">
+                                    <div className="fw-modal__import-header">
                                         <label
-                                            className="fwng-btn fwng-btn--ghost fwng-btn--sm"
+                                            className="fw-btn fw-btn--ghost fw-btn--sm"
                                             style={{ cursor: 'pointer' }}
                                         >
                                             Choose file
@@ -234,21 +234,21 @@ const YamlIO: React.FC<YamlIOProps> = ({ configName, rules, onImport }) => {
                                                 }}
                                             />
                                         </label>
-                                        <span className="fwng-modal__or">or paste below</span>
+                                        <span className="fw-modal__or">or paste below</span>
                                     </div>
-                                    <div className="fwng-field" style={{ marginBottom: 8 }}>
-                                        <label className="fwng-field__label" htmlFor="fwng-import-config-name">
+                                    <div className="fw-field" style={{ marginBottom: 8 }}>
+                                        <label className="fw-field__label" htmlFor="fw-import-config-name">
                                             Config name
                                         </label>
                                         <input
-                                            id="fwng-import-config-name"
-                                            className="fwng-input"
+                                            id="fw-import-config-name"
+                                            className="fw-input"
                                             type="text"
                                             value={importConfigName}
                                             onChange={(e) => setImportConfigName(e.target.value)}
                                             placeholder={configName}
                                         />
-                                        <span className="fwng-field__hint">
+                                        <span className="fw-field__hint">
                                             Rules will be imported into this config (creates it locally if new).
                                         </span>
                                     </div>
@@ -256,7 +256,7 @@ const YamlIO: React.FC<YamlIOProps> = ({ configName, rules, onImport }) => {
                             )}
                             <textarea
                                 ref={textareaRef}
-                                className="fwng-code-area"
+                                className="fw-code-area"
                                 value={text}
                                 onChange={(e) => {
                                     setText(e.target.value);
@@ -268,22 +268,22 @@ const YamlIO: React.FC<YamlIOProps> = ({ configName, rules, onImport }) => {
                                 spellCheck={false}
                             />
                             {parseError && (
-                                <div className="fwng-field__error" style={{ marginTop: 6, color: 'var(--g-color-text-danger)', fontSize: 12 }}>
+                                <div className="fw-field__error" style={{ marginTop: 6, color: 'var(--g-color-text-danger)', fontSize: 12 }}>
                                     {parseError}
                                 </div>
                             )}
                         </div>
 
-                        <footer className="fwng-modal__foot">
-                            <span className="fwng-modal__foot-hint">
+                        <footer className="fw-modal__foot">
+                            <span className="fw-modal__foot-hint">
                                 {showModal === 'export'
                                     ? 'Exports current draft rules (unsaved changes included).'
                                     : 'Importing replaces all rules in the target config locally. Use Save to push to the server.'}
                             </span>
-                            <div className="fwng-modal__foot-actions">
+                            <div className="fw-modal__foot-actions">
                                 <button
                                     type="button"
-                                    className="fwng-btn fwng-btn--ghost"
+                                    className="fw-btn fw-btn--ghost"
                                     onClick={closeModal}
                                 >
                                     Close
@@ -292,14 +292,14 @@ const YamlIO: React.FC<YamlIOProps> = ({ configName, rules, onImport }) => {
                                     <>
                                         <button
                                             type="button"
-                                            className="fwng-btn fwng-btn--ghost"
+                                            className="fw-btn fw-btn--ghost"
                                             onClick={handleCopy}
                                         >
                                             Copy
                                         </button>
                                         <button
                                             type="button"
-                                            className="fwng-btn fwng-btn--primary"
+                                            className="fw-btn fw-btn--primary"
                                             onClick={handleDownload}
                                         >
                                             Download .yaml
@@ -308,7 +308,7 @@ const YamlIO: React.FC<YamlIOProps> = ({ configName, rules, onImport }) => {
                                 ) : (
                                     <button
                                         type="button"
-                                        className="fwng-btn fwng-btn--primary"
+                                        className="fw-btn fw-btn--primary"
                                         onClick={handleImport}
                                         disabled={!text.trim()}
                                     >

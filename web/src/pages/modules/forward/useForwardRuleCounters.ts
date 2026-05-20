@@ -97,14 +97,55 @@ export const useForwardRuleCounters = (
     rules: RuleItem[],
     enabled: boolean,
 ): UseForwardRuleCountersResult => {
-    const [mountPoints, setMountPoints] = useState<MountPoint[]>([]);
+    // Mount points are stored together with the config name they were discovered
+    // for. Deriving the effective mount points by comparing tags during render
+    // ensures that stale points from config A are never visible in a render that
+    // already shows config B, even before the discovery effect has had a chance
+    // to call setMountPointsEntry([]) after the tab switch.
+    const [mountPointsEntry, setMountPointsEntry] = useState<{ config: string; points: MountPoint[] }>({ config: '', points: [] });
+    const mountPoints = mountPointsEntry.config === configName ? mountPointsEntry.points : [];
+
+    // Rolling history: Map<counterName, number[]>
+    const historyRef = useRef<Map<string, number[]>>(new Map());
+
+    // Map<ruleId, number[]> — returned snapshot; reference changes on each sample.
+    const [sparklines, setSparklines] = useState<Map<string, number[]>>(new Map());
+
+    // Monotonically incremented on each configName change. Promise resolutions
+    // that carry a stale generation are silently dropped so that a slow request
+    // for config A cannot overwrite the state that belongs to config B.
+    const discoveryGen = useRef(0);
 
     useEffect(() => {
         if (!configName) return;
-        discoverMountPoints(configName).then(setMountPoints).catch((err: unknown) => {
+        // Synchronously clear stale state from the previous config so the UI
+        // never displays data belonging to a different config instance.
+        historyRef.current = new Map();
+        setMountPointsEntry({ config: '', points: [] });
+        setSparklines(new Map());
+        discoveryGen.current += 1;
+        const myGen = discoveryGen.current;
+        discoverMountPoints(configName).then(points => {
+            if (myGen !== discoveryGen.current) return;
+            setMountPointsEntry({ config: configName, points });
+        }).catch((err: unknown) => {
+            if (myGen !== discoveryGen.current) return;
             console.error('Failed to discover forward mount points:', err);
         });
-    }, [configName]);
+    }, [configName]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    // When rules change (e.g. immediately after a config switch when history has
+    // been cleared), rebuild the snapshot so the UI reflects the current history
+    // state without waiting for the next 1-second tick.
+    useEffect(() => {
+        const history = historyRef.current;
+        const next = new Map<string, number[]>();
+        for (const rule of rules) {
+            const h = rule.counter ? history.get(rule.counter) : undefined;
+            if (h) next.set(rule.id, h);
+        }
+        setSparklines(next);
+    }, [rules]);
 
     // Stable refs so callbacks don't need to re-create on every render.
     const rulesRef = useRef(rules);
@@ -160,12 +201,6 @@ export const useForwardRuleCounters = (
         pollingInterval: 1000,
         interpolationInterval: 30,
     });
-
-    // Rolling history: Map<counterName, number[]>
-    const historyRef = useRef<Map<string, number[]>>(new Map());
-
-    // Map<ruleId, number[]> — returned snapshot; reference changes on each sample.
-    const [sparklines, setSparklines] = useState<Map<string, number[]>>(new Map());
 
     const countersRef = useRef(counters);
     countersRef.current = counters;

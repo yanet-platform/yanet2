@@ -73,7 +73,7 @@ export const useForwardDraft = (): UseForwardDraftResult => {
 
             rawDispatch({ type: 'LOAD_ALL_CONFIGS', configs });
         } catch (err) {
-            toaster.error('fwng-draft-load', 'Failed to load forward configurations', err);
+            toaster.error('fw-draft-load', 'Failed to load forward configurations', err);
         } finally {
             setLoading(false);
         }
@@ -90,9 +90,9 @@ export const useForwardDraft = (): UseForwardDraftResult => {
             try {
                 await API.forward.deleteConfig({ name: configName });
                 rawDispatch({ type: 'MARK_SAVED', configName });
-                toaster.success(`fwng-save-${configName}`, `Config "${configName}" deleted.`);
+                toaster.success(`fw-save-${configName}`, `Config "${configName}" deleted.`);
             } catch (err) {
-                toaster.error(`fwng-save-err-${configName}`, `Failed to delete "${configName}"`, err);
+                toaster.error(`fw-save-err-${configName}`, `Failed to delete "${configName}"`, err);
                 throw err;
             }
             return;
@@ -102,9 +102,9 @@ export const useForwardDraft = (): UseForwardDraftResult => {
         try {
             await API.forward.updateConfig({ name: configName, rules });
             rawDispatch({ type: 'MARK_SAVED', configName });
-            toaster.success(`fwng-save-${configName}`, `Config "${configName}" saved.`);
+            toaster.success(`fw-save-${configName}`, `Config "${configName}" saved.`);
         } catch (err) {
-            toaster.error(`fwng-save-err-${configName}`, `Failed to save "${configName}"`, err);
+            toaster.error(`fw-save-err-${configName}`, `Failed to save "${configName}"`, err);
             throw err;
         }
     }, [state.draft, state.pendingDeleteConfigs]);
