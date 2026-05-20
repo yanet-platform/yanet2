@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useReducer, useState } from 'react';
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { toaster } from '../../../../utils';
 import type { EntityState, BaseEntityAction } from './reducer';
 
@@ -66,21 +66,10 @@ export interface EditableEntityStoreResult<T, A> {
 export const useEditableEntityStore = <T, W, I, L, G, A>(
     config: EditableEntityStoreConfig<T, W, I, L, G, A>,
 ): EditableEntityStoreResult<T, A> => {
-    const {
-        reducer,
-        initialState,
-        api,
-        getIds,
-        idName,
-        getEntity,
-        apiToLocal,
-        localToApi,
-        makeUpdateRequest,
-        makeDeleteRequest,
-        makeCreateRequest,
-        toastPrefix,
-        entityLabel,
-    } = config;
+    const configRef = useRef(config);
+    configRef.current = config;
+
+    const { reducer, initialState } = config;
 
     const [state, rawDispatch] = useReducer(
         reducer as (state: EntityState<T>, action: A | BaseEntityAction<T>) => EntityState<T>,
@@ -94,6 +83,7 @@ export const useEditableEntityStore = <T, W, I, L, G, A>(
     }, []);
 
     const load = useCallback(async (): Promise<void> => {
+        const { api, getIds, idName, getEntity, apiToLocal, toastPrefix, entityLabel } = configRef.current;
         setLoading(true);
         try {
             const listResp = await api.list({} as Record<string, never>);
@@ -126,13 +116,14 @@ export const useEditableEntityStore = <T, W, I, L, G, A>(
         } finally {
             setLoading(false);
         }
-    }, [api, getIds, idName, getEntity, apiToLocal, toastPrefix, entityLabel]);
+    }, []);
 
     useEffect(() => {
         load();
     }, [load]);
 
     const save = useCallback(async (id: string): Promise<void> => {
+        const { api, makeUpdateRequest, localToApi, toastPrefix, entityLabel } = configRef.current;
         const entity = state.local[id];
         if (!entity) {
             return;
@@ -148,7 +139,7 @@ export const useEditableEntityStore = <T, W, I, L, G, A>(
                 err,
             );
         }
-    }, [state.local, api, makeUpdateRequest, localToApi, toastPrefix, entityLabel]);
+    }, [state.local]);
 
     const discard = useCallback((id: string): void => {
         const server = state.server[id];
@@ -163,6 +154,7 @@ export const useEditableEntityStore = <T, W, I, L, G, A>(
         state.server[id] ?? null, [state.server]);
 
     const create = useCallback(async (name: string): Promise<boolean> => {
+        const { api, makeCreateRequest, toastPrefix, entityLabel } = configRef.current;
         try {
             await api.update(makeCreateRequest(name));
             await load();
@@ -176,9 +168,10 @@ export const useEditableEntityStore = <T, W, I, L, G, A>(
             );
             return false;
         }
-    }, [api, makeCreateRequest, load, toastPrefix, entityLabel]);
+    }, [load]);
 
     const remove = useCallback(async (id: string): Promise<boolean> => {
+        const { api, makeDeleteRequest, toastPrefix, entityLabel } = configRef.current;
         try {
             await api.delete(makeDeleteRequest(id));
             rawDispatch({ type: 'REMOVE_ENTITY', id } as BaseEntityAction<T>);
@@ -193,7 +186,7 @@ export const useEditableEntityStore = <T, W, I, L, G, A>(
             );
             return false;
         }
-    }, [api, makeDeleteRequest, toastPrefix, entityLabel]);
+    }, []);
 
     const entities = useMemo(
         () => entityIds.map(id => state.local[id]).filter((e): e is T => e !== undefined),
