@@ -111,7 +111,7 @@ func buildIndex(vs []*balancerpb.VsConfig, prev map[vsID]*vsSlot) (map[vsID]*vsS
 			if _, dup := slot.reals[rk]; dup {
 				return nil, fmt.Errorf("vs[%d]: real[%d]: duplicate found", vsIdx, rIdx)
 			}
-			enabled := r.State
+			enabled := r.Enabled
 			weight := r.Weight
 			if prevSlot != nil {
 				if prevRealSlot, exists := prevSlot.reals[rk]; exists {

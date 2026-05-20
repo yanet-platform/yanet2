@@ -1,5 +1,7 @@
 #pragma once
 
+#include <stdalign.h>
+
 #include "key_value.h"
 
 #include "../../container_of.h"

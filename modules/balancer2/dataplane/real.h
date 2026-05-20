@@ -1,20 +1,18 @@
 #pragma once
 
+#include <stdatomic.h>
 #include <stdbool.h>
 
 #include "common/network.h"
+
+#include "lib/counters/counters.h"
 
 enum real_flags {
 	real_enabled = 1u << 0,
 	real_ip6 = 1u << 1,
 };
 
-/*
- * A real (backend) server within a virtual service.
- *
- * Stored in a per-VS contiguous array indexed by config index.
- * See struct balancer_vs for the array layout and indexing scheme.
- */
+/* A real (backend) server within a virtual service. */
 struct real {
 	/* Destination IP address of the real server (IPv4 or IPv6). */
 	struct net_addr addr;
@@ -32,7 +30,7 @@ struct real {
 	 *
 	 *   outer_src[i] = addr[i] | (client_src[i] & ~mask[i])
 	 *
-	 * Use v4 when balancer_real_ipv6 is clear, v6 when set.
+	 * Use v4 when real_ip6 is clear, v6 when set.
 	 */
 	struct net src;
 
@@ -40,3 +38,19 @@ struct real {
 
 	_Atomic uint8_t flags;
 };
+
+static inline struct balancer_real_stats *
+real_fetch_stats(
+	struct real *real,
+	uint32_t worker,
+	struct counter_storage *counter_storage
+) {
+	return (struct balancer_real_stats *)counter_get_address(
+		real->counter_id, worker, counter_storage
+	);
+}
+
+static inline uint8_t
+real_flags(struct real *real) {
+	return atomic_load_explicit(&real->flags, memory_order_relaxed);
+}

@@ -29,6 +29,7 @@ custom_target(
         acl_protoc_gen,
         plain_protoc_gen,
         vlan_protoc_gen,
+        balancer_protoc_gen,
 
         # cgo linker deps
         lib_acl_cp,
@@ -50,6 +51,7 @@ custom_target(
         lib_blackhole_cp,
         lib_blackhole_dp,
         lib_filter_compiler,
+        lib_balancer2_cp,
     ],
     install: true,
     install_dir: get_option('bindir'),

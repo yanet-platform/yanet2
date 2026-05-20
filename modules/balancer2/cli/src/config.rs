@@ -65,7 +65,8 @@ pub struct Real {
     pub ip: IpAddr,
     #[serde(default)]
     pub port: u16,
-    pub weight: u32,
+    pub weight: Option<u32>,
+    pub enabled: Option<bool>,
     #[serde(deserialize_with = "deserialize_from_str")]
     pub src: IpNetwork,
 }
@@ -259,6 +260,7 @@ impl From<Real> for balancerpb::RealConfig {
                 port: u32::from(real.port),
             }),
             weight: real.weight,
+            enabled: real.enabled,
             src: Some(IpNet::from(real.src)),
         }
     }

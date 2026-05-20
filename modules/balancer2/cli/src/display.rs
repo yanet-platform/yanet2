@@ -204,7 +204,7 @@ fn real_basic_row(real: &balancerpb::RealState) -> Option<RealBasicRow> {
     Some(RealBasicRow {
         real: real_str,
         enabled: real.enabled,
-        weight: rcfg.weight,
+        weight: rcfg.weight?,
         effective_weight: real.effective_weight,
     })
 }
@@ -215,7 +215,7 @@ fn real_stats_row(real: &balancerpb::RealState) -> Option<RealStatsRow> {
     Some(RealStatsRow {
         real: real_str,
         enabled: real.enabled,
-        weight: rcfg.weight,
+        weight: rcfg.weight?,
         effective_weight: real.effective_weight,
         packets: rs.map_or(0, |s| s.packets),
         bytes: rs.map_or(0, |s| s.bytes),

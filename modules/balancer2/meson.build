@@ -1,3 +1,7 @@
-subdir('controlplane')
-subdir('api')
-# subdir('dataplane')
+subdir('dataplane')
+
+if not dataplane_only
+    subdir('api')
+    subdir('controlplane')
+endif
+

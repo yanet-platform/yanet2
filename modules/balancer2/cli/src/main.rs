@@ -104,12 +104,15 @@ pub struct ShowCmd {
     /// Filter by device name.
     #[arg(long)]
     pub device: Option<String>,
+
     /// Filter by pipeline name.
     #[arg(long, short = 'p')]
     pub pipeline: Option<String>,
+
     /// Filter by function name.
     #[arg(long, short = 'f')]
     pub function: Option<String>,
+    
     /// Filter by chain name.
     #[arg(long)]
     pub chain: Option<String>,
