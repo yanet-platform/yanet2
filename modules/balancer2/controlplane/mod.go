@@ -52,7 +52,7 @@ func NewBalancerModule(cfg *Config, options ...Option) (*Module, error) {
 		return nil, fmt.Errorf("failed to attach shared memory: %w", err)
 	}
 
-	agent, err := shm.AgentReattach("balancer2", cfg.InstanceID, cfg.MemoryRequirements.Unwrap())
+	agent, err := shm.AgentAttach("balancer2", cfg.InstanceID, cfg.MemoryRequirements.Unwrap())
 	if err != nil {
 		err = fmt.Errorf("failed to reattach balancer agent: %w", err)
 		if detachErr := shm.Detach(); detachErr != nil {

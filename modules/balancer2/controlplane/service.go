@@ -109,12 +109,12 @@ func (m *Service) UpdateConfig(
 	defer m.mu.Unlock()
 
 	if cur, ok := m.moduleConfigs[name]; ok {
-		return m.updateExisting(name, cur, params, req.GetSessionsStateName())
+		return m.updateBalancer(name, cur, params, req.GetSessionsStateName())
 	}
-	return m.createNew(name, params, req.GetSessionsStateName())
+	return m.createBalancer(name, params, req.GetSessionsStateName())
 }
 
-func (m *Service) updateExisting(
+func (m *Service) updateBalancer(
 	name string,
 	cur *ModuleConfig,
 	params *ConfigParams,
@@ -134,7 +134,7 @@ func (m *Service) updateExisting(
 	return &balancerpb.UpdateConfigResponse{}, nil
 }
 
-func (m *Service) createNew(
+func (m *Service) createBalancer(
 	name string,
 	params *ConfigParams,
 	sessionsName string,
