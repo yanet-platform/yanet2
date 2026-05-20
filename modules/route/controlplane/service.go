@@ -2,7 +2,6 @@ package route
 
 import (
 	"context"
-	"net/netip"
 	"sync"
 
 	"go.uber.org/zap"
@@ -128,10 +127,20 @@ func (m *RouteService) ShowFIB(
 			}
 		}
 
-		response.Entries = append(response.Entries, &routepb.FIBEntry{
-			Prefix:   formatPrefixRange(e.PrefixFrom, e.PrefixTo),
-			Nexthops: nexthops,
-		})
+		prefixes, ok := xnetip.RangeToCIDRs(e.PrefixFrom, e.PrefixTo)
+		if !ok {
+			m.log.Warn("skipping FIB entry with invalid address range",
+				zap.String("from", e.PrefixFrom.String()),
+				zap.String("to", e.PrefixTo.String()),
+			)
+			continue
+		}
+		for _, p := range prefixes {
+			response.Entries = append(response.Entries, &routepb.FIBEntry{
+				Prefix:   p.String(),
+				Nexthops: nexthops,
+			})
+		}
 	}
 	return response, nil
 }
@@ -187,14 +196,4 @@ func (m *RouteService) UpdateFIB(
 	m.configs[name] = module
 
 	return &routepb.UpdateFIBResponse{}, nil
-}
-
-// formatPrefixRange converts an address range to a human-readable
-// string. If the range corresponds to a single CIDR prefix, it returns
-// CIDR notation; otherwise "from-to" range notation.
-func formatPrefixRange(from, to netip.Addr) string {
-	if prefix, ok := xnetip.RangeToCIDR(from, to); ok {
-		return prefix.String()
-	}
-	return from.String() + "-" + to.String()
 }

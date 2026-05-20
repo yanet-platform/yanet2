@@ -85,6 +85,57 @@ func commonPrefixLen6(a, b netip.Addr) int {
 	return xor.LeadingZeros()
 }
 
+// RangeToCIDRs decomposes an address range into the minimal set of CIDR
+// prefixes that exactly covers [from, to].
+//
+// Returns false if from and to belong to different address families or from > to.
+func RangeToCIDRs(from, to netip.Addr) ([]netip.Prefix, bool) {
+	if from.Is4() != to.Is4() {
+		return nil, false
+	}
+	if from.Compare(to) > 0 {
+		return nil, false
+	}
+
+	addrBits := 128
+	if from.Is4() {
+		addrBits = 32
+	}
+
+	var prefixes []netip.Prefix
+	curr := from
+	for {
+		prefixLen := addrBits
+		for prefixLen > 0 {
+			candidate, err := curr.Prefix(prefixLen - 1)
+			if err != nil {
+				break
+			}
+			if candidate.Addr() != curr {
+				break
+			}
+			if LastAddr(candidate).Compare(to) > 0 {
+				break
+			}
+			prefixLen--
+		}
+
+		prefix, err := curr.Prefix(prefixLen)
+		if err != nil {
+			return nil, false
+		}
+
+		prefixes = append(prefixes, prefix)
+		last := LastAddr(prefix)
+		if last == to {
+			break
+		}
+
+		curr = last.Next()
+	}
+	return prefixes, true
+}
+
 func Mask(prefix netip.Prefix) net.IPMask {
 	size := net.IPv4len
 	if !prefix.Addr().Is4() {

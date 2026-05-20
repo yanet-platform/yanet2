@@ -439,6 +439,106 @@ func TestRangeToCIDR(t *testing.T) {
 	}
 }
 
+func TestRangeToCIDRs(t *testing.T) {
+	tests := []struct {
+		name     string
+		from     string
+		to       string
+		expected []string
+		ok       bool
+	}{
+		{
+			name:     "single aligned /24",
+			from:     "192.168.1.0",
+			to:       "192.168.1.255",
+			expected: []string{"192.168.1.0/24"},
+			ok:       true,
+		},
+		{
+			name:     "host /32",
+			from:     "10.0.0.1",
+			to:       "10.0.0.1",
+			expected: []string{"10.0.0.1/32"},
+			ok:       true,
+		},
+		{
+			name:     "full IPv4 space",
+			from:     "0.0.0.0",
+			to:       "255.255.255.255",
+			expected: []string{"0.0.0.0/0"},
+			ok:       true,
+		},
+		{
+			name:     "non-aligned range 10.0.0.0..10.0.0.10",
+			from:     "10.0.0.0",
+			to:       "10.0.0.10",
+			expected: []string{"10.0.0.0/29", "10.0.0.8/31", "10.0.0.10/32"},
+			ok:       true,
+		},
+		{
+			name:     "real IPv6 dump range",
+			from:     "2a02:6b8:c0e:600::",
+			to:       "2a02:6b8:c0e:8ff:ffff:ffff:ffff:ffff",
+			expected: []string{"2a02:6b8:c0e:600::/55", "2a02:6b8:c0e:800::/56"},
+			ok:       true,
+		},
+		{
+			name:     "full IPv6 space",
+			from:     "::",
+			to:       "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
+			expected: []string{"::/0"},
+			ok:       true,
+		},
+		{
+			name: "mixed address families",
+			from: "10.0.0.0",
+			to:   "2001:db8::ffff",
+			ok:   false,
+		},
+		{
+			name: "from > to",
+			from: "10.0.0.10",
+			to:   "10.0.0.0",
+			ok:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			from := netip.MustParseAddr(tt.from)
+			to := netip.MustParseAddr(tt.to)
+
+			prefixes, ok := RangeToCIDRs(from, to)
+			require.Equal(t, tt.ok, ok)
+			if !tt.ok {
+				require.Nil(t, prefixes)
+				return
+			}
+
+			// Each returned prefix must be properly masked.
+			for _, p := range prefixes {
+				require.Equal(t, p.Masked(), p, "prefix %s is not properly masked", p)
+			}
+
+			// Build expected prefixes.
+			expected := make([]netip.Prefix, len(tt.expected))
+			for idx, s := range tt.expected {
+				expected[idx] = netip.MustParsePrefix(s)
+			}
+			require.Equal(t, expected, prefixes)
+
+			// Verify contiguous coverage: re-merge and confirm [from..to].
+			require.Equal(t, from, prefixes[0].Addr(), "first prefix must start at from")
+			require.Equal(t, to, LastAddr(prefixes[len(prefixes)-1]), "last prefix must end at to")
+			for idx := 1; idx < len(prefixes); idx++ {
+				prev := LastAddr(prefixes[idx-1])
+				next := prefixes[idx].Addr()
+				require.Equal(t, prev.Next(), next, "gap between prefixes[%d] and prefixes[%d]", idx-1, idx)
+			}
+		})
+	}
+}
+
 // BenchmarkLastAddr benchmarks the LastAddr function
 func BenchmarkLastAddr(b *testing.B) {
 	prefixes := []netip.Prefix{
