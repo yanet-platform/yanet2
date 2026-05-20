@@ -245,7 +245,7 @@ func (m *ModuleConfig) commitRealUpdates(staged map[int]*vsUpdate) error {
 	sort.Ints(order)
 	for _, vsIdx := range order {
 		info := staged[vsIdx]
-		live := m.index[info.id].reals
+		index := m.index[info.id].reals
 		if info.stateChanged {
 			states := make([]bool, len(info.reals))
 			for _, rs := range info.reals {
@@ -255,7 +255,7 @@ func (m *ModuleConfig) commitRealUpdates(staged map[int]*vsUpdate) error {
 				return fmt.Errorf("vs[%d]: update real states: %w", vsIdx, err)
 			}
 			for k, rs := range info.reals {
-				live[k].enabled = rs.enabled
+				index[k].enabled = rs.enabled
 			}
 		}
 		if info.weightChanged {
@@ -267,7 +267,7 @@ func (m *ModuleConfig) commitRealUpdates(staged map[int]*vsUpdate) error {
 				return fmt.Errorf("vs[%d]: update real weights: %w", vsIdx, err)
 			}
 			for k, rs := range info.reals {
-				live[k].weight = rs.weight
+				index[k].weight = rs.weight
 			}
 		}
 	}
