@@ -111,24 +111,24 @@ func buildIndex(vs []*balancerpb.VsConfig, prev map[vsID]*vsSlot) (map[vsID]*vsS
 			if _, dup := slot.reals[rk]; dup {
 				return nil, fmt.Errorf("vs[%d]: real[%d]: duplicate found", vsIdx, rIdx)
 			}
-			enabled := r.Enabled
-			weight := r.Weight
+			enabled := false
+			weight := uint32(0)
 			if prevSlot != nil {
 				if prevRealSlot, exists := prevSlot.reals[rk]; exists {
-					enabled = &prevRealSlot.enabled
-					weight = &prevRealSlot.weight
+					enabled = prevRealSlot.enabled
+					weight = prevRealSlot.weight
 				}
 			}
-			if enabled == nil {
-				return nil, fmt.Errorf("vs[%d]: real[%d]: 'enabled' required", vsIdx, rIdx)
+			if r.Enabled != nil {
+				enabled = *r.Enabled
 			}
-			if weight == nil {
-				return nil, fmt.Errorf("vs[%d]: real[%d]: 'weight' required", vsIdx, rIdx)
+			if r.Weight != nil {
+				weight = *r.Weight
 			}
 			slot.reals[rk] = &realSlot{
 				idx:     rIdx,
-				enabled: *enabled,
-				weight:  *weight,
+				enabled: enabled,
+				weight:  weight,
 			}
 		}
 		out[key] = slot
