@@ -40,6 +40,16 @@ type Module struct {
 }
 
 func NewBalancerModule(cfg *Config, options ...Option) (*Module, error) {
+	if cfg == nil {
+		return nil, errors.New("config is required")
+	}
+	if err := cfg.MemoryPath.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid config: memory path: %w", err)
+	}
+	if err := cfg.MemoryRequirements.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid config: memory requirements: %w", err)
+	}
+
 	opts := newModuleOptions()
 	for _, o := range options {
 		o(opts)
