@@ -16,11 +16,10 @@ import (
 type ConfigParams struct {
 	Vs       *balancerpb.VsConfigList
 	Timeouts *balancerpb.SessionsTimeouts
-	// Addr is stored and surfaced via GetConfig but not yet propagated
-	// to the dataplane; ICMP source/decap support is not implemented.
+	// Addr is not yet propagated to the dataplane;
+	// ICMP source/decap support is not implemented.
 	Addr *balancerpb.AddrConfig
-	// Wlc is stored and surfaced via GetConfig but not yet implemented.
-	Wlc *balancerpb.WlcConfig
+	Wlc  *balancerpb.WlcConfig
 }
 
 type vsID struct {
@@ -303,6 +302,6 @@ func makeRealID(id *balancerpb.RelativeRealIdentifier) (realID, error) {
 	if id.Port > math.MaxUint16 {
 		return realID{}, fmt.Errorf("port out of range: %d", id.Port)
 	}
-	// real ports not used in current implementation
+	// real ports not used for now
 	return realID{addr: addr}, nil
 }

@@ -245,8 +245,6 @@ func toCScheduler(s balancerpb.VsScheduler) (cbalancer2.VSScheduler, error) {
 	case balancerpb.VsScheduler_WRR:
 		return cbalancer2.VSSchedulerWRR, nil
 	case balancerpb.VsScheduler_WLC:
-		// WLC currently maps to WRR; weighted-least-connection
-		// logic on top of WRR is planned but not yet implemented.
 		return cbalancer2.VSSchedulerWRR, nil
 	case balancerpb.VsScheduler_OP:
 		return cbalancer2.VSSchedulerOP, nil
