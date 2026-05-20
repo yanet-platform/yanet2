@@ -1111,7 +1111,8 @@ balancer_vs_update_real_weights(
 		return -1;
 	}
 
-	struct memory_context *mctx = &cfg->cp_module.agent->memory_context;
+	struct agent *agent = ADDR_OF(&cfg->cp_module.agent);
+	struct memory_context *mctx = &agent->memory_context;
 	struct virtual_service *vs = ADDR_OF(&cfg->vs) + vs_idx;
 	struct real_selector *selector = ADDR_OF(&vs->selector);
 
