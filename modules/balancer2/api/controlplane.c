@@ -895,7 +895,7 @@ init_module_config(
 		return -1;
 	}
 
-	if (cp_module_init(&cfg->cp_module, agent, "balancer", name, error) !=
+	if (cp_module_init(&cfg->cp_module, agent, "balancer2", name, error) !=
 	    0) {
 		return -1;
 	}
