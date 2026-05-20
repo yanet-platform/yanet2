@@ -82,8 +82,14 @@ message RealIdentifier {
 
 message RealConfig {
   RelativeRealIdentifier id = 1;
-  uint32 weight = 2;
-  filterpb.IPNet src = 3;
+
+  // If not set, inherit from previous config.
+  optional uint32 weight = 2;
+
+  // If not set, inherit from previous config.
+  optional bool enabled = 3;
+
+  filterpb.IPNet src = 4;
 }
 
 message VsFlags {
