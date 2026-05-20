@@ -211,6 +211,7 @@ func (m *Agent) UpdatePlainDevices(devices []DeviceConfig) error {
 		if cerr := cerrors.FromC(unsafe.Pointer(cErr)); cerr != nil {
 			return fmt.Errorf("failed to initialize plain device config: %w", cerr)
 		}
+		defer C.cp_device_plain_config_free(cCfg)
 
 		for idx := range input {
 			pipeline := &input[idx]
