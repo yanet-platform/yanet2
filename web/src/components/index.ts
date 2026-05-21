@@ -14,3 +14,8 @@ export * from './TableSearchBar';
 export * from './CounterDisplay';
 export * from './CountersContext';
 export * from './ConfigTabs';
+export * from './ConfigTabStrip';
+export * from './SaveDiffModal';
+export { default as YamlIOModal } from './YamlIOModal';
+export type { YamlIOModalProps, YamlIOMode } from './YamlIOModal';
+export { default as BulkBar } from './BulkBar';

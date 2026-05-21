@@ -118,4 +118,14 @@ export const route = {
     showFIB: (request: ShowFIBRequest, options?: CallOptions): Promise<ShowFIBResponse> => {
         return routeService.callWithBody<ShowFIBResponse>('ShowFIB', request, options);
     },
+    updateFIB: (request: UpdateFIBRequest, options?: CallOptions): Promise<UpdateFIBResponse> => {
+        return routeService.callWithBody<UpdateFIBResponse>('UpdateFIB', request, options);
+    },
 };
+
+export interface UpdateFIBRequest {
+    module_name?: string;
+    entries?: FIBEntry[];
+}
+
+export interface UpdateFIBResponse {}

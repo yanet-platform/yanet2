@@ -1,7 +1,7 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { Button, Flex, Icon, Text, TextInput } from '@gravity-ui/uikit';
 import { Magnifier, Pause, Play, Plus } from '@gravity-ui/icons';
-import { PageLayout, PageLoader } from '../../../components';
+import { PageLayout, PageLoader, ConfigTabStrip, BulkBar } from '../../../components';
 import { useForwardDraft } from './useForwardDraft';
 import { useUnsavedChangesBlocker } from '../../builtin/_shared/lane-editor';
 import type { Rule } from '../../../api/forward';
@@ -14,56 +14,8 @@ import type { RuleDrawerHandle } from './RuleDrawer';
 import YamlIO from './YamlIO';
 import { SaveDiffModal } from './SaveDiffModal';
 import { useForwardRuleCounters } from './useForwardRuleCounters';
+import '../../../styles/draft-page.scss';
 import './forward.scss';
-
-/** Floating bulk-action bar that appears when rules are selected. */
-const BulkBar: React.FC<{
-    count: number;
-    onDelete: () => void;
-    onClear: () => void;
-}> = ({ count, onDelete, onClear }) => (
-    <div className="fw-bulk-bar">
-        <span className="fw-bulk-bar__count">{count} selected</span>
-        <button type="button" className="fw-btn fw-btn--danger fw-btn--sm" onClick={onDelete}>
-            Delete
-        </button>
-        <button type="button" className="fw-icon-btn fw-icon-btn--sm" onClick={onClear} aria-label="Clear selection">
-            ✕
-        </button>
-    </div>
-);
-
-/** Config tab strip with rule counts and add button. */
-const ConfigTabStrip: React.FC<{
-    configs: string[];
-    activeConfig: string;
-    ruleCounts: Map<string, number>;
-    dirtyConfigs: Set<string>;
-    onSelect: (c: string) => void;
-    onAddConfig: () => void;
-}> = ({ configs, activeConfig, ruleCounts, dirtyConfigs, onSelect, onAddConfig }) => (
-    <div className="fw-tabs" role="tablist">
-        {configs.map((cfg) => (
-            <button
-                key={cfg}
-                type="button"
-                role="tab"
-                aria-selected={cfg === activeConfig}
-                className={`fw-tab${cfg === activeConfig ? ' fw-tab--active' : ''}${dirtyConfigs.has(cfg) ? ' fw-tab--dirty' : ''}`}
-                onClick={() => onSelect(cfg)}
-            >
-                <span className="fw-tab__label">{cfg}</span>
-                {dirtyConfigs.has(cfg) && (
-                    <span className="fw-tab__dot" aria-label="unsaved changes" />
-                )}
-                <span className="fw-tab__count">{ruleCounts.get(cfg) ?? 0}</span>
-            </button>
-        ))}
-        <Button view="flat" size="s" onClick={onAddConfig} className="fw-tabs__add" title="Add config">
-            <Icon data={Plus} size={14} />
-        </Button>
-    </div>
-);
 
 const ForwardPage: React.FC = () => {
     const {
@@ -290,7 +242,7 @@ const ForwardPage: React.FC = () => {
                         <ConfigTabStrip
                             configs={draftConfigs}
                             activeConfig={currentConfig}
-                            ruleCounts={ruleCounts}
+                            counts={ruleCounts}
                             dirtyConfigs={dirtySet}
                             onSelect={(c) => {
                                 setActiveConfig(c);
@@ -320,6 +272,7 @@ const ForwardPage: React.FC = () => {
                 {selectedIds.size > 0 && (
                     <BulkBar
                         count={selectedIds.size}
+                        itemNoun="rule"
                         onDelete={() => setDeleteConfirmOpen(true)}
                         onClear={() => setSelectedIds(new Set())}
                     />
