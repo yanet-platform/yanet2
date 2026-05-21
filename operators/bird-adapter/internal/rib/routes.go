@@ -149,8 +149,8 @@ func ToPBMPLSRoute(route *Route, source netip.Addr) *routemplspb.Rule {
 		Nexthop: &routemplspb.NextHop{
 			Kind:          routemplspb.ActionKind_ACTION_KIND_TUNNEL,
 			Label:         label,
-			DestinationIp: destination.AsSlice(),
-			SourceIp:      source.AsSlice(),
+			DestinationIp: commonpb.NewIPAddressFromAddr(destination),
+			SourceIp:      commonpb.NewIPAddressFromAddr(source),
 
 			Weight: weight,
 

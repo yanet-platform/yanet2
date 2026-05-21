@@ -12,6 +12,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/yanet-platform/yanet2/bindings/go/filter"
+	"github.com/yanet-platform/yanet2/common/commonpb"
 	"github.com/yanet-platform/yanet2/common/filterpb"
 	"github.com/yanet-platform/yanet2/common/go/maptrie"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
@@ -132,8 +133,8 @@ func (m *RouteMPLSService) ShowConfig(
 						},
 						Nexthop: &routemplspb.NextHop{
 							Label:         nexthop.MPLSLabel,
-							SourceIp:      nexthop.Source.AsSlice(),
-							DestinationIp: nexthop.Destination.AsSlice(),
+							SourceIp:      commonpb.NewIPAddressFromAddr(nexthop.Source),
+							DestinationIp: commonpb.NewIPAddressFromAddr(nexthop.Destination),
 							Weight:        nexthop.Weight,
 							Counter:       nexthop.Counter,
 						},
@@ -259,13 +260,13 @@ func makePrefix(prefix *filterpb.IPPrefix) (netip.Prefix, error) {
 }
 
 func makeNextHop(nexthop *routemplspb.NextHop) (NextHop, error) {
-	src, ok := netip.AddrFromSlice(nexthop.SourceIp)
-	if !ok {
-		return NextHop{}, fmt.Errorf("invalid source address")
+	src, err := nexthop.GetSourceIp().ToAddr()
+	if err != nil {
+		return NextHop{}, fmt.Errorf("invalid source_ip (bytes=%x): %w", nexthop.GetSourceIp().GetAddr(), err)
 	}
-	dst, ok := netip.AddrFromSlice(nexthop.DestinationIp)
-	if !ok {
-		return NextHop{}, fmt.Errorf("invalid destination address")
+	dst, err := nexthop.GetDestinationIp().ToAddr()
+	if err != nil {
+		return NextHop{}, fmt.Errorf("invalid destination_ip (bytes=%x): %w", nexthop.GetDestinationIp().GetAddr(), err)
 	}
 
 	return NextHop{
