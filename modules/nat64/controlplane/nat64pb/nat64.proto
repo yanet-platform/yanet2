@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package nat64pb;
 
+import "common/commonpb/ipaddr.proto";
+
 option go_package = "github.com/yanet-platform/yanet2/modules/nat64/controlplane/nat64pb;nat64pb";
 
 // NAT64Service is a control-plane service for managing NAT64 module
@@ -52,9 +54,9 @@ message Prefix {
 
 // Mapping represents an IPv4-IPv6 address mapping
 message Mapping {
-  bytes ipv4 = 1;          // IPv4 address in network byte order
-  bytes ipv6 = 2;          // IPv6 address (16 bytes)
-  uint32 prefix_index = 3; // Index of the used prefix
+  commonpb.IPAddress ipv4 = 1; // IPv4 host address
+  commonpb.IPAddress ipv6 = 2; // IPv6 host address
+  uint32 prefix_index = 3;     // Index of the used prefix
 }
 
 // Config represents configuration for a single dataplane instance
@@ -88,9 +90,9 @@ message RemovePrefixResponse {}
 // AddMappingRequest specifies an IPv4-IPv6 mapping to add
 message AddMappingRequest {
   string name = 1;
-  bytes ipv4 = 2;          // IPv4 address in network byte order
-  bytes ipv6 = 3;          // IPv6 address (16 bytes)
-  uint32 prefix_index = 4; // Index of the used prefix
+  commonpb.IPAddress ipv4 = 2; // IPv4 host address
+  commonpb.IPAddress ipv6 = 3; // IPv6 host address
+  uint32 prefix_index = 4;     // Index of the used prefix
 }
 
 message AddMappingResponse {}
@@ -98,7 +100,7 @@ message AddMappingResponse {}
 // RemoveMappingRequest specifies an IPv4-IPv6 mapping to remove
 message RemoveMappingRequest {
   string name = 1;
-  bytes ipv4 = 2; // IPv4 address to remove mapping for
+  commonpb.IPAddress ipv4 = 2; // IPv4 host address to remove mapping for
 }
 
 message RemoveMappingResponse {}

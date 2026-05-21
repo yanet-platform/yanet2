@@ -3,12 +3,14 @@ package nat64
 import (
 	"context"
 	"fmt"
+	"net/netip"
 	"sync"
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/yanet-platform/yanet2/common/commonpb"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/nat64/controlplane/nat64pb"
 )
@@ -34,8 +36,8 @@ type NAT64Config struct {
 
 // Mapping represents an IPv4-IPv6 address mapping
 type Mapping struct {
-	IPv4        []byte
-	IPv6        []byte
+	IPv4        netip.Addr
+	IPv6        netip.Addr
 	PrefixIndex uint32
 }
 
@@ -101,8 +103,8 @@ func (m *NAT64Service) ShowConfig(ctx context.Context, req *nat64pb.ShowConfigRe
 
 		for _, mapping := range config.Mappings {
 			response.Config.Mappings = append(response.Config.Mappings, &nat64pb.Mapping{
-				Ipv4:        mapping.IPv4,
-				Ipv6:        mapping.IPv6,
+				Ipv4:        commonpb.NewIPAddressFromAddr(mapping.IPv4),
+				Ipv6:        commonpb.NewIPAddressFromAddr(mapping.IPv6),
 				PrefixIndex: mapping.PrefixIndex,
 			})
 		}
@@ -146,11 +148,19 @@ func (m *NAT64Service) AddPrefix(ctx context.Context, req *nat64pb.AddPrefixRequ
 }
 
 func (m *NAT64Service) AddMapping(ctx context.Context, req *nat64pb.AddMappingRequest) (*nat64pb.AddMappingResponse, error) {
-	if len(req.Ipv4) != 4 {
-		return nil, status.Errorf(codes.InvalidArgument, "invalid IPv4 address length: got %d, want 4", len(req.Ipv4))
+	ipv4, err := req.GetIpv4().ToAddr()
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid ipv4 (bytes=%x): %v", req.GetIpv4().GetAddr(), err)
 	}
-	if len(req.Ipv6) != 16 {
-		return nil, status.Errorf(codes.InvalidArgument, "invalid IPv6 address length: got %d, want 16", len(req.Ipv6))
+	if !ipv4.Is4() {
+		return nil, status.Errorf(codes.InvalidArgument, "ipv4 %q is not an IPv4 address", ipv4)
+	}
+	ipv6, err := req.GetIpv6().ToAddr()
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid ipv6 (bytes=%x): %v", req.GetIpv6().GetAddr(), err)
+	}
+	if !ipv6.Is6() || ipv6.Is4In6() {
+		return nil, status.Errorf(codes.InvalidArgument, "ipv6 %q is not a pure IPv6 address", ipv6)
 	}
 
 	name := req.GetName()
@@ -169,8 +179,8 @@ func (m *NAT64Service) AddMapping(ctx context.Context, req *nat64pb.AddMappingRe
 	}
 
 	config.Mappings = append(config.Mappings, Mapping{
-		IPv4:        req.Ipv4,
-		IPv6:        req.Ipv6,
+		IPv4:        ipv4,
+		IPv6:        ipv6,
 		PrefixIndex: req.PrefixIndex,
 	})
 
@@ -181,8 +191,8 @@ func (m *NAT64Service) AddMapping(ctx context.Context, req *nat64pb.AddMappingRe
 
 	m.log.Info("successfully added mapping",
 		zap.String("name", name),
-		zap.Binary("ipv4", req.Ipv4),
-		zap.Binary("ipv6", req.Ipv6),
+		zap.Stringer("ipv4", ipv4),
+		zap.Stringer("ipv6", ipv6),
 		zap.Uint32("prefix_index", req.PrefixIndex),
 	)
 
@@ -282,7 +292,9 @@ func (m *NAT64Service) updateModuleConfig(name string) error {
 
 	// Configure all mappings.
 	for _, mapping := range config.Mappings {
-		if err := moduleConfig.AddMapping(mapping.IPv4, mapping.IPv6, mapping.PrefixIndex); err != nil {
+		ipv4 := mapping.IPv4.As4()
+		ipv6 := mapping.IPv6.As16()
+		if err := moduleConfig.AddMapping(ipv4[:], ipv6[:], mapping.PrefixIndex); err != nil {
 			return fmt.Errorf("failed to add mapping: %w", err)
 		}
 	}

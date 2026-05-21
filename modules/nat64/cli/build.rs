@@ -6,8 +6,9 @@ pub fn main() -> Result<(), Box<dyn Error>> {
     tonic_build::configure()
         .emit_rerun_if_changed(false)
         .build_server(false)
+        .extern_path(".commonpb", "::commonpb::pb")
         .message_attribute(".", "#[derive(Serialize)]")
-        .compile_protos(&["nat64pb/nat64.proto"], &["../controlplane"])?;
+        .compile_protos(&["nat64pb/nat64.proto"], &["../controlplane", "../../.."])?;
 
     Ok(())
 }

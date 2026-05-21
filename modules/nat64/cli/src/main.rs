@@ -1,8 +1,11 @@
-use core::error::Error;
-use std::net::{Ipv4Addr, Ipv6Addr};
+use core::{
+    error::Error,
+    net::{Ipv4Addr, Ipv6Addr},
+};
 
 use clap::{ArgAction, CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::CompleteEnv;
+use commonpb::pb::IpAddress;
 use nat64pb::{
     nat64_service_client::Nat64ServiceClient, AddMappingRequest, AddPrefixRequest, ListConfigsRequest,
     SetDropUnknownRequest, SetMtuRequest, ShowConfigRequest, ShowConfigResponse,
@@ -226,8 +229,8 @@ impl NAT64Service {
     pub async fn add_mapping(&mut self, cmd: AddMappingCmd) -> Result<(), Box<dyn Error>> {
         let request = AddMappingRequest {
             name: cmd.config_name.clone(),
-            ipv4: cmd.ipv4.octets().to_vec(),
-            ipv6: cmd.ipv6.octets().to_vec(),
+            ipv4: Some(IpAddress { addr: cmd.ipv4.octets().to_vec() }),
+            ipv6: Some(IpAddress { addr: cmd.ipv6.octets().to_vec() }),
             prefix_index: cmd.prefix_index,
         };
         log::debug!("AddMappingRequest: {request:?}");
@@ -283,9 +286,12 @@ pub fn print_tree(resp: &ShowConfigResponse) -> Result<(), Box<dyn Error>> {
 
         tree.begin_child("Mappings".to_string());
         for mapping in &config.mappings {
+            let ipv4 = mapping.ipv4.as_ref().map(|a| a.to_string()).unwrap_or_default();
+            let ipv6 = mapping.ipv6.as_ref().map(|a| a.to_string()).unwrap_or_default();
+
             tree.add_empty_child(format!(
-                "IPv4: {:?} -> IPv6: {:?} (prefix: {})",
-                mapping.ipv4, mapping.ipv6, mapping.prefix_index
+                "IPv4: {} -> IPv6: {} (prefix: {})",
+                ipv4, ipv6, mapping.prefix_index
             ));
         }
         tree.end_child();
