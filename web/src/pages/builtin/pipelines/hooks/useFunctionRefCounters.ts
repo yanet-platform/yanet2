@@ -7,6 +7,8 @@ import type { InterpolatedCounterData } from '../../../../hooks';
 /** Well-known key for pipeline-level fallthrough counters. */
 export const PIPELINE_COUNTER_KEY = '__pipeline__';
 
+const DEFAULT_INTERVAL_MS = 1500;
+
 const sumCounterValues = (counter: CounterInfo | undefined): bigint => {
     if (!counter?.instances) {
         return BigInt(0);
@@ -37,6 +39,9 @@ export interface UseFunctionRefCountersResult {
  * Results are keyed by nodeId (FunctionRef.id), not by function name, so duplicate
  * function names in a pipeline each get their own bucket pointing to shared counters.
  * When refs is empty, fetches pipeline-level counters under PIPELINE_COUNTER_KEY.
+ *
+ * The topology (device list) is re-fetched at DEFAULT_INTERVAL_MS so that
+ * adding or removing a device is reflected without a page reload.
  */
 export const useFunctionRefCounters = (
     pipelineName: string,
@@ -45,9 +50,12 @@ export const useFunctionRefCounters = (
     const [devices, setDevices] = useState<DeviceInfo[]>([]);
 
     useEffect(() => {
-        const fetchDevices = async () => {
+        let cancelled = false;
+
+        const fetchDevices = async (): Promise<void> => {
             try {
                 const response = await API.inspect.inspect();
+                if (cancelled) return;
                 const allDevices = response.instance_info?.devices ?? [];
 
                 const matchingDevices = allDevices.filter(device => {
@@ -58,12 +66,17 @@ export const useFunctionRefCounters = (
                 });
 
                 setDevices(matchingDevices);
-            } catch (error) {
-                console.error('Failed to fetch devices for counters:', error);
+            } catch {
+                // Topology fetch failures are non-fatal; counters just stay empty.
             }
         };
 
         fetchDevices();
+        const id = setInterval(fetchDevices, DEFAULT_INTERVAL_MS);
+        return () => {
+            cancelled = true;
+            clearInterval(id);
+        };
     }, [pipelineName]);
 
     const hasFunctionRefs = refs.length > 0;
@@ -104,7 +117,7 @@ export const useFunctionRefCounters = (
                 const { ref, response } = result.value;
                 const rxPackets = sumCounterValues(findCounter(response.counters, 'input'));
                 const rxBytes = sumCounterValues(findCounter(response.counters, 'input_bytes'));
-                const current = newValues.get(ref.nodeId)!;
+                const current = newValues.get(ref.nodeId) ?? { packets: BigInt(0), bytes: BigInt(0) };
                 newValues.set(ref.nodeId, {
                     packets: current.packets + rxPackets,
                     bytes: current.bytes + rxBytes,
@@ -128,7 +141,7 @@ export const useFunctionRefCounters = (
                 const response = result.value;
                 const rxPackets = sumCounterValues(findCounter(response.counters, 'input'));
                 const rxBytes = sumCounterValues(findCounter(response.counters, 'input_bytes'));
-                const current = newValues.get(PIPELINE_COUNTER_KEY)!;
+                const current = newValues.get(PIPELINE_COUNTER_KEY) ?? { packets: BigInt(0), bytes: BigInt(0) };
                 newValues.set(PIPELINE_COUNTER_KEY, {
                     packets: current.packets + rxPackets,
                     bytes: current.bytes + rxBytes,

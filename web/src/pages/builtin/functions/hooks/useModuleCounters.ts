@@ -4,6 +4,8 @@ import type { CounterInfo, DeviceInfo } from '../../../../api';
 import { useInterpolatedCounters } from '../../../../hooks';
 import type { InterpolatedCounterData } from '../../../../hooks';
 
+const DEFAULT_INTERVAL_MS = 1500;
+
 const sumCounterValues = (counter: CounterInfo | undefined): bigint => {
     if (!counter?.instances) return BigInt(0);
     return counter.instances.reduce((sum, inst) => {
@@ -34,6 +36,9 @@ export interface UseModuleCountersResult {
  * Polls module counters every 1 second from backend using the Module API.
  * Aggregates counters across all devices and pipelines using the function.
  * Updates visual every 30ms using linear interpolation.
+ *
+ * The topology (device and pipeline list) is re-fetched at DEFAULT_INTERVAL_MS
+ * so that adding or removing a device is reflected without a page reload.
  */
 export const useModuleCounters = (
     functionName: string,
@@ -43,9 +48,12 @@ export const useModuleCounters = (
     const [pipelineNames, setPipelineNames] = useState<string[]>([]);
 
     useEffect(() => {
-        const fetchDevicesAndPipelines = async () => {
+        let cancelled = false;
+
+        const fetchDevicesAndPipelines = async (): Promise<void> => {
             try {
                 const response = await API.inspect.inspect();
+                if (cancelled) return;
                 const instanceInfo = response.instance_info;
                 const allDevices = instanceInfo?.devices ?? [];
                 const allPipelines = instanceInfo?.pipelines ?? [];
@@ -57,6 +65,7 @@ export const useModuleCounters = (
 
                 const pipelineNamesSet = new Set(matchingPipelines.map(p => p.name).filter((n): n is string => !!n));
 
+                const matchingDeviceNames = new Set<string>();
                 const matchingDevices: DeviceInfo[] = [];
                 for (const device of allDevices) {
                     const inputPipelines = device.input_pipelines ?? [];
@@ -65,7 +74,9 @@ export const useModuleCounters = (
 
                     for (const pipeline of allDevicePipelines) {
                         if (pipeline.name && pipelineNamesSet.has(pipeline.name)) {
-                            if (!matchingDevices.includes(device)) {
+                            const devName = device.name ?? '';
+                            if (!matchingDeviceNames.has(devName)) {
+                                matchingDeviceNames.add(devName);
                                 matchingDevices.push(device);
                             }
                         }
@@ -74,12 +85,17 @@ export const useModuleCounters = (
 
                 setDevices(matchingDevices);
                 setPipelineNames(Array.from(pipelineNamesSet));
-            } catch (error) {
-                console.error('Failed to fetch devices for counters:', error);
+            } catch {
+                // Topology fetch failures are non-fatal; counters just stay empty.
             }
         };
 
         fetchDevicesAndPipelines();
+        const id = setInterval(fetchDevicesAndPipelines, DEFAULT_INTERVAL_MS);
+        return () => {
+            cancelled = true;
+            clearInterval(id);
+        };
     }, [functionName]);
 
     const nodeIds = moduleInfoList.map(m => m.nodeId);
@@ -121,7 +137,7 @@ export const useModuleCounters = (
             const { moduleInfo, response } = result.value;
             const rxPackets = sumCounterValues(findCounter(response.counters, 'rx'));
             const rxBytes = sumCounterValues(findCounter(response.counters, 'rx_bytes'));
-            const current = newValues.get(moduleInfo.nodeId)!;
+            const current = newValues.get(moduleInfo.nodeId) ?? { packets: BigInt(0), bytes: BigInt(0) };
             newValues.set(moduleInfo.nodeId, {
                 packets: current.packets + rxPackets,
                 bytes: current.bytes + rxBytes,

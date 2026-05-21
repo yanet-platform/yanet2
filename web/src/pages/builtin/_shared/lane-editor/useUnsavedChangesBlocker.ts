@@ -1,6 +1,12 @@
 import { useEffect } from 'react';
 import { useSidebarContext } from '../../../../types';
 
+// TODO: also block react-router navigation (back/forward, useNavigate,
+// redirect routes). Requires migrating App.tsx from <BrowserRouter> to
+// createBrowserRouter + <RouterProvider> so that useBlocker becomes
+// available. Tracked as a follow-up to verdict 1 of the builtin-pages
+// review.
+
 /**
  * Registers a beforeunload handler when hasUnsavedChanges is true, so the
  * browser shows its native "Leave page?" confirmation on tab close or hard

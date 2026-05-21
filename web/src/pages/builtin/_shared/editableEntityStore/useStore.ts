@@ -75,6 +75,9 @@ export const useEditableEntityStore = <T, W, I, L, G, A>(
         reducer as (state: EntityState<T>, action: A | BaseEntityAction<T>) => EntityState<T>,
         initialState,
     );
+    const stateRef = useRef(state);
+    stateRef.current = state;
+
     const [loading, setLoading] = useState(true);
     const [entityIds, setEntityIds] = useState<string[]>([]);
 
@@ -123,14 +126,28 @@ export const useEditableEntityStore = <T, W, I, L, G, A>(
     }, [load]);
 
     const save = useCallback(async (id: string): Promise<void> => {
-        const { api, makeUpdateRequest, localToApi, toastPrefix, entityLabel } = configRef.current;
-        const entity = state.local[id];
+        const { api, makeUpdateRequest, localToApi, getEntity, apiToLocal, toastPrefix, entityLabel } = configRef.current;
+        const entity = stateRef.current.local[id];
         if (!entity) {
             return;
         }
         try {
             await api.update(makeUpdateRequest(localToApi(entity)));
-            rawDispatch({ type: 'LOAD_ENTITY', entity, id } as BaseEntityAction<T>);
+            // Fetch the server-authoritative state after save so LOAD_ENTITY
+            // reflects any normalisation the backend may have applied.
+            const makeDeleteRequest = configRef.current.makeDeleteRequest;
+            let serverEntity: T | undefined;
+            try {
+                const resp = await api.get({ id: makeDeleteRequest(id).id });
+                const wire = getEntity(resp);
+                if (wire !== undefined) {
+                    serverEntity = apiToLocal(wire);
+                }
+            } catch {
+                // Fall back to the local entity so save still clears dirty.
+            }
+            const committed = serverEntity ?? entity;
+            rawDispatch({ type: 'LOAD_ENTITY', entity: committed, id } as BaseEntityAction<T>);
             toaster.success(`${toastPrefix}-save-${id}`, `${entityLabel} "${id}" saved.`);
         } catch (err) {
             toaster.error(
@@ -139,14 +156,14 @@ export const useEditableEntityStore = <T, W, I, L, G, A>(
                 err,
             );
         }
-    }, [state.local]);
+    }, []);
 
     const discard = useCallback((id: string): void => {
-        const server = state.server[id];
+        const server = stateRef.current.server[id];
         if (server) {
             rawDispatch({ type: 'LOAD_ENTITY', entity: server, id } as BaseEntityAction<T>);
         }
-    }, [state.server]);
+    }, []);
 
     const isDirty = useCallback((id: string): boolean => state.dirty.has(id), [state.dirty]);
 

@@ -98,6 +98,7 @@ export const DeviceDetails: React.FC<DeviceDetailsProps> = ({
     const [loadingPipelines, setLoadingPipelines] = useState(false);
 
     useEffect(() => {
+        if (!device) return;
         const load = async () => {
             setLoadingPipelines(true);
             const pipelines = await loadPipelineList();
@@ -105,7 +106,7 @@ export const DeviceDetails: React.FC<DeviceDetailsProps> = ({
             setLoadingPipelines(false);
         };
         load();
-    }, [loadPipelineList]);
+    }, [device, loadPipelineList]);
 
     const handleSaveClick = useCallback(() => {
         setDiffOpen(true);

@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
-import { PageLayout, PageLoader } from '../../../components';
+import { PageLayout, PageLoader, EmptyState } from '../../../components';
 import type { DeviceType } from '../../../api/devices';
 import type { LocalDevice } from './types';
 import { useDeviceCounters } from '../../../hooks';
@@ -20,6 +20,7 @@ const DevicesPage: React.FC = () => {
     const {
         devices,
         loading,
+        error,
         createDevice,
         updateDevice,
         saveDevice,
@@ -107,6 +108,14 @@ const DevicesPage: React.FC = () => {
         return (
             <PageLayout title="Devices">
                 <PageLoader loading={loading} size="l" />
+            </PageLayout>
+        );
+    }
+
+    if (!loading && error && devices.length === 0) {
+        return (
+            <PageLayout title="Devices">
+                <EmptyState message={error} />
             </PageLayout>
         );
     }

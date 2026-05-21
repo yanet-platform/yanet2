@@ -82,6 +82,7 @@ export const InlineEdit: React.FC<InlineEditProps> = ({
             tryCommit();
         } else if (e.key === 'Escape') {
             e.preventDefault();
+            e.stopPropagation();
             revert();
         }
     }, [tryCommit, revert]);

@@ -139,11 +139,16 @@ export const usePipelineCounters = (
     const [rates, setRates] = useState<Map<string, { pps: number; bps: number }>>(new Map());
     const [series, setSeries] = useState<Map<string, number[]>>(() => new Map());
 
+    const devicesRef = useRef(devices);
+    devicesRef.current = devices;
+    const pipelinesRef = useRef(pipelines);
+    pipelinesRef.current = pipelines;
+
     const devicesKey = useMemo(() => devices.join('|'), [devices]);
     const pipelinesKey = useMemo(() => pipelines.join('|'), [pipelines]);
 
     useEffect(() => {
-        if (!enabled || devices.length === 0 || pipelines.length === 0) {
+        if (!enabled || devicesRef.current.length === 0 || pipelinesRef.current.length === 0) {
             prevRef.current = null;
             setRates(new Map());
             setSeries(new Map());
@@ -154,28 +159,36 @@ export const usePipelineCounters = (
 
         const tick = async (): Promise<void> => {
             const now = Date.now();
-            const totals = new Map<string, { packets: bigint; bytes: bigint }>();
-            for (const p of pipelines) {
-                totals.set(p, { packets: BigInt(0), bytes: BigInt(0) });
-            }
+            const currentDevices = devicesRef.current;
+            const currentPipelines = pipelinesRef.current;
 
-            await Promise.all(
-                devices.flatMap((device) =>
-                    pipelines.map(async (pipeline) => {
+            const deltas = await Promise.all(
+                currentDevices.flatMap((device) =>
+                    currentPipelines.map(async (pipeline) => {
                         try {
                             const resp = await API.counters.pipeline({ device, pipeline });
                             const sums = sumPipelineThroughput(resp);
-                            const cur = totals.get(pipeline)!;
-                            totals.set(pipeline, {
-                                packets: cur.packets + sums.packets,
-                                bytes: cur.bytes + sums.bytes,
-                            });
+                            return { name: pipeline, packets: sums.packets, bytes: sums.bytes };
                         } catch {
                             // tolerate per-pair failures.
+                            return null;
                         }
                     }),
                 ),
             );
+
+            const totals = new Map<string, { packets: bigint; bytes: bigint }>();
+            for (const p of currentPipelines) {
+                totals.set(p, { packets: BigInt(0), bytes: BigInt(0) });
+            }
+            for (const delta of deltas) {
+                if (delta === null) continue;
+                const cur = totals.get(delta.name) ?? { packets: BigInt(0), bytes: BigInt(0) };
+                totals.set(delta.name, {
+                    packets: cur.packets + delta.packets,
+                    bytes: cur.bytes + delta.bytes,
+                });
+            }
 
             if (cancelled) return;
 
@@ -221,7 +234,7 @@ export const usePipelineCounters = (
             cancelled = true;
             clearInterval(id);
         };
-    }, [enabled, devicesKey, pipelinesKey, devices, pipelines]);
+    }, [enabled, devicesKey, pipelinesKey]);
 
     return { rates, series };
 };
@@ -240,6 +253,13 @@ export const useFunctionCounters = (
     const [rates, setRates] = useState<Map<string, { pps: number; bps: number }>>(new Map());
     const [series, setSeries] = useState<Map<string, number[]>>(() => new Map());
 
+    const devicesRef = useRef(devices);
+    devicesRef.current = devices;
+    const pipelinesRef = useRef(pipelines);
+    pipelinesRef.current = pipelines;
+    const functionsRef = useRef(functions);
+    functionsRef.current = functions;
+
     const devicesKey = useMemo(() => devices.join('|'), [devices]);
     const pipelinesKey = useMemo(() => pipelines.join('|'), [pipelines]);
     const functionsKey = useMemo(() => functions.join('|'), [functions]);
@@ -247,9 +267,9 @@ export const useFunctionCounters = (
     useEffect(() => {
         if (
             !enabled ||
-            devices.length === 0 ||
-            pipelines.length === 0 ||
-            functions.length === 0
+            devicesRef.current.length === 0 ||
+            pipelinesRef.current.length === 0 ||
+            functionsRef.current.length === 0
         ) {
             prevRef.current = null;
             setRates(new Map());
@@ -261,13 +281,14 @@ export const useFunctionCounters = (
 
         const tick = async (): Promise<void> => {
             const now = Date.now();
-            const totals = new Map<string, { packets: bigint; bytes: bigint }>();
-            functions.forEach((f) => totals.set(f, { packets: BigInt(0), bytes: BigInt(0) }));
+            const currentDevices = devicesRef.current;
+            const currentPipelines = pipelinesRef.current;
+            const currentFunctions = functionsRef.current;
 
-            const tasks: Promise<void>[] = [];
-            for (const device of devices) {
-                for (const pipeline of pipelines) {
-                    for (const fn of functions) {
+            const tasks: Promise<{ name: string; packets: bigint; bytes: bigint } | null>[] = [];
+            for (const device of currentDevices) {
+                for (const pipeline of currentPipelines) {
+                    for (const fn of currentFunctions) {
                         tasks.push(
                             (async () => {
                                 try {
@@ -277,20 +298,28 @@ export const useFunctionCounters = (
                                         function: fn,
                                     });
                                     const sums = sumPipelineThroughput(resp);
-                                    const cur = totals.get(fn)!;
-                                    totals.set(fn, {
-                                        packets: cur.packets + sums.packets,
-                                        bytes: cur.bytes + sums.bytes,
-                                    });
+                                    return { name: fn, packets: sums.packets, bytes: sums.bytes };
                                 } catch {
                                     // tolerate per-triple failures.
+                                    return null;
                                 }
                             })(),
                         );
                     }
                 }
             }
-            await Promise.all(tasks);
+            const deltas = await Promise.all(tasks);
+
+            const totals = new Map<string, { packets: bigint; bytes: bigint }>();
+            currentFunctions.forEach((f) => totals.set(f, { packets: BigInt(0), bytes: BigInt(0) }));
+            for (const delta of deltas) {
+                if (delta === null) continue;
+                const cur = totals.get(delta.name) ?? { packets: BigInt(0), bytes: BigInt(0) };
+                totals.set(delta.name, {
+                    packets: cur.packets + delta.packets,
+                    bytes: cur.bytes + delta.bytes,
+                });
+            }
 
             if (cancelled) return;
 
@@ -336,7 +365,7 @@ export const useFunctionCounters = (
             cancelled = true;
             clearInterval(id);
         };
-    }, [enabled, devicesKey, pipelinesKey, functionsKey, devices, pipelines, functions]);
+    }, [enabled, devicesKey, pipelinesKey, functionsKey]);
 
     return { rates, series };
 };

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useId } from 'react';
 
 interface SparklineProps {
     data: number[];
@@ -27,6 +27,8 @@ export const Sparkline: React.FC<SparklineProps> = ({
     height = 28,
     color = '#FFC061',
 }) => {
+    const gradientId = useId();
+
     if (isFlat(data)) {
         const cy = height / 2;
         return (
@@ -72,14 +74,14 @@ export const Sparkline: React.FC<SparklineProps> = ({
             aria-hidden="true"
         >
             <defs>
-                <linearGradient id={`spark-fill-${color.replace('#', '')}`} x1="0" y1="0" x2="0" y2="1">
+                <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
                     <stop offset="0%" stopColor={color} stopOpacity="0.35" />
                     <stop offset="100%" stopColor={color} stopOpacity="0.04" />
                 </linearGradient>
             </defs>
             <path
                 d={fillPath}
-                fill={`url(#spark-fill-${color.replace('#', '')})`}
+                fill={`url(#${gradientId})`}
             />
             <path
                 d={d}
