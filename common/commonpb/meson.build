@@ -4,6 +4,7 @@ common_proto_files = [
     join_paths(common_proto_dir, 'target.proto'),
     join_paths(common_proto_dir, 'metric.proto'),
     join_paths(common_proto_dir, 'macaddr.proto'),
+    join_paths(common_proto_dir, 'ipaddr.proto'),
 ]
 
 # Generate protobuf files
@@ -13,6 +14,7 @@ common_protoc_gen = custom_target(
         'target.pb.go',
         'metric.pb.go',
         'macaddr.pb.go',
+        'ipaddr.pb.go',
     ],
     input: common_proto_files,
     command: [

@@ -674,3 +674,38 @@ export const formatIPNet = (
         return `${ipStr}/${maskStr}`;
     }
 };
+
+// Wire-format shape of commonpb.IPAddress as it arrives from the
+// gRPC-JSON gateway. The addr field may be base64 (string), a numeric
+// byte array, or a Uint8Array.
+export type IPAddressWire = {
+    addr?: string | number[] | Uint8Array;
+};
+
+// Decode a wire IPAddress into a human-readable IP string. Returns an
+// empty string when the message is missing, has an empty addr, or the
+// byte length is neither 4 nor 16.
+export const ipAddressToString = (ip: IPAddressWire | undefined): string => {
+    if (!ip || ip.addr === undefined || ip.addr === null) return '';
+    let bytes: number[];
+    if (typeof ip.addr === 'string') {
+        if (ip.addr.length === 0) return '';
+        const binary = atob(ip.addr);
+        bytes = Array.from({ length: binary.length }, (_, idx) => binary.charCodeAt(idx));
+    } else if (ip.addr instanceof Uint8Array) {
+        bytes = Array.from(ip.addr);
+    } else {
+        bytes = ip.addr;
+    }
+    if (bytes.length === 0) return '';
+    return formatIPFromBytes(bytes);
+};
+
+// Encode an IPv4 or IPv6 string into a wire IPAddress message. Returns
+// undefined for empty input or unparseable addresses.
+export const stringToIPAddress = (s: string): IPAddressWire | undefined => {
+    if (!s) return undefined;
+    const bytes = parseIPToBytes(s);
+    if (!bytes) return undefined;
+    return { addr: bytes };
+};
