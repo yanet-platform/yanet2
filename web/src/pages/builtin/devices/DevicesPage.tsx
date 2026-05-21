@@ -112,7 +112,7 @@ const DevicesPage: React.FC = () => {
         );
     }
 
-    if (!loading && error && devices.length === 0) {
+    if (error && devices.length === 0) {
         return (
             <PageLayout title="Devices">
                 <EmptyState message={error} />
