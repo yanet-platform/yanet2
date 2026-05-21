@@ -457,7 +457,7 @@ func validateSyncConfig(cfg *fwstatepb.SyncConfig) error {
 	var missing []string
 
 	// Check src_addr (16 bytes for IPv6)
-	if len(cfg.SrcAddr) != 16 || isAllZeroBytes(cfg.SrcAddr) {
+	if len(cfg.GetSrcAddr().GetAddr()) != 16 || isAllZeroBytes(cfg.GetSrcAddr().GetAddr()) {
 		missing = append(missing, "src_addr")
 	}
 
@@ -467,8 +467,8 @@ func validateSyncConfig(cfg *fwstatepb.SyncConfig) error {
 	}
 
 	// Check that at least one destination pair is configured
-	hasMulticast := len(cfg.DstAddrMulticast) == 16 && !isAllZeroBytes(cfg.DstAddrMulticast) && cfg.PortMulticast != 0
-	hasUnicast := len(cfg.DstAddrUnicast) == 16 && !isAllZeroBytes(cfg.DstAddrUnicast) && cfg.PortUnicast != 0
+	hasMulticast := len(cfg.GetDstAddrMulticast().GetAddr()) == 16 && !isAllZeroBytes(cfg.GetDstAddrMulticast().GetAddr()) && cfg.PortMulticast != 0
+	hasUnicast := len(cfg.GetDstAddrUnicast().GetAddr()) == 16 && !isAllZeroBytes(cfg.GetDstAddrUnicast().GetAddr()) && cfg.PortUnicast != 0
 
 	if !hasMulticast && !hasUnicast {
 		missing = append(missing, "dst_addr_multicast+port_multicast or dst_addr_unicast+port_unicast")

@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/yanet-platform/yanet2/common/commonpb"
 	"github.com/yanet-platform/yanet2/modules/fwstate/controlplane/fwstatepb"
 )
 
@@ -14,10 +15,10 @@ func TestPortsRoundTrip(t *testing.T) {
 	const portUnicast uint32 = 9999
 
 	pb := &fwstatepb.SyncConfig{
-		SrcAddr:          make([]byte, 16),
+		SrcAddr:          &commonpb.IPAddress{Addr: make([]byte, 16)},
 		DstEther:         make([]byte, 6),
-		DstAddrMulticast: make([]byte, 16),
-		DstAddrUnicast:   make([]byte, 16),
+		DstAddrMulticast: &commonpb.IPAddress{Addr: make([]byte, 16)},
+		DstAddrUnicast:   &commonpb.IPAddress{Addr: make([]byte, 16)},
 		PortMulticast:    portMulticast,
 		PortUnicast:      portUnicast,
 	}

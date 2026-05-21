@@ -1,4 +1,5 @@
 import { createService, type CallOptions } from './client';
+import type { IPAddressWire } from '../utils/netip';
 
 // ACL types based on aclpb/acl.proto
 
@@ -57,11 +58,11 @@ export interface MapConfig {
 }
 
 export interface SyncConfig {
-    src_addr?: string | Uint8Array | number[];
+    src_addr?: IPAddressWire;
     dst_ether?: string | Uint8Array | number[];
-    dst_addr_multicast?: string | Uint8Array | number[];
+    dst_addr_multicast?: IPAddressWire;
     port_multicast?: number;
-    dst_addr_unicast?: string | Uint8Array | number[];
+    dst_addr_unicast?: IPAddressWire;
     port_unicast?: number;
     tcp_syn_ack?: number | string; // nanoseconds
     tcp_syn?: number | string;

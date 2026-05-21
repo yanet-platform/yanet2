@@ -2,21 +2,14 @@ import React, { useCallback } from 'react';
 import { Box, Text, Button, Card } from '@gravity-ui/uikit';
 import { InputFormField } from '../../../components';
 import {
-    formatIPv6FromBytes,
     formatMACFromBytes,
     getBytes,
-    parseIPv6ToBytes,
     parseMACToBytes,
 } from '../../../utils';
+import { ipAddressToString, stringToIPAddress } from '../../../utils/netip';
 import type { FWStateFormProps } from './types';
 import type { SyncConfig } from '../../../api/acl';
 import './FWStateForm.scss';
-
-// Format bytes array to IPv6 string (wrapper for base64/bytes input)
-const formatIPv6 = (input: string | Uint8Array | number[] | undefined): string => {
-    const bytes = getBytes(input);
-    return formatIPv6FromBytes(bytes);
-};
 
 // Format bytes array to MAC address string (wrapper for base64/bytes input)
 const formatMAC = (input: string | Uint8Array | number[] | undefined): string => {
@@ -140,8 +133,8 @@ export const FWStateForm: React.FC<FWStateFormProps> = ({
                 <Box className="fwstate-form__grid--2cols">
                     <InputFormField
                         label="Source IPv6 Address"
-                        value={formatIPv6(syncConfig?.src_addr)}
-                        onChange={createSyncConfigHandler('src_addr', parseIPv6ToBytes)}
+                        value={ipAddressToString(syncConfig?.src_addr)}
+                        onChange={createSyncConfigHandler('src_addr', stringToIPAddress)}
                         placeholder="e.g., 2001:db8::1"
                     />
                     <InputFormField
@@ -152,8 +145,8 @@ export const FWStateForm: React.FC<FWStateFormProps> = ({
                     />
                     <InputFormField
                         label="Multicast IPv6 Address"
-                        value={formatIPv6(syncConfig?.dst_addr_multicast)}
-                        onChange={createSyncConfigHandler('dst_addr_multicast', parseIPv6ToBytes)}
+                        value={ipAddressToString(syncConfig?.dst_addr_multicast)}
+                        onChange={createSyncConfigHandler('dst_addr_multicast', stringToIPAddress)}
                         placeholder="e.g., ff02::1"
                     />
                     <InputFormField
@@ -170,8 +163,8 @@ export const FWStateForm: React.FC<FWStateFormProps> = ({
                     />
                     <InputFormField
                         label="Unicast IPv6 Address"
-                        value={formatIPv6(syncConfig?.dst_addr_unicast)}
-                        onChange={createSyncConfigHandler('dst_addr_unicast', parseIPv6ToBytes)}
+                        value={ipAddressToString(syncConfig?.dst_addr_unicast)}
+                        onChange={createSyncConfigHandler('dst_addr_unicast', stringToIPAddress)}
                         placeholder="e.g., 2001:db8::2"
                     />
                     <InputFormField
