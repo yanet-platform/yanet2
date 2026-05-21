@@ -110,13 +110,19 @@ func (m *AdapterService) SetupConfig(
 	req *adapterpb.SetupConfigRequest,
 ) (*adapterpb.SetupConfigResponse, error) {
 	name := req.GetName()
-	mplsV4Src, ok := netip.AddrFromSlice(req.GetSourceV4())
-	if !ok || !mplsV4Src.Is4() {
-		return nil, fmt.Errorf("invalid v4 source address")
+	mplsV4Src, err := req.GetSourceV4().ToAddr()
+	if err != nil {
+		return nil, fmt.Errorf("invalid v4 source (bytes=%x): %w", req.GetSourceV4().GetAddr(), err)
 	}
-	mplsV6Src, ok := netip.AddrFromSlice(req.GetSourceV6())
-	if !ok || !mplsV6Src.Is6() {
-		return nil, fmt.Errorf("invalid v6 source address")
+	if !mplsV4Src.Is4() {
+		return nil, fmt.Errorf("v4 source %q is not an IPv4 address", mplsV4Src)
+	}
+	mplsV6Src, err := req.GetSourceV6().ToAddr()
+	if err != nil {
+		return nil, fmt.Errorf("invalid v6 source (bytes=%x): %w", req.GetSourceV6().GetAddr(), err)
+	}
+	if !mplsV6Src.Is6() || mplsV6Src.Is4In6() {
+		return nil, fmt.Errorf("v6 source %q is not a pure IPv6 address", mplsV6Src)
 	}
 	logLevelStr := req.GetConfig().GetLogLevel()
 

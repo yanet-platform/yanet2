@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package adapterpb;
 
+import "common/commonpb/ipaddr.proto";
+
 option go_package = "github.com/yanet-platform/yanet2/operators/bird-adapter/adapterpb;adapterpb";
 
 // AdapterService provides configuration for the BIRD import adapter.
@@ -19,10 +21,10 @@ service AdapterService {
 message SetupConfigRequest {
   string name = 1;
   ImportConfig config = 2;
-  // v4 source for mpls routes
-  bytes source_v4 = 3;
-  // v6 source for mpls routes
-  bytes source_v6 = 4;
+  // IPv4 source address for MPLS routes.
+  commonpb.IPAddress source_v4 = 3;
+  // IPv6 source address for MPLS routes.
+  commonpb.IPAddress source_v6 = 4;
 }
 
 message SetupConfigResponse {}

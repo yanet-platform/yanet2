@@ -14,6 +14,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/encoding/gzip"
 
+	"github.com/yanet-platform/yanet2/common/commonpb"
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
 	adapterpb "github.com/yanet-platform/yanet2/operators/bird-adapter/adapterpb"
 )
@@ -121,12 +122,10 @@ func runClient() error {
 		logLevel = clientCmdArgs.LogLevel.String()
 	}
 
-	b4 := addrV4.As4()
-	b6 := addrV6.As16()
 	req := &adapterpb.SetupConfigRequest{
 		Name:     clientCmdArgs.ConfigName,
-		SourceV4: b4[:],
-		SourceV6: b6[:],
+		SourceV4: commonpb.NewIPAddressFromAddr(addrV4),
+		SourceV6: commonpb.NewIPAddressFromAddr(addrV6),
 		Config: &adapterpb.ImportConfig{
 			Sockets:  clientCmdArgs.Sockets,
 			LogLevel: logLevel,
