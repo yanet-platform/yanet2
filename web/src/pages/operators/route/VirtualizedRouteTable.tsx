@@ -4,6 +4,7 @@ import { Box, Text } from '@gravity-ui/uikit';
 import { EmptyState, TableSearchBar } from '../../../components';
 import type { Route } from '../../../api/routes';
 import type { MockRouteGenerator } from '../../_shared/route/mockData';
+import { ipAddressToString } from '../../../utils/netip';
 import { useContainerHeight } from '../../../hooks';
 import { useSortState, sortComparators } from '../../_shared/route/hooks';
 import { ROW_HEIGHT, OVERSCAN, TOTAL_WIDTH, SEARCH_BAR_HEIGHT, HEADER_HEIGHT, FOOTER_HEIGHT } from '../../_shared/route/constants';
@@ -65,8 +66,8 @@ export const VirtualizedRouteTable: React.FC<VirtualizedRouteTableProps> = ({
             const lowerQuery = searchQuery.toLowerCase();
             result = result.filter(route =>
                 route.prefix?.toLowerCase().includes(lowerQuery) ||
-                route.next_hop?.toLowerCase().includes(lowerQuery) ||
-                route.peer?.toLowerCase().includes(lowerQuery)
+                ipAddressToString(route.next_hop).toLowerCase().includes(lowerQuery) ||
+                ipAddressToString(route.peer).toLowerCase().includes(lowerQuery)
             );
         }
 

@@ -8,6 +8,7 @@ import {
     compareNullableNumbers,
     compareNullableStrings,
 } from '../../../utils';
+import { ipAddressToString } from '../../../utils/netip';
 
 /**
  * Hook that returns table column configuration for routes
@@ -26,17 +27,23 @@ export const useRouteColumns = (): TableColumnConfig<Route>[] => {
             id: 'next_hop',
             name: 'Next Hop',
             meta: {
-                sort: (a: Route, b: Route) => compareNullableStrings(a.next_hop, b.next_hop),
+                sort: (a: Route, b: Route) => compareNullableStrings(
+                    ipAddressToString(a.next_hop) || undefined,
+                    ipAddressToString(b.next_hop) || undefined,
+                ),
             },
-            template: (item: Route) => item.next_hop || '-',
+            template: (item: Route) => ipAddressToString(item.next_hop) || '-',
         },
         {
             id: 'peer',
             name: 'Peer',
             meta: {
-                sort: (a: Route, b: Route) => compareNullableStrings(a.peer, b.peer),
+                sort: (a: Route, b: Route) => compareNullableStrings(
+                    ipAddressToString(a.peer) || undefined,
+                    ipAddressToString(b.peer) || undefined,
+                ),
             },
-            template: (item: Route) => item.peer || '-',
+            template: (item: Route) => ipAddressToString(item.peer) || '-',
         },
         {
             id: 'is_best',
@@ -98,8 +105,8 @@ export const useConfigRoutesData = (
  */
 export const sortComparators: Record<SortableColumn, (a: Route, b: Route) => number> = {
     prefix: (a, b) => (a.prefix || '').localeCompare(b.prefix || ''),
-    next_hop: (a, b) => (a.next_hop || '').localeCompare(b.next_hop || ''),
-    peer: (a, b) => (a.peer || '').localeCompare(b.peer || ''),
+    next_hop: (a, b) => ipAddressToString(a.next_hop).localeCompare(ipAddressToString(b.next_hop)),
+    peer: (a, b) => ipAddressToString(a.peer).localeCompare(ipAddressToString(b.peer)),
     is_best: (a, b) => (a.is_best ? 1 : 0) - (b.is_best ? 1 : 0),
     pref: (a, b) => (a.pref ?? 0) - (b.pref ?? 0),
     as_path_len: (a, b) => (a.as_path_len ?? 0) - (b.as_path_len ?? 0),

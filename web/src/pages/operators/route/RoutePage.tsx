@@ -6,6 +6,7 @@ import type { Route } from '../../../api/routes';
 import { RouteSourceID } from '../../../api/routes';
 import { PageLayout, PageLoader, EmptyState, ConfirmDialog } from '../../../components';
 import { parseCIDRPrefix, parseIPAddress, CIDRParseError, IPParseError } from '../../../utils';
+import { ipAddressToString, stringToIPAddress } from '../../../utils/netip';
 import {
     type AddRouteFormData,
     type ConfigRoutesData,
@@ -117,7 +118,7 @@ const RoutePage: React.FC = () => {
             await API.route.insertRoute({
                 name: activeConfigTab,
                 prefix,
-                nexthop_addr: nexthopAddr,
+                nexthop_addr: stringToIPAddress(nexthopAddr),
                 do_flush: doFlush,
                 source_id: RouteSourceID.STATIC,
             });
@@ -182,7 +183,7 @@ const RoutePage: React.FC = () => {
             await API.route.insertRoute({
                 name: configName,
                 prefix: addRouteForm.prefix,
-                nexthop_addr: addRouteForm.nexthop_addr,
+                nexthop_addr: stringToIPAddress(addRouteForm.nexthop_addr),
                 do_flush: addRouteForm.do_flush,
                 source_id: RouteSourceID.STATIC,
             });
@@ -228,7 +229,7 @@ const RoutePage: React.FC = () => {
             let skippedInvalidRoute = false;
 
             for (const route of selectedRoutesList) {
-                if (!route.prefix || !route.next_hop) {
+                if (!route.prefix || !ipAddressToString(route.next_hop)) {
                     skippedInvalidRoute = true;
                     continue;
                 }

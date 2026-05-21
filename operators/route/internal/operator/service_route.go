@@ -132,9 +132,9 @@ func (m *RouteService) LookupRoute(
 		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
 
-	addr, err := netip.ParseAddr(req.GetIpAddr())
+	addr, err := req.GetIpAddr().ToAddr()
 	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "failed to parse IP address: %v", err)
+		return nil, status.Errorf(codes.InvalidArgument, "invalid ip_addr (bytes=%x): %v", req.GetIpAddr().GetAddr(), err)
 	}
 
 	holder, ok := m.getRib(name)
@@ -174,9 +174,9 @@ func (m *RouteService) InsertRoute(
 		return nil, status.Errorf(codes.InvalidArgument, "failed to parse prefix %q: %v", req.GetPrefix(), err)
 	}
 
-	nexthopAddr, err := netip.ParseAddr(req.GetNexthopAddr())
+	nexthopAddr, err := req.GetNexthopAddr().ToAddr()
 	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "failed to parse nexthop address %q: %v", req.GetNexthopAddr(), err)
+		return nil, status.Errorf(codes.InvalidArgument, "invalid nexthop_addr (bytes=%x): %v", req.GetNexthopAddr().GetAddr(), err)
 	}
 
 	sourceID := req.RouteSourceID()
@@ -209,9 +209,9 @@ func (m *RouteService) DeleteRoute(
 		return nil, status.Errorf(codes.InvalidArgument, "failed to parse prefix: %v", err)
 	}
 
-	nexthopAddr, err := netip.ParseAddr(req.GetNexthopAddr())
+	nexthopAddr, err := req.GetNexthopAddr().ToAddr()
 	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "failed to parse nexthop address: %v", err)
+		return nil, status.Errorf(codes.InvalidArgument, "invalid nexthop_addr (bytes=%x): %v", req.GetNexthopAddr().GetAddr(), err)
 	}
 
 	sourceID := req.RouteSourceID()

@@ -210,7 +210,7 @@ impl RouteService {
     pub async fn lookup_route(&mut self, cmd: RouteLookupCmd) -> Result<(), Box<dyn Error>> {
         let request = LookupRouteRequest {
             name: cmd.name.clone(),
-            ip_addr: cmd.addr.to_string(),
+            ip_addr: Some(cmd.addr.into()),
         };
 
         let response = self.client.lookup_route(request).await?.into_inner();
@@ -227,7 +227,7 @@ impl RouteService {
         let request = InsertRouteRequest {
             name: cmd.name.clone(),
             prefix: cmd.prefix.to_string(),
-            nexthop_addr: cmd.nexthop_addr.to_string(),
+            nexthop_addr: Some(cmd.nexthop_addr.into()),
             do_flush: true,
             source_id: cmd.source.to_proto().into(),
         };
@@ -246,7 +246,7 @@ impl RouteService {
         let request = DeleteRouteRequest {
             name: cmd.name.clone(),
             prefix: cmd.prefix.to_string(),
-            nexthop_addr: cmd.nexthop_addr.to_string(),
+            nexthop_addr: Some(cmd.nexthop_addr.into()),
             do_flush: true,
             source_id: cmd.source.to_proto().into(),
         };
@@ -357,8 +357,8 @@ impl From<operatorpb::Route> for RouteEntry {
 
         Self {
             prefix: Prefix(prefix, route.is_best),
-            next_hop: route.next_hop,
-            peer: route.peer,
+            next_hop: route.next_hop.as_ref().map(|a| a.to_string()).unwrap_or_default(),
+            peer: route.peer.as_ref().map(|a| a.to_string()).unwrap_or_default(),
             source,
             peer_as: route.peer_as,
             origin_as: route.origin_as,

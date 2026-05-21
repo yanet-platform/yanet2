@@ -1,5 +1,6 @@
 import { createService, type CallOptions } from './client';
 import type { MACAddress } from './neighbours';
+import type { IPAddressWire } from '../utils/netip';
 
 // Route types
 
@@ -17,8 +18,8 @@ export interface LargeCommunity {
 
 export interface Route {
     prefix?: string;
-    next_hop?: string;
-    peer?: string;
+    next_hop?: IPAddressWire;
+    peer?: IPAddressWire;
     route_distinguisher?: string | number; // uint64
     peer_as?: number;
     origin_as?: number;
@@ -47,7 +48,7 @@ export interface ShowRoutesResponse {
 export interface InsertRouteRequest {
     name?: string;
     prefix?: string;
-    nexthop_addr?: string;
+    nexthop_addr?: IPAddressWire;
     do_flush?: boolean;
     source_id?: RouteSourceID;
 }
@@ -58,7 +59,7 @@ export interface InsertRouteResponse {
 export interface DeleteRouteRequest {
     name?: string;
     prefix?: string;
-    nexthop_addr?: string;
+    nexthop_addr?: IPAddressWire;
     do_flush?: boolean;
     source_id?: RouteSourceID;
 }

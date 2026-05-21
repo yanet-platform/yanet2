@@ -154,7 +154,7 @@ func (m *NeighbourService) UpdateNeighbours(
 	for _, e := range req.GetEntries() {
 		addr, err := e.GetNextHop().ToAddr()
 		if err != nil {
-			return nil, status.Errorf(codes.InvalidArgument, "invalid nexthop %q: %v", addr, err)
+			return nil, status.Errorf(codes.InvalidArgument, "invalid nexthop (bytes=%x): %v", e.GetNextHop().GetAddr(), err)
 		}
 		if e.GetHardwareAddr() == nil {
 			return nil, status.Errorf(codes.InvalidArgument, "neighbour entry %q is missing hardware_addr", addr)
@@ -197,7 +197,7 @@ func (m *NeighbourService) RemoveNeighbours(
 	for _, hop := range req.GetNextHops() {
 		addr, err := hop.ToAddr()
 		if err != nil {
-			return nil, status.Errorf(codes.InvalidArgument, "invalid next_hop %q: %v", addr, err)
+			return nil, status.Errorf(codes.InvalidArgument, "invalid next_hop (bytes=%x): %v", hop.GetAddr(), err)
 		}
 		addrs = append(addrs, addr)
 	}

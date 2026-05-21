@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/netip"
 
+	"github.com/yanet-platform/yanet2/common/commonpb"
 	"github.com/yanet-platform/yanet2/common/filterpb"
 	"github.com/yanet-platform/yanet2/modules/route-mpls/controlplane/routemplspb"
 	routepb "github.com/yanet-platform/yanet2/operators/route/operatorpb/v1"
@@ -97,9 +98,9 @@ func ToPBRoute(route *Route) *routepb.Route {
 		communities = append(communities, convertLargeCommunity(c))
 	}
 
-	peer := ""
+	var peer *commonpb.IPAddress
 	if route.Peer.IsValid() {
-		peer = route.Peer.String()
+		peer = commonpb.NewIPAddressFromAddr(route.Peer)
 	}
 
 	peerAS := uint32(0)
@@ -111,7 +112,7 @@ func ToPBRoute(route *Route) *routepb.Route {
 
 	return &routepb.Route{
 		Prefix:           route.Prefix.String(),
-		NextHop:          route.NextHop.String(),
+		NextHop:          commonpb.NewIPAddressFromAddr(route.NextHop),
 		Peer:             peer,
 		PeerAs:           peerAS,
 		OriginAs:         originAS,

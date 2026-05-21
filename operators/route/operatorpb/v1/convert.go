@@ -5,6 +5,7 @@ import (
 	"net/netip"
 	"time"
 
+	"github.com/yanet-platform/yanet2/common/commonpb"
 	"github.com/yanet-platform/yanet2/operators/route/internal/rib"
 )
 
@@ -15,14 +16,14 @@ func FromRIBRoute(route *rib.Route, isBest bool) *Route {
 		communities = append(communities, convertLargeCommunity(c))
 	}
 
-	peer := ""
+	var peer *commonpb.IPAddress
 	if route.Peer.IsValid() {
-		peer = route.Peer.String()
+		peer = commonpb.NewIPAddressFromAddr(route.Peer)
 	}
 
 	return &Route{
 		Prefix:           route.Prefix.String(),
-		NextHop:          route.NextHop.String(),
+		NextHop:          commonpb.NewIPAddressFromAddr(route.NextHop),
 		Peer:             peer,
 		PeerAs:           route.PeerAS,
 		OriginAs:         route.OriginAS,
@@ -52,14 +53,14 @@ func ToRIBRoute(route *Route, toRemove bool) (*rib.Route, error) {
 	if err != nil {
 		return nil, err
 	}
-	nexthop, err := netip.ParseAddr(route.GetNextHop())
+	nexthop, err := route.GetNextHop().ToAddr()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("invalid next_hop (bytes=%x): %w", route.GetNextHop().GetAddr(), err)
 	}
 
-	peer, err := netip.ParseAddr(route.GetPeer())
+	peer, err := route.GetPeer().ToAddr()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("invalid peer (bytes=%x): %w", route.GetPeer().GetAddr(), err)
 	}
 	largeCommunities := make([]rib.LargeCommunity, 0, len(route.LargeCommunities))
 	for _, community := range route.LargeCommunities {

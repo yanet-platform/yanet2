@@ -12,6 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 ync = { path = "../../../../cli/core", version = "0.1", package = "yanet-cli" }
+commonpb = { path = "../../../../common/rust/commonpb", version = "0.1", package = "yanet-commonpb" }
 clap = { version = "4.5", features = ["derive"] }
 clap_complete = { version = "4.5", features = ["unstable-dynamic"] }
 prost = "0.13"

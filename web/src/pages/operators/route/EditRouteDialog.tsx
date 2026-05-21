@@ -3,6 +3,7 @@ import { Box, Text, Dialog, TextInput, Switch } from '@gravity-ui/uikit';
 import { FormField } from '../../../components';
 import { useDialogKeyboardShortcut } from '../../../hooks';
 import type { EditRouteDialogProps } from '../../_shared/route/types';
+import { ipAddressToString } from '../../../utils/netip';
 import '../../_shared/route/route.scss';
 
 export const EditRouteDialog: React.FC<EditRouteDialogProps> = ({
@@ -22,7 +23,7 @@ export const EditRouteDialog: React.FC<EditRouteDialogProps> = ({
     useEffect(() => {
         if (open && route) {
             setPrefix(route.prefix || '');
-            setNexthopAddr(route.next_hop || '');
+            setNexthopAddr(ipAddressToString(route.next_hop));
             setDoFlush(false);
             setIsSubmitting(false);
         }

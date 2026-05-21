@@ -2,6 +2,7 @@ import { Checkbox, Button, Icon } from '@gravity-ui/uikit';
 import { Pencil } from '@gravity-ui/icons';
 import type { Route } from '../../../api/routes';
 import { cellStyles, TOTAL_WIDTH, ROW_HEIGHT, ROUTE_SOURCES } from '../../_shared/route/constants';
+import { ipAddressToString } from '../../../utils/netip';
 
 export interface VirtualRowProps {
     route: Route;
@@ -48,8 +49,8 @@ export const VirtualRow = ({ route, index, start, isSelected, onSelect, onEdit }
             </div>
             <div style={cellStyles.index}>{index + 1}</div>
             <div style={cellStyles.prefix}>{route.prefix || '-'}</div>
-            <div style={cellStyles.next_hop}>{route.next_hop || '-'}</div>
-            <div style={cellStyles.peer}>{route.peer || '-'}</div>
+            <div style={cellStyles.next_hop}>{ipAddressToString(route.next_hop) || '-'}</div>
+            <div style={cellStyles.peer}>{ipAddressToString(route.peer) || '-'}</div>
             <div style={cellStyles.is_best}>{route.is_best ? 'Yes' : 'No'}</div>
             <div style={cellStyles.pref}>{route.pref ?? '-'}</div>
             <div style={cellStyles.as_path_len}>{route.as_path_len ?? '-'}</div>

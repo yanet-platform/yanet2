@@ -1,4 +1,5 @@
 import type { Route } from '../../../api/routes';
+import { ipAddressToString } from '../../../utils/netip';
 
 // Simple seeded random number generator for reproducible data
 class SeededRandom {
@@ -79,8 +80,8 @@ export const createMockRouteGenerator = (totalCount: number, seed: number = 42):
 
         return {
             prefix,
-            next_hop: nextHop,
-            peer,
+            next_hop: { addr: nextHop },
+            peer: { addr: peer },
             route_distinguisher: rng.nextInt(1, 65535),
             peer_as: rng.nextInt(1, 65535),
             origin_as: rng.nextInt(1, 65535),
@@ -146,8 +147,8 @@ export const createMockRouteGenerator = (totalCount: number, seed: number = 42):
             const route = getRoute(i);
             const matches =
                 route.prefix?.toLowerCase().includes(lowerQuery) ||
-                route.next_hop?.toLowerCase().includes(lowerQuery) ||
-                route.peer?.toLowerCase().includes(lowerQuery);
+                ipAddressToString(route.next_hop).toLowerCase().includes(lowerQuery) ||
+                ipAddressToString(route.peer).toLowerCase().includes(lowerQuery);
 
             if (matches) {
                 matchedCount++;
