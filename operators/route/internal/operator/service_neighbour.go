@@ -70,7 +70,7 @@ func (m *NeighbourService) List(
 		neighbours = append(
 			neighbours,
 			&operatorpb.NeighbourEntry{
-				NextHop:      entry.NextHop.String(),
+				NextHop:      commonpb.NewIPAddressFromAddr(entry.NextHop),
 				LinkAddr:     commonpb.NewMACAddressEUI48(entry.HardwareRoute.DestinationMAC),
 				HardwareAddr: commonpb.NewMACAddressEUI48(entry.HardwareRoute.SourceMAC),
 				State:        operatorpb.NeighbourState(entry.State),
@@ -152,15 +152,15 @@ func (m *NeighbourService) UpdateNeighbours(
 
 	entries := make([]neigh.NeighbourEntry, 0, len(req.GetEntries()))
 	for _, e := range req.GetEntries() {
-		addr, err := netip.ParseAddr(e.GetNextHop())
+		addr, err := e.GetNextHop().ToAddr()
 		if err != nil {
-			return nil, status.Errorf(codes.InvalidArgument, "invalid nexthop %q: %v", e.GetNextHop(), err)
+			return nil, status.Errorf(codes.InvalidArgument, "invalid nexthop %q: %v", addr, err)
 		}
 		if e.GetHardwareAddr() == nil {
-			return nil, status.Errorf(codes.InvalidArgument, "neighbour entry %q is missing hardware_addr", e.GetNextHop())
+			return nil, status.Errorf(codes.InvalidArgument, "neighbour entry %q is missing hardware_addr", addr)
 		}
 		if e.GetLinkAddr() == nil {
-			return nil, status.Errorf(codes.InvalidArgument, "neighbour entry %q is missing link_addr", e.GetNextHop())
+			return nil, status.Errorf(codes.InvalidArgument, "neighbour entry %q is missing link_addr", addr)
 		}
 
 		entries = append(entries, neigh.NeighbourEntry{
@@ -195,9 +195,9 @@ func (m *NeighbourService) RemoveNeighbours(
 
 	addrs := make([]netip.Addr, 0, len(req.GetNextHops()))
 	for _, hop := range req.GetNextHops() {
-		addr, err := netip.ParseAddr(hop)
+		addr, err := hop.ToAddr()
 		if err != nil {
-			return nil, status.Errorf(codes.InvalidArgument, "invalid next_hop %q: %v", hop, err)
+			return nil, status.Errorf(codes.InvalidArgument, "invalid next_hop %q: %v", addr, err)
 		}
 		addrs = append(addrs, addr)
 	}

@@ -683,20 +683,14 @@ export type IPAddressWire = {
 };
 
 // Decode a wire IPAddress into a human-readable IP string. Returns an
-// empty string when the message is missing, has an empty addr, or the
-// byte length is neither 4 nor 16.
+// empty string when the message is missing or has an empty addr.
+// The canonical wire form from Go's MarshalJSON is a plain IP string.
 export const ipAddressToString = (ip: IPAddressWire | undefined): string => {
     if (!ip || ip.addr === undefined || ip.addr === null) return '';
-    let bytes: number[];
     if (typeof ip.addr === 'string') {
-        if (ip.addr.length === 0) return '';
-        const binary = atob(ip.addr);
-        bytes = Array.from({ length: binary.length }, (_, idx) => binary.charCodeAt(idx));
-    } else if (ip.addr instanceof Uint8Array) {
-        bytes = Array.from(ip.addr);
-    } else {
-        bytes = ip.addr;
+        return ip.addr;
     }
+    const bytes = ip.addr instanceof Uint8Array ? Array.from(ip.addr) : ip.addr;
     if (bytes.length === 0) return '';
     return formatIPFromBytes(bytes);
 };
@@ -705,7 +699,7 @@ export const ipAddressToString = (ip: IPAddressWire | undefined): string => {
 // undefined for empty input or unparseable addresses.
 export const stringToIPAddress = (s: string): IPAddressWire | undefined => {
     if (!s) return undefined;
-    const bytes = parseIPToBytes(s);
-    if (!bytes) return undefined;
-    return { addr: bytes };
+    const parsed = parseIPAddress(s);
+    if (!parsed.ok) return undefined;
+    return { addr: s };
 };

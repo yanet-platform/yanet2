@@ -3,6 +3,7 @@ import { Box, Dialog, TextInput } from '@gravity-ui/uikit';
 import { FormField } from '../../../components';
 import { useDialogKeyboardShortcut } from '../../../hooks';
 import { isValidMAC } from '../../../utils';
+import { ipAddressToString, stringToIPAddress } from '../../../utils/netip';
 import type { Neighbour } from '../../../api/neighbours';
 import type { EditNeighbourDialogProps } from './types';
 
@@ -32,7 +33,7 @@ export const EditNeighbourDialog: React.FC<EditNeighbourDialogProps> = ({
 
     useEffect(() => {
         if (open && neighbour) {
-            setNextHop(neighbour.next_hop || '');
+            setNextHop(ipAddressToString(neighbour.next_hop));
             setLinkAddr(renderMAC(neighbour.link_addr));
             setHardwareAddr(renderMAC(neighbour.hardware_addr));
             setDevice(neighbour.device || '');
@@ -50,8 +51,11 @@ export const EditNeighbourDialog: React.FC<EditNeighbourDialogProps> = ({
 
         setIsSubmitting(true);
         try {
+            const nextHopWire = stringToIPAddress(nextHop.trim());
+            if (!nextHopWire) return;
+
             const entry: Neighbour = {
-                next_hop: nextHop.trim(),
+                next_hop: nextHopWire,
                 device: device.trim() || undefined,
                 priority: priority.trim() ? Number(priority.trim()) : undefined,
             };

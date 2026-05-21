@@ -7,6 +7,7 @@ import {
     getMACAddressValue,
     getUnixSecondsValue,
 } from '../../../utils';
+import { ipAddressToString } from '../../../utils/netip';
 
 // Sorting types
 export type SortableColumn =
@@ -41,7 +42,7 @@ export const isSortDirection = (value: string): value is SortDirection =>
 
 // Sort comparators for neighbour columns
 export const sortComparators: Record<SortableColumn, (a: Neighbour, b: Neighbour) => number> = {
-    next_hop: (a, b) => compareNullableStrings(a.next_hop, b.next_hop),
+    next_hop: (a, b) => compareNullableStrings(ipAddressToString(a.next_hop) || undefined, ipAddressToString(b.next_hop) || undefined),
     link_addr: (a, b) => compareMACAddressValues(
         getMACAddressValue(a.link_addr?.addr),
         getMACAddressValue(b.link_addr?.addr),
@@ -55,7 +56,7 @@ export const sortComparators: Record<SortableColumn, (a: Neighbour, b: Neighbour
         const stateA = a.state ?? 0;
         const stateB = b.state ?? 0;
         if (stateA !== stateB) return stateA - stateB;
-        return compareNullableStrings(a.next_hop, b.next_hop);
+        return compareNullableStrings(ipAddressToString(a.next_hop) || undefined, ipAddressToString(b.next_hop) || undefined);
     },
     source: (a, b) => compareNullableStrings(a.source, b.source),
     priority: (a, b) => (a.priority ?? 0) - (b.priority ?? 0),
@@ -78,7 +79,7 @@ export const useProcessedNeighbours = (
         if (searchQuery.trim()) {
             const lowerQuery = searchQuery.toLowerCase();
             result = result.filter(n =>
-                n.next_hop?.toLowerCase().includes(lowerQuery) ||
+                ipAddressToString(n.next_hop).toLowerCase().includes(lowerQuery) ||
                 n.device?.toLowerCase().includes(lowerQuery) ||
                 n.source?.toLowerCase().includes(lowerQuery),
             );

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom';
 import { Box, TabProvider, TabList, Tab, Button, Flex, Divider } from '@gravity-ui/uikit';
 import { toaster } from '../../../utils';
+import { stringToIPAddress } from '../../../utils/netip';
 import { API } from '../../../api';
 import type { Neighbour, NeighbourTableInfo } from '../../../api/neighbours';
 import { PageLayout, PageLoader, PageHeader, ConfirmDialog } from '../../../components';
@@ -243,7 +244,9 @@ const NeighboursPage = (): React.JSX.Element => {
     const handleRemoveConfirm = useCallback(async () => {
         if (isMergedView || !activeTab) return;
         try {
-            const nextHops = Array.from(selectedIds);
+            const nextHops = Array.from(selectedIds)
+                .map(s => stringToIPAddress(s))
+                .filter((w): w is NonNullable<typeof w> => w !== undefined);
             await API.neighbours.removeNeighbours(activeTab, nextHops);
             toaster.success('neighbours-removed', `${nextHops.length} neighbour(s) removed`);
             setSelectedIds(new Set());

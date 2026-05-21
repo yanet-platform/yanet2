@@ -1,4 +1,5 @@
 import { createService, type CallOptions } from './client';
+import type { IPAddressWire } from '../utils/netip';
 
 // Neighbour types
 export interface MACAddress {
@@ -6,7 +7,7 @@ export interface MACAddress {
 }
 
 export interface Neighbour {
-    next_hop?: string;
+    next_hop?: IPAddressWire;
     link_addr?: MACAddress;
     hardware_addr?: MACAddress;
     state?: number; // NeighbourState enum
@@ -49,7 +50,7 @@ export const neighbours = {
         return neighbourService.callWithBody<void>('UpdateNeighbours', { table, entries }, options);
     },
 
-    removeNeighbours: (table: string, nextHops: string[], options?: CallOptions): Promise<void> => {
+    removeNeighbours: (table: string, nextHops: IPAddressWire[], options?: CallOptions): Promise<void> => {
         return neighbourService.callWithBody<void>('RemoveNeighbours', { table, next_hops: nextHops }, options);
     },
 

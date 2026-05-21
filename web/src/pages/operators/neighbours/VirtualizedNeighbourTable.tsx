@@ -6,6 +6,7 @@ import type { Neighbour } from '../../../api/neighbours';
 import type { SortState, SortableColumn } from './hooks';
 import { useContainerHeight } from '../../../hooks';
 import { useProcessedNeighbours } from './hooks';
+import { ipAddressToString } from '../../../utils/netip';
 import { ROW_HEIGHT, OVERSCAN, TOTAL_WIDTH, SEARCH_BAR_HEIGHT, HEADER_HEIGHT, FOOTER_HEIGHT } from './constants';
 import { NeighbourVirtualRow } from './NeighbourVirtualRow';
 import { NeighbourTableHeader } from './NeighbourTableHeader';
@@ -21,7 +22,7 @@ export interface VirtualizedNeighbourTableProps {
     onSearchChange: (query: string) => void;
 }
 
-const getNeighbourId = (n: Neighbour): string => n.next_hop || '';
+const getNeighbourId = (n: Neighbour): string => ipAddressToString(n.next_hop);
 
 export const VirtualizedNeighbourTable: React.FC<VirtualizedNeighbourTableProps> = ({
     neighbours,

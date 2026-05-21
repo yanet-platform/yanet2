@@ -2,6 +2,7 @@ import { Checkbox, Button, Icon } from '@gravity-ui/uikit';
 import { Pencil } from '@gravity-ui/icons';
 import type { Neighbour } from '../../../api/neighbours';
 import { formatUnixSeconds, getNUDStateString } from '../../../utils';
+import { ipAddressToString } from '../../../utils/netip';
 import { cellStyles, TOTAL_WIDTH, ROW_HEIGHT } from './constants';
 
 export interface NeighbourVirtualRowProps {
@@ -59,7 +60,7 @@ export const NeighbourVirtualRow = ({
                 <Checkbox checked={isSelected} onUpdate={handleCheckboxChange} />
             </div>
             <div style={cellStyles.index}>{index + 1}</div>
-            <div style={cellStyles.next_hop}>{neighbour.next_hop || '-'}</div>
+            <div style={cellStyles.next_hop}>{ipAddressToString(neighbour.next_hop) || '-'}</div>
             <div style={cellStyles.link_addr}>{renderMac(neighbour.link_addr)}</div>
             <div style={cellStyles.hardware_addr}>{renderMac(neighbour.hardware_addr)}</div>
             <div style={cellStyles.device}>{neighbour.device || '-'}</div>

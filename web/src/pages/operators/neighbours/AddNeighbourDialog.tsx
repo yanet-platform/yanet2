@@ -3,11 +3,13 @@ import { Box, Dialog, TextInput, Select } from '@gravity-ui/uikit';
 import { FormField } from '../../../components';
 import { useDialogKeyboardShortcut } from '../../../hooks';
 import { isValidMAC } from '../../../utils';
+import { stringToIPAddress } from '../../../utils/netip';
 import type { Neighbour } from '../../../api/neighbours';
 import type { AddNeighbourDialogProps } from './types';
 
 const validateNextHop = (value: string): string | undefined => {
     if (!value.trim()) return 'Next Hop is required';
+    if (!stringToIPAddress(value.trim())) return 'Invalid IP address';
     return undefined;
 };
 
@@ -58,8 +60,11 @@ export const AddNeighbourDialog: React.FC<AddNeighbourDialogProps> = ({
 
         setIsSubmitting(true);
         try {
+            const nextHopWire = stringToIPAddress(nextHop.trim());
+            if (!nextHopWire) return;
+
             const entry: Neighbour = {
-                next_hop: nextHop.trim(),
+                next_hop: nextHopWire,
                 device: device.trim() || undefined,
                 priority: priority.trim() ? Number(priority.trim()) : undefined,
             };

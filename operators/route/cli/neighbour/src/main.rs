@@ -14,7 +14,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
-use commonpb::pb::MacAddress;
+use commonpb::pb::{IpAddress, MacAddress};
 use netip::MacAddr;
 use tabled::Tabled;
 use tonic::codec::CompressionEncoding;
@@ -191,9 +191,10 @@ impl NeighbourService {
         let mut entries = response
             .neighbours
             .into_iter()
-            .map(|entry| {
+            .map(|entry| -> Result<NeighbourEntry, Box<dyn Error>> {
                 let updated_at = UNIX_EPOCH + Duration::from_secs(entry.updated_at as u64);
-                let next_hop = entry.next_hop.parse().unwrap();
+                let next_hop: IpAddr =
+                    IpAddr::try_from(entry.next_hop.as_ref().ok_or("neighbour entry missing next_hop")?)?;
 
                 let link_addr = {
                     let addr = entry.link_addr.map(|v| v.addr).unwrap_or_default();
@@ -204,7 +205,7 @@ impl NeighbourService {
                     MacAddr::from(addr)
                 };
 
-                NeighbourEntry {
+                Ok(NeighbourEntry {
                     next_hop,
                     link_addr,
                     hardware_addr,
@@ -213,9 +214,9 @@ impl NeighbourService {
                     age: Age(updated_at),
                     source: entry.source,
                     priority: entry.priority,
-                }
+                })
             })
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<_>, _>>()?;
 
         entries.sort_by(|a, b| (a.state, &a.next_hop).cmp(&(b.state, &b.next_hop)));
 
@@ -230,7 +231,7 @@ impl NeighbourService {
         let request = UpdateNeighboursRequest {
             table: args.table.unwrap_or_default(),
             entries: vec![ProtoNeighbourEntry {
-                next_hop: args.next_hop,
+                next_hop: Some(args.next_hop.parse::<IpAddress>()?),
                 link_addr: Some(link_addr),
                 hardware_addr: Some(hardware_addr),
                 device: args.device.unwrap_or_default(),
@@ -245,9 +246,14 @@ impl NeighbourService {
     }
 
     pub async fn remove_neighbours(&mut self, args: RemoveCmd) -> Result<(), Box<dyn Error>> {
+        let next_hops = args
+            .next_hops
+            .into_iter()
+            .map(|s| s.parse::<IpAddress>())
+            .collect::<Result<Vec<_>, _>>()?;
         let request = RemoveNeighboursRequest {
             table: args.table.unwrap_or_default(),
-            next_hops: args.next_hops,
+            next_hops,
         };
 
         self.client.remove_neighbours(request).await?;
