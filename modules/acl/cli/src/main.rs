@@ -23,9 +23,7 @@ use ync::{
 mod args;
 mod metric;
 
-mod commonpb {
-    tonic::include_proto!("commonpb");
-}
+use ::commonpb::pb as commonpb;
 
 #[allow(non_snake_case)]
 pub mod aclpb {

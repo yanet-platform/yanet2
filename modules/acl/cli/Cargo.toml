@@ -8,6 +8,7 @@ rust-version = "1.85"
 
 [dependencies]
 ync = { path = "../../../cli/core", version = "0.1", package = "yanet-cli" }
+commonpb = { path = "../../../common/rust/commonpb", version = "0.1", package = "yanet-commonpb" }
 filterpb = { path = "../../../common/rust/filterpb", version = "0.1", package = "yanet-filterpb" }
 netip = "0.2"
 log = "0.4"
