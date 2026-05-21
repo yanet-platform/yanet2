@@ -26,8 +26,7 @@ struct balancer_real_config {
 /*
  * Source allow-list for a VS. A packet is admitted only if its source
  * address matches one of the listed IPv4/IPv6 networks AND its source
- * port matches one of the listed ranges. An empty set of networks
- * disallows all networks; an empty set of ports allows all ports.
+ * port matches one of the listed ranges.
  */
 struct balancer_allowed_sources {
 	struct filter_net4s net4s;

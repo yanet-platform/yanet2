@@ -12,7 +12,7 @@ type SessionsState struct {
 	agent   *ffi.Agent
 }
 
-func NewSessionsState(agent *ffi.Agent, name string, capacity uint64) (*SessionsState, error) {
+func NewSessionsState(name string, agent *ffi.Agent, capacity uint64) (*SessionsState, error) {
 	st, err := cbalancer2.NewSessionTable(agent, capacity)
 	if err != nil {
 		return nil, err

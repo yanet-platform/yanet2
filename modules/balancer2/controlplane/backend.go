@@ -272,7 +272,11 @@ func toCAllowedSources(
 	if err != nil {
 		return cbalancer2.AllowedSources{}, fmt.Errorf("net6s: %w", err)
 	}
-	ports, err := filterpb.ToPortRanges(a.Ports)
+	protoPorts := a.Ports
+	if a.Ports == nil {
+		protoPorts = []*filterpb.PortRange{{From: 0, To: uint32((1 << 16) - 1)}}
+	}
+	ports, err := filterpb.ToPortRanges(protoPorts)
 	if err != nil {
 		return cbalancer2.AllowedSources{}, fmt.Errorf("ports: %w", err)
 	}
@@ -292,6 +296,9 @@ func toCRealConfig(r *balancerpb.RealConfig, counterPrefix string) (cbalancer2.R
 	id, err := makeRealID(r.Id)
 	if err != nil {
 		return cbalancer2.RealConfig{}, err
+	}
+	if r.Src == nil {
+		return cbalancer2.RealConfig{}, errors.New("source required")
 	}
 	src, err := toCNetWithMask(r.Src)
 	if err != nil {

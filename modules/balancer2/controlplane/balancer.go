@@ -72,13 +72,13 @@ func NewModuleConfig(
 	name string,
 	agent *ffi.Agent,
 	config *ConfigParams,
-	st *SessionsState,
+	sessions *SessionsState,
 ) (*ModuleConfig, error) {
 	if config == nil {
 		return nil, errors.New("configuration is required")
 	}
 
-	handle, index, err := build(agent, name, config, st, nil)
+	handle, index, err := build(agent, name, config, sessions, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -87,7 +87,7 @@ func NewModuleConfig(
 		handle:   handle,
 		name:     name,
 		cfg:      config,
-		sessions: st,
+		sessions: sessions,
 		agent:    agent,
 		index:    index,
 	}, nil

@@ -282,7 +282,7 @@ func (m *Service) UpdateSessionsState(
 		return nil, status.Errorf(codes.AlreadyExists, "sessions state %q already exists", name)
 	}
 
-	st, err := NewSessionsState(m.agent, name, req.GetCapacity())
+	st, err := NewSessionsState(name, m.agent, req.GetCapacity())
 	if err != nil {
 		return nil, status.Errorf(
 			codes.Internal,

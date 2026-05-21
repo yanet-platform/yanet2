@@ -36,10 +36,10 @@ FILTER_COMPILER_DECLARE(vs_acl_ip4, net4_fast_src, port_fast_src);
 FILTER_COMPILER_DECLARE(vs_acl_ip6, net6_fast_src, port_fast_src);
 
 FILTER_COMPILER_DECLARE(
-	vs_matcher_ip4, net4_fast_dst, port_fast_dst, proto_range
+	vs_matcher_ip4, net4_fast_dst, port_fast_dst, proto_range_fast
 );
 FILTER_COMPILER_DECLARE(
-	vs_matcher_ip6, net6_fast_dst, port_fast_dst, proto_range
+	vs_matcher_ip6, net6_fast_dst, port_fast_dst, proto_range_fast
 );
 
 struct balancer_handle {

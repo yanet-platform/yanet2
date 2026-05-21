@@ -47,8 +47,8 @@ message VsIdentifier {
 }
 
 // Behavior:
-// - If allowed_srcs list is empty: All sources are denied (no traffic allowed)
-// - If allowed_srcs contains entries: Only matching sources are permitted
+// - If list is empty: All sources are denied (no traffic allowed)
+// - If list contains entries: Only matching sources are permitted
 // - Multiple AllowedSrc entries are evaluated with OR logic (any match allows)
 message AllowedSources {
   repeated common.filterpb.v1.IPNet nets = 1;
