@@ -102,7 +102,7 @@ const ForwardPage: React.FC = () => {
     const rawRules: Rule[] = draftRules(currentConfig);
     const allItems = useMemo(() => rulesToNgItems(rawRules), [rawRules]);
 
-    const { sparklines } = useForwardRuleCounters(currentConfig, allItems, !paused);
+    const { rates } = useForwardRuleCounters(currentConfig, allItems, !paused);
 
     const ruleCounts = useMemo((): Map<string, number> => {
         const m = new Map<string, number>();
@@ -305,7 +305,7 @@ const ForwardPage: React.FC = () => {
                                 items={visibleItems}
                                 selectedIds={selectedIds}
                                 activeRowId={activeRowId}
-                                counterValues={sparklines}
+                                rateValues={rates}
                                 onSelectionChange={setSelectedIds}
                                 onEditRule={openEdit}
                                 currentIsDirty={currentIsDirty}

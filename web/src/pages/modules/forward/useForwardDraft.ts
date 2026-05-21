@@ -8,6 +8,8 @@ import {
 } from './draftReducer';
 import type { ForwardDraftAction } from './draftReducer';
 
+const EMPTY_RULES: Rule[] = [];
+
 export interface UseForwardDraftResult {
     /** Union of server configs and local-only draft configs, minus pending-delete ones (for display). */
     draftConfigs: string[];
@@ -136,10 +138,10 @@ export const useForwardDraft = (): UseForwardDraftResult => {
     }, [state.serverConfigs, state.localOnlyConfigs, state.dirty]);
 
     const draftRulesFor = useCallback((configName: string): Rule[] =>
-        state.draft[configName] ?? [], [state.draft]);
+        state.draft[configName] ?? EMPTY_RULES, [state.draft]);
 
     const serverRulesFor = useCallback((configName: string): Rule[] =>
-        state.server[configName] ?? [], [state.server]);
+        state.server[configName] ?? EMPTY_RULES, [state.server]);
 
     const isDirty = useCallback((configName: string): boolean =>
         state.dirty.has(configName), [state.dirty]);

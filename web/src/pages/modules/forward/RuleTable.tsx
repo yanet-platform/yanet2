@@ -3,9 +3,11 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { Checkbox, Icon } from '@gravity-ui/uikit';
 import { ArrowUturnCcwLeft } from '@gravity-ui/icons';
 import type { RuleItem } from './types';
+import type { RuleRate } from './useForwardRuleCounters';
 import DirectionBadge from './DirectionBadge';
 import AnyBadge from './AnyBadge';
 import Sparkline from './Sparkline';
+import { formatPps } from '../../../utils';
 
 /** Save / floppy disk icon. */
 const SaveIcon = (): React.JSX.Element => (
@@ -40,7 +42,7 @@ const COLUMN_WIDTHS = {
     vlans: 120,
     srcs: 200,
     dsts: 200,
-    sparkline: 72,
+    sparkline: 150,
 } as const;
 
 
@@ -82,7 +84,7 @@ interface VirtualRowProps {
     start: number;
     selected: boolean;
     active: boolean;
-    sparklineValues: number[] | null;
+    rateData: RuleRate | null;
     onToggleSelect: (id: string) => void;
     onHoverChange: (item: RuleItem | null, start: number) => void;
 }
@@ -93,7 +95,7 @@ const VirtualRow: React.FC<VirtualRowProps> = memo(({
     start,
     selected,
     active,
-    sparklineValues,
+    rateData,
     onToggleSelect,
     onHoverChange,
 }) => {
@@ -187,8 +189,11 @@ const VirtualRow: React.FC<VirtualRowProps> = memo(({
                 }
             </div>
 
-            <div style={cellStyle('sparkline')}>
-                <Sparkline values={sparklineValues} width={56} height={16} />
+            <div style={{ ...cellStyle('sparkline'), gap: 8 }}>
+                <Sparkline values={rateData?.history ?? null} width={56} height={16} />
+                <span className="fw-cell-pps">
+                    {rateData ? formatPps(rateData.pps) : '— pps'}
+                </span>
             </div>
         </div>
     );
@@ -200,8 +205,8 @@ interface RuleTableProps {
     items: RuleItem[];
     selectedIds: Set<string>;
     activeRowId: string | null;
-    /** Map from RuleItem.id to pps sparkline history (60 samples). */
-    counterValues: Map<string, number[]>;
+    /** Map from RuleItem.id to rate data (sparkline history + live pps). */
+    rateValues: Map<string, RuleRate>;
     onSelectionChange: (ids: Set<string>) => void;
     onEditRule: (item: RuleItem) => void;
     currentIsDirty: boolean;
@@ -215,7 +220,7 @@ const RuleTable: React.FC<RuleTableProps> = ({
     items,
     selectedIds,
     activeRowId,
-    counterValues,
+    rateValues,
     onSelectionChange,
     onEditRule,
     currentIsDirty,
@@ -457,7 +462,7 @@ const RuleTable: React.FC<RuleTableProps> = ({
                                     start={virtualRow.start}
                                     selected={selectedIds.has(item.id)}
                                     active={activeRowId === item.id}
-                                    sparklineValues={counterValues.get(item.id) ?? null}
+                                    rateData={rateValues.get(item.id) ?? null}
                                     onToggleSelect={handleToggleSelect}
                                     onHoverChange={handleHoverChange}
                                 />

@@ -76,9 +76,15 @@ const discoverMountPoints = async (configName: string): Promise<MountPoint[]> =>
     return points;
 };
 
+/** Per-rule rate data: rolling history for the sparkline and the latest interpolated pps. */
+export interface RuleRate {
+    history: number[];
+    pps: number;
+}
+
 export interface UseForwardRuleCountersResult {
-    /** Map from RuleItem.id to pps history (60 samples). Null means not yet seeded. */
-    sparklines: Map<string, number[]>;
+    /** Map from RuleItem.id to rate data (history + live pps). */
+    rates: Map<string, RuleRate>;
 }
 
 /**
@@ -108,8 +114,10 @@ export const useForwardRuleCounters = (
     // Rolling history: Map<counterName, number[]>
     const historyRef = useRef<Map<string, number[]>>(new Map());
 
-    // Map<ruleId, number[]> — returned snapshot; reference changes on each sample.
-    const [sparklines, setSparklines] = useState<Map<string, number[]>>(new Map());
+    // Map<ruleId, RuleRate> — returned snapshot; reference changes on each sample.
+    const [rates, setRates] = useState<Map<string, RuleRate>>(new Map());
+    const ratesRef = useRef(rates);
+    ratesRef.current = rates;
 
     // Monotonically incremented on each configName change. Promise resolutions
     // that carry a stale generation are silently dropped so that a slow request
@@ -122,7 +130,7 @@ export const useForwardRuleCounters = (
         // never displays data belonging to a different config instance.
         historyRef.current = new Map();
         setMountPointsEntry({ config: '', points: [] });
-        setSparklines(new Map());
+        setRates(new Map());
         discoveryGen.current += 1;
         const myGen = discoveryGen.current;
         discoverMountPoints(configName).then(points => {
@@ -139,12 +147,13 @@ export const useForwardRuleCounters = (
     // state without waiting for the next 1-second tick.
     useEffect(() => {
         const history = historyRef.current;
-        const next = new Map<string, number[]>();
+        const next = new Map<string, RuleRate>();
         for (const rule of rules) {
             const h = rule.counter ? history.get(rule.counter) : undefined;
-            if (h) next.set(rule.id, h);
+            if (h) next.set(rule.id, { history: h, pps: countersRef.current.get(rule.counter)?.pps ?? 0 });
         }
-        setSparklines(next);
+        if (next.size === 0 && ratesRef.current.size === 0) return;
+        setRates(next);
     }, [rules]);
 
     // Stable refs so callbacks don't need to re-create on every render.
@@ -229,12 +238,15 @@ export const useForwardRuleCounters = (
 
             if (!mutated) return;
 
-            const next = new Map<string, number[]>();
+            const next = new Map<string, RuleRate>();
             for (const rule of currentRules) {
                 const h = rule.counter ? history.get(rule.counter) : undefined;
-                if (h) next.set(rule.id, h);
+                if (h) {
+                    const pps = rule.counter ? (currentCounters.get(rule.counter)?.pps ?? 0) : 0;
+                    next.set(rule.id, { history: h, pps });
+                }
             }
-            setSparklines(next);
+            setRates(next);
         };
 
         tick();
@@ -243,5 +255,5 @@ export const useForwardRuleCounters = (
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [enabled]);
 
-    return { sparklines };
+    return { rates };
 };

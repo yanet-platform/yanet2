@@ -536,6 +536,15 @@
 
 .fw-spark-svg { display: block; }
 
+.fw-cell-pps {
+    font-family: var(--fw-font-mono);
+    font-size: 11.5px;
+    font-variant-numeric: tabular-nums;
+    color: var(--fw-text-3);
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
 // Bulk action bar — centered over the content area, accounting for the sidebar.
 .fw-bulk-bar {
     position: fixed;
