@@ -5,6 +5,16 @@ import { toaster, copyToClipboard } from '../utils';
 
 export type YamlIOMode = 'import' | 'export' | null;
 
+/** Files larger than this threshold suppress the textarea preview. */
+const LARGE_FILE_THRESHOLD = 1_000_000;
+
+/** Progress information reported by an async import worker. */
+export interface ParseProgress {
+    stage: 'yaml' | 'rules' | string;
+    done: number;
+    total: number;
+}
+
 export interface YamlIOModalProps {
     /** Config name used in export metadata and download filename. */
     configName: string;
@@ -16,8 +26,17 @@ export interface YamlIOModalProps {
     downloadPrefix?: string;
     /** YAML text for export mode. Computed once when the modal opens. */
     exportYaml: () => string;
-    /** Parse the textarea text and apply the import. Should throw on failure. */
-    onImport: (text: string) => void;
+    /**
+     * Parse the textarea text and apply the import synchronously. Should throw on failure.
+     * Either onImport or onImportAsync must be supplied.
+     */
+    onImport?: (text: string) => void;
+    /**
+     * Parse the textarea text asynchronously. Receives an onProgress callback that the
+     * caller should invoke for each progress event. Should reject with an Error on failure.
+     * Either onImport or onImportAsync must be supplied.
+     */
+    onImportAsync?: (text: string, onProgress: (p: ParseProgress) => void) => Promise<void>;
     /** Toast key prefix, e.g. "fw-yaml" or "fib-yaml". */
     toastPrefix: string;
     /** Placeholder YAML shown in import textarea. */
@@ -45,6 +64,7 @@ const YamlIOModal: React.FC<YamlIOModalProps> = ({
     downloadPrefix,
     exportYaml,
     onImport,
+    onImportAsync,
     toastPrefix,
     importPlaceholder,
     exportFooterHint,
@@ -53,16 +73,40 @@ const YamlIOModal: React.FC<YamlIOModalProps> = ({
     importExtraControls,
 }) => {
     const [showModal, setShowModal] = useState<YamlIOMode>(null);
-    const [text, setText] = useState('');
+    // textContent holds the actual YAML string; textarea only shows it when small.
+    const textContent = useRef('');
+    // Preview-safe string bound to the textarea (empty for large files).
+    const [previewText, setPreviewText] = useState('');
+    const [isLargeFile, setIsLargeFile] = useState(false);
+    const [loadProgress, setLoadProgress] = useState<number | null>(null);
+    const [isParsing, setIsParsing] = useState(false);
+    const [parseProgress, setParseProgress] = useState<ParseProgress | null>(null);
     const [parseError, setParseError] = useState<string | null>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+    const applyText = (content: string): void => {
+        textContent.current = content;
+        if (content.length > LARGE_FILE_THRESHOLD) {
+            setIsLargeFile(true);
+            setPreviewText('');
+        } else {
+            setIsLargeFile(false);
+            setPreviewText(content);
+        }
+    };
+
     useEffect(() => {
         if (showModal === 'export') {
-            setText(exportYaml());
+            const yamlText = exportYaml();
+            applyText(yamlText);
         } else if (showModal === 'import') {
-            setText('');
+            textContent.current = '';
+            setPreviewText('');
+            setIsLargeFile(false);
+            setLoadProgress(null);
             setParseError(null);
+            setIsParsing(false);
+            setParseProgress(null);
         }
     // Intentionally re-run only when modal opens, not on every data update.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -79,7 +123,7 @@ const YamlIOModal: React.FC<YamlIOModalProps> = ({
 
     const handleDownload = (): void => {
         const filename = downloadPrefix ?? configName;
-        const blob = new Blob([text], { type: 'text/yaml' });
+        const blob = new Blob([textContent.current], { type: 'text/yaml' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
@@ -91,7 +135,7 @@ const YamlIOModal: React.FC<YamlIOModalProps> = ({
 
     const handleCopy = async (): Promise<void> => {
         try {
-            await copyToClipboard(text);
+            await copyToClipboard(textContent.current);
             toaster.success(`${toastPrefix}-copy`, 'Copied to clipboard.');
         } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
@@ -101,23 +145,121 @@ const YamlIOModal: React.FC<YamlIOModalProps> = ({
 
     const handleImport = (): void => {
         setParseError(null);
-        try {
-            onImport(text);
-            setShowModal(null);
-        } catch (e) {
-            setParseError((e as Error).message);
+        setParseProgress(null);
+        setIsParsing(true);
+
+        if (onImportAsync) {
+            onImportAsync(textContent.current, (p) => setParseProgress(p))
+                .then(() => {
+                    setIsParsing(false);
+                    setParseProgress(null);
+                    setShowModal(null);
+                })
+                .catch((e: unknown) => {
+                    setIsParsing(false);
+                    setParseProgress(null);
+                    setParseError((e as Error).message);
+                });
+            return;
         }
+
+        // Defer the parse via setTimeout so the browser can paint the spinner
+        // before the synchronous YAML parse blocks the main thread.
+        setTimeout(() => {
+            try {
+                onImport?.(textContent.current);
+                setIsParsing(false);
+                setShowModal(null);
+            } catch (e) {
+                setIsParsing(false);
+                setParseError((e as Error).message);
+            }
+        }, 0);
     };
 
     const handleFileLoad = (file: File): void => {
+        setLoadProgress(0);
+        setParseError(null);
         const reader = new FileReader();
-        reader.onload = (e) => setText(e.target?.result as string ?? '');
+
+        reader.onloadstart = (): void => {
+            setLoadProgress(0);
+        };
+
+        reader.onprogress = (e: ProgressEvent): void => {
+            if (e.lengthComputable && e.total > 0) {
+                setLoadProgress(Math.round((e.loaded / e.total) * 100));
+            }
+        };
+
+        reader.onload = (e): void => {
+            const content = e.target?.result as string ?? '';
+            setLoadProgress(null);
+            applyText(content);
+        };
+
+        reader.onerror = (): void => {
+            setLoadProgress(null);
+            setParseError('Failed to read file.');
+        };
+
         reader.readAsText(file);
     };
 
     const closeModal = (): void => {
         setShowModal(null);
         setParseError(null);
+        setIsParsing(false);
+        setLoadProgress(null);
+        setParseProgress(null);
+    };
+
+    const hasContent = textContent.current.trim().length > 0;
+
+    const renderParseStatus = (): React.ReactNode => {
+        if (!isParsing) return null;
+
+        if (parseProgress) {
+            const { stage, done, total } = parseProgress;
+            if (stage === 'yaml') {
+                const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+                return (
+                    <div style={{ marginTop: 6 }}>
+                        <div style={{ color: 'var(--fw-text-3)', fontSize: 12, marginBottom: 4 }}>
+                            Parsing YAML… {done < total ? '' : '100%'}
+                        </div>
+                        <div className="fw-parse-progress">
+                            <div
+                                className="fw-parse-progress__bar"
+                                style={{ width: `${pct}%` }}
+                            />
+                        </div>
+                    </div>
+                );
+            }
+            if (stage === 'rules') {
+                const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+                return (
+                    <div style={{ marginTop: 6 }}>
+                        <div style={{ color: 'var(--fw-text-3)', fontSize: 12, marginBottom: 4 }}>
+                            Converting rules: {done.toLocaleString()} / {total.toLocaleString()} ({pct}%)
+                        </div>
+                        <div className="fw-parse-progress">
+                            <div
+                                className="fw-parse-progress__bar"
+                                style={{ width: `${pct}%` }}
+                            />
+                        </div>
+                    </div>
+                );
+            }
+        }
+
+        return (
+            <div style={{ marginTop: 6, color: 'var(--fw-text-3)', fontSize: 12 }}>
+                Parsing YAML…
+            </div>
+        );
     };
 
     return (
@@ -173,21 +315,37 @@ const YamlIOModal: React.FC<YamlIOModalProps> = ({
                                             }}
                                         />
                                     </label>
-                                    <span className="fw-modal__or">or paste below</span>
+                                    {loadProgress !== null && (
+                                        <span className="fw-modal__load-progress">
+                                            Reading… {loadProgress}%
+                                        </span>
+                                    )}
+                                    {loadProgress === null && (
+                                        <span className="fw-modal__or">or paste below</span>
+                                    )}
                                     {importExtraControls}
                                 </div>
                             )}
-                            <textarea
-                                ref={textareaRef}
-                                className="fw-code-area"
-                                value={text}
-                                onChange={(e) => {
-                                    setText(e.target.value);
-                                    setParseError(null);
-                                }}
-                                placeholder={showModal === 'import' ? importPlaceholder : ''}
-                                spellCheck={false}
-                            />
+                            {isLargeFile ? (
+                                <div className="fw-modal__large-file-notice">
+                                    Large file loaded ({(textContent.current.length / 1_048_576).toFixed(1)} MB) — preview suppressed to avoid browser slowdown.
+                                </div>
+                            ) : (
+                                <textarea
+                                    ref={textareaRef}
+                                    className="fw-code-area"
+                                    value={previewText}
+                                    onChange={(e) => {
+                                        const v = e.target.value;
+                                        textContent.current = v;
+                                        setPreviewText(v);
+                                        setParseError(null);
+                                    }}
+                                    placeholder={showModal === 'import' ? importPlaceholder : ''}
+                                    spellCheck={false}
+                                />
+                            )}
+                            {renderParseStatus()}
                             {parseError && (
                                 <div style={{ marginTop: 6, color: 'var(--g-color-text-danger)', fontSize: 12 }}>
                                     {parseError}
@@ -229,9 +387,9 @@ const YamlIOModal: React.FC<YamlIOModalProps> = ({
                                         type="button"
                                         className="fw-btn fw-btn--primary"
                                         onClick={handleImport}
-                                        disabled={!text.trim()}
+                                        disabled={!hasContent || isParsing || loadProgress !== null}
                                     >
-                                        {importButtonLabel}
+                                        {isParsing ? 'Parsing…' : importButtonLabel}
                                     </button>
                                 )}
                             </div>

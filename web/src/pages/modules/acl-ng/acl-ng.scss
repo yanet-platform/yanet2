@@ -1,0 +1,495 @@
+@use '../../../styles/variables' as *;
+@use '../../../styles/mixins' as *;
+
+// ACL NG page styles. Shared chrome (fw-page, fw-tabs, fw-tbl-*, etc.) lives in
+// web/src/styles/draft-page.scss which this page imports. This file covers only
+// ACL-specific chip colors, action chain, editor elements, and override tweaks.
+
+// Chip list container.
+.acl-chip-list {
+    display: inline-flex;
+    align-items: center;
+    flex-wrap: nowrap;
+    gap: 3px;
+    overflow: hidden;
+    max-width: 100%;
+}
+
+// Base chip — inherits mono font from fw-cell-mono via composition.
+.acl-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 7px;
+    border-radius: 4px;
+    font-family: var(--fw-font-mono);
+    font-size: 11.5px;
+    font-weight: 500;
+    white-space: nowrap;
+    background: var(--g-color-base-generic-accent);
+    border: 1px solid var(--g-color-line-generic);
+    flex-shrink: 0;
+
+    &--overflow {
+        color: var(--fw-text-3);
+        background: var(--fw-bg-2);
+        border-color: var(--fw-line-2);
+        font-size: 11px;
+    }
+
+    // IPv4 chips — warm beige/tan text; transparent background, border only.
+    &--ipv4 {
+        background: transparent;
+        color: #d6c79a;
+    }
+
+    // IPv6 chips — cool blue-grey text; transparent background, border only.
+    &--ipv6 {
+        background: transparent;
+        color: #c0d3e8;
+    }
+
+    // "any" wildcard chip — dashed border, muted italic text.
+    &--any {
+        background: transparent;
+        color: var(--g-color-text-secondary);
+        border-style: dashed;
+        border-color: var(--g-color-text-hint);
+        font-style: italic;
+    }
+
+    // Port chips — neutral.
+    &--port {
+        background: var(--fw-bg-3);
+        color: var(--fw-text-2);
+        border-color: var(--fw-line-2);
+    }
+
+    // VLAN chips — subtle amber.
+    &--vlan {
+        background: color-mix(in srgb, var(--g-color-base-warning-light) 50%, transparent);
+        color: var(--g-color-text-warning);
+        border-color: color-mix(in srgb, var(--g-color-base-warning-medium) 40%, transparent);
+    }
+
+    // Device chips — muted mono style.
+    &--device {
+        background: var(--fw-bg-2);
+        color: var(--fw-text-2);
+        border-color: var(--fw-line-2);
+    }
+
+    // Proto chips by tone.
+    &--proto {
+        &-tcp {
+            background: color-mix(in srgb, var(--g-color-base-positive-light) 55%, transparent);
+            color: var(--g-color-text-positive);
+            border-color: color-mix(in srgb, var(--g-color-base-positive-medium) 40%, transparent);
+        }
+
+        &-udp {
+            background: color-mix(in srgb, var(--g-color-base-info-light) 55%, transparent);
+            color: var(--g-color-text-info);
+            border-color: color-mix(in srgb, var(--g-color-base-info-medium) 40%, transparent);
+        }
+
+        &-icmp {
+            background: color-mix(in srgb, var(--g-color-base-warning-light) 55%, transparent);
+            color: var(--g-color-text-warning);
+            border-color: color-mix(in srgb, var(--g-color-base-warning-medium) 40%, transparent);
+        }
+
+        &-misc {
+            background: color-mix(in srgb, var(--g-color-base-misc-light) 55%, transparent);
+            color: var(--g-color-text-misc);
+            border-color: color-mix(in srgb, var(--g-color-base-misc-medium) 40%, transparent);
+        }
+
+        &-dim {
+            background: var(--fw-bg-2);
+            color: var(--fw-text-3);
+            border-color: var(--fw-line-2);
+        }
+    }
+}
+
+// Action chain in table cells.
+.acl-action-chain {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    overflow: hidden;
+    max-width: 100%;
+}
+
+.acl-action-empty {
+    color: var(--fw-text-3);
+    font-family: var(--fw-font-mono);
+    font-size: 12px;
+}
+
+.acl-action-arrow {
+    color: var(--fw-text-3);
+    font-size: 11px;
+    flex-shrink: 0;
+}
+
+.acl-action-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 7px;
+    border-radius: 4px;
+    font-family: var(--fw-font-mono);
+    font-size: 11.5px;
+    font-weight: 500;
+    white-space: nowrap;
+    border: 1px solid transparent;
+    background: rgba(255, 255, 255, 0.03);
+    color: var(--fw-text-2);
+    border-color: var(--fw-line-2);
+
+    &--pass {
+        font-weight: 600;
+        background: color-mix(in srgb, var(--g-color-base-positive-light) 60%, transparent);
+        color: var(--g-color-text-positive);
+        border-color: color-mix(in srgb, var(--g-color-base-positive-medium) 50%, transparent);
+    }
+
+    &--deny {
+        font-weight: 600;
+        background: color-mix(in srgb, var(--g-color-base-danger-light) 60%, transparent);
+        color: var(--g-color-text-danger);
+        border-color: color-mix(in srgb, var(--g-color-base-danger-medium) 50%, transparent);
+    }
+
+    &--log {
+        background: color-mix(in srgb, var(--g-color-base-warning-light) 55%, transparent);
+        color: var(--g-color-text-warning);
+        border-color: color-mix(in srgb, var(--g-color-base-warning-medium) 40%, transparent);
+    }
+
+    &--state {
+        background: rgba(111, 221, 224, 0.12);
+        color: #6FDDE0;
+        border-color: rgba(111, 221, 224, 0.25);
+    }
+}
+
+// Action editor (drawer form).
+.acl-action-editor {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.acl-action-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.acl-action-row__idx {
+    color: var(--fw-text-3);
+    font-family: var(--fw-font-mono);
+    font-size: 12px;
+    min-width: 20px;
+}
+
+.acl-action-select {
+    flex: 1;
+}
+
+.acl-action-add-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding-top: 4px;
+}
+
+.acl-action-preset {
+    font-size: 11.5px;
+    padding: 2px 8px;
+    height: auto;
+}
+
+// Proto preset buttons.
+.acl-proto-presets {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-top: 6px;
+}
+
+.acl-proto-preset {
+    font-size: 11.5px;
+    padding: 2px 8px;
+    height: auto;
+}
+
+// Warning hints in drawer.
+.acl-hint--warn {
+    color: var(--g-color-text-warning);
+}
+
+// Counter toggle button in sparkline cell.
+.acl-counter-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-left: auto;
+    width: 32px;
+    height: 32px;
+    border: 1px solid var(--fw-line-2);
+    border-radius: 6px;
+    background: transparent;
+    cursor: pointer;
+    line-height: 1;
+    flex-shrink: 0;
+    padding: 0;
+    transition: background 0.1s, border-color 0.1s;
+
+    &--off {
+        color: var(--fw-text-3);
+
+        &:hover {
+            background: var(--fw-bg-2);
+            border-color: var(--fw-accent);
+            color: var(--fw-accent);
+        }
+    }
+
+    &--on {
+        color: var(--fw-accent);
+        border-color: var(--fw-accent);
+        background: color-mix(in srgb, var(--fw-accent) 10%, transparent);
+
+        &:hover {
+            background: color-mix(in srgb, var(--fw-accent) 20%, transparent);
+        }
+    }
+}
+
+.acl-pps-loading {
+    color: var(--fw-text-3);
+    font-family: var(--fw-font-mono);
+    font-size: 11px;
+}
+
+// Structured diff modal styles.
+.acl-diff-summary-bar {
+    display: flex;
+    gap: 14px;
+    align-items: center;
+    padding: 8px 12px;
+    margin-bottom: 16px;
+    background: var(--fw-bg-2);
+    border-radius: 6px;
+    border: 1px solid var(--fw-line);
+    flex-wrap: wrap;
+}
+
+.acl-diff-stat {
+    font-size: 13px;
+    font-weight: 600;
+    font-family: var(--fw-font-mono);
+
+    &--same { color: var(--fw-text-3); }
+    &--add  { color: var(--g-color-text-positive); }
+    &--mod  { color: var(--g-color-text-warning); }
+    &--rem  { color: var(--g-color-text-danger); }
+    &--reord { color: var(--g-color-text-misc); }
+}
+
+.acl-diff-empty-state {
+    text-align: center;
+    color: var(--fw-text-3);
+    font-size: 13px;
+    padding: 32px 0;
+}
+
+.acl-diff-sections {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.acl-diff-section {
+    border-radius: 6px;
+    overflow: hidden;
+    border: 1px solid var(--fw-line);
+
+    &--add  { border-left: 3px solid var(--g-color-base-positive-medium); }
+    &--mod  { border-left: 3px solid var(--g-color-base-warning-medium); }
+    &--rem  { border-left: 3px solid var(--g-color-base-danger-medium); }
+    &--reord { border-left: 3px solid var(--g-color-base-misc-medium); }
+}
+
+.acl-diff-section-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background: var(--fw-bg-2);
+    cursor: pointer;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--fw-text-2);
+    border: none;
+    width: 100%;
+    text-align: left;
+
+    &:hover { background: var(--fw-bg-3); }
+}
+
+.acl-diff-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 7px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 600;
+    background: var(--fw-bg-3);
+    color: var(--fw-text-2);
+    border: 1px solid var(--fw-line-2);
+}
+
+.acl-diff-chevron {
+    margin-left: auto;
+    font-size: 11px;
+    color: var(--fw-text-3);
+}
+
+.acl-diff-section-body {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px;
+    background: var(--fw-bg);
+}
+
+.acl-diff-card {
+    background: var(--fw-bg-2);
+    border: 1px solid var(--fw-line);
+    border-radius: 5px;
+    overflow: hidden;
+
+    &--add  { border-left: 3px solid var(--g-color-base-positive-medium); }
+    &--mod  { border-left: 3px solid var(--g-color-base-warning-medium); }
+    &--rem  { border-left: 3px solid var(--g-color-base-danger-medium); }
+    &--reord { border-left: 3px solid var(--g-color-base-misc-medium); }
+}
+
+.acl-diff-card-ref {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 10px;
+    border-bottom: 1px solid var(--fw-line);
+    background: var(--fw-bg-3);
+}
+
+.acl-diff-num {
+    font-size: 12px;
+    font-weight: 700;
+    font-family: var(--fw-font-mono);
+    color: var(--fw-text-2);
+}
+
+.acl-diff-badge {
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    padding: 1px 5px;
+    border-radius: 3px;
+
+    &--add  { color: var(--g-color-text-positive); background: color-mix(in srgb, var(--g-color-base-positive-light) 60%, transparent); }
+    &--mod  { color: var(--g-color-text-warning); background: color-mix(in srgb, var(--g-color-base-warning-light) 60%, transparent); }
+    &--rem  { color: var(--g-color-text-danger); background: color-mix(in srgb, var(--g-color-base-danger-light) 60%, transparent); }
+    &--reord { color: var(--g-color-text-misc); background: color-mix(in srgb, var(--g-color-base-misc-light) 60%, transparent); }
+}
+
+.acl-diff-arrow {
+    color: var(--fw-text-3);
+    font-size: 11px;
+}
+
+.acl-diff-card-body {
+    padding: 8px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.acl-diff-line {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    flex-wrap: wrap;
+    font-size: 12px;
+}
+
+.acl-diff-label {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--fw-text-3);
+    min-width: 52px;
+    padding-top: 2px;
+    flex-shrink: 0;
+}
+
+.acl-diff-mod-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 4px 0;
+    border-bottom: 1px solid var(--fw-line);
+
+    &:last-child { border-bottom: none; }
+}
+
+.acl-diff-before-after {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    flex: 1;
+    min-width: 0;
+    flex-wrap: wrap;
+}
+
+.acl-diff-before,
+.acl-diff-after {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 3px;
+}
+
+// ChipInput toolbar for large lists.
+.acl-chip-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 4px;
+    flex-wrap: wrap;
+}
+
+// Scrollable chip container for many chips.
+.fw-chip-input--many {
+    max-height: 180px;
+    overflow-y: auto;
+    align-content: flex-start;
+}
+
+// The header outer div is a clipping container only — the inner div is
+// translated horizontally in sync with the body scroll via transform.
+// overflow-x: hidden overrides the auto set by draft-page.scss.
+.acl-table .fw-vtbl-header {
+    overflow-x: hidden !important;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+
+    &::-webkit-scrollbar {
+        display: none;
+    }
+}

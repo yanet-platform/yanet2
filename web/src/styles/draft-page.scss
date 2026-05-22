@@ -65,8 +65,8 @@
 .fw-page {
     display: flex;
     flex-direction: column;
-    min-height: 0;
     flex: 1;
+    min-height: 0;
     background: var(--fw-page-bg);
     color: var(--fw-text);
     font-size: 13px;
@@ -882,6 +882,42 @@
 }
 
 .fw-modal__or { color: var(--fw-text-3); }
+
+.fw-modal__load-progress {
+    font-size: 12px;
+    color: var(--fw-accent);
+    font-variant-numeric: tabular-nums;
+}
+
+.fw-parse-progress {
+    height: 4px;
+    background: var(--fw-line-2);
+    border-radius: 2px;
+    overflow: hidden;
+
+    &__bar {
+        height: 100%;
+        background: var(--fw-accent);
+        border-radius: 2px;
+        transition: width 0.15s ease;
+        min-width: 2px;
+    }
+}
+
+.fw-modal__large-file-notice {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 120px;
+    border: 1px dashed var(--fw-line-2);
+    border-radius: 6px;
+    color: var(--fw-text-3);
+    font-size: 13px;
+    padding: 16px 24px;
+    text-align: center;
+    background: var(--fw-bg-2);
+}
 
 .fw-code-area {
     flex: 1;

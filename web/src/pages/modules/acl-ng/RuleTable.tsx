@@ -1,18 +1,24 @@
-import React, { useCallback, useMemo, useRef, useState, useEffect, memo } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState, memo } from 'react';
 import { useContainerHeight } from '../../../hooks';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { Checkbox } from '@gravity-ui/uikit';
+import { Checkbox, Icon } from '@gravity-ui/uikit';
+import { Pause, Play } from '@gravity-ui/icons';
 import type { RuleItem } from './types';
-import type { RuleRate } from './useForwardRuleCounters';
-import DirectionBadge from './DirectionBadge';
-import AnyBadge from './AnyBadge';
-import Sparkline from './Sparkline';
-import { formatPps } from '../../../utils';
+import { expandRuleItem } from './hooks';
+import {
+    AnyChip,
+    IpNetChip,
+    PortRangeChip,
+    VlanRangeChip,
+    ProtoChip,
+    ActionChain,
+    ChipList,
+} from './chips';
 import { DraftActionButtons } from '../../_shared/draft';
+import type { RuleRate } from './useAclNgRuleCounters';
+import Sparkline from './Sparkline';
 
-/** Duration in ms of the CSS transition on .fw-drawer — keep in sync with SCSS. */
-const DRAWER_TRANSITION_MS = 220;
-export { DRAWER_TRANSITION_MS };
+export const DRAWER_TRANSITION_MS = 220;
 
 const ROW_HEIGHT = 44;
 const HEADER_HEIGHT = 40;
@@ -22,16 +28,17 @@ const OVERSCAN = 15;
 const COLUMN_WIDTHS = {
     checkbox: 38,
     index: 48,
-    target: 160,
-    mode: 90,
+    srcs: 180,
+    dsts: 180,
+    src_ports: 130,
+    dst_ports: 130,
+    protos: 150,
+    vlans: 110,
+    devices: 130,
     counter: 140,
-    devices: 140,
-    vlans: 120,
-    srcs: 200,
-    dsts: 200,
-    sparkline: 150,
+    actions: 190,
+    sparkline: 110,
 } as const;
-
 
 const TOTAL_WIDTH = Object.values(COLUMN_WIDTHS).reduce((a, b) => a + b, 0);
 
@@ -43,49 +50,38 @@ const cellStyle = (col: ColKey): React.CSSProperties => ({
     maxWidth: COLUMN_WIDTHS[col],
     flexShrink: 0,
     overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
     paddingRight: col === 'checkbox' ? 0 : 8,
     display: 'flex',
     alignItems: 'center',
     justifyContent: col === 'checkbox' || col === 'index' ? 'center' : 'flex-start',
 });
 
-/** Compact mono list of values with overflow truncation. */
-const ValueCell: React.FC<{ values: string[] }> = ({ values }) => {
-    if (values.length === 0) return null;
-    const visible = values.slice(0, 3);
-    const rest = values.length - visible.length;
-    return (
-        <span className="fw-cell-values" title={values.join(', ')}>
-            {visible.map((v, idx) => (
-                <span key={idx} className="fw-cell-mono">{v}</span>
-            ))}
-            {rest > 0 && <span className="fw-cell-more">+{rest}</span>}
-        </span>
-    );
-};
-
 interface VirtualRowProps {
     item: RuleItem;
     start: number;
     selected: boolean;
     active: boolean;
-    rateData: RuleRate | null;
+    rate: RuleRate | undefined;
+    counterEnabled: boolean;
     onToggleSelect: (id: string) => void;
     onHoverChange: (item: RuleItem | null, start: number) => void;
+    onToggleCounter: (counterName: string) => void;
 }
 
-/** Single virtualized rule row — no per-row action slot; hover is reported to the parent overlay. */
 const VirtualRow: React.FC<VirtualRowProps> = memo(({
     item,
     start,
     selected,
     active,
-    rateData,
+    rate,
+    counterEnabled,
     onToggleSelect,
     onHoverChange,
+    onToggleCounter,
 }) => {
+    // Expand the rule lazily — only called for the ~25 visible rows at a time.
+    const expanded = useMemo(() => expandRuleItem(item.rule), [item.rule]);
+
     const handleCheckboxChange = useCallback((_checked: boolean): void => {
         onToggleSelect(item.id);
     }, [onToggleSelect, item.id]);
@@ -99,8 +95,7 @@ const VirtualRow: React.FC<VirtualRowProps> = memo(({
     }, [onHoverChange]);
 
     let rowBg = 'transparent';
-    if (active) rowBg = 'var(--fw-accent-soft)';
-    else if (selected) rowBg = 'var(--fw-accent-soft)';
+    if (active || selected) rowBg = 'var(--fw-accent-soft)';
 
     return (
         <div
@@ -121,10 +116,7 @@ const VirtualRow: React.FC<VirtualRowProps> = memo(({
                 paddingLeft: 4,
             }}
         >
-            <div
-                style={cellStyle('checkbox')}
-                onClick={(e) => e.stopPropagation()}
-            >
+            <div style={cellStyle('checkbox')} onClick={e => e.stopPropagation()}>
                 <Checkbox
                     checked={selected}
                     onUpdate={handleCheckboxChange}
@@ -136,51 +128,124 @@ const VirtualRow: React.FC<VirtualRowProps> = memo(({
                 <span style={{ fontSize: 12 }}>{item.index + 1}</span>
             </div>
 
-            <div style={cellStyle('target')} title={item.target}>
-                <span className="fw-cell-mono fw-cell-strong">{item.target || '—'}</span>
+            <div style={cellStyle('srcs')}>
+                <ChipList
+                    items={expanded.sourceCidrs}
+                    isAny={expanded.isAnySrc}
+                    renderChip={(cidr, idx) => <IpNetChip key={idx} cidr={cidr} />}
+                />
             </div>
 
-            <div style={cellStyle('mode')}>
-                <DirectionBadge mode={item.mode} />
+            <div style={cellStyle('dsts')}>
+                <ChipList
+                    items={expanded.dstCidrs}
+                    isAny={expanded.isAnyDst}
+                    renderChip={(cidr, idx) => <IpNetChip key={idx} cidr={cidr} />}
+                />
+            </div>
+
+            <div style={cellStyle('src_ports')}>
+                {expanded.isAnySrcPort
+                    ? <AnyChip>any</AnyChip>
+                    : <ChipList
+                        items={expanded.srcPortRanges}
+                        renderChip={(r, idx) => <PortRangeChip key={idx} rangeStr={r} />}
+                    />
+                }
+            </div>
+
+            <div style={cellStyle('dst_ports')}>
+                {expanded.isAnyDstPort
+                    ? <AnyChip>any</AnyChip>
+                    : <ChipList
+                        items={expanded.dstPortRanges}
+                        renderChip={(r, idx) => <PortRangeChip key={idx} rangeStr={r} />}
+                    />
+                }
+            </div>
+
+            <div style={cellStyle('protos')}>
+                <ChipList
+                    items={expanded.protoRanges}
+                    isAny={expanded.protoRanges.length === 0}
+                    anyLabel="any"
+                    renderChip={(r, idx) => <ProtoChip key={idx} rangeStr={r} />}
+                />
+            </div>
+
+            <div style={cellStyle('vlans')}>
+                {expanded.isAnyVlan
+                    ? <AnyChip>any</AnyChip>
+                    : <ChipList
+                        items={expanded.vlanRanges}
+                        renderChip={(r, idx) => <VlanRangeChip key={idx} rangeStr={r} />}
+                    />
+                }
+            </div>
+
+            <div style={cellStyle('devices')}>
+                {expanded.deviceNames.length === 0
+                    ? <AnyChip>any</AnyChip>
+                    : <ChipList
+                        items={expanded.deviceNames}
+                        renderChip={(d, idx) => (
+                            <span key={idx} className="acl-chip acl-chip--device" title={d}>{d}</span>
+                        )}
+                    />
+                }
             </div>
 
             <div style={cellStyle('counter')} title={item.counter}>
                 <span className="fw-cell-mono fw-cell-muted">{item.counter || '—'}</span>
             </div>
 
-            <div style={cellStyle('devices')}>
-                {item.deviceNames.length > 0
-                    ? <ValueCell values={item.deviceNames} />
-                    : <AnyBadge label="any" />
-                }
+            <div style={{ ...cellStyle('sparkline'), gap: 4 }}>
+                {item.counter ? (
+                    counterEnabled ? (
+                        <>
+                            {rate ? (
+                                <>
+                                    <Sparkline values={rate.history} width={52} height={16} />
+                                    <span className="fw-cell-pps" title={`${rate.pps.toFixed(0)} pps`}>
+                                        {rate.pps >= 1000
+                                            ? `${(rate.pps / 1000).toFixed(1)}k`
+                                            : rate.pps.toFixed(0)}
+                                    </span>
+                                </>
+                            ) : (
+                                <span className="fw-cell-pps acl-pps-loading" title="Waiting for counter data">…</span>
+                            )}
+                            <button
+                                type="button"
+                                className="acl-counter-toggle acl-counter-toggle--on"
+                                onClick={() => onToggleCounter(item.counter)}
+                                title="Stop tracking this counter"
+                                aria-label="Disable counter"
+                            >
+                                <Icon data={Pause} size={16} />
+                            </button>
+                        </>
+                    ) : (
+                        <>
+                            <span className="fw-cell-pps" style={{ color: 'var(--fw-text-3)' }}>—</span>
+                            <button
+                                type="button"
+                                className="acl-counter-toggle acl-counter-toggle--off"
+                                onClick={() => onToggleCounter(item.counter)}
+                                title={`Track counter "${item.counter}"`}
+                                aria-label="Enable counter"
+                            >
+                                <Icon data={Play} size={16} />
+                            </button>
+                        </>
+                    )
+                ) : (
+                    <span className="fw-cell-pps" style={{ color: 'var(--fw-text-3)' }}>—</span>
+                )}
             </div>
 
-            <div style={cellStyle('vlans')}>
-                {item.isAllVlans
-                    ? <AnyBadge label="any" />
-                    : <span className="fw-cell-mono fw-cell-muted">{item.vlansDisplay || '—'}</span>
-                }
-            </div>
-
-            <div style={cellStyle('srcs')}>
-                {item.isAnySrc
-                    ? <AnyBadge label="any" />
-                    : <ValueCell values={item.sourceCidrs} />
-                }
-            </div>
-
-            <div style={cellStyle('dsts')}>
-                {item.isAnyDst
-                    ? <AnyBadge label="any" />
-                    : <ValueCell values={item.dstCidrs} />
-                }
-            </div>
-
-            <div style={{ ...cellStyle('sparkline'), gap: 8 }}>
-                <Sparkline values={rateData?.history ?? null} width={56} height={16} />
-                <span className="fw-cell-pps">
-                    {rateData ? formatPps(rateData.pps) : '— pps'}
-                </span>
+            <div style={cellStyle('actions')}>
+                <ActionChain actions={item.rule.actions ?? []} />
             </div>
         </div>
     );
@@ -192,53 +257,39 @@ interface RuleTableProps {
     items: RuleItem[];
     selectedIds: Set<string>;
     activeRowId: string | null;
-    /** Map from RuleItem.id to rate data (sparkline history + live pps). */
-    rateValues: Map<string, RuleRate>;
     onSelectionChange: (ids: Set<string>) => void;
     onEditRule: (item: RuleItem) => void;
     currentIsDirty: boolean;
     onSave: () => void;
     onDiscard: () => void;
     onDeleteConfig: () => void;
+    rates: Map<string, RuleRate>;
+    enabledCounterNames: Set<string>;
+    onToggleCounter: (counterName: string) => void;
 }
 
-/** Virtualized rule table using @tanstack/react-virtual. */
+/** Virtualized ACL NG rule table using @tanstack/react-virtual. */
 const RuleTable: React.FC<RuleTableProps> = ({
     items,
     selectedIds,
     activeRowId,
-    rateValues,
     onSelectionChange,
     onEditRule,
     currentIsDirty,
     onSave,
     onDiscard,
     onDeleteConfig,
+    rates,
+    enabledCounterNames,
+    onToggleCounter,
 }) => {
     const scrollRef = useRef<HTMLDivElement>(null);
     const wrapRef = useRef<HTMLDivElement>(null);
     const bodyHeight = useContainerHeight(scrollRef, 300, FOOTER_HEIGHT + 20);
-
-    /**
-     * Pending hide timeout id. When the cursor leaves a row we schedule a
-     * short delay before clearing hoveredItem, giving the overlay time to
-     * receive its own mouseenter and cancel the hide.
-     */
+    const headerInnerRef = useRef<HTMLDivElement>(null);
     const hideTimeoutRef = useRef<number | null>(null);
-
-    /**
-     * Hover state for the floating edit button overlay.
-     * hoveredItem is null when no row is hovered.
-     * hoveredStart is the virtualizer `start` offset (px from scroll content top).
-     */
     const [hoveredItem, setHoveredItem] = useState<RuleItem | null>(null);
     const [hoveredStart, setHoveredStart] = useState(0);
-
-    /**
-     * Tracks the vertical scroll offset of the body so the overlay (which is
-     * a child of .fw-tbl-wrap, not the scroll body) can compute its correct
-     * top position: HEADER_HEIGHT + virtualizer_start - scrollTop.
-     */
     const [bodyScrollTop, setBodyScrollTop] = useState(0);
 
     const rowVirtualizer = useVirtualizer({
@@ -251,12 +302,17 @@ const RuleTable: React.FC<RuleTableProps> = ({
     useEffect(() => {
         const el = scrollRef.current;
         if (!el) return;
-        const onScroll = (): void => setBodyScrollTop(el.scrollTop);
-        el.addEventListener('scroll', onScroll, { passive: true });
-        return () => el.removeEventListener('scroll', onScroll);
+        const onBodyScroll = (): void => {
+            setBodyScrollTop(el.scrollTop);
+            const inner = headerInnerRef.current;
+            if (inner) {
+                inner.style.transform = `translateX(-${el.scrollLeft}px)`;
+            }
+        };
+        el.addEventListener('scroll', onBodyScroll, { passive: true });
+        return () => el.removeEventListener('scroll', onBodyScroll);
     }, []);
 
-    // Cancel any pending hide timeout when the table unmounts.
     useEffect(() => () => {
         if (hideTimeoutRef.current !== null) {
             window.clearTimeout(hideTimeoutRef.current);
@@ -274,7 +330,7 @@ const RuleTable: React.FC<RuleTableProps> = ({
         if (selectedIds.size === items.length && items.length > 0) {
             onSelectionChange(new Set());
         } else {
-            onSelectionChange(new Set(items.map((item) => item.id)));
+            onSelectionChange(new Set(items.map(item => item.id)));
         }
     }, [selectedIds.size, items, onSelectionChange]);
 
@@ -284,8 +340,6 @@ const RuleTable: React.FC<RuleTableProps> = ({
             hideTimeoutRef.current = null;
         }
         if (item === null) {
-            // Schedule the hide so the overlay can intercept if the cursor
-            // moved onto it rather than away from the table entirely.
             hideTimeoutRef.current = window.setTimeout(() => {
                 hideTimeoutRef.current = null;
                 setHoveredItem(null);
@@ -300,10 +354,6 @@ const RuleTable: React.FC<RuleTableProps> = ({
         if (hoveredItem) onEditRule(hoveredItem);
     }, [hoveredItem, onEditRule]);
 
-    /**
-     * When the cursor moves from the row into the overlay, cancel the pending
-     * hide so the button stays mounted and clickable.
-     */
     const handleOverlayMouseEnter = useCallback((): void => {
         if (hideTimeoutRef.current !== null) {
             window.clearTimeout(hideTimeoutRef.current);
@@ -317,44 +367,28 @@ const RuleTable: React.FC<RuleTableProps> = ({
 
     const isAllSelected = items.length > 0 && selectedIds.size === items.length;
     const isIndeterminate = selectedIds.size > 0 && selectedIds.size < items.length;
-
     const virtualRows = rowVirtualizer.getVirtualItems();
 
     const footerText = useMemo(() => {
-        if (items.length === 0) return '';
-        if (virtualRows.length === 0) return '';
+        if (items.length === 0 || virtualRows.length === 0) return '';
         const first = virtualRows[0].index + 1;
         const last = virtualRows[virtualRows.length - 1].index + 1;
         return `Shown ${first.toLocaleString()}–${last.toLocaleString()} of ${items.length.toLocaleString()}`;
     }, [virtualRows, items.length]);
 
-    /**
-     * Edit-button overlay y-offset relative to .fw-tbl-wrap (position:relative).
-     *
-     * The overlay is a child of .fw-tbl-wrap, NOT the scroll body.  This means:
-     *   • right: 0 resolves against .fw-tbl-wrap's right edge = wrap_right (fixed).
-     *   • top must account for the header height and the current scroll position:
-     *       top = HEADER_HEIGHT + virtualizer_start - scrollTop
-     *
-     * Geometry (button center vs header delete button center):
-     *   header delete center  = wrap_right − 8px(padding-right) − 16px(half of 32px) = wrap_right − 24px
-     *   slot width 40px, padding-right 8px, button 26px:
-     *     button center from slot_right = (40 − 8 − 26) / 2 + 13 = 3 + 13 = 16px from content edge
-     *     = 16 + 8 = 24px from slot_right = wrap_right − 24px  ✓
-     *
-     * Horizontal scrolling: the overlay is outside the scroll body so h-scroll
-     * never moves it — it stays permanently at right: 0 of .fw-tbl-wrap.
-     */
     const overlayTopOffset = HEADER_HEIGHT + hoveredStart - bodyScrollTop;
 
     return (
-        <div ref={wrapRef} className="fw-tbl-wrap">
-            {/* Sticky header row */}
+        <div
+            ref={wrapRef}
+            className="fw-tbl-wrap acl-table"
+        >
             <div className="fw-tbl-header-row">
                 <div
                     className="fw-vtbl-header"
-                    style={{ height: HEADER_HEIGHT, minWidth: TOTAL_WIDTH }}
+                    style={{ height: HEADER_HEIGHT }}
                 >
+                    <div ref={headerInnerRef} style={{ display: 'flex', minWidth: TOTAL_WIDTH, height: '100%', alignItems: 'center', willChange: 'transform' }}>
                     <div style={cellStyle('checkbox')}>
                         <Checkbox
                             indeterminate={isIndeterminate}
@@ -367,29 +401,36 @@ const RuleTable: React.FC<RuleTableProps> = ({
                     <div style={{ ...cellStyle('index'), justifyContent: 'center' }}>
                         <span className="fw-th-text">#</span>
                     </div>
-                    <div style={cellStyle('target')}>
-                        <span className="fw-th-text">Target</span>
-                    </div>
-                    <div style={cellStyle('mode')}>
-                        <span className="fw-th-text">Mode</span>
-                    </div>
-                    <div style={cellStyle('counter')}>
-                        <span className="fw-th-text">Counter</span>
-                    </div>
-                    <div style={cellStyle('devices')}>
-                        <span className="fw-th-text">Devices</span>
-                    </div>
-                    <div style={cellStyle('vlans')}>
-                        <span className="fw-th-text">VLANs</span>
-                    </div>
                     <div style={cellStyle('srcs')}>
                         <span className="fw-th-text">Sources</span>
                     </div>
                     <div style={cellStyle('dsts')}>
                         <span className="fw-th-text">Destinations</span>
                     </div>
+                    <div style={cellStyle('src_ports')}>
+                        <span className="fw-th-text">Src ports</span>
+                    </div>
+                    <div style={cellStyle('dst_ports')}>
+                        <span className="fw-th-text">Dst ports</span>
+                    </div>
+                    <div style={cellStyle('protos')}>
+                        <span className="fw-th-text">Protocols</span>
+                    </div>
+                    <div style={cellStyle('vlans')}>
+                        <span className="fw-th-text">VLANs</span>
+                    </div>
+                    <div style={cellStyle('devices')}>
+                        <span className="fw-th-text">Devices</span>
+                    </div>
+                    <div style={cellStyle('counter')}>
+                        <span className="fw-th-text">Counter</span>
+                    </div>
                     <div style={cellStyle('sparkline')}>
                         <span className="fw-th-text">pps</span>
+                    </div>
+                    <div style={cellStyle('actions')}>
+                        <span className="fw-th-text">Actions</span>
+                    </div>
                     </div>
                 </div>
                 <DraftActionButtons
@@ -400,7 +441,6 @@ const RuleTable: React.FC<RuleTableProps> = ({
                 />
             </div>
 
-            {/* Virtualized scroll body */}
             <div
                 ref={scrollRef}
                 className="fw-vtbl-body"
@@ -416,7 +456,7 @@ const RuleTable: React.FC<RuleTableProps> = ({
                             position: 'relative',
                         }}
                     >
-                        {virtualRows.map((virtualRow) => {
+                        {virtualRows.map(virtualRow => {
                             const item = items[virtualRow.index];
                             if (!item) return null;
                             return (
@@ -426,18 +466,18 @@ const RuleTable: React.FC<RuleTableProps> = ({
                                     start={virtualRow.start}
                                     selected={selectedIds.has(item.id)}
                                     active={activeRowId === item.id}
-                                    rateData={rateValues.get(item.id) ?? null}
+                                    rate={rates.get(item.id)}
+                                    counterEnabled={!!item.counter && enabledCounterNames.has(item.counter)}
                                     onToggleSelect={handleToggleSelect}
                                     onHoverChange={handleHoverChange}
+                                    onToggleCounter={onToggleCounter}
                                 />
                             );
                         })}
                     </div>
                 )}
-
             </div>
 
-            {/* Footer */}
             <div className="fw-vtbl-footer" style={{ height: FOOTER_HEIGHT }}>
                 <span className="fw-toolbar__count">{footerText}</span>
                 {selectedIds.size > 0 && (
@@ -447,24 +487,6 @@ const RuleTable: React.FC<RuleTableProps> = ({
                 )}
             </div>
 
-            {/*
-              * Floating edit button overlay — direct child of .fw-tbl-wrap
-              * (position:relative), NOT inside the scroll body.
-              *
-              *  right: 0  → always at wrap_right, regardless of horizontal scroll.
-              *  top       → HEADER_HEIGHT + virtualizer_start − scrollTop
-              *              keeps the button vertically aligned with the hovered row
-              *              while the body scrolls.
-              *
-              * Button center geometry (aligns with header delete button):
-              *   slot: 40px wide, padding-right 8px, justify-content:center (32px effective)
-              *   button: 26px centered in 32px → center offset from slot right = 8 + 3 + 13 = 24px
-              *   wrap right − 24px  =  header delete button center  ✓
-              *
-              * The overlay is clipped by .fw-tbl-wrap (overflow:hidden) so it never
-              * bleeds into the header or footer — rows at the very top/bottom that scroll
-              * into the boundary just have the button disappear naturally.
-              */}
             {hoveredItem !== null && (
                 <div
                     className="fw-row-action-slot"
@@ -476,7 +498,7 @@ const RuleTable: React.FC<RuleTableProps> = ({
                         type="button"
                         className="fw-row-edit-btn fw-row-edit-btn--visible"
                         onClick={handleOverlayEdit}
-                        aria-label={`Edit rule ${hoveredItem !== null ? hoveredItem.index + 1 : ''}`}
+                        aria-label={`Edit rule ${hoveredItem.index + 1}`}
                         title="Edit rule"
                     >
                         ✎

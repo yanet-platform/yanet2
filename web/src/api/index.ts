@@ -8,6 +8,7 @@ export * from './pipelines';
 export * from './devices';
 export * from './decap';
 export * from './acl';
+export { aclng, ACTION_KIND_LABELS } from './acl-ng';
 export * from './forward';
 export * from './counters';
 
@@ -19,6 +20,7 @@ import { pipelines } from './pipelines';
 import { devices } from './devices';
 import { decap } from './decap';
 import { acl } from './acl';
+import { aclng } from './acl-ng';
 import { forward } from './forward';
 import { counters } from './counters';
 
@@ -32,6 +34,7 @@ export const API = {
     devices,
     decap,
     acl,
+    aclng,
     forward,
     counters,
 };

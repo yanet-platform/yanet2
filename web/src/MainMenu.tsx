@@ -68,6 +68,7 @@ const MainMenu = ({ currentPage, onPageChange, renderContent, disabled = false }
         createMenuItem('modules/route', 'Route', Route),
         createMenuItem('modules/decap', 'Decap', LayoutCellsLarge),
         createMenuItem('modules/acl', 'ACL', Shield),
+        createMenuItem('modules/acl-ng', 'ACL NG', Shield),
         createMenuItem('modules/pdump', 'Pdump', CirclePlay),
         createDivider('__div_2'),
         createSectionHeader('__section_operators', 'Operators'),

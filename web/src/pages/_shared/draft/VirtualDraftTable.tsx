@@ -1,4 +1,5 @@
 import React, { useCallback, useMemo, useRef, memo } from 'react';
+import { useContainerHeight } from '../../../hooks';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { Checkbox } from '@gravity-ui/uikit';
 import DraftActionButtons from './DraftActionButtons';
@@ -227,6 +228,8 @@ export const VirtualDraftTable = <T extends { id: string }>({
     emptyMessage,
 }: VirtualDraftTableProps<T>): React.JSX.Element => {
     const scrollRef = useRef<HTMLDivElement>(null);
+    const wrapRef = useRef<HTMLDivElement>(null);
+    const bodyHeight = useContainerHeight(scrollRef, 300, FOOTER_HEIGHT + 20);
 
     const {
         hoveredRow,
@@ -279,7 +282,7 @@ export const VirtualDraftTable = <T extends { id: string }>({
     }, [virtualRows, visibleRows.length]);
 
     return (
-        <div className="fw-tbl-wrap">
+        <div ref={wrapRef} className="fw-tbl-wrap">
             <div className="fw-tbl-header-row">
                 <div className="fw-vtbl-header" style={{ height: HEADER_HEIGHT, minWidth: totalWidth }}>
                     <div
@@ -307,7 +310,11 @@ export const VirtualDraftTable = <T extends { id: string }>({
                 />
             </div>
 
-            <div ref={setScrollRef} className="fw-vtbl-body">
+            <div
+                ref={setScrollRef}
+                className="fw-vtbl-body"
+                style={bodyHeight > 0 ? { flex: '0 0 auto', height: bodyHeight } : undefined}
+            >
                 {visibleRows.length === 0 ? (
                     <div className="fw-table-empty">{emptyMessage}</div>
                 ) : (
