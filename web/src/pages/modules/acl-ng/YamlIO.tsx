@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import type { Rule } from '../../../api/acl-ng';
 import { toaster } from '../../../utils';
-import { rulesToDiffYaml } from './SaveDiffModal';
+import { rulesToDiffYaml, rulesToYamlObjects } from './SaveDiffModal';
 import YamlIOModal from '../../../components/YamlIOModal';
 import type { ParseProgress } from '../../../components/YamlIOModal';
 import YamlImportWorker from './yamlImport.worker.ts?worker';
@@ -13,13 +13,14 @@ type WorkerMessage =
     | { type: 'error'; message: string };
 
 /**
- * Parse YAML text in a dedicated Web Worker, calling onProgress for each
+ * Parse YAML or JSON text in a dedicated Web Worker, calling onProgress for each
  * progress event. Resolves with the parsed Rule array, rejects on error.
  * The worker is terminated after the promise settles.
  */
 const parseYamlToRulesAsync = (
     text: string,
     onProgress: (p: ParseProgress) => void,
+    format: 'yaml' | 'json',
 ): Promise<Rule[]> => {
     return new Promise((resolve, reject) => {
         const worker = new YamlImportWorker();
@@ -42,7 +43,7 @@ const parseYamlToRulesAsync = (
             reject(new Error(err.message));
         };
 
-        worker.postMessage({ type: 'parse', text });
+        worker.postMessage({ type: 'parse', text, format });
     });
 };
 
@@ -55,7 +56,10 @@ interface YamlIOProps {
     onImport: (configName: string, rules: Rule[], mode: ImportMode) => void;
 }
 
-/** YAML import/export controls for the ACL NG page header. */
+const rulesToInAclJson = (configName: string, rules: Rule[]): string =>
+    JSON.stringify({ name: configName, rules: rulesToYamlObjects(rules) }, null, 2) + '\n';
+
+/** YAML/JSON import/export controls for the ACL NG page header. */
 const YamlIO: React.FC<YamlIOProps> = ({ configName, rules, onImport }) => {
     const [mode, setMode] = useState<ImportMode>('replace');
 
@@ -66,8 +70,9 @@ const YamlIO: React.FC<YamlIOProps> = ({ configName, rules, onImport }) => {
     const handleImportAsync = async (
         text: string,
         onProgress: (p: ParseProgress) => void,
+        format: 'yaml' | 'json',
     ): Promise<void> => {
-        const parsed = await parseYamlToRulesAsync(text, onProgress);
+        const parsed = await parseYamlToRulesAsync(text, onProgress, format);
         onImport(configName, parsed, mode);
         const modeLabel = mode === 'replace' ? 'replace' : 'append';
         toaster.success('acl-ng-yaml-import', `Imported ${parsed.length} rules (${modeLabel}).`);
@@ -98,6 +103,7 @@ const YamlIO: React.FC<YamlIOProps> = ({ configName, rules, onImport }) => {
             itemCount={rules.length}
             itemLabel="rules"
             exportYaml={() => rulesToDiffYaml(rules)}
+            exportJson={() => rulesToInAclJson(configName, rules)}
             onImportAsync={handleImportAsync}
             toastPrefix="acl-ng-yaml"
             importPlaceholder={
@@ -117,6 +123,7 @@ const YamlIO: React.FC<YamlIOProps> = ({ configName, rules, onImport }) => {
             importFooterHint={`Loads into "${configName}" as draft — review before save.`}
             importButtonLabel="Load as draft"
             importExtraControls={importExtraControls}
+            supportJson
         />
     );
 };

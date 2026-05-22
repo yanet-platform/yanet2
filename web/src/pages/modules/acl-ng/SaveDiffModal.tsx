@@ -17,9 +17,9 @@ const ACTION_KIND_YAML_NAMES: Record<ActionKind, string> = {
     [ActionKind.ACTION_KIND_LOG]: 'ACTION_KIND_LOG',
 };
 
-/** Serialize ACL rules to the canonical YAML schema matching yanet-cli acl show output. */
-export const rulesToDiffYaml = (rules: Rule[]): string => {
-    const yamlRules = rules.map(r => {
+/** Build the serialisable object array for a set of ACL rules. Used by both YAML and JSON export. */
+export const rulesToYamlObjects = (rules: Rule[]): Array<Record<string, unknown>> => {
+    return rules.map(r => {
         const fmtIPNet = (net: { addr?: string | Uint8Array | number[]; mask?: string | Uint8Array | number[] }): string => {
             const addrBytes = extractBytes(net.addr);
             const maskBytes = extractBytes(net.mask);
@@ -55,12 +55,14 @@ export const rulesToDiffYaml = (rules: Rule[]): string => {
         entry['actions'] = actions;
         return entry;
     });
+};
 
-    return yaml.dump(
-        { rules: yamlRules },
+/** Serialize ACL rules to the canonical YAML schema matching yanet-cli acl show output. */
+export const rulesToDiffYaml = (rules: Rule[]): string =>
+    yaml.dump(
+        { rules: rulesToYamlObjects(rules) },
         { sortKeys: false, lineWidth: 120, noRefs: true },
     );
-};
 
 interface SaveDiffModalProps {
     configName: string;

@@ -36,7 +36,7 @@ export interface YamlIOModalProps {
      * caller should invoke for each progress event. Should reject with an Error on failure.
      * Either onImport or onImportAsync must be supplied.
      */
-    onImportAsync?: (text: string, onProgress: (p: ParseProgress) => void) => Promise<void>;
+    onImportAsync?: (text: string, onProgress: (p: ParseProgress) => void, format: 'yaml' | 'json') => Promise<void>;
     /** Toast key prefix, e.g. "fw-yaml" or "fib-yaml". */
     toastPrefix: string;
     /** Placeholder YAML shown in import textarea. */
@@ -49,13 +49,24 @@ export interface YamlIOModalProps {
     importButtonLabel?: string;
     /** Optional slot rendered inside the import body above the textarea (e.g. mode toggle). */
     importExtraControls?: React.ReactNode;
+    /**
+     * Opt-in to JSON support. When true: the file picker accepts .json, the export modal
+     * shows a JSON/YAML format toggle, import auto-detects format by extension or content
+     * sniff, and the detected format is passed to onImportAsync. Default: false.
+     */
+    supportJson?: boolean;
+    /**
+     * JSON serialiser for export. Only consulted when supportJson is true.
+     * If not provided alongside supportJson, the toggle is hidden and export falls back to YAML.
+     */
+    exportJson?: () => string;
 }
 
 /**
- * Reusable YAML import/export modal chrome used by multi-config draft pages.
- * Renders Import YAML and Export YAML buttons; clicking either opens the modal.
+ * Reusable YAML (and optionally JSON) import/export modal chrome used by multi-config draft pages.
+ * Renders Import and Export buttons; clicking either opens the modal.
  * Callers supply the serialisation and parsing logic via props.
- * Consumes fw-* CSS classes from forward.scss.
+ * Consumes fw-* CSS classes from draft-page.scss.
  */
 const YamlIOModal: React.FC<YamlIOModalProps> = ({
     configName,
@@ -63,6 +74,7 @@ const YamlIOModal: React.FC<YamlIOModalProps> = ({
     itemLabel = 'items',
     downloadPrefix,
     exportYaml,
+    exportJson,
     onImport,
     onImportAsync,
     toastPrefix,
@@ -71,10 +83,13 @@ const YamlIOModal: React.FC<YamlIOModalProps> = ({
     importFooterHint,
     importButtonLabel = 'Import',
     importExtraControls,
+    supportJson = false,
 }) => {
     const [showModal, setShowModal] = useState<YamlIOMode>(null);
-    // textContent holds the actual YAML string; textarea only shows it when small.
+    // textContent holds the actual text string; textarea only shows it when small.
     const textContent = useRef('');
+    // Filename from the last file-picker selection; null when user pastes manually.
+    const pickedFilename = useRef<string | null>(null);
     // Preview-safe string bound to the textarea (empty for large files).
     const [previewText, setPreviewText] = useState('');
     const [isLargeFile, setIsLargeFile] = useState(false);
@@ -83,6 +98,10 @@ const YamlIOModal: React.FC<YamlIOModalProps> = ({
     const [parseProgress, setParseProgress] = useState<ParseProgress | null>(null);
     const [parseError, setParseError] = useState<string | null>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+    // Export format toggle state (only meaningful when supportJson && exportJson).
+    const showFormatToggle = supportJson && exportJson !== undefined;
+    const [exportFormat, setExportFormat] = useState<'json' | 'yaml'>('json');
 
     const applyText = (content: string): void => {
         textContent.current = content;
@@ -95,12 +114,19 @@ const YamlIOModal: React.FC<YamlIOModalProps> = ({
         }
     };
 
+    const computeExportText = (fmt: 'json' | 'yaml'): string => {
+        if (fmt === 'json' && exportJson) {
+            return exportJson();
+        }
+        return exportYaml();
+    };
+
     useEffect(() => {
         if (showModal === 'export') {
-            const yamlText = exportYaml();
-            applyText(yamlText);
+            applyText(computeExportText(exportFormat));
         } else if (showModal === 'import') {
             textContent.current = '';
+            pickedFilename.current = null;
             setPreviewText('');
             setIsLargeFile(false);
             setLoadProgress(null);
@@ -121,13 +147,28 @@ const YamlIOModal: React.FC<YamlIOModalProps> = ({
         return () => window.removeEventListener('keydown', onKey);
     }, [showModal]);
 
+    const handleExportFormatChange = (fmt: 'json' | 'yaml'): void => {
+        setExportFormat(fmt);
+        applyText(computeExportText(fmt));
+    };
+
+    const detectImportFormat = (text: string, filename?: string): 'yaml' | 'json' => {
+        if (filename && filename.toLowerCase().endsWith('.json')) return 'json';
+        const first = text.trimStart()[0];
+        if (first === '{' || first === '[') return 'json';
+        return 'yaml';
+    };
+
     const handleDownload = (): void => {
         const filename = downloadPrefix ?? configName;
-        const blob = new Blob([textContent.current], { type: 'text/yaml' });
+        const isJson = supportJson && exportFormat === 'json';
+        const ext = isJson ? 'json' : 'yaml';
+        const mimeType = isJson ? 'application/json' : 'text/yaml';
+        const blob = new Blob([textContent.current], { type: mimeType });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `${filename}.yaml`;
+        a.download = `${filename}.${ext}`;
         a.click();
         URL.revokeObjectURL(url);
         toaster.success(`${toastPrefix}-download`, 'Download started.');
@@ -149,7 +190,10 @@ const YamlIOModal: React.FC<YamlIOModalProps> = ({
         setIsParsing(true);
 
         if (onImportAsync) {
-            onImportAsync(textContent.current, (p) => setParseProgress(p))
+            const format = supportJson
+                ? detectImportFormat(textContent.current, pickedFilename.current ?? undefined)
+                : 'yaml';
+            onImportAsync(textContent.current, (p) => setParseProgress(p), format)
                 .then(() => {
                     setIsParsing(false);
                     setParseProgress(null);
@@ -178,6 +222,7 @@ const YamlIOModal: React.FC<YamlIOModalProps> = ({
     };
 
     const handleFileLoad = (file: File): void => {
+        pickedFilename.current = file.name;
         setLoadProgress(0);
         setParseError(null);
         const reader = new FileReader();
@@ -216,6 +261,12 @@ const YamlIOModal: React.FC<YamlIOModalProps> = ({
 
     const hasContent = textContent.current.trim().length > 0;
 
+    const importLabel = supportJson ? 'Import' : 'Import YAML';
+    const exportLabel = supportJson ? 'Export' : 'Export YAML';
+    const fileAccept = supportJson
+        ? '.yaml,.yml,.json,application/json,text/*'
+        : '.yaml,.yml,text/*';
+
     const renderParseStatus = (): React.ReactNode => {
         if (!isParsing) return null;
 
@@ -226,7 +277,7 @@ const YamlIOModal: React.FC<YamlIOModalProps> = ({
                 return (
                     <div style={{ marginTop: 6 }}>
                         <div style={{ color: 'var(--fw-text-3)', fontSize: 12, marginBottom: 4 }}>
-                            Parsing YAML… {done < total ? '' : '100%'}
+                            Parsing… {done < total ? '' : '100%'}
                         </div>
                         <div className="fw-parse-progress">
                             <div
@@ -257,7 +308,29 @@ const YamlIOModal: React.FC<YamlIOModalProps> = ({
 
         return (
             <div style={{ marginTop: 6, color: 'var(--fw-text-3)', fontSize: 12 }}>
-                Parsing YAML…
+                Parsing…
+            </div>
+        );
+    };
+
+    const renderExportFormatToggle = (): React.ReactNode => {
+        if (!showFormatToggle) return null;
+        return (
+            <div style={{ display: 'flex', gap: 4 }}>
+                <button
+                    type="button"
+                    className={exportFormat === 'json' ? 'fw-btn fw-btn--sm' : 'fw-btn fw-btn--ghost fw-btn--sm'}
+                    onClick={() => handleExportFormatChange('json')}
+                >
+                    JSON
+                </button>
+                <button
+                    type="button"
+                    className={exportFormat === 'yaml' ? 'fw-btn fw-btn--sm' : 'fw-btn fw-btn--ghost fw-btn--sm'}
+                    onClick={() => handleExportFormatChange('yaml')}
+                >
+                    YAML
+                </button>
             </div>
         );
     };
@@ -266,11 +339,11 @@ const YamlIOModal: React.FC<YamlIOModalProps> = ({
         <>
             <Button view="outlined" onClick={() => setShowModal('import')}>
                 <Icon data={ArrowDownToLine} size={14} />
-                Import YAML
+                {importLabel}
             </Button>
             <Button view="outlined" onClick={() => setShowModal('export')}>
                 <Icon data={ArrowUpFromLine} size={14} />
-                Export YAML
+                {exportLabel}
             </Button>
 
             {showModal && (
@@ -279,7 +352,7 @@ const YamlIOModal: React.FC<YamlIOModalProps> = ({
                         <header className="fw-modal__head">
                             <div className="fw-modal__title-row">
                                 <span className="fw-modal__title">
-                                    {showModal === 'import' ? 'Import YAML' : 'Export YAML'}
+                                    {showModal === 'import' ? importLabel : exportLabel}
                                 </span>
                                 {showModal === 'export' && (
                                     <span className="fw-modal__meta">
@@ -307,7 +380,7 @@ const YamlIOModal: React.FC<YamlIOModalProps> = ({
                                         Choose file
                                         <input
                                             type="file"
-                                            accept=".yaml,.yml,text/*"
+                                            accept={fileAccept}
                                             style={{ display: 'none' }}
                                             onChange={(e) => {
                                                 const f = e.target.files?.[0];
@@ -326,6 +399,7 @@ const YamlIOModal: React.FC<YamlIOModalProps> = ({
                                     {importExtraControls}
                                 </div>
                             )}
+                            {showModal === 'export' && renderExportFormatToggle()}
                             {isLargeFile ? (
                                 <div className="fw-modal__large-file-notice">
                                     Large file loaded ({(textContent.current.length / 1_048_576).toFixed(1)} MB) — preview suppressed to avoid browser slowdown.
@@ -338,6 +412,7 @@ const YamlIOModal: React.FC<YamlIOModalProps> = ({
                                     onChange={(e) => {
                                         const v = e.target.value;
                                         textContent.current = v;
+                                        pickedFilename.current = null;
                                         setPreviewText(v);
                                         setParseError(null);
                                     }}
@@ -379,7 +454,9 @@ const YamlIOModal: React.FC<YamlIOModalProps> = ({
                                             className="fw-btn fw-btn--primary"
                                             onClick={handleDownload}
                                         >
-                                            Download .yaml
+                                            {showFormatToggle
+                                                ? `Download .${exportFormat}`
+                                                : 'Download .yaml'}
                                         </button>
                                     </>
                                 ) : (

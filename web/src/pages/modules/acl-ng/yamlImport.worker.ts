@@ -1,8 +1,8 @@
 /**
- * Web Worker for off-main-thread YAML import.
+ * Web Worker for off-main-thread YAML/JSON import.
  *
  * Message protocol:
- *   In  (main → worker): { type: 'parse', text: string }
+ *   In  (main → worker): { type: 'parse', text: string, format?: 'yaml' | 'json' }
  *   Out (worker → main): { type: 'progress', stage: 'yaml' | 'rules', done: number, total: number }
  *                      | { type: 'done', rules: Rule[] }
  *                      | { type: 'error', message: string }
@@ -110,25 +110,30 @@ const convertRulesChunked = (rawRules: unknown[]): Promise<Rule[]> => {
     });
 };
 
-self.onmessage = async (e: MessageEvent<{ type: string; text: string }>): Promise<void> => {
+self.onmessage = async (e: MessageEvent<{ type: string; text: string; format?: 'yaml' | 'json' }>): Promise<void> => {
     if (e.data.type !== 'parse') return;
 
-    const { text } = e.data;
+    const { text, format = 'yaml' } = e.data;
 
     self.postMessage({ type: 'progress', stage: 'yaml', done: 0, total: 1 });
 
     let parsed: unknown;
     try {
-        parsed = yaml.load(text);
+        if (format === 'json') {
+            parsed = JSON.parse(text);
+        } else {
+            parsed = yaml.load(text);
+        }
     } catch (err) {
-        self.postMessage({ type: 'error', message: `YAML parse error: ${(err as Error).message}` });
+        const label = format === 'json' ? 'JSON parse error' : 'YAML parse error';
+        self.postMessage({ type: 'error', message: `${label}: ${(err as Error).message}` });
         return;
     }
 
     self.postMessage({ type: 'progress', stage: 'yaml', done: 1, total: 1 });
 
     if (!parsed || typeof parsed !== 'object') {
-        self.postMessage({ type: 'error', message: 'Expected a YAML object with a "rules" list.' });
+        self.postMessage({ type: 'error', message: 'Expected an object with a "rules" list.' });
         return;
     }
 
