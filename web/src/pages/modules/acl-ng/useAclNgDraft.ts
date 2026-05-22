@@ -21,6 +21,7 @@ export interface UseAclNgDraftResult {
     anyDirty: boolean;
     dispatchDraft: (action: AclNgDraftAction) => void;
     saveConfig: (configName: string) => Promise<void>;
+    commitDeleteConfig: (configName: string) => Promise<void>;
     discardConfig: (configName: string) => void;
 }
 
@@ -94,6 +95,23 @@ export const useAclNgDraft = (): UseAclNgDraftResult => {
         }
     }, [state.draft, state.pendingDeleteConfigs]);
 
+    const commitDeleteConfig = useCallback(async (configName: string): Promise<void> => {
+        const isLocalOnly = state.localOnlyConfigs.includes(configName);
+        rawDispatch({ type: 'DELETE_CONFIG', configName });
+        if (isLocalOnly) {
+            return;
+        }
+        try {
+            await API.aclng.deleteConfig({ name: configName });
+            rawDispatch({ type: 'MARK_SAVED', configName });
+            toaster.success(`acl-ng-save-${configName}`, `Config "${configName}" deleted.`);
+        } catch (err) {
+            rawDispatch({ type: 'DISCARD_CONFIG', configName });
+            toaster.error(`acl-ng-save-err-${configName}`, `Failed to delete "${configName}"`, err);
+            throw err;
+        }
+    }, [state.localOnlyConfigs]);
+
     const discardConfig = useCallback((configName: string): void => {
         rawDispatch({ type: 'DISCARD_CONFIG', configName });
     }, []);
@@ -113,7 +131,7 @@ export const useAclNgDraft = (): UseAclNgDraftResult => {
     const draftConfigs = [
         ...state.serverConfigs.filter(n => !state.pendingDeleteConfigs.has(n)),
         ...state.localOnlyConfigs,
-    ];
+    ].sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
 
     const anyDirty = state.dirty.size > 0;
 
@@ -127,6 +145,7 @@ export const useAclNgDraft = (): UseAclNgDraftResult => {
         anyDirty,
         dispatchDraft,
         saveConfig,
+        commitDeleteConfig,
         discardConfig,
     };
 };

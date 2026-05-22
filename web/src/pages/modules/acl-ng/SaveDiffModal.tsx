@@ -91,7 +91,7 @@ export const SaveDiffModal: React.FC<SaveDiffModalProps> = ({
     };
 
     return (
-        <Dialog open onClose={onClose} size="s">
+        <Dialog open onClose={onClose} size="s" disableOutsideClick={applying} disableEscapeKeyDown={applying}>
             <Dialog.Header caption="Save changes" />
             <Dialog.Body>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>

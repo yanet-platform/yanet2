@@ -27,7 +27,7 @@ const BulkDeleteModal: React.FC<BulkDeleteModalProps> = ({
                     <button type="button" className="fw-icon-btn" onClick={onClose} aria-label="Close">✕</button>
                 </header>
                 <div className="fw-modal__body fw-modal__body--confirm">
-                    <p>Delete <strong>{count}</strong> selected {itemNoun}(s) from <code>{configName}</code>? This cannot be undone.</p>
+                    <p>Delete <strong>{count}</strong> selected {itemNoun}(s) from <code>{configName}</code>? Changes are staged in the draft; discard the draft to revert.</p>
                 </div>
                 <footer className="fw-modal__foot">
                     <span />

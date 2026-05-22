@@ -212,13 +212,15 @@ export const aclNgDraftReducer = (
 
         case 'MARK_SAVED': {
             const savedRules = state.draft[action.configName];
+            const wasPendingDelete = state.pendingDeleteConfigs.has(action.configName);
             const pendingDeleteConfigs = new Set(state.pendingDeleteConfigs);
             pendingDeleteConfigs.delete(action.configName);
             const nextDirty = new Set(state.dirty);
             nextDirty.delete(action.configName);
 
-            if (savedRules === undefined) {
-                // Config was pending deletion and is now gone from the server.
+            if (wasPendingDelete || savedRules === undefined) {
+                // Config was pending deletion (or never had a draft entry) and is now
+                // gone from the server.
                 const { [action.configName]: _s, ...serverRest } = state.server;
                 const { [action.configName]: _d, ...draftRest } = state.draft;
                 const { [action.configName]: _di, ...draftIdsRest } = state.draftIds;

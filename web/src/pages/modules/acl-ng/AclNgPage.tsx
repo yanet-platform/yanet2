@@ -29,6 +29,7 @@ const AclNgPage: React.FC = () => {
         anyDirty,
         dispatchDraft,
         saveConfig,
+        commitDeleteConfig,
         discardConfig,
     } = useAclNgDraft();
 
@@ -135,11 +136,16 @@ const AclNgPage: React.FC = () => {
         setDeleteConfirmOpen(false);
     }, [selectedIds, visibleItems, currentConfig, dispatchDraft]);
 
-    const handleDeleteConfig = useCallback((): void => {
-        dispatchDraft({ type: 'DELETE_CONFIG', configName: currentConfig });
-        setActiveConfig('');
+    const handleDeleteConfig = useCallback(async (): Promise<void> => {
+        const name = currentConfig;
         setDeleteConfigOpen(false);
-    }, [currentConfig, dispatchDraft]);
+        try {
+            await commitDeleteConfig(name);
+            setActiveConfig('');
+        } catch {
+            // Toast already surfaced by the hook.
+        }
+    }, [currentConfig, commitDeleteConfig]);
 
     const handleSave = useCallback(async (): Promise<void> => {
         await saveConfig(currentConfig);
