@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useDeferredValue, useMemo, useRef, useState } from 'react';
 import { Button, Flex, Icon, Text, TextInput } from '@gravity-ui/uikit';
 import { Magnifier, Pause, Play, Plus } from '@gravity-ui/icons';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar } from '../../../components';
@@ -6,7 +6,7 @@ import { useAclNgDraft } from './useAclNgDraft';
 import { useUnsavedChangesBlocker } from '../../builtin/_shared/lane-editor';
 import type { Rule } from '../../../api/acl-ng';
 import type { RuleItem, RuleDraft } from './types';
-import { rulesToNgItems, expandRuleItem, draftToRule, useKeyboardShortcuts } from './hooks';
+import { rulesToNgItems, draftToRule, useKeyboardShortcuts } from './hooks';
 import { DRAWER_TRANSITION_MS } from './RuleTable';
 import RuleTable from './RuleTable';
 import RuleDrawer from './RuleDrawer';
@@ -73,21 +73,13 @@ const AclNgPage: React.FC = () => {
         return s;
     }, [draftConfigs, isDirty]);
 
+    const deferredSearch = useDeferredValue(search);
+
     const visibleItems = useMemo((): RuleItem[] => {
-        const q = search.trim().toLowerCase();
+        const q = deferredSearch.trim().toLowerCase();
         if (!q) return allItems;
-        return allItems.filter(item => {
-            // Cheap checks first (no CIDR decode).
-            if (item.counter.toLowerCase().includes(q)) return true;
-            // Decode CIDRs and device names only when needed.
-            const expanded = expandRuleItem(item.rule);
-            return (
-                expanded.sourceCidrs.some(s => s.toLowerCase().includes(q)) ||
-                expanded.dstCidrs.some(s => s.toLowerCase().includes(q)) ||
-                expanded.deviceNames.some(d => d.toLowerCase().includes(q))
-            );
-        });
-    }, [allItems, search]);
+        return allItems.filter(item => item.searchText.includes(q));
+    }, [allItems, deferredSearch]);
 
     const openAdd = useCallback((): void => {
         setActiveRowId(null);

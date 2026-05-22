@@ -12,6 +12,8 @@ export interface RuleItem {
     rule: Rule;
     /** Counter name (empty string when unset). */
     counter: string;
+    /** Lowercased substring-search index: counter + decoded CIDRs + device names. */
+    searchText: string;
 }
 
 /** Mutable draft state for the rule drawer form. */

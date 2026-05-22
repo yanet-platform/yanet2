@@ -107,12 +107,22 @@ export const expandRuleItem = expandRule;
 
 /** Convert a Rule array and stable ID array to RuleItem array for UI display. */
 export const rulesToNgItems = (rules: Rule[], ids: string[]): RuleItem[] =>
-    rules.map((rule, index) => ({
-        id: ids[index] ?? `rule-${index}`,
-        index,
-        rule,
-        counter: rule.counter ?? '',
-    }));
+    rules.map((rule, index) => {
+        const expanded = expandRule(rule);
+        const searchText = [
+            rule.counter ?? '',
+            ...expanded.sourceCidrs,
+            ...expanded.dstCidrs,
+            ...expanded.deviceNames,
+        ].join('\n').toLowerCase();
+        return {
+            id: ids[index] ?? `rule-${index}`,
+            index,
+            rule,
+            counter: rule.counter ?? '',
+            searchText,
+        };
+    });
 
 /** Convert a RuleItem back to a RuleDraft for drawer editing. */
 export const itemToDraft = (item: RuleItem): RuleDraft => ruleToDraft(item.rule);
