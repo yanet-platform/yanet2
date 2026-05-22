@@ -1,17 +1,17 @@
 import { useCallback, useEffect, useReducer, useState } from 'react';
 import { API } from '../../../api';
 import { toaster } from '../../../utils';
-import type { Rule } from '../../../api/acl-ng';
+import type { Rule } from '../../../api/acl';
 import {
-    aclNgDraftReducer,
-    initialAclNgDraftState,
+    aclDraftReducer,
+    initialAclDraftState,
 } from './draftReducer';
-import type { AclNgDraftAction } from './draftReducer';
+import type { AclDraftAction } from './draftReducer';
 
 const EMPTY_RULES: Rule[] = [];
 const EMPTY_IDS: string[] = [];
 
-export interface UseAclNgDraftResult {
+export interface UseAclDraftResult {
     draftConfigs: string[];
     loading: boolean;
     draftRules: (configName: string) => Rule[];
@@ -19,37 +19,37 @@ export interface UseAclNgDraftResult {
     serverRules: (configName: string) => Rule[];
     isDirty: (configName: string) => boolean;
     anyDirty: boolean;
-    dispatchDraft: (action: AclNgDraftAction) => void;
+    dispatchDraft: (action: AclDraftAction) => void;
     saveConfig: (configName: string) => Promise<void>;
     commitDeleteConfig: (configName: string) => Promise<void>;
     discardConfig: (configName: string) => void;
 }
 
 /**
- * Wraps ACL NG config data with a local-draft layer.
+ * Wraps ACL config data with a local-draft layer.
  *
  * Server state is fetched once on mount via listConfigs + showConfig per name.
  * All UI mutations go through dispatchDraft and update only local state until
  * the user explicitly calls saveConfig.
  */
-export const useAclNgDraft = (): UseAclNgDraftResult => {
-    const [state, rawDispatch] = useReducer(aclNgDraftReducer, initialAclNgDraftState);
+export const useAclDraft = (): UseAclDraftResult => {
+    const [state, rawDispatch] = useReducer(aclDraftReducer, initialAclDraftState);
     const [loading, setLoading] = useState(true);
 
-    const dispatchDraft = useCallback((action: AclNgDraftAction): void => {
+    const dispatchDraft = useCallback((action: AclDraftAction): void => {
         rawDispatch(action);
     }, []);
 
     const load = useCallback(async (): Promise<void> => {
         setLoading(true);
         try {
-            const listResp = await API.aclng.listConfigs();
+            const listResp = await API.acl.listConfigs();
             const names = listResp.configs ?? [];
 
             const configs = await Promise.all(
                 names.map(async (name): Promise<{ name: string; rules: Rule[] }> => {
                     try {
-                        const resp = await API.aclng.showConfig({ name });
+                        const resp = await API.acl.showConfig({ name });
                         return { name, rules: resp.rules ?? [] };
                     } catch {
                         return { name, rules: [] };
@@ -59,7 +59,7 @@ export const useAclNgDraft = (): UseAclNgDraftResult => {
 
             rawDispatch({ type: 'LOAD_ALL_CONFIGS', configs });
         } catch (err) {
-            toaster.error('acl-ng-load', 'Failed to load ACL NG configurations', err);
+            toaster.error('acl-load', 'Failed to load ACL configurations', err);
         } finally {
             setLoading(false);
         }
@@ -74,11 +74,11 @@ export const useAclNgDraft = (): UseAclNgDraftResult => {
 
         if (isPendingDelete) {
             try {
-                await API.aclng.deleteConfig({ name: configName });
+                await API.acl.deleteConfig({ name: configName });
                 rawDispatch({ type: 'MARK_SAVED', configName });
-                toaster.success(`acl-ng-save-${configName}`, `Config "${configName}" deleted.`);
+                toaster.success(`acl-save-${configName}`, `Config "${configName}" deleted.`);
             } catch (err) {
-                toaster.error(`acl-ng-save-err-${configName}`, `Failed to delete "${configName}"`, err);
+                toaster.error(`acl-save-err-${configName}`, `Failed to delete "${configName}"`, err);
                 throw err;
             }
             return;
@@ -86,11 +86,11 @@ export const useAclNgDraft = (): UseAclNgDraftResult => {
 
         const rules = state.draft[configName] ?? [];
         try {
-            await API.aclng.updateConfig({ name: configName, rules });
+            await API.acl.updateConfig({ name: configName, rules });
             rawDispatch({ type: 'MARK_SAVED', configName });
-            toaster.success(`acl-ng-save-${configName}`, `Config "${configName}" saved.`);
+            toaster.success(`acl-save-${configName}`, `Config "${configName}" saved.`);
         } catch (err) {
-            toaster.error(`acl-ng-save-err-${configName}`, `Failed to save "${configName}"`, err);
+            toaster.error(`acl-save-err-${configName}`, `Failed to save "${configName}"`, err);
             throw err;
         }
     }, [state.draft, state.pendingDeleteConfigs]);
@@ -102,12 +102,12 @@ export const useAclNgDraft = (): UseAclNgDraftResult => {
             return;
         }
         try {
-            await API.aclng.deleteConfig({ name: configName });
+            await API.acl.deleteConfig({ name: configName });
             rawDispatch({ type: 'MARK_SAVED', configName });
-            toaster.success(`acl-ng-save-${configName}`, `Config "${configName}" deleted.`);
+            toaster.success(`acl-save-${configName}`, `Config "${configName}" deleted.`);
         } catch (err) {
             rawDispatch({ type: 'DISCARD_CONFIG', configName });
-            toaster.error(`acl-ng-save-err-${configName}`, `Failed to delete "${configName}"`, err);
+            toaster.error(`acl-save-err-${configName}`, `Failed to delete "${configName}"`, err);
             throw err;
         }
     }, [state.localOnlyConfigs]);

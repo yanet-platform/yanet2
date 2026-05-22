@@ -1,4 +1,4 @@
-import type { Rule, Action } from '../../../api/acl-ng';
+import type { Rule, Action } from '../../../api/acl';
 import { formatIPNet } from '../../../utils';
 import { extractBytes } from './utils';
 

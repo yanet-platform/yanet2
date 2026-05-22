@@ -1,4 +1,4 @@
-import type { Rule } from '../../../api/acl-ng';
+import type { Rule } from '../../../api/acl';
 
 /** Monotonically increasing counter for generating stable tmp- ids. */
 let tmpIdCounter = 0;
@@ -7,7 +7,7 @@ const nextTmpId = (): string => `tmp-${++tmpIdCounter}`;
 /** Assign stable server ids to a rules array. */
 const serverIds = (rules: Rule[]): string[] => rules.map((_, idx) => `srv-${idx}`);
 
-export interface AclNgDraftState {
+export interface AclDraftState {
     server: Record<string, Rule[]>;
     draft: Record<string, Rule[]>;
     /**
@@ -23,7 +23,7 @@ export interface AclNgDraftState {
     dirty: Set<string>;
 }
 
-export const initialAclNgDraftState: AclNgDraftState = {
+export const initialAclDraftState: AclDraftState = {
     server: {},
     draft: {},
     draftIds: {},
@@ -33,7 +33,7 @@ export const initialAclNgDraftState: AclNgDraftState = {
     dirty: new Set(),
 };
 
-export type AclNgDraftAction =
+export type AclDraftAction =
     | { type: 'LOAD_ALL_CONFIGS'; configs: Array<{ name: string; rules: Rule[] }> }
     | { type: 'ADD_RULE'; configName: string; rule: Rule }
     | { type: 'UPDATE_RULE_AT_INDEX'; configName: string; index: number; rule: Rule }
@@ -44,10 +44,10 @@ export type AclNgDraftAction =
     | { type: 'DISCARD_CONFIG'; configName: string }
     | { type: 'MARK_SAVED'; configName: string };
 
-export const aclNgDraftReducer = (
-    state: AclNgDraftState,
-    action: AclNgDraftAction,
-): AclNgDraftState => {
+export const aclDraftReducer = (
+    state: AclDraftState,
+    action: AclDraftAction,
+): AclDraftState => {
     switch (action.type) {
         case 'LOAD_ALL_CONFIGS': {
             const newServer: Record<string, Rule[]> = { ...state.server };

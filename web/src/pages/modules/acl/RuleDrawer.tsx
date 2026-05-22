@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
-import { ActionKind, ACTION_KIND_LABELS } from '../../../api/acl-ng';
+import { ActionKind, ACTION_KIND_LABELS } from '../../../api/acl';
 import { TrashIcon } from '../../_shared/draft/DraftActionButtons';
 import type { RuleDraft, RuleItem } from './types';
 import { emptyDraft } from './types';

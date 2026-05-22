@@ -6,7 +6,7 @@
  */
 
 import { parseIPToBytes, prefixLengthToMaskBytes, bytesToBase64 } from '../../../utils';
-import type { ProtoRange } from '../../../api/acl-ng';
+import type { ProtoRange } from '../../../api/acl';
 
 /** Parse CIDR strings to IPNet array with base64-encoded bytes. */
 export const parseCidrsToIPNets = (cidrs: string[]): Array<{ addr: string; mask: string }> => {

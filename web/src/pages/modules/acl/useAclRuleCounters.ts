@@ -76,7 +76,7 @@ export interface RuleRate {
     pps: number;
 }
 
-export interface UseAclNgRuleCountersResult {
+export interface UseAclRuleCountersResult {
     /** Map from RuleItem.id to rate data (history + live pps). */
     rates: Map<string, RuleRate>;
 }
@@ -89,12 +89,12 @@ export interface UseAclNgRuleCountersResult {
  * When paused (enabled=false), polling stops but last-known values are preserved so
  * sparklines freeze rather than disappear.
  */
-export const useAclNgRuleCounters = (
+export const useAclRuleCounters = (
     configName: string,
     rules: RuleItem[],
     enabledCounters: Set<string>,
     enabled: boolean,
-): UseAclNgRuleCountersResult => {
+): UseAclRuleCountersResult => {
     const [mountPointsEntry, setMountPointsEntry] = useState<{ config: string; points: MountPoint[] }>({ config: '', points: [] });
     const mountPoints = mountPointsEntry.config === configName ? mountPointsEntry.points : [];
 
@@ -120,7 +120,7 @@ export const useAclNgRuleCounters = (
             setMountPointsEntry({ config: configName, points });
         }).catch((err: unknown) => {
             if (myGen !== discoveryGen.current) return;
-            console.error('Failed to discover ACL NG mount points:', err);
+            console.error('Failed to discover ACL mount points:', err);
         });
     }, [configName]); // eslint-disable-line react-hooks/exhaustive-deps
 

@@ -15,7 +15,7 @@ import {
     ChipList,
 } from './chips';
 import { DraftActionButtons } from '../../_shared/draft';
-import type { RuleRate } from './useAclNgRuleCounters';
+import type { RuleRate } from './useAclRuleCounters';
 import Sparkline from './Sparkline';
 
 export const DRAWER_TRANSITION_MS = 220;

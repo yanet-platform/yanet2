@@ -12,7 +12,6 @@ const importDevices = () => import('./pages/builtin/devices/DevicesPage');
 const importForward = () => import('./pages/modules/forward/ForwardPage');
 const importDecap = () => import('./pages/modules/decap/DecapPage');
 const importAcl = () => import('./pages/modules/acl/AclPage');
-const importAclNg = () => import('./pages/modules/acl-ng/AclNgPage');
 const importPdump = () => import('./pages/modules/pdump/PdumpPage');
 const importModulesRoute = () => import('./pages/modules/route/RoutePage');
 const importOperatorsRoute = () => import('./pages/operators/route/RoutePage');
@@ -26,7 +25,6 @@ const pageImporters = [
     importForward,
     importDecap,
     importAcl,
-    importAclNg,
     importPdump,
     importModulesRoute,
     importOperatorsRoute,
@@ -40,7 +38,6 @@ const DevicesPage = lazy(importDevices);
 const ForwardPage = lazy(importForward);
 const DecapPage = lazy(importDecap);
 const AclPage = lazy(importAcl);
-const AclNgPage = lazy(importAclNg);
 const PdumpPage = lazy(importPdump);
 const ModulesRoutePage = lazy(importModulesRoute);
 const OperatorsRoutePage = lazy(importOperatorsRoute);
@@ -149,7 +146,6 @@ const AppContent = (): React.JSX.Element => {
                             <Route path="/modules/forward" element={<ForwardPage />} />
                             <Route path="/modules/decap" element={<DecapPage />} />
                             <Route path="/modules/acl" element={<AclPage />} />
-                            <Route path="/modules/acl-ng" element={<AclNgPage />} />
                             <Route path="/modules/pdump" element={<PdumpPage />} />
                             <Route path="/modules/route" element={<ModulesRoutePage />} />
                             <Route path="/operators/route" element={<OperatorsRoutePage />} />

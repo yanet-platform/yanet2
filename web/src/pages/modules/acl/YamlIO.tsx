@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import type { Rule } from '../../../api/acl-ng';
+import type { Rule } from '../../../api/acl';
 import { toaster } from '../../../utils';
 import { rulesToDiffYaml, rulesToYamlObjects } from './SaveDiffModal';
 import YamlIOModal from '../../../components/YamlIOModal';
@@ -75,7 +75,7 @@ const YamlIO: React.FC<YamlIOProps> = ({ configName, rules, onImport }) => {
         const parsed = await parseYamlToRulesAsync(text, onProgress, format);
         onImport(configName, parsed, mode);
         const modeLabel = mode === 'replace' ? 'replace' : 'append';
-        toaster.success('acl-ng-yaml-import', `Imported ${parsed.length} rules (${modeLabel}).`);
+        toaster.success('acl-yaml-import', `Imported ${parsed.length} rules (${modeLabel}).`);
     };
 
     const importExtraControls = (
@@ -105,7 +105,7 @@ const YamlIO: React.FC<YamlIOProps> = ({ configName, rules, onImport }) => {
             exportYaml={() => rulesToDiffYaml(rules)}
             exportJson={() => rulesToInAclJson(configName, rules)}
             onImportAsync={handleImportAsync}
-            toastPrefix="acl-ng-yaml"
+            toastPrefix="acl-yaml"
             importPlaceholder={
                 'rules:\n' +
                 '  - srcs:\n' +

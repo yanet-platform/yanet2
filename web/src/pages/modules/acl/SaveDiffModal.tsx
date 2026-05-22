@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
 import { Dialog, Text } from '@gravity-ui/uikit';
 import * as yaml from 'js-yaml';
-import type { Rule } from '../../../api/acl-ng';
-import { ActionKind } from '../../../api/acl-ng';
+import type { Rule } from '../../../api/acl';
+import { ActionKind } from '../../../api/acl';
 import { formatIPNet } from '../../../utils';
 import { extractBytes } from './utils';
 
-// TODO(acl-ng): structured diff disabled until the per-card layout is reworked.
+// TODO(acl): structured diff disabled until the per-card layout is reworked.
 
 const ACTION_KIND_YAML_NAMES: Record<ActionKind, string> = {
     [ActionKind.ACTION_KIND_PASS]: 'ACTION_KIND_PASS',

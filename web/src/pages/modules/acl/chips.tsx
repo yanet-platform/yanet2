@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import type { Action } from '../../../api/acl-ng';
-import { ActionKind, ACTION_KIND_LABELS } from '../../../api/acl-ng';
+import type { Action } from '../../../api/acl';
+import { ActionKind, ACTION_KIND_LABELS } from '../../../api/acl';
 import { formatIPNet, toaster, copyToClipboard } from '../../../utils';
 import { extractBytes } from './utils';
 
@@ -185,8 +185,8 @@ const ChipListModal = <T,>({
     const handleCopyAll = useCallback((): void => {
         const text = items.map(item => getItemText(item)).join('\n');
         copyToClipboard(text)
-            .then(() => toaster.success('acl-ng-chip-copy', 'Copied.'))
-            .catch((err) => toaster.error('acl-ng-chip-copy', 'Copy failed.', err));
+            .then(() => toaster.success('acl-chip-copy', 'Copied.'))
+            .catch((err) => toaster.error('acl-chip-copy', 'Copy failed.', err));
     }, [items, getItemText]);
 
     useEffect(() => {

@@ -1,296 +1,349 @@
-import React, { useState, useCallback, useMemo, useEffect } from 'react';
-import { Box } from '@gravity-ui/uikit';
-import { PageLayout, PageLoader, EmptyState, ConfirmDialog } from '../../../components';
+import React, { useCallback, useDeferredValue, useMemo, useRef, useState } from 'react';
+import { Button, Flex, Icon, Text, TextInput } from '@gravity-ui/uikit';
+import { Magnifier, Pause, Play, Plus } from '@gravity-ui/icons';
+import { PageLayout, PageLoader, ConfigTabStrip, BulkBar } from '../../../components';
+import { useAclDraft } from './useAclDraft';
+import { useUnsavedChangesBlocker } from '../../builtin/_shared/lane-editor';
 import type { Rule } from '../../../api/acl';
-import { useSidebarContext } from '../../../types';
-import {
-    useAclData,
-    AclPageHeader,
-    ConfigTabs,
-    InnerTabs,
-    VirtualizedAclTable,
-    FWStateForm,
-    UploadYamlDialog,
-    CreateConfigDialog,
-    UnsavedChangesDialog,
-} from '.';
+import type { RuleItem, RuleDraft } from './types';
+import { rulesToNgItems, draftToRule, useKeyboardShortcuts } from './hooks';
+import { DRAWER_TRANSITION_MS } from './RuleTable';
+import RuleTable from './RuleTable';
+import RuleDrawer from './RuleDrawer';
+import type { RuleDrawerHandle } from './RuleDrawer';
+import YamlIO, { type ImportMode } from './YamlIO';
+import { SaveDiffModal } from './SaveDiffModal';
+import { useAclRuleCounters } from './useAclRuleCounters';
+import { AddConfigModal, DeleteConfigModal, BulkDeleteModal } from '../../_shared/draft';
+import '../../../styles/draft-page.scss';
 import './acl.scss';
 
 const AclPage: React.FC = () => {
-    const { setSidebarDisabled } = useSidebarContext();
     const {
-        configs,
-        configData,
+        draftConfigs,
         loading,
-        saving,
-        activeConfigTab,
-        activeInnerTab,
-        handleConfigTabChange,
-        handleInnerTabChange,
-        hasUnsavedChanges,
-        hasAnyUnsavedChanges,
-        addNewConfig,
-        updateConfigRules,
-        updateConfigFWState,
+        draftRules,
+        draftRuleIds,
+        serverRules,
+        isDirty,
+        anyDirty,
+        dispatchDraft,
         saveConfig,
-        saveFWStateConfig,
-        deleteConfig,
-        getConfigState,
-    } = useAclData();
+        commitDeleteConfig,
+        discardConfig,
+    } = useAclDraft();
 
-    // Dialog states
-    const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
-    const [createDialogOpen, setCreateDialogOpen] = useState(false);
-    const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-    const [unsavedDialogOpen, setUnsavedDialogOpen] = useState(false);
-    const [pendingConfigChange, setPendingConfigChange] = useState<string | null>(null);
-    
-    // Check if there are any unsaved changes
-    const anyUnsavedChanges = hasAnyUnsavedChanges();
-    
-    // Browser beforeunload warning - warns when closing tab/browser
-    useEffect(() => {
-        const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-            if (anyUnsavedChanges) {
-                e.preventDefault();
-                e.returnValue = '';
+    const [activeConfig, setActiveConfig] = useState<string>('');
+    const [paused, setPaused] = useState(false);
+    const [enabledCounterNames, setEnabledCounterNames] = useState<Set<string>>(new Set());
+    const [search, setSearch] = useState('');
+    const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+    const [activeRowId, setActiveRowId] = useState<string | null>(null);
+    const [drawer, setDrawer] = useState<{ open: boolean; mode: 'add' | 'edit'; item: RuleItem | null }>({
+        open: false,
+        mode: 'add',
+        item: null,
+    });
+    const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+    const [addConfigOpen, setAddConfigOpen] = useState(false);
+    const [deleteConfigOpen, setDeleteConfigOpen] = useState(false);
+    const [diffModalOpen, setDiffModalOpen] = useState(false);
+    const searchRef = useRef<HTMLInputElement>(null);
+    const drawerRef = useRef<RuleDrawerHandle>(null);
+
+    useUnsavedChangesBlocker(anyDirty);
+
+    const currentConfig = activeConfig || draftConfigs[0] || '';
+    const rawRules: Rule[] = draftRules(currentConfig);
+    const rawIds: string[] = draftRuleIds(currentConfig);
+    const allItems = useMemo(() => rulesToNgItems(rawRules, rawIds), [rawRules, rawIds]);
+
+    const { rates } = useAclRuleCounters(currentConfig, allItems, enabledCounterNames, !paused);
+
+    const ruleCounts = useMemo((): Map<string, number> => {
+        const m = new Map<string, number>();
+        draftConfigs.forEach(c => m.set(c, draftRules(c).length));
+        return m;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [draftConfigs, draftRules]);
+
+    const dirtySet = useMemo((): Set<string> => {
+        const s = new Set<string>();
+        draftConfigs.forEach(c => { if (isDirty(c)) s.add(c); });
+        return s;
+    }, [draftConfigs, isDirty]);
+
+    const deferredSearch = useDeferredValue(search);
+
+    const visibleItems = useMemo((): RuleItem[] => {
+        const q = deferredSearch.trim().toLowerCase();
+        if (!q) return allItems;
+        return allItems.filter(item => item.searchText.includes(q));
+    }, [allItems, deferredSearch]);
+
+    const openAdd = useCallback((): void => {
+        setActiveRowId(null);
+        setDrawer({ open: true, mode: 'add', item: null });
+    }, []);
+
+    const openEdit = useCallback((item: RuleItem): void => {
+        setActiveRowId(item.id);
+        setDrawer({ open: true, mode: 'edit', item });
+    }, []);
+
+    const closeDrawer = useCallback((): void => {
+        setDrawer(d => ({ ...d, open: false }));
+        setTimeout(() => {
+            setActiveRowId(null);
+            setDrawer(d => ({ ...d, item: null }));
+        }, DRAWER_TRANSITION_MS);
+    }, []);
+
+    const handleDrawerApply = useCallback((draft: RuleDraft): void => {
+        const rule = draftToRule(draft);
+        if (drawer.mode === 'add') {
+            dispatchDraft({ type: 'ADD_RULE', configName: currentConfig, rule });
+        } else if (drawer.item) {
+            dispatchDraft({ type: 'UPDATE_RULE_AT_INDEX', configName: currentConfig, index: drawer.item.index, rule });
+        }
+        closeDrawer();
+    }, [drawer, currentConfig, dispatchDraft, closeDrawer]);
+
+    const handleDeleteItem = useCallback((item: RuleItem): void => {
+        dispatchDraft({ type: 'REMOVE_RULES', configName: currentConfig, indices: [item.index] });
+        closeDrawer();
+    }, [currentConfig, dispatchDraft, closeDrawer]);
+
+    const handleDuplicate = useCallback((item: RuleItem): void => {
+        setActiveRowId(null);
+        setDrawer({ open: true, mode: 'add', item: { ...item, rule: { ...item.rule } } });
+    }, []);
+
+    const handleBulkDelete = useCallback((): void => {
+        const indices = visibleItems
+            .filter(item => selectedIds.has(item.id))
+            .map(item => item.index);
+        dispatchDraft({ type: 'REMOVE_RULES', configName: currentConfig, indices });
+        setSelectedIds(new Set());
+        setDeleteConfirmOpen(false);
+    }, [selectedIds, visibleItems, currentConfig, dispatchDraft]);
+
+    const handleDeleteConfig = useCallback(async (): Promise<void> => {
+        const name = currentConfig;
+        setDeleteConfigOpen(false);
+        try {
+            await commitDeleteConfig(name);
+            setActiveConfig('');
+        } catch {
+            // Toast already surfaced by the hook.
+        }
+    }, [currentConfig, commitDeleteConfig]);
+
+    const handleSave = useCallback(async (): Promise<void> => {
+        await saveConfig(currentConfig);
+        setDiffModalOpen(false);
+    }, [currentConfig, saveConfig]);
+
+    const handleSavePress = useCallback((): void => {
+        if (drawer.open) {
+            drawerRef.current?.flushAndApply();
+        }
+        setDiffModalOpen(true);
+    }, [drawer.open]);
+
+    const handleToggleCounter = useCallback((counterName: string): void => {
+        setEnabledCounterNames(prev => {
+            const next = new Set(prev);
+            if (next.has(counterName)) {
+                next.delete(counterName);
+            } else {
+                next.add(counterName);
             }
-        };
-        
-        window.addEventListener('beforeunload', handleBeforeUnload);
-        return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-    }, [anyUnsavedChanges]);
-
-    // Disable sidebar during save operation
-    useEffect(() => {
-        setSidebarDisabled(saving);
-    }, [saving, setSidebarDisabled]);
-
-    // Search state for rules table
-    const [searchQuery, setSearchQuery] = useState('');
-
-    // Current config data
-    const currentConfigData = configData.get(activeConfigTab);
-    const currentRules = currentConfigData?.rules || [];
-    const currentFwstateMap = currentConfigData?.fwstateMap;
-    const currentFwstateSync = currentConfigData?.fwstateSync;
-    const currentHasUnsavedChanges = activeConfigTab ? hasUnsavedChanges(activeConfigTab) : false;
-
-    // Reset search when changing config
-    useEffect(() => {
-        setSearchQuery('');
-    }, [activeConfigTab]);
-
-    // Derived state
-    const isSaveDisabled = !activeConfigTab || !currentHasUnsavedChanges;
-    const isDeleteDisabled = !activeConfigTab;
-
-    // Config state map for tabs
-    const configStates = useMemo(() => {
-        const states = new Map<string, 'saved' | 'modified' | 'new'>();
-        for (const config of configs) {
-            states.set(config, getConfigState(config));
-        }
-        return states;
-    }, [configs, getConfigState]);
-
-    // Handlers
-    const handleUploadYaml = useCallback(() => {
-        setUploadDialogOpen(true);
+            return next;
+        });
     }, []);
 
-    const handleUploadConfirm = useCallback((configName: string, rules: Rule[]) => {
-        if (configs.includes(configName)) {
-            // Update existing config
-            updateConfigRules(configName, rules);
-            handleConfigTabChange(configName);
+    const handleDiscard = useCallback((): void => {
+        discardConfig(currentConfig);
+    }, [currentConfig, discardConfig]);
+
+    const handleImportYaml = useCallback((importedConfigName: string, rules: Rule[], mode: ImportMode): void => {
+        const target = importedConfigName || currentConfig;
+        if (mode === 'append') {
+            const current = draftRules(target);
+            dispatchDraft({ type: 'REPLACE_ALL_RULES', configName: target, rules: [...current, ...rules] });
         } else {
-            // Create new config
-            addNewConfig(configName, rules);
+            dispatchDraft({ type: 'REPLACE_ALL_RULES', configName: target, rules });
         }
-        setUploadDialogOpen(false);
-    }, [configs, updateConfigRules, handleConfigTabChange, addNewConfig]);
+        setActiveConfig(target);
+    }, [currentConfig, draftRules, dispatchDraft]);
 
-    const handleCreateConfirm = useCallback((configName: string) => {
-        addNewConfig(configName, []);
-        setCreateDialogOpen(false);
-    }, [addNewConfig]);
+    useKeyboardShortcuts({
+        onNewRule: openAdd,
+        onFocusSearch: () => searchRef.current?.focus(),
+        onEscape: closeDrawer,
+        drawerOpen: drawer.open,
+    });
 
-    const handleSave = useCallback(async () => {
-        if (!activeConfigTab) return;
-        
-        if (activeInnerTab === 'rules') {
-            await saveConfig(activeConfigTab);
-        } else {
-            await saveFWStateConfig(activeConfigTab);
-        }
-    }, [activeConfigTab, activeInnerTab, saveConfig, saveFWStateConfig]);
+    const currentIsDirty = isDirty(currentConfig);
 
-    const handleDeleteConfig = useCallback(() => {
-        setDeleteDialogOpen(true);
-    }, []);
-
-    const handleDeleteConfirm = useCallback(async () => {
-        if (!activeConfigTab) return;
-        await deleteConfig(activeConfigTab);
-        setDeleteDialogOpen(false);
-    }, [activeConfigTab, deleteConfig]);
-
-    const handleTryConfigChange = useCallback((config: string) => {
-        if (activeConfigTab && hasUnsavedChanges(activeConfigTab)) {
-            setPendingConfigChange(config);
-            setUnsavedDialogOpen(true);
-        } else {
-            handleConfigTabChange(config);
-        }
-    }, [activeConfigTab, hasUnsavedChanges, handleConfigTabChange]);
-
-    const handleUnsavedDiscard = useCallback(() => {
-        if (pendingConfigChange) {
-            handleConfigTabChange(pendingConfigChange);
-        }
-        setUnsavedDialogOpen(false);
-        setPendingConfigChange(null);
-    }, [pendingConfigChange, handleConfigTabChange]);
-
-    const handleUnsavedSave = useCallback(async () => {
-        if (activeConfigTab) {
-            await saveConfig(activeConfigTab);
-        }
-        if (pendingConfigChange) {
-            handleConfigTabChange(pendingConfigChange);
-        }
-        setUnsavedDialogOpen(false);
-        setPendingConfigChange(null);
-    }, [activeConfigTab, pendingConfigChange, saveConfig, handleConfigTabChange]);
-    
-    const handleUnsavedClose = useCallback(() => {
-        setUnsavedDialogOpen(false);
-        setPendingConfigChange(null);
-    }, []);
-
-    const handleFWStateMapChange = useCallback((mapConfig: typeof currentFwstateMap) => {
-        if (activeConfigTab) {
-            updateConfigFWState(activeConfigTab, mapConfig, currentFwstateSync);
-        }
-    }, [activeConfigTab, currentFwstateSync, updateConfigFWState]);
-
-    const handleFWStateSyncChange = useCallback((syncConfig: typeof currentFwstateSync) => {
-        if (activeConfigTab) {
-            updateConfigFWState(activeConfigTab, currentFwstateMap, syncConfig);
-        }
-    }, [activeConfigTab, currentFwstateMap, updateConfigFWState]);
-
-    const handleFWStateSave = useCallback(async () => {
-        if (activeConfigTab) {
-            await saveFWStateConfig(activeConfigTab);
-        }
-    }, [activeConfigTab, saveFWStateConfig]);
-
-    const headerContent = (
-        <AclPageHeader
-            onUploadYaml={handleUploadYaml}
-            onSave={handleSave}
-            onDeleteConfig={handleDeleteConfig}
-            isSaveDisabled={isSaveDisabled}
-            isDeleteDisabled={isDeleteDisabled}
-            hasUnsavedChanges={currentHasUnsavedChanges}
-            isSaving={saving}
-        />
+    const pageHeader = (
+        <Flex alignItems="center" gap={4} style={{ width: '100%' }}>
+            <Text variant="header-1">ACL</Text>
+            <Flex grow />
+            <div style={{ flexBasis: 380, flexShrink: 1 }}>
+                <TextInput
+                    controlRef={searchRef}
+                    value={search}
+                    onUpdate={setSearch}
+                    placeholder="Search rules… (/)"
+                    startContent={
+                        <Flex alignItems="center" justifyContent="center" style={{ paddingInline: 8, color: 'var(--g-color-text-hint)' }}>
+                            <Icon data={Magnifier} size={16} />
+                        </Flex>
+                    }
+                    hasClear
+                    type="search"
+                />
+            </div>
+            {enabledCounterNames.size > 0 && (
+                <Button
+                    view="outlined"
+                    onClick={() => setPaused(p => !p)}
+                    title={paused ? 'Resume counter polling' : 'Pause counter polling'}
+                >
+                    <Icon data={paused ? Play : Pause} size={16} />
+                    {paused ? 'Resume' : 'Pause'}
+                </Button>
+            )}
+            {currentConfig && (
+                <YamlIO
+                    configName={currentConfig}
+                    rules={rawRules}
+                    onImport={handleImportYaml}
+                />
+            )}
+            <Button view="action" onClick={openAdd}>
+                <Icon data={Plus} size={16} />
+                Add Rule
+            </Button>
+        </Flex>
     );
 
     if (loading) {
         return (
-            <PageLayout title="ACL">
-                <PageLoader loading={loading} size="l" />
-            </PageLayout>
-        );
-    }
-
-    if (configs.length === 0) {
-        return (
-            <PageLayout header={headerContent}>
-                <EmptyState message="No ACL configurations found. Click 'Upload YAML' to create one." />
-
-                <UploadYamlDialog
-                    open={uploadDialogOpen}
-                    onClose={() => setUploadDialogOpen(false)}
-                    onConfirm={handleUploadConfirm}
-                    existingConfigs={configs}
-                />
+            <PageLayout header={pageHeader}>
+                <PageLoader loading size="l" />
             </PageLayout>
         );
     }
 
     return (
-        <PageLayout header={headerContent}>
-            <Box className="acl-page__content">
-                <ConfigTabs
-                    configs={configs}
-                    activeConfig={activeConfigTab}
-                    configStates={configStates}
-                    onConfigChange={handleTryConfigChange}
+        <PageLayout header={pageHeader}>
+            <div className="fw-page">
+                {draftConfigs.length === 0 ? (
+                    <div className="fw-empty-page">
+                        <div className="fw-empty-page__message">
+                            No ACL configurations found.
+                        </div>
+                        <Button view="action" onClick={() => setAddConfigOpen(true)}>
+                            Add Config
+                        </Button>
+                    </div>
+                ) : (
+                    <>
+                        <ConfigTabStrip
+                            configs={draftConfigs}
+                            activeConfig={currentConfig}
+                            counts={ruleCounts}
+                            dirtyConfigs={dirtySet}
+                            onSelect={c => {
+                                setActiveConfig(c);
+                                setSelectedIds(new Set());
+                                setActiveRowId(null);
+                            }}
+                            onAddConfig={() => setAddConfigOpen(true)}
+                        />
+
+                        <div className="fw-content">
+                            <RuleTable
+                                items={visibleItems}
+                                selectedIds={selectedIds}
+                                activeRowId={activeRowId}
+                                onSelectionChange={setSelectedIds}
+                                onEditRule={openEdit}
+                                currentIsDirty={currentIsDirty}
+                                onSave={handleSavePress}
+                                onDiscard={handleDiscard}
+                                onDeleteConfig={() => setDeleteConfigOpen(true)}
+                                rates={rates}
+                                enabledCounterNames={enabledCounterNames}
+                                onToggleCounter={handleToggleCounter}
+                            />
+                        </div>
+                    </>
+                )}
+
+                {selectedIds.size > 0 && (
+                    <BulkBar
+                        count={selectedIds.size}
+                        itemNoun="rule"
+                        onDelete={() => setDeleteConfirmOpen(true)}
+                        onClear={() => setSelectedIds(new Set())}
+                    />
+                )}
+
+                <BulkDeleteModal
+                    open={deleteConfirmOpen}
+                    count={selectedIds.size}
+                    itemNoun="rule"
+                    configName={currentConfig}
+                    onClose={() => setDeleteConfirmOpen(false)}
+                    onConfirm={handleBulkDelete}
                 />
 
-                <InnerTabs
-                    activeTab={activeInnerTab}
-                    onTabChange={handleInnerTabChange}
+                <AddConfigModal
+                    open={addConfigOpen}
+                    onClose={() => setAddConfigOpen(false)}
+                    onCreate={name => {
+                        dispatchDraft({ type: 'ADD_CONFIG', configName: name });
+                        setActiveConfig(name);
+                        setAddConfigOpen(false);
+                    }}
+                    placeholder="e.g. acl0"
+                    existingNames={draftConfigs}
                 />
 
-                <Box className="acl-page__table-container">
-                    {activeInnerTab === 'rules' ? (
-                        <VirtualizedAclTable
-                            key={activeConfigTab}
-                            rules={currentRules}
-                            searchQuery={searchQuery}
-                            onSearchChange={setSearchQuery}
-                            isLoading={saving}
-                        />
-                    ) : (
-                        <FWStateForm
-                            mapConfig={currentFwstateMap}
-                            syncConfig={currentFwstateSync}
-                            onMapConfigChange={handleFWStateMapChange}
-                            onSyncConfigChange={handleFWStateSyncChange}
-                            onSave={handleFWStateSave}
-                            hasChanges={currentHasUnsavedChanges}
-                        />
-                    )}
-                </Box>
-            </Box>
+                <DeleteConfigModal
+                    open={deleteConfigOpen}
+                    configName={currentConfig}
+                    onClose={() => setDeleteConfigOpen(false)}
+                    onConfirm={handleDeleteConfig}
+                />
 
-            <UploadYamlDialog
-                open={uploadDialogOpen}
-                onClose={() => setUploadDialogOpen(false)}
-                onConfirm={handleUploadConfirm}
-                existingConfigs={configs}
-            />
+                <RuleDrawer
+                    ref={drawerRef}
+                    open={drawer.open}
+                    mode={drawer.mode}
+                    ruleItem={drawer.item}
+                    nextIndex={rawRules.length}
+                    onClose={closeDrawer}
+                    onSave={handleDrawerApply}
+                    onDelete={handleDeleteItem}
+                    onDuplicate={handleDuplicate}
+                />
 
-            <CreateConfigDialog
-                open={createDialogOpen}
-                onClose={() => setCreateDialogOpen(false)}
-                onConfirm={handleCreateConfirm}
-                existingConfigs={configs}
-            />
-
-            <ConfirmDialog
-                open={deleteDialogOpen}
-                onClose={() => setDeleteDialogOpen(false)}
-                onConfirm={handleDeleteConfirm}
-                title="Delete ACL Config"
-                message={`Are you sure you want to delete ACL config "${activeConfigTab}"?`}
-                secondaryMessage="This action cannot be undone."
-                confirmText="Delete"
-                danger
-            />
-
-            <UnsavedChangesDialog
-                open={unsavedDialogOpen}
-                onClose={handleUnsavedClose}
-                onDiscard={handleUnsavedDiscard}
-                onSave={handleUnsavedSave}
-                configName={activeConfigTab}
-            />
+                {diffModalOpen && (
+                    <SaveDiffModal
+                        configName={currentConfig}
+                        draftRules={rawRules}
+                        draftIds={rawIds}
+                        serverRules={serverRules(currentConfig)}
+                        onClose={() => setDiffModalOpen(false)}
+                        onApply={handleSave}
+                    />
+                )}
+            </div>
         </PageLayout>
     );
 };
