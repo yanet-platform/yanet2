@@ -87,6 +87,12 @@
         border-style: dashed;
         border-color: var(--g-color-text-hint);
         font-style: italic;
+
+        // Removable variant — shown in the drawer chip input with an × button.
+        &.acl-chip--any-removable {
+            gap: 2px;
+            padding-right: 3px;
+        }
     }
 
     // Port chips — neutral.
@@ -287,6 +293,12 @@
             border-color: var(--fw-accent);
             color: var(--fw-accent);
         }
+    }
+
+    // Applied to --off toggles whose counter name is auto-assigned (no explicit counter field).
+    // Slightly more muted than a named counter to hint that the name is synthetic.
+    &--default {
+        opacity: 0.6;
     }
 
     &--on {
@@ -550,4 +562,52 @@
     &::-webkit-scrollbar {
         display: none;
     }
+}
+
+// Row classification badges — shown in the index cell and in the drawer header.
+.acl-rule-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 0 5px;
+    border-radius: 3px;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    line-height: 16px;
+    white-space: nowrap;
+    vertical-align: middle;
+    margin-left: 5px;
+
+    &--dead {
+        color: color-mix(in srgb, var(--g-color-text-warning) 80%, transparent);
+        background: color-mix(in srgb, var(--g-color-base-warning-light) 40%, transparent);
+        border: 1px solid color-mix(in srgb, var(--g-color-base-warning-medium) 35%, transparent);
+    }
+
+    &--l2 {
+        color: var(--fw-text-3);
+        background: var(--fw-bg-3);
+        border: 1px solid var(--fw-line-2);
+    }
+}
+
+// Label row with inline action buttons (e.g. "+ any" button next to field count).
+.acl-field-label-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+// Subordinate "+" button inside a field label — kept small and muted.
+.acl-any-btn {
+    font-size: 10px;
+    font-weight: 600;
+    height: 18px;
+    padding: 0 6px;
+    letter-spacing: 0.02em;
+    text-transform: none;
+    opacity: 0.75;
+
+    &:hover { opacity: 1; }
 }

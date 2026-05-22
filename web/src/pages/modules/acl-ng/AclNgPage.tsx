@@ -326,6 +326,7 @@ const AclNgPage: React.FC = () => {
                     open={drawer.open}
                     mode={drawer.mode}
                     ruleItem={drawer.item}
+                    nextIndex={rawRules.length}
                     onClose={closeDrawer}
                     onSave={handleDrawerApply}
                     onDelete={handleDeleteItem}

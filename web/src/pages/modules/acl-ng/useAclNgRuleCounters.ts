@@ -3,6 +3,7 @@ import { API } from '../../../api';
 import type { CounterInfo } from '../../../api';
 import { useInterpolatedCounters } from '../../../hooks';
 import type { RuleItem } from './types';
+import { effectiveCounterName } from './hooks';
 
 const HISTORY_SIZE = 60;
 
@@ -127,9 +128,10 @@ export const useAclNgRuleCounters = (
         const history = historyRef.current;
         const next = new Map<string, RuleRate>();
         for (const rule of rules) {
-            if (!rule.counter || !enabledCounters.has(rule.counter)) continue;
-            const h = history.get(rule.counter);
-            if (h) next.set(rule.id, { history: h, pps: countersRef.current.get(rule.counter)?.pps ?? 0 });
+            const cname = effectiveCounterName(rule.rule, rule.index);
+            if (!enabledCounters.has(cname)) continue;
+            const h = history.get(cname);
+            if (h) next.set(rule.id, { history: h, pps: countersRef.current.get(cname)?.pps ?? 0 });
         }
         if (next.size === 0 && ratesRef.current.size === 0) return;
         setRates(next);
@@ -220,10 +222,11 @@ export const useAclNgRuleCounters = (
 
             const next = new Map<string, RuleRate>();
             for (const rule of currentRules) {
-                if (!rule.counter || !currentEnabled.has(rule.counter)) continue;
-                const h = history.get(rule.counter);
+                const cname = effectiveCounterName(rule.rule, rule.index);
+                if (!currentEnabled.has(cname)) continue;
+                const h = history.get(cname);
                 if (h) {
-                    const pps = currentCounters.get(rule.counter)?.pps ?? 0;
+                    const pps = currentCounters.get(cname)?.pps ?? 0;
                     next.set(rule.id, { history: h, pps });
                 }
             }

@@ -41,7 +41,7 @@ const coversAllPorts = (ranges: PortRange[]): boolean => {
 
 /** Returns true when proto ranges cover the full 0-65535 encoded domain. */
 const coversAllProtos = (ranges: ProtoRange[]): boolean => {
-    if (ranges.length === 0) return true;
+    if (ranges.length === 0) return false;
     return ranges.some(r => (r.from ?? 0) === 0 && (r.to ?? 0) >= 65535);
 };
 
@@ -57,12 +57,20 @@ const coversAllVlans = (ranges: VlanRange[]): boolean => {
  * This is the expensive part: it decodes base64 CIDRs and formats all the
  * range arrays into human-readable strings. Call this inside a per-row
  * useMemo or on drawer open so only visible rows pay the cost.
+ *
+ * CIDRs are rendered verbatim — no sentinel collapsing. The classification
+ * booleans (isL2, isDead, isDeadIp, isDeadProto) reflect the dataplane
+ * semantics from modules/acl/api/controlplane.c:235-289:
+ * - isL2: no IP entries on either side — rule fires on L2 frames only.
+ * - isDeadIp: asymmetric src/dst IP families — no family matched on both sides.
+ * - isDeadProto: IP rule with an empty proto_ranges array — matches no traffic.
+ * - isDead: isDeadIp || isDeadProto.
+ * - isEmptySrc: sourceCidrs.length === 0 (no IP match on sources side).
  */
 export const expandRule = (rule: Rule): {
     sourceCidrs: string[];
-    isAnySrc: boolean;
+    isEmptySrc: boolean;
     dstCidrs: string[];
-    isAnyDst: boolean;
     srcPortRanges: string[];
     isAnySrcPort: boolean;
     dstPortRanges: string[];
@@ -72,20 +80,54 @@ export const expandRule = (rule: Rule): {
     vlanRanges: string[];
     isAnyVlan: boolean;
     deviceNames: string[];
+    isL2: boolean;
+    isDeadIp: boolean;
+    isDeadProto: boolean;
+    isDead: boolean;
 } => {
-    const sourceCidrs = (rule.srcs ?? []).map(formatIPNetItem).filter(Boolean);
-    const dstCidrs = (rule.dsts ?? []).map(formatIPNetItem).filter(Boolean);
+    const srcs = rule.srcs ?? [];
+    const dsts = rule.dsts ?? [];
+
+    const sourceCidrs = srcs.map(formatIPNetItem).filter(Boolean);
+    const dstCidrs = dsts.map(formatIPNetItem).filter(Boolean);
+
     const srcPortRanges = (rule.src_port_ranges ?? []).map(formatRange);
     const dstPortRanges = (rule.dst_port_ranges ?? []).map(formatRange);
     const protoRanges = (rule.proto_ranges ?? []).map(formatRange);
     const vlanRanges = (rule.vlan_ranges ?? []).map(formatRange);
     const deviceNames = (rule.devices ?? []).map(d => d.name ?? '').filter(Boolean);
 
+    // Per-family counts for classification (addr byte length: 4 = IPv4, 16 = IPv6).
+    let v4SrcCount = 0;
+    let v6SrcCount = 0;
+    for (const net of srcs) {
+        const len = extractBytes(net.addr)?.length ?? 0;
+        if (len === 4) v4SrcCount++;
+        else if (len === 16) v6SrcCount++;
+    }
+
+    let v4DstCount = 0;
+    let v6DstCount = 0;
+    for (const net of dsts) {
+        const len = extractBytes(net.addr)?.length ?? 0;
+        if (len === 4) v4DstCount++;
+        else if (len === 16) v6DstCount++;
+    }
+
+    const hasIP4 = v4SrcCount > 0 && v4DstCount > 0;
+    const hasIP6 = v6SrcCount > 0 && v6DstCount > 0;
+    const isL2 = v4SrcCount === 0 && v4DstCount === 0 && v6SrcCount === 0 && v6DstCount === 0;
+    // isDeadIp: asymmetric src/dst IP families — no single family is matched on both sides.
+    const isDeadIp = !hasIP4 && !hasIP6 && !isL2;
+    // isDeadProto: an IP rule with an empty proto_ranges array matches no traffic. The proto
+    // compiler lacks the "count === 0 → full range" fallback that ports/vlans/devices have.
+    const isDeadProto = !isL2 && (rule.proto_ranges?.length ?? 0) === 0;
+    const isDead = isDeadIp || isDeadProto;
+
     return {
         sourceCidrs,
-        isAnySrc: sourceCidrs.length === 0,
+        isEmptySrc: sourceCidrs.length === 0,
         dstCidrs,
-        isAnyDst: dstCidrs.length === 0,
         srcPortRanges,
         isAnySrcPort: coversAllPorts(rule.src_port_ranges ?? []),
         dstPortRanges,
@@ -95,7 +137,31 @@ export const expandRule = (rule: Rule): {
         vlanRanges,
         isAnyVlan: coversAllVlans(rule.vlan_ranges ?? []),
         deviceNames,
+        isL2,
+        isDeadIp,
+        isDeadProto,
+        isDead,
     };
+};
+
+/**
+ * Return a human-readable tooltip string explaining why a rule is dead.
+ *
+ * Both isDeadIp and isDeadProto may be true simultaneously; when they are,
+ * a combined message is returned. Returns an empty string if neither is true.
+ */
+export const deadReasonText = (expanded: { isDeadIp: boolean; isDeadProto: boolean }): string => {
+    const { isDeadIp, isDeadProto } = expanded;
+    if (isDeadIp && isDeadProto) {
+        return "IP sources/destinations don't match and protocol filter is empty — rule matches no packets";
+    }
+    if (isDeadIp) {
+        return "IP sources/destinations don't match — rule matches no packets";
+    }
+    if (isDeadProto) {
+        return 'Protocol filter is empty — rule matches no packets';
+    }
+    return '';
 };
 
 /**
@@ -105,12 +171,33 @@ export const expandRule = (rule: Rule): {
  */
 export const expandRuleItem = expandRule;
 
+/**
+ * Return the default counter name the dataplane assigns to a rule at position idx.
+ *
+ * The synthetic name is derived from the rule's CURRENT draft index. The dataplane
+ * registers counters using the LAST COMMITTED index, so if the draft has reordered
+ * rules, sparkline values may temporarily disconnect until the draft is committed.
+ * This is accepted behaviour; no UI warning is shown.
+ */
+export const defaultCounterName = (idx: number): string => `rule ${idx}`;
+
+/**
+ * Return the counter name that the dataplane will actually use for this rule.
+ *
+ * If the rule has an explicit counter set, that name is returned verbatim.
+ * Otherwise the synthetic default name derived from the rule's index is returned.
+ */
+export const effectiveCounterName = (rule: Rule, index: number): string =>
+    rule.counter || defaultCounterName(index);
+
 /** Convert a Rule array and stable ID array to RuleItem array for UI display. */
 export const rulesToNgItems = (rules: Rule[], ids: string[]): RuleItem[] =>
     rules.map((rule, index) => {
         const expanded = expandRule(rule);
+        const counter = rule.counter ?? '';
         const searchText = [
-            rule.counter ?? '',
+            counter,
+            defaultCounterName(index),
             ...expanded.sourceCidrs,
             ...expanded.dstCidrs,
             ...expanded.deviceNames,
@@ -119,7 +206,7 @@ export const rulesToNgItems = (rules: Rule[], ids: string[]): RuleItem[] =>
             id: ids[index] ?? `rule-${index}`,
             index,
             rule,
-            counter: rule.counter ?? '',
+            counter,
             searchText,
         };
     });

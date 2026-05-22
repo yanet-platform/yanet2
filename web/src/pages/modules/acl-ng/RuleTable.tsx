@@ -4,7 +4,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { Checkbox, Icon } from '@gravity-ui/uikit';
 import { Pause, Play } from '@gravity-ui/icons';
 import type { RuleItem } from './types';
-import { expandRuleItem } from './hooks';
+import { expandRuleItem, effectiveCounterName, deadReasonText } from './hooks';
 import {
     AnyChip,
     IpNetChip,
@@ -124,34 +124,54 @@ const VirtualRow: React.FC<VirtualRowProps> = memo(({
                 />
             </div>
 
-            <div style={{ ...cellStyle('index'), color: 'var(--fw-text-3)', fontVariantNumeric: 'tabular-nums' }}>
+            <div style={{ ...cellStyle('index'), color: 'var(--fw-text-3)', fontVariantNumeric: 'tabular-nums', flexDirection: 'column', gap: 2 }}>
                 <span style={{ fontSize: 12 }}>{item.index + 1}</span>
+                {expanded.isDead && (
+                    <span
+                        className="acl-rule-badge acl-rule-badge--dead"
+                        title={deadReasonText(expanded)}
+                    >
+                        dead
+                    </span>
+                )}
+                {!expanded.isDead && expanded.isL2 && (
+                    <span
+                        className="acl-rule-badge acl-rule-badge--l2"
+                        title="No IP filter — matches L2 frames per VLAN/device"
+                    >
+                        L2
+                    </span>
+                )}
             </div>
 
             <div style={cellStyle('srcs')}>
-                <ChipList
-                    items={expanded.sourceCidrs}
-                    isAny={expanded.isAnySrc}
-                    renderChip={(cidr, idx) => <IpNetChip key={idx} cidr={cidr} />}
-                    label="sources"
-                    inline={2}
-                    summarizeAt={4}
-                    summaryKind="cidr"
-                    getItemText={(cidr) => cidr}
-                />
+                {expanded.isEmptySrc
+                    ? <span className="fw-cell-mono fw-cell-muted">—</span>
+                    : <ChipList
+                        items={expanded.sourceCidrs}
+                        renderChip={(cidr, idx) => <IpNetChip key={idx} cidr={cidr} />}
+                        label="sources"
+                        inline={2}
+                        summarizeAt={4}
+                        summaryKind="cidr"
+                        getItemText={(cidr) => cidr}
+                    />
+                }
             </div>
 
             <div style={cellStyle('dsts')}>
-                <ChipList
-                    items={expanded.dstCidrs}
-                    isAny={expanded.isAnyDst}
-                    renderChip={(cidr, idx) => <IpNetChip key={idx} cidr={cidr} />}
-                    label="destinations"
-                    inline={2}
-                    summarizeAt={4}
-                    summaryKind="cidr"
-                    getItemText={(cidr) => cidr}
-                />
+                {expanded.dstCidrs.length === 0
+                    ? <span className="fw-cell-mono fw-cell-muted">—</span>
+                    : <ChipList
+                        items={expanded.dstCidrs}
+                        renderChip={(cidr, idx) => <IpNetChip key={idx} cidr={cidr} />}
+                        label="destinations"
+                        inline={2}
+                        summarizeAt={4}
+                        summaryKind="cidr"
+                        getItemText={(cidr) => cidr}
+                    />
+                }
             </div>
 
             <div style={cellStyle('src_ports')}>
@@ -181,15 +201,18 @@ const VirtualRow: React.FC<VirtualRowProps> = memo(({
             </div>
 
             <div style={cellStyle('protos')}>
-                <ChipList
-                    items={expanded.protoRanges}
-                    isAny={expanded.isAnyProto}
-                    anyLabel="any"
-                    renderChip={(r, idx) => <ProtoChip key={idx} rangeStr={r} />}
-                    label="protocols"
-                    inline={2}
-                    summarizeAt={4}
-                />
+                {expanded.protoRanges.length === 0
+                    ? <span className="fw-cell-mono fw-cell-muted">—</span>
+                    : <ChipList
+                        items={expanded.protoRanges}
+                        isAny={expanded.isAnyProto}
+                        anyLabel="any"
+                        renderChip={(r, idx) => <ProtoChip key={idx} rangeStr={r} />}
+                        label="protocols"
+                        inline={2}
+                        summarizeAt={4}
+                    />
+                }
             </div>
 
             <div style={cellStyle('vlans')}>
@@ -220,52 +243,51 @@ const VirtualRow: React.FC<VirtualRowProps> = memo(({
                 }
             </div>
 
-            <div style={cellStyle('counter')} title={item.counter}>
-                <span className="fw-cell-mono fw-cell-muted">{item.counter || '—'}</span>
+            <div style={cellStyle('counter')} title={item.counter || `rule ${item.index} (default)`}>
+                {item.counter
+                    ? <span className="fw-cell-mono">{item.counter}</span>
+                    : <span className="fw-cell-mono fw-cell-muted">rule {item.index}</span>
+                }
             </div>
 
             <div style={{ ...cellStyle('sparkline'), gap: 4 }}>
-                {item.counter ? (
-                    counterEnabled ? (
-                        <>
-                            {rate ? (
-                                <>
-                                    <Sparkline values={rate.history} width={52} height={16} />
-                                    <span className="fw-cell-pps" title={`${rate.pps.toFixed(0)} pps`}>
-                                        {rate.pps >= 1000
-                                            ? `${(rate.pps / 1000).toFixed(1)}k`
-                                            : rate.pps.toFixed(0)}
-                                    </span>
-                                </>
-                            ) : (
-                                <span className="fw-cell-pps acl-pps-loading" title="Waiting for counter data">…</span>
-                            )}
-                            <button
-                                type="button"
-                                className="acl-counter-toggle acl-counter-toggle--on"
-                                onClick={() => onToggleCounter(item.counter)}
-                                title="Stop tracking this counter"
-                                aria-label="Disable counter"
-                            >
-                                <Icon data={Pause} size={16} />
-                            </button>
-                        </>
-                    ) : (
-                        <>
-                            <span className="fw-cell-pps" style={{ color: 'var(--fw-text-3)' }}>—</span>
-                            <button
-                                type="button"
-                                className="acl-counter-toggle acl-counter-toggle--off"
-                                onClick={() => onToggleCounter(item.counter)}
-                                title={`Track counter "${item.counter}"`}
-                                aria-label="Enable counter"
-                            >
-                                <Icon data={Play} size={16} />
-                            </button>
-                        </>
-                    )
+                {counterEnabled ? (
+                    <>
+                        {rate ? (
+                            <>
+                                <Sparkline values={rate.history} width={52} height={16} />
+                                <span className="fw-cell-pps" title={`${rate.pps.toFixed(0)} pps`}>
+                                    {rate.pps >= 1000
+                                        ? `${(rate.pps / 1000).toFixed(1)}k`
+                                        : rate.pps.toFixed(0)}
+                                </span>
+                            </>
+                        ) : (
+                            <span className="fw-cell-pps acl-pps-loading" title="Waiting for counter data">…</span>
+                        )}
+                        <button
+                            type="button"
+                            className="acl-counter-toggle acl-counter-toggle--on"
+                            onClick={() => onToggleCounter(effectiveCounterName(item.rule, item.index))}
+                            title="Stop tracking this counter"
+                            aria-label="Disable counter"
+                        >
+                            <Icon data={Pause} size={16} />
+                        </button>
+                    </>
                 ) : (
-                    <span className="fw-cell-pps" style={{ color: 'var(--fw-text-3)' }}>—</span>
+                    <>
+                        <span className="fw-cell-pps" style={{ color: 'var(--fw-text-3)' }}>—</span>
+                        <button
+                            type="button"
+                            className={`acl-counter-toggle acl-counter-toggle--off${!item.counter ? ' acl-counter-toggle--default' : ''}`}
+                            onClick={() => onToggleCounter(effectiveCounterName(item.rule, item.index))}
+                            title={`Track counter "${effectiveCounterName(item.rule, item.index)}"`}
+                            aria-label="Enable counter"
+                        >
+                            <Icon data={Play} size={16} />
+                        </button>
+                    </>
                 )}
             </div>
 
@@ -492,7 +514,7 @@ const RuleTable: React.FC<RuleTableProps> = ({
                                     selected={selectedIds.has(item.id)}
                                     active={activeRowId === item.id}
                                     rate={rates.get(item.id)}
-                                    counterEnabled={!!item.counter && enabledCounterNames.has(item.counter)}
+                                    counterEnabled={enabledCounterNames.has(effectiveCounterName(item.rule, item.index))}
                                     onToggleSelect={handleToggleSelect}
                                     onHoverChange={handleHoverChange}
                                     onToggleCounter={onToggleCounter}

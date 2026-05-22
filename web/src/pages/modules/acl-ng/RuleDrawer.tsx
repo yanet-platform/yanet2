@@ -3,14 +3,24 @@ import { ActionKind, ACTION_KIND_LABELS } from '../../../api/acl-ng';
 import { TrashIcon } from '../../_shared/draft/DraftActionButtons';
 import type { RuleDraft, RuleItem } from './types';
 import { emptyDraft } from './types';
-import { itemToDraft, isValidCidr, isValidDeviceName } from './hooks';
+import { itemToDraft, isValidCidr, isValidDeviceName, defaultCounterName, draftToRule, expandRule, deadReasonText } from './hooks';
 import ChipInput from './ChipInput';
 import type { ChipInputHandle } from './ChipInput';
+
+/** Insert any-wildcard CIDRs that aren't already in the chip list. */
+const addWildcards = (cidrs: string[]): string[] => {
+    const next = [...cidrs];
+    if (!next.includes('0.0.0.0/0')) next.push('0.0.0.0/0');
+    if (!next.includes('::/0')) next.push('::/0');
+    return next;
+};
 
 interface RuleDrawerProps {
     open: boolean;
     mode: 'add' | 'edit';
     ruleItem: RuleItem | null;
+    /** Prospective index for a new rule (current rule count). Used for the add-mode counter placeholder. */
+    nextIndex: number;
     onClose: () => void;
     onSave: (draft: RuleDraft) => void;
     onDelete: (item: RuleItem) => void;
@@ -41,6 +51,7 @@ const RuleDrawer = React.forwardRef<RuleDrawerHandle, RuleDrawerProps>(({
     open,
     mode,
     ruleItem,
+    nextIndex,
     onClose,
     onSave,
     onDelete,
@@ -65,12 +76,14 @@ const RuleDrawer = React.forwardRef<RuleDrawerHandle, RuleDrawerProps>(({
         setIsDirty(true);
     };
 
-    const buildFlushedDraft = (base: RuleDraft): RuleDraft => ({
-        ...base,
-        deviceNames: [...base.deviceNames, ...(deviceNamesRef.current?.flush() ?? [])],
-        sourceCidrs: [...base.sourceCidrs, ...(sourceCidrsRef.current?.flush() ?? [])],
-        dstCidrs: [...base.dstCidrs, ...(dstCidrsRef.current?.flush() ?? [])],
-    });
+    const buildFlushedDraft = (base: RuleDraft): RuleDraft => {
+        return {
+            ...base,
+            deviceNames: [...base.deviceNames, ...(deviceNamesRef.current?.flush() ?? [])],
+            sourceCidrs: [...base.sourceCidrs, ...(sourceCidrsRef.current?.flush() ?? [])],
+            dstCidrs: [...base.dstCidrs, ...(dstCidrsRef.current?.flush() ?? [])],
+        };
+    };
 
     const handleApply = useCallback((): void => {
         const finalDraft = buildFlushedDraft(draft);
@@ -112,6 +125,13 @@ const RuleDrawer = React.forwardRef<RuleDrawerHandle, RuleDrawerProps>(({
     const hasNoTerminal = draft.actions.length > 0 && terminalIdx === -1;
     const hasUnreachable = terminalIdx !== -1 && terminalIdx < draft.actions.length - 1;
 
+    // Compute classification from draft on every render (cheap — a few extractBytes calls).
+    const draftClassification = (() => {
+        const rule = draftToRule(draft);
+        const { isL2, isDead, isDeadIp, isDeadProto } = expandRule(rule);
+        return { isL2, isDead, isDeadIp, isDeadProto };
+    })();
+
     return (
         <>
             <div
@@ -129,6 +149,22 @@ const RuleDrawer = React.forwardRef<RuleDrawerHandle, RuleDrawerProps>(({
                     <h2 className="fw-drawer__title">
                         {mode === 'add' ? 'New rule' : (
                             <>Edit rule <span className="fw-drawer__rule-num">#{ruleItem?.index !== undefined ? ruleItem.index + 1 : ''}</span></>
+                        )}
+                        {draftClassification.isDead && (
+                            <span
+                                className="acl-rule-badge acl-rule-badge--dead"
+                                title={deadReasonText(draftClassification)}
+                            >
+                                dead
+                            </span>
+                        )}
+                        {!draftClassification.isDead && draftClassification.isL2 && (
+                            <span
+                                className="acl-rule-badge acl-rule-badge--l2"
+                                title="No IP filter — matches L2 frames per VLAN/device"
+                            >
+                                L2
+                            </span>
                         )}
                     </h2>
                     <div className="fw-drawer__head-actions">
@@ -228,11 +264,18 @@ const RuleDrawer = React.forwardRef<RuleDrawerHandle, RuleDrawerProps>(({
                                 </label>
                                 <input
                                     className="fw-input"
-                                    placeholder="e.g. my_acl_counter"
+                                    placeholder={mode === 'edit' && ruleItem !== null
+                                        ? `${defaultCounterName(ruleItem.index)} (default)`
+                                        : `${defaultCounterName(nextIndex)} (default)`}
                                     value={draft.counter}
                                     onChange={e => updateField('counter', e.target.value)}
                                 />
-                                <span className="fw-field__hint">Counter name shown in /stats. Leave empty to skip counting.</span>
+                                <span className="fw-field__hint">
+                                    Counter name shown in /stats.
+                                    {ruleItem !== null
+                                        ? ' Leave empty to use the auto-assigned default name (shifts with rule position).'
+                                        : ' Leave empty to use the auto-assigned default name.'}
+                                </span>
                             </div>
                         </div>
                     </section>
@@ -244,7 +287,19 @@ const RuleDrawer = React.forwardRef<RuleDrawerHandle, RuleDrawerProps>(({
                                 <div className="fw-field">
                                     <label className="fw-field__label">
                                         Sources
-                                        <span className="fw-field__count">{draft.sourceCidrs.length || 'any'}</span>
+                                        <div className="acl-field-label-actions">
+                                            <button
+                                                type="button"
+                                                className="fw-btn fw-btn--ghost fw-btn--sm acl-any-btn"
+                                                onClick={() => {
+                                                    updateField('sourceCidrs', addWildcards(draft.sourceCidrs));
+                                                }}
+                                                title="Add 0.0.0.0/0 and ::/0"
+                                            >
+                                                + any
+                                            </button>
+                                            <span className="fw-field__count">{draft.sourceCidrs.length}</span>
+                                        </div>
                                     </label>
                                     <ChipInput
                                         ref={sourceCidrsRef}
@@ -252,14 +307,26 @@ const RuleDrawer = React.forwardRef<RuleDrawerHandle, RuleDrawerProps>(({
                                         onChange={v => updateField('sourceCidrs', v)}
                                         placeholder="10.0.0.0/8…"
                                         kind="cidr"
-                                        wildcardLabel="Any source"
                                         validator={isValidCidr}
                                     />
+                                    <span className="fw-field__hint">Empty = no IP match.</span>
                                 </div>
                                 <div className="fw-field">
                                     <label className="fw-field__label">
                                         Destinations
-                                        <span className="fw-field__count">{draft.dstCidrs.length || 'any'}</span>
+                                        <div className="acl-field-label-actions">
+                                            <button
+                                                type="button"
+                                                className="fw-btn fw-btn--ghost fw-btn--sm acl-any-btn"
+                                                onClick={() => {
+                                                    updateField('dstCidrs', addWildcards(draft.dstCidrs));
+                                                }}
+                                                title="Add 0.0.0.0/0 and ::/0"
+                                            >
+                                                + any
+                                            </button>
+                                            <span className="fw-field__count">{draft.dstCidrs.length}</span>
+                                        </div>
                                     </label>
                                     <ChipInput
                                         ref={dstCidrsRef}
@@ -267,9 +334,9 @@ const RuleDrawer = React.forwardRef<RuleDrawerHandle, RuleDrawerProps>(({
                                         onChange={v => updateField('dstCidrs', v)}
                                         placeholder="192.168.0.0/16…"
                                         kind="cidr"
-                                        wildcardLabel="Any destination"
                                         validator={isValidCidr}
                                     />
+                                    <span className="fw-field__hint">Empty = no IP match.</span>
                                 </div>
                             </div>
                         </div>
@@ -301,7 +368,19 @@ const RuleDrawer = React.forwardRef<RuleDrawerHandle, RuleDrawerProps>(({
                                 </div>
                             </div>
                             <div className="fw-field">
-                                <label className="fw-field__label">Protocol ranges</label>
+                                <label className="fw-field__label">
+                                    Protocol ranges
+                                    <div className="acl-field-label-actions">
+                                        <button
+                                            type="button"
+                                            className="fw-btn fw-btn--ghost fw-btn--sm acl-any-btn"
+                                            onClick={() => updateField('protoRaw', '0-65535')}
+                                            title="Set to full range (any protocol)"
+                                        >
+                                            + any
+                                        </button>
+                                    </div>
+                                </label>
                                 <input
                                     className="fw-input fw-input--mono"
                                     placeholder="1536-1791"
@@ -311,7 +390,7 @@ const RuleDrawer = React.forwardRef<RuleDrawerHandle, RuleDrawerProps>(({
                                 <span className="fw-field__hint">
                                     Encoded as <code>(ip_proto &lt;&lt; 8) | subtype</code>.
                                     TCP=<code>1536-1791</code>, UDP=<code>4352-4607</code>, ICMP=<code>256-511</code>.
-                                    Empty = any.
+                                    Empty = no match.
                                 </span>
                                 <div className="acl-proto-presets">
                                     {[

@@ -295,7 +295,6 @@ const ChipInput = React.forwardRef<ChipInputHandle, ChipInputProps>(({
     };
 
     const isMany = value.length > MANY_THRESHOLD;
-    const isWildcard = value.length === 0;
 
     const filteredIndices = useMemo(() => {
         if (!filter.trim()) return value.map((_, idx) => idx);
@@ -365,7 +364,7 @@ const ChipInput = React.forwardRef<ChipInputHandle, ChipInputProps>(({
                 className={`fw-chip-input${isMany ? ' fw-chip-input--many' : ''}`}
                 onClick={() => !filter && inputRef.current?.focus()}
             >
-                {isWildcard && wildcardLabel && (
+                {wildcardLabel && value.length === 0 && (
                     <span className="acl-chip acl-chip--any">{wildcardLabel}</span>
                 )}
                 {filteredIndices.map(idx => {

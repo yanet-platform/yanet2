@@ -30,11 +30,11 @@ export interface RuleDraft {
 }
 
 export const emptyDraft = (): RuleDraft => ({
-    sourceCidrs: [],
-    dstCidrs: [],
+    sourceCidrs: ['0.0.0.0/0', '::/0'],
+    dstCidrs: ['0.0.0.0/0', '::/0'],
     srcPortRaw: '',
     dstPortRaw: '',
-    protoRaw: '',
+    protoRaw: '0-65535',
     vlanRaw: '',
     deviceNames: [],
     counter: '',
