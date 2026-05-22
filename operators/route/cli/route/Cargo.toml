@@ -19,6 +19,7 @@ prost = "0.13"
 log = "0.4"
 netip = "0.2"
 colored = "3"
+serde = "1"
 tabled = { version = "0.18", features = ["ansi"] }
 tokio = { version = "1", features = ["rt", "net", "time", "macros", "sync"] }
 tonic = { version = "0.13", features = ["gzip"] }

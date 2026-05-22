@@ -16,7 +16,7 @@ use tabled::Tabled;
 use tonic::codec::CompressionEncoding;
 use ync::{
     client::{ConnectionArgs, LayeredChannel},
-    display::print_table,
+    display::print_table_from_entries,
     logging,
 };
 
@@ -115,9 +115,7 @@ fn print_counter_table(rows: Vec<CounterRow>) {
         builder.push_record(row);
     }
 
-    let mut table = builder.build();
-    ync::display::apply_style(&mut table);
-    println!("{table}");
+    ync::display::print_table(builder.build());
 }
 
 fn format_number(n: u64) -> String {
@@ -326,7 +324,7 @@ fn print_metrics_table(metrics: &[Metric]) {
                 value: format_gauge_value(&m.name, m.value.unwrap_or(0.0)),
             })
             .collect();
-        print_table(rows);
+        print_table_from_entries(rows);
         println!();
     }
 
@@ -355,7 +353,7 @@ fn print_metrics_table(metrics: &[Metric]) {
                 }
             })
             .collect();
-        print_table(rows);
+        print_table_from_entries(rows);
     }
 }
 

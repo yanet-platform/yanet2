@@ -1,11 +1,10 @@
 //! CLI for YANET route operator (route-side commands).
 //!
-//! Connects to a gRPC endpoint exposing the operator's RouteService
+//! Connects to a gRPC endpoint exposing the operator's `RouteService`
 //! (the operator process directly, or the gateway once registration
 //! has propagated) and drives the operator-owned RIB.
 
 use core::{
-    error::Error,
     fmt::{self, Display, Formatter},
     net::IpAddr,
 };
@@ -25,7 +24,8 @@ use tabled::{
 use tonic::codec::CompressionEncoding;
 use ync::{
     client::{ConnectionArgs, LayeredChannel},
-    logging,
+    errors::Error,
+    output::{self, CommonFormat},
 };
 
 use crate::operatorpb::{
@@ -38,6 +38,9 @@ pub mod operatorpb {
     tonic::include_proto!("operators.route.operatorpb.v1");
 }
 
+/// The fully-qualified gRPC service name used in error messages.
+const SERVICE_NAME: &str = "operators.route.operatorpb.v1.RouteService";
+
 /// Route operator CLI (RIB management).
 #[derive(Debug, Clone, Parser)]
 #[command(version, about)]
@@ -47,7 +50,9 @@ pub struct Cmd {
     pub mode: ModeCmd,
     #[command(flatten)]
     pub connection: ConnectionArgs,
-    /// Be verbose in terms of logging.
+    #[arg(long, default_value = "human", global = true)]
+    pub format: CommonFormat,
+    /// Be verbose: shows debug log lines and raw gRPC error details.
     #[clap(short, action = ArgAction::Count, global = true)]
     pub verbose: u8,
 }
@@ -140,6 +145,13 @@ impl RouteSource {
             Self::Bird => RouteSourceId::Bird,
         }
     }
+
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::Static => "static",
+            Self::Bird => "bird",
+        }
+    }
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -147,83 +159,130 @@ pub async fn main() {
     CompleteEnv::with_factory(Cmd::command).complete();
 
     let cmd = Cmd::parse();
-    logging::init(cmd.verbose as usize).expect("no error expected");
+
+    ync::init(cmd.verbose, cmd.format);
 
     if let Err(err) = run(cmd).await {
-        log::error!("ERROR: {err}");
-        std::process::exit(1);
+        output::failure(&err);
+        std::process::exit(err.exit_code());
     }
 }
 
-async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
+async fn run(cmd: Cmd) -> Result<(), Error> {
     let mut service = RouteService::new(&cmd.connection).await?;
 
     match cmd.mode {
         ModeCmd::List => service.list_configs().await,
-        ModeCmd::Show(cmd) => service.show_routes(cmd).await,
-        ModeCmd::Lookup(cmd) => service.lookup_route(cmd).await,
-        ModeCmd::Insert(cmd) => service.insert_route(cmd).await,
-        ModeCmd::Remove(cmd) => service.remove_route(cmd).await,
-        ModeCmd::Flush(cmd) => service.flush_routes(cmd).await,
+        ModeCmd::Show(c) => service.show_routes(c).await,
+        ModeCmd::Lookup(c) => service.lookup_route(c).await,
+        ModeCmd::Insert(c) => service.insert_route(c).await,
+        ModeCmd::Remove(c) => service.remove_route(c).await,
+        ModeCmd::Flush(c) => service.flush_routes(c).await,
     }
 }
 
 pub struct RouteService {
     client: RouteServiceClient<LayeredChannel>,
+    endpoint: String,
 }
 
 impl RouteService {
-    pub async fn new(connection: &ConnectionArgs) -> Result<Self, Box<dyn Error>> {
-        let channel = ync::client::connect(connection).await?;
+    pub async fn new(connection: &ConnectionArgs) -> Result<Self, Error> {
+        let channel = ync::client::connect(connection)
+            .await
+            .map_err(|e| Error::from_connection(e, "connect", &connection.endpoint))?;
         let client = RouteServiceClient::new(channel)
             .send_compressed(CompressionEncoding::Gzip)
             .accept_compressed(CompressionEncoding::Gzip);
-        Ok(Self { client })
+
+        Ok(Self {
+            client,
+            endpoint: connection.endpoint.clone(),
+        })
     }
 
-    pub async fn list_configs(&mut self) -> Result<(), Box<dyn Error>> {
-        let request = ListConfigsRequest {};
-        let response = self.client.list_configs(request).await?.into_inner();
+    fn map_err<'a>(&'a self, action: &'a str) -> impl FnOnce(tonic::Status) -> Error + 'a {
+        let endpoint = self.endpoint.clone();
+        move |status| Error::from_status(status, action, endpoint, SERVICE_NAME)
+    }
 
-        for config in response.configs {
-            println!("{config}");
-        }
+    pub async fn list_configs(&mut self) -> Result<(), Error> {
+        let response = self
+            .client
+            .list_configs(ListConfigsRequest {})
+            .await
+            .map_err(self.map_err("list"))?
+            .into_inner();
+
+        output::data(
+            &response.configs,
+            response.configs.is_empty(),
+            format_args!("no configurations"),
+            || {
+                for config in &response.configs {
+                    println!("{config}");
+                }
+            },
+        );
+
         Ok(())
     }
 
-    pub async fn show_routes(&mut self, cmd: RouteShowCmd) -> Result<(), Box<dyn Error>> {
+    pub async fn show_routes(&mut self, cmd: RouteShowCmd) -> Result<(), Error> {
         let request = ShowRoutesRequest {
             name: cmd.name.clone(),
             ipv4_only: cmd.ipv4,
             ipv6_only: cmd.ipv6,
         };
 
-        let response = self.client.show_routes(request).await?.into_inner();
+        let response = self
+            .client
+            .show_routes(request)
+            .await
+            .map_err(self.map_err("show"))?
+            .into_inner();
 
-        let mut entries = response.routes.into_iter().map(RouteEntry::from).collect::<Vec<_>>();
-        entries.sort_by_key(|a| a.prefix.0);
+        output::data(
+            &response.routes,
+            response.routes.is_empty(),
+            format_args!("no routes in {}", cmd.name),
+            || {
+                let mut entries: Vec<RouteEntry> = response.routes.iter().cloned().map(RouteEntry::from).collect();
+                entries.sort_by_key(|entry| entry.prefix.0);
+                print_route_table(entries);
+            },
+        );
 
-        print_table(entries);
         Ok(())
     }
 
-    pub async fn lookup_route(&mut self, cmd: RouteLookupCmd) -> Result<(), Box<dyn Error>> {
+    pub async fn lookup_route(&mut self, cmd: RouteLookupCmd) -> Result<(), Error> {
         let request = LookupRouteRequest {
             name: cmd.name.clone(),
             ip_addr: Some(cmd.addr.into()),
         };
 
-        let response = self.client.lookup_route(request).await?.into_inner();
-        if response.routes.is_empty() {
-            log::info!("No routes found for {}", cmd.addr);
-            return Ok(());
-        }
+        let response = self
+            .client
+            .lookup_route(request)
+            .await
+            .map_err(self.map_err("lookup"))?
+            .into_inner();
 
-        print_table(response.routes.into_iter().map(RouteEntry::from));
+        output::data(
+            &response.routes,
+            response.routes.is_empty(),
+            format_args!("no routes for {}", cmd.addr),
+            || {
+                let entries: Vec<RouteEntry> = response.routes.iter().cloned().map(RouteEntry::from).collect();
+                print_route_table(entries);
+            },
+        );
+
         Ok(())
     }
 
-    pub async fn insert_route(&mut self, cmd: RouteInsertCmd) -> Result<(), Box<dyn Error>> {
+    pub async fn insert_route(&mut self, cmd: RouteInsertCmd) -> Result<(), Error> {
         let request = InsertRouteRequest {
             name: cmd.name.clone(),
             prefix: cmd.prefix.to_string(),
@@ -232,17 +291,26 @@ impl RouteService {
             source_id: cmd.source.to_proto().into(),
         };
 
-        self.client.insert_route(request).await?;
-        log::info!(
-            "Route inserted successfully: {} via {} (source: {:?})",
-            cmd.prefix,
-            cmd.nexthop_addr,
-            cmd.source
+        self.client
+            .insert_route(request)
+            .await
+            .map_err(self.map_err("insert"))?;
+
+        output::success(
+            "insert",
+            format_args!(
+                "inserted {} via {} in {} (source: {})",
+                cmd.prefix,
+                cmd.nexthop_addr,
+                cmd.name,
+                cmd.source.as_str()
+            ),
         );
+
         Ok(())
     }
 
-    pub async fn remove_route(&mut self, cmd: RouteRemoveCmd) -> Result<(), Box<dyn Error>> {
+    pub async fn remove_route(&mut self, cmd: RouteRemoveCmd) -> Result<(), Error> {
         let request = DeleteRouteRequest {
             name: cmd.name.clone(),
             prefix: cmd.prefix.to_string(),
@@ -251,20 +319,32 @@ impl RouteService {
             source_id: cmd.source.to_proto().into(),
         };
 
-        self.client.delete_route(request).await?;
-        log::info!(
-            "Route removed successfully: {} via {} (source: {:?})",
-            cmd.prefix,
-            cmd.nexthop_addr,
-            cmd.source
+        self.client
+            .delete_route(request)
+            .await
+            .map_err(self.map_err("remove"))?;
+
+        output::success(
+            "remove",
+            format_args!(
+                "removed {} via {} from {} (source: {})",
+                cmd.prefix,
+                cmd.nexthop_addr,
+                cmd.name,
+                cmd.source.as_str()
+            ),
         );
+
         Ok(())
     }
 
-    pub async fn flush_routes(&mut self, cmd: RouteFlushCmd) -> Result<(), Box<dyn Error>> {
+    pub async fn flush_routes(&mut self, cmd: RouteFlushCmd) -> Result<(), Error> {
         let request = FlushRoutesRequest { name: cmd.name.clone() };
-        self.client.flush_routes(request).await?;
-        log::info!("Routes flushed successfully");
+
+        self.client.flush_routes(request).await.map_err(self.map_err("flush"))?;
+
+        output::success("flush", format_args!("flushed {}", cmd.name));
+
         Ok(())
     }
 }
@@ -301,26 +381,51 @@ pub struct Communities(pub Vec<LargeCommunity>);
 
 impl Display for Communities {
     fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
-        let communities: Vec<String> = self.0.iter().map(|c| c.to_string()).collect();
-        write!(f, "{}", communities.join(" "))
+        let Self(communities) = self;
+        let strings: Vec<String> = communities.iter().map(|c| c.to_string()).collect();
+        write!(f, "{}", strings.join(" "))
     }
 }
 
+/// Wraps a prefix with its best-route flag.
+///
+/// `Ord` and `Eq` are by the address/prefix pair only; the `is_best` field
+/// is a render-only hint and intentionally excluded from identity.
 #[derive(Debug)]
 pub struct Prefix(pub Contiguous<IpNetwork>, pub bool);
 
 impl Display for Prefix {
     fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
         let Prefix(prefix, is_best) = self;
-        let prefix = prefix.to_string();
-        let prefix = if *is_best {
-            prefix.into()
+        let s = prefix.to_string();
+
+        if output::is_colored() && !is_best {
+            write!(f, "{}", s.truecolor(127, 127, 127))
         } else {
-            prefix.truecolor(127, 127, 127)
-        };
-        write!(f, "{prefix}")
+            write!(f, "{s}")
+        }
     }
 }
+
+impl PartialOrd for Prefix {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Prefix {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        self.0.cmp(&other.0)
+    }
+}
+
+impl PartialEq for Prefix {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0
+    }
+}
+
+impl Eq for Prefix {}
 
 #[derive(Debug, Tabled)]
 pub struct RouteEntry {
@@ -348,18 +453,12 @@ impl From<operatorpb::Route> for RouteEntry {
     fn from(route: operatorpb::Route) -> Self {
         let communities = route.large_communities.into_iter().map(|c| c.into()).collect();
         let prefix = Contiguous::<IpNetwork>::parse(&route.prefix).expect("must be valid prefix");
-        let source = RouteSourceId::try_from(route.source)
-            .unwrap_or_default()
-            .as_str_name()
-            .strip_prefix("ROUTE_SOURCE_ID_")
-            .unwrap_or_default()
-            .to_lowercase();
 
         Self {
             prefix: Prefix(prefix, route.is_best),
             next_hop: route.next_hop.as_ref().map(|a| a.to_string()).unwrap_or_default(),
             peer: route.peer.as_ref().map(|a| a.to_string()).unwrap_or_default(),
-            source,
+            source: route_source_name(route.source),
             peer_as: route.peer_as,
             origin_as: route.origin_as,
             pref: route.pref,
@@ -369,18 +468,52 @@ impl From<operatorpb::Route> for RouteEntry {
     }
 }
 
-fn print_table<I, T>(entries: I)
-where
-    I: IntoIterator<Item = T>,
-    T: Tabled,
-{
-    let mut table = Table::new(entries);
+fn print_route_table(entries: Vec<RouteEntry>) {
+    let mut table = Table::new(&entries);
     table.with(
         Style::modern()
             .horizontals([(1, HorizontalLine::inherit(Style::modern()))])
             .remove_horizontal(),
     );
-    table.modify(Columns::new(..), BorderColor::filled(Color::rgb_fg(0x4e, 0x4e, 0x4e)));
-    table.modify(Rows::first(), Color::BOLD);
+
+    if output::is_colored() {
+        table.modify(Columns::new(..), BorderColor::filled(Color::rgb_fg(0x4e, 0x4e, 0x4e)));
+        table.modify(Rows::first(), Color::BOLD);
+    }
+
     println!("{table}");
+}
+
+/// Returns the lowercase display name for a `RouteSourceId` discriminant.
+///
+/// Converts a raw `i32` source value to its lowercase string name by calling
+/// `as_str_name` on the corresponding `RouteSourceId` variant.
+fn route_source_name(value: i32) -> String {
+    RouteSourceId::try_from(value)
+        .unwrap_or_default()
+        .as_str_name()
+        .strip_prefix("ROUTE_SOURCE_ID_")
+        .unwrap_or_default()
+        .to_lowercase()
+}
+
+/// Serializes the `source` field of `Route` as a lowercase string name
+/// (e.g. `"static"`, `"bird"`) instead of the raw `i32` enum discriminant.
+pub fn serialize_route_source<S>(value: &i32, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    serializer.serialize_str(&route_source_name(*value))
+}
+
+/// Serializes an optional `IpAddress` field as a string (e.g. `"10.0.0.1"`)
+/// or JSON `null` when absent.
+pub fn serialize_ip_addr<S>(value: &Option<commonpb::pb::IpAddress>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    match value {
+        Some(addr) => serializer.serialize_str(&addr.to_string()),
+        None => serializer.serialize_none(),
+    }
 }

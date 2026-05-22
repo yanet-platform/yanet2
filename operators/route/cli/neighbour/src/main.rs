@@ -20,7 +20,7 @@ use tabled::Tabled;
 use tonic::codec::CompressionEncoding;
 use ync::{
     client::{ConnectionArgs, LayeredChannel},
-    display::print_table,
+    display::print_table_from_entries,
     logging,
 };
 
@@ -220,7 +220,7 @@ impl NeighbourService {
 
         entries.sort_by(|a, b| (a.state, &a.next_hop).cmp(&(b.state, &b.next_hop)));
 
-        print_table(entries);
+        print_table_from_entries(entries);
         Ok(())
     }
 
@@ -279,7 +279,7 @@ impl NeighbourService {
             })
             .collect();
 
-        print_table(entries);
+        print_table_from_entries(entries);
         Ok(())
     }
 
