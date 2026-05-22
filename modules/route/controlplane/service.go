@@ -2,6 +2,7 @@ package route
 
 import (
 	"context"
+	"sort"
 	"sync"
 
 	"go.uber.org/zap"
@@ -77,6 +78,7 @@ func (m *RouteService) ListConfigs(
 	for name := range m.configs {
 		response.Configs = append(response.Configs, name)
 	}
+	sort.Strings(response.Configs)
 	return response, nil
 }
 

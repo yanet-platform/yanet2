@@ -21,7 +21,7 @@ use tabled::{
 };
 use tonic::codec::CompressionEncoding;
 use yanet_cli_route::{
-    routepb::{route_service_client::RouteServiceClient, ListConfigsRequest, ShowFibRequest, UpdateFibRequest},
+    routepb::{self, route_service_client::RouteServiceClient, ListConfigsRequest, ShowFibRequest, UpdateFibRequest},
     FibDisplayEntry,
 };
 use ync::{
@@ -65,7 +65,7 @@ fn parse_mac(s: &str) -> Result<MacAddress, Box<dyn Error>> {
     Ok(MacAddress { addr: mac.as_u64() })
 }
 
-impl TryFrom<FibNexthop> for yanet_cli_route::routepb::FibNexthop {
+impl TryFrom<FibNexthop> for routepb::FibNexthop {
     type Error = Box<dyn Error>;
 
     fn try_from(nh: FibNexthop) -> Result<Self, Self::Error> {
@@ -77,14 +77,14 @@ impl TryFrom<FibNexthop> for yanet_cli_route::routepb::FibNexthop {
     }
 }
 
-impl TryFrom<FibEntry> for yanet_cli_route::routepb::FibEntry {
+impl TryFrom<FibEntry> for routepb::FibEntry {
     type Error = Box<dyn Error>;
 
     fn try_from(entry: FibEntry) -> Result<Self, Self::Error> {
         let nexthops = entry
             .nexthops
             .into_iter()
-            .map(yanet_cli_route::routepb::FibNexthop::try_from)
+            .map(routepb::FibNexthop::try_from)
             .collect::<Result<Vec<_>, _>>()?;
         Ok(Self { prefix: entry.prefix, nexthops })
     }
@@ -192,7 +192,7 @@ impl RouteService {
         let entries = config
             .entries
             .into_iter()
-            .map(yanet_cli_route::routepb::FibEntry::try_from)
+            .map(routepb::FibEntry::try_from)
             .collect::<Result<Vec<_>, _>>()?;
         let request = UpdateFibRequest {
             module_name: cmd.config_name,

@@ -735,7 +735,7 @@ const bigIntToBytes = (value: bigint, length: number): number[] => {
 // Compute the last address of a prefix (addr | ~mask).
 const lastAddrOfPrefix = (addrBits: bigint, prefixLen: number, totalBits: number): bigint => {
     const hostBits = totalBits - prefixLen;
-    const mask = hostBits >= totalBits ? 0n : (1n << BigInt(hostBits)) - 1n;
+    const mask = hostBits > totalBits ? 0n : (1n << BigInt(hostBits)) - 1n;
     return addrBits | mask;
 };
 
@@ -771,7 +771,7 @@ export const ipRangeToCIDRs = (range: IPRangeWire | undefined): string[] => {
             const candidate = prefixLen - 1;
             const hostBits = totalBits - candidate;
             // Check alignment: curr must be the network address for this prefix.
-            const alignMask = hostBits >= totalBits ? 0n : (1n << BigInt(hostBits)) - 1n;
+            const alignMask = hostBits > totalBits ? 0n : (1n << BigInt(hostBits)) - 1n;
             if ((curr & alignMask) !== 0n) break;
             // Check the block does not overshoot the end address.
             if (lastAddrOfPrefix(curr, candidate, totalBits) > to) break;

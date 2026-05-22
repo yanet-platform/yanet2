@@ -321,7 +321,7 @@
     }
 }
 
-// Sticky header row for the virtualized table
+// Sticky header row for the virtualized table.
 .fw-vtbl-header {
     display: flex;
     align-items: center;
@@ -333,15 +333,15 @@
 }
 
 .fw-th-text {
-    font-size: 11px;
-    font-weight: 600;
+    font-size: 10.5px;
+    font-weight: 500;
     color: var(--fw-text-3);
-    letter-spacing: 0.04em;
+    letter-spacing: 0.12em;
     text-transform: uppercase;
     white-space: nowrap;
 }
 
-// Scroll body for virtualizer
+// Scroll body for virtualizer.
 .fw-vtbl-body {
     flex: 1;
     min-height: 0;
@@ -416,7 +416,7 @@
 
 .fw-cell-mono {
     font-family: var(--fw-font-mono);
-    font-size: 11.5px;
+    font-size: 12.5px;
     letter-spacing: -0.005em;
     display: inline-block;
     max-width: 100%;
@@ -477,7 +477,7 @@
     position: absolute;
     right: 0;
     width: 40px;
-    height: 40px; // matches ROW_HEIGHT constant
+    height: 44px; // matches ROW_HEIGHT constant
     display: flex;
     align-items: center;
     justify-content: center;
@@ -494,13 +494,13 @@
 }
 
 .fw-row-edit-btn {
-    width: 26px;
-    height: 26px;
+    width: 32px;
+    height: 32px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    border-radius: 4px;
-    font-size: 14px;
+    border-radius: 6px;
+    font-size: 20px;
     color: var(--fw-text-2);
     background: var(--fw-bg-3);
     border: 1px solid var(--fw-line-2);
