@@ -142,7 +142,22 @@ func TestBasic(t *testing.T) {
 	}
 	te := setupTestEnv(t, config)
 	balancer := te.setup.balancer
-	err := balancer.UpdateReals([]*balancerpb.RealUpdate{
+	layers := te.packetGen.MakeTCPPacket(
+		"1::",
+		"2a02:6b8:0:3400:0:853a:0:3",
+		100,
+		80,
+		true,
+		false,
+		false,
+		false,
+		nil,
+	)
+	packet := xpacket.LayersToPacket(t, layers...)
+	result, err := te.mock.HandlePackets(packet)
+	assert.NoError(t, err, "failed to handle packets")
+	assert.Equal(t, 1, len(result.Drop), "not dropped packet but there is no reals")
+	err = balancer.UpdateReals([]*balancerpb.RealUpdate{
 		{
 			RealId: &balancerpb.RealIdentifier{
 				Vs:   vs1,
@@ -165,19 +180,7 @@ func TestBasic(t *testing.T) {
 		},
 	})
 	assert.NoError(t, err, "failed to update reals")
-	layers := te.packetGen.MakeTCPPacket(
-		"1::",
-		"2a02:6b8:0:3400:0:853a:0:3",
-		100,
-		80,
-		true,
-		false,
-		false,
-		false,
-		nil,
-	)
-	packet := xpacket.LayersToPacket(t, layers...)
-	result, err := te.mock.HandlePackets(packet)
+	result, err = te.mock.HandlePackets(packet)
 	assert.NoError(t, err, "failed to handle packets")
 	assert.Equal(t, 1, len(result.Output), err, "no output packets")
 	assert.True(t, result.Output[0].IsTunneled, "result packet is not tunneled")
@@ -187,6 +190,6 @@ func TestBasic(t *testing.T) {
 	state := states[0]
 	assert.Equal(t, uint64(1), state.Vs[0].Reals[0].Stats.Packets)
 	assert.Equal(t, uint64(1), state.Vs[0].Stats.CreatedSessions)
-	assert.Equal(t, uint64(1), state.Vs[0].AllowedSourcesStats[0].Passes)
+	assert.Equal(t, uint64(2), state.Vs[0].AllowedSourcesStats[0].Passes)
 	assert.Equal(t, "123", state.Vs[0].AllowedSourcesStats[0].Tag)
 }
