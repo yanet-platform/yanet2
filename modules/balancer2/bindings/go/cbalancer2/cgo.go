@@ -90,11 +90,11 @@ func (m *Balancer) Free(agent *ffi.Agent) {
 	}
 }
 
-// UpdateVSRealWeights updates per-real weights for the VS at the given index.
-// The weights slice must have length equal to the number of reals configured
+// UpdateVSReals updates per-real weights and states for the VS at the given index.
+// The weights and states slices must have length equal to the number of reals configured
 // for the VS and be indexed in the same order they were passed at VS
 // creation.
-func (m *Balancer) UpdateVSRealWeights(vsIdx uint32, weights []uint32) error {
+func (m *Balancer) UpdateVSReals(vsIdx uint32, weights []uint32, states []bool) error {
 	var cWeightsPtr *C.uint32_t
 	if len(weights) > 0 {
 		cWeights := make([]C.uint32_t, len(weights))
@@ -103,30 +103,17 @@ func (m *Balancer) UpdateVSRealWeights(vsIdx uint32, weights []uint32) error {
 		}
 		cWeightsPtr = &cWeights[0]
 	}
-
-	var cErr *C.yanet_error
-	if rc := C.balancer_vs_update_real_weights(m.ptr, C.uint32_t(vsIdx), cWeightsPtr, &cErr); rc != 0 {
-		return cerrors.FromC(unsafe.Pointer(cErr))
-	}
-	return nil
-}
-
-// UpdateVSRealStates updates per-real enabled flags for the VS at the given
-// index. The states slice must have length equal to the number of reals
-// configured for the VS and be indexed in the same order they were passed at
-// VS creation.
-func (m *Balancer) UpdateVSRealStates(vsIdx uint32, states []bool) error {
 	var cStatesPtr *C.bool
 	if len(states) > 0 {
 		cStates := make([]C.bool, len(states))
-		for i, s := range states {
-			cStates[i] = C.bool(s)
+		for i, state := range states {
+			cStates[i] = C.bool(state)
 		}
 		cStatesPtr = &cStates[0]
 	}
 
 	var cErr *C.yanet_error
-	if rc := C.balancer_vs_update_real_states(m.ptr, C.uint32_t(vsIdx), cStatesPtr, &cErr); rc != 0 {
+	if rc := C.balancer_vs_update_reals(m.ptr, C.uint32_t(vsIdx), cWeightsPtr, cStatesPtr, &cErr); rc != 0 {
 		return cerrors.FromC(unsafe.Pointer(cErr))
 	}
 	return nil

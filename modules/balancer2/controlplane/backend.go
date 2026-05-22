@@ -79,11 +79,8 @@ func prepareVSReals(handle *cbalancer2.Balancer, vsIdx uint32, slot *vsSlot) err
 		states[rs.idx] = rs.enabled
 		weights[rs.idx] = rs.weight
 	}
-	if err := handle.UpdateVSRealStates(vsIdx, states); err != nil {
-		return fmt.Errorf("vs[%d]: update real states: %w", vsIdx, err)
-	}
-	if err := handle.UpdateVSRealWeights(vsIdx, weights); err != nil {
-		return fmt.Errorf("vs[%d]: update real weights: %w", vsIdx, err)
+	if err := handle.UpdateVSReals(vsIdx, weights, states); err != nil {
+		return fmt.Errorf("vs[%d]: update reals: %w", vsIdx, err)
 	}
 	return nil
 }

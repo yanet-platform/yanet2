@@ -170,10 +170,8 @@ func (m *ModuleConfig) DeleteVS(vs []*balancerpb.VsIdentifier) error {
 }
 
 type vsUpdate struct {
-	id            vsID
-	stateChanged  bool
-	weightChanged bool
-	reals         map[realID]*realSlot
+	id    vsID
+	reals map[realID]*realSlot
 }
 
 func (m *ModuleConfig) UpdateReals(updates []*balancerpb.RealUpdate) error {
@@ -223,11 +221,9 @@ func (m *ModuleConfig) stageRealUpdates(
 		}
 		if update.Enable != nil {
 			rs.enabled = *update.Enable
-			next.stateChanged = true
 		}
 		if update.Weight != nil {
 			rs.weight = *update.Weight
-			next.weightChanged = true
 		}
 	}
 	return staged, nil
@@ -246,29 +242,20 @@ func (m *ModuleConfig) commitRealUpdates(staged map[int]*vsUpdate) error {
 	for _, vsIdx := range order {
 		info := staged[vsIdx]
 		index := m.index[info.id].reals
-		if info.stateChanged {
-			states := make([]bool, len(info.reals))
-			for _, rs := range info.reals {
-				states[rs.idx] = rs.enabled
-			}
-			if err := m.handle.UpdateVSRealStates(uint32(vsIdx), states); err != nil {
-				return fmt.Errorf("vs[%d]: update real states: %w", vsIdx, err)
-			}
-			for k, rs := range info.reals {
-				index[k].enabled = rs.enabled
-			}
+		states := make([]bool, len(info.reals))
+		for _, rs := range info.reals {
+			states[rs.idx] = rs.enabled
 		}
-		if info.weightChanged {
-			weights := make([]uint32, len(info.reals))
-			for _, rs := range info.reals {
-				weights[rs.idx] = rs.weight
-			}
-			if err := m.handle.UpdateVSRealWeights(uint32(vsIdx), weights); err != nil {
-				return fmt.Errorf("vs[%d]: update real weights: %w", vsIdx, err)
-			}
-			for k, rs := range info.reals {
-				index[k].weight = rs.weight
-			}
+		weights := make([]uint32, len(info.reals))
+		for _, rs := range info.reals {
+			weights[rs.idx] = rs.weight
+		}
+		if err := m.handle.UpdateVSReals(uint32(vsIdx), weights, states); err != nil {
+			return fmt.Errorf("vs[%d]: update reals: %w", vsIdx, err)
+		}
+		for k, rs := range info.reals {
+			index[k].enabled = rs.enabled
+			index[k].weight = rs.weight
 		}
 	}
 	return nil

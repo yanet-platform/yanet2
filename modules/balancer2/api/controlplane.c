@@ -1087,10 +1087,11 @@ build_ring(
 }
 
 int
-balancer_vs_update_real_weights(
+balancer_vs_update_reals(
 	struct balancer_handle *balancer,
 	uint32_t vs_idx,
 	const uint32_t *weights,
+	const bool *states,
 	yanet_error **error
 ) {
 	yanet_error_reset(error);
@@ -1120,10 +1121,27 @@ balancer_vs_update_real_weights(
 		atomic_load_explicit(&selector->ring_id, memory_order_relaxed);
 	size_t new_ring = cur_ring ^ 1;
 
+	size_t reals_count = vs->reals_count;
+	struct real *reals = ADDR_OF(&vs->reals);
+
+	uint32_t *ring_weights = malloc(reals_count * sizeof(*ring_weights));
+	if (ring_weights == NULL) {
+		yanet_error_add(error, "%s", heap_alloc_failed);
+		return -1;
+	}
+
+	for (size_t real_idx = 0; real_idx < reals_count; ++real_idx) {
+		if (states[real_idx]) {
+			ring_weights[real_idx] = weights[real_idx];
+		} else {
+			ring_weights[real_idx] = 0;
+		}
+	}
+
 	if (build_ring(
 		    &selector->rings[new_ring],
-		    weights,
-		    vs->reals_count,
+		    ring_weights,
+		    reals_count,
 		    mctx,
 		    vs_idx,
 		    error
@@ -1132,10 +1150,31 @@ balancer_vs_update_real_weights(
 		return -1;
 	}
 
+	for (uint32_t real_idx = 0; real_idx < reals_count; ++real_idx) {
+		uint8_t flags = atomic_load_explicit(
+			&reals[real_idx].flags, memory_order_relaxed
+		);
+		uint8_t new_flags = 0;
+		if (states[real_idx]) {
+			new_flags = flags | real_enabled;
+		} else {
+			new_flags = flags & ~real_enabled;
+		}
+		if (flags != new_flags) {
+			atomic_store_explicit(
+				&reals[real_idx].flags,
+				new_flags,
+				memory_order_relaxed
+			);
+		}
+	}
+
 	/* Blocks until all workers see new value (or will see on demand) */
 	rcu_update(&cfg->rcu, &selector->ring_id, new_ring);
 
 	big_array_free(&selector->rings[cur_ring].real_ids);
+
+	free(ring_weights);
 
 	return 0;
 }

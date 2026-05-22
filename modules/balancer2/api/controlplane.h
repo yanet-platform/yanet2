@@ -142,18 +142,20 @@ void
 balancer_free(struct agent *agent, struct balancer_handle *handle);
 
 /*
- * Updates per-real weights for a VS. The balancer handle must be
- * non-NULL. The weights array must have length equal to the number
+ * Updates per-real weights and states for a VS.
+ * The balancer handle must be non-NULL.
+ * The weights and states arrays must have length equal to the number
  * of reals configured for the VS and be indexed in the same order
  * as they were passed at VS creation.
  *
  * Returns 0 on success, -1 on error.
  */
 int
-balancer_vs_update_real_weights(
+balancer_vs_update_reals(
 	struct balancer_handle *balancer,
 	uint32_t vs_idx,
 	const uint32_t *weights,
+	const bool *states,
 	yanet_error **error
 );
 
