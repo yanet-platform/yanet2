@@ -130,6 +130,7 @@ func convertRules(reqRules []*aclpb.Rule) ([]AclRule, error) {
 
 		rule := AclRule{
 			Actions:       convertActions(reqRule.Actions),
+			Counter:       reqRule.GetCounter(),
 			Devices:       devices,
 			VlanRanges:    vlanRanges,
 			Src4s:         src4s,
