@@ -682,6 +682,15 @@ export type IPAddressWire = {
     addr?: string | number[] | Uint8Array;
 };
 
+// Wire-format shape of an IP range as returned by the gRPC-JSON gateway.
+// Both endpoints are plain IP strings — Go's IPRange.MarshalJSON flattens
+// the nested IPAddress shape into top-level strings rather than nesting
+// {addr:"..."} objects.
+export interface IPRangeWire {
+    start?: string;
+    end?: string;
+}
+
 // Decode a wire IPAddress into a human-readable IP string. Returns an
 // empty string when the message is missing or has an empty addr.
 // The canonical wire form from Go's MarshalJSON is a plain IP string.
@@ -702,4 +711,90 @@ export const stringToIPAddress = (s: string): IPAddressWire | undefined => {
     const parsed = parseIPAddress(s);
     if (!parsed.ok) return undefined;
     return { addr: s };
+};
+
+// Convert an IP bytes array to a BigInt.
+const bytesToBigInt = (bytes: number[]): bigint => {
+    let result = 0n;
+    for (const b of bytes) {
+        result = (result << 8n) | BigInt(b);
+    }
+    return result;
+};
+
+// Convert a BigInt back to a bytes array of the given length.
+const bigIntToBytes = (value: bigint, length: number): number[] => {
+    const bytes: number[] = new Array(length).fill(0);
+    for (let i = length - 1; i >= 0; i--) {
+        bytes[i] = Number(value & 0xffn);
+        value >>= 8n;
+    }
+    return bytes;
+};
+
+// Compute the last address of a prefix (addr | ~mask).
+const lastAddrOfPrefix = (addrBits: bigint, prefixLen: number, totalBits: number): bigint => {
+    const hostBits = totalBits - prefixLen;
+    const mask = hostBits >= totalBits ? 0n : (1n << BigInt(hostBits)) - 1n;
+    return addrBits | mask;
+};
+
+// Decompose an IP range into the minimal set of CIDR prefix strings.
+// Mirrors xnetip.RangeToCIDRs from the Go common library.
+// Returns [] for missing/invalid ranges or family-mismatched endpoints.
+export const ipRangeToCIDRs = (range: IPRangeWire | undefined): string[] => {
+    if (!range) return [];
+
+    const startStr = range.start ?? '';
+    const endStr = range.end ?? '';
+    if (!startStr || !endStr) return [];
+
+    const startBytes = parseIPToBytes(startStr);
+    const endBytes = parseIPToBytes(endStr);
+    if (!startBytes || !endBytes) return [];
+    if (startBytes.length !== endBytes.length) return [];
+
+    const totalBytes = startBytes.length;
+    const totalBits = totalBytes * 8;
+
+    let curr = bytesToBigInt(startBytes);
+    const to = bytesToBigInt(endBytes);
+    if (curr > to) return [];
+
+    const results: string[] = [];
+
+    while (curr <= to) {
+        let prefixLen = totalBits;
+
+        while (prefixLen > 0) {
+            // Try a larger block (one fewer prefix bit).
+            const candidate = prefixLen - 1;
+            const hostBits = totalBits - candidate;
+            // Check alignment: curr must be the network address for this prefix.
+            const alignMask = hostBits >= totalBits ? 0n : (1n << BigInt(hostBits)) - 1n;
+            if ((curr & alignMask) !== 0n) break;
+            // Check the block does not overshoot the end address.
+            if (lastAddrOfPrefix(curr, candidate, totalBits) > to) break;
+            prefixLen = candidate;
+        }
+
+        const addrStr = formatIPFromBytes(bigIntToBytes(curr, totalBytes));
+        results.push(`${addrStr}/${prefixLen}`);
+
+        const last = lastAddrOfPrefix(curr, prefixLen, totalBits);
+        if (last === to) break;
+        curr = last + 1n;
+    }
+
+    return results;
+};
+
+// Return the "[start, end]" string representation of an IP range.
+// Returns '' for missing or invalid ranges.
+export const ipRangeToString = (range: IPRangeWire | undefined): string => {
+    if (!range) return '';
+    const start = range.start ?? '';
+    const end = range.end ?? '';
+    if (!start || !end) return '';
+    return `[${start}, ${end}]`;
 };

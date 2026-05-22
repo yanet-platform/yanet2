@@ -17,7 +17,7 @@ prost = "0.13"
 tonic = { version = "0.13", features = ["gzip"] }
 tabled = { version = "0.18", features = ["ansi"] }
 serde = { version = "1", features = ["derive"] }
-netip = "0.2"
+netip = "0.3"
 serde_yaml = "0.9.34"
 
 [build-dependencies]

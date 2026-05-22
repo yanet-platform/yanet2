@@ -661,6 +661,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f"
 
 [[package]]
+name = "erased-serde"
+version = "0.4.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d2add8a07dd6a8d93ff627029c51de145e12686fbc36ecb298ac22e74cf02dec"
+dependencies = [
+ "serde",
+ "serde_core",
+ "typeid",
+]
+
+[[package]]
 name = "errno"
 version = "0.3.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1221,9 +1232,9 @@ checksum = "1d87ecb2933e8aeadb3e3a02b828fed80a7528047e68b4f424523a0981a3a084"
 
 [[package]]
 name = "netip"
-version = "0.2.0"
+version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3055e2b830c27116ba791de403649c192c4984a77e2f64d88660cfca248b4b69"
+checksum = "cff1fcab1e3a897063665edc7c11f1de7591aa92179994ca049b422db94a3001"
 
 [[package]]
 name = "no-std-net"
@@ -2468,6 +2479,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
+name = "typeid"
+version = "1.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bc7d623258602320d5c55d1bc22793b57daff0ec7efc270ea7d55ce1d5f5471c"
+
+[[package]]
 name = "typenum"
 version = "1.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3058,6 +3075,7 @@ dependencies = [
  "clap",
  "clap_complete",
  "colored",
+ "erased-serde",
  "http",
  "log",
  "serde",
@@ -3091,6 +3109,7 @@ dependencies = [
  "tonic",
  "tonic-build",
  "yanet-cli",
+ "yanet-commonpb",
  "yanet-filterpb",
 ]
 
@@ -3282,6 +3301,7 @@ dependencies = [
  "tonic",
  "tonic-build",
  "yanet-cli",
+ "yanet-commonpb",
 ]
 
 [[package]]
@@ -3319,6 +3339,7 @@ dependencies = [
  "tonic",
  "tonic-build",
  "yanet-cli",
+ "yanet-commonpb",
 ]
 
 [[package]]
@@ -3365,11 +3386,13 @@ dependencies = [
  "log",
  "netip",
  "prost",
+ "serde",
  "tabled",
  "tokio",
  "tonic",
  "tonic-build",
  "yanet-cli",
+ "yanet-commonpb",
 ]
 
 [[package]]
@@ -3451,12 +3474,14 @@ dependencies = [
  "tonic",
  "tonic-build",
  "yanet-cli",
+ "yanet-commonpb",
 ]
 
 [[package]]
 name = "yanet-commonpb"
 version = "0.1.0"
 dependencies = [
+ "netip",
  "prost",
  "serde",
  "tonic",

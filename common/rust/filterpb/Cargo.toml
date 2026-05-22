@@ -6,7 +6,7 @@ publish = false
 rust-version = "1.85"
 
 [dependencies]
-netip = "0.2"
+netip = "0.3"
 prost = "0.13"
 serde = { version = "1", features = ["derive"] }
 tonic = { version = "0.13", features = ["gzip"] }

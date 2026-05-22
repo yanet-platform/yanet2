@@ -213,7 +213,7 @@ impl RouteService {
         let entries: Vec<FibDisplayEntry> = response
             .entries
             .into_iter()
-            .flat_map(FibDisplayEntry::from_fib_entry)
+            .flat_map(FibDisplayEntry::from_range_entry)
             .collect();
 
         if entries.is_empty() {

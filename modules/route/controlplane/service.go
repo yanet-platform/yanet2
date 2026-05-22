@@ -9,7 +9,6 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/yanet-platform/yanet2/common/commonpb"
-	"github.com/yanet-platform/yanet2/common/go/xnetip"
 	"github.com/yanet-platform/yanet2/modules/route/bindings/go/croute"
 	"github.com/yanet-platform/yanet2/modules/route/controlplane/routepb"
 )
@@ -108,7 +107,7 @@ func (m *RouteService) ShowFIB(
 	}
 
 	response := &routepb.ShowFIBResponse{
-		Entries: make([]*routepb.FIBEntry, 0, len(entries)),
+		Entries: make([]*routepb.FIBRangeEntry, 0, len(entries)),
 	}
 	for _, e := range entries {
 		if req.GetIpv4Only() && e.AddressFamily != croute.AddressFamilyIPv4 {
@@ -127,20 +126,10 @@ func (m *RouteService) ShowFIB(
 			}
 		}
 
-		prefixes, ok := xnetip.RangeToCIDRs(e.PrefixFrom, e.PrefixTo)
-		if !ok {
-			m.log.Warn("skipping FIB entry with invalid address range",
-				zap.String("from", e.PrefixFrom.String()),
-				zap.String("to", e.PrefixTo.String()),
-			)
-			continue
-		}
-		for _, p := range prefixes {
-			response.Entries = append(response.Entries, &routepb.FIBEntry{
-				Prefix:   p.String(),
-				Nexthops: nexthops,
-			})
-		}
+		response.Entries = append(response.Entries, &routepb.FIBRangeEntry{
+			Range:    commonpb.NewIPRange(e.PrefixFrom, e.PrefixTo),
+			Nexthops: nexthops,
+		})
 	}
 	return response, nil
 }

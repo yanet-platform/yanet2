@@ -1,6 +1,6 @@
 import { createService, type CallOptions } from './client';
 import type { MACAddress } from './neighbours';
-import type { IPAddressWire } from '../utils/netip';
+import type { IPAddressWire, IPRangeWire } from '../utils/netip';
 
 // Route types
 
@@ -82,8 +82,13 @@ export interface ShowFIBRequest {
     ipv6_only?: boolean;
 }
 
+export interface FIBRangeEntry {
+    range?: IPRangeWire;
+    nexthops?: FIBNexthop[];
+}
+
 export interface ShowFIBResponse {
-    entries?: FIBEntry[];
+    entries?: FIBRangeEntry[];
 }
 
 export interface FIBEntry {

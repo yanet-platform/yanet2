@@ -222,6 +222,9 @@ Meson orchestrates C/DPDK builds and Go binary compilation (via `custom_target` 
 - **Comments**: English, end with period, fit within ~80 chars
   (reflow rather than preserving narrower fill). List only production
   callers, not "tests". No section-separator comments.
+- **Doc comments**: first line is a single-sentence brief ending with
+  period. If detail follows, separate with a blank `//` line, then the
+  body paragraph. Never glue brief and detail on consecutive `//` lines.
 - **Tests**: table-driven, use `require.NoError(t, err)`. Do not
   reference tests inside production-code comments.
 
@@ -251,6 +254,10 @@ Meson orchestrates C/DPDK builds and Go binary compilation (via `custom_target` 
   explicit `Result<(), fmt::Error>` (not `fmt::Result` alias).
 - **No doc comments** on `Display`/`Serialize`/`TryFrom`/`From`/`Debug`/
   `Default`/`FromStr` impls — the trait name is the doc.
+- **Doc-comment structure**: `///` / `//!` blocks lead with a
+  single-sentence brief ending with period. If detail follows, separate
+  with a blank `///` line, then the body paragraph. Never glue brief
+  and detail on consecutive `///` lines.
 - **No infallible `TryFrom`**: replace with `From`, or remove the impl
   if the call site is trivially inlinable.
 - **`assert_eq!` order**: expected first, actual second:

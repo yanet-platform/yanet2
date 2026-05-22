@@ -5,6 +5,8 @@ use core::{
     str::FromStr,
 };
 
+use netip::{Contiguous, IpNetwork, ipv4_range_to_networks, ipv6_range_to_networks};
+
 #[allow(clippy::all, non_snake_case)]
 pub mod pb {
     tonic::include_proto!("commonpb");
@@ -56,7 +58,7 @@ impl Display for pb::IpAddress {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), fmt::Error> {
         match IpAddr::try_from(self) {
             Ok(addr) => addr.fmt(f),
-            Err(_) => f.write_str("invalid"),
+            Err(..) => f.write_str("invalid"),
         }
     }
 }
@@ -67,6 +69,66 @@ impl FromStr for pb::IpAddress {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let addr = IpAddr::from_str(s)?;
         Ok(Self::from(addr))
+    }
+}
+
+impl From<(IpAddr, IpAddr)> for pb::IpRange {
+    fn from((start, end): (IpAddr, IpAddr)) -> Self {
+        pb::IpRange {
+            start: Some(pb::IpAddress::from(start)),
+            end: Some(pb::IpAddress::from(end)),
+        }
+    }
+}
+
+impl TryFrom<&pb::IpRange> for (IpAddr, IpAddr) {
+    type Error = Box<dyn Error>;
+
+    fn try_from(range: &pb::IpRange) -> Result<Self, Self::Error> {
+        let start = range.start.as_ref().ok_or("invalid IP range: missing start address")?;
+        let end = range.end.as_ref().ok_or("invalid IP range: missing end address")?;
+        let start = IpAddr::try_from(start)?;
+        let end = IpAddr::try_from(end)?;
+        if start.is_ipv4() != end.is_ipv4() {
+            return Err("invalid IP range: address family mismatch between start and end".into());
+        }
+
+        Ok((start, end))
+    }
+}
+
+impl Display for pb::IpRange {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), fmt::Error> {
+        match <(IpAddr, IpAddr)>::try_from(self) {
+            Ok((start, end)) => write!(f, "[{start}, {end}]"),
+            Err(..) => f.write_str("invalid"),
+        }
+    }
+}
+
+impl pb::IpRange {
+    /// Returns an iterator over the minimum set of CIDR blocks covering the
+    /// range.
+    ///
+    /// Each item is a `Contiguous<IpNetwork>` carrying the guarantee that the
+    /// prefix fits a contiguous slice of `[start, end]` — no non-contiguous
+    /// mask bits. On any conversion error (missing endpoint, family mismatch),
+    /// returns an empty iterator without panicking.
+    pub fn cidrs(&self) -> Box<dyn Iterator<Item = Contiguous<IpNetwork>> + '_> {
+        let (start, end) = match <(IpAddr, IpAddr)>::try_from(self) {
+            Ok(pair) => pair,
+            Err(..) => return Box::new(core::iter::empty()),
+        };
+
+        match (start, end) {
+            (IpAddr::V4(start), IpAddr::V4(end)) => {
+                Box::new(ipv4_range_to_networks(start, end).map(Contiguous::<IpNetwork>::from))
+            }
+            (IpAddr::V6(start), IpAddr::V6(end)) => {
+                Box::new(ipv6_range_to_networks(start, end).map(Contiguous::<IpNetwork>::from))
+            }
+            _ => Box::new(core::iter::empty()),
+        }
     }
 }
 
@@ -132,5 +194,88 @@ mod test {
     fn display_invalid_length() {
         let ip = pb::IpAddress { addr: vec![0u8; 5] };
         assert_eq!("invalid", ip.to_string());
+    }
+
+    #[test]
+    fn iprange_v4_round_trip() {
+        let start = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 0));
+        let end = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 255));
+        let range = pb::IpRange::from((start, end));
+        let (got_start, got_end) = <(IpAddr, IpAddr)>::try_from(&range).unwrap();
+        assert_eq!(start, got_start);
+        assert_eq!(end, got_end);
+    }
+
+    #[test]
+    fn iprange_v6_round_trip() {
+        let start = IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 0));
+        let end = IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1));
+        let range = pb::IpRange::from((start, end));
+        let (got_start, got_end) = <(IpAddr, IpAddr)>::try_from(&range).unwrap();
+        assert_eq!(start, got_start);
+        assert_eq!(end, got_end);
+    }
+
+    #[test]
+    fn iprange_try_from_rejects_family_mismatch() {
+        let start = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1));
+        let end = IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1));
+        let range = pb::IpRange {
+            start: Some(pb::IpAddress::from(start)),
+            end: Some(pb::IpAddress::from(end)),
+        };
+        assert!(<(IpAddr, IpAddr)>::try_from(&range).is_err());
+    }
+
+    #[test]
+    fn iprange_display_v4() {
+        let start = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 0));
+        let end = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 255));
+        let range = pb::IpRange::from((start, end));
+        assert_eq!("[10.0.0.0, 10.0.0.255]", range.to_string());
+    }
+
+    #[test]
+    fn iprange_display_v6() {
+        let start = IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 0));
+        let end = IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1));
+        let range = pb::IpRange::from((start, end));
+        assert_eq!("[2001:db8::, 2001:db8::1]", range.to_string());
+    }
+
+    #[test]
+    fn iprange_display_invalid() {
+        let range = pb::IpRange { start: None, end: None };
+        assert_eq!("invalid", range.to_string());
+    }
+
+    #[test]
+    fn iprange_cidrs_v4() {
+        let start = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 0));
+        let end = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 5));
+        let range = pb::IpRange::from((start, end));
+        let cidrs: Vec<String> = range.cidrs().map(|net| net.to_string()).collect();
+        assert_eq!(vec!["10.0.0.0/30", "10.0.0.4/31"], cidrs);
+    }
+
+    #[test]
+    fn iprange_cidrs_single() {
+        let addr = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1));
+        let range = pb::IpRange::from((addr, addr));
+        let cidrs: Vec<String> = range.cidrs().map(|net| net.to_string()).collect();
+        assert_eq!(1, cidrs.len());
+        assert_eq!("192.168.1.1/32", cidrs[0]);
+    }
+
+    #[test]
+    fn iprange_cidrs_invalid_family() {
+        let start = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1));
+        let end = IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1));
+        let range = pb::IpRange {
+            start: Some(pb::IpAddress::from(start)),
+            end: Some(pb::IpAddress::from(end)),
+        };
+        let cidrs: Vec<Contiguous<IpNetwork>> = range.cidrs().collect();
+        assert_eq!(0, cidrs.len());
     }
 }

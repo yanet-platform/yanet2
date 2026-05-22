@@ -28,18 +28,25 @@ pub struct FibDisplayEntry {
 }
 
 impl FibDisplayEntry {
-    /// Convert a FIBEntry proto message into one or more display
-    /// entries (one per nexthop for ECMP).
-    pub fn from_fib_entry(entry: routepb::FibEntry) -> Vec<Self> {
-        let prefix = entry.prefix;
-        entry
-            .nexthops
+    /// Convert a `FibRangeEntry` proto message into display rows.
+    ///
+    /// Emits one row per (CIDR, nexthop) pair. The CIDR list is produced by
+    /// decomposing the `range` field into the minimum set of covering
+    /// networks. Returns an empty `Vec` when `range` is absent or invalid.
+    pub fn from_range_entry(entry: routepb::FibRangeEntry) -> Vec<Self> {
+        let Some(range) = entry.range else {
+            return Vec::new();
+        };
+        let prefixes: Vec<String> = range.cidrs().map(|net| net.to_string()).collect();
+        prefixes
             .into_iter()
-            .map(|nh| FibDisplayEntry {
-                prefix: prefix.clone(),
-                dst_mac: format_mac(nh.dst_mac),
-                src_mac: format_mac(nh.src_mac),
-                device: nh.device,
+            .flat_map(|prefix| {
+                entry.nexthops.iter().map(move |nh| FibDisplayEntry {
+                    prefix: prefix.clone(),
+                    dst_mac: format_mac(nh.dst_mac),
+                    src_mac: format_mac(nh.src_mac),
+                    device: nh.device.clone(),
+                })
             })
             .collect()
     }

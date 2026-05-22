@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useReducer, useState } from 'react';
 import { API } from '../../../api';
 import { toaster } from '../../../utils';
-import type { FIBEntry, FIBNexthop } from '../../../api/routes';
+import type { FIBEntry, FIBNexthop, FIBRangeEntry } from '../../../api/routes';
+import { ipRangeToCIDRs } from '../../../utils/netip';
 import type { FIBRowItem } from './types';
 import { fibDraftReducer, initialFIBDraftState } from './fibDraftReducer';
 import type { FIBDraftAction } from './fibDraftReducer';
@@ -9,23 +10,25 @@ import type { FIBDraftAction } from './fibDraftReducer';
 let rowIdCounter = 0;
 const newRowId = (): string => `row-${++rowIdCounter}-${Date.now()}`;
 
-/** Flatten FIBEntry array into flat (prefix, nexthop) row items. */
-export const flattenFIBEntries = (entries: FIBEntry[]): FIBRowItem[] => {
+/** Flatten FIBRangeEntry array into flat (prefix, nexthop) row items. */
+export const flattenFIBEntries = (entries: FIBRangeEntry[]): FIBRowItem[] => {
     const rows: FIBRowItem[] = [];
     for (const entry of entries) {
-        const prefix = entry.prefix || '';
+        const cidrs = ipRangeToCIDRs(entry.range);
         const nexthops = entry.nexthops || [];
-        if (nexthops.length === 0) {
-            rows.push({ id: newRowId(), prefix, dst_mac: '', src_mac: '', device: '' });
-        } else {
-            for (const nh of nexthops) {
-                rows.push({
-                    id: newRowId(),
-                    prefix,
-                    dst_mac: nh.dst_mac?.addr || '',
-                    src_mac: nh.src_mac?.addr || '',
-                    device: nh.device || '',
-                });
+        for (const prefix of cidrs) {
+            if (nexthops.length === 0) {
+                rows.push({ id: newRowId(), prefix, dst_mac: '', src_mac: '', device: '' });
+            } else {
+                for (const nh of nexthops) {
+                    rows.push({
+                        id: newRowId(),
+                        prefix,
+                        dst_mac: nh.dst_mac?.addr || '',
+                        src_mac: nh.src_mac?.addr || '',
+                        device: nh.device || '',
+                    });
+                }
             }
         }
     }
