@@ -133,6 +133,11 @@ const VirtualRow: React.FC<VirtualRowProps> = memo(({
                     items={expanded.sourceCidrs}
                     isAny={expanded.isAnySrc}
                     renderChip={(cidr, idx) => <IpNetChip key={idx} cidr={cidr} />}
+                    label="sources"
+                    inline={2}
+                    summarizeAt={4}
+                    summaryKind="cidr"
+                    getItemText={(cidr) => cidr}
                 />
             </div>
 
@@ -141,6 +146,11 @@ const VirtualRow: React.FC<VirtualRowProps> = memo(({
                     items={expanded.dstCidrs}
                     isAny={expanded.isAnyDst}
                     renderChip={(cidr, idx) => <IpNetChip key={idx} cidr={cidr} />}
+                    label="destinations"
+                    inline={2}
+                    summarizeAt={4}
+                    summaryKind="cidr"
+                    getItemText={(cidr) => cidr}
                 />
             </div>
 
@@ -150,6 +160,9 @@ const VirtualRow: React.FC<VirtualRowProps> = memo(({
                     : <ChipList
                         items={expanded.srcPortRanges}
                         renderChip={(r, idx) => <PortRangeChip key={idx} rangeStr={r} />}
+                        label="port ranges"
+                        inline={2}
+                        summarizeAt={4}
                     />
                 }
             </div>
@@ -160,6 +173,9 @@ const VirtualRow: React.FC<VirtualRowProps> = memo(({
                     : <ChipList
                         items={expanded.dstPortRanges}
                         renderChip={(r, idx) => <PortRangeChip key={idx} rangeStr={r} />}
+                        label="port ranges"
+                        inline={2}
+                        summarizeAt={4}
                     />
                 }
             </div>
@@ -167,9 +183,12 @@ const VirtualRow: React.FC<VirtualRowProps> = memo(({
             <div style={cellStyle('protos')}>
                 <ChipList
                     items={expanded.protoRanges}
-                    isAny={expanded.protoRanges.length === 0}
+                    isAny={expanded.isAnyProto}
                     anyLabel="any"
                     renderChip={(r, idx) => <ProtoChip key={idx} rangeStr={r} />}
+                    label="protocols"
+                    inline={2}
+                    summarizeAt={4}
                 />
             </div>
 
@@ -179,6 +198,9 @@ const VirtualRow: React.FC<VirtualRowProps> = memo(({
                     : <ChipList
                         items={expanded.vlanRanges}
                         renderChip={(r, idx) => <VlanRangeChip key={idx} rangeStr={r} />}
+                        label="VLAN ranges"
+                        inline={2}
+                        summarizeAt={4}
                     />
                 }
             </div>
@@ -191,6 +213,9 @@ const VirtualRow: React.FC<VirtualRowProps> = memo(({
                         renderChip={(d, idx) => (
                             <span key={idx} className="acl-chip acl-chip--device" title={d}>{d}</span>
                         )}
+                        label="devices"
+                        inline={1}
+                        summarizeAt={3}
                     />
                 }
             </div>

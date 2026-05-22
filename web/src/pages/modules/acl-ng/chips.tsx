@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { Action } from '../../../api/acl-ng';
 import { ActionKind, ACTION_KIND_LABELS } from '../../../api/acl-ng';
-import { formatIPNet } from '../../../utils';
+import { formatIPNet, toaster, copyToClipboard } from '../../../utils';
 import { extractBytes } from './utils';
 
 // Protocol names per IANA IP protocol number.
@@ -138,31 +139,265 @@ export const formatIPNetChip = (net: { addr?: string | Uint8Array | number[]; ma
     return formatIPNet(addrBytes, maskBytes);
 };
 
+interface ChipListModalProps<T> {
+    items: T[];
+    renderChip: (item: T, idx: number) => React.ReactNode;
+    label: string;
+    getItemText: (item: T) => string;
+    onClose: () => void;
+}
+
+/** Full-list modal for a ChipList overflow, rendered via a portal onto document.body. */
+const ChipListModal = <T,>({
+    items,
+    renderChip,
+    label,
+    getItemText,
+    onClose,
+}: ChipListModalProps<T>): React.ReactElement => {
+    const [query, setQuery] = useState('');
+    const searchRef = useRef<HTMLInputElement | null>(null);
+
+    const queryLower = query.trim().toLowerCase();
+    const filtered = queryLower
+        ? items.filter(item => getItemText(item).toLowerCase().includes(queryLower))
+        : items;
+
+    // Compute v4/v6 stats for CIDR-style items (heuristic: any item containing ':').
+    const isCidr = items.length > 0 && items.some(item => getItemText(item).includes('/'));
+    let statsText: string;
+    if (isCidr) {
+        let v4 = 0;
+        let v6 = 0;
+        for (const item of items) {
+            if (getItemText(item).includes(':')) v6++;
+            else v4++;
+        }
+        statsText = `${items.length} total · ${v4} v4 · ${v6} v6`;
+    } else {
+        statsText = `${items.length} ${label}`;
+    }
+
+    const handleBackdropClick = useCallback((e: React.MouseEvent<HTMLDivElement>): void => {
+        if (e.target === e.currentTarget) onClose();
+    }, [onClose]);
+
+    const handleCopyAll = useCallback((): void => {
+        const text = items.map(item => getItemText(item)).join('\n');
+        copyToClipboard(text)
+            .then(() => toaster.success('acl-ng-chip-copy', 'Copied.'))
+            .catch((err) => toaster.error('acl-ng-chip-copy', 'Copy failed.', err));
+    }, [items, getItemText]);
+
+    useEffect(() => {
+        const onKey = (e: KeyboardEvent): void => {
+            if (e.key === 'Escape') onClose();
+        };
+        document.addEventListener('keydown', onKey);
+        return () => document.removeEventListener('keydown', onKey);
+    }, [onClose]);
+
+    const modal = (
+        <div className="fw-modal-backdrop acl-chip-modal-backdrop" onClick={handleBackdropClick}>
+            <div
+                className="fw-modal"
+                style={{ maxWidth: 560, maxHeight: '70vh', display: 'flex', flexDirection: 'column' }}
+                onClick={(e) => e.stopPropagation()}
+            >
+                <header className="fw-modal__head" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 4 }}>
+                    <div style={{ display: 'flex', width: '100%', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <span className="fw-modal__title" style={{ textTransform: 'capitalize' }}>{label}</span>
+                        <button type="button" className="fw-icon-btn" onClick={onClose} aria-label="Close">✕</button>
+                    </div>
+                    <span className="fw-modal__meta">{statsText}</span>
+                </header>
+
+                <div className="fw-modal__body" style={{ gap: 8 }}>
+                    <input
+                        ref={searchRef}
+                        autoFocus
+                        type="text"
+                        className="acl-chip-modal-search"
+                        placeholder={`Filter ${items.length} ${label}…`}
+                        value={query}
+                        onChange={(e) => setQuery(e.target.value)}
+                    />
+
+                    {filtered.length === 0 ? (
+                        <div style={{
+                            flex: 1,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            color: 'var(--fw-text-3)',
+                            fontSize: 13,
+                            minHeight: 80,
+                            border: '1px solid var(--fw-line)',
+                            borderRadius: 6,
+                        }}>
+                            No matches.
+                        </div>
+                    ) : (
+                        <div style={{
+                            flex: 1,
+                            overflow: 'auto',
+                            display: 'flex',
+                            flexWrap: 'wrap',
+                            gap: 6,
+                            padding: 8,
+                            alignContent: 'flex-start',
+                            border: '1px solid var(--fw-line)',
+                            borderRadius: 6,
+                            background: 'var(--fw-bg-2)',
+                        }}>
+                            {filtered.map((item, idx) => renderChip(item, idx))}
+                        </div>
+                    )}
+                </div>
+
+                <footer className="fw-modal__foot">
+                    <span className="fw-modal__foot-hint">
+                        Showing {filtered.length} of {items.length}
+                    </span>
+                    <div className="fw-modal__foot-actions">
+                        <button
+                            type="button"
+                            className="fw-btn fw-btn--ghost fw-btn--sm"
+                            onClick={handleCopyAll}
+                        >
+                            Copy all
+                        </button>
+                        <button
+                            type="button"
+                            className="fw-btn fw-btn--primary fw-btn--sm"
+                            onClick={onClose}
+                        >
+                            Close
+                        </button>
+                    </div>
+                </footer>
+            </div>
+        </div>
+    );
+
+    return createPortal(modal, document.body) as React.ReactElement;
+};
+
 interface ChipListProps<T> {
     items: T[];
     renderChip: (item: T, idx: number) => React.ReactNode;
     anyLabel?: string;
     isAny?: boolean;
-    maxVisible?: number;
+    /** Number of chips shown inline before the +N overflow button appears (Mode A). Default 2. */
+    inline?: number;
+    /** Item count at which Mode B (single summary chip) kicks in instead of Mode A. Default 4. */
+    summarizeAt?: number;
+    /** Controls summary chip text format: 'cidr' uses v4/v6 split, 'generic' uses label. Default 'generic'. */
+    summaryKind?: 'cidr' | 'generic';
+    label?: string;
+    getItemText?: (item: T) => string;
 }
 
-/** Renders up to maxVisible chips inline, then "+N" overflow indicator. */
+/** Renders chips in one of three modes:
+ * - isAny / empty: single "any" chip.
+ * - items.length <= summarizeAt: first `inline` chips + optional +N overflow button (Mode A).
+ * - items.length > summarizeAt: single summary chip that opens the modal (Mode B).
+ */
 export const ChipList = <T,>({
     items,
     renderChip,
     anyLabel = 'any',
     isAny = false,
-    maxVisible = 3,
+    inline = 2,
+    summarizeAt = 4,
+    summaryKind = 'generic',
+    label = 'items',
+    getItemText,
 }: ChipListProps<T>): React.ReactElement => {
+    const [modalOpen, setModalOpen] = useState(false);
+
+    const resolvedGetItemText = useCallback((item: T): string => {
+        if (getItemText) return getItemText(item);
+        return String(item);
+    }, [getItemText]);
+
+    const handleOverflowClick = useCallback((e: React.MouseEvent): void => {
+        e.stopPropagation();
+        setModalOpen(true);
+    }, []);
+
+    const handleModalClose = useCallback((): void => {
+        setModalOpen(false);
+    }, []);
+
     if (isAny || items.length === 0) {
         return <AnyChip>{anyLabel}</AnyChip>;
     }
-    const visible = items.slice(0, maxVisible);
+
+    // Mode B: large list — single summary chip opens the modal.
+    if (items.length > summarizeAt) {
+        let summaryLabel: string;
+        if (summaryKind === 'cidr') {
+            let v4 = 0;
+            let v6 = 0;
+            for (const it of items) {
+                if (resolvedGetItemText(it).includes(':')) v6++;
+                else v4++;
+            }
+            if (v4 && v6) summaryLabel = `${items.length} CIDRs · v4·${v4} v6·${v6}`;
+            else if (v6) summaryLabel = `${items.length} v6 CIDRs`;
+            else summaryLabel = `${items.length} v4 CIDRs`;
+        } else {
+            summaryLabel = `${items.length} ${label}`;
+        }
+        return (
+            <span className="acl-chip-list">
+                <button
+                    type="button"
+                    className="acl-chip acl-chip--summary acl-chip--trigger"
+                    onClick={handleOverflowClick}
+                    title="Show full list"
+                >
+                    {summaryLabel}
+                </button>
+                {modalOpen && (
+                    <ChipListModal
+                        items={items}
+                        renderChip={renderChip}
+                        label={label}
+                        getItemText={resolvedGetItemText}
+                        onClose={handleModalClose}
+                    />
+                )}
+            </span>
+        );
+    }
+
+    // Mode A: small list — render first `inline` chips + optional +N overflow.
+    const visible = items.slice(0, inline);
     const rest = items.length - visible.length;
     return (
         <span className="acl-chip-list" title={String(items)}>
             {visible.map((item, idx) => renderChip(item, idx))}
-            {rest > 0 && <span className="acl-chip acl-chip--overflow">+{rest}</span>}
+            {rest > 0 && (
+                <button
+                    type="button"
+                    className="acl-chip acl-chip--overflow acl-chip--trigger"
+                    onClick={handleOverflowClick}
+                    title="Show all"
+                >
+                    +{rest}
+                </button>
+            )}
+            {modalOpen && (
+                <ChipListModal
+                    items={items}
+                    renderChip={renderChip}
+                    label={label}
+                    getItemText={resolvedGetItemText}
+                    onClose={handleModalClose}
+                />
+            )}
         </span>
     );
 };

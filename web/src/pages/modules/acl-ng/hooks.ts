@@ -39,6 +39,12 @@ const coversAllPorts = (ranges: PortRange[]): boolean => {
     return ranges.some(r => (r.from ?? 0) === 0 && (r.to ?? 0) >= 65535);
 };
 
+/** Returns true when proto ranges cover the full 0-65535 encoded domain. */
+const coversAllProtos = (ranges: ProtoRange[]): boolean => {
+    if (ranges.length === 0) return true;
+    return ranges.some(r => (r.from ?? 0) === 0 && (r.to ?? 0) >= 65535);
+};
+
 /** Returns true when VLAN ranges cover the full 0-4095 domain. */
 const coversAllVlans = (ranges: VlanRange[]): boolean => {
     if (ranges.length === 0) return true;
@@ -62,6 +68,7 @@ export const expandRule = (rule: Rule): {
     dstPortRanges: string[];
     isAnyDstPort: boolean;
     protoRanges: string[];
+    isAnyProto: boolean;
     vlanRanges: string[];
     isAnyVlan: boolean;
     deviceNames: string[];
@@ -84,6 +91,7 @@ export const expandRule = (rule: Rule): {
         dstPortRanges,
         isAnyDstPort: coversAllPorts(rule.dst_port_ranges ?? []),
         protoRanges,
+        isAnyProto: coversAllProtos(rule.proto_ranges ?? []),
         vlanRanges,
         isAnyVlan: coversAllVlans(rule.vlan_ranges ?? []),
         deviceNames,
