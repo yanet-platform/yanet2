@@ -91,3 +91,77 @@ func NewSessionTable(agent *ffi.Agent, capacity uint64) (*SessionTable, error) {
 func NewSessionTableChain(agent *ffi.Agent, front *SessionTable) (*SessionTableChain, error) {
 	return createSessionTableChain(agent, front)
 }
+
+// ParseCommonCounter decodes a raw counter row into a CommonCounter. Returns
+// nil if the row's length does not match the dataplane counter layout.
+func ParseCommonCounter(counter []uint64) *CommonCounter {
+	if len(counter) != 8 {
+		return nil
+	}
+	return &CommonCounter{
+		IncomingPackets:          counter[0],
+		IncomingBytes:            counter[1],
+		UnexpectedNetworkProto:   counter[2],
+		UnexpectedTransportProto: counter[3],
+		DecapSuccessful:          counter[4],
+		DecapFailed:              counter[5],
+		OutgoingPackets:          counter[6],
+		OutgoingBytes:            counter[7],
+	}
+}
+
+// ParseL4Counter decodes a raw counter row into an L4Counter. Returns nil if
+// the row's length does not match the dataplane counter layout.
+func ParseL4Counter(counter []uint64) *L4Counter {
+	if len(counter) != 5 {
+		return nil
+	}
+	return &L4Counter{
+		IncomingPackets:  counter[0],
+		SelectVsFailed:   counter[1],
+		TunnelFailed:     counter[2],
+		SelectRealFailed: counter[3],
+		OutgoingPackets:  counter[4],
+	}
+}
+
+// ParseVsCounter decodes a raw counter row into a VsCounter. Returns nil if
+// the row's length does not match the dataplane counter layout.
+func ParseVsCounter(counter []uint64) *VsCounter {
+	if len(counter) != 16 {
+		return nil
+	}
+	return &VsCounter{
+		IncomingPackets:        counter[0],
+		IncomingBytes:          counter[1],
+		PacketSrcNotAllowed:    counter[2],
+		NoReals:                counter[3],
+		SessionTableOverflow:   counter[4],
+		EchoIcmpPackets:        counter[5],
+		ErrorIcmpPackets:       counter[6],
+		RealIsDisabled:         counter[7],
+		RealIsRemoved:          counter[8],
+		NotRescheduledPackets:  counter[9],
+		BroadcastedIcmpPackets: counter[10],
+		CreatedSessions:        counter[11],
+		OutgoingPackets:        counter[12],
+		MssMalformedPacket:     counter[13],
+		MssNoHeadroom:          counter[14],
+		OutgoingBytes:          counter[15],
+	}
+}
+
+// ParseRealCounter decodes a raw counter row into a RealCounter. Returns nil
+// if the row's length does not match the dataplane counter layout.
+func ParseRealCounter(counter []uint64) *RealCounter {
+	if len(counter) != 5 {
+		return nil
+	}
+	return &RealCounter{
+		PacketsRealDisabled: counter[0],
+		ErrorIcmpPackets:    counter[1],
+		CreatedSessions:     counter[2],
+		Packets:             counter[3],
+		Bytes:               counter[4],
+	}
+}

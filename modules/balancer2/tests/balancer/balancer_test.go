@@ -181,4 +181,12 @@ func TestBasic(t *testing.T) {
 	assert.NoError(t, err, "failed to handle packets")
 	assert.Equal(t, 1, len(result.Output), err, "no output packets")
 	assert.True(t, result.Output[0].IsTunneled, "result packet is not tunneled")
+
+	states := balancer.GetState(nil, nil)
+	assert.Equal(t, 1, len(states))
+	state := states[0]
+	assert.Equal(t, uint64(1), state.Vs[0].Reals[0].Stats.Packets)
+	assert.Equal(t, uint64(1), state.Vs[0].Stats.CreatedSessions)
+	assert.Equal(t, uint64(1), state.Vs[0].AllowedSourcesStats[0].Passes)
+	assert.Equal(t, "123", state.Vs[0].AllowedSourcesStats[0].Tag)
 }

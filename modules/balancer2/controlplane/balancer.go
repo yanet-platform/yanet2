@@ -305,3 +305,57 @@ func makeRealID(id *balancerpb.RelativeRealIdentifier) (realID, error) {
 	// real ports not used for now
 	return realID{addr: addr}, nil
 }
+
+func (m *ModuleConfig) GetState(
+	handleRef *balancerpb.PacketHandlerRef,
+	filter *balancerpb.Filter,
+) []*balancerpb.BalancerState {
+	dpConfig := m.agent.DPConfig()
+
+	matcher := newStateFilter(filter)
+
+	states := make([]*balancerpb.BalancerState, 0)
+	for position := range dpConfig.AllModulePositions("balancer2") {
+		if position.ModuleName != m.name {
+			continue
+		}
+		if !matchesHandlerRef(handleRef, &position) {
+			continue
+		}
+
+		state, lookup := m.buildBaseState(&position, matcher)
+		counters := dpConfig.ModuleCounters(
+			position.Device,
+			position.Pipeline,
+			position.Function,
+			position.Chain,
+			"balancer2",
+			m.name,
+			nil,
+		)
+		for _, counter := range counters {
+			applyCounter(state, lookup, counter)
+		}
+		states = append(states, state)
+	}
+	return states
+}
+
+func matchesHandlerRef(ref *balancerpb.PacketHandlerRef, module *ffi.ModuleReference) bool {
+	if ref == nil {
+		return true
+	}
+	if ref.Device != nil && *ref.Device != module.Device {
+		return false
+	}
+	if ref.Pipeline != nil && *ref.Pipeline != module.Pipeline {
+		return false
+	}
+	if ref.Function != nil && *ref.Function != module.Function {
+		return false
+	}
+	if ref.Chain != nil && *ref.Chain != module.Chain {
+		return false
+	}
+	return true
+}

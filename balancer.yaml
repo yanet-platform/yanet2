@@ -15,26 +15,26 @@ vs:
       - weight: 1
         ip: "2a02:6b8:c0e:1003:0:675:a15a:3314"
         port: 0
-        src: "2a02:6b8:6666::/ffff:ffff:ffff:ffff::"
+        src: "2a02:6b8:6666::/64"
       - weight: 1
         ip: "2a02:6b8:c0e:1003:0:675:a15a:3ca0"
-        src: "2a02:6b8:6666::/ffff:ffff:ffff:ffff::"
+        src: "2a02:6b8:6666::/64"
         port: 0
       - weight: 1
         ip: "2a02:6b8:c0e:1003:0:675:a15a:4174"
-        src: "2a02:6b8:6666::/ffff:ffff:ffff:ffff::"
+        src: "2a02:6b8:6666::/64"
         port: 0
       - weight: 1
         ip: "2a02:6b8:c0e:1003:0:675:a15a:4bb8"
-        src: "2a02:6b8:6666::/ffff:ffff:ffff:ffff::"
+        src: "2a02:6b8:6666::/64"
         port: 0
       - weight: 1
         ip: "2a02:6b8:c0e:1003:0:675:a15a:4d6c"
-        src: "2a02:6b8:6666::/ffff:ffff:ffff:ffff::"
+        src: "2a02:6b8:6666::/64"
         port: 0
       - weight: 1
         ip: "2a02:6b8:c0e:1003:0:675:a160:e98"
-        src: "2a02:6b8:6666::/ffff:ffff:ffff:ffff::"
+        src: "2a02:6b8:6666::/64"
         port: 0
     peers: []
 
@@ -53,11 +53,11 @@ vs:
     reals:
       - weight: 1
         ip: "2a02:6b8:c0e:1003:0:675:a15a:3314"
-        src: "2a02:6b8:6666::/ffff:ffff:ffff:ffff::"
+        src: "2a02:6b8:6666::/64"
         port: 0
       - weight: 1
         ip: "2a02:6b8:c0e:1003:0:675:a15a:3ca0"
-        src: "2a02:6b8:6666::/ffff:ffff:ffff:ffff::"
+        src: "2a02:6b8:6666::/64"
         port: 0
       - weight: 1
         ip: "2a02:6b8:c0e:1003:0:675:a15a:4174"

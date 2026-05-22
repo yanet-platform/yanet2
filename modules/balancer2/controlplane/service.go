@@ -310,3 +310,23 @@ func (m *Service) ListSessionsStates(
 	sort.Strings(names)
 	return &balancerpb.ListSessionsStatesResponse{Names: names}, nil
 }
+
+func (m *Service) GetState(ctx context.Context, req *balancerpb.GetStateRequest) (*balancerpb.GetStateResponse, error) {
+	name := req.GetConfigName()
+	if name == "" {
+		return nil, errSessionsStateNameRequired
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	mc, ok := m.moduleConfigs[name]
+	if !ok {
+		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
+	}
+
+	states := mc.GetState(req.GetPacketHandlerRef(), req.GetFilter())
+	return &balancerpb.GetStateResponse{
+		States: states,
+	}, nil
+}
