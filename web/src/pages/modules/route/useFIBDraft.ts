@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useReducer, useState } from 'react';
+import { useCallback } from 'react';
 import { API } from '../../../api';
-import { toaster } from '../../../utils';
 import type { FIBEntry, FIBNexthop, FIBRangeEntry } from '../../../api/routes';
 import { ipRangeToCIDRs } from '../../../utils/netip';
 import type { FIBRowItem } from './types';
 import { fibDraftReducer, initialFIBDraftState } from './fibDraftReducer';
-import type { FIBDraftAction } from './fibDraftReducer';
+import { useDraft } from '../../_shared/draft';
+import type { UseDraftResult } from '../../_shared/draft';
 
 let rowIdCounter = 0;
 const newRowId = (): string => `row-${++rowIdCounter}-${Date.now()}`;
@@ -54,20 +54,7 @@ export const rowsToFIBEntries = (rows: FIBRowItem[]): FIBEntry[] => {
     return entries;
 };
 
-const EMPTY_ROWS: FIBRowItem[] = [];
-
-export interface UseFIBDraftResult {
-    draftConfigs: string[];
-    loading: boolean;
-    draftRows: (configName: string) => FIBRowItem[];
-    serverRows: (configName: string) => FIBRowItem[];
-    isDirty: (configName: string) => boolean;
-    anyDirty: boolean;
-    dispatchDraft: (action: FIBDraftAction) => void;
-    commitConfig: (configName: string) => Promise<void>;
-    discardConfig: (configName: string) => void;
-    newRowId: () => string;
-}
+export type UseFIBDraftResult = UseDraftResult<FIBRowItem>;
 
 /**
  * Wraps FIB config data with a local-draft layer.
@@ -78,85 +65,32 @@ export interface UseFIBDraftResult {
  * and the local server snapshot is updated so dirty clears.
  */
 export const useFIBDraft = (): UseFIBDraftResult => {
-    const [state, rawDispatch] = useReducer(fibDraftReducer, initialFIBDraftState);
-    const [loading, setLoading] = useState(true);
-
-    const dispatchDraft = useCallback((action: FIBDraftAction): void => {
-        rawDispatch(action);
+    const load = useCallback(async (): Promise<Array<{ name: string; rows: FIBRowItem[] }>> => {
+        const configsResp = await API.route.listConfigs();
+        const configNames = configsResp.configs ?? [];
+        return Promise.all(
+            configNames.map(async (name): Promise<{ name: string; rows: FIBRowItem[] }> => {
+                try {
+                    const fibResp = await API.route.showFIB({ name });
+                    return { name, rows: flattenFIBEntries(fibResp.entries ?? []) };
+                } catch {
+                    return { name, rows: [] };
+                }
+            }),
+        );
     }, []);
 
-    const load = useCallback(async (): Promise<void> => {
-        setLoading(true);
-        try {
-            const configsResp = await API.route.listConfigs();
-            const configNames = configsResp.configs ?? [];
-
-            const configs = await Promise.all(
-                configNames.map(async (name): Promise<{ name: string; rows: FIBRowItem[] }> => {
-                    try {
-                        const fibResp = await API.route.showFIB({ name });
-                        return { name, rows: flattenFIBEntries(fibResp.entries ?? []) };
-                    } catch {
-                        return { name, rows: [] };
-                    }
-                }),
-            );
-
-            rawDispatch({ type: 'LOAD_ALL_CONFIGS', configs });
-        } catch (err) {
-            toaster.error('fib-draft-load', 'Failed to load FIB configurations', err);
-        } finally {
-            setLoading(false);
-        }
+    const commit = useCallback(async (configName: string, draftRows: FIBRowItem[]): Promise<void> => {
+        const entries = rowsToFIBEntries(draftRows);
+        await API.route.updateFIB({ module_name: configName, entries });
     }, []);
 
-    useEffect(() => {
-        load();
-    }, [load]);
-
-    const commitConfig = useCallback(async (configName: string): Promise<void> => {
-        const rows = state.draft[configName] ?? [];
-        const entries = rowsToFIBEntries(rows);
-        try {
-            await API.route.updateFIB({ module_name: configName, entries });
-            rawDispatch({ type: 'MARK_COMMITTED', configName });
-            toaster.success(`fib-commit-${configName}`, `FIB "${configName}" committed.`);
-        } catch (err) {
-            toaster.error(`fib-commit-err-${configName}`, `Failed to commit "${configName}"`, err);
-            throw err;
-        }
-    }, [state.draft]);
-
-    const discardConfig = useCallback((configName: string): void => {
-        rawDispatch({ type: 'DISCARD_CONFIG', configName });
-    }, []);
-
-    const draftRowsFor = useCallback((configName: string): FIBRowItem[] =>
-        state.draft[configName] ?? EMPTY_ROWS, [state.draft]);
-
-    const serverRowsFor = useCallback((configName: string): FIBRowItem[] =>
-        state.server[configName] ?? EMPTY_ROWS, [state.server]);
-
-    const isDirty = useCallback((configName: string): boolean =>
-        state.dirty.has(configName), [state.dirty]);
-
-    const draftConfigs = [
-        ...state.serverConfigs,
-        ...state.localOnlyConfigs,
-    ];
-
-    const anyDirty = state.dirty.size > 0;
-
-    return {
-        draftConfigs,
-        loading,
-        draftRows: draftRowsFor,
-        serverRows: serverRowsFor,
-        isDirty,
-        anyDirty,
-        dispatchDraft,
-        commitConfig,
-        discardConfig,
-        newRowId: newRowId,
-    };
+    return useDraft<FIBRowItem>({
+        load,
+        commit,
+        reducer: fibDraftReducer,
+        initialState: initialFIBDraftState,
+        toastSubject: 'fib',
+        errorSubject: 'FIB',
+    });
 };

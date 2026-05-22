@@ -1,27 +1,13 @@
 import React, { useCallback, useMemo, useRef, useState, useEffect, memo } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { Checkbox, Icon } from '@gravity-ui/uikit';
-import { ArrowUturnCcwLeft } from '@gravity-ui/icons';
+import { Checkbox } from '@gravity-ui/uikit';
 import type { RuleItem } from './types';
 import type { RuleRate } from './useForwardRuleCounters';
 import DirectionBadge from './DirectionBadge';
 import AnyBadge from './AnyBadge';
 import Sparkline from './Sparkline';
 import { formatPps } from '../../../utils';
-
-/** Save / floppy disk icon. */
-const SaveIcon = (): React.JSX.Element => (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <path d="M5 5h11l3 3v11H5zM8 5v5h7V5M8 14h8v5H8z" />
-    </svg>
-);
-
-/** Trash / delete icon. */
-const TrashIcon = (): React.JSX.Element => (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <path d="M5 7h14M9 7V5h6v2M7 7l1 12h8l1-12" />
-    </svg>
-);
+import { DraftActionButtons } from '../../_shared/draft';
 
 /** Duration in ms of the CSS transition on .fw-drawer — keep in sync with SCSS. */
 const DRAWER_TRANSITION_MS = 220;
@@ -403,38 +389,12 @@ const RuleTable: React.FC<RuleTableProps> = ({
                         <span className="fw-th-text">pps</span>
                     </div>
                 </div>
-                <div className="fw-tbl-actions">
-                    {currentIsDirty && (
-                        <button
-                            type="button"
-                            className="fw-tbl-action-btn fw-tbl-action-btn--discard"
-                            title="Discard changes"
-                            aria-label="Discard local changes"
-                            onClick={onDiscard}
-                        >
-                            <Icon data={ArrowUturnCcwLeft} size={16} />
-                        </button>
-                    )}
-                    <button
-                        type="button"
-                        className="fw-tbl-action-btn fw-tbl-action-btn--save"
-                        title={currentIsDirty ? 'Review & apply' : 'No changes to save'}
-                        aria-label="Review and apply changes"
-                        disabled={!currentIsDirty}
-                        onClick={onSave}
-                    >
-                        <SaveIcon />
-                    </button>
-                    <button
-                        type="button"
-                        className="fw-tbl-action-btn fw-tbl-action-btn--delete"
-                        title="Delete config"
-                        aria-label="Delete config"
-                        onClick={onDeleteConfig}
-                    >
-                        <TrashIcon />
-                    </button>
-                </div>
+                <DraftActionButtons
+                    currentIsDirty={currentIsDirty}
+                    onSave={onSave}
+                    onDiscard={onDiscard}
+                    onDeleteConfig={onDeleteConfig}
+                />
             </div>
 
             {/* Virtualized scroll body */}

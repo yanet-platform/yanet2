@@ -14,6 +14,7 @@ import type { RuleDrawerHandle } from './RuleDrawer';
 import YamlIO from './YamlIO';
 import { SaveDiffModal } from './SaveDiffModal';
 import { useForwardRuleCounters } from './useForwardRuleCounters';
+import { AddConfigModal, DeleteConfigModal, BulkDeleteModal } from '../../_shared/draft';
 import '../../../styles/draft-page.scss';
 import './forward.scss';
 
@@ -42,7 +43,6 @@ const ForwardPage: React.FC = () => {
     });
     const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
     const [addConfigOpen, setAddConfigOpen] = useState(false);
-    const [newConfigName, setNewConfigName] = useState('');
     const [deleteConfigOpen, setDeleteConfigOpen] = useState(false);
     const [diffModalOpen, setDiffModalOpen] = useState(false);
     const searchRef = useRef<HTMLInputElement>(null);
@@ -128,15 +128,6 @@ const ForwardPage: React.FC = () => {
         setSelectedIds(new Set());
         setDeleteConfirmOpen(false);
     }, [selectedIds, visibleItems, currentConfig, dispatchDraft]);
-
-    const handleAddConfig = useCallback((): void => {
-        const name = newConfigName.trim();
-        if (!name || draftConfigs.includes(name)) return;
-        dispatchDraft({ type: 'ADD_CONFIG', configName: name });
-        setActiveConfig(name);
-        setNewConfigName('');
-        setAddConfigOpen(false);
-    }, [newConfigName, draftConfigs, dispatchDraft]);
 
     const handleDeleteConfig = useCallback((): void => {
         dispatchDraft({ type: 'DELETE_CONFIG', configName: currentConfig });
@@ -233,7 +224,7 @@ const ForwardPage: React.FC = () => {
                         <div className="fw-empty-page__message">
                             No forward configurations found.
                         </div>
-                        <Button view="action" onClick={() => { setNewConfigName(''); setAddConfigOpen(true); }}>
+                        <Button view="action" onClick={() => setAddConfigOpen(true)}>
                             Add Config
                         </Button>
                     </div>
@@ -249,7 +240,7 @@ const ForwardPage: React.FC = () => {
                                 setSelectedIds(new Set());
                                 setActiveRowId(null);
                             }}
-                            onAddConfig={() => { setNewConfigName(''); setAddConfigOpen(true); }}
+                            onAddConfig={() => setAddConfigOpen(true)}
                         />
 
                         <div className="fw-content">
@@ -278,96 +269,33 @@ const ForwardPage: React.FC = () => {
                     />
                 )}
 
-                {deleteConfirmOpen && (
-                    <div className="fw-modal-backdrop" onClick={() => setDeleteConfirmOpen(false)}>
-                        <div className="fw-modal fw-modal--sm" onClick={(e) => e.stopPropagation()}>
-                            <header className="fw-modal__head">
-                                <span className="fw-modal__title">Delete rules</span>
-                                <button type="button" className="fw-icon-btn" onClick={() => setDeleteConfirmOpen(false)} aria-label="Close">✕</button>
-                            </header>
-                            <div className="fw-modal__body fw-modal__body--confirm">
-                                <p>Delete <strong>{selectedIds.size}</strong> selected rule(s) from <code>{currentConfig}</code>? This cannot be undone.</p>
-                            </div>
-                            <footer className="fw-modal__foot">
-                                <span />
-                                <div className="fw-modal__foot-actions">
-                                    <button type="button" className="fw-btn fw-btn--ghost" onClick={() => setDeleteConfirmOpen(false)}>Cancel</button>
-                                    <button type="button" className="fw-btn fw-btn--danger" onClick={handleBulkDelete}>
-                                        Delete {selectedIds.size} rule(s)
-                                    </button>
-                                </div>
-                            </footer>
-                        </div>
-                    </div>
-                )}
+                <BulkDeleteModal
+                    open={deleteConfirmOpen}
+                    count={selectedIds.size}
+                    itemNoun="rule"
+                    configName={currentConfig}
+                    onClose={() => setDeleteConfirmOpen(false)}
+                    onConfirm={handleBulkDelete}
+                />
 
-                {addConfigOpen && (
-                    <div className="fw-modal-backdrop" onClick={() => setAddConfigOpen(false)}>
-                        <div className="fw-modal fw-modal--sm" onClick={(e) => e.stopPropagation()}>
-                            <header className="fw-modal__head">
-                                <span className="fw-modal__title">Add config</span>
-                                <button type="button" className="fw-icon-btn" onClick={() => setAddConfigOpen(false)} aria-label="Close">✕</button>
-                            </header>
-                            <div className="fw-modal__body fw-modal__body--confirm">
-                                <div className="fw-field">
-                                    <label className="fw-field__label" htmlFor="fw-new-config-name">
-                                        Config name <span className="fw-field__req">*</span>
-                                    </label>
-                                    <input
-                                        id="fw-new-config-name"
-                                        className="fw-input"
-                                        type="text"
-                                        value={newConfigName}
-                                        onChange={(e) => setNewConfigName(e.target.value)}
-                                        onKeyDown={(e) => {
-                                            if (e.key === 'Enter') handleAddConfig();
-                                            if (e.key === 'Escape') setAddConfigOpen(false);
-                                        }}
-                                        placeholder="e.g. default"
-                                        autoFocus
-                                    />
-                                </div>
-                            </div>
-                            <footer className="fw-modal__foot">
-                                <span />
-                                <div className="fw-modal__foot-actions">
-                                    <button type="button" className="fw-btn fw-btn--ghost" onClick={() => setAddConfigOpen(false)}>Cancel</button>
-                                    <button
-                                        type="button"
-                                        className="fw-btn fw-btn--primary"
-                                        onClick={handleAddConfig}
-                                        disabled={!newConfigName.trim() || draftConfigs.includes(newConfigName.trim())}
-                                    >
-                                        Create
-                                    </button>
-                                </div>
-                            </footer>
-                        </div>
-                    </div>
-                )}
+                <AddConfigModal
+                    open={addConfigOpen}
+                    onClose={() => setAddConfigOpen(false)}
+                    onCreate={(name) => {
+                        dispatchDraft({ type: 'ADD_CONFIG', configName: name });
+                        setActiveConfig(name);
+                        setAddConfigOpen(false);
+                    }}
+                    placeholder="e.g. default"
+                    existingNames={draftConfigs}
+                />
 
-                {deleteConfigOpen && (
-                    <div className="fw-modal-backdrop" onClick={() => setDeleteConfigOpen(false)}>
-                        <div className="fw-modal fw-modal--sm" onClick={(e) => e.stopPropagation()}>
-                            <header className="fw-modal__head">
-                                <span className="fw-modal__title">Delete config</span>
-                                <button type="button" className="fw-icon-btn" onClick={() => setDeleteConfigOpen(false)} aria-label="Close">✕</button>
-                            </header>
-                            <div className="fw-modal__body fw-modal__body--confirm">
-                                <p>Delete config <code>{currentConfig}</code>? Changes will be applied on Save.</p>
-                            </div>
-                            <footer className="fw-modal__foot">
-                                <span />
-                                <div className="fw-modal__foot-actions">
-                                    <button type="button" className="fw-btn fw-btn--ghost" onClick={() => setDeleteConfigOpen(false)}>Cancel</button>
-                                    <button type="button" className="fw-btn fw-btn--danger" onClick={handleDeleteConfig}>
-                                        Mark for deletion
-                                    </button>
-                                </div>
-                            </footer>
-                        </div>
-                    </div>
-                )}
+                <DeleteConfigModal
+                    open={deleteConfigOpen}
+                    configName={currentConfig}
+                    onClose={() => setDeleteConfigOpen(false)}
+                    onConfirm={handleDeleteConfig}
+                />
 
                 <RuleDrawer
                     ref={drawerRef}
