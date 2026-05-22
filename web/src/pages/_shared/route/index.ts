@@ -3,7 +3,6 @@ export * from './constants';
 export * from './utils';
 export * from './hooks';
 export * from './useMockMode';
-export * from './useRouteConfigs';
 export * from './useRIBData';
 export * from './useFIBData';
 export * from './RouteListItem';

@@ -16,9 +16,9 @@ import {
     formatRouteCount,
     RouteListItem,
     useMockMode,
-    useRouteConfigs,
     useRIBData,
 } from '../../_shared/route';
+import { useRIBConfigs } from './useRIBConfigs';
 import { RoutePageHeader } from './RoutePageHeader';
 import { AddRouteDialog } from './AddRouteDialog';
 import { EditRouteDialog } from './EditRouteDialog';
@@ -34,7 +34,7 @@ const RoutePage: React.FC = () => {
         setConfigs,
         setActiveConfigTab,
         handleConfigTabChange,
-    } = useRouteConfigs();
+    } = useRIBConfigs();
 
     const {
         configRoutes,

@@ -107,7 +107,7 @@ const operatorRouteService = createService('operators.route.operatorpb.v1.RouteS
 
 export const route = {
     listConfigs: (options?: CallOptions): Promise<ListConfigsResponse> => {
-        return operatorRouteService.call<ListConfigsResponse>('ListConfigs', options);
+        return routeService.call<ListConfigsResponse>('ListConfigs', options);
     },
     showRoutes: (request: ShowRoutesRequest, options?: CallOptions): Promise<ShowRoutesResponse> => {
         return operatorRouteService.callWithBody<ShowRoutesResponse>('ShowRoutes', request, options);
@@ -126,6 +126,12 @@ export const route = {
     },
     updateFIB: (request: UpdateFIBRequest, options?: CallOptions): Promise<UpdateFIBResponse> => {
         return routeService.callWithBody<UpdateFIBResponse>('UpdateFIB', request, options);
+    },
+};
+
+export const routeOperator = {
+    listConfigs: (options?: CallOptions): Promise<ListConfigsResponse> => {
+        return operatorRouteService.call<ListConfigsResponse>('ListConfigs', options);
     },
 };
 

@@ -13,7 +13,7 @@ export * from './counters';
 
 import { neighbours } from './neighbours';
 import { inspect } from './inspect';
-import { route } from './routes';
+import { route, routeOperator } from './routes';
 import { functions } from './functions';
 import { pipelines } from './pipelines';
 import { devices } from './devices';
@@ -26,6 +26,7 @@ export const API = {
     neighbours,
     inspect,
     route,
+    routeOperator,
     functions,
     pipelines,
     devices,

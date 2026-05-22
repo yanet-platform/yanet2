@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { API } from '../../../api';
 import { toaster } from '../../../utils';
 
-export interface UseRouteConfigsResult {
+export interface UseRIBConfigsResult {
     configs: string[];
     loading: boolean;
     activeConfigTab: string;
@@ -11,8 +11,8 @@ export interface UseRouteConfigsResult {
     handleConfigTabChange: (config: string) => void;
 }
 
-/** Loads the list of route configs and manages the active tab selection. */
-export const useRouteConfigs = (): UseRouteConfigsResult => {
+/** Loads the list of RIB configs (route operator) and manages the active tab selection. */
+export const useRIBConfigs = (): UseRIBConfigsResult => {
     const [configs, setConfigs] = useState<string[]>([]);
     const [loading, setLoading] = useState<boolean>(true);
     const [activeConfigTab, setActiveConfigTab] = useState<string>('');
@@ -24,7 +24,7 @@ export const useRouteConfigs = (): UseRouteConfigsResult => {
             setLoading(true);
 
             try {
-                const configsResponse = await API.route.listConfigs();
+                const configsResponse = await API.routeOperator.listConfigs();
                 const configsList = configsResponse.configs || [];
 
                 if (!isMounted) return;
@@ -35,7 +35,7 @@ export const useRouteConfigs = (): UseRouteConfigsResult => {
                 }
             } catch (err) {
                 if (!isMounted) return;
-                toaster.error('route-configs-error', 'Failed to fetch route configs', err);
+                toaster.error('rib-configs-error', 'Failed to fetch RIB configs', err);
             } finally {
                 if (isMounted) {
                     setLoading(false);

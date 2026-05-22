@@ -21,7 +21,7 @@ use tabled::{
 };
 use tonic::codec::CompressionEncoding;
 use yanet_cli_route::{
-    routepb::{route_service_client::RouteServiceClient, ShowFibRequest, UpdateFibRequest},
+    routepb::{route_service_client::RouteServiceClient, ListConfigsRequest, ShowFibRequest, UpdateFibRequest},
     FibDisplayEntry,
 };
 use ync::{
@@ -118,6 +118,8 @@ pub struct FibCmd {
 
 #[derive(Debug, Clone, Parser)]
 pub enum FibAction {
+    /// List route module config names known to the route module shim.
+    List,
     /// Dump FIB entries.
     Show(FibShowCmd),
     /// Replace the FIB atomically with entries from a YAML file.
@@ -165,6 +167,7 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
 
     match cmd.mode {
         ModeCmd::Fib(cmd) => match cmd.action {
+            FibAction::List => service.list_fibs().await,
             FibAction::Show(cmd) => service.show_fib(cmd).await,
             FibAction::Update(cmd) => service.update_fib(cmd).await,
         },
@@ -198,6 +201,15 @@ impl RouteService {
         self.client.update_fib(request).await?;
 
         println!("OK");
+        Ok(())
+    }
+
+    pub async fn list_fibs(&mut self) -> Result<(), Box<dyn Error>> {
+        let response = self.client.list_configs(ListConfigsRequest {}).await?.into_inner();
+
+        for name in response.configs {
+            println!("{name}");
+        }
         Ok(())
     }
 
