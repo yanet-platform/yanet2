@@ -79,7 +79,15 @@ const NeighbourDrawer: React.FC<NeighbourDrawerProps> = ({
         if (!canSubmit) return;
         setSubmitting(true);
         try {
-            const resolvedTable = isMergedAdd ? (selectedTable[0] || defaultTable) : activeTable;
+            const resolvedTable = (() => {
+                if (mode === 'add' && activeTable === MERGED_TAB) {
+                    return selectedTable[0] || defaultTable;
+                }
+                if (mode === 'edit' && activeTable === MERGED_TAB) {
+                    return neighbour?.source || 'static';
+                }
+                return activeTable;
+            })();
 
             let nextHopWire: Neighbour['next_hop'];
             if (mode === 'add') {
@@ -115,7 +123,18 @@ const NeighbourDrawer: React.FC<NeighbourDrawerProps> = ({
         }
     };
 
-    const tableLabel = isMergedAdd ? undefined : activeTable || undefined;
+    const resolvedTableForTitle = (() => {
+        if (mode === 'add' && activeTable === MERGED_TAB) {
+            return selectedTable[0] || defaultTable;
+        }
+        if (mode === 'edit' && activeTable === MERGED_TAB) {
+            return neighbour?.source || 'static';
+        }
+        return activeTable;
+    })();
+    const tableLabel = mode === 'add' && activeTable === MERGED_TAB
+        ? undefined
+        : resolvedTableForTitle || undefined;
     const titleSingular = tableLabel ? `neighbour in ${tableLabel}` : 'neighbour';
 
     return (
