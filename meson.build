@@ -155,6 +155,7 @@ if not dataplane_only
     subdir(dir)
   endforeach
   subdir('tests')
+  subdir('lib/testutils')
 endif
 
 # Define a default test setup that excludes large tests

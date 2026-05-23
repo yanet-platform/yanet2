@@ -46,6 +46,14 @@ func (m *ModuleConfig) AsFFIModule() ffi.ModuleConfig {
 	return m.ptr
 }
 
+// CPModulePtr returns the raw *C.struct_cp_module as an unsafe.Pointer.
+//
+// Intended for tests that need to call the dataplane handler directly
+// via a C shim that expects a cp_module pointer.
+func (m *ModuleConfig) CPModulePtr() unsafe.Pointer {
+	return unsafe.Pointer(m.asRawPtr())
+}
+
 // Free releases the underlying C memory.
 //
 // Safe to call multiple times: subsequent calls are no-ops.
