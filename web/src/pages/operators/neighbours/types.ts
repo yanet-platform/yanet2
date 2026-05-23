@@ -1,37 +1,50 @@
 import type { Neighbour, NeighbourTableInfo } from '../../../api/neighbours';
 
-export interface AddNeighbourDialogProps {
+export type SortableColumn =
+    | 'next_hop'
+    | 'link_addr'
+    | 'hardware_addr'
+    | 'device'
+    | 'state'
+    | 'source'
+    | 'priority'
+    | 'updated_at';
+
+export type SortDirection = 'asc' | 'desc';
+
+export interface SortState {
+    column: SortableColumn | null;
+    direction: SortDirection;
+}
+
+export const DEFAULT_SORT: SortState = { column: 'state', direction: 'asc' };
+
+export const MERGED_TAB = '__merged__';
+
+export type NeighbourDrawerMode = 'add' | 'edit';
+
+export interface NeighbourDrawerProps {
     open: boolean;
-    onClose: () => void;
-    onConfirm: (table: string, entry: Neighbour) => Promise<void>;
+    mode: NeighbourDrawerMode;
     tables: NeighbourTableInfo[];
     defaultTable: string;
-}
-
-export interface EditNeighbourDialogProps {
-    open: boolean;
-    onClose: () => void;
-    onConfirm: (table: string, entry: Neighbour) => Promise<void>;
     neighbour: Neighbour | null;
-    table: string;
+    activeTable: string;
+    onClose: () => void;
+    onSubmit: (table: string, entry: Neighbour) => Promise<void>;
+    onDelete?: (neighbour: Neighbour) => Promise<void>;
 }
 
-export interface CreateTableDialogProps {
+export interface CreateTableModalProps {
     open: boolean;
     onClose: () => void;
-    onConfirm: (name: string, defaultPriority: number) => Promise<void>;
+    onCreate: (name: string, defaultPriority: number) => Promise<void>;
+    existingNames: string[];
 }
 
-export interface EditTableDialogProps {
+export interface EditTableModalProps {
     open: boolean;
     onClose: () => void;
-    onConfirm: (name: string, defaultPriority: number) => Promise<void>;
+    onSave: (name: string, defaultPriority: number) => Promise<void>;
     tableInfo: NeighbourTableInfo | null;
-}
-
-export interface RemoveTableDialogProps {
-    open: boolean;
-    onClose: () => void;
-    onConfirm: () => Promise<void>;
-    tableName: string;
 }

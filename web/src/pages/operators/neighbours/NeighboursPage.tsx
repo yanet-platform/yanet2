@@ -1,31 +1,21 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Box, TabProvider, TabList, Tab, Button, Flex, Divider } from '@gravity-ui/uikit';
-import { toaster } from '../../../utils';
+import { Button, Flex, Icon, Text, TextInput } from '@gravity-ui/uikit';
+import { Magnifier, Plus } from '@gravity-ui/icons';
+import { PageLayout, PageLoader, ConfigTabStrip, BulkBar } from '../../../components';
+import { BulkDeleteModal, DeleteConfigModal } from '../../_shared/draft';
 import { stringToIPAddress } from '../../../utils/netip';
-import { API } from '../../../api';
 import type { Neighbour, NeighbourTableInfo } from '../../../api/neighbours';
-import { PageLayout, PageLoader, PageHeader, ConfirmDialog } from '../../../components';
-import {
-    AddNeighbourDialog,
-    EditNeighbourDialog,
-    CreateTableDialog,
-    EditTableDialog,
-    RemoveTableDialog,
-    VirtualizedNeighbourTable,
-} from '.';
-import {
-    DEFAULT_SORT,
-    isSortableColumn,
-    isSortDirection,
-} from './hooks';
-import type { SortState, SortableColumn, SortDirection } from './hooks';
-import './neighbours.scss';
+import { NeighbourTable } from './NeighbourTable';
+import NeighbourDrawer from './NeighbourDrawer';
+import CreateTableModal from './CreateTableModal';
+import EditTableModal from './EditTableModal';
+import { useNeighbours } from './useNeighbours';
+import { getNeighbourId, isSortableColumn, isSortDirection, sortComparators } from './utils';
+import { MERGED_TAB, DEFAULT_SORT } from './types';
+import type { SortState, SortableColumn } from './types';
+import '../../../styles/draft-page.scss';
 
-const REFRESH_INTERVAL_MS = 5000;
-const MERGED_TAB = '__merged__';
-
-// URL query param keys
 const QP_TAB = 'tab';
 const QP_SORT = 'sort';
 const QP_ORDER = 'order';
@@ -43,45 +33,57 @@ const parseSortState = (params: URLSearchParams): SortState => {
     return DEFAULT_SORT;
 };
 
-const parseTab = (params: URLSearchParams): string => {
-    return params.get(QP_TAB) || MERGED_TAB;
-};
+const parseTab = (params: URLSearchParams): string =>
+    params.get(QP_TAB) || MERGED_TAB;
 
-const parseSearch = (params: URLSearchParams): string => {
-    return params.get(QP_SEARCH) || '';
-};
+const parseSearch = (params: URLSearchParams): string =>
+    params.get(QP_SEARCH) || '';
 
-const NeighboursPage = (): React.JSX.Element => {
+/** Neighbours page — shows neighbour tables and entries with inline drawer editing. */
+const NeighboursPage: React.FC = () => {
     const [searchParams, setSearchParams] = useSearchParams();
 
-    // Derive state from URL
     const activeTab = parseTab(searchParams);
     const sortState = parseSortState(searchParams);
-    const searchQuery = parseSearch(searchParams);
+    const search = parseSearch(searchParams);
 
-    const [tables, setTables] = useState<NeighbourTableInfo[]>([]);
-    const [initialLoading, setInitialLoading] = useState<boolean>(true);
+    const {
+        tables,
+        cache,
+        loading,
+        addNeighbour,
+        updateNeighbour,
+        removeNeighbours,
+        createTable,
+        updateTable,
+        removeTable,
+        reloadAll,
+        fetchTab,
+    } = useNeighbours(activeTab);
+
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+    const [drawer, setDrawer] = useState<{ open: boolean; mode: 'add' | 'edit'; neighbour: Neighbour | null }>({
+        open: false,
+        mode: 'add',
+        neighbour: null,
+    });
+    const [bulkRemoveOpen, setBulkRemoveOpen] = useState(false);
+    const [createTableOpen, setCreateTableOpen] = useState(false);
+    const [editTableOpen, setEditTableOpen] = useState(false);
+    const [deleteTableOpen, setDeleteTableOpen] = useState(false);
+    const [activeRowId, setActiveRowId] = useState<string | null>(null);
+    const [editingRowId, setEditingRowId] = useState<string | null>(null);
 
-    // Cache: tab key -> neighbours list. Merged tab uses MERGED_TAB key.
-    const [cache, setCache] = useState<Map<string, Neighbour[]>>(new Map());
+    const searchRef = useRef<HTMLInputElement>(null);
 
-    // Dialog states
-    const [addDialogOpen, setAddDialogOpen] = useState(false);
-    const [editDialogOpen, setEditDialogOpen] = useState(false);
-    const [removeDialogOpen, setRemoveDialogOpen] = useState(false);
-    const [createTableDialogOpen, setCreateTableDialogOpen] = useState(false);
-    const [editTableDialogOpen, setEditTableDialogOpen] = useState(false);
-    const [removeTableDialogOpen, setRemoveTableDialogOpen] = useState(false);
-    const [editingNeighbour, setEditingNeighbour] = useState<Neighbour | null>(null);
+    const isMergedView = activeTab === MERGED_TAB;
+    const activeTableInfo: NeighbourTableInfo | null = tables.find((t) => t.name === activeTab) ?? null;
+    const isBuiltIn = activeTableInfo?.built_in ?? false;
 
-    // Ref to track the active tab for async operations
-    const activeTabRef = useRef(activeTab);
-    activeTabRef.current = activeTab;
+    const tabsList = [MERGED_TAB, ...tables.map((t) => t.name || '').filter(Boolean)];
 
-    // Helper to update URL params without replacing other params
-    const updateParams = useCallback((updates: Record<string, string | null>) => {
-        setSearchParams(prev => {
+    const updateParams = useCallback((updates: Record<string, string | null>): void => {
+        setSearchParams((prev) => {
             const next = new URLSearchParams(prev);
             for (const [key, value] of Object.entries(updates)) {
                 if (value === null || value === '') {
@@ -94,356 +96,266 @@ const NeighboursPage = (): React.JSX.Element => {
         }, { replace: true });
     }, [setSearchParams]);
 
-    const handleSort = useCallback((column: SortableColumn) => {
-        const newDirection: SortDirection =
-            sortState.column === column && sortState.direction === 'asc' ? 'desc' : 'asc';
-        updateParams({
-            [QP_SORT]: column,
-            [QP_ORDER]: newDirection,
-        });
+    const handleTabSelect = useCallback((cfg: string): void => {
+        const tab = cfg === MERGED_TAB ? MERGED_TAB : cfg;
+        updateParams({ [QP_TAB]: tab === MERGED_TAB ? null : tab });
+        setSelectedIds(new Set());
+        setActiveRowId(null);
+        setEditingRowId(null);
+        fetchTab(tab).catch(() => {});
+    }, [updateParams, fetchTab]);
+
+    const handleSort = useCallback((col: SortableColumn): void => {
+        const newDirection: SortState['direction'] =
+            sortState.column === col && sortState.direction === 'asc' ? 'desc' : 'asc';
+        updateParams({ [QP_SORT]: col, [QP_ORDER]: newDirection });
     }, [sortState, updateParams]);
 
-    const handleSearchChange = useCallback((query: string) => {
-        updateParams({ [QP_SEARCH]: query || null });
-    }, [updateParams]);
+    const allRows = cache.get(activeTab) || [];
 
-    const loadTables = useCallback(async (): Promise<NeighbourTableInfo[]> => {
-        try {
-            const data = await API.neighbours.listTables();
-            const sorted = (data.tables || []).slice().sort((a, b) =>
-                (a.name || '').localeCompare(b.name || ''),
+    const visibleRows = useMemo(() => {
+        let res = allRows;
+        const q = search.trim().toLowerCase();
+        if (q) {
+            res = res.filter((n) =>
+                (getNeighbourId(n) || '').toLowerCase().includes(q) ||
+                (n.device || '').toLowerCase().includes(q) ||
+                (n.source || '').toLowerCase().includes(q),
             );
-            setTables(sorted);
-            return sorted;
-        } catch (err) {
-            toaster.error('tables-error', 'Failed to fetch neighbour tables', err);
-            return [];
         }
+        if (sortState.column) {
+            const cmp = sortComparators[sortState.column];
+            res = [...res].sort(sortState.direction === 'desc' ? (a, b) => cmp(b, a) : cmp);
+        }
+        return res;
+    }, [allRows, search, sortState]);
+
+    const counts = useMemo((): Map<string, number> => {
+        const m = new Map<string, number>();
+        m.set(MERGED_TAB, tables.reduce((sum, t) => sum + Number(t.entry_count ?? 0), 0));
+        tables.forEach((t) => {
+            if (t.name) m.set(t.name, Number(t.entry_count ?? 0));
+        });
+        return m;
+    }, [tables]);
+
+    const openAdd = useCallback((): void => {
+        setDrawer({ open: true, mode: 'add', neighbour: null });
     }, []);
 
-    // Fetch neighbours for a specific tab and update cache
-    const fetchNeighbours = useCallback(async (tabKey: string): Promise<Neighbour[]> => {
-        const tableFilter = tabKey === MERGED_TAB ? undefined : tabKey;
-        const data = await API.neighbours.list(tableFilter);
-        const neighbours = data.neighbours || [];
-        setCache(prev => {
-            const next = new Map(prev);
-            next.set(tabKey, neighbours);
-            return next;
-        });
-        return neighbours;
+    const handleEditRow = useCallback((id: string): void => {
+        const neighbour = allRows.find((n) => getNeighbourId(n) === id) || null;
+        setDrawer({ open: true, mode: 'edit', neighbour });
+        setActiveRowId(id);
+        setEditingRowId(id);
+    }, [allRows]);
+
+    const handleCloseDrawer = useCallback((): void => {
+        setDrawer((prev) => ({ ...prev, open: false }));
+        setEditingRowId(null);
     }, []);
 
-    // Prefetch all tables in background
-    const prefetchAll = useCallback(async (tableList: NeighbourTableInfo[]) => {
-        const keys = [MERGED_TAB, ...tableList.map(t => t.name || '').filter(Boolean)];
-        const results = await Promise.allSettled(
-            keys.map(async (key) => {
-                const tableFilter = key === MERGED_TAB ? undefined : key;
-                const data = await API.neighbours.list(tableFilter);
-                return { key, neighbours: data.neighbours || [] };
-            }),
-        );
-
-        setCache(prev => {
-            const next = new Map(prev);
-            for (const result of results) {
-                if (result.status === 'fulfilled') {
-                    next.set(result.value.key, result.value.neighbours);
-                }
-            }
-            return next;
-        });
+    const handleRowClick = useCallback((id: string): void => {
+        setActiveRowId(id);
     }, []);
 
-    // Initial load: tables + prefetch all
-    useEffect(() => {
-        let isMounted = true;
+    const handleSubmitNeighbour = useCallback(async (table: string, entry: Neighbour): Promise<void> => {
+        if (drawer.mode === 'add') {
+            await addNeighbour(table, entry);
+        } else {
+            await updateNeighbour(table, entry);
+        }
+    }, [drawer.mode, addNeighbour, updateNeighbour]);
 
-        const init = async () => {
-            const tableList = await loadTables();
-            if (!isMounted) return;
-            await prefetchAll(tableList);
-            if (isMounted) {
-                setInitialLoading(false);
-            }
-        };
-
-        init();
-        return () => { isMounted = false; };
-    }, [loadTables, prefetchAll]);
-
-    // Periodic refresh: update active tab + tables
-    useEffect(() => {
-        if (initialLoading) return;
-
-        const intervalId = window.setInterval(async () => {
-            const tab = activeTabRef.current;
-            try {
-                await fetchNeighbours(tab);
-            } catch {
-                // Silently ignore periodic refresh errors
-            }
-            loadTables();
-        }, REFRESH_INTERVAL_MS);
-
-        return () => window.clearInterval(intervalId);
-    }, [initialLoading, fetchNeighbours, loadTables]);
-
-    // On tab switch: immediately show cached data, then refresh in background
-    const handleTabChange = useCallback((tab: string) => {
-        updateParams({
-            [QP_TAB]: tab === MERGED_TAB ? null : tab,
-        });
+    const handleDeleteNeighbour = useCallback(async (neighbour: Neighbour): Promise<void> => {
+        const table = isMergedView ? (neighbour.source || 'static') : activeTab;
+        const wire = stringToIPAddress(getNeighbourId(neighbour));
+        if (!wire) return;
+        await removeNeighbours(table, [wire]);
         setSelectedIds(new Set());
-        // Refresh data for the new tab in background
-        fetchNeighbours(tab).catch(() => { });
-        loadTables();
-    }, [fetchNeighbours, loadTables, updateParams]);
+    }, [isMergedView, activeTab, removeNeighbours]);
 
-    const neighbours = cache.get(activeTab) || [];
-
-    const isMergedView = activeTab === MERGED_TAB;
-
-    const activeTableInfo = useMemo(
-        () => tables.find((t) => t.name === activeTab) ?? null,
-        [tables, activeTab],
-    );
-
-    const isBuiltIn = activeTableInfo?.built_in ?? false;
-
-    // Reload all data (after mutations)
-    const reloadAll = useCallback(async () => {
-        const tableList = await loadTables();
-        await prefetchAll(tableList);
-    }, [loadTables, prefetchAll]);
-
-    // Entry actions
-    const handleAddConfirm = useCallback(async (table: string, entry: Neighbour) => {
-        try {
-            await API.neighbours.updateNeighbours(table, [entry]);
-            toaster.success('neighbour-added', 'Neighbour added successfully');
-            await reloadAll();
-        } catch (err) {
-            toaster.error('neighbour-add-error', 'Failed to add neighbour', err);
-            throw err;
-        }
-    }, [reloadAll]);
-
-    const handleEditConfirm = useCallback(async (table: string, entry: Neighbour) => {
-        try {
-            await API.neighbours.updateNeighbours(table, [entry]);
-            toaster.success('neighbour-updated', 'Neighbour updated successfully');
-            await reloadAll();
-        } catch (err) {
-            toaster.error('neighbour-edit-error', 'Failed to update neighbour', err);
-            throw err;
-        }
-    }, [reloadAll]);
-
-    const handleRemoveConfirm = useCallback(async () => {
+    const handleBulkRemove = useCallback(async (): Promise<void> => {
         if (isMergedView || !activeTab) return;
-        try {
-            const nextHops = Array.from(selectedIds)
-                .map(s => stringToIPAddress(s))
-                .filter((w): w is NonNullable<typeof w> => w !== undefined);
-            await API.neighbours.removeNeighbours(activeTab, nextHops);
-            toaster.success('neighbours-removed', `${nextHops.length} neighbour(s) removed`);
-            setSelectedIds(new Set());
-            await reloadAll();
-        } catch (err) {
-            toaster.error('neighbours-remove-error', 'Failed to remove neighbours', err);
-            throw err;
-        }
-    }, [isMergedView, activeTab, selectedIds, reloadAll]);
+        const wires = Array.from(selectedIds).map((s) => stringToIPAddress(s));
+        await removeNeighbours(activeTab, wires);
+        setSelectedIds(new Set());
+        setBulkRemoveOpen(false);
+    }, [isMergedView, activeTab, selectedIds, removeNeighbours]);
 
-    // Table actions
-    const handleCreateTableConfirm = useCallback(async (name: string, defaultPriority: number) => {
-        try {
-            await API.neighbours.createTable(name, defaultPriority);
-            toaster.success('table-created', `Table "${name}" created`);
-            await reloadAll();
-            updateParams({ [QP_TAB]: name });
-        } catch (err) {
-            toaster.error('table-create-error', 'Failed to create table', err);
-            throw err;
-        }
-    }, [reloadAll, updateParams]);
+    const handleCreateTable = useCallback(async (name: string, priority: number): Promise<void> => {
+        await createTable(name, priority);
+        updateParams({ [QP_TAB]: name });
+    }, [createTable, updateParams]);
 
-    const handleEditTableConfirm = useCallback(async (name: string, defaultPriority: number) => {
-        try {
-            await API.neighbours.updateTable(name, defaultPriority);
-            toaster.success('table-updated', `Table "${name}" updated`);
-            await loadTables();
-        } catch (err) {
-            toaster.error('table-edit-error', 'Failed to update table', err);
-            throw err;
-        }
-    }, [loadTables]);
+    const handleEditTable = useCallback(async (name: string, priority: number): Promise<void> => {
+        await updateTable(name, priority);
+        setEditTableOpen(false);
+    }, [updateTable]);
 
-    const handleRemoveTableConfirm = useCallback(async () => {
+    const handleDeleteTable = useCallback(async (): Promise<void> => {
         if (!activeTableInfo?.name) return;
-        try {
-            await API.neighbours.removeTable(activeTableInfo.name);
-            toaster.success('table-removed', `Table "${activeTableInfo.name}" removed`);
-            updateParams({ [QP_TAB]: null });
-            setSelectedIds(new Set());
-            await reloadAll();
-        } catch (err) {
-            toaster.error('table-remove-error', 'Failed to remove table', err);
-            throw err;
-        }
-    }, [activeTableInfo, reloadAll, updateParams]);
+        await removeTable(activeTableInfo.name);
+        updateParams({ [QP_TAB]: null });
+        setSelectedIds(new Set());
+        setDeleteTableOpen(false);
+        await reloadAll();
+    }, [activeTableInfo, removeTable, updateParams, reloadAll]);
 
-    const handleEditClick = useCallback((item: Neighbour) => {
-        setEditingNeighbour(item);
-        setEditDialogOpen(true);
-    }, []);
+    const canEditTable = !isMergedView && !!activeTableInfo;
+    const canDeleteTable = !isMergedView && !!activeTableInfo && !isBuiltIn;
 
-    const editTable = useCallback(() => {
-        return isMergedView ? (editingNeighbour?.source || 'static') : activeTab;
-    }, [isMergedView, editingNeighbour, activeTab]);
+    const defaultAddTable = useMemo(() => {
+        if (!isMergedView) return activeTab;
+        const staticTable = tables.find((t) => t.name === 'static');
+        if (staticTable) return 'static';
+        const firstNonBuiltin = tables.find((t) => !t.built_in && t.name);
+        return firstNonBuiltin?.name || tables[0]?.name || '';
+    }, [isMergedView, activeTab, tables]);
 
-    const handleSelectionChange = useCallback((ids: string[]) => {
-        setSelectedIds(new Set(ids));
-    }, []);
+    const displayLabel = (cfg: string): string => cfg === MERGED_TAB ? 'Merged' : cfg;
 
-    // Determine default table for Add dialog
-    const defaultAddTable = isMergedView ? 'static' : activeTab;
+    const displayConfigs = tabsList.map(displayLabel);
+    const activeDisplayConfig = displayLabel(activeTab);
 
-    const headerContent = (
-        <PageHeader
-            title="Neighbours"
-            actions={
-                <>
-                    <Button view="action" onClick={() => setAddDialogOpen(true)}>
-                        Add Neighbour
-                    </Button>
-                    <Button
-                        view="outlined-danger"
-                        onClick={() => setRemoveDialogOpen(true)}
-                        disabled={isMergedView || selectedIds.size === 0}
-                    >
-                        Remove Selected
-                    </Button>
-                    <Divider orientation="vertical" />
-                    <Button view="normal" onClick={() => setCreateTableDialogOpen(true)}>
-                        Create Table
-                    </Button>
-                    {!isMergedView && (
-                        <>
-                            <Button
-                                view="normal"
-                                onClick={() => setEditTableDialogOpen(true)}
-                            >
-                                Edit Table
-                            </Button>
-                            <Button
-                                view="outlined-danger"
-                                onClick={() => setRemoveTableDialogOpen(true)}
-                                disabled={isBuiltIn}
-                            >
-                                Remove Table
-                            </Button>
-                        </>
-                    )}
-                </>
-            }
-        />
+    const pageHeader = (
+        <Flex alignItems="center" gap={4} style={{ width: '100%' }}>
+            <Text variant="header-1">Neighbours</Text>
+            <Flex grow />
+            <div style={{ flexBasis: 360, flexShrink: 1 }}>
+                <TextInput
+                    controlRef={searchRef as React.RefObject<HTMLInputElement | null>}
+                    value={search}
+                    onUpdate={(v) => updateParams({ [QP_SEARCH]: v || null })}
+                    placeholder="Search next hop, device, source… (/)"
+                    startContent={
+                        <Flex alignItems="center" justifyContent="center" style={{ paddingInline: 8, color: 'var(--g-color-text-hint)' }}>
+                            <Icon data={Magnifier} size={16} />
+                        </Flex>
+                    }
+                    hasClear
+                    type="search"
+                />
+            </div>
+            <Button view="outlined" onClick={() => setCreateTableOpen(true)}>
+                <Icon data={Plus} size={16} />
+                Add Table
+            </Button>
+            <Button view="action" onClick={openAdd} disabled={tables.length === 0}>
+                <Icon data={Plus} size={16} />
+                Add Neighbour
+            </Button>
+        </Flex>
     );
 
-    if (initialLoading) {
+    if (loading) {
         return (
-            <PageLayout title="Neighbours">
-                <PageLoader loading={initialLoading} size="l" />
+            <PageLayout header={pageHeader}>
+                <PageLoader loading size="l" />
             </PageLayout>
         );
     }
 
     return (
-        <PageLayout header={headerContent}>
-            <Flex direction="column" className="neigh-page__content">
-                <TabProvider value={activeTab} onUpdate={handleTabChange}>
-                    <TabList>
-                        <Tab value={MERGED_TAB}>
-                            Merged
-                        </Tab>
-                        {tables.map((t) => (
-                            <Tab key={t.name} value={t.name || ''}>
-                                {t.name} ({Number(t.entry_count ?? 0)})
-                            </Tab>
-                        ))}
-                    </TabList>
-                </TabProvider>
+        <PageLayout header={pageHeader}>
+            <div className="fw-page">
+                {tables.length === 0 ? (
+                    <div className="fw-empty-page">
+                        <div className="fw-empty-page__message">No neighbour tables found.</div>
+                        <Button view="action" onClick={() => setCreateTableOpen(true)}>Create table</Button>
+                    </div>
+                ) : (
+                    <>
+                        <ConfigTabStrip
+                            configs={displayConfigs}
+                            activeConfig={activeDisplayConfig}
+                            counts={(() => {
+                                const m = new Map<string, number>();
+                                tabsList.forEach((t) => {
+                                    m.set(displayLabel(t), counts.get(t) ?? 0);
+                                });
+                                return m;
+                            })()}
+                            dirtyConfigs={new Set()}
+                            onSelect={(label) => {
+                                const tab = label === 'Merged' ? MERGED_TAB : label;
+                                handleTabSelect(tab);
+                            }}
+                            onAddConfig={() => setCreateTableOpen(true)}
+                            addLabel="Add table"
+                        />
+                        <div className="fw-content">
+                            <NeighbourTable
+                                rows={visibleRows}
+                                selectedIds={selectedIds}
+                                activeRowId={activeRowId}
+                                editingRowId={editingRowId}
+                                sortState={sortState}
+                                onSort={handleSort}
+                                onRowClick={handleRowClick}
+                                onEditRow={handleEditRow}
+                                onSelectionChange={setSelectedIds}
+                                emptyMessage={search ? 'No neighbours match your search.' : 'No neighbours.'}
+                                canEditTable={canEditTable}
+                                canDeleteTable={canDeleteTable}
+                                onEditTable={() => setEditTableOpen(true)}
+                                onDeleteTable={() => setDeleteTableOpen(true)}
+                            />
+                        </div>
+                    </>
+                )}
 
-                <Box spacing={{ mt: 2 }} style={{ flex: 1, minHeight: 0 }}>
-                    <VirtualizedNeighbourTable
-                        neighbours={neighbours}
-                        selectedIds={selectedIds}
-                        onSelectionChange={handleSelectionChange}
-                        onEditNeighbour={handleEditClick}
-                        sortState={sortState}
-                        onSort={handleSort}
-                        searchQuery={searchQuery}
-                        onSearchChange={handleSearchChange}
+                {selectedIds.size > 0 && !isMergedView && (
+                    <BulkBar
+                        count={selectedIds.size}
+                        itemNoun="neighbour"
+                        onDelete={() => setBulkRemoveOpen(true)}
+                        onClear={() => setSelectedIds(new Set())}
                     />
-                </Box>
-            </Flex>
+                )}
 
-            {/* Entry dialogs */}
-            <AddNeighbourDialog
-                open={addDialogOpen}
-                onClose={() => setAddDialogOpen(false)}
-                onConfirm={handleAddConfirm}
-                tables={tables}
-                defaultTable={defaultAddTable}
-            />
+                <BulkDeleteModal
+                    open={bulkRemoveOpen}
+                    count={selectedIds.size}
+                    itemNoun="neighbour"
+                    configName={activeTab}
+                    onClose={() => setBulkRemoveOpen(false)}
+                    onConfirm={handleBulkRemove}
+                />
 
-            <EditNeighbourDialog
-                open={editDialogOpen}
-                onClose={() => {
-                    setEditDialogOpen(false);
-                    setEditingNeighbour(null);
-                }}
-                onConfirm={handleEditConfirm}
-                neighbour={editingNeighbour}
-                table={editTable()}
-            />
+                <DeleteConfigModal
+                    open={deleteTableOpen}
+                    configName={activeTableInfo?.name || ''}
+                    onClose={() => setDeleteTableOpen(false)}
+                    onConfirm={handleDeleteTable}
+                />
 
-            <ConfirmDialog
-                open={removeDialogOpen}
-                onClose={() => setRemoveDialogOpen(false)}
-                onConfirm={async () => {
-                    await handleRemoveConfirm();
-                    setRemoveDialogOpen(false);
-                }}
-                title="Remove Neighbours"
-                message={`Are you sure you want to remove ${selectedIds.size} neighbour(s)?`}
-                confirmText="Remove"
-                danger
-                disabled={selectedIds.size === 0}
-            />
+                <NeighbourDrawer
+                    open={drawer.open}
+                    mode={drawer.mode}
+                    tables={tables}
+                    defaultTable={defaultAddTable}
+                    neighbour={drawer.neighbour}
+                    activeTable={activeTab}
+                    onClose={handleCloseDrawer}
+                    onSubmit={handleSubmitNeighbour}
+                    onDelete={drawer.mode === 'edit' ? handleDeleteNeighbour : undefined}
+                />
 
-            {/* Table dialogs */}
-            <CreateTableDialog
-                open={createTableDialogOpen}
-                onClose={() => setCreateTableDialogOpen(false)}
-                onConfirm={handleCreateTableConfirm}
-            />
+                <CreateTableModal
+                    open={createTableOpen}
+                    onClose={() => setCreateTableOpen(false)}
+                    onCreate={handleCreateTable}
+                    existingNames={tables.map((t) => t.name || '')}
+                />
 
-            <EditTableDialog
-                open={editTableDialogOpen}
-                onClose={() => setEditTableDialogOpen(false)}
-                onConfirm={handleEditTableConfirm}
-                tableInfo={activeTableInfo}
-            />
-
-            <RemoveTableDialog
-                open={removeTableDialogOpen}
-                onClose={() => setRemoveTableDialogOpen(false)}
-                onConfirm={handleRemoveTableConfirm}
-                tableName={activeTableInfo?.name || ''}
-            />
+                <EditTableModal
+                    open={editTableOpen}
+                    onClose={() => setEditTableOpen(false)}
+                    onSave={handleEditTable}
+                    tableInfo={activeTableInfo}
+                />
+            </div>
         </PageLayout>
     );
 };
