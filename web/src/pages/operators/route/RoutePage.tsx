@@ -92,7 +92,26 @@ const RoutePage: React.FC = () => {
             toaster.error('route-nexthop-error', 'Invalid next-hop address');
             return;
         }
+
+        const isEdit = drawer.mode === 'edit';
+        const original = drawer.route;
+        const originalPrefix = original?.prefix;
+        const originalNexthop = original?.next_hop;
+        const newNexthopStr = ipAddressToString(nexthopIp);
+        const originalNexthopStr = ipAddressToString(originalNexthop);
+        const keyChanged = isEdit && !!original && (originalPrefix !== params.prefix || originalNexthopStr !== newNexthopStr);
+
         try {
+            if (keyChanged && originalPrefix && originalNexthop) {
+                await API.route.deleteRoute({
+                    name: currentConfig,
+                    prefix: originalPrefix,
+                    nexthop_addr: originalNexthop,
+                    do_flush: false,
+                    source_id: RouteSourceID.STATIC,
+                });
+            }
+
             await API.route.insertRoute({
                 name: currentConfig,
                 prefix: params.prefix,
@@ -100,13 +119,14 @@ const RoutePage: React.FC = () => {
                 do_flush: params.doFlush,
                 source_id: RouteSourceID.STATIC,
             });
+
             await reload();
-            toaster.success('route-add-success', drawer.mode === 'add' ? 'Route added.' : 'Route updated.');
+            toaster.success('route-add-success', isEdit ? 'Route updated.' : 'Route added.');
         } catch (err) {
-            toaster.error('route-add-error', drawer.mode === 'add' ? 'Failed to add route' : 'Failed to update route', err);
+            toaster.error('route-add-error', isEdit ? 'Failed to update route' : 'Failed to add route', err);
             throw err;
         }
-    }, [currentConfig, reload, drawer.mode]);
+    }, [currentConfig, reload, drawer.mode, drawer.route]);
 
     const handleDeleteRoute = useCallback(async (route: Route): Promise<void> => {
         if (!route.prefix || !route.next_hop) {
