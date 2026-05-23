@@ -45,6 +45,8 @@ export interface NeighbourTableProps {
     canDeleteTable: boolean;
     onEditTable: () => void;
     onDeleteTable: () => void;
+    onDeleteRow?: (id: string) => void;
+    canEditRow?: boolean;
 }
 
 interface SortButtonProps {
@@ -98,6 +100,8 @@ export const NeighbourTable: React.FC<NeighbourTableProps> = ({
     canDeleteTable,
     onEditTable,
     onDeleteTable,
+    onDeleteRow,
+    canEditRow,
 }) => {
     const scrollRef = useRef<HTMLDivElement>(null);
     const bodyHeight = useContainerHeight(scrollRef, 300, FOOTER_HEIGHT + 20);
@@ -290,13 +294,16 @@ export const NeighbourTable: React.FC<NeighbourTableProps> = ({
                 <span className="fw-toolbar__count">{footerText}</span>
             </div>
 
-            {hoveredRow !== null && (
+            {canEditRow !== false && hoveredRow !== null && (
                 <RowHoverEditOverlay
                     top={overlayTopOffset}
                     rowHeight={ROW_HEIGHT}
                     onEdit={handleOverlayEdit}
                     editAriaLabel={`Edit neighbour ${ipAddressToString(hoveredRow.next_hop) || (rows.indexOf(hoveredRow) + 1)}`}
                     editTitle="Edit neighbour"
+                    onDelete={onDeleteRow ? () => onDeleteRow(getNeighbourId(hoveredRow)) : undefined}
+                    deleteAriaLabel={`Delete neighbour ${ipAddressToString(hoveredRow.next_hop) || ''}`.trim()}
+                    deleteTitle="Delete neighbour"
                     onMouseEnter={handleOverlayMouseEnter}
                     onMouseLeave={handleOverlayMouseLeave}
                 />

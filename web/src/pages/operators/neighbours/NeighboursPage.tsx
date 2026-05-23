@@ -68,6 +68,10 @@ const NeighboursPage: React.FC = () => {
         neighbour: null,
     });
     const [bulkRemoveOpen, setBulkRemoveOpen] = useState(false);
+    const [rowDeleteConfirm, setRowDeleteConfirm] = useState<{ open: boolean; neighbour: Neighbour | null }>({
+        open: false,
+        neighbour: null,
+    });
     const [createTableOpen, setCreateTableOpen] = useState(false);
     const [editTableOpen, setEditTableOpen] = useState(false);
     const [deleteTableOpen, setDeleteTableOpen] = useState(false);
@@ -174,6 +178,18 @@ const NeighboursPage: React.FC = () => {
         await removeNeighbours(table, [wire]);
         setSelectedIds(new Set());
     }, [isMergedView, activeTab, removeNeighbours]);
+
+    const handleDeleteRowRequest = useCallback((id: string): void => {
+        const neighbour = allRows.find((n) => getNeighbourId(n) === id) || null;
+        if (neighbour) setRowDeleteConfirm({ open: true, neighbour });
+    }, [allRows]);
+
+    const handleDeleteRowConfirm = useCallback(async (): Promise<void> => {
+        const neighbour = rowDeleteConfirm.neighbour;
+        setRowDeleteConfirm({ open: false, neighbour: null });
+        if (!neighbour) return;
+        await handleDeleteNeighbour(neighbour);
+    }, [rowDeleteConfirm.neighbour, handleDeleteNeighbour]);
 
     const handleBulkRemove = useCallback(async (): Promise<void> => {
         if (isMergedView || !activeTab) return;
@@ -300,6 +316,8 @@ const NeighboursPage: React.FC = () => {
                                 canDeleteTable={canDeleteTable}
                                 onEditTable={() => setEditTableOpen(true)}
                                 onDeleteTable={() => setDeleteTableOpen(true)}
+                                onDeleteRow={isMergedView ? undefined : handleDeleteRowRequest}
+                                canEditRow={!isMergedView}
                             />
                         </div>
                     </>
@@ -321,6 +339,17 @@ const NeighboursPage: React.FC = () => {
                     configName={activeTab}
                     onClose={() => setBulkRemoveOpen(false)}
                     onConfirm={handleBulkRemove}
+                    immediate
+                />
+
+                <BulkDeleteModal
+                    open={rowDeleteConfirm.open}
+                    count={1}
+                    itemNoun="neighbour"
+                    configName={activeTableInfo?.name || activeTab}
+                    onClose={() => setRowDeleteConfirm({ open: false, neighbour: null })}
+                    onConfirm={handleDeleteRowConfirm}
+                    immediate
                 />
 
                 <DeleteConfigModal

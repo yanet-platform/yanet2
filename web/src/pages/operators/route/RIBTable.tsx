@@ -38,6 +38,7 @@ export interface RIBTableProps {
     onEditRow: (id: string) => void;
     onSelectionChange: (ids: Set<string>) => void;
     emptyMessage: string;
+    onDeleteRow: (id: string) => void;
 }
 
 interface SortButtonProps {
@@ -87,6 +88,7 @@ export const RIBTable: React.FC<RIBTableProps> = ({
     onEditRow,
     onSelectionChange,
     emptyMessage,
+    onDeleteRow,
 }) => {
     const scrollRef = useRef<HTMLDivElement>(null);
     const bodyHeight = useContainerHeight(scrollRef, 300, FOOTER_HEIGHT + 20);
@@ -259,6 +261,9 @@ export const RIBTable: React.FC<RIBTableProps> = ({
                     onEdit={handleOverlayEdit}
                     editAriaLabel={`Edit route ${rows.indexOf(hoveredRow) + 1}`}
                     editTitle="Edit route"
+                    onDelete={() => onDeleteRow(getRouteId(hoveredRow))}
+                    deleteAriaLabel={`Delete route ${hoveredRow.prefix || ''}`.trim()}
+                    deleteTitle="Delete route"
                     onMouseEnter={handleOverlayMouseEnter}
                     onMouseLeave={handleOverlayMouseLeave}
                 />

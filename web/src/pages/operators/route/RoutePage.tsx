@@ -29,6 +29,10 @@ const RoutePage: React.FC = () => {
     const [addConfigOpen, setAddConfigOpen] = useState(false);
     const [activeRowId, setActiveRowId] = useState<string | null>(null);
     const [editingRowId, setEditingRowId] = useState<string | null>(null);
+    const [rowDeleteConfirm, setRowDeleteConfirm] = useState<{ open: boolean; route: Route | null }>({
+        open: false,
+        route: null,
+    });
 
     const searchRef = useRef<HTMLInputElement>(null);
 
@@ -150,16 +154,27 @@ const RoutePage: React.FC = () => {
         }
     }, [currentConfig, reload, setSelected]);
 
+    const handleDeleteRowRequest = useCallback((id: string): void => {
+        const route = allRows.find((r) => getRouteId(r) === id) || null;
+        if (route) setRowDeleteConfirm({ open: true, route });
+    }, [allRows]);
+
+    const handleDeleteRowConfirm = useCallback(async (): Promise<void> => {
+        const route = rowDeleteConfirm.route;
+        setRowDeleteConfirm({ open: false, route: null });
+        if (!route) return;
+        await handleDeleteRoute(route);
+    }, [rowDeleteConfirm.route, handleDeleteRoute]);
+
     const handleFlush = useCallback(async (): Promise<void> => {
         if (!currentConfig) return;
         try {
             await API.route.flushRoutes({ name: currentConfig });
-            await reload();
             toaster.success('flush-success', `Flushed routes for ${currentConfig}.`);
         } catch (err) {
             toaster.error('flush-error', 'Failed to flush routes', err);
         }
-    }, [currentConfig, reload]);
+    }, [currentConfig]);
 
     const handleBulkDelete = useCallback(async (): Promise<void> => {
         const routes = allRows.filter((r) => currentSelected.has(getRouteId(r)));
@@ -265,6 +280,7 @@ const RoutePage: React.FC = () => {
                                 onEditRow={handleEditRow}
                                 onSelectionChange={(ids) => setSelected(currentConfig, ids)}
                                 emptyMessage={search ? 'No routes match your search.' : 'No routes.'}
+                                onDeleteRow={handleDeleteRowRequest}
                             />
                         </div>
                     </>
@@ -286,6 +302,17 @@ const RoutePage: React.FC = () => {
                     configName={currentConfig}
                     onClose={() => setBulkDeleteOpen(false)}
                     onConfirm={handleBulkDelete}
+                    immediate
+                />
+
+                <BulkDeleteModal
+                    open={rowDeleteConfirm.open}
+                    count={1}
+                    itemNoun="route"
+                    configName={currentConfig}
+                    onClose={() => setRowDeleteConfirm({ open: false, route: null })}
+                    onConfirm={handleDeleteRowConfirm}
+                    immediate
                 />
 
                 <RouteDrawer

@@ -7,6 +7,8 @@ interface BulkDeleteModalProps {
     configName: string;
     onClose: () => void;
     onConfirm: () => void;
+    /** Live-write pages (operators/*) set this to switch the hint sentence to a non-draft wording. */
+    immediate?: boolean;
 }
 
 /** Modal confirming bulk deletion of selected rows. */
@@ -17,6 +19,7 @@ const BulkDeleteModal: React.FC<BulkDeleteModalProps> = ({
     configName,
     onClose,
     onConfirm,
+    immediate = false,
 }) => {
     if (!open) return null;
     return (
@@ -27,7 +30,13 @@ const BulkDeleteModal: React.FC<BulkDeleteModalProps> = ({
                     <button type="button" className="fw-icon-btn" onClick={onClose} aria-label="Close">✕</button>
                 </header>
                 <div className="fw-modal__body fw-modal__body--confirm">
-                    <p>Delete <strong>{count}</strong> selected {itemNoun}(s) from <code>{configName}</code>? Changes are staged in the draft; discard the draft to revert.</p>
+                    <p>
+                        Delete <strong>{count}</strong> selected {itemNoun}(s) from <code>{configName}</code>?
+                        {' '}
+                        {immediate
+                            ? 'This action cannot be undone.'
+                            : 'Changes are staged in the draft; discard the draft to revert.'}
+                    </p>
                 </div>
                 <footer className="fw-modal__foot">
                     <span />

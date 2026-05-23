@@ -484,6 +484,11 @@
     z-index: 3;
     pointer-events: auto;
     background: transparent;
+
+    &--wide {
+        width: 76px;
+        gap: 4px;
+    }
 }
 
 .fw-row-edit-btn {
@@ -506,6 +511,17 @@
         background: var(--fw-bg-2);
         color: var(--fw-text);
         border-color: var(--fw-text-3);
+    }
+
+    &--danger {
+        color: var(--fw-danger);
+        border-color: color-mix(in srgb, var(--g-color-text-danger) 25%, transparent);
+
+        &:hover {
+            background: color-mix(in srgb, var(--g-color-text-danger) 8%, transparent);
+            border-color: var(--fw-danger);
+            color: var(--fw-danger);
+        }
     }
 
 }
