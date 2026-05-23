@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 
 interface DraftItemDrawerProps {
     open: boolean;
@@ -37,7 +37,19 @@ const DraftItemDrawer: React.FC<DraftItemDrawerProps> = ({
     onJump,
     ariaLabel,
     children,
-}) => (
+}) => {
+    useEffect(() => {
+        if (!open) return;
+        const handler = (e: KeyboardEvent): void => {
+            if (e.key === 'Escape') {
+                onClose();
+            }
+        };
+        window.addEventListener('keydown', handler);
+        return () => window.removeEventListener('keydown', handler);
+    }, [open, onClose]);
+
+    return (
     <>
         <div
             className={`fw-backdrop${open ? ' fw-backdrop--open' : ''}`}
@@ -127,6 +139,7 @@ const DraftItemDrawer: React.FC<DraftItemDrawerProps> = ({
             )}
         </aside>
     </>
-);
+    );
+};
 
 export default DraftItemDrawer;
