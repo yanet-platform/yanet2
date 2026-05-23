@@ -42,9 +42,12 @@ export const isSortDirection = (value: string): value is 'asc' | 'desc' =>
     value === 'asc' || value === 'desc';
 
 /** Validates a MAC address string. Returns an error message or undefined when valid. */
-export const validateMAC = (value: string): string | undefined => {
-    if (!value.trim()) return undefined;
-    if (!isValidMAC(value.trim())) return 'Invalid MAC address (expected xx:xx:xx:xx:xx:xx)';
+export const validateMAC = (value: string, options?: { required?: boolean }): string | undefined => {
+    const trimmed = value.trim();
+    if (!trimmed) {
+        return options?.required ? 'MAC address is required' : undefined;
+    }
+    if (!isValidMAC(trimmed)) return 'Invalid MAC address (expected xx:xx:xx:xx:xx:xx)';
     return undefined;
 };
 

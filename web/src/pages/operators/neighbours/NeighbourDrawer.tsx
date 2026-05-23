@@ -72,8 +72,8 @@ const NeighbourDrawer: React.FC<NeighbourDrawerProps> = ({
     }, [open, mode, defaultTable, neighbour]);
 
     const nextHopError = mode === 'add' ? validateNextHop(nextHop) : undefined;
-    const linkAddrError = validateMAC(linkAddr);
-    const hardwareAddrError = validateMAC(hardwareAddr);
+    const linkAddrError = validateMAC(linkAddr, { required: true });
+    const hardwareAddrError = validateMAC(hardwareAddr, { required: true });
 
     const canSubmit =
         !submitting &&
@@ -191,7 +191,9 @@ const NeighbourDrawer: React.FC<NeighbourDrawerProps> = ({
                 <div className="fw-section-h">L2</div>
                 <div className="fw-section__body">
                     <div className="fw-field">
-                        <label className="fw-field__label">Neighbour MAC</label>
+                        <label className="fw-field__label">
+                            Neighbour MAC <span className="fw-field__req">*</span>
+                        </label>
                         <input
                             className={`fw-input fw-input--mono${linkAddrError ? ' fw-input--invalid' : ''}`}
                             value={linkAddr}
@@ -203,7 +205,9 @@ const NeighbourDrawer: React.FC<NeighbourDrawerProps> = ({
                         )}
                     </div>
                     <div className="fw-field">
-                        <label className="fw-field__label">Interface MAC</label>
+                        <label className="fw-field__label">
+                            Interface MAC <span className="fw-field__req">*</span>
+                        </label>
                         <input
                             className={`fw-input fw-input--mono${hardwareAddrError ? ' fw-input--invalid' : ''}`}
                             value={hardwareAddr}

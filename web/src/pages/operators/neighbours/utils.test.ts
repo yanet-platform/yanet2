@@ -50,11 +50,11 @@ describe('validateMAC', () => {
         expect(validateMAC('52:54:00:12:34:56')).toBeUndefined();
     });
 
-    it('returns undefined for an empty string', () => {
+    it('returns undefined for an empty string (no options)', () => {
         expect(validateMAC('')).toBeUndefined();
     });
 
-    it('returns undefined for a whitespace-only string', () => {
+    it('returns undefined for a whitespace-only string (no options)', () => {
         expect(validateMAC('   ')).toBeUndefined();
     });
 
@@ -64,6 +64,27 @@ describe('validateMAC', () => {
 
     it('returns an error message for an incomplete MAC', () => {
         expect(validateMAC('52:54:00:12')).toBeTruthy();
+    });
+
+    it('returns undefined for empty string when required is not set', () => {
+        expect(validateMAC('', {})).toBeUndefined();
+    });
+
+    it('returns required error for empty string when required is true', () => {
+        expect(validateMAC('', { required: true })).toBe('MAC address is required');
+    });
+
+    it('returns required error for whitespace-only string when required is true', () => {
+        expect(validateMAC('   ', { required: true })).toBe('MAC address is required');
+    });
+
+    it('returns undefined for valid MAC when required is true', () => {
+        expect(validateMAC('52:54:00:12:34:56', { required: true })).toBeUndefined();
+    });
+
+    it('returns format error for invalid MAC regardless of required option', () => {
+        expect(validateMAC('not-a-mac', { required: true })).toBe('Invalid MAC address (expected xx:xx:xx:xx:xx:xx)');
+        expect(validateMAC('not-a-mac', { required: false })).toBe('Invalid MAC address (expected xx:xx:xx:xx:xx:xx)');
     });
 });
 
