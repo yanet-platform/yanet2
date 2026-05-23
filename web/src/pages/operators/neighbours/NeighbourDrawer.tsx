@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Select } from '@gravity-ui/uikit';
 import { DraftItemDrawer } from '../../_shared/draft';
 import { ipAddressToString, stringToIPAddress } from '../../../utils/netip';
@@ -30,6 +30,7 @@ const NeighbourDrawer: React.FC<NeighbourDrawerProps> = ({
     onSubmit,
     onDelete,
 }) => {
+    const nextHopRef = useRef<HTMLInputElement>(null);
     const isMergedAdd = mode === 'add' && activeTable === MERGED_TAB;
 
     const tableOptions = tables
@@ -43,6 +44,12 @@ const NeighbourDrawer: React.FC<NeighbourDrawerProps> = ({
     const [device, setDevice] = useState('');
     const [priority, setPriority] = useState('');
     const [submitting, setSubmitting] = useState(false);
+
+    useEffect(() => {
+        if (open && mode === 'add') {
+            nextHopRef.current?.focus();
+        }
+    }, [open, mode]);
 
     useEffect(() => {
         if (open) {
@@ -163,6 +170,7 @@ const NeighbourDrawer: React.FC<NeighbourDrawerProps> = ({
                             {mode === 'add' && <span className="fw-field__req">*</span>}
                         </label>
                         <input
+                            ref={nextHopRef}
                             className={`fw-input fw-input--mono${nextHopError ? ' fw-input--invalid' : ''}`}
                             value={nextHop}
                             placeholder="192.168.1.1 or fe80::1"
