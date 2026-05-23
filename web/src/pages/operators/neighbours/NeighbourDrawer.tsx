@@ -159,7 +159,8 @@ const NeighbourDrawer: React.FC<NeighbourDrawerProps> = ({
                 <div className="fw-section__body">
                     <div className="fw-field">
                         <label className="fw-field__label">
-                            Next Hop <span className="fw-field__req">*</span>
+                            Next Hop
+                            {mode === 'add' && <span className="fw-field__req">*</span>}
                         </label>
                         <input
                             className={`fw-input fw-input--mono${nextHopError ? ' fw-input--invalid' : ''}`}
@@ -170,6 +171,9 @@ const NeighbourDrawer: React.FC<NeighbourDrawerProps> = ({
                         />
                         {nextHopError && (
                             <span className="fw-field__hint fw-field__error">{nextHopError}</span>
+                        )}
+                        {mode === 'edit' && (
+                            <span className="fw-field__hint">Primary key — delete and recreate to change.</span>
                         )}
                     </div>
                 </div>
