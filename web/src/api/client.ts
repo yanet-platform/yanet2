@@ -9,6 +9,26 @@ const compressGzip = async (data: string): Promise<Blob> => {
     return new Response(compressedStream).blob();
 };
 
+/** Extract a human-readable detail from an error response body. */
+const readErrorDetail = async (response: Response): Promise<string> => {
+    try {
+        const text = await response.text();
+        if (!text) return '';
+        try {
+            const parsed = JSON.parse(text);
+            if (typeof parsed === 'object' && parsed !== null) {
+                if (typeof parsed.message === 'string') return parsed.message;
+                if (typeof parsed.error === 'string') return parsed.error;
+            }
+            return text;
+        } catch {
+            return text;
+        }
+    } catch {
+        return '';
+    }
+};
+
 const callGRPCServiceWithBody = async <T>(
     servicePath: string,
     body: any,
@@ -35,7 +55,9 @@ const callGRPCServiceWithBody = async <T>(
     });
 
     if (!response.ok) {
-        throw new Error(`HTTP error: ${response.status} ${response.statusText}`);
+        const detail = await readErrorDetail(response);
+        const base = `HTTP ${response.status} ${response.statusText}`;
+        throw new Error(detail ? `${base}: ${detail}` : base);
     }
 
     return await response.json() as T;
@@ -118,7 +140,9 @@ const streamGRPCService = async <T>(
         });
 
         if (!response.ok) {
-            throw new Error(`HTTP error: ${response.status} ${response.statusText}`);
+            const detail = await readErrorDetail(response);
+            const base = `HTTP ${response.status} ${response.statusText}`;
+            throw new Error(detail ? `${base}: ${detail}` : base);
         }
 
         if (!response.body) {
