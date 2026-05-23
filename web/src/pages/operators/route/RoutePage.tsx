@@ -10,7 +10,7 @@ import { RouteSourceID, type Route } from '../../../api/routes';
 import { useRIB } from './useRIB';
 import { RIBTable } from './RIBTable';
 import RouteDrawer from './RouteDrawer';
-import { getRouteId, sortComparators } from './utils';
+import { getRouteId, sortComparators, planRouteSubmit } from './utils';
 import type { RouteSortState, RouteSortableColumn } from './types';
 import '../../../styles/draft-page.scss';
 
@@ -99,30 +99,36 @@ const RoutePage: React.FC = () => {
 
         const isEdit = drawer.mode === 'edit';
         const original = drawer.route;
-        const originalPrefix = original?.prefix;
-        const originalNexthop = original?.next_hop;
         const newNexthopStr = ipAddressToString(nexthopIp);
-        const originalNexthopStr = ipAddressToString(originalNexthop);
-        const keyChanged = isEdit && !!original && (originalPrefix !== params.prefix || originalNexthopStr !== newNexthopStr);
+        const originalNexthopStr = ipAddressToString(original?.next_hop);
+        const ops = planRouteSubmit(
+            drawer.mode,
+            { prefix: params.prefix, nexthopIp, doFlush: params.doFlush },
+            newNexthopStr,
+            original,
+            originalNexthopStr,
+        );
 
         try {
-            if (keyChanged && originalPrefix && originalNexthop) {
-                await API.route.deleteRoute({
-                    name: currentConfig,
-                    prefix: originalPrefix,
-                    nexthop_addr: originalNexthop,
-                    do_flush: false,
-                    source_id: RouteSourceID.STATIC,
-                });
+            for (const op of ops) {
+                if (op.type === 'delete') {
+                    await API.route.deleteRoute({
+                        name: currentConfig,
+                        prefix: op.prefix,
+                        nexthop_addr: op.nexthop,
+                        do_flush: false,
+                        source_id: RouteSourceID.STATIC,
+                    });
+                } else {
+                    await API.route.insertRoute({
+                        name: currentConfig,
+                        prefix: op.prefix,
+                        nexthop_addr: op.nexthop,
+                        do_flush: op.doFlush,
+                        source_id: RouteSourceID.STATIC,
+                    });
+                }
             }
-
-            await API.route.insertRoute({
-                name: currentConfig,
-                prefix: params.prefix,
-                nexthop_addr: nexthopIp,
-                do_flush: params.doFlush,
-                source_id: RouteSourceID.STATIC,
-            });
 
             await reload();
             toaster.success('route-add-success', isEdit ? 'Route updated.' : 'Route added.');

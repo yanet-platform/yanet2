@@ -3,7 +3,7 @@ import { Select } from '@gravity-ui/uikit';
 import { DraftItemDrawer } from '../../_shared/draft';
 import { ipAddressToString, stringToIPAddress } from '../../../utils/netip';
 import type { Neighbour, NeighbourTableInfo } from '../../../api/neighbours';
-import { validateMAC, validateNextHop } from './utils';
+import { validateMAC, validateNextHop, resolveSubmitTable } from './utils';
 import { MERGED_TAB } from './types';
 
 export interface NeighbourDrawerProps {
@@ -79,15 +79,7 @@ const NeighbourDrawer: React.FC<NeighbourDrawerProps> = ({
         if (!canSubmit) return;
         setSubmitting(true);
         try {
-            const resolvedTable = (() => {
-                if (mode === 'add' && activeTable === MERGED_TAB) {
-                    return selectedTable[0] || defaultTable;
-                }
-                if (mode === 'edit' && activeTable === MERGED_TAB) {
-                    return neighbour?.source || 'static';
-                }
-                return activeTable;
-            })();
+            const resolvedTable = resolveSubmitTable(mode, activeTable, selectedTable[0], defaultTable, neighbour);
 
             let nextHopWire: Neighbour['next_hop'];
             if (mode === 'add') {
@@ -123,15 +115,7 @@ const NeighbourDrawer: React.FC<NeighbourDrawerProps> = ({
         }
     };
 
-    const resolvedTableForTitle = (() => {
-        if (mode === 'add' && activeTable === MERGED_TAB) {
-            return selectedTable[0] || defaultTable;
-        }
-        if (mode === 'edit' && activeTable === MERGED_TAB) {
-            return neighbour?.source || 'static';
-        }
-        return activeTable;
-    })();
+    const resolvedTableForTitle = resolveSubmitTable(mode, activeTable, selectedTable[0], defaultTable, neighbour);
     const tableLabel = mode === 'add' && activeTable === MERGED_TAB
         ? undefined
         : resolvedTableForTitle || undefined;

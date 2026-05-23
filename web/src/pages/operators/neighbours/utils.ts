@@ -9,6 +9,24 @@ import {
 } from '../../../utils';
 import { ipAddressToString, stringToIPAddress } from '../../../utils/netip';
 import type { SortableColumn } from './types';
+import { MERGED_TAB } from './types';
+
+/** Resolve the target table for a neighbour drawer submit. */
+export const resolveSubmitTable = (
+    mode: 'add' | 'edit',
+    activeTable: string,
+    selectedTable: string | undefined,
+    defaultTable: string,
+    neighbour: Neighbour | null,
+): string => {
+    if (mode === 'add' && activeTable === MERGED_TAB) {
+        return selectedTable || defaultTable;
+    }
+    if (mode === 'edit' && activeTable === MERGED_TAB) {
+        return neighbour?.source || 'static';
+    }
+    return activeTable;
+};
 
 export { isValidMAC };
 

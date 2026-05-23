@@ -1,7 +1,38 @@
 import type { Route } from '../../../api/routes';
 import { parseCIDRPrefix, parseIPAddress, CIDRParseError, IPParseError } from '../../../utils';
-import { ipAddressToString } from '../../../utils/netip';
+import { ipAddressToString, type IPAddressWire } from '../../../utils/netip';
 import type { RouteSortableColumn } from './types';
+
+export interface RouteSubmitParams {
+    prefix: string;
+    nexthopIp: IPAddressWire;
+    doFlush: boolean;
+}
+
+export type RouteSubmitOp =
+    | { type: 'delete'; prefix: string; nexthop: IPAddressWire }
+    | { type: 'insert'; prefix: string; nexthop: IPAddressWire; doFlush: boolean };
+
+/** Plan API operations for submitting a route. In add mode, just insert.
+ *
+ * In edit mode, delete the original first when its key changed. */
+export const planRouteSubmit = (
+    mode: 'add' | 'edit',
+    params: RouteSubmitParams,
+    newNexthopStr: string,
+    original: Route | null,
+    originalNexthopStr: string,
+): RouteSubmitOp[] => {
+    const ops: RouteSubmitOp[] = [];
+    const keyChanged = mode === 'edit'
+        && !!original
+        && (original.prefix !== params.prefix || originalNexthopStr !== newNexthopStr);
+    if (keyChanged && original?.prefix && original.next_hop) {
+        ops.push({ type: 'delete', prefix: original.prefix, nexthop: original.next_hop });
+    }
+    ops.push({ type: 'insert', prefix: params.prefix, nexthop: params.nexthopIp, doFlush: params.doFlush });
+    return ops;
+};
 
 export const ROUTE_SOURCES = ['Unknown', 'Static', 'BIRD'] as const;
 
