@@ -59,7 +59,7 @@ pub struct ListCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct ShowCmd {
     /// Function name.
-    #[arg(long)]
+    #[arg(short, long)]
     pub name: String,
     /// Output format.
     #[clap(long, value_enum, default_value_t)]
@@ -69,7 +69,7 @@ pub struct ShowCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct UpdateCmd {
     /// Function name.
-    #[arg(long)]
+    #[arg(short, long)]
     pub name: String,
     /// Chains in format name:weight=type:name,type:name
     #[arg(long)]

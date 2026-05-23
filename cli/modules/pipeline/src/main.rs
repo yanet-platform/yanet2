@@ -59,7 +59,7 @@ pub struct ListCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct ShowCmd {
     /// Pipeline name.
-    #[arg(long)]
+    #[arg(short, long)]
     pub name: String,
     /// Output format.
     #[clap(long, value_enum, default_value_t)]
@@ -69,7 +69,7 @@ pub struct ShowCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct UpdateCmd {
     /// Pipeline name.
-    #[arg(long)]
+    #[arg(short, long)]
     pub name: String,
     /// Pipeline functions.
     #[arg(long, value_delimiter = ',')]
