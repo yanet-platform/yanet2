@@ -37,7 +37,7 @@ const COLUMN_WIDTHS = {
     devices: 130,
     counter: 140,
     actions: 190,
-    sparkline: 110,
+    sparkline: 210,
 } as const;
 
 const TOTAL_WIDTH = Object.values(COLUMN_WIDTHS).reduce((a, b) => a + b, 0);
@@ -255,15 +255,18 @@ const VirtualRow: React.FC<VirtualRowProps> = memo(({
                     <>
                         {rate ? (
                             <>
-                                <Sparkline values={rate.history} width={52} height={16} />
-                                <span className="fw-cell-pps" title={`${rate.pps.toFixed(0)} pps`}>
+                                <Sparkline values={rate.history} width={120} height={22} />
+                                <span className="fw-cell-pps acl-cell-pps" title={`${rate.pps.toFixed(0)} pps`}>
                                     {rate.pps >= 1000
                                         ? `${(rate.pps / 1000).toFixed(1)}k`
                                         : rate.pps.toFixed(0)}
                                 </span>
                             </>
                         ) : (
-                            <span className="fw-cell-pps acl-pps-loading" title="Waiting for counter data">…</span>
+                            <>
+                                <Sparkline values={null} width={120} height={22} />
+                                <span className="fw-cell-pps acl-cell-pps acl-pps-loading" title="Waiting for counter data">…</span>
+                            </>
                         )}
                         <button
                             type="button"
@@ -277,7 +280,8 @@ const VirtualRow: React.FC<VirtualRowProps> = memo(({
                     </>
                 ) : (
                     <>
-                        <span className="fw-cell-pps" style={{ color: 'var(--fw-text-3)' }}>—</span>
+                        <Sparkline values={null} width={120} height={22} />
+                        <span className="fw-cell-pps acl-cell-pps" style={{ color: 'var(--fw-text-3)' }}>—</span>
                         <button
                             type="button"
                             className={`acl-counter-toggle acl-counter-toggle--off${!item.counter ? ' acl-counter-toggle--default' : ''}`}

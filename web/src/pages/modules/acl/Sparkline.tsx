@@ -25,6 +25,13 @@ const Sparkline: React.FC<SparklineProps> = ({
             <span
                 className="fw-spark-empty"
                 title="No counter history available"
+                style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    width,
+                    height,
+                }}
             >
                 --
             </span>

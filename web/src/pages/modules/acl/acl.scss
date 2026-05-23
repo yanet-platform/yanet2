@@ -312,6 +312,12 @@
     }
 }
 
+.acl-cell-pps {
+    display: inline-block;
+    width: 36px;
+    text-align: right;
+}
+
 .acl-pps-loading {
     color: var(--fw-text-3);
     font-family: var(--fw-font-mono);
