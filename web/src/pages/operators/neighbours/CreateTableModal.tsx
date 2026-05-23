@@ -30,11 +30,13 @@ const CreateTableModal: React.FC<CreateTableModalProps> = ({
 
     const trimmedName = name.trim();
     const priorityNum = Number(defaultPriority);
-    const nameError = !trimmedName
-        ? 'Name is required'
-        : existingNames.includes(trimmedName)
-            ? 'A table with this name already exists'
-            : undefined;
+    const nameError = submitting
+        ? undefined
+        : !trimmedName
+            ? 'Name is required'
+            : existingNames.includes(trimmedName)
+                ? 'A table with this name already exists'
+                : undefined;
     const priorityError =
         !defaultPriority.trim() || isNaN(priorityNum) || priorityNum < 0 || !Number.isInteger(priorityNum)
             ? 'Priority must be a non-negative integer'
