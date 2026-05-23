@@ -128,8 +128,13 @@ func (m *RouteService) ShowFIB(
 			}
 		}
 
+		ipRange, err := commonpb.NewIPRange(e.PrefixFrom, e.PrefixTo)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to build IP range from FIB entry: %v", err)
+		}
+
 		response.Entries = append(response.Entries, &routepb.FIBRangeEntry{
-			Range:    commonpb.NewIPRange(e.PrefixFrom, e.PrefixTo),
+			Range:    ipRange,
 			Nexthops: nexthops,
 		})
 	}

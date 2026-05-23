@@ -6,12 +6,43 @@ import (
 	"net/netip"
 )
 
-// NewIPRange creates an IPRange from two netip.Addr values.
-func NewIPRange(start, end netip.Addr) *IPRange {
+// NewIPRange creates an IPRange from two netip.Addr values, returning an error
+// if either address is invalid.
+//
+// Returns an error if start is not a valid address, if end is not a valid
+// address, if start and end belong to different address families, or if start
+// is greater than end.
+func NewIPRange(start, end netip.Addr) (*IPRange, error) {
+	if !start.IsValid() {
+		return nil, fmt.Errorf("invalid start address")
+	}
+	if !end.IsValid() {
+		return nil, fmt.Errorf("invalid end address")
+	}
+	if start.Is4() != end.Is4() {
+		return nil, fmt.Errorf("address family mismatch: start is IPv%d, end is IPv%d",
+			familyNum(start), familyNum(end))
+	}
+	if start.Compare(end) > 0 {
+		return nil, fmt.Errorf("start address %q is greater than end address %q",
+			start.String(), end.String())
+	}
 	return &IPRange{
 		Start: NewIPAddressFromAddr(start),
 		End:   NewIPAddressFromAddr(end),
+	}, nil
+}
+
+// MustIPRange is like NewIPRange but panics if validation fails.
+//
+// Intended for tests and package-level variable initialisation where the
+// inputs are static and any failure indicates a programming bug.
+func MustIPRange(start, end netip.Addr) *IPRange {
+	r, err := NewIPRange(start, end)
+	if err != nil {
+		panic(err)
 	}
+	return r
 }
 
 // ToRange converts the IPRange back to a pair of netip.Addr values.
@@ -98,6 +129,11 @@ func (m *IPRange) UnmarshalJSON(data []byte) error {
 		)
 	}
 
-	*m = *NewIPRange(start, end)
+	r, err := NewIPRange(start, end)
+	if err != nil {
+		return err
+	}
+	m.Start = r.Start
+	m.End = r.End
 	return nil
 }

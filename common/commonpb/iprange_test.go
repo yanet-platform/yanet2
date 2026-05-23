@@ -13,7 +13,8 @@ func TestNewIPRange_V4(t *testing.T) {
 	start := netip.MustParseAddr("10.0.0.0")
 	end := netip.MustParseAddr("10.0.0.255")
 
-	r := NewIPRange(start, end)
+	r, err := NewIPRange(start, end)
+	require.NoError(t, err)
 
 	require.NotNil(t, r.Start)
 	require.NotNil(t, r.End)
@@ -25,12 +26,62 @@ func TestNewIPRange_V6(t *testing.T) {
 	start := netip.MustParseAddr("2001:db8::")
 	end := netip.MustParseAddr("2001:db8::ffff")
 
-	r := NewIPRange(start, end)
+	r, err := NewIPRange(start, end)
+	require.NoError(t, err)
 
 	require.NotNil(t, r.Start)
 	require.NotNil(t, r.End)
 	require.Len(t, r.Start.Addr, 16)
 	require.Len(t, r.End.Addr, 16)
+}
+
+func TestNewIPRange_Errors(t *testing.T) {
+	tests := []struct {
+		name    string
+		start   netip.Addr
+		end     netip.Addr
+		wantSub string // substring expected in err.Error()
+	}{
+		{
+			name:    "invalid start",
+			start:   netip.Addr{},
+			end:     netip.MustParseAddr("10.0.0.1"),
+			wantSub: "invalid start address",
+		},
+		{
+			name:    "invalid end",
+			start:   netip.MustParseAddr("10.0.0.1"),
+			end:     netip.Addr{},
+			wantSub: "invalid end address",
+		},
+		{
+			name:    "family mismatch",
+			start:   netip.MustParseAddr("10.0.0.0"),
+			end:     netip.MustParseAddr("2001:db8::1"),
+			wantSub: "address family mismatch",
+		},
+		{
+			name:    "start greater than end IPv4",
+			start:   netip.MustParseAddr("10.0.0.10"),
+			end:     netip.MustParseAddr("10.0.0.1"),
+			wantSub: "greater than end address",
+		},
+		{
+			name:    "start greater than end IPv6",
+			start:   netip.MustParseAddr("2001:db8::10"),
+			end:     netip.MustParseAddr("2001:db8::1"),
+			wantSub: "greater than end address",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r, err := NewIPRange(tt.start, tt.end)
+			require.Error(t, err)
+			require.Nil(t, r)
+			require.Contains(t, err.Error(), tt.wantSub)
+		})
+	}
 }
 
 func TestIPRange_ToRange_RoundTrip(t *testing.T) {
@@ -63,7 +114,7 @@ func TestIPRange_ToRange_RoundTrip(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			r := NewIPRange(tt.start, tt.end)
+			r := MustIPRange(tt.start, tt.end)
 			gotStart, gotEnd, err := r.ToRange()
 			require.NoError(t, err)
 			require.Equal(t, tt.start, gotStart)
@@ -108,12 +159,12 @@ func TestIPRange_MarshalJSON(t *testing.T) {
 	}{
 		{
 			name: "IPv4",
-			r:    NewIPRange(netip.MustParseAddr("10.0.0.0"), netip.MustParseAddr("10.0.0.255")),
+			r:    MustIPRange(netip.MustParseAddr("10.0.0.0"), netip.MustParseAddr("10.0.0.255")),
 			want: `{"start":"10.0.0.0","end":"10.0.0.255"}`,
 		},
 		{
 			name: "IPv6",
-			r:    NewIPRange(netip.MustParseAddr("2001:db8::"), netip.MustParseAddr("2001:db8::ffff")),
+			r:    MustIPRange(netip.MustParseAddr("2001:db8::"), netip.MustParseAddr("2001:db8::ffff")),
 			want: `{"start":"2001:db8::","end":"2001:db8::ffff"}`,
 		},
 		{
@@ -228,7 +279,7 @@ func TestIPRange_JSONRoundTrip(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			original := NewIPRange(tt.start, tt.end)
+			original := MustIPRange(tt.start, tt.end)
 
 			data, err := json.Marshal(original)
 			require.NoError(t, err)
@@ -252,12 +303,12 @@ func TestIPRange_AsLogValue(t *testing.T) {
 	}{
 		{
 			name: "IPv4",
-			r:    NewIPRange(netip.MustParseAddr("10.0.0.0"), netip.MustParseAddr("10.0.0.255")),
+			r:    MustIPRange(netip.MustParseAddr("10.0.0.0"), netip.MustParseAddr("10.0.0.255")),
 			want: "[10.0.0.0, 10.0.0.255]",
 		},
 		{
 			name: "IPv6",
-			r:    NewIPRange(netip.MustParseAddr("2001:db8::"), netip.MustParseAddr("2001:db8::ffff")),
+			r:    MustIPRange(netip.MustParseAddr("2001:db8::"), netip.MustParseAddr("2001:db8::ffff")),
 			want: "[2001:db8::, 2001:db8::ffff]",
 		},
 		{
