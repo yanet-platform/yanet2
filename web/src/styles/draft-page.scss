@@ -477,7 +477,6 @@
     position: absolute;
     right: 0;
     width: 40px;
-    height: 44px; // matches ROW_HEIGHT constant
     display: flex;
     align-items: center;
     justify-content: center;
@@ -485,12 +484,6 @@
     z-index: 3;
     pointer-events: auto;
     background: transparent;
-
-    // Wider slot for two action buttons.
-    &--wide {
-        width: 64px;
-        gap: 4px;
-    }
 }
 
 .fw-row-edit-btn {
@@ -515,17 +508,6 @@
         border-color: var(--fw-text-3);
     }
 
-    // Danger (delete) variant in the overlay.
-    &--danger {
-        color: var(--fw-danger);
-        border-color: color-mix(in srgb, var(--g-color-text-danger) 25%, transparent);
-
-        &:hover {
-            background: color-mix(in srgb, var(--g-color-text-danger) 8%, transparent);
-            border-color: var(--fw-danger);
-            color: var(--fw-danger);
-        }
-    }
 }
 
 .fw-table-empty {

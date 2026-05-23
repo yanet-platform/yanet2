@@ -8,7 +8,7 @@ import DirectionBadge from './DirectionBadge';
 import AnyBadge from './AnyBadge';
 import Sparkline from './Sparkline';
 import { formatPps } from '../../../utils';
-import { DraftActionButtons } from '../../_shared/draft';
+import { DraftActionButtons, RowHoverEditOverlay } from '../../_shared/draft';
 
 /** Duration in ms of the CSS transition on .fw-drawer — keep in sync with SCSS. */
 const DRAWER_TRANSITION_MS = 220;
@@ -466,22 +466,15 @@ const RuleTable: React.FC<RuleTableProps> = ({
               * into the boundary just have the button disappear naturally.
               */}
             {hoveredItem !== null && (
-                <div
-                    className="fw-row-action-slot"
-                    style={{ top: overlayTopOffset }}
+                <RowHoverEditOverlay
+                    top={overlayTopOffset}
+                    rowHeight={ROW_HEIGHT}
+                    onEdit={handleOverlayEdit}
+                    editAriaLabel={`Edit rule ${hoveredItem.index + 1}`}
+                    editTitle="Edit rule"
                     onMouseEnter={handleOverlayMouseEnter}
                     onMouseLeave={handleOverlayMouseLeave}
-                >
-                    <button
-                        type="button"
-                        className="fw-row-edit-btn fw-row-edit-btn--visible"
-                        onClick={handleOverlayEdit}
-                        aria-label={`Edit rule ${hoveredItem !== null ? hoveredItem.index + 1 : ''}`}
-                        title="Edit rule"
-                    >
-                        ✎
-                    </button>
-                </div>
+                />
             )}
         </div>
     );

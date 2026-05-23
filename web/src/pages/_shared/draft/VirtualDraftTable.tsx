@@ -5,9 +5,10 @@ import { Checkbox } from '@gravity-ui/uikit';
 import DraftActionButtons from './DraftActionButtons';
 import { useRowHoverOverlay } from './useRowHoverOverlay';
 import RemovedRowsSection from './RemovedRowsSection';
+import RowHoverEditOverlay from './RowHoverEditOverlay';
 import type { RemovedColumnDescriptor } from './RemovedRowsSection';
 
-const ROW_HEIGHT = 40;
+const ROW_HEIGHT = 44;
 const HEADER_HEIGHT = 40;
 const FOOTER_HEIGHT = 28;
 const OVERSCAN = 15;
@@ -363,22 +364,15 @@ export const VirtualDraftTable = <T extends { id: string }>({
             </div>
 
             {hoveredRow !== null && (
-                <div
-                    className="fw-row-action-slot"
-                    style={{ top: overlayTopOffset }}
+                <RowHoverEditOverlay
+                    top={overlayTopOffset}
+                    rowHeight={ROW_HEIGHT}
+                    onEdit={handleOverlayEdit}
+                    editAriaLabel={`Edit ${itemNoun} ${allRows.findIndex((r) => r.id === hoveredRow.id) + 1}`}
+                    editTitle={`Edit ${itemNoun}`}
                     onMouseEnter={handleOverlayMouseEnter}
                     onMouseLeave={handleOverlayMouseLeave}
-                >
-                    <button
-                        type="button"
-                        className="fw-row-edit-btn fw-row-edit-btn--visible"
-                        onClick={handleOverlayEdit}
-                        aria-label={`Edit ${itemNoun} ${allRows.findIndex((r) => r.id === hoveredRow.id) + 1}`}
-                        title={`Edit ${itemNoun}`}
-                    >
-                        ✎
-                    </button>
-                </div>
+                />
             )}
         </div>
     );

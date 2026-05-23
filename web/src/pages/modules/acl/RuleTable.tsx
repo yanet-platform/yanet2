@@ -14,7 +14,7 @@ import {
     ActionChain,
     ChipList,
 } from './chips';
-import { DraftActionButtons } from '../../_shared/draft';
+import { DraftActionButtons, RowHoverEditOverlay } from '../../_shared/draft';
 import type { RuleRate } from './useAclRuleCounters';
 import Sparkline from './Sparkline';
 
@@ -539,22 +539,15 @@ const RuleTable: React.FC<RuleTableProps> = ({
             </div>
 
             {hoveredItem !== null && (
-                <div
-                    className="fw-row-action-slot"
-                    style={{ top: overlayTopOffset }}
+                <RowHoverEditOverlay
+                    top={overlayTopOffset}
+                    rowHeight={ROW_HEIGHT}
+                    onEdit={handleOverlayEdit}
+                    editAriaLabel={`Edit rule ${hoveredItem.index + 1}`}
+                    editTitle="Edit rule"
                     onMouseEnter={handleOverlayMouseEnter}
                     onMouseLeave={handleOverlayMouseLeave}
-                >
-                    <button
-                        type="button"
-                        className="fw-row-edit-btn fw-row-edit-btn--visible"
-                        onClick={handleOverlayEdit}
-                        aria-label={`Edit rule ${hoveredItem.index + 1}`}
-                        title="Edit rule"
-                    >
-                        ✎
-                    </button>
-                </div>
+                />
             )}
         </div>
     );

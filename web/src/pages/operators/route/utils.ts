@@ -1,20 +1,19 @@
 import type { Route } from '../../../api/routes';
-import {
-    parseCIDRPrefix,
-    parseIPAddress,
-    CIDRParseError,
-    IPParseError,
-} from '../../../utils';
+import { parseCIDRPrefix, parseIPAddress, CIDRParseError, IPParseError } from '../../../utils';
+import { ipAddressToString } from '../../../utils/netip';
+import type { RouteSortableColumn } from './types';
 
-export const getRouteId = (route: Route): string => {
-    return `${route.prefix || ''}_${route.next_hop || ''}_${route.peer || ''}_${route.route_distinguisher || ''}`;
-};
+export const ROUTE_SOURCES = ['Unknown', 'Static', 'BIRD'] as const;
 
+/** Returns a stable string key for a route row. */
+export const getRouteId = (route: Route): string =>
+    `${route.prefix || ''}_${String(route.next_hop?.addr || '')}_${String(route.peer?.addr || '')}_${route.route_distinguisher || ''}`;
+
+/** Validates a CIDR prefix string. Returns an error message or undefined when valid. */
 export const validatePrefix = (prefix: string): string | undefined => {
     if (!prefix.trim()) {
         return undefined;
     }
-
     const result = parseCIDRPrefix(prefix);
     if (!result.ok) {
         switch (result.error) {
@@ -30,15 +29,14 @@ export const validatePrefix = (prefix: string): string | undefined => {
                 return 'Invalid prefix format';
         }
     }
-
     return undefined;
 };
 
+/** Validates a next-hop IP address string. Returns an error message or undefined when valid. */
 export const validateNexthop = (nexthop: string): string | undefined => {
     if (!nexthop.trim()) {
         return undefined;
     }
-
     const result = parseIPAddress(nexthop);
     if (!result.ok) {
         switch (result.error) {
@@ -50,11 +48,16 @@ export const validateNexthop = (nexthop: string): string | undefined => {
                 return 'Invalid IP address format';
         }
     }
-
     return undefined;
 };
 
-export const formatRouteCount = (count: number): string => {
-    if (count === 1) return 'route';
-    return 'routes';
+/** Sort comparators for each sortable column. */
+export const sortComparators: Record<RouteSortableColumn, (a: Route, b: Route) => number> = {
+    prefix: (a, b) => (a.prefix || '').localeCompare(b.prefix || ''),
+    next_hop: (a, b) => ipAddressToString(a.next_hop).localeCompare(ipAddressToString(b.next_hop)),
+    peer: (a, b) => ipAddressToString(a.peer).localeCompare(ipAddressToString(b.peer)),
+    is_best: (a, b) => (a.is_best ? 1 : 0) - (b.is_best ? 1 : 0),
+    pref: (a, b) => (a.pref ?? 0) - (b.pref ?? 0),
+    as_path_len: (a, b) => (a.as_path_len ?? 0) - (b.as_path_len ?? 0),
+    source: (a, b) => (a.source ?? 0) - (b.source ?? 0),
 };

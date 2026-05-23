@@ -6,6 +6,10 @@ interface DraftItemDrawerProps {
     total: number;
     /** Singular noun for the item type, e.g. "route" or "prefix". */
     titleSingular: string;
+    /** Verb shown before the noun in the drawer title. Defaults to "Edit". */
+    titleVerb?: string;
+    /** When true, hides the "#N" index badge in the title. Defaults to false. */
+    hideIndex?: boolean;
     onClose: () => void;
     onApply: () => void;
     onDelete?: () => void;
@@ -25,6 +29,8 @@ const DraftItemDrawer: React.FC<DraftItemDrawerProps> = ({
     index,
     total,
     titleSingular,
+    titleVerb,
+    hideIndex,
     onClose,
     onApply,
     onDelete,
@@ -48,8 +54,13 @@ const DraftItemDrawer: React.FC<DraftItemDrawerProps> = ({
                 <>
                     <header className="fw-drawer__head">
                         <h2 className="fw-drawer__title">
-                            Edit {titleSingular}{' '}
-                            <span className="fw-drawer__rule-num">#{index + 1}</span>
+                            {titleVerb ?? 'Edit'} {titleSingular}
+                            {!hideIndex && (
+                                <>
+                                    {' '}
+                                    <span className="fw-drawer__rule-num">#{index + 1}</span>
+                                </>
+                            )}
                         </h2>
                         <div className="fw-drawer__head-actions">
                             <button

@@ -8,6 +8,7 @@ export { default as DraftActionButtons, SaveIcon, TrashIcon } from './DraftActio
 export { useRowHoverOverlay } from './useRowHoverOverlay';
 export type { UseRowHoverOverlayResult } from './useRowHoverOverlay';
 export { default as RemovedRowsSection } from './RemovedRowsSection';
+export { default as RowHoverEditOverlay } from './RowHoverEditOverlay';
 export type { RemovedColumnDescriptor } from './RemovedRowsSection';
 export { default as DraftItemDrawer } from './DraftItemDrawer';
 export { default as DraftPageToolbar } from './DraftPageToolbar';
