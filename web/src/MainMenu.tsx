@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { AsideHeader } from '@gravity-ui/navigation';
 import type { MenuItem as AsideHeaderMenuItem } from '@gravity-ui/navigation';
 import { Link, Eye, Route, CurlyBracketsFunction, ListUl, HardDrive, LayoutCellsLarge, CirclePlay, Shield, ArrowRight } from '@gravity-ui/icons';
@@ -20,6 +21,7 @@ type NavMenuItem = AsideHeaderMenuItem & {
 
 const MainMenu = ({ currentPage, onPageChange, renderContent, disabled = false }: MainMenuProps): React.JSX.Element => {
     const [compact, setCompact] = useState<boolean>(false);
+    const navigate = useNavigate();
 
     const createMenuItem = (id: PageId, title: string, icon: NavMenuItem['icon']): NavMenuItem => ({
         id,
@@ -84,6 +86,13 @@ const MainMenu = ({ currentPage, onPageChange, renderContent, disabled = false }
             logo={{
                 icon: () => <Logo size={24} />,
                 text: 'YANET',
+                href: '/builtin/dashboard',
+                onClick: (event) => {
+                    event.preventDefault();
+                    if (!disabled) {
+                        navigate('/builtin/dashboard');
+                    }
+                },
             }}
             renderContent={renderContent}
         />
