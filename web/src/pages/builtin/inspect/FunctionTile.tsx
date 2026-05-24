@@ -1,44 +1,34 @@
 import React from 'react';
+import { useLaggedValue } from './hooks';
 import { Sparkline } from './Sparkline';
-import { fmtPkts } from './formatters';
+import { IconFn } from './icons';
+import { fmtPps } from './formatters';
 
 export interface FunctionTileProps {
     name: string;
-    chains: string[];
     pps: number;
-    series: number[];
+    trend: number[];
 }
 
-export const FunctionTile: React.FC<FunctionTileProps> = ({ name, chains, pps, series }) => {
+/** Single function tile in FnWall with lag-interpolated PPS display. */
+export const FunctionTile: React.FC<FunctionTileProps> = ({ name, pps, trend }) => {
+    const smoothPps = useLaggedValue(pps, 1500);
+    const active = pps > 0;
+
     return (
-        <div className="inspect-fn">
-            <div className="inspect-fn-head">
-                <span className="inspect-mono inspect-fn-name">{name}</span>
-                <span className="inspect-fn-chains">{chains.length} chain</span>
+        <div className={`iv-fn-tile${active ? ' iv-fn-tile--active' : ''}`}>
+            <div className="iv-fn-tile__header">
+                <span style={{ color: active ? 'var(--iv-accent)' : 'var(--iv-mute)', display: 'flex', alignItems: 'center' }}>
+                    <IconFn size={10} />
+                </span>
+                <span className="iv-fn-tile__name">{name}</span>
             </div>
-            <div className="inspect-fn-items">
-                {chains.length === 0 ? (
-                    <span className="inspect-fn-item-empty">—</span>
-                ) : (
-                    chains.map((c, idx) => (
-                        <span
-                            key={`${c}-${idx}`}
-                            className="inspect-mono inspect-fn-item"
-                        >
-                            {c}
-                        </span>
-                    ))
-                )}
-            </div>
-            <div className="inspect-fn-spark">
-                <Sparkline
-                    data={series}
-                    color="var(--inspect-accent)"
-                    w={140}
-                    h={22}
-                    fill
-                />
-                <span className="inspect-num inspect-fn-pps">{fmtPkts(pps)} pps</span>
+            <div className="iv-fn-tile__bottom">
+                <span className="iv-fn-tile__pps">
+                    {fmtPps(smoothPps)}
+                    <span className="iv-pps-unit"> pps</span>
+                </span>
+                <Sparkline data={trend} w={48} h={12} color="var(--iv-accent)" />
             </div>
         </div>
     );

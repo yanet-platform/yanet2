@@ -3,13 +3,12 @@ import { toaster } from '../../../utils';
 import { API } from '../../../api';
 import type { InstanceInfo } from '../../../api/inspect';
 import { PageLayout, PageLoader, EmptyState } from '../../../components';
-import {
-    InstanceCard,
-    InspectPageHeader,
-    InspectPageFooter,
-} from '.';
+import { InspectPageHeader } from './InspectPageHeader';
+import { InspectPageFooter } from './InspectPageFooter';
+import { InstanceCard } from './InstanceCard';
 import './inspect.scss';
 
+/** HUD-style inspect page showing aggregate throughput, devices, modules, pipelines, and functions. */
 const InspectPage = (): React.JSX.Element => {
     const [instanceInfo, setInstanceInfo] = useState<InstanceInfo | null>(null);
     const [initialLoading, setInitialLoading] = useState<boolean>(true);
@@ -34,20 +33,20 @@ const InspectPage = (): React.JSX.Element => {
         loadInspect();
     }, [loadInspect]);
 
-    const header = <InspectPageHeader onRefresh={loadInspect} refreshing={refreshing} />;
+    const header = (
+        <InspectPageHeader onRefresh={loadInspect} refreshing={refreshing} />
+    );
 
     return (
         <PageLayout header={header}>
             <div className="inspect-page">
-                <div className="inspect-page-body">
-                    {initialLoading ? (
-                        <PageLoader loading size="l" />
-                    ) : !instanceInfo ? (
-                        <EmptyState message="No instance data found" />
-                    ) : (
-                        <InstanceCard instance={instanceInfo} />
-                    )}
-                </div>
+                {initialLoading ? (
+                    <PageLoader loading size="l" />
+                ) : !instanceInfo ? (
+                    <EmptyState message="No instance data found" />
+                ) : (
+                    <InstanceCard instance={instanceInfo} />
+                )}
                 <InspectPageFooter lastUpdate={lastUpdate} />
             </div>
         </PageLayout>

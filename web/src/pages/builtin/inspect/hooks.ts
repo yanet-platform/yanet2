@@ -369,3 +369,119 @@ export const useFunctionCounters = (
 
     return { rates, series };
 };
+
+/**
+ * Animate a numeric value by lagging one sample behind real time and linearly
+ * interpolating from the previous committed sample toward the current one as
+ * wall clock advances. Matches the "buffer 2 seconds, draw 0..1 with interp"
+ * pattern: the returned value always sits inside [previous, current], never
+ * extrapolating past current.
+ *
+ * The hook commits a new sample only when `value` changes — so the source
+ * upstream MUST tick on each poll (which it does for pipeline/function rates).
+ * `intervalMs` is the expected cadence between source updates; it sets the
+ * animation duration of the trailing segment.
+ */
+export const useLaggedValue = (value: number, intervalMs: number = 1500): number => {
+    const prevRef = useRef<{ value: number; ts: number }>({ value, ts: performance.now() });
+    const curRef = useRef<{ value: number; ts: number }>({ value, ts: performance.now() });
+    const lastInputRef = useRef<number>(value);
+    const [animated, setAnimated] = useState<number>(value);
+
+    if (lastInputRef.current !== value) {
+        prevRef.current = curRef.current;
+        curRef.current = { value, ts: performance.now() };
+        lastInputRef.current = value;
+    }
+
+    useEffect(() => {
+        let raf = 0;
+        const tick = (): void => {
+            const now = performance.now();
+            const dt = now - curRef.current.ts;
+            const t = Math.max(0, Math.min(1, dt / intervalMs));
+            const next = prevRef.current.value + (curRef.current.value - prevRef.current.value) * t;
+            setAnimated(next);
+            raf = requestAnimationFrame(tick);
+        };
+        raf = requestAnimationFrame(tick);
+        return () => cancelAnimationFrame(raf);
+    }, [intervalMs]);
+
+    return animated;
+};
+
+/**
+ * Per-key lag-interpolated rolling series: takes a Map<string, number> of
+ * latest sample values (one per key) and returns a Map<string, number[]> where
+ * each series is built with lag-interpolation.
+ */
+export const useLaggedSeriesMap = (
+    values: Map<string, number>,
+    maxLen: number = DEFAULT_MAX_LEN,
+    intervalMs: number = DEFAULT_INTERVAL_MS,
+): Map<string, number[]> => {
+    const samplesMapRef = useRef<Map<string, number[]>>(new Map());
+    const prevMapRef = useRef<Map<string, { value: number; ts: number }>>(new Map());
+    const curMapRef = useRef<Map<string, { value: number; ts: number }>>(new Map());
+    const lastInputsRef = useRef<Map<string, number>>(new Map());
+    const [, force] = useState(0);
+
+    values.forEach((v, k) => {
+        const last = lastInputsRef.current.get(k);
+        if (last !== v) {
+            const now = performance.now();
+            const cur = curMapRef.current.get(k);
+            const samples = samplesMapRef.current.get(k) ?? [];
+            if (cur !== undefined) {
+                const next = [...samples, cur.value];
+                if (next.length > Math.max(1, maxLen - 1)) {
+                    next.shift();
+                }
+                samplesMapRef.current.set(k, next);
+            } else if (samples.length === 0 && v === 0) {
+                lastInputsRef.current.set(k, v);
+                return;
+            }
+            prevMapRef.current.set(k, cur ?? { value: v, ts: now });
+            curMapRef.current.set(k, { value: v, ts: now });
+            lastInputsRef.current.set(k, v);
+        }
+    });
+    [...samplesMapRef.current.keys()].forEach((k) => {
+        if (!values.has(k)) {
+            samplesMapRef.current.delete(k);
+            prevMapRef.current.delete(k);
+            curMapRef.current.delete(k);
+            lastInputsRef.current.delete(k);
+        }
+    });
+
+    useEffect(() => {
+        let raf = 0;
+        const tick = (): void => {
+            force((n) => (n + 1) | 0);
+            raf = requestAnimationFrame(tick);
+        };
+        raf = requestAnimationFrame(tick);
+        return () => cancelAnimationFrame(raf);
+    }, []);
+
+    const out = new Map<string, number[]>();
+    const now = performance.now();
+    values.forEach((_, k) => {
+        const cur = curMapRef.current.get(k);
+        const prev = prevMapRef.current.get(k);
+        const samples = samplesMapRef.current.get(k) ?? [];
+        if (cur === undefined) {
+            if (samples.length > 0) out.set(k, samples);
+            return;
+        }
+        const dt = now - cur.ts;
+        const t = Math.max(0, Math.min(1, dt / intervalMs));
+        const prevVal = prev?.value ?? cur.value;
+        const interp = prevVal + (cur.value - prevVal) * t;
+        out.set(k, [...samples, interp]);
+    });
+    return out;
+};
