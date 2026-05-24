@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { AsideHeader } from '@gravity-ui/navigation';
 import type { MenuItem as AsideHeaderMenuItem } from '@gravity-ui/navigation';
-import { Link, Eye, Route, CurlyBracketsFunction, ListUl, HardDrive, LayoutCellsLarge, CirclePlay, Shield, ArrowRight } from '@gravity-ui/icons';
+import { Link, Eye, Route, CurlyBracketsFunction, ListUl, HardDrive, LayoutCellsLarge, CirclePlay, Shield, ArrowRight, Cube } from '@gravity-ui/icons';
 import Logo from './icons/Logo';
 import type { PageId } from './types';
 import './MainMenu.scss';
@@ -59,6 +59,7 @@ const MainMenu = ({ currentPage, onPageChange, renderContent, disabled = false }
     const menuItems: NavMenuItem[] = [
         createSectionHeader('__section_builtin', 'Builtin'),
         createMenuItem('builtin/inspect', 'Inspect', Eye),
+        createMenuItem('builtin/inspect-3d', 'Inspect (3D)', Cube),
         createMenuItem('builtin/functions', 'Functions', CurlyBracketsFunction),
         createMenuItem('builtin/pipelines', 'Pipelines', ListUl),
         createMenuItem('builtin/devices', 'Devices', HardDrive),

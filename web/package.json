@@ -14,11 +14,13 @@
         "@gravity-ui/navigation": "^3",
         "@gravity-ui/uikit": "^7",
         "@tanstack/react-virtual": "^3.13.12",
+        "@types/three": "^0.146.0",
         "diff": "^9.0.0",
         "js-yaml": "^4.1.0",
         "react": "^19",
         "react-dom": "^19",
-        "react-router-dom": "^7.9.6"
+        "react-router-dom": "^7.9.6",
+        "three": "^0.146.0"
     },
     "devDependencies": {
         "@testing-library/jest-dom": "^6.9.1",

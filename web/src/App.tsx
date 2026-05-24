@@ -6,6 +6,7 @@ import type { PageId, SidebarContextValue } from './types';
 import { PAGE_IDS, SidebarContext } from './types';
 
 const importInspect = () => import('./pages/builtin/inspect/InspectPage');
+const importInspect3d = () => import('./pages/builtin/inspect-3d/Inspect3dPage');
 const importFunctions = () => import('./pages/builtin/functions/FunctionsPage');
 const importPipelines = () => import('./pages/builtin/pipelines/PipelinesPage');
 const importDevices = () => import('./pages/builtin/devices/DevicesPage');
@@ -19,6 +20,7 @@ const importNeighbours = () => import('./pages/operators/neighbours/NeighboursPa
 
 const pageImporters = [
     importInspect,
+    importInspect3d,
     importFunctions,
     importPipelines,
     importDevices,
@@ -32,6 +34,7 @@ const pageImporters = [
 ];
 
 const InspectPage = lazy(importInspect);
+const Inspect3dPage = lazy(importInspect3d);
 const FunctionsPage = lazy(importFunctions);
 const PipelinesPage = lazy(importPipelines);
 const DevicesPage = lazy(importDevices);
@@ -139,6 +142,7 @@ const AppContent = (): React.JSX.Element => {
                         <Routes>
                             <Route path="/" element={<Navigate to="/builtin/inspect" replace />} />
                             <Route path="/builtin/inspect" element={<InspectPage />} />
+                            <Route path="/builtin/inspect-3d" element={<Inspect3dPage />} />
                             <Route path="/builtin/functions" element={<FunctionsPage />} />
                             <Route path="/builtin/functions-ng" element={<Navigate to="/builtin/functions" replace />} />
                             <Route path="/builtin/pipelines" element={<PipelinesPage />} />
@@ -151,6 +155,7 @@ const AppContent = (): React.JSX.Element => {
                             <Route path="/operators/route" element={<OperatorsRoutePage />} />
                             <Route path="/operators/neighbours" element={<NeighboursPage />} />
                             <Route path="/inspect" element={<Navigate to="/builtin/inspect" replace />} />
+                            <Route path="/inspect-3d" element={<Navigate to="/builtin/inspect-3d" replace />} />
                             <Route path="/functions" element={<Navigate to="/builtin/functions" replace />} />
                             <Route path="/pipelines" element={<Navigate to="/builtin/pipelines" replace />} />
                             <Route path="/devices" element={<Navigate to="/builtin/devices" replace />} />

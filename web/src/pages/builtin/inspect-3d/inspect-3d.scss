@@ -1,0 +1,351 @@
+// ── inspect-3d.scss ── isometric 3D topology page styles ─────────────────────
+
+.inspect-3d-page {
+    // Warm dark-brown palette, mirrored from .inspect-page.
+    --iv3-bg:             #15110D;
+    --iv3-bg-2:           #181410;
+    --iv3-surface:        #1C1814;
+    --iv3-surface-strong: #1C1814;
+    --iv3-bg-3:           #221C16;
+    --iv3-border:         rgba(255, 199, 140, 0.02);
+    --iv3-border-strong:  rgba(255, 200, 140, 0.12);
+    --iv3-text:           #F2EEE8;
+    --iv3-text-dim:       #B8B0A4;
+    --iv3-mute:           #7E7468;
+    --iv3-dim:            #7E7468;
+    --iv3-accent:         #FFC061;
+    --iv3-accent-soft:    rgba(255, 192, 97, 0.14);
+    --iv3-accent-line:    rgba(255, 192, 97, 0.4);
+    --iv3-link:           var(--g-color-text-info);
+    --iv3-ok:             var(--g-color-text-positive);
+    --iv3-idle:           var(--g-color-text-hint);
+    --iv3-danger:         var(--g-color-text-danger);
+    --iv3-mono:           'JetBrains Mono', ui-monospace, monospace;
+    --iv3-font-ui:        'Inter', system-ui, sans-serif;
+
+    font-family: var(--iv3-mono);
+    color: var(--iv3-text);
+    background: var(--iv3-bg);
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    overflow-y: auto;
+    flex: 1;
+    min-height: 0;
+
+    .iv3-scroll {
+        scrollbar-width: thin;
+        scrollbar-color: var(--iv3-border-strong) transparent;
+
+        &::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+
+        &::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        &::-webkit-scrollbar-thumb {
+            background: var(--iv3-border-strong);
+        }
+
+        &::-webkit-scrollbar-thumb:hover {
+            background: var(--iv3-accent-line);
+        }
+    }
+
+    .iv3-instance {
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+        flex: 1;
+        min-height: 0;
+    }
+
+    // ── Scene Container ───────────────────────────────────────────────
+
+    .iv3-scene-container {
+        position: relative;
+        height: 620px;
+        background: linear-gradient(180deg, rgba(20,18,16,0.7) 0%, rgba(13,13,12,0.9) 100%);
+        border: 1px solid var(--iv3-border-strong);
+        overflow: hidden;
+        flex-shrink: 0;
+    }
+
+    .iv3-scene-canvas {
+        position: absolute;
+        inset: 0;
+    }
+
+    .iv3-scene-horizon {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        background: linear-gradient(180deg, rgba(255,192,97,0.06) 0%, rgba(255,192,97,0) 55%);
+    }
+
+    .iv3-label-overlay {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        overflow: hidden;
+    }
+
+    .iv3-label--pipeline {
+        position: absolute;
+        padding: 0 6px;
+        height: 18px;
+        background: rgba(13,13,12,0.85);
+        border: 1px solid var(--iv3-border-strong);
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 10px;
+        color: var(--iv3-text);
+        font-weight: 500;
+        pointer-events: none;
+    }
+
+    .iv3-label--pipeline-active {
+        border-color: var(--iv3-accent-soft);
+    }
+
+    .iv3-label--device {
+        position: absolute;
+        width: 88px;
+        text-align: right;
+        color: var(--iv3-text);
+        font-size: 9px;
+        line-height: 1.25;
+        pointer-events: none;
+        text-shadow: 0 1px 0 rgba(0,0,0,0.6);
+    }
+
+    .iv3-label--device-sub {
+        color: var(--iv3-mute);
+        font-size: 8px;
+    }
+
+    .iv3-label--fn {
+        position: absolute;
+        width: 120px;
+        text-align: center;
+        color: var(--iv3-text);
+        font-size: 9px;
+        line-height: 1.25;
+        pointer-events: none;
+        text-shadow: 0 1px 0 rgba(0,0,0,0.6);
+    }
+
+    .iv3-label--fn-active {
+        color: var(--iv3-text);
+        font-weight: 500;
+    }
+
+    .iv3-label--fn-idle {
+        color: var(--iv3-mute);
+        font-weight: 500;
+    }
+
+    .iv3-label--fn-sub {
+        color: var(--iv3-text-dim);
+        font-size: 8px;
+    }
+
+    // ── Inspector Panel ───────────────────────────────────────────────
+
+    .iv3-inspector {
+        position: absolute;
+        top: 12px;
+        right: 12px;
+        bottom: 12px;
+        width: 296px;
+        background: rgba(13,13,12,0.94);
+        border: 1px solid var(--iv3-border-strong);
+        border-left: 2px solid var(--iv3-accent);
+        box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+        display: flex;
+        flex-direction: column;
+        font-size: 12px;
+        color: var(--iv3-text);
+        overflow: hidden;
+        z-index: 10;
+    }
+
+    .iv3-inspector__head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 10px 14px;
+        border-bottom: 1px solid var(--iv3-border-strong);
+        color: var(--iv3-mute);
+        font-size: 10px;
+        letter-spacing: 1.8px;
+        flex-shrink: 0;
+    }
+
+    .iv3-inspector__close {
+        background: transparent;
+        border: none;
+        color: var(--iv3-mute);
+        cursor: pointer;
+        font: inherit;
+        font-size: 14px;
+        line-height: 1;
+        padding: 0;
+
+        &:hover {
+            color: var(--iv3-text);
+        }
+    }
+
+    .iv3-inspector__body {
+        overflow: auto;
+        padding: 12px 14px;
+        flex: 1;
+        scrollbar-width: thin;
+        scrollbar-color: var(--iv3-border-strong) transparent;
+    }
+
+    .iv3-insp-name {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 6px;
+    }
+
+    .iv3-insp-name__text {
+        font-size: 15px;
+        font-weight: 500;
+    }
+
+    .iv3-insp-sub {
+        color: var(--iv3-mute);
+        font-size: 11px;
+        margin-bottom: 10px;
+    }
+
+    .iv3-stat-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        padding: 4px 0;
+        border-bottom: 1px dotted var(--iv3-border-strong);
+    }
+
+    .iv3-stat-row__label {
+        color: var(--iv3-mute);
+        font-size: 10px;
+        letter-spacing: 1px;
+    }
+
+    .iv3-stat-row__value {
+        color: var(--iv3-text);
+        font-size: 12px;
+    }
+
+    .iv3-stat-row__hint {
+        color: var(--iv3-mute);
+        font-size: 10px;
+        margin-left: 4px;
+    }
+
+    .iv3-section-header {
+        margin-top: 12px;
+        margin-bottom: 6px;
+        color: var(--iv3-mute);
+        font-size: 10px;
+        letter-spacing: 1.6px;
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+    }
+
+    .iv3-section-header__count {
+        color: var(--iv3-text-dim);
+    }
+
+    .iv3-chain-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 4px 6px;
+        border: 1px solid var(--iv3-border-strong);
+        background: rgba(20,18,16,0.4);
+        margin-bottom: 4px;
+    }
+
+    .iv3-chain-item__idx {
+        color: var(--iv3-mute);
+        font-size: 10px;
+        font-family: monospace;
+    }
+
+    .iv3-chain-item__name {
+        flex: 1;
+        font-size: 11px;
+    }
+
+    .iv3-chain-item__pps {
+        font-size: 10px;
+        color: var(--iv3-text-dim);
+    }
+
+    .iv3-feed-item {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 11px;
+        margin-bottom: 4px;
+    }
+
+    .iv3-feed-item__name {
+        flex: 1;
+    }
+
+    .iv3-feed-item__pps {
+        color: var(--iv3-text-dim);
+        font-size: 10px;
+    }
+
+    .iv3-dot {
+        display: inline-block;
+        flex-shrink: 0;
+        border-radius: 50%;
+    }
+
+    .iv3-sparkline-wrap {
+        margin-top: 6px;
+    }
+}
+
+// ── Light-mode palette overrides ──────────────────────────────────────────────
+
+[data-theme="light"] {
+    .inspect-3d-page {
+        --iv3-bg:             #FAF7F2;
+        --iv3-bg-2:           #F3EFE9;
+        --iv3-surface:        #FFFFFF;
+        --iv3-surface-strong: #FFFFFF;
+        --iv3-bg-3:           #EBE6DE;
+        --iv3-border:         rgba(80, 60, 30, 0.08);
+        --iv3-border-strong:  rgba(80, 60, 30, 0.16);
+        --iv3-text:           #1A1410;
+        --iv3-text-dim:       #5C4E3A;
+        --iv3-mute:           #9C8B74;
+        --iv3-dim:            #9C8B74;
+    }
+}
+
+// ── Footer ────────────────────────────────────────────────────────────────────
+
+.inspect-3d-page-footer {
+    padding: 0 32px 16px;
+    text-align: right;
+    color: var(--g-color-text-hint);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+}
