@@ -359,7 +359,6 @@ export const IsoScene3D: React.FC<IsoScene3DProps> = ({
     canvasSizeRef.current = canvasSize;
 
     useEffect(() => {
-        let cancelled = false;
         const check = (): boolean => {
             try {
                 const canvas = document.createElement('canvas');
@@ -372,12 +371,7 @@ export const IsoScene3D: React.FC<IsoScene3DProps> = ({
                 return false;
             }
         };
-        if (!cancelled) {
-            setWebglAvailable(check());
-        }
-        return () => {
-            cancelled = true;
-        };
+        setWebglAvailable(check());
     }, []);
 
     useEffect(() => {
