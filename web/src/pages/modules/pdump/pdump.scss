@@ -18,12 +18,12 @@
 
 // Row-flash animation for newly arrived packets.
 @keyframes pdump-row-in {
-    from { background-color: rgba(110, 198, 140, 0.10); }
+    from { background-color: rgba(110, 198, 140, 0.1); }
     to   { background-color: transparent; }
 }
 
 .packet-table__row--new {
-    animation: pdump-row-in 1.6s ease-out forwards;
+    animation: pdump-row-in .5s ease-out forwards;
 }
 
 .packet-table__row {
