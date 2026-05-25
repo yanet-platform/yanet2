@@ -1,207 +1,872 @@
 @use '../../../styles/variables' as *;
 @use '../../../styles/mixins' as *;
 
-// Packet Table
+// Live tab dot — pulsing green indicator for the streaming config tab.
+.fw-tab__dot--live {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--fw-ok, var(--g-color-text-positive));
+    flex-shrink: 0;
+    animation: pdump-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes pdump-pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50%       { opacity: 0.45; transform: scale(0.75); }
+}
+
+// Row-flash animation for newly arrived packets.
+@keyframes pdump-row-in {
+    from { background-color: rgba(110, 198, 140, 0.10); }
+    to   { background-color: transparent; }
+}
+
+.packet-table__row--new {
+    animation: pdump-row-in 1.6s ease-out forwards;
+}
+
+.packet-table__row {
+    transition: background-color 0.08s;
+}
+
+// !important overrides the per-row inline backgroundColor (stripe tint).
+.packet-table__row--selected {
+    background-color: var(--fw-accent-soft) !important;
+}
+
+// Hover must not clobber selected or new-flash states.
+.packet-table__row:not(.packet-table__row--selected):not(.packet-table__row--new):hover {
+    background-color: var(--fw-bg-hover) !important; // !important beats the inline stripe tint
+}
+
+// BPF filter full-width card.
+.pdump-filter-card {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 16px;
+    background: var(--fw-panel);
+    border: 1px solid var(--fw-line-2);
+    border-radius: var(--fw-r-md, 6px);
+    margin-bottom: 8px;
+    flex-shrink: 0;
+
+    &__label {
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--fw-accent);
+        flex-shrink: 0;
+    }
+
+    &__expr-wrap {
+        position: relative;
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+
+        &::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            right: 0;
+            width: 48px;
+            height: 100%;
+            background: linear-gradient(to right, transparent, var(--fw-panel));
+            pointer-events: none;
+        }
+
+        &--no-overflow::after {
+            display: none;
+        }
+    }
+
+    &__expr {
+        overflow-x: auto;
+        white-space: nowrap;
+        font-family: var(--fw-font-mono);
+        font-size: 13px;
+        line-height: 1.5;
+        padding-bottom: 2px;
+        scrollbar-width: none;
+
+        &::-webkit-scrollbar { display: none; }
+    }
+
+    &__copy {
+        flex-shrink: 0;
+        font-size: 12px;
+        font-weight: 500;
+        padding: 4px 10px;
+        border-radius: 5px;
+        border: 1px solid var(--fw-line-2);
+        background: var(--fw-bg-2);
+        color: var(--fw-text-2);
+        cursor: pointer;
+        transition: color 0.1s, background 0.1s, border-color 0.1s;
+        white-space: nowrap;
+
+        &:hover { background: var(--fw-bg-3); color: var(--fw-text); }
+
+        &--copied {
+            color: var(--fw-ok, var(--g-color-text-positive));
+            border-color: rgba(110, 198, 140, 0.3);
+            background: rgba(110, 198, 140, 0.08);
+        }
+    }
+}
+
+// BPF token colours.
+.pdump-bpf-tok {
+    &--kw   { color: var(--fw-accent); }
+    &--proto { color: #8ab4f8; }
+    &--num  { color: #ce9178; }
+    &--host { color: #9cdcfe; }
+    &--txt  { color: var(--fw-text-2); }
+}
+
+.pdump-bpf-empty { color: var(--fw-text-3); font-style: italic; }
+
+// BPF preview and suggestion chips in ConfigDialog.
+.pdump-bpf-preview {
+    margin-top: 6px;
+    padding: 6px 10px;
+    background: var(--fw-bg-2);
+    border: 1px solid var(--fw-line-2);
+    border-radius: 5px;
+    font-family: var(--fw-font-mono);
+    font-size: 12.5px;
+    white-space: nowrap;
+    overflow-x: auto;
+}
+
+.pdump-bpf-suggestions {
+    display: flex;
+    flex-wrap: wrap;
+    margin-top: 8px;
+    gap: 6px;
+}
+
+.pdump-bpf-suggestion {
+    font-size: 11.5px;
+    font-family: var(--fw-font-mono);
+    padding: 3px 8px;
+    border-radius: 4px;
+    border: 1px solid var(--fw-line-2);
+    background: var(--fw-bg-2);
+    color: var(--fw-text-2);
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.08s, color 0.08s, border-color 0.08s;
+
+    &:hover {
+        background: var(--fw-bg-3);
+        color: var(--fw-accent);
+        border-color: rgba(255, 192, 97, 0.25);
+    }
+}
+
+// Config strip — one-row meta + live stats + actions for the active config.
+.pdump-strip {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 8px 16px;
+    background: var(--fw-panel);
+    border: 1px solid var(--fw-line-2);
+    border-radius: var(--fw-r-md, 6px);
+    margin-bottom: 8px;
+    flex-shrink: 0;
+
+    &__meta {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex: 1;
+        min-width: 0;
+    }
+
+    &__mode-chips {
+        display: flex;
+        gap: 5px;
+        align-items: center;
+    }
+
+    &__chip {
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.05em;
+        padding: 2px 8px;
+        border-radius: 999px;
+        border: 1px solid transparent;
+
+        &--input {
+            color: #6a9ed1;
+            background: rgba(106, 158, 209, 0.13);
+            border-color: rgba(106, 158, 209, 0.30);
+        }
+
+        &--drop {
+            color: #d96565;
+            background: rgba(217, 101, 101, 0.10);
+            border-color: rgba(217, 101, 101, 0.32);
+        }
+
+        &--none {
+            color: var(--fw-text-3);
+            background: var(--fw-bg-2);
+            border-color: var(--fw-line-2);
+        }
+    }
+
+    &__param {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 12px;
+    }
+
+    &__param-label {
+        color: var(--fw-text-3);
+    }
+
+    &__param-value {
+        color: var(--fw-text-2);
+        font-family: var(--fw-font-mono);
+        font-size: 12px;
+    }
+
+    &__actions {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-shrink: 0;
+    }
+
+    &__start-btn {
+        background: rgba(76, 182, 133, 0.15);
+        border: 1px solid rgba(76, 182, 133, 0.35);
+        color: #4cb685;
+
+        &:hover:not(:disabled) {
+            background: rgba(76, 182, 133, 0.25);
+            border-color: #4cb685;
+        }
+
+        &:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+    }
+
+    &__stop-btn {
+        background: rgba(217, 101, 101, 0.15);
+        border: 1px solid rgba(217, 101, 101, 0.35);
+        color: #d96565;
+
+        &:hover {
+            background: rgba(217, 101, 101, 0.25);
+            border-color: #d96565;
+        }
+    }
+}
+
+// Live stats block.
+.pdump-live-stats {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 0 14px;
+    border-left: 1px solid var(--fw-line-2);
+    border-right: 1px solid var(--fw-line-2);
+}
+
+.pdump-stat {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1px;
+    min-width: 80px;
+
+    &__label {
+        font-size: 10px;
+        color: var(--fw-text-3);
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        font-weight: 500;
+    }
+
+    &__value {
+        font-size: 13px;
+        font-weight: 600;
+        font-family: var(--fw-font-mono);
+        color: var(--fw-text);
+        font-variant-numeric: tabular-nums;
+
+        &--muted { color: var(--fw-text-3); }
+    }
+}
+
+// Protocol colour badges in table cells.
+.pdump-proto-badge {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-family: var(--fw-font-mono);
+    letter-spacing: 0.03em;
+}
+
+.pdump-proto-tcp {
+    color: #6a9ed1;
+    background: rgba(106, 158, 209, 0.13);
+}
+
+.pdump-proto-udp {
+    color: #a98ad6;
+    background: rgba(169, 138, 214, 0.13);
+}
+
+.pdump-proto-icmp {
+    color: #d9a154;
+    background: rgba(217, 161, 84, 0.12);
+}
+
+.pdump-proto-arp {
+    color: #4cb685;
+    background: rgba(76, 182, 133, 0.10);
+}
+
+// Drawer scroll fix — fw-drawer__body has flex:1 but needs min-height:0 to constrain it.
+.fw-drawer__body {
+    min-height: 0;
+}
+
+// Collapsible packet-detail sections.
+.pdump-section {
+    border: 1px solid var(--fw-line-2);
+    border-radius: 8px;
+    margin-bottom: 10px;
+    background: var(--fw-bg-2);
+
+    &__head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 9px 14px;
+        cursor: pointer;
+        user-select: none;
+    }
+
+    &__head-left {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    &__marker {
+        width: 8px;
+        height: 8px;
+        border-radius: 2px;
+        background: var(--fw-text-3);
+        flex-shrink: 0;
+    }
+
+    &__title {
+        font-size: 12.5px;
+        font-weight: 600;
+        color: var(--fw-text);
+    }
+
+    &__sub {
+        font-family: var(--fw-font-mono);
+        font-size: 11.5px;
+        color: var(--fw-text-3);
+    }
+
+    &__chevron {
+        color: var(--fw-text-3);
+        transition: transform 0.18s ease;
+        display: flex;
+        align-items: center;
+    }
+
+    &__body {
+        padding: 6px 14px 12px;
+    }
+
+    &--collapsed {
+        .pdump-section__body { display: none; }
+        .pdump-section__chevron { transform: rotate(-90deg); }
+    }
+
+    &--eth   .pdump-section__marker { background: var(--fw-text-3); }
+    &--ipv4  .pdump-section__marker { background: var(--g-color-text-positive); }
+    &--ipv6  .pdump-section__marker { background: var(--g-color-text-positive); }
+    &--tcp   .pdump-section__marker { background: var(--g-color-text-info); }
+    &--udp   .pdump-section__marker { background: var(--g-color-text-misc); }
+    &--icmp  .pdump-section__marker { background: #c07a45; }
+    &--meta  .pdump-section__marker { background: var(--fw-accent); }
+    &--http  .pdump-section__marker { background: var(--fw-accent); }
+}
+
+.pdump-page .fw-drawer {
+    width: 640px;
+}
+
+// KV rows inside sections.
+.pdump-kv-row {
+    display: grid;
+    grid-template-columns: 130px 1fr;
+    gap: 14px;
+    padding: 4px 0;
+    font-family: var(--fw-font-mono);
+    font-size: 12px;
+}
+
+.pdump-kv-k { color: var(--fw-text-3); }
+
+.pdump-kv-v {
+    color: var(--fw-text);
+    word-break: break-all;
+}
+
+.pdump-kv-flag {
+    display: inline-block;
+    padding: 0 5px;
+    border-radius: 3px;
+    background: rgba(106, 158, 209, 0.14);
+    color: var(--g-color-text-info);
+    margin-right: 4px;
+    font-size: 10.5px;
+}
+
+// Colourised hex dump component.
+.pdump-hex-dump {
+    font-family: var(--fw-font-mono);
+    font-size: 11.5px;
+    line-height: 1.55;
+    padding: 10px 0 4px;
+    color: var(--fw-text-3);
+    overflow-x: auto;
+}
+
+.pdump-hex-line {
+    display: flex;
+    gap: 16px;
+}
+
+.pdump-hex-offset { color: var(--fw-text-3); }
+.pdump-hex-bytes  { color: var(--fw-text); letter-spacing: 0.02em; }
+.pdump-hex-ascii  { color: var(--fw-text-3); }
+
+.pdump-hex-bytes {
+    .hl-eth     { color: var(--fw-text-2); background: rgba(255, 255, 255, 0.04); padding: 0 1px; border-radius: 1px; }
+    .hl-ip      { color: var(--g-color-text-positive); background: rgba(76, 182, 133, 0.12); padding: 0 1px; }
+    .hl-l4      { color: var(--g-color-text-info); background: rgba(106, 158, 209, 0.14); padding: 0 1px; }
+    .hl-payload { color: var(--fw-accent); background: rgba(217, 161, 84, 0.12); padding: 0 1px; }
+}
+
+.pdump-drawer-timestamp {
+    font-family: var(--fw-font-mono);
+    font-size: 12px;
+    color: var(--fw-text-3);
+    font-weight: 400;
+    margin-left: 6px;
+}
+
+.pdump-drawer-empty {
+    color: var(--fw-text-3);
+    font-size: 13px;
+    text-align: center;
+    padding: 40px 0;
+}
+
+// Custom modal chrome.
+// CSS variables are declared here rather than inheriting from .fw-modal,
+// because that class also carries width:640px which breaks full-viewport coverage.
+.pdump-modal-backdrop {
+    --fw-panel:       #1C1814;
+    --fw-bg-2:        #181410;
+    --fw-bg-3:        #221C16;
+    --fw-bg-hover:    #221C16;
+    --fw-line-2:      rgba(255, 200, 140, 0.12);
+    --fw-text:        #F2EEE8;
+    --fw-text-2:      #B8B0A4;
+    --fw-text-3:      #7E7468;
+    --fw-accent:      #FFC061;
+    --fw-accent-soft: rgba(255, 192, 97, 0.14);
+    --fw-r-sm:        4px;
+    --fw-r-md:        6px;
+    --fw-r-lg:        10px;
+    --fw-font-mono:   'JetBrains Mono', ui-monospace, monospace;
+
+    position: fixed;
+    inset: 0;
+    background: rgba(5, 5, 8, 0.6);
+    backdrop-filter: blur(4px);
+    display: grid;
+    place-items: center;
+    z-index: 100;
+}
+
+[data-theme="light"] .pdump-modal-backdrop {
+    --fw-panel:    #FFFFFF;
+    --fw-bg-2:     #F3EFE9;
+    --fw-bg-3:     #EBE6DE;
+    --fw-bg-hover: #EBE6DE;
+    --fw-line-2:   rgba(80, 60, 30, 0.16);
+    --fw-text:     #1A1410;
+    --fw-text-2:   #5C4E3A;
+    --fw-text-3:   #9C8B74;
+}
+
+.pdump-modal {
+    max-width: calc(100vw - 40px);
+    background: var(--fw-panel);
+    border: 1px solid var(--fw-line-2);
+    border-radius: 12px;
+    box-shadow: 0 30px 80px rgba(0, 0, 0, 0.5);
+    overflow: hidden;
+
+    &__header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 16px 20px;
+        border-bottom: 1px solid var(--fw-line-2);
+    }
+
+    &__title {
+        font-size: 15px;
+        font-weight: 600;
+        color: var(--fw-text);
+    }
+
+    &__body {
+        padding: 18px 20px;
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+    }
+
+    &__footer {
+        display: flex;
+        justify-content: flex-end;
+        gap: 10px;
+        padding: 14px 20px;
+        border-top: 1px solid var(--fw-line-2);
+        background: rgba(0, 0, 0, 0.2);
+    }
+
+    &__delete-text {
+        margin: 0;
+        font-size: 13px;
+        color: var(--fw-text);
+    }
+
+    &__code {
+        font-family: var(--fw-font-mono);
+        font-size: 12.5px;
+        color: var(--fw-accent);
+        background: var(--fw-bg-2);
+        padding: 1px 5px;
+        border-radius: 3px;
+    }
+
+    &__warning {
+        margin: 0;
+        font-size: 12.5px;
+        color: var(--g-color-text-danger);
+    }
+}
+
+.pdump-modal-btn--danger {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 32px;
+    padding: 0 14px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 500;
+    border: 1px solid color-mix(in srgb, var(--g-color-text-danger) 40%, transparent);
+    background: color-mix(in srgb, var(--g-color-text-danger) 10%, transparent);
+    color: var(--g-color-text-danger);
+    cursor: pointer;
+    transition: background 0.08s, border-color 0.08s;
+    white-space: nowrap;
+
+    &:hover:not(:disabled) {
+        background: color-mix(in srgb, var(--g-color-text-danger) 18%, transparent);
+        border-color: var(--g-color-text-danger);
+    }
+
+    &:disabled { opacity: 0.45; cursor: not-allowed; }
+}
+
+// Modal form fields.
+.pdump-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+
+    &__label {
+        font-size: 12px;
+        color: var(--fw-text);
+        font-weight: 500;
+    }
+
+    &__req {
+        color: var(--g-color-text-danger);
+        margin-left: 3px;
+    }
+
+    &__hint {
+        font-size: 11.5px;
+        color: var(--fw-text-3);
+    }
+}
+
+.pdump-field-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+}
+
+.pdump-input {
+    height: 38px;
+    width: 100%;
+    box-sizing: border-box;
+    background: #0d0d10;
+    border: 1px solid var(--fw-line-2);
+    border-radius: var(--fw-r-md, 6px);
+    color: var(--fw-text);
+    font-size: 13px;
+    padding: 0 12px;
+    outline: none;
+    transition: border-color 0.1s;
+
+    &:focus { border-color: var(--fw-accent); }
+
+    &--mono { font-family: var(--fw-font-mono); }
+}
+
+.pdump-bpf-input {
+    height: 38px;
+    font-family: var(--fw-font-mono);
+    font-size: 13px;
+}
+
+// Capture mode checkboxes.
+.pdump-mode-checks {
+    display: flex;
+    gap: 10px;
+}
+
+.pdump-mode-check {
+    flex: 1;
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    border: 1px solid var(--fw-line-2);
+    background: var(--fw-bg-2);
+    border-radius: 6px;
+    padding: 10px 12px;
+    cursor: pointer;
+    transition: all 0.12s;
+    user-select: none;
+
+    &:hover { border-color: rgba(255, 192, 97, 0.3); }
+
+    &--checked {
+        border-color: var(--fw-accent);
+        background: var(--fw-accent-soft);
+    }
+
+    &__box {
+        width: 16px;
+        height: 16px;
+        border: 1.5px solid var(--fw-line-2);
+        border-radius: 3px;
+        margin-top: 2px;
+        display: grid;
+        place-items: center;
+        flex-shrink: 0;
+        transition: all 0.12s;
+
+        .pdump-mode-check--checked & {
+            background: var(--fw-accent);
+            border-color: var(--fw-accent);
+        }
+    }
+
+    &__tick {
+        font-size: 11px;
+        color: #1a140a;
+        line-height: 1;
+    }
+
+    &__text { flex: 1; min-width: 0; }
+
+    &__label {
+        font-size: 12px;
+        font-weight: 600;
+        font-family: var(--fw-font-mono);
+        letter-spacing: 0.05em;
+        color: var(--fw-text);
+
+        .pdump-mode-check--checked & { color: var(--fw-accent); }
+    }
+
+    &__hint {
+        font-size: 11px;
+        color: var(--fw-text-3);
+        margin-top: 2px;
+    }
+}
+
+// Packet table overrides for fw-page chrome.
 .packet-table {
     @include flex-column;
+    background: var(--fw-panel);
+    border: 1px solid var(--fw-line-2);
+    border-radius: var(--fw-r-lg, 10px);
+    overflow: hidden;
 
-    &__container {
-        height: 100%;
+    &__container { height: 100%; }
+
+    &__toolbar {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 0 12px;
+        border-bottom: 1px solid var(--fw-line-2);
+        background: var(--fw-panel);
+        flex-shrink: 0;
+    }
+
+    &__search { width: 280px; flex-shrink: 0; }
+
+    &__toolbar-info {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+    }
+
+    &__stats {
+        font-size: 12px;
+        color: var(--fw-text-3);
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+    }
+
+    &__live-badge {
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        padding: 2px 6px;
+        border-radius: 3px;
+        background: rgba(76, 182, 133, 0.14);
+        color: #4cb685;
+        border: 1px solid rgba(76, 182, 133, 0.28);
+
+        &--paused {
+            background: rgba(217, 161, 84, 0.12);
+            color: var(--fw-accent);
+            border-color: rgba(255, 192, 97, 0.22);
+        }
+    }
+
+    &__toolbar-actions {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-shrink: 0;
+    }
+
+    &__btn--active {
+        color: var(--fw-accent) !important;
+        border-color: rgba(255, 192, 97, 0.3) !important;
+        background: var(--fw-accent-soft) !important;
     }
 
     &__wrapper {
         flex: 1;
-        border: 1px solid var(--g-color-line-generic);
-        border-radius: $radius-lg;
-        overflow: hidden;
         @include flex-column;
+        overflow: hidden;
+        min-height: 0;
     }
 
     &__body {
         overflow: auto;
         contain: strict;
+        flex: 1;
+        user-select: none;
+        -webkit-user-select: none;
     }
 
-    &__virtual-container {
-        position: relative;
-    }
+    &__virtual-container { position: relative; }
 
     &__empty {
-        padding: 40px $spacing-xl;
+        padding: 40px 20px;
         text-align: center;
     }
 
     &__footer {
-        @include flex-row($spacing-lg);
+        display: flex;
+        align-items: center;
         justify-content: space-between;
+        padding: 0 12px;
+        border-top: 1px solid var(--fw-line-2);
+        background: var(--fw-panel);
         flex-shrink: 0;
     }
-}
 
-// Search Bar
-.packet-search-bar {
-    @include flex-row($spacing-lg);
-    flex-shrink: 0;
-
-    &__input {
-        width: 350px;
-    }
-
-    &__info {
-        @include flex-row($spacing-sm);
-        flex: 1;
-    }
-
-    &__actions {
-        @include flex-row($spacing-sm);
+    &__footer-text {
+        font-size: 11px;
+        color: var(--fw-text-3);
     }
 }
 
-// Packet Details Section
-.packet-section {
-    margin-bottom: $spacing-lg;
-
-    &__title {
-        margin-bottom: $spacing-sm;
-        display: block;
-    }
-}
-
-// Packet Details Dialog Section
-.packet-dialog-section {
-    margin-bottom: $spacing-md;
-    padding: $spacing-md;
-    background-color: var(--g-color-base-generic-ultralight);
-    border-radius: $radius-md;
-    border: 1px solid var(--g-color-line-generic);
-
-    &__title {
-        margin-bottom: $spacing-sm;
-        display: block;
-    }
-}
-
-// Packet Field
-.packet-field {
-    margin-bottom: $spacing-xs;
-
-    &--compact {
-        margin-bottom: 2px;
-    }
-
-    &__label {
-        min-width: 120px;
-
-        &--compact {
-            min-width: 100px;
-            font-size: 13px;
-        }
-    }
-
-    &__value--compact {
-        font-size: 13px;
-    }
-}
-
-// Hex Dump
-.packet-hexdump {
-    background-color: var(--g-color-base-generic);
-    padding: $spacing-md;
-    border-radius: $radius-sm;
-    overflow: auto;
-
-    &--compact {
-        padding: 10px;
-    }
-
-    &__pre {
-        margin: 0;
-        font-family: var(--g-font-family-monospace);
-        font-size: 13px;
-        line-height: 1.5;
-        white-space: pre;
-    }
-}
-
-// Packet Details Card
-.packet-details-card {
-    padding: $spacing-lg;
-    height: 100%;
-    overflow: auto;
-
-    &__title {
-        margin-bottom: $spacing-lg;
-        display: block;
-    }
-
-    &__spacer {
-        height: $spacing-lg;
-    }
-}
-
-// Dialog content
-.packet-dialog {
-    &__content {
-        max-height: 70vh;
-        overflow: auto;
-    }
-
-    &__flex-wrap {
-        flex-wrap: wrap;
-    }
-
-    &__margin-top {
-        margin-top: $spacing-xs;
-    }
-}
-
-// Config Card
-.config-card {
-    padding: $spacing-md $spacing-lg;
-    width: 280px;
-
-    &__header {
-        margin-bottom: $spacing-sm;
-    }
-
-    &__filter {
-        margin-bottom: 6px;
-
-        &-label {
-            font-size: 12px;
-        }
-
-        &-value {
-            @include text-truncate;
-            display: block;
-            font-size: 12px;
-            margin-top: 2px;
-        }
-    }
-
-    &__mode {
-        margin-bottom: $spacing-md;
-
-        &-label {
-            font-size: 12px;
-            margin-bottom: $spacing-xs;
-            display: block;
-        }
-    }
-}
-
-// Table Header
+// Packet table header row.
 .packet-table-header {
     @include flex-row($spacing-sm);
     padding: 0 $spacing-sm;
-    border-bottom: 1px solid var(--g-color-line-generic);
-    background-color: var(--g-color-base-generic);
+    border-bottom: 1px solid var(--fw-line-2);
+    background: var(--fw-bg-2);
     font-weight: $font-weight-medium;
     box-sizing: border-box;
     flex-shrink: 0;
 }
 
-// Config Dialog
+// Pdump page container.
+.pdump-page {
+    overflow: hidden;
+
+    &__content {
+        display: flex;
+        flex-direction: column;
+        flex: 1;
+        min-height: 0;
+        overflow: hidden;
+    }
+
+    &__table {
+        flex: 1;
+        min-height: 0;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+    }
+}
+
+// Config dialog row layout.
 .config-dialog {
     &__row {
         @include flex-row($spacing-lg);
@@ -212,37 +877,12 @@
     }
 }
 
-// PdumpPage
-.pdump-page {
-    &__empty {
-        width: 100%;
-        flex: 1;
-        min-width: 0;
-        padding: $spacing-xl;
-    }
+// Search bar (legacy — kept for any remaining reference; content merged into packet-table__toolbar).
+.packet-search-bar {
+    @include flex-row($spacing-lg);
+    flex-shrink: 0;
 
-    &__content {
-        width: 100%;
-        flex: 1;
-        min-width: 0;
-        padding: $spacing-xl;
-        @include flex-column;
-        overflow: hidden;
-    }
-
-    &__configs-section {
-        padding-bottom: $spacing-md;
-        border-bottom: 1px solid var(--g-color-line-generic);
-        flex-shrink: 0;
-    }
-
-    &__configs-list {
-        flex-wrap: wrap;
-    }
-
-    &__table-section {
-        flex: 1;
-        min-height: 0;
-        margin-top: $spacing-lg;
-    }
+    &__input { width: 350px; }
+    &__info { @include flex-row($spacing-sm); flex: 1; }
+    &__actions { @include flex-row($spacing-sm); }
 }

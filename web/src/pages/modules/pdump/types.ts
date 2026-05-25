@@ -13,14 +13,6 @@ export interface CapturedPacket {
     parsed: ParsedPacket;
 }
 
-export interface CaptureState {
-    isCapturing: boolean;
-    configName: string | null;
-    packets: CapturedPacket[];
-    error: Error | null;
-}
-
-// Sorting types for packet table
 export type PacketSortColumn = 'index' | 'time' | 'source' | 'destination' | 'protocol' | 'length';
 export type SortDirection = 'asc' | 'desc';
 
@@ -28,4 +20,3 @@ export interface PacketSortState {
     column: PacketSortColumn | null;
     direction: SortDirection;
 }
-

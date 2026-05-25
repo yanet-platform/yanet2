@@ -1,10 +1,13 @@
 export * from './types';
 export * from './hooks';
 export * from './constants';
-export { ConfigCard } from './ConfigCard';
 export { ConfigDialog } from './ConfigDialog';
 export { PacketTable } from './PacketTable';
-export { PacketDetails } from './PacketDetails';
-export { PacketDetailsDialog } from './PacketDetailsDialog';
-export { PdumpPageHeader } from './PdumpPageHeader';
-
+export { default as PdumpConfigTabs } from './PdumpConfigTabs';
+export { default as FilterRow } from './FilterRow';
+export { default as ConfigStrip } from './ConfigStrip';
+export { default as PacketDrawer } from './PacketDrawer';
+export { default as BpfTokens } from './BpfTokens';
+export { default as Sparkline } from './Sparkline';
+export { default as PdumpModal } from './PdumpModal';
+export { default as DeleteConfigDialog } from './DeleteConfigDialog';

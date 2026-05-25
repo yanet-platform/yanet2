@@ -8,7 +8,8 @@ export interface PacketTableRowProps {
     index: number;
     start: number;
     isSelected: boolean;
-    onClick: () => void;
+    isNew: boolean;
+    onSelect: (packet: CapturedPacket) => void;
 }
 
 const formatTime = (date: Date): string => {
@@ -16,62 +17,55 @@ const formatTime = (date: Date): string => {
     return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}.${pad(date.getMilliseconds(), 3)}`;
 };
 
-export const PacketTableRow: React.FC<PacketTableRowProps> = ({
+const getProtocolClass = (protocol: string): string => {
+    const p = protocol.toLowerCase();
+    if (p === 'tcp') return 'pdump-proto-tcp';
+    if (p === 'udp') return 'pdump-proto-udp';
+    if (p === 'icmp' || p === 'icmpv6' || p === 'icmp6') return 'pdump-proto-icmp';
+    if (p === 'arp') return 'pdump-proto-arp';
+    return '';
+};
+
+const PacketTableRowImpl: React.FC<PacketTableRowProps> = ({
     packet,
     index,
     start,
     isSelected,
-    onClick,
+    isNew,
+    onSelect,
 }) => {
     const { parsed } = packet;
 
-    // Extract source and destination
     let src = '';
     let dst = '';
     let protocol = '';
-    let isIPv6 = false;
 
     if (parsed.ipv4) {
         src = parsed.ipv4.srcAddr;
         dst = parsed.ipv4.dstAddr;
         protocol = parsed.ipv4.protocolName;
     } else if (parsed.ipv6) {
-        // Wrap IPv6 addresses in brackets
         src = `[${parsed.ipv6.srcAddr}]`;
         dst = `[${parsed.ipv6.dstAddr}]`;
         protocol = parsed.ipv6.nextHeaderName;
-        isIPv6 = true;
     } else if (parsed.ethernet) {
         src = parsed.ethernet.srcMac;
         dst = parsed.ethernet.dstMac;
         protocol = parsed.ethernet.etherTypeName;
     }
 
-    // Add ports for TCP/UDP
     if (parsed.tcp) {
-        if (isIPv6) {
-            // IPv6 with port: [addr]:port
-            src = `${src}:${parsed.tcp.srcPort}`;
-            dst = `${dst}:${parsed.tcp.dstPort}`;
-        } else {
-            src = `${src}:${parsed.tcp.srcPort}`;
-            dst = `${dst}:${parsed.tcp.dstPort}`;
-        }
+        src = `${src}:${parsed.tcp.srcPort}`;
+        dst = `${dst}:${parsed.tcp.dstPort}`;
         protocol = 'TCP';
     } else if (parsed.udp) {
-        if (isIPv6) {
-            src = `${src}:${parsed.udp.srcPort}`;
-            dst = `${dst}:${parsed.udp.dstPort}`;
-        } else {
-            src = `${src}:${parsed.udp.srcPort}`;
-            dst = `${dst}:${parsed.udp.dstPort}`;
-        }
+        src = `${src}:${parsed.udp.srcPort}`;
+        dst = `${dst}:${parsed.udp.dstPort}`;
         protocol = 'UDP';
     } else if (parsed.icmp) {
         protocol = 'ICMP';
     }
 
-    // Info column
     let info = '';
     if (parsed.tcp) {
         const flags = formatTCPFlags(parsed.tcp.flags);
@@ -86,9 +80,18 @@ export const PacketTableRow: React.FC<PacketTableRowProps> = ({
         info = `${parsed.icmp.typeName} code=${parsed.icmp.code}`;
     }
 
+    const protoClass = getProtocolClass(protocol);
+
+    const classes = [
+        'packet-table__row',
+        isNew ? 'packet-table__row--new' : '',
+        isSelected ? 'packet-table__row--selected' : '',
+    ].filter(Boolean).join(' ');
+
     return (
         <div
-            onClick={onClick}
+            onClick={() => onSelect(packet)}
+            className={classes}
             style={{
                 position: 'absolute',
                 top: 0,
@@ -100,23 +103,27 @@ export const PacketTableRow: React.FC<PacketTableRowProps> = ({
                 display: 'flex',
                 alignItems: 'center',
                 padding: '0 8px',
-                borderBottom: '1px solid var(--g-color-line-generic)',
-                backgroundColor: isSelected
-                    ? 'var(--g-color-base-selection)'
-                    : index % 2 === 0
-                        ? 'transparent'
-                        : 'var(--g-color-base-generic-ultralight)',
+                borderBottom: '1px solid var(--fw-line-2)',
+                backgroundColor: index % 2 === 0 ? 'transparent' : 'var(--fw-bg-2)',
                 boxSizing: 'border-box',
                 cursor: 'pointer',
             }}
         >
-            <div style={cellStyles.index}>{index + 1}</div>
+            <div style={cellStyles.index}>{packet.id + 1}</div>
             <div style={cellStyles.time}>{formatTime(packet.timestamp)}</div>
             <div style={cellStyles.source} title={src}>{src || '-'}</div>
             <div style={cellStyles.destination} title={dst}>{dst || '-'}</div>
-            <div style={cellStyles.protocol}>{protocol || '-'}</div>
+            <div style={cellStyles.protocol}>
+                {protocol ? (
+                    <span className={`pdump-proto-badge${protoClass ? ` ${protoClass}` : ''}`}>
+                        {protocol}
+                    </span>
+                ) : '-'}
+            </div>
             <div style={cellStyles.length}>{parsed.raw.length}</div>
             <div style={cellStyles.info} title={info}>{info || '-'}</div>
         </div>
     );
 };
+
+export const PacketTableRow = React.memo(PacketTableRowImpl);

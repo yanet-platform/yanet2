@@ -1,10 +1,22 @@
 import React, { useState, useEffect } from 'react';
-import { TextInput, Checkbox, Flex, Box } from '@gravity-ui/uikit';
-import { FormDialog } from '../../../components/FormDialog';
-import { FormField } from '../../../components/FormField';
 import { pdumpApi, parseModeFlags, modeFlagsToNumber, type PdumpConfig } from '../../../api/pdump';
 import { toaster } from '../../../utils';
+import BpfTokens from './BpfTokens';
+import PdumpModal from './PdumpModal';
 import './pdump.scss';
+
+const BPF_SUGGESTIONS = [
+    'tcp port 80',
+    'tcp port 443',
+    'udp port 53',
+    'icmp',
+    'icmp6',
+    'host 2a02:6b8::2:242',
+    'src host 10.0.0.1',
+    'tcp and dst port 22',
+    'ip6 and not icmp6',
+    'ether proto 0x86dd',
+];
 
 interface ConfigDialogProps {
     open: boolean;
@@ -55,10 +67,8 @@ export const ConfigDialog: React.FC<ConfigDialogProps> = ({
     }, [open, initialConfig, initialConfigName, isCreate]);
 
     const handleModeToggle = (mode: string) => {
-        setModes((prev) =>
-            prev.includes(mode)
-                ? prev.filter((m) => m !== mode)
-                : [...prev, mode]
+        setModes(prev =>
+            prev.includes(mode) ? prev.filter(m => m !== mode) : [...prev, mode]
         );
     };
 
@@ -78,7 +88,6 @@ export const ConfigDialog: React.FC<ConfigDialogProps> = ({
                 ring_size: ringSize ? parseInt(ringSize, 10) : undefined,
             };
 
-            // Build update mask with all fields that should be updated
             const paths: string[] = ['filter', 'mode'];
             if (config.snaplen !== undefined) {
                 paths.push('snaplen');
@@ -102,99 +111,122 @@ export const ConfigDialog: React.FC<ConfigDialogProps> = ({
         }
     };
 
+    const valid = (isCreate ? configName.trim().length > 0 : true) && filter.trim().length > 0 && modes.length > 0;
     const title = isCreate ? 'Create Pdump Configuration' : `Edit ${initialConfigName}`;
-    const canSubmit = isCreate ? configName.trim().length > 0 : true;
+
+    if (!open) return null;
+
+    const footer = (
+        <>
+            <button type="button" className="fw-btn fw-btn--ghost" onClick={onClose} disabled={loading}>
+                Cancel
+            </button>
+            <button
+                type="button"
+                className="fw-btn fw-btn--primary"
+                onClick={handleConfirm}
+                disabled={!valid || loading}
+                style={{ opacity: valid && !loading ? 1 : 0.5 }}
+            >
+                {isCreate ? 'Create' : 'Save'}
+            </button>
+        </>
+    );
 
     return (
-        <FormDialog
-            open={open}
-            onClose={onClose}
-            onConfirm={handleConfirm}
-            title={title}
-            confirmText={isCreate ? 'Create' : 'Save'}
-            loading={loading}
-            disabled={!canSubmit}
-            width="500px"
-        >
-            <Flex direction="column" gap={4}>
-                {isCreate && (
-                    <FormField
-                        label="Configuration Name"
-                        required
-                        hint="Unique name for the pdump configuration (e.g., 'pdump:main')"
-                    >
-                        <TextInput
-                            value={configName}
-                            onUpdate={setConfigName}
-                            placeholder="pdump:main"
-                            size="l"
-                            autoFocus
-                        />
-                    </FormField>
-                )}
-
-                <FormField
-                    label="Filter"
-                    hint="tcpdump-style filter expression (e.g., 'tcp port 80', 'icmp', 'host 192.168.1.1')"
-                >
-                    <TextInput
-                        value={filter}
-                        onUpdate={setFilter}
-                        placeholder="tcp port 80"
-                        size="l"
+        <PdumpModal title={title} width="620px" onClose={onClose} footer={footer}>
+            {isCreate && (
+                <div className="pdump-field">
+                    <label className="pdump-field__label">
+                        Configuration Name<span className="pdump-field__req">*</span>
+                    </label>
+                    <input
+                        className="pdump-input pdump-input--mono"
+                        placeholder="pdump:main"
+                        value={configName}
+                        onChange={e => setConfigName(e.target.value)}
+                        autoFocus
                     />
-                </FormField>
+                    <span className="pdump-field__hint">
+                        Unique identifier (e.g., 'pdump:main', 'pdump:dns-debug')
+                    </span>
+                </div>
+            )}
 
-                <FormField label="Capture Mode" hint="INPUT = incoming packets, DROP = dropped packets">
-                    <Flex gap={4}>
-                        <Checkbox
-                            checked={modes.includes('INPUT')}
-                            onUpdate={() => handleModeToggle('INPUT')}
-                            size="l"
+            <div className="pdump-field">
+                <label className="pdump-field__label">BPF Filter</label>
+                <input
+                    className="pdump-input pdump-bpf-input"
+                    placeholder="tcp port 80"
+                    value={filter}
+                    onChange={e => setFilter(e.target.value)}
+                />
+                <span className="pdump-field__hint">
+                    tcpdump-style expression. Live preview:{filter && (
+                        <span style={{ marginLeft: 8 }}><BpfTokens expr={filter} /></span>
+                    )}
+                </span>
+                <div className="pdump-bpf-suggestions">
+                    {BPF_SUGGESTIONS.map(ex => (
+                        <span
+                            key={ex}
+                            className="pdump-bpf-suggestion"
+                            onClick={() => setFilter(ex)}
                         >
-                            INPUT
-                        </Checkbox>
-                        <Checkbox
-                            checked={modes.includes('DROP')}
-                            onUpdate={() => handleModeToggle('DROP')}
-                            size="l"
-                        >
-                            DROP
-                        </Checkbox>
-                    </Flex>
-                </FormField>
+                            {ex}
+                        </span>
+                    ))}
+                </div>
+            </div>
 
-                <Box className="config-dialog__row">
-                    <Box className="config-dialog__col">
-                        <FormField
-                            label="Snaplen"
-                            hint="Maximum bytes to capture per packet"
+            <div className="pdump-field">
+                <label className="pdump-field__label">Capture Mode</label>
+                <div className="pdump-mode-checks">
+                    {(['INPUT', 'DROP'] as const).map(m => (
+                        <div
+                            key={m}
+                            className={`pdump-mode-check${modes.includes(m) ? ' pdump-mode-check--checked' : ''}`}
+                            onClick={() => handleModeToggle(m)}
                         >
-                            <TextInput
-                                value={snaplen}
-                                onUpdate={setSnaplen}
-                                placeholder="65535"
-                                type="number"
-                                size="l"
-                            />
-                        </FormField>
-                    </Box>
-                    <Box className="config-dialog__col">
-                        <FormField
-                            label="Ring Size"
-                            hint="Per-worker ring buffer size"
-                        >
-                            <TextInput
-                                value={ringSize}
-                                onUpdate={setRingSize}
-                                placeholder="1024"
-                                type="number"
-                                size="l"
-                            />
-                        </FormField>
-                    </Box>
-                </Box>
-            </Flex>
-        </FormDialog>
+                            <div className="pdump-mode-check__box">
+                                {modes.includes(m) && <span className="pdump-mode-check__tick">✓</span>}
+                            </div>
+                            <div className="pdump-mode-check__text">
+                                <div className="pdump-mode-check__label">{m}</div>
+                                <div className="pdump-mode-check__hint">
+                                    {m === 'INPUT' ? 'All packets entering the module' : 'Only packets the pipeline drops'}
+                                </div>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+                <span className="pdump-field__hint">Bitfield — both can be enabled simultaneously</span>
+            </div>
+
+            <div className="pdump-field-row">
+                <div className="pdump-field">
+                    <label className="pdump-field__label">Snaplen</label>
+                    <input
+                        className="pdump-input pdump-input--mono"
+                        type="number"
+                        value={snaplen}
+                        placeholder="65535"
+                        onChange={e => setSnaplen(e.target.value)}
+                    />
+                    <span className="pdump-field__hint">Max bytes captured per packet</span>
+                </div>
+                <div className="pdump-field">
+                    <label className="pdump-field__label">Ring Size</label>
+                    <input
+                        className="pdump-input pdump-input--mono"
+                        type="number"
+                        value={ringSize}
+                        placeholder="1048576"
+                        onChange={e => setRingSize(e.target.value)}
+                    />
+                    <span className="pdump-field__hint">Per-worker ring buffer (bytes)</span>
+                </div>
+            </div>
+        </PdumpModal>
     );
 };

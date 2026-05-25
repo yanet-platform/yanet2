@@ -75,6 +75,30 @@ export interface ICMPHeader {
     typeName: string;
 }
 
+export interface HTTPHeader {
+    name: string;
+    value: string;
+}
+
+export interface HTTPMessage {
+    /** True if this is a request, false if a response. */
+    isRequest: boolean;
+    /** Only set for requests. */
+    method?: string;
+    /** Only set for requests. */
+    target?: string;
+    /** Only set for responses. */
+    statusCode?: number;
+    /** Only set for responses. */
+    reasonPhrase?: string;
+    /** HTTP version string e.g. "HTTP/1.1". */
+    version: string;
+    /** Parsed headers in order of appearance. Names preserved as-is from the wire. */
+    headers: HTTPHeader[];
+    /** Offset (from the start of raw) where the body starts. May be past the captured length. */
+    bodyOffset: number;
+}
+
 export interface ParsedPacket {
     ethernet?: EthernetHeader;
     ipv4?: IPv4Header;
@@ -82,6 +106,7 @@ export interface ParsedPacket {
     tcp?: TCPHeader;
     udp?: UDPHeader;
     icmp?: ICMPHeader;
+    http?: HTTPMessage;
     payloadOffset: number;
     payloadLength: number;
     raw: Uint8Array;
@@ -318,6 +343,101 @@ const parseICMP = (data: Uint8Array, offset: number, isV6: boolean): ICMPHeader 
     };
 };
 
+const HTTP_REQUEST_METHODS = ['GET ', 'POST ', 'PUT ', 'DELETE ', 'HEAD ', 'OPTIONS ', 'PATCH ', 'CONNECT ', 'TRACE '];
+const HTTP_RESPONSE_PREFIXES = ['HTTP/1.0 ', 'HTTP/1.1 '];
+const HTTP_MAX_PARSE_BYTES = 8192;
+const HTTP_MAX_HEADERS = 64;
+
+const parseHTTP = (data: Uint8Array, payloadOffset: number): HTTPMessage | null => {
+    if (payloadOffset >= data.length) return null;
+
+    const available = Math.min(data.length - payloadOffset, HTTP_MAX_PARSE_BYTES);
+    if (available === 0) return null;
+
+    const sniff = String.fromCharCode(...data.subarray(payloadOffset, payloadOffset + Math.min(32, available)));
+
+    let isRequest = false;
+    let isResponse = false;
+
+    for (const method of HTTP_REQUEST_METHODS) {
+        if (sniff.startsWith(method)) {
+            isRequest = true;
+            break;
+        }
+    }
+    if (!isRequest) {
+        for (const prefix of HTTP_RESPONSE_PREFIXES) {
+            if (sniff.startsWith(prefix)) {
+                isResponse = true;
+                break;
+            }
+        }
+    }
+    if (!isRequest && !isResponse) return null;
+
+    const text = String.fromCharCode(...data.subarray(payloadOffset, payloadOffset + available));
+
+    const crlfIdx = text.indexOf('\r\n');
+    if (crlfIdx < 0) return null;
+    const requestLine = text.substring(0, crlfIdx);
+    const parts = requestLine.split(' ');
+
+    let method: string | undefined;
+    let target: string | undefined;
+    let version: string;
+    let statusCode: number | undefined;
+    let reasonPhrase: string | undefined;
+
+    if (isRequest) {
+        if (parts.length < 3) return null;
+        method = parts[0];
+        target = parts[1];
+        version = parts[2];
+    } else {
+        if (parts.length < 2) return null;
+        version = parts[0];
+        statusCode = parseInt(parts[1], 10);
+        if (isNaN(statusCode)) return null;
+        reasonPhrase = parts.slice(2).join(' ');
+    }
+
+    const headers: HTTPHeader[] = [];
+    let pos = crlfIdx + 2;
+    let headerCount = 0;
+
+    while (pos < text.length && headerCount < HTTP_MAX_HEADERS) {
+        const lineEnd = text.indexOf('\r\n', pos);
+        if (lineEnd < 0) break;
+        if (lineEnd === pos) {
+            pos += 2;
+            break;
+        }
+        const line = text.substring(pos, lineEnd);
+        const colonIdx = line.indexOf(':');
+        if (colonIdx > 0) {
+            headers.push({
+                name: line.substring(0, colonIdx),
+                value: line.substring(colonIdx + 1).trimStart(),
+            });
+            headerCount++;
+        }
+        pos = lineEnd + 2;
+    }
+
+    const bodyOffset = payloadOffset + pos;
+
+    return {
+        isRequest,
+        method,
+        target,
+        statusCode,
+        reasonPhrase,
+        version: version!,
+        headers,
+        bodyOffset,
+    };
+};
+
 export const parsePacket = (data: Uint8Array): ParsedPacket => {
     const result: ParsedPacket = {
         payloadOffset: 0,
@@ -391,6 +511,11 @@ export const parsePacket = (data: Uint8Array): ParsedPacket => {
 
     result.payloadOffset = offset;
     result.payloadLength = Math.max(0, data.length - offset);
+
+    if (result.tcp && offset < data.length) {
+        const http = parseHTTP(data, offset);
+        if (http) result.http = http;
+    }
 
     return result;
 };
