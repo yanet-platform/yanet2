@@ -1,6 +1,7 @@
 package balancer2
 
 import (
+	"iter"
 	"strings"
 	"time"
 
@@ -12,19 +13,19 @@ import (
 )
 
 type stateLookup struct {
-	vs map[string]*vsLookup
+	vs map[vsID]*vsLookup
 }
 
 type vsLookup struct {
 	state *balancerpb.VsState
-	reals map[string]*balancerpb.RealState
+	reals map[realID]*balancerpb.RealState
 }
 
 func newStateLookup() stateLookup {
-	return stateLookup{vs: map[string]*vsLookup{}}
+	return stateLookup{vs: map[vsID]*vsLookup{}}
 }
 
-func (m stateLookup) findVs(key string) *balancerpb.VsState {
+func (m stateLookup) findVs(key vsID) *balancerpb.VsState {
 	entry, ok := m.vs[key]
 	if !ok {
 		return nil
@@ -32,7 +33,7 @@ func (m stateLookup) findVs(key string) *balancerpb.VsState {
 	return entry.state
 }
 
-func (m stateLookup) findReal(vsKey, realKey string) *balancerpb.RealState {
+func (m stateLookup) findReal(vsKey vsID, realKey realID) *balancerpb.RealState {
 	entry, ok := m.vs[vsKey]
 	if !ok {
 		return nil
@@ -90,12 +91,12 @@ func (m *ModuleConfig) buildVsState(
 	vid, vidErr := makeVsID(vs.Id)
 	var (
 		slot  *vsSlot
-		reals map[string]*balancerpb.RealState
+		reals map[realID]*balancerpb.RealState
 	)
 	if vidErr == nil {
 		slot = m.index[vid]
-		reals = make(map[string]*balancerpb.RealState, len(vs.Reals))
-		lookup.vs[vid.String()] = &vsLookup{state: vsState, reals: reals}
+		reals = make(map[realID]*balancerpb.RealState, len(vs.Reals))
+		lookup.vs[vid] = &vsLookup{state: vsState, reals: reals}
 	}
 
 	for _, r := range vs.Reals {
@@ -115,7 +116,7 @@ func (m *ModuleConfig) buildVsState(
 				}
 			}
 			if reals != nil {
-				reals[rid.String()] = rs
+				reals[rid] = rs
 			}
 		}
 		vsState.Reals = append(vsState.Reals, rs)
@@ -123,43 +124,26 @@ func (m *ModuleConfig) buildVsState(
 	return vsState
 }
 
-// sessionVsKey returns the legacy vsID lookup key for a session, or an empty
-// string if the session's transport is unsupported.
-func sessionVsKey(id cbalancer2.SessionID) string {
-	proto, err := toPBTransport(id.Transport)
-	if err != nil {
-		return ""
-	}
-	return vsID{addr: id.VIP, port: id.VSPort, proto: proto}.String()
-}
-
-// sessionRealKey returns the legacy realID lookup key for a session state.
-func sessionRealKey(state cbalancer2.SessionState) string {
-	return realID{addr: state.RealIP}.String()
-}
-
 // applySessions scans live sessions yielded by IterSessions(now) once and
-// folds their stats into the already-built BalancerState. For each session
-// whose VS and real are present in lookup, ActiveSessions is incremented at
-// real, VS, and balancer level, and LastPacketTimestamp is advanced to the
-// maximum live session timestamp at each level. Sessions for unknown VSes,
-// unknown reals, or unsupported transports are silently skipped.
-func (m *ModuleConfig) applySessions(
+// folds their stats into the already-built BalancerState.
+func applySessions(
 	state *balancerpb.BalancerState,
 	lookup stateLookup,
-	now time.Time,
+	iter iter.Seq2[cbalancer2.SessionID, cbalancer2.SessionState],
 ) {
 	balancerMax := state.LastPacketTimestamp.AsTime()
-	for id, sessionState := range m.sessions.IterSessions(now) {
-		vsKey := sessionVsKey(id)
-		if vsKey == "" {
+	for id, sessionState := range iter {
+		proto, err := toPBTransport(id.Transport)
+		if err != nil {
 			continue
 		}
+		vsKey := vsID{addr: id.VIP, port: id.VSPort, proto: proto}
 		entry, ok := lookup.vs[vsKey]
 		if !ok {
 			continue
 		}
-		realState, ok := entry.reals[sessionRealKey(sessionState)]
+		realKey := realID{addr: sessionState.RealIP}
+		realState, ok := entry.reals[realKey]
 		if !ok {
 			continue
 		}
@@ -179,6 +163,14 @@ func (m *ModuleConfig) applySessions(
 			balancerMax = ts
 			state.LastPacketTimestamp = timestamppb.New(ts)
 		}
+	}
+}
+
+func applyCounters(state *balancerpb.BalancerState,
+	lookup stateLookup, counters []ffi.CounterInfo,
+) {
+	for _, counter := range counters {
+		applyCounter(state, lookup, counter)
 	}
 }
 
@@ -203,8 +195,11 @@ func applyCounter(
 			state.L4Stats = l4CounterToProto(c)
 		}
 	case strings.HasPrefix(name, vsCounterPrefix+"_"):
-		vsKey := strings.TrimPrefix(name, vsCounterPrefix+"_")
-		vsState := lookup.findVs(vsKey)
+		vid, err := vsIDFromString(strings.TrimPrefix(name, vsCounterPrefix+"_"))
+		if err != nil {
+			return
+		}
+		vsState := lookup.findVs(vid)
 		if vsState == nil {
 			return
 		}
@@ -217,7 +212,11 @@ func applyCounter(
 		if !ok {
 			return
 		}
-		vsState := lookup.findVs(vsKey)
+		vid, err := vsIDFromString(vsKey)
+		if err != nil {
+			return
+		}
+		vsState := lookup.findVs(vid)
 		if vsState == nil {
 			return
 		}
@@ -225,16 +224,27 @@ func applyCounter(
 		if len(values) == 0 {
 			return
 		}
-		vsState.AllowedSourcesStats = append(vsState.AllowedSourcesStats, &balancerpb.AllowedSourcesStats{
-			Tag:    tag,
-			Passes: values[0],
-		})
+		vsState.AllowedSourcesStats = append(
+			vsState.AllowedSourcesStats,
+			&balancerpb.AllowedSourcesStats{
+				Tag:    tag,
+				Passes: values[0],
+			},
+		)
 	case strings.HasPrefix(name, realCounterPrefix+"_"):
 		vsKey, realKey, ok := splitRealCounterName(name)
 		if !ok {
 			return
 		}
-		realState := lookup.findReal(vsKey, realKey)
+		vid, err := vsIDFromString(vsKey)
+		if err != nil {
+			return
+		}
+		rid, err := realIDFromString(realKey)
+		if err != nil {
+			return
+		}
+		realState := lookup.findReal(vid, rid)
 		if realState == nil {
 			return
 		}

@@ -7,6 +7,8 @@ import (
 	"net/netip"
 	"slices"
 	"sort"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
@@ -41,12 +43,58 @@ func (m vsID) String() string {
 	return fmt.Sprintf("%s/unknown", addrPort)
 }
 
+// vsIDFromString parses the exact output of vsID.String() back into a
+// vsID. The expected format is "<addrPort>/tcp" or "<addrPort>/udp";
+// any deviation (missing slash, empty parts, extra slashes, unknown or
+// differently-cased proto) is rejected.
+func vsIDFromString(id string) (vsID, error) {
+	addrPortStr, proto, ok := strings.Cut(id, "/")
+	if !ok {
+		return vsID{}, fmt.Errorf("invalid vs id %q: missing '/'", id)
+	}
+
+	addrPort, err := netip.ParseAddrPort(addrPortStr)
+	if err != nil {
+		return vsID{}, fmt.Errorf("invalid vs id %q: %w", id, err)
+	}
+
+	var transport balancerpb.TransportProto
+	switch proto {
+	case "tcp":
+		transport = balancerpb.TransportProto_TCP
+	case "udp":
+		transport = balancerpb.TransportProto_UDP
+	default:
+		return vsID{}, fmt.Errorf("invalid vs id %q: unknown proto %q", id, proto)
+	}
+
+	return vsID{
+		addr:  addrPort.Addr(),
+		port:  addrPort.Port(),
+		proto: transport,
+	}, nil
+}
+
 type realID struct {
 	addr netip.Addr
 }
 
 func (m realID) String() string {
 	return m.addr.String()
+}
+
+// realIDFromString parses the exact output of realID.String() back
+// into a realID. The expected format is a bare IP address; addr:port
+// strings, empty input, and any other deviation are rejected.
+func realIDFromString(id string) (realID, error) {
+	if id == "" {
+		return realID{}, errors.New("invalid real id: empty")
+	}
+	addr, err := netip.ParseAddr(id)
+	if err != nil {
+		return realID{}, fmt.Errorf("invalid real id %q: %w", id, err)
+	}
+	return realID{addr: addr}, nil
 }
 
 type realSlot struct {
@@ -73,6 +121,7 @@ type ModuleConfig struct {
 	sessions *SessionsState
 	agent    *ffi.Agent
 	index    map[vsID]*vsSlot
+	mu       sync.Mutex
 }
 
 func NewModuleConfig(
@@ -97,10 +146,14 @@ func NewModuleConfig(
 		sessions: sessions,
 		agent:    agent,
 		index:    index,
+		mu:       sync.Mutex{},
 	}, nil
 }
 
 func (m *ModuleConfig) Update(newConfig *ConfigParams, st *SessionsState) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	merged := mergeConfig(m.cfg, newConfig)
 	if st == nil {
 		st = m.sessions
@@ -120,6 +173,9 @@ func (m *ModuleConfig) Update(newConfig *ConfigParams, st *SessionsState) error 
 }
 
 func (m *ModuleConfig) Free() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	m.handle.Free(m.agent)
 }
 
@@ -132,6 +188,8 @@ func (m *ModuleConfig) SessionsStateName() string {
 }
 
 func (m *ModuleConfig) UpdateVS(vs []*balancerpb.VsConfig) error {
+	m.mu.Lock()
+
 	cur := m.cfg.Vs.Vs
 	merged := slices.Clone(cur)
 	for _, v := range vs {
@@ -145,10 +203,15 @@ func (m *ModuleConfig) UpdateVS(vs []*balancerpb.VsConfig) error {
 			merged = append(merged, v)
 		}
 	}
+
+	m.mu.Unlock()
+
 	return m.Update(&ConfigParams{Vs: &balancerpb.VsConfigList{Vs: merged}}, nil)
 }
 
 func (m *ModuleConfig) DeleteVS(vs []*balancerpb.VsIdentifier) error {
+	m.mu.Lock()
+
 	toDelete := make(map[vsID]struct{}, len(vs))
 	for _, raw := range vs {
 		id, err := makeVsID(raw)
@@ -173,6 +236,9 @@ func (m *ModuleConfig) DeleteVS(vs []*balancerpb.VsIdentifier) error {
 		}
 		kept = append(kept, v)
 	}
+
+	m.mu.Unlock()
+
 	return m.Update(&ConfigParams{Vs: &balancerpb.VsConfigList{Vs: kept}}, nil)
 }
 
@@ -182,6 +248,9 @@ type vsUpdate struct {
 }
 
 func (m *ModuleConfig) UpdateReals(updates []*balancerpb.RealUpdate) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	staged, err := m.stageRealUpdates(updates)
 	if err != nil {
 		return err
@@ -305,12 +374,11 @@ func makeRealID(id *balancerpb.RelativeRealIdentifier) (realID, error) {
 func (m *ModuleConfig) GetState(
 	handleRef *balancerpb.PacketHandlerRef,
 	filter *balancerpb.Filter,
+	now time.Time,
 ) []*balancerpb.BalancerState {
 	dpConfig := m.agent.DPConfig()
 
 	matcher := newStateFilter(filter)
-	now := time.Now()
-	m.refreshWLC(now)
 
 	states := make([]*balancerpb.BalancerState, 0)
 	for position := range dpConfig.AllModulePositions("balancer2") {
@@ -321,8 +389,10 @@ func (m *ModuleConfig) GetState(
 			continue
 		}
 
+		m.mu.Lock()
 		state, lookup := m.buildBaseState(&position, matcher)
-		m.applySessions(state, lookup, now)
+		m.mu.Unlock()
+
 		counters := dpConfig.ModuleCounters(
 			position.Device,
 			position.Pipeline,
@@ -332,11 +402,13 @@ func (m *ModuleConfig) GetState(
 			m.name,
 			nil,
 		)
-		for _, counter := range counters {
-			applyCounter(state, lookup, counter)
-		}
+		applyCounters(state, lookup, counters)
+
+		applySessions(state, lookup, m.sessions.IterSessions(now))
+
 		states = append(states, state)
 	}
+
 	return states
 }
 

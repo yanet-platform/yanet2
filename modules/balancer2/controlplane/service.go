@@ -316,7 +316,10 @@ func (m *Service) ListSessionsStates(
 	return &balancerpb.ListSessionsStatesResponse{Names: names}, nil
 }
 
-func (m *Service) GetState(ctx context.Context, req *balancerpb.GetStateRequest) (*balancerpb.GetStateResponse, error) {
+func (m *Service) GetState(
+	ctx context.Context,
+	req *balancerpb.GetStateRequest,
+) (*balancerpb.GetStateResponse, error) {
 	name := req.GetConfigName()
 	if name == "" {
 		return nil, errSessionsStateNameRequired
@@ -330,7 +333,7 @@ func (m *Service) GetState(ctx context.Context, req *balancerpb.GetStateRequest)
 		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
 
-	states := mc.GetState(req.GetPacketHandlerRef(), req.GetFilter())
+	states := mc.GetState(req.GetPacketHandlerRef(), req.GetFilter(), time.Now())
 	return &balancerpb.GetStateResponse{
 		States: states,
 	}, nil
@@ -373,7 +376,10 @@ func (m *Service) ListSessions(
 	return nil
 }
 
-func makeSession(id cbalancer2.SessionID, state cbalancer2.SessionState) (*balancerpb.Session, error) {
+func makeSession(
+	id cbalancer2.SessionID,
+	state cbalancer2.SessionState,
+) (*balancerpb.Session, error) {
 	proto, err := toPBTransport(id.Transport)
 	if err != nil {
 		return nil, err

@@ -186,7 +186,7 @@ func TestBasic(t *testing.T) {
 	assert.Equal(t, 1, len(result.Output), err, "no output packets")
 	assert.True(t, result.Output[0].IsTunneled, "result packet is not tunneled")
 
-	states := balancer.GetState(nil, nil)
+	states := balancer.GetState(nil, nil, te.mock.CurrentTime())
 	assert.Equal(t, 1, len(states))
 	state := states[0]
 	assert.Equal(t, uint64(1), state.Vs[0].Reals[0].Stats.Packets)
