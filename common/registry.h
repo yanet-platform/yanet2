@@ -293,6 +293,8 @@ value_registry_free(struct value_registry *registry) {
 		);
 	}
 	SET_OFFSET_OF(&registry->ranges, NULL);
+	registry->range_count = 0;
+	registry->max_value = 0;
 }
 
 static inline uint32_t

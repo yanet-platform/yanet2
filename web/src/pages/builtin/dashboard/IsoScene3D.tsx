@@ -7,6 +7,16 @@ import { fmtPps } from '../inspect/formatters';
 import { Inspector } from './Inspector';
 import type { SelectedItem } from './Inspector';
 import type { AgentUsage } from '../inspect/utils';
+import { metaFor } from '../functions/moduleMeta';
+
+const PARTICLE_PPS_LOW = 1000;
+const PARTICLE_PPS_HIGH = 100_000_000;
+const PARTICLE_TIME_AT_LOW_SEC = 5.0;
+const PARTICLE_TIME_AT_HIGH_SEC = 0.5;
+const PARTICLE_COUNT_AT_LOW = 5;
+const PARTICLE_COUNT_AT_HIGH = 100;
+const PARTICLE_COUNT_PER_PATH = PARTICLE_COUNT_AT_HIGH;
+const PARTICLE_MAX_FRAME_DT_SEC = 0.1;
 
 export interface IsoScene3DProps {
     instance: InstanceInfo;
@@ -31,14 +41,17 @@ interface FwdPath {
     pts: THREE.Vector3[];
     lens: number[];
     total: number;
-    density: number;
+    deviceId: string;
 }
 
 interface Particle {
     pi: number;
+    idxInPath: number;
     t: number;
-    speed: number;
     posIdx: number;
+    lastDtRate: number;
+    speedMul: number;
+    rank: number;
 }
 
 interface ParticleSystem {
@@ -55,6 +68,9 @@ interface FnMeshEntry {
     z: number;
     w: number;
     d: number;
+    activeFill: number;
+    activeEdge: number;
+    activeEmissive: number;
 }
 
 interface WireEntry {
@@ -166,23 +182,25 @@ const buildParticles = (
     color: number,
     sizeBase: number,
 ): ParticleSystem => {
-    const N = paths.reduce((sum, p) => sum + Math.max(1, Math.round(p.density * 18)), 0);
+    const N = paths.length * PARTICLE_COUNT_PER_PATH;
     if (!N) return { points: null, ps: [], geo: null };
 
     const positions = new Float32Array(N * 3);
     const ps: Particle[] = [];
     let idx = 0;
-    paths.forEach((path, pi) => {
-        const count = Math.max(1, Math.round(path.density * 18));
-        for (let i = 0; i < count; i++) {
+    paths.forEach((_path, pi) => {
+        for (let i = 0; i < PARTICLE_COUNT_PER_PATH; i++) {
             ps.push({
                 pi,
-                t: Math.random(),
-                speed: (0.0008 + path.density * 0.0014) * (0.7 + Math.random() * 0.6),
+                idxInPath: i,
+                t: i / PARTICLE_COUNT_PER_PATH,
                 posIdx: idx,
+                lastDtRate: 0,
+                speedMul: 0.8 + Math.random() * 0.4,
+                rank: Math.random(),
             });
             positions[idx * 3 + 0] = 0;
-            positions[idx * 3 + 1] = 0;
+            positions[idx * 3 + 1] = -1000;
             positions[idx * 3 + 2] = 0;
             idx++;
         }
@@ -199,6 +217,7 @@ const buildParticles = (
         depthWrite: false,
     });
     const points = new THREE.Points(geo, mat);
+    points.frustumCulled = false;
     return { points, ps, geo };
 };
 
@@ -364,6 +383,8 @@ export const IsoScene3D: React.FC<IsoScene3DProps> = ({
     });
     const canvasSizeRef = useRef(canvasSize);
     canvasSizeRef.current = canvasSize;
+    const lastFrameTimeRef = useRef<number | null>(null);
+    const pathActiveRef = useRef<boolean[]>([]);
 
     useEffect(() => {
         const check = (): boolean => {
@@ -558,6 +579,11 @@ export const IsoScene3D: React.FC<IsoScene3DProps> = ({
                     edgeColor,
                 };
                 pickGroup.add(mesh);
+                const fn = structuralFunctions.find((sf) => sf.id === fname);
+                const tint = new THREE.Color(metaFor(fn?.mod ?? '').color);
+                const activeEdge = tint.getHex();
+                const activeFill = tint.clone().multiplyScalar(0.22).getHex();
+                const activeEmissive = tint.clone().multiplyScalar(0.20).getHex();
                 fnMeshes.push({
                     mesh,
                     fnId: fname,
@@ -566,6 +592,9 @@ export const IsoScene3D: React.FC<IsoScene3DProps> = ({
                     z: pipeZ[pi] - FN_DEPTH / 2,
                     w,
                     d: FN_DEPTH,
+                    activeFill,
+                    activeEdge,
+                    activeEmissive,
                 });
             });
         });
@@ -596,7 +625,7 @@ export const IsoScene3D: React.FC<IsoScene3DProps> = ({
             const mat = new THREE.LineBasicMaterial({
                 color: 0x3a3731,
                 transparent: true,
-                opacity: 0.3,
+                opacity: 0.25,
             });
             const line = new THREE.Line(geo, mat);
             scene.add(line);
@@ -623,7 +652,7 @@ export const IsoScene3D: React.FC<IsoScene3DProps> = ({
                 lens.push(l);
                 total += l;
             }
-            fwdPaths.push({ pts, lens, total, density: 0.5 });
+            fwdPaths.push({ pts, lens, total, deviceId: d.id });
         });
 
         const fwdPS = buildParticles(fwdPaths, 0xFFC061, 2.4);
@@ -744,11 +773,11 @@ export const IsoScene3D: React.FC<IsoScene3DProps> = ({
                 const pps = liveFn?.pps ?? 0;
                 const active = pps > 0;
                 const mat = fb.mesh.material as THREE.MeshLambertMaterial;
-                mat.color.setHex(active ? 0x5a4632 : 0x1a1816);
-                (mat.emissive as THREE.Color).setHex(active ? 0x4a3a22 : 0x000000);
+                mat.color.setHex(active ? fb.activeFill : 0x1a1816);
+                (mat.emissive as THREE.Color).setHex(active ? fb.activeEmissive : 0x000000);
                 mat.emissiveIntensity = active ? 0.4 : 0;
                 ((fb.mesh.userData.edges as THREE.LineSegments).material as THREE.LineBasicMaterial)
-                    .color.setHex(active ? 0xFFC061 : 0x3a3731);
+                    .color.setHex(active ? fb.activeEdge : 0x3a3731);
                 const denom = Math.max(maxFnPps, FN_REF_PPS);
                 const norm = Math.min(1, Math.sqrt(pps / denom));
                 const breathe = Math.sin(now * 0.0009 + fb.x * 0.05) * 0.05;
@@ -790,19 +819,96 @@ export const IsoScene3D: React.FC<IsoScene3DProps> = ({
 
             wires.forEach((w) => {
                 const liveDev = live.devicesById.get(w.deviceId);
-                const active = liveDev?.status === 'ok' && (liveDev?.rxPps ?? 0) > 0;
+                const pps = liveDev?.rxPps ?? 0;
+                const active = pps > 0;
                 const wireMat = w.line.material as THREE.LineBasicMaterial;
                 wireMat.color.setHex(active ? 0xFFC061 : 0x3a3731);
-                wireMat.opacity = active ? 0.55 : 0.3;
+                wireMat.opacity = active ? 0.4 : 0.25;
             });
 
             if (fwdPS.points && fwdPS.geo) {
                 const positions = fwdPS.geo.attributes['position'].array as Float32Array;
+
+                const rawDt = lastFrameTimeRef.current === null
+                    ? 0
+                    : (now - lastFrameTimeRef.current) / 1000;
+                lastFrameTimeRef.current = now;
+                const dtSec = Math.min(PARTICLE_MAX_FRAME_DT_SEC, Math.max(0, rawDt));
+
+                const pathPps = fwdPaths.map((path) => {
+                    const liveDev = live.devicesById.get(path.deviceId);
+                    return liveDev?.rxPps ?? 0;
+                });
+
+                const logLow = Math.log10(PARTICLE_PPS_LOW);
+                const logHigh = Math.log10(PARTICLE_PPS_HIGH);
+                const logSpan = logHigh - logLow;
+
+                interface PathState {
+                    active: boolean;
+                    dtRate: number;
+                    visibleFraction: number;
+                }
+                const pathStates: PathState[] = pathPps.map((pps) => {
+                    if (pps <= 0) return { active: false, dtRate: 0, visibleFraction: 0 };
+                    const clamped = Math.max(PARTICLE_PPS_LOW, Math.min(PARTICLE_PPS_HIGH, pps));
+                    const u = (Math.log10(clamped) - logLow) / logSpan;
+                    const T_sec = PARTICLE_TIME_AT_LOW_SEC
+                        + (PARTICLE_TIME_AT_HIGH_SEC - PARTICLE_TIME_AT_LOW_SEC) * u;
+                    const N_desired = Math.max(
+                        1,
+                        Math.round(
+                            PARTICLE_COUNT_AT_LOW
+                            * Math.pow(PARTICLE_COUNT_AT_HIGH / PARTICLE_COUNT_AT_LOW, u),
+                        ),
+                    );
+                    return {
+                        active: true,
+                        dtRate: 1 / T_sec,
+                        visibleFraction: N_desired / PARTICLE_COUNT_PER_PATH,
+                    };
+                });
+
+                const wasActive = pathActiveRef.current;
+                const newActive = pathStates.map((s) => s.active);
+                pathActiveRef.current = newActive;
+
                 fwdPS.ps.forEach((p) => {
-                    p.t += p.speed * 4;
-                    if (p.t > 1) p.t -= 1;
                     const path = fwdPaths[p.pi];
-                    if (!path) return;
+                    const ps = pathStates[p.pi];
+                    if (!path || !ps) return;
+
+                    let render = false;
+                    if (ps.active) {
+                        if (!wasActive[p.pi]) {
+                            p.t = p.idxInPath / PARTICLE_COUNT_PER_PATH;
+                            p.lastDtRate = 0;
+                        }
+                        p.t += dtSec * ps.dtRate * p.speedMul;
+                        if (p.t > 1) p.t -= 1;
+                        const visible = p.rank < ps.visibleFraction;
+                        if (visible) {
+                            p.lastDtRate = ps.dtRate * p.speedMul;
+                            render = true;
+                        } else {
+                            p.lastDtRate = 0;
+                        }
+                    } else if (p.lastDtRate > 0) {
+                        p.t += dtSec * p.lastDtRate;
+                        if (p.t > 1) {
+                            p.lastDtRate = 0;
+                        } else {
+                            render = true;
+                        }
+                    }
+
+                    if (!render) {
+                        positions[p.posIdx * 3 + 0] = 0;
+                        positions[p.posIdx * 3 + 1] = -1000;
+                        positions[p.posIdx * 3 + 2] = 0;
+                        return;
+                    }
+
                     const target = p.t * path.total;
                     let acc = 0;
                     let pt = path.pts[0];

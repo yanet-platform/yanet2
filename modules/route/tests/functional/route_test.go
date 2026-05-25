@@ -5,6 +5,7 @@ import (
 	"net/netip"
 	"testing"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/gopacket/gopacket/layers"
@@ -20,9 +21,9 @@ import (
 )
 
 const (
-	routeCPSize  = 16 * 1024 * 1024
-	routeDPSize  = 4 * 1024 * 1024
-	routeMemSize = 2 * 1024 * 1024
+	routeCPSize  = 16 * datasize.MB
+	routeDPSize  = 4 * datasize.MB
+	routeMemSize = 2 * datasize.MB
 )
 
 // FIBNexthop is a test-domain nexthop descriptor.
@@ -62,8 +63,8 @@ func setupRouteHarness(
 	t.Helper()
 
 	cfg := dataplaneut.Config{
-		CPMemory:      routeCPSize,
-		DPMemory:      routeDPSize,
+		CPMemory:      uint64(routeCPSize),
+		DPMemory:      uint64(routeDPSize),
 		WorkerCount:   1,
 		Devices:       []string{deviceName},
 		Modules:       []string{"route"},
@@ -478,8 +479,8 @@ func TestRoute_ECMP_HashSelection(t *testing.T) {
 
 	// Build a two-device harness so both nexthop egress ports are registered.
 	cfg := dataplaneut.Config{
-		CPMemory:      routeCPSize,
-		DPMemory:      routeDPSize,
+		CPMemory:      uint64(routeCPSize),
+		DPMemory:      uint64(routeDPSize),
 		WorkerCount:   1,
 		Devices:       []string{"port0", "port1"},
 		Modules:       []string{"route"},

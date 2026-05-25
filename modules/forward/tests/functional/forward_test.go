@@ -2,9 +2,9 @@ package forward_test
 
 import (
 	"net"
-	"net/netip"
 	"testing"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/gopacket/gopacket/layers"
 	"github.com/stretchr/testify/require"
 
@@ -19,48 +19,10 @@ import (
 
 // Memory sizes for the forward functional harness.
 const (
-	fwdCPSize  = 64 * 1024 * 1024
-	fwdDPSize  = 4 * 1024 * 1024
-	fwdMemSize = 8 * 1024 * 1024
+	fwdCPSize  = 64 * datasize.MB
+	fwdDPSize  = 4 * datasize.MB
+	fwdMemSize = 8 * datasize.MB
 )
-
-// ip4Any is a source/destination wildcard for IPv4 filter rules.
-//
-// Both Src4s and Dst4s must be non-empty for a rule to appear in the ip4
-// filter. Use this as the source wildcard when only the destination matters.
-var ip4Any = filter.IPNets{{
-	Addr: netip.MustParseAddr("0.0.0.0"),
-	Mask: netip.MustParseAddr("0.0.0.0"),
-}}
-
-// ip6Any is a source/destination wildcard for IPv6 filter rules.
-//
-// Both Src6s and Dst6s must be non-empty for a rule to appear in the ip6
-// filter.
-var ip6Any = filter.IPNets{{
-	Addr: netip.MustParseAddr("::"),
-	Mask: netip.MustParseAddr("::"),
-}}
-
-// ip4Prefix converts a prefix string into a single-element IPv4 IPNets.
-func ip4Prefix(s string) filter.IPNets {
-	p := netip.MustParsePrefix(s)
-	nets, err := filter.Net4sFromPrefixes([]netip.Prefix{p})
-	if err != nil {
-		panic(err)
-	}
-	return nets
-}
-
-// ip6Prefix converts a prefix string into a single-element IPv6 IPNets.
-func ip6Prefix(s string) filter.IPNets {
-	p := netip.MustParsePrefix(s)
-	nets, err := filter.Net6sFromPrefixes([]netip.Prefix{p})
-	if err != nil {
-		panic(err)
-	}
-	return nets
-}
 
 // setupForwardHarness builds a dataplane harness with the forward module
 // loaded and attaches a control-plane agent.
@@ -75,8 +37,8 @@ func setupForwardHarness(
 	t.Helper()
 
 	cfg := dataplaneut.Config{
-		CPMemory:      fwdCPSize,
-		DPMemory:      fwdDPSize,
+		CPMemory:      uint64(fwdCPSize),
+		DPMemory:      uint64(fwdDPSize),
 		WorkerCount:   1,
 		Devices:       devices,
 		Modules:       []string{"forward"},
@@ -223,7 +185,7 @@ func TestForward_NoMatch(t *testing.T) {
 		Target:  "port0",
 		Mode:    cforward.ModeNone,
 		Counter: "unmatchable",
-		Dst4s:   ip4Prefix("10.0.0.0/24"),
+		Dst4s:   filter.IPNets{filter.MustParseIPNet("10.0.0.0/24")},
 		// Src4s deliberately absent — makes the rule invisible to all filters.
 	}
 
@@ -254,8 +216,8 @@ func TestForward_ModeNone_IPv4(t *testing.T) {
 		Target:  "port0",
 		Mode:    cforward.ModeNone,
 		Counter: "rule0",
-		Src4s:   ip4Any,
-		Dst4s:   ip4Prefix("10.0.0.0/24"),
+		Src4s:   filter.IPNets{filter.UnspecifiedIPv4},
+		Dst4s:   filter.IPNets{filter.MustParseIPNet("10.0.0.0/24")},
 	}
 
 	h, agent, backend := setupForwardHarness(t, []string{"port0"})
@@ -293,8 +255,8 @@ func TestForward_ModeOut_IPv4(t *testing.T) {
 		Target:  "port1",
 		Mode:    cforward.ModeOut,
 		Counter: "rule0",
-		Src4s:   ip4Any,
-		Dst4s:   ip4Prefix("10.0.0.0/24"),
+		Src4s:   filter.IPNets{filter.UnspecifiedIPv4},
+		Dst4s:   filter.IPNets{filter.MustParseIPNet("10.0.0.0/24")},
 	}
 
 	h, agent, backend := setupForwardHarness(t, []string{"port0", "port1"})
@@ -334,8 +296,8 @@ func TestForward_ModeIn_IPv4(t *testing.T) {
 		Target:  "port1",
 		Mode:    cforward.ModeIn,
 		Counter: "rule0",
-		Src4s:   ip4Any,
-		Dst4s:   ip4Prefix("10.0.0.0/24"),
+		Src4s:   filter.IPNets{filter.UnspecifiedIPv4},
+		Dst4s:   filter.IPNets{filter.MustParseIPNet("10.0.0.0/24")},
 	}
 
 	h, agent, backend := setupForwardHarness(t, []string{"port0", "port1"})
@@ -380,8 +342,8 @@ func TestForward_UnmappedDevice(t *testing.T) {
 		Target:  "phantom",
 		Mode:    cforward.ModeOut,
 		Counter: "rule0",
-		Src4s:   ip4Any,
-		Dst4s:   ip4Prefix("10.0.0.0/24"),
+		Src4s:   filter.IPNets{filter.UnspecifiedIPv4},
+		Dst4s:   filter.IPNets{filter.MustParseIPNet("10.0.0.0/24")},
 	}
 
 	h, agent, backend := setupForwardHarness(t, []string{"port0"})
@@ -426,8 +388,8 @@ func TestForward_IPv6_ModeOut(t *testing.T) {
 		Target:  "port1",
 		Mode:    cforward.ModeOut,
 		Counter: "rule0",
-		Src6s:   ip6Any,
-		Dst6s:   ip6Prefix("2001:db8::/32"),
+		Src6s:   filter.IPNets{filter.UnspecifiedIPv6},
+		Dst6s:   filter.IPNets{filter.MustParseIPNet("2001:db8::/32")},
 	}
 
 	h, agent, backend := setupForwardHarness(t, []string{"port0", "port1"})
@@ -541,8 +503,8 @@ func TestForward_MinAction(t *testing.T) {
 			Target:  "port0",
 			Mode:    cforward.ModeNone,
 			Counter: "ip4lose",
-			Src4s:   ip4Any,
-			Dst4s:   ip4Prefix("10.0.0.0/24"),
+			Src4s:   filter.IPNets{filter.UnspecifiedIPv4},
+			Dst4s:   filter.IPNets{filter.MustParseIPNet("10.0.0.0/24")},
 		},
 	}
 

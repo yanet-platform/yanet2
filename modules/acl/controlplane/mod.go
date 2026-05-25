@@ -48,7 +48,7 @@ func NewACLModule(cfg *Config, log *zap.Logger) (*ACLModule, error) {
 		return nil, fmt.Errorf("failed to attach agent to shared memory: %w", err)
 	}
 
-	aclService := NewACLService(agent, uint64(cfg.MemoryRequirements.Unwrap().Bytes()), log)
+	aclService := NewACLService(NewBackend(agent, uint64(cfg.MemoryRequirements.Unwrap().Bytes())), log)
 	aclAdapter := NewACLAdapter(aclService)
 	fwstateService := fwstate.NewFWStateService(agent, aclAdapter, log)
 

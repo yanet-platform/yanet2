@@ -9,7 +9,6 @@ import (
 	fwstate "github.com/yanet-platform/yanet2/modules/fwstate/controlplane"
 )
 
-// Compile-time check to ensure ACLAdapter implements fwstate.ACLServiceProvider interface
 var _ fwstate.ACLServiceProvider = (*ACLAdapter)(nil)
 
 // ACLAdapter provides an interface for fwstate module to interact with ACL service.
@@ -18,161 +17,190 @@ type ACLAdapter struct {
 	service *ACLService
 }
 
-// NewACLAdapter creates a new adapter for fwstate integration
+// NewACLAdapter creates a new adapter for fwstate integration.
 func NewACLAdapter(service *ACLService) *ACLAdapter {
 	return &ACLAdapter{
 		service: service,
 	}
 }
 
-// Lock locks the ACL service mutex for external synchronization
-func (a *ACLAdapter) Lock() {
-	a.service.lock()
+// LinkedConfigNames returns ACL config names linked to the given fwstate
+// config name.
+func (m *ACLAdapter) LinkedConfigNames(fwstateConfigName string) []string {
+	m.service.mu.Lock()
+	defer m.service.mu.Unlock()
+
+	return m.service.linkedConfigNamesLocked(fwstateConfigName)
 }
 
-// Unlock unlocks the ACL service mutex for external synchronization
-func (a *ACLAdapter) Unlock() {
-	a.service.unlock()
+// RelinkConfigs creates new ACL module configs for every name currently
+// linked to fwstateConfig.
+//
+// Calls publish to push the combined dataplane update.
+func (m *ACLAdapter) RelinkConfigs(
+	fwstateConfig *fwstate.FwStateConfig,
+	publish func(linkedFFI []ffi.ModuleConfig) error,
+) error {
+	m.service.mu.Lock()
+	defer m.service.mu.Unlock()
+
+	names := m.service.linkedConfigNamesLocked(fwstateConfig.Name())
+	if len(names) == 0 {
+		return publish(nil)
+	}
+
+	newHandles, err := m.service.createLinkedHandlesLocked(names, fwstateConfig)
+	if err != nil {
+		return err
+	}
+
+	ffiCfgs := make([]ffi.ModuleConfig, 0, len(names))
+	for _, name := range names {
+		ffiCfgs = append(ffiCfgs, newHandles[name].AsFFIModule())
+	}
+
+	if err := publish(ffiCfgs); err != nil {
+		for _, h := range newHandles {
+			h.Free()
+		}
+
+		return err
+	}
+
+	for name, newHandle := range newHandles {
+		oldConfig := m.service.configs[name]
+		if oldConfig.acl != nil {
+			oldConfig.acl.Free()
+		}
+
+		m.service.configs[name] = aclConfig{
+			rules:       oldConfig.rules,
+			acl:         newHandle,
+			fwstateName: fwstateConfig.Name(),
+		}
+	}
+
+	return nil
 }
 
-// LinkedConfigNames returns the names of ACL configs that are linked to the specified fwstate config
-func (a *ACLAdapter) LinkedConfigNames(fwstateConfigName string) []string {
-	return a.service.linkedConfigNames(fwstateConfigName)
+// LinkConfigs creates new ACL module configs for the given explicit list of
+// names, linking them to fwstateConfig, then calls publish so the caller can
+// push the combined dataplane update atomically.
+func (m *ACLAdapter) LinkConfigs(
+	names []string,
+	fwstateConfig *fwstate.FwStateConfig,
+	publish func(linkedFFI []ffi.ModuleConfig) error,
+) error {
+	m.service.mu.Lock()
+	defer m.service.mu.Unlock()
+
+	newHandles, err := m.service.createLinkedHandlesLocked(names, fwstateConfig)
+	if err != nil {
+		return err
+	}
+
+	ffiCfgs := make([]ffi.ModuleConfig, 0, len(names))
+	for _, name := range names {
+		ffiCfgs = append(ffiCfgs, newHandles[name].AsFFIModule())
+	}
+
+	if err := publish(ffiCfgs); err != nil {
+		for _, h := range newHandles {
+			h.Free()
+		}
+
+		return err
+	}
+
+	for name, newHandle := range newHandles {
+		oldConfig := m.service.configs[name]
+		if oldConfig.acl != nil {
+			oldConfig.acl.Free()
+		}
+
+		m.service.configs[name] = aclConfig{
+			rules:       oldConfig.rules,
+			acl:         newHandle,
+			fwstateName: fwstateConfig.Name(),
+		}
+	}
+
+	return nil
 }
 
-// CreateACLConfigs creates new ACL module configs for the specified ACL config names
-// and links them to the provided fwstate config. Returns the newly created ACL configs
-// as FFI modules and a transaction object for commit/abort.
-func (a *ACLAdapter) CreateACLConfigs(aclConfigNames []string, fwstateConfig *fwstate.FwStateConfig) ([]ffi.ModuleConfig, fwstate.ACLConfigTransaction, error) {
-	return a.service.createACLConfigs(aclConfigNames, fwstateConfig)
-}
-
-// //////////////////////////////////////////////////////////////////////////////
-// ACLService private methods for adapter
-
-// lock locks the service mutex for external synchronization
-func (m *ACLService) lock() {
-	m.mu.Lock()
-}
-
-// unlock unlocks the service mutex for external synchronization
-func (m *ACLService) unlock() {
-	m.mu.Unlock()
-}
-
-// linkedConfigNames returns the names of ACL configs that are linked to the specified fwstate config
-func (m *ACLService) linkedConfigNames(fwstateConfigName string) []string {
+// linkedConfigNamesLocked returns linked names without taking the mutex.
+//
+// Caller must hold m.mu.
+func (m *ACLService) linkedConfigNamesLocked(fwstateConfigName string) []string {
 	names := make([]string, 0)
 	for name, config := range m.configs {
 		if config.fwstateName == fwstateConfigName {
 			names = append(names, name)
 		}
 	}
+
 	return names
 }
 
-// aclConfigTransaction implements transaction pattern for ACL config updates
-type aclConfigTransaction struct {
-	service     *ACLService
-	newConfigs  map[string]*ModuleConfig
-	fwstateName string
-}
+// createLinkedHandlesLocked creates new ACL module handles for every name in
+// names, linked to fwstateConfig. On any failure every handle created so far
+// is freed before returning the error.
+//
+// Caller must hold m.mu.
+func (m *ACLService) createLinkedHandlesLocked(
+	names []string,
+	fwstateConfig *fwstate.FwStateConfig,
+) (map[string]ModuleHandle, error) {
+	newHandles := make(map[string]ModuleHandle)
 
-func (t *aclConfigTransaction) Commit() {
-	// Free old configs and save new ones
-	for name, newConfig := range t.newConfigs {
-		oldConfig := t.service.configs[name]
-		if oldConfig.acl != nil {
-			oldConfig.acl.Free()
-		}
-
-		t.service.configs[name] = aclConfig{
-			rules:       oldConfig.rules,
-			acl:         newConfig,
-			fwstateName: t.fwstateName,
-		}
-	}
-}
-
-func (t *aclConfigTransaction) Abort() {
-	// Free new configs, keep old ones
-	for _, newConfig := range t.newConfigs {
-		if newConfig != nil {
-			newConfig.Free()
-		}
-	}
-}
-
-// createACLConfigs creates new ACL module configs for the specified ACL config names
-// and links them to the provided fwstate config. Returns the newly created ACL configs
-// as FFI modules and a transaction object for commit/abort.
-func (m *ACLService) createACLConfigs(aclConfigNames []string, fwstateConfig *fwstate.FwStateConfig) ([]ffi.ModuleConfig, fwstate.ACLConfigTransaction, error) {
-	newConfigs := make(map[string]*ModuleConfig)
-
-	// Create all new configs
-	for _, name := range aclConfigNames {
+	for _, name := range names {
 		oldConfig, ok := m.configs[name]
 		if !ok {
-			// Clean up any configs we've already created
-			for _, cfg := range newConfigs {
-				cfg.Free()
+			for _, h := range newHandles {
+				h.Free()
 			}
-			return nil, nil, fmt.Errorf("ACL config %q not found", name)
+
+			return nil, fmt.Errorf("ACL config %q not found", name)
 		}
 
-		// Create new ACL config
-		newACLConfig, err := NewModuleConfig(m.agent, name)
+		handle, err := m.backend.NewModule(name)
 		if err != nil {
-			// Clean up any configs we've already created
-			for _, cfg := range newConfigs {
-				cfg.Free()
+			for _, h := range newHandles {
+				h.Free()
 			}
-			return nil, nil, fmt.Errorf("failed to create ACL module config %q: %w", name, err)
+
+			return nil, fmt.Errorf("failed to create ACL module config %q: %w", name, err)
 		}
 
-		newACLConfig.SetFwStateConfig(fwstateConfig)
+		handle.SetFwStateConfig(fwstateConfig.AsFFIModule())
 
-		// Convert and update rules
 		rules, err := convertRules(oldConfig.rules)
 		if err != nil {
-			newACLConfig.Free()
-			// Clean up any configs we've already created
-			for _, cfg := range newConfigs {
-				cfg.Free()
+			handle.Free()
+			for _, h := range newHandles {
+				h.Free()
 			}
-			return nil, nil, fmt.Errorf("failed to convert rules for ACL config %q: %w", name, err)
+
+			return nil, fmt.Errorf("failed to convert rules for ACL config %q: %w", name, err)
 		}
 
-		if err := newACLConfig.Update(rules); err != nil {
-			newACLConfig.Free()
-			// Clean up any configs we've already created
-			for _, cfg := range newConfigs {
-				cfg.Free()
+		if err := handle.UpdateRules(rules); err != nil {
+			handle.Free()
+			for _, h := range newHandles {
+				h.Free()
 			}
-			return nil, nil, fmt.Errorf("failed to update ACL module config %q: %w", name, err)
+
+			return nil, fmt.Errorf("failed to update ACL module config %q: %w", name, err)
 		}
 
-		newConfigs[name] = newACLConfig
-	}
-
-	// Create transaction
-	transaction := &aclConfigTransaction{
-		service:     m,
-		newConfigs:  newConfigs,
-		fwstateName: fwstateConfig.Name(),
-	}
-
-	// Convert to FFI modules
-	ffiConfigs := make([]ffi.ModuleConfig, 0, len(aclConfigNames))
-	for _, name := range aclConfigNames {
-		ffiConfigs = append(ffiConfigs, newConfigs[name].AsFFIModule())
+		newHandles[name] = handle
 	}
 
 	m.log.Info(
 		"successfully created ACL configs",
-		zap.Strings("acl_configs", aclConfigNames),
+		zap.Strings("acl_configs", names),
 		zap.String("fwstate", fwstateConfig.Name()),
 	)
 
-	return ffiConfigs, transaction, nil
+	return newHandles, nil
 }
