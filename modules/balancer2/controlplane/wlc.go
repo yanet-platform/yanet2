@@ -52,14 +52,17 @@ func (m *ModuleConfig) refreshWLC(now time.Time) {
 		if vs.Scheduler != balancerpb.VsScheduler_WLC {
 			continue
 		}
+
 		vid, err := makeVsID(vs.Id)
 		if err != nil {
 			continue
 		}
+
 		slot, ok := m.index[vid]
 		if !ok {
 			continue
 		}
+
 		m.vsRefreshWLC(slot, counts[vid], power, maxWeight)
 	}
 }
