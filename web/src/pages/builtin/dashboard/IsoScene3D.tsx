@@ -7,6 +7,7 @@ import { fmtPps } from '../inspect/formatters';
 import { Inspector } from './Inspector';
 import type { SelectedItem } from './Inspector';
 import type { AgentUsage } from '../inspect/utils';
+import { metaFor } from '../functions/moduleMeta';
 
 const PARTICLE_MIN_REF_PPS = 10;
 const PARTICLE_REF_DECAY = 0.995;
@@ -62,6 +63,9 @@ interface FnMeshEntry {
     z: number;
     w: number;
     d: number;
+    activeFill: number;
+    activeEdge: number;
+    activeEmissive: number;
 }
 
 interface WireEntry {
@@ -567,6 +571,11 @@ export const IsoScene3D: React.FC<IsoScene3DProps> = ({
                     edgeColor,
                 };
                 pickGroup.add(mesh);
+                const fn = structuralFunctions.find((sf) => sf.id === fname);
+                const tint = new THREE.Color(metaFor(fn?.mod ?? '').color);
+                const activeEdge = tint.getHex();
+                const activeFill = tint.clone().multiplyScalar(0.22).getHex();
+                const activeEmissive = tint.clone().multiplyScalar(0.20).getHex();
                 fnMeshes.push({
                     mesh,
                     fnId: fname,
@@ -575,6 +584,9 @@ export const IsoScene3D: React.FC<IsoScene3DProps> = ({
                     z: pipeZ[pi] - FN_DEPTH / 2,
                     w,
                     d: FN_DEPTH,
+                    activeFill,
+                    activeEdge,
+                    activeEmissive,
                 });
             });
         });
@@ -753,11 +765,11 @@ export const IsoScene3D: React.FC<IsoScene3DProps> = ({
                 const pps = liveFn?.pps ?? 0;
                 const active = pps > 0;
                 const mat = fb.mesh.material as THREE.MeshLambertMaterial;
-                mat.color.setHex(active ? 0x5a4632 : 0x1a1816);
-                (mat.emissive as THREE.Color).setHex(active ? 0x4a3a22 : 0x000000);
+                mat.color.setHex(active ? fb.activeFill : 0x1a1816);
+                (mat.emissive as THREE.Color).setHex(active ? fb.activeEmissive : 0x000000);
                 mat.emissiveIntensity = active ? 0.4 : 0;
                 ((fb.mesh.userData.edges as THREE.LineSegments).material as THREE.LineBasicMaterial)
-                    .color.setHex(active ? 0xFFC061 : 0x3a3731);
+                    .color.setHex(active ? fb.activeEdge : 0x3a3731);
                 const denom = Math.max(maxFnPps, FN_REF_PPS);
                 const norm = Math.min(1, Math.sqrt(pps / denom));
                 const breathe = Math.sin(now * 0.0009 + fb.x * 0.05) * 0.05;
