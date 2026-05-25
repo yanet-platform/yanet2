@@ -14,7 +14,7 @@ project(
   ],
 )
 
-add_global_arguments(
+add_project_arguments(
   ['-march=' + get_option('cpu_arch'), '-g', '-D_GNU_SOURCE'],
   language: 'c',
 )
