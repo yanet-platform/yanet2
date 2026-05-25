@@ -11,7 +11,7 @@ import (
 	"github.com/yanet-platform/yanet2/bindings/go/filter"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	mock "github.com/yanet-platform/yanet2/mock/go"
-	acl "github.com/yanet-platform/yanet2/modules/acl/controlplane"
+	"github.com/yanet-platform/yanet2/modules/acl/bindings/go/cacl"
 )
 
 type testEnv struct {
@@ -19,8 +19,8 @@ type testEnv struct {
 	packetGen *PacketGenerator
 }
 
-func setupTestEnv(t *testing.T, rules []acl.AclRule) *testEnv {
-	setup, err := SetupTest(&TestConfig{
+func setupTestEnv(t *testing.T, rules []cacl.AclRule) *testEnv {
+	setup, err := SetupTest(t, &TestConfig{
 		rules: rules,
 	})
 	require.NoError(t, err)
@@ -44,10 +44,10 @@ func (te *testEnv) testPacket(t *testing.T, packetLayers []gopacket.Serializable
 }
 
 // 1. Basic Allow/Deny Rules
-func createBasicRules() []acl.AclRule {
-	return []acl.AclRule{
+func createBasicRules() []cacl.AclRule {
+	return []cacl.AclRule{
 		{
-			Actions:    []acl.AclAction{{Kind: 0}}, // PASS
+			Actions:    []cacl.AclAction{{Kind: 0}}, // PASS
 			Devices:    []filter.Device{{Name: defaultDeviceName}},
 			VlanRanges: []filter.VlanRange{},
 			Src4s: []filter.IPNet{
@@ -70,7 +70,7 @@ func createBasicRules() []acl.AclRule {
 			},
 		},
 		{
-			Actions:    []acl.AclAction{{Kind: 1}}, // DENY
+			Actions:    []cacl.AclAction{{Kind: 1}}, // DENY
 			Devices:    []filter.Device{{Name: defaultDeviceName}},
 			VlanRanges: []filter.VlanRange{},
 			Src4s: []filter.IPNet{
@@ -124,10 +124,10 @@ func TestAcl_BasicRules(t *testing.T) {
 }
 
 // 2. Protocol-Specific Rules
-func createProtocolRules() []acl.AclRule {
-	return []acl.AclRule{
+func createProtocolRules() []cacl.AclRule {
+	return []cacl.AclRule{
 		{
-			Actions: []acl.AclAction{{Kind: 0}}, // PASS
+			Actions: []cacl.AclAction{{Kind: 0}}, // PASS
 			Devices: []filter.Device{{Name: defaultDeviceName}},
 			Src4s: []filter.IPNet{
 				{Addr: netip.MustParseAddr("192.0.2.2"), Mask: netip.MustParseAddr("255.255.255.255")},
@@ -179,7 +179,7 @@ func createProtocolRules() []acl.AclRule {
 			},
 		},
 		{
-			Actions: []acl.AclAction{{Kind: 1}}, // DENY
+			Actions: []cacl.AclAction{{Kind: 1}}, // DENY
 			Devices: []filter.Device{{Name: defaultDeviceName}},
 			Src4s: []filter.IPNet{
 				{Addr: netip.MustParseAddr("0.0.0.0"), Mask: netip.MustParseAddr("0.0.0.0")},
@@ -215,7 +215,7 @@ func createProtocolRules() []acl.AclRule {
 			},
 		},
 		{
-			Actions: []acl.AclAction{{Kind: 0}}, // PASS
+			Actions: []cacl.AclAction{{Kind: 0}}, // PASS
 			Devices: []filter.Device{{Name: defaultDeviceName}},
 			Src4s: []filter.IPNet{
 				{Addr: netip.MustParseAddr("192.0.2.2"), Mask: netip.MustParseAddr("255.255.255.255")},
@@ -263,10 +263,10 @@ func TestAcl_ProtocolRules(t *testing.T) {
 }
 
 // 3. Port Range Validation
-func createPortRangeRules() []acl.AclRule {
-	return []acl.AclRule{
+func createPortRangeRules() []cacl.AclRule {
+	return []cacl.AclRule{
 		{
-			Actions: []acl.AclAction{{Kind: 0}}, // PASS
+			Actions: []cacl.AclAction{{Kind: 0}}, // PASS
 			Devices: []filter.Device{{Name: defaultDeviceName}},
 			Src4s: []filter.IPNet{
 				{Addr: netip.MustParseAddr("192.0.2.2"), Mask: netip.MustParseAddr("255.255.255.255")},
@@ -304,10 +304,10 @@ func TestAcl_PortRangeRules(t *testing.T) {
 }
 
 // 4. Subnet Validation Rules
-func createSubnetRules() []acl.AclRule {
-	return []acl.AclRule{
+func createSubnetRules() []cacl.AclRule {
+	return []cacl.AclRule{
 		{
-			Actions: []acl.AclAction{{Kind: 0}}, // PASS
+			Actions: []cacl.AclAction{{Kind: 0}}, // PASS
 			Devices: []filter.Device{{Name: defaultDeviceName}},
 			Src4s: []filter.IPNet{
 				{Addr: netip.MustParseAddr("192.0.2.0"), Mask: netip.MustParseAddr("255.255.255.0")},
@@ -328,7 +328,7 @@ func createSubnetRules() []acl.AclRule {
 			},
 		},
 		{
-			Actions: []acl.AclAction{{Kind: 1}}, // DENY
+			Actions: []cacl.AclAction{{Kind: 1}}, // DENY
 			Devices: []filter.Device{{Name: defaultDeviceName}},
 			Src4s: []filter.IPNet{
 				{Addr: netip.MustParseAddr("192.0.99.0"), Mask: netip.MustParseAddr("255.255.255.0")},
@@ -368,10 +368,10 @@ func TestAcl_SubnetRules(t *testing.T) {
 }
 
 // 5. IPv6 Rules
-func createIPv6Rules() []acl.AclRule {
-	return []acl.AclRule{
+func createIPv6Rules() []cacl.AclRule {
+	return []cacl.AclRule{
 		{
-			Actions: []acl.AclAction{{Kind: 0}}, // PASS
+			Actions: []cacl.AclAction{{Kind: 0}}, // PASS
 			Devices: []filter.Device{{Name: defaultDeviceName}},
 			Src4s:   []filter.IPNet{},
 			Dst4s:   []filter.IPNet{},
@@ -392,7 +392,7 @@ func createIPv6Rules() []acl.AclRule {
 			},
 		},
 		{
-			Actions: []acl.AclAction{{Kind: 0}}, // PASS
+			Actions: []cacl.AclAction{{Kind: 0}}, // PASS
 			Devices: []filter.Device{{Name: defaultDeviceName}},
 			Src4s:   []filter.IPNet{},
 			Dst4s:   []filter.IPNet{},
@@ -413,7 +413,7 @@ func createIPv6Rules() []acl.AclRule {
 			},
 		},
 		{
-			Actions: []acl.AclAction{{Kind: 1}}, // DENY
+			Actions: []cacl.AclAction{{Kind: 1}}, // DENY
 			Devices: []filter.Device{{Name: defaultDeviceName}},
 			Src4s:   []filter.IPNet{},
 			Dst4s:   []filter.IPNet{},
@@ -475,10 +475,10 @@ func TestAcl_IPv6Rules(t *testing.T) {
 }
 
 // 6. Overlapping Rules Pyramid
-func createOverlappingRules() []acl.AclRule {
-	return []acl.AclRule{
+func createOverlappingRules() []cacl.AclRule {
+	return []cacl.AclRule{
 		{
-			Actions: []acl.AclAction{{Kind: 0}}, // PASS
+			Actions: []cacl.AclAction{{Kind: 0}}, // PASS
 			Devices: []filter.Device{{Name: defaultDeviceName}},
 			Src4s: []filter.IPNet{
 				{Addr: netip.MustParseAddr("192.0.2.0"), Mask: netip.MustParseAddr("255.255.255.254")},
@@ -499,7 +499,7 @@ func createOverlappingRules() []acl.AclRule {
 			},
 		},
 		{
-			Actions: []acl.AclAction{{Kind: 1}}, // DENY
+			Actions: []cacl.AclAction{{Kind: 1}}, // DENY
 			Devices: []filter.Device{{Name: defaultDeviceName}},
 			Src4s: []filter.IPNet{
 				{Addr: netip.MustParseAddr("192.0.2.0"), Mask: netip.MustParseAddr("255.255.255.240")},
@@ -520,7 +520,7 @@ func createOverlappingRules() []acl.AclRule {
 			},
 		},
 		{
-			Actions: []acl.AclAction{{Kind: 0}}, // PASS
+			Actions: []cacl.AclAction{{Kind: 0}}, // PASS
 			Devices: []filter.Device{{Name: defaultDeviceName}},
 			Src4s: []filter.IPNet{
 				{Addr: netip.MustParseAddr("192.0.2.0"), Mask: netip.MustParseAddr("255.255.255.0")},
@@ -541,7 +541,7 @@ func createOverlappingRules() []acl.AclRule {
 			},
 		},
 		{
-			Actions: []acl.AclAction{{Kind: 1}}, // DENY
+			Actions: []cacl.AclAction{{Kind: 1}}, // DENY
 			Devices: []filter.Device{{Name: defaultDeviceName}},
 			Src4s: []filter.IPNet{
 				{Addr: netip.MustParseAddr("192.0.0.0"), Mask: netip.MustParseAddr("255.255.0.0")},

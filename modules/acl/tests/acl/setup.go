@@ -2,12 +2,16 @@ package test
 
 import (
 	"fmt"
+	"testing"
 
 	"github.com/c2h5oh/datasize"
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	mock "github.com/yanet-platform/yanet2/mock/go"
+	"github.com/yanet-platform/yanet2/modules/acl/bindings/go/cacl"
 	acl "github.com/yanet-platform/yanet2/modules/acl/controlplane"
+	"github.com/yanet-platform/yanet2/modules/acl/controlplane/aclpb"
+	"go.uber.org/zap"
 )
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -22,16 +26,17 @@ var defaultConfigName string = "acl0"
 
 type TestConfig struct {
 	mock  *mock.YanetMockConfig
-	rules []acl.AclRule
+	rules []cacl.AclRule
 }
 
 type TestSetup struct {
-	mock   *mock.YanetMock
-	agent  *ffi.Agent
-	module *acl.ModuleConfig
+	mock    *mock.YanetMock
+	agent   *ffi.Agent
+	service *acl.ACLService
 }
 
-func SetupTest(config *TestConfig) (*TestSetup, error) {
+func SetupTest(t *testing.T, config *TestConfig) (*TestSetup, error) {
+	t.Helper()
 	if config.mock == nil {
 		config.mock = &mock.YanetMockConfig{
 			AgentsMemory: datasize.MB * 64,
@@ -55,18 +60,14 @@ func SetupTest(config *TestConfig) (*TestSetup, error) {
 		return nil, fmt.Errorf("failed to attach agent: %w", err)
 	}
 
-	module, err := acl.NewModuleConfig(agent, defaultConfigName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create new acl module: %w", err)
-	}
+	service := acl.NewACLService(acl.NewBackend(agent, uint64(config.mock.GetAgentsMemory().Bytes())), zap.NewNop())
 
-	err = module.Update(config.rules)
+	_, err = service.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
+		Name:  defaultConfigName,
+		Rules: aclpb.FromRules(config.rules),
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to update acl module: %w", err)
-	}
-
-	if err := agent.UpdateModules([]ffi.ModuleConfig{module.AsFFIModule()}); err != nil {
-		return nil, fmt.Errorf("failed to update dp modules: %w", err)
 	}
 
 	if err := setupCp(agent); err != nil {
@@ -74,9 +75,9 @@ func SetupTest(config *TestConfig) (*TestSetup, error) {
 	}
 
 	return &TestSetup{
-		mock:   mock,
-		agent:  agent,
-		module: module,
+		mock:    mock,
+		agent:   agent,
+		service: service,
 	}, nil
 }
 
@@ -153,7 +154,6 @@ func setupCp(agent *ffi.Agent) error {
 }
 
 func (ctx *TestSetup) Free() {
-	ctx.module.Free()
 	ctx.agent.Close()
 	ctx.mock.Free()
 }

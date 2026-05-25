@@ -1,7 +1,6 @@
 package test
 
 import (
-	"context"
 	"net"
 	"net/netip"
 	"testing"
@@ -16,6 +15,7 @@ import (
 	"github.com/yanet-platform/yanet2/common/filterpb"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	"github.com/yanet-platform/yanet2/modules/acl/bindings/go/cacl"
 	acl "github.com/yanet-platform/yanet2/modules/acl/controlplane"
 	"github.com/yanet-platform/yanet2/modules/acl/controlplane/aclpb"
 )
@@ -83,10 +83,10 @@ func gaugeVal(m *commonpb.Metric) float64 {
 	return 0
 }
 
-// passRule builds a simple IPv4 UDP PASS rule for the default device
-func passRule(src, dst, counter string) acl.AclRule {
-	return acl.AclRule{
-		Actions:       []acl.AclAction{{Kind: 2}, {Kind: 0}}, // COUNT + PASS
+// passRule builds a simple IPv4 UDP PASS rule for the default device.
+func passRule(src, dst, counter string) cacl.AclRule {
+	return cacl.AclRule{
+		Actions:       []cacl.AclAction{{Kind: 2}, {Kind: 0}}, // COUNT + PASS
 		Counter:       counter,
 		Devices:       []filter.Device{{Name: defaultDeviceName}},
 		Src4s:         []filter.IPNet{{Addr: netip.MustParseAddr(src), Mask: netip.MustParseAddr("255.255.255.255")}},
@@ -99,9 +99,9 @@ func passRule(src, dst, counter string) acl.AclRule {
 	}
 }
 
-func denyRule(src, dst string) acl.AclRule {
+func denyRule(src, dst string) cacl.AclRule {
 	r := passRule(src, dst, "")
-	r.Actions = []acl.AclAction{{Kind: 1}} // DENY
+	r.Actions = []cacl.AclAction{{Kind: 1}} // DENY
 	return r
 }
 
@@ -111,46 +111,49 @@ func udpPacket(t *testing.T, src, dst string) gopacket.Packet {
 }
 
 func newService(agent *ffi.Agent) *acl.ACLService {
-	return acl.NewACLService(agent, 64*1024*1024, zap.NewNop())
+	return acl.NewACLService(acl.NewBackend(agent, 64*1024*1024), zap.NewNop())
 }
 
 // 1. Compilation info (ffi.GetInfo)
 func TestMetrics_CompilationInfo(t *testing.T) {
-	setup, err := SetupTest(&TestConfig{rules: createBasicRules()})
+	setup, err := SetupTest(t, &TestConfig{rules: createBasicRules()})
 	require.NoError(t, err)
 	defer setup.Free()
 
-	info := setup.module.GetInfo()
+	info := setup.service.GetInfo(defaultConfigName)
+	require.NotNil(t, info)
 	// createBasicRules has port ranges → rules go into ip4_port filter, not pure ip4
 	assert.Greater(t, info.CompilationTimeNs, uint64(0), "compilation_time_ns must be non-zero")
 	assert.Greater(t, info.FilterRuleCountIp4Port, uint64(0), "filter_rule_count_ip4_port must be > 0")
 }
 
 func TestMetrics_CompilationInfo_IPv6(t *testing.T) {
-	setup, err := SetupTest(&TestConfig{rules: createIPv6Rules()})
+	setup, err := SetupTest(t, &TestConfig{rules: createIPv6Rules()})
 	require.NoError(t, err)
 	defer setup.Free()
 
-	assert.Greater(t, setup.module.GetInfo().FilterRuleCountIp6, uint64(0))
+	info := setup.service.GetInfo(defaultConfigName)
+	require.NotNil(t, info)
+	assert.Greater(t, info.FilterRuleCountIp6, uint64(0))
 }
 
 // 2. Action counters
 func TestMetrics_ActionCounters(t *testing.T) {
 	tests := []struct {
 		name        string
-		rules       []acl.AclRule
+		rules       []cacl.AclRule
 		src         string
 		counterName string
 	}{
-		{"allow", []acl.AclRule{passRule("10.0.0.1", "10.0.0.2", "")}, "10.0.0.1", "acl_action_allow"},
-		{"deny", []acl.AclRule{denyRule("10.0.0.1", "10.0.0.2")}, "10.0.0.1", "acl_action_deny"},
+		{"allow", []cacl.AclRule{passRule("10.0.0.1", "10.0.0.2", "")}, "10.0.0.1", "acl_action_allow"},
+		{"deny", []cacl.AclRule{denyRule("10.0.0.1", "10.0.0.2")}, "10.0.0.1", "acl_action_deny"},
 		// 172.16.0.1 doesn't match the pass rule -> no_match
-		{"no_match", []acl.AclRule{passRule("10.0.0.1", "10.0.0.2", "")}, "172.16.0.1", "acl_no_match"},
+		{"no_match", []cacl.AclRule{passRule("10.0.0.1", "10.0.0.2", "")}, "172.16.0.1", "acl_no_match"},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			setup, err := SetupTest(&TestConfig{rules: tc.rules})
+			setup, err := SetupTest(t, &TestConfig{rules: tc.rules})
 			require.NoError(t, err)
 			defer setup.Free()
 
@@ -166,7 +169,7 @@ func TestMetrics_ActionCounters(t *testing.T) {
 // 3. Per-rule counter
 func TestMetrics_PerRuleCounter(t *testing.T) {
 	const name = "acl_http"
-	setup, err := SetupTest(&TestConfig{rules: []acl.AclRule{passRule("10.0.0.1", "10.0.0.2", name)}})
+	setup, err := SetupTest(t, &TestConfig{rules: []cacl.AclRule{passRule("10.0.0.1", "10.0.0.2", name)}})
 	require.NoError(t, err)
 	defer setup.Free()
 
@@ -179,7 +182,7 @@ func TestMetrics_PerRuleCounter(t *testing.T) {
 
 // 4. ACLService.Metrics()
 func TestMetrics_ServiceCounters(t *testing.T) {
-	setup, err := SetupTest(&TestConfig{rules: []acl.AclRule{passRule("10.0.0.1", "10.0.0.2", "acl_web")}})
+	setup, err := SetupTest(t, &TestConfig{rules: []cacl.AclRule{passRule("10.0.0.1", "10.0.0.2", "acl_web")}})
 	require.NoError(t, err)
 	defer setup.Free()
 
@@ -223,12 +226,12 @@ func makeProtoRule(src, dst string, kind aclpb.ActionKind) *aclpb.Rule {
 
 func TestMetrics_ServiceGauges(t *testing.T) {
 	const memBytes = 64 * 1024 * 1024
-	setup, err := SetupTest(&TestConfig{rules: createBasicRules()})
+	setup, err := SetupTest(t, &TestConfig{rules: createBasicRules()})
 	require.NoError(t, err)
 	defer setup.Free()
 
-	svc := acl.NewACLService(setup.agent, memBytes, zap.NewNop())
-	_, err = svc.UpdateConfig(context.Background(), &aclpb.UpdateConfigRequest{
+	svc := acl.NewACLService(acl.NewBackend(setup.agent, memBytes), zap.NewNop())
+	_, err = svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
 		Name:  defaultConfigName,
 		Rules: []*aclpb.Rule{makeProtoRule("10.0.0.1", "10.0.0.2", aclpb.ActionKind_ACTION_KIND_PASS)},
 	})
@@ -254,7 +257,7 @@ func TestMetrics_ServiceGauges(t *testing.T) {
 
 // 6. Handler latency histograms
 func TestMetrics_HandlerLatency(t *testing.T) {
-	setup, err := SetupTest(&TestConfig{rules: createBasicRules()})
+	setup, err := SetupTest(t, &TestConfig{rules: createBasicRules()})
 	require.NoError(t, err)
 	defer setup.Free()
 
@@ -264,11 +267,11 @@ func TestMetrics_HandlerLatency(t *testing.T) {
 		Rules: []*aclpb.Rule{makeProtoRule("10.0.0.1", "10.0.0.2", aclpb.ActionKind_ACTION_KIND_PASS)},
 	}
 
-	_, _ = svc.UpdateConfig(context.Background(), updateReq)
-	_, _ = svc.ShowConfig(context.Background(), &aclpb.ShowConfigRequest{Name: defaultConfigName})
-	_, _ = svc.ListConfigs(context.Background(), &aclpb.ListConfigsRequest{})
-	_, _ = svc.DeleteConfig(context.Background(), &aclpb.DeleteConfigRequest{Name: defaultConfigName})
-	_, _ = svc.GetMetrics(context.Background(), &aclpb.GetMetricsRequest{})
+	_, _ = svc.UpdateConfig(t.Context(), updateReq)
+	_, _ = svc.ShowConfig(t.Context(), &aclpb.ShowConfigRequest{Name: defaultConfigName})
+	_, _ = svc.ListConfigs(t.Context(), &aclpb.ListConfigsRequest{})
+	_, _ = svc.DeleteConfig(t.Context(), &aclpb.DeleteConfigRequest{Name: defaultConfigName})
+	_, _ = svc.GetMetrics(t.Context(), &aclpb.GetMetricsRequest{})
 
 	ms, err := svc.Metrics()
 	require.NoError(t, err)

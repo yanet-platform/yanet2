@@ -122,7 +122,11 @@ func (m *ACLService) Metrics() ([]*commonpb.Metric, error) {
 }
 
 func (m *ACLService) collectMetrics() ([]*commonpb.Metric, error) {
-	dpConfig := m.agent.DPConfig()
+	dpConfig := m.backend.DPConfig()
+	if dpConfig == nil {
+		return []*commonpb.Metric{}, nil
+	}
+
 	positions := dpConfig.AllModulePositions("acl")
 
 	result := make([]*commonpb.Metric, 0)
@@ -211,7 +215,6 @@ func (m *ACLService) collectMetrics() ([]*commonpb.Metric, error) {
 					makeCounter("acl_sync_sent_packets", packets, baseLabels...),
 					makeCounter("acl_sync_sent_bytes", bytes, baseLabels...),
 				)
-
 			default:
 				ruleLabels := append(
 					baseLabels,
@@ -259,7 +262,7 @@ func (m *ACLService) collectMetrics() ([]*commonpb.Metric, error) {
 						"acl_filter_rule_count_ip6_port",
 						float64(info.FilterRuleCountIp6Port),
 						configLabels...),
-					makeGauge("acl_memory_bytes", float64(m.memoryBytes), configLabels...),
+					makeGauge("acl_memory_bytes", float64(m.backend.MemoryBytes()), configLabels...),
 				)
 			}
 		}

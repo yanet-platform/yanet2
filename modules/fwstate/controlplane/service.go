@@ -15,16 +15,30 @@ import (
 	"github.com/yanet-platform/yanet2/modules/fwstate/controlplane/fwstatepb"
 )
 
-type ACLConfigTransaction interface {
-	Commit()
-	Abort()
-}
-
+// ACLServiceProvider is the interface through which the fwstate service drives
+// ACL config lifecycle. Implementations must be safe for concurrent use.
 type ACLServiceProvider interface {
-	Lock()
-	Unlock()
+	// LinkedConfigNames returns ACL config names linked to the given fwstate
+	// config. Implementations lock internally.
 	LinkedConfigNames(fwstateConfigName string) []string
-	CreateACLConfigs(aclConfigs []string, fwstateConfig *FwStateConfig) ([]ffi.ModuleConfig, ACLConfigTransaction, error)
+
+	// RelinkConfigs rebuilds all ACL configs currently linked to fwstateConfig
+	// and invokes publish with their FFI handles. publish is called even when
+	// there are no linked configs (with nil) so the caller can still publish
+	// its own configs atomically.
+	RelinkConfigs(
+		fwstateConfig *FwStateConfig,
+		publish func(linkedFFI []ffi.ModuleConfig) error,
+	) error
+
+	// LinkConfigs links the given explicit list of ACL config names to
+	// fwstateConfig and invokes publish with their FFI handles so the caller
+	// can publish the combined update atomically.
+	LinkConfigs(
+		names []string,
+		fwstateConfig *FwStateConfig,
+		publish func(linkedFFI []ffi.ModuleConfig) error,
+	) error
 }
 
 // FWStateService implements the gRPC service for FWState management.
@@ -126,42 +140,17 @@ func (m *FWStateService) UpdateConfig(
 
 	m.log.Debug("update fwstate module config", zap.String("config", name))
 
-	// Get linked ACL configs and update them with new fwstate
-	m.aclProvider.Lock()
-	defer m.aclProvider.Unlock()
-	linkedACLNames := m.aclProvider.LinkedConfigNames(name)
-
-	var aclConfigsTx ACLConfigTransaction
-	var newACLConfigs []ffi.ModuleConfig
-
-	if len(linkedACLNames) > 0 {
-		// Create new ACL configs linked to the new fwstate
-		var err error
-		newACLConfigs, aclConfigsTx, err = m.aclProvider.CreateACLConfigs(linkedACLNames, newConfig)
-		if err != nil {
-			newConfig.DetachMaps()
-			newConfig.Free()
-			m.log.Error("failed to create linked ACL configs", zap.String("config", name), zap.Error(err))
-			return nil, status.Errorf(codes.Internal, "failed to create linked ACL configs: %v", err)
-		}
-	}
-
-	// Combine fwstate and ACL configs for atomic update
-	allConfigs := append(newACLConfigs, newConfig.AsFFIModule())
-
-	if err := m.agent.UpdateModules(allConfigs); err != nil {
-		if aclConfigsTx != nil {
-			aclConfigsTx.Abort()
-		}
+	// Rebuild all linked ACL configs against the new fwstate config and publish
+	// both atomically.
+	//
+	// RelinkConfigs holds the ACL lock for the entire window.
+	if err := m.aclProvider.RelinkConfigs(newConfig, func(linkedFFI []ffi.ModuleConfig) error {
+		return m.agent.UpdateModules(append(linkedFFI, newConfig.AsFFIModule()))
+	}); err != nil {
 		newConfig.DetachMaps()
 		newConfig.Free()
-		m.log.Error("failed to update modules", zap.String("config", name), zap.Error(err))
-		return nil, status.Errorf(codes.Internal, "failed to update modules: %v", err)
-	}
-
-	// Commit ACL transaction if exists
-	if aclConfigsTx != nil {
-		aclConfigsTx.Commit()
+		m.log.Error("failed to relink ACL configs", zap.String("config", name), zap.Error(err))
+		return nil, status.Errorf(codes.Internal, "failed to relink ACL configs: %v", err)
 	}
 
 	// Drain pending outdated layers after successful UpdateModules
@@ -215,27 +204,13 @@ func (m *FWStateService) LinkFWState(
 		return nil, status.Errorf(codes.NotFound, "FWState config %q not found", fwstateName)
 	}
 
-	// Lock ACL provider to work with ACL configs
-	m.aclProvider.Lock()
-	defer m.aclProvider.Unlock()
-
-	// Create new ACL configs linked to this fwstate
-	newACLConfigs, aclConfigsTx, err := m.aclProvider.CreateACLConfigs(aclConfigNames, fwstateConfig)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to create ACL configs: %v", err)
+	// Link the given ACL configs to this fwstate and publish both atomically.
+	// LinkConfigs holds the ACL lock for the entire window.
+	if err := m.aclProvider.LinkConfigs(aclConfigNames, fwstateConfig, func(linkedFFI []ffi.ModuleConfig) error {
+		return m.agent.UpdateModules(append(linkedFFI, fwstateConfig.AsFFIModule()))
+	}); err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to link ACL configs: %v", err)
 	}
-
-	// Combine fwstate config with all ACL configs for atomic update
-	allConfigs := append(newACLConfigs, fwstateConfig.AsFFIModule())
-
-	// Update all modules atomically
-	if err := m.agent.UpdateModules(allConfigs); err != nil {
-		aclConfigsTx.Abort()
-		return nil, status.Errorf(codes.Internal, "failed to update modules: %v", err)
-	}
-
-	// Commit the transaction
-	aclConfigsTx.Commit()
 
 	m.log.Info("successfully linked FWState to ACL configs",
 		zap.String("fwstate", fwstateName),
@@ -265,10 +240,8 @@ func (m *FWStateService) ShowConfig(
 		return nil, status.Errorf(codes.NotFound, "config %q not found", name)
 	}
 
-	// Get linked ACL config names
-	m.aclProvider.Lock()
+	// LinkedConfigNames is self-locking.
 	linkedACLs := m.aclProvider.LinkedConfigNames(name)
-	m.aclProvider.Unlock()
 
 	response := &fwstatepb.ShowConfigResponse{
 		Name:       name,
