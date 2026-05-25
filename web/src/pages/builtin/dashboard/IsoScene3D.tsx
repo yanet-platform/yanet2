@@ -822,7 +822,7 @@ export const IsoScene3D: React.FC<IsoScene3DProps> = ({
 
                 const pathPps = fwdPaths.map((path) => {
                     const liveDev = live.devicesById.get(path.deviceId);
-                    return liveDev?.status === 'ok' ? liveDev.rxPps : 0;
+                    return liveDev?.rxPps ?? 0;
                 });
                 const currentMax = pathPps.reduce((m, v) => (v > m ? v : m), 0);
                 const decayed = peakPpsRef.current * PARTICLE_REF_DECAY;
