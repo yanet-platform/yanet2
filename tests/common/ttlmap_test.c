@@ -332,9 +332,8 @@ ttlmap_init_and_get_buckets(
 			bucket, &key, &value, &lock, 0, 10, 0
 		);
 		assert(TTLMAP_STATUS(res) == TTLMAP_INSERTED);
-		*value = (test_value_t){.counter1 = i,
-					.counter2 = i + 1,
-					.session_id = 0};
+		*value = (test_value_t
+		){.counter1 = i, .counter2 = i + 1, .session_id = 0};
 		__ttlmap_unlock(lock);
 	}
 
@@ -385,9 +384,8 @@ ttlmap_strike_entries(void *memory, size_t memory_size, size_t kv_entries) {
 		int res = TTLMAP_GET(&map, &key, &value, &lock, 0, 10);
 		if (TTLMAP_STATUS(res) == TTLMAP_INSERTED) {
 			++inserted;
-			*value = (test_value_t){.counter1 = i,
-						.counter2 = i + 1,
-						.session_id = 0};
+			*value = (test_value_t
+			){.counter1 = i, .counter2 = i + 1, .session_id = 0};
 			ttlmap_release_lock(lock);
 		} else {
 			assert(TTLMAP_STATUS(res) == TTLMAP_FAILED);
@@ -414,8 +412,8 @@ ttlmap_strike_entries(void *memory, size_t memory_size, size_t kv_entries) {
 		int res = TTLMAP_GET(&map, &key, &value, &lock, 5, 10);
 		if (TTLMAP_STATUS(res) == TTLMAP_FOUND) {
 			++found;
-			assert(memcmp(&ref_value, value, sizeof(ref_value)) ==
-			       0);
+			assert(memcmp(&ref_value, value, sizeof(ref_value)) == 0
+			);
 			ttlmap_release_lock(lock);
 		} else {
 			assert(TTLMAP_STATUS(res) == TTLMAP_FAILED);
@@ -499,9 +497,8 @@ ttlmap_iter(void *memory, size_t memory_size) {
 		int res = TTLMAP_GET(&map, &key, &value, &lock, 0, 10);
 		if (TTLMAP_STATUS(res) == TTLMAP_INSERTED) {
 			++inserted;
-			*value = (test_value_t){.counter1 = i,
-						.counter2 = i + 1,
-						.session_id = 0};
+			*value = (test_value_t
+			){.counter1 = i, .counter2 = i + 1, .session_id = 0};
 			ttlmap_release_lock(lock);
 		} else {
 			assert(TTLMAP_STATUS(res) == TTLMAP_FAILED);
@@ -559,9 +556,8 @@ ttlmap_test_insert_bucket(
 	assert(TTLMAP_STATUS(res) == TTLMAP_INSERTED);
 	assert(value != NULL);
 	assert(lock != NULL);
-	*value = (test_value_t){.counter1 = counter1,
-				.counter2 = counter1 + 1,
-				.session_id = 0};
+	*value = (test_value_t
+	){.counter1 = counter1, .counter2 = counter1 + 1, .session_id = 0};
 	ttlmap_release_lock(lock);
 }
 
@@ -834,9 +830,8 @@ main() {
 
 	for (size_t entries = 1; entries <= 10000;
 	     entries = (size_t)((double)(entries + 1) * 1.6)) {
-		LOG(INFO,
-		    "test ttlmap_strike_entries [entries=%zu]...",
-		    entries);
+		LOG(INFO, "test ttlmap_strike_entries [entries=%zu]...", entries
+		);
 		ttlmap_strike_entries(memory, memory_size, entries);
 	}
 
