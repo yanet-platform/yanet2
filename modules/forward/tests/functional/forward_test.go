@@ -1,6 +1,7 @@
 package forward_test
 
 import (
+	"fmt"
 	"net"
 	"testing"
 
@@ -528,4 +529,44 @@ func TestForward_MinAction(t *testing.T) {
 	}
 	dataplaneut.RequireModuleCounter(t, h, path, "l2win", 1, pktSize)
 	dataplaneut.RequireModuleCounter(t, h, path, "ip4lose", 0, 0)
+}
+
+// TestForwardConfigMemoryLeak verifies the block allocator returns memory to
+// the pool when an old forward config generation is freed.
+//
+// THE MAGIC: use 8 rules so sizeof(forward_target)*8 = 192 and
+// sizeof(forward_target*)*8 = 64 fall into different block-allocator pools
+// even with ASAN red zones (+128 bytes per allocation). With fewer rules
+// both sizes round up to the same power-of-two pool and the leak is
+// invisible to BlockAllocatorFreeSize.
+func TestForwardConfigMemoryLeak(t *testing.T) {
+	_, agent, _ := setupForwardHarness(t, []string{"port0"})
+
+	rules := make([]cforward.ForwardRule, 8)
+	for idx := range rules {
+		rules[idx] = cforward.ForwardRule{
+			Target:  "port0",
+			Mode:    cforward.ModeIn,
+			Counter: fmt.Sprintf("rule%d", idx),
+		}
+	}
+
+	moduleA, err := cforward.NewModuleConfig(agent, "forward0")
+	require.NoError(t, err)
+	require.NoError(t, moduleA.Update(rules))
+	require.NoError(t, agent.UpdateModules([]ffi.ModuleConfig{moduleA.AsFFIModule()}))
+
+	freeBefore := agent.BlockAllocatorFreeSize()
+
+	moduleB, err := cforward.NewModuleConfig(agent, "forward0")
+	require.NoError(t, err)
+	t.Cleanup(moduleB.Free)
+
+	require.NoError(t, moduleB.Update(rules))
+	require.NoError(t, agent.UpdateModules([]ffi.ModuleConfig{moduleB.AsFFIModule()}))
+
+	moduleA.Free()
+
+	freeAfter := agent.BlockAllocatorFreeSize()
+	require.Equal(t, freeBefore, freeAfter)
 }
