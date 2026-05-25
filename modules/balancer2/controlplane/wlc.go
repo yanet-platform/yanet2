@@ -8,10 +8,6 @@ import (
 	"github.com/yanet-platform/yanet2/modules/balancer2/controlplane/balancerpb"
 )
 
-// collectSessionCounts iterates active sessions and aggregates per-real
-// session counts under each VS configured to use the WLC scheduler.
-// The caller must hold m.mu because the function reads m.cfg and
-// m.index, both of which are protected by that lock.
 func (m *ModuleConfig) collectSessionCounts(now time.Time) map[vsID]map[realID]uint64 {
 	counts := map[vsID]map[realID]uint64{}
 	for id, state := range m.sessions.IterSessions(now) {
