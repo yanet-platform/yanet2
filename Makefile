@@ -165,7 +165,7 @@ cli-clean/%:
 	$(CARGO) clean || true
 
 test: go-cache-clean dataplane
-	go test -count=1 $$(go list ./... | grep -v 'tests/functional')
+	go test -count=1 $$(go list ./... | grep -v '^github.com/yanet-platform/yanet2/tests/functional')
 	meson test -C build
 
 test-asan: go-cache-clean
@@ -175,7 +175,7 @@ test-asan: go-cache-clean
 		meson configure -Dbuildtype=debug -Doptimization=0 -Dfuzzing=disabled -Db_sanitize=address,undefined build; \
 	fi
 	meson compile -C build
-	CGO_CFLAGS="-fsanitize=address,undefined" CGO_LDFLAGS="-fsanitize=address,undefined" go test -count=1 $$(go list ./... | grep -v 'tests/functional')
+	CGO_CFLAGS="-fsanitize=address,undefined" CGO_LDFLAGS="-fsanitize=address,undefined" go test -count=1 $$(go list ./... | grep -v '^github.com/yanet-platform/yanet2/tests/functional')
 	meson test -C build
 
 test-tsan:
