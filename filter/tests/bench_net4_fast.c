@@ -574,7 +574,8 @@ main(int argc, char **argv) {
 			bench_dst_compile,
 			rule_ptrs,
 			config.num_rules,
-			&memory_context
+			&memory_context,
+			NULL
 		);
 		break;
 	case sig_net4_dst_port:
@@ -583,7 +584,8 @@ main(int argc, char **argv) {
 			bench_dst_port_compile,
 			rule_ptrs,
 			config.num_rules,
-			&memory_context
+			&memory_context,
+			NULL
 		);
 		break;
 	case sig_net4_dst_port_proto:
@@ -592,7 +594,8 @@ main(int argc, char **argv) {
 			bench_dst_port_proto_compile,
 			rule_ptrs,
 			config.num_rules,
-			&memory_context
+			&memory_context,
+			NULL
 		);
 		break;
 	}

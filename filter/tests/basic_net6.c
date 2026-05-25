@@ -147,7 +147,9 @@ test1(void *memory) {
 
 	// init filter
 	struct filter filter;
-	res = filter_init(&filter, sign_net6_dst_compile, rule_ptrs, 1, &mctx);
+	res = filter_init(
+		&filter, sign_net6_dst_compile, rule_ptrs, 1, &mctx, NULL
+	);
 	assert(res == 0);
 
 	// query packet 1
@@ -298,7 +300,9 @@ test2(void *memory) {
 
 	// init filter
 	struct filter filter;
-	res = filter_init(&filter, sign_net6_dst_compile, rule_ptrs, 1, &mctx);
+	res = filter_init(
+		&filter, sign_net6_dst_compile, rule_ptrs, 1, &mctx, NULL
+	);
 	assert(res == 0);
 
 	// query packet 1
@@ -517,7 +521,9 @@ test3(void *memory) {
 
 	// init filter
 	struct filter filter;
-	res = filter_init(&filter, sign_net6_compile, rule_ptrs, 2, &mctx);
+	res = filter_init(
+		&filter, sign_net6_compile, rule_ptrs, 2, &mctx, NULL
+	);
 	assert(res == 0);
 
 	// query packet 1

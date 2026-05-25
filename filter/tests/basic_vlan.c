@@ -62,7 +62,7 @@ test_proto_1(void *memory) {
 
 	struct filter filter;
 	res = filter_init(
-		&filter, sign_vlan_compile, rule_ptrs, 3, &memory_context
+		&filter, sign_vlan_compile, rule_ptrs, 3, &memory_context, NULL
 	);
 	assert(res == 0);
 

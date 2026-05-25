@@ -214,7 +214,8 @@ test_basic(void *arena, enum filter_sign sign) {
 			sign_fast_src_compile,
 			rule_ptrs,
 			ranges_count,
-			&mctx
+			&mctx,
+			NULL
 		);
 	} else {
 		res = filter_init(
@@ -222,7 +223,8 @@ test_basic(void *arena, enum filter_sign sign) {
 			sign_fast_dst_compile,
 			rule_ptrs,
 			ranges_count,
-			&mctx
+			&mctx,
+			NULL
 		);
 	}
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
@@ -362,7 +364,8 @@ test_multiple_ranges_per_rule(void *arena, enum filter_sign sign) {
 			sign_fast_src_compile,
 			rule_ptrs,
 			num_rules,
-			&mctx
+			&mctx,
+			NULL
 		);
 	} else {
 		res = filter_init(
@@ -370,7 +373,8 @@ test_multiple_ranges_per_rule(void *arena, enum filter_sign sign) {
 			sign_fast_dst_compile,
 			rule_ptrs,
 			num_rules,
-			&mctx
+			&mctx,
+			NULL
 		);
 	}
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
@@ -478,7 +482,8 @@ stress(void *arena,
 			sign_fast_src_compile,
 			rule_ptrs,
 			num_rules,
-			&memory_context
+			&memory_context,
+			NULL
 		);
 		break;
 	case dst:
@@ -487,7 +492,8 @@ stress(void *arena,
 			sign_fast_dst_compile,
 			rule_ptrs,
 			num_rules,
-			&memory_context
+			&memory_context,
+			NULL
 		);
 		break;
 	case src_dst:
@@ -496,7 +502,8 @@ stress(void *arena,
 			sign_fast_src_dst_compile,
 			rule_ptrs,
 			num_rules,
-			&memory_context
+			&memory_context,
+			NULL
 		);
 		break;
 	}
@@ -720,7 +727,8 @@ test_no_match(void *arena, enum filter_sign sign) {
 			sign_fast_src_compile,
 			rule_ptrs,
 			ranges_count,
-			&mctx
+			&mctx,
+			NULL
 		);
 	} else {
 		res = filter_init(
@@ -728,7 +736,8 @@ test_no_match(void *arena, enum filter_sign sign) {
 			sign_fast_dst_compile,
 			rule_ptrs,
 			ranges_count,
-			&mctx
+			&mctx,
+			NULL
 		);
 	}
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
@@ -856,7 +865,8 @@ test_overlapping_ranges(void *arena, enum filter_sign sign) {
 			sign_fast_src_compile,
 			rule_ptrs,
 			ranges_count,
-			&mctx
+			&mctx,
+			NULL
 		);
 	} else {
 		res = filter_init(
@@ -864,7 +874,8 @@ test_overlapping_ranges(void *arena, enum filter_sign sign) {
 			sign_fast_dst_compile,
 			rule_ptrs,
 			ranges_count,
-			&mctx
+			&mctx,
+			NULL
 		);
 	}
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
@@ -985,7 +996,8 @@ test_boundary_conditions(void *arena, enum filter_sign sign) {
 			sign_fast_src_compile,
 			rule_ptrs,
 			ranges_count,
-			&mctx
+			&mctx,
+			NULL
 		);
 	} else {
 		res = filter_init(
@@ -993,7 +1005,8 @@ test_boundary_conditions(void *arena, enum filter_sign sign) {
 			sign_fast_dst_compile,
 			rule_ptrs,
 			ranges_count,
-			&mctx
+			&mctx,
+			NULL
 		);
 	}
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
@@ -1126,7 +1139,8 @@ test_single_port_ranges(void *arena, enum filter_sign sign) {
 			sign_fast_src_compile,
 			rule_ptrs,
 			ranges_count,
-			&mctx
+			&mctx,
+			NULL
 		);
 	} else {
 		res = filter_init(
@@ -1134,7 +1148,8 @@ test_single_port_ranges(void *arena, enum filter_sign sign) {
 			sign_fast_dst_compile,
 			rule_ptrs,
 			ranges_count,
-			&mctx
+			&mctx,
+			NULL
 		);
 	}
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
@@ -1262,7 +1277,8 @@ test_adjacent_ranges(void *arena, enum filter_sign sign) {
 			sign_fast_src_compile,
 			rule_ptrs,
 			ranges_count,
-			&mctx
+			&mctx,
+			NULL
 		);
 	} else {
 		res = filter_init(
@@ -1270,7 +1286,8 @@ test_adjacent_ranges(void *arena, enum filter_sign sign) {
 			sign_fast_dst_compile,
 			rule_ptrs,
 			ranges_count,
-			&mctx
+			&mctx,
+			NULL
 		);
 	}
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
@@ -1402,7 +1419,8 @@ test_extreme_ports(void *arena, enum filter_sign sign) {
 			sign_fast_src_compile,
 			rule_ptrs,
 			ranges_count,
-			&mctx
+			&mctx,
+			NULL
 		);
 	} else {
 		res = filter_init(
@@ -1410,7 +1428,8 @@ test_extreme_ports(void *arena, enum filter_sign sign) {
 			sign_fast_dst_compile,
 			rule_ptrs,
 			ranges_count,
-			&mctx
+			&mctx,
+			NULL
 		);
 	}
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");

@@ -294,7 +294,8 @@ acl_module_init_l2(
 	struct acl_rule *acl_rules,
 	uint32_t acl_rule_count,
 	struct filter_rule *filter_rules,
-	const struct filter_rule **filter_rule_ptrs
+	const struct filter_rule **filter_rule_ptrs,
+	yanet_error **err
 ) {
 	struct acl_module_config *config =
 		container_of(cp_module, struct acl_module_config, cp_module);
@@ -307,13 +308,18 @@ acl_module_init_l2(
 		check_acl_rule_l2
 	);
 
-	return filter_init(
+	int rc = filter_init(
 		&config->filter_vlan,
 		ACL_FILTER_VLAN_TAG,
 		filter_rule_ptrs,
 		acl_rule_count,
-		&cp_module->memory_context
+		&cp_module->memory_context,
+		err
 	);
+	if (rc) {
+		yanet_error_add(err, "failed to init filter_vlan");
+	}
+	return rc;
 }
 
 static int
@@ -322,7 +328,8 @@ acl_module_init_ip4(
 	struct acl_rule *acl_rules,
 	uint32_t acl_rule_count,
 	struct filter_rule *filter_rules,
-	const struct filter_rule **filter_rule_ptrs
+	const struct filter_rule **filter_rule_ptrs,
+	yanet_error **err
 ) {
 	struct acl_module_config *config =
 		container_of(cp_module, struct acl_module_config, cp_module);
@@ -335,13 +342,18 @@ acl_module_init_ip4(
 		check_acl_rule_ip4
 	);
 
-	return filter_init(
+	int rc = filter_init(
 		&config->filter_ip4,
 		ACL_FILTER_IP4_TAG,
 		filter_rule_ptrs,
 		acl_rule_count,
-		&cp_module->memory_context
+		&cp_module->memory_context,
+		err
 	);
+	if (rc) {
+		yanet_error_add(err, "failed to init filter_ip4");
+	}
+	return rc;
 }
 
 static int
@@ -350,7 +362,8 @@ acl_module_init_ip4_port(
 	struct acl_rule *acl_rules,
 	uint32_t acl_rule_count,
 	struct filter_rule *filter_rules,
-	const struct filter_rule **filter_rule_ptrs
+	const struct filter_rule **filter_rule_ptrs,
+	yanet_error **err
 ) {
 	struct acl_module_config *config =
 		container_of(cp_module, struct acl_module_config, cp_module);
@@ -363,13 +376,18 @@ acl_module_init_ip4_port(
 		check_acl_rule_ip4_port
 	);
 
-	return filter_init(
+	int rc = filter_init(
 		&config->filter_ip4_port,
 		ACL_FILTER_IP4_PROTO_PORT_TAG,
 		filter_rule_ptrs,
 		acl_rule_count,
-		&cp_module->memory_context
+		&cp_module->memory_context,
+		err
 	);
+	if (rc) {
+		yanet_error_add(err, "failed to init filter_ip4_port");
+	}
+	return rc;
 }
 
 static int
@@ -378,7 +396,8 @@ acl_module_init_ip6(
 	struct acl_rule *acl_rules,
 	uint32_t acl_rule_count,
 	struct filter_rule *filter_rules,
-	const struct filter_rule **filter_rule_ptrs
+	const struct filter_rule **filter_rule_ptrs,
+	yanet_error **err
 ) {
 	struct acl_module_config *config =
 		container_of(cp_module, struct acl_module_config, cp_module);
@@ -391,13 +410,18 @@ acl_module_init_ip6(
 		check_acl_rule_ip6
 	);
 
-	return filter_init(
+	int rc = filter_init(
 		&config->filter_ip6,
 		ACL_FILTER_IP6_TAG,
 		filter_rule_ptrs,
 		acl_rule_count,
-		&cp_module->memory_context
+		&cp_module->memory_context,
+		err
 	);
+	if (rc) {
+		yanet_error_add(err, "failed to init filter_ip6");
+	}
+	return rc;
 }
 
 static int
@@ -406,7 +430,8 @@ acl_module_init_ip6_port(
 	struct acl_rule *acl_rules,
 	uint32_t acl_rule_count,
 	struct filter_rule *filter_rules,
-	const struct filter_rule **filter_rule_ptrs
+	const struct filter_rule **filter_rule_ptrs,
+	yanet_error **err
 ) {
 	struct acl_module_config *config =
 		container_of(cp_module, struct acl_module_config, cp_module);
@@ -419,13 +444,18 @@ acl_module_init_ip6_port(
 		check_acl_rule_ip6_port
 	);
 
-	return filter_init(
+	int rc = filter_init(
 		&config->filter_ip6_port,
 		ACL_FILTER_IP6_PROTO_PORT_TAG,
 		filter_rule_ptrs,
 		acl_rule_count,
-		&cp_module->memory_context
+		&cp_module->memory_context,
+		err
 	);
+	if (rc) {
+		yanet_error_add(err, "failed to init filter_ip6_port");
+	}
+	return rc;
 }
 
 int
@@ -548,7 +578,8 @@ acl_module_config_update(
 		    acl_rules,
 		    rule_count,
 		    filter_rules,
-		    filter_rule_ptrs
+		    filter_rule_ptrs,
+		    err
 	    ))
 		goto error_rule_ptrs;
 
@@ -557,7 +588,8 @@ acl_module_config_update(
 		    acl_rules,
 		    rule_count,
 		    filter_rules,
-		    filter_rule_ptrs
+		    filter_rule_ptrs,
+		    err
 	    ))
 		goto error_rule_ptrs;
 
@@ -566,7 +598,8 @@ acl_module_config_update(
 		    acl_rules,
 		    rule_count,
 		    filter_rules,
-		    filter_rule_ptrs
+		    filter_rule_ptrs,
+		    err
 	    ))
 		goto error_rule_ptrs;
 
@@ -575,7 +608,8 @@ acl_module_config_update(
 		    acl_rules,
 		    rule_count,
 		    filter_rules,
-		    filter_rule_ptrs
+		    filter_rule_ptrs,
+		    err
 	    ))
 		goto error_rule_ptrs;
 
@@ -584,7 +618,8 @@ acl_module_config_update(
 		    acl_rules,
 		    rule_count,
 		    filter_rules,
-		    filter_rule_ptrs
+		    filter_rule_ptrs,
+		    err
 	    ))
 		goto error_rule_ptrs;
 

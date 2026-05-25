@@ -8,26 +8,14 @@
 #include "common/memory.h"
 #include "common/registry.h"
 #include "common/value.h"
+#include "lib/errors/errors.h"
 #include <assert.h>
 
-/**
- * @file compiler.h
- * @brief Build/teardown macros for filter classification trees.
- *
- * Defines:
- *  - filter_init: build a filter for a declared attribute signature
- *  - filter_free: free resources allocated by filter_init
- */
-/**
- * @def filter_init(filter, tag, rules, rule_count, ctx)
- * @brief Build filter for signature tag into filter using rules.
- * @param filter struct filter*
- * @param tag name used in FILTER_COMPILER_DECLARE(...)
- * @param rules const struct filter_rule* array
- * @param rule_count size_t number of rules
- * @param ctx const struct memory_context* source context
- * @return int 0 on success, negative on error
- */
+// Build and teardown functions for filter classification trees.
+//
+// filter_init: build a filter for a declared attribute signature; reports the
+// failing step via err. filter_free: release all resources allocated by
+// filter_init.
 typedef int (*filter_lookup_init_func)(
 	struct value_registry *registry,
 	void **data,
@@ -84,16 +72,23 @@ filter_init(
 	const struct filter_compiler *filter_compiler,
 	const struct filter_rule **rules,
 	uint32_t rule_count,
-	struct memory_context *memory_context
+	struct memory_context *memory_context,
+	yanet_error **err
 ) {
-	if (filter_compiler->lookup_count == 0)
+	if (filter_compiler->lookup_count == 0) {
+		yanet_error_add(err, "filter has no lookups configured");
 		return -1;
+	}
 
 	memset(filter, 0, sizeof(struct filter));
 
 	if (memory_context_init_from(
 		    &filter->memory_context, memory_context, "filter"
 	    )) {
+		yanet_error_add(
+			err,
+			"out of memory: failed to init filter memory context"
+		);
 		return -1;
 	}
 
@@ -105,6 +100,12 @@ filter_init(
 		if (value_registry_init(
 			    &v->registry, &filter->memory_context
 		    )) {
+			yanet_error_add(
+				err,
+				"out of memory: failed to init registry for "
+				"lookup %zu",
+				(size_t)lookup_idx
+			);
 			goto init_failed;
 		}
 		v->data = NULL;
@@ -115,6 +116,12 @@ filter_init(
 			    rule_count,
 			    &filter->memory_context
 		    )) {
+			yanet_error_add(
+				err,
+				"out of memory: failed to compile attribute "
+				"lookup %zu",
+				(size_t)lookup_idx
+			);
 			goto init_failed;
 		}
 	}
@@ -124,6 +131,10 @@ filter_init(
 		if (init_dummy_registry(
 			    &filter->memory_context, rule_count, &dummy
 		    )) {
+			yanet_error_add(
+				err,
+				"out of memory: failed to init dummy registry"
+			);
 			value_registry_free(&dummy);
 			goto init_failed;
 		}
@@ -134,6 +145,10 @@ filter_init(
 			    &filter->v[1].registry,
 			    &filter->v[0].table
 		    )) {
+			yanet_error_add(
+				err,
+				"out of memory: failed to merge registry values"
+			);
 			value_registry_free(&dummy);
 			goto init_failed;
 		}
@@ -150,6 +165,12 @@ filter_init(
 			    &filter->v[idx].table,
 			    &filter->v[idx].registry
 		    )) {
+			yanet_error_add(
+				err,
+				"out of memory: failed to collect registry at "
+				"index %zu",
+				idx
+			);
 			goto init_failed;
 		}
 	}
@@ -160,6 +181,10 @@ filter_init(
 		    &filter->v[2 * 1 + 1].registry,
 		    &filter->v[1].table
 	    )) {
+		yanet_error_add(
+			err,
+			"out of memory: failed to merge final registry values"
+		);
 		goto init_failed;
 	}
 

@@ -85,7 +85,8 @@ test(void *memory) {
 		sign_net4_ports_compile,
 		action_ptrs,
 		2,
-		&memory_context
+		&memory_context,
+		NULL
 	);
 	assert(res == 0);
 

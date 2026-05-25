@@ -177,7 +177,8 @@ route_mpls_module_init_ip4(
 	struct route_mpls_rule *route_mpls_rules,
 	uint64_t route_mpls_rule_count,
 	const struct filter_rule *filter_rules,
-	const struct filter_rule **filter_rule_ptrs
+	const struct filter_rule **filter_rule_ptrs,
+	yanet_error **err
 ) {
 	struct module_config *config =
 		container_of(cp_module, struct module_config, cp_module);
@@ -190,13 +191,18 @@ route_mpls_module_init_ip4(
 		check_route_mpls_rule_ip4
 	);
 
-	return filter_init(
+	int rc = filter_init(
 		&config->filter_ip4,
 		FILTER_IP4_TAG,
 		filter_rule_ptrs,
 		route_mpls_rule_count,
-		&cp_module->memory_context
+		&cp_module->memory_context,
+		err
 	);
+	if (rc) {
+		yanet_error_add(err, "failed to init filter_ip4");
+	}
+	return rc;
 }
 
 static int
@@ -205,7 +211,8 @@ route_mpls_module_init_ip6(
 	struct route_mpls_rule *route_mpls_rules,
 	uint64_t route_mpls_rule_count,
 	const struct filter_rule *filter_rules,
-	const struct filter_rule **filter_rule_ptrs
+	const struct filter_rule **filter_rule_ptrs,
+	yanet_error **err
 ) {
 	struct module_config *config =
 		container_of(cp_module, struct module_config, cp_module);
@@ -218,13 +225,18 @@ route_mpls_module_init_ip6(
 		check_route_mpls_rule_ip6
 	);
 
-	return filter_init(
+	int rc = filter_init(
 		&config->filter_ip6,
 		FILTER_IP6_TAG,
 		filter_rule_ptrs,
 		route_mpls_rule_count,
-		&cp_module->memory_context
+		&cp_module->memory_context,
+		err
 	);
+	if (rc) {
+		yanet_error_add(err, "failed to init filter_ip6");
+	}
+	return rc;
 }
 
 static struct target *
@@ -384,7 +396,8 @@ route_mpls_module_config_update(
 		    route_mpls_rules,
 		    route_mpls_rule_count,
 		    filter_rules,
-		    filter_rule_ptrs
+		    filter_rule_ptrs,
+		    err
 	    ))
 		goto error_rule_ptrs;
 
@@ -393,7 +406,8 @@ route_mpls_module_config_update(
 		    route_mpls_rules,
 		    route_mpls_rule_count,
 		    filter_rules,
-		    filter_rule_ptrs
+		    filter_rule_ptrs,
+		    err
 	    ))
 		goto error_rule_ptrs;
 

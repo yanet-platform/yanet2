@@ -33,7 +33,7 @@ run_case(void) {
 	// init filter
 	const struct filter_rule *r_ptr = &r;
 	struct filter f;
-	res = filter_init(&f, sign, &r_ptr, 1, &memory_context);
+	res = filter_init(&f, sign, &r_ptr, 1, &memory_context, NULL);
 	assert(res == 0);
 
 	// craft packet: UDP 4000

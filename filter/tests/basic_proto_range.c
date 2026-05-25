@@ -73,7 +73,12 @@ test_proto_1(void *memory) {
 
 	LOG(INFO, "filter init...");
 	res = filter_init(
-		&filter, sign_proto_range_compile, rule_ptrs, 2, &memory_context
+		&filter,
+		sign_proto_range_compile,
+		rule_ptrs,
+		2,
+		&memory_context,
+		NULL
 	);
 	assert(res == 0);
 

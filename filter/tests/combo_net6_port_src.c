@@ -143,7 +143,7 @@ test_no_match_port_only(void *arena) {
 
 	struct filter filter;
 	res = filter_init(
-		&filter, combo_net6_port_src_compile, &rule_ptr, 1, &mctx
+		&filter, combo_net6_port_src_compile, &rule_ptr, 1, &mctx, NULL
 	);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
 
@@ -253,7 +253,7 @@ test_no_match_ip_only(void *arena) {
 
 	struct filter filter;
 	res = filter_init(
-		&filter, combo_net6_port_src_compile, &rule_ptr, 1, &mctx
+		&filter, combo_net6_port_src_compile, &rule_ptr, 1, &mctx, NULL
 	);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
 
@@ -364,7 +364,7 @@ test_both_match(void *arena) {
 
 	struct filter filter;
 	res = filter_init(
-		&filter, combo_net6_port_src_compile, &rule_ptr, 1, &mctx
+		&filter, combo_net6_port_src_compile, &rule_ptr, 1, &mctx, NULL
 	);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
 
