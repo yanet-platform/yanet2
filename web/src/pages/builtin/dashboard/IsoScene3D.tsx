@@ -128,6 +128,10 @@ interface LiveSnapshot {
     }>;
 }
 
+// Reference pps denominator and maximum height multiplier for fn cubes.
+const FN_REF_PPS = 1e6;
+const FN_MAX_GROWTH = 7;
+
 /** Build a box mesh anchored at its bottom face. */
 const makeBox = (
     w: number,
@@ -730,20 +734,26 @@ export const IsoScene3D: React.FC<IsoScene3DProps> = ({
         const animate = (now: number): void => {
             const live = liveRef.current;
 
+            let maxFnPps = 0;
+            for (const fn of live.functionsById.values()) {
+                if (fn.pps > maxFnPps) { maxFnPps = fn.pps; }
+            }
+
             fnMeshes.forEach((fb) => {
                 const liveFn = live.functionsById.get(fb.fnId);
-                const active = (liveFn?.pps ?? 0) > 0;
+                const pps = liveFn?.pps ?? 0;
+                const active = pps > 0;
                 const mat = fb.mesh.material as THREE.MeshLambertMaterial;
                 mat.color.setHex(active ? 0x5a4632 : 0x1a1816);
                 (mat.emissive as THREE.Color).setHex(active ? 0x4a3a22 : 0x000000);
                 mat.emissiveIntensity = active ? 0.4 : 0;
                 ((fb.mesh.userData.edges as THREE.LineSegments).material as THREE.LineBasicMaterial)
                     .color.setHex(active ? 0xFFC061 : 0x3a3731);
-                if (active) {
-                    const phase = now * 0.0009 + fb.x * 0.05;
-                    const target = 1 + Math.sin(phase) * 0.1 + Math.sin(phase * 2.3 + fb.z) * 0.06;
-                    fb.mesh.scale.y += (target - fb.mesh.scale.y) * 0.06;
-                }
+                const denom = Math.max(maxFnPps, FN_REF_PPS);
+                const norm = Math.min(1, Math.sqrt(pps / denom));
+                const breathe = Math.sin(now * 0.0009 + fb.x * 0.05) * 0.05;
+                const target = active ? 1 + norm * FN_MAX_GROWTH + breathe : 1;
+                fb.mesh.scale.y += (target - fb.mesh.scale.y) * 0.06;
             });
 
             Object.entries(pipeMeshes).forEach(([id, mesh]) => {
