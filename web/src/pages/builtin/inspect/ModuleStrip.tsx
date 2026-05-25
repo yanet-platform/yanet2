@@ -1,14 +1,18 @@
 import React, { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { InstanceInfo } from '../../../api/inspect';
+import { fmtIEC } from './formatters';
+import { MemoryBar } from './MemoryBar';
 import { MODULE_DESCRIPTIONS, MODULE_ROUTES, computeModulePipelineUsage } from './utils';
+import type { AgentUsage } from './utils';
 
 export interface ModuleStripProps {
     instance: InstanceInfo;
+    usage: Map<string, AgentUsage>;
 }
 
 /** Horizontal strip showing all dataplane modules with usage indicators. */
-export const ModuleStrip: React.FC<ModuleStripProps> = ({ instance }) => {
+export const ModuleStrip: React.FC<ModuleStripProps> = ({ instance, usage }) => {
     const navigate = useNavigate();
     const modules = instance.dp_modules ?? [];
     const configs = instance.cp_configs ?? [];
@@ -80,6 +84,35 @@ export const ModuleStrip: React.FC<ModuleStripProps> = ({ instance }) => {
                             </div>
                             <div className="iv-module-card__desc">{m.desc}</div>
                             <div className="iv-module-card__stats">{m.cfg}cfg · {m.pipe}pipe</div>
+                            {(() => {
+                                const mem = usage.get(m.name);
+                                if (!mem) return null;
+                                return (
+                                    <div className="iv-module-card__mem">
+                                        <div className="iv-module-card__mem-row">
+                                            <span
+                                                style={{
+                                                    color:
+                                                        mem.used > 0
+                                                            ? 'var(--iv-text)'
+                                                            : 'var(--iv-mute)',
+                                                }}
+                                            >
+                                                {fmtIEC(mem.used)}
+                                            </span>
+                                            <span className="iv-module-card__mem-limit">
+                                                {fmtIEC(mem.limit)}
+                                            </span>
+                                        </div>
+                                        <MemoryBar
+                                            used={mem.used}
+                                            limit={mem.limit}
+                                            height={4}
+                                            cells={20}
+                                        />
+                                    </div>
+                                );
+                            })()}
                         </div>
                     );
                 })}

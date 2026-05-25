@@ -1,14 +1,17 @@
 import React, { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { InstanceInfo } from '../../../api/inspect';
-import { MODULE_DESCRIPTIONS, MODULE_ROUTES, computeModulePipelineUsage } from '../inspect/utils';
+import { MODULE_DESCRIPTIONS, MODULE_ROUTES, computeModulePipelineUsage, type AgentUsage } from '../inspect/utils';
+import { MemoryBar } from '../inspect/MemoryBar';
+import { fmtIEC } from '../inspect/formatters';
 
 export interface DataplaneModulesProps {
     instance: InstanceInfo;
+    usage: Map<string, AgentUsage>;
 }
 
 /** Full-width dataplane modules grid with routing and active-state indicators. */
-export const DataplaneModules: React.FC<DataplaneModulesProps> = ({ instance }) => {
+export const DataplaneModules: React.FC<DataplaneModulesProps> = ({ instance, usage }) => {
     const navigate = useNavigate();
     const modules = instance.dp_modules ?? [];
     const configs = instance.cp_configs ?? [];
@@ -86,6 +89,36 @@ export const DataplaneModules: React.FC<DataplaneModulesProps> = ({ instance }) 
                             </div>
                             <div className="dash-module-card__desc">{m.desc}</div>
                             <div className="dash-module-card__stats">{m.cfg}cfg · {m.pipe}pipe</div>
+                            {(() => {
+                                const ag = usage.get(m.name);
+                                if (!ag) return null;
+                                return (
+                                    <div className="dash-module-card__mem">
+                                        <div className="dash-module-card__mem-row">
+                                            <span
+                                                style={{
+                                                    color: ag.used > 0
+                                                        ? 'var(--iv-text)'
+                                                        : 'var(--iv-mute)',
+                                                    fontVariantNumeric: 'tabular-nums',
+                                                }}
+                                            >
+                                                {fmtIEC(ag.used)}
+                                            </span>
+                                            <span
+                                                style={{
+                                                    color: 'var(--iv-mute)',
+                                                    fontSize: 9,
+                                                    fontVariantNumeric: 'tabular-nums',
+                                                }}
+                                            >
+                                                {fmtIEC(ag.limit)}
+                                            </span>
+                                        </div>
+                                        <MemoryBar used={ag.used} limit={ag.limit} height={4} cells={20} />
+                                    </div>
+                                );
+                            })()}
                         </div>
                     );
                 })}

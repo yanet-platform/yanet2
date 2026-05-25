@@ -1,7 +1,9 @@
 import React from 'react';
 import { Sparkline } from '../inspect/Sparkline';
 import { IconPort, IconTag, IconFn } from '../inspect/icons';
-import { fmtPps, fmtBps } from '../inspect/formatters';
+import { fmtPps, fmtBps, fmtIEC } from '../inspect/formatters';
+import type { AgentUsage } from '../inspect/utils';
+import { MemoryBar } from '../inspect/MemoryBar';
 
 export interface SelectedItem {
     kind: 'device' | 'pipeline' | 'fn';
@@ -65,6 +67,7 @@ export interface InspectorProps {
     structuralPipelines: StructuralPipeline[];
     structuralFunctions: StructuralFunction[];
     live: LiveSnapshot;
+    usage: Map<string, AgentUsage>;
 }
 
 /** A small coloured status dot. */
@@ -111,7 +114,8 @@ const InspectDevice: React.FC<{
     liveD: LiveSnapshot['devicesById'] extends Map<string, infer V> ? V : never;
     pipelines: StructuralPipeline[];
     livePipes: LiveSnapshot['pipelinesById'];
-}> = ({ d, liveD, pipelines, livePipes }) => {
+    usage: Map<string, AgentUsage>;
+}> = ({ d, liveD, pipelines, livePipes, usage }) => {
     const pIn = pipelines.find((p) => p.id === d.pipeIn);
     const pOut = pipelines.find((p) => p.id === d.pipeOut);
     const isVlan = d.kind === 'vlan';
@@ -162,6 +166,30 @@ const InspectDevice: React.FC<{
             <SectionHeader>STATE</SectionHeader>
             <StatRow label="status" value={status} />
             <StatRow label="kind" value={d.kind} />
+            {(() => {
+                const agent = usage.get(d.kind);
+                if (!agent) return null;
+                return (
+                    <>
+                        <SectionHeader>
+                            {'AGENT MEMORY · '}
+                            <span style={{ color: 'var(--iv-text-dim)', textTransform: 'lowercase' }}>
+                                {d.kind}
+                            </span>
+                        </SectionHeader>
+                        <StatRow
+                            label="used"
+                            value={fmtIEC(agent.used)}
+                            hint={`(${(agent.pct * 100).toFixed(1)}%)`}
+                        />
+                        <StatRow label="limit" value={fmtIEC(agent.limit)} />
+                        <StatRow label="free" value={fmtIEC(agent.free)} />
+                        <div style={{ marginTop: 6 }}>
+                            <MemoryBar used={agent.used} limit={agent.limit} height={4} cells={28} />
+                        </div>
+                    </>
+                );
+            })()}
         </div>
     );
 };
@@ -286,6 +314,7 @@ export const Inspector: React.FC<InspectorProps> = ({
     structuralPipelines,
     structuralFunctions,
     live,
+    usage,
 }) => {
     let content: React.ReactNode = null;
     let title = '';
@@ -304,6 +333,7 @@ export const Inspector: React.FC<InspectorProps> = ({
                 liveD={liveD}
                 pipelines={structuralPipelines}
                 livePipes={live.pipelinesById}
+                usage={usage}
             />
         );
         title = 'DEVICE';

@@ -6,11 +6,13 @@ import { usePipelineCounters, useFunctionCounters, useDeviceTrendSeries } from '
 import { fmtPps } from '../inspect/formatters';
 import { Inspector } from './Inspector';
 import type { SelectedItem } from './Inspector';
+import type { AgentUsage } from '../inspect/utils';
 
 export interface IsoScene3DProps {
     instance: InstanceInfo;
     rateCounters: Map<string, DeviceCounterData>;
     absoluteCounters: Map<string, DeviceAbsoluteData>;
+    usage: Map<string, AgentUsage>;
 }
 
 interface LabelInfo {
@@ -201,6 +203,7 @@ export const IsoScene3D: React.FC<IsoScene3DProps> = ({
     instance,
     rateCounters,
     absoluteCounters,
+    usage,
 }) => {
     const devices = instance.devices ?? [];
     const pipelines = instance.pipelines ?? [];
@@ -1004,6 +1007,7 @@ export const IsoScene3D: React.FC<IsoScene3DProps> = ({
                     structuralPipelines={structuralPipelines}
                     structuralFunctions={structuralFunctions}
                     live={liveRef.current}
+                    usage={usage}
                 />
             )}
         </div>

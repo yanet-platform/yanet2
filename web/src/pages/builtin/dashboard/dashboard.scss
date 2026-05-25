@@ -41,6 +41,8 @@
     --iv-ok:             var(--g-color-text-positive);
     --iv-idle:           var(--g-color-text-hint);
     --iv-danger:         var(--g-color-text-danger);
+    --iv-warn:           var(--g-color-text-warning);
+    --iv-faint:          var(--iv-border-strong);
     --iv-mono:           'JetBrains Mono', ui-monospace, monospace;
     --iv-font-ui:        'Inter', system-ui, sans-serif;
 
@@ -595,12 +597,29 @@
         font-size: 9px;
         color: var(--iv-text-dim);
     }
+
+    &__mem {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        margin-top: 2px;
+    }
+
+    &__mem-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        font-size: 10px;
+        font-variant-numeric: tabular-nums;
+    }
 }
 
 // ── System state strip ────────────────────────────────────────────────────────
 
 .dash-system {
     @include dash-ambient-scan;
+    overflow: visible;
+    z-index: 10; // lift above sibling KpiStrip cells (which have z-index: 1)
 
     border: 1px solid var(--iv-border-strong);
     background: var(--iv-surface);
@@ -655,6 +674,49 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+}
+
+.dash-system__mem-cell {
+    flex: 1;
+    min-width: 60px;
+    align-self: center;
+    display: block;
+    overflow: visible;
+    line-height: 0;
+}
+
+.dash-system__mem {
+    position: relative;
+    width: 100%;
+    cursor: default;
+
+    &:hover .dash-system__mem-pop {
+        opacity: 1;
+        pointer-events: auto;
+        transform: translate(-50%, 0);
+    }
+}
+
+.dash-system__mem-pop {
+    position: absolute;
+    left: 50%;
+    top: calc(100% + 8px);
+    bottom: auto;
+    transform: translate(-50%, -4px);
+    min-width: 180px;
+    padding: 8px 10px;
+    background: var(--iv-surface);
+    border: 1px solid var(--iv-border-strong);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+    color: var(--iv-text);
+    font-size: 11px;
+    line-height: 1.4;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 120ms ease-out, transform 120ms ease-out;
+    z-index: 100;
+    font-variant-numeric: tabular-nums;
 }
 
 .dash-dot {

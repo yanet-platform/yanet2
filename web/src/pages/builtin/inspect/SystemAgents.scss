@@ -1,0 +1,60 @@
+.iv-system-agents {
+    border: 1px solid var(--iv-border-strong);
+    background: var(--iv-surface);
+    padding: 10px 16px 11px;
+    flex-shrink: 0;
+
+    .iv-system-agents__header {
+        margin-bottom: 9px;
+    }
+
+    .iv-system-agents__grid {
+        display: grid;
+        gap: 18px;
+    }
+}
+
+.iv-system-agents__row {
+    display: grid;
+    grid-template-columns: 64px 1fr auto;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+}
+
+.iv-system-agents__name {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+
+.iv-system-agents__name-text {
+    font-size: 11px;
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.iv-system-agents__value {
+    font-size: 9.5px;
+    color: var(--iv-text-dim);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.iv-system-agents__title {
+    color: var(--iv-mute);
+    font-size: 10px;
+    letter-spacing: 1.6px;
+}
+
+.iv-system-agents__dot {
+    display: inline-block;
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}

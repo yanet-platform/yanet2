@@ -1,4 +1,4 @@
-import type { InstanceInfo } from '../../../api/inspect';
+import type { AgentInfo, InstanceInfo } from '../../../api/inspect';
 
 /** Per-module deep-link route. Modules without a dedicated page are absent. */
 export const MODULE_ROUTES: Record<string, string> = {
@@ -56,6 +56,104 @@ export const computeModulesInUse = (instance: InstanceInfo): number => {
         if (used.has(t)) count += 1;
     }
     return count;
+};
+
+export type AgentKind = 'module' | 'system' | 'meta';
+
+/** Aggregated memory and generation metrics for one named agent. */
+export interface AgentUsage {
+    name: string;
+    kind: AgentKind;
+    used: number;
+    limit: number;
+    free: number;
+    pct: number;
+    gen: number;
+    instances: number;
+}
+
+/** Instance-level memory totals derived from all agent usages. */
+export interface MemoryTotals {
+    memUsed: number;
+    memLimit: number;
+    agents: number;
+    agentsActive: number;
+    hot: AgentUsage | null;
+}
+
+const META_AGENTS = new Set(['function', 'pipeline']);
+
+/**
+ * Classify and aggregate per-agent memory metrics from instance.agents.
+ *
+ * Classification priority: meta (function/pipeline) > module (dp_module name
+ * match) > system (everything else — plain, vlan, and any future device-type
+ * agents regardless of whether devices of that type are present).
+ */
+export const computeAgentUsage = (instance: InstanceInfo): Map<string, AgentUsage> => {
+    const moduleNames = new Set((instance.dp_modules ?? []).map((m) => m.name ?? ''));
+
+    const result = new Map<string, AgentUsage>();
+    for (const agent of (instance.agents ?? []) as AgentInfo[]) {
+        const name = agent.name ?? '';
+        let kind: AgentKind;
+        if (META_AGENTS.has(name)) {
+            kind = 'meta';
+        } else if (moduleNames.has(name)) {
+            kind = 'module';
+        } else {
+            kind = 'system';
+        }
+
+        let limit = 0;
+        let free = 0;
+        let maxGen = 0;
+        const instanceList = agent.instances ?? [];
+        for (const inst of instanceList) {
+            limit += Number(inst.memory_limit ?? 0);
+            free += Number(inst.free_bytes ?? 0);
+            const g = Number(inst.generation ?? 0);
+            if (g > maxGen) maxGen = g;
+        }
+        const used = Math.max(0, limit - free);
+        const pct = limit > 0 ? used / limit : 0;
+
+        result.set(name, {
+            name,
+            kind,
+            used,
+            limit,
+            free,
+            pct,
+            gen: maxGen,
+            instances: instanceList.length,
+        });
+    }
+    return result;
+};
+
+/**
+ * Compute instance-level memory totals from a pre-built agent usage map.
+ */
+export const computeMemoryTotals = (usage: Map<string, AgentUsage>): MemoryTotals => {
+    let memUsed = 0;
+    let memLimit = 0;
+    let agents = 0;
+    let agentsActive = 0;
+    let hot: AgentUsage | null = null;
+
+    for (const u of usage.values()) {
+        memUsed += u.used;
+        memLimit += u.limit;
+        agents += 1;
+        if (u.used > 0) {
+            agentsActive += 1;
+            if (!hot || u.pct > hot.pct) {
+                hot = u;
+            }
+        }
+    }
+    return { memUsed, memLimit, agents, agentsActive, hot };
 };
 
 /**

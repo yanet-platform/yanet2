@@ -4,8 +4,10 @@ import { useDeviceCounters } from '../../../hooks';
 import { HudHero } from './HudHero';
 import { DeviceWall } from './DeviceWall';
 import { ModuleStrip } from './ModuleStrip';
+import { SystemAgents } from './SystemAgents';
 import { PipeWall } from './PipeWall';
 import { FnWall } from './FnWall';
+import { computeAgentUsage, computeMemoryTotals } from './utils';
 
 export interface InstanceCardProps {
     instance: InstanceInfo;
@@ -35,19 +37,24 @@ export const InstanceCard: React.FC<InstanceCardProps> = ({ instance }) => {
         return result;
     }, [devices]);
 
+    const agentUsage = useMemo(() => computeAgentUsage(instance), [instance]);
+    const memTotals = useMemo(() => computeMemoryTotals(agentUsage), [agentUsage]);
+
     return (
         <div className="iv-instance">
             <HudHero
                 instance={instance}
                 rateCounters={rateCounters}
                 physicalDeviceNames={physicalDeviceNames}
+                memTotals={memTotals}
             />
             <DeviceWall
                 instance={instance}
                 rateCounters={rateCounters}
                 absoluteCounters={absoluteCounters}
             />
-            <ModuleStrip instance={instance} />
+            <ModuleStrip instance={instance} usage={agentUsage} />
+            <SystemAgents instance={instance} usage={agentUsage} />
             <div className="iv-row">
                 <PipeWall instance={instance} />
                 <FnWall instance={instance} />

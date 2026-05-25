@@ -18,6 +18,8 @@
     --iv-ok:             var(--g-color-text-positive);
     --iv-idle:           var(--g-color-text-hint);
     --iv-danger:         var(--g-color-text-danger);
+    --iv-warn:           var(--g-color-text-warning);
+    --iv-faint:          var(--iv-border-strong);
     --iv-r-sm:           4px;
     --iv-r-md:           6px;
     --iv-r-lg:           10px;
@@ -420,6 +422,26 @@
         .iv-module-card__stats {
             font-size: 9px;
             color: var(--iv-text-dim);
+        }
+
+        .iv-module-card__mem {
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+            margin-top: 2px;
+        }
+
+        .iv-module-card__mem-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            font-size: 10px;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .iv-module-card__mem-limit {
+            font-size: 9px;
+            color: var(--iv-mute);
         }
     }
 

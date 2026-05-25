@@ -6,19 +6,60 @@ import { HeroSparkline } from './HeroSparkline';
 import { Crosshair } from './Crosshair';
 import { RadialPulse } from './RadialPulse';
 import { SideKpi } from './SideKpi';
-import { fmtBps, fmtPps } from './formatters';
+import { fmtBps, fmtIEC, fmtPps } from './formatters';
+import { MemoryBar } from './MemoryBar';
+import type { MemoryTotals } from './utils';
 
 export interface HudHeroProps {
     instance: InstanceInfo;
     rateCounters: Map<string, DeviceCounterData>;
     physicalDeviceNames: Set<string>;
+    memTotals: MemoryTotals;
 }
+
+interface SideKpiMemoryProps {
+    totals: MemoryTotals;
+}
+
+/** Memory KPI cell — aggregate used/limit bar with hottest agent callout. */
+const SideKpiMemory: React.FC<SideKpiMemoryProps> = ({ totals }) => (
+    <div className="iv-side-kpi">
+        <div className="iv-side-kpi__label">MEMORY</div>
+        <div
+            style={{
+                fontSize: 22,
+                fontWeight: 500,
+                letterSpacing: -0.5,
+                lineHeight: 1.05,
+                display: 'flex',
+                alignItems: 'baseline',
+                gap: 6,
+            }}
+        >
+            <span>{fmtIEC(totals.memUsed)}</span>
+            <span style={{ fontSize: 11, color: 'var(--iv-text-dim)' }}>
+                / {fmtIEC(totals.memLimit)}
+            </span>
+        </div>
+        <MemoryBar used={totals.memUsed} limit={totals.memLimit} height={4} cells={28} />
+        <div style={{ color: 'var(--iv-text-dim)', fontSize: 10 }}>
+            {totals.agentsActive}/{totals.agents} agents
+            {totals.hot !== null && (
+                <span style={{ color: 'var(--iv-mute)' }}>
+                    {' · hot: '}
+                    <span style={{ color: 'var(--iv-text-dim)' }}>{totals.hot.name}</span>
+                </span>
+            )}
+        </div>
+    </div>
+);
 
 /** Top hero panel showing aggregate throughput and key KPI side columns. */
 export const HudHero: React.FC<HudHeroProps> = ({
     instance,
     rateCounters,
     physicalDeviceNames,
+    memTotals,
 }) => {
     const devices = instance.devices ?? [];
     const pipelines = instance.pipelines ?? [];
@@ -75,7 +116,7 @@ export const HudHero: React.FC<HudHeroProps> = ({
             <div className="iv-hero__side iv-hero__side--right">
                 <SideKpi label="MODULES" primary={modules.length} />
                 <SideKpi label="CONFIGS" primary={configs.length} />
-                <SideKpi label="UPTIME" primary="—" />
+                <SideKpiMemory totals={memTotals} />
             </div>
         </div>
     );

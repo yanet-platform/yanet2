@@ -17,3 +17,14 @@ export const fmtBps = (n: number): string => {
     if (b >= 1e3) return `${(b / 1e3).toFixed(1)}k`;
     return Math.round(b).toString();
 };
+
+/** Format byte count in IEC binary units (KiB/MiB/GiB), 1024-base. Matches CLI. */
+export const fmtIEC = (n: number): string => {
+    if (!n || !isFinite(n)) return '0 B';
+    const KiB = 1024, MiB = KiB * 1024, GiB = MiB * 1024, TiB = GiB * 1024;
+    if (n >= TiB) return `${(n / TiB).toFixed(2)} TiB`;
+    if (n >= GiB) return `${(n / GiB).toFixed(1)} GiB`;
+    if (n >= MiB) return `${(n / MiB).toFixed(1)} MiB`;
+    if (n >= KiB) return `${(n / KiB).toFixed(1)} KiB`;
+    return `${Math.round(n)} B`;
+};
