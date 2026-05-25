@@ -11,6 +11,7 @@ import type { AgentUsage } from '../inspect/utils';
 const PARTICLE_MIN_REF_PPS = 10;
 const PARTICLE_REF_DECAY = 0.995;
 const PARTICLE_MAX_DT = 0.05;
+const PARTICLE_MIN_VISIBLE_FRACTION = 0.15;
 
 export interface IsoScene3DProps {
     instance: InstanceInfo;
@@ -809,7 +810,8 @@ export const IsoScene3D: React.FC<IsoScene3DProps> = ({
 
                 const pathPps = fwdPaths.map((path) => {
                     const liveDev = live.devicesById.get(path.deviceId);
-                    return liveDev?.status === 'ok' ? liveDev.rxPps : 0;
+                    if (!liveDev || liveDev.status !== 'ok') return 0;
+                    return Math.max(liveDev.rxPps, liveDev.txPps);
                 });
                 const currentMax = pathPps.reduce((m, v) => (v > m ? v : m), 0);
                 const decayed = peakPpsRef.current * PARTICLE_REF_DECAY;
@@ -823,9 +825,12 @@ export const IsoScene3D: React.FC<IsoScene3DProps> = ({
                     const path = fwdPaths[p.pi];
                     if (!path) return;
                     const pps = pathPps[p.pi];
-                    const fraction = pps <= 0
+                    const baseFraction = pps <= 0
                         ? 0
                         : Math.min(1, (Math.log10(Math.max(pps, PARTICLE_MIN_REF_PPS)) - logFloor) / logSpan);
+                    const fraction = baseFraction > 0
+                        ? Math.max(baseFraction, PARTICLE_MIN_VISIBLE_FRACTION)
+                        : 0;
 
                     if (fraction > 0) {
                         if (p.lastFraction === 0) {
