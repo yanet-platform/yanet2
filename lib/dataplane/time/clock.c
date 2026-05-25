@@ -5,8 +5,6 @@
 #include <rte_cycles.h>
 #include <x86intrin.h>
 
-////////////////////////////////////////////////////////////////////////////////
-
 int
 tsc_clock_init(struct tsc_clock *clock) {
 	struct timespec ts;
@@ -35,3 +33,5 @@ tsc_clock_get_time_ns(struct tsc_clock *clock) {
 
 	return clock->real_time_ns + (tsc >> 10) * clock->tsc_to_ns;
 }
+
+dataplane_time_ns_fn_t dataplane_time_ns_fn = tsc_clock_get_time_ns;

@@ -26,6 +26,11 @@
 #include "dataplane/device.h"
 #include "dataplane/worker.h"
 
+#include "lib/dataplane/config/agent.h"
+#include "lib/dataplane/config/bootstrap.h"
+#include "lib/dataplane/config/counter_storage.h"
+#include "lib/dataplane/config/module_loader.h"
+#include "lib/dataplane/config/topology.h"
 #include "lib/dataplane/packet/data.h"
 #include "lib/dataplane/packet/packet.h"
 #include "lib/errors/errors.h"
@@ -207,149 +212,6 @@ dataplane_create_devices(
 }
 
 int
-dataplane_load_module(
-	struct dp_config *dp_config, void *bin_hndl, const char *name
-) {
-	LOG(INFO, "load module %s", name);
-	char loader_name[64];
-	snprintf(loader_name, sizeof(loader_name), "%s%s", "new_module_", name);
-	module_load_handler loader =
-		(module_load_handler)dlsym(bin_hndl, loader_name);
-	if (loader == NULL) {
-		LOG(ERROR, "failed to load dyn symbol %s", loader_name);
-		return -1;
-	}
-	struct module *module = loader();
-
-	struct dp_module *dp_modules = ADDR_OF(&dp_config->dp_modules);
-	if (mem_array_expand_exp(
-		    &dp_config->memory_context,
-		    (void **)&dp_modules,
-		    sizeof(*dp_modules),
-		    &dp_config->module_count
-	    )) {
-		LOG(ERROR, "failed to allocate memory for module %s", name);
-		// FIXME: free module
-		return -1;
-	}
-
-	struct dp_module *dp_module = dp_modules + dp_config->module_count - 1;
-
-	strtcpy(dp_module->name, module->name, sizeof(dp_module->name));
-	dp_module->handler = module->handler;
-
-	SET_OFFSET_OF(&dp_config->dp_modules, dp_modules);
-
-	return 0;
-}
-
-int
-dataplane_load_device(
-	struct dp_config *dp_config, void *bin_hndl, const char *name
-) {
-	LOG(INFO, "load device %s", name);
-	char loader_name[64];
-	snprintf(loader_name, sizeof(loader_name), "%s%s", "new_device_", name);
-	device_load_handler loader =
-		(device_load_handler)dlsym(bin_hndl, loader_name);
-	if (loader == NULL) {
-		LOG(ERROR, "failed to load dyn symbol %s", loader_name);
-		return -1;
-	}
-	struct device *device = loader();
-
-	struct dp_device *dp_devices = ADDR_OF(&dp_config->dp_devices);
-	if (mem_array_expand_exp(
-		    &dp_config->memory_context,
-		    (void **)&dp_devices,
-		    sizeof(*dp_devices),
-		    &dp_config->device_count
-	    )) {
-		LOG(ERROR, "failed to allocate memory for device %s", name);
-		// FIXME: free device
-		return -1;
-	}
-
-	struct dp_device *dp_device = dp_devices + dp_config->device_count - 1;
-
-	strtcpy(dp_device->name, device->name, sizeof(dp_device->name));
-	dp_device->input_handler = device->input_handler;
-	dp_device->output_handler = device->output_handler;
-
-	SET_OFFSET_OF(&dp_config->dp_devices, dp_devices);
-
-	return 0;
-}
-
-int
-dataplane_init_storage(
-	uint32_t numa_idx,
-	uint32_t instance_idx,
-	void *storage,
-	size_t dp_memory,
-	size_t cp_memory,
-
-	struct dp_config **res_dp_config,
-	struct cp_config **res_cp_config
-) {
-	// TODO: move pages to requested numa node
-
-	struct dp_config *dp_config = (struct dp_config *)storage;
-
-	dp_config->numa_idx = numa_idx;
-	dp_config->instance_idx = instance_idx;
-	dp_config->storage_size = dp_memory + cp_memory;
-
-	block_allocator_init(&dp_config->block_allocator);
-	block_allocator_put_arena(
-		&dp_config->block_allocator,
-		storage + sizeof(struct dp_config),
-		dp_memory - sizeof(struct dp_config)
-	);
-	memory_context_init(
-		&dp_config->memory_context, "dp", &dp_config->block_allocator
-	);
-
-	dp_config->config_lock = 0;
-
-	dp_config->dp_modules = NULL;
-	dp_config->module_count = 0;
-
-	dp_config->workers = NULL;
-	dp_config->worker_count = 0;
-
-	struct cp_config *cp_config =
-		(struct cp_config *)((uintptr_t)storage + dp_memory);
-
-	block_allocator_init(&cp_config->block_allocator);
-	block_allocator_put_arena(
-		&cp_config->block_allocator,
-		storage + dp_memory + sizeof(struct cp_config),
-		cp_memory - sizeof(struct cp_config)
-	);
-	memory_context_init(
-		&cp_config->memory_context, "cp", &cp_config->block_allocator
-	);
-
-	// FIXME: cp_config bootstrap routine
-	struct cp_agent_registry *cp_agent_registry =
-		(struct cp_agent_registry *)memory_balloc(
-			&cp_config->memory_context,
-			sizeof(struct cp_agent_registry)
-		);
-	cp_agent_registry->count = 0;
-	SET_OFFSET_OF(&cp_config->agent_registry, cp_agent_registry);
-
-	SET_OFFSET_OF(&dp_config->cp_config, cp_config);
-	SET_OFFSET_OF(&cp_config->dp_config, dp_config);
-
-	*res_dp_config = dp_config;
-	*res_cp_config = cp_config;
-
-	return 0;
-}
-
-int
 dataplane_init(
 	struct dataplane *dataplane,
 	const char *binary,
@@ -443,7 +305,7 @@ dataplane_init(
 			config->instances + instance_idx;
 
 		LOG(INFO, "initialize storage for instance %u", instance_idx);
-		int rc = dataplane_init_storage(
+		int rc = dp_storage_init(
 			instance_config->numa_idx,
 			instance_idx,
 			storage + instance_offset,
@@ -467,9 +329,8 @@ dataplane_init(
 		//
 		// FIXME: not paired with a free: released only when shm is torn
 		// down.
-		struct agent *agent = (struct agent *)memory_balloc(
-			&instance->cp_config->memory_context,
-			sizeof(struct agent)
+		struct agent *agent = dp_system_agent_new(
+			instance->cp_config, instance->dp_config, "dataplane"
 		);
 		if (agent == NULL) {
 			LOG(ERROR,
@@ -477,30 +338,22 @@ dataplane_init(
 			    instance_idx);
 			return -1;
 		}
-		memset(agent, 0, sizeof(struct agent));
-		strtcpy(agent->name, "dataplane", sizeof(agent->name));
-		memory_context_init_from(
-			&agent->memory_context,
-			&instance->cp_config->memory_context,
-			"dataplane"
-		);
-		SET_OFFSET_OF(&agent->dp_config, instance->dp_config);
-		SET_OFFSET_OF(&agent->cp_config, instance->cp_config);
 
-		instance->dp_config->dp_topology.device_count =
-			config->device_count;
-		struct dp_port *ports = (struct dp_port *)memory_balloc(
-			&instance->dp_config->memory_context,
-			sizeof(struct dp_port) *
-				instance->dp_config->dp_topology.device_count
+		struct dp_port *ports = dp_topology_alloc_devices(
+			instance->dp_config, config->device_count
 		);
+		if (ports == NULL) {
+			LOG(ERROR,
+			    "failed to allocate dp_topology devices for "
+			    "instance %u",
+			    instance_idx);
+			return -1;
+		}
 		for (uint64_t idx = 0; idx < config->device_count; ++idx) {
 			strtcpy(ports[idx].port_name,
 				config->devices[idx].port_name,
 				sizeof(ports[idx].port_name));
 		}
-
-		SET_OFFSET_OF(&instance->dp_config->dp_topology.devices, ports);
 
 		instance->dp_config->instance_idx = instance_idx;
 		instance->dp_config->instance_count = dataplane->instance_count;
@@ -518,7 +371,7 @@ dataplane_init(
 		};
 		for (size_t i = 0; i < sizeof(modules) / sizeof(modules[0]);
 		     ++i) {
-			if (dataplane_load_module(
+			if (dp_load_module(
 				    instance->dp_config, bin_hndl, modules[i]
 			    ) == -1) {
 				return -1;
@@ -528,7 +381,7 @@ dataplane_init(
 		static const char *devices[] = {"plain", "vlan"};
 		for (size_t i = 0; i < sizeof(devices) / sizeof(devices[0]);
 		     ++i) {
-			if (dataplane_load_device(
+			if (dp_load_device(
 				    instance->dp_config, bin_hndl, devices[i]
 			    ) == -1) {
 				return -1;
@@ -605,39 +458,12 @@ dataplane_init(
 		dp_config->instance_idx = instance_idx;
 		dp_config->instance_count = dataplane->instance_count;
 
-		counter_storage_allocator_init(
-			&dp_config->counter_storage_allocator,
-			&dp_config->memory_context,
-			dp_config->worker_count
-		);
-
 		struct cp_config *cp_config = instance->cp_config;
-		counter_storage_allocator_init(
-			&cp_config->counter_storage_allocator,
-			&cp_config->memory_context,
-			dp_config->worker_count
-		);
-
-		yanet_error *err = NULL;
-		if (counter_registry_link(
-			    &dp_config->worker_counters, NULL, &err
-		    )) {
-			LOG(ERROR,
-			    "failed to link counter registry: %s",
-			    yanet_error_message(err));
-			yanet_error_free(err);
+		if (dp_counter_storage_init(
+			    dp_config, cp_config, dp_config->worker_count
+		    ) != 0) {
 			return -1;
 		}
-
-		SET_OFFSET_OF(
-			&dp_config->worker_counter_storage,
-			counter_storage_spawn(
-				&dp_config->memory_context,
-				&dp_config->counter_storage_allocator,
-				NULL,
-				&dp_config->worker_counters
-			)
-		);
 	}
 
 	return 0;

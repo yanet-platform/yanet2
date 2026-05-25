@@ -51,6 +51,8 @@
 #include "lib/dataplane/time/clock.h"
 
 #include "lib/controlplane/config/zone.h"
+#include "lib/dataplane/worker/counters.h"
+#include "lib/dataplane/worker/pipeline_round.h"
 
 #include "common/data_pipe.h"
 #include "logging/log.h"
@@ -280,7 +282,7 @@ worker_loop_round(struct dataplane_worker *worker) {
 	{
 		struct dp_worker *dp_worker = worker->dp_worker;
 		dp_worker->current_time =
-			tsc_clock_get_time_ns(&dp_worker->clock);
+			dataplane_time_ns_fn(&dp_worker->clock);
 	}
 
 	struct cp_config *cp_config = worker->instance->cp_config;
@@ -311,80 +313,9 @@ worker_loop_round(struct dataplane_worker *worker) {
 		return;
 	}
 
-	uint64_t device_count =
-		cp_config_gen->device_registry.registry.capacity;
-
-	while (1) {
-
-		struct packet_front schedule_input[device_count];
-		for (uint64_t idx = 0; idx < device_count; ++idx)
-			packet_front_init(schedule_input + idx);
-
-		struct packet_front schedule_output[device_count];
-		for (uint64_t idx = 0; idx < device_count; ++idx)
-			packet_front_init(schedule_output + idx);
-
-		struct packet *packet;
-
-		int empty = 1;
-
-		while ((packet = packet_list_pop(&packet_front.pending_input)
-		       ) != NULL) {
-			empty = 0;
-			packet_front_output(
-				schedule_input + packet->tx_device_id, packet
-			);
-		}
-
-		while ((packet = packet_list_pop(&packet_front.pending_output)
-		       ) != NULL) {
-			empty = 0;
-			packet_front_output(
-				schedule_output + packet->tx_device_id, packet
-			);
-		}
-
-		if (empty)
-			break;
-
-		struct device_ectx **devices = config_gen_ectx->devices;
-
-		for (uint64_t idx = 0; idx < device_count; ++idx) {
-			if (packet_list_first(&schedule_input[idx].output) ==
-			    NULL)
-				continue;
-
-			struct device_ectx *device_ectx =
-				ADDR_OF(devices + idx);
-
-			device_ectx_process_input(
-				worker->dp_worker,
-				device_ectx,
-				schedule_input + idx
-			);
-
-			packet_front_merge(&packet_front, schedule_input + idx);
-		}
-
-		for (uint64_t idx = 0; idx < device_count; ++idx) {
-			if (packet_list_first(&schedule_output[idx].output) ==
-			    NULL)
-				continue;
-
-			struct device_ectx *device_ectx =
-				ADDR_OF(devices + idx);
-
-			device_ectx_process_output(
-				worker->dp_worker,
-				device_ectx,
-				schedule_output + idx
-			);
-
-			packet_front_merge(
-				&packet_front, schedule_output + idx
-			);
-		}
-	}
+	worker_pipeline_round(
+		worker->dp_worker, cp_config_gen, config_gen_ectx, &packet_front
+	);
 
 	worker_write(worker, &packet_front.output);
 
@@ -406,26 +337,6 @@ worker_thread_start(void *arg) {
 	}
 
 	return NULL;
-}
-
-static int
-worker_register_counter(
-	struct dp_config *dp_config, const char *name, uint64_t size
-) {
-	yanet_error *err = NULL;
-	uint64_t rc = counter_registry_register(
-		&dp_config->worker_counters, name, size, &err
-	);
-	if (rc == COUNTER_INVALID) {
-		LOG(ERROR,
-		    "failed to register '%s' counter: %s",
-		    name,
-		    yanet_error_message(err));
-		yanet_error_free(err);
-		return -1;
-	}
-
-	return 0;
 }
 
 int
@@ -576,19 +487,7 @@ dataplane_worker_init(
 		&dp_config->worker_counters, &dp_config->memory_context, 0
 	);
 
-	if (worker_register_counter(dp_config, "iterations", 1)) {
-		return -1;
-	}
-	if (worker_register_counter(dp_config, "rx", 2)) {
-		return -1;
-	}
-	if (worker_register_counter(dp_config, "tx", 2)) {
-		return -1;
-	}
-	if (worker_register_counter(dp_config, "remote_rx", 2)) {
-		return -1;
-	}
-	if (worker_register_counter(dp_config, "remote_tx", 2)) {
+	if (worker_counters_register(dp_config)) {
 		return -1;
 	}
 
