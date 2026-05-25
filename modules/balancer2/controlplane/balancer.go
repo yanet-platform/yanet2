@@ -1,6 +1,7 @@
 package balancer2
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math"
@@ -121,6 +122,7 @@ type ModuleConfig struct {
 	sessions *SessionsState
 	agent    *ffi.Agent
 	index    map[vsID]*vsSlot
+	wlcLoop  *wlcRefreshLoop
 	mu       sync.Mutex
 }
 
@@ -139,7 +141,7 @@ func NewModuleConfig(
 		return nil, err
 	}
 
-	return &ModuleConfig{
+	mc := &ModuleConfig{
 		handle:   handle,
 		name:     name,
 		cfg:      config,
@@ -147,7 +149,12 @@ func NewModuleConfig(
 		agent:    agent,
 		index:    index,
 		mu:       sync.Mutex{},
-	}, nil
+	}
+
+	mc.wlcLoop = newWLCRefreshLoop(mc)
+	mc.wlcLoop.Reset(context.Background())
+
+	return mc, nil
 }
 
 func (m *ModuleConfig) Update(newConfig *ConfigParams, st *SessionsState) error {
@@ -161,6 +168,7 @@ func (m *ModuleConfig) Update(newConfig *ConfigParams, st *SessionsState) error 
 
 	handle, index, err := build(m.agent, m.name, merged, st, m.index)
 	if err != nil {
+		m.mu.Unlock()
 		return err
 	}
 
@@ -169,13 +177,15 @@ func (m *ModuleConfig) Update(newConfig *ConfigParams, st *SessionsState) error 
 	m.cfg = merged
 	m.sessions = st
 	m.index = index
+	m.wlcLoop.Reset(context.Background())
+
 	return nil
 }
 
 func (m *ModuleConfig) Free() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-
+	m.wlcLoop.Stop()
 	m.handle.Free(m.agent)
 }
 

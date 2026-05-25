@@ -1,12 +1,17 @@
 package balancer2
 
 import (
+	"context"
 	"math"
 	"time"
 
 	"github.com/yanet-platform/yanet2/modules/balancer2/controlplane/balancerpb"
 )
 
+// collectSessionCounts iterates active sessions and aggregates per-real
+// session counts under each VS configured to use the WLC scheduler.
+// The caller must hold m.mu because the function reads m.cfg and
+// m.index, both of which are protected by that lock.
 func (m *ModuleConfig) collectSessionCounts(now time.Time) map[vsID]map[realID]uint64 {
 	counts := map[vsID]map[realID]uint64{}
 	for id, state := range m.sessions.IterSessions(now) {
@@ -37,12 +42,12 @@ func (m *ModuleConfig) collectSessionCounts(now time.Time) map[vsID]map[realID]u
 }
 
 func (m *ModuleConfig) refreshWLC(now time.Time) {
-	if m.cfg == nil || m.cfg.Vs == nil {
-		return
-	}
-
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	if m.cfg == nil || m.cfg.Vs == nil || m.cfg.Wlc == nil {
+		return
+	}
 
 	counts := m.collectSessionCounts(now)
 
@@ -140,4 +145,70 @@ func computeEffectiveWeight(
 		eff = math.Min(eff, float64(maxWeight))
 	}
 	return uint32(eff)
+}
+
+func (m *ModuleConfig) wlcRefreshPeriod() time.Duration {
+	if m.cfg == nil || m.cfg.Wlc == nil || m.cfg.Wlc.RefreshPeriod == nil {
+		return 0
+	}
+	return m.cfg.Wlc.RefreshPeriod.AsDuration()
+}
+
+type wlcRefreshLoop struct {
+	module *ModuleConfig
+	cancel context.CancelFunc
+	done   chan struct{}
+}
+
+func newWLCRefreshLoop(module *ModuleConfig) *wlcRefreshLoop {
+	return &wlcRefreshLoop{
+		module: module,
+	}
+}
+
+func (m *wlcRefreshLoop) Reset(ctx context.Context) {
+	m.Stop()
+
+	period := m.module.wlcRefreshPeriod()
+
+	if period <= 0 {
+		return
+	}
+
+	ctx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+
+	m.cancel = cancel
+	m.done = done
+
+	go m.run(ctx, period, done)
+}
+
+func (m *wlcRefreshLoop) Stop() {
+	cancel := m.cancel
+	done := m.done
+	m.cancel = nil
+	m.done = nil
+
+	if cancel == nil {
+		return
+	}
+	cancel()
+	<-done
+}
+
+func (m *wlcRefreshLoop) run(ctx context.Context, period time.Duration, done chan struct{}) {
+	defer close(done)
+
+	ticker := time.NewTicker(period)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-ticker.C:
+			m.module.refreshWLC(now)
+		}
+	}
 }
