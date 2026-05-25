@@ -8,6 +8,10 @@ import { Inspector } from './Inspector';
 import type { SelectedItem } from './Inspector';
 import type { AgentUsage } from '../inspect/utils';
 
+const PARTICLE_MIN_REF_PPS = 10;
+const PARTICLE_REF_DECAY = 0.995;
+const PARTICLE_MAX_DT = 0.05;
+
 export interface IsoScene3DProps {
     instance: InstanceInfo;
     rateCounters: Map<string, DeviceCounterData>;
@@ -32,6 +36,7 @@ interface FwdPath {
     lens: number[];
     total: number;
     density: number;
+    deviceId: string;
 }
 
 interface Particle {
@@ -39,6 +44,7 @@ interface Particle {
     t: number;
     speed: number;
     posIdx: number;
+    lastFraction: number;
 }
 
 interface ParticleSystem {
@@ -178,8 +184,9 @@ const buildParticles = (
             ps.push({
                 pi,
                 t: Math.random(),
-                speed: (0.0008 + path.density * 0.0014) * (0.7 + Math.random() * 0.6),
+                speed: 0.0008 + path.density * 0.0014,
                 posIdx: idx,
+                lastFraction: 0,
             });
             positions[idx * 3 + 0] = 0;
             positions[idx * 3 + 1] = 0;
@@ -364,6 +371,7 @@ export const IsoScene3D: React.FC<IsoScene3DProps> = ({
     });
     const canvasSizeRef = useRef(canvasSize);
     canvasSizeRef.current = canvasSize;
+    const peakPpsRef = useRef<number>(PARTICLE_MIN_REF_PPS);
 
     useEffect(() => {
         const check = (): boolean => {
@@ -623,7 +631,7 @@ export const IsoScene3D: React.FC<IsoScene3DProps> = ({
                 lens.push(l);
                 total += l;
             }
-            fwdPaths.push({ pts, lens, total, density: 0.5 });
+            fwdPaths.push({ pts, lens, total, density: 0.5, deviceId: d.id });
         });
 
         const fwdPS = buildParticles(fwdPaths, 0xFFC061, 2.4);
@@ -798,11 +806,51 @@ export const IsoScene3D: React.FC<IsoScene3DProps> = ({
 
             if (fwdPS.points && fwdPS.geo) {
                 const positions = fwdPS.geo.attributes['position'].array as Float32Array;
+
+                const pathPps = fwdPaths.map((path) => {
+                    const liveDev = live.devicesById.get(path.deviceId);
+                    return liveDev?.status === 'ok' ? liveDev.rxPps : 0;
+                });
+                const currentMax = pathPps.reduce((m, v) => (v > m ? v : m), 0);
+                const decayed = peakPpsRef.current * PARTICLE_REF_DECAY;
+                const peak = Math.max(currentMax, decayed, PARTICLE_MIN_REF_PPS);
+                peakPpsRef.current = peak;
+                const logFloor = Math.log10(PARTICLE_MIN_REF_PPS);
+                const logPeak = Math.log10(peak);
+                const logSpan = Math.max(logPeak - logFloor, 1e-6);
+
                 fwdPS.ps.forEach((p) => {
-                    p.t += p.speed * 4;
-                    if (p.t > 1) p.t -= 1;
                     const path = fwdPaths[p.pi];
                     if (!path) return;
+                    const pps = pathPps[p.pi];
+                    const fraction = pps <= 0
+                        ? 0
+                        : Math.min(1, (Math.log10(Math.max(pps, PARTICLE_MIN_REF_PPS)) - logFloor) / logSpan);
+
+                    if (fraction > 0) {
+                        if (p.lastFraction === 0) {
+                            p.t = Math.random();
+                        }
+                        p.t += Math.min(PARTICLE_MAX_DT, p.speed * 4 * fraction);
+                        if (p.t > 1) p.t -= 1;
+                        p.lastFraction = fraction;
+                    } else {
+                        if (p.lastFraction === 0) {
+                            positions[p.posIdx * 3 + 0] = 0;
+                            positions[p.posIdx * 3 + 1] = -1000;
+                            positions[p.posIdx * 3 + 2] = 0;
+                            return;
+                        }
+                        p.t += Math.min(PARTICLE_MAX_DT, p.speed * 4 * p.lastFraction);
+                        if (p.t > 1) {
+                            p.lastFraction = 0;
+                            positions[p.posIdx * 3 + 0] = 0;
+                            positions[p.posIdx * 3 + 1] = -1000;
+                            positions[p.posIdx * 3 + 2] = 0;
+                            return;
+                        }
+                    }
+
                     const target = p.t * path.total;
                     let acc = 0;
                     let pt = path.pts[0];
