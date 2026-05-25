@@ -7,6 +7,7 @@
 #include "common/rng.h"
 #include "common/ttlmap/ttlmap.h"
 
+#include "controlplane/config/zone.h"
 #include "errors/errors.h"
 #include "filter/compiler.h"
 #include "filter/rule.h"
@@ -545,9 +546,8 @@ err_acl:
 }
 
 static void
-free_vs(struct memory_context *mctx,
-	struct virtual_service *vs,
-	size_t workers) {
+free_vs(struct memory_context *mctx, struct virtual_service *vs, size_t workers
+) {
 	free_vs_reals(mctx, vs);
 	free_vs_acl(mctx, vs);
 	free_real_selector(mctx, vs, workers);
@@ -655,8 +655,7 @@ build_vs_array(
 	for (size_t idx = 0; idx < count; ++idx) {
 		const struct balancer_vs_config *vs_config = &configs[idx];
 		if (validate_vs(vs_config, error) != 0 ||
-		    init_vs(
-			    mctx, registry, &vs[idx], vs_config, workers, error
+		    init_vs(mctx, registry, &vs[idx], vs_config, workers, error
 		    ) != 0) {
 			yanet_error_add(error, "vs[%zu]", idx);
 			for (size_t j = 0; j < idx; ++j) {
@@ -973,6 +972,9 @@ balancer_create(
 		return NULL;
 	}
 
+	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
+	cp_config_lock(cp_config);
+
 	struct memory_context *mctx = &agent->memory_context;
 
 	struct balancer_handle *handle = memory_balloc(mctx, sizeof(*handle));
@@ -994,10 +996,12 @@ balancer_create(
 		    l4_counter_name,
 		    error
 	    ) != 0) {
+		cp_config_unlock(cp_config);
 		memory_bfree(mctx, handle, sizeof(*handle));
 		return NULL;
 	}
 
+	cp_config_unlock(cp_config);
 	return handle;
 }
 
@@ -1025,10 +1029,16 @@ balancer_free(struct agent *agent, struct balancer_handle *handle) {
 	if (agent == NULL || handle == NULL) {
 		return;
 	}
+
+	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
+	cp_config_lock(cp_config);
+
 	struct memory_context *mctx = &agent->memory_context;
 	struct balancer_module_config *cfg = &handle->module_config;
 	free_module_config(agent, cfg);
 	memory_bfree(mctx, handle, sizeof(*handle));
+
+	cp_config_unlock(cp_config);
 }
 
 /* This procedure does not respect disabled reals.
@@ -1140,6 +1150,9 @@ balancer_vs_update_reals(
 		}
 	}
 
+	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
+	cp_config_lock(cp_config);
+
 	if (build_ring(
 		    &selector->rings[new_ring],
 		    ring_weights,
@@ -1148,6 +1161,7 @@ balancer_vs_update_reals(
 		    vs_idx,
 		    error
 	    ) != 0) {
+		cp_config_unlock(cp_config);
 		yanet_error_add(error, "build ring");
 		return -1;
 	}
@@ -1178,53 +1192,7 @@ balancer_vs_update_reals(
 
 	free(ring_weights);
 
-	return 0;
-}
-
-int
-balancer_vs_update_real_states(
-	struct balancer_handle *balancer,
-	uint32_t vs_idx,
-	const bool *states,
-	yanet_error **error
-) {
-	yanet_error_reset(error);
-
-	if (balancer == NULL) {
-		yanet_error_add(error, "missing balancer handle");
-		return -1;
-	}
-
-	struct balancer_module_config *cfg = &balancer->module_config;
-	if (vs_idx >= cfg->vs_count) {
-		yanet_error_add(
-			error,
-			"index %u exceeds number of virtual services %u",
-			vs_idx,
-			cfg->vs_count
-		);
-		return -1;
-	}
-
-	struct virtual_service *vs = ADDR_OF(&cfg->vs) + vs_idx;
-	struct real *reals = ADDR_OF(&vs->reals);
-
-	for (uint32_t i = 0; i < vs->reals_count; ++i) {
-		uint8_t flags = atomic_load_explicit(
-			&reals[i].flags, memory_order_relaxed
-		);
-		uint8_t new_flags = 0;
-		if (states[i]) {
-			new_flags = flags | real_enabled;
-		} else {
-			new_flags = flags & ~real_enabled;
-		}
-		if (flags != new_flags) {
-			atomic_store_explicit(
-				&reals[i].flags, new_flags, memory_order_relaxed
-			);
-		}
-	}
+	cp_config_unlock(cp_config);
 
 	return 0;
 }
@@ -1244,6 +1212,9 @@ balancer_create_session_table(
 		return NULL;
 	}
 
+	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
+	cp_config_lock(cp_config);
+
 	struct memory_context *mctx = &agent->memory_context;
 
 	struct balancer_session_table *table =
@@ -1262,8 +1233,11 @@ balancer_create_session_table(
 	    ) != 0) {
 		yanet_error_add(error, "%s", agent_alloc_failed);
 		memory_bfree(mctx, table, sizeof(*table));
+		cp_config_unlock(cp_config);
 		return NULL;
 	}
+
+	cp_config_unlock(cp_config);
 
 	return table;
 }
@@ -1342,9 +1316,15 @@ balancer_free_session_table(
 	if (agent == NULL || table == NULL) {
 		return;
 	}
+
+	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
+	cp_config_lock(cp_config);
+
 	struct memory_context *mctx = &agent->memory_context;
 	TTLMAP_FREE(&table->map);
 	memory_bfree(mctx, table, sizeof(*table));
+
+	cp_config_unlock(cp_config);
 	return;
 }
 
@@ -1373,9 +1353,13 @@ balancer_create_session_table_chain(
 		return NULL;
 	}
 
+	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
+	cp_config_lock(cp_config);
+
 	struct balancer_session_table_chain *chain =
 		memory_balloc(mctx, sizeof(*chain));
 	if (chain == NULL) {
+		cp_config_unlock(cp_config);
 		yanet_error_add(error, "%s", agent_alloc_failed);
 		return NULL;
 	}
@@ -1384,11 +1368,14 @@ balancer_create_session_table_chain(
 	if (rcu_init(&chain->rcu, mctx, workers) != 0) {
 		yanet_error_add(error, "%s", agent_alloc_failed);
 		memory_bfree(mctx, chain, sizeof(*chain));
+		cp_config_unlock(cp_config);
 		return NULL;
 	}
 
 	SET_OFFSET_OF(&chain->tables[0], front_table);
 	SET_OFFSET_OF(&chain->tables[1], NULL);
+
+	cp_config_unlock(cp_config);
 
 	return chain;
 }
@@ -1400,9 +1387,14 @@ balancer_free_session_table_chain(
 	if (agent == NULL || chain == NULL) {
 		return;
 	}
+	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
+	cp_config_lock(cp_config);
+
 	struct memory_context *mctx = &agent->memory_context;
 	rcu_free(&chain->rcu, mctx);
 	memory_bfree(mctx, chain, sizeof(*chain));
+
+	cp_config_unlock(cp_config);
 }
 
 struct balancer_session_table_iter {
@@ -1433,8 +1425,7 @@ balancer_session_table_iter_bucket_callback(
 }
 
 struct balancer_session_table_iter *
-balancer_session_table_create_iter(
-	struct balancer_session_table *session_table
+balancer_session_table_create_iter(struct balancer_session_table *session_table
 ) {
 	if (session_table == NULL) {
 		return NULL;
@@ -1466,8 +1457,8 @@ balancer_session_table_iter_next_bucket(
 	       sizeof(*session_ids) * balancer_session_table_iter_bucket_size);
 	memset(session_states,
 	       0,
-	       sizeof(*session_states) *
-		       balancer_session_table_iter_bucket_size);
+	       sizeof(*session_states) * balancer_session_table_iter_bucket_size
+	);
 
 	struct balancer_session_table_iter_bucket_data data = {
 		.session_ids = session_ids,

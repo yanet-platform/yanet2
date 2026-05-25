@@ -189,15 +189,15 @@ balancer_create_session_table(
 struct balancer_session_table_iter;
 
 struct balancer_session_table_iter *
-balancer_session_table_create_iter(
-	struct balancer_session_table *session_table
+balancer_session_table_create_iter(struct balancer_session_table *session_table
 );
 
 enum { balancer_session_table_iter_bucket_size = TTLMAP_BUCKET_SIZE };
 
 // Returns the number of entries copied into session_ids/session_states, or -1
-// when iteration is exhausted. 
-// The arrays must hold at least balancer_session_table_iter_bucket_size entries.
+// when iteration is exhausted.
+// The arrays must hold at least balancer_session_table_iter_bucket_size
+// entries.
 ssize_t
 balancer_session_table_iter_next_bucket(
 	struct balancer_session_table_iter *iter,
@@ -207,9 +207,7 @@ balancer_session_table_iter_next_bucket(
 );
 
 void
-balancer_session_table_iter_free(
-	struct balancer_session_table_iter *iter
-);
+balancer_session_table_iter_free(struct balancer_session_table_iter *iter);
 
 /*
  * Pushes the given table as the new front (primary) session table.
