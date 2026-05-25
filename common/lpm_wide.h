@@ -15,7 +15,7 @@
 #define LPM_WIDE_VALUE_FLAG 0x00000001
 #define LPM_WIDE_VALUE_SET(value) ((value << 1) | LPM_WIDE_VALUE_FLAG)
 #define LPM_WIDE_VALUE_GET(value) (value >> 1)
-#define LPM_WIDE_CHUNK_SIZE 2
+#define LPM_WIDE_CHUNK_SIZE 4
 #define LPM_WIDE_PAGE_SIZE 65536
 #define LPM_WIDE_KEY_SIZE_MAX 16
 

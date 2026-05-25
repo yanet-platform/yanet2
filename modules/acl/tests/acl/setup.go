@@ -12,11 +12,13 @@ import (
 
 ////////////////////////////////////////////////////////////////////////////////
 
-var defaultDeviceName string = "01:00.0"
-var defaultPipelineName string = "pipeline0"
-var defaultFunctionName string = "function0"
-var defaultChainName string = "chain0"
-var defaultConfigName string = "acl0"
+var (
+	defaultDeviceName   string = "01:00.0"
+	defaultPipelineName string = "pipeline0"
+	defaultFunctionName string = "function0"
+	defaultChainName    string = "chain0"
+	defaultConfigName   string = "acl0"
+)
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -34,7 +36,7 @@ type TestSetup struct {
 func SetupTest(config *TestConfig) (*TestSetup, error) {
 	if config.mock == nil {
 		config.mock = &mock.YanetMockConfig{
-			AgentsMemory: datasize.MB * 64,
+			AgentsMemory: datasize.MB * 256,
 			Workers:      1,
 			Devices: []mock.YanetMockDeviceConfig{
 				{
