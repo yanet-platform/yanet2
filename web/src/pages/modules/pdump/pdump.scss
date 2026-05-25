@@ -168,6 +168,18 @@
     }
 }
 
+.pdump-bpf-recents {
+    margin-bottom: 4px;
+}
+
+.pdump-bpf-recents__label {
+    font-size: 11px;
+    color: var(--fw-muted, #8a8580);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: 4px;
+}
+
 // Config strip — one-row meta + live stats + actions for the active config.
 .pdump-strip {
     display: flex;

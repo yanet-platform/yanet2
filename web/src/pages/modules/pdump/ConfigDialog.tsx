@@ -3,6 +3,7 @@ import { pdumpApi, parseModeFlags, modeFlagsToNumber, type PdumpConfig } from '.
 import { toaster } from '../../../utils';
 import BpfTokens from './BpfTokens';
 import PdumpModal from './PdumpModal';
+import { loadRecentFilters, pushRecentFilter } from './recentFilters';
 import './pdump.scss';
 
 const BPF_SUGGESTIONS = [
@@ -41,9 +42,11 @@ export const ConfigDialog: React.FC<ConfigDialogProps> = ({
     const [snaplen, setSnaplen] = useState('');
     const [ringSize, setRingSize] = useState('');
     const [loading, setLoading] = useState(false);
+    const [recent, setRecent] = useState<string[]>([]);
 
     useEffect(() => {
         if (open) {
+            setRecent(loadRecentFilters());
             if (isCreate) {
                 setConfigName('');
                 setFilter('');
@@ -97,6 +100,7 @@ export const ConfigDialog: React.FC<ConfigDialogProps> = ({
             }
 
             await pdumpApi.setConfig(targetConfigName, config, { paths });
+            pushRecentFilter(filter);
             toaster.success('pdump-config-saved', isCreate ? 'Configuration created' : 'Configuration saved');
             onSaved();
             onClose();
@@ -166,6 +170,22 @@ export const ConfigDialog: React.FC<ConfigDialogProps> = ({
                         <span style={{ marginLeft: 8 }}><BpfTokens expr={filter} /></span>
                     )}
                 </span>
+                {recent.length > 0 && (
+                    <div className="pdump-bpf-recents">
+                        <div className="pdump-bpf-recents__label">Recent</div>
+                        <div className="pdump-bpf-suggestions">
+                            {recent.map(f => (
+                                <span
+                                    key={f}
+                                    className="pdump-bpf-suggestion"
+                                    onClick={() => setFilter(f)}
+                                >
+                                    {f}
+                                </span>
+                            ))}
+                        </div>
+                    </div>
+                )}
                 <div className="pdump-bpf-suggestions">
                     {BPF_SUGGESTIONS.map(ex => (
                         <span
