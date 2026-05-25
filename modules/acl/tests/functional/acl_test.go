@@ -24,7 +24,7 @@ import (
 const (
 	aclCPSize  = 64 * datasize.MB
 	aclDPSize  = 4 * datasize.MB
-	aclMemSize = 8 * datasize.MB
+	aclMemSize = 16 * datasize.MB
 )
 
 // udpProto matches any UDP packet.
