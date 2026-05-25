@@ -76,6 +76,7 @@ filter_free(
 		value_table_free(&v0->table);
 	}
 	memory_context_fini(&filter->memory_context);
+	memset(filter, 0, sizeof(*filter));
 }
 
 static inline int

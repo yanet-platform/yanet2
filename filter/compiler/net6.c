@@ -1,6 +1,6 @@
 #include "../rule.h"
 
-#include "common/lpm.h"
+#include "common/lpm_wide.h"
 #include "common/range_collector.h"
 
 #include "common/registry.h"
@@ -66,7 +66,7 @@ collect_net6_range(
 	uint32_t count,
 	action_get_net6_func get_net6,
 	net6_get_part_func get_part,
-	struct lpm *lpm,
+	struct lpm_wide *lpm,
 	struct range_index *ri
 ) {
 	struct range_collector collector;
@@ -102,7 +102,7 @@ collect_net6_range(
 				goto error_collector;
 		}
 	}
-	if (lpm_init(lpm, memory_context)) {
+	if (lpm_wide_init(lpm, memory_context)) {
 		goto error_lpm;
 	}
 
@@ -111,7 +111,7 @@ collect_net6_range(
 		goto error_collector;
 	}
 
-	if (range_collector_collect(&collector, 8, lpm, ri)) {
+	if (range_collector_collect_wide(&collector, 8, lpm, ri)) {
 		goto error_collector;
 	}
 
@@ -252,7 +252,8 @@ merge_net6_range(
 	uint32_t *values_lo = ADDR_OF(&ri_lo->values);
 
 	struct value_registry net_registry;
-	value_registry_init(&net_registry, memory_context);
+	if (value_registry_init(&net_registry, memory_context))
+		goto error_registry;
 
 	for (const struct filter_rule **action_ptr = actions;
 	     action_ptr < actions + count;
@@ -275,7 +276,8 @@ merge_net6_range(
 			if (net_idx < net_registry.range_count)
 				continue;
 
-			value_registry_start(&net_registry);
+			if (value_registry_start(&net_registry))
+				goto error_net_registry;
 
 			uint8_t *from_hi;
 			uint8_t *mask_hi;
@@ -316,21 +318,22 @@ merge_net6_range(
 							    values_lo[idx_lo]
 						    )
 					    )) {
-						return -1;
+						goto error_net_registry;
 					}
 				}
 			}
 		}
 	}
 
-	value_registry_init(registry, memory_context);
+	if (value_registry_init(registry, memory_context))
+		goto error_net_registry;
 
 	for (const struct filter_rule **action_ptr = actions;
 	     action_ptr < actions + count;
 	     ++action_ptr) {
 		// A value range should be created even for empty rules
 		if (value_registry_start(registry))
-			return -1;
+			goto error_net_registry;
 
 		if (*action_ptr == NULL)
 			continue;
@@ -353,7 +356,7 @@ merge_net6_range(
 				if (value_registry_collect(
 					    registry, vls[idx]
 				    )) {
-					return -1;
+					goto error_net_registry;
 				}
 			}
 		}
@@ -365,6 +368,15 @@ merge_net6_range(
 	// FIXME: free temporary resources
 
 	return 0;
+
+error_net_registry:
+	value_registry_free(&net_registry);
+
+error_registry:
+	radix_free(&rdx);
+	value_table_free(table);
+
+	return -1;
 
 error_touch:
 	remap_table_free(&remap_table);
@@ -392,7 +404,6 @@ init_net6(
 		memory_balloc(memory_context, sizeof(struct net6_classifier));
 	if (net6 == NULL)
 		return -1;
-	SET_OFFSET_OF(data, net6);
 
 	struct range_index ri_hi;
 	if (collect_net6_range(
@@ -436,15 +447,16 @@ init_net6(
 	range_index_free(&ri_hi);
 	range_index_free(&ri_lo);
 
+	SET_OFFSET_OF(data, net6);
 	return 0;
 
 error_merge:
 	range_index_free(&ri_lo);
-	lpm_free(&net6->lo);
+	lpm_wide_free(&net6->lo);
 
 error_lo:
 	range_index_free(&ri_hi);
-	lpm_free(&net6->hi);
+	lpm_wide_free(&net6->hi);
 
 error_hi:
 	memory_bfree(memory_context, net6, sizeof(struct net6_classifier));
@@ -502,8 +514,8 @@ free_net6(void *data, struct memory_context *memory_context) {
 	struct net6_classifier *c = (struct net6_classifier *)data;
 	if (c == NULL)
 		return;
-	lpm_free(&c->lo);
-	lpm_free(&c->hi);
+	lpm_wide_free(&c->lo);
+	lpm_wide_free(&c->hi);
 	value_table_free(&c->comb);
 	memory_bfree(memory_context, c, sizeof(struct net6_classifier));
 }

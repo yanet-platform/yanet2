@@ -1,6 +1,8 @@
 #pragma once
 
 #include "filter/classifiers/net6.h"
+
+#include "lib/dataplane/packet/data.h"
 #include "lib/dataplane/packet/packet.h"
 
 #include "declare.h"
@@ -24,10 +26,10 @@ FILTER_ATTR_QUERY_FUNC(net6_dst)(
 			packets[idx]->network_header.offset
 		);
 
-		uint32_t hi = lpm8_lookup(
+		uint32_t hi = lpm_wide_8b_lookup(
 			&c->hi, (const uint8_t *)ipv6_hdr->dst_addr
 		);
-		uint32_t lo = lpm8_lookup(
+		uint32_t lo = lpm_wide_8b_lookup(
 			&c->lo, (const uint8_t *)ipv6_hdr->dst_addr + 8
 		);
 
@@ -49,10 +51,10 @@ FILTER_ATTR_QUERY_FUNC(net6_src)(
 			packets[idx]->network_header.offset
 		);
 
-		uint32_t hi = lpm8_lookup(
+		uint32_t hi = lpm_wide_8b_lookup(
 			&c->hi, (const uint8_t *)ipv6_hdr->src_addr
 		);
-		uint32_t lo = lpm8_lookup(
+		uint32_t lo = lpm_wide_8b_lookup(
 			&c->lo, (const uint8_t *)ipv6_hdr->src_addr + 8
 		);
 

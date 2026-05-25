@@ -155,7 +155,7 @@ main(int argc, char **argv) {
 	LOG(INFO, "building filter...");
 
 	// Build filter
-	if (build_filter(common, &mctx) < 0) {
+	if (build_filter(common, &mctx) != 0) {
 		LOG(ERROR, "failed to build filter: %s", strerror(errno));
 		return 1;
 	}
