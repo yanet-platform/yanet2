@@ -227,6 +227,35 @@ __ttlmap_bucket_count(size_t kv_entries) { // NOLINT
 		__result;                                                      \
 	})
 
+#define __TTLMAP_BUCKET_ITER_NEXT(                                             \
+	map_ptr, bucket_id, key_type, value_type, now, cb, data                \
+)                                                                              \
+	__extension__({                                                        \
+		int __delivered = 0;                                           \
+		void *__addr = __TTLMAP_BUCKET_FIND_WITH_ID(                   \
+			map_ptr, bucket_id, key_type, value_type               \
+		);                                                             \
+		__TTLMAP_BUCKET_DECLARE(key_type, value_type);                 \
+		__bucket_t *__bucket = (__bucket_t *)__addr;                   \
+		__ttlmap_lock(&__bucket->lock);                                \
+		__bucket_entry_t __entries_copy[__TTLMAP_BUCKET_ENTRIES];      \
+		memcpy(__entries_copy,                                         \
+		       __bucket->entries,                                      \
+		       sizeof(__entries_copy));                                \
+		__ttlmap_unlock(&__bucket->lock);                              \
+		for (size_t __i = 0; __i < __TTLMAP_BUCKET_ENTRIES; ++__i) {   \
+			if (__entries_copy[__i].deadline > (now)) {            \
+				__delivered = 1;                               \
+				if ((cb)(&__entries_copy[__i].key,             \
+					 &__entries_copy[__i].value,           \
+					 (data))) {                            \
+					break;                                 \
+				}                                              \
+			}                                                      \
+		}                                                              \
+		__delivered;                                                   \
+	})
+
 #define __TTLMAP_BUCKET_PREFETCH(bucket, entry, bucket_size, ...)              \
 	do {                                                                   \
 		__builtin_prefetch(&(bucket)->lock, ##__VA_ARGS__);            \

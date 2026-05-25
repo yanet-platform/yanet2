@@ -7,6 +7,7 @@ import (
 	"net/netip"
 	"slices"
 	"sort"
+	"time"
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/balancer2/bindings/go/cbalancer2"
@@ -51,7 +52,13 @@ func (m realID) String() string {
 type realSlot struct {
 	idx     int
 	enabled bool
-	weight  uint32
+	// weight is the configured/base runtime weight (set from
+	// RealConfig.Weight or RealUpdate.Weight). WLC refresh must not
+	// change it.
+	weight uint32
+	// effectiveWeight is the value pushed to the dataplane selector;
+	// WLC refresh may override it independently of the base weight.
+	effectiveWeight uint32
 }
 
 type vsSlot struct {
@@ -224,6 +231,7 @@ func (m *ModuleConfig) stageRealUpdates(
 		}
 		if update.Weight != nil {
 			rs.weight = *update.Weight
+			rs.effectiveWeight = *update.Weight
 		}
 	}
 	return staged, nil
@@ -248,7 +256,7 @@ func (m *ModuleConfig) commitRealUpdates(staged map[int]*vsUpdate) error {
 		}
 		weights := make([]uint32, len(info.reals))
 		for _, rs := range info.reals {
-			weights[rs.idx] = rs.weight
+			weights[rs.idx] = rs.effectiveWeight
 		}
 		if err := m.handle.UpdateVSReals(uint32(vsIdx), weights, states); err != nil {
 			return fmt.Errorf("vs[%d]: update reals: %w", vsIdx, err)
@@ -256,6 +264,7 @@ func (m *ModuleConfig) commitRealUpdates(staged map[int]*vsUpdate) error {
 		for k, rs := range info.reals {
 			index[k].enabled = rs.enabled
 			index[k].weight = rs.weight
+			index[k].effectiveWeight = rs.effectiveWeight
 		}
 	}
 	return nil
@@ -300,6 +309,8 @@ func (m *ModuleConfig) GetState(
 	dpConfig := m.agent.DPConfig()
 
 	matcher := newStateFilter(filter)
+	now := time.Now()
+	m.refreshWLC(now)
 
 	states := make([]*balancerpb.BalancerState, 0)
 	for position := range dpConfig.AllModulePositions("balancer2") {
@@ -311,6 +322,7 @@ func (m *ModuleConfig) GetState(
 		}
 
 		state, lookup := m.buildBaseState(&position, matcher)
+		m.applySessions(state, lookup, now)
 		counters := dpConfig.ModuleCounters(
 			position.Device,
 			position.Pipeline,

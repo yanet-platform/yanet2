@@ -142,6 +142,7 @@ func TestBasic(t *testing.T) {
 	}
 	te := setupTestEnv(t, config)
 	balancer := te.setup.balancer
+	sessions := te.setup.sessions
 	layers := te.packetGen.MakeTCPPacket(
 		"1::",
 		"2a02:6b8:0:3400:0:853a:0:3",
@@ -192,4 +193,10 @@ func TestBasic(t *testing.T) {
 	assert.Equal(t, uint64(1), state.Vs[0].Stats.CreatedSessions)
 	assert.Equal(t, uint64(2), state.Vs[0].AllowedSourcesStats[0].Passes)
 	assert.Equal(t, "123", state.Vs[0].AllowedSourcesStats[0].Tag)
+
+	count := 0
+	for range sessions.IterSessions(te.mock.CurrentTime()) {
+		count += 1
+	}
+	assert.Equal(t, 1, count)
 }

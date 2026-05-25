@@ -77,6 +77,7 @@ func SetupTest(config *TestConfig) (*TestSetup, error) {
 		mock:     mock,
 		agent:    agent,
 		balancer: module,
+		sessions: sessions,
 	}, nil
 }
 
@@ -154,6 +155,7 @@ func setupCp(agent *ffi.Agent) error {
 
 func (ctx *TestSetup) Free() {
 	ctx.balancer.Free()
+	ctx.sessions.Free()
 	ctx.agent.Close()
 	ctx.mock.Free()
 }

@@ -77,7 +77,7 @@ func prepareVSReals(handle *cbalancer2.Balancer, vsIdx uint32, slot *vsSlot) err
 	weights := make([]uint32, len(slot.reals))
 	for _, rs := range slot.reals {
 		states[rs.idx] = rs.enabled
-		weights[rs.idx] = rs.weight
+		weights[rs.idx] = rs.effectiveWeight
 	}
 	if err := handle.UpdateVSReals(vsIdx, weights, states); err != nil {
 		return fmt.Errorf("vs[%d]: update reals: %w", vsIdx, err)
@@ -110,10 +110,12 @@ func buildIndex(vs []*balancerpb.VsConfig, prev map[vsID]*vsSlot) (map[vsID]*vsS
 			}
 			enabled := false
 			weight := uint32(0)
+			effectiveWeight := uint32(0)
 			if prevSlot != nil {
 				if prevRealSlot, exists := prevSlot.reals[rk]; exists {
 					enabled = prevRealSlot.enabled
 					weight = prevRealSlot.weight
+					effectiveWeight = prevRealSlot.effectiveWeight
 				}
 			}
 			if r.Enabled != nil {
@@ -121,11 +123,13 @@ func buildIndex(vs []*balancerpb.VsConfig, prev map[vsID]*vsSlot) (map[vsID]*vsS
 			}
 			if r.Weight != nil {
 				weight = *r.Weight
+				effectiveWeight = *r.Weight
 			}
 			slot.reals[rk] = &realSlot{
-				idx:     rIdx,
-				enabled: enabled,
-				weight:  weight,
+				idx:             rIdx,
+				enabled:         enabled,
+				weight:          weight,
+				effectiveWeight: effectiveWeight,
 			}
 		}
 		out[key] = slot

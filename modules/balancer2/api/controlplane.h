@@ -1,8 +1,11 @@
 #pragma once
 
+#include <sys/types.h>
+
 #include "common/network.h"
+#include "common/ttlmap/detail/ttlmap.h"
+#include "filter/rule.h"
 #include "lib/errors/errors.h"
-#include "lib/filter/rule.h"
 #include "modules/balancer2/dataplane/types/session.h"
 
 struct agent;
@@ -160,26 +163,6 @@ balancer_vs_update_reals(
 );
 
 /*
- * Updates per-real enabled flags for a VS. The balancer handle must
- * be non-NULL. The states array must have length equal to the number
- * of reals configured for the VS and be indexed in the same order
- * as they were passed at VS creation.
- *
- * Reals start disabled after balancer_create. Until this function is
- * called with a state of true for a given real, that real does not
- * receive traffic.
- *
- * Returns 0 on success, -1 on error.
- */
-int
-balancer_vs_update_real_states(
-	struct balancer_handle *balancer,
-	uint32_t vs_idx,
-	const bool *states,
-	yanet_error **error
-);
-
-/*
  * A session table holds active session entries — one per tracked
  * flow — mapping a connection key to its selected real. The table
  * has a fixed capacity, set at creation time, that bounds the number
@@ -201,6 +184,31 @@ struct balancer_session_table;
 struct balancer_session_table *
 balancer_create_session_table(
 	struct agent *agent, size_t capacity, yanet_error **error
+);
+
+struct balancer_session_table_iter;
+
+struct balancer_session_table_iter *
+balancer_session_table_create_iter(
+	struct balancer_session_table *session_table
+);
+
+enum { balancer_session_table_iter_bucket_size = TTLMAP_BUCKET_SIZE };
+
+// Returns the number of entries copied into session_ids/session_states, or -1
+// when iteration is exhausted. 
+// The arrays must hold at least balancer_session_table_iter_bucket_size entries.
+ssize_t
+balancer_session_table_iter_next_bucket(
+	struct balancer_session_table_iter *iter,
+	uint32_t timestamp,
+	struct balancer_session_id *session_ids,
+	struct balancer_session_state *session_states
+);
+
+void
+balancer_session_table_iter_free(
+	struct balancer_session_table_iter *iter
 );
 
 /*

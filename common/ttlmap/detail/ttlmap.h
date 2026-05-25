@@ -313,3 +313,5 @@ static inline size_t
 ttlmap_memory_usage(struct ttlmap *map) {
 	return map->mctx.balloc_size - map->mctx.bfree_size;
 }
+
+#define TTLMAP_BUCKET_SIZE __TTLMAP_BUCKET_ENTRIES

@@ -2,6 +2,9 @@ package balancer2
 
 import (
 	"strings"
+	"time"
+
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/balancer2/bindings/go/cbalancer2"
@@ -50,7 +53,8 @@ func (m *ModuleConfig) buildBaseState(
 			Function: &position.Function,
 			Chain:    &position.Chain,
 		},
-		Addr: m.cfg.Addr,
+		Addr:                m.cfg.Addr,
+		LastPacketTimestamp: timestamppb.New(time.Unix(0, 0)),
 	}
 	lookup := newStateLookup()
 	if m.cfg.Vs == nil {
@@ -79,7 +83,8 @@ func (m *ModuleConfig) buildVsState(
 			Flags:     vs.Flags,
 			Peers:     vs.Peers,
 		},
-		Reals: make([]*balancerpb.RealState, 0, len(vs.Reals)),
+		Reals:               make([]*balancerpb.RealState, 0, len(vs.Reals)),
+		LastPacketTimestamp: timestamppb.New(time.Unix(0, 0)),
 	}
 
 	vid, vidErr := makeVsID(vs.Id)
@@ -98,14 +103,15 @@ func (m *ModuleConfig) buildVsState(
 			continue
 		}
 		rs := &balancerpb.RealState{
-			Config: r,
+			Config:              r,
+			LastPacketTimestamp: timestamppb.New(time.Unix(0, 0)),
 		}
 		rid, ridErr := makeRealID(r.Id)
 		if ridErr == nil {
 			if slot != nil {
 				if rSlot, ok := slot.reals[rid]; ok {
 					rs.Enabled = rSlot.enabled
-					rs.EffectiveWeight = uint64(rSlot.weight)
+					rs.EffectiveWeight = uint64(rSlot.effectiveWeight)
 				}
 			}
 			if reals != nil {
@@ -115,6 +121,65 @@ func (m *ModuleConfig) buildVsState(
 		vsState.Reals = append(vsState.Reals, rs)
 	}
 	return vsState
+}
+
+// sessionVsKey returns the legacy vsID lookup key for a session, or an empty
+// string if the session's transport is unsupported.
+func sessionVsKey(id cbalancer2.SessionID) string {
+	proto, err := toPBTransport(id.Transport)
+	if err != nil {
+		return ""
+	}
+	return vsID{addr: id.VIP, port: id.VSPort, proto: proto}.String()
+}
+
+// sessionRealKey returns the legacy realID lookup key for a session state.
+func sessionRealKey(state cbalancer2.SessionState) string {
+	return realID{addr: state.RealIP}.String()
+}
+
+// applySessions scans live sessions yielded by IterSessions(now) once and
+// folds their stats into the already-built BalancerState. For each session
+// whose VS and real are present in lookup, ActiveSessions is incremented at
+// real, VS, and balancer level, and LastPacketTimestamp is advanced to the
+// maximum live session timestamp at each level. Sessions for unknown VSes,
+// unknown reals, or unsupported transports are silently skipped.
+func (m *ModuleConfig) applySessions(
+	state *balancerpb.BalancerState,
+	lookup stateLookup,
+	now time.Time,
+) {
+	balancerMax := state.LastPacketTimestamp.AsTime()
+	for id, sessionState := range m.sessions.IterSessions(now) {
+		vsKey := sessionVsKey(id)
+		if vsKey == "" {
+			continue
+		}
+		entry, ok := lookup.vs[vsKey]
+		if !ok {
+			continue
+		}
+		realState, ok := entry.reals[sessionRealKey(sessionState)]
+		if !ok {
+			continue
+		}
+
+		realState.ActiveSessions++
+		entry.state.ActiveSessions++
+		state.ActiveSessions++
+
+		ts := sessionState.LastPacketTimestamp
+		if ts.After(realState.LastPacketTimestamp.AsTime()) {
+			realState.LastPacketTimestamp = timestamppb.New(ts)
+		}
+		if ts.After(entry.state.LastPacketTimestamp.AsTime()) {
+			entry.state.LastPacketTimestamp = timestamppb.New(ts)
+		}
+		if ts.After(balancerMax) {
+			balancerMax = ts
+			state.LastPacketTimestamp = timestamppb.New(ts)
+		}
+	}
 }
 
 // applyCounter dispatches a single dataplane counter to its destination on

@@ -13,8 +13,10 @@ import "C"
 import (
 	"errors"
 	"fmt"
+	"iter"
 	"net/netip"
 	"runtime"
+	"time"
 	"unsafe"
 
 	"github.com/yanet-platform/yanet2/bindings/go/cerrors"
@@ -464,4 +466,87 @@ func netWithMaskToCNet(n xnetip.NetWithMask) (C.struct_net, error) {
 	copy(layout[0:16], v6[:])
 	copy(layout[16:32], n.Mask)
 	return cNet, nil
+}
+
+type IPFamily int
+
+const (
+	IPFamilyIPv4 IPFamily = C.ip_family_ip4
+	IPFamilyIPv6 IPFamily = C.ip_family_ip6
+)
+
+type SessionID struct {
+	ClientPort uint16
+	VSPort     uint16
+	VIP        netip.Addr
+	ClientIP   netip.Addr
+	Transport  TransportProto
+}
+
+type SessionState struct {
+	LastPacketTimestamp time.Time
+	CreateTimestamp     time.Time
+	Timeout             time.Duration
+	RealIP              netip.Addr
+}
+
+const sessionTableIterBucketSize = C.balancer_session_table_iter_bucket_size
+
+func cNetAddrToNetip(addr C.struct_net_addr, family C.enum_ip_family) netip.Addr {
+	if family == C.ip_family_ip4 {
+		return netip.AddrFrom4(*(*[4]byte)(unsafe.Pointer(&addr)))
+	}
+
+	return netip.AddrFrom16(*(*[16]byte)(unsafe.Pointer(&addr)))
+}
+
+func sessionIDFromC(id C.struct_balancer_session_id, family C.enum_ip_family) SessionID {
+	return SessionID{
+		ClientPort: uint16(id.client_port),
+		VSPort:     uint16(id.vs_port),
+		VIP:        cNetAddrToNetip(id.vip, family),
+		ClientIP:   cNetAddrToNetip(id.client_ip, family),
+		Transport:  TransportProto(id.transport),
+	}
+}
+
+func sessionStateFromC(state C.struct_balancer_session_state) SessionState {
+	return SessionState{
+		LastPacketTimestamp: time.Unix(int64(state.last_packet_timestamp), 0),
+		CreateTimestamp:     time.Unix(int64(state.create_timestamp), 0),
+		Timeout:             time.Duration(state.timeout) * time.Second,
+		RealIP:              cNetAddrToNetip(state.real_ip, state.ip_family),
+	}
+}
+
+func (m *SessionTable) Iter(timestamp time.Time) iter.Seq2[SessionID, SessionState] {
+	return func(yield func(SessionID, SessionState) bool) {
+		cIter := C.balancer_session_table_create_iter(m.ptr)
+		if cIter == nil {
+			return
+		}
+		defer C.balancer_session_table_iter_free(cIter)
+
+		cTimestamp := C.uint32_t(timestamp.Unix())
+		var ids [sessionTableIterBucketSize]C.struct_balancer_session_id
+		var states [sessionTableIterBucketSize]C.struct_balancer_session_state
+
+		for {
+			count := C.balancer_session_table_iter_next_bucket(
+				cIter,
+				cTimestamp,
+				&ids[0],
+				&states[0],
+			)
+			if count < 0 {
+				return
+			}
+
+			for idx := range int(count) {
+				if !yield(sessionIDFromC(ids[idx], states[idx].ip_family), sessionStateFromC(states[idx])) {
+					return
+				}
+			}
+		}
+	}
 }

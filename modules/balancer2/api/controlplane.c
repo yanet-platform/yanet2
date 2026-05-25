@@ -545,8 +545,9 @@ err_acl:
 }
 
 static void
-free_vs(struct memory_context *mctx, struct virtual_service *vs, size_t workers
-) {
+free_vs(struct memory_context *mctx,
+	struct virtual_service *vs,
+	size_t workers) {
 	free_vs_reals(mctx, vs);
 	free_vs_acl(mctx, vs);
 	free_real_selector(mctx, vs, workers);
@@ -654,7 +655,8 @@ build_vs_array(
 	for (size_t idx = 0; idx < count; ++idx) {
 		const struct balancer_vs_config *vs_config = &configs[idx];
 		if (validate_vs(vs_config, error) != 0 ||
-		    init_vs(mctx, registry, &vs[idx], vs_config, workers, error
+		    init_vs(
+			    mctx, registry, &vs[idx], vs_config, workers, error
 		    ) != 0) {
 			yanet_error_add(error, "vs[%zu]", idx);
 			for (size_t j = 0; j < idx; ++j) {
@@ -1401,4 +1403,94 @@ balancer_free_session_table_chain(
 	struct memory_context *mctx = &agent->memory_context;
 	rcu_free(&chain->rcu, mctx);
 	memory_bfree(mctx, chain, sizeof(*chain));
+}
+
+struct balancer_session_table_iter {
+	struct ttlmap_bucket_iter ttlmap_iter;
+	bool done;
+};
+
+struct balancer_session_table_iter_bucket_data {
+	struct balancer_session_id *session_ids;
+	struct balancer_session_state *session_states;
+	size_t count;
+};
+
+static int
+balancer_session_table_iter_bucket_callback(
+	struct balancer_session_id *session_id,
+	struct balancer_session_state *session_state,
+	void *data
+) {
+	struct balancer_session_table_iter_bucket_data *bucket_data = data;
+	if (bucket_data->count >= balancer_session_table_iter_bucket_size) {
+		return 1;
+	}
+	bucket_data->session_ids[bucket_data->count] = *session_id;
+	bucket_data->session_states[bucket_data->count] = *session_state;
+	++bucket_data->count;
+	return 0;
+}
+
+struct balancer_session_table_iter *
+balancer_session_table_create_iter(
+	struct balancer_session_table *session_table
+) {
+	if (session_table == NULL) {
+		return NULL;
+	}
+
+	struct balancer_session_table_iter *iter = calloc(1, sizeof(*iter));
+	if (iter == NULL) {
+		return NULL;
+	}
+
+	ttlmap_bucket_iter_init(&iter->ttlmap_iter, &session_table->map);
+	return iter;
+}
+
+ssize_t
+balancer_session_table_iter_next_bucket(
+	struct balancer_session_table_iter *iter,
+	uint32_t timestamp,
+	struct balancer_session_id *session_ids,
+	struct balancer_session_state *session_states
+) {
+	if (iter == NULL || session_ids == NULL || session_states == NULL ||
+	    iter->done) {
+		return -1;
+	}
+
+	memset(session_ids,
+	       0,
+	       sizeof(*session_ids) * balancer_session_table_iter_bucket_size);
+	memset(session_states,
+	       0,
+	       sizeof(*session_states) *
+		       balancer_session_table_iter_bucket_size);
+
+	struct balancer_session_table_iter_bucket_data data = {
+		.session_ids = session_ids,
+		.session_states = session_states,
+		.count = 0
+	};
+	int res = TTLMAP_ITER_NEXT(
+		&iter->ttlmap_iter,
+		struct balancer_session_id,
+		struct balancer_session_state,
+		timestamp,
+		balancer_session_table_iter_bucket_callback,
+		&data
+	);
+	if (res == 0) {
+		iter->done = true;
+		return -1;
+	}
+
+	return (ssize_t)data.count;
+}
+
+void
+balancer_session_table_iter_free(struct balancer_session_table_iter *iter) {
+	free(iter);
 }

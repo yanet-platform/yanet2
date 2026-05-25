@@ -4,12 +4,17 @@ import (
 	"context"
 	"sort"
 	"sync"
+	"time"
 
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/durationpb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	"github.com/yanet-platform/yanet2/modules/balancer2/bindings/go/cbalancer2"
 	"github.com/yanet-platform/yanet2/modules/balancer2/controlplane/balancerpb"
 )
 
@@ -329,4 +334,76 @@ func (m *Service) GetState(ctx context.Context, req *balancerpb.GetStateRequest)
 	return &balancerpb.GetStateResponse{
 		States: states,
 	}, nil
+}
+
+func (m *Service) ListSessions(
+	req *balancerpb.ListSessionsRequest,
+	stream grpc.ServerStreamingServer[balancerpb.Session],
+) error {
+	name := req.GetSessionsStateName()
+	if name == "" {
+		return errSessionsStateNameRequired
+	}
+
+	m.mu.Lock()
+	sessions, ok := m.sessionsStates[name]
+	m.mu.Unlock()
+
+	if !ok {
+		return status.Errorf(codes.NotFound, "sessions state %q not found", name)
+	}
+
+	filter := newStateFilter(req.GetFilter())
+	for id, state := range sessions.IterSessions(time.Now()) {
+		session, err := makeSession(id, state)
+		if err != nil {
+			return status.Errorf(codes.Internal, "failed to convert session: %v", err)
+		}
+		if !filter.matchVs(session.VsId) || !filter.matchReal(session.RealId) {
+			continue
+		}
+		if err := stream.Context().Err(); err != nil {
+			return err
+		}
+		if err := stream.Send(session); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func makeSession(id cbalancer2.SessionID, state cbalancer2.SessionState) (*balancerpb.Session, error) {
+	proto, err := toPBTransport(id.Transport)
+	if err != nil {
+		return nil, err
+	}
+
+	return &balancerpb.Session{
+		ClientAddr: id.ClientIP.AsSlice(),
+		ClientPort: uint32(id.ClientPort),
+		VsId: &balancerpb.VsIdentifier{
+			Addr:  id.VIP.AsSlice(),
+			Port:  uint32(id.VSPort),
+			Proto: proto,
+		},
+		RealId: &balancerpb.RelativeRealIdentifier{
+			Ip:   state.RealIP.AsSlice(),
+			Port: 0,
+		},
+		CreateTimestamp:     timestamppb.New(state.CreateTimestamp),
+		LastPacketTimestamp: timestamppb.New(state.LastPacketTimestamp),
+		Timeout:             durationpb.New(state.Timeout),
+	}, nil
+}
+
+func toPBTransport(proto cbalancer2.TransportProto) (balancerpb.TransportProto, error) {
+	switch proto {
+	case cbalancer2.TransportTCP:
+		return balancerpb.TransportProto_TCP, nil
+	case cbalancer2.TransportUDP:
+		return balancerpb.TransportProto_UDP, nil
+	default:
+		return 0, status.Errorf(codes.Internal, "unsupported transport: %v", proto)
+	}
 }
