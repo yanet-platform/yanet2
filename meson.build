@@ -145,6 +145,7 @@ subdir('filter')
 module_test_dirs = []
 subdir('modules')
 subdir('devices')
+subdir('lib/dataplane_ut/tests')
 subdir('dataplane')
 
 if not dataplane_only
