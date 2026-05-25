@@ -1,3 +1,4 @@
+// Package balancer2 is the controlplane for balancer module
 package balancer2
 
 import (
