@@ -104,6 +104,25 @@ func (m *runnerFakeRPC) callSequence() []string {
 	return out
 }
 
+func (m *runnerFakeRPC) UpdateConfig(
+	_ context.Context,
+	req *balancerpb.UpdateConfigRequest,
+) (*balancerpb.UpdateConfigResponse, error) {
+	if err := m.recordCall(RPCUpdateConfig); err != nil {
+		return nil, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.state.vs = map[VsKey]*runnerFakeVS{}
+	m.state.order = nil
+	if req.GetVs() != nil {
+		for _, vs := range req.GetVs().GetVs() {
+			m.applyVsConfigLocked(vs)
+		}
+	}
+	return &balancerpb.UpdateConfigResponse{}, nil
+}
+
 func (m *runnerFakeRPC) UpdateVS(
 	_ context.Context,
 	req *balancerpb.UpdateVSRequest,

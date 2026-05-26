@@ -63,10 +63,13 @@ func (m *fakeBalancerClient) UpdateSessionsState(
 }
 
 func (m *fakeBalancerClient) UpdateConfig(
-	_ context.Context,
-	_ *balancerpb.UpdateConfigRequest,
+	ctx context.Context,
+	in *balancerpb.UpdateConfigRequest,
 	_ ...grpc.CallOption,
 ) (*balancerpb.UpdateConfigResponse, error) {
+	if err := m.record(ctx, RPCUpdateConfig, in); err != nil {
+		return nil, err
+	}
 	return &balancerpb.UpdateConfigResponse{}, nil
 }
 
@@ -251,6 +254,14 @@ func TestNewRPCClientValidatesArguments(t *testing.T) {
 // fakeBalancerClient so those tests do not depend on RPCClient internals.
 type recordingRPC struct {
 	calls []string
+}
+
+func (m *recordingRPC) UpdateConfig(
+	_ context.Context,
+	_ *balancerpb.UpdateConfigRequest,
+) (*balancerpb.UpdateConfigResponse, error) {
+	m.calls = append(m.calls, RPCUpdateConfig)
+	return &balancerpb.UpdateConfigResponse{}, nil
 }
 
 func (m *recordingRPC) UpdateVS(

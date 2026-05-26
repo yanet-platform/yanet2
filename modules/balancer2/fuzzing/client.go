@@ -26,6 +26,7 @@ import (
 // collide. The string values match the protobuf service method names
 // one-to-one.
 const (
+	RPCUpdateConfig = "UpdateConfig"
 	RPCUpdateVS    = "UpdateVS"
 	RPCDeleteVS    = "DeleteVS"
 	RPCUpdateReals = "UpdateReals"
@@ -38,6 +39,10 @@ const (
 // every implementation must record exactly one latency sample per call
 // under the matching RPC* constant.
 type BalancerRPC interface {
+	UpdateConfig(
+		ctx context.Context,
+		req *balancerpb.UpdateConfigRequest,
+	) (*balancerpb.UpdateConfigResponse, error)
 	UpdateVS(
 		ctx context.Context,
 		req *balancerpb.UpdateVSRequest,
@@ -138,6 +143,20 @@ func (m *RPCClient) callContext(parent context.Context) (context.Context, contex
 // m.now(). It is called from a deferred wrapper on every RPC method.
 func (m *RPCClient) record(op string, start time.Time, err error) {
 	m.stats.Record(op, m.now().Sub(start), err)
+}
+
+// UpdateConfig invokes Balancer.UpdateConfig with a derived deadline and
+// records the call latency under RPCUpdateConfig.
+func (m *RPCClient) UpdateConfig(
+	ctx context.Context,
+	req *balancerpb.UpdateConfigRequest,
+) (*balancerpb.UpdateConfigResponse, error) {
+	callCtx, cancel := m.callContext(ctx)
+	defer cancel()
+	start := m.now()
+	resp, err := m.client.UpdateConfig(callCtx, req)
+	m.record(RPCUpdateConfig, start, err)
+	return resp, err
 }
 
 // UpdateVS invokes Balancer.UpdateVS with a derived deadline and

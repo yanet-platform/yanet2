@@ -18,6 +18,8 @@ import (
 	"flag"
 	"fmt"
 	"io"
+
+	"github.com/yanet-platform/yanet2/modules/balancer2/controlplane/balancerpb"
 )
 
 // dialRPCClient is the dial seam used by RunMain. Tests replace it with
@@ -133,6 +135,11 @@ func RunMain(args []string, stdout, stderr io.Writer) int {
 		}
 	}()
 
+	if err := resetConfigFromCorpus(context.Background(), cfg, corpus, rpc); err != nil {
+		fmt.Fprintf(stderr, "balancer2-fuzzer: bootstrap config: %v\n", err)
+		return 1
+	}
+
 	runner, err := newRunner(cfg, corpus, rpc, stats)
 	if err != nil {
 		fmt.Fprintf(stderr, "balancer2-fuzzer: build runner: %v\n", err)
@@ -144,4 +151,21 @@ func RunMain(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+// resetConfigFromCorpus makes the target config deterministic before fuzzing:
+// it replaces VSes for cfg.ConfigName with the corpus VS list via UpdateConfig.
+func resetConfigFromCorpus(
+	ctx context.Context,
+	cfg *RuntimeConfig,
+	corpus *Corpus,
+	rpc BalancerRPC,
+) error {
+	if _, err := rpc.UpdateConfig(ctx, &balancerpb.UpdateConfigRequest{
+		ConfigName: cfg.ConfigName,
+		Vs:         corpus.ToVsConfigList(),
+	}); err != nil {
+		return fmt.Errorf("seed corpus vs: %w", err)
+	}
+	return nil
 }
