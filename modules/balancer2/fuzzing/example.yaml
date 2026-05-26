@@ -1,0 +1,20 @@
+# Example sidecar runtime configuration for the balancer2 fuzzing CLI.
+#
+# Run with:
+#   balancer2-fuzzer -config modules/balancer2/fuzzing/example.yaml
+#
+# All durations use Go time.ParseDuration syntax (e.g. "10ms", "30s", "5s").
+# A zero or missing seed causes the loader to generate a non-zero seed and
+# log it for replay.
+
+endpoint: "127.0.0.1:8080"
+corpus_paths:
+  - "modules/balancer2/fuzzing/taxi.services.conf"
+config_name: "balancer2-fuzz"
+sessions_state_name: "balancer2-fuzz-sessions"
+sessions_capacity: 1048576
+operation_interval: "10ms"
+update_vs_every: 10
+stats_interval: "30s"
+request_timeout: "5s"
+seed: 12345
