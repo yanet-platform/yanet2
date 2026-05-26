@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "common/flatmap.h"
 #include "filter/filter.h"
 
 #include "selector.h"
@@ -18,6 +19,8 @@ enum vs_flags {
 struct virtual_service {
 	struct real *reals;
 	uint32_t reals_count;
+
+	struct flatmap reals_map;
 
 	uint64_t counter_id;
 

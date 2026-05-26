@@ -515,7 +515,7 @@ func sessionStateFromC(state C.struct_balancer_session_state) SessionState {
 		LastPacketTimestamp: time.Unix(int64(state.last_packet_timestamp), 0),
 		CreateTimestamp:     time.Unix(int64(state.create_timestamp), 0),
 		Timeout:             time.Duration(state.timeout) * time.Second,
-		RealIP:              cNetAddrToNetip(state.real_ip, state.ip_family),
+		RealIP:              cNetAddrToNetip(state.real_ip.addr, state.real_ip.family),
 	}
 }
 
@@ -543,7 +543,7 @@ func (m *SessionTable) Iter(timestamp time.Time) iter.Seq2[SessionID, SessionSta
 			}
 
 			for idx := range int(count) {
-				if !yield(sessionIDFromC(ids[idx], states[idx].ip_family), sessionStateFromC(states[idx])) {
+				if !yield(sessionIDFromC(ids[idx], states[idx].real_ip.family), sessionStateFromC(states[idx])) {
 					return
 				}
 			}

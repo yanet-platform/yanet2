@@ -6,6 +6,7 @@
 #include <rte_tcp.h>
 
 #include "common/big_array.h"
+#include "common/flatmap.h"
 #include "common/memory_address.h"
 #include "common/network.h"
 #include "common/ttlmap/detail/lock.h"
@@ -73,31 +74,18 @@ create_session_state(
 ) {
 	session_state->create_timestamp = now;
 	session_state->last_packet_timestamp = now;
-	session_state->real_ip = real->addr;
-	session_state->ip_family =
+	session_state->real_ip.addr = real->addr;
+	session_state->real_ip.family =
 		(real_flags(real) & real_ip6 ? ip_family_ip6 : ip_family_ip4);
 	session_state->timeout = session_timeout;
 }
 
 static struct real *
-vs_lookup_real(
-	struct virtual_service *vs, uint8_t *dst, enum ip_family ip_family
-) {
-	struct real *reals = ADDR_OF(&vs->reals);
-	uint8_t ip6_flag = real_ip6;
-	uint32_t addr_len = NET6_LEN;
-	if (ip_family == ip_family_ip4) {
-		ip6_flag = 0;
-		addr_len = NET4_LEN;
-	}
-	for (size_t i = 0; i < vs->reals_count; ++i) {
-		struct real *real = &reals[i];
-		if ((real_flags(real) & ip6_flag) == ip6_flag &&
-		    memcmp(&real->addr, dst, addr_len) == 0) {
-			return real;
-		}
-	}
-	return NULL;
+vs_lookup_real(struct virtual_service *vs, struct real_ip *real_ip) {
+	void *id = flat_map_lookup(
+		&vs->reals_map, real_ip, sizeof(*real_ip), sizeof(uint32_t)
+	);
+	return id == NULL ? NULL : ADDR_OF(&vs->reals) + *(uint32_t *)id;
 }
 
 /*
@@ -114,9 +102,7 @@ try_reuse_session_real(
 	struct balancer_vs_stats *vs_stats = pkt_ctx->matched_vs_stats;
 
 	/* TODO: lookup real with hashtable. */
-	struct real *real = vs_lookup_real(
-		vs, (uint8_t *)&session_state->real_ip, session_state->ip_family
-	);
+	struct real *real = vs_lookup_real(vs, &session_state->real_ip);
 	if (unlikely(real == NULL)) {
 		return NULL;
 	}

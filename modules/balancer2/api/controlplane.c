@@ -1,5 +1,6 @@
 #include "controlplane.h"
 
+#include "common/flatmap.h"
 #include "common/memory.h"
 #include "common/memory_address.h"
 #include "common/network.h"
@@ -8,6 +9,7 @@
 #include "common/ttlmap/ttlmap.h"
 
 #include "controlplane/config/zone.h"
+#include "dataplane/types/real.h"
 #include "errors/errors.h"
 #include "filter/compiler.h"
 #include "filter/rule.h"
@@ -296,6 +298,68 @@ build_real(struct real *real, const struct balancer_real_config *config) {
 }
 
 static int
+build_vs_reals_map(
+	struct memory_context *mctx,
+	struct virtual_service *vs,
+	const struct balancer_vs_config *config,
+	yanet_error **error
+) {
+	struct real_ip *real_keys =
+		malloc(sizeof(*real_keys) * config->real_count);
+	if (real_keys == NULL && config->real_count > 0) {
+		yanet_error_add(error, "%s", heap_alloc_failed);
+		return -1;
+	}
+	for (size_t idx = 0; idx < config->real_count; ++idx) {
+		struct real_ip *real_key = real_keys + idx;
+		struct balancer_real_config *real_config = config->reals + idx;
+		memset(real_key, 0, sizeof(*real_key));
+		switch (real_config->ip_family) {
+		case ip_family_ip4:
+			real_key->addr.v4 = real_config->dst.v4;
+			real_key->family = real_config->ip_family;
+			break;
+		case ip_family_ip6:
+			real_key->addr.v6 = real_config->dst.v6;
+			real_key->family = real_config->ip_family;
+			break;
+		}
+	}
+
+	uint32_t *ids = malloc(sizeof(*ids) * config->real_count);
+	if (ids == NULL && config->real_count > 0) {
+		yanet_error_add(error, "%s", heap_alloc_failed);
+		free(real_keys);
+		return -1;
+	}
+	for (size_t idx = 0; idx < config->real_count; ++idx) {
+		ids[idx] = idx;
+	}
+
+	size_t capacity = config->real_count * 8;
+	if (capacity == 0) {
+		capacity = 1;
+	}
+	int ret = flat_map_build(
+		&vs->reals_map,
+		mctx,
+		capacity,
+		config->real_count,
+		real_keys,
+		sizeof(*real_keys),
+		ids,
+		sizeof(*ids)
+	);
+	if (ret != 0) {
+		yanet_error_add(error, "%s", agent_alloc_failed);
+	}
+
+	free(real_keys);
+	free(ids);
+	return ret == 0 ? 0 : -1;
+}
+
+static int
 build_vs_reals(
 	struct memory_context *mctx,
 	struct virtual_service *vs,
@@ -308,8 +372,16 @@ build_vs_reals(
 		yanet_error_add(error, "%s", agent_alloc_failed);
 		return -1;
 	}
+
 	for (size_t idx = 0; idx < config->real_count; ++idx) {
 		build_real(reals + idx, config->reals + idx);
+	}
+
+	if (build_vs_reals_map(mctx, vs, config, error) != 0) {
+		memory_bfree(
+			mctx, reals, sizeof(struct real) * config->real_count
+		);
+		return -1;
 	}
 
 	vs->reals_count = config->real_count;
@@ -469,6 +541,9 @@ register_vs_counters(
 
 static void
 free_vs_reals(struct memory_context *mctx, struct virtual_service *vs) {
+	flat_map_free(
+		&vs->reals_map, mctx, sizeof(struct real_ip), sizeof(uint32_t)
+	);
 	struct real *reals = ADDR_OF(&vs->reals);
 	memory_bfree(mctx, reals, sizeof(struct real) * vs->reals_count);
 	SET_OFFSET_OF(&vs->reals, NULL);
@@ -1137,7 +1212,7 @@ balancer_vs_update_reals(
 	struct real *reals = ADDR_OF(&vs->reals);
 
 	uint32_t *ring_weights = malloc(reals_count * sizeof(*ring_weights));
-	if (ring_weights == NULL) {
+	if (ring_weights == NULL && reals_count > 0) {
 		yanet_error_add(error, "%s", heap_alloc_failed);
 		return -1;
 	}

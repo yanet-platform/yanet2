@@ -1,28 +1,23 @@
 #pragma once
 
-#include "common/network.h"
+#include "real.h"
 
+#include <stdbool.h>
 #include <stdint.h>
-
-enum balancer_session_flags {
-	balancer_session_tcp = 1 << 0,
-	balancer_session_ip6 = 1 << 1,
-};
 
 struct balancer_session_id {
 	uint16_t client_port;
 	uint16_t vs_port;
-	uint8_t vip[NET6_LEN];
-	uint8_t client_ip[NET6_LEN];
-	uint8_t flags;
+	struct net_addr vip;
+	struct net_addr client_ip;
+	enum transport_proto transport;
 };
 
 struct balancer_session_state {
 	uint32_t last_packet_timestamp;
 	uint32_t create_timestamp;
 	uint32_t timeout;
-	uint8_t real_ip[NET6_LEN];
-	uint8_t flags;
+	struct real_ip real_ip;
 };
 
 struct balancer_session_timeouts {
