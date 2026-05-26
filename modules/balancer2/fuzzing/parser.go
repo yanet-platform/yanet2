@@ -135,12 +135,14 @@ func (m *VirtualServer) ToVsConfig() *balancerpb.VsConfig {
 	reals := make([]*balancerpb.RealConfig, 0, len(m.Reals))
 	for _, real := range m.Reals {
 		weight := real.Weight
+		enabled := true
 		rc := &balancerpb.RealConfig{
 			Id: &balancerpb.RelativeRealIdentifier{
 				Ip:   keyIPBytes(real.Key.IP),
 				Port: uint32(real.Key.Port),
 			},
-			Weight: &weight,
+			Weight:  &weight,
+			Enabled: &enabled,
 		}
 		rc.Src = sourceForReal(real)
 		reals = append(reals, rc)
