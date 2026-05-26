@@ -36,8 +36,8 @@ reconcile:
 # Re-applied every reconcile pass (idempotent). One operator manages exactly
 # one function with one chain and one route module.
 function:
-  name: "fn:route"
-  chain: "default"
+  name: "phy"
+  chain: "chain0"
   weight: 1
   module: "route0"
 
@@ -45,16 +45,18 @@ function:
 static:
   # Static routes seeded into the operator RIB (module above).
   routes:
-    - prefix: 2a02:6b8:c00::/40
-      nexthop_addr: fe80::1
-    - prefix: 2a02:6b8:fc00::/40
-      nexthop_addr: fe80::1
+    - prefix: ::/0
+      nexthop_addr: 2a02:6b8:0:320::1ab:a1a
+    - prefix: 0.0.0.0/0
+      nexthop_addr: 5.255.198.70
+  
   # Static neighbour entries seeded into operator-managed tables.
   neighbours: []
 
 # Mapping from logical link names (as carried in routes) to OS
 # interface names used by the netlink monitor.
-link_map: {}
+link_map:
+  kni0: 5e:00.0
 
 # RIB session TTL — stale FeedRIB sessions are garbage-collected
 # after this duration once superseded by a newer session id.

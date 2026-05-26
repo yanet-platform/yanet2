@@ -352,15 +352,13 @@ cp_function_registry_upsert(
 		for (uint64_t idx = 0;
 		     old_function != NULL && idx < old_function->chain_count;
 		     ++idx) {
-			if (!strncmp(
+			struct cp_chain *candidate = ADDR_OF(&old_function->chains[idx].cp_chain);
+			if (candidate != NULL && !strncmp(
 				    new_chain->name,
-				    ADDR_OF(&old_function->chains[idx].cp_chain)
-					    ->name,
+				    candidate->name,
 				    CP_CHAIN_NAME_LEN
 			    )) {
-				old_chain = ADDR_OF(
-					&old_function->chains[idx].cp_chain
-				);
+				old_chain = candidate;
 				break;
 			}
 		}
