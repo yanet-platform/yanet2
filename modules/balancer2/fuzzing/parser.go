@@ -23,6 +23,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/yanet-platform/yanet2/common/filterpb"
 	"github.com/yanet-platform/yanet2/modules/balancer2/controlplane/balancerpb"
 )
 
@@ -52,6 +53,13 @@ type RealServer struct {
 	AddrText string
 	Weight   uint32
 	Line     int
+	// Bindto and BindtoMask are the source address and mask parsed from the
+	// "bindto" directive inside the health-check block (HTTP_GET/SSL_GET).
+	// They use the canonical 4-byte (IPv4) or 16-byte (IPv6) form so that
+	// filterpb.IPNet construction is family-consistent. Both are nil when
+	// the corpus omits the directive.
+	Bindto     []byte
+	BindtoMask []byte
 }
 
 // VirtualServer is a parsed virtual_server entry. Reals preserves the
@@ -127,13 +135,20 @@ func (m *VirtualServer) ToVsConfig() *balancerpb.VsConfig {
 	reals := make([]*balancerpb.RealConfig, 0, len(m.Reals))
 	for _, real := range m.Reals {
 		weight := real.Weight
-		reals = append(reals, &balancerpb.RealConfig{
+		rc := &balancerpb.RealConfig{
 			Id: &balancerpb.RelativeRealIdentifier{
 				Ip:   append([]byte(nil), real.Key.IP[:]...),
 				Port: uint32(real.Key.Port),
 			},
 			Weight: &weight,
-		})
+		}
+		if real.Bindto != nil {
+			rc.Src = &filterpb.IPNet{
+				Addr: append([]byte(nil), real.Bindto...),
+				Mask: append([]byte(nil), real.BindtoMask...),
+			}
+		}
+		reals = append(reals, rc)
 	}
 	return &balancerpb.VsConfig{
 		Id: &balancerpb.VsIdentifier{
@@ -313,6 +328,10 @@ func (m *parser) consumeInReal(tokens []string) error {
 // block (HTTP_GET, SSL_GET, etc.). splitStatements guarantees that '{'
 // and '}' arrive as their own single-token statements, so a "FOO {"
 // statement increases depth and the matching "}" pops it.
+//
+// While at depth 1 (directly inside the first skipped block), the
+// "bindto" directive is captured because it carries the tunnel source
+// address needed for RealConfig.Src.
 func (m *parser) consumeInSkip(tokens []string) error {
 	last := tokens[len(tokens)-1]
 	switch last {
@@ -324,7 +343,38 @@ func (m *parser) consumeInSkip(tokens []string) error {
 			return m.errf("unbalanced '}' inside skipped block")
 		}
 	}
+	// Capture the first "bindto IP" seen at depth 1. After the switch
+	// above, m.skipper reflects the current depth: if it is still 1
+	// (neither a "{" nor a "}" changed it away from 1), and the
+	// directive is "bindto", record the tunnel source on the current real.
+	if m.skipper == 1 && len(tokens) == 2 && tokens[0] == "bindto" &&
+		m.currRS != nil && m.currRS.Bindto == nil {
+		if bindto, mask, ok := parseBindto(tokens[1]); ok {
+			m.currRS.Bindto = bindto
+			m.currRS.BindtoMask = mask
+		}
+	}
 	return nil
+}
+
+// parseBindto converts a keepalived "bindto" IP literal into the canonical
+// addr/mask byte slices used by filterpb.IPNet. IPv4 addresses are returned
+// as 4-byte slices with a /32 mask; IPv6 addresses as 16-byte slices with a
+// /128 mask. Returns (nil, nil, false) when the literal is invalid.
+func parseBindto(token string) (ip, mask []byte, ok bool) {
+	parsed := net.ParseIP(token)
+	if parsed == nil {
+		return nil, nil, false
+	}
+	if v4 := parsed.To4(); v4 != nil {
+		return []byte(v4), net.IPMask{0xff, 0xff, 0xff, 0xff}, true
+	}
+	v6 := parsed.To16()
+	fullMask := make(net.IPMask, 16)
+	for i := range fullMask {
+		fullMask[i] = 0xff
+	}
+	return []byte(v6), []byte(fullMask), true
 }
 
 func (m *parser) handleProtocol(tokens []string) error {

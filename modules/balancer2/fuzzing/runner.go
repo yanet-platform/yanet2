@@ -389,11 +389,18 @@ func (m *Runner) toVsConfig(p *UpdateVSPayload) *balancerpb.VsConfig {
 	for _, r := range p.Reals {
 		weight := r.Weight
 		enabled := r.Enabled
-		reals = append(reals, &balancerpb.RealConfig{
+		rc := &balancerpb.RealConfig{
 			Id:      realKeyToIdentifier(r.Key),
 			Weight:  &weight,
 			Enabled: &enabled,
-		})
+		}
+		if orig := m.model.OriginalReal(p.Key, r.Key); orig != nil && orig.Bindto != nil {
+			rc.Src = &filterpb.IPNet{
+				Addr: append([]byte(nil), orig.Bindto...),
+				Mask: append([]byte(nil), orig.BindtoMask...),
+			}
+		}
+		reals = append(reals, rc)
 	}
 	return &balancerpb.VsConfig{
 		Id:             id,
