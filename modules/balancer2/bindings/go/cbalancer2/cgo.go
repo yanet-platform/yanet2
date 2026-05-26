@@ -11,6 +11,7 @@ package cbalancer2
 import "C"
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"iter"
@@ -500,10 +501,17 @@ func cNetAddrToNetip(addr C.struct_net_addr, family C.enum_ip_family) netip.Addr
 	return netip.AddrFrom16(*(*[16]byte)(unsafe.Pointer(&addr)))
 }
 
-func sessionIDFromC(id C.struct_balancer_session_id, family C.enum_ip_family) SessionID {
+func cNetworkPortToHost(port C.uint16_t) uint16 {
+	// The C field bytes are stored in network order; decode the bytes instead of
+	// swapping the already-loaded scalar so this stays correct on any host endian.
+	return binary.BigEndian.Uint16((*[2]byte)(unsafe.Pointer(&port))[:])
+}
+
+func sessionIDFromC(id C.struct_balancer_session_id) SessionID {
+	family := id.ip_family
 	return SessionID{
-		ClientPort: uint16(id.client_port),
-		VSPort:     uint16(id.vs_port),
+		ClientPort: cNetworkPortToHost(id.client_port),
+		VSPort:     cNetworkPortToHost(id.vs_port),
 		VIP:        cNetAddrToNetip(id.vip, family),
 		ClientIP:   cNetAddrToNetip(id.client_ip, family),
 		Transport:  TransportProto(id.transport),
@@ -543,7 +551,7 @@ func (m *SessionTable) Iter(timestamp time.Time) iter.Seq2[SessionID, SessionSta
 			}
 
 			for idx := range int(count) {
-				if !yield(sessionIDFromC(ids[idx], states[idx].real_ip.family), sessionStateFromC(states[idx])) {
+				if !yield(sessionIDFromC(ids[idx]), sessionStateFromC(states[idx])) {
 					return
 				}
 			}

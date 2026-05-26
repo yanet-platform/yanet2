@@ -1,16 +1,20 @@
 #pragma once
 
+#include "common/network.h"
 #include "real.h"
 
 #include <stdbool.h>
 #include <stdint.h>
 
+/* IP addresses and ports are stored in network byte order. */
+/* The whole struct is used as a TTL ap key, so zero it before filling. */
 struct balancer_session_id {
 	uint16_t client_port;
 	uint16_t vs_port;
 	struct net_addr vip;
 	struct net_addr client_ip;
 	enum transport_proto transport;
+	enum ip_family ip_family;
 };
 
 struct balancer_session_state {

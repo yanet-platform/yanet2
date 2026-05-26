@@ -191,6 +191,8 @@ func TestBasic(t *testing.T) {
 	state := states[0]
 	assert.Equal(t, uint64(1), state.Vs[0].Reals[0].Stats.Packets)
 	assert.Equal(t, uint64(1), state.Vs[0].Stats.CreatedSessions)
+	assert.Equal(t, uint64(1), state.Vs[0].Reals[0].ActiveSessions)
+	assert.Equal(t, uint64(1), state.Vs[0].ActiveSessions)
 	assert.Equal(t, uint64(2), state.Vs[0].AllowedSourcesStats[0].Passes)
 	assert.Equal(t, "123", state.Vs[0].AllowedSourcesStats[0].Tag)
 

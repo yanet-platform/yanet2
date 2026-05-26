@@ -135,6 +135,7 @@ fill_sessions(
 		struct session *session = &sessions[pkt_idx];
 
 		memset(&session->id, 0, sizeof(struct balancer_session_id));
+		session->id.ip_family = is_ipv6 ? ip_family_ip6 : ip_family_ip4;
 
 		extract_network(packet, session, is_ipv6);
 		extract_transport(packet, session, timeouts);
