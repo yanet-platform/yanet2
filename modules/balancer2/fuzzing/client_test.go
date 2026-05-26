@@ -2,7 +2,6 @@ package fuzzing
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 
@@ -56,24 +55,18 @@ func (m *fakeBalancerClient) record(ctx context.Context, op string, req any) err
 }
 
 func (m *fakeBalancerClient) UpdateSessionsState(
-	ctx context.Context,
-	in *balancerpb.UpdateSessionsStateRequest,
+	_ context.Context,
+	_ *balancerpb.UpdateSessionsStateRequest,
 	_ ...grpc.CallOption,
 ) (*balancerpb.UpdateSessionsStateResponse, error) {
-	if err := m.record(ctx, RPCUpdateSessionsState, in); err != nil {
-		return nil, err
-	}
 	return &balancerpb.UpdateSessionsStateResponse{}, nil
 }
 
 func (m *fakeBalancerClient) UpdateConfig(
-	ctx context.Context,
-	in *balancerpb.UpdateConfigRequest,
+	_ context.Context,
+	_ *balancerpb.UpdateConfigRequest,
 	_ ...grpc.CallOption,
 ) (*balancerpb.UpdateConfigResponse, error) {
-	if err := m.record(ctx, RPCUpdateConfig, in); err != nil {
-		return nil, err
-	}
 	return &balancerpb.UpdateConfigResponse{}, nil
 }
 
@@ -143,23 +136,7 @@ func TestRPCClientLifecycle(t *testing.T) {
 	ctx := context.Background()
 	before := time.Now()
 
-	_, err := client.UpdateSessionsState(ctx, &balancerpb.UpdateSessionsStateRequest{
-		SessionsStateName: "sst",
-		Capacity:          1024,
-	})
-	require.NoError(t, err)
-
-	sessionsName := "sst"
-	_, err = client.UpdateConfig(ctx, &balancerpb.UpdateConfigRequest{
-		ConfigName:        "cfg",
-		SessionsStateName: &sessionsName,
-		Timeouts:          DefaultSessionsTimeouts(),
-		Wlc:               DefaultWlcConfig(),
-		Addr:              DefaultAddrConfig(),
-	})
-	require.NoError(t, err)
-
-	_, err = client.UpdateVS(ctx, &balancerpb.UpdateVSRequest{ConfigName: "cfg"})
+	_, err := client.UpdateVS(ctx, &balancerpb.UpdateVSRequest{ConfigName: "cfg"})
 	require.NoError(t, err)
 
 	_, err = client.DeleteVS(ctx, &balancerpb.DeleteVSRequest{ConfigName: "cfg"})
@@ -174,10 +151,8 @@ func TestRPCClientLifecycle(t *testing.T) {
 	// Each call must have produced exactly one fake invocation with a
 	// deadline drawn from the per-RPC timeout. We allow some slack on
 	// the upper bound to absorb scheduler jitter on busy CI machines.
-	require.Len(t, fake.calls, 6)
+	require.Len(t, fake.calls, 4)
 	wantOps := []string{
-		RPCUpdateSessionsState,
-		RPCUpdateConfig,
 		RPCUpdateVS,
 		RPCDeleteVS,
 		RPCUpdateReals,
@@ -233,9 +208,9 @@ func TestRPCClientRecordsErrorSamples(t *testing.T) {
 	assert.Equal(t, uint64(1), reports[0].Errors)
 }
 
-// TestRPCClientRequestTimeoutAppliesDeadline pins the relationship
-// between RuntimeConfig.RequestTimeout and the deadline observed by the
-// downstream balancer client.
+// TestRPCClientRequestTimeoutAppliesDeadline pins the relationship between
+// RuntimeConfig.RequestTimeout and the deadline observed by the downstream
+// balancer client.
 func TestRPCClientRequestTimeoutAppliesDeadline(t *testing.T) {
 	fake := newFakeBalancerClient()
 	stats := NewLatencyStats()
@@ -243,9 +218,7 @@ func TestRPCClientRequestTimeoutAppliesDeadline(t *testing.T) {
 	require.NoError(t, err)
 
 	before := time.Now()
-	_, err = client.UpdateConfig(context.Background(), &balancerpb.UpdateConfigRequest{
-		ConfigName: "cfg",
-	})
+	_, err = client.UpdateVS(context.Background(), &balancerpb.UpdateVSRequest{ConfigName: "cfg"})
 	require.NoError(t, err)
 
 	require.Len(t, fake.calls, 1)
@@ -273,43 +246,11 @@ func TestNewRPCClientValidatesArguments(t *testing.T) {
 	require.Error(t, err)
 }
 
-// recordingRPC is a hand-rolled BalancerRPC fake used by the Startup
-// tests. It is deliberately distinct from fakeBalancerClient so the
-// Startup tests do not depend on RPCClient's deadline plumbing.
+// recordingRPC is a hand-rolled BalancerRPC fake used by tests that wire
+// through RunMain or Runner with seams. It is deliberately distinct from
+// fakeBalancerClient so those tests do not depend on RPCClient internals.
 type recordingRPC struct {
-	calls         []string
-	sessionsReqs  []*balancerpb.UpdateSessionsStateRequest
-	configReqs    []*balancerpb.UpdateConfigRequest
-	sessionsErr   error
-	configErr     error
-	sessionsCalls int
-	configCalls   int
-}
-
-func (m *recordingRPC) UpdateSessionsState(
-	_ context.Context,
-	req *balancerpb.UpdateSessionsStateRequest,
-) (*balancerpb.UpdateSessionsStateResponse, error) {
-	m.sessionsCalls++
-	m.calls = append(m.calls, RPCUpdateSessionsState)
-	m.sessionsReqs = append(m.sessionsReqs, req)
-	if m.sessionsErr != nil {
-		return nil, m.sessionsErr
-	}
-	return &balancerpb.UpdateSessionsStateResponse{}, nil
-}
-
-func (m *recordingRPC) UpdateConfig(
-	_ context.Context,
-	req *balancerpb.UpdateConfigRequest,
-) (*balancerpb.UpdateConfigResponse, error) {
-	m.configCalls++
-	m.calls = append(m.calls, RPCUpdateConfig)
-	m.configReqs = append(m.configReqs, req)
-	if m.configErr != nil {
-		return nil, m.configErr
-	}
-	return &balancerpb.UpdateConfigResponse{}, nil
+	calls []string
 }
 
 func (m *recordingRPC) UpdateVS(
@@ -342,112 +283,4 @@ func (m *recordingRPC) GetState(
 ) (*balancerpb.GetStateResponse, error) {
 	m.calls = append(m.calls, RPCGetState)
 	return &balancerpb.GetStateResponse{}, nil
-}
-
-func newStartupConfig() *RuntimeConfig {
-	return &RuntimeConfig{
-		Endpoint:          "127.0.0.1:0",
-		CorpusPath:        "corpus",
-		ConfigName:        "fuzz-cfg",
-		OperationInterval: 10 * time.Millisecond,
-		UpdateVsEvery:     5,
-		StatsInterval:     5 * time.Second,
-		RequestTimeout:    250 * time.Millisecond,
-		Seed:              1,
-	}
-}
-
-func newStartupVsList() *balancerpb.VsConfigList {
-	return &balancerpb.VsConfigList{
-		Vs: []*balancerpb.VsConfig{
-			{
-				Id: &balancerpb.VsIdentifier{
-					Addr:  make([]byte, 16),
-					Port:  80,
-					Proto: balancerpb.TransportProto_TCP,
-				},
-				Scheduler: balancerpb.VsScheduler_WRR,
-			},
-		},
-	}
-}
-
-func TestStartupCallsSessionsBeforeConfig(t *testing.T) {
-	rpc := &recordingRPC{}
-	cfg := newStartupConfig()
-	vs := newStartupVsList()
-
-	require.NoError(t, Startup(context.Background(), rpc, cfg, vs))
-
-	require.Equal(t, []string{RPCUpdateConfig}, rpc.calls,
-		"sessions state must be created before the named config")
-
-	require.Len(t, rpc.configReqs, 1)
-	configReq := rpc.configReqs[0]
-	assert.Equal(t, cfg.ConfigName, configReq.ConfigName)
-	assert.Same(t, vs, configReq.Vs, "initial VS list must be forwarded verbatim")
-
-	require.NotNil(t, configReq.Timeouts)
-	assert.Equal(t, uint32(60), configReq.Timeouts.TcpSynAck)
-	assert.Equal(t, uint32(30), configReq.Timeouts.TcpSyn)
-	assert.Equal(t, uint32(30), configReq.Timeouts.TcpFin)
-	assert.Equal(t, uint32(10), configReq.Timeouts.Tcp)
-	assert.Equal(t, uint32(20), configReq.Timeouts.Udp)
-
-	require.NotNil(t, configReq.Wlc)
-	assert.Equal(t, uint32(10), configReq.Wlc.Power)
-	assert.Equal(t, uint32(10), configReq.Wlc.MaxWeight)
-
-	require.NotNil(t, configReq.Addr)
-	assert.Empty(t, configReq.Addr.SourceIp4)
-	assert.Empty(t, configReq.Addr.SourceIp6)
-}
-
-// TestStartupFailsOnSessionRPCError asserts the negative paths: any
-// non-AlreadyExists failure aborts startup and prevents UpdateConfig
-// from running. Three representative codes are covered to make it
-// obvious that AlreadyExists is the only tolerated code.
-func TestStartupFailsOnSessionRPCError(t *testing.T) {
-	codesUnderTest := []codes.Code{
-		codes.Internal,
-		codes.Unavailable,
-		codes.InvalidArgument,
-	}
-
-	for _, code := range codesUnderTest {
-		t.Run(code.String(), func(t *testing.T) {
-			rpc := &recordingRPC{
-				sessionsErr: status.Error(code, "sessions state setup failed"),
-			}
-			cfg := newStartupConfig()
-
-			err := Startup(context.Background(), rpc, cfg, newStartupVsList())
-			assert.Equal(t, code, status.Code(errors.Unwrap(err)),
-				"underlying status code must be preserved through the wrap")
-			assert.Equal(t, 1, rpc.sessionsCalls)
-			assert.Equal(t, 0, rpc.configCalls,
-				"UpdateConfig must not run when UpdateSessionsState fails")
-		})
-	}
-}
-
-// TestStartupPropagatesConfigError confirms a failed UpdateConfig
-// surfaces to the caller (so the runner can abort before mutating).
-func TestStartupPropagatesConfigError(t *testing.T) {
-	rpc := &recordingRPC{
-		configErr: status.Error(codes.Internal, "config setup failed"),
-	}
-	cfg := newStartupConfig()
-
-	err := Startup(context.Background(), rpc, cfg, newStartupVsList())
-	require.Error(t, err)
-	assert.Equal(t, codes.Internal, status.Code(errors.Unwrap(err)))
-}
-
-func TestStartupValidatesArguments(t *testing.T) {
-	cfg := newStartupConfig()
-	vs := newStartupVsList()
-
-	require.Error(t, Startup(context.Background(), nil, cfg, vs))
-	require.Error(t, Startup(context.Background(), &recordingRPC{}, nil, vs))
 }

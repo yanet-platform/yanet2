@@ -145,10 +145,10 @@ func TestFormatDeleteVS(t *testing.T) {
 }
 
 func TestFormatUpdateReals(t *testing.T) {
-	s := FormatUpdateReals(23, "10.0.0.1:80/TCP", 4, 5*time.Millisecond)
+	s := FormatUpdateReals(23, 3, 4, 5*time.Millisecond)
 	assert.Contains(t, s, "op=UpdateReals")
 	assert.Contains(t, s, "num=23")
-	assert.Contains(t, s, "vs=10.0.0.1:80/TCP")
+	assert.Contains(t, s, "vs_count=3")
 	assert.Contains(t, s, "real_updates=4")
 }
 

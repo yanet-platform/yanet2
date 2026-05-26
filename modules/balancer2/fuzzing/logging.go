@@ -31,12 +31,11 @@ func FormatDeleteVS(opNum uint64, vsKey string, vsCount int, dur time.Duration) 
 	)
 }
 
-// FormatUpdateReals summarises an UpdateReals call. realUpdates is the count
-// of real-server updates batched into this RPC.
-func FormatUpdateReals(opNum uint64, vsKey string, realUpdates int, dur time.Duration) string {
+// FormatUpdateReals summarises an UpdateReals call.
+func FormatUpdateReals(opNum uint64, vsCount, realUpdates int, dur time.Duration) string {
 	return fmt.Sprintf(
-		"op=UpdateReals num=%d vs=%s real_updates=%d dur=%s",
-		opNum, vsKey, realUpdates, dur,
+		"op=UpdateReals num=%d vs_count=%d real_updates=%d dur=%s",
+		opNum, vsCount, realUpdates, dur,
 	)
 }
 
@@ -50,9 +49,8 @@ func FormatGetState(opNum uint64, vsCount, realCount int, dur time.Duration) str
 	)
 }
 
-// FormatInitCall summarises a startup-time RPC such as
-// UpdateSessionsState/UpdateConfig. The seed is included so each replay log
-// is self-describing.
+// FormatInitCall summarises an init-time event. The seed is included so each
+// replay log is self-describing.
 func FormatInitCall(rpc string, seed int64, dur time.Duration) string {
 	return fmt.Sprintf(
 		"op=Init rpc=%s seed=%d dur=%s",

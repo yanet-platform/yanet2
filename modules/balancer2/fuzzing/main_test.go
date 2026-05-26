@@ -62,11 +62,8 @@ func writeConfigFile(t *testing.T) string {
 	corpusPath := filepath.Join(corpusFixtureDir(t), "taxi.services.conf")
 	body := strings.Join([]string{
 		`endpoint: "127.0.0.1:0"`,
-		`corpus_paths:`,
-		`  - "` + corpusPath + `"`,
+		`corpus_path: "` + corpusPath + `"`,
 		`config_name: "balancer2-fuzz"`,
-		`sessions_state_name: "balancer2-fuzz-sessions"`,
-		`sessions_capacity: 1024`,
 		`operation_interval: "1ms"`,
 		`update_vs_every: 1`,
 		`stats_interval: "1s"`,
@@ -158,11 +155,8 @@ func TestMainInvalidConfig(t *testing.T) {
 	bad := filepath.Join(dir, "bad.yaml")
 	// Endpoint deliberately omitted to trip Validate().
 	body := strings.Join([]string{
-		`corpus_paths:`,
-		`  - "/dev/null"`,
+		`corpus_path: "/dev/null"`,
 		`config_name: "x"`,
-		`sessions_state_name: "y"`,
-		`sessions_capacity: 1`,
 		`operation_interval: "1ms"`,
 		`update_vs_every: 1`,
 		`stats_interval: "1s"`,

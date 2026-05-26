@@ -92,11 +92,18 @@ type DeleteVSPayload struct {
 	MinActive   int
 }
 
-// UpdateRealsPayload contains the real-state diffs to apply against a
-// single active VS. Updates is non-empty.
-type UpdateRealsPayload struct {
+// UpdateRealsBatch contains per-VS real-state diffs for one entry in an
+// UpdateReals operation.
+type UpdateRealsBatch struct {
 	Key     VsKey
 	Updates []RealUpdate
+}
+
+// UpdateRealsPayload contains batched real-state diffs that are sent in
+// one RPC. Batches may be empty when there are no active VS with active
+// reals.
+type UpdateRealsPayload struct {
+	Batches []UpdateRealsBatch
 }
 
 // schedulerChoices lists the schedulers the generator rotates among. All
@@ -207,51 +214,71 @@ func (m *OperationGenerator) generateUpdateVS(opNum uint64) Operation {
 	}
 }
 
-// generateUpdateReals picks an active VS at random and emits enabled and
-// weight diffs against a random non-empty subset of its current reals.
-// The generator skips emitting an UpdateReals when the active set is
-// empty; that path is unreachable as long as MinActive >= 1, which the
-// parser guarantees for any non-empty corpus.
+// generateUpdateReals emits one operation that may update multiple VSes in
+// one batch request. If there are at least two usable active VSes, at
+// least two are included. If there is one usable VS, a one-batch update is
+// emitted. If there are none, an empty batch set is emitted.
 func (m *OperationGenerator) generateUpdateReals(opNum uint64) Operation {
-	order := m.model.ActiveOrder()
-	if len(order) == 0 {
-		// Defensive fallback: emit an empty-update operation against a
-		// zero VsKey. The runner treats len(Updates)==0 as a no-op.
-		return Operation{Type: OpUpdateReals, OpNum: opNum, UpdateReals: &UpdateRealsPayload{}}
-	}
-	key := order[m.rng.Intn(len(order))]
-	vs := m.model.ActiveVS(key)
-	reals := vs.Reals()
-	if len(reals) == 0 {
-		return Operation{Type: OpUpdateReals, OpNum: opNum, UpdateReals: &UpdateRealsPayload{Key: key}}
+	usable := make([]VsKey, 0, len(m.model.ActiveOrder()))
+	for _, key := range m.model.ActiveOrder() {
+		vs := m.model.ActiveVS(key)
+		if vs == nil || len(vs.Reals()) == 0 {
+			continue
+		}
+		usable = append(usable, key)
 	}
 
-	// Touch between 1 and len(reals) reals.
-	count := 1 + m.rng.Intn(len(reals))
-	picks := m.pickRealSubset(reals, count)
-
-	updates := make([]RealUpdate, 0, len(picks))
-	for _, rk := range picks {
-		upd := RealUpdate{Key: rk}
-		// Each pick mutates Enabled, Weight, or both. Always emit at
-		// least one field so the update is observable.
-		mode := m.rng.Intn(3)
-		if mode == 0 || mode == 2 {
-			enabled := m.rng.Intn(2) == 0
-			upd.Enabled = &enabled
+	if len(usable) == 0 {
+		return Operation{
+			Type:        OpUpdateReals,
+			OpNum:       opNum,
+			UpdateReals: &UpdateRealsPayload{},
 		}
-		if mode == 1 || mode == 2 {
-			w := uint32(1 + m.rng.Intn(10))
-			upd.Weight = &w
-		}
-		updates = append(updates, upd)
 	}
+
+	batchCount := 0
+	switch len(usable) {
+	case 1:
+		batchCount = 1
+	default:
+		batchCount = 2 + m.rng.Intn(len(usable)-1)
+	}
+
+	selectedVS := m.pickVSSubset(usable, batchCount)
+	batches := make([]UpdateRealsBatch, 0, len(selectedVS))
+	for _, key := range selectedVS {
+		vs := m.model.ActiveVS(key)
+		reals := vs.Reals()
+		count := 1 + m.rng.Intn(len(reals))
+		picks := m.pickRealSubset(reals, count)
+
+		updates := make([]RealUpdate, 0, len(picks))
+		for _, rk := range picks {
+			upd := RealUpdate{Key: rk}
+			// Each pick mutates Enabled, Weight, or both. Always emit at
+			// least one field so the update is observable.
+			mode := m.rng.Intn(3)
+			if mode == 0 || mode == 2 {
+				enabled := m.rng.Intn(2) == 0
+				upd.Enabled = &enabled
+			}
+			if mode == 1 || mode == 2 {
+				w := uint32(1 + m.rng.Intn(10))
+				upd.Weight = &w
+			}
+			updates = append(updates, upd)
+		}
+		batches = append(batches, UpdateRealsBatch{
+			Key:     key,
+			Updates: updates,
+		})
+	}
+
 	return Operation{
 		Type:  OpUpdateReals,
 		OpNum: opNum,
 		UpdateReals: &UpdateRealsPayload{
-			Key:     key,
-			Updates: updates,
+			Batches: batches,
 		},
 	}
 }
@@ -345,6 +372,31 @@ func (m *OperationGenerator) pickRealSubset(src []RealKey, n int) []RealKey {
 	return out
 }
 
+// pickVSSubset returns a deterministic subset of size n from src while
+// preserving src order in the output.
+func (m *OperationGenerator) pickVSSubset(src []VsKey, n int) []VsKey {
+	if n >= len(src) {
+		out := make([]VsKey, len(src))
+		copy(out, src)
+		return out
+	}
+	indices := make([]int, len(src))
+	for idx := range indices {
+		indices[idx] = idx
+	}
+	for idx := 0; idx < n; idx++ {
+		j := idx + m.rng.Intn(len(indices)-idx)
+		indices[idx], indices[j] = indices[j], indices[idx]
+	}
+	chosen := indices[:n]
+	sort.Ints(chosen)
+	out := make([]VsKey, 0, n)
+	for _, ci := range chosen {
+		out = append(out, src[ci])
+	}
+	return out
+}
+
 // Apply commits a successful operation to the model. The runner calls
 // this only after the corresponding RPC and GetState validation succeed,
 // so the model never drifts on failure. Apply is a no-op for
@@ -411,23 +463,25 @@ func (m *Model) applyUpdateReals(p *UpdateRealsPayload) error {
 	if p == nil {
 		return fmt.Errorf("apply update_reals: nil payload")
 	}
-	vs := m.ActiveVS(p.Key)
-	if vs == nil {
-		return fmt.Errorf("apply update_reals: VS %v is not active", p.Key)
-	}
-	for _, u := range p.Updates {
-		real := vs.realsByKey[u.Key]
-		if real == nil {
-			return fmt.Errorf("apply update_reals: real %v is not in the active subset for VS %v", u.Key, p.Key)
+	for _, batch := range p.Batches {
+		vs := m.ActiveVS(batch.Key)
+		if vs == nil {
+			continue
 		}
-		if u.Enabled != nil {
-			real.Enabled = *u.Enabled
-		}
-		if u.Weight != nil {
-			if *u.Weight < 1 || *u.Weight > 10 {
-				return fmt.Errorf("apply update_reals: weight %d out of range 1..10", *u.Weight)
+		for _, u := range batch.Updates {
+			real := vs.realsByKey[u.Key]
+			if real == nil {
+				continue
 			}
-			real.Weight = *u.Weight
+			if u.Enabled != nil {
+				real.Enabled = *u.Enabled
+			}
+			if u.Weight != nil {
+				if *u.Weight < 1 || *u.Weight > 10 {
+					return fmt.Errorf("apply update_reals: weight %d out of range 1..10", *u.Weight)
+				}
+				real.Weight = *u.Weight
+			}
 		}
 	}
 	return nil

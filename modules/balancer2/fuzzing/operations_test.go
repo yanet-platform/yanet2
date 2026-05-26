@@ -87,8 +87,7 @@ func TestOperationGenerator(t *testing.T) {
 		case OpUpdateReals:
 			require.NotNil(t, opA.UpdateReals)
 			require.NotNil(t, opB.UpdateReals)
-			assert.Equal(t, opA.UpdateReals.Key, opB.UpdateReals.Key, "op %d update_reals key", opNum)
-			assert.Equal(t, len(opA.UpdateReals.Updates), len(opB.UpdateReals.Updates), "op %d update count", opNum)
+			assert.Equal(t, opA.UpdateReals, opB.UpdateReals, "op %d update_reals payload", opNum)
 		}
 
 		require.NoError(t, mA.Apply(opA))
@@ -200,18 +199,26 @@ func TestOperationGeneratorBounds(t *testing.T) {
 		case OpUpdateReals:
 			require.NotNil(t, op.UpdateReals)
 			p := op.UpdateReals
-			vs := model.ActiveVS(p.Key)
-			require.NotNil(t, vs, "op %d UpdateReals targets inactive VS %v", opNum, p.Key)
-			assert.NotEmpty(t, p.Updates, "op %d UpdateReals must carry updates", opNum)
-			for _, u := range p.Updates {
-				assert.True(t, vs.HasReal(u.Key),
-					"op %d updates real %v not in active subset for VS %v", opNum, u.Key, p.Key)
-				if u.Weight != nil {
-					assert.GreaterOrEqual(t, *u.Weight, uint32(1))
-					assert.LessOrEqual(t, *u.Weight, uint32(10))
+			if len(p.Batches) == 0 {
+				break
+			}
+			seenVS := map[VsKey]bool{}
+			for _, batch := range p.Batches {
+				require.False(t, seenVS[batch.Key], "op %d duplicate VS batch", opNum)
+				seenVS[batch.Key] = true
+				vs := model.ActiveVS(batch.Key)
+				require.NotNil(t, vs, "op %d UpdateReals targets inactive VS %v", opNum, batch.Key)
+				assert.NotEmpty(t, batch.Updates, "op %d UpdateReals batch must carry updates", opNum)
+				for _, u := range batch.Updates {
+					assert.True(t, vs.HasReal(u.Key),
+						"op %d updates real %v not in active subset for VS %v", opNum, u.Key, batch.Key)
+					if u.Weight != nil {
+						assert.GreaterOrEqual(t, *u.Weight, uint32(1))
+						assert.LessOrEqual(t, *u.Weight, uint32(10))
+					}
+					assert.True(t, u.Enabled != nil || u.Weight != nil,
+						"op %d update emits no observable change", opNum)
 				}
-				assert.True(t, u.Enabled != nil || u.Weight != nil,
-					"op %d update emits no observable change", opNum)
 			}
 		}
 
@@ -243,6 +250,23 @@ func TestOperationGeneratorBounds(t *testing.T) {
 		}
 	}
 
+}
+
+func TestOperationGeneratorUpdateRealsCoversMultipleVS(t *testing.T) {
+	model := newModelFromText(t, genCorpusText(6, 4))
+	gen := NewOperationGenerator(model, 10, 12345)
+
+	op := gen.Generate(1)
+	require.Equal(t, OpUpdateReals, op.Type)
+	require.NotNil(t, op.UpdateReals)
+	require.GreaterOrEqual(t, len(op.UpdateReals.Batches), 2)
+
+	seen := map[VsKey]bool{}
+	for _, batch := range op.UpdateReals.Batches {
+		require.NotEmpty(t, batch.Updates)
+		seen[batch.Key] = true
+	}
+	assert.GreaterOrEqual(t, len(seen), 2)
 }
 
 // TestOperationGeneratorLowerBoundNoop forces the active set to its
@@ -348,10 +372,12 @@ func TestModelInitialWeightsUnclamped(t *testing.T) {
 			}
 		}
 		if op.Type == OpUpdateReals {
-			for _, u := range op.UpdateReals.Updates {
-				if u.Weight != nil {
-					assert.GreaterOrEqual(t, *u.Weight, uint32(1), "generated UpdateReals weight under 1")
-					assert.LessOrEqual(t, *u.Weight, uint32(10), "generated UpdateReals weight over 10")
+			for _, batch := range op.UpdateReals.Batches {
+				for _, u := range batch.Updates {
+					if u.Weight != nil {
+						assert.GreaterOrEqual(t, *u.Weight, uint32(1), "generated UpdateReals weight under 1")
+						assert.LessOrEqual(t, *u.Weight, uint32(10), "generated UpdateReals weight over 10")
+					}
 				}
 			}
 		}

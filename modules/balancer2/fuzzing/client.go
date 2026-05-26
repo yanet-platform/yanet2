@@ -3,9 +3,8 @@
 // decoupled from the generated gRPC client so that tests can substitute a
 // recording fake; RPCClient is the production implementation that wraps
 // balancerpb.BalancerClient and records a latency sample per call. The
-// Startup helper performs the documented init sequence: ensure the
-// sessions state exists, then create the named config with the
-// fuzzer-default timeouts and WLC settings.
+// The package no longer performs startup config/session mutation RPCs:
+// fuzzing assumes the target config already exists.
 
 package fuzzing
 
@@ -27,12 +26,10 @@ import (
 // collide. The string values match the protobuf service method names
 // one-to-one.
 const (
-	RPCUpdateSessionsState = "UpdateSessionsState"
-	RPCUpdateConfig        = "UpdateConfig"
-	RPCUpdateVS            = "UpdateVS"
-	RPCDeleteVS            = "DeleteVS"
-	RPCUpdateReals         = "UpdateReals"
-	RPCGetState            = "GetState"
+	RPCUpdateVS    = "UpdateVS"
+	RPCDeleteVS    = "DeleteVS"
+	RPCUpdateReals = "UpdateReals"
+	RPCGetState    = "GetState"
 )
 
 // BalancerRPC is the narrow surface the fuzzing runner needs from the
@@ -41,14 +38,6 @@ const (
 // every implementation must record exactly one latency sample per call
 // under the matching RPC* constant.
 type BalancerRPC interface {
-	UpdateSessionsState(
-		ctx context.Context,
-		req *balancerpb.UpdateSessionsStateRequest,
-	) (*balancerpb.UpdateSessionsStateResponse, error)
-	UpdateConfig(
-		ctx context.Context,
-		req *balancerpb.UpdateConfigRequest,
-	) (*balancerpb.UpdateConfigResponse, error)
 	UpdateVS(
 		ctx context.Context,
 		req *balancerpb.UpdateVSRequest,
@@ -151,34 +140,6 @@ func (m *RPCClient) record(op string, start time.Time, err error) {
 	m.stats.Record(op, m.now().Sub(start), err)
 }
 
-// UpdateSessionsState invokes Balancer.UpdateSessionsState with a
-// derived deadline and records the call latency under RPCUpdateSessionsState.
-func (m *RPCClient) UpdateSessionsState(
-	ctx context.Context,
-	req *balancerpb.UpdateSessionsStateRequest,
-) (*balancerpb.UpdateSessionsStateResponse, error) {
-	callCtx, cancel := m.callContext(ctx)
-	defer cancel()
-	start := m.now()
-	resp, err := m.client.UpdateSessionsState(callCtx, req)
-	m.record(RPCUpdateSessionsState, start, err)
-	return resp, err
-}
-
-// UpdateConfig invokes Balancer.UpdateConfig with a derived deadline
-// and records the call latency under RPCUpdateConfig.
-func (m *RPCClient) UpdateConfig(
-	ctx context.Context,
-	req *balancerpb.UpdateConfigRequest,
-) (*balancerpb.UpdateConfigResponse, error) {
-	callCtx, cancel := m.callContext(ctx)
-	defer cancel()
-	start := m.now()
-	resp, err := m.client.UpdateConfig(callCtx, req)
-	m.record(RPCUpdateConfig, start, err)
-	return resp, err
-}
-
 // UpdateVS invokes Balancer.UpdateVS with a derived deadline and
 // records the call latency under RPCUpdateVS.
 func (m *RPCClient) UpdateVS(
@@ -233,59 +194,4 @@ func (m *RPCClient) GetState(
 	resp, err := m.client.GetState(callCtx, req)
 	m.record(RPCGetState, start, err)
 	return resp, err
-}
-
-// DefaultSessionsTimeouts is the SessionsTimeouts the fuzzer uses on
-// initial UpdateConfig. The values are fixed by the task spec; later
-// task-3 mutations may overwrite them.
-func DefaultSessionsTimeouts() *balancerpb.SessionsTimeouts {
-	return &balancerpb.SessionsTimeouts{
-		TcpSynAck: 60,
-		TcpSyn:    30,
-		TcpFin:    30,
-		Tcp:       10,
-		Udp:       20,
-	}
-}
-
-// DefaultWlcConfig is the WlcConfig the fuzzer uses on initial
-// UpdateConfig. Values are fixed by the task spec.
-func DefaultWlcConfig() *balancerpb.WlcConfig {
-	return &balancerpb.WlcConfig{
-		Power:     10,
-		MaxWeight: 10,
-	}
-}
-
-// DefaultAddrConfig is the AddrConfig the fuzzer uses on initial
-// UpdateConfig. The task spec mandates zero-valued source addresses, so
-// the fields are left unset.
-func DefaultAddrConfig() *balancerpb.AddrConfig {
-	return &balancerpb.AddrConfig{}
-}
-
-func Startup(
-	ctx context.Context,
-	rpc BalancerRPC,
-	cfg *RuntimeConfig,
-	initialVS *balancerpb.VsConfigList,
-) error {
-	if rpc == nil {
-		return errors.New("startup: rpc client must not be nil")
-	}
-	if cfg == nil {
-		return errors.New("startup: runtime config must not be nil")
-	}
-
-	configReq := &balancerpb.UpdateConfigRequest{
-		ConfigName: cfg.ConfigName,
-		Vs:         initialVS,
-		Timeouts:   DefaultSessionsTimeouts(),
-		Addr:       DefaultAddrConfig(),
-		Wlc:        DefaultWlcConfig(),
-	}
-	if _, err := rpc.UpdateConfig(ctx, configReq); err != nil {
-		return fmt.Errorf("startup: update config %q: %w", cfg.ConfigName, err)
-	}
-	return nil
 }

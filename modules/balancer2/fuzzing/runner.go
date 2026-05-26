@@ -174,9 +174,9 @@ func (m *Runner) Model() *Model {
 	return m.model
 }
 
-// Run executes Startup followed by the operation loop. It returns nil on
-// graceful stop (ctx cancellation or one of the configured signals) and
-// a non-nil error on RPC failure, GetState failure, or state mismatch.
+// Run executes the operation loop. It returns nil on graceful stop (ctx
+// cancellation or one of the configured signals) and a non-nil error on
+// RPC failure, GetState failure, or state mismatch.
 //
 // The loop is single-threaded: every operation completes its full
 // mutation+GetState+compare+commit cycle before the next one starts.
@@ -184,27 +184,10 @@ func (m *Runner) Model() *Model {
 // in-flight RPC is allowed to finish (bounded by RequestTimeout) before
 // the loop exits.
 func (m *Runner) Run(ctx context.Context) error {
-	if err := m.startup(ctx); err != nil {
-		return err
-	}
-
 	runCtx, cancel := m.installSignalHandler(ctx)
 	defer cancel()
 
 	return m.loop(runCtx)
-}
-
-// startup performs Startup and logs the effective seed plus a brief
-// summary of the initial corpus shape so operators have a self-describing
-// run log.
-func (m *Runner) startup(ctx context.Context) error {
-	start := m.now()
-	if err := Startup(ctx, m.rpc, m.cfg, m.corpus.ToVsConfigList()); err != nil {
-		m.logf("%s", FormatRPCFailure(0, "Startup", err))
-		return fmt.Errorf("runner: startup failed: %w", err)
-	}
-	m.logf("%s", FormatInitCall("Startup", m.cfg.Seed, m.now().Sub(start)))
-	return nil
 }
 
 // installSignalHandler wires SIGINT/SIGTERM into a derived context. The
@@ -356,22 +339,22 @@ func (m *Runner) sendUpdateReals(ctx context.Context, op Operation) error {
 	if op.UpdateReals == nil {
 		return fmt.Errorf("runner: update_reals payload missing for op %d", op.OpNum)
 	}
-	if len(op.UpdateReals.Updates) == 0 {
-		return nil
-	}
-	if !m.model.IsActive(op.UpdateReals.Key) {
-		return nil
-	}
-	updates := make([]*balancerpb.RealUpdate, 0, len(op.UpdateReals.Updates))
-	for _, u := range op.UpdateReals.Updates {
-		updates = append(updates, &balancerpb.RealUpdate{
-			RealId: &balancerpb.RealIdentifier{
-				Vs:   vsKeyToIdentifier(op.UpdateReals.Key),
-				Real: realKeyToIdentifier(u.Key),
-			},
-			Enable: cloneBoolPtr(u.Enabled),
-			Weight: cloneUint32Ptr(u.Weight),
-		})
+
+	updates := make([]*balancerpb.RealUpdate, 0)
+	for _, batch := range op.UpdateReals.Batches {
+		if !m.model.IsActive(batch.Key) {
+			continue
+		}
+		for _, u := range batch.Updates {
+			updates = append(updates, &balancerpb.RealUpdate{
+				RealId: &balancerpb.RealIdentifier{
+					Vs:   vsKeyToIdentifier(batch.Key),
+					Real: realKeyToIdentifier(u.Key),
+				},
+				Enable: cloneBoolPtr(u.Enabled),
+				Weight: cloneUint32Ptr(u.Weight),
+			})
+		}
 	}
 	req := &balancerpb.UpdateRealsRequest{
 		ConfigName: m.cfg.ConfigName,
@@ -504,8 +487,12 @@ func (m *Runner) logOperation(op Operation, candidate *Model, dur time.Duration)
 		m.logf("%s %s", FormatDeleteVS(op.OpNum, "", candidate.ActiveCount(), dur),
 			DeleteVSNoopSummary(op.DeleteVS.ActiveCount, op.DeleteVS.MinActive))
 	case OpUpdateReals:
-		m.logf("%s", FormatUpdateReals(op.OpNum, formatVsKey(op.UpdateReals.Key),
-			len(op.UpdateReals.Updates), dur))
+		batchCount := len(op.UpdateReals.Batches)
+		updateCount := 0
+		for _, batch := range op.UpdateReals.Batches {
+			updateCount += len(batch.Updates)
+		}
+		m.logf("%s", FormatUpdateReals(op.OpNum, batchCount, updateCount, dur))
 	}
 }
 

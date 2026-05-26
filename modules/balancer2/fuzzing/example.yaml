@@ -8,11 +8,8 @@
 # log it for replay.
 
 endpoint: "127.0.0.1:8080"
-corpus_paths:
-  - "modules/balancer2/fuzzing/taxi.services.conf"
+corpus_path: "modules/balancer2/fuzzing/taxi.services.conf"
 config_name: "balancer2-fuzz"
-sessions_state_name: "balancer2-fuzz-sessions"
-sessions_capacity: 1048576
 operation_interval: "10ms"
 update_vs_every: 10
 stats_interval: "30s"

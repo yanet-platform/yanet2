@@ -145,13 +145,13 @@ func TestParseExistingCorpora(t *testing.T) {
 	// flips proto detection would still trip this assertion.
 	assert.Greater(t, tcpCount, len(corpus.VSs)/2)
 
-	// Spot-check a known fixture entry from appbalancer.services.conf.
+	// Spot-check a known fixture entry from taxi.services.conf.
 	got := corpus.Lookup(VsKey{
-		IP:    addr16(t, "213.180.204.242"),
-		Port:  443,
+		IP:    addr16(t, "2a02:6b8:0:3400:0:fa99:0:185"),
+		Port:  80,
 		Proto: balancerpb.TransportProto_TCP,
 	})
-	require.NotNil(t, got, "expected appbalancer VS 213.180.204.242:443 to be present")
+	require.NotNil(t, got, "expected taxi VS to be present")
 	assert.NotEmpty(t, got.Reals)
 }
 

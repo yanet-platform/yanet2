@@ -42,9 +42,8 @@ type runnerFakeRPC struct {
 
 	state *runnerFakeState
 
-	startupSessionsErr error
-	startupConfigErr   error
-	failOnce           map[string]error
+	failOnce        map[string]error
+	updateRealsReqs []*balancerpb.UpdateRealsRequest
 
 	overrideGetState func() (*balancerpb.GetStateResponse, error)
 
@@ -104,40 +103,6 @@ func (m *runnerFakeRPC) callSequence() []string {
 	return out
 }
 
-func (m *runnerFakeRPC) UpdateSessionsState(
-	_ context.Context,
-	_ *balancerpb.UpdateSessionsStateRequest,
-) (*balancerpb.UpdateSessionsStateResponse, error) {
-	if err := m.recordCall(RPCUpdateSessionsState); err != nil {
-		return nil, err
-	}
-	if m.startupSessionsErr != nil {
-		return nil, m.startupSessionsErr
-	}
-	return &balancerpb.UpdateSessionsStateResponse{}, nil
-}
-
-func (m *runnerFakeRPC) UpdateConfig(
-	_ context.Context,
-	req *balancerpb.UpdateConfigRequest,
-) (*balancerpb.UpdateConfigResponse, error) {
-	if err := m.recordCall(RPCUpdateConfig); err != nil {
-		return nil, err
-	}
-	if m.startupConfigErr != nil {
-		return nil, m.startupConfigErr
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.state.configName = req.ConfigName
-	if req.Vs != nil {
-		for _, vs := range req.Vs.Vs {
-			m.applyVsConfigLocked(vs)
-		}
-	}
-	return &balancerpb.UpdateConfigResponse{}, nil
-}
-
 func (m *runnerFakeRPC) UpdateVS(
 	_ context.Context,
 	req *balancerpb.UpdateVSRequest,
@@ -184,6 +149,7 @@ func (m *runnerFakeRPC) UpdateReals(
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.updateRealsReqs = append(m.updateRealsReqs, req)
 	for _, u := range req.Updates {
 		vsKey := identifierToVsKey(u.RealId.Vs)
 		vs, ok := m.state.vs[vsKey]
@@ -311,6 +277,38 @@ func (m *runnerFakeRPC) buildGetStateResponseLocked() *balancerpb.GetStateRespon
 	return &balancerpb.GetStateResponse{States: []*balancerpb.BalancerState{state}}
 }
 
+func (m *runnerFakeRPC) seedFromModel(model *Model) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.state.vs = map[VsKey]*runnerFakeVS{}
+	m.state.order = append([]VsKey(nil), model.ActiveOrder()...)
+	for _, key := range model.ActiveOrder() {
+		vs := model.ActiveVS(key)
+		if vs == nil {
+			continue
+		}
+		copyVS := &runnerFakeVS{
+			key:            key,
+			scheduler:      vs.Scheduler,
+			flags:          vs.Flags,
+			allowedSources: append([]CIDR(nil), vs.AllowedSources...),
+			reals:          map[RealKey]*runnerFakeReal{},
+			realsOrder:     append([]RealKey(nil), vs.Reals()...),
+		}
+		for _, rk := range vs.Reals() {
+			real := vs.Real(rk)
+			if real == nil {
+				continue
+			}
+			copyVS.reals[rk] = &runnerFakeReal{
+				enabled: real.Enabled,
+				weight:  real.Weight,
+			}
+		}
+		m.state.vs[key] = copyVS
+	}
+}
+
 // identifierToVsKey is the test-side inverse of vsKeyToIdentifier; the
 // runner's canonical16 path is unnecessary here because the fake only
 // sees addresses the runner just wrote.
@@ -398,6 +396,7 @@ func newRunnerHarness(t *testing.T, corpusText string, options ...RunnerOption) 
 	}
 	runner, err := NewRunner(cfg, corpus, fake, stats, append(defaults, options...)...)
 	require.NoError(t, err)
+	fake.seedFromModel(runner.Model())
 	return &runnerHarness{
 		t:           t,
 		runner:      runner,
@@ -446,12 +445,12 @@ func TestRunnerCommitsOnlyAfterGetStateMatch(t *testing.T) {
 
 	calls := h.fake.callSequence()
 	require.GreaterOrEqual(t, len(calls), 2)
-	assert.Equal(t, RPCUpdateConfig, calls[0])
-	assert.Equal(t, RPCUpdateReals, calls[1])
+	assert.Equal(t, RPCUpdateReals, calls[0])
+	assert.Equal(t, RPCGetState, calls[1])
 
 	mutations := []string{RPCUpdateVS, RPCDeleteVS, RPCUpdateReals}
 	mutationCount := 0
-	for idx := 2; idx < len(calls); idx++ {
+	for idx := 0; idx < len(calls); idx++ {
 		c := calls[idx]
 		if !contains(mutations, c) {
 			continue
@@ -605,23 +604,40 @@ func TestRunnerEmitsStatsReportOnTicker(t *testing.T) {
 	}
 }
 
-// TestRunnerFailsOnStartupError surfaces an UpdateSessionsState failure
-// before any operation runs.
-func TestRunnerFailsOnStartupError(t *testing.T) {
+// TestRunnerDoesNotMutateConfigOnStartup verifies that runner execution
+// starts directly with a mutation operation.
+func TestRunnerDoesNotMutateConfigOnStartup(t *testing.T) {
 	corpus := genCorpusText(5, 3)
-	h := newRunnerHarness(t, corpus)
-
-	h.fake.failOnce[RPCUpdateSessionsState] = errors.New("startup boom")
-
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	err := h.runner.Run(ctx)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "startup")
+	h := newRunnerHarness(t, corpus, WithOperationLimit(1))
+	require.NoError(t, h.runWithSteps(1))
 
 	calls := h.fake.callSequence()
-	assert.NotContains(t, calls, RPCUpdateConfig,
-		"startup failure must short-circuit before UpdateConfig")
+	require.GreaterOrEqual(t, len(calls), 2)
+	assert.Equal(t, RPCUpdateReals, calls[0])
+	assert.Equal(t, RPCGetState, calls[1])
+}
+
+func TestRunnerUpdateRealsSendsMultipleVSInSingleRPC(t *testing.T) {
+	corpus := genCorpusText(6, 4)
+	h := newRunnerHarness(t, corpus, WithOperationLimit(1))
+	require.NoError(t, h.runWithSteps(1))
+
+	calls := h.fake.callSequence()
+	require.GreaterOrEqual(t, len(calls), 2)
+	assert.Equal(t, RPCUpdateReals, calls[0])
+	assert.Equal(t, RPCGetState, calls[1])
+
+	require.Len(t, h.fake.updateRealsReqs, 1)
+	req := h.fake.updateRealsReqs[0]
+	require.NotEmpty(t, req.Updates)
+
+	seen := map[VsKey]bool{}
+	for _, update := range req.Updates {
+		require.NotNil(t, update.RealId)
+		require.NotNil(t, update.RealId.Vs)
+		seen[identifierToVsKey(update.RealId.Vs)] = true
+	}
+	assert.GreaterOrEqual(t, len(seen), 2, "single UpdateReals RPC must include multiple VS")
 }
 
 // TestRunnerValidatesArguments pins the constructor's nil-input handling.
