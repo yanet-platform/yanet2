@@ -18,6 +18,7 @@ package fuzzing
 import (
 	"fmt"
 	"math/rand"
+	"net"
 	"sort"
 
 	"github.com/yanet-platform/yanet2/modules/balancer2/controlplane/balancerpb"
@@ -211,7 +212,7 @@ func (m *OperationGenerator) generateUpdateVS(opNum uint64) Operation {
 			Key:            key,
 			Scheduler:      m.randomScheduler(),
 			Flags:          m.randomFlags(),
-			AllowedSources: m.randomAllowedSources(),
+			AllowedSources: m.randomAllowedSources(key),
 			Reals:          m.randomRealSubset(key),
 		},
 	}
@@ -300,20 +301,41 @@ func (m *OperationGenerator) randomFlags() VsFlags {
 	}
 }
 
-// randomAllowedSources emits 1..5 deterministic IPv4 networks. The
-// generator uses /24 networks rooted at the RNG-derived first three
-// octets; this keeps the encoding simple and avoids any reliance on the
-// parser to interpret CIDRs.
-func (m *OperationGenerator) randomAllowedSources() []CIDR {
+// randomAllowedSources emits 1..5 deterministic networks whose address
+// family matches the VS VIP identified by key. IPv4 VSes get /24 networks;
+// IPv6 VSes get /48 networks. This keeps the encoding simple while
+// satisfying the dataplane constraint that allowed-source families must
+// match the VS family.
+func (m *OperationGenerator) randomAllowedSources(key VsKey) []CIDR {
 	count := 1 + m.rng.Intn(5)
 	out := make([]CIDR, 0, count)
+	ipv4 := net.IP(key.IP[:]).To4() != nil
 	for idx := 0; idx < count; idx++ {
-		addr := make([]byte, 4)
-		addr[0] = byte(m.rng.Intn(224)) // avoid multicast/reserved high ranges.
-		addr[1] = byte(m.rng.Intn(256))
-		addr[2] = byte(m.rng.Intn(256))
-		addr[3] = 0
-		mask := []byte{0xff, 0xff, 0xff, 0x00}
+		var addr, mask []byte
+		if ipv4 {
+			addr = []byte{
+				byte(m.rng.Intn(224)), // avoid multicast/reserved high ranges.
+				byte(m.rng.Intn(256)),
+				byte(m.rng.Intn(256)),
+				0,
+			}
+			mask = []byte{0xff, 0xff, 0xff, 0x00}
+		} else {
+			// Generate a random /48 in the 2000::/3 (global unicast) range.
+			addr = []byte{
+				byte(0x20 | (m.rng.Intn(4) << 1)), // 0x20–0x26
+				byte(m.rng.Intn(256)),
+				byte(m.rng.Intn(256)),
+				byte(m.rng.Intn(256)),
+				byte(m.rng.Intn(256)),
+				byte(m.rng.Intn(256)),
+				0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+			}
+			mask = []byte{
+				0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+				0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+			}
+		}
 		out = append(out, CIDR{Addr: addr, Mask: mask})
 	}
 	return out
