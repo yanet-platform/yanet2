@@ -13,6 +13,7 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/yanet-platform/yanet2/common/commonpb"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/balancer2/bindings/go/cbalancer2"
 	"github.com/yanet-platform/yanet2/modules/balancer2/controlplane/balancerpb"
@@ -412,4 +413,36 @@ func toPBTransport(proto cbalancer2.TransportProto) (balancerpb.TransportProto, 
 	default:
 		return 0, status.Errorf(codes.Internal, "unsupported transport: %v", proto)
 	}
+}
+
+func (m *Service) GetMetrics(
+	ctx context.Context,
+	req *balancerpb.GetMetricsRequest,
+) (*balancerpb.GetMetricsResponse, error) {
+	now := time.Now()
+
+	m.mu.Lock()
+	names := make([]string, 0, len(m.moduleConfigs))
+	for name := range m.moduleConfigs {
+		names = append(names, name)
+	}
+	m.mu.Unlock()
+	sort.Strings(names)
+
+	var result []*commonpb.Metric
+	for _, name := range names {
+		m.mu.Lock()
+		mc, ok := m.moduleConfigs[name]
+		if !ok {
+			continue
+		}
+		m.mu.Unlock()
+
+		states := mc.GetState(nil, nil, now)
+		for _, state := range states {
+			result = append(result, collectStateMetrics(state)...)
+		}
+	}
+
+	return &balancerpb.GetMetricsResponse{Metrics: result}, nil
 }

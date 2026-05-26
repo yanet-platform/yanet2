@@ -387,6 +387,10 @@ func (m *ModuleConfig) GetState(
 	filter *balancerpb.Filter,
 	now time.Time,
 ) []*balancerpb.BalancerState {
+	if m == nil {
+		return nil
+	}
+
 	dpConfig := m.agent.DPConfig()
 
 	matcher := newStateFilter(filter)
