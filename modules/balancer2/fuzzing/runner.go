@@ -29,6 +29,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/signal"
 	"syscall"
@@ -394,12 +395,7 @@ func (m *Runner) toVsConfig(p *UpdateVSPayload) *balancerpb.VsConfig {
 			Weight:  &weight,
 			Enabled: &enabled,
 		}
-		if orig := m.model.OriginalReal(p.Key, r.Key); orig != nil && orig.Bindto != nil {
-			rc.Src = &filterpb.IPNet{
-				Addr: append([]byte(nil), orig.Bindto...),
-				Mask: append([]byte(nil), orig.BindtoMask...),
-			}
-		}
+		rc.Src = sourceForRealMember(r.Key, m.model.OriginalReal(p.Key, r.Key))
 		reals = append(reals, rc)
 	}
 	return &balancerpb.VsConfig{
@@ -428,6 +424,30 @@ func realKeyToIdentifier(key RealKey) *balancerpb.RelativeRealIdentifier {
 	return &balancerpb.RelativeRealIdentifier{
 		Ip:   keyIPBytes(key.IP),
 		Port: uint32(key.Port),
+	}
+}
+
+func sourceForRealMember(key RealKey, orig *RealServer) *filterpb.IPNet {
+	if orig != nil && orig.Bindto != nil && sameAddrFamily(orig.Bindto, key.IP) {
+		return &filterpb.IPNet{
+			Addr: append([]byte(nil), orig.Bindto...),
+			Mask: append([]byte(nil), orig.BindtoMask...),
+		}
+	}
+	// Balancer backend requires source for every real.
+	if v4 := net.IP(key.IP[:]).To4(); v4 != nil {
+		return &filterpb.IPNet{
+			Addr: append([]byte(nil), v4...),
+			Mask: []byte{0xff, 0xff, 0xff, 0xff},
+		}
+	}
+	mask := make([]byte, net.IPv6len)
+	for idx := range mask {
+		mask[idx] = 0xff
+	}
+	return &filterpb.IPNet{
+		Addr: keyIPBytes(key.IP),
+		Mask: mask,
 	}
 }
 

@@ -108,7 +108,7 @@ func TestParseServicesCorpus(t *testing.T) {
 	assert.Equal(t, uint32(80), list.Vs[0].Reals[0].Id.Port)
 }
 
-func TestParseBindtoFamilyMismatchIsIgnored(t *testing.T) {
+func TestParseBindtoFamilyMismatchUsesFamilySafeFallback(t *testing.T) {
 	const corpusText = `virtual_server 10.0.0.1 80 {
         real_server 2a02:6b8::2 80 {
                 HTTP_GET {
@@ -129,7 +129,9 @@ func TestParseBindtoFamilyMismatchIsIgnored(t *testing.T) {
 
 	vsCfg := corpus.VSs[0].ToVsConfig()
 	require.Len(t, vsCfg.Reals, 2)
-	assert.Nil(t, vsCfg.Reals[0].Src, "mismatched bindto family must be ignored")
+	require.NotNil(t, vsCfg.Reals[0].Src, "source is required for every real")
+	assert.Equal(t, net.IPv6len, len(vsCfg.Reals[0].Src.Addr))
+	assert.Equal(t, net.IPv6len, len(vsCfg.Reals[0].Src.Mask))
 	require.NotNil(t, vsCfg.Reals[1].Src, "matching bindto family must be preserved")
 	assert.Equal(t, net.IPv4len, len(vsCfg.Reals[1].Src.Addr))
 }

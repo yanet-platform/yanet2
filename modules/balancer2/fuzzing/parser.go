@@ -142,12 +142,7 @@ func (m *VirtualServer) ToVsConfig() *balancerpb.VsConfig {
 			},
 			Weight: &weight,
 		}
-		if real.Bindto != nil {
-			rc.Src = &filterpb.IPNet{
-				Addr: append([]byte(nil), real.Bindto...),
-				Mask: append([]byte(nil), real.BindtoMask...),
-			}
-		}
+		rc.Src = sourceForReal(real)
 		reals = append(reals, rc)
 	}
 	return &balancerpb.VsConfig{
@@ -384,6 +379,31 @@ func parseBindto(token string) (ip, mask []byte, ok bool) {
 
 func sameAddrFamily(addr []byte, key [16]byte) bool {
 	return (len(addr) == net.IPv4len) == (net.IP(key[:]).To4() != nil)
+}
+
+func sourceForReal(real *RealServer) *filterpb.IPNet {
+	if real.Bindto != nil && sameAddrFamily(real.Bindto, real.Key.IP) {
+		return &filterpb.IPNet{
+			Addr: append([]byte(nil), real.Bindto...),
+			Mask: append([]byte(nil), real.BindtoMask...),
+		}
+	}
+	// Balancer backend requires source to be set for every real; when corpus
+	// bindto is absent or mixed-family, use host-network source by real family.
+	if v4 := net.IP(real.Key.IP[:]).To4(); v4 != nil {
+		return &filterpb.IPNet{
+			Addr: append([]byte(nil), v4...),
+			Mask: []byte{0xff, 0xff, 0xff, 0xff},
+		}
+	}
+	mask := make([]byte, net.IPv6len)
+	for idx := range mask {
+		mask[idx] = 0xff
+	}
+	return &filterpb.IPNet{
+		Addr: keyIPBytes(real.Key.IP),
+		Mask: mask,
+	}
 }
 
 // keyIPBytes returns a canonical protobuf address encoding from a parsed key:
