@@ -448,6 +448,7 @@ func (m *Model) applyUpdateVS(p *UpdateVSPayload) error {
 	if _, ok := m.originalVS[p.Key]; !ok {
 		return fmt.Errorf("apply update_vs: unknown VS key %v", p.Key)
 	}
+	prev := m.ActiveVS(p.Key)
 	state := &VSState{
 		Scheduler:      p.Scheduler,
 		Flags:          p.Flags,
@@ -463,13 +464,23 @@ func (m *Model) applyUpdateVS(p *UpdateVSPayload) error {
 				p.Key,
 			)
 		}
-		if r.Weight < 1 || r.Weight > 10 {
-			return fmt.Errorf("apply update_vs: weight %d out of range 1..10", r.Weight)
+		enabled := r.Enabled
+		weight := r.Weight
+		inherited := false
+		if prev != nil {
+			if prevReal := prev.Real(r.Key); prevReal != nil {
+				enabled = prevReal.Enabled
+				weight = prevReal.Weight
+				inherited = true
+			}
+		}
+		if !inherited && (weight < 1 || weight > 10) {
+			return fmt.Errorf("apply update_vs: weight %d out of range 1..10", weight)
 		}
 		state.realsOrder = append(state.realsOrder, r.Key)
 		state.realsByKey[r.Key] = &RealState{
-			Enabled: r.Enabled,
-			Weight:  r.Weight,
+			Enabled: enabled,
+			Weight:  weight,
 		}
 	}
 	m.SetActiveVS(p.Key, state)

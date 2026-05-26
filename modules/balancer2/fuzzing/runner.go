@@ -380,6 +380,7 @@ func (m *Runner) sendUpdateReals(ctx context.Context, op Operation) error {
 // generated payload.
 func (m *Runner) toVsConfig(p *UpdateVSPayload) *balancerpb.VsConfig {
 	original := m.model.OriginalVS(p.Key)
+	current := m.model.ActiveVS(p.Key)
 	id := vsKeyToIdentifier(p.Key)
 	if original != nil {
 		id.Addr = keyIPBytes(original.Key.IP)
@@ -391,9 +392,13 @@ func (m *Runner) toVsConfig(p *UpdateVSPayload) *balancerpb.VsConfig {
 		weight := r.Weight
 		enabled := r.Enabled
 		rc := &balancerpb.RealConfig{
-			Id:      realKeyToIdentifier(r.Key),
-			Weight:  &weight,
-			Enabled: &enabled,
+			Id: realKeyToIdentifier(r.Key),
+		}
+		// For existing reals in an active VS, omit weight/enabled in UpdateVS
+		// so backend inherits current runtime values.
+		if current == nil || !current.HasReal(r.Key) {
+			rc.Weight = &weight
+			rc.Enabled = &enabled
 		}
 		rc.Src = sourceForRealMember(r.Key, m.model.OriginalReal(p.Key, r.Key))
 		reals = append(reals, rc)

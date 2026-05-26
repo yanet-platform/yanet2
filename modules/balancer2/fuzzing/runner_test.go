@@ -240,6 +240,7 @@ func (m *runnerFakeRPC) applyVsConfigLocked(vs *balancerpb.VsConfig) {
 			})
 		}
 	}
+	prevReals := existing.reals
 	existing.reals = map[RealKey]*runnerFakeReal{}
 	existing.realsOrder = nil
 	for _, r := range vs.Reals {
@@ -247,11 +248,15 @@ func (m *runnerFakeRPC) applyVsConfigLocked(vs *balancerpb.VsConfig) {
 			continue
 		}
 		rk := identifierToRealKey(r.Id)
-		enabled := true
+		enabled := false
+		var weight uint32
+		if prev := prevReals[rk]; prev != nil {
+			enabled = prev.enabled
+			weight = prev.weight
+		}
 		if r.Enabled != nil {
 			enabled = *r.Enabled
 		}
-		var weight uint32 = 1
 		if r.Weight != nil {
 			weight = *r.Weight
 		}
