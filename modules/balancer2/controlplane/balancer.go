@@ -169,7 +169,6 @@ func (m *ModuleConfig) Update(newConfig *ConfigParams, st *SessionsState) error 
 
 	handle, index, err := build(m.agent, m.name, merged, st, m.index)
 	if err != nil {
-		m.mu.Unlock()
 		return err
 	}
 
@@ -199,56 +198,66 @@ func (m *ModuleConfig) SessionsStateName() string {
 }
 
 func (m *ModuleConfig) UpdateVS(vs []*balancerpb.VsConfig) error {
-	m.mu.Lock()
+	merged, err := func() ([]*balancerpb.VsConfig, error) {
+		m.mu.Lock()
+		defer m.mu.Unlock()
 
-	cur := m.cfg.Vs.Vs
-	merged := slices.Clone(cur)
-	for _, v := range vs {
-		id, err := makeVsID(v.Id)
-		if err != nil {
-			return fmt.Errorf("update vs: %w", err)
+		cur := m.cfg.Vs.Vs
+		merged := slices.Clone(cur)
+		for _, v := range vs {
+			id, err := makeVsID(v.Id)
+			if err != nil {
+				return nil, fmt.Errorf("update vs: %w", err)
+			}
+			if slot, ok := m.index[id]; ok {
+				merged[slot.idx] = v
+			} else {
+				merged = append(merged, v)
+			}
 		}
-		if slot, ok := m.index[id]; ok {
-			merged[slot.idx] = v
-		} else {
-			merged = append(merged, v)
-		}
+		return merged, nil
+	}()
+	if err != nil {
+		return err
 	}
-
-	m.mu.Unlock()
 
 	return m.Update(&ConfigParams{Vs: &balancerpb.VsConfigList{Vs: merged}}, nil)
 }
 
 func (m *ModuleConfig) DeleteVS(vs []*balancerpb.VsIdentifier) error {
-	m.mu.Lock()
+	kept, err := func() ([]*balancerpb.VsConfig, error) {
+		m.mu.Lock()
+		defer m.mu.Unlock()
 
-	toDelete := make(map[vsID]struct{}, len(vs))
-	for _, raw := range vs {
-		id, err := makeVsID(raw)
-		if err != nil {
-			return fmt.Errorf("delete vs: %w", err)
+		toDelete := make(map[vsID]struct{}, len(vs))
+		for _, raw := range vs {
+			id, err := makeVsID(raw)
+			if err != nil {
+				return nil, fmt.Errorf("delete vs: %w", err)
+			}
+			if _, ok := m.index[id]; !ok {
+				return nil, fmt.Errorf("virtual service not found: %v", id)
+			}
+			toDelete[id] = struct{}{}
 		}
-		if _, ok := m.index[id]; !ok {
-			return fmt.Errorf("virtual service not found: %v", id)
+
+		cur := m.cfg.Vs.Vs
+		kept := make([]*balancerpb.VsConfig, 0, len(cur)-len(toDelete))
+		for _, v := range cur {
+			id, err := makeVsID(v.Id)
+			if err != nil {
+				return nil, fmt.Errorf("delete vs: stored config invalid: %w", err)
+			}
+			if _, drop := toDelete[id]; drop {
+				continue
+			}
+			kept = append(kept, v)
 		}
-		toDelete[id] = struct{}{}
+		return kept, nil
+	}()
+	if err != nil {
+		return err
 	}
-
-	cur := m.cfg.Vs.Vs
-	kept := make([]*balancerpb.VsConfig, 0, len(cur)-len(toDelete))
-	for _, v := range cur {
-		id, err := makeVsID(v.Id)
-		if err != nil {
-			return fmt.Errorf("delete vs: stored config invalid: %w", err)
-		}
-		if _, drop := toDelete[id]; drop {
-			continue
-		}
-		kept = append(kept, v)
-	}
-
-	m.mu.Unlock()
 
 	return m.Update(&ConfigParams{Vs: &balancerpb.VsConfigList{Vs: kept}}, nil)
 }
