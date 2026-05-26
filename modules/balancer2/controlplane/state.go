@@ -103,8 +103,14 @@ func (m *ModuleConfig) buildVsState(
 		if !matcher.matchReal(r.Id) {
 			continue
 		}
+		cfgReal := &balancerpb.RealConfig{
+			Id:      r.Id,
+			Weight:  r.Weight,
+			Enabled: r.Enabled,
+			Src:     r.Src,
+		}
 		rs := &balancerpb.RealState{
-			Config:              r,
+			Config:              cfgReal,
 			LastPacketTimestamp: timestamppb.New(time.Unix(0, 0)),
 		}
 		rid, ridErr := makeRealID(r.Id)
@@ -113,6 +119,10 @@ func (m *ModuleConfig) buildVsState(
 				if rSlot, ok := slot.reals[rid]; ok {
 					rs.Enabled = rSlot.enabled
 					rs.EffectiveWeight = uint64(rSlot.effectiveWeight)
+					// Real runtime state is sourced from current index, not
+					// from stored config optional fields.
+					cfgReal.Enabled = boolPtr(rSlot.enabled)
+					cfgReal.Weight = uint32Ptr(rSlot.weight)
 				}
 			}
 			if reals != nil {
@@ -253,4 +263,12 @@ func applyCounter(
 			realState.Stats = realCounterToProto(c)
 		}
 	}
+}
+
+func boolPtr(v bool) *bool {
+	return &v
+}
+
+func uint32Ptr(v uint32) *uint32 {
+	return &v
 }
