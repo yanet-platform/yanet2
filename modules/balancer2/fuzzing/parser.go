@@ -350,8 +350,13 @@ func (m *parser) consumeInSkip(tokens []string) error {
 	if m.skipper == 1 && len(tokens) == 2 && tokens[0] == "bindto" &&
 		m.currRS != nil && m.currRS.Bindto == nil {
 		if bindto, mask, ok := parseBindto(tokens[1]); ok {
-			m.currRS.Bindto = bindto
-			m.currRS.BindtoMask = mask
+			// Keep bindto only when it matches the real destination family.
+			// Some corpora include mixed-family bindto directives that are
+			// acceptable in source format but rejected by balancer config build.
+			if sameAddrFamily(bindto, m.currRS.Key.IP) {
+				m.currRS.Bindto = bindto
+				m.currRS.BindtoMask = mask
+			}
 		}
 	}
 	return nil
@@ -375,6 +380,10 @@ func parseBindto(token string) (ip, mask []byte, ok bool) {
 		fullMask[i] = 0xff
 	}
 	return []byte(v6), []byte(fullMask), true
+}
+
+func sameAddrFamily(addr []byte, key [16]byte) bool {
+	return (len(addr) == net.IPv4len) == (net.IP(key[:]).To4() != nil)
 }
 
 // keyIPBytes returns a canonical protobuf address encoding from a parsed key:
