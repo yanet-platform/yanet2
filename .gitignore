@@ -138,3 +138,9 @@ cscope.*
 
 # Pre-built .deb packages for container image builds.
 deploy/packages/
+
+.arch/
+.assets/
+.claude/
+.docs/
+.secrets/

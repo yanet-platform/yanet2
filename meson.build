@@ -151,7 +151,6 @@ subdir('dataplane')
 if not dataplane_only
   subdir('controlplane')
   subdir('operators')
-  subdir('mock')
   foreach dir : module_test_dirs
     subdir(dir)
   endforeach

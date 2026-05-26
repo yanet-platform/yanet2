@@ -13,15 +13,12 @@
  */
 
 #include "api/agent.h"
-#include "common/memory.h"
 #include "common/memory_block.h"
-#include "common/strutils.h"
 #include "common/test_assert.h"
 #include "controlplane/agent/agent.h"
+#include "lib/dataplane_ut/dataplane_ut.h"
 #include "lib/errors/errors.h"
 #include "logging/log.h"
-#include "mock/config.h"
-#include "mock/mock.h"
 #include "modules/route/api/controlplane.h"
 
 #include <stdio.h>
@@ -71,33 +68,37 @@ int
 main(void) {
 	log_enable_name("debug");
 
-	struct yanet_mock_config config;
-	memset(&config, 0, sizeof(config));
-	config.cp_memory = 1 << 25;
-	config.dp_memory = 1 << 20;
-	config.device_count = 1;
-	config.devices[0].id = 0;
-	strtcpy(config.devices[0].name,
-		"01:00.0",
-		sizeof(config.devices[0].name));
-	config.worker_count = 1;
+	const char *port_names[] = {"01:00.0"};
+	const char *modules[] = {"route"};
+	const char *devs_to_load[] = {"plain"};
 
-	struct yanet_mock mock;
-	int res = yanet_mock_init(&mock, &config, NULL);
-	if (res != 0) {
-		fprintf(stderr, "yanet_mock_init failed: %d\n", res);
+	struct dataplane_ut_config cfg = {
+		.cp_memory = 1u << 25,
+		.dp_memory = 1u << 20,
+		.worker_count = 1,
+		.devices = port_names,
+		.device_count = 1,
+		.modules = modules,
+		.module_count = 1,
+		.devices_to_load = devs_to_load,
+		.devices_to_load_count = 1,
+	};
+
+	struct dataplane_ut *ut = dataplane_ut_new(&cfg);
+	if (ut == NULL) {
+		fprintf(stderr, "dataplane_ut_new failed\n");
 		return 1;
 	}
 
-	struct yanet_shm *shm = yanet_mock_shm(&mock);
+	struct yanet_shm *shm = dataplane_ut_shm(ut);
 	if (shm == NULL) {
-		fprintf(stderr, "yanet_mock_shm returned NULL\n");
-		yanet_mock_free(&mock);
+		fprintf(stderr, "dataplane_ut_shm returned NULL\n");
+		dataplane_ut_free(ut);
 		return 1;
 	}
 
-	res = run_test(shm);
-	yanet_mock_free(&mock);
+	int res = run_test(shm);
+	dataplane_ut_free(ut);
 
 	return (res == TEST_SUCCESS) ? 0 : 1;
 }

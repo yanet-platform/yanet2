@@ -20,7 +20,10 @@ lib_dataplane_ut = static_library(
   c_args: yanet_c_args,
   link_args: yanet_link_args + ['-Wl,-E'],
   dependencies: dependencies,
-  include_directories: yanet_rootdir,
+  include_directories: [
+    yanet_rootdir,
+    include_directories('.'),
+  ],
   install: false,
 )
 

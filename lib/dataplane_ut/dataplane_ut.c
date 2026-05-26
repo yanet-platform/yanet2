@@ -25,9 +25,9 @@
 #include "lib/dataplane/module/packet_front.h"
 #include "lib/dataplane/worker/counters.h"
 #include "lib/dataplane/worker/pipeline_round.h"
+#include "lib/dataplane_ut/mempool.h"
 #include "lib/errors/errors.h"
 #include "lib/logging/log.h"
-#include "mock/worker_mempool.h"
 
 struct dataplane_ut {
 	void *arena;
@@ -239,10 +239,10 @@ dataplane_ut_new(const struct dataplane_ut_config *cfg) {
 	}
 
 	// Create the mock mempool now so step 2 can allocate mbufs.
-	ut->mempool = mock_mempool_create();
+	ut->mempool = test_mempool_create();
 	if (ut->mempool == NULL) {
 		LOG(ERROR,
-		    "dataplane_ut_new: mock_mempool_create returned NULL");
+		    "dataplane_ut_new: test_mempool_create returned NULL");
 		dataplane_ut_free(ut);
 		return NULL;
 	}
@@ -298,8 +298,7 @@ dataplane_ut_free(struct dataplane_ut *ut) {
 	}
 
 	if (ut->mempool != NULL) {
-		// mock_mempool_create allocates via calloc; free matches.
-		// Do NOT call rte_mempool_free — the mock pool is not a real
+		// Do NOT call rte_mempool_free — the test pool is not a real
 		// DPDK pool and has no backing memory to tear down that way.
 		free(ut->mempool);
 		ut->mempool = NULL;
@@ -329,8 +328,7 @@ dataplane_ut_free(struct dataplane_ut *ut) {
 
 struct yanet_shm *
 dataplane_ut_shm(struct dataplane_ut *ut) {
-	// yanet_shm is opaque; the arena base address serves as the handle,
-	// matching the pattern used by mock/mock.c::yanet_mock_shm.
+	// The arena base address serves as the opaque shm handle.
 	return (struct yanet_shm *)ut->arena;
 }
 

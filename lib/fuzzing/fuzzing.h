@@ -16,8 +16,8 @@
 #include "dataplane/packet/packet.h"
 #include "lib/dataplane/module/packet_front.h"
 #include "lib/dataplane/packet/data.h"
+#include "lib/dataplane_ut/mempool.h"
 #include "lib/logging/log.h"
-#include "mock/worker_mempool.h"
 
 #define FUZZING_ARENA_SIZE (1 << 20)
 
@@ -72,10 +72,10 @@ fuzzing_params_init(
 
 	memory_context_init(&params->mctx, name, &params->ba);
 
-	LOG(INFO, "Creating mock mempool for fuzzing");
-	params->mempool = mock_mempool_create();
+	LOG(INFO, "Creating test mempool for fuzzing");
+	params->mempool = test_mempool_create();
 	if (params->mempool == NULL) {
-		LOG(ERROR, "Failed to create mock mempool");
+		LOG(ERROR, "Failed to create test mempool");
 		return -ENOMEM;
 	}
 

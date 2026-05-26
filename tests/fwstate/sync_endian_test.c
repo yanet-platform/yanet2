@@ -23,10 +23,9 @@
 #include <rte_udp.h>
 
 #include "lib/dataplane/packet/packet.h"
+#include "lib/dataplane_ut/mempool.h"
 #include "lib/fwstate/sync.h"
 #include "lib/fwstate/types.h"
-
-#include "mock/worker_mempool.h"
 
 // Test ports chosen so that byte-swap is visible:
 // 12345 = 0x3039, byte-swapped = 0x3930 = 14640
@@ -349,10 +348,9 @@ int
 main(void) {
 	printf("=== Sync Frame Endianness Test ===\n");
 
-	/* Initialize mock mempool (same approach as mock/worker_mempool.h) */
-	test_pool = mock_mempool_create();
+	test_pool = test_mempool_create();
 	if (test_pool == NULL) {
-		fprintf(stderr, "Failed to create mock mempool\n");
+		fprintf(stderr, "Failed to create test mempool\n");
 		return EXIT_FAILURE;
 	}
 
