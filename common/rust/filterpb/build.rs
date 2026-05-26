@@ -12,6 +12,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
         .message_attribute(".filterpb.PortRange", serialize_deserialize)
         .message_attribute(".filterpb.ProtoRange", serialize_deserialize)
         .message_attribute(".filterpb.VlanRange", serialize_deserialize)
+        .message_attribute(".filterpb.Fragment", serialize_deserialize)
         .compile_protos(&["common/filterpb/filter.proto"], &["../../.."])?;
 
     Ok(())

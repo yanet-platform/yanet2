@@ -92,7 +92,13 @@ parse_ipv4_header(struct packet *packet, uint16_t *type, uint16_t *offset) {
 	packet->hash = crc32(&ipv4_hdr->src_addr, 4, packet->hash);
 	packet->hash = crc32(&ipv4_hdr->dst_addr, 4, packet->hash);
 
-	// FIXME: check if fragmented
+	if ((ipv4_hdr->fragment_offset & 0xFF3F) != 0) {
+		packet->flags |= 1 << PACKET_FLAG_FRAGMENTED;
+
+		packet->fragment_offset =
+			rte_be_to_cpu_16(ipv4_hdr->fragment_offset & 0xFF1F);
+	}
+
 	// FIXME: process extensions
 
 	*type = ipv4_hdr->next_proto_id;
@@ -172,11 +178,10 @@ parse_ipv6_header(struct packet *packet, uint16_t *type, uint16_t *offset) {
 				);
 
 			if ((ext->offset_flag & 0xF9FF) != 0x0000) {
-				// FIXME: NETWORK_FLAG_FRAGMENT
-				if ((ext->offset_flag & 0xF8FF) != 0x0000) {
-					// FIXME:
-					// NETWORK_FLAG_NOT_FIRST_FRAGMENT;
-				}
+				packet->flags |= 1 << PACKET_FLAG_FRAGMENTED;
+				packet->fragment_offset = rte_be_to_cpu_16(
+					ext->offset_flag & 0xF8FF
+				);
 			}
 
 			ext_type = ext->next_header;
@@ -207,6 +212,8 @@ parse_packet(struct packet *packet) {
 	uint16_t offset = 0;
 
 	packet->hash = 0;
+	packet->flags = 0;
+	packet->fragment_offset = 0;
 
 	if (parse_ether_header(packet, &type, &offset)) {
 		return -1;

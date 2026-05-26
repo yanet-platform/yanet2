@@ -2,6 +2,7 @@
 
 #include "declare.h"
 #include "device.h"
+#include "ipfrag.h"
 #include "net4.h"
 #include "net4_fast.h"
 #include "net6.h"
@@ -46,5 +47,6 @@ REGISTER_ATTRIBUTE(net4_fast_dst);
 REGISTER_ATTRIBUTE(net4_fast_src);
 REGISTER_ATTRIBUTE(net6_fast_dst);
 REGISTER_ATTRIBUTE(net6_fast_src);
+REGISTER_ATTRIBUTE(ip_frag);
 
 #undef REGISTER_ATTRIBUTE

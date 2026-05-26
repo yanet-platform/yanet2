@@ -432,7 +432,6 @@ impl ACLService {
 
     pub async fn metrics(&mut self, cmd: MetricsCmd) -> Result<(), Box<dyn Error>> {
         let response = self.client.get_metrics(GetMetricsRequest {}).await?.into_inner();
-
         let label_filters: Vec<(&str, &str)> = cmd
             .labels
             .iter()

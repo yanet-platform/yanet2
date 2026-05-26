@@ -48,6 +48,7 @@ message Rule {
   repeated filterpb.ProtoRange proto_ranges = 7;
   repeated filterpb.PortRange src_port_ranges = 8;
   repeated filterpb.PortRange dst_port_ranges = 9;
+  filterpb.Fragment fragment = 10;
 }
 
 message Action { ActionKind kind = 1; }

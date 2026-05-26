@@ -23,6 +23,12 @@ const (
 	ActionLog         = C.ACL_RULE_ACTION_KIND_LOG
 )
 
+const (
+	FragmentNone = C.FILTER_IP_FRAG_NONE
+	FragmentFrag = C.FILTER_IP_FRAG_FRAG
+	FragmentAny  = C.FILTER_IP_FRAG_ANY
+)
+
 // AclAction is a single action applied to a matched packet.
 type AclAction struct {
 	Kind uint32
@@ -41,6 +47,7 @@ type AclRule struct {
 	ProtoRanges   filter.ProtoRanges
 	SrcPortRanges filter.PortRanges
 	DstPortRanges filter.PortRanges
+	Fragment      filter.Fragment
 }
 
 // AclConfigInfo holds metadata about a compiled ACL configuration.
@@ -141,6 +148,15 @@ func (m *AclRule) cBuild(pinner *runtime.Pinner) C.struct_acl_rule {
 	filter.CBuildProtoRanges(&cRule.proto_ranges, m.ProtoRanges, pinner)
 	filter.CBuildPortRanges(&cRule.src_port_ranges, m.SrcPortRanges, pinner)
 	filter.CBuildPortRanges(&cRule.dst_port_ranges, m.DstPortRanges, pinner)
+
+	switch m.Fragment {
+	case filter.FragmentNone:
+		cRule.fragment = FragmentNone
+	case filter.FragmentFrag:
+		cRule.fragment = FragmentFrag
+	case filter.FragmentAny:
+		cRule.fragment = FragmentAny
+	}
 
 	return cRule
 }

@@ -137,6 +137,10 @@ func convertRules(reqRules []*aclpb.Rule) ([]cacl.AclRule, error) {
 		if err != nil {
 			return nil, status.Errorf(codes.InvalidArgument, "invalid actions in rule: %v", err)
 		}
+		fragment, err := filterpb.ToFragment(reqRule.Fragment)
+		if err != nil {
+			return nil, err
+		}
 		rule := cacl.AclRule{
 			Actions:       actions,
 			Counter:       reqRule.GetCounter(),
@@ -149,6 +153,7 @@ func convertRules(reqRules []*aclpb.Rule) ([]cacl.AclRule, error) {
 			ProtoRanges:   protoRanges,
 			SrcPortRanges: srcPortRanges,
 			DstPortRanges: dstPortRanges,
+			Fragment:      fragment,
 		}
 		rules = append(rules, rule)
 	}

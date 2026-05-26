@@ -241,3 +241,24 @@ func ToVlanRanges(pb []*VlanRange) (filter.VlanRanges, error) {
 
 	return out, nil
 }
+
+// ToFragment converts protobuf Fragment message to filter Fragment.
+func ToFragment(pb *Fragment) (filter.Fragment, error) {
+	if pb == nil {
+		return filter.FragmentAny, nil
+	}
+	switch pb.Kind {
+	case FragmentKind_Any:
+		return filter.FragmentAny, nil
+	case FragmentKind_None:
+		return filter.FragmentNone, nil
+	case FragmentKind_Frag:
+		return filter.FragmentFrag, nil
+	}
+
+	return filter.FragmentAny, status.Errorf(
+		codes.InvalidArgument,
+		"Unknown Fragment Kind code %d",
+		pb.Kind,
+	)
+}

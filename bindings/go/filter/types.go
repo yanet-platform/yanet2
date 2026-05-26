@@ -158,3 +158,12 @@ func NewProtoRange(proto uint8, subtype Subtype) ProtoRange {
 func NewProto(proto uint8, subtype uint8) uint16 {
 	return uint16(proto)<<8 | uint16(subtype)
 }
+
+type Fragment uint32
+
+// Represent Fragmented attribute
+const (
+	FragmentAny Fragment = iota
+	FragmentNone
+	FragmentFrag
+)

@@ -193,6 +193,7 @@ func allow4Rule(src4, dst4 filter.IPNets, protos filter.ProtoRanges) cacl.AclRul
 		SrcPortRanges: allPorts,
 		DstPortRanges: allPorts,
 		ProtoRanges:   protos,
+		Fragment:      filter.FragmentAny,
 	}
 }
 
@@ -1475,13 +1476,7 @@ func TestACL_IPv4Fragment_FirstFragment(t *testing.T) {
 // TestACL_IPv4Fragment_LaterFragment_PortRule asserts that a non-first IPv4
 // fragment does NOT match a port-based rule, because the fragment has no
 // L4 header and its "ports" are undefined.
-//
-// Currently SKIPPED because lib/dataplane/packet/packet.c does not check the
-// IPv4 fragment flags or offset (see FIXME at line 95). The parser sets
-// transport_header.type to next_proto_id unconditionally, so payload bytes
-// are read as ports. Remove the skip when the parser is fixed.
 func TestACL_IPv4Fragment_LaterFragment_PortRule(t *testing.T) {
-	t.Skip("TODO: parser does not detect non-first IPv4 fragments — fix lib/dataplane/packet/packet.c FIXME at line 95")
 	eth := layers.Ethernet{
 		SrcMAC:       xerror.Unwrap(net.ParseMAC("aa:bb:cc:dd:ee:ff")),
 		DstMAC:       xerror.Unwrap(net.ParseMAC("11:22:33:44:55:66")),
@@ -1640,13 +1635,7 @@ func TestACL_IPv6Fragment_FirstFragment(t *testing.T) {
 // TestACL_IPv6Fragment_LaterFragment asserts that a non-first IPv6 fragment
 // does NOT match a port-based rule, because the fragment has no L4 header
 // and its "ports" are undefined.
-//
-// Currently SKIPPED because lib/dataplane/packet/packet.c does not check the
-// IPv6 fragment offset (see FIXME at lines 174-180). The parser sets
-// transport_header.type to the next-header field unconditionally, so payload
-// bytes are read as ports. Remove the skip when the parser is fixed.
 func TestACL_IPv6Fragment_LaterFragment(t *testing.T) {
-	t.Skip("TODO: parser does not detect non-first IPv6 fragments — fix lib/dataplane/packet/packet.c FIXME at lines 174-180")
 	eth := layers.Ethernet{
 		SrcMAC:       xerror.Unwrap(net.ParseMAC("aa:bb:cc:dd:ee:ff")),
 		DstMAC:       xerror.Unwrap(net.ParseMAC("11:22:33:44:55:66")),

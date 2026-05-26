@@ -16,6 +16,7 @@ compiler_sources = files(
   'compiler/net4_fast.c',
   'compiler/port_fast.c',
   'compiler/segments.c',
+  'compiler/ipfrag.c',
 )
 
 lib_filter_compiler = static_library(

@@ -24,7 +24,9 @@ struct acl_module {
 
 FILTER_QUERY_DECLARE(filter_vlan, device, vlan);
 
-FILTER_QUERY_DECLARE(filter_ip4, device, vlan, net4_src, net4_dst, proto_range);
+FILTER_QUERY_DECLARE(
+	filter_ip4, device, vlan, net4_src, net4_dst, ip_frag, proto_range
+);
 
 FILTER_QUERY_DECLARE(
 	filter_ip4_port,
@@ -37,7 +39,9 @@ FILTER_QUERY_DECLARE(
 	port_dst
 );
 
-FILTER_QUERY_DECLARE(filter_ip6, device, vlan, net6_src, net6_dst, proto_range);
+FILTER_QUERY_DECLARE(
+	filter_ip6, device, vlan, net6_src, net6_dst, ip_frag, proto_range
+);
 
 FILTER_QUERY_DECLARE(
 	filter_ip6_port,
@@ -158,8 +162,9 @@ acl_handle_packets(
 		    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
 			ip4_packets[ip4_idx++] = packet;
 
-			if (packet->transport_header.type == IPPROTO_TCP ||
-			    packet->transport_header.type == IPPROTO_UDP) {
+			if (packet->fragment_offset == 0 &&
+			    (packet->transport_header.type == IPPROTO_TCP ||
+			     packet->transport_header.type == IPPROTO_UDP)) {
 				ip4_port_packets[ip4_port_idx++] = packet;
 			}
 		}
@@ -168,8 +173,9 @@ acl_handle_packets(
 		    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
 			ip6_packets[ip6_idx++] = packet;
 
-			if (packet->transport_header.type == IPPROTO_TCP ||
-			    packet->transport_header.type == IPPROTO_UDP) {
+			if (packet->fragment_offset == 0 &&
+			    (packet->transport_header.type == IPPROTO_TCP ||
+			     packet->transport_header.type == IPPROTO_UDP)) {
 				ip6_port_packets[ip6_port_idx++] = packet;
 			}
 		}
@@ -239,8 +245,9 @@ acl_handle_packets(
 
 			++ip4_idx;
 
-			if (packet->transport_header.type == IPPROTO_TCP ||
-			    packet->transport_header.type == IPPROTO_UDP) {
+			if (packet->fragment_offset == 0 &&
+			    (packet->transport_header.type == IPPROTO_TCP ||
+			     packet->transport_header.type == IPPROTO_UDP)) {
 				if (ip4_port_result[ip4_port_idx] < action) {
 					action = ip4_port_result[ip4_port_idx];
 				}
@@ -256,8 +263,9 @@ acl_handle_packets(
 
 			++ip6_idx;
 
-			if (packet->transport_header.type == IPPROTO_TCP ||
-			    packet->transport_header.type == IPPROTO_UDP) {
+			if (packet->fragment_offset == 0 &&
+			    (packet->transport_header.type == IPPROTO_TCP ||
+			     packet->transport_header.type == IPPROTO_UDP)) {
 				if (ip6_port_result[ip6_port_idx] < action) {
 					action = ip6_port_result[ip6_port_idx];
 				}

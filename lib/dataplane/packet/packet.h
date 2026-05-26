@@ -5,6 +5,10 @@
 
 #define PACKET_HEADER_TYPE_UNKNOWN 0
 
+enum packet_flag {
+	PACKET_FLAG_FRAGMENTED,
+};
+
 struct rte_mbuf;
 
 struct packet_header {
@@ -41,6 +45,8 @@ struct packet {
 	uint16_t vlan;
 
 	uint32_t flow_label; // 12 unused bits + 20 bits of the label
+
+	uint16_t fragment_offset;
 
 	struct network_header network_header;
 	struct transport_header transport_header;

@@ -19,7 +19,13 @@
 FILTER_COMPILER_DECLARE(ACL_FILTER_VLAN_TAG, device, vlan);
 
 FILTER_COMPILER_DECLARE(
-	ACL_FILTER_IP4_TAG, device, vlan, net4_src, net4_dst, proto_range
+	ACL_FILTER_IP4_TAG,
+	device,
+	vlan,
+	net4_src,
+	net4_dst,
+	ip_frag,
+	proto_range
 );
 
 FILTER_COMPILER_DECLARE(
@@ -34,7 +40,13 @@ FILTER_COMPILER_DECLARE(
 );
 
 FILTER_COMPILER_DECLARE(
-	ACL_FILTER_IP6_TAG, device, vlan, net6_src, net6_dst, proto_range
+	ACL_FILTER_IP6_TAG,
+	device,
+	vlan,
+	net6_src,
+	net6_dst,
+	ip_frag,
+	proto_range
 );
 
 FILTER_COMPILER_DECLARE(
@@ -202,6 +214,8 @@ make_filter_rules(
 		filter_rule->transport.dst_count =
 			acl_rule->dst_port_ranges.count;
 		filter_rule->transport.dsts = acl_rule->dst_port_ranges.items;
+
+		filter_rule->fragment = acl_rule->fragment;
 	}
 }
 
@@ -264,7 +278,9 @@ check_has_full_dst_port_range(const struct acl_rule *acl_rule) {
 
 static int
 check_has_full_port_range(const struct acl_rule *acl_rule) {
-	return check_has_full_src_port_range(acl_rule) &&
+	return (acl_rule->fragment == FILTER_IP_FRAG_ANY ||
+		acl_rule->fragment == FILTER_IP_FRAG_NONE) &&
+	       check_has_full_src_port_range(acl_rule) &&
 	       check_has_full_dst_port_range(acl_rule);
 }
 

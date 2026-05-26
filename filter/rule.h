@@ -114,6 +114,12 @@ struct filter_port_ranges {
 	uint32_t count;
 };
 
+enum filter_ip_fragment {
+	FILTER_IP_FRAG_ANY = 0,
+	FILTER_IP_FRAG_NONE = 1,
+	FILTER_IP_FRAG_FRAG = 2,
+};
+
 #define VLAN_UNSPEC ((uint16_t)-1)
 
 /**
@@ -139,6 +145,8 @@ struct filter_rule {
 	struct filter_vlan_range *vlan_ranges;
 
 	uint16_t vlan;
+
+	enum filter_ip_fragment fragment;
 
 	uint32_t action;
 };

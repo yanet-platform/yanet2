@@ -51,6 +51,8 @@ struct acl_rule {
 
 	struct filter_port_ranges src_port_ranges;
 	struct filter_port_ranges dst_port_ranges;
+
+	enum filter_ip_fragment fragment;
 };
 
 int

@@ -33,3 +33,12 @@ message PortRange {
   uint32 from = 1;
   uint32 to = 2;
 }
+
+enum FragmentKind {
+  Any = 0;
+  None = 1;
+  Frag = 2;
+}
+
+// Represents a Fragmented attribute
+message Fragment { FragmentKind kind = 1; }
