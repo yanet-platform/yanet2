@@ -381,7 +381,7 @@ func (m *Runner) toVsConfig(p *UpdateVSPayload) *balancerpb.VsConfig {
 	original := m.model.OriginalVS(p.Key)
 	id := vsKeyToIdentifier(p.Key)
 	if original != nil {
-		id.Addr = append([]byte(nil), original.Key.IP[:]...)
+		id.Addr = keyIPBytes(original.Key.IP)
 		id.Port = uint32(original.Key.Port)
 		id.Proto = original.Key.Proto
 	}
@@ -416,7 +416,7 @@ func (m *Runner) toVsConfig(p *UpdateVSPayload) *balancerpb.VsConfig {
 // alias caller-owned buffers across mutation RPCs.
 func vsKeyToIdentifier(key VsKey) *balancerpb.VsIdentifier {
 	return &balancerpb.VsIdentifier{
-		Addr:  append([]byte(nil), key.IP[:]...),
+		Addr:  keyIPBytes(key.IP),
 		Port:  uint32(key.Port),
 		Proto: key.Proto,
 	}
@@ -426,7 +426,7 @@ func vsKeyToIdentifier(key VsKey) *balancerpb.VsIdentifier {
 // independent address copy.
 func realKeyToIdentifier(key RealKey) *balancerpb.RelativeRealIdentifier {
 	return &balancerpb.RelativeRealIdentifier{
-		Ip:   append([]byte(nil), key.IP[:]...),
+		Ip:   keyIPBytes(key.IP),
 		Port: uint32(key.Port),
 	}
 }

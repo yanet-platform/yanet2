@@ -8,7 +8,7 @@
 # log it for replay.
 
 endpoint: "[::1]:8080"
-corpus_path: "taxi.services.conf"
+corpus_path: "appbalancer.services.conf"
 config_name: "balancer0"
 operation_interval: "10ms"
 update_vs_every: 10

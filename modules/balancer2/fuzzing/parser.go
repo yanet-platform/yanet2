@@ -137,7 +137,7 @@ func (m *VirtualServer) ToVsConfig() *balancerpb.VsConfig {
 		weight := real.Weight
 		rc := &balancerpb.RealConfig{
 			Id: &balancerpb.RelativeRealIdentifier{
-				Ip:   append([]byte(nil), real.Key.IP[:]...),
+				Ip:   keyIPBytes(real.Key.IP),
 				Port: uint32(real.Key.Port),
 			},
 			Weight: &weight,
@@ -152,7 +152,7 @@ func (m *VirtualServer) ToVsConfig() *balancerpb.VsConfig {
 	}
 	return &balancerpb.VsConfig{
 		Id: &balancerpb.VsIdentifier{
-			Addr:  append([]byte(nil), m.Key.IP[:]...),
+			Addr:  keyIPBytes(m.Key.IP),
 			Port:  uint32(m.Key.Port),
 			Proto: m.Key.Proto,
 		},
@@ -375,6 +375,15 @@ func parseBindto(token string) (ip, mask []byte, ok bool) {
 		fullMask[i] = 0xff
 	}
 	return []byte(v6), []byte(fullMask), true
+}
+
+// keyIPBytes returns a canonical protobuf address encoding from a parsed key:
+// IPv4 addresses are emitted as 4 bytes, IPv6 as 16 bytes.
+func keyIPBytes(key [16]byte) []byte {
+	if v4 := net.IP(key[:]).To4(); v4 != nil {
+		return append([]byte(nil), v4...)
+	}
+	return append([]byte(nil), key[:]...)
 }
 
 func (m *parser) handleProtocol(tokens []string) error {

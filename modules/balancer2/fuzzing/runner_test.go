@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"net"
 	"strings"
 	"sync"
 	"testing"
@@ -314,7 +315,7 @@ func (m *runnerFakeRPC) seedFromModel(model *Model) {
 // sees addresses the runner just wrote.
 func identifierToVsKey(id *balancerpb.VsIdentifier) VsKey {
 	var key VsKey
-	copy(key.IP[:], id.GetAddr())
+	copy(key.IP[:], net.IP(id.GetAddr()).To16())
 	key.Port = uint16(id.GetPort())
 	key.Proto = id.GetProto()
 	return key
@@ -322,7 +323,7 @@ func identifierToVsKey(id *balancerpb.VsIdentifier) VsKey {
 
 func identifierToRealKey(id *balancerpb.RelativeRealIdentifier) RealKey {
 	var key RealKey
-	copy(key.IP[:], id.GetIp())
+	copy(key.IP[:], net.IP(id.GetIp()).To16())
 	key.Port = uint16(id.GetPort())
 	return key
 }
