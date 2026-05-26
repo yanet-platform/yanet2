@@ -185,9 +185,12 @@ func TestMainLogsEffectiveSeed(t *testing.T) {
 	})
 
 	fake := &fakeRunner{}
-	withRunnerSeam(t, func(*RuntimeConfig, *Corpus, BalancerRPC, *LatencyStats) (runnerLike, error) {
-		return fake, nil
-	})
+	withRunnerSeam(
+		t,
+		func(*RuntimeConfig, *Corpus, BalancerRPC, *LatencyStats) (runnerLike, error) {
+			return fake, nil
+		},
+	)
 
 	var stdout, stderr bytes.Buffer
 	code := RunMain([]string{"-config", configPath}, &stdout, &stderr)
@@ -207,9 +210,12 @@ func TestMainRunnerErrorMapsToNonZero(t *testing.T) {
 		return &recordingRPC{}, func() error { return nil }, nil
 	})
 
-	withRunnerSeam(t, func(*RuntimeConfig, *Corpus, BalancerRPC, *LatencyStats) (runnerLike, error) {
-		return &fakeRunner{err: errors.New("synthetic runner failure")}, nil
-	})
+	withRunnerSeam(
+		t,
+		func(*RuntimeConfig, *Corpus, BalancerRPC, *LatencyStats) (runnerLike, error) {
+			return &fakeRunner{err: errors.New("synthetic runner failure")}, nil
+		},
+	)
 
 	var stdout, stderr bytes.Buffer
 	code := RunMain([]string{"-config", configPath}, &stdout, &stderr)
@@ -227,10 +233,13 @@ func TestMainDialErrorMapsToNonZero(t *testing.T) {
 		return nil, nil, errors.New("synthetic dial failure")
 	})
 
-	withRunnerSeam(t, func(*RuntimeConfig, *Corpus, BalancerRPC, *LatencyStats) (runnerLike, error) {
-		t.Fatal("runner must not be constructed after dial fails")
-		return nil, nil
-	})
+	withRunnerSeam(
+		t,
+		func(*RuntimeConfig, *Corpus, BalancerRPC, *LatencyStats) (runnerLike, error) {
+			t.Fatal("runner must not be constructed after dial fails")
+			return nil, nil
+		},
+	)
 
 	var stdout, stderr bytes.Buffer
 	code := RunMain([]string{"-config", configPath}, &stdout, &stderr)
@@ -249,9 +258,12 @@ func TestMainRunnerConstructionErrorMapsToNonZero(t *testing.T) {
 		return &recordingRPC{}, func() error { closed++; return nil }, nil
 	})
 
-	withRunnerSeam(t, func(*RuntimeConfig, *Corpus, BalancerRPC, *LatencyStats) (runnerLike, error) {
-		return nil, errors.New("synthetic runner construction failure")
-	})
+	withRunnerSeam(
+		t,
+		func(*RuntimeConfig, *Corpus, BalancerRPC, *LatencyStats) (runnerLike, error) {
+			return nil, errors.New("synthetic runner construction failure")
+		},
+	)
 
 	var stdout, stderr bytes.Buffer
 	code := RunMain([]string{"-config", configPath}, &stdout, &stderr)

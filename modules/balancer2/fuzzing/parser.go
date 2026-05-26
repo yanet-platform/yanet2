@@ -418,8 +418,15 @@ func (m *parser) closeVS() error {
 			m.source, vs.Line, vs.AddrText, vs.Key.Port)
 	}
 	if existing, dup := m.corpus.vsByKey[vs.Key]; dup {
-		return fmt.Errorf("parse services corpus %q:%d: duplicate virtual_server %s:%d (already defined at %s:%d)",
-			m.source, vs.Line, vs.AddrText, vs.Key.Port, existing.Source, existing.Line)
+		return fmt.Errorf(
+			"parse services corpus %q:%d: duplicate virtual_server %s:%d (already defined at %s:%d)",
+			m.source,
+			vs.Line,
+			vs.AddrText,
+			vs.Key.Port,
+			existing.Source,
+			existing.Line,
+		)
 	}
 	m.corpus.vsByKey[vs.Key] = vs
 	m.corpus.VSs = append(m.corpus.VSs, vs)

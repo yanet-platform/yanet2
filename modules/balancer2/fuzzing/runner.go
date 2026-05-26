@@ -193,7 +193,9 @@ func (m *Runner) Run(ctx context.Context) error {
 // installSignalHandler wires SIGINT/SIGTERM into a derived context. The
 // returned cancel must be invoked by the caller to release the signal
 // goroutine.
-func (m *Runner) installSignalHandler(parent context.Context) (context.Context, context.CancelFunc) {
+func (m *Runner) installSignalHandler(
+	parent context.Context,
+) (context.Context, context.CancelFunc) {
 	runCtx, cancel := context.WithCancel(parent)
 	if len(m.signals) == 0 {
 		return runCtx, cancel
@@ -276,7 +278,10 @@ func (m *Runner) step(ctx context.Context, opNum uint64) error {
 		return fmt.Errorf("runner: state mismatch on op %d: %v", opNum, paths)
 	}
 
-	m.logf("%s", FormatGetState(opNum, len(resp.GetStates()[0].GetVs()), countReals(resp), stateDur))
+	m.logf(
+		"%s",
+		FormatGetState(opNum, len(resp.GetStates()[0].GetVs()), countReals(resp), stateDur),
+	)
 	if err := m.model.Apply(op); err != nil {
 		return fmt.Errorf("runner: commit op %d to model: %w", opNum, err)
 	}
@@ -476,7 +481,10 @@ func cloneUint32Ptr(src *uint32) *uint32 {
 func (m *Runner) logOperation(op Operation, candidate *Model, dur time.Duration) {
 	switch op.Type {
 	case OpUpdateVS:
-		m.logf("%s", FormatUpdateVS(op.OpNum, formatVsKey(op.UpdateVS.Key), candidate.ActiveCount(), dur))
+		m.logf(
+			"%s",
+			FormatUpdateVS(op.OpNum, formatVsKey(op.UpdateVS.Key), candidate.ActiveCount(), dur),
+		)
 	case OpDeleteVS:
 		key := ""
 		if len(op.DeleteVS.Keys) > 0 {
@@ -505,9 +513,20 @@ func (m *Runner) emitStatsReport() {
 		return
 	}
 	for _, r := range reports {
-		m.logf("stats op=%s count=%d errors=%d avg=%s p50=%s p90=%s p95=%s p99=%s max=%s cum_count=%d cum_errors=%d",
-			r.Op, r.Count, r.Errors, r.Avg, r.P50, r.P90, r.P95, r.P99, r.Max,
-			r.CumulativeCount, r.CumulativeErrors)
+		m.logf(
+			"stats op=%s count=%d errors=%d avg=%s p50=%s p90=%s p95=%s p99=%s max=%s cum_count=%d cum_errors=%d",
+			r.Op,
+			r.Count,
+			r.Errors,
+			r.Avg,
+			r.P50,
+			r.P90,
+			r.P95,
+			r.P99,
+			r.Max,
+			r.CumulativeCount,
+			r.CumulativeErrors,
+		)
 	}
 }
 

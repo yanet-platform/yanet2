@@ -86,7 +86,12 @@ func TestLoadRuntimeConfigGeneratesSeedWhenZero(t *testing.T) {
 	in := strings.Replace(validYAML, "seed: 12345", "seed: 0", 1)
 	cfg, err := DecodeRuntimeConfig([]byte(in))
 	require.NoError(t, err)
-	assert.Equal(t, int64(0xC0FFEE), cfg.Seed, "seed: 0 must be replaced with a non-zero effective seed")
+	assert.Equal(
+		t,
+		int64(0xC0FFEE),
+		cfg.Seed,
+		"seed: 0 must be replaced with a non-zero effective seed",
+	)
 }
 
 func TestLoadRuntimeConfigGeneratesSeedWhenMissing(t *testing.T) {
@@ -95,7 +100,12 @@ func TestLoadRuntimeConfigGeneratesSeedWhenMissing(t *testing.T) {
 	in := strings.Replace(validYAML, "seed: 12345\n", "", 1)
 	cfg, err := DecodeRuntimeConfig([]byte(in))
 	require.NoError(t, err)
-	assert.Equal(t, int64(42), cfg.Seed, "missing seed must be replaced with a non-zero effective seed")
+	assert.Equal(
+		t,
+		int64(42),
+		cfg.Seed,
+		"missing seed must be replaced with a non-zero effective seed",
+	)
 }
 
 func TestLoadRuntimeConfigPreservesNonZeroSeed(t *testing.T) {

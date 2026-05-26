@@ -119,13 +119,24 @@ func TestParseExistingCorpora(t *testing.T) {
 	totalReals := 0
 	tcpCount := 0
 	for _, vs := range corpus.VSs {
-		assert.NotEmpty(t, vs.Reals, "vs %s:%d must have at least one real", vs.AddrText, vs.Key.Port)
+		assert.NotEmpty(
+			t,
+			vs.Reals,
+			"vs %s:%d must have at least one real",
+			vs.AddrText,
+			vs.Key.Port,
+		)
 		totalReals += len(vs.Reals)
 		assert.NotZero(t, vs.Key.Port, "port must be non-zero")
-		assert.Contains(t,
-			[]balancerpb.TransportProto{balancerpb.TransportProto_TCP, balancerpb.TransportProto_UDP},
+		assert.Contains(
+			t,
+			[]balancerpb.TransportProto{
+				balancerpb.TransportProto_TCP,
+				balancerpb.TransportProto_UDP,
+			},
 			vs.Key.Proto,
-			"proto must be TCP or UDP")
+			"proto must be TCP or UDP",
+		)
 		if vs.Key.Proto == balancerpb.TransportProto_TCP {
 			tcpCount++
 		}

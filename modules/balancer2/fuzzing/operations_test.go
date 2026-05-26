@@ -76,10 +76,28 @@ func TestOperationGenerator(t *testing.T) {
 			require.NotNil(t, opA.UpdateVS)
 			require.NotNil(t, opB.UpdateVS)
 			assert.Equal(t, opA.UpdateVS.Key, opB.UpdateVS.Key, "op %d update_vs key", opNum)
-			assert.Equal(t, opA.UpdateVS.Scheduler, opB.UpdateVS.Scheduler, "op %d scheduler", opNum)
+			assert.Equal(
+				t,
+				opA.UpdateVS.Scheduler,
+				opB.UpdateVS.Scheduler,
+				"op %d scheduler",
+				opNum,
+			)
 			assert.Equal(t, opA.UpdateVS.Flags, opB.UpdateVS.Flags, "op %d flags", opNum)
-			assert.Equal(t, len(opA.UpdateVS.AllowedSources), len(opB.UpdateVS.AllowedSources), "op %d acl count", opNum)
-			assert.Equal(t, len(opA.UpdateVS.Reals), len(opB.UpdateVS.Reals), "op %d real count", opNum)
+			assert.Equal(
+				t,
+				len(opA.UpdateVS.AllowedSources),
+				len(opB.UpdateVS.AllowedSources),
+				"op %d acl count",
+				opNum,
+			)
+			assert.Equal(
+				t,
+				len(opA.UpdateVS.Reals),
+				len(opB.UpdateVS.Reals),
+				"op %d real count",
+				opNum,
+			)
 		case OpDeleteVS, OpDeleteVSNoop:
 			require.NotNil(t, opA.DeleteVS)
 			require.NotNil(t, opB.DeleteVS)
@@ -151,7 +169,11 @@ func TestOperationGeneratorBounds(t *testing.T) {
 		switch op.Type {
 		case OpDeleteVS:
 			require.NotNil(t, op.DeleteVS)
-			require.NotEmpty(t, op.DeleteVS.Keys, "DeleteVS must carry keys; the no-op variant uses OpDeleteVSNoop")
+			require.NotEmpty(
+				t,
+				op.DeleteVS.Keys,
+				"DeleteVS must carry keys; the no-op variant uses OpDeleteVSNoop",
+			)
 			for _, k := range op.DeleteVS.Keys {
 				require.True(t, model.IsActive(k), "op %d deletes inactive VS %v", opNum, k)
 			}
@@ -208,10 +230,21 @@ func TestOperationGeneratorBounds(t *testing.T) {
 				seenVS[batch.Key] = true
 				vs := model.ActiveVS(batch.Key)
 				require.NotNil(t, vs, "op %d UpdateReals targets inactive VS %v", opNum, batch.Key)
-				assert.NotEmpty(t, batch.Updates, "op %d UpdateReals batch must carry updates", opNum)
+				assert.NotEmpty(
+					t,
+					batch.Updates,
+					"op %d UpdateReals batch must carry updates",
+					opNum,
+				)
 				for _, u := range batch.Updates {
-					assert.True(t, vs.HasReal(u.Key),
-						"op %d updates real %v not in active subset for VS %v", opNum, u.Key, batch.Key)
+					assert.True(
+						t,
+						vs.HasReal(u.Key),
+						"op %d updates real %v not in active subset for VS %v",
+						opNum,
+						u.Key,
+						batch.Key,
+					)
 					if u.Weight != nil {
 						assert.GreaterOrEqual(t, *u.Weight, uint32(1))
 						assert.LessOrEqual(t, *u.Weight, uint32(10))
@@ -226,7 +259,13 @@ func TestOperationGeneratorBounds(t *testing.T) {
 
 		// Active VS bounds must hold after every commit.
 		active := model.ActiveCount()
-		assert.GreaterOrEqual(t, active, minActive, "active count dropped below 80%% bound at op %d", opNum)
+		assert.GreaterOrEqual(
+			t,
+			active,
+			minActive,
+			"active count dropped below 80%% bound at op %d",
+			opNum,
+		)
 		assert.LessOrEqual(t, active, originalCount, "active count exceeded 100%% at op %d", opNum)
 
 		// All active VSes must continue to honour the 80-100% real bound.
@@ -244,8 +283,24 @@ func TestOperationGeneratorBounds(t *testing.T) {
 					"op %d VS %v contains real %v outside original set", opNum, vsKey, rk)
 				rs := vs.Real(rk)
 				require.NotNil(t, rs)
-				assert.GreaterOrEqual(t, rs.Weight, uint32(1), "op %d weight under 1 on VS %v real %v", opNum, vsKey, rk)
-				assert.LessOrEqual(t, rs.Weight, uint32(10), "op %d weight over 10 on VS %v real %v", opNum, vsKey, rk)
+				assert.GreaterOrEqual(
+					t,
+					rs.Weight,
+					uint32(1),
+					"op %d weight under 1 on VS %v real %v",
+					opNum,
+					vsKey,
+					rk,
+				)
+				assert.LessOrEqual(
+					t,
+					rs.Weight,
+					uint32(10),
+					"op %d weight over 10 on VS %v real %v",
+					opNum,
+					vsKey,
+					rk,
+				)
 			}
 		}
 	}
@@ -360,7 +415,12 @@ func TestModelInitialWeightsUnclamped(t *testing.T) {
 	reals := vs.Reals()
 	require.Len(t, reals, 2)
 	assert.Equal(t, uint32(42), vs.Real(reals[0]).Weight, "first real must keep parsed weight 42")
-	assert.Equal(t, uint32(999), vs.Real(reals[1]).Weight, "second real must keep parsed weight 999")
+	assert.Equal(
+		t,
+		uint32(999),
+		vs.Real(reals[1]).Weight,
+		"second real must keep parsed weight 999",
+	)
 
 	gen := NewOperationGenerator(model, 1, 12345)
 	for opNum := uint64(1); opNum <= 200; opNum++ {
@@ -375,8 +435,18 @@ func TestModelInitialWeightsUnclamped(t *testing.T) {
 			for _, batch := range op.UpdateReals.Batches {
 				for _, u := range batch.Updates {
 					if u.Weight != nil {
-						assert.GreaterOrEqual(t, *u.Weight, uint32(1), "generated UpdateReals weight under 1")
-						assert.LessOrEqual(t, *u.Weight, uint32(10), "generated UpdateReals weight over 10")
+						assert.GreaterOrEqual(
+							t,
+							*u.Weight,
+							uint32(1),
+							"generated UpdateReals weight under 1",
+						)
+						assert.LessOrEqual(
+							t,
+							*u.Weight,
+							uint32(10),
+							"generated UpdateReals weight over 10",
+						)
 					}
 				}
 			}

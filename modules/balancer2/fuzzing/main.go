@@ -40,7 +40,10 @@ type runnerLike interface {
 
 // defaultDialRPCClient adapts DialRPCClient to the BalancerRPC seam
 // signature. It is the production wiring.
-func defaultDialRPCClient(cfg *RuntimeConfig, stats *LatencyStats) (BalancerRPC, func() error, error) {
+func defaultDialRPCClient(
+	cfg *RuntimeConfig,
+	stats *LatencyStats,
+) (BalancerRPC, func() error, error) {
 	return DialRPCClient(cfg, stats)
 }
 

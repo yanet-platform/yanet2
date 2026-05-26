@@ -432,7 +432,11 @@ func (m *Model) applyUpdateVS(p *UpdateVSPayload) error {
 	}
 	for _, r := range p.Reals {
 		if m.OriginalReal(p.Key, r.Key) == nil {
-			return fmt.Errorf("apply update_vs: real %v is not in the original set for VS %v", r.Key, p.Key)
+			return fmt.Errorf(
+				"apply update_vs: real %v is not in the original set for VS %v",
+				r.Key,
+				p.Key,
+			)
 		}
 		if r.Weight < 1 || r.Weight > 10 {
 			return fmt.Errorf("apply update_vs: weight %d out of range 1..10", r.Weight)
