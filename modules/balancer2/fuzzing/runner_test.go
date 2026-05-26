@@ -445,7 +445,7 @@ func TestRunnerCommitsOnlyAfterGetStateMatch(t *testing.T) {
 
 	calls := h.fake.callSequence()
 	require.GreaterOrEqual(t, len(calls), 2)
-	assert.Equal(t, RPCUpdateReals, calls[0])
+	assert.Equal(t, RPCUpdateVS, calls[0])
 	assert.Equal(t, RPCGetState, calls[1])
 
 	mutations := []string{RPCUpdateVS, RPCDeleteVS, RPCUpdateReals}
@@ -477,7 +477,7 @@ func TestRunnerDoesNotCommitOnRPCFailure(t *testing.T) {
 	preActive := append([]VsKey(nil), h.runner.Model().ActiveOrder()...)
 	preState := snapshotModel(h.runner.Model())
 
-	h.fake.failOnce[RPCUpdateReals] = errors.New("simulated rpc failure")
+	h.fake.failOnce[RPCUpdateVS] = errors.New("simulated rpc failure")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -489,7 +489,7 @@ func TestRunnerDoesNotCommitOnRPCFailure(t *testing.T) {
 	select {
 	case err := <-done:
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "update_reals")
+		assert.Contains(t, err.Error(), "update_vs")
 	case <-time.After(2 * time.Second):
 		t.Fatal("runner did not return on RPC failure")
 	}
@@ -613,19 +613,23 @@ func TestRunnerDoesNotMutateConfigOnStartup(t *testing.T) {
 
 	calls := h.fake.callSequence()
 	require.GreaterOrEqual(t, len(calls), 2)
-	assert.Equal(t, RPCUpdateReals, calls[0])
+	assert.Equal(t, RPCUpdateVS, calls[0])
 	assert.Equal(t, RPCGetState, calls[1])
 }
 
 func TestRunnerUpdateRealsSendsMultipleVSInSingleRPC(t *testing.T) {
 	corpus := genCorpusText(6, 4)
-	h := newRunnerHarness(t, corpus, WithOperationLimit(1))
-	require.NoError(t, h.runWithSteps(1))
+	h := newRunnerHarness(t, corpus, WithOperationLimit(3))
+	require.NoError(t, h.runWithSteps(3))
 
 	calls := h.fake.callSequence()
-	require.GreaterOrEqual(t, len(calls), 2)
-	assert.Equal(t, RPCUpdateReals, calls[0])
+	require.GreaterOrEqual(t, len(calls), 6)
+	assert.Equal(t, RPCUpdateVS, calls[0])
 	assert.Equal(t, RPCGetState, calls[1])
+	assert.Equal(t, RPCUpdateVS, calls[2])
+	assert.Equal(t, RPCGetState, calls[3])
+	assert.Equal(t, RPCUpdateReals, calls[4])
+	assert.Equal(t, RPCGetState, calls[5])
 
 	require.Len(t, h.fake.updateRealsReqs, 1)
 	req := h.fake.updateRealsReqs[0]

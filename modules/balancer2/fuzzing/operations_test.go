@@ -114,14 +114,18 @@ func TestOperationGenerator(t *testing.T) {
 }
 
 // TestOperationCadenceDeletePrecedesUpdate locks in the operation
-// precedence rule: for N=5, ops 1..4 are UpdateReals, op 5 is UpdateVS,
-// and op 10 is DeleteVS (or its lower-bound no-op variant), never an
-// UpdateVS.
+// precedence rule with cold-start bootstrap: op 1 is UpdateVS; for N=5,
+// ops 2..4 are UpdateReals, op 5 is UpdateVS, and op 10 is DeleteVS (or
+// its lower-bound no-op variant), never an UpdateVS.
 func TestOperationCadenceDeletePrecedesUpdate(t *testing.T) {
 	model := newModelFromText(t, genCorpusText(10, 6))
 	gen := NewOperationGenerator(model, 5, 12345)
 
-	for opNum := uint64(1); opNum <= 4; opNum++ {
+	op1 := gen.Generate(1)
+	assert.Equal(t, OpUpdateVS, op1.Type, "op 1 must be UpdateVS bootstrap")
+	require.NoError(t, model.Apply(op1))
+
+	for opNum := uint64(2); opNum <= 4; opNum++ {
 		op := gen.Generate(opNum)
 		assert.Equal(t, OpUpdateReals, op.Type, "op %d must be UpdateReals", opNum)
 		require.NoError(t, model.Apply(op))
@@ -311,7 +315,7 @@ func TestOperationGeneratorUpdateRealsCoversMultipleVS(t *testing.T) {
 	model := newModelFromText(t, genCorpusText(6, 4))
 	gen := NewOperationGenerator(model, 10, 12345)
 
-	op := gen.Generate(1)
+	op := gen.Generate(2)
 	require.Equal(t, OpUpdateReals, op.Type)
 	require.NotNil(t, op.UpdateReals)
 	require.GreaterOrEqual(t, len(op.UpdateReals.Batches), 2)

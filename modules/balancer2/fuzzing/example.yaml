@@ -7,11 +7,12 @@
 # A zero or missing seed causes the loader to generate a non-zero seed and
 # log it for replay.
 
-endpoint: "127.0.0.1:8080"
-corpus_path: "modules/balancer2/fuzzing/taxi.services.conf"
-config_name: "balancer2-fuzz"
+endpoint: "[::1]:8080"
+corpus_path: "taxi.services.conf"
+config_name: "balancer0"
 operation_interval: "10ms"
 update_vs_every: 10
 stats_interval: "30s"
-request_timeout: "5s"
+request_timeout: "60s"
 seed: 12345
+

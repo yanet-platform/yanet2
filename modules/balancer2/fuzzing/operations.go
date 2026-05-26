@@ -144,6 +144,9 @@ func NewOperationGenerator(model *Model, n uint64, seed int64) *OperationGenerat
 // mutate it; the runner applies successful operations back into the model
 // after the corresponding RPC and GetState succeed.
 func (m *OperationGenerator) Generate(opNum uint64) Operation {
+	if opNum == 1 {
+		return m.generateUpdateVS(opNum)
+	}
 	switch {
 	case m.n > 0 && opNum%(2*m.n) == 0:
 		return m.generateDelete(opNum)
@@ -432,11 +435,7 @@ func (m *Model) applyUpdateVS(p *UpdateVSPayload) error {
 	}
 	for _, r := range p.Reals {
 		if m.OriginalReal(p.Key, r.Key) == nil {
-			return fmt.Errorf(
-				"apply update_vs: real %v is not in the original set for VS %v",
-				r.Key,
-				p.Key,
-			)
+			return fmt.Errorf("apply update_vs: real %v is not in the original set for VS %v", r.Key, p.Key)
 		}
 		if r.Weight < 1 || r.Weight > 10 {
 			return fmt.Errorf("apply update_vs: weight %d out of range 1..10", r.Weight)
