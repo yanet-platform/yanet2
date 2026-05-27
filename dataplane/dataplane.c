@@ -464,6 +464,8 @@ dataplane_init(
 		    ) != 0) {
 			return -1;
 		}
+
+		cp_config_unlock(cp_config);
 	}
 
 	return 0;
