@@ -483,18 +483,23 @@ acl_module_config_update(
 		}
 	}
 
-	struct acl_target *targets = (struct acl_target *)memory_balloc(
-		&cp_module->memory_context,
-		sizeof(struct acl_target) * rule_count
-	);
-	if (targets == NULL) {
-		goto error;
+	struct acl_target *targets = NULL;
+	if (rule_count > 0) {
+		targets = (struct acl_target *)memory_balloc(
+			&cp_module->memory_context,
+			sizeof(struct acl_target) * rule_count
+		);
+		if (targets == NULL) {
+			goto error;
+		}
 	}
 
 	SET_OFFSET_OF(&config->targets, targets);
 	config->target_count = rule_count;
 
 	struct filter_rule *filter_rules = NULL;
+	const struct filter_rule *dummy_filter_rule_ptr = NULL;
+	const struct filter_rule **filter_rule_ptrs = &dummy_filter_rule_ptr;
 
 	for (uint32_t idx = 0; idx < rule_count; ++idx) {
 		struct acl_rule *acl_rule = acl_rules + idx;
@@ -553,19 +558,20 @@ acl_module_config_update(
 	}
 
 	// Create per filter rule list
-	filter_rules = (struct filter_rule *)malloc(
-		sizeof(struct filter_rule) * rule_count
-	);
-	if (filter_rules == NULL) {
-		goto error_target;
-	}
+	if (rule_count > 0) {
+		filter_rules = (struct filter_rule *)malloc(
+			sizeof(struct filter_rule) * rule_count
+		);
+		if (filter_rules == NULL) {
+			goto error_target;
+		}
 
-	const struct filter_rule **filter_rule_ptrs =
-		(const struct filter_rule **)malloc(
+		filter_rule_ptrs = (const struct filter_rule **)malloc(
 			sizeof(struct filter_rule *) * rule_count
 		);
-	if (filter_rule_ptrs == NULL) {
-		goto error_rules;
+		if (filter_rule_ptrs == NULL) {
+			goto error_rules;
+		}
 	}
 
 	struct timespec ts_start, ts_end;
@@ -629,23 +635,29 @@ acl_module_config_update(
 				   1000000000LL +
 			   (ts_end.tv_nsec - ts_start.tv_nsec));
 
-	free(filter_rule_ptrs);
+	if (rule_count > 0) {
+		free(filter_rule_ptrs);
+	}
 	free(filter_rules);
 
 	return 0;
 
 error_rule_ptrs:
-	free(filter_rule_ptrs);
+	if (rule_count > 0) {
+		free(filter_rule_ptrs);
+	}
 
 error_rules:
 	free(filter_rules);
 
 error_target:
-	memory_bfree(
-		&cp_module->memory_context,
-		targets,
-		sizeof(struct acl_target) * rule_count
-	);
+	if (targets != NULL) {
+		memory_bfree(
+			&cp_module->memory_context,
+			targets,
+			sizeof(struct acl_target) * rule_count
+		);
+	}
 	SET_OFFSET_OF(&config->targets, NULL);
 	config->target_count = 0;
 
