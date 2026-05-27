@@ -44,6 +44,8 @@ dp_storage_init(
 	struct cp_config *cp_config =
 		(struct cp_config *)((uintptr_t)storage + dp_memory);
 
+	cp_config_lock(cp_config);
+
 	block_allocator_init(&cp_config->block_allocator);
 	block_allocator_put_arena(
 		&cp_config->block_allocator,

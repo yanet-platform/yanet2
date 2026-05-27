@@ -241,6 +241,8 @@ dataplane_ut_new(const struct dataplane_ut_config *cfg) {
 		return NULL;
 	}
 
+	cp_config_unlock(ut->cp_config);
+
 	// Create the mock mempool now so step 2 can allocate mbufs.
 	ut->mempool = test_mempool_create();
 	if (ut->mempool == NULL) {
