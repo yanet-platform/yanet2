@@ -10,10 +10,6 @@ export interface CounterInfo {
     instances?: CounterInstanceInfo[];
 }
 
-export interface CountersResponse {
-    counters?: CounterInfo[];
-}
-
 export interface CounterTag {
     key?: string;
     value?: string;
@@ -33,59 +29,9 @@ export interface CountersByTagsResponse {
     groups?: CounterGroup[];
 }
 
-export interface DeviceCountersRequest {
-    device: string;
-}
-
-export interface PipelineCountersRequest {
-    device: string;
-    pipeline: string;
-}
-
-export interface FunctionCountersRequest {
-    device: string;
-    pipeline: string;
-    function: string;
-}
-
-export interface ChainCountersRequest {
-    device: string;
-    pipeline: string;
-    function: string;
-    chain: string;
-}
-
-export interface ModuleCountersRequest {
-    device: string;
-    pipeline: string;
-    function: string;
-    chain: string;
-    module_type: string;
-    module_name: string;
-    // Filter counters by name.
-    // 
-    // If empty, returns all counters.
-    counter_query?: string[];
-}
-
 const countersService = createService('ynpb.CountersService');
 
 export const counters = {
-    device: (request: DeviceCountersRequest, options?: CallOptions): Promise<CountersResponse> => {
-        return countersService.callWithBody<CountersResponse>('Device', request, options);
-    },
-    pipeline: (request: PipelineCountersRequest, options?: CallOptions): Promise<CountersResponse> => {
-        return countersService.callWithBody<CountersResponse>('Pipeline', request, options);
-    },
-    function: (request: FunctionCountersRequest, options?: CallOptions): Promise<CountersResponse> => {
-        return countersService.callWithBody<CountersResponse>('Function', request, options);
-    },
-    chain: (request: ChainCountersRequest, options?: CallOptions): Promise<CountersResponse> => {
-        return countersService.callWithBody<CountersResponse>('Chain', request, options);
-    },
-    module: (request: ModuleCountersRequest, options?: CallOptions): Promise<CountersResponse> => {
-        return countersService.callWithBody<CountersResponse>('Module', request, options);
-    },
     byTags: (request: CountersByTagsRequest, options?: CallOptions): Promise<CountersByTagsResponse> => {
         return countersService.callWithBody<CountersByTagsResponse>('ByTags', request, options);
     },
