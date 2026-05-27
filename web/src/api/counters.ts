@@ -14,6 +14,25 @@ export interface CountersResponse {
     counters?: CounterInfo[];
 }
 
+export interface CounterTag {
+    key?: string;
+    value?: string;
+}
+
+export interface CountersByTagsRequest {
+    tags?: CounterTag[];
+    query?: string[];
+}
+
+export interface CounterGroup {
+    tags?: CounterTag[];
+    counters?: CounterInfo[];
+}
+
+export interface CountersByTagsResponse {
+    groups?: CounterGroup[];
+}
+
 export interface DeviceCountersRequest {
     device: string;
 }
@@ -66,5 +85,8 @@ export const counters = {
     },
     module: (request: ModuleCountersRequest, options?: CallOptions): Promise<CountersResponse> => {
         return countersService.callWithBody<CountersResponse>('Module', request, options);
+    },
+    byTags: (request: CountersByTagsRequest, options?: CallOptions): Promise<CountersByTagsResponse> => {
+        return countersService.callWithBody<CountersByTagsResponse>('ByTags', request, options);
     },
 };

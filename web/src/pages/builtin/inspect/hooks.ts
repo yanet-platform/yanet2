@@ -1,31 +1,10 @@
 import { useEffect, useRef, useState, useMemo } from 'react';
 import { API } from '../../../api';
-import type { CounterInfo, CountersResponse } from '../../../api';
 import type { DeviceCounterData } from '../../../hooks';
+import { groupCounterGroupsByTagsAndName, makeGroupedCounterKey } from '../../../utils';
 
 const DEFAULT_INTERVAL_MS = 1500;
 const DEFAULT_MAX_LEN = 30;
-
-const sumCounter = (counters: CounterInfo[] | undefined, name: string): bigint => {
-    const c = counters?.find((x) => x.name === name);
-    if (!c?.instances) return BigInt(0);
-    return c.instances.reduce((sum, inst) => {
-        const val = inst.values?.[0];
-        return sum + BigInt(val ?? 0);
-    }, BigInt(0));
-};
-
-/**
- * Aggregate pipeline/function throughput from input/input_bytes counters.
- * These endpoints register input/output/drop counters (not rx/tx); using
- * input represents traffic that entered the pipeline/function regardless
- * of whether it was forwarded or dropped.
- */
-const sumPipelineThroughput = (response: CountersResponse): { packets: bigint; bytes: bigint } => {
-    const packets = sumCounter(response.counters, 'input');
-    const bytes = sumCounter(response.counters, 'input_bytes');
-    return { packets, bytes };
-};
 
 /**
  * Push the current value onto a rolling history at the polling interval.
@@ -127,8 +106,8 @@ interface RatesAndSeries {
 }
 
 /**
- * Poll pipeline counters across (device, pipeline) pairs and produce
- * per-pipeline rate and rolling series.
+ * Poll pipeline counters via tag selection and produce per-pipeline
+ * rate and rolling series.
  */
 export const usePipelineCounters = (
     devices: string[],
@@ -159,35 +138,30 @@ export const usePipelineCounters = (
 
         const tick = async (): Promise<void> => {
             const now = Date.now();
-            const currentDevices = devicesRef.current;
             const currentPipelines = pipelinesRef.current;
-
-            const deltas = await Promise.all(
-                currentDevices.flatMap((device) =>
-                    currentPipelines.map(async (pipeline) => {
-                        try {
-                            const resp = await API.counters.pipeline({ device, pipeline });
-                            const sums = sumPipelineThroughput(resp);
-                            return { name: pipeline, packets: sums.packets, bytes: sums.bytes };
-                        } catch {
-                            // tolerate per-pair failures.
-                            return null;
-                        }
-                    }),
-                ),
-            );
 
             const totals = new Map<string, { packets: bigint; bytes: bigint }>();
             for (const p of currentPipelines) {
                 totals.set(p, { packets: BigInt(0), bytes: BigInt(0) });
             }
-            for (const delta of deltas) {
-                if (delta === null) continue;
-                const cur = totals.get(delta.name) ?? { packets: BigInt(0), bytes: BigInt(0) };
-                totals.set(delta.name, {
-                    packets: cur.packets + delta.packets,
-                    bytes: cur.bytes + delta.bytes,
+
+            try {
+                const response = await API.counters.byTags({
+                    tags: [
+                        { key: 'pipeline', value: '*' },
+                        { key: 'function', value: '' },
+                    ],
+                    query: ['input', 'input_bytes'],
                 });
+                const grouped = groupCounterGroupsByTagsAndName(response.groups, ['pipeline'], 0);
+                for (const pipeline of currentPipelines) {
+                    totals.set(pipeline, {
+                        packets: grouped.get(makeGroupedCounterKey([pipeline], 'input'))?.value ?? BigInt(0),
+                        bytes: grouped.get(makeGroupedCounterKey([pipeline], 'input_bytes'))?.value ?? BigInt(0),
+                    });
+                }
+            } catch {
+                // tolerate fetch failures.
             }
 
             if (cancelled) return;
@@ -240,8 +214,8 @@ export const usePipelineCounters = (
 };
 
 /**
- * Poll function counters across (device, pipeline, function) triples and
- * produce per-function rate and rolling series.
+ * Poll function counters via tag selection and produce per-function
+ * rate and rolling series.
  */
 export const useFunctionCounters = (
     devices: string[],
@@ -281,44 +255,28 @@ export const useFunctionCounters = (
 
         const tick = async (): Promise<void> => {
             const now = Date.now();
-            const currentDevices = devicesRef.current;
-            const currentPipelines = pipelinesRef.current;
             const currentFunctions = functionsRef.current;
-
-            const tasks: Promise<{ name: string; packets: bigint; bytes: bigint } | null>[] = [];
-            for (const device of currentDevices) {
-                for (const pipeline of currentPipelines) {
-                    for (const fn of currentFunctions) {
-                        tasks.push(
-                            (async () => {
-                                try {
-                                    const resp = await API.counters.function({
-                                        device,
-                                        pipeline,
-                                        function: fn,
-                                    });
-                                    const sums = sumPipelineThroughput(resp);
-                                    return { name: fn, packets: sums.packets, bytes: sums.bytes };
-                                } catch {
-                                    // tolerate per-triple failures.
-                                    return null;
-                                }
-                            })(),
-                        );
-                    }
-                }
-            }
-            const deltas = await Promise.all(tasks);
 
             const totals = new Map<string, { packets: bigint; bytes: bigint }>();
             currentFunctions.forEach((f) => totals.set(f, { packets: BigInt(0), bytes: BigInt(0) }));
-            for (const delta of deltas) {
-                if (delta === null) continue;
-                const cur = totals.get(delta.name) ?? { packets: BigInt(0), bytes: BigInt(0) };
-                totals.set(delta.name, {
-                    packets: cur.packets + delta.packets,
-                    bytes: cur.bytes + delta.bytes,
+
+            try {
+                const response = await API.counters.byTags({
+                    tags: [
+                        { key: 'function', value: '*' },
+                        { key: 'chain', value: '' },
+                    ],
+                    query: ['input', 'input_bytes'],
                 });
+                const grouped = groupCounterGroupsByTagsAndName(response.groups, ['function'], 0);
+                for (const functionName of currentFunctions) {
+                    totals.set(functionName, {
+                        packets: grouped.get(makeGroupedCounterKey([functionName], 'input'))?.value ?? BigInt(0),
+                        bytes: grouped.get(makeGroupedCounterKey([functionName], 'input_bytes'))?.value ?? BigInt(0),
+                    });
+                }
+            } catch {
+                // tolerate fetch failures.
             }
 
             if (cancelled) return;

@@ -22,8 +22,14 @@ export const useWorkerCount = (deviceNames: string[]): number | null => {
         let cancelled = false;
         (async () => {
             try {
-                const resp = await API.counters.device({ device: firstDevice });
-                const counter = resp.counters?.[0];
+                const resp = await API.counters.byTags({
+                    tags: [
+                        { key: 'device', value: firstDevice },
+                        { key: 'pipeline', value: '' },
+                    ],
+                    query: ['rx'],
+                });
+                const counter = resp.groups?.[0]?.counters?.[0];
                 if (!counter?.instances) {
                     if (!cancelled) setCount(null);
                     return;

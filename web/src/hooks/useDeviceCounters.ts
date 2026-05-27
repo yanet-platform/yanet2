@@ -1,6 +1,6 @@
 import { useCallback, useMemo } from 'react';
 import { API } from '../api';
-import type { CounterInfo } from '../api';
+import { groupCounterGroupsByTagsAndName, makeGroupedCounterKey } from '../utils';
 import {
     useInterpolatedCounters,
     type InterpolatedCounterData,
@@ -43,24 +43,6 @@ export interface UseDeviceCountersResult {
 }
 
 /**
- * Helper to sum counter values across all instances.
- */
-const sumCounterValues = (counter: CounterInfo | undefined): bigint => {
-    if (!counter?.instances) return BigInt(0);
-    return counter.instances.reduce((sum, inst) => {
-        const val = inst.values?.[0];
-        return sum + BigInt(val ?? 0);
-    }, BigInt(0));
-};
-
-/**
- * Helper to find counter by name.
- */
-const findCounter = (counters: CounterInfo[] | undefined, name: string): CounterInfo | undefined => {
-    return counters?.find(c => c.name === name);
-};
-
-/**
  * Hook for fetching and interpolating device counters (RX/TX rates).
  *
  * Uses the generic useInterpolatedCounters hook with device-specific fetch logic.
@@ -95,24 +77,29 @@ export const useDeviceCounters = (
             newValues.set(`${name}:tx`, { packets: BigInt(0), bytes: BigInt(0) });
         }
 
-        // Fetch counters for each device
-        await Promise.all(
-            deviceNames.map(async (deviceName) => {
-                try {
-                    const response = await API.counters.device({ device: deviceName });
+        try {
+            const response = await API.counters.byTags({
+                tags: [
+                    { key: 'device', value: '*' },
+                    { key: 'pipeline', value: '' },
+                ],
+                query: ['rx', 'rx_bytes', 'tx', 'tx_bytes'],
+            });
 
-                    const rxPackets = sumCounterValues(findCounter(response.counters, 'rx'));
-                    const rxBytes = sumCounterValues(findCounter(response.counters, 'rx_bytes'));
-                    const txPackets = sumCounterValues(findCounter(response.counters, 'tx'));
-                    const txBytes = sumCounterValues(findCounter(response.counters, 'tx_bytes'));
+            const grouped = groupCounterGroupsByTagsAndName(response.groups, ['device'], 0);
 
-                    newValues.set(`${deviceName}:rx`, { packets: rxPackets, bytes: rxBytes });
-                    newValues.set(`${deviceName}:tx`, { packets: txPackets, bytes: txBytes });
-                } catch {
-                    // Ignore errors for individual device counters
-                }
-            })
-        );
+            for (const deviceName of deviceNames) {
+                const rxPackets = grouped.get(makeGroupedCounterKey([deviceName], 'rx'))?.value ?? BigInt(0);
+                const rxBytes = grouped.get(makeGroupedCounterKey([deviceName], 'rx_bytes'))?.value ?? BigInt(0);
+                const txPackets = grouped.get(makeGroupedCounterKey([deviceName], 'tx'))?.value ?? BigInt(0);
+                const txBytes = grouped.get(makeGroupedCounterKey([deviceName], 'tx_bytes'))?.value ?? BigInt(0);
+
+                newValues.set(`${deviceName}:rx`, { packets: rxPackets, bytes: rxBytes });
+                newValues.set(`${deviceName}:tx`, { packets: txPackets, bytes: txBytes });
+            }
+        } catch {
+            // Ignore global counters fetch errors.
+        }
 
         return newValues;
     }, [deviceNames]);
