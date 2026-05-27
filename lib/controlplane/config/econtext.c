@@ -11,7 +11,7 @@ module_ectx_free(
 	struct cp_config_gen *cp_config_gen, struct module_ectx *module_ectx
 ) {
 	struct cp_config *cp_config = ADDR_OF(&cp_config_gen->cp_config);
-	struct memory_context *memory_context = &cp_config->memory_context;
+	struct memory_context *memory_context = &cp_config->ectx_memory_context;
 
 	struct counter_storage *counter_storage =
 		ADDR_OF(&module_ectx->counter_storage);
@@ -53,7 +53,7 @@ module_ectx_create(
 ) {
 	struct cp_config *cp_config = ADDR_OF(&cp_config_gen->cp_config);
 	struct dp_config *dp_config = ADDR_OF(&cp_config->dp_config);
-	struct memory_context *memory_context = &cp_config->memory_context;
+	struct memory_context *memory_context = &cp_config->ectx_memory_context;
 
 	size_t ectx_size = sizeof(struct module_ectx);
 	struct module_ectx *module_ectx =
@@ -100,7 +100,7 @@ module_ectx_create(
 		);
 
 	struct counter_storage *counter_storage = counter_storage_spawn(
-		memory_context,
+		&cp_config->counter_storage_memory_context,
 		&cp_config->counter_storage_allocator,
 		old_counter_storage,
 		&cp_module->counter_registry
@@ -150,7 +150,7 @@ chain_ectx_free(
 	struct cp_config_gen *cp_config_gen, struct chain_ectx *chain_ectx
 ) {
 	struct cp_config *cp_config = ADDR_OF(&cp_config_gen->cp_config);
-	struct memory_context *memory_context = &cp_config->memory_context;
+	struct memory_context *memory_context = &cp_config->ectx_memory_context;
 
 	for (uint64_t idx = 0; idx < chain_ectx->length; ++idx) {
 		struct module_ectx *module_ectx =
@@ -186,7 +186,7 @@ chain_ectx_create(
 	yanet_error **err
 ) {
 	struct cp_config *cp_config = ADDR_OF(&cp_config_gen->cp_config);
-	struct memory_context *memory_context = &cp_config->memory_context;
+	struct memory_context *memory_context = &cp_config->ectx_memory_context;
 
 	uint64_t ectx_size =
 		sizeof(struct chain_ectx) +
@@ -219,7 +219,7 @@ chain_ectx_create(
 		);
 
 	struct counter_storage *counter_storage = counter_storage_spawn(
-		memory_context,
+		&cp_config->counter_storage_memory_context,
 		&cp_config->counter_storage_allocator,
 		old_counter_storage,
 		&cp_chain->counter_registry
@@ -315,7 +315,7 @@ function_ectx_free(
 	struct cp_config_gen *cp_config_gen, struct function_ectx *function_ectx
 ) {
 	struct cp_config *cp_config = ADDR_OF(&cp_config_gen->cp_config);
-	struct memory_context *memory_context = &cp_config->memory_context;
+	struct memory_context *memory_context = &cp_config->ectx_memory_context;
 
 	struct chain_ectx **chains = ADDR_OF(&function_ectx->chains);
 	if (chains != NULL) {
@@ -356,7 +356,7 @@ function_ectx_create(
 	yanet_error **err
 ) {
 	struct cp_config *cp_config = ADDR_OF(&cp_config_gen->cp_config);
-	struct memory_context *memory_context = &cp_config->memory_context;
+	struct memory_context *memory_context = &cp_config->ectx_memory_context;
 
 	uint64_t weight_sum = 0;
 	for (uint64_t idx = 0; idx < cp_function->chain_count; ++idx) {
@@ -411,7 +411,7 @@ function_ectx_create(
 		);
 
 	struct counter_storage *counter_storage = counter_storage_spawn(
-		memory_context,
+		&cp_config->counter_storage_memory_context,
 		&cp_config->counter_storage_allocator,
 		old_counter_storage,
 		&cp_function->counter_registry
@@ -495,7 +495,7 @@ pipeline_ectx_free(
 	struct cp_config_gen *cp_config_gen, struct pipeline_ectx *pipeline_ectx
 ) {
 	struct cp_config *cp_config = ADDR_OF(&cp_config_gen->cp_config);
-	struct memory_context *memory_context = &cp_config->memory_context;
+	struct memory_context *memory_context = &cp_config->ectx_memory_context;
 
 	for (uint64_t idx = 0; idx < pipeline_ectx->length; ++idx) {
 		struct function_ectx *function_ectx =
@@ -527,7 +527,7 @@ pipeline_ectx_create(
 	yanet_error **err
 ) {
 	struct cp_config *cp_config = ADDR_OF(&cp_config_gen->cp_config);
-	struct memory_context *memory_context = &cp_config->memory_context;
+	struct memory_context *memory_context = &cp_config->ectx_memory_context;
 
 	size_t ectx_size = sizeof(struct pipeline_ectx) +
 			   sizeof(struct function_ectx *) * cp_pipeline->length;
@@ -556,7 +556,7 @@ pipeline_ectx_create(
 		);
 
 	struct counter_storage *counter_storage = counter_storage_spawn(
-		memory_context,
+		&cp_config->counter_storage_memory_context,
 		&cp_config->counter_storage_allocator,
 		old_counter_storage,
 		&cp_pipeline->counter_registry
@@ -643,7 +643,7 @@ device_entry_ectx_free(
 	struct device_entry_ectx *device_entry_ectx
 ) {
 	struct cp_config *cp_config = ADDR_OF(&cp_config_gen->cp_config);
-	struct memory_context *memory_context = &cp_config->memory_context;
+	struct memory_context *memory_context = &cp_config->ectx_memory_context;
 
 	struct pipeline_ectx **pipelines =
 		ADDR_OF(&device_entry_ectx->pipelines);
@@ -683,7 +683,7 @@ device_entry_ectx_create(
 	yanet_error **err
 ) {
 	struct cp_config *cp_config = ADDR_OF(&new_config_gen->cp_config);
-	struct memory_context *memory_context = &cp_config->memory_context;
+	struct memory_context *memory_context = &cp_config->ectx_memory_context;
 
 	uint64_t weight_sum = 0;
 	for (uint64_t idx = 0; idx < cp_device_entry->pipeline_count; ++idx) {
@@ -782,7 +782,7 @@ device_ectx_free(
 	struct cp_config_gen *cp_config_gen, struct device_ectx *device_ectx
 ) {
 	struct cp_config *cp_config = ADDR_OF(&cp_config_gen->cp_config);
-	struct memory_context *memory_context = &cp_config->memory_context;
+	struct memory_context *memory_context = &cp_config->ectx_memory_context;
 
 	struct device_entry_ectx *input =
 		ADDR_OF(&device_ectx->input_pipelines);
@@ -812,7 +812,7 @@ device_ectx_create(
 ) {
 	struct cp_config *cp_config = ADDR_OF(&cp_config_gen->cp_config);
 	struct dp_config *dp_config = ADDR_OF(&cp_config->dp_config);
-	struct memory_context *memory_context = &cp_config->memory_context;
+	struct memory_context *memory_context = &cp_config->ectx_memory_context;
 
 	size_t ectx_size = sizeof(struct device_ectx);
 
@@ -836,7 +836,7 @@ device_ectx_create(
 		);
 
 	struct counter_storage *counter_storage = counter_storage_spawn(
-		memory_context,
+		&cp_config->counter_storage_memory_context,
 		&cp_config->counter_storage_allocator,
 		old_counter_storage,
 		&cp_device->counter_registry
@@ -919,7 +919,7 @@ config_gen_ectx_free(
 	struct config_gen_ectx *config_gen_ectx
 ) {
 	struct cp_config *cp_config = ADDR_OF(&cp_config_gen->cp_config);
-	struct memory_context *memory_context = &cp_config->memory_context;
+	struct memory_context *memory_context = &cp_config->ectx_memory_context;
 
 	for (uint64_t device_idx = 0;
 	     device_idx < config_gen_ectx->device_count;
@@ -960,7 +960,7 @@ link_module_ectx(
 	struct cp_config_gen *cp_config_gen =
 		ADDR_OF(&config_gen_ectx->cp_config_gen);
 	struct cp_config *cp_config = ADDR_OF(&cp_config_gen->cp_config);
-	struct memory_context *memory_context = &cp_config->memory_context;
+	struct memory_context *memory_context = &cp_config->ectx_memory_context;
 
 	struct cp_module *cp_module = ADDR_OF(&module_ectx->cp_module);
 
@@ -1236,7 +1236,7 @@ config_gen_ectx_create(
 	yanet_error **err
 ) {
 	struct cp_config *cp_config = ADDR_OF(&cp_config_gen->cp_config);
-	struct memory_context *memory_context = &cp_config->memory_context;
+	struct memory_context *memory_context = &cp_config->ectx_memory_context;
 
 	size_t ectx_size = sizeof(struct config_gen_ectx) +
 			   sizeof(struct device_ectx *) *

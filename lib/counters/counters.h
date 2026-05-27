@@ -74,7 +74,7 @@ struct counter_storage_pool {
 };
 
 struct counter_storage_allocator {
-	struct memory_context *memory_context;
+	struct memory_context memory_context;
 	uint64_t instance_count;
 };
 

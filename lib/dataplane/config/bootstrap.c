@@ -54,6 +54,18 @@ dp_storage_init(
 		&cp_config->memory_context, "cp", &cp_config->block_allocator
 	);
 
+	memory_context_init_from(
+		&cp_config->ectx_memory_context,
+		&cp_config->memory_context,
+		"ectx"
+	);
+
+	memory_context_init_from(
+		&cp_config->counter_storage_memory_context,
+		&cp_config->memory_context,
+		"counter_storage"
+	);
+
 	// FIXME: cp_config bootstrap routine
 	struct cp_agent_registry *cp_agent_registry =
 		(struct cp_agent_registry *)memory_balloc(

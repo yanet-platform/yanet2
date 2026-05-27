@@ -78,6 +78,14 @@ struct cp_config {
 	 */
 	struct memory_context memory_context;
 	/*
+	 * Controlplane memory context used for econtext placement.
+	 */
+	struct memory_context ectx_memory_context;
+	/*
+	 * Controlplane memory context used for counter storage placement.
+	 */
+	struct memory_context counter_storage_memory_context;
+	/*
 	 * Relative porinter to the corresponding dataplane memory zone
 	 * structure.
 	 */
