@@ -29,65 +29,20 @@ on:
       - "**/Cargo.lock"
 
 jobs:
-  build:
+  build-asan-test:
     runs-on: ubuntu-24.04
     env:
-      cache_name: build-and-test
+      cache_name: build-asan-test
 
     steps:
-      - name: Free up disk space on GitHub runner
-        run: |
-          echo "=== Initial disk space ==="
-          df -h
-
-          echo "=== Removing unnecessary software ==="
-          # Remove large packages that are not needed
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /usr/local/lib/android
-          sudo rm -rf /opt/ghc
-          sudo rm -rf /opt/hostedtoolcache/CodeQL
-          sudo rm -rf /usr/local/share/boost
-          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
-
-          # Clean apt cache
-          sudo apt-get clean
-
-          # Remove docker images
-          docker rmi $(docker images -q) 2>/dev/null || true
-
-          echo "=== Disk space after cleanup ==="
-          df -h
-
       - name: update apt (act hack)
         if: ${{ env.ACT }}
         run: apt-get update
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
-      - name: Cache rust
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('**/Cargo.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-
-            ${{ runner.os }}-cargo-
       - uses: awalsh128/cache-apt-pkgs-action@latest
         with:
-          packages: meson clang cmake python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler jq clang-tidy-19
+          packages: meson clang cmake python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler
           version: 1.1
-
-      - name: Install LLVM 19 toolchain
-        id: llvm
-        uses: KyleMayes/install-llvm-action@v2
-        with:
-          version: "19.1.1"
-          directory: ${{ runner.temp }}/llvm
 
       - uses: actions/checkout@v4
         with:
@@ -96,7 +51,7 @@ jobs:
       - uses: hendrikmuhs/ccache-action@v1.2.18
         name: ccache
         with:
-          key: ${{ runner.os }}-build-cache
+          key: ${{ runner.os }}-build-asan-test-cache
           max-size: 2G
           verbose: 2
 
@@ -105,11 +60,12 @@ jobs:
           go-version: "1.24.x"
           cache: false
           check-latest: true
-      # https://github.com/actions/setup-go/issues/358
+
       - name: Get Go environment
         run: |
           echo "cache=$(go env GOCACHE)" >>$GITHUB_ENV
           echo "modcache=$(go env GOMODCACHE)" >>$GITHUB_ENV
+
       - name: Set up go cache
         uses: actions/cache@v3
         with:
@@ -130,37 +86,146 @@ jobs:
         run: |
           make go-cache-clean
           meson setup build -Dbuildtype=debug -Doptimization=0 -Db_sanitize=address,undefined
-          make dataplane cli
+          make dataplane
 
       - name: Build and run tests (sanitize)
         run: |
           make go-cache-clean
           make test-asan
+
       - name: Show meson test log
-        run: grep -v 'Inherited environment' build/meson-logs/testlog.txt
+        if: always()
+        run: grep -v 'Inherited environment' build/meson-logs/testlog.txt || true
+
+  build-tsan-test:
+    runs-on: ubuntu-24.04
+    env:
+      cache_name: build-tsan-test
+
+    steps:
+      - name: update apt (act hack)
+        if: ${{ env.ACT }}
+        run: apt-get update
+
+      - uses: awalsh128/cache-apt-pkgs-action@latest
+        with:
+          packages: meson clang cmake python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler
+          version: 1.1
+
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - uses: hendrikmuhs/ccache-action@v1.2.18
+        name: ccache
+        with:
+          key: ${{ runner.os }}-build-tsan-test-cache
+          max-size: 2G
+          verbose: 2
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+          cache: false
+          check-latest: true
+
+      - name: Get Go environment
+        run: |
+          echo "cache=$(go env GOCACHE)" >>$GITHUB_ENV
+          echo "modcache=$(go env GOMODCACHE)" >>$GITHUB_ENV
+
+      - name: Set up go cache
+        uses: actions/cache@v3
+        with:
+          path: |
+            ${{ env.cache }}
+            ${{ env.modcache }}
+          key: ${{ env.cache_name }}-${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}-${{ hashFiles('**/go.mod') }}
+          restore-keys: |
+            ${{ env.cache_name }}-${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}-
+            ${{ env.cache_name }}-${{ runner.os }}-go-
+
+      - name: Install Go Protobuf Plugins
+        run: |
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
 
       - name: Run TSAN tests
         run: make test-tsan
+
       - name: Show TSAN test log
         if: always()
         run: grep -v 'Inherited environment' build-tsan/meson-logs/testlog.txt || true
 
-      - name: Clean debug build artifacts to free space
+  build-release-artifacts:
+    runs-on: ubuntu-24.04
+    env:
+      cache_name: build-release-artifacts
+
+    steps:
+      - name: update apt (act hack)
+        if: ${{ env.ACT }}
+        run: apt-get update
+
+      - uses: awalsh128/cache-apt-pkgs-action@latest
+        with:
+          packages: meson clang cmake python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler
+          version: 1.1
+
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Cache rust
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('**/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-
+            ${{ runner.os }}-cargo-
+
+      - uses: hendrikmuhs/ccache-action@v1.2.18
+        name: ccache
+        with:
+          key: ${{ runner.os }}-build-release-artifacts-cache
+          max-size: 2G
+          verbose: 2
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+          cache: false
+          check-latest: true
+
+      - name: Get Go environment
         run: |
-          echo "=== Disk space before cleanup ==="
-          df -h
-          echo "=== Build directory size ==="
-          du -sh build/ || true
+          echo "cache=$(go env GOCACHE)" >>$GITHUB_ENV
+          echo "modcache=$(go env GOMODCACHE)" >>$GITHUB_ENV
 
-          echo "=== Cleaning debug build artifacts ==="
-          # Completely remove build directory to free maximum space
-          rm -rf build/
+      - name: Set up go cache
+        uses: actions/cache@v3
+        with:
+          path: |
+            ${{ env.cache }}
+            ${{ env.modcache }}
+          key: ${{ env.cache_name }}-${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}-${{ hashFiles('**/go.mod') }}
+          restore-keys: |
+            ${{ env.cache_name }}-${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}-
+            ${{ env.cache_name }}-${{ runner.os }}-go-
 
-          # Clean Docker build cache if exists
-          docker system prune -af 2>/dev/null || true
-
-          echo "=== Disk space after cleanup ==="
-          df -h
+      - name: Install Go Protobuf Plugins
+        run: |
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
 
       - name: Build YANET (release)
         run: |
@@ -172,7 +237,121 @@ jobs:
         run: make test
 
       - name: Show meson test log
-        run: grep -v 'Inherited environment' build/meson-logs/testlog.txt
+        if: always()
+        run: grep -v 'Inherited environment' build/meson-logs/testlog.txt || true
+
+      - name: Verify binaries before upload
+        run: |
+          echo "=== DIAGNOSTIC: Verifying binaries before artifact upload ==="
+          echo "Current git commit: $(git rev-parse HEAD)"
+          echo "Current git commit short: $(git rev-parse --short HEAD)"
+          echo ""
+
+          echo "yanet-dataplane:"
+          if [ -f "build/dataplane/yanet-dataplane" ]; then
+              stat build/dataplane/yanet-dataplane
+              md5sum build/dataplane/yanet-dataplane
+              strings build/dataplane/yanet-dataplane | grep -E "yanet|version" | head -20 || true
+          else
+              echo "ERROR: build/dataplane/yanet-dataplane not found!"
+              exit 1
+          fi
+
+          echo ""
+          echo "yanet-controlplane:"
+          if [ -f "build/controlplane/yanet-controlplane" ]; then
+              stat build/controlplane/yanet-controlplane
+              md5sum build/controlplane/yanet-controlplane
+              strings build/controlplane/yanet-controlplane | grep -E "yanet|version" | head -20 || true
+          else
+              echo "ERROR: build/controlplane/yanet-controlplane not found!"
+              exit 1
+          fi
+
+          echo ""
+          echo "yanet-cli binaries:"
+          if ls target/release/yanet-cli* 1>/dev/null 2>&1; then
+              stat target/release/yanet-cli* || true
+              md5sum target/release/yanet-cli* || true
+          else
+              echo "ERROR: No yanet-cli binaries found in target/release/!"
+              exit 1
+          fi
+
+      - name: Upload YANET binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: yanet2-binaries
+          path: |
+            build/dataplane/yanet-dataplane
+            build/controlplane/yanet-controlplane
+            target/release/yanet-cli*
+
+  clang-tidy:
+    runs-on: ubuntu-24.04
+    env:
+      cache_name: clang-tidy
+
+    steps:
+      - name: update apt (act hack)
+        if: ${{ env.ACT }}
+        run: apt-get update
+
+      - uses: awalsh128/cache-apt-pkgs-action@latest
+        with:
+          packages: meson clang cmake python3-pyelftools libnuma-dev libpcap-dev git protobuf-compiler jq
+          version: 1.1
+
+      - name: Install LLVM 19 toolchain
+        id: llvm
+        uses: KyleMayes/install-llvm-action@v2
+        with:
+          version: "19.1.1"
+          directory: ${{ runner.temp }}/llvm
+
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - uses: hendrikmuhs/ccache-action@v1.2.18
+        name: ccache
+        with:
+          key: ${{ runner.os }}-clang-tidy-cache
+          max-size: 2G
+          verbose: 2
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+          cache: false
+          check-latest: true
+
+      - name: Get Go environment
+        run: |
+          echo "cache=$(go env GOCACHE)" >>$GITHUB_ENV
+          echo "modcache=$(go env GOMODCACHE)" >>$GITHUB_ENV
+
+      - name: Set up go cache
+        uses: actions/cache@v3
+        with:
+          path: |
+            ${{ env.cache }}
+            ${{ env.modcache }}
+          key: ${{ env.cache_name }}-${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}-${{ hashFiles('**/go.mod') }}
+          restore-keys: |
+            ${{ env.cache_name }}-${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}-
+            ${{ env.cache_name }}-${{ runner.os }}-go-
+
+      - name: Install Go Protobuf Plugins
+        run: |
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+
+      - name: Build YANET (release)
+        run: |
+          make go-cache-clean
+          meson setup build -Dbuildtype=release
+          make dataplane
 
       - name: Run clang-tidy
         env:
@@ -234,58 +413,11 @@ jobs:
                       {}
           fi
 
-      - name: Verify binaries before upload
-        run: |
-          echo "=== DIAGNOSTIC: Verifying binaries before artifact upload ==="
-          echo "Current git commit: $(git rev-parse HEAD)"
-          echo "Current git commit short: $(git rev-parse --short HEAD)"
-          echo ""
-
-          echo "yanet-dataplane:"
-          if [ -f "build/dataplane/yanet-dataplane" ]; then
-              stat build/dataplane/yanet-dataplane
-              md5sum build/dataplane/yanet-dataplane
-              strings build/dataplane/yanet-dataplane | grep -E "yanet|version" | head -20 || true
-          else
-              echo "ERROR: build/dataplane/yanet-dataplane not found!"
-              exit 1
-          fi
-
-          echo ""
-          echo "yanet-controlplane:"
-          if [ -f "build/controlplane/yanet-controlplane" ]; then
-              stat build/controlplane/yanet-controlplane
-              md5sum build/controlplane/yanet-controlplane
-              strings build/controlplane/yanet-controlplane | grep -E "yanet|version" | head -20 || true
-          else
-              echo "ERROR: build/controlplane/yanet-controlplane not found!"
-              exit 1
-          fi
-
-          echo ""
-          echo "yanet-cli binaries:"
-          if ls target/release/yanet-cli* 1>/dev/null 2>&1; then
-              stat target/release/yanet-cli* || true
-              md5sum target/release/yanet-cli* || true
-          else
-              echo "ERROR: No yanet-cli binaries found in target/release/!"
-              exit 1
-          fi
-
-      - name: Upload YANET binaries
-        uses: actions/upload-artifact@v4
-        with:
-          name: yanet2-binaries
-          path: |
-            build/dataplane/yanet-dataplane
-            build/controlplane/yanet-controlplane
-            target/release/yanet-cli*
-
   functional-tests:
     name: Run Functional Tests
     runs-on: ubuntu-24.04
     timeout-minutes: 150
-    needs: build
+    needs: build-release-artifacts
 
     steps:
       - uses: actions/checkout@v4
