@@ -452,6 +452,98 @@ func TestACL_PortRange_UDP(t *testing.T) {
 	})
 }
 
+// TestACL_PortRange_BatchResultsAdvance verifies that per-packet port-filter
+// results are consumed with advancing indices across a single packet batch.
+func TestACL_PortRange_BatchResultsAdvance(t *testing.T) {
+	t.Run("ipv4_udp_filter_ip4_port", func(t *testing.T) {
+		eth := layers.Ethernet{
+			SrcMAC:       xerror.Unwrap(net.ParseMAC("aa:bb:cc:dd:ee:ff")),
+			DstMAC:       xerror.Unwrap(net.ParseMAC("11:22:33:44:55:66")),
+			EthernetType: layers.EthernetTypeIPv4,
+		}
+		ip4 := layers.IPv4{
+			Version:  4,
+			TTL:      64,
+			Protocol: layers.IPProtocolUDP,
+			SrcIP:    net.ParseIP("192.0.2.1"),
+			DstIP:    net.ParseIP("10.0.0.1"),
+		}
+
+		rules := []cacl.AclRule{{
+			Actions:       []cacl.AclAction{{Kind: cacl.ActionAllow}},
+			Devices:       filter.Devices{{Name: "port0"}},
+			Src4s:         filter.IPNets{filter.UnspecifiedIPv4},
+			Dst4s:         filter.IPNets{filter.UnspecifiedIPv4},
+			Src6s:         filter.IPNets{},
+			Dst6s:         filter.IPNets{},
+			SrcPortRanges: allPorts,
+			DstPortRanges: filter.PortRanges{{From: 150, To: 450}},
+			ProtoRanges:   udpProto,
+		}}
+
+		missUDP := layers.UDP{SrcPort: 12345, DstPort: 600}
+		missUDP.SetNetworkLayerForChecksum(&ip4)
+		missPkt := xpacket.LayersToPacket(t, &eth, &ip4, &missUDP)
+
+		matchUDP := layers.UDP{SrcPort: 12345, DstPort: 300}
+		matchUDP.SetNetworkLayerForChecksum(&ip4)
+		matchPkt := xpacket.LayersToPacket(t, &eth, &ip4, &matchUDP)
+
+		h, agent, backend := setupACLHarness(t, []string{"port0"})
+		applyACLRules(t, backend, "test", rules)
+		wireACLPipeline(t, agent, "port0", "test")
+
+		result, err := h.HandlePackets(missPkt, matchPkt)
+		require.NoError(t, err)
+		require.Len(t, result.Output, 1)
+		require.Len(t, result.Drop, 1)
+	})
+
+	t.Run("ipv6_tcp_filter_ip6_port", func(t *testing.T) {
+		eth := layers.Ethernet{
+			SrcMAC:       xerror.Unwrap(net.ParseMAC("aa:bb:cc:dd:ee:ff")),
+			DstMAC:       xerror.Unwrap(net.ParseMAC("11:22:33:44:55:66")),
+			EthernetType: layers.EthernetTypeIPv6,
+		}
+		ip6 := layers.IPv6{
+			Version:    6,
+			HopLimit:   64,
+			NextHeader: layers.IPProtocolTCP,
+			SrcIP:      net.ParseIP("2001:db8::1"),
+			DstIP:      net.ParseIP("2001:db8::2"),
+		}
+
+		rules := []cacl.AclRule{{
+			Actions:       []cacl.AclAction{{Kind: cacl.ActionAllow}},
+			Devices:       filter.Devices{{Name: "port0"}},
+			Src4s:         filter.IPNets{},
+			Dst4s:         filter.IPNets{},
+			Src6s:         filter.IPNets{filter.UnspecifiedIPv6},
+			Dst6s:         filter.IPNets{filter.UnspecifiedIPv6},
+			SrcPortRanges: allPorts,
+			DstPortRanges: filter.PortRanges{{From: 150, To: 450}},
+			ProtoRanges:   tcpProto,
+		}}
+
+		missTCP := layers.TCP{SrcPort: 12345, DstPort: 600, SYN: true}
+		missTCP.SetNetworkLayerForChecksum(&ip6)
+		missPkt := xpacket.LayersToPacket(t, &eth, &ip6, &missTCP)
+
+		matchTCP := layers.TCP{SrcPort: 12345, DstPort: 300, SYN: true}
+		matchTCP.SetNetworkLayerForChecksum(&ip6)
+		matchPkt := xpacket.LayersToPacket(t, &eth, &ip6, &matchTCP)
+
+		h, agent, backend := setupACLHarness(t, []string{"port0"})
+		applyACLRules(t, backend, "test", rules)
+		wireACLPipeline(t, agent, "port0", "test")
+
+		result, err := h.HandlePackets(missPkt, matchPkt)
+		require.NoError(t, err)
+		require.Len(t, result.Output, 1)
+		require.Len(t, result.Drop, 1)
+	})
+}
+
 // TestACL_Subnet_IPv4 verifies that a /24 source CIDR rule correctly allows
 // packets from within the subnet.
 func TestACL_Subnet_IPv4(t *testing.T) {

@@ -244,6 +244,7 @@ acl_handle_packets(
 				if (ip4_port_result[ip4_port_idx] < action) {
 					action = ip4_port_result[ip4_port_idx];
 				}
+				++ip4_port_idx;
 			}
 		} else if (packet->network_header.type ==
 			   rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
@@ -260,6 +261,7 @@ acl_handle_packets(
 				if (ip6_port_result[ip6_port_idx] < action) {
 					action = ip6_port_result[ip6_port_idx];
 				}
+				++ip6_port_idx;
 			}
 		}
 
