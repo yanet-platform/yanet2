@@ -119,8 +119,6 @@ func (m *ModuleConfig) buildVsState(
 				if rSlot, ok := slot.reals[rid]; ok {
 					rs.Enabled = rSlot.enabled
 					rs.EffectiveWeight = uint64(rSlot.effectiveWeight)
-					// Real runtime state is sourced from current index, not
-					// from stored config optional fields.
 					cfgReal.Enabled = boolPtr(rSlot.enabled)
 					cfgReal.Weight = uint32Ptr(rSlot.weight)
 				}

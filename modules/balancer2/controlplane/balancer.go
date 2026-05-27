@@ -355,8 +355,35 @@ func (m *ModuleConfig) commitRealUpdates(staged map[int]*vsUpdate) error {
 			index[k].weight = rs.weight
 			index[k].effectiveWeight = rs.effectiveWeight
 		}
+		m.syncVSConfigReals(vsIdx, info.reals)
 	}
 	return nil
+}
+
+// syncVSConfigReals mirrors successful UpdateReals changes into the stored
+// config snapshot so a later full rebuild (for example via UpdateVS on another
+// virtual service) does not resurrect stale real enabled/weight values.
+func (m *ModuleConfig) syncVSConfigReals(vsIdx int, reals map[realID]*realSlot) {
+	if m.cfg == nil || m.cfg.Vs == nil || vsIdx < 0 || vsIdx >= len(m.cfg.Vs.Vs) {
+		return
+	}
+	vs := m.cfg.Vs.Vs[vsIdx]
+	if vs == nil {
+		return
+	}
+	for _, rs := range reals {
+		if rs.idx < 0 || rs.idx >= len(vs.Reals) {
+			continue
+		}
+		realCfg := vs.Reals[rs.idx]
+		if realCfg == nil {
+			continue
+		}
+		enabled := rs.enabled
+		weight := rs.weight
+		realCfg.Enabled = &enabled
+		realCfg.Weight = &weight
+	}
 }
 
 func makeVsID(id *balancerpb.VsIdentifier) (vsID, error) {
