@@ -38,7 +38,7 @@ func NewNAT64Module(cfg *Config, log *zap.Logger) (*NAT64Module, error) {
 		return nil, fmt.Errorf("failed to attach agent to shared memory: %w", err)
 	}
 
-	nat64Service := NewNAT64Service(agent, log)
+	nat64Service := NewNAT64Service(NewBackend(agent), WithNAT64ServiceLog(log))
 
 	return &NAT64Module{
 		cfg:          cfg,

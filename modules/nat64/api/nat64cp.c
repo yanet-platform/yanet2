@@ -85,7 +85,7 @@ nat64_module_config_free(struct cp_module *cp_module) {
 		sizeof(struct nat64_module_config)
 	);
 
-	LOG(DEBUG, "Completed cleanup of NAT64 module '%s'", cp_module->name);
+	LOG(DEBUG, "Completed cleanup of NAT64 module config");
 }
 
 int
@@ -346,6 +346,29 @@ nat64_module_config_set_drop_unknown(
 	    "Set drop unknown flags: prefix=%d, mapping=%d",
 	    drop_unknown_prefix,
 	    drop_unknown_mapping);
+
+	return 0;
+}
+
+int
+nat64_module_config_set_mtu(
+	struct cp_module *cp_module, uint16_t ipv4_mtu, uint16_t ipv6_mtu
+) {
+	if (!cp_module) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	struct nat64_module_config *config =
+		container_of(cp_module, struct nat64_module_config, cp_module);
+
+	config->mtu.ipv4 = ipv4_mtu;
+	config->mtu.ipv6 = ipv6_mtu;
+
+	LOG(DEBUG,
+	    "Set MTU limits: ipv4=%" PRIu16 ", ipv6=%" PRIu16,
+	    ipv4_mtu,
+	    ipv6_mtu);
 
 	return 0;
 }
