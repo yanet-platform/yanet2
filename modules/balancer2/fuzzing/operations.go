@@ -133,6 +133,10 @@ const (
 	maxEnabledPercent = 60
 	realWeightMin     = 1
 	realWeightMax     = 30
+	// Prefer small DeleteVS steps to avoid sticking near the lower bound.
+	// Occasional deep drops keep the active-VS trajectory wide.
+	deleteVSLargeDropChancePercent = 25
+	deleteVSSmallStepMax           = 3
 )
 
 // NewOperationGenerator returns a generator seeded by the runtime config's
@@ -168,9 +172,14 @@ func (m *OperationGenerator) Generate(opNum uint64) Operation {
 }
 
 // generateDelete removes a random subset of active VSes while preserving
-// the 80-100% active-set invariant. If the active count is already at the
-// lower bound, it emits a no-op DeleteVS (empty key list) so the runner
-// still issues the RPC and GetState pair.
+// the 80-100% active-set invariant. Most deletes are intentionally small
+// (1..3 VS) so UpdateVS operations can rebuild the active set and produce
+// a wider long-run amplitude. Occasionally the generator performs a deep
+// drop to exercise lower active-set regimes.
+//
+// If the active count is already at the lower bound, it emits a no-op
+// DeleteVS (empty key list) so the runner still issues the RPC and GetState
+// pair.
 func (m *OperationGenerator) generateDelete(opNum uint64) Operation {
 	active := m.model.ActiveCount()
 	min := m.model.MinActive()
@@ -186,11 +195,23 @@ func (m *OperationGenerator) generateDelete(opNum uint64) Operation {
 		}
 	}
 
-	// Pick a target active count in [min, active-1] and delete enough VSes
-	// to reach it. This keeps the active set spread across 80-100% instead
-	// of oscillating around N/N-1.
-	targetActive := min + m.rng.Intn(active-min)
-	deleteCount := active - targetActive
+	maxDelete := active - min
+	deleteCount := 1
+	switch {
+	case maxDelete <= 1:
+		deleteCount = 1
+	case m.rng.Intn(100) < deleteVSLargeDropChancePercent:
+		// Deep drop path: any legal delete size.
+		deleteCount = 1 + m.rng.Intn(maxDelete)
+	default:
+		// Default path: keep delete bursts small so UpdateVS can recover.
+		upper := deleteVSSmallStepMax
+		if upper > maxDelete {
+			upper = maxDelete
+		}
+		deleteCount = 1 + m.rng.Intn(upper)
+	}
+	targetActive := active - deleteCount
 	keys := m.pickVSSubset(m.model.ActiveOrder(), deleteCount)
 	return Operation{
 		Type:  OpDeleteVS,
