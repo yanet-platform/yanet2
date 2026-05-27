@@ -11,9 +11,8 @@ use ync::{
     logging,
 };
 use ynpb::pb::{
-    counters_service_client::CountersServiceClient, ChainCountersRequest, CounterTag, CountersByTagsRequest,
-    DeviceCountersRequest, FunctionCountersRequest, LatencyRangeCounter, ModuleCountersRequest, PerfCounter,
-    PerfCountersRequest, PerfCountersResponse, PipelineCountersRequest,
+    counters_service_client::CountersServiceClient, CounterTag, CountersByTagsRequest, LatencyRangeCounter,
+    PerfCounter, PerfCountersRequest, PerfCountersResponse,
 };
 
 /// Counters module - displays counters information.
@@ -263,21 +262,28 @@ impl CountersService {
         Ok(())
     }
 
+    fn by_tags_request(tags: Vec<(&'static str, String)>) -> CountersByTagsRequest {
+        CountersByTagsRequest {
+            tags: tags
+                .into_iter()
+                .map(|(key, value)| CounterTag { key: key.to_string(), value })
+                .collect(),
+            query: Vec::new(),
+        }
+    }
+
     pub async fn show_device(&mut self, device_name: String) -> Result<(), Box<dyn Error>> {
-        let request = DeviceCountersRequest { device: device_name };
-        let response = self.client.device(request).await?;
-        println!("{}", serde_json::to_string(response.get_ref())?);
-        Ok(())
+        let request = Self::by_tags_request(vec![("device", device_name), ("pipeline", String::new())]);
+        self.show_by_tags(request).await
     }
 
     pub async fn show_pipeline(&mut self, device_name: String, pipeline_name: String) -> Result<(), Box<dyn Error>> {
-        let request = PipelineCountersRequest {
-            device: device_name,
-            pipeline: pipeline_name,
-        };
-        let response = self.client.pipeline(request).await?;
-        println!("{}", serde_json::to_string(response.get_ref())?);
-        Ok(())
+        let request = Self::by_tags_request(vec![
+            ("device", device_name),
+            ("pipeline", pipeline_name),
+            ("function", String::new()),
+        ]);
+        self.show_by_tags(request).await
     }
 
     pub async fn show_function(
@@ -286,14 +292,13 @@ impl CountersService {
         pipeline_name: String,
         function_name: String,
     ) -> Result<(), Box<dyn Error>> {
-        let request = FunctionCountersRequest {
-            device: device_name,
-            pipeline: pipeline_name,
-            function: function_name,
-        };
-        let response = self.client.function(request).await?;
-        println!("{}", serde_json::to_string(response.get_ref())?);
-        Ok(())
+        let request = Self::by_tags_request(vec![
+            ("device", device_name),
+            ("pipeline", pipeline_name),
+            ("function", function_name),
+            ("chain", String::new()),
+        ]);
+        self.show_by_tags(request).await
     }
 
     pub async fn show_chain(
@@ -303,15 +308,14 @@ impl CountersService {
         function_name: String,
         chain_name: String,
     ) -> Result<(), Box<dyn Error>> {
-        let request = ChainCountersRequest {
-            device: device_name,
-            pipeline: pipeline_name,
-            function: function_name,
-            chain: chain_name,
-        };
-        let response = self.client.chain(request).await?;
-        println!("{}", serde_json::to_string(response.get_ref())?);
-        Ok(())
+        let request = Self::by_tags_request(vec![
+            ("device", device_name),
+            ("pipeline", pipeline_name),
+            ("function", function_name),
+            ("chain", chain_name),
+            ("module_type", String::new()),
+        ]);
+        self.show_by_tags(request).await
     }
 
     pub async fn show_module(
@@ -323,18 +327,15 @@ impl CountersService {
         module_type: String,
         module_name: String,
     ) -> Result<(), Box<dyn Error>> {
-        let request = ModuleCountersRequest {
-            device: device_name,
-            pipeline: pipeline_name,
-            function: function_name,
-            chain: chain_name,
-            module_type,
-            module_name,
-            counter_query: Vec::new(),
-        };
-        let response = self.client.module(request).await?;
-        println!("{}", serde_json::to_string(response.get_ref())?);
-        Ok(())
+        let request = Self::by_tags_request(vec![
+            ("device", device_name),
+            ("pipeline", pipeline_name),
+            ("function", function_name),
+            ("chain", chain_name),
+            ("module_type", module_type),
+            ("module_name", module_name),
+        ]);
+        self.show_by_tags(request).await
     }
 
     pub async fn show_perf(&mut self, request: PerfCountersRequest, json: bool) -> Result<(), Box<dyn Error>> {
