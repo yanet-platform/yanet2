@@ -29,9 +29,11 @@ import (
 type OperationType int
 
 const (
+	// OpUpdate performs bootstrap config update for the first operation.
+	OpUpdate OperationType = iota
 	// OpUpdateVS replaces the desired state of a VS: scheduler, flags,
 	// allowed sources, and the active subset of reals.
-	OpUpdateVS OperationType = iota
+	OpUpdateVS
 	// OpDeleteVS removes one or more VSes from the active set.
 	OpDeleteVS
 	// OpDeleteVSNoop is the lower-bound delete cadence variant: it
@@ -126,6 +128,13 @@ type OperationGenerator struct {
 	rng   *rand.Rand
 }
 
+const (
+	minEnabledPercent = 40
+	maxEnabledPercent = 60
+	realWeightMin     = 1
+	realWeightMax     = 30
+)
+
 // NewOperationGenerator returns a generator seeded by the runtime config's
 // effective seed. The cadence n must equal RuntimeConfig.UpdateVsEvery.
 //
@@ -146,7 +155,7 @@ func NewOperationGenerator(model *Model, n uint64, seed int64) *OperationGenerat
 // after the corresponding RPC and GetState succeed.
 func (m *OperationGenerator) Generate(opNum uint64) Operation {
 	if opNum == 1 {
-		return m.generateUpdateVS(opNum)
+		return Operation{Type: OpUpdate, OpNum: opNum}
 	}
 	switch {
 	case m.n > 0 && opNum%(2*m.n) == 0:
@@ -158,9 +167,10 @@ func (m *OperationGenerator) Generate(opNum uint64) Operation {
 	}
 }
 
-// generateDelete picks a deletable VS key. If the active count is already
-// at the lower bound, it emits a no-op DeleteVS (empty key list) so the
-// runner still issues the RPC and GetState pair.
+// generateDelete removes a random subset of active VSes while preserving
+// the 80-100% active-set invariant. If the active count is already at the
+// lower bound, it emits a no-op DeleteVS (empty key list) so the runner
+// still issues the RPC and GetState pair.
 func (m *OperationGenerator) generateDelete(opNum uint64) Operation {
 	active := m.model.ActiveCount()
 	min := m.model.MinActive()
@@ -176,17 +186,18 @@ func (m *OperationGenerator) generateDelete(opNum uint64) Operation {
 		}
 	}
 
-	// Pick one key from the active set; deleting a single VS per
-	// cadence keeps the bound easy to reason about and gives the
-	// runner a clear target for the GetState pairing.
-	idx := m.rng.Intn(active)
-	key := m.model.ActiveOrder()[idx]
+	// Pick a target active count in [min, active-1] and delete enough VSes
+	// to reach it. This keeps the active set spread across 80-100% instead
+	// of oscillating around N/N-1.
+	targetActive := min + m.rng.Intn(active-min)
+	deleteCount := active - targetActive
+	keys := m.pickVSSubset(m.model.ActiveOrder(), deleteCount)
 	return Operation{
 		Type:  OpDeleteVS,
 		OpNum: opNum,
 		DeleteVS: &DeleteVSPayload{
-			Keys:        []VsKey{key},
-			ActiveCount: active - 1,
+			Keys:        keys,
+			ActiveCount: targetActive,
 			MinActive:   min,
 		},
 	}
@@ -213,7 +224,7 @@ func (m *OperationGenerator) generateUpdateVS(opNum uint64) Operation {
 			Scheduler:      m.randomScheduler(),
 			Flags:          m.randomFlags(),
 			AllowedSources: m.randomAllowedSources(key),
-			Reals:          m.randomRealSubset(key),
+			Reals:          m.randomRealSubset(key, m.model.ActiveVS(key)),
 		},
 	}
 }
@@ -253,25 +264,7 @@ func (m *OperationGenerator) generateUpdateReals(opNum uint64) Operation {
 	for _, key := range selectedVS {
 		vs := m.model.ActiveVS(key)
 		reals := vs.Reals()
-		count := 1 + m.rng.Intn(len(reals))
-		picks := m.pickRealSubset(reals, count)
-
-		updates := make([]RealUpdate, 0, len(picks))
-		for _, rk := range picks {
-			upd := RealUpdate{Key: rk}
-			// Each pick mutates Enabled, Weight, or both. Always emit at
-			// least one field so the update is observable.
-			mode := m.rng.Intn(3)
-			if mode == 0 || mode == 2 {
-				enabled := m.rng.Intn(2) == 0
-				upd.Enabled = &enabled
-			}
-			if mode == 1 || mode == 2 {
-				w := uint32(1 + m.rng.Intn(10))
-				upd.Weight = &w
-			}
-			updates = append(updates, upd)
-		}
+		updates := m.randomRealBatchUpdates(vs, reals)
 		batches = append(batches, UpdateRealsBatch{
 			Key:     key,
 			Updates: updates,
@@ -343,9 +336,11 @@ func (m *OperationGenerator) randomAllowedSources(key VsKey) []CIDR {
 
 // randomRealSubset returns between ceil(80%) and 100% of the VS's
 // original reals, in deterministic order. Each returned member carries an
-// Enabled flag and a Weight in 1..10. Membership is always a subset of
-// the parser's original real set for the VS.
-func (m *OperationGenerator) randomRealSubset(key VsKey) []RealMember {
+// Enabled flag and a Weight in 1..30. Membership is always a subset of
+// the parser's original real set for the VS. For active VSes, it also
+// attempts to change the membership set on each UpdateVS call when the
+// 80-100% envelope permits at least one alternative subset.
+func (m *OperationGenerator) randomRealSubset(key VsKey, current *VSState) []RealMember {
 	original := m.model.OriginalReals(key)
 	total := len(original)
 	if total == 0 {
@@ -359,15 +354,198 @@ func (m *OperationGenerator) randomRealSubset(key VsKey) []RealMember {
 		size = 1
 	}
 	picks := m.pickRealSubset(original, size)
+	if current != nil && sameRealKeySet(current.Reals(), picks) {
+		picks = m.forceDifferentRealSubset(original, picks, min)
+	}
 	out := make([]RealMember, 0, len(picks))
+	enabledMin, enabledMax := enabledCountBounds(len(picks))
+	enabledTarget := enabledMin + m.rng.Intn(enabledMax-enabledMin+1)
+	enabledPicks := map[RealKey]struct{}{}
+	for _, rk := range m.pickRealSubset(picks, enabledTarget) {
+		enabledPicks[rk] = struct{}{}
+	}
 	for _, rk := range picks {
+		_, enabled := enabledPicks[rk]
 		out = append(out, RealMember{
 			Key:     rk,
-			Enabled: m.rng.Intn(2) == 0,
-			Weight:  uint32(1 + m.rng.Intn(10)),
+			Enabled: enabled,
+			Weight:  uint32(realWeightMin + m.rng.Intn(realWeightMax-realWeightMin+1)),
 		})
 	}
 	return out
+}
+
+// forceDifferentRealSubset rewrites picks so membership differs from the
+// input set while staying within [min, total]. If no alternative exists,
+// picks is returned unchanged.
+func (m *OperationGenerator) forceDifferentRealSubset(
+	original []RealKey,
+	picks []RealKey,
+	min int,
+) []RealKey {
+	total := len(original)
+	if total == 0 {
+		return nil
+	}
+	if len(picks) == total && min == total {
+		return picks
+	}
+
+	pickSet := map[RealKey]struct{}{}
+	for _, rk := range picks {
+		pickSet[rk] = struct{}{}
+	}
+	excluded := make([]RealKey, 0, total-len(picks))
+	for _, rk := range original {
+		if _, ok := pickSet[rk]; ok {
+			continue
+		}
+		excluded = append(excluded, rk)
+	}
+
+	switch {
+	case len(picks) == min:
+		if len(excluded) == 0 {
+			return picks
+		}
+		add := excluded[m.rng.Intn(len(excluded))]
+		pickSet[add] = struct{}{}
+	case len(picks) == total:
+		if len(picks)-1 < min {
+			return picks
+		}
+		rm := picks[m.rng.Intn(len(picks))]
+		delete(pickSet, rm)
+	default:
+		if len(excluded) > 0 && m.rng.Intn(2) == 0 {
+			add := excluded[m.rng.Intn(len(excluded))]
+			pickSet[add] = struct{}{}
+		} else {
+			rm := picks[m.rng.Intn(len(picks))]
+			delete(pickSet, rm)
+		}
+	}
+
+	out := make([]RealKey, 0, len(pickSet))
+	for _, rk := range original {
+		if _, ok := pickSet[rk]; ok {
+			out = append(out, rk)
+		}
+	}
+	return out
+}
+
+// randomRealBatchUpdates builds one UpdateReals batch for a single VS.
+// Each batch independently chooses which reals to enable, disable, and
+// reweight, while forcing the resulting enabled count into the 40-60%
+// envelope (inclusive, integer-rounded bounds).
+func (m *OperationGenerator) randomRealBatchUpdates(vs *VSState, reals []RealKey) []RealUpdate {
+	enabled := make([]RealKey, 0, len(reals))
+	disabled := make([]RealKey, 0, len(reals))
+	for _, rk := range reals {
+		if rs := vs.Real(rk); rs != nil && rs.Enabled {
+			enabled = append(enabled, rk)
+		} else {
+			disabled = append(disabled, rk)
+		}
+	}
+
+	targetMin, targetMax := enabledCountBounds(len(reals))
+	targetEnabled := targetMin + m.rng.Intn(targetMax-targetMin+1)
+
+	enableCount := 0
+	disableCount := 0
+	switch {
+	case len(enabled) < targetEnabled:
+		enableCount = targetEnabled - len(enabled)
+	case len(enabled) > targetEnabled:
+		disableCount = len(enabled) - targetEnabled
+	}
+	toEnable := m.pickRealSubset(disabled, enableCount)
+	toDisable := m.pickRealSubset(enabled, disableCount)
+
+	weightCount := 1 + m.rng.Intn(len(reals))
+	toReweight := m.pickRealSubset(reals, weightCount)
+
+	updatesByReal := map[RealKey]*RealUpdate{}
+	for _, rk := range toEnable {
+		v := true
+		updatesByReal[rk] = &RealUpdate{
+			Key:     rk,
+			Enabled: &v,
+		}
+	}
+	for _, rk := range toDisable {
+		v := false
+		upd, ok := updatesByReal[rk]
+		if !ok {
+			updatesByReal[rk] = &RealUpdate{
+				Key:     rk,
+				Enabled: &v,
+			}
+			continue
+		}
+		upd.Enabled = &v
+	}
+	for _, rk := range toReweight {
+		w := uint32(realWeightMin + m.rng.Intn(realWeightMax-realWeightMin+1))
+		upd, ok := updatesByReal[rk]
+		if !ok {
+			updatesByReal[rk] = &RealUpdate{
+				Key:    rk,
+				Weight: &w,
+			}
+			continue
+		}
+		upd.Weight = &w
+	}
+
+	updates := make([]RealUpdate, 0, len(updatesByReal))
+	for _, rk := range reals {
+		upd := updatesByReal[rk]
+		if upd == nil {
+			continue
+		}
+		updates = append(updates, *upd)
+	}
+	return updates
+}
+
+// enabledCountBounds returns the inclusive integer bounds for the enabled
+// real count that correspond to 40-60% of total. For small totals where
+// ceil(40%) > floor(60%), the interval collapses to ceil(40%).
+func enabledCountBounds(total int) (int, int) {
+	min := ceilPercent(total, minEnabledPercent)
+	max := total * maxEnabledPercent / 100
+	if max < min {
+		max = min
+	}
+	if max > total {
+		max = total
+	}
+	return min, max
+}
+
+func sameRealKeySet(a, b []RealKey) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	set := map[RealKey]int{}
+	for _, rk := range a {
+		set[rk]++
+	}
+	for _, rk := range b {
+		if set[rk] == 0 {
+			return false
+		}
+		set[rk]--
+	}
+	for _, c := range set {
+		if c != 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // pickRealSubset returns a deterministic subset of size n from src,
@@ -428,6 +606,8 @@ func (m *OperationGenerator) pickVSSubset(src []VsKey, n int) []VsKey {
 // OpDeleteVSNoop.
 func (m *Model) Apply(op Operation) error {
 	switch op.Type {
+	case OpUpdate:
+		return nil
 	case OpUpdateVS:
 		return m.applyUpdateVS(op.UpdateVS)
 	case OpDeleteVS:
@@ -474,8 +654,13 @@ func (m *Model) applyUpdateVS(p *UpdateVSPayload) error {
 				inherited = true
 			}
 		}
-		if !inherited && (weight < 1 || weight > 10) {
-			return fmt.Errorf("apply update_vs: weight %d out of range 1..10", weight)
+		if !inherited && (weight < realWeightMin || weight > realWeightMax) {
+			return fmt.Errorf(
+				"apply update_vs: weight %d out of range %d..%d",
+				weight,
+				realWeightMin,
+				realWeightMax,
+			)
 		}
 		state.realsOrder = append(state.realsOrder, r.Key)
 		state.realsByKey[r.Key] = &RealState{
@@ -517,8 +702,13 @@ func (m *Model) applyUpdateReals(p *UpdateRealsPayload) error {
 				real.Enabled = *u.Enabled
 			}
 			if u.Weight != nil {
-				if *u.Weight < 1 || *u.Weight > 10 {
-					return fmt.Errorf("apply update_reals: weight %d out of range 1..10", *u.Weight)
+				if *u.Weight < realWeightMin || *u.Weight > realWeightMax {
+					return fmt.Errorf(
+						"apply update_reals: weight %d out of range %d..%d",
+						*u.Weight,
+						realWeightMin,
+						realWeightMax,
+					)
 				}
 				real.Weight = *u.Weight
 			}

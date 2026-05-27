@@ -470,10 +470,10 @@ func TestRunnerCommitsOnlyAfterGetStateMatch(t *testing.T) {
 
 	calls := h.fake.callSequence()
 	require.GreaterOrEqual(t, len(calls), 2)
-	assert.Equal(t, RPCUpdateVS, calls[0])
+	assert.Equal(t, RPCUpdateConfig, calls[0])
 	assert.Equal(t, RPCGetState, calls[1])
 
-	mutations := []string{RPCUpdateVS, RPCDeleteVS, RPCUpdateReals}
+	mutations := []string{RPCUpdateConfig, RPCUpdateVS, RPCDeleteVS, RPCUpdateReals}
 	mutationCount := 0
 	for idx := 0; idx < len(calls); idx++ {
 		c := calls[idx]
@@ -502,7 +502,7 @@ func TestRunnerDoesNotCommitOnRPCFailure(t *testing.T) {
 	preActive := append([]VsKey(nil), h.runner.Model().ActiveOrder()...)
 	preState := snapshotModel(h.runner.Model())
 
-	h.fake.failOnce[RPCUpdateVS] = errors.New("simulated rpc failure")
+	h.fake.failOnce[RPCUpdateConfig] = errors.New("simulated rpc failure")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -514,7 +514,7 @@ func TestRunnerDoesNotCommitOnRPCFailure(t *testing.T) {
 	select {
 	case err := <-done:
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "update_vs")
+		assert.Contains(t, err.Error(), "update op")
 	case <-time.After(2 * time.Second):
 		t.Fatal("runner did not return on RPC failure")
 	}
@@ -590,7 +590,7 @@ func TestRunnerStopsOnContextCancel(t *testing.T) {
 	calls := h.fake.callSequence()
 	mutationCount := 0
 	for _, c := range calls {
-		if c == RPCUpdateVS || c == RPCDeleteVS || c == RPCUpdateReals {
+		if c == RPCUpdateConfig || c == RPCUpdateVS || c == RPCDeleteVS || c == RPCUpdateReals {
 			mutationCount++
 		}
 	}
@@ -629,16 +629,15 @@ func TestRunnerEmitsStatsReportOnTicker(t *testing.T) {
 	}
 }
 
-// TestRunnerDoesNotMutateConfigOnStartup verifies that runner execution
-// starts directly with a mutation operation.
-func TestRunnerDoesNotMutateConfigOnStartup(t *testing.T) {
+// TestRunnerStartsWithUpdateBootstrap verifies that op #1 uses Update.
+func TestRunnerStartsWithUpdateBootstrap(t *testing.T) {
 	corpus := genCorpusText(5, 3)
 	h := newRunnerHarness(t, corpus, WithOperationLimit(1))
 	require.NoError(t, h.runWithSteps(1))
 
 	calls := h.fake.callSequence()
 	require.GreaterOrEqual(t, len(calls), 2)
-	assert.Equal(t, RPCUpdateVS, calls[0])
+	assert.Equal(t, RPCUpdateConfig, calls[0])
 	assert.Equal(t, RPCGetState, calls[1])
 }
 
@@ -649,7 +648,7 @@ func TestRunnerUpdateRealsSendsMultipleVSInSingleRPC(t *testing.T) {
 
 	calls := h.fake.callSequence()
 	require.GreaterOrEqual(t, len(calls), 6)
-	assert.Equal(t, RPCUpdateVS, calls[0])
+	assert.Equal(t, RPCUpdateConfig, calls[0])
 	assert.Equal(t, RPCGetState, calls[1])
 	assert.Equal(t, RPCUpdateVS, calls[2])
 	assert.Equal(t, RPCGetState, calls[3])

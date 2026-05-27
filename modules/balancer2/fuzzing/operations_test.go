@@ -72,6 +72,8 @@ func TestOperationGenerator(t *testing.T) {
 		require.Equal(t, opA.Type, opB.Type, "op %d type", opNum)
 		require.Equal(t, opA.OpNum, opB.OpNum, "op %d num", opNum)
 		switch opA.Type {
+		case OpUpdate:
+			// Bootstrap operation has no payload.
 		case OpUpdateVS:
 			require.NotNil(t, opA.UpdateVS)
 			require.NotNil(t, opB.UpdateVS)
@@ -114,7 +116,7 @@ func TestOperationGenerator(t *testing.T) {
 }
 
 // TestOperationCadenceDeletePrecedesUpdate locks in the operation
-// precedence rule with cold-start bootstrap: op 1 is UpdateVS; for N=5,
+// precedence rule with cold-start bootstrap: op 1 is Update; for N=5,
 // ops 2..4 are UpdateReals, op 5 is UpdateVS, and op 10 is DeleteVS (or
 // its lower-bound no-op variant), never an UpdateVS.
 func TestOperationCadenceDeletePrecedesUpdate(t *testing.T) {
@@ -122,7 +124,7 @@ func TestOperationCadenceDeletePrecedesUpdate(t *testing.T) {
 	gen := NewOperationGenerator(model, 5, 12345)
 
 	op1 := gen.Generate(1)
-	assert.Equal(t, OpUpdateVS, op1.Type, "op 1 must be UpdateVS bootstrap")
+	assert.Equal(t, OpUpdate, op1.Type, "op 1 must be Update bootstrap")
 	require.NoError(t, model.Apply(op1))
 
 	for opNum := uint64(2); opNum <= 4; opNum++ {
@@ -171,6 +173,8 @@ func TestOperationGeneratorBounds(t *testing.T) {
 		op := gen.Generate(opNum)
 
 		switch op.Type {
+		case OpUpdate:
+			assert.Equal(t, uint64(1), op.OpNum, "bootstrap update must only occur on op 1")
 		case OpDeleteVS:
 			require.NotNil(t, op.DeleteVS)
 			require.NotEmpty(
@@ -210,8 +214,31 @@ func TestOperationGeneratorBounds(t *testing.T) {
 				assert.NotNil(t, model.OriginalReal(p.Key, r.Key),
 					"op %d real %v not in original set for VS %v", opNum, r.Key, p.Key)
 				assert.GreaterOrEqual(t, r.Weight, uint32(1), "op %d weight under 1", opNum)
-				assert.LessOrEqual(t, r.Weight, uint32(10), "op %d weight over 10", opNum)
+				assert.LessOrEqual(t, r.Weight, uint32(30), "op %d weight over 30", opNum)
 			}
+			minEnabled, maxEnabled := enabledCountBounds(len(p.Reals))
+			enabledCount := 0
+			for _, r := range p.Reals {
+				if r.Enabled {
+					enabledCount++
+				}
+			}
+			assert.GreaterOrEqual(
+				t,
+				enabledCount,
+				minEnabled,
+				"op %d UpdateVS enabled reals below 40%% for VS %v",
+				opNum,
+				p.Key,
+			)
+			assert.LessOrEqual(
+				t,
+				enabledCount,
+				maxEnabled,
+				"op %d UpdateVS enabled reals above 60%% for VS %v",
+				opNum,
+				p.Key,
+			)
 			// Scheduler must be one of the supported values.
 			assert.Contains(t, schedulerChoices, p.Scheduler, "op %d unknown scheduler", opNum)
 			// ACL count in 1..5.
@@ -240,6 +267,14 @@ func TestOperationGeneratorBounds(t *testing.T) {
 					"op %d UpdateReals batch must carry updates",
 					opNum,
 				)
+				resultEnabled := 0
+				for _, rk := range vs.Reals() {
+					real := vs.Real(rk)
+					require.NotNil(t, real)
+					if real.Enabled {
+						resultEnabled++
+					}
+				}
 				for _, u := range batch.Updates {
 					assert.True(
 						t,
@@ -249,13 +284,41 @@ func TestOperationGeneratorBounds(t *testing.T) {
 						u.Key,
 						batch.Key,
 					)
+					if u.Enabled != nil {
+						if *u.Enabled {
+							if current := vs.Real(u.Key); current != nil && !current.Enabled {
+								resultEnabled++
+							}
+						} else {
+							if current := vs.Real(u.Key); current != nil && current.Enabled {
+								resultEnabled--
+							}
+						}
+					}
 					if u.Weight != nil {
 						assert.GreaterOrEqual(t, *u.Weight, uint32(1))
-						assert.LessOrEqual(t, *u.Weight, uint32(10))
+						assert.LessOrEqual(t, *u.Weight, uint32(30))
 					}
 					assert.True(t, u.Enabled != nil || u.Weight != nil,
 						"op %d update emits no observable change", opNum)
 				}
+				minEnabled, maxEnabled := enabledCountBounds(len(vs.Reals()))
+				assert.GreaterOrEqual(
+					t,
+					resultEnabled,
+					minEnabled,
+					"op %d UpdateReals result below 40%% enabled for VS %v",
+					opNum,
+					batch.Key,
+				)
+				assert.LessOrEqual(
+					t,
+					resultEnabled,
+					maxEnabled,
+					"op %d UpdateReals result above 60%% enabled for VS %v",
+					opNum,
+					batch.Key,
+				)
 			}
 		}
 
@@ -299,8 +362,8 @@ func TestOperationGeneratorBounds(t *testing.T) {
 				assert.LessOrEqual(
 					t,
 					rs.Weight,
-					uint32(10),
-					"op %d weight over 10 on VS %v real %v",
+					uint32(30),
+					"op %d weight over 30 on VS %v real %v",
 					opNum,
 					vsKey,
 					rk,
@@ -315,6 +378,7 @@ func TestOperationGeneratorUpdateRealsCoversMultipleVS(t *testing.T) {
 	model := newModelFromText(t, genCorpusText(6, 4))
 	gen := NewOperationGenerator(model, 10, 12345)
 
+	require.Equal(t, OpUpdate, gen.Generate(1).Type)
 	op := gen.Generate(2)
 	require.Equal(t, OpUpdateReals, op.Type)
 	require.NotNil(t, op.UpdateReals)
@@ -326,6 +390,38 @@ func TestOperationGeneratorUpdateRealsCoversMultipleVS(t *testing.T) {
 		seen[batch.Key] = true
 	}
 	assert.GreaterOrEqual(t, len(seen), 2)
+}
+
+func TestOperationGeneratorUpdateVSChangesRealSetWhenPossible(t *testing.T) {
+	model := newModelFromText(t, genCorpusText(1, 8))
+	gen := NewOperationGenerator(model, 10, 12345)
+
+	require.Equal(t, OpUpdate, gen.Generate(1).Type)
+	first := gen.Generate(10)
+	require.Equal(t, OpUpdateVS, first.Type)
+	require.NotNil(t, first.UpdateVS)
+	require.NoError(t, model.Apply(first))
+
+	current := model.ActiveVS(first.UpdateVS.Key)
+	require.NotNil(t, current)
+	require.Greater(t, len(model.OriginalReals(first.UpdateVS.Key)), model.MinActiveReals(first.UpdateVS.Key))
+
+	second := gen.Generate(30)
+	require.Equal(t, OpUpdateVS, second.Type)
+	require.NotNil(t, second.UpdateVS)
+	assert.False(
+		t,
+		sameRealKeySet(current.Reals(), realMemberKeys(second.UpdateVS.Reals)),
+		"UpdateVS should change the present real set when alternatives exist",
+	)
+}
+
+func realMemberKeys(in []RealMember) []RealKey {
+	out := make([]RealKey, 0, len(in))
+	for _, r := range in {
+		out = append(out, r.Key)
+	}
+	return out
 }
 
 // TestOperationGeneratorLowerBoundNoop forces the active set to its
@@ -398,9 +494,9 @@ func TestModelInitialState(t *testing.T) {
 
 // TestModelInitialWeightsUnclamped pins the contract that NewModel
 // preserves parser/corpus weights verbatim — including values outside
-// the 1..10 envelope. Task 6 startup sends these same weights to
+// the 1..30 envelope. Task 6 startup sends these same weights to
 // UpdateConfig, so the expected model must mirror them exactly until a
-// generated UpdateVS/UpdateReals overwrites the real. The 1..10
+// generated UpdateVS/UpdateReals overwrites the real. The 1..30
 // envelope applies only to generator-emitted updates, which is verified
 // separately by TestOperationGeneratorBounds.
 func TestModelInitialWeightsUnclamped(t *testing.T) {
@@ -432,7 +528,7 @@ func TestModelInitialWeightsUnclamped(t *testing.T) {
 		if op.Type == OpUpdateVS {
 			for _, r := range op.UpdateVS.Reals {
 				assert.GreaterOrEqual(t, r.Weight, uint32(1), "generated UpdateVS weight under 1")
-				assert.LessOrEqual(t, r.Weight, uint32(10), "generated UpdateVS weight over 10")
+				assert.LessOrEqual(t, r.Weight, uint32(30), "generated UpdateVS weight over 30")
 			}
 		}
 		if op.Type == OpUpdateReals {
@@ -448,8 +544,8 @@ func TestModelInitialWeightsUnclamped(t *testing.T) {
 						assert.LessOrEqual(
 							t,
 							*u.Weight,
-							uint32(10),
-							"generated UpdateReals weight over 10",
+							uint32(30),
+							"generated UpdateReals weight over 30",
 						)
 					}
 				}

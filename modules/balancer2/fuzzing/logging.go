@@ -11,6 +11,17 @@ import (
 	"time"
 )
 
+// FormatUpdate summarises an UpdateVS call. vsCount is the total number of
+// virtual servers in the config after the update; vsKey identifies the
+// touched VS (typically "ip:port/proto"); opNum is the monotonic operation
+// counter the runner maintains.
+func FormatUpdate(opNum uint64, vsCount int, dur time.Duration) string {
+	return fmt.Sprintf(
+		"op=Update num=%d vs_count=%d dur=%s",
+		opNum, vsCount, dur,
+	)
+}
+
 // FormatUpdateVS summarises an UpdateVS call. vsCount is the total number of
 // virtual servers in the config after the update; vsKey identifies the
 // touched VS (typically "ip:port/proto"); opNum is the monotonic operation

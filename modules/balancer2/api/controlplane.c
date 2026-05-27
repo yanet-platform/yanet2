@@ -574,6 +574,8 @@ free_real_selector(
 	if (selector == NULL) {
 		return;
 	}
+	big_array_free(&selector->rings[0].real_ids);
+	big_array_free(&selector->rings[1].real_ids);
 	memory_bfree(mctx, selector, real_selector_size(workers));
 	SET_OFFSET_OF(&vs->selector, NULL);
 }
@@ -1055,6 +1057,7 @@ balancer_create(
 	struct balancer_handle *handle = memory_balloc(mctx, sizeof(*handle));
 	if (handle == NULL) {
 		yanet_error_add(error, "%s", agent_alloc_failed);
+		cp_config_unlock(cp_config);
 		return NULL;
 	}
 	memset(handle, 0, sizeof(*handle));
@@ -1237,6 +1240,7 @@ balancer_vs_update_reals(
 		    error
 	    ) != 0) {
 		cp_config_unlock(cp_config);
+		free(ring_weights);
 		yanet_error_add(error, "build ring");
 		return -1;
 	}
@@ -1296,6 +1300,7 @@ balancer_create_session_table(
 		memory_balloc(mctx, sizeof(*table));
 	if (table == NULL) {
 		yanet_error_add(error, "%s", agent_alloc_failed);
+		cp_config_unlock(cp_config);
 		return NULL;
 	}
 

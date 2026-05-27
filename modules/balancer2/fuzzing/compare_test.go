@@ -367,7 +367,7 @@ func TestStateCompareNilArgs(t *testing.T) {
 }
 
 // TestStateCompareUnclampedInitialWeight pins the carry-forward from
-// Task 3: corpus weights may exceed the generator's 1..10 envelope, and
+// Task 3: corpus weights may exceed the generator's 1..30 envelope, and
 // the comparator must compare the actual model value, not assume an
 // upper bound.
 func TestStateCompareUnclampedInitialWeight(t *testing.T) {

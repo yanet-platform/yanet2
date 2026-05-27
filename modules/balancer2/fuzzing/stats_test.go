@@ -136,6 +136,14 @@ func TestFormatUpdateVS(t *testing.T) {
 	assert.Contains(t, s, "dur=3ms")
 }
 
+func TestFormatUpdate(t *testing.T) {
+	s := FormatUpdate(1, 5, 3*time.Millisecond)
+	assert.Contains(t, s, "op=Update")
+	assert.Contains(t, s, "num=1")
+	assert.Contains(t, s, "vs_count=5")
+	assert.Contains(t, s, "dur=3ms")
+}
+
 func TestFormatDeleteVS(t *testing.T) {
 	s := FormatDeleteVS(17, "10.0.0.1:80/TCP", 6, 2*time.Millisecond)
 	assert.Contains(t, s, "op=DeleteVS")

@@ -165,7 +165,7 @@ func NewModel(corpus *Corpus) *Model {
 			// the expected model must mirror it exactly until a
 			// generated UpdateVS/UpdateReals overwrites the real.
 			// Generated operations are independently constrained to
-			// 1..10 (see operations.go), so the envelope is enforced
+			// 1..30 (see operations.go), so the envelope is enforced
 			// at the mutation boundary, not at load time.
 			realsState[real.Key] = &RealState{
 				Enabled: true,

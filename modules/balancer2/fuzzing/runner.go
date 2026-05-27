@@ -295,6 +295,8 @@ func (m *Runner) step(ctx context.Context, opNum uint64) error {
 // updated by step.
 func (m *Runner) executeMutation(ctx context.Context, op Operation) error {
 	switch op.Type {
+	case OpUpdate:
+		return m.sendUpdate(ctx, op)
 	case OpUpdateVS:
 		return m.sendUpdateVS(ctx, op)
 	case OpDeleteVS, OpDeleteVSNoop:
@@ -304,6 +306,18 @@ func (m *Runner) executeMutation(ctx context.Context, op Operation) error {
 	default:
 		return fmt.Errorf("runner: unknown operation type %d for op %d", op.Type, op.OpNum)
 	}
+}
+
+func (m *Runner) sendUpdate(ctx context.Context, op Operation) error {
+	req := &balancerpb.UpdateConfigRequest{
+		ConfigName: m.cfg.ConfigName,
+		Vs:         m.corpus.ToVsConfigList(),
+	}
+	if _, err := m.rpc.UpdateConfig(ctx, req); err != nil {
+		m.logf("%s", FormatRPCFailure(op.OpNum, RPCUpdateConfig, err))
+		return fmt.Errorf("runner: update op %d: %w", op.OpNum, err)
+	}
+	return nil
 }
 
 func (m *Runner) sendUpdateVS(ctx context.Context, op Operation) error {
@@ -512,6 +526,8 @@ func cloneUint32Ptr(src *uint32) *uint32 {
 // what the controlplane should report next.
 func (m *Runner) logOperation(op Operation, candidate *Model, dur time.Duration) {
 	switch op.Type {
+	case OpUpdate:
+		m.logf("%s", FormatUpdate(op.OpNum, candidate.ActiveCount(), dur))
 	case OpUpdateVS:
 		m.logf(
 			"%s",
