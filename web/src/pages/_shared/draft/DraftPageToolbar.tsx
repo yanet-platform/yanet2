@@ -1,6 +1,7 @@
 import React from 'react';
-import { Button, Flex, Icon, Text, TextInput } from '@gravity-ui/uikit';
-import { Magnifier, Plus } from '@gravity-ui/icons';
+import { Button, Flex, Icon, Text } from '@gravity-ui/uikit';
+import { Plus } from '@gravity-ui/icons';
+import { SearchInput } from '../../../components';
 
 interface DraftPageToolbarProps {
     title: string;
@@ -28,21 +29,14 @@ const DraftPageToolbar: React.FC<DraftPageToolbarProps> = ({
     <Flex alignItems="center" gap={4} style={{ width: '100%' }}>
         <Text variant="header-1">{title}</Text>
         <Flex grow />
-        <div style={{ flexBasis: 380, flexShrink: 1 }}>
-            <TextInput
-                controlRef={searchRef}
-                value={searchValue}
-                onUpdate={onSearchChange}
-                placeholder={searchPlaceholder}
-                startContent={
-                    <Flex alignItems="center" justifyContent="center" style={{ paddingInline: 8, color: 'var(--g-color-text-hint)' }}>
-                        <Icon data={Magnifier} size={16} />
-                    </Flex>
-                }
-                hasClear
-                type="search"
-            />
-        </div>
+            <div style={{ flexBasis: 380, flexShrink: 1 }}>
+                <SearchInput
+                    controlRef={searchRef}
+                    value={searchValue}
+                    onUpdate={onSearchChange}
+                    placeholder={searchPlaceholder}
+                />
+            </div>
         {yamlSlot}
         <Button view="action" onClick={onAdd}>
             <Icon data={Plus} size={16} />

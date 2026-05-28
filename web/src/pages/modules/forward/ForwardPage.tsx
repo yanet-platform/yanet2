@@ -1,7 +1,7 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react';
-import { Button, Flex, Icon, Text, TextInput } from '@gravity-ui/uikit';
-import { Magnifier, Pause, Play, Plus } from '@gravity-ui/icons';
-import { PageLayout, PageLoader, ConfigTabStrip, BulkBar } from '../../../components';
+import { Button, Flex, Icon, Text } from '@gravity-ui/uikit';
+import { Pause, Play, Plus } from '@gravity-ui/icons';
+import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, SearchInput } from '../../../components';
 import { useForwardDraft } from './useForwardDraft';
 import { useUnsavedChangesBlocker } from '../../builtin/_shared/lane-editor';
 import type { Rule } from '../../../api/forward';
@@ -171,18 +171,11 @@ const ForwardPage: React.FC = () => {
             <Text variant="header-1">Forward</Text>
             <Flex grow />
             <div style={{ flexBasis: 380, flexShrink: 1 }}>
-                <TextInput
+                <SearchInput
                     controlRef={searchRef}
                     value={search}
                     onUpdate={setSearch}
                     placeholder="Search rules… (/)"
-                    startContent={
-                        <Flex alignItems="center" justifyContent="center" style={{ paddingInline: 8, color: 'var(--g-color-text-hint)' }}>
-                            <Icon data={Magnifier} size={16} />
-                        </Flex>
-                    }
-                    hasClear
-                    type="search"
                 />
             </div>
             {currentConfig && (

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { Button, Flex, Icon, Text, TextInput } from '@gravity-ui/uikit';
-import { Magnifier, Plus } from '@gravity-ui/icons';
-import { PageLayout, PageLoader, EmptyState } from '../../../components';
+import { Button, Flex, Icon, Text } from '@gravity-ui/uikit';
+import { Plus } from '@gravity-ui/icons';
+import { PageLayout, PageLoader, EmptyState, SearchInput } from '../../../components';
 import { useFunctionsData } from './hooks/useFunctionsData';
 import { useUnsavedChangesBlocker } from '../_shared/lane-editor';
 import { FunctionCard } from './components/FunctionCard';
@@ -90,18 +90,11 @@ const FunctionsPage = (): React.JSX.Element => {
             <Text variant="header-1">Functions</Text>
             <Flex grow />
             <div style={{ flexBasis: 380, flexShrink: 1 }}>
-                <TextInput
+                <SearchInput
                     controlRef={searchRef}
                     value={searchQuery}
                     onUpdate={setSearchQuery}
                     placeholder="Search functions, chains, modules… (⌘K)"
-                    startContent={
-                        <Flex alignItems="center" justifyContent="center" style={{ paddingInline: 8, color: 'var(--g-color-text-hint)' }}>
-                            <Icon data={Magnifier} size={16} />
-                        </Flex>
-                    }
-                    hasClear
-                    type="search"
                 />
             </div>
             <Button

@@ -1,8 +1,8 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Button, Flex, Icon, Text, TextInput } from '@gravity-ui/uikit';
-import { Magnifier, Plus } from '@gravity-ui/icons';
-import { PageLayout, PageLoader, ConfigTabStrip, BulkBar } from '../../../components';
+import { Button, Flex, Icon, Text } from '@gravity-ui/uikit';
+import { Plus } from '@gravity-ui/icons';
+import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, SearchInput } from '../../../components';
 import { BulkDeleteModal, DeleteConfigModal } from '../../_shared/draft';
 import { stringToIPAddress } from '../../../utils/netip';
 import type { Neighbour, NeighbourTableInfo } from '../../../api/neighbours';
@@ -239,18 +239,11 @@ const NeighboursPage: React.FC = () => {
             <Text variant="header-1">Neighbours</Text>
             <Flex grow />
             <div style={{ flexBasis: 360, flexShrink: 1 }}>
-                <TextInput
-                    controlRef={searchRef as React.RefObject<HTMLInputElement | null>}
+                <SearchInput
+                    controlRef={searchRef}
                     value={search}
                     onUpdate={(v) => updateParams({ [QP_SEARCH]: v || null })}
                     placeholder="Search next hop, device, source… (/)"
-                    startContent={
-                        <Flex alignItems="center" justifyContent="center" style={{ paddingInline: 8, color: 'var(--g-color-text-hint)' }}>
-                            <Icon data={Magnifier} size={16} />
-                        </Flex>
-                    }
-                    hasClear
-                    type="search"
                 />
             </div>
             <Button view="outlined" onClick={() => setCreateTableOpen(true)}>

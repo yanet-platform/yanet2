@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { Dialog, Flex, Text } from '@gravity-ui/uikit';
 import { diffLines } from 'diff';
-import { SideBySideDiff } from './SideBySideDiff';
+import { SideBySideDiff } from '../../../../components';
 
 export interface DiffModalProps<T> {
     /** The locally-edited entity. */
