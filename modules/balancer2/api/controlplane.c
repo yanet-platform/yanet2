@@ -984,8 +984,7 @@ init_module_config(
 		    cfg, registry, common_counter_name, l4_counter_name, error
 	    ) != 0) {
 		yanet_error_add(error, "register counters");
-		free_module_config(agent, cfg);
-		return -1;
+		goto err_cp_module;
 	}
 
 	if (vs_count > 0) {
@@ -993,8 +992,7 @@ init_module_config(
 			mctx, registry, vs_configs, vs_count, workers, error
 		);
 		if (vs == NULL) {
-			free_module_config(agent, cfg);
-			return -1;
+			goto err_cp_module;
 		}
 		SET_OFFSET_OF(&cfg->vs, vs);
 		cfg->vs_count = (uint32_t)vs_count;
@@ -1002,20 +1000,28 @@ init_module_config(
 
 	if (build_vs_matchers(mctx, cfg, vs_configs, vs_count, error) != 0) {
 		yanet_error_add(error, "VS matcher");
-		free_module_config(agent, cfg);
-		return -1;
+		goto err_vs_array;
 	}
 
 	if (rcu_init(&cfg->rcu, mctx, workers) != 0) {
 		yanet_error_add(error, "%s", agent_alloc_failed);
-		free_module_config(agent, cfg);
-		return -1;
+		goto err_matchers;
 	}
 
 	SET_OFFSET_OF(&cfg->st_chain, session_table_chain);
 	cfg->session_timeouts = *timeouts;
 
 	return 0;
+
+err_matchers:
+	free_vs_matchers(cfg);
+err_vs_array:
+	free_vs_array(mctx, ADDR_OF(&cfg->vs), cfg->vs_count, workers);
+	SET_OFFSET_OF(&cfg->vs, NULL);
+	cfg->vs_count = 0;
+err_cp_module:
+	cp_module_fini(&cfg->cp_module);
+	return -1;
 }
 
 struct balancer_handle *
