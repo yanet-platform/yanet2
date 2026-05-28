@@ -1,19 +1,23 @@
 import React, { useState, useCallback, useMemo } from 'react';
 import type { Pipeline, PipelinesAction, DragPayload, FunctionRef } from '../types';
 import { useFunctionRefCounters, type FunctionRefInfo, PIPELINE_COUNTER_KEY } from '../hooks/useFunctionRefCounters';
-import { useDragState, getDragPayload, useSparklineHistory } from '../../_shared/lane-editor';
+import { getDragPayload, useSparklineHistory } from '../../_shared/lane-editor';
 import { PipelineCardHeader } from './PipelineCardHeader';
 import { LaneTrack } from './LaneTrack';
 import { Drawer } from './Drawer';
 import { DiffModal } from './DiffModal';
 import type { InterpolatedCounterData } from '../../../../hooks';
 import type { FunctionId } from '../../../../api/pipelines';
+import type { DragState } from '../../_shared/lane-editor';
 
 interface PipelineCardProps {
     pipeline: Pipeline;
     serverPipeline: Pipeline | null;
     isDirty: boolean;
     dispatch: (action: PipelinesAction) => void;
+    dragState: DragState;
+    onDragStart: (payload: DragPayload) => void;
+    onDragEnd: () => void;
     onSave: () => Promise<void>;
     onDiscard: () => void;
     onDelete: () => Promise<boolean>;
@@ -28,6 +32,9 @@ export const PipelineCard: React.FC<PipelineCardProps> = ({
     serverPipeline,
     isDirty,
     dispatch,
+    dragState,
+    onDragStart,
+    onDragEnd,
     onSave,
     onDiscard,
     onDelete,
@@ -36,7 +43,6 @@ export const PipelineCard: React.FC<PipelineCardProps> = ({
     const [collapsed, setCollapsed] = useState(false);
     const [diffOpen, setDiffOpen] = useState(false);
     const [drawerRefId, setDrawerRefId] = useState<string | null>(null);
-    const { dragState, startDrag, endDrag } = useDragState();
 
     const refInfoList: FunctionRefInfo[] = useMemo(() =>
         pipeline.functions.map(r => ({ nodeId: r.id, functionName: r.name })),
@@ -63,27 +69,20 @@ export const PipelineCard: React.FC<PipelineCardProps> = ({
 
     const sparklineData = useSparklineHistory(`pl:${pipeline.id}:total`, totalPps);
 
-    const handleDragStart = useCallback((payload: DragPayload): void => {
-        startDrag(payload);
-    }, [startDrag]);
-
-    const handleDragEnd = useCallback((): void => {
-        endDrag();
-    }, [endDrag]);
-
     const handleDrop = useCallback((toIdx: number): void => {
         const payload = getDragPayload();
-        if (!payload || payload.fromFnId !== pipeline.id) {
+        if (!payload) {
             return;
         }
         dispatch({
             type: 'MOVE_FUNCTION_REF',
-            pipelineId: pipeline.id,
+            fromPipelineId: payload.fromFnId,
+            toPipelineId: pipeline.id,
             refId: payload.moduleId,
             toIdx,
         });
-        endDrag();
-    }, [pipeline.id, dispatch, endDrag]);
+        onDragEnd();
+    }, [pipeline.id, dispatch, onDragEnd]);
 
     const handleOpenDrawer = useCallback((refId: string): void => {
         setDrawerRefId(refId);
@@ -139,8 +138,8 @@ export const PipelineCard: React.FC<PipelineCardProps> = ({
                         refs={pipeline.functions}
                         dragState={dragState}
                         counterMap={counterMap}
-                        onDragStart={handleDragStart}
-                        onDragEnd={handleDragEnd}
+                        onDragStart={onDragStart}
+                        onDragEnd={onDragEnd}
                         onDrop={handleDrop}
                         onOpenDrawer={handleOpenDrawer}
                         onRemoveRef={refId => dispatch({ type: 'REMOVE_FUNCTION_REF', pipelineId: pipeline.id, refId })}

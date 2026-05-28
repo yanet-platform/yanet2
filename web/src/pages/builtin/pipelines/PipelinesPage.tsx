@@ -3,7 +3,7 @@ import { Button, Flex, Icon, Text } from '@gravity-ui/uikit';
 import { Plus } from '@gravity-ui/icons';
 import { PageLayout, PageLoader, EmptyState, SearchInput } from '../../../components';
 import { usePipelinesData } from './hooks/usePipelinesData';
-import { useUnsavedChangesBlocker } from '../_shared/lane-editor';
+import { useDragState, useUnsavedChangesBlocker } from '../_shared/lane-editor';
 import { PipelineCard } from './components/PipelineCard';
 import { CreatePipelineDialog } from './dialogs';
 import type { Pipeline } from './types';
@@ -31,6 +31,7 @@ const PipelinesPage = (): React.JSX.Element => {
     const [createDialogOpen, setCreateDialogOpen] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const searchRef = useRef<HTMLInputElement>(null);
+    const { dragState, startDrag, endDrag } = useDragState();
 
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent): void => {
@@ -108,6 +109,9 @@ const PipelinesPage = (): React.JSX.Element => {
                             serverPipeline={getServerPipeline(pl.id)}
                             isDirty={isDirty(pl.id)}
                             dispatch={dispatch}
+                            dragState={dragState}
+                            onDragStart={startDrag}
+                            onDragEnd={endDrag}
                             onSave={handleSave(pl.id)}
                             onDiscard={handleDiscard(pl.id)}
                             onDelete={handleDelete(pl.id)}

@@ -21,7 +21,7 @@ interface LaneTrackProps {
 
 /**
  * The flex-wrap dropzone container for a chain's modules.
- * Handles dragover slot detection via DOM geometry, validates cross-function drops.
+ * Handles dragover slot detection via DOM geometry.
  */
 export const LaneTrack: React.FC<LaneTrackProps> = ({
     fnId,
@@ -38,15 +38,15 @@ export const LaneTrack: React.FC<LaneTrackProps> = ({
 }) => {
     const [activeSlotIdx, setActiveSlotIdx] = useState<number | null>(null);
     const containerRef = useRef<HTMLDivElement>(null);
-    // When true, Esc was pressed during a drag — ignore the next drop event.
     const cancelledByEscRef = useRef(false);
 
     const { isDragging, dragPayload } = dragState;
     const isActiveDrag = isDragging && !!dragPayload;
-    const isSameFn = isActiveDrag && dragPayload.fromFnId === fnId;
-    const isCrossFunction = isActiveDrag && dragPayload.fromFnId !== fnId;
+    const isFunctionDrag = isActiveDrag && dragPayload.fromChainId !== dragPayload.fromFnId;
+    const isSameOwner = isFunctionDrag && dragPayload.fromFnId === fnId;
+    const isSameContainer = isSameOwner && dragPayload.fromChainId === chainId;
 
-    const fromModIdx = isActiveDrag && dragPayload.fromChainId === chainId
+    const fromModIdx = isSameContainer
         ? dragPayload.fromModIdx
         : -1;
 
@@ -56,7 +56,6 @@ export const LaneTrack: React.FC<LaneTrackProps> = ({
         hiddenSlots.add(fromModIdx + 1);
     }
 
-    // Esc key cancels the active drag.
     useEffect(() => {
         if (!isActiveDrag) {
             cancelledByEscRef.current = false;
@@ -74,7 +73,7 @@ export const LaneTrack: React.FC<LaneTrackProps> = ({
     }, [isActiveDrag, onDragEnd]);
 
     const handleDragOver = useCallback((e: React.DragEvent<HTMLDivElement>): void => {
-        if (!isSameFn) {
+        if (!isFunctionDrag) {
             return;
         }
         e.preventDefault();
@@ -108,7 +107,7 @@ export const LaneTrack: React.FC<LaneTrackProps> = ({
         });
 
         setActiveSlotIdx(nearestIdx);
-    }, [isSameFn]);
+    }, [isFunctionDrag]);
 
     const handleDragLeave = useCallback((): void => {
         setActiveSlotIdx(null);
@@ -118,26 +117,22 @@ export const LaneTrack: React.FC<LaneTrackProps> = ({
         e.preventDefault();
         setActiveSlotIdx(null);
 
-        // Cancelled by Esc — reset flag and do nothing.
         if (cancelledByEscRef.current) {
             cancelledByEscRef.current = false;
             return;
         }
 
         const payload = getDragPayload();
-        if (!payload || payload.fromFnId !== fnId) {
+        if (!payload || payload.fromChainId === payload.fromFnId) {
             return;
         }
 
-        // No slot was hovered — user dropped outside any slot, treat as cancel.
         if (activeSlotIdx === null) {
             return;
         }
 
         const toIdx = activeSlotIdx;
-
-        // Drop resolves to the source position — no-op.
-        if (payload.fromChainId === chainId) {
+        if (payload.fromFnId === fnId && payload.fromChainId === chainId) {
             const src = payload.fromModIdx;
             if (toIdx === src || toIdx === src + 1) {
                 return;
@@ -156,10 +151,7 @@ export const LaneTrack: React.FC<LaneTrackProps> = ({
 
     return (
         <div
-            className={[
-                'fn-lane-track',
-                isActiveDrag && isCrossFunction ? 'fn-lane-track--reject' : '',
-            ].filter(Boolean).join(' ')}
+            className="fn-lane-track"
             ref={containerRef}
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
@@ -169,7 +161,7 @@ export const LaneTrack: React.FC<LaneTrackProps> = ({
 
             {modules.map((m, idx) => (
                 <React.Fragment key={m.id}>
-                    {isActiveDrag && isSameFn ? (
+                    {isFunctionDrag ? (
                         <InsertSlot
                             idx={idx}
                             active={activeSlotIdx === idx}
@@ -183,9 +175,9 @@ export const LaneTrack: React.FC<LaneTrackProps> = ({
                         fnId={fnId}
                         chainId={chainId}
                         modIdx={idx}
-                        isDragging={isActiveDrag && dragPayload?.moduleId === m.id}
-                        isSourceDuringDrag={isActiveDrag && isSameFn && dragPayload?.moduleId === m.id}
-                        isInvalidDragTarget={isCrossFunction && isActiveDrag}
+                        isDragging={isFunctionDrag && dragPayload?.moduleId === m.id}
+                        isSourceDuringDrag={isFunctionDrag && isSameOwner && dragPayload?.moduleId === m.id}
+                        isInvalidDragTarget={false}
                         counter={counterMap.get(m.id)}
                         onDragStart={onDragStart}
                         onDragEnd={handleDragEnd}
@@ -204,7 +196,7 @@ export const LaneTrack: React.FC<LaneTrackProps> = ({
                 </>
             )}
 
-            {isActiveDrag && isSameFn && (
+            {isFunctionDrag && (
                 <InsertSlot
                     idx={modules.length}
                     active={activeSlotIdx === modules.length}

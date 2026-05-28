@@ -28,23 +28,38 @@ export const pipelinesReducer = (
             return handleBaseEntityAction(state, action as BaseEntityAction<Pipeline>);
 
         case 'MOVE_FUNCTION_REF': {
-            const pl = findPipeline(state, action.pipelineId);
-            if (!pl) {
+            const fromPipeline = findPipeline(state, action.fromPipelineId);
+            const toPipeline = findPipeline(state, action.toPipelineId);
+            if (!fromPipeline || !toPipeline) {
                 return state;
             }
-            const fromIdx = pl.functions.findIndex(r => r.id === action.refId);
+            const fromIdx = fromPipeline.functions.findIndex(r => r.id === action.refId);
             if (fromIdx === -1) {
                 return state;
             }
-            const toIdx = action.toIdx;
-            if (fromIdx === toIdx || fromIdx === toIdx - 1) {
-                return state;
+
+            if (action.fromPipelineId === action.toPipelineId) {
+                const toIdx = action.toIdx;
+                if (fromIdx === toIdx || fromIdx === toIdx - 1) {
+                    return state;
+                }
+                const refs = [...fromPipeline.functions];
+                const [moved] = refs.splice(fromIdx, 1);
+                const insertAt = fromIdx < toIdx ? toIdx - 1 : toIdx;
+                refs.splice(insertAt, 0, moved);
+                return updatePipeline(state, action.fromPipelineId, { ...fromPipeline, functions: refs });
             }
-            const refs = [...pl.functions];
-            const [moved] = refs.splice(fromIdx, 1);
-            const insertAt = fromIdx < toIdx ? toIdx - 1 : toIdx;
-            refs.splice(insertAt, 0, moved);
-            return updatePipeline(state, action.pipelineId, { ...pl, functions: refs });
+
+            const moved = fromPipeline.functions[fromIdx];
+            const sourceRefs = [...fromPipeline.functions];
+            sourceRefs.splice(fromIdx, 1);
+            const targetRefs = [...toPipeline.functions];
+            targetRefs.splice(action.toIdx, 0, moved);
+
+            const sourceNext = { ...fromPipeline, functions: sourceRefs };
+            const targetNext = { ...toPipeline, functions: targetRefs };
+            const sourceState = applyEntityUpdate(state, action.fromPipelineId, sourceNext, localToApi);
+            return applyEntityUpdate(sourceState, action.toPipelineId, targetNext, localToApi);
         }
 
         case 'ADD_FUNCTION_REF': {

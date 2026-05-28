@@ -33,15 +33,16 @@ export const functionsReducer = (
             return handleBaseEntityAction(state, action as BaseEntityAction<NetworkFunction>);
 
         case 'MOVE_MODULE': {
-            const fn = findFn(state, action.fnId);
-            if (!fn) {
+            const fromFn = findFn(state, action.fromFnId);
+            const toFn = findFn(state, action.toFnId);
+            if (!fromFn || !toFn) {
                 return state;
             }
 
             const { fromChainId, toChainId, moduleId, toIdx } = action;
 
-            if (fromChainId === toChainId) {
-                const updated = mapChains(fn, fromChainId, c => {
+            if (action.fromFnId === action.toFnId && fromChainId === toChainId) {
+                const updated = mapChains(fromFn, fromChainId, c => {
                     const fromIdx = c.modules.findIndex(m => m.id === moduleId);
                     if (fromIdx === -1) {
                         return c;
@@ -55,32 +56,39 @@ export const functionsReducer = (
                     mods.splice(insertAt, 0, moved);
                     return { ...c, modules: mods };
                 });
-                return updateFn(state, action.fnId, updated);
+                return updateFn(state, action.fromFnId, updated);
             }
 
-            let movedModule = null as typeof fn.chains[0]['modules'][0] | null;
-            const afterRemove = mapChains(fn, fromChainId, c => {
-                const fromIdx = c.modules.findIndex(m => m.id === moduleId);
-                if (fromIdx === -1) {
-                    return c;
-                }
-                const mods = [...c.modules];
-                [movedModule] = mods.splice(fromIdx, 1);
-                return { ...c, modules: mods };
-            });
-
-            if (!movedModule) {
+            const sourceChain = fromFn.chains.find(c => c.id === fromChainId);
+            const targetChain = toFn.chains.find(c => c.id === toChainId);
+            if (!sourceChain || !targetChain) {
+                return state;
+            }
+            const fromIdx = sourceChain.modules.findIndex(m => m.id === moduleId);
+            if (fromIdx === -1) {
                 return state;
             }
 
-            const capturedModule = movedModule;
-            const afterInsert = mapChains(afterRemove, toChainId, c => {
+            const movedModule = sourceChain.modules[fromIdx];
+            const sourceFnNext = mapChains(fromFn, fromChainId, c => {
                 const mods = [...c.modules];
-                mods.splice(toIdx, 0, capturedModule);
+                mods.splice(fromIdx, 1);
                 return { ...c, modules: mods };
             });
 
-            return updateFn(state, action.fnId, afterInsert);
+            const targetFnBase = action.fromFnId === action.toFnId ? sourceFnNext : toFn;
+            const targetFnNext = mapChains(targetFnBase, toChainId, c => {
+                const mods = [...c.modules];
+                mods.splice(toIdx, 0, movedModule);
+                return { ...c, modules: mods };
+            });
+
+            if (action.fromFnId === action.toFnId) {
+                return updateFn(state, action.fromFnId, targetFnNext);
+            }
+
+            const sourceState = updateFn(state, action.fromFnId, sourceFnNext);
+            return updateFn(sourceState, action.toFnId, targetFnNext);
         }
 
         case 'ADD_MODULE': {

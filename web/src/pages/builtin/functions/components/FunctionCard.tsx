@@ -1,7 +1,8 @@
 import React, { useState, useCallback, useMemo } from 'react';
 import type { NetworkFunction, FunctionsAction, DragPayload, Module, Chain } from '../types';
 import { useModuleCounters, type ModuleInfo } from '../hooks/useModuleCounters';
-import { useDragState, getDragPayload, useSparklineHistory } from '../../_shared/lane-editor';
+import { getDragPayload, useSparklineHistory } from '../../_shared/lane-editor';
+import type { DragState } from '../../_shared/lane-editor';
 import { FunctionCardHeader } from './FunctionCardHeader';
 import { Lane } from './Lane';
 import { AddChainButton } from './AddChainButton';
@@ -15,6 +16,9 @@ interface FunctionCardProps {
     isDirty: boolean;
     availableModuleTypes: string[];
     dispatch: (action: FunctionsAction) => void;
+    dragState: DragState;
+    onDragStart: (payload: DragPayload) => void;
+    onDragEnd: () => void;
     onSave: () => Promise<void>;
     onDiscard: () => void;
     onDelete: () => Promise<boolean>;
@@ -54,19 +58,20 @@ export const FunctionCard: React.FC<FunctionCardProps> = ({
     isDirty,
     availableModuleTypes,
     dispatch,
+    dragState,
+    onDragStart,
+    onDragEnd,
     onSave,
     onDiscard,
     onDelete,
 }) => {
     const [collapsed, setCollapsed] = useState(false);
     const [diffOpen, setDiffOpen] = useState(false);
-    // Selection: either a module or a chain in this function's drawer.
     const [drawerSelection, setDrawerSelection] = useState<
         { kind: 'module'; moduleId: string; chainId: string } |
         { kind: 'chain'; chainId: string } |
         null
     >(null);
-    const { dragState, startDrag, endDrag } = useDragState();
 
     const totalWeight = fn.chains.reduce((s, c) => s + c.weight, 0);
 
@@ -114,29 +119,22 @@ export const FunctionCard: React.FC<FunctionCardProps> = ({
 
     const siblingChainNames = fn.chains.map(c => c.name);
 
-    const handleDragStart = useCallback((payload: DragPayload): void => {
-        startDrag(payload);
-    }, [startDrag]);
-
-    const handleDragEnd = useCallback((): void => {
-        endDrag();
-    }, [endDrag]);
-
     const handleDrop = useCallback((toChainId: string, toIdx: number): void => {
         const payload = getDragPayload();
-        if (!payload || payload.fromFnId !== fn.id) {
+        if (!payload) {
             return;
         }
         dispatch({
             type: 'MOVE_MODULE',
-            fnId: fn.id,
+            fromFnId: payload.fromFnId,
+            toFnId: fn.id,
             fromChainId: payload.fromChainId,
             toChainId,
             moduleId: payload.moduleId,
             toIdx,
         });
-        endDrag();
-    }, [fn.id, dispatch, endDrag]);
+        onDragEnd();
+    }, [fn.id, dispatch, onDragEnd]);
 
     const handleOpenModuleDrawer = useCallback((moduleId: string, chainId: string): void => {
         setDrawerSelection({ kind: 'module', moduleId, chainId });
@@ -283,8 +281,8 @@ export const FunctionCard: React.FC<FunctionCardProps> = ({
                                 dragState={dragState}
                                 counterMap={counterMap}
                                 siblingChainNames={siblingChainNames}
-                                onDragStart={handleDragStart}
-                                onDragEnd={handleDragEnd}
+                                onDragStart={onDragStart}
+                                onDragEnd={onDragEnd}
                                 onDrop={handleDrop}
                                 dispatch={dispatch}
                                 onAddModule={handleAddModule}
@@ -344,7 +342,8 @@ export const FunctionCard: React.FC<FunctionCardProps> = ({
                         if (m) {
                             dispatch({
                                 type: 'MOVE_MODULE',
-                                fnId: fn.id,
+                                fromFnId: fn.id,
+                                toFnId: fn.id,
                                 fromChainId: drawerChain.id,
                                 toChainId: drawerChain.id,
                                 moduleId: m.id,

@@ -3,7 +3,7 @@ import { Button, Flex, Icon, Text } from '@gravity-ui/uikit';
 import { Plus } from '@gravity-ui/icons';
 import { PageLayout, PageLoader, EmptyState, SearchInput } from '../../../components';
 import { useFunctionsData } from './hooks/useFunctionsData';
-import { useUnsavedChangesBlocker } from '../_shared/lane-editor';
+import { useDragState, useUnsavedChangesBlocker } from '../_shared/lane-editor';
 import { FunctionCard } from './components/FunctionCard';
 import { CreateFunctionDialog } from './dialogs';
 import type { NetworkFunction } from './types';
@@ -41,6 +41,7 @@ const FunctionsPage = (): React.JSX.Element => {
     const [createDialogOpen, setCreateDialogOpen] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const searchRef = useRef<HTMLInputElement>(null);
+    const { dragState, startDrag, endDrag } = useDragState();
 
     useEffect(() => {
         const fetchTypes = async (): Promise<void> => {
@@ -133,6 +134,9 @@ const FunctionsPage = (): React.JSX.Element => {
                             isDirty={isDirty(fn.id)}
                             availableModuleTypes={availableModuleTypes}
                             dispatch={dispatch}
+                            dragState={dragState}
+                            onDragStart={startDrag}
+                            onDragEnd={endDrag}
                             onSave={handleSave(fn.id)}
                             onDiscard={handleDiscard(fn.id)}
                             onDelete={handleDelete(fn.id)}
