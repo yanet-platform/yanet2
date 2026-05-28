@@ -146,6 +146,36 @@ export const FunctionCard: React.FC<FunctionCardProps> = ({
         setDrawerSelection({ kind: 'chain', chainId });
     }, []);
 
+    const handleAddModule = useCallback((chainId: string): void => {
+        const chain = fn.chains.find(c => c.id === chainId);
+        if (!chain) {
+            return;
+        }
+
+        const existingNames = new Set(chain.modules.map(module => module.name));
+        let idx = chain.modules.length;
+        let candidateName = `module${idx}`;
+        while (existingNames.has(candidateName)) {
+            idx++;
+            candidateName = `module${idx}`;
+        }
+
+        const module: Module = {
+            id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+            type: 'route',
+            name: candidateName,
+        };
+
+        dispatch({
+            type: 'ADD_MODULE',
+            fnId: fn.id,
+            chainId,
+            toIdx: chain.modules.length,
+            module,
+        });
+        setDrawerSelection({ kind: 'module', moduleId: module.id, chainId });
+    }, [fn.id, fn.chains, dispatch]);
+
     const handleCloseDrawer = useCallback((): void => {
         setDrawerSelection(null);
     }, []);
@@ -257,6 +287,7 @@ export const FunctionCard: React.FC<FunctionCardProps> = ({
                                 onDragEnd={handleDragEnd}
                                 onDrop={handleDrop}
                                 dispatch={dispatch}
+                                onAddModule={handleAddModule}
                                 onOpenModuleDrawer={handleOpenModuleDrawer}
                                 onOpenChainDrawer={handleOpenChainDrawer}
                             />

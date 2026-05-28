@@ -18,6 +18,7 @@ interface LaneProps {
     onDragEnd: () => void;
     onDrop: (toChainId: string, toIdx: number) => void;
     dispatch: (action: FunctionsAction) => void;
+    onAddModule: (chainId: string) => void;
     onOpenModuleDrawer: (moduleId: string, chainId: string) => void;
     onOpenChainDrawer: (chainId: string) => void;
 }
@@ -37,6 +38,7 @@ export const Lane: React.FC<LaneProps> = ({
     onDragEnd,
     onDrop,
     dispatch,
+    onAddModule,
     onOpenModuleDrawer,
     onOpenChainDrawer,
 }) => {
@@ -65,23 +67,6 @@ export const Lane: React.FC<LaneProps> = ({
         dispatch({ type: 'RENAME_MODULE', fnId, moduleId, name });
     };
 
-    const handleAddModule = (): void => {
-        const existingNames = new Set(chain.modules.map(m => m.name));
-        let idx = chain.modules.length;
-        let candidateName = `module${idx}`;
-        while (existingNames.has(candidateName)) {
-            idx++;
-            candidateName = `module${idx}`;
-        }
-        const newModule = {
-            id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-            type: 'route',
-            name: candidateName,
-        };
-        dispatch({ type: 'ADD_MODULE', fnId, chainId: chain.id, toIdx: chain.modules.length, module: newModule });
-        onOpenModuleDrawer(newModule.id, chain.id);
-    };
-
     return (
         <div
             className="fn-lane"
@@ -107,7 +92,7 @@ export const Lane: React.FC<LaneProps> = ({
                 onDrop={onDrop}
                 onRenameModule={handleRenameModule}
                 onOpenDrawer={moduleId => onOpenModuleDrawer(moduleId, chain.id)}
-                onAddModule={handleAddModule}
+                onAddModule={() => onAddModule(chain.id)}
             />
         </div>
     );
