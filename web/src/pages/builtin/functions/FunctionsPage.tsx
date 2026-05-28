@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button, Flex, Icon, Text } from '@gravity-ui/uikit';
 import { Plus } from '@gravity-ui/icons';
 import { PageLayout, PageLoader, EmptyState, SearchInput } from '../../../components';
@@ -40,7 +40,6 @@ const FunctionsPage = (): React.JSX.Element => {
     const [availableModuleTypes, setAvailableModuleTypes] = useState<string[]>([]);
     const [createDialogOpen, setCreateDialogOpen] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
-    const searchRef = useRef<HTMLInputElement>(null);
     const { dragState, startDrag, endDrag } = useDragState();
 
     useEffect(() => {
@@ -55,17 +54,6 @@ const FunctionsPage = (): React.JSX.Element => {
             }
         };
         fetchTypes();
-    }, []);
-
-    useEffect(() => {
-        const handleKeyDown = (e: KeyboardEvent): void => {
-            if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-                e.preventDefault();
-                searchRef.current?.focus();
-            }
-        };
-        window.addEventListener('keydown', handleKeyDown);
-        return () => window.removeEventListener('keydown', handleKeyDown);
     }, []);
 
     const filteredFunctions = useMemo(() => {
@@ -92,10 +80,9 @@ const FunctionsPage = (): React.JSX.Element => {
             <Flex grow />
             <div style={{ flexBasis: 380, flexShrink: 1 }}>
                 <SearchInput
-                    controlRef={searchRef}
                     value={searchQuery}
                     onUpdate={setSearchQuery}
-                    placeholder="Search functions, chains, modules… (⌘K)"
+                    placeholder="Search functions, chains, modules…"
                 />
             </div>
             <Button

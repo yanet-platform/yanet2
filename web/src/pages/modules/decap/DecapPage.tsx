@@ -34,7 +34,6 @@ const DecapPage: React.FC = () => {
     const [addConfigOpen, setAddConfigOpen] = useState(false);
     const [deleteConfigOpen, setDeleteConfigOpen] = useState(false);
 
-    const searchRef = useRef<HTMLInputElement>(null);
     const drawerRef = useRef<PrefixDrawerHandle>(null);
     const dragDrop = useDraftDragDrop();
 
@@ -101,17 +100,16 @@ const DecapPage: React.FC = () => {
 
     useDraftShortcuts({
         rows: rawRows, activeRowId, setActiveRowId, editingRowId, setEditingRowId,
-        searchRef, onDeleteRow: handlers.handleDeleteRow,
+        onDeleteRow: handlers.handleDeleteRow,
     });
 
     const pageHeader = (
-        <DraftPageToolbar
-            title="Decap"
-            searchValue={search}
-            onSearchChange={setSearch}
-            searchPlaceholder="Search prefix… (/)"
-            searchRef={searchRef}
-            yamlSlot={currentConfig ? (
+            <DraftPageToolbar
+                title="Decap"
+                searchValue={search}
+                onSearchChange={setSearch}
+                searchPlaceholder="Search prefix…"
+                yamlSlot={currentConfig ? (
                 <PrefixYamlIO configName={currentConfig} rows={rawRows} onImport={handlers.handleImportYaml} />
             ) : undefined}
             addLabel="Add Prefix"

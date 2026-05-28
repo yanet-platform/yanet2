@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Button, Flex, Icon, Text } from '@gravity-ui/uikit';
 import { Plus } from '@gravity-ui/icons';
@@ -78,7 +78,6 @@ const NeighboursPage: React.FC = () => {
     const [activeRowId, setActiveRowId] = useState<string | null>(null);
     const [editingRowId, setEditingRowId] = useState<string | null>(null);
 
-    const searchRef = useRef<HTMLInputElement>(null);
 
     const isMergedView = activeTab === MERGED_TAB;
     const activeTableInfo: NeighbourTableInfo | null = tables.find((t) => t.name === activeTab) ?? null;
@@ -240,10 +239,9 @@ const NeighboursPage: React.FC = () => {
             <Flex grow />
             <div style={{ flexBasis: 360, flexShrink: 1 }}>
                 <SearchInput
-                    controlRef={searchRef}
                     value={search}
                     onUpdate={(v) => updateParams({ [QP_SEARCH]: v || null })}
-                    placeholder="Search next hop, device, source… (/)"
+                    placeholder="Search next hop, device, source…"
                 />
             </div>
             <Button view="outlined" onClick={() => setCreateTableOpen(true)}>

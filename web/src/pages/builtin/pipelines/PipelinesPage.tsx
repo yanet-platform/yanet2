@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import { Button, Flex, Icon, Text } from '@gravity-ui/uikit';
 import { Plus } from '@gravity-ui/icons';
 import { PageLayout, PageLoader, EmptyState, SearchInput } from '../../../components';
@@ -30,19 +30,7 @@ const PipelinesPage = (): React.JSX.Element => {
     const { pipelines, loading, isDirty, getServerPipeline, dispatch, savePipeline, discardPipeline, createPipeline, deletePipeline, loadFunctionList } = usePipelinesData();
     const [createDialogOpen, setCreateDialogOpen] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
-    const searchRef = useRef<HTMLInputElement>(null);
     const { dragState, startDrag, endDrag } = useDragState();
-
-    useEffect(() => {
-        const handleKeyDown = (e: KeyboardEvent): void => {
-            if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-                e.preventDefault();
-                searchRef.current?.focus();
-            }
-        };
-        window.addEventListener('keydown', handleKeyDown);
-        return () => window.removeEventListener('keydown', handleKeyDown);
-    }, []);
 
     const filteredPipelines = useMemo(() => {
         if (!searchQuery.trim()) {
@@ -68,10 +56,9 @@ const PipelinesPage = (): React.JSX.Element => {
             <Flex grow />
             <div style={{ flexBasis: 380, flexShrink: 1 }}>
                 <SearchInput
-                    controlRef={searchRef}
                     value={searchQuery}
                     onUpdate={setSearchQuery}
-                    placeholder="Search pipelines, functions… (⌘K)"
+                    placeholder="Search pipelines, functions…"
                 />
             </div>
             <Button

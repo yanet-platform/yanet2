@@ -279,11 +279,10 @@ export const isValidDeviceName = (s: string): boolean => /^[a-zA-Z0-9_:.\-]+$/.t
 /** Keyboard shortcuts for the ACL page. */
 export const useKeyboardShortcuts = (opts: {
     onNewRule: () => void;
-    onFocusSearch: () => void;
     onEscape: () => void;
     drawerOpen: boolean;
 }): void => {
-    const { onNewRule, onFocusSearch, onEscape, drawerOpen } = opts;
+    const { onNewRule, onEscape, drawerOpen } = opts;
 
     useEffect(() => {
         const onKey = (e: KeyboardEvent): void => {
@@ -293,14 +292,11 @@ export const useKeyboardShortcuts = (opts: {
             }
             const tag = (e.target as HTMLElement).tagName;
             if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-            if (e.key === '/' && !e.metaKey && !e.ctrlKey) {
-                e.preventDefault();
-                onFocusSearch();
-            } else if (e.key === 'n' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+            if (e.key === 'n' && !e.metaKey && !e.ctrlKey && !e.altKey) {
                 onNewRule();
             }
         };
         window.addEventListener('keydown', onKey);
         return () => window.removeEventListener('keydown', onKey);
-    }, [onNewRule, onFocusSearch, onEscape, drawerOpen]);
+    }, [onNewRule, onEscape, drawerOpen]);
 };

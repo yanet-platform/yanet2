@@ -7,7 +7,6 @@ export interface DevicePageHeaderProps {
     onCreateDevice: () => void;
     searchQuery: string;
     onSearchChange: (value: string) => void;
-    searchRef: React.RefObject<HTMLInputElement | null>;
 }
 
 /** Page header rendered inside the PageLayout header slot. */
@@ -15,7 +14,6 @@ export const DevicePageHeader: React.FC<DevicePageHeaderProps> = ({
     onCreateDevice,
     searchQuery,
     onSearchChange,
-    searchRef,
 }) => {
     return (
         <Flex alignItems="center" gap={4} style={{ width: '100%' }}>
@@ -23,10 +21,9 @@ export const DevicePageHeader: React.FC<DevicePageHeaderProps> = ({
             <Flex grow />
             <div style={{ flexBasis: 380, flexShrink: 1 }}>
                 <SearchInput
-                    controlRef={searchRef}
                     value={searchQuery}
                     onUpdate={onSearchChange}
-                    placeholder="Search devices… (⌘K)"
+                    placeholder="Search devices…"
                 />
             </div>
             <Button view="action" onClick={onCreateDevice}>

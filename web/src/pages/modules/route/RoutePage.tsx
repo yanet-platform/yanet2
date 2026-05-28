@@ -34,7 +34,6 @@ const RoutePage: React.FC = () => {
     const [addConfigOpen, setAddConfigOpen] = useState(false);
     const [deleteConfigOpen, setDeleteConfigOpen] = useState(false);
 
-    const searchRef = useRef<HTMLInputElement>(null);
     const drawerRef = useRef<FIBDrawerHandle>(null);
     const dragDrop = useDraftDragDrop();
 
@@ -106,19 +105,18 @@ const RoutePage: React.FC = () => {
 
     useDraftShortcuts({
         rows: rawRows, activeRowId, setActiveRowId, editingRowId, setEditingRowId,
-        searchRef, onDeleteRow: handlers.handleDeleteRow,
+        onDeleteRow: handlers.handleDeleteRow,
     });
 
     const pageHeader = (
-        <DraftPageToolbar
-            title="Route FIB"
-            searchValue={search}
-            onSearchChange={setSearch}
-            searchPlaceholder="Search prefix, MAC or device… (/)"
-            searchRef={searchRef}
-            yamlSlot={currentConfig ? (
-                <FIBYamlIO configName={currentConfig} rows={rawRows} onImport={handlers.handleImportYaml} />
-            ) : undefined}
+            <DraftPageToolbar
+                title="Route FIB"
+                searchValue={search}
+                onSearchChange={setSearch}
+                searchPlaceholder="Search prefix, MAC or device…"
+                yamlSlot={currentConfig ? (
+                    <FIBYamlIO configName={currentConfig} rows={rawRows} onImport={handlers.handleImportYaml} />
+                ) : undefined}
             addLabel="Add Route"
             onAdd={openAdd}
         />

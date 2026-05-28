@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { Button, Flex, Icon, Text } from '@gravity-ui/uikit';
 import { Plus } from '@gravity-ui/icons';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, SearchInput } from '../../../components';
@@ -34,7 +34,6 @@ const RoutePage: React.FC = () => {
         route: null,
     });
 
-    const searchRef = useRef<HTMLInputElement>(null);
 
     const currentConfig = activeConfig || configs[0] || '';
     const allRows = configRoutes.get(currentConfig) || [];
@@ -221,10 +220,9 @@ const RoutePage: React.FC = () => {
             <Flex grow />
             <div style={{ flexBasis: 380, flexShrink: 1 }}>
                 <SearchInput
-                    controlRef={searchRef}
                     value={search}
                     onUpdate={setSearch}
-                    placeholder="Search prefix, nexthop or peer… (/)"
+                    placeholder="Search prefix, nexthop or peer…"
                 />
             </div>
             <Button view="outlined" onClick={handleFlush} disabled={!currentConfig}>

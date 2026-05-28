@@ -8,7 +8,6 @@ interface DraftPageToolbarProps {
     searchValue: string;
     onSearchChange: (v: string) => void;
     searchPlaceholder: string;
-    searchRef?: React.RefObject<HTMLInputElement | null>;
     /** Optional slot for YAML import/export control. */
     yamlSlot?: React.ReactNode;
     addLabel: string;
@@ -21,7 +20,6 @@ const DraftPageToolbar: React.FC<DraftPageToolbarProps> = ({
     searchValue,
     onSearchChange,
     searchPlaceholder,
-    searchRef,
     yamlSlot,
     addLabel,
     onAdd,
@@ -31,7 +29,6 @@ const DraftPageToolbar: React.FC<DraftPageToolbarProps> = ({
         <Flex grow />
             <div style={{ flexBasis: 380, flexShrink: 1 }}>
                 <SearchInput
-                    controlRef={searchRef}
                     value={searchValue}
                     onUpdate={onSearchChange}
                     placeholder={searchPlaceholder}

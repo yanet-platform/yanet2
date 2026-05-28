@@ -1,5 +1,6 @@
 import React from 'react';
-import { Box, TextInput, Loader, Label, Text } from '@gravity-ui/uikit';
+import { Box, Loader, Label, Text } from '@gravity-ui/uikit';
+import { SearchInput } from '../SearchInput';
 import './TableSearchBar.scss';
 
 export interface TableSearchBarProps {
@@ -32,12 +33,10 @@ export const TableSearchBar: React.FC<TableSearchBarProps> = ({
     return (
         <Box className={`table-search-bar ${className}`} style={{ height }}>
             <Box className="table-search-bar__input" style={{ width: inputWidth }}>
-                <TextInput
+                <SearchInput
                     placeholder={placeholder}
                     value={searchQuery}
                     onUpdate={onSearchChange}
-                    size="m"
-                    hasClear
                 />
             </Box>
             <Box className="table-search-bar__stats">

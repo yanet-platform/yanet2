@@ -125,11 +125,10 @@ export const itemToDraft = (item: RuleItem): RuleDraft => ({
 /** Register keyboard shortcuts for the forward page. */
 export const useKeyboardShortcuts = (opts: {
     onNewRule: () => void;
-    onFocusSearch: () => void;
     onEscape: () => void;
     drawerOpen: boolean;
 }): void => {
-    const { onNewRule, onFocusSearch, onEscape, drawerOpen } = opts;
+    const { onNewRule, onEscape, drawerOpen } = opts;
 
     useEffect(() => {
         const onKey = (e: KeyboardEvent): void => {
@@ -138,19 +137,16 @@ export const useKeyboardShortcuts = (opts: {
                 onEscape();
                 return;
             }
-            // n and / are gated: do not fire when focus is inside a text field.
+            // n is gated: do not fire when focus is inside a text field.
             const tag = (e.target as HTMLElement).tagName;
             if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-            if (e.key === '/' && !e.metaKey && !e.ctrlKey) {
-                e.preventDefault();
-                onFocusSearch();
-            } else if (e.key === 'n' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+            if (e.key === 'n' && !e.metaKey && !e.ctrlKey && !e.altKey) {
                 onNewRule();
             }
         };
         window.addEventListener('keydown', onKey);
         return () => window.removeEventListener('keydown', onKey);
-    }, [onNewRule, onFocusSearch, onEscape, drawerOpen]);
+    }, [onNewRule, onEscape, drawerOpen]);
 };
 
 /** Validate CIDR string (IPv4 or IPv6). Returns true if valid. */

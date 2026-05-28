@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import { PageLayout, PageLoader, EmptyState } from '../../../components';
 import type { DeviceType } from '../../../api/devices';
 import type { LocalDevice } from './types';
@@ -32,18 +32,6 @@ const DevicesPage: React.FC = () => {
     const [selectedDeviceName, setSelectedDeviceName] = useState<string | null>(null);
     const [grouping, setGrouping] = useState<GroupingMode>('type');
     const [searchQuery, setSearchQuery] = useState('');
-    const searchRef = useRef<HTMLInputElement>(null);
-
-    useEffect(() => {
-        const handleKeyDown = (e: KeyboardEvent): void => {
-            if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-                e.preventDefault();
-                searchRef.current?.focus();
-            }
-        };
-        window.addEventListener('keydown', handleKeyDown);
-        return () => window.removeEventListener('keydown', handleKeyDown);
-    }, []);
 
     const selectedDevice = useMemo(() => {
         if (!selectedDeviceName) return null;
@@ -100,7 +88,6 @@ const DevicesPage: React.FC = () => {
             onCreateDevice={handleCreateDevice}
             searchQuery={searchQuery}
             onSearchChange={setSearchQuery}
-            searchRef={searchRef}
         />
     );
 

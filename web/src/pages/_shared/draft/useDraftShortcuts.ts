@@ -6,15 +6,14 @@ interface UseDraftShortcutsOpts<T extends { id: string }> {
     setActiveRowId: (id: string | null) => void;
     editingRowId: string | null;
     setEditingRowId: (id: string | null) => void;
-    searchRef: React.RefObject<HTMLInputElement | null>;
     onDeleteRow: (row: T) => void;
 }
 
 /**
  * Registers keyboard shortcuts shared across draft-table pages.
  *
- * Escape closes the drawer; / focuses search; Arrow keys navigate rows;
- * Enter opens the drawer; d / Backspace deletes the active row.
+ * Escape closes the drawer; Arrow keys navigate rows; Enter opens the drawer;
+ * and d / Backspace deletes the active row.
  */
 export function useDraftShortcuts<T extends { id: string }>({
     rows,
@@ -22,7 +21,6 @@ export function useDraftShortcuts<T extends { id: string }>({
     setActiveRowId,
     editingRowId,
     setEditingRowId,
-    searchRef,
     onDeleteRow,
 }: UseDraftShortcutsOpts<T>): void {
     useEffect(() => {
@@ -32,11 +30,6 @@ export function useDraftShortcuts<T extends { id: string }>({
             }
             const tag = (e.target as HTMLElement).tagName;
             if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-            if (e.key === '/' && !e.metaKey && !e.ctrlKey) {
-                e.preventDefault();
-                searchRef.current?.focus();
-                return;
-            }
             if (!rows.length) return;
             if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
                 e.preventDefault();
@@ -59,5 +52,5 @@ export function useDraftShortcuts<T extends { id: string }>({
         };
         window.addEventListener('keydown', onKey);
         return () => window.removeEventListener('keydown', onKey);
-    }, [editingRowId, activeRowId, rows, onDeleteRow, setActiveRowId, setEditingRowId, searchRef]);
+    }, [editingRowId, activeRowId, rows, onDeleteRow, setActiveRowId, setEditingRowId]);
 }

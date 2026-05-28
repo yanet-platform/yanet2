@@ -45,7 +45,6 @@ const ForwardPage: React.FC = () => {
     const [addConfigOpen, setAddConfigOpen] = useState(false);
     const [deleteConfigOpen, setDeleteConfigOpen] = useState(false);
     const [diffModalOpen, setDiffModalOpen] = useState(false);
-    const searchRef = useRef<HTMLInputElement>(null);
     const drawerRef = useRef<RuleDrawerHandle>(null);
 
     useUnsavedChangesBlocker(anyDirty);
@@ -159,7 +158,6 @@ const ForwardPage: React.FC = () => {
 
     useKeyboardShortcuts({
         onNewRule: openAdd,
-        onFocusSearch: () => searchRef.current?.focus(),
         onEscape: closeDrawer,
         drawerOpen: drawer.open,
     });
@@ -172,10 +170,9 @@ const ForwardPage: React.FC = () => {
             <Flex grow />
             <div style={{ flexBasis: 380, flexShrink: 1 }}>
                 <SearchInput
-                    controlRef={searchRef}
                     value={search}
                     onUpdate={setSearch}
-                    placeholder="Search rules… (/)"
+                    placeholder="Search rules…"
                 />
             </div>
             {currentConfig && (
