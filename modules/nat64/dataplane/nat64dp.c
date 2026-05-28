@@ -221,13 +221,19 @@ find_ip4to6(struct nat64_module_config *config, uint32_t *ip4) {
  *
  * @see RFC7915 Section 1.2 - Fragmentation and Reassembly
  */
+enum fragment_total_len_check {
+	FRAGMENT_TOTAL_LEN_SKIP = 0,
+	FRAGMENT_TOTAL_LEN_CHECK = 1,
+};
+
 static int
 validate_fragment_params(
 	uint16_t frag_offset,
 	uint16_t frag_size,
 	uint16_t total_len,
 	bool more_fragments,
-	bool is_icmp
+	bool is_icmp,
+	enum fragment_total_len_check total_len_check
 ) {
 	// RFC7915 1.2: Fragmented ICMP/ICMPv6 packets will not be translated
 	if (is_icmp) {
@@ -258,7 +264,8 @@ validate_fragment_params(
 	}
 
 	// Check for fragment overlap
-	if (frag_offset + frag_size > total_len) {
+	if (total_len_check == FRAGMENT_TOTAL_LEN_CHECK &&
+	    frag_offset + frag_size > total_len) {
 		LOG_DBG(NAT64,
 			"Fragment extends beyond packet end:\n"
 			"  - Offset: %u\n"
@@ -1540,15 +1547,6 @@ process_ipv6_extension_headers(
 				return -1;
 			}
 
-			// Validate fragment offset
-			if (*frag_offset % 8) {
-				LOG_DBG(NAT64,
-					"Invalid fragment offset (not multiple "
-					"of 8): %u\n",
-					*frag_offset);
-				return -1;
-			}
-
 			current_offset += sizeof(*frag_hdr);
 			*ext_hdrs_len += sizeof(*frag_hdr);
 
@@ -1728,13 +1726,15 @@ nat64_handle_v6(
 	if (is_fragmented) {
 		uint16_t total_len = rte_be_to_cpu_16(ipv6_header->payload_len);
 		uint16_t frag_size = total_len - ext_hdrs_len;
+		uint16_t frag_offset_bytes = frag_offset * 8;
 
 		if (validate_fragment_params(
-			    frag_offset,
+			    frag_offset_bytes,
 			    frag_size,
 			    total_len,
 			    frag_flags,
-			    next_header == IPPROTO_ICMPV6
+			    next_header == IPPROTO_ICMPV6,
+			    FRAGMENT_TOTAL_LEN_SKIP
 		    ) != 0) {
 			return -1;
 		}
@@ -1781,40 +1781,38 @@ nat64_handle_v6(
 	}
 
 	uint16_t payload_length = rte_be_to_cpu_16(ipv6_header->payload_len);
+	uint16_t translated_payload_length = payload_length - ext_hdrs_len;
+	uint32_t dst_addr = 0;
+	rte_memcpy(&dst_addr, &ipv6_header->dst_addr[12], sizeof(dst_addr));
 
 	new_ipv4_header->version_ihl = RTE_IPV4_VHL_DEF;
 	new_ipv4_header->type_of_service =
 		(rte_be_to_cpu_32(ipv6_header->vtc_flow) >> 20) & 0xFF;
-	new_ipv4_header->total_length =
-		rte_cpu_to_be_16(payload_length + sizeof(struct rte_ipv4_hdr));
+	new_ipv4_header->total_length = rte_cpu_to_be_16(
+		translated_payload_length + sizeof(struct rte_ipv4_hdr)
+	);
 
 	// Set packet ID and fragment offset if the packet is fragmented
 	if (is_fragmented) {
 		new_ipv4_header->packet_id = frag_id;
 		new_ipv4_header->fragment_offset = rte_cpu_to_be_16(
-			(frag_offset << 3) |
-			(frag_flags ? RTE_IPV4_HDR_MF_FLAG : 0)
+			frag_offset | (frag_flags ? RTE_IPV4_HDR_MF_FLAG : 0)
 		);
 	} else {
 		new_ipv4_header->packet_id = 0;
 		new_ipv4_header->fragment_offset = 0;
 	}
 	new_ipv4_header->time_to_live = ipv6_header->hop_limits;
-	new_ipv4_header->next_proto_id = ipv6_header->proto;
+	new_ipv4_header->next_proto_id = next_header;
 	new_ipv4_header->hdr_checksum = 0;
 
 	new_ipv4_header->src_addr = new_src_addr->ip4;
+	new_ipv4_header->dst_addr = dst_addr;
 
-	if (ipv6_header->proto == IPPROTO_FRAGMENT) {
-		rte_memcpy(
-			&new_ipv4_header->dst_addr,
-			&ipv6_header->dst_addr[12],
-			sizeof(uint32_t)
-		);
-	}
+	bool has_transport_header = !is_fragmented || frag_offset == 0;
 
 	// handle ICMP, TCP, UDP
-	if (ipv6_header->proto == IPPROTO_ICMPV6) {
+	if (has_transport_header && next_header == IPPROTO_ICMPV6) {
 		new_ipv4_header->next_proto_id = IPPROTO_ICMP;
 
 		struct yanet_icmp6_hdr *icmp_header = rte_pktmbuf_mtod_offset(
@@ -1841,7 +1839,7 @@ nat64_handle_v6(
 				"ICMP translation failed, dropping packet\n");
 			return -1;
 		}
-	} else if (ipv6_header->proto == IPPROTO_UDP) {
+	} else if (has_transport_header && next_header == IPPROTO_UDP) {
 		// Recalculate UDP checksum for IPv4
 		struct rte_udp_hdr *udp_hdr = rte_pktmbuf_mtod_offset(
 			mbuf,
@@ -1864,7 +1862,7 @@ nat64_handle_v6(
 			"UDP checksum calculated: 0x%04X\n",
 			rte_be_to_cpu_16(udp_hdr->dgram_cksum));
 
-	} else if (ipv6_header->proto == IPPROTO_TCP) {
+	} else if (has_transport_header && next_header == IPPROTO_TCP) {
 		// Recalculate TCP checksum for IPv4
 		struct rte_tcp_hdr *tcp_hdr = rte_pktmbuf_mtod_offset(
 			mbuf,
@@ -2198,7 +2196,7 @@ icmp_v4_to_v6(
 			code = 0;
 
 			// Get MTU from ICMP header
-			uint16_t mtu =
+			uint32_t mtu =
 				rte_be_to_cpu_16(icmp_header->yanet_icmp_nextmtu
 				);
 
@@ -2216,11 +2214,14 @@ icmp_v4_to_v6(
 				mtu = RTE_MIN(mtu, nat64_config->mtu.ipv6);
 			}
 			if (nat64_config->mtu.ipv4 > 0) {
-				mtu = RTE_MIN(mtu, nat64_config->mtu.ipv4 + 20);
+				mtu = RTE_MIN(
+					mtu,
+					(uint32_t)nat64_config->mtu.ipv4 + 20U
+				);
 			}
 			// RFC7915: MTU must not be less than IPv6 minimum
 			// (1280)
-			mtu = RTE_MAX(1280, mtu);
+			mtu = RTE_MAX(1280U, mtu);
 
 			LOG_DBG(NAT64,
 				"MTU translation:\n"
@@ -2232,7 +2233,8 @@ icmp_v4_to_v6(
 				mtu,
 				nat64_config->mtu.ipv6);
 
-			icmp_header->yanet_icmp_nextmtu = rte_cpu_to_be_32(mtu);
+			((struct yanet_icmp6_hdr *)icmp_header)
+				->yanet_icmp6_mtu = rte_cpu_to_be_32(mtu);
 			break;
 
 		default:
@@ -2837,7 +2839,8 @@ nat64_handle_v4(
 			    frag_size,
 			    total_len,
 			    more_fragments,
-			    ipv4_header->next_proto_id == IPPROTO_ICMP
+			    ipv4_header->next_proto_id == IPPROTO_ICMP,
+			    FRAGMENT_TOTAL_LEN_CHECK
 		    ) != 0) {
 			return -1;
 		}
