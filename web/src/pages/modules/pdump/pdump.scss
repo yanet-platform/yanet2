@@ -416,6 +416,7 @@
     }
 
     &--eth   .pdump-section__marker { background: var(--fw-text-3); }
+    &--vlan  .pdump-section__marker { background: #d9a154; }
     &--ipv4  .pdump-section__marker { background: var(--g-color-text-positive); }
     &--ipv6  .pdump-section__marker { background: var(--g-color-text-positive); }
     &--tcp   .pdump-section__marker { background: var(--g-color-text-info); }

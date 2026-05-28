@@ -16,7 +16,7 @@ interface PacketDrawerProps {
     onNext: () => void;
 }
 
-type SectionKind = 'meta' | 'eth' | 'ipv4' | 'ipv6' | 'tcp' | 'udp' | 'icmp' | 'http';
+type SectionKind = 'meta' | 'eth' | 'vlan' | 'ipv4' | 'ipv6' | 'tcp' | 'udp' | 'icmp' | 'http';
 
 interface SectionProps {
     kind: SectionKind;
@@ -65,7 +65,7 @@ interface HexDumpProps {
 }
 
 const HexDump: React.FC<HexDumpProps> = ({ bytes, parsed }) => {
-    const ethEnd = parsed.ethernet?.etherType === 0x8100 ? 18 : 14;
+    const ethEnd = 14 + (parsed.vlans?.length ?? 0) * 4;
     const ipEnd = parsed.ipv4
         ? ethEnd + parsed.ipv4.ihl * 4
         : parsed.ipv6
@@ -245,6 +245,22 @@ const PacketDrawer: React.FC<PacketDrawerProps> = ({
                                 <KV k="Source MAC" v={packet.parsed.ethernet.srcMac} />
                                 <KV k="Dest MAC" v={packet.parsed.ethernet.dstMac} />
                                 <KV k="EtherType" v={`${packet.parsed.ethernet.etherTypeName} (0x${packet.parsed.ethernet.etherType.toString(16)})`} />
+                            </Section>
+                        )}
+
+                        {packet.parsed.vlans && packet.parsed.vlans.length > 0 && (
+                            <Section kind="vlan" title="VLAN / 802.1Q" sub={`${packet.parsed.vlans.length} tag${packet.parsed.vlans.length > 1 ? 's' : ''}`}>
+                                {packet.parsed.vlans.map((tag, idx) => (
+                                    <React.Fragment key={idx}>
+                                        <KV k="Tag" v={`#${idx + 1}`} />
+                                        <KV k="TPID" v={`${tag.tpidName} (0x${tag.tpid.toString(16)})`} />
+                                        <KV k="TCI" v={`0x${tag.tci.toString(16).padStart(4, '0')}`} />
+                                        <KV k="PCP" v={tag.pcp} />
+                                        <KV k="DEI" v={tag.dei ? '1' : '0'} />
+                                        <KV k="VLAN ID" v={tag.vlanId} />
+                                        <KV k="Inner EtherType" v={`${tag.innerEtherTypeName} (0x${tag.innerEtherType.toString(16)})`} />
+                                    </React.Fragment>
+                                ))}
                             </Section>
                         )}
 

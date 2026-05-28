@@ -7,6 +7,17 @@ export interface EthernetHeader {
     etherTypeName: string;
 }
 
+export interface VlanTag {
+    tpid: number;
+    tpidName: string;
+    tci: number;
+    pcp: number;
+    dei: boolean;
+    vlanId: number;
+    innerEtherType: number;
+    innerEtherTypeName: string;
+}
+
 export interface IPv4Header {
     version: number;
     ihl: number;
@@ -101,6 +112,7 @@ export interface HTTPMessage {
 
 export interface ParsedPacket {
     ethernet?: EthernetHeader;
+    vlans?: VlanTag[];
     ipv4?: IPv4Header;
     ipv6?: IPv6Header;
     tcp?: TCPHeader;
@@ -117,6 +129,8 @@ const ETHERTYPE_IPV4 = 0x0800;
 const ETHERTYPE_IPV6 = 0x86dd;
 const ETHERTYPE_ARP = 0x0806;
 const ETHERTYPE_VLAN = 0x8100;
+const ETHERTYPE_VLAN_QINQ = 0x88a8;
+const ETHERTYPE_VLAN_9100 = 0x9100;
 
 // IP Protocol constants
 const IPPROTO_ICMP = 1;
@@ -154,9 +168,53 @@ const getEtherTypeName = (etherType: number): string => {
         case ETHERTYPE_IPV4: return 'IPv4';
         case ETHERTYPE_IPV6: return 'IPv6';
         case ETHERTYPE_ARP: return 'ARP';
-        case ETHERTYPE_VLAN: return 'VLAN';
+        case ETHERTYPE_VLAN: return '802.1Q';
+        case ETHERTYPE_VLAN_QINQ: return '802.1ad';
+        case ETHERTYPE_VLAN_9100: return '802.1Q-in-Q';
         default: return `0x${etherType.toString(16)}`;
     }
+};
+
+const isVlanEtherType = (etherType: number): boolean => {
+    return etherType === ETHERTYPE_VLAN || etherType === ETHERTYPE_VLAN_QINQ || etherType === ETHERTYPE_VLAN_9100;
+};
+
+const parseVlans = (data: Uint8Array, offset: number, outerEtherType: number): { vlans: VlanTag[]; etherType: number; offset: number } | null => {
+    if (!isVlanEtherType(outerEtherType)) {
+        return { vlans: [], etherType: outerEtherType, offset };
+    }
+
+    const vlans: VlanTag[] = [];
+    let currentOffset = offset;
+    let currentEtherType = outerEtherType;
+
+    while (isVlanEtherType(currentEtherType)) {
+        if (data.length < currentOffset + 4) {
+            return null;
+        }
+
+        const tci = (data[currentOffset] << 8) | data[currentOffset + 1];
+        const innerEtherType = (data[currentOffset + 2] << 8) | data[currentOffset + 3];
+        vlans.push({
+            tpid: currentEtherType,
+            tpidName: getEtherTypeName(currentEtherType),
+            tci,
+            pcp: (tci >> 13) & 0x07,
+            dei: (tci & 0x1000) !== 0,
+            vlanId: tci & 0x0fff,
+            innerEtherType,
+            innerEtherTypeName: getEtherTypeName(innerEtherType),
+        });
+
+        currentEtherType = innerEtherType;
+        currentOffset += 4;
+    }
+
+    return {
+        vlans,
+        etherType: currentEtherType,
+        offset: currentOffset,
+    };
 };
 
 const getIPProtocolName = (protocol: number): string => {
@@ -453,13 +511,16 @@ export const parsePacket = (data: Uint8Array): ParsedPacket => {
     result.ethernet = ethernet;
     offset = 14;
 
-    // Handle VLAN tag
     let etherType = ethernet.etherType;
-    if (etherType === ETHERTYPE_VLAN) {
-        if (data.length < offset + 4) return result;
-        etherType = (data[offset + 2] << 8) | data[offset + 3];
-        offset += 4;
+    const parsedVlans = parseVlans(data, offset, etherType);
+    if (!parsedVlans) {
+        return result;
     }
+    if (parsedVlans.vlans.length > 0) {
+        result.vlans = parsedVlans.vlans;
+    }
+    etherType = parsedVlans.etherType;
+    offset = parsedVlans.offset;
 
     // Parse IP layer
     let ipProtocol: number | null = null;
@@ -631,4 +692,3 @@ export const base64ToUint8Array = (base64: string): Uint8Array => {
     }
     return bytes;
 };
-
