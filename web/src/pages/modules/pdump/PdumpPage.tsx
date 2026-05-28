@@ -1,7 +1,8 @@
 import React, { useState, useCallback, useRef, useMemo, useEffect } from 'react';
 import { Button, Flex, Icon, Text } from '@gravity-ui/uikit';
-import { Plus } from '@gravity-ui/icons';
+import { ArrowDownToLine, Plus } from '@gravity-ui/icons';
 import { PageLayout, PageLoader } from '../../../components';
+import { toaster } from '../../../utils';
 import {
     usePdumpConfigs,
     usePdumpCapture,
@@ -20,6 +21,54 @@ import './pdump.scss';
 
 const NEW_PACKET_TTL_MS = 1200;
 const EMPTY_PPS_HISTORY: number[] = [];
+const PCAP_GLOBAL_HEADER_BYTES = 24;
+const PCAP_PACKET_HEADER_BYTES = 16;
+const PCAP_LINKTYPE_ETHERNET = 1;
+
+const sanitizeFilenamePart = (value: string): string => {
+    const sanitized = value.replace(/[^a-zA-Z0-9._-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+    return sanitized || 'capture';
+};
+
+const createPcapBuffer = (records: CapturedPacket[]): ArrayBuffer => {
+    let totalSize = PCAP_GLOBAL_HEADER_BYTES;
+    for (const packet of records) {
+        totalSize += PCAP_PACKET_HEADER_BYTES + packet.parsed.raw.length;
+    }
+
+    const buffer = new ArrayBuffer(totalSize);
+    const view = new DataView(buffer);
+    const bytes = new Uint8Array(buffer);
+
+    view.setUint32(0, 0xa1b2c3d4, true);
+    view.setUint16(4, 2, true);
+    view.setUint16(6, 4, true);
+    view.setInt32(8, 0, true);
+    view.setUint32(12, 0, true);
+    view.setUint32(16, 65535, true);
+    view.setUint32(20, PCAP_LINKTYPE_ETHERNET, true);
+
+    let offset = PCAP_GLOBAL_HEADER_BYTES;
+    for (const packet of records) {
+        const payload = packet.parsed.raw;
+        const capturedLength = payload.length;
+        const originalLength = packet.record.meta?.packet_len ?? capturedLength;
+        const timestampMs = packet.timestamp.getTime();
+        const tsSec = Math.floor(timestampMs / 1000);
+        const tsUsec = Math.floor((timestampMs % 1000) * 1000);
+
+        view.setUint32(offset, tsSec, true);
+        view.setUint32(offset + 4, tsUsec, true);
+        view.setUint32(offset + 8, capturedLength, true);
+        view.setUint32(offset + 12, originalLength, true);
+        offset += PCAP_PACKET_HEADER_BYTES;
+
+        bytes.set(payload, offset);
+        offset += capturedLength;
+    }
+
+    return buffer;
+};
 
 const PdumpPage: React.FC = () => {
     const { configs, loading, refetch, deleteConfig } = usePdumpConfigs();
@@ -242,10 +291,35 @@ const PdumpPage: React.FC = () => {
         }
     }, [deletingConfigName, deleteConfig, activeConfig]);
 
+    const handleExportPcap = useCallback(() => {
+        if (packets.length === 0) {
+            return;
+        }
+
+        try {
+            const pcapData = createPcapBuffer(packets);
+            const blob = new Blob([pcapData], { type: 'application/vnd.tcpdump.pcap' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `pdump-${sanitizeFilenamePart(currentConfig || 'capture')}.pcap`;
+            link.click();
+            URL.revokeObjectURL(url);
+            toaster.success('pdump-export-pcap', 'PCAP export started.');
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            toaster.error('pdump-export-pcap-error', `Failed to export PCAP: ${message}`);
+        }
+    }, [currentConfig, packets]);
+
     const pageHeader = (
         <Flex alignItems="center" gap={4} style={{ width: '100%' }}>
             <Text variant="header-1">Pdump</Text>
             <Flex grow />
+            <Button view="normal" onClick={handleExportPcap} disabled={packets.length === 0}>
+                <Icon data={ArrowDownToLine} size={16} />
+                Export PCAP
+            </Button>
             <Button view="action" onClick={() => setIsCreateDialogOpen(true)}>
                 <Icon data={Plus} size={16} />
                 New Configuration
