@@ -79,6 +79,7 @@ export const Lane: React.FC<LaneProps> = ({
             name: candidateName,
         };
         dispatch({ type: 'ADD_MODULE', fnId, chainId: chain.id, toIdx: chain.modules.length, module: newModule });
+        onOpenModuleDrawer(newModule.id, chain.id);
     };
 
     return (
