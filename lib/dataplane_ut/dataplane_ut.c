@@ -38,7 +38,7 @@ struct dataplane_ut {
 	uint64_t mock_time_ns;
 };
 
-// Counter indices used by wire_worker_counters to address the five
+// Counter indices used by wire_worker_counters to address the
 // standard worker counter slots by their registration order.
 enum {
 	WORKER_CTR_ITERATIONS = 0,
@@ -46,6 +46,7 @@ enum {
 	WORKER_CTR_TX = 2,
 	WORKER_CTR_REMOTE_RX = 3,
 	WORKER_CTR_REMOTE_TX = 4,
+	WORKER_CTR_RX_BURSTS = 5,
 };
 
 // Wire counter address pointers for a single dp_worker.
@@ -76,6 +77,8 @@ wire_worker_counters(struct dp_worker *dp_worker, struct dp_config *dp_config) {
 
 	dp_worker->remote_tx_count =
 		counter_get_address(WORKER_CTR_REMOTE_TX, idx, storage) + 0;
+	dp_worker->rx_bursts =
+		counter_get_address(WORKER_CTR_RX_BURSTS, idx, storage);
 }
 
 struct dataplane_ut *
@@ -213,7 +216,7 @@ dataplane_ut_new(const struct dataplane_ut_config *cfg) {
 	}
 	SET_OFFSET_OF(&ut->cp_config->cp_config_gen, cp_config_gen);
 
-	// Register the five standard worker counters used by the pipeline.
+	// Register the standard worker counters used by the pipeline.
 	// Sizes and names mirror production worker.c::worker_register_counter.
 	counter_registry_init(
 		&ut->dp_config->worker_counters,
@@ -282,6 +285,10 @@ dataplane_ut_new(const struct dataplane_ut_config *cfg) {
 		// a newer config snapshot — same trick used by mock.
 		dp_worker->gen = DATAPLANE_UT_HIGH_GEN;
 		dp_worker->rx_mempool = ut->mempool;
+		dp_worker->core_id = (uint32_t)idx;
+		dp_worker->device_id = 0;
+		dp_worker->queue_id = (uint32_t)idx;
+		dp_worker->rx_burst_size = WORKER_RX_BURST_SIZE;
 
 		wire_worker_counters(dp_worker, ut->dp_config);
 

@@ -61,7 +61,11 @@ struct dp_worker {
 
 	struct rte_mempool *rx_mempool;
 
-	uint8_t pad[24];
+	uint64_t *rx_bursts;
+	uint32_t core_id;
+	uint32_t device_id;
+	uint32_t queue_id;
+	uint32_t rx_burst_size;
 };
 struct dp_config {
 	uint32_t instance_count;

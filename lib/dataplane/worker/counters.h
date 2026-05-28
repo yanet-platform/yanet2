@@ -2,8 +2,11 @@
 
 struct dp_config;
 
-// Register the five standard worker counters (iterations, rx, tx,
-// remote_rx, remote_tx) in dp_config->worker_counters. Caller must
+enum {
+	WORKER_RX_BURST_SIZE = 32,
+};
+
+// Register standard worker counters in dp_config->worker_counters. Caller must
 // initialise the registry via counter_registry_init before calling.
 //
 // Returns 0 on success, -1 if any counter fails to register.

@@ -68,6 +68,9 @@ worker_read(struct dataplane_worker *worker, struct packet_list *packets) {
 		worker->port_id, worker->queue_id, mbufs, ctx->read_size
 	);
 	*(worker->dp_worker->rx_count) += read;
+	if (worker->dp_worker->rx_bursts != NULL) {
+		worker->dp_worker->rx_bursts[read] += 1;
+	}
 
 	for (uint32_t idx = 0; idx < read; ++idx) {
 		struct packet *packet = mbuf_to_packet(mbufs[idx]);
@@ -405,9 +408,13 @@ dataplane_worker_init(
 	);
 	dp_config->worker_count += 1;
 
-	worker->read_ctx.read_size = 32;
+	worker->read_ctx.read_size = WORKER_RX_BURST_SIZE;
 	worker->write_ctx.write_size = 32;
 	worker->write_ctx.rx_pipes = NULL;
+	dp_worker->core_id = config->core_id;
+	dp_worker->device_id = worker->device_id;
+	dp_worker->queue_id = queue_id;
+	dp_worker->rx_burst_size = WORKER_RX_BURST_SIZE;
 
 	packet_list_init(&worker->pending);
 
@@ -552,6 +559,9 @@ dataplane_worker_start(struct dataplane_worker *worker) {
 			ADDR_OF(&dp_config->worker_counter_storage)
 		) +
 		0;
+	dp_worker->rx_bursts = counter_get_address(
+		5, dp_worker->idx, ADDR_OF(&dp_config->worker_counter_storage)
+	);
 
 	pthread_attr_t wrk_th_attr;
 	pthread_attr_init(&wrk_th_attr);

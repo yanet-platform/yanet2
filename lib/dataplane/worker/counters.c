@@ -39,5 +39,8 @@ worker_counters_register(struct dp_config *dp_config) {
 	if (register_one(dp_config, "remote_tx", 2)) {
 		return -1;
 	}
+	if (register_one(dp_config, "rx_bursts", WORKER_RX_BURST_SIZE + 1)) {
+		return -1;
+	}
 	return 0;
 }

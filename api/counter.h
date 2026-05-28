@@ -73,6 +73,20 @@ yanet_get_module_counters(
 struct counter_handle_list *
 yanet_get_worker_counters(struct dp_config *dp_config);
 
+struct worker_counter_metadata {
+	uint32_t core_id;
+	uint32_t device_id;
+	uint32_t queue_id;
+	uint32_t rx_burst_size;
+};
+
+int
+yanet_get_worker_counter_metadata(
+	struct dp_config *dp_config,
+	uint64_t worker_idx,
+	struct worker_counter_metadata *metadata
+);
+
 struct counter_handle *
 yanet_get_counter(struct counter_handle_list *counters, uint64_t idx);
 

@@ -5,8 +5,9 @@ package ynpb;
 option go_package = "github.com/yanet-platform/yanet2/controlplane/ynpb;ynpb";
 
 service CountersService {
-  rpc Perf(PerfCountersRequest) returns (PerfCountersResponse) {}
-  rpc ByTags(CountersByTagsRequest) returns (CountersByTagsResponse) {}
+  rpc Perf(PerfCountersRequest) returns (PerfCountersResponse);
+  rpc ByTags(CountersByTagsRequest) returns (CountersByTagsResponse);
+  rpc Workers(WorkerCountersRequest) returns (WorkerCountersResponse);
 }
 
 message CounterTag {
@@ -31,6 +32,41 @@ message CounterInstanceInfo { repeated uint64 values = 1; }
 message CounterInfo {
   string name = 1;
   repeated CounterInstanceInfo instances = 2;
+}
+
+// Requests a snapshot of raw cumulative worker polling and traffic counters.
+message WorkerCountersRequest {}
+
+// Returns one cumulative counter record per dataplane worker thread.
+message WorkerCountersResponse { repeated WorkerCounter workers = 1; }
+
+message WorkerCounter {
+  // Stable worker index in the dataplane worker table.
+  uint32 worker_idx = 1;
+  // CPU core currently assigned to this worker.
+  uint32 core_id = 2;
+  // Device identifier used by this worker for RX/TX.
+  uint32 device_id = 3;
+  // RX queue identifier polled by this worker.
+  uint32 queue_id = 4;
+  // Maximum valid burst index for rx_bursts.
+  uint32 max_burst_size = 5;
+  // RX poll histogram: index 0 is empty polls, index n is polls with n packets.
+  repeated uint64 rx_bursts = 6;
+  // Total worker loop iterations since the counters were reset.
+  uint64 iterations = 7;
+  // Total packets received by this worker.
+  uint64 rx_packets = 8;
+  // Total received bytes counted by this worker.
+  uint64 rx_bytes = 9;
+  // Total packets transmitted by this worker.
+  uint64 tx_packets = 10;
+  // Total transmitted bytes counted by this worker.
+  uint64 tx_bytes = 11;
+  // Total packets received from remote workers.
+  uint64 remote_rx_packets = 12;
+  // Total packets sent to remote workers.
+  uint64 remote_tx_packets = 13;
 }
 
 // Request message for retrieving module performance counters.

@@ -12,7 +12,7 @@ use ync::{
 };
 use ynpb::pb::{
     counters_service_client::CountersServiceClient, CounterTag, CountersByTagsRequest, LatencyRangeCounter,
-    PerfCounter, PerfCountersRequest, PerfCountersResponse,
+    PerfCounter, PerfCountersRequest, PerfCountersResponse, WorkerCountersRequest,
 };
 
 /// Counters module - displays counters information.
@@ -96,6 +96,8 @@ pub enum ModeCmd {
     Module(ModuleCmd),
     /// Show performance counters for a module.
     Perf(PerfCmd),
+    /// Show worker counters.
+    Workers,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -238,6 +240,7 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
 
             service.show_perf(request, cmd.json).await?
         }
+        Some(ModeCmd::Workers) => service.show_workers().await?,
     }
 
     Ok(())
@@ -346,6 +349,12 @@ impl CountersService {
         } else {
             format_perf_counters(response.get_ref());
         }
+        Ok(())
+    }
+
+    pub async fn show_workers(&mut self) -> Result<(), Box<dyn Error>> {
+        let response = self.client.workers(WorkerCountersRequest {}).await?;
+        println!("{}", serde_json::to_string(response.get_ref())?);
         Ok(())
     }
 }

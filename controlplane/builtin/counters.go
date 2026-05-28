@@ -151,3 +151,38 @@ func (m *Counters) ByTags(
 
 	return response, nil
 }
+
+// Workers returns raw cumulative worker counters.
+func (m *Counters) Workers(
+	ctx context.Context,
+	request *ynpb.WorkerCountersRequest,
+) (*ynpb.WorkerCountersResponse, error) {
+	dpConfig := m.shm.DPConfig(m.instanceID)
+	workers, err := dpConfig.WorkerCounters()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ynpb.WorkerCountersResponse{
+		Workers: make([]*ynpb.WorkerCounter, 0, len(workers)),
+	}
+	for _, worker := range workers {
+		response.Workers = append(response.Workers, &ynpb.WorkerCounter{
+			WorkerIdx:       worker.WorkerIdx,
+			CoreId:          worker.CoreID,
+			DeviceId:        worker.DeviceID,
+			QueueId:         worker.QueueID,
+			MaxBurstSize:    worker.MaxBurstSize,
+			RxBursts:        worker.RxBursts,
+			Iterations:      worker.Iterations,
+			RxPackets:       worker.RxPackets,
+			RxBytes:         worker.RxBytes,
+			TxPackets:       worker.TxPackets,
+			TxBytes:         worker.TxBytes,
+			RemoteRxPackets: worker.RemoteRxPackets,
+			RemoteTxPackets: worker.RemoteTxPackets,
+		})
+	}
+
+	return response, nil
+}

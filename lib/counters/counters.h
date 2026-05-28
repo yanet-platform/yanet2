@@ -5,7 +5,7 @@
 #include "common/memory.h"
 #include "lib/errors/errors.h"
 
-#define COUNTER_MAX_SIZE_EXP 5
+#define COUNTER_MAX_SIZE_EXP 6
 #define COUNTER_POOL_SIZE (COUNTER_MAX_SIZE_EXP + 1)
 #define COUNTER_STORAGE_PAGE_SIZE 4096
 

@@ -1650,6 +1650,38 @@ yanet_get_worker_counters(struct dp_config *dp_config) {
 	return list;
 }
 
+int
+yanet_get_worker_counter_metadata(
+	struct dp_config *dp_config,
+	uint64_t worker_idx,
+	struct worker_counter_metadata *metadata
+) {
+	if (dp_config == NULL || metadata == NULL) {
+		return -1;
+	}
+
+	struct dp_worker **workers = ADDR_OF(&dp_config->workers);
+	if (workers == NULL) {
+		return -1;
+	}
+
+	if (worker_idx >= dp_config->worker_count) {
+		return -1;
+	}
+
+	struct dp_worker *worker = ADDR_OF(&workers[worker_idx]);
+	if (worker == NULL) {
+		return -1;
+	}
+
+	metadata->core_id = worker->core_id;
+	metadata->device_id = worker->device_id;
+	metadata->queue_id = worker->queue_id;
+	metadata->rx_burst_size = worker->rx_burst_size;
+
+	return 0;
+}
+
 void
 yanet_counter_handle_list_free(struct counter_handle_list *counters) {
 	if (counters == NULL) {
