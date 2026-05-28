@@ -79,10 +79,9 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 	}
 
 	app := operator.NewOperator(
-		cfg.Server,
 		fanOut,
 		source,
-		services,
+		operator.WithGRPCServer(cfg.Server, services...),
 		operator.WithReconcile(cfg.Reconcile),
 		operator.WithGateways(cfg.Register, cfg.Gateways...),
 		operator.WithPreRun(func(ctx context.Context) error {

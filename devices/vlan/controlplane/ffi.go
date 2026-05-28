@@ -48,6 +48,7 @@ func NewDeviceConfig(
 	if cCfg == nil {
 		return nil, fmt.Errorf("failed to initialize vlan device config: %w", cerrors.FromC(unsafe.Pointer(cErr)))
 	}
+	defer C.cp_device_vlan_config_free(cCfg)
 
 	for idx, pipeline := range input {
 		cName := C.CString(pipeline.GetName())

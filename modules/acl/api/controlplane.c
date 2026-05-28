@@ -63,7 +63,11 @@ acl_module_config_init(
 
 	if (cp_module_init(&config->cp_module, agent, "acl", name, err)) {
 		yanet_error_add(err, "failed to init module");
-		acl_module_config_free(&config->cp_module);
+		memory_bfree(
+			&agent->memory_context,
+			config,
+			sizeof(struct acl_module_config)
+		);
 		return NULL;
 	}
 
@@ -87,18 +91,21 @@ acl_module_config_init(
 		uint64_t size;
 		uint64_t *dst;
 	} counters[] = {
-		{"acl_no_match", 2, &config->no_match_counter_id},
-		{"acl_action_allow", 2, &config->action_allow_counter_id},
-		{"acl_action_deny", 2, &config->action_deny_counter_id},
-		{"acl_action_count", 2, &config->action_count_counter_id},
-		{"acl_action_check_state",
-		 2,
-		 &config->action_check_state_counter_id},
+		{"acl_no_match", 1, &config->no_match_counter_id},
+		{"acl_action_allow", 1, &config->action_allow_counter_id},
+		{"acl_action_deny", 1, &config->action_deny_counter_id},
+		{"acl_action_check_pass",
+		 1,
+		 &config->action_check_pass_counter_id},
+		{"acl_action_check_miss",
+		 1,
+		 &config->action_check_miss_counter_id},
 		{"acl_action_create_state",
-		 2,
+		 1,
 		 &config->action_create_state_counter_id},
-		{"acl_action_unknown", 2, &config->action_unknown_counter_id},
-		{"acl_state_miss", 2, &config->state_miss_counter_id},
+		{"acl_action_invalid", 1, &config->action_invalid_counter_id},
+		{"acl_action_non_term", 1, &config->action_non_term_counter_id},
+
 		{"acl_sync_sent", 2, &config->sync_sent_counter_id},
 	};
 
@@ -129,8 +136,6 @@ acl_module_config_free(struct cp_module *cp_module) {
 	struct acl_module_config *config =
 		container_of(cp_module, struct acl_module_config, cp_module);
 
-	struct agent *agent = ADDR_OF(&cp_module->agent);
-
 	memory_bfree(
 		&cp_module->memory_context,
 		ADDR_OF(&config->targets),
@@ -142,6 +147,11 @@ acl_module_config_free(struct cp_module *cp_module) {
 	filter_free(&config->filter_ip4_port, ACL_FILTER_IP4_PROTO_PORT_TAG);
 	filter_free(&config->filter_ip6, ACL_FILTER_IP6_TAG);
 	filter_free(&config->filter_ip6_port, ACL_FILTER_IP6_PROTO_PORT_TAG);
+
+	// Capture agent before fini zeroes it.
+	struct agent *agent = ADDR_OF(&cp_module->agent);
+
+	cp_module_fini(cp_module);
 
 	// Note: We don't destroy fwstate_cfg maps here because they're owned by
 	// the fwstate module. We only stored offsets to them.
@@ -284,7 +294,8 @@ acl_module_init_l2(
 	struct acl_rule *acl_rules,
 	uint32_t acl_rule_count,
 	struct filter_rule *filter_rules,
-	const struct filter_rule **filter_rule_ptrs
+	const struct filter_rule **filter_rule_ptrs,
+	yanet_error **err
 ) {
 	struct acl_module_config *config =
 		container_of(cp_module, struct acl_module_config, cp_module);
@@ -297,13 +308,18 @@ acl_module_init_l2(
 		check_acl_rule_l2
 	);
 
-	return filter_init(
+	int rc = filter_init(
 		&config->filter_vlan,
 		ACL_FILTER_VLAN_TAG,
 		filter_rule_ptrs,
 		acl_rule_count,
-		&cp_module->memory_context
+		&cp_module->memory_context,
+		err
 	);
+	if (rc) {
+		yanet_error_add(err, "failed to init filter_vlan");
+	}
+	return rc;
 }
 
 static int
@@ -312,7 +328,8 @@ acl_module_init_ip4(
 	struct acl_rule *acl_rules,
 	uint32_t acl_rule_count,
 	struct filter_rule *filter_rules,
-	const struct filter_rule **filter_rule_ptrs
+	const struct filter_rule **filter_rule_ptrs,
+	yanet_error **err
 ) {
 	struct acl_module_config *config =
 		container_of(cp_module, struct acl_module_config, cp_module);
@@ -325,13 +342,18 @@ acl_module_init_ip4(
 		check_acl_rule_ip4
 	);
 
-	return filter_init(
+	int rc = filter_init(
 		&config->filter_ip4,
 		ACL_FILTER_IP4_TAG,
 		filter_rule_ptrs,
 		acl_rule_count,
-		&cp_module->memory_context
+		&cp_module->memory_context,
+		err
 	);
+	if (rc) {
+		yanet_error_add(err, "failed to init filter_ip4");
+	}
+	return rc;
 }
 
 static int
@@ -340,7 +362,8 @@ acl_module_init_ip4_port(
 	struct acl_rule *acl_rules,
 	uint32_t acl_rule_count,
 	struct filter_rule *filter_rules,
-	const struct filter_rule **filter_rule_ptrs
+	const struct filter_rule **filter_rule_ptrs,
+	yanet_error **err
 ) {
 	struct acl_module_config *config =
 		container_of(cp_module, struct acl_module_config, cp_module);
@@ -353,13 +376,18 @@ acl_module_init_ip4_port(
 		check_acl_rule_ip4_port
 	);
 
-	return filter_init(
+	int rc = filter_init(
 		&config->filter_ip4_port,
 		ACL_FILTER_IP4_PROTO_PORT_TAG,
 		filter_rule_ptrs,
 		acl_rule_count,
-		&cp_module->memory_context
+		&cp_module->memory_context,
+		err
 	);
+	if (rc) {
+		yanet_error_add(err, "failed to init filter_ip4_port");
+	}
+	return rc;
 }
 
 static int
@@ -368,7 +396,8 @@ acl_module_init_ip6(
 	struct acl_rule *acl_rules,
 	uint32_t acl_rule_count,
 	struct filter_rule *filter_rules,
-	const struct filter_rule **filter_rule_ptrs
+	const struct filter_rule **filter_rule_ptrs,
+	yanet_error **err
 ) {
 	struct acl_module_config *config =
 		container_of(cp_module, struct acl_module_config, cp_module);
@@ -381,13 +410,18 @@ acl_module_init_ip6(
 		check_acl_rule_ip6
 	);
 
-	return filter_init(
+	int rc = filter_init(
 		&config->filter_ip6,
 		ACL_FILTER_IP6_TAG,
 		filter_rule_ptrs,
 		acl_rule_count,
-		&cp_module->memory_context
+		&cp_module->memory_context,
+		err
 	);
+	if (rc) {
+		yanet_error_add(err, "failed to init filter_ip6");
+	}
+	return rc;
 }
 
 static int
@@ -396,7 +430,8 @@ acl_module_init_ip6_port(
 	struct acl_rule *acl_rules,
 	uint32_t acl_rule_count,
 	struct filter_rule *filter_rules,
-	const struct filter_rule **filter_rule_ptrs
+	const struct filter_rule **filter_rule_ptrs,
+	yanet_error **err
 ) {
 	struct acl_module_config *config =
 		container_of(cp_module, struct acl_module_config, cp_module);
@@ -409,13 +444,18 @@ acl_module_init_ip6_port(
 		check_acl_rule_ip6_port
 	);
 
-	return filter_init(
+	int rc = filter_init(
 		&config->filter_ip6_port,
 		ACL_FILTER_IP6_PROTO_PORT_TAG,
 		filter_rule_ptrs,
 		acl_rule_count,
-		&cp_module->memory_context
+		&cp_module->memory_context,
+		err
 	);
+	if (rc) {
+		yanet_error_add(err, "failed to init filter_ip6_port");
+	}
+	return rc;
 }
 
 int
@@ -443,36 +483,63 @@ acl_module_config_update(
 		}
 	}
 
-	struct acl_target *targets = (struct acl_target *)memory_balloc(
-		&cp_module->memory_context,
-		sizeof(struct acl_target) * rule_count
-	);
-	if (targets == NULL) {
-		goto error;
+	struct acl_target *targets = NULL;
+	if (rule_count > 0) {
+		targets = (struct acl_target *)memory_balloc(
+			&cp_module->memory_context,
+			sizeof(struct acl_target) * rule_count
+		);
+		if (targets == NULL) {
+			goto error;
+		}
 	}
 
 	SET_OFFSET_OF(&config->targets, targets);
 	config->target_count = rule_count;
 
 	struct filter_rule *filter_rules = NULL;
+	const struct filter_rule *dummy_filter_rule_ptr = NULL;
+	const struct filter_rule **filter_rule_ptrs = &dummy_filter_rule_ptr;
 
 	for (uint32_t idx = 0; idx < rule_count; ++idx) {
 		struct acl_rule *acl_rule = acl_rules + idx;
 
 		uint64_t action_count = acl_rule->action_count;
 		if (action_count > ACL_MAX_ACTIONS) {
-			action_count = ACL_MAX_ACTIONS;
+			/*
+			 * Could not reach a terminal one action
+			 */
+			goto error_target;
 		}
 		for (uint64_t action_idx = 0; action_idx < action_count;
 		     ++action_idx) {
-			targets[idx].actions[action_idx] =
-				acl_rule->actions[action_idx].id;
+			uint64_t *action = targets[idx].actions + action_idx;
+			switch (acl_rule->actions[action_idx].kind) {
+			case ACL_RULE_ACTION_KIND_ALLOW:
+				*action = ACTION_ALLOW;
+				break;
+			case ACL_RULE_ACTION_KIND_DENY:
+				*action = ACTION_DENY;
+				break;
+			case ACL_RULE_ACTION_KIND_COUNT:
+				*action = ACTION_COUNT;
+				break;
+			case ACL_RULE_ACTION_KIND_CHECK_STATE:
+				*action = ACTION_CHECK_STATE;
+				break;
+			case ACL_RULE_ACTION_KIND_CREATE_STATE:
+				*action = ACTION_CREATE_STATE;
+				break;
+			case ACL_RULE_ACTION_KIND_LOG:
+				*action = ACTION_LOG;
+				break;
+			default:
+				goto error_target;
+			}
 		}
 		targets[idx].action_count = action_count;
 
-		struct acl_action *terminal =
-			&acl_rule->actions[acl_rule->action_count - 1];
-		const char *counter_name = terminal->counter;
+		const char *counter_name = acl_rule->counter;
 		char default_counter[COUNTER_NAME_LEN];
 		if (counter_name[0] == '\0') {
 			snprintf(
@@ -491,19 +558,20 @@ acl_module_config_update(
 	}
 
 	// Create per filter rule list
-	filter_rules = (struct filter_rule *)malloc(
-		sizeof(struct filter_rule) * rule_count
-	);
-	if (filter_rules == NULL) {
-		goto error_target;
-	}
+	if (rule_count > 0) {
+		filter_rules = (struct filter_rule *)malloc(
+			sizeof(struct filter_rule) * rule_count
+		);
+		if (filter_rules == NULL) {
+			goto error_target;
+		}
 
-	const struct filter_rule **filter_rule_ptrs =
-		(const struct filter_rule **)malloc(
+		filter_rule_ptrs = (const struct filter_rule **)malloc(
 			sizeof(struct filter_rule *) * rule_count
 		);
-	if (filter_rule_ptrs == NULL) {
-		goto error_rules;
+		if (filter_rule_ptrs == NULL) {
+			goto error_rules;
+		}
 	}
 
 	struct timespec ts_start, ts_end;
@@ -516,7 +584,8 @@ acl_module_config_update(
 		    acl_rules,
 		    rule_count,
 		    filter_rules,
-		    filter_rule_ptrs
+		    filter_rule_ptrs,
+		    err
 	    ))
 		goto error_rule_ptrs;
 
@@ -525,7 +594,8 @@ acl_module_config_update(
 		    acl_rules,
 		    rule_count,
 		    filter_rules,
-		    filter_rule_ptrs
+		    filter_rule_ptrs,
+		    err
 	    ))
 		goto error_rule_ptrs;
 
@@ -534,7 +604,8 @@ acl_module_config_update(
 		    acl_rules,
 		    rule_count,
 		    filter_rules,
-		    filter_rule_ptrs
+		    filter_rule_ptrs,
+		    err
 	    ))
 		goto error_rule_ptrs;
 
@@ -543,7 +614,8 @@ acl_module_config_update(
 		    acl_rules,
 		    rule_count,
 		    filter_rules,
-		    filter_rule_ptrs
+		    filter_rule_ptrs,
+		    err
 	    ))
 		goto error_rule_ptrs;
 
@@ -552,7 +624,8 @@ acl_module_config_update(
 		    acl_rules,
 		    rule_count,
 		    filter_rules,
-		    filter_rule_ptrs
+		    filter_rule_ptrs,
+		    err
 	    ))
 		goto error_rule_ptrs;
 
@@ -562,24 +635,29 @@ acl_module_config_update(
 				   1000000000LL +
 			   (ts_end.tv_nsec - ts_start.tv_nsec));
 
-	free(filter_rule_ptrs);
+	if (rule_count > 0) {
+		free(filter_rule_ptrs);
+	}
 	free(filter_rules);
 
 	return 0;
 
 error_rule_ptrs:
-	free(filter_rule_ptrs);
+	if (rule_count > 0) {
+		free(filter_rule_ptrs);
+	}
 
 error_rules:
 	free(filter_rules);
 
 error_target:
-	free(filter_rules);
-	memory_bfree(
-		&cp_module->memory_context,
-		targets,
-		sizeof(struct acl_target) * rule_count
-	);
+	if (targets != NULL) {
+		memory_bfree(
+			&cp_module->memory_context,
+			targets,
+			sizeof(struct acl_target) * rule_count
+		);
+	}
 	SET_OFFSET_OF(&config->targets, NULL);
 	config->target_count = 0;
 

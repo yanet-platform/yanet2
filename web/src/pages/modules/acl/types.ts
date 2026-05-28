@@ -1,105 +1,42 @@
-import type { Rule, MapConfig, SyncConfig } from '../../../api/acl';
+import type { Rule, ActionKind } from '../../../api/acl';
 
-// Config state types
-export type ConfigState = 'saved' | 'modified' | 'new';
+export type { Rule, ActionKind };
 
-export interface AclConfigData {
-    rules: Rule[];
-    fwstateMap?: MapConfig;
-    fwstateSync?: SyncConfig;
-    state: ConfigState;
-    originalRules?: Rule[]; // For detecting changes
-    originalFwstateMap?: MapConfig;
-    originalFwstateSync?: SyncConfig;
-}
-
-// Form data for YAML upload
-export interface UploadYamlFormData {
-    configName: string;
-    file: File | null;
-    parsedRules: Rule[] | null;
-    parseError: string | null;
-}
-
-// YAML file structure (matches CLI format)
-export interface YamlAclRule {
-    srcs: string[];
-    dsts: string[];
-    src_ports: Array<{ from: number; to: number }>;
-    dst_ports: Array<{ from: number; to: number }>;
-    proto_ranges: Array<{ from: number; to: number }>;
-    vlan_ranges: Array<{ from: number; to: number }>;
-    devices: string[];
+/** Display item produced by rulesToNgItems — one per rule in the draft. */
+export interface RuleItem {
+    /** Stable unique ID (from the server-assigned rule ID). */
+    id: string;
+    /** Zero-based position in the rule array. */
+    index: number;
+    /** Raw wire-format rule. */
+    rule: Rule;
+    /** Counter name (empty string when unset). */
     counter: string;
-    action: 'Allow' | 'Deny';
+    /** Lowercased substring-search index: counter + decoded CIDRs + device names. */
+    searchText: string;
 }
 
-export interface YamlAclConfig {
-    rules: YamlAclRule[];
+/** Mutable draft state for the rule drawer form. */
+export interface RuleDraft {
+    sourceCidrs: string[];
+    dstCidrs: string[];
+    srcPortRaw: string;
+    dstPortRaw: string;
+    protoRaw: string;
+    vlanRaw: string;
+    deviceNames: string[];
+    counter: string;
+    actions: ActionKind[];
 }
 
-// Page header props
-export interface AclPageHeaderProps {
-    onUploadYaml: () => void;
-    onSave: () => void;
-    onDeleteConfig: () => void;
-    isSaveDisabled: boolean;
-    isDeleteDisabled: boolean;
-    hasUnsavedChanges: boolean;
-    isSaving: boolean;
-}
-
-// Config tabs props
-export interface ConfigTabsProps {
-    configs: string[];
-    activeConfig: string;
-    configStates: Map<string, ConfigState>;
-    onConfigChange: (config: string) => void;
-}
-
-// Inner tabs props
-export interface InnerTabsProps {
-    activeTab: 'rules' | 'fwstate';
-    onTabChange: (tab: 'rules' | 'fwstate') => void;
-}
-
-// Table props
-export interface AclTableProps {
-    rules: Rule[];
-    searchQuery: string;
-    onSearchChange: (query: string) => void;
-    isLoading?: boolean;
-}
-
-// FW State form props
-export interface FWStateFormProps {
-    mapConfig?: MapConfig;
-    syncConfig?: SyncConfig;
-    onMapConfigChange: (config: MapConfig) => void;
-    onSyncConfigChange: (config: SyncConfig) => void;
-    onSave: () => void;
-    hasChanges: boolean;
-}
-
-// Dialog props
-export interface UploadYamlDialogProps {
-    open: boolean;
-    onClose: () => void;
-    onConfirm: (configName: string, rules: Rule[]) => void;
-    existingConfigs: string[];
-}
-
-export interface CreateConfigDialogProps {
-    open: boolean;
-    onClose: () => void;
-    onConfirm: (configName: string) => void;
-    existingConfigs: string[];
-}
-
-export interface UnsavedChangesDialogProps {
-    open: boolean;
-    onClose: () => void;
-    onDiscard: () => void;
-    onSave: () => void;
-    configName: string;
-}
+export const emptyDraft = (): RuleDraft => ({
+    sourceCidrs: ['0.0.0.0/0', '::/0'],
+    dstCidrs: ['0.0.0.0/0', '::/0'],
+    srcPortRaw: '',
+    dstPortRaw: '',
+    protoRaw: '0-65535',
+    vlanRaw: '',
+    deviceNames: [],
+    counter: '',
+    actions: [],
+});

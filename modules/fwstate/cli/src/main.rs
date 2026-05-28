@@ -1,13 +1,13 @@
-use core::error::Error;
+use core::{error::Error, net::Ipv6Addr};
 use std::{
     fmt,
-    net::{Ipv4Addr, Ipv6Addr},
     time::{Duration, UNIX_EPOCH},
 };
 
 use args::{DeleteCmd, DirectionArg, EntriesCmd, LinkCmd, ModeCmd, ShowCmd, StatsCmd, UpdateCmd};
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
+use commonpb::pb::IpAddress;
 use fwstatepb::{
     DeleteConfigRequest, Direction, GetStatsRequest, LinkFwStateRequest, ListConfigsRequest, ListEntriesRequest,
     ShowConfigRequest, UpdateConfigRequest, fw_state_service_client::FwStateServiceClient,
@@ -44,10 +44,10 @@ pub struct Cmd {
     pub verbose: u8,
 }
 
-/// Parse IPv6 address from string to bytes
-fn parse_ipv6(s: &str) -> Result<Vec<u8>, Box<dyn Error>> {
+/// Parse IPv6 address string into an `IpAddress` proto message.
+fn parse_ipv6(s: &str) -> Result<IpAddress, Box<dyn Error>> {
     let addr: Ipv6Addr = s.parse()?;
-    Ok(addr.octets().to_vec())
+    Ok(IpAddress { addr: addr.octets().to_vec() })
 }
 
 /// Parse MAC address from string to bytes
@@ -128,7 +128,7 @@ impl FWStateService {
 
         // Update only the fields that were provided
         if let Some(ref src_addr) = cmd.src_addr {
-            sync_config.src_addr = parse_ipv6(src_addr)?;
+            sync_config.src_addr = Some(parse_ipv6(src_addr)?);
         }
 
         if let Some(ref dst_ether) = cmd.dst_ether {
@@ -136,7 +136,7 @@ impl FWStateService {
         }
 
         if let Some(ref dst_addr_multicast) = cmd.dst_addr_multicast {
-            sync_config.dst_addr_multicast = parse_ipv6(dst_addr_multicast)?;
+            sync_config.dst_addr_multicast = Some(parse_ipv6(dst_addr_multicast)?);
         }
 
         if let Some(port_multicast) = cmd.port_multicast {
@@ -144,7 +144,7 @@ impl FWStateService {
         }
 
         if let Some(ref dst_addr_unicast) = cmd.dst_addr_unicast {
-            sync_config.dst_addr_unicast = parse_ipv6(dst_addr_unicast)?;
+            sync_config.dst_addr_unicast = Some(parse_ipv6(dst_addr_unicast)?);
         }
 
         if let Some(port_unicast) = cmd.port_unicast {
@@ -250,10 +250,10 @@ impl FWStateService {
                     break;
                 }
                 if json_output {
-                    let je = JsonEntry::from_entry(entry, cmd.ipv6);
+                    let je = JsonEntry::from_entry(entry);
                     println!("{}", serde_json::to_string(&je)?);
                 } else {
-                    print_entry(entry, cmd.ipv6);
+                    print_entry(entry);
                 }
                 total += 1;
             }
@@ -282,18 +282,8 @@ impl FWStateService {
     }
 }
 
-fn format_addr(addr: Option<&fwstatepb::Addr>, is_ipv6: bool) -> String {
-    match addr {
-        Some(a) if is_ipv6 && a.bytes.len() == 16 => {
-            let octets: [u8; 16] = a.bytes[..16].try_into().unwrap();
-            Ipv6Addr::from(octets).to_string()
-        }
-        Some(a) if !is_ipv6 && a.bytes.len() == 4 => {
-            let octets: [u8; 4] = a.bytes[..4].try_into().unwrap();
-            Ipv4Addr::from(octets).to_string()
-        }
-        _ => "?".to_string(),
-    }
+fn format_addr(addr: Option<&IpAddress>) -> String {
+    addr.map(|a| a.to_string()).unwrap_or_else(|| "?".to_string())
 }
 
 /// Format IANA protocol number as a human-readable name.
@@ -405,7 +395,7 @@ struct SrcDstPackets {
 }
 
 impl JsonEntry {
-    fn from_entry(entry: &fwstatepb::FwStateEntry, is_ipv6: bool) -> Self {
+    fn from_entry(entry: &fwstatepb::FwStateEntry) -> Self {
         let key = entry.key.as_ref();
         let val = entry.value.as_ref();
         let flags = FwStateFlags(val.map(|v| v.flags).unwrap_or(0));
@@ -416,8 +406,8 @@ impl JsonEntry {
             expired: entry.expired,
             src_port: key.map(|k| k.src_port).unwrap_or(0),
             dst_port: key.map(|k| k.dst_port).unwrap_or(0),
-            src_addr: format_addr(key.and_then(|k| k.src_addr.as_ref()), is_ipv6),
-            dst_addr: format_addr(key.and_then(|k| k.dst_addr.as_ref()), is_ipv6),
+            src_addr: format_addr(key.and_then(|k| k.src_addr.as_ref())),
+            dst_addr: format_addr(key.and_then(|k| k.dst_addr.as_ref())),
             proto: format_proto(key.map(|k| k.proto).unwrap_or(0)),
             origin: if external { "external" } else { "local" },
             flags: SrcDstFlags {
@@ -440,11 +430,11 @@ impl JsonEntry {
     }
 }
 
-fn print_entry(entry: &fwstatepb::FwStateEntry, is_ipv6: bool) {
+fn print_entry(entry: &fwstatepb::FwStateEntry) {
     let (src_addr, dst_addr, src_port, dst_port, proto) = match &entry.key {
         Some(k) => (
-            format_addr(k.src_addr.as_ref(), is_ipv6),
-            format_addr(k.dst_addr.as_ref(), is_ipv6),
+            format_addr(k.src_addr.as_ref()),
+            format_addr(k.dst_addr.as_ref()),
             k.src_port,
             k.dst_port,
             k.proto,

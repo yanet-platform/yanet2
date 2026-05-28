@@ -105,3 +105,17 @@ nat64_module_config_set_drop_unknown(
 	bool drop_unknown_prefix,
 	bool drop_unknown_mapping
 );
+
+/**
+ * @brief Sets IPv4/IPv6 MTU limits.
+ *
+ * @param cp_module Pointer to the module data structure
+ * @param ipv4_mtu IPv4 MTU limit
+ * @param ipv6_mtu IPv6 MTU limit
+ * @return 0 on success, -1 on failure with errno set:
+ *         - EINVAL: Invalid module data pointer
+ */
+int
+nat64_module_config_set_mtu(
+	struct cp_module *cp_module, uint16_t ipv4_mtu, uint16_t ipv6_mtu
+);

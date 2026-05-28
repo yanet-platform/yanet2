@@ -73,7 +73,12 @@ test_proto_1(void *memory) {
 
 	LOG(INFO, "filter init...");
 	res = filter_init(
-		&filter, sign_proto_range_compile, rule_ptrs, 2, &memory_context
+		&filter,
+		sign_proto_range_compile,
+		rule_ptrs,
+		2,
+		&memory_context,
+		NULL
 	);
 	assert(res == 0);
 
@@ -84,6 +89,7 @@ test_proto_1(void *memory) {
 	query_udp_packet(&filter, 1);
 
 	filter_free(&filter, sign_proto_range_compile);
+	memory_context_fini(&memory_context);
 }
 
 int

@@ -88,6 +88,7 @@ test_init_and_free_basic(void) {
 		"subarrays_count should be 0 after free"
 	);
 
+	memory_context_fini(&mctx);
 	free(raw_mem);
 	return TEST_SUCCESS;
 }
@@ -147,6 +148,7 @@ test_init_large_array(void) {
 	    subarray_size);
 
 	big_array_free(&array);
+	memory_context_fini(&mctx);
 	free(raw_mem);
 	return TEST_SUCCESS;
 }
@@ -190,6 +192,7 @@ test_init_exact_boundary(void) {
 	);
 
 	big_array_free(&array);
+	memory_context_fini(&mctx);
 	free(raw_mem);
 	return TEST_SUCCESS;
 }
@@ -230,6 +233,7 @@ test_init_zero_size(void) {
 	// Free should be safe even with zero size
 	big_array_free(&array);
 
+	memory_context_fini(&mctx);
 	free(raw_mem);
 	return TEST_SUCCESS;
 }
@@ -302,6 +306,7 @@ test_get_access_patterns(void) {
 	}
 
 	big_array_free(&array);
+	memory_context_fini(&mctx);
 	free(raw_mem);
 	return TEST_SUCCESS;
 }
@@ -372,6 +377,7 @@ test_get_multiple_subarrays(void) {
 	    subarray_size);
 
 	big_array_free(&array);
+	memory_context_fini(&mctx);
 	free(raw_mem);
 	return TEST_SUCCESS;
 }
@@ -417,6 +423,7 @@ test_double_free_safety(void) {
 		"subarrays_count not 0 after double free"
 	);
 
+	memory_context_fini(&mctx);
 	free(raw_mem);
 	return TEST_SUCCESS;
 }
@@ -497,6 +504,7 @@ test_size_bigger_than_max(void) {
 	}
 
 	big_array_free(&array);
+	memory_context_fini(&mctx);
 	free(raw_mem);
 	return TEST_SUCCESS;
 }
@@ -562,6 +570,7 @@ test_last_subarray_size_optimization(void) {
 	    array_size,
 	    balloc_size_before_free);
 
+	memory_context_fini(&mctx);
 	free(raw_mem);
 	return TEST_SUCCESS;
 }

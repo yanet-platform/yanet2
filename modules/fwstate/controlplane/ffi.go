@@ -21,6 +21,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/yanet-platform/yanet2/bindings/go/cerrors"
+	"github.com/yanet-platform/yanet2/common/commonpb"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/fwstate/controlplane/fwstatepb"
 )
@@ -147,9 +148,8 @@ func (m *FwStateConfig) SetSyncConfig(req *fwstatepb.SyncConfig) {
 	currentConfig := m.GetSyncConfig()
 
 	// Check byte arrays (addresses)
-	if len(req.SrcAddr) == 0 {
-		req.SrcAddr = make([]byte, 16)
-		copy(req.SrcAddr, currentConfig.SrcAddr)
+	if len(req.GetSrcAddr().GetAddr()) == 0 {
+		req.SrcAddr = currentConfig.SrcAddr
 	}
 
 	if len(req.DstEther) == 0 {
@@ -157,14 +157,12 @@ func (m *FwStateConfig) SetSyncConfig(req *fwstatepb.SyncConfig) {
 		copy(req.DstEther, currentConfig.DstEther)
 	}
 
-	if len(req.DstAddrMulticast) == 0 {
-		req.DstAddrMulticast = make([]byte, 16)
-		copy(req.DstAddrMulticast, currentConfig.DstAddrMulticast)
+	if len(req.GetDstAddrMulticast().GetAddr()) == 0 {
+		req.DstAddrMulticast = currentConfig.DstAddrMulticast
 	}
 
-	if len(req.DstAddrUnicast) == 0 {
-		req.DstAddrUnicast = make([]byte, 16)
-		copy(req.DstAddrUnicast, currentConfig.DstAddrUnicast)
+	if len(req.GetDstAddrUnicast().GetAddr()) == 0 {
+		req.DstAddrUnicast = currentConfig.DstAddrUnicast
 	}
 
 	// Check ports
@@ -381,8 +379,8 @@ func convertCKey(ptr unsafe.Pointer, isIPv6 bool) *fwstatepb.FwStateKey {
 		Proto:   uint32(hdr.proto),
 		SrcPort: uint32(hdr.src_port),
 		DstPort: uint32(hdr.dst_port),
-		SrcAddr: &fwstatepb.Addr{Bytes: srcAddr},
-		DstAddr: &fwstatepb.Addr{Bytes: dstAddr},
+		SrcAddr: &commonpb.IPAddress{Addr: srcAddr},
+		DstAddr: &commonpb.IPAddress{Addr: dstAddr},
 	}
 }
 

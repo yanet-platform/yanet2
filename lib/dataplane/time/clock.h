@@ -39,3 +39,19 @@ tsc_clock_adjust(struct tsc_clock *clock);
 // Get current real time in nanoseconds.
 uint64_t
 tsc_clock_get_time_ns(struct tsc_clock *clock);
+
+// Signature of the per-round wall-time read.
+//
+// The default implementation calls tsc_clock_get_time_ns. Tests and
+// alternative harnesses may install a substitute by assigning to
+// dataplane_time_ns_fn before any worker activity begins. The
+// substitute may ignore the clock argument and read a process-global
+// mock time source instead.
+typedef uint64_t (*dataplane_time_ns_fn_t)(struct tsc_clock *clock);
+
+// Process-global override point for wall-time reads inside the worker
+// loop.
+//
+// Defaults to tsc_clock_get_time_ns. Not thread-safe to swap — install
+// once before any worker thread starts.
+extern dataplane_time_ns_fn_t dataplane_time_ns_fn;

@@ -42,6 +42,7 @@ dscp_module_config_create(
 		    config, &config->cp_module.memory_context
 	    )) {
 		yanet_error_add(err, "failed to init config data");
+		cp_module_fini(&config->cp_module);
 		memory_bfree(
 			&agent->memory_context,
 			config,
@@ -61,6 +62,9 @@ dscp_module_config_free(struct cp_module *cp_module) {
 	dscp_module_config_data_destroy(config);
 
 	struct agent *agent = ADDR_OF(&cp_module->agent);
+
+	cp_module_fini(cp_module);
+
 	memory_bfree(
 		&agent->memory_context,
 		config,

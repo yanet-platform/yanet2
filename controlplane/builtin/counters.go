@@ -64,92 +64,6 @@ func (m *Counters) encodeCounters(
 	return res
 }
 
-// Device returns device counters.
-func (m *Counters) Device(
-	ctx context.Context,
-	request *ynpb.DeviceCountersRequest,
-) (*ynpb.CountersResponse, error) {
-	dpConfig := m.shm.DPConfig(m.instanceID)
-	counterValues := dpConfig.DeviceCounters(request.Device)
-
-	response := &ynpb.CountersResponse{
-		Counters: m.encodeCounters(counterValues),
-	}
-
-	return response, nil
-}
-
-// Pipeline returns pipeline counters.
-func (m *Counters) Pipeline(
-	ctx context.Context,
-	request *ynpb.PipelineCountersRequest,
-) (*ynpb.CountersResponse, error) {
-	device := request.GetDevice()
-	pipeline := request.GetPipeline()
-
-	dpConfig := m.shm.DPConfig(m.instanceID)
-	counterValues := dpConfig.PipelineCounters(device, pipeline)
-
-	response := &ynpb.CountersResponse{
-		Counters: m.encodeCounters(counterValues),
-	}
-
-	return response, nil
-}
-
-// Function returns function counters.
-func (m *Counters) Function(
-	ctx context.Context,
-	request *ynpb.FunctionCountersRequest,
-) (*ynpb.CountersResponse, error) {
-	dpConfig := m.shm.DPConfig(m.instanceID)
-	counterValues := dpConfig.FunctionCounters(request.Device, request.Pipeline, request.Function)
-
-	response := &ynpb.CountersResponse{
-		Counters: m.encodeCounters(counterValues),
-	}
-
-	return response, nil
-}
-
-// Chain returns chain counters.
-func (m *Counters) Chain(
-	ctx context.Context,
-	request *ynpb.ChainCountersRequest,
-) (*ynpb.CountersResponse, error) {
-	dpConfig := m.shm.DPConfig(m.instanceID)
-	counterValues := dpConfig.ChainCounters(request.Device, request.Pipeline, request.Function, request.Chain)
-
-	response := &ynpb.CountersResponse{
-		Counters: m.encodeCounters(counterValues),
-	}
-
-	return response, nil
-}
-
-// Module returns module counters.
-func (m *Counters) Module(
-	ctx context.Context,
-	request *ynpb.ModuleCountersRequest,
-) (*ynpb.CountersResponse, error) {
-	dpConfig := m.shm.DPConfig(m.instanceID)
-	counterValues := dpConfig.ModuleCounters(
-		request.GetDevice(),
-		request.GetPipeline(),
-		request.GetFunction(),
-		request.GetChain(),
-		request.GetModuleType(),
-		request.GetModuleName(),
-		request.GetCounterQuery(),
-	)
-
-	response := &ynpb.CountersResponse{
-		Counters: m.encodeCounters(counterValues),
-	}
-
-	return response, nil
-}
-
 // Perf returns performance counters.
 func (m *Counters) Perf(
 	ctx context.Context,
@@ -191,6 +105,47 @@ func (m *Counters) Perf(
 			Packets:        uint64(counter.Packets),
 			Bytes:          uint64(counter.Bytes),
 			Latencies:      latencies,
+		})
+	}
+
+	return response, nil
+}
+
+// ByTags returns counters grouped by tag set, filtered by the request's
+// tag and query predicates.
+func (m *Counters) ByTags(
+	ctx context.Context,
+	request *ynpb.CountersByTagsRequest,
+) (*ynpb.CountersByTagsResponse, error) {
+	reqTags := request.GetTags()
+	tags := make([]ffi.CounterTag, len(reqTags))
+	for idx, tag := range reqTags {
+		tags[idx] = ffi.CounterTag{
+			Key:   tag.GetKey(),
+			Value: tag.GetValue(),
+		}
+	}
+
+	dpConfig := m.shm.DPConfig(m.instanceID)
+	groups, err := dpConfig.CountersByTags(tags, request.GetQuery())
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ynpb.CountersByTagsResponse{
+		Groups: make([]*ynpb.CounterGroup, 0, len(groups)),
+	}
+	for _, group := range groups {
+		pbTags := make([]*ynpb.CounterTag, 0, len(group.Tags))
+		for _, tag := range group.Tags {
+			pbTags = append(pbTags, &ynpb.CounterTag{
+				Key:   tag.Key,
+				Value: tag.Value,
+			})
+		}
+		response.Groups = append(response.Groups, &ynpb.CounterGroup{
+			Tags:     pbTags,
+			Counters: m.encodeCounters(group.Counters),
 		})
 	}
 

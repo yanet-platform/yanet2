@@ -197,20 +197,15 @@ message AgentInstanceInfo {
   // Enforced by the dataplane to prevent runaway agents from exhausting
   // resources.
   uint64 memory_limit = 2;
-  // Current amount of memory (in bytes) allocated by this agent instance.
-  //
-  // Includes all active allocations in the shared memory pool.
-  uint64 allocated = 3;
-  // Total amount of memory (in bytes) freed by this agent instance since
-  // startup.
-  //
-  // Useful for tracking memory churn and detecting leaks.
-  uint64 freed = 4;
+  reserved 3, 4; // were 'allocated' and 'freed' (partial top-level mctx, dropped)
   // Generation number of this agent instance.
   //
   // Incremented when the agent performs a major configuration update,
   // allowing the dataplane to coordinate atomic configuration switches.
   uint64 generation = 5;
+  // Bytes still available for allocation in this agent instance.
+  // Subtract from memory_limit to find how much memory is currently in use.
+  uint64 free_bytes = 6;
 }
 
 // DeviceInfo contains information about a network device.

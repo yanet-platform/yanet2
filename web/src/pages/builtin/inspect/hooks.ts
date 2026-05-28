@@ -1,31 +1,10 @@
 import { useEffect, useRef, useState, useMemo } from 'react';
 import { API } from '../../../api';
-import type { CounterInfo, CountersResponse } from '../../../api';
 import type { DeviceCounterData } from '../../../hooks';
+import { groupCounterGroupsByTagsAndName, makeGroupedCounterKey } from '../../../utils';
 
 const DEFAULT_INTERVAL_MS = 1500;
 const DEFAULT_MAX_LEN = 30;
-
-const sumCounter = (counters: CounterInfo[] | undefined, name: string): bigint => {
-    const c = counters?.find((x) => x.name === name);
-    if (!c?.instances) return BigInt(0);
-    return c.instances.reduce((sum, inst) => {
-        const val = inst.values?.[0];
-        return sum + BigInt(val ?? 0);
-    }, BigInt(0));
-};
-
-/**
- * Aggregate pipeline/function throughput from input/input_bytes counters.
- * These endpoints register input/output/drop counters (not rx/tx); using
- * input represents traffic that entered the pipeline/function regardless
- * of whether it was forwarded or dropped.
- */
-const sumPipelineThroughput = (response: CountersResponse): { packets: bigint; bytes: bigint } => {
-    const packets = sumCounter(response.counters, 'input');
-    const bytes = sumCounter(response.counters, 'input_bytes');
-    return { packets, bytes };
-};
 
 /**
  * Push the current value onto a rolling history at the polling interval.
@@ -58,14 +37,18 @@ export const useRollingSeries = (
 };
 
 /**
- * Aggregate device pps and produce a rolling throughput series.
+ * Aggregate device pps over physical devices only and produce a rolling
+ * throughput series. Restricting to physical devices avoids double-counting
+ * traffic that also appears on stacked virtual devices (e.g. vlan).
  */
 export const useThroughputSeries = (
     deviceCounters: Map<string, DeviceCounterData>,
+    physicalDeviceNames: Set<string>,
     maxLen: number = DEFAULT_MAX_LEN,
 ): { current: number; series: number[] } => {
     let current = 0;
-    deviceCounters.forEach((d) => {
+    deviceCounters.forEach((d, name) => {
+        if (!physicalDeviceNames.has(name)) return;
         current += (d.rx?.pps ?? 0) + (d.tx?.pps ?? 0);
     });
     const series = useRollingSeries(current, maxLen);
@@ -123,8 +106,8 @@ interface RatesAndSeries {
 }
 
 /**
- * Poll pipeline counters across (device, pipeline) pairs and produce
- * per-pipeline rate and rolling series.
+ * Poll pipeline counters via tag selection and produce per-pipeline
+ * rate and rolling series.
  */
 export const usePipelineCounters = (
     devices: string[],
@@ -135,11 +118,16 @@ export const usePipelineCounters = (
     const [rates, setRates] = useState<Map<string, { pps: number; bps: number }>>(new Map());
     const [series, setSeries] = useState<Map<string, number[]>>(() => new Map());
 
+    const devicesRef = useRef(devices);
+    devicesRef.current = devices;
+    const pipelinesRef = useRef(pipelines);
+    pipelinesRef.current = pipelines;
+
     const devicesKey = useMemo(() => devices.join('|'), [devices]);
     const pipelinesKey = useMemo(() => pipelines.join('|'), [pipelines]);
 
     useEffect(() => {
-        if (!enabled || devices.length === 0 || pipelines.length === 0) {
+        if (!enabled || devicesRef.current.length === 0 || pipelinesRef.current.length === 0) {
             prevRef.current = null;
             setRates(new Map());
             setSeries(new Map());
@@ -150,28 +138,31 @@ export const usePipelineCounters = (
 
         const tick = async (): Promise<void> => {
             const now = Date.now();
+            const currentPipelines = pipelinesRef.current;
+
             const totals = new Map<string, { packets: bigint; bytes: bigint }>();
-            for (const p of pipelines) {
+            for (const p of currentPipelines) {
                 totals.set(p, { packets: BigInt(0), bytes: BigInt(0) });
             }
 
-            await Promise.all(
-                devices.flatMap((device) =>
-                    pipelines.map(async (pipeline) => {
-                        try {
-                            const resp = await API.counters.pipeline({ device, pipeline });
-                            const sums = sumPipelineThroughput(resp);
-                            const cur = totals.get(pipeline)!;
-                            totals.set(pipeline, {
-                                packets: cur.packets + sums.packets,
-                                bytes: cur.bytes + sums.bytes,
-                            });
-                        } catch {
-                            // tolerate per-pair failures.
-                        }
-                    }),
-                ),
-            );
+            try {
+                const response = await API.counters.byTags({
+                    tags: [
+                        { key: 'pipeline', value: '*' },
+                        { key: 'function', value: '' },
+                    ],
+                    query: ['input', 'input_bytes'],
+                });
+                const grouped = groupCounterGroupsByTagsAndName(response.groups, ['pipeline'], 0);
+                for (const pipeline of currentPipelines) {
+                    totals.set(pipeline, {
+                        packets: grouped.get(makeGroupedCounterKey([pipeline], 'input'))?.value ?? BigInt(0),
+                        bytes: grouped.get(makeGroupedCounterKey([pipeline], 'input_bytes'))?.value ?? BigInt(0),
+                    });
+                }
+            } catch {
+                // tolerate fetch failures.
+            }
 
             if (cancelled) return;
 
@@ -217,14 +208,14 @@ export const usePipelineCounters = (
             cancelled = true;
             clearInterval(id);
         };
-    }, [enabled, devicesKey, pipelinesKey, devices, pipelines]);
+    }, [enabled, devicesKey, pipelinesKey]);
 
     return { rates, series };
 };
 
 /**
- * Poll function counters across (device, pipeline, function) triples and
- * produce per-function rate and rolling series.
+ * Poll function counters via tag selection and produce per-function
+ * rate and rolling series.
  */
 export const useFunctionCounters = (
     devices: string[],
@@ -236,6 +227,13 @@ export const useFunctionCounters = (
     const [rates, setRates] = useState<Map<string, { pps: number; bps: number }>>(new Map());
     const [series, setSeries] = useState<Map<string, number[]>>(() => new Map());
 
+    const devicesRef = useRef(devices);
+    devicesRef.current = devices;
+    const pipelinesRef = useRef(pipelines);
+    pipelinesRef.current = pipelines;
+    const functionsRef = useRef(functions);
+    functionsRef.current = functions;
+
     const devicesKey = useMemo(() => devices.join('|'), [devices]);
     const pipelinesKey = useMemo(() => pipelines.join('|'), [pipelines]);
     const functionsKey = useMemo(() => functions.join('|'), [functions]);
@@ -243,9 +241,9 @@ export const useFunctionCounters = (
     useEffect(() => {
         if (
             !enabled ||
-            devices.length === 0 ||
-            pipelines.length === 0 ||
-            functions.length === 0
+            devicesRef.current.length === 0 ||
+            pipelinesRef.current.length === 0 ||
+            functionsRef.current.length === 0
         ) {
             prevRef.current = null;
             setRates(new Map());
@@ -257,36 +255,29 @@ export const useFunctionCounters = (
 
         const tick = async (): Promise<void> => {
             const now = Date.now();
-            const totals = new Map<string, { packets: bigint; bytes: bigint }>();
-            functions.forEach((f) => totals.set(f, { packets: BigInt(0), bytes: BigInt(0) }));
+            const currentFunctions = functionsRef.current;
 
-            const tasks: Promise<void>[] = [];
-            for (const device of devices) {
-                for (const pipeline of pipelines) {
-                    for (const fn of functions) {
-                        tasks.push(
-                            (async () => {
-                                try {
-                                    const resp = await API.counters.function({
-                                        device,
-                                        pipeline,
-                                        function: fn,
-                                    });
-                                    const sums = sumPipelineThroughput(resp);
-                                    const cur = totals.get(fn)!;
-                                    totals.set(fn, {
-                                        packets: cur.packets + sums.packets,
-                                        bytes: cur.bytes + sums.bytes,
-                                    });
-                                } catch {
-                                    // tolerate per-triple failures.
-                                }
-                            })(),
-                        );
-                    }
+            const totals = new Map<string, { packets: bigint; bytes: bigint }>();
+            currentFunctions.forEach((f) => totals.set(f, { packets: BigInt(0), bytes: BigInt(0) }));
+
+            try {
+                const response = await API.counters.byTags({
+                    tags: [
+                        { key: 'function', value: '*' },
+                        { key: 'chain', value: '' },
+                    ],
+                    query: ['input', 'input_bytes'],
+                });
+                const grouped = groupCounterGroupsByTagsAndName(response.groups, ['function'], 0);
+                for (const functionName of currentFunctions) {
+                    totals.set(functionName, {
+                        packets: grouped.get(makeGroupedCounterKey([functionName], 'input'))?.value ?? BigInt(0),
+                        bytes: grouped.get(makeGroupedCounterKey([functionName], 'input_bytes'))?.value ?? BigInt(0),
+                    });
                 }
+            } catch {
+                // tolerate fetch failures.
             }
-            await Promise.all(tasks);
 
             if (cancelled) return;
 
@@ -332,7 +323,123 @@ export const useFunctionCounters = (
             cancelled = true;
             clearInterval(id);
         };
-    }, [enabled, devicesKey, pipelinesKey, functionsKey, devices, pipelines, functions]);
+    }, [enabled, devicesKey, pipelinesKey, functionsKey]);
 
     return { rates, series };
+};
+
+/**
+ * Animate a numeric value by lagging one sample behind real time and linearly
+ * interpolating from the previous committed sample toward the current one as
+ * wall clock advances. Matches the "buffer 2 seconds, draw 0..1 with interp"
+ * pattern: the returned value always sits inside [previous, current], never
+ * extrapolating past current.
+ *
+ * The hook commits a new sample only when `value` changes — so the source
+ * upstream MUST tick on each poll (which it does for pipeline/function rates).
+ * `intervalMs` is the expected cadence between source updates; it sets the
+ * animation duration of the trailing segment.
+ */
+export const useLaggedValue = (value: number, intervalMs: number = 1500): number => {
+    const prevRef = useRef<{ value: number; ts: number }>({ value, ts: performance.now() });
+    const curRef = useRef<{ value: number; ts: number }>({ value, ts: performance.now() });
+    const lastInputRef = useRef<number>(value);
+    const [animated, setAnimated] = useState<number>(value);
+
+    if (lastInputRef.current !== value) {
+        prevRef.current = curRef.current;
+        curRef.current = { value, ts: performance.now() };
+        lastInputRef.current = value;
+    }
+
+    useEffect(() => {
+        let raf = 0;
+        const tick = (): void => {
+            const now = performance.now();
+            const dt = now - curRef.current.ts;
+            const t = Math.max(0, Math.min(1, dt / intervalMs));
+            const next = prevRef.current.value + (curRef.current.value - prevRef.current.value) * t;
+            setAnimated(next);
+            raf = requestAnimationFrame(tick);
+        };
+        raf = requestAnimationFrame(tick);
+        return () => cancelAnimationFrame(raf);
+    }, [intervalMs]);
+
+    return animated;
+};
+
+/**
+ * Per-key lag-interpolated rolling series: takes a Map<string, number> of
+ * latest sample values (one per key) and returns a Map<string, number[]> where
+ * each series is built with lag-interpolation.
+ */
+export const useLaggedSeriesMap = (
+    values: Map<string, number>,
+    maxLen: number = DEFAULT_MAX_LEN,
+    intervalMs: number = DEFAULT_INTERVAL_MS,
+): Map<string, number[]> => {
+    const samplesMapRef = useRef<Map<string, number[]>>(new Map());
+    const prevMapRef = useRef<Map<string, { value: number; ts: number }>>(new Map());
+    const curMapRef = useRef<Map<string, { value: number; ts: number }>>(new Map());
+    const lastInputsRef = useRef<Map<string, number>>(new Map());
+    const [, force] = useState(0);
+
+    values.forEach((v, k) => {
+        const last = lastInputsRef.current.get(k);
+        if (last !== v) {
+            const now = performance.now();
+            const cur = curMapRef.current.get(k);
+            const samples = samplesMapRef.current.get(k) ?? [];
+            if (cur !== undefined) {
+                const next = [...samples, cur.value];
+                if (next.length > Math.max(1, maxLen - 1)) {
+                    next.shift();
+                }
+                samplesMapRef.current.set(k, next);
+            } else if (samples.length === 0 && v === 0) {
+                lastInputsRef.current.set(k, v);
+                return;
+            }
+            prevMapRef.current.set(k, cur ?? { value: v, ts: now });
+            curMapRef.current.set(k, { value: v, ts: now });
+            lastInputsRef.current.set(k, v);
+        }
+    });
+    [...samplesMapRef.current.keys()].forEach((k) => {
+        if (!values.has(k)) {
+            samplesMapRef.current.delete(k);
+            prevMapRef.current.delete(k);
+            curMapRef.current.delete(k);
+            lastInputsRef.current.delete(k);
+        }
+    });
+
+    useEffect(() => {
+        let raf = 0;
+        const tick = (): void => {
+            force((n) => (n + 1) | 0);
+            raf = requestAnimationFrame(tick);
+        };
+        raf = requestAnimationFrame(tick);
+        return () => cancelAnimationFrame(raf);
+    }, []);
+
+    const out = new Map<string, number[]>();
+    const now = performance.now();
+    values.forEach((_, k) => {
+        const cur = curMapRef.current.get(k);
+        const prev = prevMapRef.current.get(k);
+        const samples = samplesMapRef.current.get(k) ?? [];
+        if (cur === undefined) {
+            if (samples.length > 0) out.set(k, samples);
+            return;
+        }
+        const dt = now - cur.ts;
+        const t = Math.max(0, Math.min(1, dt / intervalMs));
+        const prevVal = prev?.value ?? cur.value;
+        const interp = prevVal + (cur.value - prevVal) * t;
+        out.set(k, [...samples, interp]);
+    });
+    return out;
 };

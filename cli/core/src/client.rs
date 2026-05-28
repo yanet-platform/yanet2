@@ -48,7 +48,7 @@ pub struct ConnectionArgs {
 /// Error type for connection establishment.
 #[derive(Debug, thiserror::Error)]
 pub enum ConnectionError {
-    #[error("transport error: {0}")]
+    #[error("{0}")]
     Transport(#[from] tonic::transport::Error),
     #[error("invalid URI: {0}")]
     InvalidUri(#[from] http::uri::InvalidUri),

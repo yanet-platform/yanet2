@@ -323,6 +323,7 @@ main(int argc, char **argv) {
 
 	free(slots);
 	free(sizes);
+	memory_context_fini(&mctx);
 	free(arena);
 
 	return 0;

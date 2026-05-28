@@ -9,6 +9,9 @@ const RING_SIZE = 60;
  * Buffer initialization is deferred until the first non-zero currentPps is
  * observed, so the consumer's Sparkline renders the dashed-baseline placeholder
  * (isFlat) instead of a flat-zero line while counters are still loading.
+ *
+ * The buffer entry for moduleId is deleted on unmount (or when moduleId
+ * changes) to prevent unbounded memory growth.
  */
 export const useSparklineHistory = (moduleId: string, currentPps: number): number[] => {
     const bufferRef = useRef<Map<string, number[]>>(new Map());
@@ -17,9 +20,17 @@ export const useSparklineHistory = (moduleId: string, currentPps: number): numbe
     const [, forceRender] = useState(0);
 
     // Seed the buffer on the first non-zero value for this moduleId.
-    if (!bufferRef.current.has(moduleId) && currentPps > 0) {
-        bufferRef.current.set(moduleId, [currentPps]);
-    }
+    // Runs inside an effect to avoid render-time side effects under react-compiler.
+    useEffect(() => {
+        const map = bufferRef.current;
+        if (!map.has(moduleId) && currentPpsRef.current > 0) {
+            map.set(moduleId, [currentPpsRef.current]);
+            forceRender(n => n + 1);
+        }
+        return () => {
+            bufferRef.current.delete(moduleId);
+        };
+    }, [moduleId]);
 
     useEffect(() => {
         const push = (): void => {

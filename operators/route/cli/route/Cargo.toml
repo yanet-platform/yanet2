@@ -12,12 +12,14 @@ path = "src/main.rs"
 
 [dependencies]
 ync = { path = "../../../../cli/core", version = "0.1", package = "yanet-cli" }
+commonpb = { path = "../../../../common/rust/commonpb", version = "0.1", package = "yanet-commonpb" }
 clap = { version = "4.5", features = ["derive"] }
 clap_complete = { version = "4.5", features = ["unstable-dynamic"] }
 prost = "0.13"
 log = "0.4"
-netip = "0.2"
+netip = "0.3"
 colored = "3"
+serde = "1"
 tabled = { version = "0.18", features = ["ansi"] }
 tokio = { version = "1", features = ["rt", "net", "time", "macros", "sync"] }
 tonic = { version = "0.13", features = ["gzip"] }

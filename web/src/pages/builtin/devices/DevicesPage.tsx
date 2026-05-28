@@ -1,7 +1,10 @@
-import React, { useState, useCallback, useMemo } from 'react';
-import { Box } from '@gravity-ui/uikit';
-import { PageLayout, PageLoader } from '../../../components';
+import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
+import { PageLayout, PageLoader, EmptyState } from '../../../components';
 import type { DeviceType } from '../../../api/devices';
+import type { LocalDevice } from './types';
+import { useDeviceCounters } from '../../../hooks';
+import { useCounterHistory } from '../../../hooks/useCounterHistory';
+import { useUnsavedChangesBlocker } from '../_shared/lane-editor';
 import {
     DevicePageHeader,
     DevicesList,
@@ -11,23 +14,49 @@ import {
 } from '.';
 import './devices.scss';
 
+type GroupingMode = 'flat' | 'type' | 'parent';
+
 const DevicesPage: React.FC = () => {
     const {
         devices,
         loading,
+        error,
         createDevice,
         updateDevice,
         saveDevice,
         loadPipelineList,
+        getServerDevice,
     } = useDeviceData();
 
     const [createDialogOpen, setCreateDialogOpen] = useState(false);
     const [selectedDeviceName, setSelectedDeviceName] = useState<string | null>(null);
+    const [grouping, setGrouping] = useState<GroupingMode>('type');
+    const [searchQuery, setSearchQuery] = useState('');
+    const searchRef = useRef<HTMLInputElement>(null);
+
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent): void => {
+            if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+                e.preventDefault();
+                searchRef.current?.focus();
+            }
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, []);
 
     const selectedDevice = useMemo(() => {
         if (!selectedDeviceName) return null;
         return devices.find(d => d.id.name === selectedDeviceName) || null;
     }, [devices, selectedDeviceName]);
+
+    const anyDirty = useMemo(() => devices.some(d => d.isDirty), [devices]);
+    useUnsavedChangesBlocker(anyDirty);
+
+    const deviceNames = useMemo(() => devices.map(d => d.id.name || ''), [devices]);
+
+    const { counters } = useDeviceCounters(deviceNames, deviceNames.length > 0);
+    const history = useCounterHistory(counters);
 
     const handleCreateDevice = useCallback(() => {
         setCreateDialogOpen(true);
@@ -43,7 +72,7 @@ const DevicesPage: React.FC = () => {
         setSelectedDeviceName(deviceName);
     }, []);
 
-    const handleUpdateDevice = useCallback((updates: Partial<typeof selectedDevice>) => {
+    const handleUpdateDevice = useCallback((updates: Partial<LocalDevice>) => {
         if (selectedDeviceName) {
             updateDevice(selectedDeviceName, updates);
         }
@@ -58,8 +87,21 @@ const DevicesPage: React.FC = () => {
 
     const existingDeviceNames = devices.map(d => d.id.name || '');
 
+    const selectedCounterData = selectedDevice?.id.name
+        ? counters.get(selectedDevice.id.name)
+        : undefined;
+
+    const selectedHistory = selectedDevice?.id.name
+        ? history.get(selectedDevice.id.name)
+        : undefined;
+
     const headerContent = (
-        <DevicePageHeader onCreateDevice={handleCreateDevice} />
+        <DevicePageHeader
+            onCreateDevice={handleCreateDevice}
+            searchQuery={searchQuery}
+            onSearchChange={setSearchQuery}
+            searchRef={searchRef}
+        />
     );
 
     if (loading) {
@@ -70,21 +112,39 @@ const DevicesPage: React.FC = () => {
         );
     }
 
+    if (error && devices.length === 0) {
+        return (
+            <PageLayout title="Devices">
+                <EmptyState message={error} />
+            </PageLayout>
+        );
+    }
+
     return (
         <PageLayout header={headerContent}>
-            <Box className="devices-page__layout">
-                <DevicesList
-                    devices={devices}
-                    selectedDeviceName={selectedDeviceName}
-                    onSelectDevice={handleSelectDevice}
-                />
-                <DeviceDetails
-                    device={selectedDevice}
-                    loadPipelineList={loadPipelineList}
-                    onUpdate={handleUpdateDevice}
-                    onSave={handleSaveDevice}
-                />
-            </Box>
+            <div className="devices-page-v2">
+                <div className="dv-workspace">
+                    <DevicesList
+                        devices={devices}
+                        selectedDeviceName={selectedDeviceName}
+                        grouping={grouping}
+                        onGroupingChange={setGrouping}
+                        onSelectDevice={handleSelectDevice}
+                        counters={counters}
+                        history={history}
+                        query={searchQuery}
+                    />
+                    <DeviceDetails
+                        device={selectedDevice}
+                        loadPipelineList={loadPipelineList}
+                        counterData={selectedCounterData}
+                        history={selectedHistory}
+                        onUpdate={handleUpdateDevice}
+                        onSave={handleSaveDevice}
+                        getServerDevice={getServerDevice}
+                    />
+                </div>
+            </div>
 
             <CreateDeviceDialog
                 open={createDialogOpen}

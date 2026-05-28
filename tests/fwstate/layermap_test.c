@@ -167,11 +167,12 @@ test_layermap_basic_operations(void *arena) {
 	fwmap_t *layer = active_layer;
 	while (layer) {
 		fwmap_t *next = (fwmap_t *)ADDR_OF(&layer->next);
-		fwmap_destroy(layer, ctx);
+		fwmap_free(layer, ctx);
 		layer = next;
 	}
 
 	verify_memory_leaks(ctx, "layermap_basic_operations");
+	memory_context_fini(ctx);
 	fprintf(stderr, "Layermap basic operations test PASSED\n");
 }
 
@@ -338,13 +339,14 @@ test_layermap_multithreaded(void *arena) {
 	fwmap_t *layer = active_layer;
 	while (layer) {
 		fwmap_t *next = (fwmap_t *)ADDR_OF(&layer->next);
-		fwmap_destroy(layer, ctx);
+		fwmap_free(layer, ctx);
 		layer = next;
 	}
 
 	memory_bfree(ctx, active_layer_offset, sizeof(fwmap_t *));
 
 	verify_memory_leaks(ctx, "layermap_multithreaded");
+	memory_context_fini(ctx);
 	fprintf(stderr, "Layermap multithreaded test PASSED\n");
 }
 

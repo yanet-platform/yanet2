@@ -42,14 +42,19 @@ export interface Counters {
 export type CountersByModuleId = Record<string, Counters>;
 
 export type FunctionsAction =
-    | { type: 'MOVE_MODULE';          fnId: string; fromChainId: string; toChainId: string; moduleId: string; toIdx: number }
+    | {
+        type: 'MOVE_MODULE';
+        fromFnId: string;
+        toFnId: string;
+        fromChainId: string;
+        toChainId: string;
+        moduleId: string;
+        toIdx: number;
+    }
     | { type: 'ADD_MODULE';           fnId: string; chainId: string; toIdx: number; module: Module }
     | { type: 'REMOVE_MODULE';        fnId: string; chainId: string; moduleId: string }
     | { type: 'RENAME_MODULE';        fnId: string; moduleId: string; name: string }
     | { type: 'UPDATE_MODULE_CONFIG'; fnId: string; moduleId: string; patch: Partial<Module> }
     | { type: 'UPDATE_CHAIN';         fnId: string; chainId: string; patch: Partial<Chain> }
     | { type: 'ADD_CHAIN';            fnId: string; chain: Chain; toIdx?: number }
-    | { type: 'REMOVE_CHAIN';         fnId: string; chainId: string }
-    | { type: 'ADD_FUNCTION';         fn: NetworkFunction }
-    | { type: 'REMOVE_FUNCTION';      fnId: string }
-    | { type: 'LOAD_FUNCTION';        fn: NetworkFunction };
+    | { type: 'REMOVE_CHAIN';         fnId: string; chainId: string };

@@ -17,3 +17,6 @@ export { useDeviceCounters } from './useDeviceCounters';
 export type { DeviceCounterData, DeviceAbsoluteData, UseDeviceCountersResult } from './useDeviceCounters';
 
 export { useContainerHeight } from './useContainerHeight';
+
+export { useCounterHistory } from './useCounterHistory';
+export type { CounterHistoryEntry } from './useCounterHistory';

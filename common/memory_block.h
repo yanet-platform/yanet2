@@ -70,6 +70,13 @@ block_allocator_init(struct block_allocator *allocator) {
 	return 0;
 }
 
+// Currently a no-op; reserved for future leak assertions on teardown.
+static inline void
+block_allocator_fini(struct block_allocator *allocator) {
+	// No-op: arena memory is reclaimed externally.
+	(void)allocator;
+}
+
 static inline size_t
 block_allocator_pool_size(
 	struct block_allocator *allocator, size_t pool_index

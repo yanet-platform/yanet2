@@ -588,6 +588,7 @@ main(void) {
 
 	LOG(INFO, "=== Benchmark Suite Completed ===");
 
+	memory_context_fini(&g_mctx);
 	free(arena);
 
 	return 0;

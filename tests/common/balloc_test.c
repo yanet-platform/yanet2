@@ -98,6 +98,7 @@ test_init_and_empty_alloc(void) {
 		mctx.balloc_size == 0,
 		"balloc_size should not increment on failed alloc"
 	);
+	memory_context_fini(&mctx);
 	return 0;
 }
 
@@ -223,6 +224,7 @@ test_put_arena_single_block_and_exact_alloc(void) {
 	TEST_ASSERT(mctx.balloc_size == req, "balloc_size mismatch");
 	TEST_ASSERT(mctx.bfree_size == req, "bfree_size mismatch");
 
+	memory_context_fini(&mctx);
 	free(raw);
 	return 0;
 }
@@ -325,6 +327,7 @@ test_small_alloc_borrow_chain_and_mask_logic(void) {
 		"ctx sizes mismatch"
 	);
 
+	memory_context_fini(&mctx);
 	free(raw);
 	return 0;
 }
@@ -399,6 +402,7 @@ test_alignment_matrix(void) {
 		block_allocator_free_size(&ba)
 	);
 
+	memory_context_fini(&mctx);
 	free(raw);
 	return 0;
 }
@@ -445,6 +449,7 @@ test_reduction_loop_small_region(void) {
 	TEST_ASSERT(p != NULL, "reduction loop: small alloc failed");
 	memory_bfree(&mctx, p, 1);
 
+	memory_context_fini(&mctx);
 	free(raw_big);
 	return 0;
 }

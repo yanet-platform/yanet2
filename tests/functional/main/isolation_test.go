@@ -14,10 +14,15 @@ import (
 // between tests. The test sends a packet, intentionally does not read it,
 // then resets the connection and confirms the buffered packet is gone.
 func TestIsolation(t *testing.T) {
-	fw := globalFramework.ForTest(t)
+	withBootedVM(t, func(fw *framework.TestFramework) {
+		testIsolation(t, fw)
+	})
+}
+
+func testIsolation(t *testing.T, fw *framework.TestFramework) {
 	require.NotNil(t, fw, "Global framework should be initialized")
 
-	fw.Run("Configure_Forward_Module", func(fw *framework.F, t *testing.T) {
+	fw.Run("Configure_Forward_Module", func(fw *framework.TestFramework, t *testing.T) {
 		commands := []string{
 			framework.CLIFunction + " update --name=test --chains ch0:4=forward:forward0,route:route0",
 			framework.CLIPipeline + " update --name=test --functions test",
@@ -29,7 +34,7 @@ func TestIsolation(t *testing.T) {
 
 	// Step 1: Send a packet and verify it arrives on the output interface.
 	// Then send another packet but do NOT read it — it stays in the socket buffer.
-	fw.Run("Step_1_Send_packet_and_leave_unread", func(fw *framework.F, t *testing.T) {
+	fw.Run("Step_1_Send_packet_and_leave_unread", func(fw *framework.TestFramework, t *testing.T) {
 		inputClient, err := fw.GetSocketClient(0)
 		require.NoError(t, err)
 		require.NoError(t, inputClient.Connect())
@@ -52,19 +57,19 @@ func TestIsolation(t *testing.T) {
 		// Send second packet but do NOT read it — it will be buffered
 		require.NoError(t, inputClient.SendPacket(packet, ""))
 
-		// Give the VM time to process and forward the packet to the output socket
-		time.Sleep(100 * time.Millisecond)
+		// Give the VM time to process and forward the packet to the output socket.
+		time.Sleep(500 * time.Millisecond)
 	})
 
 	// Step 2: Reset the connection and verify the buffered packet is gone.
 	// This is the key isolation test — after ResetConnection(), the unread
 	// packet from Step 1 must NOT be readable.
-	fw.Run("Step_2_Verify_buffer_is_clean_after_reset", func(fw *framework.F, t *testing.T) {
+	fw.Run("Step_2_Verify_buffer_is_clean_after_reset", func(fw *framework.TestFramework, t *testing.T) {
 		outputClient, err := fw.GetSocketClient(0)
 		require.NoError(t, err)
 
-		// Note: fw.Run() already called resetAllConnections() before this step,
-		// so the connection is fresh. Attempt to read with a short timeout.
+		// fw.Run() already reset the connection before this step, so the
+		// unread packet from Step 1 must NOT be readable on a fresh connection.
 		require.NoError(t, outputClient.Connect())
 		_, err = outputClient.ReceivePacket(100*time.Millisecond, "")
 		assert.Error(t, err, "Should NOT receive any packet after connection reset — buffer must be clean")
@@ -72,7 +77,7 @@ func TestIsolation(t *testing.T) {
 
 	// Step 3: Verify the connection still works after reset.
 	// Send a new packet and confirm we can read it.
-	fw.Run("Step_3_Verify_connection_works_after_reset", func(fw *framework.F, t *testing.T) {
+	fw.Run("Step_3_Verify_connection_works_after_reset", func(fw *framework.TestFramework, t *testing.T) {
 		inputClient, err := fw.GetSocketClient(0)
 		require.NoError(t, err)
 		require.NoError(t, inputClient.Connect())
@@ -89,6 +94,6 @@ func TestIsolation(t *testing.T) {
 
 		require.NoError(t, inputClient.SendPacket(packet, ""))
 		_, err = outputClient.ReceivePacket(500*time.Millisecond, "")
-		require.NoError(t, err, "Packet should arrive after reset — connection must be functional")
+		require.NoError(t, err, "Packet should arrive after reset -- connection must be functional")
 	})
 }

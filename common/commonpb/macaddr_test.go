@@ -150,6 +150,31 @@ func TestMACAddress_RoundTrip(t *testing.T) {
 	}
 }
 
+func TestMACAddress_AsLogValue(t *testing.T) {
+	tests := []struct {
+		name string
+		mac  *MACAddress
+		want string
+	}{
+		{
+			name: "typical MAC",
+			mac:  NewMACAddressEUI48([6]byte{0x7c, 0xc3, 0x85, 0x70, 0x5a, 0xd6}),
+			want: "7c:c3:85:70:5a:d6",
+		},
+		{
+			name: "all zeros",
+			mac:  &MACAddress{},
+			want: "00:00:00:00:00:00",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, tt.mac.AsLogValue())
+		})
+	}
+}
+
 func TestMACAddress_FromProto(t *testing.T) {
 	mac := &MACAddress{
 		Addr: 0x00003aac269b5bf9,

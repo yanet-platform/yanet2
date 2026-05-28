@@ -90,6 +90,9 @@ main(void) {
 		ectx, "config_gen_ectx must resolve to NULL on fresh gen"
 	);
 
+	memory_context_fini(&agent.memory_context);
+	memory_context_fini(&cp->memory_context);
+	memory_context_fini(&dp->memory_context);
 	free(storage);
 	return 0;
 }

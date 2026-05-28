@@ -1,6 +1,8 @@
 package framework
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"net"
 	"os"
@@ -11,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gopacket/gopacket"
+	"github.com/gopacket/gopacket/layers"
 	"go.uber.org/zap"
 )
 
@@ -25,10 +29,10 @@ const (
 	VMIPv6Gateway = "fe80::1"
 	VMIPv6Host    = "fe80::5054:ff:fe6b:ffa5"
 
-	// CLI tool paths
+	// CLI tool paths (9P defaults, used in single-VM mode)
 	CLIBasePath    = "/mnt/target/release"
 	CLIRoute       = CLIBasePath + "/yanet-cli-route"
-	CLIBalancer    = CLIBasePath + "/yanet-cli-balancer"
+	CLIRouteMPLS   = CLIBasePath + "/yanet-cli-route-mpls"
 	CLINAT64       = CLIBasePath + "/yanet-cli-nat64"
 	CLIACL         = CLIBasePath + "/yanet-cli-acl"
 	CLIFWState     = CLIBasePath + "/yanet-cli-fwstate"
@@ -42,36 +46,126 @@ const (
 	globalName = "global"
 )
 
+// CLIBinaryNames is the canonical list of all CLI binaries installed
+// in the YANET target/release directory. Used by StartYANET
+// verification, PrepareLocalStorage, and test assertions to keep
+// binary lists in sync.
+var CLIBinaryNames = []string{
+	"yanet-cli",
+	"yanet-cli-route", "yanet-cli-route-mpls",
+	"yanet-cli-nat64", "yanet-cli-acl",
+	"yanet-cli-fwstate", "yanet-cli-pipeline", "yanet-cli-function",
+	"yanet-cli-device-plain", "yanet-cli-device-vlan",
+	"yanet-cli-decap", "yanet-cli-forward",
+	"yanet-cli-common", "yanet-cli-dscp", "yanet-cli-counters",
+	"yanet-cli-pdump", "yanet-cli-inspect",
+}
+
+// GuestPaths holds all guest-side filesystem paths used by the framework.
+// In single-VM mode these point to 9P mounts. In pool/snapshot mode
+// they point to /tmp/yanet/ (local tmpfs) so that no YANET process holds
+// open fids on 9P mounts, allowing savevm/loadvm to succeed.
+type GuestPaths struct {
+	CLIBase        string // directory with yanet-cli-* binaries
+	BuildDir       string // directory with yanet-dataplane, yanet-controlplane
+	ConfigDir      string // directory for config files
+	LogDir         string // directory for log files
+	DPDKDevbindDir string // directory containing dpdk-devbind.py
+	ForwardYAML    string // path to forward.yaml
+	LocalMode      bool   // true when paths are on guest tmpfs (pool/snapshot mode)
+}
+
+// DefaultGuestPaths returns the standard 9P-backed paths used in single-VM mode.
+func DefaultGuestPaths() GuestPaths {
+	return GuestPaths{
+		CLIBase:        "/mnt/target/release",
+		BuildDir:       "/mnt/build",
+		ConfigDir:      "/mnt/config",
+		LogDir:         "/mnt/logs",
+		DPDKDevbindDir: "/mnt/yanet2/subprojects/dpdk/usertools",
+		ForwardYAML:    "/mnt/config/forward.yaml",
+		LocalMode:      false,
+	}
+}
+
+// LocalGuestPaths returns paths on local tmpfs inside the guest.
+// Used in pool/snapshot mode after PrepareLocalStorage() copies
+// files from 9P mounts to /tmp/yanet/.
+func LocalGuestPaths() GuestPaths {
+	return GuestPaths{
+		CLIBase:        "/tmp/yanet/cli",
+		BuildDir:       "/tmp/yanet/build",
+		ConfigDir:      "/tmp/yanet/config",
+		LogDir:         "/tmp/yanet/logs",
+		DPDKDevbindDir: "/tmp/yanet/tools",
+		ForwardYAML:    "/tmp/yanet/forward.yaml",
+		LocalMode:      true,
+	}
+}
+
+// CLI returns the full path to a CLI binary by name.
+func (p GuestPaths) CLI(name string) string {
+	return p.CLIBase + "/" + name
+}
+
+// baselineSnapshotReady tracks whether the "baseline" VM snapshot
+// was successfully created during TestMain setup. Tests check this
+// before calling RunWith("baseline", ...) for per-test isolation.
+var baselineSnapshotReady atomic.Bool
+
 // Global atomic counter for generating unique log IDs
 var logIDCounter atomic.Uint32
 
-var (
-	CommonConfigCommands = []string{
+// MarkBaselineSaved records that the "baseline" VM snapshot was successfully
+// created. Called once from TestMain after setup completes.
+func MarkBaselineSaved() {
+	baselineSnapshotReady.Store(true)
+}
+
+// HasBaselineSnapshot returns true if the "baseline" VM snapshot is available
+// for per-test state isolation via RunWith("baseline", ...).
+func HasBaselineSnapshot() bool {
+	return baselineSnapshotReady.Load()
+}
+
+// CommonConfigCommands returns the shell commands that configure the
+// baseline YANET state (kni0, forwarding, route FIB, pipelines, devices).
+// Paths are resolved from f.Paths so the commands work with both 9P
+// and local tmpfs layouts.
+func (f *TestFramework) CommonConfigCommands() []string {
+	p := f.Paths
+	// Config files (route0.yaml, etc.) are always written via CreateConfigFile
+	// to the host-side config dir, accessible in the guest as /mnt/config/.
+	// Use the 9P guest path for rule files regardless of local/remote mode.
+	return []string{
 		// Configure kni0 network interface
 		"ip link set kni0 up",
-		"ip nei add " + VMIPv6Gateway + " lladdr " + SrcMAC + " dev kni0",
-		"ip nei add " + VMIPv4Gateway + " lladdr " + SrcMAC + " dev kni0",
-		"ip addr add " + VMIPv4Host + "/24 dev kni0",
+		"ip nei replace " + VMIPv6Gateway + " lladdr " + SrcMAC + " dev kni0",
+		"ip nei replace " + VMIPv4Gateway + " lladdr " + SrcMAC + " dev kni0",
+		"ip addr replace " + VMIPv4Host + "/24 dev kni0",
 
 		// Configure L2 and L3 forwarding
-		CLIForward + " update --name=forward0 --rules /mnt/yanet2/forward.yaml",
+		p.CLI("yanet-cli-forward") + " update --name=forward0 --rules " + p.ForwardYAML,
 
 		// Bootstrap the default IPv4/IPv6 FIB for the "route0" config.
-		// The YAML payload is created on the host before this command
-		// runs; see framework_test.go.
-		CLIRoute + " fib update --name=route0 --rules /mnt/config/route0.yaml",
+		// route0.yaml is always at /mnt/config/ (written via host 9P).
+		p.CLI("yanet-cli-route") + " fib update --name=route0 --rules /mnt/config/route0.yaml",
 
-		CLIFunction + " update --name=virt --chains chain0:10=forward:forward0",
-		CLIFunction + " update --name=test --chains chain2:1=forward:forward0,route:route0",
+		p.CLI("yanet-cli-function") + " update --name=virt --chains chain0:10=forward:forward0",
+		p.CLI("yanet-cli-function") + " update --name=test --chains chain2:1=forward:forward0,route:route0",
 
-		CLIPipeline + " update --name=bootstrap --functions virt",
-		CLIPipeline + " update --name=test --functions test",
-		CLIPipeline + " update --name=dummy",
+		p.CLI("yanet-cli-pipeline") + " update --name=bootstrap --functions virt",
+		p.CLI("yanet-cli-pipeline") + " update --name=test --functions test",
+		p.CLI("yanet-cli-pipeline") + " update --name=dummy",
 
-		CLIDevicePlain + " update --name=01:00.0 --input test:1 --output dummy:1",
-		CLIDevicePlain + " update --name=virtio_user_kni0 --input bootstrap:1 --output dummy:1",
+		p.CLI("yanet-cli-device-plain") + " update --name=01:00.0 --input test:1 --output dummy:1",
+		p.CLI("yanet-cli-device-plain") + " update --name=virtio_user_kni0 --input bootstrap:1 --output dummy:1",
 	}
-)
+}
+
+// CommonConfigCommands is the package-level variable for backward compatibility.
+// Uses default 9P paths. In pool mode tests use fw.CommonConfigCommands() instead.
+var CommonConfigCommands = (&TestFramework{Paths: DefaultGuestPaths()}).CommonConfigCommands()
 
 // MustParseMAC parses a MAC address string and panics if parsing fails.
 // This utility function is designed for use with known-good MAC address constants
@@ -99,7 +193,7 @@ func MustParseMAC(mac string) net.HardwareAddr {
 
 // generateLogID generates a short 4-character log ID using an atomic counter.
 // This provides a unique, compact identifier for logging purposes.
-// The counter is a uint16, allowing for 65536 unique IDs (0000-FFFF).
+// The counter is a uint32 wrapped at 16 bits, producing 4-character hex IDs (0000-FFFF).
 //
 // Parameters:
 //   - testName: Full test name (e.g., "TestBalancer/TestCase1")
@@ -112,7 +206,6 @@ func generateLogID(testName string) string {
 	}
 	// Increment counter and get the value (wraps around at uint16 max)
 	id := logIDCounter.Add(1)
-	// Use only lower 16 bits to ensure 4-character hex output
 	return fmt.Sprintf("%04X", uint16(id))
 }
 
@@ -135,21 +228,23 @@ type socketClientsCache struct {
 //
 // All operations are thread-safe through internal synchronization mechanisms.
 // This type has private fields and cannot be constructed directly - use Global() and ForTest(t).
-type F struct {
-	qemu         *QEMUManager       // Virtual machine manager for test environment
-	cli          *CLIManager        // Command-line interface manager for VM operations
-	PacketParser *PacketParser      // Network packet parsing and analysis engine
-	log          *zap.SugaredLogger // Logger for debugging and monitoring
+type TestFramework struct {
+	qemu         *QEMUManager
+	cli          *CLIManager
+	PacketParser *PacketParser
+	log          *zap.SugaredLogger
+	Paths        GuestPaths // Guest-side filesystem paths (9P or local tmpfs)
 
-	// Socket client cache for network interface communication
-	socketClients *socketClientsCache // Cached socket clients with mutex
+	socketClients *socketClientsCache
 
-	// Test context
-	testName string     // Name of the current test (empty for global framework)
-	t        *testing.T // Testing context (nil for global framework)
+	lastDataplaneConfig    string // Last dataplane config used by StartYANET (for RestartYANET)
+	lastControlplaneConfig string // Last controlplane config used by StartYANET (for RestartYANET)
+
+	testName string
+	t        *testing.T
 }
 
-// GlobalFramework is a safe wrapper that prevents direct access to framework methods.
+// Framework is a safe wrapper that prevents direct access to framework methods.
 // It provides two ways to access the framework:
 //   - Global() - returns TestFramework with testName="global" for global operations in TestMain
 //   - ForTest(t) - returns TestFramework bound to *testing.T for test-specific operations
@@ -158,7 +253,7 @@ type F struct {
 //
 // Example usage:
 //
-//	var globalFramework *GlobalFramework
+//	var globalFramework *Framework
 //
 //	func TestMain(m *testing.M) {
 //	    fw, _ := New(config)
@@ -174,8 +269,8 @@ type F struct {
 //	        // Use fw for framework operations, t for assertions
 //	    })
 //	}
-type GlobalFramework struct {
-	inner *F
+type Framework struct {
+	inner *TestFramework
 }
 
 // writeToDumpFile appends data to a dump file if debug is enabled and path is not empty.
@@ -211,7 +306,7 @@ func writeToDumpFile(path string, data []byte) error {
 // Returns:
 //   - FrameworkOption: A functional option that sets the logger
 func WithLog(log *zap.SugaredLogger) FrameworkOption {
-	return func(fw *F) error {
+	return func(fw *TestFramework) error {
 		fw.log = log
 		return nil
 	}
@@ -220,7 +315,7 @@ func WithLog(log *zap.SugaredLogger) FrameworkOption {
 // FrameworkOption defines functional options for configuring TestFramework instances.
 // This pattern enables flexible initialization with optional parameters while
 // maintaining backward compatibility and clean API design.
-type FrameworkOption func(*F) error
+type FrameworkOption func(*TestFramework) error
 
 // Config contains essential configuration parameters for initializing the test framework.
 // It specifies the QEMU virtual machine image and working directory for test execution.
@@ -229,7 +324,7 @@ type Config struct {
 	QEMUImage string // Path to the QEMU virtual machine image file
 }
 
-// New creates and initializes a new GlobalFramework instance with the specified configuration
+// New creates and initializes a new Framework instance with the specified configuration
 // and optional functional parameters. The framework sets up all necessary components
 // including QEMU VM management, CLI operations, and packet processing capabilities.
 //
@@ -245,7 +340,7 @@ type Config struct {
 //   - opts: Optional functional options for customizing framework behavior
 //
 // Returns:
-//   - *GlobalFramework: Fully initialized framework wrapper
+//   - *Framework: Fully initialized framework wrapper
 //   - error: An error if initialization fails or configuration is invalid
 //
 // Example:
@@ -258,14 +353,15 @@ type Config struct {
 //	if err != nil {
 //	    log.Fatalf("Failed to create framework: %v", err)
 //	}
-func New(config *Config, opts ...FrameworkOption) (*GlobalFramework, error) {
+func New(config *Config, opts ...FrameworkOption) (*Framework, error) {
 	if config == nil {
 		return nil, fmt.Errorf("config is required")
 	}
 
 	// Create framework instance with default values
-	fw := &F{
-		log: zap.NewNop().Sugar(), // default noop logger
+	fw := &TestFramework{
+		log:   zap.NewNop().Sugar(), // default noop logger
+		Paths: DefaultGuestPaths(),
 		socketClients: &socketClientsCache{
 			clients: make(map[int]*SocketClient),
 		},
@@ -299,7 +395,7 @@ func New(config *Config, opts ...FrameworkOption) (*GlobalFramework, error) {
 		fw.PacketParser = NewPacketParser()
 	}
 
-	return &GlobalFramework{inner: fw}, nil
+	return &Framework{inner: fw}, nil
 }
 
 // Global returns the underlying TestFramework with testName="global" for global operations.
@@ -319,7 +415,7 @@ func New(config *Config, opts ...FrameworkOption) (*GlobalFramework, error) {
 //	    defer gfw.Stop()
 //	    m.Run()
 //	}
-func (f *GlobalFramework) Global() *F {
+func (f *Framework) Global() *TestFramework {
 	return f.inner.withTestName(globalName)
 }
 
@@ -341,8 +437,17 @@ func (f *GlobalFramework) Global() *F {
 //	        // Test code here
 //	    })
 //	}
-func (f *GlobalFramework) ForTest(t *testing.T) *F {
+func (f *Framework) ForTest(t *testing.T) *TestFramework {
 	fwCopy := f.inner.withTestName(t.Name())
+	fwCopy.t = t
+	return fwCopy
+}
+
+// ForTest binds an already constructed framework instance to a specific test.
+// This is used by pooled VMs, where tests acquire a shared base framework from
+// VMPool and then need a test-scoped copy with the proper logger and *testing.T.
+func (f *TestFramework) ForTest(t *testing.T) *TestFramework {
+	fwCopy := f.withTestName(t.Name())
 	fwCopy.t = t
 	return fwCopy
 }
@@ -364,71 +469,31 @@ func (f *GlobalFramework) ForTest(t *testing.T) *F {
 //	if err := framework.Start(); err != nil {
 //	    log.Fatalf("Failed to start test environment: %v", err)
 //	}
-func (f *F) Start() error {
-	// Start QEMU VM with socket networking
-	if err := f.qemu.Start(); err != nil {
-		return fmt.Errorf("failed to start QEMU: %w", err)
+func (f *TestFramework) Start() (bool, error) {
+	fromSnapshot, err := f.qemu.Start()
+	if err != nil {
+		return false, fmt.Errorf("failed to start QEMU: %w", err)
 	}
 
-	return nil
+	return fromSnapshot, nil
 }
 
-// Stop performs comprehensive cleanup of the test environment, ensuring proper
-// resource deallocation and temporary file removal. This method should always
-// be called when testing is complete to prevent resource leaks.
+// Stop performs cleanup of the test environment, closing socket clients
+// and stopping the QEMU virtual machine.
 //
-// The cleanup process includes:
-//   - Closing all active socket client connections
-//   - Terminating CLI manager connections
-//   - Stopping and cleaning up the QEMU virtual machine
-//   - Removing the working directory and all test artifacts
-
-// Stop performs comprehensive cleanup of the test environment, ensuring proper
-// resource deallocation and temporary file removal. This method should always
-// be called when testing is complete to prevent resource leaks.
-//
-// The cleanup process includes:
-//   - Closing all active socket client connections
-//   - Terminating CLI manager connections
-//   - Stopping and cleaning up the QEMU virtual machine
-//   - Removing the working directory and all test artifacts
-//
-// Multiple cleanup errors are collected and returned as a combined error for
-// comprehensive error reporting.
-//
-// Returns:
-//   - error: A combined error if any cleanup operations fail, or nil if successful
-//
-// Example:
-//
-//	defer func() {
-//	    if err := framework.Stop(); err != nil {
-//	        log.Errorf("Cleanup failed: %v", err)
-//	    }
-//	}()
-func (f *F) Stop() error {
+// Multiple cleanup errors are collected and returned as a combined error.
+func (f *TestFramework) Stop() error {
 	var errs []error
 
-	// Lock the mutex to safely access the socketClients map
 	f.socketClients.mutex.Lock()
-	// Close all socket clients
 	for _, client := range f.socketClients.clients {
 		if err := client.Close(); err != nil {
 			errs = append(errs, fmt.Errorf("failed to close socket client: %w", err))
 		}
 	}
-	// Clear the map
 	f.socketClients.clients = make(map[int]*SocketClient)
 	f.socketClients.mutex.Unlock()
 
-	// Close CLI connections
-	if f.cli != nil {
-		if err := f.cli.Close(); err != nil {
-			errs = append(errs, fmt.Errorf("failed to close CLI: %w", err))
-		}
-	}
-
-	// Stop QEMU VM
 	if err := f.qemu.Stop(); err != nil {
 		errs = append(errs, fmt.Errorf("failed to stop QEMU: %w", err))
 	}
@@ -444,25 +509,26 @@ func (f *F) Stop() error {
 // (QEMU, CLI, socket clients, etc.). The copy shares the same caches and mutexes for
 // thread-safe access to shared resources.
 //
-// A unique 8-character log ID is generated from the test name for compact logging.
+// A unique 4-character log ID is generated from the test name for compact logging.
 //
 // Parameters:
 //   - testName: Name of the test (typically from t.Name())
 //
 // Returns:
 //   - *TestFramework: A new framework instance with the test name set
-func (f *F) withTestName(testName string) *F {
+func (f *TestFramework) withTestName(testName string) *TestFramework {
 	logID := generateLogID(testName)
 	namedLog := f.log.Named(logID)
 	if testName != globalName {
 		namedLog.Infof("Test '%s' will use log ID: %s", testName, logID)
 	}
 
-	fWithName := &F{
+	fWithName := &TestFramework{
 		qemu:          f.qemu,
 		cli:           f.cli.WithLog(namedLog),
 		PacketParser:  f.PacketParser,
 		log:           namedLog,
+		Paths:         f.Paths,
 		socketClients: f.socketClients, // shared cache with mutex
 		testName:      testName,
 	}
@@ -511,7 +577,7 @@ func (f *F) withTestName(testName string) *F {
 //	    response, err := fw.SendPacketAndCapture(0, 1, packetData, 5*time.Second)
 //	    require.NoError(t, err)
 //	})
-func (f *F) SendPacketAndCapture(inputIfaceIndex int, outputIfaceIndex int, packet []byte, timeout time.Duration) ([]byte, error) {
+func (f *TestFramework) SendPacketAndCapture(inputIfaceIndex int, outputIfaceIndex int, packet []byte, timeout time.Duration) ([]byte, error) {
 	f.log.Infof("Sending packet on interface %d and capturing response on interface %d", inputIfaceIndex, outputIfaceIndex)
 
 	// Get socket clients
@@ -537,18 +603,22 @@ func (f *F) SendPacketAndCapture(inputIfaceIndex int, outputIfaceIndex int, pack
 		return nil, fmt.Errorf("failed to connect to output socket: %w", err)
 	}
 
-	_, _ = outputClient.ReceiveAllPackets(timeout, outputDumpPath)
+	// Drain any stale packets from a previous test before sending.
+	// Use a short deadline — we only want to flush already-buffered data,
+	// not block waiting for new traffic.
+	_, _ = outputClient.ReceiveAllPackets(50*time.Millisecond, outputDumpPath)
 
 	// Send packet on input interface
 	if err := inputClient.SendPacket(packet, inputDumpPath); err != nil {
 		return nil, fmt.Errorf("failed to send packet: %w", err)
 	}
 
-	return outputClient.ReceivePacket(timeout, outputDumpPath)
+	responseData, err := outputClient.ReceivePacket(timeout, outputDumpPath)
+	return responseData, err
 }
 
 // SendPacketAndCaptureAll sends a network packet and captures all response packets.
-func (f *F) SendPacketAndCaptureAll(inputIfaceIndex int, outputIfaceIndex int, packet []byte, timeout time.Duration) ([][]byte, error) {
+func (f *TestFramework) SendPacketAndCaptureAll(inputIfaceIndex int, outputIfaceIndex int, packet []byte, timeout time.Duration) ([][]byte, error) {
 	inputClient, err := f.GetSocketClient(inputIfaceIndex)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get input socket client: %w", err)
@@ -607,7 +677,7 @@ func (f *F) SendPacketAndCaptureAll(inputIfaceIndex int, outputIfaceIndex int, p
 //	    require.NoError(t, err)
 //	    t.Logf("Sent: %s, Received: %s", input.String(), output.String())
 //	})
-func (f *F) SendPacketAndParse(inputIfaceIndex int, outputIfaceIndex int, packet []byte, timeout time.Duration) (*PacketInfo, *PacketInfo, error) {
+func (f *TestFramework) SendPacketAndParse(inputIfaceIndex int, outputIfaceIndex int, packet []byte, timeout time.Duration) (*PacketInfo, *PacketInfo, error) {
 	// Parse input packet
 	inputPacketInfo, err := f.PacketParser.ParsePacket(packet)
 	if err != nil {
@@ -634,7 +704,7 @@ func (f *F) SendPacketAndParse(inputIfaceIndex int, outputIfaceIndex int, packet
 }
 
 // SendPacketAndParseAll sends a network packet and captures ALL response packets.
-func (f *F) SendPacketAndParseAll(inputIfaceIndex int, outputIfaceIndex int, packet []byte, timeout time.Duration) ([]*PacketInfo, error) {
+func (f *TestFramework) SendPacketAndParseAll(inputIfaceIndex int, outputIfaceIndex int, packet []byte, timeout time.Duration) ([]*PacketInfo, error) {
 	inputPacketInfo, err := f.PacketParser.ParsePacket(packet)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse input packet: %w", err)
@@ -650,6 +720,32 @@ func (f *F) SendPacketAndParseAll(inputIfaceIndex int, outputIfaceIndex int, pac
 	}
 
 	// Parse all response packets
+	var outputPacketInfos []*PacketInfo
+	for i, responseData := range responses {
+		outputPacketInfo, err := f.PacketParser.ParsePacket(responseData)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse response packet %d: %w", i, err)
+		}
+		f.log.Debugf("Received packet %d: %s", i, outputPacketInfo.String())
+		outputPacketInfos = append(outputPacketInfos, outputPacketInfo)
+	}
+
+	return outputPacketInfos, nil
+}
+
+func (f *TestFramework) SendPacketsAndParseAll(inputIfaceIndex int, outputIfaceIndex int, packets [][]byte, timeout time.Duration) ([]*PacketInfo, error) {
+	f.log.Infof("Sending %d packets on interface %d and capturing responses on interface %d", len(packets), inputIfaceIndex, outputIfaceIndex)
+
+	var responses [][]byte
+	for idx, packet := range packets {
+		packetResponses, err := f.SendPacketAndCaptureAll(inputIfaceIndex, outputIfaceIndex, packet, timeout)
+		if err != nil {
+			return nil, fmt.Errorf("failed to send packet %d and capture responses: %w", idx, err)
+		}
+		responses = append(responses, packetResponses...)
+	}
+
+	// Parse all response packets.
 	var outputPacketInfos []*PacketInfo
 	for i, responseData := range responses {
 		outputPacketInfo, err := f.PacketParser.ParsePacket(responseData)
@@ -691,7 +787,7 @@ func (f *F) SendPacketAndParseAll(inputIfaceIndex int, outputIfaceIndex int, pac
 //	    log.Fatalf("Failed to get socket client: %v", err)
 //	}
 //	defer client.Close()
-func (f *F) GetSocketClient(ifaceIndex int) (*SocketClient, error) {
+func (f *TestFramework) GetSocketClient(ifaceIndex int) (*SocketClient, error) {
 	// For QEMU networking: Unix stream socket interfaces only
 	if ifaceIndex >= len(f.qemu.SocketPaths) {
 		return nil, fmt.Errorf("interface index %d out of range, available interfaces: 0-%d", ifaceIndex, len(f.qemu.SocketPaths)-1)
@@ -720,24 +816,23 @@ func (f *F) GetSocketClient(ifaceIndex int) (*SocketClient, error) {
 	return client.WithLog(f.log.With("interface", ifaceIndex)), nil
 }
 
-// resetAllConnections closes and reconnects all socket clients.
-// This ensures a clean state before starting a new test, preventing
-// packet leakage between tests. Unlike draining, this approach
-// guarantees a completely clean stream by discarding any buffered
-// data with the old connection.
+// ResetConnections closes and reconnects all socket clients.
+// This ensures a clean state after a snapshot restore, preventing stale
+// connections from causing false heartbeat failures. Unlike draining,
+// this approach guarantees a completely clean stream by discarding any
+// buffered data with the old connection.
 //
-// The method iterates through all existing socket clients and
-// resets their connections. Errors during reset are logged but
-// do not cause the operation to fail.
+// Must be called after loadvm and before any packet operations
+// (WaitForDatapathReady, SendPacketAndCapture, etc.) because loadvm
+// restores QEMU's internal stream-netdev state but the host-side UNIX
+// socket connections are stale — Connect() short-circuits on the dead
+// net.Conn and never reconnects.
 //
-// Example:
-//
-//	f.resetAllConnections()
-func (f *F) resetAllConnections() {
+// Errors during reset are logged but do not cause the operation to fail.
+func (f *TestFramework) ResetConnections() {
 	f.socketClients.mutex.Lock()
 	defer f.socketClients.mutex.Unlock()
 
-	// Reset all existing socket clients
 	for i, client := range f.socketClients.clients {
 		if err := client.ResetConnection(); err != nil {
 			f.log.Warnf("Failed to reset connection for interface %d: %v", i, err)
@@ -769,8 +864,15 @@ func (f *F) resetAllConnections() {
 //	    require.NoError(t, err)
 //	    t.Logf("Output: %s", output)
 //	})
-func (f *F) ExecuteCommand(command string) (string, error) {
+func (f *TestFramework) ExecuteCommand(command string) (string, error) {
 	return f.cli.ExecuteCommand(command)
+}
+
+// ExecuteCommandWithTimeout executes a single CLI command with a custom
+// timeout. Use this for operations that may take longer than the default
+// 30s, such as copying large binaries on slow emulated VMs.
+func (f *TestFramework) ExecuteCommandWithTimeout(command string, timeout time.Duration) (string, error) {
+	return f.cli.ExecuteCommandWithTimeout(command, timeout)
 }
 
 // ExecuteCommands executes multiple CLI commands sequentially within the QEMU
@@ -799,20 +901,13 @@ func (f *F) ExecuteCommand(command string) (string, error) {
 //	    require.NoError(t, err)
 //	    t.Logf("Outputs: %v", outputs)
 //	})
-func (f *F) ExecuteCommands(commands ...string) ([]string, error) {
+func (f *TestFramework) ExecuteCommands(commands ...string) ([]string, error) {
 	return f.cli.ExecuteCommands(commands...)
 }
 
 // getDumpFilePaths returns dump file paths for a test.
 // If debug is disabled or testName is empty, returns empty strings.
-//
-// Parameters:
-//   - testName: Name of the test
-//
-// Returns:
-//   - string: Input dump file path (empty if debug disabled)
-//   - string: Output dump file path (empty if debug disabled)
-func (f *F) getDumpFilePaths() (string, string) {
+func (f *TestFramework) getDumpFilePaths() (string, string) {
 	if !IsDebugEnabled() || f.testName == "" {
 		return "", ""
 	}
@@ -858,8 +953,12 @@ func (f *F) getDumpFilePaths() (string, string) {
 //	if err := fw.StartYANET(dataplaneYAML, controlplaneYAML); err != nil {
 //	    log.Fatalf("YANET startup failed: %v", err)
 //	}
-func (f *F) StartYANET(dataplaneConfig string, controlplaneConfig string) error {
+func (f *TestFramework) StartYANET(dataplaneConfig string, controlplaneConfig string) error {
+	yanetStart := time.Now()
 	f.log.Info("Starting YANET in VM...")
+
+	f.lastDataplaneConfig = dataplaneConfig
+	f.lastControlplaneConfig = controlplaneConfig
 
 	if !f.qemu.IsVMReady() {
 		return fmt.Errorf("vm is not ready")
@@ -882,108 +981,76 @@ func (f *F) StartYANET(dataplaneConfig string, controlplaneConfig string) error 
 		return fmt.Errorf("failed to create config files: %w", err)
 	}
 
-	// Check if YANET binaries are available
-	f.log.Debug("Checking YANET binary availability...")
-	commands := []string{
-		"ls -la /mnt/build/",
-		"ls -la /mnt/build/dataplane/",
-		"ls -la /mnt/build/controlplane/",
-	}
+	p := f.Paths
 
-	for _, cmd := range commands {
-		output, err := f.cli.ExecuteCommand(cmd)
-		if err != nil {
-			return fmt.Errorf("YANET binary check failed: %w", err)
-		}
-		if strings.Contains(output, "such") {
-			return fmt.Errorf("YANET binary check failed: %s", output)
-		}
-		f.log.Debugf("Command: %s\nOutput: %s", cmd, output)
+	// Batch-check all required binaries in a single compound command.
+	f.log.Debug("Checking YANET binary availability...")
+	allBinaries := []string{
+		p.BuildDir + "/dataplane/yanet-dataplane",
+		p.BuildDir + "/controlplane/yanet-controlplane",
 	}
+	for _, name := range CLIBinaryNames {
+		allBinaries = append(allBinaries, p.CLI(name))
+	}
+	checkCmd := "test -x " + strings.Join(allBinaries, " && test -x ")
+	if _, err := f.cli.ExecuteCommand(checkCmd); err != nil {
+		return fmt.Errorf(
+			"required binary not found in %s or %s\n"+
+				"Run 'just dbuild' + 'just dcli' to build YANET",
+			p.BuildDir, p.CLIBase,
+		)
+	}
+	f.log.Debug("All binaries present")
 
 	// Load required kernel modules
-	f.log.Debug("Loading required kernel modules...")
-	moduleCommands := []string{
-		"sudo modprobe vfio-pci",
-	}
-
-	for _, cmd := range moduleCommands {
-		output, err := f.cli.ExecuteCommand(cmd)
-		if err != nil {
-			return fmt.Errorf("failed to load kernel modules: %w", err)
-		}
-		f.log.Debugf("Module command: %s\nOutput: %s", cmd, output)
-	}
-
-	f.log.Debug("Configuring network interfaces for DPDK...")
-
-	// Check PCI devices status
-	statusCmd := "/mnt/yanet2/subprojects/dpdk/usertools/dpdk-devbind.py --status"
-	output, err := f.cli.ExecuteCommand(statusCmd)
+	f.log.Debug("Loading kernel modules and binding DPDK interfaces...")
+	devbind := p.DPDKDevbindDir + "/dpdk-devbind.py"
+	_, err := f.cli.ExecuteCommand(fmt.Sprintf(
+		"sudo modprobe vfio-pci && %s --bind=vfio-pci 01:00.0 && %s --bind=vfio-pci 02:00.0",
+		devbind, devbind,
+	))
 	if err != nil {
-		return fmt.Errorf("DPDK devbind status check failed: %v", err)
+		return fmt.Errorf("DPDK setup failed: %w", err)
 	}
-	f.log.Debugf("DPDK devices status: %s", output)
+	f.log.Debug("DPDK interfaces bound")
 
-	// Bind network interfaces to DPDK driver
-	// Based on the QEMU configuration, we need to bind the virtio interfaces
-	bindCommands := []string{
-		"/mnt/yanet2/subprojects/dpdk/usertools/dpdk-devbind.py --bind=vfio-pci 01:00.0",
-		"/mnt/yanet2/subprojects/dpdk/usertools/dpdk-devbind.py --bind=vfio-pci 02:00.0",
-	}
-
-	for _, cmd := range bindCommands {
-		output, err = f.cli.ExecuteCommand(cmd)
-		if err != nil {
-			return fmt.Errorf("interface bind failed: %s, %w", cmd, err)
-		}
-		f.log.Debugf("DPDK bind command: %s\nOutput: %s", cmd, output)
-	}
-
-	// Verify that config files are accessible in VM
-	f.log.Debug("Verifying config files are accessible in VM...")
-	verifyCommands := []string{
-		"ls -la /mnt/config/dataplane.yaml",
-		"ls -la /mnt/config/controlplane.yaml",
-	}
-
-	for _, cmd := range verifyCommands {
-		output, err := f.cli.ExecuteCommand(cmd)
-		if err != nil {
-			return fmt.Errorf("config file verification failed: %w", err)
-		}
-		f.log.Debugf("Config verification: %s\nOutput: %s", cmd, output)
-	}
-
-	// Start dataplane in background using config from mounted directory
+	// Start dataplane in background
 	f.log.Debug("Starting YANET dataplane...")
-	dataplaneCmd := "bash -c 'nohup /mnt/build/dataplane/yanet-dataplane /mnt/config/dataplane.yaml > /mnt/logs/yanet-dataplane.log 2>&1 &'"
-	output, err = f.cli.ExecuteCommand(dataplaneCmd)
+	dataplaneCmd := fmt.Sprintf(
+		"bash -c 'nohup %s/dataplane/yanet-dataplane %s/dataplane.yaml > %s/yanet-dataplane.log 2>&1 &'",
+		p.BuildDir, p.ConfigDir, p.LogDir,
+	)
+	output, err := f.cli.ExecuteCommand(dataplaneCmd)
 	if err != nil {
 		return fmt.Errorf("failed to start dataplane: %w", err)
 	}
-	f.log.Infof("Dataplane started: %s", output)
+	f.log.Infof("Dataplane started: %s (took %v)", output, time.Since(yanetStart).Round(time.Millisecond))
 	f.log.Infof("Wait for the kni0 device to appear")
+	dpStart := time.Now()
 	err = f.WaitOutputPresent("ip link", func(output string) bool {
 		return strings.Contains(output, "kni0")
-	}, 10*time.Second)
+	}, 30*time.Second)
 	if err != nil {
 		return fmt.Errorf("failed to start dataplane: %w", err)
 	}
+	f.log.Infof("kni0 appeared after %v", time.Since(dpStart).Round(time.Millisecond))
 
-	// Start controlplane in background using config from mounted directory
+	// Start controlplane in background
 	f.log.Debug("Starting YANET controlplane...")
-	controlplaneCmd := "bash -c 'nohup /mnt/build/controlplane/yanet-controlplane -c /mnt/config/controlplane.yaml > /mnt/logs/yanet-controlplane.log 2>&1 &'"
+	controlplaneCmd := fmt.Sprintf(
+		"bash -c 'nohup %s/controlplane/yanet-controlplane -c %s/controlplane.yaml > %s/yanet-controlplane.log 2>&1 &'",
+		p.BuildDir, p.ConfigDir, p.LogDir,
+	)
 	output, err = f.cli.ExecuteCommand(controlplaneCmd)
 	if err != nil {
 		return fmt.Errorf("failed to start controlplane: %w", err)
 	}
-	f.log.Infof("Controlplane started: %s", output)
+	f.log.Infof("Controlplane started: %s (total YANET startup: %v)", output, time.Since(yanetStart).Round(time.Millisecond))
 
 	// Verify services are running
 	f.log.Debug("Verifying YANET services are running...")
 
-	err = f.WaitOutputPresent("cat /mnt/logs/yanet-controlplane.log", func(output string) bool {
+	err = f.WaitOutputPresent("cat "+p.LogDir+"/yanet-controlplane.log", func(output string) bool {
 		return strings.Contains(output, "all built-in modules ready")
 	}, 10*time.Second)
 	if err != nil {
@@ -993,8 +1060,8 @@ func (f *F) StartYANET(dataplaneConfig string, controlplaneConfig string) error 
 	checkCmds := []string{
 		"ps awux | grep [y]anet-dataplane",
 		"ps awux | grep [y]anet-controlplane",
-		"cat /mnt/logs/yanet-dataplane.log",
-		"cat /mnt/logs/yanet-controlplane.log",
+		"cat " + p.LogDir + "/yanet-dataplane.log",
+		"cat " + p.LogDir + "/yanet-controlplane.log",
 	}
 
 	_, err = f.cli.ExecuteCommands(checkCmds...)
@@ -1002,7 +1069,31 @@ func (f *F) StartYANET(dataplaneConfig string, controlplaneConfig string) error 
 		return fmt.Errorf("failed to start services: %w", err)
 	}
 
-	f.log.Info("YANET services started successfully")
+	f.log.Infof("YANET services started successfully (total: %v)", time.Since(yanetStart).Round(time.Millisecond))
+	return nil
+}
+
+func (f *TestFramework) RestartYANET() error {
+	f.log.Info("Restarting YANET (kill + fresh start)...")
+
+	killCmd := "kill $(pidof yanet-dataplane) $(pidof yanet-controlplane) 2>/dev/null; sleep 1; kill -9 $(pidof yanet-dataplane) $(pidof yanet-controlplane) 2>/dev/null; true"
+	if _, err := f.ExecuteCommand(killCmd); err != nil {
+		f.log.Debugf("Kill command returned error (non-fatal): %v", err)
+	}
+
+	if _, err := f.ExecuteCommand("ip link del kni0 2>/dev/null; true"); err != nil {
+		f.log.Debugf("kni0 cleanup returned error (non-fatal): %v", err)
+	}
+
+	if err := f.StartYANET(f.lastDataplaneConfig, f.lastControlplaneConfig); err != nil {
+		return fmt.Errorf("YANET restart failed: %w", err)
+	}
+
+	if _, err := f.ExecuteCommands(f.CommonConfigCommands()...); err != nil {
+		return fmt.Errorf("YANET reconfigure after restart failed: %w", err)
+	}
+
+	f.log.Info("YANET restarted and reconfigured successfully")
 	return nil
 }
 
@@ -1028,7 +1119,7 @@ func (f *F) StartYANET(dataplaneConfig string, controlplaneConfig string) error 
 //	err := fw.WaitOutputPresent("ps aux | grep yanet", func(output string) bool {
 //	    return strings.Contains(output, "yanet-dataplane")
 //	}, 30*time.Second)
-func (f *F) WaitOutputPresent(cmd string, checker func(string) bool, timeout time.Duration) error {
+func (f *TestFramework) WaitOutputPresent(cmd string, checker func(string) bool, timeout time.Duration) error {
 	// Wait for flags to be applied
 	deadline := time.Now().Add(timeout)
 
@@ -1038,31 +1129,55 @@ func (f *F) WaitOutputPresent(cmd string, checker func(string) bool, timeout tim
 			return fmt.Errorf("failed to check output: %w", err)
 		}
 
-		// Check if flags match expected state
 		if checker(output) {
 			return nil
 		}
-		// Wait before next check
 		time.Sleep(100 * time.Millisecond)
 	}
 
 	return fmt.Errorf("timeout waiting for output to be present: %s", cmd)
 }
 
-func (f *F) CreateConfigFile(name string, config string) error {
-	// Get the config directory path from QEMU manager
+func (f *TestFramework) CreateConfigFile(name string, config string) error {
+	// Always write to the host filesystem via the 9P-shared config directory.
+	// In pool mode, 9P is remounted after loadvm so /mnt/config is available.
+	// Tests reference /mnt/config/ in CLI commands, so this must be consistent.
 	configDir := f.qemu.ConfigDir
 	if configDir == "" {
 		return fmt.Errorf("config directory not set in QEMU manager")
 	}
 
-	// Create dataplane config file
 	configPath := filepath.Join(configDir, name)
 	if err := os.WriteFile(configPath, []byte(config), 0644); err != nil {
 		return fmt.Errorf("failed to write config to %s: %w", configPath, err)
 	}
 	f.log.Debugf("Created config: %s", configPath)
 	return nil
+}
+
+// createGuestFile writes content to a file inside the guest VM via serial
+// console. Uses base64 encoding to avoid heredoc echo/marker confusion
+// on the serial terminal.
+func (f *TestFramework) createGuestFile(guestPath string, content string) error {
+	encoded := base64.StdEncoding.EncodeToString([]byte(content))
+	cmd := fmt.Sprintf("echo '%s' | base64 -d > %s", encoded, guestPath)
+	if _, err := f.ExecuteCommand(cmd); err != nil {
+		return fmt.Errorf("failed to write guest file %s: %w", guestPath, err)
+	}
+	f.log.Debugf("Created guest config: %s", guestPath)
+	return nil
+}
+
+// CreateForwardConfig writes forward.yaml to the path referenced by
+// f.Paths.ForwardYAML. In 9P mode this writes to the host filesystem;
+// in local mode it writes via serial console to the guest tmpfs.
+func (f *TestFramework) CreateForwardConfig(config string) error {
+	if f.Paths.LocalMode {
+		// Local mode: write directly into guest filesystem via serial console.
+		return f.createGuestFile(f.Paths.ForwardYAML, config)
+	}
+	// 9P mode: write to host filesystem, accessible via 9P mount.
+	return f.CreateConfigFile("forward.yaml", config)
 }
 
 // createConfigFiles creates YANET configuration files in the host filesystem
@@ -1084,10 +1199,23 @@ func (f *F) CreateConfigFile(name string, config string) error {
 //   - error: An error if configuration directory is unavailable or file creation fails
 //
 // Note: This is an internal method used by StartYANET and should not be called directly.
-func (f *F) createConfigFiles(dataplaneConfig string, controlplaneConfig string) error {
-	f.log.Debug("Creating configuration files on host in mounted directory...")
+func (f *TestFramework) createConfigFiles(dataplaneConfig string, controlplaneConfig string) error {
+	p := f.Paths
+	f.log.Debug("Creating configuration files...")
 
-	// Get the config directory path from QEMU manager
+	if p.ConfigDir != "/mnt/config" {
+		// Local tmpfs mode (pool): write configs into guest via serial console.
+		if err := f.createGuestFile(p.ConfigDir+"/dataplane.yaml", dataplaneConfig); err != nil {
+			return err
+		}
+		if err := f.createGuestFile(p.ConfigDir+"/controlplane.yaml", controlplaneConfig); err != nil {
+			return err
+		}
+		f.log.Debug("Configuration files created in guest tmpfs")
+		return nil
+	}
+
+	// Default (9P mode): write to host filesystem via shared directory.
 	configDir := f.qemu.ConfigDir
 	if configDir == "" {
 		return fmt.Errorf("config directory not set in QEMU manager")
@@ -1096,12 +1224,11 @@ func (f *F) createConfigFiles(dataplaneConfig string, controlplaneConfig string)
 	if err := f.CreateConfigFile("dataplane.yaml", dataplaneConfig); err != nil {
 		return err
 	}
-
 	if err := f.CreateConfigFile("controlplane.yaml", controlplaneConfig); err != nil {
 		return err
 	}
 
-	f.log.Debug("Configuration files created successfully on host")
+	f.log.Debug("Configuration files created on host")
 	return nil
 }
 
@@ -1119,41 +1246,53 @@ func (f *F) createConfigFiles(dataplaneConfig string, controlplaneConfig string)
 //	if err := fw.WaitForReady(60 * time.Second); err != nil {
 //	    log.Fatalf("VM failed to become ready: %v", err)
 //	}
-func (f *F) WaitForReady(timeout time.Duration) error {
+func (f *TestFramework) WaitForReady(timeout time.Duration) error {
 	return f.qemu.WaitForReady(timeout)
 }
 
-func (f *F) GetSocketPaths() []string {
+func (f *TestFramework) GetSocketPaths() []string {
 	return f.qemu.SocketPaths
 }
 
-// ValidateCounter validates a counter value against expected value.
-// This method checks statistic counters from yanet modules using CLI commands.
-//
-// Parameters:
-//   - counterName: Name/identifier of the counter to validate (e.g., "flow_1", "packets_received")
-//   - expectedValue: Expected value for the counter
-//
-// Returns:
-//   - error: Error if validation fails or counter cannot be accessed
-//
-// Note: Current implementation is a placeholder that logs the validation attempt.
-// Full implementation will require CLI access to yanet statistics.
-func (f *F) ValidateCounter(counterName string, expectedValue int) error {
-	f.log.Debugf("Validating counter %s with expected value %d", counterName, expectedValue)
+// ValidateCounter queries a named counter via yanet-cli-counters and
+// compares its value against expect. Sums all instances for counters
+// with multiple instances. Returns an error if the counter is not found
+// or the value does not match.
+func (f *TestFramework) ValidateCounter(name string, expect uint64) error {
+	cmd := f.Paths.CLI("yanet-cli-counters") +
+		" pipeline --device-name kni0 --pipeline-name test"
+	output, err := f.ExecuteCommand(cmd)
+	if err != nil {
+		return fmt.Errorf("counters query failed: %w", err)
+	}
 
-	// TODO: Implement actual counter validation using yanet CLI
-	// This will require:
-	// 1. CLI command to query counters (e.g., yanet-cli-stats)
-	// 2. Parse response to get actual counter value
-	// 3. Compare actual vs expected value
-	// 4. Return error if mismatch
+	var resp struct {
+		Counters []struct {
+			Name      string `json:"name"`
+			Instances []struct {
+				Values []uint64 `json:"values"`
+			} `json:"instances"`
+		} `json:"counters"`
+	}
+	if err := json.Unmarshal([]byte(output), &resp); err != nil {
+		return fmt.Errorf("parse counters response: %w", err)
+	}
 
-	// For now, just log the validation attempt
-	f.log.Infof("Counter validation placeholder: %s = %d (actual validation not implemented)", counterName, expectedValue)
-
-	// Simulate validation - always succeed for now
-	return nil
+	for _, c := range resp.Counters {
+		if c.Name == name {
+			var total uint64
+			for _, inst := range c.Instances {
+				for _, v := range inst.Values {
+					total += v
+				}
+			}
+			if total != expect {
+				return fmt.Errorf("counter %s: expected %d, got %d", name, expect, total)
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("counter %q not found", name)
 }
 
 // Run executes a subtest with the given name and function. This method wraps
@@ -1190,21 +1329,474 @@ func (f *F) ValidateCounter(counterName string, expectedValue int) error {
 //	        require.NoError(t, err)
 //	    })
 //	}
-func (f *F) Run(name string, fn func(fw *F, t *testing.T)) bool {
+func (f *TestFramework) Run(name string, fn func(fw *TestFramework, t *testing.T)) bool {
 	if f.t == nil {
 		panic("Run() can only be called on TestFramework created via ForTest()")
 	}
 
-	// Reset socket connections before test to ensure clean state
-	// This prevents packet leakage between tests by discarding any
-	// buffered data with the old connection
 	f.log.Debugf("Resetting socket connections before test '%s'", name)
-	f.resetAllConnections()
+	f.ResetConnections()
 
 	return f.t.Run(name, func(t *testing.T) {
 		// Create a new TestFramework with the subtest's full name
 		subFw := f.withTestName(t.Name())
 		subFw.t = t
+		fn(subFw, t)
+	})
+}
+
+// guest9PMountPoints lists the 9P mount points inside the guest VM
+// in the order they appear in fstab. These must be unmounted before
+// savevm because QEMU registers a migration blocker for each mounted
+// VirtFS/9P export.
+var guest9PMountPoints = []string{
+	"/mnt/logs",
+	"/mnt/config",
+	"/mnt/build",
+	"/mnt/target",
+	"/mnt/yanet2",
+}
+
+// Unmount9P unmounts all 9P shares inside the guest VM.
+// This removes the QEMU migration blockers so that savevm/loadvm
+// can proceed. When PrepareLocalStorage() has been called first,
+// no process holds open fids on 9P mounts and plain umount works.
+// Log tailer processes (tail -f >> /mnt/logs/...) are killed first
+// because they hold open fids on /mnt/logs via write-append.
+func (f *TestFramework) Unmount9P() error {
+	if !f.qemu.Ninepmounted.Load() {
+		f.log.Debug("9P mounts already unmounted, skipping")
+		return nil
+	}
+	// Batch all umounts into a single command to avoid 6 round-trips
+	// through the serial console (~600ms → ~100ms).
+	cmd := "umount"
+	for _, mp := range guest9PMountPoints {
+		cmd += " " + mp
+	}
+	cmd += " 2>/dev/null; true"
+	if _, err := f.ExecuteCommand(cmd); err != nil {
+		f.log.Debugf("batch umount returned error (may be already unmounted): %v", err)
+	}
+	f.qemu.Ninepmounted.Store(false)
+	f.log.Debug("All 9P mounts unmounted")
+	return nil
+}
+
+// PrepareLocalStorage copies all YANET binaries, CLI tools, configs and
+// scripts from 9P mounts to /tmp/yanet/ inside the guest. After this
+// call, YANET can be started from local tmpfs paths so that no process
+// holds open fids on 9P mounts, making savevm/loadvm work cleanly.
+//
+// This also switches f.Paths to LocalGuestPaths().
+func (f *TestFramework) PrepareLocalStorage() error {
+	f.log.Info("Copying YANET files from 9P mounts to local tmpfs...")
+
+	// Ensure 9P mounts are available (they may be unmounted after a
+	// snapshot restore from a booted overlay).
+	if !f.qemu.Ninepmounted.Load() {
+		f.log.Debug("Mounting 9P shares before PrepareLocalStorage...")
+		if err := f.Mount9P(); err != nil {
+			return fmt.Errorf("failed to mount 9P shares: %w", err)
+		}
+	}
+
+	// Copy files step by step to avoid serial terminal line-length limits.
+	// Each command is kept short enough for reliable serial transmission.
+	copyCommands := []string{
+		"mkdir -p /tmp/yanet/build/dataplane /tmp/yanet/build/controlplane /tmp/yanet/cli /tmp/yanet/config /tmp/yanet/logs /tmp/yanet/tools",
+		"cp /mnt/build/dataplane/yanet-dataplane /tmp/yanet/build/dataplane/",
+		"cp /mnt/build/controlplane/yanet-controlplane /tmp/yanet/build/controlplane/",
+		"cp /mnt/yanet2/subprojects/dpdk/usertools/dpdk-devbind.py /tmp/yanet/tools/",
+	}
+
+	// Copy CLI binaries individually -- serial terminals truncate long lines.
+	for _, name := range CLIBinaryNames {
+		copyCommands = append(copyCommands,
+			"cp /mnt/target/release/"+name+" /tmp/yanet/cli/")
+	}
+	copyCommands = append(copyCommands,
+		"chmod +x /tmp/yanet/cli/* /tmp/yanet/build/dataplane/* /tmp/yanet/build/controlplane/*",
+	)
+
+	for _, cmd := range copyCommands {
+		if _, err := f.ExecuteCommandWithTimeout(cmd, 60*time.Second); err != nil {
+			return fmt.Errorf("PrepareLocalStorage failed on %q: %w", cmd, err)
+		}
+	}
+
+	f.Paths = LocalGuestPaths()
+	// 9P shares are still mounted (we just copied from them).
+	f.qemu.Ninepmounted.Store(true)
+	f.log.Info("Local storage prepared, switched to local paths")
+	return nil
+}
+
+// StartLogTailers starts background processes that tail YANET log files
+// from local tmpfs to the 9P-mounted /mnt/logs/ directory, making logs
+// visible on the host in real time. Must be called after YANET is
+// running and 9P mounts are available.
+func (f *TestFramework) StartLogTailers() error {
+	tailers := []string{
+		"bash -c 'nohup tail -f /tmp/yanet/logs/yanet-dataplane.log >> /mnt/logs/yanet-dataplane.log 2>/dev/null &'",
+		"bash -c 'nohup tail -f /tmp/yanet/logs/yanet-controlplane.log >> /mnt/logs/yanet-controlplane.log 2>/dev/null &'",
+	}
+	for _, cmd := range tailers {
+		if _, err := f.ExecuteCommand(cmd); err != nil {
+			return fmt.Errorf("failed to start log tailer: %w", err)
+		}
+	}
+	f.log.Debug("Log tailers started (tmpfs -> 9P)")
+	return nil
+}
+
+// Mount9P remounts all 9P shares inside the guest VM.
+// Uses mount -a for speed, then verifies each mount point is present.
+func (f *TestFramework) Mount9P() error {
+	if _, err := f.ExecuteCommand("mount -a 2>/dev/null; true"); err != nil {
+		return fmt.Errorf("mount -a failed: %w", err)
+	}
+
+	// Verify all expected mount points are present in a single command.
+	output, err := f.ExecuteCommand("mount")
+	if err != nil {
+		return fmt.Errorf("failed to list mounts: %w", err)
+	}
+	for _, mp := range guest9PMountPoints {
+		if !strings.Contains(output, mp) {
+			return fmt.Errorf("9P mount point %s not mounted after mount -a", mp)
+		}
+	}
+
+	f.qemu.Ninepmounted.Store(true)
+	f.log.Debug("All 9P mounts restored and verified")
+	return nil
+}
+
+// SaveSnapshot saves a named VM snapshot that captures the full machine
+// state (CPU, RAM, devices). Subsequent calls to RestoreAndReconnect can
+// revert the VM to this point. This is typically called from TestMain
+// after YANET is configured to create a "baseline" snapshot.
+//
+// The method unmounts all 9P shares before savevm (to remove QEMU
+// migration blockers) and remounts them afterward. This only works
+// cleanly when PrepareLocalStorage() was called first so that no
+// process holds open fids on 9P mounts.
+func (f *TestFramework) SaveSnapshot(name string) error {
+	if err := f.Unmount9P(); err != nil {
+		return fmt.Errorf("pre-savevm unmount failed: %w", err)
+	}
+	if err := f.qemu.SaveSnapshot(name); err != nil {
+		_ = f.Mount9P()
+		return err
+	}
+	if err := f.Mount9P(); err != nil {
+		return fmt.Errorf("post-savevm remount failed: %w", err)
+	}
+	f.log.Infof("Snapshot %q saved successfully", name)
+	return nil
+}
+
+// SaveSnapshotKeepUnmounted saves a snapshot like SaveSnapshot but does NOT
+// remount 9P shares afterward. Use this for baseline snapshots in pool mode:
+// since RestoreAndReconnect will loadvm immediately, the intermediate remount
+// would just be unmounted again before loadvm, wasting ~4s per test.
+func (f *TestFramework) SaveSnapshotKeepUnmounted(name string) error {
+	if err := f.Unmount9P(); err != nil {
+		return fmt.Errorf("pre-savevm unmount failed: %w", err)
+	}
+	if err := f.qemu.SaveSnapshot(name); err != nil {
+		_ = f.Mount9P()
+		return err
+	}
+	// ninepmounted remains false — caller knows 9P is unmounted.
+	f.log.Infof("Snapshot %q saved (9P unmounted, ready for pool use)", name)
+	return nil
+}
+
+// ExportCurrentOverlay copies the VM's current qcow2 overlay to dst. This is
+// used to cache prepared template overlays (for example a prebuilt baseline)
+// and start future pool VMs from the same snapshot source.
+func (f *TestFramework) ExportCurrentOverlay(dst string) error {
+	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+		return fmt.Errorf("create overlay cache dir: %w", err)
+	}
+	src := filepath.Join(f.qemu.WorkDir, "overlay.qcow2")
+	if err := copyFile(src, dst); err != nil {
+		return fmt.Errorf("copy overlay %s -> %s: %w", src, dst, err)
+	}
+	f.log.Infof("Exported current overlay to %s", dst)
+	return nil
+}
+
+// restoreSnapshotCore is the shared low-level sequence for both RestoreClean
+// and RestoreAndReconnect: unmount 9P → loadvm → serial reconnect → wait for
+// shell prompt → mount 9P. It does not reset socket connections or run a
+// heartbeat check — callers add that on top as needed.
+func (f *TestFramework) restoreSnapshotCore(snapshot string) error {
+	if err := f.Unmount9P(); err != nil {
+		f.log.Debugf("Pre-restore unmount (may be already unmounted): %v", err)
+	}
+
+	if err := f.qemu.RestoreSnapshot(snapshot); err != nil {
+		return fmt.Errorf("failed to restore snapshot %q: %w", snapshot, err)
+	}
+
+	f.qemu.stopSerialReader()
+
+	if err := f.qemu.ReconnectSerial(); err != nil {
+		return fmt.Errorf("failed to reconnect serial after restore: %w", err)
+	}
+
+	f.qemu.setVMReady(false)
+	f.qemu.readySignal = make(chan bool, 1)
+	f.qemu.resetSerialBuffer()
+	go f.qemu.readSerial()
+
+	stdin := f.qemu.GetStdin()
+	if stdin == nil {
+		return fmt.Errorf("serial console unavailable after restore")
+	}
+	for range 3 {
+		_, _ = stdin.Write([]byte{0x03})
+		time.Sleep(20 * time.Millisecond)
+	}
+	const restoreTimeout = 30 * time.Second
+	deadline := time.Now().Add(restoreTimeout)
+	_, _ = stdin.Write([]byte("\n\n"))
+	for !f.qemu.IsVMReady() && time.Now().Before(deadline) {
+		select {
+		case <-f.qemu.readySignal:
+		case <-time.After(1 * time.Second):
+			if !f.qemu.IsVMReady() {
+				_, _ = stdin.Write([]byte("\n\n"))
+			}
+		}
+	}
+	if !f.qemu.IsVMReady() {
+		return fmt.Errorf("VM did not respond within %v after restoring %q", restoreTimeout, snapshot)
+	}
+
+	if err := f.Mount9P(); err != nil {
+		return fmt.Errorf("post-restore remount failed: %w", err)
+	}
+
+	return nil
+}
+
+// RestoreClean reverts the VM to a previously saved snapshot and
+// re-establishes serial console and 9P mounts WITHOUT running the
+// dataplane heartbeat check. Use this for snapshots where YANET is
+// not yet running (e.g. "preyanet") -- StartYANET will be called
+// separately after restore.
+func (f *TestFramework) RestoreClean(snapshot string) error {
+	f.log.Infof("Restoring snapshot %q (clean, no heartbeat)...", snapshot)
+	if err := f.restoreSnapshotCore(snapshot); err != nil {
+		return err
+	}
+	f.log.Infof("Snapshot %q clean restore complete", snapshot)
+	return nil
+}
+
+// RestoreAndReconnect reverts the VM to a previously saved snapshot and
+// re-establishes the serial console and socket connections that break
+// when the guest state is rolled back.
+//
+// Call sequence after restore:
+//  1. Unmount 9P shares
+//  2. loadvm via QEMU monitor (monitor socket survives)
+//  3. Reconnect serial console
+//  4. Wait for shell prompts
+//  5. Mount 9P shares
+//  6. Reset socket connections (close stale connections, reconnect)
+//  7. Wait for dataplane ready (ICMP heartbeat)
+//
+// Socket connections MUST be reset before the heartbeat because loadvm
+// restores QEMU's internal stream-netdev state but the host-side UNIX
+// socket connections are stale. Without reset, Connect() short-circuits
+// on the dead net.Conn and heartbeat fails silently.
+func (f *TestFramework) RestoreAndReconnect(snapshot string) error {
+	f.log.Infof("Restoring snapshot %q...", snapshot)
+	if err := f.restoreSnapshotCore(snapshot); err != nil {
+		return err
+	}
+
+	f.ResetConnections()
+
+	const heartbeatTimeout = 10 * time.Second
+	if err := f.WaitForDatapathReady(heartbeatTimeout); err != nil {
+		f.log.Warnf("Heartbeat failed after loadvm: %v", err)
+		f.runKni0Diagnostic("pre-restart")
+
+		f.log.Info("Restarting YANET to reinitialize DPDK device state...")
+		if restartErr := f.RestartYANET(); restartErr != nil {
+			return fmt.Errorf("heartbeat failed, restart also failed: %w", restartErr)
+		}
+
+		f.ResetConnections()
+
+		if err := f.WaitForDatapathReady(heartbeatTimeout); err != nil {
+			return fmt.Errorf("heartbeat failed after YANET restart: %w", err)
+		}
+	}
+
+	f.log.Infof("Snapshot %q restore complete", snapshot)
+	return nil
+}
+
+// WaitForDatapathReady sends ICMP heartbeat packets until the dataplane
+// responds, confirming DPDK virtio-user reconnect after a snapshot restore.
+// No operstate check — on macOS TCG and Linux KVM, kni0 operstate stays DOWN
+// even when DPDK is actively forwarding. Only an end-to-end packet test works.
+func (f *TestFramework) WaitForDatapathReady(timeout time.Duration) error {
+	f.log.Debug("Waiting for dataplane to be ready...")
+	start := time.Now()
+
+	srcIP := net.ParseIP(VMIPv4Gateway)
+	dstIP := net.ParseIP(VMIPv4Host)
+	if srcIP == nil || dstIP == nil {
+		return fmt.Errorf("invalid VM IP addresses for heartbeat")
+	}
+
+	srcMAC := MustParseMAC(SrcMAC)
+	dstMAC := MustParseMAC(DstMAC)
+	eth := layers.Ethernet{
+		SrcMAC:       srcMAC,
+		DstMAC:       dstMAC,
+		EthernetType: layers.EthernetTypeIPv4,
+	}
+	ip4 := layers.IPv4{
+		Version:  4,
+		IHL:      5,
+		Id:       1,
+		TTL:      64,
+		Protocol: layers.IPProtocolICMPv4,
+		SrcIP:    srcIP,
+		DstIP:    dstIP,
+	}
+	icmp := layers.ICMPv4{
+		TypeCode: layers.CreateICMPv4TypeCode(layers.ICMPv4TypeEchoRequest, 0),
+		Id:       1,
+		Seq:      1,
+	}
+	payload := []byte("hb")
+
+	buf := gopacket.NewSerializeBuffer()
+	opts := gopacket.SerializeOptions{ComputeChecksums: true, FixLengths: true}
+	if err := gopacket.SerializeLayers(buf, opts, &eth, &ip4, &icmp, gopacket.Payload(payload)); err != nil {
+		return fmt.Errorf("failed to serialize heartbeat packet: %w", err)
+	}
+	heartbeat := buf.Bytes()
+
+	deadline := time.Now().Add(timeout)
+	attempt := 0
+
+	for time.Now().Before(deadline) {
+		attempt++
+		elapsed := time.Since(start).Round(time.Millisecond)
+
+		attemptTimeout := 2 * time.Second
+		if attempt <= 3 {
+			attemptTimeout = 500 * time.Millisecond
+		}
+
+		f.log.Debugf("Heartbeat attempt %d (elapsed=%v, timeout=%v)", attempt, elapsed, attemptTimeout)
+
+		_, err := f.SendPacketAndCapture(0, 0, heartbeat, attemptTimeout)
+		if err == nil {
+			f.log.Debugf("Dataplane ready after %v (attempt %d)", elapsed, attempt)
+			return nil
+		}
+
+		f.log.Debugf("Heartbeat attempt %d failed (elapsed=%v): %v", attempt, elapsed, err)
+		time.Sleep(200 * time.Millisecond)
+	}
+
+	return fmt.Errorf("dataplane not ready after %v (%d attempts)", time.Since(start).Round(time.Millisecond), attempt)
+}
+
+// runKni0Diagnostic dumps kni0 state to help debug restore failures.
+// Logs kni0 link state, operstate, yanet process list.
+func (f *TestFramework) runKni0Diagnostic(label string) {
+	f.log.Debugf("=== kni0 diagnostic [%s] ===", label)
+
+	output, err := f.ExecuteCommand("ip link show kni0 2>&1")
+	if err != nil {
+		f.log.Warnf("  kni0: failed to get link state: %v (output: %s)", err, output)
+	} else {
+		f.log.Debugf("  kni0 link: %s", output)
+	}
+
+	output, err = f.ExecuteCommand("cat /sys/class/net/kni0/operstate 2>&1")
+	if err != nil {
+		f.log.Warnf("  kni0 operstate: failed: %v", err)
+	} else {
+		f.log.Debugf("  kni0 operstate: %s", strings.TrimSpace(output))
+	}
+
+	output, err = f.ExecuteCommand("ps awux | grep [y]anet")
+	if err != nil {
+		f.log.Warnf("  yanet processes: failed to list: %v", err)
+	} else if len(output) == 0 {
+		f.log.Warn("  yanet processes: none found")
+	} else {
+		f.log.Debugf("  yanet processes: %s", output)
+	}
+
+	f.log.Debugf("=== End diagnostic [%s] ===", label)
+}
+
+// RestoreBooted restores the VM to the "booted" snapshot and re-establishes
+// all connections. This is the primary per-test isolation primitive.
+//
+// Unlike RestoreAndReconnect("baseline"), RestoreBooted does not depend on a
+// baseline snapshot being created at test startup. It only requires that the
+// VM pool was started from a pre-prepared booted template overlay.
+func (f *TestFramework) RestoreBooted() error {
+	f.log.Infof("Restoring booted snapshot...")
+
+	// Unmount 9P before loadvm (QEMU blocks loadvm when VirtFS is active).
+	if err := f.Unmount9P(); err != nil {
+		f.log.Debugf("Pre-restore 9P unmount (may be already unmounted): %v", err)
+	}
+
+	// Restore via monitor + serial reconnect.
+	if err := f.qemu.RestoreBooted(); err != nil {
+		return fmt.Errorf("TestFramework.RestoreBooted: %w", err)
+	}
+
+	// Remount 9P for test access to binaries and config files.
+	if err := f.Mount9P(); err != nil {
+		return fmt.Errorf("post-restore 9P mount: %w", err)
+	}
+
+	// Reset socket connections (forces DPDK virtio-user reconnect).
+	f.ResetConnections()
+
+	f.log.Infof("Booted restore complete")
+	return nil
+}
+
+// RunWith is like Run but restores the named VM snapshot before executing
+// the test function. This gives each subtest a guaranteed clean VM state
+// matching the configuration at snapshot time.
+//
+// Use Run() (without snapshot restore) for subtests that intentionally
+// build on the state left by previous subtests. Use RunWith() when each
+// subtest needs full isolation.
+func (f *TestFramework) RunWith(snapshot string, name string, fn func(fw *TestFramework, t *testing.T)) bool {
+	if f.t == nil {
+		panic("RunWith() can only be called on a framework created via ForTest()")
+	}
+
+	return f.t.Run(name, func(t *testing.T) {
+		subFw := f.withTestName(t.Name())
+		subFw.t = t
+
+		if err := subFw.RestoreAndReconnect(snapshot); err != nil {
+			t.Fatalf("failed to restore snapshot %q before test: %v", snapshot, err)
+		}
+
 		fn(subFw, t)
 	})
 }

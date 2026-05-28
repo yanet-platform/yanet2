@@ -48,8 +48,3 @@ forward_module_config_update(
 	uint32_t rule_count,
 	yanet_error **err
 );
-
-// Enables deletion of configurations for the forwarding module.
-// @return Returns -1 on error and 0 on success.
-int
-forward_module_config_delete(struct cp_module *cp_module);

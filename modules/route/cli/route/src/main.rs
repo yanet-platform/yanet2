@@ -21,7 +21,7 @@ use tabled::{
 };
 use tonic::codec::CompressionEncoding;
 use yanet_cli_route::{
-    routepb::{route_service_client::RouteServiceClient, ShowFibRequest, UpdateFibRequest},
+    routepb::{self, route_service_client::RouteServiceClient, ListConfigsRequest, ShowFibRequest, UpdateFibRequest},
     FibDisplayEntry,
 };
 use ync::{
@@ -65,7 +65,7 @@ fn parse_mac(s: &str) -> Result<MacAddress, Box<dyn Error>> {
     Ok(MacAddress { addr: mac.as_u64() })
 }
 
-impl TryFrom<FibNexthop> for yanet_cli_route::routepb::FibNexthop {
+impl TryFrom<FibNexthop> for routepb::FibNexthop {
     type Error = Box<dyn Error>;
 
     fn try_from(nh: FibNexthop) -> Result<Self, Self::Error> {
@@ -77,14 +77,14 @@ impl TryFrom<FibNexthop> for yanet_cli_route::routepb::FibNexthop {
     }
 }
 
-impl TryFrom<FibEntry> for yanet_cli_route::routepb::FibEntry {
+impl TryFrom<FibEntry> for routepb::FibEntry {
     type Error = Box<dyn Error>;
 
     fn try_from(entry: FibEntry) -> Result<Self, Self::Error> {
         let nexthops = entry
             .nexthops
             .into_iter()
-            .map(yanet_cli_route::routepb::FibNexthop::try_from)
+            .map(routepb::FibNexthop::try_from)
             .collect::<Result<Vec<_>, _>>()?;
         Ok(Self { prefix: entry.prefix, nexthops })
     }
@@ -118,6 +118,8 @@ pub struct FibCmd {
 
 #[derive(Debug, Clone, Parser)]
 pub enum FibAction {
+    /// List route module config names known to the route module shim.
+    List,
     /// Dump FIB entries.
     Show(FibShowCmd),
     /// Replace the FIB atomically with entries from a YAML file.
@@ -165,6 +167,7 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
 
     match cmd.mode {
         ModeCmd::Fib(cmd) => match cmd.action {
+            FibAction::List => service.list_fibs().await,
             FibAction::Show(cmd) => service.show_fib(cmd).await,
             FibAction::Update(cmd) => service.update_fib(cmd).await,
         },
@@ -189,7 +192,7 @@ impl RouteService {
         let entries = config
             .entries
             .into_iter()
-            .map(yanet_cli_route::routepb::FibEntry::try_from)
+            .map(routepb::FibEntry::try_from)
             .collect::<Result<Vec<_>, _>>()?;
         let request = UpdateFibRequest {
             module_name: cmd.config_name,
@@ -198,6 +201,15 @@ impl RouteService {
         self.client.update_fib(request).await?;
 
         println!("OK");
+        Ok(())
+    }
+
+    pub async fn list_fibs(&mut self) -> Result<(), Box<dyn Error>> {
+        let response = self.client.list_configs(ListConfigsRequest {}).await?.into_inner();
+
+        for name in response.configs {
+            println!("{name}");
+        }
         Ok(())
     }
 
@@ -213,7 +225,7 @@ impl RouteService {
         let entries: Vec<FibDisplayEntry> = response
             .entries
             .into_iter()
-            .flat_map(FibDisplayEntry::from_fib_entry)
+            .flat_map(FibDisplayEntry::from_range_entry)
             .collect();
 
         if entries.is_empty() {

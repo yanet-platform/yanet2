@@ -45,7 +45,7 @@ build_filter(struct common *common, struct memory_context *mctx) {
 	}
 	LOG(INFO, "compiling %zu rules...", rule_count);
 	int res = filter_init(
-		&common->filter, filter_sign, rule_ptrs, rule_count, mctx
+		&common->filter, filter_sign, rule_ptrs, rule_count, mctx, NULL
 	);
 	if (res < 0) {
 		LOG(ERROR, "compilation failed: %d", res);

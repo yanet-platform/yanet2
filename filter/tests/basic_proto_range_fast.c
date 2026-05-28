@@ -87,7 +87,8 @@ test_basic_tcp_udp(void *memory) {
 		sign_proto_range_fast_compile,
 		rule_ptrs,
 		2,
-		&memory_context
+		&memory_context,
+		NULL
 	);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
 
@@ -98,6 +99,7 @@ test_basic_tcp_udp(void *memory) {
 	query_udp_packet(&filter, 1);
 
 	filter_free(&filter, sign_proto_range_fast_compile);
+	memory_context_fini(&memory_context);
 
 	return TEST_SUCCESS;
 }
@@ -150,7 +152,8 @@ test_tcp_flags(void *memory) {
 		sign_proto_range_fast_compile,
 		rule_ptrs,
 		3,
-		&memory_context
+		&memory_context,
+		NULL
 	);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
 
@@ -164,6 +167,7 @@ test_tcp_flags(void *memory) {
 	query_tcp_packet(&filter, 0x01, 2);
 
 	filter_free(&filter, sign_proto_range_fast_compile);
+	memory_context_fini(&memory_context);
 
 	return TEST_SUCCESS;
 }
@@ -203,7 +207,8 @@ test_multiple_ranges_per_rule(void *memory) {
 		sign_proto_range_fast_compile,
 		rule_ptrs,
 		1,
-		&memory_context
+		&memory_context,
+		NULL
 	);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
 
@@ -214,6 +219,7 @@ test_multiple_ranges_per_rule(void *memory) {
 	query_udp_packet(&filter, 0);
 
 	filter_free(&filter, sign_proto_range_fast_compile);
+	memory_context_fini(&memory_context);
 
 	return TEST_SUCCESS;
 }
@@ -254,7 +260,8 @@ test_boundary_values(void *memory) {
 		sign_proto_range_fast_compile,
 		rule_ptrs,
 		2,
-		&memory_context
+		&memory_context,
+		NULL
 	);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
 
@@ -274,6 +281,7 @@ test_boundary_values(void *memory) {
 	free_packet(&packet1);
 
 	filter_free(&filter, sign_proto_range_fast_compile);
+	memory_context_fini(&memory_context);
 
 	return TEST_SUCCESS;
 }

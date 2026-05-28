@@ -43,11 +43,13 @@ nat64_module_config_create(
 		    config, &config->cp_module.memory_context
 	    )) {
 		yanet_error_add(err, "failed to init config data");
-		goto error_init;
+		goto error_data;
 	}
 
 	return &config->cp_module;
 
+error_data:
+	cp_module_fini(&config->cp_module);
 error_init:
 	memory_bfree(
 		&agent->memory_context,
@@ -68,21 +70,22 @@ nat64_module_config_free(struct cp_module *cp_module) {
 		config, &config->cp_module.memory_context
 	);
 
-	// Free main config structure
+	// Capture agent before fini zeroes it.
 	struct agent *agent = ADDR_OF(&cp_module->agent);
-	if (cp_module->agent) {
-		LOG(DEBUG,
-		    "Freeing main config structure: size=%zu bytes, address=%p",
-		    sizeof(struct nat64_module_config),
-		    (void *)config);
-		memory_bfree(
-			&agent->memory_context,
-			config,
-			sizeof(struct nat64_module_config)
-		);
-	}
 
-	LOG(DEBUG, "Completed cleanup of NAT64 module '%s'", cp_module->name);
+	cp_module_fini(cp_module);
+
+	LOG(DEBUG,
+	    "Freeing main config structure: size=%zu bytes, address=%p",
+	    sizeof(struct nat64_module_config),
+	    (void *)config);
+	memory_bfree(
+		&agent->memory_context,
+		config,
+		sizeof(struct nat64_module_config)
+	);
+
+	LOG(DEBUG, "Completed cleanup of NAT64 module config");
 }
 
 int
@@ -343,6 +346,29 @@ nat64_module_config_set_drop_unknown(
 	    "Set drop unknown flags: prefix=%d, mapping=%d",
 	    drop_unknown_prefix,
 	    drop_unknown_mapping);
+
+	return 0;
+}
+
+int
+nat64_module_config_set_mtu(
+	struct cp_module *cp_module, uint16_t ipv4_mtu, uint16_t ipv6_mtu
+) {
+	if (!cp_module) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	struct nat64_module_config *config =
+		container_of(cp_module, struct nat64_module_config, cp_module);
+
+	config->mtu.ipv4 = ipv4_mtu;
+	config->mtu.ipv6 = ipv6_mtu;
+
+	LOG(DEBUG,
+	    "Set MTU limits: ipv4=%" PRIu16 ", ipv6=%" PRIu16,
+	    ipv4_mtu,
+	    ipv6_mtu);
 
 	return 0;
 }

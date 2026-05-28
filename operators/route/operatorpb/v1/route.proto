@@ -4,6 +4,8 @@ package operators.route.operatorpb.v1;
 
 option go_package = "github.com/yanet-platform/yanet2/operators/route/operatorpb/v1;operatorpb";
 
+import "common/commonpb/ipaddr.proto";
+
 // RouteService is the operator-owned routing surface.
 service RouteService {
   // ShowRoutes returns all routes in the routing table.
@@ -51,7 +53,7 @@ message ShowRoutesResponse {
 message LookupRouteRequest {
   string name = 1;
   // IP address to lookup.
-  string ip_addr = 2;
+  commonpb.IPAddress ip_addr = 2;
 }
 
 // LookupRouteResponse contains the matching routes for the IP address.
@@ -68,7 +70,7 @@ message InsertRouteRequest {
   // The destination prefix of the route.
   string prefix = 2;
   // The IP address of the nexthop router.
-  string nexthop_addr = 3;
+  commonpb.IPAddress nexthop_addr = 3;
 
   // Indicates whether the RIB should be flushed to the FIB after this
   // request.
@@ -85,7 +87,7 @@ message InsertRouteResponse {}
 message DeleteRouteRequest {
   string name = 1;
   string prefix = 2;
-  string nexthop_addr = 3;
+  commonpb.IPAddress nexthop_addr = 3;
 
   bool do_flush = 4;
   RouteSourceID source_id = 5;
@@ -121,8 +123,8 @@ message ListConfigsResponse { repeated string configs = 1; }
 // Route represents a routing table entry.
 message Route {
   string prefix = 1;
-  string next_hop = 2;
-  string peer = 3;
+  commonpb.IPAddress next_hop = 2;
+  commonpb.IPAddress peer = 3;
   uint64 route_distinguisher = 4;
   uint32 peer_as = 5;
   uint32 origin_as = 6;

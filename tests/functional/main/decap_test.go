@@ -14,10 +14,15 @@ import (
 
 // TestDecap_BasicFunctionality tests basic decap module functionality
 func TestDecap(t *testing.T) {
-	fw := globalFramework.ForTest(t)
-	require.NotNil(t, fw, "Global framework should be initialized")
+	t.Parallel()
+	withBootedVM(t, func(fw *framework.TestFramework) {
+		testDecap(t, fw)
+	})
+}
 
-	fw.Run("Configure_Decap_Module", func(fw *framework.F, t *testing.T) {
+func testDecap(t *testing.T, fw *framework.TestFramework) {
+
+	fw.Run("Configure_Decap_Module", func(fw *framework.TestFramework, t *testing.T) {
 		// Decap-specific configuration
 		commands := []string{
 			"/mnt/target/release/yanet-cli-decap prefix-add --name decap0 -p 4.5.6.7/32",
@@ -31,7 +36,7 @@ func TestDecap(t *testing.T) {
 		require.NoError(t, err, "Failed to configure decap module")
 	})
 
-	fw.Run("Test_IPIP6_Decapsulation", func(fw *framework.F, t *testing.T) {
+	fw.Run("Test_IPIP6_Decapsulation", func(fw *framework.TestFramework, t *testing.T) {
 		// Test IPv6-in-IPv4 decapsulation (IPIP6)
 		// Based on unit test TestDecap_IPIP6
 		packet := createIPIP6Packet(
@@ -54,7 +59,7 @@ func TestDecap(t *testing.T) {
 		assert.Equal(t, "::2", outputPacket.DstIP.String(), "Decapsulated destination IP should match inner packet")
 	})
 
-	fw.Run("Test_IP6IP_Decapsulation", func(fw *framework.F, t *testing.T) {
+	fw.Run("Test_IP6IP_Decapsulation", func(fw *framework.TestFramework, t *testing.T) {
 		// Test IPv4-in-IPv6 decapsulation (IP6IP)
 		// Based on unit test TestDecap_IP6IP
 		packet := createIP6IPPacket(
@@ -76,7 +81,7 @@ func TestDecap(t *testing.T) {
 		assert.Equal(t, "2.2.0.0", outputPacket.DstIP.String(), "Decapsulated destination IP should match inner packet")
 	})
 
-	fw.Run("Test_Non_Matching_Prefix", func(fw *framework.F, t *testing.T) {
+	fw.Run("Test_Non_Matching_Prefix", func(fw *framework.TestFramework, t *testing.T) {
 		// Test packet with non-matching prefix should not be decapsulated but forwarded
 		packet := createIPIP6Packet(
 			net.ParseIP("4.5.6.8"), // outer IPv4 dst (does NOT match our prefix 4.5.6.7/32)
@@ -97,7 +102,7 @@ func TestDecap(t *testing.T) {
 		assert.Equal(t, inputPacket.TunnelType, outputPacket.TunnelType, "Tunnel type should be unchanged")
 	})
 
-	fw.Run("Test_IPIP_Decapsulation", func(fw *framework.F, t *testing.T) {
+	fw.Run("Test_IPIP_Decapsulation", func(fw *framework.TestFramework, t *testing.T) {
 		// Test IPv4-in-IPv4 decapsulation (IPIP)
 		// Based on unit test TestDecap_IPIP
 		packet := createIPIPPacket(
@@ -121,7 +126,7 @@ func TestDecap(t *testing.T) {
 		assert.Equal(t, "2.2.0.0", outputPacket.DstIP.String(), "Decapsulated destination IP should match inner packet")
 	})
 
-	fw.Run("Test_IP6IP6_Decapsulation", func(fw *framework.F, t *testing.T) {
+	fw.Run("Test_IP6IP6_Decapsulation", func(fw *framework.TestFramework, t *testing.T) {
 		// Test IPv6-in-IPv6 decapsulation (IP6IP6)
 		// Based on unit test TestDecap_IP6IP6
 		packet := createIP6IP6Packet(
@@ -145,7 +150,7 @@ func TestDecap(t *testing.T) {
 		assert.Equal(t, "::2", outputPacket.DstIP.String(), "Decapsulated destination IP should match inner packet")
 	})
 
-	fw.Run("Test_GRE_IPv6_to_IPv4_Decapsulation", func(fw *framework.F, t *testing.T) {
+	fw.Run("Test_GRE_IPv6_to_IPv4_Decapsulation", func(fw *framework.TestFramework, t *testing.T) {
 		// Test GRE IPv6-to-IPv4 decapsulation
 		// Based on unit test TestDecap_GRE
 		packet := createGRESimplePacket(
@@ -169,7 +174,7 @@ func TestDecap(t *testing.T) {
 		assert.Equal(t, "2.2.0.0", outputPacket.DstIP.String(), "Decapsulated destination IP should match inner packet")
 	})
 
-	fw.Run("Test_GRE_With_Options", func(fw *framework.F, t *testing.T) {
+	fw.Run("Test_GRE_With_Options", func(fw *framework.TestFramework, t *testing.T) {
 		// Test GRE with checksum, key, and sequence options
 		packet := createGREPacket(
 			net.ParseIP("1:2:3:4::abcd"), // outer IPv6 dst (matches our prefix)
@@ -193,7 +198,7 @@ func TestDecap(t *testing.T) {
 		assert.Equal(t, "2.3.4.5", outputPacket.DstIP.String(), "Decapsulated destination IP should match inner packet")
 	})
 
-	fw.Run("Test_Fragmented_Packet_Drop", func(fw *framework.F, t *testing.T) {
+	fw.Run("Test_Fragmented_Packet_Drop", func(fw *framework.TestFramework, t *testing.T) {
 		// Test that fragmented packets are dropped (based on unit tests)
 		packet := createFragmentedIPIP6Packet(
 			net.ParseIP("4.5.6.7"), // outer IPv4 dst (matches our prefix)
@@ -213,7 +218,7 @@ func TestDecap(t *testing.T) {
 		require.True(t, inputPacket.IsTunneled, "Input packet should be tunneled")
 	})
 
-	fw.Run("Test_Invalid_GRE_Version", func(fw *framework.F, t *testing.T) {
+	fw.Run("Test_Invalid_GRE_Version", func(fw *framework.TestFramework, t *testing.T) {
 		// Test GRE packet with invalid version (should be dropped)
 		// Based on unit test TestDecap_GRE negative cases
 		packet := createInvalidGREPacket(
@@ -233,7 +238,7 @@ func TestDecap(t *testing.T) {
 		require.True(t, inputPacket.IsTunneled, "Input packet should be tunneled")
 	})
 
-	fw.Run("Test_GRE_With_Reserved_Bits", func(fw *framework.F, t *testing.T) {
+	fw.Run("Test_GRE_With_Reserved_Bits", func(fw *framework.TestFramework, t *testing.T) {
 		// Test GRE packet with reserved bits set (should be dropped)
 		packet := createGREWithReservedBits(
 			net.ParseIP("1:2:3:4::abcd"), // outer IPv6 dst (matches our prefix)
@@ -251,7 +256,7 @@ func TestDecap(t *testing.T) {
 		require.True(t, inputPacket.IsTunneled, "Input packet should be tunneled")
 	})
 
-	fw.Run("Test_IPv6_Fragment_Drop", func(fw *framework.F, t *testing.T) {
+	fw.Run("Test_IPv6_Fragment_Drop", func(fw *framework.TestFramework, t *testing.T) {
 		// Test that IPv6 fragmented packets are dropped
 		packet := createFragmentedIP6IPPacket(
 			net.ParseIP("1:2:3:4::abcd"), // outer IPv6 dst (matches our prefix)
@@ -269,7 +274,7 @@ func TestDecap(t *testing.T) {
 		require.True(t, inputPacket.IsTunneled, "Input packet should be tunneled")
 	})
 
-	fw.Run("Check_Yanet_State", func(fw *framework.F, t *testing.T) {
+	fw.Run("Check_Yanet_State", func(fw *framework.TestFramework, t *testing.T) {
 		cmd := "/mnt/target/release/yanet-cli-counters pipeline --device-name kni0 --pipeline-name test"
 		output, err := fw.ExecuteCommand(cmd)
 		require.NoError(t, err, "Failed to execute command %s with output %s", cmd, output)

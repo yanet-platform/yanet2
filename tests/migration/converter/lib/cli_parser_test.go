@@ -202,7 +202,7 @@ func TestFormatYanet2Command(t *testing.T) {
 				"prefix": "10.0.0.0/24",
 			},
 			instances:  []int{0},
-			wantResult: "route insert --instances 0 --cfg route0 --prefix 10.0.0.0/24 --via 192.168.1.1",
+			wantResult: "route insert --cfg route0 --prefix 10.0.0.0/24 --via 192.168.1.1",
 		},
 		{
 			name:   "command with quoted parameter",
@@ -212,7 +212,7 @@ func TestFormatYanet2Command(t *testing.T) {
 				"cfg": "test config with spaces",
 			},
 			instances:  []int{0, 1},
-			wantResult: "forward module --instances 0,1 --cfg \"test config with spaces\"",
+			wantResult: "forward module --cfg \"test config with spaces\"",
 		},
 		{
 			name:       "module only",
@@ -315,7 +315,7 @@ func TestCommandBuilder(t *testing.T) {
 		Param("prefix", "10.0.0.0/24").
 		Build()
 
-	expected := "route insert --instances 0 --cfg route0 --prefix 10.0.0.0/24 --via 192.168.1.1"
+	expected := "route insert --cfg route0 --prefix 10.0.0.0/24 --via 192.168.1.1"
 	require.Equal(t, expected, cmd)
 
 	// Test minimal builder

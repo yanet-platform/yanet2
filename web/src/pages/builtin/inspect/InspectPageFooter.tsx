@@ -11,11 +11,12 @@ const formatTime = (d: Date): string => {
     return `${hh}:${mm}:${ss}`;
 };
 
+/** Footer showing last update time and connectivity status. */
 export const InspectPageFooter: React.FC<InspectPageFooterProps> = ({ lastUpdate }) => {
     const ts = lastUpdate ? formatTime(lastUpdate) : '—';
     return (
-        <div className="inspect-page-footer inspect-mono">
-            last update {ts} · polling 1.5s · controlplane reachable
+        <div className="inspect-page-footer">
+            last update {ts} · controlplane reachable
         </div>
     );
 };

@@ -34,7 +34,12 @@ forward_module_config_init(
 
 	if (cp_module_init(&config->cp_module, agent, "forward", name, err)) {
 		yanet_error_add(err, "failed to init module");
-		goto fail;
+		memory_bfree(
+			&agent->memory_context,
+			config,
+			sizeof(struct forward_module_config)
+		);
+		return NULL;
 	}
 
 	SET_OFFSET_OF(&config->targets, NULL);
@@ -47,11 +52,6 @@ forward_module_config_init(
 	memset(&config->filter_ip6, 0, sizeof(config->filter_ip6));
 
 	return &config->cp_module;
-
-fail: {
-	forward_module_config_free(&config->cp_module);
-	return NULL;
-}
 }
 
 void
@@ -70,17 +70,16 @@ forward_module_config_free(struct cp_module *cp_module) {
 	filter_free(&config->filter_ip4, FWD_FILTER_IP4_TAG);
 	filter_free(&config->filter_ip6, FWD_FILTER_IP6_TAG);
 
+	// Capture agent before fini zeroes it.
+	struct agent *agent = ADDR_OF(&cp_module->agent);
+
 	cp_module_fini(cp_module);
 
-	struct agent *agent = ADDR_OF(&cp_module->agent);
-	// FIXME: remove the check as agent should be assigned
-	if (agent != NULL) {
-		memory_bfree(
-			&agent->memory_context,
-			config,
-			sizeof(struct forward_module_config)
-		);
-	}
+	memory_bfree(
+		&agent->memory_context,
+		config,
+		sizeof(struct forward_module_config)
+	);
 }
 
 typedef int (*forward_rule_check_func)(const struct forward_rule *forward_rule);
@@ -177,7 +176,8 @@ forward_module_init_l2(
 	struct forward_rule *forward_rules,
 	uint32_t forward_rule_count,
 	struct filter_rule *filter_rules,
-	const struct filter_rule **filter_rule_ptrs
+	const struct filter_rule **filter_rule_ptrs,
+	yanet_error **err
 ) {
 	struct forward_module_config *config = container_of(
 		cp_module, struct forward_module_config, cp_module
@@ -191,13 +191,18 @@ forward_module_init_l2(
 		check_forward_rule_l2
 	);
 
-	return filter_init(
+	int rc = filter_init(
 		&config->filter_vlan,
 		FWD_FILTER_VLAN_TAG,
 		filter_rule_ptrs,
 		forward_rule_count,
-		&cp_module->memory_context
+		&cp_module->memory_context,
+		err
 	);
+	if (rc) {
+		yanet_error_add(err, "failed to init filter_vlan");
+	}
+	return rc;
 }
 
 static int
@@ -206,7 +211,8 @@ forward_module_init_ip4(
 	struct forward_rule *forward_rules,
 	uint32_t forward_rule_count,
 	struct filter_rule *filter_rules,
-	const struct filter_rule **filter_rule_ptrs
+	const struct filter_rule **filter_rule_ptrs,
+	yanet_error **err
 ) {
 	struct forward_module_config *config = container_of(
 		cp_module, struct forward_module_config, cp_module
@@ -220,13 +226,18 @@ forward_module_init_ip4(
 		check_forward_rule_ip4
 	);
 
-	return filter_init(
+	int rc = filter_init(
 		&config->filter_ip4,
 		FWD_FILTER_IP4_TAG,
 		filter_rule_ptrs,
 		forward_rule_count,
-		&cp_module->memory_context
+		&cp_module->memory_context,
+		err
 	);
+	if (rc) {
+		yanet_error_add(err, "failed to init filter_ip4");
+	}
+	return rc;
 }
 
 static int
@@ -235,7 +246,8 @@ forward_module_init_ip6(
 	struct forward_rule *forward_rules,
 	uint32_t forward_rule_count,
 	struct filter_rule *filter_rules,
-	const struct filter_rule **filter_rule_ptrs
+	const struct filter_rule **filter_rule_ptrs,
+	yanet_error **err
 ) {
 	struct forward_module_config *config = container_of(
 		cp_module, struct forward_module_config, cp_module
@@ -249,13 +261,18 @@ forward_module_init_ip6(
 		check_forward_rule_ip6
 	);
 
-	return filter_init(
+	int rc = filter_init(
 		&config->filter_ip6,
 		FWD_FILTER_IP6_TAG,
 		filter_rule_ptrs,
 		forward_rule_count,
-		&cp_module->memory_context
+		&cp_module->memory_context,
+		err
 	);
+	if (rc) {
+		yanet_error_add(err, "failed to init filter_ip6");
+	}
+	return rc;
 }
 
 int
@@ -336,7 +353,8 @@ forward_module_config_update(
 		    forward_rules,
 		    rule_count,
 		    filter_rules,
-		    filter_rule_ptrs
+		    filter_rule_ptrs,
+		    err
 	    ))
 		goto error_rule_ptrs;
 
@@ -345,7 +363,8 @@ forward_module_config_update(
 		    forward_rules,
 		    rule_count,
 		    filter_rules,
-		    filter_rule_ptrs
+		    filter_rule_ptrs,
+		    err
 	    ))
 		goto error_rule_ptrs;
 
@@ -354,7 +373,8 @@ forward_module_config_update(
 		    forward_rules,
 		    rule_count,
 		    filter_rules,
-		    filter_rule_ptrs
+		    filter_rule_ptrs,
+		    err
 	    ))
 		goto error_rule_ptrs;
 
@@ -375,17 +395,10 @@ error_target:
 		targets,
 		sizeof(struct forward_target) * rule_count
 	);
+	SET_OFFSET_OF(&config->targets, NULL);
+	config->target_count = 0;
 
 error:
 
 	return -1;
-}
-
-int
-forward_module_config_delete(struct cp_module *cp_module) {
-	// TODO: either pass "err" and adapt other modules or make
-	// "agent_delete_module" infallible.
-	return agent_delete_module(
-		cp_module->agent, "forward", cp_module->name, NULL
-	);
 }

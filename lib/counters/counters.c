@@ -26,7 +26,7 @@ counter_registry_init(
 }
 
 void
-counter_registry_free(struct counter_registry *registry) {
+counter_registry_fini(struct counter_registry *registry) {
 	struct memory_context *memory_context =
 		ADDR_OF(&registry->memory_context);
 	struct counter *names = ADDR_OF(&registry->names);
@@ -37,6 +37,9 @@ counter_registry_free(struct counter_registry *registry) {
 			sizeof(struct counter) * registry->capacity
 		);
 	}
+
+	// Reset to zero-init state so a second fini is a safe no-op.
+	memset(registry, 0, sizeof(*registry));
 }
 
 uint64_t
@@ -149,10 +152,25 @@ counter_registry_register(
 	uint64_t size,
 	yanet_error **err
 ) {
-	if (size == 0)
+	if (size == 0) {
+		yanet_error_add(err, "zero size");
 		return -1;
-	if (size > (1 << COUNTER_MAX_SIZE_EXP))
+	}
+	if (size > (1 << COUNTER_MAX_SIZE_EXP)) {
+		yanet_error_add(
+			err,
+			"counter size %lu exceeds max %d",
+			size,
+			(1 << COUNTER_MAX_SIZE_EXP)
+		);
 		return -1;
+	}
+	if (strnlen(name, COUNTER_NAME_LEN) == COUNTER_NAME_LEN) {
+		yanet_error_add(
+			err, "name length exceeds max %d", COUNTER_NAME_LEN - 1
+		);
+		return -1;
+	}
 
 	uint64_t idx = counter_registry_lookup_index(registry, name, size);
 
@@ -236,6 +254,23 @@ counter_storage_allocator_init(
 	counter_storage_allocator->instance_count = instance_count;
 }
 
+void
+counter_storage_allocator_fini(struct counter_storage_allocator *self) {
+	if (self == NULL) {
+		return;
+	}
+
+	// Nothing is owned directly here.
+	//
+	// The allocator is a factory: pages it produces are owned by
+	// counter_storage_block objects inside counter_storage_pool and are
+	// freed through counter_storage_free / counter_storage_pool_fini.
+	//
+	// Zero the fields for idempotency.
+	SET_OFFSET_OF(&self->memory_context, NULL);
+	self->instance_count = 0;
+}
+
 static struct counter_storage_page *
 counter_storage_allocator_new_pages(struct counter_storage_allocator *allocator
 ) {
@@ -265,6 +300,15 @@ counter_storage_allocator_free_pages(
 	);
 }
 
+// Initialize a counter_storage_pool to the zero-init state.
+//
+// Pool entries are allocated lazily on first counter registration, so there
+// is nothing to set up beyond zeroing the struct.
+static void
+counter_storage_pool_init(struct counter_storage_pool *self) {
+	memset(self, 0, sizeof(*self));
+}
+
 static void
 counter_storage_init(
 	struct memory_context *memory_context,
@@ -275,9 +319,9 @@ counter_storage_init(
 	SET_OFFSET_OF(&storage->memory_context, memory_context);
 	SET_OFFSET_OF(&storage->allocator, allocator);
 	SET_OFFSET_OF(&storage->registry, registry);
-	memset(storage->pools,
-	       0,
-	       sizeof(struct counter_storage_pool) * COUNTER_POOL_SIZE);
+	for (uint64_t idx = 0; idx < COUNTER_POOL_SIZE; ++idx) {
+		counter_storage_pool_init(storage->pools + idx);
+	}
 }
 
 struct counter_storage *
@@ -418,7 +462,7 @@ error:
 }
 
 static void
-counter_storage_pool_destroy(
+counter_storage_pool_fini(
 	struct counter_storage *storage, struct counter_storage_pool *pool
 ) {
 	if (ADDR_OF(&pool->blocks) == NULL)
@@ -470,7 +514,7 @@ counter_storage_free(struct counter_storage *storage) {
 
 	for (uint64_t pool_idx = 0; pool_idx < COUNTER_POOL_SIZE; ++pool_idx) {
 		struct counter_storage_pool *pool = storage->pools + pool_idx;
-		counter_storage_pool_destroy(storage, pool);
+		counter_storage_pool_fini(storage, pool);
 	}
 }
 

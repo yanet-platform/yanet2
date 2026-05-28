@@ -40,9 +40,10 @@ export const LaneTrack: React.FC<LaneTrackProps> = ({
 
     const { isDragging, dragPayload } = dragState;
     const isActiveDrag = isDragging && !!dragPayload;
-    const isSamePipeline = isActiveDrag && dragPayload.fromFnId === pipelineId;
+    const isPipelineDrag = isActiveDrag && dragPayload.fromChainId === dragPayload.fromFnId;
+    const isSamePipeline = isPipelineDrag && dragPayload.fromFnId === pipelineId;
 
-    const fromRefIdx = isActiveDrag && dragPayload.fromChainId === pipelineId
+    const fromRefIdx = isPipelineDrag && isSamePipeline
         ? dragPayload.fromModIdx
         : -1;
 
@@ -69,7 +70,7 @@ export const LaneTrack: React.FC<LaneTrackProps> = ({
     }, [isActiveDrag, onDragEnd]);
 
     const handleDragOver = useCallback((e: React.DragEvent<HTMLDivElement>): void => {
-        if (!isSamePipeline) {
+        if (!isPipelineDrag) {
             return;
         }
         e.preventDefault();
@@ -103,7 +104,7 @@ export const LaneTrack: React.FC<LaneTrackProps> = ({
         });
 
         setActiveSlotIdx(nearestIdx);
-    }, [isSamePipeline]);
+    }, [isPipelineDrag]);
 
     const handleDragLeave = useCallback((): void => {
         setActiveSlotIdx(null);
@@ -119,7 +120,7 @@ export const LaneTrack: React.FC<LaneTrackProps> = ({
         }
 
         const payload = getDragPayload();
-        if (!payload || payload.fromFnId !== pipelineId) {
+        if (!payload || payload.fromChainId !== payload.fromFnId) {
             return;
         }
 
@@ -128,9 +129,11 @@ export const LaneTrack: React.FC<LaneTrackProps> = ({
         }
 
         const toIdx = activeSlotIdx;
-        const src = payload.fromModIdx;
-        if (toIdx === src || toIdx === src + 1) {
-            return;
+        if (payload.fromFnId === pipelineId) {
+            const src = payload.fromModIdx;
+            if (toIdx === src || toIdx === src + 1) {
+                return;
+            }
         }
 
         onDrop(toIdx);
@@ -155,7 +158,7 @@ export const LaneTrack: React.FC<LaneTrackProps> = ({
 
             {refs.map((ref, idx) => (
                 <React.Fragment key={ref.id}>
-                    {isActiveDrag && isSamePipeline ? (
+                    {isPipelineDrag ? (
                         <InsertSlot
                             idx={idx}
                             active={activeSlotIdx === idx}
@@ -168,8 +171,8 @@ export const LaneTrack: React.FC<LaneTrackProps> = ({
                         ref_={ref}
                         pipelineId={pipelineId}
                         refIdx={idx}
-                        isDragging={isActiveDrag && dragPayload?.moduleId === ref.id}
-                        isSourceDuringDrag={isActiveDrag && isSamePipeline && dragPayload?.moduleId === ref.id}
+                        isDragging={isPipelineDrag && dragPayload?.moduleId === ref.id}
+                        isSourceDuringDrag={isPipelineDrag && isSamePipeline && dragPayload?.moduleId === ref.id}
                         isInvalidDragTarget={false}
                         counter={counterMap.get(ref.id)}
                         onDragStart={onDragStart}
@@ -189,7 +192,7 @@ export const LaneTrack: React.FC<LaneTrackProps> = ({
                 </>
             )}
 
-            {isActiveDrag && isSamePipeline && (
+            {isPipelineDrag && (
                 <InsertSlot
                     idx={refs.length}
                     active={activeSlotIdx === refs.length}

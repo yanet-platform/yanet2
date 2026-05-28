@@ -6,6 +6,7 @@ import type { PageId, SidebarContextValue } from './types';
 import { PAGE_IDS, SidebarContext } from './types';
 
 const importInspect = () => import('./pages/builtin/inspect/InspectPage');
+const importDashboard = () => import('./pages/builtin/dashboard/DashboardPage');
 const importFunctions = () => import('./pages/builtin/functions/FunctionsPage');
 const importPipelines = () => import('./pages/builtin/pipelines/PipelinesPage');
 const importDevices = () => import('./pages/builtin/devices/DevicesPage');
@@ -19,6 +20,7 @@ const importNeighbours = () => import('./pages/operators/neighbours/NeighboursPa
 
 const pageImporters = [
     importInspect,
+    importDashboard,
     importFunctions,
     importPipelines,
     importDevices,
@@ -32,6 +34,7 @@ const pageImporters = [
 ];
 
 const InspectPage = lazy(importInspect);
+const DashboardPage = lazy(importDashboard);
 const FunctionsPage = lazy(importFunctions);
 const PipelinesPage = lazy(importPipelines);
 const DevicesPage = lazy(importDevices);
@@ -90,7 +93,7 @@ const AppContent = (): React.JSX.Element => {
     const getCurrentPage = (): PageId => {
         const path = location.pathname;
         if (path === '/' || path === '') {
-            return 'builtin/inspect';
+            return 'builtin/dashboard';
         }
         const segments = path.split('/').filter(Boolean);
         if (segments.length >= 2) {
@@ -99,7 +102,7 @@ const AppContent = (): React.JSX.Element => {
                 return candidate;
             }
         }
-        return 'builtin/inspect';
+        return 'builtin/dashboard';
     };
 
     const currentPage = getCurrentPage();
@@ -137,8 +140,9 @@ const AppContent = (): React.JSX.Element => {
                 renderContent={() => (
                     <Suspense fallback={<PageLoader loading size="l" />}>
                         <Routes>
-                            <Route path="/" element={<Navigate to="/builtin/inspect" replace />} />
+                            <Route path="/" element={<Navigate to="/builtin/dashboard" replace />} />
                             <Route path="/builtin/inspect" element={<InspectPage />} />
+                            <Route path="/builtin/dashboard" element={<DashboardPage />} />
                             <Route path="/builtin/functions" element={<FunctionsPage />} />
                             <Route path="/builtin/functions-ng" element={<Navigate to="/builtin/functions" replace />} />
                             <Route path="/builtin/pipelines" element={<PipelinesPage />} />
@@ -151,6 +155,7 @@ const AppContent = (): React.JSX.Element => {
                             <Route path="/operators/route" element={<OperatorsRoutePage />} />
                             <Route path="/operators/neighbours" element={<NeighboursPage />} />
                             <Route path="/inspect" element={<Navigate to="/builtin/inspect" replace />} />
+                            <Route path="/dashboard" element={<Navigate to="/builtin/dashboard" replace />} />
                             <Route path="/functions" element={<Navigate to="/builtin/functions" replace />} />
                             <Route path="/pipelines" element={<Navigate to="/builtin/pipelines" replace />} />
                             <Route path="/devices" element={<Navigate to="/builtin/devices" replace />} />

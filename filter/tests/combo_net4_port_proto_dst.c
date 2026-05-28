@@ -96,7 +96,12 @@ test_no_match_proto_only(void *arena) {
 
 	struct filter filter;
 	res = filter_init(
-		&filter, combo_net4_port_proto_dst_compile, &rule_ptr, 1, &mctx
+		&filter,
+		combo_net4_port_proto_dst_compile,
+		&rule_ptr,
+		1,
+		&mctx,
+		NULL
 	);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
 
@@ -113,6 +118,9 @@ test_no_match_proto_only(void *arena) {
 		free(packets[i]);
 	}
 	free(actions);
+
+	filter_free(&filter, combo_net4_port_proto_dst_compile);
+	memory_context_fini(&mctx);
 
 	return TEST_SUCCESS;
 }
@@ -179,7 +187,12 @@ test_all_match(void *arena) {
 
 	struct filter filter;
 	res = filter_init(
-		&filter, combo_net4_port_proto_dst_compile, &rule_ptr, 1, &mctx
+		&filter,
+		combo_net4_port_proto_dst_compile,
+		&rule_ptr,
+		1,
+		&mctx,
+		NULL
 	);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
 
@@ -196,6 +209,9 @@ test_all_match(void *arena) {
 		free(packets[i]);
 	}
 	free(ranges);
+
+	filter_free(&filter, combo_net4_port_proto_dst_compile);
+	memory_context_fini(&mctx);
 
 	return TEST_SUCCESS;
 }
@@ -299,7 +315,12 @@ test_multiple_rules_overlap(void *arena) {
 
 	struct filter filter;
 	res = filter_init(
-		&filter, combo_net4_port_proto_dst_compile, rule_ptrs, 3, &mctx
+		&filter,
+		combo_net4_port_proto_dst_compile,
+		rule_ptrs,
+		3,
+		&mctx,
+		NULL
 	);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
 
@@ -316,6 +337,9 @@ test_multiple_rules_overlap(void *arena) {
 		free(packets[i]);
 	}
 	free(ranges);
+
+	filter_free(&filter, combo_net4_port_proto_dst_compile);
+	memory_context_fini(&mctx);
 
 	return TEST_SUCCESS;
 }
@@ -411,7 +435,12 @@ test_tcp_flags(void *arena) {
 
 	struct filter filter;
 	res = filter_init(
-		&filter, combo_net4_port_proto_dst_compile, rule_ptrs, 2, &mctx
+		&filter,
+		combo_net4_port_proto_dst_compile,
+		rule_ptrs,
+		2,
+		&mctx,
+		NULL
 	);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
 
@@ -428,6 +457,9 @@ test_tcp_flags(void *arena) {
 		free(packets[i]);
 	}
 	free(ranges);
+
+	filter_free(&filter, combo_net4_port_proto_dst_compile);
+	memory_context_fini(&mctx);
 
 	return TEST_SUCCESS;
 }

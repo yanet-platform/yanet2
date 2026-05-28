@@ -88,6 +88,11 @@ cp_module_init(
 	return 0;
 }
 
+void
+cp_module_fini(struct cp_module *cp_module) {
+	(void) cp_module;
+}
+
 */
 import "C"
 import (

@@ -1,5 +1,7 @@
 # Test configuration
 QEMU_IMAGE := yanet-test.qcow2
+BOOTED_TEMPLATE := yanet-test-booted.qcow2
+
 UBUNTU_IMAGE := ubuntu-24.04-minimal-cloudimg-amd64.img
 UBUNTU_URL := https://cloud-images.ubuntu.com/minimal/releases/noble/release/$(UBUNTU_IMAGE)
 CLOUD_INIT_AUTOLOGIN_ISO := cloud-init-autologin.iso
@@ -20,14 +22,17 @@ else
 	endif
 endif
 
-.PHONY: all test clean prepare-vm check-deps test-enhanced test-basic debug-vm debug-dry-run test-login convert convert-one test-converted clean-converted
+.PHONY: all test clean prepare-vm check-deps test-enhanced test-basic debug-vm debug-dry-run test-login convert convert-one
 
 # Default target
 all: test
 
 
 
-# Prepare test environment with autologin
+# Prepare test environment: base image only.
+# The booted template overlay (yanet-test-booted.qcow2) is created automatically
+# on the first 'make test-main' run if it does not already exist.
+# To force recreation of the booted template: rm yanet-test-booted.qcow2
 prepare-vm: check-deps $(QEMU_IMAGE)
 	@echo "Test environment ready"
 
@@ -44,14 +49,16 @@ endif
 	@which go > /dev/null || (echo "Please install Go" && exit 1)
 
 # Run all functional tests
+# restoreBooted tries the fast baseline snapshot first (YANET running),
+# falling back to the preyanet snapshot only when baseline fails.
 test: prepare-vm
 	@echo "Running all functional tests..."
-	go test -count=1 -v ./...
+	go test -count=1 -v ./main/...
 
 # Run main functional tests
 test-main: prepare-vm
 	@echo "Running main functional tests..."
-	go test -count=1 -v ./main/...
+	go test -count=1 -v -failfast ./main/...
 
 # Run specific test
 test-run:
@@ -92,19 +99,6 @@ convert-one:
 	@echo "Converting test $(TEST)..."
 	cd $(MIGRATION_DIR) && $(MAKE) convert-one TEST=$(TEST) YANET1_ROOT=$(YANET1_ROOT)
 
-# Run converted tests
-test-converted: prepare-vm
-	@echo "Running converted yanet1 tests..."
-	@if [ ! -d "converted" ] || [ -z "$$(ls -A converted/*.go 2>/dev/null)" ]; then \
-		echo "No converted tests found. Run 'make convert' or 'make convert-one TEST=name' first."; \
-		exit 1; \
-	fi
-ifdef TEST
-	go test -count=1 -v -run "$(TEST)" ./converted/
-else
-	go test -count=1 -v -run "^Test.*" ./converted/
-endif
-
 # Create QEMU image
 $(QEMU_IMAGE): $(UBUNTU_IMAGE) $(CLOUD_INIT_AUTOLOGIN_ISO)
 	@echo "Creating QEMU image..."
@@ -130,7 +124,7 @@ define run_qemu
 		-machine q35,kernel-irqchip=split \
 		-cpu max \
 		-smp 4 \
-		-m 8G $(QEMU_ACCEL) \
+		-m 1G $(QEMU_ACCEL) \
 		-device intel-iommu,intremap=on,device-iotlb=on \
 		-device ioh3420,id=pcie.1,chassis=1 \
 		-device ioh3420,id=pcie.2,chassis=2 \
@@ -173,7 +167,7 @@ define run_qemu_ssh
 		-machine q35,kernel-irqchip=split \
 		-cpu max \
 		-smp 4 \
-		-m 8G $(QEMU_ACCEL) \
+		-m 1G $(QEMU_ACCEL) \
 		-device intel-iommu,intremap=on,device-iotlb=on \
 		-device ioh3420,id=pcie.1,chassis=1 \
 		-device ioh3420,id=pcie.2,chassis=2 \
@@ -250,7 +244,7 @@ help:
 	@echo "Available targets:"
 	@echo "  all              - Run all tests (default)"
 	@echo "  test             - Run all functional tests"
-	@echo "  test-main        - Run main functional tests (without converted)"
+	@echo "  test-main        - Run main functional tests"
 	@echo "  test-run TEST=X  - Run specific test by name"
 	@echo ""
 	@echo "  prepare-vm       - Prepare VM environment with autologin"
@@ -271,6 +265,5 @@ help:
 	@echo "Converted tests (yanet1 → yanet2 migration):"
 	@echo "  convert           - Convert all yanet1 tests"
 	@echo "  convert-one TEST=X - Convert single test"
-	@echo "  test-converted    - Run converted tests"
-	@echo "  clean-converted   - Remove converted tests"
+	@echo "  clean-converted   - Remove converted tests from main/"
 	@echo ""

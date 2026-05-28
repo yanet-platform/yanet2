@@ -3,11 +3,10 @@ import type { Module, Chain } from '../types';
 import { metaFor } from '../moduleMeta';
 import { InlineEdit } from './InlineEdit';
 import { Sparkline, useSparklineHistory } from '../../_shared/lane-editor';
+import { CloseIcon, TrashIcon } from '../../_shared/icons';
 import { formatPps, formatBps } from '../../../../utils';
 import { ConfirmDialog } from '../../../../components';
 import type { InterpolatedCounterData } from '../../../../hooks';
-
-const MODULE_NAME_REGEX = /^[a-z0-9_-]+$/;
 
 /** Props for module-mode drawer. */
 interface DrawerModuleProps {
@@ -16,7 +15,6 @@ interface DrawerModuleProps {
     chain: Chain | null;
     counter?: InterpolatedCounterData;
     availableTypes: string[];
-    siblingNames: string[];
     onClose: () => void;
     onRename: (newName: string) => void;
     onChangeType: (newType: string) => void;
@@ -36,20 +34,6 @@ interface DrawerChainProps {
 }
 
 type DrawerProps = DrawerModuleProps | DrawerChainProps;
-
-/** X close icon. */
-const CloseIcon = (): React.JSX.Element => (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <path d="M6 6l12 12M6 18 18 6" />
-    </svg>
-);
-
-/** Trash icon. */
-const TrashIcon = (): React.JSX.Element => (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <path d="M5 7h14M9 7V5h6v2M7 7l1 12h8l1-12" />
-    </svg>
-);
 
 /** Up arrow icon for module reorder. */
 const UpIcon = (): React.JSX.Element => (
@@ -408,18 +392,8 @@ export const Drawer: React.FC<DrawerProps> = (props) => {
         if (!name.trim()) {
             return 'Name cannot be empty';
         }
-        if (name.length > 32) {
-            return 'Name must be 32 chars or fewer';
-        }
-        if (!MODULE_NAME_REGEX.test(name)) {
-            return 'Only a-z, 0-9, _ and - allowed';
-        }
-        const others = props.siblingNames.filter(n => n !== props.module.name);
-        if (others.includes(name)) {
-            return 'Name must be unique within chain';
-        }
         return null;
-    }, [props]);
+    }, [props.mode]);
 
     return (
         <>

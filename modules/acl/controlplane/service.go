@@ -13,16 +13,45 @@ import (
 	"github.com/yanet-platform/yanet2/common/filterpb"
 	"github.com/yanet-platform/yanet2/common/go/metrics"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	"github.com/yanet-platform/yanet2/modules/acl/bindings/go/cacl"
 	"github.com/yanet-platform/yanet2/modules/acl/controlplane/aclpb"
 )
+
+// ModuleHandle is a handle to an ACL module configuration written to
+// shared memory. Operations on the handle mutate the underlying C config;
+// Free releases it.
+type ModuleHandle interface {
+	Free()
+	AsFFIModule() ffi.ModuleConfig
+	UpdateRules(rules []cacl.AclRule) error
+	SetFwStateConfig(fw ffi.ModuleConfig)
+	TransferFwStateConfig(old ffi.ModuleConfig)
+	GetInfo() *cacl.AclConfigInfo
+}
+
+// Backend abstracts shared-memory operations for the ACL service.
+type Backend interface {
+	// NewModule allocates a new ACL module config in shared memory.
+	// The returned handle is not yet published to the dataplane.
+	NewModule(name string) (ModuleHandle, error)
+	// UpdateModule publishes handle to dp_config_gen so the dataplane
+	// picks it up on the next round.
+	UpdateModule(handle ModuleHandle) error
+	// DeleteModule removes a module config from the dataplane.
+	DeleteModule(name string) error
+	// TODO: remove this
+	MemoryBytes() uint64
+	// DPConfig returns the dataplane configuration handle for counter
+	// and position queries.
+	DPConfig() *ffi.DPConfig
+}
 
 type ACLService struct {
 	aclpb.UnimplementedACLServiceServer
 
 	mu             sync.Mutex
-	agent          *ffi.Agent
+	backend        Backend
 	configs        map[string]aclConfig
-	memoryBytes    uint64
 	handlerMetrics handlersMetrics
 
 	log *zap.Logger
@@ -30,15 +59,15 @@ type ACLService struct {
 
 type aclConfig struct {
 	rules       []*aclpb.Rule
-	acl         *ModuleConfig
+	acl         ModuleHandle
 	fwstateName string
 }
 
-func NewACLService(agent *ffi.Agent, memoryBytes uint64, log *zap.Logger) *ACLService {
+// NewACLService creates an ACL gRPC service backed by the given Backend.
+func NewACLService(backend Backend, log *zap.Logger) *ACLService {
 	return &ACLService{
-		agent:          agent,
-		configs:        make(map[string]aclConfig),
-		memoryBytes:    memoryBytes,
+		backend:        backend,
+		configs:        map[string]aclConfig{},
 		handlerMetrics: newHandlersMetrics(),
 		log:            log,
 	}
@@ -65,36 +94,8 @@ func (m *ACLService) newHandlerTracker(name string) *handlerMetricTracker {
 	)
 }
 
-// //////////////////////////////////////////////////////////////////////////////
-func terminalAction(protoActions []*aclpb.Action) AclAction {
-	const (
-		cACLActionAllow       = 0
-		cACLActionDeny        = 1
-		cACLActionCheckState  = 3
-		cACLActionCreateState = 4
-	)
-
-	if len(protoActions) == 0 {
-		return AclAction{ID: cACLActionAllow}
-	}
-
-	a := protoActions[len(protoActions)-1]
-	switch a.GetKind() {
-	case aclpb.ActionKind_ACTION_KIND_PASS:
-		return AclAction{ID: cACLActionAllow, Counter: a.GetCounter()}
-	case aclpb.ActionKind_ACTION_KIND_DENY:
-		return AclAction{ID: cACLActionDeny, Counter: a.GetCounter()}
-	case aclpb.ActionKind_ACTION_KIND_CHECK_STATE:
-		return AclAction{ID: cACLActionCheckState, Counter: a.GetCounter()}
-	case aclpb.ActionKind_ACTION_KIND_CREATE_STATE:
-		return AclAction{ID: cACLActionCreateState, Counter: a.GetCounter()}
-	default:
-		return AclAction{ID: cACLActionDeny, Counter: a.GetCounter()}
-	}
-}
-
-func convertRules(reqRules []*aclpb.Rule) ([]AclRule, error) {
-	rules := make([]AclRule, 0, len(reqRules))
+func convertRules(reqRules []*aclpb.Rule) ([]cacl.AclRule, error) {
+	rules := make([]cacl.AclRule, 0, len(reqRules))
 	for _, reqRule := range reqRules {
 		devices, err := filterpb.ToDevices(reqRule.Devices)
 		if err != nil {
@@ -132,9 +133,13 @@ func convertRules(reqRules []*aclpb.Rule) ([]AclRule, error) {
 		if err != nil {
 			return nil, err
 		}
-
-		rule := AclRule{
-			Actions:       []AclAction{terminalAction(reqRule.Actions)},
+		actions, err := aclpb.ToActions(reqRule.Actions)
+		if err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "invalid actions in rule: %v", err)
+		}
+		rule := cacl.AclRule{
+			Actions:       actions,
+			Counter:       reqRule.GetCounter(),
 			Devices:       devices,
 			VlanRanges:    vlanRanges,
 			Src4s:         src4s,
@@ -145,7 +150,6 @@ func convertRules(reqRules []*aclpb.Rule) ([]AclRule, error) {
 			SrcPortRanges: srcPortRanges,
 			DstPortRanges: dstPortRanges,
 		}
-
 		rules = append(rules, rule)
 	}
 	return rules, nil
@@ -186,24 +190,24 @@ func (m *ACLService) UpdateConfig(
 		return nil, err
 	}
 
-	config, err := NewModuleConfig(m.agent, name)
+	handle, err := m.backend.NewModule(name)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to create module config: %v", err)
 	}
 
-	if err := config.Update(rules); err != nil {
-		config.Free()
+	if err := handle.UpdateRules(rules); err != nil {
+		handle.Free()
 		return nil, status.Errorf(codes.Internal, "failed to update module config: %v", err)
 	}
 
 	oldConfigs, ok := m.configs[name]
 	if ok && oldConfigs.fwstateName != "" {
-		m.log.Info("transfer fwstate config for ACL module", zap.String("config", name))
-		config.TransferFwStateConfig(oldConfigs.acl)
+		handle.TransferFwStateConfig(oldConfigs.acl.AsFFIModule())
+		m.log.Info("transferred fwstate config for ACL module", zap.String("config", name))
 	}
 
-	if err := m.agent.UpdateModules([]ffi.ModuleConfig{config.AsFFIModule()}); err != nil {
-		config.Free()
+	if err := m.backend.UpdateModule(handle); err != nil {
+		handle.Free()
 		return nil, status.Errorf(codes.Internal, "failed to update module: %v", err)
 	}
 
@@ -213,7 +217,7 @@ func (m *ACLService) UpdateConfig(
 
 	m.configs[name] = aclConfig{
 		rules:       req.Rules,
-		acl:         config,
+		acl:         handle,
 		fwstateName: oldConfigs.fwstateName,
 	}
 
@@ -288,7 +292,7 @@ func (m *ACLService) DeleteConfig(
 	}
 
 	if config.acl != nil {
-		if err := m.agent.DeleteModuleConfig(name); err != nil {
+		if err := m.backend.DeleteModule(name); err != nil {
 			return nil, status.Errorf(codes.Internal, "could not delete acl module config '%s': %v", name, err)
 		}
 		m.log.Info("successfully deleted ACL module config", zap.String("name", name))
@@ -300,6 +304,20 @@ func (m *ACLService) DeleteConfig(
 	response := &aclpb.DeleteConfigResponse{}
 
 	return response, nil
+}
+
+// GetInfo returns the compiled configuration metadata for the named ACL module,
+// or nil if no config with that name is loaded.
+func (m *ACLService) GetInfo(name string) *cacl.AclConfigInfo {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	cfg, ok := m.configs[name]
+	if !ok {
+		return nil
+	}
+
+	return cfg.acl.GetInfo()
 }
 
 func (m *ACLService) GetMetrics(

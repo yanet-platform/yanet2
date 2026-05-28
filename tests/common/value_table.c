@@ -56,6 +56,7 @@ main() {
 
 	remap_table_free(&remap_table);
 	value_table_free(&table);
+	memory_context_fini(&mem_ctx);
 	free(arena0);
 
 	puts("OK");

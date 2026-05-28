@@ -50,7 +50,7 @@ counter_registry_register(
 );
 
 void
-counter_registry_free(struct counter_registry *registry);
+counter_registry_fini(struct counter_registry *registry);
 
 int
 counter_registry_link(
@@ -84,6 +84,9 @@ counter_storage_allocator_init(
 	struct memory_context *memory_context,
 	uint64_t instance_count
 );
+
+void
+counter_storage_allocator_fini(struct counter_storage_allocator *self);
 
 struct counter_value_handle;
 

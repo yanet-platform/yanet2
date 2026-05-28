@@ -236,15 +236,9 @@ func FormatYanet2Command(module, action string, params map[string]string, instan
 		parts = append(parts, action)
 	}
 
-	// Instance configuration
-	if len(instances) > 0 {
-		parts = append(parts, "--instances")
-		instanceStrs := make([]string, len(instances))
-		for i, inst := range instances {
-			instanceStrs[i] = fmt.Sprintf("%d", inst)
-		}
-		parts = append(parts, strings.Join(instanceStrs, ","))
-	}
+	// Instance configuration is intentionally omitted.
+	// yanet2 CLIs do not support the --instances flag (yanet1 artifact).
+	_ = instances
 
 	// Configuration parameters - sort keys for deterministic output
 	var keys []string

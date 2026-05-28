@@ -67,7 +67,7 @@ func NewRouteModule(cfg *Config, options ...Option) (*RouteModule, error) {
 		zap.Stringer("size", cfg.MemoryRequirements),
 	)
 
-	agent, err := shm.AgentReattach(agentName, cfg.InstanceID, cfg.MemoryRequirements.Unwrap())
+	agent, err := shm.AgentAttach(agentName, cfg.InstanceID, cfg.MemoryRequirements.Unwrap())
 	if err != nil {
 		return nil, fmt.Errorf("failed to attach agent to shared memory: %w", err)
 	}

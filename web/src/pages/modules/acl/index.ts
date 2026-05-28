@@ -1,10 +1,1 @@
-export * from './types';
-export * from './constants';
-export * from './hooks';
-export * from './yamlParser';
-export { AclPageHeader } from './AclPageHeader';
-export { ConfigTabs } from './ConfigTabs';
-export { InnerTabs } from './InnerTabs';
-export { VirtualizedAclTable } from './VirtualizedAclTable';
-export { FWStateForm } from './FWStateForm';
-export * from './dialogs';
+export { default as AclPage } from './AclPage';

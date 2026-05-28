@@ -9,7 +9,6 @@ modules:
       - controlplane
       - devices
       - modules/acl
-      - modules/balancer
       - modules/balancer2
       - modules/decap
       - modules/dscp

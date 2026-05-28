@@ -1,9 +1,1 @@
-export * from './RoutePageHeader';
-export * from './AddRouteDialog';
-export * from './EditRouteDialog';
-export * from './ConfigTabs';
-export * from './RouteConfigContent';
-export * from './RouteTable';
-export * from './VirtualizedRouteTable';
-export * from './VirtualRow';
-export * from './TableHeader';
+export { default } from './RoutePage';

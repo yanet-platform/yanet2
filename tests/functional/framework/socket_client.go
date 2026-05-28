@@ -3,6 +3,7 @@ package framework
 import (
 	"encoding/binary"
 	"fmt"
+	"io"
 	"net"
 	"sync"
 	"time"
@@ -252,11 +253,6 @@ func (sc *SocketClient) SendPacket(packet []byte, dumpPath string) error {
 		return fmt.Errorf("not connected to socket")
 	}
 
-	err := sc.inner.conn.SetWriteDeadline(time.Now().Add(sc.inner.timeout))
-	if err != nil {
-		return fmt.Errorf("failed to set write deadline: %w", err)
-	}
-
 	// Create a buffer with the packet length in network byte order followed by the packet data
 	packetWithLength := make([]byte, 4+len(packet))
 	binary.BigEndian.PutUint32(packetWithLength, uint32(len(packet)))
@@ -269,8 +265,46 @@ func (sc *SocketClient) SendPacket(packet []byte, dumpPath string) error {
 		sc.log.Warnf("Failed to write to dump file: %v", err)
 	}
 
-	_, err = sc.inner.conn.Write(packetWithLength)
+	_, err := sc.writeFull(packetWithLength, sc.inner.timeout)
 	if err != nil {
+		return fmt.Errorf("failed to send packet: %w", err)
+	}
+
+	return nil
+}
+
+func (sc *SocketClient) SendPackets(packets [][]byte, dumpPath string) error {
+	if sc.inner.conn == nil {
+		return fmt.Errorf("not connected to socket")
+	}
+
+	if err := sc.inner.conn.SetWriteDeadline(time.Now().Add(sc.inner.timeout)); err != nil {
+		return fmt.Errorf("failed to set write deadline: %w", err)
+	}
+
+	headerSize := binary.Size(uint32(0))
+	// Evaluate buffer size
+	size := 0
+	for idx := range packets {
+		size = size + headerSize + len(packets[idx])
+	}
+	// Create a buffer with the packet length in network byte order followed by the packet data
+	packetWithLength := make([]byte, size)
+	current := packetWithLength[0:]
+	for idx := range packets {
+		binary.BigEndian.PutUint32(current, uint32(len(packets[idx])))
+		copy(current[headerSize:], packets[idx])
+		current = current[len(packets[idx])+headerSize:]
+	}
+
+	sc.log.Debugf("Sending packets with length prefixes: % x", packetWithLength)
+
+	// Write raw socket data to dump file if path is provided
+	if err := writeToDumpFile(dumpPath, packetWithLength); err != nil {
+		sc.log.Warnf("Failed to write to dump file: %v", err)
+	}
+
+	if _, err := sc.writeFull(packetWithLength, sc.inner.timeout); err != nil {
 		return fmt.Errorf("failed to send packet: %w", err)
 	}
 
@@ -327,8 +361,7 @@ func (sc *SocketClient) ReceivePacket(timeout time.Duration, dumpPath string) ([
 		}
 
 		// Read the packet length prefix (4 bytes)
-		lengthPrefix := make([]byte, 4)
-		_, err = sc.inner.conn.Read(lengthPrefix)
+		lengthPrefix, err := sc.readFull(4, timeout)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read packet length prefix: %w", err)
 		}
@@ -340,8 +373,7 @@ func (sc *SocketClient) ReceivePacket(timeout time.Duration, dumpPath string) ([
 		}
 
 		// Read the packet data
-		packetData := make([]byte, packetLength)
-		_, err = sc.inner.conn.Read(packetData)
+		packetData, err := sc.readFull(int(packetLength), timeout)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read packet data: %w", err)
 		}
@@ -389,8 +421,7 @@ func (sc *SocketClient) ReceiveAllPackets(timeout time.Duration, dumpPath string
 		}
 
 		// Read the packet length prefix (4 bytes)
-		lengthPrefix := make([]byte, 4)
-		_, err = sc.inner.conn.Read(lengthPrefix)
+		lengthPrefix, err := sc.readFull(4, timeout)
 		if err != nil {
 			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 				// Timeout is expected when no more packets
@@ -405,8 +436,7 @@ func (sc *SocketClient) ReceiveAllPackets(timeout time.Duration, dumpPath string
 		}
 
 		// Read the packet data
-		packetData := make([]byte, packetLength)
-		_, err = sc.inner.conn.Read(packetData)
+		packetData, err := sc.readFull(int(packetLength), timeout)
 		if err != nil {
 			return packets, fmt.Errorf("failed to read packet data: %w", err)
 		}
@@ -527,4 +557,51 @@ func (sc *SocketClient) WithLog(log *zap.SugaredLogger) *SocketClient {
 		inner: sc.inner, // Share the same inner state (connection)
 		log:   log,
 	}
+}
+
+// readFull reads exactly n bytes from the connection within the timeout.
+// Returns an error if all bytes cannot be read before the deadline expires.
+func (sc *SocketClient) readFull(n int, timeout time.Duration) ([]byte, error) {
+	if sc.inner.conn == nil {
+		return nil, fmt.Errorf("not connected to socket")
+	}
+
+	if err := sc.inner.conn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
+		return nil, fmt.Errorf("failed to set read deadline: %w", err)
+	}
+
+	buf := make([]byte, n)
+	if _, err := io.ReadFull(sc.inner.conn, buf); err != nil {
+		return nil, err
+	}
+	return buf, nil
+}
+
+// writeFull writes all bytes in the buffer to the connection within the timeout.
+// Returns an error if all bytes cannot be written before the deadline expires.
+func (sc *SocketClient) writeFull(buf []byte, timeout time.Duration) (int, error) {
+	if sc.inner.conn == nil {
+		return 0, fmt.Errorf("not connected to socket")
+	}
+
+	err := sc.inner.conn.SetWriteDeadline(time.Now().Add(timeout))
+	if err != nil {
+		return 0, fmt.Errorf("failed to set write deadline: %w", err)
+	}
+
+	bytesWritten := 0
+
+	for bytesWritten < len(buf) {
+		nWritten, err := sc.inner.conn.Write(buf[bytesWritten:])
+		if err != nil {
+			if nWritten > 0 {
+				// Partial write before error - report how much was written
+				return bytesWritten + nWritten, fmt.Errorf("wrote %d/%d bytes before error: %w", bytesWritten+nWritten, len(buf), err)
+			}
+			return bytesWritten, err
+		}
+		bytesWritten += nWritten
+	}
+
+	return bytesWritten, nil
 }

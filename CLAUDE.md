@@ -63,10 +63,9 @@ Top-level directories and their roles:
 - `devices/`       — device adapters (`plain`, `vlan`); same layout as modules.
 - `operators/`     — long-running orchestration daemons (see Operators).
 - `filter/`        — filter compiler, classifiers, and query engine (C).
-- `lib/`           — C support libraries: `controlplane`, `counters`, `dataplane`, `errors`, `fwstate`, `logging`, `utils`, plus `tests/` and `fuzzing/`.
+- `lib/`           — C support libraries: `controlplane`, `counters`, `dataplane`, `dataplane_ut`, `errors`, `fwstate`, `logging`, `utils`, plus `tests/` and `fuzzing/`.
 - `api/`           — public C API headers exposed to control plane (`agent.h`, `config.h`, `counter.h`, `info.h`).
-- `bindings/go/`   — root-level Go CGO bindings for the agent/shared-memory surface.
-- `mock/`          — C dataplane test mocks (`mock.c/h`, `worker.c/h`, etc.) used by module unit tests.
+- `bindings/go/`   — root-level Go CGO bindings for the agent/shared-memory agent surface.
 - `cli/`           — Rust CLI workspace: `core/` (yanet-cli library), `modules/` (shared CLI subcommands), `Makefile`.
 - `common/`        — shared libraries across languages (see Shared Libraries).
 - `web/`           — TypeScript/React Web UI.
@@ -125,17 +124,12 @@ modules/<name>/
 **Legacy** (acl, fwstate, nat64, pdump, route-mpls): no `bindings/`,
 CGO calls live directly in `controlplane/ffi.go`, no `backend.go`.
 
-**Special**: `balancer` does not follow the canonical layout.
-- `agent/` — CGO surface: `agent.c/h`, `manager.c/h`, `config.c`, `balancerpb/`, `go/`.
-- `controlplane/` — `api/`, `balancerpb/`, `handler/`, `state/`.
-- Top-level `bench/`, `tests/`, `cli/`, `dataplane/` complete the module.
-
-`balancer2` is an early-stage rewrite — only `api/` and `dataplane/`
+**Special**: `balancer2` is an early-stage module — only `api/` and `dataplane/`
 exist today.
 
 Module dataplane symbols are exported via meson linker defsym: `new_module_<name>`.
 
-Active modules: `route, acl, balancer, balancer2, forward, decap, nat64,
+Active modules: `route, acl, balancer2, forward, decap, nat64,
 fwstate, dscp, pdump, route-mpls`.
 
 ### Devices
@@ -151,7 +145,7 @@ the dataplane through the gateway, distinct from per-module gRPC services.
 
 - `operators/yanet-pipeline-operator` — declarative reconciliation operator
   (`cmd/`, `internal/`, `operatorpb/`). Structural template for future
-  operators (route, acl, balancer).
+  operators (route, acl).
 - `operators/bird-adapter` — BIRD routing-daemon adapter (canonical agent
   layout: `adapterpb/`, `internal/`, `service.go`). Note:
   `modules/route/bird-adapter/` is a separate proto-contract subtree
@@ -177,7 +171,7 @@ the dataplane through the gateway, distinct from per-module gRPC services.
 ### Shared Memory Pattern
 
 1. Module control plane attaches via `ffi.SharedMemory` (Go CGO)
-2. Creates agent via `shm.AgentReattach(name, instanceIdx, size)`
+2. Creates agent via `shm.AgentAttach(name, instanceIdx, size)`
 3. Writes C-level config through FFI functions (e.g., `acl_module_config_update()`)
 4. Uses `runtime.Pinner` to pin Go memory during C calls
 5. Dataplane reads updated config atomically
@@ -227,6 +221,9 @@ Meson orchestrates C/DPDK builds and Go binary compilation (via `custom_target` 
 - **Comments**: English, end with period, fit within ~80 chars
   (reflow rather than preserving narrower fill). List only production
   callers, not "tests". No section-separator comments.
+- **Doc comments**: first line is a single-sentence brief ending with
+  period. If detail follows, separate with a blank `//` line, then the
+  body paragraph. Never glue brief and detail on consecutive `//` lines.
 - **Tests**: table-driven, use `require.NoError(t, err)`. Do not
   reference tests inside production-code comments.
 
@@ -256,6 +253,10 @@ Meson orchestrates C/DPDK builds and Go binary compilation (via `custom_target` 
   explicit `Result<(), fmt::Error>` (not `fmt::Result` alias).
 - **No doc comments** on `Display`/`Serialize`/`TryFrom`/`From`/`Debug`/
   `Default`/`FromStr` impls — the trait name is the doc.
+- **Doc-comment structure**: `///` / `//!` blocks lead with a
+  single-sentence brief ending with period. If detail follows, separate
+  with a blank `///` line, then the body paragraph. Never glue brief
+  and detail on consecutive `///` lines.
 - **No infallible `TryFrom`**: replace with `From`, or remove the impl
   if the call site is trivially inlinable.
 - **`assert_eq!` order**: expected first, actual second:
@@ -293,7 +294,7 @@ Web UI lives in `web/` (`package.json`, `index.html`, `dist/`).
 
 ## Agent Memory & Feedback
 
-**`.claude/agent-memory/<agent>/MEMORY.md`** — single flat file per agent. No backing files, no YAML frontmatter. The file is auto-loaded into conversation context, so keep it tight.
+**`<REPO_ROOT>/.claude/agent-memory/<agent>/MEMORY.md`** — single flat file per agent, **always at the repository root**, never under a subdirectory like `web/.claude/…` or `controlplane/.claude/…`. The path is `<repo>/.claude/agent-memory/<agent>/MEMORY.md` regardless of the agent's current working directory. If you would write to a `.claude/` path that is not directly under the repo root, you are wrong — walk up to the repo root first. No backing files, no YAML frontmatter. The file is auto-loaded into conversation context, so keep it tight.
 
 ### Format
 

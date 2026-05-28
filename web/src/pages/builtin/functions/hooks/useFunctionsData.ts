@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useReducer, useState } from 'react';
+import { useCallback } from 'react';
 import { API } from '../../../../api';
-import { toaster } from '../../../../utils';
 import type { NetworkFunction, FunctionsAction } from '../types';
-import { functionsReducer, initialState, discardEdits } from '../reducer';
+import { functionsReducer, initialState } from '../reducer';
 import { apiToLocal, localToApi } from '../wire';
+import { useEditableEntityStore } from '../../_shared/editableEntityStore';
 
 export interface UseFunctionsDataResult {
     functions: NetworkFunction[];
@@ -22,99 +22,61 @@ export interface UseFunctionsDataResult {
  * and exposes per-function save/discard/create operations.
  */
 export const useFunctionsData = (): UseFunctionsDataResult => {
-    const [state, rawDispatch] = useReducer(functionsReducer, initialState);
-    const [loading, setLoading] = useState(true);
-    const [fnIds, setFnIds] = useState<string[]>([]);
+    const store = useEditableEntityStore({
+        reducer: functionsReducer,
+        initialState,
+        api: API.functions,
+        getIds: resp => resp.ids ?? [],
+        idName: id => id.name ?? '',
+        getEntity: resp => resp.function,
+        apiToLocal,
+        localToApi,
+        makeUpdateRequest: fn => ({ function: fn }),
+        makeDeleteRequest: name => ({ id: { name } }),
+        makeCreateRequest: name => ({ function: { id: { name }, chains: [] } }),
+        toastPrefix: 'fn-ng',
+        entityLabel: 'Function',
+    });
 
-    const dispatch = useCallback((action: FunctionsAction) => {
-        rawDispatch(action);
-    }, []);
+    const getServerFn = useCallback(
+        (fnId: string): NetworkFunction | null => store.getServer(fnId),
+        [store.getServer],
+    );
 
-    const load = useCallback(async (): Promise<void> => {
-        setLoading(true);
-        try {
-            const listResp = await API.functions.list({});
-            const ids = listResp.ids ?? [];
-            const names = ids.map(id => id.name ?? '').filter(Boolean);
-            setFnIds(names);
+    const saveFn = useCallback(
+        (fnId: string): Promise<void> => store.save(fnId),
+        [store.save],
+    );
 
-            await Promise.all(ids.map(async (fid) => {
-                try {
-                    const resp = await API.functions.get({ id: fid });
-                    if (resp.function) {
-                        rawDispatch({ type: 'LOAD_FUNCTION', fn: apiToLocal(resp.function) });
-                    }
-                } catch (err) {
-                    toaster.error('fn-ng-load', `Failed to load function ${fid.name}`, err);
-                }
-            }));
-        } catch (err) {
-            toaster.error('fn-ng-list', 'Failed to load functions', err);
-        } finally {
-            setLoading(false);
-        }
-    }, []);
+    const discardFn = useCallback(
+        (fnId: string): void => store.discard(fnId),
+        [store.discard],
+    );
 
-    useEffect(() => {
-        load();
-    }, [load]);
+    const isDirty = useCallback(
+        (fnId: string): boolean => store.isDirty(fnId),
+        [store.isDirty],
+    );
 
-    const saveFn = useCallback(async (fnId: string): Promise<void> => {
-        const fn = state.local[fnId];
-        if (!fn) {
-            return;
-        }
-        try {
-            await API.functions.update({ function: localToApi(fn) });
-            // Sync server snapshot by re-dispatching as LOAD_FUNCTION to clear dirty.
-            rawDispatch({ type: 'LOAD_FUNCTION', fn });
-            toaster.success(`fn-ng-save-${fnId}`, `Function "${fnId}" saved.`);
-        } catch (err) {
-            toaster.error(`fn-ng-save-err-${fnId}`, `Failed to save "${fnId}"`, err);
-        }
-    }, [state.local]);
+    const createFn = useCallback(
+        (name: string): Promise<boolean> => store.create(name),
+        [store.create],
+    );
 
-    const discardFn = useCallback((fnId: string): void => {
-        const next = discardEdits(state, fnId);
-        const reverted = next.local[fnId];
-        if (reverted) {
-            rawDispatch({ type: 'LOAD_FUNCTION', fn: reverted });
-        }
-    }, [state]);
+    const deleteFn = useCallback(
+        (fnId: string): Promise<boolean> => store.remove(fnId),
+        [store.remove],
+    );
 
-    const isDirty = useCallback((fnId: string): boolean => state.dirty.has(fnId), [state.dirty]);
-
-    const getServerFn = useCallback((fnId: string): NetworkFunction | null =>
-        state.server[fnId] ?? null, [state.server]);
-
-    const createFn = useCallback(async (name: string): Promise<boolean> => {
-        try {
-            await API.functions.update({ function: { id: { name }, chains: [] } });
-            await load();
-            toaster.success(`fn-ng-create-${name}`, `Function "${name}" created.`);
-            return true;
-        } catch (err) {
-            toaster.error(`fn-ng-create-err-${name}`, `Failed to create "${name}"`, err);
-            return false;
-        }
-    }, [load]);
-
-    const deleteFn = useCallback(async (fnId: string): Promise<boolean> => {
-        try {
-            await API.functions.delete({ id: { name: fnId } });
-            rawDispatch({ type: 'REMOVE_FUNCTION', fnId });
-            setFnIds(prev => prev.filter(id => id !== fnId));
-            toaster.success(`fn-ng-delete-${fnId}`, `Function "${fnId}" deleted.`);
-            return true;
-        } catch (err) {
-            toaster.error(`fn-ng-delete-err-${fnId}`, `Failed to delete "${fnId}"`, err);
-            return false;
-        }
-    }, []);
-
-    const functions = fnIds
-        .map(id => state.local[id])
-        .filter((f): f is NetworkFunction => !!f);
-
-    return { functions, loading, isDirty, getServerFn, dispatch, saveFn, discardFn, createFn, deleteFn };
+    return {
+        functions: store.entities,
+        loading: store.loading,
+        isDirty,
+        getServerFn,
+        dispatch: store.dispatch,
+        saveFn,
+        discardFn,
+        createFn,
+        deleteFn,
+    };
 };

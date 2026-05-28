@@ -215,14 +215,8 @@ impl RouteMplsService {
                     nexthop: Some(NextHop {
                         kind: routemplspb::ActionKind::Tunnel.into(),
                         label: cmd.mpls_label,
-                        source_ip: match cmd.src_addr {
-                            IpAddr::V4(v4) => v4.octets().to_vec(),
-                            IpAddr::V6(v6) => v6.octets().to_vec(),
-                        },
-                        destination_ip: match cmd.dst_addr {
-                            IpAddr::V4(v4) => v4.octets().to_vec(),
-                            IpAddr::V6(v6) => v6.octets().to_vec(),
-                        },
+                        source_ip: Some(cmd.src_addr.into()),
+                        destination_ip: Some(cmd.dst_addr.into()),
                         weight: cmd.weight,
                         counter: cmd.counter,
                     }),
@@ -242,11 +236,8 @@ impl RouteMplsService {
                     nexthop: Some(NextHop {
                         kind: routemplspb::ActionKind::Tunnel.into(),
                         label: cmd.mpls_label,
-                        source_ip: vec![],
-                        destination_ip: match cmd.dst_addr {
-                            IpAddr::V4(v4) => v4.octets().to_vec(),
-                            IpAddr::V6(v6) => v6.octets().to_vec(),
-                        },
+                        source_ip: None,
+                        destination_ip: Some(cmd.dst_addr.into()),
                         weight: 0,
                         counter: "".to_string(),
                     }),

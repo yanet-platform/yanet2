@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package commonpb;
+
+option go_package = "github.com/yanet-platform/yanet2/common/commonpb;commonpb";
+
+import "common/commonpb/ipaddr.proto";
+
+// IPRange represents an inclusive address range [start, end].
+//
+// Both endpoints must belong to the same address family (both IPv4 or
+// both IPv6) and must compare start <= end as bytes in network byte
+// order. A single-address range has start == end.
+message IPRange {
+  // Lower bound, inclusive.
+  IPAddress start = 1;
+  // Upper bound, inclusive.
+  IPAddress end = 2;
+}

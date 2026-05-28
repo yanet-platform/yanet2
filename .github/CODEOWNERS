@@ -22,7 +22,6 @@
 # Dataplane core.
 /api/                                   @yanet-platform/yanet-core
 /dataplane/                             @yanet-platform/yanet-core
-/mock/                                  @yanet-platform/yanet-core
 
 # Controlplane.
 /controlplane/                          @yanet-platform/yanet-controlplane

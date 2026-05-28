@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { Button, Flex, Icon, Text, TextInput } from '@gravity-ui/uikit';
-import { Magnifier, Plus } from '@gravity-ui/icons';
-import { PageLayout, PageLoader, EmptyState } from '../../../components';
+import { Button, Flex, Icon, Text } from '@gravity-ui/uikit';
+import { Plus } from '@gravity-ui/icons';
+import { PageLayout, PageLoader, EmptyState, SearchInput } from '../../../components';
 import { useFunctionsData } from './hooks/useFunctionsData';
-import { useUnsavedChangesBlocker } from '../_shared/lane-editor';
+import { useDragState, useUnsavedChangesBlocker } from '../_shared/lane-editor';
 import { FunctionCard } from './components/FunctionCard';
 import { CreateFunctionDialog } from './dialogs';
 import type { NetworkFunction } from './types';
@@ -41,6 +41,7 @@ const FunctionsPage = (): React.JSX.Element => {
     const [createDialogOpen, setCreateDialogOpen] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const searchRef = useRef<HTMLInputElement>(null);
+    const { dragState, startDrag, endDrag } = useDragState();
 
     useEffect(() => {
         const fetchTypes = async (): Promise<void> => {
@@ -90,24 +91,15 @@ const FunctionsPage = (): React.JSX.Element => {
             <Text variant="header-1">Functions</Text>
             <Flex grow />
             <div style={{ flexBasis: 380, flexShrink: 1 }}>
-                <TextInput
+                <SearchInput
                     controlRef={searchRef}
                     value={searchQuery}
                     onUpdate={setSearchQuery}
                     placeholder="Search functions, chains, modules… (⌘K)"
-                    startContent={
-                        <Flex alignItems="center" justifyContent="center" style={{ paddingInline: 8, color: 'var(--g-color-text-hint)' }}>
-                            <Icon data={Magnifier} size={16} />
-                        </Flex>
-                    }
-                    size="l"
-                    hasClear
-                    type="search"
                 />
             </div>
             <Button
                 view="action"
-                size="l"
                 onClick={() => setCreateDialogOpen(true)}
             >
                 <Icon data={Plus} size={16} />
@@ -142,6 +134,9 @@ const FunctionsPage = (): React.JSX.Element => {
                             isDirty={isDirty(fn.id)}
                             availableModuleTypes={availableModuleTypes}
                             dispatch={dispatch}
+                            dragState={dragState}
+                            onDragStart={startDrag}
+                            onDragEnd={endDrag}
                             onSave={handleSave(fn.id)}
                             onDiscard={handleDiscard(fn.id)}
                             onDelete={handleDelete(fn.id)}

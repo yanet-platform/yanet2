@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package fwstatepb;
 
+import "common/commonpb/ipaddr.proto";
+
 option go_package = "github.com/yanet-platform/yanet2/modules/fwstate/controlplane/fwstatepb;fwstatepb";
 
 service FWStateService {
@@ -80,16 +82,12 @@ enum Direction {
   BACKWARD = 1;
 }
 
-// IP address representation supporting both IPv4 and IPv6.
-// IPv4: 4 bytes, IPv6: 16 bytes.
-message Addr { bytes bytes = 1; }
-
 message FwStateKey {
   uint32 proto = 1;
   uint32 src_port = 2;
   uint32 dst_port = 3;
-  Addr src_addr = 4;
-  Addr dst_addr = 5;
+  commonpb.IPAddress src_addr = 4;
+  commonpb.IPAddress dst_addr = 5;
 }
 
 message FwStateValue {
@@ -133,12 +131,12 @@ message MapConfig {
 
 // Firewall state synchronization configuration
 message SyncConfig {
-  bytes src_addr = 1;           // IPv6 source address (16 bytes);
-  bytes dst_ether = 2;          // Destination MAC address (6 bytes);
-  bytes dst_addr_multicast = 3; // Multicast IPv6 address (16 bytes);
-  uint32 port_multicast = 4;    // Multicast port;
-  bytes dst_addr_unicast = 5;   // Unicast IPv6 address (16 bytes);
-  uint32 port_unicast = 6;      // Unicast port;
+  commonpb.IPAddress src_addr = 1;           // IPv6 source address;
+  bytes dst_ether = 2;                        // Destination MAC address (6 bytes);
+  commonpb.IPAddress dst_addr_multicast = 3; // Multicast IPv6 address;
+  uint32 port_multicast = 4;                 // Multicast port;
+  commonpb.IPAddress dst_addr_unicast = 5;   // Unicast IPv6 address;
+  uint32 port_unicast = 6;                   // Unicast port;
 
   // Connection timeouts
   uint64 tcp_syn_ack = 7; // TCP SYN-ACK timeout in nanoseconds;

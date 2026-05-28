@@ -7,6 +7,17 @@ export interface EthernetHeader {
     etherTypeName: string;
 }
 
+export interface VlanTag {
+    tpid: number;
+    tpidName: string;
+    tci: number;
+    pcp: number;
+    dei: boolean;
+    vlanId: number;
+    innerEtherType: number;
+    innerEtherTypeName: string;
+}
+
 export interface IPv4Header {
     version: number;
     ihl: number;
@@ -75,13 +86,39 @@ export interface ICMPHeader {
     typeName: string;
 }
 
+export interface HTTPHeader {
+    name: string;
+    value: string;
+}
+
+export interface HTTPMessage {
+    /** True if this is a request, false if a response. */
+    isRequest: boolean;
+    /** Only set for requests. */
+    method?: string;
+    /** Only set for requests. */
+    target?: string;
+    /** Only set for responses. */
+    statusCode?: number;
+    /** Only set for responses. */
+    reasonPhrase?: string;
+    /** HTTP version string e.g. "HTTP/1.1". */
+    version: string;
+    /** Parsed headers in order of appearance. Names preserved as-is from the wire. */
+    headers: HTTPHeader[];
+    /** Offset (from the start of raw) where the body starts. May be past the captured length. */
+    bodyOffset: number;
+}
+
 export interface ParsedPacket {
     ethernet?: EthernetHeader;
+    vlans?: VlanTag[];
     ipv4?: IPv4Header;
     ipv6?: IPv6Header;
     tcp?: TCPHeader;
     udp?: UDPHeader;
     icmp?: ICMPHeader;
+    http?: HTTPMessage;
     payloadOffset: number;
     payloadLength: number;
     raw: Uint8Array;
@@ -92,6 +129,8 @@ const ETHERTYPE_IPV4 = 0x0800;
 const ETHERTYPE_IPV6 = 0x86dd;
 const ETHERTYPE_ARP = 0x0806;
 const ETHERTYPE_VLAN = 0x8100;
+const ETHERTYPE_VLAN_QINQ = 0x88a8;
+const ETHERTYPE_VLAN_9100 = 0x9100;
 
 // IP Protocol constants
 const IPPROTO_ICMP = 1;
@@ -129,9 +168,53 @@ const getEtherTypeName = (etherType: number): string => {
         case ETHERTYPE_IPV4: return 'IPv4';
         case ETHERTYPE_IPV6: return 'IPv6';
         case ETHERTYPE_ARP: return 'ARP';
-        case ETHERTYPE_VLAN: return 'VLAN';
+        case ETHERTYPE_VLAN: return '802.1Q';
+        case ETHERTYPE_VLAN_QINQ: return '802.1ad';
+        case ETHERTYPE_VLAN_9100: return '802.1Q-in-Q';
         default: return `0x${etherType.toString(16)}`;
     }
+};
+
+const isVlanEtherType = (etherType: number): boolean => {
+    return etherType === ETHERTYPE_VLAN || etherType === ETHERTYPE_VLAN_QINQ || etherType === ETHERTYPE_VLAN_9100;
+};
+
+const parseVlans = (data: Uint8Array, offset: number, outerEtherType: number): { vlans: VlanTag[]; etherType: number; offset: number } | null => {
+    if (!isVlanEtherType(outerEtherType)) {
+        return { vlans: [], etherType: outerEtherType, offset };
+    }
+
+    const vlans: VlanTag[] = [];
+    let currentOffset = offset;
+    let currentEtherType = outerEtherType;
+
+    while (isVlanEtherType(currentEtherType)) {
+        if (data.length < currentOffset + 4) {
+            return null;
+        }
+
+        const tci = (data[currentOffset] << 8) | data[currentOffset + 1];
+        const innerEtherType = (data[currentOffset + 2] << 8) | data[currentOffset + 3];
+        vlans.push({
+            tpid: currentEtherType,
+            tpidName: getEtherTypeName(currentEtherType),
+            tci,
+            pcp: (tci >> 13) & 0x07,
+            dei: (tci & 0x1000) !== 0,
+            vlanId: tci & 0x0fff,
+            innerEtherType,
+            innerEtherTypeName: getEtherTypeName(innerEtherType),
+        });
+
+        currentEtherType = innerEtherType;
+        currentOffset += 4;
+    }
+
+    return {
+        vlans,
+        etherType: currentEtherType,
+        offset: currentOffset,
+    };
 };
 
 const getIPProtocolName = (protocol: number): string => {
@@ -318,6 +401,101 @@ const parseICMP = (data: Uint8Array, offset: number, isV6: boolean): ICMPHeader 
     };
 };
 
+const HTTP_REQUEST_METHODS = ['GET ', 'POST ', 'PUT ', 'DELETE ', 'HEAD ', 'OPTIONS ', 'PATCH ', 'CONNECT ', 'TRACE '];
+const HTTP_RESPONSE_PREFIXES = ['HTTP/1.0 ', 'HTTP/1.1 '];
+const HTTP_MAX_PARSE_BYTES = 8192;
+const HTTP_MAX_HEADERS = 64;
+
+const parseHTTP = (data: Uint8Array, payloadOffset: number): HTTPMessage | null => {
+    if (payloadOffset >= data.length) return null;
+
+    const available = Math.min(data.length - payloadOffset, HTTP_MAX_PARSE_BYTES);
+    if (available === 0) return null;
+
+    const sniff = String.fromCharCode(...data.subarray(payloadOffset, payloadOffset + Math.min(32, available)));
+
+    let isRequest = false;
+    let isResponse = false;
+
+    for (const method of HTTP_REQUEST_METHODS) {
+        if (sniff.startsWith(method)) {
+            isRequest = true;
+            break;
+        }
+    }
+    if (!isRequest) {
+        for (const prefix of HTTP_RESPONSE_PREFIXES) {
+            if (sniff.startsWith(prefix)) {
+                isResponse = true;
+                break;
+            }
+        }
+    }
+    if (!isRequest && !isResponse) return null;
+
+    const text = String.fromCharCode(...data.subarray(payloadOffset, payloadOffset + available));
+
+    const crlfIdx = text.indexOf('\r\n');
+    if (crlfIdx < 0) return null;
+    const requestLine = text.substring(0, crlfIdx);
+    const parts = requestLine.split(' ');
+
+    let method: string | undefined;
+    let target: string | undefined;
+    let version: string;
+    let statusCode: number | undefined;
+    let reasonPhrase: string | undefined;
+
+    if (isRequest) {
+        if (parts.length < 3) return null;
+        method = parts[0];
+        target = parts[1];
+        version = parts[2];
+    } else {
+        if (parts.length < 2) return null;
+        version = parts[0];
+        statusCode = parseInt(parts[1], 10);
+        if (isNaN(statusCode)) return null;
+        reasonPhrase = parts.slice(2).join(' ');
+    }
+
+    const headers: HTTPHeader[] = [];
+    let pos = crlfIdx + 2;
+    let headerCount = 0;
+
+    while (pos < text.length && headerCount < HTTP_MAX_HEADERS) {
+        const lineEnd = text.indexOf('\r\n', pos);
+        if (lineEnd < 0) break;
+        if (lineEnd === pos) {
+            pos += 2;
+            break;
+        }
+        const line = text.substring(pos, lineEnd);
+        const colonIdx = line.indexOf(':');
+        if (colonIdx > 0) {
+            headers.push({
+                name: line.substring(0, colonIdx),
+                value: line.substring(colonIdx + 1).trimStart(),
+            });
+            headerCount++;
+        }
+        pos = lineEnd + 2;
+    }
+
+    const bodyOffset = payloadOffset + pos;
+
+    return {
+        isRequest,
+        method,
+        target,
+        statusCode,
+        reasonPhrase,
+        version: version!,
+        headers,
+        bodyOffset,
+    };
+};
+
 export const parsePacket = (data: Uint8Array): ParsedPacket => {
     const result: ParsedPacket = {
         payloadOffset: 0,
@@ -333,13 +511,16 @@ export const parsePacket = (data: Uint8Array): ParsedPacket => {
     result.ethernet = ethernet;
     offset = 14;
 
-    // Handle VLAN tag
     let etherType = ethernet.etherType;
-    if (etherType === ETHERTYPE_VLAN) {
-        if (data.length < offset + 4) return result;
-        etherType = (data[offset + 2] << 8) | data[offset + 3];
-        offset += 4;
+    const parsedVlans = parseVlans(data, offset, etherType);
+    if (!parsedVlans) {
+        return result;
     }
+    if (parsedVlans.vlans.length > 0) {
+        result.vlans = parsedVlans.vlans;
+    }
+    etherType = parsedVlans.etherType;
+    offset = parsedVlans.offset;
 
     // Parse IP layer
     let ipProtocol: number | null = null;
@@ -391,6 +572,11 @@ export const parsePacket = (data: Uint8Array): ParsedPacket => {
 
     result.payloadOffset = offset;
     result.payloadLength = Math.max(0, data.length - offset);
+
+    if (result.tcp && offset < data.length) {
+        const http = parseHTTP(data, offset);
+        if (http) result.http = http;
+    }
 
     return result;
 };
@@ -506,4 +692,3 @@ export const base64ToUint8Array = (base64: string): Uint8Array => {
     }
     return bytes;
 };
-

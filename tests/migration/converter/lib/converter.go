@@ -37,6 +37,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/yanet-platform/yanet2/tests/functional/framework"
 	"gopkg.in/yaml.v3"
 )
 
@@ -44,8 +45,9 @@ import (
 type Config struct {
 	InputDir       string
 	OutputDir      string
-	Verbose        bool // Enable verbose output (user-facing progress messages)
-	Debug          bool // Enable debug logging (technical details, automatically enables Verbose)
+	PackageName    string // Go package name for generated test files (default: "functional")
+	Verbose        bool   // Enable verbose output (user-facing progress messages)
+	Debug          bool   // Enable debug logging (technical details, automatically enables Verbose)
 	SkiplistPath   string
 	ForceASTParser bool // Force use of AST parser (fail if unavailable)
 	ForcePCAP      bool // Force use of PCAP analyzer, even if AST is available
@@ -227,11 +229,90 @@ type Converter struct {
 	scapyCodegenV2        *ScapyCodegenV2 // New code generator
 	packetCounter         int             // Global counter for unique packet function names
 	stepCounter           int             // Counter for unique step names
+	fibStepCounter        int             // Counter for unique FIB YAML file names
+	fibState              []fibEntry      // Current FIB state (accumulated across steps)
 	skiplist              map[string]SkiplistEntry
 	defaultStripVLAN      bool
 	moduleInventory       moduleInventory
 	specialHandlingSkips  map[string]int // Track special handling types that were skipped
 	unsupportedLayerTypes map[string]int // Track unsupported layer types
+}
+
+// fibEntry represents a single FIB entry with prefix for state tracking.
+type fibEntry struct {
+	Prefix string
+}
+
+// resetFIBState initializes FIB state with the baseline entries.
+// Called before converting each test.
+func (c *Converter) resetFIBState() {
+	c.fibStepCounter = 0
+	c.fibState = []fibEntry{
+		{Prefix: "0.0.0.0/0"},
+		{Prefix: "::/0"},
+	}
+}
+
+// addFIBEntries adds prefixes to the current FIB state, avoiding duplicates.
+func (c *Converter) addFIBEntries(prefixes []string) {
+	for _, p := range prefixes {
+		found := false
+		for _, e := range c.fibState {
+			if e.Prefix == p {
+				found = true
+				break
+			}
+		}
+		if !found {
+			c.fibState = append(c.fibState, fibEntry{Prefix: p})
+		}
+	}
+}
+
+// removeFIBEntries removes prefixes from the current FIB state.
+func (c *Converter) removeFIBEntries(prefixes []string) {
+	remove := make(map[string]bool, len(prefixes))
+	for _, p := range prefixes {
+		remove[p] = true
+	}
+	var kept []fibEntry
+	for _, e := range c.fibState {
+		if !remove[e.Prefix] {
+			kept = append(kept, e)
+		}
+	}
+	c.fibState = kept
+}
+
+// generateFIBUpdateGoCode generates Go code that writes a FIB YAML file
+// and runs yanet-cli-route fib update.
+func (c *Converter) generateFIBUpdateGoCode(description string) string {
+	c.fibStepCounter++
+	fileName := fmt.Sprintf("route0-step%03d.yaml", c.fibStepCounter)
+
+	// Build YAML entries string
+	var yamlEntries strings.Builder
+	yamlEntries.WriteString("entries:\n")
+	for _, e := range c.fibState {
+		yamlEntries.WriteString(fmt.Sprintf(`  - prefix: "%s"
+    nexthops:
+      - dst_mac: "%s"
+        src_mac: "%s"
+        device: "01:00.0"
+`, e.Prefix, framework.SrcMAC, framework.DstMAC))
+	}
+
+	// Use backtick for multi-line string in generated Go code
+	return fmt.Sprintf(`fibYAML := %s
+%s%s
+	err := fw.CreateConfigFile(%q, fibYAML)
+	require.NoError(t, err, "Failed to create FIB config for %s")
+	_, err = fw.ExecuteCommand(%q)
+	require.NoError(t, err, "Failed to update FIB for %s")`,
+		"`", yamlEntries.String(), "`",
+		fileName, description,
+		fmt.Sprintf("%s fib update --cfg=route0 --rules /mnt/config/%s", framework.CLIRoute, fileName),
+		description)
 }
 
 type moduleInventory struct {
@@ -264,6 +345,10 @@ type SkiplistEntry struct {
 
 // NewConverter creates a new converter instance
 func NewConverter(config *Config) (*Converter, error) {
+	if config.PackageName == "" {
+		config.PackageName = "functional"
+	}
+
 	// Initialize optional AST-based system (PCAP path is default)
 	scapyASTParser, err := findScapyASTParser()
 	if err != nil {
@@ -724,11 +809,12 @@ func (c *Converter) ConvertAllTestsWithStats() (*ConversionStats, error) {
 //   - Step conversion (routes, CLI commands, packets)
 //   - Go code generation with proper formatting
 func (c *Converter) ConvertSingleTest(testPath, testName string) error {
-	// Reset counters for each test to avoid leakage between tests
+	// Reset counters and state for each test to avoid leakage between tests
 	c.packetCounter = 0
 	c.stepCounter = 0
 	c.defaultStripVLAN = false
 	c.moduleInventory = moduleInventory{balancerModules: make(map[string]struct{})}
+	c.resetFIBState()
 
 	// Check test-level skip state
 	testState := c.effectiveState(testName, 0)

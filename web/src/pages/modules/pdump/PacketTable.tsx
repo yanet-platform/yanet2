@@ -1,16 +1,14 @@
 import React, { useRef, useMemo, useState, useCallback, useEffect } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { Box, Text } from '@gravity-ui/uikit';
+import { TextInput } from '@gravity-ui/uikit';
 import { EmptyState } from '../../../components';
 import { useContainerHeight } from '../../../hooks';
 import { ROW_HEIGHT, SEARCH_BAR_HEIGHT, HEADER_HEIGHT, FOOTER_HEIGHT, OVERSCAN, TOTAL_WIDTH } from './constants';
 import { PacketTableRow } from './PacketTableRow';
 import { PacketTableHeader } from './PacketTableHeader';
-import { PacketSearchBar } from './PacketSearchBar';
 import type { CapturedPacket, PacketSortState, PacketSortColumn } from './types';
 import './pdump.scss';
 
-// Helper to extract sortable values from packet
 const getPacketSortValues = (packet: CapturedPacket) => {
     const { parsed } = packet;
 
@@ -47,7 +45,6 @@ const getPacketSortValues = (packet: CapturedPacket) => {
     return { source, destination, protocol, length: parsed.raw.length };
 };
 
-// Sort comparators
 const createComparator = (column: PacketSortColumn, direction: 'asc' | 'desc') => {
     const mult = direction === 'asc' ? 1 : -1;
 
@@ -83,11 +80,20 @@ const createComparator = (column: PacketSortColumn, direction: 'asc' | 'desc') =
 export interface PacketTableProps {
     packets: CapturedPacket[];
     selectedPacketId: number | null;
-    onSelectPacket: (id: number | null) => void;
+    onSelectPacket: (packet: CapturedPacket | null) => void;
     isCapturing: boolean;
     configName: string | null;
-    onStopCapture: () => void;
     onClearPackets: () => void;
+    /** Set of packet IDs that are newly arrived (used for row-flash animation). */
+    newPacketIds: Set<number>;
+    /** Whether the view is paused (controlled by parent). */
+    paused: boolean;
+    /** Callback to toggle pause state in the parent. */
+    onTogglePause: () => void;
+    /** Whether auto-scroll is enabled (controlled by parent). */
+    autoScroll: boolean;
+    /** Callback when auto-scroll state changes. */
+    onAutoScrollChange: (value: boolean) => void;
 }
 
 export const PacketTable: React.FC<PacketTableProps> = ({
@@ -96,27 +102,27 @@ export const PacketTable: React.FC<PacketTableProps> = ({
     onSelectPacket,
     isCapturing,
     configName,
-    onStopCapture,
     onClearPackets,
+    newPacketIds,
+    paused,
+    onTogglePause,
+    autoScroll,
+    onAutoScrollChange,
 }) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const parentRef = useRef<HTMLDivElement>(null);
     const containerHeight = useContainerHeight(containerRef);
     const [searchQuery, setSearchQuery] = useState('');
-    const [autoScroll, setAutoScroll] = useState(true);
     const [sortState, setSortState] = useState<PacketSortState>({ column: null, direction: 'asc' });
 
-    // Handle sort
     const handleSort = useCallback((column: PacketSortColumn) => {
         setSortState(prev => ({
             column,
             direction: prev.column === column && prev.direction === 'asc' ? 'desc' : 'asc',
         }));
-        // Disable auto-scroll when sorting
-        setAutoScroll(false);
-    }, []);
+        onAutoScrollChange(false);
+    }, [onAutoScrollChange]);
 
-    // Filter packets based on search query
     const filteredPackets = useMemo(() => {
         if (!searchQuery.trim()) return packets;
 
@@ -124,7 +130,6 @@ export const PacketTable: React.FC<PacketTableProps> = ({
         return packets.filter(packet => {
             const { parsed } = packet;
 
-            // Search in IP addresses
             if (parsed.ipv4) {
                 if (parsed.ipv4.srcAddr.includes(lowerQuery) || parsed.ipv4.dstAddr.includes(lowerQuery)) {
                     return true;
@@ -137,7 +142,6 @@ export const PacketTable: React.FC<PacketTableProps> = ({
                 }
             }
 
-            // Search in ports
             if (parsed.tcp) {
                 if (parsed.tcp.srcPort.toString().includes(lowerQuery) ||
                     parsed.tcp.dstPort.toString().includes(lowerQuery)) {
@@ -151,13 +155,11 @@ export const PacketTable: React.FC<PacketTableProps> = ({
                 }
             }
 
-            // Search in protocol
             const protocol = parsed.tcp ? 'tcp' : parsed.udp ? 'udp' : parsed.icmp ? 'icmp' : '';
             if (protocol.includes(lowerQuery)) {
                 return true;
             }
 
-            // Search in MAC addresses
             if (parsed.ethernet) {
                 if (parsed.ethernet.srcMac.toLowerCase().includes(lowerQuery) ||
                     parsed.ethernet.dstMac.toLowerCase().includes(lowerQuery)) {
@@ -169,7 +171,6 @@ export const PacketTable: React.FC<PacketTableProps> = ({
         });
     }, [packets, searchQuery]);
 
-    // Sort filtered packets
     const sortedPackets = useMemo(() => {
         if (!sortState.column) return filteredPackets;
 
@@ -177,7 +178,6 @@ export const PacketTable: React.FC<PacketTableProps> = ({
         return [...filteredPackets].sort(comparator);
     }, [filteredPackets, sortState]);
 
-    // Virtualizer
     const rowVirtualizer = useVirtualizer({
         count: sortedPackets.length,
         getScrollElement: () => parentRef.current,
@@ -185,53 +185,59 @@ export const PacketTable: React.FC<PacketTableProps> = ({
         overscan: OVERSCAN,
     });
 
-    // Auto-scroll to bottom when new packets arrive
+    // Use the id of the newest packet rather than sortedPackets.length so this
+    // effect re-fires after every flush even when the ring buffer is full and
+    // length stays pinned at MAX_PACKETS.
+    const lastPacketId = sortedPackets.length > 0 ? sortedPackets[sortedPackets.length - 1]?.id : null;
+
     useEffect(() => {
-        if (autoScroll && isCapturing && sortedPackets.length > 0 && parentRef.current && !sortState.column) {
+        if (autoScroll && !paused && isCapturing && sortedPackets.length > 0 && parentRef.current && !sortState.column) {
             rowVirtualizer.scrollToIndex(sortedPackets.length - 1, { align: 'end' });
         }
-    }, [sortedPackets.length, autoScroll, isCapturing, rowVirtualizer, sortState.column]);
+    }, [lastPacketId, autoScroll, paused, isCapturing, rowVirtualizer, sortState.column]);
 
-    // Detect mouse wheel scroll to disable auto-scroll
-    // Using wheel event instead of scroll event to avoid race conditions with programmatic scrolling
+    const STICKY_BOTTOM_THRESHOLD_PX = 24;
+
     useEffect(() => {
         const element = parentRef.current;
         if (!element || !isCapturing) return;
 
-        const handleWheel = (e: WheelEvent) => {
-            // Only disable auto-scroll when user scrolls up
-            if (autoScroll && e.deltaY < 0) {
-                setAutoScroll(false);
-            }
+        const handleScroll = () => {
+            const el = parentRef.current;
+            if (!el) return;
+            const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+            const atBottom = distance < STICKY_BOTTOM_THRESHOLD_PX;
+            onAutoScrollChange(atBottom);
         };
 
-        element.addEventListener('wheel', handleWheel, { passive: true });
-        return () => element.removeEventListener('wheel', handleWheel);
-    }, [isCapturing, autoScroll]);
+        element.addEventListener('scroll', handleScroll, { passive: true });
+        return () => element.removeEventListener('scroll', handleScroll);
+    }, [isCapturing, onAutoScrollChange]);
 
-    const handleSelectPacket = useCallback((id: number) => {
-        onSelectPacket(id === selectedPacketId ? null : id);
-    }, [onSelectPacket, selectedPacketId]);
+    const selectedPacketIdRef = useRef(selectedPacketId);
+    selectedPacketIdRef.current = selectedPacketId;
+
+    const handleSelectPacket = useCallback((packet: CapturedPacket) => {
+        onSelectPacket(packet.id === selectedPacketIdRef.current ? null : packet);
+    }, [onSelectPacket]);
 
     const handleSearchChange = useCallback((value: string) => {
         setSearchQuery(value);
     }, []);
 
     const handleToggleAutoScroll = useCallback(() => {
-        setAutoScroll(prev => !prev);
-    }, []);
+        onAutoScrollChange(!autoScroll);
+    }, [onAutoScrollChange, autoScroll]);
 
-    // Stats text
     const statsText = useMemo(() => {
         const total = packets.length;
         const filtered = sortedPackets.length;
         if (searchQuery.trim() && filtered !== total) {
-            return `Showing ${filtered.toLocaleString()} of ${total.toLocaleString()} packets`;
+            return `${filtered.toLocaleString()} / ${total.toLocaleString()} packets`;
         }
         return `${total.toLocaleString()} packets`;
     }, [packets.length, sortedPackets.length, searchQuery]);
 
-    // Don't render until height is measured
     if (containerHeight === 0) {
         return <div ref={containerRef} className="packet-table__container" />;
     }
@@ -239,43 +245,82 @@ export const PacketTable: React.FC<PacketTableProps> = ({
     const tableBodyHeight = containerHeight - SEARCH_BAR_HEIGHT - HEADER_HEIGHT - FOOTER_HEIGHT - 2;
     const virtualRows = rowVirtualizer.getVirtualItems();
 
-    // Footer text
     const footerText = virtualRows.length > 0
-        ? `Packets ${(virtualRows[0].index + 1).toLocaleString()} - ${(virtualRows[virtualRows.length - 1].index + 1).toLocaleString()} of ${sortedPackets.length.toLocaleString()}`
+        ? `Rows ${(virtualRows[0].index + 1).toLocaleString()} – ${(virtualRows[virtualRows.length - 1].index + 1).toLocaleString()} of ${sortedPackets.length.toLocaleString()}`
         : '';
 
     return (
         <div ref={containerRef} className="packet-table" style={{ height: containerHeight }}>
-            <PacketSearchBar
-                searchQuery={searchQuery}
-                onSearchChange={handleSearchChange}
-                statsText={statsText}
-                isCapturing={isCapturing}
-                configName={configName}
-                onStopCapture={onStopCapture}
-                onClearPackets={onClearPackets}
-                canClear={packets.length > 0}
-                autoScroll={autoScroll}
-                onToggleAutoScroll={handleToggleAutoScroll}
-            />
+            <div className="packet-table__toolbar" style={{ height: SEARCH_BAR_HEIGHT }}>
+                <div className="packet-table__search">
+                    <TextInput
+                        placeholder="Filter by IP, port, protocol..."
+                        value={searchQuery}
+                        onUpdate={handleSearchChange}
+                        size="m"
+                        hasClear
+                    />
+                </div>
+                <div className="packet-table__toolbar-info">
+                    <span className="packet-table__stats">{statsText}</span>
+                    {configName && isCapturing && (
+                        <span className={`packet-table__live-badge${paused ? ' packet-table__live-badge--paused' : ''}`}>
+                            {paused ? 'PAUSED' : 'LIVE'}
+                        </span>
+                    )}
+                </div>
+                <div className="packet-table__toolbar-actions">
+                    {isCapturing && (
+                        <button
+                            type="button"
+                            className={`fw-btn fw-btn--ghost fw-btn--sm${autoScroll ? ' packet-table__btn--active' : ''}`}
+                            onClick={handleToggleAutoScroll}
+                            title="Toggle auto-scroll to new packets"
+                        >
+                            Auto-scroll
+                        </button>
+                    )}
+                    <button
+                        type="button"
+                        className={`fw-btn fw-btn--ghost fw-btn--sm${paused ? ' packet-table__btn--active' : ''}`}
+                        onClick={onTogglePause}
+                        title="Pause / resume view updates"
+                    >
+                        {paused ? 'Resume' : 'Pause'}
+                    </button>
+                    <button
+                        type="button"
+                        className="fw-btn fw-btn--ghost fw-btn--sm"
+                        onClick={onClearPackets}
+                        disabled={packets.length === 0}
+                        title="Clear all captured packets"
+                    >
+                        Clear
+                    </button>
+                </div>
+            </div>
 
-            {/* Table container */}
-            <Box className="packet-table__wrapper">
+            <div className="packet-table__wrapper">
                 <PacketTableHeader
                     sortState={sortState}
                     onSort={handleSort}
                 />
 
-                {/* Virtualized body */}
                 <div
                     ref={parentRef}
                     className="packet-table__body"
                     style={{ height: tableBodyHeight }}
                 >
                     {sortedPackets.length === 0 ? (
-                        <Box className="packet-table__empty">
-                            <EmptyState message={packets.length === 0 ? 'No packets captured yet' : 'No packets match the filter'} />
-                        </Box>
+                        <div className="packet-table__empty">
+                            <EmptyState message={
+                                !configName
+                                    ? 'Select a config and start capture to see packets.'
+                                    : packets.length === 0
+                                        ? 'Waiting for packets matching the filter...'
+                                        : 'No packets match the filter'
+                            } />
+                        </div>
                     ) : (
                         <div
                             className="packet-table__virtual-container"
@@ -289,6 +334,7 @@ export const PacketTable: React.FC<PacketTableProps> = ({
                                 if (!packet) return null;
 
                                 const isSelected = packet.id === selectedPacketId;
+                                const isNew = newPacketIds.has(packet.id) && !paused;
 
                                 return (
                                     <PacketTableRow
@@ -297,23 +343,22 @@ export const PacketTable: React.FC<PacketTableProps> = ({
                                         index={virtualRow.index}
                                         start={virtualRow.start}
                                         isSelected={isSelected}
-                                        onClick={() => handleSelectPacket(packet.id)}
+                                        isNew={isNew}
+                                        onSelect={handleSelectPacket}
                                     />
                                 );
                             })}
                         </div>
                     )}
                 </div>
-            </Box>
+            </div>
 
-            {/* Footer */}
-            <Box className="packet-table__footer" style={{ height: FOOTER_HEIGHT }}>
-                <Text variant="body-2" color="secondary">{footerText}</Text>
-                <Text variant="body-2" color="secondary">
-                    {sortState.column ? `Sorted by ${sortState.column} • ` : ''}
-                    Click to inspect
-                </Text>
-            </Box>
+            <div className="packet-table__footer" style={{ height: FOOTER_HEIGHT }}>
+                <span className="packet-table__footer-text">{footerText}</span>
+                <span className="packet-table__footer-text">
+                    {sortState.column ? `Sorted by ${sortState.column} · ` : ''}Click to inspect
+                </span>
+            </div>
         </div>
     );
 };

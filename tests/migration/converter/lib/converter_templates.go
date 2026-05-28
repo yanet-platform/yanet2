@@ -177,14 +177,13 @@ func (c *Converter) generateTestStepsInOrder(steps []ConvertedStep) string {
 
 		var receivedPackets []gopacket.Packet
 		for idx, pkt := range sendPackets {
-			t.Logf("Sending packet %%d of %%d from `+testCase.SendPcap+`", idx+1, len(sendPackets))
 			packetBytes := pkt.Data()
 
 			// Send packet
-			require.NoError(t, client.SendPacket(packetBytes), "Failed to send packet %%d", idx)
+			require.NoError(t, client.SendPacket(packetBytes, ""), "Failed to send packet %%d", idx)
 
 			// Receive packet (ignore errors - packet may be dropped)
-			responseData, _ := client.ReceivePacket(100 * time.Millisecond)
+			responseData, _ := client.ReceivePacket(100 * time.Millisecond, "")
 			if responseData != nil {
 				receivedPkt := gopacket.NewPacket(responseData, layers.LayerTypeEthernet, gopacket.Default)
 				receivedPackets = append(receivedPackets, receivedPkt)
@@ -251,6 +250,7 @@ func (c *Converter) generateTestHeader(testName, originalTestName, testType stri
 	"github.com/gopacket/gopacket/layers"
 	"github.com/stretchr/testify/require"
 
+	"github.com/yanet-platform/yanet2/tests/functional/framework"
 	"github.com/yanet-platform/yanet2/tests/migration/converter/lib"
 )`
 
@@ -262,7 +262,7 @@ func (c *Converter) generateTestHeader(testName, originalTestName, testType stri
 	_ = net.ParseIP
 	_ = strings.Join`
 
-	return fmt.Sprintf(`package converted
+	return fmt.Sprintf(`package %s
 
 %s
 
@@ -270,9 +270,10 @@ func (c *Converter) generateTestHeader(testName, originalTestName, testType stri
 // Original test: %s
 // Test type: %s
 func Test%s(t *testing.T) {
-	fw := globalFramework.ForTest(t)
+	t.Parallel()
+	withBootedVM(t, func(fw *framework.F) {
 	require.NotNil(t, fw, "Global framework should be initialized")%s
-`, imports, testName, originalTestName, testType, testName, silenceCode)
+`, c.config.PackageName, imports, testName, originalTestName, testType, testName, silenceCode)
 }
 
 // generateNAT64TestTemplate generates template for NAT64 tests
@@ -307,7 +308,7 @@ func (c *Converter) generateNAT64TestTemplate(testData *GoTestData, functions []
 				// Generate prefix add commands
 				for _, prefix := range prefixes {
 					nat64Commands = append(nat64Commands,
-						fmt.Sprintf(`"%s prefix add --cfg %s --instances 0 --prefix %s"`, framework.CLINAT64, moduleName, prefix))
+						fmt.Sprintf(`"%s prefix add --cfg %s --prefix %s"`, framework.CLINAT64, moduleName, prefix))
 				}
 
 				// Generate mapping add commands
@@ -318,7 +319,7 @@ func (c *Converter) generateNAT64TestTemplate(testData *GoTestData, functions []
 					}
 					prefixIndex := prefixMap[prefix]
 					nat64Commands = append(nat64Commands,
-						fmt.Sprintf(`"%s mapping add --cfg %s --instances 0 --ipv4 %s --ipv6 %s --prefix-index %d"`,
+						fmt.Sprintf(`"%s mapping add --cfg %s --ipv4 %s --ipv6 %s --prefix-index %d"`,
 							framework.CLINAT64, moduleName, trans.IPv4Address, trans.IPv6Address, prefixIndex))
 				}
 				break // Use the first NAT64 module found
@@ -340,8 +341,8 @@ func (c *Converter) generateNAT64TestTemplate(testData *GoTestData, functions []
 	fw.Run("Step_000_Configure_NAT64_Environment", func(fw *framework.F, t *testing.T) {
 		// Configure NAT64 module
 		commands := []string{%s%s
-			"%s update --name=test --chains chain2:1=forward:forward0,nat64:%s,route:route0 --instance=0",
-			"%s update --name=test --functions test --instance=0",
+			"%s update --name=test --chains chain2:1=forward:forward0,nat64:%s,route:route0",
+			"%s update --name=test --functions test",
 		}
 		_, err := fw.ExecuteCommands(commands...)
 		require.NoError(t, err, "Failed to configure NAT64 module")
@@ -349,6 +350,7 @@ func (c *Converter) generateNAT64TestTemplate(testData *GoTestData, functions []
 	})
 
 %s
+	})
 }
 
 %s
@@ -383,9 +385,9 @@ func (c *Converter) generateBalancerTestTemplate(testData *GoTestData, functions
 	fw.Run("Step_000_Configure_Balancer_Environment", func(fw *framework.F, t *testing.T) {
 		// Configure balancer module
 		commands := []string{
-			"%s service add --cfg balancer0 --instances 0 --virtual-ip 10.0.0.16 --proto tcp --virtual-port any",
-			"%s update --name=test --chains chain2:1=balancer:balancer0,route:route0 --instance=0",
-			"%s update --name=test --functions test --instance=0",
+			"%s service add --cfg balancer0 --virtual-ip 10.0.0.16 --proto tcp --virtual-port any",
+			"%s update --name=test --chains chain2:1=balancer:balancer0,route:route0",
+			"%s update --name=test --functions test",
 		}
 		_, err := fw.ExecuteCommands(commands...)
 		require.NoError(t, err, "Failed to configure balancer module")
@@ -393,11 +395,12 @@ func (c *Converter) generateBalancerTestTemplate(testData *GoTestData, functions
 	})
 
 %s
+	})
 }
 
 %s
 `, header,
-		framework.CLIBalancer,
+		framework.CLIBasePath+"/yanet-cli-balancer2",
 		framework.CLIFunction,
 		framework.CLIPipeline,
 		c.generateTestStepsInOrder(testData.Steps),
@@ -409,6 +412,7 @@ func (c *Converter) generateRouteTestTemplate(testData *GoTestData, functions []
 	header := c.generateTestHeader(testData.TestName, testData.OriginalTestName, testData.TestType)
 	return fmt.Sprintf(`%s
 %s
+	})
 }
 
 %s
@@ -424,8 +428,8 @@ func (c *Converter) generateACLTestTemplate(testData *GoTestData, functions []st
 	fw.Run("Step_000_Configure_ACL_Environment", func(fw *framework.F, t *testing.T) {
 		// Configure ACL module
 		commands := []string{
-			"%s update --name=test --chains chain2:1=acl:acl0,route:route0 --instance=0",
-			"%s update --name=test --functions test --instance=0",
+			"%s update --name=test --chains chain2:1=acl:acl0,route:route0",
+			"%s update --name=test --functions test",
 		}
 		_, err := fw.ExecuteCommands(commands...)
 		require.NoError(t, err, "Failed to configure ACL module")
@@ -433,6 +437,7 @@ func (c *Converter) generateACLTestTemplate(testData *GoTestData, functions []st
 	})
 
 %s
+	})
 }
 
 %s
@@ -455,12 +460,12 @@ func (c *Converter) generateDecapTestTemplate(testData *GoTestData, functions []
 				// Add IPv4 destination prefixes
 				for _, prefix := range module.IPv4DestinationPrefixes {
 					decapCommands = append(decapCommands,
-						fmt.Sprintf(`"%s prefix-add --cfg %s --instances 0 -p %s"`, framework.CLIDecap, moduleName, prefix))
+						fmt.Sprintf(`"%s prefix-add --cfg %s -p %s"`, framework.CLIDecap, moduleName, prefix))
 				}
 				// Add IPv6 destination prefixes
 				for _, prefix := range module.IPv6DestinationPrefixes {
 					decapCommands = append(decapCommands,
-						fmt.Sprintf(`"%s prefix-add --cfg %s --instances 0 -p %s"`, framework.CLIDecap, moduleName, prefix))
+						fmt.Sprintf(`"%s prefix-add --cfg %s -p %s"`, framework.CLIDecap, moduleName, prefix))
 				}
 			}
 		}
@@ -475,14 +480,15 @@ func (c *Converter) generateDecapTestTemplate(testData *GoTestData, functions []
 	fw.Run("Step_000_Configure_Decap_Environment", func(fw *framework.F, t *testing.T) {
 		// Configure Decap module
 		commands := []string{%s
-			"%s update --name=test --chains chain2:1=forward:forward0,decap:decap0,route:route0 --instance=0",
-			"%s update --name=test --functions test --instance=0",
+			"%s update --name=test --chains chain2:1=forward:forward0,decap:decap0,route:route0",
+			"%s update --name=test --functions test",
 		}
 		_, err := fw.ExecuteCommands(commands...)
 		require.NoError(t, err, "Failed to configure Decap module")
 	})
 
 %s
+	})
 }
 
 %s
@@ -501,14 +507,15 @@ func (c *Converter) generateGenericTestTemplate(testData *GoTestData, functions 
 	fw.Run("Step_000_Configure_Test_Environment", func(fw *framework.F, t *testing.T) {
 		// Configure test environment with forward (required for packet processing)
 		commands := []string{
-			"%s update --name=test --chains chain2:1=forward:forward0,route:route0 --instance=0",
-			"%s update --name=test --functions test --instance=0",
+			"%s update --name=test --chains chain2:1=forward:forward0,route:route0",
+			"%s update --name=test --functions test",
 		}
 		_, err := fw.ExecuteCommands(commands...)
 		require.NoError(t, err, "Failed to configure test environment")
 	})
 
 %s
+	})
 }
 
 %s

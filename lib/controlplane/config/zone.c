@@ -165,13 +165,13 @@ cp_config_gen_free(
 
 	// Then, free registries of module configs, chains,
 	// functions and pipelines
-	cp_module_registry_destroy(&config_gen->module_registry);
-	cp_function_registry_destroy(&config_gen->function_registry);
-	cp_pipeline_registry_destroy(&config_gen->pipeline_registry);
-	cp_device_registry_destroy(&config_gen->device_registry);
+	cp_module_registry_fini(&config_gen->module_registry);
+	cp_function_registry_fini(&config_gen->function_registry);
+	cp_pipeline_registry_fini(&config_gen->pipeline_registry);
+	cp_device_registry_fini(&config_gen->device_registry);
 
 	// Finally, free counter storage registry
-	cp_config_counter_storage_registry_destroy(
+	cp_config_counter_storage_registry_fini(
 		&config_gen->counter_storage_registry
 	);
 }
@@ -320,17 +320,30 @@ cp_config_update_functions(
 	}
 
 	for (uint64_t idx = 0; idx < function_count; ++idx) {
-		struct cp_function *new_cp_function = cp_function_create(
+		struct cp_function *new_cp_function = cp_function_new(
 			&cp_config->memory_context,
-			dp_config,
-			new_config_gen,
-			cp_function_configs[idx],
-			err
+			cp_function_configs[idx]->chain_count
 		);
 		if (new_cp_function == NULL) {
 			yanet_error_add(
 				err,
-				"failed to create function '%s'",
+				"failed to allocate function '%s'",
+				cp_function_configs[idx]->name
+			);
+			goto error_free;
+		}
+
+		if (cp_function_init(
+			    new_cp_function,
+			    dp_config,
+			    new_config_gen,
+			    cp_function_configs[idx],
+			    err
+		    )) {
+			cp_function_free(new_cp_function);
+			yanet_error_add(
+				err,
+				"failed to initialize function '%s'",
 				cp_function_configs[idx]->name
 			);
 			goto error_free;
@@ -427,16 +440,29 @@ cp_config_update_pipelines(
 	}
 
 	for (uint64_t idx = 0; idx < pipeline_count; ++idx) {
-		struct cp_pipeline *new_cp_pipeline = cp_pipeline_create(
+		struct cp_pipeline *new_cp_pipeline = cp_pipeline_new(
 			&cp_config->memory_context,
-			new_config_gen,
-			cp_pipeline_configs[idx],
-			err
+			cp_pipeline_configs[idx]->length
 		);
 		if (new_cp_pipeline == NULL) {
 			yanet_error_add(
 				err,
-				"failed to create pipeline '%s'",
+				"failed to allocate pipeline '%s'",
+				cp_pipeline_configs[idx]->name
+			);
+			goto error_free;
+		}
+
+		if (cp_pipeline_init(
+			    new_cp_pipeline,
+			    new_config_gen,
+			    cp_pipeline_configs[idx],
+			    err
+		    )) {
+			cp_pipeline_free(new_cp_pipeline);
+			yanet_error_add(
+				err,
+				"failed to initialize pipeline '%s'",
 				cp_pipeline_configs[idx]->name
 			);
 			goto error_free;
@@ -694,11 +720,20 @@ cp_config_gen_create(struct agent *agent, yanet_error **err) {
 		device_config.input_pipelines = &pipe_cfg;
 		device_config.output_pipelines = &pipe_cfg;
 		struct cp_device *cp_device =
-			cp_device_create(agent, &device_config, err);
+			cp_device_new(&agent->memory_context);
 		if (cp_device == NULL) {
 			yanet_error_add(
 				err,
-				"failed to create device '%s'",
+				"failed to allocate memory for device '%s'",
+				device_config.name
+			);
+			goto error;
+		}
+		if (cp_device_init(cp_device, agent, &device_config, err)) {
+			cp_device_free(cp_device);
+			yanet_error_add(
+				err,
+				"failed to initialize device '%s'",
 				device_config.name
 			);
 			goto error;

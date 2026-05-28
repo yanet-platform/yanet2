@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { API } from '../../../api';
 import type { DeviceType } from '../../../api/devices';
 import type { PipelineId } from '../../../api/pipelines';
@@ -15,12 +15,32 @@ export interface UseDeviceDataResult {
     updateDevice: (deviceName: string, updates: Partial<LocalDevice>) => void;
     saveDevice: (device: LocalDevice) => Promise<boolean>;
     loadPipelineList: () => Promise<PipelineId[]>;
+    getServerDevice: (name: string) => LocalDevice | null;
 }
 
 const parseWeight = (weight: string | number | undefined): number => {
     if (weight === undefined) return 0;
     if (typeof weight === 'number') return weight;
     return parseInt(weight, 10) || 0;
+};
+
+/** Returns true when two LocalDevice values are structurally equal (same type, vlanId, and pipeline arrays in order). */
+const localDeviceEquals = (a: LocalDevice, b: LocalDevice): boolean => {
+    if (a.type !== b.type) return false;
+    if (a.vlanId !== b.vlanId) return false;
+    if (a.inputPipelines.length !== b.inputPipelines.length) return false;
+    if (a.outputPipelines.length !== b.outputPipelines.length) return false;
+    for (let idx = 0; idx < a.inputPipelines.length; idx++) {
+        const pa = a.inputPipelines[idx];
+        const pb = b.inputPipelines[idx];
+        if (pa.name !== pb.name || Number(pa.weight) !== Number(pb.weight)) return false;
+    }
+    for (let idx = 0; idx < a.outputPipelines.length; idx++) {
+        const pa = a.outputPipelines[idx];
+        const pb = b.outputPipelines[idx];
+        if (pa.name !== pb.name || Number(pa.weight) !== Number(pb.weight)) return false;
+    }
+    return true;
 };
 
 const deviceInfoToLocal = (info: DeviceInfo): LocalDevice => {
@@ -42,23 +62,33 @@ const deviceInfoToLocal = (info: DeviceInfo): LocalDevice => {
 };
 
 /**
- * Hook for managing device data and API interactions
+ * Hook for managing device data and API interactions.
+ * Maintains a server-side snapshot map used by the diff modal.
  */
 export const useDeviceData = (): UseDeviceDataResult => {
     const [devices, setDevices] = useState<LocalDevice[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const serverSnapshotRef = useRef<Map<string, LocalDevice>>(new Map());
 
     const loadDevices = useCallback(async (): Promise<void> => {
         setLoading(true);
         setError(null);
 
         try {
-            // Get devices from inspect
             const inspectResponse: InspectResponse = await API.inspect.inspect();
             const instanceInfo = inspectResponse.instance_info;
 
             const loadedDevices = instanceInfo?.devices?.map(deviceInfoToLocal) || [];
+
+            const snapshot = new Map<string, LocalDevice>();
+            for (const d of loadedDevices) {
+                if (d.id.name) {
+                    snapshot.set(d.id.name, d);
+                }
+            }
+            serverSnapshotRef.current = snapshot;
+
             setDevices(loadedDevices);
         } catch (err) {
             const message = err instanceof Error ? err.message : 'Failed to load devices';
@@ -93,11 +123,12 @@ export const useDeviceData = (): UseDeviceDataResult => {
     ): void => {
         setDevices(prev => prev.map(device => {
             if (device.id.name === deviceName) {
-                return {
-                    ...device,
-                    ...updates,
-                    isDirty: true,
-                };
+                const updated = { ...device, ...updates };
+                const serverSnapshot = serverSnapshotRef.current.get(deviceName);
+                const isDirty = updated.isNew
+                    || !serverSnapshot
+                    || !localDeviceEquals(updated, serverSnapshot);
+                return { ...updated, isDirty };
             }
             return device;
         }));
@@ -136,10 +167,17 @@ export const useDeviceData = (): UseDeviceDataResult => {
                 throw new Error(response.error);
             }
 
-            // Mark device as clean
+            // Mark device as clean and update the server snapshot.
+            const savedDevice = { ...device, isDirty: false, isNew: false };
+            if (device.id.name) {
+                serverSnapshotRef.current = new Map(serverSnapshotRef.current).set(
+                    device.id.name,
+                    savedDevice,
+                );
+            }
             setDevices(prev => prev.map(d => {
                 if (d.id.name === device.id.name) {
-                    return { ...d, isDirty: false, isNew: false };
+                    return savedDevice;
                 }
                 return d;
             }));
@@ -162,6 +200,10 @@ export const useDeviceData = (): UseDeviceDataResult => {
         }
     }, []);
 
+    const getServerDevice = useCallback((name: string): LocalDevice | null => {
+        return serverSnapshotRef.current.get(name) ?? null;
+    }, []);
+
     return {
         devices,
         loading,
@@ -171,5 +213,6 @@ export const useDeviceData = (): UseDeviceDataResult => {
         updateDevice,
         saveDevice,
         loadPipelineList,
+        getServerDevice,
     };
 };

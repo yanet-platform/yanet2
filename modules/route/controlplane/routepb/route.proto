@@ -4,6 +4,7 @@ package routepb;
 
 option go_package = "github.com/yanet-platform/yanet2/modules/route/controlplane/routepb;routepb";
 
+import "common/commonpb/iprange.proto";
 import "common/commonpb/macaddr.proto";
 
 service RouteService {
@@ -47,8 +48,8 @@ message ShowFIBRequest {
 
 // ShowFIBResponse contains the list of FIB entries.
 message ShowFIBResponse {
-  // List of entries in the forwarding information base.
-  repeated FIBEntry entries = 1;
+  // List of FIB rows; each carries one range with its nexthops.
+  repeated FIBRangeEntry entries = 1;
 }
 
 // FIBEntry represents a single prefix in the FIB with its nexthops.
@@ -67,6 +68,16 @@ message FIBNexthop {
   commonpb.MACAddress src_mac = 2;
   // Egress device name.
   string device = 3;
+}
+
+// FIBRangeEntry represents a single dataplane FIB row.
+//
+// Carries the contiguous address range covered by one set of nexthops.
+// Used in ShowFIBResponse. UpdateFIBRequest still uses FIBEntry with a
+// CIDR string until a typed commonpb.IPPrefix lands.
+message FIBRangeEntry {
+  commonpb.IPRange range = 1;
+  repeated FIBNexthop nexthops = 2;
 }
 
 // UpdateFIBRequest carries the full FIB to be applied atomically.

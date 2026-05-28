@@ -2,7 +2,7 @@ package route
 
 import (
 	"context"
-	"net/netip"
+	"sort"
 	"sync"
 
 	"go.uber.org/zap"
@@ -10,7 +10,6 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/yanet-platform/yanet2/common/commonpb"
-	"github.com/yanet-platform/yanet2/common/go/xnetip"
 	"github.com/yanet-platform/yanet2/modules/route/bindings/go/croute"
 	"github.com/yanet-platform/yanet2/modules/route/controlplane/routepb"
 )
@@ -79,6 +78,7 @@ func (m *RouteService) ListConfigs(
 	for name := range m.configs {
 		response.Configs = append(response.Configs, name)
 	}
+	sort.Strings(response.Configs)
 	return response, nil
 }
 
@@ -109,7 +109,7 @@ func (m *RouteService) ShowFIB(
 	}
 
 	response := &routepb.ShowFIBResponse{
-		Entries: make([]*routepb.FIBEntry, 0, len(entries)),
+		Entries: make([]*routepb.FIBRangeEntry, 0, len(entries)),
 	}
 	for _, e := range entries {
 		if req.GetIpv4Only() && e.AddressFamily != croute.AddressFamilyIPv4 {
@@ -128,8 +128,13 @@ func (m *RouteService) ShowFIB(
 			}
 		}
 
-		response.Entries = append(response.Entries, &routepb.FIBEntry{
-			Prefix:   formatPrefixRange(e.PrefixFrom, e.PrefixTo),
+		ipRange, err := commonpb.NewIPRange(e.PrefixFrom, e.PrefixTo)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to build IP range from FIB entry: %v", err)
+		}
+
+		response.Entries = append(response.Entries, &routepb.FIBRangeEntry{
+			Range:    ipRange,
 			Nexthops: nexthops,
 		})
 	}
@@ -187,14 +192,4 @@ func (m *RouteService) UpdateFIB(
 	m.configs[name] = module
 
 	return &routepb.UpdateFIBResponse{}, nil
-}
-
-// formatPrefixRange converts an address range to a human-readable
-// string. If the range corresponds to a single CIDR prefix, it returns
-// CIDR notation; otherwise "from-to" range notation.
-func formatPrefixRange(from, to netip.Addr) string {
-	if prefix, ok := xnetip.RangeToCIDR(from, to); ok {
-		return prefix.String()
-	}
-	return from.String() + "-" + to.String()
 }

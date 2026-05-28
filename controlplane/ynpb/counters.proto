@@ -5,48 +5,26 @@ package ynpb;
 option go_package = "github.com/yanet-platform/yanet2/controlplane/ynpb;ynpb";
 
 service CountersService {
-  // Inspect retrieves the current configuration state.
-  rpc Device(DeviceCountersRequest) returns (CountersResponse) {}
-  rpc Pipeline(PipelineCountersRequest) returns (CountersResponse) {}
-  rpc Function(FunctionCountersRequest) returns (CountersResponse) {}
-  rpc Chain(ChainCountersRequest) returns (CountersResponse) {}
-  rpc Module(ModuleCountersRequest) returns (CountersResponse) {}
   rpc Perf(PerfCountersRequest) returns (PerfCountersResponse) {}
+  rpc ByTags(CountersByTagsRequest) returns (CountersByTagsResponse) {}
 }
 
-message DeviceCountersRequest { string device = 1; }
-
-message PipelineCountersRequest {
-  string device = 1;
-  string pipeline = 2;
+message CounterTag {
+  string key = 1;
+  string value = 2;
 }
 
-message FunctionCountersRequest {
-  string device = 1;
-  string pipeline = 2;
-  string function = 3;
+message CountersByTagsRequest {
+  repeated CounterTag tags = 1;
+  repeated string query = 2;
 }
 
-message ChainCountersRequest {
-  string device = 1;
-  string pipeline = 2;
-  string function = 3;
-  string chain = 4;
+message CounterGroup {
+  repeated CounterTag tags = 1;
+  repeated CounterInfo counters = 2;
 }
 
-message ModuleCountersRequest {
-  string device = 1;
-  string pipeline = 2;
-  string function = 3;
-  string chain = 4;
-  string module_type = 5;
-  string module_name = 6;
-  // CounterQuery filters counters by name. If empty, returns all
-  // counters.
-  //
-  // TODO: support wildcards or regex?
-  repeated string counter_query = 7;
-}
+message CountersByTagsResponse { repeated CounterGroup groups = 1; }
 
 message CounterInstanceInfo { repeated uint64 values = 1; }
 
@@ -54,8 +32,6 @@ message CounterInfo {
   string name = 1;
   repeated CounterInstanceInfo instances = 2;
 }
-
-message CountersResponse { repeated CounterInfo counters = 1; }
 
 // Request message for retrieving module performance counters.
 //

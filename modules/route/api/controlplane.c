@@ -49,6 +49,7 @@ route_module_config_create(
 		    config, &config->cp_module.memory_context
 	    )) {
 		yanet_error_add(err, "failed to init config data");
+		cp_module_fini(&config->cp_module);
 		memory_bfree(
 			&agent->memory_context,
 			config,
@@ -59,19 +60,6 @@ route_module_config_create(
 
 	return &config->cp_module;
 }
-
-void
-route_module_config_free(struct cp_module *cp_module) {
-	struct route_module_config *config =
-		container_of(cp_module, struct route_module_config, cp_module);
-
-	struct agent *agent = ADDR_OF(&cp_module->agent);
-	memory_bfree(
-		&agent->memory_context,
-		config,
-		sizeof(struct route_module_config)
-	);
-};
 
 int
 route_module_config_data_init(
@@ -100,28 +88,49 @@ route_module_config_data_init(
 void
 route_module_config_data_destroy(struct route_module_config *config) {
 	struct route *routes = ADDR_OF(&config->routes);
-	memory_bfree(
+	mem_array_free_exp(
 		&config->cp_module.memory_context,
 		routes,
-		sizeof(struct route) * config->route_count
+		sizeof(*routes),
+		config->route_count
 	);
 
 	struct route_list *route_lists = ADDR_OF(&config->route_lists);
-	memory_bfree(
+	mem_array_free_exp(
 		&config->cp_module.memory_context,
 		route_lists,
-		sizeof(struct route_list) * config->route_list_count
+		sizeof(*route_lists),
+		config->route_list_count
 	);
 
 	uint64_t *route_indexes = ADDR_OF(&config->route_indexes);
-	memory_bfree(
+	mem_array_free_exp(
 		&config->cp_module.memory_context,
 		route_indexes,
-		sizeof(uint64_t) * config->route_index_count
+		sizeof(*route_indexes),
+		config->route_index_count
 	);
 
 	lpm_free(&config->lpm_v6);
 	lpm_free(&config->lpm_v4);
+}
+
+void
+route_module_config_free(struct cp_module *cp_module) {
+	struct route_module_config *config =
+		container_of(cp_module, struct route_module_config, cp_module);
+
+	route_module_config_data_destroy(config);
+
+	struct agent *agent = ADDR_OF(&cp_module->agent);
+
+	cp_module_fini(cp_module);
+
+	memory_bfree(
+		&agent->memory_context,
+		config,
+		sizeof(struct route_module_config)
+	);
 }
 
 int

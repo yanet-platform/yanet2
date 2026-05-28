@@ -14,7 +14,7 @@ project(
   ],
 )
 
-add_global_arguments(
+add_project_arguments(
   ['-march=' + get_option('cpu_arch'), '-g', '-D_GNU_SOURCE'],
   language: 'c',
 )
@@ -142,14 +142,18 @@ libdpdk_inc_dep = libdpdk_dep.partial_dependency(includes: true)
 subdir('common')
 subdir('lib')
 subdir('filter')
+module_test_dirs = []
 subdir('modules')
 subdir('devices')
+subdir('lib/dataplane_ut/tests')
 subdir('dataplane')
 
 if not dataplane_only
   subdir('controlplane')
   subdir('operators')
-  subdir('mock')
+  foreach dir : module_test_dirs
+    subdir(dir)
+  endforeach
   subdir('tests')
 endif
 

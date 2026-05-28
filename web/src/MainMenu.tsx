@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { AsideHeader } from '@gravity-ui/navigation';
 import type { MenuItem as AsideHeaderMenuItem } from '@gravity-ui/navigation';
 import { Link, Eye, Route, CurlyBracketsFunction, ListUl, HardDrive, LayoutCellsLarge, CirclePlay, Shield, ArrowRight } from '@gravity-ui/icons';
@@ -20,6 +21,7 @@ type NavMenuItem = AsideHeaderMenuItem & {
 
 const MainMenu = ({ currentPage, onPageChange, renderContent, disabled = false }: MainMenuProps): React.JSX.Element => {
     const [compact, setCompact] = useState<boolean>(false);
+    const navigate = useNavigate();
 
     const createMenuItem = (id: PageId, title: string, icon: NavMenuItem['icon']): NavMenuItem => ({
         id,
@@ -65,10 +67,10 @@ const MainMenu = ({ currentPage, onPageChange, renderContent, disabled = false }
         createDivider('__div_1'),
         createSectionHeader('__section_modules', 'Modules'),
         createMenuItem('modules/forward', 'Forward', ArrowRight),
+        createMenuItem('modules/route', 'Route', Route),
         createMenuItem('modules/decap', 'Decap', LayoutCellsLarge),
         createMenuItem('modules/acl', 'ACL', Shield),
         createMenuItem('modules/pdump', 'Pdump', CirclePlay),
-        createMenuItem('modules/route', 'Route', Route),
         createDivider('__div_2'),
         createSectionHeader('__section_operators', 'Operators'),
         createMenuItem('operators/route', 'Route', Route),
@@ -84,6 +86,13 @@ const MainMenu = ({ currentPage, onPageChange, renderContent, disabled = false }
             logo={{
                 icon: () => <Logo size={24} />,
                 text: 'YANET',
+                href: '/builtin/dashboard',
+                onClick: (event) => {
+                    event.preventDefault();
+                    if (!disabled) {
+                        navigate('/builtin/dashboard');
+                    }
+                },
             }}
             renderContent={renderContent}
         />

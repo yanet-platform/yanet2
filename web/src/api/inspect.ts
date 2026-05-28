@@ -34,10 +34,9 @@ export interface PipelineInfo {
 
 export interface AgentInstanceInfo {
     pid?: number;
-    memory_limit?: string | number; // uint64 - serialized as string in JSON
-    allocated?: string | number; // uint64 - serialized as string in JSON
-    freed?: string | number; // uint64 - serialized as string in JSON
-    generation?: string | number; // uint64 - serialized as string in JSON
+    memory_limit?: string | number; // uint64 — serialized as string in JSON
+    free_bytes?: string | number; // uint64 — serialized as string in JSON
+    generation?: string | number; // uint64 — serialized as string in JSON
 }
 
 export interface AgentInfo {

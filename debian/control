@@ -99,10 +99,9 @@ Description: YANET2 route operator
  and neighbour discovery.
 
 Package: yanet2-forward-operator
-Architecture: all
-Depends: ${misc:Depends}
- , bash
- , yanet2-cli (= ${binary:Version})
+Architecture: any
+Depends: ${shlibs:Depends}
+ , ${misc:Depends}
 Description: YANET2 forward operator
  Periodic reconciler that pushes a forward-rules YAML to one or
- more YANET2 gateways via yanet-cli-forward.
+ more YANET2 gateways via FunctionService.

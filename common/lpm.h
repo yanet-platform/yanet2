@@ -131,24 +131,28 @@ static inline void
 lpm_free(struct lpm *lpm) {
 	struct memory_context *memory_context = &lpm->memory_context;
 	struct lpm_page **pages = ADDR_OF(&lpm->pages);
-	if (pages == NULL) {
-		return;
-	}
 
-	uint32_t chunk_count =
-		(lpm->page_count + LPM_CHUNK_SIZE - 1) / LPM_CHUNK_SIZE;
+	if (pages != NULL) {
+		uint32_t chunk_count =
+			(lpm->page_count + LPM_CHUNK_SIZE - 1) / LPM_CHUNK_SIZE;
 
-	for (size_t chunk_idx = 0; chunk_idx < chunk_count; ++chunk_idx) {
+		for (size_t chunk_idx = 0; chunk_idx < chunk_count;
+		     ++chunk_idx) {
+			memory_bfree(
+				&lpm->memory_context,
+				ADDR_OF(&pages[chunk_idx]),
+				sizeof(struct lpm_page) * LPM_CHUNK_SIZE
+			);
+		}
+
 		memory_bfree(
-			&lpm->memory_context,
-			ADDR_OF(&pages[chunk_idx]),
-			sizeof(struct lpm_page) * LPM_CHUNK_SIZE
+			memory_context,
+			pages,
+			sizeof(struct lpm_page *) * chunk_count
 		);
 	}
 
-	memory_bfree(
-		memory_context, pages, sizeof(struct lpm_page *) * chunk_count
-	);
+	memory_context_fini(memory_context);
 }
 
 static inline int

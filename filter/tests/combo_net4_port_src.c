@@ -123,7 +123,7 @@ test_no_match_port_only(void *arena) {
 
 	struct filter filter;
 	res = filter_init(
-		&filter, combo_net4_port_src_compile, &rule_ptr, 1, &mctx
+		&filter, combo_net4_port_src_compile, &rule_ptr, 1, &mctx, NULL
 	);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
 
@@ -136,6 +136,9 @@ test_no_match_port_only(void *arena) {
 		free_packet(packets[i]);
 		free(packets[i]);
 	}
+
+	filter_free(&filter, combo_net4_port_src_compile);
+	memory_context_fini(&mctx);
 
 	return TEST_SUCCESS;
 }
@@ -201,7 +204,7 @@ test_no_match_ip_only(void *arena) {
 
 	struct filter filter;
 	res = filter_init(
-		&filter, combo_net4_port_src_compile, &rule_ptr, 1, &mctx
+		&filter, combo_net4_port_src_compile, &rule_ptr, 1, &mctx, NULL
 	);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
 
@@ -214,6 +217,9 @@ test_no_match_ip_only(void *arena) {
 		free_packet(packets[i]);
 		free(packets[i]);
 	}
+
+	filter_free(&filter, combo_net4_port_src_compile);
+	memory_context_fini(&mctx);
 
 	return TEST_SUCCESS;
 }
@@ -279,7 +285,7 @@ test_both_match(void *arena) {
 
 	struct filter filter;
 	res = filter_init(
-		&filter, combo_net4_port_src_compile, &rule_ptr, 1, &mctx
+		&filter, combo_net4_port_src_compile, &rule_ptr, 1, &mctx, NULL
 	);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
 
@@ -292,6 +298,9 @@ test_both_match(void *arena) {
 		free_packet(packets[i]);
 		free(packets[i]);
 	}
+
+	filter_free(&filter, combo_net4_port_src_compile);
+	memory_context_fini(&mctx);
 
 	return TEST_SUCCESS;
 }
@@ -384,7 +393,7 @@ test_overlapping(void *arena) {
 
 	struct filter filter;
 	res = filter_init(
-		&filter, combo_net4_port_src_compile, rule_ptrs, 3, &mctx
+		&filter, combo_net4_port_src_compile, rule_ptrs, 3, &mctx, NULL
 	);
 	TEST_ASSERT_EQUAL(res, 0, "failed to initialize filter");
 
@@ -397,6 +406,9 @@ test_overlapping(void *arena) {
 		free_packet(packets[i]);
 		free(packets[i]);
 	}
+
+	filter_free(&filter, combo_net4_port_src_compile);
+	memory_context_fini(&mctx);
 
 	return TEST_SUCCESS;
 }

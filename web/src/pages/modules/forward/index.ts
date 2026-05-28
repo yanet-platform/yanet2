@@ -1,17 +1,1 @@
-// Types
-export * from './types';
-
-// Constants
-export * from './constants';
-
-// Hooks
-export * from './hooks';
-export * from './useForwardData';
-
-// Components
-export * from './ForwardPageHeader';
-export * from './RuleTable';
-export * from './RuleRow';
-export * from './RuleTableHeader';
-export * from './AddRuleDialog';
-export * from './EditRuleDialog';
+export { default } from './ForwardPage';

@@ -2,6 +2,7 @@
 
 use core::error::Error;
 
+use bytesize::ByteSize;
 use clap::{ArgAction, CommandFactory, Parser, ValueEnum};
 use clap_complete::CompleteEnv;
 use ptree::TreeBuilder;
@@ -113,10 +114,11 @@ impl InspectService {
                 tree.begin_child(agent.name.to_string());
 
                 for instance in &agent.instances {
+                    let used = instance.memory_limit.saturating_sub(instance.free_bytes);
                     tree.begin_child(format!("Instance (PID: {})", instance.pid));
-                    tree.add_empty_child(format!("Memory limit: {}", instance.memory_limit));
-                    tree.add_empty_child(format!("Allocated: {}", instance.allocated));
-                    tree.add_empty_child(format!("Freed: {}", instance.freed));
+                    tree.add_empty_child(format!("Memory limit: {}", ByteSize::b(instance.memory_limit)));
+                    tree.add_empty_child(format!("Used:         {}", ByteSize::b(used)));
+                    tree.add_empty_child(format!("Free:         {}", ByteSize::b(instance.free_bytes)));
                     tree.add_empty_child(format!("Generation: {}", instance.generation));
                     tree.end_child();
                 }

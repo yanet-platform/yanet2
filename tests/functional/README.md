@@ -31,22 +31,33 @@ The framework allows:
 
 ```
 tests/functional/
-├── framework/           # Main framework components
-│   ├── qemu.go         # QEMU VM management
-│   ├── cli.go          # CLI interaction
-│   ├── socket_client.go # TCP socket client for QEMU communication
-│   ├── packet_parser.go # Packet parser for network analysis
-│   ├── utils.go        # Utility functions
-│   └── framework.go    # Main framework code
-├── framework_test.go   # Main comprehensive framework test
-├── nat64_test.go       # NAT64 module tests
-├── forward_test.go     # Forward module tests
-├── decap_test.go       # Decap module tests
-├── decap_test.sh       # Shell script for decap testing
-├── Makefile            # Build and run commands
-├── cloud-init-user-data.yaml # Cloud-init configuration with autologin
-├── meta-data           # Cloud-init metadata
-└── README.md           # Documentation
+├── framework/             # Framework library (not a test package)
+│   ├── framework.go       # Main framework: F, GlobalFramework, Run, RunWith
+│   ├── qemu.go            # QEMU VM management, snapshot save/restore
+│   ├── cli.go             # CLI command execution via serial console
+│   ├── socket_client.go   # Unix socket client for packet injection/capture
+│   ├── packet_parser.go   # Packet parsing with gopacket
+│   ├── packet_builder.go  # Shared packet creation helpers (CreateTCPIPv4Packet, etc.)
+│   ├── pool.go            # VM pool for parallel test execution
+│   └── utils.go           # Utility functions
+├── main/                  # Primary functional test suite
+│   ├── framework_test.go  # TestMain + TestFramework (VM/YANET boot)
+│   ├── acl_test.go        # ACL module tests
+│   ├── balancer_test.go   # Balancer module tests
+│   ├── decap_test.go      # Decap module tests
+│   ├── forward_test.go    # Forward module tests
+│   ├── fwstate_test.go    # Firewall state module tests
+│   ├── isolation_test.go  # Test isolation verification
+│   ├── nat64_test.go      # NAT64 module tests
+│   ├── pipeline_test.go   # Empty pipeline (no-forward) tests
+│   ├── route_test.go      # Route module tests
+│   └── route_mpls_test.go # Route MPLS module tests
+│   └── 0*_test.go         # Auto-generated tests migrated from yanet1
+├── testdata/              # YAML config files for tests
+├── Makefile               # VM image creation and test targets
+├── cloud-init-user-data.yaml  # Cloud-init configuration
+├── meta-data              # Cloud-init metadata
+└── README.md
 ```
 
 ## Usage
@@ -335,9 +346,73 @@ Tests use **QEMU 9P filesystem** for access to built binary files:
 - VM runs real YANET processes from built binaries
 - This ensures full end-to-end testing
 
-## Future Development
+## VM Snapshots and Test Isolation
 
-1. Add support for parallel test execution
+The framework supports QEMU VM snapshots (`savevm`/`loadvm`) for per-test
+state isolation. This eliminates state leakage between tests (YANET config,
+kernel state, filesystem changes) by reverting the VM to a known-good state
+before each test.
+
+### Snapshot Workflow
+
+In `TestMain`, after starting YANET and configuring the baseline:
+
+```go
+// Save baseline snapshot after initial setup.
+gfw.SaveSnapshot("baseline")
+```
+
+In individual tests, use `RunWith` to restore the snapshot before each subtest:
+
+```go
+fw.RunWith("baseline", "MyTest", func(fw *F, t *testing.T) {
+    // VM state is exactly as it was when "baseline" was saved.
+    // No contamination from previous tests.
+})
+```
+
+Use `Run()` (without snapshot) for subtests that intentionally build on the
+state left by previous subtests.
+
+### QCOW2 Overlay
+
+The framework creates a QCOW2 overlay on top of the base image instead of
+using QEMU's `-snapshot` flag. This ensures `savevm`/`loadvm` work correctly
+with a writable disk. The overlay is ephemeral and removed when the VM stops.
+
+## Parallel Test Execution
+
+The framework includes a `VMPool` for running tests in parallel across
+multiple QEMU VMs. Each VM in the pool has its own baseline snapshots.
+
+### Configuration
+
+Set `YANET_VM_POOL_SIZE` to control the number of parallel VMs:
+
+```bash
+# Sequential execution (default)
+YANET_VM_POOL_SIZE=1 go test -v ./main/...
+
+# Parallel with 4 VMs (requires ~20GB RAM, 8 CPUs)
+YANET_VM_POOL_SIZE=4 go test -v ./main/...
+```
+
+### Writing Parallel Tests
+
+Tests opt into parallel execution with `t.Parallel()`:
+
+```go
+func TestRoute(t *testing.T) {
+    t.Parallel()  // marks test as parallelizable
+    fw := pool.Acquire()
+    defer pool.Release(fw)
+
+    fw.RestoreAndReconnect("baseline")
+    // ... test code
+}
+```
+
+## Future Development
 2. Improve VM readiness waiting mechanism
 3. Add VM snapshot support for faster tests
 4. Expand test suite for load balancer

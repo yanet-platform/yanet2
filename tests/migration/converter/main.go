@@ -21,9 +21,10 @@ func main() {
 		statsFile  = flag.String("stats", "", "File to save statistics (markdown)")
 		skiplist   = flag.String("skiplist", "", "Path to skiplist YAML (optional)")
 		updateSkip = flag.Bool("update-skiplist", false, "Update skiplist.yaml in-place at the auto-generated marker")
-		forceAST   = flag.Bool("force-ast", false, "Force use of AST parser (fail if unavailable)")
-		strict     = flag.Bool("strict", false, "Strict mode: fail on unsupported layers/special handling (for CI)")
-		tolerant   = flag.Bool("tolerant", true, "Tolerant mode: continue with warnings on unsupported features (default)")
+		packageName = flag.String("package", "functional", "Go package name for generated test files")
+		forceAST    = flag.Bool("force-ast", false, "Force use of AST parser (fail if unavailable)")
+		strict      = flag.Bool("strict", false, "Strict mode: fail on unsupported layers/special handling (for CI)")
+		tolerant    = flag.Bool("tolerant", true, "Tolerant mode: continue with warnings on unsupported features (default)")
 	)
 	flag.Parse()
 
@@ -40,7 +41,7 @@ func main() {
 
 	// Default output dir if not provided
 	if *outputDir == "" {
-		*outputDir = filepath.Join("..", "..", "functional", "converted")
+		*outputDir = filepath.Join("..", "..", "functional", "main")
 	}
 
 	// Default skiplist path if not provided and file exists one level up
@@ -54,6 +55,7 @@ func main() {
 	converter, err := lib.NewConverter(&lib.Config{
 		InputDir:       *inputDir,
 		OutputDir:      *outputDir,
+		PackageName:    *packageName,
 		Verbose:        *verbose,
 		Debug:          *debug,
 		SkiplistPath:   *skiplist,

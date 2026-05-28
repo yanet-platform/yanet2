@@ -9,10 +9,17 @@ struct dp_config;
 
 struct counter_value_handle;
 
+struct counter_tag {
+	const char *key;
+	const char *value;
+};
+
 struct counter_handle {
 	char name[60];
 	uint64_t size;
 	uint64_t gen;
+	struct counter_tag *tags;
+	size_t tag_count;
 	struct counter_value_handle *value_handle;
 };
 
@@ -74,6 +81,37 @@ yanet_get_counter_value(
 	struct counter_value_handle *value_handle,
 	uint64_t value_idx,
 	uint64_t worker_idx
+);
+
+// Return counters that satisfy every predicate in tags and match at
+// least one name in query. Pass tag_count == 0 to impose no per-tag
+// constraint and query_count == -1 to match any name.
+//
+// Each counter_tag is a predicate against the counter's tags, with
+// the check encoded in value: an empty string requires the tag to be
+// absent, "*" requires the tag to be present with any value, and any
+// other string requires the tag to be present with exactly that
+// value.
+//
+// Recognized keys are "device", "pipeline", "function", "chain",
+// "module_type", "module_name".
+//
+// A tag is rejected with err filled and NULL returned if any of the
+// following holds: key is NULL; value is NULL; key is unrecognized;
+// or tags contains another predicate with the same key. Tag strings
+// are borrowed only for the duration of the call.
+//
+// The returned list must be released with yanet_counter_handle_list_free.
+// On failure NULL is returned and err is filled; an empty match is a
+// non-NULL empty list.
+struct counter_handle_list *
+yanet_get_counters_by_tags(
+	struct dp_config *dp_config,
+	const struct counter_tag *tags,
+	size_t tag_count,
+	const char *const *query,
+	size_t query_count,
+	yanet_error **err
 );
 
 void

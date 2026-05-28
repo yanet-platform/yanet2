@@ -118,6 +118,15 @@ export const useInterpolatedCounters = <K extends string = string>(
     // Stable key for keys array to use in dependencies
     const keysKey = useMemo(() => JSON.stringify([...keys].sort()), [keys]);
 
+    // Clear stale snapshots and rates whenever the key set changes so that the
+    // first rate sample after a config switch is not computed against data from
+    // the previous config (which would produce an arbitrarily large or negative
+    // delta and therefore a garbage pps value).
+    useEffect(() => {
+        snapshotsRef.current = [];
+        ratesRef.current = [];
+    }, [keysKey]);
+
     // Fetch counters at polling interval and calculate rates
     useEffect(() => {
         if (!enabled || keys.length === 0) return;

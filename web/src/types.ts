@@ -2,6 +2,7 @@ import { createContext, useContext } from 'react';
 
 export const PAGE_IDS = [
     'builtin/inspect',
+    'builtin/dashboard',
     'builtin/functions',
     'builtin/pipelines',
     'builtin/devices',

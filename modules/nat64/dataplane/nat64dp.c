@@ -2449,6 +2449,20 @@ icmp_v4_to_v6(
 			}
 		}
 
+		uint16_t move_len =
+			new_payload_len - sizeof(struct rte_icmp_hdr);
+		uint16_t available_for_move = rte_pktmbuf_data_len(mbuf) -
+					      (packet->transport_header.offset +
+					       sizeof(struct rte_icmp_hdr));
+		if (move_len > available_for_move) {
+			LOG_DBG(NAT64,
+				"ICMP payload move length (%u) "
+				"exceeds available data (%u)\n",
+				move_len,
+				available_for_move);
+			return -1;
+		}
+
 		// move(because overlap) icmp payload
 		memmove(rte_pktmbuf_mtod_offset(
 				mbuf,
@@ -2462,7 +2476,7 @@ icmp_v4_to_v6(
 				packet->transport_header.offset +
 					sizeof(struct rte_icmp_hdr)
 			),
-			new_payload_len - sizeof(struct rte_icmp_hdr));
+			move_len);
 
 		// new ipv6 payload header at old place
 		struct rte_ipv6_hdr *new_ipv6_payload_header =
@@ -2530,13 +2544,29 @@ icmp_v4_to_v6(
 
 				// Recalculate ICMP checksum for IPv6 embeded
 				icmp_header_payload->icmp_cksum = 0;
+				uint16_t embedded_payload_len =
+					rte_be_to_cpu_16(new_ipv6_payload_header
+								 ->payload_len);
+				uint16_t available_embedded_len =
+					rte_pktmbuf_data_len(mbuf) -
+					payload_offset;
+				if (embedded_payload_len >
+				    available_embedded_len) {
+					LOG_DBG(NAT64,
+						"Embedded ICMP payload length "
+						"(%u) exceeds available data "
+						"(%u)\n",
+						embedded_payload_len,
+						available_embedded_len);
+					return -1;
+				}
+
 				uint32_t sum = rte_ipv6_phdr_cksum(
 					new_ipv6_payload_header, 0
 				);
 				sum = __rte_raw_cksum(
 					icmp_header_payload,
-					rte_be_to_cpu_16(new_ipv6_payload_header
-								 ->payload_len),
+					embedded_payload_len,
 					sum
 				);
 

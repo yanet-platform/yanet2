@@ -1,5 +1,6 @@
 import { createService, type CallOptions } from './client';
 import type { MACAddress } from './neighbours';
+import type { IPAddressWire, IPRangeWire } from '../utils/netip';
 
 // Route types
 
@@ -17,8 +18,8 @@ export interface LargeCommunity {
 
 export interface Route {
     prefix?: string;
-    next_hop?: string;
-    peer?: string;
+    next_hop?: IPAddressWire;
+    peer?: IPAddressWire;
     route_distinguisher?: string | number; // uint64
     peer_as?: number;
     origin_as?: number;
@@ -47,7 +48,7 @@ export interface ShowRoutesResponse {
 export interface InsertRouteRequest {
     name?: string;
     prefix?: string;
-    nexthop_addr?: string;
+    nexthop_addr?: IPAddressWire;
     do_flush?: boolean;
     source_id?: RouteSourceID;
 }
@@ -58,7 +59,7 @@ export interface InsertRouteResponse {
 export interface DeleteRouteRequest {
     name?: string;
     prefix?: string;
-    nexthop_addr?: string;
+    nexthop_addr?: IPAddressWire;
     do_flush?: boolean;
     source_id?: RouteSourceID;
 }
@@ -81,8 +82,13 @@ export interface ShowFIBRequest {
     ipv6_only?: boolean;
 }
 
+export interface FIBRangeEntry {
+    range?: IPRangeWire;
+    nexthops?: FIBNexthop[];
+}
+
 export interface ShowFIBResponse {
-    entries?: FIBEntry[];
+    entries?: FIBRangeEntry[];
 }
 
 export interface FIBEntry {
@@ -101,7 +107,7 @@ const operatorRouteService = createService('operators.route.operatorpb.v1.RouteS
 
 export const route = {
     listConfigs: (options?: CallOptions): Promise<ListConfigsResponse> => {
-        return operatorRouteService.call<ListConfigsResponse>('ListConfigs', options);
+        return routeService.call<ListConfigsResponse>('ListConfigs', options);
     },
     showRoutes: (request: ShowRoutesRequest, options?: CallOptions): Promise<ShowRoutesResponse> => {
         return operatorRouteService.callWithBody<ShowRoutesResponse>('ShowRoutes', request, options);
@@ -118,4 +124,20 @@ export const route = {
     showFIB: (request: ShowFIBRequest, options?: CallOptions): Promise<ShowFIBResponse> => {
         return routeService.callWithBody<ShowFIBResponse>('ShowFIB', request, options);
     },
+    updateFIB: (request: UpdateFIBRequest, options?: CallOptions): Promise<UpdateFIBResponse> => {
+        return routeService.callWithBody<UpdateFIBResponse>('UpdateFIB', request, options);
+    },
 };
+
+export const routeOperator = {
+    listConfigs: (options?: CallOptions): Promise<ListConfigsResponse> => {
+        return operatorRouteService.call<ListConfigsResponse>('ListConfigs', options);
+    },
+};
+
+export interface UpdateFIBRequest {
+    module_name?: string;
+    entries?: FIBEntry[];
+}
+
+export interface UpdateFIBResponse {}

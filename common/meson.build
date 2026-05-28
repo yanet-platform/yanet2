@@ -5,5 +5,6 @@ lib_common_dep = declare_dependency(
 if not dataplane_only
   subdir('commonpb')
   subdir('filterpb')
+  subdir('readinesspb')
 endif
 

@@ -561,7 +561,8 @@ main(int argc, char **argv) {
 			bench_dst_compile,
 			rule_ptrs,
 			config.num_rules,
-			&memory_context
+			&memory_context,
+			NULL
 		);
 		break;
 	case sig_net4_dst_port:
@@ -570,7 +571,8 @@ main(int argc, char **argv) {
 			bench_dst_port_compile,
 			rule_ptrs,
 			config.num_rules,
-			&memory_context
+			&memory_context,
+			NULL
 		);
 		break;
 	case sig_net4_dst_port_proto:
@@ -579,7 +581,8 @@ main(int argc, char **argv) {
 			bench_dst_port_proto_compile,
 			rule_ptrs,
 			config.num_rules,
-			&memory_context
+			&memory_context,
+			NULL
 		);
 		break;
 	}
@@ -706,6 +709,20 @@ main(int argc, char **argv) {
 	free(rule_ptrs);
 	munmap(builders, builders_size);
 	munmap(rules, rules_size);
+
+	switch (config.sig_type) {
+	case sig_net4_dst:
+		filter_free(&filter, bench_dst_compile);
+		break;
+	case sig_net4_dst_port:
+		filter_free(&filter, bench_dst_port_compile);
+		break;
+	case sig_net4_dst_port_proto:
+		filter_free(&filter, bench_dst_port_proto_compile);
+		break;
+	}
+	memory_context_fini(&memory_context);
+
 	munmap(arena, arena_size);
 
 	return 0;

@@ -81,6 +81,7 @@ main() {
 
 	puts("OK!");
 
+	memory_context_fini(&mem_ctx);
 	free(arena);
 
 	return 0;

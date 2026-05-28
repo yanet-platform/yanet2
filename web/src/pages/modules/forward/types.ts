@@ -1,35 +1,60 @@
 import type { Rule } from '../../../api/forward';
+import { ForwardMode } from '../../../api/forward';
 
-// Rule item for table display with index
+export type { Rule };
+export { ForwardMode };
+
+/** A flat, UI-friendly representation of a forward rule for table and drawer use. */
 export interface RuleItem {
-    id: string; // Unique id based on index
+    id: string;
     index: number;
     rule: Rule;
+    /** Parsed target string. */
+    target: string;
+    /** Parsed mode. */
+    mode: ForwardMode;
+    /** Parsed counter name. */
+    counter: string;
+    /** Parsed device names. */
+    deviceNames: string[];
+    /** Formatted VLAN string for display (e.g. "0-4095", "100-200"). */
+    vlansDisplay: string;
+    /** Whether VLANs cover full 0-4095 range (triggers ALL VLANs badge). */
+    isAllVlans: boolean;
+    /** Formatted source CIDR strings. */
+    sourceCidrs: string[];
+    /** Whether sources is wildcard (*). */
+    isAnySrc: boolean;
+    /** Formatted destination CIDR strings. */
+    dstCidrs: string[];
+    /** Whether destinations is wildcard (*). */
+    isAnyDst: boolean;
 }
 
-// Props for AddRuleDialog
-export interface AddRuleDialogProps {
-    open: boolean;
-    onClose: () => void;
-    onConfirm: (configName: string, rule: Rule) => Promise<void>;
-    existingConfigs: string[];
-    currentConfig?: string;
+/** Draft state used inside RuleDrawer form. */
+export interface RuleDraft {
+    target: string;
+    mode: ForwardMode;
+    counter: string;
+    deviceNames: string[];
+    vlansRaw: string;
+    sourceCidrs: string[];
+    dstCidrs: string[];
 }
 
-// Props for EditRuleDialog
-export interface EditRuleDialogProps {
-    open: boolean;
-    onClose: () => void;
-    onConfirm: (rule: Rule) => Promise<void>;
-    rule: Rule | null;
-    ruleIndex: number;
-}
+export const emptyDraft = (): RuleDraft => ({
+    target: '',
+    mode: ForwardMode.NONE,
+    counter: '',
+    deviceNames: [],
+    vlansRaw: '',
+    sourceCidrs: [],
+    dstCidrs: [],
+});
 
-// Props for RuleTable
-export interface RuleTableProps {
-    rules: RuleItem[];
-    selectedIds: Set<string>;
-    onSelectionChange: (ids: Set<string>) => void;
-    onEditRule: (ruleItem: RuleItem) => void;
-}
-
+/** Mode label strings for display. */
+export const MODE_LABELS: Record<ForwardMode, string> = {
+    [ForwardMode.NONE]: 'NONE',
+    [ForwardMode.IN]: 'IN',
+    [ForwardMode.OUT]: 'OUT',
+};

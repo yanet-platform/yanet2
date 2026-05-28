@@ -1,399 +1,342 @@
-import React, { useCallback, useMemo, useState } from 'react';
-import { Box, Text } from '@gravity-ui/uikit';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
+import { Button, Flex, Icon, Text } from '@gravity-ui/uikit';
+import { Plus } from '@gravity-ui/icons';
+import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, SearchInput } from '../../../components';
+import { AddConfigModal, BulkDeleteModal } from '../../_shared/draft';
 import { API } from '../../../api';
 import { toaster } from '../../../utils';
-import type { Route } from '../../../api/routes';
-import { RouteSourceID } from '../../../api/routes';
-import { PageLayout, PageLoader, EmptyState, ConfirmDialog } from '../../../components';
-import { parseCIDRPrefix, parseIPAddress, CIDRParseError, IPParseError } from '../../../utils';
-import {
-    type AddRouteFormData,
-    type ConfigRoutesData,
-    getRouteId,
-    validatePrefix,
-    validateNexthop,
-    formatRouteCount,
-    RouteListItem,
-    useMockMode,
-    useRouteConfigs,
-    useRIBData,
-} from '../../_shared/route';
-import { RoutePageHeader } from './RoutePageHeader';
-import { AddRouteDialog } from './AddRouteDialog';
-import { EditRouteDialog } from './EditRouteDialog';
-import { RouteConfigContent } from './RouteConfigContent';
-import { VirtualizedRouteTable } from './VirtualizedRouteTable';
-import '../../_shared/route/route.scss';
+import { stringToIPAddress, ipAddressToString } from '../../../utils/netip';
+import { RouteSourceID, type Route } from '../../../api/routes';
+import { useRIB } from './useRIB';
+import { RIBTable } from './RIBTable';
+import RouteDrawer from './RouteDrawer';
+import { getRouteId, sortComparators, planRouteSubmit } from './utils';
+import type { RouteSortState, RouteSortableColumn } from './types';
+import '../../../styles/draft-page.scss';
 
 const RoutePage: React.FC = () => {
-    const {
-        configs,
-        loading,
-        activeConfigTab,
-        setConfigs,
-        setActiveConfigTab,
-        handleConfigTabChange,
-    } = useRouteConfigs();
+    const { configs, configRoutes, selectedIds, loading, reload, addLocalConfig, setSelected } = useRIB();
 
-    const {
-        configRoutes,
-        selectedRoutes,
-        setConfigRoutes,
-        setSelectedRoutes,
-        handleSelectionChange,
-        reloadRoutes,
-    } = useRIBData(configs);
-
-    const {
-        mockEnabled,
-        mockSize,
-        mockGenerator,
-        mockSelectedIds,
-        setMockSelectedIds,
-        handleMockToggle,
-        handleMockSizeChange,
-    } = useMockMode();
-
-    const [deleteDialogOpen, setDeleteDialogOpen] = useState<boolean>(false);
-    const [addDialogOpen, setAddDialogOpen] = useState<boolean>(false);
-    const [editDialogOpen, setEditDialogOpen] = useState<boolean>(false);
-    const [editingRoute, setEditingRoute] = useState<Route | null>(null);
-    const [addRouteForm, setAddRouteForm] = useState<AddRouteFormData>({
-        configName: '',
-        prefix: '',
-        nexthop_addr: '',
-        do_flush: false,
+    const [activeConfig, setActiveConfig] = useState('');
+    const [search, setSearch] = useState('');
+    const [sortState, setSortState] = useState<RouteSortState>({ column: null, direction: 'asc' });
+    const [drawer, setDrawer] = useState<{ open: boolean; mode: 'add' | 'edit'; route: Route | null }>({
+        open: false,
+        mode: 'add',
+        route: null,
+    });
+    const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+    const [addConfigOpen, setAddConfigOpen] = useState(false);
+    const [activeRowId, setActiveRowId] = useState<string | null>(null);
+    const [editingRowId, setEditingRowId] = useState<string | null>(null);
+    const [rowDeleteConfirm, setRowDeleteConfirm] = useState<{ open: boolean; route: Route | null }>({
+        open: false,
+        route: null,
     });
 
-    const currentSelected = selectedRoutes.get(activeConfigTab);
-    const isDeleteDisabled = !currentSelected || currentSelected.size === 0;
-    const isFlushDisabled = !activeConfigTab;
+    const searchRef = useRef<HTMLInputElement>(null);
 
-    const handleAddRouteClick = useCallback((): void => {
-        setAddRouteForm({
-            configName: activeConfigTab,
-            prefix: '',
-            nexthop_addr: '',
-            do_flush: false,
-        });
-        setAddDialogOpen(true);
-    }, [activeConfigTab]);
+    const currentConfig = activeConfig || configs[0] || '';
+    const allRows = configRoutes.get(currentConfig) || [];
+    const currentSelected = selectedIds.get(currentConfig) || new Set<string>();
 
-    const handleDeleteRouteClick = useCallback((): void => {
-        if (isDeleteDisabled) {
-            toaster.warning('delete-route-warning', 'Please select routes to delete');
-            return;
+    const visibleRows = useMemo(() => {
+        let res = allRows;
+        const q = search.trim().toLowerCase();
+        if (q) {
+            res = res.filter((r) =>
+                (r.prefix || '').toLowerCase().includes(q) ||
+                ipAddressToString(r.next_hop).toLowerCase().includes(q) ||
+                ipAddressToString(r.peer).toLowerCase().includes(q)
+            );
         }
-        setDeleteDialogOpen(true);
-    }, [isDeleteDisabled]);
-
-    const handleFlushClick = useCallback(async (): Promise<void> => {
-        if (!activeConfigTab) {
-            toaster.warning('flush-route-config-warning', 'Please select a config to flush');
-            return;
+        if (sortState.column) {
+            const cmp = sortComparators[sortState.column];
+            res = [...res].sort(sortState.direction === 'desc' ? (a, b) => cmp(b, a) : cmp);
         }
+        return res;
+    }, [allRows, search, sortState]);
 
-        try {
-            await API.route.flushRoutes({
-                name: activeConfigTab,
-            });
+    const counts = useMemo((): Map<string, number> => {
+        const m = new Map<string, number>();
+        configs.forEach((c) => m.set(c, (configRoutes.get(c) || []).length));
+        return m;
+    }, [configs, configRoutes]);
 
-            const reloadedRoutes = await reloadRoutes(configs);
-            setConfigRoutes(reloadedRoutes);
-
-            toaster.success('flush-route-success', `Flushed routes for ${activeConfigTab}`);
-        } catch (err) {
-            toaster.error('flush-route-error', 'Failed to flush routes', err);
-        }
-    }, [activeConfigTab, configs, reloadRoutes, setConfigRoutes]);
-
-    const handleEditRouteClick = useCallback((route: Route): void => {
-        setEditingRoute(route);
-        setEditDialogOpen(true);
+    const handleSort = useCallback((col: RouteSortableColumn): void => {
+        setSortState((prev) => ({
+            column: col,
+            direction: prev.column === col && prev.direction === 'asc' ? 'desc' : 'asc',
+        }));
     }, []);
 
-    const handleEditRouteConfirm = useCallback(async (prefix: string, nexthopAddr: string, doFlush: boolean): Promise<void> => {
-        try {
-            await API.route.insertRoute({
-                name: activeConfigTab,
-                prefix,
-                nexthop_addr: nexthopAddr,
-                do_flush: doFlush,
-                source_id: RouteSourceID.STATIC,
-            });
+    const openAdd = useCallback((): void => {
+        setDrawer({ open: true, mode: 'add', route: null });
+    }, []);
 
-            const reloadedRoutes = await reloadRoutes(configs);
-            setConfigRoutes(reloadedRoutes);
+    const handleEditRow = useCallback((id: string): void => {
+        const route = allRows.find((r) => getRouteId(r) === id) || null;
+        setDrawer({ open: true, mode: 'edit', route });
+        setActiveRowId(id);
+        setEditingRowId(id);
+    }, [allRows]);
 
-            toaster.success('edit-route-success', 'Route updated successfully');
-        } catch (err) {
-            toaster.error('edit-route-error', 'Failed to update route', err);
-        }
-    }, [activeConfigTab, configs, reloadRoutes, setConfigRoutes]);
+    const handleCloseDrawer = useCallback((): void => {
+        setDrawer((prev) => ({ ...prev, open: false }));
+        setEditingRowId(null);
+    }, []);
 
-    const handleAddRouteConfirm = useCallback(async (): Promise<void> => {
-        const configName = addRouteForm.configName.trim();
+    const handleRowClick = useCallback((id: string): void => {
+        setActiveRowId(id);
+    }, []);
 
-        if (!configName) {
-            toaster.error('add-route-config-error', 'Please enter a config name');
+    const handleSubmitRoute = useCallback(async (params: { prefix: string; nexthopAddr: string; doFlush: boolean }): Promise<void> => {
+        const nexthopIp = stringToIPAddress(params.nexthopAddr);
+        if (!nexthopIp) {
+            toaster.error('route-nexthop-error', 'Invalid next-hop address');
             return;
         }
 
-        if (!addRouteForm.prefix || !addRouteForm.nexthop_addr) {
-            toaster.error('add-route-validation-error', 'Please fill in all required fields');
-            return;
-        }
-
-        const prefixResult = parseCIDRPrefix(addRouteForm.prefix);
-        if (!prefixResult.ok) {
-            let errorMessage = 'Invalid prefix format';
-            switch (prefixResult.error) {
-                case CIDRParseError.InvalidFormat:
-                    errorMessage = 'Invalid prefix format. Use CIDR notation (e.g., 192.168.1.0/24 or 2001:db8::/32)';
-                    break;
-                case CIDRParseError.InvalidPrefixLength:
-                    errorMessage = 'Invalid prefix length';
-                    break;
-                case CIDRParseError.InvalidIPAddress:
-                    errorMessage = 'Invalid IP address in prefix';
-                    break;
-            }
-            toaster.error('add-route-prefix-error', errorMessage);
-            return;
-        }
-
-        const prefixLength = prefixResult.value.prefixLength;
-        if (prefixLength === null) {
-            toaster.error('add-route-prefix-error', 'Invalid prefix length');
-            return;
-        }
-
-        const nexthopResult = parseIPAddress(addRouteForm.nexthop_addr);
-        if (!nexthopResult.ok) {
-            let errorMessage = 'Invalid nexthop address format';
-            if (nexthopResult.error === IPParseError.InvalidFormat) {
-                errorMessage = 'Invalid nexthop address format. Use valid IPv4 (e.g., 192.168.1.1) or IPv6 (e.g., 2001:db8::1) address';
-            }
-            toaster.error('add-route-nexthop-error', errorMessage);
-            return;
-        }
+        const isEdit = drawer.mode === 'edit';
+        const original = drawer.route;
+        const newNexthopStr = ipAddressToString(nexthopIp);
+        const originalNexthopStr = ipAddressToString(original?.next_hop);
+        const ops = planRouteSubmit(
+            drawer.mode,
+            { prefix: params.prefix, nexthopIp, doFlush: params.doFlush },
+            newNexthopStr,
+            original,
+            originalNexthopStr,
+        );
 
         try {
-            await API.route.insertRoute({
-                name: configName,
-                prefix: addRouteForm.prefix,
-                nexthop_addr: addRouteForm.nexthop_addr,
-                do_flush: addRouteForm.do_flush,
-                source_id: RouteSourceID.STATIC,
-            });
-
-            setAddDialogOpen(false);
-
-            const isNewConfig = !configs.includes(configName);
-            const updatedConfigsList = isNewConfig
-                ? [...configs, configName]
-                : configs;
-
-            if (isNewConfig) {
-                setConfigs(updatedConfigsList);
-                setActiveConfigTab(configName);
-            }
-
-            const reloadedRoutes = await reloadRoutes(updatedConfigsList);
-            setConfigRoutes(reloadedRoutes);
-
-            toaster.success('add-route-success', 'Route added successfully');
-        } catch (err) {
-            toaster.error('add-route-error', 'Failed to add route', err);
-        }
-    }, [addRouteForm, configs, reloadRoutes, setConfigs, setConfigRoutes, setActiveConfigTab]);
-
-    const handleDeleteConfirm = useCallback(async (): Promise<void> => {
-        const selected = currentSelected;
-
-        if (!selected || selected.size === 0) {
-            setDeleteDialogOpen(false);
-            return;
-        }
-
-        const routes = configRoutes.get(activeConfigTab) || [];
-        const selectedRoutesList = routes.filter((route: Route) => selected.has(getRouteId(route)));
-
-        if (selectedRoutesList.length === 0) {
-            setDeleteDialogOpen(false);
-            return;
-        }
-
-        try {
-            let skippedInvalidRoute = false;
-
-            for (const route of selectedRoutesList) {
-                if (!route.prefix || !route.next_hop) {
-                    skippedInvalidRoute = true;
-                    continue;
+            for (const op of ops) {
+                if (op.type === 'delete') {
+                    await API.route.deleteRoute({
+                        name: currentConfig,
+                        prefix: op.prefix,
+                        nexthop_addr: op.nexthop,
+                        do_flush: false,
+                        source_id: RouteSourceID.STATIC,
+                    });
+                } else {
+                    await API.route.insertRoute({
+                        name: currentConfig,
+                        prefix: op.prefix,
+                        nexthop_addr: op.nexthop,
+                        do_flush: op.doFlush,
+                        source_id: RouteSourceID.STATIC,
+                    });
                 }
+            }
 
+            await reload();
+            toaster.success('route-add-success', isEdit ? 'Route updated.' : 'Route added.');
+        } catch (err) {
+            toaster.error('route-add-error', isEdit ? 'Failed to update route' : 'Failed to add route', err);
+            throw err;
+        }
+    }, [currentConfig, reload, drawer.mode, drawer.route]);
+
+    const handleDeleteRoute = useCallback(async (route: Route): Promise<void> => {
+        if (!route.prefix || !route.next_hop) {
+            toaster.warning('route-delete-invalid', 'Route has no prefix or next-hop');
+            return;
+        }
+        try {
+            await API.route.deleteRoute({
+                name: currentConfig,
+                prefix: route.prefix,
+                nexthop_addr: route.next_hop,
+                do_flush: true,
+                source_id: RouteSourceID.STATIC,
+            });
+            await reload();
+            setSelected(currentConfig, new Set());
+            toaster.success('route-delete-success', 'Route deleted.');
+        } catch (err) {
+            toaster.error('route-delete-error', 'Failed to delete route', err);
+            throw err;
+        }
+    }, [currentConfig, reload, setSelected]);
+
+    const handleDeleteRowRequest = useCallback((id: string): void => {
+        const route = allRows.find((r) => getRouteId(r) === id) || null;
+        if (route) setRowDeleteConfirm({ open: true, route });
+    }, [allRows]);
+
+    const handleDeleteRowConfirm = useCallback(async (): Promise<void> => {
+        const route = rowDeleteConfirm.route;
+        setRowDeleteConfirm({ open: false, route: null });
+        if (!route) return;
+        await handleDeleteRoute(route);
+    }, [rowDeleteConfirm.route, handleDeleteRoute]);
+
+    const handleFlush = useCallback(async (): Promise<void> => {
+        if (!currentConfig) return;
+        try {
+            await API.route.flushRoutes({ name: currentConfig });
+            toaster.success('flush-success', `Flushed routes for ${currentConfig}.`);
+        } catch (err) {
+            toaster.error('flush-error', 'Failed to flush routes', err);
+        }
+    }, [currentConfig]);
+
+    const handleBulkDelete = useCallback(async (): Promise<void> => {
+        const routes = allRows.filter((r) => currentSelected.has(getRouteId(r)));
+        let skipped = 0;
+        let deleted = 0;
+        for (const route of routes) {
+            if (!route.prefix || !route.next_hop) {
+                skipped++;
+                continue;
+            }
+            try {
                 await API.route.deleteRoute({
-                    name: activeConfigTab,
+                    name: currentConfig,
                     prefix: route.prefix,
                     nexthop_addr: route.next_hop,
                     do_flush: true,
                     source_id: RouteSourceID.STATIC,
                 });
+                deleted++;
+            } catch (err) {
+                toaster.error('bulk-delete-error', `Failed to delete route ${route.prefix}`, err);
             }
-
-            if (skippedInvalidRoute) {
-                toaster.warning('delete-route-skip-warning', 'Skipped routes without prefix or nexthop address');
-            }
-
-            const reloadedRoutes = await reloadRoutes(configs);
-            setConfigRoutes(reloadedRoutes);
-
-            setSelectedRoutes((prev) => {
-                const newSelected = new Map(prev);
-                newSelected.set(activeConfigTab, new Set<string>());
-                return newSelected;
-            });
-
-            setDeleteDialogOpen(false);
-
-            toaster.success('delete-route-success', `Deleted ${selectedRoutesList.length} route(s)`);
-        } catch (err) {
-            toaster.error('delete-route-error', 'Failed to delete routes', err);
         }
-    }, [currentSelected, activeConfigTab, configs, configRoutes, reloadRoutes, setConfigRoutes, setSelectedRoutes]);
+        await reload();
+        setSelected(currentConfig, new Set());
+        setBulkDeleteOpen(false);
+        if (deleted > 0) {
+            toaster.success('bulk-delete-success', `Deleted ${deleted} route${deleted !== 1 ? 's' : ''}.`);
+        }
+        if (skipped > 0) {
+            toaster.warning('bulk-delete-skip', `Skipped ${skipped} route${skipped !== 1 ? 's' : ''} without prefix or nexthop.`);
+        }
+    }, [allRows, currentSelected, currentConfig, reload, setSelected]);
 
-    const selectedRoutesForDialog = useMemo((): Route[] => {
-        if (!currentSelected || currentSelected.size === 0) return [];
-        const routes = configRoutes.get(activeConfigTab) || [];
-        return routes.filter((route: Route) => currentSelected.has(getRouteId(route)));
-    }, [currentSelected, activeConfigTab, configRoutes]);
-
-    const getRoutesData = (configName: string): ConfigRoutesData => {
-        const routes = configRoutes.get(configName) || [];
-        const selectedSet = selectedRoutes.get(configName) || new Set<string>();
-        return {
-            routes,
-            selectedIds: Array.from(selectedSet),
-        };
-    };
-
-    const headerContent = (
-        <RoutePageHeader
-            onAddRoute={handleAddRouteClick}
-            onDeleteRoute={handleDeleteRouteClick}
-            onFlush={handleFlushClick}
-            isDeleteDisabled={mockEnabled ? mockSelectedIds.size === 0 : isDeleteDisabled}
-            isFlushDisabled={isFlushDisabled}
-            mockEnabled={mockEnabled}
-            onMockToggle={handleMockToggle}
-            mockSize={mockSize}
-            onMockSizeChange={handleMockSizeChange}
-        />
+    const pageHeader = (
+        <Flex alignItems="center" gap={4} style={{ width: '100%' }}>
+            <Text variant="header-1">Routing Table</Text>
+            <Flex grow />
+            <div style={{ flexBasis: 380, flexShrink: 1 }}>
+                <SearchInput
+                    controlRef={searchRef}
+                    value={search}
+                    onUpdate={setSearch}
+                    placeholder="Search prefix, nexthop or peer… (/)"
+                />
+            </div>
+            <Button view="outlined" onClick={handleFlush} disabled={!currentConfig}>
+                Flush RIB → FIB
+            </Button>
+            <Button view="action" onClick={openAdd} disabled={configs.length === 0}>
+                <Icon data={Plus} size={16} />
+                Add Route
+            </Button>
+        </Flex>
     );
 
-    if (loading && !mockEnabled) {
+    if (loading) {
         return (
-            <PageLayout title="Routing Table">
-                <PageLoader loading={loading} size="l" />
-            </PageLayout>
-        );
-    }
-
-    if (mockEnabled && mockGenerator) {
-        return (
-            <PageLayout header={headerContent}>
-                <Box className="route-page__content route-page__content--with-generator">
-                    <VirtualizedRouteTable
-                        generator={mockGenerator}
-                        selectedIds={mockSelectedIds}
-                        onSelectionChange={(ids) => setMockSelectedIds(new Set(ids))}
-                        getRouteId={getRouteId}
-                    />
-                </Box>
-            </PageLayout>
-        );
-    }
-
-    if (configs.length === 0) {
-        return (
-            <PageLayout header={headerContent}>
-                <EmptyState message="No configs found. Use 'Add Route' to create a new configuration." />
-
-                <AddRouteDialog
-                    open={addDialogOpen}
-                    onClose={() => setAddDialogOpen(false)}
-                    onConfirm={handleAddRouteConfirm}
-                    form={addRouteForm}
-                    onFormChange={setAddRouteForm}
-                    validatePrefix={validatePrefix}
-                    validateNexthop={validateNexthop}
-                />
+            <PageLayout header={pageHeader}>
+                <PageLoader loading size="l" />
             </PageLayout>
         );
     }
 
     return (
-        <PageLayout header={headerContent}>
-            <Box className="route-page__content">
-                <RouteConfigContent
-                    configs={configs}
-                    activeConfig={activeConfigTab}
-                    onConfigChange={handleConfigTabChange}
-                    getRoutesData={getRoutesData}
-                    onSelectionChange={handleSelectionChange}
-                    getRouteId={getRouteId}
-                    onEditRoute={handleEditRouteClick}
-                />
-            </Box>
-
-            <ConfirmDialog
-                open={deleteDialogOpen}
-                onClose={() => setDeleteDialogOpen(false)}
-                onConfirm={async () => {
-                    await handleDeleteConfirm();
-                    setDeleteDialogOpen(false);
-                }}
-                title="Delete Routes"
-                message={`Are you sure you want to delete ${selectedRoutesForDialog.length} ${formatRouteCount(selectedRoutesForDialog.length)}?`}
-                confirmText="Delete"
-                danger
-                disabled={selectedRoutesForDialog.length === 0}
-            >
-                {selectedRoutesForDialog.length > 0 && (
-                    <Box style={{ maxHeight: 300, overflowY: 'auto', marginTop: 16 }}>
-                        <Text variant="subheader-2">Selected routes:</Text>
-                        <Box style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 8 }}>
-                            {selectedRoutesForDialog.map((route, idx) => (
-                                <RouteListItem key={idx} route={route} />
-                            ))}
-                        </Box>
-                    </Box>
+        <PageLayout header={pageHeader}>
+            <div className="fw-page">
+                {configs.length === 0 ? (
+                    <div className="fw-empty-page">
+                        <div className="fw-empty-page__message">No route configurations found.</div>
+                        <Button view="action" onClick={() => setAddConfigOpen(true)}>Add Config</Button>
+                    </div>
+                ) : (
+                    <>
+                        <ConfigTabStrip
+                            configs={configs}
+                            activeConfig={currentConfig}
+                            counts={counts}
+                            dirtyConfigs={new Set()}
+                            onSelect={(c) => {
+                                setActiveConfig(c);
+                                setActiveRowId(null);
+                                setEditingRowId(null);
+                            }}
+                            onAddConfig={() => setAddConfigOpen(true)}
+                        />
+                        <div className="fw-content">
+                            <RIBTable
+                                rows={visibleRows}
+                                selectedIds={currentSelected}
+                                activeRowId={activeRowId}
+                                editingRowId={editingRowId}
+                                sortState={sortState}
+                                onSort={handleSort}
+                                onRowClick={handleRowClick}
+                                onEditRow={handleEditRow}
+                                onSelectionChange={(ids) => setSelected(currentConfig, ids)}
+                                emptyMessage={search ? 'No routes match your search.' : 'No routes.'}
+                                onDeleteRow={handleDeleteRowRequest}
+                            />
+                        </div>
+                    </>
                 )}
-            </ConfirmDialog>
 
-            <AddRouteDialog
-                open={addDialogOpen}
-                onClose={() => setAddDialogOpen(false)}
-                onConfirm={handleAddRouteConfirm}
-                form={addRouteForm}
-                onFormChange={setAddRouteForm}
-                validatePrefix={validatePrefix}
-                validateNexthop={validateNexthop}
-            />
+                {currentSelected.size > 0 && (
+                    <BulkBar
+                        count={currentSelected.size}
+                        itemNoun="route"
+                        onDelete={() => setBulkDeleteOpen(true)}
+                        onClear={() => setSelected(currentConfig, new Set())}
+                    />
+                )}
 
-            <EditRouteDialog
-                open={editDialogOpen}
-                onClose={() => {
-                    setEditDialogOpen(false);
-                    setEditingRoute(null);
-                }}
-                onConfirm={handleEditRouteConfirm}
-                route={editingRoute}
-                configName={activeConfigTab}
-                validatePrefix={validatePrefix}
-                validateNexthop={validateNexthop}
-            />
+                <BulkDeleteModal
+                    open={bulkDeleteOpen}
+                    count={currentSelected.size}
+                    itemNoun="route"
+                    configName={currentConfig}
+                    onClose={() => setBulkDeleteOpen(false)}
+                    onConfirm={handleBulkDelete}
+                    immediate
+                />
+
+                <BulkDeleteModal
+                    open={rowDeleteConfirm.open}
+                    count={1}
+                    itemNoun="route"
+                    configName={currentConfig}
+                    onClose={() => setRowDeleteConfirm({ open: false, route: null })}
+                    onConfirm={handleDeleteRowConfirm}
+                    immediate
+                />
+
+                <RouteDrawer
+                    open={drawer.open}
+                    mode={drawer.mode}
+                    route={drawer.route}
+                    configName={currentConfig}
+                    onClose={handleCloseDrawer}
+                    onSubmit={handleSubmitRoute}
+                    onDelete={handleDeleteRoute}
+                />
+
+                <AddConfigModal
+                    open={addConfigOpen}
+                    onClose={() => setAddConfigOpen(false)}
+                    onCreate={(name) => {
+                        addLocalConfig(name);
+                        setActiveConfig(name);
+                        setAddConfigOpen(false);
+                    }}
+                    title="Add route config"
+                    placeholder="e.g. route0"
+                    existingNames={configs}
+                />
+            </div>
         </PageLayout>
     );
 };

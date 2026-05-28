@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use tabled::Tabled;
 use yanet_cli_balancer2::balancerpb;
-use ync::display::print_table;
+use ync::display::print_table_from_entries;
 
 use crate::{bytes_to_ip, format_ip_port};
 
@@ -43,7 +43,7 @@ fn print_module_stats(state: &balancerpb::BalancerState) {
         push_icmp_rows(&mut rows, "ICMPv6", icmp);
     }
 
-    print_table(rows);
+    print_table_from_entries(rows);
     println!();
 }
 
@@ -162,12 +162,12 @@ fn print_table_view_vs(vs: &balancerpb::VsState, opts: &ShowOptions) {
     if opts.stats {
         let rows: Vec<RealStatsRow> = vs.reals.iter().filter_map(real_stats_row).collect();
         if !rows.is_empty() {
-            print_table(rows);
+            print_table_from_entries(rows);
         }
     } else {
         let rows: Vec<RealBasicRow> = vs.reals.iter().filter_map(real_basic_row).collect();
         if !rows.is_empty() {
-            print_table(rows);
+            print_table_from_entries(rows);
         }
     }
     println!();

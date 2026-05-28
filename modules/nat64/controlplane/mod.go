@@ -33,12 +33,12 @@ func NewNAT64Module(cfg *Config, log *zap.Logger) (*NAT64Module, error) {
 		zap.Stringer("size", cfg.MemoryRequirements),
 	)
 
-	agent, err := shm.AgentReattach("nat64", cfg.InstanceID, cfg.MemoryRequirements.Unwrap())
+	agent, err := shm.AgentAttach("nat64", cfg.InstanceID, cfg.MemoryRequirements.Unwrap())
 	if err != nil {
 		return nil, fmt.Errorf("failed to attach agent to shared memory: %w", err)
 	}
 
-	nat64Service := NewNAT64Service(agent, log)
+	nat64Service := NewNAT64Service(NewBackend(agent), WithNAT64ServiceLog(log))
 
 	return &NAT64Module{
 		cfg:          cfg,

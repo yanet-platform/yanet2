@@ -118,31 +118,6 @@ func (m *SharedMemory) AgentAttach(
 	return &Agent{name: name, ptr: ptr}, nil
 }
 
-// AgentReattach attaches a module agent to shared memory on the dataplane instance.
-// If Agent with such name already attached, it will be reattached to the same memory.
-func (m *SharedMemory) AgentReattach(
-	name string,
-	instanceIdx uint32,
-	size datasize.ByteSize,
-) (*Agent, error) {
-	cName := C.CString(name)
-	defer C.free(unsafe.Pointer(cName))
-
-	var cErr *C.yanet_error
-	ptr := C.agent_reattach(
-		m.ptr,
-		C.uint32_t(instanceIdx),
-		cName,
-		C.size_t(size),
-		&cErr,
-	)
-	if ptr == nil {
-		return nil, fmt.Errorf("failed to reattach agent %q: %w", name, cerrors.FromC(unsafe.Pointer(cErr)))
-	}
-
-	return &Agent{name: name, ptr: ptr}, nil
-}
-
 // AgentsAttach attaches agents to shared memory on the specified list of instances.
 func (m *SharedMemory) AgentsAttach(
 	name string,
@@ -151,7 +126,7 @@ func (m *SharedMemory) AgentsAttach(
 ) ([]*Agent, error) {
 	agents := make([]*Agent, 0, len(instanceIndices))
 	for _, instanceIdx := range instanceIndices {
-		agent, err := m.AgentReattach(name, instanceIdx, size)
+		agent, err := m.AgentAttach(name, instanceIdx, size)
 		if err != nil {
 			return nil, fmt.Errorf(
 				"failed to connect to shared memory on instance %d: %w",
@@ -335,8 +310,7 @@ func (m *dpConfig) Agents() []AgentInfo {
 			instances[instIdx] = AgentInstanceInfo{
 				PID:         uint32(instanceInfo.pid),
 				MemoryLimit: uint64(instanceInfo.memory_limit),
-				Allocated:   uint64(instanceInfo.allocated),
-				Freed:       uint64(instanceInfo.freed),
+				FreeBytes:   uint64(instanceInfo.free_bytes),
 				Gen:         uint64(instanceInfo.gen),
 			}
 		}
@@ -380,8 +354,7 @@ type AgentInfo struct {
 type AgentInstanceInfo struct {
 	PID         uint32
 	MemoryLimit uint64
-	Allocated   uint64
-	Freed       uint64
+	FreeBytes   uint64
 	Gen         uint64
 }
 
@@ -472,40 +445,43 @@ func (m *dpConfig) Devices() []DeviceInfo {
 }
 
 type CounterInfo struct {
-	Name   string
+	Name string
+	// [instance][value_index]
 	Values [][]uint64
 }
 
-func (m *dpConfig) encodeCounters(
+func decodeCounterHandle(
+	handle *C.struct_counter_handle,
+	instanceCount C.uint64_t,
+) CounterInfo {
+	counterInfo := CounterInfo{
+		Name:   C.GoString(&handle.name[0]),
+		Values: make([][]uint64, 0, instanceCount),
+	}
+
+	for iidx := C.uint64_t(0); iidx < instanceCount; iidx++ {
+		values := make([]uint64, 0, int(handle.size))
+		for vidx := C.uint64_t(0); vidx < handle.size; vidx++ {
+			values = append(values, uint64(C.yanet_get_counter_value(
+				handle.value_handle,
+				vidx,
+				iidx,
+			)))
+		}
+		counterInfo.Values = append(counterInfo.Values, values)
+	}
+
+	return counterInfo
+}
+
+func (m *DPConfig) encodeCounters(
 	counters *C.struct_counter_handle_list,
 ) []CounterInfo {
-	res := make([]CounterInfo, 0)
+	res := make([]CounterInfo, 0, counters.count)
 
 	for cidx := C.uint64_t(0); cidx < counters.count; cidx++ {
 		handle := C.yanet_get_counter(counters, cidx)
-		counterInfo := CounterInfo{
-			Name:   C.GoString(&handle.name[0]),
-			Values: make([][]uint64, 0, counters.instance_count),
-		}
-
-		for iidx := C.uint64_t(0); iidx < counters.instance_count; iidx++ {
-			counterInfo.Values = append(
-				counterInfo.Values,
-				make([]uint64, 0, int(handle.size)),
-			)
-			for vidx := C.uint64_t(0); vidx < handle.size; vidx++ {
-				counterInfo.Values[iidx] = append(
-					counterInfo.Values[iidx],
-					uint64(C.yanet_get_counter_value(
-						handle.value_handle,
-						vidx,
-						iidx,
-					)),
-				)
-			}
-		}
-
-		res = append(res, counterInfo)
+		res = append(res, decodeCounterHandle(handle, counters.instance_count))
 	}
 
 	return res
@@ -660,6 +636,112 @@ func (m *dpConfig) ModuleCounters(
 	}
 
 	return m.encodeCounters(counters)
+}
+
+// CounterTag is a (key, value) predicate against a counter's tag set.
+// Value semantics follow the C API: an empty string requires the tag to
+// be absent, "*" requires the tag to be present with any value, and any
+// other string requires an exact match.
+type CounterTag struct {
+	Key   string
+	Value string
+}
+
+// CounterGroup is a set of counters that share the same tag set.
+type CounterGroup struct {
+	Tags     []CounterTag
+	Counters []CounterInfo
+}
+
+// CountersByTags returns counters matching every predicate in tags and at
+// least one name in query. A nil or empty tags slice imposes no per-tag
+// constraint; a nil or empty query matches any counter name.
+func (m *DPConfig) CountersByTags(
+	tags []CounterTag,
+	query []string,
+) ([]CounterGroup, error) {
+	cTags := make([]C.struct_counter_tag, len(tags))
+	for idx, tag := range tags {
+		cKey := C.CString(tag.Key)
+		cValue := C.CString(tag.Value)
+		defer C.free(unsafe.Pointer(cKey))
+		defer C.free(unsafe.Pointer(cValue))
+		cTags[idx] = C.struct_counter_tag{key: cKey, value: cValue}
+	}
+
+	cQuery := make([]*C.char, len(query))
+	for idx, name := range query {
+		cQuery[idx] = C.CString(name)
+		defer C.free(unsafe.Pointer(cQuery[idx]))
+	}
+
+	var cTagsPtr *C.struct_counter_tag
+	if len(cTags) > 0 {
+		cTagsPtr = &cTags[0]
+	}
+	var cQueryPtr **C.char
+	var queryCount C.size_t
+	if len(cQuery) > 0 {
+		cQueryPtr = &cQuery[0]
+		queryCount = C.size_t(len(cQuery))
+	} else {
+		queryCount = C.size_t(^uint64(0))
+	}
+
+	var cErr *C.yanet_error
+	counters := C.yanet_get_counters_by_tags(
+		m.ptr,
+		cTagsPtr,
+		C.size_t(len(cTags)),
+		cQueryPtr,
+		queryCount,
+		&cErr,
+	)
+	if counters == nil {
+		if err := cerrors.FromC(unsafe.Pointer(cErr)); err != nil {
+			return nil, err
+		}
+		return nil, fmt.Errorf("unknown error")
+	}
+	defer C.yanet_counter_handle_list_free(counters)
+
+	groups := make([]CounterGroup, 0)
+
+	for idx := C.uint64_t(0); idx < counters.count; idx++ {
+		handle := C.yanet_get_counter(counters, idx)
+
+		if idx == 0 || C.yanet_get_counter(counters, idx-1).tags != handle.tags {
+			tags := decodeCounterTags(handle.tags, handle.tag_count)
+			groups = append(groups, CounterGroup{Tags: tags})
+		}
+
+		group := &groups[len(groups)-1]
+		group.Counters = append(
+			group.Counters,
+			decodeCounterHandle(handle, counters.instance_count),
+		)
+	}
+
+	return groups, nil
+}
+
+func decodeCounterTags(
+	tags *C.struct_counter_tag,
+	count C.size_t,
+) []CounterTag {
+	if tags == nil || count == 0 {
+		return nil
+	}
+
+	cTags := unsafe.Slice(tags, count)
+	out := make([]CounterTag, count)
+	for idx := range cTags {
+		out[idx] = CounterTag{
+			Key:   C.GoString(cTags[idx].key),
+			Value: C.GoString(cTags[idx].value),
+		}
+	}
+	return out
 }
 
 // PerformanceCounterLatencyRange represents a latency range in performance counters.

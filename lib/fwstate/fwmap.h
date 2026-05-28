@@ -607,7 +607,7 @@ fwmap_update_counters(
 
 // Free a FWMap and all its resources.
 static inline void
-fwmap_destroy(fwmap_t *map, struct memory_context *ctx) {
+fwmap_free(fwmap_t *map, struct memory_context *ctx) {
 	if (!map) {
 		return;
 	}
@@ -948,7 +948,7 @@ fwmap_new(const fwmap_config_t *user_config, struct memory_context *ctx) {
 	return map;
 
 fail:
-	fwmap_destroy(map, ctx);
+	fwmap_free(map, ctx);
 	return NULL;
 }
 

@@ -45,6 +45,8 @@ jobs:
         name: ccache
         with:
           key: ${{ runner.os }}-fuzz-build-cache
+          max-size: 1G
+          verbose: 2
 
       - name: Build fuzz targets
         run: make fuzz

@@ -1,11 +1,15 @@
-use core::error::Error;
-use std::net::{Ipv4Addr, Ipv6Addr};
+use core::{
+    error::Error,
+    net::{Ipv4Addr, Ipv6Addr},
+};
 
 use clap::{ArgAction, CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::CompleteEnv;
+use commonpb::pb::IpAddress;
 use nat64pb::{
     nat64_service_client::Nat64ServiceClient, AddMappingRequest, AddPrefixRequest, ListConfigsRequest,
-    SetDropUnknownRequest, SetMtuRequest, ShowConfigRequest, ShowConfigResponse,
+    RemoveMappingRequest, RemovePrefixRequest, SetDropUnknownRequest, SetMtuRequest, ShowConfigRequest,
+    ShowConfigResponse,
 };
 use netip::{Contiguous, Ipv6Network};
 use ptree::TreeBuilder;
@@ -61,12 +65,16 @@ pub enum ModeCmd {
 pub enum PrefixCmd {
     /// Add a new NAT64 prefix
     Add(AddPrefixCmd),
+    /// Remove NAT64 prefix
+    Remove(RemovePrefixCmd),
 }
 
 #[derive(Debug, Clone, Subcommand)]
 pub enum MappingCmd {
     /// Add a new IPv4-IPv6 mapping
     Add(AddMappingCmd),
+    /// Remove IPv4-IPv6 mapping
+    Remove(RemoveMappingCmd),
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -90,6 +98,16 @@ pub struct AddPrefixCmd {
 }
 
 #[derive(Debug, Clone, Parser)]
+pub struct RemovePrefixCmd {
+    /// The name of the config to operate on.
+    #[arg(long = "name", short = 'n')]
+    pub config_name: String,
+    /// IPv6 prefix (12 bytes) to be removed.
+    #[arg(long)]
+    pub prefix: Contiguous<Ipv6Network>,
+}
+
+#[derive(Debug, Clone, Parser)]
 pub struct AddMappingCmd {
     /// The name of the config to operate on.
     #[arg(long = "name", short = 'n')]
@@ -103,6 +121,16 @@ pub struct AddMappingCmd {
     /// Index of the prefix to use.
     #[arg(long)]
     pub prefix_index: u32,
+}
+
+#[derive(Debug, Clone, Parser)]
+pub struct RemoveMappingCmd {
+    /// The name of the config to operate on.
+    #[arg(long = "name", short = 'n')]
+    pub config_name: String,
+    /// IPv4 address (4 bytes).
+    #[arg(long)]
+    pub ipv4: Ipv4Addr,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -161,9 +189,11 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
         ModeCmd::Show(cmd) => service.show_config(cmd).await,
         ModeCmd::Prefix { cmd } => match cmd {
             PrefixCmd::Add(cmd) => service.add_prefix(cmd).await,
+            PrefixCmd::Remove(cmd) => service.remove_prefix(cmd).await,
         },
         ModeCmd::Mapping { cmd } => match cmd {
             MappingCmd::Add(cmd) => service.add_mapping(cmd).await,
+            MappingCmd::Remove(cmd) => service.remove_mapping(cmd).await,
         },
         ModeCmd::Mtu(cmd) => service.set_mtu(cmd).await,
         ModeCmd::Drop(cmd) => service.set_drop_unknown(cmd).await,
@@ -223,15 +253,39 @@ impl NAT64Service {
         Ok(())
     }
 
+    pub async fn remove_prefix(&mut self, cmd: RemovePrefixCmd) -> Result<(), Box<dyn Error>> {
+        let request = RemovePrefixRequest {
+            name: cmd.config_name.clone(),
+            prefix: cmd.prefix.addr().octets()[..12].to_vec(),
+        };
+        log::debug!("RemovePrefixRequest: {request:?}");
+        self.client.remove_prefix(request).await?;
+
+        println!("OK");
+        Ok(())
+    }
+
     pub async fn add_mapping(&mut self, cmd: AddMappingCmd) -> Result<(), Box<dyn Error>> {
         let request = AddMappingRequest {
             name: cmd.config_name.clone(),
-            ipv4: cmd.ipv4.octets().to_vec(),
-            ipv6: cmd.ipv6.octets().to_vec(),
+            ipv4: Some(IpAddress { addr: cmd.ipv4.octets().to_vec() }),
+            ipv6: Some(IpAddress { addr: cmd.ipv6.octets().to_vec() }),
             prefix_index: cmd.prefix_index,
         };
         log::debug!("AddMappingRequest: {request:?}");
         self.client.add_mapping(request).await?;
+
+        println!("OK");
+        Ok(())
+    }
+
+    pub async fn remove_mapping(&mut self, cmd: RemoveMappingCmd) -> Result<(), Box<dyn Error>> {
+        let request = RemoveMappingRequest {
+            name: cmd.config_name.clone(),
+            ipv4: Some(IpAddress { addr: cmd.ipv4.octets().to_vec() }),
+        };
+        log::debug!("RemoveMappingRequest: {request:?}");
+        self.client.remove_mapping(request).await?;
 
         println!("OK");
         Ok(())
@@ -283,9 +337,12 @@ pub fn print_tree(resp: &ShowConfigResponse) -> Result<(), Box<dyn Error>> {
 
         tree.begin_child("Mappings".to_string());
         for mapping in &config.mappings {
+            let ipv4 = mapping.ipv4.as_ref().map(|a| a.to_string()).unwrap_or_default();
+            let ipv6 = mapping.ipv6.as_ref().map(|a| a.to_string()).unwrap_or_default();
+
             tree.add_empty_child(format!(
-                "IPv4: {:?} -> IPv6: {:?} (prefix: {})",
-                mapping.ipv4, mapping.ipv6, mapping.prefix_index
+                "IPv4: {} -> IPv6: {} (prefix: {})",
+                ipv4, ipv6, mapping.prefix_index
             ));
         }
         tree.end_child();

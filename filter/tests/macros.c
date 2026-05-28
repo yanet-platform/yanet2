@@ -33,7 +33,7 @@ run_case(void) {
 	// init filter
 	const struct filter_rule *r_ptr = &r;
 	struct filter f;
-	res = filter_init(&f, sign, &r_ptr, 1, &memory_context);
+	res = filter_init(&f, sign, &r_ptr, 1, &memory_context, NULL);
 	assert(res == 0);
 
 	// craft packet: UDP 4000
@@ -51,6 +51,7 @@ run_case(void) {
 
 	free_packet(&p);
 	filter_free(&f, sign);
+	memory_context_fini(&memory_context);
 	free(memory);
 }
 

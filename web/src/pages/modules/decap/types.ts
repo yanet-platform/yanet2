@@ -1,14 +1,14 @@
-// Prefix item for table display
-export interface PrefixItem {
+/** A single row in the decap prefix table. */
+export interface PrefixRowItem {
+    /** Stable local ID — equals the prefix string for server-loaded rows. */
     id: string;
     prefix: string;
 }
 
-// Props for AddPrefixDialog
-export interface AddPrefixDialogProps {
-    open: boolean;
-    onClose: () => void;
-    onConfirm: (configName: string, prefixes: string[]) => Promise<void>;
-    existingConfigs: string[];
-}
+/** Row status relative to the last-known server snapshot. */
+export type PrefixRowStatus = 'same' | 'added' | 'changed';
 
+/** Validation errors for a single row. null = valid, string = error message. */
+export interface PrefixRowErrors {
+    prefix: string | null;
+}

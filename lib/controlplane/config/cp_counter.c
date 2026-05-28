@@ -1,12 +1,21 @@
 #include "cp_counter.h"
 
-#include "common/container_of.h"
 #include "common/memory.h"
 
-#include "controlplane/config/defines.h"
+#include "common/memory_address.h"
+#include "counters/counters.h"
 #include "lib/errors/errors.h"
+#include <stdlib.h>
+#include <string.h>
 
 #define COUNTER_REGISTRY_PREALLOC 8
+
+static int
+compare_tags(const void *left, const void *right) {
+	const struct counter_tag *left_tag = (const struct counter_tag *)left;
+	const struct counter_tag *right_tag = (const struct counter_tag *)right;
+	return strcmp(left_tag->key, right_tag->key);
+}
 
 int
 cp_config_counter_storage_registry_init(
@@ -14,196 +23,301 @@ cp_config_counter_storage_registry_init(
 	struct cp_config_counter_storage_registry *registry,
 	yanet_error **err
 ) {
-	if (registry_init(
-		    memory_context,
-		    &registry->device_registry,
-		    COUNTER_REGISTRY_PREALLOC
-	    )) {
+	struct cp_counter_storage *items = memory_balloc(
+		memory_context,
+		sizeof(struct cp_counter_storage) * COUNTER_REGISTRY_PREALLOC
+	);
+	if (items == NULL) {
 		yanet_error_add(
-			err,
-			"failed to initialize device registry for counter "
-			"storage"
+			err, "failed to initialize registry for counter storage"
 		);
 		return -1;
 	}
 
+	SET_OFFSET_OF(&registry->items, items);
+	registry->capacity = COUNTER_REGISTRY_PREALLOC;
+	registry->count = 0;
 	SET_OFFSET_OF(&registry->memory_context, memory_context);
 	return 0;
 }
 
-struct cp_config_counter_storage_device {
-	struct registry_item item;
-	char device_name[CP_DEVICE_NAME_LEN];
-	struct counter_storage *counter_storage;
-	struct registry pipeline_registry;
-};
-
-struct cp_config_counter_storage_pipeline {
-	struct registry_item item;
-	char pipeline_name[CP_PIPELINE_NAME_LEN];
-	struct counter_storage *counter_storage;
-	struct registry function_registry;
-};
-
-struct cp_config_counter_storage_function {
-	struct registry_item item;
-	char function_name[CP_FUNCTION_NAME_LEN];
-	struct counter_storage *counter_storage;
-	struct registry chain_registry;
-};
-
-struct cp_config_counter_storage_chain {
-	struct registry_item item;
-	char chain_name[CP_CHAIN_NAME_LEN];
-	struct counter_storage *counter_storage;
-	struct registry module_registry;
-};
-
-struct cp_config_counter_storage_module {
-	struct registry_item item;
-	char module_type[80];
-	char module_name[CP_MODULE_NAME_LEN];
-	struct counter_storage *counter_storage;
-};
-
-static void
-cb_cp_config_counter_storage_module_free(
-	struct registry_item *item, void *cb_data
-) {
-	struct memory_context *memory_context =
-		(struct memory_context *)cb_data;
-
-	struct cp_config_counter_storage_module *module = container_of(
-		item, struct cp_config_counter_storage_module, item
-	);
-
-	memory_bfree(memory_context, module, sizeof(*module));
-}
-
-static void
-cb_cp_config_counter_storage_chain_free(
-	struct registry_item *item, void *cb_data
-) {
-	struct memory_context *memory_context =
-		(struct memory_context *)cb_data;
-
-	struct cp_config_counter_storage_chain *chain = container_of(
-		item, struct cp_config_counter_storage_chain, item
-	);
-
-	registry_destroy(
-		&chain->module_registry,
-		cb_cp_config_counter_storage_module_free,
-		memory_context
-	);
-
-	memory_bfree(memory_context, chain, sizeof(*chain));
-}
-
-static void
-cb_cp_config_counter_storage_function_free(
-	struct registry_item *item, void *cb_data
-) {
-	struct memory_context *memory_context =
-		(struct memory_context *)cb_data;
-
-	struct cp_config_counter_storage_function *function = container_of(
-		item, struct cp_config_counter_storage_function, item
-	);
-
-	registry_destroy(
-		&function->chain_registry,
-		cb_cp_config_counter_storage_chain_free,
-		memory_context
-	);
-
-	memory_bfree(memory_context, function, sizeof(*function));
-}
-
-static void
-cb_cp_config_counter_storage_pipeline_free(
-	struct registry_item *item, void *cb_data
-) {
-	struct memory_context *memory_context =
-		(struct memory_context *)cb_data;
-
-	struct cp_config_counter_storage_pipeline *pipeline = container_of(
-		item, struct cp_config_counter_storage_pipeline, item
-	);
-
-	registry_destroy(
-		&pipeline->function_registry,
-		cb_cp_config_counter_storage_function_free,
-		memory_context
-	);
-
-	memory_bfree(memory_context, pipeline, sizeof(*pipeline));
-}
-
-static void
-cb_cp_config_counter_storage_device_free(
-	struct registry_item *item, void *cb_data
-) {
-	struct memory_context *memory_context =
-		(struct memory_context *)cb_data;
-
-	struct cp_config_counter_storage_device *device = container_of(
-		item, struct cp_config_counter_storage_device, item
-	);
-
-	registry_destroy(
-		&device->pipeline_registry,
-		cb_cp_config_counter_storage_pipeline_free,
-		memory_context
-	);
-
-	memory_bfree(memory_context, device, sizeof(*device));
-}
-
-void
-cp_config_counter_storage_registry_destroy(
-	struct cp_config_counter_storage_registry *registry
-) {
-	registry_destroy(
-		&registry->device_registry,
-		cb_cp_config_counter_storage_device_free,
-		ADDR_OF(&registry->memory_context)
-	);
+static int
+validate_tag(struct counter_tag *tag, bool predicate, yanet_error **err) {
+	if (tag->key == NULL) {
+		yanet_error_add(err, "key is required");
+		return -1;
+	}
+	if (tag->value == NULL) {
+		yanet_error_add(err, "value is required");
+		return -1;
+	}
+	if (strnlen(tag->key, KEY_MAX_SIZE) == KEY_MAX_SIZE) {
+		yanet_error_add(
+			err, "key length exceeds max %d", KEY_MAX_SIZE - 1
+		);
+		return -1;
+	}
+	if (strnlen(tag->value, VALUE_MAX_SIZE) == VALUE_MAX_SIZE) {
+		yanet_error_add(
+			err, "value length exceeds max %d", VALUE_MAX_SIZE - 1
+		);
+		return -1;
+	}
+	if (!predicate) {
+		if (strcmp(tag->value, "") == 0) {
+			yanet_error_add(
+				err,
+				"empty value is reserved for 'absent' predicate"
+			);
+			return -1;
+		}
+		if (strcmp(tag->value, "*") == 0) {
+			yanet_error_add(
+				err,
+				"* value is reserved for 'present' predicate"
+			);
+			return -1;
+		}
+	}
+	return 0;
 }
 
 static int
-compare_device_name(const struct registry_item *item, const void *data) {
-	struct cp_config_counter_storage_device *device = container_of(
-		item, struct cp_config_counter_storage_device, item
-	);
+normalize_tags(
+	struct counter_tag *tags,
+	size_t tag_count,
+	bool predicate,
+	yanet_error **err
+) {
+	if (tag_count > MAX_TAG_COUNT) {
+		yanet_error_add(err, "tag count exceeds max %d", MAX_TAG_COUNT);
+		return -1;
+	}
 
-	const char *device_name = (const char *)data;
+	for (size_t i = 0; i < tag_count; ++i) {
+		if (validate_tag(tags + i, predicate, err) != 0) {
+			yanet_error_add(err, "tag at index %zu", i);
+			return -1;
+		}
+	}
+	qsort(tags, tag_count, sizeof(*tags), compare_tags);
+	for (size_t i = 0; i + 1 < tag_count; ++i) {
+		if (strcmp(tags[i].key, tags[i + 1].key) == 0) {
+			yanet_error_add(err, "duplicate key '%s'", tags[i].key);
+			return -1;
+		}
+	}
 
-	return strncmp(
-		device->device_name, device_name, sizeof(device->device_name)
-	);
+	return 0;
 }
 
-static struct cp_config_counter_storage_device *
-cp_config_counter_storage_registry_lookup_device_item(
+static int
+check_already_exists(
 	struct cp_config_counter_storage_registry *registry,
-	const char *device_name
+	struct counter_tag *tags,
+	size_t tag_count,
+	yanet_error **err
 ) {
-	uint64_t index;
-	if (registry_lookup(
-		    &registry->device_registry,
-		    compare_device_name,
-		    device_name,
-		    &index
-	    )) {
+	struct cp_counter_storage *items = ADDR_OF(&registry->items);
+	for (size_t i = 0; i < registry->count; ++i) {
+		struct cp_counter_storage *cur = items + i;
+		if (cur->tag_count != tag_count) {
+			continue;
+		}
+		int equals = 1;
+		for (size_t j = 0; j < tag_count; ++j) {
+			if (strcmp(tags[j].key, cur->tags[j].key) != 0 ||
+			    strcmp(tags[j].value, cur->tags[j].value) != 0) {
+				equals = 0;
+				break;
+			}
+		}
+		if (equals) {
+			yanet_error_add(err, "already exists");
+			return -1;
+		}
+	}
+	return 0;
+}
+
+int
+cp_config_counter_storage_registry_insert(
+	struct cp_config_counter_storage_registry *registry,
+	const struct counter_tag *const_tags,
+	size_t tag_count,
+	struct counter_storage *storage,
+	yanet_error **err
+) {
+	if (tag_count > MAX_TAG_COUNT) {
+		yanet_error_add(err, "tag count exceeds max %d", MAX_TAG_COUNT);
+		return -1;
+	}
+	struct counter_tag tags[MAX_TAG_COUNT];
+	for (size_t i = 0; i < tag_count; ++i) {
+		tags[i].key = const_tags[i].key;
+		tags[i].value = const_tags[i].value;
+	}
+
+	if (normalize_tags(tags, tag_count, false, err) != 0) {
+		return -1;
+	}
+
+	if (check_already_exists(registry, tags, tag_count, err) != 0) {
+		return -1;
+	}
+
+	if (registry->count == registry->capacity) {
+		struct memory_context *mctx =
+			ADDR_OF(&registry->memory_context);
+		struct cp_counter_storage *items = memory_balloc(
+			mctx, registry->capacity * 2 * sizeof(*items)
+		);
+		if (items == NULL) {
+			yanet_error_add(err, "failed to allocate storage");
+			return -1;
+		}
+		struct cp_counter_storage *prev_items =
+			ADDR_OF(&registry->items);
+		for (size_t i = 0; i < registry->count; ++i) {
+			struct cp_counter_storage *dst = items + i;
+			struct cp_counter_storage *src = prev_items + i;
+			memcpy(dst->tags, src->tags, sizeof(dst->tags));
+			dst->tag_count = src->tag_count;
+			EQUATE_OFFSET(&dst->storage, &src->storage);
+		}
+		memory_bfree(
+			mctx, prev_items, registry->count * sizeof(*items)
+		);
+		SET_OFFSET_OF(&registry->items, items);
+		registry->capacity *= 2;
+	}
+
+	struct cp_counter_storage *dst =
+		ADDR_OF(&registry->items) + registry->count;
+	SET_OFFSET_OF(&dst->storage, storage);
+	dst->tag_count = tag_count;
+	for (size_t i = 0; i < tag_count; ++i) {
+		struct cp_counter_tag *dst_tag = &dst->tags[i];
+		struct counter_tag *src = &tags[i];
+		strcpy(dst_tag->key, src->key);
+		strcpy(dst_tag->value, src->value);
+	}
+
+	registry->count += 1;
+
+	return 0;
+}
+
+static int
+check_match(
+	const struct counter_tag *filter,
+	size_t filter_count,
+	const struct cp_counter_tag *present,
+	size_t present_count
+) {
+	size_t j = 0;
+	for (size_t i = 0; i < filter_count; ++i) {
+		while (j < present_count &&
+		       strcmp(filter[i].key, present[j].key) > 0) {
+			++j;
+		}
+		bool key_present = j < present_count &&
+				   strcmp(filter[i].key, present[j].key) == 0;
+		bool ok;
+		if (strcmp(filter[i].value, "") == 0) {
+			ok = !key_present;
+		} else if (strcmp(filter[i].value, "*") == 0) {
+			ok = key_present;
+		} else {
+			ok = key_present &&
+			     strcmp(filter[i].value, present[j].value) == 0;
+		}
+		if (!ok) {
+			return 0;
+		}
+	}
+	return 1;
+}
+
+struct cp_counter_storage **
+cp_config_counter_storage_registry_find(
+	struct cp_config_counter_storage_registry *registry,
+	const struct counter_tag *const_tags,
+	size_t tag_count,
+	yanet_error **err
+) {
+	if (tag_count > MAX_TAG_COUNT) {
+		yanet_error_add(err, "tag count exceeds max %d", MAX_TAG_COUNT);
+		return NULL;
+	}
+	struct counter_tag tags[MAX_TAG_COUNT];
+	for (size_t i = 0; i < tag_count; ++i) {
+		tags[i].key = const_tags[i].key;
+		tags[i].value = const_tags[i].value;
+	}
+
+	if (normalize_tags(tags, tag_count, true, err) != 0) {
 		return NULL;
 	}
 
-	return container_of(
-		registry_get(&registry->device_registry, index),
-		struct cp_config_counter_storage_device,
-		item
-	);
+	size_t cnt = 0;
+	struct cp_counter_storage *items = ADDR_OF(&registry->items);
+	for (size_t i = 0; i < registry->count; ++i) {
+		if (check_match(
+			    tags, tag_count, items[i].tags, items[i].tag_count
+		    ) == 1) {
+			++cnt;
+		}
+	}
+
+	struct cp_counter_storage **list = malloc((cnt + 1) * sizeof(*list));
+	if (list == NULL) {
+		yanet_error_add(err, "malloc failed");
+		return NULL;
+	}
+
+	cnt = 0;
+	for (size_t i = 0; i < registry->count; ++i) {
+		if (check_match(
+			    tags, tag_count, items[i].tags, items[i].tag_count
+		    ) == 1) {
+			list[cnt++] = items + i;
+		}
+	}
+
+	list[cnt] = NULL;
+
+	return list;
+}
+
+void
+cp_config_counter_storage_registry_fini(
+	struct cp_config_counter_storage_registry *registry
+) {
+	struct memory_context *mctx = ADDR_OF(&registry->memory_context);
+	if (mctx == NULL) {
+		return;
+	}
+	struct cp_counter_storage *items = ADDR_OF(&registry->items);
+	memory_bfree(mctx, items, sizeof(*items) * registry->capacity);
+	memset(registry, 0, sizeof(*registry));
+}
+
+static struct counter_storage *
+get_one(struct cp_config_counter_storage_registry *registry,
+	struct counter_tag *tags,
+	size_t tag_count) {
+	struct cp_counter_storage **storages =
+		cp_config_counter_storage_registry_find(
+			registry, tags, tag_count, NULL
+		);
+	if (storages == NULL || storages[0] == NULL) {
+		free(storages);
+		return NULL;
+	}
+	struct counter_storage *result = ADDR_OF(&storages[0]->storage);
+	free(storages);
+	return result;
 }
 
 struct counter_storage *
@@ -211,14 +325,11 @@ cp_config_counter_storage_registry_lookup_device(
 	struct cp_config_counter_storage_registry *registry,
 	const char *device_name
 ) {
-	struct cp_config_counter_storage_device *device =
-		cp_config_counter_storage_registry_lookup_device_item(
-			registry, device_name
-		);
-	if (device == NULL)
-		return NULL;
-
-	return ADDR_OF(&device->counter_storage);
+	struct counter_tag tags[] = {
+		{.key = "device", .value = device_name},
+		{.key = "pipeline", .value = ""}
+	};
+	return get_one(registry, tags, 2);
 }
 
 int
@@ -228,116 +339,9 @@ cp_config_counter_storage_registry_insert_device(
 	struct counter_storage *counter_storage,
 	yanet_error **err
 ) {
-	struct cp_config_counter_storage_device *device =
-		cp_config_counter_storage_registry_lookup_device_item(
-			registry, device_name
-		);
-	if (device != NULL) {
-		yanet_error_add(
-			err,
-			"device '%s' already exists in counter storage "
-			"registry",
-			device_name
-		);
-		return -1;
-	}
-
-	struct memory_context *memory_context =
-		ADDR_OF(&registry->memory_context);
-
-	device = (struct cp_config_counter_storage_device *)memory_balloc(
-		memory_context, sizeof(struct cp_config_counter_storage_device)
-	);
-	if (device == NULL) {
-		yanet_error_add(
-			err,
-			"failed to allocate memory for device '%s' in counter "
-			"storage",
-			device_name
-		);
-		return -1;
-	}
-
-	registry_item_init(&device->item);
-	strtcpy(device->device_name, device_name, sizeof(device->device_name));
-	if (registry_init(
-		    memory_context,
-		    &device->pipeline_registry,
-		    COUNTER_REGISTRY_PREALLOC
-	    )) {
-		yanet_error_add(
-			err,
-			"failed to initialize pipeline registry for device "
-			"'%s'",
-			device_name
-		);
-		goto error_init;
-	}
-	SET_OFFSET_OF(&device->counter_storage, counter_storage);
-
-	if (registry_insert(&registry->device_registry, &device->item)) {
-		yanet_error_add(
-			err,
-			"failed to insert device '%s' into counter storage "
-			"registry",
-			device_name
-		);
-		goto error_insert;
-	}
-
-	return 0;
-
-error_insert:
-	registry_destroy(
-		&device->pipeline_registry,
-		cb_cp_config_counter_storage_pipeline_free,
-		memory_context
-	);
-
-error_init:
-	memory_bfree(
-		memory_context,
-		device,
-		sizeof(struct cp_config_counter_storage_device)
-	);
-
-	return -1;
-}
-
-static int
-compare_pipeline_name(const struct registry_item *item, const void *data) {
-	struct cp_config_counter_storage_pipeline *pipeline = container_of(
-		item, struct cp_config_counter_storage_pipeline, item
-	);
-
-	const char *pipeline_name = (const char *)data;
-
-	return strncmp(
-		pipeline->pipeline_name,
-		pipeline_name,
-		sizeof(pipeline->pipeline_name)
-	);
-}
-
-static struct cp_config_counter_storage_pipeline *
-cp_config_counter_storage_registry_lookup_pipeline_item(
-	struct cp_config_counter_storage_device *device,
-	const char *function_name
-) {
-	uint64_t index;
-	if (registry_lookup(
-		    &device->pipeline_registry,
-		    compare_pipeline_name,
-		    function_name,
-		    &index
-	    )) {
-		return NULL;
-	}
-
-	return container_of(
-		registry_get(&device->pipeline_registry, index),
-		struct cp_config_counter_storage_pipeline,
-		item
+	struct counter_tag tag = {.key = "device", .value = device_name};
+	return cp_config_counter_storage_registry_insert(
+		registry, &tag, 1, counter_storage, err
 	);
 }
 
@@ -347,21 +351,15 @@ cp_config_counter_storage_registry_lookup_pipeline(
 	const char *device_name,
 	const char *pipeline_name
 ) {
-	struct cp_config_counter_storage_device *device =
-		cp_config_counter_storage_registry_lookup_device_item(
-			registry, device_name
-		);
-	if (device == NULL)
-		return NULL;
-
-	struct cp_config_counter_storage_pipeline *pipeline =
-		cp_config_counter_storage_registry_lookup_pipeline_item(
-			device, pipeline_name
-		);
-	if (pipeline == NULL)
-		return NULL;
-
-	return ADDR_OF(&pipeline->counter_storage);
+	struct counter_tag tags[] = {
+		{.key = "device", .value = device_name},
+		{.key = "pipeline", .value = pipeline_name},
+		{
+			.key = "function",
+			.value = "",
+		}
+	};
+	return get_one(registry, tags, 3);
 }
 
 int
@@ -372,133 +370,12 @@ cp_config_counter_storage_registry_insert_pipeline(
 	struct counter_storage *counter_storage,
 	yanet_error **err
 ) {
-	struct cp_config_counter_storage_device *device =
-		cp_config_counter_storage_registry_lookup_device_item(
-			registry, device_name
-		);
-
-	if (device == NULL) {
-		yanet_error_add(
-			err,
-			"device '%s' not found in counter storage registry",
-			device_name
-		);
-		return -1;
-	}
-
-	struct cp_config_counter_storage_pipeline *pipeline =
-		cp_config_counter_storage_registry_lookup_pipeline_item(
-			device, pipeline_name
-		);
-
-	if (pipeline != NULL) {
-		yanet_error_add(
-			err,
-			"pipeline '%s' already exists for device '%s' in "
-			"counter storage",
-			pipeline_name,
-			device_name
-		);
-		return -1;
-	}
-
-	struct memory_context *memory_context =
-		ADDR_OF(&registry->memory_context);
-
-	pipeline = (struct cp_config_counter_storage_pipeline *)memory_balloc(
-		memory_context,
-		sizeof(struct cp_config_counter_storage_pipeline)
-	);
-	if (pipeline == NULL) {
-		yanet_error_add(
-			err,
-			"failed to allocate memory for pipeline '%s' on device "
-			"'%s'",
-			pipeline_name,
-			device_name
-		);
-		return -1;
-	}
-
-	registry_item_init(&pipeline->item);
-	strtcpy(pipeline->pipeline_name,
-		pipeline_name,
-		sizeof(pipeline->pipeline_name));
-	if (registry_init(
-		    memory_context,
-		    &pipeline->function_registry,
-		    COUNTER_REGISTRY_PREALLOC
-	    )) {
-		yanet_error_add(
-			err,
-			"failed to initialize function registry for pipeline "
-			"'%s'",
-			pipeline_name
-		);
-		goto error_init;
-	}
-	SET_OFFSET_OF(&pipeline->counter_storage, counter_storage);
-
-	if (registry_insert(&device->pipeline_registry, &pipeline->item)) {
-		yanet_error_add(
-			err,
-			"failed to insert pipeline '%s' into device '%s' "
-			"registry",
-			pipeline_name,
-			device_name
-		);
-		goto error_insert;
-	}
-
-	return 0;
-
-error_insert:
-	registry_destroy(
-		&pipeline->function_registry,
-		cb_cp_config_counter_storage_function_free,
-		memory_context
-	);
-
-error_init:
-	memory_bfree(memory_context, pipeline, sizeof(*pipeline));
-
-	return -1;
-}
-
-static int
-compare_function_name(const struct registry_item *item, const void *data) {
-	struct cp_config_counter_storage_function *function = container_of(
-		item, struct cp_config_counter_storage_function, item
-	);
-
-	const char *function_name = (const char *)data;
-
-	return strncmp(
-		function->function_name,
-		function_name,
-		sizeof(function->function_name)
-	);
-}
-
-static struct cp_config_counter_storage_function *
-cp_config_counter_storage_registry_lookup_function_item(
-	struct cp_config_counter_storage_pipeline *pipeline,
-	const char *function_name
-) {
-	uint64_t index;
-	if (registry_lookup(
-		    &pipeline->function_registry,
-		    compare_function_name,
-		    function_name,
-		    &index
-	    )) {
-		return NULL;
-	}
-
-	return container_of(
-		registry_get(&pipeline->function_registry, index),
-		struct cp_config_counter_storage_function,
-		item
+	struct counter_tag tags[] = {
+		{.key = "device", .value = device_name},
+		{.key = "pipeline", .value = pipeline_name}
+	};
+	return cp_config_counter_storage_registry_insert(
+		registry, tags, 2, counter_storage, err
 	);
 }
 
@@ -509,28 +386,16 @@ cp_config_counter_storage_registry_lookup_function(
 	const char *pipeline_name,
 	const char *function_name
 ) {
-	struct cp_config_counter_storage_device *device =
-		cp_config_counter_storage_registry_lookup_device_item(
-			registry, device_name
-		);
-	if (device == NULL)
-		return NULL;
-
-	struct cp_config_counter_storage_pipeline *pipeline =
-		cp_config_counter_storage_registry_lookup_pipeline_item(
-			device, pipeline_name
-		);
-	if (pipeline == NULL)
-		return NULL;
-
-	struct cp_config_counter_storage_function *function =
-		cp_config_counter_storage_registry_lookup_function_item(
-			pipeline, function_name
-		);
-	if (function == NULL)
-		return NULL;
-
-	return ADDR_OF(&function->counter_storage);
+	struct counter_tag tags[] = {
+		{.key = "device", .value = device_name},
+		{.key = "pipeline", .value = pipeline_name},
+		{
+			.key = "function",
+			.value = function_name,
+		},
+		{.key = "chain", .value = ""}
+	};
+	return get_one(registry, tags, 4);
 }
 
 int
@@ -542,143 +407,13 @@ cp_config_counter_storage_registry_insert_function(
 	struct counter_storage *counter_storage,
 	yanet_error **err
 ) {
-	struct cp_config_counter_storage_device *device =
-		cp_config_counter_storage_registry_lookup_device_item(
-			registry, device_name
-		);
-	if (device == NULL) {
-		yanet_error_add(
-			err,
-			"device '%s' not found in counter storage registry",
-			device_name
-		);
-		return -1;
-	}
-
-	struct cp_config_counter_storage_pipeline *pipeline =
-		cp_config_counter_storage_registry_lookup_pipeline_item(
-			device, pipeline_name
-		);
-
-	if (pipeline == NULL) {
-		yanet_error_add(
-			err,
-			"pipeline '%s' not found on device '%s'",
-			pipeline_name,
-			device_name
-		);
-		return -1;
-	}
-
-	struct cp_config_counter_storage_function *function =
-		cp_config_counter_storage_registry_lookup_function_item(
-			pipeline, function_name
-		);
-
-	if (function != NULL) {
-		yanet_error_add(
-			err,
-			"function '%s' already exists for pipeline '%s' in "
-			"counter storage",
-			function_name,
-			pipeline_name
-		);
-		return -1;
-	}
-
-	struct memory_context *memory_context =
-		ADDR_OF(&registry->memory_context);
-
-	function = (struct cp_config_counter_storage_function *)memory_balloc(
-		memory_context,
-		sizeof(struct cp_config_counter_storage_function)
-	);
-	if (function == NULL) {
-		yanet_error_add(
-			err,
-			"failed to allocate memory for function '%s' on "
-			"pipeline '%s'",
-			function_name,
-			pipeline_name
-		);
-		return -1;
-	}
-
-	registry_item_init(&function->item);
-	strtcpy(function->function_name,
-		function_name,
-		sizeof(function->function_name));
-	if (registry_init(
-		    memory_context,
-		    &function->chain_registry,
-		    COUNTER_REGISTRY_PREALLOC
-	    )) {
-		yanet_error_add(
-			err,
-			"failed to initialize chain registry for function '%s'",
-			function_name
-		);
-		goto error_init;
-	}
-	SET_OFFSET_OF(&function->counter_storage, counter_storage);
-
-	if (registry_insert(&pipeline->function_registry, &function->item)) {
-		yanet_error_add(
-			err,
-			"failed to initialize function registry for pipeline "
-			"'%s'",
-			pipeline_name
-		);
-		goto error_insert;
-	}
-
-	return 0;
-
-error_insert:
-	registry_destroy(
-		&function->chain_registry,
-		cb_cp_config_counter_storage_chain_free,
-		memory_context
-	);
-
-error_init:
-	memory_bfree(memory_context, function, sizeof(*function));
-
-	return -1;
-}
-
-static int
-compare_chain_name(const struct registry_item *item, const void *data) {
-	struct cp_config_counter_storage_chain *chain = container_of(
-		item, struct cp_config_counter_storage_chain, item
-	);
-
-	const char *chain_name = (const char *)data;
-
-	return strncmp(
-		chain->chain_name, chain_name, sizeof(chain->chain_name)
-	);
-}
-
-static struct cp_config_counter_storage_chain *
-cp_config_counter_storage_registry_lookup_chain_item(
-	struct cp_config_counter_storage_function *function,
-	const char *chain_name
-) {
-	uint64_t index;
-	if (registry_lookup(
-		    &function->chain_registry,
-		    compare_chain_name,
-		    chain_name,
-		    &index
-	    )) {
-		return NULL;
-	}
-
-	return container_of(
-		registry_get(&function->chain_registry, index),
-		struct cp_config_counter_storage_chain,
-		item
+	struct counter_tag tags[] = {
+		{.key = "device", .value = device_name},
+		{.key = "pipeline", .value = pipeline_name},
+		{.key = "function", .value = function_name}
+	};
+	return cp_config_counter_storage_registry_insert(
+		registry, tags, 3, counter_storage, err
 	);
 }
 
@@ -690,35 +425,17 @@ cp_config_counter_storage_registry_lookup_chain(
 	const char *function_name,
 	const char *chain_name
 ) {
-	struct cp_config_counter_storage_device *device =
-		cp_config_counter_storage_registry_lookup_device_item(
-			registry, device_name
-		);
-	if (device == NULL)
-		return NULL;
-
-	struct cp_config_counter_storage_pipeline *pipeline =
-		cp_config_counter_storage_registry_lookup_pipeline_item(
-			device, pipeline_name
-		);
-	if (pipeline == NULL)
-		return NULL;
-
-	struct cp_config_counter_storage_function *function =
-		cp_config_counter_storage_registry_lookup_function_item(
-			pipeline, function_name
-		);
-	if (function == NULL)
-		return NULL;
-
-	struct cp_config_counter_storage_chain *chain =
-		cp_config_counter_storage_registry_lookup_chain_item(
-			function, chain_name
-		);
-	if (chain == NULL)
-		return NULL;
-
-	return ADDR_OF(&chain->counter_storage);
+	struct counter_tag tags[] = {
+		{.key = "device", .value = device_name},
+		{.key = "pipeline", .value = pipeline_name},
+		{
+			.key = "function",
+			.value = function_name,
+		},
+		{.key = "chain", .value = chain_name},
+		{.key = "module_type", .value = ""}
+	};
+	return get_one(registry, tags, 5);
 }
 
 int
@@ -731,174 +448,14 @@ cp_config_counter_storage_registry_insert_chain(
 	struct counter_storage *counter_storage,
 	yanet_error **err
 ) {
-	struct cp_config_counter_storage_device *device =
-		cp_config_counter_storage_registry_lookup_device_item(
-			registry, device_name
-		);
-	if (device == NULL) {
-		yanet_error_add(
-			err,
-			"device '%s' not found in counter storage registry",
-			device_name
-		);
-		return -1;
-	}
-
-	struct cp_config_counter_storage_pipeline *pipeline =
-		cp_config_counter_storage_registry_lookup_pipeline_item(
-			device, pipeline_name
-		);
-	if (pipeline == NULL) {
-		yanet_error_add(
-			err,
-			"pipeline '%s' not found on device '%s'",
-			pipeline_name,
-			device_name
-		);
-		return -1;
-	}
-
-	struct cp_config_counter_storage_function *function =
-		cp_config_counter_storage_registry_lookup_function_item(
-			pipeline, function_name
-		);
-	if (function == NULL) {
-		yanet_error_add(
-			err,
-			"function '%s' not found on pipeline '%s'",
-			function_name,
-			pipeline_name
-		);
-		return -1;
-	}
-
-	struct cp_config_counter_storage_chain *chain =
-		cp_config_counter_storage_registry_lookup_chain_item(
-			function, chain_name
-		);
-	if (chain != NULL) {
-		yanet_error_add(
-			err,
-			"chain '%s' already exists for function '%s' in "
-			"counter storage",
-			chain_name,
-			function_name
-		);
-		return -1;
-	}
-
-	struct memory_context *memory_context =
-		ADDR_OF(&registry->memory_context);
-
-	chain = (struct cp_config_counter_storage_chain *)memory_balloc(
-		memory_context, sizeof(struct cp_config_counter_storage_chain)
-	);
-	if (chain == NULL) {
-		yanet_error_add(
-			err,
-			"failed to allocate memory for chain '%s' on function "
-			"'%s'",
-			chain_name,
-			function_name
-		);
-		return -1;
-	}
-
-	registry_item_init(&chain->item);
-	strtcpy(chain->chain_name, chain_name, sizeof(chain->chain_name));
-	if (registry_init(
-		    memory_context,
-		    &chain->module_registry,
-		    COUNTER_REGISTRY_PREALLOC
-	    )) {
-		yanet_error_add(
-			err,
-			"failed to initialize module registry for chain '%s'",
-			chain_name
-		);
-		goto error_init;
-	}
-	SET_OFFSET_OF(&chain->counter_storage, counter_storage);
-
-	if (registry_insert(&function->chain_registry, &chain->item)) {
-		yanet_error_add(
-			err,
-			"failed to insert pipeline '%s' into device '%s' "
-			"registry",
-			pipeline_name,
-			device_name
-		);
-		goto error_insert;
-	}
-
-	return 0;
-
-error_insert:
-	registry_destroy(
-		&chain->module_registry,
-		cb_cp_config_counter_storage_module_free,
-		memory_context
-	);
-
-error_init:
-	memory_bfree(memory_context, chain, sizeof(*chain));
-
-	return -1;
-}
-
-struct module_item_key {
-	const char *module_type;
-	const char *module_name;
-};
-
-static int
-compare_module_type_name(const struct registry_item *item, const void *data) {
-	struct cp_config_counter_storage_module *module = container_of(
-		item, struct cp_config_counter_storage_module, item
-	);
-
-	const struct module_item_key *key =
-		(const struct module_item_key *)data;
-
-	int rc =
-		strncmp(module->module_type,
-			key->module_type,
-			sizeof(module->module_type));
-	if (rc)
-		return rc;
-
-	return strncmp(
-		module->module_name,
-		key->module_name,
-		sizeof(module->module_name)
-	);
-}
-
-static struct cp_config_counter_storage_module *
-cp_config_counter_storage_registry_lookup_module_item(
-	struct cp_config_counter_storage_chain *chain,
-	const char *module_type,
-	const char *module_name
-) {
-	struct module_item_key cmp_key = {
-		.module_type = module_type,
-		.module_name = module_name,
+	struct counter_tag tags[] = {
+		{.key = "device", .value = device_name},
+		{.key = "pipeline", .value = pipeline_name},
+		{.key = "function", .value = function_name},
+		{.key = "chain", .value = chain_name}
 	};
-
-	uint64_t index;
-	if (registry_lookup(
-		    &chain->module_registry,
-		    compare_module_type_name,
-		    &cmp_key,
-		    &index
-	    )) {
-		return NULL;
-	}
-
-	return container_of(
-		registry_get(&chain->module_registry, index),
-		struct cp_config_counter_storage_module,
-		item
+	return cp_config_counter_storage_registry_insert(
+		registry, tags, 4, counter_storage, err
 	);
 }
 
@@ -912,42 +469,18 @@ cp_config_counter_storage_registry_lookup_module(
 	const char *module_type,
 	const char *module_name
 ) {
-	struct cp_config_counter_storage_device *device =
-		cp_config_counter_storage_registry_lookup_device_item(
-			registry, device_name
-		);
-	if (device == NULL)
-		return NULL;
-
-	struct cp_config_counter_storage_pipeline *pipeline =
-		cp_config_counter_storage_registry_lookup_pipeline_item(
-			device, pipeline_name
-		);
-	if (pipeline == NULL)
-		return NULL;
-
-	struct cp_config_counter_storage_function *function =
-		cp_config_counter_storage_registry_lookup_function_item(
-			pipeline, function_name
-		);
-	if (function == NULL)
-		return NULL;
-
-	struct cp_config_counter_storage_chain *chain =
-		cp_config_counter_storage_registry_lookup_chain_item(
-			function, chain_name
-		);
-	if (chain == NULL)
-		return NULL;
-
-	struct cp_config_counter_storage_module *module =
-		cp_config_counter_storage_registry_lookup_module_item(
-			chain, module_type, module_name
-		);
-	if (module == NULL)
-		return NULL;
-
-	return ADDR_OF(&module->counter_storage);
+	struct counter_tag tags[] = {
+		{.key = "device", .value = device_name},
+		{.key = "pipeline", .value = pipeline_name},
+		{
+			.key = "function",
+			.value = function_name,
+		},
+		{.key = "chain", .value = chain_name},
+		{.key = "module_type", .value = module_type},
+		{.key = "module_name", .value = module_name}
+	};
+	return get_one(registry, tags, 6);
 }
 
 int
@@ -962,116 +495,15 @@ cp_config_counter_storage_registry_insert_module(
 	struct counter_storage *counter_storage,
 	yanet_error **err
 ) {
-	struct cp_config_counter_storage_device *device =
-		cp_config_counter_storage_registry_lookup_device_item(
-			registry, device_name
-		);
-	if (device == NULL) {
-		yanet_error_add(
-			err,
-			"device '%s' not found in counter storage registry",
-			device_name
-		);
-		return -1;
-	}
-
-	struct cp_config_counter_storage_pipeline *pipeline =
-		cp_config_counter_storage_registry_lookup_pipeline_item(
-			device, pipeline_name
-		);
-	if (pipeline == NULL) {
-		yanet_error_add(
-			err,
-			"pipeline '%s' not found on device '%s'",
-			pipeline_name,
-			device_name
-		);
-		return -1;
-	}
-
-	struct cp_config_counter_storage_function *function =
-		cp_config_counter_storage_registry_lookup_function_item(
-			pipeline, function_name
-		);
-	if (function == NULL) {
-		yanet_error_add(
-			err,
-			"function '%s' not found on pipeline '%s'",
-			function_name,
-			pipeline_name
-		);
-		return -1;
-	}
-
-	struct cp_config_counter_storage_chain *chain =
-		cp_config_counter_storage_registry_lookup_chain_item(
-			function, chain_name
-		);
-	if (chain == NULL) {
-		yanet_error_add(
-			err,
-			"chain '%s' not found on function '%s'",
-			chain_name,
-			function_name
-		);
-		return -1;
-	}
-
-	struct cp_config_counter_storage_module *module =
-		cp_config_counter_storage_registry_lookup_module_item(
-			chain, module_type, module_name
-		);
-	if (module != NULL) {
-		yanet_error_add(
-			err,
-			"module '%s:%s' already exists for chain '%s' in "
-			"counter storage",
-			module_type,
-			module_name,
-			chain_name
-		);
-		return -1;
-	}
-
-	struct memory_context *memory_context =
-		ADDR_OF(&registry->memory_context);
-
-	module = (struct cp_config_counter_storage_module *)memory_balloc(
-		memory_context, sizeof(struct cp_config_counter_storage_module)
+	struct counter_tag tags[] = {
+		{.key = "device", .value = device_name},
+		{.key = "pipeline", .value = pipeline_name},
+		{.key = "function", .value = function_name},
+		{.key = "chain", .value = chain_name},
+		{.key = "module_type", .value = module_type},
+		{.key = "module_name", .value = module_name}
+	};
+	return cp_config_counter_storage_registry_insert(
+		registry, tags, 6, counter_storage, err
 	);
-	if (module == NULL) {
-		yanet_error_add(
-			err,
-			"failed to allocate memory for module '%s:%s' on chain "
-			"'%s'",
-			module_type,
-			module_name,
-			chain_name
-		);
-		return -1;
-	}
-
-	registry_item_init(&module->item);
-	strtcpy(module->module_type, module_type, sizeof(module->module_type));
-	strtcpy(module->module_name, module_name, sizeof(module->module_name));
-	SET_OFFSET_OF(&module->counter_storage, counter_storage);
-
-	if (registry_insert(&chain->module_registry, &module->item)) {
-		yanet_error_add(
-			err,
-			"failed to insert module '%s:%s' into chain '%s' "
-			"registry",
-			module_type,
-			module_name,
-			chain_name
-		);
-		goto error;
-	}
-
-	return 0;
-
-error:
-	memory_bfree(memory_context, module, sizeof(*module));
-
-	return -1;
 }

@@ -174,7 +174,7 @@ func (c *Converter) convertBalancerCommand(cmd *CLICommand) string {
 		c.debugLog("Warning: %v, using module anyway", err)
 	}
 
-	builder := NewCommandBuilder(framework.CLIBalancer).
+	builder := NewCommandBuilder(framework.CLIBasePath+"/yanet-cli-balancer2").
 		Action("real").
 		Config(module).
 		Instances(0)

@@ -5,8 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gopacket/gopacket"
-	"github.com/gopacket/gopacket/layers"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
 
@@ -21,50 +19,6 @@ const routeCfgName = "route-tfn0"
 // dataplane configuration in framework_test.go.
 const routeEgressDevice = "01:00.0"
 
-// createRouteTestPacket creates a TCP packet for route testing.
-func createRouteTestPacket(srcIP, dstIP net.IP, payload []byte) []byte {
-	eth := layers.Ethernet{
-		SrcMAC:       framework.MustParseMAC(framework.SrcMAC),
-		DstMAC:       framework.MustParseMAC(framework.DstMAC),
-		EthernetType: layers.EthernetTypeIPv4,
-	}
-
-	ip4 := layers.IPv4{
-		Version:  4,
-		IHL:      5,
-		Id:       1,
-		TTL:      64,
-		Protocol: layers.IPProtocolTCP,
-		SrcIP:    srcIP,
-		DstIP:    dstIP,
-	}
-
-	tcp := layers.TCP{
-		SrcPort: 12345,
-		DstPort: 80,
-		Seq:     1,
-		Ack:     1,
-		Window:  1024,
-		PSH:     true,
-		ACK:     true,
-	}
-	err := tcp.SetNetworkLayerForChecksum(&ip4)
-	if err != nil {
-		panic(err)
-	}
-
-	buf := gopacket.NewSerializeBuffer()
-	opts := gopacket.SerializeOptions{
-		FixLengths:       true,
-		ComputeChecksums: true,
-	}
-	err = gopacket.SerializeLayers(buf, opts, &eth, &ip4, &tcp, gopacket.Payload(payload))
-	if err != nil {
-		panic(err)
-	}
-	return buf.Bytes()
-}
-
 // applyFIB writes a FIB YAML file under /mnt/config and pushes it via
 // "yanet-cli-route fib update" against the named route module config.
 //
@@ -74,7 +28,7 @@ func createRouteTestPacket(srcIP, dstIP net.IP, payload []byte) []byte {
 //
 // An empty prefixes set produces an empty entries list, which the CLI
 // treats as a full FIB clear.
-func applyFIB(t *testing.T, fw *framework.F, cfgName, suffix string, prefixes ...string) {
+func applyFIB(t *testing.T, fw *framework.TestFramework, cfgName, suffix string, prefixes ...string) {
 	t.Helper()
 
 	type fibNexthopYAML struct {
@@ -117,14 +71,19 @@ func applyFIB(t *testing.T, fw *framework.F, cfgName, suffix string, prefixes ..
 
 // TestRoute tests route module functionality including static route insertion and deletion.
 func TestRoute(t *testing.T) {
-	fw := globalFramework.ForTest(t)
-	require.NotNil(t, fw, "Global framework should be initialized")
+	t.Parallel()
+	withBootedVM(t, func(fw *framework.TestFramework) {
+		testRoute(t, fw)
+	})
+}
 
-	fw.Run("Setup_Route_Config", func(fw *framework.F, t *testing.T) {
+func testRoute(t *testing.T, fw *framework.TestFramework) {
+
+	fw.Run("Setup_Route_Config", func(fw *framework.TestFramework, t *testing.T) {
 		applyFIB(t, fw, routeCfgName, "setup", "10.0.0.0/24")
 	})
 
-	fw.Run("Configure_Route_Module", func(fw *framework.F, t *testing.T) {
+	fw.Run("Configure_Route_Module", func(fw *framework.TestFramework, t *testing.T) {
 		commands := []string{
 			framework.CLIFunction + " update --name=test --chains ch0:4=route:" + routeCfgName,
 			framework.CLIPipeline + " update --name=test --functions test",
@@ -134,11 +93,12 @@ func TestRoute(t *testing.T) {
 		require.NoError(t, err, "Failed to configure route module")
 	})
 
-	fw.Run("Test_Packet_Routing_With_Route", func(fw *framework.F, t *testing.T) {
-		packet := createRouteTestPacket(
+	fw.Run("Test_Packet_Routing_With_Route", func(fw *framework.TestFramework, t *testing.T) {
+		packet := framework.CreateTCPIPv4Packet(
 			net.ParseIP("192.0.2.100"),
 			net.ParseIP("10.0.0.10"),
 			[]byte("route test"),
+			nil,
 		)
 
 		inputPacket, outputPacket, err := fw.SendPacketAndParse(0, 0, packet, 100*time.Millisecond)
@@ -150,18 +110,19 @@ func TestRoute(t *testing.T) {
 		}
 	})
 
-	fw.Run("Delete_Static_Route", func(fw *framework.F, t *testing.T) {
+	fw.Run("Delete_Static_Route", func(fw *framework.TestFramework, t *testing.T) {
 		// fib update is a full atomic replacement; an empty entry set
 		// effectively removes all routes from the module.
 		applyFIB(t, fw, routeCfgName, "clear")
 		t.Logf("Successfully cleared route FIB")
 	})
 
-	fw.Run("Test_Packet_Without_Route", func(fw *framework.F, t *testing.T) {
-		packet := createRouteTestPacket(
+	fw.Run("Test_Packet_Without_Route", func(fw *framework.TestFramework, t *testing.T) {
+		packet := framework.CreateTCPIPv4Packet(
 			net.ParseIP("192.0.2.100"),
 			net.ParseIP("172.16.0.10"),
 			[]byte("no route test"),
+			nil,
 		)
 
 		inputPacket, outputPacket0, err := fw.SendPacketAndParse(0, 0, packet, 100*time.Millisecond)
@@ -182,13 +143,14 @@ func TestRoute(t *testing.T) {
 		t.Logf("Packet correctly dropped (no matching route)")
 	})
 
-	fw.Run("Test_Packet_With_Default_Route", func(fw *framework.F, t *testing.T) {
+	fw.Run("Test_Packet_With_Default_Route", func(fw *framework.TestFramework, t *testing.T) {
 		applyFIB(t, fw, routeCfgName, "default", "0.0.0.0/0")
 
-		packet := createRouteTestPacket(
+		packet := framework.CreateTCPIPv4Packet(
 			net.ParseIP("192.0.2.100"),
 			net.ParseIP("172.16.0.10"),
 			[]byte("default route test"),
+			nil,
 		)
 
 		inputPacket, outputPacket, err := fw.SendPacketAndParse(0, 0, packet, 100*time.Millisecond)

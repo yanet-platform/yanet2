@@ -8,7 +8,7 @@ YANET1_ROOT ?= $(abspath $(YANET1_ROOT_REL))
 YANET2_DIR_REL ?= ../..
 YANET2_DIR = $(abspath $(YANET2_DIR_REL))
 CONVERTER_DIR = converter
-OUTPUT_DIR_REL = $(YANET2_DIR)/tests/functional/converted
+OUTPUT_DIR_REL = $(YANET2_DIR)/tests/functional/main
 OUTPUT_DIR = $(abspath $(OUTPUT_DIR_REL))
 SKIPLIST ?= $(abspath $(CONVERTER_DIR)/../skiplist.yaml)
 EXAMPLES_DIR = examples
@@ -31,7 +31,7 @@ help:
 	@echo "Variables:"
 	@echo "  YANET1_ROOT - Path to yanet1 directory (default: ../../../yanet1)"
 	@echo "  YANET2_DIR_REL - Relative path to yanet2 (default: ../..)"
-	@echo "  OUTPUT_DIR - Output directory (default: yanet2/tests/functional/converted)"
+	@echo "  OUTPUT_DIR - Output directory (default: yanet2/tests/functional/main)"
  	@echo "  SKIPLIST  - Path to skiplist.yaml (default: converter/../skiplist.yaml if exists)"
 
 # Tidy go.mod dependencies

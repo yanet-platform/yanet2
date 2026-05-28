@@ -2,6 +2,8 @@
 
 #include "lib/logging/log.h"
 
+#include <string.h>
+
 /* Test framework macros */
 #define TEST_SUCCESS 0
 #define TEST_FAILED -1
@@ -31,6 +33,22 @@
 			    ##__VA_ARGS__,                                     \
 			    (long)(b),                                         \
 			    (long)(a));                                        \
+			return TEST_FAILED;                                    \
+		}                                                              \
+	} while (0)
+
+#define TEST_ASSERT_STR_CONTAINS(haystack, needle, msg, ...)                   \
+	do {                                                                   \
+		const char *_hay = (haystack);                                 \
+		const char *_ndl = (needle);                                   \
+		if (_hay == NULL || _ndl == NULL ||                            \
+		    strstr(_hay, _ndl) == NULL) {                              \
+			LOG(ERROR,                                             \
+			    "ASSERT FAILED: " msg                              \
+			    " (expected substring '%s' in '%s')",              \
+			    ##__VA_ARGS__,                                     \
+			    _ndl ? _ndl : "(null)",                            \
+			    _hay ? _hay : "(null)");                           \
 			return TEST_FAILED;                                    \
 		}                                                              \
 	} while (0)
