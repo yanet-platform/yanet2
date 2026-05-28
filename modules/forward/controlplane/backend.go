@@ -42,6 +42,6 @@ func (m *backend) DeleteModule(name string) error {
 	return m.agent.DeleteModuleConfig(name)
 }
 
-func (m *backend) Agent() ffi.FFIAgent {
+func (m *backend) Agent() *ffi.Agent {
 	return m.agent
 }

@@ -64,10 +64,6 @@ func (m *ForwardService) collectMetrics() ([]*commonpb.Metric, error) {
 				}
 			}
 
-			if cntPackets == 0 && bytes == 0 {
-				continue
-			}
-
 			result = append(result,
 				makeCounter(counter.Name+"_packets", cntPackets, baseLabels...),
 				makeCounter(counter.Name+"_bytes", bytes, baseLabels...),

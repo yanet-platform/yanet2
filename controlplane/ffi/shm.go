@@ -97,7 +97,7 @@ func (m *SharedMemory) AsRawPtr() unsafe.Pointer {
 func (m *SharedMemory) DPConfig(instanceIdx uint32) DPConfig {
 	ptr := C.yanet_shm_dp_config(m.ptr, C.uint32_t(instanceIdx))
 
-	return &DPConfigImpl{ptr: ptr}
+	return &dpConfig{ptr: ptr}
 }
 
 // AgentAttach attaches a module agent to shared memory on the dataplane instance.
@@ -166,24 +166,24 @@ func (m *SharedMemory) AgentsAttach(
 }
 
 // DPConfig represents a handle to dataplane configuration.
-type DPConfigImpl struct {
+type dpConfig struct {
 	ptr *C.struct_dp_config
 }
 
-func NewDPConfigFromRaw(ptr unsafe.Pointer) *DPConfigImpl {
-	return &DPConfigImpl{ptr: (*C.struct_dp_config)(ptr)}
+func NewDPConfigFromRaw(ptr unsafe.Pointer) *dpConfig {
+	return &dpConfig{ptr: (*C.struct_dp_config)(ptr)}
 }
 
-func (m *DPConfigImpl) NumaIdx() uint32 {
+func (m *dpConfig) NumaIdx() uint32 {
 	return uint32(C.dataplane_instance_numa_idx(m.ptr))
 }
 
-func (m *DPConfigImpl) WorkerCount() uint32 {
+func (m *dpConfig) WorkerCount() uint32 {
 	return uint32(C.dataplane_instance_worker_count(m.ptr))
 }
 
 // Modules returns a list of dataplane modules available.
-func (m *DPConfigImpl) Modules() []DPModule {
+func (m *dpConfig) Modules() []DPModule {
 	ptr := C.yanet_get_dp_module_list_info(m.ptr)
 	defer C.dp_module_list_info_free(ptr)
 
@@ -204,7 +204,7 @@ func (m *DPConfigImpl) Modules() []DPModule {
 	return out
 }
 
-func (m *DPConfigImpl) CPConfigs() []CPConfig {
+func (m *dpConfig) CPConfigs() []CPConfig {
 	cpModulesListInfo := C.yanet_get_cp_module_list_info(m.ptr)
 	defer C.cp_module_list_info_free(cpModulesListInfo)
 
@@ -240,7 +240,7 @@ type Function struct {
 }
 
 // Functions returns all functions configurations from the dataplane.
-func (m *DPConfigImpl) Functions() []Function {
+func (m *dpConfig) Functions() []Function {
 	functionListInfo := C.yanet_get_cp_function_list_info(m.ptr)
 	defer C.cp_function_list_info_free(functionListInfo)
 
@@ -281,7 +281,7 @@ func (m *DPConfigImpl) Functions() []Function {
 }
 
 // Pipelines returns all pipeline configurations from the dataplane.
-func (m *DPConfigImpl) Pipelines() []Pipeline {
+func (m *dpConfig) Pipelines() []Pipeline {
 	pipelineListInfo := C.yanet_get_cp_pipeline_list_info(m.ptr)
 	defer C.cp_pipeline_list_info_free(pipelineListInfo)
 
@@ -308,7 +308,7 @@ func (m *DPConfigImpl) Pipelines() []Pipeline {
 }
 
 // Agents returns all agent information from the dataplane.
-func (m *DPConfigImpl) Agents() []AgentInfo {
+func (m *dpConfig) Agents() []AgentInfo {
 	agentListInfo := C.yanet_get_cp_agent_list_info(m.ptr)
 	defer C.cp_agent_list_info_free(agentListInfo)
 
@@ -414,7 +414,7 @@ type DeviceInfo struct {
 }
 
 // Devices returns all device information from the dataplane.
-func (m *DPConfigImpl) Devices() []DeviceInfo {
+func (m *dpConfig) Devices() []DeviceInfo {
 	deviceListInfo := C.yanet_get_cp_device_list_info(m.ptr)
 	if deviceListInfo == nil {
 		return nil
@@ -476,7 +476,7 @@ type CounterInfo struct {
 	Values [][]uint64
 }
 
-func (m *DPConfigImpl) encodeCounters(
+func (m *dpConfig) encodeCounters(
 	counters *C.struct_counter_handle_list,
 ) []CounterInfo {
 	res := make([]CounterInfo, 0)
@@ -511,7 +511,7 @@ func (m *DPConfigImpl) encodeCounters(
 	return res
 }
 
-func (m *DPConfigImpl) DeviceCounters(
+func (m *dpConfig) DeviceCounters(
 	deviceName string,
 ) []CounterInfo {
 	cDeviceName := C.CString(deviceName)
@@ -527,7 +527,7 @@ func (m *DPConfigImpl) DeviceCounters(
 }
 
 // PipelineCounters returns pipeline counters
-func (m *DPConfigImpl) PipelineCounters(
+func (m *dpConfig) PipelineCounters(
 	deviceName string,
 	pipelineName string,
 ) []CounterInfo {
@@ -545,7 +545,7 @@ func (m *DPConfigImpl) PipelineCounters(
 	return m.encodeCounters(counters)
 }
 
-func (m *DPConfigImpl) FunctionCounters(
+func (m *dpConfig) FunctionCounters(
 	deviceName string,
 	pipelineName string,
 	functionName string,
@@ -571,7 +571,7 @@ func (m *DPConfigImpl) FunctionCounters(
 	return m.encodeCounters(counters)
 }
 
-func (m *DPConfigImpl) ChainCounters(
+func (m *dpConfig) ChainCounters(
 	deviceName string,
 	pipelineName string,
 	functionName string,
@@ -604,7 +604,7 @@ func (m *DPConfigImpl) ChainCounters(
 // ModuleCounters returns module counters, optionally filtered by name.
 //
 // If counterQuery is nil or empty, returns all counters.
-func (m *DPConfigImpl) ModuleCounters(
+func (m *dpConfig) ModuleCounters(
 	deviceName string,
 	pipelineName string,
 	functionName string,
@@ -691,7 +691,7 @@ type PerformanceCounters struct {
 // Performance counters provide detailed timing and batch processing statistics
 // for module execution, including mean latency and latency distribution across
 // different batch sizes, as well as tx/rx packet and byte counters.
-func (m *DPConfigImpl) PerformanceCounters(
+func (m *dpConfig) PerformanceCounters(
 	deviceName string,
 	pipelineName string,
 	functionName string,
@@ -793,7 +793,7 @@ type ModuleReference struct {
 	ModuleName string
 }
 
-func (m *DPConfigImpl) AllModulePositions(moduleType string) iter.Seq[ModuleReference] {
+func (m *dpConfig) AllModulePositions(moduleType string) iter.Seq[ModuleReference] {
 	deviceList := m.Devices()
 
 	pipelineList := m.Pipelines()

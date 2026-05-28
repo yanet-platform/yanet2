@@ -199,10 +199,7 @@ func (m *ForwardService) GetMetrics(
 	ctx context.Context,
 	req *forwardpb.GetMetricsRequest,
 ) (*forwardpb.GetMetricsResponse, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	metrics, err := m.collectMetrics()
+	metrics, err := m.Metrics()
 	if err != nil {
 		return nil, err
 	}

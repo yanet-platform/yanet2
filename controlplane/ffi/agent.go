@@ -83,32 +83,16 @@ type FFIAgent interface {
 }
 
 type DPAgent interface {
-	ModuleAgent
-	FunctionAgent
-	PipelineAgent
-	DeviceAgent
-	CleanUp() error
-	Close() error
-}
-
-type ModuleAgent interface {
 	UpdateModules(modules []ModuleConfig) error
 	DeleteModuleConfig(configName string) error
-}
-
-type FunctionAgent interface {
 	UpdateFunction(functionConfig FunctionConfig) error
 	DeleteFunction(name string) error
-}
-
-type PipelineAgent interface {
 	UpdatePipeline(pipelineConfig PipelineConfig) error
 	DeletePipeline(name string) error
-}
-
-type DeviceAgent interface {
 	UpdatePlainDevices(devices []DeviceConfig) error
 	UpdateDevices(devices []ShmDeviceConfig) error
+	CleanUp() error
+	Close() error
 }
 
 type Agent struct {
@@ -168,7 +152,7 @@ func (m *Agent) UpdateModules(modules []ModuleConfig) error {
 }
 
 func (m *Agent) DPConfig() DPConfig {
-	return &DPConfigImpl{
+	return &dpConfig{
 		ptr: C.agent_dp_config(m.ptr),
 	}
 }
