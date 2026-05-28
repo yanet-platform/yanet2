@@ -157,7 +157,6 @@ cp_config_gen_free(
 ) {
 	// Free ectx first, as its internals reference
 	// module configs, chains, functions and pipelines
-	(void)cp_config;
 	struct config_gen_ectx *config_gen_ectx =
 		ADDR_OF(&config_gen->config_gen_ectx);
 	if (config_gen_ectx != NULL)
@@ -173,6 +172,12 @@ cp_config_gen_free(
 	// Finally, free counter storage registry
 	cp_config_counter_storage_registry_fini(
 		&config_gen->counter_storage_registry
+	);
+
+	memory_bfree(
+		&cp_config->memory_context,
+		config_gen,
+		sizeof(struct cp_config_gen)
 	);
 }
 

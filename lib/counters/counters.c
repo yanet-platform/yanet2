@@ -498,6 +498,9 @@ counter_storage_pool_fini(
 
 void
 counter_storage_free(struct counter_storage *storage) {
+	if (storage == NULL)
+		return;
+
 	struct memory_context *memory_context =
 		ADDR_OF(&storage->memory_context);
 
@@ -516,6 +519,8 @@ counter_storage_free(struct counter_storage *storage) {
 		struct counter_storage_pool *pool = storage->pools + pool_idx;
 		counter_storage_pool_fini(storage, pool);
 	}
+
+	memory_bfree(memory_context, storage, sizeof(struct counter_storage));
 }
 
 void
