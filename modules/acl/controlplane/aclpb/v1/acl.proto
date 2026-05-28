@@ -25,9 +25,13 @@ service ACLService {
 message UpdateConfigRequest {
   string name = 1;
   repeated Rule rules = 2;
+  optional string rules_hash = 3;
 }
 
-message UpdateConfigResponse {}
+message UpdateConfigResponse {
+  bool modified = 1;
+  string rules_hash = 2;
+}
 
 message ShowConfigRequest { string name = 1; }
 
@@ -35,6 +39,7 @@ message ShowConfigResponse {
   string name = 1;
   repeated Rule rules = 2;
   string fwstate_name = 3;
+  string rules_hash = 4;
 }
 
 message Rule {

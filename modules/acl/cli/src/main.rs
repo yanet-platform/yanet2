@@ -423,10 +423,12 @@ impl ACLService {
         let request = UpdateConfigRequest {
             name: cmd.config_name.clone(),
             rules: config.rules,
+            rules_hash: cmd.rules_hash,
         };
         log::trace!("UpdateConfigRequest: {request:?}");
         let response = self.client.update_config(request).await?.into_inner();
         log::debug!("UpdateConfigResponse: {response:?}");
+        println!("modified={} rules_hash={}", response.modified, response.rules_hash);
         Ok(())
     }
 

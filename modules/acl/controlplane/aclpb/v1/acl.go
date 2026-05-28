@@ -10,6 +10,9 @@ func (m *UpdateConfigRequest) AsLogValue() any {
 		enc.AddString("name", m.Name)
 		enc.AddString("rules", "<redacted>")
 		enc.AddInt("rules_count", len(m.Rules))
+		if m.RulesHash != nil {
+			enc.AddString("rules_hash", *m.RulesHash)
+		}
 		return nil
 	})
 }

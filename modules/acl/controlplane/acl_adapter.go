@@ -75,6 +75,7 @@ func (m *ACLAdapter) RelinkConfigs(
 
 		m.service.configs[name] = aclConfig{
 			rules:       oldConfig.rules,
+			rulesHash:   oldConfig.rulesHash,
 			acl:         newHandle,
 			fwstateName: fwstateConfig.Name(),
 		}
@@ -120,6 +121,7 @@ func (m *ACLAdapter) LinkConfigs(
 
 		m.service.configs[name] = aclConfig{
 			rules:       oldConfig.rules,
+			rulesHash:   oldConfig.rulesHash,
 			acl:         newHandle,
 			fwstateName: fwstateConfig.Name(),
 		}

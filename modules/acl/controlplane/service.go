@@ -2,6 +2,8 @@ package acl
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"sync"
 
 	"go.uber.org/zap"
@@ -59,6 +61,7 @@ type ACLService struct {
 
 type aclConfig struct {
 	rules       []*aclpb.Rule
+	rulesHash   string
 	acl         ModuleHandle
 	fwstateName string
 }
@@ -172,6 +175,22 @@ func rulesEqual(a, b []*aclpb.Rule) bool {
 	return true
 }
 
+func computeRulesHash(rules []*aclpb.Rule) string {
+	h := sha256.New()
+	opts := proto.MarshalOptions{Deterministic: true}
+	for _, rule := range rules {
+		data, err := opts.Marshal(rule)
+		if err != nil {
+			continue
+		}
+		// Write 4-byte big-endian length prefix to avoid ambiguity between messages
+		length := uint32(len(data))
+		h.Write([]byte{byte(length >> 24), byte(length >> 16), byte(length >> 8), byte(length)})
+		h.Write(data)
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
 func (m *ACLService) UpdateConfig(
 	ctx context.Context,
 	req *aclpb.UpdateConfigRequest,
@@ -186,9 +205,26 @@ func (m *ACLService) UpdateConfig(
 	defer m.mu.Unlock()
 	defer tracker.Fix()
 
-	if existing, ok := m.configs[name]; ok && rulesEqual(existing.rules, req.Rules) {
-		return &aclpb.UpdateConfigResponse{}, nil
+	// If the server hash matches rules_hash the update is skipped and modified=false is returned 
+	// If the server hash differs rules are compiled and published
+	// If rules_hash without rules is rejected when the hashes differ
+	// (omit rules_hash to force-publish an empty ACL)
+
+	if clientHash := req.GetRulesHash(); clientHash != "" {
+		if existing, ok := m.configs[name]; ok && existing.rulesHash == clientHash {
+			return &aclpb.UpdateConfigResponse{
+				Modified:  false,
+				RulesHash: existing.rulesHash,
+			}, nil
+		}
+		if len(req.Rules) == 0 {
+			return nil, status.Error(codes.InvalidArgument,
+				"rules_hash provided without rules on hash mismatch: "+
+					"omit rules_hash to force-publish an empty ruleset")
+		}
 	}
+
+	newHash := computeRulesHash(req.Rules)
 
 	rules, err := convertRules(req.Rules)
 	if err != nil {
@@ -222,11 +258,15 @@ func (m *ACLService) UpdateConfig(
 
 	m.configs[name] = aclConfig{
 		rules:       req.Rules,
+		rulesHash:   newHash,
 		acl:         handle,
 		fwstateName: oldConfigs.fwstateName,
 	}
 
-	return &aclpb.UpdateConfigResponse{}, nil
+	return &aclpb.UpdateConfigResponse{
+		Modified:  true,
+		RulesHash: newHash,
+	}, nil
 }
 
 func (m *ACLService) ShowConfig(
@@ -252,6 +292,7 @@ func (m *ACLService) ShowConfig(
 		Name:        name,
 		Rules:       config.rules,
 		FwstateName: config.fwstateName,
+		RulesHash:   config.rulesHash,
 	}
 
 	return response, nil

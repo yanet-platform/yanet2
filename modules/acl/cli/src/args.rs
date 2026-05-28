@@ -32,6 +32,9 @@ pub struct UpdateCmd {
     /// Path to the ruleset YAML file
     #[arg(required = true, long = "rules", value_name = "PATH")]
     pub rules: PathBuf,
+    /// Skip compilation if the server-side hash already equals this value
+    #[arg(long = "hash", value_name = "HEX")]
+    pub rules_hash: Option<String>,
 }
 
 #[derive(Debug, Clone, Parser)]

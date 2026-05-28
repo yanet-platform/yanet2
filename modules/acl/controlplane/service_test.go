@@ -192,28 +192,40 @@ func TestConvertRulesCounter(t *testing.T) {
 	}
 }
 
-// TestUpdateConfig_Idempotency verifies that calling UpdateConfig twice with
-// identical rules does not publish a second time.
+// TestUpdateConfig_Idempotency: a second UpdateConfig call carrying 
+// the hash returned by the first is skipped, while a call
+// without rules_hash always compiles and publishes
 func TestUpdateConfig_Idempotency(t *testing.T) {
 	b := newFakeBackend(0)
 	svc := newTestService(b)
 
-	req := &aclpb.UpdateConfigRequest{
+	// First call: no hash, must always publish
+	resp, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
 		Name:  "acl0",
 		Rules: []*aclpb.Rule{},
-	}
-
-	_, err := svc.UpdateConfig(t.Context(), req)
+	})
 	require.NoError(t, err)
+	assert.True(t, resp.Modified)
+	assert.NotEmpty(t, resp.RulesHash)
+	assert.Equal(t, 1, b.PublishCalls())
 
-	publishBefore := b.PublishCalls()
-
-	_, err = svc.UpdateConfig(t.Context(), req)
+	// Second call: no hash, must publish again regardless of content
+	_, err = svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
+		Name:  "acl0",
+		Rules: []*aclpb.Rule{},
+	})
 	require.NoError(t, err)
+	assert.Equal(t, 2, b.PublishCalls(), "call without rules_hash must always publish")
 
-	publishAfter := b.PublishCalls()
-
-	assert.Equal(t, publishBefore, publishAfter, "second call with identical rules must not publish")
+	// Third call: correct hash, must be skipped
+	resp2, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
+		Name:      "acl0",
+		Rules:     []*aclpb.Rule{},
+		RulesHash: &resp.RulesHash,
+	})
+	require.NoError(t, err)
+	assert.False(t, resp2.Modified)
+	assert.Equal(t, 2, b.PublishCalls(), "call with matching rules_hash must not publish")
 }
 
 // TestUpdateConfig_ErrorPropagation verifies that a backend failure from
