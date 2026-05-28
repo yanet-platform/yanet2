@@ -18,6 +18,7 @@ struct dataplane_device_worker_config {
 };
 
 struct dataplane_device_config {
+	char device_name[80];
 	char port_name[80];
 	char mac_addr[20];
 

@@ -711,7 +711,8 @@ cp_config_gen_create(struct agent *agent, yanet_error **err) {
 		struct cp_device_config device_config;
 		memset(&device_config, 0, sizeof(struct cp_device_config));
 		strtcpy(device_config.name,
-			ADDR_OF(&dp_config->dp_topology.devices)[idx].port_name,
+			ADDR_OF(&dp_config->dp_topology.devices)[idx]
+				.device_name,
 			CP_DEVICE_NAME_LEN);
 		strtcpy(device_config.type, "plain", sizeof(device_config.type)
 		);

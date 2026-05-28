@@ -5,7 +5,7 @@
 
 struct dp_port {
 	uint16_t port_id;
-	char port_name[80];
+	char device_name[80];
 };
 
 struct dp_topology {

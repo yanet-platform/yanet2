@@ -350,9 +350,9 @@ dataplane_init(
 			return -1;
 		}
 		for (uint64_t idx = 0; idx < config->device_count; ++idx) {
-			strtcpy(ports[idx].port_name,
-				config->devices[idx].port_name,
-				sizeof(ports[idx].port_name));
+			strtcpy(ports[idx].device_name,
+				config->devices[idx].device_name,
+				sizeof(ports[idx].device_name));
 		}
 
 		instance->dp_config->instance_idx = instance_idx;

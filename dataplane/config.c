@@ -19,6 +19,7 @@ enum state {
 
 	state_devices,
 	state_device,
+	state_device_name,
 	state_device_port_name,
 	state_device_mac_addr,
 	state_device_mtu,
@@ -129,6 +130,12 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 				if (*end != '\0')
 					goto error;
 				state = state_instance;
+				break;
+			case state_device_name:
+				strtcpy(device->device_name,
+					start,
+					sizeof(device->device_name));
+				state = state_device;
 				break;
 
 			case state_device_port_name:
@@ -254,7 +261,9 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 
 				break;
 			case state_device:
-				if (!strcmp("port_name", start)) {
+				if (!strcmp("device_name", start)) {
+					state = state_device_name;
+				} else if (!strcmp("port_name", start)) {
 					state = state_device_port_name;
 				} else if (!strcmp("mac_addr", start)) {
 					state = state_device_mac_addr;
@@ -435,6 +444,13 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 				state = state_instances;
 				break;
 			case state_device:
+				// Default device_name to port_name when the
+				// YAML did not provide an explicit device_name.
+				if (device->device_name[0] == '\0') {
+					strtcpy(device->device_name,
+						device->port_name,
+						sizeof(device->device_name));
+				}
 				state = state_devices;
 				break;
 			case state_worker:

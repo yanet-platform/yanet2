@@ -193,9 +193,9 @@ dataplane_ut_new(const struct dataplane_ut_config *cfg) {
 			return NULL;
 		}
 		for (size_t idx = 0; idx < cfg->device_count; ++idx) {
-			strtcpy(ports[idx].port_name,
+			strtcpy(ports[idx].device_name,
 				cfg->devices[idx],
-				sizeof(ports[idx].port_name));
+				sizeof(ports[idx].device_name));
 		}
 	}
 
