@@ -99,7 +99,7 @@ func (m *FWStateService) UpdateConfig(
 		return nil, status.Errorf(codes.Internal, "failed to create fwstate config: %v", err)
 	}
 	if oldConfig != nil {
-		newConfig.PropogateConfig(oldConfig)
+		newConfig.PropagateConfig(oldConfig)
 
 		// Trim stale layers from the transferred configuration
 		// Layers with expired deadlines will be collected and added to pending list
@@ -131,7 +131,7 @@ func (m *FWStateService) UpdateConfig(
 
 	dpConfig := m.agent.DPConfig()
 
-	if err = newConfig.CreateMaps(req.MapConfig, uint16(dpConfig.WorkerCount()), m.log); err != nil {
+	if err = newConfig.CreateMaps(req.MapConfig, uint16(dpConfig.WorkerCount())); err != nil {
 		newConfig.DetachMaps() // in order not to pull them out from under the feet of another module
 		newConfig.Free()
 		m.log.Error("failed to create fwstate maps", zap.String("config", name), zap.Error(err))
@@ -322,23 +322,23 @@ func (m *FWStateService) GetStats(
 
 	response := &fwstatepb.GetStatsResponse{
 		Ipv4Stats: &fwstatepb.MapStats{
-			IndexSize:        uint32(mapsStats.v4.index_size),
-			ExtraBucketCount: uint32(mapsStats.v4.extra_bucket_count),
-			MaxChainLength:   uint32(mapsStats.v4.max_chain_length),
-			LayerCount:       uint32(mapsStats.v4.layer_count),
-			TotalElements:    uint64(mapsStats.v4.total_elements),
-			MaxDeadline:      uint64(mapsStats.v4.max_deadline),
-			MemoryUsed:       uint64(mapsStats.v4.memory_used),
+			IndexSize:        uint32(mapsStats.IPv4.IndexSize),
+			ExtraBucketCount: uint32(mapsStats.IPv4.ExtraBucketCount),
+			MaxChainLength:   uint32(mapsStats.IPv4.MaxChainLength),
+			LayerCount:       uint32(mapsStats.IPv4.LayerCount),
+			TotalElements:    uint64(mapsStats.IPv4.TotalElements),
+			MaxDeadline:      uint64(mapsStats.IPv4.MaxDeadline),
+			MemoryUsed:       uint64(mapsStats.IPv4.MemoryUsed),
 			Note:             "Statistics are currently shown for the first layer only",
 		},
 		Ipv6Stats: &fwstatepb.MapStats{
-			IndexSize:        uint32(mapsStats.v6.index_size),
-			ExtraBucketCount: uint32(mapsStats.v6.extra_bucket_count),
-			MaxChainLength:   uint32(mapsStats.v6.max_chain_length),
-			LayerCount:       uint32(mapsStats.v6.layer_count),
-			TotalElements:    uint64(mapsStats.v6.total_elements),
-			MaxDeadline:      uint64(mapsStats.v6.max_deadline),
-			MemoryUsed:       uint64(mapsStats.v6.memory_used),
+			IndexSize:        uint32(mapsStats.IPv6.IndexSize),
+			ExtraBucketCount: uint32(mapsStats.IPv6.ExtraBucketCount),
+			MaxChainLength:   uint32(mapsStats.IPv6.MaxChainLength),
+			LayerCount:       uint32(mapsStats.IPv6.LayerCount),
+			TotalElements:    uint64(mapsStats.IPv6.TotalElements),
+			MaxDeadline:      uint64(mapsStats.IPv6.MaxDeadline),
+			MemoryUsed:       uint64(mapsStats.IPv6.MemoryUsed),
 			Note:             "Statistics are currently shown for the first layer only",
 		},
 	}
@@ -403,13 +403,8 @@ func (m *FWStateService) ListEntries(
 		}
 
 		pbEntries := make([]*fwstatepb.FwStateEntry, 0, len(entries))
-		for _, e := range entries {
-			pbEntries = append(pbEntries, &fwstatepb.FwStateEntry{
-				Key:     e.Key,
-				Value:   e.Value,
-				Idx:     e.Idx,
-				Expired: e.Expired,
-			})
+		for idx := range entries {
+			pbEntries = append(pbEntries, fwstatepb.FromCursorEntry(entries[idx]))
 		}
 
 		resp := &fwstatepb.ListEntriesResponse{

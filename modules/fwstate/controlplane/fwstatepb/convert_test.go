@@ -1,11 +1,10 @@
-package fwstate
+package fwstatepb
 
 import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"github.com/yanet-platform/yanet2/common/commonpb"
-	"github.com/yanet-platform/yanet2/modules/fwstate/controlplane/fwstatepb"
 )
 
 // TestPortsRoundTrip verifies that port_unicast and port_multicast survive
@@ -14,7 +13,7 @@ func TestPortsRoundTrip(t *testing.T) {
 	const portMulticast uint32 = 4789
 	const portUnicast uint32 = 9999
 
-	pb := &fwstatepb.SyncConfig{
+	pb := &SyncConfig{
 		SrcAddr:          &commonpb.IPAddress{Addr: make([]byte, 16)},
 		DstEther:         make([]byte, 6),
 		DstAddrMulticast: &commonpb.IPAddress{Addr: make([]byte, 16)},
@@ -23,8 +22,8 @@ func TestPortsRoundTrip(t *testing.T) {
 		PortUnicast:      portUnicast,
 	}
 
-	cCfg := ConvertPbToCSyncConfig(pb)
-	got := ConvertCSyncConfigToPb(&cCfg)
+	cCfg := pb.ToC()
+	got := FromCSyncConfig(cCfg)
 
 	require.Equal(t, portMulticast, got.PortMulticast)
 	require.Equal(t, portUnicast, got.PortUnicast)
