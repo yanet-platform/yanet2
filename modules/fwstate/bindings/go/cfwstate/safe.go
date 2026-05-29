@@ -12,6 +12,9 @@ import (
 	"unsafe"
 )
 
+// TTL48Max is the largest TTL (ns) storable in fw_state_value::last_ttl.
+const TTL48Max = uint64(C.FWSTATE_TTL48_MAX)
+
 type MapConfig struct {
 	IndexSize        uint32
 	ExtraBucketCount uint32

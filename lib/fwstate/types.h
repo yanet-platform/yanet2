@@ -13,9 +13,6 @@
 #define FW_STATE_SYNC_THRESHOLD (uint64_t)8e9 // nanoseconds
 #define FW_STATE_DEFAULT_TIMEOUT (uint64_t)120e9
 
-// Nanosecond TTL stored in fw_state_value::last_ttl (48-bit, little-endian).
-#define FWSTATE_TTL48_MAX ((uint64_t)((1ULL << 48) - 1))
-
 /**
  * Common header shared by all fw_state key types.
  * Must be the first member so that any key pointer can be safely cast
@@ -105,7 +102,7 @@ struct fw_state_value {
 	union fw_state_flags_u flags;
 	// TTL (ns) from the last put/sync frame; expiry is updated_at +
 	// last_ttl.
-	uint8_t last_ttl[6];
+	uint64_t last_ttl : 48;
 	// Timestamp when the state was created
 	uint64_t created_at;
 	// Timestamp when the last sync packet was emitted
@@ -139,31 +136,13 @@ struct fw_state_sync_frame {
 } __attribute__((__packed__));
 
 static inline void
-fwstate_ttl48_store(uint8_t out[6], uint64_t ttl_ns) {
-	out[0] = (uint8_t)(ttl_ns);
-	out[1] = (uint8_t)(ttl_ns >> 8);
-	out[2] = (uint8_t)(ttl_ns >> 16);
-	out[3] = (uint8_t)(ttl_ns >> 24);
-	out[4] = (uint8_t)(ttl_ns >> 32);
-	out[5] = (uint8_t)(ttl_ns >> 40);
-}
-
-static inline uint64_t
-fwstate_ttl48_load(const uint8_t in[6]) {
-	return (uint64_t)in[0] | ((uint64_t)in[1] << 8) |
-	       ((uint64_t)in[2] << 16) | ((uint64_t)in[3] << 24) |
-	       ((uint64_t)in[4] << 32) | ((uint64_t)in[5] << 40);
-}
-
-static inline void
 fwstate_value_set_last_ttl(struct fw_state_value *value, uint64_t ttl_ns) {
-	// Configured timeouts must fit in last_ttl (see FWSTATE_TTL48_MAX).
-	fwstate_ttl48_store(value->last_ttl, ttl_ns);
+	value->last_ttl = ttl_ns & FWSTATE_TTL48_MAX;
 }
 
 static inline uint64_t
 fwstate_value_expires_at(const struct fw_state_value *value) {
-	return value->updated_at + fwstate_ttl48_load(value->last_ttl);
+	return value->updated_at + value->last_ttl;
 }
 
 static inline bool

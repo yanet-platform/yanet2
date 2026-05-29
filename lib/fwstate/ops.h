@@ -91,7 +91,7 @@ fwmap_promote_value_fwstate(
 	d->external = new_v->external;
 	d->updated_at = new_v->updated_at;
 	d->created_at = old_v->created_at;
-	fwstate_value_set_last_ttl(d, fwstate_ttl48_load(new_v->last_ttl));
+	d->last_ttl = new_v->last_ttl;
 
 	// Merge: TCP flags are OR-combined and per-direction packet counters
 	// are summed across the two layers.

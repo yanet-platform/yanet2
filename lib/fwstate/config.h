@@ -5,6 +5,9 @@
 // Forward declaration to avoid circular dependency
 typedef struct fwmap fwmap_t;
 
+// Max TTL (ns) storable in fw_state_value::last_ttl.
+#define FWSTATE_TTL48_MAX ((uint64_t)((1ULL << 48) - 1))
+
 /**
  * FWState configuration structure
  * Contains fwmap references and sync configuration

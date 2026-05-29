@@ -446,6 +446,10 @@ func validateSyncConfig(cfg *fwstatepb.SyncConfig) error {
 		return status.Errorf(codes.InvalidArgument, "missing required sync config fields: %v", missing)
 	}
 
+	if err := cfg.ValidateTimeouts(); err != nil {
+		return status.Errorf(codes.InvalidArgument, "invalid sync config timeouts: %v", err)
+	}
+
 	return nil
 }
 
