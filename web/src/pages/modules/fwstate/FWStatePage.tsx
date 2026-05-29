@@ -1,14 +1,28 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Button, Flex, Icon, Label, Select, Switch, Table, Text, TextInput } from '@gravity-ui/uikit';
-import { Plus } from '@gravity-ui/icons';
-import { useNavigate } from 'react-router-dom';
+import {
+    Button,
+    Flex,
+    Icon,
+    Label,
+    SegmentedRadioGroup,
+    Select,
+    Switch,
+    Table,
+    Text,
+    TextInput,
+    Tooltip,
+} from '@gravity-ui/uikit';
+import { CircleInfo, Plus } from '@gravity-ui/icons';
+import { useVirtualizer } from '@tanstack/react-virtual';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { API } from '../../../api';
 import { Direction, type FwStateEntry, type ListEntriesRequest, type MapStats } from '../../../api/fwstate';
 import { ConfirmDialog, ConfigTabStrip, PageLayout, PageLoader } from '../../../components';
+import { useContainerHeight } from '../../../hooks';
 import { useUnsavedChangesBlocker } from '../../builtin/_shared/lane-editor';
 import { ipAddressToString, isValidIPAddress, parseIPToBytes, stringToIPAddress, type IPAddressWire } from '../../../utils/netip';
 import { formatMACFromBytes, parseMACToBytes } from '../../../utils/mac';
-import { toaster } from '../../../utils';
+import { formatBytes, toaster } from '../../../utils';
 import { AddConfigModal, DeleteConfigModal } from '../../_shared/draft';
 import { SaveIcon, TrashIcon } from '../../_shared/draft/DraftActionButtons';
 import { IpAddressChip, ProtocolNumberChip } from '../_shared/chips';
@@ -51,6 +65,35 @@ const DEFAULT_NS = {
     udp: 30_000_000_000,
     defaultTimeout: 16_000_000_000,
 };
+
+const STATES_TABLE_BOTTOM_OFFSET = 68;
+const STATES_TABLE_ROW_HEIGHT = 44;
+const STATES_TABLE_HEADER_HEIGHT = 40;
+const STATES_TABLE_OVERSCAN = 15;
+const STATES_COL_IDX = 52;
+const STATES_COL_SOURCE = 280;
+const STATES_COL_DESTINATION = 280;
+const STATES_COL_PROTO = 70;
+const STATES_COL_SRC_FLAGS = 100;
+const STATES_COL_DST_FLAGS = 100;
+const STATES_COL_ORIGIN = 86;
+const STATES_COL_PACKETS_FORWARD = 140;
+const STATES_COL_PACKETS_BACKWARD = 186;
+const STATES_COL_UPDATED = 168;
+const STATES_COL_EXPIRED = 96;
+const FWSTATE_STATES_TOTAL_WIDTH = STATES_COL_IDX +
+    STATES_COL_SOURCE +
+    STATES_COL_DESTINATION +
+    STATES_COL_PROTO +
+    STATES_COL_SRC_FLAGS +
+    STATES_COL_DST_FLAGS +
+    STATES_COL_ORIGIN +
+    STATES_COL_PACKETS_FORWARD +
+    STATES_COL_PACKETS_BACKWARD +
+    STATES_COL_UPDATED +
+    STATES_COL_EXPIRED;
+
+const STATES_TABLE_MAX_BATCH_SIZE = 1000;
 
 const BACKWARD_RESET_CURSOR = Number.MAX_SAFE_INTEGER;
 
@@ -195,12 +238,50 @@ const formatStateIdx = (idx: number | string | null | undefined): string => {
     return normalizeUnsignedInt(idx) ?? '-';
 };
 
+const formatMemoryBytes = (value: number | string | null | undefined): string => {
+    try {
+        if (value === undefined || value === null) return '-';
+        if (typeof value === 'number') {
+            if (!Number.isFinite(value) || !Number.isInteger(value) || !Number.isSafeInteger(value) || value < 0) {
+                return '-';
+            }
+            return formatBytes(BigInt(value));
+        }
+        const trimmed = value.trim();
+        if (!trimmed || !/^\d+$/.test(trimmed)) return '-';
+        return formatBytes(BigInt(trimmed));
+    } catch {
+        return '-';
+    }
+};
+
 const FLAG_TONES: Array<{ bit: number; label: string }> = [
     { bit: 0x01, label: 'FIN' },
     { bit: 0x02, label: 'SYN' },
     { bit: 0x04, label: 'RST' },
     { bit: 0x08, label: 'ACK' },
 ];
+
+const QP_TAB = 'tab';
+const QP_CONFIG = 'config';
+
+type StateSubTab = 'configuration' | 'links' | 'states' | 'statistics';
+
+const STATE_SUB_TABS: Array<{ id: StateSubTab; label: string }> = [
+    { id: 'configuration', label: 'Configuration' },
+    { id: 'links', label: 'Links' },
+    { id: 'states', label: 'States' },
+    { id: 'statistics', label: 'Statistics' },
+];
+
+const isStateSubTab = (value: string | null): value is StateSubTab => {
+    return STATE_SUB_TABS.some((tab) => tab.id === value);
+};
+
+const getStateSubTab = (params: URLSearchParams): StateSubTab => {
+    const value = params.get(QP_TAB);
+    return isStateSubTab(value) ? value : 'states';
+};
 
 const renderIpChip = (ip: IPAddressWire | undefined): React.ReactElement => {
     const value = ipAddressToString(ip).trim();
@@ -237,10 +318,191 @@ const renderFlagChips = (flags: string[]): React.ReactElement => {
     );
 };
 
+interface FWStateStateColumn {
+    id: string;
+    label: string;
+    width: number;
+    align?: 'left' | 'center' | 'right';
+    render: (item: FwStateEntry) => React.ReactElement;
+}
+
+const FWSTATE_STATES_COLUMNS: Array<FWStateStateColumn> = [
+    { id: 'idx', label: 'IDX', width: STATES_COL_IDX, align: 'center', render: (item) => <span className="fwstate-mono">{formatStateIdx(item.idx)}</span> },
+    { id: 'source', label: 'SOURCE', width: STATES_COL_SOURCE, render: (item) => renderIpChip(item.key?.src_addr as IPAddressWire | undefined) },
+    { id: 'destination', label: 'DESTINATION', width: STATES_COL_DESTINATION, render: (item) => renderIpChip(item.key?.dst_addr as IPAddressWire | undefined) },
+    {
+        id: 'proto',
+        label: 'PROTO',
+        width: STATES_COL_PROTO,
+        align: 'center',
+        render: (item) => <ProtocolNumberChip proto={item.key?.proto} />,
+    },
+    { id: 'src_flags', label: 'SRC FLAGS', width: STATES_COL_SRC_FLAGS, render: (item) => renderFlagChips(decodeFlags(item.value?.flags).source) },
+    { id: 'dst_flags', label: 'DST FLAGS', width: STATES_COL_DST_FLAGS, render: (item) => renderFlagChips(decodeFlags(item.value?.flags).destination) },
+    {
+        id: 'origin',
+        label: 'ORIGIN',
+        width: STATES_COL_ORIGIN,
+        render: (item) => <span className="fwstate-table-cell">{item.value?.external ? 'external' : 'local'}</span>,
+    },
+    { id: 'packets_forward', label: 'PACKETS FWD', width: STATES_COL_PACKETS_FORWARD, align: 'right', render: (item) => <span className="fwstate-mono">{formatUnsignedCount(item.value?.packets_forward)}</span> },
+    { id: 'packets_backward', label: 'PACKETS BACKWARD', width: STATES_COL_PACKETS_BACKWARD, align: 'right', render: (item) => <span className="fwstate-mono">{formatUnsignedCount(item.value?.packets_backward)}</span> },
+    { id: 'updated', label: 'UPDATED', width: STATES_COL_UPDATED, render: (item) => <span className="fwstate-table-cell fwstate-updated">{formatNsUtc(item.value?.updated_at)}</span> },
+    {
+        id: 'expired',
+        label: 'EXPIRED',
+        width: STATES_COL_EXPIRED,
+        align: 'center',
+        render: (item) => (
+            <span className={`fwstate-expired-pill ${item.expired ? 'fwstate-expired-pill--expired' : 'fwstate-expired-pill--active'}`}>
+                {item.expired ? 'Expired' : 'Active'}
+            </span>
+        ),
+    },
+];
+
+interface FWStateEntriesTableProps {
+    rows: FwStateEntry[];
+    loading: boolean;
+    hasMore: boolean;
+    height: number;
+    onSetScrollRef: (node: HTMLDivElement | null) => void;
+    onEndReached: () => void;
+}
+
+const FWStateEntriesTable: React.FC<FWStateEntriesTableProps> = ({ rows, loading, hasMore, height, onSetScrollRef, onEndReached }) => {
+    const scrollRef = useRef<HTMLDivElement | null>(null);
+    const headerInnerRef = useRef<HTMLDivElement | null>(null);
+    const setScrollRef = useCallback((node: HTMLDivElement | null): void => {
+        scrollRef.current = node;
+        onSetScrollRef(node);
+    }, [onSetScrollRef]);
+
+    const rowVirtualizer = useVirtualizer({
+        count: rows.length,
+        getScrollElement: () => scrollRef.current,
+        estimateSize: () => STATES_TABLE_ROW_HEIGHT,
+        overscan: STATES_TABLE_OVERSCAN,
+    });
+
+    const virtualRows = rowVirtualizer.getVirtualItems();
+
+    const bodyHeight = Math.max(0, height - STATES_TABLE_HEADER_HEIGHT);
+
+    const handleScroll = useCallback((event: React.UIEvent<HTMLDivElement>): void => {
+        const { scrollTop, clientHeight, scrollHeight } = event.currentTarget;
+        const { scrollLeft } = event.currentTarget;
+        const headerInner = headerInnerRef.current;
+        if (headerInner) {
+            headerInner.style.transform = `translateX(-${scrollLeft}px)`;
+        }
+        if (scrollTop + clientHeight >= scrollHeight - 1 && hasMore && !loading) {
+            onEndReached();
+        }
+    }, [hasMore, loading, onEndReached]);
+
+    return (
+        <div className="fw-tbl-wrap fwstate-states-vtbl">
+            <div className="fw-tbl-header-row">
+                <div className="fw-vtbl-header" style={{ height: STATES_TABLE_HEADER_HEIGHT }}>
+                    <div
+                        ref={headerInnerRef}
+                        style={{
+                            display: 'flex',
+                            minWidth: FWSTATE_STATES_TOTAL_WIDTH,
+                            height: '100%',
+                            alignItems: 'center',
+                            willChange: 'transform',
+                        }}
+                    >
+                        {FWSTATE_STATES_COLUMNS.map((col) => (
+                            <div
+                                key={col.id}
+                                style={{
+                                    width: col.width,
+                                    minWidth: col.width,
+                                    flexShrink: 0,
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: col.align === 'center' ? 'center' : col.align === 'right' ? 'flex-end' : 'flex-start',
+                                    textAlign: col.align === 'center' ? 'center' : col.align === 'right' ? 'right' : 'left',
+                                    paddingRight: col.align === 'center' || col.align === 'right' ? 8 : 0,
+                                    paddingLeft: col.align === 'center' ? 0 : 0,
+                                }}
+                            >
+                                <span className="fw-th-text">{col.label}</span>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            </div>
+            <div
+                ref={setScrollRef}
+                className="fw-vtbl-body"
+                onScroll={handleScroll}
+                style={bodyHeight > 0 ? { height: bodyHeight, flex: '0 0 auto' } : undefined}
+            >
+                {rows.length === 0 ? (
+                    <div className="fw-table-empty">{loading ? 'Loading…' : 'No data'}</div>
+                ) : (
+                    <div style={{ height: rowVirtualizer.getTotalSize(), minWidth: FWSTATE_STATES_TOTAL_WIDTH, position: 'relative' }}>
+                        {virtualRows.map((virtualRow) => {
+                            const row = rows[virtualRow.index];
+                            if (!row) return null;
+                            return (
+                                <div
+                                    key={`${row.idx ?? 'row'}-${virtualRow.index}`}
+                                    className="fw-vrow"
+                                    style={{
+                                        position: 'absolute',
+                                        top: virtualRow.start,
+                                        left: 0,
+                                        height: STATES_TABLE_ROW_HEIGHT,
+                                        minWidth: FWSTATE_STATES_TOTAL_WIDTH,
+                                        width: '100%',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        borderBottom: '1px solid var(--fw-line)',
+                                        paddingLeft: 4,
+                                    }}
+                                >
+                                    {FWSTATE_STATES_COLUMNS.map((col) => (
+                                        <div
+                                            key={`${row.idx ?? 'row'}-${virtualRow.index}-${col.id}`}
+                                            style={{
+                                                width: col.width,
+                                                minWidth: col.width,
+                                                flexShrink: 0,
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                justifyContent: col.align === 'center' ? 'center' : col.align === 'right' ? 'flex-end' : 'flex-start',
+                                                textAlign: col.align === 'center' ? 'center' : col.align === 'right' ? 'right' : 'left',
+                                                overflow: 'hidden',
+                                                textOverflow: 'ellipsis',
+                                                whiteSpace: 'nowrap',
+                                                paddingRight: col.align === 'center' || col.align === 'right' ? 8 : 0,
+                                                paddingLeft: 4,
+                                                boxSizing: 'border-box',
+                                            }}
+                                        >
+                                            <span style={{ display: 'inline-block', maxWidth: '100%' }}>{col.render(row)}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            );
+                        })}
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+};
+
 const FWStatePage: React.FC = () => {
     const navigate = useNavigate();
+    const [searchParams, setSearchParams] = useSearchParams();
     const [loading, setLoading] = useState(true);
-    const [activeConfig, setActiveConfig] = useState('');
+    const [activeSubTab, setActiveSubTab] = useState<StateSubTab>(() => getStateSubTab(searchParams));
     const [configs, setConfigs] = useState<Record<string, DraftConfig>>({});
     const [dirtyConfigs, setDirtyConfigs] = useState<Set<string>>(new Set());
     const [aclMeta, setAclMeta] = useState<AclMeta[]>([]);
@@ -263,9 +525,27 @@ const FWStatePage: React.FC = () => {
         linkedFwstateName: string | null;
     } | null>(null);
     const statesScrollRef = useRef<HTMLDivElement | null>(null);
+    const [statesTableSlotNode, setStatesTableSlotNode] = useState<HTMLDivElement | null>(null);
+    const statesTableSlotRef = useMemo(() => ({ current: statesTableSlotNode } as React.RefObject<HTMLElement | null>), [statesTableSlotNode]);
+    const statesTableSlotHeight = useContainerHeight(statesTableSlotRef, 300, STATES_TABLE_BOTTOM_OFFSET);
+    const setStatesTableSlotRef = useCallback((node: HTMLDivElement | null) => {
+        setStatesTableSlotNode(node);
+    }, []);
+
+    const stateCursorRef = useRef(0);
+    const stateRowsRef = useRef<FwStateEntry[]>([]);
+    const stateLoadingRef = useRef(false);
+    const stateHasMoreRef = useRef(true);
+    const canLoadStatesRef = useRef(false);
 
     const configNames = useMemo(() => Object.keys(configs).sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' })), [configs]);
-    const currentName = activeConfig || configNames[0] || '';
+    const queryConfig = useMemo(() => searchParams.get(QP_CONFIG), [searchParams]);
+    const currentName = useMemo(() => {
+        if (queryConfig && (loading || configNames.includes(queryConfig))) {
+            return queryConfig;
+        }
+        return configNames[0] || '';
+    }, [configNames, queryConfig, loading]);
     const current = configs[currentName];
     const canLoadStates = Boolean(currentName && current && !current.isLocalOnly);
     const currentIsDirty = dirtyConfigs.has(currentName);
@@ -279,6 +559,48 @@ const FWStatePage: React.FC = () => {
     const lastLoadedQueryKeyRef = useRef<string | null>(null);
     const inFlightStatesQueryKeyRef = useRef<string | null>(null);
     const stateGenerationRef = useRef<number | string | null>(null);
+    const updateParams = useCallback((updates: Record<string, string | null>): void => {
+        setSearchParams((prev) => {
+            const next = new URLSearchParams(prev);
+            for (const [key, value] of Object.entries(updates)) {
+                if (value === null || value === '') {
+                    next.delete(key);
+                } else {
+                    next.set(key, value);
+                }
+            }
+            return next;
+        }, { replace: true });
+    }, [setSearchParams]);
+    const updateActiveConfig = useCallback((name: string): void => {
+        updateParams({ [QP_CONFIG]: name || null });
+    }, [updateParams]);
+    const updateActiveSubTab = useCallback((tab: StateSubTab): void => {
+        updateParams({ [QP_TAB]: tab });
+    }, [updateParams]);
+
+    useEffect(() => {
+        const updates: Record<string, string | null> = {};
+        const activeTab = getStateSubTab(searchParams);
+        if (activeSubTab !== activeTab) {
+            setActiveSubTab(activeTab);
+        }
+        if (activeTab !== searchParams.get(QP_TAB)) {
+            updates[QP_TAB] = activeTab;
+        }
+        if (!loading) {
+            if (!currentName) {
+                if (searchParams.get(QP_CONFIG) !== null) {
+                    updates[QP_CONFIG] = null;
+                }
+            } else if (queryConfig !== currentName) {
+                updates[QP_CONFIG] = currentName;
+            }
+        }
+        if (Object.keys(updates).length > 0) {
+            updateParams(updates);
+        }
+    }, [activeSubTab, configNames.length, currentName, loading, queryConfig, searchParams, updateParams]);
     useUnsavedChangesBlocker(anyDirty);
 
     useEffect(() => {
@@ -292,6 +614,26 @@ const FWStatePage: React.FC = () => {
     useEffect(() => {
         stateGenerationRef.current = stateGeneration;
     }, [stateGeneration]);
+
+    useEffect(() => {
+        canLoadStatesRef.current = canLoadStates;
+    }, [canLoadStates]);
+
+    useEffect(() => {
+        stateLoadingRef.current = stateLoading;
+    }, [stateLoading]);
+
+    useEffect(() => {
+        stateHasMoreRef.current = stateHasMore;
+    }, [stateHasMore]);
+
+    useEffect(() => {
+        stateRowsRef.current = stateRows;
+    }, [stateRows]);
+
+    useEffect(() => {
+        stateCursorRef.current = stateCursor;
+    }, [stateCursor]);
 
     const loadAll = useCallback(async (options?: { preserveDirty?: boolean; skipDirtyNames?: Set<string> }): Promise<void> => {
         setLoading(true);
@@ -323,18 +665,9 @@ const FWStatePage: React.FC = () => {
                 setDirtyConfigs(
                     new Set(Array.from(preservedDirtyNames).filter((name) => Boolean(mergedConfigs[name])))
                 );
-                setActiveConfig((prev) => {
-                    if (prev && !skipDirtyNames.has(prev) && mergedConfigs[prev]) {
-                        return prev;
-                    }
-                    return Object.keys(mergedConfigs)[0] ?? '';
-                });
             } else {
                 setConfigs(nextConfigs);
                 setDirtyConfigs(new Set());
-                setActiveConfig((prev) => {
-                    return prev && nextConfigs[prev] ? prev : Object.keys(nextConfigs)[0] ?? '';
-                });
             }
         } catch (err) {
             toaster.error('fwstate-load', 'Failed to load FWState data', err);
@@ -405,11 +738,15 @@ const FWStatePage: React.FC = () => {
         inFlightStatesQueryKeyRef.current = null;
         stateGenerationRef.current = null;
         setStateRows([]);
+        stateRowsRef.current = [];
         setStateCursor(0);
+        stateCursorRef.current = 0;
         setStateHasMore(true);
+        stateHasMoreRef.current = true;
         setStateGeneration(null);
         if (options?.clearLoading) {
             setStateLoading(false);
+            stateLoadingRef.current = false;
         }
     }, []);
 
@@ -615,7 +952,6 @@ const FWStatePage: React.FC = () => {
                 return next;
             });
             await loadAll({ preserveDirty: true, skipDirtyNames: new Set([currentName]) });
-            setActiveConfig(currentName);
         } catch (err) {
             toaster.error('fwstate-save-error', 'Failed to save FWState config', err);
         }
@@ -639,7 +975,7 @@ const FWStatePage: React.FC = () => {
                 return next;
             });
             const remainingNames = configNames.filter((name) => name !== currentName);
-            setActiveConfig(remainingNames[0] ?? '');
+            updateActiveConfig(remainingNames[0] ?? '');
             setDeleteConfigOpen(false);
             return;
         }
@@ -652,32 +988,37 @@ const FWStatePage: React.FC = () => {
         }
     };
 
-    const getStatesBatchSize = (): number => {
-        const containerHeight = statesScrollRef.current?.clientHeight ?? 0;
-        const estimatedRowHeight = 42;
-        const visibleRows = Math.max(10, Math.floor(containerHeight / estimatedRowHeight));
-        return Math.max(30, Math.min(500, visibleRows * 3));
+    const requestStatesPrefetch = (): void => {
+        const container = statesScrollRef.current;
+        if (!container || !canLoadStatesRef.current || stateLoadingRef.current || !stateHasMoreRef.current || !currentName) {
+            return;
+        }
+        const { scrollHeight, clientHeight, scrollTop } = container;
+        if (scrollTop + clientHeight >= scrollHeight - 1) {
+            void loadStatesPage(false);
+        }
     };
 
     const loadStatesPage = useCallback(async (reset: boolean): Promise<void> => {
         if (!canLoadStates || !currentName) return;
-        if (stateLoading) return;
-        if (!reset && !stateHasMore) return;
+        if (stateLoadingRef.current) return;
+        if (!reset && !stateHasMoreRef.current) return;
         statesAbortRef.current?.abort();
         const abortController = new AbortController();
         statesAbortRef.current = abortController;
         const requestId = ++statesRequestIdRef.current;
         setStateLoading(true);
+        stateLoadingRef.current = true;
         const request: ListEntriesRequest = {
             config_name: currentName,
             is_ipv6: statesQuery.isIpv6,
             layer_index: statesQuery.layerIndex,
             include_expired: statesQuery.includeExpired,
             direction: statesQuery.direction,
-            batch_size: getStatesBatchSize(),
+            batch_size: STATES_TABLE_MAX_BATCH_SIZE,
             index: reset
                 ? (statesQuery.direction === Direction.BACKWARD ? BACKWARD_RESET_CURSOR : 0)
-                : stateCursor,
+                : stateCursorRef.current,
         };
         let shouldMarkLoaded = true;
         await new Promise<void>((resolve) => {
@@ -699,9 +1040,15 @@ const FWStatePage: React.FC = () => {
                     }
                     setStateGeneration(generation);
                     const rows = res.entries ?? [];
-                    setStateRows((prev) => reset ? rows : [...prev, ...rows]);
-                    setStateCursor(normalizeUnsignedIntToNumber(res.index));
-                    setStateHasMore(Boolean(res.has_more));
+                    const nextRows = reset ? rows : [...stateRowsRef.current, ...rows];
+                    const nextCursor = normalizeUnsignedIntToNumber(res.index);
+                    const nextHasMore = Boolean(res.has_more);
+                    setStateRows(nextRows);
+                    stateRowsRef.current = nextRows;
+                    setStateCursor(nextCursor);
+                    stateCursorRef.current = nextCursor;
+                    setStateHasMore(nextHasMore);
+                    stateHasMoreRef.current = nextHasMore;
                     resolve();
                 },
                 onError: (err) => {
@@ -723,14 +1070,17 @@ const FWStatePage: React.FC = () => {
             }
             inFlightStatesQueryKeyRef.current = null;
             setStateLoading(false);
+            stateLoadingRef.current = false;
+            if (shouldMarkLoaded) {
+                requestAnimationFrame(() => {
+                    requestStatesPrefetch();
+                });
+            }
         }
     }, [
         canLoadStates,
         currentName,
         resetStatesView,
-        stateCursor,
-        stateHasMore,
-        stateLoading,
         statesQuery.direction,
         statesQuery.includeExpired,
         statesQuery.isIpv6,
@@ -752,8 +1102,8 @@ const FWStatePage: React.FC = () => {
             row('Max chain', (s) => s?.max_chain_length ?? '-'),
             row('Layers', (s) => s?.layer_count ?? '-'),
             row('State entries', (s) => s?.total_elements ?? '-'),
-            row('Max deadline', (s) => s?.max_deadline ?? '-'),
-            row('Memory used', (s) => s?.memory_used ?? '-'),
+            row('Max deadline', (s) => formatNsUtc(s?.max_deadline)),
+            row('Memory used', (s) => formatMemoryBytes(s?.memory_used)),
         ];
     }, [stats]);
 
@@ -791,50 +1141,331 @@ const FWStatePage: React.FC = () => {
         resetStatesView({ clearLoading: true });
     }, [canLoadStates, resetStatesView]);
 
-    const handleStatesScroll = useCallback(() => {
-        const container = statesScrollRef.current;
-        if (!container || stateLoading || !stateHasMore || !canLoadStates || !currentName || stateRows.length === 0) {
-            return;
-        }
-        const threshold = 120;
-        if (container.scrollTop + container.clientHeight >= container.scrollHeight - threshold) {
-            void loadStatesPage(false);
-        }
-    }, [canLoadStates, currentName, stateHasMore, stateLoading, stateRows.length, stateCursor, stateGeneration, statesQuery.direction, statesQuery.includeExpired, statesQuery.isIpv6, statesQuery.layerIndex]);
+    const statesTableHeight = statesTableSlotHeight > 0 ? statesTableSlotHeight : 0;
+    const setStatesScrollRef = useCallback((node: HTMLDivElement | null): void => {
+        statesScrollRef.current = node;
+    }, []);
 
-    const stateColumns = [
-        { id: 'idx', name: 'IDX', template: (item: FwStateEntry) => <span className="fwstate-mono">{formatStateIdx(item.idx)}</span> },
-        { id: 'source', name: 'SOURCE', template: (item: FwStateEntry) => renderIpChip(item.key?.src_addr as IPAddressWire | undefined) },
-        { id: 'destination', name: 'DESTINATION', template: (item: FwStateEntry) => renderIpChip(item.key?.dst_addr as IPAddressWire | undefined) },
-        {
-            id: 'proto',
-            name: 'PROTO',
-            template: (item: FwStateEntry) => <ProtocolNumberChip proto={item.key?.proto} />,
-        },
-        {
-            id: 'src_flags',
-            name: 'SRC FLAGS',
-            template: (item: FwStateEntry) => renderFlagChips(decodeFlags(item.value?.flags).source),
-        },
-        {
-            id: 'dst_flags',
-            name: 'DST FLAGS',
-            template: (item: FwStateEntry) => renderFlagChips(decodeFlags(item.value?.flags).destination),
-        },
-        { id: 'origin', name: 'ORIGIN', template: (item: FwStateEntry) => <span className="fwstate-table-cell">{item.value?.external ? 'external' : 'local'}</span> },
-        { id: 'packets_forward', name: 'PACKETS FWD', template: (item: FwStateEntry) => <span className="fwstate-mono">{formatUnsignedCount(item.value?.packets_forward)}</span> },
-        { id: 'packets_backward', name: 'PACKETS BACKWARD', template: (item: FwStateEntry) => <span className="fwstate-mono">{formatUnsignedCount(item.value?.packets_backward)}</span> },
-        { id: 'updated', name: 'UPDATED', template: (item: FwStateEntry) => <span className="fwstate-mono fwstate-updated">{formatNsUtc(item.value?.updated_at)}</span> },
-        {
-            id: 'expired',
-            name: 'EXPIRED',
-            template: (item: FwStateEntry) => (
-                <span className={`fwstate-expired-pill ${item.expired ? 'fwstate-expired-pill--expired' : 'fwstate-expired-pill--active'}`}>
-                    {item.expired ? 'Expired' : 'Active'}
-                </span>
-            ),
-        },
-    ];
+    const statesTab = current && (
+        <section className="fwstate-states-table-panel">
+            <div className="fwstate-states-toolbar">
+                <div className="fwstate-states-toolbar__control fwstate-states-toolbar__control--field fwstate-states-toolbar__control--field-family">
+                    <Text className="fwstate-states-toolbar__label">Address family</Text>
+                    <SegmentedRadioGroup
+                        size="m"
+                        width="max"
+                        className="fwstate-states-toolbar__family"
+                        value={statesQuery.isIpv6 ? 'ipv6' : 'ipv4'}
+                        onUpdate={(value) => setStatesQuery((prev) => ({ ...prev, isIpv6: value === 'ipv6' }))}
+                    >
+                        <SegmentedRadioGroup.Option value="ipv6" content="IPv6" />
+                        <SegmentedRadioGroup.Option value="ipv4" content="IPv4" />
+                    </SegmentedRadioGroup>
+                </div>
+                <div className="fwstate-states-toolbar__control fwstate-states-toolbar__control--field fwstate-states-toolbar__control--field-direction">
+                    <Text className="fwstate-states-toolbar__label">Direction</Text>
+                    <div title="Direction (f/b)">
+                    <Select
+                        value={[String(statesQuery.direction)]}
+                        onUpdate={(v) => setStatesQuery((prev) => ({ ...prev, direction: Number(v[0] ?? 0) as Direction }))}
+                        options={[{ value: String(Direction.FORWARD), content: 'forward' }, { value: String(Direction.BACKWARD), content: 'backward' }]}
+                    />
+                    </div>
+                </div>
+                <div className="fwstate-states-toolbar__control fwstate-states-toolbar__control--field fwstate-states-toolbar__control--field-layer">
+                    <Text className="fwstate-states-toolbar__label">State layer</Text>
+                    <div title="State layer">
+                        <TextInput
+                            type="number"
+                            value={String(statesQuery.layerIndex)}
+                            onUpdate={(v) => setStatesQuery((prev) => ({ ...prev, layerIndex: Math.max(0, Number(v) || 0) }))}
+                        />
+                    </div>
+                </div>
+                <div className="fwstate-states-toolbar__control fwstate-states-toolbar__control--switch">
+                    <Text className="fwstate-states-toolbar__label">Include expired</Text>
+                    <div title="Include expired (e)">
+                        <Switch checked={statesQuery.includeExpired} onUpdate={(includeExpired) => setStatesQuery((prev) => ({ ...prev, includeExpired }))} />
+                    </div>
+                </div>
+            </div>
+            <div
+                ref={setStatesTableSlotRef}
+                className="fwstate-states-table-slot"
+                style={statesTableSlotHeight > 0 ? { height: statesTableSlotHeight, maxHeight: statesTableSlotHeight } : undefined}
+            >
+                <FWStateEntriesTable
+                    rows={stateRows}
+                    loading={stateLoading}
+                    hasMore={stateHasMore}
+                    height={statesTableHeight}
+                    onSetScrollRef={setStatesScrollRef}
+                    onEndReached={requestStatesPrefetch}
+                />
+            </div>
+            <div className="fwstate-states-footer">
+                <Text className="fwstate-states-footer__text">{stateLoading ? 'Loading…' : `Shown ${stateRows.length} rows`}</Text>
+                <Text className="fwstate-states-footer__text fwstate-states-footer__text--secondary">
+                    {stateLoading || stateRows.length === 0 || stateHasMore ? '\u00a0' : 'End of entries.'}
+                </Text>
+            </div>
+        </section>
+    );
+
+    const linksTab = current && (
+        <section className="fwstate-acl-panel">
+            <div className="fwstate-table-shell fwstate-acl-table-shell">
+                <Table
+                    data={aclRows}
+                    columns={[
+                        { id: 'name', name: 'ACL config', template: (row) => <span className="fwstate-table-cell">{row.name}</span> },
+                        { id: 'fwstate', name: 'Current FWState', template: (row) => row.fwstateName ? <Label theme={row.isLinkedHere ? 'success' : 'warning'} size="s">{row.fwstateName}</Label> : <Label theme="unknown" size="s">{row.isLoaded ? 'unlinked' : 'Loading…'}</Label> },
+                        { id: 'rules', name: 'Rules', template: (row) => <span className="fwstate-mono">{row.ruleCount === null ? (row.isLoaded ? (row.loadFailed ? '—' : 'Loading…') : 'Loading…') : row.ruleCount}</span> },
+                        {
+                            id: 'action',
+                            name: 'Action',
+                            template: (row) => {
+                                if (row.isLinkedHere) {
+                                    return <Label theme="success" size="s">Linked</Label>;
+                                }
+                                if (!row.isLoaded) {
+                                    return (
+                                        <Button size="s" view="outlined" disabled>
+                                            Loading…
+                                        </Button>
+                                    );
+                                }
+                                if (row.loadFailed) {
+                                    return (
+                                        <Text color="secondary" className="fwstate-table-cell">
+                                            Unavailable
+                                        </Text>
+                                    );
+                                }
+                                return (
+                                    <Button
+                                        size="s"
+                                        view="outlined"
+                                        className="fwstate-acl-link-btn"
+                                        onClick={() => openLinkAclDialog(row.name)}
+                                    >
+                                        {row.fwstateName ? 'Move here' : 'Link'}
+                                    </Button>
+                                );
+                            },
+                        },
+                    ]}
+                />
+            </div>
+        </section>
+    );
+
+    const statisticsTab = current && (
+        <section className="fwstate-stats-compare-wrap">
+            <div className="fwstate-stats-compare">
+                <div className="fwstate-stats-compare__head fwstate-stats-compare__head--metric">
+                    <span>Metric</span>
+                    {statsNote && (
+                        <Tooltip content={statsNote} openDelay={0}>
+                            <span className="fwstate-stats-compare__note-icon" aria-label={statsNote}>
+                                <Icon data={CircleInfo} size={14} />
+                            </span>
+                        </Tooltip>
+                    )}
+                </div>
+                <div className="fwstate-stats-compare__head">IPv4</div>
+                <div className="fwstate-stats-compare__head">IPv6</div>
+                {statsRows.map((row) => (
+                    <React.Fragment key={row.label}>
+                        <div className="fwstate-stats-compare__metric">{row.label}</div>
+                        <div className="fwstate-stats-compare__value fwstate-mono">{row.ipv4}</div>
+                        <div className="fwstate-stats-compare__value fwstate-mono">{row.ipv6}</div>
+                    </React.Fragment>
+                ))}
+            </div>
+        </section>
+    );
+
+    const configurationTab = current && (() => {
+        const useMulticast = current.syncMode === 'multicast' || current.syncMode === 'both';
+        const useUnicast = current.syncMode === 'unicast' || current.syncMode === 'both';
+        const multicastAddrError = !useMulticast
+            ? undefined
+            : !isValidNonzeroIPv6Address(current.dstAddrMulticast)
+                ? 'Non-zero IPv6 required'
+                : undefined;
+        const multicastPortError = !useMulticast
+            ? undefined
+            : current.portMulticast < 0 || current.portMulticast > 65535
+                ? '0..65535'
+                : current.portMulticast === 0
+                    ? 'Port required'
+                    : undefined;
+        const unicastAddrError = !useUnicast
+            ? undefined
+            : !isValidNonzeroIPv6Address(current.dstAddrUnicast)
+                ? 'Non-zero IPv6 required'
+                : undefined;
+        const unicastPortError = !useUnicast
+            ? undefined
+            : current.portUnicast < 0 || current.portUnicast > 65535
+                ? '0..65535'
+                : current.portUnicast === 0
+                    ? 'Port required'
+                    : undefined;
+
+        return (
+            <div className="fwstate-config-panel">
+                <div className="fwstate-settings-top-row">
+                    <div className="fwstate-config-section">
+                        <div className="fwstate-config-section__head">
+                            <Text variant="subheader-2">Map sizing</Text>
+                        </div>
+                        <div className="fwstate-field-grid fwstate-field-grid--map">
+                            <label className="fwstate-field">
+                                <Text variant="caption-2" color="secondary">Hash index slots</Text>
+                                <TextInput type="number" value={String(current.mapIndexSize)} onUpdate={(v) => updateCurrent({ mapIndexSize: Number(v) })} />
+                            </label>
+                            <label className="fwstate-field">
+                                <Text variant="caption-2" color="secondary">Overflow buckets</Text>
+                                <TextInput type="number" value={String(current.mapExtraBucketCount)} onUpdate={(v) => updateCurrent({ mapExtraBucketCount: Number(v) })} />
+                            </label>
+                        </div>
+                    </div>
+
+                    <div className="fwstate-config-section">
+                        <div className="fwstate-config-section__head">
+                            <Text variant="subheader-2">Sync endpoints</Text>
+                        </div>
+                        <div className="fwstate-sync-grid">
+                            <label className="fwstate-field fwstate-sync-grid__src">
+                                <Text variant="caption-2" color="secondary">Sync source address</Text>
+                                <TextInput value={current.srcAddr} onUpdate={(srcAddr) => updateCurrent({ srcAddr })} error={!isValidNonzeroIPv6Address(current.srcAddr) ? 'Non-zero IPv6 required' : undefined} placeholder="2001:db8::1" />
+                            </label>
+                            <label className="fwstate-field fwstate-sync-grid__mac">
+                                <Text variant="caption-2" color="secondary">Destination MAC</Text>
+                                <TextInput value={current.dstEther} onUpdate={(dstEther) => updateCurrent({ dstEther })} error={!isValidNonzeroMAC(current.dstEther) ? 'Non-zero MAC required' : undefined} placeholder="aa:bb:cc:dd:ee:ff" />
+                            </label>
+                            <label className="fwstate-field fwstate-sync-grid__mode">
+                                <Text variant="caption-2" color="secondary">Endpoint mode</Text>
+                                <Select
+                                    value={[current.syncMode]}
+                                    options={[
+                                        { value: 'multicast', content: 'Multicast' },
+                                        { value: 'unicast', content: 'Unicast' },
+                                        { value: 'both', content: 'Both' },
+                                    ]}
+                                    onUpdate={(value) => updateCurrent({ syncMode: (value[0] as DraftConfig['syncMode']) || 'multicast' })}
+                                />
+                            </label>
+                            {useMulticast && (
+                                <div className="fwstate-sync-grid__endpoint">
+                                    <div className="fwstate-field">
+                                        <Text variant="caption-2" color="secondary">Multicast endpoint</Text>
+                                        <div className="fwstate-endpoint-row">
+                                            <label className="fwstate-field">
+                                                <Text variant="caption-2" color="secondary">Address</Text>
+                                                <TextInput value={current.dstAddrMulticast} onUpdate={(dstAddrMulticast) => updateCurrent({ dstAddrMulticast })} error={multicastAddrError} placeholder="ff02::1" />
+                                            </label>
+                                            <label className="fwstate-field">
+                                                <Text variant="caption-2" color="secondary">Port</Text>
+                                                <TextInput type="number" value={String(current.portMulticast)} onUpdate={(v) => updateCurrent({ portMulticast: Number(v) })} error={multicastPortError} placeholder="2000" />
+                                            </label>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+                            {useUnicast && (
+                                <div className="fwstate-sync-grid__endpoint">
+                                    <div className="fwstate-field">
+                                        <Text variant="caption-2" color="secondary">Unicast endpoint</Text>
+                                        <div className="fwstate-endpoint-row">
+                                            <label className="fwstate-field">
+                                                <Text variant="caption-2" color="secondary">Address</Text>
+                                                <TextInput value={current.dstAddrUnicast} onUpdate={(dstAddrUnicast) => updateCurrent({ dstAddrUnicast })} error={unicastAddrError} placeholder="2001:db8::2" />
+                                            </label>
+                                            <label className="fwstate-field">
+                                                <Text variant="caption-2" color="secondary">Port</Text>
+                                                <TextInput type="number" value={String(current.portUnicast)} onUpdate={(v) => updateCurrent({ portUnicast: Number(v) })} error={unicastPortError} placeholder="2000" />
+                                            </label>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+
+                <div className="fwstate-config-section">
+                    <div className="fwstate-config-section__head">
+                        <Text variant="subheader-2">Timeouts</Text>
+                    </div>
+                    <div className="fwstate-field-grid fwstate-field-grid--timeouts">
+                        <label className="fwstate-field">
+                            <Text variant="caption-2" color="secondary">TCP SYN+ACK</Text>
+                            <TextInput
+                                type="number"
+                                value={current.tcpSynAck}
+                                onUpdate={(tcpSynAck) => updateCurrent({ tcpSynAck })}
+                                error={parseDurationToNs(current.tcpSynAck) ? undefined : 'Enter seconds'}
+                                endContent={<Text className="fwstate-timeout-unit" variant="caption-2" color="secondary">s</Text>}
+                            />
+                        </label>
+                        <label className="fwstate-field">
+                            <Text variant="caption-2" color="secondary">TCP SYN</Text>
+                            <TextInput
+                                type="number"
+                                value={current.tcpSyn}
+                                onUpdate={(tcpSyn) => updateCurrent({ tcpSyn })}
+                                error={parseDurationToNs(current.tcpSyn) ? undefined : 'Enter seconds'}
+                                endContent={<Text className="fwstate-timeout-unit" variant="caption-2" color="secondary">s</Text>}
+                            />
+                        </label>
+                        <label className="fwstate-field">
+                            <Text variant="caption-2" color="secondary">TCP FIN</Text>
+                            <TextInput
+                                type="number"
+                                value={current.tcpFin}
+                                onUpdate={(tcpFin) => updateCurrent({ tcpFin })}
+                                error={parseDurationToNs(current.tcpFin) ? undefined : 'Enter seconds'}
+                                endContent={<Text className="fwstate-timeout-unit" variant="caption-2" color="secondary">s</Text>}
+                            />
+                        </label>
+                        <label className="fwstate-field">
+                            <Text variant="caption-2" color="secondary">TCP established</Text>
+                            <TextInput
+                                type="number"
+                                value={current.tcp}
+                                onUpdate={(tcp) => updateCurrent({ tcp })}
+                                error={parseDurationToNs(current.tcp) ? undefined : 'Enter seconds'}
+                                endContent={<Text className="fwstate-timeout-unit" variant="caption-2" color="secondary">s</Text>}
+                            />
+                        </label>
+                        <label className="fwstate-field">
+                            <Text variant="caption-2" color="secondary">UDP</Text>
+                            <TextInput
+                                type="number"
+                                value={current.udp}
+                                onUpdate={(udp) => updateCurrent({ udp })}
+                                error={parseDurationToNs(current.udp) ? undefined : 'Enter seconds'}
+                                endContent={<Text className="fwstate-timeout-unit" variant="caption-2" color="secondary">s</Text>}
+                            />
+                        </label>
+                        <label className="fwstate-field">
+                            <Text variant="caption-2" color="secondary">Default</Text>
+                            <TextInput
+                                type="number"
+                                value={current.defaultTimeout}
+                                onUpdate={(defaultTimeout) => updateCurrent({ defaultTimeout })}
+                                error={parseDurationToNs(current.defaultTimeout) ? undefined : 'Enter seconds'}
+                                endContent={<Text className="fwstate-timeout-unit" variant="caption-2" color="secondary">s</Text>}
+                            />
+                        </label>
+                    </div>
+                </div>
+            </div>
+        );
+    })();
 
     const pageHeader = (
         <Flex alignItems="center" gap={3} style={{ width: '100%' }}>
@@ -846,6 +1477,33 @@ const FWStatePage: React.FC = () => {
             </Button>
         </Flex>
     );
+
+    const subTabHeaderAction = activeSubTab === 'configuration' ? (
+        <>
+            <button
+                type="button"
+                className="fw-tbl-action-btn fw-tbl-action-btn--save"
+                title="Save config"
+                aria-label="Save config"
+                disabled={!currentIsDirty}
+                onClick={handleSave}
+            >
+                <SaveIcon />
+            </button>
+            <button
+                type="button"
+                className="fw-tbl-action-btn fw-tbl-action-btn--delete"
+                title="Delete config"
+                aria-label="Delete config"
+                disabled={!current || currentHasLinkedAcls}
+                onClick={() => setDeleteConfigOpen(true)}
+            >
+                <TrashIcon />
+            </button>
+        </>
+    ) : activeSubTab === 'links' ? (
+        <Button view="flat" size="s" onClick={() => navigate('/modules/acl')}>Open ACL module</Button>
+    ) : null;
 
     if (loading) {
         return <PageLayout header={pageHeader}><PageLoader loading size="l" /></PageLayout>;
@@ -868,7 +1526,7 @@ const FWStatePage: React.FC = () => {
                                     activeConfig={currentName}
                                     counts={counts}
                                     dirtyConfigs={dirtyConfigs}
-                                    onSelect={setActiveConfig}
+                                    onSelect={updateActiveConfig}
                                     onAddConfig={() => setAddConfigOpen(true)}
                                 />
                             </div>
@@ -876,376 +1534,41 @@ const FWStatePage: React.FC = () => {
 
                         <div className="fw-content fwstate-content">
                             {current && (
-                                (() => {
-                                    const useMulticast = current.syncMode === 'multicast' || current.syncMode === 'both';
-                                    const useUnicast = current.syncMode === 'unicast' || current.syncMode === 'both';
-                                    const multicastAddrError = !useMulticast
-                                        ? undefined
-                                        : !isValidNonzeroIPv6Address(current.dstAddrMulticast)
-                                            ? 'Non-zero IPv6 required'
-                                            : undefined;
-                                    const multicastPortError = !useMulticast
-                                        ? undefined
-                                        : current.portMulticast < 0 || current.portMulticast > 65535
-                                            ? '0..65535'
-                                            : current.portMulticast === 0
-                                                ? 'Port required'
-                                                : undefined;
-                                    const unicastAddrError = !useUnicast
-                                        ? undefined
-                                        : !isValidNonzeroIPv6Address(current.dstAddrUnicast)
-                                            ? 'Non-zero IPv6 required'
-                                            : undefined;
-                                    const unicastPortError = !useUnicast
-                                        ? undefined
-                                        : current.portUnicast < 0 || current.portUnicast > 65535
-                                            ? '0..65535'
-                                            : current.portUnicast === 0
-                                                ? 'Port required'
-                                                : undefined;
-
-                                    return (
-                                        <div className="fwstate-settings-layout">
-                                            <div className="fwstate-panel fwstate-states-table-panel">
-                                                <div className="fwstate-panel-head">
-                                                    <Text variant="subheader-2">States</Text>
-                                                </div>
-                                                <div className="fwstate-states-toolbar">
-                                                    <div className="fwstate-states-toolbar__control fwstate-states-toolbar__control--field fwstate-states-toolbar__control--field-family">
-                                                        <Text className="fwstate-states-toolbar__label">Address family</Text>
-                                                            <div className="fwstate-states-toolbar__family">
-                                                                <Button
-                                                                    view="outlined"
-                                                                    size="s"
-                                                                    className={`fwstate-states-toolbar__family-btn${statesQuery.isIpv6 ? ' fwstate-states-toolbar__family-btn--active' : ''}`}
-                                                                    onClick={() => setStatesQuery((prev) => ({ ...prev, isIpv6: true }))}
-                                                                    title="IPv6 (6)"
-                                                                >
-                                                                    IPv6
-                                                                </Button>
-                                                                <Button
-                                                                    view="outlined"
-                                                                    size="s"
-                                                                    className={`fwstate-states-toolbar__family-btn${statesQuery.isIpv6 ? '' : ' fwstate-states-toolbar__family-btn--active'}`}
-                                                                    onClick={() => setStatesQuery((prev) => ({ ...prev, isIpv6: false }))}
-                                                                    title="IPv4 (4)"
-                                                                >
-                                                                    IPv4
-                                                                </Button>
-                                                            </div>
-                                                        </div>
-                                                    <div className="fwstate-states-toolbar__control fwstate-states-toolbar__control--field fwstate-states-toolbar__control--field-direction">
-                                                        <Text className="fwstate-states-toolbar__label">Direction</Text>
-                                                        <div title="Direction (f/b)">
-                                                            <Select
-                                                                value={[String(statesQuery.direction)]}
-                                                                onUpdate={(v) => setStatesQuery((prev) => ({ ...prev, direction: Number(v[0] ?? 0) as Direction }))}
-                                                                options={[{ value: String(Direction.FORWARD), content: 'forward' }, { value: String(Direction.BACKWARD), content: 'backward' }]}
-                                                            />
-                                                        </div>
-                                                    </div>
-                                                    <div className="fwstate-states-toolbar__control fwstate-states-toolbar__control--switch">
-                                                        <Text className="fwstate-states-toolbar__label">Include expired</Text>
-                                                        <div title="Include expired (e)">
-                                                            <Switch checked={statesQuery.includeExpired} onUpdate={(includeExpired) => setStatesQuery((prev) => ({ ...prev, includeExpired }))} />
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                                <details className="fwstate-states-advanced-details">
-                                                    <summary className="fwstate-states-advanced-details__summary">
-                                                        <Text variant="caption-2" color="secondary">Advanced filters</Text>
-                                                    </summary>
-                                                    <div className="fwstate-states-advanced-details__content">
-                                                        <div className="fwstate-states-toolbar__control fwstate-states-toolbar__control--field fwstate-states-toolbar__control--field-layer">
-                                                            <Text className="fwstate-states-toolbar__label">State layer</Text>
-                                                            <div title="State layer (0 = active layer)">
-                                                                <TextInput
-                                                                    type="number"
-                                                                    value={String(statesQuery.layerIndex)}
-                                                                    onUpdate={(v) => setStatesQuery((prev) => ({ ...prev, layerIndex: Math.max(0, Number(v) || 0) }))}
-                                                                />
-                                                            </div>
-                                                            <Text className="fwstate-states-toolbar__hint">0 = active layer</Text>
-                                                        </div>
-                                                    </div>
-                                                </details>
-                                                <div className="fwstate-table-shell fwstate-table-shell--scroll" ref={statesScrollRef} onScroll={handleStatesScroll}>
-                                                    <div className="fwstate-states-table-content">
-                                                        <Table data={stateRows} columns={stateColumns} emptyMessage="" />
-                                                    </div>
-                                                    {!stateLoading && stateRows.length === 0 && <div className="fwstate-states-empty-overlay">No data</div>}
-                                                </div>
-                                                <div className="fwstate-states-footer">
-                                                    <Text className="fwstate-states-footer__text">{stateLoading ? 'Loading…' : `Shown ${stateRows.length} rows`}</Text>
-                                                    <Text className="fwstate-states-footer__text fwstate-states-footer__text--secondary">
-                                                        {stateLoading || stateRows.length === 0 || stateHasMore ? '\u00a0' : 'End of entries.'}
-                                                    </Text>
-                                                </div>
-                                            </div>
-
-                                            <div className="fwstate-operational-secondary">
-                                                <div className="fwstate-panel fwstate-acl-panel">
-                                                    <div className="fwstate-panel-head fwstate-panel-head--split">
-                                                        <Text variant="subheader-2">ACL links</Text>
-                                                        <Button view="flat" size="s" onClick={() => navigate('/modules/acl')}>Open ACL module</Button>
-                                                    </div>
-                                                    <div className="fwstate-table-shell fwstate-acl-table-shell">
-                                                        <Table
-                                                            data={aclRows}
-                                                            columns={[
-                                                                { id: 'name', name: 'ACL config', template: (row) => <span className="fwstate-table-cell">{row.name}</span> },
-                                                                { id: 'fwstate', name: 'Current FWState', template: (row) => row.fwstateName ? <Label theme={row.isLinkedHere ? 'success' : 'warning'} size="s">{row.fwstateName}</Label> : <Label theme="unknown" size="s">{row.isLoaded ? 'unlinked' : 'Loading…'}</Label> },
-                                                                { id: 'rules', name: 'Rules', template: (row) => <span className="fwstate-mono">{row.ruleCount === null ? (row.isLoaded ? (row.loadFailed ? '—' : 'Loading…') : 'Loading…') : row.ruleCount}</span> },
-                                                                {
-                                                                    id: 'action',
-                                                                    name: 'Action',
-                                                                    template: (row) => {
-                                                                        if (row.isLinkedHere) {
-                                                                            return <Label theme="success" size="s">Linked</Label>;
-                                                                        }
-                                                                        if (!row.isLoaded) {
-                                                                            return (
-                                                                                <Button size="s" view="outlined" disabled>
-                                                                                    Loading…
-                                                                                </Button>
-                                                                            );
-                                                                        }
-                                                                        if (row.loadFailed) {
-                                                                            return (
-                                                                                <Text color="secondary" className="fwstate-table-cell">
-                                                                                    Unavailable
-                                                                                </Text>
-                                                                            );
-                                                                        }
-                                                                        return (
-                                                                            <Button
-                                                                                size="s"
-                                                                                view="outlined"
-                                                                                className="fwstate-acl-link-btn"
-                                                                                onClick={() => openLinkAclDialog(row.name)}
-                                                                            >
-                                                                                {row.fwstateName ? 'Move here' : 'Link'}
-                                                                            </Button>
-                                                                        );
-                                                                    },
-                                                                },
-                                                            ]}
-                                                        />
-                                                    </div>
-                                                </div>
-
-                                                <div className="fwstate-panel">
-                                                    <div className="fwstate-panel-head">
-                                                        <Text variant="subheader-2">State map stats</Text>
-                                                    </div>
-                                                    <div className="fwstate-stats-compare">
-                                                        <div className="fwstate-stats-compare__head">Metric</div>
-                                                        <div className="fwstate-stats-compare__head">IPv4</div>
-                                                        <div className="fwstate-stats-compare__head">IPv6</div>
-                                                        {statsRows.map((row) => (
-                                                            <React.Fragment key={row.label}>
-                                                                <div className="fwstate-stats-compare__metric">{row.label}</div>
-                                                                <div className="fwstate-stats-compare__value fwstate-mono">{row.ipv4}</div>
-                                                                <div className="fwstate-stats-compare__value fwstate-mono">{row.ipv6}</div>
-                                                            </React.Fragment>
-                                                        ))}
-                                                    </div>
-                                                    {statsNote && (
-                                                        <Text className="fwstate-stats-note" color="secondary">
-                                                            {statsNote}
-                                                        </Text>
-                                                    )}
-                                                </div>
-                                            </div>
-                                            <details className="fwstate-config-details">
-                                                <summary className="fwstate-config-details__summary">
-                                                    <div className="fwstate-config-details__summary-inner">
-                                                        <Text variant="subheader-2">Configuration</Text>
-                                                        <div className="fwstate-config-details__summary-actions">
+                                <div className="fwstate-settings-layout">
+                                    <div
+                                        className={`fwstate-panel fwstate-subtab-panel ${activeSubTab === 'states' ? 'fwstate-subtab-panel--states' : 'fwstate-subtab-panel--scroll'}`}
+                                        role="tabpanel"
+                                        id="fwstate-subtab-panel"
+                                    >
+                                        <div className="fwstate-subtab-frame">
+                                            <div className="fwstate-subtab-frame__head">
+                                                <div className="fw-tabs fwstate-sub-tabs" role="tablist" aria-label="FWState sub tabs">
+                                                    {STATE_SUB_TABS.map((tab) => {
+                                                        const isActive = tab.id === activeSubTab;
+                                                        return (
                                                             <button
+                                                                key={tab.id}
                                                                 type="button"
-                                                                className="fw-tbl-action-btn fw-tbl-action-btn--save"
-                                                                title="Save config"
-                                                                aria-label="Save config"
-                                                                disabled={!currentIsDirty}
-                                                                onClick={(event) => {
-                                                                    event.preventDefault();
-                                                                    event.stopPropagation();
-                                                                    handleSave();
-                                                                }}
+                                                                role="tab"
+                                                                aria-selected={isActive}
+                                                                aria-controls="fwstate-subtab-panel"
+                                                                className={`fw-tab${isActive ? ' fw-tab--active' : ''}`}
+                                                                onClick={() => updateActiveSubTab(tab.id)}
                                                             >
-                                                                <SaveIcon />
+                                                                <span className="fw-tab__label">{tab.label}</span>
                                                             </button>
-                                                            <button
-                                                                type="button"
-                                                                className="fw-tbl-action-btn fw-tbl-action-btn--delete"
-                                                                title="Delete config"
-                                                                aria-label="Delete config"
-                                                                disabled={!current || currentHasLinkedAcls}
-                                                                onClick={(event) => {
-                                                                    event.preventDefault();
-                                                                    event.stopPropagation();
-                                                                    setDeleteConfigOpen(true);
-                                                                }}
-                                                            >
-                                                                <TrashIcon />
-                                                            </button>
-                                                        </div>
-                                                    </div>
-                                                </summary>
-                                                <div className="fwstate-config-details__content">
-                                                    <div className="fwstate-settings-top-row">
-                                                        <div className="fwstate-config-section">
-                                                            <div className="fwstate-config-section__head">
-                                                                <Text variant="subheader-2">Map sizing</Text>
-                                                            </div>
-                                                            <div className="fwstate-field-grid fwstate-field-grid--map">
-                                                                <label className="fwstate-field">
-                                                                    <Text variant="caption-2" color="secondary">Hash index slots</Text>
-                                                                    <TextInput type="number" value={String(current.mapIndexSize)} onUpdate={(v) => updateCurrent({ mapIndexSize: Number(v) })} />
-                                                                </label>
-                                                                <label className="fwstate-field">
-                                                                    <Text variant="caption-2" color="secondary">Overflow buckets</Text>
-                                                                    <TextInput type="number" value={String(current.mapExtraBucketCount)} onUpdate={(v) => updateCurrent({ mapExtraBucketCount: Number(v) })} />
-                                                                </label>
-                                                            </div>
-                                                        </div>
-
-                                                        <div className="fwstate-config-section">
-                                                            <div className="fwstate-config-section__head">
-                                                                <Text variant="subheader-2">Sync endpoints</Text>
-                                                            </div>
-                                                            <div className="fwstate-sync-grid">
-                                                                <label className="fwstate-field fwstate-sync-grid__src">
-                                                                    <Text variant="caption-2" color="secondary">Sync source address</Text>
-                                                                    <TextInput value={current.srcAddr} onUpdate={(srcAddr) => updateCurrent({ srcAddr })} error={!isValidNonzeroIPv6Address(current.srcAddr) ? 'Non-zero IPv6 required' : undefined} placeholder="2001:db8::1" />
-                                                                </label>
-                                                                <label className="fwstate-field fwstate-sync-grid__mac">
-                                                                    <Text variant="caption-2" color="secondary">Destination MAC</Text>
-                                                                    <TextInput value={current.dstEther} onUpdate={(dstEther) => updateCurrent({ dstEther })} error={!isValidNonzeroMAC(current.dstEther) ? 'Non-zero MAC required' : undefined} placeholder="aa:bb:cc:dd:ee:ff" />
-                                                                </label>
-                                                                <label className="fwstate-field fwstate-sync-grid__mode">
-                                                                    <Text variant="caption-2" color="secondary">Endpoint mode</Text>
-                                                                    <Select
-                                                                        value={[current.syncMode]}
-                                                                        options={[
-                                                                            { value: 'multicast', content: 'Multicast' },
-                                                                            { value: 'unicast', content: 'Unicast' },
-                                                                            { value: 'both', content: 'Both' },
-                                                                        ]}
-                                                                        onUpdate={(value) => updateCurrent({ syncMode: (value[0] as DraftConfig['syncMode']) || 'multicast' })}
-                                                                    />
-                                                                </label>
-                                                                {useMulticast && (
-                                                                    <div className="fwstate-sync-grid__endpoint">
-                                                                        <div className="fwstate-field">
-                                                                            <Text variant="caption-2" color="secondary">Multicast endpoint</Text>
-                                                                            <div className="fwstate-endpoint-row">
-                                                                                <label className="fwstate-field">
-                                                                                    <Text variant="caption-2" color="secondary">Address</Text>
-                                                                                    <TextInput value={current.dstAddrMulticast} onUpdate={(dstAddrMulticast) => updateCurrent({ dstAddrMulticast })} error={multicastAddrError} placeholder="ff02::1" />
-                                                                                </label>
-                                                                                <label className="fwstate-field">
-                                                                                    <Text variant="caption-2" color="secondary">Port</Text>
-                                                                                    <TextInput type="number" value={String(current.portMulticast)} onUpdate={(v) => updateCurrent({ portMulticast: Number(v) })} error={multicastPortError} placeholder="2000" />
-                                                                                </label>
-                                                                            </div>
-                                                                        </div>
-                                                                    </div>
-                                                                )}
-                                                                {useUnicast && (
-                                                                    <div className="fwstate-sync-grid__endpoint">
-                                                                        <div className="fwstate-field">
-                                                                            <Text variant="caption-2" color="secondary">Unicast endpoint</Text>
-                                                                            <div className="fwstate-endpoint-row">
-                                                                                <label className="fwstate-field">
-                                                                                    <Text variant="caption-2" color="secondary">Address</Text>
-                                                                                    <TextInput value={current.dstAddrUnicast} onUpdate={(dstAddrUnicast) => updateCurrent({ dstAddrUnicast })} error={unicastAddrError} placeholder="2001:db8::2" />
-                                                                                </label>
-                                                                                <label className="fwstate-field">
-                                                                                    <Text variant="caption-2" color="secondary">Port</Text>
-                                                                                    <TextInput type="number" value={String(current.portUnicast)} onUpdate={(v) => updateCurrent({ portUnicast: Number(v) })} error={unicastPortError} placeholder="2000" />
-                                                                                </label>
-                                                                            </div>
-                                                                        </div>
-                                                                    </div>
-                                                                )}
-                                                            </div>
-                                                        </div>
-                                                    </div>
-
-                                                        <div className="fwstate-config-section">
-                                                            <div className="fwstate-config-section__head">
-                                                                <Text variant="subheader-2">Timeouts</Text>
-                                                            </div>
-                                                            <div className="fwstate-field-grid fwstate-field-grid--timeouts">
-                                                            <label className="fwstate-field">
-                                                                <Text variant="caption-2" color="secondary">TCP SYN+ACK</Text>
-                                                                <TextInput
-                                                                    type="number"
-                                                                    value={current.tcpSynAck}
-                                                                    onUpdate={(tcpSynAck) => updateCurrent({ tcpSynAck })}
-                                                                    error={parseDurationToNs(current.tcpSynAck) ? undefined : 'Enter seconds'}
-                                                                    endContent={<Text className="fwstate-timeout-unit" variant="caption-2" color="secondary">s</Text>}
-                                                                />
-                                                            </label>
-                                                            <label className="fwstate-field">
-                                                                <Text variant="caption-2" color="secondary">TCP SYN</Text>
-                                                                <TextInput
-                                                                    type="number"
-                                                                    value={current.tcpSyn}
-                                                                    onUpdate={(tcpSyn) => updateCurrent({ tcpSyn })}
-                                                                    error={parseDurationToNs(current.tcpSyn) ? undefined : 'Enter seconds'}
-                                                                    endContent={<Text className="fwstate-timeout-unit" variant="caption-2" color="secondary">s</Text>}
-                                                                />
-                                                            </label>
-                                                            <label className="fwstate-field">
-                                                                <Text variant="caption-2" color="secondary">TCP FIN</Text>
-                                                                <TextInput
-                                                                    type="number"
-                                                                    value={current.tcpFin}
-                                                                    onUpdate={(tcpFin) => updateCurrent({ tcpFin })}
-                                                                    error={parseDurationToNs(current.tcpFin) ? undefined : 'Enter seconds'}
-                                                                    endContent={<Text className="fwstate-timeout-unit" variant="caption-2" color="secondary">s</Text>}
-                                                                />
-                                                            </label>
-                                                            <label className="fwstate-field">
-                                                                <Text variant="caption-2" color="secondary">TCP established</Text>
-                                                                <TextInput
-                                                                    type="number"
-                                                                    value={current.tcp}
-                                                                    onUpdate={(tcp) => updateCurrent({ tcp })}
-                                                                    error={parseDurationToNs(current.tcp) ? undefined : 'Enter seconds'}
-                                                                    endContent={<Text className="fwstate-timeout-unit" variant="caption-2" color="secondary">s</Text>}
-                                                                />
-                                                            </label>
-                                                            <label className="fwstate-field">
-                                                                <Text variant="caption-2" color="secondary">UDP</Text>
-                                                                <TextInput
-                                                                    type="number"
-                                                                    value={current.udp}
-                                                                    onUpdate={(udp) => updateCurrent({ udp })}
-                                                                    error={parseDurationToNs(current.udp) ? undefined : 'Enter seconds'}
-                                                                    endContent={<Text className="fwstate-timeout-unit" variant="caption-2" color="secondary">s</Text>}
-                                                                />
-                                                            </label>
-                                                            <label className="fwstate-field">
-                                                                <Text variant="caption-2" color="secondary">Default</Text>
-                                                                <TextInput
-                                                                    type="number"
-                                                                    value={current.defaultTimeout}
-                                                                    onUpdate={(defaultTimeout) => updateCurrent({ defaultTimeout })}
-                                                                    error={parseDurationToNs(current.defaultTimeout) ? undefined : 'Enter seconds'}
-                                                                    endContent={<Text className="fwstate-timeout-unit" variant="caption-2" color="secondary">s</Text>}
-                                                                />
-                                                            </label>
-                                                        </div>
-                                                    </div>
-                                                    </div>
-                                            </details>
+                                                        );
+                                                    })}
+                                                </div>
+                                                {subTabHeaderAction && <div className="fwstate-subtab-frame__actions">{subTabHeaderAction}</div>}
+                                            </div>
                                         </div>
-                                    );
-                                })()
+                                        {activeSubTab === 'configuration' && configurationTab}
+                                        {activeSubTab === 'links' && linksTab}
+                                        {activeSubTab === 'states' && statesTab}
+                                        {activeSubTab === 'statistics' && statisticsTab}
+                                    </div>
+                                </div>
                             )}
                         </div>
                     </>
@@ -1260,7 +1583,7 @@ const FWStatePage: React.FC = () => {
                 onCreate={(name) => {
                     setConfigs((prev) => ({ ...prev, [name]: toDraftConfig(null, true) }));
                     setDirtyConfigs((prev) => new Set(prev).add(name));
-                    setActiveConfig(name);
+                    updateActiveConfig(name);
                     setAddConfigOpen(false);
                 }}
             />
