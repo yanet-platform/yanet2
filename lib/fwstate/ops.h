@@ -49,10 +49,12 @@ fwmap_update_value_fwstate(
 	struct fw_state_value old = *d;
 	*d = *s;
 
-	// Update: take ownership/timestamp from the incoming frame, but keep
-	// the original creation timestamp so the connection age is preserved.
+	// Update: take ownership/timestamp/last_ttl from the incoming frame,
+	// but keep the original creation timestamp so the connection age is
+	// preserved.
 	d->created_at = old.created_at;
-	// (external and updated_at are inherited from *s by the *d = *s above.)
+	// (external, updated_at, and last_ttl are inherited from *s by *d =
+	// *s.)
 
 	// Merge: TCP flags accumulate across frames (FIN/SYN/RST/ACK once seen,
 	// stays seen), and per-direction packet counters are summed.
@@ -83,12 +85,13 @@ fwmap_promote_value_fwstate(
 	const struct fw_state_value *old_v =
 		(const struct fw_state_value *)old_value;
 
-	// Update: ownership and last-seen timestamp come from the incoming
-	// frame; the creation timestamp comes from the older copy in the stale
-	// layer so the connection age is preserved across promotion.
+	// Update: ownership, last-seen timestamp, and last_ttl come from the
+	// incoming frame; the creation timestamp comes from the older copy in
+	// the stale layer so the connection age is preserved across promotion.
 	d->external = new_v->external;
 	d->updated_at = new_v->updated_at;
 	d->created_at = old_v->created_at;
+	fwstate_value_set_last_ttl(d, fwstate_ttl48_load(new_v->last_ttl));
 
 	// Merge: TCP flags are OR-combined and per-direction packet counters
 	// are summed across the two layers.

@@ -122,24 +122,10 @@ fwstate_build_value(
 		state.value.packets_backward = 1;
 	}
 
-	// Determine TTL based on protocol and flags
-	// Logic from yanet/dataplane/slow_worker.cpp:496
-	state.ttl = timeouts_config->default_;
-	if (sync_frame->proto == IPPROTO_UDP) {
-		state.ttl = timeouts_config->udp;
-	} else if (sync_frame->proto == IPPROTO_TCP) {
-		state.ttl = timeouts_config->tcp;
-		uint8_t flags =
-			state.value.flags.tcp.src | state.value.flags.tcp.dst;
-		if (flags & FWSTATE_ACK) {
-			state.ttl = timeouts_config->tcp_syn_ack;
-		} else if (flags & FWSTATE_SYN) {
-			state.ttl = timeouts_config->tcp_syn;
-		}
-		if (flags & FWSTATE_FIN) {
-			state.ttl = timeouts_config->tcp_fin;
-		}
-	}
+	state.ttl = fwstate_entry_ttl(
+		sync_frame->proto, state.value.flags.raw, timeouts_config
+	);
+	fwstate_value_set_last_ttl(&state.value, state.ttl);
 
 	return state;
 }

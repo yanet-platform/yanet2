@@ -1,14 +1,20 @@
 #pragma once
 
+#include <netinet/in.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include "config.h"
 
 #define FW_STATE_ADDR_TYPE_IP4 4
 #define FW_STATE_ADDR_TYPE_IP6 6
 
 #define FW_STATE_SYNC_THRESHOLD (uint64_t)8e9 // nanoseconds
 #define FW_STATE_DEFAULT_TIMEOUT (uint64_t)120e9
+
+// Nanosecond TTL stored in fw_state_value::last_ttl (48-bit, little-endian).
+#define FWSTATE_TTL48_MAX ((uint64_t)((1ULL << 48) - 1))
 
 /**
  * Common header shared by all fw_state key types.
@@ -97,7 +103,9 @@ union fw_state_flags_u {
 struct fw_state_value {
 	bool external; // State ownership (internal/external)
 	union fw_state_flags_u flags;
-	uint8_t _pad[6];
+	// TTL (ns) from the last put/sync frame; expiry is updated_at +
+	// last_ttl.
+	uint8_t last_ttl[6];
 	// Timestamp when the state was created
 	uint64_t created_at;
 	// Timestamp when the last sync packet was emitted
@@ -129,3 +137,67 @@ struct fw_state_sync_frame {
 	uint32_t flow_id6;   // IPv6 flow label
 	uint32_t extra;	     // Reserved for future use
 } __attribute__((__packed__));
+
+static inline void
+fwstate_ttl48_store(uint8_t out[6], uint64_t ttl_ns) {
+	out[0] = (uint8_t)(ttl_ns);
+	out[1] = (uint8_t)(ttl_ns >> 8);
+	out[2] = (uint8_t)(ttl_ns >> 16);
+	out[3] = (uint8_t)(ttl_ns >> 24);
+	out[4] = (uint8_t)(ttl_ns >> 32);
+	out[5] = (uint8_t)(ttl_ns >> 40);
+}
+
+static inline uint64_t
+fwstate_ttl48_load(const uint8_t in[6]) {
+	return (uint64_t)in[0] | ((uint64_t)in[1] << 8) |
+	       ((uint64_t)in[2] << 16) | ((uint64_t)in[3] << 24) |
+	       ((uint64_t)in[4] << 32) | ((uint64_t)in[5] << 40);
+}
+
+static inline void
+fwstate_value_set_last_ttl(struct fw_state_value *value, uint64_t ttl_ns) {
+	// Configured timeouts must fit in last_ttl (see FWSTATE_TTL48_MAX).
+	fwstate_ttl48_store(value->last_ttl, ttl_ns);
+}
+
+static inline uint64_t
+fwstate_value_expires_at(const struct fw_state_value *value) {
+	return value->updated_at + fwstate_ttl48_load(value->last_ttl);
+}
+
+static inline bool
+fwstate_value_is_expired(const struct fw_state_value *value, uint64_t now) {
+	if (value->updated_at == 0) {
+		return true;
+	}
+	return fwstate_value_expires_at(value) <= now;
+}
+
+/// Select TTL for a frame from protocol and TCP flags.
+/// Ported from yanet/dataplane/slow_worker.cpp:496.
+static inline uint64_t
+fwstate_entry_ttl(
+	uint16_t proto, uint8_t raw_flags, const struct fwstate_timeouts *t
+) {
+	union fw_state_flags_u flags = {.raw = raw_flags};
+
+	uint64_t ttl = t->default_;
+	if (proto == IPPROTO_UDP) {
+		ttl = t->udp;
+	} else if (proto == IPPROTO_TCP) {
+		ttl = t->tcp;
+
+		uint8_t tcp_flags = flags.tcp.src | flags.tcp.dst;
+		if (tcp_flags & FWSTATE_ACK) {
+			ttl = t->tcp_syn_ack;
+		} else if (tcp_flags & FWSTATE_SYN) {
+			ttl = t->tcp_syn;
+		}
+		if (tcp_flags & FWSTATE_FIN) {
+			ttl = t->tcp_fin;
+		}
+	}
+
+	return ttl;
+}

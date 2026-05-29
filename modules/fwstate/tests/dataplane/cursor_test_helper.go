@@ -33,14 +33,14 @@ type CursorResult struct {
 	PktBackward uint64
 }
 
-// insertFw4Entry inserts a single IPv4 fwstate entry directly into the
-// active layer's fwmap using fwmap_put.
+// insertFw4Entry inserts a single IPv4 fwstate entry into the active layer.
 func insertFw4Entry(
 	cpModule *C.struct_cp_module,
 	proto uint16, srcPort uint16, dstPort uint16,
 	srcAddr uint32, dstAddr uint32,
 	srcFlags uint8, dstFlags uint8,
 	createdAt uint64, updatedAt uint64,
+	ttlNs uint64,
 ) error {
 	// Resolve the active IPv4 map (layer 0)
 	fwmap := C.fwstate_config_resolve_map(cpModule, C.bool(false), C.uint32_t(0))
@@ -62,9 +62,9 @@ func insertFw4Entry(
 	val.updated_at = C.uint64_t(updatedAt)
 	val.packets_forward = C.uint64_t(1)
 	val.packets_backward = C.uint64_t(0)
+	C.fwstate_value_set_last_ttl(&val, C.uint64_t(ttlNs))
 
-	ttl := C.uint64_t(50000) // large TTL for the bucket deadline
-	ret := C.fwmap_put(fwmap, C.uint16_t(0), C.uint64_t(updatedAt), ttl,
+	ret := C.fwmap_put(fwmap, C.uint16_t(0), C.uint64_t(updatedAt), C.uint64_t(ttlNs),
 		unsafe.Pointer(&key), unsafe.Pointer(&val), nil)
 	if ret < 0 {
 		return fmt.Errorf("fwmap_put failed: %d", ret)

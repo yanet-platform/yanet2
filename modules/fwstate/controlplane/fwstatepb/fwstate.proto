@@ -132,7 +132,7 @@ message MapConfig {
 // Firewall state synchronization configuration
 message SyncConfig {
   commonpb.IPAddress src_addr = 1;           // IPv6 source address;
-  bytes dst_ether = 2;                        // Destination MAC address (6 bytes);
+  bytes dst_ether = 2;                       // Destination MAC address (6 bytes);
   commonpb.IPAddress dst_addr_multicast = 3; // Multicast IPv6 address;
   uint32 port_multicast = 4;                 // Multicast port;
   commonpb.IPAddress dst_addr_unicast = 5;   // Unicast IPv6 address;

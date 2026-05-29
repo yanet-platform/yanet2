@@ -455,10 +455,6 @@ fwstate_config_cursor_create(
 	int64_t index,
 	bool include_expired
 ) {
-	struct fwstate_module_config *config = container_of(
-		cp_module, struct fwstate_module_config, cp_module
-	);
-
 	// Verify the map/layer exists
 	fwmap_t *map =
 		fwstate_config_resolve_map(cp_module, is_ipv6, layer_index);
@@ -469,7 +465,6 @@ fwstate_config_cursor_create(
 
 	cursor->key_pos = index;
 	cursor->include_expired = include_expired;
-	cursor->timeouts = config->cfg.sync_config.timeouts;
 
 	return 0;
 }

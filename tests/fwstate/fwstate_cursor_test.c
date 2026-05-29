@@ -21,7 +21,6 @@
 
 #define ARENA_SIZE_MB 64
 #define ARENA_SIZE ((1 << 20) * ARENA_SIZE_MB)
-#define DEFAULT_TTL 50000
 #define WORKER_ID 0
 
 /* Global time counter for TTL expiration testing */
@@ -114,9 +113,16 @@ test_env_insert_tcp(
 		val.created_at = now;
 		val.updated_at = now;
 		val.packets_forward = 1;
+		fwstate_value_set_last_ttl(&val, test_timeouts.tcp);
 
 		int64_t ret = fwmap_put(
-			env->map, WORKER_ID, now, DEFAULT_TTL, &key, &val, NULL
+			env->map,
+			WORKER_ID,
+			now,
+			test_timeouts.tcp,
+			&key,
+			&val,
+			NULL
 		);
 		assert(ret >= 0);
 	}
@@ -149,9 +155,16 @@ test_env_insert_udp(
 		val.created_at = now;
 		val.updated_at = now;
 		val.packets_forward = 1;
+		fwstate_value_set_last_ttl(&val, test_timeouts.udp);
 
 		int64_t ret = fwmap_put(
-			env->map, WORKER_ID, now, DEFAULT_TTL, &key, &val, NULL
+			env->map,
+			WORKER_ID,
+			now,
+			test_timeouts.udp,
+			&key,
+			&val,
+			NULL
 		);
 		assert(ret >= 0);
 	}
@@ -192,11 +205,11 @@ test_ttl_selection(void) {
 	assert(fwstate_entry_ttl(IPPROTO_TCP, flags.raw, &test_timeouts) ==
 	       test_timeouts.tcp_fin);
 
-	/* TCP established (no special flags) */
+	/* TCP with ACK on both sides */
 	flags.tcp.src = FWSTATE_ACK;
 	flags.tcp.dst = FWSTATE_ACK;
 	assert(fwstate_entry_ttl(IPPROTO_TCP, flags.raw, &test_timeouts) ==
-	       test_timeouts.tcp);
+	       test_timeouts.tcp_syn_ack);
 
 	/* UDP */
 	flags.raw = 0;
@@ -225,7 +238,6 @@ test_empty_map(void *arena) {
 	fwstate_cursor_t cursor = {
 		.key_pos = 0,
 		.include_expired = true,
-		.timeouts = test_timeouts,
 	};
 	uint32_t n =
 		fwstate_cursor_read_forward(env.map, &cursor, now, out, 10);
@@ -257,7 +269,6 @@ test_forward_iteration(void *arena) {
 	fwstate_cursor_t cursor = {
 		.key_pos = 0,
 		.include_expired = true,
-		.timeouts = test_timeouts,
 	};
 
 	uint32_t n =
@@ -297,7 +308,6 @@ test_backward_iteration(void *arena) {
 	fwstate_cursor_t cursor = {
 		.key_pos = INT64_MAX,
 		.include_expired = true,
-		.timeouts = test_timeouts,
 	};
 
 	uint32_t n =
@@ -347,7 +357,6 @@ test_expired_skipped(void *arena) {
 	fwstate_cursor_t cursor = {
 		.key_pos = 0,
 		.include_expired = false,
-		.timeouts = test_timeouts,
 	};
 
 	uint32_t n = fwstate_cursor_read_forward(
@@ -388,7 +397,6 @@ test_include_expired(void *arena) {
 	fwstate_cursor_t cursor = {
 		.key_pos = 0,
 		.include_expired = true,
-		.timeouts = test_timeouts,
 	};
 
 	uint32_t n = fwstate_cursor_read_forward(
@@ -423,7 +431,6 @@ test_uninitialized_skipped(void *arena) {
 	fwstate_cursor_t cursor = {
 		.key_pos = 0,
 		.include_expired = true,
-		.timeouts = test_timeouts,
 	};
 
 	uint32_t n =
@@ -455,7 +462,6 @@ test_paging(void *arena) {
 	fwstate_cursor_t cursor = {
 		.key_pos = 0,
 		.include_expired = true,
-		.timeouts = test_timeouts,
 	};
 
 	int total = 0;
@@ -519,7 +525,6 @@ test_forward_bounds(void *arena) {
 	fwstate_cursor_t cursor = {
 		.key_pos = 3,
 		.include_expired = true,
-		.timeouts = test_timeouts,
 	};
 	uint32_t n =
 		fwstate_cursor_read_forward(env.map, &cursor, now, out, 10);
@@ -555,7 +560,6 @@ test_backward_clamping(void *arena) {
 	fwstate_cursor_t cursor = {
 		.key_pos = 999,
 		.include_expired = true,
-		.timeouts = test_timeouts,
 	};
 
 	uint32_t n =
@@ -591,7 +595,6 @@ test_single_entry_backward(void *arena) {
 	fwstate_cursor_t cursor = {
 		.key_pos = INT64_MAX,
 		.include_expired = true,
-		.timeouts = test_timeouts,
 	};
 
 	uint32_t n =
@@ -627,7 +630,6 @@ test_backward_paging(void *arena) {
 	fwstate_cursor_t cursor = {
 		.key_pos = INT64_MAX,
 		.include_expired = true,
-		.timeouts = test_timeouts,
 	};
 
 	int total = 0;
@@ -696,7 +698,6 @@ test_backward_expired_at_zero(void *arena) {
 	fwstate_cursor_t cursor = {
 		.key_pos = INT64_MAX,
 		.include_expired = false,
-		.timeouts = test_timeouts,
 	};
 
 	uint32_t n = fwstate_cursor_read_backward(

@@ -24,6 +24,12 @@ const (
 	flagSYN uint8 = 0x02
 )
 
+// Match fwstateModuleConfig sync timeouts (nanoseconds).
+const (
+	ttlTCPNs = uint64(120e9)
+	ttlUDPNs = uint64(30e9)
+)
+
 // ipToUint32 converts an IPv4 string to a uint32 in network byte order.
 func ipToUint32(s string) uint32 {
 	ip := net.ParseIP(s).To4()
@@ -46,7 +52,7 @@ func TestCursorForwardRead(t *testing.T) {
 			protoTCP, uint16(1000+i), 80,
 			ipToUint32("10.0.0.1"), ipToUint32("192.168.0.1"),
 			flagACK, flagACK,
-			now, now,
+			now, now, ttlTCPNs,
 		)
 		require.NoError(t, err, "insert entry %d", i)
 	}
@@ -79,7 +85,7 @@ func TestCursorBackwardRead(t *testing.T) {
 			protoTCP, uint16(2000+i), 443,
 			ipToUint32("10.0.0.1"), ipToUint32("192.168.0.2"),
 			flagACK, flagACK,
-			now, now,
+			now, now, ttlTCPNs,
 		)
 		require.NoError(t, err)
 	}
@@ -112,7 +118,7 @@ func TestCursorExpiredFiltering(t *testing.T) {
 		protoTCP, 3000, 80,
 		ipToUint32("10.0.0.1"), ipToUint32("192.168.0.1"),
 		flagACK, flagACK,
-		now, now,
+		now, now, ttlTCPNs,
 	)
 	require.NoError(t, err)
 
@@ -121,7 +127,7 @@ func TestCursorExpiredFiltering(t *testing.T) {
 		protoUDP, 3001, 53,
 		ipToUint32("10.0.0.2"), ipToUint32("192.168.0.1"),
 		0, 0,
-		now, now,
+		now, now, ttlUDPNs,
 	)
 	require.NoError(t, err)
 
@@ -130,7 +136,7 @@ func TestCursorExpiredFiltering(t *testing.T) {
 		protoTCP, 3002, 443,
 		ipToUint32("10.0.0.3"), ipToUint32("192.168.0.1"),
 		flagACK, flagACK,
-		now, now,
+		now, now, ttlTCPNs,
 	)
 	require.NoError(t, err)
 
@@ -169,7 +175,7 @@ func TestCursorKeyDataCorrectness(t *testing.T) {
 		protoTCP, 12345, 8080,
 		srcAddr, dstAddr,
 		flagSYN, 0,
-		now, now,
+		now, now, ttlTCPNs,
 	)
 	require.NoError(t, err)
 
@@ -198,7 +204,7 @@ func TestCursorValueDataCorrectness(t *testing.T) {
 		protoTCP, 9000, 80,
 		ipToUint32("10.0.0.1"), ipToUint32("192.168.0.1"),
 		flagACK, flagACK,
-		now-1000, now,
+		now-1000, now, ttlTCPNs,
 	)
 	require.NoError(t, err)
 
@@ -241,7 +247,7 @@ func TestCursorPaging(t *testing.T) {
 			protoTCP, uint16(6000+i), 80,
 			ipToUint32("10.0.0.1")+uint32(i), ipToUint32("192.168.0.1"),
 			flagACK, flagACK,
-			now, now,
+			now, now, ttlTCPNs,
 		)
 		require.NoError(t, err)
 	}
