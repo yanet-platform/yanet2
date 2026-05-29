@@ -15,6 +15,8 @@ interface FunctionCardProps {
     serverFn: NetworkFunction | null;
     isDirty: boolean;
     availableModuleTypes: string[];
+    availableModuleConfigNamesByType: Record<string, string[]>;
+    availableModuleConfigNames: string[];
     dispatch: (action: FunctionsAction) => void;
     dragState: DragState;
     onDragStart: (payload: DragPayload) => void;
@@ -57,6 +59,8 @@ export const FunctionCard: React.FC<FunctionCardProps> = ({
     serverFn,
     isDirty,
     availableModuleTypes,
+    availableModuleConfigNamesByType,
+    availableModuleConfigNames,
     dispatch,
     dragState,
     onDragStart,
@@ -118,6 +122,12 @@ export const FunctionCard: React.FC<FunctionCardProps> = ({
     const sparklineData = useSparklineHistory(`fn:${fn.id}:total`, totalPps);
 
     const siblingChainNames = fn.chains.map(c => c.name);
+
+    const getConfigNameSuggestions = useCallback((moduleType: string): string[] => {
+        return (availableModuleConfigNamesByType[moduleType]?.length ?? 0) > 0
+            ? availableModuleConfigNamesByType[moduleType]
+            : availableModuleConfigNames;
+    }, [availableModuleConfigNames, availableModuleConfigNamesByType]);
 
     const handleDrop = useCallback((toChainId: string, toIdx: number): void => {
         const payload = getDragPayload();
@@ -301,6 +311,7 @@ export const FunctionCard: React.FC<FunctionCardProps> = ({
                     chain={drawerChain}
                     counter={counterMap.get(drawerSelection.moduleId)}
                     availableTypes={availableModuleTypes}
+                    availableModuleConfigNames={getConfigNameSuggestions(drawerModule.type)}
                     onClose={handleCloseDrawer}
                     onRename={name => {
                         dispatch({ type: 'RENAME_MODULE', fnId: fn.id, moduleId: drawerModule.id, name });

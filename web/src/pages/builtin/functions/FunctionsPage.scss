@@ -743,6 +743,13 @@
     }
 }
 
+.inline-edit {
+    position: relative;
+    display: inline-block;
+    width: 100%;
+    max-width: 100%;
+}
+
 .inline-edit-pencil-icon {
     display: inline-flex;
     align-items: center;
@@ -770,6 +777,41 @@
 
     &--error {
         border-bottom-color: var(--fn-danger);
+    }
+}
+
+.inline-edit-suggestions {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    z-index: 560;
+    background: var(--fn-bg-2);
+    border: 1px solid var(--fn-line-2);
+    border-radius: var(--fn-r-sm);
+    box-shadow: 0 10px 22px rgba(0, 0, 0, 0.35);
+    max-height: 180px;
+    overflow-y: auto;
+}
+
+.inline-edit-suggestion {
+    all: unset;
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 4px 8px;
+    color: var(--fn-text-2);
+    font-size: 12px;
+    cursor: pointer;
+
+    &:hover {
+        background: var(--fn-bg-3);
+        color: var(--fn-text);
+    }
+
+    &--active {
+        background: var(--fn-line);
+        color: var(--fn-text);
     }
 }
 

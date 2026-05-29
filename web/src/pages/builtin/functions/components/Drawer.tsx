@@ -15,6 +15,7 @@ interface DrawerModuleProps {
     chain: Chain | null;
     counter?: InterpolatedCounterData;
     availableTypes: string[];
+    availableModuleConfigNames: string[];
     onClose: () => void;
     onRename: (newName: string) => void;
     onChangeType: (newType: string) => void;
@@ -97,7 +98,17 @@ const ModuleDrawerContent = ({
     setConfirmRemove: (v: boolean) => void;
     validateName: (name: string) => string | null;
 }): React.JSX.Element => {
-    const { module, chain, counter, availableTypes, onClose, onRename, onChangeType, onRemove } = props;
+    const {
+        module,
+        chain,
+        counter,
+        availableTypes,
+        availableModuleConfigNames,
+        onClose,
+        onRename,
+        onChangeType,
+        onRemove,
+    } = props;
     const meta = metaFor(module.type);
     const accent = meta.color;
     const sparklineData = useSparklineHistory(module.id, counter?.pps ?? 0);
@@ -116,6 +127,7 @@ const ModuleDrawerContent = ({
                         value={module.name}
                         onChange={onRename}
                         validate={validateName}
+                        suggestions={availableModuleConfigNames}
                         className="fn-drawer__name-edit"
                     />
                 </div>
@@ -173,6 +185,7 @@ const ModuleDrawerContent = ({
                         value={module.name}
                         onChange={onRename}
                         validate={validateName}
+                        suggestions={availableModuleConfigNames}
                     />
                 </div>
                 {chain && (
