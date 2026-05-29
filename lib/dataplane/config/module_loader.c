@@ -7,18 +7,39 @@
 #include "common/exp_array.h"
 #include "common/memory_address.h"
 #include "common/strutils.h"
+#include "lib/dataplane/config/plugin_loader.h"
 #include "lib/dataplane/config/zone.h"
 #include "lib/dataplane/device/device.h"
 #include "lib/dataplane/module/module.h"
 #include "lib/logging/log.h"
 
 int
-dp_load_module(struct dp_config *dp_config, void *bin_hndl, const char *name) {
+dp_load_module(struct dp_config *dp_config, void *bin_hndl,
+               const struct plugin_registry *plugins, const char *name) {
 	LOG(INFO, "load module %s", name);
-	char loader_name[64];
+	char loader_name[128];
 	snprintf(loader_name, sizeof(loader_name), "%s%s", "new_module_", name);
-	module_load_handler loader =
-		(module_load_handler)dlsym(bin_hndl, loader_name);
+
+	// Try plugin handles first (external modules loaded from .a).
+	module_load_handler loader = NULL;
+	if (plugins != NULL) {
+		for (uint64_t i = 0; i < plugins->count; i++) {
+			loader = (module_load_handler)dlsym(
+				plugins->plugins[i].dl_handle,
+				loader_name);
+			if (loader != NULL) {
+				LOG(INFO, "module %s found in plugin %s",
+				    name, plugins->plugins[i].name);
+				break;
+			}
+		}
+	}
+
+	// Fallback to built-in (main binary).
+	if (loader == NULL) {
+		loader = (module_load_handler)dlsym(bin_hndl, loader_name);
+	}
+
 	if (loader == NULL) {
 		LOG(ERROR, "failed to load dyn symbol %s", loader_name);
 		return -1;
@@ -52,7 +73,7 @@ dp_load_module(struct dp_config *dp_config, void *bin_hndl, const char *name) {
 int
 dp_load_device(struct dp_config *dp_config, void *bin_hndl, const char *name) {
 	LOG(INFO, "load device %s", name);
-	char loader_name[64];
+	char loader_name[128];
 	snprintf(loader_name, sizeof(loader_name), "%s%s", "new_device_", name);
 	device_load_handler loader =
 		(device_load_handler)dlsym(bin_hndl, loader_name);

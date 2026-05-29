@@ -11,6 +11,7 @@ sources = files(
   'bootstrap.c',
   'counter_storage.c',
   'module_loader.c',
+  'plugin_loader.c',
   'topology.c',
   'zone.c',
 )

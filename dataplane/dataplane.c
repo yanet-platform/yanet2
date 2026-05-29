@@ -27,6 +27,7 @@
 #include "lib/dataplane/config/bootstrap.h"
 #include "lib/dataplane/config/counter_storage.h"
 #include "lib/dataplane/config/module_loader.h"
+#include "lib/dataplane/config/plugin_loader.h"
 #include "lib/dataplane/config/topology.h"
 #include "lib/dataplane/packet/data.h"
 #include "lib/dataplane/packet/packet.h"
@@ -300,6 +301,17 @@ dataplane_init(
 
 	assert((uintptr_t)storage % page_size == 0);
 
+	// Load external module plugins from .a files.
+	memset(&dataplane->plugins, 0, sizeof(dataplane->plugins));
+	if (config->plugin_dir[0] != '\0') {
+		if (dp_load_plugins(config->plugin_dir,
+		                    &dataplane->plugins) != 0) {
+			LOG(ERROR, "failed to load plugins from %s",
+			    config->plugin_dir);
+			return -1;
+		}
+	}
+
 	off_t instance_offset = 0;
 	for (uint32_t instance_idx = 0;
 	     instance_idx < dataplane->instance_count;
@@ -391,7 +403,9 @@ dataplane_init(
 		instance->dp_config->instance_idx = instance_idx;
 		instance->dp_config->instance_count = dataplane->instance_count;
 
-		static const char *modules[] = {
+		// Use module list from config if specified,
+		// otherwise fall back to built-in defaults.
+		static const char *default_modules[] = {
 			"forward",
 			"route",
 			"decap",
@@ -403,10 +417,29 @@ dataplane_init(
 			"route_mpls",
 			"blackhole"
 		};
-		for (size_t i = 0; i < sizeof(modules) / sizeof(modules[0]);
-		     ++i) {
+
+		const char **mod_list;
+		size_t mod_count;
+		const char *cfg_ptrs[DATAPLANE_MAX_MODULES];
+
+		if (config->module_count > 0) {
+			for (uint64_t i = 0;
+			     i < config->module_count; i++) {
+				cfg_ptrs[i] = config->module_names[i];
+			}
+			mod_list = cfg_ptrs;
+			mod_count = config->module_count;
+		} else {
+			mod_list = default_modules;
+			mod_count = sizeof(default_modules) /
+				    sizeof(default_modules[0]);
+		}
+
+		for (size_t i = 0; i < mod_count; ++i) {
 			if (dp_load_module(
-				    instance->dp_config, bin_hndl, modules[i]
+				    instance->dp_config, bin_hndl,
+				    &dataplane->plugins,
+				    mod_list[i]
 			    ) == -1) {
 				return -1;
 			}

@@ -5,6 +5,7 @@
 
 struct dataplane_config;
 struct dataplane_device;
+struct plugin_registry;
 
 struct dataplane_instance {
 	struct dp_config *dp_config;
@@ -19,6 +20,8 @@ struct dataplane {
 
 	struct dataplane_device *devices;
 	uint32_t device_count;
+
+	struct plugin_registry plugins;
 };
 
 int

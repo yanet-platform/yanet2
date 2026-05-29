@@ -3,6 +3,10 @@
 #include <stdint.h>
 #include <stdio.h>
 
+#define DATAPLANE_MODULE_NAME_LEN 80
+#define DATAPLANE_MAX_MODULES 64
+#define DATAPLANE_PLUGIN_DIR_LEN 256
+
 struct dataplane_instance_config {
 	uint16_t numa_idx;
 	uint64_t dp_memory;
@@ -49,6 +53,10 @@ struct dataplane_config {
 	uint64_t connection_count;
 	struct dataplane_connection_config *connections;
 	char loglevel[32];
+
+	char plugin_dir[DATAPLANE_PLUGIN_DIR_LEN];
+	uint64_t module_count;
+	char module_names[DATAPLANE_MAX_MODULES][DATAPLANE_MODULE_NAME_LEN];
 };
 
 int

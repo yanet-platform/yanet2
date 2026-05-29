@@ -40,6 +40,9 @@ enum state {
 	state_connection_dst,
 
 	state_loglevel,
+
+	state_plugin_dir,
+	state_modules,
 };
 
 int
@@ -110,6 +113,22 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 					start,
 					sizeof(dataplane->loglevel));
 				state = state_dataplane;
+				break;
+			case state_plugin_dir:
+				strtcpy(dataplane->plugin_dir,
+					start,
+					sizeof(dataplane->plugin_dir));
+				state = state_dataplane;
+				break;
+			case state_modules:
+				if (dataplane->module_count >=
+				    DATAPLANE_MAX_MODULES)
+					goto error;
+				strtcpy(dataplane->module_names
+						[dataplane->module_count],
+					start,
+					DATAPLANE_MODULE_NAME_LEN);
+				dataplane->module_count++;
 				break;
 
 			// handle new instance
@@ -243,6 +262,10 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 					state = state_connections;
 				} else if (!strcmp("loglevel", start)) {
 					state = state_loglevel;
+				} else if (!strcmp("plugin_dir", start)) {
+					state = state_plugin_dir;
+				} else if (!strcmp("modules", start)) {
+					state = state_modules;
 				} else {
 					goto error;
 				}
@@ -323,6 +346,8 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 				break;
 			case state_connections:
 				break;
+			case state_modules:
+				break;
 			default:
 				goto error;
 			}
@@ -339,6 +364,9 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 				state = state_device;
 				break;
 			case state_connections:
+				state = state_dataplane;
+				break;
+			case state_modules:
 				state = state_dataplane;
 				break;
 			default:

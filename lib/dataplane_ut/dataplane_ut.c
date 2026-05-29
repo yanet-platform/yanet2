@@ -148,7 +148,7 @@ dataplane_ut_new(const struct dataplane_ut_config *cfg) {
 	// Load requested packet-processing modules.
 	for (size_t idx = 0; idx < cfg->module_count; ++idx) {
 		if (dp_load_module(
-			    ut->dp_config, bin_hndl, cfg->modules[idx]
+			    ut->dp_config, bin_hndl, NULL, cfg->modules[idx]
 		    ) == -1) {
 			LOG(ERROR,
 			    "dataplane_ut_new: failed to load module %s",
