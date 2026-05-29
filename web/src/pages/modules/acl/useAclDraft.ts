@@ -10,6 +10,7 @@ import type { AclDraftAction } from './draftReducer';
 
 const EMPTY_RULES: Rule[] = [];
 const EMPTY_IDS: string[] = [];
+const EMPTY_FWSTATE_NAME = '';
 
 export interface UseAclDraftResult {
     draftConfigs: string[];
@@ -17,6 +18,7 @@ export interface UseAclDraftResult {
     draftRules: (configName: string) => Rule[];
     draftRuleIds: (configName: string) => string[];
     serverRules: (configName: string) => Rule[];
+    fwstateName: (configName: string) => string;
     isDirty: (configName: string) => boolean;
     anyDirty: boolean;
     dispatchDraft: (action: AclDraftAction) => void;
@@ -47,12 +49,12 @@ export const useAclDraft = (): UseAclDraftResult => {
             const names = listResp.configs ?? [];
 
             const configs = await Promise.all(
-                names.map(async (name): Promise<{ name: string; rules: Rule[] }> => {
+                names.map(async (name): Promise<{ name: string; rules: Rule[]; fwstateName: string }> => {
                     try {
                         const resp = await API.acl.showConfig({ name });
-                        return { name, rules: resp.rules ?? [] };
+                        return { name, rules: resp.rules ?? [], fwstateName: resp.fwstate_name ?? '' };
                     } catch {
-                        return { name, rules: [] };
+                        return { name, rules: [], fwstateName: '' };
                     }
                 }),
             );
@@ -124,6 +126,8 @@ export const useAclDraft = (): UseAclDraftResult => {
 
     const serverRulesFor = useCallback((configName: string): Rule[] =>
         state.server[configName] ?? EMPTY_RULES, [state.server]);
+    const fwstateNameFor = useCallback((configName: string): string =>
+        state.serverFwStateName[configName] ?? EMPTY_FWSTATE_NAME, [state.serverFwStateName]);
 
     const isDirty = useCallback((configName: string): boolean =>
         state.dirty.has(configName), [state.dirty]);
@@ -141,6 +145,7 @@ export const useAclDraft = (): UseAclDraftResult => {
         draftRules: draftRulesFor,
         draftRuleIds: draftRuleIdsFor,
         serverRules: serverRulesFor,
+        fwstateName: fwstateNameFor,
         isDirty,
         anyDirty,
         dispatchDraft,

@@ -13,6 +13,7 @@ const importDevices = () => import('./pages/builtin/devices/DevicesPage');
 const importForward = () => import('./pages/modules/forward/ForwardPage');
 const importDecap = () => import('./pages/modules/decap/DecapPage');
 const importAcl = () => import('./pages/modules/acl/AclPage');
+const importFwState = () => import('./pages/modules/fwstate/FWStatePage');
 const importPdump = () => import('./pages/modules/pdump/PdumpPage');
 const importModulesRoute = () => import('./pages/modules/route/RoutePage');
 const importOperatorsRoute = () => import('./pages/operators/route/RoutePage');
@@ -27,6 +28,7 @@ const pageImporters = [
     importForward,
     importDecap,
     importAcl,
+    importFwState,
     importPdump,
     importModulesRoute,
     importOperatorsRoute,
@@ -41,6 +43,7 @@ const DevicesPage = lazy(importDevices);
 const ForwardPage = lazy(importForward);
 const DecapPage = lazy(importDecap);
 const AclPage = lazy(importAcl);
+const FWStatePage = lazy(importFwState);
 const PdumpPage = lazy(importPdump);
 const ModulesRoutePage = lazy(importModulesRoute);
 const OperatorsRoutePage = lazy(importOperatorsRoute);
@@ -150,6 +153,7 @@ const AppContent = (): React.JSX.Element => {
                             <Route path="/modules/forward" element={<ForwardPage />} />
                             <Route path="/modules/decap" element={<DecapPage />} />
                             <Route path="/modules/acl" element={<AclPage />} />
+                            <Route path="/modules/fwstate" element={<FWStatePage />} />
                             <Route path="/modules/pdump" element={<PdumpPage />} />
                             <Route path="/modules/route" element={<ModulesRoutePage />} />
                             <Route path="/operators/route" element={<OperatorsRoutePage />} />
@@ -162,6 +166,7 @@ const AppContent = (): React.JSX.Element => {
                             <Route path="/forward" element={<Navigate to="/modules/forward" replace />} />
                             <Route path="/decap" element={<Navigate to="/modules/decap" replace />} />
                             <Route path="/acl" element={<Navigate to="/modules/acl" replace />} />
+                            <Route path="/fwstate" element={<Navigate to="/modules/fwstate" replace />} />
                             <Route path="/pdump" element={<Navigate to="/modules/pdump" replace />} />
                             <Route path="/route" element={<Navigate to="/operators/route" replace />} />
                             <Route path="/neighbours" element={<Navigate to="/operators/neighbours" replace />} />

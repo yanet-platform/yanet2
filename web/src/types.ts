@@ -9,6 +9,7 @@ export const PAGE_IDS = [
     'modules/forward',
     'modules/decap',
     'modules/acl',
+    'modules/fwstate',
     'modules/pdump',
     'modules/route',
     'operators/route',

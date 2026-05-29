@@ -1,0 +1,59 @@
+.shared-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 7px;
+    border-radius: 4px;
+    font-family: var(--fw-font-mono);
+    font-size: 12px;
+    font-weight: 500;
+    white-space: nowrap;
+    background: var(--fw-bg-2);
+    border: 1px solid var(--fw-line-2);
+    flex-shrink: 0;
+}
+
+.shared-chip--ip {
+    background: transparent;
+}
+
+.shared-chip--ip-ipv4 {
+    color: #d6c79a;
+}
+
+.shared-chip--ip-ipv6 {
+    color: #c0d3e8;
+}
+
+.shared-chip--proto {
+    font-size: 12px;
+}
+
+.shared-chip--proto-tcp {
+    background: color-mix(in srgb, var(--g-color-base-positive-light) 55%, transparent);
+    color: var(--g-color-text-positive);
+    border-color: color-mix(in srgb, var(--g-color-base-positive-medium) 40%, transparent);
+}
+
+.shared-chip--proto-udp {
+    background: color-mix(in srgb, var(--g-color-base-info-light) 55%, transparent);
+    color: var(--g-color-text-info);
+    border-color: color-mix(in srgb, var(--g-color-base-info-medium) 40%, transparent);
+}
+
+.shared-chip--proto-icmp {
+    background: color-mix(in srgb, var(--g-color-base-warning-light) 55%, transparent);
+    color: var(--g-color-text-warning);
+    border-color: color-mix(in srgb, var(--g-color-base-warning-medium) 40%, transparent);
+}
+
+.shared-chip--proto-misc {
+    background: color-mix(in srgb, var(--g-color-base-misc-light) 55%, transparent);
+    color: var(--g-color-text-misc);
+    border-color: color-mix(in srgb, var(--g-color-base-misc-medium) 40%, transparent);
+}
+
+.shared-chip--proto-dim {
+    background: var(--fw-bg-2);
+    color: var(--fw-text-3);
+    border-color: var(--fw-line-2);
+}

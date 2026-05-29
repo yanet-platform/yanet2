@@ -9,6 +9,7 @@ export * from './devices';
 export * from './decap';
 export { acl, ACTION_KIND_LABELS } from './acl';
 export * from './forward';
+export { fwstate } from './fwstate';
 export * from './counters';
 
 import { neighbours } from './neighbours';
@@ -20,6 +21,7 @@ import { devices } from './devices';
 import { decap } from './decap';
 import { acl } from './acl';
 import { forward } from './forward';
+import { fwstate } from './fwstate';
 import { counters } from './counters';
 
 export const API = {
@@ -33,5 +35,6 @@ export const API = {
     decap,
     acl,
     forward,
+    fwstate,
     counters,
 };

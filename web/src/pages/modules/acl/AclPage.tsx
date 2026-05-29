@@ -1,10 +1,12 @@
 import React, { useCallback, useDeferredValue, useMemo, useRef, useState } from 'react';
-import { Button, Flex, Icon, Text } from '@gravity-ui/uikit';
+import { Button, Flex, Icon, Label, Text } from '@gravity-ui/uikit';
 import { Pause, Play, Plus } from '@gravity-ui/icons';
+import { useNavigate } from 'react-router-dom';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, SearchInput } from '../../../components';
 import { useAclDraft } from './useAclDraft';
 import { useUnsavedChangesBlocker } from '../../builtin/_shared/lane-editor';
 import type { Rule } from '../../../api/acl';
+import { ActionKind } from '../../../api/acl';
 import type { RuleItem, RuleDraft } from './types';
 import { rulesToNgItems, draftToRule, useKeyboardShortcuts } from './hooks';
 import { DRAWER_TRANSITION_MS } from './RuleTable';
@@ -25,6 +27,7 @@ const AclPage: React.FC = () => {
         draftRules,
         draftRuleIds,
         serverRules,
+        fwstateName,
         isDirty,
         anyDirty,
         dispatchDraft,
@@ -49,10 +52,12 @@ const AclPage: React.FC = () => {
     const [deleteConfigOpen, setDeleteConfigOpen] = useState(false);
     const [diffModalOpen, setDiffModalOpen] = useState(false);
     const drawerRef = useRef<RuleDrawerHandle>(null);
+    const navigate = useNavigate();
 
     useUnsavedChangesBlocker(anyDirty);
 
     const currentConfig = activeConfig || draftConfigs[0] || '';
+    const currentFwStateName = fwstateName(currentConfig);
     const rawRules: Rule[] = draftRules(currentConfig);
     const rawIds: string[] = draftRuleIds(currentConfig);
     const allItems = useMemo(() => rulesToNgItems(rawRules, rawIds), [rawRules, rawIds]);
@@ -184,10 +189,22 @@ const AclPage: React.FC = () => {
     });
 
     const currentIsDirty = isDirty(currentConfig);
+    const hasStatefulRules = useMemo(() =>
+        rawRules.some((rule) => (rule.actions ?? []).some((action) =>
+            action.kind === ActionKind.ACTION_KIND_CHECK_STATE || action.kind === ActionKind.ACTION_KIND_CREATE_STATE,
+        )), [rawRules]);
 
     const pageHeader = (
         <Flex alignItems="center" gap={4} style={{ width: '100%' }}>
             <Text variant="header-1">ACL</Text>
+            {currentFwStateName && (
+                <Button size="s" view="outlined" onClick={() => navigate('/modules/fwstate')}>
+                    FWState: {currentFwStateName}
+                </Button>
+            )}
+            {!currentFwStateName && hasStatefulRules && (
+                <Label theme="warning">Stateful rules without FWState</Label>
+            )}
             <Flex grow />
             <div style={{ flexBasis: 380, flexShrink: 1 }}>
                 <SearchInput

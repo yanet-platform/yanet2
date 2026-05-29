@@ -4,28 +4,34 @@ import type { Action } from '../../../api/acl';
 import { ActionKind, ACTION_KIND_LABELS } from '../../../api/acl';
 import { formatIPNet, toaster, copyToClipboard } from '../../../utils';
 import { extractBytes } from './utils';
+import { getProtocolTone, IpAddressChip, ProtoChip as SharedProtoChip } from '../_shared/chips';
 
 // Protocol names per IANA IP protocol number.
 const IP_PROTOS: Record<number, string> = {
-    0: 'HOPOPT', 1: 'ICMP', 2: 'IGMP', 4: 'IPv4', 6: 'TCP',
-    17: 'UDP', 41: 'IPv6', 43: 'IPv6-Route', 44: 'IPv6-Frag',
-    47: 'GRE', 50: 'ESP', 51: 'AH', 58: 'ICMPv6', 59: 'IPv6-NoNxt',
-    60: 'IPv6-Opts', 89: 'OSPF', 103: 'PIM', 112: 'VRRP', 132: 'SCTP',
-};
-
-type ProtoTone = 'tcp' | 'udp' | 'icmp' | 'misc' | 'dim';
-
-const protoTone = (proto: number): ProtoTone => {
-    if (proto === 6) return 'tcp';
-    if (proto === 17) return 'udp';
-    if (proto === 1 || proto === 58) return 'icmp';
-    if (proto === 47 || proto === 50 || proto === 51 || proto === 132) return 'misc';
-    return 'dim';
+    0: 'HOPOPT',
+    1: 'ICMP',
+    2: 'IGMP',
+    4: 'IPv4',
+    6: 'TCP',
+    17: 'UDP',
+    41: 'IPv6',
+    43: 'IPv6-Route',
+    44: 'IPv6-Frag',
+    47: 'GRE',
+    50: 'ESP',
+    51: 'AH',
+    58: 'ICMPv6',
+    59: 'IPv6-NoNxt',
+    60: 'IPv6-Opts',
+    89: 'OSPF',
+    103: 'PIM',
+    112: 'VRRP',
+    132: 'SCTP',
 };
 
 interface DecodedProto {
     label: string;
-    tone: ProtoTone | 'dim';
+    tone: ReturnType<typeof getProtocolTone>;
     title: string;
 }
 
@@ -42,7 +48,7 @@ const decodeProtoRange = (rangeStr: string): DecodedProto => {
 
     if (pFrom === pTo) {
         const name = IP_PROTOS[pFrom] ?? `proto ${pFrom}`;
-        const tone = protoTone(pFrom);
+        const tone = getProtocolTone(pFrom);
         if (sFrom === 0 && sTo === 255) {
             return { label: name, tone, title: rangeStr };
         }
@@ -76,14 +82,7 @@ interface ProtoChipProps {
 /** Renders a single proto range chip with color based on protocol. */
 export const ProtoChip: React.FC<ProtoChipProps> = ({ rangeStr }) => {
     const { label, tone, title } = decodeProtoRange(rangeStr);
-    return (
-        <span
-            className={`acl-chip acl-chip--proto acl-chip--proto-${tone}`}
-            title={title}
-        >
-            {label}
-        </span>
-    );
+    return <SharedProtoChip label={label} tone={tone} title={title} />;
 };
 
 interface PortRangeChipProps {
@@ -120,15 +119,7 @@ interface IpNetChipProps {
 
 /** Renders a CIDR chip, colored differently for IPv4 vs IPv6. */
 export const IpNetChip: React.FC<IpNetChipProps> = ({ cidr }) => {
-    const isV6 = cidr.includes(':');
-    return (
-        <span
-            className={`acl-chip ${isV6 ? 'acl-chip--ipv6' : 'acl-chip--ipv4'}`}
-            title={cidr}
-        >
-            {cidr}
-        </span>
-    );
+    return <IpAddressChip value={cidr} />;
 };
 
 /** Format an IPNet wire object to a CIDR string. */
