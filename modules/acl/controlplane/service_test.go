@@ -114,7 +114,7 @@ func (m *fakeBackend) MemoryBytes() uint64 {
 	return m.memoryBytes
 }
 
-func (m *fakeBackend) DPConfig() *ffi.DPConfig {
+func (m *fakeBackend) DPConfig() ffi.DPConfig {
 	return nil
 }
 

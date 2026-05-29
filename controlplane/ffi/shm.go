@@ -42,6 +42,7 @@ type DPObserver interface {
 }
 
 type CounterAggregator interface {
+	CountersByTags(tags []CounterTag, query []string) ([]CounterGroup, error)
 	DeviceCounters(deviceName string) []CounterInfo
 	PipelineCounters(deviceName string, pipelineName string) []CounterInfo
 	FunctionCounters(deviceName string, pipelineName string, functionName string) []CounterInfo
@@ -474,7 +475,7 @@ func decodeCounterHandle(
 	return counterInfo
 }
 
-func (m *DPConfig) encodeCounters(
+func (m *dpConfig) encodeCounters(
 	counters *C.struct_counter_handle_list,
 ) []CounterInfo {
 	res := make([]CounterInfo, 0, counters.count)
@@ -656,7 +657,7 @@ type CounterGroup struct {
 // CountersByTags returns counters matching every predicate in tags and at
 // least one name in query. A nil or empty tags slice imposes no per-tag
 // constraint; a nil or empty query matches any counter name.
-func (m *DPConfig) CountersByTags(
+func (m *dpConfig) CountersByTags(
 	tags []CounterTag,
 	query []string,
 ) ([]CounterGroup, error) {

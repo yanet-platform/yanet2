@@ -43,7 +43,7 @@ type Backend interface {
 	MemoryBytes() uint64
 	// DPConfig returns the dataplane configuration handle for counter
 	// and position queries.
-	DPConfig() *ffi.DPConfig
+	DPConfig() ffi.DPConfig
 }
 
 type ACLService struct {

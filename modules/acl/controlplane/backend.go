@@ -42,6 +42,6 @@ func (m *backend) MemoryBytes() uint64 {
 	return m.memoryBytes
 }
 
-func (m *backend) DPConfig() *ffi.DPConfig {
+func (m *backend) DPConfig() ffi.DPConfig {
 	return m.agent.DPConfig()
 }

@@ -95,6 +95,8 @@ type DPAgent interface {
 	Close() error
 }
 
+var _ FFIAgent = &Agent{}
+
 type Agent struct {
 	name string
 	ptr  *C.struct_agent
