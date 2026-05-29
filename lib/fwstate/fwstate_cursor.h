@@ -72,12 +72,14 @@ fwstate_cursor_read_entry(
 		return 0;
 	}
 
-	const struct fw_state_key_hdr *hdr =
-		(const struct fw_state_key_hdr *)key;
-	uint64_t ttl = fwstate_entry_ttl(
-		hdr->proto, value->flags.raw, &cursor->timeouts
+	uint64_t deadline;
+	int64_t entry_idx = fwmap_get_value_and_deadline(
+		map, 0, key, NULL, NULL, &deadline
 	);
-	bool expired = (value->updated_at + ttl <= now);
+	if (entry_idx < 0 || entry_idx != cursor->key_pos) {
+		return 0;
+	}
+	bool expired = (deadline <= now);
 
 	if (!cursor->include_expired && expired) {
 		return 0;

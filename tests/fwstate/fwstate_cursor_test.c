@@ -9,6 +9,7 @@
 #include "common/memory.h"
 #include "lib/fwstate/fwmap.h"
 #include "lib/fwstate/fwstate_cursor.h"
+#include "lib/fwstate/ops.h"
 #include "lib/fwstate/types.h"
 #include "test_utils.h"
 
@@ -21,7 +22,7 @@
 
 #define ARENA_SIZE_MB 64
 #define ARENA_SIZE ((1 << 20) * ARENA_SIZE_MB)
-#define DEFAULT_TTL 50000
+#define DEFAULT_TTL 120e9
 #define WORKER_ID 0
 
 /* Global time counter for TTL expiration testing */
@@ -89,6 +90,25 @@ test_env_destroy(test_env_t *env) {
 	memory_context_fini(env->ctx);
 }
 
+static void
+test_env_insert_tcp_with_ttl(
+	test_env_t *env,
+	uint32_t count,
+	uint16_t base_port,
+	uint16_t dst_port,
+	uint64_t ttl
+);
+
+static void
+test_env_insert_udp_with_ttl(
+	test_env_t *env,
+	uint32_t count,
+	uint16_t base_port,
+	uint16_t dst_port,
+	uint32_t addr_offset,
+	uint64_t ttl
+);
+
 /*
  * Insert `count` TCP entries with sequential source ports starting at
  * `base_port`, all targeting `dst_port`. Source addresses increment from
@@ -97,6 +117,19 @@ test_env_destroy(test_env_t *env) {
 static void
 test_env_insert_tcp(
 	test_env_t *env, uint32_t count, uint16_t base_port, uint16_t dst_port
+) {
+	test_env_insert_tcp_with_ttl(
+		env, count, base_port, dst_port, DEFAULT_TTL
+	);
+}
+
+static void
+test_env_insert_tcp_with_ttl(
+	test_env_t *env,
+	uint32_t count,
+	uint16_t base_port,
+	uint16_t dst_port,
+	uint64_t ttl
 ) {
 	for (uint32_t i = 0; i < count; i++) {
 		struct fw4_state_key key;
@@ -116,7 +149,7 @@ test_env_insert_tcp(
 		val.packets_forward = 1;
 
 		int64_t ret = fwmap_put(
-			env->map, WORKER_ID, now, DEFAULT_TTL, &key, &val, NULL
+			env->map, WORKER_ID, now, ttl, &key, &val, NULL
 		);
 		assert(ret >= 0);
 	}
@@ -128,12 +161,13 @@ test_env_insert_tcp(
  * 10.0.0.1 + addr_offset.
  */
 static void
-test_env_insert_udp(
+test_env_insert_udp_with_ttl(
 	test_env_t *env,
 	uint32_t count,
 	uint16_t base_port,
 	uint16_t dst_port,
-	uint32_t addr_offset
+	uint32_t addr_offset,
+	uint64_t ttl
 ) {
 	for (uint32_t i = 0; i < count; i++) {
 		struct fw4_state_key key;
@@ -151,7 +185,7 @@ test_env_insert_udp(
 		val.packets_forward = 1;
 
 		int64_t ret = fwmap_put(
-			env->map, WORKER_ID, now, DEFAULT_TTL, &key, &val, NULL
+			env->map, WORKER_ID, now, ttl, &key, &val, NULL
 		);
 		assert(ret >= 0);
 	}
@@ -333,7 +367,7 @@ test_expired_skipped(void *arena) {
 
 	/* Insert: TCP(3000->80), UDP(3001->53), TCP(3002->443) */
 	test_env_insert_tcp(&env, 1, 3000, 80);
-	test_env_insert_udp(&env, 1, 3001, 53, 1);
+	test_env_insert_udp_with_ttl(&env, 1, 3001, 53, 1, 30e9);
 	test_env_insert_tcp(&env, 1, 3002, 443);
 
 	/*
@@ -377,7 +411,7 @@ test_include_expired(void *arena) {
 	/* Same setup as expired test: TCP(4000->80), UDP(4001->53),
 	 * TCP(4002->443) */
 	test_env_insert_tcp(&env, 1, 4000, 80);
-	test_env_insert_udp(&env, 1, 4001, 53, 1);
+	test_env_insert_udp_with_ttl(&env, 1, 4001, 53, 1, 30e9);
 	test_env_insert_tcp(&env, 1, 4002, 443);
 
 	/* Advance time so UDP is expired */
@@ -401,7 +435,93 @@ test_include_expired(void *arena) {
 }
 
 /* ====================================================================== */
-/* Test 7: Uninitialized entries skipped                                   */
+/* Test 7: Cursor uses refreshed deadline instead of recomputed TTL */
+/* ====================================================================== */
+
+static void
+test_cursor_deadline_over_flags_ttl(void *arena) {
+	printf("\n--- Cursor deadline over flags test ---\n");
+	struct memory_context *ctx =
+		init_context_from_arena(arena, ARENA_SIZE, "cursor_deadline");
+
+	fwmap_config_t cfg;
+	memset(&cfg, 0, sizeof(cfg));
+	cfg.key_size = sizeof(struct fw4_state_key);
+	cfg.value_size = sizeof(struct fw_state_value);
+	cfg.hash_seed = 0;
+	cfg.worker_count = 1;
+	cfg.hash_fn_id = FWMAP_HASH_FNV1A;
+	cfg.key_equal_fn_id = FWMAP_KEY_EQUAL_FW4;
+	cfg.rand_fn_id = FWMAP_RAND_DEFAULT;
+	cfg.copy_key_fn_id = FWMAP_COPY_KEY_FW4;
+	cfg.copy_value_fn_id = FWMAP_COPY_VALUE_FWSTATE;
+	cfg.merge_value_fn_id = FWMAP_MERGE_VALUE_FWSTATE;
+	cfg.index_size = 128;
+	cfg.extra_bucket_count = 8;
+
+	fwmap_t *map = fwmap_new(&cfg, ctx);
+	assert(map != NULL);
+
+	struct fw4_state_key key = {
+		.hdr.proto = IPPROTO_TCP,
+		.hdr.src_port = 7000,
+		.hdr.dst_port = 80,
+		.src_addr = 0x0A000001,
+		.dst_addr = 0x0A000002,
+	};
+
+	struct fw_state_value syn = {
+		.created_at = now,
+		.updated_at = now,
+		.packets_forward = 1,
+		.flags.tcp.src = FWSTATE_SYN,
+	};
+	int64_t ret = fwmap_put(map, WORKER_ID, now, 3e9, &key, &syn, NULL);
+	assert(ret >= 0);
+
+	struct fw_state_value ack = {
+		.created_at = now + 10,
+		.updated_at = now + 10,
+		.packets_forward = 1,
+		.flags.tcp.dst = FWSTATE_ACK,
+	};
+	ret = fwmap_put(map, WORKER_ID, now + 10, 20e9, &key, &ack, NULL);
+	assert(ret >= 0);
+
+	struct fwstate_timeouts short_timeouts = {
+		.tcp_syn_ack = 1e9,
+		.tcp_syn = 3e9,
+		.tcp_fin = 20e9,
+		.tcp = 20e9,
+		.udp = 30e9,
+		.default_ = 16e9,
+	};
+	fwstate_cursor_entry_t out[4];
+	fwstate_cursor_t cursor = {
+		.key_pos = 0,
+		.include_expired = false,
+		.timeouts = short_timeouts,
+	};
+	uint64_t read_now = now + 15e9;
+	uint32_t n =
+		fwstate_cursor_read_forward(map, &cursor, read_now, out, 10);
+	assert(n == 1);
+	assert(out[0].expired == false);
+	assert(out[0].idx == 0);
+	assert(out[0].value != NULL);
+
+	struct fw_state_value *value = (struct fw_state_value *)out[0].value;
+	assert(value->flags.tcp.src == FWSTATE_SYN);
+	assert(value->flags.tcp.dst == FWSTATE_ACK);
+
+	fwmap_free(map, ctx);
+	verify_memory_leaks(ctx, "cursor_deadline");
+	memory_context_fini(ctx);
+	printf("  Cursor deadline over flags test passed\n");
+}
+
+/* ====================================================================== */
+/* Test 8: Uninitialized entries skipped                                   */
 /* ====================================================================== */
 
 static void
@@ -439,7 +559,7 @@ test_uninitialized_skipped(void *arena) {
 }
 
 /* ====================================================================== */
-/* Test 8: Paging                                                          */
+/* Test 9: Paging                                                          */
 /* ====================================================================== */
 
 static void
@@ -502,7 +622,7 @@ test_paging(void *arena) {
 }
 
 /* ====================================================================== */
-/* Test 9: Forward bounds safety                                           */
+/* Test 10: Forward bounds safety                                          */
 /* ====================================================================== */
 
 static void
@@ -535,7 +655,7 @@ test_forward_bounds(void *arena) {
 }
 
 /* ====================================================================== */
-/* Test 10: Backward clamping                                              */
+/* Test 11: Backward clamping                                              */
 /* ====================================================================== */
 
 static void
@@ -576,7 +696,7 @@ test_backward_clamping(void *arena) {
 }
 
 /* ====================================================================== */
-/* Test 11: Single entry backward                                          */
+/* Test 12: Single entry backward                                          */
 /* ====================================================================== */
 
 static void
@@ -611,7 +731,7 @@ test_single_entry_backward(void *arena) {
 }
 
 /* ====================================================================== */
-/* Test 12: Backward paging                                                */
+/* Test 13: Backward paging                                                */
 /* ====================================================================== */
 
 static void
@@ -674,7 +794,7 @@ test_backward_paging(void *arena) {
 }
 
 /* ====================================================================== */
-/* Test 13: Expired entry at index 0 in backward with include_expired      */
+/* Test 14: Expired entry at index 0 in backward with include_expired      */
 /* ====================================================================== */
 
 static void
@@ -683,7 +803,7 @@ test_backward_expired_at_zero(void *arena) {
 	test_env_t env = test_env_create(arena, "bwd_exp0");
 
 	/* Entry 0: UDP (30s TTL) -- will expire */
-	test_env_insert_udp(&env, 1, 14000, 53, 0);
+	test_env_insert_udp_with_ttl(&env, 1, 14000, 53, 0, 30e9);
 
 	/* Entry 1: TCP (120s TTL) -- will not expire */
 	test_env_insert_tcp(&env, 1, 14001, 80);
@@ -745,6 +865,7 @@ main(void) {
 	test_backward_iteration(arena);
 	test_expired_skipped(arena);
 	test_include_expired(arena);
+	test_cursor_deadline_over_flags_ttl(arena);
 	test_uninitialized_skipped(arena);
 	test_paging(arena);
 	test_forward_bounds(arena);

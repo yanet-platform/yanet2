@@ -34,12 +34,18 @@ fwmap_copy_value_fwstate(
 	const struct fw_state_value *s = (const struct fw_state_value *)src;
 	struct fw_state_value *d = (struct fw_state_value *)dst;
 
-	uint64_t created_at = d->created_at;
-	*d = *s;
-	if (!dst_empty) {
-		// On update, preserve the original creation timestamp.
-		d->created_at = created_at;
+	if (dst_empty) {
+		*d = *s;
+		return;
 	}
+
+	struct fw_state_value old = *d;
+	*d = *s;
+	// On update, preserve the original creation timestamp.
+	d->created_at = old.created_at;
+	d->flags.raw |= old.flags.raw;
+	d->packets_forward += old.packets_forward;
+	d->packets_backward += old.packets_backward;
 }
 
 static inline void
