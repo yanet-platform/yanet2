@@ -3,9 +3,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "lib/dataplane/config/plugin_loader.h"
+
 struct dataplane_config;
 struct dataplane_device;
-struct plugin_registry;
 
 struct dataplane_instance {
 	struct dp_config *dp_config;
