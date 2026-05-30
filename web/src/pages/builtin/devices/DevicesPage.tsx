@@ -1,4 +1,5 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { PageLayout, PageLoader, EmptyState } from '../../../components';
 import type { DeviceType } from '../../../api/devices';
 import type { LocalDevice } from './types';
@@ -16,6 +17,8 @@ import './devices.scss';
 
 type GroupingMode = 'flat' | 'type' | 'parent';
 
+const QP_DEVICE = 'device';
+
 const DevicesPage: React.FC = () => {
     const {
         devices,
@@ -28,10 +31,21 @@ const DevicesPage: React.FC = () => {
         getServerDevice,
     } = useDeviceData();
 
+    const [searchParams, setSearchParams] = useSearchParams();
     const [createDialogOpen, setCreateDialogOpen] = useState(false);
-    const [selectedDeviceName, setSelectedDeviceName] = useState<string | null>(null);
     const [grouping, setGrouping] = useState<GroupingMode>('type');
     const [searchQuery, setSearchQuery] = useState('');
+
+    const deviceNames = useMemo(() => devices.map(d => d.id.name || ''), [devices]);
+
+    const queryDevice = useMemo(() => searchParams.get(QP_DEVICE), [searchParams]);
+
+    const selectedDeviceName = useMemo((): string | null => {
+        if (queryDevice && (loading || deviceNames.includes(queryDevice))) {
+            return queryDevice;
+        }
+        return deviceNames[0] ?? null;
+    }, [deviceNames, queryDevice, loading]);
 
     const selectedDevice = useMemo(() => {
         if (!selectedDeviceName) return null;
@@ -41,7 +55,30 @@ const DevicesPage: React.FC = () => {
     const anyDirty = useMemo(() => devices.some(d => d.isDirty), [devices]);
     useUnsavedChangesBlocker(anyDirty);
 
-    const deviceNames = useMemo(() => devices.map(d => d.id.name || ''), [devices]);
+    const updateParams = useCallback((updates: Record<string, string | null>): void => {
+        setSearchParams((prev) => {
+            const next = new URLSearchParams(prev);
+            for (const [key, value] of Object.entries(updates)) {
+                if (value === null || value === '') {
+                    next.delete(key);
+                } else {
+                    next.set(key, value);
+                }
+            }
+            return next;
+        }, { replace: true });
+    }, [setSearchParams]);
+
+    useEffect(() => {
+        if (loading) return;
+        if (!selectedDeviceName) {
+            if (queryDevice !== null) {
+                updateParams({ [QP_DEVICE]: null });
+            }
+        } else if (queryDevice !== selectedDeviceName) {
+            updateParams({ [QP_DEVICE]: selectedDeviceName });
+        }
+    }, [selectedDeviceName, loading, queryDevice, deviceNames.length, updateParams]);
 
     const { counters } = useDeviceCounters(deviceNames, deviceNames.length > 0);
     const history = useCounterHistory(counters);
@@ -53,12 +90,12 @@ const DevicesPage: React.FC = () => {
     const handleCreateConfirm = useCallback((name: string, type: DeviceType) => {
         createDevice(name, type);
         setCreateDialogOpen(false);
-        setSelectedDeviceName(name);
-    }, [createDevice]);
+        updateParams({ [QP_DEVICE]: name || null });
+    }, [createDevice, updateParams]);
 
     const handleSelectDevice = useCallback((deviceName: string) => {
-        setSelectedDeviceName(deviceName);
-    }, []);
+        updateParams({ [QP_DEVICE]: deviceName || null });
+    }, [updateParams]);
 
     const handleUpdateDevice = useCallback((updates: Partial<LocalDevice>) => {
         if (selectedDeviceName) {
