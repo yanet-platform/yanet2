@@ -1,5 +1,6 @@
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Flex, Icon, Text } from '@gravity-ui/uikit';
+import { useSearchParams } from 'react-router-dom';
 import { Pause, Play, Plus } from '@gravity-ui/icons';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, SearchInput } from '../../../components';
 import { useForwardDraft } from './useForwardDraft';
@@ -18,6 +19,9 @@ import { AddConfigModal, DeleteConfigModal, BulkDeleteModal } from '../../_share
 import '../../../styles/draft-page.scss';
 import './forward.scss';
 
+const QP_CONFIG = 'config';
+const QP_SEARCH = 'search';
+
 const ForwardPage: React.FC = () => {
     const {
         draftConfigs,
@@ -30,10 +34,9 @@ const ForwardPage: React.FC = () => {
         saveConfig,
         discardConfig,
     } = useForwardDraft();
+    const [searchParams, setSearchParams] = useSearchParams();
 
-    const [activeConfig, setActiveConfig] = useState<string>('');
     const [paused, setPaused] = useState(false);
-    const [search, setSearch] = useState('');
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
     const [activeRowId, setActiveRowId] = useState<string | null>(null);
     const [drawer, setDrawer] = useState<{ open: boolean; mode: 'add' | 'edit'; item: RuleItem | null }>({
@@ -46,10 +49,41 @@ const ForwardPage: React.FC = () => {
     const [deleteConfigOpen, setDeleteConfigOpen] = useState(false);
     const [diffModalOpen, setDiffModalOpen] = useState(false);
     const drawerRef = useRef<RuleDrawerHandle>(null);
+    const queryConfig = useMemo(() => searchParams.get(QP_CONFIG), [searchParams]);
+    const search = useMemo(() => searchParams.get(QP_SEARCH) || '', [searchParams]);
+    const currentConfig = (queryConfig && (loading || draftConfigs.includes(queryConfig))) ? queryConfig : (draftConfigs[0] || '');
+    const updateParams = useCallback((updates: Record<string, string | null>): void => {
+        setSearchParams((prev) => {
+            const next = new URLSearchParams(prev);
+            for (const [key, value] of Object.entries(updates)) {
+                if (value === null || value === '') {
+                    next.delete(key);
+                } else {
+                    next.set(key, value);
+                }
+            }
+            return next;
+        }, { replace: true });
+    }, [setSearchParams]);
 
     useUnsavedChangesBlocker(anyDirty);
 
-    const currentConfig = activeConfig || draftConfigs[0] || '';
+    useEffect(() => {
+        const updates: Record<string, string | null> = {};
+        if (!loading) {
+            if (!currentConfig) {
+                if (searchParams.get(QP_CONFIG) !== null) {
+                    updates[QP_CONFIG] = null;
+                }
+            } else if (queryConfig !== currentConfig) {
+                updates[QP_CONFIG] = currentConfig;
+            }
+        }
+        if (Object.keys(updates).length > 0) {
+            updateParams(updates);
+        }
+    }, [currentConfig, loading, queryConfig, searchParams, updateParams]);
+
     const rawRules: Rule[] = draftRules(currentConfig);
     const allItems = useMemo(() => rulesToNgItems(rawRules), [rawRules]);
 
@@ -130,7 +164,6 @@ const ForwardPage: React.FC = () => {
 
     const handleDeleteConfig = useCallback((): void => {
         dispatchDraft({ type: 'DELETE_CONFIG', configName: currentConfig });
-        setActiveConfig('');
         setDeleteConfigOpen(false);
     }, [currentConfig, dispatchDraft]);
 
@@ -153,8 +186,27 @@ const ForwardPage: React.FC = () => {
     const handleImportYaml = useCallback((importedConfigName: string, rules: Rule[]): void => {
         const target = importedConfigName || currentConfig;
         dispatchDraft({ type: 'REPLACE_ALL_RULES', configName: target, rules });
-        setActiveConfig(target);
-    }, [currentConfig, dispatchDraft]);
+        updateParams({ [QP_CONFIG]: target || null });
+    }, [currentConfig, dispatchDraft, updateParams]);
+
+    const handleTabSelect = useCallback((cfg: string): void => {
+        updateParams({ [QP_CONFIG]: cfg || null });
+        setSelectedIds(new Set());
+        setActiveRowId(null);
+    }, [updateParams]);
+
+    const handleSearchChange = useCallback((value: string): void => {
+        updateParams({ [QP_SEARCH]: value || null });
+    }, [updateParams]);
+
+    useEffect(() => {
+        setSelectedIds(new Set());
+        setActiveRowId(null);
+        setDrawer((d) => ({ ...d, open: false, item: null }));
+        setDeleteConfirmOpen(false);
+        setDeleteConfigOpen(false);
+        setDiffModalOpen(false);
+    }, [currentConfig]);
 
     useKeyboardShortcuts({
         onNewRule: openAdd,
@@ -171,12 +223,13 @@ const ForwardPage: React.FC = () => {
             <div style={{ flexBasis: 380, flexShrink: 1 }}>
                 <SearchInput
                     value={search}
-                    onUpdate={setSearch}
+                    onUpdate={handleSearchChange}
                     placeholder="Search rules…"
                 />
             </div>
             {currentConfig && (
                 <YamlIO
+                    key={currentConfig}
                     configName={currentConfig}
                     rules={rawRules}
                     onImport={handleImportYaml}
@@ -225,11 +278,7 @@ const ForwardPage: React.FC = () => {
                             activeConfig={currentConfig}
                             counts={ruleCounts}
                             dirtyConfigs={dirtySet}
-                            onSelect={(c) => {
-                                setActiveConfig(c);
-                                setSelectedIds(new Set());
-                                setActiveRowId(null);
-                            }}
+                            onSelect={handleTabSelect}
                             onAddConfig={() => setAddConfigOpen(true)}
                         />
 
@@ -273,7 +322,7 @@ const ForwardPage: React.FC = () => {
                     onClose={() => setAddConfigOpen(false)}
                     onCreate={(name) => {
                         dispatchDraft({ type: 'ADD_CONFIG', configName: name });
-                        setActiveConfig(name);
+                        updateParams({ [QP_CONFIG]: name });
                         setAddConfigOpen(false);
                     }}
                     placeholder="e.g. default"
