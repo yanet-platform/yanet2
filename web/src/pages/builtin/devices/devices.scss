@@ -388,20 +388,38 @@
         display: flex;
         flex-direction: column;
         align-items: flex-end;
-        gap: 0;
+        gap: 2px;
+    }
+
+    .dv-row-pps-entry {
+        display: flex;
+        align-items: baseline;
+        gap: 4px;
     }
 
     .dv-row-pps {
-        font-size: 12px;
+        font-size: 11.5px;
         color: var(--fg);
         font-weight: 500;
         font-family: var(--mono);
     }
 
     .dv-row-pps-lbl {
-        font-size: 9.5px;
+        font-size: 9px;
         color: var(--fg-3);
         letter-spacing: 0.05em;
+        font-weight: 600;
+        min-width: 14px;
+        text-align: right;
+    }
+
+    .dv-lbl-rx {
+        color: var(--teal-dim);
+    }
+
+    .dv-lbl-tx {
+        color: var(--blue);
+        opacity: 0.75;
     }
 
     .dv-row-status {

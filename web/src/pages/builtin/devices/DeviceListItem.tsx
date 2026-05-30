@@ -25,6 +25,7 @@ export const DeviceListItem: React.FC<DeviceListItemProps> = ({
     const iconColor = isVlan ? 'var(--violet)' : 'var(--teal)';
     const name = device.id.name || '';
     const rxPps = counterData?.rx.pps ?? 0;
+    const txPps = counterData?.tx.pps ?? 0;
     const rxHistory = history?.rx ?? [];
     const txHistory = history?.tx ?? [];
 
@@ -64,7 +65,14 @@ export const DeviceListItem: React.FC<DeviceListItemProps> = ({
             </span>
 
             <span className="dv-row-metric">
-                <span className="dv-row-pps mono">{formatPps(rxPps)}</span>
+                <span className="dv-row-pps-entry">
+                    <span className="dv-row-pps-lbl dv-lbl-rx">RX</span>
+                    <span className="dv-row-pps mono">{formatPps(rxPps)}</span>
+                </span>
+                <span className="dv-row-pps-entry">
+                    <span className="dv-row-pps-lbl dv-lbl-tx">TX</span>
+                    <span className="dv-row-pps mono">{formatPps(txPps)}</span>
+                </span>
             </span>
 
             <span className="dv-row-status">

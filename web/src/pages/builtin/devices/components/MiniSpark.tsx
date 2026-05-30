@@ -1,8 +1,7 @@
 import React from 'react';
 
-const pathFor = (values: number[], w: number, h: number, pad = 1): string => {
+const pathFor = (values: number[], w: number, h: number, max: number, pad = 1): string => {
     if (!values.length) return '';
-    const max = Math.max(1, ...values);
     const stepX = (w - pad * 2) / (values.length - 1 || 1);
     let d = '';
     for (let idx = 0; idx < values.length; idx++) {
@@ -13,9 +12,8 @@ const pathFor = (values: number[], w: number, h: number, pad = 1): string => {
     return d;
 };
 
-const areaFor = (values: number[], w: number, h: number, pad = 1): string => {
+const areaFor = (values: number[], w: number, h: number, max: number, pad = 1): string => {
     if (!values.length) return '';
-    const max = Math.max(1, ...values);
     const stepX = (w - pad * 2) / (values.length - 1 || 1);
     let d = `M${pad} ${h - pad} `;
     for (let idx = 0; idx < values.length; idx++) {
@@ -39,9 +37,10 @@ export interface MiniSparkProps {
 /** Compact dual-series sparkline shown in list rows. */
 export const MiniSpark = ({ deviceId, rx, tx, width = 72, height = 24 }: MiniSparkProps): React.JSX.Element => {
     const gid = `dv-g-${deviceId}`;
-    const rxPath = pathFor(rx, width, height);
-    const txPath = pathFor(tx, width, height);
-    const rxArea = areaFor(rx, width, height);
+    const max = Math.max(1, ...rx, ...tx);
+    const rxPath = pathFor(rx, width, height, max);
+    const txPath = pathFor(tx, width, height, max);
+    const rxArea = areaFor(rx, width, height, max);
     return (
         <svg
             width={width}
