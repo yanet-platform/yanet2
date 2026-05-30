@@ -879,7 +879,8 @@ const StatesTabBody: React.FC<StatesTabBodyProps> = ({
         lastLoadedKeyRef.current = null;
         inFlightKeyRef.current = null;
         resetView(true);
-    }, [resetView]);
+        void loadPage(true);
+    }, [loadPage, resetView]);
 
     return (
         <div className="fws-states">
