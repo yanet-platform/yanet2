@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import {
     Button,
     Flex,
@@ -13,7 +14,6 @@ import {
     Tooltip,
 } from '@gravity-ui/uikit';
 import { CircleInfo, Plus } from '@gravity-ui/icons';
-import { useVirtualizer } from '@tanstack/react-virtual';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { API } from '../../../api';
 import { Direction, type FwStateEntry, type ListEntriesRequest, type MapStats } from '../../../api/fwstate';
@@ -25,7 +25,6 @@ import { formatMACFromBytes, parseMACToBytes } from '../../../utils/mac';
 import { formatBytes, toaster } from '../../../utils';
 import { AddConfigModal, DeleteConfigModal } from '../../_shared/draft';
 import { SaveIcon, TrashIcon } from '../../_shared/draft/DraftActionButtons';
-import { IpAddressChip, ProtocolNumberChip } from '../_shared/chips';
 import '../../../styles/draft-page.scss';
 import './fwstate.scss';
 
@@ -66,35 +65,12 @@ const DEFAULT_NS = {
     defaultTimeout: 16_000_000_000,
 };
 
-const STATES_TABLE_BOTTOM_OFFSET = 68;
-const STATES_TABLE_ROW_HEIGHT = 44;
-const STATES_TABLE_HEADER_HEIGHT = 40;
-const STATES_TABLE_OVERSCAN = 15;
-const STATES_COL_IDX = 52;
-const STATES_COL_SOURCE = 280;
-const STATES_COL_DESTINATION = 280;
-const STATES_COL_PROTO = 70;
-const STATES_COL_SRC_FLAGS = 100;
-const STATES_COL_DST_FLAGS = 100;
-const STATES_COL_ORIGIN = 86;
-const STATES_COL_PACKETS_FORWARD = 140;
-const STATES_COL_PACKETS_BACKWARD = 186;
-const STATES_COL_UPDATED = 168;
-const STATES_COL_EXPIRED = 96;
-const FWSTATE_STATES_TOTAL_WIDTH = STATES_COL_IDX +
-    STATES_COL_SOURCE +
-    STATES_COL_DESTINATION +
-    STATES_COL_PROTO +
-    STATES_COL_SRC_FLAGS +
-    STATES_COL_DST_FLAGS +
-    STATES_COL_ORIGIN +
-    STATES_COL_PACKETS_FORWARD +
-    STATES_COL_PACKETS_BACKWARD +
-    STATES_COL_UPDATED +
-    STATES_COL_EXPIRED;
-
-const STATES_TABLE_MAX_BATCH_SIZE = 1000;
-
+const STATES_TABLE_ROW_HEIGHT = 38;
+const STATES_TABLE_HEADER_HEIGHT = 38;
+const STATES_TABLE_BOTTOM_OFFSET = 86;
+const STATES_TABLE_OVERSCAN = 12;
+const STATES_TABLE_LOAD_THRESHOLD = 60;
+const STATES_TABLE_MAX_BATCH_SIZE = 10000;
 const BACKWARD_RESET_CURSOR = Number.MAX_SAFE_INTEGER;
 
 const zeroIPv6AddressWire = (): IPAddressWire => ({ addr: '::' });
@@ -211,11 +187,12 @@ const normalizeUnsignedIntToNumber = (value: number | string | null | undefined)
     return parsed;
 };
 
-const formatUnsignedCount = (value: number | string | null | undefined, fallbackOnMissing = '0'): string => {
-    if (value === undefined || value === null) {
-        return fallbackOnMissing;
-    }
-    return normalizeUnsignedInt(value) ?? '-';
+const fmtInt = (n: number): string => n.toLocaleString('en-US');
+
+const fmtCompact = (n: number): string => {
+    if (n >= 1e6) return (n / 1e6).toFixed(n >= 1e7 ? 1 : 2) + 'M';
+    if (n >= 1e3) return (n / 1e3).toFixed(n >= 1e4 ? 1 : 2) + 'k';
+    return String(n);
 };
 
 const formatNsUtc = (value: number | string | null | undefined): string => {
@@ -346,14 +323,6 @@ const getStateSubTab = (params: URLSearchParams): StateSubTab => {
     return isStateSubTab(value) ? value : 'states';
 };
 
-const renderIpChip = (ip: IPAddressWire | undefined): React.ReactElement => {
-    const value = ipAddressToString(ip).trim();
-    if (!value) {
-        return <span className="fwstate-table-cell fwstate-table-cell--empty">-</span>;
-    }
-    return <IpAddressChip value={value} />;
-};
-
 const decodeFlags = (rawFlags: number | string | null | undefined): { source: string[]; destination: string[] } => {
     const value = typeof rawFlags === 'number' ? rawFlags : Number(rawFlags);
     if (!Number.isInteger(value) || value < 0) {
@@ -370,79 +339,492 @@ const decodeFlags = (rawFlags: number | string | null | undefined): { source: st
     return { source: sourceFlags, destination: destinationFlags };
 };
 
+const FLAG_ABBR: Record<string, string> = { FIN: 'F', SYN: 'S', RST: 'R', ACK: 'A' };
+
 const renderFlagChips = (flags: string[]): React.ReactElement => {
     if (flags.length === 0) {
-        return <span className="fwstate-flag-chip fwstate-flag-chip--none">-</span>;
+        return <span className="fws-flag-chip fws-flag-chip--none">—</span>;
     }
     return (
-        <span className="fwstate-flag-chip-list">
-            {flags.map((flag) => <span key={flag} className="fwstate-flag-chip">{flag}</span>)}
+        <span className="fws-flag-chip-list">
+            {flags.map((flag) => (
+                <span key={flag} className="fws-flag-chip" title={flag} aria-label={flag}>
+                    {FLAG_ABBR[flag] ?? flag}
+                </span>
+            ))}
         </span>
     );
 };
 
-interface FWStateStateColumn {
-    id: string;
-    label: string;
-    width: number;
-    align?: 'left' | 'center' | 'right';
-    render: (item: FwStateEntry) => React.ReactElement;
+const protoLabel = (proto: number | undefined): string => {
+    if (proto === 6) return 'TCP';
+    if (proto === 17) return 'UDP';
+    if (proto === 1) return 'ICMP';
+    if (proto === 58) return 'ICMPv6';
+    return proto !== undefined ? String(proto) : '?';
+};
+
+const protoClass = (proto: number | undefined): string => {
+    if (proto === 6) return 'fws-badge fws-badge--tcp';
+    if (proto === 17) return 'fws-badge fws-badge--udp';
+    if (proto === 1 || proto === 58) return 'fws-badge fws-badge--icmp';
+    return 'fws-badge fws-badge--other';
+};
+
+const ageColorStyle = (ageMs: number): string => {
+    if (ageMs < 30_000) return 'var(--fws-age-fresh)';
+    if (ageMs < 300_000) return 'var(--fws-age-recent)';
+    if (ageMs < 3_600_000) return 'var(--fws-age-aging)';
+    if (ageMs < 21_600_000) return 'var(--fws-age-stale)';
+    return 'var(--fws-age-dead)';
+};
+
+const fmtAgeDuration = (ms: number): string => {
+    const s = Math.floor(ms / 1000);
+    if (s < 60) return `${s}s`;
+    const m = Math.floor(s / 60);
+    if (m < 60) return `${m}m ${s % 60}s`;
+    const h = Math.floor(m / 60);
+    if (h < 24) return `${h}h ${m % 60}m`;
+    return `${Math.floor(h / 24)}d ${h % 24}h`;
+};
+
+const isoTimeOnly = (isoStr: string): string => isoStr.slice(11, 23);
+
+interface EnrichedRow extends FwStateEntry {
+    _ageMs: number;
+    _health: 'ok' | 'expired' | 'oneway' | 'halfopen';
+    _proto: number | undefined;
+    _srcFlags: string[];
+    _dstFlags: string[];
+    _pktFwd: number;
+    _pktBwd: number;
 }
 
-const FWSTATE_STATES_COLUMNS: Array<FWStateStateColumn> = [
-    { id: 'idx', label: 'IDX', width: STATES_COL_IDX, align: 'center', render: (item) => <span className="fwstate-mono">{formatStateIdx(item.idx)}</span> },
-    { id: 'source', label: 'SOURCE', width: STATES_COL_SOURCE, render: (item) => renderIpChip(item.key?.src_addr as IPAddressWire | undefined) },
-    { id: 'destination', label: 'DESTINATION', width: STATES_COL_DESTINATION, render: (item) => renderIpChip(item.key?.dst_addr as IPAddressWire | undefined) },
-    {
-        id: 'proto',
-        label: 'PROTO',
-        width: STATES_COL_PROTO,
-        align: 'center',
-        render: (item) => <ProtocolNumberChip proto={item.key?.proto} />,
-    },
-    { id: 'src_flags', label: 'SRC FLAGS', width: STATES_COL_SRC_FLAGS, render: (item) => renderFlagChips(decodeFlags(item.value?.flags).source) },
-    { id: 'dst_flags', label: 'DST FLAGS', width: STATES_COL_DST_FLAGS, render: (item) => renderFlagChips(decodeFlags(item.value?.flags).destination) },
-    {
-        id: 'origin',
-        label: 'ORIGIN',
-        width: STATES_COL_ORIGIN,
-        render: (item) => <span className="fwstate-table-cell">{item.value?.external ? 'external' : 'local'}</span>,
-    },
-    { id: 'packets_forward', label: 'PACKETS FWD', width: STATES_COL_PACKETS_FORWARD, align: 'right', render: (item) => <span className="fwstate-mono">{formatUnsignedCount(item.value?.packets_forward)}</span> },
-    { id: 'packets_backward', label: 'PACKETS BACKWARD', width: STATES_COL_PACKETS_BACKWARD, align: 'right', render: (item) => <span className="fwstate-mono">{formatUnsignedCount(item.value?.packets_backward)}</span> },
-    { id: 'updated', label: 'UPDATED', width: STATES_COL_UPDATED, render: (item) => <span className="fwstate-table-cell fwstate-updated">{formatNsUtc(item.value?.updated_at)}</span> },
-    {
-        id: 'expired',
-        label: 'EXPIRED',
-        width: STATES_COL_EXPIRED,
-        align: 'center',
-        render: (item) => (
-            <span className={`fwstate-expired-pill ${item.expired ? 'fwstate-expired-pill--expired' : 'fwstate-expired-pill--active'}`}>
-                {item.expired ? 'Expired' : 'Active'}
-            </span>
-        ),
-    },
+const enrichRow = (row: FwStateEntry): EnrichedRow => {
+    const updatedNs = row.value?.updated_at;
+    const nowMs = Date.now();
+    let ageMs = 0;
+    if (updatedNs) {
+        try {
+            const updatedMs = Number(BigInt(String(updatedNs)) / 1_000_000n);
+            ageMs = Math.max(0, nowMs - updatedMs);
+        } catch {
+            ageMs = 0;
+        }
+    }
+    const { source: srcFlags, destination: dstFlags } = decodeFlags(row.value?.flags);
+    const pktFwd = normalizeUnsignedIntToNumber(row.value?.packets_forward);
+    const pktBwd = normalizeUnsignedIntToNumber(row.value?.packets_backward);
+    const proto = row.key?.proto;
+
+    let health: EnrichedRow['_health'] = 'ok';
+    if (row.expired) {
+        health = 'expired';
+    } else if (proto === 6 && srcFlags.includes('SYN') && !srcFlags.includes('ACK') && dstFlags.length === 0) {
+        health = 'halfopen';
+    } else if (pktBwd === 0 && (proto === 6 || proto === 17)) {
+        health = 'oneway';
+    }
+
+    return { ...row, _ageMs: ageMs, _health: health, _proto: proto, _srcFlags: srcFlags, _dstFlags: dstFlags, _pktFwd: pktFwd, _pktBwd: pktBwd };
+};
+
+const ANOMALY_PRESETS = [
+    { id: 'all', label: 'All', health: null as null | string, color: 'var(--fws-text-3)' },
+    { id: 'expired', label: 'Expired', health: 'expired', color: 'var(--fws-red)' },
+    { id: 'oneway', label: 'One-way', health: 'oneway', color: 'var(--fws-amber)' },
+    { id: 'halfopen', label: 'Half-open', health: 'halfopen', color: 'var(--fws-blue)' },
 ];
 
-interface FWStateEntriesTableProps {
-    rows: FwStateEntry[];
-    loading: boolean;
-    hasMore: boolean;
-    height: number;
-    onSetScrollRef: (node: HTMLDivElement | null) => void;
-    onEndReached: () => void;
+interface DistStats {
+    sample: number;
+    proto: Record<string, number>;
+    health: Record<string, number>;
+    age: number[];
 }
 
-const FWStateEntriesTable: React.FC<FWStateEntriesTableProps> = ({ rows, loading, hasMore, height, onSetScrollRef, onEndReached }) => {
+const computeDistStats = (rows: EnrichedRow[]): DistStats => {
+    const proto: Record<string, number> = { TCP: 0, UDP: 0, ICMP: 0, OTHER: 0 };
+    const health: Record<string, number> = { ok: 0, oneway: 0, halfopen: 0, expired: 0 };
+    const age = [0, 0, 0, 0, 0, 0];
+
+    for (const s of rows) {
+        const p = s._proto;
+        if (p === 6) proto.TCP++;
+        else if (p === 17) proto.UDP++;
+        else if (p === 1 || p === 58) proto.ICMP++;
+        else proto.OTHER++;
+
+        health[s._health] = (health[s._health] ?? 0) + 1;
+
+        const a = s._ageMs;
+        if (a < 10_000) age[0]++;
+        else if (a < 30_000) age[1]++;
+        else if (a < 300_000) age[2]++;
+        else if (a < 3_600_000) age[3]++;
+        else if (a < 21_600_000) age[4]++;
+        else age[5]++;
+    }
+
+    return { sample: rows.length, proto, health, age };
+};
+
+const StatusDot: React.FC<{ health: EnrichedRow['_health'] }> = ({ health }) => {
+    const titles: Record<string, string> = {
+        ok: 'Established',
+        oneway: 'One-way — no backward packets',
+        halfopen: 'Half-open — SYN, no ACK',
+        expired: 'Expired',
+    };
+    return <span className={`fws-sdot fws-sdot--${health}`} title={titles[health]} />;
+};
+
+const FLAT_COLS = ['', 'IDX', 'SOURCE', 'DESTINATION', 'PROTO', 'SRC FLAGS', 'DST FLAGS', 'ORIGIN', 'PKT →', 'PKT ←', 'AGE', 'UPDATED'];
+const FLAT_COL_WIDTHS = [30, 52, 280, 280, 68, 108, 108, 80, 110, 110, 90, 148];
+const FLAT_COL_ALIGNS = ['', '', '', '', 'center', '', '', '', 'right', 'right', '', ''];
+const FWSTATE_STATES_TOTAL_WIDTH = FLAT_COL_WIDTHS.reduce((a, b) => a + b, 0);
+
+const colCellStyle = (colIdx: number): React.CSSProperties => ({
+    width: FLAT_COL_WIDTHS[colIdx],
+    minWidth: FLAT_COL_WIDTHS[colIdx],
+    flexShrink: 0,
+    overflow: 'hidden',
+    paddingLeft: colIdx === 0 ? 14 : 8,
+    paddingRight: 8,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: FLAT_COL_ALIGNS[colIdx] === 'center' ? 'center' : FLAT_COL_ALIGNS[colIdx] === 'right' ? 'flex-end' : 'flex-start',
+    boxSizing: 'border-box',
+});
+
+interface FlatStateRowProps {
+    row: EnrichedRow;
+    start: number;
+    isExpired: boolean;
+}
+
+const FlatStateRow: React.FC<FlatStateRowProps> = ({ row, start, isExpired }) => {
+    const updatedIso = formatNsUtc(row.value?.updated_at);
+    return (
+        <div
+            className={`fws-strow${isExpired ? ' fws-strow--expired' : ''}`}
+            style={{
+                position: 'absolute',
+                top: start,
+                left: 0,
+                height: STATES_TABLE_ROW_HEIGHT,
+                minWidth: FWSTATE_STATES_TOTAL_WIDTH,
+                width: '100%',
+                display: 'flex',
+                alignItems: 'center',
+                borderBottom: '1px solid var(--fws-border-soft)',
+            }}
+        >
+            <div style={colCellStyle(0)}><StatusDot health={row._health} /></div>
+            <div style={{ ...colCellStyle(1), color: 'var(--fws-text-3)', fontFamily: 'var(--fws-mono)', fontSize: 11.5 }}>{formatStateIdx(row.idx)}</div>
+            <div style={colCellStyle(2)}><span className="fws-pill fws-pill--src">{ipAddressToString(row.key?.src_addr as IPAddressWire | undefined) || '—'}</span></div>
+            <div style={colCellStyle(3)}><span className="fws-pill fws-pill--dst">{ipAddressToString(row.key?.dst_addr as IPAddressWire | undefined) || '—'}</span></div>
+            <div style={colCellStyle(4)}><span className={protoClass(row._proto)}>{protoLabel(row._proto)}</span></div>
+            <div style={colCellStyle(5)}>{renderFlagChips(row._srcFlags)}</div>
+            <div style={colCellStyle(6)}>{renderFlagChips(row._dstFlags)}</div>
+            <div style={colCellStyle(7)}>
+                {row.value?.external
+                    ? <span className="fws-badge fws-badge--dim">sync</span>
+                    : <span className="fws-badge fws-badge--green">local</span>}
+            </div>
+            <div style={colCellStyle(8)}>
+                <span className="fws-pktcell"><span className="fws-arrow">→</span>{fmtInt(row._pktFwd)}</span>
+            </div>
+            <div style={colCellStyle(9)}>
+                <span className={`fws-pktcell${row._pktBwd === 0 ? ' fws-pktcell--zero' : ''}`}>
+                    <span className="fws-arrow">←</span>{fmtInt(row._pktBwd)}
+                </span>
+            </div>
+            <div style={colCellStyle(10)}>
+                <span className="fws-agecell">
+                    <span className="fws-agedot" style={{ background: ageColorStyle(row._ageMs) }} />
+                    {fmtAgeDuration(row._ageMs)}
+                </span>
+            </div>
+            <div style={colCellStyle(11)}>
+                <span className="fws-mono fws-updated" title={updatedIso !== '-' ? updatedIso : undefined}>
+                    {updatedIso !== '-' ? isoTimeOnly(updatedIso) : '—'}
+                </span>
+            </div>
+        </div>
+    );
+};
+
+interface DistributionStripProps {
+    dist: DistStats;
+    mapTotal: number;
+    collapsed: boolean;
+    onToggle: () => void;
+}
+
+const DistributionStrip: React.FC<DistributionStripProps> = ({ dist, mapTotal, collapsed, onToggle }) => {
+    const protoEntries = [
+        { key: 'TCP', color: 'var(--fws-tcp)' },
+        { key: 'UDP', color: 'var(--fws-udp)' },
+        { key: 'ICMP', color: 'var(--fws-icmp)' },
+        { key: 'OTHER', color: 'var(--fws-other)' },
+    ];
+    const sum = Math.max(1, dist.sample);
+    const ageColors = [
+        'var(--fws-age-fresh)', 'var(--fws-age-fresh)', 'var(--fws-age-recent)',
+        'var(--fws-age-aging)', 'var(--fws-age-stale)', 'var(--fws-age-dead)',
+    ];
+    const ageLabels = ['<10s', '<30s', '<5m', '<1h', '<6h', '6h+'];
+    const ageMax = Math.max(1, ...dist.age);
+
+    if (collapsed) {
+        return (
+            <div className="fws-distrib fws-distrib--collapsed">
+                <button className="fws-dcollapse fws-dcollapse--full" onClick={onToggle} title="Show overview" aria-label="Show distribution overview">
+                    <span className="fws-dcollapse-label">Overview</span>
+                    <span className="fws-chevron fws-chevron--up" />
+                </button>
+            </div>
+        );
+    }
+
+    return (
+        <div className="fws-distrib">
+            <div className="fws-dwrap">
+                <div className="fws-dblock fws-dtotal">
+                    <span className="fws-dh">States in map</span>
+                    <div><span className="fws-big">{fmtCompact(mapTotal)}</span></div>
+                </div>
+
+                <div className="fws-dvrule" />
+
+                <div className="fws-dblock" style={{ flex: 1, minWidth: 240 }}>
+                    <span className="fws-dh">
+                        Protocol mix <em className="fws-sample">— sample of {fmtInt(dist.sample)} loaded</em>
+                    </span>
+                    <div className="fws-stackbar">
+                        {protoEntries.map((p) => (
+                            <span key={p.key} style={{ width: `${(dist.proto[p.key] / sum) * 100}%`, background: p.color }} />
+                        ))}
+                    </div>
+                    <div className="fws-stacklegend">
+                        {protoEntries.map((p) => (
+                            <span key={p.key} className="fws-li">
+                                <span className="fws-sw" style={{ background: p.color }} />
+                                {p.key} <b>{((dist.proto[p.key] / sum) * 100).toFixed(p.key === 'TCP' || p.key === 'UDP' ? 0 : 1)}%</b>
+                            </span>
+                        ))}
+                    </div>
+                </div>
+
+                <div className="fws-dblock">
+                    <span className="fws-dh">Health <em className="fws-sample">— in loaded</em></span>
+                    <div className="fws-stacklegend" style={{ marginTop: 2 }}>
+                        <span className="fws-li"><span className="fws-sdot fws-sdot--ok" /> OK <b>{fmtInt(dist.health.ok ?? 0)}</b></span>
+                        <span className="fws-li"><span className="fws-sdot fws-sdot--oneway" /> One-way <b>{fmtInt(dist.health.oneway ?? 0)}</b></span>
+                        <span className="fws-li"><span className="fws-sdot fws-sdot--halfopen" /> Half-open <b>{fmtInt(dist.health.halfopen ?? 0)}</b></span>
+                        <span className="fws-li"><span className="fws-sdot fws-sdot--expired" /> Expired <b>{fmtInt(dist.health.expired ?? 0)}</b></span>
+                    </div>
+                </div>
+
+                <div className="fws-dblock">
+                    <span className="fws-dh">Age</span>
+                    <div className="fws-minibars">
+                        {dist.age.map((v, idx) => (
+                            <div key={idx} title={`${ageLabels[idx]} · ${fmtInt(v)}`}
+                                className="fws-mb" style={{ height: 6 + (v / ageMax) * 28, background: ageColors[idx] }} />
+                        ))}
+                    </div>
+                </div>
+            </div>
+            <button className="fws-dcollapse" onClick={onToggle} title="Hide overview" aria-label="Hide distribution overview">
+                <span className="fws-chevron" />
+            </button>
+        </div>
+    );
+};
+
+interface StatesTabBodyProps {
+    currentName: string;
+    statesQuery: StatesQuery;
+    updateStatesQuery: (q: StatesQuery) => void;
+    canLoadStates: boolean;
+    stats: { ipv4?: MapStats; ipv6?: MapStats } | null;
+}
+
+const StatesTabBody: React.FC<StatesTabBodyProps> = ({
+    currentName,
+    statesQuery,
+    updateStatesQuery,
+    canLoadStates,
+    stats,
+}) => {
+    const [preset, setPreset] = useState<string>('all');
+    const [distCollapsed, setDistCollapsed] = useState(false);
+
+    const [rows, setRows] = useState<EnrichedRow[]>([]);
+    const [stateLoading, setStateLoading] = useState(false);
+    const [stateHasMore, setStateHasMore] = useState(true);
+
+    const rowsRef = useRef<EnrichedRow[]>([]);
+    const stateLoadingRef = useRef(false);
+    const stateHasMoreRef = useRef(true);
+    const stateCursorRef = useRef(0);
+    const stateGenerationRef = useRef<string | null>(null);
+    const abortRef = useRef<AbortController | null>(null);
+    const requestIdRef = useRef(0);
+    const inFlightKeyRef = useRef<string | null>(null);
+    const lastLoadedKeyRef = useRef<string | null>(null);
+
     const scrollRef = useRef<HTMLDivElement | null>(null);
     const headerInnerRef = useRef<HTMLDivElement | null>(null);
-    const setScrollRef = useCallback((node: HTMLDivElement | null): void => {
-        scrollRef.current = node;
-        onSetScrollRef(node);
-    }, [onSetScrollRef]);
+
+    const [tableSlotNode, setTableSlotNode] = useState<HTMLDivElement | null>(null);
+    const tableSlotRef = useMemo(() => ({ current: tableSlotNode } as React.RefObject<HTMLElement | null>), [tableSlotNode]);
+    const tableSlotHeight = useContainerHeight(tableSlotRef, 300, STATES_TABLE_BOTTOM_OFFSET);
+    const tableScrollHeight = tableSlotHeight > 0 ? tableSlotHeight : undefined;
+    const bodyHeight = tableScrollHeight !== undefined ? tableScrollHeight - STATES_TABLE_HEADER_HEIGHT : undefined;
+
+    const queryKey = useMemo(() => JSON.stringify({
+        currentName,
+        isIpv6: statesQuery.isIpv6,
+        layerIndex: statesQuery.layerIndex,
+        direction: statesQuery.direction,
+        includeExpired: statesQuery.includeExpired,
+    }), [currentName, statesQuery]);
+
+    const mapTotal = statesQuery.isIpv6
+        ? normalizeUnsignedIntToNumber(stats?.ipv6?.total_elements)
+        : normalizeUnsignedIntToNumber(stats?.ipv4?.total_elements);
+
+    const resetView = useCallback((clearLoading = false): void => {
+        abortRef.current?.abort();
+        abortRef.current = null;
+        requestIdRef.current += 1;
+        inFlightKeyRef.current = null;
+        stateGenerationRef.current = null;
+        setRows([]);
+        rowsRef.current = [];
+        stateCursorRef.current = 0;
+        setStateHasMore(true);
+        stateHasMoreRef.current = true;
+        if (clearLoading) {
+            setStateLoading(false);
+            stateLoadingRef.current = false;
+        }
+        if (scrollRef.current) {
+            scrollRef.current.scrollTop = 0;
+        }
+    }, []);
+
+    const loadPage = useCallback(async (reset: boolean): Promise<void> => {
+        if (!canLoadStates || !currentName) return;
+        if (stateLoadingRef.current) return;
+        if (!reset && !stateHasMoreRef.current) return;
+
+        abortRef.current?.abort();
+        const abort = new AbortController();
+        abortRef.current = abort;
+        const requestId = ++requestIdRef.current;
+
+        setStateLoading(true);
+        stateLoadingRef.current = true;
+
+        const request: ListEntriesRequest = {
+            config_name: currentName,
+            is_ipv6: statesQuery.isIpv6,
+            layer_index: statesQuery.layerIndex,
+            include_expired: statesQuery.includeExpired,
+            direction: statesQuery.direction,
+            batch_size: STATES_TABLE_MAX_BATCH_SIZE,
+            index: reset
+                ? (statesQuery.direction === Direction.BACKWARD ? BACKWARD_RESET_CURSOR : 0)
+                : stateCursorRef.current,
+        };
+
+        let shouldMarkLoaded = true;
+        await new Promise<void>((resolve) => {
+            API.fwstate.listEntriesPage(request, {
+                onMessage: (res) => {
+                    if (requestIdRef.current !== requestId) { resolve(); return; }
+                    const generation = normalizeUnsignedInt(res.generation) ?? '0';
+                    if (stateGenerationRef.current !== null && generation !== stateGenerationRef.current) {
+                        shouldMarkLoaded = false;
+                        resetView(true);
+                        lastLoadedKeyRef.current = null;
+                        inFlightKeyRef.current = null;
+                        toaster.warning('fwstate-generation', 'State generation changed. Reload from start.');
+                        resolve();
+                        return;
+                    }
+                    stateGenerationRef.current = generation;
+                    const newEntries = (res.entries ?? []).map(enrichRow);
+                    const nextRows = reset ? newEntries : [...rowsRef.current, ...newEntries];
+                    const nextCursor = normalizeUnsignedIntToNumber(res.index);
+                    const nextHasMore = Boolean(res.has_more);
+                    setRows(nextRows);
+                    rowsRef.current = nextRows;
+                    stateCursorRef.current = nextCursor;
+                    setStateHasMore(nextHasMore);
+                    stateHasMoreRef.current = nextHasMore;
+                    resolve();
+                },
+                onError: (err) => {
+                    if (abort.signal.aborted || requestIdRef.current !== requestId) { resolve(); return; }
+                    toaster.error('fwstate-entries', 'Failed to load FWState entries', err);
+                    resolve();
+                },
+                onEnd: () => resolve(),
+            }, abort.signal);
+        });
+
+        if (requestIdRef.current === requestId) {
+            abortRef.current = null;
+            if (shouldMarkLoaded) {
+                lastLoadedKeyRef.current = queryKey;
+            }
+            inFlightKeyRef.current = null;
+            setStateLoading(false);
+            stateLoadingRef.current = false;
+        }
+    }, [canLoadStates, currentName, queryKey, resetView, statesQuery]);
+
+    useEffect(() => {
+        resetView(true);
+    }, [resetView, queryKey]);
+
+    useEffect(() => {
+        return () => { abortRef.current?.abort(); };
+    }, []);
+
+    useEffect(() => {
+        if (!canLoadStates || !currentName || stateLoadingRef.current) return;
+        if (lastLoadedKeyRef.current === queryKey) return;
+        if (inFlightKeyRef.current === queryKey) return;
+        inFlightKeyRef.current = queryKey;
+        void loadPage(true);
+    }, [canLoadStates, currentName, loadPage, queryKey]);
+
+    useEffect(() => {
+        if (!canLoadStates) {
+            resetView(true);
+        }
+    }, [canLoadStates, resetView]);
+
+    const pulledCount = rows.length;
+
+    const dist = useMemo(() => computeDistStats(rows), [rows]);
+
+    const presetHealth = ANOMALY_PRESETS.find((p) => p.id === preset)?.health ?? null;
+
+    const displayRows = useMemo(() => {
+        if (!presetHealth) return rows;
+        return rows.filter((r) => r._health === presetHealth);
+    }, [rows, presetHealth]);
 
     const rowVirtualizer = useVirtualizer({
-        count: rows.length,
+        count: displayRows.length,
         getScrollElement: () => scrollRef.current,
         estimateSize: () => STATES_TABLE_ROW_HEIGHT,
         overscan: STATES_TABLE_OVERSCAN,
@@ -450,112 +832,231 @@ const FWStateEntriesTable: React.FC<FWStateEntriesTableProps> = ({ rows, loading
 
     const virtualRows = rowVirtualizer.getVirtualItems();
 
-    const bodyHeight = Math.max(0, height - STATES_TABLE_HEADER_HEIGHT);
+    useEffect(() => {
+        const lastItem = virtualRows[virtualRows.length - 1];
+        if (!lastItem) return;
+        if (!stateHasMoreRef.current || stateLoadingRef.current) return;
+        if (lastLoadedKeyRef.current !== queryKey) return;
+        if (lastItem.index >= displayRows.length - STATES_TABLE_LOAD_THRESHOLD) {
+            void loadPage(false);
+        }
+    }, [virtualRows, displayRows.length, loadPage, queryKey]);
 
-    const handleScroll = useCallback((event: React.UIEvent<HTMLDivElement>): void => {
-        const { scrollTop, clientHeight, scrollHeight } = event.currentTarget;
-        const { scrollLeft } = event.currentTarget;
-        const headerInner = headerInnerRef.current;
-        if (headerInner) {
-            headerInner.style.transform = `translateX(-${scrollLeft}px)`;
-        }
-        if (scrollTop + clientHeight >= scrollHeight - 1 && hasMore && !loading) {
-            onEndReached();
-        }
-    }, [hasMore, loading, onEndReached]);
+    useEffect(() => {
+        const el = scrollRef.current;
+        if (!el) return;
+        const onScroll = (): void => {
+            const inner = headerInnerRef.current;
+            if (inner) {
+                inner.style.transform = `translateX(-${el.scrollLeft}px)`;
+            }
+        };
+        el.addEventListener('scroll', onScroll, { passive: true });
+        return () => el.removeEventListener('scroll', onScroll);
+    }, []);
+
+    const handleRefreshTable = useCallback((): void => {
+        lastLoadedKeyRef.current = null;
+        inFlightKeyRef.current = null;
+        resetView(true);
+    }, [resetView]);
 
     return (
-        <div className="fw-tbl-wrap fwstate-states-vtbl">
-            <div className="fw-tbl-header-row">
-                <div className="fw-vtbl-header" style={{ height: STATES_TABLE_HEADER_HEIGHT }}>
-                    <div
-                        ref={headerInnerRef}
-                        style={{
-                            display: 'flex',
-                            minWidth: FWSTATE_STATES_TOTAL_WIDTH,
-                            height: '100%',
-                            alignItems: 'center',
-                            willChange: 'transform',
-                        }}
+        <div className="fws-states">
+            <div className="fws-queryrow">
+                <div className="fws-qfield">
+                    <span className="fws-field-label">Address family</span>
+                    <SegmentedRadioGroup
+                        size="m"
+                        value={statesQuery.isIpv6 ? 'ipv6' : 'ipv4'}
+                        onUpdate={(v) => updateStatesQuery({ ...statesQuery, isIpv6: v === 'ipv6' })}
                     >
-                        {FWSTATE_STATES_COLUMNS.map((col) => (
-                            <div
-                                key={col.id}
-                                style={{
-                                    width: col.width,
-                                    minWidth: col.width,
-                                    flexShrink: 0,
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: col.align === 'center' ? 'center' : col.align === 'right' ? 'flex-end' : 'flex-start',
-                                    textAlign: col.align === 'center' ? 'center' : col.align === 'right' ? 'right' : 'left',
-                                    paddingRight: col.align === 'center' || col.align === 'right' ? 8 : 0,
-                                    paddingLeft: col.align === 'center' ? 0 : 0,
-                                }}
-                            >
-                                <span className="fw-th-text">{col.label}</span>
-                            </div>
-                        ))}
+                        <SegmentedRadioGroup.Option value="ipv6" content="IPv6" />
+                        <SegmentedRadioGroup.Option value="ipv4" content="IPv4" />
+                    </SegmentedRadioGroup>
+                </div>
+                <div className="fws-qfield">
+                    <span className="fws-field-label">Direction</span>
+                    <Select
+                        size="m"
+                        value={[String(statesQuery.direction)]}
+                        onUpdate={(v) => updateStatesQuery({ ...statesQuery, direction: Number(v[0] ?? 0) as Direction })}
+                        options={[
+                            { value: String(Direction.FORWARD), content: 'Forward' },
+                            { value: String(Direction.BACKWARD), content: 'Backward' },
+                        ]}
+                    />
+                </div>
+                <div className="fws-qfield" style={{ width: 100 }}>
+                    <span className="fws-field-label">State layer</span>
+                    <TextInput
+                        size="m"
+                        type="number"
+                        value={String(statesQuery.layerIndex)}
+                        onUpdate={(v) => updateStatesQuery({ ...statesQuery, layerIndex: normalizeUnsignedIntToNumber(v) })}
+                    />
+                </div>
+                <div className="fws-qfield">
+                    <span className="fws-field-label">Include expired</span>
+                    <div className="fws-switch-row">
+                        <Switch
+                            checked={statesQuery.includeExpired}
+                            onUpdate={(v) => updateStatesQuery({ ...statesQuery, includeExpired: v })}
+                        />
                     </div>
                 </div>
             </div>
+
+            <div className="fws-viewbar">
+                <span className="fws-vb-label">Highlight in loaded rows</span>
+                <div className="fws-presets">
+                    {ANOMALY_PRESETS.map((p) => {
+                        const cnt = p.health ? (dist.health[p.health] ?? 0) : dist.sample;
+                        return (
+                            <button
+                                key={p.id}
+                                className={`fws-preset-btn${preset === p.id ? ' fws-preset-btn--on' : ''}`}
+                                onClick={() => setPreset(p.id)}
+                            >
+                                <span className="fws-dot" style={{ background: p.color }} />
+                                {p.label}
+                                <span className="fws-n">{fmtInt(cnt)}</span>
+                            </button>
+                        );
+                    })}
+                </div>
+                <div style={{ flex: 1 }} />
+                <span className="fws-scope-note" title="No server-side filter API: presets and highlights only scan the rows already pulled through the cursor.">
+                    <svg className="fws-ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/>
+                    </svg>
+                    filters scan loaded rows only
+                </span>
+            </div>
+
+            <DistributionStrip
+                dist={dist}
+                mapTotal={mapTotal}
+                collapsed={distCollapsed}
+                onToggle={() => setDistCollapsed((v) => !v)}
+            />
+
             <div
-                ref={setScrollRef}
-                className="fw-vtbl-body"
-                onScroll={handleScroll}
-                style={bodyHeight > 0 ? { height: bodyHeight, flex: '0 0 auto' } : undefined}
+                ref={setTableSlotNode}
+                className="fws-tablezone"
+                style={tableScrollHeight !== undefined ? { height: tableScrollHeight } : undefined}
             >
-                {rows.length === 0 ? (
-                    <div className="fw-table-empty">{loading ? 'Loading…' : 'No data'}</div>
-                ) : (
-                    <div style={{ height: rowVirtualizer.getTotalSize(), minWidth: FWSTATE_STATES_TOTAL_WIDTH, position: 'relative' }}>
-                        {virtualRows.map((virtualRow) => {
-                            const row = rows[virtualRow.index];
-                            if (!row) return null;
-                            return (
+                <div className="fws-tblshell">
+                    <div className="fws-tblheader">
+                        <div
+                            ref={headerInnerRef}
+                            style={{ display: 'flex', minWidth: FWSTATE_STATES_TOTAL_WIDTH, height: '100%', alignItems: 'center', willChange: 'transform' }}
+                        >
+                            {FLAT_COLS.map((col, colIdx) => (
                                 <div
-                                    key={`${row.idx ?? 'row'}-${virtualRow.index}`}
-                                    className="fw-vrow"
+                                    key={`th-${colIdx}`}
                                     style={{
-                                        position: 'absolute',
-                                        top: virtualRow.start,
-                                        left: 0,
-                                        height: STATES_TABLE_ROW_HEIGHT,
-                                        minWidth: FWSTATE_STATES_TOTAL_WIDTH,
-                                        width: '100%',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        borderBottom: '1px solid var(--fw-line)',
-                                        paddingLeft: 4,
+                                        width: FLAT_COL_WIDTHS[colIdx],
+                                        minWidth: FLAT_COL_WIDTHS[colIdx],
+                                        flexShrink: 0,
+                                        textAlign: (FLAT_COL_ALIGNS[colIdx] as React.CSSProperties['textAlign']) || 'left',
+                                        paddingLeft: colIdx === 0 ? 14 : 8,
+                                        paddingRight: 8,
+                                        boxSizing: 'border-box',
                                     }}
+                                    className="fws-th"
                                 >
-                                    {FWSTATE_STATES_COLUMNS.map((col) => (
-                                        <div
-                                            key={`${row.idx ?? 'row'}-${virtualRow.index}-${col.id}`}
-                                            style={{
-                                                width: col.width,
-                                                minWidth: col.width,
-                                                flexShrink: 0,
-                                                display: 'flex',
-                                                alignItems: 'center',
-                                                justifyContent: col.align === 'center' ? 'center' : col.align === 'right' ? 'flex-end' : 'flex-start',
-                                                textAlign: col.align === 'center' ? 'center' : col.align === 'right' ? 'right' : 'left',
-                                                overflow: 'hidden',
-                                                textOverflow: 'ellipsis',
-                                                whiteSpace: 'nowrap',
-                                                paddingRight: col.align === 'center' || col.align === 'right' ? 8 : 0,
-                                                paddingLeft: 4,
-                                                boxSizing: 'border-box',
-                                            }}
-                                        >
-                                            <span style={{ display: 'inline-block', maxWidth: '100%' }}>{col.render(row)}</span>
-                                        </div>
-                                    ))}
+                                    {col}
                                 </div>
-                            );
-                        })}
+                            ))}
+                        </div>
                     </div>
+
+                    <div
+                        className="fws-tablescroll"
+                        ref={scrollRef}
+                        style={bodyHeight !== undefined ? { height: bodyHeight } : undefined}
+                    >
+                        {displayRows.length === 0 && !stateLoading && (
+                            <div className="fws-tableempty">
+                                {canLoadStates
+                                    ? preset !== 'all'
+                                        ? (
+                                            <>
+                                                <div>No <b>{ANOMALY_PRESETS.find((p) => p.id === preset)?.label}</b> states in {fmtInt(pulledCount)} loaded rows.</div>
+                                                <div style={{ display: 'flex', gap: 8 }}>
+                                                    <Button size="s" onClick={() => setPreset('all')}>Show all</Button>
+                                                    {stateHasMore && (
+                                                        <Button size="s" view="outlined" onClick={() => { void loadPage(false); }}>Pull more rows</Button>
+                                                    )}
+                                                </div>
+                                            </>
+                                        )
+                                        : <div>{pulledCount === 0 ? 'Loading states…' : 'No states found.'}</div>
+                                    : <div>This FWState config has no linked ACLs — states are not available.</div>
+                                }
+                            </div>
+                        )}
+
+                        {displayRows.length > 0 && (
+                            <div
+                                style={{
+                                    height: rowVirtualizer.getTotalSize(),
+                                    minWidth: FWSTATE_STATES_TOTAL_WIDTH,
+                                    position: 'relative',
+                                }}
+                            >
+                                {virtualRows.map((virtualRow) => {
+                                    const row = displayRows[virtualRow.index];
+                                    if (!row) return null;
+                                    return (
+                                        <FlatStateRow
+                                            key={String(row.idx)}
+                                            row={row}
+                                            start={virtualRow.start}
+                                            isExpired={Boolean(row.expired)}
+                                        />
+                                    );
+                                })}
+                            </div>
+                        )}
+                    </div>
+                </div>
+            </div>
+
+            <div className="fws-cursorbar">
+                <div className="fws-pulled">
+                    <span>Pulled <b>{fmtInt(pulledCount)}</b> states</span>
+                    <span className="fws-hint">of</span>
+                    <span>≈ <b>{fmtCompact(mapTotal || 0)}</b> in map</span>
+                    {presetHealth && (
+                        <span className="fws-showing">
+                            · showing <b>{fmtInt(displayRows.length)}</b> {ANOMALY_PRESETS.find((p) => p.id === preset)?.label?.toLowerCase()}
+                        </span>
+                    )}
+                </div>
+                {stateHasMore ? (
+                    <Button
+                        size="s"
+                        loading={stateLoading}
+                        onClick={() => { void loadPage(false); }}
+                    >
+                        Pull more
+                    </Button>
+                ) : (
+                    <span className="fws-endcap">— cursor exhausted —</span>
                 )}
+                <div style={{ flex: 1 }} />
+                <button
+                    className="fws-preset-btn"
+                    title="Refresh table"
+                    aria-label="Refresh table"
+                    onClick={handleRefreshTable}
+                >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5"/>
+                    </svg>
+                </button>
             </div>
         </div>
     );
@@ -572,28 +1073,14 @@ const FWStatePage: React.FC = () => {
     const [stats, setStats] = useState<{ ipv4?: MapStats; ipv6?: MapStats } | null>(null);
     const [addConfigOpen, setAddConfigOpen] = useState(false);
     const [deleteConfigOpen, setDeleteConfigOpen] = useState(false);
-    const [stateRows, setStateRows] = useState<FwStateEntry[]>([]);
-    const [stateGeneration, setStateGeneration] = useState<number | string | null>(null);
-    const [stateCursor, setStateCursor] = useState<number>(0);
-    const [stateHasMore, setStateHasMore] = useState(true);
-    const [stateLoading, setStateLoading] = useState(false);
     const [pendingAclLink, setPendingAclLink] = useState<{
         aclName: string;
         linkedFwstateName: string | null;
     } | null>(null);
-    const statesScrollRef = useRef<HTMLDivElement | null>(null);
-    const [statesTableSlotNode, setStatesTableSlotNode] = useState<HTMLDivElement | null>(null);
-    const statesTableSlotRef = useMemo(() => ({ current: statesTableSlotNode } as React.RefObject<HTMLElement | null>), [statesTableSlotNode]);
-    const statesTableSlotHeight = useContainerHeight(statesTableSlotRef, 300, STATES_TABLE_BOTTOM_OFFSET);
-    const setStatesTableSlotRef = useCallback((node: HTMLDivElement | null) => {
-        setStatesTableSlotNode(node);
-    }, []);
 
-    const stateCursorRef = useRef(0);
-    const stateRowsRef = useRef<FwStateEntry[]>([]);
-    const stateLoadingRef = useRef(false);
-    const stateHasMoreRef = useRef(true);
-    const canLoadStatesRef = useRef(false);
+    const configsRef = useRef(configs);
+    const dirtyConfigsRef = useRef(dirtyConfigs);
+    const statsRequestIdRef = useRef(0);
 
     const configNames = useMemo(() => Object.keys(configs).sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' })), [configs]);
     const queryConfig = useMemo(() => searchParams.get(QP_CONFIG), [searchParams]);
@@ -608,14 +1095,7 @@ const FWStatePage: React.FC = () => {
     const currentIsDirty = dirtyConfigs.has(currentName);
     const currentHasLinkedAcls = (current?.linkedAcls.length ?? 0) > 0;
     const anyDirty = dirtyConfigs.size > 0;
-    const configsRef = useRef(configs);
-    const dirtyConfigsRef = useRef(dirtyConfigs);
-    const statsRequestIdRef = useRef(0);
-    const statesRequestIdRef = useRef(0);
-    const statesAbortRef = useRef<AbortController | null>(null);
-    const lastLoadedQueryKeyRef = useRef<string | null>(null);
-    const inFlightStatesQueryKeyRef = useRef<string | null>(null);
-    const stateGenerationRef = useRef<number | string | null>(null);
+
     const updateParams = useCallback((updates: Record<string, string | null>): void => {
         setSearchParams((prev) => {
             const next = new URLSearchParams(prev);
@@ -629,12 +1109,15 @@ const FWStatePage: React.FC = () => {
             return next;
         }, { replace: true });
     }, [setSearchParams]);
+
     const updateActiveConfig = useCallback((name: string): void => {
         updateParams({ [QP_CONFIG]: name || null });
     }, [updateParams]);
+
     const updateActiveSubTab = useCallback((tab: StateSubTab): void => {
         updateParams({ [QP_TAB]: tab });
     }, [updateParams]);
+
     const statesQuery = useMemo(() => getStatesQuery(searchParams), [searchParams]);
     const updateStatesQuery = useCallback((query: StatesQuery): void => {
         updateParams(getStatesQueryParamValues(query));
@@ -663,39 +1146,11 @@ const FWStatePage: React.FC = () => {
             updateParams(updates);
         }
     }, [activeSubTab, configNames.length, currentName, loading, queryConfig, searchParams, statesQueryParamUpdates, updateParams]);
+
     useUnsavedChangesBlocker(anyDirty);
 
-    useEffect(() => {
-        configsRef.current = configs;
-    }, [configs]);
-
-    useEffect(() => {
-        dirtyConfigsRef.current = dirtyConfigs;
-    }, [dirtyConfigs]);
-
-    useEffect(() => {
-        stateGenerationRef.current = stateGeneration;
-    }, [stateGeneration]);
-
-    useEffect(() => {
-        canLoadStatesRef.current = canLoadStates;
-    }, [canLoadStates]);
-
-    useEffect(() => {
-        stateLoadingRef.current = stateLoading;
-    }, [stateLoading]);
-
-    useEffect(() => {
-        stateHasMoreRef.current = stateHasMore;
-    }, [stateHasMore]);
-
-    useEffect(() => {
-        stateRowsRef.current = stateRows;
-    }, [stateRows]);
-
-    useEffect(() => {
-        stateCursorRef.current = stateCursor;
-    }, [stateCursor]);
+    useEffect(() => { configsRef.current = configs; }, [configs]);
+    useEffect(() => { dirtyConfigsRef.current = dirtyConfigs; }, [dirtyConfigs]);
 
     const loadAll = useCallback(async (options?: { preserveDirty?: boolean; skipDirtyNames?: Set<string> }): Promise<void> => {
         setLoading(true);
@@ -716,17 +1171,13 @@ const FWStatePage: React.FC = () => {
                     Array.from(dirtySnapshot).filter((name) => !skipDirtyNames.has(name))
                 );
                 const mergedConfigs: Record<string, DraftConfig> = { ...nextConfigs };
-
                 Object.entries(configSnapshot).forEach(([name, draft]) => {
                     if (preservedDirtyNames.has(name) || (draft.isLocalOnly && !nextConfigs[name] && !skipDirtyNames.has(name))) {
                         mergedConfigs[name] = draft;
                     }
                 });
-
                 setConfigs(mergedConfigs);
-                setDirtyConfigs(
-                    new Set(Array.from(preservedDirtyNames).filter((name) => Boolean(mergedConfigs[name])))
-                );
+                setDirtyConfigs(new Set(Array.from(preservedDirtyNames).filter((name) => Boolean(mergedConfigs[name]))));
             } else {
                 setConfigs(nextConfigs);
                 setDirtyConfigs(new Set());
@@ -788,49 +1239,8 @@ const FWStatePage: React.FC = () => {
             if (!mounted) return;
             await loadAclMeta();
         })();
-        return () => {
-            mounted = false;
-        };
+        return () => { mounted = false; };
     }, [loadAll, loadAclMeta]);
-
-    const resetStatesView = useCallback((options?: { clearLoading?: boolean }): void => {
-        statesAbortRef.current?.abort();
-        statesAbortRef.current = null;
-        statesRequestIdRef.current += 1;
-        inFlightStatesQueryKeyRef.current = null;
-        stateGenerationRef.current = null;
-        setStateRows([]);
-        stateRowsRef.current = [];
-        setStateCursor(0);
-        stateCursorRef.current = 0;
-        setStateHasMore(true);
-        stateHasMoreRef.current = true;
-        setStateGeneration(null);
-        if (options?.clearLoading) {
-            setStateLoading(false);
-            stateLoadingRef.current = false;
-        }
-    }, []);
-
-    const statesQueryKey = useMemo(() => {
-        return JSON.stringify({
-            currentName,
-            isIpv6: statesQuery.isIpv6,
-            layerIndex: statesQuery.layerIndex,
-            direction: statesQuery.direction,
-            includeExpired: statesQuery.includeExpired,
-        });
-    }, [currentName, statesQuery.direction, statesQuery.includeExpired, statesQuery.isIpv6, statesQuery.layerIndex]);
-
-    useEffect(() => {
-        resetStatesView({ clearLoading: true });
-    }, [resetStatesView, statesQueryKey]);
-
-    useEffect(() => {
-        return () => {
-            statesAbortRef.current?.abort();
-        };
-    }, []);
 
     useEffect(() => {
         const requestId = ++statsRequestIdRef.current;
@@ -838,15 +1248,11 @@ const FWStatePage: React.FC = () => {
         if (!currentName) return;
         API.fwstate.getStats({ name: currentName })
             .then((res) => {
-                if (statsRequestIdRef.current !== requestId) {
-                    return;
-                }
+                if (statsRequestIdRef.current !== requestId) return;
                 setStats({ ipv4: res.ipv4_stats, ipv6: res.ipv6_stats });
             })
             .catch((err) => {
-                if (statsRequestIdRef.current !== requestId) {
-                    return;
-                }
+                if (statsRequestIdRef.current !== requestId) return;
                 toaster.error('fwstate-stats', 'Failed to load FWState stats', err);
             });
     }, [currentName]);
@@ -877,10 +1283,7 @@ const FWStatePage: React.FC = () => {
         aclNames.add(aclName);
         try {
             await API.fwstate.linkFWState({ fwstate_name: currentName, acl_config_names: Array.from(aclNames) });
-            await Promise.all([
-                loadAll({ preserveDirty: true }),
-                loadAclMeta(),
-            ]);
+            await Promise.all([loadAll({ preserveDirty: true }), loadAclMeta()]);
         } catch (err) {
             toaster.error('fwstate-link-error', 'Failed to link ACL config', err);
         }
@@ -893,65 +1296,9 @@ const FWStatePage: React.FC = () => {
         await handleLinkAcl(aclName);
     }, [handleLinkAcl, pendingAclLink]);
 
-    useEffect(() => {
-        const isEditableTarget = (target: EventTarget | null): boolean => {
-            if (!(target instanceof HTMLElement)) return false;
-            const tagName = target.tagName.toLowerCase();
-            if (tagName === 'input' || tagName === 'textarea' || tagName === 'select') return true;
-            return target.isContentEditable;
-        };
-
-        const onKeyDown = (event: KeyboardEvent) => {
-            if (event.defaultPrevented) return;
-            if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
-            if (isEditableTarget(event.target)) return;
-
-            const key = event.key.toLowerCase();
-            if (key === '4') {
-                event.preventDefault();
-                if (statesQuery.isIpv6) {
-                    updateStatesQuery({ ...statesQuery, isIpv6: false });
-                }
-                return;
-            }
-            if (key === '6') {
-                event.preventDefault();
-                if (!statesQuery.isIpv6) {
-                    updateStatesQuery({ ...statesQuery, isIpv6: true });
-                }
-                return;
-            }
-            if (key === 'f') {
-                event.preventDefault();
-                if (statesQuery.direction !== Direction.FORWARD) {
-                    updateStatesQuery({ ...statesQuery, direction: Direction.FORWARD });
-                }
-                return;
-            }
-            if (key === 'b') {
-                event.preventDefault();
-                if (statesQuery.direction !== Direction.BACKWARD) {
-                    updateStatesQuery({ ...statesQuery, direction: Direction.BACKWARD });
-                }
-                return;
-            }
-            if (key === 'e') {
-                event.preventDefault();
-                updateStatesQuery({ ...statesQuery, includeExpired: !statesQuery.includeExpired });
-            }
-        };
-
-        document.addEventListener('keydown', onKeyDown);
-        return () => {
-            document.removeEventListener('keydown', onKeyDown);
-        };
-    }, [statesQuery, updateStatesQuery]);
-
     const counts = useMemo(() => {
         const m = new Map<string, number>();
-        configNames.forEach((name) => {
-            m.set(name, configs[name]?.linkedAcls.length ?? 0);
-        });
+        configNames.forEach((name) => { m.set(name, configs[name]?.linkedAcls.length ?? 0); });
         return m;
     }, [configNames, configs]);
 
@@ -966,14 +1313,12 @@ const FWStatePage: React.FC = () => {
         const durationFields = [current.tcpSynAck, current.tcpSyn, current.tcpFin, current.tcp, current.udp, current.defaultTimeout];
         const useMulticast = current.syncMode === 'multicast' || current.syncMode === 'both';
         const useUnicast = current.syncMode === 'unicast' || current.syncMode === 'both';
-        const multicastAddrValid = isValidNonzeroIPv6Address(current.dstAddrMulticast);
-        const unicastAddrValid = isValidNonzeroIPv6Address(current.dstAddrUnicast);
         if (current.mapIndexSize < 0 || current.mapExtraBucketCount < 0) return false;
         if (useMulticast && (current.portMulticast < 0 || current.portMulticast > 65535)) return false;
         if (useUnicast && (current.portUnicast < 0 || current.portUnicast > 65535)) return false;
         if (!isValidNonzeroIPv6Address(current.srcAddr)) return false;
-        if (useMulticast && (!multicastAddrValid || current.portMulticast === 0)) return false;
-        if (useUnicast && (!unicastAddrValid || current.portUnicast === 0)) return false;
+        if (useMulticast && (!isValidNonzeroIPv6Address(current.dstAddrMulticast) || current.portMulticast === 0)) return false;
+        if (useUnicast && (!isValidNonzeroIPv6Address(current.dstAddrUnicast) || current.portUnicast === 0)) return false;
         if (!isValidNonzeroMAC(current.dstEther)) return false;
         if (durationFields.some((value) => parseDurationToNs(value) === null)) return false;
         return true;
@@ -1058,106 +1403,6 @@ const FWStatePage: React.FC = () => {
         }
     };
 
-    const requestStatesPrefetch = (): void => {
-        const container = statesScrollRef.current;
-        if (!container || !canLoadStatesRef.current || stateLoadingRef.current || !stateHasMoreRef.current || !currentName) {
-            return;
-        }
-        const { scrollHeight, clientHeight, scrollTop } = container;
-        if (scrollTop + clientHeight >= scrollHeight - 1) {
-            void loadStatesPage(false);
-        }
-    };
-
-    const loadStatesPage = useCallback(async (reset: boolean): Promise<void> => {
-        if (!canLoadStates || !currentName) return;
-        if (stateLoadingRef.current) return;
-        if (!reset && !stateHasMoreRef.current) return;
-        statesAbortRef.current?.abort();
-        const abortController = new AbortController();
-        statesAbortRef.current = abortController;
-        const requestId = ++statesRequestIdRef.current;
-        setStateLoading(true);
-        stateLoadingRef.current = true;
-        const request: ListEntriesRequest = {
-            config_name: currentName,
-            is_ipv6: statesQuery.isIpv6,
-            layer_index: statesQuery.layerIndex,
-            include_expired: statesQuery.includeExpired,
-            direction: statesQuery.direction,
-            batch_size: STATES_TABLE_MAX_BATCH_SIZE,
-            index: reset
-                ? (statesQuery.direction === Direction.BACKWARD ? BACKWARD_RESET_CURSOR : 0)
-                : stateCursorRef.current,
-        };
-        let shouldMarkLoaded = true;
-        await new Promise<void>((resolve) => {
-            API.fwstate.listEntriesPage(request, {
-                onMessage: (res) => {
-                    if (statesRequestIdRef.current !== requestId) {
-                        resolve();
-                        return;
-                    }
-                    const generation = normalizeUnsignedInt(res.generation) ?? '0';
-                    if (stateGenerationRef.current !== null && generation !== stateGenerationRef.current) {
-                        shouldMarkLoaded = false;
-                        resetStatesView({ clearLoading: true });
-                        lastLoadedQueryKeyRef.current = null;
-                        inFlightStatesQueryKeyRef.current = null;
-                        toaster.warning('fwstate-generation', 'State generation changed. Reload from start.');
-                        resolve();
-                        return;
-                    }
-                    setStateGeneration(generation);
-                    const rows = res.entries ?? [];
-                    const nextRows = reset ? rows : [...stateRowsRef.current, ...rows];
-                    const nextCursor = normalizeUnsignedIntToNumber(res.index);
-                    const nextHasMore = Boolean(res.has_more);
-                    setStateRows(nextRows);
-                    stateRowsRef.current = nextRows;
-                    setStateCursor(nextCursor);
-                    stateCursorRef.current = nextCursor;
-                    setStateHasMore(nextHasMore);
-                    stateHasMoreRef.current = nextHasMore;
-                    resolve();
-                },
-                onError: (err) => {
-                    if (abortController.signal.aborted || statesRequestIdRef.current !== requestId) {
-                        resolve();
-                        return;
-                    }
-                    lastLoadedQueryKeyRef.current = statesQueryKey;
-                    toaster.error('fwstate-entries', 'Failed to load FWState entries', err);
-                    resolve();
-                },
-                onEnd: () => resolve(),
-            }, abortController.signal);
-        });
-        if (statesRequestIdRef.current === requestId) {
-            statesAbortRef.current = null;
-            if (shouldMarkLoaded) {
-                lastLoadedQueryKeyRef.current = statesQueryKey;
-            }
-            inFlightStatesQueryKeyRef.current = null;
-            setStateLoading(false);
-            stateLoadingRef.current = false;
-            if (shouldMarkLoaded) {
-                requestAnimationFrame(() => {
-                    requestStatesPrefetch();
-                });
-            }
-        }
-    }, [
-        canLoadStates,
-        currentName,
-        resetStatesView,
-        statesQuery.direction,
-        statesQuery.includeExpired,
-        statesQuery.isIpv6,
-        statesQuery.layerIndex,
-        statesQueryKey,
-    ]);
-
     const aclRows = useMemo(() => aclMeta.map((row) => ({ ...row, isLinkedHere: row.fwstateName === currentName })), [aclMeta, currentName]);
 
     const statsRows = useMemo(() => {
@@ -1179,6 +1424,10 @@ const FWStatePage: React.FC = () => {
 
     const statsNote = stats?.ipv4?.note || stats?.ipv6?.note || '';
 
+    const totalStatesV4 = normalizeUnsignedIntToNumber(stats?.ipv4?.total_elements);
+    const totalStatesV6 = normalizeUnsignedIntToNumber(stats?.ipv6?.total_elements);
+    const totalStates = totalStatesV4 + totalStatesV6;
+
     const aclLinkDialogTitle = pendingAclLink
         ? pendingAclLink.linkedFwstateName && pendingAclLink.linkedFwstateName !== currentName
             ? 'Move ACL config'
@@ -1190,199 +1439,55 @@ const FWStatePage: React.FC = () => {
             : `Link ACL "${pendingAclLink.aclName}" to FWState "${currentName}".`
         : '';
 
-    useEffect(() => {
-        if (!canLoadStates || !currentName || stateLoading) {
-            return;
-        }
-        if (lastLoadedQueryKeyRef.current === statesQueryKey) {
-            return;
-        }
-        if (inFlightStatesQueryKeyRef.current === statesQueryKey) {
-            return;
-        }
-        inFlightStatesQueryKeyRef.current = statesQueryKey;
-        void loadStatesPage(true);
-    }, [canLoadStates, currentName, loadStatesPage, stateLoading, statesQueryKey]);
-
-    useEffect(() => {
-        if (canLoadStates) {
-            return;
-        }
-        resetStatesView({ clearLoading: true });
-    }, [canLoadStates, resetStatesView]);
-
-    const statesTableHeight = statesTableSlotHeight > 0 ? statesTableSlotHeight : 0;
-    const setStatesScrollRef = useCallback((node: HTMLDivElement | null): void => {
-        statesScrollRef.current = node;
-    }, []);
-
-    const statesTab = current && (
-        <section className="fwstate-states-table-panel">
-            <div className="fwstate-states-toolbar">
-                <div className="fwstate-states-toolbar__control fwstate-states-toolbar__control--field fwstate-states-toolbar__control--field-family">
-                    <Text className="fwstate-states-toolbar__label">Address family</Text>
-                    <SegmentedRadioGroup
-                        size="m"
-                        width="max"
-                        className="fwstate-states-toolbar__family"
-                        value={statesQuery.isIpv6 ? 'ipv6' : 'ipv4'}
-                        onUpdate={(value) => updateStatesQuery({ ...statesQuery, isIpv6: value === 'ipv6' })}
-                    >
-                        <SegmentedRadioGroup.Option value="ipv6" content="IPv6" />
-                        <SegmentedRadioGroup.Option value="ipv4" content="IPv4" />
-                    </SegmentedRadioGroup>
-                </div>
-                <div className="fwstate-states-toolbar__control fwstate-states-toolbar__control--field fwstate-states-toolbar__control--field-direction">
-                    <Text className="fwstate-states-toolbar__label">Direction</Text>
-                    <div title="Direction (f/b)">
-                    <Select
-                        value={[String(statesQuery.direction)]}
-                        onUpdate={(v) => updateStatesQuery({ ...statesQuery, direction: Number(v[0] ?? 0) as Direction })}
-                        options={[{ value: String(Direction.FORWARD), content: 'forward' }, { value: String(Direction.BACKWARD), content: 'backward' }]}
-                    />
-                    </div>
-                </div>
-                <div className="fwstate-states-toolbar__control fwstate-states-toolbar__control--field fwstate-states-toolbar__control--field-layer">
-                    <Text className="fwstate-states-toolbar__label">State layer</Text>
-                    <div title="State layer">
-                        <TextInput
-                            type="number"
-                            value={String(statesQuery.layerIndex)}
-                            onUpdate={(v) => updateStatesQuery({ ...statesQuery, layerIndex: normalizeUnsignedIntToNumber(v) })}
-                        />
-                    </div>
-                </div>
-                <div className="fwstate-states-toolbar__control fwstate-states-toolbar__control--switch">
-                    <Text className="fwstate-states-toolbar__label">Include expired</Text>
-                    <div title="Include expired (e)">
-                        <Switch checked={statesQuery.includeExpired} onUpdate={(includeExpired) => updateStatesQuery({ ...statesQuery, includeExpired })} />
-                    </div>
-                </div>
-            </div>
-            <div
-                ref={setStatesTableSlotRef}
-                className="fwstate-states-table-slot"
-                style={statesTableSlotHeight > 0 ? { height: statesTableSlotHeight, maxHeight: statesTableSlotHeight } : undefined}
+    const subTabHeaderAction = activeSubTab === 'configuration' ? (
+        <>
+            <button
+                type="button"
+                className="fw-tbl-action-btn fw-tbl-action-btn--save"
+                title="Save config"
+                aria-label="Save config"
+                disabled={!currentIsDirty}
+                onClick={handleSave}
             >
-                <FWStateEntriesTable
-                    rows={stateRows}
-                    loading={stateLoading}
-                    hasMore={stateHasMore}
-                    height={statesTableHeight}
-                    onSetScrollRef={setStatesScrollRef}
-                    onEndReached={requestStatesPrefetch}
-                />
-            </div>
-            <div className="fwstate-states-footer">
-                <Text className="fwstate-states-footer__text">{stateLoading ? 'Loading…' : `Shown ${stateRows.length} rows`}</Text>
-                <Text className="fwstate-states-footer__text fwstate-states-footer__text--secondary">
-                    {stateLoading || stateRows.length === 0 || stateHasMore ? '\u00a0' : 'End of entries.'}
-                </Text>
-            </div>
-        </section>
+                <SaveIcon />
+            </button>
+            <button
+                type="button"
+                className="fw-tbl-action-btn fw-tbl-action-btn--delete"
+                title="Delete config"
+                aria-label="Delete config"
+                disabled={!current || currentHasLinkedAcls}
+                onClick={() => setDeleteConfigOpen(true)}
+            >
+                <TrashIcon />
+            </button>
+        </>
+    ) : activeSubTab === 'links' ? (
+        <Button view="flat" size="s" onClick={() => navigate('/modules/acl')}>Open ACL module</Button>
+    ) : null;
+
+    const pageHeader = (
+        <Flex alignItems="center" gap={3} style={{ width: '100%' }}>
+            <Text variant="header-1">FWState</Text>
+            <Flex grow />
+            <Button view="action" onClick={() => setAddConfigOpen(true)}>
+                <Icon data={Plus} size={16} />
+                Add Config
+            </Button>
+        </Flex>
     );
 
-    const linksTab = current && (
-        <section className="fwstate-acl-panel">
-            <div className="fwstate-table-shell fwstate-acl-table-shell">
-                <Table
-                    data={aclRows}
-                    columns={[
-                        { id: 'name', name: 'ACL config', template: (row) => <span className="fwstate-table-cell">{row.name}</span> },
-                        { id: 'fwstate', name: 'Current FWState', template: (row) => row.fwstateName ? <Label theme={row.isLinkedHere ? 'success' : 'warning'} size="s">{row.fwstateName}</Label> : <Label theme="unknown" size="s">{row.isLoaded ? 'unlinked' : 'Loading…'}</Label> },
-                        { id: 'rules', name: 'Rules', template: (row) => <span className="fwstate-mono">{row.ruleCount === null ? (row.isLoaded ? (row.loadFailed ? '—' : 'Loading…') : 'Loading…') : row.ruleCount}</span> },
-                        {
-                            id: 'action',
-                            name: 'Action',
-                            template: (row) => {
-                                if (row.isLinkedHere) {
-                                    return <Label theme="success" size="s">Linked</Label>;
-                                }
-                                if (!row.isLoaded) {
-                                    return (
-                                        <Button size="s" view="outlined" disabled>
-                                            Loading…
-                                        </Button>
-                                    );
-                                }
-                                if (row.loadFailed) {
-                                    return (
-                                        <Text color="secondary" className="fwstate-table-cell">
-                                            Unavailable
-                                        </Text>
-                                    );
-                                }
-                                return (
-                                    <Button
-                                        size="s"
-                                        view="outlined"
-                                        className="fwstate-acl-link-btn"
-                                        onClick={() => openLinkAclDialog(row.name)}
-                                    >
-                                        {row.fwstateName ? 'Move here' : 'Link'}
-                                    </Button>
-                                );
-                            },
-                        },
-                    ]}
-                />
-            </div>
-        </section>
-    );
-
-    const statisticsTab = current && (
-        <section className="fwstate-stats-compare-wrap">
-            <div className="fwstate-stats-compare">
-                <div className="fwstate-stats-compare__head fwstate-stats-compare__head--metric">
-                    <span>Metric</span>
-                    {statsNote && (
-                        <Tooltip content={statsNote} openDelay={0}>
-                            <span className="fwstate-stats-compare__note-icon" aria-label={statsNote}>
-                                <Icon data={CircleInfo} size={14} />
-                            </span>
-                        </Tooltip>
-                    )}
-                </div>
-                <div className="fwstate-stats-compare__head">IPv4</div>
-                <div className="fwstate-stats-compare__head">IPv6</div>
-                {statsRows.map((row) => (
-                    <React.Fragment key={row.label}>
-                        <div className="fwstate-stats-compare__metric">{row.label}</div>
-                        <div className="fwstate-stats-compare__value fwstate-mono">{row.ipv4}</div>
-                        <div className="fwstate-stats-compare__value fwstate-mono">{row.ipv6}</div>
-                    </React.Fragment>
-                ))}
-            </div>
-        </section>
-    );
+    if (loading) {
+        return <PageLayout header={pageHeader}><PageLoader loading size="l" /></PageLayout>;
+    }
 
     const configurationTab = current && (() => {
         const useMulticast = current.syncMode === 'multicast' || current.syncMode === 'both';
         const useUnicast = current.syncMode === 'unicast' || current.syncMode === 'both';
-        const multicastAddrError = !useMulticast
-            ? undefined
-            : !isValidNonzeroIPv6Address(current.dstAddrMulticast)
-                ? 'Non-zero IPv6 required'
-                : undefined;
-        const multicastPortError = !useMulticast
-            ? undefined
-            : current.portMulticast < 0 || current.portMulticast > 65535
-                ? '0..65535'
-                : current.portMulticast === 0
-                    ? 'Port required'
-                    : undefined;
-        const unicastAddrError = !useUnicast
-            ? undefined
-            : !isValidNonzeroIPv6Address(current.dstAddrUnicast)
-                ? 'Non-zero IPv6 required'
-                : undefined;
-        const unicastPortError = !useUnicast
-            ? undefined
-            : current.portUnicast < 0 || current.portUnicast > 65535
-                ? '0..65535'
-                : current.portUnicast === 0
-                    ? 'Port required'
-                    : undefined;
+        const multicastAddrError = !useMulticast ? undefined : !isValidNonzeroIPv6Address(current.dstAddrMulticast) ? 'Non-zero IPv6 required' : undefined;
+        const multicastPortError = !useMulticast ? undefined : current.portMulticast === 0 ? 'Port required' : current.portMulticast < 0 || current.portMulticast > 65535 ? '0..65535' : undefined;
+        const unicastAddrError = !useUnicast ? undefined : !isValidNonzeroIPv6Address(current.dstAddrUnicast) ? 'Non-zero IPv6 required' : undefined;
+        const unicastPortError = !useUnicast ? undefined : current.portUnicast === 0 ? 'Port required' : current.portUnicast < 0 || current.portUnicast > 65535 ? '0..65535' : undefined;
 
         return (
             <div className="fwstate-config-panel">
@@ -1473,63 +1578,27 @@ const FWStatePage: React.FC = () => {
                     <div className="fwstate-field-grid fwstate-field-grid--timeouts">
                         <label className="fwstate-field">
                             <Text variant="caption-2" color="secondary">TCP SYN+ACK</Text>
-                            <TextInput
-                                type="number"
-                                value={current.tcpSynAck}
-                                onUpdate={(tcpSynAck) => updateCurrent({ tcpSynAck })}
-                                error={parseDurationToNs(current.tcpSynAck) ? undefined : 'Enter seconds'}
-                                endContent={<Text className="fwstate-timeout-unit" variant="caption-2" color="secondary">s</Text>}
-                            />
+                            <TextInput type="number" value={current.tcpSynAck} onUpdate={(tcpSynAck) => updateCurrent({ tcpSynAck })} error={parseDurationToNs(current.tcpSynAck) ? undefined : 'Enter seconds'} endContent={<Text className="fwstate-timeout-unit" variant="caption-2" color="secondary">s</Text>} />
                         </label>
                         <label className="fwstate-field">
                             <Text variant="caption-2" color="secondary">TCP SYN</Text>
-                            <TextInput
-                                type="number"
-                                value={current.tcpSyn}
-                                onUpdate={(tcpSyn) => updateCurrent({ tcpSyn })}
-                                error={parseDurationToNs(current.tcpSyn) ? undefined : 'Enter seconds'}
-                                endContent={<Text className="fwstate-timeout-unit" variant="caption-2" color="secondary">s</Text>}
-                            />
+                            <TextInput type="number" value={current.tcpSyn} onUpdate={(tcpSyn) => updateCurrent({ tcpSyn })} error={parseDurationToNs(current.tcpSyn) ? undefined : 'Enter seconds'} endContent={<Text className="fwstate-timeout-unit" variant="caption-2" color="secondary">s</Text>} />
                         </label>
                         <label className="fwstate-field">
                             <Text variant="caption-2" color="secondary">TCP FIN</Text>
-                            <TextInput
-                                type="number"
-                                value={current.tcpFin}
-                                onUpdate={(tcpFin) => updateCurrent({ tcpFin })}
-                                error={parseDurationToNs(current.tcpFin) ? undefined : 'Enter seconds'}
-                                endContent={<Text className="fwstate-timeout-unit" variant="caption-2" color="secondary">s</Text>}
-                            />
+                            <TextInput type="number" value={current.tcpFin} onUpdate={(tcpFin) => updateCurrent({ tcpFin })} error={parseDurationToNs(current.tcpFin) ? undefined : 'Enter seconds'} endContent={<Text className="fwstate-timeout-unit" variant="caption-2" color="secondary">s</Text>} />
                         </label>
                         <label className="fwstate-field">
                             <Text variant="caption-2" color="secondary">TCP established</Text>
-                            <TextInput
-                                type="number"
-                                value={current.tcp}
-                                onUpdate={(tcp) => updateCurrent({ tcp })}
-                                error={parseDurationToNs(current.tcp) ? undefined : 'Enter seconds'}
-                                endContent={<Text className="fwstate-timeout-unit" variant="caption-2" color="secondary">s</Text>}
-                            />
+                            <TextInput type="number" value={current.tcp} onUpdate={(tcp) => updateCurrent({ tcp })} error={parseDurationToNs(current.tcp) ? undefined : 'Enter seconds'} endContent={<Text className="fwstate-timeout-unit" variant="caption-2" color="secondary">s</Text>} />
                         </label>
                         <label className="fwstate-field">
                             <Text variant="caption-2" color="secondary">UDP</Text>
-                            <TextInput
-                                type="number"
-                                value={current.udp}
-                                onUpdate={(udp) => updateCurrent({ udp })}
-                                error={parseDurationToNs(current.udp) ? undefined : 'Enter seconds'}
-                                endContent={<Text className="fwstate-timeout-unit" variant="caption-2" color="secondary">s</Text>}
-                            />
+                            <TextInput type="number" value={current.udp} onUpdate={(udp) => updateCurrent({ udp })} error={parseDurationToNs(current.udp) ? undefined : 'Enter seconds'} endContent={<Text className="fwstate-timeout-unit" variant="caption-2" color="secondary">s</Text>} />
                         </label>
                         <label className="fwstate-field">
                             <Text variant="caption-2" color="secondary">Default</Text>
-                            <TextInput
-                                type="number"
-                                value={current.defaultTimeout}
-                                onUpdate={(defaultTimeout) => updateCurrent({ defaultTimeout })}
-                                error={parseDurationToNs(current.defaultTimeout) ? undefined : 'Enter seconds'}
-                                endContent={<Text className="fwstate-timeout-unit" variant="caption-2" color="secondary">s</Text>}
-                            />
+                            <TextInput type="number" value={current.defaultTimeout} onUpdate={(defaultTimeout) => updateCurrent({ defaultTimeout })} error={parseDurationToNs(current.defaultTimeout) ? undefined : 'Enter seconds'} endContent={<Text className="fwstate-timeout-unit" variant="caption-2" color="secondary">s</Text>} />
                         </label>
                     </div>
                 </div>
@@ -1537,47 +1606,98 @@ const FWStatePage: React.FC = () => {
         );
     })();
 
-    const pageHeader = (
-        <Flex alignItems="center" gap={3} style={{ width: '100%' }}>
-            <Text variant="header-1">FWState</Text>
-            <Flex grow />
-            <Button view="action" onClick={() => setAddConfigOpen(true)}>
-                <Icon data={Plus} size={16} />
-                Add Config
-            </Button>
-        </Flex>
+    const linksTab = current && (
+        <section className="fwstate-acl-panel">
+            <div className="fwstate-table-shell fwstate-acl-table-shell">
+                <Table
+                    data={aclRows}
+                    columns={[
+                        { id: 'name', name: 'ACL config', template: (row) => <span className="fwstate-table-cell">{row.name}</span> },
+                        { id: 'fwstate', name: 'Current FWState', template: (row) => row.fwstateName ? <Label theme={row.isLinkedHere ? 'success' : 'warning'} size="s">{row.fwstateName}</Label> : <Label theme="unknown" size="s">{row.isLoaded ? 'unlinked' : 'Loading…'}</Label> },
+                        { id: 'rules', name: 'Rules', template: (row) => <span className="fwstate-mono">{row.ruleCount === null ? (row.isLoaded ? (row.loadFailed ? '—' : 'Loading…') : 'Loading…') : row.ruleCount}</span> },
+                        {
+                            id: 'action',
+                            name: 'Action',
+                            template: (row) => {
+                                if (row.isLinkedHere) return <Label theme="success" size="s">Linked</Label>;
+                                if (!row.isLoaded) return <Button size="s" view="outlined" disabled>Loading…</Button>;
+                                if (row.loadFailed) return <Text color="secondary" className="fwstate-table-cell">Unavailable</Text>;
+                                return (
+                                    <Button
+                                        size="s"
+                                        view="outlined"
+                                        className="fwstate-acl-link-btn"
+                                        onClick={() => openLinkAclDialog(row.name)}
+                                    >
+                                        {row.fwstateName ? 'Move here' : 'Link'}
+                                    </Button>
+                                );
+                            },
+                        },
+                    ]}
+                />
+            </div>
+            <p className="fws-link-note">
+                Linking an ACL routes its <code>+state</code> / <code>?state</code> rule actions into this FWState map.
+                One FWState may back multiple ACL configs.
+            </p>
+        </section>
     );
 
-    const subTabHeaderAction = activeSubTab === 'configuration' ? (
-        <>
-            <button
-                type="button"
-                className="fw-tbl-action-btn fw-tbl-action-btn--save"
-                title="Save config"
-                aria-label="Save config"
-                disabled={!currentIsDirty}
-                onClick={handleSave}
-            >
-                <SaveIcon />
-            </button>
-            <button
-                type="button"
-                className="fw-tbl-action-btn fw-tbl-action-btn--delete"
-                title="Delete config"
-                aria-label="Delete config"
-                disabled={!current || currentHasLinkedAcls}
-                onClick={() => setDeleteConfigOpen(true)}
-            >
-                <TrashIcon />
-            </button>
-        </>
-    ) : activeSubTab === 'links' ? (
-        <Button view="flat" size="s" onClick={() => navigate('/modules/acl')}>Open ACL module</Button>
-    ) : null;
+    const statisticsTab = current && (
+        <section className="fws-stats-section">
+            <div className="fws-statcards">
+                <div className="fws-statcard">
+                    <div className="fws-statcard__lbl">Total states</div>
+                    <div className="fws-statcard__val">{fmtCompact(totalStates)}</div>
+                    <div className="fws-statcard__meta">{fmtCompact(totalStatesV6)} v6 · {fmtCompact(totalStatesV4)} v4</div>
+                </div>
+                <div className="fws-statcard">
+                    <div className="fws-statcard__lbl">Memory used</div>
+                    <div className="fws-statcard__val">
+                        {stats ? formatMemoryBytes((normalizeUnsignedIntToNumber(stats.ipv4?.memory_used) + normalizeUnsignedIntToNumber(stats.ipv6?.memory_used))) : '—'}
+                    </div>
+                    <div className="fws-statcard__meta">IPv4 + IPv6 maps</div>
+                </div>
+                <div className="fws-statcard">
+                    <div className="fws-statcard__lbl">Max chain</div>
+                    <div className="fws-statcard__val">
+                        {stats ? `v4: ${stats.ipv4?.max_chain_length ?? '—'} · v6: ${stats.ipv6?.max_chain_length ?? '—'}` : '—'}
+                    </div>
+                    <div className="fws-statcard__meta">hash collision depth</div>
+                </div>
+                <div className="fws-statcard">
+                    <div className="fws-statcard__lbl">Max deadline</div>
+                    <div className="fws-statcard__val fws-statcard__val--mono">
+                        {formatNsUtc(stats?.ipv6?.max_deadline ?? stats?.ipv4?.max_deadline)}
+                    </div>
+                    <div className="fws-statcard__meta">latest state expiry</div>
+                </div>
+            </div>
 
-    if (loading) {
-        return <PageLayout header={pageHeader}><PageLoader loading size="l" /></PageLayout>;
-    }
+            <div className="fwstate-stats-compare">
+                <div className="fwstate-stats-compare__head fwstate-stats-compare__head--metric">
+                    <span>Metric</span>
+                    {statsNote && (
+                        <Tooltip content={statsNote} openDelay={0}>
+                            <span className="fwstate-stats-compare__note-icon" aria-label={statsNote}>
+                                <Icon data={CircleInfo} size={14} />
+                            </span>
+                        </Tooltip>
+                    )}
+                </div>
+                <div className="fwstate-stats-compare__head">IPv4</div>
+                <div className="fwstate-stats-compare__head">IPv6</div>
+                {statsRows.map((row) => (
+                    <React.Fragment key={row.label}>
+                        <div className="fwstate-stats-compare__metric">{row.label}</div>
+                        <div className="fwstate-stats-compare__value fwstate-mono">{row.ipv4}</div>
+                        <div className="fwstate-stats-compare__value fwstate-mono">{row.ipv6}</div>
+                    </React.Fragment>
+                ))}
+            </div>
+        </section>
+    );
 
     return (
         <PageLayout header={pageHeader}>
@@ -1635,7 +1755,16 @@ const FWStatePage: React.FC = () => {
                                         </div>
                                         {activeSubTab === 'configuration' && configurationTab}
                                         {activeSubTab === 'links' && linksTab}
-                                        {activeSubTab === 'states' && statesTab}
+                                        {activeSubTab === 'states' && (
+                                            <StatesTabBody
+                                                key={currentName}
+                                                currentName={currentName}
+                                                statesQuery={statesQuery}
+                                                updateStatesQuery={updateStatesQuery}
+                                                canLoadStates={canLoadStates}
+                                                stats={stats}
+                                            />
+                                        )}
                                         {activeSubTab === 'statistics' && statisticsTab}
                                     </div>
                                 </div>
@@ -1677,7 +1806,6 @@ const FWStatePage: React.FC = () => {
                 confirmText={pendingAclLink?.linkedFwstateName && pendingAclLink.linkedFwstateName !== currentName ? 'Move here' : 'Link'}
                 cancelText="Cancel"
             />
-
         </PageLayout>
     );
 };
