@@ -1,12 +1,16 @@
 //! CLI for YANET "logging" core module.
 
-use core::error::Error;
-
 use clap::{ArgAction, CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::CompleteEnv;
 use tonic::codec::CompressionEncoding;
-use ync::{client::ConnectionArgs, logging};
+use ync::{
+    client::ConnectionArgs,
+    errors::Error,
+    output::{self, CommonFormat},
+};
 use ynpb::pb::{logging_client::LoggingClient, UpdateLevelRequest};
+
+const LOGGING_SERVICE: &str = "ynpb.Logging";
 
 /// Common functionality.
 #[derive(Debug, Clone, Parser)]
@@ -17,6 +21,9 @@ struct Cmd {
     pub mode: ModeCmd,
     #[command(flatten)]
     pub connection: ConnectionArgs,
+    /// Output format.
+    #[arg(long, value_enum, default_value = "human", global = true)]
+    pub format: CommonFormat,
     /// Be verbose in terms of logging.
     #[arg(short, action = ArgAction::Count, global = true)]
     pub verbose: u8,
@@ -66,16 +73,30 @@ pub async fn main() {
     CompleteEnv::with_factory(Cmd::command).complete();
 
     let cmd = Cmd::parse();
-    let _ = logging::init(cmd.verbose as usize);
+    ync::init(cmd.verbose, cmd.format);
 
     if let Err(err) = run(cmd).await {
-        log::error!("ERROR: {err}");
-        std::process::exit(1);
+        output::failure(&err);
+        std::process::exit(err.exit_code());
     }
 }
 
-async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
-    let channel = ync::client::connect(&cmd.connection).await?;
+impl ModeCmd {
+    pub fn action(&self) -> &'static str {
+        match self {
+            ModeCmd::Logging(LoggingCmd::SetLevel(..)) => "set-level",
+        }
+    }
+}
+
+async fn run(cmd: Cmd) -> Result<(), Error> {
+    let action = cmd.mode.action();
+    let endpoint = cmd.connection.endpoint.clone();
+
+    let channel = ync::client::connect(&cmd.connection)
+        .await
+        .map_err(|err| Error::from_connection(err, action, endpoint.clone()))?;
+
     let mut client = LoggingClient::new(channel)
         .send_compressed(CompressionEncoding::Gzip)
         .accept_compressed(CompressionEncoding::Gzip);
@@ -83,10 +104,14 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
     match cmd.mode {
         ModeCmd::Logging(LoggingCmd::SetLevel(cmd)) => {
             let request = UpdateLevelRequest {
-                level: ynpb::pb::LogLevel::from(cmd.level).into(),
+                level: ynpb::pb::LogLevel::from(cmd.level.clone()).into(),
             };
-            let _ = client.update_level(request).await?;
-            println!("OK");
+            client
+                .update_level(request)
+                .await
+                .map_err(|status| Error::from_status(status, action, endpoint.clone(), LOGGING_SERVICE))?;
+
+            output::success(action, format_args!("set log level to {:?}", cmd.level));
         }
     }
 
