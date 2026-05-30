@@ -1,7 +1,14 @@
 import React, { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { InstanceInfo } from '../../../api/inspect';
-import { MODULE_DESCRIPTIONS, MODULE_ROUTES, computeModulePipelineUsage, type AgentUsage } from '../inspect/utils';
+import {
+    computeModulePipelineUsage,
+    getModuleCardAgentUsage,
+    getModuleDescription,
+    getModuleRoute,
+    normalizeModuleName,
+    type AgentUsage,
+} from '../inspect/utils';
 import { MemoryBar } from '../inspect/MemoryBar';
 import { fmtIEC } from '../inspect/formatters';
 
@@ -20,14 +27,16 @@ export const DataplaneModules: React.FC<DataplaneModulesProps> = ({ instance, us
 
     const moduleData = useMemo(
         () =>
-            modules.map((m) => {
+            modules.map((m, idx) => {
                 const name = m.name ?? '';
+                const key = name || `module-${idx}`;
+                const moduleKey = normalizeModuleName(name);
                 const cfg = configs.filter(
-                    (c) => (c.type?.toLowerCase() ?? '') === name.toLowerCase(),
+                    (c) => normalizeModuleName(c.type ?? '') === moduleKey,
                 ).length;
-                const pipe = pipeUsage.get(name.toLowerCase()) ?? 0;
+                const pipe = pipeUsage.get(moduleKey) ?? 0;
                 const inUse = cfg > 0 || pipe > 0;
-                return { name, cfg, pipe, inUse, desc: MODULE_DESCRIPTIONS[name] ?? '' };
+                return { key, name, cfg, pipe, inUse, desc: getModuleDescription(name) };
             }),
         [modules, configs, pipeUsage],
     );
@@ -53,7 +62,7 @@ export const DataplaneModules: React.FC<DataplaneModulesProps> = ({ instance, us
                 style={{ gridTemplateColumns: `repeat(${colCount}, minmax(0, 1fr))` }}
             >
                 {moduleData.map((m) => {
-                    const href = MODULE_ROUTES[m.name];
+                    const href = getModuleRoute(m.name);
                     const isClickable = Boolean(href);
                     const className = [
                         'dash-module-card',
@@ -71,7 +80,7 @@ export const DataplaneModules: React.FC<DataplaneModulesProps> = ({ instance, us
                         : undefined;
                     return (
                         <div
-                            key={m.name}
+                            key={m.key}
                             className={className}
                             onClick={handleClick}
                             onKeyDown={handleKeyDown}
@@ -90,7 +99,7 @@ export const DataplaneModules: React.FC<DataplaneModulesProps> = ({ instance, us
                             <div className="dash-module-card__desc">{m.desc}</div>
                             <div className="dash-module-card__stats">{m.cfg}cfg · {m.pipe}pipe</div>
                             {(() => {
-                                const ag = usage.get(m.name);
+                                const ag = getModuleCardAgentUsage(usage, m.name);
                                 if (!ag) return null;
                                 return (
                                     <div className="dash-module-card__mem">

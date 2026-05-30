@@ -3,7 +3,13 @@ import { useNavigate } from 'react-router-dom';
 import type { InstanceInfo } from '../../../api/inspect';
 import { fmtIEC } from './formatters';
 import { MemoryBar } from './MemoryBar';
-import { MODULE_DESCRIPTIONS, MODULE_ROUTES, computeModulePipelineUsage } from './utils';
+import {
+    computeModulePipelineUsage,
+    getModuleCardAgentUsage,
+    getModuleDescription,
+    getModuleRoute,
+    normalizeModuleName,
+} from './utils';
 import type { AgentUsage } from './utils';
 
 export interface ModuleStripProps {
@@ -21,12 +27,14 @@ export const ModuleStrip: React.FC<ModuleStripProps> = ({ instance, usage }) => 
 
     const moduleData = useMemo(
         () =>
-            modules.map((m) => {
+            modules.map((m, idx) => {
                 const name = m.name ?? '';
-                const cfg = configs.filter((c) => (c.type?.toLowerCase() ?? '') === name.toLowerCase()).length;
-                const pipe = pipeUsage.get(name.toLowerCase()) ?? 0;
+                const key = name || `module-${idx}`;
+                const moduleKey = normalizeModuleName(name);
+                const cfg = configs.filter((c) => normalizeModuleName(c.type ?? '') === moduleKey).length;
+                const pipe = pipeUsage.get(moduleKey) ?? 0;
                 const inUse = cfg > 0 || pipe > 0;
-                return { name, cfg, pipe, inUse, desc: MODULE_DESCRIPTIONS[name] ?? '' };
+                return { key, name, cfg, pipe, inUse, desc: getModuleDescription(name) };
             }),
         [modules, configs, pipeUsage],
     );
@@ -50,7 +58,7 @@ export const ModuleStrip: React.FC<ModuleStripProps> = ({ instance, usage }) => 
                 style={{ gridTemplateColumns: `repeat(${modules.length || 1}, minmax(0, 1fr))` }}
             >
                 {moduleData.map((m) => {
-                    const href = MODULE_ROUTES[m.name];
+                    const href = getModuleRoute(m.name);
                     const isClickable = Boolean(href);
                     const className = [
                         'iv-module-card',
@@ -68,7 +76,7 @@ export const ModuleStrip: React.FC<ModuleStripProps> = ({ instance, usage }) => 
                         : undefined;
                     return (
                         <div
-                            key={m.name}
+                            key={m.key}
                             className={className}
                             onClick={handleClick}
                             onKeyDown={handleKeyDown}
@@ -85,7 +93,7 @@ export const ModuleStrip: React.FC<ModuleStripProps> = ({ instance, usage }) => 
                             <div className="iv-module-card__desc">{m.desc}</div>
                             <div className="iv-module-card__stats">{m.cfg}cfg · {m.pipe}pipe</div>
                             {(() => {
-                                const mem = usage.get(m.name);
+                                const mem = getModuleCardAgentUsage(usage, m.name);
                                 if (!mem) return null;
                                 return (
                                     <div className="iv-module-card__mem">
