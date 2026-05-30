@@ -1,7 +1,7 @@
 import React from 'react';
 import { IconPlain, IconVlan } from './components/Icons';
 import { MiniSpark } from './components/MiniSpark';
-import { fmtPps } from './components/MiniSpark';
+import { formatPps } from '../../../utils';
 import type { LocalDevice } from './types';
 import type { CounterHistoryEntry } from '../../../hooks/useCounterHistory';
 import type { DeviceCounterData } from '../../../hooks/useDeviceCounters';
@@ -64,8 +64,7 @@ export const DeviceListItem: React.FC<DeviceListItemProps> = ({
             </span>
 
             <span className="dv-row-metric">
-                <span className="dv-row-pps mono">{fmtPps(rxPps)}</span>
-                <span className="dv-row-pps-lbl">pps</span>
+                <span className="dv-row-pps mono">{formatPps(rxPps)}</span>
             </span>
 
             <span className="dv-row-status">

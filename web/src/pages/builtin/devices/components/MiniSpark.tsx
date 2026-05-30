@@ -1,23 +1,5 @@
 import React from 'react';
 
-/** Format packets per second without the unit suffix (used inside sparkline labels). */
-export const fmtPps = (n: number): string => {
-    if (n === 0) return '0';
-    if (n >= 1e9) return (n / 1e9).toFixed(2) + 'G';
-    if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
-    if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
-    return String(Math.round(n));
-};
-
-/** Format bytes per second with a unit suffix. */
-export const fmtBps = (n: number): string => {
-    if (n === 0) return '0';
-    if (n >= 1e9) return (n / 1e9).toFixed(2) + ' GB/s';
-    if (n >= 1e6) return (n / 1e6).toFixed(1) + ' MB/s';
-    if (n >= 1e3) return (n / 1e3).toFixed(1) + ' KB/s';
-    return n + ' B/s';
-};
-
 const pathFor = (values: number[], w: number, h: number, pad = 1): string => {
     if (!values.length) return '';
     const max = Math.max(1, ...values);

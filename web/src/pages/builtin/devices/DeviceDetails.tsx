@@ -9,7 +9,7 @@ import {
 } from './components/Icons';
 import { DeviceDiffModal } from './components/DeviceDiffModal';
 import { BigSpark } from './components/BigSpark';
-import { fmtPps, fmtBps } from './components/MiniSpark';
+import { formatBps, formatPps } from '../../../utils';
 import { PipelineTable } from './PipelineTable';
 import type { LocalDevice } from './types';
 import type { PipelineId } from '../../../api/pipelines';
@@ -56,10 +56,7 @@ const MetricBlock = ({
             </span>
             <span className="dv-metric-lbl">{subLabel}</span>
         </div>
-        <div className="dv-metric-val mono">
-            {isPps ? fmtPps(value) : fmtBps(value)}
-            {isPps && <span className="dv-metric-unit">pps</span>}
-        </div>
+        <div className="dv-metric-val mono">{isPps ? formatPps(value) : formatBps(value)}</div>
         <BigSpark
             deviceId={deviceId}
             series={series}
