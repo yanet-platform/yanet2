@@ -1,5 +1,6 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@gravity-ui/uikit';
+import { useSearchParams } from 'react-router-dom';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar } from '../../../components';
 import { useFIBDraft } from './useFIBDraft';
 import { useUnsavedChangesBlocker } from '../../builtin/_shared/lane-editor';
@@ -15,6 +16,9 @@ import {
 } from '../../_shared/draft';
 import '../../../styles/draft-page.scss';
 
+const QP_CONFIG = 'config';
+const QP_SEARCH = 'search';
+
 let idCounter = 0;
 const makeRowId = (): string => `new-${++idCounter}-${Date.now()}`;
 
@@ -23,9 +27,11 @@ const RoutePage: React.FC = () => {
         draftConfigs, loading, draftRows, serverRows, isDirty, anyDirty,
         dispatchDraft, commitConfig, discardConfig,
     } = useFIBDraft();
+    const [searchParams, setSearchParams] = useSearchParams();
 
-    const [activeConfig, setActiveConfig] = useState<string>('');
-    const [search, setSearch] = useState('');
+    const queryConfig = useMemo(() => searchParams.get(QP_CONFIG), [searchParams]);
+    const search = useMemo(() => searchParams.get(QP_SEARCH) || '', [searchParams]);
+
     const [activeRowId, setActiveRowId] = useState<string | null>(null);
     const [editingRowId, setEditingRowId] = useState<string | null>(null);
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -36,10 +42,56 @@ const RoutePage: React.FC = () => {
 
     const drawerRef = useRef<FIBDrawerHandle>(null);
     const dragDrop = useDraftDragDrop();
+    const { handleDragLeave } = dragDrop;
 
     useUnsavedChangesBlocker(anyDirty);
 
-    const currentConfig = activeConfig || draftConfigs[0] || '';
+    const updateParams = useCallback((updates: Record<string, string | null>): void => {
+        setSearchParams((prev) => {
+            const next = new URLSearchParams(prev);
+            for (const [key, value] of Object.entries(updates)) {
+                if (value === null || value === '') {
+                    next.delete(key);
+                } else {
+                    next.set(key, value);
+                }
+            }
+            return next;
+        }, { replace: true });
+    }, [setSearchParams]);
+
+    const setActiveConfig = useCallback((configName: string): void => {
+        updateParams({ [QP_CONFIG]: configName || null });
+    }, [updateParams]);
+
+    const currentConfig = (queryConfig && (loading || draftConfigs.includes(queryConfig))) ? queryConfig : (draftConfigs[0] || '');
+
+    useEffect(() => {
+        const updates: Record<string, string | null> = {};
+        if (!loading) {
+            if (!currentConfig) {
+                if (searchParams.get(QP_CONFIG) !== null) {
+                    updates[QP_CONFIG] = null;
+                }
+            } else if (queryConfig !== currentConfig) {
+                updates[QP_CONFIG] = currentConfig;
+            }
+        }
+        if (Object.keys(updates).length > 0) {
+            updateParams(updates);
+        }
+    }, [currentConfig, loading, queryConfig, searchParams, updateParams]);
+
+    useEffect(() => {
+        setActiveRowId(null);
+        setEditingRowId(null);
+        setSelectedIds(new Set());
+        setDeleteConfirmOpen(false);
+        setDeleteConfigOpen(false);
+        setDiffModalOpen(false);
+        handleDragLeave();
+    }, [currentConfig, handleDragLeave]);
+
     const rawRows: FIBRowItem[] = draftRows(currentConfig);
     const rawServerRows: FIBRowItem[] = serverRows(currentConfig);
     const currentIsDirty = isDirty(currentConfig);
@@ -103,6 +155,14 @@ const RoutePage: React.FC = () => {
         setEditingRowId(newRow.id);
     };
 
+    const handleSearchChange = useCallback((value: string): void => {
+        updateParams({ [QP_SEARCH]: value || null });
+    }, [updateParams]);
+
+    const handleConfigSelect = useCallback((cfg: string): void => {
+        setActiveConfig(cfg);
+    }, [setActiveConfig]);
+
     useDraftShortcuts({
         rows: rawRows, activeRowId, setActiveRowId, editingRowId, setEditingRowId,
         onDeleteRow: handlers.handleDeleteRow,
@@ -112,10 +172,10 @@ const RoutePage: React.FC = () => {
             <DraftPageToolbar
                 title="Route FIB"
                 searchValue={search}
-                onSearchChange={setSearch}
+                onSearchChange={handleSearchChange}
                 searchPlaceholder="Search prefix, MAC or device…"
                 yamlSlot={currentConfig ? (
-                    <FIBYamlIO configName={currentConfig} rows={rawRows} onImport={handlers.handleImportYaml} />
+                    <FIBYamlIO key={currentConfig} configName={currentConfig} rows={rawRows} onImport={handlers.handleImportYaml} />
                 ) : undefined}
             addLabel="Add Route"
             onAdd={openAdd}
@@ -139,7 +199,7 @@ const RoutePage: React.FC = () => {
                             activeConfig={currentConfig}
                             counts={routeCounts}
                             dirtyConfigs={dirtySet}
-                            onSelect={(c) => { setActiveConfig(c); setActiveRowId(null); setEditingRowId(null); setSelectedIds(new Set()); }}
+                            onSelect={handleConfigSelect}
                             onAddConfig={() => setAddConfigOpen(true)}
                         />
                         <div className="fw-content">
@@ -181,7 +241,14 @@ const RoutePage: React.FC = () => {
                     <FIBSaveDiffModal configName={currentConfig} draftRows={rawRows} serverRows={rawServerRows} onClose={() => setDiffModalOpen(false)} onApply={handlers.handleCommit} />
                 )}
 
-                <AddConfigModal open={addConfigOpen} onClose={() => setAddConfigOpen(false)} onCreate={(name) => { dispatchDraft({ type: 'ADD_CONFIG', configName: name }); setActiveConfig(name); setAddConfigOpen(false); }} title="Add FIB config" placeholder="e.g. route0" existingNames={draftConfigs} />
+                <AddConfigModal
+                    open={addConfigOpen}
+                    onClose={() => setAddConfigOpen(false)}
+                    onCreate={(name) => { dispatchDraft({ type: 'ADD_CONFIG', configName: name }); setActiveConfig(name); setAddConfigOpen(false); }}
+                    title="Add FIB config"
+                    placeholder="e.g. route0"
+                    existingNames={draftConfigs}
+                />
 
                 <DeleteConfigModal open={deleteConfigOpen} configName={currentConfig} onClose={() => setDeleteConfigOpen(false)} onConfirm={handlers.handleDeleteConfig} />
             </div>
