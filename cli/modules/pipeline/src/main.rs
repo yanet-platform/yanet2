@@ -1,20 +1,20 @@
 //! CLI for YANET "pipeline" module.
 
-use core::error::Error;
-
-use clap::{ArgAction, CommandFactory, Parser, ValueEnum};
+use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
 use commonpb::pb::{FunctionId, PipelineId};
-use serde::Serialize;
 use tonic::codec::CompressionEncoding;
 use ync::{
     client::{ConnectionArgs, LayeredChannel},
-    logging,
+    errors::Error,
+    output::{self, CommonFormat},
 };
 use ynpb::pb::{
     pipeline_service_client::PipelineServiceClient, DeletePipelineRequest, GetPipelineRequest, ListPipelinesRequest,
-    ListPipelinesResponse, Pipeline, UpdatePipelineRequest,
+    Pipeline, UpdatePipelineRequest,
 };
+
+const PIPELINE_SERVICE: &str = "ynpb.PipelineService";
 
 /// Pipeline module.
 #[derive(Debug, Clone, Parser)]
@@ -25,6 +25,9 @@ pub struct Cmd {
     pub mode: ModeCmd,
     #[command(flatten)]
     pub connection: ConnectionArgs,
+    /// Output format.
+    #[arg(long, value_enum, default_value = "human", global = true)]
+    pub format: CommonFormat,
     /// Be verbose in terms of logging.
     #[clap(short, action = ArgAction::Count, global = true)]
     pub verbose: u8,
@@ -33,7 +36,7 @@ pub struct Cmd {
 #[derive(Debug, Clone, Parser)]
 pub enum ModeCmd {
     /// List all pipelines.
-    List(ListCmd),
+    List,
     /// Show pipeline definition.
     Show(ShowCmd),
     /// Update pipeline configurations.
@@ -42,18 +45,15 @@ pub enum ModeCmd {
     Delete(DeleteCmd),
 }
 
-#[derive(Debug, Clone, Copy, Default, ValueEnum)]
-pub enum OutputFormat {
-    #[default]
-    Yaml,
-    Json,
-}
-
-#[derive(Debug, Clone, Parser)]
-pub struct ListCmd {
-    /// Output format.
-    #[clap(long, value_enum, default_value_t)]
-    pub format: OutputFormat,
+impl ModeCmd {
+    pub fn action(&self) -> &'static str {
+        match self {
+            ModeCmd::List => "list pipelines",
+            ModeCmd::Show(..) => "show pipeline",
+            ModeCmd::Update(..) => "update pipeline",
+            ModeCmd::Delete(..) => "delete pipeline",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -61,9 +61,6 @@ pub struct ShowCmd {
     /// Pipeline name.
     #[arg(short, long)]
     pub name: String,
-    /// Output format.
-    #[clap(long, value_enum, default_value_t)]
-    pub format: OutputFormat,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -88,49 +85,46 @@ pub async fn main() {
     CompleteEnv::with_factory(Cmd::command).complete();
 
     let cmd = Cmd::parse();
-    let _ = logging::init(cmd.verbose as usize);
+    ync::init(cmd.verbose, cmd.format);
 
     if let Err(err) = run(cmd).await {
-        log::error!("ERROR: {err}");
-        std::process::exit(1);
+        output::failure(&err);
+        std::process::exit(err.exit_code());
     }
 }
 
-async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
-    let mut service = PipelineService::new(&cmd.connection).await?;
+async fn run(cmd: Cmd) -> Result<(), Error> {
+    let action = cmd.mode.action();
+    let mut service = PipelineService::new(&cmd.connection, action).await?;
 
     match cmd.mode {
-        ModeCmd::List(cmd) => {
-            let response = service.list_pipelines().await?;
-            println_fmt(&response.ids, cmd.format)?;
+        ModeCmd::List => {
+            let ids = service.list_pipelines().await?;
+            output::data(&ids, ids.is_empty(), format_args!("no pipelines configured"), || {
+                print!(
+                    "{}",
+                    serde_yaml::to_string(&ids).expect("pipeline list YAML serialization must not fail")
+                );
+            });
         }
-        ModeCmd::Show(cmd) => {
-            let pipeline = service.get_pipeline(&cmd.name).await?;
-            println_fmt(&pipeline, cmd.format)?;
+        ModeCmd::Show(show) => {
+            let pipeline = service.get_pipeline(&show.name).await?;
+            output::data(&pipeline, false, format_args!(""), || {
+                print!(
+                    "{}",
+                    serde_yaml::to_string(&pipeline).expect("pipeline YAML serialization must not fail")
+                );
+            });
         }
-        ModeCmd::Update(cmd) => {
-            service.update_pipeline(cmd).await?;
-            println!("OK");
+        ModeCmd::Update(update) => {
+            let name = update.name.clone();
+            service.update_pipeline(update).await?;
+            output::success(action, format_args!("updated pipeline {name}"));
         }
-        ModeCmd::Delete(cmd) => {
-            service.delete_pipeline(cmd).await?;
-            println!("OK");
-        }
-    }
-
-    Ok(())
-}
-
-fn println_fmt<T>(value: &T, format: OutputFormat) -> Result<(), Box<dyn Error>>
-where
-    T: Serialize,
-{
-    match format {
-        OutputFormat::Yaml => {
-            print!("{}", serde_yaml::to_string(value)?);
-        }
-        OutputFormat::Json => {
-            println!("{}", serde_json::to_string(value)?);
+        ModeCmd::Delete(delete) => {
+            let name = delete.name.clone();
+            service.delete_pipeline(delete).await?;
+            output::success(action, format_args!("deleted pipeline {name}"));
         }
     }
 
@@ -139,31 +133,62 @@ where
 
 pub struct PipelineService {
     client: PipelineServiceClient<LayeredChannel>,
+    endpoint: String,
+    action: &'static str,
 }
 
 impl PipelineService {
-    pub async fn new(connection: &ConnectionArgs) -> Result<Self, Box<dyn Error>> {
-        let channel = ync::client::connect(connection).await?;
+    pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
+        let channel = ync::client::connect(connection)
+            .await
+            .map_err(|err| Error::from_connection(err, action, connection.endpoint.clone()))?;
         let client = PipelineServiceClient::new(channel)
             .send_compressed(CompressionEncoding::Gzip)
             .accept_compressed(CompressionEncoding::Gzip);
-        Ok(Self { client })
+
+        Ok(Self {
+            client,
+            endpoint: connection.endpoint.clone(),
+            action,
+        })
     }
 
-    pub async fn list_pipelines(&mut self) -> Result<ListPipelinesResponse, Box<dyn Error>> {
-        let response = self.client.list(ListPipelinesRequest {}).await?.into_inner();
-        Ok(response)
+    fn map_err(&self) -> impl FnOnce(tonic::Status) -> Error + '_ {
+        let endpoint = self.endpoint.clone();
+        let action = self.action;
+        move |status| Error::from_status(status, action, endpoint, PIPELINE_SERVICE)
     }
 
-    pub async fn get_pipeline(&mut self, name: &str) -> Result<Option<Pipeline>, Box<dyn Error>> {
+    pub async fn list_pipelines(&mut self) -> Result<Vec<PipelineId>, Error> {
+        let response = self
+            .client
+            .list(ListPipelinesRequest {})
+            .await
+            .map_err(self.map_err())?
+            .into_inner();
+
+        Ok(response.ids)
+    }
+
+    pub async fn get_pipeline(&mut self, name: &str) -> Result<Pipeline, Error> {
         let request = GetPipelineRequest {
             id: Some(PipelineId { name: name.to_string() }),
         };
-        let response = self.client.get(request).await?.into_inner();
-        Ok(response.pipeline)
+        let response = self.client.get(request).await.map_err(self.map_err())?.into_inner();
+
+        let pipeline = response.pipeline.ok_or_else(|| {
+            Error::from_status(
+                tonic::Status::not_found(format!("pipeline {name} not found")),
+                self.action,
+                self.endpoint.clone(),
+                PIPELINE_SERVICE,
+            )
+        })?;
+
+        Ok(pipeline)
     }
 
-    pub async fn update_pipeline(&mut self, cmd: UpdateCmd) -> Result<(), Box<dyn Error>> {
+    pub async fn update_pipeline(&mut self, cmd: UpdateCmd) -> Result<(), Error> {
         let request = UpdatePipelineRequest {
             pipeline: Some(Pipeline {
                 id: Some(PipelineId { name: cmd.name }),
@@ -175,17 +200,18 @@ impl PipelineService {
             }),
         };
 
-        self.client.update(request).await?;
-        log::info!("Successfully updated pipelines");
+        self.client.update(request).await.map_err(self.map_err())?;
+
         Ok(())
     }
 
-    pub async fn delete_pipeline(&mut self, cmd: DeleteCmd) -> Result<(), Box<dyn Error>> {
+    pub async fn delete_pipeline(&mut self, cmd: DeleteCmd) -> Result<(), Error> {
         let request = DeletePipelineRequest {
             id: Some(PipelineId { name: cmd.name }),
         };
-        self.client.delete(request).await?;
-        log::info!("Successfully deleted pipeline");
+
+        self.client.delete(request).await.map_err(self.map_err())?;
+
         Ok(())
     }
 }
