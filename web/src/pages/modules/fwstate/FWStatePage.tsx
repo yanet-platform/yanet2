@@ -399,6 +399,8 @@ interface EnrichedRow extends FwStateEntry {
     _dstFlags: string[];
     _pktFwd: number;
     _pktBwd: number;
+    _pktFwdExact: string;
+    _pktBwdExact: string;
 }
 
 const enrichRow = (row: FwStateEntry): EnrichedRow => {
@@ -416,6 +418,8 @@ const enrichRow = (row: FwStateEntry): EnrichedRow => {
     const { source: srcFlags, destination: dstFlags } = decodeFlags(row.value?.flags);
     const pktFwd = normalizeUnsignedIntToNumber(row.value?.packets_forward);
     const pktBwd = normalizeUnsignedIntToNumber(row.value?.packets_backward);
+    const pktFwdExact = normalizeUnsignedInt(row.value?.packets_forward) ?? '0';
+    const pktBwdExact = normalizeUnsignedInt(row.value?.packets_backward) ?? '0';
     const proto = row.key?.proto;
 
     let health: EnrichedRow['_health'] = 'ok';
@@ -427,7 +431,18 @@ const enrichRow = (row: FwStateEntry): EnrichedRow => {
         health = 'oneway';
     }
 
-    return { ...row, _ageMs: ageMs, _health: health, _proto: proto, _srcFlags: srcFlags, _dstFlags: dstFlags, _pktFwd: pktFwd, _pktBwd: pktBwd };
+    return {
+        ...row,
+        _ageMs: ageMs,
+        _health: health,
+        _proto: proto,
+        _srcFlags: srcFlags,
+        _dstFlags: dstFlags,
+        _pktFwd: pktFwd,
+        _pktBwd: pktBwd,
+        _pktFwdExact: pktFwdExact,
+        _pktBwdExact: pktBwdExact,
+    };
 };
 
 const ANOMALY_PRESETS = [
@@ -534,11 +549,16 @@ const FlatStateRow: React.FC<FlatStateRowProps> = ({ row, start, isExpired }) =>
                     : <span className="fws-badge fws-badge--green">local</span>}
             </div>
             <div style={colCellStyle(8)}>
-                <span className="fws-pktcell"><span className="fws-arrow">→</span>{fmtInt(row._pktFwd)}</span>
+                <span className="fws-pktcell" title={row._pktFwdExact}>
+                    <span className="fws-arrow">→</span>{fmtCompact(row._pktFwd)}
+                </span>
             </div>
             <div style={colCellStyle(9)}>
-                <span className={`fws-pktcell${row._pktBwd === 0 ? ' fws-pktcell--zero' : ''}`}>
-                    <span className="fws-arrow">←</span>{fmtInt(row._pktBwd)}
+                <span
+                    className={`fws-pktcell${row._pktBwd === 0 ? ' fws-pktcell--zero' : ''}`}
+                    title={row._pktBwdExact}
+                >
+                    <span className="fws-arrow">←</span>{fmtCompact(row._pktBwd)}
                 </span>
             </div>
             <div style={colCellStyle(10)}>
