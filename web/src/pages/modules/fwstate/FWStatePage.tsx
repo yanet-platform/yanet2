@@ -264,6 +264,69 @@ const FLAG_TONES: Array<{ bit: number; label: string }> = [
 
 const QP_TAB = 'tab';
 const QP_CONFIG = 'config';
+const QP_FAMILY = 'family';
+const QP_DIRECTION = 'direction';
+const QP_LAYER = 'layer';
+const QP_EXPIRED = 'expired';
+
+interface StatesQuery {
+    isIpv6: boolean;
+    layerIndex: number;
+    direction: Direction;
+    includeExpired: boolean;
+}
+
+const getStatesQuery = (params: URLSearchParams): StatesQuery => {
+    const familyValue = params.get(QP_FAMILY);
+    const directionValue = params.get(QP_DIRECTION);
+    const layerValue = params.get(QP_LAYER);
+    const expiredValue = params.get(QP_EXPIRED);
+
+    const isIpv6 = familyValue === 'ipv4' ? false : true;
+    const direction = directionValue === 'backward' ? Direction.BACKWARD : Direction.FORWARD;
+    const layerIndex = (() => {
+        const normalized = normalizeUnsignedInt(layerValue);
+        if (!normalized) return 0;
+        return normalizeUnsignedIntToNumber(normalized);
+    })();
+    const includeExpired = expiredValue === '1';
+
+    return {
+        isIpv6,
+        layerIndex,
+        direction,
+        includeExpired,
+    };
+};
+
+const getStatesQueryParamValues = (query: StatesQuery): Record<string, string | null> => {
+    return {
+        [QP_FAMILY]: query.isIpv6 ? null : 'ipv4',
+        [QP_DIRECTION]: query.direction === Direction.BACKWARD ? 'backward' : null,
+        [QP_LAYER]: query.layerIndex > 0 ? String(query.layerIndex) : null,
+        [QP_EXPIRED]: query.includeExpired ? '1' : null,
+    };
+};
+
+const getStatesQueryParamUpdates = (params: URLSearchParams, query: StatesQuery): Record<string, string | null> => {
+    const normalized = getStatesQueryParamValues(query);
+    const updates: Record<string, string | null> = {};
+
+    if (params.get(QP_FAMILY) !== normalized[QP_FAMILY]) {
+        updates[QP_FAMILY] = normalized[QP_FAMILY];
+    }
+    if (params.get(QP_DIRECTION) !== normalized[QP_DIRECTION]) {
+        updates[QP_DIRECTION] = normalized[QP_DIRECTION];
+    }
+    if (params.get(QP_LAYER) !== normalized[QP_LAYER]) {
+        updates[QP_LAYER] = normalized[QP_LAYER];
+    }
+    if (params.get(QP_EXPIRED) !== normalized[QP_EXPIRED]) {
+        updates[QP_EXPIRED] = normalized[QP_EXPIRED];
+    }
+
+    return updates;
+};
 
 type StateSubTab = 'configuration' | 'links' | 'states' | 'statistics';
 
@@ -514,12 +577,6 @@ const FWStatePage: React.FC = () => {
     const [stateCursor, setStateCursor] = useState<number>(0);
     const [stateHasMore, setStateHasMore] = useState(true);
     const [stateLoading, setStateLoading] = useState(false);
-    const [statesQuery, setStatesQuery] = useState({
-        isIpv6: true,
-        layerIndex: 0,
-        direction: Direction.FORWARD,
-        includeExpired: false,
-    });
     const [pendingAclLink, setPendingAclLink] = useState<{
         aclName: string;
         linkedFwstateName: string | null;
@@ -578,6 +635,17 @@ const FWStatePage: React.FC = () => {
     const updateActiveSubTab = useCallback((tab: StateSubTab): void => {
         updateParams({ [QP_TAB]: tab });
     }, [updateParams]);
+    const statesQuery = useMemo(() => getStatesQuery(searchParams), [searchParams]);
+    const updateStatesQuery = useCallback((query: StatesQuery): void => {
+        updateParams(getStatesQueryParamValues(query));
+    }, [updateParams]);
+    const statesQueryParamUpdates = useMemo(() => getStatesQueryParamUpdates(searchParams, statesQuery), [searchParams, statesQuery]);
+
+    useEffect(() => {
+        if (Object.keys(statesQueryParamUpdates).length > 0) {
+            updateParams(statesQueryParamUpdates);
+        }
+    }, [statesQueryParamUpdates, updateParams]);
 
     useEffect(() => {
         const updates: Record<string, string | null> = {};
@@ -847,27 +915,35 @@ const FWStatePage: React.FC = () => {
             const key = event.key.toLowerCase();
             if (key === '4') {
                 event.preventDefault();
-                setStatesQuery((prev) => (prev.isIpv6 ? { ...prev, isIpv6: false } : prev));
+                if (statesQuery.isIpv6) {
+                    updateStatesQuery({ ...statesQuery, isIpv6: false });
+                }
                 return;
             }
             if (key === '6') {
                 event.preventDefault();
-                setStatesQuery((prev) => (prev.isIpv6 ? prev : { ...prev, isIpv6: true }));
+                if (!statesQuery.isIpv6) {
+                    updateStatesQuery({ ...statesQuery, isIpv6: true });
+                }
                 return;
             }
             if (key === 'f') {
                 event.preventDefault();
-                setStatesQuery((prev) => (prev.direction === Direction.FORWARD ? prev : { ...prev, direction: Direction.FORWARD }));
+                if (statesQuery.direction !== Direction.FORWARD) {
+                    updateStatesQuery({ ...statesQuery, direction: Direction.FORWARD });
+                }
                 return;
             }
             if (key === 'b') {
                 event.preventDefault();
-                setStatesQuery((prev) => (prev.direction === Direction.BACKWARD ? prev : { ...prev, direction: Direction.BACKWARD }));
+                if (statesQuery.direction !== Direction.BACKWARD) {
+                    updateStatesQuery({ ...statesQuery, direction: Direction.BACKWARD });
+                }
                 return;
             }
             if (key === 'e') {
                 event.preventDefault();
-                setStatesQuery((prev) => ({ ...prev, includeExpired: !prev.includeExpired }));
+                updateStatesQuery({ ...statesQuery, includeExpired: !statesQuery.includeExpired });
             }
         };
 
@@ -875,7 +951,7 @@ const FWStatePage: React.FC = () => {
         return () => {
             document.removeEventListener('keydown', onKeyDown);
         };
-    }, [setStatesQuery]);
+    }, [statesQuery, updateStatesQuery]);
 
     const counts = useMemo(() => {
         const m = new Map<string, number>();
@@ -1156,7 +1232,7 @@ const FWStatePage: React.FC = () => {
                         width="max"
                         className="fwstate-states-toolbar__family"
                         value={statesQuery.isIpv6 ? 'ipv6' : 'ipv4'}
-                        onUpdate={(value) => setStatesQuery((prev) => ({ ...prev, isIpv6: value === 'ipv6' }))}
+                        onUpdate={(value) => updateStatesQuery({ ...statesQuery, isIpv6: value === 'ipv6' })}
                     >
                         <SegmentedRadioGroup.Option value="ipv6" content="IPv6" />
                         <SegmentedRadioGroup.Option value="ipv4" content="IPv4" />
@@ -1167,7 +1243,7 @@ const FWStatePage: React.FC = () => {
                     <div title="Direction (f/b)">
                     <Select
                         value={[String(statesQuery.direction)]}
-                        onUpdate={(v) => setStatesQuery((prev) => ({ ...prev, direction: Number(v[0] ?? 0) as Direction }))}
+                        onUpdate={(v) => updateStatesQuery({ ...statesQuery, direction: Number(v[0] ?? 0) as Direction })}
                         options={[{ value: String(Direction.FORWARD), content: 'forward' }, { value: String(Direction.BACKWARD), content: 'backward' }]}
                     />
                     </div>
@@ -1178,14 +1254,14 @@ const FWStatePage: React.FC = () => {
                         <TextInput
                             type="number"
                             value={String(statesQuery.layerIndex)}
-                            onUpdate={(v) => setStatesQuery((prev) => ({ ...prev, layerIndex: Math.max(0, Number(v) || 0) }))}
+                            onUpdate={(v) => updateStatesQuery({ ...statesQuery, layerIndex: normalizeUnsignedIntToNumber(v) })}
                         />
                     </div>
                 </div>
                 <div className="fwstate-states-toolbar__control fwstate-states-toolbar__control--switch">
                     <Text className="fwstate-states-toolbar__label">Include expired</Text>
                     <div title="Include expired (e)">
-                        <Switch checked={statesQuery.includeExpired} onUpdate={(includeExpired) => setStatesQuery((prev) => ({ ...prev, includeExpired }))} />
+                        <Switch checked={statesQuery.includeExpired} onUpdate={(includeExpired) => updateStatesQuery({ ...statesQuery, includeExpired })} />
                     </div>
                 </div>
             </div>
