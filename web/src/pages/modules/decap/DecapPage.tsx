@@ -1,5 +1,6 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@gravity-ui/uikit';
+import { useSearchParams } from 'react-router-dom';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar } from '../../../components';
 import { usePrefixDraft } from './usePrefixDraft';
 import { useUnsavedChangesBlocker } from '../../builtin/_shared/lane-editor';
@@ -17,15 +18,18 @@ import '../../../styles/draft-page.scss';
 
 let idCounter = 0;
 const makeRowId = (): string => `new-${++idCounter}-${Date.now()}`;
+const QP_CONFIG = 'config';
+const QP_SEARCH = 'search';
 
 const DecapPage: React.FC = () => {
     const {
         draftConfigs, loading, draftRows, serverRows, isDirty, anyDirty,
         dispatchDraft, commitConfig, discardConfig,
     } = usePrefixDraft();
+    const [searchParams, setSearchParams] = useSearchParams();
 
-    const [activeConfig, setActiveConfig] = useState<string>('');
-    const [search, setSearch] = useState('');
+    const queryConfig = useMemo(() => searchParams.get(QP_CONFIG), [searchParams]);
+    const search = useMemo(() => searchParams.get(QP_SEARCH) || '', [searchParams]);
     const [activeRowId, setActiveRowId] = useState<string | null>(null);
     const [editingRowId, setEditingRowId] = useState<string | null>(null);
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -36,10 +40,56 @@ const DecapPage: React.FC = () => {
 
     const drawerRef = useRef<PrefixDrawerHandle>(null);
     const dragDrop = useDraftDragDrop();
+    const { handleDragLeave } = dragDrop;
 
     useUnsavedChangesBlocker(anyDirty);
 
-    const currentConfig = activeConfig || draftConfigs[0] || '';
+    const updateParams = useCallback((updates: Record<string, string | null>): void => {
+        setSearchParams((prev) => {
+            const next = new URLSearchParams(prev);
+            for (const [key, value] of Object.entries(updates)) {
+                if (value === null || value === '') {
+                    next.delete(key);
+                } else {
+                    next.set(key, value);
+                }
+            }
+            return next;
+        }, { replace: true });
+    }, [setSearchParams]);
+
+    const setActiveConfig = useCallback((configName: string): void => {
+        updateParams({ [QP_CONFIG]: configName || null });
+    }, [updateParams]);
+
+    const currentConfig = (queryConfig && (loading || draftConfigs.includes(queryConfig))) ? queryConfig : (draftConfigs[0] || '');
+
+    useEffect(() => {
+        const updates: Record<string, string | null> = {};
+        if (!loading) {
+            if (!currentConfig) {
+                if (searchParams.get(QP_CONFIG) !== null) {
+                    updates[QP_CONFIG] = null;
+                }
+            } else if (queryConfig !== currentConfig) {
+                updates[QP_CONFIG] = currentConfig;
+            }
+        }
+        if (Object.keys(updates).length > 0) {
+            updateParams(updates);
+        }
+    }, [currentConfig, loading, queryConfig, searchParams, updateParams]);
+
+    useEffect(() => {
+        setActiveRowId(null);
+        setEditingRowId(null);
+        setSelectedIds(new Set());
+        setDeleteConfirmOpen(false);
+        setDeleteConfigOpen(false);
+        setDiffModalOpen(false);
+        handleDragLeave();
+    }, [currentConfig, handleDragLeave]);
+
     const rawRows: PrefixRowItem[] = draftRows(currentConfig);
     const rawServerRows: PrefixRowItem[] = serverRows(currentConfig);
     const currentIsDirty = isDirty(currentConfig);
@@ -107,10 +157,12 @@ const DecapPage: React.FC = () => {
             <DraftPageToolbar
                 title="Decap"
                 searchValue={search}
-                onSearchChange={setSearch}
+                onSearchChange={(value) => {
+                    updateParams({ [QP_SEARCH]: value || null });
+                }}
                 searchPlaceholder="Search prefix…"
                 yamlSlot={currentConfig ? (
-                <PrefixYamlIO configName={currentConfig} rows={rawRows} onImport={handlers.handleImportYaml} />
+                <PrefixYamlIO key={currentConfig} configName={currentConfig} rows={rawRows} onImport={handlers.handleImportYaml} />
             ) : undefined}
             addLabel="Add Prefix"
             onAdd={openAdd}
@@ -134,7 +186,7 @@ const DecapPage: React.FC = () => {
                             activeConfig={currentConfig}
                             counts={prefixCounts}
                             dirtyConfigs={dirtySet}
-                            onSelect={(c) => { setActiveConfig(c); setActiveRowId(null); setEditingRowId(null); setSelectedIds(new Set()); }}
+                            onSelect={setActiveConfig}
                             onAddConfig={() => setAddConfigOpen(true)}
                         />
                         <div className="fw-content">
