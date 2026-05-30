@@ -1,7 +1,7 @@
-import React, { useCallback, useDeferredValue, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Flex, Icon, Label, Text } from '@gravity-ui/uikit';
 import { Pause, Play, Plus } from '@gravity-ui/icons';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, SearchInput } from '../../../components';
 import { useAclDraft } from './useAclDraft';
 import { useUnsavedChangesBlocker } from '../../builtin/_shared/lane-editor';
@@ -20,6 +20,9 @@ import { AddConfigModal, DeleteConfigModal, BulkDeleteModal } from '../../_share
 import '../../../styles/draft-page.scss';
 import './acl.scss';
 
+const QP_CONFIG = 'config';
+const QP_SEARCH = 'search';
+
 const AclPage: React.FC = () => {
     const {
         draftConfigs,
@@ -35,11 +38,10 @@ const AclPage: React.FC = () => {
         commitDeleteConfig,
         discardConfig,
     } = useAclDraft();
+    const [searchParams, setSearchParams] = useSearchParams();
 
-    const [activeConfig, setActiveConfig] = useState<string>('');
     const [paused, setPaused] = useState(false);
     const [enabledCounterNames, setEnabledCounterNames] = useState<Set<string>>(new Set());
-    const [search, setSearch] = useState('');
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
     const [activeRowId, setActiveRowId] = useState<string | null>(null);
     const [drawer, setDrawer] = useState<{ open: boolean; mode: 'add' | 'edit'; item: RuleItem | null }>({
@@ -51,12 +53,75 @@ const AclPage: React.FC = () => {
     const [addConfigOpen, setAddConfigOpen] = useState(false);
     const [deleteConfigOpen, setDeleteConfigOpen] = useState(false);
     const [diffModalOpen, setDiffModalOpen] = useState(false);
+    const [deleteConfigTarget, setDeleteConfigTarget] = useState<string | null>(null);
+    const [deleteInFlightConfig, setDeleteInFlightConfig] = useState<string | null>(null);
+    const [bulkDeleteConfig, setBulkDeleteConfig] = useState<string | null>(null);
+    const [bulkDeleteRuleIds, setBulkDeleteRuleIds] = useState<string[]>([]);
     const drawerRef = useRef<RuleDrawerHandle>(null);
     const navigate = useNavigate();
+    const queryConfig = useMemo(() => searchParams.get(QP_CONFIG), [searchParams]);
+    const search = useMemo(() => searchParams.get(QP_SEARCH) || '', [searchParams]);
+
+    const currentConfig = (queryConfig && (loading || draftConfigs.includes(queryConfig) || queryConfig === deleteInFlightConfig))
+        ? queryConfig
+        : (draftConfigs[0] || '');
+    const updateParams = useCallback((updates: Record<string, string | null>): void => {
+        setSearchParams((prev) => {
+            const next = new URLSearchParams(prev);
+            for (const [key, value] of Object.entries(updates)) {
+                if (value === null || value === '') {
+                    next.delete(key);
+                } else {
+                    next.set(key, value);
+                }
+            }
+            return next;
+        }, { replace: true });
+    }, [setSearchParams]);
+
+    const clearConfigParamIfCurrent = useCallback((name: string): void => {
+        setSearchParams((prev) => {
+            if (prev.get(QP_CONFIG) !== name) {
+                return prev;
+            }
+            const next = new URLSearchParams(prev);
+            next.delete(QP_CONFIG);
+            return next;
+        }, { replace: true });
+    }, [setSearchParams]);
+
+    useEffect(() => {
+        const updates: Record<string, string | null> = {};
+        if (!loading) {
+            if (!currentConfig) {
+                if (searchParams.get(QP_CONFIG) !== null) {
+                    updates[QP_CONFIG] = null;
+                }
+            } else if (queryConfig !== currentConfig) {
+                updates[QP_CONFIG] = currentConfig;
+            }
+        }
+        if (Object.keys(updates).length > 0) {
+            updateParams(updates);
+        }
+    }, [currentConfig, loading, queryConfig, searchParams, updateParams]);
 
     useUnsavedChangesBlocker(anyDirty);
 
-    const currentConfig = activeConfig || draftConfigs[0] || '';
+    useEffect(() => {
+        setSelectedIds(new Set());
+        setActiveRowId(null);
+        setDrawer((d) => ({ ...d, open: false, item: null }));
+        setDeleteConfirmOpen(false);
+        setDeleteConfigOpen(false);
+        setDiffModalOpen(false);
+        setDeleteConfigTarget(null);
+        setBulkDeleteConfig(null);
+        setBulkDeleteRuleIds([]);
+        setEnabledCounterNames(new Set());
+        setPaused(false);
+    }, [currentConfig]);
+
     const currentFwStateName = fwstateName(currentConfig);
     const rawRules: Rule[] = draftRules(currentConfig);
     const rawIds: string[] = draftRuleIds(currentConfig);
@@ -123,25 +188,69 @@ const AclPage: React.FC = () => {
         setDrawer({ open: true, mode: 'add', item: { ...item, rule: { ...item.rule } } });
     }, []);
 
-    const handleBulkDelete = useCallback((): void => {
-        const indices = visibleItems
-            .filter(item => selectedIds.has(item.id))
-            .map(item => item.index);
-        dispatchDraft({ type: 'REMOVE_RULES', configName: currentConfig, indices });
-        setSelectedIds(new Set());
+    const handleOpenBulkDelete = useCallback((): void => {
+        if (!currentConfig) {
+            return;
+        }
+        setBulkDeleteConfig(currentConfig);
+        setBulkDeleteRuleIds(Array.from(selectedIds));
+        setDeleteConfirmOpen(true);
+    }, [currentConfig, selectedIds]);
+
+    const handleCloseBulkDelete = useCallback((): void => {
         setDeleteConfirmOpen(false);
-    }, [selectedIds, visibleItems, currentConfig, dispatchDraft]);
+        setBulkDeleteConfig(null);
+        setBulkDeleteRuleIds([]);
+    }, []);
+
+    const handleBulkDelete = useCallback((): void => {
+        if (!bulkDeleteConfig) {
+            handleCloseBulkDelete();
+            return;
+        }
+        const selectedIdSet = new Set(bulkDeleteRuleIds);
+        const targetIds = draftRuleIds(bulkDeleteConfig);
+        const indices = targetIds
+            .flatMap((id, index) => (selectedIdSet.has(id) ? [index] : []));
+
+        dispatchDraft({ type: 'REMOVE_RULES', configName: bulkDeleteConfig, indices });
+        setSelectedIds(new Set());
+        setBulkDeleteConfig(null);
+        setBulkDeleteRuleIds([]);
+        setDeleteConfirmOpen(false);
+    }, [bulkDeleteConfig, bulkDeleteRuleIds, draftRuleIds, dispatchDraft, handleCloseBulkDelete]);
+
+    const handleOpenDeleteConfig = useCallback((): void => {
+        if (!currentConfig) {
+            return;
+        }
+        setDeleteConfigTarget(currentConfig);
+        setDeleteConfigOpen(true);
+    }, [currentConfig]);
+
+    const handleCloseDeleteConfig = useCallback((): void => {
+        setDeleteConfigOpen(false);
+        setDeleteConfigTarget(null);
+    }, []);
 
     const handleDeleteConfig = useCallback(async (): Promise<void> => {
-        const name = currentConfig;
+        if (!deleteConfigTarget) {
+            setDeleteConfigOpen(false);
+            return;
+        }
+        const name = deleteConfigTarget;
         setDeleteConfigOpen(false);
+        setDeleteInFlightConfig(name);
         try {
             await commitDeleteConfig(name);
-            setActiveConfig('');
+            clearConfigParamIfCurrent(name);
         } catch {
             // Toast already surfaced by the hook.
+        } finally {
+            setDeleteInFlightConfig(null);
+            setDeleteConfigTarget(null);
         }
-    }, [currentConfig, commitDeleteConfig]);
+    }, [deleteConfigTarget, commitDeleteConfig, clearConfigParamIfCurrent]);
 
     const handleSave = useCallback(async (): Promise<void> => {
         await saveConfig(currentConfig);
@@ -179,8 +288,16 @@ const AclPage: React.FC = () => {
         } else {
             dispatchDraft({ type: 'REPLACE_ALL_RULES', configName: target, rules });
         }
-        setActiveConfig(target);
-    }, [currentConfig, draftRules, dispatchDraft]);
+        updateParams({ [QP_CONFIG]: target || null });
+    }, [currentConfig, draftRules, dispatchDraft, updateParams]);
+
+    const handleTabSelect = useCallback((cfg: string): void => {
+        updateParams({ [QP_CONFIG]: cfg || null });
+    }, [updateParams]);
+
+    const handleSearchChange = useCallback((value: string): void => {
+        updateParams({ [QP_SEARCH]: value || null });
+    }, [updateParams]);
 
     useKeyboardShortcuts({
         onNewRule: openAdd,
@@ -209,7 +326,7 @@ const AclPage: React.FC = () => {
             <div style={{ flexBasis: 380, flexShrink: 1 }}>
                 <SearchInput
                     value={search}
-                    onUpdate={setSearch}
+                    onUpdate={handleSearchChange}
                     placeholder="Search rules…"
                 />
             </div>
@@ -225,6 +342,7 @@ const AclPage: React.FC = () => {
             )}
             {currentConfig && (
                 <YamlIO
+                    key={currentConfig}
                     configName={currentConfig}
                     rules={rawRules}
                     onImport={handleImportYaml}
@@ -264,11 +382,7 @@ const AclPage: React.FC = () => {
                             activeConfig={currentConfig}
                             counts={ruleCounts}
                             dirtyConfigs={dirtySet}
-                            onSelect={c => {
-                                setActiveConfig(c);
-                                setSelectedIds(new Set());
-                                setActiveRowId(null);
-                            }}
+                            onSelect={handleTabSelect}
                             onAddConfig={() => setAddConfigOpen(true)}
                         />
 
@@ -282,7 +396,7 @@ const AclPage: React.FC = () => {
                                 currentIsDirty={currentIsDirty}
                                 onSave={handleSavePress}
                                 onDiscard={handleDiscard}
-                                onDeleteConfig={() => setDeleteConfigOpen(true)}
+                                onDeleteConfig={handleOpenDeleteConfig}
                                 rates={rates}
                                 enabledCounterNames={enabledCounterNames}
                                 onToggleCounter={handleToggleCounter}
@@ -295,17 +409,17 @@ const AclPage: React.FC = () => {
                     <BulkBar
                         count={selectedIds.size}
                         itemNoun="rule"
-                        onDelete={() => setDeleteConfirmOpen(true)}
+                        onDelete={handleOpenBulkDelete}
                         onClear={() => setSelectedIds(new Set())}
                     />
                 )}
 
                 <BulkDeleteModal
-                    open={deleteConfirmOpen}
-                    count={selectedIds.size}
+                    open={Boolean(deleteConfirmOpen && bulkDeleteConfig)}
+                    count={bulkDeleteRuleIds.length}
                     itemNoun="rule"
-                    configName={currentConfig}
-                    onClose={() => setDeleteConfirmOpen(false)}
+                    configName={bulkDeleteConfig || ''}
+                    onClose={handleCloseBulkDelete}
                     onConfirm={handleBulkDelete}
                 />
 
@@ -314,7 +428,7 @@ const AclPage: React.FC = () => {
                     onClose={() => setAddConfigOpen(false)}
                     onCreate={name => {
                         dispatchDraft({ type: 'ADD_CONFIG', configName: name });
-                        setActiveConfig(name);
+                        updateParams({ [QP_CONFIG]: name });
                         setAddConfigOpen(false);
                     }}
                     placeholder="e.g. acl0"
@@ -322,9 +436,9 @@ const AclPage: React.FC = () => {
                 />
 
                 <DeleteConfigModal
-                    open={deleteConfigOpen}
-                    configName={currentConfig}
-                    onClose={() => setDeleteConfigOpen(false)}
+                    open={Boolean(deleteConfigOpen && deleteConfigTarget)}
+                    configName={deleteConfigTarget || ''}
+                    onClose={handleCloseDeleteConfig}
                     onConfirm={handleDeleteConfig}
                 />
 
