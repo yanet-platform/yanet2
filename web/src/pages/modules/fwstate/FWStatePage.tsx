@@ -301,7 +301,7 @@ const getStatesQuery = (params: URLSearchParams): StatesQuery => {
 
 const getStatesQueryParamValues = (query: StatesQuery): Record<string, string | null> => {
     return {
-        [QP_FAMILY]: query.isIpv6 ? null : 'ipv4',
+        [QP_FAMILY]: query.isIpv6 ? 'ipv6' : 'ipv4',
         [QP_DIRECTION]: query.direction === Direction.BACKWARD ? 'backward' : null,
         [QP_LAYER]: query.layerIndex > 0 ? String(query.layerIndex) : null,
         [QP_EXPIRED]: query.includeExpired ? '1' : null,
@@ -642,13 +642,7 @@ const FWStatePage: React.FC = () => {
     const statesQueryParamUpdates = useMemo(() => getStatesQueryParamUpdates(searchParams, statesQuery), [searchParams, statesQuery]);
 
     useEffect(() => {
-        if (Object.keys(statesQueryParamUpdates).length > 0) {
-            updateParams(statesQueryParamUpdates);
-        }
-    }, [statesQueryParamUpdates, updateParams]);
-
-    useEffect(() => {
-        const updates: Record<string, string | null> = {};
+        const updates: Record<string, string | null> = { ...statesQueryParamUpdates };
         const activeTab = getStateSubTab(searchParams);
         if (activeSubTab !== activeTab) {
             setActiveSubTab(activeTab);
@@ -668,7 +662,7 @@ const FWStatePage: React.FC = () => {
         if (Object.keys(updates).length > 0) {
             updateParams(updates);
         }
-    }, [activeSubTab, configNames.length, currentName, loading, queryConfig, searchParams, updateParams]);
+    }, [activeSubTab, configNames.length, currentName, loading, queryConfig, searchParams, statesQueryParamUpdates, updateParams]);
     useUnsavedChangesBlocker(anyDirty);
 
     useEffect(() => {
