@@ -1,4 +1,4 @@
-import React, { useRef, useMemo, useState, useCallback, useEffect } from 'react';
+import React, { useRef, useMemo, useCallback, useEffect, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { TextInput } from '@gravity-ui/uikit';
 import { EmptyState } from '../../../components';
@@ -81,6 +81,8 @@ export interface PacketTableProps {
     packets: CapturedPacket[];
     selectedPacketId: number | null;
     onSelectPacket: (packet: CapturedPacket | null) => void;
+    searchQuery: string;
+    onSearchQueryChange: (value: string) => void;
     isCapturing: boolean;
     configName: string | null;
     onClearPackets: () => void;
@@ -100,6 +102,8 @@ export const PacketTable: React.FC<PacketTableProps> = ({
     packets,
     selectedPacketId,
     onSelectPacket,
+    searchQuery,
+    onSearchQueryChange,
     isCapturing,
     configName,
     onClearPackets,
@@ -112,7 +116,6 @@ export const PacketTable: React.FC<PacketTableProps> = ({
     const containerRef = useRef<HTMLDivElement>(null);
     const parentRef = useRef<HTMLDivElement>(null);
     const containerHeight = useContainerHeight(containerRef);
-    const [searchQuery, setSearchQuery] = useState('');
     const [sortState, setSortState] = useState<PacketSortState>({ column: null, direction: 'asc' });
 
     const handleSort = useCallback((column: PacketSortColumn) => {
@@ -222,8 +225,8 @@ export const PacketTable: React.FC<PacketTableProps> = ({
     }, [onSelectPacket]);
 
     const handleSearchChange = useCallback((value: string) => {
-        setSearchQuery(value);
-    }, []);
+        onSearchQueryChange(value);
+    }, [onSearchQueryChange]);
 
     const handleToggleAutoScroll = useCallback(() => {
         onAutoScrollChange(!autoScroll);

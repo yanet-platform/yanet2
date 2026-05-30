@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useRef, useMemo, useEffect } from 'react';
 import { Button, Flex, Icon, Text } from '@gravity-ui/uikit';
 import { ArrowDownToLine, Plus } from '@gravity-ui/icons';
+import { useSearchParams } from 'react-router-dom';
 import { PageLayout, PageLoader } from '../../../components';
 import { toaster } from '../../../utils';
 import {
@@ -20,6 +21,8 @@ import '../../../styles/draft-page.scss';
 import './pdump.scss';
 
 const NEW_PACKET_TTL_MS = 1200;
+const QP_CONFIG = 'config';
+const QP_SEARCH = 'search';
 const EMPTY_PPS_HISTORY: number[] = [];
 const PCAP_GLOBAL_HEADER_BYTES = 24;
 const PCAP_PACKET_HEADER_BYTES = 16;
@@ -72,12 +75,15 @@ const createPcapBuffer = (records: CapturedPacket[]): ArrayBuffer => {
 
 const PdumpPage: React.FC = () => {
     const { configs, loading, refetch, deleteConfig } = usePdumpConfigs();
-
-    const [activeConfig, setActiveConfig] = useState<string>('');
+    const [searchParams, setSearchParams] = useSearchParams();
+    const queryConfig = useMemo(() => searchParams.get(QP_CONFIG), [searchParams]);
+    const searchQuery = useMemo(() => searchParams.get(QP_SEARCH) || '', [searchParams]);
     const [editingConfig, setEditingConfig] = useState<PdumpConfigInfo | null>(null);
     const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
     const [deletingConfigName, setDeletingConfigName] = useState<string | null>(null);
     const [isDeleting, setIsDeleting] = useState(false);
+    const [deleteInFlightConfig, setDeleteInFlightConfig] = useState<string | null>(null);
+    const [excludedConfigNames, setExcludedConfigNames] = useState<Set<string>>(new Set());
     const [paused, setPaused] = useState(false);
     const [autoScroll, setAutoScroll] = useState(true);
     const [pinnedPacket, setPinnedPacket] = useState<CapturedPacket | null>(null);
@@ -99,6 +105,31 @@ const PdumpPage: React.FC = () => {
         setNewPacketIds(new Set());
     }, []);
 
+    const updateSearchParams = useCallback((updates: Record<string, string | null>): void => {
+        setSearchParams(prev => {
+            const next = new URLSearchParams(prev);
+            for (const [key, value] of Object.entries(updates)) {
+                if (value === null || value === '') {
+                    next.delete(key);
+                } else {
+                    next.set(key, value);
+                }
+            }
+            return next;
+        }, { replace: true });
+    }, [setSearchParams]);
+
+    const clearConfigParamIfCurrent = useCallback((name: string): void => {
+        setSearchParams((prev) => {
+            if (prev.get(QP_CONFIG) !== name) {
+                return prev;
+            }
+            const next = new URLSearchParams(prev);
+            next.delete(QP_CONFIG);
+            return next;
+        }, { replace: true });
+    }, [setSearchParams]);
+
     const handleTogglePause = useCallback(() => {
         setPaused(prev => {
             const next = !prev;
@@ -113,7 +144,66 @@ const PdumpPage: React.FC = () => {
         });
     }, []);
 
-    const currentConfig = activeConfig || configs[0]?.name || '';
+    const availableConfigNames = useMemo(() => (
+        configs
+            .map(({ name }) => name)
+            .filter(name => !excludedConfigNames.has(name))
+    ), [configs, excludedConfigNames]);
+    const hasAvailableConfigs = availableConfigNames.length > 0;
+    const currentConfig = useMemo(() => {
+        if (!loading) {
+            if (
+                queryConfig
+                && (
+                    availableConfigNames.includes(queryConfig)
+                    || queryConfig === deleteInFlightConfig
+                )
+            ) {
+                return queryConfig;
+            }
+            if (queryConfig && !hasAvailableConfigs) {
+                return '';
+            }
+            return hasAvailableConfigs ? availableConfigNames[0] || '' : '';
+        }
+        return queryConfig || (hasAvailableConfigs ? availableConfigNames[0] || '' : '');
+    }, [availableConfigNames, deleteInFlightConfig, hasAvailableConfigs, loading, queryConfig]);
+
+    useEffect(() => {
+        const updates: Record<string, string | null> = {};
+        if (!loading) {
+            if (!hasAvailableConfigs) {
+                if (searchParams.get(QP_CONFIG) !== null) {
+                    updates[QP_CONFIG] = null;
+                }
+            } else if (queryConfig !== currentConfig) {
+                updates[QP_CONFIG] = currentConfig || null;
+            }
+        }
+        if (Object.keys(updates).length > 0) {
+            updateSearchParams(updates);
+        }
+    }, [currentConfig, hasAvailableConfigs, loading, queryConfig, searchParams, updateSearchParams]);
+
+    useEffect(() => {
+        if (excludedConfigNames.size === 0) {
+            return;
+        }
+
+        setExcludedConfigNames(prev => {
+            const next = new Set(prev);
+            let changed = false;
+
+            for (const name of prev) {
+                if (!configs.some(config => config.name === name)) {
+                    next.delete(name);
+                    changed = true;
+                }
+            }
+
+            return changed ? next : prev;
+        });
+    }, [configs, excludedConfigNames]);
 
     const currentConfigInfo = useMemo(
         () => configs.find(c => c.name === currentConfig) ?? null,
@@ -192,6 +282,13 @@ const PdumpPage: React.FC = () => {
         }
     }, []);
 
+    useEffect(() => {
+        setPinnedPacket(null);
+        setDrawerOpen(false);
+        restorePreInspectState();
+        clearNewPacketState();
+    }, [currentConfig, clearNewPacketState, restorePreInspectState]);
+
     const handleSelectPacket = useCallback((packet: CapturedPacket | null) => {
         if (packet) {
             if (preInspectStateRef.current === null) {
@@ -262,34 +359,44 @@ const PdumpPage: React.FC = () => {
     }, [refetch]);
 
     const handleSelectTab = useCallback((name: string) => {
-        setActiveConfig(name);
-        setPinnedPacket(null);
-        setDrawerOpen(false);
-        restorePreInspectState();
-        clearNewPacketState();
-    }, [clearNewPacketState, restorePreInspectState]);
+        updateSearchParams({ [QP_CONFIG]: name || null });
+    }, [updateSearchParams]);
 
     const handleOpenDeleteDialog = useCallback((configName: string) => {
         setDeletingConfigName(configName);
     }, []);
 
     const handleCloseDeleteDialog = useCallback(() => {
+        if (isDeleting) {
+            return;
+        }
         setDeletingConfigName(null);
-    }, []);
+    }, [isDeleting]);
 
     const handleConfirmDelete = useCallback(async () => {
         if (!deletingConfigName) return;
         setIsDeleting(true);
+        setDeleteInFlightConfig(deletingConfigName);
         try {
-            await deleteConfig(deletingConfigName);
-            if (activeConfig === deletingConfigName) {
-                setActiveConfig('');
+            const deleted = await deleteConfig(deletingConfigName);
+            if (deleted) {
+                setExcludedConfigNames(prev => {
+                    const next = new Set(prev);
+                    next.add(deletingConfigName);
+                    return next;
+                });
+                clearConfigParamIfCurrent(deletingConfigName);
+                setDeletingConfigName(null);
             }
-            setDeletingConfigName(null);
         } finally {
+            setDeleteInFlightConfig(null);
             setIsDeleting(false);
         }
-    }, [deletingConfigName, deleteConfig, activeConfig]);
+    }, [clearConfigParamIfCurrent, deleteConfig, deletingConfigName]);
+
+    const handleSearchChange = useCallback((value: string): void => {
+        updateSearchParams({ [QP_SEARCH]: value || null });
+    }, [updateSearchParams]);
 
     const handleExportPcap = useCallback(() => {
         if (packets.length === 0) {
@@ -378,11 +485,14 @@ const PdumpPage: React.FC = () => {
 
                             <div className="pdump-page__table">
                                 <PacketTable
+                                    key={currentConfig || 'empty'}
                                     packets={packets}
                                     isCapturing={capture.liveConfig === currentConfig}
                                     configName={currentConfig || null}
+                                    searchQuery={searchQuery}
                                     selectedPacketId={pinnedPacket?.id ?? null}
                                     onSelectPacket={handleSelectPacket}
+                                    onSearchQueryChange={handleSearchChange}
                                     onClearPackets={handleClearPackets}
                                     newPacketIds={newPacketIds}
                                     paused={paused}
