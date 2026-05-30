@@ -153,7 +153,7 @@ typedef struct fwmap {
 	uint32_t keys_chunk_cnt;
 	uint32_t values_chunk_cnt;
 
-	uint32_t _;
+	uint32_t index_size;
 
 	uint64_t max_deadline;
 	struct fwmap *next;
@@ -366,7 +366,7 @@ fwmap_bfree_aligned(
 
 static inline uint8_t *
 fwmap_get_key(fwmap_t *map, uint32_t idx) {
-	if (idx > map->index_mask) {
+	if (idx >= map->index_size) {
 		return NULL;
 	}
 	uint32_t chunk_idx = 0;
@@ -384,7 +384,7 @@ fwmap_get_key(fwmap_t *map, uint32_t idx) {
 
 static inline uint8_t *
 fwmap_get_value(fwmap_t *map, uint32_t idx) {
-	if (idx > map->index_mask) {
+	if (idx >= map->index_size) {
 		return NULL;
 	}
 
@@ -460,7 +460,7 @@ fwmap_max_deadline(const fwmap_t *map) {
 static inline fwmap_stats_t
 fwmap_get_stats(const fwmap_t *map) {
 	fwmap_stats_t stats = {
-		.index_size = map->index_mask + 1,
+		.index_size = map->index_size,
 		.extra_bucket_count = map->extra_size,
 		.max_chain_length = fwmap_max_chain_length(map),
 		.layer_count = fwmap_layer_count(map),
@@ -504,7 +504,7 @@ fwmap_get_stats(const fwmap_t *map) {
 	total_memory += key_store_array_size;
 
 	// 6. Key chunks (actual key storage)
-	total_memory += (size_t)map->key_size * (map->index_mask + 1);
+	total_memory += (size_t)map->key_size * (map->index_size);
 
 	// 7. Value store array (array of pointers to value chunks)
 	size_t value_store_array_size =
@@ -512,7 +512,7 @@ fwmap_get_stats(const fwmap_t *map) {
 	total_memory += value_store_array_size;
 
 	// 8. Value chunks (actual value storage)
-	total_memory += (size_t)map->value_size * (map->index_mask + 1);
+	total_memory += (size_t)map->value_size * (map->index_size);
 
 	stats.memory_used = total_memory;
 
@@ -555,7 +555,7 @@ fwmap_next_free_key(fwmap_t *map) {
 	// Happy path optimization: check if key_cursor is already exhausted.
 	// On lazy ordering platforms this check may not see the latest value,
 	// but we rely on the atomic operation below for correctness.
-	if (map->key_cursor > map->index_mask) {
+	if (map->key_cursor >= map->index_size) {
 		return -1;
 	}
 	// Atomically increment and return the next free key.
@@ -585,7 +585,8 @@ fwmap_next_free_key(fwmap_t *map) {
 	// round.
 	uint32_t curr_key =
 		__atomic_fetch_add(&map->key_cursor, 1, __ATOMIC_RELAXED);
-	if (curr_key > map->index_mask) {
+	if (curr_key >= map->index_size) {
+		__atomic_fetch_sub(&map->key_cursor, 1, __ATOMIC_RELAXED);
 		return -1;
 	}
 
@@ -672,7 +673,7 @@ fwmap_free(fwmap_t *map, struct memory_context *ctx) {
 
 	uint8_t **key_chunks = ADDR_OF(&map->key_store);
 	if (key_chunks) {
-		uint32_t remaining_keys = map->index_mask + 1;
+		uint32_t remaining_keys = map->index_size;
 		for (size_t i = 0; i < map->keys_chunk_cnt; i++) {
 			// In case of allocation failure, the first null pointer
 			// indicates the failed allocation.
@@ -701,7 +702,7 @@ fwmap_free(fwmap_t *map, struct memory_context *ctx) {
 
 	uint8_t **value_chunks = ADDR_OF(&map->value_store);
 	if (value_chunks) {
-		uint32_t remaining_values = map->index_mask + 1;
+		uint32_t remaining_values = map->index_size;
 		for (size_t i = 0; i < map->values_chunk_cnt; i++) {
 			// In case of allocation failure, the first null pointer
 			// indicates the failed allocation.
@@ -831,7 +832,8 @@ fwmap_new(const fwmap_config_t *user_config, struct memory_context *ctx) {
 	map->update_value_fn_id = config.update_value_fn_id;
 	map->promote_value_fn_id = config.promote_value_fn_id;
 
-	map->index_mask = index_size - 1;
+	map->index_size = index_size;
+	map->index_mask = index_size / FWMAP_BUCKET_ENTRIES - 1;
 	// Shift amount equals the number of bits set in the chunk_index_mask
 	map->buckets_chunk_shift = __builtin_popcount(FWMAP_CHUNK_INDEX_MASK);
 
@@ -1079,26 +1081,33 @@ fwmap_entry(
 	}
 
 	size_t chain_length = 0;
-	fwmap_bucket_t *last_bucket = bucket;
-
-	bool has_free = false;
 	uint32_t vacant_slot = 0;
 	fwmap_bucket_t *bucket_to_insert = NULL;
+	fwmap_bucket_t *last_bucket = bucket;
 
+	/*
+	 * The loop looks for a given key and returns containing bucket:slot
+	 * or the first free location in case if het key was not found.
+	 */
 	while (bucket) {
+		last_bucket = bucket;
 		chain_length += 1;
 
 		// Search for and update existing key.
 		for (uint32_t i = 0; i < FWMAP_BUCKET_ENTRIES; i++) {
-			if (bucket->sig[i] == sig &&
-			    bucket->deadline[i] > now) {
+			if (bucket->deadline[i] < now &&
+			    bucket_to_insert == NULL) {
+				bucket_to_insert = bucket;
+				vacant_slot = i;
+			}
+
+			if (bucket->sig[i] == sig) {
 				uint32_t idx = bucket->idx[i];
 				uint8_t *other = fwmap_get_key(map, idx);
 				if (key_equal_fn(key, other, map->key_size)) {
-					uint8_t *value_ptr =
-						fwmap_get_value(map, idx);
-					// Update deadline for existing entry.
+					bool empty = bucket->deadline[i] <= now;
 					bucket->deadline[i] = deadline;
+
 					fwmap_update_counters(
 						map,
 						worker_idx,
@@ -1106,115 +1115,94 @@ fwmap_entry(
 						0,
 						deadline
 					);
+
 					return (fwmap_entry_t
 					){.idx = idx,
 					  .key = other,
-					  .value = value_ptr,
-					  .empty = false};
-				}
-			} else if (!bucket_to_insert) {
-				if (!bucket->sig[i]) {
-					has_free = true;
-					vacant_slot = i;
-					bucket_to_insert = bucket;
-					break;
-				} else if (bucket->deadline[i] < now) {
-					vacant_slot = i;
-					bucket_to_insert = bucket;
+					  .value = fwmap_get_value(map, idx),
+					  .empty = empty};
 				}
 			}
-		}
-		last_bucket = bucket;
 
-		if (has_free) {
-			// If a free slot exists, there should be no next bucket
-			// (free slots only occur at the end of a chain).
-			break;
+			if (bucket->deadline[i] == 0) {
+				// The end of the chain
+				if (bucket_to_insert == NULL) {
+					bucket_to_insert = bucket;
+					vacant_slot = i;
+				}
+				goto stop_lookup;
+			}
 		}
 
 		// Index 0 represents a null pointer
 		bucket = bucket->next ? &extra[bucket->next] : NULL;
 	}
+stop_lookup:
 
-	if (bucket_to_insert) {
-		// Insert new key-value pair into an empty slot in existing
-		// buckets.
-		int64_t idx = (int64_t)bucket_to_insert->idx[vacant_slot];
-		if (has_free) {
-			idx = fwmap_next_free_key(map);
-			if (idx == -1) {
-				return (fwmap_entry_t){0};
-			}
-			bucket_to_insert->idx[vacant_slot] = (uint32_t)idx;
+	// key was not found
+	if (bucket_to_insert == NULL) {
+		/*
+		 * There is no space in existing buckets try to allocate an
+		 * extra one.
+		 */
+		if (map->extra_free_idx >= map->extra_size) {
+			return (fwmap_entry_t){0};
 		}
 
-		// Get the key slot and store the key.
-		uint8_t *new_key = fwmap_get_key(map, (uint32_t)idx);
-		uint8_t *value_ptr = fwmap_get_value(map, idx);
-
-		// Store signature and key index in the bucket.
-		bucket_to_insert->sig[vacant_slot] = sig;
-		bucket_to_insert->deadline[vacant_slot] = deadline;
-
-		// Update counters.
-		fwmap_update_counters(
-			map, worker_idx, chain_length, (int)has_free, deadline
+		uint32_t new_bucket_idx = __atomic_fetch_add(
+			&map->extra_free_idx, 1, __ATOMIC_RELAXED
 		);
+		if (new_bucket_idx >= map->extra_size) {
+			__atomic_fetch_sub(
+				&map->extra_free_idx, 1, __ATOMIC_RELAXED
+			);
+			return (fwmap_entry_t){0};
+		}
 
-		return (fwmap_entry_t
-		){.idx = idx, .key = new_key, .value = value_ptr, .empty = true
-		};
+		last_bucket->next = new_bucket_idx;
+
+		fwmap_bucket_t *new_bucket = &extra[new_bucket_idx];
+		// Free extra buckets are already zero-initialized (zeroed at
+		// creation and during clear calls).
+		new_bucket->next = 0;
+
+		bucket_to_insert = new_bucket;
+		vacant_slot = 0;
+
+		chain_length += 1;
 	}
 
-	// All slots in the existing chain are full; need to allocate a new
-	// bucket.
-	// extra_size is bounded by FWMAP_CHUNK_INDEX_MAX_SIZE, so u32 overflow
-	// is impossible here (see overflow analysis in fwmap_next_free_key).
-	if (map->extra_free_idx >= map->extra_size) {
-		// No more extra buckets available.
-		return (fwmap_entry_t){0};
+	/*
+	 * Check if slot already contains an existing key/value pair and
+	 * replace them or allocate a new one.
+	 */
+	int64_t idx;
+	if (bucket_to_insert->deadline[vacant_slot] > 0) {
+		idx = (int64_t)bucket_to_insert->idx[vacant_slot];
+		fwmap_update_counters(
+			map, worker_idx, chain_length, 0, deadline
+		);
+	} else {
+		// No assigned key/value pair - try to allocate a new one
+		idx = fwmap_next_free_key(map);
+		if (idx == -1) {
+			return (fwmap_entry_t){0};
+		}
+		fwmap_update_counters(
+			map, worker_idx, chain_length, 1, deadline
+		);
 	}
 
-	// Allocate new extra bucket.
-	// extra_size is bounded by FWMAP_CHUNK_INDEX_MAX_SIZE, so u32 overflow
-	// is impossible here (see overflow analysis in fwmap_next_free_key).
-	uint32_t new_bucket_idx =
-		__atomic_fetch_add(&map->extra_free_idx, 1, __ATOMIC_RELAXED);
-	if (new_bucket_idx >= map->extra_size) {
-		return (fwmap_entry_t){0};
-	}
+	bucket_to_insert->idx[vacant_slot] = (uint32_t)idx;
+	bucket_to_insert->sig[vacant_slot] = sig;
+	bucket_to_insert->deadline[vacant_slot] = deadline;
 
-	fwmap_bucket_t *new_bucket = &extra[new_bucket_idx];
-	// Free extra buckets are already zero-initialized (zeroed at creation
-	// and during clear calls).
-	new_bucket->next = 0;
-
-	// Allocate new key.
-	int64_t idx = fwmap_next_free_key(map);
-	if (idx == -1) {
-		// No more space for keys.
-		return (fwmap_entry_t){0};
-	}
-
-	// Store key and value.
-	uint8_t *new_key = fwmap_get_key(map, (uint32_t)idx);
-	uint8_t *value_ptr = fwmap_get_value(map, idx);
-
-	// Initialize new bucket with the key.
-	new_bucket->sig[0] = sig;
-	new_bucket->idx[0] = (uint32_t)idx;
-	new_bucket->deadline[0] = deadline;
-
-	last_bucket->next = new_bucket_idx;
-
-	// Update counters.
-	chain_length++;
-	fwmap_update_counters(
-		map, worker_idx, chain_length, 1, new_bucket->deadline[0]
-	);
-
-	return (fwmap_entry_t
-	){.idx = idx, .key = new_key, .value = value_ptr, .empty = true};
+	return (fwmap_entry_t){
+		.idx = idx,
+		.key = fwmap_get_key(map, (uint32_t)idx),
+		.value = fwmap_get_value(map, (uint32_t)idx),
+		.empty = true,
+	};
 }
 
 static inline int64_t

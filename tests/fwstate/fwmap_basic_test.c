@@ -467,6 +467,40 @@ test_capacity_limits(void *arena) {
 	printf("  Capacity limits test passed\n");
 }
 
+static void
+test_overwrite(void *arena) {
+	printf("\n--- Overwrite Test ---\n");
+	struct memory_context *ctx =
+		init_context_from_arena(arena, ARENA_SIZE, "overwrite");
+
+	fwmap_config_t cfg;
+	setup_test_config(&cfg, 32, 2);
+	cfg.hash_seed = 0x12345678;
+
+	/* Create map */
+	fwmap_t *map = fwmap_new(&cfg, ctx);
+	assert(map != NULL);
+	assert(fwmap_empty(map));
+	assert(fwmap_size(map) == 0);
+
+	for (int k = 0; k < 4096; ++k) {
+		int ret = fwmap_put(map, WORKER_ID, k, 3, &k, &k, NULL);
+		assert(ret >= 0);
+	}
+
+	for (int k = 4094; k < 4096; ++k) {
+		int *retrieved = NULL;
+		int ret = fwmap_get(map, now, &k, (void **)&retrieved, NULL);
+		assert(ret >= 0);
+		assert(*retrieved == k);
+	}
+
+	fwmap_free(map, ctx);
+	verify_memory_leaks(ctx, "rewrite");
+	memory_context_fini(ctx);
+	printf("  Rewrite test passed\n");
+}
+
 int
 main(void) {
 	printf("%s%s=== FWMap Basic Tests ===%s\n\n", C_BOLD, C_WHITE, C_RESET);
@@ -482,6 +516,7 @@ main(void) {
 	printf("%s%sRunning test suite...%s\n", C_BOLD, C_BLUE, C_RESET);
 
 	verify_constants();
+	test_overwrite(arena);
 	test_lifecycle(arena);
 	test_bulk_operations(arena);
 	test_collision_chains(arena);
