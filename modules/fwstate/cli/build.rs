@@ -1,7 +1,7 @@
 use core::error::Error;
 
 pub fn main() -> Result<(), Box<dyn Error>> {
-    println!("cargo:rerun-if-changed=../controlplane/fwstatepb/fwstate.proto");
+    println!("cargo:rerun-if-changed=../controlplane/fwstatepb/v1/fwstate.proto");
     println!("cargo:rerun-if-changed=../../../common/commonpb/ipaddr.proto");
     println!("cargo:rerun-if-changed=../../../common/commonpb/macaddr.proto");
 
@@ -10,7 +10,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
         .build_server(false)
         .extern_path(".commonpb", "::commonpb::pb")
         .message_attribute(".", "#[derive(Serialize)]")
-        .compile_protos(&["fwstatepb/fwstate.proto"], &["../controlplane", "../../.."])?;
+        .compile_protos(&["fwstatepb/v1/fwstate.proto"], &["../controlplane", "../../.."])?;
 
     Ok(())
 }

@@ -8,8 +8,6 @@ modules:
       # Modules not yet migrated.
       - controlplane
       - devices
-      - modules/acl
-      - modules/fwstate
       - modules/route-mpls
 lint:
   use:

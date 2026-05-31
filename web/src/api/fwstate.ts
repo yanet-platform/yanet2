@@ -119,8 +119,8 @@ export interface GetStatsRequest {
     name?: string;
 }
 
-const fwStateService = createService('fwstatepb.FWStateService');
-const fwStateStreamingService = createStreamingService('fwstatepb.FWStateService');
+const fwStateService = createService('modules.fwstate.controlplane.fwstatepb.v1.FWStateService');
+const fwStateStreamingService = createStreamingService('modules.fwstate.controlplane.fwstatepb.v1.FWStateService');
 
 export const fwstate = {
     listConfigs: (options?: CallOptions): Promise<ListConfigsResponse> =>

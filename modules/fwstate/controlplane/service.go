@@ -12,7 +12,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	"github.com/yanet-platform/yanet2/modules/fwstate/controlplane/fwstatepb"
+	"github.com/yanet-platform/yanet2/modules/fwstate/controlplane/fwstatepb/v1"
 )
 
 // ACLServiceProvider is the interface through which the fwstate service drives

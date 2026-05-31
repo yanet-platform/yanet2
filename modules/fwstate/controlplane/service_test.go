@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/yanet-platform/yanet2/common/commonpb"
-	"github.com/yanet-platform/yanet2/modules/fwstate/controlplane/fwstatepb"
+	"github.com/yanet-platform/yanet2/modules/fwstate/controlplane/fwstatepb/v1"
 )
 
 // TestValidateSyncConfigDstEther checks that dst_ether validation

@@ -88,8 +88,6 @@ proto-lint:
 		--exclude controlplane \
 		--exclude devices \
 		--exclude operators/bird-adapter \
-		--exclude modules/acl \
-		--exclude modules/fwstate \
 		--exclude modules/route-mpls
 
 go-cache-clean:

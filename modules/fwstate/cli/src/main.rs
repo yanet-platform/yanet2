@@ -28,7 +28,7 @@ mod args;
 pub mod fwstatepb {
     use serde::Serialize;
 
-    tonic::include_proto!("fwstatepb");
+    tonic::include_proto!("modules.fwstate.controlplane.fwstatepb.v1");
 }
 
 /// FWState module CLI.

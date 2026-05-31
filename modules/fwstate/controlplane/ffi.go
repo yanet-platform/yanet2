@@ -3,7 +3,7 @@ package fwstate
 import (
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/fwstate/bindings/go/cfwstate"
-	"github.com/yanet-platform/yanet2/modules/fwstate/controlplane/fwstatepb"
+	"github.com/yanet-platform/yanet2/modules/fwstate/controlplane/fwstatepb/v1"
 )
 
 type FwStateConfig struct {

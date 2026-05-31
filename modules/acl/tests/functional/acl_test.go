@@ -19,7 +19,7 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/acl/bindings/go/cacl"
 	acl "github.com/yanet-platform/yanet2/modules/acl/controlplane"
-	"github.com/yanet-platform/yanet2/modules/acl/controlplane/aclpb"
+	"github.com/yanet-platform/yanet2/modules/acl/controlplane/aclpb/v1"
 )
 
 // Memory sizes for the ACL functional harness.

@@ -1,11 +1,11 @@
 syntax = "proto3";
 
-package fwstatepb;
+package modules.fwstate.controlplane.fwstatepb.v1;
 
 import "common/commonpb/ipaddr.proto";
 import "common/commonpb/macaddr.proto";
 
-option go_package = "github.com/yanet-platform/yanet2/modules/fwstate/controlplane/fwstatepb;fwstatepb";
+option go_package = "github.com/yanet-platform/yanet2/modules/fwstate/controlplane/fwstatepb/v1;fwstatepb";
 
 service FWStateService {
   // Updates the complete FWState configuration

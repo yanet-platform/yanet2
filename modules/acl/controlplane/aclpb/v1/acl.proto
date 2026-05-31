@@ -1,11 +1,11 @@
 syntax = "proto3";
 
-package aclpb;
+package modules.acl.controlplane.aclpb.v1;
 
 import "common/filterpb/filter.proto";
 import "common/commonpb/metric.proto";
 
-option go_package = "github.com/yanet-platform/yanet2/modules/acl/controlplane/aclpb;aclpb";
+option go_package = "github.com/yanet-platform/yanet2/modules/acl/controlplane/aclpb/v1;aclpb";
 
 // ACLService is a service for ACL module.
 service ACLService {

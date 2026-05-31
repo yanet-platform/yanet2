@@ -91,7 +91,7 @@ export interface DeleteConfigResponse {
     deleted?: boolean;
 }
 
-const aclService = createService('aclpb.ACLService');
+const aclService = createService('modules.acl.controlplane.aclpb.v1.ACLService');
 
 export const acl = {
     listConfigs: (options?: CallOptions): Promise<ListConfigsResponse> =>
