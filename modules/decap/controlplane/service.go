@@ -11,7 +11,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/yanet-platform/yanet2/common/go/xnetip"
-	"github.com/yanet-platform/yanet2/modules/decap/controlplane/decappb"
+	"github.com/yanet-platform/yanet2/modules/decap/controlplane/decappb/v1"
 )
 
 var (

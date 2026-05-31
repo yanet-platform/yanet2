@@ -24,7 +24,7 @@ export interface RemovePrefixesRequest {
 
 export interface RemovePrefixesResponse { }
 
-const decapService = createService('decappb.DecapService');
+const decapService = createService('modules.decap.controlplane.decappb.v1.DecapService');
 
 export const decap = {
     showConfig: (request: ShowConfigRequest, options?: CallOptions): Promise<ShowConfigResponse> => {

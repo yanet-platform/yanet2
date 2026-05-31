@@ -10,7 +10,6 @@ modules:
       - devices
       - modules/acl
       - modules/balancer2
-      - modules/decap
       - modules/dscp
       - modules/fwstate
       - modules/nat64

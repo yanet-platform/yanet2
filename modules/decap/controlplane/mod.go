@@ -7,7 +7,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	"github.com/yanet-platform/yanet2/modules/decap/controlplane/decappb"
+	"github.com/yanet-platform/yanet2/modules/decap/controlplane/decappb/v1"
 )
 
 // DecapModule is a control-plane component of a module that is responsible for
@@ -21,7 +21,7 @@ type DecapModule struct {
 }
 
 func NewDecapModule(cfg *Config, log *zap.Logger) (*DecapModule, error) {
-	log = log.With(zap.String("module", "decappb.DecapService"))
+	log = log.With(zap.String("module", "modules.decap.controlplane.decappb.v1.DecapService"))
 
 	shm, err := ffi.AttachSharedMemory(cfg.MemoryPath.Unwrap())
 	if err != nil {
@@ -58,7 +58,7 @@ func (m *DecapModule) Endpoint() string {
 }
 
 func (m *DecapModule) ServicesNames() []string {
-	return []string{"decappb.DecapService"}
+	return []string{"modules.decap.controlplane.decappb.v1.DecapService"}
 }
 
 func (m *DecapModule) RegisterService(server *grpc.Server) {

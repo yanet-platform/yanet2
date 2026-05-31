@@ -18,7 +18,7 @@ use ync::{
 pub mod decappb {
     use serde::Serialize;
 
-    tonic::include_proto!("decappb");
+    tonic::include_proto!("modules.decap.controlplane.decappb.v1");
 }
 
 /// Decap module.

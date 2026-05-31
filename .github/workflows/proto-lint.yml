@@ -49,7 +49,6 @@ jobs:
                                                 --exclude modules/acl \
                                                 --exclude modules/balancer \
                                                 --exclude modules/balancer2 \
-                                                --exclude modules/decap \
                                                 --exclude modules/dscp \
                                                 --exclude modules/fwstate \
                                                 --exclude modules/nat64 \
