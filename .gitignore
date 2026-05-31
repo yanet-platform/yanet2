@@ -93,12 +93,6 @@ buildclang/
 build/
 web/dist/
 
-# AI
-.ai
-.cursor*
-.cline*
-memory-bank
-
 # generated files
 *.pb.go
 
@@ -123,9 +117,6 @@ default.profraw
 /tests/functional/ubuntu-24.04-minimal-cloudimg-amd64.img
 /tests/functional/yanet-test.qcow2
 
-# meson 1.9
-subprojects/.wraplock
-
 # node
 node_modules/
 .vite/
@@ -139,8 +130,14 @@ cscope.*
 # Pre-built .deb packages for container image builds.
 deploy/packages/
 
+### AI ###
+.ai
+.cursor/
+.claude/
+.codex/
+
+### Uncategorized ###
 .arch/
 .assets/
-.claude/
 .docs/
 .secrets/
