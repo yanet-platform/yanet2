@@ -62,7 +62,7 @@ impl FibConfig {
 
 fn parse_mac(s: &str) -> Result<MacAddress, Box<dyn Error>> {
     let mac: MacAddr = s.parse()?;
-    Ok(MacAddress { addr: mac.as_u64() })
+    Ok(mac.into())
 }
 
 impl TryFrom<FibNexthop> for routepb::FibNexthop {

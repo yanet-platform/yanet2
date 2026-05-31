@@ -196,13 +196,13 @@ impl NeighbourService {
                 let next_hop: IpAddr =
                     IpAddr::try_from(entry.next_hop.as_ref().ok_or("neighbour entry missing next_hop")?)?;
 
-                let link_addr = {
-                    let addr = entry.link_addr.map(|v| v.addr).unwrap_or_default();
-                    MacAddr::from(addr)
+                let link_addr = match entry.link_addr {
+                    Some(v) => MacAddr::try_from(&v)?,
+                    None => MacAddr::from(0),
                 };
-                let hardware_addr = {
-                    let addr = entry.hardware_addr.map(|v| v.addr).unwrap_or_default();
-                    MacAddr::from(addr)
+                let hardware_addr = match entry.hardware_addr {
+                    Some(v) => MacAddr::try_from(&v)?,
+                    None => MacAddr::from(0),
                 };
 
                 Ok(NeighbourEntry {
@@ -313,7 +313,7 @@ impl NeighbourService {
 
 fn parse_mac(s: &str) -> Result<MacAddress, Box<dyn Error>> {
     let mac: MacAddr = s.parse()?;
-    Ok(MacAddress { addr: mac.as_u64() })
+    Ok(mac.into())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]

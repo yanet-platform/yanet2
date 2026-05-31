@@ -5,7 +5,7 @@ use core::{
     str::FromStr,
 };
 
-use netip::{Contiguous, IpNetwork, ipv4_range_to_networks, ipv6_range_to_networks};
+use netip::{Contiguous, IpNetwork, MacAddr, ipv4_range_to_networks, ipv6_range_to_networks};
 
 #[allow(clippy::all, non_snake_case)]
 pub mod pb {
@@ -33,6 +33,24 @@ impl From<IpAddr> for pb::IpAddress {
             IpAddr::V6(v6) => v6.octets().to_vec(),
         };
         pb::IpAddress { addr: bytes }
+    }
+}
+
+impl From<MacAddr> for pb::MacAddress {
+    fn from(mac: MacAddr) -> Self {
+        pb::MacAddress { addr: mac.as_u64() }
+    }
+}
+
+impl TryFrom<&pb::MacAddress> for MacAddr {
+    type Error = Box<dyn Error>;
+
+    fn try_from(mac: &pb::MacAddress) -> Result<Self, Self::Error> {
+        if mac.addr >> 48 != 0 {
+            return Err("upper 16 bits are set for MAC address".into());
+        }
+
+        Ok(MacAddr::from(mac.addr))
     }
 }
 
@@ -247,6 +265,20 @@ mod test {
     fn iprange_display_invalid() {
         let range = pb::IpRange { start: None, end: None };
         assert_eq!("invalid", range.to_string());
+    }
+
+    #[test]
+    fn mac_round_trip() {
+        let mac = "aa:bb:cc:dd:ee:ff".parse::<MacAddr>().unwrap();
+        let proto = pb::MacAddress::from(mac);
+        let got = MacAddr::try_from(&proto).unwrap();
+        assert_eq!(mac, got);
+    }
+
+    #[test]
+    fn mac_try_from_rejects_upper_bits() {
+        let proto = pb::MacAddress { addr: 0x1_0000_0000_0000 };
+        assert!(MacAddr::try_from(&proto).is_err());
     }
 
     #[test]

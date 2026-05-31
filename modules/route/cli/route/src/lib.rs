@@ -1,4 +1,5 @@
 use commonpb::pb::MacAddress;
+use netip::MacAddr;
 use tabled::Tabled;
 
 #[allow(clippy::all, non_snake_case)]
@@ -7,11 +8,14 @@ pub mod routepb {
 }
 
 fn format_mac(mac: Option<MacAddress>) -> String {
-    let bytes = mac.map(|m| m.addr.to_be_bytes()).unwrap_or_default();
-    format!(
-        "{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
-        bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
-    )
+    let mac = match mac {
+        Some(mac) => match MacAddr::try_from(&mac) {
+            Ok(mac) => return mac.to_string(),
+            Err(..) => "invalid",
+        },
+        None => "00:00:00:00:00:00",
+    };
+    mac.to_string()
 }
 
 /// FIB entry for display in the CLI table.
