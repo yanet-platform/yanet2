@@ -133,7 +133,9 @@ deploy/packages/
 ### AI ###
 .ai
 .cursor/
-.claude/
+.claude/agent-memory/
+.claude/settings.*.json
+.claude/worktrees/
 .codex/
 
 ### Uncategorized ###

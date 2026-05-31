@@ -1,1 +1,2 @@
-.claude/
+.claude/agents/
+.claude/settings.json
