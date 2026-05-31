@@ -14,7 +14,7 @@ use ync::{
 pub mod code {
     use serde::Serialize;
 
-    tonic::include_proto!("vlanpb");
+    tonic::include_proto!("devices.vlan.controlplane.vlanpb.v1");
 }
 
 /// DeviceVlan module.

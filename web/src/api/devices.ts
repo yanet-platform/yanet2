@@ -50,8 +50,8 @@ export const DEVICE_TYPES = ['plain', 'vlan'] as const;
 export type DeviceType = typeof DEVICE_TYPES[number];
 
 const deviceService = createService('ynpb.DeviceService');
-const plainService = createService('plainpb.DevicePlainService');
-const vlanService = createService('vlanpb.DeviceVlanService');
+const plainService = createService('devices.plain.controlplane.plainpb.v1.DevicePlainService');
+const vlanService = createService('devices.vlan.controlplane.vlanpb.v1.DeviceVlanService');
 
 export const devices = {
     list: (request: ListDevicesRequest, options?: CallOptions): Promise<ListDevicesResponse> => {

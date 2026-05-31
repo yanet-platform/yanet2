@@ -7,7 +7,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	"github.com/yanet-platform/yanet2/devices/vlan/controlplane/vlanpb"
+	"github.com/yanet-platform/yanet2/devices/vlan/controlplane/vlanpb/v1"
 )
 
 // DeviceVlanDevice is a control-plane component responsible for vlan devices
@@ -21,7 +21,7 @@ type DeviceVlanDevice struct {
 
 // NewDeviceVlanDevice creates a new DeviceVlan device instance
 func NewDeviceVlanDevice(cfg *Config, log *zap.Logger) (*DeviceVlanDevice, error) {
-	log = log.With(zap.String("module", "vlanpb.DeviceVlanService"))
+	log = log.With(zap.String("module", "devices.vlan.controlplane.vlanpb.v1.DeviceVlanService"))
 
 	shm, err := ffi.AttachSharedMemory(cfg.MemoryPath.Unwrap())
 	if err != nil {
@@ -58,7 +58,7 @@ func (m *DeviceVlanDevice) Endpoint() string {
 }
 
 func (m *DeviceVlanDevice) ServicesNames() []string {
-	return []string{"vlanpb.DeviceVlanService"}
+	return []string{"devices.vlan.controlplane.vlanpb.v1.DeviceVlanService"}
 }
 
 func (m *DeviceVlanDevice) RegisterService(server *grpc.Server) {

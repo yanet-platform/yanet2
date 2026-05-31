@@ -1,10 +1,10 @@
 syntax = "proto3";
 
-package plainpb;
+package devices.plain.controlplane.plainpb.v1;
 
 import "common/commonpb/target.proto";
 
-option go_package = "github.com/yanet-platform/yanet2/devices/plain/controlplane/plainpb;plainpb";
+option go_package = "github.com/yanet-platform/yanet2/devices/plain/controlplane/plainpb/v1;plainpb";
 
 service DevicePlainService { rpc UpdateDevice(UpdateDevicePlainRequest) returns (UpdateDevicePlainResponse); }
 

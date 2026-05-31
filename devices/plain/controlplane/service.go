@@ -8,7 +8,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	"github.com/yanet-platform/yanet2/devices/plain/controlplane/plainpb"
+	"github.com/yanet-platform/yanet2/devices/plain/controlplane/plainpb/v1"
 )
 
 // DevicePlainService implements the DevicePlain gRPC service.

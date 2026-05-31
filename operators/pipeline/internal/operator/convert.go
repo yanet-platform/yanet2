@@ -5,8 +5,8 @@ import (
 
 	"github.com/yanet-platform/yanet2/common/commonpb"
 	"github.com/yanet-platform/yanet2/controlplane/ynpb"
-	"github.com/yanet-platform/yanet2/devices/plain/controlplane/plainpb"
-	"github.com/yanet-platform/yanet2/devices/vlan/controlplane/vlanpb"
+	"github.com/yanet-platform/yanet2/devices/plain/controlplane/plainpb/v1"
+	"github.com/yanet-platform/yanet2/devices/vlan/controlplane/vlanpb/v1"
 )
 
 func pipelineToProto(p PipelineConfig) *ynpb.Pipeline {

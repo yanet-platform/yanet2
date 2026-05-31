@@ -8,7 +8,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	"github.com/yanet-platform/yanet2/devices/vlan/controlplane/vlanpb"
+	"github.com/yanet-platform/yanet2/devices/vlan/controlplane/vlanpb/v1"
 )
 
 // DeviceVlanService implements the DeviceVlan gRPC service.

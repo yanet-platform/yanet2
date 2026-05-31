@@ -14,7 +14,7 @@ use ync::{
 pub mod code {
     use serde::Serialize;
 
-    tonic::include_proto!("plainpb");
+    tonic::include_proto!("devices.plain.controlplane.plainpb.v1");
 }
 
 /// DevicePlain module.

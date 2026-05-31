@@ -86,7 +86,6 @@ proto-lint:
 	go run ./lint/protobuf/cmd/protolint/ --exclude subprojects \
 		--exclude common \
 		--exclude controlplane \
-		--exclude devices \
 		--exclude operators/bird-adapter \
 		--exclude modules/route-mpls
 

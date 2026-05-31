@@ -7,7 +7,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	"github.com/yanet-platform/yanet2/devices/plain/controlplane/plainpb"
+	"github.com/yanet-platform/yanet2/devices/plain/controlplane/plainpb/v1"
 )
 
 // DevicePlainDevice is a control-plane component responsible for plain devices
@@ -21,7 +21,7 @@ type DevicePlainDevice struct {
 
 // NewDevicePlainDevice creates a new DevicePlain device instance
 func NewDevicePlainDevice(cfg *Config, log *zap.Logger) (*DevicePlainDevice, error) {
-	log = log.With(zap.String("module", "plainpb.DevicePlainService"))
+	log = log.With(zap.String("module", "devices.plain.controlplane.plainpb.v1.DevicePlainService"))
 
 	shm, err := ffi.AttachSharedMemory(cfg.MemoryPath.Unwrap())
 	if err != nil {
@@ -58,7 +58,7 @@ func (m *DevicePlainDevice) Endpoint() string {
 }
 
 func (m *DevicePlainDevice) ServicesNames() []string {
-	return []string{"plainpb.DevicePlainService"}
+	return []string{"devices.plain.controlplane.plainpb.v1.DevicePlainService"}
 }
 
 func (m *DevicePlainDevice) RegisterService(server *grpc.Server) {

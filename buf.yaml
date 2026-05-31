@@ -7,7 +7,6 @@ modules:
       - operators/bird-adapter
       # Modules not yet migrated.
       - controlplane
-      - devices
       - modules/route-mpls
 lint:
   use:
