@@ -13,7 +13,6 @@ modules:
       - modules/decap
       - modules/dscp
       - modules/fwstate
-      - modules/nat64
       - modules/pdump
       - modules/route
       - modules/route-mpls

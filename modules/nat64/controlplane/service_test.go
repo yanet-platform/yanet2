@@ -10,7 +10,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/yanet-platform/yanet2/common/commonpb"
-	"github.com/yanet-platform/yanet2/modules/nat64/controlplane/nat64pb"
+	nat64pb "github.com/yanet-platform/yanet2/modules/nat64/controlplane/nat64pb/v1"
 )
 
 var errInjectedBackend = errors.New("injected backend failure")

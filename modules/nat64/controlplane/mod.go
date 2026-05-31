@@ -7,7 +7,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	"github.com/yanet-platform/yanet2/modules/nat64/controlplane/nat64pb"
+	nat64pb "github.com/yanet-platform/yanet2/modules/nat64/controlplane/nat64pb/v1"
 )
 
 // NAT64Module is a control-plane component responsible for NAT64 translation
@@ -21,7 +21,7 @@ type NAT64Module struct {
 
 // NewNAT64Module creates a new NAT64 module instance
 func NewNAT64Module(cfg *Config, log *zap.Logger) (*NAT64Module, error) {
-	log = log.With(zap.String("module", "nat64pb.NAT64Service"))
+	log = log.With(zap.String("module", "modules.nat64.controlplane.nat64pb.v1.NAT64Service"))
 
 	shm, err := ffi.AttachSharedMemory(cfg.MemoryPath.Unwrap())
 	if err != nil {
@@ -58,7 +58,7 @@ func (m *NAT64Module) Endpoint() string {
 }
 
 func (m *NAT64Module) ServicesNames() []string {
-	return []string{"nat64pb.NAT64Service"}
+	return []string{"modules.nat64.controlplane.nat64pb.v1.NAT64Service"}
 }
 
 func (m *NAT64Module) RegisterService(server *grpc.Server) {

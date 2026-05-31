@@ -22,7 +22,7 @@ use ync::{
 #[allow(non_snake_case)]
 pub mod nat64pb {
     use serde::Serialize;
-    tonic::include_proto!("nat64pb");
+    tonic::include_proto!("modules.nat64.controlplane.nat64pb.v1");
 }
 
 /// NAT64 module CLI.

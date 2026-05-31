@@ -93,7 +93,6 @@ proto-lint:
 		--exclude modules/decap \
 		--exclude modules/dscp \
 		--exclude modules/fwstate \
-		--exclude modules/nat64 \
 		--exclude modules/pdump \
 		--exclude modules/route \
 		--exclude modules/route-mpls

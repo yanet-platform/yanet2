@@ -17,7 +17,7 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	nat64 "github.com/yanet-platform/yanet2/modules/nat64/controlplane"
-	"github.com/yanet-platform/yanet2/modules/nat64/controlplane/nat64pb"
+	nat64pb "github.com/yanet-platform/yanet2/modules/nat64/controlplane/nat64pb/v1"
 )
 
 const (
