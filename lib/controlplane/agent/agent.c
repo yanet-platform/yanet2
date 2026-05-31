@@ -1530,7 +1530,8 @@ yanet_get_counters_by_tags(
 		}
 	}
 
-	cp_config_unlock(cp_config);
+	// Prolong lock for a list lifetime
+	list->cp_config = cp_config;
 	free(storages);
 	return list;
 
@@ -1692,6 +1693,9 @@ yanet_counter_handle_list_free(struct counter_handle_list *counters) {
 		if (i == 0 || handles[i].tags != handles[i - 1].tags) {
 			free(handles[i].tags);
 		}
+	}
+	if (counters->cp_config != NULL) {
+		cp_config_unlock(counters->cp_config);
 	}
 	free(counters);
 }

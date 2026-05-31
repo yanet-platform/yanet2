@@ -23,9 +23,12 @@ struct counter_handle {
 	struct counter_value_handle *value_handle;
 };
 
+struct cp_config;
+
 struct counter_handle_list {
 	uint64_t instance_count;
 	uint64_t count;
+	struct cp_config *cp_config;
 	struct counter_handle counters[];
 };
 
