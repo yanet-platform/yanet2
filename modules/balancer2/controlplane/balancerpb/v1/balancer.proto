@@ -1,14 +1,14 @@
 syntax = "proto3";
 
-package balancerpb;
+package modules.balancer2.controlplane.balancerpb.v1;
 
-import "modules/balancer2/controlplane/balancerpb/config.proto";
-import "modules/balancer2/controlplane/balancerpb/filter.proto";
-import "modules/balancer2/controlplane/balancerpb/state.proto";
+import "modules/balancer2/controlplane/balancerpb/v1/config.proto";
+import "modules/balancer2/controlplane/balancerpb/v1/filter.proto";
+import "modules/balancer2/controlplane/balancerpb/v1/state.proto";
 
 import "common/commonpb/metric.proto";
 
-option go_package = "github.com/yanet-platform/yanet2/modules/balancer2/controlplane/balancerpb;balancerpb";
+option go_package = "github.com/yanet-platform/yanet2/modules/balancer2/controlplane/balancerpb/v1;balancerpb";
 
 // Balancer service.
 //

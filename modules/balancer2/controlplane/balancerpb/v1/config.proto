@@ -1,12 +1,12 @@
 syntax = "proto3";
 
-package balancerpb;
+package modules.balancer2.controlplane.balancerpb.v1;
 
 import "common/filterpb/filter.proto";
 
 import "google/protobuf/duration.proto";
 
-option go_package = "github.com/yanet-platform/yanet2/modules/balancer2/controlplane/balancerpb;balancerpb";
+option go_package = "github.com/yanet-platform/yanet2/modules/balancer2/controlplane/balancerpb/v1;balancerpb";
 
 enum TransportProto {
   TCP = 0;

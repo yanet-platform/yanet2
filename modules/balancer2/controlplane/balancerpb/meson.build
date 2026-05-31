@@ -1,9 +1,9 @@
 root_dir = meson.project_source_root()
 proto_files = [
-    join_paths(root_dir, 'modules/balancer2/controlplane/balancerpb/balancer.proto'),
-    join_paths(root_dir, 'modules/balancer2/controlplane/balancerpb/config.proto'),
-    join_paths(root_dir, 'modules/balancer2/controlplane/balancerpb/filter.proto'),
-    join_paths(root_dir, 'modules/balancer2/controlplane/balancerpb/state.proto'),
+    join_paths(root_dir, 'modules/balancer2/controlplane/balancerpb/v1/balancer.proto'),
+    join_paths(root_dir, 'modules/balancer2/controlplane/balancerpb/v1/config.proto'),
+    join_paths(root_dir, 'modules/balancer2/controlplane/balancerpb/v1/filter.proto'),
+    join_paths(root_dir, 'modules/balancer2/controlplane/balancerpb/v1/state.proto'),
 ]
 
 protoc_gen = custom_target(
@@ -13,7 +13,7 @@ protoc_gen = custom_target(
         'balancer_grpc.pb.go',
         'config.pb.go',
         'filter.pb.go',
-        'memory.pb.go',
+        'state.pb.go',
     ],
     input: proto_files,
     command: [

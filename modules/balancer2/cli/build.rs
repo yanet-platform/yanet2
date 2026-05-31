@@ -1,10 +1,10 @@
 use core::error::Error;
 
 pub fn main() -> Result<(), Box<dyn Error>> {
-    println!("cargo:rerun-if-changed=../controlplane/balancerpb/balancer.proto");
-    println!("cargo:rerun-if-changed=../controlplane/balancerpb/config.proto");
-    println!("cargo:rerun-if-changed=../controlplane/balancerpb/state.proto");
-    println!("cargo:rerun-if-changed=../controlplane/balancerpb/filter.proto");
+    println!("cargo:rerun-if-changed=../controlplane/balancerpb/v1/balancer.proto");
+    println!("cargo:rerun-if-changed=../controlplane/balancerpb/v1/config.proto");
+    println!("cargo:rerun-if-changed=../controlplane/balancerpb/v1/state.proto");
+    println!("cargo:rerun-if-changed=../controlplane/balancerpb/v1/filter.proto");
 
     tonic_build::configure()
         .emit_rerun_if_changed(false)
@@ -14,19 +14,40 @@ pub fn main() -> Result<(), Box<dyn Error>> {
         .extern_path(".commonpb", "::commonpb::pb")
         .message_attribute(".", "#[derive(serde::Serialize)]")
         .enum_attribute(".", "#[derive(serde::Serialize)]")
-        .field_attribute("balancerpb.WlcConfig.refresh_period", "#[serde(skip)]")
-        .field_attribute("balancerpb.BalancerState.last_packet_timestamp", "#[serde(skip)]")
-        .field_attribute("balancerpb.VsState.last_packet_timestamp", "#[serde(skip)]")
-        .field_attribute("balancerpb.RealState.last_packet_timestamp", "#[serde(skip)]")
-        .field_attribute("balancerpb.Session.last_packet_timestamp", "#[serde(skip)]")
-        .field_attribute("balancerpb.Session.create_timestamp", "#[serde(skip)]")
-        .field_attribute("balancerpb.Session.timeout", "#[serde(skip)]")
+        .field_attribute(
+            "modules.balancer2.controlplane.balancerpb.v1.WlcConfig.refresh_period",
+            "#[serde(skip)]",
+        )
+        .field_attribute(
+            "modules.balancer2.controlplane.balancerpb.v1.BalancerState.last_packet_timestamp",
+            "#[serde(skip)]",
+        )
+        .field_attribute(
+            "modules.balancer2.controlplane.balancerpb.v1.VsState.last_packet_timestamp",
+            "#[serde(skip)]",
+        )
+        .field_attribute(
+            "modules.balancer2.controlplane.balancerpb.v1.RealState.last_packet_timestamp",
+            "#[serde(skip)]",
+        )
+        .field_attribute(
+            "modules.balancer2.controlplane.balancerpb.v1.Session.last_packet_timestamp",
+            "#[serde(skip)]",
+        )
+        .field_attribute(
+            "modules.balancer2.controlplane.balancerpb.v1.Session.create_timestamp",
+            "#[serde(skip)]",
+        )
+        .field_attribute(
+            "modules.balancer2.controlplane.balancerpb.v1.Session.timeout",
+            "#[serde(skip)]",
+        )
         .compile_protos(
             &[
-                "modules/balancer2/controlplane/balancerpb/balancer.proto",
-                "modules/balancer2/controlplane/balancerpb/config.proto",
-                "modules/balancer2/controlplane/balancerpb/state.proto",
-                "modules/balancer2/controlplane/balancerpb/filter.proto",
+                "modules/balancer2/controlplane/balancerpb/v1/balancer.proto",
+                "modules/balancer2/controlplane/balancerpb/v1/config.proto",
+                "modules/balancer2/controlplane/balancerpb/v1/state.proto",
+                "modules/balancer2/controlplane/balancerpb/v1/filter.proto",
             ],
             &["../../.."],
         )?;

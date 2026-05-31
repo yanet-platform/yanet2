@@ -1,13 +1,13 @@
 syntax = "proto3";
 
-package balancerpb;
+package modules.balancer2.controlplane.balancerpb.v1;
 
 import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
 
-import "modules/balancer2/controlplane/balancerpb/config.proto";
+import "modules/balancer2/controlplane/balancerpb/v1/config.proto";
 
-option go_package = "github.com/yanet-platform/yanet2/modules/balancer2/controlplane/balancerpb;balancerpb";
+option go_package = "github.com/yanet-platform/yanet2/modules/balancer2/controlplane/balancerpb/v1;balancerpb";
 
 message BalancerState {
   string config_name = 1;

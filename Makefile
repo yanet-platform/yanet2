@@ -89,7 +89,6 @@ proto-lint:
 		--exclude devices \
 		--exclude operators/bird-adapter \
 		--exclude modules/acl \
-		--exclude modules/balancer2 \
 		--exclude modules/fwstate \
 		--exclude modules/route \
 		--exclude modules/route-mpls
