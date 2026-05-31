@@ -16,7 +16,7 @@ import (
 	"github.com/yanet-platform/yanet2/common/filterpb"
 	"github.com/yanet-platform/yanet2/common/go/maptrie"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	"github.com/yanet-platform/yanet2/modules/route-mpls/controlplane/routemplspb"
+	"github.com/yanet-platform/yanet2/modules/route-mpls/controlplane/routemplspb/v1"
 )
 
 type RouteMPLSService struct {

@@ -7,7 +7,6 @@ modules:
       - operators/bird-adapter
       # Modules not yet migrated.
       - controlplane
-      - modules/route-mpls
 lint:
   use:
     - STANDARD
@@ -18,6 +17,9 @@ lint:
     - RPC_RESPONSE_STANDARD_NAME
     - RPC_REQUEST_RESPONSE_UNIQUE
     - SERVICE_SUFFIX
+  ignore_only:
+    PACKAGE_DIRECTORY_MATCH:
+      - modules/route-mpls
   ignore:
     - common
 breaking:

@@ -1,11 +1,11 @@
 syntax = "proto3";
 
-package routemplspb;
+package modules.route_mpls.controlplane.routemplspb.v1;
 
 import "common/commonpb/ipaddr.proto";
 import "common/filterpb/filter.proto";
 
-option go_package = "github.com/yanet-platform/yanet2/modules/route-mpls/controlplane/routemplspb;routemplspb";
+option go_package = "github.com/yanet-platform/yanet2/modules/route-mpls/controlplane/routemplspb/v1;routemplspb";
 
 service RouteMPLSService {
   // Create mpls route module

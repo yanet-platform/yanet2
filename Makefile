@@ -86,8 +86,7 @@ proto-lint:
 	go run ./lint/protobuf/cmd/protolint/ --exclude subprojects \
 		--exclude common \
 		--exclude controlplane \
-		--exclude operators/bird-adapter \
-		--exclude modules/route-mpls
+		--exclude operators/bird-adapter
 
 go-cache-clean:
 	go clean -cache

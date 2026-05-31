@@ -7,7 +7,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	"github.com/yanet-platform/yanet2/modules/route-mpls/controlplane/routemplspb"
+	"github.com/yanet-platform/yanet2/modules/route-mpls/controlplane/routemplspb/v1"
 )
 
 // RouteMPLSModule is a controlplane part of a module that is responsible for
@@ -21,7 +21,7 @@ type RouteMPLSModule struct {
 }
 
 func NewRouteMPLSModule(cfg *Config, log *zap.Logger) (*RouteMPLSModule, error) {
-	log = log.With(zap.String("module", "routemplspb.RouteService"))
+	log = log.With(zap.String("module", "modules.route_mpls.controlplane.routemplspb.v1.RouteMPLSService"))
 
 	shm, err := ffi.AttachSharedMemory(cfg.MemoryPath.Unwrap())
 	if err != nil {
@@ -60,7 +60,7 @@ func (m *RouteMPLSModule) Endpoint() string {
 
 func (m *RouteMPLSModule) ServicesNames() []string {
 	return []string{
-		"routemplspb.RouteMPLSService",
+		"modules.route_mpls.controlplane.routemplspb.v1.RouteMPLSService",
 	}
 }
 

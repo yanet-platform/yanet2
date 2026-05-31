@@ -13,7 +13,7 @@ pub mod filterpb {
 pub mod routemplspb {
     use serde::Serialize;
 
-    tonic::include_proto!("routemplspb");
+    tonic::include_proto!("modules.route_mpls.controlplane.routemplspb.v1");
 }
 
 use clap::{ArgAction, CommandFactory, Parser};
