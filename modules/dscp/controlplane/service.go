@@ -10,7 +10,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/yanet-platform/yanet2/common/go/xnetip"
-	"github.com/yanet-platform/yanet2/modules/dscp/controlplane/dscppb"
+	"github.com/yanet-platform/yanet2/modules/dscp/controlplane/dscppb/v1"
 )
 
 var (

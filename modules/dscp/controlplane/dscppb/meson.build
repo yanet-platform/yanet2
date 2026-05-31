@@ -1,4 +1,4 @@
-proto_dir = meson.current_source_dir()
+proto_dir = join_paths(meson.current_source_dir(), 'v1')
 proto_files = [join_paths(proto_dir, 'dscp.proto')]
 
 protoc_gen = custom_target(

@@ -1,8 +1,8 @@
 syntax = "proto3";
 
-package dscppb;
+package modules.dscp.controlplane.dscppb.v1;
 
-option go_package = "github.com/yanet-platform/yanet2/modules/dscp/controlplane/dscppb;dscppb";
+option go_package = "github.com/yanet-platform/yanet2/modules/dscp/controlplane/dscppb/v1;dscppb";
 
 // DscpService is a service for Differentiated Services Code Point module.
 service DscpService {

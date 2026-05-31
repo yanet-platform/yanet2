@@ -20,7 +20,7 @@ use crate::dscppb::ListConfigsRequest;
 pub mod dscppb {
     use serde::Serialize;
 
-    tonic::include_proto!("dscppb");
+    tonic::include_proto!("modules.dscp.controlplane.dscppb.v1");
 }
 
 /// DSCP module for packet marking.

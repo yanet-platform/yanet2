@@ -10,7 +10,6 @@ modules:
       - devices
       - modules/acl
       - modules/balancer2
-      - modules/dscp
       - modules/fwstate
       - modules/pdump
       - modules/route

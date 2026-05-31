@@ -7,7 +7,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	"github.com/yanet-platform/yanet2/modules/dscp/controlplane/dscppb"
+	"github.com/yanet-platform/yanet2/modules/dscp/controlplane/dscppb/v1"
 )
 
 // DscpModule is a control-plane component of a module that is responsible for
@@ -59,7 +59,7 @@ func (m *DscpModule) Endpoint() string {
 }
 
 func (m *DscpModule) ServicesNames() []string {
-	return []string{"dscppb.DscpService"}
+	return []string{"modules.dscp.controlplane.dscppb.v1.DscpService"}
 }
 
 func (m *DscpModule) RegisterService(server *grpc.Server) {

@@ -90,7 +90,6 @@ proto-lint:
 		--exclude operators/bird-adapter \
 		--exclude modules/acl \
 		--exclude modules/balancer2 \
-		--exclude modules/dscp \
 		--exclude modules/fwstate \
 		--exclude modules/pdump \
 		--exclude modules/route \

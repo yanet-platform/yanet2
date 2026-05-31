@@ -49,7 +49,6 @@ jobs:
                                                 --exclude modules/acl \
                                                 --exclude modules/balancer \
                                                 --exclude modules/balancer2 \
-                                                --exclude modules/dscp \
                                                 --exclude modules/fwstate \
                                                 --exclude modules/pdump \
                                                 --exclude modules/route \
