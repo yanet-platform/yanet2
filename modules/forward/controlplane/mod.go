@@ -7,7 +7,7 @@ import (
 	"google.golang.org/grpc"
 
 	cpffi "github.com/yanet-platform/yanet2/controlplane/ffi"
-	"github.com/yanet-platform/yanet2/modules/forward/controlplane/forwardpb"
+	forwardpb "github.com/yanet-platform/yanet2/modules/forward/controlplane/forwardpb/v1"
 )
 
 const agentName = "forward"
@@ -23,7 +23,7 @@ type ForwardModule struct {
 }
 
 func NewForwardModule(cfg *Config, log *zap.Logger) (*ForwardModule, error) {
-	log = log.With(zap.String("module", "forwardpb.ForwardService"))
+	log = log.With(zap.String("module", "modules.forward.controlplane.forwardpb.v1.ForwardService"))
 
 	shm, err := cpffi.AttachSharedMemory(cfg.MemoryPath.Unwrap())
 	if err != nil {
@@ -60,7 +60,7 @@ func (m *ForwardModule) Endpoint() string {
 }
 
 func (m *ForwardModule) ServicesNames() []string {
-	return []string{"forwardpb.ForwardService"}
+	return []string{"modules.forward.controlplane.forwardpb.v1.ForwardService"}
 }
 
 func (m *ForwardModule) RegisterService(server *grpc.Server) {

@@ -12,7 +12,7 @@ import (
 	"github.com/yanet-platform/yanet2/common/commonpb"
 	"github.com/yanet-platform/yanet2/common/go/operator"
 	"github.com/yanet-platform/yanet2/controlplane/ynpb"
-	"github.com/yanet-platform/yanet2/modules/forward/controlplane/forwardpb"
+	forwardpb "github.com/yanet-platform/yanet2/modules/forward/controlplane/forwardpb/v1"
 )
 
 // GatewayActuator publishes the desired forward state to a single gateway.

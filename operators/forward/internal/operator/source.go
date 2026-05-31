@@ -4,7 +4,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/yanet-platform/yanet2/common/go/operator"
-	"github.com/yanet-platform/yanet2/modules/forward/controlplane/forwardpb"
+	forwardpb "github.com/yanet-platform/yanet2/modules/forward/controlplane/forwardpb/v1"
 )
 
 // State is the desired payload pushed by each reconcile pass.

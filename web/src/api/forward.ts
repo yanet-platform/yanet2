@@ -76,7 +76,7 @@ export interface DeleteConfigResponse {
     deleted?: boolean;
 }
 
-const forwardService = createService('forwardpb.ForwardService');
+const forwardService = createService('modules.forward.controlplane.forwardpb.v1.ForwardService');
 
 export const forward = {
     listConfigs: (options?: CallOptions): Promise<ListConfigsResponse> => {

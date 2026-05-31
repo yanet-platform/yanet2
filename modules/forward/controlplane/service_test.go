@@ -10,7 +10,7 @@ import (
 
 	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
 	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
-	"github.com/yanet-platform/yanet2/modules/forward/controlplane/forwardpb"
+	forwardpb "github.com/yanet-platform/yanet2/modules/forward/controlplane/forwardpb/v1"
 )
 
 type mockModuleHandle struct{}

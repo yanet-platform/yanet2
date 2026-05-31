@@ -10,7 +10,7 @@ import (
 
 	"github.com/yanet-platform/yanet2/common/filterpb"
 	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
-	"github.com/yanet-platform/yanet2/modules/forward/controlplane/forwardpb"
+	forwardpb "github.com/yanet-platform/yanet2/modules/forward/controlplane/forwardpb/v1"
 )
 
 // ModuleHandle is a handle to a module configuration.

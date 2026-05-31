@@ -9,7 +9,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/yanet-platform/yanet2/common/filterpb"
-	"github.com/yanet-platform/yanet2/modules/forward/controlplane/forwardpb"
+	forwardpb "github.com/yanet-platform/yanet2/modules/forward/controlplane/forwardpb/v1"
 )
 
 // yamlVlanRange mirrors the YAML schema for a VLAN range entry.

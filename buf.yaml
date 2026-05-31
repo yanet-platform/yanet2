@@ -12,7 +12,6 @@ modules:
       - modules/balancer2
       - modules/decap
       - modules/dscp
-      - modules/forward
       - modules/fwstate
       - modules/nat64
       - modules/pdump

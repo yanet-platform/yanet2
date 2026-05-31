@@ -92,7 +92,6 @@ proto-lint:
 		--exclude modules/balancer2 \
 		--exclude modules/decap \
 		--exclude modules/dscp \
-		--exclude modules/forward \
 		--exclude modules/fwstate \
 		--exclude modules/nat64 \
 		--exclude modules/pdump \

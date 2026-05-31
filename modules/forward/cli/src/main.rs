@@ -22,7 +22,7 @@ use ync::{
 pub mod forwardpb {
     use serde::Serialize;
 
-    tonic::include_proto!("forwardpb");
+    tonic::include_proto!("modules.forward.controlplane.forwardpb.v1");
 }
 
 /// Forward module.
