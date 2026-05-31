@@ -11,7 +11,6 @@ modules:
       - modules/acl
       - modules/balancer2
       - modules/fwstate
-      - modules/route
       - modules/route-mpls
 lint:
   use:

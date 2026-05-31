@@ -7,7 +7,7 @@ import (
 	"google.golang.org/grpc"
 
 	cpffi "github.com/yanet-platform/yanet2/controlplane/ffi"
-	"github.com/yanet-platform/yanet2/modules/route/controlplane/routepb"
+	"github.com/yanet-platform/yanet2/modules/route/controlplane/routepb/v1"
 )
 
 const (
@@ -55,7 +55,7 @@ func NewRouteModule(cfg *Config, options ...Option) (*RouteModule, error) {
 		o(opts)
 	}
 
-	log := opts.Log.With(zap.String("module", "routepb.RouteService"))
+	log := opts.Log.With(zap.String("module", "modules.route.controlplane.routepb.v1.RouteService"))
 
 	shm, err := cpffi.AttachSharedMemory(cfg.MemoryPath.Unwrap())
 	if err != nil {
@@ -96,7 +96,7 @@ func (m *RouteModule) Endpoint() string {
 // ServicesNames returns the gRPC service names exposed by the module.
 func (m *RouteModule) ServicesNames() []string {
 	return []string{
-		"routepb.RouteService",
+		"modules.route.controlplane.routepb.v1.RouteService",
 	}
 }
 

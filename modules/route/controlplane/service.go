@@ -11,7 +11,7 @@ import (
 
 	"github.com/yanet-platform/yanet2/common/commonpb"
 	"github.com/yanet-platform/yanet2/modules/route/bindings/go/croute"
-	"github.com/yanet-platform/yanet2/modules/route/controlplane/routepb"
+	"github.com/yanet-platform/yanet2/modules/route/controlplane/routepb/v1"
 )
 
 // RouteServiceOption configures the RouteService constructor.

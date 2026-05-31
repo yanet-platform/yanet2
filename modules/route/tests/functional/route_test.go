@@ -17,7 +17,7 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	route "github.com/yanet-platform/yanet2/modules/route/controlplane"
-	"github.com/yanet-platform/yanet2/modules/route/controlplane/routepb"
+	"github.com/yanet-platform/yanet2/modules/route/controlplane/routepb/v1"
 )
 
 const (

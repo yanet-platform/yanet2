@@ -1,8 +1,8 @@
 syntax = "proto3";
 
-package routepb;
+package modules.route.controlplane.routepb.v1;
 
-option go_package = "github.com/yanet-platform/yanet2/modules/route/controlplane/routepb;routepb";
+option go_package = "github.com/yanet-platform/yanet2/modules/route/controlplane/routepb/v1;routepb";
 
 import "common/commonpb/iprange.proto";
 import "common/commonpb/macaddr.proto";

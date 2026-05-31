@@ -50,5 +50,4 @@ jobs:
                                                 --exclude modules/balancer \
                                                 --exclude modules/balancer2 \
                                                 --exclude modules/fwstate \
-                                                --exclude modules/route \
                                                 --exclude modules/route-mpls

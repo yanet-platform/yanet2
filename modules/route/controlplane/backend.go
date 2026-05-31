@@ -10,7 +10,7 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/bitset"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/route/bindings/go/croute"
-	"github.com/yanet-platform/yanet2/modules/route/controlplane/routepb"
+	"github.com/yanet-platform/yanet2/modules/route/controlplane/routepb/v1"
 )
 
 // ModuleHandle is a handle to a route module configuration in shared

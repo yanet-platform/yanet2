@@ -102,7 +102,7 @@ export interface FIBNexthop {
     device?: string;
 }
 
-const routeService = createService('routepb.RouteService');
+const routeService = createService('modules.route.controlplane.routepb.v1.RouteService');
 const operatorRouteService = createService('operators.route.operatorpb.v1.RouteService');
 
 export const route = {
