@@ -52,13 +52,18 @@ export const useNeighbours = (activeTab: string): UseNeighboursResult => {
 
     const fetchTab = useCallback(async (tabKey: string): Promise<void> => {
         const tableFilter = tabKey === MERGED_TAB ? undefined : tabKey;
-        const data = await API.neighbours.list(tableFilter);
-        const neighbours = data.neighbours || [];
-        setCache((prev) => {
-            const next = new Map(prev);
-            next.set(tabKey, neighbours);
-            return next;
-        });
+        try {
+            const data = await API.neighbours.list(tableFilter);
+            const neighbours = data.neighbours || [];
+            setCache((prev) => {
+                const next = new Map(prev);
+                next.set(tabKey, neighbours);
+                return next;
+            });
+        } catch (err) {
+            toaster.error('nb-list-error', 'Failed to fetch neighbours', err);
+            throw err;
+        }
     }, []);
 
     const prefetchAll = useCallback(async (tableList: NeighbourTableInfo[]): Promise<void> => {
@@ -70,6 +75,10 @@ export const useNeighbours = (activeTab: string): UseNeighboursResult => {
                 return { key, neighbours: data.neighbours || [] };
             }),
         );
+        const firstRejected = results.find((r) => r.status === 'rejected');
+        if (firstRejected && firstRejected.status === 'rejected') {
+            toaster.error('nb-list-error', 'Failed to fetch neighbours', firstRejected.reason);
+        }
         setCache((prev) => {
             const next = new Map(prev);
             for (const result of results) {
@@ -106,7 +115,7 @@ export const useNeighbours = (activeTab: string): UseNeighboursResult => {
                 await fetchTab(tab);
                 setLastSync(Date.now());
             } catch {
-                // Silently ignore periodic refresh errors.
+                // fetchTab already toasted; swallow here to avoid unhandled rejection.
             }
             loadTables();
         }, REFRESH_INTERVAL_MS);
