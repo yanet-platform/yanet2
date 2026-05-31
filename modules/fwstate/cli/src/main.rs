@@ -51,12 +51,6 @@ fn parse_ipv6(s: &str) -> Result<IpAddress, Box<dyn Error>> {
     Ok(IpAddress { addr: addr.octets().to_vec() })
 }
 
-/// Parse MAC address string into an `MacAddress` proto message.
-fn parse_mac(s: &str) -> Result<MacAddress, Box<dyn Error>> {
-    let mac: MacAddr = s.parse()?;
-    Ok(MacAddress { addr: mac.as_u64() })
-}
-
 pub struct FWStateService {
     client: FwStateServiceClient<LayeredChannel>,
 }
@@ -123,7 +117,8 @@ impl FWStateService {
         }
 
         if let Some(ref dst_ether) = cmd.dst_ether {
-            sync_config.dst_ether = Some(parse_mac(dst_ether)?);
+            let mac: MacAddr = dst_ether.parse()?;
+            sync_config.dst_ether = Some(MacAddress { addr: mac.as_u64() });
         }
 
         if let Some(ref dst_addr_multicast) = cmd.dst_addr_multicast {
