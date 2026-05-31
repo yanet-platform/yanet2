@@ -5,6 +5,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/yanet-platform/yanet2/common/commonpb"
+	"github.com/yanet-platform/yanet2/modules/fwstate/bindings/go/cfwstate"
 )
 
 // TestPortsRoundTrip verifies that port_unicast and port_multicast survive
@@ -15,7 +16,7 @@ func TestPortsRoundTrip(t *testing.T) {
 
 	pb := &SyncConfig{
 		SrcAddr:          &commonpb.IPAddress{Addr: make([]byte, 16)},
-		DstEther:         make([]byte, 6),
+		DstEther:         commonpb.NewMACAddressEUI48([6]byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00}),
 		DstAddrMulticast: &commonpb.IPAddress{Addr: make([]byte, 16)},
 		DstAddrUnicast:   &commonpb.IPAddress{Addr: make([]byte, 16)},
 		PortMulticast:    portMulticast,
@@ -27,4 +28,31 @@ func TestPortsRoundTrip(t *testing.T) {
 
 	require.Equal(t, portMulticast, got.PortMulticast)
 	require.Equal(t, portUnicast, got.PortUnicast)
+	require.Equal(t, pb.DstEther.GetAddr(), got.DstEther.GetAddr())
+}
+
+func TestSyncConfig_ToCWithDefaults(t *testing.T) {
+	t.Run("omitted", func(t *testing.T) {
+		current := cfwstate.SyncConfig{
+			DstEther: [6]byte{0x10, 0x11, 0x12, 0x13, 0x14, 0x15},
+		}
+		pb := &SyncConfig{}
+
+		cfg := pb.ToCWithDefaults(current)
+
+		require.Equal(t, current.DstEther, cfg.DstEther)
+	})
+
+	t.Run("explicit_zero", func(t *testing.T) {
+		current := cfwstate.SyncConfig{
+			DstEther: [6]byte{0x10, 0x11, 0x12, 0x13, 0x14, 0x15},
+		}
+		pb := &SyncConfig{
+			DstEther: &commonpb.MACAddress{},
+		}
+
+		cfg := pb.ToCWithDefaults(current)
+
+		require.Equal(t, [6]byte{}, cfg.DstEther)
+	})
 }

@@ -7,11 +7,12 @@ use std::{
 use args::{DeleteCmd, DirectionArg, EntriesCmd, LinkCmd, ModeCmd, ShowCmd, StatsCmd, UpdateCmd};
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
-use commonpb::pb::IpAddress;
+use commonpb::pb::{IpAddress, MacAddress};
 use fwstatepb::{
     DeleteConfigRequest, Direction, GetStatsRequest, LinkFwStateRequest, ListConfigsRequest, ListEntriesRequest,
     ShowConfigRequest, UpdateConfigRequest, fw_state_service_client::FwStateServiceClient,
 };
+use netip::MacAddr;
 use serde::Serialize;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
@@ -50,20 +51,10 @@ fn parse_ipv6(s: &str) -> Result<IpAddress, Box<dyn Error>> {
     Ok(IpAddress { addr: addr.octets().to_vec() })
 }
 
-/// Parse MAC address from string to bytes
-fn parse_mac(s: &str) -> Result<Vec<u8>, Box<dyn Error>> {
-    let parts: Vec<&str> = s.split(':').collect();
-    if parts.len() != 6 {
-        return Err(format!("invalid MAC address format: {}", s).into());
-    }
-
-    let mut bytes = Vec::with_capacity(6);
-    for part in parts {
-        let byte = u8::from_str_radix(part, 16).map_err(|_| format!("invalid MAC address byte: {}", part))?;
-        bytes.push(byte);
-    }
-
-    Ok(bytes)
+/// Parse MAC address string into an `MacAddress` proto message.
+fn parse_mac(s: &str) -> Result<MacAddress, Box<dyn Error>> {
+    let mac: MacAddr = s.parse()?;
+    Ok(MacAddress { addr: mac.as_u64() })
 }
 
 pub struct FWStateService {
@@ -132,7 +123,7 @@ impl FWStateService {
         }
 
         if let Some(ref dst_ether) = cmd.dst_ether {
-            sync_config.dst_ether = parse_mac(dst_ether)?;
+            sync_config.dst_ether = Some(parse_mac(dst_ether)?);
         }
 
         if let Some(ref dst_addr_multicast) = cmd.dst_addr_multicast {

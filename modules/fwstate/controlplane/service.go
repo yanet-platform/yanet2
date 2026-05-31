@@ -430,8 +430,14 @@ func validateSyncConfig(cfg *fwstatepb.SyncConfig) error {
 	}
 
 	// Check dst_ether (6 bytes for MAC)
-	if len(cfg.DstEther) != 6 || isAllZeroBytes(cfg.DstEther) {
+	dstEther := cfg.GetDstEther()
+	if dstEther == nil {
 		missing = append(missing, "dst_ether")
+	} else {
+		eui := dstEther.EUI48()
+		if isAllZeroBytes(eui[:]) {
+			missing = append(missing, "dst_ether")
+		}
 	}
 
 	// Check that at least one destination pair is configured

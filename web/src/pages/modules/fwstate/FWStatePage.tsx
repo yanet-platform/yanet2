@@ -21,7 +21,7 @@ import { ConfirmDialog, ConfigTabStrip, PageLayout, PageLoader } from '../../../
 import { useContainerHeight } from '../../../hooks';
 import { useUnsavedChangesBlocker } from '../../builtin/_shared/lane-editor';
 import { ipAddressToString, isValidIPAddress, parseIPToBytes, stringToIPAddress, type IPAddressWire } from '../../../utils/netip';
-import { formatMACFromBytes, parseMACToBytes } from '../../../utils/mac';
+import { parseMACToBytes } from '../../../utils/mac';
 import { formatBytes, toaster } from '../../../utils';
 import { AddConfigModal, DeleteConfigModal } from '../../_shared/draft';
 import { SaveIcon, TrashIcon } from '../../_shared/draft/DraftActionButtons';
@@ -121,17 +121,6 @@ const isValidNonzeroMAC = (value: string): boolean => {
     return Boolean(parsed && parsed.some((byte) => byte !== 0));
 };
 
-const decodeWireBytes = (wire: string | Uint8Array | number[] | undefined): number[] => {
-    if (!wire) return [];
-    if (Array.isArray(wire)) return wire;
-    if (wire instanceof Uint8Array) return Array.from(wire);
-    try {
-        return Array.from(atob(wire), (char) => char.charCodeAt(0));
-    } catch {
-        return [];
-    }
-};
-
 const toDraftConfig = (config: Awaited<ReturnType<typeof API.fwstate.showConfig>> | null, isLocalOnly: boolean): DraftConfig => {
     const sync = config?.sync_config;
     const multicastAddress = ipAddressToString(sync?.dst_addr_multicast as IPAddressWire | undefined).trim();
@@ -147,7 +136,7 @@ const toDraftConfig = (config: Awaited<ReturnType<typeof API.fwstate.showConfig>
         mapIndexSize: config?.map_config?.index_size ?? 1_048_576,
         mapExtraBucketCount: config?.map_config?.extra_bucket_count ?? 1_024,
         srcAddr: ipAddressToString(sync?.src_addr as IPAddressWire | undefined),
-        dstEther: formatMACFromBytes(decodeWireBytes(sync?.dst_ether)),
+        dstEther: sync?.dst_ether?.addr ?? '',
         dstAddrMulticast: ipAddressToString(sync?.dst_addr_multicast as IPAddressWire | undefined),
         portMulticast: sync?.port_multicast ?? 0,
         dstAddrUnicast: ipAddressToString(sync?.dst_addr_unicast as IPAddressWire | undefined),
@@ -1360,7 +1349,7 @@ const FWStatePage: React.FC = () => {
         const useUnicast = current.syncMode === 'unicast' || current.syncMode === 'both';
         const syncConfig = {
             src_addr: stringToIPAddress(current.srcAddr),
-            dst_ether: parseMACToBytes(current.dstEther),
+            dst_ether: { addr: current.dstEther },
             dst_addr_multicast: useMulticast ? stringToIPAddress(current.dstAddrMulticast) : zeroIPv6AddressWire(),
             port_multicast: useMulticast ? current.portMulticast : 0,
             dst_addr_unicast: useUnicast ? stringToIPAddress(current.dstAddrUnicast) : zeroIPv6AddressWire(),

@@ -30,7 +30,11 @@ func (m *SyncConfig) ToC() cfwstate.SyncConfig {
 	var cfg cfwstate.SyncConfig
 	src := m.GetSrcAddr().GetAddr()
 	copy(cfg.SrcAddr[:], src)
-	copy(cfg.DstEther[:], m.GetDstEther())
+	dstEther := m.GetDstEther()
+	if dstEther != nil {
+		eui := dstEther.EUI48()
+		copy(cfg.DstEther[:], eui[:])
+	}
 	copy(cfg.DstAddrMulticast[:], m.GetDstAddrMulticast().GetAddr())
 	copy(cfg.DstAddrUnicast[:], m.GetDstAddrUnicast().GetAddr())
 	cfg.PortMulticast = uint16(m.GetPortMulticast())
@@ -55,7 +59,7 @@ func (m *SyncConfig) ToCWithDefaults(current cfwstate.SyncConfig) cfwstate.SyncC
 	if len(m.GetSrcAddr().GetAddr()) == 0 {
 		cfg.SrcAddr = current.SrcAddr
 	}
-	if len(m.GetDstEther()) == 0 {
+	if m.GetDstEther() == nil {
 		cfg.DstEther = current.DstEther
 	}
 	if len(m.GetDstAddrMulticast().GetAddr()) == 0 {
@@ -95,7 +99,7 @@ func (m *SyncConfig) ToCWithDefaults(current cfwstate.SyncConfig) cfwstate.SyncC
 func FromCSyncConfig(cfg cfwstate.SyncConfig) *SyncConfig {
 	return &SyncConfig{
 		SrcAddr:          &commonpb.IPAddress{Addr: append([]byte(nil), cfg.SrcAddr[:]...)},
-		DstEther:         append([]byte(nil), cfg.DstEther[:]...),
+		DstEther:         commonpb.NewMACAddressEUI48(cfg.DstEther),
 		DstAddrMulticast: &commonpb.IPAddress{Addr: append([]byte(nil), cfg.DstAddrMulticast[:]...)},
 		PortMulticast:    uint32(cfg.PortMulticast),
 		DstAddrUnicast:   &commonpb.IPAddress{Addr: append([]byte(nil), cfg.DstAddrUnicast[:]...)},

@@ -3288,6 +3288,7 @@ dependencies = [
  "clap_complete",
  "humantime",
  "log",
+ "netip",
  "prost",
  "prost-types",
  "serde",
