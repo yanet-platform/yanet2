@@ -3,8 +3,6 @@ modules:
   - path: .
     excludes:
       - subprojects
-      # Operators not yet migrated to versioned proto layout.
-      - operators/bird-adapter
       # Modules not yet migrated.
       - controlplane
 lint:
@@ -20,6 +18,7 @@ lint:
   ignore_only:
     PACKAGE_DIRECTORY_MATCH:
       - modules/route-mpls
+      - operators/bird-adapter
   ignore:
     - common
 breaking:

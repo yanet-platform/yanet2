@@ -18,7 +18,7 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
 	"github.com/yanet-platform/yanet2/common/go/xcmd"
 	birdAdapter "github.com/yanet-platform/yanet2/operators/bird-adapter"
-	adapterpb "github.com/yanet-platform/yanet2/operators/bird-adapter/adapterpb"
+	adapterpb "github.com/yanet-platform/yanet2/operators/bird-adapter/adapterpb/v1"
 )
 
 var serverCmdArgs struct {

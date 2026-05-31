@@ -44,5 +44,4 @@ jobs:
           go run ./lint/protobuf/cmd/protolint/ --exclude subprojects \
                                                 --exclude common \
                                                 --exclude controlplane \
-                                                --exclude operators/bird-adapter \
                                                 --exclude modules/balancer

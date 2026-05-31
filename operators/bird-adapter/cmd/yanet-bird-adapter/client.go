@@ -16,7 +16,7 @@ import (
 
 	"github.com/yanet-platform/yanet2/common/commonpb"
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
-	adapterpb "github.com/yanet-platform/yanet2/operators/bird-adapter/adapterpb"
+	adapterpb "github.com/yanet-platform/yanet2/operators/bird-adapter/adapterpb/v1"
 )
 
 // logLevelFlag wraps zapcore.Level to implement pflag.Value interface.
