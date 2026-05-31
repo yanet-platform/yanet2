@@ -66,6 +66,7 @@ const EditTableModal: React.FC<EditTableModalProps> = ({
                             value={tableInfo?.name || ''}
                             disabled
                         />
+                        <span className="fw-field__hint">Name can't be changed</span>
                     </div>
                     <div className="fw-field">
                         <label className="fw-field__label" htmlFor="et-priority">
@@ -84,8 +85,10 @@ const EditTableModal: React.FC<EditTableModalProps> = ({
                             placeholder="100"
                             autoFocus
                         />
-                        {priorityError && defaultPriority && (
+                        {priorityError && defaultPriority ? (
                             <span className="fw-field__hint fw-field__error">{priorityError}</span>
+                        ) : (
+                            <span className="fw-field__hint">Lower value wins on merge.</span>
                         )}
                     </div>
                 </div>

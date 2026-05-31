@@ -21,6 +21,10 @@ interface RowHoverEditOverlayProps {
     /** Forwarded to the slot root so hover state can be tracked. */
     onMouseEnter: () => void;
     onMouseLeave: () => void;
+    /** Custom edit button icon. Defaults to the ✎ glyph. */
+    editIcon?: React.ReactNode;
+    /** Custom delete button icon. Defaults to TrashIcon. */
+    deleteIcon?: React.ReactNode;
 }
 
 /** Absolute-positioned edit button overlay that appears when a table row is hovered. */
@@ -35,6 +39,8 @@ const RowHoverEditOverlay: React.FC<RowHoverEditOverlayProps> = ({
     deleteTitle,
     onMouseEnter,
     onMouseLeave,
+    editIcon,
+    deleteIcon,
 }) => (
     <div
         className={`fw-row-action-slot${onDelete ? ' fw-row-action-slot--wide' : ''}`}
@@ -49,7 +55,7 @@ const RowHoverEditOverlay: React.FC<RowHoverEditOverlayProps> = ({
             aria-label={editAriaLabel}
             title={editTitle}
         >
-            ✎
+            {editIcon ?? '✎'}
         </button>
         {onDelete && (
             <button
@@ -59,7 +65,7 @@ const RowHoverEditOverlay: React.FC<RowHoverEditOverlayProps> = ({
                 aria-label={deleteAriaLabel ?? 'Delete'}
                 title={deleteTitle ?? 'Delete'}
             >
-                <TrashIcon />
+                {deleteIcon ?? <TrashIcon />}
             </button>
         )}
     </div>

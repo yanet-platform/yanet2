@@ -104,8 +104,10 @@ const CreateTableModal: React.FC<CreateTableModalProps> = ({
                             }}
                             placeholder="100"
                         />
-                        {priorityError && defaultPriority && (
+                        {priorityError && defaultPriority ? (
                             <span className="fw-field__hint fw-field__error">{priorityError}</span>
+                        ) : (
+                            <span className="fw-field__hint">Lower value wins on merge.</span>
                         )}
                     </div>
                 </div>

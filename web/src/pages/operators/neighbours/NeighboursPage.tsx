@@ -1,13 +1,13 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Button, Flex, Icon, Text } from '@gravity-ui/uikit';
-import { Plus } from '@gravity-ui/icons';
+import { Plus, Layers } from '@gravity-ui/icons';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, SearchInput } from '../../../components';
 import { BulkDeleteModal, DeleteConfigModal } from '../../_shared/draft';
 import { stringToIPAddress } from '../../../utils/netip';
 import type { Neighbour, NeighbourTableInfo } from '../../../api/neighbours';
 import { NeighbourTable } from './NeighbourTable';
-import NeighbourDrawer from './NeighbourDrawer';
+import NeighbourPanel from './NeighbourPanel';
 import CreateTableModal from './CreateTableModal';
 import EditTableModal from './EditTableModal';
 import { useNeighbours } from './useNeighbours';
@@ -39,7 +39,7 @@ const parseTab = (params: URLSearchParams): string =>
 const parseSearch = (params: URLSearchParams): string =>
     params.get(QP_SEARCH) || '';
 
-/** Neighbours page — shows neighbour tables and entries with inline drawer editing. */
+/** Neighbours page — shows neighbour tables and entries with inline panel editing. */
 const NeighboursPage: React.FC = () => {
     const [searchParams, setSearchParams] = useSearchParams();
 
@@ -51,6 +51,9 @@ const NeighboursPage: React.FC = () => {
         tables,
         cache,
         loading,
+        lastSync,
+        paused,
+        setPaused,
         addNeighbour,
         updateNeighbour,
         removeNeighbours,
@@ -62,7 +65,7 @@ const NeighboursPage: React.FC = () => {
     } = useNeighbours(activeTab);
 
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-    const [drawer, setDrawer] = useState<{ open: boolean; mode: 'add' | 'edit'; neighbour: Neighbour | null }>({
+    const [panel, setPanel] = useState<{ open: boolean; mode: 'add' | 'edit' | 'view'; neighbour: Neighbour | null }>({
         open: false,
         mode: 'add',
         neighbour: null,
@@ -77,7 +80,12 @@ const NeighboursPage: React.FC = () => {
     const [deleteTableOpen, setDeleteTableOpen] = useState(false);
     const [activeRowId, setActiveRowId] = useState<string | null>(null);
     const [editingRowId, setEditingRowId] = useState<string | null>(null);
+    const [tick, setTick] = useState(0);
 
+    useEffect(() => {
+        const id = window.setInterval(() => setTick((t) => t + 1), 1000);
+        return () => window.clearInterval(id);
+    }, []);
 
     const isMergedView = activeTab === MERGED_TAB;
     const activeTableInfo: NeighbourTableInfo | null = tables.find((t) => t.name === activeTab) ?? null;
@@ -105,6 +113,7 @@ const NeighboursPage: React.FC = () => {
         setSelectedIds(new Set());
         setActiveRowId(null);
         setEditingRowId(null);
+        setPanel((prev) => ({ ...prev, open: false }));
         fetchTab(tab).catch(() => {});
     }, [updateParams, fetchTab]);
 
@@ -143,32 +152,41 @@ const NeighboursPage: React.FC = () => {
     }, [tables]);
 
     const openAdd = useCallback((): void => {
-        setDrawer({ open: true, mode: 'add', neighbour: null });
+        setPanel({ open: true, mode: 'add', neighbour: null });
+        setEditingRowId(null);
     }, []);
 
     const handleEditRow = useCallback((id: string): void => {
         const neighbour = allRows.find((n) => getNeighbourId(n) === id) || null;
-        setDrawer({ open: true, mode: 'edit', neighbour });
+        setPanel({ open: true, mode: 'edit', neighbour });
         setActiveRowId(id);
         setEditingRowId(id);
     }, [allRows]);
 
-    const handleCloseDrawer = useCallback((): void => {
-        setDrawer((prev) => ({ ...prev, open: false }));
+    const handleClosePanel = useCallback((): void => {
+        setPanel((prev) => ({ ...prev, open: false }));
         setEditingRowId(null);
     }, []);
 
     const handleRowClick = useCallback((id: string): void => {
         setActiveRowId(id);
-    }, []);
+        const neighbour = allRows.find((n) => getNeighbourId(n) === id) || null;
+        const mode = isMergedView ? 'view' : 'edit';
+        setPanel({ open: true, mode, neighbour });
+        if (mode === 'edit') {
+            setEditingRowId(id);
+        } else {
+            setEditingRowId(null);
+        }
+    }, [allRows, isMergedView]);
 
     const handleSubmitNeighbour = useCallback(async (table: string, entry: Neighbour): Promise<void> => {
-        if (drawer.mode === 'add') {
+        if (panel.mode === 'add') {
             await addNeighbour(table, entry);
         } else {
             await updateNeighbour(table, entry);
         }
-    }, [drawer.mode, addNeighbour, updateNeighbour]);
+    }, [panel.mode, addNeighbour, updateNeighbour]);
 
     const handleDeleteNeighbour = useCallback(async (neighbour: Neighbour): Promise<void> => {
         const table = isMergedView ? (neighbour.source || 'static') : activeTab;
@@ -188,7 +206,8 @@ const NeighboursPage: React.FC = () => {
         setRowDeleteConfirm({ open: false, neighbour: null });
         if (!neighbour) return;
         await handleDeleteNeighbour(neighbour);
-    }, [rowDeleteConfirm.neighbour, handleDeleteNeighbour]);
+        handleClosePanel();
+    }, [rowDeleteConfirm.neighbour, handleDeleteNeighbour, handleClosePanel]);
 
     const handleBulkRemove = useCallback(async (): Promise<void> => {
         if (isMergedView || !activeTab) return;
@@ -227,6 +246,20 @@ const NeighboursPage: React.FC = () => {
         const firstNonBuiltin = tables.find((t) => !t.built_in && t.name);
         return firstNonBuiltin?.name || tables[0]?.name || '';
     }, [isMergedView, activeTab, tables]);
+
+    const handlePinAsStatic = useCallback((neighbour: Neighbour): void => {
+        updateParams({ [QP_TAB]: 'static' });
+        fetchTab('static').catch(() => {});
+        setPanel({ open: true, mode: 'add', neighbour });
+        setEditingRowId(null);
+    }, [updateParams, fetchTab]);
+
+    const syncAgoLabel = useMemo((): string => {
+        const s = Math.max(0, Math.floor((Date.now() - lastSync) / 1000));
+        if (s < 5) return 'just now';
+        if (s < 60) return `${s}s ago`;
+        return `${Math.floor(s / 60)}m ago`;
+    }, [lastSync, tick]);
 
     const displayLabel = (cfg: string): string => cfg === MERGED_TAB ? 'Merged' : cfg;
 
@@ -273,27 +306,65 @@ const NeighboursPage: React.FC = () => {
                     </div>
                 ) : (
                     <>
-                        <ConfigTabStrip
-                            configs={displayConfigs}
-                            activeConfig={activeDisplayConfig}
-                            counts={(() => {
-                                const m = new Map<string, number>();
-                                tabsList.forEach((t) => {
-                                    m.set(displayLabel(t), counts.get(t) ?? 0);
-                                });
-                                return m;
-                            })()}
-                            dirtyConfigs={new Set()}
-                            onSelect={(label) => {
-                                const tab = label === 'Merged' ? MERGED_TAB : label;
-                                handleTabSelect(tab);
-                            }}
-                            onAddConfig={() => setCreateTableOpen(true)}
-                            addLabel="Add table"
-                        />
+                        <div className="fw-tabs-row">
+                            <ConfigTabStrip
+                                configs={displayConfigs}
+                                activeConfig={activeDisplayConfig}
+                                counts={(() => {
+                                    const m = new Map<string, number>();
+                                    tabsList.forEach((t) => {
+                                        m.set(displayLabel(t), counts.get(t) ?? 0);
+                                    });
+                                    return m;
+                                })()}
+                                dirtyConfigs={new Set()}
+                                onSelect={(label) => {
+                                    const tab = label === 'Merged' ? MERGED_TAB : label;
+                                    handleTabSelect(tab);
+                                }}
+                                onAddConfig={() => setCreateTableOpen(true)}
+                                addLabel="Add table"
+                                leadingIcon={(label) =>
+                                    label === 'Merged' ? (
+                                        <Layers
+                                            width={13}
+                                            height={13}
+                                            style={{ color: 'var(--fw-text-3)', flexShrink: 0 }}
+                                        />
+                                    ) : undefined
+                                }
+                            />
+                            <div className={`nb-live-pill${paused ? '' : ' nb-live-pill--on'}`}>
+                                <span className="nb-live-pill__dot" />
+                                <span className="nb-live-pill__label">
+                                    {paused ? 'Paused' : `Live · synced ${syncAgoLabel}`}
+                                </span>
+                                <button
+                                    type="button"
+                                    className="nb-live-pill__btn"
+                                    title={paused ? 'Resume polling' : 'Pause polling'}
+                                    onClick={() => setPaused(!paused)}
+                                >
+                                    {paused ? '▶' : '⏸'}
+                                </button>
+                            </div>
+                        </div>
                         <div className="fw-content">
                             <NeighbourTable
                                 rows={visibleRows}
+                                totalCount={allRows.length}
+                                searchActive={search.trim().length > 0}
+                                readOnlyNote={
+                                    isMergedView ? (
+                                        <span className="nb-footer-note">
+                                            Merged is read-only — resolved by priority (lower value wins) across {tables.length} tables
+                                        </span>
+                                    ) : activeTableInfo?.name === 'kernel' ? (
+                                        <span className="nb-footer-note">
+                                            kernel is populated from netlink — manual edits are overwritten
+                                        </span>
+                                    ) : undefined
+                                }
                                 selectedIds={selectedIds}
                                 activeRowId={activeRowId}
                                 editingRowId={editingRowId}
@@ -309,6 +380,9 @@ const NeighboursPage: React.FC = () => {
                                 onDeleteTable={() => setDeleteTableOpen(true)}
                                 onDeleteRow={isMergedView ? undefined : handleDeleteRowRequest}
                                 canEditRow={!isMergedView}
+                                isMergedView={isMergedView}
+                                cache={cache}
+                                tables={tables}
                             />
                         </div>
                     </>
@@ -350,16 +424,19 @@ const NeighboursPage: React.FC = () => {
                     onConfirm={handleDeleteTable}
                 />
 
-                <NeighbourDrawer
-                    open={drawer.open}
-                    mode={drawer.mode}
+                <NeighbourPanel
+                    open={panel.open}
+                    mode={panel.mode}
+                    neighbour={panel.neighbour}
                     tables={tables}
                     defaultTable={defaultAddTable}
-                    neighbour={drawer.neighbour}
                     activeTable={activeTab}
-                    onClose={handleCloseDrawer}
+                    isMergedView={isMergedView}
+                    cache={cache}
+                    onClose={handleClosePanel}
                     onSubmit={handleSubmitNeighbour}
-                    onDelete={drawer.mode === 'edit' ? handleDeleteNeighbour : undefined}
+                    onDeleteRequest={(n) => setRowDeleteConfirm({ open: true, neighbour: n })}
+                    onPinAsStatic={handlePinAsStatic}
                 />
 
                 <CreateTableModal

@@ -12,6 +12,9 @@ export interface UseNeighboursResult {
     cache: Map<string, Neighbour[]>;
     loading: boolean;
     activeTabRef: React.MutableRefObject<string>;
+    lastSync: number;
+    paused: boolean;
+    setPaused: (paused: boolean) => void;
     addNeighbour: (table: string, entry: Neighbour) => Promise<void>;
     updateNeighbour: (table: string, entry: Neighbour) => Promise<void>;
     removeNeighbours: (table: string, nextHopWires: (IPAddressWire | undefined)[]) => Promise<void>;
@@ -27,6 +30,8 @@ export const useNeighbours = (activeTab: string): UseNeighboursResult => {
     const [tables, setTables] = useState<NeighbourTableInfo[]>([]);
     const [cache, setCache] = useState<Map<string, Neighbour[]>>(new Map());
     const [loading, setLoading] = useState(true);
+    const [lastSync, setLastSync] = useState<number>(() => Date.now());
+    const [paused, setPaused] = useState(false);
 
     const activeTabRef = useRef(activeTab);
     activeTabRef.current = activeTab;
@@ -94,18 +99,19 @@ export const useNeighbours = (activeTab: string): UseNeighboursResult => {
     }, [loadTables, prefetchAll]);
 
     useEffect(() => {
-        if (loading) return;
+        if (loading || paused) return;
         const intervalId = window.setInterval(async () => {
             const tab = activeTabRef.current;
             try {
                 await fetchTab(tab);
+                setLastSync(Date.now());
             } catch {
                 // Silently ignore periodic refresh errors.
             }
             loadTables();
         }, REFRESH_INTERVAL_MS);
         return () => window.clearInterval(intervalId);
-    }, [loading, fetchTab, loadTables]);
+    }, [loading, paused, fetchTab, loadTables]);
 
     const addNeighbour = useCallback(async (table: string, entry: Neighbour): Promise<void> => {
         try {
@@ -182,6 +188,9 @@ export const useNeighbours = (activeTab: string): UseNeighboursResult => {
         cache,
         loading,
         activeTabRef,
+        lastSync,
+        paused,
+        setPaused,
         addNeighbour,
         updateNeighbour,
         removeNeighbours,

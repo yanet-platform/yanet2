@@ -154,6 +154,12 @@
     }
 }
 
+// Fix 6 — gold count badge on the active tab, scoped to neighbours only.
+.fw-tabs-row .fw-tab--active .fw-tab__count {
+    color: var(--fw-accent);
+    background: var(--fw-accent-soft);
+}
+
 // Content area
 .fw-content {
     display: flex;
@@ -507,17 +513,22 @@
 
     &--visible { opacity: 1; }
 
-    &:hover {
+    &:hover:not(:disabled) {
         background: var(--fw-bg-2);
         color: var(--fw-text);
         border-color: var(--fw-text-3);
+    }
+
+    &:disabled {
+        opacity: 0.35;
+        cursor: not-allowed;
     }
 
     &--danger {
         color: var(--fw-danger);
         border-color: color-mix(in srgb, var(--g-color-text-danger) 25%, transparent);
 
-        &:hover {
+        &:hover:not(:disabled) {
             background: color-mix(in srgb, var(--g-color-text-danger) 8%, transparent);
             border-color: var(--fw-danger);
             color: var(--fw-danger);
@@ -787,6 +798,14 @@
     }
 
     &::placeholder { color: var(--fw-text-3); }
+
+    &:disabled {
+        opacity: 0.55;
+        background: var(--fw-bg-2);
+        color: var(--fw-text-3);
+        cursor: not-allowed;
+        border-color: var(--fw-line-2);
+    }
 }
 
 .fw-field__error {
@@ -955,4 +974,497 @@
     display: flex;
     align-items: center;
     gap: 8px;
+}
+
+// Neighbours page extensions.
+// Scoped to .fw-page to avoid bleeding into other pages.
+
+// Neighbours-specific header modifier — constrains the header to the visible
+// flex width (no minWidth override) and hides its scrollbar, relying on JS
+// scrollLeft sync from the body scroll event to keep columns aligned.
+.nb-vtbl-header {
+    overflow-x: scroll;
+    min-width: 0 !important;
+    scrollbar-width: none; // Firefox
+
+    &::-webkit-scrollbar {
+        display: none; // Chrome/Safari/Edge
+    }
+}
+
+// Right-side footer note (read-only warning) for the neighbours table.
+.nb-footer-note {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 11px;
+    color: var(--fw-text-3);
+    white-space: nowrap;
+}
+
+// Tabs row wrapper — aligns ConfigTabStrip with the live pill.
+.fw-tabs-row {
+    display: flex;
+    align-items: center;
+    border-bottom: 1px solid var(--fw-line-2);
+    background: var(--fw-page-bg);
+    flex-shrink: 0;
+    padding-right: 16px;
+
+    .fw-tabs {
+        flex: 1;
+        border-bottom: none;
+        // Fix 2 — overflow-x:auto promotes overflow-y to auto by default,
+        // causing a stray vertical scrollbar when tab content (icons) exceeds
+        // the strip height. Clamp it here, scoped to neighbours only.
+        overflow-y: hidden;
+    }
+}
+
+// State badge pill.
+.nb-state-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 9px 2px 7px;
+    border-radius: var(--fw-r-md);
+    font-family: var(--fw-font-mono);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+    background: var(--nb-stb-bg);
+    color: var(--nb-stb-c);
+    border: 1px solid var(--nb-stb-bd);
+    cursor: default;
+
+    &__dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--nb-stb-c);
+        flex-shrink: 0;
+    }
+}
+
+// Fix 1 — warm tooltip surface for state and override-badge tooltips.
+// Gravity renders the popup as a .g-popup element in a portal outside .fw-page,
+// so CSS variables defined on .fw-page do not cascade into the portal.
+// We hardcode the warm dark-mode values (app is locked to dark) here.
+// The className prop on Gravity Tooltip lands directly on the .g-popup root,
+// which also acts as the tooltip surface itself — so we style it directly.
+.nb-state-tip-popup,
+.nb-ovr-tip-popup {
+    --fw-text:       #F2EEE8;
+    --fw-text-2:     #B8B0A4;
+    --fw-text-3:     #7E7468;
+    --fw-accent:     #FFC061;
+    --fw-line-2:     rgba(255, 200, 140, 0.12);
+    --fw-font-mono:  'JetBrains Mono', ui-monospace, monospace;
+    background: #221C16 !important;
+    color: #F2EEE8 !important;
+    border-radius: 10px !important;
+    border: 1px solid rgba(255, 200, 140, 0.12) !important;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5) !important;
+    font-size: 12px !important;
+    padding: 10px 14px !important;
+    max-width: 320px !important;
+    overflow: hidden !important;
+}
+
+// Tooltip content for state badge.
+.nb-state-tip {
+    &__head {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        font-weight: 600;
+        color: var(--fw-text);
+        font-family: var(--fw-font-mono);
+        font-size: 12px;
+        margin-bottom: 5px;
+    }
+
+    &__dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        flex-shrink: 0;
+    }
+
+    &__desc {
+        font-size: 12px;
+        line-height: 1.5;
+        color: var(--fw-text-2);
+    }
+
+    &__action {
+        margin-top: 7px;
+        padding-top: 7px;
+        border-top: 1px solid var(--fw-line-2);
+        color: var(--fw-text-3);
+        font-size: 11px;
+
+        strong { color: var(--fw-text-2); font-weight: 600; }
+    }
+}
+
+// Source cell chips.
+.nb-src-chip {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 3px;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.nb-src-name {
+    font-family: var(--fw-font-mono);
+    font-size: 12px;
+    color: var(--fw-text-2);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+
+    &--static { color: var(--fw-accent); }
+}
+
+// Override badge (shown under source name in Merged tab).
+.nb-ovr-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 9.5px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 1px 5px;
+    border-radius: var(--fw-r-sm);
+    background: var(--fw-accent-soft);
+    color: var(--fw-accent);
+    border: 1px solid rgba(255, 192, 97, 0.3);
+    white-space: nowrap;
+    cursor: default;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+
+    &--conflict {
+        background: color-mix(in srgb, var(--g-color-text-warning) 12%, transparent);
+        color: var(--g-color-text-warning);
+        border-color: color-mix(in srgb, var(--g-color-text-warning) 30%, transparent);
+    }
+}
+
+// Tooltip content for override badge.
+.nb-ovr-tip {
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--fw-text-2);
+
+    &__head {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        font-weight: 600;
+        color: var(--fw-text);
+        margin-bottom: 5px;
+    }
+
+    &__conflict {
+        margin-top: 7px;
+        padding-top: 7px;
+        border-top: 1px solid var(--fw-line-2);
+        color: var(--g-color-text-warning);
+        font-size: 11px;
+
+        strong { font-weight: 600; }
+    }
+
+    strong { color: var(--fw-text); font-weight: 600; }
+}
+
+// Live freshness pill.
+.nb-live-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    height: 30px;
+    padding: 0 10px;
+    border-radius: var(--fw-r-md);
+    border: 1px solid var(--fw-line-2);
+    background: var(--fw-panel);
+    font-size: 11.5px;
+    color: var(--fw-text-3);
+    flex-shrink: 0;
+
+    &__dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--fw-text-3);
+        flex-shrink: 0;
+        position: relative;
+    }
+
+    &__label { white-space: nowrap; }
+
+    &__btn {
+        display: grid;
+        place-items: center;
+        width: 18px;
+        height: 18px;
+        border-radius: var(--fw-r-sm);
+        color: var(--fw-text-3);
+        background: none;
+        border: none;
+        cursor: pointer;
+        font-size: 11px;
+        padding: 0;
+
+        &:hover { background: var(--fw-bg-2); color: var(--fw-text); }
+    }
+
+    &--on {
+        .nb-live-pill__dot {
+            background: var(--g-color-text-positive);
+
+            &::after {
+                content: '';
+                position: absolute;
+                inset: -4px;
+                border-radius: 50%;
+                background: var(--g-color-text-positive);
+                opacity: 0.35;
+                animation: nb-pulse 1.8s ease-out infinite;
+            }
+        }
+
+        .nb-live-pill__label { color: var(--fw-text-2); }
+    }
+}
+
+@keyframes nb-pulse {
+    0%   { transform: scale(0.6); opacity: 0.5; }
+    70%  { transform: scale(1.9); opacity: 0; }
+    100% { opacity: 0; }
+}
+
+// Detail panel — read-only aside using existing fw-drawer chrome.
+.nb-detail-panel {
+    width: 480px;
+
+    &__header-info {
+        flex: 1;
+        min-width: 0;
+    }
+
+    &__ip {
+        font-size: 15px;
+        font-weight: 600;
+    }
+
+    &__subtitle {
+        font-size: 11.5px;
+        color: var(--fw-text-2);
+        margin-top: 2px;
+    }
+}
+
+// Key-value grid inside the detail panel.
+.nb-kv {
+    display: grid;
+    grid-template-columns: 120px 1fr;
+    gap: 8px 12px;
+    align-items: baseline;
+
+    dt {
+        font-size: 10.5px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--fw-text-3);
+    }
+
+    dd {
+        font-size: 12.5px;
+        color: var(--fw-text);
+        line-height: 1.5;
+        overflow-wrap: anywhere;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        flex-wrap: wrap;
+    }
+}
+
+// Copy value widget.
+.nb-copy-val {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+
+    &--muted { color: var(--fw-text-3); }
+}
+
+.nb-copy-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    border-radius: var(--fw-r-sm);
+    font-size: 11px;
+    color: var(--fw-text-3);
+    background: none;
+    border: none;
+    cursor: pointer;
+    flex-shrink: 0;
+
+    &:hover { color: var(--fw-accent); background: var(--fw-bg-2); }
+}
+
+// State explanation block.
+.nb-state-explain {
+    border-radius: var(--fw-r-md);
+    border: 1px solid var(--fw-line-2);
+    background: var(--fw-bg-2);
+    padding: 12px 14px;
+
+    &__head {
+        margin-bottom: 8px;
+    }
+
+    &__desc {
+        font-size: 12.5px;
+        line-height: 1.55;
+        color: var(--fw-text-2);
+        margin: 0;
+    }
+
+    &__action {
+        margin-top: 10px;
+        padding-top: 10px;
+        border-top: 1px solid var(--fw-line-2);
+        font-size: 12px;
+        color: var(--fw-text-2);
+        display: flex;
+        align-items: flex-start;
+        gap: 7px;
+    }
+
+    &__action-icon {
+        flex-shrink: 0;
+        margin-top: 1px;
+    }
+}
+
+// Merge explanation callout box.
+.nb-why-box {
+    display: flex;
+    gap: 9px;
+    padding: 11px 13px;
+    border-radius: var(--fw-r-md);
+    background: var(--fw-accent-soft);
+    border: 1px solid rgba(255, 192, 97, 0.22);
+    margin-bottom: 14px;
+    font-size: 12.5px;
+    line-height: 1.55;
+    color: var(--fw-text-2);
+
+    strong { color: var(--fw-text); font-weight: 600; }
+
+    &__icon {
+        font-size: 14px;
+        flex-shrink: 0;
+        margin-top: 1px;
+    }
+
+    p { margin: 0; }
+}
+
+// Merge candidate cards.
+.nb-cand-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.nb-cand {
+    border: 1px solid var(--fw-line-2);
+    border-radius: var(--fw-r-md);
+    padding: 11px 13px;
+    background: var(--fw-bg-2);
+
+    &--winner {
+        border-color: rgba(255, 192, 97, 0.3);
+        background: var(--fw-accent-soft);
+    }
+
+    &__top {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 10px;
+    }
+
+    &__table {
+        font-weight: 600;
+        font-size: 13px;
+        color: var(--fw-text);
+    }
+
+    &__tag {
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 0.07em;
+        text-transform: uppercase;
+        padding: 2px 6px;
+        border-radius: var(--fw-r-sm);
+
+        &--winner {
+            background: var(--fw-accent);
+            color: #1a140a;
+        }
+
+        &--shadow {
+            background: var(--fw-bg-3);
+            color: var(--fw-text-3);
+        }
+    }
+
+    &__prio {
+        margin-left: auto;
+        font-size: 11px;
+        color: var(--fw-text-3);
+    }
+
+    &__grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 6px 12px;
+    }
+
+    &__cell {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+
+        span {
+            font-size: 9.5px;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: var(--fw-text-3);
+        }
+
+        b {
+            font-size: 11.5px;
+            font-weight: 500;
+            color: var(--fw-text-2);
+        }
+    }
+
+    &__diff {
+        color: var(--g-color-text-warning) !important;
+    }
 }

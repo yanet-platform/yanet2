@@ -17,6 +17,10 @@ export interface ConfigTabStripProps {
     onAddConfig: () => void;
     /** Accessible label for the "add config" button tooltip. Defaults to "Add config". */
     addLabel?: string;
+    /** Optional leading icon renderer — return a node to prepend before the tab label. */
+    leadingIcon?: (configName: string) => React.ReactNode;
+    /** Optional trailing icon renderer — return a node to append after the tab label, before the count badge. */
+    trailingIcon?: (configName: string) => React.ReactNode;
 }
 
 /**
@@ -32,6 +36,8 @@ export const ConfigTabStrip: React.FC<ConfigTabStripProps> = ({
     onSelect,
     onAddConfig,
     addLabel = 'Add config',
+    leadingIcon,
+    trailingIcon,
 }) => (
     <div className="fw-tabs" role="tablist">
         {configs.map((cfg) => (
@@ -43,10 +49,12 @@ export const ConfigTabStrip: React.FC<ConfigTabStripProps> = ({
                 className={`fw-tab${cfg === activeConfig ? ' fw-tab--active' : ''}${dirtyConfigs.has(cfg) ? ' fw-tab--dirty' : ''}`}
                 onClick={() => onSelect(cfg)}
             >
+                {leadingIcon?.(cfg)}
                 <span className="fw-tab__label">{cfg}</span>
                 {dirtyConfigs.has(cfg) && (
                     <span className="fw-tab__dot" aria-label="unsaved changes" />
                 )}
+                {trailingIcon?.(cfg)}
                 <span className="fw-tab__count">{counts.get(cfg) ?? 0}</span>
             </button>
         ))}

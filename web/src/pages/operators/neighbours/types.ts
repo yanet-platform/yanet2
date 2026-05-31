@@ -1,4 +1,4 @@
-import type { Neighbour, NeighbourTableInfo } from '../../../api/neighbours';
+import type { NeighbourTableInfo } from '../../../api/neighbours';
 
 export type SortableColumn =
     | 'next_hop'
@@ -20,20 +20,6 @@ export interface SortState {
 export const DEFAULT_SORT: SortState = { column: 'state', direction: 'asc' };
 
 export const MERGED_TAB = '__merged__';
-
-export type NeighbourDrawerMode = 'add' | 'edit';
-
-export interface NeighbourDrawerProps {
-    open: boolean;
-    mode: NeighbourDrawerMode;
-    tables: NeighbourTableInfo[];
-    defaultTable: string;
-    neighbour: Neighbour | null;
-    activeTable: string;
-    onClose: () => void;
-    onSubmit: (table: string, entry: Neighbour) => Promise<void>;
-    onDelete?: (neighbour: Neighbour) => Promise<void>;
-}
 
 export interface CreateTableModalProps {
     open: boolean;
