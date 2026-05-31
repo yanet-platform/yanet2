@@ -9,6 +9,15 @@ lpm_test = executable(
 )
 test('lpm', lpm_test, suite: ['common'])
 
+lpm_wide_test = executable(
+  'lpm_wide_test',
+  ['lpm_wide_test.c',],
+  c_args: yanet_test_c_args,
+  link_args: yanet_link_args,
+  dependencies: dependencies,
+)
+test('lpm_wide', lpm_wide_test, suite: ['common'])
+
 radix_test = executable(
   'radix_test',
   ['radix_test.c',],
