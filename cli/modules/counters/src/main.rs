@@ -1,6 +1,6 @@
 //! CLI for YANET "counters" module.
 
-use core::error::Error;
+use std::str::FromStr;
 
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
@@ -8,12 +8,16 @@ use colored::Colorize;
 use tonic::codec::CompressionEncoding;
 use ync::{
     client::{ConnectionArgs, LayeredChannel},
-    logging,
+    errors::Error,
+    output::{self, CommonFormat},
 };
 use ynpb::pb::{
-    counters_service_client::CountersServiceClient, CounterTag, CountersByTagsRequest, LatencyRangeCounter,
-    PerfCounter, PerfCountersRequest, PerfCountersResponse, WorkerCountersRequest,
+    counters_service_client::CountersServiceClient, CounterTag, CountersByTagsRequest, CountersByTagsResponse,
+    LatencyRangeCounter, PerfCounter, PerfCountersRequest, PerfCountersResponse, WorkerCountersRequest,
+    WorkerCountersResponse,
 };
+
+const COUNTERS_SERVICE: &str = "ynpb.CountersService";
 
 /// Counters module - displays counters information.
 #[derive(Debug, Clone, Parser)]
@@ -26,6 +30,9 @@ pub struct Cmd {
     pub by_tags: ByTagsCmd,
     #[command(flatten)]
     pub connection: ConnectionArgs,
+    /// Output format.
+    #[arg(long, value_enum, default_value = "human", global = true)]
+    pub format: CommonFormat,
     /// Be verbose in terms of logging.
     #[clap(short, action = ArgAction::Count, global = true)]
     pub verbose: u8,
@@ -100,6 +107,20 @@ pub enum ModeCmd {
     Workers,
 }
 
+impl ModeCmd {
+    pub fn action(&self) -> &'static str {
+        match self {
+            ModeCmd::Device(..) => "show device counters",
+            ModeCmd::Pipeline(..) => "show pipeline counters",
+            ModeCmd::Function(..) => "show function counters",
+            ModeCmd::Chain(..) => "show chain counters",
+            ModeCmd::Module(..) => "show module counters",
+            ModeCmd::Perf(..) => "show perf counters",
+            ModeCmd::Workers => "show worker counters",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Parser)]
 pub struct DeviceCmd {
     #[arg(short = 'd', long)]
@@ -168,10 +189,28 @@ pub struct PerfCmd {
     pub chain: String,
     /// Module in format module_type:module_name
     #[arg(short = 'm', long)]
-    pub module: String,
-    /// Output raw JSON instead of formatted histogram
-    #[arg(long)]
-    pub json: bool,
+    pub module: ModuleRef,
+}
+
+/// A `module_type:module_name` pair parsed by clap from the `--module` flag.
+#[derive(Debug, Clone)]
+pub struct ModuleRef {
+    pub module_type: String,
+    pub module_name: String,
+}
+
+impl FromStr for ModuleRef {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.split_once(':') {
+            Some((t, n)) if !t.is_empty() && !n.is_empty() => Ok(Self {
+                module_type: t.to_string(),
+                module_name: n.to_string(),
+            }),
+            _ => Err(format!("invalid module '{s}', expected module_type:module_name")),
+        }
+    }
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -179,183 +218,145 @@ pub async fn main() {
     CompleteEnv::with_factory(Cmd::command).complete();
 
     let cmd = Cmd::parse();
-    let _ = logging::init(cmd.verbose as usize);
+    ync::init(cmd.verbose, cmd.format);
+    colored::control::set_override(output::is_colored());
 
     if let Err(err) = run(cmd).await {
-        log::error!("ERROR: {err}");
-        std::process::exit(1);
+        output::failure(&err);
+        std::process::exit(err.exit_code());
     }
 }
 
-async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
-    let mut service = CountersService::new(&cmd.connection).await?;
+async fn run(cmd: Cmd) -> Result<(), Error> {
+    let action = cmd.mode.as_ref().map_or("show counters", ModeCmd::action);
+    let mut service = CountersService::new(&cmd.connection, action).await?;
 
     match cmd.mode {
-        None => service.show_by_tags(cmd.by_tags.into()).await?,
-        Some(ModeCmd::Device(cmd)) => service.show_device(cmd.device_name).await?,
-        Some(ModeCmd::Pipeline(cmd)) => service.show_pipeline(cmd.device_name, cmd.pipeline_name).await?,
-        Some(ModeCmd::Function(cmd)) => {
-            service
-                .show_function(cmd.device_name, cmd.pipeline_name, cmd.function_name)
-                .await?
-        }
-        Some(ModeCmd::Chain(cmd)) => {
-            service
-                .show_chain(cmd.device_name, cmd.pipeline_name, cmd.function_name, cmd.chain_name)
-                .await?
-        }
-        Some(ModeCmd::Module(cmd)) => {
-            service
-                .show_module(
-                    cmd.device_name,
-                    cmd.pipeline_name,
-                    cmd.function_name,
-                    cmd.chain_name,
-                    cmd.module_type,
-                    cmd.module_name,
-                )
-                .await?
-        }
-        Some(ModeCmd::Perf(cmd)) => {
-            // Parse module format: module_type:module_name
-            let parts: Vec<&str> = cmd.module.split(':').collect();
-            if parts.len() != 2 {
-                return Err(format!(
-                    "Invalid module format '{}'. Expected format: module_type:module_name",
-                    cmd.module
-                )
-                .into());
-            }
-            let module_type = parts[0].to_string();
-            let module_name = parts[1].to_string();
-
+        Some(ModeCmd::Perf(perf)) => {
             let request = PerfCountersRequest {
-                device: cmd.device,
-                pipeline: cmd.pipeline,
-                function: cmd.function,
-                chain: cmd.chain,
-                module_type,
-                module_name,
+                device: perf.device,
+                pipeline: perf.pipeline,
+                function: perf.function,
+                chain: perf.chain,
+                module_type: perf.module.module_type,
+                module_name: perf.module.module_name,
             };
-
-            service.show_perf(request, cmd.json).await?
+            let response = service.perf(request).await?;
+            output::data(&response, false, format_args!(""), || {
+                format_perf_counters(&response);
+            });
         }
-        Some(ModeCmd::Workers) => service.show_workers().await?,
+        Some(ModeCmd::Workers) => {
+            let response = service.workers().await?;
+            output::data(&response, false, format_args!(""), || {
+                print!(
+                    "{}",
+                    serde_yaml::to_string(&response).expect("worker counters YAML serialization must not fail")
+                );
+            });
+        }
+        mode => {
+            let request = tags_request(mode, cmd.by_tags);
+            let response = service.by_tags(request).await?;
+            output::data(&response, false, format_args!(""), || {
+                print!(
+                    "{}",
+                    serde_yaml::to_string(&response).expect("counters YAML serialization must not fail")
+                );
+            });
+        }
     }
 
     Ok(())
 }
 
+fn by_tags_request(tags: Vec<(&'static str, String)>) -> CountersByTagsRequest {
+    CountersByTagsRequest {
+        tags: tags
+            .into_iter()
+            .map(|(key, value)| CounterTag { key: key.to_string(), value })
+            .collect(),
+        query: Vec::new(),
+    }
+}
+
+fn tags_request(mode: Option<ModeCmd>, by_tags: ByTagsCmd) -> CountersByTagsRequest {
+    match mode {
+        None => by_tags.into(),
+        Some(ModeCmd::Device(cmd)) => by_tags_request(vec![("device", cmd.device_name), ("pipeline", String::new())]),
+        Some(ModeCmd::Pipeline(cmd)) => by_tags_request(vec![
+            ("device", cmd.device_name),
+            ("pipeline", cmd.pipeline_name),
+            ("function", String::new()),
+        ]),
+        Some(ModeCmd::Function(cmd)) => by_tags_request(vec![
+            ("device", cmd.device_name),
+            ("pipeline", cmd.pipeline_name),
+            ("function", cmd.function_name),
+            ("chain", String::new()),
+        ]),
+        Some(ModeCmd::Chain(cmd)) => by_tags_request(vec![
+            ("device", cmd.device_name),
+            ("pipeline", cmd.pipeline_name),
+            ("function", cmd.function_name),
+            ("chain", cmd.chain_name),
+            ("module_type", String::new()),
+        ]),
+        Some(ModeCmd::Module(cmd)) => by_tags_request(vec![
+            ("device", cmd.device_name),
+            ("pipeline", cmd.pipeline_name),
+            ("function", cmd.function_name),
+            ("chain", cmd.chain_name),
+            ("module_type", cmd.module_type),
+            ("module_name", cmd.module_name),
+        ]),
+        Some(ModeCmd::Perf(..)) | Some(ModeCmd::Workers) => unreachable!(),
+    }
+}
+
 pub struct CountersService {
     client: CountersServiceClient<LayeredChannel>,
+    endpoint: String,
+    action: &'static str,
 }
 
 impl CountersService {
-    pub async fn new(connection: &ConnectionArgs) -> Result<Self, Box<dyn Error>> {
-        let channel = ync::client::connect(connection).await?;
+    pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
+        let channel = ync::client::connect(connection)
+            .await
+            .map_err(|err| Error::from_connection(err, action, connection.endpoint.clone()))?;
         let client = CountersServiceClient::new(channel)
             .send_compressed(CompressionEncoding::Gzip)
             .accept_compressed(CompressionEncoding::Gzip);
-        Ok(Self { client })
+
+        Ok(Self {
+            client,
+            endpoint: connection.endpoint.clone(),
+            action,
+        })
     }
 
-    pub async fn show_by_tags(&mut self, request: CountersByTagsRequest) -> Result<(), Box<dyn Error>> {
-        let response = self.client.by_tags(request).await?;
-        println!("{}", serde_json::to_string(response.get_ref())?);
-        Ok(())
+    fn map_err(&self) -> impl FnOnce(tonic::Status) -> Error + '_ {
+        let endpoint = self.endpoint.clone();
+        let action = self.action;
+        move |status| Error::from_status(status, action, endpoint, COUNTERS_SERVICE)
     }
 
-    fn by_tags_request(tags: Vec<(&'static str, String)>) -> CountersByTagsRequest {
-        CountersByTagsRequest {
-            tags: tags
-                .into_iter()
-                .map(|(key, value)| CounterTag { key: key.to_string(), value })
-                .collect(),
-            query: Vec::new(),
-        }
+    pub async fn by_tags(&mut self, request: CountersByTagsRequest) -> Result<CountersByTagsResponse, Error> {
+        Ok(self.client.by_tags(request).await.map_err(self.map_err())?.into_inner())
     }
 
-    pub async fn show_device(&mut self, device_name: String) -> Result<(), Box<dyn Error>> {
-        let request = Self::by_tags_request(vec![("device", device_name), ("pipeline", String::new())]);
-        self.show_by_tags(request).await
+    pub async fn perf(&mut self, request: PerfCountersRequest) -> Result<PerfCountersResponse, Error> {
+        Ok(self.client.perf(request).await.map_err(self.map_err())?.into_inner())
     }
 
-    pub async fn show_pipeline(&mut self, device_name: String, pipeline_name: String) -> Result<(), Box<dyn Error>> {
-        let request = Self::by_tags_request(vec![
-            ("device", device_name),
-            ("pipeline", pipeline_name),
-            ("function", String::new()),
-        ]);
-        self.show_by_tags(request).await
-    }
-
-    pub async fn show_function(
-        &mut self,
-        device_name: String,
-        pipeline_name: String,
-        function_name: String,
-    ) -> Result<(), Box<dyn Error>> {
-        let request = Self::by_tags_request(vec![
-            ("device", device_name),
-            ("pipeline", pipeline_name),
-            ("function", function_name),
-            ("chain", String::new()),
-        ]);
-        self.show_by_tags(request).await
-    }
-
-    pub async fn show_chain(
-        &mut self,
-        device_name: String,
-        pipeline_name: String,
-        function_name: String,
-        chain_name: String,
-    ) -> Result<(), Box<dyn Error>> {
-        let request = Self::by_tags_request(vec![
-            ("device", device_name),
-            ("pipeline", pipeline_name),
-            ("function", function_name),
-            ("chain", chain_name),
-            ("module_type", String::new()),
-        ]);
-        self.show_by_tags(request).await
-    }
-
-    pub async fn show_module(
-        &mut self,
-        device_name: String,
-        pipeline_name: String,
-        function_name: String,
-        chain_name: String,
-        module_type: String,
-        module_name: String,
-    ) -> Result<(), Box<dyn Error>> {
-        let request = Self::by_tags_request(vec![
-            ("device", device_name),
-            ("pipeline", pipeline_name),
-            ("function", function_name),
-            ("chain", chain_name),
-            ("module_type", module_type),
-            ("module_name", module_name),
-        ]);
-        self.show_by_tags(request).await
-    }
-
-    pub async fn show_perf(&mut self, request: PerfCountersRequest, json: bool) -> Result<(), Box<dyn Error>> {
-        let response = self.client.perf(request).await?;
-
-        if json {
-            println!("{}", serde_json::to_string(response.get_ref())?);
-        } else {
-            format_perf_counters(response.get_ref());
-        }
-        Ok(())
-    }
-
-    pub async fn show_workers(&mut self) -> Result<(), Box<dyn Error>> {
-        let response = self.client.workers(WorkerCountersRequest {}).await?;
-        println!("{}", serde_json::to_string(response.get_ref())?);
-        Ok(())
+    pub async fn workers(&mut self) -> Result<WorkerCountersResponse, Error> {
+        Ok(self
+            .client
+            .workers(WorkerCountersRequest {})
+            .await
+            .map_err(self.map_err())?
+            .into_inner())
     }
 }
 
@@ -907,7 +908,7 @@ fn format_bytes(bytes: u64) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+mod test {
     use super::*;
 
     #[test]
