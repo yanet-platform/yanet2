@@ -41,8 +41,8 @@ export interface FieldMask {
     paths?: string[];
 }
 
-const pdumpService = createService('pdumppb.PdumpService');
-const pdumpStreamService = createStreamingService('pdumppb.PdumpService');
+const pdumpService = createService('modules.pdump.controlplane.pdumppb.v1.PdumpService');
+const pdumpStreamService = createStreamingService('modules.pdump.controlplane.pdumppb.v1.PdumpService');
 
 export const pdumpApi = {
     listConfigs: (options?: CallOptions): Promise<ListConfigsResponse> => {

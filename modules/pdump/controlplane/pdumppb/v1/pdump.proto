@@ -1,8 +1,8 @@
 syntax = "proto3";
 
-package pdumppb;
+package modules.pdump.controlplane.pdumppb.v1;
 
-option go_package = "github.com/yanet-platform/yanet2/modules/pdump/controlplane/pdumppb;pdumppb";
+option go_package = "github.com/yanet-platform/yanet2/modules/pdump/controlplane/pdumppb/v1;pdumppb";
 
 // PdumpService is a service for Differentiated Services Code Point module.
 service PdumpService {

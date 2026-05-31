@@ -19,7 +19,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	"github.com/yanet-platform/yanet2/modules/pdump/controlplane/pdumppb"
+	"github.com/yanet-platform/yanet2/modules/pdump/controlplane/pdumppb/v1"
 )
 
 const errMsgConfigNameRequired = "module config name is required"

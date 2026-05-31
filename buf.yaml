@@ -12,7 +12,6 @@ modules:
       - modules/balancer2
       - modules/dscp
       - modules/fwstate
-      - modules/pdump
       - modules/route
       - modules/route-mpls
 lint:

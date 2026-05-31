@@ -15,7 +15,7 @@ import (
 	"go.uber.org/zap/zaptest"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/yanet-platform/yanet2/modules/pdump/controlplane/pdumppb"
+	"github.com/yanet-platform/yanet2/modules/pdump/controlplane/pdumppb/v1"
 )
 
 // Test constants and helpers

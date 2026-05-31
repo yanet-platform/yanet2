@@ -92,7 +92,6 @@ proto-lint:
 		--exclude modules/balancer2 \
 		--exclude modules/dscp \
 		--exclude modules/fwstate \
-		--exclude modules/pdump \
 		--exclude modules/route \
 		--exclude modules/route-mpls
 

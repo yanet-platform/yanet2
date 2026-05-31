@@ -2,13 +2,13 @@ use core::error::Error;
 use std::{env, path::PathBuf};
 
 pub fn main() -> Result<(), Box<dyn Error>> {
-    println!("cargo:rerun-if-changed=../controlplane/pdumppb/pdump.proto");
+    println!("cargo:rerun-if-changed=../controlplane/pdumppb/v1/pdump.proto");
 
     tonic_build::configure()
         .emit_rerun_if_changed(false)
         .build_server(false)
         .message_attribute(".", "#[derive(Serialize)]")
-        .compile_protos(&["pdumppb/pdump.proto"], &["../controlplane"])?;
+        .compile_protos(&["pdumppb/v1/pdump.proto"], &["../controlplane"])?;
 
     let bindings = bindgen::Builder::default()
         .header("../dataplane/mode.h")

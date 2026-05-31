@@ -31,7 +31,7 @@ mod writer;
 pub mod pdumppb {
     use serde::Serialize;
 
-    tonic::include_proto!("pdumppb");
+    tonic::include_proto!("modules.pdump.controlplane.pdumppb.v1");
 }
 
 /// Pdump - packet dump module

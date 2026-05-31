@@ -14,7 +14,7 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/yanet-platform/yanet2/modules/pdump/controlplane/pdumppb"
+	"github.com/yanet-platform/yanet2/modules/pdump/controlplane/pdumppb/v1"
 )
 
 type ringMsgHdr C.struct_ring_msg_hdr

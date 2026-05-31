@@ -9,7 +9,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	"github.com/yanet-platform/yanet2/modules/pdump/controlplane/pdumppb"
+	"github.com/yanet-platform/yanet2/modules/pdump/controlplane/pdumppb/v1"
 )
 
 // PdumpModule is a control-plane component of a packet dump module.
@@ -22,7 +22,7 @@ type PdumpModule struct {
 }
 
 func NewPdumpModule(cfg *Config, log *zap.Logger) (*PdumpModule, error) {
-	log = log.With(zap.String("module", "pdumppb.PdumpService"))
+	log = log.With(zap.String("module", "modules.pdump.controlplane.pdumppb.v1.PdumpService"))
 
 	// setup CGO export logger
 	logger = log.WithOptions(
@@ -66,7 +66,7 @@ func (m *PdumpModule) Endpoint() string {
 }
 
 func (m *PdumpModule) ServicesNames() []string {
-	return []string{"pdumppb.PdumpService"}
+	return []string{"modules.pdump.controlplane.pdumppb.v1.PdumpService"}
 }
 
 func (m *PdumpModule) RegisterService(server *grpc.Server) {
