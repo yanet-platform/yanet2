@@ -3,7 +3,7 @@
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
 use commonpb::pb::{FunctionId, PipelineId};
-use tonic::codec::CompressionEncoding;
+use tonic::{codec::CompressionEncoding, Status};
 use ync::{
     client::{ConnectionArgs, LayeredChannel},
     errors::Error,
@@ -64,6 +64,10 @@ pub struct ShowCmd {
 }
 
 #[derive(Debug, Clone, Parser)]
+#[command(
+    about = "Update pipeline configuration.",
+    after_help = "Examples:\n  yanet-cli pipeline update --name main --functions acl,route"
+)]
 pub struct UpdateCmd {
     /// Pipeline name.
     #[arg(short, long)]
@@ -100,7 +104,7 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
     match cmd.mode {
         ModeCmd::List => {
             let ids = service.list_pipelines().await?;
-            output::data(&ids, ids.is_empty(), format_args!("no pipelines configured"), || {
+            output::data(&ids, ids.is_empty(), format_args!("No pipelines found."), || {
                 print!(
                     "{}",
                     serde_yaml::to_string(&ids).expect("pipeline list YAML serialization must not fail")
@@ -119,16 +123,31 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
         ModeCmd::Update(update) => {
             let name = update.name.clone();
             service.update_pipeline(update).await?;
-            output::success(action, format_args!("updated pipeline {name}"));
+            output::success(action, format_args!("Updated pipeline '{name}'."));
         }
         ModeCmd::Delete(delete) => {
             let name = delete.name.clone();
             service.delete_pipeline(delete).await?;
-            output::success(action, format_args!("deleted pipeline {name}"));
+            output::success(action, format_args!("Deleted pipeline '{name}'."));
         }
     }
 
     Ok(())
+}
+
+fn map_not_found(status: Status, action: &'static str, endpoint: &str, resource: Option<&str>) -> Error {
+    if status.message().trim().eq_ignore_ascii_case("not found") {
+        let resource = resource.unwrap_or("requested pipeline");
+
+        return Error::from_status(
+            Status::not_found(format!("{resource} not found")),
+            action,
+            endpoint.to_owned(),
+            PIPELINE_SERVICE,
+        );
+    }
+
+    Error::from_status(status, action, endpoint.to_owned(), PIPELINE_SERVICE)
 }
 
 pub struct PipelineService {
@@ -153,18 +172,12 @@ impl PipelineService {
         })
     }
 
-    fn map_err(&self) -> impl FnOnce(tonic::Status) -> Error + '_ {
-        let endpoint = self.endpoint.clone();
-        let action = self.action;
-        move |status| Error::from_status(status, action, endpoint, PIPELINE_SERVICE)
-    }
-
     pub async fn list_pipelines(&mut self) -> Result<Vec<PipelineId>, Error> {
         let response = self
             .client
             .list(ListPipelinesRequest {})
             .await
-            .map_err(self.map_err())?
+            .map_err(|status| map_not_found(status, self.action, &self.endpoint, Some("pipeline service")))?
             .into_inner();
 
         Ok(response.ids)
@@ -174,7 +187,12 @@ impl PipelineService {
         let request = GetPipelineRequest {
             id: Some(PipelineId { name: name.to_string() }),
         };
-        let response = self.client.get(request).await.map_err(self.map_err())?.into_inner();
+        let response = self
+            .client
+            .get(request)
+            .await
+            .map_err(|status| map_not_found(status, self.action, &self.endpoint, Some(&format!("pipeline '{name}'"))))?
+            .into_inner();
 
         let pipeline = response.pipeline.ok_or_else(|| {
             Error::from_status(
@@ -189,9 +207,10 @@ impl PipelineService {
     }
 
     pub async fn update_pipeline(&mut self, cmd: UpdateCmd) -> Result<(), Error> {
+        let pipeline_name = cmd.name;
         let request = UpdatePipelineRequest {
             pipeline: Some(Pipeline {
-                id: Some(PipelineId { name: cmd.name }),
+                id: Some(PipelineId { name: pipeline_name.clone() }),
                 functions: cmd
                     .functions
                     .into_iter()
@@ -200,7 +219,14 @@ impl PipelineService {
             }),
         };
 
-        self.client.update(request).await.map_err(self.map_err())?;
+        self.client.update(request).await.map_err(|status| {
+            map_not_found(
+                status,
+                self.action,
+                &self.endpoint,
+                Some(&format!("pipeline '{pipeline_name}'")),
+            )
+        })?;
 
         Ok(())
     }
@@ -210,7 +236,10 @@ impl PipelineService {
             id: Some(PipelineId { name: cmd.name }),
         };
 
-        self.client.delete(request).await.map_err(self.map_err())?;
+        let name = request.id.as_ref().expect("pipeline id").name.clone();
+        self.client.delete(request).await.map_err(|status| {
+            map_not_found(status, self.action, &self.endpoint, Some(&format!("pipeline '{name}'")))
+        })?;
 
         Ok(())
     }

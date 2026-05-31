@@ -3,7 +3,7 @@
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
 use commonpb::pb::FunctionId;
-use tonic::codec::CompressionEncoding;
+use tonic::{codec::CompressionEncoding, Status};
 use ync::{
     client::{ConnectionArgs, LayeredChannel},
     errors::Error,
@@ -45,6 +45,17 @@ pub enum ModeCmd {
     Delete(DeleteCmd),
 }
 
+impl ModeCmd {
+    pub fn action(&self) -> &'static str {
+        match self {
+            ModeCmd::List => "list functions",
+            ModeCmd::Show(..) => "show function",
+            ModeCmd::Update(..) => "update function",
+            ModeCmd::Delete(..) => "delete function",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Parser)]
 pub struct ShowCmd {
     /// Function name.
@@ -53,12 +64,16 @@ pub struct ShowCmd {
 }
 
 #[derive(Debug, Clone, Parser)]
+#[command(
+    about = "Update function configuration.",
+    after_help = "Examples:\n  yanet-cli function update --name my-function \\\n      --chains edge:20=filter:acl,route:ipv4 \\\n      --chains control:10=counter:rx"
+)]
 pub struct UpdateCmd {
     /// Function name.
     #[arg(short, long)]
     pub name: String,
-    /// Chains in format name:weight=type:name,type:name
-    #[arg(long)]
+    /// Chains in format `name:weight=type:name,type:name`.
+    #[arg(long, required = true)]
     pub chains: Vec<FunctionChain>,
 }
 
@@ -83,13 +98,13 @@ pub async fn main() {
 }
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
-    let action = action_name(&cmd.mode);
+    let action = cmd.mode.action();
     let mut service = FunctionService::new(&cmd.connection, action).await?;
 
     match cmd.mode {
         ModeCmd::List => {
             let ids = service.list_functions().await?;
-            output::data(&ids, false, format_args!("No functions found."), || {
+            output::data(&ids, ids.is_empty(), format_args!("No functions found."), || {
                 print!(
                     "{}",
                     serde_yaml::to_string(&ids).expect("function list YAML serialization must not fail")
@@ -108,25 +123,31 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
         ModeCmd::Update(update) => {
             let name = update.name.clone();
             service.update_function(update).await?;
-            output::success("update", format_args!("updated function {}", name));
+            output::success("update function", format_args!("Updated function '{name}'."));
         }
         ModeCmd::Delete(delete) => {
             let name = delete.name.clone();
             service.delete_function(delete).await?;
-            output::success("delete", format_args!("deleted function {}", name));
+            output::success("delete function", format_args!("Deleted function '{name}'."));
         }
     }
 
     Ok(())
 }
 
-fn action_name(mode: &ModeCmd) -> &'static str {
-    match mode {
-        ModeCmd::List => "list functions",
-        ModeCmd::Show(..) => "show function",
-        ModeCmd::Update(..) => "update function",
-        ModeCmd::Delete(..) => "delete function",
+fn map_not_found(status: Status, action: &'static str, endpoint: &str, resource: Option<&str>) -> Error {
+    if status.message().trim().eq_ignore_ascii_case("not found") {
+        let resource = resource.unwrap_or("requested function");
+
+        return Error::from_status(
+            Status::not_found(format!("{resource} not found")),
+            action,
+            endpoint.to_owned(),
+            FUNCTION_SERVICE,
+        );
     }
+
+    Error::from_status(status, action, endpoint.to_owned(), FUNCTION_SERVICE)
 }
 
 pub struct FunctionService {
@@ -135,7 +156,7 @@ pub struct FunctionService {
 }
 
 impl FunctionService {
-    pub async fn new(connection: &ConnectionArgs, action: &str) -> Result<Self, Error> {
+    pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
         let channel = ync::client::connect(connection)
             .await
             .map_err(|err| Error::from_connection(err, action, connection.endpoint.clone()))?;
@@ -154,7 +175,7 @@ impl FunctionService {
             .client
             .list(ListFunctionsRequest {})
             .await
-            .map_err(|status| Error::from_status(status, "list functions", self.endpoint.clone(), FUNCTION_SERVICE))?
+            .map_err(|status| map_not_found(status, "list functions", &self.endpoint, None))?
             .into_inner();
 
         Ok(response.ids)
@@ -164,16 +185,24 @@ impl FunctionService {
         let request = GetFunctionRequest {
             id: Some(FunctionId { name: name.to_string() }),
         };
+
         let response = self
             .client
             .get(request)
             .await
-            .map_err(|status| Error::from_status(status, "show function", self.endpoint.clone(), FUNCTION_SERVICE))?
+            .map_err(|status| {
+                map_not_found(
+                    status,
+                    "show function",
+                    &self.endpoint,
+                    Some(&format!("function '{name}'")),
+                )
+            })?
             .into_inner();
 
         let function = response.function.ok_or_else(|| {
             Error::from_status(
-                tonic::Status::not_found(format!("function {} not found", name)),
+                Status::not_found(format!("function '{name}' not found")),
                 "show function",
                 self.endpoint.clone(),
                 FUNCTION_SERVICE,
@@ -186,27 +215,39 @@ impl FunctionService {
     pub async fn update_function(&mut self, cmd: UpdateCmd) -> Result<(), Error> {
         let request = UpdateFunctionRequest {
             function: Some(Function {
-                id: Some(FunctionId { name: cmd.name }),
+                id: Some(FunctionId { name: cmd.name.clone() }),
                 chains: cmd.chains,
             }),
         };
 
-        self.client
-            .update(request)
-            .await
-            .map_err(|status| Error::from_status(status, "update function", self.endpoint.clone(), FUNCTION_SERVICE))?;
+        self.client.update(request).await.map_err(|status| {
+            map_not_found(
+                status,
+                "update function",
+                &self.endpoint,
+                Some(&format!("function '{name}'", name = cmd.name)),
+            )
+        })?;
 
         Ok(())
     }
 
     pub async fn delete_function(&mut self, cmd: DeleteCmd) -> Result<(), Error> {
-        let request = DeleteFunctionRequest {
-            id: Some(FunctionId { name: cmd.name }),
-        };
+        let name = cmd.name;
+
         self.client
-            .delete(request)
+            .delete(DeleteFunctionRequest {
+                id: Some(FunctionId { name: name.clone() }),
+            })
             .await
-            .map_err(|status| Error::from_status(status, "delete function", self.endpoint.clone(), FUNCTION_SERVICE))?;
+            .map_err(|status| {
+                map_not_found(
+                    status,
+                    "delete function",
+                    &self.endpoint,
+                    Some(&format!("function '{name}'")),
+                )
+            })?;
 
         Ok(())
     }
