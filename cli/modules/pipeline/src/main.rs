@@ -3,7 +3,7 @@
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
 use commonpb::pb::{FunctionId, PipelineId};
-use tonic::{codec::CompressionEncoding, Status};
+use tonic::{codec::CompressionEncoding, Code, Status};
 use ync::{
     client::{ConnectionArgs, LayeredChannel},
     errors::Error,
@@ -136,7 +136,7 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
 }
 
 fn map_not_found(status: Status, action: &'static str, endpoint: &str, resource: Option<&str>) -> Error {
-    if status.message().trim().eq_ignore_ascii_case("not found") {
+    if status.code() == Code::NotFound {
         let resource = resource.unwrap_or("requested pipeline");
 
         return Error::from_status(
