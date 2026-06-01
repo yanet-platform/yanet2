@@ -2,6 +2,11 @@
 
 #include "config.h"
 #include "numa.h"
+#include "logging/log.h"
+
+#include <stdbool.h>
+#include <stdint.h>
+#include <string.h>
 
 #include <dlfcn.h>
 #include <pthread.h>
@@ -403,8 +408,6 @@ dataplane_init(
 		instance->dp_config->instance_idx = instance_idx;
 		instance->dp_config->instance_count = dataplane->instance_count;
 
-		// Use module list from config if specified,
-		// otherwise fall back to built-in defaults.
 		static const char *default_modules[] = {
 			"forward",
 			"route",
@@ -418,28 +421,35 @@ dataplane_init(
 			"blackhole"
 		};
 
-		const char **mod_list;
-		size_t mod_count;
-		const char *cfg_ptrs[DATAPLANE_MAX_MODULES];
-
-		if (config->module_count > 0) {
-			for (uint64_t i = 0;
-			     i < config->module_count; i++) {
-				cfg_ptrs[i] = config->module_names[i];
-			}
-			mod_list = cfg_ptrs;
-			mod_count = config->module_count;
-		} else {
-			mod_list = default_modules;
-			mod_count = sizeof(default_modules) /
-				    sizeof(default_modules[0]);
-		}
-
-		for (size_t i = 0; i < mod_count; ++i) {
+		for (size_t i = 0; i < sizeof(default_modules) /
+		     sizeof(default_modules[0]); ++i) {
 			if (dp_load_module(
 				    instance->dp_config, bin_hndl,
 				    &dataplane->plugins,
-				    mod_list[i]
+				    default_modules[i]
+			    ) == -1) {
+				return -1;
+			}
+		}
+
+		for (uint64_t i = 0; i < config->module_count; ++i) {
+			bool is_default = false;
+			for (size_t j = 0; j < sizeof(default_modules) /
+			     sizeof(default_modules[0]); ++j) {
+				if (strcmp(config->module_names[i],
+					   default_modules[j]) == 0) {
+					is_default = true;
+					break;
+				}
+			}
+			if (is_default) {
+				continue;
+			}
+
+			if (dp_load_module(
+				    instance->dp_config, bin_hndl,
+				    &dataplane->plugins,
+				    config->module_names[i]
 			    ) == -1) {
 				return -1;
 			}
