@@ -1634,6 +1634,7 @@ yanet_get_worker_counters(struct dp_config *dp_config) {
 
 	if (list == NULL)
 		return NULL;
+	memset(list, 0, sizeof(*list));
 	list->instance_count = ADDR_OF(&storage->allocator)->instance_count;
 	list->count = count;
 	struct counter_handle *handlers = list->counters;
