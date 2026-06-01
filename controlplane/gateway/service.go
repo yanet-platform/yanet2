@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"sync"
 
 	"github.com/siderolabs/grpc-proxy/proxy"
 	"go.uber.org/zap"
@@ -30,6 +31,30 @@ func registrationStatusToProto(s RegistrationStatus) ynpb.RegistrationStatus {
 	default:
 		return ynpb.RegistrationStatus_REGISTRATION_STATUS_UNSPECIFIED
 	}
+}
+
+// backendConn adapts a backend's *grpc.ClientConn to the registry Conn
+// interface, reporting the real backend endpoint rather than the dial target.
+//
+// Close is idempotent: a single connection may back several registry entries
+// (e.g. the loopback connection shared across built-in service names), so the
+// registry's shutdown sweep can call Close more than once.
+type backendConn struct {
+	endpoint  string
+	conn      *grpc.ClientConn
+	closeOnce sync.Once
+	closeErr  error
+}
+
+func newBackendConn(endpoint string, conn *grpc.ClientConn) *backendConn {
+	return &backendConn{endpoint: endpoint, conn: conn}
+}
+
+func (m *backendConn) Target() string { return m.endpoint }
+
+func (m *backendConn) Close() error {
+	m.closeOnce.Do(func() { m.closeErr = m.conn.Close() })
+	return m.closeErr
 }
 
 // GatewayService is the gRPC service for the Gateway API.
@@ -131,7 +156,7 @@ func (m *GatewayService) Register(
 	status := m.registry.RegisterBackend(
 		backendDesc.GetName(),
 		backend,
-		backendDesc.GetEndpoint(),
+		newBackendConn(backendDesc.GetEndpoint(), conn),
 	)
 
 	switch status {
