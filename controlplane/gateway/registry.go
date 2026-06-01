@@ -8,6 +8,15 @@ import (
 	"github.com/siderolabs/grpc-proxy/proxy"
 )
 
+// RegistrationStatus describes how a Register call changed the registry.
+type RegistrationStatus int
+
+const (
+	RegistrationRegistered RegistrationStatus = iota + 1
+	RegistrationRenewed
+	RegistrationUpdated
+)
+
 // BackendRegistry is a registry of backends for Gateway API.
 type BackendRegistry struct {
 	mu       sync.RWMutex
@@ -57,13 +66,27 @@ func (m *BackendRegistry) GetBackend(service string) (proxy.Backend, bool) {
 }
 
 // RegisterBackend registers a backend for the given service.
+//
+// It reports whether the service was newly registered, renewed with the same
+// endpoint, or updated with a new endpoint.
 func (m *BackendRegistry) RegisterBackend(
 	service string,
 	backend proxy.Backend,
 	endpoint string,
-) {
+) RegistrationStatus {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	var status RegistrationStatus
+	existing, ok := m.backends[service]
+	switch {
+	case !ok:
+		status = RegistrationRegistered
+	case existing.endpoint == endpoint:
+		status = RegistrationRenewed
+	default:
+		status = RegistrationUpdated
+	}
 
 	m.backends[service] = BackendEntry{
 		service:    service,
@@ -71,6 +94,8 @@ func (m *BackendRegistry) RegisterBackend(
 		endpoint:   endpoint,
 		lastSeenAt: time.Now().UTC(),
 	}
+
+	return status
 }
 
 // ListBackends returns metadata for all currently registered backends.

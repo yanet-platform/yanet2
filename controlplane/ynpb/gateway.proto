@@ -36,8 +36,22 @@ message RegisteredBackend {
 // ListServicesResponse contains all known services in the registry.
 message ListServicesResponse { repeated RegisteredBackend services = 1; }
 
+// RegistrationStatus describes the outcome of a Register call.
+enum RegistrationStatus {
+  // Default, unused value.
+  REGISTRATION_STATUS_UNSPECIFIED = 0;
+  // Service was not previously known.
+  REGISTRATION_STATUS_REGISTERED = 1;
+  // Service re-registered with an unchanged endpoint.
+  REGISTRATION_STATUS_RENEWED = 2;
+  // Known service registered with a different endpoint.
+  REGISTRATION_STATUS_UPDATED = 3;
+}
+
 // RegisterRequest is the request to register a new module.
 message RegisterRequest { BackendDesc backend = 1; }
 
 // RegisterResponse is the response to the RegisterRequest.
-message RegisterResponse {}
+message RegisterResponse {
+  RegistrationStatus status = 1;
+}

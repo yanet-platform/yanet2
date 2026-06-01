@@ -133,6 +133,10 @@ func (m *GatewayRegistrar) RegisterServices(
 		}
 
 		wg.Go(func() error {
+			log := m.log.With(
+				zap.String("service", name),
+				zap.String("gateway", m.endpoint),
+			)
 			retryOpts := []backoff.RetryOption{
 				backoff.WithBackOff(m.backoff()),
 			}
@@ -143,18 +147,20 @@ func (m *GatewayRegistrar) RegisterServices(
 			_, err := backoff.Retry(ctx, func() (*ynpb.RegisterResponse, error) {
 				resp, err := m.client.Register(ctx, request)
 				if err != nil {
-					m.log.Warn("failed to register in gateway",
-						zap.String("service", name),
-						zap.String("gateway", m.endpoint),
-						zap.Error(err),
-					)
+					log.Warn("failed to register in gateway", zap.Error(err))
 					return nil, err
 				}
 
-				m.log.Info("successfully registered in gateway",
-					zap.String("service", name),
-					zap.String("gateway", m.endpoint),
-				)
+				switch resp.GetStatus() {
+				case ynpb.RegistrationStatus_REGISTRATION_STATUS_REGISTERED:
+					log.Info("registered in gateway")
+				case ynpb.RegistrationStatus_REGISTRATION_STATUS_UPDATED:
+					log.Info("updated registration in gateway")
+				case ynpb.RegistrationStatus_REGISTRATION_STATUS_RENEWED:
+					log.Debug("registration renewed in gateway")
+				default:
+					log.Info("registered in gateway")
+				}
 				return resp, nil
 			}, retryOpts...)
 

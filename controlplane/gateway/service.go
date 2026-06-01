@@ -19,6 +19,19 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/ynpb"
 )
 
+func registrationStatusToProto(s RegistrationStatus) ynpb.RegistrationStatus {
+	switch s {
+	case RegistrationRegistered:
+		return ynpb.RegistrationStatus_REGISTRATION_STATUS_REGISTERED
+	case RegistrationRenewed:
+		return ynpb.RegistrationStatus_REGISTRATION_STATUS_RENEWED
+	case RegistrationUpdated:
+		return ynpb.RegistrationStatus_REGISTRATION_STATUS_UPDATED
+	default:
+		return ynpb.RegistrationStatus_REGISTRATION_STATUS_UNSPECIFIED
+	}
+}
+
 // GatewayService is the gRPC service for the Gateway API.
 type GatewayService struct {
 	ynpb.UnimplementedGatewayServer
@@ -78,11 +91,11 @@ func (m *GatewayService) Register(
 		)
 	}
 
-	m.log.Info(
-		"registering backend",
+	log := m.log.With(
 		zap.String("name", backendDesc.GetName()),
 		zap.String("endpoint", backendDesc.GetEndpoint()),
 	)
+	log.Debug("registering backend")
 
 	conn, err := grpc.NewClient(
 		"passthrough:target",
@@ -115,11 +128,20 @@ func (m *GatewayService) Register(
 			return outCtx, conn, nil
 		},
 	}
-	m.registry.RegisterBackend(
+	status := m.registry.RegisterBackend(
 		backendDesc.GetName(),
 		backend,
 		backendDesc.GetEndpoint(),
 	)
 
-	return &ynpb.RegisterResponse{}, nil
+	switch status {
+	case RegistrationRegistered:
+		log.Info("registered backend")
+	case RegistrationUpdated:
+		log.Info("updated backend endpoint")
+	default:
+		log.Debug("renewed backend registration")
+	}
+
+	return &ynpb.RegisterResponse{Status: registrationStatusToProto(status)}, nil
 }
