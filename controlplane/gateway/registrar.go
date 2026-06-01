@@ -133,10 +133,7 @@ func (m *GatewayRegistrar) RegisterServices(
 		}
 
 		wg.Go(func() error {
-			log := m.log.With(
-				zap.String("service", name),
-				zap.String("gateway", m.endpoint),
-			)
+			log := m.log.With(zap.String("service", name))
 			retryOpts := []backoff.RetryOption{
 				backoff.WithBackOff(m.backoff()),
 			}

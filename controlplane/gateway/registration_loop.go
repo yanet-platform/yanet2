@@ -64,10 +64,7 @@ func NewRegistrationLoop(
 		o(opts)
 	}
 
-	log := opts.Log.With(
-		zap.String("gateway", registrar.Endpoint()),
-		zap.Strings("services", services),
-	)
+	log := opts.Log.With(zap.Strings("services", services))
 
 	return &RegistrationLoop{
 		registrar:       registrar,

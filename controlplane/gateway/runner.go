@@ -125,7 +125,7 @@ func (m *ServiceRunner) register(ctx context.Context, addr net.Addr) error {
 	registrar, err := NewGatewayRegistrar(
 		m.gatewayEndpoint,
 		m.gatewayTLS,
-		WithRegistrarLog(m.log),
+		WithRegistrarLog(m.log.With(zap.String("gateway", m.gatewayEndpoint))),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to initialize gateway registrar: %w", err)
