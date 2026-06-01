@@ -7,6 +7,7 @@ package dataplaneut
 #cgo CFLAGS: -I../../../build/lib/dataplane_ut
 
 // Library search paths — modules, devices, and support libs.
+#cgo LDFLAGS: -L../../../build/modules/blackhole/dataplane
 #cgo LDFLAGS: -L../../../build/modules/decap/dataplane
 #cgo LDFLAGS: -L../../../build/modules/dscp/dataplane
 #cgo LDFLAGS: -L../../../build/modules/acl/dataplane
@@ -36,7 +37,7 @@ package dataplaneut
 // references between them (fwstate->acl, worker->pipeline, etc.).
 // fwstate depends on acl — acl must come first inside the group.
 #cgo LDFLAGS: -Wl,--start-group
-#cgo LDFLAGS: -ldecap_dp -ldscp_dp -lacl_dp -lfwstate_dp -lforward_dp -lroute_dp -lnat64_dp -lpdump_dp
+#cgo LDFLAGS: -lblackhole_dp -ldecap_dp -ldscp_dp -lacl_dp -lfwstate_dp -lforward_dp -lroute_dp -lnat64_dp -lpdump_dp
 #cgo LDFLAGS: -lplain_dp -lvlan_dp
 #cgo LDFLAGS: -ldataplane_ut -lpipeline -lmodule -lworker_dp -lconfig_dp -lpacket
 #cgo LDFLAGS: -llogging -lagent -lconfig_cp -lcounters -lerrors -lfilter_compiler -lfwstate -llib_utils
@@ -89,6 +90,7 @@ free_cptr_array(const char **arr) {
 
 void
 keep_refs(void **ptrs) {
+	extern struct module *new_module_blackhole(void);
 	extern struct module *new_module_decap(void);
 	extern struct module *new_module_dscp(void);
 	extern struct module *new_module_acl(void);
@@ -102,6 +104,7 @@ keep_refs(void **ptrs) {
 	extern struct device *new_device_vlan(void);
 
 	static void *funcs[] = {
+		new_module_blackhole,
 		new_module_decap,
 		new_module_dscp,
 		new_module_acl,
@@ -266,7 +269,11 @@ func (m *Harness) HandlePacketsWithHashes(
 	packets ...gopacket.Packet,
 ) (*Result, error) {
 	if len(hashes) > len(packets) {
-		return nil, fmt.Errorf("hashes length %d exceeds packets length %d", len(hashes), len(packets))
+		return nil, fmt.Errorf(
+			"hashes length %d exceeds packets length %d",
+			len(hashes),
+			len(packets),
+		)
 	}
 	return m.handlePackets(0, hashes, packets...)
 }

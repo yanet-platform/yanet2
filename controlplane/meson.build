@@ -47,6 +47,8 @@ custom_target(
         lib_pdump_dp,
         lib_route_cp,
         lib_route_dp,
+        lib_blackhole_cp,
+        lib_blackhole_dp,
         lib_filter_compiler,
     ],
     install: true,

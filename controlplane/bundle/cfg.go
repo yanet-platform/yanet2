@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	acl "github.com/yanet-platform/yanet2/modules/acl/controlplane"
+	blackhole "github.com/yanet-platform/yanet2/modules/blackhole/controlplane"
 	decap "github.com/yanet-platform/yanet2/modules/decap/controlplane"
 	dscp "github.com/yanet-platform/yanet2/modules/dscp/controlplane"
 	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
@@ -34,6 +35,8 @@ type ModulesConfig struct {
 	Pdump *pdump.Config `yaml:"pdump"`
 	// ACL is the configuration for the acl module.
 	ACL *acl.Config `yaml:"acl"`
+	// Blackhole is the configuration for the blackhole module.
+	Blackhole *blackhole.Config `yaml:"blackhole"`
 }
 
 // DevicesConfig describes built-in devices in the standard YANET bundle.
@@ -55,6 +58,7 @@ func DefaultModulesConfig() ModulesConfig {
 		NAT64:     nat64.DefaultConfig(),
 		Pdump:     pdump.DefaultConfig(),
 		ACL:       acl.DefaultConfig(),
+		Blackhole: blackhole.DefaultConfig(),
 	}
 }
 
@@ -85,6 +89,9 @@ func (m *ModulesConfig) Validate() error {
 	}
 	if m.ACL == nil {
 		return fmt.Errorf("acl module is not configured")
+	}
+	if m.Blackhole == nil {
+		return fmt.Errorf("blackhole module is not configured")
 	}
 	return nil
 }
