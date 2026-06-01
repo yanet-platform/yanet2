@@ -4,6 +4,11 @@ install_data(
     install_dir: '/etc/yanet2/forward.d',
 )
 
+install_data(
+    'etc/yanet/yanet-forward-operator-default.yaml',
+    install_dir: '/etc/yanet2',
+)
+
 if not get_option('fuzzing').enabled()
   custom_target(
       'yanet-forward-operator',

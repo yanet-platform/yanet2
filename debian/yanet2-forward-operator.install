@@ -1,3 +1,4 @@
 usr/bin/yanet-forward-operator
 etc/yanet2/forward.d/vlan-phy-default.yaml
 etc/yanet2/forward.d/phy-vlan-default.yaml
+etc/yanet2/yanet-forward-operator-default.yaml

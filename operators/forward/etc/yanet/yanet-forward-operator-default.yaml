@@ -1,0 +1,29 @@
+logging:
+  level: info
+
+server:
+  endpoint: "[::1]:50003"
+
+gateways:
+  - name: numa0
+    endpoint: "[::1]:8080"
+
+register:
+  interval: 30s
+
+reconcile:
+  interval: 30s
+  initial_backoff: 500ms
+  max_backoff: 30s
+
+functions:
+  - name: "fn:forward-vlan-phy"
+    chain: "default"
+    weight: 1
+    module: "vlan-phy"
+    rules_file: "/etc/yanet2/forward.d/vlan-phy-default.yaml"
+  - name: "fn:forward-phy-vlan"
+    chain: "default"
+    weight: 1
+    module: "phy-vlan"
+    rules_file: "/etc/yanet2/forward.d/phy-vlan-default.yaml"
