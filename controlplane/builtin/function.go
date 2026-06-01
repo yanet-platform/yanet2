@@ -7,6 +7,8 @@ import (
 	"github.com/c2h5oh/datasize"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/yanet-platform/yanet2/common/commonpb"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
@@ -122,7 +124,7 @@ func (m *Function) Get(
 		}
 	}
 
-	return nil, fmt.Errorf("not found")
+	return nil, status.Error(codes.NotFound, "not found")
 }
 
 // Update updates or inserts a function.
