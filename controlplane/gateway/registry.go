@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"errors"
+	"io"
 	"sort"
 	"sync"
 	"time"
@@ -18,26 +19,17 @@ const (
 	RegistrationUpdated
 )
 
-// Conn is a backend connection tracked by the registry.
-//
-// Target identifies the backend endpoint for change detection; Close releases
-// the connection.
-type Conn interface {
-	Target() string
-	Close() error
-}
-
-// BackendRegistry is a registry of backends for Gateway API.
-type BackendRegistry struct {
-	mu       sync.RWMutex
-	backends map[string]BackendEntry
+// Backend is a routable, closeable upstream connection tracked by the registry.
+type Backend interface {
+	proxy.Backend
+	Endpoint() string
+	io.Closer
 }
 
 // BackendEntry holds metadata about a single registered backend.
 type BackendEntry struct {
 	service    string
-	backend    proxy.Backend
-	conn       Conn
+	backend    Backend
 	lastSeenAt time.Time
 }
 
@@ -48,12 +40,23 @@ func (m *BackendEntry) Service() string {
 
 // Endpoint returns the endpoint of the entry.
 func (m *BackendEntry) Endpoint() string {
-	return m.conn.Target()
+	return m.backend.Endpoint()
 }
 
 // LastSeenAt returns the time the entry was last registered.
 func (m *BackendEntry) LastSeenAt() time.Time {
 	return m.lastSeenAt
+}
+
+// GetBackend returns the proxy.Backend for this entry.
+func (m *BackendEntry) GetBackend() proxy.Backend {
+	return m.backend
+}
+
+// BackendRegistry is a registry of backends for Gateway API.
+type BackendRegistry struct {
+	mu       sync.RWMutex
+	backends map[string]BackendEntry
 }
 
 // NewBackendRegistry creates a new BackendRegistry.
@@ -71,63 +74,93 @@ func (m *BackendRegistry) GetBackend(service string) (proxy.Backend, bool) {
 	defer m.mu.RUnlock()
 
 	entry, ok := m.backends[service]
-	backend := entry.backend
-	return backend, ok
+	return entry.backend, ok
 }
 
-// RegisterBackend registers a backend connection for the given service.
+// RegisterBackend stores or replaces the backend for service and reports how
+// the registry changed.
 //
-// On a same-target re-registration the new conn is closed and the existing
-// entry is retained. On an endpoint change the previous conn is closed and the
-// new entry replaces it. The obsolete connection is closed after the lock is
-// released.
-func (m *BackendRegistry) RegisterBackend(
-	service string,
-	backend proxy.Backend,
-	conn Conn,
-) RegistrationStatus {
-	status, obsolete := m.registerBackend(service, backend, conn)
-	if obsolete != nil {
-		_ = obsolete.Close()
+// The displaced backend (the previous one on an endpoint change, or the
+// redundant new one on an unchanged-endpoint re-registration) is closed after
+// the lock is released.
+//
+// This close-on-displace path applies only to 1:1 out-of-process module
+// backends.
+// The shared loopback backend is registered once under distinct keys and is
+// never displaced, so it is only closed by Close().
+func (m *BackendRegistry) RegisterBackend(service string, b Backend) RegistrationStatus {
+	status, evicted := m.registerBackend(service, b)
+	if evicted != nil {
+		_ = evicted.Close()
 	}
+
 	return status
 }
 
-func (m *BackendRegistry) registerBackend(
-	service string,
-	backend proxy.Backend,
-	conn Conn,
-) (RegistrationStatus, Conn) {
+func (m *BackendRegistry) registerBackend(service string, b Backend) (RegistrationStatus, Backend) {
+	now := time.Now().UTC()
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	now := time.Now().UTC()
 	existing, ok := m.backends[service]
 	switch {
-	case ok && existing.conn.Target() == conn.Target():
+	case ok && existing.backend.Endpoint() == b.Endpoint():
 		existing.lastSeenAt = now
 		m.backends[service] = existing
-		return RegistrationRenewed, conn
+		return RegistrationRenewed, b
 	case ok:
-		m.backends[service] = BackendEntry{service: service, backend: backend, conn: conn, lastSeenAt: now}
-		return RegistrationUpdated, existing.conn
+		m.backends[service] = BackendEntry{service: service, backend: b, lastSeenAt: now}
+		return RegistrationUpdated, existing.backend
 	default:
-		m.backends[service] = BackendEntry{service: service, backend: backend, conn: conn, lastSeenAt: now}
+		m.backends[service] = BackendEntry{service: service, backend: b, lastSeenAt: now}
 		return RegistrationRegistered, nil
 	}
 }
 
-// Close closes all tracked backend connections and clears the registry.
-func (m *BackendRegistry) Close() error {
+// Renew refreshes the last-seen time when service is already registered at
+// endpoint and reports whether it did.
+//
+// A false result means the caller must dial a new backend and call
+// RegisterBackend (new service or changed endpoint).
+func (m *BackendRegistry) Renew(service, endpoint string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	var err error
-	for _, entry := range m.backends {
-		err = errors.Join(err, entry.conn.Close())
+	entry, ok := m.backends[service]
+	if ok && entry.backend.Endpoint() == endpoint {
+		entry.lastSeenAt = time.Now().UTC()
+		m.backends[service] = entry
+		return true
 	}
-	m.backends = map[string]BackendEntry{}
+
+	return false
+}
+
+// Close closes all backend connections without holding the registry lock.
+//
+// A backend may be registered under several service names (the shared loopback
+// connection).
+//
+// backend.Close is idempotent, so closing every entry is safe.
+func (m *BackendRegistry) Close() error {
+	var err error
+	for _, entry := range m.takeBackends() {
+		err = errors.Join(err, entry.backend.Close())
+	}
+
 	return err
+}
+
+// takeBackends atomically returns the registered backends and clears the
+// registry.
+func (m *BackendRegistry) takeBackends() map[string]BackendEntry {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	backends := m.backends
+	m.backends = map[string]BackendEntry{}
+	return backends
 }
 
 // ListBackends returns metadata for all currently registered backends.

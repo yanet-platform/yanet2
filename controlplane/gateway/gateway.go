@@ -12,8 +12,6 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/encoding/gzip"
-	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
 	"github.com/yanet-platform/yanet2/controlplane/httpproxy"
@@ -173,87 +171,63 @@ func NewGateway(cfg *Config, options ...GatewayOption) (*Gateway, error) {
 	ynpb.RegisterAuthServiceServer(server, authService)
 	log.Info("registered service", zap.String("service", fmt.Sprintf("%T", authService)))
 
-	// Register Gateway and Auth as loopback backends for HTTP proxy access.
-	loopback, loopbackGRPCConn, err := newLoopbackBackend(cfg.Server.Endpoint, cfg.Server.TLS)
+	// Dial a single loopback connection shared by all built-in and in-process
+	// services.
+	//
+	// Out-of-process module backends (from the Register RPC) each get their
+	// own connection via RegisterBackend in the registration loop.
+	creds, err := TransportCredentials(cfg.Server.TLS, cfg.Server.Endpoint)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build loopback TLS credentials: %w", err)
+	}
+
+	loopback, err := dialBackend(cfg.Server.Endpoint, creds)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create loopback backend for built-in services: %w", err)
 	}
-	builtinConn := newBackendConn(cfg.Server.Endpoint, loopbackGRPCConn)
-	registry.RegisterBackend("ynpb.Gateway", loopback, builtinConn)
-	log.Debug("registered built-in service in registry", zap.String("service", "ynpb.Gateway"))
-	registry.RegisterBackend("ynpb.Auth", loopback, builtinConn)
-	log.Debug("registered built-in service in registry", zap.String("service", "ynpb.Auth"))
 
-	var allServices []Service
+	for _, service := range []string{"ynpb.Gateway", "ynpb.Auth"} {
+		registry.RegisterBackend(service, loopback)
+		log.Info("registered built-in service in registry",
+			zap.String("service", service),
+		)
+	}
+
+	var services []Service
 	var serviceRunners []*ServiceRunner
 
 	for _, service := range opts.Services {
 		if service.Endpoint() == "" {
-			// In-process: register on the shared server.
+			// In-process: register on the shared server and point every
+			// service name at the shared loopback backend.
 			service.RegisterService(server)
-			log.Info("registered in-process service", zap.String("service", service.Name()))
+			log.Info("registered in-process service in registry",
+				zap.String("service", service.Name()),
+			)
 
-			// Share one loopback backend across all service names for this service.
-			inprocBackend, inprocGRPCConn, err := newLoopbackBackend(cfg.Server.Endpoint, cfg.Server.TLS)
-			if err != nil {
-				return nil, fmt.Errorf("failed to create loopback backend for service %q: %w", service.Name(), err)
-			}
-			inprocConn := newBackendConn(cfg.Server.Endpoint, inprocGRPCConn)
 			for _, name := range service.ServicesNames() {
-				registry.RegisterBackend(name, inprocBackend, inprocConn)
-				log.Debug("registered in-process service in registry", zap.String("service", name))
+				registry.RegisterBackend(name, loopback)
+				log.Debug("registered in-process service in registry",
+					zap.String("service", name),
+				)
 			}
 		} else {
 			// Out-of-process: wrap in a ServiceRunner.
 			runner := NewServiceRunner(service, cfg.Server.Endpoint, cfg.Server.TLS, log)
 			serviceRunners = append(serviceRunners, runner)
 		}
-		allServices = append(allServices, service)
+
+		services = append(services, service)
 	}
 
 	return &Gateway{
 		cfg:            cfg,
 		server:         server,
-		services:       allServices,
+		services:       services,
 		serviceRunners: serviceRunners,
 		registry:       registry,
 		log:            log,
 	}, nil
-}
-
-// newLoopbackBackend creates a gRPC proxy backend that dials back to the
-// gateway's own listener, and returns the underlying connection so the caller
-// can wrap it in a backendConn for registry tracking.
-func newLoopbackBackend(endpoint string, tlsCfg *TLSConfig) (proxy.Backend, *grpc.ClientConn, error) {
-	creds, err := TransportCredentials(tlsCfg, endpoint)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to build loopback TLS credentials: %w", err)
-	}
-
-	conn, err := grpc.NewClient(
-		"passthrough:target",
-		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
-			dialer := net.Dialer{}
-			return dialer.DialContext(ctx, "tcp", endpoint)
-		}),
-		grpc.WithDefaultCallOptions(
-			grpc.ForceCodecV2(proxy.Codec()),
-			grpc.UseCompressor(gzip.Name),
-		),
-		grpc.WithTransportCredentials(creds),
-	)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create loopback gRPC client: %w", err)
-	}
-
-	backend := &proxy.SingleBackend{
-		GetConn: func(ctx context.Context) (context.Context, *grpc.ClientConn, error) {
-			md, _ := metadata.FromIncomingContext(ctx)
-			outCtx := metadata.NewOutgoingContext(ctx, md.Copy())
-			return outCtx, conn, nil
-		},
-	}
-	return backend, conn, nil
 }
 
 // Close closes the gateway API.
@@ -263,6 +237,7 @@ func (m *Gateway) Close() error {
 		if !ok {
 			continue
 		}
+
 		if err := closer.Close(); err != nil {
 			m.log.Warn("failed to close service",
 				zap.String("service", fmt.Sprintf("%T", service)),
