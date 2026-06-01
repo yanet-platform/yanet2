@@ -136,7 +136,7 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
 }
 
 fn map_not_found(status: Status, action: &'static str, endpoint: &str, resource: Option<&str>) -> Error {
-    if status.code() == Code::NotFound {
+    if status.code() == Code::NotFound && !status.message().contains("unknown service") {
         let resource = resource.unwrap_or("requested function");
 
         return Error::from_status(
