@@ -7,12 +7,14 @@ on:
       - "**.rs"
       - "**/Cargo.toml"
       - "**/Cargo.lock"
+      - ".github/workflows/rust-check.yml"
   pull_request:
     branches: ["main"]
     paths:
       - "**.rs"
       - "**/Cargo.toml"
       - "**/Cargo.lock"
+      - ".github/workflows/rust-check.yml"
 
 jobs:
   fmt:
@@ -49,6 +51,30 @@ jobs:
           packages: protobuf-compiler
           version: 1.0
       - run: cargo check --workspace
+
+  test:
+    name: cargo test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-test-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-test-
+      - uses: awalsh128/cache-apt-pkgs-action@latest
+        with:
+          packages: protobuf-compiler
+          version: 1.0
+      - run: cargo test --workspace
 
   clippy:
     name: cargo clippy
