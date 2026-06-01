@@ -6,6 +6,7 @@ import { useFunctionsData } from './hooks/useFunctionsData';
 import { useDragState, useUnsavedChangesBlocker } from '../_shared/lane-editor';
 import { FunctionCard } from './components/FunctionCard';
 import { CreateFunctionDialog } from './dialogs';
+import { getAvailableModuleTypesFromInspect } from './moduleTypeOptions';
 import type { NetworkFunction } from './types';
 import { API } from '../../../api';
 import './FunctionsPage.scss';
@@ -48,17 +49,14 @@ const FunctionsPage = (): React.JSX.Element => {
         const fetchTypes = async (): Promise<void> => {
             try {
                 const resp = await API.inspect.inspect();
+                const moduleTypes = getAvailableModuleTypesFromInspect(resp.instance_info?.dp_modules ?? []);
                 const cpConfigs = resp.instance_info?.cp_configs ?? [];
                 const namesByType = new Map<string, Set<string>>();
-                const types = new Set<string>();
                 const allNames = new Set<string>();
 
                 cpConfigs.forEach(cfg => {
                     const type = cfg.type?.trim() ?? '';
                     const name = cfg.name?.trim() ?? '';
-                    if (type) {
-                        types.add(type);
-                    }
                     if (!name) {
                         return;
                     }
@@ -73,17 +71,16 @@ const FunctionsPage = (): React.JSX.Element => {
                     namesByType.set(type, names);
                 });
 
-                const typeList = [...types].sort((a, b) => a.localeCompare(b));
                 const byType: Record<string, string[]> = {};
                 namesByType.forEach((names, type) => {
                     byType[type] = [...names].sort((a, b) => a.localeCompare(b));
                 });
 
-                setAvailableModuleTypes(typeList);
+                setAvailableModuleTypes(moduleTypes);
                 setAvailableModuleConfigNamesByType(byType);
                 setAvailableModuleConfigNames([...allNames].sort((a, b) => a.localeCompare(b)));
             } catch {
-                // Non-critical; drawer will show current module type only.
+                setAvailableModuleTypes([]);
             }
         };
         fetchTypes();
