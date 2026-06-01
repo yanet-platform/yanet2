@@ -15,24 +15,24 @@ import (
 )
 
 type gatewayRegistrarOptions struct {
-	backoff        func() backoff.BackOff
-	maxElapsedTime time.Duration
-	log            *zap.Logger
+	Backoff        func() backoff.BackOff
+	MaxElapsedTime time.Duration
+	Log            *zap.Logger
 }
 
 type GatewayRegistrarOption func(*gatewayRegistrarOptions)
 
 func newGatewayRegistrarOptions() *gatewayRegistrarOptions {
 	return &gatewayRegistrarOptions{
-		backoff: func() backoff.BackOff { return backoff.NewExponentialBackOff() },
-		log:     zap.NewNop(),
+		Backoff: func() backoff.BackOff { return backoff.NewExponentialBackOff() },
+		Log:     zap.NewNop(),
 	}
 }
 
 // WithRegistrarLog sets the logger for the GatewayRegistrar.
 func WithRegistrarLog(log *zap.Logger) GatewayRegistrarOption {
 	return func(o *gatewayRegistrarOptions) {
-		o.log = log
+		o.Log = log
 	}
 }
 
@@ -44,7 +44,7 @@ func WithRegistrarLog(log *zap.Logger) GatewayRegistrarOption {
 // not be shared across concurrent retries.
 func WithBackOff(factory func() backoff.BackOff) GatewayRegistrarOption {
 	return func(o *gatewayRegistrarOptions) {
-		o.backoff = factory
+		o.Backoff = factory
 	}
 }
 
@@ -55,7 +55,7 @@ func WithBackOff(factory func() backoff.BackOff) GatewayRegistrarOption {
 // implementation.
 func WithMaxElapsedTime(d time.Duration) GatewayRegistrarOption {
 	return func(o *gatewayRegistrarOptions) {
-		o.maxElapsedTime = d
+		o.MaxElapsedTime = d
 	}
 }
 
@@ -78,8 +78,8 @@ func NewGatewayRegistrar(
 	options ...GatewayRegistrarOption,
 ) (*GatewayRegistrar, error) {
 	opts := newGatewayRegistrarOptions()
-	for _, option := range options {
-		option(opts)
+	for _, o := range options {
+		o(opts)
 	}
 
 	creds, err := TransportCredentials(tlsConfig, endpoint)
@@ -100,9 +100,9 @@ func NewGatewayRegistrar(
 		endpoint:       endpoint,
 		client:         ynpb.NewGatewayClient(conn),
 		conn:           conn,
-		backoff:        opts.backoff,
-		maxElapsedTime: opts.maxElapsedTime,
-		log:            opts.log,
+		backoff:        opts.Backoff,
+		maxElapsedTime: opts.MaxElapsedTime,
+		log:            opts.Log,
 	}, nil
 }
 
