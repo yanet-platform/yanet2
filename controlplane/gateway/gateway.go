@@ -178,9 +178,17 @@ func NewGateway(cfg *Config, options ...GatewayOption) (*Gateway, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create loopback backend for built-in services: %w", err)
 	}
-	registry.RegisterBackend("ynpb.Gateway", loopback, cfg.Server.Endpoint)
+	if _, err := registry.RegisterBackend("ynpb.Gateway", cfg.Server.Endpoint, func() (proxy.Backend, *grpc.ClientConn, error) {
+		return loopback, nil, nil
+	}); err != nil {
+		return nil, fmt.Errorf("failed to register built-in gateway service: %w", err)
+	}
 	log.Debug("registered built-in service in registry", zap.String("service", "ynpb.Gateway"))
-	registry.RegisterBackend("ynpb.Auth", loopback, cfg.Server.Endpoint)
+	if _, err := registry.RegisterBackend("ynpb.Auth", cfg.Server.Endpoint, func() (proxy.Backend, *grpc.ClientConn, error) {
+		return loopback, nil, nil
+	}); err != nil {
+		return nil, fmt.Errorf("failed to register built-in auth service: %w", err)
+	}
 	log.Debug("registered built-in service in registry", zap.String("service", "ynpb.Auth"))
 
 	var allServices []Service
@@ -198,7 +206,12 @@ func NewGateway(cfg *Config, options ...GatewayOption) (*Gateway, error) {
 				return nil, fmt.Errorf("failed to create loopback backend for service %q: %w", service.Name(), err)
 			}
 			for _, name := range service.ServicesNames() {
-				registry.RegisterBackend(name, inprocBackend, cfg.Server.Endpoint)
+				captured := inprocBackend
+				if _, err := registry.RegisterBackend(name, cfg.Server.Endpoint, func() (proxy.Backend, *grpc.ClientConn, error) {
+					return captured, nil, nil
+				}); err != nil {
+					return nil, fmt.Errorf("failed to register in-process service %q: %w", name, err)
+				}
 				log.Debug("registered in-process service in registry", zap.String("service", name))
 			}
 		} else {

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/siderolabs/grpc-proxy/proxy"
+	"google.golang.org/grpc"
 )
 
 // RegistrationStatus describes how a Register call changed the registry.
@@ -27,6 +28,7 @@ type BackendRegistry struct {
 type BackendEntry struct {
 	service    string
 	backend    proxy.Backend
+	conn       *grpc.ClientConn
 	endpoint   string
 	lastSeenAt time.Time
 }
@@ -65,37 +67,50 @@ func (m *BackendRegistry) GetBackend(service string) (proxy.Backend, bool) {
 	return backend, ok
 }
 
-// RegisterBackend registers a backend for the given service.
+// RegisterBackend registers or refreshes the backend for the given service.
 //
-// It reports whether the service was newly registered, renewed with the same
-// endpoint, or updated with a new endpoint.
+// dial is invoked, under the registry lock, only when a connection must be
+// established: for a newly registered service or an endpoint change. On an
+// unchanged endpoint the existing connection is reused and only the last-seen
+// time is refreshed; when the endpoint changes the previous connection is
+// closed.
 func (m *BackendRegistry) RegisterBackend(
 	service string,
-	backend proxy.Backend,
 	endpoint string,
-) RegistrationStatus {
+	dial func() (proxy.Backend, *grpc.ClientConn, error),
+) (RegistrationStatus, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	var status RegistrationStatus
+	now := time.Now().UTC()
 	existing, ok := m.backends[service]
-	switch {
-	case !ok:
-		status = RegistrationRegistered
-	case existing.endpoint == endpoint:
-		status = RegistrationRenewed
-	default:
+	if ok && existing.endpoint == endpoint {
+		existing.lastSeenAt = now
+		m.backends[service] = existing
+		return RegistrationRenewed, nil
+	}
+
+	backend, conn, err := dial()
+	if err != nil {
+		return 0, err
+	}
+
+	status := RegistrationRegistered
+	if ok {
 		status = RegistrationUpdated
+		if existing.conn != nil {
+			_ = existing.conn.Close()
+		}
 	}
 
 	m.backends[service] = BackendEntry{
 		service:    service,
 		backend:    backend,
+		conn:       conn,
 		endpoint:   endpoint,
-		lastSeenAt: time.Now().UTC(),
+		lastSeenAt: now,
 	}
-
-	return status
+	return status, nil
 }
 
 // ListBackends returns metadata for all currently registered backends.
