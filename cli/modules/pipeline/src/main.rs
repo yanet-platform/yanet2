@@ -3,10 +3,10 @@
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
 use commonpb::pb::{FunctionId, PipelineId};
-use tonic::{codec::CompressionEncoding, Code, Status};
+use tonic::codec::CompressionEncoding;
 use ync::{
     client::{ConnectionArgs, LayeredChannel},
-    errors::Error,
+    errors::{Error, NotFoundMapper},
     output::{self, CommonFormat},
 };
 use ynpb::pb::{
@@ -15,6 +15,7 @@ use ynpb::pb::{
 };
 
 const PIPELINE_SERVICE: &str = "ynpb.PipelineService";
+const NOT_FOUND: NotFoundMapper = NotFoundMapper::new(PIPELINE_SERVICE, "requested pipeline");
 
 /// Pipeline module.
 #[derive(Debug, Clone, Parser)]
@@ -135,21 +136,6 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
     Ok(())
 }
 
-fn map_not_found(status: Status, action: &'static str, endpoint: &str, resource: Option<&str>) -> Error {
-    if status.code() == Code::NotFound && !status.message().contains("unknown service") {
-        let resource = resource.unwrap_or("requested pipeline");
-
-        return Error::from_status(
-            Status::not_found(format!("{resource} not found")),
-            action,
-            endpoint.to_owned(),
-            PIPELINE_SERVICE,
-        );
-    }
-
-    Error::from_status(status, action, endpoint.to_owned(), PIPELINE_SERVICE)
-}
-
 pub struct PipelineService {
     client: PipelineServiceClient<LayeredChannel>,
     endpoint: String,
@@ -177,7 +163,7 @@ impl PipelineService {
             .client
             .list(ListPipelinesRequest {})
             .await
-            .map_err(|status| map_not_found(status, self.action, &self.endpoint, Some("pipeline service")))?
+            .map_err(|status| NOT_FOUND.map(status, self.action, &self.endpoint, Some("pipeline service")))?
             .into_inner();
 
         Ok(response.ids)
@@ -191,7 +177,7 @@ impl PipelineService {
             .client
             .get(request)
             .await
-            .map_err(|status| map_not_found(status, self.action, &self.endpoint, Some(&format!("pipeline '{name}'"))))?
+            .map_err(|status| NOT_FOUND.map(status, self.action, &self.endpoint, Some(&format!("pipeline '{name}'"))))?
             .into_inner();
 
         let pipeline = response.pipeline.ok_or_else(|| {
@@ -220,7 +206,7 @@ impl PipelineService {
         };
 
         self.client.update(request).await.map_err(|status| {
-            map_not_found(
+            NOT_FOUND.map(
                 status,
                 self.action,
                 &self.endpoint,
@@ -238,7 +224,7 @@ impl PipelineService {
 
         let name = request.id.as_ref().expect("pipeline id").name.clone();
         self.client.delete(request).await.map_err(|status| {
-            map_not_found(status, self.action, &self.endpoint, Some(&format!("pipeline '{name}'")))
+            NOT_FOUND.map(status, self.action, &self.endpoint, Some(&format!("pipeline '{name}'")))
         })?;
 
         Ok(())

@@ -9,7 +9,7 @@
 
 use core::fmt::{self, Display, Formatter};
 
-use tonic::Code;
+use tonic::{Code, Status};
 
 use crate::client::ConnectionError;
 
@@ -178,5 +178,86 @@ fn default_hint(kind: ErrorKind) -> Option<String> {
         ),
         ErrorKind::Connection => Some("verify the endpoint is reachable and the gateway is up".to_owned()),
         _ => None,
+    }
+}
+
+/// Maps a gRPC status to a resource-specific not-found error for one service.
+pub struct NotFoundMapper {
+    service: &'static str,
+    default_resource: &'static str,
+}
+
+impl NotFoundMapper {
+    /// Creates a mapper for the given service and default resource label.
+    pub const fn new(service: &'static str, default_resource: &'static str) -> Self {
+        Self { service, default_resource }
+    }
+
+    /// Maps `status` to an [`Error`], rewriting a genuine resource `NotFound`
+    /// into a friendly `"<resource> not found"` message and passing everything
+    /// else (including the gateway's "unknown service" `NotFound`) through
+    /// unchanged.
+    pub fn map(
+        &self,
+        status: Status,
+        action: impl Into<String>,
+        endpoint: impl Into<String>,
+        resource: Option<&str>,
+    ) -> Error {
+        if status.code() == Code::NotFound && !status.message().contains("unknown service") {
+            let resource = resource.unwrap_or(self.default_resource);
+
+            return Error::from_status(
+                Status::not_found(format!("{resource} not found")),
+                action,
+                endpoint,
+                self.service,
+            );
+        }
+
+        Error::from_status(status, action, endpoint, self.service)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use tonic::Status;
+
+    use super::{ErrorKind, NotFoundMapper};
+
+    const MAPPER: NotFoundMapper = NotFoundMapper::new("test.Service", "requested item");
+
+    #[test]
+    fn not_found_resource_is_rewritten() {
+        let status = Status::not_found("some resource missing");
+        let err = MAPPER.map(status, "show item", "http://localhost:50051", Some("item 'x'"));
+
+        assert_eq!(ErrorKind::NotFound, err.kind);
+        assert_eq!("item 'x' not found", err.message);
+    }
+
+    #[test]
+    fn not_found_uses_default_resource_when_none_given() {
+        let status = Status::not_found("some resource missing");
+        let err = MAPPER.map(status, "show item", "http://localhost:50051", None);
+
+        assert_eq!(ErrorKind::NotFound, err.kind);
+        assert_eq!("requested item not found", err.message);
+    }
+
+    #[test]
+    fn unknown_service_not_found_passes_through_as_service_unregistered() {
+        let status = Status::not_found("unknown service test.Service");
+        let err = MAPPER.map(status, "show item", "http://localhost:50051", None);
+
+        assert_eq!(ErrorKind::ServiceUnregistered, err.kind);
+    }
+
+    #[test]
+    fn non_not_found_status_passes_through_unchanged() {
+        let status = Status::unavailable("backend down");
+        let err = MAPPER.map(status, "show item", "http://localhost:50051", None);
+
+        assert_eq!(ErrorKind::Unavailable, err.kind);
     }
 }

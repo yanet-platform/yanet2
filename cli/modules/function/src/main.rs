@@ -3,10 +3,10 @@
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
 use commonpb::pb::FunctionId;
-use tonic::{codec::CompressionEncoding, Code, Status};
+use tonic::{codec::CompressionEncoding, Status};
 use ync::{
     client::{ConnectionArgs, LayeredChannel},
-    errors::Error,
+    errors::{Error, NotFoundMapper},
     output::{self, CommonFormat},
 };
 use ynpb::pb::{
@@ -15,6 +15,7 @@ use ynpb::pb::{
 };
 
 const FUNCTION_SERVICE: &str = "ynpb.FunctionService";
+const NOT_FOUND: NotFoundMapper = NotFoundMapper::new(FUNCTION_SERVICE, "requested function");
 
 /// Function module.
 #[derive(Debug, Clone, Parser)]
@@ -135,21 +136,6 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
     Ok(())
 }
 
-fn map_not_found(status: Status, action: &'static str, endpoint: &str, resource: Option<&str>) -> Error {
-    if status.code() == Code::NotFound && !status.message().contains("unknown service") {
-        let resource = resource.unwrap_or("requested function");
-
-        return Error::from_status(
-            Status::not_found(format!("{resource} not found")),
-            action,
-            endpoint.to_owned(),
-            FUNCTION_SERVICE,
-        );
-    }
-
-    Error::from_status(status, action, endpoint.to_owned(), FUNCTION_SERVICE)
-}
-
 pub struct FunctionService {
     client: FunctionServiceClient<LayeredChannel>,
     endpoint: String,
@@ -175,7 +161,7 @@ impl FunctionService {
             .client
             .list(ListFunctionsRequest {})
             .await
-            .map_err(|status| map_not_found(status, "list functions", &self.endpoint, None))?
+            .map_err(|status| NOT_FOUND.map(status, "list functions", &self.endpoint, None))?
             .into_inner();
 
         Ok(response.ids)
@@ -191,7 +177,7 @@ impl FunctionService {
             .get(request)
             .await
             .map_err(|status| {
-                map_not_found(
+                NOT_FOUND.map(
                     status,
                     "show function",
                     &self.endpoint,
@@ -221,7 +207,7 @@ impl FunctionService {
         };
 
         self.client.update(request).await.map_err(|status| {
-            map_not_found(
+            NOT_FOUND.map(
                 status,
                 "update function",
                 &self.endpoint,
@@ -241,7 +227,7 @@ impl FunctionService {
             })
             .await
             .map_err(|status| {
-                map_not_found(
+                NOT_FOUND.map(
                     status,
                     "delete function",
                     &self.endpoint,
