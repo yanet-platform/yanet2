@@ -10,7 +10,6 @@ compiler_sources = files(
   'compiler/port.c',
   'compiler/proto_range.c',
   'compiler/proto_range_fast.c',
-  'compiler/proto.c',
   'compiler/vlan.c',
   'compiler/net6_fast.c',
   'compiler/net4_fast.c',

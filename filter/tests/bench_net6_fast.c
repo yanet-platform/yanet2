@@ -58,9 +58,11 @@ FILTER_COMPILER_DECLARE(bench_dst_port_compile, net6_fast_dst, port_dst);
 FILTER_QUERY_DECLARE(bench_dst_port, net6_fast_dst, port_dst);
 
 FILTER_COMPILER_DECLARE(
-	bench_dst_port_proto_compile, net6_fast_dst, port_dst, proto
+	bench_dst_port_proto_compile, net6_fast_dst, port_dst, proto_range
 );
-FILTER_QUERY_DECLARE(bench_dst_port_proto, net6_fast_dst, port_dst, proto);
+FILTER_QUERY_DECLARE(
+	bench_dst_port_proto, net6_fast_dst, port_dst, proto_range
+);
 
 ////////////////////////////////////////////////////////////////////////////////
 // Configuration and types
