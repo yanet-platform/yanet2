@@ -90,6 +90,18 @@ func TestConfigValidate(t *testing.T) {
 			},
 			wantErr: true,
 		},
+		{
+			name: "duplicate gateway name",
+			build: func() *Config {
+				cfg := validConfig()
+				cfg.Gateways = append(cfg.Gateways, operator.GatewayConfig{
+					Name:     "numa0",
+					Endpoint: xcfg.MustNonEmptyString("[::1]:8081"),
+				})
+				return cfg
+			},
+			wantErr: true,
+		},
 	}
 
 	for _, tc := range cases {

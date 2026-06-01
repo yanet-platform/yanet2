@@ -5,8 +5,10 @@ import (
 	"fmt"
 
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
 
 	"github.com/yanet-platform/yanet2/common/go/operator"
+	operatorpb "github.com/yanet-platform/yanet2/operators/forward/operatorpb/v1"
 )
 
 // Operator is the forward operator's thin wrapper around the generic
@@ -38,6 +40,12 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 		})
 	}
 
+	gatewayIDs := make([]string, len(cfg.Gateways))
+	for idx, gw := range cfg.Gateways {
+		gatewayIDs[idx] = gw.Name
+	}
+	tracker := operator.NewReadiness(gatewayIDs)
+
 	actuators := make([]operator.Actuator[State], 0, len(cfg.Gateways))
 	for _, gw := range cfg.Gateways {
 		actuator, err := NewGatewayActuator(gw, cfg.Functions, WithGatewayActuatorLog(log))
@@ -47,16 +55,29 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 			}
 			return nil, fmt.Errorf("failed to construct gateway actuator %q: %w", gw.Name, err)
 		}
-		actuators = append(actuators, actuator)
+		observed := operator.NewObservedActuator(actuator, gw.Name, tracker.Observe)
+		actuators = append(actuators, observed)
 	}
 
 	fanOut := operator.NewFanOutActuator(actuators, operator.WithFanOutLog(log))
 	source := NewStaticSource(modules, WithSourceLog(log))
 
+	svc := NewReadinessService(tracker)
+	registrar := func(s *grpc.Server) string {
+		operatorpb.RegisterReadinessServiceServer(s, svc)
+		return operatorpb.ReadinessService_ServiceDesc.ServiceName
+	}
+
 	app := operator.NewOperator(
 		fanOut,
 		source,
-		operator.WithGRPCServer(cfg.Server),
+		operator.WithGRPCServer(cfg.Server, registrar),
+		operator.WithGateways(cfg.Register, cfg.Gateways...),
+		operator.WithWorkers(func(ctx context.Context) error {
+			<-ctx.Done()
+			tracker.Drain()
+			return nil
+		}),
 		operator.WithLog(log),
 		operator.WithReconcile(cfg.Reconcile),
 	)

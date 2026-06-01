@@ -41,6 +41,14 @@ func (m *Config) Validate() error {
 		return errors.New("at least one function must be configured")
 	}
 
+	gatewayNames := map[string]struct{}{}
+	for idx, gw := range m.Gateways {
+		if _, dup := gatewayNames[gw.Name]; dup {
+			return fmt.Errorf("duplicate gateway name %q at index %d", gw.Name, idx)
+		}
+		gatewayNames[gw.Name] = struct{}{}
+	}
+
 	names := map[string]struct{}{}
 	modules := map[string]struct{}{}
 	for idx, fn := range m.Functions {
