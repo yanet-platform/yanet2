@@ -14,10 +14,10 @@ rules:
 
   # Create state for outgoing TCP to port 80
   - actions:
-      - kind: CreateState
-      - kind: Allow
+      - kind: ACTION_KIND_CREATE_STATE
+      - kind: ACTION_KIND_PASS
     devices: []
-    dst_ports:
+    dst_port_ranges:
       - from: 80
         to: 80
     dsts:
@@ -25,7 +25,7 @@ rules:
     proto_ranges:
       - from: 1536
         to: 1791
-    src_ports:
+    src_port_ranges:
       - from: 0
         to: 65535
     srcs:
@@ -34,10 +34,10 @@ rules:
 
   # Check state for return traffic
   - actions:
-      - kind: CheckState
-      - kind: Deny
+      - kind: ACTION_KIND_CHECK_STATE
+      - kind: ACTION_KIND_DENY
     devices: []
-    dst_ports:
+    dst_port_ranges:
       - from: 0
         to: 65535
     dsts:
@@ -45,7 +45,7 @@ rules:
     proto_ranges:
       - from: 1536
         to: 1791
-    src_ports:
+    src_port_ranges:
       - from: 80
         to: 80
     srcs:
@@ -54,10 +54,10 @@ rules:
 
   # Create state for outgoing UDP to port 80
   - actions:
-      - kind: CreateState
-      - kind: Allow
+      - kind: ACTION_KIND_CREATE_STATE
+      - kind: ACTION_KIND_PASS
     devices: []
-    dst_ports:
+    dst_port_ranges:
       - from: 80
         to: 80
     dsts:
@@ -65,7 +65,7 @@ rules:
     proto_ranges:
       - from: 4352
         to: 4607
-    src_ports:
+    src_port_ranges:
       - from: 0
         to: 65535
     srcs:
@@ -74,10 +74,10 @@ rules:
 
   # Check state for return UDP traffic
   - actions:
-      - kind: CheckState
-      - kind: Deny
+      - kind: ACTION_KIND_CHECK_STATE
+      - kind: ACTION_KIND_DENY
     devices: []
-    dst_ports:
+    dst_port_ranges:
       - from: 0
         to: 65535
     dsts:
@@ -85,7 +85,7 @@ rules:
     proto_ranges:
       - from: 4352
         to: 4607
-    src_ports:
+    src_port_ranges:
       - from: 80
         to: 80
     srcs:
@@ -96,10 +96,10 @@ rules:
 
   # Create state for outgoing TCPv6 to port 80
   - actions:
-      - kind: CreateState
-      - kind: Allow
+      - kind: ACTION_KIND_CREATE_STATE
+      - kind: ACTION_KIND_PASS
     devices: []
-    dst_ports:
+    dst_port_ranges:
       - from: 80
         to: 80
     dsts:
@@ -107,7 +107,7 @@ rules:
     proto_ranges:
       - from: 1536
         to: 1791
-    src_ports:
+    src_port_ranges:
       - from: 0
         to: 65535
     srcs:
@@ -116,10 +116,10 @@ rules:
 
   # Check state for return TCPv6 traffic
   - actions:
-      - kind: CheckState
-      - kind: Deny
+      - kind: ACTION_KIND_CHECK_STATE
+      - kind: ACTION_KIND_DENY
     devices: []
-    dst_ports:
+    dst_port_ranges:
       - from: 0
         to: 65535
     dsts:
@@ -127,7 +127,7 @@ rules:
     proto_ranges:
       - from: 1536
         to: 1791
-    src_ports:
+    src_port_ranges:
       - from: 80
         to: 80
     srcs:
@@ -140,9 +140,9 @@ rules:
   # These packets are processed by the fwstate module to create external state
   # entries and then dropped.
   - actions:
-      - kind: Allow
+      - kind: ACTION_KIND_PASS
     devices: []
-    dst_ports:
+    dst_port_ranges:
       - from: 9999
         to: 9999
     dsts:
@@ -150,7 +150,7 @@ rules:
     proto_ranges:
       - from: 4352
         to: 4607
-    src_ports:
+    src_port_ranges:
       - from: 9999
         to: 9999
     srcs:

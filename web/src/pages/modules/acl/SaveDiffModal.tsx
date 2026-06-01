@@ -28,17 +28,15 @@ export const rulesToYamlObjects = (rules: Rule[]): Array<Record<string, unknown>
         };
         const srcs = (r.srcs ?? []).map(fmtIPNet).filter(Boolean);
         const dsts = (r.dsts ?? []).map(fmtIPNet).filter(Boolean);
-        const fmtRange = (rng: { from?: number; to?: number }): string => {
-            const from = rng.from ?? 0;
-            const to = rng.to ?? 0;
-            if (from === to) return String(from);
-            return `${from}-${to}`;
-        };
+        const fmtRange = (rng: { from?: number; to?: number }): { from: number; to: number } => ({
+            from: rng.from ?? 0,
+            to: rng.to ?? 0,
+        });
         const src_port_ranges = (r.src_port_ranges ?? []).map(fmtRange);
         const dst_port_ranges = (r.dst_port_ranges ?? []).map(fmtRange);
         const proto_ranges = (r.proto_ranges ?? []).map(fmtRange);
         const vlan_ranges = (r.vlan_ranges ?? []).map(fmtRange);
-        const devices = (r.devices ?? []).map(d => d.name ?? '').filter(Boolean);
+        const devices = (r.devices ?? []).map(d => ({ name: d.name ?? '' })).filter(d => d.name !== '');
         const actions = (r.actions ?? []).map(a => ({
             kind: ACTION_KIND_YAML_NAMES[a.kind ?? ActionKind.ACTION_KIND_PASS] ?? 'ACTION_KIND_PASS',
         }));

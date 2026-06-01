@@ -3487,6 +3487,7 @@ dependencies = [
  "netip",
  "prost",
  "serde",
+ "serde_json",
  "tonic",
  "tonic-build",
 ]

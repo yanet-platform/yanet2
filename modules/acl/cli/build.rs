@@ -8,6 +8,26 @@ pub fn main() -> Result<(), Box<dyn Error>> {
         .build_server(false)
         .extern_path(".commonpb", "::commonpb::pb")
         .extern_path(".filterpb", "::filterpb::pb")
+        .message_attribute(
+            ".modules.acl.controlplane.aclpb.v1.Rule",
+            "#[derive(serde::Serialize, serde::Deserialize)] #[serde(default)]",
+        )
+        .message_attribute(
+            ".modules.acl.controlplane.aclpb.v1.Action",
+            "#[derive(serde::Serialize, serde::Deserialize)]",
+        )
+        .message_attribute(
+            ".modules.acl.controlplane.aclpb.v1.ShowConfigResponse",
+            "#[derive(serde::Serialize)]",
+        )
+        .field_attribute(
+            ".modules.acl.controlplane.aclpb.v1.Action.kind",
+            "#[serde(with = \"crate::action_kind\")]",
+        )
+        .field_attribute(
+            ".modules.acl.controlplane.aclpb.v1.ShowConfigResponse.fwstate_name",
+            "#[serde(skip)]",
+        )
         .compile_protos(&["aclpb/v1/acl.proto"], &["../../..", "../controlplane"])?;
 
     Ok(())

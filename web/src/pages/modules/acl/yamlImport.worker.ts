@@ -11,7 +11,7 @@
 import yaml from 'js-yaml';
 import { ActionKind } from '../../../api/acl';
 import type { Rule } from '../../../api/acl';
-import { parseCidrsToIPNets, parseRangesRaw, parseProtoRangesRaw } from './parseHelpers';
+import { parseCidrsToIPNets } from './parseHelpers';
 
 /** Raw shape of an action entry in the YAML schema. */
 interface YamlAction {
@@ -45,6 +45,21 @@ const parseStringArray = (val: unknown): string[] => {
     return (val as unknown[]).filter((s): s is string => typeof s === 'string');
 };
 
+/** Convert an array of {from, to} YAML objects to wire range objects. */
+const rangesFromObjects = (val: unknown): Array<{ from: number; to: number }> => {
+    if (!Array.isArray(val)) return [];
+    const results: Array<{ from: number; to: number }> = [];
+    for (const item of val as unknown[]) {
+        if (!item || typeof item !== 'object') continue;
+        const obj = item as Record<string, unknown>;
+        const from = typeof obj['from'] === 'number' ? obj['from'] : Number(obj['from'] ?? 0);
+        const to = typeof obj['to'] === 'number' ? obj['to'] : Number(obj['to'] ?? 0);
+        if (isNaN(from) || isNaN(to)) continue;
+        results.push({ from, to });
+    }
+    return results;
+};
+
 const convertRow = (r: unknown): Rule => {
     if (!r || typeof r !== 'object') return {};
     const row = r as YamlRule;
@@ -52,19 +67,16 @@ const convertRow = (r: unknown): Rule => {
     const srcs = parseCidrsToIPNets(parseStringArray(row.srcs));
     const dsts = parseCidrsToIPNets(parseStringArray(row.dsts));
 
-    const srcPortStrings = parseStringArray(row.src_port_ranges);
-    const src_port_ranges = srcPortStrings.length > 0 ? parseRangesRaw(srcPortStrings.join(', ')) : [];
+    const src_port_ranges = rangesFromObjects(row.src_port_ranges);
+    const dst_port_ranges = rangesFromObjects(row.dst_port_ranges);
+    const proto_ranges = rangesFromObjects(row.proto_ranges);
+    const vlan_ranges = rangesFromObjects(row.vlan_ranges);
 
-    const dstPortStrings = parseStringArray(row.dst_port_ranges);
-    const dst_port_ranges = dstPortStrings.length > 0 ? parseRangesRaw(dstPortStrings.join(', ')) : [];
-
-    const protoStrings = parseStringArray(row.proto_ranges);
-    const proto_ranges = protoStrings.length > 0 ? parseProtoRangesRaw(protoStrings.join(', ')) : [];
-
-    const vlanStrings = parseStringArray(row.vlan_ranges);
-    const vlan_ranges = vlanStrings.length > 0 ? parseRangesRaw(vlanStrings.join(', ')) : [];
-
-    const devices = parseStringArray(row.devices).map(name => ({ name }));
+    const devicesRaw = Array.isArray(row.devices) ? row.devices as unknown[] : [];
+    const devices = devicesRaw
+        .filter((d): d is Record<string, unknown> => !!d && typeof d === 'object')
+        .map(d => ({ name: typeof d['name'] === 'string' ? d['name'] : '' }))
+        .filter(d => d.name !== '');
     const counter = typeof row.counter === 'string' ? row.counter : undefined;
 
     const actionsRaw = Array.isArray(row.actions) ? row.actions as unknown[] : [];

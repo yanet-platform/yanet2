@@ -8,9 +8,7 @@ use aclpb::{
 use args::{DeleteCmd, MetricsCmd, ModeCmd, OutputFormat, ShowCmd, UpdateCmd};
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
-use filterpb::pb::{Device, IpNet, PortRange, ProtoRange, VlanRange};
 use metric::Metric;
-use netip::IpNetwork;
 use serde::{Deserialize, Serialize};
 use tabled::Tabled;
 use tonic::codec::CompressionEncoding;
@@ -30,28 +28,23 @@ pub mod aclpb {
     tonic::include_proto!("modules.acl.controlplane.aclpb.v1");
 }
 
-#[derive(Serialize)]
-struct SerializableShowConfigResponse {
-    name: String,
-    rules: Vec<SerializableRule>,
-}
+pub(crate) mod action_kind {
+    use serde::{Deserialize, Deserializer, Serializer, de};
 
-#[derive(Serialize)]
-struct SerializableRule {
-    srcs: Vec<String>,
-    dsts: Vec<String>,
-    src_port_ranges: Vec<String>,
-    dst_port_ranges: Vec<String>,
-    proto_ranges: Vec<String>,
-    vlan_ranges: Vec<String>,
-    devices: Vec<String>,
-    counter: String,
-    actions: Vec<SerializableAction>,
-}
+    use super::aclpb;
 
-#[derive(Serialize)]
-struct SerializableAction {
-    kind: String,
+    pub fn serialize<S: Serializer>(kind: &i32, s: S) -> Result<S::Ok, S::Error> {
+        let action_kind = aclpb::ActionKind::try_from(*kind)
+            .map_err(|_| serde::ser::Error::custom(format!("unknown ActionKind value {kind}")))?;
+        s.serialize_str(action_kind.as_str_name())
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<i32, D::Error> {
+        let s = String::deserialize(d)?;
+        let action_kind = aclpb::ActionKind::from_str_name(&s)
+            .ok_or_else(|| de::Error::custom(format!("unknown ActionKind name `{s}`")))?;
+        Ok(action_kind as i32)
+    }
 }
 
 #[derive(Tabled)]
@@ -357,6 +350,23 @@ fn print_metrics_table(metrics: &[Metric]) {
     }
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ACLConfig {
+    rules: Vec<aclpb::Rule>,
+}
+
+impl ACLConfig {
+    pub fn load<P>(path: P) -> Result<Self, Box<dyn Error>>
+    where
+        P: AsRef<Path>,
+    {
+        let file = File::open(path)?;
+        let config = serde_yaml::from_reader(file)?;
+
+        Ok(config)
+    }
+}
+
 /// ACL module
 #[derive(Debug, Clone, Parser)]
 #[command(version, about)]
@@ -368,160 +378,6 @@ pub struct Cmd {
     /// Log verbosity level.
     #[clap(short, action = ArgAction::Count, global = true)]
     pub verbose: u8,
-}
-
-/// Local range type for YAML deserialization
-#[derive(Debug, Serialize, Deserialize)]
-struct Range {
-    from: u16,
-    to: u16,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-enum ActionKind {
-    Allow,
-    Deny,
-    Count,
-    CheckState,
-    CreateState,
-    Log,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct ACLAction {
-    kind: ActionKind,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct ACLRule {
-    srcs: Vec<String>,
-    dsts: Vec<String>,
-    src_ports: Vec<Range>,
-    dst_ports: Vec<Range>,
-    proto_ranges: Vec<Range>,
-    vlan_ranges: Vec<Range>,
-    devices: Vec<String>,
-    #[serde(default)]
-    counter: String,
-    actions: Vec<ACLAction>,
-}
-
-/// Converts a YAML `Range` to a protobuf `PortRange`, validating that
-/// `from <= to`.
-fn port_range(r: &Range) -> Result<PortRange, Box<dyn Error>> {
-    if r.from > r.to {
-        return Err(format!("port 'from' value {} is greater than 'to' value {}", r.from, r.to).into());
-    }
-    Ok(PortRange {
-        from: u32::from(r.from),
-        to: u32::from(r.to),
-    })
-}
-
-/// Converts a YAML `Range` to a protobuf `ProtoRange`, validating that
-/// `from <= to`.
-fn proto_range(r: &Range) -> Result<ProtoRange, Box<dyn Error>> {
-    if r.from > r.to {
-        return Err(format!("protocol 'from' value {} is greater than 'to' value {}", r.from, r.to).into());
-    }
-    Ok(ProtoRange {
-        from: u32::from(r.from),
-        to: u32::from(r.to),
-    })
-}
-
-/// Converts a YAML `Range` to a protobuf `VlanRange`, validating both the
-/// 12-bit VLAN-id bound (4095) and `from <= to`.
-fn vlan_range(r: &Range) -> Result<VlanRange, Box<dyn Error>> {
-    if r.from > 4095 {
-        return Err(format!("VLAN 'from' value {} exceeds maximum 4095", r.from).into());
-    }
-    if r.to > 4095 {
-        return Err(format!("VLAN 'to' value {} exceeds maximum 4095", r.to).into());
-    }
-    if r.from > r.to {
-        return Err(format!("VLAN 'from' value {} is greater than 'to' value {}", r.from, r.to).into());
-    }
-    Ok(VlanRange {
-        from: u32::from(r.from),
-        to: u32::from(r.to),
-    })
-}
-
-impl TryFrom<ACLRule> for aclpb::Rule {
-    type Error = Box<dyn Error>;
-
-    fn try_from(acl_rule: ACLRule) -> Result<Self, Self::Error> {
-        Ok(Self {
-            srcs: acl_rule
-                .srcs
-                .iter()
-                .map(|s| IpNetwork::parse(s).map(IpNet::from))
-                .collect::<Result<_, _>>()?,
-            dsts: acl_rule
-                .dsts
-                .iter()
-                .map(|s| IpNetwork::parse(s).map(IpNet::from))
-                .collect::<Result<_, _>>()?,
-            src_port_ranges: acl_rule.src_ports.iter().map(port_range).collect::<Result<_, _>>()?,
-            dst_port_ranges: acl_rule.dst_ports.iter().map(port_range).collect::<Result<_, _>>()?,
-            proto_ranges: acl_rule
-                .proto_ranges
-                .iter()
-                .map(proto_range)
-                .collect::<Result<_, _>>()?,
-            vlan_ranges: acl_rule.vlan_ranges.iter().map(vlan_range).collect::<Result<_, _>>()?,
-            devices: acl_rule.devices.iter().cloned().map(Device::from).collect(),
-            counter: acl_rule.counter.clone(),
-            actions: acl_rule
-                .actions
-                .iter()
-                .map(|a| aclpb::Action {
-                    kind: match a.kind {
-                        ActionKind::Allow => aclpb::ActionKind::Pass,
-                        ActionKind::Deny => aclpb::ActionKind::Deny,
-                        ActionKind::Count => aclpb::ActionKind::Count,
-                        ActionKind::CheckState => aclpb::ActionKind::CheckState,
-                        ActionKind::CreateState => aclpb::ActionKind::CreateState,
-                        ActionKind::Log => aclpb::ActionKind::Log,
-                    }
-                    .into(),
-                })
-                .collect(),
-        })
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ACLConfig {
-    rules: Vec<ACLRule>,
-}
-
-impl TryFrom<ACLConfig> for Vec<aclpb::Rule> {
-    type Error = Box<dyn Error>;
-
-    fn try_from(config: ACLConfig) -> Result<Self, Self::Error> {
-        config
-            .rules
-            .into_iter()
-            .enumerate()
-            .map(|(i, rule)| {
-                rule.try_into().map_err(|e: Box<dyn Error>| -> Box<dyn Error> {
-                    format!("failed to parse rule #{}: {}", i + 1, e).into()
-                })
-            })
-            .collect()
-    }
-}
-
-impl ACLConfig {
-    pub fn from_file<P>(path: P) -> Result<Self, Box<dyn Error>>
-    where
-        P: AsRef<Path>,
-    {
-        let rd = File::open(path)?;
-        Ok(serde_yaml::from_reader(rd)?)
-    }
 }
 
 pub struct ACLService {
@@ -549,50 +405,10 @@ impl ACLService {
     pub async fn show_config(&mut self, cmd: ShowCmd) -> Result<(), Box<dyn Error>> {
         let request = ShowConfigRequest { name: cmd.config_name.clone() };
         let response = self.client.show_config(request).await?.into_inner();
-
-        let out = SerializableShowConfigResponse {
-            name: response.name,
-            rules: response
-                .rules
-                .into_iter()
-                .map(|rule| SerializableRule {
-                    srcs: rule.srcs.iter().map(IpNet::to_string).collect(),
-                    dsts: rule.dsts.iter().map(IpNet::to_string).collect(),
-                    src_port_ranges: rule
-                        .src_port_ranges
-                        .iter()
-                        .map(|r| format!("{}-{}", r.from, r.to))
-                        .collect(),
-                    dst_port_ranges: rule
-                        .dst_port_ranges
-                        .iter()
-                        .map(|r| format!("{}-{}", r.from, r.to))
-                        .collect(),
-                    proto_ranges: rule
-                        .proto_ranges
-                        .iter()
-                        .map(|r| format!("{}-{}", r.from, r.to))
-                        .collect(),
-                    vlan_ranges: rule
-                        .vlan_ranges
-                        .iter()
-                        .map(|r| format!("{}-{}", r.from, r.to))
-                        .collect(),
-                    devices: rule.devices.iter().map(|d| d.name.clone()).collect(),
-                    counter: rule.counter.clone(),
-                    actions: rule
-                        .actions
-                        .iter()
-                        .map(|a| SerializableAction {
-                            kind: aclpb::ActionKind::try_from(a.kind)
-                                .map(|k| k.as_str_name().to_string())
-                                .unwrap_or_else(|_| a.kind.to_string()),
-                        })
-                        .collect(),
-                })
-                .collect(),
-        };
-        println!("{}", serde_json::to_string(&out)?);
+        println!(
+            "{}",
+            serde_json::to_string(&response).expect("ShowConfigResponse serialization must not fail")
+        );
         Ok(())
     }
 
@@ -603,9 +419,11 @@ impl ACLService {
     }
 
     pub async fn update_config(&mut self, cmd: UpdateCmd) -> Result<(), Box<dyn Error>> {
-        let config = ACLConfig::from_file(&cmd.rules)?;
-        let rules: Vec<aclpb::Rule> = config.try_into()?;
-        let request = UpdateConfigRequest { name: cmd.config_name.clone(), rules };
+        let config = ACLConfig::load(&cmd.rules)?;
+        let request = UpdateConfigRequest {
+            name: cmd.config_name.clone(),
+            rules: config.rules,
+        };
         log::trace!("UpdateConfigRequest: {request:?}");
         let response = self.client.update_config(request).await?.into_inner();
         log::debug!("UpdateConfigResponse: {response:?}");
@@ -667,5 +485,24 @@ pub async fn main() {
     if let Err(err) = run(cmd).await {
         log::error!("ERROR: {err}");
         std::process::exit(1);
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn deserialize_fixture_acl_yaml() {
+        let content = include_str!("../../../../tests/functional/testdata/acl.yaml");
+        let config: ACLConfig = serde_yaml::from_str(content).expect("acl.yaml fixture must deserialize");
+        assert!(!config.rules.is_empty());
+    }
+
+    #[test]
+    fn deserialize_fixture_acl_fwstate_yaml() {
+        let content = include_str!("../../../../tests/functional/testdata/acl+fwstate.yaml");
+        let config: ACLConfig = serde_yaml::from_str(content).expect("acl+fwstate.yaml fixture must deserialize");
+        assert!(!config.rules.is_empty());
     }
 }

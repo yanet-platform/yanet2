@@ -57,7 +57,7 @@ func testFWStateListEntries(t *testing.T, fw *framework.TestFramework) {
 	// 2. Link fwstate to an ACL config so the dataplane module is active.
 	fw.Run("Link_fwstate_to_acl", func(fw *framework.TestFramework, t *testing.T) {
 		commands := []string{
-			framework.CLIACL + " update --name acl_fw --rules /mnt/yanet2/acl+fwstate.yaml",
+			framework.CLIACL + " update --name acl_fw --rules /mnt/yanet2/tests/functional/testdata/acl+fwstate.yaml",
 			framework.CLIFWState + " link --name fwstate0 --acl acl_fw",
 			framework.CLIFunction + " update --name=test --chains ch0:2=acl:acl_fw,fwstate:fwstate0,route:route0",
 			framework.CLIPipeline + " update --name=test --functions test",
@@ -383,7 +383,7 @@ func testFWStateUDPEndianness(t *testing.T, fw *framework.TestFramework) {
 
 	fw.Run("Link_fwstate_to_acl", func(fw *framework.TestFramework, t *testing.T) {
 		commands := []string{
-			framework.CLIACL + " update --name acl_udp --rules /mnt/yanet2/acl+fwstate.yaml",
+			framework.CLIACL + " update --name acl_udp --rules /mnt/yanet2/tests/functional/testdata/acl+fwstate.yaml",
 			framework.CLIFWState + " link --name fwstate_udp --acl acl_udp",
 			framework.CLIFunction + " update --name=test --chains ch0:2=acl:acl_udp,fwstate:fwstate_udp,route:route0",
 			framework.CLIPipeline + " update --name=test --functions test",
@@ -630,7 +630,7 @@ func testFWStateExternalSyncFrame(t *testing.T, fw *framework.TestFramework) {
 	// 2. Link fwstate to ACL with the sync frame allow rule.
 	fw.Run("Link_fwstate_to_acl", func(fw *framework.TestFramework, t *testing.T) {
 		commands := []string{
-			framework.CLIACL + " update --name acl_ext --rules /mnt/yanet2/acl+fwstate.yaml",
+			framework.CLIACL + " update --name acl_ext --rules /mnt/yanet2/tests/functional/testdata/acl+fwstate.yaml",
 			framework.CLIFWState + " link --name fwstate_ext --acl acl_ext",
 			framework.CLIFunction + " update --name=test --chains ch0:2=acl:acl_ext,fwstate:fwstate_ext,route:route0",
 			framework.CLIPipeline + " update --name=test --functions test",

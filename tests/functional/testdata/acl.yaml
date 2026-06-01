@@ -1,28 +1,19 @@
 # ACL Rules Configuration
-# =============================================
 #
 # Format: YAML
 #
 # Structure:
 # rules:
 #   - actions:                                    # List of actions (last one is terminal)
-#       - kind: Allow|Deny|Count|...              # Action kind
+#       - kind: ACTION_KIND_PASS|ACTION_KIND_DENY|...   # Action kind
 #     counter: string                         # Optional counter name
-#     devices: [string]                         # List of devices (currently empty array)
-#     dst_ports: array                          # Destination port ranges
-#       - from: int                               # Start of port range
-#         to: int                                 # End of port range
-#     dsts: [string]                            # Destination addresses (address/mask)
-#     proto_ranges: array                       # Protocol ranges
-#       - from: int                               # Start of protocol range
-#         to: int                                 # End of protocol range
-#     src_ports: array                          # Source port ranges
-#       - from: int                               # Start of port range
-#         to: int                                 # End of port range
-#     srcs: [string]                            # Source addresses (address/mask)
-#     vlan_ranges: array                        # VLAN ranges (0–4095)
-#       - from: int                               # Start of vlan range
-#         to: int                                 # End of vlan range
+#     devices: [{name: string}]                 # List of devices (objects with a name)
+#     dst_port_ranges: [{from: N, to: M}]       # Destination port ranges
+#     dsts: [string]                            # Destination addresses (address/mask or CIDR)
+#     proto_ranges: [{from: N, to: M}]          # Protocol ranges
+#     src_port_ranges: [{from: N, to: M}]       # Source port ranges
+#     srcs: [string]                            # Source addresses (address/mask or CIDR)
+#     vlan_ranges: [{from: N, to: M}]           # VLAN ranges (0-4095)
 
 rules:
   # ===== BASIC ALLOW/DENY RULES =====
@@ -30,9 +21,9 @@ rules:
   # 1
   # add allow udp from 192.0.2.2 to 192.0.3.1 150-450,600
   - actions:
-      - kind: Allow
+      - kind: ACTION_KIND_PASS
     devices: []
-    dst_ports:
+    dst_port_ranges:
       - from: 150
         to: 450
       - from: 600
@@ -42,7 +33,7 @@ rules:
     proto_ranges:
       - from: 4352
         to: 4607
-    src_ports:
+    src_port_ranges:
       - from: 0
         to: 65535
     srcs:
@@ -53,9 +44,9 @@ rules:
   # 2
   # add deny udp from 192.0.2.99 to 192.0.3.1 600
   - actions:
-      - kind: Deny
+      - kind: ACTION_KIND_DENY
     devices: []
-    dst_ports:
+    dst_port_ranges:
       - from: 600
         to: 600
     dsts:
@@ -63,7 +54,7 @@ rules:
     proto_ranges:
       - from: 4352
         to: 4607
-    src_ports:
+    src_port_ranges:
       - from: 0
         to: 65535
     srcs:
@@ -75,10 +66,10 @@ rules:
   # 3
   # add allow tcp from 192.0.2.2 to 192.0.3.1 600 tcpflags syn
   - actions:
-      - kind: Allow
+      - kind: ACTION_KIND_PASS
     devices:
-      - ""
-    dst_ports:
+      - name: ""
+    dst_port_ranges:
       - from: 600
         to: 600
     dsts:
@@ -212,7 +203,7 @@ rules:
         to: 1787
       - from: 1790
         to: 1791
-    src_ports:
+    src_port_ranges:
       - from: 0
         to: 65535
     srcs:
@@ -223,10 +214,10 @@ rules:
   # 4
   # add deny tcp from any to any tcpflags rst
   - actions:
-      - kind: Deny
+      - kind: ACTION_KIND_DENY
     devices:
-      - ""
-    dst_ports:
+      - name: ""
+    dst_port_ranges:
       - from: 0
         to: 65535
     dsts:
@@ -297,7 +288,7 @@ rules:
         to: 1783
       - from: 1788
         to: 1791
-    src_ports:
+    src_port_ranges:
       - from: 0
         to: 65535
     srcs:
@@ -309,10 +300,10 @@ rules:
   # 5
   # add allow icmp from 192.0.2.2 to 192.0.3.1 icmptypes 8
   - actions:
-      - kind: Allow
+      - kind: ACTION_KIND_PASS
     devices:
-      - ""
-    dst_ports:
+      - name: ""
+    dst_port_ranges:
       - from: 0
         to: 65535
     dsts:
@@ -320,7 +311,7 @@ rules:
     proto_ranges:
       - from: 264
         to: 264
-    src_ports:
+    src_port_ranges:
       - from: 0
         to: 65535
     srcs:
@@ -332,10 +323,10 @@ rules:
   # 6
   # add allow udp from 192.0.2.0/24 to 192.0.3.1 600
   - actions:
-      - kind: Allow
+      - kind: ACTION_KIND_PASS
     devices:
-      - ""
-    dst_ports:
+      - name: ""
+    dst_port_ranges:
       - from: 600
         to: 600
     dsts:
@@ -343,7 +334,7 @@ rules:
     proto_ranges:
       - from: 4352
         to: 4607
-    src_ports:
+    src_port_ranges:
       - from: 0
         to: 65535
     srcs:
@@ -354,10 +345,10 @@ rules:
   # 7
   # add deny udp from 192.0.99.0/24 to any
   - actions:
-      - kind: Deny
+      - kind: ACTION_KIND_DENY
     devices:
-      - ""
-    dst_ports:
+      - name: ""
+    dst_port_ranges:
       - from: 0
         to: 65535
     dsts:
@@ -366,7 +357,7 @@ rules:
     proto_ranges:
       - from: 4352
         to: 4607
-    src_ports:
+    src_port_ranges:
       - from: 0
         to: 65535
     srcs:
@@ -378,10 +369,10 @@ rules:
   # 8
   # add allow tcp from 2001:db8::1 to 2001:db8::2 600
   - actions:
-      - kind: Allow
+      - kind: ACTION_KIND_PASS
     devices:
-      - ""
-    dst_ports:
+      - name: ""
+    dst_port_ranges:
       - from: 600
         to: 600
     dsts:
@@ -389,7 +380,7 @@ rules:
     proto_ranges:
       - from: 1536
         to: 1791
-    src_ports:
+    src_port_ranges:
       - from: 0
         to: 65535
     srcs:
@@ -400,10 +391,10 @@ rules:
   # 9
   # add allow ipv6-icmp from 2001:db8::1 to 2001:db8::2 icmp6types 128,129
   - actions:
-      - kind: Allow
+      - kind: ACTION_KIND_PASS
     devices:
-      - ""
-    dst_ports:
+      - name: ""
+    dst_port_ranges:
       - from: 0
         to: 65535
     dsts:
@@ -413,7 +404,7 @@ rules:
         to: 14976
       - from: 14977
         to: 14977
-    src_ports:
+    src_port_ranges:
       - from: 0
         to: 65535
     srcs:
@@ -424,10 +415,10 @@ rules:
   # 10
   # add deny udp from 2001:db8::99 to 2001:db8::2 600
   - actions:
-      - kind: Deny
+      - kind: ACTION_KIND_DENY
     devices:
-      - ""
-    dst_ports:
+      - name: ""
+    dst_port_ranges:
       - from: 600
         to: 600
     dsts:
@@ -435,7 +426,7 @@ rules:
     proto_ranges:
       - from: 4352
         to: 4607
-    src_ports:
+    src_port_ranges:
       - from: 0
         to: 65535
     srcs:
@@ -447,10 +438,10 @@ rules:
   # 11
   # add allow udp from 192.0.2.0/31 to any 100-200
   - actions:
-      - kind: Allow
+      - kind: ACTION_KIND_PASS
     devices:
-      - ""
-    dst_ports:
+      - name: ""
+    dst_port_ranges:
       - from: 0
         to: 65535
     dsts:
@@ -459,7 +450,7 @@ rules:
     proto_ranges:
       - from: 4352
         to: 4607
-    src_ports:
+    src_port_ranges:
       - from: 0
         to: 65535
     srcs:
@@ -469,10 +460,10 @@ rules:
   # 12
   # add deny udp from 192.0.2.0/28 to any
   - actions:
-      - kind: Deny
+      - kind: ACTION_KIND_DENY
     devices:
-      - ""
-    dst_ports:
+      - name: ""
+    dst_port_ranges:
       - from: 0
         to: 65535
     dsts:
@@ -481,7 +472,7 @@ rules:
     proto_ranges:
       - from: 4352
         to: 4607
-    src_ports:
+    src_port_ranges:
       - from: 0
         to: 65535
     srcs:
@@ -491,10 +482,10 @@ rules:
   # 13
   # add allow udp from 192.0.2.0/24 to any
   - actions:
-      - kind: Allow
+      - kind: ACTION_KIND_PASS
     devices:
-      - ""
-    dst_ports:
+      - name: ""
+    dst_port_ranges:
       - from: 0
         to: 65535
     dsts:
@@ -503,7 +494,7 @@ rules:
     proto_ranges:
       - from: 4352
         to: 4607
-    src_ports:
+    src_port_ranges:
       - from: 0
         to: 65535
     srcs:
@@ -513,10 +504,10 @@ rules:
   # 14
   # add deny udp from 192.0.0.0/16 to any
   - actions:
-      - kind: Deny
+      - kind: ACTION_KIND_DENY
     devices:
-      - ""
-    dst_ports:
+      - name: ""
+    dst_port_ranges:
       - from: 0
         to: 65535
     dsts:
@@ -525,7 +516,7 @@ rules:
     proto_ranges:
       - from: 4352
         to: 4607
-    src_ports:
+    src_port_ranges:
       - from: 0
         to: 65535
     srcs:
@@ -535,20 +526,17 @@ rules:
 #   - action: Deny
 #     counter: ""
 #     devices:
-#       - ""
-#     dst_ports:
-#       - from: 0
-#         to: 65535
+#       - {name: ""}
+#     dst_port_ranges:
+#       - {from: 0, to: 65535}
 #     dsts:
 #       - 0.0.0.0/0.0.0.0
-#       - '::/::'
+#       - '::/0'
 #     proto_ranges:
-#       - from: 0
-#         to: 65535
-#     src_ports:
-#       - from: 0
-#         to: 65535
+#       - {from: 0, to: 65535}
+#     src_port_ranges:
+#       - {from: 0, to: 65535}
 #     srcs:
 #       - 0.0.0.0/0.0.0.0
-#       - '::/::'
+#       - '::/0'
 #     vlan_ranges: []
