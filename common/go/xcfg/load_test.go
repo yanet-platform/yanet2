@@ -125,6 +125,75 @@ func Test_Load_PreservesDefaults(t *testing.T) {
 	require.Equal(t, "/default/path", cfg.Path.Unwrap())
 }
 
+func Test_Load_SliceElement_MissingField(t *testing.T) {
+	type Item struct {
+		Name NonEmptyString `yaml:"name"`
+	}
+	type Config struct {
+		Items []Item `yaml:"items"`
+	}
+
+	// The first element omits "name" entirely — zero value NonEmptyString must
+	// be caught by the walker.
+	yaml := "items:\n  - {}\n"
+	var cfg Config
+	err := Decode([]byte(yaml), &cfg)
+
+	var pathErr *PathError
+	require.ErrorAs(t, err, &pathErr)
+	require.Equal(t, "items[0].name", pathErr.Path)
+}
+
+func Test_Load_SliceElement_ExplicitEmptyField(t *testing.T) {
+	type Item struct {
+		Name NonEmptyString `yaml:"name"`
+	}
+	type Config struct {
+		Items []Item `yaml:"items"`
+	}
+
+	// An explicit empty string is rejected at UnmarshalYAML; Decode must still
+	// surface an error.
+	yaml := "items:\n  - name: \"\"\n"
+	var cfg Config
+	err := Decode([]byte(yaml), &cfg)
+	require.Error(t, err)
+}
+
+func Test_Load_SliceElement_Valid(t *testing.T) {
+	type Item struct {
+		Name NonEmptyString `yaml:"name"`
+	}
+	type Config struct {
+		Items []Item `yaml:"items"`
+	}
+
+	yaml := "items:\n  - name: alpha\n  - name: beta\n"
+	var cfg Config
+	require.NoError(t, Decode([]byte(yaml), &cfg))
+	require.Equal(t, "alpha", cfg.Items[0].Name.Unwrap())
+	require.Equal(t, "beta", cfg.Items[1].Name.Unwrap())
+}
+
+func Test_Load_SliceElement_SecondElementMissingField(t *testing.T) {
+	type Item struct {
+		Name  NonEmptyString `yaml:"name"`
+		Value NonEmptyString `yaml:"value"`
+	}
+	type Config struct {
+		Items []Item `yaml:"items"`
+	}
+
+	// The second element omits "value" — the walker must catch it.
+	yaml := "items:\n  - name: alpha\n    value: v1\n  - name: beta\n"
+	var cfg Config
+	err := Decode([]byte(yaml), &cfg)
+
+	var pathErr *PathError
+	require.ErrorAs(t, err, &pathErr)
+	require.Equal(t, "items[1].value", pathErr.Path)
+}
+
 func Test_Load_LineErrorUnwrapsFromPathError(t *testing.T) {
 	// Verify that LineError from UnmarshalYAML is accessible via
 	// errors.As through the error chain, even when Decode doesn't

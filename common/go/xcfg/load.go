@@ -93,6 +93,15 @@ func validate(v reflect.Value, path string) error {
 		}
 	}
 
+	// Recurse into slice and array elements.
+	if v.Kind() == reflect.Slice || v.Kind() == reflect.Array {
+		for idx := 0; idx < v.Len(); idx++ {
+			if err := validate(v.Index(idx), fmt.Sprintf("%s[%d]", path, idx)); err != nil {
+				return err
+			}
+		}
+	}
+
 	return nil
 }
 

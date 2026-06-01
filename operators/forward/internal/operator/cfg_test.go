@@ -9,6 +9,37 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
 )
 
+// TestDecode_FunctionMissingRequiredField verifies that xcfg.Decode catches a
+// functions entry that omits a required NonEmptyString field, surfacing it as a
+// *xcfg.PathError with a path rooted at the slice element.
+func TestDecode_FunctionMissingRequiredField(t *testing.T) {
+	// Minimal valid YAML except the single functions entry omits rules_file.
+	yaml := `
+logging:
+  level: info
+server:
+  endpoint: "[::1]:50003"
+gateways:
+  - name: numa0
+    endpoint: "[::1]:8080"
+reconcile:
+  interval: 5s
+  initial_backoff: 1s
+  max_backoff: 30s
+functions:
+  - name: fn:forward-vlan-phy
+    chain: default
+    weight: 1
+    module: vlan-phy
+`
+	cfg := DefaultConfig()
+	err := xcfg.Decode([]byte(yaml), cfg)
+
+	var pathErr *xcfg.PathError
+	require.ErrorAs(t, err, &pathErr)
+	require.Contains(t, pathErr.Path, "functions[0]")
+}
+
 func validConfig() *Config {
 	return &Config{
 		Gateways: []operator.GatewayConfig{
