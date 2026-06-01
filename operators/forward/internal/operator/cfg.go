@@ -44,6 +44,19 @@ func (m *Config) Validate() error {
 	names := map[string]struct{}{}
 	modules := map[string]struct{}{}
 	for idx, fn := range m.Functions {
+		if fn.Name.Unwrap() == "" {
+			return fmt.Errorf("function at index %d: name is required", idx)
+		}
+		if fn.Chain.Unwrap() == "" {
+			return fmt.Errorf("function at index %d: chain is required", idx)
+		}
+		if fn.Module.Unwrap() == "" {
+			return fmt.Errorf("function at index %d: module is required", idx)
+		}
+		if fn.RulesFile.Unwrap() == "" {
+			return fmt.Errorf("function at index %d: rules_file is required", idx)
+		}
+
 		name := fn.Name.Unwrap()
 		if _, dup := names[name]; dup {
 			return fmt.Errorf("duplicate function name %q at index %d", name, idx)

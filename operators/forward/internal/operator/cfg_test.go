@@ -61,6 +61,66 @@ func TestConfigValidate(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name: "function missing name",
+			build: func() *Config {
+				cfg := validConfig()
+				cfg.Functions = []FunctionConfig{
+					{
+						Chain:     xcfg.MustNonEmptyString("default"),
+						Module:    xcfg.MustNonEmptyString("vlan-phy"),
+						RulesFile: xcfg.MustNonEmptyString("/etc/yanet2/forward.d/vlan-phy-default.yaml"),
+					},
+				}
+				return cfg
+			},
+			wantErr: true,
+		},
+		{
+			name: "function missing chain",
+			build: func() *Config {
+				cfg := validConfig()
+				cfg.Functions = []FunctionConfig{
+					{
+						Name:      xcfg.MustNonEmptyString("fn:forward-vlan-phy"),
+						Module:    xcfg.MustNonEmptyString("vlan-phy"),
+						RulesFile: xcfg.MustNonEmptyString("/etc/yanet2/forward.d/vlan-phy-default.yaml"),
+					},
+				}
+				return cfg
+			},
+			wantErr: true,
+		},
+		{
+			name: "function missing module",
+			build: func() *Config {
+				cfg := validConfig()
+				cfg.Functions = []FunctionConfig{
+					{
+						Name:      xcfg.MustNonEmptyString("fn:forward-vlan-phy"),
+						Chain:     xcfg.MustNonEmptyString("default"),
+						RulesFile: xcfg.MustNonEmptyString("/etc/yanet2/forward.d/vlan-phy-default.yaml"),
+					},
+				}
+				return cfg
+			},
+			wantErr: true,
+		},
+		{
+			name: "function missing rules_file",
+			build: func() *Config {
+				cfg := validConfig()
+				cfg.Functions = []FunctionConfig{
+					{
+						Name:   xcfg.MustNonEmptyString("fn:forward-vlan-phy"),
+						Chain:  xcfg.MustNonEmptyString("default"),
+						Module: xcfg.MustNonEmptyString("vlan-phy"),
+					},
+				}
+				return cfg
+			},
+			wantErr: true,
+		},
+		{
 			name: "duplicate function name",
 			build: func() *Config {
 				cfg := validConfig()
