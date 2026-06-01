@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Bulb, CircleInfo, Layers } from '@gravity-ui/icons';
 import { Select } from '@gravity-ui/uikit';
 import { ipAddressToString, stringToIPAddress } from '../../../utils/netip';
 import { formatUnixSeconds } from '../../../utils';
@@ -334,7 +335,7 @@ const NeighbourPanel: React.FC<NeighbourPanelProps> = ({
                                             </div>
                                             <p className="nb-state-explain__desc">{meta.desc}</p>
                                             <div className="nb-state-explain__action">
-                                                <span className="nb-state-explain__action-icon" style={{ color: 'var(--fw-accent)' }}>⚡</span>
+                                                <span className="nb-state-explain__action-icon" style={{ color: 'var(--fw-accent)' }}><Bulb width={13} height={13} /></span>
                                                 <span>{meta.action}</span>
                                             </div>
                                         </div>
@@ -345,7 +346,7 @@ const NeighbourPanel: React.FC<NeighbourPanelProps> = ({
                                             <div className="fw-section-h">Merge resolution</div>
                                             {hasShadowed ? (
                                                 <div className="nb-why-box">
-                                                    <span className="nb-why-box__icon" style={{ color: 'var(--fw-accent)' }}>⊕</span>
+                                                    <span className="nb-why-box__icon" style={{ color: 'var(--fw-accent)' }}><Layers width={13} height={13} /></span>
                                                     <p>
                                                         <strong>{source}</strong> wins with the lowest priority{' '}
                                                         <strong>{priorityDisplay}</strong> (higher precedence), shadowing {shadowed.length}{' '}
@@ -356,7 +357,7 @@ const NeighbourPanel: React.FC<NeighbourPanelProps> = ({
                                                 </div>
                                             ) : (
                                                 <div className="nb-why-box">
-                                                    <span className="nb-why-box__icon" style={{ color: 'var(--fw-text-3)' }}>ℹ</span>
+                                                    <span className="nb-why-box__icon" style={{ color: 'var(--fw-text-3)' }}><CircleInfo width={13} height={13} /></span>
                                                     <p>
                                                         Only one table provides this neighbour (<strong>{source}</strong>).
                                                         Nothing to merge.
@@ -546,7 +547,7 @@ const NeighbourPanel: React.FC<NeighbourPanelProps> = ({
                                                 </div>
                                                 <p className="nb-state-explain__desc">{meta.desc}</p>
                                                 <div className="nb-state-explain__action">
-                                                    <span className="nb-state-explain__action-icon" style={{ color: 'var(--fw-accent)' }}>⚡</span>
+                                                    <span className="nb-state-explain__action-icon" style={{ color: 'var(--fw-accent)' }}><Bulb width={13} height={13} /></span>
                                                     <span>{meta.action}</span>
                                                 </div>
                                             </div>
