@@ -269,21 +269,22 @@ const RoutePage: React.FC = () => {
         setLookupOpen(true);
     }, []);
 
-    const handleShowInTable = useCallback((prefix: string): void => {
-        const matchedRow = allRows.find((r) => r.prefix === prefix);
-        if (matchedRow) {
-            const id = getRouteId(matchedRow);
-            setFlashRowId(null);
-            setTimeout(() => setFlashRowId(id), 0);
-        }
-    }, [allRows]);
-
     const handleClearFilters = useCallback((): void => {
         setFamily('all');
         setBestOnly(false);
         setConflictsOnly(false);
         setSearch('');
     }, []);
+
+    const handleShowInTable = useCallback((prefix: string): void => {
+        handleClearFilters();
+        const matchedRow = allRows.find((r) => r.prefix === prefix);
+        if (matchedRow) {
+            const id = getRouteId(matchedRow);
+            setFlashRowId(null);
+            setTimeout(() => setFlashRowId(id), 0);
+        }
+    }, [allRows, handleClearFilters]);
 
     const handleJumpToRow = useCallback((id: string): void => {
         setFlashRowId(null);
