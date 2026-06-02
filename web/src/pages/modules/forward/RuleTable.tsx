@@ -217,7 +217,7 @@ const RuleTable: React.FC<RuleTableProps> = ({
 }) => {
     const scrollRef = useRef<HTMLDivElement>(null);
     const wrapRef = useRef<HTMLDivElement>(null);
-    const bodyHeight = useContainerHeight(scrollRef, 300, FOOTER_HEIGHT + 20);
+    const bodyHeight = useContainerHeight(scrollRef, 300, FOOTER_HEIGHT);
 
     /**
      * Pending hide timeout id. When the cursor leaves a row we schedule a

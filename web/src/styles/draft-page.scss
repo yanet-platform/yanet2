@@ -1352,6 +1352,58 @@
     }
 }
 
+// Shared flat-surface layout treatment.
+// Pages that apply .yn-flat-layout (on PageLayout) and .yn-flat-page (on .yn-page)
+// get the same unified #1C1814 surface, flush table, and 3px active underline.
+// Route (.ro-layout/.ro-page) and neighbours (.nb-layout/.nb-page) are temporary
+// duplicates that will migrate onto these shared classes in a later PR.
+
+.yn-flat-layout {
+    --yn-surface-bg: #1C1814;
+}
+
+.yn-flat-layout .page-layout__header {
+    background: var(--yn-surface-bg);
+    min-height: 64px;
+}
+
+.yn-page.yn-flat-page {
+    background: var(--yn-surface-bg);
+}
+
+.yn-flat-page .yn-tabs {
+    background: var(--yn-surface-bg);
+    border-bottom: none;
+}
+
+.yn-flat-page .yn-tab--active::after {
+    height: 3px;
+}
+
+.yn-flat-page .yn-tab--active .yn-tab__count {
+    color: var(--yn-accent);
+    background: var(--yn-accent-soft);
+}
+
+.yn-flat-page .yn-content {
+    padding: 0;
+}
+
+.yn-flat-page .yn-table-wrap {
+    background: transparent;
+    border: none;
+    border-radius: 0;
+}
+
+.yn-flat-page .yn-table-header-row {
+    background: transparent;
+    border-top: 1px solid var(--yn-line-2);
+}
+
+.yn-flat-page .yn-vtbl-footer {
+    background: transparent;
+}
+
 // Neighbours page flush + borderless-tab overrides.
 // Mirrors the .ro-page treatment in route.scss, scoped to .nb-page only.
 
