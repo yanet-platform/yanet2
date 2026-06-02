@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Bulb, CircleInfo, Layers } from '@gravity-ui/icons';
 import { Select } from '@gravity-ui/uikit';
+import { DotBadge } from '../../_shared/table/DotBadge';
 import { ipAddressToString, stringToIPAddress } from '../../../utils/netip';
 import { formatUnixSeconds } from '../../../utils';
 import type { Neighbour, NeighbourTableInfo } from '../../../api/neighbours';
@@ -78,19 +79,7 @@ interface StateBadgeInlineProps {
 const StateBadgeInline: React.FC<StateBadgeInlineProps> = ({ state }) => {
     const name = nudStateToName(state);
     const meta = getStateMeta(state);
-    return (
-        <span
-            className="nb-state-badge"
-            style={{
-                '--nb-stb-c': meta.color,
-                '--nb-stb-bg': `color-mix(in srgb, ${meta.color} 14%, transparent)`,
-                '--nb-stb-bd': `color-mix(in srgb, ${meta.color} 32%, transparent)`,
-            } as React.CSSProperties}
-        >
-            <span className="nb-state-badge__dot" />
-            {name}
-        </span>
-    );
+    return <DotBadge label={name} color={meta.color} />;
 };
 
 export type NeighbourPanelMode = 'add' | 'edit' | 'view';

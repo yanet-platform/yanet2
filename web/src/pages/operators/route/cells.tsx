@@ -1,6 +1,7 @@
 import React from 'react';
 import { ROUTE_SOURCES } from './utils';
 import { FamilyBadge as SharedFamilyBadge } from '../../_shared/table/cells';
+import { DotBadge } from '../../_shared/table/DotBadge';
 
 /** Inline checkmark SVG for the Best column. */
 const CheckIcon: React.FC = () => (
@@ -31,54 +32,14 @@ export const BestPill: React.FC<{ isBest: boolean }> = ({ isBest }) => {
     );
 };
 
-/** Source chip: BIRD in blue, Static in amber, Unknown muted — with leading colored dot. */
+/** Source chip: BIRD in blue, Static in amber, Unknown/undefined renders an em-dash. */
 export const SourceChip: React.FC<{ source: number | undefined }> = ({ source }) => {
     const label = source !== undefined ? (ROUTE_SOURCES[source] ?? '::') : '—';
     if (label === 'BIRD') {
-        return (
-            <span
-                style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 6,
-                    padding: '2px 9px 2px 7px',
-                    borderRadius: 999,
-                    fontSize: 11.5,
-                    fontWeight: 600,
-                    letterSpacing: '0.02em',
-                    color: 'var(--g-color-text-info)',
-                    background: 'color-mix(in srgb, var(--g-color-text-info) 12%, transparent)',
-                    whiteSpace: 'nowrap',
-                    fontFamily: 'var(--yn-font-mono)',
-                }}
-            >
-                <span style={{ width: 5, height: 5, borderRadius: 999, background: 'var(--g-color-text-info)', flexShrink: 0 }} />
-                {label}
-            </span>
-        );
+        return <DotBadge label="BIRD" color="var(--g-color-text-info)" />;
     }
     if (label === 'Static') {
-        return (
-            <span
-                style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 6,
-                    padding: '2px 9px 2px 7px',
-                    borderRadius: 999,
-                    fontSize: 11.5,
-                    fontWeight: 600,
-                    letterSpacing: '0.02em',
-                    color: 'var(--yn-accent)',
-                    background: 'var(--yn-accent-soft)',
-                    whiteSpace: 'nowrap',
-                    fontFamily: 'var(--yn-font-mono)',
-                }}
-            >
-                <span style={{ width: 5, height: 5, borderRadius: 999, background: 'var(--yn-accent)', flexShrink: 0 }} />
-                {label}
-            </span>
-        );
+        return <DotBadge label="Static" color="var(--yn-accent)" />;
     }
     return <span style={{ color: 'var(--yn-text-3)', fontFamily: 'var(--yn-font-mono)' }}>—</span>;
 };

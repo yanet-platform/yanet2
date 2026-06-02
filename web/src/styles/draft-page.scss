@@ -970,8 +970,8 @@
     }
 }
 
-// State badge pill.
-.nb-state-badge {
+// Shared dot-badge pill — used by state badges, source chips, etc.
+.yn-dot-badge {
     display: inline-flex;
     align-items: center;
     gap: 6px;
@@ -982,16 +982,16 @@
     font-weight: 500;
     letter-spacing: 0.02em;
     white-space: nowrap;
-    background: var(--nb-stb-bg);
-    color: var(--nb-stb-c);
-    border: 1px solid var(--nb-stb-bd);
+    background: var(--yn-dotb-bg);
+    color: var(--yn-dotb-c);
+    border: 1px solid var(--yn-dotb-bd);
     cursor: default;
 
     &__dot {
         width: 6px;
         height: 6px;
         border-radius: 50%;
-        background: var(--nb-stb-c);
+        background: var(--yn-dotb-c);
         flex-shrink: 0;
     }
 }

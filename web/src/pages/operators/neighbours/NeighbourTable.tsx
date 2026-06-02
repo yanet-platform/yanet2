@@ -1,6 +1,7 @@
 import React from 'react';
-import { Tooltip } from '@gravity-ui/uikit';
 import { Pencil, TrashBin } from '@gravity-ui/icons';
+import { Tooltip } from '@gravity-ui/uikit';
+import { DotBadge } from '../../_shared/table/DotBadge';
 import type { Neighbour, NeighbourTableInfo } from '../../../api/neighbours';
 import { formatUnixSeconds } from '../../../utils';
 import { ipAddressToString } from '../../../utils/netip';
@@ -50,23 +51,7 @@ const StateBadge: React.FC<StateBadgeProps> = ({ state, withTooltip }) => {
     const name = nudStateToName(state);
     const meta = getStateMeta(state);
 
-    const badge = (
-        <span
-            className="nb-state-badge"
-            style={{
-                '--nb-stb-c': meta.color,
-                '--nb-stb-bg': `color-mix(in srgb, ${meta.color} 14%, transparent)`,
-                '--nb-stb-bd': `color-mix(in srgb, ${meta.color} 32%, transparent)`,
-            } as React.CSSProperties}
-        >
-            <span className="nb-state-badge__dot" />
-            {name}
-        </span>
-    );
-
-    if (!withTooltip) return badge;
-
-    const tooltipContent = (
+    const tooltipContent = withTooltip ? (
         <div className="nb-state-tip">
             <div className="nb-state-tip__head">
                 <span className="nb-state-tip__dot" style={{ background: meta.color }} />
@@ -77,12 +62,15 @@ const StateBadge: React.FC<StateBadgeProps> = ({ state, withTooltip }) => {
                 <strong>What to do:</strong> {meta.action}
             </div>
         </div>
-    );
+    ) : undefined;
 
     return (
-        <Tooltip content={tooltipContent} openDelay={200} placement="bottom" className="nb-state-tip-popup">
-            {badge}
-        </Tooltip>
+        <DotBadge
+            label={name}
+            color={meta.color}
+            tooltip={tooltipContent}
+            tooltipClassName={withTooltip ? 'nb-state-tip-popup' : undefined}
+        />
     );
 };
 
