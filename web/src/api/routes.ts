@@ -105,6 +105,16 @@ export interface FIBNexthop {
 const routeService = createService('modules.route.controlplane.routepb.v1.RouteService');
 const operatorRouteService = createService('operators.route.operatorpb.v1.RouteService');
 
+export interface LookupRouteRequest {
+    name?: string;
+    ip_addr?: IPAddressWire;
+}
+
+export interface LookupRouteResponse {
+    prefix?: string;
+    routes?: Route[];
+}
+
 export const route = {
     listConfigs: (options?: CallOptions): Promise<ListConfigsResponse> => {
         return routeService.call<ListConfigsResponse>('ListConfigs', options);
@@ -120,6 +130,9 @@ export const route = {
     },
     flushRoutes: (request: FlushRoutesRequest, options?: CallOptions): Promise<FlushRoutesResponse> => {
         return operatorRouteService.callWithBody<FlushRoutesResponse>('FlushRoutes', request, options);
+    },
+    lookupRoute: (request: LookupRouteRequest, options?: CallOptions): Promise<LookupRouteResponse> => {
+        return operatorRouteService.callWithBody<LookupRouteResponse>('LookupRoute', request, options);
     },
     showFIB: (request: ShowFIBRequest, options?: CallOptions): Promise<ShowFIBResponse> => {
         return routeService.callWithBody<ShowFIBResponse>('ShowFIB', request, options);

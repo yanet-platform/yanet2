@@ -1,0 +1,616 @@
+@use '../../../styles/variables' as *;
+@use '../../../styles/mixins' as *;
+
+// Route Operator page – ro-* class prefix.
+// All colors use existing --fw-* tokens or Gravity --g-color-* tokens.
+// No raw oklch/hex values from the prototype.
+
+// ─── Toolbar ─────────────────────────────────────────────────────────────────
+
+.ro-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 20px;
+    flex-wrap: wrap;
+    flex-shrink: 0;
+    border-bottom: 1px solid var(--fw-line);
+}
+
+.ro-toolbar__right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: auto;
+}
+
+// ─── Segmented family filter ──────────────────────────────────────────────────
+
+.ro-seg {
+    display: inline-flex;
+    align-items: center;
+    background: var(--fw-bg-2);
+    border-radius: var(--fw-r-md);
+    padding: 3px;
+    gap: 2px;
+    box-shadow: inset 0 0 0 1px var(--fw-line-2);
+    flex-shrink: 0;
+}
+
+.ro-seg__btn {
+    height: 26px;
+    padding: 0 12px;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--fw-text-2);
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.12s;
+    white-space: nowrap;
+
+    &:hover:not(.ro-seg__btn--active) {
+        background: var(--fw-bg-3);
+        color: var(--fw-text);
+    }
+
+    &--active {
+        background: var(--fw-accent);
+        color: var(--fw-bg-3);
+        font-weight: 600;
+
+        &:hover {
+            background: var(--fw-accent);
+            color: var(--fw-bg-3);
+        }
+    }
+}
+
+// ─── Toggle chips ─────────────────────────────────────────────────────────────
+
+.ro-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 6px 12px;
+    border-radius: var(--fw-r-md);
+    border: none;
+    box-shadow: inset 0 0 0 1px var(--fw-line-2);
+    background: var(--fw-bg-2);
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--fw-text-2);
+    cursor: pointer;
+    transition: background 0.12s, color 0.12s, box-shadow 0.12s;
+    white-space: nowrap;
+    flex-shrink: 0;
+
+    &:hover {
+        background: var(--fw-bg-2);
+        color: var(--fw-text);
+    }
+
+    &--best.ro-chip--active {
+        background: color-mix(in srgb, var(--g-color-text-positive) 14%, transparent);
+        color: var(--g-color-text-positive);
+        box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--g-color-text-positive) 30%, transparent);
+    }
+
+    &--conflict.ro-chip--active {
+        background: var(--fw-accent-soft);
+        color: var(--fw-accent);
+        box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fw-accent) 30%, transparent);
+    }
+}
+
+.ro-chip__badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+    opacity: 0.8;
+    font-family: var(--fw-font-mono);
+    font-variant-numeric: tabular-nums;
+}
+
+// ─── Search kbd button ────────────────────────────────────────────────────────
+
+.ro-search-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    flex: 1;
+    max-width: 520px;
+    min-width: 0;
+    margin: 0 auto;
+    height: 40px;
+    padding: 0 14px;
+    border-radius: var(--fw-r-md, 6px);
+    // .ro-search-btn sits in the page header, outside .fw-page where --fw-*
+    // tokens are defined, so each property includes a hard-coded fallback that
+    // matches the token value from draft-page.scss.
+    border: 1px solid color-mix(in srgb, var(--fw-text-3, #7E7468) 55%, transparent);
+    background: var(--fw-bg-3, oklch(0.212 0.01 56));
+    font-size: 13.5px;
+    color: var(--fw-text-3, #7E7468);
+    cursor: text;
+    transition: border-color 0.08s, color 0.08s;
+
+    &:hover {
+        border-color: var(--fw-text-3, #7E7468);
+        color: var(--fw-text-2, #B8B0A4);
+    }
+}
+
+.ro-search-placeholder {
+    flex: 1;
+    text-align: left;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.ro-kbd {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 20px;
+    padding: 0 6px;
+    border-radius: 4px;
+    font-size: 12.5px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: var(--fw-text-3, #7e7468);
+    background: var(--fw-bg-2, #1a1410);
+    border: 1px solid var(--fw-line-2, rgba(120, 108, 96, 0.28));
+    font-family: var(--fw-font-mono);
+    line-height: 1;
+}
+
+// ─── Row count ────────────────────────────────────────────────────────────────
+
+.ro-count {
+    font-size: 12.5px;
+    color: var(--fw-text-3);
+    white-space: nowrap;
+    flex-shrink: 0;
+    font-family: var(--fw-font-mono);
+    font-variant-numeric: tabular-nums;
+}
+
+// ─── Command palette ──────────────────────────────────────────────────────────
+
+.ro-palette-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.52);
+    backdrop-filter: blur(3px);
+    z-index: 200;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding-top: 16vh;
+}
+
+.ro-palette-card {
+    width: 580px;
+    max-width: calc(100vw - 40px);
+    background: var(--fw-panel);
+    border: 1px solid var(--fw-line-2);
+    border-radius: var(--fw-r-lg);
+    box-shadow: 0 24px 72px rgba(0, 0, 0, 0.65);
+    overflow: hidden;
+    animation: ro-palette-popin 0.14s ease-out both;
+}
+
+@keyframes ro-palette-popin {
+    from { opacity: 0; transform: translateY(6px) scale(0.985); }
+    to   { opacity: 1; transform: none; }
+}
+
+.ro-palette-input-row {
+    display: flex;
+    align-items: center;
+    padding: 0 14px;
+    border-bottom: 1px solid var(--fw-line-2);
+    height: 52px;
+    gap: 10px;
+}
+
+.ro-palette-search-icon {
+    font-size: 16px;
+    color: var(--fw-accent);
+    flex-shrink: 0;
+    font-family: var(--fw-font-mono);
+}
+
+.ro-palette-input {
+    flex: 1;
+    background: none;
+    border: none;
+    outline: none;
+    font-size: 15px;
+    color: var(--fw-text);
+    font-family: var(--fw-font-mono);
+
+    &::placeholder {
+        color: var(--fw-text-3);
+        font-family: inherit;
+    }
+}
+
+.ro-palette-esc-hint {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    height: 18px;
+    padding: 0 6px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--fw-text-3);
+    background: var(--fw-bg-2);
+    border: 1px solid var(--fw-line-2);
+    font-family: var(--fw-font-mono);
+}
+
+.ro-palette-list {
+    max-height: 340px;
+    overflow-y: auto;
+    padding: 6px;
+}
+
+.ro-palette-item {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 10px;
+    border-radius: var(--fw-r-md);
+    border: none;
+    background: none;
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.06s;
+
+    &--active {
+        background: var(--fw-accent-soft);
+
+        .ro-palette-item__icon { color: var(--fw-accent); }
+        .ro-palette-item__label { color: var(--fw-text); }
+    }
+}
+
+.ro-palette-item__icon {
+    width: 26px;
+    height: 26px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--fw-r-sm);
+    font-size: 13px;
+    color: var(--fw-text-3);
+    background: var(--fw-bg-2);
+    border: 1px solid var(--fw-line-2);
+    flex-shrink: 0;
+    font-family: var(--fw-font-mono);
+}
+
+.ro-palette-item__body {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.ro-palette-item__label {
+    font-size: 13px;
+    color: var(--fw-text-2);
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.ro-palette-item__sub {
+    font-size: 11px;
+    color: var(--fw-text-3);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.ro-palette-item__enter {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: 4px;
+    font-size: 11px;
+    color: var(--fw-accent);
+    background: var(--fw-accent-soft);
+    border: 1px solid rgba(255, 192, 97, 0.3);
+    font-family: var(--fw-font-mono);
+}
+
+.ro-palette-empty {
+    padding: 20px;
+    text-align: center;
+    font-size: 13px;
+    color: var(--fw-text-3);
+}
+
+// ─── Lookup drawer ─────────────────────────────────────────────────────────────
+
+.ro-lookup-drawer {
+    width: 680px;
+}
+
+.ro-lookup-input-row {
+    display: flex;
+    gap: 8px;
+    align-items: stretch;
+
+    .fw-input { flex: 1; }
+}
+
+.ro-lookup-examples {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.ro-lookup-examples__label {
+    font-size: 11px;
+    color: var(--fw-text-3);
+    flex-shrink: 0;
+}
+
+.ro-lookup-example-chip {
+    display: inline-flex;
+    align-items: center;
+    height: 24px;
+    padding: 0 10px;
+    border-radius: 999px;
+    font-size: 11.5px;
+    font-family: var(--fw-font-mono);
+    color: var(--fw-text-2);
+    background: var(--fw-bg-2);
+    border: 1px solid var(--fw-line-2);
+    cursor: pointer;
+    transition: background 0.08s, color 0.08s;
+    white-space: nowrap;
+
+    &:hover {
+        background: var(--fw-accent-soft);
+        color: var(--fw-accent);
+        border-color: rgba(255, 192, 97, 0.3);
+    }
+}
+
+.ro-lookup-loading {
+    padding: 24px;
+    text-align: center;
+    color: var(--fw-text-3);
+    font-size: 13px;
+}
+
+.ro-lookup-result {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.ro-lookup-result__matched {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    border-radius: var(--fw-r-md);
+    background: var(--fw-bg-2);
+    border: 1px solid var(--fw-line-2);
+}
+
+.ro-lookup-result__label {
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--fw-text-3);
+    font-weight: 600;
+    flex-shrink: 0;
+}
+
+.ro-lookup-result__prefix {
+    font-family: var(--fw-font-mono);
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--fw-text);
+    flex: 1;
+}
+
+.ro-lookup-show-in-table {
+    font-size: 12px;
+    color: var(--fw-accent);
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 0;
+    flex-shrink: 0;
+    transition: opacity 0.1s;
+
+    &:hover { opacity: 0.75; }
+}
+
+.ro-lookup-reason {
+    font-size: 12px;
+    color: var(--fw-text-3);
+    padding: 7px 12px;
+    background: var(--fw-accent-soft);
+    border: 1px solid rgba(255, 192, 97, 0.22);
+    border-radius: var(--fw-r-sm);
+
+    &::before {
+        content: '★ ';
+        color: var(--fw-accent);
+    }
+}
+
+.ro-lookup-table-wrap {
+    overflow-x: auto;
+    border: 1px solid var(--fw-line-2);
+    border-radius: var(--fw-r-md);
+}
+
+// Column widths — shared by th and td via table-layout: fixed.
+// Track order: marker | prefix | next-hop | peer | source | peer-as | origin | pref | med | communities
+// Drawer body inner width = 680px drawer − 40px body-padding − 2px wrap-border = 638px usable.
+// Fixed cols sum: 28+100+86+64+64+68+56+44+42 = 552px; remaining ~86px goes to communities.
+// "COMMUNITIES" header at 9.5px uppercase needs ~85px — this keeps it just inside clientWidth.
+$_ro-col-marker:  28px;
+$_ro-col-prefix:  100px;
+$_ro-col-nexthop:  86px;
+$_ro-col-peer:     64px;
+$_ro-col-source:   64px;
+$_ro-col-peeras:   68px;
+$_ro-col-origin:   56px;
+$_ro-col-pref:     44px;
+$_ro-col-med:      42px;
+// Communities column (#10) has no explicit width so it auto-fills remaining space.
+
+.ro-lookup-table {
+    width: 100%;
+    table-layout: fixed;
+    border-collapse: collapse;
+    font-size: 12.5px;
+
+    // Explicit column widths — header and body share these via table-layout: fixed.
+    th:nth-child(1), td:nth-child(1) { width: $_ro-col-marker;  }
+    th:nth-child(2), td:nth-child(2) { width: $_ro-col-prefix;  }
+    th:nth-child(3), td:nth-child(3) { width: $_ro-col-nexthop; }
+    th:nth-child(4), td:nth-child(4) { width: $_ro-col-peer;    }
+    th:nth-child(5), td:nth-child(5) { width: $_ro-col-source;  }
+    th:nth-child(6), td:nth-child(6) { width: $_ro-col-peeras;  }
+    th:nth-child(7), td:nth-child(7) { width: $_ro-col-origin;  }
+    th:nth-child(8), td:nth-child(8) { width: $_ro-col-pref;    }
+    th:nth-child(9), td:nth-child(9) { width: $_ro-col-med;     }
+    // Communities — last column, no explicit width so it fills remaining space.
+
+    th {
+        padding: 6px 8px;
+        text-align: left;
+        font-size: 9.5px;
+        font-weight: 700;
+        letter-spacing: 0.07em;
+        text-transform: uppercase;
+        color: var(--fw-text-3);
+        background: var(--fw-bg-2);
+        border-bottom: 1px solid var(--fw-line-2);
+        white-space: nowrap;
+        // No overflow:hidden or text-overflow:ellipsis on headers — labels must
+        // always be fully visible. Only body td values truncate.
+        overflow: visible;
+    }
+
+    td {
+        // Restore table-cell display in case a .fw-cell-mono class (display:inline-block)
+        // is applied directly to the <td> element — table-layout:fixed still sizes the
+        // column from the <th> width, but we want content to flow normally inside.
+        display: table-cell;
+        padding: 8px 8px;
+        border-bottom: 1px solid var(--fw-line-2);
+        vertical-align: middle;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    tr:last-child td { border-bottom: none; }
+
+    &__best-row td {
+        background: color-mix(in srgb, var(--g-color-text-positive) 7%, transparent);
+    }
+}
+
+.ro-lookup-communities {
+    font-family: var(--fw-font-mono);
+    font-size: 11px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    // max-width is removed — the column width is governed by table-layout:fixed.
+}
+
+.ro-lookup-no-match {
+    padding: 24px;
+    text-align: center;
+    color: var(--fw-text-3);
+    font-size: 13px;
+}
+
+// ─── Surface color — single control point for the whole route page ───────────
+
+// Flip to #15110D for the flat (page-bg) look; #1C1814 for the panel look.
+.ro-layout {
+    --ro-surface-bg: #1C1814;
+}
+
+// Header sits outside .fw-page so --fw-* tokens are not in scope there.
+// --ro-surface-bg is defined on .ro-layout and cascades to both subtrees.
+.ro-layout .page-layout__header {
+    background: var(--ro-surface-bg);
+}
+
+// Two-class specificity beats the `.fw-page { background: var(--fw-page-bg) }` rule.
+.fw-page.ro-page {
+    background: var(--ro-surface-bg);
+}
+
+.ro-page .fw-tabs {
+    background: var(--ro-surface-bg);
+    border-bottom: none;
+}
+
+.ro-page .fw-tab--active::after {
+    height: 3px;
+}
+
+// ─── Route-page scoped overrides (.ro-page modifier on .fw-page) ─────────────
+
+// Gold count badge on the active config tab, scoped to route only.
+// The shared rule in draft-page.scss scopes gold badges to .fw-tabs-row only
+// (neighbours). This rule targets the route page root without touching that.
+.ro-page .fw-tab--active .fw-tab__count {
+    color: var(--fw-accent);
+    background: var(--fw-accent-soft);
+}
+
+// Table flush: no outer padding and no card chrome.
+// Keeps per-row separators and the header bottom border.
+.ro-page .fw-content {
+    padding: 0;
+}
+
+.ro-page .fw-tbl-wrap {
+    background: transparent;
+    border: none;
+    border-radius: 0;
+}
+
+.ro-page .fw-tbl-header-row {
+    background: transparent;
+    border-top: 1px solid var(--fw-line-2);
+}
+
+.ro-page .fw-vtbl-footer {
+    background: transparent;
+}
+

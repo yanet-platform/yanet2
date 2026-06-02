@@ -1,7 +1,7 @@
 import type { Route } from '../../../api/routes';
 import { parseCIDRPrefix, parseIPAddress, CIDRParseError, IPParseError } from '../../../utils';
 import { ipAddressToString, type IPAddressWire } from '../../../utils/netip';
-import type { RouteSortableColumn } from './types';
+import type { RouteSortableColumn, IPFamily } from './types';
 
 export interface RouteSubmitParams {
     prefix: string;
@@ -38,7 +38,7 @@ export const ROUTE_SOURCES = ['Unknown', 'Static', 'BIRD'] as const;
 
 /** Returns a stable string key for a route row. */
 export const getRouteId = (route: Route): string =>
-    `${route.prefix || ''}_${String(route.next_hop?.addr || '')}_${String(route.peer?.addr || '')}_${route.route_distinguisher || ''}`;
+    `${route.prefix ?? ''}_${String(route.next_hop?.addr ?? '')}_${String(route.peer?.addr ?? '')}_${route.route_distinguisher ?? ''}_${route.source ?? 0}_${route.pref ?? 0}_${route.peer_as ?? 0}_${route.origin_as ?? 0}_${route.med ?? 0}_${route.as_path_len ?? 0}`;
 
 /** Validates a CIDR prefix string. Returns an error message or undefined when valid. */
 export const validatePrefix = (prefix: string): string | undefined => {
@@ -80,6 +80,72 @@ export const validateNexthop = (nexthop: string): string | undefined => {
         }
     }
     return undefined;
+};
+
+/** Returns the IP family of a prefix string. Detects ':' for IPv6, else IPv4. */
+export const prefixIPFamily = (prefix: string): IPFamily => {
+    return prefix.includes(':') ? 'v6' : 'v4';
+};
+
+/** Groups routes by prefix, returning a map from prefix → route array. */
+export const groupByPrefix = (routes: Route[]): Map<string, Route[]> => {
+    const m = new Map<string, Route[]>();
+    for (const r of routes) {
+        const key = r.prefix || '';
+        const group = m.get(key);
+        if (group) {
+            group.push(r);
+        } else {
+            m.set(key, [r]);
+        }
+    }
+    return m;
+};
+
+/** Filters routes by IP family. Returns all routes when family is 'all'. */
+export const filterByFamily = (routes: Route[], family: IPFamily): Route[] => {
+    if (family === 'all') return routes;
+    return routes.filter((r) => prefixIPFamily(r.prefix || '') === family);
+};
+
+/** Returns a human-readable reason why the first candidate beats the second,
+ *  walking the BGP decision ladder: pref > as_path_len > med > origin_as > peer_as. */
+export const bestPathReason = (cands: Route[]): string => {
+    if (cands.length < 2) return '';
+    const best = cands[0];
+    const runner = cands[1];
+
+    const bestPref = best.pref ?? 0;
+    const runnerPref = runner.pref ?? 0;
+    if (bestPref !== runnerPref) {
+        return `higher Local Pref (${bestPref} vs ${runnerPref})`;
+    }
+
+    const bestLen = best.as_path_len ?? 0;
+    const runnerLen = runner.as_path_len ?? 0;
+    if (bestLen !== runnerLen) {
+        return `shorter AS path (${bestLen} vs ${runnerLen})`;
+    }
+
+    const bestMed = best.med ?? 0;
+    const runnerMed = runner.med ?? 0;
+    if (bestMed !== runnerMed) {
+        return `lower MED (${bestMed} vs ${runnerMed})`;
+    }
+
+    const bestOrigin = best.origin_as ?? 0;
+    const runnerOrigin = runner.origin_as ?? 0;
+    if (bestOrigin !== runnerOrigin) {
+        return `lower Origin AS (${bestOrigin} vs ${runnerOrigin})`;
+    }
+
+    const bestPeerAs = best.peer_as ?? 0;
+    const runnerPeerAs = runner.peer_as ?? 0;
+    if (bestPeerAs !== runnerPeerAs) {
+        return `lower Peer AS (${bestPeerAs} vs ${runnerPeerAs})`;
+    }
+
+    return '';
 };
 
 /** Sort comparators for each sortable column. */

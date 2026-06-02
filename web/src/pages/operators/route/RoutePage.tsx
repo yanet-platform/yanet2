@@ -1,6 +1,6 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button, Flex, Icon, Text } from '@gravity-ui/uikit';
-import { Plus } from '@gravity-ui/icons';
+import { ArrowRightToLine, Funnel, Magnifier, Plus } from '@gravity-ui/icons';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, SearchInput } from '../../../components';
 import { AddConfigModal, BulkDeleteModal } from '../../_shared/draft';
 import { API } from '../../../api';
@@ -10,9 +10,12 @@ import { RouteSourceID, type Route } from '../../../api/routes';
 import { useRIB } from './useRIB';
 import { RIBTable } from './RIBTable';
 import RouteDrawer from './RouteDrawer';
-import { getRouteId, sortComparators, planRouteSubmit } from './utils';
-import type { RouteSortState, RouteSortableColumn } from './types';
+import CommandPalette from './CommandPalette';
+import LookupDrawer from './LookupDrawer';
+import { getRouteId, sortComparators, planRouteSubmit, groupByPrefix, filterByFamily } from './utils';
+import type { RouteSortState, RouteSortableColumn, IPFamily } from './types';
 import '../../../styles/draft-page.scss';
+import './route.scss';
 
 const RoutePage: React.FC = () => {
     const { configs, configRoutes, selectedIds, loading, reload, addLocalConfig, setSelected } = useRIB();
@@ -27,20 +30,49 @@ const RoutePage: React.FC = () => {
     });
     const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
     const [addConfigOpen, setAddConfigOpen] = useState(false);
-    const [activeRowId, setActiveRowId] = useState<string | null>(null);
-    const [editingRowId, setEditingRowId] = useState<string | null>(null);
     const [rowDeleteConfirm, setRowDeleteConfirm] = useState<{ open: boolean; route: Route | null }>({
         open: false,
         route: null,
     });
 
+    const [paletteOpen, setPaletteOpen] = useState(false);
+    const [lookupOpen, setLookupOpen] = useState(false);
+    const [lookupInitialQuery, setLookupInitialQuery] = useState('');
+    const [family, setFamily] = useState<IPFamily>('all');
+    const [bestOnly, setBestOnly] = useState(false);
+    const [conflictsOnly, setConflictsOnly] = useState(false);
+    const [flashRowId, setFlashRowId] = useState<string | null>(null);
 
     const currentConfig = activeConfig || configs[0] || '';
     const allRows = configRoutes.get(currentConfig) || [];
     const currentSelected = selectedIds.get(currentConfig) || new Set<string>();
 
+    const conflictMap = useMemo((): Map<string, number> => {
+        const groups = groupByPrefix(allRows);
+        const m = new Map<string, number>();
+        groups.forEach((group, prefix) => m.set(prefix, group.length));
+        return m;
+    }, [allRows]);
+
+    const conflictCount = useMemo((): number => {
+        let count = 0;
+        conflictMap.forEach((n) => { if (n > 1) count++; });
+        return count;
+    }, [conflictMap]);
+
     const visibleRows = useMemo(() => {
         let res = allRows;
+
+        res = filterByFamily(res, family);
+
+        if (bestOnly) {
+            res = res.filter((r) => r.is_best === true);
+        }
+
+        if (conflictsOnly) {
+            res = res.filter((r) => (conflictMap.get(r.prefix || '') ?? 1) > 1);
+        }
+
         const q = search.trim().toLowerCase();
         if (q) {
             res = res.filter((r) =>
@@ -54,7 +86,7 @@ const RoutePage: React.FC = () => {
             res = [...res].sort(sortState.direction === 'desc' ? (a, b) => cmp(b, a) : cmp);
         }
         return res;
-    }, [allRows, search, sortState]);
+    }, [allRows, search, sortState, family, bestOnly, conflictsOnly, conflictMap]);
 
     const counts = useMemo((): Map<string, number> => {
         const m = new Map<string, number>();
@@ -62,11 +94,36 @@ const RoutePage: React.FC = () => {
         return m;
     }, [configs, configRoutes]);
 
+    useEffect(() => {
+        if (!paletteOpen) return;
+        const handleKeyDown = (e: KeyboardEvent): void => {
+            if (e.key === 'Escape') setPaletteOpen(false);
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [paletteOpen]);
+
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent): void => {
+            if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+                e.preventDefault();
+                setPaletteOpen((prev) => !prev);
+            }
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, []);
+
     const handleSort = useCallback((col: RouteSortableColumn): void => {
-        setSortState((prev) => ({
-            column: col,
-            direction: prev.column === col && prev.direction === 'asc' ? 'desc' : 'asc',
-        }));
+        setSortState((prev) => {
+            if (prev.column !== col) {
+                return { column: col, direction: 'asc' };
+            }
+            if (prev.direction === 'asc') {
+                return { column: col, direction: 'desc' };
+            }
+            return { column: null, direction: 'asc' };
+        });
     }, []);
 
     const openAdd = useCallback((): void => {
@@ -76,17 +133,10 @@ const RoutePage: React.FC = () => {
     const handleEditRow = useCallback((id: string): void => {
         const route = allRows.find((r) => getRouteId(r) === id) || null;
         setDrawer({ open: true, mode: 'edit', route });
-        setActiveRowId(id);
-        setEditingRowId(id);
     }, [allRows]);
 
     const handleCloseDrawer = useCallback((): void => {
         setDrawer((prev) => ({ ...prev, open: false }));
-        setEditingRowId(null);
-    }, []);
-
-    const handleRowClick = useCallback((id: string): void => {
-        setActiveRowId(id);
     }, []);
 
     const handleSubmitRoute = useCallback(async (params: { prefix: string; nexthopAddr: string; doFlush: boolean }): Promise<void> => {
@@ -214,18 +264,47 @@ const RoutePage: React.FC = () => {
         }
     }, [allRows, currentSelected, currentConfig, reload, setSelected]);
 
+    const handleLookupIP = useCallback((ip: string): void => {
+        setLookupInitialQuery(ip);
+        setLookupOpen(true);
+    }, []);
+
+    const handleShowInTable = useCallback((prefix: string): void => {
+        const matchedRow = allRows.find((r) => r.prefix === prefix);
+        if (matchedRow) {
+            const id = getRouteId(matchedRow);
+            setFlashRowId(null);
+            setTimeout(() => setFlashRowId(id), 0);
+        }
+    }, [allRows]);
+
+    const handleClearFilters = useCallback((): void => {
+        setFamily('all');
+        setBestOnly(false);
+        setConflictsOnly(false);
+        setSearch('');
+    }, []);
+
+    const handleJumpToRow = useCallback((id: string): void => {
+        setFlashRowId(null);
+        setTimeout(() => setFlashRowId(id), 0);
+    }, []);
+
     const pageHeader = (
         <Flex alignItems="center" gap={4} style={{ width: '100%' }}>
             <Text variant="header-1">Routing Table</Text>
-            <Flex grow />
-            <div style={{ flexBasis: 380, flexShrink: 1 }}>
-                <SearchInput
-                    value={search}
-                    onUpdate={setSearch}
-                    placeholder="Search prefix, nexthop or peer…"
-                />
-            </div>
+            <button
+                type="button"
+                className="ro-search-btn"
+                onClick={() => setPaletteOpen(true)}
+                title="Open command palette (⌘K)"
+            >
+                <Icon data={Magnifier} size={16} />
+                <span className="ro-search-placeholder">Search or look up an IP…</span>
+                <kbd className="ro-kbd">⌘K</kbd>
+            </button>
             <Button view="outlined" onClick={handleFlush} disabled={!currentConfig}>
+                <Icon data={ArrowRightToLine} size={16} />
                 Flush RIB → FIB
             </Button>
             <Button view="action" onClick={openAdd} disabled={configs.length === 0}>
@@ -237,15 +316,15 @@ const RoutePage: React.FC = () => {
 
     if (loading) {
         return (
-            <PageLayout header={pageHeader}>
+            <PageLayout header={pageHeader} className="ro-layout">
                 <PageLoader loading size="l" />
             </PageLayout>
         );
     }
 
     return (
-        <PageLayout header={pageHeader}>
-            <div className="fw-page">
+        <PageLayout header={pageHeader} className="ro-layout">
+            <div className="fw-page ro-page">
                 {configs.length === 0 ? (
                     <div className="fw-empty-page">
                         <div className="fw-empty-page__message">No route configurations found.</div>
@@ -260,24 +339,78 @@ const RoutePage: React.FC = () => {
                             dirtyConfigs={new Set()}
                             onSelect={(c) => {
                                 setActiveConfig(c);
-                                setActiveRowId(null);
-                                setEditingRowId(null);
                             }}
                             onAddConfig={() => setAddConfigOpen(true)}
                         />
+                        <div className="ro-toolbar">
+                            <div className="ro-seg">
+                                {(['all', 'v4', 'v6'] as IPFamily[]).map((f) => (
+                                    <button
+                                        key={f}
+                                        type="button"
+                                        className={`ro-seg__btn${family === f ? ' ro-seg__btn--active' : ''}`}
+                                        onClick={() => setFamily(f)}
+                                    >
+                                        {f === 'all' ? 'All' : f === 'v4' ? 'IPv4' : 'IPv6'}
+                                    </button>
+                                ))}
+                            </div>
+                            <button
+                                type="button"
+                                className={`ro-chip ro-chip--best${bestOnly ? ' ro-chip--active' : ''}`}
+                                onClick={() => setBestOnly((v) => !v)}
+                                title="Show only the best route for each prefix"
+                            >
+                                <svg width={13} height={13} viewBox="0 0 24 24" fill={bestOnly ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+                                    <path d="M13 2 3 14h9l-1 8 10-12h-9l1-8Z" />
+                                </svg>
+                                Best only
+                            </button>
+                            <button
+                                type="button"
+                                className={`ro-chip ro-chip--conflict${conflictsOnly ? ' ro-chip--active' : ''}`}
+                                onClick={() => setConflictsOnly((v) => !v)}
+                                title="Show only prefixes with multiple candidate routes"
+                            >
+                                <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+                                    <path d="M6 3v12" />
+                                    <path d="M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" />
+                                    <path d="M6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" />
+                                    <path d="M15 6a9 9 0 0 1-9 9" />
+                                </svg>
+                                Conflicts
+                                {conflictCount > 0 && (
+                                    <span className="ro-chip__badge">{conflictCount}</span>
+                                )}
+                            </button>
+                            <div style={{ flex: 1 }} />
+                            <div style={{ flexBasis: 230, flexShrink: 1 }}>
+                                <SearchInput
+                                    value={search}
+                                    onUpdate={setSearch}
+                                    placeholder="Filter rows…"
+                                    enableFocusShortcut={false}
+                                    showShortcutHint={false}
+                                    icon={Funnel}
+                                />
+                            </div>
+                            <span className="ro-count">
+                                <span style={{ color: 'var(--fw-text)', fontWeight: 600 }}>{visibleRows.length.toLocaleString()}</span>
+                                {' / '}{allRows.length.toLocaleString()}
+                            </span>
+                        </div>
                         <div className="fw-content">
                             <RIBTable
                                 rows={visibleRows}
                                 selectedIds={currentSelected}
-                                activeRowId={activeRowId}
-                                editingRowId={editingRowId}
                                 sortState={sortState}
                                 onSort={handleSort}
-                                onRowClick={handleRowClick}
                                 onEditRow={handleEditRow}
                                 onSelectionChange={(ids) => setSelected(currentConfig, ids)}
-                                emptyMessage={search ? 'No routes match your search.' : 'No routes.'}
+                                emptyMessage={search || family !== 'all' || bestOnly || conflictsOnly ? 'No routes match the current filters.' : 'No routes.'}
                                 onDeleteRow={handleDeleteRowRequest}
+                                conflictMap={conflictMap}
+                                flashRowId={flashRowId}
                             />
                         </div>
                     </>
@@ -334,6 +467,30 @@ const RoutePage: React.FC = () => {
                     placeholder="e.g. route0"
                     existingNames={configs}
                 />
+
+                <CommandPalette
+                    open={paletteOpen}
+                    onClose={() => setPaletteOpen(false)}
+                    rows={allRows}
+                    onLookupIP={handleLookupIP}
+                    onAddRoute={openAdd}
+                    onFlush={handleFlush}
+                    onOpenLookup={() => { setLookupInitialQuery(''); setLookupOpen(true); }}
+                    onSetFamily={setFamily}
+                    onToggleBestOnly={() => setBestOnly((v) => !v)}
+                    onToggleConflicts={() => setConflictsOnly((v) => !v)}
+                    onClearFilters={handleClearFilters}
+                    onJumpToRow={handleJumpToRow}
+                />
+
+                <LookupDrawer
+                    open={lookupOpen}
+                    configName={currentConfig}
+                    initialQuery={lookupInitialQuery}
+                    onClose={() => setLookupOpen(false)}
+                    onShowInTable={handleShowInTable}
+                />
+
             </div>
         </PageLayout>
     );

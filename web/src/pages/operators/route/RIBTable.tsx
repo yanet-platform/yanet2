@@ -1,11 +1,12 @@
-import React, { useCallback, useMemo, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { Checkbox } from '@gravity-ui/uikit';
-import { useContainerHeight } from '../../../hooks';
 import { useRowHoverOverlay, RowHoverEditOverlay } from '../../_shared/draft';
 import type { Route } from '../../../api/routes';
 import { ipAddressToString } from '../../../utils/netip';
-import { ROUTE_SOURCES, getRouteId } from './utils';
+import { useContainerHeight } from '../../../hooks/useContainerHeight';
+import { getRouteId } from './utils';
+import { BestPill, SourceChip, FamilyBadge, ConflictBadge } from './cells';
 import type { RouteSortableColumn, RouteSortState } from './types';
 
 const ROW_HEIGHT = 44;
@@ -13,65 +14,84 @@ const HEADER_HEIGHT = 40;
 const FOOTER_HEIGHT = 28;
 const OVERSCAN = 15;
 
-const COL_CHECKBOX = 38;
-const COL_INDEX = 48;
-const COL_PREFIX = 260;
-const COL_NEXT_HOP = 200;
-const COL_PEER = 200;
-const COL_BEST = 60;
-const COL_PREF = 60;
-const COL_AS_PATH = 80;
-const COL_SOURCE = 90;
+/** Minimum total width before a horizontal scrollbar appears on very narrow viewports. */
+const RIB_MIN_WIDTH = 860;
 
-export const RIB_TOTAL_WIDTH =
-    COL_CHECKBOX + COL_INDEX + COL_PREFIX + COL_NEXT_HOP + COL_PEER +
-    COL_BEST + COL_PREF + COL_AS_PATH + COL_SOURCE;
+/** CSS grid template for both the header row and each data row. */
+const GRID_TEMPLATE = '38px 52px minmax(190px, 1.3fr) 150px minmax(120px, 0.8fr) 92px 64px 78px 116px';
+const GRID_COLUMN_GAP = 14;
+
+/** @deprecated Use GRID_TEMPLATE instead. Kept for external callers. */
+export const RIB_TOTAL_WIDTH = RIB_MIN_WIDTH;
 
 export interface RIBTableProps {
     rows: Route[];
     selectedIds: Set<string>;
-    activeRowId: string | null;
-    editingRowId: string | null;
     sortState: RouteSortState;
     onSort: (col: RouteSortableColumn) => void;
-    onRowClick: (id: string) => void;
     onEditRow: (id: string) => void;
     onSelectionChange: (ids: Set<string>) => void;
     emptyMessage: string;
     onDeleteRow: (id: string) => void;
+    conflictMap?: Map<string, number>;
+    flashRowId?: string | null;
 }
 
 interface SortButtonProps {
     col: RouteSortableColumn;
     label: string;
-    width: number;
     sortState: RouteSortState;
     onSort: (col: RouteSortableColumn) => void;
 }
 
-const SortButton: React.FC<SortButtonProps> = ({ col, label, width, sortState, onSort }) => {
+/** SVG sort icon — double arrow (unsorted), up arrow (asc), down arrow (desc). */
+const SortIcon: React.FC<{ variant: 'sort' | 'sortUp' | 'sortDown'; active: boolean }> = ({ variant, active }) => {
+    const paths: Record<typeof variant, string[]> = {
+        sort: ['M8 3v18', 'M5 8l3-3 3 3', 'M16 21V3', 'M13 16l3 3 3-3'],
+        sortUp: ['M8 5l4-4 4 4', 'M12 1v22'],
+        sortDown: ['M8 19l4 4 4-4', 'M12 23V1'],
+    };
+    return (
+        <svg
+            width={12}
+            height={12}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={2}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            style={{ display: 'block', flexShrink: 0, opacity: active ? 1 : 0.5 }}
+        >
+            {paths[variant].map((d) => <path key={d} d={d} />)}
+        </svg>
+    );
+};
+
+const SortButton: React.FC<SortButtonProps> = ({ col, label, sortState, onSort }) => {
     const isActive = sortState.column === col;
-    const arrow = isActive ? (sortState.direction === 'asc' ? '▲' : '▼') : '↕';
+    const iconVariant = isActive
+        ? (sortState.direction === 'asc' ? 'sortUp' : 'sortDown')
+        : 'sort';
     return (
         <button
             type="button"
             style={{
-                width,
-                minWidth: width,
-                flexShrink: 0,
                 display: 'flex',
                 alignItems: 'center',
                 gap: 4,
                 background: 'none',
                 border: 'none',
                 cursor: 'pointer',
-                color: 'inherit',
-                padding: '0 8px 0 0',
+                color: isActive ? 'var(--fw-accent)' : 'inherit',
+                padding: 0,
+                width: '100%',
+                minWidth: 0,
             }}
             onClick={() => onSort(col)}
         >
-            <span className="fw-th-text">{label}</span>
-            <span style={{ fontSize: 10, opacity: isActive ? 1 : 0.35 }}>{arrow}</span>
+            <span className="fw-th-text" style={{ color: isActive ? 'var(--fw-accent)' : undefined }}>{label}</span>
+            <SortIcon variant={iconVariant} active={isActive} />
         </button>
     );
 };
@@ -80,18 +100,18 @@ const SortButton: React.FC<SortButtonProps> = ({ col, label, width, sortState, o
 export const RIBTable: React.FC<RIBTableProps> = ({
     rows,
     selectedIds,
-    activeRowId,
-    editingRowId,
     sortState,
     onSort,
-    onRowClick,
     onEditRow,
     onSelectionChange,
     emptyMessage,
     onDeleteRow,
+    conflictMap,
+    flashRowId,
 }) => {
     const scrollRef = useRef<HTMLDivElement>(null);
-    const bodyHeight = useContainerHeight(scrollRef, 300, FOOTER_HEIGHT + 20);
+    const bodyHeight = useContainerHeight(scrollRef, 300, FOOTER_HEIGHT);
+    const [flashingId, setFlashingId] = React.useState<string | null>(null);
 
     const {
         hoveredRow,
@@ -114,6 +134,17 @@ export const RIBTable: React.FC<RIBTableProps> = ({
         overscan: OVERSCAN,
     });
 
+    useEffect(() => {
+        if (!flashRowId) return;
+        const idx = rows.findIndex((r) => getRouteId(r) === flashRowId);
+        if (idx >= 0) {
+            rowVirtualizer.scrollToIndex(idx, { align: 'center' });
+        }
+        setFlashingId(flashRowId);
+        const t = setTimeout(() => setFlashingId(null), 1200);
+        return () => clearTimeout(t);
+    }, [flashRowId, rows, rowVirtualizer]);
+
     const isAllSelected = rows.length > 0 && rows.every((r) => selectedIds.has(getRouteId(r)));
     const isIndeterminate = !isAllSelected && rows.some((r) => selectedIds.has(getRouteId(r)));
 
@@ -129,11 +160,9 @@ export const RIBTable: React.FC<RIBTableProps> = ({
 
     const handleOverlayEdit = useCallback((): void => {
         if (hoveredRow) {
-            const id = getRouteId(hoveredRow);
-            onRowClick(id);
-            onEditRow(id);
+            onEditRow(getRouteId(hoveredRow));
         }
-    }, [hoveredRow, onRowClick, onEditRow]);
+    }, [hoveredRow, onEditRow]);
 
     const virtualRows = rowVirtualizer.getVirtualItems();
 
@@ -144,71 +173,82 @@ export const RIBTable: React.FC<RIBTableProps> = ({
         return `Shown ${first.toLocaleString()}–${last.toLocaleString()} of ${rows.length.toLocaleString()}`;
     }, [virtualRows, rows.length]);
 
+    const gridStyle: React.CSSProperties = {
+        display: 'grid',
+        gridTemplateColumns: GRID_TEMPLATE,
+        columnGap: GRID_COLUMN_GAP,
+        alignItems: 'center',
+        paddingLeft: 16,
+        paddingRight: 22,
+        minWidth: RIB_MIN_WIDTH,
+    };
+
     return (
         <div className="fw-tbl-wrap">
             <div className="fw-tbl-header-row">
-                <div className="fw-vtbl-header" style={{ height: HEADER_HEIGHT, minWidth: RIB_TOTAL_WIDTH }}>
+                <div
+                    className="fw-vtbl-header"
+                    style={{ ...gridStyle, height: HEADER_HEIGHT, flex: '1 1 auto', overflow: 'hidden' }}
+                >
                     <div
-                        style={{ width: COL_CHECKBOX, minWidth: COL_CHECKBOX, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                        style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                         onClick={(e) => e.stopPropagation()}
                     >
                         <Checkbox checked={isAllSelected} indeterminate={isIndeterminate} onUpdate={handleSelectAll} size="m" />
                     </div>
-                    <div style={{ width: COL_INDEX, minWidth: COL_INDEX, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                         <span className="fw-th-text">#</span>
                     </div>
-                    <SortButton col="prefix" label="Prefix" width={COL_PREFIX} sortState={sortState} onSort={onSort} />
-                    <SortButton col="next_hop" label="Next Hop" width={COL_NEXT_HOP} sortState={sortState} onSort={onSort} />
-                    <SortButton col="peer" label="Peer" width={COL_PEER} sortState={sortState} onSort={onSort} />
-                    <SortButton col="is_best" label="Best" width={COL_BEST} sortState={sortState} onSort={onSort} />
-                    <SortButton col="pref" label="Pref" width={COL_PREF} sortState={sortState} onSort={onSort} />
-                    <SortButton col="as_path_len" label="AS Path" width={COL_AS_PATH} sortState={sortState} onSort={onSort} />
-                    <SortButton col="source" label="Source" width={COL_SOURCE} sortState={sortState} onSort={onSort} />
+                    <SortButton col="prefix" label="Prefix" sortState={sortState} onSort={onSort} />
+                    <SortButton col="next_hop" label="Next Hop" sortState={sortState} onSort={onSort} />
+                    <SortButton col="peer" label="Peer" sortState={sortState} onSort={onSort} />
+                    <SortButton col="is_best" label="Best" sortState={sortState} onSort={onSort} />
+                    <SortButton col="pref" label="Pref" sortState={sortState} onSort={onSort} />
+                    <SortButton col="as_path_len" label="AS Path" sortState={sortState} onSort={onSort} />
+                    <SortButton col="source" label="Source" sortState={sortState} onSort={onSort} />
                 </div>
             </div>
 
             <div
                 ref={setScrollRef}
                 className="fw-vtbl-body"
-                style={bodyHeight > 0 ? { flex: '0 0 auto', height: bodyHeight } : undefined}
+                style={{ flex: '0 0 auto', height: bodyHeight, overflowY: 'auto' }}
             >
                 {rows.length === 0 ? (
                     <div className="fw-table-empty">{emptyMessage}</div>
                 ) : (
-                    <div style={{ height: rowVirtualizer.getTotalSize(), minWidth: RIB_TOTAL_WIDTH, position: 'relative' }}>
+                    <div style={{ height: rowVirtualizer.getTotalSize(), minWidth: RIB_MIN_WIDTH, position: 'relative' }}>
                         {virtualRows.map((virtualRow) => {
                             const route = rows[virtualRow.index];
                             if (!route) return null;
                             const id = getRouteId(route);
                             const isSelected = selectedIds.has(id);
-                            const isActive = activeRowId === id || editingRowId === id;
+                            const isFlashing = flashingId === id;
                             let rowBg = 'transparent';
-                            if (isSelected || isActive) rowBg = 'var(--fw-accent-soft)';
+                            if (isFlashing) rowBg = 'color-mix(in srgb, var(--g-color-text-positive) 14%, transparent)';
+                            else if (isSelected) rowBg = 'var(--fw-accent-soft)';
+                            const prefixConflictCount = conflictMap?.get(route.prefix || '') ?? 1;
                             return (
                                 <div
                                     key={id}
-                                    className={`fw-vrow${isActive ? ' fw-vrow--active' : ''}${isSelected ? ' fw-vrow--selected' : ''}`}
+                                    className={`fw-vrow${isSelected ? ' fw-vrow--selected' : ''}`}
                                     data-row-id={id}
                                     onMouseEnter={() => handleHoverChange(route, virtualRow.start)}
                                     onMouseLeave={() => handleHoverChange(null, 0)}
-                                    onClick={() => onRowClick(id)}
                                     style={{
                                         position: 'absolute',
                                         top: virtualRow.start,
                                         left: 0,
                                         height: ROW_HEIGHT,
-                                        minWidth: RIB_TOTAL_WIDTH,
                                         width: '100%',
-                                        display: 'flex',
-                                        alignItems: 'center',
                                         borderBottom: '1px solid var(--fw-line)',
                                         backgroundColor: rowBg,
-                                        paddingLeft: 4,
                                         cursor: 'default',
+                                        ...gridStyle,
                                     }}
                                 >
                                     <div
-                                        style={{ width: COL_CHECKBOX, minWidth: COL_CHECKBOX, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                                        style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                                         onClick={(e) => e.stopPropagation()}
                                     >
                                         <Checkbox
@@ -217,31 +257,42 @@ export const RIBTable: React.FC<RIBTableProps> = ({
                                             size="m"
                                         />
                                     </div>
-                                    <div style={{ width: COL_INDEX, minWidth: COL_INDEX, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--fw-text-3)', fontVariantNumeric: 'tabular-nums' }}>
-                                        <span style={{ fontSize: 12 }}>{virtualRow.index + 1}</span>
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--fw-text-3)', fontVariantNumeric: 'tabular-nums', fontFamily: 'var(--fw-font-mono)' }}>
+                                        <span style={{ fontSize: 12.5 }}>{virtualRow.index + 1}</span>
                                     </div>
-                                    <div style={{ width: COL_PREFIX, minWidth: COL_PREFIX, flexShrink: 0, paddingRight: 8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                        <span className="fw-cell-mono fw-cell-strong">{route.prefix || '-'}</span>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 9, overflow: 'hidden' }}>
+                                        {route.prefix && <FamilyBadge prefix={route.prefix} />}
+                                        <span
+                                            className="fw-cell-mono"
+                                            style={{
+                                                overflow: 'hidden',
+                                                textOverflow: 'ellipsis',
+                                                whiteSpace: 'nowrap',
+                                                flexShrink: 1,
+                                                fontSize: 13.5,
+                                                fontWeight: route.is_best ? 600 : 500,
+                                                color: route.is_best ? 'var(--fw-text)' : 'var(--fw-text-2)',
+                                            }}
+                                        >{route.prefix || '-'}</span>
+                                        {prefixConflictCount > 1 && <ConflictBadge count={prefixConflictCount} />}
                                     </div>
-                                    <div style={{ width: COL_NEXT_HOP, minWidth: COL_NEXT_HOP, flexShrink: 0, paddingRight: 8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                        <span className="fw-cell-mono fw-cell-muted">{ipAddressToString(route.next_hop) || '-'}</span>
+                                    <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                        <span className="fw-cell-mono" style={{ fontSize: 12.5, color: 'var(--fw-text-2)' }}>{ipAddressToString(route.next_hop) || '-'}</span>
                                     </div>
-                                    <div style={{ width: COL_PEER, minWidth: COL_PEER, flexShrink: 0, paddingRight: 8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                        <span className="fw-cell-mono fw-cell-muted">{ipAddressToString(route.peer) || '-'}</span>
+                                    <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                        <span className="fw-cell-mono" style={{ fontSize: 12.5, color: 'var(--fw-text-3)' }}>{ipAddressToString(route.peer) || '-'}</span>
                                     </div>
-                                    <div style={{ width: COL_BEST, minWidth: COL_BEST, flexShrink: 0, paddingRight: 8 }}>
-                                        <span className="fw-cell-muted">{route.is_best ? 'Yes' : 'No'}</span>
+                                    <div style={{ display: 'flex', alignItems: 'center' }}>
+                                        <BestPill isBest={route.is_best ?? false} />
                                     </div>
-                                    <div style={{ width: COL_PREF, minWidth: COL_PREF, flexShrink: 0, paddingRight: 8 }}>
-                                        <span className="fw-cell-muted">{route.pref ?? '-'}</span>
+                                    <div>
+                                        <span className="fw-cell-mono" style={{ fontSize: 12.5, color: route.pref ? 'var(--fw-text-2)' : 'var(--fw-text-3)' }}>{route.pref || '—'}</span>
                                     </div>
-                                    <div style={{ width: COL_AS_PATH, minWidth: COL_AS_PATH, flexShrink: 0, paddingRight: 8 }}>
-                                        <span className="fw-cell-muted">{route.as_path_len ?? '-'}</span>
+                                    <div>
+                                        <span className="fw-cell-mono" style={{ fontSize: 12.5, color: route.as_path_len ? 'var(--fw-text-2)' : 'var(--fw-text-3)' }}>{route.as_path_len || '—'}</span>
                                     </div>
-                                    <div style={{ width: COL_SOURCE, minWidth: COL_SOURCE, flexShrink: 0, paddingRight: 8 }}>
-                                        <span className="fw-cell-muted">
-                                            {route.source !== undefined ? (ROUTE_SOURCES[route.source] ?? 'Unknown') : '-'}
-                                        </span>
+                                    <div style={{ overflow: 'hidden' }}>
+                                        <SourceChip source={route.source} />
                                     </div>
                                 </div>
                             );

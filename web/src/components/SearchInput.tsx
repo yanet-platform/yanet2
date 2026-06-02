@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef } from 'react';
 import { Magnifier } from '@gravity-ui/icons';
 import { Flex, Icon, TextInput } from '@gravity-ui/uikit';
+import type { IconData } from '@gravity-ui/uikit';
 
 interface SearchInputProps {
     value: string;
@@ -9,6 +10,8 @@ interface SearchInputProps {
     controlRef?: React.RefObject<HTMLInputElement | null>;
     enableFocusShortcut?: boolean;
     showShortcutHint?: boolean;
+    /** Overrides the leading icon. Defaults to the magnifier. */
+    icon?: IconData;
 }
 
 const isMacPlatform = (): boolean => {
@@ -58,6 +61,7 @@ export const SearchInput: React.FC<SearchInputProps> = ({
     controlRef,
     enableFocusShortcut = true,
     showShortcutHint = true,
+    icon,
 }) => {
     const fallbackRef = useRef<HTMLInputElement | null>(null);
     const inputRef = controlRef ?? fallbackRef;
@@ -94,7 +98,7 @@ export const SearchInput: React.FC<SearchInputProps> = ({
             placeholder={placeholderWithHint}
             startContent={
                 <Flex alignItems="center" justifyContent="center" style={{ paddingInline: 8, color: 'var(--g-color-text-hint)' }}>
-                    <Icon data={Magnifier} size={16} />
+                    <Icon data={icon ?? Magnifier} size={16} />
                 </Flex>
             }
             hasClear

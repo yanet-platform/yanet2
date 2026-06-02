@@ -9,11 +9,13 @@ export interface PageLayoutProps {
     header?: React.ReactNode;
     /** Main page content */
     children: React.ReactNode;
+    /** Optional extra class applied to the root element for page-scoped overrides. */
+    className?: string;
 }
 
-export const PageLayout = ({ title, header, children }: PageLayoutProps): React.JSX.Element => {
+export const PageLayout = ({ title, header, children, className }: PageLayoutProps): React.JSX.Element => {
     return (
-        <Flex direction="column" className="page-layout">
+        <Flex direction="column" className={`page-layout${className ? ' ' + className : ''}`}>
             {(title || header) && (
                 <>
                     <Box spacing={{ px: 5, py: 3 }} className="page-layout__header">

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Switch } from '@gravity-ui/uikit';
 import { DraftItemDrawer } from '../../_shared/draft';
 import { ipAddressToString } from '../../../utils/netip';
@@ -64,6 +64,25 @@ const RouteDrawer: React.FC<RouteDrawerProps> = ({
             setSubmitting(false);
         }
     };
+
+    // Keep a ref so the keydown handler always sees the latest canSubmit/handleApply
+    // without re-registering on every render (react-compiler safe).
+    const submitRef = useRef({ canSubmit, apply: handleApply });
+    submitRef.current = { canSubmit, apply: handleApply };
+
+    useEffect(() => {
+        if (!open) return;
+        const handler = (e: KeyboardEvent): void => {
+            if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+                e.preventDefault();
+                if (submitRef.current.canSubmit) {
+                    void submitRef.current.apply();
+                }
+            }
+        };
+        window.addEventListener('keydown', handler);
+        return () => window.removeEventListener('keydown', handler);
+    }, [open]);
 
     const title = mode === 'add' ? 'Add route' : 'Edit route';
 
