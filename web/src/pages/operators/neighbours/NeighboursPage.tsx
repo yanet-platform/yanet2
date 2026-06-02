@@ -1,10 +1,13 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Button, Flex, Icon, Text } from '@gravity-ui/uikit';
-import { Plus, Layers } from '@gravity-ui/icons';
-import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, SearchInput } from '../../../components';
+import { Plus, Layers, Magnifier } from '@gravity-ui/icons';
+import { PageLayout, PageLoader, ConfigTabStrip, BulkBar } from '../../../components';
 import { BulkDeleteModal, DeleteConfigModal } from '../../_shared/draft';
+import { CommandPalette } from '../../_shared/command-palette';
+import type { Command, RowAdapter } from '../../_shared/command-palette';
 import { stringToIPAddress, ipAddressToString } from '../../../utils/netip';
+import { parseIPAddress } from '../../../utils';
 import type { Neighbour, NeighbourTableInfo } from '../../../api/neighbours';
 import { NeighbourTable } from './NeighbourTable';
 import NeighbourPanel from './NeighbourPanel';
@@ -15,18 +18,25 @@ import { getNeighbourId, isSortableColumn, isSortDirection, sortComparators } fr
 import { MERGED_TAB, DEFAULT_SORT } from './types';
 import type { SortState, SortableColumn } from './types';
 import { FamilyFilter, type IPFamily } from '../../_shared/table/FamilyFilter';
+import { nudStateToName, STATE_META } from './stateMeta';
 import '../../../styles/draft-page.scss';
+import '../../_shared/command-palette/command-palette.scss';
 
 const QP_TAB = 'tab';
 const QP_SORT = 'sort';
 const QP_ORDER = 'order';
-const QP_SEARCH = 'search';
 const QP_FAMILY = 'family';
+const QP_STATE = 'state';
 
 const parseFamily = (params: URLSearchParams): IPFamily => {
     const v = params.get(QP_FAMILY);
     if (v === 'v4' || v === 'v6') return v;
     return 'all';
+};
+
+const parseStateFilter = (params: URLSearchParams): string | null => {
+    const v = params.get(QP_STATE);
+    return v || null;
 };
 
 const parseSortState = (params: URLSearchParams): SortState => {
@@ -44,17 +54,18 @@ const parseSortState = (params: URLSearchParams): SortState => {
 const parseTab = (params: URLSearchParams): string =>
     params.get(QP_TAB) || MERGED_TAB;
 
-const parseSearch = (params: URLSearchParams): string =>
-    params.get(QP_SEARCH) || '';
-
 /** Neighbours page — shows neighbour tables and entries with inline panel editing. */
 const NeighboursPage: React.FC = () => {
     const [searchParams, setSearchParams] = useSearchParams();
 
     const activeTab = parseTab(searchParams);
     const sortState = parseSortState(searchParams);
-    const search = parseSearch(searchParams);
     const family = parseFamily(searchParams);
+    const stateFilter = parseStateFilter(searchParams);
+
+    const [paused, setPaused] = useState(false);
+    const [paletteOpen, setPaletteOpen] = useState(false);
+    const [flashRowId, setFlashRowId] = useState<string | null>(null);
 
     const {
         tables,
@@ -68,7 +79,8 @@ const NeighboursPage: React.FC = () => {
         removeTable,
         reloadAll,
         fetchTab,
-    } = useNeighbours(activeTab);
+        refreshNow,
+    } = useNeighbours(activeTab, paused);
 
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
     const [panel, setPanel] = useState<{ open: boolean; mode: 'add' | 'edit' | 'view'; neighbour: Neighbour | null }>({
@@ -90,6 +102,26 @@ const NeighboursPage: React.FC = () => {
     const isBuiltIn = activeTableInfo?.built_in ?? false;
 
     const tabsList = [MERGED_TAB, ...tables.map((t) => t.name || '').filter(Boolean)];
+
+    useEffect(() => {
+        if (!paletteOpen) return;
+        const handleKeyDown = (e: KeyboardEvent): void => {
+            if (e.key === 'Escape') setPaletteOpen(false);
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [paletteOpen]);
+
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent): void => {
+            if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+                e.preventDefault();
+                setPaletteOpen((prev) => !prev);
+            }
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, []);
 
     const updateParams = useCallback((updates: Record<string, string | null>): void => {
         setSearchParams((prev) => {
@@ -129,20 +161,15 @@ const NeighboursPage: React.FC = () => {
                 return family === 'v6' ? addr.includes(':') : !addr.includes(':');
             });
         }
-        const q = search.trim().toLowerCase();
-        if (q) {
-            res = res.filter((n) =>
-                (getNeighbourId(n) || '').toLowerCase().includes(q) ||
-                (n.device || '').toLowerCase().includes(q) ||
-                (n.source || '').toLowerCase().includes(q),
-            );
+        if (stateFilter) {
+            res = res.filter((n) => nudStateToName(n.state) === stateFilter);
         }
         if (sortState.column) {
             const cmp = sortComparators[sortState.column];
             res = [...res].sort(sortState.direction === 'desc' ? (a, b) => cmp(b, a) : cmp);
         }
         return res;
-    }, [allRows, search, sortState, family]);
+    }, [allRows, sortState, family, stateFilter]);
 
     const counts = useMemo((): Map<string, number> => {
         const m = new Map<string, number>();
@@ -228,6 +255,11 @@ const NeighboursPage: React.FC = () => {
         await reloadAll();
     }, [activeTableInfo, removeTable, updateParams, reloadAll]);
 
+    const handleJumpToRow = useCallback((id: string): void => {
+        setFlashRowId(null);
+        setTimeout(() => setFlashRowId(id), 0);
+    }, []);
+
     const canEditTable = !isMergedView && !!activeTableInfo;
     const canDeleteTable = !isMergedView && !!activeTableInfo && !isBuiltIn;
 
@@ -250,17 +282,245 @@ const NeighboursPage: React.FC = () => {
     const displayConfigs = tabsList.map(displayLabel);
     const activeDisplayConfig = displayLabel(activeTab);
 
+    const distinctStates = useMemo((): string[] => {
+        const seen = new Set<string>();
+        for (const n of allRows) {
+            seen.add(nudStateToName(n.state));
+        }
+        return Array.from(seen).sort();
+    }, [allRows]);
+
+    const stateCounts = useMemo((): Map<string, number> => {
+        const m = new Map<string, number>();
+        for (const n of allRows) {
+            const name = nudStateToName(n.state);
+            m.set(name, (m.get(name) ?? 0) + 1);
+        }
+        return m;
+    }, [allRows]);
+
+    const neighbourCommands = useMemo((): Command[] => {
+        const cmds: Command[] = [];
+
+        cmds.push({
+            id: '__add_neighbour',
+            icon: '+',
+            label: 'Add neighbour',
+            sub: 'Open the add-neighbour panel',
+            keywords: 'add neighbour create new',
+            onSelect: () => { openAdd(); setPaletteOpen(false); },
+        });
+
+        cmds.push({
+            id: '__add_table',
+            icon: '⊞',
+            label: 'Add table',
+            sub: 'Create a new neighbour table',
+            keywords: 'add table create new',
+            onSelect: () => { setCreateTableOpen(true); setPaletteOpen(false); },
+        });
+
+        if (canEditTable) {
+            cmds.push({
+                id: '__edit_table',
+                icon: '✎',
+                label: 'Edit current table',
+                sub: activeTableInfo?.name,
+                keywords: 'edit table settings priority',
+                onSelect: () => { setEditTableOpen(true); setPaletteOpen(false); },
+            });
+        }
+
+        if (canDeleteTable) {
+            cmds.push({
+                id: '__delete_table',
+                icon: '✕',
+                label: 'Delete current table',
+                sub: activeTableInfo?.name,
+                keywords: 'delete remove table',
+                onSelect: () => { setDeleteTableOpen(true); setPaletteOpen(false); },
+            });
+        }
+
+        if (!isMergedView) {
+            cmds.push({
+                id: '__switch_merged',
+                icon: '⊕',
+                label: 'Switch to Merged view',
+                keywords: 'merged view all tables',
+                onSelect: () => { handleTabSelect(MERGED_TAB); setPaletteOpen(false); },
+            });
+        }
+
+        for (const t of tables) {
+            if (!t.name || t.name === activeTab) continue;
+            const name = t.name;
+            cmds.push({
+                id: `__tab_${name}`,
+                icon: '⇥',
+                label: `Switch to table ${name}`,
+                keywords: `switch table ${name}`,
+                onSelect: () => { handleTabSelect(name); setPaletteOpen(false); },
+            });
+        }
+
+        cmds.push({
+            id: '__filter_v4',
+            icon: '4',
+            label: 'Filter IPv4 only',
+            keywords: 'ipv4 filter family',
+            onSelect: () => { updateParams({ [QP_FAMILY]: 'v4' }); setPaletteOpen(false); },
+        });
+
+        cmds.push({
+            id: '__filter_v6',
+            icon: '6',
+            label: 'Filter IPv6 only',
+            keywords: 'ipv6 filter family',
+            onSelect: () => { updateParams({ [QP_FAMILY]: 'v6' }); setPaletteOpen(false); },
+        });
+
+        cmds.push({
+            id: '__clear_filters',
+            icon: '✕',
+            label: 'Clear filters',
+            keywords: 'clear reset filters all',
+            onSelect: () => { updateParams({ [QP_FAMILY]: null, [QP_STATE]: null }); setPaletteOpen(false); },
+        });
+
+        for (const stateName of distinctStates) {
+            const sn = stateName;
+            cmds.push({
+                id: `__filter_state_${sn}`,
+                icon: '◉',
+                label: `Filter state: ${sn}`,
+                keywords: `filter state nud ${sn.toLowerCase()}`,
+                onSelect: () => { updateParams({ [QP_STATE]: sn }); setPaletteOpen(false); },
+            });
+        }
+
+        if (stateFilter) {
+            cmds.push({
+                id: '__clear_state_filter',
+                icon: '✕',
+                label: 'Clear state filter',
+                keywords: 'clear state filter nud',
+                onSelect: () => { updateParams({ [QP_STATE]: null }); setPaletteOpen(false); },
+            });
+        }
+
+        cmds.push({
+            id: '__refresh_now',
+            icon: '⟳',
+            label: 'Refresh now',
+            keywords: 'refresh reload update now',
+            onSelect: () => { refreshNow().catch(() => {}); setPaletteOpen(false); },
+        });
+
+        cmds.push({
+            id: '__toggle_autorefresh',
+            icon: paused ? '▶' : '⏸',
+            label: paused ? 'Resume auto-refresh' : 'Pause auto-refresh',
+            keywords: 'pause resume auto refresh toggle',
+            onSelect: () => { setPaused((v) => !v); setPaletteOpen(false); },
+        });
+
+        if (selectedIds.size > 0 && !isMergedView) {
+            cmds.push({
+                id: '__bulk_delete',
+                icon: '✕',
+                label: 'Delete selected neighbours',
+                sub: `${selectedIds.size} selected`,
+                keywords: 'delete remove selected bulk',
+                onSelect: () => { setBulkRemoveOpen(true); setPaletteOpen(false); },
+            });
+
+            cmds.push({
+                id: '__clear_selection',
+                icon: '☐',
+                label: 'Clear selection',
+                keywords: 'clear deselect selection',
+                onSelect: () => { setSelectedIds(new Set()); setPaletteOpen(false); },
+            });
+        }
+
+        return cmds;
+    }, [
+        openAdd,
+        canEditTable,
+        canDeleteTable,
+        activeTableInfo,
+        isMergedView,
+        tables,
+        activeTab,
+        handleTabSelect,
+        updateParams,
+        distinctStates,
+        stateFilter,
+        refreshNow,
+        paused,
+        selectedIds,
+    ]);
+
+    const neighbourDynamicCommands = useCallback((q: string): Command[] => {
+        if (!parseIPAddress(q.trim()).ok) return [];
+        const ip = q.trim();
+        const existing = allRows.find((n) => ipAddressToString(n.next_hop) === ip);
+        if (existing) {
+            const id = getNeighbourId(existing);
+            return [
+                {
+                    id: '__jump_ip',
+                    icon: '⌖',
+                    label: `Jump to ${ip}`,
+                    sub: 'Scroll to this neighbour in the table',
+                    onSelect: () => { handleJumpToRow(id); setPaletteOpen(false); },
+                },
+            ];
+        }
+        return [
+            {
+                id: '__add_ip',
+                icon: '+',
+                label: `Add neighbour ${ip}`,
+                sub: 'Open the add panel pre-filled with this IP',
+                onSelect: () => {
+                    const wire = stringToIPAddress(ip);
+                    if (wire) {
+                        setPanel({ open: true, mode: 'add', neighbour: { next_hop: wire } });
+                    }
+                    setPaletteOpen(false);
+                },
+            },
+        ];
+    }, [allRows, handleJumpToRow]);
+
+    const neighbourRowAdapter: RowAdapter<Neighbour> = {
+        rows: allRows,
+        getId: getNeighbourId,
+        getLabel: (n) => ipAddressToString(n.next_hop) || '—',
+        getSub: (n) => [n.device, n.source, nudStateToName(n.state)].filter(Boolean).join(' · '),
+        searchText: (n) => ipAddressToString(n.next_hop) + ' ' + (n.device || '') + ' ' + (n.source || ''),
+        onSelect: (id) => { handleJumpToRow(id); setPaletteOpen(false); },
+        icon: '→',
+        max: 7,
+    };
+
+    const searchActive = family !== 'all' || !!stateFilter;
+
     const pageHeader = (
         <Flex alignItems="center" gap={4} style={{ width: '100%' }}>
             <Text variant="header-1">Neighbours</Text>
-            <Flex grow />
-            <div style={{ flexBasis: 360, flexShrink: 1 }}>
-                <SearchInput
-                    value={search}
-                    onUpdate={(v) => updateParams({ [QP_SEARCH]: v || null })}
-                    placeholder="Search next hop, device, source…"
-                />
-            </div>
+            <button
+                type="button"
+                className="cp-trigger"
+                onClick={() => setPaletteOpen(true)}
+                title="Open command palette (⌘K)"
+            >
+                <Icon data={Magnifier} size={16} />
+                <span className="cp-trigger__placeholder">Search neighbours or type an IP…</span>
+                <kbd className="cp-kbd">⌘K</kbd>
+            </button>
             <Button view="outlined" onClick={() => setCreateTableOpen(true)}>
                 <Icon data={Plus} size={16} />
                 Add Table
@@ -324,12 +584,35 @@ const NeighboursPage: React.FC = () => {
                                 value={family}
                                 onChange={(f) => updateParams({ [QP_FAMILY]: f === 'all' ? null : f })}
                             />
+                            {distinctStates.length > 0 && (
+                                <>
+                                    <div className="nb-toolbar-sep" />
+                                    {distinctStates.map((stateName) => {
+                                        const isActive = stateFilter === stateName;
+                                        const color = STATE_META[stateName]?.color ?? STATE_META['UNKNOWN'].color;
+                                        const count = stateCounts.get(stateName) ?? 0;
+                                        return (
+                                            <button
+                                                key={stateName}
+                                                type="button"
+                                                className={`nb-state-chip${isActive ? ' nb-state-chip--active' : ''}`}
+                                                style={{ '--chip-color': color } as React.CSSProperties}
+                                                onClick={() => updateParams({ [QP_STATE]: isActive ? null : stateName })}
+                                                title={isActive ? `Clear state filter (${stateName})` : `Filter by state: ${stateName}`}
+                                            >
+                                                {stateName}
+                                                <span className="nb-state-chip__badge">{count}</span>
+                                            </button>
+                                        );
+                                    })}
+                                </>
+                            )}
                         </div>
                         <div className="yn-content">
                             <NeighbourTable
                                 rows={visibleRows}
                                 totalCount={allRows.length}
-                                searchActive={search.trim().length > 0 || family !== 'all'}
+                                searchActive={searchActive}
                                 readOnlyNote={
                                     isMergedView ? (
                                         <span className="nb-footer-note">
@@ -347,7 +630,7 @@ const NeighboursPage: React.FC = () => {
                                 onRowClick={handleRowClick}
                                 onEditRow={handleEditRow}
                                 onSelectionChange={setSelectedIds}
-                                emptyMessage={search || family !== 'all' ? 'No neighbours match the current filters.' : 'No neighbours.'}
+                                emptyMessage={searchActive ? 'No neighbours match the current filters.' : 'No neighbours.'}
                                 canEditTable={canEditTable}
                                 canDeleteTable={canDeleteTable}
                                 onEditTable={() => setEditTableOpen(true)}
@@ -357,6 +640,7 @@ const NeighboursPage: React.FC = () => {
                                 isMergedView={isMergedView}
                                 cache={cache}
                                 tables={tables}
+                                flashRowId={flashRowId}
                             />
                         </div>
                     </>
@@ -425,6 +709,15 @@ const NeighboursPage: React.FC = () => {
                     onClose={() => setEditTableOpen(false)}
                     onSave={handleEditTable}
                     tableInfo={activeTableInfo}
+                />
+
+                <CommandPalette<Neighbour>
+                    open={paletteOpen}
+                    onClose={() => setPaletteOpen(false)}
+                    placeholder="Search neighbours or type an IP…"
+                    commands={neighbourCommands}
+                    dynamicCommands={neighbourDynamicCommands}
+                    rowAdapter={neighbourRowAdapter}
                 />
             </div>
         </PageLayout>

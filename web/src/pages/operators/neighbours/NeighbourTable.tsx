@@ -39,6 +39,7 @@ export interface NeighbourTableProps {
     isMergedView?: boolean;
     cache?: Map<string, Neighbour[]>;
     tables?: NeighbourTableInfo[];
+    flashRowId?: string | null;
 }
 
 interface StateBadgeProps {
@@ -150,6 +151,7 @@ export const NeighbourTable: React.FC<NeighbourTableProps> = ({
     isMergedView,
     cache,
     tables,
+    flashRowId,
 }): React.JSX.Element => {
     const columns: Column<Neighbour>[] = [
         {
@@ -320,6 +322,7 @@ export const NeighbourTable: React.FC<NeighbourTableProps> = ({
             editIcon={<Pencil width={14} height={14} />}
             deleteIcon={<TrashBin width={14} height={14} />}
             onRowClick={onRowClick}
+            flashRowId={flashRowId}
             headerActions={headerActions}
             footerSummary={footerText}
             footerExtra={readOnlyNote}

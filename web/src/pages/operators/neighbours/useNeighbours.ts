@@ -20,10 +20,11 @@ export interface UseNeighboursResult {
     removeTable: (name: string) => Promise<void>;
     reloadAll: () => Promise<void>;
     fetchTab: (tabKey: string) => Promise<void>;
+    refreshNow: () => Promise<void>;
 }
 
 /** Loads and manages neighbour tables and their entries with periodic polling. */
-export const useNeighbours = (activeTab: string): UseNeighboursResult => {
+export const useNeighbours = (activeTab: string, paused = false): UseNeighboursResult => {
     const [tables, setTables] = useState<NeighbourTableInfo[]>([]);
     const [cache, setCache] = useState<Map<string, Neighbour[]>>(new Map());
     const [loading, setLoading] = useState(true);
@@ -103,7 +104,7 @@ export const useNeighbours = (activeTab: string): UseNeighboursResult => {
     }, [loadTables, prefetchAll]);
 
     useEffect(() => {
-        if (loading) return;
+        if (loading || paused) return;
         const intervalId = window.setInterval(async () => {
             const tab = activeTabRef.current;
             try {
@@ -114,7 +115,7 @@ export const useNeighbours = (activeTab: string): UseNeighboursResult => {
             loadTables();
         }, REFRESH_INTERVAL_MS);
         return () => window.clearInterval(intervalId);
-    }, [loading, fetchTab, loadTables]);
+    }, [loading, paused, fetchTab, loadTables]);
 
     const addNeighbour = useCallback(async (table: string, entry: Neighbour): Promise<void> => {
         try {
@@ -186,6 +187,11 @@ export const useNeighbours = (activeTab: string): UseNeighboursResult => {
         }
     }, [reloadAll]);
 
+    const refreshNow = useCallback(async (): Promise<void> => {
+        await fetchTab(activeTabRef.current);
+        await loadTables();
+    }, [fetchTab, loadTables]);
+
     return {
         tables,
         cache,
@@ -199,5 +205,6 @@ export const useNeighbours = (activeTab: string): UseNeighboursResult => {
         removeTable,
         reloadAll,
         fetchTab,
+        refreshNow,
     };
 };

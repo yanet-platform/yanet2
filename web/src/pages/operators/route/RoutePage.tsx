@@ -3,14 +3,15 @@ import { Button, Flex, Icon, Text } from '@gravity-ui/uikit';
 import { ArrowRightToLine, Funnel, Magnifier, Plus } from '@gravity-ui/icons';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, SearchInput } from '../../../components';
 import { AddConfigModal, BulkDeleteModal } from '../../_shared/draft';
+import { CommandPalette } from '../../_shared/command-palette';
+import type { Command, RowAdapter } from '../../_shared/command-palette';
 import { API } from '../../../api';
-import { toaster } from '../../../utils';
+import { toaster, parseIPAddress } from '../../../utils';
 import { stringToIPAddress, ipAddressToString } from '../../../utils/netip';
 import { RouteSourceID, type Route } from '../../../api/routes';
 import { useRIB } from './useRIB';
 import { RIBTable } from './RIBTable';
 import RouteDrawer from './RouteDrawer';
-import CommandPalette from './CommandPalette';
 import LookupDrawer from './LookupDrawer';
 import { getRouteId, sortComparators, planRouteSubmit, groupByPrefix, filterByFamily } from './utils';
 import type { RouteSortState, RouteSortableColumn, IPFamily } from './types';
@@ -292,18 +293,106 @@ const RoutePage: React.FC = () => {
         setTimeout(() => setFlashRowId(id), 0);
     }, []);
 
+    const routeCommands: Command[] = [
+        {
+            id: '__add',
+            icon: '+',
+            label: 'Add route',
+            sub: 'Open the add-route drawer',
+            keywords: 'add route insert',
+            onSelect: () => { openAdd(); setPaletteOpen(false); },
+        },
+        {
+            id: '__flush',
+            icon: '⟳',
+            label: 'Flush RIB → FIB',
+            sub: 'Push best routes to the dataplane',
+            keywords: 'flush rib fib push',
+            onSelect: () => { handleFlush(); setPaletteOpen(false); },
+        },
+        {
+            id: '__open_lookup',
+            icon: '⌖',
+            label: 'Open Route Lookup',
+            sub: 'Look up an IP address in the RIB',
+            keywords: 'route lookup ip search',
+            onSelect: () => { setLookupInitialQuery(''); setLookupOpen(true); setPaletteOpen(false); },
+        },
+        {
+            id: '__best_only',
+            icon: '★',
+            label: 'Show best paths only',
+            keywords: 'best paths only filter',
+            onSelect: () => { setBestOnly((v) => !v); setPaletteOpen(false); },
+        },
+        {
+            id: '__conflicts',
+            icon: '⚡',
+            label: 'Show conflicts only',
+            sub: 'Prefixes with more than one candidate route',
+            keywords: 'conflicts duplicate prefix',
+            onSelect: () => { setConflictsOnly((v) => !v); setPaletteOpen(false); },
+        },
+        {
+            id: '__v6',
+            icon: '6',
+            label: 'Filter IPv6 only',
+            keywords: 'ipv6 filter family',
+            onSelect: () => { setFamily('v6'); setPaletteOpen(false); },
+        },
+        {
+            id: '__v4',
+            icon: '4',
+            label: 'Filter IPv4 only',
+            keywords: 'ipv4 filter family',
+            onSelect: () => { setFamily('v4'); setPaletteOpen(false); },
+        },
+        {
+            id: '__clear',
+            icon: '✕',
+            label: 'Clear filters',
+            keywords: 'clear reset filters all',
+            onSelect: () => { handleClearFilters(); setPaletteOpen(false); },
+        },
+    ];
+
+    const routeDynamicCommands = useCallback((q: string): Command[] => {
+        if (!parseIPAddress(q.trim()).ok) return [];
+        const ip = q.trim();
+        return [
+            {
+                id: '__lookup_ip',
+                icon: '⌖',
+                label: `Look up ${ip}`,
+                sub: 'Route Lookup — longest prefix match',
+                onSelect: () => { handleLookupIP(ip); setPaletteOpen(false); },
+            },
+        ];
+    }, [handleLookupIP]);
+
+    const routeRowAdapter: RowAdapter<Route> = {
+        rows: allRows,
+        getId: getRouteId,
+        getLabel: (r) => r.prefix || '(no prefix)',
+        getSub: (r) => ipAddressToString(r.next_hop) || '—',
+        searchText: (r) => (r.prefix || '') + ' ' + ipAddressToString(r.next_hop),
+        onSelect: (id) => { handleJumpToRow(id); setPaletteOpen(false); },
+        icon: '→',
+        max: 7,
+    };
+
     const pageHeader = (
         <Flex alignItems="center" gap={4} style={{ width: '100%' }}>
             <Text variant="header-1">Routing Table</Text>
             <button
                 type="button"
-                className="ro-search-btn"
+                className="cp-trigger"
                 onClick={() => setPaletteOpen(true)}
                 title="Open command palette (⌘K)"
             >
                 <Icon data={Magnifier} size={16} />
-                <span className="ro-search-placeholder">Search or look up an IP…</span>
-                <kbd className="ro-kbd">⌘K</kbd>
+                <span className="cp-trigger__placeholder">Search or look up an IP…</span>
+                <kbd className="cp-kbd">⌘K</kbd>
             </button>
             <Button view="outlined" onClick={handleFlush} disabled={!currentConfig}>
                 <Icon data={ArrowRightToLine} size={16} />
@@ -459,19 +548,13 @@ const RoutePage: React.FC = () => {
                     existingNames={configs}
                 />
 
-                <CommandPalette
+                <CommandPalette<Route>
                     open={paletteOpen}
                     onClose={() => setPaletteOpen(false)}
-                    rows={allRows}
-                    onLookupIP={handleLookupIP}
-                    onAddRoute={openAdd}
-                    onFlush={handleFlush}
-                    onOpenLookup={() => { setLookupInitialQuery(''); setLookupOpen(true); }}
-                    onSetFamily={setFamily}
-                    onToggleBestOnly={() => setBestOnly((v) => !v)}
-                    onToggleConflicts={() => setConflictsOnly((v) => !v)}
-                    onClearFilters={handleClearFilters}
-                    onJumpToRow={handleJumpToRow}
+                    placeholder="Search routes, prefixes, or type an IP…"
+                    commands={routeCommands}
+                    dynamicCommands={routeDynamicCommands}
+                    rowAdapter={routeRowAdapter}
                 />
 
                 <LookupDrawer

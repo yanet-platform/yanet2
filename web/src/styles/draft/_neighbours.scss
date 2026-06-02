@@ -440,9 +440,62 @@
     background: var(--nb-surface-bg);
 }
 
-// Neighbours toolbar row — hosts the family filter below the tabs-row.
+// Neighbours toolbar row — hosts the family filter and state chips below the tabs-row.
 .nb-toolbar {
     @include yn-toolbar;
+    flex-wrap: wrap;
     border-bottom: 1px solid var(--yn-line);
     background: var(--nb-surface-bg, var(--yn-page-bg));
+}
+
+// State filter chips row separator (thin vertical divider between FamilyFilter and chips).
+.nb-toolbar-sep {
+    width: 1px;
+    height: 20px;
+    background: var(--yn-line-2);
+    flex-shrink: 0;
+}
+
+// NUD-state toggle chips — one per distinct state present in the loaded data.
+.nb-state-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 6px 12px;
+    border-radius: var(--yn-r-md);
+    border: none;
+    box-shadow: inset 0 0 0 1px var(--yn-line-2);
+    background: var(--yn-bg-2);
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--yn-text-2);
+    cursor: pointer;
+    transition: background 0.12s, color 0.12s, box-shadow 0.12s;
+    white-space: nowrap;
+    flex-shrink: 0;
+
+    &:hover {
+        color: var(--yn-text);
+    }
+
+    &--active {
+        background: color-mix(in srgb, var(--chip-color, var(--yn-accent)) 14%, transparent);
+        color: var(--chip-color, var(--yn-accent));
+        box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--chip-color, var(--yn-accent)) 30%, transparent);
+    }
+}
+
+.nb-state-chip__badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+    opacity: 0.8;
+    font-family: var(--yn-font-mono);
+    font-variant-numeric: tabular-nums;
 }
