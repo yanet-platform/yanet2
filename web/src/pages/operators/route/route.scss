@@ -8,12 +8,8 @@
 // ─── Toolbar ─────────────────────────────────────────────────────────────────
 
 .ro-toolbar {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 12px 20px;
+    @include yn-toolbar;
     flex-wrap: wrap;
-    flex-shrink: 0;
     border-bottom: 1px solid var(--yn-line);
 }
 
@@ -22,49 +18,6 @@
     align-items: center;
     gap: 8px;
     margin-left: auto;
-}
-
-// ─── Segmented family filter ──────────────────────────────────────────────────
-
-.ro-seg {
-    display: inline-flex;
-    align-items: center;
-    background: var(--yn-bg-2);
-    border-radius: var(--yn-r-md);
-    padding: 3px;
-    gap: 2px;
-    box-shadow: inset 0 0 0 1px var(--yn-line-2);
-    flex-shrink: 0;
-}
-
-.ro-seg__btn {
-    height: 26px;
-    padding: 0 12px;
-    font-size: 12.5px;
-    font-weight: 600;
-    color: var(--yn-text-2);
-    background: transparent;
-    border: none;
-    border-radius: 6px;
-    cursor: pointer;
-    transition: all 0.12s;
-    white-space: nowrap;
-
-    &:hover:not(.ro-seg__btn--active) {
-        background: var(--yn-bg-3);
-        color: var(--yn-text);
-    }
-
-    &--active {
-        background: var(--yn-accent);
-        color: var(--yn-bg-3);
-        font-weight: 600;
-
-        &:hover {
-            background: var(--yn-accent);
-            color: var(--yn-bg-3);
-        }
-    }
 }
 
 // ─── Toggle chips ─────────────────────────────────────────────────────────────

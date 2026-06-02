@@ -1,5 +1,6 @@
 import React from 'react';
 import { ROUTE_SOURCES } from './utils';
+import { FamilyBadge as SharedFamilyBadge } from '../../_shared/table/cells';
 
 /** Inline checkmark SVG for the Best column. */
 const CheckIcon: React.FC = () => (
@@ -83,26 +84,9 @@ export const SourceChip: React.FC<{ source: number | undefined }> = ({ source })
 };
 
 /** Small v4/v6 family badge derived from the prefix string. */
-export const FamilyBadge: React.FC<{ prefix: string }> = ({ prefix }) => {
-    const isV6 = prefix.includes(':');
-    return (
-        <span
-            style={{
-                display: 'inline-block',
-                fontSize: 9.5,
-                fontWeight: 700,
-                fontFamily: 'var(--yn-font-mono)',
-                color: isV6 ? 'var(--g-color-text-info)' : 'var(--g-color-text-warning)',
-                opacity: 0.8,
-                width: 16,
-                flexShrink: 0,
-                whiteSpace: 'nowrap',
-            }}
-        >
-            {isV6 ? 'v6' : 'v4'}
-        </span>
-    );
-};
+export const FamilyBadge: React.FC<{ prefix: string }> = ({ prefix }) => (
+    <SharedFamilyBadge address={prefix} />
+);
 
 /** Badge shown when a prefix has multiple candidate routes. */
 export const ConflictBadge: React.FC<{ count: number }> = ({ count }) => {

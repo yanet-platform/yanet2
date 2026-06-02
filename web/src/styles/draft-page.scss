@@ -272,6 +272,9 @@
 }
 
 // Sticky header row for the virtualized table.
+// Base: flex row with 4px L/R padding — consumed by VirtualDraftTable (FIBTable,
+// PrefixTable) and the legacy ACL/Forward RuleTables that place header cells as
+// direct flex children.
 .yn-vtbl-header {
     display: flex;
     align-items: center;
@@ -280,6 +283,21 @@
     flex: 1 1 auto;
     overflow-x: auto;
     overflow-y: hidden;
+}
+
+// Modifier for the VirtualTable grid shell.  The shell sets overflow/height inline;
+// this resets the base flex/padding so the inner CSS-grid aligns pixel-perfect
+// with the body rows (which also have zero outer horizontal padding).
+// scrollbar-width:none hides the bar while allowing scrollLeft sync via JS.
+.yn-vtbl-header--grid {
+    display: block;
+    padding-left: 0;
+    padding-right: 0;
+    scrollbar-width: none;
+
+    &::-webkit-scrollbar {
+        display: none;
+    }
 }
 
 .yn-th-text {
@@ -923,19 +941,6 @@
 // Neighbours page extensions.
 // Scoped to .yn-page to avoid bleeding into other pages.
 
-// Neighbours-specific header modifier — constrains the header to the visible
-// flex width (no minWidth override) and hides its scrollbar, relying on JS
-// scrollLeft sync from the body scroll event to keep columns aligned.
-.nb-vtbl-header {
-    overflow-x: scroll;
-    min-width: 0 !important;
-    scrollbar-width: none; // Firefox
-
-    &::-webkit-scrollbar {
-        display: none; // Chrome/Safari/Edge
-    }
-}
-
 // Right-side footer note (read-only warning) for the neighbours table.
 .nb-footer-note {
     display: inline-flex;
@@ -946,7 +951,7 @@
     white-space: nowrap;
 }
 
-// Tabs row wrapper — aligns ConfigTabStrip with the live pill.
+// Tabs row wrapper — contains the ConfigTabStrip for neighbours.
 .yn-tabs-row {
     display: flex;
     align-items: center;
@@ -1127,72 +1132,6 @@
     }
 
     strong { color: var(--yn-text); font-weight: 600; }
-}
-
-// Live freshness pill.
-.nb-live-pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    height: 30px;
-    padding: 0 10px;
-    border-radius: var(--yn-r-md);
-    border: 1px solid var(--yn-line-2);
-    background: var(--yn-panel);
-    font-size: 11.5px;
-    color: var(--yn-text-3);
-    flex-shrink: 0;
-
-    &__dot {
-        width: 7px;
-        height: 7px;
-        border-radius: 50%;
-        background: var(--yn-text-3);
-        flex-shrink: 0;
-        position: relative;
-    }
-
-    &__label { white-space: nowrap; }
-
-    &__btn {
-        display: grid;
-        place-items: center;
-        width: 18px;
-        height: 18px;
-        border-radius: var(--yn-r-sm);
-        color: var(--yn-text-3);
-        background: none;
-        border: none;
-        cursor: pointer;
-        font-size: 11px;
-        padding: 0;
-
-        &:hover { background: var(--yn-bg-2); color: var(--yn-text); }
-    }
-
-    &--on {
-        .nb-live-pill__dot {
-            background: var(--g-color-text-positive);
-
-            &::after {
-                content: '';
-                position: absolute;
-                inset: -4px;
-                border-radius: 50%;
-                background: var(--g-color-text-positive);
-                opacity: 0.35;
-                animation: nb-pulse 1.8s ease-out infinite;
-            }
-        }
-
-        .nb-live-pill__label { color: var(--yn-text-2); }
-    }
-}
-
-@keyframes nb-pulse {
-    0%   { transform: scale(0.6); opacity: 0.5; }
-    70%  { transform: scale(1.9); opacity: 0; }
-    100% { opacity: 0; }
 }
 
 // Detail panel — read-only aside using existing yn-drawer chrome.
@@ -1411,4 +1350,125 @@
     &__diff {
         color: var(--g-color-text-warning) !important;
     }
+}
+
+// Neighbours page flush + borderless-tab overrides.
+// Mirrors the .ro-page treatment in route.scss, scoped to .nb-page only.
+
+.yn-page.nb-page {
+    background: var(--yn-page-bg);
+}
+
+.nb-page .yn-tabs-row {
+    border-bottom: none;
+}
+
+.nb-page .yn-tabs-row .yn-tabs {
+    border-bottom: none;
+}
+
+.nb-page .yn-tab--active::after {
+    height: 3px;
+}
+
+.nb-page .yn-tab--active .yn-tab__count {
+    color: var(--yn-accent);
+    background: var(--yn-accent-soft);
+}
+
+.nb-page .yn-content {
+    padding: 0;
+}
+
+.nb-page .yn-table-wrap {
+    background: transparent;
+    border: none;
+    border-radius: 0;
+}
+
+.nb-page .yn-table-header-row {
+    background: transparent;
+    border-top: 1px solid var(--yn-line-2);
+}
+
+.nb-page .yn-vtbl-footer {
+    background: transparent;
+}
+
+// Surface color — mirrors the ro-layout/ro-page pattern from route.scss, scoped to neighbours.
+// The --nb-surface-bg token cascades from .nb-layout to both the header subtree
+// and the .nb-page content subtree, keeping both on the same flat #1C1814 plane.
+.nb-layout {
+    --nb-surface-bg: #1C1814;
+}
+
+// Header sits outside .yn-page so --yn-* tokens are not in scope there.
+// Match route page: same background (#1C1814) and same rendered height (64px).
+.nb-layout .page-layout__header {
+    background: var(--nb-surface-bg);
+    min-height: 64px;
+}
+
+// Two-class specificity beats `.yn-page { background: var(--yn-page-bg) }`.
+.yn-page.nb-page {
+    background: var(--nb-surface-bg);
+}
+
+// Tab strip and tabs-row sit on the same flat surface.
+.nb-page .yn-tabs-row {
+    background: var(--nb-surface-bg);
+}
+
+.nb-page .yn-tabs {
+    background: var(--nb-surface-bg);
+}
+
+// Shared segmented family filter — yn-seg / yn-seg__btn.
+// Used by both the route page and the neighbours page.
+.yn-seg {
+    display: inline-flex;
+    align-items: center;
+    background: var(--yn-bg-2);
+    border-radius: var(--yn-r-md);
+    padding: 3px;
+    gap: 2px;
+    box-shadow: inset 0 0 0 1px var(--yn-line-2);
+    flex-shrink: 0;
+}
+
+.yn-seg__btn {
+    height: 26px;
+    padding: 0 12px;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--yn-text-2);
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.12s;
+    white-space: nowrap;
+
+    &:hover:not(.yn-seg__btn--active) {
+        background: var(--yn-bg-3);
+        color: var(--yn-text);
+    }
+
+    &--active {
+        background: var(--yn-accent);
+        color: var(--yn-bg-3);
+        font-weight: 600;
+
+        &:hover {
+            background: var(--yn-accent);
+            color: var(--yn-bg-3);
+        }
+    }
+}
+
+// Neighbours toolbar row — hosts the family filter below the tabs-row.
+.nb-toolbar {
+    @include yn-toolbar;
+    border-bottom: 1px solid var(--yn-line);
+    background: var(--nb-surface-bg, var(--yn-page-bg));
 }

@@ -14,6 +14,7 @@ import CommandPalette from './CommandPalette';
 import LookupDrawer from './LookupDrawer';
 import { getRouteId, sortComparators, planRouteSubmit, groupByPrefix, filterByFamily } from './utils';
 import type { RouteSortState, RouteSortableColumn, IPFamily } from './types';
+import { FamilyFilter } from '../../_shared/table/FamilyFilter';
 import '../../../styles/draft-page.scss';
 import './route.scss';
 
@@ -344,18 +345,7 @@ const RoutePage: React.FC = () => {
                             onAddConfig={() => setAddConfigOpen(true)}
                         />
                         <div className="ro-toolbar">
-                            <div className="ro-seg">
-                                {(['all', 'v4', 'v6'] as IPFamily[]).map((f) => (
-                                    <button
-                                        key={f}
-                                        type="button"
-                                        className={`ro-seg__btn${family === f ? ' ro-seg__btn--active' : ''}`}
-                                        onClick={() => setFamily(f)}
-                                    >
-                                        {f === 'all' ? 'All' : f === 'v4' ? 'IPv4' : 'IPv6'}
-                                    </button>
-                                ))}
-                            </div>
+                            <FamilyFilter value={family} onChange={setFamily} />
                             <button
                                 type="button"
                                 className={`ro-chip ro-chip--best${bestOnly ? ' ro-chip--active' : ''}`}

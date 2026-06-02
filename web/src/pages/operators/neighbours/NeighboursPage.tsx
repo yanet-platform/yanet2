@@ -1,10 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Button, Flex, Icon, Text } from '@gravity-ui/uikit';
 import { Plus, Layers } from '@gravity-ui/icons';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, SearchInput } from '../../../components';
 import { BulkDeleteModal, DeleteConfigModal } from '../../_shared/draft';
-import { stringToIPAddress } from '../../../utils/netip';
+import { stringToIPAddress, ipAddressToString } from '../../../utils/netip';
 import type { Neighbour, NeighbourTableInfo } from '../../../api/neighbours';
 import { NeighbourTable } from './NeighbourTable';
 import NeighbourPanel from './NeighbourPanel';
@@ -14,12 +14,20 @@ import { useNeighbours } from './useNeighbours';
 import { getNeighbourId, isSortableColumn, isSortDirection, sortComparators } from './utils';
 import { MERGED_TAB, DEFAULT_SORT } from './types';
 import type { SortState, SortableColumn } from './types';
+import { FamilyFilter, type IPFamily } from '../../_shared/table/FamilyFilter';
 import '../../../styles/draft-page.scss';
 
 const QP_TAB = 'tab';
 const QP_SORT = 'sort';
 const QP_ORDER = 'order';
 const QP_SEARCH = 'search';
+const QP_FAMILY = 'family';
+
+const parseFamily = (params: URLSearchParams): IPFamily => {
+    const v = params.get(QP_FAMILY);
+    if (v === 'v4' || v === 'v6') return v;
+    return 'all';
+};
 
 const parseSortState = (params: URLSearchParams): SortState => {
     const col = params.get(QP_SORT);
@@ -46,14 +54,12 @@ const NeighboursPage: React.FC = () => {
     const activeTab = parseTab(searchParams);
     const sortState = parseSortState(searchParams);
     const search = parseSearch(searchParams);
+    const family = parseFamily(searchParams);
 
     const {
         tables,
         cache,
         loading,
-        lastSync,
-        paused,
-        setPaused,
         addNeighbour,
         updateNeighbour,
         removeNeighbours,
@@ -78,14 +84,6 @@ const NeighboursPage: React.FC = () => {
     const [createTableOpen, setCreateTableOpen] = useState(false);
     const [editTableOpen, setEditTableOpen] = useState(false);
     const [deleteTableOpen, setDeleteTableOpen] = useState(false);
-    const [activeRowId, setActiveRowId] = useState<string | null>(null);
-    const [editingRowId, setEditingRowId] = useState<string | null>(null);
-    const [tick, setTick] = useState(0);
-
-    useEffect(() => {
-        const id = window.setInterval(() => setTick((t) => t + 1), 1000);
-        return () => window.clearInterval(id);
-    }, []);
 
     const isMergedView = activeTab === MERGED_TAB;
     const activeTableInfo: NeighbourTableInfo | null = tables.find((t) => t.name === activeTab) ?? null;
@@ -111,8 +109,6 @@ const NeighboursPage: React.FC = () => {
         const tab = cfg === MERGED_TAB ? MERGED_TAB : cfg;
         updateParams({ [QP_TAB]: tab === MERGED_TAB ? null : tab });
         setSelectedIds(new Set());
-        setActiveRowId(null);
-        setEditingRowId(null);
         setPanel((prev) => ({ ...prev, open: false }));
         fetchTab(tab).catch(() => {});
     }, [updateParams, fetchTab]);
@@ -127,6 +123,12 @@ const NeighboursPage: React.FC = () => {
 
     const visibleRows = useMemo(() => {
         let res = allRows;
+        if (family !== 'all') {
+            res = res.filter((n) => {
+                const addr = ipAddressToString(n.next_hop);
+                return family === 'v6' ? addr.includes(':') : !addr.includes(':');
+            });
+        }
         const q = search.trim().toLowerCase();
         if (q) {
             res = res.filter((n) =>
@@ -140,7 +142,7 @@ const NeighboursPage: React.FC = () => {
             res = [...res].sort(sortState.direction === 'desc' ? (a, b) => cmp(b, a) : cmp);
         }
         return res;
-    }, [allRows, search, sortState]);
+    }, [allRows, search, sortState, family]);
 
     const counts = useMemo((): Map<string, number> => {
         const m = new Map<string, number>();
@@ -153,31 +155,21 @@ const NeighboursPage: React.FC = () => {
 
     const openAdd = useCallback((): void => {
         setPanel({ open: true, mode: 'add', neighbour: null });
-        setEditingRowId(null);
     }, []);
 
     const handleEditRow = useCallback((id: string): void => {
         const neighbour = allRows.find((n) => getNeighbourId(n) === id) || null;
         setPanel({ open: true, mode: 'edit', neighbour });
-        setActiveRowId(id);
-        setEditingRowId(id);
     }, [allRows]);
 
     const handleClosePanel = useCallback((): void => {
         setPanel((prev) => ({ ...prev, open: false }));
-        setEditingRowId(null);
     }, []);
 
     const handleRowClick = useCallback((id: string): void => {
-        setActiveRowId(id);
         const neighbour = allRows.find((n) => getNeighbourId(n) === id) || null;
         const mode = isMergedView ? 'view' : 'edit';
         setPanel({ open: true, mode, neighbour });
-        if (mode === 'edit') {
-            setEditingRowId(id);
-        } else {
-            setEditingRowId(null);
-        }
     }, [allRows, isMergedView]);
 
     const handleSubmitNeighbour = useCallback(async (table: string, entry: Neighbour): Promise<void> => {
@@ -251,15 +243,7 @@ const NeighboursPage: React.FC = () => {
         updateParams({ [QP_TAB]: 'static' });
         fetchTab('static').catch(() => {});
         setPanel({ open: true, mode: 'add', neighbour });
-        setEditingRowId(null);
     }, [updateParams, fetchTab]);
-
-    const syncAgoLabel = useMemo((): string => {
-        const s = Math.max(0, Math.floor((Date.now() - lastSync) / 1000));
-        if (s < 5) return 'just now';
-        if (s < 60) return `${s}s ago`;
-        return `${Math.floor(s / 60)}m ago`;
-    }, [lastSync, tick]);
 
     const displayLabel = (cfg: string): string => cfg === MERGED_TAB ? 'Merged' : cfg;
 
@@ -290,15 +274,15 @@ const NeighboursPage: React.FC = () => {
 
     if (loading) {
         return (
-            <PageLayout header={pageHeader}>
+            <PageLayout header={pageHeader} className="nb-layout">
                 <PageLoader loading size="l" />
             </PageLayout>
         );
     }
 
     return (
-        <PageLayout header={pageHeader}>
-            <div className="yn-page">
+        <PageLayout header={pageHeader} className="nb-layout">
+            <div className="yn-page nb-page">
                 {tables.length === 0 ? (
                     <div className="yn-empty-page">
                         <div className="yn-empty-page__message">No neighbour tables found.</div>
@@ -334,26 +318,18 @@ const NeighboursPage: React.FC = () => {
                                     ) : undefined
                                 }
                             />
-                            <div className={`nb-live-pill${paused ? '' : ' nb-live-pill--on'}`}>
-                                <span className="nb-live-pill__dot" />
-                                <span className="nb-live-pill__label">
-                                    {paused ? 'Paused' : `Live · synced ${syncAgoLabel}`}
-                                </span>
-                                <button
-                                    type="button"
-                                    className="nb-live-pill__btn"
-                                    title={paused ? 'Resume polling' : 'Pause polling'}
-                                    onClick={() => setPaused(!paused)}
-                                >
-                                    {paused ? '▶' : '⏸'}
-                                </button>
-                            </div>
+                        </div>
+                        <div className="nb-toolbar">
+                            <FamilyFilter
+                                value={family}
+                                onChange={(f) => updateParams({ [QP_FAMILY]: f === 'all' ? null : f })}
+                            />
                         </div>
                         <div className="yn-content">
                             <NeighbourTable
                                 rows={visibleRows}
                                 totalCount={allRows.length}
-                                searchActive={search.trim().length > 0}
+                                searchActive={search.trim().length > 0 || family !== 'all'}
                                 readOnlyNote={
                                     isMergedView ? (
                                         <span className="nb-footer-note">
@@ -366,14 +342,12 @@ const NeighboursPage: React.FC = () => {
                                     ) : undefined
                                 }
                                 selectedIds={selectedIds}
-                                activeRowId={activeRowId}
-                                editingRowId={editingRowId}
                                 sortState={sortState}
                                 onSort={handleSort}
                                 onRowClick={handleRowClick}
                                 onEditRow={handleEditRow}
                                 onSelectionChange={setSelectedIds}
-                                emptyMessage={search ? 'No neighbours match your search.' : 'No neighbours.'}
+                                emptyMessage={search || family !== 'all' ? 'No neighbours match the current filters.' : 'No neighbours.'}
                                 canEditTable={canEditTable}
                                 canDeleteTable={canDeleteTable}
                                 onEditTable={() => setEditTableOpen(true)}
