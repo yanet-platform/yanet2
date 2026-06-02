@@ -5,6 +5,7 @@ resolver = "2"
 members = [
     "common/rust/commonpb",
     "common/rust/filterpb",
+    "common/rust/readinesspb",
     "common/rust/ynpb",
     "cli/core",
     "cli/modules/common",
@@ -24,6 +25,7 @@ members = [
     "modules/route-mpls/cli",
     "devices/plain/cli",
     "devices/vlan/cli",
+    "operators/forward/cli",
     "operators/pipeline/cli",
     "operators/route/cli/route",
     "operators/route/cli/neighbour",

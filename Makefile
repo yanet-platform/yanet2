@@ -34,6 +34,7 @@ CLI_MODULES := \
 	forward \
 	nat64 \
 	pdump \
+	operator-forward \
 	operator-neighbour \
 	operator-pipeline \
 	operator-route

@@ -3338,6 +3338,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "yanet-cli-operator-forward"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "clap_complete",
+ "colored",
+ "log",
+ "prost",
+ "prost-types",
+ "tabled",
+ "tokio",
+ "tonic",
+ "tonic-build",
+ "yanet-cli",
+ "yanet-readinesspb",
+]
+
+[[package]]
 name = "yanet-cli-operator-neighbour"
 version = "0.1.0"
 dependencies = [
@@ -3488,6 +3506,17 @@ dependencies = [
  "prost",
  "serde",
  "serde_json",
+ "tonic",
+ "tonic-build",
+]
+
+[[package]]
+name = "yanet-readinesspb"
+version = "0.1.0"
+dependencies = [
+ "prost",
+ "prost-types",
+ "serde",
  "tonic",
  "tonic-build",
 ]
