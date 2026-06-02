@@ -1,18 +1,16 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render, screen, cleanup, fireEvent } from '@testing-library/react';
-import BulkDeleteModal from './BulkDeleteModal';
+import DeleteConfigModal from './DeleteConfigModal';
 
-describe('BulkDeleteModal', () => {
+describe('DeleteConfigModal', () => {
     afterEach(() => {
         cleanup();
     });
 
     it('renders nothing when open is false', () => {
         const { container } = render(
-            <BulkDeleteModal
+            <DeleteConfigModal
                 open={false}
-                count={3}
-                itemNoun="route"
                 configName="main"
                 onClose={() => {}}
                 onConfirm={() => {}}
@@ -21,57 +19,53 @@ describe('BulkDeleteModal', () => {
         expect(container.firstChild).toBeNull();
     });
 
-    it('shows "This action cannot be undone" when immediate is true', () => {
-        render(
-            <BulkDeleteModal
+    it('shows "Delete config" title by default', () => {
+        const { container } = render(
+            <DeleteConfigModal
                 open
-                count={2}
-                itemNoun="route"
                 configName="main"
                 onClose={() => {}}
                 onConfirm={() => {}}
-                immediate
             />,
         );
-        expect(screen.getByText(/This action cannot be undone/i)).toBeInTheDocument();
+        const title = container.querySelector('.yn-modal__title');
+        expect(title?.textContent).toBe('Delete config');
     });
 
-    it('shows draft staging text when immediate is omitted', () => {
-        render(
-            <BulkDeleteModal
+    it('shows "Delete table" title when noun="table"', () => {
+        const { container } = render(
+            <DeleteConfigModal
                 open
-                count={2}
-                itemNoun="route"
-                configName="main"
+                configName="my-table"
                 onClose={() => {}}
                 onConfirm={() => {}}
+                noun="table"
             />,
         );
-        expect(screen.getByText(/Changes are staged in the draft/i)).toBeInTheDocument();
+        const title = container.querySelector('.yn-modal__title');
+        expect(title?.textContent).toBe('Delete table');
     });
 
-    it('shows draft staging text when immediate is explicitly false', () => {
-        render(
-            <BulkDeleteModal
+    it('uses the noun in the body text', () => {
+        const { container } = render(
+            <DeleteConfigModal
                 open
-                count={2}
-                itemNoun="route"
-                configName="main"
+                configName="my-table"
                 onClose={() => {}}
                 onConfirm={() => {}}
-                immediate={false}
+                noun="table"
             />,
         );
-        expect(screen.getByText(/Changes are staged in the draft/i)).toBeInTheDocument();
+        const body = container.querySelector('.yn-modal__body p');
+        expect(body?.textContent).toMatch(/Delete table/);
+        expect(screen.getByText('my-table')).toBeInTheDocument();
     });
 
     it('calls onConfirm when Ctrl+Enter is pressed', () => {
         const onConfirm = vi.fn();
         render(
-            <BulkDeleteModal
+            <DeleteConfigModal
                 open
-                count={3}
-                itemNoun="route"
                 configName="main"
                 onClose={() => {}}
                 onConfirm={onConfirm}
@@ -84,10 +78,8 @@ describe('BulkDeleteModal', () => {
     it('calls onConfirm when Cmd+Enter is pressed', () => {
         const onConfirm = vi.fn();
         render(
-            <BulkDeleteModal
+            <DeleteConfigModal
                 open
-                count={3}
-                itemNoun="route"
                 configName="main"
                 onClose={() => {}}
                 onConfirm={onConfirm}
@@ -100,10 +92,8 @@ describe('BulkDeleteModal', () => {
     it('calls onClose when Escape is pressed', () => {
         const onClose = vi.fn();
         render(
-            <BulkDeleteModal
+            <DeleteConfigModal
                 open
-                count={3}
-                itemNoun="route"
                 configName="main"
                 onClose={onClose}
                 onConfirm={() => {}}
@@ -116,10 +106,8 @@ describe('BulkDeleteModal', () => {
     it('does not call onConfirm when dialog is closed and Ctrl+Enter is pressed', () => {
         const onConfirm = vi.fn();
         render(
-            <BulkDeleteModal
+            <DeleteConfigModal
                 open={false}
-                count={3}
-                itemNoun="route"
                 configName="main"
                 onClose={() => {}}
                 onConfirm={onConfirm}
@@ -132,10 +120,8 @@ describe('BulkDeleteModal', () => {
     it('does not call onClose when dialog is closed and Escape is pressed', () => {
         const onClose = vi.fn();
         render(
-            <BulkDeleteModal
+            <DeleteConfigModal
                 open={false}
-                count={3}
-                itemNoun="route"
                 configName="main"
                 onClose={onClose}
                 onConfirm={() => {}}
@@ -143,5 +129,49 @@ describe('BulkDeleteModal', () => {
         );
         fireEvent.keyDown(document, { key: 'Escape' });
         expect(onClose).not.toHaveBeenCalled();
+    });
+
+    it('stops propagation to window on Ctrl+Enter so draft page shortcuts are not triggered', () => {
+        const onConfirm = vi.fn();
+        const onClose = vi.fn();
+        const windowSpy = vi.fn();
+        window.addEventListener('keydown', windowSpy);
+        try {
+            render(
+                <DeleteConfigModal
+                    open
+                    configName="main"
+                    onClose={onClose}
+                    onConfirm={onConfirm}
+                />,
+            );
+            fireEvent.keyDown(document, { key: 'Enter', ctrlKey: true, bubbles: true });
+            expect(onConfirm).toHaveBeenCalledTimes(1);
+            expect(windowSpy).not.toHaveBeenCalled();
+        } finally {
+            window.removeEventListener('keydown', windowSpy);
+        }
+    });
+
+    it('stops propagation to window on Escape so draft page shortcuts are not triggered', () => {
+        const onConfirm = vi.fn();
+        const onClose = vi.fn();
+        const windowSpy = vi.fn();
+        window.addEventListener('keydown', windowSpy);
+        try {
+            render(
+                <DeleteConfigModal
+                    open
+                    configName="main"
+                    onClose={onClose}
+                    onConfirm={onConfirm}
+                />,
+            );
+            fireEvent.keyDown(document, { key: 'Escape', bubbles: true });
+            expect(onClose).toHaveBeenCalledTimes(1);
+            expect(windowSpy).not.toHaveBeenCalled();
+        } finally {
+            window.removeEventListener('keydown', windowSpy);
+        }
     });
 });

@@ -687,6 +687,7 @@ const NeighboursPage: React.FC = () => {
                     configName={activeTableInfo?.name || ''}
                     onClose={() => setDeleteTableOpen(false)}
                     onConfirm={handleDeleteTable}
+                    noun="table"
                 />
 
                 <NeighbourPanel

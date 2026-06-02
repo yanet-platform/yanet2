@@ -1,4 +1,5 @@
 import React from 'react';
+import { useDialogKeyboardShortcut } from '../../../hooks';
 
 interface BulkDeleteModalProps {
     open: boolean;
@@ -21,6 +22,7 @@ const BulkDeleteModal: React.FC<BulkDeleteModalProps> = ({
     onConfirm,
     immediate = false,
 }) => {
+    useDialogKeyboardShortcut({ open, canSubmit: true, onConfirm, onCancel: onClose });
     if (!open) return null;
     return (
         <div className="yn-modal-backdrop" onClick={onClose}>
