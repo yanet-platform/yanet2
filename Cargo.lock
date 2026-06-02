@@ -3399,6 +3399,7 @@ dependencies = [
  "log",
  "netip",
  "prost",
+ "prost-types",
  "serde",
  "tabled",
  "tokio",
@@ -3406,6 +3407,7 @@ dependencies = [
  "tonic-build",
  "yanet-cli",
  "yanet-commonpb",
+ "yanet-readinesspb",
 ]
 
 [[package]]

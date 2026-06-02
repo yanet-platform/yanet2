@@ -2,6 +2,7 @@ use core::error::Error;
 
 pub fn main() -> Result<(), Box<dyn Error>> {
     println!("cargo:rerun-if-changed=../../operatorpb/v1/route.proto");
+    println!("cargo:rerun-if-changed=../../operatorpb/v1/readiness.proto");
 
     tonic_build::configure()
         .emit_rerun_if_changed(false)
@@ -20,8 +21,12 @@ pub fn main() -> Result<(), Box<dyn Error>> {
             "#[serde(serialize_with = \"crate::serialize_ip_addr\")]",
         )
         .extern_path(".commonpb", "::commonpb::pb")
+        .extern_path(".readinesspb", "::readinesspb::pb")
         .compile_protos(
-            &["../../../../operators/route/operatorpb/v1/route.proto"],
+            &[
+                "../../../../operators/route/operatorpb/v1/route.proto",
+                "../../../../operators/route/operatorpb/v1/readiness.proto",
+            ],
             &["../../../../"],
         )
         .map_err(Into::into)
