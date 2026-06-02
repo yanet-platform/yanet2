@@ -44,11 +44,9 @@ func NewReadiness(gatewayIDs []string) *Readiness {
 
 // Observe records the outcome of one apply attempt for the named gateway.
 //
-// When err is nil the scope transitions to STATE_READY with no reasons.
-// When err is non-nil the scope transitions to STATE_NOT_READY with an
-// APPLY_FAILED reason carrying the error message. The observed_at timestamp
-// is always updated; last_transition_time is updated only when the state
-// value changes.
+// A failed apply holds the scope at DEGRADED when it was previously applied,
+// and drops to NOT_READY only when it was never applied. observed_at always
+// advances; last_transition_time changes only on a state transition.
 func (m *Readiness) Observe(gatewayID string, err error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -68,8 +66,15 @@ func (m *Readiness) Observe(gatewayID string, err error) {
 	if err == nil {
 		next = readinesspb.State_STATE_READY
 	} else {
-		next = readinesspb.State_STATE_NOT_READY
 		reasons = []*readinesspb.Reason{{Code: "APPLY_FAILED", Message: err.Error()}}
+		switch s.state {
+		case readinesspb.State_STATE_READY, readinesspb.State_STATE_DEGRADED:
+			// Last successfully applied state is still live — hold at DEGRADED.
+			next = readinesspb.State_STATE_DEGRADED
+		default:
+			// Never successfully applied — no valid state to fall back to.
+			next = readinesspb.State_STATE_NOT_READY
+		}
 	}
 
 	if s.observedAt.IsZero() || s.state != next {

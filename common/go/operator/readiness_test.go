@@ -39,8 +39,9 @@ func TestReadiness_Transitions(t *testing.T) {
 			wantState:     readinesspb.State_STATE_READY,
 			wantReasonLen: 0,
 		},
+		// From UNKNOWN (never programmed), a failure must yield NOT_READY.
 		{
-			name:          "failure -> NOT_READY with APPLY_FAILED",
+			name:          "UNKNOWN + failure -> NOT_READY with APPLY_FAILED",
 			observeErr:    applyErr,
 			wantState:     readinesspb.State_STATE_NOT_READY,
 			wantReasonLen: 1,
@@ -71,6 +72,93 @@ func TestReadiness_Transitions(t *testing.T) {
 	}
 }
 
+// TestReadiness_ObserveHoldOnRegression verifies the state-aware Observe
+// semantics: a failure from READY or DEGRADED holds at DEGRADED (last-good
+// state live), while a failure from UNKNOWN or NOT_READY produces NOT_READY.
+func TestReadiness_ObserveHoldOnRegression(t *testing.T) {
+	boom := errors.New("push failed")
+
+	tests := []struct {
+		name       string
+		seed       func(r *operator.Readiness) // sets up pre-condition
+		wantState  readinesspb.State
+		wantReason string
+	}{
+		{
+			name:       "UNKNOWN + err -> NOT_READY",
+			seed:       func(_ *operator.Readiness) {},
+			wantState:  readinesspb.State_STATE_NOT_READY,
+			wantReason: "APPLY_FAILED",
+		},
+		{
+			name: "READY + err -> DEGRADED",
+			seed: func(r *operator.Readiness) {
+				r.Observe("gw", nil) // UNKNOWN -> READY
+			},
+			wantState:  readinesspb.State_STATE_DEGRADED,
+			wantReason: "APPLY_FAILED",
+		},
+		{
+			name: "DEGRADED + err -> DEGRADED",
+			seed: func(r *operator.Readiness) {
+				r.Observe("gw", nil)  // UNKNOWN -> READY
+				r.Observe("gw", boom) // READY -> DEGRADED
+			},
+			wantState:  readinesspb.State_STATE_DEGRADED,
+			wantReason: "APPLY_FAILED",
+		},
+		{
+			name: "NOT_READY + err -> NOT_READY",
+			seed: func(r *operator.Readiness) {
+				r.Observe("gw", boom) // UNKNOWN -> NOT_READY
+			},
+			wantState:  readinesspb.State_STATE_NOT_READY,
+			wantReason: "APPLY_FAILED",
+		},
+		{
+			name: "DEGRADED + ok -> READY",
+			seed: func(r *operator.Readiness) {
+				r.Observe("gw", nil)  // UNKNOWN -> READY
+				r.Observe("gw", boom) // READY -> DEGRADED
+			},
+			wantState:  readinesspb.State_STATE_READY,
+			wantReason: "",
+		},
+		{
+			name: "NOT_READY + ok -> READY",
+			seed: func(r *operator.Readiness) {
+				r.Observe("gw", boom) // UNKNOWN -> NOT_READY
+			},
+			wantState:  readinesspb.State_STATE_READY,
+			wantReason: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := operator.NewReadiness([]string{"gw"})
+			tt.seed(r)
+
+			var finalErr error
+			if tt.wantState != readinesspb.State_STATE_READY {
+				finalErr = boom
+			}
+			r.Observe("gw", finalErr)
+
+			resp := r.Ready(&readinesspb.ReadyRequest{})
+			require.Len(t, resp.Scopes, 1)
+			s := resp.Scopes[0]
+			assert.Equal(t, tt.wantState, s.State)
+			if tt.wantReason != "" {
+				require.Len(t, s.Reasons, 1)
+				assert.Equal(t, tt.wantReason, s.Reasons[0].Code)
+			} else {
+				assert.Empty(t, s.Reasons)
+			}
+		})
+	}
+}
+
 func TestReadiness_LastTransitionTime_OnlyChangesOnStateChange(t *testing.T) {
 	r := operator.NewReadiness([]string{"gw-a"})
 
@@ -93,14 +181,14 @@ func TestReadiness_LastTransitionTime_OnlyChangesOnStateChange(t *testing.T) {
 	// ensure it is not before the first observation.
 	assert.False(t, obs2.Before(obs1))
 
-	// Third observation with failure (READY -> NOT_READY): ltt must change.
+	// Third observation with failure (READY -> DEGRADED): ltt must change.
 	r.Observe("gw-a", errors.New("boom"))
 	resp3 := r.Ready(&readinesspb.ReadyRequest{})
 	require.Len(t, resp3.Scopes, 1)
 	ltt3 := resp3.Scopes[0].LastTransitionTime.AsTime()
 
 	assert.True(t, ltt3.Equal(ltt2) || ltt3.After(ltt2),
-		"last_transition_time must advance on READY -> NOT_READY")
+		"last_transition_time must advance on READY -> DEGRADED")
 }
 
 func TestReadiness_ScopeFilter(t *testing.T) {

@@ -23,6 +23,10 @@ const (
 	// defaultSampleInterval is the period between rate samples taken by the
 	// RIB readiness helper.
 	defaultSampleInterval = 1 * time.Second
+
+	// defaultReconnectGrace is the default time after a BIRD session ends
+	// before the bird-session reason flips from RECONNECTING to DOWN.
+	defaultReconnectGrace = 15 * time.Second
 )
 
 const (
@@ -69,6 +73,14 @@ type ReadinessConfig struct {
 	// SampleInterval is the period at which the rate helper samples the
 	// RIB update counter.
 	SampleInterval time.Duration `yaml:"sample_interval"`
+
+	// ReconnectGrace is a diagnostics-only duration.
+	//
+	// After a BIRD session ends, the bird-session scope reason flips from
+	// RECONNECTING to DOWN once this grace period elapses without a new
+	// session. It never changes the State (bird-session never reaches
+	// NOT_READY) and has no correctness coupling with RIBTTL.
+	ReconnectGrace time.Duration `yaml:"reconnect_grace"`
 }
 
 func (m *Config) Default() {
@@ -123,6 +135,7 @@ func DefaultConfig() *Config {
 			RateThreshold:   defaultRateThreshold,
 			StabilityWindow: defaultStabilityWindow,
 			SampleInterval:  defaultSampleInterval,
+			ReconnectGrace:  defaultReconnectGrace,
 		},
 	}
 }

@@ -17,6 +17,15 @@ import (
 	"github.com/yanet-platform/yanet2/operators/route/operatorpb/v1"
 )
 
+// ribReadiness drives the rib readiness scope (and, when BIRD is expected,
+// the bird-session scope) from FeedRIB session signals and a sampling loop.
+type ribReadiness interface {
+	OnSessionStart(name string, sessionID uint64)
+	OnUpdate(n int)
+	OnSessionEnd(name string, sessionID uint64)
+	Run(ctx context.Context) error
+}
+
 const (
 	// staticTablePriority is the default priority assigned to entries in
 	// the built-in "static" neighbour table.
@@ -50,12 +59,15 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 	metrics := NewMetrics()
 
 	// Build the readiness tracker scope list: one gateway scope per gateway,
-	// plus a neighbours scope and a rib scope.
-	scopeNames := make([]string, 0, len(cfg.Gateways)+2)
+	// plus a neighbours scope, a rib scope, and optionally a bird-session scope.
+	scopeNames := make([]string, 0, len(cfg.Gateways)+3)
 	for _, gw := range cfg.Gateways {
 		scopeNames = append(scopeNames, "gateway:"+gw.Name)
 	}
 	scopeNames = append(scopeNames, "neighbours", "rib")
+	if cfg.Readiness.ExpectBird {
+		scopeNames = append(scopeNames, "bird-session")
+	}
 	tracker := operator.NewReadiness(scopeNames)
 
 	neighTable := neigh.NewNeighTable()
@@ -64,17 +76,33 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 	}
 
 	// Propagate the neighbours scope based on netlink monitor config.
-	var neighOnSynced neigh.Option
+	var neighOpts []neigh.Option
 	if cfg.NetlinkMonitor.Disabled {
 		tracker.Set("neighbours", readinesspb.State_STATE_READY)
-		neighOnSynced = neigh.WithOnSynced(func() {})
+		neighOpts = []neigh.Option{neigh.WithOnSynced(func() {})}
 	} else {
-		neighOnSynced = neigh.WithOnSynced(func() {
-			tracker.Set("neighbours", readinesspb.State_STATE_READY)
-		})
+		// Seed the neighbours scope at NOT_READY(SYNCING) before the monitor starts.
+		tracker.Set("neighbours",
+			readinesspb.State_STATE_NOT_READY,
+			&readinesspb.Reason{Code: "SYNCING"},
+		)
+		neighOpts = []neigh.Option{
+			neigh.WithOnSynced(func() {
+				tracker.Set("neighbours", readinesspb.State_STATE_READY)
+			}),
+			neigh.WithOnError(func(err error) {
+				tracker.Set("neighbours",
+					readinesspb.State_STATE_DEGRADED,
+					&readinesspb.Reason{Code: "RESYNC", Message: err.Error()},
+				)
+			}),
+			neigh.WithOnResynced(func() {
+				tracker.Set("neighbours", readinesspb.State_STATE_READY)
+			}),
+		}
 	}
 
-	neighMonitor, err := newNeighbourMonitor(cfg, neighTable, log, neighOnSynced)
+	neighMonitor, err := newNeighbourMonitor(cfg, neighTable, log, neighOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create neighbour monitor: %w", err)
 	}
@@ -83,36 +111,18 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 	source := NewRouteSource(neighTable, routeRIBStore)
 	wake := source.WakeFunc()
 
-	// Build the RIB readiness helper when BIRD is expected; otherwise mark the
-	// rib scope ready immediately.
 	moduleName := cfg.Function.Module.Unwrap()
-	var ribHelper *ribReadinessHelper
-	var ribRouteServiceOpts []RouteServiceOption
-	if !cfg.Readiness.ExpectBird {
-		tracker.Set("rib", readinesspb.State_STATE_READY)
-	} else {
-		ribHelper = newRIBReadinessHelper(
-			cfg.Readiness,
-			routeRIBStore,
-			moduleName,
-			tracker,
-			log,
-		)
-		ribRouteServiceOpts = []RouteServiceOption{
-			WithRouteServiceOnRIBSessionStart(ribHelper.OnSessionStart),
-			WithRouteServiceOnRIBUpdate(ribHelper.OnUpdate),
-			WithRouteServiceOnRIBSessionEnd(ribHelper.OnSessionEnd),
-		}
-	}
+	ribHelper := newRIBReadiness(cfg.Readiness, routeRIBStore, moduleName, tracker, log)
 
 	routeSvc := NewRouteService(
 		neighTable,
-		append([]RouteServiceOption{
-			WithRouteServiceRIBStore(routeRIBStore),
-			WithRouteServiceRIBTTL(ribTTL(cfg)),
-			WithRouteServiceOnChanged(wake),
-			WithRouteServiceLog(log),
-		}, ribRouteServiceOpts...)...,
+		WithRouteServiceRIBStore(routeRIBStore),
+		WithRouteServiceRIBTTL(ribTTL(cfg)),
+		WithRouteServiceOnChanged(wake),
+		WithRouteServiceLog(log),
+		WithRouteServiceOnRIBSessionStart(ribHelper.OnSessionStart),
+		WithRouteServiceOnRIBUpdate(ribHelper.OnUpdate),
+		WithRouteServiceOnRIBSessionEnd(ribHelper.OnSessionEnd),
 	)
 
 	neighbourSvc := NewNeighbourService(
@@ -173,8 +183,6 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 		},
 	}
 
-	// Build the worker list: always include the neighbour monitor and the
-	// drain worker; add the RIB readiness ticker when BIRD is expected.
 	workers := []operator.Runner{
 		neighbourMonitorRunner(neighMonitor),
 		func(ctx context.Context) error {
@@ -182,9 +190,7 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 			tracker.Drain()
 			return nil
 		},
-	}
-	if ribHelper != nil {
-		workers = append(workers, ribHelper.Run)
+		ribHelper.Run,
 	}
 
 	app := operator.NewOperator(

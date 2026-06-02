@@ -73,7 +73,7 @@ netlink_monitor:
 # expect_bird: set to true when a BIRD adapter is expected; the rib scope
 # stays NOT_READY (SYNCING) until the FeedRIB update rate settles, then
 # becomes READY for the duration of the session. Set false for static-only
-# deployments; rib becomes READY immediately at startup.
+# deployments; rib scope is driven by route presence only.
 readiness:
   expect_bird: false
   # rate_threshold: maximum RIB updates/sec below which the bulk-load
@@ -84,3 +84,8 @@ readiness:
   stability_window: 5s
   # sample_interval: how often the rate helper samples the update counter.
   sample_interval: 1s
+  # reconnect_grace: diagnostics-only — after a BIRD session ends, the
+  # bird-session reason flips from RECONNECTING to DOWN once this duration
+  # elapses without a new session. Has no effect on the rib scope or on
+  # announce decisions; tune for observability only.
+  reconnect_grace: 15s

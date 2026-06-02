@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/netip"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/vishvananda/netlink"
@@ -59,10 +60,36 @@ func WithOnSynced(fn func()) Option {
 	}
 }
 
+// WithOnError registers a callback invoked once per degradation episode.
+//
+// It fires on the first update failure after the initial sync has completed,
+// signalling that the neighbour table may be stale. Subsequent failures in the
+// same episode do not re-fire. The callback is not called before the first
+// successful sync.
+func WithOnError(fn func(error)) Option {
+	return func(o *options) {
+		o.OnError = fn
+	}
+}
+
+// WithOnResynced registers a callback invoked once when an update succeeds
+// after a degradation episode.
+//
+// It fires on the first successful update following an OnError event, marking
+// the transition back to healthy. Subsequent successes in the same healthy
+// run do not re-fire.
+func WithOnResynced(fn func()) Option {
+	return func(o *options) {
+		o.OnResynced = fn
+	}
+}
+
 type options struct {
 	UpdateInterval time.Duration
 	LinkMap        map[string]string
 	OnSynced       func()
+	OnError        func(error)
+	OnResynced     func()
 	Log            *zap.Logger
 }
 
@@ -71,6 +98,8 @@ func newOptions() *options {
 		UpdateInterval: 5 * time.Minute,
 		LinkMap:        make(map[string]string),
 		OnSynced:       func() {},
+		OnError:        func(error) {},
+		OnResynced:     func() {},
 		Log:            zap.NewNop(),
 	}
 }
@@ -88,7 +117,18 @@ type NeighMonitor struct {
 	linkMap        map[string]string
 	onSynced       sync.Once
 	onSyncedFn     func()
-	log            *zap.Logger
+	onErrorFn      func(error)
+	onResyncedFn   func()
+
+	// synced is set to true once the first successful update completes and
+	// never reverts.
+	synced atomic.Bool
+
+	// degraded is flipped episode-once via CAS: error path sets it
+	// false→true (only after synced), success path clears it true→false.
+	degraded atomic.Bool
+
+	log *zap.Logger
 }
 
 // NewNeighMonitor creates a new neighbour monitor.
@@ -104,6 +144,8 @@ func NewNeighMonitor(neighTable *NeighTable, source *NeighSource, options ...Opt
 		linkMap:        opts.LinkMap,
 		updateInterval: opts.UpdateInterval,
 		onSyncedFn:     opts.OnSynced,
+		onErrorFn:      opts.OnError,
+		onResyncedFn:   opts.OnResynced,
 		log:            opts.Log,
 	}
 
@@ -114,6 +156,7 @@ func NewNeighMonitor(neighTable *NeighTable, source *NeighSource, options ...Opt
 	// periodic ticker.
 	if err := m.updateNeighbours(); err == nil {
 		m.onSynced.Do(m.onSyncedFn)
+		m.synced.Store(true)
 	}
 
 	return m
@@ -166,8 +209,11 @@ func (m *NeighMonitor) runNeighPeriodicUpdate(ctx context.Context) error {
 		case <-timer.C:
 			if err := m.updateNeighbours(); err != nil {
 				m.log.Warn("failed to update neighbours", zap.Error(err))
+				m.notifyError(err)
 			} else {
 				m.onSynced.Do(m.onSyncedFn)
+				m.synced.Store(true)
+				m.notifyResynced()
 			}
 		}
 	}
@@ -184,10 +230,13 @@ func (m *NeighMonitor) processNeighUpdate(update netlink.NeighUpdate) error {
 	switch update.Type {
 	case unix.RTM_NEWNEIGH:
 		if err := m.updateNeighbours(); err != nil {
+			m.notifyError(err)
 			return err
 		}
 
 		m.onSynced.Do(m.onSyncedFn)
+		m.synced.Store(true)
+		m.notifyResynced()
 		return nil
 	case unix.RTM_DELNEIGH:
 		// We don't process neighbour deletion events to avoid flaps.
@@ -200,6 +249,26 @@ func (m *NeighMonitor) processNeighUpdate(update netlink.NeighUpdate) error {
 	}
 
 	return nil
+}
+
+// notifyError fires onErrorFn once per degradation episode.
+//
+// It is a no-op before the first successful sync and when the monitor is
+// already in the degraded state for the current episode.
+func (m *NeighMonitor) notifyError(err error) {
+	if !m.synced.Load() || !m.degraded.CompareAndSwap(false, true) {
+		return
+	}
+	m.onErrorFn(err)
+}
+
+// notifyResynced fires onResyncedFn once on recovery from a degradation
+// episode. It is a no-op when the monitor is not currently degraded.
+func (m *NeighMonitor) notifyResynced() {
+	if !m.degraded.CompareAndSwap(true, false) {
+		return
+	}
+	m.onResyncedFn()
 }
 
 func (m *NeighMonitor) updateNeighbours() error {
