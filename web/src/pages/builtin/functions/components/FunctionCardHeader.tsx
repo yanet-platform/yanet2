@@ -1,8 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import type { NetworkFunction } from '../types';
 import { metaFor } from '../moduleMeta';
-import { Sparkline } from '../../_shared/lane-editor';
-import { TrashIcon, SaveIcon, DiscardIcon, ChevronDownIcon } from '../../_shared/icons';
+import { Sparkline, formatPps, LaneStat, LaneCardActions, LaneCollapseButton } from '../../_shared/lane-editor';
 import { ConfirmDialog } from '../../../../components';
 
 interface FunctionCardHeaderProps {
@@ -17,32 +16,6 @@ interface FunctionCardHeaderProps {
     onDiscard: () => void;
     onDelete: () => void;
 }
-
-/** Format a pps number with K/M suffix. */
-const fmtPps = (v: number): string => {
-    if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(2)}M`;
-    if (v >= 1_000) return `${(v / 1_000).toFixed(1)}K`;
-    return String(Math.round(v));
-};
-
-interface MiniStatProps {
-    label: string;
-    value: string | number;
-    accent?: boolean;
-}
-
-/** Stat cell: value on top, label on bottom, right-aligned. */
-const MiniStat = ({ label, value, accent }: MiniStatProps): React.JSX.Element => (
-    <div className="fn-card-header__stat">
-        <span
-            className="fn-card-header__stat-value"
-            style={accent ? { color: 'var(--fn-accent)' } : undefined}
-        >
-            {value}
-        </span>
-        <span className="fn-card-header__stat-label">{label}</span>
-    </div>
-);
 
 /**
  * Header row of a function card: type chip, function id, unsaved pill,
@@ -84,19 +57,13 @@ export const FunctionCardHeader: React.FC<FunctionCardHeaderProps> = ({
     return (
         <div className="fn-card-header">
             <div className="fn-card-header__main-row">
-                <button
-                    className="fn-card-header__collapse-btn"
-                    onClick={onToggleCollapse}
-                    type="button"
-                    aria-expanded={!collapsed}
-                    aria-label={collapsed ? 'Expand function' : 'Collapse function'}
-                >
-                    <span
-                        className={`fn-card-header__chevron${collapsed ? '' : ' fn-card-header__chevron--open'}`}
-                    >
-                        <ChevronDownIcon />
-                    </span>
-                </button>
+                <LaneCollapseButton
+                    prefix="fn"
+                    collapsed={collapsed}
+                    onToggle={onToggleCollapse}
+                    expandLabel="Expand function"
+                    collapseLabel="Collapse function"
+                />
 
                 {distinctTypes.length === 1 && (() => {
                     const meta = metaFor(distinctTypes[0]);
@@ -139,11 +106,11 @@ export const FunctionCardHeader: React.FC<FunctionCardHeaderProps> = ({
                 <div className="fn-card-header__spacer" />
 
                 <div className="fn-card-header__stats">
-                    <MiniStat label="CHAINS" value={totalChains} />
+                    <LaneStat prefix="fn" label="CHAINS" value={totalChains} />
                     <div className="fn-card-header__stat-sep" />
-                    <MiniStat label="MODULES" value={totalModules} />
+                    <LaneStat prefix="fn" label="MODULES" value={totalModules} />
                     <div className="fn-card-header__stat-sep" />
-                    <MiniStat label="PPS" value={fmtPps(totalPps)} accent />
+                    <LaneStat prefix="fn" label="PPS" value={formatPps(totalPps)} accent />
                     <div className="fn-card-header__sparkline">
                         <Sparkline
                             data={sparklineData}
@@ -154,38 +121,16 @@ export const FunctionCardHeader: React.FC<FunctionCardHeaderProps> = ({
                     </div>
                 </div>
 
-                <div className="fn-card-header__actions">
-                    {isDirty && (
-                        <button
-                            className="fn-card-header__icon-btn fn-card-header__icon-btn--discard"
-                            type="button"
-                            title="Discard changes"
-                            aria-label="Discard local changes"
-                            onClick={() => setConfirmDiscard(true)}
-                        >
-                            <DiscardIcon />
-                        </button>
-                    )}
-                    <button
-                        className="fn-card-header__icon-btn fn-card-header__icon-btn--save"
-                        onClick={onOpenDiff}
-                        disabled={!isDirty || hasErrors}
-                        type="button"
-                        title={isDirty ? 'Review & apply' : 'No changes to save'}
-                        aria-label="Review and apply changes"
-                    >
-                        <SaveIcon />
-                    </button>
-                    <button
-                        className="fn-card-header__icon-btn fn-card-header__icon-btn--delete"
-                        onClick={() => setConfirmDelete(true)}
-                        type="button"
-                        title="Delete function"
-                        aria-label="Delete function"
-                    >
-                        <TrashIcon size={18} />
-                    </button>
-                </div>
+                <LaneCardActions
+                    prefix="fn"
+                    isDirty={isDirty}
+                    saveDisabled={!isDirty || hasErrors}
+                    deleteTitle="Delete function"
+                    deleteAriaLabel="Delete function"
+                    onDiscard={() => setConfirmDiscard(true)}
+                    onOpenDiff={onOpenDiff}
+                    onDelete={() => setConfirmDelete(true)}
+                />
             </div>
 
             <ConfirmDialog

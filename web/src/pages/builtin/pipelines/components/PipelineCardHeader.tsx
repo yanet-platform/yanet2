@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import type { Pipeline } from '../types';
-import { Sparkline } from '../../_shared/lane-editor';
-import { TrashIcon, SaveIcon, DiscardIcon, ChevronDownIcon } from '../../_shared/icons';
+import { Sparkline, formatPps, LaneStat, LaneCardActions, LaneCollapseButton } from '../../_shared/lane-editor';
 import { ConfirmDialog } from '../../../../components';
 
 interface PipelineCardHeaderProps {
@@ -15,31 +14,6 @@ interface PipelineCardHeaderProps {
     onDiscard: () => void;
     onDelete: () => void;
 }
-
-/** Format a pps number with K/M suffix. */
-const fmtPps = (v: number): string => {
-    if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(2)}M`;
-    if (v >= 1_000) return `${(v / 1_000).toFixed(1)}K`;
-    return String(Math.round(v));
-};
-
-interface MiniStatProps {
-    label: string;
-    value: string | number;
-    accent?: boolean;
-}
-
-const MiniStat = ({ label, value, accent }: MiniStatProps): React.JSX.Element => (
-    <div className="pl-card-header__stat">
-        <span
-            className="pl-card-header__stat-value"
-            style={accent ? { color: 'var(--pl-accent)' } : undefined}
-        >
-            {value}
-        </span>
-        <span className="pl-card-header__stat-label">{label}</span>
-    </div>
-);
 
 /**
  * Header row of a pipeline card: pipeline name (read-only), unsaved pill,
@@ -64,19 +38,13 @@ export const PipelineCardHeader: React.FC<PipelineCardHeaderProps> = ({
     return (
         <div className="pl-card-header">
             <div className="pl-card-header__main-row">
-                <button
-                    className="pl-card-header__collapse-btn"
-                    onClick={onToggleCollapse}
-                    type="button"
-                    aria-expanded={!collapsed}
-                    aria-label={collapsed ? 'Expand pipeline' : 'Collapse pipeline'}
-                >
-                    <span
-                        className={`pl-card-header__chevron${collapsed ? '' : ' pl-card-header__chevron--open'}`}
-                    >
-                        <ChevronDownIcon />
-                    </span>
-                </button>
+                <LaneCollapseButton
+                    prefix="pl"
+                    collapsed={collapsed}
+                    onToggle={onToggleCollapse}
+                    expandLabel="Expand pipeline"
+                    collapseLabel="Collapse pipeline"
+                />
 
                 <span className="pl-card-header__pipeline-id">{pipeline.id}</span>
 
@@ -87,9 +55,9 @@ export const PipelineCardHeader: React.FC<PipelineCardHeaderProps> = ({
                 <div className="pl-card-header__spacer" />
 
                 <div className="pl-card-header__stats">
-                    <MiniStat label="FUNCTIONS" value={totalFunctions} />
+                    <LaneStat prefix="pl" label="FUNCTIONS" value={totalFunctions} />
                     <div className="pl-card-header__stat-sep" />
-                    <MiniStat label="PPS" value={fmtPps(totalPps)} accent />
+                    <LaneStat prefix="pl" label="PPS" value={formatPps(totalPps)} accent />
                     <div className="pl-card-header__sparkline">
                         <Sparkline
                             data={sparklineData}
@@ -100,38 +68,16 @@ export const PipelineCardHeader: React.FC<PipelineCardHeaderProps> = ({
                     </div>
                 </div>
 
-                <div className="pl-card-header__actions">
-                    {isDirty && (
-                        <button
-                            className="pl-card-header__icon-btn pl-card-header__icon-btn--discard"
-                            type="button"
-                            title="Discard changes"
-                            aria-label="Discard local changes"
-                            onClick={() => setConfirmDiscard(true)}
-                        >
-                            <DiscardIcon />
-                        </button>
-                    )}
-                    <button
-                        className="pl-card-header__icon-btn pl-card-header__icon-btn--save"
-                        onClick={onOpenDiff}
-                        disabled={!isDirty}
-                        type="button"
-                        title={isDirty ? 'Review & apply' : 'No changes to save'}
-                        aria-label="Review and apply changes"
-                    >
-                        <SaveIcon />
-                    </button>
-                    <button
-                        className="pl-card-header__icon-btn pl-card-header__icon-btn--delete"
-                        onClick={() => setConfirmDelete(true)}
-                        type="button"
-                        title="Delete pipeline"
-                        aria-label="Delete pipeline"
-                    >
-                        <TrashIcon size={18} />
-                    </button>
-                </div>
+                <LaneCardActions
+                    prefix="pl"
+                    isDirty={isDirty}
+                    saveDisabled={!isDirty}
+                    deleteTitle="Delete pipeline"
+                    deleteAriaLabel="Delete pipeline"
+                    onDiscard={() => setConfirmDiscard(true)}
+                    onOpenDiff={onOpenDiff}
+                    onDelete={() => setConfirmDelete(true)}
+                />
             </div>
 
             <ConfirmDialog
