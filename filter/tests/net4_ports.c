@@ -10,7 +10,7 @@
 #include <netinet/in.h>
 #include <stdio.h>
 
-static const size_t MEMORY_SIZE = 1 << 29;
+static const size_t MEMORY_SIZE = 1 << 28;
 
 FILTER_COMPILER_DECLARE(
 	sign_net4_ports_compile, port_src, port_dst, net4_src, net4_dst

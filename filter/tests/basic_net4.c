@@ -167,7 +167,7 @@ test_stress_seed12_regression(void *memory, size_t memory_size) {
 	LOG(INFO, "Regression test passed!");
 }
 
-static const size_t MEMORY_SIZE = 1 << 30;
+static const size_t MEMORY_SIZE = 1 << 28;
 
 int
 main() {

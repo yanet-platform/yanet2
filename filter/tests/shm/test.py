@@ -17,7 +17,7 @@ def main():
     print("Compiler path: ", compiler_path)
     print("Filter path: ", filter_path)
     
-    size = 1 << 30
+    size = 1 << 28
     
     shm = shared_memory.SharedMemory(create=True, size=size)
 
