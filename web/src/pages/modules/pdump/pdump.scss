@@ -879,6 +879,52 @@
     }
 }
 
+// Flat-surface overrides: re-apply insets and strip boxed-panel chrome
+// so the filter card, config strip, and packet table read flush on #1C1814.
+.yn-flat-page {
+    .pdump-filter-card {
+        background: transparent;
+        border-color: var(--yn-line-2);
+        border-radius: 0;
+        border-left: none;
+        border-right: none;
+        border-top: 1px solid var(--yn-line-2);
+        border-bottom: 1px solid var(--yn-line-2);
+
+        &__expr-wrap::after {
+            background: linear-gradient(to right, transparent, var(--yn-surface-bg));
+        }
+    }
+
+    .pdump-strip {
+        background: transparent;
+        border-color: var(--yn-line-2);
+        border-radius: 0;
+        border-left: none;
+        border-right: none;
+        border-top: none;
+        border-bottom: 1px solid var(--yn-line-2);
+    }
+
+    .packet-table {
+        background: transparent;
+        border: none;
+        border-radius: 0;
+    }
+
+    .packet-table__toolbar {
+        background: transparent;
+    }
+
+    .packet-table__footer {
+        background: transparent;
+    }
+
+    .packet-table-header {
+        background: transparent;
+    }
+}
+
 // Config dialog row layout.
 .config-dialog {
     &__row {
