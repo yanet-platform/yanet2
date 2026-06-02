@@ -143,12 +143,25 @@ func (m *Readiness) Observe(gatewayID string, err error) {
 	m.logTransition(s.name, prev, next, reason)
 }
 
-// Set transitions the named scope to the given state, creating the scope if it
-// does not yet exist.
+// Set transitions the named scope to the given state with no reason.
 //
-// last_transition_time is updated only when the state value changes. The
-// supplied reason replaces any existing reason on each call; pass nil for none.
-func (m *Readiness) Set(scope string, state readinesspb.State, reason *readinesspb.Reason) {
+// It creates the scope if absent. last_transition_time is updated only when
+// the state value changes.
+func (m *Readiness) Set(scope string, state readinesspb.State) {
+	m.set(scope, state, nil)
+}
+
+// SetWithReason transitions the named scope to the given state with the
+// supplied reason.
+//
+// It creates the scope if absent. last_transition_time is updated only when
+// the state value changes.
+func (m *Readiness) SetWithReason(scope string, state readinesspb.State, reason *readinesspb.Reason) {
+	m.set(scope, state, reason)
+}
+
+// set is the shared implementation for Set and SetWithReason.
+func (m *Readiness) set(scope string, state readinesspb.State, reason *readinesspb.Reason) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 

@@ -90,11 +90,11 @@ func newBirdRIBReadiness(
 
 	// Seed initial states: bird-session starts DEGRADED(NO_SESSION),
 	// rib starts NOT_READY(SYNCING).
-	tracker.Set("bird-session",
+	tracker.SetWithReason("bird-session",
 		readinesspb.State_STATE_DEGRADED,
 		&readinesspb.Reason{Code: "NO_SESSION"},
 	)
-	tracker.Set("rib",
+	tracker.SetWithReason("rib",
 		readinesspb.State_STATE_NOT_READY,
 		&readinesspb.Reason{Code: "SYNCING"},
 	)
@@ -143,8 +143,8 @@ func (m *birdRIBReadiness) OnSessionStart(name string, sessionID uint64) {
 	m.bulkSettled = false
 	m.belowSince = time.Time{}
 
-	m.tracker.Set("bird-session", readinesspb.State_STATE_READY, nil)
-	m.tracker.Set("rib", m.ribSyncingState(),
+	m.tracker.Set("bird-session", readinesspb.State_STATE_READY)
+	m.tracker.SetWithReason("rib", m.ribSyncingState(),
 		&readinesspb.Reason{Code: "SYNCING"},
 	)
 }
@@ -177,11 +177,11 @@ func (m *birdRIBReadiness) OnSessionEnd(name string, sessionID uint64) {
 	m.bulkSettled = false
 	m.lastSessionEnd = time.Now()
 
-	m.tracker.Set("bird-session",
+	m.tracker.SetWithReason("bird-session",
 		readinesspb.State_STATE_DEGRADED,
 		&readinesspb.Reason{Code: "RECONNECTING"},
 	)
-	m.tracker.Set("rib",
+	m.tracker.SetWithReason("rib",
 		readinesspb.State_STATE_DEGRADED,
 		&readinesspb.Reason{Code: "SESSION_ENDED"},
 	)
@@ -235,7 +235,7 @@ func (m *birdRIBReadiness) tick(now time.Time, rate float64) {
 	if !m.sessionActive {
 		// Update the bird-session reason when the reconnect grace elapses.
 		if !m.lastSessionEnd.IsZero() && now.Sub(m.lastSessionEnd) >= m.reconnectGrace {
-			m.tracker.Set("bird-session",
+			m.tracker.SetWithReason("bird-session",
 				readinesspb.State_STATE_DEGRADED,
 				&readinesspb.Reason{Code: "DOWN"},
 			)
@@ -244,12 +244,12 @@ func (m *birdRIBReadiness) tick(now time.Time, rate float64) {
 		// Re-evaluate rib from route presence so that a TTL purge that
 		// empties the RIB is reflected without waiting for a new session.
 		if !m.hasRoutes() {
-			m.tracker.Set("rib",
+			m.tracker.SetWithReason("rib",
 				readinesspb.State_STATE_NOT_READY,
 				&readinesspb.Reason{Code: "NO_ROUTES"},
 			)
 		} else {
-			m.tracker.Set("rib",
+			m.tracker.SetWithReason("rib",
 				readinesspb.State_STATE_DEGRADED,
 				&readinesspb.Reason{Code: "SESSION_ENDED"},
 			)
@@ -273,7 +273,11 @@ func (m *birdRIBReadiness) tick(now time.Time, rate float64) {
 		nextState = readinesspb.State_STATE_READY
 	}
 
-	m.tracker.Set("rib", nextState, reason)
+	if reason == nil {
+		m.tracker.Set("rib", nextState)
+	} else {
+		m.tracker.SetWithReason("rib", nextState, reason)
+	}
 
 	m.log.Debug("rib readiness tick",
 		zap.Float64("rate", rate),
@@ -357,9 +361,9 @@ func (m *staticRIBReadiness) Run(ctx context.Context) error {
 func (m *staticRIBReadiness) evaluate() {
 	r, ok := m.store.Get(m.configName)
 	if ok && r.Stats().Routes > 0 {
-		m.tracker.Set("rib", readinesspb.State_STATE_READY, nil)
+		m.tracker.Set("rib", readinesspb.State_STATE_READY)
 	} else {
-		m.tracker.Set("rib",
+		m.tracker.SetWithReason("rib",
 			readinesspb.State_STATE_NOT_READY,
 			&readinesspb.Reason{Code: "NO_ROUTES"},
 		)

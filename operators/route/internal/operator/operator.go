@@ -82,26 +82,26 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 	// Propagate the neighbours scope based on netlink monitor config.
 	var neighOpts []neigh.Option
 	if cfg.NetlinkMonitor.Disabled {
-		tracker.Set("neighbours", readinesspb.State_STATE_READY, nil)
+		tracker.Set("neighbours", readinesspb.State_STATE_READY)
 		neighOpts = []neigh.Option{neigh.WithOnSynced(func() {})}
 	} else {
 		// Seed the neighbours scope at NOT_READY(SYNCING) before the monitor starts.
-		tracker.Set("neighbours",
+		tracker.SetWithReason("neighbours",
 			readinesspb.State_STATE_NOT_READY,
 			&readinesspb.Reason{Code: "SYNCING"},
 		)
 		neighOpts = []neigh.Option{
 			neigh.WithOnSynced(func() {
-				tracker.Set("neighbours", readinesspb.State_STATE_READY, nil)
+				tracker.Set("neighbours", readinesspb.State_STATE_READY)
 			}),
 			neigh.WithOnError(func(err error) {
-				tracker.Set("neighbours",
+				tracker.SetWithReason("neighbours",
 					readinesspb.State_STATE_DEGRADED,
 					&readinesspb.Reason{Code: "RESYNC", Message: err.Error()},
 				)
 			}),
 			neigh.WithOnResynced(func() {
-				tracker.Set("neighbours", readinesspb.State_STATE_READY, nil)
+				tracker.Set("neighbours", readinesspb.State_STATE_READY)
 			}),
 		}
 	}

@@ -40,7 +40,7 @@ func TestReadiness_NeighboursDisabled_ImmediatelyReady(t *testing.T) {
 
 	// When netlink monitor is disabled, mark neighbours READY immediately.
 	if cfg.NetlinkMonitor.Disabled {
-		tracker.Set("neighbours", readinesspb.State_STATE_READY, nil)
+		tracker.Set("neighbours", readinesspb.State_STATE_READY)
 	}
 
 	s := requireScope(t, tracker, "neighbours")
@@ -51,7 +51,7 @@ func TestReadiness_ExpectBirdFalse_RibImmediatelyReady(t *testing.T) {
 	tracker := operator.NewReadiness([]string{"rib"})
 
 	// When BIRD is not expected, mark rib READY immediately.
-	tracker.Set("rib", readinesspb.State_STATE_READY, nil)
+	tracker.Set("rib", readinesspb.State_STATE_READY)
 
 	s := requireScope(t, tracker, "rib")
 	assert.Equal(t, readinesspb.State_STATE_READY, s.State)
@@ -739,7 +739,7 @@ func TestNeighbours_SyncThenError(t *testing.T) {
 	tracker := operator.NewReadiness([]string{"neighbours"})
 
 	// Seed initial NOT_READY(SYNCING) as operator.go does.
-	tracker.Set("neighbours",
+	tracker.SetWithReason("neighbours",
 		readinesspb.State_STATE_NOT_READY,
 		&readinesspb.Reason{Code: "SYNCING"},
 	)
@@ -750,14 +750,14 @@ func TestNeighbours_SyncThenError(t *testing.T) {
 	assert.Equal(t, "SYNCING", s.Reasons[0].Code)
 
 	// First sync completes.
-	tracker.Set("neighbours", readinesspb.State_STATE_READY, nil)
+	tracker.Set("neighbours", readinesspb.State_STATE_READY)
 
 	s = requireScope(t, tracker, "neighbours")
 	assert.Equal(t, readinesspb.State_STATE_READY, s.State)
 	assert.Empty(t, s.Reasons)
 
 	// Error after sync transitions to DEGRADED(RESYNC).
-	tracker.Set("neighbours",
+	tracker.SetWithReason("neighbours",
 		readinesspb.State_STATE_DEGRADED,
 		&readinesspb.Reason{Code: "RESYNC"},
 	)
@@ -768,7 +768,7 @@ func TestNeighbours_SyncThenError(t *testing.T) {
 	assert.Equal(t, "RESYNC", s.Reasons[0].Code)
 
 	// Recovery transitions back to READY.
-	tracker.Set("neighbours", readinesspb.State_STATE_READY, nil)
+	tracker.Set("neighbours", readinesspb.State_STATE_READY)
 
 	s = requireScope(t, tracker, "neighbours")
 	assert.Equal(t, readinesspb.State_STATE_READY, s.State)
