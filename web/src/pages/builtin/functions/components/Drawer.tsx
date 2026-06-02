@@ -1,8 +1,8 @@
-import React, { useCallback, useEffect, useRef } from 'react';
+import React, { useCallback } from 'react';
 import type { Module, Chain } from '../types';
 import { metaFor } from '../moduleMeta';
 import { InlineEdit } from './InlineEdit';
-import { Sparkline, useSparklineHistory } from '../../_shared/lane-editor';
+import { Sparkline, useSparklineHistory, LaneDrawerShell, DrawerBigStat, DrawerAction } from '../../_shared/lane-editor';
 import { CloseIcon, TrashIcon } from '../../_shared/icons';
 import { formatPps, formatBps } from '../../../../utils';
 import { ConfirmDialog } from '../../../../components';
@@ -48,42 +48,6 @@ const DownIcon = (): React.JSX.Element => (
     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
         <path d="M12 5v14M19 12l-7 7-7-7" />
     </svg>
-);
-
-interface DrawerActionProps {
-    icon: React.ReactNode;
-    label: string;
-    danger?: boolean;
-    onClick?: () => void;
-}
-
-const DrawerAction = ({ icon, label, danger, onClick }: DrawerActionProps): React.JSX.Element => (
-    <button
-        className={`fn-drawer__action-btn${danger ? ' fn-drawer__action-btn--danger' : ''}`}
-        type="button"
-        onClick={onClick}
-    >
-        {icon}
-        {label}
-    </button>
-);
-
-interface BigStatProps {
-    label: string;
-    value: string;
-    accent?: string;
-}
-
-const BigStat = ({ label, value, accent }: BigStatProps): React.JSX.Element => (
-    <div className="fn-drawer__big-stat">
-        <div className="fn-drawer__big-stat-label">{label}</div>
-        <div
-            className="fn-drawer__big-stat-value"
-            style={accent ? { color: accent } : undefined}
-        >
-            {value}
-        </div>
-    </div>
 );
 
 /** Module-mode drawer content. */
@@ -144,8 +108,8 @@ const ModuleDrawerContent = ({
             <div className="fn-drawer__section">
                 <div className="fn-drawer__section-label">Live counters</div>
                 <div className="fn-drawer__counters-grid">
-                    <BigStat label="PPS" value={counter ? formatPps(counter.pps) : '—'} accent={accent} />
-                    <BigStat label="BPS" value={counter ? formatBps(counter.bps) : '—'} />
+                    <DrawerBigStat prefix="fn" label="PPS" value={counter ? formatPps(counter.pps) : '—'} accent={accent} />
+                    <DrawerBigStat prefix="fn" label="BPS" value={counter ? formatBps(counter.bps) : '—'} />
                 </div>
                 {sparklineData.length >= 4 && (
                     <div>
@@ -202,6 +166,7 @@ const ModuleDrawerContent = ({
                 <div className="fn-drawer__section-label">Actions</div>
                 <div className="fn-drawer__actions" style={{ padding: 0 }}>
                     <DrawerAction
+                        prefix="fn"
                         icon={<TrashIcon />}
                         label="Remove from chain"
                         danger
@@ -358,6 +323,7 @@ const ChainDrawerContent = ({
                 <div className="fn-drawer__section-label">Actions</div>
                 <div className="fn-drawer__actions" style={{ padding: 0 }}>
                     <DrawerAction
+                        prefix="fn"
                         icon={<TrashIcon />}
                         label="Delete chain"
                         danger
@@ -386,17 +352,6 @@ const ChainDrawerContent = ({
  */
 export const Drawer: React.FC<DrawerProps> = (props) => {
     const [confirmAction, setConfirmAction] = React.useState(false);
-    const drawerRef = useRef<HTMLDivElement>(null);
-
-    useEffect(() => {
-        const handleKey = (e: KeyboardEvent): void => {
-            if (e.key === 'Escape') {
-                props.onClose();
-            }
-        };
-        document.addEventListener('keydown', handleKey);
-        return () => document.removeEventListener('keydown', handleKey);
-    }, [props.onClose]);
 
     const validateName = useCallback((name: string): string | null => {
         if (props.mode !== 'module') {
@@ -409,29 +364,25 @@ export const Drawer: React.FC<DrawerProps> = (props) => {
     }, [props.mode]);
 
     return (
-        <>
-            <div className="fn-drawer__backdrop" onClick={props.onClose} />
-            <div
-                className="fn-drawer"
-                ref={drawerRef}
-                role="dialog"
-                aria-label={props.mode === 'module' ? 'Module inspector' : 'Chain inspector'}
-            >
-                {props.mode === 'module' ? (
-                    <ModuleDrawerContent
-                        props={props}
-                        confirmRemove={confirmAction}
-                        setConfirmRemove={setConfirmAction}
-                        validateName={validateName}
-                    />
-                ) : (
-                    <ChainDrawerContent
-                        props={props}
-                        confirmDelete={confirmAction}
-                        setConfirmDelete={setConfirmAction}
-                    />
-                )}
-            </div>
-        </>
+        <LaneDrawerShell
+            prefix="fn"
+            ariaLabel={props.mode === 'module' ? 'Module inspector' : 'Chain inspector'}
+            onClose={props.onClose}
+        >
+            {props.mode === 'module' ? (
+                <ModuleDrawerContent
+                    props={props}
+                    confirmRemove={confirmAction}
+                    setConfirmRemove={setConfirmAction}
+                    validateName={validateName}
+                />
+            ) : (
+                <ChainDrawerContent
+                    props={props}
+                    confirmDelete={confirmAction}
+                    setConfirmDelete={setConfirmAction}
+                />
+            )}
+        </LaneDrawerShell>
     );
 };

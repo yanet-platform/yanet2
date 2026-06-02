@@ -11,3 +11,6 @@ export { formatPps } from './laneFormat';
 export { LaneStat } from './LaneStat';
 export { LaneCardActions } from './LaneCardActions';
 export { LaneCollapseButton } from './LaneCollapseButton';
+export { LaneDrawerShell } from './LaneDrawerShell';
+export { DrawerBigStat } from './DrawerBigStat';
+export { DrawerAction } from './DrawerAction';
