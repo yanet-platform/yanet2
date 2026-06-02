@@ -261,7 +261,7 @@ func TestReadiness_Set_UpsertNewScope(t *testing.T) {
 	r := operator.NewReadiness([]string{"gw-a"})
 
 	// Set a scope that was not in the initial list.
-	r.Set("rib", readinesspb.State_STATE_READY)
+	r.Set("rib", readinesspb.State_STATE_READY, nil)
 
 	resp := r.Ready(&readinesspb.ReadyRequest{})
 	require.Len(t, resp.Scopes, 2)
@@ -281,12 +281,12 @@ func TestReadiness_Set_UpsertNewScope(t *testing.T) {
 func TestReadiness_Set_TransitionTimeOnlyOnStateChange(t *testing.T) {
 	r := operator.NewReadiness([]string{"gw-a"})
 
-	r.Set("gw-a", readinesspb.State_STATE_READY)
+	r.Set("gw-a", readinesspb.State_STATE_READY, nil)
 	resp1 := r.Ready(&readinesspb.ReadyRequest{})
 	ltt1 := resp1.Scopes[0].LastTransitionTime.AsTime()
 
 	// Second Set with same state must not advance last_transition_time.
-	r.Set("gw-a", readinesspb.State_STATE_READY)
+	r.Set("gw-a", readinesspb.State_STATE_READY, nil)
 	resp2 := r.Ready(&readinesspb.ReadyRequest{})
 	ltt2 := resp2.Scopes[0].LastTransitionTime.AsTime()
 
@@ -313,7 +313,7 @@ func TestReadiness_Set_ReasonsUpdated(t *testing.T) {
 	assert.Equal(t, "SYNCING", resp1.Scopes[0].Reasons[0].Code)
 
 	// Transition to READY clears reasons.
-	r.Set("gw-a", readinesspb.State_STATE_READY)
+	r.Set("gw-a", readinesspb.State_STATE_READY, nil)
 
 	resp2 := r.Ready(&readinesspb.ReadyRequest{})
 	assert.Empty(t, resp2.Scopes[0].Reasons)
@@ -357,11 +357,11 @@ func TestReadiness_Log_SetNoopLogs_Nothing(t *testing.T) {
 	r, logs := newObservedReadiness(t, []string{"gw-a"}, "route")
 
 	// First Set: UNKNOWN -> READY (transition, will log).
-	r.Set("gw-a", readinesspb.State_STATE_READY)
+	r.Set("gw-a", readinesspb.State_STATE_READY, nil)
 	require.Equal(t, 1, logs.Len())
 
 	// Second Set: READY -> READY (no state change, must not log).
-	r.Set("gw-a", readinesspb.State_STATE_READY)
+	r.Set("gw-a", readinesspb.State_STATE_READY, nil)
 	assert.Equal(t, 1, logs.Len(), "no-op Set must not emit a log entry")
 }
 

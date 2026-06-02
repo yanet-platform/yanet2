@@ -40,7 +40,7 @@ func TestReadiness_NeighboursDisabled_ImmediatelyReady(t *testing.T) {
 
 	// When netlink monitor is disabled, mark neighbours READY immediately.
 	if cfg.NetlinkMonitor.Disabled {
-		tracker.Set("neighbours", readinesspb.State_STATE_READY)
+		tracker.Set("neighbours", readinesspb.State_STATE_READY, nil)
 	}
 
 	s := requireScope(t, tracker, "neighbours")
@@ -51,7 +51,7 @@ func TestReadiness_ExpectBirdFalse_RibImmediatelyReady(t *testing.T) {
 	tracker := operator.NewReadiness([]string{"rib"})
 
 	// When BIRD is not expected, mark rib READY immediately.
-	tracker.Set("rib", readinesspb.State_STATE_READY)
+	tracker.Set("rib", readinesspb.State_STATE_READY, nil)
 
 	s := requireScope(t, tracker, "rib")
 	assert.Equal(t, readinesspb.State_STATE_READY, s.State)
@@ -750,7 +750,7 @@ func TestNeighbours_SyncThenError(t *testing.T) {
 	assert.Equal(t, "SYNCING", s.Reasons[0].Code)
 
 	// First sync completes.
-	tracker.Set("neighbours", readinesspb.State_STATE_READY)
+	tracker.Set("neighbours", readinesspb.State_STATE_READY, nil)
 
 	s = requireScope(t, tracker, "neighbours")
 	assert.Equal(t, readinesspb.State_STATE_READY, s.State)
@@ -768,7 +768,7 @@ func TestNeighbours_SyncThenError(t *testing.T) {
 	assert.Equal(t, "RESYNC", s.Reasons[0].Code)
 
 	// Recovery transitions back to READY.
-	tracker.Set("neighbours", readinesspb.State_STATE_READY)
+	tracker.Set("neighbours", readinesspb.State_STATE_READY, nil)
 
 	s = requireScope(t, tracker, "neighbours")
 	assert.Equal(t, readinesspb.State_STATE_READY, s.State)

@@ -143,7 +143,7 @@ func (m *birdRIBReadiness) OnSessionStart(name string, sessionID uint64) {
 	m.bulkSettled = false
 	m.belowSince = time.Time{}
 
-	m.tracker.Set("bird-session", readinesspb.State_STATE_READY)
+	m.tracker.Set("bird-session", readinesspb.State_STATE_READY, nil)
 	m.tracker.Set("rib", m.ribSyncingState(),
 		&readinesspb.Reason{Code: "SYNCING"},
 	)
@@ -273,11 +273,7 @@ func (m *birdRIBReadiness) tick(now time.Time, rate float64) {
 		nextState = readinesspb.State_STATE_READY
 	}
 
-	if nextState == readinesspb.State_STATE_READY {
-		m.tracker.Set("rib", nextState)
-	} else {
-		m.tracker.Set("rib", nextState, reason)
-	}
+	m.tracker.Set("rib", nextState, reason)
 
 	m.log.Debug("rib readiness tick",
 		zap.Float64("rate", rate),
@@ -361,7 +357,7 @@ func (m *staticRIBReadiness) Run(ctx context.Context) error {
 func (m *staticRIBReadiness) evaluate() {
 	r, ok := m.store.Get(m.configName)
 	if ok && r.Stats().Routes > 0 {
-		m.tracker.Set("rib", readinesspb.State_STATE_READY)
+		m.tracker.Set("rib", readinesspb.State_STATE_READY, nil)
 	} else {
 		m.tracker.Set("rib",
 			readinesspb.State_STATE_NOT_READY,

@@ -14,7 +14,7 @@ import (
 type scopeState struct {
 	name               string
 	state              readinesspb.State
-	reasons            []*readinesspb.Reason
+	reason             *readinesspb.Reason
 	observedAt         time.Time
 	lastTransitionTime time.Time
 }
@@ -77,8 +77,8 @@ func NewReadiness(gatewayIDs []string, options ...ReadinessOption) *Readiness {
 }
 
 // logTransition logs a state change for a scope at Info level when prev and
-// next differ. The first reason's code and message are included when present.
-func (m *Readiness) logTransition(name string, prev, next readinesspb.State, reasons []*readinesspb.Reason) {
+// next differ. The reason code and message are included when reason is non-nil.
+func (m *Readiness) logTransition(name string, prev, next readinesspb.State, reason *readinesspb.Reason) {
 	if prev == next {
 		return
 	}
@@ -88,10 +88,10 @@ func (m *Readiness) logTransition(name string, prev, next readinesspb.State, rea
 		zap.String("from", prev.String()),
 		zap.String("to", next.String()),
 	}
-	if len(reasons) > 0 && reasons[0] != nil {
-		fields = append(fields, zap.String("reason", reasons[0].GetCode()))
-		if reasons[0].GetMessage() != "" {
-			fields = append(fields, zap.String("reason_message", reasons[0].GetMessage()))
+	if reason != nil {
+		fields = append(fields, zap.String("reason", reason.GetCode()))
+		if reason.GetMessage() != "" {
+			fields = append(fields, zap.String("reason_message", reason.GetMessage()))
 		}
 	}
 	m.log.Info("readiness scope transitioned", fields...)
@@ -114,14 +114,14 @@ func (m *Readiness) Observe(gatewayID string, err error) {
 	now := time.Now()
 
 	var (
-		next    readinesspb.State
-		reasons []*readinesspb.Reason
+		next   readinesspb.State
+		reason *readinesspb.Reason
 	)
 
 	if err == nil {
 		next = readinesspb.State_STATE_READY
 	} else {
-		reasons = []*readinesspb.Reason{{Code: "APPLY_FAILED", Message: err.Error()}}
+		reason = &readinesspb.Reason{Code: "APPLY_FAILED", Message: err.Error()}
 		switch s.state {
 		case readinesspb.State_STATE_READY, readinesspb.State_STATE_DEGRADED:
 			// Last successfully applied state is still live — hold at DEGRADED.
@@ -137,18 +137,18 @@ func (m *Readiness) Observe(gatewayID string, err error) {
 		s.lastTransitionTime = now
 	}
 	s.state = next
-	s.reasons = reasons
+	s.reason = reason
 	s.observedAt = now
 
-	m.logTransition(s.name, prev, next, reasons)
+	m.logTransition(s.name, prev, next, reason)
 }
 
 // Set transitions the named scope to the given state, creating the scope if it
 // does not yet exist.
 //
-// last_transition_time is updated only when the state value changes. Supplied
-// reasons replace any existing reasons on each call.
-func (m *Readiness) Set(scope string, state readinesspb.State, reasons ...*readinesspb.Reason) {
+// last_transition_time is updated only when the state value changes. The
+// supplied reason replaces any existing reason on each call; pass nil for none.
+func (m *Readiness) Set(scope string, state readinesspb.State, reason *readinesspb.Reason) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -165,10 +165,10 @@ func (m *Readiness) Set(scope string, state readinesspb.State, reasons ...*readi
 		s.lastTransitionTime = now
 	}
 	s.state = state
-	s.reasons = reasons
+	s.reason = reason
 	s.observedAt = now
 
-	m.logTransition(s.name, prev, state, reasons)
+	m.logTransition(s.name, prev, state, reason)
 }
 
 // Drain marks every scope as STATE_NOT_READY with a SHUTTING_DOWN reason.
@@ -179,17 +179,17 @@ func (m *Readiness) Drain() {
 	defer m.mu.Unlock()
 
 	now := time.Now()
-	reasons := []*readinesspb.Reason{{Code: "SHUTTING_DOWN"}}
+	reason := &readinesspb.Reason{Code: "SHUTTING_DOWN"}
 	for _, s := range m.scopes {
 		prev := s.state
 		if s.state != readinesspb.State_STATE_NOT_READY {
 			s.lastTransitionTime = now
 		}
 		s.state = readinesspb.State_STATE_NOT_READY
-		s.reasons = reasons
+		s.reason = reason
 		s.observedAt = now
 
-		m.logTransition(s.name, prev, readinesspb.State_STATE_NOT_READY, reasons)
+		m.logTransition(s.name, prev, readinesspb.State_STATE_NOT_READY, reason)
 	}
 }
 
@@ -212,10 +212,14 @@ func (m *Readiness) Ready(req *readinesspb.ReadyRequest) *readinesspb.ReadyRespo
 			}
 		}
 
+		var reasons []*readinesspb.Reason
+		if s.reason != nil {
+			reasons = []*readinesspb.Reason{s.reason}
+		}
 		scope := &readinesspb.Scope{
 			Name:    s.name,
 			State:   s.state,
-			Reasons: s.reasons,
+			Reasons: reasons,
 		}
 		if !s.observedAt.IsZero() {
 			scope.ObservedAt = timestamppb.New(s.observedAt)
