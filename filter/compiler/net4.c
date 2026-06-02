@@ -1,5 +1,4 @@
 #include "../rule.h"
-#include "common/lpm.h"
 #include "common/lpm_wide.h"
 #include "common/range_collector.h"
 #include "common/registry.h"
@@ -67,25 +66,30 @@ net4_collect_values(
 	return 0;
 }
 
-static inline void
+static inline int
 net4_collect_registry(
 	struct net4 *start,
 	uint32_t count,
-	struct lpm *lpm,
+	struct lpm_wide *lpm,
 	struct value_registry *registry
 ) {
 	for (struct net4 *net4 = start; net4 < start + count; ++net4) {
 		uint32_t addr = *(uint32_t *)net4->addr;
 		uint32_t mask = *(uint32_t *)net4->mask;
 		uint32_t to = addr | ~mask;
-		lpm4_collect_values(
-			lpm,
-			(uint8_t *)&addr,
-			(uint8_t *)&to,
-			lpm_collect_registry_iterator,
-			registry
-		);
+		if (lpm_wide_collect_values(
+			    lpm,
+			    4,
+			    (uint8_t *)&addr,
+			    (uint8_t *)&to,
+			    lpm_collect_registry_iterator,
+			    registry
+		    )) {
+			return -1;
+		}
 	}
+
+	return 0;
 }
 
 static inline int
@@ -94,7 +98,7 @@ collect_net4_values(
 	const struct filter_rule **actions,
 	uint32_t count,
 	rule_get_net4_func get_net4,
-	struct lpm *lpm,
+	struct lpm_wide *lpm,
 	struct value_registry *registry
 ) {
 	struct range_collector collector;
@@ -128,7 +132,7 @@ collect_net4_values(
 				goto error_collector;
 		}
 	}
-	if (lpm_init(lpm, memory_context)) {
+	if (lpm_wide_init(lpm, memory_context)) {
 		goto error_collector;
 	}
 	struct range_index range_index;
@@ -136,12 +140,7 @@ collect_net4_values(
 		goto error_lpm;
 	}
 
-	if (range_collector_collect_wide(
-			    &collector,
-			    4,
-			    (struct lpm_wide *)lpm,
-			    &range_index
-		    )) {
+	if (range_collector_collect_wide(&collector, 4, lpm, &range_index)) {
 		goto error_range_collect;
 	}
 
@@ -177,13 +176,14 @@ collect_net4_values(
 
 	remap_table_compact(&remap_table);
 	value_table_compact(&table, &remap_table);
-	lpm4_remap(lpm, &table);
-	lpm4_compact(lpm);
+	lpm_wide_remap(lpm, 4, &table);
+	lpm_wide_compact(lpm, 4);
 	for (const struct filter_rule **action_ptr = actions;
 	     action_ptr < actions + count;
 	     ++action_ptr) {
 		// A value range should be created even for empty rules
-		value_registry_start(registry);
+		if (value_registry_start(registry))
+			goto error_net_collect;
 
 		if (*action_ptr == NULL)
 			continue;
@@ -193,7 +193,8 @@ collect_net4_values(
 		uint32_t net_count;
 		get_net4(action, &nets, &net_count);
 
-		net4_collect_registry(nets, net_count, lpm, registry);
+		if (net4_collect_registry(nets, net_count, lpm, registry))
+			goto error_net_collect;
 	}
 
 	remap_table_free(&remap_table);
@@ -214,7 +215,7 @@ error_range_collect:
 	range_index_free(&range_index);
 
 error_lpm:
-	lpm_free(lpm);
+	lpm_wide_free(lpm);
 
 error_collector:
 	range_collector_free(&collector, 4);
@@ -234,16 +235,26 @@ FILTER_ATTR_COMPILER_INIT_FUNC(net4_src)(
 	size_t actions_count,
 	struct memory_context *memory_context
 ) {
-	struct lpm *lpm = memory_balloc(memory_context, sizeof(struct lpm));
-	SET_OFFSET_OF(data, lpm);
-	return collect_net4_values(
-		memory_context,
-		actions,
-		actions_count,
-		action_get_net4_src,
-		lpm,
-		registry
+	struct lpm_wide *lpm = memory_balloc(
+		memory_context, sizeof(struct lpm_wide)
 	);
+	if (lpm == NULL)
+		return -1;
+
+	if (collect_net4_values(
+		    memory_context,
+		    actions,
+		    actions_count,
+		    action_get_net4_src,
+		    lpm,
+		    registry
+	    )) {
+		memory_bfree(memory_context, lpm, sizeof(struct lpm_wide));
+		return -1;
+	}
+
+	SET_OFFSET_OF(data, lpm);
+	return 0;
 }
 
 // Allows to initialize attribute for IPv4 destination address.
@@ -255,26 +266,36 @@ FILTER_ATTR_COMPILER_INIT_FUNC(net4_dst)(
 	size_t actions_count,
 	struct memory_context *memory_context
 ) {
-	struct lpm *lpm = memory_balloc(memory_context, sizeof(struct lpm));
-	SET_OFFSET_OF(data, lpm);
-	return collect_net4_values(
-		memory_context,
-		actions,
-		actions_count,
-		action_get_net4_dst,
-		lpm,
-		registry
+	struct lpm_wide *lpm = memory_balloc(
+		memory_context, sizeof(struct lpm_wide)
 	);
+	if (lpm == NULL)
+		return -1;
+
+	if (collect_net4_values(
+		    memory_context,
+		    actions,
+		    actions_count,
+		    action_get_net4_dst,
+		    lpm,
+		    registry
+	    )) {
+		memory_bfree(memory_context, lpm, sizeof(struct lpm_wide));
+		return -1;
+	}
+
+	SET_OFFSET_OF(data, lpm);
+	return 0;
 }
 
 // Allows to free data for IPv4 classification.
 static void
 free_net4(void *data, struct memory_context *memory_context) {
-	struct lpm *lpm = (struct lpm *)data;
+	struct lpm_wide *lpm = (struct lpm_wide *)data;
 	if (lpm == NULL)
 		return;
-	lpm_free(lpm);
-	memory_bfree(memory_context, lpm, sizeof(struct lpm));
+	lpm_wide_free(lpm);
+	memory_bfree(memory_context, lpm, sizeof(struct lpm_wide));
 }
 
 void
