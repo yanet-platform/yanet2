@@ -68,7 +68,9 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 	if cfg.Readiness.ExpectBird {
 		scopeNames = append(scopeNames, "bird-session")
 	}
-	tracker := operator.NewReadiness(scopeNames)
+	tracker := operator.NewReadiness(scopeNames,
+		operator.WithReadinessLog(log.With(zap.String("operator", "route"))),
+	)
 
 	neighTable := neigh.NewNeighTable()
 	if _, err := neighTable.CreateSource("static", staticTablePriority, true); err != nil {

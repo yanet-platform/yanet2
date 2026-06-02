@@ -4,6 +4,7 @@ import (
 	"sync"
 	"time"
 
+	"go.uber.org/zap"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/yanet-platform/yanet2/common/readinesspb"
@@ -26,11 +27,41 @@ type scopeState struct {
 type Readiness struct {
 	mu     sync.Mutex
 	scopes map[string]*scopeState
+	log    *zap.Logger
+}
+
+// ReadinessOption configures NewReadiness.
+type ReadinessOption func(*readinessOptions)
+
+type readinessOptions struct {
+	Log *zap.Logger
+}
+
+func newReadinessOptions() *readinessOptions {
+	return &readinessOptions{
+		Log: zap.NewNop(),
+	}
+}
+
+// WithReadinessLog sets the logger used by the Readiness tracker.
+//
+// The caller is responsible for pre-tagging the logger with any
+// operator or context attributes (e.g. via log.With(zap.String("operator",
+// "route"))). The tracker itself adds only the scope field on each transition.
+func WithReadinessLog(log *zap.Logger) ReadinessOption {
+	return func(o *readinessOptions) {
+		o.Log = log
+	}
 }
 
 // NewReadiness creates a Readiness tracker pre-seeded with the supplied
 // gateway IDs, each starting at STATE_UNKNOWN.
-func NewReadiness(gatewayIDs []string) *Readiness {
+func NewReadiness(gatewayIDs []string, options ...ReadinessOption) *Readiness {
+	opts := newReadinessOptions()
+	for _, o := range options {
+		o(opts)
+	}
+
 	scopes := map[string]*scopeState{}
 	for _, id := range gatewayIDs {
 		scopes[id] = &scopeState{
@@ -39,7 +70,31 @@ func NewReadiness(gatewayIDs []string) *Readiness {
 		}
 	}
 
-	return &Readiness{scopes: scopes}
+	return &Readiness{
+		scopes: scopes,
+		log:    opts.Log,
+	}
+}
+
+// logTransition logs a state change for a scope at Info level when prev and
+// next differ. The first reason's code and message are included when present.
+func (m *Readiness) logTransition(name string, prev, next readinesspb.State, reasons []*readinesspb.Reason) {
+	if prev == next {
+		return
+	}
+
+	fields := []zap.Field{
+		zap.String("scope", name),
+		zap.String("from", prev.String()),
+		zap.String("to", next.String()),
+	}
+	if len(reasons) > 0 && reasons[0] != nil {
+		fields = append(fields, zap.String("reason", reasons[0].GetCode()))
+		if reasons[0].GetMessage() != "" {
+			fields = append(fields, zap.String("reason_message", reasons[0].GetMessage()))
+		}
+	}
+	m.log.Info("readiness scope transitioned", fields...)
 }
 
 // Observe records the outcome of one apply attempt for the named gateway.
@@ -77,12 +132,15 @@ func (m *Readiness) Observe(gatewayID string, err error) {
 		}
 	}
 
+	prev := s.state
 	if s.observedAt.IsZero() || s.state != next {
 		s.lastTransitionTime = now
 	}
 	s.state = next
 	s.reasons = reasons
 	s.observedAt = now
+
+	m.logTransition(s.name, prev, next, reasons)
 }
 
 // Set transitions the named scope to the given state, creating the scope if it
@@ -102,12 +160,15 @@ func (m *Readiness) Set(scope string, state readinesspb.State, reasons ...*readi
 		m.scopes[scope] = s
 	}
 
+	prev := s.state
 	if s.observedAt.IsZero() || s.state != state {
 		s.lastTransitionTime = now
 	}
 	s.state = state
 	s.reasons = reasons
 	s.observedAt = now
+
+	m.logTransition(s.name, prev, state, reasons)
 }
 
 // Drain marks every scope as STATE_NOT_READY with a SHUTTING_DOWN reason.
@@ -118,13 +179,17 @@ func (m *Readiness) Drain() {
 	defer m.mu.Unlock()
 
 	now := time.Now()
+	reasons := []*readinesspb.Reason{{Code: "SHUTTING_DOWN"}}
 	for _, s := range m.scopes {
+		prev := s.state
 		if s.state != readinesspb.State_STATE_NOT_READY {
 			s.lastTransitionTime = now
 		}
 		s.state = readinesspb.State_STATE_NOT_READY
-		s.reasons = []*readinesspb.Reason{{Code: "SHUTTING_DOWN"}}
+		s.reasons = reasons
 		s.observedAt = now
+
+		m.logTransition(s.name, prev, readinesspb.State_STATE_NOT_READY, reasons)
 	}
 }
 

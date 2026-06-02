@@ -44,7 +44,9 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 	for idx, gw := range cfg.Gateways {
 		gatewayIDs[idx] = gw.Name
 	}
-	tracker := operator.NewReadiness(gatewayIDs)
+	tracker := operator.NewReadiness(gatewayIDs,
+		operator.WithReadinessLog(log.With(zap.String("operator", "forward"))),
+	)
 
 	actuators := make([]operator.Actuator[State], 0, len(cfg.Gateways))
 	for _, gw := range cfg.Gateways {

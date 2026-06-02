@@ -6,6 +6,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/yanet-platform/yanet2/common/go/operator"
 	"github.com/yanet-platform/yanet2/common/readinesspb"
@@ -314,4 +317,124 @@ func TestReadiness_Set_ReasonsUpdated(t *testing.T) {
 
 	resp2 := r.Ready(&readinesspb.ReadyRequest{})
 	assert.Empty(t, resp2.Scopes[0].Reasons)
+}
+
+// newObservedReadiness constructs a Readiness tracker backed by a zap
+// observer so tests can inspect emitted log entries. The operatorName is
+// pre-tagged on the logger before passing it to the tracker, matching the
+// expected caller pattern.
+func newObservedReadiness(t *testing.T, scopes []string, operatorName string) (*operator.Readiness, *observer.ObservedLogs) {
+	t.Helper()
+	core, logs := observer.New(zapcore.InfoLevel)
+	r := operator.NewReadiness(
+		scopes,
+		operator.WithReadinessLog(zap.New(core).With(zap.String("operator", operatorName))),
+	)
+	return r, logs
+}
+
+func TestReadiness_Log_SetTransitionLogsEntry(t *testing.T) {
+	r, logs := newObservedReadiness(t, []string{"gw-a"}, "route")
+
+	r.Set("gw-a", readinesspb.State_STATE_READY,
+		&readinesspb.Reason{Code: "SYNCED", Message: "all good"})
+
+	require.Equal(t, 1, logs.Len())
+	entry := logs.All()[0]
+	assert.Equal(t, "readiness scope transitioned", entry.Message)
+	assert.Equal(t, zapcore.InfoLevel, entry.Level)
+
+	fields := entry.ContextMap()
+	assert.Equal(t, "route", fields["operator"])
+	assert.Equal(t, "gw-a", fields["scope"])
+	assert.Equal(t, readinesspb.State_STATE_UNKNOWN.String(), fields["from"])
+	assert.Equal(t, readinesspb.State_STATE_READY.String(), fields["to"])
+	assert.Equal(t, "SYNCED", fields["reason"])
+	assert.Equal(t, "all good", fields["reason_message"])
+}
+
+func TestReadiness_Log_SetNoopLogs_Nothing(t *testing.T) {
+	r, logs := newObservedReadiness(t, []string{"gw-a"}, "route")
+
+	// First Set: UNKNOWN -> READY (transition, will log).
+	r.Set("gw-a", readinesspb.State_STATE_READY)
+	require.Equal(t, 1, logs.Len())
+
+	// Second Set: READY -> READY (no state change, must not log).
+	r.Set("gw-a", readinesspb.State_STATE_READY)
+	assert.Equal(t, 1, logs.Len(), "no-op Set must not emit a log entry")
+}
+
+func TestReadiness_Log_SetReasonOnlyChange_LogsNothing(t *testing.T) {
+	r, logs := newObservedReadiness(t, []string{"gw-a"}, "route")
+
+	r.Set("gw-a", readinesspb.State_STATE_DEGRADED,
+		&readinesspb.Reason{Code: "RECONNECTING"})
+	require.Equal(t, 1, logs.Len())
+
+	// Same state (DEGRADED), different reason — must not log.
+	r.Set("gw-a", readinesspb.State_STATE_DEGRADED,
+		&readinesspb.Reason{Code: "DOWN"})
+	assert.Equal(t, 1, logs.Len(), "reason-only change must not emit a log entry")
+}
+
+func TestReadiness_Log_ObserveReadyToDegraded(t *testing.T) {
+	r, logs := newObservedReadiness(t, []string{"gw"}, "forward")
+
+	// UNKNOWN -> READY: one log entry.
+	r.Observe("gw", nil)
+	require.Equal(t, 1, logs.Len())
+
+	// READY -> DEGRADED: one more log entry.
+	r.Observe("gw", errors.New("push failed"))
+	require.Equal(t, 2, logs.Len())
+
+	entry := logs.All()[1]
+	fields := entry.ContextMap()
+	assert.Equal(t, "forward", fields["operator"])
+	assert.Equal(t, "gw", fields["scope"])
+	assert.Equal(t, readinesspb.State_STATE_READY.String(), fields["from"])
+	assert.Equal(t, readinesspb.State_STATE_DEGRADED.String(), fields["to"])
+}
+
+func TestReadiness_Log_ObserveRepeatedFailure_LogsNothing(t *testing.T) {
+	r, logs := newObservedReadiness(t, []string{"gw"}, "forward")
+
+	boom := errors.New("push failed")
+
+	// UNKNOWN -> NOT_READY: one log entry.
+	r.Observe("gw", boom)
+	require.Equal(t, 1, logs.Len())
+
+	// NOT_READY -> NOT_READY (repeated failure): must not log.
+	r.Observe("gw", boom)
+	assert.Equal(t, 1, logs.Len(), "repeated failing Observe must not emit additional log entries")
+}
+
+func TestReadiness_Log_DrainLogsPerChangedScope(t *testing.T) {
+	r, logs := newObservedReadiness(t, []string{"gw-a", "gw-b"}, "route")
+
+	// Bring gw-a to READY (logs one transition).
+	r.Observe("gw-a", nil)
+	// Leave gw-b at UNKNOWN (no transition yet).
+	countBeforeDrain := logs.Len()
+
+	// Drain: gw-a transitions READY -> NOT_READY (logs); gw-b transitions
+	// UNKNOWN -> NOT_READY (logs). gw-b was never in NOT_READY, so it logs too.
+	r.Drain()
+	assert.Equal(t, countBeforeDrain+2, logs.Len(),
+		"Drain must log one entry per scope that changes state")
+}
+
+func TestReadiness_Log_DrainAlreadyNotReady_NoLog(t *testing.T) {
+	r, logs := newObservedReadiness(t, []string{"gw-a"}, "route")
+
+	// Force gw-a to NOT_READY first (UNKNOWN -> NOT_READY: one log entry).
+	r.Observe("gw-a", errors.New("boom"))
+	require.Equal(t, 1, logs.Len())
+
+	// Drain: gw-a is already NOT_READY — must not log.
+	r.Drain()
+	assert.Equal(t, 1, logs.Len(),
+		"Drain on a scope already in NOT_READY must not emit a log entry")
 }
