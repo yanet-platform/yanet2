@@ -11,9 +11,10 @@ import type { FIBDrawerHandle } from './FIBDrawer';
 import FIBYamlIO from './FIBYamlIO';
 import { FIBSaveDiffModal } from './FIBSaveDiffModal';
 import {
-    AddConfigModal, DeleteConfigModal, BulkDeleteModal,
+    AddConfigModal,
     DraftPageToolbar, useDraftShortcuts, useDraftDragDrop, useDraftPageHandlers,
 } from '../../_shared/draft';
+import { DeleteConfigModal, BulkDeleteModal } from '../../../components';
 import '../../../styles/draft-page.scss';
 
 const QP_CONFIG = 'config';

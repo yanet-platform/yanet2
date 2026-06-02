@@ -22,3 +22,7 @@ export * from './SearchInput';
 export { default as YamlIOModal } from './YamlIOModal';
 export type { YamlIOModalProps, YamlIOMode } from './YamlIOModal';
 export { default as BulkBar } from './BulkBar';
+export { ConfirmModal } from './ConfirmModal';
+export type { ConfirmModalProps } from './ConfirmModal';
+export { default as DeleteConfigModal } from './DeleteConfigModal';
+export { default as BulkDeleteModal } from './BulkDeleteModal';

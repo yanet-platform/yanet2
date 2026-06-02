@@ -11,9 +11,10 @@ import type { PrefixDrawerHandle } from './PrefixDrawer';
 import PrefixYamlIO from './PrefixYamlIO';
 import { PrefixSaveDiffModal } from './PrefixSaveDiffModal';
 import {
-    AddConfigModal, DeleteConfigModal, BulkDeleteModal,
+    AddConfigModal,
     DraftPageToolbar, useDraftShortcuts, useDraftDragDrop, useDraftPageHandlers,
 } from '../../_shared/draft';
+import { DeleteConfigModal, BulkDeleteModal } from '../../../components';
 import '../../../styles/draft-page.scss';
 
 let idCounter = 0;

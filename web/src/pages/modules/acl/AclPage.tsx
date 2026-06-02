@@ -16,7 +16,8 @@ import type { RuleDrawerHandle } from './RuleDrawer';
 import YamlIO, { type ImportMode } from './YamlIO';
 import { SaveDiffModal } from './SaveDiffModal';
 import { useAclRuleCounters } from './useAclRuleCounters';
-import { AddConfigModal, DeleteConfigModal, BulkDeleteModal } from '../../_shared/draft';
+import { AddConfigModal } from '../../_shared/draft';
+import { DeleteConfigModal, BulkDeleteModal } from '../../../components';
 import '../../../styles/draft-page.scss';
 import './acl.scss';
 

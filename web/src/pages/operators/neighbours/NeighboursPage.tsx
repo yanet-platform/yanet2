@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { Button, Flex, Icon, Text } from '@gravity-ui/uikit';
 import { Plus, Layers, Magnifier } from '@gravity-ui/icons';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar } from '../../../components';
-import { BulkDeleteModal, DeleteConfigModal } from '../../_shared/draft';
+import { BulkDeleteModal, DeleteConfigModal } from '../../../components';
 import { CommandPalette } from '../../_shared/command-palette';
 import type { Command, RowAdapter } from '../../_shared/command-palette';
 import { stringToIPAddress, ipAddressToString } from '../../../utils/netip';

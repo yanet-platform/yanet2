@@ -2,8 +2,6 @@ export { createDraftReducer } from './draftReducer';
 export type { DraftState, DraftAction, CreateDraftReducerOptions } from './draftReducer';
 export { isValidCIDR } from './cidr';
 export { default as AddConfigModal } from './AddConfigModal';
-export { default as DeleteConfigModal } from './DeleteConfigModal';
-export { default as BulkDeleteModal } from './BulkDeleteModal';
 export { default as DraftActionButtons, SaveIcon, TrashIcon } from './DraftActionButtons';
 export { useRowHoverOverlay } from './useRowHoverOverlay';
 export type { UseRowHoverOverlayResult } from './useRowHoverOverlay';

@@ -1,6 +1,5 @@
 import React from 'react';
-import PdumpModal from './PdumpModal';
-import './pdump.scss';
+import { ConfirmModal } from '../../../components';
 
 interface DeleteConfigDialogProps {
     name: string;
@@ -9,32 +8,20 @@ interface DeleteConfigDialogProps {
     onConfirm: () => void;
 }
 
-/** Pdump-specific delete confirmation dialog. */
-const DeleteConfigDialog: React.FC<DeleteConfigDialogProps> = ({ name, isDeleting, onClose, onConfirm }) => {
-    const footer = (
-        <>
-            <button type="button" className="yn-btn yn-btn--ghost" onClick={onClose} disabled={isDeleting}>
-                Cancel
-            </button>
-            <button
-                type="button"
-                className="yn-btn pdump-modal-btn--danger"
-                onClick={onConfirm}
-                disabled={isDeleting}
-            >
-                {isDeleting ? 'Deleting…' : 'Delete'}
-            </button>
-        </>
-    );
-
-    return (
-        <PdumpModal title="Delete Pdump Configuration" width="460px" onClose={onClose} footer={footer}>
-            <p className="pdump-modal__delete-text">
-                Delete configuration <code className="pdump-modal__code">{name}</code>?
-            </p>
-            <p className="pdump-modal__warning">This action cannot be undone.</p>
-        </PdumpModal>
-    );
-};
+/** Pdump delete confirmation dialog. */
+const DeleteConfigDialog: React.FC<DeleteConfigDialogProps> = ({ name, isDeleting, onClose, onConfirm }) => (
+    <ConfirmModal
+        open
+        title="Delete Pdump Configuration"
+        confirmText="Delete"
+        busyText="Deleting…"
+        busy={isDeleting}
+        onClose={onClose}
+        onConfirm={onConfirm}
+    >
+        <p>Delete configuration <code>{name}</code>?</p>
+        <p>This action cannot be undone.</p>
+    </ConfirmModal>
+);
 
 export default DeleteConfigDialog;
