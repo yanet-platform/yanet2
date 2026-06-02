@@ -58,11 +58,13 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 	log := opts.Log
 	metrics := NewMetrics()
 
-	// Build the readiness tracker scope list: one gateway scope per gateway,
-	// plus a neighbours scope, a rib scope, and optionally a bird-session scope.
+	moduleName := cfg.Function.Module.Unwrap()
+
+	// Build the readiness tracker scope list: one fib:<gateway>:<module> scope per
+	// gateway, plus a neighbours scope, a rib scope, and optionally a bird-session scope.
 	scopeNames := make([]string, 0, len(cfg.Gateways)+3)
 	for _, gw := range cfg.Gateways {
-		scopeNames = append(scopeNames, "gateway:"+gw.Name)
+		scopeNames = append(scopeNames, fmt.Sprintf("fib:%s:%s", gw.Name, moduleName))
 	}
 	scopeNames = append(scopeNames, "neighbours", "rib")
 	if cfg.Readiness.ExpectBird {
@@ -112,8 +114,6 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 	routeRIBStore := newRIBStore(log)
 	source := NewRouteSource(neighTable, routeRIBStore)
 	wake := source.WakeFunc()
-
-	moduleName := cfg.Function.Module.Unwrap()
 	ribHelper := newRIBReadiness(cfg.Readiness, routeRIBStore, moduleName, tracker, log)
 
 	routeSvc := NewRouteService(
@@ -150,8 +150,8 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 			return nil, fmt.Errorf("failed to construct gateway actuator %q: %w", gw.Name, err)
 		}
 
-		// Wrap each actuator so that apply outcomes drive the per-gateway scope.
-		observed := operator.NewObservedActuator(actuator, "gateway:"+gw.Name, tracker.Observe)
+		// Wrap each actuator so that apply outcomes drive the per-gateway fib scope.
+		observed := operator.NewObservedActuator(actuator, fmt.Sprintf("fib:%s:%s", gw.Name, moduleName), tracker.Observe)
 		actuators = append(actuators, observed)
 	}
 

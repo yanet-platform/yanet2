@@ -36,7 +36,7 @@ func TestReadiness_NeighboursDisabled_ImmediatelyReady(t *testing.T) {
 	cfg.Readiness.ExpectBird = false
 	cfg.Gateways = []operator.GatewayConfig{{Name: "gw0"}}
 
-	tracker := operator.NewReadiness([]string{"gateway:gw0", "neighbours", "rib"})
+	tracker := operator.NewReadiness([]string{"fib:gw0:route0", "neighbours", "rib"})
 
 	// When netlink monitor is disabled, mark neighbours READY immediately.
 	if cfg.NetlinkMonitor.Disabled {
@@ -57,36 +57,36 @@ func TestReadiness_ExpectBirdFalse_RibImmediatelyReady(t *testing.T) {
 	assert.Equal(t, readinesspb.State_STATE_READY, s.State)
 }
 
-func TestReadiness_GatewayObserve(t *testing.T) {
-	tracker := operator.NewReadiness([]string{"gateway:gw0"})
+func TestReadiness_FIBObserve(t *testing.T) {
+	tracker := operator.NewReadiness([]string{"fib:gw0:route0"})
 
 	// Initial state is UNKNOWN.
-	s := requireScope(t, tracker, "gateway:gw0")
+	s := requireScope(t, tracker, "fib:gw0:route0")
 	assert.Equal(t, readinesspb.State_STATE_UNKNOWN, s.State)
 
 	// From UNKNOWN, a failed apply transitions to NOT_READY (never programmed).
-	tracker.Observe("gateway:gw0", assert.AnError)
-	s = requireScope(t, tracker, "gateway:gw0")
+	tracker.Observe("fib:gw0:route0", assert.AnError)
+	s = requireScope(t, tracker, "fib:gw0:route0")
 	assert.Equal(t, readinesspb.State_STATE_NOT_READY, s.State)
 	require.Len(t, s.Reasons, 1)
 	assert.Equal(t, "APPLY_FAILED", s.Reasons[0].Code)
 
 	// Successful apply transitions to READY.
-	tracker.Observe("gateway:gw0", nil)
-	s = requireScope(t, tracker, "gateway:gw0")
+	tracker.Observe("fib:gw0:route0", nil)
+	s = requireScope(t, tracker, "fib:gw0:route0")
 	assert.Equal(t, readinesspb.State_STATE_READY, s.State)
 	assert.Empty(t, s.Reasons)
 
 	// Failed apply from READY transitions to DEGRADED (last-good FIB still live).
-	tracker.Observe("gateway:gw0", assert.AnError)
-	s = requireScope(t, tracker, "gateway:gw0")
+	tracker.Observe("fib:gw0:route0", assert.AnError)
+	s = requireScope(t, tracker, "fib:gw0:route0")
 	assert.Equal(t, readinesspb.State_STATE_DEGRADED, s.State)
 	require.Len(t, s.Reasons, 1)
 	assert.Equal(t, "APPLY_FAILED", s.Reasons[0].Code)
 
 	// Recovery: successful apply from DEGRADED transitions back to READY.
-	tracker.Observe("gateway:gw0", nil)
-	s = requireScope(t, tracker, "gateway:gw0")
+	tracker.Observe("fib:gw0:route0", nil)
+	s = requireScope(t, tracker, "fib:gw0:route0")
 	assert.Equal(t, readinesspb.State_STATE_READY, s.State)
 	assert.Empty(t, s.Reasons)
 }
