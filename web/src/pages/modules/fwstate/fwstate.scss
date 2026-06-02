@@ -180,7 +180,6 @@
 .fws-distrib {
     display: flex;
     align-items: stretch;
-    border-bottom: 1px solid var(--fws-border-soft);
     flex: none;
 }
 
@@ -357,8 +356,7 @@
     min-width: 0;
     display: flex;
     flex-direction: column;
-    border: 1px solid var(--fws-border);
-    border-radius: 8px 8px 0 0;
+    border-top: 1px solid var(--fws-border);
     overflow: hidden;
 }
 
@@ -373,11 +371,9 @@
 }
 
 .fws-tablescroll {
-    flex: 1;
     overflow: auto;
     position: relative;
     scroll-behavior: auto;
-    min-height: 0;
 }
 
 .fws-th {
@@ -565,11 +561,13 @@
     display: flex;
     align-items: center;
     gap: 12px;
-    padding: 10px 20px;
+    padding: 0 20px;
+    height: 41px;
     flex: none;
     border-top: 1px solid var(--fws-border);
     background: var(--fws-panel-2);
-    flex-wrap: wrap;
+    box-sizing: border-box;
+    overflow: hidden;
 }
 
 .fws-pulled {
@@ -684,6 +682,7 @@
     flex: 1;
     overflow: hidden;
     min-height: 0;
+    padding: 0;
 }
 
 .fwstate-sub-tabs {
@@ -741,7 +740,7 @@
     justify-content: space-between;
     flex-wrap: nowrap;
     min-height: 36px;
-    padding-bottom: 9px;
+    padding: 0 20px 9px;
     margin-bottom: 12px;
     border-bottom: 1px solid var(--yn-line-2);
 }
@@ -797,6 +796,7 @@
     flex-direction: column;
     gap: 14px;
     min-width: 0;
+    padding: 0 20px 20px;
 }
 
 .fwstate-config-section__head {
@@ -813,13 +813,6 @@
     letter-spacing: .02em;
     margin-inline-end: 1px;
     margin-inline-start: 2px;
-}
-
-.fwstate-panel {
-    border: 1px solid var(--yn-line-2);
-    border-radius: 8px;
-    background: var(--yn-panel);
-    padding: 14px;
 }
 
 .fwstate-panel-head {
@@ -878,6 +871,7 @@
 
 .fwstate-acl-panel {
     min-height: 0;
+    padding: 0 20px 20px;
 }
 
 .fwstate-table-shell {
@@ -1030,6 +1024,24 @@
     color: var(--yn-text-2);
     font-size: 12px;
     line-height: 1.35;
+}
+
+.yn-flat-page {
+    .fws-tblheader {
+        background: transparent;
+    }
+
+    .fws-cursorbar {
+        background: transparent;
+    }
+
+    .fws-preset-btn {
+        background: rgba(255, 255, 255, .035);
+    }
+
+    .fws-preset-btn--on {
+        background: var(--fws-elev);
+    }
 }
 
 @media (max-width: 1280px) {

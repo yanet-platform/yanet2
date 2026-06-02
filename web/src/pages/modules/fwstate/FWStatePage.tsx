@@ -66,12 +66,11 @@ const DEFAULT_NS = {
 };
 
 const STATES_TABLE_ROW_HEIGHT = 38;
-const STATES_TABLE_HEADER_HEIGHT = 38;
-const STATES_TABLE_BOTTOM_OFFSET = 86;
 const STATES_TABLE_OVERSCAN = 12;
 const STATES_TABLE_LOAD_THRESHOLD = 60;
 const STATES_TABLE_MAX_BATCH_SIZE = 10000;
 const BACKWARD_RESET_CURSOR = Number.MAX_SAFE_INTEGER;
+const STATES_CURSORBAR_HEIGHT = 41;
 
 const zeroIPv6AddressWire = (): IPAddressWire => ({ addr: '::' });
 
@@ -689,11 +688,7 @@ const StatesTabBody: React.FC<StatesTabBodyProps> = ({
     const scrollRef = useRef<HTMLDivElement | null>(null);
     const headerInnerRef = useRef<HTMLDivElement | null>(null);
 
-    const [tableSlotNode, setTableSlotNode] = useState<HTMLDivElement | null>(null);
-    const tableSlotRef = useMemo(() => ({ current: tableSlotNode } as React.RefObject<HTMLElement | null>), [tableSlotNode]);
-    const tableSlotHeight = useContainerHeight(tableSlotRef, 300, STATES_TABLE_BOTTOM_OFFSET);
-    const tableScrollHeight = tableSlotHeight > 0 ? tableSlotHeight : undefined;
-    const bodyHeight = tableScrollHeight !== undefined ? tableScrollHeight - STATES_TABLE_HEADER_HEIGHT : undefined;
+    const bodyHeight = useContainerHeight(scrollRef as React.RefObject<HTMLElement | null>, 300, STATES_CURSORBAR_HEIGHT);
 
     const queryKey = useMemo(() => JSON.stringify({
         currentName,
@@ -951,11 +946,7 @@ const StatesTabBody: React.FC<StatesTabBodyProps> = ({
                 onToggle={() => setDistCollapsed((v) => !v)}
             />
 
-            <div
-                ref={setTableSlotNode}
-                className="fws-tablezone"
-                style={tableScrollHeight !== undefined ? { height: tableScrollHeight } : undefined}
-            >
+            <div className="fws-tablezone">
                 <div className="fws-tblshell">
                     <div className="fws-tblheader">
                         <div
@@ -985,7 +976,7 @@ const StatesTabBody: React.FC<StatesTabBodyProps> = ({
                     <div
                         className="fws-tablescroll"
                         ref={scrollRef}
-                        style={bodyHeight !== undefined ? { height: bodyHeight } : undefined}
+                        style={{ flex: '0 0 auto', height: bodyHeight, overflowY: 'auto' }}
                     >
                         {displayRows.length === 0 && !stateLoading && (
                             <div className="fws-tableempty">
@@ -1488,7 +1479,7 @@ const FWStatePage: React.FC = () => {
     );
 
     if (loading) {
-        return <PageLayout header={pageHeader}><PageLoader loading size="l" /></PageLayout>;
+        return <PageLayout header={pageHeader} className="yn-flat-layout"><PageLoader loading size="l" /></PageLayout>;
     }
 
     const configurationTab = current && (() => {
@@ -1710,8 +1701,8 @@ const FWStatePage: React.FC = () => {
     );
 
     return (
-        <PageLayout header={pageHeader}>
-            <div className="yn-page">
+        <PageLayout header={pageHeader} className="yn-flat-layout">
+            <div className="yn-page yn-flat-page">
                 {configNames.length === 0 ? (
                     <div className="yn-empty-page">
                         <div className="yn-empty-page__message">No FWState configurations found.</div>
@@ -1736,7 +1727,7 @@ const FWStatePage: React.FC = () => {
                             {current && (
                                 <div className="fwstate-settings-layout">
                                     <div
-                                        className={`fwstate-panel fwstate-subtab-panel ${activeSubTab === 'states' ? 'fwstate-subtab-panel--states' : 'fwstate-subtab-panel--scroll'}`}
+                                        className={`fwstate-subtab-panel ${activeSubTab === 'states' ? 'fwstate-subtab-panel--states' : 'fwstate-subtab-panel--scroll'}`}
                                         role="tabpanel"
                                         id="fwstate-subtab-panel"
                                     >
