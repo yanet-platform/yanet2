@@ -1,0 +1,32 @@
+package operator
+
+import (
+	"context"
+
+	"github.com/yanet-platform/yanet2/common/go/operator"
+	"github.com/yanet-platform/yanet2/common/readinesspb"
+	operatorpb "github.com/yanet-platform/yanet2/operators/route/operatorpb/v1"
+)
+
+// ReadinessService implements operatorpb.ReadinessServiceServer.
+//
+// All state is delegated to a Readiness tracker that records per-scope
+// readiness outcomes.
+type ReadinessService struct {
+	operatorpb.UnimplementedReadinessServiceServer
+
+	tracker *operator.Readiness
+}
+
+// NewReadinessService constructs a ReadinessService backed by tracker.
+func NewReadinessService(tracker *operator.Readiness) *ReadinessService {
+	return &ReadinessService{tracker: tracker}
+}
+
+// Ready returns the current per-scope readiness state.
+func (m *ReadinessService) Ready(
+	ctx context.Context,
+	req *readinesspb.ReadyRequest,
+) (*readinesspb.ReadyResponse, error) {
+	return m.tracker.Ready(req), nil
+}

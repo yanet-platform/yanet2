@@ -11,6 +11,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/yanet-platform/yanet2/common/go/operator"
+	"github.com/yanet-platform/yanet2/common/readinesspb"
 	"github.com/yanet-platform/yanet2/operators/route/internal/discovery/neigh"
 	"github.com/yanet-platform/yanet2/operators/route/internal/rib"
 	"github.com/yanet-platform/yanet2/operators/route/operatorpb/v1"
@@ -48,12 +49,32 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 	log := opts.Log
 	metrics := NewMetrics()
 
+	// Build the readiness tracker scope list: one gateway scope per gateway,
+	// plus a neighbours scope and a rib scope.
+	scopeNames := make([]string, 0, len(cfg.Gateways)+2)
+	for _, gw := range cfg.Gateways {
+		scopeNames = append(scopeNames, "gateway:"+gw.Name)
+	}
+	scopeNames = append(scopeNames, "neighbours", "rib")
+	tracker := operator.NewReadiness(scopeNames)
+
 	neighTable := neigh.NewNeighTable()
 	if _, err := neighTable.CreateSource("static", staticTablePriority, true); err != nil {
 		return nil, fmt.Errorf("failed to create static neighbour source: %w", err)
 	}
 
-	neighMonitor, err := newNeighbourMonitor(cfg, neighTable, log)
+	// Propagate the neighbours scope based on netlink monitor config.
+	var neighOnSynced neigh.Option
+	if cfg.NetlinkMonitor.Disabled {
+		tracker.Set("neighbours", readinesspb.State_STATE_READY)
+		neighOnSynced = neigh.WithOnSynced(func() {})
+	} else {
+		neighOnSynced = neigh.WithOnSynced(func() {
+			tracker.Set("neighbours", readinesspb.State_STATE_READY)
+		})
+	}
+
+	neighMonitor, err := newNeighbourMonitor(cfg, neighTable, log, neighOnSynced)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create neighbour monitor: %w", err)
 	}
@@ -62,12 +83,36 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 	source := NewRouteSource(neighTable, routeRIBStore)
 	wake := source.WakeFunc()
 
+	// Build the RIB readiness helper when BIRD is expected; otherwise mark the
+	// rib scope ready immediately.
+	moduleName := cfg.Function.Module.Unwrap()
+	var ribHelper *ribReadinessHelper
+	var ribRouteServiceOpts []RouteServiceOption
+	if !cfg.Readiness.ExpectBird {
+		tracker.Set("rib", readinesspb.State_STATE_READY)
+	} else {
+		ribHelper = newRIBReadinessHelper(
+			cfg.Readiness,
+			routeRIBStore,
+			moduleName,
+			tracker,
+			log,
+		)
+		ribRouteServiceOpts = []RouteServiceOption{
+			WithRouteServiceOnRIBSessionStart(ribHelper.OnSessionStart),
+			WithRouteServiceOnRIBUpdate(ribHelper.OnUpdate),
+			WithRouteServiceOnRIBSessionEnd(ribHelper.OnSessionEnd),
+		}
+	}
+
 	routeSvc := NewRouteService(
 		neighTable,
-		WithRouteServiceRIBStore(routeRIBStore),
-		WithRouteServiceRIBTTL(ribTTL(cfg)),
-		WithRouteServiceOnChanged(wake),
-		WithRouteServiceLog(log),
+		append([]RouteServiceOption{
+			WithRouteServiceRIBStore(routeRIBStore),
+			WithRouteServiceRIBTTL(ribTTL(cfg)),
+			WithRouteServiceOnChanged(wake),
+			WithRouteServiceLog(log),
+		}, ribRouteServiceOpts...)...,
 	)
 
 	neighbourSvc := NewNeighbourService(
@@ -93,13 +138,17 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 			return nil, fmt.Errorf("failed to construct gateway actuator %q: %w", gw.Name, err)
 		}
 
-		actuators = append(actuators, actuator)
+		// Wrap each actuator so that apply outcomes drive the per-gateway scope.
+		observed := operator.NewObservedActuator(actuator, "gateway:"+gw.Name, tracker.Observe)
+		actuators = append(actuators, observed)
 	}
 
 	fanOut := operator.NewFanOutActuator(
 		actuators,
 		operator.WithFanOutLog(log),
 	)
+
+	readinessSvc := NewReadinessService(tracker)
 
 	services := []operator.ServiceRegistrar{
 		func(s *grpc.Server) string {
@@ -118,6 +167,24 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 			operatorpb.RegisterRouteOperatorServiceServer(s, operatorSvc)
 			return operatorpb.RouteOperatorService_ServiceDesc.ServiceName
 		},
+		func(s *grpc.Server) string {
+			operatorpb.RegisterReadinessServiceServer(s, readinessSvc)
+			return operatorpb.ReadinessService_ServiceDesc.ServiceName
+		},
+	}
+
+	// Build the worker list: always include the neighbour monitor and the
+	// drain worker; add the RIB readiness ticker when BIRD is expected.
+	workers := []operator.Runner{
+		neighbourMonitorRunner(neighMonitor),
+		func(ctx context.Context) error {
+			<-ctx.Done()
+			tracker.Drain()
+			return nil
+		},
+	}
+	if ribHelper != nil {
+		workers = append(workers, ribHelper.Run)
 	}
 
 	app := operator.NewOperator(
@@ -141,7 +208,7 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 
 			return nil
 		}),
-		operator.WithWorkers(neighbourMonitorRunner(neighMonitor)),
+		operator.WithWorkers(workers...),
 	)
 
 	return &Operator{
@@ -170,6 +237,7 @@ func newNeighbourMonitor(
 	cfg *Config,
 	neighTable *neigh.NeighTable,
 	log *zap.Logger,
+	extraOpts ...neigh.Option,
 ) (*neigh.NeighMonitor, error) {
 	if cfg.NetlinkMonitor.Disabled {
 		return nil, nil
@@ -184,12 +252,12 @@ func newNeighbourMonitor(
 		return nil, fmt.Errorf("failed to create kernel neighbour source: %w", err)
 	}
 
-	monitor := neigh.NewNeighMonitor(
-		neighTable,
-		source,
+	opts := append([]neigh.Option{
 		neigh.WithLog(log),
 		neigh.WithLinkMap(cfg.LinkMap),
-	)
+	}, extraOpts...)
+
+	monitor := neigh.NewNeighMonitor(neighTable, source, opts...)
 
 	return monitor, nil
 }

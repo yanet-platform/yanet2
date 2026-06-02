@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"sync"
 	"time"
 
 	"github.com/vishvananda/netlink"
@@ -47,9 +48,21 @@ func WithLog(log *zap.Logger) Option {
 	}
 }
 
+// WithOnSynced registers a callback invoked exactly once after the first
+// successful neighbour sync.
+//
+// The synchronous bootstrap in NewNeighMonitor fires it immediately on
+// success. A failed bootstrap defers it to the first periodic success.
+func WithOnSynced(fn func()) Option {
+	return func(o *options) {
+		o.OnSynced = fn
+	}
+}
+
 type options struct {
 	UpdateInterval time.Duration
 	LinkMap        map[string]string
+	OnSynced       func()
 	Log            *zap.Logger
 }
 
@@ -57,6 +70,7 @@ func newOptions() *options {
 	return &options{
 		UpdateInterval: 5 * time.Minute,
 		LinkMap:        make(map[string]string),
+		OnSynced:       func() {},
 		Log:            zap.NewNop(),
 	}
 }
@@ -72,6 +86,8 @@ type NeighMonitor struct {
 	source         *NeighSource
 	updateInterval time.Duration
 	linkMap        map[string]string
+	onSynced       sync.Once
+	onSyncedFn     func()
 	log            *zap.Logger
 }
 
@@ -87,11 +103,19 @@ func NewNeighMonitor(neighTable *NeighTable, source *NeighSource, options ...Opt
 		source:         source,
 		linkMap:        opts.LinkMap,
 		updateInterval: opts.UpdateInterval,
+		onSyncedFn:     opts.OnSynced,
 		log:            opts.Log,
 	}
 
 	// Bootstrap neighbours synchronously here.
-	m.updateNeighbours()
+	//
+	// If the bootstrap succeeds, fire the onSynced callback immediately so
+	// callers can observe the first-sync signal without waiting for the
+	// periodic ticker.
+	if err := m.updateNeighbours(); err == nil {
+		m.onSynced.Do(m.onSyncedFn)
+	}
+
 	return m
 }
 
@@ -142,6 +166,8 @@ func (m *NeighMonitor) runNeighPeriodicUpdate(ctx context.Context) error {
 		case <-timer.C:
 			if err := m.updateNeighbours(); err != nil {
 				m.log.Warn("failed to update neighbours", zap.Error(err))
+			} else {
+				m.onSynced.Do(m.onSyncedFn)
 			}
 		}
 	}
@@ -157,7 +183,12 @@ func (m *NeighMonitor) processNeighUpdate(update netlink.NeighUpdate) error {
 
 	switch update.Type {
 	case unix.RTM_NEWNEIGH:
-		return m.updateNeighbours()
+		if err := m.updateNeighbours(); err != nil {
+			return err
+		}
+
+		m.onSynced.Do(m.onSyncedFn)
+		return nil
 	case unix.RTM_DELNEIGH:
 		// We don't process neighbour deletion events to avoid flaps.
 		//

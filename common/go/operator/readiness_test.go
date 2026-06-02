@@ -165,3 +165,65 @@ func TestReadiness_Drain_TransitionTimeOnlyOnChange(t *testing.T) {
 	assert.Equal(t, ltt1, ltt2,
 		"draining a scope already in NOT_READY must not update last_transition_time")
 }
+
+func TestReadiness_Set_UpsertNewScope(t *testing.T) {
+	r := operator.NewReadiness([]string{"gw-a"})
+
+	// Set a scope that was not in the initial list.
+	r.Set("rib", readinesspb.State_STATE_READY)
+
+	resp := r.Ready(&readinesspb.ReadyRequest{})
+	require.Len(t, resp.Scopes, 2)
+
+	var ribScope *readinesspb.Scope
+	for _, s := range resp.Scopes {
+		if s.Name == "rib" {
+			ribScope = s
+		}
+	}
+	require.NotNil(t, ribScope)
+	assert.Equal(t, readinesspb.State_STATE_READY, ribScope.State)
+	assert.NotNil(t, ribScope.ObservedAt)
+	assert.NotNil(t, ribScope.LastTransitionTime)
+}
+
+func TestReadiness_Set_TransitionTimeOnlyOnStateChange(t *testing.T) {
+	r := operator.NewReadiness([]string{"gw-a"})
+
+	r.Set("gw-a", readinesspb.State_STATE_READY)
+	resp1 := r.Ready(&readinesspb.ReadyRequest{})
+	ltt1 := resp1.Scopes[0].LastTransitionTime.AsTime()
+
+	// Second Set with same state must not advance last_transition_time.
+	r.Set("gw-a", readinesspb.State_STATE_READY)
+	resp2 := r.Ready(&readinesspb.ReadyRequest{})
+	ltt2 := resp2.Scopes[0].LastTransitionTime.AsTime()
+
+	assert.Equal(t, ltt1, ltt2, "last_transition_time must not change on same-state Set")
+
+	// Transition to NOT_READY must advance last_transition_time.
+	r.Set("gw-a", readinesspb.State_STATE_NOT_READY,
+		&readinesspb.Reason{Code: "SYNCING"})
+	resp3 := r.Ready(&readinesspb.ReadyRequest{})
+	ltt3 := resp3.Scopes[0].LastTransitionTime.AsTime()
+
+	assert.True(t, ltt3.Equal(ltt2) || ltt3.After(ltt2),
+		"last_transition_time must advance on state change via Set")
+}
+
+func TestReadiness_Set_ReasonsUpdated(t *testing.T) {
+	r := operator.NewReadiness([]string{"gw-a"})
+
+	r.Set("gw-a", readinesspb.State_STATE_NOT_READY,
+		&readinesspb.Reason{Code: "SYNCING"})
+
+	resp1 := r.Ready(&readinesspb.ReadyRequest{})
+	require.Len(t, resp1.Scopes[0].Reasons, 1)
+	assert.Equal(t, "SYNCING", resp1.Scopes[0].Reasons[0].Code)
+
+	// Transition to READY clears reasons.
+	r.Set("gw-a", readinesspb.State_STATE_READY)
+
+	resp2 := r.Ready(&readinesspb.ReadyRequest{})
+	assert.Empty(t, resp2.Scopes[0].Reasons)
+}

@@ -18,10 +18,11 @@ type scopeState struct {
 	lastTransitionTime time.Time
 }
 
-// Readiness tracks per-gateway readiness state for the forward operator.
+// Readiness tracks readiness state across named scopes.
 //
-// Each gateway is represented as a named scope. State transitions and
-// observation timestamps are maintained independently per gateway.
+// Each scope is an independent readiness dimension (e.g. "neighbours", "rib",
+// or a gateway ID). State transitions and observation timestamps are
+// maintained independently per scope.
 type Readiness struct {
 	mu     sync.Mutex
 	scopes map[string]*scopeState
@@ -75,6 +76,31 @@ func (m *Readiness) Observe(gatewayID string, err error) {
 		s.lastTransitionTime = now
 	}
 	s.state = next
+	s.reasons = reasons
+	s.observedAt = now
+}
+
+// Set transitions the named scope to the given state, creating the scope if it
+// does not yet exist.
+//
+// last_transition_time is updated only when the state value changes. Supplied
+// reasons replace any existing reasons on each call.
+func (m *Readiness) Set(scope string, state readinesspb.State, reasons ...*readinesspb.Reason) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	now := time.Now()
+
+	s, ok := m.scopes[scope]
+	if !ok {
+		s = &scopeState{name: scope}
+		m.scopes[scope] = s
+	}
+
+	if s.observedAt.IsZero() || s.state != state {
+		s.lastTransitionTime = now
+	}
+	s.state = state
 	s.reasons = reasons
 	s.observedAt = now
 }

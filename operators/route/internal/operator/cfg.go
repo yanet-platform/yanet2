@@ -12,6 +12,20 @@ import (
 )
 
 const (
+	// defaultRateThreshold is the default RIB update rate (updates/sec) below
+	// which the operator considers bulk loading complete.
+	defaultRateThreshold = 50.0
+
+	// defaultStabilityWindow is how long the rate must stay below
+	// defaultRateThreshold before the RIB scope is marked ready.
+	defaultStabilityWindow = 5 * time.Second
+
+	// defaultSampleInterval is the period between rate samples taken by the
+	// RIB readiness helper.
+	defaultSampleInterval = 1 * time.Second
+)
+
+const (
 	DefaultRIBTTL = 5 * time.Minute
 )
 
@@ -29,6 +43,32 @@ type Config struct {
 	LinkMap        map[string]string    `yaml:"link_map"`
 	RIBTTL         time.Duration        `yaml:"rib_ttl"`
 	NetlinkMonitor NetlinkMonitorConfig `yaml:"netlink_monitor"`
+	Readiness      ReadinessConfig      `yaml:"readiness"`
+}
+
+// ReadinessConfig controls the operator's readiness reporting.
+type ReadinessConfig struct {
+	// ExpectBird gates the rib scope on BIRD connectivity.
+	//
+	// When false (static-only deployments with no BIRD adapter running), the rib
+	// scope becomes READY immediately at startup.
+	ExpectBird bool `yaml:"expect_bird"`
+
+	// RateThreshold is the maximum RIB-update rate (updates per second) still
+	// considered settled.
+	//
+	// The rate must stay below this value continuously for StabilityWindow before
+	// the bulk-load gate clears. Tune upward in deployments with high
+	// steady-state BGP churn.
+	RateThreshold float64 `yaml:"rate_threshold"`
+
+	// StabilityWindow is the continuous duration the update rate must remain
+	// below RateThreshold before the bulk-load gate is considered cleared.
+	StabilityWindow time.Duration `yaml:"stability_window"`
+
+	// SampleInterval is the period at which the rate helper samples the
+	// RIB update counter.
+	SampleInterval time.Duration `yaml:"sample_interval"`
 }
 
 func (m *Config) Default() {
@@ -77,6 +117,12 @@ func DefaultConfig() *Config {
 		NetlinkMonitor: NetlinkMonitorConfig{
 			TableName:       "kernel",
 			DefaultPriority: 100,
+		},
+		Readiness: ReadinessConfig{
+			ExpectBird:      true,
+			RateThreshold:   defaultRateThreshold,
+			StabilityWindow: defaultStabilityWindow,
+			SampleInterval:  defaultSampleInterval,
 		},
 	}
 }

@@ -27,9 +27,12 @@ type RouteService struct {
 	ribs       *RIBStore
 	neighTable *neigh.NeighTable
 
-	ribTTL    time.Duration
-	quitCh    chan bool
-	onChanged func()
+	ribTTL            time.Duration
+	quitCh            chan bool
+	onChanged         func()
+	onRIBSessionStart func(name string, sessionID uint64)
+	onRIBUpdate       func(n int)
+	onRIBSessionEnd   func(name string, sessionID uint64)
 
 	log *zap.Logger
 }
@@ -46,12 +49,15 @@ func NewRouteService(
 	}
 
 	return &RouteService{
-		ribs:       opts.RIBs,
-		neighTable: neighTable,
-		ribTTL:     opts.RIBTTL,
-		quitCh:     make(chan bool),
-		onChanged:  opts.OnChanged,
-		log:        opts.Log,
+		ribs:              opts.RIBs,
+		neighTable:        neighTable,
+		ribTTL:            opts.RIBTTL,
+		quitCh:            make(chan bool),
+		onChanged:         opts.OnChanged,
+		onRIBSessionStart: opts.OnRIBSessionStart,
+		onRIBUpdate:       opts.OnRIBUpdate,
+		onRIBSessionEnd:   opts.OnRIBSessionEnd,
+		log:               opts.Log,
 	}
 }
 
@@ -285,6 +291,7 @@ func (m *RouteService) FeedRIB(stream operatorpb.RouteService_FeedRIBServer) err
 				zap.Uint64("session_id", sessionID),
 				zap.String("name", name),
 			)
+			m.onRIBSessionStart(name, sessionID)
 		}
 
 		if terminated.Load() {
@@ -314,6 +321,7 @@ func (m *RouteService) FeedRIB(stream operatorpb.RouteService_FeedRIBServer) err
 		}
 		route.SessionID = sessionID
 		ribRef.Update(*route)
+		m.onRIBUpdate(1)
 	}
 
 	if ribRef != nil {
@@ -322,6 +330,7 @@ func (m *RouteService) FeedRIB(stream operatorpb.RouteService_FeedRIBServer) err
 			zap.String("name", name),
 			zap.Duration("ttl", m.ribTTL),
 		)
+		m.onRIBSessionEnd(name, sessionID)
 		go ribRef.CleanupTask(sessionID, m.quitCh, m.ribTTL)
 		m.onChanged()
 	}

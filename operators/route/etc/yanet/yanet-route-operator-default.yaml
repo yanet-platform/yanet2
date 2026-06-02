@@ -67,3 +67,20 @@ netlink_monitor:
   disabled: false
   table_name: kernel
   default_priority: 100
+
+# Readiness probes reported to the gateway.
+#
+# expect_bird: set to true when a BIRD adapter is expected; the rib scope
+# stays NOT_READY (SYNCING) until the FeedRIB update rate settles, then
+# becomes READY for the duration of the session. Set false for static-only
+# deployments; rib becomes READY immediately at startup.
+readiness:
+  expect_bird: false
+  # rate_threshold: maximum RIB updates/sec below which the bulk-load
+  # gate starts counting toward the stability window.
+  rate_threshold: 50
+  # stability_window: how long the update rate must stay below
+  # rate_threshold before the "rib" scope is marked ready.
+  stability_window: 5s
+  # sample_interval: how often the rate helper samples the update counter.
+  sample_interval: 1s

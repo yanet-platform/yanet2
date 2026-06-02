@@ -29,18 +29,24 @@ func WithLog(log *zap.Logger) Option {
 }
 
 type routeServiceOptions struct {
-	RIBs      *RIBStore
-	RIBTTL    time.Duration
-	OnChanged func()
-	Log       *zap.Logger
+	RIBs              *RIBStore
+	RIBTTL            time.Duration
+	OnChanged         func()
+	OnRIBSessionStart func(name string, sessionID uint64)
+	OnRIBUpdate       func(n int)
+	OnRIBSessionEnd   func(name string, sessionID uint64)
+	Log               *zap.Logger
 }
 
 func newRouteServiceOptions() *routeServiceOptions {
 	return &routeServiceOptions{
-		RIBs:      newRIBStore(zap.NewNop()),
-		RIBTTL:    DefaultRIBTTL,
-		OnChanged: func() {},
-		Log:       zap.NewNop(),
+		RIBs:              newRIBStore(zap.NewNop()),
+		RIBTTL:            DefaultRIBTTL,
+		OnChanged:         func() {},
+		OnRIBSessionStart: func(string, uint64) {},
+		OnRIBUpdate:       func(int) {},
+		OnRIBSessionEnd:   func(string, uint64) {},
+		Log:               zap.NewNop(),
 	}
 }
 
@@ -73,6 +79,38 @@ func WithRouteServiceOnChanged(fn func()) RouteServiceOption {
 func WithRouteServiceLog(log *zap.Logger) RouteServiceOption {
 	return func(o *routeServiceOptions) {
 		o.Log = log
+	}
+}
+
+// WithRouteServiceOnRIBSessionStart registers a callback invoked when a new
+// FeedRIB stream session begins for the named config.
+//
+// The callback receives the config name and the session id assigned by
+// ribRef.NewSession for the new stream.
+func WithRouteServiceOnRIBSessionStart(fn func(name string, sessionID uint64)) RouteServiceOption {
+	return func(o *routeServiceOptions) {
+		o.OnRIBSessionStart = fn
+	}
+}
+
+// WithRouteServiceOnRIBUpdate registers a callback invoked after each
+// successfully applied route update.
+//
+// The callback receives the count of routes applied in that batch.
+func WithRouteServiceOnRIBUpdate(fn func(n int)) RouteServiceOption {
+	return func(o *routeServiceOptions) {
+		o.OnRIBUpdate = fn
+	}
+}
+
+// WithRouteServiceOnRIBSessionEnd registers a callback invoked when a
+// FeedRIB stream session ends for the named config.
+//
+// The callback receives the config name and the session id that ended, so
+// the callee can discard events from superseded sessions.
+func WithRouteServiceOnRIBSessionEnd(fn func(name string, sessionID uint64)) RouteServiceOption {
+	return func(o *routeServiceOptions) {
+		o.OnRIBSessionEnd = fn
 	}
 }
 
