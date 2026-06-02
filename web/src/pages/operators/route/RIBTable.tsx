@@ -286,10 +286,10 @@ export const RIBTable: React.FC<RIBTableProps> = ({
                                         <BestPill isBest={route.is_best ?? false} />
                                     </div>
                                     <div>
-                                        <span className="fw-cell-mono" style={{ fontSize: 12.5, color: route.pref ? 'var(--fw-text-2)' : 'var(--fw-text-3)' }}>{route.pref || '—'}</span>
+                                        <span className="fw-cell-mono" style={{ fontSize: 12.5, color: route.pref != null ? 'var(--fw-text-2)' : 'var(--fw-text-3)' }}>{route.pref ?? '—'}</span>
                                     </div>
                                     <div>
-                                        <span className="fw-cell-mono" style={{ fontSize: 12.5, color: route.as_path_len ? 'var(--fw-text-2)' : 'var(--fw-text-3)' }}>{route.as_path_len || '—'}</span>
+                                        <span className="fw-cell-mono" style={{ fontSize: 12.5, color: route.as_path_len != null ? 'var(--fw-text-2)' : 'var(--fw-text-3)' }}>{route.as_path_len ?? '—'}</span>
                                     </div>
                                     <div style={{ overflow: 'hidden' }}>
                                         <SourceChip source={route.source} />
