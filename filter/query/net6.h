@@ -1,6 +1,8 @@
 #pragma once
 
 #include "filter/classifiers/net6.h"
+
+#include "lib/dataplane/packet/data.h"
 #include "lib/dataplane/packet/packet.h"
 
 #include "declare.h"
@@ -24,11 +26,11 @@ FILTER_ATTR_QUERY_FUNC(net6_dst)(
 			packets[idx]->network_header.offset
 		);
 
-		uint32_t hi = lpm8_lookup(
-			&c->hi, (const uint8_t *)ipv6_hdr->dst_addr
+		uint32_t hi = lpm_wide_lookup(
+			&c->hi, 8, (const uint8_t *)ipv6_hdr->dst_addr
 		);
-		uint32_t lo = lpm8_lookup(
-			&c->lo, (const uint8_t *)ipv6_hdr->dst_addr + 8
+		uint32_t lo = lpm_wide_lookup(
+			&c->lo, 8, (const uint8_t *)ipv6_hdr->dst_addr + 8
 		);
 
 		result[idx] = value_table_get(&c->comb, hi, lo);
@@ -49,11 +51,11 @@ FILTER_ATTR_QUERY_FUNC(net6_src)(
 			packets[idx]->network_header.offset
 		);
 
-		uint32_t hi = lpm8_lookup(
-			&c->hi, (const uint8_t *)ipv6_hdr->src_addr
+		uint32_t hi = lpm_wide_lookup(
+			&c->hi, 8, (const uint8_t *)ipv6_hdr->src_addr
 		);
-		uint32_t lo = lpm8_lookup(
-			&c->lo, (const uint8_t *)ipv6_hdr->src_addr + 8
+		uint32_t lo = lpm_wide_lookup(
+			&c->lo, 8, (const uint8_t *)ipv6_hdr->src_addr + 8
 		);
 
 		result[idx] = value_table_get(&c->comb, hi, lo);
