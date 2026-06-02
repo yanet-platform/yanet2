@@ -1,0 +1,329 @@
+// Virtualized table container.
+// position:relative is required so the floating edit-button overlay
+// (.yn-row-action-slot) can use position:absolute with right:0 to
+// pin to the wrap's right edge — unaffected by the body's h-scroll.
+.yn-table-wrap {
+    flex: 1;
+    min-height: 0;
+    border: 1px solid var(--yn-line-2);
+    border-radius: 8px;
+    background: var(--yn-panel);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    position: relative;
+    --yn-tbl-pad-left: 16px;
+    --yn-tbl-pad-right: 22px;
+}
+
+// Canonical outer horizontal inset for every table row and header line.
+// Apply to any element that must start at --yn-tbl-pad-left from the
+// wrap's left edge and end --yn-tbl-pad-right from its right edge.
+.yn-tbl-line {
+    padding-left: var(--yn-tbl-pad-left);
+    padding-right: var(--yn-tbl-pad-right);
+}
+
+// Outer wrapper that aligns column-header row with the action button cluster.
+.yn-table-header-row {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    background: var(--yn-panel);
+    border-bottom: 1px solid var(--yn-line-2);
+    flex-shrink: 0;
+}
+
+// Action button cluster — sits flush-right of the column-header row.
+.yn-table-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+    padding: 0 8px 0 12px;
+    margin-left: auto;
+}
+
+.yn-table-action-btn {
+    background: none;
+    border: 1px solid var(--yn-line);
+    border-radius: 6px;
+    color: var(--yn-text-3);
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: color 0.1s, border-color 0.1s, background 0.1s;
+
+    &:hover:not(:disabled) {
+        color: var(--yn-text-2);
+        background: var(--yn-bg-3);
+    }
+
+    &:disabled {
+        opacity: 0.35;
+        cursor: not-allowed;
+    }
+
+    &--save {
+        color: var(--yn-accent);
+        border-color: rgba(255, 192, 97, 0.3);
+
+        &:hover:not(:disabled) {
+            background: var(--yn-accent-soft);
+            border-color: var(--yn-accent);
+            color: var(--yn-accent);
+        }
+    }
+
+    &--discard:hover:not(:disabled) {
+        color: var(--yn-danger);
+        border-color: color-mix(in srgb, var(--g-color-text-danger) 40%, transparent);
+        background: color-mix(in srgb, var(--g-color-text-danger) 8%, transparent);
+    }
+
+    &--delete {
+        color: var(--yn-danger);
+        border-color: color-mix(in srgb, var(--g-color-text-danger) 25%, transparent);
+
+        &:hover {
+            background: color-mix(in srgb, var(--g-color-text-danger) 8%, transparent);
+            border-color: var(--yn-danger);
+        }
+    }
+}
+
+// Sticky header row for the virtualized table.
+// Base: flex row — consumed by VirtualDraftTable (FIBTable, PrefixTable) and the
+// legacy ACL RuleTable.  Horizontal padding is applied via .yn-tbl-line so it
+// matches the row inset exactly.
+.yn-vtbl-header {
+    display: flex;
+    align-items: center;
+    flex: 1 1 auto;
+    overflow-x: auto;
+    overflow-y: hidden;
+}
+
+// Modifier for the VirtualTable grid shell.  The shell sets overflow/height inline;
+// this resets the base flex/padding so the inner CSS-grid aligns pixel-perfect
+// with the body rows (which also have zero outer horizontal padding).
+// scrollbar-width:none hides the bar while allowing scrollLeft sync via JS.
+.yn-vtbl-header--grid {
+    display: block;
+    padding-left: 0;
+    padding-right: 0;
+    scrollbar-width: none;
+
+    &::-webkit-scrollbar {
+        display: none;
+    }
+}
+
+.yn-th-text {
+    font-size: 10.5px;
+    font-weight: 500;
+    color: var(--yn-text-3);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
+// Scroll body for virtualizer.
+.yn-vtbl-body {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    position: relative;
+}
+
+// Footer row
+.yn-vtbl-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 12px;
+    border-top: 1px solid var(--yn-line-2);
+    background: var(--yn-panel);
+    flex-shrink: 0;
+
+    .yn-toolbar__count {
+        color: var(--yn-text-3);
+        font-size: 11px;
+        font-weight: 400;
+    }
+}
+
+// Virtual rows
+.yn-vrow {
+    cursor: default;
+    transition: background-color 0.06s;
+
+    &:hover { background-color: var(--yn-bg-hover) !important; }
+
+    &--active {
+        box-shadow: inset 2px 0 0 var(--yn-accent);
+    }
+
+    &--selected {
+        background-color: var(--yn-accent-soft) !important;
+    }
+
+    // Drag indicator inset shadows.
+    &--drag-top    { box-shadow: inset 0 2px 0 var(--yn-accent); }
+    &--drag-bottom { box-shadow: inset 0 -2px 0 var(--yn-accent); }
+}
+
+// Drag handle cell.
+.yn-drag-handle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--yn-text-3);
+    cursor: grab;
+    width: 100%;
+    height: 100%;
+    user-select: none;
+
+    &:active { cursor: grabbing; }
+    &:hover  { color: var(--yn-text-2); }
+}
+
+// Status dot (added / changed / removed).
+.yn-status-dot {
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    flex-shrink: 0;
+
+    &--added   { background: var(--yn-ok); }
+    &--changed { background: var(--yn-accent); }
+    &--removed { background: var(--yn-danger); }
+}
+
+.yn-cell-mono {
+    font-family: var(--yn-font-mono);
+    font-size: 12.5px;
+    letter-spacing: -0.005em;
+    display: inline-block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    vertical-align: middle;
+    flex-shrink: 1;
+    min-width: 0;
+}
+
+.yn-cell-strong { color: var(--yn-text); font-weight: 500; }
+.yn-cell-muted { color: var(--yn-text-2); }
+
+.yn-cell-values {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 3px;
+    align-items: center;
+    overflow: hidden;
+    min-width: 0;
+}
+
+.yn-cell-more {
+    font-size: 11px;
+    color: var(--yn-text-3);
+    padding: 1px 5px;
+    background: var(--yn-bg-2);
+    border-radius: 999px;
+    border: 1px solid var(--yn-line-2);
+}
+
+/*
+ * Floating edit-button overlay.  Direct child of .yn-table-wrap (position:relative,
+ * overflow:hidden).
+ *
+ *   right: 0   — resolves against .yn-table-wrap's right edge = wrap_right.
+ *                Never shifts during horizontal scroll because the overlay lives
+ *                OUTSIDE the scroll body.
+ *   top        — set from JS: HEADER_HEIGHT + virtualizer_start − body.scrollTop
+ *                This keeps the slot aligned with the hovered row even as the
+ *                body scrolls vertically.
+ *
+ * Width geometry (aligned with header delete button):
+ *   slot: 40px wide, padding-right 8px → effective centering region: 32px
+ *   button: 26px centered in 32px:
+ *     left padding before button = (32 − 26) / 2 = 3px
+ *     button center from slot right = 8 + 3 + 13 = 24px
+ *   slot_right = wrap_right  →  button center = wrap_right − 24px
+ *
+ *   header delete: 32px wide, .yn-table-actions padding-right: 8px
+ *     → delete center = wrap_right − 8 − 16 = wrap_right − 24px  ✓
+ *
+ * The overlay is clipped by .yn-table-wrap (overflow:hidden) at the header/footer
+ * boundaries, so the button disappears naturally when the row scrolls out of view.
+ */
+.yn-row-action-slot {
+    position: absolute;
+    right: 0;
+    width: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding-right: 8px;
+    z-index: 3;
+    pointer-events: auto;
+    background: transparent;
+
+    &--wide {
+        width: 76px;
+        gap: 4px;
+    }
+}
+
+.yn-row-edit-btn {
+    width: 32px;
+    height: 32px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 6px;
+    font-size: 20px;
+    color: var(--yn-text-2);
+    background: var(--yn-bg-3);
+    border: 1px solid var(--yn-line-2);
+    cursor: pointer;
+    transition: background 0.08s, color 0.08s, border-color 0.08s;
+
+    &--visible { opacity: 1; }
+
+    &:hover:not(:disabled) {
+        background: var(--yn-bg-2);
+        color: var(--yn-text);
+        border-color: var(--yn-text-3);
+    }
+
+    &:disabled {
+        opacity: 0.35;
+        cursor: not-allowed;
+    }
+
+    &--danger {
+        color: var(--yn-danger);
+        border-color: color-mix(in srgb, var(--g-color-text-danger) 25%, transparent);
+
+        &:hover:not(:disabled) {
+            background: color-mix(in srgb, var(--g-color-text-danger) 8%, transparent);
+            border-color: var(--yn-danger);
+            color: var(--yn-danger);
+        }
+    }
+
+}
+
+.yn-table-empty {
+    padding: 40px;
+    text-align: center;
+    color: var(--yn-text-3);
+    font-size: 13px;
+}

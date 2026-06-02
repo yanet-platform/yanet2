@@ -1,0 +1,448 @@
+@use '../mixins' as *;
+
+// Neighbours page extensions.
+// Scoped to .yn-page to avoid bleeding into other pages.
+
+// Right-side footer note (read-only warning) for the neighbours table.
+.nb-footer-note {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 11px;
+    color: var(--yn-text-3);
+    white-space: nowrap;
+}
+
+// Fix 1 — warm tooltip surface for state and override-badge tooltips.
+// Gravity renders the popup as a .g-popup element in a portal outside .yn-page,
+// so CSS variables defined on .yn-page do not cascade into the portal.
+// We hardcode the warm dark-mode values (app is locked to dark) here.
+// The className prop on Gravity Tooltip lands directly on the .g-popup root,
+// which also acts as the tooltip surface itself — so we style it directly.
+.nb-state-tip-popup,
+.nb-ovr-tip-popup {
+    --yn-text:       #F2EEE8;
+    --yn-text-2:     #B8B0A4;
+    --yn-text-3:     #7E7468;
+    --yn-accent:     #FFC061;
+    --yn-line-2:     rgba(255, 200, 140, 0.12);
+    --yn-font-mono:  'JetBrains Mono', ui-monospace, monospace;
+    background: #221C16 !important;
+    color: #F2EEE8 !important;
+    border-radius: 10px !important;
+    border: 1px solid rgba(255, 200, 140, 0.12) !important;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5) !important;
+    font-size: 12px !important;
+    padding: 10px 14px !important;
+    max-width: 320px !important;
+    overflow: hidden !important;
+}
+
+// Tooltip content for state badge.
+.nb-state-tip {
+    &__head {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        font-weight: 600;
+        color: var(--yn-text);
+        font-family: var(--yn-font-mono);
+        font-size: 12px;
+        margin-bottom: 5px;
+    }
+
+    &__dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        flex-shrink: 0;
+    }
+
+    &__desc {
+        font-size: 12px;
+        line-height: 1.5;
+        color: var(--yn-text-2);
+    }
+
+    &__action {
+        margin-top: 7px;
+        padding-top: 7px;
+        border-top: 1px solid var(--yn-line-2);
+        color: var(--yn-text-3);
+        font-size: 11px;
+
+        strong { color: var(--yn-text-2); font-weight: 600; }
+    }
+}
+
+// Source cell chips.
+.nb-src-chip {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 3px;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.nb-src-name {
+    font-family: var(--yn-font-mono);
+    font-size: 12px;
+    color: var(--yn-text-2);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+
+    &--static { color: var(--yn-accent); }
+}
+
+// Override badge (shown under source name in Merged tab).
+.nb-ovr-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 9.5px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 1px 5px;
+    border-radius: var(--yn-r-sm);
+    background: var(--yn-accent-soft);
+    color: var(--yn-accent);
+    border: 1px solid rgba(255, 192, 97, 0.3);
+    white-space: nowrap;
+    cursor: default;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+
+    &--conflict {
+        background: color-mix(in srgb, var(--g-color-text-warning) 12%, transparent);
+        color: var(--g-color-text-warning);
+        border-color: color-mix(in srgb, var(--g-color-text-warning) 30%, transparent);
+    }
+}
+
+// Tooltip content for override badge.
+.nb-ovr-tip {
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--yn-text-2);
+
+    &__head {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        font-weight: 600;
+        color: var(--yn-text);
+        margin-bottom: 5px;
+    }
+
+    &__conflict {
+        margin-top: 7px;
+        padding-top: 7px;
+        border-top: 1px solid var(--yn-line-2);
+        color: var(--g-color-text-warning);
+        font-size: 11px;
+
+        strong { font-weight: 600; }
+    }
+
+    strong { color: var(--yn-text); font-weight: 600; }
+}
+
+// Detail panel — read-only aside using existing yn-drawer chrome.
+.nb-detail-panel {
+    width: 480px;
+
+    &__header-info {
+        flex: 1;
+        min-width: 0;
+    }
+
+    &__ip {
+        font-size: 15px;
+        font-weight: 600;
+    }
+
+    &__subtitle {
+        font-size: 11.5px;
+        color: var(--yn-text-2);
+        margin-top: 2px;
+    }
+}
+
+// Key-value grid inside the detail panel.
+.nb-kv {
+    display: grid;
+    grid-template-columns: 120px 1fr;
+    gap: 8px 12px;
+    align-items: baseline;
+
+    dt {
+        font-size: 10.5px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--yn-text-3);
+    }
+
+    dd {
+        font-size: 12.5px;
+        color: var(--yn-text);
+        line-height: 1.5;
+        overflow-wrap: anywhere;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        flex-wrap: wrap;
+    }
+}
+
+// Copy value widget.
+.nb-copy-val {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+
+    &--muted { color: var(--yn-text-3); }
+}
+
+.nb-copy-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    border-radius: var(--yn-r-sm);
+    font-size: 11px;
+    color: var(--yn-text-3);
+    background: none;
+    border: none;
+    cursor: pointer;
+    flex-shrink: 0;
+
+    &:hover { color: var(--yn-accent); background: var(--yn-bg-2); }
+}
+
+// State explanation block.
+.nb-state-explain {
+    border-radius: var(--yn-r-md);
+    border: 1px solid var(--yn-line-2);
+    background: var(--yn-bg-2);
+    padding: 12px 14px;
+
+    &__head {
+        margin-bottom: 8px;
+    }
+
+    &__desc {
+        font-size: 12.5px;
+        line-height: 1.55;
+        color: var(--yn-text-2);
+        margin: 0;
+    }
+
+    &__action {
+        margin-top: 10px;
+        padding-top: 10px;
+        border-top: 1px solid var(--yn-line-2);
+        font-size: 12px;
+        color: var(--yn-text-2);
+        display: flex;
+        align-items: flex-start;
+        gap: 7px;
+    }
+
+    &__action-icon {
+        flex-shrink: 0;
+        margin-top: 1px;
+    }
+}
+
+// Merge explanation callout box.
+.nb-why-box {
+    display: flex;
+    gap: 9px;
+    padding: 11px 13px;
+    border-radius: var(--yn-r-md);
+    background: var(--yn-accent-soft);
+    border: 1px solid rgba(255, 192, 97, 0.22);
+    margin-bottom: 14px;
+    font-size: 12.5px;
+    line-height: 1.55;
+    color: var(--yn-text-2);
+
+    strong { color: var(--yn-text); font-weight: 600; }
+
+    &__icon {
+        font-size: 14px;
+        flex-shrink: 0;
+        margin-top: 1px;
+    }
+
+    p { margin: 0; }
+}
+
+// Merge candidate cards.
+.nb-cand-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.nb-cand {
+    border: 1px solid var(--yn-line-2);
+    border-radius: var(--yn-r-md);
+    padding: 11px 13px;
+    background: var(--yn-bg-2);
+
+    &--winner {
+        border-color: rgba(255, 192, 97, 0.3);
+        background: var(--yn-accent-soft);
+    }
+
+    &__top {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 10px;
+    }
+
+    &__table {
+        font-weight: 600;
+        font-size: 13px;
+        color: var(--yn-text);
+    }
+
+    &__tag {
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 0.07em;
+        text-transform: uppercase;
+        padding: 2px 6px;
+        border-radius: var(--yn-r-sm);
+
+        &--winner {
+            background: var(--yn-accent);
+            color: #1a140a;
+        }
+
+        &--shadow {
+            background: var(--yn-bg-3);
+            color: var(--yn-text-3);
+        }
+    }
+
+    &__prio {
+        margin-left: auto;
+        font-size: 11px;
+        color: var(--yn-text-3);
+    }
+
+    &__grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 6px 12px;
+    }
+
+    &__cell {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+
+        span {
+            font-size: 9.5px;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: var(--yn-text-3);
+        }
+
+        b {
+            font-size: 11.5px;
+            font-weight: 500;
+            color: var(--yn-text-2);
+        }
+    }
+
+    &__diff {
+        color: var(--g-color-text-warning) !important;
+    }
+}
+
+// Neighbours page flush + borderless-tab overrides.
+// Mirrors the .ro-page treatment in route.scss, scoped to .nb-page only.
+
+.yn-page.nb-page {
+    background: var(--yn-page-bg);
+}
+
+.nb-page .yn-tabs-row {
+    border-bottom: none;
+}
+
+.nb-page .yn-tabs-row .yn-tabs {
+    border-bottom: none;
+}
+
+.nb-page .yn-tab--active::after {
+    height: 3px;
+}
+
+.nb-page .yn-tab--active .yn-tab__count {
+    color: var(--yn-accent);
+    background: var(--yn-accent-soft);
+}
+
+.nb-page .yn-content {
+    padding: 0;
+}
+
+.nb-page .yn-table-wrap {
+    background: transparent;
+    border: none;
+    border-radius: 0;
+}
+
+.nb-page .yn-table-header-row {
+    background: transparent;
+    border-top: 1px solid var(--yn-line-2);
+}
+
+.nb-page .yn-vtbl-footer {
+    background: transparent;
+}
+
+// Surface color — mirrors the ro-layout/ro-page pattern from route.scss, scoped to neighbours.
+// The --nb-surface-bg token cascades from .nb-layout to both the header subtree
+// and the .nb-page content subtree, keeping both on the same flat #1C1814 plane.
+.nb-layout {
+    --nb-surface-bg: #1C1814;
+}
+
+// Header sits outside .yn-page so --yn-* tokens are not in scope there.
+// Match route page: same background (#1C1814) and same rendered height (64px).
+.nb-layout .page-layout__header {
+    background: var(--nb-surface-bg);
+    min-height: 64px;
+}
+
+// Two-class specificity beats `.yn-page { background: var(--yn-page-bg) }`.
+.yn-page.nb-page {
+    background: var(--nb-surface-bg);
+}
+
+// Tab strip and tabs-row sit on the same flat surface.
+.nb-page .yn-tabs-row {
+    background: var(--nb-surface-bg);
+}
+
+.nb-page .yn-tabs {
+    background: var(--nb-surface-bg);
+}
+
+// Neighbours toolbar row — hosts the family filter below the tabs-row.
+.nb-toolbar {
+    @include yn-toolbar;
+    border-bottom: 1px solid var(--yn-line);
+    background: var(--nb-surface-bg, var(--yn-page-bg));
+}

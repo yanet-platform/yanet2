@@ -1,0 +1,105 @@
+// Config tabs
+
+.yn-tabs {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 8px 20px 0;
+    border-bottom: 1px solid var(--yn-line-2);
+    background: var(--yn-page-bg);
+    overflow-x: auto;
+    flex-shrink: 0;
+}
+
+.yn-tab {
+    position: relative;
+    padding: 10px 14px;
+    font-size: 13px;
+    color: var(--yn-text-2);
+    border-radius: 6px 6px 0 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: color 0.1s;
+
+    &:hover { color: var(--yn-text); }
+
+    &--active {
+        color: var(--yn-text);
+
+        &::after {
+            content: "";
+            position: absolute;
+            left: 14px;
+            right: 14px;
+            bottom: -1px;
+            height: 2px;
+            background: var(--yn-accent);
+            border-radius: 2px 2px 0 0;
+        }
+    }
+}
+
+.yn-tab__label { flex: 1; }
+
+
+.yn-tabs__add {
+    margin-left: 4px;
+    color: var(--yn-text-3) !important;
+    flex-shrink: 0;
+
+    &:hover {
+        color: var(--yn-text) !important;
+    }
+}
+
+.yn-tab__dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--yn-accent);
+    flex-shrink: 0;
+}
+
+.yn-tab__count {
+    font-size: 11px;
+    color: var(--yn-text-3);
+    background: var(--yn-bg-2);
+    padding: 1px 6px;
+    border-radius: 999px;
+    font-variant-numeric: tabular-nums;
+
+    .yn-tab--active & {
+        color: var(--yn-text-2);
+        background: var(--yn-bg-3);
+    }
+}
+
+// Fix 6 — gold count badge on the active tab, scoped to neighbours only.
+.yn-tabs-row .yn-tab--active .yn-tab__count {
+    color: var(--yn-accent);
+    background: var(--yn-accent-soft);
+}
+
+// Tabs row wrapper — contains the ConfigTabStrip for neighbours.
+.yn-tabs-row {
+    display: flex;
+    align-items: center;
+    border-bottom: 1px solid var(--yn-line-2);
+    background: var(--yn-page-bg);
+    flex-shrink: 0;
+    padding-right: 16px;
+
+    .yn-tabs {
+        flex: 1;
+        border-bottom: none;
+        // Fix 2 — overflow-x:auto promotes overflow-y to auto by default,
+        // causing a stray vertical scrollbar when tab content (icons) exceeds
+        // the strip height. Clamp it here, scoped to neighbours only.
+        overflow-y: hidden;
+    }
+}

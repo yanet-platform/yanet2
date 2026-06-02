@@ -1,0 +1,99 @@
+// Drawer backdrop
+
+.yn-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.38);
+    z-index: 50;
+    opacity: 0;
+    transition: opacity 0.18s ease;
+    pointer-events: none;
+
+    &--open {
+        opacity: 1;
+        pointer-events: auto;
+    }
+}
+
+// Side drawer
+
+.yn-drawer {
+    position: fixed;
+    top: 0;
+    right: 0;
+    height: 100vh;
+    width: 520px;
+    max-width: 92vw;
+    background: var(--yn-panel);
+    border-left: 1px solid var(--yn-line-2);
+    display: flex;
+    flex-direction: column;
+    transform: translateX(100%);
+    transition: transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+    z-index: 60;
+    box-shadow: -16px 0 40px rgba(0, 0, 0, 0.4);
+
+    &--open { transform: translateX(0); }
+}
+
+.yn-drawer__head {
+    padding: 16px 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    border-bottom: 1px solid var(--yn-line-2);
+    flex-shrink: 0;
+}
+
+.yn-drawer__title {
+    font-size: 15px;
+    font-weight: 600;
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.yn-drawer__rule-num {
+    font-family: var(--yn-font-mono);
+    color: var(--yn-text-2);
+    font-weight: 400;
+}
+
+.yn-drawer__head-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.yn-drawer__body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+}
+
+.yn-drawer__foot {
+    padding: 14px 20px;
+    border-top: 1px solid var(--yn-line-2);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    background: var(--yn-panel);
+    flex-shrink: 0;
+}
+
+.yn-drawer__foot-meta {
+    font-size: 11px;
+    color: var(--yn-text-3);
+}
+
+.yn-drawer__foot-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}

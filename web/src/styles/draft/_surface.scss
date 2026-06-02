@@ -1,0 +1,116 @@
+// Page container
+
+.yn-page {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    background: var(--yn-page-bg);
+    color: var(--yn-text);
+    font-size: 13px;
+    line-height: 1.45;
+    position: relative;
+}
+
+// Content area
+.yn-content {
+    display: flex;
+    flex-direction: column;
+    padding: 16px 20px 20px;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    gap: 0;
+}
+
+// Bulk action bar — centered over the content area, accounting for the sidebar.
+.yn-bulk-bar {
+    position: fixed;
+    bottom: 24px;
+    left: calc(50% + var(--gn-aside-header-size, 56px) / 2);
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--yn-bg-3);
+    border: 1px solid var(--yn-line-2);
+    border-radius: 10px;
+    padding: 8px 14px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+    z-index: 40;
+    white-space: nowrap;
+}
+
+.yn-bulk-bar__count {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--yn-accent);
+    padding-right: 4px;
+}
+
+// Empty page state
+.yn-empty-page {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+}
+
+.yn-empty-page__message {
+    font-size: 14px;
+    color: var(--yn-text-2);
+}
+
+// Shared flat-surface layout treatment.
+// Pages that apply .yn-flat-layout (on PageLayout) and .yn-flat-page (on .yn-page)
+// get the same unified #1C1814 surface, flush table, and 3px active underline.
+// Route (.ro-layout/.ro-page) and neighbours (.nb-layout/.nb-page) are temporary
+// duplicates that will migrate onto these shared classes in a later PR.
+
+.yn-flat-layout {
+    --yn-surface-bg: #1C1814;
+}
+
+.yn-flat-layout .page-layout__header {
+    background: var(--yn-surface-bg);
+    min-height: 64px;
+}
+
+.yn-page.yn-flat-page {
+    background: var(--yn-surface-bg);
+}
+
+.yn-flat-page .yn-tabs {
+    background: var(--yn-surface-bg);
+    border-bottom: none;
+}
+
+.yn-flat-page .yn-tab--active::after {
+    height: 3px;
+}
+
+.yn-flat-page .yn-tab--active .yn-tab__count {
+    color: var(--yn-accent);
+    background: var(--yn-accent-soft);
+}
+
+.yn-flat-page .yn-content {
+    padding: 0;
+}
+
+.yn-flat-page .yn-table-wrap {
+    background: transparent;
+    border: none;
+    border-radius: 0;
+}
+
+.yn-flat-page .yn-table-header-row {
+    background: transparent;
+    border-top: 1px solid var(--yn-line-2);
+}
+
+.yn-flat-page .yn-vtbl-footer {
+    background: transparent;
+}

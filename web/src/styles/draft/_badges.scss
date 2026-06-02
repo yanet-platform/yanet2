@@ -1,0 +1,69 @@
+// Shared dot-badge pill — used by state badges, source chips, etc.
+
+.yn-dot-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 9px 2px 7px;
+    border-radius: var(--yn-r-md);
+    font-family: var(--yn-font-mono);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+    background: var(--yn-dotb-bg);
+    color: var(--yn-dotb-c);
+    border: 1px solid var(--yn-dotb-bd);
+    cursor: default;
+
+    &__dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--yn-dotb-c);
+        flex-shrink: 0;
+    }
+}
+
+// Shared segmented family filter — yn-seg / yn-seg__btn.
+// Used by both the route page and the neighbours page.
+.yn-seg {
+    display: inline-flex;
+    align-items: center;
+    background: var(--yn-bg-2);
+    border-radius: var(--yn-r-md);
+    padding: 3px;
+    gap: 2px;
+    box-shadow: inset 0 0 0 1px var(--yn-line-2);
+    flex-shrink: 0;
+}
+
+.yn-seg__btn {
+    height: 26px;
+    padding: 0 12px;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--yn-text-2);
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.12s;
+    white-space: nowrap;
+
+    &:hover:not(.yn-seg__btn--active) {
+        background: var(--yn-bg-3);
+        color: var(--yn-text);
+    }
+
+    &--active {
+        background: var(--yn-accent);
+        color: var(--yn-bg-3);
+        font-weight: 600;
+
+        &:hover {
+            background: var(--yn-accent);
+            color: var(--yn-bg-3);
+        }
+    }
+}
