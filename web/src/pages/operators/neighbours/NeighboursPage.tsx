@@ -256,9 +256,13 @@ const NeighboursPage: React.FC = () => {
     }, [activeTableInfo, removeTable, updateParams, reloadAll]);
 
     const handleJumpToRow = useCallback((id: string): void => {
+        const inVisible = visibleRows.some((n) => getNeighbourId(n) === id);
+        if (!inVisible) {
+            updateParams({ [QP_FAMILY]: null, [QP_STATE]: null });
+        }
         setFlashRowId(null);
         setTimeout(() => setFlashRowId(id), 0);
-    }, []);
+    }, [visibleRows, updateParams]);
 
     const canEditTable = !isMergedView && !!activeTableInfo;
     const canDeleteTable = !isMergedView && !!activeTableInfo && !isBuiltIn;
@@ -302,14 +306,16 @@ const NeighboursPage: React.FC = () => {
     const neighbourCommands = useMemo((): Command[] => {
         const cmds: Command[] = [];
 
-        cmds.push({
-            id: '__add_neighbour',
-            icon: '+',
-            label: 'Add neighbour',
-            sub: 'Open the add-neighbour panel',
-            keywords: 'add neighbour create new',
-            onSelect: () => { openAdd(); setPaletteOpen(false); },
-        });
+        if (tables.length > 0) {
+            cmds.push({
+                id: '__add_neighbour',
+                icon: '+',
+                label: 'Add neighbour',
+                sub: 'Open the add-neighbour panel',
+                keywords: 'add neighbour create new',
+                onSelect: () => { openAdd(); setPaletteOpen(false); },
+            });
+        }
 
         cmds.push({
             id: '__add_table',
@@ -478,6 +484,7 @@ const NeighboursPage: React.FC = () => {
                 },
             ];
         }
+        if (tables.length === 0) return [];
         return [
             {
                 id: '__add_ip',
@@ -493,7 +500,7 @@ const NeighboursPage: React.FC = () => {
                 },
             },
         ];
-    }, [allRows, handleJumpToRow]);
+    }, [allRows, handleJumpToRow, tables.length]);
 
     const neighbourRowAdapter: RowAdapter<Neighbour> = {
         rows: allRows,
