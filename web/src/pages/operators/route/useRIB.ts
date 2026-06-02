@@ -14,6 +14,9 @@ export interface UseRIBResult {
     setSelected: (configName: string, ids: Set<string>) => void;
 }
 
+const sortConfigs = (a: string, b: string): number =>
+    a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+
 /** Loads route configs and their routes from the operator backend. */
 export const useRIB = (): UseRIBResult => {
     const [configs, setConfigs] = useState<string[]>([]);
@@ -46,7 +49,7 @@ export const useRIB = (): UseRIBResult => {
             );
 
             if (opts?.isCancelled?.()) return;
-            setConfigs(configsList);
+            setConfigs([...configsList].sort(sortConfigs));
             setConfigRoutes(routesMap);
         } catch (err) {
             if (opts?.isCancelled?.()) return;
@@ -73,7 +76,7 @@ export const useRIB = (): UseRIBResult => {
     }, [loadAll]);
 
     const addLocalConfig = useCallback((name: string): void => {
-        setConfigs((prev) => (prev.includes(name) ? prev : [...prev, name]));
+        setConfigs((prev) => (prev.includes(name) ? prev : [...prev, name].sort(sortConfigs)));
         setConfigRoutes((prev) => {
             const next = new Map(prev);
             if (!next.has(name)) next.set(name, []);
