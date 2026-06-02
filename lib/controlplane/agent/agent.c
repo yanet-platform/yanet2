@@ -1530,8 +1530,10 @@ yanet_get_counters_by_tags(
 		}
 	}
 
-	// Prolong lock for a list lifetime
-	list->cp_config = cp_config;
+	// Hold cp_config_lock until the list is freed because handles borrow
+	// storage from the active config generation.
+	list->lock.dp_config = dp_config;
+
 	free(storages);
 	return list;
 
@@ -1695,8 +1697,10 @@ yanet_counter_handle_list_free(struct counter_handle_list *counters) {
 			free(handles[i].tags);
 		}
 	}
-	if (counters->cp_config != NULL) {
-		cp_config_unlock(counters->cp_config);
+	if (counters->lock.dp_config != NULL) {
+		struct cp_config *cp_config =
+			ADDR_OF(&counters->lock.dp_config->cp_config);
+		cp_config_unlock(cp_config);
 	}
 	free(counters);
 }

@@ -23,12 +23,19 @@ struct counter_handle {
 	struct counter_value_handle *value_handle;
 };
 
-struct cp_config;
+// Used to pin counter storage lifetime.
+struct counter_lock {
+	struct dp_config *dp_config;
+};
 
 struct counter_handle_list {
 	uint64_t instance_count;
 	uint64_t count;
-	struct cp_config *cp_config;
+
+	// Active when the list pins backing counter storage
+	// until list is freed.
+	struct counter_lock lock;
+
 	struct counter_handle counters[];
 };
 
