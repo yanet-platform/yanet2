@@ -4,10 +4,11 @@ import (
 	"context"
 	"fmt"
 
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
 	"github.com/yanet-platform/yanet2/common/go/operator"
-	"github.com/yanet-platform/yanet2/operators/pipeline/operatorpb/v1"
+	operatorpb "github.com/yanet-platform/yanet2/operators/pipeline/operatorpb/v1"
 )
 
 // Actuator applies a desired stage configuration.
@@ -39,6 +40,15 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 		WithServiceLog(log),
 	)
 
+	// One pipeline:<gateway> scope per gateway, covering all stages pushed there.
+	scopeNames := make([]string, len(cfg.Gateways))
+	for idx, gw := range cfg.Gateways {
+		scopeNames[idx] = fmt.Sprintf("pipeline:%s", gw.Name)
+	}
+	tracker := operator.NewReadiness(scopeNames,
+		operator.WithReadinessLog(log.With(zap.String("operator", "pipeline"))),
+	)
+
 	actuators := make([]Actuator, 0, len(cfg.Gateways))
 	for idx, gw := range cfg.Gateways {
 		actuator, err := NewGatewayActuator(
@@ -53,7 +63,8 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 			return nil, fmt.Errorf("failed to construct gateway actuator %q: %w", gw.Name, err)
 		}
 
-		actuators = append(actuators, actuator)
+		observed := operator.NewObservedActuator(actuator, fmt.Sprintf("pipeline:%s", gw.Name), tracker.Observe)
+		actuators = append(actuators, observed)
 	}
 
 	fanOut := operator.NewFanOutActuator(
@@ -67,6 +78,7 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 	)
 
 	stages := cfg.Stages
+	readinessSvc := NewReadinessService(tracker)
 	services := []operator.ServiceRegistrar{
 		func(s *grpc.Server) string {
 			operatorpb.RegisterPipelineOperatorServiceServer(s, service)
@@ -76,6 +88,10 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 			operatorpb.RegisterMetricsServiceServer(s, service)
 			return operatorpb.MetricsService_ServiceDesc.ServiceName
 		},
+		func(s *grpc.Server) string {
+			operatorpb.RegisterReadinessServiceServer(s, readinessSvc)
+			return operatorpb.ReadinessService_ServiceDesc.ServiceName
+		},
 	}
 
 	app := operator.NewOperator(
@@ -84,6 +100,11 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 		operator.WithGRPCServer(cfg.Server, services...),
 		operator.WithReconcile(cfg.Reconcile),
 		operator.WithGateways(cfg.Register, cfg.Gateways...),
+		operator.WithWorkers(func(ctx context.Context) error {
+			<-ctx.Done()
+			tracker.Drain()
+			return nil
+		}),
 		operator.WithPreRun(func(ctx context.Context) error {
 			if len(stages) == 0 {
 				return nil

@@ -17,3 +17,25 @@ protoc_gen = custom_target(
     build_by_default: true,
 )
 pipeline_operator_protoc_gen = protoc_gen
+
+readiness_proto_files = [
+    join_paths(proto_dir, 'readiness.proto'),
+]
+
+readiness_protoc_gen = custom_target(
+    'pipeline-operator-readiness-protoc',
+    output: [
+        'readiness.pb.go',
+        'readiness_grpc.pb.go',
+    ],
+    input: readiness_proto_files,
+    command: [
+        protoc,
+        '-I', root_dir,
+        '--go_out=paths=source_relative:' + root_dir,
+        '--go-grpc_out=paths=source_relative:' + root_dir,
+        '@INPUT@',
+    ],
+    build_by_default: true,
+)
+pipeline_operator_readiness_protoc_gen = readiness_protoc_gen
