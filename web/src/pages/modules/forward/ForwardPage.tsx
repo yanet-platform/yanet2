@@ -39,6 +39,7 @@ const ForwardPage: React.FC = () => {
         anyDirty,
         dispatchDraft,
         saveConfig,
+        commitDeleteConfig,
         discardConfig,
     } = useForwardDraft();
     const [searchParams, setSearchParams] = useSearchParams();
@@ -54,6 +55,7 @@ const ForwardPage: React.FC = () => {
     const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
     const [addConfigOpen, setAddConfigOpen] = useState(false);
     const [deleteConfigOpen, setDeleteConfigOpen] = useState(false);
+    const [deleteInFlightConfig, setDeleteInFlightConfig] = useState<string | null>(null);
     const [diffModalOpen, setDiffModalOpen] = useState(false);
     const [paletteOpen, setPaletteOpen] = useState(false);
     const [modeFilter, setModeFilter] = useState<ModeFilterValue>('all');
@@ -61,7 +63,7 @@ const ForwardPage: React.FC = () => {
     const drawerRef = useRef<RuleDrawerHandle>(null);
     const queryConfig = useMemo(() => searchParams.get(QP_CONFIG), [searchParams]);
     const search = useMemo(() => searchParams.get(QP_SEARCH) || '', [searchParams]);
-    const currentConfig = (queryConfig && (loading || draftConfigs.includes(queryConfig))) ? queryConfig : (draftConfigs[0] || '');
+    const currentConfig = (queryConfig && (loading || draftConfigs.includes(queryConfig) || queryConfig === deleteInFlightConfig)) ? queryConfig : (draftConfigs[0] || '');
     const updateParams = useCallback((updates: Record<string, string | null>): void => {
         setSearchParams((prev) => {
             const next = new URLSearchParams(prev);
@@ -72,6 +74,17 @@ const ForwardPage: React.FC = () => {
                     next.set(key, value);
                 }
             }
+            return next;
+        }, { replace: true });
+    }, [setSearchParams]);
+
+    const clearConfigParamIfCurrent = useCallback((name: string): void => {
+        setSearchParams((prev) => {
+            if (prev.get(QP_CONFIG) !== name) {
+                return prev;
+            }
+            const next = new URLSearchParams(prev);
+            next.delete(QP_CONFIG);
             return next;
         }, { replace: true });
     }, [setSearchParams]);
@@ -186,10 +199,19 @@ const ForwardPage: React.FC = () => {
         setDeleteConfirmOpen(false);
     }, [selectedIds, visibleItems, currentConfig, dispatchDraft]);
 
-    const handleDeleteConfig = useCallback((): void => {
-        dispatchDraft({ type: 'DELETE_CONFIG', configName: currentConfig });
+    const handleDeleteConfig = useCallback(async (): Promise<void> => {
         setDeleteConfigOpen(false);
-    }, [currentConfig, dispatchDraft]);
+        setDeleteInFlightConfig(currentConfig);
+        const name = currentConfig;
+        try {
+            await commitDeleteConfig(name);
+            clearConfigParamIfCurrent(name);
+        } catch {
+            // Toast already surfaced by the hook.
+        } finally {
+            setDeleteInFlightConfig(null);
+        }
+    }, [currentConfig, commitDeleteConfig, clearConfigParamIfCurrent]);
 
     const handleSave = useCallback(async (): Promise<void> => {
         await saveConfig(currentConfig);

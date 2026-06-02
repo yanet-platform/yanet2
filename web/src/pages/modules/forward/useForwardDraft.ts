@@ -27,6 +27,8 @@ export interface UseForwardDraftResult {
     dispatchDraft: (action: ForwardDraftAction) => void;
     /** Save one config to the server, then mark it clean. */
     saveConfig: (configName: string) => Promise<void>;
+    /** Immediately delete a config: dispatches DELETE_CONFIG, calls the API for server configs, toasts on completion. */
+    commitDeleteConfig: (configName: string) => Promise<void>;
     /** Revert one config's draft back to the server snapshot. */
     discardConfig: (configName: string) => void;
     /** Save all dirty configs sequentially. */
@@ -111,6 +113,23 @@ export const useForwardDraft = (): UseForwardDraftResult => {
         }
     }, [state.draft, state.pendingDeleteConfigs]);
 
+    const commitDeleteConfig = useCallback(async (configName: string): Promise<void> => {
+        const isLocalOnly = state.localOnlyConfigs.includes(configName);
+        rawDispatch({ type: 'DELETE_CONFIG', configName });
+        if (isLocalOnly) {
+            return;
+        }
+        try {
+            await API.forward.deleteConfig({ name: configName });
+            rawDispatch({ type: 'MARK_SAVED', configName });
+            toaster.success(`yn-save-${configName}`, `Config "${configName}" deleted.`);
+        } catch (err) {
+            rawDispatch({ type: 'CANCEL_PENDING_DELETE', configName });
+            toaster.error(`yn-save-err-${configName}`, `Failed to delete "${configName}"`, err);
+            throw err;
+        }
+    }, [state.localOnlyConfigs]);
+
     const discardConfig = useCallback((configName: string): void => {
         rawDispatch({ type: 'DISCARD_CONFIG', configName });
     }, []);
@@ -163,6 +182,7 @@ export const useForwardDraft = (): UseForwardDraftResult => {
         anyDirty,
         dispatchDraft,
         saveConfig,
+        commitDeleteConfig,
         discardConfig,
         saveAll,
         discardAll,

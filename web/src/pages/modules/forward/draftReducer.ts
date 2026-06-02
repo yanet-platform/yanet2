@@ -35,6 +35,7 @@ export type ForwardDraftAction =
     | { type: 'ADD_CONFIG'; configName: string }
     | { type: 'DELETE_CONFIG'; configName: string }
     | { type: 'DISCARD_CONFIG'; configName: string }
+    | { type: 'CANCEL_PENDING_DELETE'; configName: string }
     | { type: 'MARK_SAVED'; configName: string };
 
 /** Recompute the dirty set by comparing JSON of draft vs server for every known config. */
@@ -223,13 +224,24 @@ export const forwardDraftReducer = (
             return { ...next, dirty: recomputeDirty(next) };
         }
 
+        case 'CANCEL_PENDING_DELETE': {
+            const pendingDeleteConfigs = new Set(state.pendingDeleteConfigs);
+            pendingDeleteConfigs.delete(action.configName);
+            const next: Omit<ForwardDraftState, 'dirty'> = {
+                ...state,
+                pendingDeleteConfigs,
+            };
+            return { ...next, dirty: recomputeDirty(next) };
+        }
+
         case 'MARK_SAVED': {
             const draftRules = state.draft[action.configName];
+            const wasPendingDelete = state.pendingDeleteConfigs.has(action.configName);
             const pendingDeleteConfigs = new Set(state.pendingDeleteConfigs);
             pendingDeleteConfigs.delete(action.configName);
 
-            if (draftRules === undefined) {
-                // Config was deleted.
+            if (wasPendingDelete || draftRules === undefined) {
+                // Config was deleted (pending delete just persisted, or never had a draft entry).
                 const { [action.configName]: _s, ...serverRest } = state.server;
                 const { [action.configName]: _d, ...draftRest } = state.draft;
                 const next: Omit<ForwardDraftState, 'dirty'> = {
