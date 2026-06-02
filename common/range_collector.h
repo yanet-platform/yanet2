@@ -7,8 +7,43 @@
 
 #include "key.h"
 #include "lpm.h"
+#include "lpm_wide.h"
 #include "radix.h"
 #include "range_index.h"
+
+#define RANGE_COLLECTOR_VALUE_INVALID UINT32_MAX
+
+typedef int (*range_collector_insert_func)(
+	void *lpm,
+	uint8_t key_size,
+	const uint8_t *from,
+	const uint8_t *to,
+	uint32_t value
+);
+
+static inline int
+range_collector_lpm_insert(
+	void *lpm,
+	uint8_t key_size,
+	const uint8_t *from,
+	const uint8_t *to,
+	uint32_t value
+) {
+	return lpm_insert((struct lpm *)lpm, key_size, from, to, value);
+}
+
+static inline int
+range_collector_lpm_wide_insert(
+	void *lpm,
+	uint8_t key_size,
+	const uint8_t *from,
+	const uint8_t *to,
+	uint32_t value
+) {
+	return lpm_wide_insert(
+		(struct lpm_wide *)lpm, key_size, from, to, value
+	);
+}
 
 struct range_collector {
 	struct memory_context *memory_context;
@@ -120,7 +155,8 @@ range_collector_add(
 
 struct range_collector_ctx {
 	struct range_collector *collector;
-	struct lpm *lpm;
+	void *lpm;
+	range_collector_insert_func insert;
 	struct range_index *range_index;
 
 	uint32_t max_value;
@@ -152,7 +188,7 @@ range_collector_stack_push(
 		struct range_collector_stack_item item =
 			range_collector_stack_last(ctx, key_size);
 		if (filter_key_cmp(key_size, to, item.to) == 0) {
-			*item.value = LPM_VALUE_INVALID;
+			*item.value = RANGE_COLLECTOR_VALUE_INVALID;
 			return;
 		}
 	}
@@ -160,7 +196,7 @@ range_collector_stack_push(
 	++ctx->stack_depth;
 	struct range_collector_stack_item item =
 		range_collector_stack_last(ctx, key_size);
-	*item.value = LPM_VALUE_INVALID;
+	*item.value = RANGE_COLLECTOR_VALUE_INVALID;
 	memcpy(item.to, to, key_size);
 }
 
@@ -171,10 +207,10 @@ range_collector_stack_emit(
 	struct range_collector_stack_item item =
 		range_collector_stack_last(ctx, key_size);
 
-	if (*item.value == LPM_VALUE_INVALID)
+	if (*item.value == RANGE_COLLECTOR_VALUE_INVALID)
 		*item.value = ctx->max_value++;
 
-	if (lpm_insert(ctx->lpm, key_size, ctx->pos, to, *item.value))
+	if (ctx->insert(ctx->lpm, key_size, ctx->pos, to, *item.value))
 		return -1;
 
 	if (range_index_insert(
@@ -256,17 +292,19 @@ range_collector_iterate(
 }
 
 static inline int
-range_collector_collect(
+range_collector_collect_with_insert(
 	struct range_collector *collector,
 	uint8_t key_size,
-	struct lpm *lpm64,
+	void *lpm,
+	range_collector_insert_func insert,
 	struct range_index *range_index
 ) {
 	struct range_collector_ctx ctx;
 	ctx.collector = collector;
 	ctx.max_value = 0;
 
-	ctx.lpm = lpm64;
+	ctx.lpm = lpm;
+	ctx.insert = insert;
 	ctx.range_index = range_index;
 
 	uint32_t stack_size = key_size * 8 + 1;
@@ -304,6 +342,38 @@ range_collector_collect(
 error:
 
 	return -1;
+}
+
+static inline int
+range_collector_collect(
+	struct range_collector *collector,
+	uint8_t key_size,
+	struct lpm *lpm,
+	struct range_index *range_index
+) {
+	return range_collector_collect_with_insert(
+		collector,
+		key_size,
+		lpm,
+		range_collector_lpm_insert,
+		range_index
+	);
+}
+
+static inline int
+range_collector_collect_wide(
+	struct range_collector *collector,
+	uint8_t key_size,
+	struct lpm_wide *lpm,
+	struct range_index *range_index
+) {
+	return range_collector_collect_with_insert(
+		collector,
+		key_size,
+		lpm,
+		range_collector_lpm_wide_insert,
+		range_index
+	);
 }
 
 static inline int
