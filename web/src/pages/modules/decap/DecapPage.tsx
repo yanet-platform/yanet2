@@ -169,11 +169,11 @@ const DecapPage: React.FC = () => {
         />
     );
 
-    if (loading) return <PageLayout header={pageHeader}><PageLoader loading size="l" /></PageLayout>;
+    if (loading) return <PageLayout header={pageHeader} className="yn-flat-layout"><PageLoader loading size="l" /></PageLayout>;
 
     return (
-        <PageLayout header={pageHeader}>
-            <div className="yn-page">
+        <PageLayout header={pageHeader} className="yn-flat-layout">
+            <div className="yn-page yn-flat-page">
                 {draftConfigs.length === 0 ? (
                     <div className="yn-empty-page">
                         <div className="yn-empty-page__message">No decap configurations found.</div>
