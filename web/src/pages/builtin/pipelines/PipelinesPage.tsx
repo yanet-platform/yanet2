@@ -5,7 +5,7 @@ import { PageLayout, PageLoader, EmptyState, SearchInput } from '../../../compon
 import { usePipelinesData } from './hooks/usePipelinesData';
 import { useDragState, useUnsavedChangesBlocker } from '../_shared/lane-editor';
 import { PipelineCard } from './components/PipelineCard';
-import { CreatePipelineDialog } from './dialogs';
+import { CreateEntityDialog } from '../../../components';
 import type { Pipeline } from './types';
 import './PipelinesPage.scss';
 
@@ -108,7 +108,8 @@ const PipelinesPage = (): React.JSX.Element => {
                 )}
             </div>
 
-            <CreatePipelineDialog
+            <CreateEntityDialog
+                entityType="Pipeline"
                 open={createDialogOpen}
                 onClose={() => setCreateDialogOpen(false)}
                 onConfirm={async (name) => {

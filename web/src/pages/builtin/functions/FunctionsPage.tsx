@@ -5,7 +5,7 @@ import { PageLayout, PageLoader, EmptyState, SearchInput } from '../../../compon
 import { useFunctionsData } from './hooks/useFunctionsData';
 import { useDragState, useUnsavedChangesBlocker } from '../_shared/lane-editor';
 import { FunctionCard } from './components/FunctionCard';
-import { CreateFunctionDialog } from './dialogs';
+import { CreateEntityDialog } from '../../../components';
 import { getAvailableModuleTypesFromInspect } from './moduleTypeOptions';
 import type { NetworkFunction } from './types';
 import { API } from '../../../api';
@@ -164,7 +164,8 @@ const FunctionsPage = (): React.JSX.Element => {
                 )}
             </div>
 
-            <CreateFunctionDialog
+            <CreateEntityDialog
+                entityType="Function"
                 open={createDialogOpen}
                 onClose={() => setCreateDialogOpen(false)}
                 onConfirm={async (name) => {
