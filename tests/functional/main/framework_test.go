@@ -79,13 +79,13 @@ modules:
   dscp:
     memory_requirements: 8MB
   forward:
-    memory_requirements: 8MB
+    memory_requirements: 128MB
   nat64:
     memory_requirements: 8MB
   pdump:
     memory_requirements: 8MB
   acl:
-    memory_requirements: 16MB
+    memory_requirements: 128MB
 
 devices:
   plain:
