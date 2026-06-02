@@ -99,7 +99,7 @@ const VirtualRow: React.FC<VirtualRowProps> = memo(({
 
     return (
         <div
-            className={`yn-vrow${selected ? ' yn-vrow--selected' : ''}${active ? ' yn-vrow--active' : ''}`}
+            className={`yn-vrow yn-tbl-line${selected ? ' yn-vrow--selected' : ''}${active ? ' yn-vrow--active' : ''}`}
             onMouseEnter={handleMouseEnter}
             onMouseLeave={handleMouseLeave}
             style={{
@@ -113,7 +113,6 @@ const VirtualRow: React.FC<VirtualRowProps> = memo(({
                 alignItems: 'center',
                 borderBottom: '1px solid var(--yn-line)',
                 backgroundColor: rowBg,
-                paddingLeft: 4,
             }}
         >
             <div style={cellStyle('checkbox')} onClick={e => e.stopPropagation()}>
@@ -439,7 +438,7 @@ const RuleTable: React.FC<RuleTableProps> = ({
                     className="yn-vtbl-header"
                     style={{ height: HEADER_HEIGHT }}
                 >
-                    <div ref={headerInnerRef} style={{ display: 'flex', minWidth: TOTAL_WIDTH, height: '100%', alignItems: 'center', willChange: 'transform' }}>
+                    <div ref={headerInnerRef} className="yn-tbl-line" style={{ display: 'flex', minWidth: TOTAL_WIDTH, height: '100%', alignItems: 'center', willChange: 'transform' }}>
                     <div style={cellStyle('checkbox')}>
                         <Checkbox
                             indeterminate={isIndeterminate}

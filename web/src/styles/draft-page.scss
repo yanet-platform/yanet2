@@ -198,6 +198,16 @@
     flex-direction: column;
     overflow: hidden;
     position: relative;
+    --yn-tbl-pad-left: 16px;
+    --yn-tbl-pad-right: 22px;
+}
+
+// Canonical outer horizontal inset for every table row and header line.
+// Apply to any element that must start at --yn-tbl-pad-left from the
+// wrap's left edge and end --yn-tbl-pad-right from its right edge.
+.yn-tbl-line {
+    padding-left: var(--yn-tbl-pad-left);
+    padding-right: var(--yn-tbl-pad-right);
 }
 
 // Outer wrapper that aligns column-header row with the action button cluster.
@@ -272,14 +282,12 @@
 }
 
 // Sticky header row for the virtualized table.
-// Base: flex row with 4px L/R padding — consumed by VirtualDraftTable (FIBTable,
-// PrefixTable) and the legacy ACL/Forward RuleTables that place header cells as
-// direct flex children.
+// Base: flex row — consumed by VirtualDraftTable (FIBTable, PrefixTable) and the
+// legacy ACL RuleTable.  Horizontal padding is applied via .yn-tbl-line so it
+// matches the row inset exactly.
 .yn-vtbl-header {
     display: flex;
     align-items: center;
-    padding-left: 4px;
-    padding-right: 4px;
     flex: 1 1 auto;
     overflow-x: auto;
     overflow-y: hidden;

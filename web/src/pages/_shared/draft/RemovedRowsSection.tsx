@@ -72,14 +72,13 @@ const RemovedRowsSection = <T extends { id: string }>({
             {rows.map((r) => (
                 <div
                     key={r.id}
-                    className="yn-vrow"
+                    className="yn-vrow yn-tbl-line"
                     style={{
                         display: 'flex',
                         alignItems: 'center',
                         height: rowHeight,
                         minWidth: totalWidth,
                         borderBottom: '1px solid var(--yn-line)',
-                        paddingLeft: 4,
                         opacity: 0.55,
                         background: 'rgba(224, 122, 110, 0.04)',
                         position: 'relative',

@@ -244,8 +244,6 @@ export function VirtualTable<T>({
         gridTemplateColumns,
         columnGap: GRID_COLUMN_GAP,
         alignItems: 'center',
-        paddingLeft: 16,
-        paddingRight: 22,
         minWidth,
     };
 
@@ -265,7 +263,7 @@ export function VirtualTable<T>({
                     className="yn-vtbl-header yn-vtbl-header--grid"
                     style={{ flex: '1 1 auto', height: HEADER_HEIGHT, overflowX: 'scroll', overflowY: 'hidden', minWidth: 0 }}
                 >
-                    <div style={{ ...gridStyle, height: HEADER_HEIGHT, display: 'grid' }}>
+                    <div className="yn-tbl-line" style={{ ...gridStyle, height: HEADER_HEIGHT, display: 'grid' }}>
                         <div
                             style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                             onClick={(e) => e.stopPropagation()}
@@ -352,7 +350,7 @@ export function VirtualTable<T>({
                             return (
                                 <div
                                     key={id || virtualRow.index}
-                                    className={rowClasses}
+                                    className={`${rowClasses} yn-tbl-line`}
                                     data-row-id={id}
                                     onMouseEnter={() => handleHoverChange(row, virtualRow.start)}
                                     onMouseLeave={() => handleHoverChange(null, 0)}

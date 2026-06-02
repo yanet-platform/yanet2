@@ -111,7 +111,7 @@ const VirtualRowShell = memo(<T extends { id: string }>({
 
     return (
         <div
-            className={`yn-vrow${active ? ' yn-vrow--active' : ''}${dragCls}${selected ? ' yn-vrow--selected' : ''}`}
+            className={`yn-vrow yn-tbl-line${active ? ' yn-vrow--active' : ''}${dragCls}${selected ? ' yn-vrow--selected' : ''}`}
             data-row-id={row.id}
             onMouseEnter={handleMouseEnter}
             onMouseLeave={handleMouseLeave}
@@ -129,7 +129,6 @@ const VirtualRowShell = memo(<T extends { id: string }>({
                 alignItems: 'center',
                 borderBottom: '1px solid var(--yn-line)',
                 backgroundColor: rowBg,
-                paddingLeft: 4,
             }}
         >
             <div
@@ -291,7 +290,7 @@ export const VirtualDraftTable = <T extends { id: string }>({
     return (
         <div ref={wrapRef} className="yn-table-wrap">
             <div className="yn-table-header-row">
-                <div className="yn-vtbl-header" style={{ height: HEADER_HEIGHT, minWidth: totalWidth }}>
+                <div className="yn-vtbl-header yn-tbl-line" style={{ height: HEADER_HEIGHT, minWidth: totalWidth }}>
                     <div
                         style={{ width: LEADING_CELL_WIDTHS.checkbox, minWidth: LEADING_CELL_WIDTHS.checkbox, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                         onClick={(e) => e.stopPropagation()}
