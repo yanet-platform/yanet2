@@ -235,9 +235,8 @@ FILTER_ATTR_COMPILER_INIT_FUNC(net4_src)(
 	size_t actions_count,
 	struct memory_context *memory_context
 ) {
-	struct lpm_wide *lpm = memory_balloc(
-		memory_context, sizeof(struct lpm_wide)
-	);
+	struct lpm_wide *lpm =
+		memory_balloc(memory_context, sizeof(struct lpm_wide));
 	if (lpm == NULL)
 		return -1;
 
@@ -266,9 +265,8 @@ FILTER_ATTR_COMPILER_INIT_FUNC(net4_dst)(
 	size_t actions_count,
 	struct memory_context *memory_context
 ) {
-	struct lpm_wide *lpm = memory_balloc(
-		memory_context, sizeof(struct lpm_wide)
-	);
+	struct lpm_wide *lpm =
+		memory_balloc(memory_context, sizeof(struct lpm_wide));
 	if (lpm == NULL)
 		return -1;
 

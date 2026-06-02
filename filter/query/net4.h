@@ -23,9 +23,8 @@ FILTER_ATTR_QUERY_FUNC(net4_src)(
 			struct rte_ipv4_hdr *,
 			packets[idx]->network_header.offset
 		);
-		result[idx] = lpm_wide_lookup(
-			lpm, 4, (uint8_t *)&ipv4_hdr->src_addr
-		);
+		result[idx] =
+			lpm_wide_lookup(lpm, 4, (uint8_t *)&ipv4_hdr->src_addr);
 	}
 }
 
@@ -42,8 +41,7 @@ FILTER_ATTR_QUERY_FUNC(net4_dst)(
 			struct rte_ipv4_hdr *,
 			packets[idx]->network_header.offset
 		);
-		result[idx] = lpm_wide_lookup(
-			lpm, 4, (uint8_t *)&ipv4_hdr->dst_addr
-		);
+		result[idx] =
+			lpm_wide_lookup(lpm, 4, (uint8_t *)&ipv4_hdr->dst_addr);
 	}
 }
