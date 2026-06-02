@@ -11,8 +11,7 @@ import { parseIPAddress } from '../../../utils';
 import type { Neighbour, NeighbourTableInfo } from '../../../api/neighbours';
 import { NeighbourTable } from './NeighbourTable';
 import NeighbourPanel from './NeighbourPanel';
-import CreateTableModal from './CreateTableModal';
-import EditTableModal from './EditTableModal';
+import TableModal from './TableModal';
 import { useNeighbours } from './useNeighbours';
 import { getNeighbourId, isSortableColumn, isSortDirection, sortComparators } from './utils';
 import { MERGED_TAB, DEFAULT_SORT } from './types';
@@ -705,14 +704,16 @@ const NeighboursPage: React.FC = () => {
                     onPinAsStatic={handlePinAsStatic}
                 />
 
-                <CreateTableModal
+                <TableModal
+                    mode="create"
                     open={createTableOpen}
                     onClose={() => setCreateTableOpen(false)}
                     onCreate={handleCreateTable}
                     existingNames={tables.map((t) => t.name || '')}
                 />
 
-                <EditTableModal
+                <TableModal
+                    mode="edit"
                     open={editTableOpen}
                     onClose={() => setEditTableOpen(false)}
                     onSave={handleEditTable}
