@@ -45,6 +45,8 @@ interface RuleTableProps {
     onSave: () => void;
     onDiscard: () => void;
     onDeleteConfig: () => void;
+    /** Row id to scroll to and flash on mount / change. */
+    flashRowId?: string | null;
 }
 
 /** Virtualized rule table — thin wrapper over the shared VirtualTable shell. */
@@ -59,6 +61,7 @@ const RuleTable: React.FC<RuleTableProps> = ({
     onSave,
     onDiscard,
     onDeleteConfig,
+    flashRowId,
 }) => {
     const columns: Column<RuleItem>[] = [
         {
@@ -155,6 +158,7 @@ const RuleTable: React.FC<RuleTableProps> = ({
             editAriaLabel={(item) => `Edit rule ${item.index + 1}`}
             editTitle="Edit rule"
             activeRowId={activeRowId}
+            flashRowId={flashRowId}
             headerActions={
                 <DraftActionButtons
                     currentIsDirty={currentIsDirty}

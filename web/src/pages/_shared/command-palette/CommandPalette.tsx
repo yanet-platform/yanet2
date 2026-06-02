@@ -215,7 +215,7 @@ const CommandPalette = <T,>({
                                 key={item.id}
                                 type="button"
                                 className={`cp-item${idx === activeIdx ? ' cp-item--active' : ''}`}
-                                onMouseEnter={() => setActiveIdx(idx)}
+                                onMouseMove={() => { if (activeIdx !== idx) setActiveIdx(idx); }}
                                 onMouseDown={(e) => { e.preventDefault(); item.onSelect(); }}
                             >
                                 <span className="cp-item__icon">{item.icon}</span>

@@ -1,12 +1,16 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Flex, Icon, Text } from '@gravity-ui/uikit';
 import { useSearchParams } from 'react-router-dom';
-import { Pause, Play, Plus } from '@gravity-ui/icons';
+import { Funnel, Magnifier, Pause, Play, Plus } from '@gravity-ui/icons';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, SearchInput } from '../../../components';
 import { useForwardDraft } from './useForwardDraft';
 import { useUnsavedChangesBlocker } from '../../builtin/_shared/lane-editor';
 import type { Rule } from '../../../api/forward';
+import { ForwardMode } from '../../../api/forward';
 import type { RuleItem, RuleDraft } from './types';
+import { MODE_LABELS } from './types';
+import { ModeFilter } from './ModeFilter';
+import type { ModeFilterValue } from './ModeFilter';
 import { rulesToNgItems, draftToRule, useKeyboardShortcuts } from './hooks';
 import { DRAWER_TRANSITION_MS } from './RuleTable';
 import RuleTable from './RuleTable';
@@ -17,6 +21,8 @@ import { SaveDiffModal } from './SaveDiffModal';
 import { useForwardRuleCounters } from './useForwardRuleCounters';
 import { AddConfigModal } from '../../_shared/draft';
 import { DeleteConfigModal, BulkDeleteModal } from '../../../components';
+import { CommandPalette } from '../../_shared/command-palette';
+import type { Command, RowAdapter } from '../../_shared/command-palette';
 import '../../../styles/draft-page.scss';
 import './forward.scss';
 
@@ -49,6 +55,9 @@ const ForwardPage: React.FC = () => {
     const [addConfigOpen, setAddConfigOpen] = useState(false);
     const [deleteConfigOpen, setDeleteConfigOpen] = useState(false);
     const [diffModalOpen, setDiffModalOpen] = useState(false);
+    const [paletteOpen, setPaletteOpen] = useState(false);
+    const [modeFilter, setModeFilter] = useState<ModeFilterValue>('all');
+    const [flashRowId, setFlashRowId] = useState<string | null>(null);
     const drawerRef = useRef<RuleDrawerHandle>(null);
     const queryConfig = useMemo(() => searchParams.get(QP_CONFIG), [searchParams]);
     const search = useMemo(() => searchParams.get(QP_SEARCH) || '', [searchParams]);
@@ -104,16 +113,30 @@ const ForwardPage: React.FC = () => {
     }, [draftConfigs, isDirty]);
 
     const visibleItems = useMemo((): RuleItem[] => {
+        let res = allItems;
+
+        if (modeFilter !== 'all') {
+            const modeMap: Record<Exclude<ModeFilterValue, 'all'>, ForwardMode> = {
+                in: ForwardMode.IN,
+                out: ForwardMode.OUT,
+                none: ForwardMode.NONE,
+            };
+            const targetMode = modeMap[modeFilter];
+            res = res.filter((item) => item.mode === targetMode);
+        }
+
         const q = search.trim().toLowerCase();
-        if (!q) return allItems;
-        return allItems.filter((item) =>
-            item.target.toLowerCase().includes(q) ||
-            item.counter.toLowerCase().includes(q) ||
-            item.deviceNames.some((d) => d.toLowerCase().includes(q)) ||
-            item.sourceCidrs.some((s) => s.toLowerCase().includes(q)) ||
-            item.dstCidrs.some((s) => s.toLowerCase().includes(q))
-        );
-    }, [allItems, search]);
+        if (q) {
+            res = res.filter((item) =>
+                item.target.toLowerCase().includes(q) ||
+                item.counter.toLowerCase().includes(q) ||
+                item.deviceNames.some((d) => d.toLowerCase().includes(q)) ||
+                item.sourceCidrs.some((s) => s.toLowerCase().includes(q)) ||
+                item.dstCidrs.some((s) => s.toLowerCase().includes(q))
+            );
+        }
+        return res;
+    }, [allItems, search, modeFilter]);
 
     const openAdd = useCallback((): void => {
         setActiveRowId(null);
@@ -200,6 +223,11 @@ const ForwardPage: React.FC = () => {
         updateParams({ [QP_SEARCH]: value || null });
     }, [updateParams]);
 
+    const handleJumpToRow = useCallback((id: string): void => {
+        setFlashRowId(null);
+        setTimeout(() => setFlashRowId(id), 0);
+    }, []);
+
     useEffect(() => {
         setSelectedIds(new Set());
         setActiveRowId(null);
@@ -207,7 +235,29 @@ const ForwardPage: React.FC = () => {
         setDeleteConfirmOpen(false);
         setDeleteConfigOpen(false);
         setDiffModalOpen(false);
+        setModeFilter('all');
+        setFlashRowId(null);
     }, [currentConfig]);
+
+    useEffect(() => {
+        if (!paletteOpen) return;
+        const handleKeyDown = (e: KeyboardEvent): void => {
+            if (e.key === 'Escape') setPaletteOpen(false);
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [paletteOpen]);
+
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent): void => {
+            if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+                e.preventDefault();
+                setPaletteOpen((prev) => !prev);
+            }
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, []);
 
     useKeyboardShortcuts({
         onNewRule: openAdd,
@@ -217,17 +267,131 @@ const ForwardPage: React.FC = () => {
 
     const currentIsDirty = isDirty(currentConfig);
 
+    const commands = useMemo((): Command[] => {
+        const list: Command[] = [
+            {
+                id: '__add',
+                icon: '+',
+                label: 'Add rule',
+                sub: 'Open the add-rule drawer',
+                keywords: 'add rule insert new',
+                onSelect: () => { openAdd(); setPaletteOpen(false); },
+            },
+        ];
+        if (currentIsDirty) {
+            list.push({
+                id: '__save',
+                icon: '✓',
+                label: 'Save changes',
+                sub: 'Open the diff and save dialog',
+                keywords: 'save commit apply',
+                onSelect: () => { handleSavePress(); setPaletteOpen(false); },
+            });
+            list.push({
+                id: '__discard',
+                icon: '⟲',
+                label: 'Discard changes',
+                sub: 'Revert to the last saved state',
+                keywords: 'discard revert undo reset',
+                onSelect: () => { handleDiscard(); setPaletteOpen(false); },
+            });
+        }
+        list.push({
+            id: '__add_config',
+            icon: '▤',
+            label: 'Add config',
+            sub: 'Create a new forward configuration',
+            keywords: 'add config create new',
+            onSelect: () => { setAddConfigOpen(true); setPaletteOpen(false); },
+        });
+        if (currentConfig) {
+            list.push({
+                id: '__delete_config',
+                icon: '✕',
+                label: 'Delete config',
+                sub: `Delete "${currentConfig}"`,
+                keywords: 'delete remove config',
+                onSelect: () => { setDeleteConfigOpen(true); setPaletteOpen(false); },
+            });
+        }
+        for (const cfg of draftConfigs) {
+            if (cfg === currentConfig) continue;
+            const name = cfg;
+            list.push({
+                id: `__config_${name}`,
+                icon: '⇥',
+                label: `Switch to config ${name}`,
+                sub: dirtySet.has(name) ? 'unsaved changes' : undefined,
+                keywords: `switch config tab ${name}`,
+                onSelect: () => { handleTabSelect(name); setPaletteOpen(false); },
+            });
+        }
+        list.push({
+            id: '__pause',
+            icon: paused ? '▶' : '⏸',
+            label: paused ? 'Resume counters' : 'Pause counters',
+            keywords: 'pause resume counters pps',
+            onSelect: () => { setPaused((p) => !p); setPaletteOpen(false); },
+        });
+        list.push({
+            id: '__filter_in',
+            icon: '→',
+            label: 'Filter: IN only',
+            keywords: 'filter mode in direction',
+            onSelect: () => { setModeFilter('in'); setPaletteOpen(false); },
+        });
+        list.push({
+            id: '__filter_out',
+            icon: '→',
+            label: 'Filter: OUT only',
+            keywords: 'filter mode out direction',
+            onSelect: () => { setModeFilter('out'); setPaletteOpen(false); },
+        });
+        list.push({
+            id: '__filter_none',
+            icon: '→',
+            label: 'Filter: NONE only',
+            keywords: 'filter mode none direction',
+            onSelect: () => { setModeFilter('none'); setPaletteOpen(false); },
+        });
+        list.push({
+            id: '__clear',
+            icon: '✕',
+            label: 'Clear filters',
+            keywords: 'clear reset filter all',
+            onSelect: () => { setModeFilter('all'); handleSearchChange(''); setPaletteOpen(false); },
+        });
+        return list;
+    }, [currentIsDirty, currentConfig, paused, draftConfigs, dirtySet, handleTabSelect, openAdd, handleSavePress, handleDiscard, handleSearchChange]);
+
+    const rowAdapter: RowAdapter<RuleItem> = {
+        rows: allItems,
+        getId: (it) => it.id,
+        getLabel: (it) => it.target || '(no target)',
+        getSub: (it) => {
+            const parts: string[] = [MODE_LABELS[it.mode]];
+            if (it.counter) parts.push(it.counter);
+            if (it.deviceNames.length) parts.push(it.deviceNames.join(', '));
+            return parts.join(' · ');
+        },
+        searchText: (it) => [it.target, it.counter, ...it.deviceNames, ...it.sourceCidrs, ...it.dstCidrs].join(' '),
+        onSelect: (id) => { handleJumpToRow(id); setPaletteOpen(false); },
+        icon: '→',
+    };
+
     const pageHeader = (
         <Flex alignItems="center" gap={4} style={{ width: '100%' }}>
             <Text variant="header-1">Forward</Text>
-            <Flex grow />
-            <div style={{ flexBasis: 380, flexShrink: 1 }}>
-                <SearchInput
-                    value={search}
-                    onUpdate={handleSearchChange}
-                    placeholder="Search rules…"
-                />
-            </div>
+            <button
+                type="button"
+                className="cp-trigger"
+                onClick={() => setPaletteOpen(true)}
+                title="Open command palette (⌘K)"
+            >
+                <Icon data={Magnifier} size={16} />
+                <span className="cp-trigger__placeholder">Search rules or run an action…</span>
+                <kbd className="cp-kbd">⌘K</kbd>
+            </button>
             {currentConfig && (
                 <YamlIO
                     key={currentConfig}
@@ -283,6 +447,25 @@ const ForwardPage: React.FC = () => {
                             onAddConfig={() => setAddConfigOpen(true)}
                         />
 
+                        <div className="fw-toolbar">
+                            <ModeFilter value={modeFilter} onChange={setModeFilter} />
+                            <div style={{ flex: 1 }} />
+                            <div style={{ flexBasis: 230, flexShrink: 1 }}>
+                                <SearchInput
+                                    value={search}
+                                    onUpdate={handleSearchChange}
+                                    placeholder="Filter rows…"
+                                    enableFocusShortcut={false}
+                                    showShortcutHint={false}
+                                    icon={Funnel}
+                                />
+                            </div>
+                            <span className="fw-count">
+                                <span style={{ color: 'var(--yn-text)', fontWeight: 600 }}>{visibleItems.length.toLocaleString()}</span>
+                                {' / '}{allItems.length.toLocaleString()}
+                            </span>
+                        </div>
+
                         <div className="yn-content">
                             <RuleTable
                                 items={visibleItems}
@@ -295,6 +478,7 @@ const ForwardPage: React.FC = () => {
                                 onSave={handleSavePress}
                                 onDiscard={handleDiscard}
                                 onDeleteConfig={() => setDeleteConfigOpen(true)}
+                                flashRowId={flashRowId}
                             />
                         </div>
                     </>
@@ -357,6 +541,14 @@ const ForwardPage: React.FC = () => {
                         onApply={handleSave}
                     />
                 )}
+
+                <CommandPalette<RuleItem>
+                    open={paletteOpen}
+                    onClose={() => setPaletteOpen(false)}
+                    placeholder="Search rules or run an action…"
+                    commands={commands}
+                    rowAdapter={rowAdapter}
+                />
             </div>
         </PageLayout>
     );
