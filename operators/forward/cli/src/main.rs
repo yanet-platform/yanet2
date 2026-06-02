@@ -1,7 +1,7 @@
 //! CLI for the YANET forward operator (readiness commands).
 //!
 //! Connects to a gRPC endpoint exposing the operator's `ReadinessService`
-//! and reports per-gateway readiness state.
+//! and reports per-scope readiness state.
 
 use core::fmt::{self, Display, Formatter};
 
@@ -54,14 +54,14 @@ pub struct Cmd {
 
 #[derive(Debug, Clone, Parser)]
 pub enum ModeCmd {
-    /// Show per-gateway readiness of the forward operator.
+    /// Show per-scope readiness of the forward operator.
     Ready(ReadyCmd),
 }
 
 #[derive(Debug, Clone, Parser)]
 pub struct ReadyCmd {
-    /// Restrict output to these gateway names; empty means all.
-    pub gateways: Vec<String>,
+    /// Restrict output to these scope names; empty means all.
+    pub scopes: Vec<String>,
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -116,7 +116,7 @@ impl ForwardOperatorService {
     }
 
     pub async fn ready(&mut self, cmd: ReadyCmd) -> Result<bool, Error> {
-        let request = readinesspb::pb::ReadyRequest { scopes: cmd.gateways.clone() };
+        let request = readinesspb::pb::ReadyRequest { scopes: cmd.scopes.clone() };
 
         let response = self
             .client
@@ -129,7 +129,7 @@ impl ForwardOperatorService {
             response.scopes.iter().map(|scope| scope.name.as_str()).collect();
 
         let missing: Vec<&str> = cmd
-            .gateways
+            .scopes
             .iter()
             .map(String::as_str)
             .filter(|name| !returned_names.contains(name))
@@ -152,10 +152,10 @@ impl ForwardOperatorService {
         output::data(
             &response.scopes,
             response.scopes.is_empty() && missing.is_empty(),
-            format_args!("no gateways"),
+            format_args!("no scopes"),
             || {
                 let mut rows: Vec<ReadinessRow> = response.scopes.iter().map(ReadinessRow::from).collect();
-                rows.sort_by(|a, b| a.gateway.cmp(&b.gateway));
+                rows.sort_by(|a, b| a.scope.cmp(&b.scope));
 
                 if !rows.is_empty() {
                     print_readiness_table(rows);
@@ -175,7 +175,7 @@ impl ForwardOperatorService {
                 let missing_count = missing.len();
 
                 if missing_count > 0 {
-                    println!("summary: {ready_count}/{total} ready, {missing_count} requested gateway missing");
+                    println!("summary: {ready_count}/{total} ready, {missing_count} requested scope missing");
                 } else {
                     println!("summary: {ready_count}/{total} ready");
                 }
@@ -212,8 +212,8 @@ impl Display for StateCell {
 
 #[derive(Debug, Tabled)]
 pub struct ReadinessRow {
-    #[tabled(rename = "Gateway")]
-    pub gateway: String,
+    #[tabled(rename = "Scope")]
+    pub scope: String,
     #[tabled(rename = "State")]
     pub state: String,
     #[tabled(rename = "Last Transition")]
@@ -237,7 +237,7 @@ impl From<&readinesspb::pb::Scope> for ReadinessRow {
             .join(", ");
 
         Self {
-            gateway: scope.name.clone(),
+            scope: scope.name.clone(),
             state: state_cell.to_string(),
             last_transition: format_age(scope.last_transition_time.as_ref()),
             observed: format_age(scope.observed_at.as_ref()),

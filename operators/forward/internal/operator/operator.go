@@ -40,11 +40,12 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 		})
 	}
 
-	gatewayIDs := make([]string, len(cfg.Gateways))
+	// One config:<gateway> scope per gateway, covering all module configs pushed there.
+	scopeNames := make([]string, len(cfg.Gateways))
 	for idx, gw := range cfg.Gateways {
-		gatewayIDs[idx] = gw.Name
+		scopeNames[idx] = fmt.Sprintf("config:%s", gw.Name)
 	}
-	tracker := operator.NewReadiness(gatewayIDs,
+	tracker := operator.NewReadiness(scopeNames,
 		operator.WithReadinessLog(log.With(zap.String("operator", "forward"))),
 	)
 
@@ -57,7 +58,7 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 			}
 			return nil, fmt.Errorf("failed to construct gateway actuator %q: %w", gw.Name, err)
 		}
-		observed := operator.NewObservedActuator(actuator, gw.Name, tracker.Observe)
+		observed := operator.NewObservedActuator(actuator, fmt.Sprintf("config:%s", gw.Name), tracker.Observe)
 		actuators = append(actuators, observed)
 	}
 
