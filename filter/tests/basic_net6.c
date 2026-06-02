@@ -109,7 +109,7 @@ test1(void *memory) {
 	// init memory
 	struct block_allocator allocator;
 	block_allocator_init(&allocator);
-	block_allocator_put_arena(&allocator, memory, 1 << 24);
+	block_allocator_put_arena(&allocator, memory, 1 << 28);
 
 	struct memory_context mctx;
 	int res = memory_context_init(&mctx, "test", &allocator);
@@ -261,7 +261,7 @@ test2(void *memory) {
 	// init memory
 	struct block_allocator allocator;
 	block_allocator_init(&allocator);
-	block_allocator_put_arena(&allocator, memory, 1 << 24);
+	block_allocator_put_arena(&allocator, memory, 1 << 28);
 
 	struct memory_context mctx;
 	int res = memory_context_init(&mctx, "test", &allocator);
@@ -388,7 +388,7 @@ test3(void *memory) {
 	// init memory
 	struct block_allocator allocator;
 	block_allocator_init(&allocator);
-	block_allocator_put_arena(&allocator, memory, 1 << 24);
+	block_allocator_put_arena(&allocator, memory, 1 << 28);
 
 	struct memory_context mctx;
 	int res = memory_context_init(&mctx, "test", &allocator);
@@ -579,7 +579,7 @@ test3(void *memory) {
 int
 main() {
 	log_enable_name("debug");
-	void *memory = malloc(1 << 24); // 16MB
+	void *memory = malloc(1 << 28); // 256MB
 
 	LOG(INFO, "Running test1...");
 	test1(memory);

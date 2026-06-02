@@ -12,9 +12,9 @@
 // Forward module filter compilation needs more memory than the default 1 MB
 // arena.
 //
-// ASAN redzones inflate allocations significantly, so 16 MB is needed for
+// ASAN redzones inflate allocations significantly, so 256 MB is needed for
 // fuzzing builds.
-#define FORWARD_EXTRA_ARENA_SIZE (16 << 20)
+#define FORWARD_EXTRA_ARENA_SIZE (1 << 28)
 
 static struct fuzzing_params fuzz_params = {0};
 
