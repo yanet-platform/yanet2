@@ -1,13 +1,12 @@
-import React, { useMemo } from 'react';
+import React from 'react';
 import type { InstanceInfo } from '../../../api/inspect';
-import { useDeviceCounters } from '../../../hooks';
 import { HudHero } from './HudHero';
 import { DeviceWall } from './DeviceWall';
 import { ModuleStrip } from './ModuleStrip';
 import { SystemAgents } from './SystemAgents';
 import { PipeWall } from './PipeWall';
 import { FnWall } from './FnWall';
-import { computeAgentUsage, computeMemoryTotals } from './utils';
+import { useInstanceData } from '../_shared/useInstanceData';
 
 export interface InstanceCardProps {
     instance: InstanceInfo;
@@ -15,30 +14,7 @@ export interface InstanceCardProps {
 
 /** Root HUD layout for a single YANET instance. */
 export const InstanceCard: React.FC<InstanceCardProps> = ({ instance }) => {
-    const devices = instance.devices ?? [];
-
-    const deviceNames = useMemo(
-        () => devices.map((d, idx) => d.name ?? `device-${idx}`),
-        [devices],
-    );
-
-    const { counters: rateCounters, absoluteCounters } = useDeviceCounters(
-        deviceNames,
-        devices.length > 0,
-    );
-
-    const physicalDeviceNames = useMemo(() => {
-        const result = new Set<string>();
-        devices.forEach((d, idx) => {
-            if (d.type === 'plain') {
-                result.add(d.name ?? `device-${idx}`);
-            }
-        });
-        return result;
-    }, [devices]);
-
-    const agentUsage = useMemo(() => computeAgentUsage(instance), [instance]);
-    const memTotals = useMemo(() => computeMemoryTotals(agentUsage), [agentUsage]);
+    const { rateCounters, absoluteCounters, physicalDeviceNames, usage: agentUsage, memTotals } = useInstanceData(instance);
 
     return (
         <div className="iv-instance">

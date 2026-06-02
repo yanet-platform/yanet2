@@ -1,6 +1,5 @@
-import React, { useMemo } from 'react';
+import React from 'react';
 import type { InstanceInfo } from '../../../api/inspect';
-import { useDeviceCounters } from '../../../hooks';
 import { SystemState } from './SystemState';
 import { useWorkerCount } from './hooks';
 import { KpiStrip } from './KpiStrip';
@@ -9,7 +8,7 @@ import { SceneErrorBoundary } from './SceneErrorBoundary';
 import { Throughput } from './Throughput';
 import { DataplaneModules } from './DataplaneModules';
 import { SystemAgents } from '../inspect/SystemAgents';
-import { computeAgentUsage, computeMemoryTotals } from '../inspect/utils';
+import { useInstanceData } from '../_shared/useInstanceData';
 
 export interface InstanceCardProps {
     instance: InstanceInfo;
@@ -17,32 +16,9 @@ export interface InstanceCardProps {
 
 /** Root layout for a single YANET instance: system state, KPI strip, 3D scene, modules. */
 export const InstanceCard: React.FC<InstanceCardProps> = ({ instance }) => {
-    const devices = instance.devices ?? [];
-
-    const deviceNames = useMemo(
-        () => devices.map((d, idx) => d.name ?? `device-${idx}`),
-        [devices],
-    );
-
-    const { counters: rateCounters, absoluteCounters } = useDeviceCounters(
-        deviceNames,
-        devices.length > 0,
-    );
+    const { deviceNames, rateCounters, absoluteCounters, physicalDeviceNames, usage, memTotals } = useInstanceData(instance);
 
     const workerCount = useWorkerCount(deviceNames);
-
-    const usage = useMemo(() => computeAgentUsage(instance), [instance]);
-    const memTotals = useMemo(() => computeMemoryTotals(usage), [usage]);
-
-    const physicalDeviceNames = useMemo(() => {
-        const result = new Set<string>();
-        devices.forEach((d, idx) => {
-            if (d.type === 'plain') {
-                result.add(d.name ?? `device-${idx}`);
-            }
-        });
-        return result;
-    }, [devices]);
 
     return (
         <>
