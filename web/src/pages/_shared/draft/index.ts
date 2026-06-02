@@ -17,3 +17,5 @@ export { useDraftDragDrop } from './useDraftDragDrop';
 export type { DragOverState, UseDraftDragDropResult } from './useDraftDragDrop';
 export { useDraftPageHandlers } from './useDraftPageHandlers';
 export type { UseDraftPageHandlersResult } from './useDraftPageHandlers';
+export { rowHasError, countInvalidRows } from './validation';
+export { dumpYamlDoc, parseYamlList } from './yaml';

@@ -1,5 +1,9 @@
 import type { FIBRowItem, FIBRowErrors } from './types';
 import { isValidCIDR } from '../../_shared/draft/cidr';
+import {
+    rowHasError as sharedRowHasError,
+    countInvalidRows as sharedCountInvalidRows,
+} from '../../_shared/draft/validation';
 
 /** Returns true if s is a valid IPv4 or IPv6 CIDR prefix. */
 export const isValidPrefix = isValidCIDR;
@@ -21,11 +25,8 @@ export const validateRow = (row: FIBRowItem): FIBRowErrors => ({
 });
 
 /** Returns true if the row has any validation error. */
-export const rowHasError = (row: FIBRowItem): boolean => {
-    const errs = validateRow(row);
-    return Object.values(errs).some(Boolean);
-};
+export const rowHasError = (row: FIBRowItem): boolean => sharedRowHasError(validateRow(row));
 
 /** Count invalid rows in a list. */
 export const countInvalidRows = (rows: FIBRowItem[]): number =>
-    rows.filter(rowHasError).length;
+    sharedCountInvalidRows(rows, validateRow);
