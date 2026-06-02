@@ -141,37 +141,39 @@ const AppContent = (): React.JSX.Element => {
                 onPageChange={handlePageChange}
                 disabled={sidebarDisabled}
                 renderContent={() => (
-                    <Suspense fallback={<PageLoader loading size="l" />}>
-                        <Routes>
-                            <Route path="/" element={<Navigate to="/builtin/dashboard" replace />} />
-                            <Route path="/builtin/inspect" element={<InspectPage />} />
-                            <Route path="/builtin/dashboard" element={<DashboardPage />} />
-                            <Route path="/builtin/functions" element={<FunctionsPage />} />
-                            <Route path="/builtin/functions-ng" element={<Navigate to="/builtin/functions" replace />} />
-                            <Route path="/builtin/pipelines" element={<PipelinesPage />} />
-                            <Route path="/builtin/devices" element={<DevicesPage />} />
-                            <Route path="/modules/forward" element={<ForwardPage />} />
-                            <Route path="/modules/decap" element={<DecapPage />} />
-                            <Route path="/modules/acl" element={<AclPage />} />
-                            <Route path="/modules/fwstate" element={<FWStatePage />} />
-                            <Route path="/modules/pdump" element={<PdumpPage />} />
-                            <Route path="/modules/route" element={<ModulesRoutePage />} />
-                            <Route path="/operators/route" element={<OperatorsRoutePage />} />
-                            <Route path="/operators/neighbours" element={<NeighboursPage />} />
-                            <Route path="/inspect" element={<Navigate to="/builtin/inspect" replace />} />
-                            <Route path="/dashboard" element={<Navigate to="/builtin/dashboard" replace />} />
-                            <Route path="/functions" element={<Navigate to="/builtin/functions" replace />} />
-                            <Route path="/pipelines" element={<Navigate to="/builtin/pipelines" replace />} />
-                            <Route path="/devices" element={<Navigate to="/builtin/devices" replace />} />
-                            <Route path="/forward" element={<Navigate to="/modules/forward" replace />} />
-                            <Route path="/decap" element={<Navigate to="/modules/decap" replace />} />
-                            <Route path="/acl" element={<Navigate to="/modules/acl" replace />} />
-                            <Route path="/fwstate" element={<Navigate to="/modules/fwstate" replace />} />
-                            <Route path="/pdump" element={<Navigate to="/modules/pdump" replace />} />
-                            <Route path="/route" element={<Navigate to="/operators/route" replace />} />
-                            <Route path="/neighbours" element={<Navigate to="/operators/neighbours" replace />} />
-                        </Routes>
-                    </Suspense>
+                    <div className="app-surface">
+                        <Suspense fallback={<PageLoader loading size="l" />}>
+                            <Routes>
+                                <Route path="/" element={<Navigate to="/builtin/dashboard" replace />} />
+                                <Route path="/builtin/inspect" element={<InspectPage />} />
+                                <Route path="/builtin/dashboard" element={<DashboardPage />} />
+                                <Route path="/builtin/functions" element={<FunctionsPage />} />
+                                <Route path="/builtin/functions-ng" element={<Navigate to="/builtin/functions" replace />} />
+                                <Route path="/builtin/pipelines" element={<PipelinesPage />} />
+                                <Route path="/builtin/devices" element={<DevicesPage />} />
+                                <Route path="/modules/forward" element={<ForwardPage />} />
+                                <Route path="/modules/decap" element={<DecapPage />} />
+                                <Route path="/modules/acl" element={<AclPage />} />
+                                <Route path="/modules/fwstate" element={<FWStatePage />} />
+                                <Route path="/modules/pdump" element={<PdumpPage />} />
+                                <Route path="/modules/route" element={<ModulesRoutePage />} />
+                                <Route path="/operators/route" element={<OperatorsRoutePage />} />
+                                <Route path="/operators/neighbours" element={<NeighboursPage />} />
+                                <Route path="/inspect" element={<Navigate to="/builtin/inspect" replace />} />
+                                <Route path="/dashboard" element={<Navigate to="/builtin/dashboard" replace />} />
+                                <Route path="/functions" element={<Navigate to="/builtin/functions" replace />} />
+                                <Route path="/pipelines" element={<Navigate to="/builtin/pipelines" replace />} />
+                                <Route path="/devices" element={<Navigate to="/builtin/devices" replace />} />
+                                <Route path="/forward" element={<Navigate to="/modules/forward" replace />} />
+                                <Route path="/decap" element={<Navigate to="/modules/decap" replace />} />
+                                <Route path="/acl" element={<Navigate to="/modules/acl" replace />} />
+                                <Route path="/fwstate" element={<Navigate to="/modules/fwstate" replace />} />
+                                <Route path="/pdump" element={<Navigate to="/modules/pdump" replace />} />
+                                <Route path="/route" element={<Navigate to="/operators/route" replace />} />
+                                <Route path="/neighbours" element={<Navigate to="/operators/neighbours" replace />} />
+                            </Routes>
+                        </Suspense>
+                    </div>
                 )}
             />
         </SidebarContext.Provider>

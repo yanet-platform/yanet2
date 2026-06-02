@@ -8,6 +8,7 @@ export interface UseRIBResult {
     configRoutes: Map<string, Route[]>;
     selectedIds: Map<string, Set<string>>;
     loading: boolean;
+    refreshing: boolean;
     reload: () => Promise<void>;
     addLocalConfig: (name: string) => void;
     setSelected: (configName: string, ids: Set<string>) => void;
@@ -19,9 +20,15 @@ export const useRIB = (): UseRIBResult => {
     const [configRoutes, setConfigRoutes] = useState<Map<string, Route[]>>(new Map());
     const [selectedIds, setSelectedIds] = useState<Map<string, Set<string>>>(new Map());
     const [loading, setLoading] = useState(true);
+    const [refreshing, setRefreshing] = useState(false);
 
-    const loadAll = useCallback(async (opts?: { isCancelled?: () => boolean }): Promise<void> => {
-        setLoading(true);
+    const loadAll = useCallback(async (opts?: { initial?: boolean; isCancelled?: () => boolean }): Promise<void> => {
+        const isInitial = opts?.initial !== false;
+        if (isInitial) {
+            setLoading(true);
+        } else {
+            setRefreshing(true);
+        }
         try {
             const configsResponse = await API.routeOperator.listConfigs();
             const configsList = configsResponse.configs || [];
@@ -46,19 +53,23 @@ export const useRIB = (): UseRIBResult => {
             toaster.error('rib-configs-error', 'Failed to fetch RIB configs', err);
         } finally {
             if (!opts?.isCancelled?.()) {
-                setLoading(false);
+                if (isInitial) {
+                    setLoading(false);
+                } else {
+                    setRefreshing(false);
+                }
             }
         }
     }, []);
 
     useEffect(() => {
         let cancelled = false;
-        loadAll({ isCancelled: () => cancelled });
+        loadAll({ initial: true, isCancelled: () => cancelled });
         return () => { cancelled = true; };
     }, [loadAll]);
 
     const reload = useCallback(async (): Promise<void> => {
-        await loadAll();
+        await loadAll({ initial: false });
     }, [loadAll]);
 
     const addLocalConfig = useCallback((name: string): void => {
@@ -78,5 +89,5 @@ export const useRIB = (): UseRIBResult => {
         });
     }, []);
 
-    return { configs, configRoutes, selectedIds, loading, reload, addLocalConfig, setSelected };
+    return { configs, configRoutes, selectedIds, loading, refreshing, reload, addLocalConfig, setSelected };
 };

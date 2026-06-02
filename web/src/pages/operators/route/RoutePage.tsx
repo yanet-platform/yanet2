@@ -18,7 +18,7 @@ import '../../../styles/draft-page.scss';
 import './route.scss';
 
 const RoutePage: React.FC = () => {
-    const { configs, configRoutes, selectedIds, loading, reload, addLocalConfig, setSelected } = useRIB();
+    const { configs, configRoutes, selectedIds, loading, refreshing, reload, addLocalConfig, setSelected } = useRIB();
 
     const [activeConfig, setActiveConfig] = useState('');
     const [search, setSearch] = useState('');
@@ -314,7 +314,7 @@ const RoutePage: React.FC = () => {
         </Flex>
     );
 
-    if (loading) {
+    if (loading && configs.length === 0) {
         return (
             <PageLayout header={pageHeader} className="ro-layout">
                 <PageLoader loading size="l" />
@@ -324,7 +324,7 @@ const RoutePage: React.FC = () => {
 
     return (
         <PageLayout header={pageHeader} className="ro-layout">
-            <div className="fw-page ro-page">
+            <div className="fw-page ro-page" aria-busy={refreshing}>
                 {configs.length === 0 ? (
                     <div className="fw-empty-page">
                         <div className="fw-empty-page__message">No route configurations found.</div>
