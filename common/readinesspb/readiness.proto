@@ -16,9 +16,7 @@ message ReadyRequest {
   repeated string scopes = 1;
 }
 
-message ReadyResponse {
-  repeated Scope scopes = 1;
-}
+message ReadyResponse { repeated Scope scopes = 1; }
 
 // Scope describes the readiness of a single logical dimension within the
 // component.

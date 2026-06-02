@@ -57,7 +57,7 @@ message Rule {
 message NextHop {
   ActionKind kind = 1;
   uint32 label = 2;
-  commonpb.IPAddress source_ip = 3; // host address
+  commonpb.IPAddress source_ip = 3;      // host address
   commonpb.IPAddress destination_ip = 4; // host address
   uint64 weight = 5;
   string counter = 6;

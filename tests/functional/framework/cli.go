@@ -242,10 +242,10 @@ func (c *CLIManager) waitForCommandCompletionWithMarkers(command, fullCommand, s
 	parseRetries := 0
 
 	for time.Now().Before(deadline) {
-	output := c.inner.qemu.serialBufferSnapshot()
-	// Normalize \r\n → \n before stripping command echo so ReplaceAll
-	// matches even when the shell echoes the command with CRLF line endings.
-	output = strings.ReplaceAll(strings.ReplaceAll(output, "\r\n", "\n"), fullCommand, "")
+		output := c.inner.qemu.serialBufferSnapshot()
+		// Normalize \r\n → \n before stripping command echo so ReplaceAll
+		// matches even when the shell echoes the command with CRLF line endings.
+		output = strings.ReplaceAll(strings.ReplaceAll(output, "\r\n", "\n"), fullCommand, "")
 
 		// Look for start marker
 		if !foundStart && strings.Contains(output, startMarker) {

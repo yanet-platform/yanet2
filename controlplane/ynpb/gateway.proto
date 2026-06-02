@@ -52,6 +52,4 @@ enum RegistrationStatus {
 message RegisterRequest { BackendDesc backend = 1; }
 
 // RegisterResponse is the response to the RegisterRequest.
-message RegisterResponse {
-  RegistrationStatus status = 1;
-}
+message RegisterResponse { RegistrationStatus status = 1; }
