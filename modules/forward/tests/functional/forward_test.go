@@ -20,9 +20,9 @@ import (
 
 // Memory sizes for the forward functional harness.
 const (
-	fwdCPSize  = 64 * datasize.MB
+	fwdCPSize  = 256 * datasize.MB
 	fwdDPSize  = 4 * datasize.MB
-	fwdMemSize = 8 * datasize.MB
+	fwdMemSize = 128 * datasize.MB
 )
 
 // setupForwardHarness builds a dataplane harness with the forward module

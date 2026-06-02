@@ -167,6 +167,8 @@ test_stress_seed12_regression(void *memory, size_t memory_size) {
 	LOG(INFO, "Regression test passed!");
 }
 
+static const size_t MEMORY_SIZE = 1 << 30;
+
 int
 main() {
 	log_enable_name("debug");
@@ -174,8 +176,8 @@ main() {
 	// init memory
 	struct block_allocator allocator;
 	block_allocator_init(&allocator);
-	void *memory = malloc(1 << 28);
-	block_allocator_put_arena(&allocator, memory, 1 << 28);
+	void *memory = malloc(MEMORY_SIZE);
+	block_allocator_put_arena(&allocator, memory, MEMORY_SIZE);
 
 	struct memory_context memory_context;
 	int res = memory_context_init(&memory_context, "test", &allocator);
@@ -271,7 +273,7 @@ main() {
 
 	// Run comprehensive regression test with all 20 rules from stress test
 	// Allocate separate memory for the stress test
-	// test_stress_seed12_regression(memory, 1 << 28);
+	// test_stress_seed12_regression(memory, MEMORY_SIZE);
 
 	(void)test_stress_seed12_regression;
 

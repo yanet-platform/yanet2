@@ -24,9 +24,9 @@ import (
 
 // Memory sizes for the ACL functional harness.
 const (
-	aclCPSize  = 64 * datasize.MB
+	aclCPSize  = 256 * datasize.MB
 	aclDPSize  = 4 * datasize.MB
-	aclMemSize = 16 * datasize.MB
+	aclMemSize = 128 * datasize.MB
 )
 
 // udpProto matches any UDP packet.

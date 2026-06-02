@@ -10,6 +10,8 @@
 #include <netinet/in.h>
 #include <stdio.h>
 
+static const size_t MEMORY_SIZE = 1 << 29;
+
 FILTER_COMPILER_DECLARE(
 	sign_net4_ports_compile, port_src, port_dst, net4_src, net4_dst
 );
@@ -42,7 +44,7 @@ test(void *memory) {
 	struct block_allocator allocator;
 	block_allocator_init(&allocator);
 
-	block_allocator_put_arena(&allocator, memory, 1 << 26);
+	block_allocator_put_arena(&allocator, memory, MEMORY_SIZE);
 
 	struct memory_context memory_context;
 	int res = memory_context_init(&memory_context, "test", &allocator);
@@ -142,7 +144,7 @@ next_permutation(uint32_t *a, size_t n) {
 int
 main() {
 	log_enable_name("debug");
-	void *memory = malloc(1 << 26); // 64MB
+	void *memory = malloc(MEMORY_SIZE);
 
 	uint32_t perm[4] = {0, 1, 2, 3};
 
