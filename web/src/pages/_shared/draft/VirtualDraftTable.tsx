@@ -197,6 +197,11 @@ export interface VirtualDraftTableProps<T extends { id: string }> {
     itemNoun: string;
     /** Message shown when visibleRows is empty. */
     emptyMessage: string;
+    /**
+     * When true the body height is calculated with zero extra gap below the footer,
+     * pinning the footer flush to the page bottom. Defaults to false (legacy +20px gap).
+     */
+    flushFooter?: boolean;
 }
 
 /** Generic virtualized draft table. Used by FIBTable and PrefixTable. */
@@ -227,10 +232,11 @@ export const VirtualDraftTable = <T extends { id: string }>({
     removedColumns,
     itemNoun,
     emptyMessage,
+    flushFooter = false,
 }: VirtualDraftTableProps<T>): React.JSX.Element => {
     const scrollRef = useRef<HTMLDivElement>(null);
     const wrapRef = useRef<HTMLDivElement>(null);
-    const bodyHeight = useContainerHeight(scrollRef, 300, FOOTER_HEIGHT + 20);
+    const bodyHeight = useContainerHeight(scrollRef, 300, flushFooter ? FOOTER_HEIGHT : FOOTER_HEIGHT + 20);
 
     const {
         hoveredRow,

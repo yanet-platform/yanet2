@@ -105,6 +105,7 @@ export const FIBTable: React.FC<FIBTableProps> = (props) => {
             removedColumns={REMOVED_COLUMNS}
             itemNoun="route"
             emptyMessage="No routes match your search."
+            flushFooter
         />
     );
 };
