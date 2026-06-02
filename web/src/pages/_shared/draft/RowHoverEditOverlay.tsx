@@ -43,14 +43,14 @@ const RowHoverEditOverlay: React.FC<RowHoverEditOverlayProps> = ({
     deleteIcon,
 }) => (
     <div
-        className={`fw-row-action-slot${onDelete ? ' fw-row-action-slot--wide' : ''}`}
+        className={`yn-row-action-slot${onDelete ? ' yn-row-action-slot--wide' : ''}`}
         style={{ top, height: rowHeight }}
         onMouseEnter={onMouseEnter}
         onMouseLeave={onMouseLeave}
     >
         <button
             type="button"
-            className="fw-row-edit-btn fw-row-edit-btn--visible"
+            className="yn-row-edit-btn yn-row-edit-btn--visible"
             onClick={onEdit}
             aria-label={editAriaLabel}
             title={editTitle}
@@ -60,7 +60,7 @@ const RowHoverEditOverlay: React.FC<RowHoverEditOverlayProps> = ({
         {onDelete && (
             <button
                 type="button"
-                className="fw-row-edit-btn fw-row-edit-btn--visible fw-row-edit-btn--danger"
+                className="yn-row-edit-btn yn-row-edit-btn--visible yn-row-edit-btn--danger"
                 onClick={onDelete}
                 aria-label={deleteAriaLabel ?? 'Delete'}
                 title={deleteTitle ?? 'Delete'}

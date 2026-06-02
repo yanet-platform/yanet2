@@ -13,7 +13,7 @@ const COLUMN_HEADERS: TableColumnHeader[] = [
 ];
 
 const REMOVED_COLUMNS: RemovedColumnDescriptor<PrefixRowItem>[] = [
-    { width: PREFIX_WIDTH, render: (r) => <span className="fw-cell-mono">{r.prefix}</span> },
+    { width: PREFIX_WIDTH, render: (r) => <span className="yn-cell-mono">{r.prefix}</span> },
 ];
 
 const renderPrefixDataCells = (row: PrefixRowItem): React.ReactNode => {
@@ -31,12 +31,12 @@ const renderPrefixDataCells = (row: PrefixRowItem): React.ReactNode => {
                 paddingRight: 8,
                 display: 'flex',
                 alignItems: 'center',
-                ...(errors.prefix ? { color: 'var(--fw-danger)' } : {}),
+                ...(errors.prefix ? { color: 'var(--yn-danger)' } : {}),
             }}
             title={row.prefix || undefined}
         >
-            <span className="fw-cell-mono fw-cell-strong">
-                {row.prefix || <span style={{ color: 'var(--fw-text-3)', fontStyle: 'italic' }}>prefix?</span>}
+            <span className="yn-cell-mono yn-cell-strong">
+                {row.prefix || <span style={{ color: 'var(--yn-text-3)', fontStyle: 'italic' }}>prefix?</span>}
             </span>
         </div>
     );

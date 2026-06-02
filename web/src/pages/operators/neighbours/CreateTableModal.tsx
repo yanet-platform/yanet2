@@ -60,20 +60,20 @@ const CreateTableModal: React.FC<CreateTableModalProps> = ({
     };
 
     return (
-        <div className="fw-modal-backdrop" onClick={handleClose}>
-            <div className="fw-modal fw-modal--sm" onClick={(e) => e.stopPropagation()}>
-                <header className="fw-modal__head">
-                    <span className="fw-modal__title">Create neighbour table</span>
-                    <button type="button" className="fw-icon-btn" onClick={handleClose} aria-label="Close">✕</button>
+        <div className="yn-modal-backdrop" onClick={handleClose}>
+            <div className="yn-modal yn-modal--sm" onClick={(e) => e.stopPropagation()}>
+                <header className="yn-modal__head">
+                    <span className="yn-modal__title">Create neighbour table</span>
+                    <button type="button" className="yn-icon-btn" onClick={handleClose} aria-label="Close">✕</button>
                 </header>
-                <div className="fw-modal__body fw-modal__body--confirm">
-                    <div className="fw-field">
-                        <label className="fw-field__label" htmlFor="ct-name">
-                            Name <span className="fw-field__req">*</span>
+                <div className="yn-modal__body yn-modal__body--confirm">
+                    <div className="yn-field">
+                        <label className="yn-field__label" htmlFor="ct-name">
+                            Name <span className="yn-field__req">*</span>
                         </label>
                         <input
                             id="ct-name"
-                            className={`fw-input${nameError && trimmedName ? ' fw-input--invalid' : ''}`}
+                            className={`yn-input${nameError && trimmedName ? ' yn-input--invalid' : ''}`}
                             type="text"
                             value={name}
                             onChange={(e) => setName(e.target.value)}
@@ -85,16 +85,16 @@ const CreateTableModal: React.FC<CreateTableModalProps> = ({
                             autoFocus
                         />
                         {nameError && trimmedName && (
-                            <span className="fw-field__hint fw-field__error">{nameError}</span>
+                            <span className="yn-field__hint yn-field__error">{nameError}</span>
                         )}
                     </div>
-                    <div className="fw-field">
-                        <label className="fw-field__label" htmlFor="ct-priority">
-                            Default Priority <span className="fw-field__req">*</span>
+                    <div className="yn-field">
+                        <label className="yn-field__label" htmlFor="ct-priority">
+                            Default Priority <span className="yn-field__req">*</span>
                         </label>
                         <input
                             id="ct-priority"
-                            className={`fw-input${priorityError && defaultPriority ? ' fw-input--invalid' : ''}`}
+                            className={`yn-input${priorityError && defaultPriority ? ' yn-input--invalid' : ''}`}
                             type="number"
                             value={defaultPriority}
                             onChange={(e) => setDefaultPriority(e.target.value)}
@@ -105,21 +105,21 @@ const CreateTableModal: React.FC<CreateTableModalProps> = ({
                             placeholder="100"
                         />
                         {priorityError && defaultPriority ? (
-                            <span className="fw-field__hint fw-field__error">{priorityError}</span>
+                            <span className="yn-field__hint yn-field__error">{priorityError}</span>
                         ) : (
-                            <span className="fw-field__hint">Lower value wins on merge.</span>
+                            <span className="yn-field__hint">Lower value wins on merge.</span>
                         )}
                     </div>
                 </div>
-                <footer className="fw-modal__foot">
+                <footer className="yn-modal__foot">
                     <span />
-                    <div className="fw-modal__foot-actions">
-                        <button type="button" className="fw-btn fw-btn--ghost" onClick={handleClose} disabled={submitting}>
+                    <div className="yn-modal__foot-actions">
+                        <button type="button" className="yn-btn yn-btn--ghost" onClick={handleClose} disabled={submitting}>
                             Cancel
                         </button>
                         <button
                             type="button"
-                            className="fw-btn fw-btn--primary"
+                            className="yn-btn yn-btn--primary"
                             onClick={handleCreate}
                             disabled={!canCreate}
                         >

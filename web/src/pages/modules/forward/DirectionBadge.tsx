@@ -10,10 +10,10 @@ interface DirectionBadgeProps {
 
 /** Colored pill badge showing direction mode (IN / OUT / NONE) with equal width. */
 const DirectionBadge: React.FC<DirectionBadgeProps> = ({ mode }) => {
-    let cls = 'fw-badge-dir';
-    if (mode === ForwardMode.IN) cls += ' fw-badge-dir--in';
-    else if (mode === ForwardMode.OUT) cls += ' fw-badge-dir--out';
-    else cls += ' fw-badge-dir--none';
+    let cls = 'yn-badge-dir';
+    if (mode === ForwardMode.IN) cls += ' yn-badge-dir--in';
+    else if (mode === ForwardMode.OUT) cls += ' yn-badge-dir--out';
+    else cls += ' yn-badge-dir--none';
 
     return (
         <span className={cls}>

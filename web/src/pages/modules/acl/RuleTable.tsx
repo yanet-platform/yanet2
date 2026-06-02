@@ -95,11 +95,11 @@ const VirtualRow: React.FC<VirtualRowProps> = memo(({
     }, [onHoverChange]);
 
     let rowBg = 'transparent';
-    if (active || selected) rowBg = 'var(--fw-accent-soft)';
+    if (active || selected) rowBg = 'var(--yn-accent-soft)';
 
     return (
         <div
-            className={`fw-vrow${selected ? ' fw-vrow--selected' : ''}${active ? ' fw-vrow--active' : ''}`}
+            className={`yn-vrow${selected ? ' yn-vrow--selected' : ''}${active ? ' yn-vrow--active' : ''}`}
             onMouseEnter={handleMouseEnter}
             onMouseLeave={handleMouseLeave}
             style={{
@@ -111,7 +111,7 @@ const VirtualRow: React.FC<VirtualRowProps> = memo(({
                 width: '100%',
                 display: 'flex',
                 alignItems: 'center',
-                borderBottom: '1px solid var(--fw-line)',
+                borderBottom: '1px solid var(--yn-line)',
                 backgroundColor: rowBg,
                 paddingLeft: 4,
             }}
@@ -124,7 +124,7 @@ const VirtualRow: React.FC<VirtualRowProps> = memo(({
                 />
             </div>
 
-            <div style={{ ...cellStyle('index'), color: 'var(--fw-text-3)', fontVariantNumeric: 'tabular-nums', flexDirection: 'column', gap: 2 }}>
+            <div style={{ ...cellStyle('index'), color: 'var(--yn-text-3)', fontVariantNumeric: 'tabular-nums', flexDirection: 'column', gap: 2 }}>
                 <span style={{ fontSize: 12 }}>{item.index + 1}</span>
                 {expanded.isDead && (
                     <span
@@ -146,7 +146,7 @@ const VirtualRow: React.FC<VirtualRowProps> = memo(({
 
             <div style={cellStyle('srcs')}>
                 {expanded.isEmptySrc
-                    ? <span className="fw-cell-mono fw-cell-muted">—</span>
+                    ? <span className="yn-cell-mono yn-cell-muted">—</span>
                     : <ChipList
                         items={expanded.sourceCidrs}
                         renderChip={(cidr, idx) => <IpNetChip key={idx} cidr={cidr} />}
@@ -161,7 +161,7 @@ const VirtualRow: React.FC<VirtualRowProps> = memo(({
 
             <div style={cellStyle('dsts')}>
                 {expanded.dstCidrs.length === 0
-                    ? <span className="fw-cell-mono fw-cell-muted">—</span>
+                    ? <span className="yn-cell-mono yn-cell-muted">—</span>
                     : <ChipList
                         items={expanded.dstCidrs}
                         renderChip={(cidr, idx) => <IpNetChip key={idx} cidr={cidr} />}
@@ -202,7 +202,7 @@ const VirtualRow: React.FC<VirtualRowProps> = memo(({
 
             <div style={cellStyle('protos')}>
                 {expanded.protoRanges.length === 0
-                    ? <span className="fw-cell-mono fw-cell-muted">—</span>
+                    ? <span className="yn-cell-mono yn-cell-muted">—</span>
                     : <ChipList
                         items={expanded.protoRanges}
                         isAny={expanded.isAnyProto}
@@ -245,8 +245,8 @@ const VirtualRow: React.FC<VirtualRowProps> = memo(({
 
             <div style={cellStyle('counter')} title={item.counter || `rule ${item.index} (default)`}>
                 {item.counter
-                    ? <span className="fw-cell-mono">{item.counter}</span>
-                    : <span className="fw-cell-mono fw-cell-muted">rule {item.index}</span>
+                    ? <span className="yn-cell-mono">{item.counter}</span>
+                    : <span className="yn-cell-mono yn-cell-muted">rule {item.index}</span>
                 }
             </div>
 
@@ -256,7 +256,7 @@ const VirtualRow: React.FC<VirtualRowProps> = memo(({
                         {rate ? (
                             <>
                                 <Sparkline values={rate.history} width={120} height={22} />
-                                <span className="fw-cell-pps acl-cell-pps" title={`${rate.pps.toFixed(0)} pps`}>
+                                <span className="yn-cell-pps acl-cell-pps" title={`${rate.pps.toFixed(0)} pps`}>
                                     {rate.pps >= 1000
                                         ? `${(rate.pps / 1000).toFixed(1)}k`
                                         : rate.pps.toFixed(0)}
@@ -265,7 +265,7 @@ const VirtualRow: React.FC<VirtualRowProps> = memo(({
                         ) : (
                             <>
                                 <Sparkline values={null} width={120} height={22} />
-                                <span className="fw-cell-pps acl-cell-pps acl-pps-loading" title="Waiting for counter data">…</span>
+                                <span className="yn-cell-pps acl-cell-pps acl-pps-loading" title="Waiting for counter data">…</span>
                             </>
                         )}
                         <button
@@ -281,7 +281,7 @@ const VirtualRow: React.FC<VirtualRowProps> = memo(({
                 ) : (
                     <>
                         <Sparkline values={null} width={120} height={22} />
-                        <span className="fw-cell-pps acl-cell-pps" style={{ color: 'var(--fw-text-3)' }}>—</span>
+                        <span className="yn-cell-pps acl-cell-pps" style={{ color: 'var(--yn-text-3)' }}>—</span>
                         <button
                             type="button"
                             className={`acl-counter-toggle acl-counter-toggle--off${!item.counter ? ' acl-counter-toggle--default' : ''}`}
@@ -432,11 +432,11 @@ const RuleTable: React.FC<RuleTableProps> = ({
     return (
         <div
             ref={wrapRef}
-            className="fw-tbl-wrap acl-table"
+            className="yn-table-wrap acl-table"
         >
-            <div className="fw-tbl-header-row">
+            <div className="yn-table-header-row">
                 <div
-                    className="fw-vtbl-header"
+                    className="yn-vtbl-header"
                     style={{ height: HEADER_HEIGHT }}
                 >
                     <div ref={headerInnerRef} style={{ display: 'flex', minWidth: TOTAL_WIDTH, height: '100%', alignItems: 'center', willChange: 'transform' }}>
@@ -450,37 +450,37 @@ const RuleTable: React.FC<RuleTableProps> = ({
                         />
                     </div>
                     <div style={{ ...cellStyle('index'), justifyContent: 'center' }}>
-                        <span className="fw-th-text">#</span>
+                        <span className="yn-th-text">#</span>
                     </div>
                     <div style={cellStyle('srcs')}>
-                        <span className="fw-th-text">Sources</span>
+                        <span className="yn-th-text">Sources</span>
                     </div>
                     <div style={cellStyle('dsts')}>
-                        <span className="fw-th-text">Destinations</span>
+                        <span className="yn-th-text">Destinations</span>
                     </div>
                     <div style={cellStyle('src_ports')}>
-                        <span className="fw-th-text">Src ports</span>
+                        <span className="yn-th-text">Src ports</span>
                     </div>
                     <div style={cellStyle('dst_ports')}>
-                        <span className="fw-th-text">Dst ports</span>
+                        <span className="yn-th-text">Dst ports</span>
                     </div>
                     <div style={cellStyle('protos')}>
-                        <span className="fw-th-text">Protocols</span>
+                        <span className="yn-th-text">Protocols</span>
                     </div>
                     <div style={cellStyle('vlans')}>
-                        <span className="fw-th-text">VLANs</span>
+                        <span className="yn-th-text">VLANs</span>
                     </div>
                     <div style={cellStyle('devices')}>
-                        <span className="fw-th-text">Devices</span>
+                        <span className="yn-th-text">Devices</span>
                     </div>
                     <div style={cellStyle('counter')}>
-                        <span className="fw-th-text">Counter</span>
+                        <span className="yn-th-text">Counter</span>
                     </div>
                     <div style={cellStyle('sparkline')}>
-                        <span className="fw-th-text">pps</span>
+                        <span className="yn-th-text">pps</span>
                     </div>
                     <div style={cellStyle('actions')}>
-                        <span className="fw-th-text">Actions</span>
+                        <span className="yn-th-text">Actions</span>
                     </div>
                     </div>
                 </div>
@@ -494,11 +494,11 @@ const RuleTable: React.FC<RuleTableProps> = ({
 
             <div
                 ref={scrollRef}
-                className="fw-vtbl-body"
+                className="yn-vtbl-body"
                 style={bodyHeight > 0 ? { flex: '0 0 auto', height: bodyHeight } : undefined}
             >
                 {items.length === 0 ? (
-                    <div className="fw-table-empty">No rules match your search.</div>
+                    <div className="yn-table-empty">No rules match your search.</div>
                 ) : (
                     <div
                         style={{
@@ -529,10 +529,10 @@ const RuleTable: React.FC<RuleTableProps> = ({
                 )}
             </div>
 
-            <div className="fw-vtbl-footer" style={{ height: FOOTER_HEIGHT }}>
-                <span className="fw-toolbar__count">{footerText}</span>
+            <div className="yn-vtbl-footer" style={{ height: FOOTER_HEIGHT }}>
+                <span className="yn-toolbar__count">{footerText}</span>
                 {selectedIds.size > 0 && (
-                    <span className="fw-toolbar__count" style={{ color: 'var(--fw-accent)' }}>
+                    <span className="yn-toolbar__count" style={{ color: 'var(--yn-accent)' }}>
                         {selectedIds.size.toLocaleString()} selected
                     </span>
                 )}

@@ -1453,7 +1453,7 @@ const FWStatePage: React.FC = () => {
         <>
             <button
                 type="button"
-                className="fw-tbl-action-btn fw-tbl-action-btn--save"
+                className="yn-table-action-btn yn-table-action-btn--save"
                 title="Save config"
                 aria-label="Save config"
                 disabled={!currentIsDirty}
@@ -1463,7 +1463,7 @@ const FWStatePage: React.FC = () => {
             </button>
             <button
                 type="button"
-                className="fw-tbl-action-btn fw-tbl-action-btn--delete"
+                className="yn-table-action-btn yn-table-action-btn--delete"
                 title="Delete config"
                 aria-label="Delete config"
                 disabled={!current || currentHasLinkedAcls}
@@ -1711,10 +1711,10 @@ const FWStatePage: React.FC = () => {
 
     return (
         <PageLayout header={pageHeader}>
-            <div className="fw-page">
+            <div className="yn-page">
                 {configNames.length === 0 ? (
-                    <div className="fw-empty-page">
-                        <div className="fw-empty-page__message">No FWState configurations found.</div>
+                    <div className="yn-empty-page">
+                        <div className="yn-empty-page__message">No FWState configurations found.</div>
                         <Button view="action" onClick={() => setAddConfigOpen(true)}>Add Config</Button>
                     </div>
                 ) : (
@@ -1732,7 +1732,7 @@ const FWStatePage: React.FC = () => {
                             </div>
                         </div>
 
-                        <div className="fw-content fwstate-content">
+                        <div className="yn-content fwstate-content">
                             {current && (
                                 <div className="fwstate-settings-layout">
                                     <div
@@ -1742,7 +1742,7 @@ const FWStatePage: React.FC = () => {
                                     >
                                         <div className="fwstate-subtab-frame">
                                             <div className="fwstate-subtab-frame__head">
-                                                <div className="fw-tabs fwstate-sub-tabs" role="tablist" aria-label="FWState sub tabs">
+                                                <div className="yn-tabs fwstate-sub-tabs" role="tablist" aria-label="FWState sub tabs">
                                                     {STATE_SUB_TABS.map((tab) => {
                                                         const isActive = tab.id === activeSubTab;
                                                         return (
@@ -1752,10 +1752,10 @@ const FWStatePage: React.FC = () => {
                                                                 role="tab"
                                                                 aria-selected={isActive}
                                                                 aria-controls="fwstate-subtab-panel"
-                                                                className={`fw-tab${isActive ? ' fw-tab--active' : ''}`}
+                                                                className={`yn-tab${isActive ? ' yn-tab--active' : ''}`}
                                                                 onClick={() => updateActiveSubTab(tab.id)}
                                                             >
-                                                                <span className="fw-tab__label">{tab.label}</span>
+                                                                <span className="yn-tab__label">{tab.label}</span>
                                                             </button>
                                                         );
                                                     })}

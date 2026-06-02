@@ -23,17 +23,17 @@ const FIBYamlIO: React.FC<FIBYamlIOProps> = ({ configName, rows, onImport }) => 
     const importExtraControls = (
         <>
             <div style={{ flex: 1 }} />
-            <span style={{ fontSize: 12, color: 'var(--fw-text-3)' }}>Mode:</span>
+            <span style={{ fontSize: 12, color: 'var(--yn-text-3)' }}>Mode:</span>
             <button
                 type="button"
-                className={`fw-btn fw-btn--sm${importMode === 'replace' ? '' : ' fw-btn--ghost'}`}
+                className={`yn-btn yn-btn--sm${importMode === 'replace' ? '' : ' yn-btn--ghost'}`}
                 onClick={() => setImportMode('replace')}
             >
                 Replace all
             </button>
             <button
                 type="button"
-                className={`fw-btn fw-btn--sm${importMode === 'append' ? '' : ' fw-btn--ghost'}`}
+                className={`yn-btn yn-btn--sm${importMode === 'append' ? '' : ' yn-btn--ghost'}`}
                 onClick={() => setImportMode('append')}
             >
                 Append

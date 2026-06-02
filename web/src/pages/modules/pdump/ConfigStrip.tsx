@@ -88,7 +88,7 @@ const ConfigStrip: React.FC<ConfigStripProps> = ({
             <div className="pdump-strip__actions">
                 <button
                     type="button"
-                    className="fw-btn fw-btn--ghost fw-btn--sm"
+                    className="yn-btn yn-btn--ghost yn-btn--sm"
                     onClick={onEdit}
                     title="Edit configuration"
                 >
@@ -96,7 +96,7 @@ const ConfigStrip: React.FC<ConfigStripProps> = ({
                 </button>
                 <button
                     type="button"
-                    className="fw-btn fw-btn--ghost fw-btn--sm fw-btn--danger"
+                    className="yn-btn yn-btn--ghost yn-btn--sm yn-btn--danger"
                     onClick={onDelete}
                     disabled={isCaptureActive}
                     title="Delete configuration"
@@ -106,7 +106,7 @@ const ConfigStrip: React.FC<ConfigStripProps> = ({
                 {isCaptureActive ? (
                     <button
                         type="button"
-                        className="fw-btn fw-btn--sm pdump-strip__stop-btn"
+                        className="yn-btn yn-btn--sm pdump-strip__stop-btn"
                         onClick={onStopCapture}
                     >
                         Stop
@@ -114,7 +114,7 @@ const ConfigStrip: React.FC<ConfigStripProps> = ({
                 ) : (
                     <button
                         type="button"
-                        className="fw-btn fw-btn--sm pdump-strip__start-btn"
+                        className="yn-btn yn-btn--sm pdump-strip__start-btn"
                         onClick={onStartCapture}
                         disabled={isCapturing}
                         title={isCapturing ? 'Another capture is active' : 'Start capture'}

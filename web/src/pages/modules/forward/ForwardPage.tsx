@@ -261,10 +261,10 @@ const ForwardPage: React.FC = () => {
 
     return (
         <PageLayout header={pageHeader}>
-            <div className="fw-page">
+            <div className="yn-page">
                 {draftConfigs.length === 0 ? (
-                    <div className="fw-empty-page">
-                        <div className="fw-empty-page__message">
+                    <div className="yn-empty-page">
+                        <div className="yn-empty-page__message">
                             No forward configurations found.
                         </div>
                         <Button view="action" onClick={() => setAddConfigOpen(true)}>
@@ -282,7 +282,7 @@ const ForwardPage: React.FC = () => {
                             onAddConfig={() => setAddConfigOpen(true)}
                         />
 
-                        <div className="fw-content">
+                        <div className="yn-content">
                             <RuleTable
                                 items={visibleItems}
                                 selectedIds={selectedIds}

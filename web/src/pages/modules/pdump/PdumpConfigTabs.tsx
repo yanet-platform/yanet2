@@ -29,7 +29,7 @@ const PdumpConfigTabs: React.FC<PdumpConfigTabsProps> = ({
     onSelect,
     onAddConfig,
 }) => (
-    <div className="fw-tabs" role="tablist">
+    <div className="yn-tabs" role="tablist">
         {configs.map((cfg) => {
             const isActive = cfg === activeConfig;
             const isLive = cfg === liveConfig;
@@ -39,21 +39,21 @@ const PdumpConfigTabs: React.FC<PdumpConfigTabsProps> = ({
                     type="button"
                     role="tab"
                     aria-selected={isActive}
-                    className={`fw-tab${isActive ? ' fw-tab--active' : ''}`}
+                    className={`yn-tab${isActive ? ' yn-tab--active' : ''}`}
                     onClick={() => onSelect(cfg)}
                 >
                     {isLive && (
                         <span
-                            className="fw-tab__dot fw-tab__dot--live"
+                            className="yn-tab__dot yn-tab__dot--live"
                             aria-label="live capture"
                         />
                     )}
-                    <span className="fw-tab__label">{cfg}</span>
-                    <span className="fw-tab__count">{counts.get(cfg) ?? 0}</span>
+                    <span className="yn-tab__label">{cfg}</span>
+                    <span className="yn-tab__count">{counts.get(cfg) ?? 0}</span>
                 </button>
             );
         })}
-        <Button view="flat" size="s" onClick={onAddConfig} className="fw-tabs__add" title="Add config">
+        <Button view="flat" size="s" onClick={onAddConfig} className="yn-tabs__add" title="Add config">
             <Icon data={Plus} size={14} />
         </Button>
     </div>

@@ -76,76 +76,76 @@ const FIBDrawer = React.forwardRef<FIBDrawerHandle, FIBDrawerProps>(({
             onJump={onJump}
             ariaLabel="Edit route"
         >
-            <section className="fw-section">
-                <div className="fw-section-h">Destination</div>
-                <div className="fw-section__body">
-                    <div className="fw-field">
-                        <label className="fw-field__label">
-                            Prefix <span className="fw-field__req">*</span>
+            <section className="yn-section">
+                <div className="yn-section-h">Destination</div>
+                <div className="yn-section__body">
+                    <div className="yn-field">
+                        <label className="yn-field__label">
+                            Prefix <span className="yn-field__req">*</span>
                         </label>
                         <input
-                            className={`fw-input fw-input--mono${errors.prefix ? ' fw-input--invalid' : ''}`}
+                            className={`yn-input yn-input--mono${errors.prefix ? ' yn-input--invalid' : ''}`}
                             value={draft?.prefix ?? ''}
                             placeholder="10.0.0.0/8 or 2a02:6b8::/32"
                             onChange={(e) => updateField('prefix', e.target.value.trim())}
                         />
                         {errors.prefix
-                            ? <span className="fw-field__hint fw-field__error">{errors.prefix}</span>
-                            : <span className="fw-field__hint">IPv4 or IPv6 with mask.</span>
+                            ? <span className="yn-field__hint yn-field__error">{errors.prefix}</span>
+                            : <span className="yn-field__hint">IPv4 or IPv6 with mask.</span>
                         }
                     </div>
                 </div>
             </section>
 
-            <section className="fw-section">
-                <div className="fw-section-h">L2 Rewrite</div>
-                <div className="fw-section__body">
-                    <div className="fw-field">
-                        <label className="fw-field__label">
-                            Destination MAC <span className="fw-field__req">*</span>
+            <section className="yn-section">
+                <div className="yn-section-h">L2 Rewrite</div>
+                <div className="yn-section__body">
+                    <div className="yn-field">
+                        <label className="yn-field__label">
+                            Destination MAC <span className="yn-field__req">*</span>
                         </label>
                         <input
-                            className={`fw-input fw-input--mono${errors.dst_mac ? ' fw-input--invalid' : ''}`}
+                            className={`yn-input yn-input--mono${errors.dst_mac ? ' yn-input--invalid' : ''}`}
                             value={draft?.dst_mac ?? ''}
                             placeholder="52:54:00:00:1c:57"
                             onChange={(e) => updateField('dst_mac', e.target.value.trim())}
                         />
                         {errors.dst_mac && (
-                            <span className="fw-field__hint fw-field__error">{errors.dst_mac}</span>
+                            <span className="yn-field__hint yn-field__error">{errors.dst_mac}</span>
                         )}
                     </div>
-                    <div className="fw-field">
-                        <label className="fw-field__label">
-                            Source MAC <span className="fw-field__req">*</span>
+                    <div className="yn-field">
+                        <label className="yn-field__label">
+                            Source MAC <span className="yn-field__req">*</span>
                         </label>
                         <input
-                            className={`fw-input fw-input--mono${errors.src_mac ? ' fw-input--invalid' : ''}`}
+                            className={`yn-input yn-input--mono${errors.src_mac ? ' yn-input--invalid' : ''}`}
                             value={draft?.src_mac ?? ''}
                             placeholder="52:54:00:12:34:56"
                             onChange={(e) => updateField('src_mac', e.target.value.trim())}
                         />
                         {errors.src_mac && (
-                            <span className="fw-field__hint fw-field__error">{errors.src_mac}</span>
+                            <span className="yn-field__hint yn-field__error">{errors.src_mac}</span>
                         )}
                     </div>
                 </div>
             </section>
 
-            <section className="fw-section">
-                <div className="fw-section-h">Egress</div>
-                <div className="fw-section__body">
-                    <div className="fw-field">
-                        <label className="fw-field__label">
-                            Device <span className="fw-field__req">*</span>
+            <section className="yn-section">
+                <div className="yn-section-h">Egress</div>
+                <div className="yn-section__body">
+                    <div className="yn-field">
+                        <label className="yn-field__label">
+                            Device <span className="yn-field__req">*</span>
                         </label>
                         <input
-                            className={`fw-input${errors.device ? ' fw-input--invalid' : ''}`}
+                            className={`yn-input${errors.device ? ' yn-input--invalid' : ''}`}
                             value={draft?.device ?? ''}
                             placeholder="eth0"
                             onChange={(e) => updateField('device', e.target.value.trim())}
                         />
                         {errors.device && (
-                            <span className="fw-field__hint fw-field__error">{errors.device}</span>
+                            <span className="yn-field__hint yn-field__error">{errors.device}</span>
                         )}
                     </div>
                 </div>

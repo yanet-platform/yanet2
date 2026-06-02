@@ -14,7 +14,7 @@ const Sparkline: React.FC<SparklineProps> = ({
     values,
     width = 64,
     height = 18,
-    color = 'var(--fw-accent)',
+    color = 'var(--yn-accent)',
     fill = true,
 }) => {
     return <MetricSparkline values={values} width={width} height={height} color={color} fill={fill} />;

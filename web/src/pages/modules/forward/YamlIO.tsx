@@ -113,23 +113,23 @@ const YamlIO: React.FC<YamlIOProps> = ({ configName, rules, onImport }) => {
         const parsed = parseYamlToRules(text);
         const targetConfig = importConfigName.trim() || configName;
         onImport(targetConfig, parsed);
-        toaster.success('fw-yaml-import', `Imported ${parsed.length} rules into "${targetConfig}".`);
+        toaster.success('yn-yaml-import', `Imported ${parsed.length} rules into "${targetConfig}".`);
     };
 
     const importExtraControls = (
-        <div className="fw-field" style={{ marginBottom: 0, minWidth: 200 }}>
-            <label className="fw-field__label" htmlFor="fw-import-config-name">
+        <div className="yn-field" style={{ marginBottom: 0, minWidth: 200 }}>
+            <label className="yn-field__label" htmlFor="yn-import-config-name">
                 Config name
             </label>
             <input
-                id="fw-import-config-name"
-                className="fw-input"
+                id="yn-import-config-name"
+                className="yn-input"
                 type="text"
                 value={importConfigName}
                 onChange={(e) => setImportConfigName(e.target.value)}
                 placeholder={configName}
             />
-            <span className="fw-field__hint">
+            <span className="yn-field__hint">
                 Rules will be imported into this config (creates it locally if new).
             </span>
         </div>
@@ -142,7 +142,7 @@ const YamlIO: React.FC<YamlIOProps> = ({ configName, rules, onImport }) => {
             itemLabel="rules"
             exportYaml={() => rulesToDiffYaml(rules)}
             onImport={handleImport}
-            toastPrefix="fw-yaml"
+            toastPrefix="yn-yaml"
             importPlaceholder={'rules:\n  - target: eth0\n    mode: Out\n    srcs:\n      - 10.0.0.0/8'}
             exportFooterHint="Exports current draft rules (unsaved changes included)."
             importFooterHint="Importing replaces all rules in the target config locally. Use Save to push to the server."

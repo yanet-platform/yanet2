@@ -26,7 +26,7 @@ export interface ConfigTabStripProps {
 /**
  * Horizontal tab strip for multi-config pages. Shows a dirty dot and item count badge
  * per tab, and a "+" button to add a new config.
- * Consumes the fw-* CSS design tokens from forward.scss.
+ * Consumes the yn-* CSS design tokens from forward.scss.
  */
 export const ConfigTabStrip: React.FC<ConfigTabStripProps> = ({
     configs,
@@ -39,26 +39,26 @@ export const ConfigTabStrip: React.FC<ConfigTabStripProps> = ({
     leadingIcon,
     trailingIcon,
 }) => (
-    <div className="fw-tabs" role="tablist">
+    <div className="yn-tabs" role="tablist">
         {configs.map((cfg) => (
             <button
                 key={cfg}
                 type="button"
                 role="tab"
                 aria-selected={cfg === activeConfig}
-                className={`fw-tab${cfg === activeConfig ? ' fw-tab--active' : ''}${dirtyConfigs.has(cfg) ? ' fw-tab--dirty' : ''}`}
+                className={`yn-tab${cfg === activeConfig ? ' yn-tab--active' : ''}${dirtyConfigs.has(cfg) ? ' yn-tab--dirty' : ''}`}
                 onClick={() => onSelect(cfg)}
             >
                 {leadingIcon?.(cfg)}
-                <span className="fw-tab__label">{cfg}</span>
+                <span className="yn-tab__label">{cfg}</span>
                 {dirtyConfigs.has(cfg) && (
-                    <span className="fw-tab__dot" aria-label="unsaved changes" />
+                    <span className="yn-tab__dot" aria-label="unsaved changes" />
                 )}
                 {trailingIcon?.(cfg)}
-                <span className="fw-tab__count">{counts.get(cfg) ?? 0}</span>
+                <span className="yn-tab__count">{counts.get(cfg) ?? 0}</span>
             </button>
         ))}
-        <Button view="flat" size="s" onClick={onAddConfig} className="fw-tabs__add" title={addLabel}>
+        <Button view="flat" size="s" onClick={onAddConfig} className="yn-tabs__add" title={addLabel}>
             <Icon data={Plus} size={14} />
         </Button>
     </div>

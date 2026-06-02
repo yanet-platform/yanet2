@@ -30,11 +30,11 @@ const DraftActionButtons: React.FC<DraftActionButtonsProps> = ({
     onDiscard,
     onDeleteConfig,
 }) => (
-    <div className="fw-tbl-actions">
+    <div className="yn-table-actions">
         {currentIsDirty && (
             <button
                 type="button"
-                className="fw-tbl-action-btn fw-tbl-action-btn--discard"
+                className="yn-table-action-btn yn-table-action-btn--discard"
                 title="Discard changes"
                 aria-label="Discard local changes"
                 onClick={onDiscard}
@@ -44,7 +44,7 @@ const DraftActionButtons: React.FC<DraftActionButtonsProps> = ({
         )}
         <button
             type="button"
-            className="fw-tbl-action-btn fw-tbl-action-btn--save"
+            className="yn-table-action-btn yn-table-action-btn--save"
             title={currentIsDirty ? 'Review & apply' : 'No changes to save'}
             aria-label="Review and apply changes"
             disabled={!currentIsDirty}
@@ -54,7 +54,7 @@ const DraftActionButtons: React.FC<DraftActionButtonsProps> = ({
         </button>
         <button
             type="button"
-            className="fw-tbl-action-btn fw-tbl-action-btn--delete"
+            className="yn-table-action-btn yn-table-action-btn--delete"
             title="Delete config"
             aria-label="Delete config"
             onClick={onDeleteConfig}

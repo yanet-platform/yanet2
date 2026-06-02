@@ -444,10 +444,10 @@ const PdumpPage: React.FC = () => {
 
     return (
         <PageLayout header={pageHeader}>
-            <div className="fw-page pdump-page">
+            <div className="yn-page pdump-page">
                 {configs.length === 0 ? (
-                    <div className="fw-empty-page">
-                        <div className="fw-empty-page__message">
+                    <div className="yn-empty-page">
+                        <div className="yn-empty-page__message">
                             No pdump configurations found.
                         </div>
                         <Button view="action" onClick={() => setIsCreateDialogOpen(true)}>
@@ -465,7 +465,7 @@ const PdumpPage: React.FC = () => {
                             onAddConfig={() => setIsCreateDialogOpen(true)}
                         />
 
-                        <div className="fw-content pdump-page__content">
+                        <div className="yn-content pdump-page__content">
                             {currentConfigInfo && (
                                 <>
                                     <FilterRow filter={currentConfigInfo.config?.filter ?? ''} />

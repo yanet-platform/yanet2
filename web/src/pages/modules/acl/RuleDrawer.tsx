@@ -135,20 +135,20 @@ const RuleDrawer = React.forwardRef<RuleDrawerHandle, RuleDrawerProps>(({
     return (
         <>
             <div
-                className={`fw-backdrop${open ? ' fw-backdrop--open' : ''}`}
+                className={`yn-backdrop${open ? ' yn-backdrop--open' : ''}`}
                 onClick={handleClose}
                 aria-hidden="true"
             />
             <aside
-                className={`fw-drawer${open ? ' fw-drawer--open' : ''}`}
+                className={`yn-drawer${open ? ' yn-drawer--open' : ''}`}
                 role="dialog"
                 aria-modal="true"
                 aria-label={mode === 'add' ? 'Add ACL rule' : 'Edit ACL rule'}
             >
-                <header className="fw-drawer__head">
-                    <h2 className="fw-drawer__title">
+                <header className="yn-drawer__head">
+                    <h2 className="yn-drawer__title">
                         {mode === 'add' ? 'New rule' : (
-                            <>Edit rule <span className="fw-drawer__rule-num">#{ruleItem?.index !== undefined ? ruleItem.index + 1 : ''}</span></>
+                            <>Edit rule <span className="yn-drawer__rule-num">#{ruleItem?.index !== undefined ? ruleItem.index + 1 : ''}</span></>
                         )}
                         {draftClassification.isDead && (
                             <span
@@ -167,12 +167,12 @@ const RuleDrawer = React.forwardRef<RuleDrawerHandle, RuleDrawerProps>(({
                             </span>
                         )}
                     </h2>
-                    <div className="fw-drawer__head-actions">
+                    <div className="yn-drawer__head-actions">
                         {mode === 'edit' && ruleItem && (
                             <>
                                 <button
                                     type="button"
-                                    className="fw-icon-btn"
+                                    className="yn-icon-btn"
                                     onClick={() => onDuplicate(ruleItem)}
                                     title="Duplicate rule"
                                 >
@@ -180,7 +180,7 @@ const RuleDrawer = React.forwardRef<RuleDrawerHandle, RuleDrawerProps>(({
                                 </button>
                                 <button
                                     type="button"
-                                    className="fw-icon-btn fw-icon-btn--danger"
+                                    className="yn-icon-btn yn-icon-btn--danger"
                                     onClick={() => onDelete(ruleItem)}
                                     title="Delete rule"
                                 >
@@ -190,7 +190,7 @@ const RuleDrawer = React.forwardRef<RuleDrawerHandle, RuleDrawerProps>(({
                         )}
                         <button
                             type="button"
-                            className="fw-icon-btn"
+                            className="yn-icon-btn"
                             onClick={handleClose}
                             aria-label="Close drawer"
                         >
@@ -199,21 +199,21 @@ const RuleDrawer = React.forwardRef<RuleDrawerHandle, RuleDrawerProps>(({
                     </div>
                 </header>
 
-                <div className="fw-drawer__body">
-                    <section className="fw-section">
-                        <div className="fw-section-h">Actions</div>
-                        <div className="fw-section__body">
-                            <div className="fw-field">
-                                <label className="fw-field__label">
+                <div className="yn-drawer__body">
+                    <section className="yn-section">
+                        <div className="yn-section-h">Actions</div>
+                        <div className="yn-section__body">
+                            <div className="yn-field">
+                                <label className="yn-field__label">
                                     Action chain
-                                    <span className="fw-field__count">{draft.actions.length} step{draft.actions.length !== 1 ? 's' : ''}</span>
+                                    <span className="yn-field__count">{draft.actions.length} step{draft.actions.length !== 1 ? 's' : ''}</span>
                                 </label>
                                 <div className="acl-action-editor">
                                     {draft.actions.map((kind, idx) => (
                                         <div key={idx} className="acl-action-row">
                                             <span className="acl-action-row__idx">{idx + 1}.</span>
                                             <select
-                                                className="fw-input acl-action-select"
+                                                className="yn-input acl-action-select"
                                                 value={kind}
                                                 onChange={e => changeAction(idx, parseInt(e.target.value, 10) as ActionKind)}
                                             >
@@ -225,7 +225,7 @@ const RuleDrawer = React.forwardRef<RuleDrawerHandle, RuleDrawerProps>(({
                                             </select>
                                             <button
                                                 type="button"
-                                                className="fw-icon-btn fw-icon-btn--danger"
+                                                className="yn-icon-btn yn-icon-btn--danger"
                                                 onClick={() => removeAction(idx)}
                                                 aria-label={`Remove step ${idx + 1}`}
                                                 title="Remove step"
@@ -239,7 +239,7 @@ const RuleDrawer = React.forwardRef<RuleDrawerHandle, RuleDrawerProps>(({
                                             <button
                                                 key={kind}
                                                 type="button"
-                                                className="fw-btn fw-btn--ghost acl-action-preset"
+                                                className="yn-btn yn-btn--ghost acl-action-preset"
                                                 onClick={() => addAction(kind)}
                                             >
                                                 + {ACTION_KIND_LABELS[kind]}
@@ -248,29 +248,29 @@ const RuleDrawer = React.forwardRef<RuleDrawerHandle, RuleDrawerProps>(({
                                     </div>
                                 </div>
                                 {hasNoTerminal && (
-                                    <span className="fw-field__hint acl-hint--warn">
+                                    <span className="yn-field__hint acl-hint--warn">
                                         No terminal action (pass/deny) — traffic will fall through.
                                     </span>
                                 )}
                                 {hasUnreachable && (
-                                    <span className="fw-field__hint acl-hint--warn">
+                                    <span className="yn-field__hint acl-hint--warn">
                                         Steps after step {terminalIdx + 1} are unreachable.
                                     </span>
                                 )}
                             </div>
-                            <div className="fw-field">
-                                <label className="fw-field__label">
-                                    Counter <span className="fw-field__optional">optional</span>
+                            <div className="yn-field">
+                                <label className="yn-field__label">
+                                    Counter <span className="yn-field__optional">optional</span>
                                 </label>
                                 <input
-                                    className="fw-input"
+                                    className="yn-input"
                                     placeholder={mode === 'edit' && ruleItem !== null
                                         ? `${defaultCounterName(ruleItem.index)} (default)`
                                         : `${defaultCounterName(nextIndex)} (default)`}
                                     value={draft.counter}
                                     onChange={e => updateField('counter', e.target.value)}
                                 />
-                                <span className="fw-field__hint">
+                                <span className="yn-field__hint">
                                     Counter name shown in /stats.
                                     {ruleItem !== null
                                         ? ' Leave empty to use the auto-assigned default name (shifts with rule position).'
@@ -280,17 +280,17 @@ const RuleDrawer = React.forwardRef<RuleDrawerHandle, RuleDrawerProps>(({
                         </div>
                     </section>
 
-                    <section className="fw-section">
-                        <div className="fw-section-h">Match — addresses</div>
-                        <div className="fw-section__body">
-                            <div className="fw-fgrid">
-                                <div className="fw-field">
-                                    <label className="fw-field__label">
+                    <section className="yn-section">
+                        <div className="yn-section-h">Match — addresses</div>
+                        <div className="yn-section__body">
+                            <div className="yn-fgrid">
+                                <div className="yn-field">
+                                    <label className="yn-field__label">
                                         Sources
                                         <div className="acl-field-label-actions">
                                             <button
                                                 type="button"
-                                                className="fw-btn fw-btn--ghost fw-btn--sm acl-any-btn"
+                                                className="yn-btn yn-btn--ghost yn-btn--sm acl-any-btn"
                                                 onClick={() => {
                                                     updateField('sourceCidrs', addWildcards(draft.sourceCidrs));
                                                 }}
@@ -298,7 +298,7 @@ const RuleDrawer = React.forwardRef<RuleDrawerHandle, RuleDrawerProps>(({
                                             >
                                                 + any
                                             </button>
-                                            <span className="fw-field__count">{draft.sourceCidrs.length}</span>
+                                            <span className="yn-field__count">{draft.sourceCidrs.length}</span>
                                         </div>
                                     </label>
                                     <ChipInput
@@ -309,15 +309,15 @@ const RuleDrawer = React.forwardRef<RuleDrawerHandle, RuleDrawerProps>(({
                                         kind="cidr"
                                         validator={isValidCidr}
                                     />
-                                    <span className="fw-field__hint">Empty = no IP match.</span>
+                                    <span className="yn-field__hint">Empty = no IP match.</span>
                                 </div>
-                                <div className="fw-field">
-                                    <label className="fw-field__label">
+                                <div className="yn-field">
+                                    <label className="yn-field__label">
                                         Destinations
                                         <div className="acl-field-label-actions">
                                             <button
                                                 type="button"
-                                                className="fw-btn fw-btn--ghost fw-btn--sm acl-any-btn"
+                                                className="yn-btn yn-btn--ghost yn-btn--sm acl-any-btn"
                                                 onClick={() => {
                                                     updateField('dstCidrs', addWildcards(draft.dstCidrs));
                                                 }}
@@ -325,7 +325,7 @@ const RuleDrawer = React.forwardRef<RuleDrawerHandle, RuleDrawerProps>(({
                                             >
                                                 + any
                                             </button>
-                                            <span className="fw-field__count">{draft.dstCidrs.length}</span>
+                                            <span className="yn-field__count">{draft.dstCidrs.length}</span>
                                         </div>
                                     </label>
                                     <ChipInput
@@ -336,44 +336,44 @@ const RuleDrawer = React.forwardRef<RuleDrawerHandle, RuleDrawerProps>(({
                                         kind="cidr"
                                         validator={isValidCidr}
                                     />
-                                    <span className="fw-field__hint">Empty = no IP match.</span>
+                                    <span className="yn-field__hint">Empty = no IP match.</span>
                                 </div>
                             </div>
                         </div>
                     </section>
 
-                    <section className="fw-section">
-                        <div className="fw-section-h">Match — ports and protocols</div>
-                        <div className="fw-section__body">
-                            <div className="fw-fgrid">
-                                <div className="fw-field">
-                                    <label className="fw-field__label">Src port ranges</label>
+                    <section className="yn-section">
+                        <div className="yn-section-h">Match — ports and protocols</div>
+                        <div className="yn-section__body">
+                            <div className="yn-fgrid">
+                                <div className="yn-field">
+                                    <label className="yn-field__label">Src port ranges</label>
                                     <input
-                                        className="fw-input fw-input--mono"
+                                        className="yn-input yn-input--mono"
                                         placeholder="0-65535"
                                         value={draft.srcPortRaw}
                                         onChange={e => updateField('srcPortRaw', e.target.value)}
                                     />
-                                    <span className="fw-field__hint">e.g. <code>80</code>, <code>80-90</code>, <code>80, 443</code>. Empty = any.</span>
+                                    <span className="yn-field__hint">e.g. <code>80</code>, <code>80-90</code>, <code>80, 443</code>. Empty = any.</span>
                                 </div>
-                                <div className="fw-field">
-                                    <label className="fw-field__label">Dst port ranges</label>
+                                <div className="yn-field">
+                                    <label className="yn-field__label">Dst port ranges</label>
                                     <input
-                                        className="fw-input fw-input--mono"
+                                        className="yn-input yn-input--mono"
                                         placeholder="0-65535"
                                         value={draft.dstPortRaw}
                                         onChange={e => updateField('dstPortRaw', e.target.value)}
                                     />
-                                    <span className="fw-field__hint">e.g. <code>80</code>, <code>443</code>, <code>8080-8443</code>. Empty = any.</span>
+                                    <span className="yn-field__hint">e.g. <code>80</code>, <code>443</code>, <code>8080-8443</code>. Empty = any.</span>
                                 </div>
                             </div>
-                            <div className="fw-field">
-                                <label className="fw-field__label">
+                            <div className="yn-field">
+                                <label className="yn-field__label">
                                     Protocol ranges
                                     <div className="acl-field-label-actions">
                                         <button
                                             type="button"
-                                            className="fw-btn fw-btn--ghost fw-btn--sm acl-any-btn"
+                                            className="yn-btn yn-btn--ghost yn-btn--sm acl-any-btn"
                                             onClick={() => updateField('protoRaw', '0-65535')}
                                             title="Set to full range (any protocol)"
                                         >
@@ -382,12 +382,12 @@ const RuleDrawer = React.forwardRef<RuleDrawerHandle, RuleDrawerProps>(({
                                     </div>
                                 </label>
                                 <input
-                                    className="fw-input fw-input--mono"
+                                    className="yn-input yn-input--mono"
                                     placeholder="1536-1791"
                                     value={draft.protoRaw}
                                     onChange={e => updateField('protoRaw', e.target.value)}
                                 />
-                                <span className="fw-field__hint">
+                                <span className="yn-field__hint">
                                     Encoded as <code>(ip_proto &lt;&lt; 8) | subtype</code>.
                                     TCP=<code>1536-1791</code>, UDP=<code>4352-4607</code>, ICMP=<code>256-511</code>.
                                     Empty = no match.
@@ -404,7 +404,7 @@ const RuleDrawer = React.forwardRef<RuleDrawerHandle, RuleDrawerProps>(({
                                         <button
                                             key={range}
                                             type="button"
-                                            className="fw-btn fw-btn--ghost acl-proto-preset"
+                                            className="yn-btn yn-btn--ghost acl-proto-preset"
                                             onClick={() => {
                                                 const current = draft.protoRaw.trim();
                                                 if (!current) {
@@ -422,25 +422,25 @@ const RuleDrawer = React.forwardRef<RuleDrawerHandle, RuleDrawerProps>(({
                         </div>
                     </section>
 
-                    <section className="fw-section">
-                        <div className="fw-section-h">Match — L2 / device</div>
-                        <div className="fw-section__body">
-                            <div className="fw-field">
-                                <label className="fw-field__label">VLAN ranges</label>
+                    <section className="yn-section">
+                        <div className="yn-section-h">Match — L2 / device</div>
+                        <div className="yn-section__body">
+                            <div className="yn-field">
+                                <label className="yn-field__label">VLAN ranges</label>
                                 <input
-                                    className="fw-input fw-input--mono"
+                                    className="yn-input yn-input--mono"
                                     placeholder="0-4095"
                                     value={draft.vlanRaw}
                                     onChange={e => updateField('vlanRaw', e.target.value)}
                                 />
-                                <span className="fw-field__hint">
+                                <span className="yn-field__hint">
                                     Single <code>100</code>, range <code>100-200</code>, list <code>100, 200, 300-400</code>. Empty = all VLANs.
                                 </span>
                             </div>
-                            <div className="fw-field">
-                                <label className="fw-field__label">
+                            <div className="yn-field">
+                                <label className="yn-field__label">
                                     Devices
-                                    <span className="fw-field__count">{draft.deviceNames.length || 'any'}</span>
+                                    <span className="yn-field__count">{draft.deviceNames.length || 'any'}</span>
                                 </label>
                                 <ChipInput
                                     ref={deviceNamesRef}
@@ -456,19 +456,19 @@ const RuleDrawer = React.forwardRef<RuleDrawerHandle, RuleDrawerProps>(({
                     </section>
                 </div>
 
-                <footer className="fw-drawer__foot">
-                    <span className="fw-drawer__foot-meta">
+                <footer className="yn-drawer__foot">
+                    <span className="yn-drawer__foot-meta">
                         {mode === 'add'
                             ? 'Will be appended to config.'
                             : `Rule #${(ruleItem?.index ?? -1) + 1}`}
                     </span>
-                    <div className="fw-drawer__foot-actions">
-                        <button type="button" className="fw-btn fw-btn--ghost" onClick={handleClose}>
+                    <div className="yn-drawer__foot-actions">
+                        <button type="button" className="yn-btn yn-btn--ghost" onClick={handleClose}>
                             Cancel
                         </button>
                         <button
                             type="button"
-                            className="fw-btn fw-btn--primary"
+                            className="yn-btn yn-btn--primary"
                             onClick={handleApply}
                         >
                             Apply

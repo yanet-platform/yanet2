@@ -61,9 +61,9 @@ export const MetricSparkline: React.FC<MetricSparklineBaseProps> = ({
     values,
     width = 64,
     height = 18,
-    color = 'var(--fw-accent)',
+    color = 'var(--yn-accent)',
     fill = true,
-    className = 'fw-spark-svg',
+    className = 'yn-spark-svg',
     children,
 }) => {
     const hasData = values !== null && values.length >= 2;

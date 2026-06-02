@@ -39,20 +39,20 @@ const AddConfigModal: React.FC<AddConfigModalProps> = ({
     };
 
     return (
-        <div className="fw-modal-backdrop" onClick={handleClose}>
-            <div className="fw-modal fw-modal--sm" onClick={(e) => e.stopPropagation()}>
-                <header className="fw-modal__head">
-                    <span className="fw-modal__title">{title}</span>
-                    <button type="button" className="fw-icon-btn" onClick={handleClose} aria-label="Close">✕</button>
+        <div className="yn-modal-backdrop" onClick={handleClose}>
+            <div className="yn-modal yn-modal--sm" onClick={(e) => e.stopPropagation()}>
+                <header className="yn-modal__head">
+                    <span className="yn-modal__title">{title}</span>
+                    <button type="button" className="yn-icon-btn" onClick={handleClose} aria-label="Close">✕</button>
                 </header>
-                <div className="fw-modal__body fw-modal__body--confirm">
-                    <div className="fw-field">
-                        <label className="fw-field__label" htmlFor="draft-new-config-name">
-                            {label} <span className="fw-field__req">*</span>
+                <div className="yn-modal__body yn-modal__body--confirm">
+                    <div className="yn-field">
+                        <label className="yn-field__label" htmlFor="draft-new-config-name">
+                            {label} <span className="yn-field__req">*</span>
                         </label>
                         <input
                             id="draft-new-config-name"
-                            className="fw-input"
+                            className="yn-input"
                             type="text"
                             value={name}
                             onChange={(e) => setName(e.target.value)}
@@ -65,13 +65,13 @@ const AddConfigModal: React.FC<AddConfigModalProps> = ({
                         />
                     </div>
                 </div>
-                <footer className="fw-modal__foot">
+                <footer className="yn-modal__foot">
                     <span />
-                    <div className="fw-modal__foot-actions">
-                        <button type="button" className="fw-btn fw-btn--ghost" onClick={handleClose}>Cancel</button>
+                    <div className="yn-modal__foot-actions">
+                        <button type="button" className="yn-btn yn-btn--ghost" onClick={handleClose}>Cancel</button>
                         <button
                             type="button"
-                            className="fw-btn fw-btn--primary"
+                            className="yn-btn yn-btn--primary"
                             onClick={handleCreate}
                             disabled={isDisabled}
                         >

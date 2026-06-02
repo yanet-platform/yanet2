@@ -100,18 +100,18 @@ const VirtualRowShell = memo(<T extends { id: string }>({
     }, [onHoverChange]);
 
     let rowBg = 'transparent';
-    if (selected) rowBg = 'var(--fw-accent-soft)';
-    else if (active || editing) rowBg = 'var(--fw-accent-soft)';
+    if (selected) rowBg = 'var(--yn-accent-soft)';
+    else if (active || editing) rowBg = 'var(--yn-accent-soft)';
 
     const dragCls = dragOver === 'top'
-        ? ' fw-vrow--drag-top'
+        ? ' yn-vrow--drag-top'
         : dragOver === 'bottom'
-            ? ' fw-vrow--drag-bottom'
+            ? ' yn-vrow--drag-bottom'
             : '';
 
     return (
         <div
-            className={`fw-vrow${active ? ' fw-vrow--active' : ''}${dragCls}${selected ? ' fw-vrow--selected' : ''}`}
+            className={`yn-vrow${active ? ' yn-vrow--active' : ''}${dragCls}${selected ? ' yn-vrow--selected' : ''}`}
             data-row-id={row.id}
             onMouseEnter={handleMouseEnter}
             onMouseLeave={handleMouseLeave}
@@ -127,7 +127,7 @@ const VirtualRowShell = memo(<T extends { id: string }>({
                 width: '100%',
                 display: 'flex',
                 alignItems: 'center',
-                borderBottom: '1px solid var(--fw-line)',
+                borderBottom: '1px solid var(--yn-line)',
                 backgroundColor: rowBg,
                 paddingLeft: 4,
             }}
@@ -143,18 +143,18 @@ const VirtualRowShell = memo(<T extends { id: string }>({
                 style={{ width: LEADING_CELL_WIDTHS.handle, minWidth: LEADING_CELL_WIDTHS.handle, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                 onClick={(e) => e.stopPropagation()}
             >
-                <div className="fw-drag-handle" draggable onDragStart={onDragStart} title="Drag to reorder">
+                <div className="yn-drag-handle" draggable onDragStart={onDragStart} title="Drag to reorder">
                     {DRAG_ICON}
                 </div>
             </div>
 
-            <div style={{ width: LEADING_CELL_WIDTHS.index, minWidth: LEADING_CELL_WIDTHS.index, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--fw-text-3)', fontVariantNumeric: 'tabular-nums' }}>
+            <div style={{ width: LEADING_CELL_WIDTHS.index, minWidth: LEADING_CELL_WIDTHS.index, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--yn-text-3)', fontVariantNumeric: 'tabular-nums' }}>
                 <span style={{ fontSize: 12 }}>{realIndex + 1}</span>
             </div>
 
             <div style={{ width: LEADING_CELL_WIDTHS.status, minWidth: LEADING_CELL_WIDTHS.status, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                {status === 'added' && <span className="fw-status-dot fw-status-dot--added" title="Added (not yet committed)" />}
-                {status === 'changed' && <span className="fw-status-dot fw-status-dot--changed" title="Modified (not yet committed)" />}
+                {status === 'added' && <span className="yn-status-dot yn-status-dot--added" title="Added (not yet committed)" />}
+                {status === 'changed' && <span className="yn-status-dot yn-status-dot--changed" title="Modified (not yet committed)" />}
             </div>
 
             {renderDataCells(row)}
@@ -283,9 +283,9 @@ export const VirtualDraftTable = <T extends { id: string }>({
     }, [virtualRows, visibleRows.length]);
 
     return (
-        <div ref={wrapRef} className="fw-tbl-wrap">
-            <div className="fw-tbl-header-row">
-                <div className="fw-vtbl-header" style={{ height: HEADER_HEIGHT, minWidth: totalWidth }}>
+        <div ref={wrapRef} className="yn-table-wrap">
+            <div className="yn-table-header-row">
+                <div className="yn-vtbl-header" style={{ height: HEADER_HEIGHT, minWidth: totalWidth }}>
                     <div
                         style={{ width: LEADING_CELL_WIDTHS.checkbox, minWidth: LEADING_CELL_WIDTHS.checkbox, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                         onClick={(e) => e.stopPropagation()}
@@ -294,12 +294,12 @@ export const VirtualDraftTable = <T extends { id: string }>({
                     </div>
                     <div style={{ width: LEADING_CELL_WIDTHS.handle, minWidth: LEADING_CELL_WIDTHS.handle, flexShrink: 0 }} />
                     <div style={{ width: LEADING_CELL_WIDTHS.index, minWidth: LEADING_CELL_WIDTHS.index, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <span className="fw-th-text">#</span>
+                        <span className="yn-th-text">#</span>
                     </div>
                     <div style={{ width: LEADING_CELL_WIDTHS.status, minWidth: LEADING_CELL_WIDTHS.status, flexShrink: 0 }} />
                     {columnHeaders.map((col) => (
                         <div key={col.label} style={{ width: col.width, minWidth: col.width, flexShrink: 0, display: 'flex', alignItems: 'center', paddingRight: 8 }}>
-                            <span className="fw-th-text">{col.label}</span>
+                            <span className="yn-th-text">{col.label}</span>
                         </div>
                     ))}
                 </div>
@@ -313,11 +313,11 @@ export const VirtualDraftTable = <T extends { id: string }>({
 
             <div
                 ref={setScrollRef}
-                className="fw-vtbl-body"
+                className="yn-vtbl-body"
                 style={bodyHeight > 0 ? { flex: '0 0 auto', height: bodyHeight } : undefined}
             >
                 {visibleRows.length === 0 ? (
-                    <div className="fw-table-empty">{emptyMessage}</div>
+                    <div className="yn-table-empty">{emptyMessage}</div>
                 ) : (
                     <div style={{ height: rowVirtualizer.getTotalSize(), minWidth: totalWidth, position: 'relative' }}>
                         {virtualRows.map((virtualRow) => {
@@ -359,8 +359,8 @@ export const VirtualDraftTable = <T extends { id: string }>({
                 />
             </div>
 
-            <div className="fw-vtbl-footer" style={{ height: FOOTER_HEIGHT }}>
-                <span className="fw-toolbar__count">{footerText}</span>
+            <div className="yn-vtbl-footer" style={{ height: FOOTER_HEIGHT }}>
+                <span className="yn-toolbar__count">{footerText}</span>
             </div>
 
             {hoveredRow !== null && (

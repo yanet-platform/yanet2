@@ -83,14 +83,14 @@ const SortButton: React.FC<SortButtonProps> = ({ col, label, sortState, onSort }
                 background: 'none',
                 border: 'none',
                 cursor: 'pointer',
-                color: isActive ? 'var(--fw-accent)' : 'inherit',
+                color: isActive ? 'var(--yn-accent)' : 'inherit',
                 padding: 0,
                 width: '100%',
                 minWidth: 0,
             }}
             onClick={() => onSort(col)}
         >
-            <span className="fw-th-text" style={{ color: isActive ? 'var(--fw-accent)' : undefined }}>{label}</span>
+            <span className="yn-th-text" style={{ color: isActive ? 'var(--yn-accent)' : undefined }}>{label}</span>
             <SortIcon variant={iconVariant} active={isActive} />
         </button>
     );
@@ -184,10 +184,10 @@ export const RIBTable: React.FC<RIBTableProps> = ({
     };
 
     return (
-        <div className="fw-tbl-wrap">
-            <div className="fw-tbl-header-row">
+        <div className="yn-table-wrap">
+            <div className="yn-table-header-row">
                 <div
-                    className="fw-vtbl-header"
+                    className="yn-vtbl-header"
                     style={{ ...gridStyle, height: HEADER_HEIGHT, flex: '1 1 auto', overflow: 'hidden' }}
                 >
                     <div
@@ -197,7 +197,7 @@ export const RIBTable: React.FC<RIBTableProps> = ({
                         <Checkbox checked={isAllSelected} indeterminate={isIndeterminate} onUpdate={handleSelectAll} size="m" />
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <span className="fw-th-text">#</span>
+                        <span className="yn-th-text">#</span>
                     </div>
                     <SortButton col="prefix" label="Prefix" sortState={sortState} onSort={onSort} />
                     <SortButton col="next_hop" label="Next Hop" sortState={sortState} onSort={onSort} />
@@ -211,11 +211,11 @@ export const RIBTable: React.FC<RIBTableProps> = ({
 
             <div
                 ref={setScrollRef}
-                className="fw-vtbl-body"
+                className="yn-vtbl-body"
                 style={{ flex: '0 0 auto', height: bodyHeight, overflowY: 'auto' }}
             >
                 {rows.length === 0 ? (
-                    <div className="fw-table-empty">{emptyMessage}</div>
+                    <div className="yn-table-empty">{emptyMessage}</div>
                 ) : (
                     <div style={{ height: rowVirtualizer.getTotalSize(), minWidth: RIB_MIN_WIDTH, position: 'relative' }}>
                         {virtualRows.map((virtualRow) => {
@@ -226,12 +226,12 @@ export const RIBTable: React.FC<RIBTableProps> = ({
                             const isFlashing = flashingId === id;
                             let rowBg = 'transparent';
                             if (isFlashing) rowBg = 'color-mix(in srgb, var(--g-color-text-positive) 14%, transparent)';
-                            else if (isSelected) rowBg = 'var(--fw-accent-soft)';
+                            else if (isSelected) rowBg = 'var(--yn-accent-soft)';
                             const prefixConflictCount = conflictMap?.get(route.prefix || '') ?? 1;
                             return (
                                 <div
                                     key={id}
-                                    className={`fw-vrow${isSelected ? ' fw-vrow--selected' : ''}`}
+                                    className={`yn-vrow${isSelected ? ' yn-vrow--selected' : ''}`}
                                     data-row-id={id}
                                     onMouseEnter={() => handleHoverChange(route, virtualRow.start)}
                                     onMouseLeave={() => handleHoverChange(null, 0)}
@@ -241,7 +241,7 @@ export const RIBTable: React.FC<RIBTableProps> = ({
                                         left: 0,
                                         height: ROW_HEIGHT,
                                         width: '100%',
-                                        borderBottom: '1px solid var(--fw-line)',
+                                        borderBottom: '1px solid var(--yn-line)',
                                         backgroundColor: rowBg,
                                         cursor: 'default',
                                         ...gridStyle,
@@ -257,13 +257,13 @@ export const RIBTable: React.FC<RIBTableProps> = ({
                                             size="m"
                                         />
                                     </div>
-                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--fw-text-3)', fontVariantNumeric: 'tabular-nums', fontFamily: 'var(--fw-font-mono)' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--yn-text-3)', fontVariantNumeric: 'tabular-nums', fontFamily: 'var(--yn-font-mono)' }}>
                                         <span style={{ fontSize: 12.5 }}>{virtualRow.index + 1}</span>
                                     </div>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: 9, overflow: 'hidden' }}>
                                         {route.prefix && <FamilyBadge prefix={route.prefix} />}
                                         <span
-                                            className="fw-cell-mono"
+                                            className="yn-cell-mono"
                                             style={{
                                                 overflow: 'hidden',
                                                 textOverflow: 'ellipsis',
@@ -271,25 +271,25 @@ export const RIBTable: React.FC<RIBTableProps> = ({
                                                 flexShrink: 1,
                                                 fontSize: 13.5,
                                                 fontWeight: route.is_best ? 600 : 500,
-                                                color: route.is_best ? 'var(--fw-text)' : 'var(--fw-text-2)',
+                                                color: route.is_best ? 'var(--yn-text)' : 'var(--yn-text-2)',
                                             }}
                                         >{route.prefix || '-'}</span>
                                         {prefixConflictCount > 1 && <ConflictBadge count={prefixConflictCount} />}
                                     </div>
                                     <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                        <span className="fw-cell-mono" style={{ fontSize: 12.5, color: 'var(--fw-text-2)' }}>{ipAddressToString(route.next_hop) || '-'}</span>
+                                        <span className="yn-cell-mono" style={{ fontSize: 12.5, color: 'var(--yn-text-2)' }}>{ipAddressToString(route.next_hop) || '-'}</span>
                                     </div>
                                     <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                        <span className="fw-cell-mono" style={{ fontSize: 12.5, color: 'var(--fw-text-3)' }}>{ipAddressToString(route.peer) || '-'}</span>
+                                        <span className="yn-cell-mono" style={{ fontSize: 12.5, color: 'var(--yn-text-3)' }}>{ipAddressToString(route.peer) || '-'}</span>
                                     </div>
                                     <div style={{ display: 'flex', alignItems: 'center' }}>
                                         <BestPill isBest={route.is_best ?? false} />
                                     </div>
                                     <div>
-                                        <span className="fw-cell-mono" style={{ fontSize: 12.5, color: route.pref != null ? 'var(--fw-text-2)' : 'var(--fw-text-3)' }}>{route.pref ?? '—'}</span>
+                                        <span className="yn-cell-mono" style={{ fontSize: 12.5, color: route.pref != null ? 'var(--yn-text-2)' : 'var(--yn-text-3)' }}>{route.pref ?? '—'}</span>
                                     </div>
                                     <div>
-                                        <span className="fw-cell-mono" style={{ fontSize: 12.5, color: route.as_path_len != null ? 'var(--fw-text-2)' : 'var(--fw-text-3)' }}>{route.as_path_len ?? '—'}</span>
+                                        <span className="yn-cell-mono" style={{ fontSize: 12.5, color: route.as_path_len != null ? 'var(--yn-text-2)' : 'var(--yn-text-3)' }}>{route.as_path_len ?? '—'}</span>
                                     </div>
                                     <div style={{ overflow: 'hidden' }}>
                                         <SourceChip source={route.source} />
@@ -301,8 +301,8 @@ export const RIBTable: React.FC<RIBTableProps> = ({
                 )}
             </div>
 
-            <div className="fw-vtbl-footer" style={{ height: FOOTER_HEIGHT }}>
-                <span className="fw-toolbar__count">{footerText}</span>
+            <div className="yn-vtbl-footer" style={{ height: FOOTER_HEIGHT }}>
+                <span className="yn-toolbar__count">{footerText}</span>
             </div>
 
             {hoveredRow !== null && (

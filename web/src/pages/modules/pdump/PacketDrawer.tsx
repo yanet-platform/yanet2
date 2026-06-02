@@ -177,26 +177,26 @@ const PacketDrawer: React.FC<PacketDrawerProps> = ({
 
     return (
         <aside
-            className={`fw-drawer${open ? ' fw-drawer--open' : ''}`}
+            className={`yn-drawer${open ? ' yn-drawer--open' : ''}`}
             role="dialog"
             aria-modal="true"
             aria-label="Packet details"
         >
-            <header className="fw-drawer__head">
-                <h2 className="fw-drawer__title">
+            <header className="yn-drawer__head">
+                <h2 className="yn-drawer__title">
                     {packet ? (
                         <>
-                            Packet <span className="fw-drawer__rule-num">#{packet.id + 1}</span>
+                            Packet <span className="yn-drawer__rule-num">#{packet.id + 1}</span>
                             <span className="pdump-drawer-timestamp">{formatTime(packet.timestamp)}</span>
                         </>
                     ) : (
                         'Packet details'
                     )}
                 </h2>
-                <div className="fw-drawer__head-actions">
+                <div className="yn-drawer__head-actions">
                     <button
                         type="button"
-                        className="fw-icon-btn"
+                        className="yn-icon-btn"
                         onClick={onPrev}
                         disabled={packetIndex <= 0}
                         title="Previous packet (↑ / k)"
@@ -206,7 +206,7 @@ const PacketDrawer: React.FC<PacketDrawerProps> = ({
                     </button>
                     <button
                         type="button"
-                        className="fw-icon-btn"
+                        className="yn-icon-btn"
                         onClick={onNext}
                         disabled={packetIndex < 0 || packetIndex >= totalPackets - 1}
                         title="Next packet (↓ / j)"
@@ -216,7 +216,7 @@ const PacketDrawer: React.FC<PacketDrawerProps> = ({
                     </button>
                     <button
                         type="button"
-                        className="fw-icon-btn"
+                        className="yn-icon-btn"
                         onClick={onClose}
                         aria-label="Close drawer"
                         title="Close (Esc)"
@@ -226,7 +226,7 @@ const PacketDrawer: React.FC<PacketDrawerProps> = ({
                 </div>
             </header>
 
-            <div className="fw-drawer__body">
+            <div className="yn-drawer__body">
                 {packet ? (
                     <>
                         <Section kind="meta" title="Capture" sub={configName ?? ''}>
@@ -359,14 +359,14 @@ const PacketDrawer: React.FC<PacketDrawerProps> = ({
             </div>
 
             {packet && (
-                <footer className="fw-drawer__foot">
-                    <span className="fw-drawer__foot-meta">
+                <footer className="yn-drawer__foot">
+                    <span className="yn-drawer__foot-meta">
                         {packetIndex >= 0
                             ? `${packetIndex + 1} / ${totalPackets} packets`
                             : `evicted / ${totalPackets} packets`}
                     </span>
-                    <div className="fw-drawer__foot-actions">
-                        <button type="button" className="fw-btn fw-btn--ghost" onClick={onClose}>
+                    <div className="yn-drawer__foot-actions">
+                        <button type="button" className="yn-btn yn-btn--ghost" onClick={onClose}>
                             Close
                         </button>
                     </div>

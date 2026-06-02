@@ -57,7 +57,7 @@ const CopyVal: React.FC<CopyValProps> = ({ value, muted }) => {
 
     return (
         <span className="nb-copy-val">
-            <span className={`fw-cell-mono${muted ? ' nb-copy-val--muted' : ''}`}>{value}</span>
+            <span className={`yn-cell-mono${muted ? ' nb-copy-val--muted' : ''}`}>{value}</span>
             <button
                 type="button"
                 className="nb-copy-btn"
@@ -258,21 +258,21 @@ const NeighbourPanel: React.FC<NeighbourPanelProps> = ({
     return (
         <>
             <div
-                className={`fw-backdrop${open ? ' fw-backdrop--open' : ''}`}
+                className={`yn-backdrop${open ? ' yn-backdrop--open' : ''}`}
                 onClick={onClose}
                 aria-hidden="true"
             />
             <aside
-                className={`fw-drawer${open ? ' fw-drawer--open' : ''} nb-detail-panel`}
+                className={`yn-drawer${open ? ' yn-drawer--open' : ''} nb-detail-panel`}
                 role="dialog"
                 aria-modal="true"
                 aria-label={ariaLabel}
             >
                 {open && (
                     <>
-                        <div className="fw-drawer__head">
+                        <div className="yn-drawer__head">
                             <div className="nb-detail-panel__header-info">
-                                <div className="nb-detail-panel__ip fw-cell-mono">{headerTitle}</div>
+                                <div className="nb-detail-panel__ip yn-cell-mono">{headerTitle}</div>
                                 {mode !== 'add' && (
                                     <div className="nb-detail-panel__subtitle">
                                         on {deviceDisplay}{family ? ` · ${family}` : ''}
@@ -289,7 +289,7 @@ const NeighbourPanel: React.FC<NeighbourPanelProps> = ({
                             )}
                             <button
                                 type="button"
-                                className="fw-icon-btn"
+                                className="yn-icon-btn"
                                 onClick={onClose}
                                 aria-label="Close panel"
                             >
@@ -297,11 +297,11 @@ const NeighbourPanel: React.FC<NeighbourPanelProps> = ({
                             </button>
                         </div>
 
-                        <div className="fw-drawer__body">
+                        <div className="yn-drawer__body">
                             {mode === 'view' && neighbour && (
                                 <>
-                                    <div className="fw-section">
-                                        <div className="fw-section-h">Resolved entry</div>
+                                    <div className="yn-section">
+                                        <div className="yn-section-h">Resolved entry</div>
                                         <dl className="nb-kv">
                                             <dt>Next hop</dt>
                                             <dd><CopyVal value={ip} /></dd>
@@ -314,7 +314,7 @@ const NeighbourPanel: React.FC<NeighbourPanelProps> = ({
                                                 <CopyVal value={interfaceMac} muted={interfaceMac === ZERO_MAC} />
                                             </dd>
                                             <dt>Device</dt>
-                                            <dd className="fw-cell-mono">{deviceDisplay}</dd>
+                                            <dd className="yn-cell-mono">{deviceDisplay}</dd>
                                             <dt>Source</dt>
                                             <dd>
                                                 <span className={`nb-src-name${isStatic ? ' nb-src-name--static' : ''}`}>
@@ -323,30 +323,30 @@ const NeighbourPanel: React.FC<NeighbourPanelProps> = ({
                                                 {' · priority '}{priorityDisplay}
                                             </dd>
                                             <dt>Updated at</dt>
-                                            <dd className="fw-cell-mono">{updatedAt}</dd>
+                                            <dd className="yn-cell-mono">{updatedAt}</dd>
                                         </dl>
                                     </div>
 
-                                    <div className="fw-section">
-                                        <div className="fw-section-h">State — {stateName}</div>
+                                    <div className="yn-section">
+                                        <div className="yn-section-h">State — {stateName}</div>
                                         <div className="nb-state-explain">
                                             <div className="nb-state-explain__head">
                                                 <StateBadgeInline state={neighbour.state} />
                                             </div>
                                             <p className="nb-state-explain__desc">{meta.desc}</p>
                                             <div className="nb-state-explain__action">
-                                                <span className="nb-state-explain__action-icon" style={{ color: 'var(--fw-accent)' }}><Bulb width={13} height={13} /></span>
+                                                <span className="nb-state-explain__action-icon" style={{ color: 'var(--yn-accent)' }}><Bulb width={13} height={13} /></span>
                                                 <span>{meta.action}</span>
                                             </div>
                                         </div>
                                     </div>
 
                                     {isMergedView && (
-                                        <div className="fw-section">
-                                            <div className="fw-section-h">Merge resolution</div>
+                                        <div className="yn-section">
+                                            <div className="yn-section-h">Merge resolution</div>
                                             {hasShadowed ? (
                                                 <div className="nb-why-box">
-                                                    <span className="nb-why-box__icon" style={{ color: 'var(--fw-accent)' }}><Layers width={13} height={13} /></span>
+                                                    <span className="nb-why-box__icon" style={{ color: 'var(--yn-accent)' }}><Layers width={13} height={13} /></span>
                                                     <p>
                                                         <strong>{source}</strong> wins with the lowest priority{' '}
                                                         <strong>{priorityDisplay}</strong> (higher precedence), shadowing {shadowed.length}{' '}
@@ -357,7 +357,7 @@ const NeighbourPanel: React.FC<NeighbourPanelProps> = ({
                                                 </div>
                                             ) : (
                                                 <div className="nb-why-box">
-                                                    <span className="nb-why-box__icon" style={{ color: 'var(--fw-text-3)' }}><CircleInfo width={13} height={13} /></span>
+                                                    <span className="nb-why-box__icon" style={{ color: 'var(--yn-text-3)' }}><CircleInfo width={13} height={13} /></span>
                                                     <p>
                                                         Only one table provides this neighbour (<strong>{source}</strong>).
                                                         Nothing to merge.
@@ -368,9 +368,9 @@ const NeighbourPanel: React.FC<NeighbourPanelProps> = ({
                                             <div className="nb-cand-stack">
                                                 <div className="nb-cand nb-cand--winner">
                                                     <div className="nb-cand__top">
-                                                        <span className="nb-cand__table fw-cell-mono">{source}</span>
+                                                        <span className="nb-cand__table yn-cell-mono">{source}</span>
                                                         <span className="nb-cand__tag nb-cand__tag--winner">winner</span>
-                                                        <span className="nb-cand__prio fw-cell-mono">priority {priorityDisplay}</span>
+                                                        <span className="nb-cand__prio yn-cell-mono">priority {priorityDisplay}</span>
                                                     </div>
                                                     <div className="nb-cand__grid">
                                                         <div className="nb-cand__cell">
@@ -379,15 +379,15 @@ const NeighbourPanel: React.FC<NeighbourPanelProps> = ({
                                                         </div>
                                                         <div className="nb-cand__cell">
                                                             <span>Updated</span>
-                                                            <b className="fw-cell-mono">{updatedAt}</b>
+                                                            <b className="yn-cell-mono">{updatedAt}</b>
                                                         </div>
                                                         <div className="nb-cand__cell">
                                                             <span>Neighbour MAC</span>
-                                                            <b className="fw-cell-mono">{neighbourMac}</b>
+                                                            <b className="yn-cell-mono">{neighbourMac}</b>
                                                         </div>
                                                         <div className="nb-cand__cell">
                                                             <span>Interface MAC</span>
-                                                            <b className="fw-cell-mono">{interfaceMac}</b>
+                                                            <b className="yn-cell-mono">{interfaceMac}</b>
                                                         </div>
                                                     </div>
                                                 </div>
@@ -399,9 +399,9 @@ const NeighbourPanel: React.FC<NeighbourPanelProps> = ({
                                                     return (
                                                         <div key={cand.table} className="nb-cand">
                                                             <div className="nb-cand__top">
-                                                                <span className="nb-cand__table fw-cell-mono">{cand.table}</span>
+                                                                <span className="nb-cand__table yn-cell-mono">{cand.table}</span>
                                                                 <span className="nb-cand__tag nb-cand__tag--shadow">shadowed</span>
-                                                                <span className="nb-cand__prio fw-cell-mono">priority {cand.priority}</span>
+                                                                <span className="nb-cand__prio yn-cell-mono">priority {cand.priority}</span>
                                                             </div>
                                                             <div className="nb-cand__grid">
                                                                 <div className="nb-cand__cell">
@@ -410,17 +410,17 @@ const NeighbourPanel: React.FC<NeighbourPanelProps> = ({
                                                                 </div>
                                                                 <div className="nb-cand__cell">
                                                                     <span>Updated</span>
-                                                                    <b className="fw-cell-mono">{candUpdated}</b>
+                                                                    <b className="yn-cell-mono">{candUpdated}</b>
                                                                 </div>
                                                                 <div className="nb-cand__cell">
                                                                     <span>Neighbour MAC</span>
-                                                                    <b className={`fw-cell-mono${cand.macDiffers ? ' nb-cand__diff' : ''}`}>
+                                                                    <b className={`yn-cell-mono${cand.macDiffers ? ' nb-cand__diff' : ''}`}>
                                                                         {candMac}
                                                                     </b>
                                                                 </div>
                                                                 <div className="nb-cand__cell">
                                                                     <span>Interface MAC</span>
-                                                                    <b className="fw-cell-mono">{candImac}</b>
+                                                                    <b className="yn-cell-mono">{candImac}</b>
                                                                 </div>
                                                             </div>
                                                         </div>
@@ -435,12 +435,12 @@ const NeighbourPanel: React.FC<NeighbourPanelProps> = ({
                             {(mode === 'add' || mode === 'edit') && (
                                 <>
                                     {isMergedAdd && (
-                                        <section className="fw-section">
-                                            <div className="fw-section-h">Target</div>
-                                            <div className="fw-section__body">
-                                                <div className="fw-field">
-                                                    <label className="fw-field__label">
-                                                        Table <span className="fw-field__req">*</span>
+                                        <section className="yn-section">
+                                            <div className="yn-section-h">Target</div>
+                                            <div className="yn-section__body">
+                                                <div className="yn-field">
+                                                    <label className="yn-field__label">
+                                                        Table <span className="yn-field__req">*</span>
                                                     </label>
                                                     <Select
                                                         value={selectedTable}
@@ -453,82 +453,82 @@ const NeighbourPanel: React.FC<NeighbourPanelProps> = ({
                                         </section>
                                     )}
 
-                                    <section className="fw-section">
-                                        <div className="fw-section-h">Identity</div>
-                                        <div className="fw-section__body">
-                                            <div className="fw-field">
-                                                <label className="fw-field__label">
+                                    <section className="yn-section">
+                                        <div className="yn-section-h">Identity</div>
+                                        <div className="yn-section__body">
+                                            <div className="yn-field">
+                                                <label className="yn-field__label">
                                                     Next Hop
-                                                    {mode === 'add' && <span className="fw-field__req">*</span>}
+                                                    {mode === 'add' && <span className="yn-field__req">*</span>}
                                                 </label>
                                                 <input
                                                     ref={nextHopRef}
-                                                    className={`fw-input fw-input--mono${nextHopError ? ' fw-input--invalid' : ''}`}
+                                                    className={`yn-input yn-input--mono${nextHopError ? ' yn-input--invalid' : ''}`}
                                                     value={nextHop}
                                                     placeholder="192.168.1.1 or fe80::1"
                                                     onChange={(e) => setNextHop(e.target.value)}
                                                     disabled={mode === 'edit'}
                                                 />
                                                 {nextHopError && (
-                                                    <span className="fw-field__hint fw-field__error">{nextHopError}</span>
+                                                    <span className="yn-field__hint yn-field__error">{nextHopError}</span>
                                                 )}
                                                 {mode === 'edit' && (
-                                                    <span className="fw-field__hint">Primary key — delete and recreate to change.</span>
+                                                    <span className="yn-field__hint">Primary key — delete and recreate to change.</span>
                                                 )}
                                             </div>
                                         </div>
                                     </section>
 
-                                    <section className="fw-section">
-                                        <div className="fw-section-h">L2</div>
-                                        <div className="fw-section__body">
-                                            <div className="fw-field">
-                                                <label className="fw-field__label">
-                                                    Neighbour MAC <span className="fw-field__req">*</span>
+                                    <section className="yn-section">
+                                        <div className="yn-section-h">L2</div>
+                                        <div className="yn-section__body">
+                                            <div className="yn-field">
+                                                <label className="yn-field__label">
+                                                    Neighbour MAC <span className="yn-field__req">*</span>
                                                 </label>
                                                 <input
-                                                    className={`fw-input fw-input--mono${linkAddrError ? ' fw-input--invalid' : ''}`}
+                                                    className={`yn-input yn-input--mono${linkAddrError ? ' yn-input--invalid' : ''}`}
                                                     value={linkAddr}
                                                     placeholder="52:54:00:12:34:56"
                                                     onChange={(e) => setLinkAddr(e.target.value)}
                                                 />
                                                 {linkAddrError && (
-                                                    <span className="fw-field__hint fw-field__error">{linkAddrError}</span>
+                                                    <span className="yn-field__hint yn-field__error">{linkAddrError}</span>
                                                 )}
                                             </div>
-                                            <div className="fw-field">
-                                                <label className="fw-field__label">
-                                                    Interface MAC <span className="fw-field__req">*</span>
+                                            <div className="yn-field">
+                                                <label className="yn-field__label">
+                                                    Interface MAC <span className="yn-field__req">*</span>
                                                 </label>
                                                 <input
-                                                    className={`fw-input fw-input--mono${hardwareAddrError ? ' fw-input--invalid' : ''}`}
+                                                    className={`yn-input yn-input--mono${hardwareAddrError ? ' yn-input--invalid' : ''}`}
                                                     value={hardwareAddr}
                                                     placeholder="52:54:00:12:34:56"
                                                     onChange={(e) => setHardwareAddr(e.target.value)}
                                                 />
                                                 {hardwareAddrError && (
-                                                    <span className="fw-field__hint fw-field__error">{hardwareAddrError}</span>
+                                                    <span className="yn-field__hint yn-field__error">{hardwareAddrError}</span>
                                                 )}
                                             </div>
                                         </div>
                                     </section>
 
-                                    <section className="fw-section">
-                                        <div className="fw-section-h">Egress</div>
-                                        <div className="fw-section__body">
-                                            <div className="fw-field">
-                                                <label className="fw-field__label">Device</label>
+                                    <section className="yn-section">
+                                        <div className="yn-section-h">Egress</div>
+                                        <div className="yn-section__body">
+                                            <div className="yn-field">
+                                                <label className="yn-field__label">Device</label>
                                                 <input
-                                                    className="fw-input"
+                                                    className="yn-input"
                                                     value={device}
                                                     placeholder="eth0"
                                                     onChange={(e) => setDevice(e.target.value)}
                                                 />
                                             </div>
-                                            <div className="fw-field">
-                                                <label className="fw-field__label">Priority</label>
+                                            <div className="yn-field">
+                                                <label className="yn-field__label">Priority</label>
                                                 <input
-                                                    className="fw-input"
+                                                    className="yn-input"
                                                     type="number"
                                                     value={priority}
                                                     placeholder="100"
@@ -539,15 +539,15 @@ const NeighbourPanel: React.FC<NeighbourPanelProps> = ({
                                     </section>
 
                                     {mode === 'edit' && neighbour && (
-                                        <div className="fw-section">
-                                            <div className="fw-section-h">State — {stateName}</div>
+                                        <div className="yn-section">
+                                            <div className="yn-section-h">State — {stateName}</div>
                                             <div className="nb-state-explain">
                                                 <div className="nb-state-explain__head">
                                                     <StateBadgeInline state={neighbour.state} />
                                                 </div>
                                                 <p className="nb-state-explain__desc">{meta.desc}</p>
                                                 <div className="nb-state-explain__action">
-                                                    <span className="nb-state-explain__action-icon" style={{ color: 'var(--fw-accent)' }}><Bulb width={13} height={13} /></span>
+                                                    <span className="nb-state-explain__action-icon" style={{ color: 'var(--yn-accent)' }}><Bulb width={13} height={13} /></span>
                                                     <span>{meta.action}</span>
                                                 </div>
                                             </div>
@@ -557,20 +557,20 @@ const NeighbourPanel: React.FC<NeighbourPanelProps> = ({
                             )}
                         </div>
 
-                        <div className="fw-drawer__foot">
+                        <div className="yn-drawer__foot">
                             {mode === 'add' && (
                                 <>
-                                    <div className="fw-drawer__foot-actions">
+                                    <div className="yn-drawer__foot-actions">
                                         <button
                                             type="button"
-                                            className="fw-btn fw-btn--ghost fw-btn--sm"
+                                            className="yn-btn yn-btn--ghost yn-btn--sm"
                                             onClick={onClose}
                                         >
                                             Cancel
                                         </button>
                                         <button
                                             type="button"
-                                            className="fw-btn fw-btn--primary fw-btn--sm"
+                                            className="yn-btn yn-btn--primary yn-btn--sm"
                                             onClick={() => void handleApply()}
                                             disabled={!canSubmit}
                                         >
@@ -582,27 +582,27 @@ const NeighbourPanel: React.FC<NeighbourPanelProps> = ({
 
                             {mode === 'edit' && (
                                 <>
-                                    <div className="fw-drawer__foot-actions">
+                                    <div className="yn-drawer__foot-actions">
                                         <button
                                             type="button"
-                                            className="fw-btn fw-btn--danger fw-btn--sm"
+                                            className="yn-btn yn-btn--danger yn-btn--sm"
                                             onClick={handleDeleteRequest}
                                             disabled={submitting}
                                         >
                                             Delete
                                         </button>
                                     </div>
-                                    <div className="fw-drawer__foot-actions">
+                                    <div className="yn-drawer__foot-actions">
                                         <button
                                             type="button"
-                                            className="fw-btn fw-btn--ghost fw-btn--sm"
+                                            className="yn-btn yn-btn--ghost yn-btn--sm"
                                             onClick={onClose}
                                         >
                                             Cancel
                                         </button>
                                         <button
                                             type="button"
-                                            className="fw-btn fw-btn--primary fw-btn--sm"
+                                            className="yn-btn yn-btn--primary yn-btn--sm"
                                             onClick={() => void handleApply()}
                                             disabled={!canSubmit}
                                         >
@@ -614,11 +614,11 @@ const NeighbourPanel: React.FC<NeighbourPanelProps> = ({
 
                             {mode === 'view' && (
                                 <>
-                                    <div className="fw-drawer__foot-actions">
+                                    <div className="yn-drawer__foot-actions">
                                         {!isStatic && neighbour && (
                                             <button
                                                 type="button"
-                                                className="fw-btn fw-btn--ghost fw-btn--sm"
+                                                className="yn-btn yn-btn--ghost yn-btn--sm"
                                                 onClick={() => onPinAsStatic(neighbour)}
                                             >
                                                 📌 Pin as static
@@ -627,7 +627,7 @@ const NeighbourPanel: React.FC<NeighbourPanelProps> = ({
                                     </div>
                                     <button
                                         type="button"
-                                        className="fw-btn fw-btn--ghost fw-btn--sm"
+                                        className="yn-btn yn-btn--ghost yn-btn--sm"
                                         onClick={onClose}
                                     >
                                         Close

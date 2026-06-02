@@ -82,14 +82,14 @@ const YamlIO: React.FC<YamlIOProps> = ({ configName, rules, onImport }) => {
         <div style={{ display: 'flex', gap: 4 }}>
             <button
                 type="button"
-                className={mode === 'replace' ? 'fw-btn fw-btn--sm' : 'fw-btn fw-btn--ghost fw-btn--sm'}
+                className={mode === 'replace' ? 'yn-btn yn-btn--sm' : 'yn-btn yn-btn--ghost yn-btn--sm'}
                 onClick={() => setMode('replace')}
             >
                 Replace all
             </button>
             <button
                 type="button"
-                className={mode === 'append' ? 'fw-btn fw-btn--sm' : 'fw-btn fw-btn--ghost fw-btn--sm'}
+                className={mode === 'append' ? 'yn-btn yn-btn--sm' : 'yn-btn yn-btn--ghost yn-btn--sm'}
                 onClick={() => setMode('append')}
             >
                 Append

@@ -28,7 +28,7 @@ const PdumpModal: React.FC<PdumpModalProps> = ({ title, width = '620px', onClose
             >
                 <div className="pdump-modal__header">
                     <div className="pdump-modal__title">{title}</div>
-                    <button type="button" className="fw-icon-btn" onClick={onClose} aria-label="Close">✕</button>
+                    <button type="button" className="yn-icon-btn" onClick={onClose} aria-label="Close">✕</button>
                 </div>
                 <div className="pdump-modal__body">
                     {children}

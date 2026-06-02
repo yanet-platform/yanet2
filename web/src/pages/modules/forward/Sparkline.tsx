@@ -14,7 +14,7 @@ const Sparkline: React.FC<SparklineProps> = ({
     values,
     width = 64,
     height = 18,
-    color = 'var(--fw-accent)',
+    color = 'var(--yn-accent)',
     fill = true,
 }) => {
     return (
@@ -25,7 +25,7 @@ const Sparkline: React.FC<SparklineProps> = ({
                 }
                 return (
                     <span
-                        className="fw-spark-empty"
+                        className="yn-spark-empty"
                         title="No counter history available from backend"
                     >
                         --

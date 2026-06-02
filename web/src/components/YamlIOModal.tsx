@@ -37,7 +37,7 @@ export interface YamlIOModalProps {
      * Either onImport or onImportAsync must be supplied.
      */
     onImportAsync?: (text: string, onProgress: (p: ParseProgress) => void, format: 'yaml' | 'json') => Promise<void>;
-    /** Toast key prefix, e.g. "fw-yaml" or "fib-yaml". */
+    /** Toast key prefix, e.g. "yn-yaml" or "fib-yaml". */
     toastPrefix: string;
     /** Placeholder YAML shown in import textarea. */
     importPlaceholder: string;
@@ -66,7 +66,7 @@ export interface YamlIOModalProps {
  * Reusable YAML (and optionally JSON) import/export modal chrome used by multi-config draft pages.
  * Renders Import and Export buttons; clicking either opens the modal.
  * Callers supply the serialisation and parsing logic via props.
- * Consumes fw-* CSS classes from draft-page.scss.
+ * Consumes yn-* CSS classes from draft-page.scss.
  */
 const YamlIOModal: React.FC<YamlIOModalProps> = ({
     configName,
@@ -276,12 +276,12 @@ const YamlIOModal: React.FC<YamlIOModalProps> = ({
                 const pct = total > 0 ? Math.round((done / total) * 100) : 0;
                 return (
                     <div style={{ marginTop: 6 }}>
-                        <div style={{ color: 'var(--fw-text-3)', fontSize: 12, marginBottom: 4 }}>
+                        <div style={{ color: 'var(--yn-text-3)', fontSize: 12, marginBottom: 4 }}>
                             Parsing… {done < total ? '' : '100%'}
                         </div>
-                        <div className="fw-parse-progress">
+                        <div className="yn-parse-progress">
                             <div
-                                className="fw-parse-progress__bar"
+                                className="yn-parse-progress__bar"
                                 style={{ width: `${pct}%` }}
                             />
                         </div>
@@ -292,12 +292,12 @@ const YamlIOModal: React.FC<YamlIOModalProps> = ({
                 const pct = total > 0 ? Math.round((done / total) * 100) : 0;
                 return (
                     <div style={{ marginTop: 6 }}>
-                        <div style={{ color: 'var(--fw-text-3)', fontSize: 12, marginBottom: 4 }}>
+                        <div style={{ color: 'var(--yn-text-3)', fontSize: 12, marginBottom: 4 }}>
                             Converting rules: {done.toLocaleString()} / {total.toLocaleString()} ({pct}%)
                         </div>
-                        <div className="fw-parse-progress">
+                        <div className="yn-parse-progress">
                             <div
-                                className="fw-parse-progress__bar"
+                                className="yn-parse-progress__bar"
                                 style={{ width: `${pct}%` }}
                             />
                         </div>
@@ -307,7 +307,7 @@ const YamlIOModal: React.FC<YamlIOModalProps> = ({
         }
 
         return (
-            <div style={{ marginTop: 6, color: 'var(--fw-text-3)', fontSize: 12 }}>
+            <div style={{ marginTop: 6, color: 'var(--yn-text-3)', fontSize: 12 }}>
                 Parsing…
             </div>
         );
@@ -319,14 +319,14 @@ const YamlIOModal: React.FC<YamlIOModalProps> = ({
             <div style={{ display: 'flex', gap: 4 }}>
                 <button
                     type="button"
-                    className={exportFormat === 'json' ? 'fw-btn fw-btn--sm' : 'fw-btn fw-btn--ghost fw-btn--sm'}
+                    className={exportFormat === 'json' ? 'yn-btn yn-btn--sm' : 'yn-btn yn-btn--ghost yn-btn--sm'}
                     onClick={() => handleExportFormatChange('json')}
                 >
                     JSON
                 </button>
                 <button
                     type="button"
-                    className={exportFormat === 'yaml' ? 'fw-btn fw-btn--sm' : 'fw-btn fw-btn--ghost fw-btn--sm'}
+                    className={exportFormat === 'yaml' ? 'yn-btn yn-btn--sm' : 'yn-btn yn-btn--ghost yn-btn--sm'}
                     onClick={() => handleExportFormatChange('yaml')}
                 >
                     YAML
@@ -347,22 +347,22 @@ const YamlIOModal: React.FC<YamlIOModalProps> = ({
             </Button>
 
             {showModal && (
-                <div className="fw-modal-backdrop" onClick={closeModal}>
-                    <div className="fw-modal" onClick={(e) => e.stopPropagation()}>
-                        <header className="fw-modal__head">
-                            <div className="fw-modal__title-row">
-                                <span className="fw-modal__title">
+                <div className="yn-modal-backdrop" onClick={closeModal}>
+                    <div className="yn-modal" onClick={(e) => e.stopPropagation()}>
+                        <header className="yn-modal__head">
+                            <div className="yn-modal__title-row">
+                                <span className="yn-modal__title">
                                     {showModal === 'import' ? importLabel : exportLabel}
                                 </span>
                                 {showModal === 'export' && (
-                                    <span className="fw-modal__meta">
+                                    <span className="yn-modal__meta">
                                         {configName} · {itemCount} {itemLabel}
                                     </span>
                                 )}
                             </div>
                             <button
                                 type="button"
-                                className="fw-icon-btn"
+                                className="yn-icon-btn"
                                 onClick={closeModal}
                                 aria-label="Close"
                             >
@@ -370,11 +370,11 @@ const YamlIOModal: React.FC<YamlIOModalProps> = ({
                             </button>
                         </header>
 
-                        <div className="fw-modal__body">
+                        <div className="yn-modal__body">
                             {showModal === 'import' && (
-                                <div className="fw-modal__import-header">
+                                <div className="yn-modal__import-header">
                                     <label
-                                        className="fw-btn fw-btn--ghost fw-btn--sm"
+                                        className="yn-btn yn-btn--ghost yn-btn--sm"
                                         style={{ cursor: 'pointer' }}
                                     >
                                         Choose file
@@ -389,25 +389,25 @@ const YamlIOModal: React.FC<YamlIOModalProps> = ({
                                         />
                                     </label>
                                     {loadProgress !== null && (
-                                        <span className="fw-modal__load-progress">
+                                        <span className="yn-modal__load-progress">
                                             Reading… {loadProgress}%
                                         </span>
                                     )}
                                     {loadProgress === null && (
-                                        <span className="fw-modal__or">or paste below</span>
+                                        <span className="yn-modal__or">or paste below</span>
                                     )}
                                     {importExtraControls}
                                 </div>
                             )}
                             {showModal === 'export' && renderExportFormatToggle()}
                             {isLargeFile ? (
-                                <div className="fw-modal__large-file-notice">
+                                <div className="yn-modal__large-file-notice">
                                     Large file loaded ({(textContent.current.length / 1_048_576).toFixed(1)} MB) — preview suppressed to avoid browser slowdown.
                                 </div>
                             ) : (
                                 <textarea
                                     ref={textareaRef}
-                                    className="fw-code-area"
+                                    className="yn-code-area"
                                     value={previewText}
                                     onChange={(e) => {
                                         const v = e.target.value;
@@ -428,14 +428,14 @@ const YamlIOModal: React.FC<YamlIOModalProps> = ({
                             )}
                         </div>
 
-                        <footer className="fw-modal__foot">
-                            <span className="fw-modal__foot-hint">
+                        <footer className="yn-modal__foot">
+                            <span className="yn-modal__foot-hint">
                                 {showModal === 'export' ? exportFooterHint : importFooterHint}
                             </span>
-                            <div className="fw-modal__foot-actions">
+                            <div className="yn-modal__foot-actions">
                                 <button
                                     type="button"
-                                    className="fw-btn fw-btn--ghost"
+                                    className="yn-btn yn-btn--ghost"
                                     onClick={closeModal}
                                 >
                                     Close
@@ -444,14 +444,14 @@ const YamlIOModal: React.FC<YamlIOModalProps> = ({
                                     <>
                                         <button
                                             type="button"
-                                            className="fw-btn fw-btn--ghost"
+                                            className="yn-btn yn-btn--ghost"
                                             onClick={handleCopy}
                                         >
                                             Copy
                                         </button>
                                         <button
                                             type="button"
-                                            className="fw-btn fw-btn--primary"
+                                            className="yn-btn yn-btn--primary"
                                             onClick={handleDownload}
                                         >
                                             {showFormatToggle
@@ -462,7 +462,7 @@ const YamlIOModal: React.FC<YamlIOModalProps> = ({
                                 ) : (
                                     <button
                                         type="button"
-                                        className="fw-btn fw-btn--primary"
+                                        className="yn-btn yn-btn--primary"
                                         onClick={handleImport}
                                         disabled={!hasContent || isParsing || loadProgress !== null}
                                     >

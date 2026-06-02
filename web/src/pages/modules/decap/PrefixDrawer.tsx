@@ -76,22 +76,22 @@ const PrefixDrawer = React.forwardRef<PrefixDrawerHandle, PrefixDrawerProps>(({
             onJump={onJump}
             ariaLabel="Edit prefix"
         >
-            <section className="fw-section">
-                <div className="fw-section-h">Prefix</div>
-                <div className="fw-section__body">
-                    <div className="fw-field">
-                        <label className="fw-field__label">
-                            CIDR <span className="fw-field__req">*</span>
+            <section className="yn-section">
+                <div className="yn-section-h">Prefix</div>
+                <div className="yn-section__body">
+                    <div className="yn-field">
+                        <label className="yn-field__label">
+                            CIDR <span className="yn-field__req">*</span>
                         </label>
                         <input
-                            className={`fw-input fw-input--mono${errors.prefix ? ' fw-input--invalid' : ''}`}
+                            className={`yn-input yn-input--mono${errors.prefix ? ' yn-input--invalid' : ''}`}
                             value={draft?.prefix ?? ''}
                             placeholder="10.0.0.0/8 or 2a02:6b8::/32"
                             onChange={(e) => updateField('prefix', e.target.value.trim())}
                         />
                         {errors.prefix
-                            ? <span className="fw-field__hint fw-field__error">{errors.prefix}</span>
-                            : <span className="fw-field__hint">IPv4 or IPv6 with mask.</span>
+                            ? <span className="yn-field__hint yn-field__error">{errors.prefix}</span>
+                            : <span className="yn-field__hint">IPv4 or IPv6 with mask.</span>
                         }
                     </div>
                 </div>

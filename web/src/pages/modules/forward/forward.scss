@@ -2,11 +2,11 @@
 @use '../../../styles/mixins' as *;
 
 // Forward-specific styles — direction badges, sparkline, chip-input, segmented control.
-// Shared page chrome (fw-page, fw-tabs, fw-tbl-*, fw-modal*, fw-drawer*, fw-bulk-bar, etc.)
+// Shared page chrome (yn-page, yn-tabs, yn-table-*, yn-modal*, yn-drawer*, yn-bulk-bar, etc.)
 // lives in web/src/styles/draft-page.scss.
 
 // Direction badges
-.fw-badge-dir {
+.yn-badge-dir {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -16,81 +16,81 @@
     border-radius: 999px;
     font-size: 11.5px;
     font-weight: 600;
-    font-family: var(--fw-font-mono);
+    font-family: var(--yn-font-mono);
     letter-spacing: 0.03em;
     border: 1px solid transparent;
 
     &--in {
-        background: var(--fw-dir-in-bg);
-        color: var(--fw-dir-in);
-        border-color: var(--fw-dir-in-bd);
+        background: var(--yn-dir-in-bg);
+        color: var(--yn-dir-in);
+        border-color: var(--yn-dir-in-bd);
     }
 
     &--out {
-        background: var(--fw-dir-out-bg);
-        color: var(--fw-dir-out);
-        border-color: var(--fw-dir-out-bd);
+        background: var(--yn-dir-out-bg);
+        color: var(--yn-dir-out);
+        border-color: var(--yn-dir-out-bd);
     }
 
     &--none {
-        background: var(--fw-dir-none-bg);
-        color: var(--fw-dir-none);
-        border-color: var(--fw-dir-none-bd);
+        background: var(--yn-dir-none-bg);
+        color: var(--yn-dir-none);
+        border-color: var(--yn-dir-none-bd);
     }
 }
 
 // Any/ALL badge
-.fw-badge-any {
+.yn-badge-any {
     display: inline-flex;
     align-items: center;
     padding: 2px 8px;
     border-radius: 999px;
     font-size: 11px;
     font-weight: 500;
-    color: var(--fw-text-2);
-    background: var(--fw-bg-2);
-    border: 1px solid var(--fw-line-2);
+    color: var(--yn-text-2);
+    background: var(--yn-bg-2);
+    border: 1px solid var(--yn-line-2);
     white-space: nowrap;
 }
 
 // Sparkline
-.fw-spark-empty {
-    font-family: var(--fw-font-mono);
+.yn-spark-empty {
+    font-family: var(--yn-font-mono);
     font-size: 11px;
-    color: var(--fw-text-3);
+    color: var(--yn-text-3);
 }
 
-.fw-spark-svg { display: block; }
+.yn-spark-svg { display: block; }
 
-.fw-cell-pps {
-    font-family: var(--fw-font-mono);
+.yn-cell-pps {
+    font-family: var(--yn-font-mono);
     font-size: 11.5px;
     font-variant-numeric: tabular-nums;
-    color: var(--fw-text-3);
+    color: var(--yn-text-3);
     white-space: nowrap;
     flex-shrink: 0;
 }
 
 // Segmented control for mode
-.fw-segmented {
+.yn-segmented {
     display: flex;
-    background: var(--fw-bg-2);
-    border: 1px solid var(--fw-line-2);
+    background: var(--yn-bg-2);
+    border: 1px solid var(--yn-line-2);
     border-radius: 6px;
     padding: 2px;
     gap: 2px;
 }
 
-.fw-segmented__opt {
+.yn-segmented__opt {
     flex: 1;
     padding: 0 10px;
     height: 28px;
     border-radius: 4px;
     font-size: 12px;
     font-weight: 600;
-    font-family: var(--fw-font-mono);
+    font-family: var(--yn-font-mono);
     letter-spacing: 0.04em;
-    color: var(--fw-text-2);
+    color: var(--yn-text-2);
     background: none;
     border: none;
     cursor: pointer;
@@ -99,22 +99,22 @@
     justify-content: center;
     transition: background 0.08s, color 0.08s;
 
-    &:hover { color: var(--fw-text); }
+    &:hover { color: var(--yn-text); }
 
     &--on {
-        background: var(--fw-bg-3);
-        color: var(--fw-text);
+        background: var(--yn-bg-3);
+        color: var(--yn-text);
     }
 
-    &--on#{&}--in { color: var(--fw-dir-in); }
-    &--on#{&}--out { color: var(--fw-dir-out); }
-    &--on#{&}--none { color: var(--fw-text); }
+    &--on#{&}--in { color: var(--yn-dir-in); }
+    &--on#{&}--out { color: var(--yn-dir-out); }
+    &--on#{&}--none { color: var(--yn-text); }
 }
 
 // Chip input
-.fw-chip-input {
-    background: var(--fw-bg-2);
-    border: 1px solid var(--fw-line-2);
+.yn-chip-input {
+    background: var(--yn-bg-2);
+    border: 1px solid var(--yn-line-2);
     border-radius: 6px;
     padding: 5px;
     min-height: 34px;
@@ -126,57 +126,57 @@
     transition: border-color 0.1s, box-shadow 0.1s;
 
     &:focus-within {
-        border-color: var(--fw-accent);
-        box-shadow: 0 0 0 2px var(--fw-accent-soft);
+        border-color: var(--yn-accent);
+        box-shadow: 0 0 0 2px var(--yn-accent-soft);
     }
 }
 
-.fw-chip-input__raw {
+.yn-chip-input__raw {
     flex: 1;
     min-width: 80px;
     background: none;
     border: none;
     outline: none;
     padding: 2px 4px;
-    font-family: var(--fw-font-mono);
+    font-family: var(--yn-font-mono);
     font-size: 12px;
-    color: var(--fw-text);
+    color: var(--yn-text);
 
-    &::placeholder { color: var(--fw-text-3); }
+    &::placeholder { color: var(--yn-text-3); }
 }
 
-.fw-chip {
+.yn-chip {
     display: inline-flex;
     align-items: center;
     gap: 3px;
-    background: var(--fw-bg-3);
-    border: 1px solid var(--fw-line-2);
+    background: var(--yn-bg-3);
+    border: 1px solid var(--yn-line-2);
     border-radius: 4px;
     padding: 1px 4px 1px 7px;
-    font-family: var(--fw-font-mono);
+    font-family: var(--yn-font-mono);
     font-size: 11.5px;
-    color: var(--fw-text);
+    color: var(--yn-text);
     line-height: 1.6;
 
     &--invalid {
         background: rgba(224, 122, 110, 0.1);
         border-color: rgba(224, 122, 110, 0.4);
-        color: var(--fw-danger);
+        color: var(--yn-danger);
     }
 }
 
-.fw-chip__label {
+.yn-chip__label {
     flex: 1;
     cursor: text;
 
     &:hover { text-decoration: underline; text-decoration-style: dotted; }
 }
 
-.fw-chip__x {
+.yn-chip__x {
     width: 14px;
     height: 14px;
     border-radius: 3px;
-    color: var(--fw-text-3);
+    color: var(--yn-text-3);
     background: none;
     border: none;
     cursor: pointer;
@@ -188,5 +188,5 @@
     padding: 0;
     transition: background 0.08s, color 0.08s;
 
-    &:hover { background: var(--fw-bg-hover); color: var(--fw-text); }
+    &:hover { background: var(--yn-bg-hover); color: var(--yn-text); }
 }

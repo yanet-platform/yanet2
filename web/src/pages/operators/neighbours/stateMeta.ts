@@ -2,7 +2,7 @@ import { NUD_STATE_MAP } from '../../../utils/nud';
 
 /** Metadata for a single NUD state — descriptions and action guidance. */
 export interface StateMetaEntry {
-    /** CSS color token for this state (uses existing fw-* / g-color-* tokens). */
+    /** CSS color token for this state (uses existing yn-* / g-color-* tokens). */
     color: string;
     /** Short human-readable description of what the state means. */
     desc: string;
@@ -18,7 +18,7 @@ export const STATE_META: Record<string, StateMetaEntry> = {
         action: 'Healthy. No action needed.',
     },
     PERMANENT: {
-        color: 'var(--fw-accent)',
+        color: 'var(--yn-accent)',
         desc: 'Static entry pinned by an administrator. Never expires and is not subject to ARP/ND timers.',
         action: 'Managed manually. Edit or delete via the static table.',
     },
@@ -48,17 +48,17 @@ export const STATE_META: Record<string, StateMetaEntry> = {
         action: 'Check link/cabling, that the peer is up, and that ARP/ND is not filtered. A static entry can override this.',
     },
     NOARP: {
-        color: 'var(--fw-text-3)',
+        color: 'var(--yn-text-3)',
         desc: 'No L2 resolution is required for this entry (loopback, point-to-point, or multicast). This is expected, not an error.',
         action: 'Expected for lo / multicast / kni interfaces.',
     },
     NONE: {
-        color: 'var(--fw-text-3)',
+        color: 'var(--yn-text-3)',
         desc: 'No state recorded for this entry.',
         action: '—',
     },
     UNKNOWN: {
-        color: 'var(--fw-text-3)',
+        color: 'var(--yn-text-3)',
         desc: 'Unrecognized state value.',
         action: '—',
     },

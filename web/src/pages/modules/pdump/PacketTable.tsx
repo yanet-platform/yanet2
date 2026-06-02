@@ -276,7 +276,7 @@ export const PacketTable: React.FC<PacketTableProps> = ({
                     {isCapturing && (
                         <button
                             type="button"
-                            className={`fw-btn fw-btn--ghost fw-btn--sm${autoScroll ? ' packet-table__btn--active' : ''}`}
+                            className={`yn-btn yn-btn--ghost yn-btn--sm${autoScroll ? ' packet-table__btn--active' : ''}`}
                             onClick={handleToggleAutoScroll}
                             title="Toggle auto-scroll to new packets"
                         >
@@ -285,7 +285,7 @@ export const PacketTable: React.FC<PacketTableProps> = ({
                     )}
                     <button
                         type="button"
-                        className={`fw-btn fw-btn--ghost fw-btn--sm${paused ? ' packet-table__btn--active' : ''}`}
+                        className={`yn-btn yn-btn--ghost yn-btn--sm${paused ? ' packet-table__btn--active' : ''}`}
                         onClick={onTogglePause}
                         title="Pause / resume view updates"
                     >
@@ -293,7 +293,7 @@ export const PacketTable: React.FC<PacketTableProps> = ({
                     </button>
                     <button
                         type="button"
-                        className="fw-btn fw-btn--ghost fw-btn--sm"
+                        className="yn-btn yn-btn--ghost yn-btn--sm"
                         onClick={onClearPackets}
                         disabled={packets.length === 0}
                         title="Clear all captured packets"

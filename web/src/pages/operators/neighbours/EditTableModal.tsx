@@ -51,30 +51,30 @@ const EditTableModal: React.FC<EditTableModalProps> = ({
     };
 
     return (
-        <div className="fw-modal-backdrop" onClick={handleClose}>
-            <div className="fw-modal fw-modal--sm" onClick={(e) => e.stopPropagation()}>
-                <header className="fw-modal__head">
-                    <span className="fw-modal__title">Edit table — {tableInfo?.name}</span>
-                    <button type="button" className="fw-icon-btn" onClick={handleClose} aria-label="Close">✕</button>
+        <div className="yn-modal-backdrop" onClick={handleClose}>
+            <div className="yn-modal yn-modal--sm" onClick={(e) => e.stopPropagation()}>
+                <header className="yn-modal__head">
+                    <span className="yn-modal__title">Edit table — {tableInfo?.name}</span>
+                    <button type="button" className="yn-icon-btn" onClick={handleClose} aria-label="Close">✕</button>
                 </header>
-                <div className="fw-modal__body fw-modal__body--confirm">
-                    <div className="fw-field">
-                        <label className="fw-field__label">Name</label>
+                <div className="yn-modal__body yn-modal__body--confirm">
+                    <div className="yn-field">
+                        <label className="yn-field__label">Name</label>
                         <input
-                            className="fw-input"
+                            className="yn-input"
                             type="text"
                             value={tableInfo?.name || ''}
                             disabled
                         />
-                        <span className="fw-field__hint">Name can't be changed</span>
+                        <span className="yn-field__hint">Name can't be changed</span>
                     </div>
-                    <div className="fw-field">
-                        <label className="fw-field__label" htmlFor="et-priority">
-                            Default Priority <span className="fw-field__req">*</span>
+                    <div className="yn-field">
+                        <label className="yn-field__label" htmlFor="et-priority">
+                            Default Priority <span className="yn-field__req">*</span>
                         </label>
                         <input
                             id="et-priority"
-                            className={`fw-input${priorityError && defaultPriority ? ' fw-input--invalid' : ''}`}
+                            className={`yn-input${priorityError && defaultPriority ? ' yn-input--invalid' : ''}`}
                             type="number"
                             value={defaultPriority}
                             onChange={(e) => setDefaultPriority(e.target.value)}
@@ -86,21 +86,21 @@ const EditTableModal: React.FC<EditTableModalProps> = ({
                             autoFocus
                         />
                         {priorityError && defaultPriority ? (
-                            <span className="fw-field__hint fw-field__error">{priorityError}</span>
+                            <span className="yn-field__hint yn-field__error">{priorityError}</span>
                         ) : (
-                            <span className="fw-field__hint">Lower value wins on merge.</span>
+                            <span className="yn-field__hint">Lower value wins on merge.</span>
                         )}
                     </div>
                 </div>
-                <footer className="fw-modal__foot">
+                <footer className="yn-modal__foot">
                     <span />
-                    <div className="fw-modal__foot-actions">
-                        <button type="button" className="fw-btn fw-btn--ghost" onClick={handleClose} disabled={submitting}>
+                    <div className="yn-modal__foot-actions">
+                        <button type="button" className="yn-btn yn-btn--ghost" onClick={handleClose} disabled={submitting}>
                             Cancel
                         </button>
                         <button
                             type="button"
-                            className="fw-btn fw-btn--primary"
+                            className="yn-btn yn-btn--primary"
                             onClick={handleSave}
                             disabled={!canSave}
                         >

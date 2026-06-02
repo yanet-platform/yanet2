@@ -2,11 +2,11 @@
 @use '../../../styles/mixins' as *;
 
 // Live tab dot — pulsing green indicator for the streaming config tab.
-.fw-tab__dot--live {
+.yn-tab__dot--live {
     width: 7px;
     height: 7px;
     border-radius: 50%;
-    background: var(--fw-ok, var(--g-color-text-positive));
+    background: var(--yn-ok, var(--g-color-text-positive));
     flex-shrink: 0;
     animation: pdump-pulse 1.6s ease-in-out infinite;
 }
@@ -32,12 +32,12 @@
 
 // !important overrides the per-row inline backgroundColor (stripe tint).
 .packet-table__row--selected {
-    background-color: var(--fw-accent-soft) !important;
+    background-color: var(--yn-accent-soft) !important;
 }
 
 // Hover must not clobber selected or new-flash states.
 .packet-table__row:not(.packet-table__row--selected):not(.packet-table__row--new):hover {
-    background-color: var(--fw-bg-hover) !important; // !important beats the inline stripe tint
+    background-color: var(--yn-bg-hover) !important; // !important beats the inline stripe tint
 }
 
 // BPF filter full-width card.
@@ -46,9 +46,9 @@
     align-items: center;
     gap: 12px;
     padding: 10px 16px;
-    background: var(--fw-panel);
-    border: 1px solid var(--fw-line-2);
-    border-radius: var(--fw-r-md, 6px);
+    background: var(--yn-panel);
+    border: 1px solid var(--yn-line-2);
+    border-radius: var(--yn-r-md, 6px);
     margin-bottom: 8px;
     flex-shrink: 0;
 
@@ -57,7 +57,7 @@
         font-weight: 700;
         letter-spacing: 0.1em;
         text-transform: uppercase;
-        color: var(--fw-accent);
+        color: var(--yn-accent);
         flex-shrink: 0;
     }
 
@@ -74,7 +74,7 @@
             right: 0;
             width: 48px;
             height: 100%;
-            background: linear-gradient(to right, transparent, var(--fw-panel));
+            background: linear-gradient(to right, transparent, var(--yn-panel));
             pointer-events: none;
         }
 
@@ -86,7 +86,7 @@
     &__expr {
         overflow-x: auto;
         white-space: nowrap;
-        font-family: var(--fw-font-mono);
+        font-family: var(--yn-font-mono);
         font-size: 13px;
         line-height: 1.5;
         padding-bottom: 2px;
@@ -101,17 +101,17 @@
         font-weight: 500;
         padding: 4px 10px;
         border-radius: 5px;
-        border: 1px solid var(--fw-line-2);
-        background: var(--fw-bg-2);
-        color: var(--fw-text-2);
+        border: 1px solid var(--yn-line-2);
+        background: var(--yn-bg-2);
+        color: var(--yn-text-2);
         cursor: pointer;
         transition: color 0.1s, background 0.1s, border-color 0.1s;
         white-space: nowrap;
 
-        &:hover { background: var(--fw-bg-3); color: var(--fw-text); }
+        &:hover { background: var(--yn-bg-3); color: var(--yn-text); }
 
         &--copied {
-            color: var(--fw-ok, var(--g-color-text-positive));
+            color: var(--yn-ok, var(--g-color-text-positive));
             border-color: rgba(110, 198, 140, 0.3);
             background: rgba(110, 198, 140, 0.08);
         }
@@ -120,23 +120,23 @@
 
 // BPF token colours.
 .pdump-bpf-tok {
-    &--kw   { color: var(--fw-accent); }
+    &--kw   { color: var(--yn-accent); }
     &--proto { color: #8ab4f8; }
     &--num  { color: #ce9178; }
     &--host { color: #9cdcfe; }
-    &--txt  { color: var(--fw-text-2); }
+    &--txt  { color: var(--yn-text-2); }
 }
 
-.pdump-bpf-empty { color: var(--fw-text-3); font-style: italic; }
+.pdump-bpf-empty { color: var(--yn-text-3); font-style: italic; }
 
 // BPF preview and suggestion chips in ConfigDialog.
 .pdump-bpf-preview {
     margin-top: 6px;
     padding: 6px 10px;
-    background: var(--fw-bg-2);
-    border: 1px solid var(--fw-line-2);
+    background: var(--yn-bg-2);
+    border: 1px solid var(--yn-line-2);
     border-radius: 5px;
-    font-family: var(--fw-font-mono);
+    font-family: var(--yn-font-mono);
     font-size: 12.5px;
     white-space: nowrap;
     overflow-x: auto;
@@ -151,19 +151,19 @@
 
 .pdump-bpf-suggestion {
     font-size: 11.5px;
-    font-family: var(--fw-font-mono);
+    font-family: var(--yn-font-mono);
     padding: 3px 8px;
     border-radius: 4px;
-    border: 1px solid var(--fw-line-2);
-    background: var(--fw-bg-2);
-    color: var(--fw-text-2);
+    border: 1px solid var(--yn-line-2);
+    background: var(--yn-bg-2);
+    color: var(--yn-text-2);
     cursor: pointer;
     white-space: nowrap;
     transition: background 0.08s, color 0.08s, border-color 0.08s;
 
     &:hover {
-        background: var(--fw-bg-3);
-        color: var(--fw-accent);
+        background: var(--yn-bg-3);
+        color: var(--yn-accent);
         border-color: rgba(255, 192, 97, 0.25);
     }
 }
@@ -174,7 +174,7 @@
 
 .pdump-bpf-recents__label {
     font-size: 11px;
-    color: var(--fw-muted, #8a8580);
+    color: var(--yn-muted, #8a8580);
     text-transform: uppercase;
     letter-spacing: 0.04em;
     margin-bottom: 4px;
@@ -186,9 +186,9 @@
     align-items: center;
     gap: 16px;
     padding: 8px 16px;
-    background: var(--fw-panel);
-    border: 1px solid var(--fw-line-2);
-    border-radius: var(--fw-r-md, 6px);
+    background: var(--yn-panel);
+    border: 1px solid var(--yn-line-2);
+    border-radius: var(--yn-r-md, 6px);
     margin-bottom: 8px;
     flex-shrink: 0;
 
@@ -227,9 +227,9 @@
         }
 
         &--none {
-            color: var(--fw-text-3);
-            background: var(--fw-bg-2);
-            border-color: var(--fw-line-2);
+            color: var(--yn-text-3);
+            background: var(--yn-bg-2);
+            border-color: var(--yn-line-2);
         }
     }
 
@@ -241,12 +241,12 @@
     }
 
     &__param-label {
-        color: var(--fw-text-3);
+        color: var(--yn-text-3);
     }
 
     &__param-value {
-        color: var(--fw-text-2);
-        font-family: var(--fw-font-mono);
+        color: var(--yn-text-2);
+        font-family: var(--yn-font-mono);
         font-size: 12px;
     }
 
@@ -291,8 +291,8 @@
     align-items: center;
     gap: 16px;
     padding: 0 14px;
-    border-left: 1px solid var(--fw-line-2);
-    border-right: 1px solid var(--fw-line-2);
+    border-left: 1px solid var(--yn-line-2);
+    border-right: 1px solid var(--yn-line-2);
 }
 
 .pdump-stat {
@@ -304,7 +304,7 @@
 
     &__label {
         font-size: 10px;
-        color: var(--fw-text-3);
+        color: var(--yn-text-3);
         text-transform: uppercase;
         letter-spacing: 0.08em;
         font-weight: 500;
@@ -313,11 +313,11 @@
     &__value {
         font-size: 13px;
         font-weight: 600;
-        font-family: var(--fw-font-mono);
-        color: var(--fw-text);
+        font-family: var(--yn-font-mono);
+        color: var(--yn-text);
         font-variant-numeric: tabular-nums;
 
-        &--muted { color: var(--fw-text-3); }
+        &--muted { color: var(--yn-text-3); }
     }
 }
 
@@ -328,7 +328,7 @@
     font-weight: 600;
     padding: 1px 6px;
     border-radius: 3px;
-    font-family: var(--fw-font-mono);
+    font-family: var(--yn-font-mono);
     letter-spacing: 0.03em;
 }
 
@@ -352,17 +352,17 @@
     background: rgba(76, 182, 133, 0.10);
 }
 
-// Drawer scroll fix — fw-drawer__body has flex:1 but needs min-height:0 to constrain it.
-.fw-drawer__body {
+// Drawer scroll fix — yn-drawer__body has flex:1 but needs min-height:0 to constrain it.
+.yn-drawer__body {
     min-height: 0;
 }
 
 // Collapsible packet-detail sections.
 .pdump-section {
-    border: 1px solid var(--fw-line-2);
+    border: 1px solid var(--yn-line-2);
     border-radius: 8px;
     margin-bottom: 10px;
-    background: var(--fw-bg-2);
+    background: var(--yn-bg-2);
 
     &__head {
         display: flex;
@@ -383,24 +383,24 @@
         width: 8px;
         height: 8px;
         border-radius: 2px;
-        background: var(--fw-text-3);
+        background: var(--yn-text-3);
         flex-shrink: 0;
     }
 
     &__title {
         font-size: 12.5px;
         font-weight: 600;
-        color: var(--fw-text);
+        color: var(--yn-text);
     }
 
     &__sub {
-        font-family: var(--fw-font-mono);
+        font-family: var(--yn-font-mono);
         font-size: 11.5px;
-        color: var(--fw-text-3);
+        color: var(--yn-text-3);
     }
 
     &__chevron {
-        color: var(--fw-text-3);
+        color: var(--yn-text-3);
         transition: transform 0.18s ease;
         display: flex;
         align-items: center;
@@ -415,18 +415,18 @@
         .pdump-section__chevron { transform: rotate(-90deg); }
     }
 
-    &--eth   .pdump-section__marker { background: var(--fw-text-3); }
+    &--eth   .pdump-section__marker { background: var(--yn-text-3); }
     &--vlan  .pdump-section__marker { background: #d9a154; }
     &--ipv4  .pdump-section__marker { background: var(--g-color-text-positive); }
     &--ipv6  .pdump-section__marker { background: var(--g-color-text-positive); }
     &--tcp   .pdump-section__marker { background: var(--g-color-text-info); }
     &--udp   .pdump-section__marker { background: var(--g-color-text-misc); }
     &--icmp  .pdump-section__marker { background: #c07a45; }
-    &--meta  .pdump-section__marker { background: var(--fw-accent); }
-    &--http  .pdump-section__marker { background: var(--fw-accent); }
+    &--meta  .pdump-section__marker { background: var(--yn-accent); }
+    &--http  .pdump-section__marker { background: var(--yn-accent); }
 }
 
-.pdump-page .fw-drawer {
+.pdump-page .yn-drawer {
     width: 640px;
 }
 
@@ -436,14 +436,14 @@
     grid-template-columns: 130px 1fr;
     gap: 14px;
     padding: 4px 0;
-    font-family: var(--fw-font-mono);
+    font-family: var(--yn-font-mono);
     font-size: 12px;
 }
 
-.pdump-kv-k { color: var(--fw-text-3); }
+.pdump-kv-k { color: var(--yn-text-3); }
 
 .pdump-kv-v {
-    color: var(--fw-text);
+    color: var(--yn-text);
     word-break: break-all;
 }
 
@@ -459,11 +459,11 @@
 
 // Colourised hex dump component.
 .pdump-hex-dump {
-    font-family: var(--fw-font-mono);
+    font-family: var(--yn-font-mono);
     font-size: 11.5px;
     line-height: 1.55;
     padding: 10px 0 4px;
-    color: var(--fw-text-3);
+    color: var(--yn-text-3);
     overflow-x: auto;
 }
 
@@ -472,50 +472,50 @@
     gap: 16px;
 }
 
-.pdump-hex-offset { color: var(--fw-text-3); }
-.pdump-hex-bytes  { color: var(--fw-text); letter-spacing: 0.02em; }
-.pdump-hex-ascii  { color: var(--fw-text-3); }
+.pdump-hex-offset { color: var(--yn-text-3); }
+.pdump-hex-bytes  { color: var(--yn-text); letter-spacing: 0.02em; }
+.pdump-hex-ascii  { color: var(--yn-text-3); }
 
 .pdump-hex-bytes {
-    .hl-eth     { color: var(--fw-text-2); background: rgba(255, 255, 255, 0.04); padding: 0 1px; border-radius: 1px; }
+    .hl-eth     { color: var(--yn-text-2); background: rgba(255, 255, 255, 0.04); padding: 0 1px; border-radius: 1px; }
     .hl-ip      { color: var(--g-color-text-positive); background: rgba(76, 182, 133, 0.12); padding: 0 1px; }
     .hl-l4      { color: var(--g-color-text-info); background: rgba(106, 158, 209, 0.14); padding: 0 1px; }
-    .hl-payload { color: var(--fw-accent); background: rgba(217, 161, 84, 0.12); padding: 0 1px; }
+    .hl-payload { color: var(--yn-accent); background: rgba(217, 161, 84, 0.12); padding: 0 1px; }
 }
 
 .pdump-drawer-timestamp {
-    font-family: var(--fw-font-mono);
+    font-family: var(--yn-font-mono);
     font-size: 12px;
-    color: var(--fw-text-3);
+    color: var(--yn-text-3);
     font-weight: 400;
     margin-left: 6px;
 }
 
 .pdump-drawer-empty {
-    color: var(--fw-text-3);
+    color: var(--yn-text-3);
     font-size: 13px;
     text-align: center;
     padding: 40px 0;
 }
 
 // Custom modal chrome.
-// CSS variables are declared here rather than inheriting from .fw-modal,
+// CSS variables are declared here rather than inheriting from .yn-modal,
 // because that class also carries width:640px which breaks full-viewport coverage.
 .pdump-modal-backdrop {
-    --fw-panel:       #1C1814;
-    --fw-bg-2:        #181410;
-    --fw-bg-3:        #221C16;
-    --fw-bg-hover:    #221C16;
-    --fw-line-2:      rgba(255, 200, 140, 0.12);
-    --fw-text:        #F2EEE8;
-    --fw-text-2:      #B8B0A4;
-    --fw-text-3:      #7E7468;
-    --fw-accent:      #FFC061;
-    --fw-accent-soft: rgba(255, 192, 97, 0.14);
-    --fw-r-sm:        4px;
-    --fw-r-md:        6px;
-    --fw-r-lg:        10px;
-    --fw-font-mono:   'JetBrains Mono', ui-monospace, monospace;
+    --yn-panel:       #1C1814;
+    --yn-bg-2:        #181410;
+    --yn-bg-3:        #221C16;
+    --yn-bg-hover:    #221C16;
+    --yn-line-2:      rgba(255, 200, 140, 0.12);
+    --yn-text:        #F2EEE8;
+    --yn-text-2:      #B8B0A4;
+    --yn-text-3:      #7E7468;
+    --yn-accent:      #FFC061;
+    --yn-accent-soft: rgba(255, 192, 97, 0.14);
+    --yn-r-sm:        4px;
+    --yn-r-md:        6px;
+    --yn-r-lg:        10px;
+    --yn-font-mono:   'JetBrains Mono', ui-monospace, monospace;
 
     position: fixed;
     inset: 0;
@@ -527,20 +527,20 @@
 }
 
 [data-theme="light"] .pdump-modal-backdrop {
-    --fw-panel:    #FFFFFF;
-    --fw-bg-2:     #F3EFE9;
-    --fw-bg-3:     #EBE6DE;
-    --fw-bg-hover: #EBE6DE;
-    --fw-line-2:   rgba(80, 60, 30, 0.16);
-    --fw-text:     #1A1410;
-    --fw-text-2:   #5C4E3A;
-    --fw-text-3:   #9C8B74;
+    --yn-panel:    #FFFFFF;
+    --yn-bg-2:     #F3EFE9;
+    --yn-bg-3:     #EBE6DE;
+    --yn-bg-hover: #EBE6DE;
+    --yn-line-2:   rgba(80, 60, 30, 0.16);
+    --yn-text:     #1A1410;
+    --yn-text-2:   #5C4E3A;
+    --yn-text-3:   #9C8B74;
 }
 
 .pdump-modal {
     max-width: calc(100vw - 40px);
-    background: var(--fw-panel);
-    border: 1px solid var(--fw-line-2);
+    background: var(--yn-panel);
+    border: 1px solid var(--yn-line-2);
     border-radius: 12px;
     box-shadow: 0 30px 80px rgba(0, 0, 0, 0.5);
     overflow: hidden;
@@ -550,13 +550,13 @@
         align-items: center;
         justify-content: space-between;
         padding: 16px 20px;
-        border-bottom: 1px solid var(--fw-line-2);
+        border-bottom: 1px solid var(--yn-line-2);
     }
 
     &__title {
         font-size: 15px;
         font-weight: 600;
-        color: var(--fw-text);
+        color: var(--yn-text);
     }
 
     &__body {
@@ -571,21 +571,21 @@
         justify-content: flex-end;
         gap: 10px;
         padding: 14px 20px;
-        border-top: 1px solid var(--fw-line-2);
+        border-top: 1px solid var(--yn-line-2);
         background: rgba(0, 0, 0, 0.2);
     }
 
     &__delete-text {
         margin: 0;
         font-size: 13px;
-        color: var(--fw-text);
+        color: var(--yn-text);
     }
 
     &__code {
-        font-family: var(--fw-font-mono);
+        font-family: var(--yn-font-mono);
         font-size: 12.5px;
-        color: var(--fw-accent);
-        background: var(--fw-bg-2);
+        color: var(--yn-accent);
+        background: var(--yn-bg-2);
         padding: 1px 5px;
         border-radius: 3px;
     }
@@ -629,7 +629,7 @@
 
     &__label {
         font-size: 12px;
-        color: var(--fw-text);
+        color: var(--yn-text);
         font-weight: 500;
     }
 
@@ -640,7 +640,7 @@
 
     &__hint {
         font-size: 11.5px;
-        color: var(--fw-text-3);
+        color: var(--yn-text-3);
     }
 }
 
@@ -655,22 +655,22 @@
     width: 100%;
     box-sizing: border-box;
     background: #0d0d10;
-    border: 1px solid var(--fw-line-2);
-    border-radius: var(--fw-r-md, 6px);
-    color: var(--fw-text);
+    border: 1px solid var(--yn-line-2);
+    border-radius: var(--yn-r-md, 6px);
+    color: var(--yn-text);
     font-size: 13px;
     padding: 0 12px;
     outline: none;
     transition: border-color 0.1s;
 
-    &:focus { border-color: var(--fw-accent); }
+    &:focus { border-color: var(--yn-accent); }
 
-    &--mono { font-family: var(--fw-font-mono); }
+    &--mono { font-family: var(--yn-font-mono); }
 }
 
 .pdump-bpf-input {
     height: 38px;
-    font-family: var(--fw-font-mono);
+    font-family: var(--yn-font-mono);
     font-size: 13px;
 }
 
@@ -685,8 +685,8 @@
     display: flex;
     align-items: flex-start;
     gap: 10px;
-    border: 1px solid var(--fw-line-2);
-    background: var(--fw-bg-2);
+    border: 1px solid var(--yn-line-2);
+    background: var(--yn-bg-2);
     border-radius: 6px;
     padding: 10px 12px;
     cursor: pointer;
@@ -696,14 +696,14 @@
     &:hover { border-color: rgba(255, 192, 97, 0.3); }
 
     &--checked {
-        border-color: var(--fw-accent);
-        background: var(--fw-accent-soft);
+        border-color: var(--yn-accent);
+        background: var(--yn-accent-soft);
     }
 
     &__box {
         width: 16px;
         height: 16px;
-        border: 1.5px solid var(--fw-line-2);
+        border: 1.5px solid var(--yn-line-2);
         border-radius: 3px;
         margin-top: 2px;
         display: grid;
@@ -712,8 +712,8 @@
         transition: all 0.12s;
 
         .pdump-mode-check--checked & {
-            background: var(--fw-accent);
-            border-color: var(--fw-accent);
+            background: var(--yn-accent);
+            border-color: var(--yn-accent);
         }
     }
 
@@ -728,26 +728,26 @@
     &__label {
         font-size: 12px;
         font-weight: 600;
-        font-family: var(--fw-font-mono);
+        font-family: var(--yn-font-mono);
         letter-spacing: 0.05em;
-        color: var(--fw-text);
+        color: var(--yn-text);
 
-        .pdump-mode-check--checked & { color: var(--fw-accent); }
+        .pdump-mode-check--checked & { color: var(--yn-accent); }
     }
 
     &__hint {
         font-size: 11px;
-        color: var(--fw-text-3);
+        color: var(--yn-text-3);
         margin-top: 2px;
     }
 }
 
-// Packet table overrides for fw-page chrome.
+// Packet table overrides for yn-page chrome.
 .packet-table {
     @include flex-column;
-    background: var(--fw-panel);
-    border: 1px solid var(--fw-line-2);
-    border-radius: var(--fw-r-lg, 10px);
+    background: var(--yn-panel);
+    border: 1px solid var(--yn-line-2);
+    border-radius: var(--yn-r-lg, 10px);
     overflow: hidden;
 
     &__container { height: 100%; }
@@ -757,8 +757,8 @@
         align-items: center;
         gap: 10px;
         padding: 0 12px;
-        border-bottom: 1px solid var(--fw-line-2);
-        background: var(--fw-panel);
+        border-bottom: 1px solid var(--yn-line-2);
+        background: var(--yn-panel);
         flex-shrink: 0;
     }
 
@@ -774,7 +774,7 @@
 
     &__stats {
         font-size: 12px;
-        color: var(--fw-text-3);
+        color: var(--yn-text-3);
         font-variant-numeric: tabular-nums;
         white-space: nowrap;
     }
@@ -791,7 +791,7 @@
 
         &--paused {
             background: rgba(217, 161, 84, 0.12);
-            color: var(--fw-accent);
+            color: var(--yn-accent);
             border-color: rgba(255, 192, 97, 0.22);
         }
     }
@@ -804,9 +804,9 @@
     }
 
     &__btn--active {
-        color: var(--fw-accent) !important;
+        color: var(--yn-accent) !important;
         border-color: rgba(255, 192, 97, 0.3) !important;
-        background: var(--fw-accent-soft) !important;
+        background: var(--yn-accent-soft) !important;
     }
 
     &__wrapper {
@@ -836,14 +836,14 @@
         align-items: center;
         justify-content: space-between;
         padding: 0 12px;
-        border-top: 1px solid var(--fw-line-2);
-        background: var(--fw-panel);
+        border-top: 1px solid var(--yn-line-2);
+        background: var(--yn-panel);
         flex-shrink: 0;
     }
 
     &__footer-text {
         font-size: 11px;
-        color: var(--fw-text-3);
+        color: var(--yn-text-3);
     }
 }
 
@@ -851,8 +851,8 @@
 .packet-table-header {
     @include flex-row($spacing-sm);
     padding: 0 $spacing-sm;
-    border-bottom: 1px solid var(--fw-line-2);
-    background: var(--fw-bg-2);
+    border-bottom: 1px solid var(--yn-line-2);
+    background: var(--yn-bg-2);
     font-weight: $font-weight-medium;
     box-sizing: border-box;
     flex-shrink: 0;

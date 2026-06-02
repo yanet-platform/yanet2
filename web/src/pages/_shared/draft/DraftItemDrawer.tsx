@@ -52,32 +52,32 @@ const DraftItemDrawer: React.FC<DraftItemDrawerProps> = ({
     return (
     <>
         <div
-            className={`fw-backdrop${open ? ' fw-backdrop--open' : ''}`}
+            className={`yn-backdrop${open ? ' yn-backdrop--open' : ''}`}
             onClick={onClose}
             aria-hidden="true"
         />
         <aside
-            className={`fw-drawer${open ? ' fw-drawer--open' : ''}`}
+            className={`yn-drawer${open ? ' yn-drawer--open' : ''}`}
             role="dialog"
             aria-modal="true"
             aria-label={ariaLabel}
         >
             {open && children !== null && (
                 <>
-                    <header className="fw-drawer__head">
-                        <h2 className="fw-drawer__title">
+                    <header className="yn-drawer__head">
+                        <h2 className="yn-drawer__title">
                             {titleVerb ?? 'Edit'} {titleSingular}
                             {!hideIndex && (
                                 <>
                                     {' '}
-                                    <span className="fw-drawer__rule-num">#{index + 1}</span>
+                                    <span className="yn-drawer__rule-num">#{index + 1}</span>
                                 </>
                             )}
                         </h2>
-                        <div className="fw-drawer__head-actions">
+                        <div className="yn-drawer__head-actions">
                             <button
                                 type="button"
-                                className="fw-icon-btn"
+                                className="yn-icon-btn"
                                 onClick={() => onJump(-1)}
                                 disabled={index === 0}
                                 title="Previous row (↑)"
@@ -86,7 +86,7 @@ const DraftItemDrawer: React.FC<DraftItemDrawerProps> = ({
                             </button>
                             <button
                                 type="button"
-                                className="fw-icon-btn"
+                                className="yn-icon-btn"
                                 onClick={() => onJump(1)}
                                 disabled={index === total - 1}
                                 title="Next row (↓)"
@@ -96,7 +96,7 @@ const DraftItemDrawer: React.FC<DraftItemDrawerProps> = ({
                             {onDelete && (
                                 <button
                                     type="button"
-                                    className="fw-icon-btn fw-icon-btn--danger"
+                                    className="yn-icon-btn yn-icon-btn--danger"
                                     onClick={onDelete}
                                     title="Delete row"
                                 >
@@ -105,7 +105,7 @@ const DraftItemDrawer: React.FC<DraftItemDrawerProps> = ({
                             )}
                             <button
                                 type="button"
-                                className="fw-icon-btn"
+                                className="yn-icon-btn"
                                 onClick={onClose}
                                 aria-label="Close drawer"
                             >
@@ -114,21 +114,21 @@ const DraftItemDrawer: React.FC<DraftItemDrawerProps> = ({
                         </div>
                     </header>
 
-                    <div className="fw-drawer__body">
+                    <div className="yn-drawer__body">
                         {children}
                     </div>
 
-                    <footer className="fw-drawer__foot">
-                        <span className="fw-drawer__foot-meta">
-                            Row <span className="fw-cell-mono fw-cell-strong">#{index + 1}</span> of {total}
+                    <footer className="yn-drawer__foot">
+                        <span className="yn-drawer__foot-meta">
+                            Row <span className="yn-cell-mono yn-cell-strong">#{index + 1}</span> of {total}
                         </span>
-                        <div className="fw-drawer__foot-actions">
-                            <button type="button" className="fw-btn fw-btn--ghost" onClick={onClose}>
+                        <div className="yn-drawer__foot-actions">
+                            <button type="button" className="yn-btn yn-btn--ghost" onClick={onClose}>
                                 Cancel
                             </button>
                             <button
                                 type="button"
-                                className="fw-btn fw-btn--primary"
+                                className="yn-btn yn-btn--primary"
                                 onClick={onApply}
                             >
                                 Apply

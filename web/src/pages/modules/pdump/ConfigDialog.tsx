@@ -122,12 +122,12 @@ export const ConfigDialog: React.FC<ConfigDialogProps> = ({
 
     const footer = (
         <>
-            <button type="button" className="fw-btn fw-btn--ghost" onClick={onClose} disabled={loading}>
+            <button type="button" className="yn-btn yn-btn--ghost" onClick={onClose} disabled={loading}>
                 Cancel
             </button>
             <button
                 type="button"
-                className="fw-btn fw-btn--primary"
+                className="yn-btn yn-btn--primary"
                 onClick={handleConfirm}
                 disabled={!valid || loading}
                 style={{ opacity: valid && !loading ? 1 : 0.5 }}

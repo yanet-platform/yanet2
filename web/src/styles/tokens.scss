@@ -1,56 +1,56 @@
 // Global design tokens — warm dark-brown palette.
 // Scoped to .g-root so they are available on every page,
-// not only those that mount a .fw-page element.
+// not only those that mount a .yn-page element.
 
 .g-root {
     // Dark-mode warm-brown palette (default — app is locked to dark).
-    --fw-page-bg:       #15110D;
-    --fw-panel:         #1C1814;
-    --fw-bg-2:          #181410;
-    --fw-bg-3:          #221C16;
-    --fw-bg-hover:      #221C16;
-    --fw-line:          rgba(255, 199, 140, 0.02);
-    --fw-line-2:        rgba(255, 200, 140, 0.12);
-    --fw-text:          #F2EEE8;
-    --fw-text-2:        #B8B0A4;
-    --fw-text-3:        #7E7468;
-    --fw-accent:        #FFC061;
-    --fw-accent-soft:   rgba(255, 192, 97, 0.14);
-    --fw-danger:        var(--g-color-text-danger);
-    --fw-warn:          var(--g-color-text-warning);
-    --fw-ok:            var(--g-color-text-positive);
-    --fw-r-sm:          4px;
-    --fw-r-md:          6px;
-    --fw-r-lg:          10px;
-    --fw-font-mono:     'JetBrains Mono', ui-monospace, monospace;
+    --yn-page-bg:       #15110D;
+    --yn-panel:         #1C1814;
+    --yn-bg-2:          #181410;
+    --yn-bg-3:          #221C16;
+    --yn-bg-hover:      #221C16;
+    --yn-line:          rgba(255, 199, 140, 0.02);
+    --yn-line-2:        rgba(255, 200, 140, 0.12);
+    --yn-text:          #F2EEE8;
+    --yn-text-2:        #B8B0A4;
+    --yn-text-3:        #7E7468;
+    --yn-accent:        #FFC061;
+    --yn-accent-soft:   rgba(255, 192, 97, 0.14);
+    --yn-danger:        var(--g-color-text-danger);
+    --yn-warn:          var(--g-color-text-warning);
+    --yn-ok:            var(--g-color-text-positive);
+    --yn-r-sm:          4px;
+    --yn-r-md:          6px;
+    --yn-r-lg:          10px;
+    --yn-font-mono:     'JetBrains Mono', ui-monospace, monospace;
 
     // Direction badge colors — recomputed against new warm accent.
-    --fw-dir-in:        var(--g-color-text-positive);
-    --fw-dir-in-bg:     rgba(110, 198, 140, 0.12);
-    --fw-dir-in-bd:     rgba(110, 198, 140, 0.22);
-    --fw-dir-out:       var(--fw-accent);
-    --fw-dir-out-bg:    var(--fw-accent-soft);
-    --fw-dir-out-bd:    rgba(255, 192, 97, 0.22);
-    --fw-dir-none:      var(--fw-text-3);
-    --fw-dir-none-bg:   rgba(126, 116, 104, 0.12);
-    --fw-dir-none-bd:   rgba(126, 116, 104, 0.22);
+    --yn-dir-in:        var(--g-color-text-positive);
+    --yn-dir-in-bg:     rgba(110, 198, 140, 0.12);
+    --yn-dir-in-bd:     rgba(110, 198, 140, 0.22);
+    --yn-dir-out:       var(--yn-accent);
+    --yn-dir-out-bg:    var(--yn-accent-soft);
+    --yn-dir-out-bd:    rgba(255, 192, 97, 0.22);
+    --yn-dir-none:      var(--yn-text-3);
+    --yn-dir-none-bg:   rgba(126, 116, 104, 0.12);
+    --yn-dir-none-bd:   rgba(126, 116, 104, 0.22);
 }
 
 // Light-mode overrides.
 [data-theme="light"] {
-    .fw-page,
-    .fw-drawer,
-    .fw-modal {
-        --fw-page-bg:  #FAF7F2;
-        --fw-panel:    #FFFFFF;
-        --fw-bg-2:     #F3EFE9;
-        --fw-bg-3:     #EBE6DE;
-        --fw-bg-hover: #EBE6DE;
-        --fw-line:     rgba(80, 60, 30, 0.08);
-        --fw-line-2:   rgba(80, 60, 30, 0.16);
-        --fw-text:     #1A1410;
-        --fw-text-2:   #5C4E3A;
-        --fw-text-3:   #9C8B74;
+    .yn-page,
+    .yn-drawer,
+    .yn-modal {
+        --yn-page-bg:  #FAF7F2;
+        --yn-panel:    #FFFFFF;
+        --yn-bg-2:     #F3EFE9;
+        --yn-bg-3:     #EBE6DE;
+        --yn-bg-hover: #EBE6DE;
+        --yn-line:     rgba(80, 60, 30, 0.08);
+        --yn-line-2:   rgba(80, 60, 30, 0.16);
+        --yn-text:     #1A1410;
+        --yn-text-2:   #5C4E3A;
+        --yn-text-3:   #9C8B74;
     }
 }
 
@@ -61,5 +61,5 @@
     flex: 1;
     min-width: 0;
     min-height: 100%;
-    background: var(--fw-page-bg);
+    background: var(--yn-page-bg);
 }

@@ -2,7 +2,7 @@
 @use '../../../styles/mixins' as *;
 
 // Route Operator page – ro-* class prefix.
-// All colors use existing --fw-* tokens or Gravity --g-color-* tokens.
+// All colors use existing --yn-* tokens or Gravity --g-color-* tokens.
 // No raw oklch/hex values from the prototype.
 
 // ─── Toolbar ─────────────────────────────────────────────────────────────────
@@ -14,7 +14,7 @@
     padding: 12px 20px;
     flex-wrap: wrap;
     flex-shrink: 0;
-    border-bottom: 1px solid var(--fw-line);
+    border-bottom: 1px solid var(--yn-line);
 }
 
 .ro-toolbar__right {
@@ -29,11 +29,11 @@
 .ro-seg {
     display: inline-flex;
     align-items: center;
-    background: var(--fw-bg-2);
-    border-radius: var(--fw-r-md);
+    background: var(--yn-bg-2);
+    border-radius: var(--yn-r-md);
     padding: 3px;
     gap: 2px;
-    box-shadow: inset 0 0 0 1px var(--fw-line-2);
+    box-shadow: inset 0 0 0 1px var(--yn-line-2);
     flex-shrink: 0;
 }
 
@@ -42,7 +42,7 @@
     padding: 0 12px;
     font-size: 12.5px;
     font-weight: 600;
-    color: var(--fw-text-2);
+    color: var(--yn-text-2);
     background: transparent;
     border: none;
     border-radius: 6px;
@@ -51,18 +51,18 @@
     white-space: nowrap;
 
     &:hover:not(.ro-seg__btn--active) {
-        background: var(--fw-bg-3);
-        color: var(--fw-text);
+        background: var(--yn-bg-3);
+        color: var(--yn-text);
     }
 
     &--active {
-        background: var(--fw-accent);
-        color: var(--fw-bg-3);
+        background: var(--yn-accent);
+        color: var(--yn-bg-3);
         font-weight: 600;
 
         &:hover {
-            background: var(--fw-accent);
-            color: var(--fw-bg-3);
+            background: var(--yn-accent);
+            color: var(--yn-bg-3);
         }
     }
 }
@@ -74,21 +74,21 @@
     align-items: center;
     gap: 7px;
     padding: 6px 12px;
-    border-radius: var(--fw-r-md);
+    border-radius: var(--yn-r-md);
     border: none;
-    box-shadow: inset 0 0 0 1px var(--fw-line-2);
-    background: var(--fw-bg-2);
+    box-shadow: inset 0 0 0 1px var(--yn-line-2);
+    background: var(--yn-bg-2);
     font-size: 12.5px;
     font-weight: 600;
-    color: var(--fw-text-2);
+    color: var(--yn-text-2);
     cursor: pointer;
     transition: background 0.12s, color 0.12s, box-shadow 0.12s;
     white-space: nowrap;
     flex-shrink: 0;
 
     &:hover {
-        background: var(--fw-bg-2);
-        color: var(--fw-text);
+        background: var(--yn-bg-2);
+        color: var(--yn-text);
     }
 
     &--best.ro-chip--active {
@@ -98,9 +98,9 @@
     }
 
     &--conflict.ro-chip--active {
-        background: var(--fw-accent-soft);
-        color: var(--fw-accent);
-        box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fw-accent) 30%, transparent);
+        background: var(--yn-accent-soft);
+        color: var(--yn-accent);
+        box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--yn-accent) 30%, transparent);
     }
 }
 
@@ -115,7 +115,7 @@
     font-size: 11px;
     font-weight: 700;
     opacity: 0.8;
-    font-family: var(--fw-font-mono);
+    font-family: var(--yn-font-mono);
     font-variant-numeric: tabular-nums;
 }
 
@@ -131,20 +131,20 @@
     margin: 0 auto;
     height: 40px;
     padding: 0 14px;
-    border-radius: var(--fw-r-md, 6px);
-    // .ro-search-btn sits in the page header, outside .fw-page where --fw-*
+    border-radius: var(--yn-r-md, 6px);
+    // .ro-search-btn sits in the page header, outside .yn-page where --yn-*
     // tokens are defined, so each property includes a hard-coded fallback that
     // matches the token value from draft-page.scss.
-    border: 1px solid color-mix(in srgb, var(--fw-text-3, #7E7468) 55%, transparent);
-    background: var(--fw-bg-3, oklch(0.212 0.01 56));
+    border: 1px solid color-mix(in srgb, var(--yn-text-3, #7E7468) 55%, transparent);
+    background: var(--yn-bg-3, oklch(0.212 0.01 56));
     font-size: 13.5px;
-    color: var(--fw-text-3, #7E7468);
+    color: var(--yn-text-3, #7E7468);
     cursor: text;
     transition: border-color 0.08s, color 0.08s;
 
     &:hover {
-        border-color: var(--fw-text-3, #7E7468);
-        color: var(--fw-text-2, #B8B0A4);
+        border-color: var(--yn-text-3, #7E7468);
+        color: var(--yn-text-2, #B8B0A4);
     }
 }
 
@@ -166,10 +166,10 @@
     font-size: 12.5px;
     font-weight: 600;
     letter-spacing: 0.02em;
-    color: var(--fw-text-3, #7e7468);
-    background: var(--fw-bg-2, #1a1410);
-    border: 1px solid var(--fw-line-2, rgba(120, 108, 96, 0.28));
-    font-family: var(--fw-font-mono);
+    color: var(--yn-text-3, #7e7468);
+    background: var(--yn-bg-2, #1a1410);
+    border: 1px solid var(--yn-line-2, rgba(120, 108, 96, 0.28));
+    font-family: var(--yn-font-mono);
     line-height: 1;
 }
 
@@ -177,10 +177,10 @@
 
 .ro-count {
     font-size: 12.5px;
-    color: var(--fw-text-3);
+    color: var(--yn-text-3);
     white-space: nowrap;
     flex-shrink: 0;
-    font-family: var(--fw-font-mono);
+    font-family: var(--yn-font-mono);
     font-variant-numeric: tabular-nums;
 }
 
@@ -201,9 +201,9 @@
 .ro-palette-card {
     width: 580px;
     max-width: calc(100vw - 40px);
-    background: var(--fw-panel);
-    border: 1px solid var(--fw-line-2);
-    border-radius: var(--fw-r-lg);
+    background: var(--yn-panel);
+    border: 1px solid var(--yn-line-2);
+    border-radius: var(--yn-r-lg);
     box-shadow: 0 24px 72px rgba(0, 0, 0, 0.65);
     overflow: hidden;
     animation: ro-palette-popin 0.14s ease-out both;
@@ -218,16 +218,16 @@
     display: flex;
     align-items: center;
     padding: 0 14px;
-    border-bottom: 1px solid var(--fw-line-2);
+    border-bottom: 1px solid var(--yn-line-2);
     height: 52px;
     gap: 10px;
 }
 
 .ro-palette-search-icon {
     font-size: 16px;
-    color: var(--fw-accent);
+    color: var(--yn-accent);
     flex-shrink: 0;
-    font-family: var(--fw-font-mono);
+    font-family: var(--yn-font-mono);
 }
 
 .ro-palette-input {
@@ -236,11 +236,11 @@
     border: none;
     outline: none;
     font-size: 15px;
-    color: var(--fw-text);
-    font-family: var(--fw-font-mono);
+    color: var(--yn-text);
+    font-family: var(--yn-font-mono);
 
     &::placeholder {
-        color: var(--fw-text-3);
+        color: var(--yn-text-3);
         font-family: inherit;
     }
 }
@@ -254,10 +254,10 @@
     border-radius: 4px;
     font-size: 10px;
     font-weight: 600;
-    color: var(--fw-text-3);
-    background: var(--fw-bg-2);
-    border: 1px solid var(--fw-line-2);
-    font-family: var(--fw-font-mono);
+    color: var(--yn-text-3);
+    background: var(--yn-bg-2);
+    border: 1px solid var(--yn-line-2);
+    font-family: var(--yn-font-mono);
 }
 
 .ro-palette-list {
@@ -272,7 +272,7 @@
     align-items: center;
     gap: 10px;
     padding: 9px 10px;
-    border-radius: var(--fw-r-md);
+    border-radius: var(--yn-r-md);
     border: none;
     background: none;
     cursor: pointer;
@@ -280,10 +280,10 @@
     transition: background 0.06s;
 
     &--active {
-        background: var(--fw-accent-soft);
+        background: var(--yn-accent-soft);
 
-        .ro-palette-item__icon { color: var(--fw-accent); }
-        .ro-palette-item__label { color: var(--fw-text); }
+        .ro-palette-item__icon { color: var(--yn-accent); }
+        .ro-palette-item__label { color: var(--yn-text); }
     }
 }
 
@@ -293,13 +293,13 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    border-radius: var(--fw-r-sm);
+    border-radius: var(--yn-r-sm);
     font-size: 13px;
-    color: var(--fw-text-3);
-    background: var(--fw-bg-2);
-    border: 1px solid var(--fw-line-2);
+    color: var(--yn-text-3);
+    background: var(--yn-bg-2);
+    border: 1px solid var(--yn-line-2);
     flex-shrink: 0;
-    font-family: var(--fw-font-mono);
+    font-family: var(--yn-font-mono);
 }
 
 .ro-palette-item__body {
@@ -312,7 +312,7 @@
 
 .ro-palette-item__label {
     font-size: 13px;
-    color: var(--fw-text-2);
+    color: var(--yn-text-2);
     font-weight: 500;
     white-space: nowrap;
     overflow: hidden;
@@ -321,7 +321,7 @@
 
 .ro-palette-item__sub {
     font-size: 11px;
-    color: var(--fw-text-3);
+    color: var(--yn-text-3);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -335,17 +335,17 @@
     padding: 0 5px;
     border-radius: 4px;
     font-size: 11px;
-    color: var(--fw-accent);
-    background: var(--fw-accent-soft);
+    color: var(--yn-accent);
+    background: var(--yn-accent-soft);
     border: 1px solid rgba(255, 192, 97, 0.3);
-    font-family: var(--fw-font-mono);
+    font-family: var(--yn-font-mono);
 }
 
 .ro-palette-empty {
     padding: 20px;
     text-align: center;
     font-size: 13px;
-    color: var(--fw-text-3);
+    color: var(--yn-text-3);
 }
 
 // ─── Lookup drawer ─────────────────────────────────────────────────────────────
@@ -359,7 +359,7 @@
     gap: 8px;
     align-items: stretch;
 
-    .fw-input { flex: 1; }
+    .yn-input { flex: 1; }
 }
 
 .ro-lookup-examples {
@@ -371,7 +371,7 @@
 
 .ro-lookup-examples__label {
     font-size: 11px;
-    color: var(--fw-text-3);
+    color: var(--yn-text-3);
     flex-shrink: 0;
 }
 
@@ -382,17 +382,17 @@
     padding: 0 10px;
     border-radius: 999px;
     font-size: 11.5px;
-    font-family: var(--fw-font-mono);
-    color: var(--fw-text-2);
-    background: var(--fw-bg-2);
-    border: 1px solid var(--fw-line-2);
+    font-family: var(--yn-font-mono);
+    color: var(--yn-text-2);
+    background: var(--yn-bg-2);
+    border: 1px solid var(--yn-line-2);
     cursor: pointer;
     transition: background 0.08s, color 0.08s;
     white-space: nowrap;
 
     &:hover {
-        background: var(--fw-accent-soft);
-        color: var(--fw-accent);
+        background: var(--yn-accent-soft);
+        color: var(--yn-accent);
         border-color: rgba(255, 192, 97, 0.3);
     }
 }
@@ -400,7 +400,7 @@
 .ro-lookup-loading {
     padding: 24px;
     text-align: center;
-    color: var(--fw-text-3);
+    color: var(--yn-text-3);
     font-size: 13px;
 }
 
@@ -415,31 +415,31 @@
     align-items: center;
     gap: 10px;
     padding: 10px 14px;
-    border-radius: var(--fw-r-md);
-    background: var(--fw-bg-2);
-    border: 1px solid var(--fw-line-2);
+    border-radius: var(--yn-r-md);
+    background: var(--yn-bg-2);
+    border: 1px solid var(--yn-line-2);
 }
 
 .ro-lookup-result__label {
     font-size: 10.5px;
     text-transform: uppercase;
     letter-spacing: 0.1em;
-    color: var(--fw-text-3);
+    color: var(--yn-text-3);
     font-weight: 600;
     flex-shrink: 0;
 }
 
 .ro-lookup-result__prefix {
-    font-family: var(--fw-font-mono);
+    font-family: var(--yn-font-mono);
     font-size: 14px;
     font-weight: 600;
-    color: var(--fw-text);
+    color: var(--yn-text);
     flex: 1;
 }
 
 .ro-lookup-show-in-table {
     font-size: 12px;
-    color: var(--fw-accent);
+    color: var(--yn-accent);
     background: none;
     border: none;
     cursor: pointer;
@@ -452,22 +452,22 @@
 
 .ro-lookup-reason {
     font-size: 12px;
-    color: var(--fw-text-3);
+    color: var(--yn-text-3);
     padding: 7px 12px;
-    background: var(--fw-accent-soft);
+    background: var(--yn-accent-soft);
     border: 1px solid rgba(255, 192, 97, 0.22);
-    border-radius: var(--fw-r-sm);
+    border-radius: var(--yn-r-sm);
 
     &::before {
         content: '★ ';
-        color: var(--fw-accent);
+        color: var(--yn-accent);
     }
 }
 
 .ro-lookup-table-wrap {
     overflow-x: auto;
-    border: 1px solid var(--fw-line-2);
-    border-radius: var(--fw-r-md);
+    border: 1px solid var(--yn-line-2);
+    border-radius: var(--yn-r-md);
 }
 
 // Column widths — shared by th and td via table-layout: fixed.
@@ -511,9 +511,9 @@ $_ro-col-med:      42px;
         font-weight: 700;
         letter-spacing: 0.07em;
         text-transform: uppercase;
-        color: var(--fw-text-3);
-        background: var(--fw-bg-2);
-        border-bottom: 1px solid var(--fw-line-2);
+        color: var(--yn-text-3);
+        background: var(--yn-bg-2);
+        border-bottom: 1px solid var(--yn-line-2);
         white-space: nowrap;
         // No overflow:hidden or text-overflow:ellipsis on headers — labels must
         // always be fully visible. Only body td values truncate.
@@ -521,12 +521,12 @@ $_ro-col-med:      42px;
     }
 
     td {
-        // Restore table-cell display in case a .fw-cell-mono class (display:inline-block)
+        // Restore table-cell display in case a .yn-cell-mono class (display:inline-block)
         // is applied directly to the <td> element — table-layout:fixed still sizes the
         // column from the <th> width, but we want content to flow normally inside.
         display: table-cell;
         padding: 8px 8px;
-        border-bottom: 1px solid var(--fw-line-2);
+        border-bottom: 1px solid var(--yn-line-2);
         vertical-align: middle;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -541,7 +541,7 @@ $_ro-col-med:      42px;
 }
 
 .ro-lookup-communities {
-    font-family: var(--fw-font-mono);
+    font-family: var(--yn-font-mono);
     font-size: 11px;
     white-space: nowrap;
     overflow: hidden;
@@ -552,7 +552,7 @@ $_ro-col-med:      42px;
 .ro-lookup-no-match {
     padding: 24px;
     text-align: center;
-    color: var(--fw-text-3);
+    color: var(--yn-text-3);
     font-size: 13px;
 }
 
@@ -563,54 +563,54 @@ $_ro-col-med:      42px;
     --ro-surface-bg: #1C1814;
 }
 
-// Header sits outside .fw-page so --fw-* tokens are not in scope there.
+// Header sits outside .yn-page so --yn-* tokens are not in scope there.
 // --ro-surface-bg is defined on .ro-layout and cascades to both subtrees.
 .ro-layout .page-layout__header {
     background: var(--ro-surface-bg);
 }
 
-// Two-class specificity beats the `.fw-page { background: var(--fw-page-bg) }` rule.
-.fw-page.ro-page {
+// Two-class specificity beats the `.yn-page { background: var(--yn-page-bg) }` rule.
+.yn-page.ro-page {
     background: var(--ro-surface-bg);
 }
 
-.ro-page .fw-tabs {
+.ro-page .yn-tabs {
     background: var(--ro-surface-bg);
     border-bottom: none;
 }
 
-.ro-page .fw-tab--active::after {
+.ro-page .yn-tab--active::after {
     height: 3px;
 }
 
-// ─── Route-page scoped overrides (.ro-page modifier on .fw-page) ─────────────
+// ─── Route-page scoped overrides (.ro-page modifier on .yn-page) ─────────────
 
 // Gold count badge on the active config tab, scoped to route only.
-// The shared rule in draft-page.scss scopes gold badges to .fw-tabs-row only
+// The shared rule in draft-page.scss scopes gold badges to .yn-tabs-row only
 // (neighbours). This rule targets the route page root without touching that.
-.ro-page .fw-tab--active .fw-tab__count {
-    color: var(--fw-accent);
-    background: var(--fw-accent-soft);
+.ro-page .yn-tab--active .yn-tab__count {
+    color: var(--yn-accent);
+    background: var(--yn-accent-soft);
 }
 
 // Table flush: no outer padding and no card chrome.
 // Keeps per-row separators and the header bottom border.
-.ro-page .fw-content {
+.ro-page .yn-content {
     padding: 0;
 }
 
-.ro-page .fw-tbl-wrap {
+.ro-page .yn-table-wrap {
     background: transparent;
     border: none;
     border-radius: 0;
 }
 
-.ro-page .fw-tbl-header-row {
+.ro-page .yn-table-header-row {
     background: transparent;
-    border-top: 1px solid var(--fw-line-2);
+    border-top: 1px solid var(--yn-line-2);
 }
 
-.ro-page .fw-vtbl-footer {
+.ro-page .yn-vtbl-footer {
     background: transparent;
 }
 

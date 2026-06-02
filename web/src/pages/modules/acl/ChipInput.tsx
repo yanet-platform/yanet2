@@ -73,46 +73,46 @@ const BulkPasteModal: React.FC<BulkPasteModalProps> = ({ existing, validate, onC
         <Dialog open onClose={onClose} size="m">
             <Dialog.Header caption="Bulk paste" />
             <Dialog.Body>
-                <p style={{ margin: '0 0 10px', fontSize: 12.5, color: 'var(--fw-text-3)' }}>
+                <p style={{ margin: '0 0 10px', fontSize: 12.5, color: 'var(--yn-text-3)' }}>
                     Whitespace, comma, or newline separated values.
                 </p>
                 <textarea
                     autoFocus
-                    className="fw-input fw-input--mono"
-                    style={{ width: '100%', height: 220, resize: 'vertical', fontFamily: 'var(--fw-font-mono)', fontSize: 12 }}
+                    className="yn-input yn-input--mono"
+                    style={{ width: '100%', height: 220, resize: 'vertical', fontFamily: 'var(--yn-font-mono)', fontSize: 12 }}
                     value={text}
                     placeholder={'10.0.0.0/24\n10.0.1.0/24, 10.0.2.0/24\n2001:db8::/32'}
                     onChange={e => setText(e.target.value)}
                     spellCheck={false}
                 />
                 <div style={{ display: 'flex', gap: 14, marginTop: 10, fontSize: 12.5, flexWrap: 'wrap', alignItems: 'center' }}>
-                    <span style={{ color: 'var(--fw-text-3)' }}>parsed:</span>
-                    <span style={{ fontFamily: 'var(--fw-font-mono)' }}>{parsed.length} total</span>
+                    <span style={{ color: 'var(--yn-text-3)' }}>parsed:</span>
+                    <span style={{ fontFamily: 'var(--yn-font-mono)' }}>{parsed.length} total</span>
                     {invalid.length > 0 && (
-                        <span style={{ color: 'var(--g-color-text-danger)', fontFamily: 'var(--fw-font-mono)' }}>
+                        <span style={{ color: 'var(--g-color-text-danger)', fontFamily: 'var(--yn-font-mono)' }}>
                             {invalid.length} invalid
                         </span>
                     )}
                     {dupCount > 0 && (
-                        <span style={{ color: 'var(--fw-text-3)', fontFamily: 'var(--fw-font-mono)' }}>
+                        <span style={{ color: 'var(--yn-text-3)', fontFamily: 'var(--yn-font-mono)' }}>
                             {dupCount} duplicate
                         </span>
                     )}
-                    <span style={{ fontFamily: 'var(--fw-font-mono)', color: 'var(--g-color-text-warning)' }}>
+                    <span style={{ fontFamily: 'var(--yn-font-mono)', color: 'var(--g-color-text-warning)' }}>
                         {validCount} will be {mode === 'replace' ? 'set' : 'added'}
                     </span>
                 </div>
                 <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
                     <button
                         type="button"
-                        className={`fw-btn ${mode === 'append' ? 'fw-btn--primary' : 'fw-btn--ghost'}`}
+                        className={`yn-btn ${mode === 'append' ? 'yn-btn--primary' : 'yn-btn--ghost'}`}
                         onClick={() => setMode('append')}
                     >
                         Append
                     </button>
                     <button
                         type="button"
-                        className={`fw-btn ${mode === 'replace' ? 'fw-btn--primary' : 'fw-btn--ghost'}`}
+                        className={`yn-btn ${mode === 'replace' ? 'yn-btn--primary' : 'yn-btn--ghost'}`}
                         onClick={() => setMode('replace')}
                     >
                         Replace all
@@ -158,7 +158,7 @@ const ListPopover: React.FC<ListPopoverProps> = ({ items, label, onClose }) => {
             <Dialog.Header caption={label} />
             <Dialog.Body>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10, minHeight: 0, maxHeight: '50vh' }}>
-                    <div style={{ fontSize: 12, color: 'var(--fw-text-3)', marginBottom: 4 }}>{stats}</div>
+                    <div style={{ fontSize: 12, color: 'var(--yn-text-3)', marginBottom: 4 }}>{stats}</div>
                     <TextInput
                         autoFocus
                         value={q}
@@ -170,8 +170,8 @@ const ListPopover: React.FC<ListPopoverProps> = ({ items, label, onClose }) => {
                     <div style={{
                         flex: 1,
                         overflow: 'auto',
-                        background: 'var(--fw-bg-2)',
-                        border: '1px solid var(--fw-line)',
+                        background: 'var(--yn-bg-2)',
+                        border: '1px solid var(--yn-line)',
                         borderRadius: 6,
                         padding: 8,
                         display: 'flex',
@@ -182,7 +182,7 @@ const ListPopover: React.FC<ListPopoverProps> = ({ items, label, onClose }) => {
                         maxHeight: 320,
                     }}>
                         {filtered.length === 0 ? (
-                            <span style={{ color: 'var(--fw-text-3)', fontSize: 12, padding: 12 }}>No matches.</span>
+                            <span style={{ color: 'var(--yn-text-3)', fontSize: 12, padding: 12 }}>No matches.</span>
                         ) : (
                             filtered.map((s, idx) => {
                                 const isV6 = s.includes(':');
@@ -196,10 +196,10 @@ const ListPopover: React.FC<ListPopoverProps> = ({ items, label, onClose }) => {
                         )}
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12 }}>
-                        <span style={{ color: 'var(--fw-text-3)' }}>
+                        <span style={{ color: 'var(--yn-text-3)' }}>
                             Showing {filtered.length} of {items.length}
                         </span>
-                        <button type="button" className="fw-btn fw-btn--ghost" style={{ fontSize: 12, padding: '2px 10px' }} onClick={copyAll}>
+                        <button type="button" className="yn-btn yn-btn--ghost" style={{ fontSize: 12, padding: '2px 10px' }} onClick={copyAll}>
                             Copy all
                         </button>
                     </div>
@@ -328,7 +328,7 @@ const ChipInput = React.forwardRef<ChipInputHandle, ChipInputProps>(({
                     </div>
                     <button
                         type="button"
-                        className="fw-btn fw-btn--ghost"
+                        className="yn-btn yn-btn--ghost"
                         style={{ fontSize: 11, padding: '2px 8px' }}
                         onClick={() => setBulkOpen(true)}
                     >
@@ -337,7 +337,7 @@ const ChipInput = React.forwardRef<ChipInputHandle, ChipInputProps>(({
                     {isBig && (
                         <button
                             type="button"
-                            className="fw-btn fw-btn--ghost"
+                            className="yn-btn yn-btn--ghost"
                             style={{ fontSize: 11, padding: '2px 8px' }}
                             onClick={() => setPopoverOpen(true)}
                             title="View full list"
@@ -347,21 +347,21 @@ const ChipInput = React.forwardRef<ChipInputHandle, ChipInputProps>(({
                     )}
                     <button
                         type="button"
-                        className="fw-btn fw-btn--ghost"
+                        className="yn-btn yn-btn--ghost"
                         style={{ fontSize: 11, padding: '2px 8px', color: 'var(--g-color-text-danger)' }}
                         onClick={() => onChange([])}
                         title="Remove all"
                     >
                         Clear
                     </button>
-                    <span style={{ fontSize: 11, color: 'var(--fw-text-3)', fontFamily: 'var(--fw-font-mono)' }}>
+                    <span style={{ fontSize: 11, color: 'var(--yn-text-3)', fontFamily: 'var(--yn-font-mono)' }}>
                         {value.length}
                     </span>
                 </div>
             )}
 
             <div
-                className={`fw-chip-input${isMany ? ' fw-chip-input--many' : ''}`}
+                className={`yn-chip-input${isMany ? ' yn-chip-input--many' : ''}`}
                 onClick={() => !filter && inputRef.current?.focus()}
             >
                 {wildcardLabel && value.length === 0 && (
@@ -371,9 +371,9 @@ const ChipInput = React.forwardRef<ChipInputHandle, ChipInputProps>(({
                     const v = value[idx];
                     const valid = validator(v);
                     return (
-                        <span key={idx} className={`fw-chip${valid ? '' : ' fw-chip--invalid'}`}>
+                        <span key={idx} className={`yn-chip${valid ? '' : ' yn-chip--invalid'}`}>
                             <span
-                                className="fw-chip__label"
+                                className="yn-chip__label"
                                 role="button"
                                 tabIndex={0}
                                 title="Click to edit"
@@ -398,7 +398,7 @@ const ChipInput = React.forwardRef<ChipInputHandle, ChipInputProps>(({
                             </span>
                             <button
                                 type="button"
-                                className="fw-chip__x"
+                                className="yn-chip__x"
                                 onClick={(e) => {
                                     e.stopPropagation();
                                     onChange(value.filter((_, j) => j !== idx));
@@ -411,7 +411,7 @@ const ChipInput = React.forwardRef<ChipInputHandle, ChipInputProps>(({
                     );
                 })}
                 {filter && filteredIndices.length === 0 && (
-                    <span style={{ fontSize: 12, color: 'var(--fw-text-3)', fontFamily: 'var(--fw-font-mono)' }}>
+                    <span style={{ fontSize: 12, color: 'var(--yn-text-3)', fontFamily: 'var(--yn-font-mono)' }}>
                         no matches
                     </span>
                 )}
@@ -425,7 +425,7 @@ const ChipInput = React.forwardRef<ChipInputHandle, ChipInputProps>(({
                         onKeyDown={handleKeyDown}
                         onBlur={handleBlur}
                         onPaste={handlePaste}
-                        className="fw-chip-input__raw"
+                        className="yn-chip-input__raw"
                     />
                 )}
             </div>
@@ -433,7 +433,7 @@ const ChipInput = React.forwardRef<ChipInputHandle, ChipInputProps>(({
             {!isMany && (
                 <button
                     type="button"
-                    className="fw-btn fw-btn--ghost"
+                    className="yn-btn yn-btn--ghost"
                     style={{ fontSize: 11, alignSelf: 'flex-start', padding: '2px 8px' }}
                     onClick={() => setBulkOpen(true)}
                 >

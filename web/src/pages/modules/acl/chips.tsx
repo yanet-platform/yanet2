@@ -189,21 +189,21 @@ const ChipListModal = <T,>({
     }, [onClose]);
 
     const modal = (
-        <div className="fw-modal-backdrop acl-chip-modal-backdrop" onClick={handleBackdropClick}>
+        <div className="yn-modal-backdrop acl-chip-modal-backdrop" onClick={handleBackdropClick}>
             <div
-                className="fw-modal"
+                className="yn-modal"
                 style={{ maxWidth: 560, maxHeight: '70vh', display: 'flex', flexDirection: 'column' }}
                 onClick={(e) => e.stopPropagation()}
             >
-                <header className="fw-modal__head" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 4 }}>
+                <header className="yn-modal__head" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 4 }}>
                     <div style={{ display: 'flex', width: '100%', alignItems: 'center', justifyContent: 'space-between' }}>
-                        <span className="fw-modal__title" style={{ textTransform: 'capitalize' }}>{label}</span>
-                        <button type="button" className="fw-icon-btn" onClick={onClose} aria-label="Close">✕</button>
+                        <span className="yn-modal__title" style={{ textTransform: 'capitalize' }}>{label}</span>
+                        <button type="button" className="yn-icon-btn" onClick={onClose} aria-label="Close">✕</button>
                     </div>
-                    <span className="fw-modal__meta">{statsText}</span>
+                    <span className="yn-modal__meta">{statsText}</span>
                 </header>
 
-                <div className="fw-modal__body" style={{ gap: 8 }}>
+                <div className="yn-modal__body" style={{ gap: 8 }}>
                     <input
                         ref={searchRef}
                         autoFocus
@@ -220,10 +220,10 @@ const ChipListModal = <T,>({
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'center',
-                            color: 'var(--fw-text-3)',
+                            color: 'var(--yn-text-3)',
                             fontSize: 13,
                             minHeight: 80,
-                            border: '1px solid var(--fw-line)',
+                            border: '1px solid var(--yn-line)',
                             borderRadius: 6,
                         }}>
                             No matches.
@@ -237,30 +237,30 @@ const ChipListModal = <T,>({
                             gap: 6,
                             padding: 8,
                             alignContent: 'flex-start',
-                            border: '1px solid var(--fw-line)',
+                            border: '1px solid var(--yn-line)',
                             borderRadius: 6,
-                            background: 'var(--fw-bg-2)',
+                            background: 'var(--yn-bg-2)',
                         }}>
                             {filtered.map((item, idx) => renderChip(item, idx))}
                         </div>
                     )}
                 </div>
 
-                <footer className="fw-modal__foot">
-                    <span className="fw-modal__foot-hint">
+                <footer className="yn-modal__foot">
+                    <span className="yn-modal__foot-hint">
                         Showing {filtered.length} of {items.length}
                     </span>
-                    <div className="fw-modal__foot-actions">
+                    <div className="yn-modal__foot-actions">
                         <button
                             type="button"
-                            className="fw-btn fw-btn--ghost fw-btn--sm"
+                            className="yn-btn yn-btn--ghost yn-btn--sm"
                             onClick={handleCopyAll}
                         >
                             Copy all
                         </button>
                         <button
                             type="button"
-                            className="fw-btn fw-btn--primary fw-btn--sm"
+                            className="yn-btn yn-btn--primary yn-btn--sm"
                             onClick={onClose}
                         >
                             Close

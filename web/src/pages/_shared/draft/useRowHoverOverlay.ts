@@ -5,7 +5,7 @@ export interface UseRowHoverOverlayResult<T> {
     hoveredRow: T | null;
     /** Virtualizer start offset (px) of the hovered row. */
     hoveredStart: number;
-    /** Top offset of the overlay relative to .fw-tbl-wrap. */
+    /** Top offset of the overlay relative to .yn-table-wrap. */
     overlayTopOffset: number;
     /** Call from the row's onMouseEnter/onMouseLeave. Pass null to begin the hide delay. */
     handleHoverChange: (row: T | null, start: number) => void;

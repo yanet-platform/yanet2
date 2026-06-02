@@ -325,10 +325,10 @@ const RoutePage: React.FC = () => {
 
     return (
         <PageLayout header={pageHeader} className="ro-layout">
-            <div className="fw-page ro-page" aria-busy={refreshing}>
+            <div className="yn-page ro-page" aria-busy={refreshing}>
                 {configs.length === 0 ? (
-                    <div className="fw-empty-page">
-                        <div className="fw-empty-page__message">No route configurations found.</div>
+                    <div className="yn-empty-page">
+                        <div className="yn-empty-page__message">No route configurations found.</div>
                         <Button view="action" onClick={() => setAddConfigOpen(true)}>Add Config</Button>
                     </div>
                 ) : (
@@ -396,11 +396,11 @@ const RoutePage: React.FC = () => {
                                 />
                             </div>
                             <span className="ro-count">
-                                <span style={{ color: 'var(--fw-text)', fontWeight: 600 }}>{visibleRows.length.toLocaleString()}</span>
+                                <span style={{ color: 'var(--yn-text)', fontWeight: 600 }}>{visibleRows.length.toLocaleString()}</span>
                                 {' / '}{allRows.length.toLocaleString()}
                             </span>
                         </div>
-                        <div className="fw-content">
+                        <div className="yn-content">
                             <RIBTable
                                 rows={visibleRows}
                                 selectedIds={currentSelected}

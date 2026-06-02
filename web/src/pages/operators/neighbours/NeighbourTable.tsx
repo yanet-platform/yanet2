@@ -189,7 +189,7 @@ const SortButton: React.FC<SortButtonProps> = ({ col, label, width, sortState, o
             }}
             onClick={() => onSort(col)}
         >
-            <span className="fw-th-text">{label}</span>
+            <span className="yn-th-text">{label}</span>
             <span style={{ fontSize: 10, opacity: isActive ? 1 : 0.35 }}>{arrow}</span>
         </button>
     );
@@ -286,9 +286,9 @@ export const NeighbourTable: React.FC<NeighbourTableProps> = ({
     const showTableActions = canEditTable || canDeleteTable;
 
     return (
-        <div className="fw-tbl-wrap">
-            <div className="fw-tbl-header-row">
-                <div ref={headerRef} className="fw-vtbl-header nb-vtbl-header" style={{ height: HEADER_HEIGHT }}>
+        <div className="yn-table-wrap">
+            <div className="yn-table-header-row">
+                <div ref={headerRef} className="yn-vtbl-header nb-vtbl-header" style={{ height: HEADER_HEIGHT }}>
                     <div style={{ display: 'flex', alignItems: 'center', minWidth: totalWidth, height: '100%', paddingLeft: 4, paddingRight: 4 }}>
                         <div
                             style={{ width: COL_CHECKBOX, minWidth: COL_CHECKBOX, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
@@ -303,7 +303,7 @@ export const NeighbourTable: React.FC<NeighbourTableProps> = ({
                             )}
                         </div>
                         <div style={{ width: COL_INDEX, minWidth: COL_INDEX, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                            <span className="fw-th-text">#</span>
+                            <span className="yn-th-text">#</span>
                         </div>
                         <SortButton col="next_hop" label="Next Hop" width={COL_NEXT_HOP} sortState={sortState} onSort={onSort} />
                         <SortButton col="link_addr" label="Neighbour MAC" width={COL_LINK_ADDR} sortState={sortState} onSort={onSort} />
@@ -320,10 +320,10 @@ export const NeighbourTable: React.FC<NeighbourTableProps> = ({
                     </div>
                 </div>
                 {showTableActions && (
-                    <div className="fw-tbl-actions">
+                    <div className="yn-table-actions">
                         <button
                             type="button"
-                            className="fw-row-edit-btn fw-row-edit-btn--visible"
+                            className="yn-row-edit-btn yn-row-edit-btn--visible"
                             title="Edit table"
                             aria-label="Edit table settings"
                             disabled={!canEditTable}
@@ -333,7 +333,7 @@ export const NeighbourTable: React.FC<NeighbourTableProps> = ({
                         </button>
                         <button
                             type="button"
-                            className="fw-row-edit-btn fw-row-edit-btn--visible fw-row-edit-btn--danger"
+                            className="yn-row-edit-btn yn-row-edit-btn--visible yn-row-edit-btn--danger"
                             title={canDeleteTable ? 'Delete table' : 'Cannot remove built-in table'}
                             aria-label="Delete table"
                             disabled={!canDeleteTable}
@@ -347,12 +347,12 @@ export const NeighbourTable: React.FC<NeighbourTableProps> = ({
 
             <div
                 ref={setScrollRef}
-                className="fw-vtbl-body"
+                className="yn-vtbl-body"
                 style={bodyHeight > 0 ? { flex: '0 0 auto', height: bodyHeight } : undefined}
                 onScroll={handleBodyScroll}
             >
                 {rows.length === 0 ? (
-                    <div className="fw-table-empty">{emptyMessage}</div>
+                    <div className="yn-table-empty">{emptyMessage}</div>
                 ) : (
                     <div style={{ height: rowVirtualizer.getTotalSize(), minWidth: totalWidth, position: 'relative' }}>
                         {virtualRows.map((virtualRow) => {
@@ -361,11 +361,11 @@ export const NeighbourTable: React.FC<NeighbourTableProps> = ({
                             const id = getNeighbourId(neighbour);
                             const isSelected = selectedIds.has(id);
                             const isActive = activeRowId === id || editingRowId === id;
-                            const rowBg = (isSelected || isActive) ? 'var(--fw-accent-soft)' : 'transparent';
+                            const rowBg = (isSelected || isActive) ? 'var(--yn-accent-soft)' : 'transparent';
                             return (
                                 <div
                                     key={id || virtualRow.index}
-                                    className={`fw-vrow${isActive ? ' fw-vrow--active' : ''}${isSelected ? ' fw-vrow--selected' : ''}`}
+                                    className={`yn-vrow${isActive ? ' yn-vrow--active' : ''}${isSelected ? ' yn-vrow--selected' : ''}`}
                                     data-row-id={id}
                                     onMouseEnter={() => handleHoverChange(neighbour, virtualRow.start)}
                                     onMouseLeave={() => handleHoverChange(null, 0)}
@@ -379,7 +379,7 @@ export const NeighbourTable: React.FC<NeighbourTableProps> = ({
                                         width: '100%',
                                         display: 'flex',
                                         alignItems: 'center',
-                                        borderBottom: '1px solid var(--fw-line)',
+                                        borderBottom: '1px solid var(--yn-line)',
                                         backgroundColor: rowBg,
                                         paddingLeft: 4,
                                         cursor: 'pointer',
@@ -401,20 +401,20 @@ export const NeighbourTable: React.FC<NeighbourTableProps> = ({
                                             />
                                         )}
                                     </div>
-                                    <div style={{ width: COL_INDEX, minWidth: COL_INDEX, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--fw-text-3)', fontVariantNumeric: 'tabular-nums' }}>
+                                    <div style={{ width: COL_INDEX, minWidth: COL_INDEX, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--yn-text-3)', fontVariantNumeric: 'tabular-nums' }}>
                                         <span style={{ fontSize: 12 }}>{virtualRow.index + 1}</span>
                                     </div>
                                     <div style={{ width: COL_NEXT_HOP, minWidth: COL_NEXT_HOP, flexShrink: 0, paddingRight: 8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                        <span className="fw-cell-mono fw-cell-strong">{ipAddressToString(neighbour.next_hop) || '-'}</span>
+                                        <span className="yn-cell-mono yn-cell-strong">{ipAddressToString(neighbour.next_hop) || '-'}</span>
                                     </div>
                                     <div style={{ width: COL_LINK_ADDR, minWidth: COL_LINK_ADDR, flexShrink: 0, paddingRight: 8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                        <span className="fw-cell-mono fw-cell-muted">{neighbour.link_addr?.addr || '-'}</span>
+                                        <span className="yn-cell-mono yn-cell-muted">{neighbour.link_addr?.addr || '-'}</span>
                                     </div>
                                     <div style={{ width: COL_HW_ADDR, minWidth: COL_HW_ADDR, flexShrink: 0, paddingRight: 8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                        <span className="fw-cell-mono fw-cell-muted">{neighbour.hardware_addr?.addr || '-'}</span>
+                                        <span className="yn-cell-mono yn-cell-muted">{neighbour.hardware_addr?.addr || '-'}</span>
                                     </div>
                                     <div style={{ width: COL_DEVICE, minWidth: COL_DEVICE, flexShrink: 0, paddingRight: 8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                        <span className="fw-cell-muted">{neighbour.device || '-'}</span>
+                                        <span className="yn-cell-muted">{neighbour.device || '-'}</span>
                                     </div>
                                     <div style={{ width: COL_STATE, minWidth: COL_STATE, flexShrink: 0, paddingRight: 8, overflow: 'hidden', whiteSpace: 'nowrap' }}>
                                         <StateBadge state={neighbour.state} withTooltip />
@@ -428,10 +428,10 @@ export const NeighbourTable: React.FC<NeighbourTableProps> = ({
                                         />
                                     </div>
                                     <div style={{ width: COL_PRIORITY, minWidth: COL_PRIORITY, flexShrink: 0, paddingRight: 8 }}>
-                                        <span className="fw-cell-muted">{neighbour.priority ?? '-'}</span>
+                                        <span className="yn-cell-muted">{neighbour.priority ?? '-'}</span>
                                     </div>
                                     <div style={{ width: COL_UPDATED, minWidth: COL_UPDATED, flexShrink: 0, paddingRight: 8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                        <span className="fw-cell-muted">{formatUnixSeconds(neighbour.updated_at)}</span>
+                                        <span className="yn-cell-muted">{formatUnixSeconds(neighbour.updated_at)}</span>
                                     </div>
                                 </div>
                             );
@@ -440,8 +440,8 @@ export const NeighbourTable: React.FC<NeighbourTableProps> = ({
                 )}
             </div>
 
-            <div className="fw-vtbl-footer" style={{ height: FOOTER_HEIGHT }}>
-                <span className="fw-toolbar__count">{footerText}</span>
+            <div className="yn-vtbl-footer" style={{ height: FOOTER_HEIGHT }}>
+                <span className="yn-toolbar__count">{footerText}</span>
                 {readOnlyNote}
             </div>
 

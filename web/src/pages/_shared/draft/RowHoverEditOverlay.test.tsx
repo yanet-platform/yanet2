@@ -36,8 +36,8 @@ describe('RowHoverEditOverlay', () => {
                 onMouseLeave={() => {}}
             />,
         );
-        expect(container.querySelector('.fw-row-action-slot--wide')).toBeNull();
-        expect(container.querySelector('.fw-row-action-slot')).not.toBeNull();
+        expect(container.querySelector('.yn-row-action-slot--wide')).toBeNull();
+        expect(container.querySelector('.yn-row-action-slot')).not.toBeNull();
     });
 
     it('renders two buttons when onDelete is provided', () => {
@@ -74,7 +74,7 @@ describe('RowHoverEditOverlay', () => {
                 onMouseLeave={() => {}}
             />,
         );
-        const dangerBtn = document.querySelector('.fw-row-edit-btn--danger') as HTMLElement;
+        const dangerBtn = document.querySelector('.yn-row-edit-btn--danger') as HTMLElement;
         expect(dangerBtn).not.toBeNull();
         expect(dangerBtn.getAttribute('aria-label')).toBe('Delete row 1');
     });
@@ -94,7 +94,7 @@ describe('RowHoverEditOverlay', () => {
                 onMouseLeave={() => {}}
             />,
         );
-        expect(container.querySelector('.fw-row-action-slot--wide')).not.toBeNull();
+        expect(container.querySelector('.yn-row-action-slot--wide')).not.toBeNull();
     });
 
     it('fires onEdit when the edit button is clicked', () => {
@@ -146,7 +146,7 @@ describe('RowHoverEditOverlay', () => {
                 onMouseLeave={() => {}}
             />,
         );
-        const slot = container.querySelector('.fw-row-action-slot') as HTMLElement;
+        const slot = container.querySelector('.yn-row-action-slot') as HTMLElement;
         expect(slot.style.top).toBe('128px');
         expect(slot.style.height).toBe('48px');
     });

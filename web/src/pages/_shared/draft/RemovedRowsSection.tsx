@@ -72,13 +72,13 @@ const RemovedRowsSection = <T extends { id: string }>({
             {rows.map((r) => (
                 <div
                     key={r.id}
-                    className="fw-vrow"
+                    className="yn-vrow"
                     style={{
                         display: 'flex',
                         alignItems: 'center',
                         height: rowHeight,
                         minWidth: totalWidth,
-                        borderBottom: '1px solid var(--fw-line)',
+                        borderBottom: '1px solid var(--yn-line)',
                         paddingLeft: 4,
                         opacity: 0.55,
                         background: 'rgba(224, 122, 110, 0.04)',
@@ -87,17 +87,17 @@ const RemovedRowsSection = <T extends { id: string }>({
                 >
                     <div style={leadingCellStyle(leadingWidths.checkbox)} />
                     <div style={leadingCellStyle(leadingWidths.handle)}>
-                        <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--fw-danger)', fontSize: 11 }}>✕</span>
+                        <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--yn-danger)', fontSize: 11 }}>✕</span>
                     </div>
                     <div style={leadingCellStyle(leadingWidths.index)}>
-                        <span style={{ fontSize: 12, color: 'var(--fw-text-3)' }}>—</span>
+                        <span style={{ fontSize: 12, color: 'var(--yn-text-3)' }}>—</span>
                     </div>
                     <div style={leadingCellStyle(leadingWidths.status)}>
-                        <span className="fw-status-dot fw-status-dot--removed" title="Removed in draft" />
+                        <span className="yn-status-dot yn-status-dot--removed" title="Removed in draft" />
                     </div>
                     {columns.map((col, idx) => (
                         <div key={idx} style={dataCellStyle(col.width)}>
-                            <span style={{ textDecoration: 'line-through', textDecorationColor: 'var(--fw-danger)' }}>
+                            <span style={{ textDecoration: 'line-through', textDecorationColor: 'var(--yn-danger)' }}>
                                 {col.render(r)}
                             </span>
                         </div>
@@ -105,7 +105,7 @@ const RemovedRowsSection = <T extends { id: string }>({
                     <div style={{ marginLeft: 'auto', paddingRight: 8 }}>
                         <button
                             type="button"
-                            className="fw-row-edit-btn fw-row-edit-btn--visible"
+                            className="yn-row-edit-btn yn-row-edit-btn--visible"
                             onClick={() => onRestore(r)}
                             title="Restore row"
                             aria-label="Restore removed row"

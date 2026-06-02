@@ -625,17 +625,17 @@
 }
 
 .fws-statcard {
-    border: 1px solid var(--fw-line-2, rgba(255, 200, 140, .12));
+    border: 1px solid var(--yn-line-2, rgba(255, 200, 140, .12));
     border-radius: 10px;
     padding: 16px 18px;
-    background: var(--fw-bg-2, #181410);
+    background: var(--yn-bg-2, #181410);
     min-width: 0;
 
     &__lbl {
         font-size: 10.5px;
         letter-spacing: .12em;
         text-transform: uppercase;
-        color: var(--fw-text-3, #7e7468);
+        color: var(--yn-text-3, #7e7468);
         font-weight: 600;
     }
 
@@ -643,7 +643,7 @@
         font-size: 24px;
         font-weight: 600;
         margin-top: 8px;
-        color: var(--fw-text, #f2eee8);
+        color: var(--yn-text, #f2eee8);
         font-family: 'JetBrains Mono', ui-monospace, monospace;
         letter-spacing: -.01em;
         white-space: nowrap;
@@ -658,14 +658,14 @@
 
     &__meta {
         font-size: 12px;
-        color: var(--fw-text-3, #7e7468);
+        color: var(--yn-text-3, #7e7468);
         margin-top: 4px;
     }
 }
 
 .fws-link-note {
     font-size: 12.5px;
-    color: var(--fw-text-3, #7e7468);
+    color: var(--yn-text-3, #7e7468);
     margin: 14px 0 0;
     line-height: 1.55;
 
@@ -703,23 +703,23 @@
 
     &::-webkit-scrollbar { display: none; }
 
-    .fw-tab {
+    .yn-tab {
         background: transparent;
         border-radius: 0;
-        color: var(--fw-text-2);
+        color: var(--yn-text-2);
         box-shadow: none;
     }
 
-    .fw-tab--active {
+    .yn-tab--active {
         background: transparent;
-        color: var(--fw-text);
+        color: var(--yn-text);
         box-shadow: none;
     }
 
-    .fw-tab:hover { background: transparent; }
+    .yn-tab:hover { background: transparent; }
 
-    .fw-tab::before,
-    .fw-tab--active::before { display: none; }
+    .yn-tab::before,
+    .yn-tab--active::before { display: none; }
 }
 
 .fwstate-subtab-header__actions {
@@ -743,7 +743,7 @@
     min-height: 36px;
     padding-bottom: 9px;
     margin-bottom: 12px;
-    border-bottom: 1px solid var(--fw-line-2);
+    border-bottom: 1px solid var(--yn-line-2);
 }
 
 .fwstate-subtab-frame__actions {
@@ -787,9 +787,9 @@
     flex-direction: column;
     gap: 10px;
     padding: 12px;
-    border: 1px solid color-mix(in srgb, var(--fw-line-2) 75%, transparent);
+    border: 1px solid color-mix(in srgb, var(--yn-line-2) 75%, transparent);
     border-radius: 10px;
-    background: color-mix(in srgb, var(--fw-panel) 86%, var(--fw-bg-2) 14%);
+    background: color-mix(in srgb, var(--yn-panel) 86%, var(--yn-bg-2) 14%);
 }
 
 .fwstate-config-panel {
@@ -801,14 +801,14 @@
 
 .fwstate-config-section__head {
     padding: 0 0 8px;
-    border-bottom: 1px solid color-mix(in srgb, var(--fw-line-2) 72%, transparent);
+    border-bottom: 1px solid color-mix(in srgb, var(--yn-line-2) 72%, transparent);
 }
 
 .fwstate-timeout-unit {
     line-height: 1;
     display: inline-flex;
     align-items: center;
-    color: var(--fw-text-3);
+    color: var(--yn-text-3);
     font-size: 12px;
     letter-spacing: .02em;
     margin-inline-end: 1px;
@@ -816,9 +816,9 @@
 }
 
 .fwstate-panel {
-    border: 1px solid var(--fw-line-2);
+    border: 1px solid var(--yn-line-2);
     border-radius: 8px;
-    background: var(--fw-panel);
+    background: var(--yn-panel);
     padding: 14px;
 }
 
@@ -881,10 +881,10 @@
 }
 
 .fwstate-table-shell {
-    border: 1px solid var(--fw-line-2);
+    border: 1px solid var(--yn-line-2);
     border-radius: 8px;
     overflow: hidden;
-    background: color-mix(in srgb, var(--fw-panel) 70%, var(--fw-bg-2) 30%);
+    background: color-mix(in srgb, var(--yn-panel) 70%, var(--yn-bg-2) 30%);
 
     .g-table,
     table { width: 100%; min-width: 100%; }
@@ -896,20 +896,20 @@
     .g-table__th {
         font-size: 10.5px;
         font-weight: 500;
-        color: var(--fw-text-3);
+        color: var(--yn-text-3);
         letter-spacing: .06em;
         text-transform: uppercase;
         line-height: 1.35;
-        border-bottom: 1px solid var(--fw-line-2);
+        border-bottom: 1px solid var(--yn-line-2);
     }
 
     .g-table td,
     .g-table__td,
     table td {
         font-size: 12.5px;
-        color: var(--fw-text-2);
+        color: var(--yn-text-2);
         line-height: 1.35;
-        border-bottom: 1px solid var(--fw-line);
+        border-bottom: 1px solid var(--yn-line);
         padding-top: 8px;
         padding-bottom: 8px;
     }
@@ -924,10 +924,10 @@
 .fwstate-acl-link-btn {
     --g-button-border-width: 0px;
     --g-button-border-color: transparent;
-    --g-button-text-color: color-mix(in srgb, var(--fw-text-2) 88%, var(--fw-accent) 12%);
-    --g-button-background-color: color-mix(in srgb, var(--fw-bg-2) 86%, var(--fw-panel) 14%);
-    --g-button-background-color-hover: color-mix(in srgb, var(--fw-bg-2) 76%, var(--fw-panel) 24%);
-    border: 1px solid color-mix(in srgb, var(--fw-accent) 55%, transparent);
+    --g-button-text-color: color-mix(in srgb, var(--yn-text-2) 88%, var(--yn-accent) 12%);
+    --g-button-background-color: color-mix(in srgb, var(--yn-bg-2) 86%, var(--yn-panel) 14%);
+    --g-button-background-color-hover: color-mix(in srgb, var(--yn-bg-2) 76%, var(--yn-panel) 24%);
+    border: 1px solid color-mix(in srgb, var(--yn-accent) 55%, transparent);
     border-radius: var(--g-button-border-radius, var(--g-border-radius-s));
     position: relative;
     transition: color .15s ease;
@@ -936,25 +936,25 @@
     &::before { border-width: 0; }
 
     &:hover {
-        --g-button-text-color: color-mix(in srgb, var(--fw-text) 92%, var(--fw-accent) 8%);
-        border-color: color-mix(in srgb, var(--fw-accent) 75%, transparent);
+        --g-button-text-color: color-mix(in srgb, var(--yn-text) 92%, var(--yn-accent) 8%);
+        border-color: color-mix(in srgb, var(--yn-accent) 75%, transparent);
     }
 
     &:focus-visible {
         outline: none;
-        box-shadow: 0 0 0 1px color-mix(in srgb, var(--fw-accent) 55%, transparent);
+        box-shadow: 0 0 0 1px color-mix(in srgb, var(--yn-accent) 55%, transparent);
     }
 
-    &.g-button:focus-visible::before { border-color: var(--fw-accent); }
+    &.g-button:focus-visible::before { border-color: var(--yn-accent); }
 }
 
 .fwstate-stats-compare {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    border: 1px solid var(--fw-line-2);
+    border: 1px solid var(--yn-line-2);
     border-radius: 8px;
     overflow: hidden;
-    background: color-mix(in srgb, var(--fw-bg-2) 82%, var(--fw-panel) 18%);
+    background: color-mix(in srgb, var(--yn-bg-2) 82%, var(--yn-panel) 18%);
 
     > :nth-last-child(-n + 3) { border-bottom: 0; }
 }
@@ -965,17 +965,17 @@
     min-height: 38px;
     padding: 10px 12px;
     min-width: 0;
-    border-bottom: 1px solid var(--fw-line-2);
+    border-bottom: 1px solid var(--yn-line-2);
     font-size: 12px;
     line-height: 1.35;
 }
 
 .fwstate-stats-compare__head {
-    background: color-mix(in srgb, var(--fw-bg-2) 70%, var(--fw-panel) 30%);
+    background: color-mix(in srgb, var(--yn-bg-2) 70%, var(--yn-panel) 30%);
     text-transform: uppercase;
     letter-spacing: .06em;
     font-weight: 500;
-    color: var(--fw-text-3);
+    color: var(--yn-text-3);
 
     &--metric {
         display: flex;
@@ -992,7 +992,7 @@
     width: 15px;
     height: 15px;
     border-radius: 999px;
-    color: var(--fw-text-3);
+    color: var(--yn-text-3);
     cursor: help;
     flex: 0 0 auto;
 
@@ -1004,30 +1004,30 @@
 .fwstate-stats-compare__value {
     overflow-wrap: anywhere;
     word-break: break-word;
-    color: var(--fw-text-2);
+    color: var(--yn-text-2);
 }
 
 .fwstate-stats-compare__metric {
     font-size: 13px;
-    color: var(--fw-text-2);
+    color: var(--yn-text-2);
 }
 
 .fwstate-stats-compare__value {
     font-size: 14px;
-    font-family: var(--fw-font-mono);
+    font-family: var(--yn-font-mono);
     font-variant-numeric: tabular-nums;
-    color: var(--fw-text);
+    color: var(--yn-text);
 }
 
 .fwstate-mono {
-    font-family: var(--fw-font-mono);
+    font-family: var(--yn-font-mono);
     font-size: 12px;
     font-variant-numeric: tabular-nums;
-    color: var(--fw-text-2);
+    color: var(--yn-text-2);
 }
 
 .fwstate-table-cell {
-    color: var(--fw-text-2);
+    color: var(--yn-text-2);
     font-size: 12px;
     line-height: 1.35;
 }

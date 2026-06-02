@@ -3,12 +3,12 @@
     align-items: center;
     padding: 1px 7px;
     border-radius: 4px;
-    font-family: var(--fw-font-mono);
+    font-family: var(--yn-font-mono);
     font-size: 12px;
     font-weight: 500;
     white-space: nowrap;
-    background: var(--fw-bg-2);
-    border: 1px solid var(--fw-line-2);
+    background: var(--yn-bg-2);
+    border: 1px solid var(--yn-line-2);
     flex-shrink: 0;
 }
 
@@ -53,7 +53,7 @@
 }
 
 .shared-chip--proto-dim {
-    background: var(--fw-bg-2);
-    color: var(--fw-text-3);
-    border-color: var(--fw-line-2);
+    background: var(--yn-bg-2);
+    color: var(--yn-text-3);
+    border-color: var(--yn-line-2);
 }

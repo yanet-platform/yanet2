@@ -298,15 +298,15 @@ const NeighboursPage: React.FC = () => {
 
     return (
         <PageLayout header={pageHeader}>
-            <div className="fw-page">
+            <div className="yn-page">
                 {tables.length === 0 ? (
-                    <div className="fw-empty-page">
-                        <div className="fw-empty-page__message">No neighbour tables found.</div>
+                    <div className="yn-empty-page">
+                        <div className="yn-empty-page__message">No neighbour tables found.</div>
                         <Button view="action" onClick={() => setCreateTableOpen(true)}>Create table</Button>
                     </div>
                 ) : (
                     <>
-                        <div className="fw-tabs-row">
+                        <div className="yn-tabs-row">
                             <ConfigTabStrip
                                 configs={displayConfigs}
                                 activeConfig={activeDisplayConfig}
@@ -329,7 +329,7 @@ const NeighboursPage: React.FC = () => {
                                         <Layers
                                             width={13}
                                             height={13}
-                                            style={{ color: 'var(--fw-text-3)', flexShrink: 0 }}
+                                            style={{ color: 'var(--yn-text-3)', flexShrink: 0 }}
                                         />
                                     ) : undefined
                                 }
@@ -349,7 +349,7 @@ const NeighboursPage: React.FC = () => {
                                 </button>
                             </div>
                         </div>
-                        <div className="fw-content">
+                        <div className="yn-content">
                             <NeighbourTable
                                 rows={visibleRows}
                                 totalCount={allRows.length}

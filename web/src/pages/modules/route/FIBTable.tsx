@@ -23,10 +23,10 @@ const COLUMN_HEADERS: TableColumnHeader[] = [
 ];
 
 const REMOVED_COLUMNS: RemovedColumnDescriptor<FIBRowItem>[] = [
-    { width: COLUMN_WIDTHS.prefix, render: (r) => <span className="fw-cell-mono">{r.prefix}</span> },
-    { width: COLUMN_WIDTHS.dst_mac, render: (r) => <span className="fw-cell-mono fw-cell-muted">{r.dst_mac}</span> },
-    { width: COLUMN_WIDTHS.src_mac, render: (r) => <span className="fw-cell-mono fw-cell-muted">{r.src_mac}</span> },
-    { width: COLUMN_WIDTHS.device, render: (r) => <span className="fw-cell-mono fw-cell-muted">{r.device}</span> },
+    { width: COLUMN_WIDTHS.prefix, render: (r) => <span className="yn-cell-mono">{r.prefix}</span> },
+    { width: COLUMN_WIDTHS.dst_mac, render: (r) => <span className="yn-cell-mono yn-cell-muted">{r.dst_mac}</span> },
+    { width: COLUMN_WIDTHS.src_mac, render: (r) => <span className="yn-cell-mono yn-cell-muted">{r.src_mac}</span> },
+    { width: COLUMN_WIDTHS.device, render: (r) => <span className="yn-cell-mono yn-cell-muted">{r.device}</span> },
 ];
 
 const dataCellStyle = (width: number, hasError: boolean): React.CSSProperties => ({
@@ -40,7 +40,7 @@ const dataCellStyle = (width: number, hasError: boolean): React.CSSProperties =>
     paddingRight: 8,
     display: 'flex',
     alignItems: 'center',
-    ...(hasError ? { color: 'var(--fw-danger)' } : {}),
+    ...(hasError ? { color: 'var(--yn-danger)' } : {}),
 });
 
 const renderFIBDataCells = (row: FIBRowItem): React.ReactNode => {
@@ -48,18 +48,18 @@ const renderFIBDataCells = (row: FIBRowItem): React.ReactNode => {
     return (
         <>
             <div style={dataCellStyle(COLUMN_WIDTHS.prefix, !!errors.prefix)} title={row.prefix || undefined}>
-                <span className="fw-cell-mono fw-cell-strong">
-                    {row.prefix || <span style={{ color: 'var(--fw-text-3)', fontStyle: 'italic' }}>prefix?</span>}
+                <span className="yn-cell-mono yn-cell-strong">
+                    {row.prefix || <span style={{ color: 'var(--yn-text-3)', fontStyle: 'italic' }}>prefix?</span>}
                 </span>
             </div>
             <div style={dataCellStyle(COLUMN_WIDTHS.dst_mac, !!errors.dst_mac)} title={row.dst_mac || undefined}>
-                <span className="fw-cell-mono fw-cell-muted">{row.dst_mac || '—'}</span>
+                <span className="yn-cell-mono yn-cell-muted">{row.dst_mac || '—'}</span>
             </div>
             <div style={dataCellStyle(COLUMN_WIDTHS.src_mac, !!errors.src_mac)} title={row.src_mac || undefined}>
-                <span className="fw-cell-mono fw-cell-muted">{row.src_mac || '—'}</span>
+                <span className="yn-cell-mono yn-cell-muted">{row.src_mac || '—'}</span>
             </div>
             <div style={dataCellStyle(COLUMN_WIDTHS.device, !!errors.device)} title={row.device || undefined}>
-                <span className="fw-cell-mono fw-cell-muted">{row.device || '—'}</span>
+                <span className="yn-cell-mono yn-cell-muted">{row.device || '—'}</span>
             </div>
         </>
     );

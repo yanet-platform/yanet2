@@ -13,12 +13,12 @@ interface DeleteConfigDialogProps {
 const DeleteConfigDialog: React.FC<DeleteConfigDialogProps> = ({ name, isDeleting, onClose, onConfirm }) => {
     const footer = (
         <>
-            <button type="button" className="fw-btn fw-btn--ghost" onClick={onClose} disabled={isDeleting}>
+            <button type="button" className="yn-btn yn-btn--ghost" onClick={onClose} disabled={isDeleting}>
                 Cancel
             </button>
             <button
                 type="button"
-                className="fw-btn pdump-modal-btn--danger"
+                className="yn-btn pdump-modal-btn--danger"
                 onClick={onConfirm}
                 disabled={isDeleting}
             >

@@ -10,7 +10,7 @@ import Sparkline from './Sparkline';
 import { formatPps } from '../../../utils';
 import { DraftActionButtons, RowHoverEditOverlay } from '../../_shared/draft';
 
-/** Duration in ms of the CSS transition on .fw-drawer — keep in sync with SCSS. */
+/** Duration in ms of the CSS transition on .yn-drawer — keep in sync with SCSS. */
 const DRAWER_TRANSITION_MS = 220;
 export { DRAWER_TRANSITION_MS };
 
@@ -57,11 +57,11 @@ const ValueCell: React.FC<{ values: string[] }> = ({ values }) => {
     const visible = values.slice(0, 3);
     const rest = values.length - visible.length;
     return (
-        <span className="fw-cell-values" title={values.join(', ')}>
+        <span className="yn-cell-values" title={values.join(', ')}>
             {visible.map((v, idx) => (
-                <span key={idx} className="fw-cell-mono">{v}</span>
+                <span key={idx} className="yn-cell-mono">{v}</span>
             ))}
-            {rest > 0 && <span className="fw-cell-more">+{rest}</span>}
+            {rest > 0 && <span className="yn-cell-more">+{rest}</span>}
         </span>
     );
 };
@@ -99,12 +99,12 @@ const VirtualRow: React.FC<VirtualRowProps> = memo(({
     }, [onHoverChange]);
 
     let rowBg = 'transparent';
-    if (active) rowBg = 'var(--fw-accent-soft)';
-    else if (selected) rowBg = 'var(--fw-accent-soft)';
+    if (active) rowBg = 'var(--yn-accent-soft)';
+    else if (selected) rowBg = 'var(--yn-accent-soft)';
 
     return (
         <div
-            className={`fw-vrow${selected ? ' fw-vrow--selected' : ''}${active ? ' fw-vrow--active' : ''}`}
+            className={`yn-vrow${selected ? ' yn-vrow--selected' : ''}${active ? ' yn-vrow--active' : ''}`}
             onMouseEnter={handleMouseEnter}
             onMouseLeave={handleMouseLeave}
             style={{
@@ -116,7 +116,7 @@ const VirtualRow: React.FC<VirtualRowProps> = memo(({
                 width: '100%',
                 display: 'flex',
                 alignItems: 'center',
-                borderBottom: '1px solid var(--fw-line)',
+                borderBottom: '1px solid var(--yn-line)',
                 backgroundColor: rowBg,
                 paddingLeft: 4,
             }}
@@ -132,12 +132,12 @@ const VirtualRow: React.FC<VirtualRowProps> = memo(({
                 />
             </div>
 
-            <div style={{ ...cellStyle('index'), color: 'var(--fw-text-3)', fontVariantNumeric: 'tabular-nums' }}>
+            <div style={{ ...cellStyle('index'), color: 'var(--yn-text-3)', fontVariantNumeric: 'tabular-nums' }}>
                 <span style={{ fontSize: 12 }}>{item.index + 1}</span>
             </div>
 
             <div style={cellStyle('target')} title={item.target}>
-                <span className="fw-cell-mono fw-cell-strong">{item.target || '—'}</span>
+                <span className="yn-cell-mono yn-cell-strong">{item.target || '—'}</span>
             </div>
 
             <div style={cellStyle('mode')}>
@@ -145,7 +145,7 @@ const VirtualRow: React.FC<VirtualRowProps> = memo(({
             </div>
 
             <div style={cellStyle('counter')} title={item.counter}>
-                <span className="fw-cell-mono fw-cell-muted">{item.counter || '—'}</span>
+                <span className="yn-cell-mono yn-cell-muted">{item.counter || '—'}</span>
             </div>
 
             <div style={cellStyle('devices')}>
@@ -158,7 +158,7 @@ const VirtualRow: React.FC<VirtualRowProps> = memo(({
             <div style={cellStyle('vlans')}>
                 {item.isAllVlans
                     ? <AnyBadge label="any" />
-                    : <span className="fw-cell-mono fw-cell-muted">{item.vlansDisplay || '—'}</span>
+                    : <span className="yn-cell-mono yn-cell-muted">{item.vlansDisplay || '—'}</span>
                 }
             </div>
 
@@ -178,7 +178,7 @@ const VirtualRow: React.FC<VirtualRowProps> = memo(({
 
             <div style={{ ...cellStyle('sparkline'), gap: 8 }}>
                 <Sparkline values={rateData?.history ?? null} width={56} height={16} />
-                <span className="fw-cell-pps">
+                <span className="yn-cell-pps">
                     {rateData ? formatPps(rateData.pps) : '— pps'}
                 </span>
             </div>
@@ -236,7 +236,7 @@ const RuleTable: React.FC<RuleTableProps> = ({
 
     /**
      * Tracks the vertical scroll offset of the body so the overlay (which is
-     * a child of .fw-tbl-wrap, not the scroll body) can compute its correct
+     * a child of .yn-table-wrap, not the scroll body) can compute its correct
      * top position: HEADER_HEIGHT + virtualizer_start - scrollTop.
      */
     const [bodyScrollTop, setBodyScrollTop] = useState(0);
@@ -329,10 +329,10 @@ const RuleTable: React.FC<RuleTableProps> = ({
     }, [virtualRows, items.length]);
 
     /**
-     * Edit-button overlay y-offset relative to .fw-tbl-wrap (position:relative).
+     * Edit-button overlay y-offset relative to .yn-table-wrap (position:relative).
      *
-     * The overlay is a child of .fw-tbl-wrap, NOT the scroll body.  This means:
-     *   • right: 0 resolves against .fw-tbl-wrap's right edge = wrap_right (fixed).
+     * The overlay is a child of .yn-table-wrap, NOT the scroll body.  This means:
+     *   • right: 0 resolves against .yn-table-wrap's right edge = wrap_right (fixed).
      *   • top must account for the header height and the current scroll position:
      *       top = HEADER_HEIGHT + virtualizer_start - scrollTop
      *
@@ -343,16 +343,16 @@ const RuleTable: React.FC<RuleTableProps> = ({
      *     = 16 + 8 = 24px from slot_right = wrap_right − 24px  ✓
      *
      * Horizontal scrolling: the overlay is outside the scroll body so h-scroll
-     * never moves it — it stays permanently at right: 0 of .fw-tbl-wrap.
+     * never moves it — it stays permanently at right: 0 of .yn-table-wrap.
      */
     const overlayTopOffset = HEADER_HEIGHT + hoveredStart - bodyScrollTop;
 
     return (
-        <div ref={wrapRef} className="fw-tbl-wrap">
+        <div ref={wrapRef} className="yn-table-wrap">
             {/* Sticky header row */}
-            <div className="fw-tbl-header-row">
+            <div className="yn-table-header-row">
                 <div
-                    className="fw-vtbl-header"
+                    className="yn-vtbl-header"
                     style={{ height: HEADER_HEIGHT, minWidth: TOTAL_WIDTH }}
                 >
                     <div style={cellStyle('checkbox')}>
@@ -365,31 +365,31 @@ const RuleTable: React.FC<RuleTableProps> = ({
                         />
                     </div>
                     <div style={{ ...cellStyle('index'), justifyContent: 'center' }}>
-                        <span className="fw-th-text">#</span>
+                        <span className="yn-th-text">#</span>
                     </div>
                     <div style={cellStyle('target')}>
-                        <span className="fw-th-text">Target</span>
+                        <span className="yn-th-text">Target</span>
                     </div>
                     <div style={cellStyle('mode')}>
-                        <span className="fw-th-text">Mode</span>
+                        <span className="yn-th-text">Mode</span>
                     </div>
                     <div style={cellStyle('counter')}>
-                        <span className="fw-th-text">Counter</span>
+                        <span className="yn-th-text">Counter</span>
                     </div>
                     <div style={cellStyle('devices')}>
-                        <span className="fw-th-text">Devices</span>
+                        <span className="yn-th-text">Devices</span>
                     </div>
                     <div style={cellStyle('vlans')}>
-                        <span className="fw-th-text">VLANs</span>
+                        <span className="yn-th-text">VLANs</span>
                     </div>
                     <div style={cellStyle('srcs')}>
-                        <span className="fw-th-text">Sources</span>
+                        <span className="yn-th-text">Sources</span>
                     </div>
                     <div style={cellStyle('dsts')}>
-                        <span className="fw-th-text">Destinations</span>
+                        <span className="yn-th-text">Destinations</span>
                     </div>
                     <div style={cellStyle('sparkline')}>
-                        <span className="fw-th-text">pps</span>
+                        <span className="yn-th-text">pps</span>
                     </div>
                 </div>
                 <DraftActionButtons
@@ -403,11 +403,11 @@ const RuleTable: React.FC<RuleTableProps> = ({
             {/* Virtualized scroll body */}
             <div
                 ref={scrollRef}
-                className="fw-vtbl-body"
+                className="yn-vtbl-body"
                 style={bodyHeight > 0 ? { flex: '0 0 auto', height: bodyHeight } : undefined}
             >
                 {items.length === 0 ? (
-                    <div className="fw-table-empty">No rules match your search.</div>
+                    <div className="yn-table-empty">No rules match your search.</div>
                 ) : (
                     <div
                         style={{
@@ -438,17 +438,17 @@ const RuleTable: React.FC<RuleTableProps> = ({
             </div>
 
             {/* Footer */}
-            <div className="fw-vtbl-footer" style={{ height: FOOTER_HEIGHT }}>
-                <span className="fw-toolbar__count">{footerText}</span>
+            <div className="yn-vtbl-footer" style={{ height: FOOTER_HEIGHT }}>
+                <span className="yn-toolbar__count">{footerText}</span>
                 {selectedIds.size > 0 && (
-                    <span className="fw-toolbar__count" style={{ color: 'var(--fw-accent)' }}>
+                    <span className="yn-toolbar__count" style={{ color: 'var(--yn-accent)' }}>
                         {selectedIds.size.toLocaleString()} selected
                     </span>
                 )}
             </div>
 
             {/*
-              * Floating edit button overlay — direct child of .fw-tbl-wrap
+              * Floating edit button overlay — direct child of .yn-table-wrap
               * (position:relative), NOT inside the scroll body.
               *
               *  right: 0  → always at wrap_right, regardless of horizontal scroll.
@@ -461,7 +461,7 @@ const RuleTable: React.FC<RuleTableProps> = ({
               *   button: 26px centered in 32px → center offset from slot right = 8 + 3 + 13 = 24px
               *   wrap right − 24px  =  header delete button center  ✓
               *
-              * The overlay is clipped by .fw-tbl-wrap (overflow:hidden) so it never
+              * The overlay is clipped by .yn-table-wrap (overflow:hidden) so it never
               * bleeds into the header or footer — rows at the very top/bottom that scroll
               * into the boundary just have the button disappear naturally.
               */}

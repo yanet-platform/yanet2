@@ -103,8 +103,8 @@ const PacketTableRowImpl: React.FC<PacketTableRowProps> = ({
                 display: 'flex',
                 alignItems: 'center',
                 padding: '0 8px',
-                borderBottom: '1px solid var(--fw-line-2)',
-                backgroundColor: index % 2 === 0 ? 'transparent' : 'var(--fw-bg-2)',
+                borderBottom: '1px solid var(--yn-line-2)',
+                backgroundColor: index % 2 === 0 ? 'transparent' : 'var(--yn-bg-2)',
                 boxSizing: 'border-box',
                 cursor: 'pointer',
             }}

@@ -100,51 +100,51 @@ const RouteDrawer: React.FC<RouteDrawerProps> = ({
             onJump={() => {}}
             ariaLabel={title}
         >
-            <section className="fw-section">
-                <div className="fw-section-h">Destination</div>
-                <div className="fw-section__body">
-                    <div className="fw-field">
-                        <label className="fw-field__label">
-                            Prefix <span className="fw-field__req">*</span>
+            <section className="yn-section">
+                <div className="yn-section-h">Destination</div>
+                <div className="yn-section__body">
+                    <div className="yn-field">
+                        <label className="yn-field__label">
+                            Prefix <span className="yn-field__req">*</span>
                         </label>
                         <input
-                            className={`fw-input fw-input--mono${prefixError ? ' fw-input--invalid' : ''}`}
+                            className={`yn-input yn-input--mono${prefixError ? ' yn-input--invalid' : ''}`}
                             value={prefix}
                             placeholder="10.0.0.0/8 or 2001:db8::/32"
                             onChange={(e) => setPrefix(e.target.value)}
                         />
                         {prefixError
-                            ? <span className="fw-field__hint fw-field__error">{prefixError}</span>
-                            : <span className="fw-field__hint">IPv4 or IPv6 with mask.</span>
+                            ? <span className="yn-field__hint yn-field__error">{prefixError}</span>
+                            : <span className="yn-field__hint">IPv4 or IPv6 with mask.</span>
                         }
                     </div>
                 </div>
             </section>
 
-            <section className="fw-section">
-                <div className="fw-section-h">Next Hop</div>
-                <div className="fw-section__body">
-                    <div className="fw-field">
-                        <label className="fw-field__label">
-                            Next Hop IP <span className="fw-field__req">*</span>
+            <section className="yn-section">
+                <div className="yn-section-h">Next Hop</div>
+                <div className="yn-section__body">
+                    <div className="yn-field">
+                        <label className="yn-field__label">
+                            Next Hop IP <span className="yn-field__req">*</span>
                         </label>
                         <input
-                            className={`fw-input fw-input--mono${nexthopError ? ' fw-input--invalid' : ''}`}
+                            className={`yn-input yn-input--mono${nexthopError ? ' yn-input--invalid' : ''}`}
                             value={nexthopAddr}
                             placeholder="192.168.1.1 or 2001:db8::1"
                             onChange={(e) => setNexthopAddr(e.target.value)}
                         />
                         {nexthopError && (
-                            <span className="fw-field__hint fw-field__error">{nexthopError}</span>
+                            <span className="yn-field__hint yn-field__error">{nexthopError}</span>
                         )}
                     </div>
                 </div>
             </section>
 
-            <section className="fw-section">
-                <div className="fw-section-h">Apply</div>
-                <div className="fw-section__body">
-                    <div className="fw-field">
+            <section className="yn-section">
+                <div className="yn-section-h">Apply</div>
+                <div className="yn-section__body">
+                    <div className="yn-field">
                         <Switch
                             checked={doFlush}
                             onUpdate={setDoFlush}

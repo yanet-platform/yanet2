@@ -99,15 +99,15 @@ const LookupDrawer: React.FC<LookupDrawerProps> = ({
     return (
         <>
             <div
-                className={`fw-backdrop${open ? ' fw-backdrop--open' : ''}`}
+                className={`yn-backdrop${open ? ' yn-backdrop--open' : ''}`}
                 onClick={onClose}
             />
-            <div className={`fw-drawer ro-lookup-drawer${open ? ' fw-drawer--open' : ''}`}>
-                <div className="fw-drawer__head">
-                    <h2 className="fw-drawer__title">Route Lookup</h2>
+            <div className={`yn-drawer ro-lookup-drawer${open ? ' yn-drawer--open' : ''}`}>
+                <div className="yn-drawer__head">
+                    <h2 className="yn-drawer__title">Route Lookup</h2>
                     <button
                         type="button"
-                        className="fw-icon-btn"
+                        className="yn-icon-btn"
                         onClick={onClose}
                         aria-label="Close"
                     >
@@ -115,11 +115,11 @@ const LookupDrawer: React.FC<LookupDrawerProps> = ({
                     </button>
                 </div>
 
-                <div className="fw-drawer__body">
+                <div className="yn-drawer__body">
                     <div className="ro-lookup-input-row">
                         <input
                             ref={inputRef}
-                            className="fw-input fw-input--mono"
+                            className="yn-input yn-input--mono"
                             placeholder="Enter IPv4 or IPv6 address…"
                             value={query}
                             onChange={(e) => setQuery(e.target.value)}
@@ -129,7 +129,7 @@ const LookupDrawer: React.FC<LookupDrawerProps> = ({
                         />
                         <button
                             type="button"
-                            className="fw-btn fw-btn--primary"
+                            className="yn-btn yn-btn--primary"
                             onClick={() => void performLookup(query)}
                             disabled={loading || !query.trim()}
                         >
@@ -211,31 +211,31 @@ const LookupDrawer: React.FC<LookupDrawerProps> = ({
                                                     <td>
                                                         <BestPill isBest={idx === 0} />
                                                     </td>
-                                                    <td className="fw-cell-mono fw-cell-strong">
+                                                    <td className="yn-cell-mono yn-cell-strong">
                                                         {r.prefix || '—'}
                                                     </td>
-                                                    <td className="fw-cell-mono fw-cell-muted">
+                                                    <td className="yn-cell-mono yn-cell-muted">
                                                         {ipAddressToString(r.next_hop) || '—'}
                                                     </td>
-                                                    <td className="fw-cell-mono fw-cell-muted">
+                                                    <td className="yn-cell-mono yn-cell-muted">
                                                         {ipAddressToString(r.peer) || '—'}
                                                     </td>
                                                     <td>
                                                         <SourceChip source={r.source} />
                                                     </td>
-                                                    <td className="fw-cell-muted">
+                                                    <td className="yn-cell-muted">
                                                         {r.peer_as ?? '—'}
                                                     </td>
-                                                    <td className="fw-cell-muted">
+                                                    <td className="yn-cell-muted">
                                                         {r.origin_as ?? '—'}
                                                     </td>
-                                                    <td className="fw-cell-muted">
+                                                    <td className="yn-cell-muted">
                                                         {r.pref ?? '—'}
                                                     </td>
-                                                    <td className="fw-cell-muted">
+                                                    <td className="yn-cell-muted">
                                                         {r.med ?? '—'}
                                                     </td>
-                                                    <td className="fw-cell-muted ro-lookup-communities">
+                                                    <td className="yn-cell-muted ro-lookup-communities">
                                                         {r.large_communities && r.large_communities.length > 0
                                                             ? r.large_communities
                                                                 .map((c) => `${c.global_administrator ?? 0}:${c.local_data_part1 ?? 0}:${c.local_data_part2 ?? 0}`)
