@@ -1,5 +1,6 @@
 #include "../rule.h"
 #include "common/lpm.h"
+#include "common/lpm_wide.h"
 #include "common/range_collector.h"
 #include "common/registry.h"
 #include "common/value.h"
@@ -135,7 +136,12 @@ collect_net4_values(
 		goto error_lpm;
 	}
 
-	if (range_collector_collect(&collector, 4, lpm, &range_index)) {
+	if (range_collector_collect_wide(
+			    &collector,
+			    4,
+			    (struct lpm_wide *)lpm,
+			    &range_index
+		    )) {
 		goto error_range_collect;
 	}
 
