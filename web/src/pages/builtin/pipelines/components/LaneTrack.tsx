@@ -1,8 +1,7 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import type { FunctionRef, DragPayload } from '../types';
-import { getDragPayload, InsertSlot, Endpoint, FlowLink } from '../../_shared/lane-editor';
+import { getDragPayload, InsertSlot, Endpoint, FlowLink, AddSlotButton } from '../../_shared/lane-editor';
 import { FunctionRefCard } from './FunctionRefCard';
-import { AddFunctionRefButton } from './AddFunctionRefButton';
 import type { InterpolatedCounterData } from '../../../../hooks';
 
 interface LaneTrackProps {
@@ -202,7 +201,7 @@ export const LaneTrack: React.FC<LaneTrackProps> = ({
 
             {!isActiveDrag && <FlowLink />}
             <Endpoint kind="out" />
-            <AddFunctionRefButton onClick={onAddRef} />
+            <AddSlotButton onClick={onAddRef} className="pl-add-ref-btn" label="Add function reference" />
         </div>
     );
 };

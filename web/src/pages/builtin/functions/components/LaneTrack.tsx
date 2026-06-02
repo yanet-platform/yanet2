@@ -1,8 +1,7 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import type { Module, DragPayload } from '../types';
-import { getDragPayload, InsertSlot, Endpoint, FlowLink } from '../../_shared/lane-editor';
+import { getDragPayload, InsertSlot, Endpoint, FlowLink, AddSlotButton } from '../../_shared/lane-editor';
 import { ModuleCard } from './ModuleCard';
-import { AddModuleButton } from './AddModuleButton';
 import type { InterpolatedCounterData } from '../../../../hooks';
 
 interface LaneTrackProps {
@@ -206,7 +205,7 @@ export const LaneTrack: React.FC<LaneTrackProps> = ({
 
             {!isActiveDrag && <FlowLink />}
             <Endpoint kind="out" />
-            <AddModuleButton onClick={onAddModule} />
+            <AddSlotButton onClick={onAddModule} className="fn-add-module-btn" label="Add module" />
         </div>
     );
 };
