@@ -67,6 +67,7 @@ executable(
   sources,
   dependencies: dependencies,
   install: true,
+  export_dynamic: true,
 )
 
 subdir('unittest')
