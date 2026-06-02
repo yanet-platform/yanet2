@@ -375,7 +375,7 @@ const ForwardPage: React.FC = () => {
             return parts.join(' · ');
         },
         searchText: (it) => [it.target, it.counter, ...it.deviceNames, ...it.sourceCidrs, ...it.dstCidrs].join(' '),
-        onSelect: (id) => { handleJumpToRow(id); setPaletteOpen(false); },
+        onSelect: (id) => { setModeFilter('all'); handleSearchChange(''); handleJumpToRow(id); setPaletteOpen(false); },
         icon: '→',
     };
 
