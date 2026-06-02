@@ -3,8 +3,7 @@ import { Dialog, Text } from '@gravity-ui/uikit';
 import * as yaml from 'js-yaml';
 import type { Rule } from '../../../api/acl';
 import { ActionKind } from '../../../api/acl';
-import { formatIPNet } from '../../../utils';
-import { extractBytes } from './utils';
+import { formatIPNet, extractBytes } from '../../../utils';
 
 // TODO(acl): structured diff disabled until the per-card layout is reworked.
 

@@ -2,8 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { Action } from '../../../api/acl';
 import { ActionKind, ACTION_KIND_LABELS } from '../../../api/acl';
-import { formatIPNet, toaster, copyToClipboard } from '../../../utils';
-import { extractBytes } from './utils';
+import { formatIPNet, toaster, copyToClipboard, extractBytes } from '../../../utils';
 import { getProtocolTone, IpAddressChip, ProtoChip as SharedProtoChip } from '../_shared/chips';
 
 // Protocol names per IANA IP protocol number.

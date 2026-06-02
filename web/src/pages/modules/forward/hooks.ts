@@ -1,9 +1,8 @@
 import { useEffect } from 'react';
 import type { Rule, IPNet, VlanRange } from '../../../api/forward';
 import { ForwardMode } from '../../../api/forward';
-import { formatIPNet, parseIPToBytes, prefixLengthToMaskBytes, bytesToBase64 } from '../../../utils';
+import { formatIPNet, parseIPToBytes, prefixLengthToMaskBytes, bytesToBase64, extractBytes } from '../../../utils';
 import type { RuleItem, RuleDraft } from './types';
-import { extractBytes } from './utils';
 
 /** Format an IPNet to a CIDR string. */
 const formatIPNetItem = (net: IPNet): string => {

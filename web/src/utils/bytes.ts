@@ -43,6 +43,22 @@ export const getBytes = (input: string | Uint8Array | number[] | undefined): num
     return Array.from(input);
 };
 
+/** Convert raw bytes in various formats to a number array. Returns undefined on falsy input or parse failure. */
+export const extractBytes = (data: string | Uint8Array | number[] | undefined): number[] | undefined => {
+    if (!data) return undefined;
+    if (Array.isArray(data)) return data;
+    if (data instanceof Uint8Array) return Array.from(data);
+    if (typeof data === 'string') {
+        try {
+            const binary = atob(data);
+            return Array.from(binary, (c) => c.charCodeAt(0));
+        } catch {
+            return undefined;
+        }
+    }
+    return undefined;
+};
+
 /**
  * Format a byte count using binary prefixes.
  * Examples: "500 B", "1.2 KB", "3.5 MB", "1.1 GB", "0.50 TB".

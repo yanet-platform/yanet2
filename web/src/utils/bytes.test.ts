@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { base64ToBytes, bytesToBase64, getBytes, formatBytes } from './bytes';
+import { base64ToBytes, bytesToBase64, getBytes, formatBytes, extractBytes } from './bytes';
 
 describe('base64ToBytes', () => {
     it('decodes a known base64 string to bytes', () => {
@@ -54,6 +54,33 @@ describe('getBytes', () => {
         const result = getBytes(input);
         expect(result).toEqual([7, 8, 9]);
         expect(result).not.toBe(input);
+    });
+});
+
+describe('extractBytes', () => {
+    it('returns undefined for undefined input', () => {
+        expect(extractBytes(undefined)).toBeUndefined();
+    });
+
+    it('returns undefined for empty string (falsy)', () => {
+        expect(extractBytes('')).toBeUndefined();
+    });
+
+    it('returns undefined for invalid base64 string', () => {
+        expect(extractBytes('!!!not-base64!!!')).toBeUndefined();
+    });
+
+    it('decodes a valid base64 string to bytes', () => {
+        expect(extractBytes('AAEC')).toEqual([0, 1, 2]);
+    });
+
+    it('converts a Uint8Array to a plain number array', () => {
+        expect(extractBytes(Uint8Array.from([10, 20]))).toEqual([10, 20]);
+    });
+
+    it('returns the same number array reference for a number[] input', () => {
+        const input = [1, 2, 3];
+        expect(extractBytes(input)).toBe(input);
     });
 });
 

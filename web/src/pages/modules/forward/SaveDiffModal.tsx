@@ -2,8 +2,7 @@ import React, { useMemo } from 'react';
 import * as yaml from 'js-yaml';
 import type { Rule } from '../../../api/forward';
 import { ForwardMode } from '../../../api/forward';
-import { formatIPNet } from '../../../utils';
-import { extractBytes } from './utils';
+import { formatIPNet, extractBytes } from '../../../utils';
 import { SaveDiffModal as SharedSaveDiffModal } from '../../../components';
 
 /** Serialize a rules array into the canonical YAML schema for diff display. */

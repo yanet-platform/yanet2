@@ -1,8 +1,7 @@
 import { useEffect } from 'react';
 import type { Rule, PortRange, VlanRange, ProtoRange, Action } from '../../../api/acl';
 import { ActionKind } from '../../../api/acl';
-import { formatIPNet } from '../../../utils';
-import { extractBytes } from './utils';
+import { formatIPNet, extractBytes } from '../../../utils';
 import type { RuleDraft, RuleItem } from './types';
 import { parseCidrsToIPNets, parseRangesRaw, parseProtoRangesRaw } from './parseHelpers';
 export { parseCidrsToIPNets, parseRangesRaw, parseProtoRangesRaw } from './parseHelpers';

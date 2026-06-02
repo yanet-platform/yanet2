@@ -1,6 +1,5 @@
 import type { Rule, Action } from '../../../api/acl';
-import { formatIPNet } from '../../../utils';
-import { extractBytes } from './utils';
+import { formatIPNet, extractBytes } from '../../../utils';
 
 /** Format an IPNet wire object to a CIDR string for comparison purposes. */
 const fmtIPNet = (net: { addr?: string | Uint8Array | number[]; mask?: string | Uint8Array | number[] }): string => {
