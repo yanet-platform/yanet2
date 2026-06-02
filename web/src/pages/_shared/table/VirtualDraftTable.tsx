@@ -2,11 +2,11 @@ import React, { useCallback, useMemo, useRef, memo } from 'react';
 import { useContainerHeight } from '../../../hooks';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { Checkbox } from '@gravity-ui/uikit';
-import DraftActionButtons from './DraftActionButtons';
-import { useRowHoverOverlay } from './useRowHoverOverlay';
-import RemovedRowsSection from './RemovedRowsSection';
-import RowHoverEditOverlay from './RowHoverEditOverlay';
-import type { RemovedColumnDescriptor } from './RemovedRowsSection';
+import DraftActionButtons from '../draft/DraftActionButtons';
+import { useRowHoverOverlay } from '../draft/useRowHoverOverlay';
+import RemovedRowsSection from '../draft/RemovedRowsSection';
+import RowHoverEditOverlay from '../draft/RowHoverEditOverlay';
+import type { RemovedColumnDescriptor } from '../draft/RemovedRowsSection';
 
 const ROW_HEIGHT = 44;
 const HEADER_HEIGHT = 40;

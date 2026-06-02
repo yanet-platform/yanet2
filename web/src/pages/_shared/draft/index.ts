@@ -15,8 +15,6 @@ export { default as DraftPageToolbar } from './DraftPageToolbar';
 export { useDraftShortcuts } from './useDraftShortcuts';
 export { useDraft } from './useDraft';
 export type { UseDraftResult } from './useDraft';
-export { VirtualDraftTable, LEADING_CELL_WIDTHS, LEADING_TOTAL_WIDTH } from './VirtualDraftTable';
-export type { VirtualDraftTableProps, TableColumnHeader, RenderDataCells, RowStatus } from './VirtualDraftTable';
 export { useDraftDragDrop } from './useDraftDragDrop';
 export type { DragOverState, UseDraftDragDropResult } from './useDraftDragDrop';
 export { useDraftPageHandlers } from './useDraftPageHandlers';

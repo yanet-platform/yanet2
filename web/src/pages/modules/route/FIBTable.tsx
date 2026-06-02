@@ -1,8 +1,9 @@
 import React, { useMemo } from 'react';
 import type { FIBRowItem, FIBRowStatus } from './types';
 import { validateRow } from './validation';
-import { VirtualDraftTable, LEADING_TOTAL_WIDTH } from '../../_shared/draft';
-import type { RemovedColumnDescriptor, TableColumnHeader } from '../../_shared/draft';
+import { VirtualDraftTable, LEADING_TOTAL_WIDTH } from '../../_shared/table/VirtualDraftTable';
+import type { RemovedColumnDescriptor } from '../../_shared/draft/RemovedRowsSection';
+import type { TableColumnHeader } from '../../_shared/table/VirtualDraftTable';
 
 const COLUMN_WIDTHS = {
     prefix: 220,
@@ -91,7 +92,7 @@ export interface FIBTableProps {
 /** Virtualized FIB table backed by VirtualDraftTable. */
 export const FIBTable: React.FC<FIBTableProps> = (props) => {
     const statusById = useMemo(
-        () => props.statusById as Map<string, import('../../_shared/draft').RowStatus>,
+        () => props.statusById as Map<string, import('../../_shared/table/VirtualDraftTable').RowStatus>,
         [props.statusById],
     );
 

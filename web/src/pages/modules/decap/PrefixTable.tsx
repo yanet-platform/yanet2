@@ -1,8 +1,9 @@
 import React, { useMemo } from 'react';
 import type { PrefixRowItem, PrefixRowStatus } from './types';
 import { validateRow } from './validation';
-import { VirtualDraftTable, LEADING_TOTAL_WIDTH } from '../../_shared/draft';
-import type { RemovedColumnDescriptor, TableColumnHeader } from '../../_shared/draft';
+import { VirtualDraftTable, LEADING_TOTAL_WIDTH } from '../../_shared/table/VirtualDraftTable';
+import type { RemovedColumnDescriptor } from '../../_shared/draft/RemovedRowsSection';
+import type { TableColumnHeader } from '../../_shared/table/VirtualDraftTable';
 
 const PREFIX_WIDTH = 480;
 
@@ -68,7 +69,7 @@ export interface PrefixTableProps {
 /** Virtualized prefix table backed by VirtualDraftTable. */
 export const PrefixTable: React.FC<PrefixTableProps> = (props) => {
     const statusById = useMemo(
-        () => props.statusById as Map<string, import('../../_shared/draft').RowStatus>,
+        () => props.statusById as Map<string, import('../../_shared/table/VirtualDraftTable').RowStatus>,
         [props.statusById],
     );
 
