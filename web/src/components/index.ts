@@ -26,3 +26,5 @@ export { ConfirmModal } from './ConfirmModal';
 export type { ConfirmModalProps } from './ConfirmModal';
 export { default as DeleteConfigModal } from './DeleteConfigModal';
 export { default as BulkDeleteModal } from './BulkDeleteModal';
+export { useChipInput, Chip } from './chip-input';
+export type { ChipKind, ChipInputProps, ChipInputHandle } from './chip-input';

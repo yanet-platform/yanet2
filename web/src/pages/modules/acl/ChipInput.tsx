@@ -1,26 +1,9 @@
-import React, { useEffect, useImperativeHandle, useRef, useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import { Dialog, TextInput } from '@gravity-ui/uikit';
+import { useChipInput, Chip } from '../../../components/chip-input';
+import type { ChipInputProps, ChipInputHandle } from '../../../components/chip-input';
 
-type ChipKind = 'cidr' | 'device' | 'vlan';
-
-interface ChipInputProps {
-    value: string[];
-    onChange: (values: string[]) => void;
-    placeholder?: string;
-    kind: ChipKind;
-    wildcardLabel?: string;
-    validator: (s: string) => boolean;
-}
-
-/** Imperative handle for synchronously flushing pending text before a parent save. */
-export interface ChipInputHandle {
-    /**
-     * Synchronously return any tokens in the current draft text and clear it.
-     * Does NOT call onChange — the caller merges the returned tokens itself so
-     * that draft text and committed chips land in one synchronous transaction.
-     */
-    flush(): string[];
-}
+export type { ChipInputHandle };
 
 const MANY_THRESHOLD = 20;
 
@@ -229,70 +212,12 @@ const ChipInput = React.forwardRef<ChipInputHandle, ChipInputProps>(({
     wildcardLabel,
     validator,
 }, ref) => {
-    const [draft, setDraft] = useState('');
-    const draftRef = useRef('');
-    const inputRef = useRef<HTMLInputElement>(null);
+    const { draft, inputRef, handleChange, handleKeyDown, handleBlur, handlePaste, startEdit, removeChip } =
+        useChipInput(value, onChange, ref);
+
     const [filter, setFilter] = useState('');
     const [bulkOpen, setBulkOpen] = useState(false);
     const [popoverOpen, setPopoverOpen] = useState(false);
-
-    useEffect(() => {
-        draftRef.current = draft;
-    }, [draft]);
-
-    useImperativeHandle(ref, () => ({
-        flush() {
-            const tokens = draftRef.current
-                .split(/[,\s]+/)
-                .map((t) => t.trim())
-                .filter(Boolean);
-            if (tokens.length > 0) {
-                setDraft('');
-                draftRef.current = '';
-            }
-            return tokens;
-        },
-    }), []);
-
-    const commitDraft = (raw?: string): void => {
-        const source = raw ?? draft;
-        const tokens = source.split(/[,\s]+/).map((t) => t.trim()).filter(Boolean);
-        if (!tokens.length) return;
-        onChange([...value, ...tokens]);
-        setDraft('');
-        draftRef.current = '';
-    };
-
-    const handleChange = (e: React.ChangeEvent<HTMLInputElement>): void => {
-        const v = e.target.value;
-        if (v.includes(',')) {
-            commitDraft(v);
-        } else {
-            setDraft(v);
-            draftRef.current = v;
-        }
-    };
-
-    const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>): void => {
-        if ((e.key === 'Enter' || e.key === 'Tab') && draft.trim()) {
-            e.preventDefault();
-            commitDraft();
-        } else if (e.key === 'Backspace' && !draft && value.length > 0) {
-            onChange(value.slice(0, -1));
-        }
-    };
-
-    const handleBlur = (): void => {
-        if (draft.trim()) commitDraft();
-    };
-
-    const handlePaste = (e: React.ClipboardEvent<HTMLInputElement>): void => {
-        const text = e.clipboardData.getData('text');
-        if (/[,\s]/.test(text)) {
-            e.preventDefault();
-            commitDraft(text);
-        }
-    };
 
     const isMany = value.length > MANY_THRESHOLD;
 
@@ -310,7 +235,6 @@ const ChipInput = React.forwardRef<ChipInputHandle, ChipInputProps>(({
         }
     };
 
-    // Summary for table-cell collapse (>6 items).
     const isBig = value.length > 6;
 
     return (
@@ -367,49 +291,16 @@ const ChipInput = React.forwardRef<ChipInputHandle, ChipInputProps>(({
                 {wildcardLabel && value.length === 0 && (
                     <span className="acl-chip acl-chip--any">{wildcardLabel}</span>
                 )}
-                {filteredIndices.map(idx => {
-                    const v = value[idx];
-                    const valid = validator(v);
-                    return (
-                        <span key={idx} className={`yn-chip${valid ? '' : ' yn-chip--invalid'}`}>
-                            <span
-                                className="yn-chip__label"
-                                role="button"
-                                tabIndex={0}
-                                title="Click to edit"
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    onChange(value.filter((_, j) => j !== idx));
-                                    setDraft(v);
-                                    draftRef.current = v;
-                                    setTimeout(() => inputRef.current?.focus(), 0);
-                                }}
-                                onKeyDown={(e) => {
-                                    if (e.key === 'Enter' || e.key === ' ') {
-                                        e.preventDefault();
-                                        onChange(value.filter((_, j) => j !== idx));
-                                        setDraft(v);
-                                        draftRef.current = v;
-                                        setTimeout(() => inputRef.current?.focus(), 0);
-                                    }
-                                }}
-                            >
-                                {v}
-                            </span>
-                            <button
-                                type="button"
-                                className="yn-chip__x"
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    onChange(value.filter((_, j) => j !== idx));
-                                }}
-                                aria-label={`Remove ${v}`}
-                            >
-                                ×
-                            </button>
-                        </span>
-                    );
-                })}
+                {filteredIndices.map(idx => (
+                    <Chip
+                        key={idx}
+                        value={value[idx]}
+                        index={idx}
+                        valid={validator(value[idx])}
+                        onEdit={startEdit}
+                        onRemove={removeChip}
+                    />
+                ))}
                 {filter && filteredIndices.length === 0 && (
                     <span style={{ fontSize: 12, color: 'var(--yn-text-3)', fontFamily: 'var(--yn-font-mono)' }}>
                         no matches
