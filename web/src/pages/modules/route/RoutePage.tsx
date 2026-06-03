@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Button } from '@gravity-ui/uikit';
+import { Button, Icon, Text } from '@gravity-ui/uikit';
 import { useSearchParams } from 'react-router-dom';
-import { PageLayout, PageLoader, ConfigTabStrip, BulkBar } from '../../../components';
+import { Funnel, Magnifier, Plus } from '@gravity-ui/icons';
+import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, SearchInput } from '../../../components';
 import { useFIBDraft } from './useFIBDraft';
 import { useUnsavedChangesBlocker } from '../../builtin/_shared/lane-editor';
 import type { FIBRowItem } from './types';
@@ -11,11 +12,13 @@ import type { FIBDrawerHandle } from './FIBDrawer';
 import FIBYamlIO from './FIBYamlIO';
 import { FIBSaveDiffModal } from './FIBSaveDiffModal';
 import {
-    AddConfigModal,
-    DraftPageToolbar, useDraftShortcuts, useDraftDragDrop, useDraftPageHandlers,
+    AddConfigModal, isValidCIDR, useDraftShortcuts, useDraftDragDrop, useDraftPageHandlers,
 } from '../../_shared/draft';
 import { DeleteConfigModal, BulkDeleteModal } from '../../../components';
+import { CommandPalette } from '../../_shared/command-palette';
+import type { Command, RowAdapter } from '../../_shared/command-palette';
 import '../../../styles/draft-page.scss';
+import './route.scss';
 
 const QP_CONFIG = 'config';
 const QP_SEARCH = 'search';
@@ -40,6 +43,7 @@ const RoutePage: React.FC = () => {
     const [diffModalOpen, setDiffModalOpen] = useState(false);
     const [addConfigOpen, setAddConfigOpen] = useState(false);
     const [deleteConfigOpen, setDeleteConfigOpen] = useState(false);
+    const [paletteOpen, setPaletteOpen] = useState(false);
 
     const drawerRef = useRef<FIBDrawerHandle>(null);
     const dragDrop = useDraftDragDrop();
@@ -149,12 +153,32 @@ const RoutePage: React.FC = () => {
         dragDrop,
     });
 
-    const openAdd = () => {
-        const newRow: FIBRowItem = { id: makeRowId(), prefix: '', dst_mac: '', src_mac: '', device: '' };
+    useEffect(() => {
+        if (!paletteOpen) return;
+        const handleKeyDown = (e: KeyboardEvent): void => {
+            if (e.key === 'Escape') setPaletteOpen(false);
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [paletteOpen]);
+
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent): void => {
+            if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+                e.preventDefault();
+                setPaletteOpen((prev) => !prev);
+            }
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, []);
+
+    const openAdd = useCallback((prefix = ''): void => {
+        const newRow: FIBRowItem = { id: makeRowId(), prefix, dst_mac: '', src_mac: '', device: '' };
         dispatchDraft({ type: 'ADD_ROW', configName: currentConfig, row: newRow });
         setActiveRowId(newRow.id);
         setEditingRowId(newRow.id);
-    };
+    }, [currentConfig, dispatchDraft]);
 
     const handleSearchChange = useCallback((value: string): void => {
         updateParams({ [QP_SEARCH]: value || null });
@@ -169,19 +193,131 @@ const RoutePage: React.FC = () => {
         onDeleteRow: handlers.handleDeleteRow,
     });
 
+    const commands = useMemo((): Command[] => {
+        const list: Command[] = [
+            {
+                id: '__add',
+                icon: '+',
+                label: 'Add route',
+                keywords: 'add route insert new',
+                onSelect: () => { openAdd(); setPaletteOpen(false); },
+            },
+        ];
+        if (currentIsDirty) {
+            list.push({
+                id: '__save',
+                icon: '✓',
+                label: 'Save changes',
+                onSelect: () => { handlers.handleCommitPress(); setPaletteOpen(false); },
+            });
+            list.push({
+                id: '__discard',
+                icon: '⟲',
+                label: 'Discard changes',
+                onSelect: () => { handlers.handleDiscard(); setPaletteOpen(false); },
+            });
+        }
+        list.push({
+            id: '__add_config',
+            icon: '▤',
+            label: 'Add config',
+            onSelect: () => { setAddConfigOpen(true); setPaletteOpen(false); },
+        });
+        if (currentConfig) {
+            list.push({
+                id: '__delete_config',
+                icon: '✕',
+                label: 'Delete config',
+                sub: `Delete "${currentConfig}"`,
+                onSelect: () => { setDeleteConfigOpen(true); setPaletteOpen(false); },
+            });
+        }
+        for (const cfg of draftConfigs) {
+            if (cfg === currentConfig) continue;
+            const name = cfg;
+            list.push({
+                id: `__config_${name}`,
+                icon: '⇥',
+                label: `Switch to config ${name}`,
+                sub: dirtySet.has(name) ? 'unsaved changes' : undefined,
+                keywords: `switch config tab ${name}`,
+                onSelect: () => { handleConfigSelect(name); setPaletteOpen(false); },
+            });
+        }
+        if (search) {
+            list.push({
+                id: '__clear',
+                icon: '✕',
+                label: 'Clear search',
+                keywords: 'clear reset search',
+                onSelect: () => { handleSearchChange(''); setPaletteOpen(false); },
+            });
+        }
+        return list;
+    }, [currentIsDirty, currentConfig, draftConfigs, dirtySet, search, handlers, handleConfigSelect, handleSearchChange, openAdd]);
+
+    const dynamicCommands = useCallback((q: string): Command[] => {
+        if (isValidCIDR(q.trim())) {
+            return [
+                {
+                    id: '__add_cidr',
+                    icon: '⌖',
+                    label: `Add route for ${q.trim()}`,
+                    sub: 'Pre-fill a new route with this prefix',
+                    onSelect: () => { openAdd(q.trim()); setPaletteOpen(false); },
+                },
+            ];
+        }
+        return [];
+    }, [openAdd]);
+
+    const rowAdapter: RowAdapter<FIBRowItem> = {
+        rows: rawRows,
+        getId: (r) => r.id,
+        getLabel: (r) => r.prefix || '(no prefix)',
+        getSub: (r) => `${r.dst_mac || '—'} · ${r.device || '—'}`,
+        searchText: (r) => [r.prefix, r.dst_mac, r.src_mac, r.device].join(' '),
+        onSelect: (id) => { setActiveRowId(id); setEditingRowId(id); setPaletteOpen(false); },
+        icon: '→',
+        max: 7,
+    };
+
     const pageHeader = (
-            <DraftPageToolbar
-                title="Route FIB"
-                searchValue={search}
-                onSearchChange={handleSearchChange}
-                searchPlaceholder="Search prefix, MAC or device…"
-                yamlSlot={<FIBYamlIO key={currentConfig || '__none'} configName={currentConfig} rows={rawRows} onImport={handlers.handleImportYaml} disabled={!currentConfig} />}
-            addLabel="Add Route"
-            onAdd={openAdd}
-        />
+        <div className="page-header-bar">
+            <Text variant="header-1">Route FIB</Text>
+            <button
+                type="button"
+                className="cp-trigger"
+                onClick={() => setPaletteOpen(true)}
+                title="Open command palette (⌘K)"
+            >
+                <Icon data={Magnifier} size={16} />
+                <span className="cp-trigger__placeholder">Search routes or run an action…</span>
+                <kbd className="cp-kbd">⌘K</kbd>
+            </button>
+            <div className="page-header-bar__actions">
+                <FIBYamlIO
+                    key={currentConfig || '__none'}
+                    configName={currentConfig}
+                    rows={rawRows}
+                    onImport={handlers.handleImportYaml}
+                    disabled={!currentConfig}
+                />
+                <Button view="action" onClick={() => openAdd()}>
+                    <Icon data={Plus} size={16} />
+                    Add Route
+                </Button>
+            </div>
+        </div>
     );
 
-    if (loading) return <PageLayout header={pageHeader} className="yn-flat-layout"><PageLoader loading size="l" /></PageLayout>;
+    if (loading) {
+        return (
+            <PageLayout header={pageHeader} className="yn-flat-layout">
+                <PageLoader loading size="l" />
+            </PageLayout>
+        );
+    }
 
     return (
         <PageLayout header={pageHeader} className="yn-flat-layout">
@@ -201,6 +337,23 @@ const RoutePage: React.FC = () => {
                             onSelect={handleConfigSelect}
                             onAddConfig={() => setAddConfigOpen(true)}
                         />
+                        <div className="rt-toolbar">
+                            <div style={{ flex: 1 }} />
+                            <div style={{ flexBasis: 230, flexShrink: 1 }}>
+                                <SearchInput
+                                    value={search}
+                                    onUpdate={handleSearchChange}
+                                    placeholder="Filter routes…"
+                                    enableFocusShortcut={false}
+                                    showShortcutHint={false}
+                                    icon={Funnel}
+                                />
+                            </div>
+                            <span className="rt-count">
+                                <span style={{ color: 'var(--yn-text)', fontWeight: 600 }}>{visibleRows.length.toLocaleString()}</span>
+                                {' / '}{rawRows.length.toLocaleString()}
+                            </span>
+                        </div>
                         <div className="yn-content">
                             <FIBTable
                                 allRows={rawRows}
@@ -250,6 +403,15 @@ const RoutePage: React.FC = () => {
                 />
 
                 <DeleteConfigModal open={deleteConfigOpen} configName={currentConfig} onClose={() => setDeleteConfigOpen(false)} onConfirm={handlers.handleDeleteConfig} />
+
+                <CommandPalette<FIBRowItem>
+                    open={paletteOpen}
+                    onClose={() => setPaletteOpen(false)}
+                    placeholder="Search routes or run an action…"
+                    commands={commands}
+                    dynamicCommands={dynamicCommands}
+                    rowAdapter={rowAdapter}
+                />
             </div>
         </PageLayout>
     );
