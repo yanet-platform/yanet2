@@ -3302,6 +3302,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "yanet-cli-gateway"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "clap_complete",
+ "colored",
+ "prost-types",
+ "serde",
+ "tabled",
+ "tokio",
+ "tonic",
+ "yanet-cli",
+ "yanet-ynpb",
+]
+
+[[package]]
 name = "yanet-cli-inspect"
 version = "0.1.0"
 dependencies = [
@@ -3532,6 +3548,7 @@ name = "yanet-ynpb"
 version = "0.1.0"
 dependencies = [
  "prost",
+ "prost-types",
  "serde",
  "tonic",
  "tonic-build",

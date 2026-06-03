@@ -7,6 +7,7 @@ rust-version = "1.85"
 
 [dependencies]
 prost = "0.13"
+prost-types = "0.13"
 serde = { version = "1", features = ["derive"] }
 tonic = { version = "0.13", features = ["gzip"] }
 commonpb = { path = "../commonpb", version = "0.1", package = "yanet-commonpb" }

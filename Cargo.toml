@@ -13,6 +13,7 @@ members = [
     "cli/modules/pipeline",
     "cli/modules/function",
     "cli/modules/counters",
+    "cli/modules/gateway",
     "modules/acl/cli",
     "modules/fwstate/cli",
     "modules/decap/cli",

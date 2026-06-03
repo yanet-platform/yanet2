@@ -4,6 +4,10 @@ pub fn main() -> Result<(), Box<dyn Error>> {
     tonic_build::configure()
         .build_server(false)
         .message_attribute(".", "#[derive(serde::Serialize)]")
+        .field_attribute(
+            ".ynpb.RegisteredBackend.last_seen_at",
+            "#[serde(serialize_with = \"crate::serialize_timestamp\")]",
+        )
         .extern_path(".commonpb", "::commonpb::pb")
         .compile_protos(
             &[
@@ -12,6 +16,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
                 "controlplane/ynpb/pipeline.proto",
                 "controlplane/ynpb/inspect.proto",
                 "controlplane/ynpb/counters.proto",
+                "controlplane/ynpb/gateway.proto",
             ],
             &["../../.."],
         )?;
