@@ -3,7 +3,7 @@ import type { RuleItem } from './types';
 import type { RuleRate } from './useForwardRuleCounters';
 import DirectionBadge from './DirectionBadge';
 import AnyBadge from './AnyBadge';
-import Sparkline from './Sparkline';
+import Sparkline from '../_shared/Sparkline';
 import { formatPps } from '../../../utils';
 import { DraftActionButtons } from '../../_shared/draft';
 import { VirtualTable, type Column } from '../../../components/VirtualTable';
@@ -130,7 +130,7 @@ const RuleTable: React.FC<RuleTableProps> = ({
                 const rateData = rateValues.get(item.id) ?? null;
                 return (
                     <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <Sparkline values={rateData?.history ?? null} width={56} height={16} />
+                        <Sparkline values={rateData?.history ?? null} width={56} height={16} emptyTitle="No counter history available from backend" />
                         <span className="yn-cell-pps">
                             {rateData ? formatPps(rateData.pps) : '— pps'}
                         </span>

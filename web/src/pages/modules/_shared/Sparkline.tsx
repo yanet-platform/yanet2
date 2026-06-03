@@ -8,6 +8,10 @@ interface SparklineProps {
     height?: number;
     color?: string;
     fill?: boolean;
+    /** Tooltip on the empty-state placeholder. */
+    emptyTitle?: string;
+    /** When true, the empty placeholder is sized to width×height and centered (acl). */
+    sizeEmptyToBox?: boolean;
 }
 
 const Sparkline: React.FC<SparklineProps> = ({
@@ -16,6 +20,8 @@ const Sparkline: React.FC<SparklineProps> = ({
     height = 18,
     color = 'var(--yn-accent)',
     fill = true,
+    emptyTitle = 'No counter history available',
+    sizeEmptyToBox = false,
 }) => {
     return (
         <MetricSparkline values={values} width={width} height={height} color={color} fill={fill}>
@@ -26,14 +32,8 @@ const Sparkline: React.FC<SparklineProps> = ({
                 return (
                     <span
                         className="yn-spark-empty"
-                        title="No counter history available"
-                        style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            width,
-                            height,
-                        }}
+                        title={emptyTitle}
+                        style={sizeEmptyToBox ? { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width, height } : undefined}
                     >
                         --
                     </span>

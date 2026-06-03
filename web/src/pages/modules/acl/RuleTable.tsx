@@ -14,7 +14,7 @@ import {
 } from './chips';
 import { DraftActionButtons } from '../../_shared/draft';
 import type { RuleRate } from './useAclRuleCounters';
-import Sparkline from './Sparkline';
+import Sparkline from '../_shared/Sparkline';
 import { VirtualTable, type Column } from '../../../components/VirtualTable';
 
 export const DRAWER_TRANSITION_MS = 220;
@@ -49,7 +49,7 @@ const SparklineCell: React.FC<SparklineCellProps> = ({ item, rate, counterEnable
             <span style={{ display: 'flex', alignItems: 'center', gap: 4, width: '100%' }}>
                 {rate ? (
                     <>
-                        <Sparkline values={rate.history} width={120} height={22} />
+                        <Sparkline values={rate.history} width={120} height={22} sizeEmptyToBox />
                         <span className="yn-cell-pps acl-cell-pps" title={`${rate.pps.toFixed(0)} pps`}>
                             {rate.pps >= 1000
                                 ? `${(rate.pps / 1000).toFixed(1)}k`
@@ -58,7 +58,7 @@ const SparklineCell: React.FC<SparklineCellProps> = ({ item, rate, counterEnable
                     </>
                 ) : (
                     <>
-                        <Sparkline values={null} width={120} height={22} />
+                        <Sparkline values={null} width={120} height={22} sizeEmptyToBox />
                         <span className="yn-cell-pps acl-cell-pps acl-pps-loading" title="Waiting for counter data">…</span>
                     </>
                 )}
@@ -77,7 +77,7 @@ const SparklineCell: React.FC<SparklineCellProps> = ({ item, rate, counterEnable
 
     return (
         <span style={{ display: 'flex', alignItems: 'center', gap: 4, width: '100%' }}>
-            <Sparkline values={null} width={120} height={22} />
+            <Sparkline values={null} width={120} height={22} sizeEmptyToBox />
             <span className="yn-cell-pps acl-cell-pps" style={{ color: 'var(--yn-text-3)' }}>—</span>
             <button
                 type="button"
