@@ -3,11 +3,6 @@ export type { DraftState, DraftAction, CreateDraftReducerOptions } from './draft
 export { isValidCIDR } from './cidr';
 export { default as AddConfigModal } from './AddConfigModal';
 export { default as DraftActionButtons, SaveIcon, TrashIcon } from './DraftActionButtons';
-export { useRowHoverOverlay } from './useRowHoverOverlay';
-export type { UseRowHoverOverlayResult } from './useRowHoverOverlay';
-export { default as RemovedRowsSection } from './RemovedRowsSection';
-export { default as RowHoverEditOverlay } from './RowHoverEditOverlay';
-export type { RemovedColumnDescriptor } from './RemovedRowsSection';
 export { default as DraftItemDrawer } from './DraftItemDrawer';
 export { default as DraftPageToolbar } from './DraftPageToolbar';
 export { useDraftShortcuts } from './useDraftShortcuts';

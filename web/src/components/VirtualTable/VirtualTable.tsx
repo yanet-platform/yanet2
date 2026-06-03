@@ -1,8 +1,10 @@
+import './table.scss';
 import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { Checkbox, Tooltip } from '@gravity-ui/uikit';
-import { useRowHoverOverlay, RowHoverEditOverlay } from '../draft';
-import { useContainerHeight } from '../../../hooks/useContainerHeight';
+import { useRowHoverOverlay } from './useRowHoverOverlay';
+import RowHoverEditOverlay from './RowHoverEditOverlay';
+import { useContainerHeight } from '../../hooks/useContainerHeight';
 
 export const ROW_HEIGHT = 44;
 export const HEADER_HEIGHT = 40;
@@ -10,7 +12,8 @@ export const FOOTER_HEIGHT = 28;
 export const OVERSCAN = 15;
 
 const CHECKBOX_TRACK = '38px';
-const INDEX_TRACK = '52px';
+const DEFAULT_INDEX_TRACK = 52;
+const DEFAULT_COLUMN_GAP = 14;
 
 /** Column definition for VirtualTable. */
 export interface Column<T> {
@@ -68,6 +71,21 @@ export interface VirtualTableProps<T> {
     footerExtra?: React.ReactNode;
 
     minWidth: number;
+
+    /** CSS grid column-gap between every track. Defaults to 14px. Pass 0 for gapless (dense) tables. */
+    columnGap?: number;
+    /** Width in px of the index (row-number) leading track. Defaults to 52. */
+    indexWidth?: number;
+    /** Right padding in px applied to each DATA cell wrapper (header + body). Does not apply to the checkbox or index cells. Defaults to 0. */
+    cellPaddingRight?: number;
+    /** Font size in px for the index (row-number) span. Defaults to 12.5. */
+    indexFontSize?: number;
+
+    /**
+     * When provided, renders additional content inside the index cell beneath the
+     * row-number span. Useful for per-row badges (e.g. dead/L2 classification).
+     */
+    renderIndexAdornment?: (row: T, index: number) => React.ReactNode;
 }
 
 /** SVG sort icon — double arrow (unsorted), up arrow (asc), down arrow (desc). */
@@ -160,6 +178,11 @@ export function VirtualTable<T>({
     footerSummary,
     footerExtra,
     minWidth,
+    columnGap = DEFAULT_COLUMN_GAP,
+    indexWidth = DEFAULT_INDEX_TRACK,
+    cellPaddingRight = 0,
+    indexFontSize = 12.5,
+    renderIndexAdornment,
 }: VirtualTableProps<T>): React.JSX.Element {
     const scrollRef = useRef<HTMLDivElement | null>(null);
     const headerRef = useRef<HTMLDivElement | null>(null);
@@ -180,6 +203,13 @@ export function VirtualTable<T>({
         attachScrollEl(el);
     }, [attachScrollEl]);
 
+    const rowVirtualizer = useVirtualizer({
+        count: rows.length,
+        getScrollElement: () => scrollRef.current,
+        estimateSize: () => ROW_HEIGHT,
+        overscan: OVERSCAN,
+    });
+
     const handleBodyScroll = useCallback((e: React.UIEvent<HTMLDivElement>): void => {
         const body = e.currentTarget;
         const header = headerRef.current;
@@ -187,13 +217,6 @@ export function VirtualTable<T>({
             header.scrollLeft = body.scrollLeft;
         }
     }, []);
-
-    const rowVirtualizer = useVirtualizer({
-        count: rows.length,
-        getScrollElement: () => scrollRef.current,
-        estimateSize: () => ROW_HEIGHT,
-        overscan: OVERSCAN,
-    });
 
     useEffect(() => {
         if (!flashRowId) return;
@@ -236,13 +259,12 @@ export function VirtualTable<T>({
 
     const footerText = footerSummary ?? defaultFooterText;
 
-    const gridTemplateColumns = [CHECKBOX_TRACK, INDEX_TRACK, ...columns.map((c) => c.gridTrack)].join(' ');
-    const GRID_COLUMN_GAP = 14;
+    const gridTemplateColumns = [CHECKBOX_TRACK, `${indexWidth}px`, ...columns.map((c) => c.gridTrack)].join(' ');
 
     const gridStyle: React.CSSProperties = {
         display: 'grid',
         gridTemplateColumns,
-        columnGap: GRID_COLUMN_GAP,
+        columnGap,
         alignItems: 'center',
         minWidth,
     };
@@ -281,6 +303,7 @@ export function VirtualTable<T>({
                                     alignItems: 'center',
                                     justifyContent: col.align === 'center' ? 'center' : col.align === 'right' ? 'flex-end' : 'flex-start',
                                     overflow: 'hidden',
+                                    paddingRight: cellPaddingRight || undefined,
                                 }}
                             >
                                 {col.sortKey ? (
@@ -347,6 +370,10 @@ export function VirtualTable<T>({
                                 />
                             );
 
+                            const adornment = renderIndexAdornment
+                                ? renderIndexAdornment(row, virtualRow.index)
+                                : null;
+
                             return (
                                 <div
                                     key={id || virtualRow.index}
@@ -373,8 +400,9 @@ export function VirtualTable<T>({
                                     >
                                         {rowCheckbox}
                                     </div>
-                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--yn-text-3)', fontVariantNumeric: 'tabular-nums', fontFamily: 'var(--yn-font-mono)' }}>
-                                        <span style={{ fontSize: 12.5 }}>{virtualRow.index + 1}</span>
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--yn-text-3)', fontVariantNumeric: 'tabular-nums', fontFamily: 'var(--yn-font-mono)', flexDirection: adornment ? 'column' : undefined, gap: adornment ? 2 : undefined }}>
+                                        <span style={{ fontSize: indexFontSize }}>{virtualRow.index + 1}</span>
+                                        {adornment}
                                     </div>
                                     {columns.map((col) => (
                                         <div
@@ -384,6 +412,7 @@ export function VirtualTable<T>({
                                                 display: 'flex',
                                                 alignItems: 'center',
                                                 justifyContent: col.align === 'center' ? 'center' : col.align === 'right' ? 'flex-end' : 'flex-start',
+                                                paddingRight: cellPaddingRight || undefined,
                                             }}
                                         >
                                             {col.renderCell(row, virtualRow.index)}

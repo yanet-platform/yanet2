@@ -4,8 +4,8 @@ import { ipAddressToString } from '../../../utils/netip';
 import { getRouteId } from './utils';
 import { BestPill, SourceChip, FamilyBadge, ConflictBadge } from './cells';
 import type { RouteSortableColumn, RouteSortState } from './types';
-import { VirtualTable } from '../../_shared/table/VirtualTable';
-import type { Column, SortState } from '../../_shared/table/VirtualTable';
+import { VirtualTable } from '../../../components/VirtualTable';
+import type { Column, SortState } from '../../../components/VirtualTable';
 
 /** Minimum total width before a horizontal scrollbar appears on very narrow viewports. */
 const RIB_MIN_WIDTH = 860;

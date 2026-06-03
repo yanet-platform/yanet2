@@ -16,7 +16,7 @@ import RouteDrawer from './RouteDrawer';
 import LookupDrawer from './LookupDrawer';
 import { getRouteId, sortComparators, planRouteSubmit, groupByPrefix, filterByFamily } from './utils';
 import type { RouteSortState, RouteSortableColumn, IPFamily } from './types';
-import { FamilyFilter } from '../../_shared/table/FamilyFilter';
+import { FamilyFilter } from '../../../components/VirtualTable';
 import '../../../styles/draft-page.scss';
 import './route.scss';
 

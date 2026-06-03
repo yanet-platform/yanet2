@@ -5,9 +5,9 @@
 .yn-table-wrap {
     flex: 1;
     min-height: 0;
-    border: 1px solid var(--yn-line-2);
-    border-radius: 8px;
-    background: var(--yn-panel);
+    border: none;
+    border-radius: 0;
+    background: transparent;
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -29,7 +29,8 @@
     display: flex;
     align-items: center;
     width: 100%;
-    background: var(--yn-panel);
+    background: transparent;
+    border-top: 1px solid var(--yn-line-2);
     border-bottom: 1px solid var(--yn-line-2);
     flex-shrink: 0;
 }
@@ -146,7 +147,7 @@
     justify-content: space-between;
     padding: 0 12px;
     border-top: 1px solid var(--yn-line-2);
-    background: var(--yn-panel);
+    background: transparent;
     flex-shrink: 0;
 
     .yn-toolbar__count {

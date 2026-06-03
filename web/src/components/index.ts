@@ -8,8 +8,38 @@ export * from './InputFormField';
 export * from './FormDialog';
 export * from './ConfirmDialog';
 export * from './CreateEntityDialog';
-export * from './SortableDataTable';
 export * from './SortableTableHeader';
+export {
+    VirtualTable,
+    VirtualDraftTable,
+    ROW_HEIGHT,
+    HEADER_HEIGHT,
+    FOOTER_HEIGHT,
+    OVERSCAN,
+    LEADING_CELL_WIDTHS,
+    LEADING_TOTAL_WIDTH,
+    SortIcon,
+    RowHoverEditOverlay,
+    useRowHoverOverlay,
+    RemovedRowsSection,
+    DotBadge,
+    FamilyFilter,
+    FamilyBadge,
+} from './VirtualTable';
+export type {
+    Column,
+    SortState as VTableSortState,
+    VirtualTableProps,
+    VirtualDraftTableProps,
+    TableColumnHeader,
+    RowStatus,
+    RenderDataCells,
+    UseRowHoverOverlayResult,
+    RemovedColumnDescriptor,
+    DotBadgeProps,
+    FamilyFilterProps,
+    IPFamily,
+} from './VirtualTable';
 export * from './TableSearchBar';
 export * from './CounterDisplay';
 export * from './CountersContext';

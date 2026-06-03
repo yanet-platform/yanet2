@@ -1,12 +1,11 @@
 import React, { useCallback, useMemo, useRef, memo } from 'react';
-import { useContainerHeight } from '../../../hooks';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { Checkbox } from '@gravity-ui/uikit';
-import DraftActionButtons from '../draft/DraftActionButtons';
-import { useRowHoverOverlay } from '../draft/useRowHoverOverlay';
-import RemovedRowsSection from '../draft/RemovedRowsSection';
-import RowHoverEditOverlay from '../draft/RowHoverEditOverlay';
-import type { RemovedColumnDescriptor } from '../draft/RemovedRowsSection';
+import { useContainerHeight } from '../../hooks/useContainerHeight';
+import { useRowHoverOverlay } from './useRowHoverOverlay';
+import RemovedRowsSection from './RemovedRowsSection';
+import RowHoverEditOverlay from './RowHoverEditOverlay';
+import type { RemovedColumnDescriptor } from './RemovedRowsSection';
 
 const ROW_HEIGHT = 44;
 const HEADER_HEIGHT = 40;
@@ -180,10 +179,6 @@ export interface VirtualDraftTableProps<T extends { id: string }> {
     onDragOver: (id: string, e: React.DragEvent) => void;
     onDragLeave: () => void;
     onDrop: (id: string, e: React.DragEvent) => void;
-    currentIsDirty: boolean;
-    onSave: () => void;
-    onDiscard: () => void;
-    onDeleteConfig: () => void;
     /** Total pixel width of all columns combined. */
     totalWidth: number;
     /** Data column header descriptors (right of the 4 fixed leading cells). */
@@ -201,6 +196,11 @@ export interface VirtualDraftTableProps<T extends { id: string }> {
      * pinning the footer flush to the page bottom. Defaults to false (legacy +20px gap).
      */
     flushFooter?: boolean;
+    /**
+     * Optional actions rendered to the right of the column header row.
+     * Pass <DraftActionButtons .../> here to preserve the save/discard/delete cluster.
+     */
+    headerActions?: React.ReactNode;
 }
 
 /** Generic virtualized draft table. Used by FIBTable and PrefixTable. */
@@ -221,10 +221,6 @@ export const VirtualDraftTable = <T extends { id: string }>({
     onDragOver,
     onDragLeave,
     onDrop,
-    currentIsDirty,
-    onSave,
-    onDiscard,
-    onDeleteConfig,
     totalWidth,
     columnHeaders,
     renderDataCells,
@@ -232,10 +228,11 @@ export const VirtualDraftTable = <T extends { id: string }>({
     itemNoun,
     emptyMessage,
     flushFooter = false,
+    headerActions,
 }: VirtualDraftTableProps<T>): React.JSX.Element => {
-    const scrollRef = useRef<HTMLDivElement>(null);
+    const scrollRef = useRef<HTMLDivElement | null>(null);
     const wrapRef = useRef<HTMLDivElement>(null);
-    const bodyHeight = useContainerHeight(scrollRef, 300, flushFooter ? FOOTER_HEIGHT : FOOTER_HEIGHT + 20);
+    const bodyHeight = useContainerHeight(scrollRef as React.RefObject<HTMLElement | null>, 300, flushFooter ? FOOTER_HEIGHT : FOOTER_HEIGHT + 20);
 
     const {
         hoveredRow,
@@ -308,12 +305,7 @@ export const VirtualDraftTable = <T extends { id: string }>({
                         </div>
                     ))}
                 </div>
-                <DraftActionButtons
-                    currentIsDirty={currentIsDirty}
-                    onSave={onSave}
-                    onDiscard={onDiscard}
-                    onDeleteConfig={onDeleteConfig}
-                />
+                {headerActions}
             </div>
 
             <div

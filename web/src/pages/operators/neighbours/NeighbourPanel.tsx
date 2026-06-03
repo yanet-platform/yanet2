@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Bulb, CircleInfo, Layers } from '@gravity-ui/icons';
 import { Select } from '@gravity-ui/uikit';
-import { DotBadge } from '../../_shared/table/DotBadge';
+import { DotBadge } from '../../../components/VirtualTable';
 import { ipAddressToString, stringToIPAddress } from '../../../utils/netip';
 import { formatUnixSeconds } from '../../../utils';
 import type { Neighbour, NeighbourTableInfo } from '../../../api/neighbours';

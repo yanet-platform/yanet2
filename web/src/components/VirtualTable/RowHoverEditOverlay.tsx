@@ -1,5 +1,11 @@
 import React from 'react';
-import { TrashIcon } from './DraftActionButtons';
+
+/** Trash / delete icon. */
+const TrashIcon = (): React.JSX.Element => (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M5 7h14M9 7V5h6v2M7 7l1 12h8l1-12" />
+    </svg>
+);
 
 interface RowHoverEditOverlayProps {
     /** Top offset in px from useRowHoverOverlay's overlayTopOffset. */

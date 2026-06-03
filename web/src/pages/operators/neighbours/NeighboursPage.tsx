@@ -16,7 +16,7 @@ import { useNeighbours } from './useNeighbours';
 import { getNeighbourId, isSortableColumn, isSortDirection, sortComparators } from './utils';
 import { MERGED_TAB, DEFAULT_SORT } from './types';
 import type { SortState, SortableColumn } from './types';
-import { FamilyFilter, type IPFamily } from '../../_shared/table/FamilyFilter';
+import { FamilyFilter, type IPFamily } from '../../../components/VirtualTable';
 import { nudStateToName, STATE_META } from './stateMeta';
 import '../../../styles/draft-page.scss';
 import '../../_shared/command-palette/command-palette.scss';

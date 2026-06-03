@@ -6,7 +6,7 @@ import AnyBadge from './AnyBadge';
 import Sparkline from './Sparkline';
 import { formatPps } from '../../../utils';
 import { DraftActionButtons } from '../../_shared/draft';
-import { VirtualTable, type Column } from '../../_shared/table/VirtualTable';
+import { VirtualTable, type Column } from '../../../components/VirtualTable';
 
 /** Duration in ms of the CSS transition on .yn-drawer — keep in sync with SCSS. */
 const DRAWER_TRANSITION_MS = 220;

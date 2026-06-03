@@ -1,9 +1,9 @@
 import React, { useMemo } from 'react';
 import type { FIBRowItem, FIBRowStatus } from './types';
 import { validateRow } from './validation';
-import { VirtualDraftTable, LEADING_TOTAL_WIDTH } from '../../_shared/table/VirtualDraftTable';
-import type { RemovedColumnDescriptor } from '../../_shared/draft/RemovedRowsSection';
-import type { TableColumnHeader } from '../../_shared/table/VirtualDraftTable';
+import { VirtualDraftTable, LEADING_TOTAL_WIDTH } from '../../../components/VirtualTable';
+import type { RemovedColumnDescriptor, TableColumnHeader, RowStatus } from '../../../components/VirtualTable';
+import { DraftActionButtons } from '../../_shared/draft';
 
 const COLUMN_WIDTHS = {
     prefix: 220,
@@ -92,7 +92,7 @@ export interface FIBTableProps {
 /** Virtualized FIB table backed by VirtualDraftTable. */
 export const FIBTable: React.FC<FIBTableProps> = (props) => {
     const statusById = useMemo(
-        () => props.statusById as Map<string, import('../../_shared/table/VirtualDraftTable').RowStatus>,
+        () => props.statusById as Map<string, RowStatus>,
         [props.statusById],
     );
 
@@ -107,6 +107,14 @@ export const FIBTable: React.FC<FIBTableProps> = (props) => {
             itemNoun="route"
             emptyMessage="No routes match your search."
             flushFooter
+            headerActions={
+                <DraftActionButtons
+                    currentIsDirty={props.currentIsDirty}
+                    onSave={props.onSave}
+                    onDiscard={props.onDiscard}
+                    onDeleteConfig={props.onDeleteConfig}
+                />
+            }
         />
     );
 };

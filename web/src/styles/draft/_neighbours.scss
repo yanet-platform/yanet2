@@ -407,21 +407,6 @@
     padding: 0;
 }
 
-.nb-page .yn-table-wrap {
-    background: transparent;
-    border: none;
-    border-radius: 0;
-}
-
-.nb-page .yn-table-header-row {
-    background: transparent;
-    border-top: 1px solid var(--yn-line-2);
-}
-
-.nb-page .yn-vtbl-footer {
-    background: transparent;
-}
-
 // Surface color — mirrors the ro-layout/ro-page pattern from route.scss, scoped to neighbours.
 // The --nb-surface-bg token cascades from .nb-layout to both the header subtree
 // and the .nb-page content subtree, keeping both on the same flat #1C1814 plane.

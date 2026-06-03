@@ -1,7 +1,7 @@
 import React from 'react';
 import { ROUTE_SOURCES } from './utils';
-import { FamilyBadge as SharedFamilyBadge } from '../../_shared/table/cells';
-import { DotBadge } from '../../_shared/table/DotBadge';
+import { FamilyBadge as SharedFamilyBadge } from '../../../components/VirtualTable';
+import { DotBadge } from '../../../components/VirtualTable';
 
 /** Inline checkmark SVG for the Best column. */
 const CheckIcon: React.FC = () => (

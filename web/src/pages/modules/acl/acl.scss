@@ -557,19 +557,6 @@
     z-index: 1000;
 }
 
-// The header outer div is a clipping container only — the inner div is
-// translated horizontally in sync with the body scroll via transform.
-// overflow-x: hidden overrides the auto set by draft-page.scss.
-.acl-table .yn-vtbl-header {
-    overflow-x: hidden !important;
-    scrollbar-width: none;
-    -ms-overflow-style: none;
-
-    &::-webkit-scrollbar {
-        display: none;
-    }
-}
-
 // Row classification badges — shown in the index cell and in the drawer header.
 .acl-rule-badge {
     display: inline-flex;

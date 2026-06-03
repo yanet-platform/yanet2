@@ -1,6 +1,6 @@
 export type RouteSortableColumn = 'prefix' | 'next_hop' | 'peer' | 'is_best' | 'pref' | 'as_path_len' | 'source';
 export type SortDirection = 'asc' | 'desc';
-export type { IPFamily } from '../../_shared/table/FamilyFilter';
+export type { IPFamily } from '../../../components/VirtualTable';
 
 export interface RouteSortState {
     column: RouteSortableColumn | null;
