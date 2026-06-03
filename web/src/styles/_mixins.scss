@@ -38,3 +38,33 @@
     padding: 12px 20px;
     flex-shrink: 0;
 }
+
+/** Side-by-side diff dialog chrome — shared by fn-diff-dialog and pl-diff-dialog. */
+@mixin diff-dialog($page-bg, $line) {
+    // Override Gravity's size="l" to be wide enough for side-by-side split view.
+    .g-dialog__content {
+        width: min(1100px, 92vw);
+        max-width: none;
+    }
+
+    &__body {
+        padding: 0 !important;
+    }
+
+    &__content {
+        background: $page-bg;
+    }
+
+    &__error-bar {
+        padding: 6px 16px;
+        background: color-mix(in srgb, var(--g-color-text-danger) 8%, transparent);
+        border-bottom: 1px solid $line;
+        flex-shrink: 0;
+    }
+
+    &__scroll {
+        overflow: auto;
+        max-height: min(70vh, 600px);
+        padding: 12px 16px 16px;
+    }
+}
