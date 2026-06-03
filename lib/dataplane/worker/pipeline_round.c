@@ -32,7 +32,9 @@ worker_pipeline_round(
 		       ) != NULL) {
 			empty = 0;
 			device_ectx_schedule_input(
-				devices[packet->tx_device_id], packet
+				devices[packet->tx_device_id],
+				packet,
+				dp_worker->idx
 			);
 		}
 
@@ -48,7 +50,9 @@ worker_pipeline_round(
 		       ) != NULL) {
 			empty = 0;
 			device_ectx_schedule_output(
-				devices[packet->tx_device_id], packet
+				devices[packet->tx_device_id],
+				packet,
+				dp_worker->idx
 			);
 		}
 

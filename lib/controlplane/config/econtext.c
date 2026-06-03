@@ -3,6 +3,9 @@
 #include <string.h>
 
 // cp_config and cp_config_gen
+#include "common/memory.h"
+#include "common/memory_address.h"
+#include "dataplane/module/packet_front.h"
 #include "lib/controlplane/config/zone.h"
 #include "lib/errors/errors.h"
 
@@ -782,6 +785,7 @@ device_ectx_free(
 	struct cp_config_gen *cp_config_gen, struct device_ectx *device_ectx
 ) {
 	struct cp_config *cp_config = ADDR_OF(&cp_config_gen->cp_config);
+	struct dp_config *dp_config = ADDR_OF(&cp_config->dp_config);
 	struct memory_context *memory_context = &cp_config->ectx_memory_context;
 
 	struct device_entry_ectx *input =
@@ -797,6 +801,13 @@ device_ectx_free(
 		ADDR_OF(&device_ectx->counter_storage);
 	if (counter_storage != NULL)
 		counter_storage_free(counter_storage);
+
+	struct packet_front *pending = ADDR_OF(&device_ectx->pending_input);
+	memory_bfree(
+		memory_context,
+		pending,
+		sizeof(*pending) * 2 * dp_config->worker_count
+	);
 
 	size_t ectx_size = sizeof(struct device_ectx);
 	memory_bfree(memory_context, device_ectx, ectx_size);
@@ -826,9 +837,29 @@ device_ectx_create(
 		return NULL;
 	}
 
+	struct packet_front *pending = memory_balloc(
+		memory_context, sizeof(*pending) * 2 * dp_config->worker_count
+	);
+	if (pending == NULL) {
+		yanet_error_add(
+			err, "failed to allocate memory for pending pipelines"
+		);
+		memory_bfree(memory_context, device_ectx, ectx_size);
+		return NULL;
+	}
+
+	struct packet_front *pending_input = pending;
+	struct packet_front *pending_output = pending + dp_config->worker_count;
+	for (uint64_t worker_idx = 0; worker_idx < dp_config->worker_count;
+	     ++worker_idx) {
+		packet_front_init(pending_input + worker_idx);
+		packet_front_init(pending_output + worker_idx);
+	}
+
 	memset(device_ectx, 0, ectx_size);
-	packet_front_init(&device_ectx->pending_input);
-	packet_front_init(&device_ectx->pending_output);
+
+	SET_OFFSET_OF(&device_ectx->pending_input, pending_input);
+	SET_OFFSET_OF(&device_ectx->pending_output, pending_output);
 	SET_OFFSET_OF(&device_ectx->cp_device, cp_device);
 
 	struct counter_storage *old_counter_storage =

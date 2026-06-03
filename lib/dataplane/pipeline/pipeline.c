@@ -287,7 +287,8 @@ device_ectx_process_input(
 	struct device_ectx *device_ectx,
 	struct packet_front *packet_front
 ) {
-	struct packet_front *pending = &device_ectx->pending_input;
+	struct packet_front *pending =
+		ADDR_OF(&device_ectx->pending_input) + dp_worker->idx;
 	if (pending->input.count == 0) {
 		return;
 	}
@@ -314,7 +315,8 @@ device_ectx_process_output(
 	struct device_ectx *device_ectx,
 	struct packet_front *packet_front
 ) {
-	struct packet_front *pending = &device_ectx->pending_output;
+	struct packet_front *pending =
+		ADDR_OF(&device_ectx->pending_output) + dp_worker->idx;
 	if (pending->input.count == 0) {
 		return;
 	}
