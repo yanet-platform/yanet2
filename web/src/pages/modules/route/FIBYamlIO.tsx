@@ -8,10 +8,11 @@ interface FIBYamlIOProps {
     configName: string;
     rows: FIBRowItem[];
     onImport: (rows: FIBRowItem[], mode: 'replace' | 'append') => void;
+    disabled?: boolean;
 }
 
 /** YAML import/export controls for the FIB page header. */
-const FIBYamlIO: React.FC<FIBYamlIOProps> = ({ configName, rows, onImport }) => {
+const FIBYamlIO: React.FC<FIBYamlIOProps> = ({ configName, rows, onImport, disabled }) => {
     const [importMode, setImportMode] = useState<'replace' | 'append'>('replace');
 
     const handleImport = (text: string): void => {
@@ -55,6 +56,7 @@ const FIBYamlIO: React.FC<FIBYamlIOProps> = ({ configName, rows, onImport }) => 
             importFooterHint="Loads into current config as draft. Use Commit to push to server."
             importButtonLabel="Load as draft"
             importExtraControls={importExtraControls}
+            disabled={disabled}
         />
     );
 };

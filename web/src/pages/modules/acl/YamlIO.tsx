@@ -54,13 +54,14 @@ interface YamlIOProps {
     configName: string;
     rules: Rule[];
     onImport: (configName: string, rules: Rule[], mode: ImportMode) => void;
+    disabled?: boolean;
 }
 
 const rulesToInAclJson = (configName: string, rules: Rule[]): string =>
     JSON.stringify({ name: configName, rules: rulesToYamlObjects(rules) }, null, 2) + '\n';
 
 /** YAML/JSON import/export controls for the ACL NG page header. */
-const YamlIO: React.FC<YamlIOProps> = ({ configName, rules, onImport }) => {
+const YamlIO: React.FC<YamlIOProps> = ({ configName, rules, onImport, disabled }) => {
     const [mode, setMode] = useState<ImportMode>('replace');
 
     useEffect(() => {
@@ -106,6 +107,7 @@ const YamlIO: React.FC<YamlIOProps> = ({ configName, rules, onImport }) => {
             exportJson={() => rulesToInAclJson(configName, rules)}
             onImportAsync={handleImportAsync}
             toastPrefix="acl-yaml"
+            disabled={disabled}
             importPlaceholder={
                 'rules:\n' +
                 '  - srcs:\n' +

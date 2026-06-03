@@ -60,6 +60,8 @@ export interface YamlIOModalProps {
      * If not provided alongside supportJson, the toggle is hidden and export falls back to YAML.
      */
     exportJson?: () => string;
+    /** When true, the Import and Export trigger buttons are disabled. Default: false. */
+    disabled?: boolean;
 }
 
 /**
@@ -84,6 +86,7 @@ const YamlIOModal: React.FC<YamlIOModalProps> = ({
     importButtonLabel = 'Import',
     importExtraControls,
     supportJson = false,
+    disabled = false,
 }) => {
     const [showModal, setShowModal] = useState<YamlIOMode>(null);
     // textContent holds the actual text string; textarea only shows it when small.
@@ -337,11 +340,11 @@ const YamlIOModal: React.FC<YamlIOModalProps> = ({
 
     return (
         <>
-            <Button view="outlined" onClick={() => setShowModal('import')}>
+            <Button view="outlined" onClick={() => setShowModal('import')} disabled={disabled}>
                 <Icon data={ArrowDownToLine} size={14} />
                 {importLabel}
             </Button>
-            <Button view="outlined" onClick={() => setShowModal('export')}>
+            <Button view="outlined" onClick={() => setShowModal('export')} disabled={disabled}>
                 <Icon data={ArrowUpFromLine} size={14} />
                 {exportLabel}
             </Button>

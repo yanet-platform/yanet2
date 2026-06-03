@@ -406,14 +406,13 @@ const ForwardPage: React.FC = () => {
                 <span className="cp-trigger__placeholder">Search rules or run an action…</span>
                 <kbd className="cp-kbd">⌘K</kbd>
             </button>
-            {currentConfig && (
-                <YamlIO
-                    key={currentConfig}
-                    configName={currentConfig}
-                    rules={rawRules}
-                    onImport={handleImportYaml}
-                />
-            )}
+            <YamlIO
+                key={currentConfig || '__none'}
+                configName={currentConfig}
+                rules={rawRules}
+                onImport={handleImportYaml}
+                disabled={!currentConfig}
+            />
             <Button view="action" onClick={openAdd}>
                 <Icon data={Plus} size={16} />
                 Add Rule

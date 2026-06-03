@@ -175,9 +175,7 @@ const RoutePage: React.FC = () => {
                 searchValue={search}
                 onSearchChange={handleSearchChange}
                 searchPlaceholder="Search prefix, MAC or device…"
-                yamlSlot={currentConfig ? (
-                    <FIBYamlIO key={currentConfig} configName={currentConfig} rows={rawRows} onImport={handlers.handleImportYaml} />
-                ) : undefined}
+                yamlSlot={<FIBYamlIO key={currentConfig || '__none'} configName={currentConfig} rows={rawRows} onImport={handlers.handleImportYaml} disabled={!currentConfig} />}
             addLabel="Add Route"
             onAdd={openAdd}
         />

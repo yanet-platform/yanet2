@@ -103,10 +103,12 @@ interface YamlIOProps {
     rules: Rule[];
     /** Called when user imports rules into a config. Receives the target config name and parsed rules. */
     onImport: (configName: string, rules: Rule[]) => void;
+    /** When true, the Import and Export trigger buttons are disabled. Default: false. */
+    disabled?: boolean;
 }
 
 /** YAML import/export controls rendered inline in the page header. */
-const YamlIO: React.FC<YamlIOProps> = ({ configName, rules, onImport }) => {
+const YamlIO: React.FC<YamlIOProps> = ({ configName, rules, onImport, disabled }) => {
     const [importConfigName, setImportConfigName] = useState(configName);
 
     const handleImport = (text: string): void => {
@@ -148,6 +150,7 @@ const YamlIO: React.FC<YamlIOProps> = ({ configName, rules, onImport }) => {
             importFooterHint="Importing replaces all rules in the target config locally. Use Save to push to the server."
             importButtonLabel="Import"
             importExtraControls={importExtraControls}
+            disabled={disabled}
         />
     );
 };

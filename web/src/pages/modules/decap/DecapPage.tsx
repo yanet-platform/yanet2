@@ -162,9 +162,7 @@ const DecapPage: React.FC = () => {
                     updateParams({ [QP_SEARCH]: value || null });
                 }}
                 searchPlaceholder="Search prefix…"
-                yamlSlot={currentConfig ? (
-                <PrefixYamlIO key={currentConfig} configName={currentConfig} rows={rawRows} onImport={handlers.handleImportYaml} />
-            ) : undefined}
+                yamlSlot={<PrefixYamlIO key={currentConfig || '__none'} configName={currentConfig} rows={rawRows} onImport={handlers.handleImportYaml} disabled={!currentConfig} />}
             addLabel="Add Prefix"
             onAdd={openAdd}
         />

@@ -8,10 +8,11 @@ interface PrefixYamlIOProps {
     configName: string;
     rows: PrefixRowItem[];
     onImport: (rows: PrefixRowItem[], mode: 'replace' | 'append') => void;
+    disabled?: boolean;
 }
 
 /** YAML import/export controls for the decap page header. */
-const PrefixYamlIO: React.FC<PrefixYamlIOProps> = ({ configName, rows, onImport }) => {
+const PrefixYamlIO: React.FC<PrefixYamlIOProps> = ({ configName, rows, onImport, disabled }) => {
     const [importMode, setImportMode] = useState<'replace' | 'append'>('replace');
 
     const handleImport = (text: string): void => {
@@ -55,6 +56,7 @@ const PrefixYamlIO: React.FC<PrefixYamlIOProps> = ({ configName, rows, onImport 
             importFooterHint="Loads into current config as draft. Use Commit to push to server."
             importButtonLabel="Load as draft"
             importExtraControls={importExtraControls}
+            disabled={disabled}
         />
     );
 };

@@ -341,14 +341,7 @@ const AclPage: React.FC = () => {
                     {paused ? 'Resume' : 'Pause'}
                 </Button>
             )}
-            {currentConfig && (
-                <YamlIO
-                    key={currentConfig}
-                    configName={currentConfig}
-                    rules={rawRules}
-                    onImport={handleImportYaml}
-                />
-            )}
+            <YamlIO key={currentConfig || '__none'} configName={currentConfig} rules={rawRules} onImport={handleImportYaml} disabled={!currentConfig} />
             <Button view="action" onClick={openAdd}>
                 <Icon data={Plus} size={16} />
                 Add Rule
