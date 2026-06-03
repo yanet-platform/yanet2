@@ -33,6 +33,29 @@
     flex: initial;
 }
 
+/* Page header 3-column grid: title | search pill (centered) | actions */
+.page-header-bar {
+    --cp-max: 520px;
+    --hdr-gap: 16px;
+    display: grid;
+    grid-template-columns:
+        minmax(min-content, calc(50% - var(--cp-max) / 2 - var(--gn-aside-header-size, 56px) / 2 - var(--hdr-gap)))
+        minmax(0, var(--cp-max))
+        minmax(min-content, 1fr);
+    align-items: center;
+    gap: var(--hdr-gap);
+    width: 100%;
+    min-width: 0;
+}
+
+.page-header-bar__actions {
+    display: flex;
+    align-items: center;
+    gap: var(--hdr-gap);
+    justify-content: flex-end;
+    min-width: 0;
+}
+
 /* PageLayout */
 .page-layout {
     flex: 1;

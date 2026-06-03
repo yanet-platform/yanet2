@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Button, Flex, Icon, Text } from '@gravity-ui/uikit';
+import { Button, Icon, Text } from '@gravity-ui/uikit';
 import { useSearchParams } from 'react-router-dom';
 import { Funnel, Magnifier, Plus } from '@gravity-ui/icons';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, SearchInput } from '../../../components';
@@ -394,7 +394,7 @@ const ForwardPage: React.FC = () => {
     };
 
     const pageHeader = (
-        <Flex alignItems="center" gap={4} style={{ width: '100%' }}>
+        <div className="page-header-bar">
             <Text variant="header-1">Forward</Text>
             <button
                 type="button"
@@ -406,18 +406,20 @@ const ForwardPage: React.FC = () => {
                 <span className="cp-trigger__placeholder">Search rules or run an action…</span>
                 <kbd className="cp-kbd">⌘K</kbd>
             </button>
-            <YamlIO
-                key={currentConfig || '__none'}
-                configName={currentConfig}
-                rules={rawRules}
-                onImport={handleImportYaml}
-                disabled={!currentConfig}
-            />
-            <Button view="action" onClick={openAdd}>
-                <Icon data={Plus} size={16} />
-                Add Rule
-            </Button>
-        </Flex>
+            <div className="page-header-bar__actions">
+                <YamlIO
+                    key={currentConfig || '__none'}
+                    configName={currentConfig}
+                    rules={rawRules}
+                    onImport={handleImportYaml}
+                    disabled={!currentConfig}
+                />
+                <Button view="action" onClick={openAdd}>
+                    <Icon data={Plus} size={16} />
+                    Add Rule
+                </Button>
+            </div>
+        </div>
     );
 
     if (loading) {

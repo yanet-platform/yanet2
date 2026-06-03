@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Button, Flex, Icon, Text } from '@gravity-ui/uikit';
+import { Button, Icon, Text } from '@gravity-ui/uikit';
 import { Plus, Layers, Magnifier } from '@gravity-ui/icons';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar } from '../../../components';
 import { BulkDeleteModal, DeleteConfigModal } from '../../../components';
@@ -515,7 +515,7 @@ const NeighboursPage: React.FC = () => {
     const searchActive = family !== 'all' || !!stateFilter;
 
     const pageHeader = (
-        <Flex alignItems="center" gap={4} style={{ width: '100%' }}>
+        <div className="page-header-bar">
             <Text variant="header-1">Neighbours</Text>
             <button
                 type="button"
@@ -527,15 +527,17 @@ const NeighboursPage: React.FC = () => {
                 <span className="cp-trigger__placeholder">Search neighbours or type an IP…</span>
                 <kbd className="cp-kbd">⌘K</kbd>
             </button>
-            <Button view="outlined" onClick={() => setCreateTableOpen(true)}>
-                <Icon data={Plus} size={16} />
-                Add Table
-            </Button>
-            <Button view="action" onClick={openAdd} disabled={tables.length === 0}>
-                <Icon data={Plus} size={16} />
-                Add Neighbour
-            </Button>
-        </Flex>
+            <div className="page-header-bar__actions">
+                <Button view="outlined" onClick={() => setCreateTableOpen(true)}>
+                    <Icon data={Plus} size={16} />
+                    Add Table
+                </Button>
+                <Button view="action" onClick={openAdd} disabled={tables.length === 0}>
+                    <Icon data={Plus} size={16} />
+                    Add Neighbour
+                </Button>
+            </div>
+        </div>
     );
 
     if (loading) {

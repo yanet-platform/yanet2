@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Button, Flex, Icon, Text } from '@gravity-ui/uikit';
+import { Button, Icon, Text } from '@gravity-ui/uikit';
 import { ArrowRightToLine, Funnel, Magnifier, Plus } from '@gravity-ui/icons';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, SearchInput } from '../../../components';
 import { AddConfigModal } from '../../_shared/draft';
@@ -383,7 +383,7 @@ const RoutePage: React.FC = () => {
     };
 
     const pageHeader = (
-        <Flex alignItems="center" gap={4} style={{ width: '100%' }}>
+        <div className="page-header-bar">
             <Text variant="header-1">Routing Table</Text>
             <button
                 type="button"
@@ -395,15 +395,17 @@ const RoutePage: React.FC = () => {
                 <span className="cp-trigger__placeholder">Search or look up an IP…</span>
                 <kbd className="cp-kbd">⌘K</kbd>
             </button>
-            <Button view="outlined" onClick={handleFlush} disabled={!currentConfig}>
-                <Icon data={ArrowRightToLine} size={16} />
-                Flush RIB → FIB
-            </Button>
-            <Button view="action" onClick={openAdd} disabled={configs.length === 0}>
-                <Icon data={Plus} size={16} />
-                Add Route
-            </Button>
-        </Flex>
+            <div className="page-header-bar__actions">
+                <Button view="outlined" onClick={handleFlush} disabled={!currentConfig}>
+                    <Icon data={ArrowRightToLine} size={16} />
+                    Flush RIB → FIB
+                </Button>
+                <Button view="action" onClick={openAdd} disabled={configs.length === 0}>
+                    <Icon data={Plus} size={16} />
+                    Add Route
+                </Button>
+            </div>
+        </div>
     );
 
     if (loading && configs.length === 0) {
