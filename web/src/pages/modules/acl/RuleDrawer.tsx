@@ -3,7 +3,8 @@ import { ActionKind, ACTION_KIND_LABELS } from '../../../api/acl';
 import { TrashIcon } from '../../_shared/draft/DraftActionButtons';
 import type { RuleDraft, RuleItem } from './types';
 import { emptyDraft } from './types';
-import { itemToDraft, isValidCidr, isValidDeviceName, defaultCounterName, draftToRule, expandRule, deadReasonText } from './hooks';
+import { itemToDraft, defaultCounterName, draftToRule, expandRule, deadReasonText } from './hooks';
+import { isValidCidr, isValidDeviceName } from '../../../utils';
 import ChipInput from './ChipInput';
 import type { ChipInputHandle } from './ChipInput';
 

@@ -3,7 +3,8 @@ import { ForwardMode } from '../../../api/forward';
 import { MODE_LABELS } from './types';
 import type { RuleDraft, RuleItem } from './types';
 import { emptyDraft } from './types';
-import { itemToDraft, isValidCidr, isValidDeviceName } from './hooks';
+import { itemToDraft } from './hooks';
+import { isValidCidr, isValidDeviceName } from '../../../utils';
 import ChipInput from './ChipInput';
 import type { ChipInputHandle } from './ChipInput';
 
