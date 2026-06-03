@@ -2,9 +2,10 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AsideHeader } from '@gravity-ui/navigation';
 import type { MenuItem as AsideHeaderMenuItem } from '@gravity-ui/navigation';
-import { Link, Eye, Route, CurlyBracketsFunction, ListUl, HardDrive, LayoutCellsLarge, CirclePlay, Shield, ArrowRight } from '@gravity-ui/icons';
 import Logo from './icons/Logo';
 import type { PageId } from './types';
+import { navItems } from './navItems';
+import type { NavSection } from './navItems';
 import './MainMenu.scss';
 
 interface MainMenuProps {
@@ -58,25 +59,20 @@ const MainMenu = ({ currentPage, onPageChange, renderContent, disabled = false }
         onItemClick: undefined,
     });
 
-    const menuItems: NavMenuItem[] = [
-        createSectionHeader('__section_builtin', 'Builtin'),
-        createMenuItem('builtin/inspect', 'Inspect', Eye),
-        createMenuItem('builtin/functions', 'Functions', CurlyBracketsFunction),
-        createMenuItem('builtin/pipelines', 'Pipelines', ListUl),
-        createMenuItem('builtin/devices', 'Devices', HardDrive),
-        createDivider('__div_1'),
-        createSectionHeader('__section_modules', 'Modules'),
-        createMenuItem('modules/forward', 'Forward', ArrowRight),
-        createMenuItem('modules/route', 'Route', Route),
-        createMenuItem('modules/decap', 'Decap', LayoutCellsLarge),
-        createMenuItem('modules/acl', 'ACL', Shield),
-        createMenuItem('modules/fwstate', 'FWState', Shield),
-        createMenuItem('modules/pdump', 'Pdump', CirclePlay),
-        createDivider('__div_2'),
-        createSectionHeader('__section_operators', 'Operators'),
-        createMenuItem('operators/route', 'Route', Route),
-        createMenuItem('operators/neighbours', 'Neighbours', Link),
-    ];
+    const menuItems: NavMenuItem[] = [];
+    let lastSection: NavSection | null = null;
+    let dividerIdx = 0;
+
+    for (const item of navItems) {
+        if (item.section !== lastSection) {
+            if (lastSection !== null) {
+                menuItems.push(createDivider(`__div_${dividerIdx++}`));
+            }
+            menuItems.push(createSectionHeader(`__section_${item.section}`, item.section));
+            lastSection = item.section;
+        }
+        menuItems.push(createMenuItem(item.id, item.title, item.icon));
+    }
 
     return (
         <AsideHeader

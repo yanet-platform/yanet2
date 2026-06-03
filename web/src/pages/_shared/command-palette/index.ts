@@ -5,3 +5,6 @@ export { fuzzyMatch } from './fuzzy';
 export type { FuzzyMatchResult } from './fuzzy';
 export { default as CommandPaletteTrigger, PALETTE_SHORTCUT_LABEL } from './CommandPaletteTrigger';
 export { usePaletteShortcut } from './usePaletteShortcut';
+export { PaletteProvider, usePalette } from './PaletteContext';
+export type { PagePaletteContribution } from './PaletteContext';
+export { navigationCommands } from './navigationCommands';

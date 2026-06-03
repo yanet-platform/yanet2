@@ -19,6 +19,7 @@ import { SaveDiffModal } from './SaveDiffModal';
 import { useAclRuleCounters } from './useAclRuleCounters';
 import { AddConfigModal } from '../../_shared/draft';
 import { DeleteConfigModal, BulkDeleteModal } from '../../../components';
+import { useTabCycle } from '../../_shared/useTabCycle';
 import '../../../styles/draft-page.scss';
 import './acl.scss';
 
@@ -273,6 +274,13 @@ const AclPage: React.FC = () => {
     const handleTabSelect = useCallback((cfg: string): void => {
         updateParams({ [QP_CONFIG]: cfg || null });
     }, [updateParams]);
+
+    useTabCycle({
+        tabs: draftConfigs,
+        activeTab: currentConfig,
+        onSelect: handleTabSelect,
+        enabled: !loading,
+    });
 
     const handleSearchChange = useCallback((value: string): void => {
         updateParams({ [QP_SEARCH]: value || null });

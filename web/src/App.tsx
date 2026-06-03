@@ -4,6 +4,8 @@ import MainMenu from './MainMenu';
 import { PageLoader } from './components';
 import type { PageId, SidebarContextValue } from './types';
 import { PAGE_IDS, SidebarContext } from './types';
+import { PaletteProvider, usePalette, CommandPalette, navigationCommands } from './pages/_shared/command-palette';
+import type { RowAdapter } from './pages/_shared/command-palette';
 
 const importInspect = () => import('./pages/builtin/inspect/InspectPage');
 const importDashboard = () => import('./pages/builtin/dashboard/DashboardPage');
@@ -52,6 +54,37 @@ const NeighboursPage = lazy(importNeighbours);
 type IdleHandle = number;
 type RequestIdleCallback = (cb: () => void, opts?: { timeout: number }) => IdleHandle;
 type CancelIdleCallback = (id: IdleHandle) => void;
+
+/** Global command palette instance that reads contributions from context at render time. */
+const GlobalPalette = ({ handlePageChange }: { handlePageChange: (id: PageId) => void }): React.JSX.Element => {
+    const { open, closePalette, contribution } = usePalette();
+    const navCmds = useMemo(() => navigationCommands(handlePageChange), [handlePageChange]);
+
+    const commands = useMemo(() => {
+        const pageCmds = contribution?.commands ?? [];
+        return [...pageCmds, ...navCmds];
+    }, [contribution, navCmds]);
+
+    const dynamicCommands = useMemo(() => {
+        const pageDynamic = contribution?.dynamicCommands;
+        if (!pageDynamic) return undefined;
+        return pageDynamic;
+    }, [contribution]);
+
+    const rowAdapter = contribution?.rowAdapter as RowAdapter<unknown> | undefined;
+    const placeholder = contribution?.placeholder ?? 'Search or jump to a page…';
+
+    return (
+        <CommandPalette<unknown>
+            open={open}
+            onClose={closePalette}
+            placeholder={placeholder}
+            commands={commands}
+            dynamicCommands={dynamicCommands}
+            rowAdapter={rowAdapter}
+        />
+    );
+};
 
 const AppContent = (): React.JSX.Element => {
     const location = useLocation();
@@ -110,7 +143,7 @@ const AppContent = (): React.JSX.Element => {
 
     const currentPage = getCurrentPage();
 
-    const handlePageChange = (pageId: PageId): void => {
+    const handlePageChange = useCallback((pageId: PageId): void => {
         const guard = unsavedGuardRef.current;
         if (guard && guard()) {
             const ok = window.confirm('You have unsaved changes. Leave this page anyway?');
@@ -119,7 +152,7 @@ const AppContent = (): React.JSX.Element => {
             }
         }
         navigate(`/${pageId}`);
-    };
+    }, [navigate]);
 
     const handleSetSidebarDisabled = useCallback((disabled: boolean) => {
         setSidebarDisabled(disabled);
@@ -136,46 +169,49 @@ const AppContent = (): React.JSX.Element => {
 
     return (
         <SidebarContext.Provider value={sidebarContextValue}>
-            <MainMenu
-                currentPage={currentPage}
-                onPageChange={handlePageChange}
-                disabled={sidebarDisabled}
-                renderContent={() => (
-                    <div className="app-surface">
-                        <Suspense fallback={<PageLoader loading size="l" />}>
-                            <Routes>
-                                <Route path="/" element={<Navigate to="/builtin/dashboard" replace />} />
-                                <Route path="/builtin/inspect" element={<InspectPage />} />
-                                <Route path="/builtin/dashboard" element={<DashboardPage />} />
-                                <Route path="/builtin/functions" element={<FunctionsPage />} />
-                                <Route path="/builtin/functions-ng" element={<Navigate to="/builtin/functions" replace />} />
-                                <Route path="/builtin/pipelines" element={<PipelinesPage />} />
-                                <Route path="/builtin/devices" element={<DevicesPage />} />
-                                <Route path="/modules/forward" element={<ForwardPage />} />
-                                <Route path="/modules/decap" element={<DecapPage />} />
-                                <Route path="/modules/acl" element={<AclPage />} />
-                                <Route path="/modules/fwstate" element={<FWStatePage />} />
-                                <Route path="/modules/pdump" element={<PdumpPage />} />
-                                <Route path="/modules/route" element={<ModulesRoutePage />} />
-                                <Route path="/operators/route" element={<OperatorsRoutePage />} />
-                                <Route path="/operators/neighbours" element={<NeighboursPage />} />
-                                <Route path="/inspect" element={<Navigate to="/builtin/inspect" replace />} />
-                                <Route path="/dashboard" element={<Navigate to="/builtin/dashboard" replace />} />
-                                <Route path="/functions" element={<Navigate to="/builtin/functions" replace />} />
-                                <Route path="/pipelines" element={<Navigate to="/builtin/pipelines" replace />} />
-                                <Route path="/devices" element={<Navigate to="/builtin/devices" replace />} />
-                                <Route path="/forward" element={<Navigate to="/modules/forward" replace />} />
-                                <Route path="/decap" element={<Navigate to="/modules/decap" replace />} />
-                                <Route path="/acl" element={<Navigate to="/modules/acl" replace />} />
-                                <Route path="/fwstate" element={<Navigate to="/modules/fwstate" replace />} />
-                                <Route path="/pdump" element={<Navigate to="/modules/pdump" replace />} />
-                                <Route path="/route" element={<Navigate to="/operators/route" replace />} />
-                                <Route path="/neighbours" element={<Navigate to="/operators/neighbours" replace />} />
-                            </Routes>
-                        </Suspense>
-                    </div>
-                )}
-            />
+            <PaletteProvider>
+                <GlobalPalette handlePageChange={handlePageChange} />
+                <MainMenu
+                    currentPage={currentPage}
+                    onPageChange={handlePageChange}
+                    disabled={sidebarDisabled}
+                    renderContent={() => (
+                        <div className="app-surface">
+                            <Suspense fallback={<PageLoader loading size="l" />}>
+                                <Routes>
+                                    <Route path="/" element={<Navigate to="/builtin/dashboard" replace />} />
+                                    <Route path="/builtin/inspect" element={<InspectPage />} />
+                                    <Route path="/builtin/dashboard" element={<DashboardPage />} />
+                                    <Route path="/builtin/functions" element={<FunctionsPage />} />
+                                    <Route path="/builtin/functions-ng" element={<Navigate to="/builtin/functions" replace />} />
+                                    <Route path="/builtin/pipelines" element={<PipelinesPage />} />
+                                    <Route path="/builtin/devices" element={<DevicesPage />} />
+                                    <Route path="/modules/forward" element={<ForwardPage />} />
+                                    <Route path="/modules/decap" element={<DecapPage />} />
+                                    <Route path="/modules/acl" element={<AclPage />} />
+                                    <Route path="/modules/fwstate" element={<FWStatePage />} />
+                                    <Route path="/modules/pdump" element={<PdumpPage />} />
+                                    <Route path="/modules/route" element={<ModulesRoutePage />} />
+                                    <Route path="/operators/route" element={<OperatorsRoutePage />} />
+                                    <Route path="/operators/neighbours" element={<NeighboursPage />} />
+                                    <Route path="/inspect" element={<Navigate to="/builtin/inspect" replace />} />
+                                    <Route path="/dashboard" element={<Navigate to="/builtin/dashboard" replace />} />
+                                    <Route path="/functions" element={<Navigate to="/builtin/functions" replace />} />
+                                    <Route path="/pipelines" element={<Navigate to="/builtin/pipelines" replace />} />
+                                    <Route path="/devices" element={<Navigate to="/builtin/devices" replace />} />
+                                    <Route path="/forward" element={<Navigate to="/modules/forward" replace />} />
+                                    <Route path="/decap" element={<Navigate to="/modules/decap" replace />} />
+                                    <Route path="/acl" element={<Navigate to="/modules/acl" replace />} />
+                                    <Route path="/fwstate" element={<Navigate to="/modules/fwstate" replace />} />
+                                    <Route path="/pdump" element={<Navigate to="/modules/pdump" replace />} />
+                                    <Route path="/route" element={<Navigate to="/operators/route" replace />} />
+                                    <Route path="/neighbours" element={<Navigate to="/operators/neighbours" replace />} />
+                                </Routes>
+                            </Suspense>
+                        </div>
+                    )}
+                />
+            </PaletteProvider>
         </SidebarContext.Provider>
     );
 };

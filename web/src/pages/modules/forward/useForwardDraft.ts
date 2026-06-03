@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useReducer, useState } from 'react';
+import { useCallback, useEffect, useMemo, useReducer, useState } from 'react';
 import { API } from '../../../api';
 import { toaster } from '../../../utils';
 import type { Rule } from '../../../api/forward';
@@ -166,10 +166,13 @@ export const useForwardDraft = (): UseForwardDraftResult => {
         state.dirty.has(configName), [state.dirty]);
 
     // Visible configs: server configs (minus pending deletes) plus local-only configs.
-    const draftConfigs = [
-        ...state.serverConfigs.filter(n => !state.pendingDeleteConfigs.has(n)),
-        ...state.localOnlyConfigs,
-    ];
+    const draftConfigs = useMemo(
+        () => [
+            ...state.serverConfigs.filter(n => !state.pendingDeleteConfigs.has(n)),
+            ...state.localOnlyConfigs,
+        ],
+        [state.serverConfigs, state.pendingDeleteConfigs, state.localOnlyConfigs],
+    );
 
     const anyDirty = state.dirty.size > 0;
 

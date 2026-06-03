@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useReducer, useState } from 'react';
+import { useCallback, useEffect, useMemo, useReducer, useState } from 'react';
 import { toaster } from '../../../utils';
 import type { DraftState, DraftAction } from './draftReducer';
 
@@ -104,10 +104,10 @@ export function useDraft<T extends { id?: unknown }>({
         [state.dirty],
     );
 
-    const draftConfigs = [
-        ...state.serverConfigs,
-        ...state.localOnlyConfigs,
-    ];
+    const draftConfigs = useMemo(
+        () => [...state.serverConfigs, ...state.localOnlyConfigs],
+        [state.serverConfigs, state.localOnlyConfigs],
+    );
 
     const anyDirty = state.dirty.size > 0;
 

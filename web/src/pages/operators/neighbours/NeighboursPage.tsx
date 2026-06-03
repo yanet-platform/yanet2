@@ -1,12 +1,13 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useSearchParamHelpers } from '../../../hooks';
 import { Button, Icon, Text } from '@gravity-ui/uikit';
 import { Plus, Layers } from '@gravity-ui/icons';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar } from '../../../components';
 import { BulkDeleteModal, DeleteConfigModal } from '../../../components';
-import { CommandPalette, CommandPaletteTrigger, usePaletteShortcut } from '../../_shared/command-palette';
+import { CommandPaletteTrigger, usePalette } from '../../_shared/command-palette';
 import type { Command, RowAdapter } from '../../_shared/command-palette';
+import { useTabCycle } from '../../_shared/useTabCycle';
 import { stringToIPAddress, ipAddressToString } from '../../../utils/netip';
 import { parseIPAddress } from '../../../utils';
 import type { Neighbour, NeighbourTableInfo } from '../../../api/neighbours';
@@ -64,7 +65,6 @@ const NeighboursPage: React.FC = () => {
     const stateFilter = parseStateFilter(searchParams);
 
     const [paused, setPaused] = useState(false);
-    const [paletteOpen, setPaletteOpen] = useState(false);
     const [flashRowId, setFlashRowId] = useState<string | null>(null);
 
     const {
@@ -103,7 +103,7 @@ const NeighboursPage: React.FC = () => {
 
     const tabsList = [MERGED_TAB, ...tables.map((t) => t.name || '').filter(Boolean)];
 
-    usePaletteShortcut(paletteOpen, setPaletteOpen);
+    const { openPalette, setPageContribution } = usePalette();
 
     const { updateParams } = useSearchParamHelpers(setSearchParams);
 
@@ -114,6 +114,13 @@ const NeighboursPage: React.FC = () => {
         setPanel((prev) => ({ ...prev, open: false }));
         fetchTab(tab).catch(() => {});
     }, [updateParams, fetchTab]);
+
+    useTabCycle({
+        tabs: tabsList,
+        activeTab,
+        onSelect: handleTabSelect,
+        enabled: !loading,
+    });
 
     const handleSort = useCallback((col: SortableColumn): void => {
         const newDirection: SortState['direction'] =
@@ -283,7 +290,7 @@ const NeighboursPage: React.FC = () => {
                 label: 'Add neighbour',
                 sub: 'Open the add-neighbour panel',
                 keywords: 'add neighbour create new',
-                onSelect: () => { openAdd(); setPaletteOpen(false); },
+                onSelect: () => { openAdd(); },
             });
         }
 
@@ -293,7 +300,7 @@ const NeighboursPage: React.FC = () => {
             label: 'Add table',
             sub: 'Create a new neighbour table',
             keywords: 'add table create new',
-            onSelect: () => { setCreateTableOpen(true); setPaletteOpen(false); },
+            onSelect: () => { setCreateTableOpen(true); },
         });
 
         if (canEditTable) {
@@ -303,7 +310,7 @@ const NeighboursPage: React.FC = () => {
                 label: 'Edit current table',
                 sub: activeTableInfo?.name,
                 keywords: 'edit table settings priority',
-                onSelect: () => { setEditTableOpen(true); setPaletteOpen(false); },
+                onSelect: () => { setEditTableOpen(true); },
             });
         }
 
@@ -314,7 +321,7 @@ const NeighboursPage: React.FC = () => {
                 label: 'Delete current table',
                 sub: activeTableInfo?.name,
                 keywords: 'delete remove table',
-                onSelect: () => { setDeleteTableOpen(true); setPaletteOpen(false); },
+                onSelect: () => { setDeleteTableOpen(true); },
             });
         }
 
@@ -324,7 +331,7 @@ const NeighboursPage: React.FC = () => {
                 icon: '⊕',
                 label: 'Switch to Merged view',
                 keywords: 'merged view all tables',
-                onSelect: () => { handleTabSelect(MERGED_TAB); setPaletteOpen(false); },
+                onSelect: () => { handleTabSelect(MERGED_TAB); },
             });
         }
 
@@ -336,7 +343,7 @@ const NeighboursPage: React.FC = () => {
                 icon: '⇥',
                 label: `Switch to table ${name}`,
                 keywords: `switch table ${name}`,
-                onSelect: () => { handleTabSelect(name); setPaletteOpen(false); },
+                onSelect: () => { handleTabSelect(name); },
             });
         }
 
@@ -345,7 +352,7 @@ const NeighboursPage: React.FC = () => {
             icon: '4',
             label: 'Filter IPv4 only',
             keywords: 'ipv4 filter family',
-            onSelect: () => { updateParams({ [QP_FAMILY]: 'v4' }); setPaletteOpen(false); },
+            onSelect: () => { updateParams({ [QP_FAMILY]: 'v4' }); },
         });
 
         cmds.push({
@@ -353,7 +360,7 @@ const NeighboursPage: React.FC = () => {
             icon: '6',
             label: 'Filter IPv6 only',
             keywords: 'ipv6 filter family',
-            onSelect: () => { updateParams({ [QP_FAMILY]: 'v6' }); setPaletteOpen(false); },
+            onSelect: () => { updateParams({ [QP_FAMILY]: 'v6' }); },
         });
 
         cmds.push({
@@ -361,7 +368,7 @@ const NeighboursPage: React.FC = () => {
             icon: '✕',
             label: 'Clear filters',
             keywords: 'clear reset filters all',
-            onSelect: () => { updateParams({ [QP_FAMILY]: null, [QP_STATE]: null }); setPaletteOpen(false); },
+            onSelect: () => { updateParams({ [QP_FAMILY]: null, [QP_STATE]: null }); },
         });
 
         for (const stateName of distinctStates) {
@@ -371,7 +378,7 @@ const NeighboursPage: React.FC = () => {
                 icon: '◉',
                 label: `Filter state: ${sn}`,
                 keywords: `filter state nud ${sn.toLowerCase()}`,
-                onSelect: () => { updateParams({ [QP_STATE]: sn }); setPaletteOpen(false); },
+                onSelect: () => { updateParams({ [QP_STATE]: sn }); },
             });
         }
 
@@ -381,7 +388,7 @@ const NeighboursPage: React.FC = () => {
                 icon: '✕',
                 label: 'Clear state filter',
                 keywords: 'clear state filter nud',
-                onSelect: () => { updateParams({ [QP_STATE]: null }); setPaletteOpen(false); },
+                onSelect: () => { updateParams({ [QP_STATE]: null }); },
             });
         }
 
@@ -390,7 +397,7 @@ const NeighboursPage: React.FC = () => {
             icon: '⟳',
             label: 'Refresh now',
             keywords: 'refresh reload update now',
-            onSelect: () => { refreshNow().catch(() => {}); setPaletteOpen(false); },
+            onSelect: () => { refreshNow().catch(() => {}); },
         });
 
         cmds.push({
@@ -398,7 +405,7 @@ const NeighboursPage: React.FC = () => {
             icon: paused ? '▶' : '⏸',
             label: paused ? 'Resume auto-refresh' : 'Pause auto-refresh',
             keywords: 'pause resume auto refresh toggle',
-            onSelect: () => { setPaused((v) => !v); setPaletteOpen(false); },
+            onSelect: () => { setPaused((v) => !v); },
         });
 
         if (selectedIds.size > 0 && !isMergedView) {
@@ -408,7 +415,7 @@ const NeighboursPage: React.FC = () => {
                 label: 'Delete selected neighbours',
                 sub: `${selectedIds.size} selected`,
                 keywords: 'delete remove selected bulk',
-                onSelect: () => { setBulkRemoveOpen(true); setPaletteOpen(false); },
+                onSelect: () => { setBulkRemoveOpen(true); },
             });
 
             cmds.push({
@@ -416,7 +423,7 @@ const NeighboursPage: React.FC = () => {
                 icon: '☐',
                 label: 'Clear selection',
                 keywords: 'clear deselect selection',
-                onSelect: () => { setSelectedIds(new Set()); setPaletteOpen(false); },
+                onSelect: () => { setSelectedIds(new Set()); },
             });
         }
 
@@ -450,7 +457,7 @@ const NeighboursPage: React.FC = () => {
                     icon: '⌖',
                     label: `Jump to ${ip}`,
                     sub: 'Scroll to this neighbour in the table',
-                    onSelect: () => { handleJumpToRow(id); setPaletteOpen(false); },
+                    onSelect: () => { handleJumpToRow(id); },
                 },
             ];
         }
@@ -466,29 +473,38 @@ const NeighboursPage: React.FC = () => {
                     if (wire) {
                         setPanel({ open: true, mode: 'add', neighbour: { next_hop: wire } });
                     }
-                    setPaletteOpen(false);
                 },
             },
         ];
     }, [allRows, handleJumpToRow, tables.length]);
 
-    const neighbourRowAdapter: RowAdapter<Neighbour> = {
+    const neighbourRowAdapter = useMemo((): RowAdapter<Neighbour> => ({
         rows: allRows,
         getId: getNeighbourId,
         getLabel: (n) => ipAddressToString(n.next_hop) || '—',
         getSub: (n) => [n.device, n.source, nudStateToName(n.state)].filter(Boolean).join(' · '),
         searchText: (n) => ipAddressToString(n.next_hop) + ' ' + (n.device || '') + ' ' + (n.source || ''),
-        onSelect: (id) => { handleJumpToRow(id); setPaletteOpen(false); },
+        onSelect: (id) => handleJumpToRow(id),
         icon: '→',
         max: 7,
-    };
+    }), [allRows, handleJumpToRow]);
+
+    useEffect(() => {
+        setPageContribution({
+            commands: neighbourCommands,
+            dynamicCommands: neighbourDynamicCommands,
+            rowAdapter: neighbourRowAdapter as RowAdapter<unknown>,
+            placeholder: 'Search neighbours or type an IP…',
+        });
+        return () => setPageContribution(null);
+    }, [neighbourCommands, neighbourDynamicCommands, neighbourRowAdapter, setPageContribution]);
 
     const searchActive = family !== 'all' || !!stateFilter;
 
     const pageHeader = (
         <div className="page-header-bar">
             <Text variant="header-1">Neighbours</Text>
-            <CommandPaletteTrigger placeholder="Search neighbours or type an IP…" onOpen={() => setPaletteOpen(true)} />
+            <CommandPaletteTrigger placeholder="Search neighbours or type an IP…" onOpen={openPalette} />
             <div className="page-header-bar__actions">
                 <Button view="outlined" onClick={() => setCreateTableOpen(true)}>
                     <Icon data={Plus} size={16} />
@@ -684,14 +700,6 @@ const NeighboursPage: React.FC = () => {
                     tableInfo={activeTableInfo}
                 />
 
-                <CommandPalette<Neighbour>
-                    open={paletteOpen}
-                    onClose={() => setPaletteOpen(false)}
-                    placeholder="Search neighbours or type an IP…"
-                    commands={neighbourCommands}
-                    dynamicCommands={neighbourDynamicCommands}
-                    rowAdapter={neighbourRowAdapter}
-                />
             </div>
         </PageLayout>
     );

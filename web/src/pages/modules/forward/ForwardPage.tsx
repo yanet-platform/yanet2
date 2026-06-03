@@ -22,8 +22,9 @@ import { SaveDiffModal } from './SaveDiffModal';
 import { useForwardRuleCounters } from './useForwardRuleCounters';
 import { AddConfigModal } from '../../_shared/draft';
 import { DeleteConfigModal, BulkDeleteModal } from '../../../components';
-import { CommandPalette, CommandPaletteTrigger, usePaletteShortcut } from '../../_shared/command-palette';
+import { CommandPaletteTrigger, usePalette } from '../../_shared/command-palette';
 import type { Command, RowAdapter } from '../../_shared/command-palette';
+import { useTabCycle } from '../../_shared/useTabCycle';
 import '../../../styles/draft-page.scss';
 import './forward.scss';
 
@@ -57,7 +58,6 @@ const ForwardPage: React.FC = () => {
     const [deleteConfigOpen, setDeleteConfigOpen] = useState(false);
     const [deleteInFlightConfig, setDeleteInFlightConfig] = useState<string | null>(null);
     const [diffModalOpen, setDiffModalOpen] = useState(false);
-    const [paletteOpen, setPaletteOpen] = useState(false);
     const [modeFilter, setModeFilter] = useState<ModeFilterValue>('all');
     const [flashRowId, setFlashRowId] = useState<string | null>(null);
     const drawerRef = useRef<RuleDrawerHandle>(null);
@@ -238,12 +238,19 @@ const ForwardPage: React.FC = () => {
         setFlashRowId(null);
     }, [currentConfig]);
 
-    usePaletteShortcut(paletteOpen, setPaletteOpen);
+    const { openPalette, setPageContribution } = usePalette();
 
     usePageKeyboardShortcuts({
         onNewRule: openAdd,
         onEscape: closeDrawer,
         drawerOpen: drawer.open,
+    });
+
+    useTabCycle({
+        tabs: draftConfigs,
+        activeTab: currentConfig,
+        onSelect: handleTabSelect,
+        enabled: !loading,
     });
 
     const currentIsDirty = isDirty(currentConfig);
@@ -256,7 +263,7 @@ const ForwardPage: React.FC = () => {
                 label: 'Add rule',
                 sub: 'Open the add-rule drawer',
                 keywords: 'add rule insert new',
-                onSelect: () => { openAdd(); setPaletteOpen(false); },
+                onSelect: () => openAdd(),
             },
         ];
         if (currentIsDirty) {
@@ -266,7 +273,7 @@ const ForwardPage: React.FC = () => {
                 label: 'Save changes',
                 sub: 'Open the diff and save dialog',
                 keywords: 'save commit apply',
-                onSelect: () => { handleSavePress(); setPaletteOpen(false); },
+                onSelect: () => handleSavePress(),
             });
             list.push({
                 id: '__discard',
@@ -274,7 +281,7 @@ const ForwardPage: React.FC = () => {
                 label: 'Discard changes',
                 sub: 'Revert to the last saved state',
                 keywords: 'discard revert undo reset',
-                onSelect: () => { handleDiscard(); setPaletteOpen(false); },
+                onSelect: () => handleDiscard(),
             });
         }
         list.push({
@@ -283,7 +290,7 @@ const ForwardPage: React.FC = () => {
             label: 'Add config',
             sub: 'Create a new forward configuration',
             keywords: 'add config create new',
-            onSelect: () => { setAddConfigOpen(true); setPaletteOpen(false); },
+            onSelect: () => setAddConfigOpen(true),
         });
         if (currentConfig) {
             list.push({
@@ -292,7 +299,7 @@ const ForwardPage: React.FC = () => {
                 label: 'Delete config',
                 sub: `Delete "${currentConfig}"`,
                 keywords: 'delete remove config',
-                onSelect: () => { setDeleteConfigOpen(true); setPaletteOpen(false); },
+                onSelect: () => setDeleteConfigOpen(true),
             });
         }
         for (const cfg of draftConfigs) {
@@ -304,7 +311,7 @@ const ForwardPage: React.FC = () => {
                 label: `Switch to config ${name}`,
                 sub: dirtySet.has(name) ? 'unsaved changes' : undefined,
                 keywords: `switch config tab ${name}`,
-                onSelect: () => { handleTabSelect(name); setPaletteOpen(false); },
+                onSelect: () => handleTabSelect(name),
             });
         }
         list.push({
@@ -312,33 +319,33 @@ const ForwardPage: React.FC = () => {
             icon: '→',
             label: 'Filter: IN only',
             keywords: 'filter mode in direction',
-            onSelect: () => { setModeFilter('in'); setPaletteOpen(false); },
+            onSelect: () => setModeFilter('in'),
         });
         list.push({
             id: '__filter_out',
             icon: '→',
             label: 'Filter: OUT only',
             keywords: 'filter mode out direction',
-            onSelect: () => { setModeFilter('out'); setPaletteOpen(false); },
+            onSelect: () => setModeFilter('out'),
         });
         list.push({
             id: '__filter_none',
             icon: '→',
             label: 'Filter: NONE only',
             keywords: 'filter mode none direction',
-            onSelect: () => { setModeFilter('none'); setPaletteOpen(false); },
+            onSelect: () => setModeFilter('none'),
         });
         list.push({
             id: '__clear',
             icon: '✕',
             label: 'Clear filters',
             keywords: 'clear reset filter all',
-            onSelect: () => { setModeFilter('all'); handleSearchChange(''); setPaletteOpen(false); },
+            onSelect: () => { setModeFilter('all'); handleSearchChange(''); },
         });
         return list;
     }, [currentIsDirty, currentConfig, draftConfigs, dirtySet, handleTabSelect, openAdd, handleSavePress, handleDiscard, handleSearchChange]);
 
-    const rowAdapter: RowAdapter<RuleItem> = {
+    const rowAdapter = useMemo((): RowAdapter<RuleItem> => ({
         rows: allItems,
         getId: (it) => it.id,
         getLabel: (it) => it.target || '(no target)',
@@ -349,14 +356,23 @@ const ForwardPage: React.FC = () => {
             return parts.join(' · ');
         },
         searchText: (it) => [it.target, it.counter, ...it.deviceNames, ...it.sourceCidrs, ...it.dstCidrs].join(' '),
-        onSelect: (id) => { setModeFilter('all'); handleSearchChange(''); handleJumpToRow(id); setPaletteOpen(false); },
+        onSelect: (id) => { setModeFilter('all'); handleSearchChange(''); handleJumpToRow(id); },
         icon: '→',
-    };
+    }), [allItems, handleSearchChange, handleJumpToRow]);
+
+    useEffect(() => {
+        setPageContribution({
+            commands,
+            rowAdapter: rowAdapter as RowAdapter<unknown>,
+            placeholder: 'Search rules or run an action…',
+        });
+        return () => setPageContribution(null);
+    }, [commands, rowAdapter, setPageContribution]);
 
     const pageHeader = (
         <div className="page-header-bar">
             <Text variant="header-1">Forward</Text>
-            <CommandPaletteTrigger placeholder="Search rules or run an action…" onOpen={() => setPaletteOpen(true)} />
+            <CommandPaletteTrigger placeholder="Search rules or run an action…" onOpen={openPalette} />
             <div className="page-header-bar__actions">
                 <YamlIO
                     key={currentConfig || '__none'}
@@ -499,13 +515,6 @@ const ForwardPage: React.FC = () => {
                     />
                 )}
 
-                <CommandPalette<RuleItem>
-                    open={paletteOpen}
-                    onClose={() => setPaletteOpen(false)}
-                    placeholder="Search rules or run an action…"
-                    commands={commands}
-                    rowAdapter={rowAdapter}
-                />
             </div>
         </PageLayout>
     );

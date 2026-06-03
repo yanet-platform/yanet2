@@ -1,11 +1,12 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button, Icon, Text } from '@gravity-ui/uikit';
 import { ArrowRightToLine, Funnel, Plus } from '@gravity-ui/icons';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, SearchInput } from '../../../components';
 import { AddConfigModal } from '../../_shared/draft';
 import { BulkDeleteModal } from '../../../components';
-import { CommandPalette, CommandPaletteTrigger, usePaletteShortcut } from '../../_shared/command-palette';
+import { CommandPaletteTrigger, usePalette } from '../../_shared/command-palette';
 import type { Command, RowAdapter } from '../../_shared/command-palette';
+import { useTabCycle } from '../../_shared/useTabCycle';
 import { API } from '../../../api';
 import { toaster, parseIPAddress } from '../../../utils';
 import { stringToIPAddress, ipAddressToString } from '../../../utils/netip';
@@ -38,7 +39,6 @@ const RoutePage: React.FC = () => {
         route: null,
     });
 
-    const [paletteOpen, setPaletteOpen] = useState(false);
     const [lookupOpen, setLookupOpen] = useState(false);
     const [lookupInitialQuery, setLookupInitialQuery] = useState('');
     const [family, setFamily] = useState<IPFamily>('all');
@@ -97,7 +97,14 @@ const RoutePage: React.FC = () => {
         return m;
     }, [configs, configRoutes]);
 
-    usePaletteShortcut(paletteOpen, setPaletteOpen);
+    const { openPalette, setPageContribution } = usePalette();
+
+    useTabCycle({
+        tabs: configs,
+        activeTab: currentConfig,
+        onSelect: setActiveConfig,
+        enabled: !loading,
+    });
 
     const handleSort = useCallback((col: RouteSortableColumn): void => {
         setSortState((prev) => {
@@ -276,14 +283,14 @@ const RoutePage: React.FC = () => {
         setTimeout(() => setFlashRowId(id), 0);
     }, []);
 
-    const routeCommands: Command[] = [
+    const routeCommands = useMemo((): Command[] => [
         {
             id: '__add',
             icon: '+',
             label: 'Add route',
             sub: 'Open the add-route drawer',
             keywords: 'add route insert',
-            onSelect: () => { openAdd(); setPaletteOpen(false); },
+            onSelect: () => openAdd(),
         },
         {
             id: '__flush',
@@ -291,7 +298,7 @@ const RoutePage: React.FC = () => {
             label: 'Flush RIB → FIB',
             sub: 'Push best routes to the dataplane',
             keywords: 'flush rib fib push',
-            onSelect: () => { handleFlush(); setPaletteOpen(false); },
+            onSelect: () => handleFlush(),
         },
         {
             id: '__open_lookup',
@@ -299,14 +306,14 @@ const RoutePage: React.FC = () => {
             label: 'Open Route Lookup',
             sub: 'Look up an IP address in the RIB',
             keywords: 'route lookup ip search',
-            onSelect: () => { setLookupInitialQuery(''); setLookupOpen(true); setPaletteOpen(false); },
+            onSelect: () => { setLookupInitialQuery(''); setLookupOpen(true); },
         },
         {
             id: '__best_only',
             icon: '★',
             label: 'Show best paths only',
             keywords: 'best paths only filter',
-            onSelect: () => { setBestOnly((v) => !v); setPaletteOpen(false); },
+            onSelect: () => setBestOnly((v) => !v),
         },
         {
             id: '__conflicts',
@@ -314,30 +321,30 @@ const RoutePage: React.FC = () => {
             label: 'Show conflicts only',
             sub: 'Prefixes with more than one candidate route',
             keywords: 'conflicts duplicate prefix',
-            onSelect: () => { setConflictsOnly((v) => !v); setPaletteOpen(false); },
+            onSelect: () => setConflictsOnly((v) => !v),
         },
         {
             id: '__v6',
             icon: '6',
             label: 'Filter IPv6 only',
             keywords: 'ipv6 filter family',
-            onSelect: () => { setFamily('v6'); setPaletteOpen(false); },
+            onSelect: () => setFamily('v6'),
         },
         {
             id: '__v4',
             icon: '4',
             label: 'Filter IPv4 only',
             keywords: 'ipv4 filter family',
-            onSelect: () => { setFamily('v4'); setPaletteOpen(false); },
+            onSelect: () => setFamily('v4'),
         },
         {
             id: '__clear',
             icon: '✕',
             label: 'Clear filters',
             keywords: 'clear reset filters all',
-            onSelect: () => { handleClearFilters(); setPaletteOpen(false); },
+            onSelect: () => handleClearFilters(),
         },
-    ];
+    ], [openAdd, handleFlush, handleClearFilters]);
 
     const routeDynamicCommands = useCallback((q: string): Command[] => {
         if (!parseIPAddress(q.trim()).ok) return [];
@@ -348,26 +355,36 @@ const RoutePage: React.FC = () => {
                 icon: '⌖',
                 label: `Look up ${ip}`,
                 sub: 'Route Lookup — longest prefix match',
-                onSelect: () => { handleLookupIP(ip); setPaletteOpen(false); },
+                onSelect: () => handleLookupIP(ip),
             },
         ];
     }, [handleLookupIP]);
 
-    const routeRowAdapter: RowAdapter<Route> = {
+    const routeRowAdapter = useMemo((): RowAdapter<Route> => ({
         rows: allRows,
         getId: getRouteId,
         getLabel: (r) => r.prefix || '(no prefix)',
         getSub: (r) => ipAddressToString(r.next_hop) || '—',
         searchText: (r) => (r.prefix || '') + ' ' + ipAddressToString(r.next_hop),
-        onSelect: (id) => { handleJumpToRow(id); setPaletteOpen(false); },
+        onSelect: (id) => handleJumpToRow(id),
         icon: '→',
         max: 7,
-    };
+    }), [allRows, handleJumpToRow]);
+
+    useEffect(() => {
+        setPageContribution({
+            commands: routeCommands,
+            dynamicCommands: routeDynamicCommands,
+            rowAdapter: routeRowAdapter as RowAdapter<unknown>,
+            placeholder: 'Search routes, prefixes, or type an IP…',
+        });
+        return () => setPageContribution(null);
+    }, [routeCommands, routeDynamicCommands, routeRowAdapter, setPageContribution]);
 
     const pageHeader = (
         <div className="page-header-bar">
             <Text variant="header-1">Routing Table</Text>
-            <CommandPaletteTrigger placeholder="Search or look up an IP…" onOpen={() => setPaletteOpen(true)} />
+            <CommandPaletteTrigger placeholder="Search or look up an IP…" onOpen={openPalette} />
             <div className="page-header-bar__actions">
                 <Button view="outlined" onClick={handleFlush} disabled={!currentConfig}>
                     <Icon data={ArrowRightToLine} size={16} />
@@ -522,15 +539,6 @@ const RoutePage: React.FC = () => {
                     title="Add route config"
                     placeholder="e.g. route0"
                     existingNames={configs}
-                />
-
-                <CommandPalette<Route>
-                    open={paletteOpen}
-                    onClose={() => setPaletteOpen(false)}
-                    placeholder="Search routes, prefixes, or type an IP…"
-                    commands={routeCommands}
-                    dynamicCommands={routeDynamicCommands}
-                    rowAdapter={routeRowAdapter}
                 />
 
                 <LookupDrawer

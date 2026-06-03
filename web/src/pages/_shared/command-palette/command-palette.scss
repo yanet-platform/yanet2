@@ -211,6 +211,17 @@
     font-family: var(--yn-font-mono);
 }
 
+.cp-group-label {
+    padding: 5px 10px 2px;
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--yn-text-3);
+    pointer-events: none;
+    user-select: none;
+}
+
 .cp-empty {
     padding: 20px;
     text-align: center;

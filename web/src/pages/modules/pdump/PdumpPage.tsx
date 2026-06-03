@@ -17,6 +17,7 @@ import ConfigStrip from './ConfigStrip';
 import PacketDrawer from './PacketDrawer';
 import DeleteConfigDialog from './DeleteConfigDialog';
 import type { PdumpConfigInfo, CapturedPacket } from './types';
+import { useTabCycle } from '../../_shared/useTabCycle';
 import '../../../styles/draft-page.scss';
 import './pdump.scss';
 
@@ -339,6 +340,13 @@ const PdumpPage: React.FC = () => {
     const handleSelectTab = useCallback((name: string) => {
         updateSearchParams({ [QP_CONFIG]: name || null });
     }, [updateSearchParams]);
+
+    useTabCycle({
+        tabs: configs.map((c) => c.name),
+        activeTab: currentConfig,
+        onSelect: handleSelectTab,
+        enabled: !loading,
+    });
 
     const handleOpenDeleteDialog = useCallback((configName: string) => {
         setDeletingConfigName(configName);

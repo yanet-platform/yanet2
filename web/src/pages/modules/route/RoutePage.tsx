@@ -16,8 +16,9 @@ import {
     AddConfigModal, isValidCIDR, useDraftShortcuts, useDraftDragDrop, useDraftPageHandlers,
 } from '../../_shared/draft';
 import { DeleteConfigModal, BulkDeleteModal } from '../../../components';
-import { CommandPalette, CommandPaletteTrigger, usePaletteShortcut } from '../../_shared/command-palette';
+import { CommandPaletteTrigger, usePalette } from '../../_shared/command-palette';
 import type { Command, RowAdapter } from '../../_shared/command-palette';
+import { useTabCycle } from '../../_shared/useTabCycle';
 import '../../../styles/draft-page.scss';
 import './route.scss';
 
@@ -44,8 +45,6 @@ const RoutePage: React.FC = () => {
     const [diffModalOpen, setDiffModalOpen] = useState(false);
     const [addConfigOpen, setAddConfigOpen] = useState(false);
     const [deleteConfigOpen, setDeleteConfigOpen] = useState(false);
-    const [paletteOpen, setPaletteOpen] = useState(false);
-
     const drawerRef = useRef<FIBDrawerHandle>(null);
     const dragDrop = useDraftDragDrop();
     const { handleDragLeave } = dragDrop;
@@ -142,7 +141,7 @@ const RoutePage: React.FC = () => {
         dragDrop,
     });
 
-    usePaletteShortcut(paletteOpen, setPaletteOpen);
+    const { openPalette, setPageContribution } = usePalette();
 
     const openAdd = useCallback((prefix = ''): void => {
         const newRow: FIBRowItem = { id: makeRowId(), prefix, dst_mac: '', src_mac: '', device: '' };
@@ -159,6 +158,13 @@ const RoutePage: React.FC = () => {
         setActiveConfig(cfg);
     }, [setActiveConfig]);
 
+    useTabCycle({
+        tabs: draftConfigs,
+        activeTab: currentConfig,
+        onSelect: handleConfigSelect,
+        enabled: !loading,
+    });
+
     useDraftShortcuts({
         rows: rawRows, activeRowId, setActiveRowId, editingRowId, setEditingRowId,
         onDeleteRow: handlers.handleDeleteRow,
@@ -171,7 +177,7 @@ const RoutePage: React.FC = () => {
                 icon: '+',
                 label: 'Add route',
                 keywords: 'add route insert new',
-                onSelect: () => { openAdd(); setPaletteOpen(false); },
+                onSelect: () => openAdd(),
             },
         ];
         if (currentIsDirty) {
@@ -179,20 +185,20 @@ const RoutePage: React.FC = () => {
                 id: '__save',
                 icon: '✓',
                 label: 'Save changes',
-                onSelect: () => { handlers.handleCommitPress(); setPaletteOpen(false); },
+                onSelect: () => handlers.handleCommitPress(),
             });
             list.push({
                 id: '__discard',
                 icon: '⟲',
                 label: 'Discard changes',
-                onSelect: () => { handlers.handleDiscard(); setPaletteOpen(false); },
+                onSelect: () => handlers.handleDiscard(),
             });
         }
         list.push({
             id: '__add_config',
             icon: '▤',
             label: 'Add config',
-            onSelect: () => { setAddConfigOpen(true); setPaletteOpen(false); },
+            onSelect: () => setAddConfigOpen(true),
         });
         if (currentConfig) {
             list.push({
@@ -200,7 +206,7 @@ const RoutePage: React.FC = () => {
                 icon: '✕',
                 label: 'Delete config',
                 sub: `Delete "${currentConfig}"`,
-                onSelect: () => { setDeleteConfigOpen(true); setPaletteOpen(false); },
+                onSelect: () => setDeleteConfigOpen(true),
             });
         }
         for (const cfg of draftConfigs) {
@@ -212,7 +218,7 @@ const RoutePage: React.FC = () => {
                 label: `Switch to config ${name}`,
                 sub: dirtySet.has(name) ? 'unsaved changes' : undefined,
                 keywords: `switch config tab ${name}`,
-                onSelect: () => { handleConfigSelect(name); setPaletteOpen(false); },
+                onSelect: () => handleConfigSelect(name),
             });
         }
         if (search) {
@@ -221,7 +227,7 @@ const RoutePage: React.FC = () => {
                 icon: '✕',
                 label: 'Clear search',
                 keywords: 'clear reset search',
-                onSelect: () => { handleSearchChange(''); setPaletteOpen(false); },
+                onSelect: () => handleSearchChange(''),
             });
         }
         return list;
@@ -235,28 +241,38 @@ const RoutePage: React.FC = () => {
                     icon: '⌖',
                     label: `Add route for ${q.trim()}`,
                     sub: 'Pre-fill a new route with this prefix',
-                    onSelect: () => { openAdd(q.trim()); setPaletteOpen(false); },
+                    onSelect: () => openAdd(q.trim()),
                 },
             ];
         }
         return [];
     }, [openAdd]);
 
-    const rowAdapter: RowAdapter<FIBRowItem> = {
+    const rowAdapter = useMemo((): RowAdapter<FIBRowItem> => ({
         rows: rawRows,
         getId: (r) => r.id,
         getLabel: (r) => r.prefix || '(no prefix)',
         getSub: (r) => `${r.dst_mac || '—'} · ${r.device || '—'}`,
         searchText: (r) => [r.prefix, r.dst_mac, r.src_mac, r.device].join(' '),
-        onSelect: (id) => { setActiveRowId(id); setEditingRowId(id); setPaletteOpen(false); },
+        onSelect: (id) => { setActiveRowId(id); setEditingRowId(id); },
         icon: '→',
         max: 7,
-    };
+    }), [rawRows]);
+
+    useEffect(() => {
+        setPageContribution({
+            commands,
+            dynamicCommands,
+            rowAdapter: rowAdapter as RowAdapter<unknown>,
+            placeholder: 'Search routes or run an action…',
+        });
+        return () => setPageContribution(null);
+    }, [commands, dynamicCommands, rowAdapter, setPageContribution]);
 
     const pageHeader = (
         <div className="page-header-bar">
             <Text variant="header-1">Route FIB</Text>
-            <CommandPaletteTrigger placeholder="Search routes or run an action…" onOpen={() => setPaletteOpen(true)} />
+            <CommandPaletteTrigger placeholder="Search routes or run an action…" onOpen={openPalette} />
             <div className="page-header-bar__actions">
                 <FIBYamlIO
                     key={currentConfig || '__none'}
@@ -366,14 +382,6 @@ const RoutePage: React.FC = () => {
 
                 <DeleteConfigModal open={deleteConfigOpen} configName={currentConfig} onClose={() => setDeleteConfigOpen(false)} onConfirm={handlers.handleDeleteConfig} />
 
-                <CommandPalette<FIBRowItem>
-                    open={paletteOpen}
-                    onClose={() => setPaletteOpen(false)}
-                    placeholder="Search routes or run an action…"
-                    commands={commands}
-                    dynamicCommands={dynamicCommands}
-                    rowAdapter={rowAdapter}
-                />
             </div>
         </PageLayout>
     );

@@ -10,6 +10,8 @@ export interface Command {
     sub?: string;
     /** Extra text fed to fuzzy matching beyond label (not displayed). */
     keywords?: string;
+    /** Optional group label; consecutive items with the same group are visually grouped. */
+    group?: string;
     /** Called when the command is selected. */
     onSelect: () => void;
 }

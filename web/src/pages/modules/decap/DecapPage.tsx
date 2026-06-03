@@ -16,6 +16,7 @@ import {
     DraftPageToolbar, useDraftShortcuts, useDraftDragDrop, useDraftPageHandlers,
 } from '../../_shared/draft';
 import { DeleteConfigModal, BulkDeleteModal } from '../../../components';
+import { useTabCycle } from '../../_shared/useTabCycle';
 import '../../../styles/draft-page.scss';
 
 let idCounter = 0;
@@ -53,6 +54,13 @@ const DecapPage: React.FC = () => {
     }, [updateParams]);
 
     const currentConfig = (queryConfig && (loading || draftConfigs.includes(queryConfig))) ? queryConfig : (draftConfigs[0] || '');
+
+    useTabCycle({
+        tabs: draftConfigs,
+        activeTab: currentConfig,
+        onSelect: setActiveConfig,
+        enabled: !loading,
+    });
 
     useEffect(() => {
         const updates: Record<string, string | null> = {};

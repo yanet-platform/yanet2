@@ -27,6 +27,7 @@ import { formatBytes, toaster } from '../../../utils';
 import { AddConfigModal } from '../../_shared/draft';
 import { DeleteConfigModal } from '../../../components';
 import { SaveIcon, TrashIcon } from '../../_shared/draft/DraftActionButtons';
+import { useTabCycle } from '../../_shared/useTabCycle';
 import '../../../styles/draft-page.scss';
 import './fwstate.scss';
 
@@ -1104,6 +1105,13 @@ const FWStatePage: React.FC = () => {
     const updateActiveConfig = useCallback((name: string): void => {
         updateParams({ [QP_CONFIG]: name || null });
     }, [updateParams]);
+
+    useTabCycle({
+        tabs: configNames,
+        activeTab: currentName,
+        onSelect: updateActiveConfig,
+        enabled: !loading,
+    });
 
     const updateActiveSubTab = useCallback((tab: StateSubTab): void => {
         updateParams({ [QP_TAB]: tab });

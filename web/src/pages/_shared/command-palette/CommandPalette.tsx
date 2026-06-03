@@ -9,6 +9,7 @@ interface PaletteItem {
     label: string;
     labelRanges: Array<[number, number]>;
     sub?: string;
+    group?: string;
     onSelect: () => void;
 }
 
@@ -86,31 +87,43 @@ const CommandPalette = <T,>({
                 label: cmd.label,
                 labelRanges: [],
                 sub: cmd.sub,
+                group: cmd.group,
                 onSelect: cmd.onSelect,
             });
         }
     } else {
-        const scored: Array<{ item: PaletteItem; score: number }> = [];
+        const scoredPage: Array<{ item: PaletteItem; score: number }> = [];
+        const scoredNav: Array<{ item: PaletteItem; score: number }> = [];
         for (const cmd of commands) {
             const searchTarget = cmd.label + (cmd.keywords ? ' ' + cmd.keywords : '');
             const match = fuzzyMatch(q, searchTarget);
             if (match !== null) {
                 const labelMatch = fuzzyMatch(q, cmd.label);
-                scored.push({
+                const entry = {
                     item: {
                         id: cmd.id,
                         icon: cmd.icon,
                         label: cmd.label,
                         labelRanges: labelMatch ? labelMatch.ranges : [],
                         sub: cmd.sub,
+                        group: cmd.group,
                         onSelect: cmd.onSelect,
                     },
                     score: match.score,
-                });
+                };
+                if (cmd.group === 'Go to') {
+                    scoredNav.push(entry);
+                } else {
+                    scoredPage.push(entry);
+                }
             }
         }
-        scored.sort((a, b) => b.score - a.score);
-        for (const entry of scored) {
+        scoredPage.sort((a, b) => b.score - a.score);
+        scoredNav.sort((a, b) => b.score - a.score);
+        for (const entry of scoredPage) {
+            items.push(entry.item);
+        }
+        for (const entry of scoredNav) {
             items.push(entry.item);
         }
     }
@@ -163,7 +176,7 @@ const CommandPalette = <T,>({
 
     useEffect(() => {
         if (!open) return;
-        const el = listRef.current?.children[activeIdx] as HTMLElement | undefined;
+        const el = listRef.current?.querySelector<HTMLElement>(`[data-palette-idx="${activeIdx}"]`);
         el?.scrollIntoView({ block: 'nearest' });
     }, [activeIdx, open]);
 
@@ -183,6 +196,7 @@ const CommandPalette = <T,>({
             const item = items[activeIdx];
             if (item) {
                 item.onSelect();
+                onClose();
             }
         }
     }, [items, activeIdx, onClose]);
@@ -210,28 +224,37 @@ const CommandPalette = <T,>({
                 </div>
                 {items.length > 0 && (
                     <div ref={listRef} className="cp-list">
-                        {items.map((item, idx) => (
-                            <button
-                                key={item.id}
-                                type="button"
-                                className={`cp-item${idx === activeIdx ? ' cp-item--active' : ''}`}
-                                onMouseMove={() => { if (activeIdx !== idx) setActiveIdx(idx); }}
-                                onMouseDown={(e) => { e.preventDefault(); item.onSelect(); }}
-                            >
-                                <span className="cp-item__icon">{item.icon}</span>
-                                <span className="cp-item__body">
-                                    <span className="cp-item__label">
-                                        <HighlightedLabel label={item.label} ranges={item.labelRanges} />
-                                    </span>
-                                    {item.sub && (
-                                        <span className="cp-item__sub">{item.sub}</span>
+                        {items.map((item, idx) => {
+                            const showGroupHeader = item.group !== undefined &&
+                                (idx === 0 || items[idx - 1].group !== item.group);
+                            return (
+                                <React.Fragment key={item.id}>
+                                    {showGroupHeader && (
+                                        <div className="cp-group-label">{item.group}</div>
                                     )}
-                                </span>
-                                {idx === activeIdx && (
-                                    <kbd className="cp-item__enter">↵</kbd>
-                                )}
-                            </button>
-                        ))}
+                                    <button
+                                        type="button"
+                                        data-palette-idx={idx}
+                                        className={`cp-item${idx === activeIdx ? ' cp-item--active' : ''}`}
+                                        onMouseMove={() => { if (activeIdx !== idx) setActiveIdx(idx); }}
+                                        onMouseDown={(e) => { e.preventDefault(); item.onSelect(); onClose(); }}
+                                    >
+                                        <span className="cp-item__icon">{item.icon}</span>
+                                        <span className="cp-item__body">
+                                            <span className="cp-item__label">
+                                                <HighlightedLabel label={item.label} ranges={item.labelRanges} />
+                                            </span>
+                                            {item.sub && (
+                                                <span className="cp-item__sub">{item.sub}</span>
+                                            )}
+                                        </span>
+                                        {idx === activeIdx && (
+                                            <kbd className="cp-item__enter">↵</kbd>
+                                        )}
+                                    </button>
+                                </React.Fragment>
+                            );
+                        })}
                     </div>
                 )}
                 {items.length === 0 && q && (
