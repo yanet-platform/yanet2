@@ -39,6 +39,58 @@
     flex-shrink: 0;
 }
 
+/** Function/pipeline card-header chrome — shared by fn-card-header and pl-card-header. */
+@mixin card-header($p, $id) {
+    padding: 0;
+    border-bottom: 1px solid var(--#{$p}-line);
+    background: var(--#{$p}-bg-2);
+
+    &__main-row { display: flex; align-items: center; gap: 10px; padding: 10px 14px; min-height: 48px; }
+    &__collapse-btn {
+        background: none; border: none; cursor: pointer; color: var(--#{$p}-text-3);
+        display: flex; align-items: center; justify-content: center;
+        width: 24px; height: 24px; border-radius: var(--#{$p}-r-sm); flex-shrink: 0;
+        transition: color 0.1s, background 0.1s;
+        &:hover { color: var(--#{$p}-text); background: var(--#{$p}-line); }
+    }
+    &__chevron { display: flex; align-items: center; justify-content: center; transition: transform 0.18s ease; &--open { transform: rotate(180deg); } }
+    &__#{$id} { font-family: var(--#{$p}-font-mono); font-size: 14px; font-weight: 600; color: var(--#{$p}-text); flex-shrink: 0; }
+    &__unsaved-pill { background: var(--#{$p}-accent-soft); color: var(--#{$p}-accent); font-family: var(--#{$p}-font-mono); font-size: 11px; font-weight: 600; padding: 2px 6px; border-radius: 3px; flex-shrink: 0; }
+    &__error-pill { background: color-mix(in srgb, var(--g-color-text-danger) 15%, transparent); color: var(--#{$p}-danger); font-family: var(--#{$p}-font-mono); font-size: 11px; font-weight: 600; padding: 2px 6px; border-radius: 3px; flex-shrink: 0; }
+    &__spacer { flex: 1; }
+    &__stats { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+    &__stat { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; }
+    &__stat-label { font-family: var(--#{$p}-font-mono); font-size: 10px; font-weight: 600; color: var(--#{$p}-text-3); text-transform: uppercase; letter-spacing: 0.4px; }
+    &__stat-value { font-family: var(--#{$p}-font-mono); font-size: 14px; font-weight: 600; color: var(--#{$p}-text-2); font-variant-numeric: tabular-nums; }
+    &__stat-sep { width: 1px; height: 24px; background: var(--#{$p}-line-2); flex-shrink: 0; }
+    &__sparkline { display: flex; align-items: center; opacity: 0.8; padding-left: 14px; border-left: 1px solid var(--#{$p}-line); }
+    &__actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+    &__icon-btn {
+        background: none; border: 1px solid var(--#{$p}-line); border-radius: var(--#{$p}-r-md); color: var(--#{$p}-text-3);
+        width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; cursor: pointer;
+        transition: color 0.1s, border-color 0.1s, background 0.1s;
+        &:hover:not(:disabled) { color: var(--#{$p}-text-2); background: var(--#{$p}-bg-3); }
+        &:disabled { opacity: 0.35; cursor: not-allowed; }
+        &--save {
+            color: var(--#{$p}-accent); border-color: rgba(255, 192, 97, 0.3);
+            &:hover { background: var(--#{$p}-accent-soft); border-color: var(--#{$p}-accent); color: var(--#{$p}-accent); }
+            &:disabled { opacity: 0.4; cursor: not-allowed; }
+        }
+        &--discard {
+            color: var(--#{$p}-text-3);
+            &:hover { color: var(--#{$p}-danger); border-color: color-mix(in srgb, var(--g-color-text-danger) 40%, transparent); background: color-mix(in srgb, var(--g-color-text-danger) 8%, transparent); }
+        }
+        &--delete {
+            color: var(--#{$p}-danger); border-color: color-mix(in srgb, var(--g-color-text-danger) 25%, transparent);
+            &:hover { background: color-mix(in srgb, var(--g-color-text-danger) 8%, transparent); border-color: var(--#{$p}-danger); }
+        }
+        &--danger {
+            color: var(--#{$p}-danger); border-color: color-mix(in srgb, var(--g-color-text-danger) 25%, transparent);
+            &:hover { background: color-mix(in srgb, var(--g-color-text-danger) 8%, transparent); border-color: var(--#{$p}-danger); }
+        }
+    }
+}
+
 /** Side-by-side diff dialog chrome — shared by fn-diff-dialog and pl-diff-dialog. */
 @mixin diff-dialog($page-bg, $line) {
     // Override Gravity's size="l" to be wide enough for side-by-side split view.
