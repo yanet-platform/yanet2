@@ -22,7 +22,7 @@ struct packet_front {
 	struct packet_list drop;
 
 	// Cache-line aligned: arrays of packet_front are used as per-worker
-  	// shards, so alignment prevents false sharing between workers.
+	// shards, so alignment prevents false sharing between workers.
 } __attribute__((aligned(64)));
 
 static inline void
