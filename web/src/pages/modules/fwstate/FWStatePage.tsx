@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual';
 import {
     Button,
-    Flex,
     Icon,
     Label,
     SegmentedRadioGroup,
@@ -1582,15 +1581,16 @@ const FWStatePage: React.FC = () => {
     ) : null;
 
     const pageHeader = (
-        <Flex alignItems="center" gap={3} style={{ width: '100%' }}>
+        <div className="page-header-bar">
             <Text variant="header-1">FWState</Text>
             <CommandPaletteTrigger placeholder="Search FWState actions…" onOpen={openPalette} />
-            <Flex grow />
-            <Button view="action" onClick={() => setAddConfigOpen(true)}>
-                <Icon data={Plus} size={16} />
-                Add Config
-            </Button>
-        </Flex>
+            <div className="page-header-bar__actions">
+                <Button view="action" onClick={() => setAddConfigOpen(true)}>
+                    <Icon data={Plus} size={16} />
+                    Add Config
+                </Button>
+            </div>
+        </div>
     );
 
     if (loading) {
