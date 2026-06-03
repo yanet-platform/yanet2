@@ -25,3 +25,6 @@ export { useSearchParamHelpers } from './useSearchParamHelpers';
 export type { SearchParamUpdates } from './useSearchParamHelpers';
 
 export { usePageKeyboardShortcuts } from './usePageKeyboardShortcuts';
+
+export { useModuleRuleCounters } from './useModuleRuleCounters';
+export type { RuleRate, ModuleRuleCountersParams } from './useModuleRuleCounters';
