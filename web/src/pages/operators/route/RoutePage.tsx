@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { Button, Icon, Text } from '@gravity-ui/uikit';
 import { ArrowRightToLine, Funnel, Magnifier, Plus } from '@gravity-ui/icons';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, SearchInput } from '../../../components';
@@ -6,6 +6,7 @@ import { AddConfigModal } from '../../_shared/draft';
 import { BulkDeleteModal } from '../../../components';
 import { CommandPalette } from '../../_shared/command-palette';
 import type { Command, RowAdapter } from '../../_shared/command-palette';
+import { useCommandPalette } from '../../../hooks';
 import { API } from '../../../api';
 import { toaster, parseIPAddress } from '../../../utils';
 import { stringToIPAddress, ipAddressToString } from '../../../utils/netip';
@@ -38,7 +39,7 @@ const RoutePage: React.FC = () => {
         route: null,
     });
 
-    const [paletteOpen, setPaletteOpen] = useState(false);
+    const { paletteOpen, setPaletteOpen } = useCommandPalette();
     const [lookupOpen, setLookupOpen] = useState(false);
     const [lookupInitialQuery, setLookupInitialQuery] = useState('');
     const [family, setFamily] = useState<IPFamily>('all');
@@ -96,26 +97,6 @@ const RoutePage: React.FC = () => {
         configs.forEach((c) => m.set(c, (configRoutes.get(c) || []).length));
         return m;
     }, [configs, configRoutes]);
-
-    useEffect(() => {
-        if (!paletteOpen) return;
-        const handleKeyDown = (e: KeyboardEvent): void => {
-            if (e.key === 'Escape') setPaletteOpen(false);
-        };
-        window.addEventListener('keydown', handleKeyDown);
-        return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [paletteOpen]);
-
-    useEffect(() => {
-        const handleKeyDown = (e: KeyboardEvent): void => {
-            if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-                e.preventDefault();
-                setPaletteOpen((prev) => !prev);
-            }
-        };
-        window.addEventListener('keydown', handleKeyDown);
-        return () => window.removeEventListener('keydown', handleKeyDown);
-    }, []);
 
     const handleSort = useCallback((col: RouteSortableColumn): void => {
         setSortState((prev) => {

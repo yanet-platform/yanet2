@@ -1,6 +1,6 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { useSearchParamHelpers } from '../../../hooks';
+import { useSearchParamHelpers, useCommandPalette } from '../../../hooks';
 import { Button, Icon, Text } from '@gravity-ui/uikit';
 import { Plus, Layers, Magnifier } from '@gravity-ui/icons';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar } from '../../../components';
@@ -64,7 +64,7 @@ const NeighboursPage: React.FC = () => {
     const stateFilter = parseStateFilter(searchParams);
 
     const [paused, setPaused] = useState(false);
-    const [paletteOpen, setPaletteOpen] = useState(false);
+    const { paletteOpen, setPaletteOpen } = useCommandPalette();
     const [flashRowId, setFlashRowId] = useState<string | null>(null);
 
     const {
@@ -102,26 +102,6 @@ const NeighboursPage: React.FC = () => {
     const isBuiltIn = activeTableInfo?.built_in ?? false;
 
     const tabsList = [MERGED_TAB, ...tables.map((t) => t.name || '').filter(Boolean)];
-
-    useEffect(() => {
-        if (!paletteOpen) return;
-        const handleKeyDown = (e: KeyboardEvent): void => {
-            if (e.key === 'Escape') setPaletteOpen(false);
-        };
-        window.addEventListener('keydown', handleKeyDown);
-        return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [paletteOpen]);
-
-    useEffect(() => {
-        const handleKeyDown = (e: KeyboardEvent): void => {
-            if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-                e.preventDefault();
-                setPaletteOpen((prev) => !prev);
-            }
-        };
-        window.addEventListener('keydown', handleKeyDown);
-        return () => window.removeEventListener('keydown', handleKeyDown);
-    }, []);
 
     const { updateParams } = useSearchParamHelpers(setSearchParams);
 

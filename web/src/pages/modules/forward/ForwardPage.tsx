@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Icon, Text } from '@gravity-ui/uikit';
 import { useSearchParams } from 'react-router-dom';
-import { useSearchParamHelpers, usePageKeyboardShortcuts } from '../../../hooks';
+import { useSearchParamHelpers, usePageKeyboardShortcuts, useCommandPalette } from '../../../hooks';
 import { Funnel, Magnifier, Plus } from '@gravity-ui/icons';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, SearchInput } from '../../../components';
 import { useForwardDraft } from './useForwardDraft';
@@ -57,7 +57,7 @@ const ForwardPage: React.FC = () => {
     const [deleteConfigOpen, setDeleteConfigOpen] = useState(false);
     const [deleteInFlightConfig, setDeleteInFlightConfig] = useState<string | null>(null);
     const [diffModalOpen, setDiffModalOpen] = useState(false);
-    const [paletteOpen, setPaletteOpen] = useState(false);
+    const { paletteOpen, setPaletteOpen } = useCommandPalette();
     const [modeFilter, setModeFilter] = useState<ModeFilterValue>('all');
     const [flashRowId, setFlashRowId] = useState<string | null>(null);
     const drawerRef = useRef<RuleDrawerHandle>(null);
@@ -237,26 +237,6 @@ const ForwardPage: React.FC = () => {
         setModeFilter('all');
         setFlashRowId(null);
     }, [currentConfig]);
-
-    useEffect(() => {
-        if (!paletteOpen) return;
-        const handleKeyDown = (e: KeyboardEvent): void => {
-            if (e.key === 'Escape') setPaletteOpen(false);
-        };
-        window.addEventListener('keydown', handleKeyDown);
-        return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [paletteOpen]);
-
-    useEffect(() => {
-        const handleKeyDown = (e: KeyboardEvent): void => {
-            if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-                e.preventDefault();
-                setPaletteOpen((prev) => !prev);
-            }
-        };
-        window.addEventListener('keydown', handleKeyDown);
-        return () => window.removeEventListener('keydown', handleKeyDown);
-    }, []);
 
     usePageKeyboardShortcuts({
         onNewRule: openAdd,
