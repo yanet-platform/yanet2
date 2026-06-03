@@ -1,11 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useSearchParamHelpers } from '../../../hooks';
-import { Button, Icon, Text } from '@gravity-ui/uikit';
+import { Button, Icon } from '@gravity-ui/uikit';
 import { Plus, Layers } from '@gravity-ui/icons';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, EmptyPagePlaceholder } from '../../../components';
-import { BulkDeleteModal, DeleteConfigModal } from '../../../components';
-import { CommandPaletteTrigger, usePalette } from '../../_shared/command-palette';
+import { BulkDeleteModal, DeleteConfigModal, CommandPaletteHeader } from '../../../components';
+import { usePalette } from '../../_shared/command-palette';
 import type { Command, RowAdapter } from '../../_shared/command-palette';
 import { useTabCycle } from '../../_shared/useTabCycle';
 import { stringToIPAddress, ipAddressToString } from '../../../utils/netip';
@@ -103,7 +103,7 @@ const NeighboursPage: React.FC = () => {
 
     const tabsList = [MERGED_TAB, ...tables.map((t) => t.name || '').filter(Boolean)];
 
-    const { openPalette, setPageContribution } = usePalette();
+    const { setPageContribution } = usePalette();
 
     const { updateParams } = useSearchParamHelpers(setSearchParams);
 
@@ -502,10 +502,10 @@ const NeighboursPage: React.FC = () => {
     const searchActive = family !== 'all' || !!stateFilter;
 
     const pageHeader = (
-        <div className="page-header-bar">
-            <Text variant="header-1">Neighbours</Text>
-            <CommandPaletteTrigger placeholder="Search neighbours or type an IP…" onOpen={openPalette} />
-            <div className="page-header-bar__actions">
+        <CommandPaletteHeader
+            title="Neighbours"
+            placeholder="Search neighbours or type an IP…"
+            actions={<>
                 <Button view="outlined" onClick={() => setCreateTableOpen(true)}>
                     <Icon data={Plus} size={16} />
                     Add Table
@@ -514,8 +514,8 @@ const NeighboursPage: React.FC = () => {
                     <Icon data={Plus} size={16} />
                     Add Neighbour
                 </Button>
-            </div>
-        </div>
+            </>}
+        />
     );
 
     if (loading) {

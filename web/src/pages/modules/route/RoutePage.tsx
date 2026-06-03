@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Button, Icon, Text } from '@gravity-ui/uikit';
+import { Button, Icon } from '@gravity-ui/uikit';
 import { useSearchParams } from 'react-router-dom';
 import { useSearchParamHelpers } from '../../../hooks';
 import { Funnel, Plus } from '@gravity-ui/icons';
@@ -15,8 +15,8 @@ import { FIBSaveDiffModal } from './FIBSaveDiffModal';
 import {
     AddConfigModal, isValidCIDR, useDraftShortcuts, useDraftDragDrop, useDraftPageHandlers,
 } from '../../_shared/draft';
-import { DeleteConfigModal, BulkDeleteModal } from '../../../components';
-import { CommandPaletteTrigger, usePalette } from '../../_shared/command-palette';
+import { DeleteConfigModal, BulkDeleteModal, CommandPaletteHeader } from '../../../components';
+import { usePalette } from '../../_shared/command-palette';
 import type { Command, RowAdapter } from '../../_shared/command-palette';
 import { useTabCycle } from '../../_shared/useTabCycle';
 import '../../../styles/draft-page.scss';
@@ -141,7 +141,7 @@ const RoutePage: React.FC = () => {
         dragDrop,
     });
 
-    const { openPalette, setPageContribution } = usePalette();
+    const { setPageContribution } = usePalette();
 
     const openAdd = useCallback((prefix = ''): void => {
         const newRow: FIBRowItem = { id: makeRowId(), prefix, dst_mac: '', src_mac: '', device: '' };
@@ -270,10 +270,10 @@ const RoutePage: React.FC = () => {
     }, [commands, dynamicCommands, rowAdapter, setPageContribution]);
 
     const pageHeader = (
-        <div className="page-header-bar">
-            <Text variant="header-1">Route FIB</Text>
-            <CommandPaletteTrigger placeholder="Search routes or run an action…" onOpen={openPalette} />
-            <div className="page-header-bar__actions">
+        <CommandPaletteHeader
+            title="Route FIB"
+            placeholder="Search routes or run an action…"
+            actions={<>
                 <FIBYamlIO
                     key={currentConfig || '__none'}
                     configName={currentConfig}
@@ -285,8 +285,8 @@ const RoutePage: React.FC = () => {
                     <Icon data={Plus} size={16} />
                     Add Route
                 </Button>
-            </div>
-        </div>
+            </>}
+        />
     );
 
     if (loading) {

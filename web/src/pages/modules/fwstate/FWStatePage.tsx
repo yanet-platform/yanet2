@@ -24,10 +24,10 @@ import { ipAddressToString, isValidIPAddress, parseIPToBytes, stringToIPAddress,
 import { parseMACToBytes } from '../../../utils/mac';
 import { formatBytes, toaster } from '../../../utils';
 import { AddConfigModal } from '../../_shared/draft';
-import { DeleteConfigModal } from '../../../components';
+import { DeleteConfigModal, CommandPaletteHeader } from '../../../components';
 import { SaveIcon, TrashIcon } from '../../_shared/draft/DraftActionButtons';
 import { useTabCycle } from '../../_shared/useTabCycle';
-import { CommandPaletteTrigger, usePalette } from '../../_shared/command-palette';
+import { usePalette } from '../../_shared/command-palette';
 import type { Command } from '../../_shared/command-palette';
 import '../../../styles/draft-page.scss';
 import './fwstate.scss';
@@ -1114,7 +1114,7 @@ const FWStatePage: React.FC = () => {
         enabled: !loading,
     });
 
-    const { openPalette, setPageContribution } = usePalette();
+    const { setPageContribution } = usePalette();
 
     const updateActiveSubTab = useCallback((tab: StateSubTab): void => {
         updateParams({ [QP_TAB]: tab });
@@ -1581,16 +1581,16 @@ const FWStatePage: React.FC = () => {
     ) : null;
 
     const pageHeader = (
-        <div className="page-header-bar">
-            <Text variant="header-1">FWState</Text>
-            <CommandPaletteTrigger placeholder="Search FWState actions…" onOpen={openPalette} />
-            <div className="page-header-bar__actions">
+        <CommandPaletteHeader
+            title="FWState"
+            placeholder="Search FWState actions…"
+            actions={<>
                 <Button view="action" onClick={() => setAddConfigOpen(true)}>
                     <Icon data={Plus} size={16} />
                     Add Config
                 </Button>
-            </div>
-        </div>
+            </>}
+        />
     );
 
     if (loading) {

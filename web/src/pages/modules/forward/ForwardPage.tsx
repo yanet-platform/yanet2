@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Button, Icon, Text } from '@gravity-ui/uikit';
+import { Button, Icon } from '@gravity-ui/uikit';
 import { useSearchParams } from 'react-router-dom';
 import { useSearchParamHelpers, usePageKeyboardShortcuts } from '../../../hooks';
 import { Funnel, Plus } from '@gravity-ui/icons';
@@ -21,8 +21,8 @@ import YamlIO from './YamlIO';
 import { SaveDiffModal } from './SaveDiffModal';
 import { useForwardRuleCounters } from './useForwardRuleCounters';
 import { AddConfigModal } from '../../_shared/draft';
-import { DeleteConfigModal, BulkDeleteModal } from '../../../components';
-import { CommandPaletteTrigger, usePalette } from '../../_shared/command-palette';
+import { DeleteConfigModal, BulkDeleteModal, CommandPaletteHeader } from '../../../components';
+import { usePalette } from '../../_shared/command-palette';
 import type { Command, RowAdapter } from '../../_shared/command-palette';
 import { useTabCycle } from '../../_shared/useTabCycle';
 import '../../../styles/draft-page.scss';
@@ -238,7 +238,7 @@ const ForwardPage: React.FC = () => {
         setFlashRowId(null);
     }, [currentConfig]);
 
-    const { openPalette, setPageContribution } = usePalette();
+    const { setPageContribution } = usePalette();
 
     usePageKeyboardShortcuts({
         onNewRule: openAdd,
@@ -370,10 +370,10 @@ const ForwardPage: React.FC = () => {
     }, [commands, rowAdapter, setPageContribution]);
 
     const pageHeader = (
-        <div className="page-header-bar">
-            <Text variant="header-1">Forward</Text>
-            <CommandPaletteTrigger placeholder="Search rules or run an action…" onOpen={openPalette} />
-            <div className="page-header-bar__actions">
+        <CommandPaletteHeader
+            title="Forward"
+            placeholder="Search rules or run an action…"
+            actions={<>
                 <YamlIO
                     key={currentConfig || '__none'}
                     configName={currentConfig}
@@ -385,8 +385,8 @@ const ForwardPage: React.FC = () => {
                     <Icon data={Plus} size={16} />
                     Add Rule
                 </Button>
-            </div>
-        </div>
+            </>}
+        />
     );
 
     if (loading) {

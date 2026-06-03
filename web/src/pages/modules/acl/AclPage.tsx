@@ -1,5 +1,5 @@
 import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
-import { Button, Icon, Label, Text } from '@gravity-ui/uikit';
+import { Button, Icon, Label } from '@gravity-ui/uikit';
 import { Funnel, Pause, Play, Plus } from '@gravity-ui/icons';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, SearchInput, EmptyPagePlaceholder } from '../../../components';
@@ -18,8 +18,8 @@ import YamlIO, { type ImportMode } from './YamlIO';
 import { SaveDiffModal } from './SaveDiffModal';
 import { useAclRuleCounters } from './useAclRuleCounters';
 import { AddConfigModal } from '../../_shared/draft';
-import { DeleteConfigModal, BulkDeleteModal } from '../../../components';
-import { CommandPaletteTrigger, usePalette } from '../../_shared/command-palette';
+import { DeleteConfigModal, BulkDeleteModal, CommandPaletteHeader } from '../../../components';
+import { usePalette } from '../../_shared/command-palette';
 import type { Command, RowAdapter } from '../../_shared/command-palette';
 import { useTabCycle } from '../../_shared/useTabCycle';
 import '../../../styles/draft-page.scss';
@@ -313,7 +313,7 @@ const AclPage: React.FC = () => {
 
     const currentIsDirty = isDirty(currentConfig);
 
-    const { openPalette, setPageContribution } = usePalette();
+    const { setPageContribution } = usePalette();
 
     const commands = useMemo((): Command[] => {
         const list: Command[] = [];
@@ -438,10 +438,10 @@ const AclPage: React.FC = () => {
         )), [rawRules]);
 
     const pageHeader = (
-        <div className="page-header-bar">
-            <Text variant="header-1">ACL</Text>
-            <CommandPaletteTrigger placeholder="Search rules or run an action…" onOpen={openPalette} />
-            <div className="page-header-bar__actions">
+        <CommandPaletteHeader
+            title="ACL"
+            placeholder="Search rules or run an action…"
+            actions={<>
                 {enabledCounterNames.size > 0 && (
                     <Button
                         view="outlined"
@@ -457,8 +457,8 @@ const AclPage: React.FC = () => {
                     <Icon data={Plus} size={16} />
                     Add Rule
                 </Button>
-            </div>
-        </div>
+            </>}
+        />
     );
 
     if (loading) {

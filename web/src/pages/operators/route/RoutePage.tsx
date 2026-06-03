@@ -1,10 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Button, Icon, Text } from '@gravity-ui/uikit';
+import { Button, Icon } from '@gravity-ui/uikit';
 import { ArrowRightToLine, Funnel, Plus } from '@gravity-ui/icons';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, SearchInput, EmptyPagePlaceholder } from '../../../components';
 import { AddConfigModal } from '../../_shared/draft';
-import { BulkDeleteModal } from '../../../components';
-import { CommandPaletteTrigger, usePalette } from '../../_shared/command-palette';
+import { BulkDeleteModal, CommandPaletteHeader } from '../../../components';
+import { usePalette } from '../../_shared/command-palette';
 import type { Command, RowAdapter } from '../../_shared/command-palette';
 import { useTabCycle } from '../../_shared/useTabCycle';
 import { API } from '../../../api';
@@ -97,7 +97,7 @@ const RoutePage: React.FC = () => {
         return m;
     }, [configs, configRoutes]);
 
-    const { openPalette, setPageContribution } = usePalette();
+    const { setPageContribution } = usePalette();
 
     useTabCycle({
         tabs: configs,
@@ -382,10 +382,10 @@ const RoutePage: React.FC = () => {
     }, [routeCommands, routeDynamicCommands, routeRowAdapter, setPageContribution]);
 
     const pageHeader = (
-        <div className="page-header-bar">
-            <Text variant="header-1">Routing Table</Text>
-            <CommandPaletteTrigger placeholder="Search or look up an IP…" onOpen={openPalette} />
-            <div className="page-header-bar__actions">
+        <CommandPaletteHeader
+            title="Routing Table"
+            placeholder="Search or look up an IP…"
+            actions={<>
                 <Button view="outlined" onClick={handleFlush} disabled={!currentConfig}>
                     <Icon data={ArrowRightToLine} size={16} />
                     Flush RIB → FIB
@@ -394,8 +394,8 @@ const RoutePage: React.FC = () => {
                     <Icon data={Plus} size={16} />
                     Add Route
                 </Button>
-            </div>
-        </div>
+            </>}
+        />
     );
 
     if (loading && configs.length === 0) {

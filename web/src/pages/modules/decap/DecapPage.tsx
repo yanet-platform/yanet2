@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Button, Icon, Text } from '@gravity-ui/uikit';
+import { Button, Icon } from '@gravity-ui/uikit';
 import { Funnel, Plus } from '@gravity-ui/icons';
 import { useSearchParamHelpers } from '../../../hooks';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, EmptyPagePlaceholder, SearchInput } from '../../../components';
@@ -16,9 +16,9 @@ import {
     AddConfigModal,
     useDraftShortcuts, useDraftDragDrop, useDraftPageHandlers,
 } from '../../_shared/draft';
-import { DeleteConfigModal, BulkDeleteModal } from '../../../components';
+import { DeleteConfigModal, BulkDeleteModal, CommandPaletteHeader } from '../../../components';
 import { useTabCycle } from '../../_shared/useTabCycle';
-import { CommandPaletteTrigger, usePalette } from '../../_shared/command-palette';
+import { usePalette } from '../../_shared/command-palette';
 import type { Command, RowAdapter } from '../../_shared/command-palette';
 import '../../../styles/draft-page.scss';
 import './decap.scss';
@@ -92,7 +92,7 @@ const DecapPage: React.FC = () => {
         handleDragLeave();
     }, [currentConfig, handleDragLeave]);
 
-    const { openPalette, setPageContribution } = usePalette();
+    const { setPageContribution } = usePalette();
 
     const rawRows: PrefixRowItem[] = draftRows(currentConfig);
     const rawServerRows: PrefixRowItem[] = serverRows(currentConfig);
@@ -252,17 +252,17 @@ const DecapPage: React.FC = () => {
     }, [commands, rowAdapter, setPageContribution]);
 
     const pageHeader = (
-        <div className="page-header-bar">
-            <Text variant="header-1">Decap</Text>
-            <CommandPaletteTrigger placeholder="Search prefixes or run an action…" onOpen={openPalette} />
-            <div className="page-header-bar__actions">
+        <CommandPaletteHeader
+            title="Decap"
+            placeholder="Search prefixes or run an action…"
+            actions={<>
                 <PrefixYamlIO key={currentConfig || '__none'} configName={currentConfig} rows={rawRows} onImport={handlers.handleImportYaml} disabled={!currentConfig} />
                 <Button view="action" onClick={openAdd}>
                     <Icon data={Plus} size={16} />
                     Add Prefix
                 </Button>
-            </div>
-        </div>
+            </>}
+        />
     );
 
     if (loading) return <PageLayout header={pageHeader} className="yn-flat-layout"><PageLoader loading size="l" /></PageLayout>;
