@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Icon, Text } from '@gravity-ui/uikit';
 import { useSearchParams } from 'react-router-dom';
+import { useSearchParamHelpers } from '../../../hooks';
 import { Funnel, Magnifier, Plus } from '@gravity-ui/icons';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, SearchInput } from '../../../components';
 import { useFIBDraft } from './useFIBDraft';
@@ -51,19 +52,7 @@ const RoutePage: React.FC = () => {
 
     useUnsavedChangesBlocker(anyDirty);
 
-    const updateParams = useCallback((updates: Record<string, string | null>): void => {
-        setSearchParams((prev) => {
-            const next = new URLSearchParams(prev);
-            for (const [key, value] of Object.entries(updates)) {
-                if (value === null || value === '') {
-                    next.delete(key);
-                } else {
-                    next.set(key, value);
-                }
-            }
-            return next;
-        }, { replace: true });
-    }, [setSearchParams]);
+    const { updateParams } = useSearchParamHelpers(setSearchParams);
 
     const setActiveConfig = useCallback((configName: string): void => {
         updateParams({ [QP_CONFIG]: configName || null });

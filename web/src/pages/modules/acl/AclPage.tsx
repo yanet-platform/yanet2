@@ -3,6 +3,7 @@ import { Button, Flex, Icon, Label, Text } from '@gravity-ui/uikit';
 import { Pause, Play, Plus } from '@gravity-ui/icons';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, SearchInput } from '../../../components';
+import { useSearchParamHelpers } from '../../../hooks';
 import { useAclDraft } from './useAclDraft';
 import { useUnsavedChangesBlocker } from '../../builtin/_shared/lane-editor';
 import type { Rule } from '../../../api/acl';
@@ -66,30 +67,7 @@ const AclPage: React.FC = () => {
     const currentConfig = (queryConfig && (loading || draftConfigs.includes(queryConfig) || queryConfig === deleteInFlightConfig))
         ? queryConfig
         : (draftConfigs[0] || '');
-    const updateParams = useCallback((updates: Record<string, string | null>): void => {
-        setSearchParams((prev) => {
-            const next = new URLSearchParams(prev);
-            for (const [key, value] of Object.entries(updates)) {
-                if (value === null || value === '') {
-                    next.delete(key);
-                } else {
-                    next.set(key, value);
-                }
-            }
-            return next;
-        }, { replace: true });
-    }, [setSearchParams]);
-
-    const clearConfigParamIfCurrent = useCallback((name: string): void => {
-        setSearchParams((prev) => {
-            if (prev.get(QP_CONFIG) !== name) {
-                return prev;
-            }
-            const next = new URLSearchParams(prev);
-            next.delete(QP_CONFIG);
-            return next;
-        }, { replace: true });
-    }, [setSearchParams]);
+    const { updateParams, clearConfigParamIfCurrent } = useSearchParamHelpers(setSearchParams, QP_CONFIG);
 
     useEffect(() => {
         const updates: Record<string, string | null> = {};

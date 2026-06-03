@@ -2,6 +2,7 @@ import React, { useState, useCallback, useRef, useMemo, useEffect } from 'react'
 import { Button, Flex, Icon, Text } from '@gravity-ui/uikit';
 import { ArrowDownToLine, Plus } from '@gravity-ui/icons';
 import { useSearchParams } from 'react-router-dom';
+import { useSearchParamHelpers } from '../../../hooks';
 import { PageLayout, PageLoader, ConfigTabStrip } from '../../../components';
 import { toaster } from '../../../utils';
 import {
@@ -105,30 +106,7 @@ const PdumpPage: React.FC = () => {
         setNewPacketIds(new Set());
     }, []);
 
-    const updateSearchParams = useCallback((updates: Record<string, string | null>): void => {
-        setSearchParams(prev => {
-            const next = new URLSearchParams(prev);
-            for (const [key, value] of Object.entries(updates)) {
-                if (value === null || value === '') {
-                    next.delete(key);
-                } else {
-                    next.set(key, value);
-                }
-            }
-            return next;
-        }, { replace: true });
-    }, [setSearchParams]);
-
-    const clearConfigParamIfCurrent = useCallback((name: string): void => {
-        setSearchParams((prev) => {
-            if (prev.get(QP_CONFIG) !== name) {
-                return prev;
-            }
-            const next = new URLSearchParams(prev);
-            next.delete(QP_CONFIG);
-            return next;
-        }, { replace: true });
-    }, [setSearchParams]);
+    const { updateParams: updateSearchParams, clearConfigParamIfCurrent } = useSearchParamHelpers(setSearchParams, QP_CONFIG);
 
     const handleTogglePause = useCallback(() => {
         setPaused(prev => {

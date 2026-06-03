@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { useSearchParamHelpers } from '../../../hooks';
 import { PageLayout, PageLoader, EmptyState } from '../../../components';
 import type { DeviceType } from '../../../api/devices';
 import type { LocalDevice } from './types';
@@ -55,19 +56,7 @@ const DevicesPage: React.FC = () => {
     const anyDirty = useMemo(() => devices.some(d => d.isDirty), [devices]);
     useUnsavedChangesBlocker(anyDirty);
 
-    const updateParams = useCallback((updates: Record<string, string | null>): void => {
-        setSearchParams((prev) => {
-            const next = new URLSearchParams(prev);
-            for (const [key, value] of Object.entries(updates)) {
-                if (value === null || value === '') {
-                    next.delete(key);
-                } else {
-                    next.set(key, value);
-                }
-            }
-            return next;
-        }, { replace: true });
-    }, [setSearchParams]);
+    const { updateParams } = useSearchParamHelpers(setSearchParams);
 
     useEffect(() => {
         if (loading) return;

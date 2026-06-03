@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@gravity-ui/uikit';
 import { useSearchParams } from 'react-router-dom';
+import { useSearchParamHelpers } from '../../../hooks';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar } from '../../../components';
 import { usePrefixDraft } from './usePrefixDraft';
 import { useUnsavedChangesBlocker } from '../../builtin/_shared/lane-editor';
@@ -45,19 +46,7 @@ const DecapPage: React.FC = () => {
 
     useUnsavedChangesBlocker(anyDirty);
 
-    const updateParams = useCallback((updates: Record<string, string | null>): void => {
-        setSearchParams((prev) => {
-            const next = new URLSearchParams(prev);
-            for (const [key, value] of Object.entries(updates)) {
-                if (value === null || value === '') {
-                    next.delete(key);
-                } else {
-                    next.set(key, value);
-                }
-            }
-            return next;
-        }, { replace: true });
-    }, [setSearchParams]);
+    const { updateParams } = useSearchParamHelpers(setSearchParams);
 
     const setActiveConfig = useCallback((configName: string): void => {
         updateParams({ [QP_CONFIG]: configName || null });

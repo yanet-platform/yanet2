@@ -20,3 +20,6 @@ export { useContainerHeight } from './useContainerHeight';
 
 export { useCounterHistory } from './useCounterHistory';
 export type { CounterHistoryEntry } from './useCounterHistory';
+
+export { useSearchParamHelpers } from './useSearchParamHelpers';
+export type { SearchParamUpdates } from './useSearchParamHelpers';

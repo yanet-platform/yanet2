@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { useSearchParamHelpers } from '../../../hooks';
 import { Button, Icon, Text } from '@gravity-ui/uikit';
 import { Plus, Layers, Magnifier } from '@gravity-ui/icons';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar } from '../../../components';
@@ -122,19 +123,7 @@ const NeighboursPage: React.FC = () => {
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, []);
 
-    const updateParams = useCallback((updates: Record<string, string | null>): void => {
-        setSearchParams((prev) => {
-            const next = new URLSearchParams(prev);
-            for (const [key, value] of Object.entries(updates)) {
-                if (value === null || value === '') {
-                    next.delete(key);
-                } else {
-                    next.set(key, value);
-                }
-            }
-            return next;
-        }, { replace: true });
-    }, [setSearchParams]);
+    const { updateParams } = useSearchParamHelpers(setSearchParams);
 
     const handleTabSelect = useCallback((cfg: string): void => {
         const tab = cfg === MERGED_TAB ? MERGED_TAB : cfg;

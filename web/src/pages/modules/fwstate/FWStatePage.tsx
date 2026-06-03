@@ -15,6 +15,7 @@ import {
 } from '@gravity-ui/uikit';
 import { CircleInfo, Plus } from '@gravity-ui/icons';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useSearchParamHelpers } from '../../../hooks';
 import { API } from '../../../api';
 import { Direction, type FwStateEntry, type ListEntriesRequest, type MapStats } from '../../../api/fwstate';
 import { ConfirmDialog, ConfigTabStrip, PageLayout, PageLoader } from '../../../components';
@@ -1098,19 +1099,7 @@ const FWStatePage: React.FC = () => {
     const currentHasLinkedAcls = (current?.linkedAcls.length ?? 0) > 0;
     const anyDirty = dirtyConfigs.size > 0;
 
-    const updateParams = useCallback((updates: Record<string, string | null>): void => {
-        setSearchParams((prev) => {
-            const next = new URLSearchParams(prev);
-            for (const [key, value] of Object.entries(updates)) {
-                if (value === null || value === '') {
-                    next.delete(key);
-                } else {
-                    next.set(key, value);
-                }
-            }
-            return next;
-        }, { replace: true });
-    }, [setSearchParams]);
+    const { updateParams } = useSearchParamHelpers(setSearchParams);
 
     const updateActiveConfig = useCallback((name: string): void => {
         updateParams({ [QP_CONFIG]: name || null });
