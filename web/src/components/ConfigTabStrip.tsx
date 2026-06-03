@@ -1,6 +1,7 @@
 import React from 'react';
 import { Button, Icon } from '@gravity-ui/uikit';
 import { Plus } from '@gravity-ui/icons';
+import './ConfigTabStrip.scss';
 
 export interface ConfigTabStripProps {
     /** Ordered list of config names. */

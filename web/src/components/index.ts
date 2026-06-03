@@ -13,7 +13,6 @@ export * from './SortableTableHeader';
 export * from './TableSearchBar';
 export * from './CounterDisplay';
 export * from './CountersContext';
-export * from './ConfigTabs';
 export * from './ConfigTabStrip';
 export * from './SaveDiffModal';
 export * from './SideBySideDiff';

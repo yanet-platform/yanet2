@@ -3,7 +3,6 @@ export * from './hooks';
 export * from './constants';
 export { ConfigDialog } from './ConfigDialog';
 export { PacketTable } from './PacketTable';
-export { default as PdumpConfigTabs } from './PdumpConfigTabs';
 export { default as FilterRow } from './FilterRow';
 export { default as ConfigStrip } from './ConfigStrip';
 export { default as PacketDrawer } from './PacketDrawer';

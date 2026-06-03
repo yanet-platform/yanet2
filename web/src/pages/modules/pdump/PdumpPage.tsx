@@ -2,7 +2,7 @@ import React, { useState, useCallback, useRef, useMemo, useEffect } from 'react'
 import { Button, Flex, Icon, Text } from '@gravity-ui/uikit';
 import { ArrowDownToLine, Plus } from '@gravity-ui/icons';
 import { useSearchParams } from 'react-router-dom';
-import { PageLayout, PageLoader } from '../../../components';
+import { PageLayout, PageLoader, ConfigTabStrip } from '../../../components';
 import { toaster } from '../../../utils';
 import {
     usePdumpConfigs,
@@ -11,7 +11,6 @@ import {
 } from './hooks';
 import { ConfigDialog } from './ConfigDialog';
 import { PacketTable } from './PacketTable';
-import PdumpConfigTabs from './PdumpConfigTabs';
 import FilterRow from './FilterRow';
 import ConfigStrip from './ConfigStrip';
 import PacketDrawer from './PacketDrawer';
@@ -21,6 +20,7 @@ import '../../../styles/draft-page.scss';
 import './pdump.scss';
 
 const NEW_PACKET_TTL_MS = 1200;
+const EMPTY_DIRTY_SET = new Set<string>();
 const QP_CONFIG = 'config';
 const QP_SEARCH = 'search';
 const EMPTY_PPS_HISTORY: number[] = [];
@@ -456,13 +456,14 @@ const PdumpPage: React.FC = () => {
                     </div>
                 ) : (
                     <>
-                        <PdumpConfigTabs
+                        <ConfigTabStrip
                             configs={configs.map(c => c.name)}
                             activeConfig={currentConfig}
                             counts={packetCounts}
-                            liveConfig={capture.liveConfig}
+                            dirtyConfigs={EMPTY_DIRTY_SET}
                             onSelect={handleSelectTab}
                             onAddConfig={() => setIsCreateDialogOpen(true)}
+                            leadingIcon={(cfg) => cfg === capture.liveConfig ? <span className="yn-tab__dot yn-tab__dot--live" aria-label="live capture" /> : null}
                         />
 
                         <div className="yn-content pdump-page__content">

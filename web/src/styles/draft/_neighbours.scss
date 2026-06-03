@@ -369,6 +369,25 @@
     }
 }
 
+// Tabs row wrapper — contains the ConfigTabStrip for neighbours.
+.yn-tabs-row {
+    display: flex;
+    align-items: center;
+    border-bottom: 1px solid var(--yn-line-2);
+    background: var(--yn-page-bg);
+    flex-shrink: 0;
+    padding-right: 16px;
+
+    .yn-tabs {
+        flex: 1;
+        border-bottom: none;
+        // overflow-x:auto promotes overflow-y to auto by default, causing a
+        // stray vertical scrollbar when tab content (icons) exceeds the strip
+        // height. Clamp it here, scoped to neighbours only.
+        overflow-y: hidden;
+    }
+}
+
 // Neighbours page flush + borderless-tab overrides.
 // Mirrors the .ro-page treatment in route.scss, scoped to .nb-page only.
 
@@ -382,15 +401,6 @@
 
 .nb-page .yn-tabs-row .yn-tabs {
     border-bottom: none;
-}
-
-.nb-page .yn-tab--active::after {
-    height: 3px;
-}
-
-.nb-page .yn-tab--active .yn-tab__count {
-    color: var(--yn-accent);
-    background: var(--yn-accent-soft);
 }
 
 .nb-page .yn-content {

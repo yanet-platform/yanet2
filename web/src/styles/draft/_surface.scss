@@ -87,15 +87,6 @@
     border-bottom: none;
 }
 
-.yn-flat-page .yn-tab--active::after {
-    height: 3px;
-}
-
-.yn-flat-page .yn-tab--active .yn-tab__count {
-    color: var(--yn-accent);
-    background: var(--yn-accent-soft);
-}
-
 .yn-flat-page .yn-content {
     padding: 0;
 }

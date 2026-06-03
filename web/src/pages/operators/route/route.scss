@@ -315,20 +315,6 @@ $_ro-col-med:      42px;
     border-bottom: none;
 }
 
-.ro-page .yn-tab--active::after {
-    height: 3px;
-}
-
-// ─── Route-page scoped overrides (.ro-page modifier on .yn-page) ─────────────
-
-// Gold count badge on the active config tab, scoped to route only.
-// The shared rule in draft-page.scss scopes gold badges to .yn-tabs-row only
-// (neighbours). This rule targets the route page root without touching that.
-.ro-page .yn-tab--active .yn-tab__count {
-    color: var(--yn-accent);
-    background: var(--yn-accent-soft);
-}
-
 // Table flush: no outer padding and no card chrome.
 // Keeps per-row separators and the header bottom border.
 .ro-page .yn-content {
