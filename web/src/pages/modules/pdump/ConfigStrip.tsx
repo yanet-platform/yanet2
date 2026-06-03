@@ -2,7 +2,7 @@ import React from 'react';
 import { parseModeFlags } from '../../../api/pdump';
 import { formatPps } from '../../../utils';
 import type { PdumpConfigInfo } from './types';
-import Sparkline from './Sparkline';
+import { MetricSparkline } from '../../../components';
 
 interface ConfigStripProps {
     config: PdumpConfigInfo;
@@ -78,7 +78,7 @@ const ConfigStrip: React.FC<ConfigStripProps> = ({
                         {isCaptureActive ? formatPps(currentPps) : '--'}
                     </span>
                 </div>
-                <Sparkline
+                <MetricSparkline
                     values={isCaptureActive && ppsHistory.length >= 2 ? ppsHistory : null}
                     width={72}
                     height={22}

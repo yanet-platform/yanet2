@@ -7,6 +7,5 @@ export { default as FilterRow } from './FilterRow';
 export { default as ConfigStrip } from './ConfigStrip';
 export { default as PacketDrawer } from './PacketDrawer';
 export { default as BpfTokens } from './BpfTokens';
-export { default as Sparkline } from './Sparkline';
 export { default as PdumpModal } from './PdumpModal';
 export { default as DeleteConfigDialog } from './DeleteConfigDialog';
