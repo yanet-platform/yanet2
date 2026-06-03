@@ -1,10 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { Button, Icon, Text } from '@gravity-ui/uikit';
-import { ArrowRightToLine, Funnel, Magnifier, Plus } from '@gravity-ui/icons';
+import { ArrowRightToLine, Funnel, Plus } from '@gravity-ui/icons';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, SearchInput } from '../../../components';
 import { AddConfigModal } from '../../_shared/draft';
 import { BulkDeleteModal } from '../../../components';
-import { CommandPalette } from '../../_shared/command-palette';
+import { CommandPalette, CommandPaletteTrigger, usePaletteShortcut } from '../../_shared/command-palette';
 import type { Command, RowAdapter } from '../../_shared/command-palette';
 import { API } from '../../../api';
 import { toaster, parseIPAddress } from '../../../utils';
@@ -97,25 +97,7 @@ const RoutePage: React.FC = () => {
         return m;
     }, [configs, configRoutes]);
 
-    useEffect(() => {
-        if (!paletteOpen) return;
-        const handleKeyDown = (e: KeyboardEvent): void => {
-            if (e.key === 'Escape') setPaletteOpen(false);
-        };
-        window.addEventListener('keydown', handleKeyDown);
-        return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [paletteOpen]);
-
-    useEffect(() => {
-        const handleKeyDown = (e: KeyboardEvent): void => {
-            if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-                e.preventDefault();
-                setPaletteOpen((prev) => !prev);
-            }
-        };
-        window.addEventListener('keydown', handleKeyDown);
-        return () => window.removeEventListener('keydown', handleKeyDown);
-    }, []);
+    usePaletteShortcut(paletteOpen, setPaletteOpen);
 
     const handleSort = useCallback((col: RouteSortableColumn): void => {
         setSortState((prev) => {
@@ -385,16 +367,7 @@ const RoutePage: React.FC = () => {
     const pageHeader = (
         <div className="page-header-bar">
             <Text variant="header-1">Routing Table</Text>
-            <button
-                type="button"
-                className="cp-trigger"
-                onClick={() => setPaletteOpen(true)}
-                title="Open command palette (⌘K)"
-            >
-                <Icon data={Magnifier} size={16} />
-                <span className="cp-trigger__placeholder">Search or look up an IP…</span>
-                <kbd className="cp-kbd">⌘K</kbd>
-            </button>
+            <CommandPaletteTrigger placeholder="Search or look up an IP…" onOpen={() => setPaletteOpen(true)} />
             <div className="page-header-bar__actions">
                 <Button view="outlined" onClick={handleFlush} disabled={!currentConfig}>
                     <Icon data={ArrowRightToLine} size={16} />

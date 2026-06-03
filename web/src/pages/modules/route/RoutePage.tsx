@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Icon, Text } from '@gravity-ui/uikit';
 import { useSearchParams } from 'react-router-dom';
 import { useSearchParamHelpers } from '../../../hooks';
-import { Funnel, Magnifier, Plus } from '@gravity-ui/icons';
+import { Funnel, Plus } from '@gravity-ui/icons';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, SearchInput } from '../../../components';
 import { useFIBDraft } from './useFIBDraft';
 import { useUnsavedChangesBlocker } from '../../builtin/_shared/lane-editor';
@@ -16,7 +16,7 @@ import {
     AddConfigModal, isValidCIDR, useDraftShortcuts, useDraftDragDrop, useDraftPageHandlers,
 } from '../../_shared/draft';
 import { DeleteConfigModal, BulkDeleteModal } from '../../../components';
-import { CommandPalette } from '../../_shared/command-palette';
+import { CommandPalette, CommandPaletteTrigger, usePaletteShortcut } from '../../_shared/command-palette';
 import type { Command, RowAdapter } from '../../_shared/command-palette';
 import '../../../styles/draft-page.scss';
 import './route.scss';
@@ -142,25 +142,7 @@ const RoutePage: React.FC = () => {
         dragDrop,
     });
 
-    useEffect(() => {
-        if (!paletteOpen) return;
-        const handleKeyDown = (e: KeyboardEvent): void => {
-            if (e.key === 'Escape') setPaletteOpen(false);
-        };
-        window.addEventListener('keydown', handleKeyDown);
-        return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [paletteOpen]);
-
-    useEffect(() => {
-        const handleKeyDown = (e: KeyboardEvent): void => {
-            if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-                e.preventDefault();
-                setPaletteOpen((prev) => !prev);
-            }
-        };
-        window.addEventListener('keydown', handleKeyDown);
-        return () => window.removeEventListener('keydown', handleKeyDown);
-    }, []);
+    usePaletteShortcut(paletteOpen, setPaletteOpen);
 
     const openAdd = useCallback((prefix = ''): void => {
         const newRow: FIBRowItem = { id: makeRowId(), prefix, dst_mac: '', src_mac: '', device: '' };
@@ -274,16 +256,7 @@ const RoutePage: React.FC = () => {
     const pageHeader = (
         <div className="page-header-bar">
             <Text variant="header-1">Route FIB</Text>
-            <button
-                type="button"
-                className="cp-trigger"
-                onClick={() => setPaletteOpen(true)}
-                title="Open command palette (⌘K)"
-            >
-                <Icon data={Magnifier} size={16} />
-                <span className="cp-trigger__placeholder">Search routes or run an action…</span>
-                <kbd className="cp-kbd">⌘K</kbd>
-            </button>
+            <CommandPaletteTrigger placeholder="Search routes or run an action…" onOpen={() => setPaletteOpen(true)} />
             <div className="page-header-bar__actions">
                 <FIBYamlIO
                     key={currentConfig || '__none'}
