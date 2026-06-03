@@ -28,6 +28,8 @@ import { AddConfigModal } from '../../_shared/draft';
 import { DeleteConfigModal } from '../../../components';
 import { SaveIcon, TrashIcon } from '../../_shared/draft/DraftActionButtons';
 import { useTabCycle } from '../../_shared/useTabCycle';
+import { CommandPaletteTrigger, usePalette } from '../../_shared/command-palette';
+import type { Command } from '../../_shared/command-palette';
 import '../../../styles/draft-page.scss';
 import './fwstate.scss';
 
@@ -1113,6 +1115,8 @@ const FWStatePage: React.FC = () => {
         enabled: !loading,
     });
 
+    const { openPalette, setPageContribution } = usePalette();
+
     const updateActiveSubTab = useCallback((tab: StateSubTab): void => {
         updateParams({ [QP_TAB]: tab });
     }, [updateParams]);
@@ -1402,6 +1406,118 @@ const FWStatePage: React.FC = () => {
         }
     };
 
+    const handleOpenAclModule = useCallback((): void => {
+        if (anyDirty && !window.confirm('You have unsaved changes. Leave this page anyway?')) {
+            return;
+        }
+        navigate('/modules/acl');
+    }, [anyDirty, navigate]);
+
+    const commands = useMemo((): Command[] => {
+        const list: Command[] = [
+            {
+                id: '__add_config',
+                icon: '▤',
+                label: 'Add config',
+                sub: 'Create a new FWState configuration',
+                keywords: 'add config create new',
+                onSelect: () => setAddConfigOpen(true),
+            },
+        ];
+        if (currentIsDirty) {
+            list.push({
+                id: '__save',
+                icon: '✓',
+                label: 'Save config',
+                sub: `Save "${currentName}"`,
+                keywords: 'save commit apply',
+                onSelect: () => { void handleSave(); },
+            });
+        }
+        if (current && !currentHasLinkedAcls) {
+            list.push({
+                id: '__delete_config',
+                icon: '✕',
+                label: 'Delete config',
+                sub: `Delete "${currentName}"`,
+                keywords: 'delete remove config',
+                onSelect: () => setDeleteConfigOpen(true),
+            });
+        }
+        for (const name of configNames) {
+            if (name === currentName) continue;
+            list.push({
+                id: `__config_${name}`,
+                icon: '⇥',
+                label: `Switch to config ${name}`,
+                sub: dirtyConfigs.has(name) ? 'unsaved changes' : undefined,
+                keywords: `switch config tab ${name}`,
+                onSelect: () => updateActiveConfig(name),
+            });
+        }
+        for (const tab of STATE_SUB_TABS) {
+            list.push({
+                id: `__subtab_${tab.id}`,
+                icon: '→',
+                label: `Go to ${tab.label}`,
+                keywords: `tab ${tab.id} ${tab.label}`,
+                onSelect: () => updateActiveSubTab(tab.id),
+            });
+        }
+        list.push({
+            id: '__states_ipv4',
+            icon: '4',
+            label: 'States: filter IPv4',
+            keywords: 'states filter ipv4 family',
+            onSelect: () => updateStatesQuery({ ...statesQuery, isIpv6: false }),
+        });
+        list.push({
+            id: '__states_ipv6',
+            icon: '6',
+            label: 'States: filter IPv6',
+            keywords: 'states filter ipv6 family',
+            onSelect: () => updateStatesQuery({ ...statesQuery, isIpv6: true }),
+        });
+        list.push({
+            id: '__states_expired',
+            icon: '⏱',
+            label: 'States: toggle include-expired',
+            sub: statesQuery.includeExpired ? 'Currently: on' : 'Currently: off',
+            keywords: 'states expired toggle include',
+            onSelect: () => updateStatesQuery({ ...statesQuery, includeExpired: !statesQuery.includeExpired }),
+        });
+        list.push({
+            id: '__open_acl',
+            icon: '↗',
+            label: 'Open ACL module',
+            keywords: 'acl module open navigate',
+            onSelect: () => handleOpenAclModule(),
+        });
+        return list;
+    }, [
+        current,
+        currentName,
+        currentIsDirty,
+        currentHasLinkedAcls,
+        configNames,
+        dirtyConfigs,
+        statesQuery,
+        handleSave,
+        updateActiveConfig,
+        updateActiveSubTab,
+        updateStatesQuery,
+        navigate,
+        handleOpenAclModule,
+    ]);
+
+    useEffect(() => {
+        setPageContribution({
+            commands,
+            placeholder: 'Search FWState actions…',
+        });
+        return () => setPageContribution(null);
+    }, [commands, setPageContribution]);
+
     const aclRows = useMemo(() => aclMeta.map((row) => ({ ...row, isLinkedHere: row.fwstateName === currentName })), [aclMeta, currentName]);
 
     const statsRows = useMemo(() => {
@@ -1462,12 +1578,13 @@ const FWStatePage: React.FC = () => {
             </button>
         </>
     ) : activeSubTab === 'links' ? (
-        <Button view="flat" size="s" onClick={() => navigate('/modules/acl')}>Open ACL module</Button>
+        <Button view="flat" size="s" onClick={handleOpenAclModule}>Open ACL module</Button>
     ) : null;
 
     const pageHeader = (
         <Flex alignItems="center" gap={3} style={{ width: '100%' }}>
             <Text variant="header-1">FWState</Text>
+            <CommandPaletteTrigger placeholder="Search FWState actions…" onOpen={openPalette} />
             <Flex grow />
             <Button view="action" onClick={() => setAddConfigOpen(true)}>
                 <Icon data={Plus} size={16} />
