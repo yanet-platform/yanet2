@@ -16,6 +16,8 @@ import {
 } from '../../_shared/draft';
 import { DeleteConfigModal, BulkDeleteModal } from '../../../components';
 import { useTabCycle } from '../../_shared/useTabCycle';
+import { usePalette } from '../../_shared/command-palette';
+import type { Command, RowAdapter } from '../../_shared/command-palette';
 import '../../../styles/draft-page.scss';
 
 let idCounter = 0;
@@ -87,6 +89,8 @@ const DecapPage: React.FC = () => {
         handleDragLeave();
     }, [currentConfig, handleDragLeave]);
 
+    const { openPalette, setPageContribution } = usePalette();
+
     const rawRows: PrefixRowItem[] = draftRows(currentConfig);
     const rawServerRows: PrefixRowItem[] = serverRows(currentConfig);
     const currentIsDirty = isDirty(currentConfig);
@@ -138,29 +142,125 @@ const DecapPage: React.FC = () => {
         dragDrop,
     });
 
-    const openAdd = () => {
+    const openAdd = useCallback((): void => {
         const newRow: PrefixRowItem = { id: makeRowId(), prefix: '' };
         dispatchDraft({ type: 'ADD_ROW', configName: currentConfig, row: newRow });
         setActiveRowId(newRow.id);
         setEditingRowId(newRow.id);
-    };
+    }, [currentConfig, dispatchDraft, setActiveRowId, setEditingRowId]);
 
     useDraftShortcuts({
         rows: rawRows, activeRowId, setActiveRowId, editingRowId, setEditingRowId,
         onDeleteRow: handlers.handleDeleteRow,
     });
 
+    const commands = useMemo((): Command[] => {
+        const list: Command[] = [
+            {
+                id: '__add',
+                icon: '+',
+                label: 'Add prefix',
+                sub: 'Open the add-prefix drawer',
+                keywords: 'add prefix insert new',
+                onSelect: () => openAdd(),
+            },
+        ];
+        if (currentIsDirty) {
+            list.push({
+                id: '__save',
+                icon: '✓',
+                label: 'Save changes',
+                sub: 'Open the diff and save dialog',
+                keywords: 'save commit apply',
+                onSelect: () => handlers.handleCommitPress(),
+            });
+            list.push({
+                id: '__discard',
+                icon: '⟲',
+                label: 'Discard changes',
+                sub: 'Revert to the last saved state',
+                keywords: 'discard revert undo reset',
+                onSelect: () => handlers.handleDiscard(),
+            });
+        }
+        list.push({
+            id: '__add_config',
+            icon: '▤',
+            label: 'Add config',
+            sub: 'Create a new decap configuration',
+            keywords: 'add config create new',
+            onSelect: () => setAddConfigOpen(true),
+        });
+        if (currentConfig) {
+            list.push({
+                id: '__delete_config',
+                icon: '✕',
+                label: 'Delete config',
+                sub: `Delete "${currentConfig}"`,
+                keywords: 'delete remove config',
+                onSelect: () => setDeleteConfigOpen(true),
+            });
+        }
+        for (const cfg of draftConfigs) {
+            if (cfg === currentConfig) continue;
+            const name = cfg;
+            list.push({
+                id: `__config_${name}`,
+                icon: '⇥',
+                label: `Switch to config ${name}`,
+                sub: dirtySet.has(name) ? 'unsaved changes' : undefined,
+                keywords: `switch config tab ${name}`,
+                onSelect: () => setActiveConfig(name),
+            });
+        }
+        list.push({
+            id: '__clear_search',
+            icon: '✕',
+            label: 'Clear search',
+            keywords: 'clear reset search filter',
+            onSelect: () => updateParams({ [QP_SEARCH]: null }),
+        });
+        return list;
+    }, [
+        currentIsDirty, currentConfig, draftConfigs, dirtySet,
+        openAdd, handlers, setAddConfigOpen, setDeleteConfigOpen, setActiveConfig, updateParams,
+    ]);
+
+    const rowAdapter = useMemo((): RowAdapter<PrefixRowItem> => ({
+        rows: rawRows,
+        getId: (r) => r.id,
+        getLabel: (r) => r.prefix || '(empty)',
+        searchText: (r) => r.prefix,
+        onSelect: (id) => {
+            updateParams({ [QP_SEARCH]: null });
+            setActiveRowId(id);
+            setEditingRowId(id);
+        },
+        icon: '→',
+    }), [rawRows, updateParams, setActiveRowId, setEditingRowId]);
+
+    useEffect(() => {
+        setPageContribution({
+            commands,
+            rowAdapter: rowAdapter as RowAdapter<unknown>,
+            placeholder: 'Search prefixes or run an action…',
+        });
+        return () => setPageContribution(null);
+    }, [commands, rowAdapter, setPageContribution]);
+
     const pageHeader = (
-            <DraftPageToolbar
-                title="Decap"
-                searchValue={search}
-                onSearchChange={(value) => {
-                    updateParams({ [QP_SEARCH]: value || null });
-                }}
-                searchPlaceholder="Search prefix…"
-                yamlSlot={<PrefixYamlIO key={currentConfig || '__none'} configName={currentConfig} rows={rawRows} onImport={handlers.handleImportYaml} disabled={!currentConfig} />}
+        <DraftPageToolbar
+            title="Decap"
+            searchValue={search}
+            onSearchChange={(value) => {
+                updateParams({ [QP_SEARCH]: value || null });
+            }}
+            searchPlaceholder="Search prefix…"
+            yamlSlot={<PrefixYamlIO key={currentConfig || '__none'} configName={currentConfig} rows={rawRows} onImport={handlers.handleImportYaml} disabled={!currentConfig} />}
             addLabel="Add Prefix"
             onAdd={openAdd}
+            onOpenPalette={openPalette}
+            palettePlaceholder="Search prefixes or run an action…"
         />
     );
 

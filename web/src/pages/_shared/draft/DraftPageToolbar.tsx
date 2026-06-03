@@ -2,6 +2,7 @@ import React from 'react';
 import { Button, Flex, Icon, Text } from '@gravity-ui/uikit';
 import { Plus } from '@gravity-ui/icons';
 import { SearchInput } from '../../../components';
+import { CommandPaletteTrigger } from '../command-palette';
 
 interface DraftPageToolbarProps {
     title: string;
@@ -12,6 +13,10 @@ interface DraftPageToolbarProps {
     yamlSlot?: React.ReactNode;
     addLabel: string;
     onAdd: () => void;
+    /** When provided, renders a CommandPaletteTrigger pill after the title. */
+    onOpenPalette?: () => void;
+    /** Placeholder text for the palette trigger pill. */
+    palettePlaceholder?: string;
 }
 
 /** Page header toolbar shared by draft-style module pages (Route, Decap, …). */
@@ -23,9 +28,17 @@ const DraftPageToolbar: React.FC<DraftPageToolbarProps> = ({
     yamlSlot,
     addLabel,
     onAdd,
+    onOpenPalette,
+    palettePlaceholder,
 }) => (
     <Flex alignItems="center" gap={4} style={{ width: '100%' }}>
         <Text variant="header-1">{title}</Text>
+        {onOpenPalette && (
+            <CommandPaletteTrigger
+                placeholder={palettePlaceholder ?? '…'}
+                onOpen={onOpenPalette}
+            />
+        )}
         <Flex grow />
             <div style={{ flexBasis: 380, flexShrink: 1 }}>
                 <SearchInput
