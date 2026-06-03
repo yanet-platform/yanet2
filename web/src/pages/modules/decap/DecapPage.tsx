@@ -1,7 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { Button, Icon, Text } from '@gravity-ui/uikit';
+import { Funnel, Plus } from '@gravity-ui/icons';
 import { useSearchParamHelpers } from '../../../hooks';
-import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, EmptyPagePlaceholder } from '../../../components';
+import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, EmptyPagePlaceholder, SearchInput } from '../../../components';
 import { usePrefixDraft } from './usePrefixDraft';
 import { useUnsavedChangesBlocker } from '../../builtin/_shared/lane-editor';
 import type { PrefixRowItem } from './types';
@@ -12,13 +14,14 @@ import PrefixYamlIO from './PrefixYamlIO';
 import { PrefixSaveDiffModal } from './PrefixSaveDiffModal';
 import {
     AddConfigModal,
-    DraftPageToolbar, useDraftShortcuts, useDraftDragDrop, useDraftPageHandlers,
+    useDraftShortcuts, useDraftDragDrop, useDraftPageHandlers,
 } from '../../_shared/draft';
 import { DeleteConfigModal, BulkDeleteModal } from '../../../components';
 import { useTabCycle } from '../../_shared/useTabCycle';
-import { usePalette } from '../../_shared/command-palette';
+import { CommandPaletteTrigger, usePalette } from '../../_shared/command-palette';
 import type { Command, RowAdapter } from '../../_shared/command-palette';
 import '../../../styles/draft-page.scss';
+import './decap.scss';
 
 let idCounter = 0;
 const makeRowId = (): string => `new-${++idCounter}-${Date.now()}`;
@@ -249,19 +252,17 @@ const DecapPage: React.FC = () => {
     }, [commands, rowAdapter, setPageContribution]);
 
     const pageHeader = (
-        <DraftPageToolbar
-            title="Decap"
-            searchValue={search}
-            onSearchChange={(value) => {
-                updateParams({ [QP_SEARCH]: value || null });
-            }}
-            searchPlaceholder="Search prefix…"
-            yamlSlot={<PrefixYamlIO key={currentConfig || '__none'} configName={currentConfig} rows={rawRows} onImport={handlers.handleImportYaml} disabled={!currentConfig} />}
-            addLabel="Add Prefix"
-            onAdd={openAdd}
-            onOpenPalette={openPalette}
-            palettePlaceholder="Search prefixes or run an action…"
-        />
+        <div className="page-header-bar">
+            <Text variant="header-1">Decap</Text>
+            <CommandPaletteTrigger placeholder="Search prefixes or run an action…" onOpen={openPalette} />
+            <div className="page-header-bar__actions">
+                <PrefixYamlIO key={currentConfig || '__none'} configName={currentConfig} rows={rawRows} onImport={handlers.handleImportYaml} disabled={!currentConfig} />
+                <Button view="action" onClick={openAdd}>
+                    <Icon data={Plus} size={16} />
+                    Add Prefix
+                </Button>
+            </div>
+        </div>
     );
 
     if (loading) return <PageLayout header={pageHeader} className="yn-flat-layout"><PageLoader loading size="l" /></PageLayout>;
@@ -285,6 +286,23 @@ const DecapPage: React.FC = () => {
                             onSelect={setActiveConfig}
                             onAddConfig={() => setAddConfigOpen(true)}
                         />
+                        <div className="decap-toolbar">
+                            <div style={{ flex: 1 }} />
+                            <div style={{ flexBasis: 230, flexShrink: 1 }}>
+                                <SearchInput
+                                    value={search}
+                                    onUpdate={(value) => updateParams({ [QP_SEARCH]: value || null })}
+                                    placeholder="Filter prefixes…"
+                                    enableFocusShortcut={false}
+                                    showShortcutHint={false}
+                                    icon={Funnel}
+                                />
+                            </div>
+                            <span className="decap-count">
+                                <span style={{ color: 'var(--yn-text)', fontWeight: 600 }}>{visibleRows.length.toLocaleString()}</span>
+                                {' / '}{rawRows.length.toLocaleString()}
+                            </span>
+                        </div>
                         <div className="yn-content">
                             <PrefixTable
                                 allRows={rawRows}

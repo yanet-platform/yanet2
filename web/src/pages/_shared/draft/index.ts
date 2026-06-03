@@ -4,7 +4,6 @@ export { isValidCIDR } from './cidr';
 export { default as AddConfigModal } from './AddConfigModal';
 export { default as DraftActionButtons, SaveIcon, TrashIcon } from './DraftActionButtons';
 export { default as DraftItemDrawer } from './DraftItemDrawer';
-export { default as DraftPageToolbar } from './DraftPageToolbar';
 export { useDraftShortcuts } from './useDraftShortcuts';
 export { useDraft } from './useDraft';
 export type { UseDraftResult } from './useDraft';
