@@ -3,13 +3,13 @@ import { Button, Flex, Icon, Label, Text } from '@gravity-ui/uikit';
 import { Pause, Play, Plus } from '@gravity-ui/icons';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, SearchInput } from '../../../components';
-import { useSearchParamHelpers } from '../../../hooks';
+import { useSearchParamHelpers, usePageKeyboardShortcuts } from '../../../hooks';
 import { useAclDraft } from './useAclDraft';
 import { useUnsavedChangesBlocker } from '../../builtin/_shared/lane-editor';
 import type { Rule } from '../../../api/acl';
 import { ActionKind } from '../../../api/acl';
 import type { RuleItem, RuleDraft } from './types';
-import { rulesToNgItems, draftToRule, useKeyboardShortcuts } from './hooks';
+import { rulesToNgItems, draftToRule } from './hooks';
 import { DRAWER_TRANSITION_MS } from './RuleTable';
 import RuleTable from './RuleTable';
 import RuleDrawer from './RuleDrawer';
@@ -278,7 +278,7 @@ const AclPage: React.FC = () => {
         updateParams({ [QP_SEARCH]: value || null });
     }, [updateParams]);
 
-    useKeyboardShortcuts({
+    usePageKeyboardShortcuts({
         onNewRule: openAdd,
         onEscape: closeDrawer,
         drawerOpen: drawer.open,

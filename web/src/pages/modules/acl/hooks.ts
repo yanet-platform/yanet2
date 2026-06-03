@@ -1,4 +1,3 @@
-import { useEffect } from 'react';
 import type { Rule, PortRange, VlanRange, ProtoRange, Action } from '../../../api/acl';
 import { ActionKind } from '../../../api/acl';
 import { formatIPNet, extractBytes } from '../../../utils';
@@ -251,29 +250,4 @@ export const ruleToDraft = (rule: Rule): RuleDraft => {
         counter: rule.counter ?? '',
         actions: (rule.actions ?? []).map(a => normalizeActionKind(a.kind)),
     };
-};
-
-/** Keyboard shortcuts for the ACL page. */
-export const useKeyboardShortcuts = (opts: {
-    onNewRule: () => void;
-    onEscape: () => void;
-    drawerOpen: boolean;
-}): void => {
-    const { onNewRule, onEscape, drawerOpen } = opts;
-
-    useEffect(() => {
-        const onKey = (e: KeyboardEvent): void => {
-            if (e.key === 'Escape' && drawerOpen) {
-                onEscape();
-                return;
-            }
-            const tag = (e.target as HTMLElement).tagName;
-            if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-            if (e.key === 'n' && !e.metaKey && !e.ctrlKey && !e.altKey) {
-                onNewRule();
-            }
-        };
-        window.addEventListener('keydown', onKey);
-        return () => window.removeEventListener('keydown', onKey);
-    }, [onNewRule, onEscape, drawerOpen]);
 };

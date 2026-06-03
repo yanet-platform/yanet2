@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Icon, Text } from '@gravity-ui/uikit';
 import { useSearchParams } from 'react-router-dom';
-import { useSearchParamHelpers } from '../../../hooks';
+import { useSearchParamHelpers, usePageKeyboardShortcuts } from '../../../hooks';
 import { Funnel, Magnifier, Plus } from '@gravity-ui/icons';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, SearchInput } from '../../../components';
 import { useForwardDraft } from './useForwardDraft';
@@ -12,7 +12,7 @@ import type { RuleItem, RuleDraft } from './types';
 import { MODE_LABELS } from './types';
 import { ModeFilter } from './ModeFilter';
 import type { ModeFilterValue } from './ModeFilter';
-import { rulesToNgItems, draftToRule, useKeyboardShortcuts } from './hooks';
+import { rulesToNgItems, draftToRule } from './hooks';
 import { DRAWER_TRANSITION_MS } from './RuleTable';
 import RuleTable from './RuleTable';
 import RuleDrawer from './RuleDrawer';
@@ -258,7 +258,7 @@ const ForwardPage: React.FC = () => {
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, []);
 
-    useKeyboardShortcuts({
+    usePageKeyboardShortcuts({
         onNewRule: openAdd,
         onEscape: closeDrawer,
         drawerOpen: drawer.open,

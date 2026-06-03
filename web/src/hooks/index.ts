@@ -23,3 +23,5 @@ export type { CounterHistoryEntry } from './useCounterHistory';
 
 export { useSearchParamHelpers } from './useSearchParamHelpers';
 export type { SearchParamUpdates } from './useSearchParamHelpers';
+
+export { usePageKeyboardShortcuts } from './usePageKeyboardShortcuts';

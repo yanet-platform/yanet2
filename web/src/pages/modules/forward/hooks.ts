@@ -1,4 +1,3 @@
-import { useEffect } from 'react';
 import type { Rule, IPNet, VlanRange } from '../../../api/forward';
 import { ForwardMode } from '../../../api/forward';
 import { formatIPNet, parseIPToBytes, prefixLengthToMaskBytes, bytesToBase64, extractBytes } from '../../../utils';
@@ -120,33 +119,6 @@ export const itemToDraft = (item: RuleItem): RuleDraft => ({
     sourceCidrs: [...item.sourceCidrs],
     dstCidrs: [...item.dstCidrs],
 });
-
-/** Register keyboard shortcuts for the forward page. */
-export const useKeyboardShortcuts = (opts: {
-    onNewRule: () => void;
-    onEscape: () => void;
-    drawerOpen: boolean;
-}): void => {
-    const { onNewRule, onEscape, drawerOpen } = opts;
-
-    useEffect(() => {
-        const onKey = (e: KeyboardEvent): void => {
-            // Escape always closes the drawer regardless of focus position.
-            if (e.key === 'Escape' && drawerOpen) {
-                onEscape();
-                return;
-            }
-            // n is gated: do not fire when focus is inside a text field.
-            const tag = (e.target as HTMLElement).tagName;
-            if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-            if (e.key === 'n' && !e.metaKey && !e.ctrlKey && !e.altKey) {
-                onNewRule();
-            }
-        };
-        window.addEventListener('keydown', onKey);
-        return () => window.removeEventListener('keydown', onKey);
-    }, [onNewRule, onEscape, drawerOpen]);
-};
 
 /** Validate VLAN token (single value or range, 0-4095). */
 export const isValidVlanToken = (s: string): boolean => {
