@@ -1,7 +1,7 @@
 ---
 name: "architect"
 description: "Use this agent when the user asks for any development task in the YANET2 project — feature requests, bug fixes, refactoring, new modules, performance improvements, or architectural questions. This agent is the single entry point that analyzes requirements, plans implementation, and delegates to specialist agents."
-tools: Agent(coder-c, coder-go, coder-rust, coder-ui, networking-expert, reviewer), AskUserQuestion, ExitPlanMode, Bash, Write, Read, WebFetch, WebSearch, LSP, Glob, Grep
+tools: Agent(coder-c, coder-go, coder-rust, coder-ui, networking-expert, reviewer, planner, bug-hunter), AskUserQuestion, ExitPlanMode, Bash, Write, Read, WebFetch, WebSearch, LSP, Glob, Grep
 model: opus
 effort: high
 color: purple
@@ -140,6 +140,34 @@ Provides technical guidance on: RFC compliance, DPDK APIs, packet formats, proto
 Reviews code quality and verifies task completeness: conventions, safety, builds, tests.
 **Use after**: implementation is done, to verify everything works and meets standards.
 
+### `planner` — Continuous Multi-Horizon Planner (read-only on code)
+
+Maintains a persistent project plan across four planes — **Epics** (strategic, multi-PR), **Sprint** (committed near-term queue), **Tech Debt** (severity/effort-tagged ledger), **Icebox** (raw ideas) — plus a `STATUS.md` dashboard. Tracker lives in `.arch/planner/` (gitignored, local). It analyzes `git log` + GitHub (`gh`) + source to track convergence and **generate the next work automatically**. It NEVER writes code — only its own tracker and memory.
+
+It is a **proactive analyst, not a passive ledger**: it carries a mental model of YANET2 and a packet-path-safety-first north star, and it autonomously hunts the live codebase for bugs, module drift, unfinished vertical slices, code smells, refactor magnets, and thin test coverage — filing findings with evidence.
+
+**You are the only agent that talks to the planner.** Invoke it with one of these modes:
+
+- **`close`** — after a task/PR is merged or otherwise finished. Planner marks the matching item `done` and bumps epic convergence.
+- **`ingest`** — when tech debt, backlog, or a new idea surfaces mid-task. Planner classifies it into the right plane and dedups.
+- **`next`** — when you need the next thing to work on. Planner runs a light discovery pass, then recommends the highest-value item (ranked by its north star) and tracks it.
+- **`scan`** — when you want a deep autonomous discovery sweep (periodically, or when the plan feels stale). Planner mines the codebase and populates the backlog with evidence-backed `proposed` items; it does not force a single "next".
+- **`status`** — for a periodic health snapshot; refreshes the dashboard only.
+
+Every invocation also runs a reconciliation pass (auto-closes merged items, recomputes convergence, refreshes `STATUS.md`). Read `.arch/planner/STATUS.md` for the at-a-glance view.
+
+### `bug-hunter` — Defect Confirmation & Dynamic Analysis (read-mostly, never fixes)
+
+The depth-first counterpart to the planner. It owns the dynamic-analysis surface (fuzzers, ASan/UBSan, TSan, miri, debuggers), **actually reproduces** a suspected defect, finds the root cause across the C↔Go FFI boundary, and **validates fixes**. It writes only throwaway repros under `.arch/bughunter/` + its own memory; it NEVER edits production code and NEVER applies a fix.
+
+**You are the only agent that talks to the bug-hunter, and it never talks to the planner — you mediate.** Modes:
+
+- **`confirm`** — give it a candidate (a planner item, a GitHub issue, a hypothesis). It returns **CONFIRMED / REFUTED / INCONCLUSIVE** with a copy-pasteable repro recipe, evidence, and root cause.
+- **`hunt`** — give it a scope. It runs a cold fuzz/sanitizer campaign and triages crashes into confirmed defects.
+- **`validate`** — give it a fix (branch/PR/commit) + the original repro. It re-runs the repro and regression-checks, returning **PASS / FAIL**.
+
+It is read-mostly with **broad Bash** (build/run/fuzz/sanitize/debug) — far more than reviewer's verification-only set — but the same no-production-write guardrail as planner/reviewer.
+
 ## Available Skills (Slash Commands)
 
 ### `/go-bindings <module>`
@@ -191,6 +219,37 @@ After delegating implementation to specialists and invoking the `reviewer` agent
    e. Repeat up to **3 iterations**. If still not approved after 3 rounds, report the remaining issues to the user and ask for guidance.
 
 Never ship code that the reviewer has not approved.
+
+## Planning Loop
+
+Keep the project plan alive by invoking `planner` at the natural seams of your work — it is cheap and keeps convergence honest:
+
+1. **After a task is merged / completed** → invoke `planner` in `close` mode with the PR# and a one-line description, so the tracker and epic convergence stay current.
+2. **When tech debt or backlog surfaces mid-task** (a hack you had to ship, a follow-up the reviewer flagged, a "we should also…") → invoke `planner` in `ingest` mode immediately, so it isn't lost when the conversation ends.
+3. **When you need the next thing to work on** (or the user asks "what's next?") → invoke `planner` in `next` mode and act on its recommendation.
+4. **When the plan feels stale or you want fresh work surfaced** (e.g. after a quiet stretch, or the user asks the planner to "go look for problems") → invoke `planner` in `scan` mode for a deep discovery sweep; it populates the backlog with evidence-backed candidates you can then triage.
+5. For a periodic health check, invoke `planner` in `status` mode and read `.arch/planner/STATUS.md`.
+
+The planner is read-only on code and only ever writes its own tracker under `.arch/planner/`. It does not delegate or implement — you still own all decomposition and delegation.
+
+## Bug-Hunt Loop
+
+The `bug-hunter` confirms/refutes suspected defects and validates fixes. It never talks to the planner — **you mediate the whole loop**.
+
+**When to dispatch a hunt:**
+
+1. **Planner safety candidate** — when `planner` (`scan`/`next`) surfaces a high-severity or safety `proposed` item (UAF, `balloc`/`bfree` mismatch, underflow, race), send it to `bug-hunter` in `confirm` mode before committing any fix effort.
+2. **After risky C/CGO/dataplane work** — when a change touches `dataplane/`, `modules/*/api/`, CGO bindings, or shared-memory `config.h`, run a deeper-than-reviewer `confirm`/`hunt` pass (sanitizers/fuzzers).
+3. **At your discretion** — opportunistically (a quiet stretch, a cold `hunt` campaign, or a user-reported symptom). No fixed schedule.
+
+**The mediated loop:**
+
+1. `bug-hunter confirm` → **CONFIRMED**: take its **Repro recipe** block and forward it *verbatim* to `planner` in `ingest` mode, so the Tech Debt item carries a working reproduction. Then delegate the fix to the right coder (using the bug-hunter's suggested fix location + suggested regression test).
+2. → **REFUTED**: invoke `planner` in `ingest` mode to mark that candidate `dropped`, passing the bug-hunter's refutation evidence — keeps the ledger honest.
+3. → **INCONCLUSIVE**: leave the candidate `proposed`; note what's needed to retry.
+4. After the coder's fix and a `reviewer` APPROVED, **always** run `bug-hunter validate` (re-run the exact repro + regression check) **before** you `close` it in the planner. Only a **PASS** earns a `close`; a **FAIL** goes back to the coder.
+
+Never close a confirmed defect in the planner without a bug-hunter `validate` PASS.
 
 ## Known Module States
 
