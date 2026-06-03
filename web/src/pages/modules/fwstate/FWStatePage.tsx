@@ -18,7 +18,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useSearchParamHelpers } from '../../../hooks';
 import { API } from '../../../api';
 import { Direction, type FwStateEntry, type ListEntriesRequest, type MapStats } from '../../../api/fwstate';
-import { ConfirmDialog, ConfigTabStrip, PageLayout, PageLoader } from '../../../components';
+import { ConfirmDialog, ConfigTabStrip, PageLayout, PageLoader, EmptyPagePlaceholder } from '../../../components';
 import { useContainerHeight } from '../../../hooks';
 import { useUnsavedChangesBlocker } from '../../builtin/_shared/lane-editor';
 import { ipAddressToString, isValidIPAddress, parseIPToBytes, stringToIPAddress, type IPAddressWire } from '../../../utils/netip';
@@ -1694,10 +1694,11 @@ const FWStatePage: React.FC = () => {
         <PageLayout header={pageHeader} className="yn-flat-layout">
             <div className="yn-page yn-flat-page">
                 {configNames.length === 0 ? (
-                    <div className="yn-empty-page">
-                        <div className="yn-empty-page__message">No FWState configurations found.</div>
-                        <Button view="action" onClick={() => setAddConfigOpen(true)}>Add Config</Button>
-                    </div>
+                    <EmptyPagePlaceholder
+                        message="No FWState configurations found."
+                        actionLabel="Add Config"
+                        onAction={() => setAddConfigOpen(true)}
+                    />
                 ) : (
                     <>
                         <div className="fwstate-config-bar">

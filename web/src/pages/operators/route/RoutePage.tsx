@@ -1,7 +1,7 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { Button, Icon, Text } from '@gravity-ui/uikit';
 import { ArrowRightToLine, Funnel, Plus } from '@gravity-ui/icons';
-import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, SearchInput } from '../../../components';
+import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, SearchInput, EmptyPagePlaceholder } from '../../../components';
 import { AddConfigModal } from '../../_shared/draft';
 import { BulkDeleteModal } from '../../../components';
 import { CommandPalette, CommandPaletteTrigger, usePaletteShortcut } from '../../_shared/command-palette';
@@ -393,10 +393,11 @@ const RoutePage: React.FC = () => {
         <PageLayout header={pageHeader} className="ro-layout">
             <div className="yn-page ro-page" aria-busy={refreshing}>
                 {configs.length === 0 ? (
-                    <div className="yn-empty-page">
-                        <div className="yn-empty-page__message">No route configurations found.</div>
-                        <Button view="action" onClick={() => setAddConfigOpen(true)}>Add Config</Button>
-                    </div>
+                    <EmptyPagePlaceholder
+                        message="No route configurations found."
+                        actionLabel="Add Config"
+                        onAction={() => setAddConfigOpen(true)}
+                    />
                 ) : (
                     <>
                         <ConfigTabStrip

@@ -3,6 +3,7 @@ export * from './PageLoader';
 export * from './PageHeader';
 export * from './CardHeader';
 export * from './EmptyState';
+export * from './EmptyPagePlaceholder';
 export * from './FormField';
 export * from './InputFormField';
 export * from './FormDialog';

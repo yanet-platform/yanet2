@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { useSearchParamHelpers } from '../../../hooks';
 import { Button, Icon, Text } from '@gravity-ui/uikit';
 import { Plus, Layers } from '@gravity-ui/icons';
-import { PageLayout, PageLoader, ConfigTabStrip, BulkBar } from '../../../components';
+import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, EmptyPagePlaceholder } from '../../../components';
 import { BulkDeleteModal, DeleteConfigModal } from '../../../components';
 import { CommandPalette, CommandPaletteTrigger, usePaletteShortcut } from '../../_shared/command-palette';
 import type { Command, RowAdapter } from '../../_shared/command-palette';
@@ -514,10 +514,11 @@ const NeighboursPage: React.FC = () => {
         <PageLayout header={pageHeader} className="nb-layout">
             <div className="yn-page nb-page">
                 {tables.length === 0 ? (
-                    <div className="yn-empty-page">
-                        <div className="yn-empty-page__message">No neighbour tables found.</div>
-                        <Button view="action" onClick={() => setCreateTableOpen(true)}>Create table</Button>
-                    </div>
+                    <EmptyPagePlaceholder
+                        message="No neighbour tables found."
+                        actionLabel="Create table"
+                        onAction={() => setCreateTableOpen(true)}
+                    />
                 ) : (
                     <>
                         <div className="yn-tabs-row">

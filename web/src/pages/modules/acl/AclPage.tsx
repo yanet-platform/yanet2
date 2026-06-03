@@ -2,7 +2,7 @@ import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useSt
 import { Button, Flex, Icon, Label, Text } from '@gravity-ui/uikit';
 import { Pause, Play, Plus } from '@gravity-ui/icons';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, SearchInput } from '../../../components';
+import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, SearchInput, EmptyPagePlaceholder } from '../../../components';
 import { useSearchParamHelpers, usePageKeyboardShortcuts } from '../../../hooks';
 import { useAclDraft } from './useAclDraft';
 import { useUnsavedChangesBlocker } from '../../builtin/_shared/lane-editor';
@@ -339,14 +339,11 @@ const AclPage: React.FC = () => {
         <PageLayout header={pageHeader} className="yn-flat-layout">
             <div className="yn-page yn-flat-page">
                 {draftConfigs.length === 0 ? (
-                    <div className="yn-empty-page">
-                        <div className="yn-empty-page__message">
-                            No ACL configurations found.
-                        </div>
-                        <Button view="action" onClick={() => setAddConfigOpen(true)}>
-                            Add Config
-                        </Button>
-                    </div>
+                    <EmptyPagePlaceholder
+                        message="No ACL configurations found."
+                        actionLabel="Add Config"
+                        onAction={() => setAddConfigOpen(true)}
+                    />
                 ) : (
                     <>
                         <ConfigTabStrip

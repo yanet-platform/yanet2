@@ -3,7 +3,7 @@ import { Button, Icon, Text } from '@gravity-ui/uikit';
 import { useSearchParams } from 'react-router-dom';
 import { useSearchParamHelpers } from '../../../hooks';
 import { Funnel, Plus } from '@gravity-ui/icons';
-import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, SearchInput } from '../../../components';
+import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, SearchInput, EmptyPagePlaceholder } from '../../../components';
 import { useFIBDraft } from './useFIBDraft';
 import { useUnsavedChangesBlocker } from '../../builtin/_shared/lane-editor';
 import type { FIBRowItem } from './types';
@@ -285,10 +285,11 @@ const RoutePage: React.FC = () => {
         <PageLayout header={pageHeader} className="yn-flat-layout">
             <div className="yn-page yn-flat-page">
                 {draftConfigs.length === 0 ? (
-                    <div className="yn-empty-page">
-                        <div className="yn-empty-page__message">No FIB configurations found.</div>
-                        <Button view="action" onClick={() => setAddConfigOpen(true)}>Add Config</Button>
-                    </div>
+                    <EmptyPagePlaceholder
+                        message="No FIB configurations found."
+                        actionLabel="Add Config"
+                        onAction={() => setAddConfigOpen(true)}
+                    />
                 ) : (
                     <>
                         <ConfigTabStrip

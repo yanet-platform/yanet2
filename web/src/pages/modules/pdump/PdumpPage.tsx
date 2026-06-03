@@ -3,7 +3,7 @@ import { Button, Flex, Icon, Text } from '@gravity-ui/uikit';
 import { ArrowDownToLine, Plus } from '@gravity-ui/icons';
 import { useSearchParams } from 'react-router-dom';
 import { useSearchParamHelpers } from '../../../hooks';
-import { PageLayout, PageLoader, ConfigTabStrip } from '../../../components';
+import { PageLayout, PageLoader, ConfigTabStrip, EmptyPagePlaceholder } from '../../../components';
 import { toaster } from '../../../utils';
 import {
     usePdumpConfigs,
@@ -424,14 +424,11 @@ const PdumpPage: React.FC = () => {
         <PageLayout header={pageHeader} className="yn-flat-layout">
             <div className="yn-page pdump-page yn-flat-page">
                 {configs.length === 0 ? (
-                    <div className="yn-empty-page">
-                        <div className="yn-empty-page__message">
-                            No pdump configurations found.
-                        </div>
-                        <Button view="action" onClick={() => setIsCreateDialogOpen(true)}>
-                            New Configuration
-                        </Button>
-                    </div>
+                    <EmptyPagePlaceholder
+                        message="No pdump configurations found."
+                        actionLabel="New Configuration"
+                        onAction={() => setIsCreateDialogOpen(true)}
+                    />
                 ) : (
                     <>
                         <ConfigTabStrip

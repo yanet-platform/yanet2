@@ -1,8 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Button } from '@gravity-ui/uikit';
 import { useSearchParams } from 'react-router-dom';
 import { useSearchParamHelpers } from '../../../hooks';
-import { PageLayout, PageLoader, ConfigTabStrip, BulkBar } from '../../../components';
+import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, EmptyPagePlaceholder } from '../../../components';
 import { usePrefixDraft } from './usePrefixDraft';
 import { useUnsavedChangesBlocker } from '../../builtin/_shared/lane-editor';
 import type { PrefixRowItem } from './types';
@@ -163,10 +162,11 @@ const DecapPage: React.FC = () => {
         <PageLayout header={pageHeader} className="yn-flat-layout">
             <div className="yn-page yn-flat-page">
                 {draftConfigs.length === 0 ? (
-                    <div className="yn-empty-page">
-                        <div className="yn-empty-page__message">No decap configurations found.</div>
-                        <Button view="action" onClick={() => setAddConfigOpen(true)}>Add Config</Button>
-                    </div>
+                    <EmptyPagePlaceholder
+                        message="No decap configurations found."
+                        actionLabel="Add Config"
+                        onAction={() => setAddConfigOpen(true)}
+                    />
                 ) : (
                     <>
                         <ConfigTabStrip
