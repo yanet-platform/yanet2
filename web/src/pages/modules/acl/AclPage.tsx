@@ -19,6 +19,8 @@ import { SaveDiffModal } from './SaveDiffModal';
 import { useAclRuleCounters } from './useAclRuleCounters';
 import { AddConfigModal } from '../../_shared/draft';
 import { DeleteConfigModal, BulkDeleteModal } from '../../../components';
+import { CommandPaletteTrigger, usePalette } from '../../_shared/command-palette';
+import type { Command, RowAdapter } from '../../_shared/command-palette';
 import { useTabCycle } from '../../_shared/useTabCycle';
 import '../../../styles/draft-page.scss';
 import './acl.scss';
@@ -56,6 +58,7 @@ const AclPage: React.FC = () => {
     const [addConfigOpen, setAddConfigOpen] = useState(false);
     const [deleteConfigOpen, setDeleteConfigOpen] = useState(false);
     const [diffModalOpen, setDiffModalOpen] = useState(false);
+    const [flashRowId, setFlashRowId] = useState<string | null>(null);
     const [deleteConfigTarget, setDeleteConfigTarget] = useState<string | null>(null);
     const [deleteInFlightConfig, setDeleteInFlightConfig] = useState<string | null>(null);
     const [bulkDeleteConfig, setBulkDeleteConfig] = useState<string | null>(null);
@@ -100,6 +103,7 @@ const AclPage: React.FC = () => {
         setBulkDeleteRuleIds([]);
         setEnabledCounterNames(new Set());
         setPaused(false);
+        setFlashRowId(null);
     }, [currentConfig]);
 
     const currentFwStateName = fwstateName(currentConfig);
@@ -131,9 +135,12 @@ const AclPage: React.FC = () => {
     }, [allItems, deferredSearch]);
 
     const openAdd = useCallback((): void => {
+        if (!currentConfig) {
+            return;
+        }
         setActiveRowId(null);
         setDrawer({ open: true, mode: 'add', item: null });
-    }, []);
+    }, [currentConfig]);
 
     const openEdit = useCallback((item: RuleItem): void => {
         setActiveRowId(item.id);
@@ -286,6 +293,18 @@ const AclPage: React.FC = () => {
         updateParams({ [QP_SEARCH]: value || null });
     }, [updateParams]);
 
+    const handleJumpToRow = useCallback((id: string): void => {
+        setFlashRowId(null);
+        setTimeout(() => setFlashRowId(id), 0);
+    }, []);
+
+    const handleOpenLinkedFwstate = useCallback((): void => {
+        if (!currentFwStateName) {
+            return;
+        }
+        navigate(`/modules/fwstate?config=${encodeURIComponent(currentFwStateName)}`);
+    }, [currentFwStateName, navigate]);
+
     usePageKeyboardShortcuts({
         onNewRule: openAdd,
         onEscape: closeDrawer,
@@ -293,6 +312,126 @@ const AclPage: React.FC = () => {
     });
 
     const currentIsDirty = isDirty(currentConfig);
+
+    const { openPalette, setPageContribution } = usePalette();
+
+    const commands = useMemo((): Command[] => {
+        const list: Command[] = [];
+        if (currentConfig) {
+            list.push({
+                id: '__add',
+                icon: '+',
+                label: 'Add rule',
+                sub: 'Open the add-rule drawer',
+                keywords: 'add rule insert new',
+                onSelect: () => openAdd(),
+            });
+        }
+        if (currentIsDirty) {
+            list.push({
+                id: '__save',
+                icon: '✓',
+                label: 'Save changes',
+                sub: 'Open the diff and save dialog',
+                keywords: 'save commit apply',
+                onSelect: () => handleSavePress(),
+            });
+            list.push({
+                id: '__discard',
+                icon: '⟲',
+                label: 'Discard changes',
+                sub: 'Revert to the last saved state',
+                keywords: 'discard revert undo reset',
+                onSelect: () => { closeDrawer(); handleDiscard(); },
+            });
+        }
+        list.push({
+            id: '__add_config',
+            icon: '▤',
+            label: 'Add config',
+            sub: 'Create a new ACL configuration',
+            keywords: 'add config create new',
+            onSelect: () => setAddConfigOpen(true),
+        });
+        if (currentConfig) {
+            list.push({
+                id: '__delete_config',
+                icon: '✕',
+                label: 'Delete config',
+                sub: `Delete "${currentConfig}"`,
+                keywords: 'delete remove config',
+                onSelect: () => handleOpenDeleteConfig(),
+            });
+        }
+        for (const cfg of draftConfigs) {
+            if (cfg === currentConfig) continue;
+            const name = cfg;
+            list.push({
+                id: `__config_${name}`,
+                icon: '⇥',
+                label: `Switch to config ${name}`,
+                sub: dirtySet.has(name) ? 'unsaved changes' : undefined,
+                keywords: `switch config tab ${name}`,
+                onSelect: () => handleTabSelect(name),
+            });
+        }
+        if (enabledCounterNames.size > 0) {
+            list.push({
+                id: '__pause_resume',
+                icon: paused ? '▶' : '⏸',
+                label: paused ? 'Resume counters' : 'Pause counters',
+                keywords: 'pause resume counter polling',
+                onSelect: () => setPaused(p => !p),
+            });
+        }
+        if (currentFwStateName) {
+            list.push({
+                id: '__open_fwstate',
+                icon: '↗',
+                label: 'Open linked FWState',
+                sub: currentFwStateName,
+                keywords: 'fwstate open link navigate',
+                onSelect: () => handleOpenLinkedFwstate(),
+            });
+        }
+        list.push({
+            id: '__clear_search',
+            icon: '✕',
+            label: 'Clear search',
+            keywords: 'clear reset search filter',
+            onSelect: () => handleSearchChange(''),
+        });
+        return list;
+    }, [
+        currentIsDirty, currentConfig, draftConfigs, dirtySet,
+        enabledCounterNames, paused, currentFwStateName,
+        openAdd, handleSavePress, handleDiscard, closeDrawer,
+        handleTabSelect, handleOpenDeleteConfig, handleSearchChange, handleOpenLinkedFwstate,
+    ]);
+
+    const rowAdapter = useMemo((): RowAdapter<RuleItem> => ({
+        rows: allItems,
+        getId: (it) => it.id,
+        getLabel: (it) => `Rule ${it.index + 1}${it.counter ? ` · ${it.counter}` : ''}`,
+        getSub: (it) => {
+            const rule = it.rule;
+            const devices = (rule.devices ?? []).map(d => d.name ?? '').filter(Boolean);
+            return devices.join(', ');
+        },
+        searchText: (it) => it.searchText,
+        onSelect: (id) => { handleSearchChange(''); handleJumpToRow(id); },
+        icon: '→',
+    }), [allItems, handleSearchChange, handleJumpToRow]);
+
+    useEffect(() => {
+        setPageContribution({
+            commands,
+            rowAdapter: rowAdapter as RowAdapter<unknown>,
+            placeholder: 'Search rules or run an action…',
+        });
+        return () => setPageContribution(null);
+    }, [commands, rowAdapter, setPageContribution]);
+
     const hasStatefulRules = useMemo(() =>
         rawRules.some((rule) => (rule.actions ?? []).some((action) =>
             action.kind === ActionKind.ACTION_KIND_CHECK_STATE || action.kind === ActionKind.ACTION_KIND_CREATE_STATE,
@@ -302,13 +441,14 @@ const AclPage: React.FC = () => {
         <Flex alignItems="center" gap={4} style={{ width: '100%' }}>
             <Text variant="header-1">ACL</Text>
             {currentFwStateName && (
-                <Button size="s" view="outlined" onClick={() => navigate('/modules/fwstate')}>
+                <Button size="s" view="outlined" onClick={handleOpenLinkedFwstate}>
                     FWState: {currentFwStateName}
                 </Button>
             )}
             {!currentFwStateName && hasStatefulRules && (
                 <Label theme="warning">Stateful rules without FWState</Label>
             )}
+            <CommandPaletteTrigger placeholder="Search rules or run an action…" onOpen={openPalette} />
             <Flex grow />
             <div style={{ flexBasis: 380, flexShrink: 1 }}>
                 <SearchInput
@@ -368,6 +508,7 @@ const AclPage: React.FC = () => {
                                 items={visibleItems}
                                 selectedIds={selectedIds}
                                 activeRowId={activeRowId}
+                                flashRowId={flashRowId}
                                 onSelectionChange={setSelectedIds}
                                 onEditRule={openEdit}
                                 currentIsDirty={currentIsDirty}

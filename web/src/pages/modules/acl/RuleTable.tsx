@@ -96,6 +96,7 @@ interface RuleTableProps {
     items: RuleItem[];
     selectedIds: Set<string>;
     activeRowId: string | null;
+    flashRowId?: string | null;
     onSelectionChange: (ids: Set<string>) => void;
     onEditRule: (item: RuleItem) => void;
     currentIsDirty: boolean;
@@ -112,6 +113,7 @@ const RuleTable: React.FC<RuleTableProps> = ({
     items,
     selectedIds,
     activeRowId,
+    flashRowId,
     onSelectionChange,
     onEditRule,
     currentIsDirty,
@@ -306,6 +308,7 @@ const RuleTable: React.FC<RuleTableProps> = ({
             editAriaLabel={(item) => `Edit rule ${item.index + 1}`}
             editTitle="Edit rule"
             activeRowId={activeRowId}
+            flashRowId={flashRowId}
             renderIndexAdornment={(item) => {
                 const expanded = expandRuleItem(item.rule);
                 if (expanded.isDead) {
