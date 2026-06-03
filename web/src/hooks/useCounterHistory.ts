@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { DeviceCounterData } from './useDeviceCounters';
 
-const HISTORY_SIZE = 60;
+export const HISTORY_SIZE = 60;
 
 export interface CounterHistoryEntry {
     rx: number[];
@@ -11,7 +11,7 @@ export interface CounterHistoryEntry {
 }
 
 /** Returns a new array with v appended, capped at cap elements. */
-const appendCapped = (arr: number[], v: number, cap: number): number[] =>
+export const appendCapped = (arr: number[], v: number, cap: number): number[] =>
     arr.length < cap ? [...arr, v] : [...arr.slice(1), v];
 
 /**

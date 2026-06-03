@@ -1,14 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { API } from '../../../api';
 import { useInterpolatedCounters } from '../../../hooks';
+import { appendCapped, HISTORY_SIZE } from '../../../hooks/useCounterHistory';
 import type { RuleItem } from './types';
 import { groupCounterGroupsByTagsAndName, makeGroupedCounterKey } from '../../../utils';
-
-const HISTORY_SIZE = 60;
-
-/** Returns a new array with v appended, capped at cap elements. */
-const appendCapped = (arr: number[], v: number, cap: number): number[] =>
-    arr.length < cap ? [...arr, v] : [...arr.slice(1), v];
 
 /** Per-rule rate data: rolling history for the sparkline and the latest interpolated pps. */
 export interface RuleRate {
