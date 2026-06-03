@@ -141,7 +141,6 @@ libdpdk_inc_dep = libdpdk_dep.partial_dependency(includes: true)
 
 subdir('common')
 subdir('lib')
-subdir('filter')
 module_test_dirs = []
 subdir('modules')
 subdir('devices')

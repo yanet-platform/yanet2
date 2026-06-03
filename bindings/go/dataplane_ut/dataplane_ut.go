@@ -29,7 +29,7 @@ package dataplaneut
 #cgo LDFLAGS: -L../../../build/lib/controlplane/config
 #cgo LDFLAGS: -L../../../build/lib/counters
 #cgo LDFLAGS: -L../../../build/lib/errors
-#cgo LDFLAGS: -L../../../build/filter
+#cgo LDFLAGS: -L../../../build/lib/filter
 #cgo LDFLAGS: -L../../../build/lib/fwstate
 #cgo LDFLAGS: -L../../../build/lib/utils
 

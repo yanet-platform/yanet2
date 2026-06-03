@@ -2,7 +2,7 @@
 
 #include "controlplane/config/cp_module.h"
 
-#include "filter/filter.h"
+#include "lib/filter/filter.h"
 #include "lib/fwstate/config.h"
 
 #define ACTION_ALLOW 0

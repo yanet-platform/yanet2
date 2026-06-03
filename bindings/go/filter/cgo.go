@@ -3,7 +3,7 @@ package filter
 //#cgo CFLAGS: -I../../..
 //#include <stdlib.h>
 //#include <string.h>
-//#include "filter/rule.h"
+//#include "lib/filter/rule.h"
 import "C"
 
 import (

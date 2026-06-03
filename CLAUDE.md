@@ -62,8 +62,7 @@ Top-level directories and their roles:
 - `modules/`       — packet-processing modules (see Module Structure).
 - `devices/`       — device adapters (`plain`, `vlan`); same layout as modules.
 - `operators/`     — long-running orchestration daemons (see Operators).
-- `filter/`        — filter compiler, classifiers, and query engine (C).
-- `lib/`           — C support libraries: `controlplane`, `counters`, `dataplane`, `dataplane_ut`, `errors`, `fwstate`, `logging`, `utils`, plus `tests/` and `fuzzing/`.
+- `lib/`           — C support libraries: `controlplane`, `counters`, `dataplane`, `dataplane_ut`, `errors`, `filter`, `fwstate`, `logging`, `utils`, plus `tests/` and `fuzzing/`.
 - `api/`           — public C API headers exposed to control plane (`agent.h`, `config.h`, `counter.h`, `info.h`).
 - `bindings/go/`   — root-level Go CGO bindings for the agent/shared-memory agent surface.
 - `cli/`           — Rust CLI workspace: `core/` (yanet-cli library), `modules/` (shared CLI subcommands), `Makefile`.

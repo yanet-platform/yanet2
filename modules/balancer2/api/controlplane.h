@@ -1,8 +1,8 @@
 #pragma once
 
 #include "common/network.h"
-#include "filter/rule.h"
 #include "lib/errors/errors.h"
+#include "lib/filter/rule.h"
 #include "modules/balancer2/dataplane/types/session.h"
 
 struct agent;

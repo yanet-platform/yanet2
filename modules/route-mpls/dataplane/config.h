@@ -2,7 +2,7 @@
 
 #include "controlplane/config/cp_module.h"
 
-#include "filter/filter.h"
+#include "lib/filter/filter.h"
 
 #define ROUTE_TYPE_NONE 0
 #define ROUTE_TYPE_V4 1

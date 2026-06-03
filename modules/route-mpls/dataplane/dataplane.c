@@ -6,7 +6,7 @@
 
 #include "common/memory.h"
 
-#include "filter/query.h"
+#include "lib/filter/query.h"
 
 #include "lib/logging/log.h"
 

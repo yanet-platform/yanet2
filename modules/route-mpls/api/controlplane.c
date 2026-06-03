@@ -8,7 +8,7 @@
 
 #include "controlplane/agent/agent.h"
 
-#include "filter/compiler.h"
+#include "lib/filter/compiler.h"
 
 FILTER_COMPILER_DECLARE(FILTER_IP4_TAG, net4_dst);
 FILTER_COMPILER_DECLARE(FILTER_IP6_TAG, net6_dst);

@@ -3,7 +3,7 @@
 #include <stdint.h>
 
 #include "common/network.h"
-#include "filter/rule.h"
+#include "lib/filter/rule.h"
 
 #include "counters/counters.h"
 
