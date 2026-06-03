@@ -73,18 +73,8 @@
     --yn-surface-bg: #1C1814;
 }
 
-.yn-flat-layout .page-layout__header {
-    background: var(--yn-surface-bg);
-    min-height: 64px;
-}
-
 .yn-page.yn-flat-page {
     background: var(--yn-surface-bg);
-}
-
-.yn-flat-page .yn-tabs {
-    background: var(--yn-surface-bg);
-    border-bottom: none;
 }
 
 .yn-flat-page .yn-content {

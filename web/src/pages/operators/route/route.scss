@@ -299,20 +299,8 @@ $_ro-col-med:      42px;
     --ro-surface-bg: #1C1814;
 }
 
-// Header sits outside .yn-page so --yn-* tokens are not in scope there.
-// --ro-surface-bg is defined on .ro-layout and cascades to both subtrees.
-.ro-layout .page-layout__header {
-    background: var(--ro-surface-bg);
-}
-
-// Two-class specificity beats the `.yn-page { background: var(--yn-page-bg) }` rule.
 .yn-page.ro-page {
     background: var(--ro-surface-bg);
-}
-
-.ro-page .yn-tabs {
-    background: var(--ro-surface-bg);
-    border-bottom: none;
 }
 
 // Table flush: no outer padding and no card chrome.

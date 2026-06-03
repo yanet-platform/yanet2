@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Flex, Icon, Text } from '@gravity-ui/uikit';
 import { useSearchParams } from 'react-router-dom';
-import { Funnel, Magnifier, Pause, Play, Plus } from '@gravity-ui/icons';
+import { Funnel, Magnifier, Plus } from '@gravity-ui/icons';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, SearchInput } from '../../../components';
 import { useForwardDraft } from './useForwardDraft';
 import { useUnsavedChangesBlocker } from '../../builtin/_shared/lane-editor';
@@ -44,7 +44,6 @@ const ForwardPage: React.FC = () => {
     } = useForwardDraft();
     const [searchParams, setSearchParams] = useSearchParams();
 
-    const [paused, setPaused] = useState(false);
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
     const [activeRowId, setActiveRowId] = useState<string | null>(null);
     const [drawer, setDrawer] = useState<{ open: boolean; mode: 'add' | 'edit'; item: RuleItem | null }>({
@@ -110,7 +109,7 @@ const ForwardPage: React.FC = () => {
     const rawRules: Rule[] = draftRules(currentConfig);
     const allItems = useMemo(() => rulesToNgItems(rawRules), [rawRules]);
 
-    const { rates } = useForwardRuleCounters(currentConfig, allItems, !paused);
+    const { rates } = useForwardRuleCounters(currentConfig, allItems, true);
 
     const ruleCounts = useMemo((): Map<string, number> => {
         const m = new Map<string, number>();
@@ -349,13 +348,6 @@ const ForwardPage: React.FC = () => {
             });
         }
         list.push({
-            id: '__pause',
-            icon: paused ? '▶' : '⏸',
-            label: paused ? 'Resume counters' : 'Pause counters',
-            keywords: 'pause resume counters pps',
-            onSelect: () => { setPaused((p) => !p); setPaletteOpen(false); },
-        });
-        list.push({
             id: '__filter_in',
             icon: '→',
             label: 'Filter: IN only',
@@ -384,7 +376,7 @@ const ForwardPage: React.FC = () => {
             onSelect: () => { setModeFilter('all'); handleSearchChange(''); setPaletteOpen(false); },
         });
         return list;
-    }, [currentIsDirty, currentConfig, paused, draftConfigs, dirtySet, handleTabSelect, openAdd, handleSavePress, handleDiscard, handleSearchChange]);
+    }, [currentIsDirty, currentConfig, draftConfigs, dirtySet, handleTabSelect, openAdd, handleSavePress, handleDiscard, handleSearchChange]);
 
     const rowAdapter: RowAdapter<RuleItem> = {
         rows: allItems,
@@ -422,15 +414,6 @@ const ForwardPage: React.FC = () => {
                     onImport={handleImportYaml}
                 />
             )}
-            <Button
-                view="flat"
-                size="m"
-                onClick={() => setPaused(p => !p)}
-                title={paused ? 'Resume counters' : 'Pause counters'}
-            >
-                <Icon data={paused ? Play : Pause} size={16} />
-                {paused ? 'Resume counters' : 'Pause counters'}
-            </Button>
             <Button view="action" onClick={openAdd}>
                 <Icon data={Plus} size={16} />
                 Add Rule

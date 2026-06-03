@@ -1,10 +1,16 @@
+// Tab strip vertical padding.
+//
+// The active-tab underline `bottom` is derived as its negative so the
+// underline sits on the strip's bottom border.
+$yn-tabs-pad-y: 4px;
+
 .yn-tabs {
     display: flex;
     align-items: center;
     gap: 4px;
-    padding: 8px 20px 0;
+    padding: $yn-tabs-pad-y 20px;
     border-bottom: 1px solid var(--yn-line-2);
-    background: var(--yn-page-bg);
+    background: #15110D;
     overflow-x: auto;
     flex-shrink: 0;
 }
@@ -32,9 +38,9 @@
         &::after {
             content: "";
             position: absolute;
-            left: 14px;
-            right: 14px;
-            bottom: -1px;
+            left: 0px;
+            right: 0px;
+            bottom: -$yn-tabs-pad-y;
             height: 3px;
             background: var(--yn-accent);
             border-radius: 2px 2px 0 0;

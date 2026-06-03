@@ -43,7 +43,10 @@
 
 .page-layout__header {
     width: 100%;
-    min-height: 56px;
+    height: var(--yn-page-header-height);
+    min-height: var(--yn-page-header-height);
+    padding-top: 0;
+    padding-bottom: 0;
     display: flex;
     align-items: center;
 }

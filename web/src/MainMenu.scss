@@ -1,3 +1,9 @@
+// Overrides Gravity navigation divider offset to nudge the aside header bottom
+// divider up by 1px.
+.gn-aside-header .gn-aside-header__header::after {
+    bottom: 13px;
+}
+
 .main-menu__section-label {
     display: block;
     padding: 4px 12px;

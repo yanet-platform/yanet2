@@ -399,10 +399,6 @@
     border-bottom: none;
 }
 
-.nb-page .yn-tabs-row .yn-tabs {
-    border-bottom: none;
-}
-
 .nb-page .yn-content {
     padding: 0;
 }
@@ -414,13 +410,6 @@
     --nb-surface-bg: #1C1814;
 }
 
-// Header sits outside .yn-page so --yn-* tokens are not in scope there.
-// Match route page: same background (#1C1814) and same rendered height (64px).
-.nb-layout .page-layout__header {
-    background: var(--nb-surface-bg);
-    min-height: 64px;
-}
-
 // Two-class specificity beats `.yn-page { background: var(--yn-page-bg) }`.
 .yn-page.nb-page {
     background: var(--nb-surface-bg);
@@ -428,10 +417,6 @@
 
 // Tab strip and tabs-row sit on the same flat surface.
 .nb-page .yn-tabs-row {
-    background: var(--nb-surface-bg);
-}
-
-.nb-page .yn-tabs {
     background: var(--nb-surface-bg);
 }
 
