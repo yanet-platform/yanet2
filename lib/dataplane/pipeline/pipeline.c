@@ -1,5 +1,6 @@
 #include "pipeline.h"
 
+#include "common/memory_address.h"
 #include "common/numutils.h"
 
 #include "counters/histogram.h"
@@ -244,12 +245,12 @@ device_entry_ectx_process(
 	struct device_entry_ectx *entry_ectx,
 	struct packet_front *packet_front
 ) {
-	packet_front_switch(packet_front);
+	// Handler must process ALL input packets, so the input list must be
+	// empty after the call.
 	entry_ectx->handler(dp_worker, device_ectx, packet_front);
 
 	if (!entry_ectx->pipeline_map_size) {
-		packet_list_concat(&packet_front->drop, &packet_front->output);
-		packet_list_init(&packet_front->output);
+		packet_list_move(&packet_front->drop, &packet_front->output);
 		return;
 	}
 
@@ -286,20 +287,25 @@ device_ectx_process_input(
 	struct device_ectx *device_ectx,
 	struct packet_front *packet_front
 ) {
+	struct packet_front *pending = &device_ectx->pending_input;
+	if (pending->input.count == 0) {
+		return;
+	}
+
 	counter_add_packets_bytes(
 		device_ectx->counter_packet_rx_count,
 		device_ectx->counter_packet_rx_bytes,
 		dp_worker->idx,
 		ADDR_OF(&device_ectx->counter_storage),
-		packet_list_count(&packet_front->output),
-		packet_list_bytes_sum(&packet_front->output)
+		packet_list_count(&pending->input),
+		packet_list_bytes_sum(&pending->input)
 	);
 
 	struct device_entry_ectx *entry_ectx =
 		ADDR_OF(&device_ectx->input_pipelines);
-	device_entry_ectx_process(
-		dp_worker, device_ectx, entry_ectx, packet_front
-	);
+	device_entry_ectx_process(dp_worker, device_ectx, entry_ectx, pending);
+
+	packet_front_move(packet_front, pending);
 }
 
 void
@@ -308,18 +314,23 @@ device_ectx_process_output(
 	struct device_ectx *device_ectx,
 	struct packet_front *packet_front
 ) {
+	struct packet_front *pending = &device_ectx->pending_output;
+	if (pending->input.count == 0) {
+		return;
+	}
+
 	counter_add_packets_bytes(
 		device_ectx->counter_packet_tx_count,
 		device_ectx->counter_packet_tx_bytes,
 		dp_worker->idx,
 		ADDR_OF(&device_ectx->counter_storage),
-		packet_list_count(&packet_front->output),
-		packet_list_bytes_sum(&packet_front->output)
+		packet_list_count(&pending->input),
+		packet_list_bytes_sum(&pending->input)
 	);
 
 	struct device_entry_ectx *entry_ectx =
 		ADDR_OF(&device_ectx->output_pipelines);
-	device_entry_ectx_process(
-		dp_worker, device_ectx, entry_ectx, packet_front
-	);
+	device_entry_ectx_process(dp_worker, device_ectx, entry_ectx, pending);
+
+	packet_front_move(packet_front, pending);
 }

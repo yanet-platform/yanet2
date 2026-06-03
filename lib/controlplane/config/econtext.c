@@ -827,6 +827,8 @@ device_ectx_create(
 	}
 
 	memset(device_ectx, 0, ectx_size);
+	packet_front_init(&device_ectx->pending_input);
+	packet_front_init(&device_ectx->pending_output);
 	SET_OFFSET_OF(&device_ectx->cp_device, cp_device);
 
 	struct counter_storage *old_counter_storage =

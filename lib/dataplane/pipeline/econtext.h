@@ -3,10 +3,11 @@
 #include <stdint.h>
 
 #include "common/memory_address.h"
+#include "lib/dataplane/counters/module.h"
 #include "lib/dataplane/device/device.h"
 #include "lib/dataplane/module/module.h"
-
-#include "lib/dataplane/counters/module.h"
+#include "lib/dataplane/module/packet_front.h"
+#include "lib/dataplane/packet/packet.h"
 
 struct counter_storage;
 
@@ -107,6 +108,8 @@ struct device_ectx {
 	struct counter_storage *counter_storage;
 	struct device_entry_ectx *input_pipelines;
 	struct device_entry_ectx *output_pipelines;
+	struct packet_front pending_input;
+	struct packet_front pending_output;
 };
 
 struct config_gen_ectx {

@@ -6,6 +6,7 @@
 #include "lib/dataplane/module/packet_front.h"
 #include "lib/dataplane/pipeline/econtext.h"
 #include "lib/dataplane/pipeline/pipeline.h"
+#include "lib/dataplane/pipeline/schedule.h"
 
 void
 worker_pipeline_round(
@@ -17,17 +18,12 @@ worker_pipeline_round(
 	uint64_t device_count =
 		cp_config_gen->device_registry.registry.capacity;
 
+	struct device_ectx *devices[device_count];
+	for (uint64_t idx = 0; idx < device_count; ++idx) {
+		devices[idx] = ADDR_OF(config_gen_ectx->devices + idx);
+	}
+
 	while (1) {
-		struct packet_front schedule_input[device_count];
-		for (uint64_t idx = 0; idx < device_count; ++idx) {
-			packet_front_init(schedule_input + idx);
-		}
-
-		struct packet_front schedule_output[device_count];
-		for (uint64_t idx = 0; idx < device_count; ++idx) {
-			packet_front_init(schedule_output + idx);
-		}
-
 		struct packet *packet;
 
 		int empty = 1;
@@ -35,55 +31,37 @@ worker_pipeline_round(
 		while ((packet = packet_list_pop(&packet_front->pending_input)
 		       ) != NULL) {
 			empty = 0;
-			packet_front_output(
-				schedule_input + packet->tx_device_id, packet
+			device_ectx_schedule_input(
+				devices[packet->tx_device_id], packet
 			);
+		}
+
+		for (uint64_t idx = 0; idx < device_count; ++idx) {
+			if (devices[idx] != NULL) {
+				device_ectx_process_input(
+					dp_worker, devices[idx], packet_front
+				);
+			}
 		}
 
 		while ((packet = packet_list_pop(&packet_front->pending_output)
 		       ) != NULL) {
 			empty = 0;
-			packet_front_output(
-				schedule_output + packet->tx_device_id, packet
+			device_ectx_schedule_output(
+				devices[packet->tx_device_id], packet
 			);
+		}
+
+		for (uint64_t idx = 0; idx < device_count; ++idx) {
+			if (devices[idx] != NULL) {
+				device_ectx_process_output(
+					dp_worker, devices[idx], packet_front
+				);
+			}
 		}
 
 		if (empty) {
 			break;
-		}
-
-		struct device_ectx **devices = config_gen_ectx->devices;
-
-		for (uint64_t idx = 0; idx < device_count; ++idx) {
-			if (packet_list_first(&schedule_input[idx].output) ==
-			    NULL) {
-				continue;
-			}
-
-			struct device_ectx *device_ectx =
-				ADDR_OF(devices + idx);
-
-			device_ectx_process_input(
-				dp_worker, device_ectx, schedule_input + idx
-			);
-
-			packet_front_merge(packet_front, schedule_input + idx);
-		}
-
-		for (uint64_t idx = 0; idx < device_count; ++idx) {
-			if (packet_list_first(&schedule_output[idx].output) ==
-			    NULL) {
-				continue;
-			}
-
-			struct device_ectx *device_ectx =
-				ADDR_OF(devices + idx);
-
-			device_ectx_process_output(
-				dp_worker, device_ectx, schedule_output + idx
-			);
-
-			packet_front_merge(packet_front, schedule_output + idx);
 		}
 	}
 }
