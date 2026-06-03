@@ -38,14 +38,6 @@ worker_pipeline_round(
 			);
 		}
 
-		for (uint64_t idx = 0; idx < device_count; ++idx) {
-			if (devices[idx] != NULL) {
-				device_ectx_process_input(
-					dp_worker, devices[idx], packet_front
-				);
-			}
-		}
-
 		while ((packet = packet_list_pop(&packet_front->pending_output)
 		       ) != NULL) {
 			empty = 0;
@@ -56,16 +48,24 @@ worker_pipeline_round(
 			);
 		}
 
+		if (empty) {
+			break;
+		}
+
+		for (uint64_t idx = 0; idx < device_count; ++idx) {
+			if (devices[idx] != NULL) {
+				device_ectx_process_input(
+					dp_worker, devices[idx], packet_front
+				);
+			}
+		}
+
 		for (uint64_t idx = 0; idx < device_count; ++idx) {
 			if (devices[idx] != NULL) {
 				device_ectx_process_output(
 					dp_worker, devices[idx], packet_front
 				);
 			}
-		}
-
-		if (empty) {
-			break;
 		}
 	}
 }
