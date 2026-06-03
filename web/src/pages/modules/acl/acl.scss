@@ -5,6 +5,20 @@
 // web/src/styles/draft-page.scss which this page imports. This file covers only
 // ACL-specific chip colors, action chain, editor elements, and override tweaks.
 
+.acl-toolbar {
+    @include yn-toolbar;
+    border-bottom: 1px solid var(--yn-line);
+}
+
+.acl-count {
+    font-size: 12.5px;
+    color: var(--yn-text-3);
+    white-space: nowrap;
+    flex-shrink: 0;
+    font-family: var(--yn-font-mono);
+    font-variant-numeric: tabular-nums;
+}
+
 // Chip list container.
 .acl-chip-list {
     display: inline-flex;

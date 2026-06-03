@@ -1,6 +1,6 @@
 import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
-import { Button, Flex, Icon, Label, Text } from '@gravity-ui/uikit';
-import { Pause, Play, Plus } from '@gravity-ui/icons';
+import { Button, Icon, Label, Text } from '@gravity-ui/uikit';
+import { Funnel, Pause, Play, Plus } from '@gravity-ui/icons';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, SearchInput, EmptyPagePlaceholder } from '../../../components';
 import { useSearchParamHelpers, usePageKeyboardShortcuts } from '../../../hooks';
@@ -438,41 +438,27 @@ const AclPage: React.FC = () => {
         )), [rawRules]);
 
     const pageHeader = (
-        <Flex alignItems="center" gap={4} style={{ width: '100%' }}>
+        <div className="page-header-bar">
             <Text variant="header-1">ACL</Text>
-            {currentFwStateName && (
-                <Button size="s" view="outlined" onClick={handleOpenLinkedFwstate}>
-                    FWState: {currentFwStateName}
-                </Button>
-            )}
-            {!currentFwStateName && hasStatefulRules && (
-                <Label theme="warning">Stateful rules without FWState</Label>
-            )}
             <CommandPaletteTrigger placeholder="Search rules or run an action…" onOpen={openPalette} />
-            <Flex grow />
-            <div style={{ flexBasis: 380, flexShrink: 1 }}>
-                <SearchInput
-                    value={search}
-                    onUpdate={handleSearchChange}
-                    placeholder="Search rules…"
-                />
-            </div>
-            {enabledCounterNames.size > 0 && (
-                <Button
-                    view="outlined"
-                    onClick={() => setPaused(p => !p)}
-                    title={paused ? 'Resume counter polling' : 'Pause counter polling'}
-                >
-                    <Icon data={paused ? Play : Pause} size={16} />
-                    {paused ? 'Resume' : 'Pause'}
+            <div className="page-header-bar__actions">
+                {enabledCounterNames.size > 0 && (
+                    <Button
+                        view="outlined"
+                        onClick={() => setPaused(p => !p)}
+                        title={paused ? 'Resume counter polling' : 'Pause counter polling'}
+                    >
+                        <Icon data={paused ? Play : Pause} size={16} />
+                        {paused ? 'Resume' : 'Pause'}
+                    </Button>
+                )}
+                <YamlIO key={currentConfig || '__none'} configName={currentConfig} rules={rawRules} onImport={handleImportYaml} disabled={!currentConfig} />
+                <Button view="action" onClick={openAdd}>
+                    <Icon data={Plus} size={16} />
+                    Add Rule
                 </Button>
-            )}
-            <YamlIO key={currentConfig || '__none'} configName={currentConfig} rules={rawRules} onImport={handleImportYaml} disabled={!currentConfig} />
-            <Button view="action" onClick={openAdd}>
-                <Icon data={Plus} size={16} />
-                Add Rule
-            </Button>
-        </Flex>
+            </div>
+        </div>
     );
 
     if (loading) {
@@ -502,6 +488,31 @@ const AclPage: React.FC = () => {
                             onSelect={handleTabSelect}
                             onAddConfig={() => setAddConfigOpen(true)}
                         />
+                        <div className="acl-toolbar">
+                            {currentFwStateName && (
+                                <Button size="s" view="outlined" onClick={handleOpenLinkedFwstate}>
+                                    FWState: {currentFwStateName}
+                                </Button>
+                            )}
+                            {!currentFwStateName && hasStatefulRules && (
+                                <Label theme="warning">Stateful rules without FWState</Label>
+                            )}
+                            <div style={{ flex: 1 }} />
+                            <div style={{ flexBasis: 320, flexShrink: 1 }}>
+                                <SearchInput
+                                    value={search}
+                                    onUpdate={handleSearchChange}
+                                    placeholder="Search rules…"
+                                    icon={Funnel}
+                                    enableFocusShortcut={false}
+                                    showShortcutHint={false}
+                                />
+                            </div>
+                            <span className="acl-count">
+                                <span style={{ color: 'var(--yn-text)', fontWeight: 600 }}>{visibleItems.length.toLocaleString()}</span>
+                                {' / '}{allItems.length.toLocaleString()}
+                            </span>
+                        </div>
 
                         <div className="yn-content">
                             <RuleTable
