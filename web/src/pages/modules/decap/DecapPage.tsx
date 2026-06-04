@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom';
 import { Button, Icon } from '@gravity-ui/uikit';
 import { Funnel, Plus } from '@gravity-ui/icons';
-import { useSearchParamHelpers, useDirtyConfigSet } from '../../../hooks';
+import { useSearchParamHelpers, useDirtyConfigSet, useConfigQuerySync } from '../../../hooks';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, EmptyPagePlaceholder, SearchInput, RowCountDisplay } from '../../../components';
 import { usePrefixDraft } from './usePrefixDraft';
 import { useUnsavedChangesBlocker } from '../../builtin/_shared/lane-editor';
@@ -66,21 +66,7 @@ const DecapPage: React.FC = () => {
         enabled: !loading,
     });
 
-    useEffect(() => {
-        const updates: Record<string, string | null> = {};
-        if (!loading) {
-            if (!currentConfig) {
-                if (searchParams.get(QP_CONFIG) !== null) {
-                    updates[QP_CONFIG] = null;
-                }
-            } else if (queryConfig !== currentConfig) {
-                updates[QP_CONFIG] = currentConfig;
-            }
-        }
-        if (Object.keys(updates).length > 0) {
-            updateParams(updates);
-        }
-    }, [currentConfig, loading, queryConfig, searchParams, updateParams]);
+    useConfigQuerySync({ currentConfig, loading, queryConfig, paramKey: QP_CONFIG, searchParams, updateParams });
 
     useEffect(() => {
         setActiveRowId(null);

@@ -30,3 +30,6 @@ export { useModuleRuleCounters } from './useModuleRuleCounters';
 export type { RuleRate, ModuleRuleCountersParams } from './useModuleRuleCounters';
 
 export { useDirtyConfigSet } from './useDirtyConfigSet';
+
+export { useConfigQuerySync } from './useConfigQuerySync';
+export type { UseConfigQuerySyncOptions } from './useConfigQuerySync';

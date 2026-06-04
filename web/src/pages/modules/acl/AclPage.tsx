@@ -3,7 +3,7 @@ import { Button, Icon, Label } from '@gravity-ui/uikit';
 import { Funnel, Pause, Play, Plus } from '@gravity-ui/icons';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, SearchInput, EmptyPagePlaceholder, RowCountDisplay } from '../../../components';
-import { useSearchParamHelpers, usePageKeyboardShortcuts, useDirtyConfigSet } from '../../../hooks';
+import { useSearchParamHelpers, usePageKeyboardShortcuts, useDirtyConfigSet, useConfigQuerySync } from '../../../hooks';
 import { useAclDraft } from './useAclDraft';
 import { useUnsavedChangesBlocker } from '../../builtin/_shared/lane-editor';
 import type { Rule } from '../../../api/acl';
@@ -73,21 +73,7 @@ const AclPage: React.FC = () => {
         : (draftConfigs[0] || '');
     const { updateParams, clearConfigParamIfCurrent } = useSearchParamHelpers(setSearchParams, QP_CONFIG);
 
-    useEffect(() => {
-        const updates: Record<string, string | null> = {};
-        if (!loading) {
-            if (!currentConfig) {
-                if (searchParams.get(QP_CONFIG) !== null) {
-                    updates[QP_CONFIG] = null;
-                }
-            } else if (queryConfig !== currentConfig) {
-                updates[QP_CONFIG] = currentConfig;
-            }
-        }
-        if (Object.keys(updates).length > 0) {
-            updateParams(updates);
-        }
-    }, [currentConfig, loading, queryConfig, searchParams, updateParams]);
+    useConfigQuerySync({ currentConfig, loading, queryConfig, paramKey: QP_CONFIG, searchParams, updateParams });
 
     useUnsavedChangesBlocker(anyDirty);
 

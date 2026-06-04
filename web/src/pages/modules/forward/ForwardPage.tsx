@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Icon } from '@gravity-ui/uikit';
 import { useSearchParams } from 'react-router-dom';
-import { useSearchParamHelpers, usePageKeyboardShortcuts, useDirtyConfigSet } from '../../../hooks';
+import { useSearchParamHelpers, usePageKeyboardShortcuts, useDirtyConfigSet, useConfigQuerySync } from '../../../hooks';
 import { Funnel, Plus } from '@gravity-ui/icons';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, SearchInput, EmptyPagePlaceholder, RowCountDisplay } from '../../../components';
 import { useForwardDraft } from './useForwardDraft';
@@ -68,21 +68,7 @@ const ForwardPage: React.FC = () => {
 
     useUnsavedChangesBlocker(anyDirty);
 
-    useEffect(() => {
-        const updates: Record<string, string | null> = {};
-        if (!loading) {
-            if (!currentConfig) {
-                if (searchParams.get(QP_CONFIG) !== null) {
-                    updates[QP_CONFIG] = null;
-                }
-            } else if (queryConfig !== currentConfig) {
-                updates[QP_CONFIG] = currentConfig;
-            }
-        }
-        if (Object.keys(updates).length > 0) {
-            updateParams(updates);
-        }
-    }, [currentConfig, loading, queryConfig, searchParams, updateParams]);
+    useConfigQuerySync({ currentConfig, loading, queryConfig, paramKey: QP_CONFIG, searchParams, updateParams });
 
     const rawRules: Rule[] = draftRules(currentConfig);
     const allItems = useMemo(() => rulesToNgItems(rawRules), [rawRules]);
