@@ -1,8 +1,8 @@
 import React, { useMemo } from 'react';
-import type { FIBRowItem, FIBRowStatus } from './types';
+import type { FIBRowItem } from './types';
 import { validateRow } from './validation';
 import { VirtualDraftTable, LEADING_TOTAL_WIDTH } from '../../../components/VirtualTable';
-import type { RemovedColumnDescriptor, TableColumnHeader, RowStatus } from '../../../components/VirtualTable';
+import type { RemovedColumnDescriptor, TableColumnHeader, RowStatus, VirtualDraftTableBaseProps } from '../../../components/VirtualTable';
 import { DraftActionButtons } from '../../_shared/draft';
 
 const COLUMN_WIDTHS = {
@@ -66,28 +66,7 @@ const renderFIBDataCells = (row: FIBRowItem): React.ReactNode => {
     );
 };
 
-export interface FIBTableProps {
-    allRows: FIBRowItem[];
-    visibleRows: FIBRowItem[];
-    statusById: Map<string, FIBRowStatus>;
-    removedRows: FIBRowItem[];
-    activeRowId: string | null;
-    editingRowId: string | null;
-    selectedIds: Set<string>;
-    dragOverState: { id: string | null; where: 'top' | 'bottom' | null };
-    onRowClick: (id: string) => void;
-    onEditRow: (id: string) => void;
-    onRestoreRow: (row: FIBRowItem) => void;
-    onSelectionChange: (ids: Set<string>) => void;
-    onDragStart: (id: string, e: React.DragEvent) => void;
-    onDragOver: (id: string, e: React.DragEvent) => void;
-    onDragLeave: () => void;
-    onDrop: (id: string, e: React.DragEvent) => void;
-    currentIsDirty: boolean;
-    onSave: () => void;
-    onDiscard: () => void;
-    onDeleteConfig: () => void;
-}
+export type FIBTableProps = VirtualDraftTableBaseProps<FIBRowItem>;
 
 /** Virtualized FIB table backed by VirtualDraftTable. */
 export const FIBTable: React.FC<FIBTableProps> = (props) => {

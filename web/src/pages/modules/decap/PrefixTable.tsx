@@ -1,8 +1,8 @@
 import React, { useMemo } from 'react';
-import type { PrefixRowItem, PrefixRowStatus } from './types';
+import type { PrefixRowItem } from './types';
 import { validateRow } from './validation';
 import { VirtualDraftTable, LEADING_TOTAL_WIDTH } from '../../../components/VirtualTable';
-import type { RemovedColumnDescriptor, TableColumnHeader, RowStatus } from '../../../components/VirtualTable';
+import type { RemovedColumnDescriptor, TableColumnHeader, RowStatus, VirtualDraftTableBaseProps } from '../../../components/VirtualTable';
 import { DraftActionButtons } from '../../_shared/draft';
 
 const PREFIX_WIDTH = 480;
@@ -43,28 +43,7 @@ const renderPrefixDataCells = (row: PrefixRowItem): React.ReactNode => {
     );
 };
 
-export interface PrefixTableProps {
-    allRows: PrefixRowItem[];
-    visibleRows: PrefixRowItem[];
-    statusById: Map<string, PrefixRowStatus>;
-    removedRows: PrefixRowItem[];
-    activeRowId: string | null;
-    editingRowId: string | null;
-    selectedIds: Set<string>;
-    dragOverState: { id: string | null; where: 'top' | 'bottom' | null };
-    onRowClick: (id: string) => void;
-    onEditRow: (id: string) => void;
-    onRestoreRow: (row: PrefixRowItem) => void;
-    onSelectionChange: (ids: Set<string>) => void;
-    onDragStart: (id: string, e: React.DragEvent) => void;
-    onDragOver: (id: string, e: React.DragEvent) => void;
-    onDragLeave: () => void;
-    onDrop: (id: string, e: React.DragEvent) => void;
-    currentIsDirty: boolean;
-    onSave: () => void;
-    onDiscard: () => void;
-    onDeleteConfig: () => void;
-}
+export type PrefixTableProps = VirtualDraftTableBaseProps<PrefixRowItem>;
 
 /** Virtualized prefix table backed by VirtualDraftTable. */
 export const PrefixTable: React.FC<PrefixTableProps> = (props) => {

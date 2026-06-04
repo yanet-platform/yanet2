@@ -2,7 +2,7 @@ export { VirtualTable, ROW_HEIGHT, HEADER_HEIGHT, FOOTER_HEIGHT, OVERSCAN, SortI
 export type { Column, SortState, VirtualTableProps } from './VirtualTable';
 
 export { VirtualDraftTable, LEADING_CELL_WIDTHS, LEADING_TOTAL_WIDTH } from './VirtualDraftTable';
-export type { VirtualDraftTableProps, TableColumnHeader, RowStatus, RenderDataCells } from './VirtualDraftTable';
+export type { VirtualDraftTableProps, VirtualDraftTableBaseProps, TableColumnHeader, RowStatus, RenderDataCells } from './VirtualDraftTable';
 
 export { default as RowHoverEditOverlay } from './RowHoverEditOverlay';
 export { useRowHoverOverlay } from './useRowHoverOverlay';

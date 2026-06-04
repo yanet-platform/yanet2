@@ -203,6 +203,38 @@ export interface VirtualDraftTableProps<T extends { id: string }> {
     headerActions?: React.ReactNode;
 }
 
+/**
+ * Props a draft page supplies to a VirtualDraftTable wrapper.
+ *
+ * The page-supplied subset of VirtualDraftTableProps plus the draft-action
+ * controls; the table-internal layout props (column descriptors, widths,
+ * nouns, footer) are filled in by the concrete table component.
+ */
+export type VirtualDraftTableBaseProps<T extends { id: string }> = Pick<
+    VirtualDraftTableProps<T>,
+    | 'allRows'
+    | 'visibleRows'
+    | 'statusById'
+    | 'removedRows'
+    | 'activeRowId'
+    | 'editingRowId'
+    | 'selectedIds'
+    | 'dragOverState'
+    | 'onRowClick'
+    | 'onEditRow'
+    | 'onRestoreRow'
+    | 'onSelectionChange'
+    | 'onDragStart'
+    | 'onDragOver'
+    | 'onDragLeave'
+    | 'onDrop'
+> & {
+    currentIsDirty: boolean;
+    onSave: () => void;
+    onDiscard: () => void;
+    onDeleteConfig: () => void;
+};
+
 /** Generic virtualized draft table. Used by FIBTable and PrefixTable. */
 export const VirtualDraftTable = <T extends { id: string }>({
     allRows,
