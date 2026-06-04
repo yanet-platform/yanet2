@@ -298,7 +298,7 @@ const RoutePage: React.FC = () => {
                             onSelect={handleConfigSelect}
                             onAddConfig={() => setAddConfigOpen(true)}
                         />
-                        <div className="rt-toolbar">
+                        <div className="yn-toolbar-bordered">
                             <div style={{ flex: 1 }} />
                             <div style={{ flexBasis: 230, flexShrink: 1 }}>
                                 <SearchInput

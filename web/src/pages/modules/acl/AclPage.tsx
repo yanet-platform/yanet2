@@ -470,7 +470,7 @@ const AclPage: React.FC = () => {
                             onSelect={handleTabSelect}
                             onAddConfig={() => setAddConfigOpen(true)}
                         />
-                        <div className="acl-toolbar">
+                        <div className="yn-toolbar-bordered">
                             {currentFwStateName && (
                                 <Button size="s" view="outlined" onClick={handleOpenLinkedFwstate}>
                                     FWState: {currentFwStateName}

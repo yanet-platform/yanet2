@@ -1,7 +1,3 @@
 @use '../../../styles/variables' as *;
 @use '../../../styles/mixins' as *;
 
-.decap-toolbar {
-    @include yn-toolbar;
-    border-bottom: 1px solid var(--yn-line);
-}

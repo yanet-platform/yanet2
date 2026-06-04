@@ -399,7 +399,7 @@ const ForwardPage: React.FC = () => {
                             onAddConfig={() => setAddConfigOpen(true)}
                         />
 
-                        <div className="fw-toolbar">
+                        <div className="yn-toolbar-bordered">
                             <ModeFilter value={modeFilter} onChange={setModeFilter} />
                             <div style={{ flex: 1 }} />
                             <div style={{ flexBasis: 230, flexShrink: 1 }}>

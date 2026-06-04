@@ -268,7 +268,7 @@ const DecapPage: React.FC = () => {
                             onSelect={setActiveConfig}
                             onAddConfig={() => setAddConfigOpen(true)}
                         />
-                        <div className="decap-toolbar">
+                        <div className="yn-toolbar-bordered">
                             <div style={{ flex: 1 }} />
                             <div style={{ flexBasis: 230, flexShrink: 1 }}>
                                 <SearchInput

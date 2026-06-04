@@ -1,3 +1,5 @@
+@use '../mixins' as *;
+
 // Page container
 
 .yn-page {
@@ -89,4 +91,9 @@
 
 .yn-flat-page .yn-content {
     padding: 0;
+}
+
+.yn-toolbar-bordered {
+    @include yn-toolbar;
+    border-bottom: 1px solid var(--yn-line);
 }
