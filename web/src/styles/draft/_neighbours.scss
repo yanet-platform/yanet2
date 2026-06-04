@@ -388,36 +388,10 @@
     }
 }
 
-// Neighbours page flush + borderless-tab overrides.
-// Mirrors the .ro-page treatment in route.scss, scoped to .nb-page only.
-
-.yn-page.nb-page {
-    background: var(--yn-page-bg);
-}
-
+// Neighbours-specific tab-row overrides (flush border, no bottom rule).
 .nb-page .yn-tabs-row {
     border-bottom: none;
-}
-
-.nb-page .yn-content {
-    padding: 0;
-}
-
-// Surface color — mirrors the ro-layout/ro-page pattern from route.scss, scoped to neighbours.
-// The --nb-surface-bg token cascades from .nb-layout to both the header subtree
-// and the .nb-page content subtree, keeping both on the same flat #1C1814 plane.
-.nb-layout {
-    --nb-surface-bg: #1C1814;
-}
-
-// Two-class specificity beats `.yn-page { background: var(--yn-page-bg) }`.
-.yn-page.nb-page {
-    background: var(--nb-surface-bg);
-}
-
-// Tab strip and tabs-row sit on the same flat surface.
-.nb-page .yn-tabs-row {
-    background: var(--nb-surface-bg);
+    background: var(--yn-surface-bg);
 }
 
 // Neighbours toolbar row — hosts the family filter and state chips below the tabs-row.
@@ -425,7 +399,7 @@
     @include yn-toolbar;
     flex-wrap: wrap;
     border-bottom: 1px solid var(--yn-line);
-    background: var(--nb-surface-bg, var(--yn-page-bg));
+    background: var(--yn-surface-bg, var(--yn-page-bg));
 }
 
 // State filter chips row separator (thin vertical divider between FamilyFilter and chips).

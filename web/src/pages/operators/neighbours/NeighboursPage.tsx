@@ -520,15 +520,15 @@ const NeighboursPage: React.FC = () => {
 
     if (loading) {
         return (
-            <PageLayout header={pageHeader} className="nb-layout">
+            <PageLayout header={pageHeader} className="yn-flat-layout">
                 <PageLoader loading size="l" />
             </PageLayout>
         );
     }
 
     return (
-        <PageLayout header={pageHeader} className="nb-layout">
-            <div className="yn-page nb-page">
+        <PageLayout header={pageHeader} className="yn-flat-layout">
+            <div className="yn-page nb-page yn-flat-page">
                 {tables.length === 0 ? (
                     <EmptyPagePlaceholder
                         message="No neighbour tables found."

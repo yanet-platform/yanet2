@@ -281,20 +281,4 @@ $_ro-col-med:      42px;
     font-size: 13px;
 }
 
-// ─── Surface color — single control point for the whole route page ───────────
-
-// Flip to #15110D for the flat (page-bg) look; #1C1814 for the panel look.
-.ro-layout {
-    --ro-surface-bg: #1C1814;
-}
-
-.yn-page.ro-page {
-    background: var(--ro-surface-bg);
-}
-
-// Table flush: no outer padding and no card chrome.
-// Keeps per-row separators and the header bottom border.
-.ro-page .yn-content {
-    padding: 0;
-}
 

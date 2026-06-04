@@ -77,9 +77,7 @@
 
 // Shared flat-surface layout treatment.
 // Pages that apply .yn-flat-layout (on PageLayout) and .yn-flat-page (on .yn-page)
-// get the same unified #1C1814 surface, flush table, and 3px active underline.
-// Route (.ro-layout/.ro-page) and neighbours (.nb-layout/.nb-page) are temporary
-// duplicates that will migrate onto these shared classes in a later PR.
+// get the unified #1C1814 surface and flush content area (padding: 0).
 
 .yn-flat-layout {
     --yn-surface-bg: #1C1814;

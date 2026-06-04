@@ -400,15 +400,15 @@ const RoutePage: React.FC = () => {
 
     if (loading && configs.length === 0) {
         return (
-            <PageLayout header={pageHeader} className="ro-layout">
+            <PageLayout header={pageHeader} className="yn-flat-layout">
                 <PageLoader loading size="l" />
             </PageLayout>
         );
     }
 
     return (
-        <PageLayout header={pageHeader} className="ro-layout">
-            <div className="yn-page ro-page" aria-busy={refreshing}>
+        <PageLayout header={pageHeader} className="yn-flat-layout">
+            <div className="yn-page yn-flat-page" aria-busy={refreshing}>
                 {configs.length === 0 ? (
                     <EmptyPagePlaceholder
                         message="No route configurations found."
