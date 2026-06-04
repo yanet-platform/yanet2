@@ -5,31 +5,9 @@
  * Both hooks.ts and yamlImport.worker.ts import from here.
  */
 
-import { parseIPToBytes, prefixLengthToMaskBytes, bytesToBase64 } from '../../../utils';
 import type { ProtoRange } from '../../../api/acl';
 
-/** Parse CIDR strings to IPNet array with base64-encoded bytes. */
-export const parseCidrsToIPNets = (cidrs: string[]): Array<{ addr: string; mask: string }> => {
-    const results: Array<{ addr: string; mask: string }> = [];
-    for (const cidr of cidrs) {
-        const parts = cidr.trim().split('/');
-        if (parts.length !== 2) continue;
-        const [ipPart, maskStr] = parts;
-        const prefixLength = parseInt(maskStr, 10);
-        if (isNaN(prefixLength)) continue;
-        const addrBytes = parseIPToBytes(ipPart);
-        if (!addrBytes) continue;
-        const isIPv4 = addrBytes.length === 4;
-        const maxPrefix = isIPv4 ? 32 : 128;
-        if (prefixLength < 0 || prefixLength > maxPrefix) continue;
-        const maskBytes = prefixLengthToMaskBytes(prefixLength, isIPv4 ? 4 : 16);
-        results.push({
-            addr: bytesToBase64(addrBytes),
-            mask: bytesToBase64(maskBytes),
-        });
-    }
-    return results;
-};
+export { parseCidrsToIPNets } from '../../../utils';
 
 /** Parse a port/vlan range string (e.g. "80-90", "80") to a {from, to} object. */
 const parseRangeStr = (s: string): { from: number; to: number } | null => {

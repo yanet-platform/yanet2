@@ -1,4 +1,4 @@
-import { extractBytes } from './bytes';
+import { bytesToBase64, extractBytes } from './bytes';
 
 // Result types for error handling
 export type Ok<T> = { ok: true; value: T };
@@ -811,4 +811,27 @@ export const ipRangeToString = (range: IPRangeWire | undefined): string => {
     const end = range.end ?? '';
     if (!start || !end) return '';
     return `[${start}, ${end}]`;
+};
+
+/** Parse CIDR strings to IPNet array with base64-encoded bytes. */
+export const parseCidrsToIPNets = (cidrs: string[]): Array<{ addr: string; mask: string }> => {
+    const results: Array<{ addr: string; mask: string }> = [];
+    for (const cidr of cidrs) {
+        const parts = cidr.trim().split('/');
+        if (parts.length !== 2) continue;
+        const [ipPart, maskStr] = parts;
+        const prefixLength = parseInt(maskStr, 10);
+        if (isNaN(prefixLength)) continue;
+        const addrBytes = parseIPToBytes(ipPart);
+        if (!addrBytes) continue;
+        const isIPv4 = addrBytes.length === 4;
+        const maxPrefix = isIPv4 ? 32 : 128;
+        if (prefixLength < 0 || prefixLength > maxPrefix) continue;
+        const maskBytes = prefixLengthToMaskBytes(prefixLength, isIPv4 ? 4 : 16);
+        results.push({
+            addr: bytesToBase64(addrBytes),
+            mask: bytesToBase64(maskBytes),
+        });
+    }
+    return results;
 };

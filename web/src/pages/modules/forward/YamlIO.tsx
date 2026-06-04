@@ -3,7 +3,7 @@ import yaml from 'js-yaml';
 import type { Rule } from '../../../api/forward';
 import { ForwardMode } from '../../../api/forward';
 import { toaster } from '../../../utils';
-import { parseCidrsToIPNets } from './hooks';
+import { parseCidrsToIPNets } from '../../../utils';
 import { rulesToDiffYaml } from './SaveDiffModal';
 import YamlIOModal from '../../../components/YamlIOModal';
 

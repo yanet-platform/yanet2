@@ -1,6 +1,6 @@
-import type { Rule, IPNet, VlanRange } from '../../../api/forward';
+import type { Rule, VlanRange } from '../../../api/forward';
 import { ForwardMode } from '../../../api/forward';
-import { parseIPToBytes, prefixLengthToMaskBytes, bytesToBase64, formatIPNetItem } from '../../../utils';
+import { formatIPNetItem, parseCidrsToIPNets } from '../../../utils';
 import type { RuleItem, RuleDraft } from './types';
 
 /** Format VlanRange array to a display string. */
@@ -63,29 +63,6 @@ export const parseVlanRangesStr = (input: string): VlanRange[] => {
         const val = parseInt(part, 10);
         return { from: val, to: val };
     }).filter((r) => !isNaN(r.from ?? NaN) && !isNaN(r.to ?? NaN));
-};
-
-/** Parse CIDR strings to IPNet array with base64-encoded bytes. */
-export const parseCidrsToIPNets = (cidrs: string[]): IPNet[] => {
-    const results: IPNet[] = [];
-    for (const cidr of cidrs) {
-        const parts = cidr.split('/');
-        if (parts.length !== 2) continue;
-        const [ipPart, maskStr] = parts;
-        const prefixLength = parseInt(maskStr, 10);
-        if (isNaN(prefixLength)) continue;
-        const addrBytes = parseIPToBytes(ipPart);
-        if (!addrBytes) continue;
-        const isIPv4 = addrBytes.length === 4;
-        const maxPrefix = isIPv4 ? 32 : 128;
-        if (prefixLength < 0 || prefixLength > maxPrefix) continue;
-        const maskBytes = prefixLengthToMaskBytes(prefixLength, isIPv4 ? 4 : 16);
-        results.push({
-            addr: bytesToBase64(addrBytes),
-            mask: bytesToBase64(maskBytes),
-        });
-    }
-    return results;
 };
 
 /** Convert a RuleDraft to a Rule for the API. */
