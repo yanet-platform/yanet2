@@ -1,3 +1,5 @@
+@use '../../../styles/iv-tokens' as *;
+
 @mixin dash-ambient-scan {
     position: relative;
     overflow: hidden;
@@ -22,29 +24,7 @@
 }
 
 .dashboard-page {
-    // Warm dark-brown palette, mirrored from .inspect-page.
-    --iv-bg:             #15110D;
-    --iv-bg-2:           #181410;
-    --iv-surface:        #1C1814;
-    --iv-surface-strong: #1C1814;
-    --iv-bg-3:           #221C16;
-    --iv-border:         rgba(255, 199, 140, 0.02);
-    --iv-border-strong:  rgba(255, 200, 140, 0.12);
-    --iv-text:           #F2EEE8;
-    --iv-text-dim:       #B8B0A4;
-    --iv-mute:           #7E7468;
-    --iv-dim:            #7E7468;
-    --iv-accent:         #FFC061;
-    --iv-accent-soft:    rgba(255, 192, 97, 0.14);
-    --iv-accent-line:    rgba(255, 192, 97, 0.4);
-    --iv-link:           var(--g-color-text-info);
-    --iv-ok:             var(--g-color-text-positive);
-    --iv-idle:           var(--g-color-text-hint);
-    --iv-danger:         var(--g-color-text-danger);
-    --iv-warn:           var(--g-color-text-warning);
-    --iv-faint:          var(--iv-border-strong);
-    --iv-mono:           'JetBrains Mono', ui-monospace, monospace;
-    --iv-font-ui:        'Inter', system-ui, sans-serif;
+    @include iv-palette;
 
     font-family: var(--iv-mono);
     color: var(--iv-text);
@@ -401,17 +381,7 @@
 
 [data-theme="light"] {
     .dashboard-page {
-        --iv-bg:             #FAF7F2;
-        --iv-bg-2:           #F3EFE9;
-        --iv-surface:        #FFFFFF;
-        --iv-surface-strong: #FFFFFF;
-        --iv-bg-3:           #EBE6DE;
-        --iv-border:         rgba(80, 60, 30, 0.08);
-        --iv-border-strong:  rgba(80, 60, 30, 0.16);
-        --iv-text:           #1A1410;
-        --iv-text-dim:       #5C4E3A;
-        --iv-mute:           #9C8B74;
-        --iv-dim:            #9C8B74;
+        @include iv-palette-light;
     }
 }
 
