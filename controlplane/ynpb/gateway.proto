@@ -25,12 +25,25 @@ message BackendDesc {
   string endpoint = 2;
 }
 
+// BackendKind classifies how a backend is hosted relative to the gateway.
+enum BackendKind {
+  // Default, unused value.
+  BACKEND_KIND_UNSPECIFIED = 0;
+  // Built-in or in-process service sharing the gateway's own gRPC server. It
+  // does not heartbeat and is alive for as long as the gateway process is.
+  BACKEND_KIND_IN_PROCESS = 1;
+  // Out-of-process module backend that registers via the Register RPC and
+  // refreshes its registration on a heartbeat interval.
+  BACKEND_KIND_OUT_OF_PROCESS = 2;
+}
+
 // RegisteredBackend identifies a registered backend in the Gateway registry.
 message RegisteredBackend {
   BackendDesc backend = 1;
   // LastSeenAt is the timestamp when the service was last successfully
   // registered or updated.
   google.protobuf.Timestamp last_seen_at = 2;
+  BackendKind kind = 3;
 }
 
 // ListServicesResponse contains all known services in the registry.

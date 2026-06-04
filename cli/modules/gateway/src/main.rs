@@ -16,7 +16,7 @@ use ync::{
     errors::Error,
     output::{self, CommonFormat},
 };
-use ynpb::pb::{ListServicesRequest, RegisteredBackend, gateway_client::GatewayClient};
+use ynpb::pb::{BackendKind, ListServicesRequest, RegisteredBackend, gateway_client::GatewayClient};
 
 const GATEWAY_SERVICE: &str = "ynpb.Gateway";
 
@@ -111,6 +111,8 @@ impl GatewayService {
 pub struct ServiceRow {
     #[tabled(rename = "Name")]
     pub name: String,
+    #[tabled(rename = "Kind")]
+    pub kind: String,
     #[tabled(rename = "Endpoint")]
     pub endpoint: String,
     #[tabled(rename = "Last seen")]
@@ -125,11 +127,35 @@ impl From<&RegisteredBackend> for ServiceRow {
             .map(|b| (b.name.clone(), b.endpoint.clone()))
             .unwrap_or_default();
 
+        let kind = BackendKind::try_from(backend.kind).unwrap_or(BackendKind::Unspecified);
+
         Self {
             name,
+            kind: kind_display(kind),
             endpoint,
-            last_seen: format_age(backend.last_seen_at.as_ref()),
+            last_seen: last_seen_cell(kind, backend.last_seen_at.as_ref()),
         }
+    }
+}
+
+/// Maps a `BackendKind` to its human-readable display string.
+pub fn kind_display(kind: BackendKind) -> String {
+    match kind {
+        BackendKind::InProcess => "in-process".to_string(),
+        BackendKind::OutOfProcess => "module".to_string(),
+        BackendKind::Unspecified => "unspecified".to_string(),
+    }
+}
+
+/// Returns the "Last seen" cell for a row.
+///
+/// In-process backends never heartbeat, so showing a timestamp age is
+/// misleading — returns `"—"` for `InProcess` and `Unspecified` kinds.
+/// Out-of-process backends heartbeat regularly; returns the formatted age.
+pub fn last_seen_cell(kind: BackendKind, ts: Option<&prost_types::Timestamp>) -> String {
+    match kind {
+        BackendKind::OutOfProcess => format_age(ts),
+        BackendKind::InProcess | BackendKind::Unspecified => "\u{2014}".to_string(),
     }
 }
 
@@ -231,5 +257,35 @@ mod test {
             nanos: 0,
         };
         assert_eq!("2h3m ago", format_age(Some(&ts)));
+    }
+
+    #[test]
+    fn kind_display_maps_correctly() {
+        assert_eq!("in-process", kind_display(BackendKind::InProcess));
+        assert_eq!("module", kind_display(BackendKind::OutOfProcess));
+        assert_eq!("unspecified", kind_display(BackendKind::Unspecified));
+    }
+
+    #[test]
+    fn last_seen_cell_in_process_returns_em_dash() {
+        let ts = prost_types::Timestamp { seconds: 1_000_000, nanos: 0 };
+        assert_eq!("\u{2014}", last_seen_cell(BackendKind::InProcess, Some(&ts)));
+    }
+
+    #[test]
+    fn last_seen_cell_unspecified_returns_em_dash() {
+        assert_eq!("\u{2014}", last_seen_cell(BackendKind::Unspecified, None));
+    }
+
+    #[test]
+    fn last_seen_cell_out_of_process_returns_age() {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap();
+        let ts = prost_types::Timestamp {
+            seconds: now.as_secs() as i64 - 30,
+            nanos: 0,
+        };
+        assert_eq!("30s ago", last_seen_cell(BackendKind::OutOfProcess, Some(&ts)));
     }
 }

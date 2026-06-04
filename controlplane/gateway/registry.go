@@ -19,6 +19,14 @@ const (
 	RegistrationUpdated
 )
 
+// BackendKind classifies how a backend is hosted relative to the gateway.
+type BackendKind int
+
+const (
+	BackendKindInProcess BackendKind = iota + 1
+	BackendKindOutOfProcess
+)
+
 // Backend is a routable, closeable upstream connection tracked by the registry.
 type Backend interface {
 	proxy.Backend
@@ -30,6 +38,7 @@ type Backend interface {
 type BackendEntry struct {
 	service    string
 	backend    Backend
+	kind       BackendKind
 	lastSeenAt time.Time
 }
 
@@ -46,6 +55,11 @@ func (m *BackendEntry) Endpoint() string {
 // LastSeenAt returns the time the entry was last registered.
 func (m *BackendEntry) LastSeenAt() time.Time {
 	return m.lastSeenAt
+}
+
+// Kind returns the hosting classification of the entry.
+func (m *BackendEntry) Kind() BackendKind {
+	return m.kind
 }
 
 // GetBackend returns the proxy.Backend for this entry.
@@ -88,8 +102,8 @@ func (m *BackendRegistry) GetBackend(service string) (proxy.Backend, bool) {
 // backends.
 // The shared loopback backend is registered once under distinct keys and is
 // never displaced, so it is only closed by Close().
-func (m *BackendRegistry) RegisterBackend(service string, b Backend) RegistrationStatus {
-	status, evicted := m.registerBackend(service, b)
+func (m *BackendRegistry) RegisterBackend(service string, b Backend, kind BackendKind) RegistrationStatus {
+	status, evicted := m.registerBackend(service, b, kind)
 	if evicted != nil {
 		_ = evicted.Close()
 	}
@@ -97,7 +111,7 @@ func (m *BackendRegistry) RegisterBackend(service string, b Backend) Registratio
 	return status
 }
 
-func (m *BackendRegistry) registerBackend(service string, b Backend) (RegistrationStatus, Backend) {
+func (m *BackendRegistry) registerBackend(service string, b Backend, kind BackendKind) (RegistrationStatus, Backend) {
 	now := time.Now().UTC()
 
 	m.mu.Lock()
@@ -110,10 +124,10 @@ func (m *BackendRegistry) registerBackend(service string, b Backend) (Registrati
 		m.backends[service] = existing
 		return RegistrationRenewed, b
 	case ok:
-		m.backends[service] = BackendEntry{service: service, backend: b, lastSeenAt: now}
+		m.backends[service] = BackendEntry{service: service, backend: b, kind: kind, lastSeenAt: now}
 		return RegistrationUpdated, existing.backend
 	default:
-		m.backends[service] = BackendEntry{service: service, backend: b, lastSeenAt: now}
+		m.backends[service] = BackendEntry{service: service, backend: b, kind: kind, lastSeenAt: now}
 		return RegistrationRegistered, nil
 	}
 }

@@ -187,7 +187,7 @@ func NewGateway(cfg *Config, options ...GatewayOption) (*Gateway, error) {
 	}
 
 	for _, service := range []string{"ynpb.Gateway", "ynpb.Auth"} {
-		registry.RegisterBackend(service, loopback)
+		registry.RegisterBackend(service, loopback, BackendKindInProcess)
 		log.Info("registered built-in service in registry",
 			zap.String("service", service),
 		)
@@ -206,7 +206,7 @@ func NewGateway(cfg *Config, options ...GatewayOption) (*Gateway, error) {
 			)
 
 			for _, name := range service.ServicesNames() {
-				registry.RegisterBackend(name, loopback)
+				registry.RegisterBackend(name, loopback, BackendKindInProcess)
 				log.Debug("registered in-process service in registry",
 					zap.String("service", name),
 				)

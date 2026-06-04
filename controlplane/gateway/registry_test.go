@@ -50,7 +50,7 @@ func TestBackendRegistry_FirstRegistration(t *testing.T) {
 	reg := NewBackendRegistry()
 	b := &fakeBackend{endpoint: "127.0.0.1:9000"}
 
-	status := reg.RegisterBackend("svc.Foo", b)
+	status := reg.RegisterBackend("svc.Foo", b, BackendKindOutOfProcess)
 
 	require.Equal(t, RegistrationRegistered, status)
 	require.False(t, b.closed)
@@ -63,12 +63,12 @@ func TestBackendRegistry_FirstRegistration(t *testing.T) {
 func TestBackendRegistry_SameEndpointRenews(t *testing.T) {
 	reg := NewBackendRegistry()
 	original := &fakeBackend{endpoint: "127.0.0.1:9000"}
-	reg.RegisterBackend("svc.Foo", original)
+	reg.RegisterBackend("svc.Foo", original, BackendKindOutOfProcess)
 
 	// Re-register with a different object but the same endpoint.
 	second := &fakeBackend{endpoint: "127.0.0.1:9000"}
 
-	status := reg.RegisterBackend("svc.Foo", second)
+	status := reg.RegisterBackend("svc.Foo", second, BackendKindOutOfProcess)
 
 	require.Equal(t, RegistrationRenewed, status)
 
@@ -86,11 +86,11 @@ func TestBackendRegistry_SameEndpointRenews(t *testing.T) {
 func TestBackendRegistry_DifferentEndpointUpdates(t *testing.T) {
 	reg := NewBackendRegistry()
 	prev := &fakeBackend{endpoint: "127.0.0.1:9000"}
-	reg.RegisterBackend("svc.Foo", prev)
+	reg.RegisterBackend("svc.Foo", prev, BackendKindOutOfProcess)
 
 	next := &fakeBackend{endpoint: "127.0.0.1:9001"}
 
-	status := reg.RegisterBackend("svc.Foo", next)
+	status := reg.RegisterBackend("svc.Foo", next, BackendKindOutOfProcess)
 
 	require.Equal(t, RegistrationUpdated, status)
 
@@ -111,8 +111,8 @@ func TestBackendRegistry_Close(t *testing.T) {
 	bA := &fakeBackend{endpoint: "127.0.0.1:9000"}
 	bB := &fakeBackend{endpoint: "127.0.0.1:9001"}
 
-	reg.RegisterBackend("svc.A", bA)
-	reg.RegisterBackend("svc.B", bB)
+	reg.RegisterBackend("svc.A", bA, BackendKindOutOfProcess)
+	reg.RegisterBackend("svc.B", bB, BackendKindOutOfProcess)
 
 	err := reg.Close()
 	require.NoError(t, err)
@@ -130,8 +130,8 @@ func TestBackendRegistry_CloseSharedBackendOnce(t *testing.T) {
 
 	// Register the same backend instance under two different service names,
 	// simulating the shared loopback backend used by built-in services.
-	reg.RegisterBackend("svc.A", shared)
-	reg.RegisterBackend("svc.B", shared)
+	reg.RegisterBackend("svc.A", shared, BackendKindInProcess)
+	reg.RegisterBackend("svc.B", shared, BackendKindInProcess)
 
 	err := reg.Close()
 	require.NoError(t, err)
@@ -147,7 +147,7 @@ func TestBackendRegistry_CloseSharedBackendOnce(t *testing.T) {
 func TestBackendRegistry_Renew(t *testing.T) {
 	reg := NewBackendRegistry()
 	b := &fakeBackend{endpoint: "127.0.0.1:9000"}
-	reg.RegisterBackend("svc.Foo", b)
+	reg.RegisterBackend("svc.Foo", b, BackendKindOutOfProcess)
 
 	before := reg.backends["svc.Foo"].lastSeenAt
 
@@ -185,7 +185,7 @@ func TestBackendRegistry_ConcurrentRace(t *testing.T) {
 		go func() {
 			defer func() { done <- struct{}{} }()
 			b := &fakeBackend{endpoint: "127.0.0.1:9000"}
-			reg.RegisterBackend("svc.Race", b)
+			reg.RegisterBackend("svc.Race", b, BackendKindOutOfProcess)
 			reg.Renew("svc.Race", "127.0.0.1:9000")
 			reg.GetBackend("svc.Race")
 			reg.ListBackends()
@@ -196,4 +196,37 @@ func TestBackendRegistry_ConcurrentRace(t *testing.T) {
 	}
 
 	_ = reg.Close()
+}
+
+func TestBackendRegistry_KindIsPreserved(t *testing.T) {
+	reg := NewBackendRegistry()
+
+	inProc := &fakeBackend{endpoint: "127.0.0.1:9000"}
+	outProc := &fakeBackend{endpoint: "127.0.0.1:9001"}
+
+	reg.RegisterBackend("svc.InProcess", inProc, BackendKindInProcess)
+	reg.RegisterBackend("svc.OutOfProcess", outProc, BackendKindOutOfProcess)
+
+	entries := reg.ListBackends()
+	kinds := map[string]BackendKind{}
+	for _, e := range entries {
+		kinds[e.Service()] = e.Kind()
+	}
+
+	require.Equal(t, BackendKindInProcess, kinds["svc.InProcess"])
+	require.Equal(t, BackendKindOutOfProcess, kinds["svc.OutOfProcess"])
+}
+
+func TestBackendRegistry_RenewPreservesKind(t *testing.T) {
+	reg := NewBackendRegistry()
+	b := &fakeBackend{endpoint: "127.0.0.1:9000"}
+	reg.RegisterBackend("svc.Foo", b, BackendKindInProcess)
+
+	// Renew must not reset the stored kind.
+	ok := reg.Renew("svc.Foo", "127.0.0.1:9000")
+	require.True(t, ok)
+
+	entry, exists := reg.backends["svc.Foo"]
+	require.True(t, exists)
+	require.Equal(t, BackendKindInProcess, entry.Kind())
 }

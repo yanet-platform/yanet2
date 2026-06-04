@@ -25,6 +25,17 @@ func registrationStatusToProto(s RegistrationStatus) ynpb.RegistrationStatus {
 	}
 }
 
+func backendKindToProto(k BackendKind) ynpb.BackendKind {
+	switch k {
+	case BackendKindInProcess:
+		return ynpb.BackendKind_BACKEND_KIND_IN_PROCESS
+	case BackendKindOutOfProcess:
+		return ynpb.BackendKind_BACKEND_KIND_OUT_OF_PROCESS
+	default:
+		return ynpb.BackendKind_BACKEND_KIND_UNSPECIFIED
+	}
+}
+
 // GatewayService is the gRPC service for the Gateway API.
 type GatewayService struct {
 	ynpb.UnimplementedGatewayServer
@@ -55,6 +66,7 @@ func (m *GatewayService) ListServices(
 				Endpoint: b.Endpoint(),
 			},
 			LastSeenAt: timestamppb.New(b.LastSeenAt()),
+			Kind:       backendKindToProto(b.Kind()),
 		}
 
 		services = append(services, registeredBackend)
@@ -105,7 +117,7 @@ func (m *GatewayService) Register(
 		return nil, err
 	}
 
-	regStatus := m.registry.RegisterBackend(backendDesc.GetName(), b)
+	regStatus := m.registry.RegisterBackend(backendDesc.GetName(), b, BackendKindOutOfProcess)
 	switch regStatus {
 	case RegistrationRegistered:
 		log.Info("registered backend")
