@@ -56,3 +56,216 @@
         --lane-r-sm:        var(--#{$p}-r-sm);
     }
 }
+
+// Mixin that emits the drawer shell rules shared between the functions and
+// pipelines lane-editor pages. Emits ~19 shell selectors + the slide-in
+// keyframes. Per-page divergent selectors (chain-info, loading, module-list,
+// etc.) are NOT included here — keep them inline in each page's SCSS.
+// $p — prefix string, e.g. 'fn' or 'pl'.
+@mixin lane-drawer($p) {
+    .#{$p}-drawer {
+        position: fixed;
+        top: 0;
+        right: 0;
+        width: 400px;
+        height: 100vh;
+        z-index: 500;
+        background: var(--#{$p}-page-bg);
+        border-left: 1px solid var(--#{$p}-line-2);
+        display: flex;
+        flex-direction: column;
+        box-shadow: -12px 0 32px rgba(0, 0, 0, 0.35);
+        animation: #{$p}-drawer-slide-in 0.2s ease;
+        overflow-y: auto;
+    }
+
+    @keyframes #{$p}-drawer-slide-in {
+        from { transform: translateX(100%); }
+        to   { transform: translateX(0); }
+    }
+
+    .#{$p}-drawer__backdrop {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.6);
+        backdrop-filter: blur(2px);
+        z-index: 499;
+    }
+
+    .#{$p}-drawer__header {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        padding: 16px 18px;
+        border-bottom: 1px solid var(--#{$p}-line);
+        flex-shrink: 0;
+    }
+
+    .#{$p}-drawer__title {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        flex: 1;
+        min-width: 0;
+    }
+
+    .#{$p}-drawer__subtitle {
+        font-family: var(--#{$p}-font-mono);
+        font-size: 12px;
+        color: var(--#{$p}-text-3);
+        text-transform: uppercase;
+        letter-spacing: 0.6px;
+    }
+
+    .#{$p}-drawer__name-edit {
+        font-family: var(--#{$p}-font-mono);
+        font-size: 18px;
+        font-weight: 600;
+        color: var(--#{$p}-text);
+        word-break: break-all;
+    }
+
+    .#{$p}-drawer__close-btn {
+        background: none;
+        border: 1px solid var(--#{$p}-line);
+        color: var(--#{$p}-text-2);
+        width: 28px;
+        height: 28px;
+        border-radius: var(--#{$p}-r-md);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        flex-shrink: 0;
+        transition: color 0.1s, background 0.1s;
+
+        &:hover {
+            color: var(--#{$p}-text);
+            background: var(--#{$p}-bg-3);
+        }
+    }
+
+    .#{$p}-drawer__section {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        padding: 16px 18px;
+        border-bottom: 1px solid var(--#{$p}-line);
+    }
+
+    .#{$p}-drawer__section-label {
+        font-family: var(--#{$p}-font-mono);
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--#{$p}-text-3);
+        text-transform: uppercase;
+        letter-spacing: 0.6px;
+    }
+
+    .#{$p}-drawer__counters-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+    }
+
+    .#{$p}-drawer__big-stat {
+        background: var(--#{$p}-bg-2);
+        border: 1px solid var(--#{$p}-line);
+        border-radius: var(--#{$p}-r-md);
+        padding: 10px 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+    }
+
+    .#{$p}-drawer__big-stat-label {
+        font-family: var(--#{$p}-font-mono);
+        font-size: 10px;
+        color: var(--#{$p}-text-3);
+        text-transform: uppercase;
+    }
+
+    .#{$p}-drawer__big-stat-value {
+        font-family: var(--#{$p}-font-mono);
+        font-size: 16px;
+        font-weight: 600;
+        color: var(--#{$p}-text);
+        font-variant-numeric: tabular-nums;
+    }
+
+    .#{$p}-drawer__sparkline-label {
+        font-family: var(--#{$p}-font-mono);
+        font-size: 10px;
+        color: var(--#{$p}-text-3);
+        margin-bottom: 6px;
+    }
+
+    .#{$p}-drawer__sparkline {
+        overflow: hidden;
+        border-radius: var(--#{$p}-r-sm);
+    }
+
+    .#{$p}-drawer__type-select {
+        background: var(--#{$p}-bg-2);
+        border: 1px solid var(--#{$p}-line-2);
+        border-radius: var(--#{$p}-r-md);
+        color: var(--#{$p}-text);
+        padding: 8px 10px;
+        font-family: var(--#{$p}-font-mono);
+        font-size: 12px;
+        outline: none;
+        width: 100%;
+
+        &:focus {
+            border-color: var(--#{$p}-accent);
+        }
+    }
+
+    .#{$p}-drawer__field {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        margin-bottom: 12px;
+    }
+
+    .#{$p}-drawer__field-label {
+        font-size: 12px;
+        color: var(--#{$p}-text-2);
+        font-weight: 500;
+    }
+
+    .#{$p}-drawer__action-btn {
+        background: none;
+        border: 1px solid var(--#{$p}-line);
+        color: var(--#{$p}-text-2);
+        padding: 8px 12px;
+        border-radius: var(--#{$p}-r-md);
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        cursor: pointer;
+        font-size: 13px;
+        text-align: left;
+        width: 100%;
+        transition: background 0.1s, color 0.1s;
+
+        &:hover {
+            background: var(--#{$p}-bg-2);
+        }
+
+        &--danger {
+            color: var(--#{$p}-danger);
+
+            &:hover {
+                background: color-mix(in srgb, var(--g-color-text-danger) 8%, transparent);
+            }
+        }
+    }
+
+    .#{$p}-drawer__actions {
+        padding: 16px 18px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+    }
+}
