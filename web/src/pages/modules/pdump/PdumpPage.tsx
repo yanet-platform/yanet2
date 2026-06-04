@@ -1,9 +1,9 @@
 import React, { useState, useCallback, useRef, useMemo, useEffect } from 'react';
-import { Button, Flex, Icon, Text } from '@gravity-ui/uikit';
+import { Button, Icon } from '@gravity-ui/uikit';
 import { ArrowDownToLine, Plus } from '@gravity-ui/icons';
 import { useSearchParams } from 'react-router-dom';
 import { useSearchParamHelpers } from '../../../hooks';
-import { PageLayout, PageLoader, ConfigTabStrip, EmptyPagePlaceholder } from '../../../components';
+import { PageLayout, PageLoader, ConfigTabStrip, EmptyPagePlaceholder, CommandPaletteHeader } from '../../../components';
 import { toaster } from '../../../utils';
 import {
     usePdumpConfigs,
@@ -17,6 +17,8 @@ import ConfigStrip from './ConfigStrip';
 import PacketDrawer from './PacketDrawer';
 import DeleteConfigDialog from './DeleteConfigDialog';
 import type { PdumpConfigInfo, CapturedPacket } from './types';
+import { usePalette } from '../../_shared/command-palette';
+import type { Command } from '../../_shared/command-palette';
 import { useTabCycle } from '../../_shared/useTabCycle';
 import '../../../styles/draft-page.scss';
 import './pdump.scss';
@@ -348,6 +350,8 @@ const PdumpPage: React.FC = () => {
         enabled: !loading,
     });
 
+    const { setPageContribution } = usePalette();
+
     const handleOpenDeleteDialog = useCallback((configName: string) => {
         setDeletingConfigName(configName);
     }, []);
@@ -405,19 +409,148 @@ const PdumpPage: React.FC = () => {
         }
     }, [currentConfig, packets]);
 
+    const commands = useMemo((): Command[] => {
+        const list: Command[] = [];
+
+        if (currentConfigInfo && !capture.isCapturing) {
+            list.push({
+                id: '__start_capture',
+                icon: '▶',
+                label: 'Start capture',
+                sub: `Start capturing on "${currentConfig}"`,
+                keywords: 'start capture begin record',
+                group: 'Capture',
+                onSelect: () => handleStartCapture(currentConfig),
+            });
+        }
+        if (capture.liveConfig === currentConfig) {
+            list.push({
+                id: '__stop_capture',
+                icon: '■',
+                label: 'Stop capture',
+                sub: `Stop capturing on "${currentConfig}"`,
+                keywords: 'stop capture end halt',
+                group: 'Capture',
+                onSelect: handleStopCapture,
+            });
+        }
+        if (currentConfig) {
+            list.push({
+                id: '__toggle_pause',
+                icon: paused ? '▶' : '⏸',
+                label: paused ? 'Resume stream' : 'Pause stream',
+                sub: paused ? 'Resume live packet stream' : 'Pause live packet stream',
+                keywords: 'pause resume stream toggle',
+                group: 'Capture',
+                onSelect: handleTogglePause,
+            });
+        }
+        if (packets.length > 0) {
+            list.push({
+                id: '__clear_packets',
+                icon: '✕',
+                label: 'Clear packets',
+                sub: 'Remove all captured packets',
+                keywords: 'clear packets remove flush',
+                group: 'Capture',
+                onSelect: handleClearPackets,
+            });
+        }
+        if (currentConfig) {
+            list.push({
+                id: '__toggle_autoscroll',
+                icon: '↧',
+                label: autoScroll ? 'Disable auto-scroll' : 'Enable auto-scroll',
+                sub: autoScroll ? 'Stop following new packets' : 'Follow new packets',
+                keywords: 'auto scroll follow tail',
+                group: 'Capture',
+                onSelect: () => setAutoScroll(v => !v),
+            });
+        }
+
+        list.push({
+            id: '__new_config',
+            icon: '+',
+            label: 'New configuration',
+            sub: 'Create a new pdump configuration',
+            keywords: 'new config create add',
+            group: 'Config',
+            onSelect: () => setIsCreateDialogOpen(true),
+        });
+        if (currentConfigInfo) {
+            list.push({
+                id: '__edit_config',
+                icon: '✎',
+                label: 'Edit configuration',
+                sub: `Edit "${currentConfig}"`,
+                keywords: 'edit config modify',
+                group: 'Config',
+                onSelect: () => setEditingConfig(currentConfigInfo),
+            });
+        }
+        if (currentConfig && capture.liveConfig !== currentConfig) {
+            list.push({
+                id: '__delete_config',
+                icon: '✕',
+                label: 'Delete configuration',
+                sub: `Delete "${currentConfig}"`,
+                keywords: 'delete remove config',
+                group: 'Config',
+                onSelect: () => handleOpenDeleteDialog(currentConfig),
+            });
+        }
+        for (const cfg of configs) {
+            if (cfg.name === currentConfig) continue;
+            const name = cfg.name;
+            list.push({
+                id: `__config_${name}`,
+                icon: '⇥',
+                label: `Switch to config ${name}`,
+                sub: name,
+                keywords: `switch config tab ${name}`,
+                group: 'Config',
+                onSelect: () => handleSelectTab(name),
+            });
+        }
+
+        return list;
+    }, [
+        currentConfig,
+        currentConfigInfo,
+        configs,
+        capture.liveConfig,
+        capture.isCapturing,
+        paused,
+        autoScroll,
+        packets.length,
+        handleStartCapture,
+        handleStopCapture,
+        handleTogglePause,
+        handleClearPackets,
+        handleSelectTab,
+        handleOpenDeleteDialog,
+    ]);
+
+    useEffect(() => {
+        setPageContribution({ commands, placeholder: 'Search pdump actions…' });
+        return () => setPageContribution(null);
+    }, [commands, setPageContribution]);
+
     const pageHeader = (
-        <Flex alignItems="center" gap={4} style={{ width: '100%' }}>
-            <Text variant="header-1">Pdump</Text>
-            <Flex grow />
-            <Button view="normal" onClick={handleExportPcap} disabled={packets.length === 0}>
-                <Icon data={ArrowDownToLine} size={16} />
-                Export PCAP
-            </Button>
-            <Button view="action" onClick={() => setIsCreateDialogOpen(true)}>
-                <Icon data={Plus} size={16} />
-                New Configuration
-            </Button>
-        </Flex>
+        <CommandPaletteHeader
+            title="Pdump"
+            placeholder="Search pdump actions…"
+            actions={<>
+                <Button view="normal" onClick={handleExportPcap} disabled={packets.length === 0}>
+                    <Icon data={ArrowDownToLine} size={16} />
+                    Export PCAP
+                </Button>
+                <Button view="action" onClick={() => setIsCreateDialogOpen(true)}>
+                    <Icon data={Plus} size={16} />
+                    New Configuration
+                </Button>
+            </>}
+        />
     );
 
     if (loading) {
