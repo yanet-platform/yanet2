@@ -13,7 +13,7 @@ import type { FIBDrawerHandle } from './FIBDrawer';
 import FIBYamlIO from './FIBYamlIO';
 import { FIBSaveDiffModal } from './FIBSaveDiffModal';
 import {
-    AddConfigModal, isValidCIDR, useDraftShortcuts, useDraftDragDrop, useDraftPageHandlers,
+    AddConfigModal, isValidCIDR, useDraftShortcuts, useDraftDragDrop, useDraftPageHandlers, computeRowStatuses,
 } from '../../_shared/draft';
 import { DeleteConfigModal, BulkDeleteModal, CommandPaletteHeader } from '../../../components';
 import { usePalette } from '../../_shared/command-palette';
@@ -95,21 +95,13 @@ const RoutePage: React.FC = () => {
         );
     }, [rawRows, search]);
 
-    const statusById = useMemo((): Map<string, import('./types').FIBRowStatus> => {
-        const m = new Map<string, import('./types').FIBRowStatus>();
-        const serverById = new Map(rawServerRows.map((r) => [r.id, r]));
-        for (const r of rawRows) {
-            const s = serverById.get(r.id);
-            if (!s) m.set(r.id, 'added');
-            else m.set(r.id, (s.prefix === r.prefix && s.dst_mac === r.dst_mac && s.src_mac === r.src_mac && s.device === r.device) ? 'same' : 'changed');
-        }
-        return m;
-    }, [rawRows, rawServerRows]);
-
-    const removedRows = useMemo((): FIBRowItem[] => {
-        const localIds = new Set(rawRows.map((r) => r.id));
-        return rawServerRows.filter((r) => !localIds.has(r.id));
-    }, [rawRows, rawServerRows]);
+    const { statusById, removedRows } = useMemo(
+        () => computeRowStatuses(
+            rawRows, rawServerRows,
+            (s, r) => s.prefix === r.prefix && s.dst_mac === r.dst_mac && s.src_mac === r.src_mac && s.device === r.device,
+        ),
+        [rawRows, rawServerRows],
+    );
 
     const editingIndex = editingRowId ? rawRows.findIndex((r) => r.id === editingRowId) : -1;
     const editingRow = editingIndex >= 0 ? rawRows[editingIndex] : null;

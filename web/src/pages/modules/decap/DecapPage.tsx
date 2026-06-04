@@ -14,7 +14,7 @@ import PrefixYamlIO from './PrefixYamlIO';
 import { PrefixSaveDiffModal } from './PrefixSaveDiffModal';
 import {
     AddConfigModal,
-    useDraftShortcuts, useDraftDragDrop, useDraftPageHandlers,
+    useDraftShortcuts, useDraftDragDrop, useDraftPageHandlers, computeRowStatuses,
 } from '../../_shared/draft';
 import { DeleteConfigModal, BulkDeleteModal, CommandPaletteHeader } from '../../../components';
 import { useTabCycle } from '../../_shared/useTabCycle';
@@ -99,21 +99,10 @@ const DecapPage: React.FC = () => {
         return rawRows.filter((r) => r.prefix.toLowerCase().includes(q));
     }, [rawRows, search]);
 
-    const statusById = useMemo((): Map<string, import('./types').PrefixRowStatus> => {
-        const m = new Map<string, import('./types').PrefixRowStatus>();
-        const serverById = new Map(rawServerRows.map((r) => [r.id, r]));
-        for (const r of rawRows) {
-            const s = serverById.get(r.id);
-            if (!s) m.set(r.id, 'added');
-            else m.set(r.id, s.prefix === r.prefix ? 'same' : 'changed');
-        }
-        return m;
-    }, [rawRows, rawServerRows]);
-
-    const removedRows = useMemo((): PrefixRowItem[] => {
-        const localIds = new Set(rawRows.map((r) => r.id));
-        return rawServerRows.filter((r) => !localIds.has(r.id));
-    }, [rawRows, rawServerRows]);
+    const { statusById, removedRows } = useMemo(
+        () => computeRowStatuses(rawRows, rawServerRows, (s, r) => s.prefix === r.prefix),
+        [rawRows, rawServerRows],
+    );
 
     const editingIndex = editingRowId ? rawRows.findIndex((r) => r.id === editingRowId) : -1;
     const editingRow = editingIndex >= 0 ? rawRows[editingIndex] : null;
