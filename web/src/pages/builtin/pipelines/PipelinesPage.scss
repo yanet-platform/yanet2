@@ -6,66 +6,11 @@
 // Design tokens — warm dark-brown palette scoped to this page.
 @include palette.lane-page-palette('pl', 'pipeline-card');
 
-// ─── Page container ───────────────────────────────────────────────────────────
+// ─── Page container + Pipeline card ──────────────────────────────────────────
 
-.pl-page {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    padding: 20px;
-    overflow-y: auto;
-    flex: 1;
-    min-height: 0;
-    background: var(--pl-page-bg);
-}
+@include palette.lane-page-shell('pl', 'pipeline-card');
 
-// ─── Pipeline card ────────────────────────────────────────────────────────────
-
-.pl-pipeline-card {
-    background: var(--pl-panel);
-    border: 1px solid var(--pl-line-2);
-    border-radius: var(--pl-r-lg);
-    overflow: hidden;
-
-    &--collapsed {
-        .pl-pipeline-card__body {
-            display: none;
-        }
-    }
-}
-
-.pl-pipeline-card__body {
-    display: flex;
-    flex-direction: column;
-}
-
-.pl-pipeline-card__sub-header {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    padding: 10px 16px;
-    border-bottom: 1px solid var(--pl-line);
-    background: var(--pl-bg-2);
-    font-family: var(--pl-font-mono);
-    font-size: 12px;
-    color: var(--pl-text-3);
-}
-
-.pl-pipeline-card__sub-header-item {
-    color: var(--pl-text-3);
-
-    &--bold {
-        color: var(--pl-text-2);
-        font-weight: 600;
-    }
-}
-
-.pl-pipeline-card__sub-header-sep {
-    width: 1px;
-    height: 12px;
-    background: var(--pl-line-2);
-    flex-shrink: 0;
-}
+@include palette.lane-page-subheader('pl', 'pipeline-card');
 
 // ─── Pipeline card header ─────────────────────────────────────────────────────
 
@@ -75,35 +20,7 @@
 
 // ─── Lane track ───────────────────────────────────────────────────────────────
 
-.pl-lane-track {
-    display: flex;
-    flex-wrap: nowrap;
-    align-items: center;
-    column-gap: 0;
-    padding: 12px 16px;
-    flex: 1;
-    min-width: 0;
-    overflow-x: auto;
-    overflow-y: hidden;
-    transition: box-shadow 0.15s;
-    background-image:
-        linear-gradient(to right, transparent 0, transparent calc(100% - 1px), var(--pl-line) 100%),
-        repeating-linear-gradient(to right, transparent 0 22px, var(--pl-line) 22px 23px);
-
-    &--reject {
-        box-shadow: inset 0 0 0 1px var(--pl-danger);
-    }
-}
-
-.pl-lane-track__empty {
-    background: var(--pl-bg-3);
-    padding: 8px 16px;
-    border: 1px dashed var(--pl-line-2);
-    border-radius: var(--pl-r-md);
-    color: var(--pl-text-3);
-    font-size: 12px;
-    font-family: var(--pl-font-mono);
-}
+@include palette.lane-track('pl', 12px);
 
 @include palette.lane-card('pl', 'ref-card');
 
