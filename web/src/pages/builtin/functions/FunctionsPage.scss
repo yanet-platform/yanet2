@@ -221,65 +221,7 @@
     font-family: var(--fn-font-mono);
 }
 
-// ─── Module card ──────────────────────────────────────────────────────────────
-
-.fn-module-card {
-    position: relative;
-    display: flex;
-    flex-shrink: 0;
-    width: 192px;
-    background: var(--fn-bg-3);
-    border: 1px solid var(--fn-line-2);
-    border-radius: 8px;
-    cursor: pointer;
-    user-select: none;
-    transition: box-shadow 0.12s, opacity 0.12s;
-    overflow: hidden;
-
-    &:hover {
-        box-shadow: 0 0 0 1px var(--fn-accent-soft);
-    }
-
-    &--dragging {
-        opacity: 0.4;
-    }
-
-    &--drag-source {
-        opacity: 0.4;
-        box-shadow: 0 0 0 1px var(--fn-line-2);
-        cursor: no-drop;
-    }
-
-    &--invalid-target {
-        box-shadow: 0 0 0 1px var(--fn-danger);
-    }
-}
-
-.fn-module-card__accent-bar {
-    width: 3px;
-    position: absolute;
-    left: 0;
-    top: 0;
-    bottom: 0;
-    flex-shrink: 0;
-}
-
-.fn-module-card__content {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    padding: 7px 8px 7px 14px;
-    flex: 1;
-    min-width: 0;
-}
-
-// Row 1: [type-chip] [name] [kebab]
-.fn-module-card__top-row {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    min-width: 0;
-}
+@include palette.lane-card('fn', 'module-card');
 
 .fn-module-card__type-chip {
     display: inline-flex;
@@ -329,34 +271,6 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-}
-
-// Row 2: [sparkline grow] [pps]
-.fn-module-card__sparkline-row {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    min-height: 15px;
-
-    svg {
-        flex: 1;
-        min-width: 0;
-        width: 100% !important;
-        height: 15px;
-    }
-}
-
-.fn-module-card__counter {
-    font-family: var(--fn-font-mono);
-    font-size: 11px;
-    color: var(--fn-text-2);
-    font-variant-numeric: tabular-nums;
-    white-space: nowrap;
-    flex-shrink: 0;
-}
-
-.fn-module-card__counter-unit {
-    color: var(--fn-text-3);
 }
 
 // ─── Weight badge ─────────────────────────────────────────────────────────────

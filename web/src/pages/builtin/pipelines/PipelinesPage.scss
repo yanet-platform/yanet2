@@ -105,64 +105,7 @@
     font-family: var(--pl-font-mono);
 }
 
-// ─── Function reference card ──────────────────────────────────────────────────
-
-.pl-ref-card {
-    position: relative;
-    display: flex;
-    flex-shrink: 0;
-    width: 192px;
-    background: var(--pl-bg-3);
-    border: 1px solid var(--pl-line-2);
-    border-radius: 8px;
-    cursor: pointer;
-    user-select: none;
-    transition: box-shadow 0.12s, opacity 0.12s;
-    overflow: hidden;
-
-    &:hover {
-        box-shadow: 0 0 0 1px var(--pl-accent-soft);
-    }
-
-    &--dragging {
-        opacity: 0.4;
-    }
-
-    &--drag-source {
-        opacity: 0.4;
-        box-shadow: 0 0 0 1px var(--pl-line-2);
-        cursor: no-drop;
-    }
-
-    &--invalid-target {
-        box-shadow: 0 0 0 1px var(--pl-danger);
-    }
-}
-
-.pl-ref-card__accent-bar {
-    width: 3px;
-    position: absolute;
-    left: 0;
-    top: 0;
-    bottom: 0;
-    flex-shrink: 0;
-}
-
-.pl-ref-card__content {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    padding: 7px 8px 7px 14px;
-    flex: 1;
-    min-width: 0;
-}
-
-.pl-ref-card__top-row {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    min-width: 0;
-}
+@include palette.lane-card('pl', 'ref-card');
 
 .pl-ref-card__name {
     flex: 1;
@@ -211,33 +154,6 @@
             color: var(--pl-danger);
         }
     }
-}
-
-.pl-ref-card__sparkline-row {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    min-height: 15px;
-
-    svg {
-        flex: 1;
-        min-width: 0;
-        width: 100% !important;
-        height: 15px;
-    }
-}
-
-.pl-ref-card__counter {
-    font-family: var(--pl-font-mono);
-    font-size: 11px;
-    color: var(--pl-text-2);
-    font-variant-numeric: tabular-nums;
-    white-space: nowrap;
-    flex-shrink: 0;
-}
-
-.pl-ref-card__counter-unit {
-    color: var(--pl-text-3);
 }
 
 // ─── Add function ref ghost button ────────────────────────────────────────────

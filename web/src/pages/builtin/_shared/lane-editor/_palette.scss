@@ -57,6 +57,98 @@
     }
 }
 
+// Mixin that emits the draggable card shell shared between the functions and
+// pipelines lane-editor pages. The 7 selectors (container, accent-bar,
+// content, top-row, sparkline-row, counter, counter-unit) are byte-identical
+// modulo prefix and card-class name.
+// $p    — prefix string, e.g. 'fn' or 'pl'.
+// $card — card class suffix, e.g. 'module-card' or 'ref-card'.
+@mixin lane-card($p, $card) {
+    .#{$p}-#{$card} {
+        position: relative;
+        display: flex;
+        flex-shrink: 0;
+        width: 192px;
+        background: var(--#{$p}-bg-3);
+        border: 1px solid var(--#{$p}-line-2);
+        border-radius: 8px;
+        cursor: pointer;
+        user-select: none;
+        transition: box-shadow 0.12s, opacity 0.12s;
+        overflow: hidden;
+
+        &:hover {
+            box-shadow: 0 0 0 1px var(--#{$p}-accent-soft);
+        }
+
+        &--dragging {
+            opacity: 0.4;
+        }
+
+        &--drag-source {
+            opacity: 0.4;
+            box-shadow: 0 0 0 1px var(--#{$p}-line-2);
+            cursor: no-drop;
+        }
+
+        &--invalid-target {
+            box-shadow: 0 0 0 1px var(--#{$p}-danger);
+        }
+    }
+
+    .#{$p}-#{$card}__accent-bar {
+        width: 3px;
+        position: absolute;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        flex-shrink: 0;
+    }
+
+    .#{$p}-#{$card}__content {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        padding: 7px 8px 7px 14px;
+        flex: 1;
+        min-width: 0;
+    }
+
+    .#{$p}-#{$card}__top-row {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        min-width: 0;
+    }
+
+    .#{$p}-#{$card}__sparkline-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        min-height: 15px;
+
+        svg {
+            flex: 1;
+            min-width: 0;
+            width: 100% !important;
+            height: 15px;
+        }
+    }
+
+    .#{$p}-#{$card}__counter {
+        font-family: var(--#{$p}-font-mono);
+        font-size: 11px;
+        color: var(--#{$p}-text-2);
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+        flex-shrink: 0;
+    }
+
+    .#{$p}-#{$card}__counter-unit {
+        color: var(--#{$p}-text-3);
+    }
+}
+
 // Mixin that emits the drawer shell rules shared between the functions and
 // pipelines lane-editor pages. Emits ~19 shell selectors + the slide-in
 // keyframes. Per-page divergent selectors (chain-info, loading, module-list,
