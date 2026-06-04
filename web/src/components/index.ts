@@ -59,3 +59,5 @@ export { default as BulkDeleteModal } from './BulkDeleteModal';
 export { useChipInput, Chip } from './chip-input';
 export type { ChipKind, ChipInputProps, ChipInputHandle } from './chip-input';
 export { default as CommandPaletteHeader } from './CommandPaletteHeader';
+export { default as DraftYamlIO } from './DraftYamlIO';
+export type { DraftYamlIOProps } from './DraftYamlIO';

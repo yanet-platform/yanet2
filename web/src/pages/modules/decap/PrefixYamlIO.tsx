@@ -1,8 +1,7 @@
-import React, { useState } from 'react';
+import React from 'react';
 import type { PrefixRowItem } from './types';
 import { rowsToYaml, yamlToRows } from './yaml';
-import { toaster } from '../../../utils';
-import YamlIOModal from '../../../components/YamlIOModal';
+import DraftYamlIO from '../../../components/DraftYamlIO';
 
 interface PrefixYamlIOProps {
     configName: string;
@@ -12,53 +11,19 @@ interface PrefixYamlIOProps {
 }
 
 /** YAML import/export controls for the decap page header. */
-const PrefixYamlIO: React.FC<PrefixYamlIOProps> = ({ configName, rows, onImport, disabled }) => {
-    const [importMode, setImportMode] = useState<'replace' | 'append'>('replace');
-
-    const handleImport = (text: string): void => {
-        const imported = yamlToRows(text);
-        onImport(imported, importMode);
-        toaster.success('prefix-yaml-import', `Imported ${imported.length} prefixes (${importMode}).`);
-    };
-
-    const importExtraControls = (
-        <>
-            <div style={{ flex: 1 }} />
-            <span style={{ fontSize: 12, color: 'var(--yn-text-3)' }}>Mode:</span>
-            <button
-                type="button"
-                className={`yn-btn yn-btn--sm${importMode === 'replace' ? '' : ' yn-btn--ghost'}`}
-                onClick={() => setImportMode('replace')}
-            >
-                Replace all
-            </button>
-            <button
-                type="button"
-                className={`yn-btn yn-btn--sm${importMode === 'append' ? '' : ' yn-btn--ghost'}`}
-                onClick={() => setImportMode('append')}
-            >
-                Append
-            </button>
-        </>
-    );
-
-    return (
-        <YamlIOModal
-            configName={configName}
-            itemCount={rows.length}
-            itemLabel="prefixes"
-            downloadPrefix={`decap-${configName}`}
-            exportYaml={() => rowsToYaml(configName, rows)}
-            onImport={handleImport}
-            toastPrefix="prefix-yaml"
-            importPlaceholder={`config: ${configName}\nprefixes:\n  - 10.0.0.0/8\n  - 2a02:6b8::/32`}
-            exportFooterHint="Exports current draft (uncommitted changes included)."
-            importFooterHint="Loads into current config as draft. Use Commit to push to server."
-            importButtonLabel="Load as draft"
-            importExtraControls={importExtraControls}
-            disabled={disabled}
-        />
-    );
-};
+const PrefixYamlIO: React.FC<PrefixYamlIOProps> = ({ configName, rows, onImport, disabled }) => (
+    <DraftYamlIO<PrefixRowItem>
+        configName={configName}
+        rows={rows}
+        onImport={onImport}
+        itemLabel="prefixes"
+        downloadPrefix={`decap-${configName}`}
+        toastPrefix="prefix-yaml"
+        importPlaceholder={`config: ${configName}\nprefixes:\n  - 10.0.0.0/8\n  - 2a02:6b8::/32`}
+        exportYaml={() => rowsToYaml(configName, rows)}
+        parseImport={yamlToRows}
+        disabled={disabled}
+    />
+);
 
 export default PrefixYamlIO;
