@@ -12,6 +12,19 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/ynpb"
 )
 
+func backendKindToProto(k BackendKind) ynpb.BackendKind {
+	switch k {
+	case BackendKindBuiltin:
+		return ynpb.BackendKind_BACKEND_KIND_BUILTIN
+	case BackendKindInProcess:
+		return ynpb.BackendKind_BACKEND_KIND_IN_PROCESS
+	case BackendKindExternal:
+		return ynpb.BackendKind_BACKEND_KIND_EXTERNAL
+	default:
+		return ynpb.BackendKind_BACKEND_KIND_UNSPECIFIED
+	}
+}
+
 func registrationStatusToProto(s RegistrationStatus) ynpb.RegistrationStatus {
 	switch s {
 	case RegistrationRegistered:
@@ -55,6 +68,7 @@ func (m *GatewayService) ListServices(
 				Endpoint: b.Endpoint(),
 			},
 			LastSeenAt: timestamppb.New(b.LastSeenAt()),
+			Kind:       backendKindToProto(b.Kind()),
 		}
 
 		services = append(services, registeredBackend)
@@ -90,12 +104,17 @@ func (m *GatewayService) Register(
 	)
 	log.Debug("registering backend")
 
+	kind := BackendKindExternal
+	if req.GetInProcess() {
+		kind = BackendKindInProcess
+	}
+
 	// Fast path: skip dialing when the endpoint is unchanged.
 	//
 	// A registration that races in between this check and RegisterBackend
 	// below is resolved there authoritatively (the redundant connection is
 	// closed), so this check need not be the linearization point.
-	if m.registry.Renew(backendDesc.GetName(), backendDesc.GetEndpoint()) {
+	if m.registry.Renew(backendDesc.GetName(), backendDesc.GetEndpoint(), kind) {
 		log.Debug("renewed backend registration")
 		return &ynpb.RegisterResponse{Status: registrationStatusToProto(RegistrationRenewed)}, nil
 	}
@@ -105,7 +124,7 @@ func (m *GatewayService) Register(
 		return nil, err
 	}
 
-	regStatus := m.registry.RegisterBackend(backendDesc.GetName(), b)
+	regStatus := m.registry.RegisterBackend(backendDesc.GetName(), b, kind)
 	switch regStatus {
 	case RegistrationRegistered:
 		log.Info("registered backend")

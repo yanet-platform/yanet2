@@ -19,6 +19,15 @@ const (
 	RegistrationUpdated
 )
 
+// BackendKind classifies how a backend is hosted relative to the gateway.
+type BackendKind int
+
+const (
+	BackendKindBuiltin BackendKind = iota + 1
+	BackendKindInProcess
+	BackendKindExternal
+)
+
 // Backend is a routable, closeable upstream connection tracked by the registry.
 type Backend interface {
 	proxy.Backend
@@ -30,6 +39,7 @@ type Backend interface {
 type BackendEntry struct {
 	service    string
 	backend    Backend
+	kind       BackendKind
 	lastSeenAt time.Time
 }
 
@@ -46,6 +56,11 @@ func (m *BackendEntry) Endpoint() string {
 // LastSeenAt returns the time the entry was last registered.
 func (m *BackendEntry) LastSeenAt() time.Time {
 	return m.lastSeenAt
+}
+
+// Kind returns the hosting classification of the entry.
+func (m *BackendEntry) Kind() BackendKind {
+	return m.kind
 }
 
 // GetBackend returns the proxy.Backend for this entry.
@@ -84,12 +99,11 @@ func (m *BackendRegistry) GetBackend(service string) (proxy.Backend, bool) {
 // redundant new one on an unchanged-endpoint re-registration) is closed after
 // the lock is released.
 //
-// This close-on-displace path applies only to 1:1 out-of-process module
-// backends.
+// This close-on-displace path applies only to 1:1 external module backends.
 // The shared loopback backend is registered once under distinct keys and is
 // never displaced, so it is only closed by Close().
-func (m *BackendRegistry) RegisterBackend(service string, b Backend) RegistrationStatus {
-	status, evicted := m.registerBackend(service, b)
+func (m *BackendRegistry) RegisterBackend(service string, b Backend, kind BackendKind) RegistrationStatus {
+	status, evicted := m.registerBackend(service, b, kind)
 	if evicted != nil {
 		_ = evicted.Close()
 	}
@@ -97,7 +111,7 @@ func (m *BackendRegistry) RegisterBackend(service string, b Backend) Registratio
 	return status
 }
 
-func (m *BackendRegistry) registerBackend(service string, b Backend) (RegistrationStatus, Backend) {
+func (m *BackendRegistry) registerBackend(service string, b Backend, kind BackendKind) (RegistrationStatus, Backend) {
 	now := time.Now().UTC()
 
 	m.mu.Lock()
@@ -106,29 +120,31 @@ func (m *BackendRegistry) registerBackend(service string, b Backend) (Registrati
 	existing, ok := m.backends[service]
 	switch {
 	case ok && existing.backend.Endpoint() == b.Endpoint():
+		existing.kind = kind
 		existing.lastSeenAt = now
 		m.backends[service] = existing
 		return RegistrationRenewed, b
 	case ok:
-		m.backends[service] = BackendEntry{service: service, backend: b, lastSeenAt: now}
+		m.backends[service] = BackendEntry{service: service, backend: b, kind: kind, lastSeenAt: now}
 		return RegistrationUpdated, existing.backend
 	default:
-		m.backends[service] = BackendEntry{service: service, backend: b, lastSeenAt: now}
+		m.backends[service] = BackendEntry{service: service, backend: b, kind: kind, lastSeenAt: now}
 		return RegistrationRegistered, nil
 	}
 }
 
-// Renew refreshes the last-seen time when service is already registered at
-// endpoint and reports whether it did.
+// Renew refreshes the last-seen timestamp and hosting kind when service is
+// already registered at endpoint, and reports whether it did.
 //
 // A false result means the caller must dial a new backend and call
 // RegisterBackend (new service or changed endpoint).
-func (m *BackendRegistry) Renew(service, endpoint string) bool {
+func (m *BackendRegistry) Renew(service, endpoint string, kind BackendKind) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	entry, ok := m.backends[service]
 	if ok && entry.backend.Endpoint() == endpoint {
+		entry.kind = kind
 		entry.lastSeenAt = time.Now().UTC()
 		m.backends[service] = entry
 		return true

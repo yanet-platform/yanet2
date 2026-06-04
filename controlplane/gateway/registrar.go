@@ -17,6 +17,7 @@ import (
 type gatewayRegistrarOptions struct {
 	Backoff        func() backoff.BackOff
 	MaxElapsedTime time.Duration
+	InProcess      bool
 	Log            *zap.Logger
 }
 
@@ -59,6 +60,14 @@ func WithMaxElapsedTime(d time.Duration) GatewayRegistrarOption {
 	}
 }
 
+// WithInProcess marks every RegisterRequest sent by this registrar as
+// originating from inside the gateway process.
+func WithInProcess(inProcess bool) GatewayRegistrarOption {
+	return func(o *gatewayRegistrarOptions) {
+		o.InProcess = inProcess
+	}
+}
+
 // GatewayRegistrar registers service backends in a single gateway endpoint.
 //
 // A single GatewayRegistrar instance is tied to exactly one endpoint.
@@ -68,6 +77,7 @@ type GatewayRegistrar struct {
 	conn           *grpc.ClientConn
 	backoff        func() backoff.BackOff
 	maxElapsedTime time.Duration
+	inProcess      bool
 	log            *zap.Logger
 }
 
@@ -102,6 +112,7 @@ func NewGatewayRegistrar(
 		conn:           conn,
 		backoff:        opts.Backoff,
 		maxElapsedTime: opts.MaxElapsedTime,
+		inProcess:      opts.InProcess,
 		log:            opts.Log,
 	}, nil
 }
@@ -130,6 +141,7 @@ func (m *GatewayRegistrar) RegisterServices(
 				Name:     name,
 				Endpoint: backendEndpoint,
 			},
+			InProcess: m.inProcess,
 		}
 
 		wg.Go(func() error {

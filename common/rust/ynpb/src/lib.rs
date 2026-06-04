@@ -5,6 +5,22 @@ pub mod pb {
 
 mod function;
 
+/// Serializes a `BackendKind` discriminant as its lowercased short name
+/// (e.g. `builtin`, `in_process`, `external`), or `unspecified` when unknown.
+pub fn serialize_backend_kind<S>(value: &i32, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    let name = pb::BackendKind::try_from(*value)
+        .unwrap_or_default()
+        .as_str_name()
+        .strip_prefix("BACKEND_KIND_")
+        .unwrap_or("UNSPECIFIED")
+        .to_lowercase();
+
+    serializer.serialize_str(&name)
+}
+
 /// Serializes an `Option<prost_types::Timestamp>` as `{"seconds": i64, "nanos":
 /// i32}` or `null` when absent.
 pub fn serialize_timestamp<S>(value: &Option<prost_types::Timestamp>, serializer: S) -> Result<S::Ok, S::Error>

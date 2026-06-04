@@ -22,14 +22,14 @@ import (
 
 // Service is the interface that gateway services must implement.
 //
-// When Endpoint returns an empty string the service is in-process:
-// it shares the gateway's gRPC server. When Endpoint returns a
-// non-empty host:port or unix path the service runs its own listener
-// and registers itself with the gateway client.
+// When Endpoint returns an empty string the service shares the gateway's own
+// gRPC server. When Endpoint returns a non-empty host:port or unix path the
+// service runs its own listener and registers itself with the gateway client.
 type Service interface {
 	Name() string
-	// Endpoint returns "" for in-process services, or a host:port / unix
-	// path for out-of-process services that run their own listener.
+	// Endpoint returns "" when the service shares the gateway's own gRPC
+	// server, or a host:port / unix path when the service runs its own
+	// listener.
 	Endpoint() string
 	ServicesNames() []string
 	RegisterService(server *grpc.Server)
@@ -47,8 +47,14 @@ type ClosableService interface {
 	Close() error
 }
 
+// serviceEntry pairs a service with its declared backend kind.
+type serviceEntry struct {
+	service Service
+	kind    BackendKind
+}
+
 type gatewayOptions struct {
-	Services []Service
+	Services []serviceEntry
 	Log      *zap.Logger
 	LogLevel *zap.AtomicLevel
 }
@@ -62,10 +68,17 @@ func newGatewayOptions() *gatewayOptions {
 // GatewayOption is a function that configures the Gateway.
 type GatewayOption func(*gatewayOptions)
 
-// WithService adds a service to the Gateway.
+// WithService adds an in-process module or device service to the Gateway.
 func WithService(service Service) GatewayOption {
 	return func(o *gatewayOptions) {
-		o.Services = append(o.Services, service)
+		o.Services = append(o.Services, serviceEntry{service: service, kind: BackendKindInProcess})
+	}
+}
+
+// WithBuiltinService adds a framework service that shares the gateway's own gRPC server.
+func WithBuiltinService(service Service) GatewayOption {
+	return func(o *gatewayOptions) {
+		o.Services = append(o.Services, serviceEntry{service: service, kind: BackendKindBuiltin})
 	}
 }
 
@@ -171,8 +184,8 @@ func NewGateway(cfg *Config, options ...GatewayOption) (*Gateway, error) {
 	ynpb.RegisterAuthServiceServer(server, authService)
 	log.Info("registered service", zap.String("service", fmt.Sprintf("%T", authService)))
 
-	// Dial a single loopback connection shared by all built-in and in-process
-	// services.
+	// Dial a single loopback connection shared by services hosted on the
+	// gateway's own gRPC server.
 	//
 	// Out-of-process module backends (from the Register RPC) each get their
 	// own connection via RegisterBackend in the registration loop.
@@ -183,11 +196,11 @@ func NewGateway(cfg *Config, options ...GatewayOption) (*Gateway, error) {
 
 	loopback, err := dialBackend(cfg.Server.Endpoint, creds)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create loopback backend for built-in services: %w", err)
+		return nil, fmt.Errorf("failed to create loopback backend for gateway-hosted services: %w", err)
 	}
 
 	for _, service := range []string{"ynpb.Gateway", "ynpb.Auth"} {
-		registry.RegisterBackend(service, loopback)
+		registry.RegisterBackend(service, loopback, BackendKindBuiltin)
 		log.Info("registered built-in service in registry",
 			zap.String("service", service),
 		)
@@ -196,28 +209,36 @@ func NewGateway(cfg *Config, options ...GatewayOption) (*Gateway, error) {
 	var services []Service
 	var serviceRunners []*ServiceRunner
 
-	for _, service := range opts.Services {
-		if service.Endpoint() == "" {
-			// In-process: register on the shared server and point every
-			// service name at the shared loopback backend.
-			service.RegisterService(server)
-			log.Info("registered in-process service in registry",
-				zap.String("service", service.Name()),
+	for _, entry := range opts.Services {
+		if entry.service.Endpoint() == "" {
+			// Shared-server service: register on the gateway's gRPC server and
+			// point every service name at the shared loopback backend using the
+			// declared kind.
+			entry.service.RegisterService(server)
+			var msg string
+			switch entry.kind {
+			case BackendKindBuiltin:
+				msg = "registered built-in service in registry"
+			default:
+				msg = "registered in-process service in registry"
+			}
+			log.Info(msg,
+				zap.String("service", entry.service.Name()),
 			)
 
-			for _, name := range service.ServicesNames() {
-				registry.RegisterBackend(name, loopback)
-				log.Debug("registered in-process service in registry",
+			for _, name := range entry.service.ServicesNames() {
+				registry.RegisterBackend(name, loopback, entry.kind)
+				log.Debug(msg,
 					zap.String("service", name),
 				)
 			}
 		} else {
 			// Out-of-process: wrap in a ServiceRunner.
-			runner := NewServiceRunner(service, cfg.Server.Endpoint, cfg.Server.TLS, log)
+			runner := NewServiceRunner(entry.service, cfg.Server.Endpoint, cfg.Server.TLS, log)
 			serviceRunners = append(serviceRunners, runner)
 		}
 
-		services = append(services, service)
+		services = append(services, entry.service)
 	}
 
 	return &Gateway{

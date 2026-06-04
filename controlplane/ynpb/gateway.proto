@@ -25,12 +25,29 @@ message BackendDesc {
   string endpoint = 2;
 }
 
+// BackendKind classifies how a registered backend is hosted relative to the
+// gateway, which determines whether its last-seen time reflects a heartbeat.
+enum BackendKind {
+  // Default, unused value.
+  BACKEND_KIND_UNSPECIFIED = 0;
+  // Service compiled into the gateway and sharing its gRPC server. Registered
+  // once at startup; it does not heartbeat.
+  BACKEND_KIND_BUILTIN = 1;
+  // Service launched in the gateway process and registered locally over its
+  // own listener. Registered once; it does not heartbeat.
+  BACKEND_KIND_IN_PROCESS = 2;
+  // Service registered from a separate process and refreshed on a heartbeat
+  // interval.
+  BACKEND_KIND_EXTERNAL = 3;
+}
+
 // RegisteredBackend identifies a registered backend in the Gateway registry.
 message RegisteredBackend {
   BackendDesc backend = 1;
   // LastSeenAt is the timestamp when the service was last successfully
   // registered or updated.
   google.protobuf.Timestamp last_seen_at = 2;
+  BackendKind kind = 3;
 }
 
 // ListServicesResponse contains all known services in the registry.
@@ -49,7 +66,13 @@ enum RegistrationStatus {
 }
 
 // RegisterRequest is the request to register a new module.
-message RegisterRequest { BackendDesc backend = 1; }
+message RegisterRequest {
+  BackendDesc backend = 1;
+  // in_process is set by registrants that run inside the gateway process
+  // (the director's in-process service runner). Separate-process registrants
+  // leave it false.
+  bool in_process = 2;
+}
 
 // RegisterResponse is the response to the RegisterRequest.
 message RegisterResponse { RegistrationStatus status = 1; }
