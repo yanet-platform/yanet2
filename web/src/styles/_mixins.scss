@@ -120,6 +120,22 @@
     }
 }
 
+/** Count badge pill shared by the toggle chips (route + neighbours). */
+@mixin toggle-chip-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+    opacity: 0.8;
+    font-family: var(--yn-font-mono);
+    font-variant-numeric: tabular-nums;
+}
+
 /** Side-by-side diff dialog chrome — shared by fn-diff-dialog and pl-diff-dialog. */
 @mixin diff-dialog($page-bg, $line) {
     // Override Gravity's size="l" to be wide enough for side-by-side split view.
