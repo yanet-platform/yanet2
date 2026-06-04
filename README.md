@@ -52,7 +52,7 @@ YANET employs a multi-language approach to leverage the strengths of different p
 - **Rust** - CLI tools.
 - **DPDK** - Kernel-bypass networking for high-performance packet processing.
 - **gRPC** - Communication framework for inter-component messaging.
-- **Protocol Buffers** - Efficient binary serialization format.
+- **Protocol Buffers** - Efficient binary serialization format. Protobuf API compatibility policy: see [docs/proto-compatibility.md](docs/proto-compatibility.md).
 - **Meson** - Build system for core components.
 
 ## 🔧 Building & Requirements
