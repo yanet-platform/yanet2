@@ -10,7 +10,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/stretchr/testify/require"
-	"github.com/yanet-platform/yanet2/controlplane/ynpb"
+	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 )
 
 type fakeService struct{}

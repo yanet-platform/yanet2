@@ -17,7 +17,7 @@ use ynpb::pb::{
     WorkerCountersResponse,
 };
 
-const COUNTERS_SERVICE: &str = "ynpb.CountersService";
+const COUNTERS_SERVICE: &str = "controlplane.ynpb.v1.CountersService";
 
 /// Counters module - displays counters information.
 #[derive(Debug, Clone, Parser)]

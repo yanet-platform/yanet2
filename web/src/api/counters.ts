@@ -29,7 +29,7 @@ export interface CountersByTagsResponse {
     groups?: CounterGroup[];
 }
 
-const countersService = createService('ynpb.CountersService');
+const countersService = createService('controlplane.ynpb.v1.CountersService');
 
 export const counters = {
     byTags: (request: CountersByTagsRequest, options?: CallOptions): Promise<CountersByTagsResponse> => {

@@ -8,7 +8,7 @@ import (
 
 	"github.com/yanet-platform/yanet2/controlplane/internal/auth"
 	"github.com/yanet-platform/yanet2/controlplane/internal/auth/core"
-	"github.com/yanet-platform/yanet2/controlplane/ynpb"
+	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 )
 
 // AuthService provides authentication introspection.

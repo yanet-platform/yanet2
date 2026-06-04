@@ -12,7 +12,7 @@ use ync::{
 };
 use ynpb::pb::{inspect_service_client::InspectServiceClient, InspectRequest, InspectResponse};
 
-const INSPECT_SERVICE: &str = "ynpb.InspectService";
+const INSPECT_SERVICE: &str = "controlplane.ynpb.v1.InspectService";
 
 /// Inspect module - displays system introspection information.
 #[derive(Debug, Clone, Parser)]

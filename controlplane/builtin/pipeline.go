@@ -12,7 +12,7 @@ import (
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	"github.com/yanet-platform/yanet2/controlplane/ynpb"
+	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 )
 
 const agentName = "pipeline"
@@ -50,7 +50,7 @@ func (m *Pipeline) Name() string { return "pipeline" }
 func (m *Pipeline) Endpoint() string { return "" }
 
 // ServicesNames returns the gRPC service names served by this service.
-func (m *Pipeline) ServicesNames() []string { return []string{"ynpb.PipelineService"} }
+func (m *Pipeline) ServicesNames() []string { return []string{"controlplane.ynpb.v1.PipelineService"} }
 
 // RegisterService registers the service on the given gRPC server.
 func (m *Pipeline) RegisterService(server *grpc.Server) {

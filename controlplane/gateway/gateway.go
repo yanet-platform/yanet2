@@ -17,7 +17,7 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/httpproxy"
 	"github.com/yanet-platform/yanet2/controlplane/internal/auth"
 	"github.com/yanet-platform/yanet2/controlplane/internal/xgrpc"
-	"github.com/yanet-platform/yanet2/controlplane/ynpb"
+	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 )
 
 // Service is the interface that gateway services must implement.
@@ -199,7 +199,7 @@ func NewGateway(cfg *Config, options ...GatewayOption) (*Gateway, error) {
 		return nil, fmt.Errorf("failed to create loopback backend for gateway-hosted services: %w", err)
 	}
 
-	for _, service := range []string{"ynpb.Gateway", "ynpb.Auth"} {
+	for _, service := range []string{"controlplane.ynpb.v1.Gateway", "controlplane.ynpb.v1.Auth"} {
 		registry.RegisterBackend(service, loopback, BackendKindBuiltin)
 		log.Info("registered built-in service in registry",
 			zap.String("service", service),

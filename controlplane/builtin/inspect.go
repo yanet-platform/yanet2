@@ -6,7 +6,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	"github.com/yanet-platform/yanet2/controlplane/ynpb"
+	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 )
 
 // Inspect is an in-process gRPC service for inspecting the dataplane
@@ -33,7 +33,7 @@ func (m *Inspect) Name() string { return "inspect" }
 func (m *Inspect) Endpoint() string { return "" }
 
 // ServicesNames returns the gRPC service names served by this service.
-func (m *Inspect) ServicesNames() []string { return []string{"ynpb.InspectService"} }
+func (m *Inspect) ServicesNames() []string { return []string{"controlplane.ynpb.v1.InspectService"} }
 
 // RegisterService registers the service on the given gRPC server.
 func (m *Inspect) RegisterService(server *grpc.Server) {

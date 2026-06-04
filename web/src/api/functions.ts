@@ -49,7 +49,7 @@ export interface DeleteFunctionRequest {
 
 export interface DeleteFunctionResponse { }
 
-const functionService = createService('ynpb.FunctionService');
+const functionService = createService('controlplane.ynpb.v1.FunctionService');
 
 export const functions = {
     list: (request: ListFunctionsRequest, options?: CallOptions): Promise<ListFunctionsResponse> => {

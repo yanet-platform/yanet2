@@ -71,7 +71,7 @@ export interface InspectResponse {
     instance_info?: InstanceInfo;
 }
 
-const inspectService = createService('ynpb.InspectService');
+const inspectService = createService('controlplane.ynpb.v1.InspectService');
 
 export const inspect = {
     inspect: (options?: CallOptions): Promise<InspectResponse> => {

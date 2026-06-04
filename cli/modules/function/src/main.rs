@@ -14,7 +14,7 @@ use ynpb::pb::{
     ListFunctionsRequest, UpdateFunctionRequest,
 };
 
-const FUNCTION_SERVICE: &str = "ynpb.FunctionService";
+const FUNCTION_SERVICE: &str = "controlplane.ynpb.v1.FunctionService";
 const NOT_FOUND: NotFoundMapper = NotFoundMapper::new(FUNCTION_SERVICE, "requested function");
 
 /// Function module.

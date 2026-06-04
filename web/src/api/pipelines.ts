@@ -40,7 +40,7 @@ export interface DeletePipelineRequest {
 
 export interface DeletePipelineResponse { }
 
-const pipelineService = createService('ynpb.PipelineService');
+const pipelineService = createService('controlplane.ynpb.v1.PipelineService');
 
 export const pipelines = {
     list: (request: ListPipelinesRequest, options?: CallOptions): Promise<ListPipelinesResponse> => {

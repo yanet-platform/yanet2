@@ -18,7 +18,7 @@ use ync::{
 };
 use ynpb::pb::{BackendKind, ListServicesRequest, RegisteredBackend, gateway_client::GatewayClient};
 
-const GATEWAY_SERVICE: &str = "ynpb.Gateway";
+const GATEWAY_SERVICE: &str = "controlplane.ynpb.v1.Gateway";
 
 /// Gateway - inspects the gateway service registry.
 #[derive(Debug, Clone, Parser)]

@@ -49,7 +49,7 @@ export interface UpdateDeviceVlanResponse {
 export const DEVICE_TYPES = ['plain', 'vlan'] as const;
 export type DeviceType = typeof DEVICE_TYPES[number];
 
-const deviceService = createService('ynpb.DeviceService');
+const deviceService = createService('controlplane.ynpb.v1.DeviceService');
 const plainService = createService('devices.plain.controlplane.plainpb.v1.DevicePlainService');
 const vlanService = createService('devices.vlan.controlplane.vlanpb.v1.DeviceVlanService');
 

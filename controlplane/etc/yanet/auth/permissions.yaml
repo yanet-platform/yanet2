@@ -6,4 +6,4 @@ permissions:
   users:
     - username: anonymous
       permissions:
-        - "/ynpb.Gateway/Register"
+        - "/controlplane.ynpb.v1.Gateway/Register"

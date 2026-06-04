@@ -5,22 +5,22 @@ pub fn main() -> Result<(), Box<dyn Error>> {
         .build_server(false)
         .message_attribute(".", "#[derive(serde::Serialize)]")
         .field_attribute(
-            ".ynpb.RegisteredBackend.last_seen_at",
+            ".controlplane.ynpb.v1.RegisteredBackend.last_seen_at",
             "#[serde(serialize_with = \"crate::serialize_timestamp\")]",
         )
         .field_attribute(
-            ".ynpb.RegisteredBackend.kind",
+            ".controlplane.ynpb.v1.RegisteredBackend.kind",
             "#[serde(serialize_with = \"crate::serialize_backend_kind\")]",
         )
         .extern_path(".common.commonpb.v1", "::commonpb::pb")
         .compile_protos(
             &[
-                "controlplane/ynpb/logging.proto",
-                "controlplane/ynpb/function.proto",
-                "controlplane/ynpb/pipeline.proto",
-                "controlplane/ynpb/inspect.proto",
-                "controlplane/ynpb/counters.proto",
-                "controlplane/ynpb/gateway.proto",
+                "controlplane/ynpb/v1/logging.proto",
+                "controlplane/ynpb/v1/function.proto",
+                "controlplane/ynpb/v1/pipeline.proto",
+                "controlplane/ynpb/v1/inspect.proto",
+                "controlplane/ynpb/v1/counters.proto",
+                "controlplane/ynpb/v1/gateway.proto",
             ],
             &["../../.."],
         )?;

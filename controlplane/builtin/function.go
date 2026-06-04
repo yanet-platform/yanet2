@@ -12,7 +12,7 @@ import (
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	"github.com/yanet-platform/yanet2/controlplane/ynpb"
+	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 )
 
 const functionAgentName = "function"
@@ -50,7 +50,7 @@ func (m *Function) Name() string { return "function" }
 func (m *Function) Endpoint() string { return "" }
 
 // ServicesNames returns the gRPC service names served by this service.
-func (m *Function) ServicesNames() []string { return []string{"ynpb.FunctionService"} }
+func (m *Function) ServicesNames() []string { return []string{"controlplane.ynpb.v1.FunctionService"} }
 
 // RegisterService registers the service on the given gRPC server.
 func (m *Function) RegisterService(server *grpc.Server) {

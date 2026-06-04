@@ -10,7 +10,7 @@ use ync::{
 };
 use ynpb::pb::{logging_client::LoggingClient, UpdateLevelRequest};
 
-const LOGGING_SERVICE: &str = "ynpb.Logging";
+const LOGGING_SERVICE: &str = "controlplane.ynpb.v1.Logging";
 
 /// Common functionality.
 #[derive(Debug, Clone, Parser)]

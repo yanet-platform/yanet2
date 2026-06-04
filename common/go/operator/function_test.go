@@ -9,7 +9,7 @@ import (
 	"google.golang.org/grpc"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
-	"github.com/yanet-platform/yanet2/controlplane/ynpb"
+	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 )
 
 type fakeFunctionClient struct {

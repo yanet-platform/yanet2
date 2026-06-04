@@ -6,7 +6,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	"github.com/yanet-platform/yanet2/controlplane/ynpb"
+	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 )
 
 // Counters is an in-process gRPC service for retrieving counters.
@@ -32,7 +32,7 @@ func (m *Counters) Name() string { return "counters" }
 func (m *Counters) Endpoint() string { return "" }
 
 // ServicesNames returns the gRPC service names served by this service.
-func (m *Counters) ServicesNames() []string { return []string{"ynpb.CountersService"} }
+func (m *Counters) ServicesNames() []string { return []string{"controlplane.ynpb.v1.CountersService"} }
 
 // RegisterService registers the service on the given gRPC server.
 func (m *Counters) RegisterService(server *grpc.Server) {

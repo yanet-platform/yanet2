@@ -50,8 +50,8 @@ func TestNewGateway_DeclaredKindsWired(t *testing.T) {
 	}
 
 	// Framework services registered with WithBuiltinService must be built-in.
-	require.Equal(t, BackendKindBuiltin, kinds["ynpb.Gateway"], "ynpb.Gateway must be built-in")
-	require.Equal(t, BackendKindBuiltin, kinds["ynpb.Auth"], "ynpb.Auth must be built-in")
+	require.Equal(t, BackendKindBuiltin, kinds["controlplane.ynpb.v1.Gateway"], "controlplane.ynpb.v1.Gateway must be built-in")
+	require.Equal(t, BackendKindBuiltin, kinds["controlplane.ynpb.v1.Auth"], "controlplane.ynpb.v1.Auth must be built-in")
 	require.Equal(t, BackendKindBuiltin, kinds["test.BuiltinService"], "WithBuiltinService must yield built-in kind")
 
 	// Module/device services registered with WithService must be in-process.

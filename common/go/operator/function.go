@@ -8,7 +8,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
-	"github.com/yanet-platform/yanet2/controlplane/ynpb"
+	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 )
 
 // FunctionChainSpec is the desired single-chain function definition that

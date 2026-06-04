@@ -14,7 +14,7 @@ use ynpb::pb::{
     Pipeline, UpdatePipelineRequest,
 };
 
-const PIPELINE_SERVICE: &str = "ynpb.PipelineService";
+const PIPELINE_SERVICE: &str = "controlplane.ynpb.v1.PipelineService";
 const NOT_FOUND: NotFoundMapper = NotFoundMapper::new(PIPELINE_SERVICE, "requested pipeline");
 
 /// Pipeline module.

@@ -1,8 +1,8 @@
 syntax = "proto3";
 
-package ynpb;
+package controlplane.ynpb.v1;
 
-option go_package = "github.com/yanet-platform/yanet2/controlplane/ynpb;ynpb";
+option go_package = "github.com/yanet-platform/yanet2/controlplane/ynpb/v1;ynpb";
 
 import "common/commonpb/v1/target.proto";
 

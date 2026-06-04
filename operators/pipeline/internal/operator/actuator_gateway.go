@@ -9,7 +9,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/yanet-platform/yanet2/common/go/operator"
-	"github.com/yanet-platform/yanet2/controlplane/ynpb"
+	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 	"github.com/yanet-platform/yanet2/devices/plain/controlplane/plainpb/v1"
 	"github.com/yanet-platform/yanet2/devices/vlan/controlplane/vlanpb/v1"
 )

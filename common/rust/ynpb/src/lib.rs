@@ -1,6 +1,6 @@
 #[allow(clippy::all, non_snake_case)]
 pub mod pb {
-    tonic::include_proto!("ynpb");
+    tonic::include_proto!("controlplane.ynpb.v1");
 }
 
 mod function;
