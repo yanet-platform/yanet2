@@ -11,6 +11,17 @@ describe('formatPps', () => {
         expect(formatPps(1_234)).toBe('1.2K pps');
         expect(formatPps(1_234_567)).toBe('1.2M pps');
     });
+
+    it('formats values in the G tier by default', () => {
+        expect(formatPps(2_000_000_000)).toBe('2.0G pps');
+    });
+
+    it('accepts lane options: no unit, 2-decimal M, M-capped', () => {
+        expect(formatPps(500, { unit: '', mDecimals: 2, maxUnit: 'M' })).toBe('500');
+        expect(formatPps(1_500, { unit: '', mDecimals: 2, maxUnit: 'M' })).toBe('1.5K');
+        expect(formatPps(5_000_000, { unit: '', mDecimals: 2, maxUnit: 'M' })).toBe('5.00M');
+        expect(formatPps(2_000_000_000, { unit: '', mDecimals: 2, maxUnit: 'M' })).toBe('2000.00M');
+    });
 });
 
 describe('formatBps', () => {

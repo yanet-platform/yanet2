@@ -8,21 +8,31 @@ export const formatUint64 = (value: string | number | bigint | undefined): strin
     return parsed === null ? '-' : parsed.toString();
 };
 
+interface FormatPpsOptions {
+    /** Unit appended to every result. */
+    unit?: string;
+    /** Decimal places at the M tier. */
+    mDecimals?: number;
+    /** Largest tier to use; 'M' caps everything ≥ 1e6 at the M tier. */
+    maxUnit?: 'M' | 'G';
+}
+
 /**
  * Format packets per second value for display.
  * Examples: "1.2K pps", "3.5M pps", "1.1G pps"
  */
-export const formatPps = (pps: number): string => {
+export const formatPps = (pps: number, options: FormatPpsOptions = {}): string => {
+    const { unit = ' pps', mDecimals = 1, maxUnit = 'G' } = options;
     if (pps < 1000) {
-        return `${Math.round(pps)} pps`;
+        return `${Math.round(pps)}${unit}`;
     }
     if (pps < 1_000_000) {
-        return `${(pps / 1000).toFixed(1)}K pps`;
+        return `${(pps / 1000).toFixed(1)}K${unit}`;
     }
-    if (pps < 1_000_000_000) {
-        return `${(pps / 1_000_000).toFixed(1)}M pps`;
+    if (maxUnit === 'G' && pps >= 1_000_000_000) {
+        return `${(pps / 1_000_000_000).toFixed(1)}G${unit}`;
     }
-    return `${(pps / 1_000_000_000).toFixed(1)}G pps`;
+    return `${(pps / 1_000_000).toFixed(mDecimals)}M${unit}`;
 };
 
 /**

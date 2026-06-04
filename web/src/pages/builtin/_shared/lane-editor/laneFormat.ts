@@ -1,10 +1,5 @@
-/** Format a pps number with a K/M suffix. */
-export const formatPps = (v: number): string => {
-    if (v >= 1_000_000) {
-        return `${(v / 1_000_000).toFixed(2)}M`;
-    }
-    if (v >= 1_000) {
-        return `${(v / 1_000).toFixed(1)}K`;
-    }
-    return String(Math.round(v));
-};
+import { formatPps as formatPpsBase } from '../../../../utils/format';
+
+/** Format a pps number with a compact K/M suffix (no unit, finer M precision, capped at M). */
+export const formatPps = (v: number): string =>
+    formatPpsBase(v, { unit: '', mDecimals: 2, maxUnit: 'M' });
