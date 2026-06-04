@@ -4,6 +4,7 @@ import { DraftItemDrawer } from '../../_shared/draft';
 import { ipAddressToString } from '../../../utils/netip';
 import { validatePrefix, validateNexthop } from './utils';
 import type { Route } from '../../../api/routes';
+import { CidrPrefixField } from '../../../components';
 
 export interface RouteDrawerProps {
     open: boolean;
@@ -103,21 +104,13 @@ const RouteDrawer: React.FC<RouteDrawerProps> = ({
             <section className="yn-section">
                 <div className="yn-section-h">Destination</div>
                 <div className="yn-section__body">
-                    <div className="yn-field">
-                        <label className="yn-field__label">
-                            Prefix <span className="yn-field__req">*</span>
-                        </label>
-                        <input
-                            className={`yn-input yn-input--mono${prefixError ? ' yn-input--invalid' : ''}`}
-                            value={prefix}
-                            placeholder="10.0.0.0/8 or 2001:db8::/32"
-                            onChange={(e) => setPrefix(e.target.value)}
-                        />
-                        {prefixError
-                            ? <span className="yn-field__hint yn-field__error">{prefixError}</span>
-                            : <span className="yn-field__hint">IPv4 or IPv6 with mask.</span>
-                        }
-                    </div>
+                    <CidrPrefixField
+                        label="Prefix"
+                        placeholder="10.0.0.0/8 or 2001:db8::/32"
+                        value={prefix}
+                        error={prefixError}
+                        onChange={(v) => setPrefix(v)}
+                    />
                 </div>
             </section>
 

@@ -64,3 +64,4 @@ export { default as RowCountDisplay } from './RowCountDisplay';
 export type { DraftYamlIOProps } from './DraftYamlIO';
 export { DraftSaveDiffModal } from './DraftSaveDiffModal';
 export type { DraftSaveDiffModalProps } from './DraftSaveDiffModal';
+export { CidrPrefixField } from './CidrPrefixField';

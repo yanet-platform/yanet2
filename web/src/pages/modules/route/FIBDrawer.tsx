@@ -2,6 +2,7 @@ import React, { useEffect, useImperativeHandle, useState } from 'react';
 import type { FIBRowItem, FIBRowErrors } from './types';
 import { validateRow } from './validation';
 import { DraftItemDrawer } from '../../_shared/draft';
+import { CidrPrefixField } from '../../../components';
 
 interface FIBDrawerProps {
     open: boolean;
@@ -79,21 +80,13 @@ const FIBDrawer = React.forwardRef<FIBDrawerHandle, FIBDrawerProps>(({
             <section className="yn-section">
                 <div className="yn-section-h">Destination</div>
                 <div className="yn-section__body">
-                    <div className="yn-field">
-                        <label className="yn-field__label">
-                            Prefix <span className="yn-field__req">*</span>
-                        </label>
-                        <input
-                            className={`yn-input yn-input--mono${errors.prefix ? ' yn-input--invalid' : ''}`}
-                            value={draft?.prefix ?? ''}
-                            placeholder="10.0.0.0/8 or 2a02:6b8::/32"
-                            onChange={(e) => updateField('prefix', e.target.value.trim())}
-                        />
-                        {errors.prefix
-                            ? <span className="yn-field__hint yn-field__error">{errors.prefix}</span>
-                            : <span className="yn-field__hint">IPv4 or IPv6 with mask.</span>
-                        }
-                    </div>
+                    <CidrPrefixField
+                        label="Prefix"
+                        placeholder="10.0.0.0/8 or 2a02:6b8::/32"
+                        value={draft?.prefix ?? ''}
+                        error={errors.prefix}
+                        onChange={(v) => updateField('prefix', v.trim())}
+                    />
                 </div>
             </section>
 
