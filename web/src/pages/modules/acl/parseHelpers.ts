@@ -34,9 +34,4 @@ export const parseRangesRaw = (raw: string): Array<{ from: number; to: number }>
 };
 
 /** Parse encoded proto ranges (e.g. "1536-1791") to ProtoRange wire objects. */
-export const parseProtoRangesRaw = (raw: string): ProtoRange[] => {
-    if (!raw.trim()) return [];
-    return raw.split(/[,\n]+/)
-        .map(s => parseRangeStr(s))
-        .filter((r): r is { from: number; to: number } => r !== null);
-};
+export const parseProtoRangesRaw = (raw: string): ProtoRange[] => parseRangesRaw(raw) as ProtoRange[];

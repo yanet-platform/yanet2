@@ -1,6 +1,6 @@
 import type { Rule, PortRange, VlanRange, ProtoRange, Action } from '../../../api/acl';
 import { ActionKind } from '../../../api/acl';
-import { extractBytes, formatIPNetItem } from '../../../utils';
+import { extractBytes, formatIPNetItem, formatRange } from '../../../utils';
 import type { RuleDraft, RuleItem } from './types';
 import { parseCidrsToIPNets, parseRangesRaw, parseProtoRangesRaw } from './parseHelpers';
 export { parseCidrsToIPNets, parseRangesRaw, parseProtoRangesRaw } from './parseHelpers';
@@ -14,14 +14,6 @@ export { parseCidrsToIPNets, parseRangesRaw, parseProtoRangesRaw } from './parse
  */
 export const normalizeActionKind = (kind: ActionKind | undefined): ActionKind =>
     kind ?? ActionKind.ACTION_KIND_PASS;
-
-/** Format a PortRange or ProtoRange {from, to} to a string like "80" or "80-90". */
-const formatRange = (r: { from?: number; to?: number }): string => {
-    const from = r.from ?? 0;
-    const to = r.to ?? 0;
-    if (from === to) return String(from);
-    return `${from}-${to}`;
-};
 
 /** Returns true when port ranges cover the full 0-65535 domain. */
 const coversAllPorts = (ranges: PortRange[]): boolean => {
@@ -205,12 +197,7 @@ export const rulesToNgItems = (rules: Rule[], ids: string[]): RuleItem[] =>
 export const itemToDraft = (item: RuleItem): RuleDraft => ruleToDraft(item.rule);
 
 /** Convert a ProtoRange wire object to the encoded-range string "A-B". */
-export const protoRangeToStr = (r: ProtoRange): string => {
-    const from = r.from ?? 0;
-    const to = r.to ?? 0;
-    if (from === to) return String(from);
-    return `${from}-${to}`;
-};
+export const protoRangeToStr = (r: ProtoRange): string => formatRange(r);
 
 /** Convert a RuleDraft to a wire Rule. */
 export const draftToRule = (draft: RuleDraft): Rule => {

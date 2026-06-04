@@ -1,17 +1,12 @@
 import type { Rule, VlanRange } from '../../../api/forward';
 import { ForwardMode } from '../../../api/forward';
-import { formatIPNetItem, parseCidrsToIPNets } from '../../../utils';
+import { formatIPNetItem, formatRange, parseCidrsToIPNets } from '../../../utils';
 import type { RuleItem, RuleDraft } from './types';
 
 /** Format VlanRange array to a display string. */
 const formatVlanRanges = (ranges: VlanRange[] | undefined): string => {
     if (!ranges || ranges.length === 0) return '';
-    return ranges.map((r) => {
-        const from = r.from ?? 0;
-        const to = r.to ?? 0;
-        if (from === to) return String(from);
-        return `${from}-${to}`;
-    }).join(', ');
+    return ranges.map((r) => formatRange(r)).join(', ');
 };
 
 /** Returns true if the VLAN ranges represent the full 0-4095 range or no restriction. */
