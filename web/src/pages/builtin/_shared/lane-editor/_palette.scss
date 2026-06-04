@@ -1,0 +1,58 @@
+// Mixin that emits the warm dark-brown design-token palette for a lane-page.
+// $p    — prefix string, e.g. 'fn' or 'pl'.
+// $card — card class suffix, e.g. 'function-card' or 'pipeline-card'.
+@mixin lane-page-palette($p, $card) {
+    // Dark-mode warm-brown palette (default — app is locked to dark).
+    .#{$p}-page,
+    .#{$p}-drawer,
+    .#{$p}-#{$card} {
+        --#{$p}-page-bg:       #15110D;
+        --#{$p}-panel:         #1C1814;
+        --#{$p}-bg-2:          #181410;
+        --#{$p}-bg-3:          #221C16;
+        --#{$p}-line:          rgba(255, 199, 140, 0.02);
+        --#{$p}-line-2:        rgba(255, 200, 140, 0.12);
+        --#{$p}-text:          #F2EEE8;
+        --#{$p}-text-2:        #B8B0A4;
+        --#{$p}-text-3:        #7E7468;
+        --#{$p}-accent:        #FFC061;
+        --#{$p}-accent-soft:   rgba(255, 192, 97, 0.14);
+        --#{$p}-accent-strong: #FFC061;
+        --#{$p}-danger:        var(--g-color-text-danger);
+        --#{$p}-warn:          var(--g-color-text-warning);
+        --#{$p}-ok:            var(--g-color-text-positive);
+        --#{$p}-r-sm:          4px;
+        --#{$p}-r-md:          6px;
+        --#{$p}-r-lg:          10px;
+        --#{$p}-r-xl:          14px;
+        --#{$p}-font-mono:     'JetBrains Mono', ui-monospace, monospace;
+        --#{$p}-font-ui:       'Inter', system-ui, sans-serif;
+    }
+
+    // Light-mode overrides — scoped so other pages are unaffected.
+    [data-theme="light"] {
+        .#{$p}-page,
+        .#{$p}-drawer,
+        .#{$p}-#{$card} {
+            --#{$p}-page-bg:  #FAF7F2;
+            --#{$p}-panel:    #FFFFFF;
+            --#{$p}-bg-2:     #F3EFE9;
+            --#{$p}-bg-3:     #EBE6DE;
+            --#{$p}-line:     rgba(80, 60, 30, 0.08);
+            --#{$p}-line-2:   rgba(80, 60, 30, 0.16);
+            --#{$p}-text:     #1A1410;
+            --#{$p}-text-2:   #5C4E3A;
+            --#{$p}-text-3:   #9C8B74;
+        }
+    }
+
+    // Neutral lane-editor var aliases consumed by shared lane-editor.scss.
+    .#{$p}-page {
+        --lane-bg-3:        var(--#{$p}-bg-3);
+        --lane-line-2:      var(--#{$p}-line-2);
+        --lane-text-2:      var(--#{$p}-text-2);
+        --lane-accent:      var(--#{$p}-accent);
+        --lane-accent-soft: var(--#{$p}-accent-soft);
+        --lane-r-sm:        var(--#{$p}-r-sm);
+    }
+}

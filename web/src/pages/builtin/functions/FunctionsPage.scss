@@ -1,64 +1,10 @@
 @use '../../../styles/variables' as *;
 @use '../../../styles/mixins' as *;
 @use '../_shared/lane-editor/lane-editor';
+@use '../_shared/lane-editor/palette' as palette;
 
-// Design tokens scoped to this page — warm dark-brown palette.
-// All fn-* tokens are overridden here so other pages stay Gravity-default.
-// Light-mode overrides are provided under [data-theme="light"] .fn-page.
-.fn-page,
-.fn-drawer,
-.fn-function-card {
-    // Dark-mode warm-brown palette (default — app is locked to dark).
-    --fn-page-bg:       #15110D;
-    --fn-panel:         #1C1814;
-    --fn-bg-2:          #181410;
-    --fn-bg-3:          #221C16;
-    --fn-line:          rgba(255, 199, 140, 0.02);
-    --fn-line-2:        rgba(255, 200, 140, 0.12);
-    --fn-text:          #F2EEE8;
-    --fn-text-2:        #B8B0A4;
-    --fn-text-3:        #7E7468;
-    --fn-accent:        #FFC061;
-    --fn-accent-soft:   rgba(255, 192, 97, 0.14);
-    --fn-accent-strong: #FFC061;
-    --fn-danger:        var(--g-color-text-danger);
-    --fn-warn:          var(--g-color-text-warning);
-    --fn-ok:            var(--g-color-text-positive);
-    --fn-r-sm:          4px;
-    --fn-r-md:          6px;
-    --fn-r-lg:          10px;
-    --fn-r-xl:          14px;
-    --fn-font-mono:     'JetBrains Mono', ui-monospace, monospace;
-    --fn-font-ui:       'Inter', system-ui, sans-serif;
-}
-
-// Light-mode overrides — scoped to .fn-page so other pages are unaffected.
-[data-theme="light"] {
-    .fn-page,
-    .fn-drawer,
-    .fn-function-card {
-        --fn-page-bg:  #FAF7F2;
-        --fn-panel:    #FFFFFF;
-        --fn-bg-2:     #F3EFE9;
-        --fn-bg-3:     #EBE6DE;
-        --fn-line:     rgba(80, 60, 30, 0.08);
-        --fn-line-2:   rgba(80, 60, 30, 0.16);
-        --fn-text:     #1A1410;
-        --fn-text-2:   #5C4E3A;
-        --fn-text-3:   #9C8B74;
-    }
-}
-
-// ─── Neutral lane-editor var aliases (consumed by shared lane-editor.scss) ────
-
-.fn-page {
-    --lane-bg-3:        var(--fn-bg-3);
-    --lane-line-2:      var(--fn-line-2);
-    --lane-text-2:      var(--fn-text-2);
-    --lane-accent:      var(--fn-accent);
-    --lane-accent-soft: var(--fn-accent-soft);
-    --lane-r-sm:        var(--fn-r-sm);
-}
+// Design tokens — warm dark-brown palette scoped to this page.
+@include palette.lane-page-palette('fn', 'function-card');
 
 // ─── Page container ───────────────────────────────────────────────────────────
 

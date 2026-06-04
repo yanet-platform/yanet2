@@ -1,64 +1,10 @@
 @use '../../../styles/variables' as *;
 @use '../../../styles/mixins' as *;
 @use '../_shared/lane-editor/lane-editor';
+@use '../_shared/lane-editor/palette' as palette;
 
-// Design tokens scoped to this page — warm dark-brown palette.
-// All pl-* tokens are overridden here so other pages stay Gravity-default.
-// Light-mode overrides are provided under [data-theme="light"] .pl-page.
-.pl-page,
-.pl-drawer,
-.pl-pipeline-card {
-    // Dark-mode warm-brown palette (default — app is locked to dark).
-    --pl-page-bg:       #15110D;
-    --pl-panel:         #1C1814;
-    --pl-bg-2:          #181410;
-    --pl-bg-3:          #221C16;
-    --pl-line:          rgba(255, 199, 140, 0.02);
-    --pl-line-2:        rgba(255, 200, 140, 0.12);
-    --pl-text:          #F2EEE8;
-    --pl-text-2:        #B8B0A4;
-    --pl-text-3:        #7E7468;
-    --pl-accent:        #FFC061;
-    --pl-accent-soft:   rgba(255, 192, 97, 0.14);
-    --pl-accent-strong: #FFC061;
-    --pl-danger:        var(--g-color-text-danger);
-    --pl-warn:          var(--g-color-text-warning);
-    --pl-ok:            var(--g-color-text-positive);
-    --pl-r-sm:          4px;
-    --pl-r-md:          6px;
-    --pl-r-lg:          10px;
-    --pl-r-xl:          14px;
-    --pl-font-mono:     'JetBrains Mono', ui-monospace, monospace;
-    --pl-font-ui:       'Inter', system-ui, sans-serif;
-}
-
-// Light-mode overrides — scoped to .pl-page so other pages are unaffected.
-[data-theme="light"] {
-    .pl-page,
-    .pl-drawer,
-    .pl-pipeline-card {
-        --pl-page-bg:  #FAF7F2;
-        --pl-panel:    #FFFFFF;
-        --pl-bg-2:     #F3EFE9;
-        --pl-bg-3:     #EBE6DE;
-        --pl-line:     rgba(80, 60, 30, 0.08);
-        --pl-line-2:   rgba(80, 60, 30, 0.16);
-        --pl-text:     #1A1410;
-        --pl-text-2:   #5C4E3A;
-        --pl-text-3:   #9C8B74;
-    }
-}
-
-// ─── Neutral lane-editor var aliases (consumed by shared lane-editor.scss) ────
-
-.pl-page {
-    --lane-bg-3:        var(--pl-bg-3);
-    --lane-line-2:      var(--pl-line-2);
-    --lane-text-2:      var(--pl-text-2);
-    --lane-accent:      var(--pl-accent);
-    --lane-accent-soft: var(--pl-accent-soft);
-    --lane-r-sm:        var(--pl-r-sm);
-}
+// Design tokens — warm dark-brown palette scoped to this page.
+@include palette.lane-page-palette('pl', 'pipeline-card');
 
 // ─── Page container ───────────────────────────────────────────────────────────
 
