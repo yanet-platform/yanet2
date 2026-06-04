@@ -1,3 +1,7 @@
+/** Compare two strings with natural (numeric-aware, case-insensitive) ordering. */
+export const compareNatural = (a: string, b: string): number =>
+    a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+
 type NullableString = string | null | undefined;
 type NullableNumber = number | null | undefined;
 type NullableBoolean = boolean | null | undefined;

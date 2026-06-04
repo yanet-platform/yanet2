@@ -22,7 +22,7 @@ import { useContainerHeight } from '../../../hooks';
 import { useUnsavedChangesBlocker } from '../../builtin/_shared/lane-editor';
 import { ipAddressToString, isValidIPAddress, parseIPToBytes, stringToIPAddress, type IPAddressWire } from '../../../utils/netip';
 import { parseMACToBytes } from '../../../utils/mac';
-import { formatBytes, toaster } from '../../../utils';
+import { formatBytes, toaster, compareNatural } from '../../../utils';
 import { AddConfigModal } from '../../_shared/draft';
 import { DeleteConfigModal, CommandPaletteHeader } from '../../../components';
 import { SaveIcon, TrashIcon } from '../../_shared/draft/DraftActionButtons';
@@ -1087,7 +1087,7 @@ const FWStatePage: React.FC = () => {
     const dirtyConfigsRef = useRef(dirtyConfigs);
     const statsRequestIdRef = useRef(0);
 
-    const configNames = useMemo(() => Object.keys(configs).sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' })), [configs]);
+    const configNames = useMemo(() => Object.keys(configs).sort((a, b) => compareNatural(a, b)), [configs]);
     const queryConfig = useMemo(() => searchParams.get(QP_CONFIG), [searchParams]);
     const currentName = useMemo(() => {
         if (queryConfig && (loading || configNames.includes(queryConfig))) {

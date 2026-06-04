@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { API } from '../../../api';
-import { toaster } from '../../../utils';
+import { toaster, compareNatural } from '../../../utils';
 import type { Route } from '../../../api/routes';
 
 export interface UseRIBResult {
@@ -15,7 +15,7 @@ export interface UseRIBResult {
 }
 
 const sortConfigs = (a: string, b: string): number =>
-    a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+    compareNatural(a, b);
 
 /** Loads route configs and their routes from the operator backend. */
 export const useRIB = (): UseRIBResult => {

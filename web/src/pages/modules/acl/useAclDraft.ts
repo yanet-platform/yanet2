@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useReducer, useState } from 'react';
 import { API } from '../../../api';
-import { toaster } from '../../../utils';
+import { toaster, compareNatural } from '../../../utils';
 import type { Rule } from '../../../api/acl';
 import {
     aclDraftReducer,
@@ -135,7 +135,7 @@ export const useAclDraft = (): UseAclDraftResult => {
     const draftConfigs = [
         ...state.serverConfigs.filter(n => !state.pendingDeleteConfigs.has(n)),
         ...state.localOnlyConfigs,
-    ].sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+    ].sort((a, b) => compareNatural(a, b));
 
     const anyDirty = state.dirty.size > 0;
 
