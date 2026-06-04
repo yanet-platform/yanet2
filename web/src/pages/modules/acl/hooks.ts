@@ -1,6 +1,6 @@
 import type { Rule, PortRange, VlanRange, ProtoRange, Action } from '../../../api/acl';
 import { ActionKind } from '../../../api/acl';
-import { formatIPNet, extractBytes } from '../../../utils';
+import { extractBytes, formatIPNetItem } from '../../../utils';
 import type { RuleDraft, RuleItem } from './types';
 import { parseCidrsToIPNets, parseRangesRaw, parseProtoRangesRaw } from './parseHelpers';
 export { parseCidrsToIPNets, parseRangesRaw, parseProtoRangesRaw } from './parseHelpers';
@@ -14,14 +14,6 @@ export { parseCidrsToIPNets, parseRangesRaw, parseProtoRangesRaw } from './parse
  */
 export const normalizeActionKind = (kind: ActionKind | undefined): ActionKind =>
     kind ?? ActionKind.ACTION_KIND_PASS;
-
-/** Format a single IPNet (base64 bytes) to a CIDR string. */
-const formatIPNetItem = (net: { addr?: string | Uint8Array | number[]; mask?: string | Uint8Array | number[] }): string => {
-    const addrBytes = extractBytes(net.addr);
-    const maskBytes = extractBytes(net.mask);
-    if (!addrBytes || addrBytes.length === 0) return '';
-    return formatIPNet(addrBytes, maskBytes);
-};
 
 /** Format a PortRange or ProtoRange {from, to} to a string like "80" or "80-90". */
 const formatRange = (r: { from?: number; to?: number }): string => {

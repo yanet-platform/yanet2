@@ -1,3 +1,5 @@
+import { extractBytes } from './bytes';
+
 // Result types for error handling
 export type Ok<T> = { ok: true; value: T };
 export type Err<E> = { ok: false; error: E };
@@ -673,6 +675,18 @@ export const formatIPNet = (
         const maskStr = formatIPFromBytes(maskBytes);
         return `${ipStr}/${maskStr}`;
     }
+};
+
+/** Format a wire IPNet ({addr, mask} as base64/bytes) to a CIDR string. */
+export const formatIPNetItem = (
+    net: { addr?: string | Uint8Array | number[]; mask?: string | Uint8Array | number[] },
+): string => {
+    const addrBytes = extractBytes(net.addr);
+    const maskBytes = extractBytes(net.mask);
+    if (!addrBytes || addrBytes.length === 0) {
+        return '';
+    }
+    return formatIPNet(addrBytes, maskBytes);
 };
 
 // Wire-format shape of commonpb.IPAddress as it arrives from the

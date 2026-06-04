@@ -1,15 +1,7 @@
 import type { Rule, IPNet, VlanRange } from '../../../api/forward';
 import { ForwardMode } from '../../../api/forward';
-import { formatIPNet, parseIPToBytes, prefixLengthToMaskBytes, bytesToBase64, extractBytes } from '../../../utils';
+import { parseIPToBytes, prefixLengthToMaskBytes, bytesToBase64, formatIPNetItem } from '../../../utils';
 import type { RuleItem, RuleDraft } from './types';
-
-/** Format an IPNet to a CIDR string. */
-const formatIPNetItem = (net: IPNet): string => {
-    const addrBytes = extractBytes(net.addr);
-    const maskBytes = extractBytes(net.mask);
-    if (!addrBytes || addrBytes.length === 0) return '';
-    return formatIPNet(addrBytes, maskBytes);
-};
 
 /** Format VlanRange array to a display string. */
 const formatVlanRanges = (ranges: VlanRange[] | undefined): string => {

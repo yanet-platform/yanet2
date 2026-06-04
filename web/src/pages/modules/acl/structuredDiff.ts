@@ -1,13 +1,5 @@
 import type { Rule, Action } from '../../../api/acl';
-import { formatIPNet, extractBytes } from '../../../utils';
-
-/** Format an IPNet wire object to a CIDR string for comparison purposes. */
-const fmtIPNet = (net: { addr?: string | Uint8Array | number[]; mask?: string | Uint8Array | number[] }): string => {
-    const addrBytes = extractBytes(net.addr);
-    const maskBytes = extractBytes(net.mask);
-    if (!addrBytes || addrBytes.length === 0) return '';
-    return formatIPNet(addrBytes, maskBytes);
-};
+import { formatIPNetItem } from '../../../utils';
 
 /** Serialize a range {from, to} to a canonical string for equality comparison. */
 const fmtRange = (r: { from?: number; to?: number }): string =>
@@ -61,9 +53,9 @@ const fieldValues = (rule: Rule, field: RuleField): string[] => {
         case 'counter':
             return [rule.counter ?? ''];
         case 'srcs':
-            return (rule.srcs ?? []).map(fmtIPNet).filter(Boolean);
+            return (rule.srcs ?? []).map(formatIPNetItem).filter(Boolean);
         case 'dsts':
-            return (rule.dsts ?? []).map(fmtIPNet).filter(Boolean);
+            return (rule.dsts ?? []).map(formatIPNetItem).filter(Boolean);
         case 'src_port_ranges':
             return (rule.src_port_ranges ?? []).map(fmtRange);
         case 'dst_port_ranges':
