@@ -3,7 +3,7 @@ syntax = "proto3";
 package modules.route_mpls.controlplane.routemplspb.v1;
 
 import "common/commonpb/v1/ipaddr.proto";
-import "common/filterpb/filter.proto";
+import "common/filterpb/v1/filter.proto";
 
 option go_package = "github.com/yanet-platform/yanet2/modules/route-mpls/controlplane/routemplspb/v1;routemplspb";
 
@@ -50,7 +50,7 @@ message ShowConfigResponse {
 }
 
 message Rule {
-  filterpb.IPPrefix prefix = 1;
+  common.filterpb.v1.IPPrefix prefix = 1;
   NextHop nexthop = 2;
 }
 

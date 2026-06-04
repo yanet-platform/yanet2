@@ -1,8 +1,8 @@
 syntax = "proto3";
 
-package filterpb;
+package common.filterpb.v1;
 
-option go_package = "github.com/yanet-platform/yanet2/common/filterpb;filterpb";
+option go_package = "github.com/yanet-platform/yanet2/common/filterpb/v1;filterpb";
 
 message Device { string name = 1; }
 

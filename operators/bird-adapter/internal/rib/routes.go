@@ -5,7 +5,7 @@ import (
 	"net/netip"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
-	"github.com/yanet-platform/yanet2/common/filterpb"
+	filterpb "github.com/yanet-platform/yanet2/common/filterpb/v1"
 	"github.com/yanet-platform/yanet2/modules/route-mpls/controlplane/routemplspb/v1"
 	routepb "github.com/yanet-platform/yanet2/operators/route/operatorpb/v1"
 )

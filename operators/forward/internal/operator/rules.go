@@ -8,7 +8,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/yanet-platform/yanet2/common/filterpb"
+	filterpb "github.com/yanet-platform/yanet2/common/filterpb/v1"
 	forwardpb "github.com/yanet-platform/yanet2/modules/forward/controlplane/forwardpb/v1"
 )
 

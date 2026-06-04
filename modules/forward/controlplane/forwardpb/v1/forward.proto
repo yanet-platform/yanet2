@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package modules.forward.controlplane.forwardpb.v1;
 
-import "common/filterpb/filter.proto";
+import "common/filterpb/v1/filter.proto";
 
 option go_package = "github.com/yanet-platform/yanet2/modules/forward/controlplane/forwardpb/v1;forwardpb";
 
@@ -50,10 +50,10 @@ enum ForwardMode {
 message Rule {
   Action action = 1;
 
-  repeated filterpb.Device devices = 2;
-  repeated filterpb.VlanRange vlan_ranges = 3;
-  repeated filterpb.IPNet srcs = 4;
-  repeated filterpb.IPNet dsts = 5;
+  repeated common.filterpb.v1.Device devices = 2;
+  repeated common.filterpb.v1.VlanRange vlan_ranges = 3;
+  repeated common.filterpb.v1.IPNet srcs = 4;
+  repeated common.filterpb.v1.IPNet dsts = 5;
 }
 
 message Action {

@@ -7,13 +7,13 @@ pub fn main() -> Result<(), Box<dyn Error>> {
     tonic_build::configure()
         .emit_rerun_if_changed(false)
         .build_server(false)
-        .message_attribute(".filterpb.IPPrefix", serialize)
-        .message_attribute(".filterpb.Device", serialize_deserialize)
-        .message_attribute(".filterpb.PortRange", serialize_deserialize)
-        .message_attribute(".filterpb.ProtoRange", serialize_deserialize)
-        .message_attribute(".filterpb.VlanRange", serialize_deserialize)
-        .message_attribute(".filterpb.Fragment", serialize_deserialize)
-        .compile_protos(&["common/filterpb/filter.proto"], &["../../.."])?;
+        .message_attribute(".common.filterpb.v1.IPPrefix", serialize)
+        .message_attribute(".common.filterpb.v1.Device", serialize_deserialize)
+        .message_attribute(".common.filterpb.v1.PortRange", serialize_deserialize)
+        .message_attribute(".common.filterpb.v1.ProtoRange", serialize_deserialize)
+        .message_attribute(".common.filterpb.v1.VlanRange", serialize_deserialize)
+        .message_attribute(".common.filterpb.v1.Fragment", serialize_deserialize)
+        .compile_protos(&["common/filterpb/v1/filter.proto"], &["../../.."])?;
 
     Ok(())
 }

@@ -7,7 +7,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
         .emit_rerun_if_changed(false)
         .build_server(false)
         .extern_path(".common.commonpb.v1", "::commonpb::pb")
-        .extern_path(".filterpb", "::filterpb::pb")
+        .extern_path(".common.filterpb.v1", "::filterpb::pb")
         .message_attribute(
             ".modules.acl.controlplane.aclpb.v1.Rule",
             "#[derive(serde::Serialize, serde::Deserialize)] #[serde(default)]",

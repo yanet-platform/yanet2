@@ -10,7 +10,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
         .emit_rerun_if_changed(false)
         .build_server(false)
         .protoc_arg("--experimental_allow_proto3_optional")
-        .extern_path(".filterpb", "::filterpb::pb")
+        .extern_path(".common.filterpb.v1", "::filterpb::pb")
         .extern_path(".common.commonpb.v1", "::commonpb::pb")
         .message_attribute(".", "#[derive(serde::Serialize)]")
         .enum_attribute(".", "#[derive(serde::Serialize)]")

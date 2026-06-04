@@ -6,7 +6,7 @@ use core::{error::Error, net::IpAddr, ops::Deref};
 pub mod filterpb {
     use serde::Serialize;
 
-    tonic::include_proto!("filterpb");
+    tonic::include_proto!("common.filterpb.v1");
 }
 
 #[allow(non_snake_case)]

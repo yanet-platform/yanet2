@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	"github.com/yanet-platform/yanet2/bindings/go/filter"
-	"github.com/yanet-platform/yanet2/common/filterpb"
+	filterpb "github.com/yanet-platform/yanet2/common/filterpb/v1"
 	"github.com/yanet-platform/yanet2/modules/acl/bindings/go/cacl"
 )
 
