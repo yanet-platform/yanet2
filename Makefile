@@ -62,6 +62,7 @@ CLI_RELEASE_BINARIES := $(addprefix $(RELEASE_DIR)/,$(CLI_BINARIES))
 	clean \
 	go-cache-clean \
 	proto-lint \
+	proto-breaking \
 	test \
 	test-asan \
 	test-tsan \
@@ -86,6 +87,13 @@ proto-lint:
 	fi
 	go test ./lint/protobuf/cmd/protolint/
 	go run ./lint/protobuf/cmd/protolint/ --exclude subprojects
+
+proto-breaking:
+	@if command -v buf >/dev/null 2>&1; then \
+		buf breaking --against ".git#branch=main"; \
+	else \
+		echo "WARN: 'buf' not found, skipping buf breaking (install: https://buf.build/docs/installation)"; \
+	fi
 
 go-cache-clean:
 	go clean -cache

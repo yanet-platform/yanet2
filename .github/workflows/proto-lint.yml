@@ -6,11 +6,13 @@ on:
       - '**/*.proto'
       - 'lint/protobuf/**'
       - 'buf.yaml'
+      - '.github/workflows/proto-lint.yml'
   pull_request:
     paths:
       - '**/*.proto'
       - 'lint/protobuf/**'
       - 'buf.yaml'
+      - '.github/workflows/proto-lint.yml'
 
 jobs:
   buf-lint:
@@ -25,6 +27,20 @@ jobs:
 
       - name: Run buf lint
         run: buf lint
+
+  buf-breaking:
+    name: Buf breaking
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: bufbuild/buf-action@v1
+        with:
+          setup_only: true
+
+      - name: Run buf breaking
+        run: buf breaking --against "https://github.com/${{ github.repository }}.git#branch=main"
 
   protolint:
     name: Custom protolint linter

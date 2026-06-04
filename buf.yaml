@@ -23,3 +23,5 @@ lint:
 breaking:
   use:
     - PACKAGE
+  ignore:
+    - modules/balancer2
