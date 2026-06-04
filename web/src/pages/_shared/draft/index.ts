@@ -13,3 +13,4 @@ export { useDraftPageHandlers } from './useDraftPageHandlers';
 export type { UseDraftPageHandlersResult } from './useDraftPageHandlers';
 export { rowHasError, countInvalidRows } from './validation';
 export { dumpYamlDoc, parseYamlList } from './yaml';
+export { DRAWER_TRANSITION_MS } from './constants';

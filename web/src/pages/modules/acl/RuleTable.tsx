@@ -17,8 +17,6 @@ import type { RuleRate } from './useAclRuleCounters';
 import Sparkline from '../_shared/Sparkline';
 import { VirtualTable, type Column } from '../../../components/VirtualTable';
 
-export const DRAWER_TRANSITION_MS = 220;
-
 const COLUMN_WIDTHS = {
     srcs: 180,
     dsts: 180,

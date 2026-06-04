@@ -8,10 +8,6 @@ import { formatPps } from '../../../utils';
 import { DraftActionButtons } from '../../_shared/draft';
 import { VirtualTable, type Column } from '../../../components/VirtualTable';
 
-/** Duration in ms of the CSS transition on .yn-drawer — keep in sync with SCSS. */
-const DRAWER_TRANSITION_MS = 220;
-export { DRAWER_TRANSITION_MS };
-
 /** Compact mono list of values with overflow truncation. */
 const ValueCell: React.FC<{ values: string[] }> = ({ values }) => {
     if (values.length === 0) return null;
