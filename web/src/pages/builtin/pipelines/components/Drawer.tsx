@@ -1,8 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import type { FunctionRef } from '../types';
-import { Sparkline, useSparklineHistory, LaneDrawerShell, DrawerBigStat, DrawerAction } from '../../_shared/lane-editor';
+import { useSparklineHistory, LaneDrawerShell, DrawerAction, DrawerCounterSection } from '../../_shared/lane-editor';
 import { CloseIcon, TrashIcon } from '../../_shared/icons';
-import { formatPps, formatBps } from '../../../../utils';
 import { ConfirmDialog } from '../../../../components';
 import type { InterpolatedCounterData } from '../../../../hooks';
 import type { FunctionId } from '../../../../api/pipelines';
@@ -73,26 +72,7 @@ export const Drawer: React.FC<DrawerProps> = ({
                 </button>
             </div>
 
-            <div className="pl-drawer__section">
-                <div className="pl-drawer__section-label">Live counters</div>
-                <div className="pl-drawer__counters-grid">
-                    <DrawerBigStat prefix="pl" label="PPS" value={counter ? formatPps(counter.pps) : '—'} accent={accent} />
-                    <DrawerBigStat prefix="pl" label="BPS" value={counter ? formatBps(counter.bps) : '—'} />
-                </div>
-                {sparklineData.length >= 4 && (
-                    <div>
-                        <div className="pl-drawer__sparkline-label">pps · last {sparklineData.length} samples</div>
-                        <div className="pl-drawer__sparkline">
-                            <Sparkline
-                                data={sparklineData}
-                                width={364}
-                                height={48}
-                                color={accent}
-                            />
-                        </div>
-                    </div>
-                )}
-            </div>
+            <DrawerCounterSection prefix="pl" counter={counter} accent={accent} sparklineData={sparklineData} />
 
             <div className="pl-drawer__section">
                 <div className="pl-drawer__section-label">Configuration</div>

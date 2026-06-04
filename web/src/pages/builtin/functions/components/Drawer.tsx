@@ -2,9 +2,8 @@ import React, { useCallback } from 'react';
 import type { Module, Chain } from '../types';
 import { metaFor } from '../moduleMeta';
 import { InlineEdit } from './InlineEdit';
-import { Sparkline, useSparklineHistory, LaneDrawerShell, DrawerBigStat, DrawerAction } from '../../_shared/lane-editor';
+import { useSparklineHistory, LaneDrawerShell, DrawerAction, DrawerCounterSection } from '../../_shared/lane-editor';
 import { CloseIcon, TrashIcon } from '../../_shared/icons';
-import { formatPps, formatBps } from '../../../../utils';
 import { ConfirmDialog } from '../../../../components';
 import type { InterpolatedCounterData } from '../../../../hooks';
 
@@ -105,26 +104,7 @@ const ModuleDrawerContent = ({
                 </button>
             </div>
 
-            <div className="fn-drawer__section">
-                <div className="fn-drawer__section-label">Live counters</div>
-                <div className="fn-drawer__counters-grid">
-                    <DrawerBigStat prefix="fn" label="PPS" value={counter ? formatPps(counter.pps) : '—'} accent={accent} />
-                    <DrawerBigStat prefix="fn" label="BPS" value={counter ? formatBps(counter.bps) : '—'} />
-                </div>
-                {sparklineData.length >= 4 && (
-                    <div>
-                        <div className="fn-drawer__sparkline-label">pps · last {sparklineData.length} samples</div>
-                        <div className="fn-drawer__sparkline">
-                            <Sparkline
-                                data={sparklineData}
-                                width={364}
-                                height={48}
-                                color={accent}
-                            />
-                        </div>
-                    </div>
-                )}
-            </div>
+            <DrawerCounterSection prefix="fn" counter={counter} accent={accent} sparklineData={sparklineData} />
 
             <div className="fn-drawer__section">
                 <div className="fn-drawer__section-label">Configuration</div>

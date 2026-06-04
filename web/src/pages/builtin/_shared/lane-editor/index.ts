@@ -13,4 +13,5 @@ export { LaneCardActions } from './LaneCardActions';
 export { LaneCollapseButton } from './LaneCollapseButton';
 export { LaneDrawerShell } from './LaneDrawerShell';
 export { DrawerBigStat } from './DrawerBigStat';
+export { DrawerCounterSection } from './DrawerCounterSection';
 export { DrawerAction } from './DrawerAction';

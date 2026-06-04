@@ -1,7 +1,7 @@
 import React from 'react';
 
 interface DrawerBigStatProps {
-    prefix: 'fn' | 'pl';
+    prefix: string;
     label: string;
     value: string;
     accent?: string;
