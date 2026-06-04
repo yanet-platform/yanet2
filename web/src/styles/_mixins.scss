@@ -91,6 +91,35 @@
     }
 }
 
+/** Emit the shared protocol-chip color tones for a given chip base selector. */
+@mixin proto-chip-tones($base) {
+    #{$base}--proto-tcp {
+        background: color-mix(in srgb, var(--g-color-base-positive-light) 55%, transparent);
+        color: var(--g-color-text-positive);
+        border-color: color-mix(in srgb, var(--g-color-base-positive-medium) 40%, transparent);
+    }
+    #{$base}--proto-udp {
+        background: color-mix(in srgb, var(--g-color-base-info-light) 55%, transparent);
+        color: var(--g-color-text-info);
+        border-color: color-mix(in srgb, var(--g-color-base-info-medium) 40%, transparent);
+    }
+    #{$base}--proto-icmp {
+        background: color-mix(in srgb, var(--g-color-base-warning-light) 55%, transparent);
+        color: var(--g-color-text-warning);
+        border-color: color-mix(in srgb, var(--g-color-base-warning-medium) 40%, transparent);
+    }
+    #{$base}--proto-misc {
+        background: color-mix(in srgb, var(--g-color-base-misc-light) 55%, transparent);
+        color: var(--g-color-text-misc);
+        border-color: color-mix(in srgb, var(--g-color-base-misc-medium) 40%, transparent);
+    }
+    #{$base}--proto-dim {
+        background: var(--yn-bg-2);
+        color: var(--yn-text-3);
+        border-color: var(--yn-line-2);
+    }
+}
+
 /** Side-by-side diff dialog chrome — shared by fn-diff-dialog and pl-diff-dialog. */
 @mixin diff-dialog($page-bg, $line) {
     // Override Gravity's size="l" to be wide enough for side-by-side split view.

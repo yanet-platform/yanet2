@@ -116,39 +116,9 @@
         border-color: var(--yn-line-2);
     }
 
-    // Proto chips by tone.
-    &--proto {
-        &-tcp {
-            background: color-mix(in srgb, var(--g-color-base-positive-light) 55%, transparent);
-            color: var(--g-color-text-positive);
-            border-color: color-mix(in srgb, var(--g-color-base-positive-medium) 40%, transparent);
-        }
-
-        &-udp {
-            background: color-mix(in srgb, var(--g-color-base-info-light) 55%, transparent);
-            color: var(--g-color-text-info);
-            border-color: color-mix(in srgb, var(--g-color-base-info-medium) 40%, transparent);
-        }
-
-        &-icmp {
-            background: color-mix(in srgb, var(--g-color-base-warning-light) 55%, transparent);
-            color: var(--g-color-text-warning);
-            border-color: color-mix(in srgb, var(--g-color-base-warning-medium) 40%, transparent);
-        }
-
-        &-misc {
-            background: color-mix(in srgb, var(--g-color-base-misc-light) 55%, transparent);
-            color: var(--g-color-text-misc);
-            border-color: color-mix(in srgb, var(--g-color-base-misc-medium) 40%, transparent);
-        }
-
-        &-dim {
-            background: var(--yn-bg-2);
-            color: var(--yn-text-3);
-            border-color: var(--yn-line-2);
-        }
-    }
 }
+
+@include proto-chip-tones('.acl-chip');
 
 // Action chain in table cells.
 .acl-action-chain {
