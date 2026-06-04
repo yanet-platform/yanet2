@@ -19,26 +19,7 @@
     min-height: 0;
 
     .iv-scroll {
-        scrollbar-width: thin;
-        scrollbar-color: var(--iv-border-strong) transparent;
-
-        &::-webkit-scrollbar {
-            width: 6px;
-            height: 6px;
-        }
-
-        &::-webkit-scrollbar-track {
-            background: transparent;
-        }
-
-        &::-webkit-scrollbar-thumb {
-            background: var(--iv-border-strong);
-            border-radius: 3px;
-        }
-
-        &::-webkit-scrollbar-thumb:hover {
-            background: var(--iv-accent-line);
-        }
+        @include iv-thin-scrollbar(3px);
     }
 
     .iv-instance {

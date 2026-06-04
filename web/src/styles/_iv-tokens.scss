@@ -44,3 +44,28 @@
     font-size: 10px;
     letter-spacing: 1.6px;
 }
+
+@mixin iv-thin-scrollbar($thumb-radius: null) {
+    scrollbar-width: thin;
+    scrollbar-color: var(--iv-border-strong) transparent;
+
+    &::-webkit-scrollbar {
+        width: 6px;
+        height: 6px;
+    }
+
+    &::-webkit-scrollbar-track {
+        background: transparent;
+    }
+
+    &::-webkit-scrollbar-thumb {
+        background: var(--iv-border-strong);
+        @if $thumb-radius != null {
+            border-radius: $thumb-radius;
+        }
+    }
+
+    &::-webkit-scrollbar-thumb:hover {
+        background: var(--iv-accent-line);
+    }
+}
