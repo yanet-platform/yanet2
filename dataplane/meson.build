@@ -18,6 +18,7 @@ lib_sources = files(
   'dataplane.c',
   'device.c',
   'worker.c',
+  'numa.c',
 )
 
 lib_dataplane = static_library(

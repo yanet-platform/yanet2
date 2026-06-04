@@ -1,9 +1,7 @@
 #include "dataplane.h"
 
 #include "config.h"
-#include "logging/log.h"
-
-#include <stdint.h>
+#include "numa.h"
 
 #include <dlfcn.h>
 #include <pthread.h>
@@ -14,7 +12,6 @@
 #include "dpdk.h"
 
 #include "common/data_pipe.h"
-#include "common/exp_array.h"
 #include "common/strutils.h"
 
 #include "common/hugepages.h"
@@ -33,12 +30,12 @@
 #include "lib/dataplane/config/topology.h"
 #include "lib/dataplane/packet/data.h"
 #include "lib/dataplane/packet/packet.h"
-#include "lib/errors/errors.h"
+#include "lib/logging/log.h"
 
 #include <unistd.h>
 
-#include "sys/mman.h"
 #include <fcntl.h>
+#include <sys/mman.h>
 
 static int
 dataplane_worker_connect(
@@ -293,7 +290,15 @@ dataplane_init(
 		close(mem_fd);
 		return -1;
 	}
+
+	long page_size = file_page_size(mem_fd);
 	close(mem_fd);
+	if (page_size <= 0) {
+		LOG(ERROR, "failed to get storage page size");
+		return -1;
+	}
+
+	assert((uintptr_t)storage % page_size == 0);
 
 	off_t instance_offset = 0;
 	for (uint32_t instance_idx = 0;
@@ -304,8 +309,36 @@ dataplane_init(
 		struct dataplane_instance_config *instance_config =
 			config->instances + instance_idx;
 
+		size_t instance_size =
+			instance_config->dp_memory + instance_config->cp_memory;
+		if (instance_size == 0 || instance_size % page_size != 0) {
+			LOG(ERROR,
+			    "instance size must be positive and divisible by "
+			    "page size");
+			return -1;
+		}
+
 		LOG(INFO, "initialize storage for instance %u", instance_idx);
-		int rc = dp_storage_init(
+
+		yanet_error *err = NULL;
+		int rc = allocate_pages_on_numa(
+			storage + instance_offset,
+			instance_size,
+			instance_config->numa_idx,
+			page_size,
+			&err
+		);
+		if (rc != 0) {
+			LOG(ERROR,
+			    "failed to allocate instance %u on numa %u: %s",
+			    instance_idx,
+			    instance_config->numa_idx,
+			    yanet_error_message(err));
+			yanet_error_free(err);
+			return -1;
+		}
+
+		rc = dp_storage_init(
 			instance_config->numa_idx,
 			instance_idx,
 			storage + instance_offset,
@@ -389,7 +422,6 @@ dataplane_init(
 			}
 		}
 
-		yanet_error *err = NULL;
 		struct cp_config_gen *cp_config_gen =
 			cp_config_gen_create(agent, &err);
 		if (cp_config_gen == NULL) {
@@ -403,8 +435,7 @@ dataplane_init(
 			&instance->cp_config->cp_config_gen, cp_config_gen
 		);
 
-		instance_offset +=
-			instance_config->dp_memory + instance_config->cp_memory;
+		instance_offset += instance_size;
 	}
 
 	size_t pci_port_count = 0;

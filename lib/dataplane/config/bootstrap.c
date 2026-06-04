@@ -15,8 +15,6 @@ dp_storage_init(
 	struct dp_config **res_dp_config,
 	struct cp_config **res_cp_config
 ) {
-	// TODO: move pages to requested numa node
-
 	struct dp_config *dp_config = (struct dp_config *)storage;
 
 	dp_config->numa_idx = numa_idx;
