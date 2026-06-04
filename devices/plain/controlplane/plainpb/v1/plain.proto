@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package devices.plain.controlplane.plainpb.v1;
 
-import "common/commonpb/target.proto";
+import "common/commonpb/v1/target.proto";
 
 option go_package = "github.com/yanet-platform/yanet2/devices/plain/controlplane/plainpb/v1;plainpb";
 
@@ -10,7 +10,7 @@ service DevicePlainService { rpc UpdateDevice(UpdateDevicePlainRequest) returns 
 
 message UpdateDevicePlainRequest {
   string name = 1;
-  commonpb.Device device = 2;
+  common.commonpb.v1.Device device = 2;
 }
 
 message UpdateDevicePlainResponse { string error = 1; }

@@ -8,7 +8,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
 
     tonic_build::configure()
         .emit_rerun_if_changed(false)
-        .extern_path(".commonpb", "::commonpb::pb")
+        .extern_path(".common.commonpb.v1", "::commonpb::pb")
         .extern_path(".readinesspb", "::readinesspb::pb")
         .build_server(false)
         .message_attribute(".", "#[derive(serde::Serialize)]")

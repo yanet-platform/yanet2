@@ -4,8 +4,8 @@ package modules.route.controlplane.routepb.v1;
 
 option go_package = "github.com/yanet-platform/yanet2/modules/route/controlplane/routepb/v1;routepb";
 
-import "common/commonpb/iprange.proto";
-import "common/commonpb/macaddr.proto";
+import "common/commonpb/v1/iprange.proto";
+import "common/commonpb/v1/macaddr.proto";
 
 service RouteService {
   // ListConfigs returns all route module configurations known to the
@@ -62,10 +62,10 @@ message FIBEntry {
 
 // FIBNexthop represents a hardware-level nexthop in the FIB.
 //
-// Destination MAC (binary EUI-48 carried in commonpb.MACAddress).
+// Destination MAC (binary EUI-48 carried in common.commonpb.v1.MACAddress).
 message FIBNexthop {
-  commonpb.MACAddress dst_mac = 1;
-  commonpb.MACAddress src_mac = 2;
+  common.commonpb.v1.MACAddress dst_mac = 1;
+  common.commonpb.v1.MACAddress src_mac = 2;
   // Egress device name.
   string device = 3;
 }
@@ -74,9 +74,9 @@ message FIBNexthop {
 //
 // Carries the contiguous address range covered by one set of nexthops.
 // Used in ShowFIBResponse. UpdateFIBRequest still uses FIBEntry with a
-// CIDR string until a typed commonpb.IPPrefix lands.
+// CIDR string until a typed common.commonpb.v1.IPPrefix lands.
 message FIBRangeEntry {
-  commonpb.IPRange range = 1;
+  common.commonpb.v1.IPRange range = 1;
   repeated FIBNexthop nexthops = 2;
 }
 

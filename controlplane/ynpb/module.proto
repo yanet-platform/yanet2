@@ -4,7 +4,7 @@ package ynpb;
 
 option go_package = "github.com/yanet-platform/yanet2/controlplane/ynpb;ynpb";
 
-import "common/commonpb/target.proto";
+import "common/commonpb/v1/target.proto";
 
 // ModuleService provides methods to query control plane module configurations.
 //
@@ -29,5 +29,5 @@ message ListModulesRequest {}
 // ListModulesResponse contains the list of module configuration identifiers.
 message ListModulesResponse {
   // List of module identifiers.
-  repeated commonpb.ModuleId ids = 1;
+  repeated common.commonpb.v1.ModuleId ids = 1;
 }

@@ -1,10 +1,10 @@
 syntax = "proto3";
 
-package commonpb;
+package common.commonpb.v1;
 
-option go_package = "github.com/yanet-platform/yanet2/common/commonpb;commonpb";
+option go_package = "github.com/yanet-platform/yanet2/common/commonpb/v1;commonpb";
 
-import "common/commonpb/ipaddr.proto";
+import "common/commonpb/v1/ipaddr.proto";
 
 // IPRange represents an inclusive address range [start, end].
 //

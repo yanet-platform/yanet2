@@ -4,7 +4,7 @@ package ynpb;
 
 option go_package = "github.com/yanet-platform/yanet2/controlplane/ynpb;ynpb";
 
-import "common/commonpb/target.proto";
+import "common/commonpb/v1/target.proto";
 
 // FunctionService provides CRUD operations for packet processing functions.
 //
@@ -40,13 +40,13 @@ message ListFunctionsRequest {}
 // ListFunctionsResponse contains the list of function identifiers.
 message ListFunctionsResponse {
   // List of function identifiers currently configured in the dataplane.
-  repeated commonpb.FunctionId ids = 1;
+  repeated common.commonpb.v1.FunctionId ids = 1;
 }
 
 // GetFunctionRequest specifies which function to retrieve.
 message GetFunctionRequest {
   // Identifier of the function to retrieve.
-  commonpb.FunctionId id = 1;
+  common.commonpb.v1.FunctionId id = 1;
 }
 
 // GetFunctionResponse contains the requested function definition.
@@ -76,7 +76,7 @@ message UpdateFunctionResponse {}
 // than a chain with weight 1).
 message Function {
   // Unique identifier for this function.
-  commonpb.FunctionId id = 1;
+  common.commonpb.v1.FunctionId id = 1;
   // Weighted processing chains.
   //
   // At least one chain is required.
@@ -111,7 +111,7 @@ message Chain {
   // Ordered list of module configurations to apply.
   //
   // Packets are processed by each module in sequence from first to last.
-  repeated commonpb.ModuleId modules = 2;
+  repeated common.commonpb.v1.ModuleId modules = 2;
 }
 
 // DeleteFunctionRequest specifies which function to delete.
@@ -120,7 +120,7 @@ message DeleteFunctionRequest {
   //
   // The delete fails if the function is currently referenced by any
   // active pipeline.
-  commonpb.FunctionId id = 1;
+  common.commonpb.v1.FunctionId id = 1;
 }
 
 // DeleteFunctionResponse is returned after successful deletion.

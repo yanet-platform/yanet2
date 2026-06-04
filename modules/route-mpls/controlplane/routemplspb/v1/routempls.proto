@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package modules.route_mpls.controlplane.routemplspb.v1;
 
-import "common/commonpb/ipaddr.proto";
+import "common/commonpb/v1/ipaddr.proto";
 import "common/filterpb/filter.proto";
 
 option go_package = "github.com/yanet-platform/yanet2/modules/route-mpls/controlplane/routemplspb/v1;routemplspb";
@@ -57,8 +57,8 @@ message Rule {
 message NextHop {
   ActionKind kind = 1;
   uint32 label = 2;
-  commonpb.IPAddress source_ip = 3;      // host address
-  commonpb.IPAddress destination_ip = 4; // host address
+  common.commonpb.v1.IPAddress source_ip = 3;      // host address
+  common.commonpb.v1.IPAddress destination_ip = 4; // host address
   uint64 weight = 5;
   string counter = 6;
 }

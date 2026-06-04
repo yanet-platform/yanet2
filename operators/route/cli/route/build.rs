@@ -20,7 +20,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
             ".operators.route.operatorpb.v1.Route.peer",
             "#[serde(serialize_with = \"crate::serialize_ip_addr\")]",
         )
-        .extern_path(".commonpb", "::commonpb::pb")
+        .extern_path(".common.commonpb.v1", "::commonpb::pb")
         .extern_path(".readinesspb", "::readinesspb::pb")
         .compile_protos(
             &[

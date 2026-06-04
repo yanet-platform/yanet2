@@ -1,11 +1,11 @@
 use core::error::Error;
 
 pub fn main() -> Result<(), Box<dyn Error>> {
-    println!("cargo:rerun-if-changed=common/commonpb/target.proto");
-    println!("cargo:rerun-if-changed=common/commonpb/metric.proto");
-    println!("cargo:rerun-if-changed=common/commonpb/macaddr.proto");
-    println!("cargo:rerun-if-changed=common/commonpb/ipaddr.proto");
-    println!("cargo:rerun-if-changed=common/commonpb/iprange.proto");
+    println!("cargo:rerun-if-changed=common/commonpb/v1/target.proto");
+    println!("cargo:rerun-if-changed=common/commonpb/v1/metric.proto");
+    println!("cargo:rerun-if-changed=common/commonpb/v1/macaddr.proto");
+    println!("cargo:rerun-if-changed=common/commonpb/v1/ipaddr.proto");
+    println!("cargo:rerun-if-changed=common/commonpb/v1/iprange.proto");
 
     tonic_build::configure()
         .build_server(false)
@@ -13,11 +13,11 @@ pub fn main() -> Result<(), Box<dyn Error>> {
         .enum_attribute(".", "#[derive(serde::Serialize)]")
         .compile_protos(
             &[
-                "common/commonpb/target.proto",
-                "common/commonpb/metric.proto",
-                "common/commonpb/macaddr.proto",
-                "common/commonpb/ipaddr.proto",
-                "common/commonpb/iprange.proto",
+                "common/commonpb/v1/target.proto",
+                "common/commonpb/v1/metric.proto",
+                "common/commonpb/v1/macaddr.proto",
+                "common/commonpb/v1/ipaddr.proto",
+                "common/commonpb/v1/iprange.proto",
             ],
             &["../../.."],
         )?;

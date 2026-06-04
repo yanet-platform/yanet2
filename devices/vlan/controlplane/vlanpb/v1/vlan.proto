@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package devices.vlan.controlplane.vlanpb.v1;
 
-import "common/commonpb/target.proto";
+import "common/commonpb/v1/target.proto";
 
 option go_package = "github.com/yanet-platform/yanet2/devices/vlan/controlplane/vlanpb/v1;vlanpb";
 
@@ -10,7 +10,7 @@ service DeviceVlanService { rpc UpdateDevice(UpdateDeviceVlanRequest) returns (U
 
 message UpdateDeviceVlanRequest {
   string name = 1;
-  commonpb.Device device = 2;
+  common.commonpb.v1.Device device = 2;
   uint32 vlan = 3;
 }
 

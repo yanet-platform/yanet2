@@ -1,8 +1,8 @@
 syntax = "proto3";
 
-package commonpb;
+package common.commonpb.v1;
 
-option go_package = "github.com/yanet-platform/yanet2/common/commonpb;commonpb";
+option go_package = "github.com/yanet-platform/yanet2/common/commonpb/v1;commonpb";
 
 message ModuleId {
   string type = 1;

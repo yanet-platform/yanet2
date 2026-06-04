@@ -3,7 +3,7 @@ package operator
 import (
 	"time"
 
-	"github.com/yanet-platform/yanet2/common/commonpb"
+	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/operator"
 )
 

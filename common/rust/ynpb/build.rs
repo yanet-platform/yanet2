@@ -8,7 +8,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
             ".ynpb.RegisteredBackend.last_seen_at",
             "#[serde(serialize_with = \"crate::serialize_timestamp\")]",
         )
-        .extern_path(".commonpb", "::commonpb::pb")
+        .extern_path(".common.commonpb.v1", "::commonpb::pb")
         .compile_protos(
             &[
                 "controlplane/ynpb/logging.proto",

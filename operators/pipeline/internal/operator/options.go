@@ -3,7 +3,7 @@ package operator
 import (
 	"go.uber.org/zap"
 
-	"github.com/yanet-platform/yanet2/common/commonpb"
+	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 )
 
 type options struct {

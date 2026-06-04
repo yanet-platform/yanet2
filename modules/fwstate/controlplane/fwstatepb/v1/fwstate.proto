@@ -2,8 +2,8 @@ syntax = "proto3";
 
 package modules.fwstate.controlplane.fwstatepb.v1;
 
-import "common/commonpb/ipaddr.proto";
-import "common/commonpb/macaddr.proto";
+import "common/commonpb/v1/ipaddr.proto";
+import "common/commonpb/v1/macaddr.proto";
 
 option go_package = "github.com/yanet-platform/yanet2/modules/fwstate/controlplane/fwstatepb/v1;fwstatepb";
 
@@ -87,8 +87,8 @@ message FwStateKey {
   uint32 proto = 1;
   uint32 src_port = 2;
   uint32 dst_port = 3;
-  commonpb.IPAddress src_addr = 4;
-  commonpb.IPAddress dst_addr = 5;
+  common.commonpb.v1.IPAddress src_addr = 4;
+  common.commonpb.v1.IPAddress dst_addr = 5;
 }
 
 message FwStateValue {
@@ -132,11 +132,11 @@ message MapConfig {
 
 // Firewall state synchronization configuration
 message SyncConfig {
-  commonpb.IPAddress src_addr = 1;           // IPv6 source address;
-  commonpb.MACAddress dst_ether = 2;         // Destination MAC address;
-  commonpb.IPAddress dst_addr_multicast = 3; // Multicast IPv6 address;
+  common.commonpb.v1.IPAddress src_addr = 1;           // IPv6 source address;
+  common.commonpb.v1.MACAddress dst_ether = 2;         // Destination MAC address;
+  common.commonpb.v1.IPAddress dst_addr_multicast = 3; // Multicast IPv6 address;
   uint32 port_multicast = 4;                 // Multicast port;
-  commonpb.IPAddress dst_addr_unicast = 5;   // Unicast IPv6 address;
+  common.commonpb.v1.IPAddress dst_addr_unicast = 5;   // Unicast IPv6 address;
   uint32 port_unicast = 6;                   // Unicast port;
 
   // Connection timeouts

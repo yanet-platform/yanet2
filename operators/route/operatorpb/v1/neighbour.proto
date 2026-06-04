@@ -4,8 +4,8 @@ package operators.route.operatorpb.v1;
 
 option go_package = "github.com/yanet-platform/yanet2/operators/route/operatorpb/v1;operatorpb";
 
-import "common/commonpb/ipaddr.proto";
-import "common/commonpb/macaddr.proto";
+import "common/commonpb/v1/ipaddr.proto";
+import "common/commonpb/v1/macaddr.proto";
 
 // NeighbourService is the operator-owned neighbour table surface.
 service NeighbourService {
@@ -55,9 +55,9 @@ enum NeighbourState {
 
 // NeighbourEntry represents a single neighbor entry.
 message NeighbourEntry {
-  commonpb.IPAddress next_hop = 1;
-  commonpb.MACAddress link_addr = 2;
-  commonpb.MACAddress hardware_addr = 3;
+  common.commonpb.v1.IPAddress next_hop = 1;
+  common.commonpb.v1.MACAddress link_addr = 2;
+  common.commonpb.v1.MACAddress hardware_addr = 3;
   NeighbourState state = 4;
   int64 updated_at = 5;
   string source = 6;
@@ -105,7 +105,7 @@ message UpdateNeighboursResponse {}
 
 message RemoveNeighboursRequest {
   string table = 1;
-  repeated commonpb.IPAddress next_hops = 2;
+  repeated common.commonpb.v1.IPAddress next_hops = 2;
 }
 
 message RemoveNeighboursResponse {}

@@ -1,12 +1,12 @@
 syntax = "proto3";
 
-package commonpb;
+package common.commonpb.v1;
 
-option go_package = "github.com/yanet-platform/yanet2/common/commonpb;commonpb";
+option go_package = "github.com/yanet-platform/yanet2/common/commonpb/v1;commonpb";
 
 message GetMetricsRequest {}
 
-message GetMetricsResponse { repeated commonpb.Metric metrics = 1; }
+message GetMetricsResponse { repeated Metric metrics = 1; }
 
 message Metric {
   string name = 1;

@@ -1,7 +1,7 @@
 package fwstatepb
 
 import (
-	"github.com/yanet-platform/yanet2/common/commonpb"
+	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/modules/fwstate/bindings/go/cfwstate"
 )
 

@@ -14,7 +14,7 @@ import (
 	"unsafe"
 
 	"github.com/yanet-platform/yanet2/bindings/go/cerrors"
-	"github.com/yanet-platform/yanet2/common/commonpb"
+	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 )
 

@@ -4,7 +4,7 @@ package ynpb;
 
 option go_package = "github.com/yanet-platform/yanet2/controlplane/ynpb;ynpb";
 
-import "common/commonpb/target.proto";
+import "common/commonpb/v1/target.proto";
 
 // PipelineService provides CRUD operations for packet processing pipelines.
 //
@@ -37,13 +37,13 @@ message ListPipelinesRequest {}
 // ListPipelinesResponse contains the list of pipeline identifiers.
 message ListPipelinesResponse {
   // List of pipeline identifiers currently configured in the dataplane.
-  repeated commonpb.PipelineId ids = 1;
+  repeated common.commonpb.v1.PipelineId ids = 1;
 }
 
 // GetPipelineRequest specifies which pipeline to retrieve.
 message GetPipelineRequest {
   // Identifier of the pipeline to retrieve.
-  commonpb.PipelineId id = 1;
+  common.commonpb.v1.PipelineId id = 1;
 }
 
 // GetPipelineResponse contains the requested pipeline definition.
@@ -72,12 +72,12 @@ message UpdatePipelineResponse {}
 // functions process it and in what order.
 message Pipeline {
   // Unique identifier for this pipeline.
-  commonpb.PipelineId id = 1;
+  common.commonpb.v1.PipelineId id = 1;
   // Ordered list of functions that process packets in this pipeline.
   //
   // Functions are executed in order. Each function can forward, drop, or
   // modify packets before passing to the next function.
-  repeated commonpb.FunctionId functions = 2;
+  repeated common.commonpb.v1.FunctionId functions = 2;
 }
 
 // DeletePipelineRequest specifies which pipeline to delete.
@@ -86,7 +86,7 @@ message DeletePipelineRequest {
   //
   // The delete fails if the pipeline is currently associated with any
   // device.
-  commonpb.PipelineId id = 1;
+  common.commonpb.v1.PipelineId id = 1;
 }
 
 // DeletePipelineResponse is returned after successful deletion.

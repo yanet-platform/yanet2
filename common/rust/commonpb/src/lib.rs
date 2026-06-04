@@ -9,7 +9,7 @@ use netip::{Contiguous, IpNetwork, MacAddr, ipv4_range_to_networks, ipv6_range_t
 
 #[allow(clippy::all, non_snake_case)]
 pub mod pb {
-    tonic::include_proto!("commonpb");
+    tonic::include_proto!("common.commonpb.v1");
 }
 
 impl FromStr for pb::DevicePipeline {

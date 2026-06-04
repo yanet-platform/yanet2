@@ -3,7 +3,7 @@ syntax = "proto3";
 package modules.acl.controlplane.aclpb.v1;
 
 import "common/filterpb/filter.proto";
-import "common/commonpb/metric.proto";
+import "common/commonpb/v1/metric.proto";
 
 option go_package = "github.com/yanet-platform/yanet2/modules/acl/controlplane/aclpb/v1;aclpb";
 
@@ -78,4 +78,4 @@ message ListConfigsResponse { repeated string configs = 1; }
 
 message GetMetricsRequest {}
 
-message GetMetricsResponse { repeated commonpb.Metric metrics = 1; }
+message GetMetricsResponse { repeated common.commonpb.v1.Metric metrics = 1; }
