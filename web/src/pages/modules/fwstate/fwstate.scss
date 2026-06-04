@@ -1,5 +1,13 @@
 @use '../../../styles/variables' as *;
 
+/** Uppercase tracked micro-label typography shared by fwstate field/section labels. */
+@mixin micro-label {
+    font-size: 10.5px;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    font-weight: 600;
+}
+
 .fws-states {
     --fws-tcp:        #57c79c;
     --fws-tcp-bg:     rgba(60, 170, 125, .13);
@@ -74,11 +82,8 @@
 }
 
 .fws-field-label {
-    font-size: 10.5px;
-    letter-spacing: .12em;
+    @include micro-label;
     color: var(--fws-text-3);
-    font-weight: 600;
-    text-transform: uppercase;
 }
 
 .fws-switch-row {
@@ -104,11 +109,8 @@
 }
 
 .fws-vb-label {
-    font-size: 10.5px;
-    letter-spacing: .12em;
+    @include micro-label;
     color: var(--fws-text-3);
-    font-weight: 600;
-    text-transform: uppercase;
     white-space: nowrap;
 }
 
@@ -201,11 +203,8 @@
 }
 
 .fws-dh {
-    font-size: 10.5px;
-    letter-spacing: .12em;
+    @include micro-label;
     color: var(--fws-text-3);
-    font-weight: 600;
-    text-transform: uppercase;
 }
 
 .fws-sample {
@@ -324,10 +323,7 @@
 }
 
 .fws-dcollapse-label {
-    font-size: 10.5px;
-    font-weight: 600;
-    letter-spacing: .12em;
-    text-transform: uppercase;
+    @include micro-label;
     color: inherit;
 }
 
@@ -630,11 +626,8 @@
     min-width: 0;
 
     &__lbl {
-        font-size: 10.5px;
-        letter-spacing: .12em;
-        text-transform: uppercase;
+        @include micro-label;
         color: var(--yn-text-3, #7e7468);
-        font-weight: 600;
     }
 
     &__val {
