@@ -4,10 +4,10 @@ package operators.forward.operatorpb.v1;
 
 option go_package = "github.com/yanet-platform/yanet2/operators/forward/operatorpb/v1;operatorpb";
 
-import "common/readinesspb/readiness.proto";
+import "common/readinesspb/v1/readiness.proto";
 
 // ReadinessService exposes per-gateway readiness of the forward operator.
 service ReadinessService {
   // Ready returns the current per-gateway readiness state.
-  rpc Ready(readinesspb.ReadyRequest) returns (readinesspb.ReadyResponse);
+  rpc Ready(common.readinesspb.v1.ReadyRequest) returns (common.readinesspb.v1.ReadyResponse);
 }

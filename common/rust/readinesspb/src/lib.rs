@@ -2,11 +2,11 @@
 //!
 //! Exposes `pb::ReadyRequest`, `pb::ReadyResponse`, `pb::Scope`,
 //! `pb::State`, and `pb::Reason` generated from
-//! `common/readinesspb/readiness.proto`.
+//! `common/readinesspb/v1/readiness.proto`.
 
 #[allow(clippy::all, non_snake_case)]
 pub mod pb {
-    tonic::include_proto!("readinesspb");
+    tonic::include_proto!("common.readinesspb.v1");
 }
 
 /// Serializes a `readinesspb.State` discriminant as its lowercase name (e.g.

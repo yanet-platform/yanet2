@@ -1,10 +1,10 @@
 syntax = "proto3";
 
-package readinesspb;
+package common.readinesspb.v1;
 
 import "google/protobuf/timestamp.proto";
 
-option go_package = "github.com/yanet-platform/yanet2/common/readinesspb;readinesspb";
+option go_package = "github.com/yanet-platform/yanet2/common/readinesspb/v1;readinesspb";
 
 // ReadyRequest selects which scopes to query.
 //

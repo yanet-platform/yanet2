@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/yanet-platform/yanet2/common/go/operator"
-	"github.com/yanet-platform/yanet2/common/readinesspb"
+	readinesspb "github.com/yanet-platform/yanet2/common/readinesspb/v1"
 	operatorpb "github.com/yanet-platform/yanet2/operators/route/operatorpb/v1"
 )
 

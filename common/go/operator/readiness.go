@@ -7,7 +7,7 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	"github.com/yanet-platform/yanet2/common/readinesspb"
+	readinesspb "github.com/yanet-platform/yanet2/common/readinesspb/v1"
 )
 
 // scopeState holds the mutable readiness state for one gateway scope.

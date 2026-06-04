@@ -9,7 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/yanet-platform/yanet2/common/go/operator"
-	"github.com/yanet-platform/yanet2/common/readinesspb"
+	readinesspb "github.com/yanet-platform/yanet2/common/readinesspb/v1"
 )
 
 // newRIBReadiness returns a birdRIBReadiness when cfg.ExpectBird is true,

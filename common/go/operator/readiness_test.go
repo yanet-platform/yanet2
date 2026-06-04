@@ -11,7 +11,7 @@ import (
 	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/yanet-platform/yanet2/common/go/operator"
-	"github.com/yanet-platform/yanet2/common/readinesspb"
+	readinesspb "github.com/yanet-platform/yanet2/common/readinesspb/v1"
 )
 
 func TestReadiness_InitialState(t *testing.T) {
