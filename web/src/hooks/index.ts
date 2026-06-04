@@ -28,3 +28,5 @@ export { usePageKeyboardShortcuts } from './usePageKeyboardShortcuts';
 
 export { useModuleRuleCounters } from './useModuleRuleCounters';
 export type { RuleRate, ModuleRuleCountersParams } from './useModuleRuleCounters';
+
+export { useDirtyConfigSet } from './useDirtyConfigSet';

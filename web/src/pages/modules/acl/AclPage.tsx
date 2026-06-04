@@ -3,7 +3,7 @@ import { Button, Icon, Label } from '@gravity-ui/uikit';
 import { Funnel, Pause, Play, Plus } from '@gravity-ui/icons';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, SearchInput, EmptyPagePlaceholder, RowCountDisplay } from '../../../components';
-import { useSearchParamHelpers, usePageKeyboardShortcuts } from '../../../hooks';
+import { useSearchParamHelpers, usePageKeyboardShortcuts, useDirtyConfigSet } from '../../../hooks';
 import { useAclDraft } from './useAclDraft';
 import { useUnsavedChangesBlocker } from '../../builtin/_shared/lane-editor';
 import type { Rule } from '../../../api/acl';
@@ -120,11 +120,7 @@ const AclPage: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [draftConfigs, draftRules]);
 
-    const dirtySet = useMemo((): Set<string> => {
-        const s = new Set<string>();
-        draftConfigs.forEach(c => { if (isDirty(c)) s.add(c); });
-        return s;
-    }, [draftConfigs, isDirty]);
+    const dirtySet = useDirtyConfigSet(draftConfigs, isDirty);
 
     const deferredSearch = useDeferredValue(search);
 

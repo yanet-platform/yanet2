@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom';
 import { Button, Icon } from '@gravity-ui/uikit';
 import { Funnel, Plus } from '@gravity-ui/icons';
-import { useSearchParamHelpers } from '../../../hooks';
+import { useSearchParamHelpers, useDirtyConfigSet } from '../../../hooks';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, EmptyPagePlaceholder, SearchInput, RowCountDisplay } from '../../../components';
 import { usePrefixDraft } from './usePrefixDraft';
 import { useUnsavedChangesBlocker } from '../../builtin/_shared/lane-editor';
@@ -105,11 +105,7 @@ const DecapPage: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [draftConfigs, draftRows]);
 
-    const dirtySet = useMemo((): Set<string> => {
-        const s = new Set<string>();
-        draftConfigs.forEach((c) => { if (isDirty(c)) s.add(c); });
-        return s;
-    }, [draftConfigs, isDirty]);
+    const dirtySet = useDirtyConfigSet(draftConfigs, isDirty);
 
     const visibleRows = useMemo((): PrefixRowItem[] => {
         const q = search.trim().toLowerCase();

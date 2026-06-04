@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Icon } from '@gravity-ui/uikit';
 import { useSearchParams } from 'react-router-dom';
-import { useSearchParamHelpers } from '../../../hooks';
+import { useSearchParamHelpers, useDirtyConfigSet } from '../../../hooks';
 import { Funnel, Plus } from '@gravity-ui/icons';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, SearchInput, EmptyPagePlaceholder, RowCountDisplay } from '../../../components';
 import { useFIBDraft } from './useFIBDraft';
@@ -96,11 +96,7 @@ const RoutePage: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [draftConfigs, draftRows]);
 
-    const dirtySet = useMemo((): Set<string> => {
-        const s = new Set<string>();
-        draftConfigs.forEach((c) => { if (isDirty(c)) s.add(c); });
-        return s;
-    }, [draftConfigs, isDirty]);
+    const dirtySet = useDirtyConfigSet(draftConfigs, isDirty);
 
     const visibleRows = useMemo((): FIBRowItem[] => {
         const q = search.trim().toLowerCase();
