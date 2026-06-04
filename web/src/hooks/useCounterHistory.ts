@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useMemo } from 'react';
 import type { DeviceCounterData } from './useDeviceCounters';
+import { useRollingWindow } from './useRollingWindow';
 
 export const HISTORY_SIZE = 60;
 
@@ -32,63 +33,46 @@ export const appendCapped = (arr: number[], v: number, cap: number): number[] =>
 export const useCounterHistory = (
     counters: Map<string, DeviceCounterData>
 ): Map<string, CounterHistoryEntry> => {
-    // historyRef holds the mutable ring-buffer; we return a fresh Map snapshot on
-    // each sample tick so React can detect the change.
-    const historyRef = useRef<Map<string, CounterHistoryEntry>>(new Map());
-    const [snapshot, setSnapshot] = useState<Map<string, CounterHistoryEntry>>(new Map());
+    const rxSamples = useMemo(() => {
+        const m = new Map<string, number>();
+        counters.forEach((d, name) => m.set(name, d.rx.pps));
+        return m;
+    }, [counters]);
 
-    // Keep a stable ref to the latest counters map so the interval callback can
-    // read it without being recreated every render.
-    const countersRef = useRef(counters);
-    countersRef.current = counters;
+    const txSamples = useMemo(() => {
+        const m = new Map<string, number>();
+        counters.forEach((d, name) => m.set(name, d.tx.pps));
+        return m;
+    }, [counters]);
 
-    useEffect(() => {
-        const tick = () => {
-            const current = countersRef.current;
-            if (!current.size) return;
+    const rxBytesSamples = useMemo(() => {
+        const m = new Map<string, number>();
+        counters.forEach((d, name) => m.set(name, d.rx.bps));
+        return m;
+    }, [counters]);
 
-            const history = historyRef.current;
-            let mutated = false;
+    const txBytesSamples = useMemo(() => {
+        const m = new Map<string, number>();
+        counters.forEach((d, name) => m.set(name, d.tx.bps));
+        return m;
+    }, [counters]);
 
-            for (const [name, data] of current.entries()) {
-                const entry = history.get(name);
+    const rxHistory = useRollingWindow(rxSamples, HISTORY_SIZE, 1000);
+    const txHistory = useRollingWindow(txSamples, HISTORY_SIZE, 1000);
+    const rxBytesHistory = useRollingWindow(rxBytesSamples, HISTORY_SIZE, 1000);
+    const txBytesHistory = useRollingWindow(txBytesSamples, HISTORY_SIZE, 1000);
 
-                if (!entry) {
-                    // Seed with HISTORY_SIZE copies of the current value so the
-                    // sparkline starts as a flat line rather than a single-sample
-                    // spike that immediately falls downward.
-                    history.set(name, {
-                        rx:      Array(HISTORY_SIZE).fill(data.rx.pps) as number[],
-                        tx:      Array(HISTORY_SIZE).fill(data.tx.pps) as number[],
-                        rxBytes: Array(HISTORY_SIZE).fill(data.rx.bps) as number[],
-                        txBytes: Array(HISTORY_SIZE).fill(data.tx.bps) as number[],
-                    });
-                    mutated = true;
-                    continue;
-                }
-
-                // Always produce fresh arrays and a fresh entry object so that
-                // React Compiler memoized children see a changed reference.
-                history.set(name, {
-                    rx:      appendCapped(entry.rx,      data.rx.pps, HISTORY_SIZE),
-                    tx:      appendCapped(entry.tx,      data.tx.pps, HISTORY_SIZE),
-                    rxBytes: appendCapped(entry.rxBytes, data.rx.bps, HISTORY_SIZE),
-                    txBytes: appendCapped(entry.txBytes, data.tx.bps, HISTORY_SIZE),
-                });
-                mutated = true;
+    return useMemo(() => {
+        const result = new Map<string, CounterHistoryEntry>();
+        counters.forEach((_, name) => {
+            const rx = rxHistory.get(name);
+            const tx = txHistory.get(name);
+            const rxBytes = rxBytesHistory.get(name);
+            const txBytes = txBytesHistory.get(name);
+            if (rx && tx && rxBytes && txBytes) {
+                result.set(name, { rx, tx, rxBytes, txBytes });
             }
-
-            if (mutated) {
-                setSnapshot(new Map(history));
-            }
-        };
-
-        // Fire immediately so any already-loaded counters are seeded at mount
-        // without waiting the first full second.
-        tick();
-        const id = setInterval(tick, 1000);
-        return () => clearInterval(id);
-    }, []);
-
-    return snapshot;
+        });
+        return result;
+    }, [counters, rxHistory, txHistory, rxBytesHistory, txBytesHistory]);
 };

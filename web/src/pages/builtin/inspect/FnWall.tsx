@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import type { InstanceInfo } from '../../../api/inspect';
-import { useFunctionCounters, useLaggedSeriesMap } from './hooks';
+import { useFunctionCounters } from './hooks';
 import { FunctionTile } from './FunctionTile';
 
 export interface FnWallProps {
@@ -26,20 +26,12 @@ export const FnWall: React.FC<FnWallProps> = ({ instance }) => {
         [functions],
     );
 
-    const { rates } = useFunctionCounters(
+    const { rates, series } = useFunctionCounters(
         deviceNames,
         pipelineNames,
         functionNames,
         devices.length > 0 && pipelines.length > 0 && functions.length > 0,
     );
-
-    const ppsMap = useMemo(() => {
-        const m = new Map<string, number>();
-        rates.forEach((r, name) => m.set(name, r.pps));
-        return m;
-    }, [rates]);
-
-    const laggedSeries = useLaggedSeriesMap(ppsMap, 30, 1500);
 
     const activeCount = useMemo(() => {
         let count = 0;
@@ -68,7 +60,7 @@ export const FnWall: React.FC<FnWallProps> = ({ instance }) => {
                     const name = f.name ?? `fn-${idx}`;
                     const rate = rates.get(name);
                     const pps = rate?.pps ?? 0;
-                    const trend = laggedSeries.get(name) ?? [];
+                    const trend = series.get(name) ?? [];
 
                     return (
                         <FunctionTile

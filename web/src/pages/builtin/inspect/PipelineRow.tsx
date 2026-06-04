@@ -1,5 +1,4 @@
 import React from 'react';
-import { useLaggedValue } from './hooks';
 import { Sparkline } from './Sparkline';
 import { fmtPps } from './formatters';
 
@@ -12,7 +11,6 @@ export interface PipelineRowProps {
 
 /** Single pipeline row in PipeWall with lag-interpolated PPS display. */
 export const PipelineRow: React.FC<PipelineRowProps> = ({ name, pps, fns, trend }) => {
-    const smoothPps = useLaggedValue(pps, 1500);
     const active = pps > 0;
 
     return (
@@ -29,7 +27,7 @@ export const PipelineRow: React.FC<PipelineRowProps> = ({ name, pps, fns, trend 
             </span>
             <Sparkline data={trend} w={70} h={20} color="var(--iv-accent)" />
             <span className="iv-pipe-row__pps">
-                {fmtPps(smoothPps)}
+                {fmtPps(pps)}
                 <span className="iv-pps-unit"> pps</span>
             </span>
         </div>

@@ -11,3 +11,4 @@ export * from './clipboard';
 export * from './counterGroups';
 export * from './validation';
 export * from './ranges';
+export * from './interpolation';

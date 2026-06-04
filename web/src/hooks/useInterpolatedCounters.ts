@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
+import { computeRate } from '../utils/interpolation';
+import { useLagInterpolated } from './useLagInterpolated';
 
 /**
  * Counter data with interpolated rate values.
@@ -24,14 +26,6 @@ interface RawCounterSnapshot<K extends string = string> {
     values: Map<K, { packets: bigint; bytes: bigint }>;
 }
 
-/**
- * Calculated rate at a point in time.
- */
-interface RateSnapshot<K extends string = string> {
-    timestamp: number;
-    rates: Map<K, { pps: number; bps: number }>;
-}
-
 export interface UseInterpolatedCountersOptions<K extends string = string> {
     /**
      * List of keys to track counters for.
@@ -51,6 +45,9 @@ export interface UseInterpolatedCountersOptions<K extends string = string> {
 
     /**
      * Interpolation update interval in milliseconds. Default: 30ms.
+     *
+     * This option is accepted for backwards compatibility but is ignored
+     * internally — interpolation now runs via requestAnimationFrame.
      */
     interpolationInterval?: number;
 
@@ -68,18 +65,19 @@ export interface UseInterpolatedCountersResult<K extends string = string> {
 
     /**
      * Map of key -> interpolated absolute data (packets/bytes).
-     * Uses linear extrapolation based on current rate.
+     * Interpolates cumulative packet/byte counts between the two most recent
+     * raw snapshots; never extrapolates past the current sample.
      */
     absoluteCounters: Map<K, InterpolatedAbsoluteData>;
 }
 
 /**
  * Hook for fetching and interpolating counters.
- * 
- * - Polls counters at specified interval (default: 1 second)
- * - Calculates rate (pps/bps) from counter deltas
- * - Stores previous and current rate for interpolation
- * - Updates visual at specified interval (default: 30ms) using linear interpolation
+ *
+ * - Polls counters at the specified interval (default: 1 second).
+ * - Computes per-second rates from counter deltas via computeRate.
+ * - Smoothly interpolates pps/bps and absolute packet/byte counts between
+ *   poll snapshots using RAF lag-interpolation (prev -> cur, clamp to [0,1]).
  */
 export const useInterpolatedCounters = <K extends string = string>(
     options: UseInterpolatedCountersOptions<K>
@@ -88,214 +86,147 @@ export const useInterpolatedCounters = <K extends string = string>(
         keys,
         fetchCounters,
         pollingInterval = 1000,
-        interpolationInterval = 30,
         enabled = true,
     } = options;
 
-    // Interpolated rate counters for display
-    const [counters, setCounters] = useState<Map<K, InterpolatedCounterData>>(new Map());
-
-    // Interpolated absolute counters for display
-    const [absoluteCounters, setAbsoluteCounters] = useState<Map<K, InterpolatedAbsoluteData>>(new Map());
-
-    // Store raw counter snapshots (cumulative values)
+    // Latest two raw cumulative snapshots for rate and absolute interpolation.
     const snapshotsRef = useRef<RawCounterSnapshot<K>[]>([]);
 
-    // Store calculated rate snapshots for interpolation
-    const ratesRef = useRef<RateSnapshot<K>[]>([]);
+    // pps samples fed into useLagInterpolated — one map entry per key.
+    const [ppsSamples, setPpsSamples] = useState<Map<K, number>>(() => new Map());
+    // bps samples fed into useLagInterpolated.
+    const [bpsSamples, setBpsSamples] = useState<Map<K, number>>(() => new Map());
+    // Absolute packet samples (cumulative BigInt -> Number snapshot).
+    const [packetSamples, setPacketSamples] = useState<Map<K, number>>(() => new Map());
+    // Absolute byte samples.
+    const [bytesSamples, setBytesSamples] = useState<Map<K, number>>(() => new Map());
 
-    // Track if component is mounted
-    const isMountedRef = useRef(true);
-
-    // Store keys ref to avoid effect re-triggers
     const keysRef = useRef<K[]>(keys);
     keysRef.current = keys;
 
-    // Store fetch function ref
     const fetchCountersRef = useRef(fetchCounters);
     fetchCountersRef.current = fetchCounters;
 
-    // Stable key for keys array to use in dependencies
     const keysKey = useMemo(() => JSON.stringify([...keys].sort()), [keys]);
 
-    // Clear stale snapshots and rates whenever the key set changes so that the
-    // first rate sample after a config switch is not computed against data from
-    // the previous config (which would produce an arbitrarily large or negative
-    // delta and therefore a garbage pps value).
+    // Clear stale snapshots when the key set changes to avoid garbage deltas
+    // across config switches.
     useEffect(() => {
         snapshotsRef.current = [];
-        ratesRef.current = [];
+        setPpsSamples(new Map());
+        setBpsSamples(new Map());
+        setPacketSamples(new Map());
+        setBytesSamples(new Map());
     }, [keysKey]);
 
-    // Fetch counters at polling interval and calculate rates
+    // Poll loop: fetch cumulative counters, compute rates, publish samples.
     useEffect(() => {
         if (!enabled || keys.length === 0) return;
 
-        const doFetch = async () => {
-            if (!isMountedRef.current) return;
+        let cancelled = false;
+
+        const doFetch = async (): Promise<void> => {
+            if (cancelled) return;
 
             const currentKeys = keysRef.current;
 
             try {
                 const newValues = await fetchCountersRef.current();
-                const now = Date.now();
+                if (cancelled) return;
 
-                // Add new raw snapshot
+                const now = Date.now();
                 const newSnapshot: RawCounterSnapshot<K> = {
                     timestamp: now,
                     values: newValues,
                 };
 
-                // Calculate rate if we have a previous snapshot
                 const prevSnapshot = snapshotsRef.current[snapshotsRef.current.length - 1];
-                if (prevSnapshot) {
-                    const timeDelta = (now - prevSnapshot.timestamp) / 1000; // seconds
 
-                    if (timeDelta > 0) {
-                        const newRates = new Map<K, { pps: number; bps: number }>();
+                if (prevSnapshot) {
+                    const dtSeconds = (now - prevSnapshot.timestamp) / 1000;
+
+                    if (dtSeconds > 0) {
+                        const nextPps = new Map<K, number>();
+                        const nextBps = new Map<K, number>();
 
                         for (const key of currentKeys) {
-                            const prevVal = prevSnapshot.values.get(key);
-                            const currVal = newValues.get(key);
+                            const prev = prevSnapshot.values.get(key);
+                            const cur = newValues.get(key);
 
-                            if (prevVal && currVal) {
-                                const packetsDelta = Number(currVal.packets - prevVal.packets);
-                                const bytesDelta = Number(currVal.bytes - prevVal.bytes);
-
-                                const pps = packetsDelta >= 0 ? packetsDelta / timeDelta : 0;
-                                const bps = bytesDelta >= 0 ? bytesDelta / timeDelta : 0;
-
-                                newRates.set(key, { pps, bps });
+                            if (prev && cur) {
+                                const { pps, bps } = computeRate(prev, cur, dtSeconds);
+                                nextPps.set(key, pps);
+                                nextBps.set(key, bps);
                             } else {
-                                newRates.set(key, { pps: 0, bps: 0 });
+                                nextPps.set(key, 0);
+                                nextBps.set(key, 0);
                             }
                         }
 
-                        // Add new rate snapshot
-                        ratesRef.current.push({
-                            timestamp: now,
-                            rates: newRates,
-                        });
-
-                        // Keep only last 2 rate snapshots
-                        if (ratesRef.current.length > 2) {
-                            ratesRef.current.shift();
-                        }
+                        setPpsSamples(nextPps);
+                        setBpsSamples(nextBps);
                     }
                 }
 
-                // Store raw snapshot
-                snapshotsRef.current.push(newSnapshot);
+                // Publish absolute samples from the latest snapshot.
+                const nextPackets = new Map<K, number>();
+                const nextBytes = new Map<K, number>();
+                for (const key of currentKeys) {
+                    const cur = newValues.get(key);
+                    nextPackets.set(key, cur ? Number(cur.packets) : 0);
+                    nextBytes.set(key, cur ? Number(cur.bytes) : 0);
+                }
+                setPacketSamples(nextPackets);
+                setBytesSamples(nextBytes);
 
-                // Keep only last 2 raw snapshots
+                snapshotsRef.current.push(newSnapshot);
                 if (snapshotsRef.current.length > 2) {
                     snapshotsRef.current.shift();
                 }
-            } catch (error) {
-                console.error('Failed to fetch counters:', error);
+            } catch {
+                // tolerate fetch failures.
             }
         };
 
-        // Initial fetch
         doFetch();
-
-        // Set up polling interval
-        const intervalId = setInterval(doFetch, pollingInterval);
-
+        const id = setInterval(doFetch, pollingInterval);
         return () => {
-            clearInterval(intervalId);
+            cancelled = true;
+            clearInterval(id);
         };
     }, [enabled, keysKey, pollingInterval]);
 
-    // Interpolation timer - updates at interpolation interval
-    useEffect(() => {
-        if (!enabled) return;
+    // Lag-interpolate pps, bps, packets, bytes independently.
+    const interpPps = useLagInterpolated(ppsSamples, pollingInterval);
+    const interpBps = useLagInterpolated(bpsSamples, pollingInterval);
+    const interpPackets = useLagInterpolated(packetSamples, pollingInterval);
+    const interpBytes = useLagInterpolated(bytesSamples, pollingInterval);
 
-        const interpolate = () => {
-            if (!isMountedRef.current) return;
-
-            const rates = ratesRef.current;
-            const snapshots = snapshotsRef.current;
-            const currentKeys = keysRef.current;
-
-            // Need keys to display
-            if (currentKeys.length === 0) return;
-
-            // Need at least one rate snapshot to publish anything.
-            if (rates.length === 0) return;
-
-            const newCounters = new Map<K, InterpolatedCounterData>();
-            const newAbsoluteCounters = new Map<K, InterpolatedAbsoluteData>();
-            const now = Date.now();
-
-            // When two rates are available, interpolate; otherwise use the single rate directly.
-            const prevRate = rates.length >= 2 ? rates[0] : null;
-            const currRate = rates[rates.length - 1];
-
-            // Get the latest raw snapshot for absolute value extrapolation
-            const latestSnapshot = snapshots[snapshots.length - 1];
-
-            // Calculate progress: 0 at currRate.timestamp, 1 at currRate.timestamp + pollingInterval
-            const elapsed = now - currRate.timestamp;
-            const progress = Math.min(1, Math.max(0, elapsed / 1000));
-
-            // Time elapsed since the latest snapshot (in seconds)
-            const elapsedSinceSnapshot = (now - (latestSnapshot?.timestamp ?? now)) / 1000;
-
-            for (const key of currentKeys) {
-                const prev = prevRate?.rates.get(key);
-                const curr = currRate.rates.get(key);
-                const latestValue = latestSnapshot?.values.get(key);
-
-                if (prev && curr) {
-                    // Linear interpolation from prev rate to curr rate
-                    const pps = prev.pps + (curr.pps - prev.pps) * progress;
-                    const bps = prev.bps + (curr.bps - prev.bps) * progress;
-                    newCounters.set(key, { pps, bps });
-
-                    // Extrapolate absolute values using current rate
-                    if (latestValue) {
-                        const packets = Number(latestValue.packets) + pps * elapsedSinceSnapshot;
-                        const bytes = Number(latestValue.bytes) + bps * elapsedSinceSnapshot;
-                        newAbsoluteCounters.set(key, { packets, bytes });
-                    } else {
-                        newAbsoluteCounters.set(key, { packets: 0, bytes: 0 });
-                    }
-                } else if (curr) {
-                    newCounters.set(key, { pps: curr.pps, bps: curr.bps });
-
-                    if (latestValue) {
-                        const packets = Number(latestValue.packets) + curr.pps * elapsedSinceSnapshot;
-                        const bytes = Number(latestValue.bytes) + curr.bps * elapsedSinceSnapshot;
-                        newAbsoluteCounters.set(key, { packets, bytes });
-                    } else {
-                        newAbsoluteCounters.set(key, { packets: 0, bytes: 0 });
-                    }
-                } else {
-                    newCounters.set(key, { pps: 0, bps: 0 });
-                    newAbsoluteCounters.set(key, { packets: 0, bytes: 0 });
-                }
+    // Assemble output maps. Build fresh Map objects each render so consumers
+    // that depend on map identity detect the change.
+    const counters = useMemo((): Map<K, InterpolatedCounterData> => {
+        const out = new Map<K, InterpolatedCounterData>();
+        for (const key of keys) {
+            const pps = interpPps.get(key);
+            const bps = interpBps.get(key);
+            if (pps !== undefined && bps !== undefined) {
+                out.set(key, { pps, bps });
             }
+        }
+        return out;
+    }, [keys, interpPps, interpBps]);
 
-            setCounters(newCounters);
-            setAbsoluteCounters(newAbsoluteCounters);
-        };
-
-        // Run interpolation at specified interval
-        const intervalId = setInterval(interpolate, interpolationInterval);
-
-        return () => {
-            clearInterval(intervalId);
-        };
-    }, [enabled, interpolationInterval]);
-
-    // Cleanup on unmount
-    useEffect(() => {
-        isMountedRef.current = true;
-        return () => {
-            isMountedRef.current = false;
-        };
-    }, []);
+    const absoluteCounters = useMemo((): Map<K, InterpolatedAbsoluteData> => {
+        const out = new Map<K, InterpolatedAbsoluteData>();
+        for (const key of keys) {
+            const packets = interpPackets.get(key);
+            const bytes = interpBytes.get(key);
+            if (packets !== undefined && bytes !== undefined) {
+                out.set(key, { packets, bytes });
+            }
+        }
+        return out;
+    }, [keys, interpPackets, interpBytes]);
 
     return { counters, absoluteCounters };
 };

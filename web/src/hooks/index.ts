@@ -33,3 +33,6 @@ export { useDirtyConfigSet } from './useDirtyConfigSet';
 
 export { useConfigQuerySync } from './useConfigQuerySync';
 export type { UseConfigQuerySyncOptions } from './useConfigQuerySync';
+
+export { useLagInterpolated } from './useLagInterpolated';
+export { useRollingWindow } from './useRollingWindow';
