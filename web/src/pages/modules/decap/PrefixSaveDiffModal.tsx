@@ -1,9 +1,8 @@
-import React, { useMemo } from 'react';
-import { Text } from '@gravity-ui/uikit';
+import React from 'react';
 import type { PrefixRowItem } from './types';
 import { rowsToDiffYaml } from './yaml';
 import { countInvalidRows } from './validation';
-import { SaveDiffModal } from '../../../components';
+import { DraftSaveDiffModal } from '../../../components';
 
 interface PrefixSaveDiffModalProps {
     configName: string;
@@ -17,32 +16,10 @@ interface PrefixSaveDiffModalProps {
  * Modal showing a side-by-side YAML diff of server vs draft prefix rows,
  * with a Commit button that calls onApply and closes on success.
  */
-export const PrefixSaveDiffModal: React.FC<PrefixSaveDiffModalProps> = ({
-    configName,
-    draftRows,
-    serverRows,
-    onClose,
-    onApply,
-}) => {
-    const beforeYaml = useMemo(() => rowsToDiffYaml(serverRows), [serverRows]);
-    const afterYaml = useMemo(() => rowsToDiffYaml(draftRows), [draftRows]);
-    const invalidCount = useMemo(() => countInvalidRows(draftRows), [draftRows]);
-
-    const warning = invalidCount > 0 ? (
-        <Text variant="caption-1" color="warning">
-            {invalidCount} row{invalidCount === 1 ? '' : 's'} fail client-side validation — server may reject.
-        </Text>
-    ) : undefined;
-
-    return (
-        <SaveDiffModal
-            configName={configName}
-            beforeYaml={beforeYaml}
-            afterYaml={afterYaml}
-            warning={warning}
-            applyLabel="Commit"
-            onClose={onClose}
-            onApply={onApply}
-        />
-    );
-};
+export const PrefixSaveDiffModal: React.FC<PrefixSaveDiffModalProps> = (props) => (
+    <DraftSaveDiffModal<PrefixRowItem>
+        {...props}
+        rowsToDiffYaml={rowsToDiffYaml}
+        countInvalidRows={countInvalidRows}
+    />
+);

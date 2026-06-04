@@ -61,3 +61,5 @@ export type { ChipKind, ChipInputProps, ChipInputHandle } from './chip-input';
 export { default as CommandPaletteHeader } from './CommandPaletteHeader';
 export { default as DraftYamlIO } from './DraftYamlIO';
 export type { DraftYamlIOProps } from './DraftYamlIO';
+export { DraftSaveDiffModal } from './DraftSaveDiffModal';
+export type { DraftSaveDiffModalProps } from './DraftSaveDiffModal';
