@@ -1,3 +1,5 @@
+@use '../../../styles/iv-tokens' as *;
+
 .iv-system-agents {
     border: 1px solid var(--iv-border-strong);
     background: var(--iv-surface);
@@ -46,9 +48,7 @@
 }
 
 .iv-system-agents__title {
-    color: var(--iv-mute);
-    font-size: 10px;
-    letter-spacing: 1.6px;
+    @include iv-section-label;
 }
 
 .iv-system-agents__dot {

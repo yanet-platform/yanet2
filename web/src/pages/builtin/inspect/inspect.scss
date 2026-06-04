@@ -58,9 +58,7 @@
     }
 
     .iv-label {
-        color: var(--iv-mute);
-        font-size: 10px;
-        letter-spacing: 1.6px;
+        @include iv-section-label;
 
         .iv-label__count {
             color: var(--iv-text-dim);
@@ -228,9 +226,7 @@
         padding-left: 14px;
 
         .iv-side-kpi__label {
-            color: var(--iv-mute);
-            font-size: 10px;
-            letter-spacing: 1.6px;
+            @include iv-section-label;
         }
 
         .iv-side-kpi__primary {

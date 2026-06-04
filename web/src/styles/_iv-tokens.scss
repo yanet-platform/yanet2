@@ -38,3 +38,9 @@
     --iv-mute:           #9C8B74;
     --iv-dim:            #9C8B74;
 }
+
+@mixin iv-section-label {
+    color: var(--iv-mute);
+    font-size: 10px;
+    letter-spacing: 1.6px;
+}
