@@ -31,9 +31,8 @@ export interface Route {
     is_best?: boolean;
 }
 
-export interface ListConfigsResponse {
-    configs?: string[];
-}
+import type { ListConfigsResponse } from './shared';
+export type { ListConfigsResponse };
 
 export interface ShowRoutesRequest {
     name?: string;

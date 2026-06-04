@@ -29,9 +29,8 @@ export interface ShowConfigResponse {
     sync_config?: SyncConfig;
 }
 
-export interface ListConfigsResponse {
-    configs?: string[];
-}
+import type { ListConfigsResponse } from './shared';
+export type { ListConfigsResponse };
 
 export interface LinkFWStateRequest {
     fwstate_name?: string;

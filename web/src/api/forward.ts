@@ -2,19 +2,8 @@ import { createService, type CallOptions } from './client';
 
 // Forward types based on forwardpb/forward.proto
 
-export interface Device {
-    name?: string;
-}
-
-export interface VlanRange {
-    from?: number;
-    to?: number;
-}
-
-export interface IPNet {
-    addr?: string | Uint8Array | number[]; // Base64 encoded bytes or raw bytes
-    mask?: string | Uint8Array | number[]; // Base64 encoded bytes or raw bytes
-}
+import type { Device, VlanRange, IPNet, ListConfigsResponse } from './shared';
+export type { Device, VlanRange, IPNet, ListConfigsResponse };
 
 export enum ForwardMode {
     NONE = 0,
@@ -45,10 +34,6 @@ export interface Rule {
 // Request/Response types
 
 export interface ListConfigsRequest { }
-
-export interface ListConfigsResponse {
-    configs?: string[];
-}
 
 export interface ShowConfigRequest {
     name?: string;

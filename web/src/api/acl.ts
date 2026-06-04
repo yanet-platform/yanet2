@@ -3,10 +3,8 @@ import { createService, type CallOptions } from './client';
 // Types matching aclpb/acl.proto and filterpb/filter.proto exactly.
 // No Action.counter, no keep_state, no MapConfig, no SyncConfig, no DUMP kind.
 
-export interface IPNet {
-    addr?: string | Uint8Array | number[];
-    mask?: string | Uint8Array | number[];
-}
+import type { IPNet, VlanRange, Device, ListConfigsResponse } from './shared';
+export type { IPNet, VlanRange, Device, ListConfigsResponse };
 
 export interface PortRange {
     from?: number;
@@ -16,15 +14,6 @@ export interface PortRange {
 export interface ProtoRange {
     from?: number;
     to?: number;
-}
-
-export interface VlanRange {
-    from?: number;
-    to?: number;
-}
-
-export interface Device {
-    name?: string;
 }
 
 export enum ActionKind {
@@ -60,10 +49,6 @@ export interface Rule {
     proto_ranges?: ProtoRange[];
     src_port_ranges?: PortRange[];
     dst_port_ranges?: PortRange[];
-}
-
-export interface ListConfigsResponse {
-    configs?: string[];
 }
 
 export interface ShowConfigRequest {
