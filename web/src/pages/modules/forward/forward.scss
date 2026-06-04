@@ -8,15 +8,6 @@
     border-bottom: 1px solid var(--yn-line);
 }
 
-.fw-count {
-    font-size: 12.5px;
-    color: var(--yn-text-3);
-    white-space: nowrap;
-    flex-shrink: 0;
-    font-family: var(--yn-font-mono);
-    font-variant-numeric: tabular-nums;
-}
-
 // Forward-specific styles — direction badges, sparkline, chip-input, segmented control.
 // Shared page chrome (yn-page, yn-tabs, yn-table-*, yn-modal*, yn-drawer*, yn-bulk-bar, etc.)
 // lives in web/src/styles/draft-page.scss.

@@ -2,7 +2,7 @@ import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useSt
 import { Button, Icon, Label } from '@gravity-ui/uikit';
 import { Funnel, Pause, Play, Plus } from '@gravity-ui/icons';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, SearchInput, EmptyPagePlaceholder } from '../../../components';
+import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, SearchInput, EmptyPagePlaceholder, RowCountDisplay } from '../../../components';
 import { useSearchParamHelpers, usePageKeyboardShortcuts } from '../../../hooks';
 import { useAclDraft } from './useAclDraft';
 import { useUnsavedChangesBlocker } from '../../builtin/_shared/lane-editor';
@@ -508,10 +508,7 @@ const AclPage: React.FC = () => {
                                     showShortcutHint={false}
                                 />
                             </div>
-                            <span className="acl-count">
-                                <span style={{ color: 'var(--yn-text)', fontWeight: 600 }}>{visibleItems.length.toLocaleString()}</span>
-                                {' / '}{allItems.length.toLocaleString()}
-                            </span>
+                            <RowCountDisplay filtered={visibleItems.length} total={allItems.length} />
                         </div>
 
                         <div className="yn-content">

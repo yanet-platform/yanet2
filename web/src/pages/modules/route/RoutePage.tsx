@@ -3,7 +3,7 @@ import { Button, Icon } from '@gravity-ui/uikit';
 import { useSearchParams } from 'react-router-dom';
 import { useSearchParamHelpers } from '../../../hooks';
 import { Funnel, Plus } from '@gravity-ui/icons';
-import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, SearchInput, EmptyPagePlaceholder } from '../../../components';
+import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, SearchInput, EmptyPagePlaceholder, RowCountDisplay } from '../../../components';
 import { useFIBDraft } from './useFIBDraft';
 import { useUnsavedChangesBlocker } from '../../builtin/_shared/lane-editor';
 import type { FIBRowItem } from './types';
@@ -328,10 +328,7 @@ const RoutePage: React.FC = () => {
                                     icon={Funnel}
                                 />
                             </div>
-                            <span className="rt-count">
-                                <span style={{ color: 'var(--yn-text)', fontWeight: 600 }}>{visibleRows.length.toLocaleString()}</span>
-                                {' / '}{rawRows.length.toLocaleString()}
-                            </span>
+                            <RowCountDisplay filtered={visibleRows.length} total={rawRows.length} />
                         </div>
                         <div className="yn-content">
                             <FIBTable

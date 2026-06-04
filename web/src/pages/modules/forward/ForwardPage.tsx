@@ -3,7 +3,7 @@ import { Button, Icon } from '@gravity-ui/uikit';
 import { useSearchParams } from 'react-router-dom';
 import { useSearchParamHelpers, usePageKeyboardShortcuts } from '../../../hooks';
 import { Funnel, Plus } from '@gravity-ui/icons';
-import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, SearchInput, EmptyPagePlaceholder } from '../../../components';
+import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, SearchInput, EmptyPagePlaceholder, RowCountDisplay } from '../../../components';
 import { useForwardDraft } from './useForwardDraft';
 import { useUnsavedChangesBlocker } from '../../builtin/_shared/lane-editor';
 import type { Rule } from '../../../api/forward';
@@ -430,10 +430,7 @@ const ForwardPage: React.FC = () => {
                                     icon={Funnel}
                                 />
                             </div>
-                            <span className="fw-count">
-                                <span style={{ color: 'var(--yn-text)', fontWeight: 600 }}>{visibleItems.length.toLocaleString()}</span>
-                                {' / '}{allItems.length.toLocaleString()}
-                            </span>
+                            <RowCountDisplay filtered={visibleItems.length} total={allItems.length} />
                         </div>
 
                         <div className="yn-content">

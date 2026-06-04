@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button, Icon } from '@gravity-ui/uikit';
 import { ArrowRightToLine, Funnel, Plus } from '@gravity-ui/icons';
-import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, SearchInput, EmptyPagePlaceholder } from '../../../components';
+import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, SearchInput, EmptyPagePlaceholder, RowCountDisplay } from '../../../components';
 import { AddConfigModal } from '../../_shared/draft';
 import { BulkDeleteModal, CommandPaletteHeader } from '../../../components';
 import { usePalette } from '../../_shared/command-palette';
@@ -468,10 +468,7 @@ const RoutePage: React.FC = () => {
                                     icon={Funnel}
                                 />
                             </div>
-                            <span className="ro-count">
-                                <span style={{ color: 'var(--yn-text)', fontWeight: 600 }}>{visibleRows.length.toLocaleString()}</span>
-                                {' / '}{allRows.length.toLocaleString()}
-                            </span>
+                            <RowCountDisplay filtered={visibleRows.length} total={allRows.length} />
                         </div>
                         <div className="yn-content">
                             <RIBTable

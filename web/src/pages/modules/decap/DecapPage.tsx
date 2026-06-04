@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { Button, Icon } from '@gravity-ui/uikit';
 import { Funnel, Plus } from '@gravity-ui/icons';
 import { useSearchParamHelpers } from '../../../hooks';
-import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, EmptyPagePlaceholder, SearchInput } from '../../../components';
+import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, EmptyPagePlaceholder, SearchInput, RowCountDisplay } from '../../../components';
 import { usePrefixDraft } from './usePrefixDraft';
 import { useUnsavedChangesBlocker } from '../../builtin/_shared/lane-editor';
 import type { PrefixRowItem } from './types';
@@ -298,10 +298,7 @@ const DecapPage: React.FC = () => {
                                     icon={Funnel}
                                 />
                             </div>
-                            <span className="decap-count">
-                                <span style={{ color: 'var(--yn-text)', fontWeight: 600 }}>{visibleRows.length.toLocaleString()}</span>
-                                {' / '}{rawRows.length.toLocaleString()}
-                            </span>
+                            <RowCountDisplay filtered={visibleRows.length} total={rawRows.length} />
                         </div>
                         <div className="yn-content">
                             <PrefixTable
