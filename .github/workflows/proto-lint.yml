@@ -41,7 +41,4 @@ jobs:
 
       - name: Run linter
         run: |
-          go run ./lint/protobuf/cmd/protolint/ --exclude subprojects \
-                                                --exclude common \
-                                                --exclude controlplane \
-                                                --exclude modules/balancer
+          go run ./lint/protobuf/cmd/protolint/ --exclude subprojects

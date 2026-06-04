@@ -2,7 +2,7 @@ use core::error::Error;
 
 pub fn main() -> Result<(), Box<dyn Error>> {
     println!("cargo:rerun-if-changed=../../../common/filterpb/v1/filter.proto");
-    println!("cargo:rerun-if-changed=../../../common/commonpb/ipaddr.proto");
+    println!("cargo:rerun-if-changed=../../../common/commonpb/v1/ipaddr.proto");
     println!("cargo:rerun-if-changed=../controlplane/routemplspb/v1/routempls.proto");
 
     tonic_build::configure()

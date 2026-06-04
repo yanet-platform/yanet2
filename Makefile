@@ -85,9 +85,7 @@ proto-lint:
 		echo "WARN: 'buf' not found, skipping buf lint (install: https://buf.build/docs/installation)"; \
 	fi
 	go test ./lint/protobuf/cmd/protolint/
-	go run ./lint/protobuf/cmd/protolint/ --exclude subprojects \
-		--exclude common \
-		--exclude controlplane
+	go run ./lint/protobuf/cmd/protolint/ --exclude subprojects
 
 go-cache-clean:
 	go clean -cache

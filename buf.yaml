@@ -3,8 +3,7 @@ modules:
   - path: .
     excludes:
       - subprojects
-      # Modules not yet migrated.
-      - controlplane
+      - .claude
 lint:
   use:
     - STANDARD
@@ -19,8 +18,8 @@ lint:
     PACKAGE_DIRECTORY_MATCH:
       - modules/route-mpls
       - operators/bird-adapter
-  ignore:
-    - common
+    ENUM_VALUE_UPPER_SNAKE_CASE:
+      - common/filterpb
 breaking:
   use:
     - PACKAGE
