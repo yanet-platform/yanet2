@@ -16,7 +16,6 @@ export interface DevicesListProps {
     onSelectDevice: (deviceName: string) => void;
     counters: Map<string, DeviceCounterData>;
     history: Map<string, CounterHistoryEntry>;
-    query: string;
 }
 
 interface DeviceGroup {
@@ -63,7 +62,6 @@ export const DevicesList: React.FC<DevicesListProps> = ({
     onSelectDevice,
     counters,
     history,
-    query,
 }) => {
     const [filter, setFilter] = useState<FilterKind>('all');
 
@@ -74,16 +72,12 @@ export const DevicesList: React.FC<DevicesListProps> = ({
     }), [devices]);
 
     const filtered = useMemo(() => {
-        const q = query.trim().toLowerCase();
         return devices.filter(d => {
             if (filter === 'plain' && d.type !== 'plain') return false;
             if (filter === 'vlan' && d.type !== 'vlan') return false;
-            if (!q) return true;
-            const name = (d.id.name || '').toLowerCase();
-            const vid = d.vlanId !== undefined ? String(d.vlanId) : '';
-            return name.includes(q) || vid.includes(q);
+            return true;
         });
-    }, [devices, query, filter]);
+    }, [devices, filter]);
 
     const groups = useMemo(() => buildGroups(filtered, grouping), [filtered, grouping]);
 

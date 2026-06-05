@@ -1,14 +1,17 @@
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { Button, Icon } from '@gravity-ui/uikit';
+import { Plus } from '@gravity-ui/icons';
 import { useSearchParamHelpers } from '../../../hooks';
-import { PageLayout, PageLoader, EmptyState } from '../../../components';
+import { PageLayout, PageLoader, EmptyState, CommandPaletteHeader } from '../../../components';
 import type { DeviceType } from '../../../api/devices';
 import type { LocalDevice } from './types';
 import { useDeviceCounters } from '../../../hooks';
 import { useCounterHistory } from '../../../hooks/useCounterHistory';
 import { useUnsavedChangesBlocker } from '../_shared/lane-editor';
+import { usePalette } from '../../_shared/command-palette';
+import type { Command, RowAdapter } from '../../_shared/command-palette';
 import {
-    DevicePageHeader,
     DevicesList,
     DeviceDetails,
     CreateDeviceDialog,
@@ -35,7 +38,6 @@ const DevicesPage: React.FC = () => {
     const [searchParams, setSearchParams] = useSearchParams();
     const [createDialogOpen, setCreateDialogOpen] = useState(false);
     const [grouping, setGrouping] = useState<GroupingMode>('type');
-    const [searchQuery, setSearchQuery] = useState('');
 
     const deviceNames = useMemo(() => devices.map(d => d.id.name || ''), [devices]);
 
@@ -99,6 +101,74 @@ const DevicesPage: React.FC = () => {
         return false;
     }, [selectedDevice, saveDevice]);
 
+    const { setPageContribution } = usePalette();
+
+    const commands = useMemo((): Command[] => {
+        const list: Command[] = [
+            {
+                id: '__create_device',
+                icon: '+',
+                label: 'Create device',
+                sub: 'Open the create device dialog',
+                keywords: 'create new device add',
+                onSelect: () => handleCreateDevice(),
+            },
+        ];
+        if (selectedDevice?.isDirty) {
+            list.push({
+                id: '__save_device',
+                icon: '✓',
+                label: 'Save current device',
+                sub: `Save "${selectedDevice.id.name || ''}"`,
+                keywords: 'save commit apply device',
+                onSelect: () => handleSaveDevice(),
+            });
+        }
+        list.push({
+            id: '__group_flat',
+            icon: '≡',
+            label: 'Group: Flat',
+            keywords: 'group flat list ungrouped',
+            onSelect: () => setGrouping('flat'),
+        });
+        list.push({
+            id: '__group_type',
+            icon: '≡',
+            label: 'Group: By type',
+            keywords: 'group type physical vlan',
+            onSelect: () => setGrouping('type'),
+        });
+        list.push({
+            id: '__group_parent',
+            icon: '≡',
+            label: 'Group: By parent',
+            keywords: 'group parent hierarchy',
+            onSelect: () => setGrouping('parent'),
+        });
+        return list;
+    }, [selectedDevice, handleCreateDevice, handleSaveDevice]);
+
+    const rowAdapter = useMemo((): RowAdapter<LocalDevice> => ({
+        rows: devices,
+        getId: (d) => d.id.name || '',
+        getLabel: (d) => d.id.name || '(unnamed)',
+        getSub: (d) => d.type === 'vlan'
+            ? `vlan${d.vlanId !== undefined ? ' · ' + d.vlanId : ''}`
+            : 'physical',
+        searchText: (d) => [d.id.name, d.type, d.vlanId].filter(Boolean).join(' '),
+        onSelect: (id) => handleSelectDevice(id),
+        icon: '→',
+    }), [devices, handleSelectDevice]);
+
+    useEffect(() => {
+        setPageContribution({
+            commands,
+            rowAdapter: rowAdapter as RowAdapter<unknown>,
+            placeholder: 'Search devices or run an action…',
+        });
+        return () => setPageContribution(null);
+    }, [commands, rowAdapter, setPageContribution]);
+
     const existingDeviceNames = devices.map(d => d.id.name || '');
 
     const selectedCounterData = selectedDevice?.id.name
@@ -110,10 +180,13 @@ const DevicesPage: React.FC = () => {
         : undefined;
 
     const headerContent = (
-        <DevicePageHeader
-            onCreateDevice={handleCreateDevice}
-            searchQuery={searchQuery}
-            onSearchChange={setSearchQuery}
+        <CommandPaletteHeader
+            title="Devices"
+            placeholder="Search devices or run an action…"
+            actions={<Button view="action" onClick={handleCreateDevice}>
+                <Icon data={Plus} size={16} />
+                Create Device
+            </Button>}
         />
     );
 
@@ -145,7 +218,6 @@ const DevicesPage: React.FC = () => {
                         onSelectDevice={handleSelectDevice}
                         counters={counters}
                         history={history}
-                        query={searchQuery}
                     />
                     <DeviceDetails
                         device={selectedDevice}
