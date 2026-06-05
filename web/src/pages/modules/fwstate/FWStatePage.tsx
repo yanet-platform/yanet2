@@ -1405,11 +1405,11 @@ const FWStatePage: React.FC = () => {
         }
     };
 
-    const handleOpenAclModule = useCallback((): void => {
+    const handleOpenAcl = useCallback((aclName?: string): void => {
         if (anyDirty && !window.confirm('You have unsaved changes. Leave this page anyway?')) {
             return;
         }
-        navigate('/modules/acl');
+        navigate(aclName ? `/modules/acl?config=${encodeURIComponent(aclName)}` : '/modules/acl');
     }, [anyDirty, navigate]);
 
     const commands = useMemo((): Command[] => {
@@ -1490,7 +1490,7 @@ const FWStatePage: React.FC = () => {
             icon: '↗',
             label: 'Open ACL module',
             keywords: 'acl module open navigate',
-            onSelect: () => handleOpenAclModule(),
+            onSelect: () => handleOpenAcl(),
         });
         return list;
     }, [
@@ -1506,7 +1506,7 @@ const FWStatePage: React.FC = () => {
         updateActiveSubTab,
         updateStatesQuery,
         navigate,
-        handleOpenAclModule,
+        handleOpenAcl,
     ]);
 
     useEffect(() => {
@@ -1576,8 +1576,6 @@ const FWStatePage: React.FC = () => {
                 <TrashIcon />
             </button>
         </>
-    ) : activeSubTab === 'links' ? (
-        <Button view="flat" size="s" onClick={handleOpenAclModule}>Open ACL module</Button>
     ) : null;
 
     const pageHeader = (
@@ -1735,7 +1733,7 @@ const FWStatePage: React.FC = () => {
                             id: 'action',
                             name: 'Action',
                             template: (row) => {
-                                if (row.isLinkedHere) return <Label theme="success" size="s">Linked</Label>;
+                                if (row.isLinkedHere) return <Button size="s" view="outlined-success" onClick={() => handleOpenAcl(row.name)}>Linked: {row.name}</Button>;
                                 if (!row.isLoaded) return <Button size="s" view="outlined" disabled>Loading…</Button>;
                                 if (row.loadFailed) return <Text color="secondary" className="fwstate-table-cell">Unavailable</Text>;
                                 return (
