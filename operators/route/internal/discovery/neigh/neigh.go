@@ -84,12 +84,27 @@ func WithOnResynced(fn func()) Option {
 	}
 }
 
+// WithOnHealthy registers a callback invoked after every successful neighbour
+// table refresh.
+//
+// It fires after each successful refresh — whether during bootstrap, the
+// periodic ticker, or an event-driven update — signalling that the source is
+// live. This is distinct from OnSynced and OnResynced, which are
+// episode-edged (fire once per initial sync or once per recovery). OnHealthy
+// fires on every success regardless of episode state.
+func WithOnHealthy(fn func()) Option {
+	return func(o *options) {
+		o.OnHealthy = fn
+	}
+}
+
 type options struct {
 	UpdateInterval time.Duration
 	LinkMap        map[string]string
 	OnSynced       func()
 	OnError        func(error)
 	OnResynced     func()
+	OnHealthy      func()
 	Log            *zap.Logger
 }
 
@@ -100,6 +115,7 @@ func newOptions() *options {
 		OnSynced:       func() {},
 		OnError:        func(error) {},
 		OnResynced:     func() {},
+		OnHealthy:      func() {},
 		Log:            zap.NewNop(),
 	}
 }
@@ -119,6 +135,7 @@ type NeighMonitor struct {
 	onSyncedFn     func()
 	onErrorFn      func(error)
 	onResyncedFn   func()
+	onHealthyFn    func()
 
 	// synced is set to true once the first successful update completes and
 	// never reverts.
@@ -146,6 +163,7 @@ func NewNeighMonitor(neighTable *NeighTable, source *NeighSource, options ...Opt
 		onSyncedFn:     opts.OnSynced,
 		onErrorFn:      opts.OnError,
 		onResyncedFn:   opts.OnResynced,
+		onHealthyFn:    opts.OnHealthy,
 		log:            opts.Log,
 	}
 
@@ -376,5 +394,6 @@ func (m *NeighMonitor) updateNeighbours() error {
 	}
 
 	m.log.Info("updated nexthop cache", zap.Int("size", len(nexthopCache)))
+	m.onHealthyFn()
 	return nil
 }

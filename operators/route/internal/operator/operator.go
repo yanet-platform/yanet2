@@ -103,6 +103,9 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 			neigh.WithOnResynced(func() {
 				tracker.Set("neighbours", readinesspb.State_STATE_READY)
 			}),
+			neigh.WithOnHealthy(func() {
+				tracker.Touch("neighbours")
+			}),
 		}
 	}
 

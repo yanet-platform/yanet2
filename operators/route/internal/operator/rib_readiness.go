@@ -219,6 +219,9 @@ func (m *birdRIBReadiness) tick(now time.Time, rate float64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	// Re-stamp bird-session freshness each tick; tick re-confirms session liveness.
+	m.tracker.Touch("bird-session")
+
 	if !m.bulkSettled {
 		if rate < m.rateThreshold {
 			if m.belowSince.IsZero() {

@@ -3,6 +3,7 @@ package operator_test
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -317,6 +318,54 @@ func TestReadiness_Set_ReasonsUpdated(t *testing.T) {
 
 	resp2 := r.Ready(&readinesspb.ReadyRequest{})
 	assert.Empty(t, resp2.Scopes[0].Reasons)
+}
+
+func TestReadiness_Touch_AdvancesObservedAt(t *testing.T) {
+	r := operator.NewReadiness([]string{"neighbours"})
+
+	// Drive the scope to a known state.
+	r.SetWithReason("neighbours",
+		readinesspb.State_STATE_READY,
+		&readinesspb.Reason{Code: "SYNCED"},
+	)
+
+	resp1 := r.Ready(&readinesspb.ReadyRequest{})
+	require.Len(t, resp1.Scopes, 1)
+	s1 := resp1.Scopes[0]
+
+	obs1 := s1.ObservedAt.AsTime()
+	ltt1 := s1.LastTransitionTime.AsTime()
+	wantState := s1.State
+	wantReason := s1.Reasons[0].Code
+
+	// Sleep a small amount so the clock advances reliably.
+	time.Sleep(2 * time.Millisecond)
+
+	r.Touch("neighbours")
+
+	resp2 := r.Ready(&readinesspb.ReadyRequest{})
+	require.Len(t, resp2.Scopes, 1)
+	s2 := resp2.Scopes[0]
+
+	obs2 := s2.ObservedAt.AsTime()
+	ltt2 := s2.LastTransitionTime.AsTime()
+
+	assert.True(t, obs2.After(obs1), "Touch must advance observed_at")
+	assert.Equal(t, ltt1, ltt2, "Touch must not change last_transition_time")
+	assert.Equal(t, wantState, s2.State, "Touch must not change state")
+	require.Len(t, s2.Reasons, 1)
+	assert.Equal(t, wantReason, s2.Reasons[0].Code, "Touch must not change reason")
+}
+
+func TestReadiness_Touch_UnknownScope_NoOp(t *testing.T) {
+	r := operator.NewReadiness([]string{"neighbours"})
+
+	// Touch an unknown scope must not panic and must not create the scope.
+	r.Touch("bird-session")
+
+	resp := r.Ready(&readinesspb.ReadyRequest{})
+	require.Len(t, resp.Scopes, 1)
+	assert.Equal(t, "neighbours", resp.Scopes[0].Name)
 }
 
 // newObservedReadiness constructs a Readiness tracker backed by a zap

@@ -184,6 +184,24 @@ func (m *Readiness) set(scope string, state readinesspb.State, reason *readiness
 	m.logTransition(s.name, prev, state, reason)
 }
 
+// Touch advances observed_at for an existing scope without changing its state.
+//
+// It records that the underlying source was successfully re-evaluated, so
+// freshness consumers can distinguish a live scope from one whose last event
+// was long ago. Touch is a no-op for unknown scopes — it never creates a
+// scope. state, reason, and lastTransitionTime are left unchanged.
+func (m *Readiness) Touch(scope string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	s, ok := m.scopes[scope]
+	if !ok {
+		return
+	}
+
+	s.observedAt = time.Now()
+}
+
 // Drain marks every scope as STATE_NOT_READY with a SHUTTING_DOWN reason.
 //
 // last_transition_time is updated only for scopes that change state.
