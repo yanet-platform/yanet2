@@ -22,6 +22,7 @@ export interface RIBTableProps {
     onDeleteRow: (id: string) => void;
     conflictMap?: Map<string, number>;
     flashRowId?: string | null;
+    activeRowId?: string | null;
 }
 
 /** Read-only virtualized table for the RIB (Route Information Base). */
@@ -36,6 +37,7 @@ export const RIBTable: React.FC<RIBTableProps> = ({
     onDeleteRow,
     conflictMap,
     flashRowId,
+    activeRowId,
 }) => {
     const columns: Column<Route>[] = [
         {
@@ -156,6 +158,8 @@ export const RIBTable: React.FC<RIBTableProps> = ({
             editTitle="Edit route"
             deleteTitle="Delete route"
             flashRowId={flashRowId}
+            activeRowId={activeRowId}
+            scrollActiveIntoView
             minWidth={RIB_MIN_WIDTH}
         />
     );

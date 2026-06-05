@@ -5,7 +5,8 @@ import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, SearchInput, EmptyPage
 import { AddConfigModal } from '../../_shared/draft';
 import { BulkDeleteModal, CommandPaletteHeader } from '../../../components';
 import { usePalette } from '../../../components/command-palette';
-import type { Command, RowAdapter } from '../../../components/command-palette';
+import type { Command, RowAdapter, ShortcutSection } from '../../../components/command-palette';
+import { useListNavigation } from '../../../hooks';
 import { useTabCycle } from '../../_shared/useTabCycle';
 import { API } from '../../../api';
 import { toaster, parseIPAddress } from '../../../utils';
@@ -45,6 +46,7 @@ const RoutePage: React.FC = () => {
     const [bestOnly, setBestOnly] = useState(false);
     const [conflictsOnly, setConflictsOnly] = useState(false);
     const [flashRowId, setFlashRowId] = useState<string | null>(null);
+    const [activeRowId, setActiveRowId] = useState<string | null>(null);
 
     const currentConfig = activeConfig || configs[0] || '';
     const allRows = configRoutes.get(currentConfig) || [];
@@ -91,6 +93,8 @@ const RoutePage: React.FC = () => {
         return res;
     }, [allRows, search, sortState, family, bestOnly, conflictsOnly, conflictMap]);
 
+    const navRows = useMemo(() => visibleRows.map((r) => ({ id: getRouteId(r) })), [visibleRows]);
+
     const counts = useMemo((): Map<string, number> => {
         const m = new Map<string, number>();
         configs.forEach((c) => m.set(c, (configRoutes.get(c) || []).length));
@@ -126,6 +130,13 @@ const RoutePage: React.FC = () => {
         const route = allRows.find((r) => getRouteId(r) === id) || null;
         setDrawer({ open: true, mode: 'edit', route });
     }, [allRows]);
+
+    useListNavigation({
+        rows: navRows,
+        activeId: activeRowId,
+        setActiveId: setActiveRowId,
+        onActivate: (row) => handleEditRow(row.id),
+    });
 
     const handleCloseDrawer = useCallback((): void => {
         setDrawer((prev) => ({ ...prev, open: false }));
@@ -371,15 +382,26 @@ const RoutePage: React.FC = () => {
         max: 7,
     }), [allRows, handleJumpToRow]);
 
+    const shortcuts: ShortcutSection[] = useMemo(() => [{
+        title: 'Routes',
+        items: [
+            { keys: '↑ ↓', desc: 'Select previous / next route' },
+            { keys: 'Enter', desc: 'Edit the selected route' },
+            { keys: 'Esc', desc: 'Clear selection' },
+            { keys: '[ ]', desc: 'Switch config tab' },
+        ],
+    }], []);
+
     useEffect(() => {
         setPageContribution({
             commands: routeCommands,
             dynamicCommands: routeDynamicCommands,
             rowAdapter: routeRowAdapter as RowAdapter<unknown>,
             placeholder: 'Search routes, prefixes, or type an IP…',
+            shortcuts,
         });
         return () => setPageContribution(null);
-    }, [routeCommands, routeDynamicCommands, routeRowAdapter, setPageContribution]);
+    }, [routeCommands, routeDynamicCommands, routeRowAdapter, setPageContribution, shortcuts]);
 
     const pageHeader = (
         <CommandPaletteHeader
@@ -482,6 +504,7 @@ const RoutePage: React.FC = () => {
                                 onDeleteRow={handleDeleteRowRequest}
                                 conflictMap={conflictMap}
                                 flashRowId={flashRowId}
+                                activeRowId={activeRowId}
                             />
                         </div>
                     </>
