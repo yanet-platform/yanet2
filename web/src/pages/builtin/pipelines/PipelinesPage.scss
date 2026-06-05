@@ -109,3 +109,13 @@
 .pl-diff-dialog {
     @include diff-dialog(var(--pl-page-bg), var(--pl-line));
 }
+
+@keyframes pl-card-flash {
+    0%   { box-shadow: 0 0 0 2px var(--pl-accent); }
+    80%  { box-shadow: 0 0 0 2px var(--pl-accent); }
+    100% { box-shadow: 0 0 0 2px transparent; }
+}
+
+.pl-pipeline-card--flash {
+    animation: pl-card-flash 1.2s ease-out forwards;
+}

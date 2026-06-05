@@ -1,40 +1,33 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Button, Flex, Icon, Text } from '@gravity-ui/uikit';
+import { Button, Icon } from '@gravity-ui/uikit';
 import { Plus } from '@gravity-ui/icons';
-import { PageLayout, PageLoader, EmptyState, SearchInput } from '../../../components';
+import { PageLayout, PageLoader, EmptyState, CommandPaletteHeader } from '../../../components';
 import { useFunctionsData } from './hooks/useFunctionsData';
 import { useDragState, useUnsavedChangesBlocker } from '../_shared/lane-editor';
 import { FunctionCard } from './components/FunctionCard';
 import { CreateEntityDialog } from '../../../components';
 import { getAvailableModuleTypesFromInspect } from './moduleTypeOptions';
 import type { NetworkFunction } from './types';
+import { isFnSaveable } from './validation';
 import { API } from '../../../api';
+import { usePalette } from '../../_shared/command-palette';
+import type { Command, RowAdapter } from '../../_shared/command-palette';
 import './FunctionsPage.scss';
 
-/** Returns true if the function matches the query string (case-insensitive substring). */
-const matchesFn = (fn: NetworkFunction, query: string): boolean => {
-    const q = query.toLowerCase();
-    if (fn.id.toLowerCase().includes(q)) {
-        return true;
-    }
-    if (fn.type.toLowerCase().includes(q)) {
-        return true;
-    }
+/** Builds a space-joined search string for a function (id, type, chain names, module names/types). */
+const fnSearchText = (fn: NetworkFunction): string => {
+    const parts: string[] = [fn.id, fn.type];
     for (const chain of fn.chains) {
-        if (chain.name.toLowerCase().includes(q)) {
-            return true;
-        }
+        parts.push(chain.name);
         for (const m of chain.modules) {
-            if (m.name.toLowerCase().includes(q) || m.type.toLowerCase().includes(q)) {
-                return true;
-            }
+            parts.push(m.name, m.type);
         }
     }
-    return false;
+    return parts.join(' ');
 };
 
 /**
- * Functions page: Tracks editor with horizontal lanes, inline edit, DnD and live counters.
+ * Functions page: tracks editor with horizontal lanes, inline edit, DnD and live counters.
  */
 const FunctionsPage = (): React.JSX.Element => {
     const { functions, loading, isDirty, getServerFn, dispatch, saveFn, discardFn, createFn, deleteFn } = useFunctionsData();
@@ -42,7 +35,7 @@ const FunctionsPage = (): React.JSX.Element => {
     const [availableModuleConfigNamesByType, setAvailableModuleConfigNamesByType] = useState<Record<string, string[]>>({});
     const [availableModuleConfigNames, setAvailableModuleConfigNames] = useState<string[]>([]);
     const [createDialogOpen, setCreateDialogOpen] = useState(false);
-    const [searchQuery, setSearchQuery] = useState('');
+    const [flashId, setFlashId] = useState<string | null>(null);
     const { dragState, startDrag, endDrag } = useDragState();
 
     useEffect(() => {
@@ -86,13 +79,6 @@ const FunctionsPage = (): React.JSX.Element => {
         fetchTypes();
     }, []);
 
-    const filteredFunctions = useMemo(() => {
-        if (!searchQuery.trim()) {
-            return functions;
-        }
-        return functions.filter(fn => matchesFn(fn, searchQuery));
-    }, [functions, searchQuery]);
-
     const anyDirty = useMemo(
         () => functions.some(fn => isDirty(fn.id)),
         [functions, isDirty],
@@ -104,46 +90,87 @@ const FunctionsPage = (): React.JSX.Element => {
     const handleDiscard = useCallback((fnId: string) => (): void => discardFn(fnId), [discardFn]);
     const handleDelete = useCallback((fnId: string) => (): Promise<boolean> => deleteFn(fnId), [deleteFn]);
 
-    const pageHeader = (
-        <Flex alignItems="center" gap={4} style={{ width: '100%' }}>
-            <Text variant="header-1">Functions</Text>
-            <Flex grow />
-            <div style={{ flexBasis: 380, flexShrink: 1 }}>
-                <SearchInput
-                    value={searchQuery}
-                    onUpdate={setSearchQuery}
-                    placeholder="Search functions, chains, modules…"
-                />
-            </div>
-            <Button
-                view="action"
-                onClick={() => setCreateDialogOpen(true)}
-            >
+    const jumpToFn = useCallback((id: string): void => {
+        setFlashId(null);
+        setTimeout(() => {
+            setFlashId(id);
+            document.getElementById(`fn-card-${id}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        }, 0);
+    }, []);
+
+    const { setPageContribution } = usePalette();
+
+    const commands = useMemo((): Command[] => {
+        const list: Command[] = [
+            {
+                id: '__create_function',
+                icon: '+',
+                label: 'Create function',
+                sub: 'Open the create function dialog',
+                keywords: 'create new function add',
+                onSelect: () => setCreateDialogOpen(true),
+            },
+        ];
+        for (const fn of functions) {
+            if (isDirty(fn.id) && isFnSaveable(fn)) {
+                list.push({
+                    id: `__save_${fn.id}`,
+                    icon: '✓',
+                    label: `Save ${fn.id}`,
+                    sub: 'Save unsaved changes',
+                    keywords: 'save commit apply',
+                    onSelect: () => saveFn(fn.id),
+                });
+            }
+        }
+        return list;
+    }, [functions, isDirty, saveFn]);
+
+    const rowAdapter = useMemo((): RowAdapter<NetworkFunction> => ({
+        rows: functions,
+        getId: (fn) => fn.id,
+        getLabel: (fn) => fn.id,
+        getSub: (fn) => `${fn.type} · ${fn.chains.length} chains`,
+        searchText: fnSearchText,
+        onSelect: (id) => jumpToFn(id),
+        icon: '→',
+    }), [functions, jumpToFn]);
+
+    useEffect(() => {
+        setPageContribution({
+            commands,
+            rowAdapter: rowAdapter as RowAdapter<unknown>,
+            placeholder: 'Search functions or run an action…',
+        });
+        return () => setPageContribution(null);
+    }, [commands, rowAdapter, setPageContribution]);
+
+    const headerContent = (
+        <CommandPaletteHeader
+            title="Functions"
+            placeholder="Search functions or run an action…"
+            actions={<Button view="action" onClick={() => setCreateDialogOpen(true)}>
                 <Icon data={Plus} size={16} />
                 Create function
-            </Button>
-        </Flex>
+            </Button>}
+        />
     );
 
     if (loading) {
         return (
-            <PageLayout header={pageHeader}>
+            <PageLayout title="Functions">
                 <PageLoader loading size="l" />
             </PageLayout>
         );
     }
 
     return (
-        <PageLayout header={pageHeader}>
+        <PageLayout header={headerContent}>
             <div className="fn-page">
-                {filteredFunctions.length === 0 ? (
-                    <EmptyState message={
-                        searchQuery.trim()
-                            ? `No functions match "${searchQuery}".`
-                            : 'No functions found. Click "Create function" to add one.'
-                    } />
+                {functions.length === 0 ? (
+                    <EmptyState message='No functions found. Click "Create function" to add one.' />
                 ) : (
-                    filteredFunctions.map(fn => (
+                    functions.map(fn => (
                         <FunctionCard
                             key={fn.id}
                             fn={fn}
@@ -159,6 +186,7 @@ const FunctionsPage = (): React.JSX.Element => {
                             onSave={handleSave(fn.id)}
                             onDiscard={handleDiscard(fn.id)}
                             onDelete={handleDelete(fn.id)}
+                            flash={flashId === fn.id}
                         />
                     ))
                 )}

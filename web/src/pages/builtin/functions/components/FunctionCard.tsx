@@ -24,32 +24,10 @@ interface FunctionCardProps {
     onSave: () => Promise<void>;
     onDiscard: () => void;
     onDelete: () => Promise<boolean>;
+    flash?: boolean;
 }
 
-/** Validate a single function, returning error messages (editing-time only; weight=0 is allowed). */
-const validateFn = (fn: NetworkFunction): string[] => {
-    const errors: string[] = [];
-    for (const chain of fn.chains) {
-        const names = new Set<string>();
-        for (const m of chain.modules) {
-            if (names.has(m.name)) {
-                errors.push(`Chain "${chain.name}": duplicate module name "${m.name}"`);
-            }
-            names.add(m.name);
-        }
-    }
-    return errors;
-};
-
-/** Check save-time constraints (weight sum > 0 required). */
-const validateSave = (fn: NetworkFunction): string[] => {
-    const errors: string[] = [];
-    const totalWeight = fn.chains.reduce((s, c) => s + c.weight, 0);
-    if (totalWeight === 0 && fn.chains.length > 0) {
-        errors.push('Total chain weight is 0 — at least one chain must have weight > 0 before saving.');
-    }
-    return errors;
-};
+import { validateFn, validateSave } from '../validation';
 
 /**
  * A full function card with collapsible lanes, drag-and-drop, drawer, and per-function save.
@@ -68,6 +46,7 @@ export const FunctionCard: React.FC<FunctionCardProps> = ({
     onSave,
     onDiscard,
     onDelete,
+    flash,
 }) => {
     const [collapsed, setCollapsed] = useState(false);
     const [diffOpen, setDiffOpen] = useState(false);
@@ -241,7 +220,10 @@ export const FunctionCard: React.FC<FunctionCardProps> = ({
     }, []);
 
     return (
-        <div className={`fn-function-card${collapsed ? ' fn-function-card--collapsed' : ''}`}>
+        <div
+            id={`fn-card-${fn.id}`}
+            className={`fn-function-card${collapsed ? ' fn-function-card--collapsed' : ''}${flash ? ' fn-function-card--flash' : ''}`}
+        >
             <FunctionCardHeader
                 fn={fn}
                 isDirty={isDirty}

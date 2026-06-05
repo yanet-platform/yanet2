@@ -22,6 +22,7 @@ interface PipelineCardProps {
     onDiscard: () => void;
     onDelete: () => Promise<boolean>;
     loadFunctionList: () => Promise<FunctionId[]>;
+    flash?: boolean;
 }
 
 /**
@@ -39,6 +40,7 @@ export const PipelineCard: React.FC<PipelineCardProps> = ({
     onDiscard,
     onDelete,
     loadFunctionList,
+    flash,
 }) => {
     const [collapsed, setCollapsed] = useState(false);
     const [diffOpen, setDiffOpen] = useState(false);
@@ -112,7 +114,10 @@ export const PipelineCard: React.FC<PipelineCardProps> = ({
     }, [pipeline.functions, drawerRefId]);
 
     return (
-        <div className={`pl-pipeline-card${collapsed ? ' pl-pipeline-card--collapsed' : ''}`}>
+        <div
+            id={`pl-card-${pipeline.id}`}
+            className={`pl-pipeline-card${collapsed ? ' pl-pipeline-card--collapsed' : ''}${flash ? ' pl-pipeline-card--flash' : ''}`}
+        >
             <PipelineCardHeader
                 pipeline={pipeline}
                 isDirty={isDirty}

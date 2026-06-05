@@ -518,3 +518,13 @@
 .fn-diff-dialog {
     @include diff-dialog(var(--fn-page-bg), var(--fn-line));
 }
+
+@keyframes fn-card-flash {
+    0%   { box-shadow: 0 0 0 2px var(--fn-accent); }
+    80%  { box-shadow: 0 0 0 2px var(--fn-accent); }
+    100% { box-shadow: 0 0 0 2px transparent; }
+}
+
+.fn-function-card--flash {
+    animation: fn-card-flash 1.2s ease-out forwards;
+}

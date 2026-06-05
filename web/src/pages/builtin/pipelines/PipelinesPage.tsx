@@ -1,27 +1,18 @@
-import React, { useState, useCallback, useMemo } from 'react';
-import { Button, Flex, Icon, Text } from '@gravity-ui/uikit';
+import React, { useState, useCallback, useMemo, useEffect } from 'react';
+import { Button, Icon } from '@gravity-ui/uikit';
 import { Plus } from '@gravity-ui/icons';
-import { PageLayout, PageLoader, EmptyState, SearchInput } from '../../../components';
+import { PageLayout, PageLoader, EmptyState, CommandPaletteHeader } from '../../../components';
 import { usePipelinesData } from './hooks/usePipelinesData';
 import { useDragState, useUnsavedChangesBlocker } from '../_shared/lane-editor';
 import { PipelineCard } from './components/PipelineCard';
 import { CreateEntityDialog } from '../../../components';
 import type { Pipeline } from './types';
+import { usePalette } from '../../_shared/command-palette';
+import type { Command, RowAdapter } from '../../_shared/command-palette';
 import './PipelinesPage.scss';
 
-/** Returns true if the pipeline matches the query string (case-insensitive substring). */
-const matchesPipeline = (pl: Pipeline, query: string): boolean => {
-    const q = query.toLowerCase();
-    if (pl.id.toLowerCase().includes(q)) {
-        return true;
-    }
-    for (const ref of pl.functions) {
-        if (ref.name.toLowerCase().includes(q)) {
-            return true;
-        }
-    }
-    return false;
-};
+/** Builds a space-joined search string for a pipeline (id and function names). */
+const plSearchText = (pl: Pipeline): string => [pl.id, ...pl.functions.map(f => f.name)].join(' ');
 
 /**
  * Pipelines page: track editor with function references, drag-and-drop, and live counters.
@@ -29,15 +20,8 @@ const matchesPipeline = (pl: Pipeline, query: string): boolean => {
 const PipelinesPage = (): React.JSX.Element => {
     const { pipelines, loading, isDirty, getServerPipeline, dispatch, savePipeline, discardPipeline, createPipeline, deletePipeline, loadFunctionList } = usePipelinesData();
     const [createDialogOpen, setCreateDialogOpen] = useState(false);
-    const [searchQuery, setSearchQuery] = useState('');
+    const [flashId, setFlashId] = useState<string | null>(null);
     const { dragState, startDrag, endDrag } = useDragState();
-
-    const filteredPipelines = useMemo(() => {
-        if (!searchQuery.trim()) {
-            return pipelines;
-        }
-        return pipelines.filter(pl => matchesPipeline(pl, searchQuery));
-    }, [pipelines, searchQuery]);
 
     const anyDirty = useMemo(
         () => pipelines.some(pl => isDirty(pl.id)),
@@ -50,46 +34,87 @@ const PipelinesPage = (): React.JSX.Element => {
     const handleDiscard = useCallback((pipelineId: string) => (): void => discardPipeline(pipelineId), [discardPipeline]);
     const handleDelete = useCallback((pipelineId: string) => (): Promise<boolean> => deletePipeline(pipelineId), [deletePipeline]);
 
-    const pageHeader = (
-        <Flex alignItems="center" gap={4} style={{ width: '100%' }}>
-            <Text variant="header-1">Pipelines</Text>
-            <Flex grow />
-            <div style={{ flexBasis: 380, flexShrink: 1 }}>
-                <SearchInput
-                    value={searchQuery}
-                    onUpdate={setSearchQuery}
-                    placeholder="Search pipelines, functions…"
-                />
-            </div>
-            <Button
-                view="action"
-                onClick={() => setCreateDialogOpen(true)}
-            >
+    const jumpToPipeline = useCallback((id: string): void => {
+        setFlashId(null);
+        setTimeout(() => {
+            setFlashId(id);
+            document.getElementById(`pl-card-${id}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        }, 0);
+    }, []);
+
+    const { setPageContribution } = usePalette();
+
+    const commands = useMemo((): Command[] => {
+        const list: Command[] = [
+            {
+                id: '__create_pipeline',
+                icon: '+',
+                label: 'Create pipeline',
+                sub: 'Open the create pipeline dialog',
+                keywords: 'create new pipeline add',
+                onSelect: () => setCreateDialogOpen(true),
+            },
+        ];
+        for (const pl of pipelines) {
+            if (isDirty(pl.id)) {
+                list.push({
+                    id: `__save_${pl.id}`,
+                    icon: '✓',
+                    label: `Save ${pl.id}`,
+                    sub: 'Save unsaved changes',
+                    keywords: 'save commit apply',
+                    onSelect: () => savePipeline(pl.id),
+                });
+            }
+        }
+        return list;
+    }, [pipelines, isDirty, savePipeline]);
+
+    const rowAdapter = useMemo((): RowAdapter<Pipeline> => ({
+        rows: pipelines,
+        getId: (pl) => pl.id,
+        getLabel: (pl) => pl.id,
+        getSub: (pl) => `${pl.functions.length} functions`,
+        searchText: plSearchText,
+        onSelect: (id) => jumpToPipeline(id),
+        icon: '→',
+    }), [pipelines, jumpToPipeline]);
+
+    useEffect(() => {
+        setPageContribution({
+            commands,
+            rowAdapter: rowAdapter as RowAdapter<unknown>,
+            placeholder: 'Search pipelines or run an action…',
+        });
+        return () => setPageContribution(null);
+    }, [commands, rowAdapter, setPageContribution]);
+
+    const headerContent = (
+        <CommandPaletteHeader
+            title="Pipelines"
+            placeholder="Search pipelines or run an action…"
+            actions={<Button view="action" onClick={() => setCreateDialogOpen(true)}>
                 <Icon data={Plus} size={16} />
                 Create pipeline
-            </Button>
-        </Flex>
+            </Button>}
+        />
     );
 
     if (loading) {
         return (
-            <PageLayout header={pageHeader}>
+            <PageLayout title="Pipelines">
                 <PageLoader loading size="l" />
             </PageLayout>
         );
     }
 
     return (
-        <PageLayout header={pageHeader}>
+        <PageLayout header={headerContent}>
             <div className="pl-page">
-                {filteredPipelines.length === 0 ? (
-                    <EmptyState message={
-                        searchQuery.trim()
-                            ? `No pipelines match "${searchQuery}".`
-                            : 'No pipelines found. Click "Create pipeline" to add one.'
-                    } />
+                {pipelines.length === 0 ? (
+                    <EmptyState message='No pipelines found. Click "Create pipeline" to add one.' />
                 ) : (
-                    filteredPipelines.map(pl => (
+                    pipelines.map(pl => (
                         <PipelineCard
                             key={pl.id}
                             pipeline={pl}
@@ -103,6 +128,7 @@ const PipelinesPage = (): React.JSX.Element => {
                             onDiscard={handleDiscard(pl.id)}
                             onDelete={handleDelete(pl.id)}
                             loadFunctionList={loadFunctionList}
+                            flash={flashId === pl.id}
                         />
                     ))
                 )}
