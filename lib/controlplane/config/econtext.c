@@ -4,8 +4,8 @@
 
 #include "common/memory.h"
 #include "common/memory_address.h"
-#include "lib/dataplane/module/packet_front.h"
 #include "lib/controlplane/config/zone.h"
+#include "lib/dataplane/module/packet_front.h"
 #include "lib/errors/errors.h"
 
 static void
