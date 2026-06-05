@@ -46,16 +46,17 @@ const PipelinesPage = (): React.JSX.Element => {
     const { setPageContribution } = usePalette();
 
     const commands = useMemo((): Command[] => {
-        const list: Command[] = [
-            {
+        const list: Command[] = [];
+        if (!loading) {
+            list.push({
                 id: '__create_pipeline',
                 icon: '+',
                 label: 'Create pipeline',
                 sub: 'Open the create pipeline dialog',
                 keywords: 'create new pipeline add',
                 onSelect: () => setCreateDialogOpen(true),
-            },
-        ];
+            });
+        }
         for (const pl of pipelines) {
             if (isDirty(pl.id)) {
                 list.push({
@@ -69,7 +70,7 @@ const PipelinesPage = (): React.JSX.Element => {
             }
         }
         return list;
-    }, [pipelines, isDirty]);
+    }, [loading, pipelines, isDirty]);
 
     const rowAdapter = useMemo((): RowAdapter<Pipeline> => ({
         rows: pipelines,
@@ -94,49 +95,45 @@ const PipelinesPage = (): React.JSX.Element => {
         <CommandPaletteHeader
             title="Pipelines"
             placeholder="Search pipelines or run an action…"
-            actions={<Button view="action" onClick={() => setCreateDialogOpen(true)}>
+            actions={<Button view="action" onClick={() => setCreateDialogOpen(true)} disabled={loading}>
                 <Icon data={Plus} size={16} />
                 Create pipeline
             </Button>}
         />
     );
 
-    if (loading) {
-        return (
-            <PageLayout title="Pipelines">
-                <PageLoader loading size="l" />
-            </PageLayout>
-        );
-    }
-
     return (
         <PageLayout header={headerContent}>
-            <div className="pl-page">
-                {pipelines.length === 0 ? (
-                    <EmptyState message='No pipelines found. Click "Create pipeline" to add one.' />
-                ) : (
-                    pipelines.map(pl => (
-                        <PipelineCard
-                            key={pl.id}
-                            pipeline={pl}
-                            serverPipeline={getServerPipeline(pl.id)}
-                            isDirty={isDirty(pl.id)}
-                            dispatch={dispatch}
-                            dragState={dragState}
-                            onDragStart={startDrag}
-                            onDragEnd={endDrag}
-                            onSave={handleSave(pl.id)}
-                            onDiscard={handleDiscard(pl.id)}
-                            onDelete={handleDelete(pl.id)}
-                            loadFunctionList={loadFunctionList}
-                            diffOpen={diffOpenId === pl.id}
-                            onOpenDiff={() => setDiffOpenId(pl.id)}
-                            onCloseDiff={() => setDiffOpenId(null)}
-                            flash={flashId === pl.id}
-                        />
-                    ))
-                )}
-            </div>
+            {loading ? (
+                <PageLoader loading size="l" />
+            ) : (
+                <div className="pl-page">
+                    {pipelines.length === 0 ? (
+                        <EmptyState message='No pipelines found. Click "Create pipeline" to add one.' />
+                    ) : (
+                        pipelines.map(pl => (
+                            <PipelineCard
+                                key={pl.id}
+                                pipeline={pl}
+                                serverPipeline={getServerPipeline(pl.id)}
+                                isDirty={isDirty(pl.id)}
+                                dispatch={dispatch}
+                                dragState={dragState}
+                                onDragStart={startDrag}
+                                onDragEnd={endDrag}
+                                onSave={handleSave(pl.id)}
+                                onDiscard={handleDiscard(pl.id)}
+                                onDelete={handleDelete(pl.id)}
+                                loadFunctionList={loadFunctionList}
+                                diffOpen={diffOpenId === pl.id}
+                                onOpenDiff={() => setDiffOpenId(pl.id)}
+                                onCloseDiff={() => setDiffOpenId(null)}
+                                flash={flashId === pl.id}
+                            />
+                        ))
+                    )}
+                </div>
+            )}
 
             <CreateEntityDialog
                 entityType="Pipeline"

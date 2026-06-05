@@ -103,19 +103,22 @@ const DevicesPage: React.FC = () => {
         return false;
     }, [selectedDevice, saveDevice]);
 
+    const canCreate = !loading && !(error && devices.length === 0);
+
     const { setPageContribution } = usePalette();
 
     const commands = useMemo((): Command[] => {
-        const list: Command[] = [
-            {
+        const list: Command[] = [];
+        if (canCreate) {
+            list.push({
                 id: '__create_device',
                 icon: '+',
                 label: 'Create device',
                 sub: 'Open the create device dialog',
                 keywords: 'create new device add',
                 onSelect: () => handleCreateDevice(),
-            },
-        ];
+            });
+        }
         if (selectedDevice?.isDirty) {
             list.push({
                 id: '__save_device',
@@ -148,7 +151,7 @@ const DevicesPage: React.FC = () => {
             onSelect: () => setGrouping('parent'),
         });
         return list;
-    }, [selectedDevice, handleCreateDevice, handleSaveDevice]);
+    }, [canCreate, selectedDevice, handleCreateDevice, handleSaveDevice]);
 
     const rowAdapter = useMemo((): RowAdapter<LocalDevice> => ({
         rows: devices,
@@ -185,55 +188,45 @@ const DevicesPage: React.FC = () => {
         <CommandPaletteHeader
             title="Devices"
             placeholder="Search devices or run an action…"
-            actions={<Button view="action" onClick={handleCreateDevice}>
+            actions={<Button view="action" onClick={handleCreateDevice} disabled={!canCreate}>
                 <Icon data={Plus} size={16} />
                 Create Device
             </Button>}
         />
     );
 
-    if (loading) {
-        return (
-            <PageLayout title="Devices">
-                <PageLoader loading={loading} size="l" />
-            </PageLayout>
-        );
-    }
-
-    if (error && devices.length === 0) {
-        return (
-            <PageLayout title="Devices">
-                <EmptyState message={error} />
-            </PageLayout>
-        );
-    }
-
     return (
         <PageLayout header={headerContent}>
-            <div className="devices-page-v2">
-                <div className="dv-workspace">
-                    <DevicesList
-                        devices={devices}
-                        selectedDeviceName={selectedDeviceName}
-                        grouping={grouping}
-                        onGroupingChange={setGrouping}
-                        onSelectDevice={handleSelectDevice}
-                        counters={counters}
-                        history={history}
-                        filter={deviceFilter}
-                        onFilterChange={setDeviceFilter}
-                    />
-                    <DeviceDetails
-                        device={selectedDevice}
-                        loadPipelineList={loadPipelineList}
-                        counterData={selectedCounterData}
-                        history={selectedHistory}
-                        onUpdate={handleUpdateDevice}
-                        onSave={handleSaveDevice}
-                        getServerDevice={getServerDevice}
-                    />
+            {loading ? (
+                <PageLoader loading={loading} size="l" />
+            ) : (error && devices.length === 0) ? (
+                <EmptyState message={error} />
+            ) : (
+                <div className="devices-page-v2">
+                    <div className="dv-workspace">
+                        <DevicesList
+                            devices={devices}
+                            selectedDeviceName={selectedDeviceName}
+                            grouping={grouping}
+                            onGroupingChange={setGrouping}
+                            onSelectDevice={handleSelectDevice}
+                            counters={counters}
+                            history={history}
+                            filter={deviceFilter}
+                            onFilterChange={setDeviceFilter}
+                        />
+                        <DeviceDetails
+                            device={selectedDevice}
+                            loadPipelineList={loadPipelineList}
+                            counterData={selectedCounterData}
+                            history={selectedHistory}
+                            onUpdate={handleUpdateDevice}
+                            onSave={handleSaveDevice}
+                            getServerDevice={getServerDevice}
+                        />
+                    </div>
                 </div>
-            </div>
+            )}
 
             <CreateDeviceDialog
                 open={createDialogOpen}

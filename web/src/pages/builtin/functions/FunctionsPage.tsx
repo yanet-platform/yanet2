@@ -102,16 +102,17 @@ const FunctionsPage = (): React.JSX.Element => {
     const { setPageContribution } = usePalette();
 
     const commands = useMemo((): Command[] => {
-        const list: Command[] = [
-            {
+        const list: Command[] = [];
+        if (!loading) {
+            list.push({
                 id: '__create_function',
                 icon: '+',
                 label: 'Create function',
                 sub: 'Open the create function dialog',
                 keywords: 'create new function add',
                 onSelect: () => setCreateDialogOpen(true),
-            },
-        ];
+            });
+        }
         for (const fn of functions) {
             if (isDirty(fn.id) && isFnSaveable(fn)) {
                 list.push({
@@ -125,7 +126,7 @@ const FunctionsPage = (): React.JSX.Element => {
             }
         }
         return list;
-    }, [functions, isDirty]);
+    }, [loading, functions, isDirty]);
 
     const rowAdapter = useMemo((): RowAdapter<NetworkFunction> => ({
         rows: functions,
@@ -150,51 +151,47 @@ const FunctionsPage = (): React.JSX.Element => {
         <CommandPaletteHeader
             title="Functions"
             placeholder="Search functions or run an action…"
-            actions={<Button view="action" onClick={() => setCreateDialogOpen(true)}>
+            actions={<Button view="action" onClick={() => setCreateDialogOpen(true)} disabled={loading}>
                 <Icon data={Plus} size={16} />
                 Create function
             </Button>}
         />
     );
 
-    if (loading) {
-        return (
-            <PageLayout title="Functions">
-                <PageLoader loading size="l" />
-            </PageLayout>
-        );
-    }
-
     return (
         <PageLayout header={headerContent}>
-            <div className="fn-page">
-                {functions.length === 0 ? (
-                    <EmptyState message='No functions found. Click "Create function" to add one.' />
-                ) : (
-                    functions.map(fn => (
-                        <FunctionCard
-                            key={fn.id}
-                            fn={fn}
-                            serverFn={getServerFn(fn.id)}
-                            isDirty={isDirty(fn.id)}
-                            availableModuleTypes={availableModuleTypes}
-                            availableModuleConfigNamesByType={availableModuleConfigNamesByType}
-                            availableModuleConfigNames={availableModuleConfigNames}
-                            dispatch={dispatch}
-                            dragState={dragState}
-                            onDragStart={startDrag}
-                            onDragEnd={endDrag}
-                            onSave={handleSave(fn.id)}
-                            onDiscard={handleDiscard(fn.id)}
-                            onDelete={handleDelete(fn.id)}
-                            diffOpen={diffOpenId === fn.id}
-                            onOpenDiff={() => setDiffOpenId(fn.id)}
-                            onCloseDiff={() => setDiffOpenId(null)}
-                            flash={flashId === fn.id}
-                        />
-                    ))
-                )}
-            </div>
+            {loading ? (
+                <PageLoader loading size="l" />
+            ) : (
+                <div className="fn-page">
+                    {functions.length === 0 ? (
+                        <EmptyState message='No functions found. Click "Create function" to add one.' />
+                    ) : (
+                        functions.map(fn => (
+                            <FunctionCard
+                                key={fn.id}
+                                fn={fn}
+                                serverFn={getServerFn(fn.id)}
+                                isDirty={isDirty(fn.id)}
+                                availableModuleTypes={availableModuleTypes}
+                                availableModuleConfigNamesByType={availableModuleConfigNamesByType}
+                                availableModuleConfigNames={availableModuleConfigNames}
+                                dispatch={dispatch}
+                                dragState={dragState}
+                                onDragStart={startDrag}
+                                onDragEnd={endDrag}
+                                onSave={handleSave(fn.id)}
+                                onDiscard={handleDiscard(fn.id)}
+                                onDelete={handleDelete(fn.id)}
+                                diffOpen={diffOpenId === fn.id}
+                                onOpenDiff={() => setDiffOpenId(fn.id)}
+                                onCloseDiff={() => setDiffOpenId(null)}
+                                flash={flashId === fn.id}
+                            />
+                        ))
+                    )}
+                </div>
+            )}
 
             <CreateEntityDialog
                 entityType="Function"
