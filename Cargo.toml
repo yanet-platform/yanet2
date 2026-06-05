@@ -15,6 +15,7 @@ members = [
     "cli/modules/counters",
     "cli/modules/gateway",
     "cli/modules/ready",
+    "cli/modules/metrics",
     "modules/acl/cli",
     "modules/fwstate/cli",
     "modules/decap/cli",

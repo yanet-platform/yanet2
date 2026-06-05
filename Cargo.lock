@@ -3334,6 +3334,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "yanet-cli-metrics"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "clap_complete",
+ "tabled",
+ "tokio",
+ "yanet-cli",
+ "yanet-commonpb",
+]
+
+[[package]]
 name = "yanet-cli-nat64"
 version = "0.1.0"
 dependencies = [

@@ -15,7 +15,8 @@ CLI_CORE_MODULES := \
 	function \
 	counters \
 	gateway \
-	ready
+	ready \
+	metrics
 
 CLI_CORE_BINARIES := yanet-cli $(addprefix yanet-cli-,$(CLI_CORE_MODULES))
 
