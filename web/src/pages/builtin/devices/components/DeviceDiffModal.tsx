@@ -1,7 +1,7 @@
 import React from 'react';
 import * as yaml from 'js-yaml';
 import type { LocalDevice } from '../types';
-import { DiffModal as SharedDiffModal } from '../../_shared/DiffModal';
+import { SaveDiffModal } from '../../../../components';
 
 export interface DeviceDiffModalProps {
     device: LocalDevice;
@@ -38,11 +38,10 @@ export const DeviceDiffModal: React.FC<DeviceDiffModalProps> = ({
     onClose,
     onApply,
 }) => (
-    <SharedDiffModal
-        entity={device}
-        serverEntity={serverDevice}
-        toYaml={toYaml}
-        title={'Review changes — ' + (device.id.name || '')}
+    <SaveDiffModal
+        configName={device.id.name || ''}
+        beforeYaml={serverDevice != null ? toYaml(serverDevice) : ''}
+        afterYaml={toYaml(device)}
         onApply={onApply}
         onClose={onClose}
     />

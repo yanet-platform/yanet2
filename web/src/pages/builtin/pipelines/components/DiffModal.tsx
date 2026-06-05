@@ -2,7 +2,7 @@ import React from 'react';
 import * as yaml from 'js-yaml';
 import type { Pipeline } from '../types';
 import { localToApi } from '../wire';
-import { DiffModal as SharedDiffModal } from '../../_shared/DiffModal';
+import { SaveDiffModal } from '../../../../components';
 
 interface DiffModalProps {
     pipeline: Pipeline;
@@ -27,11 +27,10 @@ export const DiffModal: React.FC<DiffModalProps> = ({
     onClose,
     onApply,
 }) => (
-    <SharedDiffModal
-        entity={pipeline}
-        serverEntity={serverPipeline}
-        toYaml={toYaml}
-        title={`Review changes — ${pipeline.id}`}
+    <SaveDiffModal
+        configName={pipeline.id}
+        beforeYaml={serverPipeline != null ? toYaml(serverPipeline) : ''}
+        afterYaml={toYaml(pipeline)}
         onApply={onApply}
         onClose={onClose}
     />

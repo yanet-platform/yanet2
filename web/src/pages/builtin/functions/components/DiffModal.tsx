@@ -2,7 +2,7 @@ import React from 'react';
 import * as yaml from 'js-yaml';
 import type { NetworkFunction } from '../types';
 import { localToApi } from '../wire';
-import { DiffModal as SharedDiffModal } from '../../_shared/DiffModal';
+import { SaveDiffModal } from '../../../../components';
 
 interface DiffModalProps {
     fn: NetworkFunction;
@@ -29,11 +29,10 @@ export const DiffModal: React.FC<DiffModalProps> = ({
     onClose,
     onApply,
 }) => (
-    <SharedDiffModal
-        entity={fn}
-        serverEntity={serverFn}
-        toYaml={toYaml}
-        title={`Review changes — ${fn.id}`}
+    <SaveDiffModal
+        configName={fn.id}
+        beforeYaml={serverFn != null ? toYaml(serverFn) : ''}
+        afterYaml={toYaml(fn)}
         onApply={onApply}
         onClose={onClose}
         headerError={saveErrors.length > 0 ? saveErrors[0] : undefined}
