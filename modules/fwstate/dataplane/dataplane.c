@@ -25,6 +25,40 @@ struct fwstate {
 	struct fw_state_value value;
 };
 
+// Validate and return the sync-frame payload length from the IPv6 header.
+//
+// Returns false when the packet must be rejected — the header stack is not
+// fully resident (runt), the UDP claimed length is below the UDP header size
+// (underflow), or the claimed payload exceeds the bytes actually resident in
+// the first mbuf segment (over-claim / truncated).
+//
+// On success, *out is the claimed UDP payload length and is fully resident.
+// Callers must still check that *out is a non-zero multiple of the frame size.
+static inline bool
+fwstate_sync_payload_len(
+	const struct rte_mbuf *mbuf,
+	const struct rte_ipv6_hdr *ipv6_hdr,
+	uint16_t payload_offset,
+	uint16_t *out
+) {
+	uint16_t avail = rte_pktmbuf_data_len(mbuf);
+	if (avail < payload_offset) {
+		return false; // runt
+	}
+	uint16_t usable = avail - payload_offset;
+	uint16_t claimed = rte_be_to_cpu_16(ipv6_hdr->payload_len);
+	if (claimed < sizeof(struct rte_udp_hdr)) {
+		return false; // underflow
+	}
+	uint16_t claimed_payload =
+		claimed - (uint16_t)sizeof(struct rte_udp_hdr);
+	if (claimed_payload > usable) {
+		return false; // over-claim / truncated
+	}
+	*out = claimed_payload;
+	return true;
+}
+
 // Helper function to check if packet is a fw state sync packet
 static bool
 is_fw_state_sync_packet(
@@ -83,9 +117,17 @@ is_fw_state_sync_packet(
 		return false;
 	}
 
-	// Check if UDP payload size is a multiple of fw_state_sync_frame
-	uint16_t udp_payload_len = rte_be_to_cpu_16(ipv6_hdr->payload_len) -
-				   sizeof(struct rte_udp_hdr);
+	// Check if UDP payload size is a multiple of fw_state_sync_frame.
+	// Computes a bounded length to guard against underflow and over-claim.
+	const uint16_t payload_offset =
+		sizeof(struct rte_ether_hdr) + sizeof(struct rte_vlan_hdr) +
+		sizeof(struct rte_ipv6_hdr) + sizeof(struct rte_udp_hdr);
+	uint16_t udp_payload_len;
+	if (!fwstate_sync_payload_len(
+		    mbuf, ipv6_hdr, payload_offset, &udp_payload_len
+	    )) {
+		return false;
+	}
 	if (udp_payload_len % sizeof(struct fw_state_sync_frame) != 0) {
 		return false;
 	}
@@ -260,9 +302,13 @@ fwstate_handle_packets(
 		bool is_external =
 			(memcmp(ipv6_hdr->src_addr, (uint8_t[16]){0}, 16) != 0);
 
-		uint16_t udp_payload_len =
-			rte_be_to_cpu_16(ipv6_hdr->payload_len) -
-			sizeof(struct rte_udp_hdr);
+		uint16_t udp_payload_len;
+		if (!fwstate_sync_payload_len(
+			    mbuf, ipv6_hdr, payload_offset, &udp_payload_len
+		    )) {
+			packet_front_output(packet_front, packet);
+			continue;
+		}
 		size_t frame_count =
 			udp_payload_len / sizeof(struct fw_state_sync_frame);
 
