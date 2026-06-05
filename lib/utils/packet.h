@@ -102,6 +102,24 @@ free_packet_list_custom_alloc(
 int
 fill_packet_from_data(struct packet *packet, struct packet_info *data);
 
+// Build a multi-segment (chained) packet from one contiguous buffer split
+// into seg_count segments of the given byte sizes (sum must equal data->size).
+//
+// Each segment mbuf is allocated tightly to its own segment length, so an
+// over-read past a segment's bytes is detectable by AddressSanitizer. The head
+// mbuf carries nb_segs and pkt_len (the total size); each segment carries its
+// own data_len and the next-pointer chain. Runs parse_packet on the head.
+//
+// Returns parse_packet's result, or -1 on allocation failure or when the
+// segment sizes do not sum to data->size.
+int
+fill_packet_from_segments(
+	struct packet *packet,
+	struct packet_info *data,
+	const uint16_t *seg_sizes,
+	size_t seg_count
+);
+
 void
 init_mbuf(struct rte_mbuf *m, struct packet_info *data, uint16_t buf_len);
 

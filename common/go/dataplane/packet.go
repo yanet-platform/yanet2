@@ -47,6 +47,65 @@ func PacketsData(txDeviceId uint16, rxDeviceId uint16, packets ...gopacket.Packe
 
 type Packet C.struct_packet
 
+// NewPacketFromSegments builds a chained (multi-segment) packet from the given
+// segments, copied in order into separate tightly-sized mbuf segments.
+//
+// Each element of segments becomes one mbuf segment allocated at exactly that
+// segment's length, so an over-read past a segment boundary is detectable by
+// AddressSanitizer. parse_packet is run on the assembled head mbuf.
+// Returns an error if segments is empty, the total payload is zero, or the
+// underlying C call fails.
+func NewPacketFromSegments(segments [][]byte, txDeviceId, rxDeviceId uint16) (*Packet, error) {
+	if len(segments) == 0 {
+		return nil, fmt.Errorf("failed to create segmented packet: no segments provided")
+	}
+
+	// Concatenate all segments into one contiguous payload buffer.
+	total := 0
+	for idx := range segments {
+		total += len(segments[idx])
+	}
+	if total == 0 {
+		return nil, fmt.Errorf("failed to create segmented packet: total payload size is zero")
+	}
+
+	payload := make([]byte, 0, total)
+	for idx := range segments {
+		payload = append(payload, segments[idx]...)
+	}
+
+	// Build the per-segment size array.
+	segSizes := make([]uint16, len(segments))
+	for idx := range segments {
+		segSizes[idx] = uint16(len(segments[idx]))
+	}
+
+	var pinner runtime.Pinner
+	defer pinner.Unpin()
+	pinner.Pin(&payload[0])
+	pinner.Pin(&segSizes[0])
+
+	packet := C.struct_packet{}
+	packetInfo := C.struct_packet_info{
+		data:         (*C.uint8_t)(&payload[0]),
+		size:         C.uint16_t(len(payload)),
+		tx_device_id: C.uint16_t(txDeviceId),
+		rx_device_id: C.uint16_t(rxDeviceId),
+	}
+
+	rc := C.fill_packet_from_segments(
+		&packet,
+		&packetInfo,
+		(*C.uint16_t)(&segSizes[0]),
+		C.size_t(len(segSizes)),
+	)
+	if rc != 0 {
+		return nil, fmt.Errorf("failed to create segmented packet: rc=%d", rc)
+	}
+
+	return (*Packet)(&packet), nil
+}
+
 func NewPacketFromData(data PacketData) (*Packet, error) {
 	packet := C.struct_packet{}
 	packetData := C.struct_packet_info{

@@ -155,6 +155,16 @@ type Result struct {
 	Drop   []*framework.PacketInfo
 }
 
+// RawResult holds the raw first-segment bytes of each output and drop packet
+// from one pipeline round, without gopacket parsing.
+//
+// Use this when the packets under test cannot be decoded by gopacket (e.g.
+// malformed or multi-segment packets that are passed through as-is).
+type RawResult struct {
+	Output [][]byte
+	Drop   [][]byte
+}
+
 // Harness is a handle to an in-process dataplane harness.
 //
 // Never move this object in memory after construction — the underlying C
@@ -276,6 +286,58 @@ func (m *Harness) HandlePacketsWithHashes(
 		)
 	}
 	return m.handlePackets(0, hashes, packets...)
+}
+
+// HandleSegmentedPackets runs one pipeline round on worker 0 where each input
+// packet is supplied as an ordered list of byte segments, producing a chained
+// multi-segment mbuf. The result is returned unparsed so callers can inspect
+// packets that gopacket cannot decode.
+func (m *Harness) HandleSegmentedPackets(packets ...[][]byte) (*RawResult, error) {
+	pinner := runtime.Pinner{}
+	defer pinner.Unpin()
+
+	builtPackets := make([]*dataplane.Packet, 0, len(packets))
+	for idx := range packets {
+		pkt, err := dataplane.NewPacketFromSegments(packets[idx], 0, 0)
+		if err != nil {
+			return nil, fmt.Errorf("failed to build segmented packet at index %d: %w", idx, err)
+		}
+		pinner.Pin(pkt)
+		builtPackets = append(builtPackets, pkt)
+	}
+
+	packetList := dataplane.NewPacketList(&pinner, builtPackets)
+
+	pinner.Pin(m)
+
+	var result C.struct_dataplane_ut_round_result
+	C.dataplane_ut_run(
+		m.ptr,
+		C.size_t(0),
+		(*C.struct_packet_list)(unsafe.Pointer(packetList)),
+		&result,
+	)
+
+	pinner.Pin(&result)
+
+	output := (*dataplane.PacketList)(unsafe.Pointer(&result.output))
+	drop := (*dataplane.PacketList)(unsafe.Pointer(&result.drop))
+
+	rawBytes := func(list *dataplane.PacketList) [][]byte {
+		data := list.Data()
+		out := make([][]byte, 0, len(data))
+		for idx := range data {
+			b := make([]byte, len(data[idx].Payload))
+			copy(b, data[idx].Payload)
+			out = append(out, b)
+		}
+		return out
+	}
+
+	return &RawResult{
+		Output: rawBytes(output),
+		Drop:   rawBytes(drop),
+	}, nil
 }
 
 // handlePackets is the shared implementation for all HandlePackets variants.

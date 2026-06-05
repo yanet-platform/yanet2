@@ -230,7 +230,12 @@ fill_packet(
 
 void
 free_packet(struct packet *packet) {
-	free(packet->mbuf);
+	struct rte_mbuf *seg = packet->mbuf;
+	while (seg != NULL) {
+		struct rte_mbuf *next = seg->next;
+		free(seg);
+		seg = next;
+	}
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -357,6 +362,109 @@ fill_packet_from_data(struct packet *packet, struct packet_info *data) {
 	init_mbuf(mbuf, data, buf_len);
 	init_packet_with_mbuf(packet, mbuf, data);
 	return parse_packet(packet);
+}
+
+// Allocate one mbuf segment, copy len bytes from src into its data area.
+//
+// buf_len is the total buffer length (sizeof rte_mbuf is NOT included).
+// data_off is the data offset within the buffer (headroom for seg 0, 0 for the
+// rest). Returns the allocated mbuf, or NULL on failure.
+static struct rte_mbuf *
+alloc_seg(const uint8_t *src, uint16_t len, size_t buf_len, uint16_t data_off) {
+	size_t align = alignof(struct rte_mbuf);
+	size_t alloc_size = sizeof(struct rte_mbuf) + buf_len;
+	if (alloc_size % align != 0) {
+		alloc_size += align - alloc_size % align;
+	}
+	struct rte_mbuf *m = aligned_alloc(align, alloc_size);
+	if (m == NULL) {
+		return NULL;
+	}
+	memset(m, 0, sizeof(struct rte_mbuf));
+	m->priv_size = 0;
+	m->buf_addr = (char *)m + sizeof(struct rte_mbuf);
+	m->buf_len = (uint16_t)buf_len;
+	m->data_off = data_off;
+	m->data_len = len;
+	m->pkt_len = len;
+	m->nb_segs = 1;
+	m->pool = NULL;
+	m->port = 1;
+	m->next = NULL;
+	rte_mbuf_refcnt_set(m, 1);
+	memcpy(rte_pktmbuf_mtod(m, uint8_t *), src, len);
+	return m;
+}
+
+int
+fill_packet_from_segments(
+	struct packet *packet,
+	struct packet_info *data,
+	const uint16_t *seg_sizes,
+	size_t seg_count
+) {
+	if (seg_count == 0) {
+		return -1;
+	}
+
+	// Validate that the segment sizes sum to the total packet size.
+	uint32_t total = 0;
+	for (size_t i = 0; i < seg_count; i++) {
+		total += seg_sizes[i];
+	}
+	if (total != data->size) {
+		return -1;
+	}
+
+	// Allocate all segments, chaining as we go.
+	struct rte_mbuf *head = NULL;
+	struct rte_mbuf *prev = NULL;
+	uint32_t offset = 0;
+
+	for (size_t i = 0; i < seg_count; i++) {
+		uint16_t seg_len = seg_sizes[i];
+		size_t buf_len;
+		uint16_t data_off;
+
+		if (i == 0) {
+			buf_len = RTE_PKTMBUF_HEADROOM + seg_len;
+			data_off =
+				RTE_MIN(RTE_PKTMBUF_HEADROOM,
+					(uint16_t)buf_len);
+		} else {
+			buf_len = seg_len;
+			data_off = 0;
+		}
+
+		struct rte_mbuf *seg = alloc_seg(
+			data->data + offset, seg_len, buf_len, data_off
+		);
+		if (seg == NULL) {
+			// Free everything allocated so far.
+			struct rte_mbuf *s = head;
+			while (s != NULL) {
+				struct rte_mbuf *next = s->next;
+				free(s);
+				s = next;
+			}
+			return -1;
+		}
+
+		if (head == NULL) {
+			head = seg;
+		}
+		if (prev != NULL) {
+			prev->next = seg;
+		}
+		prev = seg;
+		offset += seg_len;
+	}
+
+	// Fix up the head: nb_segs and pkt_len cover the whole chain.
+	head->nb_segs = (uint16_t)seg_count;
+	head->pkt_len = data->size;
+
+	return init_packet_with_mbuf(packet, head, data);
 }
 
 int
