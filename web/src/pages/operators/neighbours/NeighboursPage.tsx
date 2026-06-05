@@ -1,12 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { useSearchParamHelpers } from '../../../hooks';
+import { useSearchParamHelpers, useListNavigation } from '../../../hooks';
 import { Button, Icon } from '@gravity-ui/uikit';
 import { Plus, Layers } from '@gravity-ui/icons';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, EmptyPagePlaceholder } from '../../../components';
 import { BulkDeleteModal, DeleteConfigModal, CommandPaletteHeader } from '../../../components';
 import { usePalette } from '../../../components/command-palette';
-import type { Command, RowAdapter } from '../../../components/command-palette';
+import type { Command, RowAdapter, ShortcutSection } from '../../../components/command-palette';
 import { useTabCycle } from '../../_shared/useTabCycle';
 import { stringToIPAddress, ipAddressToString } from '../../../utils/netip';
 import { parseIPAddress } from '../../../utils';
@@ -66,6 +66,7 @@ const NeighboursPage: React.FC = () => {
 
     const [paused, setPaused] = useState(false);
     const [flashRowId, setFlashRowId] = useState<string | null>(null);
+    const [activeRowId, setActiveRowId] = useState<string | null>(null);
 
     const {
         tables,
@@ -148,6 +149,8 @@ const NeighboursPage: React.FC = () => {
         return res;
     }, [allRows, sortState, family, stateFilter]);
 
+    const navRows = useMemo(() => visibleRows.map((n) => ({ id: getNeighbourId(n) })), [visibleRows]);
+
     const counts = useMemo((): Map<string, number> => {
         const m = new Map<string, number>();
         m.set(MERGED_TAB, tables.reduce((sum, t) => sum + Number(t.entry_count ?? 0), 0));
@@ -174,7 +177,15 @@ const NeighboursPage: React.FC = () => {
         const neighbour = allRows.find((n) => getNeighbourId(n) === id) || null;
         const mode = isMergedView ? 'view' : 'edit';
         setPanel({ open: true, mode, neighbour });
+        setActiveRowId(id);
     }, [allRows, isMergedView]);
+
+    useListNavigation({
+        rows: navRows,
+        activeId: activeRowId,
+        setActiveId: setActiveRowId,
+        onActivate: (row) => handleRowClick(row.id),
+    });
 
     const handleSubmitNeighbour = useCallback(async (table: string, entry: Neighbour): Promise<void> => {
         if (panel.mode === 'add') {
@@ -489,15 +500,26 @@ const NeighboursPage: React.FC = () => {
         max: 7,
     }), [allRows, handleJumpToRow]);
 
+    const shortcuts: ShortcutSection[] = useMemo(() => [{
+        title: 'Neighbours',
+        items: [
+            { keys: '↑ ↓', desc: 'Select previous / next neighbour' },
+            { keys: 'Enter', desc: 'Open the neighbour panel' },
+            { keys: 'Esc', desc: 'Clear selection' },
+            { keys: '[ ]', desc: 'Switch table tab' },
+        ],
+    }], []);
+
     useEffect(() => {
         setPageContribution({
             commands: neighbourCommands,
             dynamicCommands: neighbourDynamicCommands,
             rowAdapter: neighbourRowAdapter as RowAdapter<unknown>,
             placeholder: 'Search neighbours or type an IP…',
+            shortcuts,
         });
         return () => setPageContribution(null);
-    }, [neighbourCommands, neighbourDynamicCommands, neighbourRowAdapter, setPageContribution]);
+    }, [neighbourCommands, neighbourDynamicCommands, neighbourRowAdapter, setPageContribution, shortcuts]);
 
     const searchActive = family !== 'all' || !!stateFilter;
 
@@ -628,6 +650,7 @@ const NeighboursPage: React.FC = () => {
                                 cache={cache}
                                 tables={tables}
                                 flashRowId={flashRowId}
+                                activeRowId={activeRowId}
                             />
                         </div>
                     </>

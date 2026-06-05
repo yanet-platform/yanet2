@@ -62,6 +62,8 @@ export interface VirtualTableProps<T> {
 
     onRowClick?: (id: string) => void;
     activeRowId?: string | null;
+    /** When true, scrolls the active row into view as activeRowId changes. Off by default so existing callers are unaffected. */
+    scrollActiveIntoView?: boolean;
 
     flashRowId?: string | null;
 
@@ -173,6 +175,7 @@ export function VirtualTable<T>({
     deleteIcon,
     onRowClick,
     activeRowId,
+    scrollActiveIntoView,
     flashRowId,
     headerActions,
     footerSummary,
@@ -228,6 +231,20 @@ export function VirtualTable<T>({
         const t = setTimeout(() => setFlashingId(null), 1200);
         return () => clearTimeout(t);
     }, [flashRowId, rows, rowVirtualizer, getRowId]);
+
+    const prevActiveRowId = useRef<string | null>(null);
+    useEffect(() => {
+        const prev = prevActiveRowId.current;
+        prevActiveRowId.current = activeRowId ?? null;
+        if (!scrollActiveIntoView || !activeRowId) return;
+        // Only scroll when the selection itself changed, not when a data refresh
+        // installs a new rows array.
+        if (activeRowId === prev) return;
+        const idx = rows.findIndex((r) => getRowId(r) === activeRowId);
+        if (idx >= 0) {
+            rowVirtualizer.scrollToIndex(idx, { align: 'auto' });
+        }
+    }, [scrollActiveIntoView, activeRowId, rows, rowVirtualizer, getRowId]);
 
     const isAllSelected = rows.length > 0 && rows.every((r) => selectedIds.has(getRowId(r)));
     const isIndeterminate = !isAllSelected && rows.some((r) => selectedIds.has(getRowId(r)));

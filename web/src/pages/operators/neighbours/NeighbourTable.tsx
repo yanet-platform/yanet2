@@ -40,6 +40,7 @@ export interface NeighbourTableProps {
     cache?: Map<string, Neighbour[]>;
     tables?: NeighbourTableInfo[];
     flashRowId?: string | null;
+    activeRowId?: string | null;
 }
 
 interface StateBadgeProps {
@@ -152,6 +153,7 @@ export const NeighbourTable: React.FC<NeighbourTableProps> = ({
     cache,
     tables,
     flashRowId,
+    activeRowId,
 }): React.JSX.Element => {
     const columns: Column<Neighbour>[] = [
         {
@@ -322,6 +324,8 @@ export const NeighbourTable: React.FC<NeighbourTableProps> = ({
             editIcon={<Pencil width={14} height={14} />}
             deleteIcon={<TrashBin width={14} height={14} />}
             onRowClick={onRowClick}
+            activeRowId={activeRowId}
+            scrollActiveIntoView
             flashRowId={flashRowId}
             headerActions={headerActions}
             footerSummary={footerText}
