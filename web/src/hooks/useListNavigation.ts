@@ -18,7 +18,7 @@ interface UseListNavigationOptions<T extends { id: string }> {
     enabled?: boolean;
 }
 
-/** Adds Arrow Up/Down/Enter/Esc/d/Backspace keyboard navigation to a list of rows; ignores events whose target is or is inside a focused interactive control (button, select, link, role="button/menuitem"). */
+/** Adds Arrow Up/Down/Enter/Esc/d/Backspace keyboard navigation to a list of rows; arrows defer only to arrow-consuming controls (select, listbox, combobox, menu, slider, spinbutton); Enter and delete keys defer to any focused interactive control. */
 export const useListNavigation = <T extends { id: string }>({
     rows,
     activeId,
@@ -51,8 +51,7 @@ export const useListNavigation = <T extends { id: string }>({
             if (
                 target.tagName === 'INPUT' ||
                 target.tagName === 'TEXTAREA' ||
-                target.isContentEditable ||
-                target.closest('button, select, a[href], [role="button"], [role="menuitem"]')
+                target.isContentEditable
             ) {
                 return;
             }
@@ -62,6 +61,8 @@ export const useListNavigation = <T extends { id: string }>({
             }
 
             if (key === 'ArrowDown' || key === 'ArrowUp') {
+                // Controls that consume arrow keys themselves take precedence.
+                if (target.closest('select, [role="listbox"], [role="combobox"], [role="menu"], [role="menubar"], [role="slider"], [role="spinbutton"]')) return;
                 e.preventDefault();
                 if (rows.length === 0) return;
 
@@ -88,6 +89,8 @@ export const useListNavigation = <T extends { id: string }>({
             }
 
             if (key === 'Enter') {
+                // Defer activation to a focused interactive control.
+                if (target.closest('button, select, a[href], [role="button"], [role="menuitem"]')) return;
                 if (activeId === null) return;
                 const row = rows.find((r) => r.id === activeId);
                 if (row && onActivate) {
@@ -103,6 +106,8 @@ export const useListNavigation = <T extends { id: string }>({
             }
 
             if (key === 'd' || key === 'Backspace') {
+                // Defer activation to a focused interactive control.
+                if (target.closest('button, select, a[href], [role="button"], [role="menuitem"]')) return;
                 if (!onDelete) return;
                 if (activeId === null) return;
                 const row = rows.find((r) => r.id === activeId);

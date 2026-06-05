@@ -2,7 +2,7 @@ import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Button, Icon } from '@gravity-ui/uikit';
 import { Plus } from '@gravity-ui/icons';
-import { useSearchParamHelpers } from '../../../hooks';
+import { useSearchParamHelpers, useListNavigation } from '../../../hooks';
 import { PageLayout, PageLoader, EmptyState, CommandPaletteHeader } from '../../../components';
 import type { DeviceType } from '../../../api/devices';
 import type { LocalDevice } from './types';
@@ -10,12 +10,14 @@ import { useDeviceCounters } from '../../../hooks';
 import { useCounterHistory } from '../../../hooks/useCounterHistory';
 import { useUnsavedChangesBlocker } from '../_shared/lane-editor';
 import { usePalette } from '../../../components/command-palette';
-import type { Command, RowAdapter } from '../../../components/command-palette';
+import type { Command, RowAdapter, ShortcutSection } from '../../../components/command-palette';
 import {
     DevicesList,
     DeviceDetails,
     CreateDeviceDialog,
     useDeviceData,
+    filterDevices,
+    buildGroups,
 } from '.';
 import type { FilterKind } from '.';
 import './devices.scss';
@@ -57,6 +59,11 @@ const DevicesPage: React.FC = () => {
         return devices.find(d => d.id.name === selectedDeviceName) || null;
     }, [devices, selectedDeviceName]);
 
+    const visibleDevices = useMemo(
+        () => buildGroups(filterDevices(devices, deviceFilter), grouping).flatMap(g => g.items),
+        [devices, deviceFilter, grouping],
+    );
+
     const anyDirty = useMemo(() => devices.some(d => d.isDirty), [devices]);
     useUnsavedChangesBlocker(anyDirty);
 
@@ -89,6 +96,18 @@ const DevicesPage: React.FC = () => {
     const handleSelectDevice = useCallback((deviceName: string) => {
         updateParams({ [QP_DEVICE]: deviceName || null });
     }, [updateParams]);
+
+    const visibleNavRows = useMemo(
+        () => visibleDevices.map(d => ({ id: d.id.name || '' })),
+        [visibleDevices],
+    );
+
+    useListNavigation({
+        rows: visibleNavRows,
+        activeId: selectedDeviceName,
+        setActiveId: (id) => { if (id) handleSelectDevice(id); },
+        getElementId: (name) => `dv-row-${name}`,
+    });
 
     const handleUpdateDevice = useCallback((updates: Partial<LocalDevice>) => {
         if (selectedDeviceName) {
@@ -165,14 +184,20 @@ const DevicesPage: React.FC = () => {
         icon: '→',
     }), [devices, handleSelectDevice]);
 
+    const shortcuts = useMemo((): ShortcutSection[] => [{
+        title: 'Devices',
+        items: [{ keys: '↑ ↓', desc: 'Select previous / next device' }],
+    }], []);
+
     useEffect(() => {
         setPageContribution({
             commands,
             rowAdapter: rowAdapter as RowAdapter<unknown>,
             placeholder: 'Search devices or run an action…',
+            shortcuts,
         });
         return () => setPageContribution(null);
-    }, [commands, rowAdapter, setPageContribution]);
+    }, [commands, rowAdapter, setPageContribution, shortcuts]);
 
     const existingDeviceNames = devices.map(d => d.id.name || '');
 

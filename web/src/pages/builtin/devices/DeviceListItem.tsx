@@ -31,6 +31,7 @@ export const DeviceListItem: React.FC<DeviceListItemProps> = ({
 
     return (
         <button
+            id={`dv-row-${device.id.name || ''}`}
             className={`dv-row${isSelected ? ' row-sel' : ''}`}
             onClick={onClick}
         >

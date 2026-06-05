@@ -32,7 +32,14 @@ const nextGrouping = (current: GroupingMode): GroupingMode => {
     return 'flat';
 };
 
-const buildGroups = (devices: LocalDevice[], grouping: GroupingMode): DeviceGroup[] => {
+export const filterDevices = (devices: LocalDevice[], filter: FilterKind): LocalDevice[] =>
+    devices.filter(d => {
+        if (filter === 'plain' && d.type !== 'plain') return false;
+        if (filter === 'vlan' && d.type !== 'vlan') return false;
+        return true;
+    });
+
+export const buildGroups = (devices: LocalDevice[], grouping: GroupingMode): DeviceGroup[] => {
     if (grouping === 'type') {
         return [
             { key: 'plain', label: 'Physical', items: devices.filter(d => d.type === 'plain') },
@@ -74,13 +81,7 @@ export const DevicesList: React.FC<DevicesListProps> = ({
         vlan: devices.filter(d => d.type === 'vlan').length,
     }), [devices]);
 
-    const filtered = useMemo(() => {
-        return devices.filter(d => {
-            if (filter === 'plain' && d.type !== 'plain') return false;
-            if (filter === 'vlan' && d.type !== 'vlan') return false;
-            return true;
-        });
-    }, [devices, filter]);
+    const filtered = useMemo(() => filterDevices(devices, filter), [devices, filter]);
 
     const groups = useMemo(() => buildGroups(filtered, grouping), [filtered, grouping]);
 
