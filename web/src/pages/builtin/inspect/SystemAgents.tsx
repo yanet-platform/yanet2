@@ -37,7 +37,7 @@ export const SystemAgents: React.FC<SystemAgentsProps> = ({ instance: _instance,
     const count = agents.length;
 
     return (
-        <div className="iv-system-agents">
+        <div id="iv-section-agents" className="iv-system-agents">
             <div className="iv-system-agents__header iv-system-agents__title">
                 SYSTEM AGENTS
             </div>

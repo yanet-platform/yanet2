@@ -28,7 +28,7 @@ export const PipeWall: React.FC<PipeWallProps> = ({ instance }) => {
     );
 
     return (
-        <div className="iv-pipe-wall">
+        <div id="iv-section-pipelines" className="iv-pipe-wall">
             <div className="iv-label iv-pipe-wall__title">
                 PIPELINES{' '}
                 <span className="iv-label__count">{pipelines.length}</span>

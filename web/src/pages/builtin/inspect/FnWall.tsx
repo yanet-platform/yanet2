@@ -45,7 +45,7 @@ export const FnWall: React.FC<FnWallProps> = ({ instance }) => {
     const idleCount = functions.length - activeCount;
 
     return (
-        <div className="iv-fn-wall">
+        <div id="iv-section-functions" className="iv-fn-wall">
             <div className="iv-fn-wall__header iv-label">
                 <span>
                     FUNCTIONS{' '}

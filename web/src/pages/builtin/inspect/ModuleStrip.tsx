@@ -40,7 +40,7 @@ export const ModuleStrip: React.FC<ModuleStripProps> = ({ instance, usage }) => 
     );
 
     return (
-        <div className="iv-module-strip">
+        <div id="iv-section-modules" className="iv-module-strip">
             <div className="iv-module-strip__header">
                 <span className="iv-label">
                     DATAPLANE MODULES{' '}

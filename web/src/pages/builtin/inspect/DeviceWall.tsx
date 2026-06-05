@@ -30,7 +30,7 @@ export const DeviceWall: React.FC<DeviceWallProps> = ({
     );
 
     return (
-        <div className="iv-device-wall">
+        <div id="iv-section-devices" className="iv-device-wall">
             <div className="iv-device-wall__header">
                 <span className="iv-label">
                     DEVICES{' '}
