@@ -11,7 +11,8 @@ import type { NetworkFunction } from './types';
 import { isFnSaveable } from './validation';
 import { API } from '../../../api';
 import { usePalette } from '../../../components/command-palette';
-import type { Command, RowAdapter } from '../../../components/command-palette';
+import type { Command, RowAdapter, ShortcutSection } from '../../../components/command-palette';
+import { useListNavigation } from '../../../hooks';
 import './FunctionsPage.scss';
 
 /** Builds a space-joined search string for a function (id, type, chain names, module names/types). */
@@ -37,6 +38,7 @@ const FunctionsPage = (): React.JSX.Element => {
     const [createDialogOpen, setCreateDialogOpen] = useState(false);
     const [flashId, setFlashId] = useState<string | null>(null);
     const [diffOpenId, setDiffOpenId] = useState<string | null>(null);
+    const [activeId, setActiveId] = useState<string | null>(null);
     const { dragState, startDrag, endDrag } = useDragState();
 
     useEffect(() => {
@@ -99,6 +101,14 @@ const FunctionsPage = (): React.JSX.Element => {
         }, 0);
     }, []);
 
+    useListNavigation<NetworkFunction>({
+        rows: functions,
+        activeId,
+        setActiveId,
+        onActivate: (fn) => setDiffOpenId(fn.id),
+        getElementId: (id) => `fn-card-${id}`,
+    });
+
     const { setPageContribution } = usePalette();
 
     const commands = useMemo((): Command[] => {
@@ -138,14 +148,24 @@ const FunctionsPage = (): React.JSX.Element => {
         icon: '→',
     }), [functions, jumpToFn]);
 
+    const shortcuts = useMemo((): ShortcutSection[] => [{
+        title: 'Functions',
+        items: [
+            { keys: '↑ ↓', desc: 'Highlight a function' },
+            { keys: 'Enter', desc: 'Open the YAML diff' },
+            { keys: 'Esc', desc: 'Clear selection' },
+        ],
+    }], []);
+
     useEffect(() => {
         setPageContribution({
             commands,
             rowAdapter: rowAdapter as RowAdapter<unknown>,
             placeholder: 'Search functions or run an action…',
+            shortcuts,
         });
         return () => setPageContribution(null);
-    }, [commands, rowAdapter, setPageContribution]);
+    }, [commands, rowAdapter, setPageContribution, shortcuts]);
 
     const headerContent = (
         <CommandPaletteHeader
@@ -187,6 +207,7 @@ const FunctionsPage = (): React.JSX.Element => {
                                 onOpenDiff={() => setDiffOpenId(fn.id)}
                                 onCloseDiff={() => setDiffOpenId(null)}
                                 flash={flashId === fn.id}
+                                active={activeId === fn.id}
                             />
                         ))
                     )}

@@ -8,7 +8,8 @@ import { PipelineCard } from './components/PipelineCard';
 import { CreateEntityDialog } from '../../../components';
 import type { Pipeline } from './types';
 import { usePalette } from '../../../components/command-palette';
-import type { Command, RowAdapter } from '../../../components/command-palette';
+import type { Command, RowAdapter, ShortcutSection } from '../../../components/command-palette';
+import { useListNavigation } from '../../../hooks';
 import './PipelinesPage.scss';
 
 /** Builds a space-joined search string for a pipeline (id and function names). */
@@ -22,6 +23,7 @@ const PipelinesPage = (): React.JSX.Element => {
     const [createDialogOpen, setCreateDialogOpen] = useState(false);
     const [flashId, setFlashId] = useState<string | null>(null);
     const [diffOpenId, setDiffOpenId] = useState<string | null>(null);
+    const [activeId, setActiveId] = useState<string | null>(null);
     const { dragState, startDrag, endDrag } = useDragState();
 
     const anyDirty = useMemo(
@@ -42,6 +44,14 @@ const PipelinesPage = (): React.JSX.Element => {
             document.getElementById(`pl-card-${id}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
         }, 0);
     }, []);
+
+    useListNavigation<Pipeline>({
+        rows: pipelines,
+        activeId,
+        setActiveId,
+        onActivate: (pl) => setDiffOpenId(pl.id),
+        getElementId: (id) => `pl-card-${id}`,
+    });
 
     const { setPageContribution } = usePalette();
 
@@ -82,14 +92,24 @@ const PipelinesPage = (): React.JSX.Element => {
         icon: '→',
     }), [pipelines, jumpToPipeline]);
 
+    const shortcuts = useMemo((): ShortcutSection[] => [{
+        title: 'Pipelines',
+        items: [
+            { keys: '↑ ↓', desc: 'Highlight a pipeline' },
+            { keys: 'Enter', desc: 'Open the YAML diff' },
+            { keys: 'Esc', desc: 'Clear selection' },
+        ],
+    }], []);
+
     useEffect(() => {
         setPageContribution({
             commands,
             rowAdapter: rowAdapter as RowAdapter<unknown>,
             placeholder: 'Search pipelines or run an action…',
+            shortcuts,
         });
         return () => setPageContribution(null);
-    }, [commands, rowAdapter, setPageContribution]);
+    }, [commands, rowAdapter, setPageContribution, shortcuts]);
 
     const headerContent = (
         <CommandPaletteHeader
@@ -129,6 +149,7 @@ const PipelinesPage = (): React.JSX.Element => {
                                 onOpenDiff={() => setDiffOpenId(pl.id)}
                                 onCloseDiff={() => setDiffOpenId(null)}
                                 flash={flashId === pl.id}
+                                active={activeId === pl.id}
                             />
                         ))
                     )}

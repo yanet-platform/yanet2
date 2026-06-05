@@ -28,6 +28,7 @@ interface FunctionCardProps {
     onOpenDiff: () => void;
     onCloseDiff: () => void;
     flash?: boolean;
+    active?: boolean;
 }
 
 import { validateFn, validateSave } from '../validation';
@@ -53,6 +54,7 @@ export const FunctionCard: React.FC<FunctionCardProps> = ({
     onOpenDiff,
     onCloseDiff,
     flash,
+    active,
 }) => {
     const [collapsed, setCollapsed] = useState(false);
     const [drawerSelection, setDrawerSelection] = useState<
@@ -219,7 +221,7 @@ export const FunctionCard: React.FC<FunctionCardProps> = ({
     return (
         <div
             id={`fn-card-${fn.id}`}
-            className={`fn-function-card${collapsed ? ' fn-function-card--collapsed' : ''}${flash ? ' fn-function-card--flash' : ''}`}
+            className={`fn-function-card${collapsed ? ' fn-function-card--collapsed' : ''}${flash ? ' fn-function-card--flash' : ''}${active ? ' fn-function-card--active' : ''}`}
         >
             <FunctionCardHeader
                 fn={fn}

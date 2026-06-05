@@ -528,3 +528,7 @@
 .fn-function-card--flash {
     animation: fn-card-flash 1.2s ease-out forwards;
 }
+
+.fn-function-card--active {
+    box-shadow: 0 0 0 2px var(--fn-accent);
+}

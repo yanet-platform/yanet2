@@ -26,6 +26,7 @@ interface PipelineCardProps {
     onOpenDiff: () => void;
     onCloseDiff: () => void;
     flash?: boolean;
+    active?: boolean;
 }
 
 /**
@@ -47,6 +48,7 @@ export const PipelineCard: React.FC<PipelineCardProps> = ({
     onOpenDiff,
     onCloseDiff,
     flash,
+    active,
 }) => {
     const [collapsed, setCollapsed] = useState(false);
     const [drawerRefId, setDrawerRefId] = useState<string | null>(null);
@@ -121,7 +123,7 @@ export const PipelineCard: React.FC<PipelineCardProps> = ({
     return (
         <div
             id={`pl-card-${pipeline.id}`}
-            className={`pl-pipeline-card${collapsed ? ' pl-pipeline-card--collapsed' : ''}${flash ? ' pl-pipeline-card--flash' : ''}`}
+            className={`pl-pipeline-card${collapsed ? ' pl-pipeline-card--collapsed' : ''}${flash ? ' pl-pipeline-card--flash' : ''}${active ? ' pl-pipeline-card--active' : ''}`}
         >
             <PipelineCardHeader
                 pipeline={pipeline}

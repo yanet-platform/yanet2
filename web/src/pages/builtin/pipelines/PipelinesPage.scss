@@ -119,3 +119,7 @@
 .pl-pipeline-card--flash {
     animation: pl-card-flash 1.2s ease-out forwards;
 }
+
+.pl-pipeline-card--active {
+    box-shadow: 0 0 0 2px var(--pl-accent);
+}

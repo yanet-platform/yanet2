@@ -18,7 +18,7 @@ interface UseListNavigationOptions<T extends { id: string }> {
     enabled?: boolean;
 }
 
-/** Adds Arrow Up/Down/Enter/Esc/d/Backspace keyboard navigation to a list of rows. */
+/** Adds Arrow Up/Down/Enter/Esc/d/Backspace keyboard navigation to a list of rows; ignores events whose target is or is inside a focused interactive control (button, select, link, role="button/menuitem"). */
 export const useListNavigation = <T extends { id: string }>({
     rows,
     activeId,
@@ -51,7 +51,8 @@ export const useListNavigation = <T extends { id: string }>({
             if (
                 target.tagName === 'INPUT' ||
                 target.tagName === 'TEXTAREA' ||
-                target.isContentEditable
+                target.isContentEditable ||
+                target.closest('button, select, a[href], [role="button"], [role="menuitem"]')
             ) {
                 return;
             }
