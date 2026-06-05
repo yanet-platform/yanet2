@@ -835,6 +835,7 @@ device_ectx_create(
 		);
 		return NULL;
 	}
+	memset(device_ectx, 0, ectx_size);
 
 	struct packet_front *pending = memory_balloc(
 		memory_context, sizeof(*pending) * 2 * dp_config->worker_count
@@ -849,13 +850,17 @@ device_ectx_create(
 
 	struct packet_front *pending_input = pending;
 	struct packet_front *pending_output = pending + dp_config->worker_count;
-	for (uint64_t worker_idx = 0; worker_idx < dp_config->worker_count;
-	     ++worker_idx) {
-		packet_front_init(pending_input + worker_idx);
-		packet_front_init(pending_output + worker_idx);
-	}
 
-	memset(device_ectx, 0, ectx_size);
+	// Initializing a front stores a pointer into itself that is valid
+	// only in the process that wrote it, and the two planes map this
+	// memory at different addresses. Zero instead and let the dataplane
+	// initialize each front on first use.
+	memset(pending_input,
+	       0,
+	       sizeof(*pending_input) * dp_config->worker_count);
+	memset(pending_output,
+	       0,
+	       sizeof(*pending_output) * dp_config->worker_count);
 
 	SET_OFFSET_OF(&device_ectx->pending_input, pending_input);
 	SET_OFFSET_OF(&device_ectx->pending_output, pending_output);

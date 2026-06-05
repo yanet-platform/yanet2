@@ -14,27 +14,33 @@ worker_pipeline_round(
 	struct config_gen_ectx *config_gen_ectx,
 	struct packet_front *packet_front
 ) {
-	while (1) {
-		uint64_t device_count =
-			cp_config_gen->device_registry.registry.capacity;
+	uint64_t device_count =
+		cp_config_gen->device_registry.registry.capacity;
 
-		struct device_ectx *devices[device_count];
-		struct packet_front *input[device_count];
-		struct packet_front *output[device_count];
-		for (uint64_t idx = 0; idx < device_count; ++idx) {
-			struct device_ectx *device =
-				ADDR_OF(config_gen_ectx->devices + idx);
-			input[idx] = device != NULL
-					     ? ADDR_OF(&device->pending_input) +
-						       dp_worker->idx
+	struct device_ectx *devices[device_count];
+	struct packet_front *input[device_count];
+	struct packet_front *output[device_count];
+	for (uint64_t idx = 0; idx < device_count; ++idx) {
+		struct device_ectx *device =
+			ADDR_OF(config_gen_ectx->devices + idx);
+		input[idx] = device != NULL ? ADDR_OF(&device->pending_input) +
+						      dp_worker->idx
+					    : NULL;
+		output[idx] = device != NULL ? ADDR_OF(&device->pending_output
+					       ) + dp_worker->idx
 					     : NULL;
-			output[idx] = device != NULL
-					      ? ADDR_OF(&device->pending_output
-						) + dp_worker->idx
-					      : NULL;
-			devices[idx] = device;
-		}
+		devices[idx] = device;
 
+		// Initialize each pending front on first use. The controlplane
+		// only zeroes them: an initialized front stores a pointer into
+		// itself, valid only in the process that wrote it.
+		if (device != NULL && input[idx]->output.last == NULL) {
+			packet_front_init(input[idx]);
+			packet_front_init(output[idx]);
+		}
+	}
+
+	while (1) {
 		struct packet *packet;
 
 		int empty = 1;
