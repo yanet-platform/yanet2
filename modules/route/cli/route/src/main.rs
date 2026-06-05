@@ -253,5 +253,6 @@ where
     table.modify(Columns::new(..), BorderColor::filled(Color::rgb_fg(0x4e, 0x4e, 0x4e)));
     table.modify(Rows::first(), Color::BOLD);
 
+    ync::display::fit_terminal_width(&mut table);
     println!("{table}");
 }

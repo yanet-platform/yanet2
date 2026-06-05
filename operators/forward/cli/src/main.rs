@@ -292,6 +292,7 @@ fn print_readiness_table(rows: Vec<ReadinessRow>) {
         table.modify(Rows::first(), Color::BOLD);
     }
 
+    ync::display::fit_terminal_width(&mut table);
     println!("{table}");
 }
 

@@ -176,6 +176,7 @@ fn render_table(rows: &[ServiceRow]) {
         table.modify(Rows::first(), Color::BOLD);
     }
 
+    ync::display::fit_terminal_width(&mut table);
     println!("{table}");
 }
 

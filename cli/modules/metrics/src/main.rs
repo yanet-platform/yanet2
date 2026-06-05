@@ -160,6 +160,7 @@ fn print_metrics_table(rows: Vec<MetricRow>) {
         table.modify(Rows::first(), Color::BOLD);
     }
 
+    ync::display::fit_terminal_width(&mut table);
     println!("{table}");
 }
 
