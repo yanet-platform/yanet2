@@ -1,0 +1,22 @@
+[package]
+name = "yanet-cli-ready"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+rust-version = "1.85"
+
+[[bin]]
+name = "yanet-cli-ready"
+path = "src/main.rs"
+
+[dependencies]
+ync = { path = "../../core", version = "0.1", package = "yanet-cli" }
+readinesspb = { path = "../../../common/rust/readinesspb", version = "0.1", package = "yanet-readinesspb" }
+clap = { version = "4.5", features = ["derive"] }
+clap_complete = { version = "4.5", features = ["unstable-dynamic"] }
+prost-types = "0.13"
+tokio = { version = "1", features = ["rt", "net", "time", "macros", "sync"] }
+tonic = { version = "0.13", features = ["gzip"] }
+colored = "3"
+tabled = { version = "0.18", features = ["ansi"] }

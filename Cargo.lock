@@ -3468,6 +3468,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "yanet-cli-ready"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "clap_complete",
+ "colored",
+ "prost-types",
+ "tabled",
+ "tokio",
+ "tonic",
+ "yanet-cli",
+ "yanet-readinesspb",
+]
+
+[[package]]
 name = "yanet-cli-route"
 version = "0.1.0"
 dependencies = [

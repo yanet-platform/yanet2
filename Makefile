@@ -14,7 +14,8 @@ CLI_CORE_MODULES := \
 	pipeline \
 	function \
 	counters \
-	gateway
+	gateway \
+	ready
 
 CLI_CORE_BINARIES := yanet-cli $(addprefix yanet-cli-,$(CLI_CORE_MODULES))
 
