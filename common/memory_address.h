@@ -31,8 +31,9 @@
  */
 #define SET_OFFSET_OF(PTR, ADDR)                                               \
 	do {                                                                   \
-		*(PTR) = ((typeof(ADDR))((uintptr_t)(ADDR) -                   \
-					 (uintptr_t)((ADDR) ? (PTR) : NULL))); \
+		typeof(ADDR) _addr = (ADDR);                                   \
+		*(PTR) = (typeof(_addr))((uintptr_t)_addr -                    \
+					 (uintptr_t)(_addr ? (PTR) : NULL));   \
 	} while (0)
 
 /**
@@ -64,9 +65,12 @@
 	})
 
 #define ATOMIC_SET_OFFSET_OF(PTR, ADDR)                                        \
-	atomic_store_explicit(                                                 \
-		(_Atomic(typeof(*PTR)) *)PTR,                                  \
-		(typeof(ADDR))((uintptr_t)(ADDR) -                             \
-			       (uintptr_t)((ADDR) ? (PTR) : NULL)),            \
-		memory_order_release                                           \
-	)
+	do {                                                                   \
+		typeof(ADDR) _addr = (ADDR);                                   \
+		atomic_store_explicit(                                         \
+			(_Atomic(typeof(*PTR)) *)PTR,                          \
+			(typeof(_addr))((uintptr_t)_addr -                     \
+					(uintptr_t)(_addr ? (PTR) : NULL)),    \
+			memory_order_release                                   \
+		);                                                             \
+	} while (0)

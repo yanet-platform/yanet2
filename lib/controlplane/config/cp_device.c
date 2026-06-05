@@ -169,13 +169,10 @@ cp_device_init(
 
 	struct memory_context *memory_context = &self->memory_context;
 
-	SET_OFFSET_OF(
-		&self->input_pipelines,
-		cp_device_entry_create(
-			memory_context, cfg->input_pipelines, err
-		)
+	struct cp_device_entry *input = cp_device_entry_create(
+		memory_context, cfg->input_pipelines, err
 	);
-	if (self->input_pipelines == NULL) {
+	if (input == NULL) {
 		yanet_error_add(
 			err,
 			"failed to create input pipelines for device '%s'",
@@ -183,14 +180,12 @@ cp_device_init(
 		);
 		goto err_out;
 	}
+	SET_OFFSET_OF(&self->input_pipelines, input);
 
-	SET_OFFSET_OF(
-		&self->output_pipelines,
-		cp_device_entry_create(
-			memory_context, cfg->output_pipelines, err
-		)
+	struct cp_device_entry *output = cp_device_entry_create(
+		memory_context, cfg->output_pipelines, err
 	);
-	if (self->output_pipelines == NULL) {
+	if (output == NULL) {
 		yanet_error_add(
 			err,
 			"failed to create output pipelines for device '%s'",
@@ -198,6 +193,7 @@ cp_device_init(
 		);
 		goto err_out;
 	}
+	SET_OFFSET_OF(&self->output_pipelines, output);
 
 	registry_item_init(&self->config_item);
 
