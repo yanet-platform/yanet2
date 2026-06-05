@@ -13,13 +13,21 @@
 static void
 fwstate_config_destroy(struct fwstate_config *config, struct agent *agent) {
 	if (config->fw4state != NULL) {
-		fwmap_t *fw4 = ADDR_OF(&config->fw4state);
-		fwmap_free(fw4, &agent->memory_context);
+		fwmap_t *node = ADDR_OF(&config->fw4state);
+		while (node != NULL) {
+			fwmap_t *next = (fwmap_t *)ADDR_OF(&node->next);
+			fwmap_free(node, &agent->memory_context);
+			node = next;
+		}
 		config->fw4state = NULL;
 	}
 	if (config->fw6state != NULL) {
-		fwmap_t *fw6 = ADDR_OF(&config->fw6state);
-		fwmap_free(fw6, &agent->memory_context);
+		fwmap_t *node = ADDR_OF(&config->fw6state);
+		while (node != NULL) {
+			fwmap_t *next = (fwmap_t *)ADDR_OF(&node->next);
+			fwmap_free(node, &agent->memory_context);
+			node = next;
+		}
 		config->fw6state = NULL;
 	}
 }
