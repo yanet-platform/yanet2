@@ -18,8 +18,8 @@ import {
 } from '../../_shared/draft';
 import { DeleteConfigModal, BulkDeleteModal, CommandPaletteHeader } from '../../../components';
 import { useTabCycle } from '../../_shared/useTabCycle';
-import { usePalette } from '../../_shared/command-palette';
-import type { Command, RowAdapter } from '../../_shared/command-palette';
+import { usePalette } from '../../../components/command-palette';
+import type { Command, RowAdapter } from '../../../components/command-palette';
 import '../../../styles/draft-page.scss';
 import './decap.scss';
 

@@ -4,8 +4,8 @@ import MainMenu from './MainMenu';
 import { PageLoader } from './components';
 import type { PageId, SidebarContextValue } from './types';
 import { PAGE_IDS, SidebarContext } from './types';
-import { PaletteProvider, usePalette, CommandPalette, navigationCommands } from './pages/_shared/command-palette';
-import type { RowAdapter } from './pages/_shared/command-palette';
+import { PaletteProvider, usePalette, CommandPalette, navigationCommands } from './components/command-palette';
+import type { RowAdapter } from './components/command-palette';
 
 const importInspect = () => import('./pages/builtin/inspect/InspectPage');
 const importDashboard = () => import('./pages/builtin/dashboard/DashboardPage');

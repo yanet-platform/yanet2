@@ -9,8 +9,8 @@ import type { LocalDevice } from './types';
 import { useDeviceCounters } from '../../../hooks';
 import { useCounterHistory } from '../../../hooks/useCounterHistory';
 import { useUnsavedChangesBlocker } from '../_shared/lane-editor';
-import { usePalette } from '../../_shared/command-palette';
-import type { Command, RowAdapter } from '../../_shared/command-palette';
+import { usePalette } from '../../../components/command-palette';
+import type { Command, RowAdapter } from '../../../components/command-palette';
 import {
     DevicesList,
     DeviceDetails,

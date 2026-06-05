@@ -1,5 +1,5 @@
-import type { PageId } from '../../../types';
-import { navItems } from '../../../navItems';
+import type { PageId } from '../../types';
+import { navItems } from '../../navItems';
 import type { Command } from './types';
 
 /** Builds "Go to" navigation commands from the shared navItems list. */

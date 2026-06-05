@@ -10,8 +10,8 @@ import { getAvailableModuleTypesFromInspect } from './moduleTypeOptions';
 import type { NetworkFunction } from './types';
 import { isFnSaveable } from './validation';
 import { API } from '../../../api';
-import { usePalette } from '../../_shared/command-palette';
-import type { Command, RowAdapter } from '../../_shared/command-palette';
+import { usePalette } from '../../../components/command-palette';
+import type { Command, RowAdapter } from '../../../components/command-palette';
 import './FunctionsPage.scss';
 
 /** Builds a space-joined search string for a function (id, type, chain names, module names/types). */

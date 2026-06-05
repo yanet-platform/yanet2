@@ -16,8 +16,8 @@ import {
     AddConfigModal, isValidCIDR, useDraftShortcuts, useDraftDragDrop, useDraftPageHandlers, computeRowStatuses,
 } from '../../_shared/draft';
 import { DeleteConfigModal, BulkDeleteModal, CommandPaletteHeader } from '../../../components';
-import { usePalette } from '../../_shared/command-palette';
-import type { Command, RowAdapter } from '../../_shared/command-palette';
+import { usePalette } from '../../../components/command-palette';
+import type { Command, RowAdapter } from '../../../components/command-palette';
 import { useTabCycle } from '../../_shared/useTabCycle';
 import '../../../styles/draft-page.scss';
 import './route.scss';

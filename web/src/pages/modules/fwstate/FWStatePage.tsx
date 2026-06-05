@@ -27,8 +27,8 @@ import { AddConfigModal } from '../../_shared/draft';
 import { DeleteConfigModal, CommandPaletteHeader } from '../../../components';
 import { SaveIcon, TrashIcon } from '../../_shared/draft/DraftActionButtons';
 import { useTabCycle } from '../../_shared/useTabCycle';
-import { usePalette } from '../../_shared/command-palette';
-import type { Command } from '../../_shared/command-palette';
+import { usePalette } from '../../../components/command-palette';
+import type { Command } from '../../../components/command-palette';
 import '../../../styles/draft-page.scss';
 import './fwstate.scss';
 

@@ -1,6 +1,6 @@
 import React from 'react';
 import { Text } from '@gravity-ui/uikit';
-import { CommandPaletteTrigger, usePalette } from '../pages/_shared/command-palette';
+import { CommandPaletteTrigger, usePalette } from './command-palette';
 import './CommandPaletteHeader.scss';
 
 interface CommandPaletteHeaderProps {

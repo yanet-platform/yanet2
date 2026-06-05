@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { usePalette } from './command-palette';
+import { usePalette } from '../../components/command-palette';
 
 interface UseTabCycleOptions {
     /** Ordered list of tab identifiers. */

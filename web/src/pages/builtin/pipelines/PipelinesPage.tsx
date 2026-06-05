@@ -7,8 +7,8 @@ import { useDragState, useUnsavedChangesBlocker } from '../_shared/lane-editor';
 import { PipelineCard } from './components/PipelineCard';
 import { CreateEntityDialog } from '../../../components';
 import type { Pipeline } from './types';
-import { usePalette } from '../../_shared/command-palette';
-import type { Command, RowAdapter } from '../../_shared/command-palette';
+import { usePalette } from '../../../components/command-palette';
+import type { Command, RowAdapter } from '../../../components/command-palette';
 import './PipelinesPage.scss';
 
 /** Builds a space-joined search string for a pipeline (id and function names). */
