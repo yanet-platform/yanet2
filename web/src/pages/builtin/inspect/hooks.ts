@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { API } from '../../../api';
+import type { CounterTag } from '../../../api/counters';
 import type { DeviceCounterData } from '../../../hooks';
 import { useInterpolatedCounters } from '../../../hooks/useInterpolatedCounters';
 import { useRollingWindow } from '../../../hooks/useRollingWindow';
@@ -70,36 +71,36 @@ interface RatesAndSeries {
     series: Map<string, number[]>;
 }
 
+const COUNTER_QUERY = ['input', 'input_bytes'];
+
 /**
- * Poll pipeline counters via tag selection and produce per-pipeline
- * rate and rolling series.
+ * Poll counters selected by tag filter and produce per-key rate and
+ * rolling series, grouped by the given tag keys.
  */
-export const usePipelineCounters = (
-    _devices: string[],
-    pipelines: string[],
+const useTagCounterSeries = (
+    keys: string[],
+    filterTags: CounterTag[],
+    groupTagKeys: string[],
     enabled: boolean,
 ): RatesAndSeries => {
-    const pipelinesKey = useMemo(() => pipelines.join('|'), [pipelines]);
+    const keysKey = useMemo(() => keys.join('|'), [keys]);
 
     const fetchCounters = useMemo(() => async (): Promise<Map<string, { packets: bigint; bytes: bigint }>> => {
         const totals = new Map<string, { packets: bigint; bytes: bigint }>();
-        for (const p of pipelines) {
-            totals.set(p, { packets: BigInt(0), bytes: BigInt(0) });
+        for (const k of keys) {
+            totals.set(k, { packets: BigInt(0), bytes: BigInt(0) });
         }
 
         try {
             const response = await API.counters.byTags({
-                tags: [
-                    { key: 'pipeline', value: '*' },
-                    { key: 'function', value: '' },
-                ],
-                query: ['input', 'input_bytes'],
+                tags: filterTags,
+                query: COUNTER_QUERY,
             });
-            const grouped = groupCounterGroupsByTagsAndName(response.groups, ['pipeline'], 0);
-            for (const pipeline of pipelines) {
-                totals.set(pipeline, {
-                    packets: grouped.get(makeGroupedCounterKey([pipeline], 'input'))?.value ?? BigInt(0),
-                    bytes: grouped.get(makeGroupedCounterKey([pipeline], 'input_bytes'))?.value ?? BigInt(0),
+            const grouped = groupCounterGroupsByTagsAndName(response.groups, groupTagKeys, 0);
+            for (const k of keys) {
+                totals.set(k, {
+                    packets: grouped.get(makeGroupedCounterKey([k], 'input'))?.value ?? BigInt(0),
+                    bytes: grouped.get(makeGroupedCounterKey([k], 'input_bytes'))?.value ?? BigInt(0),
                 });
             }
         } catch {
@@ -108,12 +109,12 @@ export const usePipelineCounters = (
 
         return totals;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [pipelinesKey]);
+    }, [keysKey]);
 
     const { counters } = useInterpolatedCounters({
-        keys: pipelines,
+        keys,
         fetchCounters,
-        enabled: enabled && pipelines.length > 0,
+        enabled: enabled && keys.length > 0,
         pollingInterval: DEFAULT_INTERVAL_MS,
     });
 
@@ -133,6 +134,26 @@ export const usePipelineCounters = (
 
     return { rates, series };
 };
+
+const PIPELINE_TAGS: CounterTag[] = [
+    { key: 'pipeline', value: '*' },
+    { key: 'function', value: '' },
+];
+
+/**
+ * Poll pipeline counters via tag selection and produce per-pipeline
+ * rate and rolling series.
+ */
+export const usePipelineCounters = (
+    _devices: string[],
+    pipelines: string[],
+    enabled: boolean,
+): RatesAndSeries => useTagCounterSeries(pipelines, PIPELINE_TAGS, ['pipeline'], enabled);
+
+const FUNCTION_TAGS: CounterTag[] = [
+    { key: 'function', value: '*' },
+    { key: 'chain', value: '' },
+];
 
 /**
  * Poll function counters via tag selection and produce per-function
@@ -143,58 +164,4 @@ export const useFunctionCounters = (
     _pipelines: string[],
     functions: string[],
     enabled: boolean,
-): RatesAndSeries => {
-    const functionsKey = useMemo(() => functions.join('|'), [functions]);
-
-    const fetchCounters = useMemo(() => async (): Promise<Map<string, { packets: bigint; bytes: bigint }>> => {
-        const totals = new Map<string, { packets: bigint; bytes: bigint }>();
-        for (const f of functions) {
-            totals.set(f, { packets: BigInt(0), bytes: BigInt(0) });
-        }
-
-        try {
-            const response = await API.counters.byTags({
-                tags: [
-                    { key: 'function', value: '*' },
-                    { key: 'chain', value: '' },
-                ],
-                query: ['input', 'input_bytes'],
-            });
-            const grouped = groupCounterGroupsByTagsAndName(response.groups, ['function'], 0);
-            for (const functionName of functions) {
-                totals.set(functionName, {
-                    packets: grouped.get(makeGroupedCounterKey([functionName], 'input'))?.value ?? BigInt(0),
-                    bytes: grouped.get(makeGroupedCounterKey([functionName], 'input_bytes'))?.value ?? BigInt(0),
-                });
-            }
-        } catch {
-            // tolerate fetch failures.
-        }
-
-        return totals;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [functionsKey]);
-
-    const { counters } = useInterpolatedCounters({
-        keys: functions,
-        fetchCounters,
-        enabled: enabled && functions.length > 0,
-        pollingInterval: DEFAULT_INTERVAL_MS,
-    });
-
-    const ppsSamples = useMemo(() => {
-        const m = new Map<string, number>();
-        counters.forEach((r, name) => m.set(name, r.pps));
-        return m;
-    }, [counters]);
-
-    const series = useRollingWindow(ppsSamples, DEFAULT_MAX_LEN, DEFAULT_INTERVAL_MS);
-
-    const rates = useMemo(() => {
-        const m = new Map<string, { pps: number; bps: number }>();
-        counters.forEach((r, name) => m.set(name, { pps: r.pps, bps: r.bps }));
-        return m;
-    }, [counters]);
-
-    return { rates, series };
-};
+): RatesAndSeries => useTagCounterSeries(functions, FUNCTION_TAGS, ['function'], enabled);
