@@ -164,6 +164,11 @@
 
     &:hover { background-color: var(--yn-bg-hover) !important; }
 
+    &--selected:hover,
+    &--active:hover {
+        background-color: var(--yn-accent-soft) !important;
+    }
+
     &--active {
         box-shadow: inset 2px 0 0 var(--yn-accent);
     }
