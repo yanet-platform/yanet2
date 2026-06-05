@@ -11,6 +11,19 @@ import './inspect.scss';
 
 const PLACEHOLDER = 'Search or jump to a section…';
 
+const JUMP_SECTIONS: ReadonlyArray<{
+    key: string;
+    label: string;
+    anchor: string;
+    has: (info: InstanceInfo) => boolean;
+}> = [
+    { key: 'devices',   label: 'Devices',       anchor: 'iv-section-devices',   has: (info) => !!info.devices?.length },
+    { key: 'modules',   label: 'Modules',        anchor: 'iv-section-modules',   has: (info) => !!info.dp_modules?.length },
+    { key: 'agents',    label: 'System agents',  anchor: 'iv-section-agents',    has: (info) => !!info.agents?.length },
+    { key: 'pipelines', label: 'Pipelines',      anchor: 'iv-section-pipelines', has: (info) => !!info.pipelines?.length },
+    { key: 'functions', label: 'Functions',      anchor: 'iv-section-functions', has: (info) => !!info.functions?.length },
+];
+
 /** HUD-style inspect page showing aggregate throughput, devices, modules, pipelines, and functions. */
 const InspectPage = (): React.JSX.Element => {
     const [instanceInfo, setInstanceInfo] = useState<InstanceInfo | null>(null);
@@ -36,69 +49,19 @@ const InspectPage = (): React.JSX.Element => {
     const { setPageContribution } = usePalette();
 
     const commands = useMemo((): Command[] => {
-        const list: Command[] = [];
-
-        if (instanceInfo?.devices?.length) {
-            list.push({
-                id: '__jump_devices',
-                icon: '↧',
-                label: 'Jump to Devices',
-                sub: 'Scroll to the Devices section',
-                keywords: 'jump scroll go devices',
-                group: 'Jump to section',
-                onSelect: () => document.getElementById('iv-section-devices')?.scrollIntoView({ block: 'start', behavior: 'smooth' }),
-            });
+        if (!instanceInfo) {
+            return [];
         }
-
-        if (instanceInfo?.dp_modules?.length) {
-            list.push({
-                id: '__jump_modules',
-                icon: '↧',
-                label: 'Jump to Modules',
-                sub: 'Scroll to the Modules section',
-                keywords: 'jump scroll go modules',
-                group: 'Jump to section',
-                onSelect: () => document.getElementById('iv-section-modules')?.scrollIntoView({ block: 'start', behavior: 'smooth' }),
-            });
-        }
-
-        if (instanceInfo?.agents?.length) {
-            list.push({
-                id: '__jump_agents',
-                icon: '↧',
-                label: 'Jump to System agents',
-                sub: 'Scroll to the System agents section',
-                keywords: 'jump scroll go system agents',
-                group: 'Jump to section',
-                onSelect: () => document.getElementById('iv-section-agents')?.scrollIntoView({ block: 'start', behavior: 'smooth' }),
-            });
-        }
-
-        if (instanceInfo?.pipelines?.length) {
-            list.push({
-                id: '__jump_pipelines',
-                icon: '↧',
-                label: 'Jump to Pipelines',
-                sub: 'Scroll to the Pipelines section',
-                keywords: 'jump scroll go pipelines',
-                group: 'Jump to section',
-                onSelect: () => document.getElementById('iv-section-pipelines')?.scrollIntoView({ block: 'start', behavior: 'smooth' }),
-            });
-        }
-
-        if (instanceInfo?.functions?.length) {
-            list.push({
-                id: '__jump_functions',
-                icon: '↧',
-                label: 'Jump to Functions',
-                sub: 'Scroll to the Functions section',
-                keywords: 'jump scroll go functions',
-                group: 'Jump to section',
-                onSelect: () => document.getElementById('iv-section-functions')?.scrollIntoView({ block: 'start', behavior: 'smooth' }),
-            });
-        }
-
-        return list;
+        const info = instanceInfo;
+        return JUMP_SECTIONS.filter((section) => section.has(info)).map((section) => ({
+            id: `__jump_${section.key}`,
+            icon: '↧',
+            label: `Jump to ${section.label}`,
+            sub: `Scroll to the ${section.label} section`,
+            keywords: `jump scroll go ${section.label.toLowerCase()}`,
+            group: 'Jump to section',
+            onSelect: () => document.getElementById(section.anchor)?.scrollIntoView({ block: 'start', behavior: 'smooth' }),
+        }));
     }, [instanceInfo]);
 
     useEffect(() => {
