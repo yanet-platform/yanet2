@@ -79,10 +79,6 @@
 // Pages that apply .yn-flat-layout (on PageLayout) and .yn-flat-page (on .yn-page)
 // get the unified #1C1814 surface and flush content area (padding: 0).
 
-.yn-flat-layout {
-    --yn-surface-bg: #1C1814;
-}
-
 .yn-page.yn-flat-page {
     background: var(--yn-surface-bg);
 }

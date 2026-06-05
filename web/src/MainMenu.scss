@@ -4,6 +4,14 @@
     bottom: 13px;
 }
 
+// Match the sidebar background to the warm-dark surface so the header
+// decoration gradient fades smoothly into the page rather than into Gravity's
+// default background.
+.gn-aside-header {
+    --gn-aside-header-background-color: var(--yn-surface-bg);
+    background-color: var(--yn-surface-bg);
+}
+
 .main-menu__section-label {
     display: block;
     padding: 4px 12px;
