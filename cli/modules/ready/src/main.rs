@@ -5,6 +5,8 @@ use core::fmt::{self, Display, Formatter};
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
 use colored::Colorize;
+use prost_types::Timestamp;
+use readinesspb::pb::{ReadyRequest, ReadyResponse, Scope, State};
 use tabled::{
     Table, Tabled,
     settings::{
@@ -12,10 +14,6 @@ use tabled::{
         object::{Columns, Rows},
         style::{BorderColor, HorizontalLine},
     },
-};
-use tonic::{
-    client::Grpc,
-    codec::{CompressionEncoding, ProstCodec},
 };
 use ync::{
     client::ConnectionArgs,
@@ -70,43 +68,14 @@ pub async fn main() {
 
 /// Run the readiness probe.
 async fn run(cmd: Cmd) -> Result<bool, Error> {
-    let endpoint = cmd.connection.endpoint.clone();
-
-    let channel = ync::client::connect(&cmd.connection)
-        .await
-        .map_err(|err| Error::from_connection(err, "ready", endpoint.clone()))?;
-
-    let mut grpc = Grpc::new(channel)
-        .send_compressed(CompressionEncoding::Gzip)
-        .accept_compressed(CompressionEncoding::Gzip);
-
-    let path = tonic::codegen::http::uri::PathAndQuery::try_from(format!("/{}/Ready", cmd.name)).map_err(|err| {
-        Error::from_status(
-            tonic::Status::invalid_argument(err.to_string()),
-            "ready",
-            endpoint.clone(),
-            cmd.name.clone(),
-        )
-    })?;
-
-    grpc.ready().await.map_err(|err| {
-        Error::from_status(
-            tonic::Status::unavailable(err.to_string()),
-            "ready",
-            endpoint.clone(),
-            cmd.name.clone(),
-        )
-    })?;
-
-    let codec: ProstCodec<readinesspb::pb::ReadyRequest, readinesspb::pb::ReadyResponse> = ProstCodec::default();
-
-    let request = tonic::Request::new(readinesspb::pb::ReadyRequest { scopes: cmd.scopes.clone() });
-
-    let response = grpc
-        .unary(request, path, codec)
-        .await
-        .map_err(|status| Error::from_status(status, "ready", endpoint.clone(), &cmd.name))?
-        .into_inner();
+    let response: ReadyResponse = ync::client::invoke_unary(
+        &cmd.connection,
+        "ready",
+        &cmd.name,
+        "Ready",
+        ReadyRequest { scopes: cmd.scopes.clone() },
+    )
+    .await?;
 
     let returned_names: std::collections::HashSet<&str> =
         response.scopes.iter().map(|scope| scope.name.as_str()).collect();
@@ -118,10 +87,7 @@ async fn run(cmd: Cmd) -> Result<bool, Error> {
         .filter(|name| !returned_names.contains(name))
         .collect();
 
-    let all_scopes_ready = response
-        .scopes
-        .iter()
-        .all(|scope| scope.state == readinesspb::pb::State::Ready as i32);
+    let all_scopes_ready = response.scopes.iter().all(|scope| scope.state == State::Ready as i32);
 
     let all_ready = all_scopes_ready && missing.is_empty();
 
@@ -129,7 +95,7 @@ async fn run(cmd: Cmd) -> Result<bool, Error> {
     let ready_count = response
         .scopes
         .iter()
-        .filter(|scope| scope.state == readinesspb::pb::State::Ready as i32)
+        .filter(|scope| scope.state == State::Ready as i32)
         .count();
 
     output::data(
@@ -169,7 +135,7 @@ async fn run(cmd: Cmd) -> Result<bool, Error> {
 }
 
 /// Wraps a readiness state for colored display in the table.
-pub struct StateCell(readinesspb::pb::State);
+pub struct StateCell(State);
 
 impl Display for StateCell {
     fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
@@ -178,12 +144,10 @@ impl Display for StateCell {
 
         if output::is_colored() {
             let colored = match state {
-                readinesspb::pb::State::Ready => name.green().to_string(),
-                readinesspb::pb::State::Degraded => name.yellow().to_string(),
-                readinesspb::pb::State::NotReady => name.red().to_string(),
-                readinesspb::pb::State::Unspecified | readinesspb::pb::State::Unknown => {
-                    name.truecolor(127, 127, 127).to_string()
-                }
+                State::Ready => name.green().to_string(),
+                State::Degraded => name.yellow().to_string(),
+                State::NotReady => name.red().to_string(),
+                State::Unspecified | State::Unknown => name.truecolor(127, 127, 127).to_string(),
             };
             write!(f, "{colored}")
         } else {
@@ -207,9 +171,9 @@ pub struct ReadinessRow {
     pub reasons: String,
 }
 
-impl From<&readinesspb::pb::Scope> for ReadinessRow {
-    fn from(scope: &readinesspb::pb::Scope) -> Self {
-        let state = readinesspb::pb::State::try_from(scope.state).unwrap_or_default();
+impl From<&Scope> for ReadinessRow {
+    fn from(scope: &Scope) -> Self {
+        let state = State::try_from(scope.state).unwrap_or_default();
         let state_cell = StateCell(state);
 
         let reasons = scope
@@ -245,12 +209,12 @@ fn print_readiness_table(rows: Vec<ReadinessRow>) {
     println!("{table}");
 }
 
-/// Formats a `prost_types::Timestamp` as a human-readable relative age.
+/// Formats a `Timestamp` as a human-readable relative age.
 ///
 /// Returns `"-"` when `ts` is `None` or the zero sentinel
 /// (`seconds == 0 && nanos == 0`). Otherwise formats as `Xs ago`,
 /// `XmYs ago`, or `XhYm ago` depending on magnitude.
-pub fn format_age(ts: Option<&prost_types::Timestamp>) -> String {
+pub fn format_age(ts: Option<&Timestamp>) -> String {
     let ts = match ts {
         Some(ts) if ts.seconds != 0 || ts.nanos != 0 => ts,
         _ => return "-".to_string(),
@@ -289,7 +253,7 @@ mod test {
 
     #[test]
     fn format_age_zero_sentinel_returns_dash() {
-        let ts = prost_types::Timestamp { seconds: 0, nanos: 0 };
+        let ts = Timestamp { seconds: 0, nanos: 0 };
         assert_eq!("-", format_age(Some(&ts)));
     }
 
@@ -298,7 +262,7 @@ mod test {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap();
-        let ts = prost_types::Timestamp {
+        let ts = Timestamp {
             seconds: now.as_secs() as i64 - 30,
             nanos: 0,
         };
@@ -310,7 +274,7 @@ mod test {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap();
-        let ts = prost_types::Timestamp {
+        let ts = Timestamp {
             seconds: now.as_secs() as i64 - 64,
             nanos: 0,
         };
@@ -322,7 +286,7 @@ mod test {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap();
-        let ts = prost_types::Timestamp {
+        let ts = Timestamp {
             seconds: now.as_secs() as i64 - (2 * 3600 + 3 * 60),
             nanos: 0,
         };

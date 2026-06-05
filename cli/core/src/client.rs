@@ -21,10 +21,20 @@
 //!     .accept_compressed(CompressionEncoding::Gzip);
 //! ```
 
-use tonic::transport::Channel;
+use http::uri::PathAndQuery;
+use prost::Message;
+use tonic::{
+    client::Grpc,
+    codec::{CompressionEncoding, ProstCodec},
+    transport::Channel,
+    Request, Status,
+};
 use tower::Layer;
 
-use crate::auth::{self, interceptor::AuthService, AuthArgs};
+use crate::{
+    auth::{self, interceptor::AuthService, AuthArgs},
+    errors::Error,
+};
 
 /// Channel type with all interceptors applied.
 ///
@@ -62,4 +72,53 @@ pub async fn connect(args: &ConnectionArgs) -> Result<LayeredChannel, Connection
     let auth = auth::create_layer(&args.auth).await?;
 
     Ok(auth.layer(channel))
+}
+
+/// Invoke a unary RPC on an arbitrary gRPC service by its fully-qualified
+/// name, without a generated client.
+///
+/// `action` is the user-facing verb used in error messages (e.g. `"ready"`),
+/// `service` is the service FQN, `method` is the wire method name (e.g.
+/// `"Ready"`). The request and response are any `prost` messages — the
+/// shared codec is built from them.
+pub async fn invoke_unary<Req, Resp>(
+    connection: &ConnectionArgs,
+    action: &str,
+    service: &str,
+    method: &str,
+    request: Req,
+) -> Result<Resp, Error>
+where
+    Req: Message + 'static,
+    Resp: Message + Default + 'static,
+{
+    let endpoint = connection.endpoint.clone();
+
+    let channel = connect(connection)
+        .await
+        .map_err(|err| Error::from_connection(err, action, endpoint.clone()))?;
+
+    let mut grpc = Grpc::new(channel)
+        .send_compressed(CompressionEncoding::Gzip)
+        .accept_compressed(CompressionEncoding::Gzip);
+
+    let path = PathAndQuery::try_from(format!("/{service}/{method}")).map_err(|err| {
+        Error::from_status(
+            Status::invalid_argument(err.to_string()),
+            action,
+            endpoint.clone(),
+            service,
+        )
+    })?;
+
+    grpc.ready()
+        .await
+        .map_err(|err| Error::from_status(Status::unavailable(err.to_string()), action, endpoint.clone(), service))?;
+
+    let codec: ProstCodec<Req, Resp> = ProstCodec::default();
+
+    grpc.unary(Request::new(request), path, codec)
+        .await
+        .map(|response| response.into_inner())
+        .map_err(|status| Error::from_status(status, action, endpoint, service))
 }

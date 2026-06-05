@@ -3078,6 +3078,7 @@ dependencies = [
  "erased-serde",
  "http",
  "log",
+ "prost",
  "serde",
  "serde_json",
  "simple_logger",
@@ -3477,7 +3478,6 @@ dependencies = [
  "prost-types",
  "tabled",
  "tokio",
- "tonic",
  "yanet-cli",
  "yanet-readinesspb",
 ]

@@ -14,7 +14,8 @@ simple_logger = { version = "5", features = ["timestamps", "stderr"] }
 colored = "3"
 tabled = { version = "0.18", features = ["ansi"] }
 tokio = { version = "1", features = ["net", "io-util", "time", "sync"] }
-tonic = "0.13"
+prost = "0.13"
+tonic = { version = "0.13", features = ["gzip"] }
 tower = "0.5"
 http = "1"
 ssh-key = "0.6"
