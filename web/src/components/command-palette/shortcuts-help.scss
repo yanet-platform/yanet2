@@ -1,0 +1,99 @@
+@use '../../styles/variables' as *;
+@use '../../styles/mixins' as *;
+
+.sh-backdrop {
+    align-items: center;
+    padding-top: 0;
+}
+
+.sh-card {
+    width: 520px;
+    max-width: calc(100vw - 40px);
+    max-height: calc(100vh - 80px);
+    background: var(--yn-panel);
+    border: 1px solid var(--yn-line-2);
+    border-radius: var(--yn-r-lg);
+    box-shadow: 0 24px 72px rgba(0, 0, 0, 0.65);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    animation: cp-popin 0.14s ease-out both;
+    outline: none;
+}
+
+.sh-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 16px 12px;
+    border-bottom: 1px solid var(--yn-line-2);
+    flex-shrink: 0;
+}
+
+.sh-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--yn-text);
+    letter-spacing: 0.01em;
+}
+
+.sh-esc {
+    margin-left: 8px;
+}
+
+.sh-body {
+    overflow-y: auto;
+    padding: 8px 0 12px;
+}
+
+.sh-section {
+    padding: 0 6px 4px;
+
+    & + .sh-section {
+        margin-top: 4px;
+        padding-top: 4px;
+        border-top: 1px solid var(--yn-line-2);
+    }
+}
+
+.sh-section-title {
+    padding: 5px 10px 2px;
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--yn-text-3);
+    user-select: none;
+}
+
+.sh-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 6px 10px;
+    border-radius: var(--yn-r-md);
+
+    &:hover {
+        background: var(--yn-accent-soft);
+    }
+}
+
+.sh-keys {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 140px;
+    flex-shrink: 0;
+}
+
+.sh-sep {
+    font-size: 11px;
+    color: var(--yn-text-3);
+    padding: 0 2px;
+}
+
+.sh-desc {
+    font-size: 12.5px;
+    color: var(--yn-text-2);
+    flex: 1;
+}

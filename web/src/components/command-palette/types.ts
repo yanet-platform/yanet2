@@ -1,3 +1,19 @@
+/** A single shortcut entry shown in the help overlay. */
+export interface ShortcutItem {
+    /** Key combination label, e.g. "⌘K" or "↑ ↓". */
+    keys: string;
+    /** Short description of what the shortcut does. */
+    desc: string;
+}
+
+/** A grouped section of shortcut items shown in the help overlay. */
+export interface ShortcutSection {
+    /** Section heading, e.g. "Dashboard" or "Global". */
+    title: string;
+    /** Shortcut items in this section. */
+    items: ShortcutItem[];
+}
+
 /** A command item displayed in the palette. */
 export interface Command {
     /** Unique identifier for this command. */

@@ -18,14 +18,14 @@ interface UseTabCycleOptions {
  * modifier key (Meta, Ctrl, Alt) is held, or when the event target is an input, textarea,
  * or contentEditable element. */
 export const useTabCycle = ({ tabs, activeTab, onSelect, enabled = true }: UseTabCycleOptions): void => {
-    const { open: paletteOpen } = usePalette();
+    const { open: paletteOpen, helpOpen } = usePalette();
 
     useEffect(() => {
         if (!enabled || tabs.length < 2) return;
 
         const handleKeyDown = (e: KeyboardEvent): void => {
             if (e.key !== '[' && e.key !== ']') return;
-            if (paletteOpen) return;
+            if (paletteOpen || helpOpen) return;
             if (e.metaKey || e.ctrlKey || e.altKey) return;
 
             const target = e.target as HTMLElement;
@@ -57,5 +57,5 @@ export const useTabCycle = ({ tabs, activeTab, onSelect, enabled = true }: UseTa
 
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [tabs, activeTab, onSelect, enabled, paletteOpen]);
+    }, [tabs, activeTab, onSelect, enabled, paletteOpen, helpOpen]);
 };

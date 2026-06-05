@@ -1,10 +1,12 @@
 export { default as CommandPalette } from './CommandPalette';
 export type { CommandPaletteProps } from './CommandPalette';
-export type { Command, RowAdapter } from './types';
+export type { Command, RowAdapter, ShortcutSection, ShortcutItem } from './types';
 export { fuzzyMatch } from './fuzzy';
 export type { FuzzyMatchResult } from './fuzzy';
 export { default as CommandPaletteTrigger, PALETTE_SHORTCUT_LABEL } from './CommandPaletteTrigger';
 export { usePaletteShortcut } from './usePaletteShortcut';
+export { useHelpShortcut } from './useHelpShortcut';
 export { PaletteProvider, usePalette } from './PaletteContext';
 export type { PagePaletteContribution } from './PaletteContext';
 export { navigationCommands } from './navigationCommands';
+export { default as ShortcutsHelp } from './ShortcutsHelp';

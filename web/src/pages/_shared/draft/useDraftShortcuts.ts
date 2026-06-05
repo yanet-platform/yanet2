@@ -25,6 +25,8 @@ export function useDraftShortcuts<T extends { id: string }>({
 }: UseDraftShortcutsOpts<T>): void {
     useEffect(() => {
         const onKey = (e: KeyboardEvent): void => {
+            // Suppress all shortcuts while any overlay backdrop (palette or help) is open.
+            if (document.querySelector('.cp-backdrop')) return;
             if (e.key === 'Escape') {
                 if (editingRowId) { setEditingRowId(null); return; }
             }

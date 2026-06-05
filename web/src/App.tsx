@@ -4,8 +4,8 @@ import MainMenu from './MainMenu';
 import { PageLoader } from './components';
 import type { PageId, SidebarContextValue } from './types';
 import { PAGE_IDS, SidebarContext } from './types';
-import { PaletteProvider, usePalette, CommandPalette, navigationCommands } from './components/command-palette';
-import type { RowAdapter } from './components/command-palette';
+import { PaletteProvider, usePalette, CommandPalette, navigationCommands, ShortcutsHelp } from './components/command-palette';
+import type { RowAdapter, Command } from './components/command-palette';
 
 const importInspect = () => import('./pages/builtin/inspect/InspectPage');
 const importDashboard = () => import('./pages/builtin/dashboard/DashboardPage');
@@ -57,13 +57,23 @@ type CancelIdleCallback = (id: IdleHandle) => void;
 
 /** Global command palette instance that reads contributions from context at render time. */
 const GlobalPalette = ({ handlePageChange }: { handlePageChange: (id: PageId) => void }): React.JSX.Element => {
-    const { open, closePalette, contribution } = usePalette();
+    const { open, closePalette, contribution, helpOpen, closeHelp, helpShortcuts, openHelp } = usePalette();
     const navCmds = useMemo(() => navigationCommands(handlePageChange), [handlePageChange]);
+
+    const showShortcutsCmd = useMemo((): Command => ({
+        id: '__show_shortcuts',
+        icon: '?',
+        label: 'Keyboard shortcuts',
+        keywords: 'help keys shortcuts hotkeys',
+        group: 'Go to',
+        // Defer so the palette's auto-close on select runs before the help opens.
+        onSelect: () => setTimeout(openHelp, 0),
+    }), [openHelp]);
 
     const commands = useMemo(() => {
         const pageCmds = contribution?.commands ?? [];
-        return [...pageCmds, ...navCmds];
-    }, [contribution, navCmds]);
+        return [...pageCmds, ...navCmds, showShortcutsCmd];
+    }, [contribution, navCmds, showShortcutsCmd]);
 
     const dynamicCommands = useMemo(() => {
         const pageDynamic = contribution?.dynamicCommands;
@@ -75,14 +85,21 @@ const GlobalPalette = ({ handlePageChange }: { handlePageChange: (id: PageId) =>
     const placeholder = contribution?.placeholder ?? 'Search or jump to a page…';
 
     return (
-        <CommandPalette<unknown>
-            open={open}
-            onClose={closePalette}
-            placeholder={placeholder}
-            commands={commands}
-            dynamicCommands={dynamicCommands}
-            rowAdapter={rowAdapter}
-        />
+        <>
+            <CommandPalette<unknown>
+                open={open}
+                onClose={closePalette}
+                placeholder={placeholder}
+                commands={commands}
+                dynamicCommands={dynamicCommands}
+                rowAdapter={rowAdapter}
+            />
+            <ShortcutsHelp
+                open={helpOpen}
+                onClose={closeHelp}
+                pageSections={helpShortcuts}
+            />
+        </>
     );
 };
 

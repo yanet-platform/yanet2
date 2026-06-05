@@ -36,3 +36,5 @@ export type { UseConfigQuerySyncOptions } from './useConfigQuerySync';
 
 export { useLagInterpolated } from './useLagInterpolated';
 export { useRollingWindow } from './useRollingWindow';
+
+export { useListNavigation } from './useListNavigation';
