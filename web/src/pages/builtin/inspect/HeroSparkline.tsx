@@ -86,7 +86,7 @@ export const HeroSparkline: React.FC<HeroSparklineProps> = ({
         const cy = h / 2;
         return (
             <div ref={wrapperRef} className="iv-hero-spark">
-                <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} aria-hidden>
+                <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} aria-hidden className="iv-hero-spark__svg">
                     <line
                         x1={0}
                         y1={cy}
