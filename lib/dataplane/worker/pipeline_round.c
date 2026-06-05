@@ -6,7 +6,6 @@
 #include "lib/dataplane/module/packet_front.h"
 #include "lib/dataplane/pipeline/econtext.h"
 #include "lib/dataplane/pipeline/pipeline.h"
-#include "lib/dataplane/pipeline/schedule.h"
 
 void
 worker_pipeline_round(
@@ -19,8 +18,18 @@ worker_pipeline_round(
 		cp_config_gen->device_registry.registry.capacity;
 
 	struct device_ectx *devices[device_count];
+	struct packet_front *input[device_count];
+	struct packet_front *output[device_count];
 	for (uint64_t idx = 0; idx < device_count; ++idx) {
-		devices[idx] = ADDR_OF(config_gen_ectx->devices + idx);
+		struct device_ectx *device =
+			ADDR_OF(config_gen_ectx->devices + idx);
+		input[idx] = device != NULL ? ADDR_OF(&device->pending_input) +
+						      dp_worker->idx
+					    : NULL;
+		output[idx] = device != NULL ? ADDR_OF(&device->pending_output
+					       ) + dp_worker->idx
+					     : NULL;
+		devices[idx] = device;
 	}
 
 	while (1) {
@@ -31,20 +40,16 @@ worker_pipeline_round(
 		while ((packet = packet_list_pop(&packet_front->pending_input)
 		       ) != NULL) {
 			empty = 0;
-			device_ectx_schedule_input(
-				devices[packet->tx_device_id],
-				packet,
-				dp_worker->idx
+			packet_front_output(
+				input[packet->tx_device_id], packet
 			);
 		}
 
 		while ((packet = packet_list_pop(&packet_front->pending_output)
 		       ) != NULL) {
 			empty = 0;
-			device_ectx_schedule_output(
-				devices[packet->tx_device_id],
-				packet,
-				dp_worker->idx
+			packet_front_output(
+				output[packet->tx_device_id], packet
 			);
 		}
 
@@ -53,18 +58,24 @@ worker_pipeline_round(
 		}
 
 		for (uint64_t idx = 0; idx < device_count; ++idx) {
-			if (devices[idx] != NULL) {
+			if (input[idx] != NULL &&
+			    input[idx]->output.count > 0) {
 				device_ectx_process_input(
-					dp_worker, devices[idx], packet_front
+					dp_worker, devices[idx], input[idx]
 				);
+				packet_front_merge(packet_front, input[idx]);
+				packet_front_init(input[idx]);
 			}
 		}
 
 		for (uint64_t idx = 0; idx < device_count; ++idx) {
-			if (devices[idx] != NULL) {
+			if (output[idx] != NULL &&
+			    output[idx]->output.count > 0) {
 				device_ectx_process_output(
-					dp_worker, devices[idx], packet_front
+					dp_worker, devices[idx], output[idx]
 				);
+				packet_front_merge(packet_front, output[idx]);
+				packet_front_init(output[idx]);
 			}
 		}
 	}

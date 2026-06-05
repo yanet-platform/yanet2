@@ -95,12 +95,6 @@ packet_list_concat(struct packet_list *dst, struct packet_list *src) {
 	dst->count += src->count;
 }
 
-static inline void
-packet_list_move(struct packet_list *dst, struct packet_list *src) {
-	packet_list_concat(dst, src);
-	packet_list_init(src);
-}
-
 static inline struct packet *
 packet_list_pop(struct packet_list *packets) {
 	struct packet *res = packets->first;

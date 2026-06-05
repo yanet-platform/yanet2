@@ -20,7 +20,7 @@ plain_input_handle(
 	(void)dp_worker;
 	(void)device_ectx;
 
-	packet_list_move(&packet_front->output, &packet_front->input);
+	packet_list_concat(&packet_front->output, &packet_front->input);
 }
 
 static void
@@ -32,7 +32,7 @@ plain_output_handle(
 	(void)dp_worker;
 	(void)device_ectx;
 
-	packet_list_move(&packet_front->output, &packet_front->input);
+	packet_list_concat(&packet_front->output, &packet_front->input);
 }
 
 struct device_plain {

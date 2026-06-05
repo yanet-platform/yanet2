@@ -43,14 +43,6 @@ packet_front_merge(struct packet_front *dst, struct packet_front *src) {
 }
 
 static inline void
-packet_front_move(struct packet_front *dst, struct packet_front *src) {
-	packet_list_move(&dst->output, &src->output);
-	packet_list_move(&dst->drop, &src->drop);
-	packet_list_move(&dst->pending_input, &src->pending_input);
-	packet_list_move(&dst->pending_output, &src->pending_output);
-}
-
-static inline void
 packet_front_output(struct packet_front *packet_front, struct packet *packet) {
 	packet_list_add(&packet_front->output, packet);
 }
