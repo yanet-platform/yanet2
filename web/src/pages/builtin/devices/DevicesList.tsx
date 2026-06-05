@@ -1,11 +1,11 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo } from 'react';
 import { DeviceListItem } from './DeviceListItem';
 import { IconStack } from './components/Icons';
 import type { LocalDevice } from './types';
 import type { CounterHistoryEntry } from '../../../hooks/useCounterHistory';
 import type { DeviceCounterData } from '../../../hooks/useDeviceCounters';
 
-type FilterKind = 'all' | 'plain' | 'vlan';
+export type FilterKind = 'all' | 'plain' | 'vlan';
 type GroupingMode = 'flat' | 'type' | 'parent';
 
 export interface DevicesListProps {
@@ -16,6 +16,8 @@ export interface DevicesListProps {
     onSelectDevice: (deviceName: string) => void;
     counters: Map<string, DeviceCounterData>;
     history: Map<string, CounterHistoryEntry>;
+    filter: FilterKind;
+    onFilterChange: (filter: FilterKind) => void;
 }
 
 interface DeviceGroup {
@@ -62,8 +64,9 @@ export const DevicesList: React.FC<DevicesListProps> = ({
     onSelectDevice,
     counters,
     history,
+    filter,
+    onFilterChange,
 }) => {
-    const [filter, setFilter] = useState<FilterKind>('all');
 
     const counts = useMemo(() => ({
         all: devices.length,
@@ -99,7 +102,7 @@ export const DevicesList: React.FC<DevicesListProps> = ({
                             <button
                                 key={k}
                                 className={"dv-chip" + (filter === k ? ' chip-on' : '')}
-                                onClick={() => setFilter(k)}
+                                onClick={() => onFilterChange(k)}
                             >
                                 {label} <span className="dv-chip-n">{n}</span>
                             </button>

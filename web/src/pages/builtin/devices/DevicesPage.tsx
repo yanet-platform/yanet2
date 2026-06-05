@@ -17,6 +17,7 @@ import {
     CreateDeviceDialog,
     useDeviceData,
 } from '.';
+import type { FilterKind } from '.';
 import './devices.scss';
 
 type GroupingMode = 'flat' | 'type' | 'parent';
@@ -38,6 +39,7 @@ const DevicesPage: React.FC = () => {
     const [searchParams, setSearchParams] = useSearchParams();
     const [createDialogOpen, setCreateDialogOpen] = useState(false);
     const [grouping, setGrouping] = useState<GroupingMode>('type');
+    const [deviceFilter, setDeviceFilter] = useState<FilterKind>('all');
 
     const deviceNames = useMemo(() => devices.map(d => d.id.name || ''), [devices]);
 
@@ -156,7 +158,7 @@ const DevicesPage: React.FC = () => {
             ? `vlan${d.vlanId !== undefined ? ' · ' + d.vlanId : ''}`
             : 'physical',
         searchText: (d) => [d.id.name, d.type, d.vlanId].filter(Boolean).join(' '),
-        onSelect: (id) => handleSelectDevice(id),
+        onSelect: (id) => { setDeviceFilter('all'); handleSelectDevice(id); },
         icon: '→',
     }), [devices, handleSelectDevice]);
 
@@ -218,6 +220,8 @@ const DevicesPage: React.FC = () => {
                         onSelectDevice={handleSelectDevice}
                         counters={counters}
                         history={history}
+                        filter={deviceFilter}
+                        onFilterChange={setDeviceFilter}
                     />
                     <DeviceDetails
                         device={selectedDevice}
