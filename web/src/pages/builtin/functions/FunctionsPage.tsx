@@ -36,6 +36,7 @@ const FunctionsPage = (): React.JSX.Element => {
     const [availableModuleConfigNames, setAvailableModuleConfigNames] = useState<string[]>([]);
     const [createDialogOpen, setCreateDialogOpen] = useState(false);
     const [flashId, setFlashId] = useState<string | null>(null);
+    const [diffOpenId, setDiffOpenId] = useState<string | null>(null);
     const { dragState, startDrag, endDrag } = useDragState();
 
     useEffect(() => {
@@ -117,14 +118,14 @@ const FunctionsPage = (): React.JSX.Element => {
                     id: `__save_${fn.id}`,
                     icon: '✓',
                     label: `Save ${fn.id}`,
-                    sub: 'Save unsaved changes',
+                    sub: 'Preview YAML diff before saving',
                     keywords: 'save commit apply',
-                    onSelect: () => saveFn(fn.id),
+                    onSelect: () => setDiffOpenId(fn.id),
                 });
             }
         }
         return list;
-    }, [functions, isDirty, saveFn]);
+    }, [functions, isDirty]);
 
     const rowAdapter = useMemo((): RowAdapter<NetworkFunction> => ({
         rows: functions,
@@ -186,6 +187,9 @@ const FunctionsPage = (): React.JSX.Element => {
                             onSave={handleSave(fn.id)}
                             onDiscard={handleDiscard(fn.id)}
                             onDelete={handleDelete(fn.id)}
+                            diffOpen={diffOpenId === fn.id}
+                            onOpenDiff={() => setDiffOpenId(fn.id)}
+                            onCloseDiff={() => setDiffOpenId(null)}
                             flash={flashId === fn.id}
                         />
                     ))

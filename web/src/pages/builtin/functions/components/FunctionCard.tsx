@@ -24,6 +24,9 @@ interface FunctionCardProps {
     onSave: () => Promise<void>;
     onDiscard: () => void;
     onDelete: () => Promise<boolean>;
+    diffOpen: boolean;
+    onOpenDiff: () => void;
+    onCloseDiff: () => void;
     flash?: boolean;
 }
 
@@ -46,10 +49,12 @@ export const FunctionCard: React.FC<FunctionCardProps> = ({
     onSave,
     onDiscard,
     onDelete,
+    diffOpen,
+    onOpenDiff,
+    onCloseDiff,
     flash,
 }) => {
     const [collapsed, setCollapsed] = useState(false);
-    const [diffOpen, setDiffOpen] = useState(false);
     const [drawerSelection, setDrawerSelection] = useState<
         { kind: 'module'; moduleId: string; chainId: string } |
         { kind: 'chain'; chainId: string } |
@@ -211,14 +216,6 @@ export const FunctionCard: React.FC<FunctionCardProps> = ({
 
     const saveErrors = useMemo(() => validateSave(fn), [fn]);
 
-    const handleOpenDiff = useCallback((): void => {
-        setDiffOpen(true);
-    }, []);
-
-    const handleCloseDiff = useCallback((): void => {
-        setDiffOpen(false);
-    }, []);
-
     return (
         <div
             id={`fn-card-${fn.id}`}
@@ -232,7 +229,7 @@ export const FunctionCard: React.FC<FunctionCardProps> = ({
                 totalPps={totalPps}
                 sparklineData={sparklineData}
                 onToggleCollapse={() => setCollapsed(c => !c)}
-                onOpenDiff={handleOpenDiff}
+                onOpenDiff={onOpenDiff}
                 onDiscard={onDiscard}
                 onDelete={onDelete}
             />
@@ -362,7 +359,7 @@ export const FunctionCard: React.FC<FunctionCardProps> = ({
                     fn={fn}
                     serverFn={serverFn}
                     saveErrors={saveErrors}
-                    onClose={handleCloseDiff}
+                    onClose={onCloseDiff}
                     onApply={onSave}
                 />
             )}

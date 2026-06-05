@@ -22,6 +22,9 @@ interface PipelineCardProps {
     onDiscard: () => void;
     onDelete: () => Promise<boolean>;
     loadFunctionList: () => Promise<FunctionId[]>;
+    diffOpen: boolean;
+    onOpenDiff: () => void;
+    onCloseDiff: () => void;
     flash?: boolean;
 }
 
@@ -40,10 +43,12 @@ export const PipelineCard: React.FC<PipelineCardProps> = ({
     onDiscard,
     onDelete,
     loadFunctionList,
+    diffOpen,
+    onOpenDiff,
+    onCloseDiff,
     flash,
 }) => {
     const [collapsed, setCollapsed] = useState(false);
-    const [diffOpen, setDiffOpen] = useState(false);
     const [drawerRefId, setDrawerRefId] = useState<string | null>(null);
 
     const refInfoList: FunctionRefInfo[] = useMemo(() =>
@@ -125,7 +130,7 @@ export const PipelineCard: React.FC<PipelineCardProps> = ({
                 totalPps={totalPps}
                 sparklineData={sparklineData}
                 onToggleCollapse={() => setCollapsed(c => !c)}
-                onOpenDiff={() => setDiffOpen(true)}
+                onOpenDiff={onOpenDiff}
                 onDiscard={onDiscard}
                 onDelete={onDelete}
             />
@@ -173,7 +178,7 @@ export const PipelineCard: React.FC<PipelineCardProps> = ({
                 <DiffModal
                     pipeline={pipeline}
                     serverPipeline={serverPipeline}
-                    onClose={() => setDiffOpen(false)}
+                    onClose={onCloseDiff}
                     onApply={onSave}
                 />
             )}

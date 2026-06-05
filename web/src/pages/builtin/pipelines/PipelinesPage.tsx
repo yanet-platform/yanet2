@@ -21,6 +21,7 @@ const PipelinesPage = (): React.JSX.Element => {
     const { pipelines, loading, isDirty, getServerPipeline, dispatch, savePipeline, discardPipeline, createPipeline, deletePipeline, loadFunctionList } = usePipelinesData();
     const [createDialogOpen, setCreateDialogOpen] = useState(false);
     const [flashId, setFlashId] = useState<string | null>(null);
+    const [diffOpenId, setDiffOpenId] = useState<string | null>(null);
     const { dragState, startDrag, endDrag } = useDragState();
 
     const anyDirty = useMemo(
@@ -61,14 +62,14 @@ const PipelinesPage = (): React.JSX.Element => {
                     id: `__save_${pl.id}`,
                     icon: '✓',
                     label: `Save ${pl.id}`,
-                    sub: 'Save unsaved changes',
+                    sub: 'Preview YAML diff before saving',
                     keywords: 'save commit apply',
-                    onSelect: () => savePipeline(pl.id),
+                    onSelect: () => setDiffOpenId(pl.id),
                 });
             }
         }
         return list;
-    }, [pipelines, isDirty, savePipeline]);
+    }, [pipelines, isDirty]);
 
     const rowAdapter = useMemo((): RowAdapter<Pipeline> => ({
         rows: pipelines,
@@ -128,6 +129,9 @@ const PipelinesPage = (): React.JSX.Element => {
                             onDiscard={handleDiscard(pl.id)}
                             onDelete={handleDelete(pl.id)}
                             loadFunctionList={loadFunctionList}
+                            diffOpen={diffOpenId === pl.id}
+                            onOpenDiff={() => setDiffOpenId(pl.id)}
+                            onCloseDiff={() => setDiffOpenId(null)}
                             flash={flashId === pl.id}
                         />
                     ))
