@@ -14,7 +14,6 @@
 #include "common/memory_address.h"
 #include "common/strutils.h"
 #include "lib/controlplane/agent/agent.h"
-#include "lib/controlplane/config/cp_device.h"
 #include "lib/controlplane/config/zone.h"
 #include "lib/counters/counters.h"
 #include "lib/dataplane/config/agent.h"
@@ -405,165 +404,83 @@ dataplane_ut_run(
 	packet_list_concat(&result->drop, &packet_front.drop);
 }
 
-int
-dataplane_ut_add_passthrough_pipeline(
+// Saved per-packet state used by dataplane_ut_run_rounds to reset each
+// packet before re-queuing it for the next round.
+struct saved_packet {
+	struct packet *pkt;
+	uint16_t tx_device_id;
+	uint16_t rx_device_id;
+};
+
+void
+dataplane_ut_run_rounds(
 	struct dataplane_ut *ut,
-	const char *device_name,
-	const char *pipeline_name,
-	uint64_t *out_tx_device_id
+	size_t worker,
+	struct packet_list *input,
+	uint64_t rounds
 ) {
-	yanet_error *err = NULL;
-
-	// Names for the synthetic chain and function created to back this
-	// passthrough pipeline. Both are empty (zero modules / one chain with
-	// weight 1) so packets traverse the counters and emerge unchanged.
-	static const char *chain_name = "passthrough_chain";
-	static const char *function_name = "passthrough_func";
-
-	// Empty chain: zero modules, so packets pass straight through.
-	struct cp_chain_config *chain_cfg =
-		cp_chain_config_create(chain_name, 0, NULL, NULL);
-	if (chain_cfg == NULL) {
-		LOG(ERROR,
-		    "dataplane_ut_add_passthrough_pipeline: "
-		    "cp_chain_config_create failed");
-		return -1;
+	if (rounds == 0 || input->count == 0) {
+		return;
 	}
 
-	struct cp_function_config *fn_cfg =
-		cp_function_config_create(function_name, 1);
-	if (fn_cfg == NULL) {
-		LOG(ERROR,
-		    "dataplane_ut_add_passthrough_pipeline: "
-		    "cp_function_config_create failed");
-		cp_chain_config_free(chain_cfg);
-		return -1;
-	}
-	// cp_function_config_set_chain takes ownership of chain_cfg.
-	if (cp_function_config_set_chain(fn_cfg, 0, chain_cfg, 1) != 0) {
-		LOG(ERROR,
-		    "dataplane_ut_add_passthrough_pipeline: "
-		    "cp_function_config_set_chain failed");
-		cp_function_config_free(fn_cfg);
-		cp_chain_config_free(chain_cfg);
-		return -1;
+	size_t count = (size_t)input->count;
+	struct saved_packet *saved =
+		malloc(count * sizeof(struct saved_packet));
+	if (saved == NULL) {
+		return;
 	}
 
-	struct cp_function_config *fn_cfgs[] = {fn_cfg};
-	if (agent_update_functions(ut->agent, 1, fn_cfgs, &err) != 0) {
-		LOG(ERROR,
-		    "dataplane_ut_add_passthrough_pipeline: "
-		    "agent_update_functions failed: %s",
-		    yanet_error_message(err));
-		yanet_error_free(err);
-		cp_function_config_free(fn_cfg);
-		return -1;
-	}
-	cp_function_config_free(fn_cfg);
-
-	struct cp_pipeline_config *pl_cfg =
-		cp_pipeline_config_create(pipeline_name, 1);
-	if (pl_cfg == NULL) {
-		LOG(ERROR,
-		    "dataplane_ut_add_passthrough_pipeline: "
-		    "cp_pipeline_config_create failed");
-		return -1;
-	}
-	if (cp_pipeline_config_set_function(pl_cfg, 0, function_name) != 0) {
-		LOG(ERROR,
-		    "dataplane_ut_add_passthrough_pipeline: "
-		    "cp_pipeline_config_set_function failed");
-		cp_pipeline_config_free(pl_cfg);
-		return -1;
+	// Pop every packet out of input and record its initial routing state.
+	for (size_t idx = 0; idx < count; ++idx) {
+		struct packet *pkt = packet_list_pop(input);
+		saved[idx].pkt = pkt;
+		saved[idx].tx_device_id = pkt->tx_device_id;
+		saved[idx].rx_device_id = pkt->rx_device_id;
 	}
 
-	struct cp_pipeline_config *pl_cfgs[] = {pl_cfg};
-	if (agent_update_pipelines(ut->agent, 1, pl_cfgs, &err) != 0) {
-		LOG(ERROR,
-		    "dataplane_ut_add_passthrough_pipeline: "
-		    "agent_update_pipelines failed: %s",
-		    yanet_error_message(err));
-		yanet_error_free(err);
-		cp_pipeline_config_free(pl_cfg);
-		return -1;
-	}
-	cp_pipeline_config_free(pl_cfg);
-
-	// cp_device_config_init allocates input/output pipeline arrays on the
-	// heap; cp_device_config_fini frees them.
-	struct cp_device_config device_cfg;
-	if (cp_device_config_init(
-		    &device_cfg, "plain", device_name, 1, 0, &err
-	    ) != 0) {
-		LOG(ERROR,
-		    "dataplane_ut_add_passthrough_pipeline: "
-		    "cp_device_config_init failed: %s",
-		    yanet_error_message(err));
-		yanet_error_free(err);
-		return -1;
-	}
-	if (cp_device_config_set_input_pipeline(
-		    &device_cfg, 0, pipeline_name, 1
-	    ) != 0) {
-		LOG(ERROR,
-		    "dataplane_ut_add_passthrough_pipeline: "
-		    "cp_device_config_set_input_pipeline failed");
-		cp_device_config_fini(&device_cfg);
-		return -1;
-	}
-
-	struct cp_device *cp_device = cp_device_new(&ut->agent->memory_context);
-	if (cp_device == NULL) {
-		LOG(ERROR,
-		    "dataplane_ut_add_passthrough_pipeline: "
-		    "cp_device_new failed");
-		cp_device_config_fini(&device_cfg);
-		return -1;
-	}
-	if (cp_device_init(cp_device, ut->agent, &device_cfg, &err) != 0) {
-		LOG(ERROR,
-		    "dataplane_ut_add_passthrough_pipeline: "
-		    "cp_device_init failed: %s",
-		    yanet_error_message(err));
-		yanet_error_free(err);
-		cp_device_free(cp_device);
-		cp_device_config_fini(&device_cfg);
-		return -1;
-	}
-	cp_device_config_fini(&device_cfg);
-
-	struct cp_device *devices[] = {cp_device};
-	if (agent_update_devices(ut->agent, 1, devices, &err) != 0) {
-		LOG(ERROR,
-		    "dataplane_ut_add_passthrough_pipeline: "
-		    "agent_update_devices failed: %s",
-		    yanet_error_message(err));
-		yanet_error_free(err);
-		// Do not fini/free cp_device here: agent_update_devices upserts
-		// it into a new config gen, and cp_config_gen_free frees it on
-		// install failure. Freeing it again would be a double-free.
-		return -1;
-	}
-
-	// Find the device's topology index so the caller knows which
-	// tx_device_id to set on packets destined for this device.
-	// The topology order matches the registry slot order established by
-	// cp_config_gen_create, so the topology index IS the correct
-	// tx_device_id.
-	struct dp_topology *topo = &ut->dp_config->dp_topology;
-	struct dp_port *ports = ADDR_OF(&topo->devices);
-	for (uint64_t idx = 0; idx < topo->device_count; ++idx) {
-		if (strncmp(ports[idx].device_name,
-			    device_name,
-			    sizeof(ports[idx].device_name)) == 0) {
-			*out_tx_device_id = idx;
-			return 0;
+	// Assumes a fixed packet set: handlers forward or drop without
+	// allocating, freeing, or replicating packets. dataplane_ut_run does
+	// not free dropped packets, so saved[idx].pkt stays valid every round.
+	for (uint64_t r = 0; r < rounds; ++r) {
+		// Rebuild input from the saved snapshot.
+		for (size_t idx = 0; idx < count; ++idx) {
+			struct packet *pkt = saved[idx].pkt;
+			pkt->next = NULL;
+			pkt->tx_device_id = saved[idx].tx_device_id;
+			pkt->rx_device_id = saved[idx].rx_device_id;
+			packet_list_add(input, pkt);
 		}
+
+		struct dataplane_ut_round_result result;
+		dataplane_ut_run(ut, worker, input, &result);
 	}
 
-	LOG(ERROR,
-	    "dataplane_ut_add_passthrough_pipeline: "
-	    "device '%s' not found in dp_topology",
-	    device_name);
-	return -1;
+	// Leave input holding all packets so the caller can free them.
+	for (size_t idx = 0; idx < count; ++idx) {
+		struct packet *pkt = saved[idx].pkt;
+		pkt->next = NULL;
+		pkt->tx_device_id = saved[idx].tx_device_id;
+		pkt->rx_device_id = saved[idx].rx_device_id;
+		packet_list_add(input, pkt);
+	}
+
+	free(saved);
+}
+
+int
+dataplane_ut_build_optimized(void) {
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer)
+	return 0;
+#endif
+#endif
+#if defined(__SANITIZE_ADDRESS__)
+	return 0;
+#else
+#if defined(__OPTIMIZE__)
+	return 1;
+#else
+	return 0;
+#endif
+#endif
 }

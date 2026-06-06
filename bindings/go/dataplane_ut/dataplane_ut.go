@@ -125,6 +125,8 @@ import "C"
 import (
 	"fmt"
 	"runtime"
+	"sync"
+	"testing"
 	"time"
 	"unsafe"
 
@@ -395,6 +397,68 @@ func (m *Harness) handlePackets(
 		Output: output.Info(),
 		Drop:   drop.Info(),
 	}, nil
+}
+
+// warnUnoptimizedOnce guards the non-optimized build warning so it prints
+// at most once per process regardless of how many benchmarks call Bench.
+var warnUnoptimizedOnce sync.Once
+
+// Bench runs b.N pipeline rounds over the given packets on worker 0,
+// timing only the C-side loop.
+//
+// Harness, config, and packet-build setup done by the caller before this
+// call is excluded from the measurement.
+func (m *Harness) Bench(b *testing.B, packets ...gopacket.Packet) {
+	b.Helper()
+
+	warnUnoptimizedOnce.Do(func() {
+		if C.dataplane_ut_build_optimized() == 0 {
+			b.Logf("WARNING: dataplane built without optimizations (or with sanitizers); benchmark numbers are NOT representative — rebuild meson with buildtype=debugoptimized or release and b_sanitize=none.")
+		}
+	})
+
+	pinner := runtime.Pinner{}
+	defer pinner.Unpin()
+
+	payloads := xpacket.PacketsGoPayload(packets...)
+	data := make([]dataplane.PacketData, 0, len(payloads))
+	for idx := range payloads {
+		data = append(data, dataplane.PacketData{
+			Payload:    payloads[idx],
+			TxDeviceId: 0,
+			RxDeviceId: 0,
+		})
+	}
+
+	packetList, err := dataplane.NewPacketListFromData(&pinner, data...)
+	if err != nil {
+		b.Fatalf("failed to build packet list: %v", err)
+	}
+
+	pinner.Pin(m)
+
+	var totalBytes int64
+	for idx := range payloads {
+		totalBytes += int64(len(payloads[idx]))
+	}
+	numPkts := len(payloads)
+
+	b.ResetTimer()
+	C.dataplane_ut_run_rounds(
+		m.ptr,
+		C.size_t(0),
+		(*C.struct_packet_list)(unsafe.Pointer(packetList)),
+		C.uint64_t(b.N),
+	)
+	b.StopTimer()
+
+	elapsed := b.Elapsed()
+	if elapsed > 0 {
+		bits := float64(totalBytes) * float64(b.N) * 8
+		pkts := float64(numPkts) * float64(b.N)
+		b.ReportMetric(bits/elapsed.Seconds()/1e9, "Gbit/s")
+		b.ReportMetric(pkts/elapsed.Seconds()/1e6, "Mpps")
+	}
 }
 
 // toCStringArray converts a Go string slice to a slice of *C.char values and

@@ -56,12 +56,12 @@ var allPorts = filter.PortRanges{{From: 0, To: 65535}}
 // attaches a control-plane agent.
 //
 // devices is the set of logical port names to register in the harness topology.
-// Cleanup is wired via t.Cleanup in LIFO order.
+// Cleanup is wired via tb.Cleanup in LIFO order.
 func setupACLHarness(
-	t *testing.T,
+	tb testing.TB,
 	devices []string,
 ) (*dataplaneut.Harness, *ffi.Agent, acl.Backend) {
-	t.Helper()
+	tb.Helper()
 
 	cfg := dataplaneut.Config{
 		CPMemory:      uint64(aclCPSize),
@@ -72,34 +72,34 @@ func setupACLHarness(
 		DevicesToLoad: []string{"plain"},
 	}
 	h, err := dataplaneut.NewHarness(cfg)
-	require.NoError(t, err)
-	t.Cleanup(h.Free)
+	require.NoError(tb, err)
+	tb.Cleanup(h.Free)
 
 	shm := h.SharedMemory()
 	agent, err := shm.AgentAttach("acl-test", 0, aclMemSize)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = agent.CleanUp() })
+	require.NoError(tb, err)
+	tb.Cleanup(func() { _ = agent.CleanUp() })
 
 	backend := acl.NewBackend(agent, uint64(aclMemSize))
 	return h, agent, backend
 }
 
 // applyACLRules pushes rules into a new ACL module config and publishes it to
-// the dataplane. The module handle is freed via t.Cleanup.
+// the dataplane. The module handle is freed via tb.Cleanup.
 func applyACLRules(
-	t *testing.T,
+	tb testing.TB,
 	backend acl.Backend,
 	name string,
 	rules []cacl.AclRule,
 ) acl.ModuleHandle {
-	t.Helper()
+	tb.Helper()
 
 	handle, err := backend.NewModule(name)
-	require.NoError(t, err)
-	t.Cleanup(handle.Free)
+	require.NoError(tb, err)
+	tb.Cleanup(handle.Free)
 
-	require.NoError(t, handle.UpdateRules(rules))
-	require.NoError(t, backend.UpdateModule(handle))
+	require.NoError(tb, handle.UpdateRules(rules))
+	require.NoError(tb, backend.UpdateModule(handle))
 	return handle
 }
 
@@ -109,13 +109,13 @@ func applyACLRules(
 // Must be called after applyACLRules, because the ACL module config must exist
 // before UpdatePlainDevices resolves chain module references.
 func wireACLPipeline(
-	t *testing.T,
+	tb testing.TB,
 	agent *ffi.Agent,
 	device, configName string,
 ) {
-	t.Helper()
+	tb.Helper()
 
-	require.NoError(t, agent.UpdateFunction(ffi.FunctionConfig{
+	require.NoError(tb, agent.UpdateFunction(ffi.FunctionConfig{
 		Name: configName,
 		Chains: []ffi.FunctionChainConfig{{
 			Weight: 1,
@@ -127,14 +127,14 @@ func wireACLPipeline(
 			},
 		}},
 	}))
-	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{
+	require.NoError(tb, agent.UpdatePipeline(ffi.PipelineConfig{
 		Name:      configName,
 		Functions: []string{configName},
 	}))
-	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{
+	require.NoError(tb, agent.UpdatePipeline(ffi.PipelineConfig{
 		Name: "dummy",
 	}))
-	require.NoError(t, agent.UpdatePlainDevices([]ffi.DeviceConfig{{
+	require.NoError(tb, agent.UpdatePlainDevices([]ffi.DeviceConfig{{
 		Name:   device,
 		Input:  []ffi.DevicePipelineConfig{{Name: configName, Weight: 1}},
 		Output: []ffi.DevicePipelineConfig{{Name: "dummy", Weight: 1}},

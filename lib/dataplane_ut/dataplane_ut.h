@@ -67,26 +67,6 @@ struct dataplane_ut_round_result {
 	struct packet_list drop;
 };
 
-// Wire a passthrough pipeline to a device in the harness so that
-// config_gen_ectx becomes non-NULL and packets can flow.
-//
-// Creates an empty chain, a single-chain function, a pipeline with one
-// function stage, and binds that pipeline to the named device's input.
-// device_name must be one of the names supplied in dataplane_ut_config.devices.
-//
-// On success, writes the device's topology index to *out_tx_device_id.
-// The caller must set pkt->tx_device_id to this value for packets that
-// should be routed through the pipeline installed on this device.
-//
-// Returns 0 on success, -1 on failure (details logged via LOG(ERROR, ...)).
-int
-dataplane_ut_add_passthrough_pipeline(
-	struct dataplane_ut *ut,
-	const char *device_name,
-	const char *pipeline_name,
-	uint64_t *out_tx_device_id
-);
-
 // Run one pipeline round on worker_idx with the given input.
 //
 // input is drained to empty on return; result->output and result->drop
@@ -100,4 +80,44 @@ dataplane_ut_run(
 	size_t worker_idx,
 	struct packet_list *input,
 	struct dataplane_ut_round_result *result
+);
+
+// Report whether this dataplane build is suitable for benchmarking:
+// compiled with optimizations enabled and without AddressSanitizer.
+//
+// Benchmarks against a debug or AddressSanitizer build produce misleading
+// numbers, so the Go harness warns when this returns 0.
+int
+dataplane_ut_build_optimized(void);
+
+// Run rounds pipeline rounds on worker, recycling the packets in input each
+// time without allocating or printing.
+//
+// Before the loop, every packet is popped from input and its initial
+// tx_device_id and rx_device_id are recorded. Each round rebuilds input from
+// those snapshot pointers, resets next/tx_device_id/rx_device_id on each
+// packet, and calls dataplane_ut_run. The per-round result is discarded —
+// dataplane_ut_run moves packet nodes without freeing them, so the snapshot
+// pointers remain valid for every subsequent round.
+//
+// After the loop, input is rebuilt from the snapshot so the caller's list
+// holds all packets in a consistent state for freeing. The snapshot array is
+// freed before returning.
+//
+// Returns immediately (leaving input intact) when rounds == 0 or
+// input->count == 0. Returns immediately on malloc failure.
+//
+// Caveat: this primitive assumes each round's handlers only forward or drop the
+// fixed packet set. A handler that allocates, frees, or replicates packets per
+// round breaks the recycling contract: any new mbuf emitted (for example the
+// fwstate state-sync path, which calls worker_packet_alloc +
+// packet_front_output) is held only by the discarded per-round result, not by
+// the snapshot, so it leaks one mbuf per round. Do not benchmark configurations
+// that emit or drop-free packets through this primitive.
+void
+dataplane_ut_run_rounds(
+	struct dataplane_ut *ut,
+	size_t worker,
+	struct packet_list *input,
+	uint64_t rounds
 );

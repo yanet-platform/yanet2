@@ -69,6 +69,7 @@ CLI_RELEASE_BINARIES := $(addprefix $(RELEASE_DIR)/,$(CLI_BINARIES))
 	test-asan \
 	test-tsan \
 	test-functional \
+	bench \
 	fuzz \
 	cli \
 	cli-build \
@@ -187,6 +188,14 @@ test-tsan:
 test-functional:
 	@echo "Running functional tests..."
 	cd tests/functional && $(MAKE) test
+
+# Run Go benchmarks without running unit tests.
+# A/B recipe: save baseline and candidate runs to files and compare with benchstat.
+#   go test -run='^$$' -bench=. -benchmem -count=6 ./bindings/go/dataplane_ut/... > old.txt
+#   go test -run='^$$' -bench=. -benchmem -count=6 ./bindings/go/dataplane_ut/... > new.txt
+#   benchstat old.txt new.txt
+bench: go-cache-clean dataplane
+	go test -run='^$$' -bench=. -benchmem ./bindings/go/dataplane_ut/... ./modules/acl/tests/functional/...
 
 fuzz:
 	@if [ -d build ] && ! meson introspect build --buildoptions | jq -er '.[] | select(.name=="fuzzing") | .value' | grep -q enabled; then \
