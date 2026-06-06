@@ -6,7 +6,6 @@
 #include <stdint.h>
 
 #include <dlfcn.h>
-#include <pthread.h>
 
 #include <rte_ethdev.h>
 #include <rte_ether.h>
@@ -472,84 +471,11 @@ dataplane_init(
 	return 0;
 }
 
-static void *
-stat_thread(void *arg) {
-	struct dataplane *dataplane = (struct dataplane *)arg;
-
-	FILE *log = fopen("stat.log", "w");
-
-	struct rte_eth_xstat_name names[4096];
-	struct rte_eth_xstat xstats0[dataplane->device_count][4096];
-
-	struct rte_eth_stats stats0[dataplane->device_count];
-	for (uint16_t idx = 0; idx < dataplane->device_count; ++idx) {
-		rte_eth_stats_get(
-			dataplane->devices[idx].port_id, &stats0[idx]
-		);
-		rte_eth_xstats_get(
-			dataplane->devices[idx].port_id, xstats0[idx], 4096
-		);
-	}
-
-	while (1) {
-		sleep(1);
-
-		for (uint16_t idx = 0; idx < dataplane->device_count; ++idx) {
-			struct rte_eth_stats stats1;
-			rte_eth_stats_get(
-				dataplane->devices[idx].port_id, &stats1
-			);
-			fprintf(log,
-				"dev %u ib %li ob %li ip %li op %li ie %li oe "
-				"%li\n",
-				idx,
-				(int64_t)(stats1.ibytes - stats0[idx].ibytes),
-				(int64_t)(stats1.obytes - stats0[idx].obytes),
-				(int64_t)(stats1.ipackets - stats0[idx].ipackets
-				),
-				(int64_t)(stats1.opackets - stats0[idx].opackets
-				),
-				(int64_t)(stats1.ierrors - stats0[idx].ierrors),
-				(int64_t)(stats1.oerrors - stats0[idx].oerrors)
-			);
-
-			memcpy(&stats0[idx], &stats1, sizeof(stats1));
-
-			struct rte_eth_xstat xstats1[4096];
-			rte_eth_xstats_get_names(
-				dataplane->devices[idx].port_id, names, 4096
-			);
-			int cnt = rte_eth_xstats_get(
-				dataplane->devices[idx].port_id, xstats1, 4096
-			);
-
-			for (int pth = 0; pth < cnt; ++pth) {
-				fprintf(log,
-					"xstat %u %s %lu\n",
-					idx,
-					names[xstats1[pth].id].name,
-					xstats1[pth].value -
-						xstats0[idx][pth].value);
-			}
-
-			memcpy(&xstats0[idx],
-			       xstats1,
-			       sizeof(struct rte_eth_xstat) * cnt);
-		}
-
-		fflush(log);
-	}
-
-	return NULL;
-}
-
 int
 dataplane_start(struct dataplane *dataplane) {
 	for (size_t dev_idx = 0; dev_idx < dataplane->device_count; ++dev_idx) {
 		dataplane_device_start(dataplane, dataplane->devices + dev_idx);
 	}
-	pthread_t thread_id;
-	pthread_create(&thread_id, NULL, stat_thread, dataplane);
 
 	return 0;
 }
