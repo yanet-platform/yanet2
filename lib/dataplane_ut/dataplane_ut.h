@@ -67,6 +67,26 @@ struct dataplane_ut_round_result {
 	struct packet_list drop;
 };
 
+// Wire a passthrough pipeline to a device in the harness so that
+// config_gen_ectx becomes non-NULL and packets can flow.
+//
+// Creates an empty chain, a single-chain function, a pipeline with one
+// function stage, and binds that pipeline to the named device's input.
+// device_name must be one of the names supplied in dataplane_ut_config.devices.
+//
+// On success, writes the device's topology index to *out_tx_device_id.
+// The caller must set pkt->tx_device_id to this value for packets that
+// should be routed through the pipeline installed on this device.
+//
+// Returns 0 on success, -1 on failure (details logged via LOG(ERROR, ...)).
+int
+dataplane_ut_add_passthrough_pipeline(
+	struct dataplane_ut *ut,
+	const char *device_name,
+	const char *pipeline_name,
+	uint64_t *out_tx_device_id
+);
+
 // Run one pipeline round on worker_idx with the given input.
 //
 // input is drained to empty on return; result->output and result->drop
