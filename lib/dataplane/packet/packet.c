@@ -555,13 +555,14 @@ logtrace_rte_mbuf(struct rte_mbuf *mbuf) {
 #endif // ENABLE_TRACE_LOG
 }
 
+uint16_t
+packet_accounted_len(const struct packet *packet) {
+	return packet_data_len((struct packet *)packet);
+}
+
 uint64_t
 packet_list_bytes_sum(struct packet_list *list) {
-	uint64_t bytes = 0;
-	for (struct packet *pkt = list->first; pkt != NULL; pkt = pkt->next) {
-		bytes += packet_data_len(pkt);
-	}
-	return bytes;
+	return list->bytes;
 }
 
 void

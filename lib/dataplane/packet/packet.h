@@ -56,13 +56,19 @@ struct packet_list {
 	struct packet *first;
 	struct packet **last;
 	uint64_t count;
+	uint64_t bytes;
 };
+
+// Return the accounted byte length of a packet. Defined in packet.c.
+uint16_t
+packet_accounted_len(const struct packet *packet);
 
 static inline void
 packet_list_init(struct packet_list *list) {
 	list->first = NULL;
 	list->last = &list->first;
 	list->count = 0;
+	list->bytes = 0;
 }
 
 static inline void
@@ -71,6 +77,7 @@ packet_list_add(struct packet_list *list, struct packet *packet) {
 	packet->next = NULL;
 	list->last = &packet->next;
 	list->count += 1;
+	list->bytes += packet_accounted_len(packet);
 }
 
 static inline struct packet *
@@ -93,18 +100,22 @@ packet_list_concat(struct packet_list *dst, struct packet_list *src) {
 	*dst->last = packet_list_first(src);
 	dst->last = src->last;
 	dst->count += src->count;
+	dst->bytes += src->bytes;
 }
 
 static inline struct packet *
 packet_list_pop(struct packet_list *packets) {
 	struct packet *res = packets->first;
-	if (res == NULL)
+	if (res == NULL) {
 		return res;
+	}
 
 	packets->first = res->next;
-	if (packets->first == NULL)
+	if (packets->first == NULL) {
 		packets->last = &packets->first;
+	}
 	packets->count -= 1;
+	packets->bytes -= packet_accounted_len(res);
 
 	return res;
 }
@@ -126,15 +137,7 @@ parse_packet(struct packet *packet);
 void
 packet_list_print(struct packet_list *list);
 
-/**
- * @brief Calculate total bytes in a packet list
- *
- * Traverses the linked list of packets and sums up the data length of each
- * packet.
- *
- * @param list Pointer to packet list structure to sum bytes for
- * @return Total bytes of all packets in the list
- */
+// Return the running byte total maintained by the list mutators; O(1).
 uint64_t
 packet_list_bytes_sum(struct packet_list *list);
 

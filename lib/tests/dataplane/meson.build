@@ -13,6 +13,21 @@ mss_test = executable(
 )
 test('mss', mss_test, suite: 'lib_packet')
 
+packet_list_bytes_test = executable(
+  'packet_list_bytes_test',
+  'packet_list_bytes_test.c',
+  c_args: yanet_c_args,
+  link_args: yanet_link_args,
+  dependencies: [
+    lib_packet_dp_dep,
+    lib_lib_utils_dep,
+    lib_logging_dep,
+    libdpdk_dep,
+  ],
+  include_directories: yanet_rootdir,
+)
+test('packet_list_bytes', packet_list_bytes_test, suite: 'lib_packet')
+
 gre_test = executable(
   'gre_test',
   'gre_test.c',
