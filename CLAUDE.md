@@ -192,6 +192,18 @@ Meson orchestrates C/DPDK builds and Go binary compilation (via `custom_target` 
 
 ## Coding Conventions
 
+### General (every language — C, Go, Rust, TypeScript, shell, Makefiles, proto, YAML)
+
+- **No banner / section-separator comments. Anywhere. In any language.**
+  Lines like `// --- foo ---`, `# === foo ===`, `# --- validation ---`,
+  `// ----------`, `/* ===== */`, ASCII box-art, or any horizontal divider
+  used to label a block are forbidden — in source, scripts, configs, and
+  tests alike. This explicitly includes shell scripts, Makefiles, and proto
+  files, not just C/Go/Rust/TS. If a file feels long enough to want visual
+  dividers, split it into smaller files or functions instead. This is a hard
+  rule the user has repeated many times across C, Rust, Go, and shell; treat
+  any occurrence as a blocking review finding, never a non-blocking nit.
+
 ### Go
 
 - **Receiver names**: always `m`. No type-letter mnemonics.
@@ -219,7 +231,7 @@ Meson orchestrates C/DPDK builds and Go binary compilation (via `custom_target` 
   the client. `m.log.Debug("would call …")` is a bug, not a stub.
 - **Comments**: English, end with period, fit within ~80 chars
   (reflow rather than preserving narrower fill). List only production
-  callers, not "tests". No section-separator comments.
+  callers, not "tests".
 - **Doc comments**: first line is a single-sentence brief ending with
   period. If detail follows, separate with a blank `//` line, then the
   body paragraph. Never glue brief and detail on consecutive `//` lines.
@@ -276,7 +288,6 @@ Meson orchestrates C/DPDK builds and Go binary compilation (via `custom_target` 
 Web UI lives in `web/` (`package.json`, `index.html`, `dist/`).
 
 - Prefer arrow function expressions.
-- No section separator comments.
 
 ### Commits & PRs
 
