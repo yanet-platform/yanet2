@@ -17,10 +17,18 @@ request_timeout: "60s"
 seed: 12345
 
 # Virtual services that must remain present in every config the fuzzer
-# produces. DeleteVS never removes a fixed VS. Each entry is "addr:port" or
-# "addr:port/proto" (proto defaults to tcp); IPv6 uses the bracketed form.
-# Every entry must match a virtual_server defined in the corpus.
+# produces. DeleteVS never removes a fixed VS. Each entry must match a
+# virtual_server defined in the corpus.
+#
+# An entry is either a bare "addr:port" / "addr:port/proto" string (proto
+# defaults to tcp; IPv6 uses the bracketed form), or a mapping that also
+# pins the allowed sources so they stay constant for the whole run. Each
+# pinned source is a CIDR whose family matches the virtual service family.
 fixed_virtual_services:
-  - "213.180.204.242:443"
-  - "[2a02:6b8::242]:443/tcp"
+  - vs: "213.180.204.242:443/udp"
+    allowed_sources:
+      - "::/0"
+  - vs: "[2a02:6b8::242]:443/tcp"
+    allowed_sources:
+      - "::/0"
 

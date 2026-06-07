@@ -147,15 +147,15 @@ func NewRunner(
 		return nil, errors.New("runner: stats must not be nil")
 	}
 
-	fixed, err := cfg.FixedVSKeys()
+	fixed, err := cfg.FixedVSEntries()
 	if err != nil {
 		return nil, err
 	}
-	for _, key := range fixed {
-		if corpus.Lookup(key) == nil {
+	for _, entry := range fixed {
+		if corpus.Lookup(entry.Key) == nil {
 			return nil, fmt.Errorf(
 				"runner: fixed virtual service %s is not defined in the corpus",
-				formatVsKey(key),
+				formatVsKey(entry.Key),
 			)
 		}
 	}

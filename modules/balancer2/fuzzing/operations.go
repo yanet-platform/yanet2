@@ -243,6 +243,13 @@ func (m *OperationGenerator) generateUpdateVS(opNum uint64) Operation {
 		order := m.model.ActiveOrder()
 		key = order[m.rng.Intn(len(order))]
 	}
+	sources := m.randomAllowedSources(key)
+	if pinned := m.model.FixedSources(key); len(pinned) > 0 {
+		// A fixed VS with pinned allowed sources keeps them constant for
+		// the whole run instead of regenerating them on every update. A
+		// fixed VS without pinned sources still gets random ones.
+		sources = cloneCIDRs(pinned)
+	}
 	return Operation{
 		Type:  OpUpdateVS,
 		OpNum: opNum,
@@ -250,7 +257,7 @@ func (m *OperationGenerator) generateUpdateVS(opNum uint64) Operation {
 			Key:            key,
 			Scheduler:      m.randomScheduler(),
 			Flags:          m.randomFlags(),
-			AllowedSources: m.randomAllowedSources(key),
+			AllowedSources: sources,
 			Reals:          m.randomRealSubset(key, m.model.ActiveVS(key)),
 		},
 	}

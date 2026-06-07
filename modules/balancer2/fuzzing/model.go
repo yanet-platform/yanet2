@@ -134,24 +134,28 @@ type Model struct {
 	// activeVS holds mutable state for every currently-active VS.
 	activeVS map[VsKey]*VSState
 
-	// fixed is the set of VS keys that must remain present in every config
-	// the fuzzer produces. The operation generator never selects a fixed
-	// VS for deletion and the model refuses to remove one. The map is
-	// populated once at construction and never mutated afterwards.
-	fixed map[VsKey]struct{}
+	// fixedSources maps each fixed VS key to its pinned allowed-source
+	// CIDRs. Presence in the map marks the VS as fixed: the operation
+	// generator never selects it for deletion and the model refuses to
+	// remove one. A non-empty value additionally pins the allowed sources
+	// so the generator keeps them constant instead of regenerating them on
+	// every update. The map is populated once at construction and never
+	// mutated afterwards.
+	fixedSources map[VsKey][]CIDR
 }
 
 // ModelOption configures a Model at construction time.
 type ModelOption func(*Model)
 
-// WithFixedVS marks a set of VS keys as fixed: they must remain present in
-// every config the fuzzer produces. Keys absent from the corpus are
-// ignored here; the runner validates corpus membership before building the
-// model.
-func WithFixedVS(keys []VsKey) ModelOption {
+// WithFixedVS marks a set of VSes as fixed: they must remain present in
+// every config the fuzzer produces. Each entry may pin allowed-source
+// CIDRs, which the operation generator emits verbatim instead of random
+// sources. Keys absent from the corpus are ignored here; the runner
+// validates corpus membership before building the model.
+func WithFixedVS(entries []FixedVSEntry) ModelOption {
 	return func(m *Model) {
-		for _, key := range keys {
-			m.fixed[key] = struct{}{}
+		for _, entry := range entries {
+			m.fixedSources[entry.Key] = cloneCIDRs(entry.AllowedSources)
 		}
 	}
 }
@@ -170,7 +174,7 @@ func NewModel(corpus *Corpus, options ...ModelOption) *Model {
 		originalRealsByKey: make(map[VsKey]map[RealKey]*RealServer, len(corpus.VSs)),
 		activeOrder:        make([]VsKey, 0, len(corpus.VSs)),
 		activeVS:           make(map[VsKey]*VSState, len(corpus.VSs)),
-		fixed:              map[VsKey]struct{}{},
+		fixedSources:       map[VsKey][]CIDR{},
 	}
 	for _, vs := range corpus.VSs {
 		key := vs.Key
@@ -271,20 +275,27 @@ func (m *Model) IsActive(key VsKey) bool {
 // IsFixed reports whether the VS is pinned and must remain present in
 // every config the fuzzer produces.
 func (m *Model) IsFixed(key VsKey) bool {
-	_, ok := m.fixed[key]
+	_, ok := m.fixedSources[key]
 	return ok
+}
+
+// FixedSources returns the pinned allowed-source CIDRs for a fixed VS, or
+// nil when the VS is not fixed or has no pinned sources. Callers must treat
+// the slice as read-only.
+func (m *Model) FixedSources(key VsKey) []CIDR {
+	return m.fixedSources[key]
 }
 
 // DeletableActiveOrder returns the active VS keys that may be removed, in
 // active order, excluding fixed VSes. When no VS is fixed the active order
 // is returned directly so callers see no extra allocation.
 func (m *Model) DeletableActiveOrder() []VsKey {
-	if len(m.fixed) == 0 {
+	if len(m.fixedSources) == 0 {
 		return m.activeOrder
 	}
 	out := make([]VsKey, 0, len(m.activeOrder))
 	for _, key := range m.activeOrder {
-		if _, ok := m.fixed[key]; ok {
+		if _, ok := m.fixedSources[key]; ok {
 			continue
 		}
 		out = append(out, key)
@@ -366,7 +377,7 @@ func (m *Model) Clone() *Model {
 		originalRealsByKey: m.originalRealsByKey,
 		activeOrder:        append([]VsKey(nil), m.activeOrder...),
 		activeVS:           make(map[VsKey]*VSState, len(m.activeVS)),
-		fixed:              m.fixed,
+		fixedSources:       m.fixedSources,
 	}
 	for k, v := range m.activeVS {
 		out.activeVS[k] = v.Clone()

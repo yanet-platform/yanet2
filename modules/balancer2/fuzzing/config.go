@@ -47,11 +47,55 @@ type RuntimeConfig struct {
 	Seed int64 `yaml:"seed"`
 	// FixedVirtualServices lists virtual servers that must remain present
 	// in every config the fuzzer produces. DeleteVS never removes a fixed
-	// VS, so each one stays active for the whole run. Each entry is written
-	// as "addr:port" or "addr:port/proto" (proto defaults to tcp); IPv6
-	// addresses use the bracketed form, e.g. "[2001:db8::1]:443". Every
-	// entry must resolve to a virtual server defined in the corpus.
-	FixedVirtualServices []string `yaml:"fixed_virtual_services"`
+	// VS, so each one stays active for the whole run. Every entry must
+	// resolve to a virtual server defined in the corpus.
+	//
+	// Each entry is written either as a bare string or as a mapping. The
+	// bare-string form pins the VS but lets the fuzzer randomise its
+	// allowed sources on every update. The mapping form additionally pins
+	// the allowed sources so they stay constant for the whole run:
+	//
+	//	fixed_virtual_services:
+	//	  - "10.0.0.1:80"
+	//	  - vs: "[2001:db8::1]:443/tcp"
+	//	    allowed_sources:
+	//	      - "2001:db8::/48"
+	//
+	// The VS spec is "addr:port" or "addr:port/proto" (proto defaults to
+	// tcp); IPv6 addresses use the bracketed form. Every pinned allowed
+	// source is a CIDR whose address family matches the VS address family.
+	FixedVirtualServices []FixedVS `yaml:"fixed_virtual_services"`
+}
+
+// FixedVS is a single fixed virtual service entry. VS is the textual VS
+// spec; AllowedSources optionally pins the allowed-source CIDRs so the
+// fuzzer keeps them constant instead of regenerating them on every update.
+type FixedVS struct {
+	VS             string   `yaml:"vs"`
+	AllowedSources []string `yaml:"allowed_sources"`
+}
+
+// UnmarshalYAML accepts both the bare-string form and the mapping form. A
+// scalar node is treated as the VS spec with no pinned allowed sources; a
+// mapping node is decoded into the full structure.
+func (m *FixedVS) UnmarshalYAML(value *yaml.Node) error {
+	if value.Kind == yaml.ScalarNode {
+		return value.Decode(&m.VS)
+	}
+	type rawFixedVS FixedVS
+	var raw rawFixedVS
+	if err := value.Decode(&raw); err != nil {
+		return err
+	}
+	*m = FixedVS(raw)
+	return nil
+}
+
+// FixedVSEntry is a parsed fixed virtual service: its canonical key plus
+// the pinned allowed-source CIDRs, if any.
+type FixedVSEntry struct {
+	Key            VsKey
+	AllowedSources []CIDR
 }
 
 // seedSource is the source of non-zero seeds used when the YAML seed is zero
@@ -129,29 +173,84 @@ func (m *RuntimeConfig) Validate() error {
 	if m.RequestTimeout <= 0 {
 		return fmt.Errorf("request_timeout: must be a positive duration")
 	}
-	if _, err := m.FixedVSKeys(); err != nil {
+	if _, err := m.FixedVSEntries(); err != nil {
 		return err
 	}
 	return nil
 }
 
-// FixedVSKeys parses the configured fixed virtual service specs into VS
-// keys. It returns an error when any spec is malformed. The keys are not
-// checked against the corpus here; the runner performs that cross-check
-// once the corpus has been parsed.
-func (m *RuntimeConfig) FixedVSKeys() ([]VsKey, error) {
+// FixedVSEntries parses the configured fixed virtual services into keys and
+// pinned allowed-source CIDRs. It returns an error when any VS spec or
+// pinned CIDR is malformed, including when a CIDR family does not match the
+// VS address family. The keys are not checked against the corpus here; the
+// runner performs that cross-check once the corpus has been parsed.
+func (m *RuntimeConfig) FixedVSEntries() ([]FixedVSEntry, error) {
 	if len(m.FixedVirtualServices) == 0 {
 		return nil, nil
 	}
-	out := make([]VsKey, 0, len(m.FixedVirtualServices))
-	for _, spec := range m.FixedVirtualServices {
-		key, err := parseFixedVS(spec)
+	out := make([]FixedVSEntry, 0, len(m.FixedVirtualServices))
+	for _, entry := range m.FixedVirtualServices {
+		key, err := parseFixedVS(entry.VS)
 		if err != nil {
 			return nil, fmt.Errorf("fixed_virtual_services: %w", err)
 		}
-		out = append(out, key)
+		vsIsIPv4 := net.IP(key.IP[:]).To4() != nil
+		sources := make([]CIDR, 0, len(entry.AllowedSources))
+		for _, spec := range entry.AllowedSources {
+			cidr, err := parseAllowedSourceCIDR(spec, vsIsIPv4)
+			if err != nil {
+				return nil, fmt.Errorf("fixed_virtual_services: %w", err)
+			}
+			sources = append(sources, cidr)
+		}
+		out = append(out, FixedVSEntry{Key: key, AllowedSources: sources})
 	}
 	return out, nil
+}
+
+// FixedVSKeys parses the configured fixed virtual services into VS keys,
+// discarding any pinned allowed sources. It is a convenience wrapper around
+// FixedVSEntries for callers that only need the identities.
+func (m *RuntimeConfig) FixedVSKeys() ([]VsKey, error) {
+	entries, err := m.FixedVSEntries()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]VsKey, 0, len(entries))
+	for _, entry := range entries {
+		out = append(out, entry.Key)
+	}
+	return out, nil
+}
+
+// parseAllowedSourceCIDR parses a pinned allowed-source CIDR. The address
+// family must match the VS VIP family, since the dataplane requires
+// allowed sources to share the VS family. Addresses are encoded in the
+// same byte widths the operation generator uses: four bytes for IPv4,
+// sixteen for IPv6.
+func parseAllowedSourceCIDR(spec string, vsIsIPv4 bool) (CIDR, error) {
+	s := strings.TrimSpace(spec)
+	_, network, err := net.ParseCIDR(s)
+	if err != nil {
+		return CIDR{}, fmt.Errorf("invalid allowed source %q: %w", spec, err)
+	}
+	cidrIsIPv4 := network.IP.To4() != nil
+	if cidrIsIPv4 != vsIsIPv4 {
+		return CIDR{}, fmt.Errorf(
+			"allowed source %q family does not match the virtual service family",
+			spec,
+		)
+	}
+	if cidrIsIPv4 {
+		return CIDR{
+			Addr: append([]byte(nil), network.IP.To4()...),
+			Mask: append([]byte(nil), network.Mask...),
+		}, nil
+	}
+	return CIDR{
+		Addr: append([]byte(nil), network.IP.To16()...),
+		Mask: append([]byte(nil), network.Mask...),
+	}, nil
 }
 
 // parseFixedVS parses a fixed virtual service spec into a VS key. The
