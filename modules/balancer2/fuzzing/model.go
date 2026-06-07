@@ -150,12 +150,19 @@ type ModelOption func(*Model)
 // WithFixedVS marks a set of VSes as fixed: they must remain present in
 // every config the fuzzer produces. Each entry may pin allowed-source
 // CIDRs, which the operation generator emits verbatim instead of random
-// sources. Keys absent from the corpus are ignored here; the runner
+// sources. Pinned sources are also seeded into the VS's initial active
+// state so the expected model matches the bootstrap config the runner
+// pushes, rather than only appearing once a later update happens to
+// target the VS. Keys absent from the corpus are ignored here; the runner
 // validates corpus membership before building the model.
 func WithFixedVS(entries []FixedVSEntry) ModelOption {
 	return func(m *Model) {
 		for _, entry := range entries {
-			m.fixedSources[entry.Key] = cloneCIDRs(entry.AllowedSources)
+			sources := cloneCIDRs(entry.AllowedSources)
+			m.fixedSources[entry.Key] = sources
+			if state, ok := m.activeVS[entry.Key]; ok && len(sources) > 0 {
+				state.AllowedSources = cloneCIDRs(sources)
+			}
 		}
 	}
 }

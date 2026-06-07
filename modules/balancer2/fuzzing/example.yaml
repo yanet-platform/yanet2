@@ -25,10 +25,10 @@ seed: 12345
 # pins the allowed sources so they stay constant for the whole run. Each
 # pinned source is a CIDR whose family matches the virtual service family.
 fixed_virtual_services:
-  - vs: "213.180.204.242:443/udp"
+  - vs: "[2a02:6b8:0:3400:0:853a:0:3]:80/tcp"
     allowed_sources:
       - "::/0"
-  - vs: "[2a02:6b8::242]:443/tcp"
+  - vs: "[2a02:6b8:0:3400:0:853a:0:3]:80/udp"
     allowed_sources:
       - "::/0"
 

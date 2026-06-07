@@ -1,9 +1,11 @@
 package fuzzing
 
 import (
+	"context"
 	"net"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -387,6 +389,62 @@ func TestOperationGeneratorBareFixedVSRandomizesSources(t *testing.T) {
 	}
 	assert.True(t, sawNonEmpty,
 		"a bare fixed VS must still receive randomized allowed sources")
+}
+
+// TestModelSeedsFixedSources confirms that a fixed VS with pinned allowed
+// sources starts active with those sources rather than an empty set, so
+// the expected model matches the bootstrap config the runner pushes.
+func TestModelSeedsFixedSources(t *testing.T) {
+	corpus := parsedCorpus(t, genCorpusText(5, 4))
+	key := vsKeyFor(t, "10.0.0.1", 80, balancerpb.TransportProto_TCP)
+	pinned := []CIDR{{Addr: []byte{192, 168, 0, 0}, Mask: []byte{0xff, 0xff, 0xff, 0x00}}}
+	model := NewModel(corpus, WithFixedVS([]FixedVSEntry{{Key: key, AllowedSources: pinned}}))
+
+	state := model.ActiveVS(key)
+	require.NotNil(t, state)
+	assert.Equal(t, pinned, state.AllowedSources)
+
+	bare := vsKeyFor(t, "10.0.0.2", 80, balancerpb.TransportProto_TCP)
+	require.Nil(t, model.ActiveVS(bare).AllowedSources,
+		"a VS that is not fixed must start with no allowed sources")
+}
+
+// TestRunnerBootstrapAppliesPinnedSources drives a single bootstrap
+// operation and confirms the fixed VS's pinned allowed sources reach the
+// controlplane through the initial UpdateConfig, instead of waiting for a
+// later UpdateVS that may never target the VS.
+func TestRunnerBootstrapAppliesPinnedSources(t *testing.T) {
+	corpus := parsedCorpus(t, genCorpusText(5, 4))
+	pinned := []CIDR{{Addr: []byte{192, 168, 0, 0}, Mask: []byte{0xff, 0xff, 0xff, 0x00}}}
+	key := vsKeyFor(t, "10.0.0.1", 80, balancerpb.TransportProto_TCP)
+
+	cfg := runnerTestConfig()
+	cfg.FixedVirtualServices = []FixedVS{{
+		VS:             "10.0.0.1:80/tcp",
+		AllowedSources: []string{"192.168.0.0/24"},
+	}}
+
+	stats := NewLatencyStats()
+	fake := newRunnerFakeRPC(cfg.ConfigName)
+	fake.stats = stats
+	runner, err := NewRunner(
+		cfg, corpus, fake, stats,
+		WithLogger(&syncBuffer{}),
+		WithSignals(),
+		WithOperationTicker(func(time.Duration) tickerLike { return newManualTicker() }),
+		WithStatsTicker(func(time.Duration) tickerLike { return newManualTicker() }),
+	)
+	require.NoError(t, err)
+
+	require.NoError(t, runner.sendUpdate(context.Background(), Operation{Type: OpUpdate, OpNum: 1}))
+
+	vs := fake.state.vs[key]
+	require.NotNil(t, vs)
+	assert.Equal(t, pinned, vs.allowedSources)
+
+	other := vsKeyFor(t, "10.0.0.2", 80, balancerpb.TransportProto_TCP)
+	require.Nil(t, fake.state.vs[other].allowedSources,
+		"a non-fixed VS must bootstrap with no allowed sources")
 }
 
 // parsedCorpus parses synthetic corpus text into a Corpus for tests that

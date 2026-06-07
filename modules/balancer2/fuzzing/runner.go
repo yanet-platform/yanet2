@@ -322,15 +322,33 @@ func (m *Runner) executeMutation(ctx context.Context, op Operation) error {
 }
 
 func (m *Runner) sendUpdate(ctx context.Context, op Operation) error {
+	list := m.corpus.ToVsConfigList()
+	m.applyPinnedAllowedSources(list)
 	req := &balancerpb.UpdateConfigRequest{
 		ConfigName: m.cfg.ConfigName,
-		Vs:         m.corpus.ToVsConfigList(),
+		Vs:         list,
 	}
 	if _, err := m.rpc.UpdateConfig(ctx, req); err != nil {
 		m.logf("%s", FormatRPCFailure(op.OpNum, RPCUpdateConfig, err))
 		return fmt.Errorf("runner: update op %d: %w", op.OpNum, err)
 	}
 	return nil
+}
+
+// applyPinnedAllowedSources overlays the pinned allowed sources of every
+// fixed VS onto the bootstrap config list. The corpus parser leaves
+// allowed sources empty, so without this overlay a fixed VS would start
+// with no allowed sources and keep them until a later update happened to
+// target it. The corpus and the list share VS ordering, so each list
+// entry is matched to its corpus key by index.
+func (m *Runner) applyPinnedAllowedSources(list *balancerpb.VsConfigList) {
+	for idx, vs := range m.corpus.VSs {
+		pinned := m.model.FixedSources(vs.Key)
+		if len(pinned) == 0 {
+			continue
+		}
+		list.Vs[idx].AllowedSources = cidrsToAllowedSources(pinned)
+	}
 }
 
 func (m *Runner) sendUpdateVS(ctx context.Context, op Operation) error {
