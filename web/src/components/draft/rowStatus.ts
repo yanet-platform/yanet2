@@ -1,4 +1,4 @@
-import type { RowStatus } from '../../../components';
+import type { RowStatus } from '../VirtualTable';
 
 /** Per-row draft status plus the removed-rows list, against a server snapshot. */
 export interface RowStatusResult<T> {

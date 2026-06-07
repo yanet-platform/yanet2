@@ -5,7 +5,7 @@
 
 // .cp-trigger sits in the page header, outside .yn-page where --yn-*
 // tokens are defined, so each property includes a hard-coded fallback that
-// matches the token value from draft-page.scss.
+// matches the token value from chrome.scss.
 .cp-trigger {
     display: inline-flex;
     align-items: center;

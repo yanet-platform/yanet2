@@ -68,7 +68,7 @@ export interface YamlIOModalProps {
  * Reusable YAML (and optionally JSON) import/export modal chrome used by multi-config draft pages.
  * Renders Import and Export buttons; clicking either opens the modal.
  * Callers supply the serialisation and parsing logic via props.
- * Consumes yn-* CSS classes from draft-page.scss.
+ * Consumes yn-* CSS classes from chrome.scss.
  */
 const YamlIOModal: React.FC<YamlIOModalProps> = ({
     configName,

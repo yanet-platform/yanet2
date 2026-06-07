@@ -4,8 +4,8 @@ import type { FIBEntry, FIBNexthop, FIBRangeEntry } from '../../../api/routes';
 import { ipRangeToCIDRs } from '../../../utils/netip';
 import type { FIBRowItem } from './types';
 import { fibDraftReducer, initialFIBDraftState } from './fibDraftReducer';
-import { useDraft } from '../../_shared/draft';
-import type { UseDraftResult } from '../../_shared/draft';
+import { useDraft } from '../../../components/draft';
+import type { UseDraftResult } from '../../../components/draft';
 
 let rowIdCounter = 0;
 const newRowId = (): string => `row-${++rowIdCounter}-${Date.now()}`;

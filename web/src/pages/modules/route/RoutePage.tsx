@@ -12,14 +12,13 @@ import FIBDrawer from './FIBDrawer';
 import type { FIBDrawerHandle } from './FIBDrawer';
 import FIBYamlIO from './FIBYamlIO';
 import { FIBSaveDiffModal } from './FIBSaveDiffModal';
-import {
-    AddConfigModal, isValidCIDR, useDraftShortcuts, useDraftDragDrop, useDraftPageHandlers, computeRowStatuses,
-} from '../../_shared/draft';
-import { DeleteConfigModal, BulkDeleteModal, CommandPaletteHeader } from '../../../components';
+import { AddConfigModal, DeleteConfigModal, BulkDeleteModal, CommandPaletteHeader } from '../../../components';
+import { useDraftShortcuts, useDraftDragDrop, useDraftPageHandlers, computeRowStatuses } from '../../../components/draft';
+import { isValidCidr as isValidCIDR } from '../../../utils';
 import { usePalette } from '../../../components/command-palette';
 import type { Command, RowAdapter } from '../../../components/command-palette';
 import { useTabCycle } from '../../_shared/useTabCycle';
-import '../../../styles/draft-page.scss';
+import '../../../styles/chrome.scss';
 import './route.scss';
 
 const QP_CONFIG = 'config';

@@ -1,0 +1,10 @@
+// Shared page chrome — the yn-* design system used across all pages.
+// Aggregates ./chrome/* partials. Do not add rules here directly.
+// Design tokens are defined globally in tokens.scss (imported from main.tsx).
+
+@use './chrome/surface';
+@use './chrome/buttons';
+@use './chrome/drawer';
+@use './chrome/forms';
+@use './chrome/modal';
+@use './chrome/badges';

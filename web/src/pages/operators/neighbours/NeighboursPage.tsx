@@ -20,7 +20,8 @@ import { MERGED_TAB, DEFAULT_SORT } from './types';
 import type { SortState, SortableColumn } from './types';
 import { FamilyFilter, type IPFamily } from '../../../components/VirtualTable';
 import { nudStateToName, STATE_META } from './stateMeta';
-import '../../../styles/draft-page.scss';
+import '../../../styles/chrome.scss';
+import './neighbours.scss';
 import '../../../components/command-palette/command-palette.scss';
 
 const QP_TAB = 'tab';

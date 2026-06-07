@@ -1,4 +1,4 @@
-import { dumpYamlDoc, parseYamlList } from '../../_shared/draft/yaml';
+import { dumpYamlDoc, parseYamlList } from '../../../utils';
 import type { FIBRowItem } from './types';
 
 /** Single-config YAML shape: { config, routes: [...] }. Mirrors Forward's envelope style. */

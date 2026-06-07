@@ -1,13 +1,9 @@
-import { isValidCIDR } from '../../_shared/draft/cidr';
-import {
-    rowHasError as sharedRowHasError,
-    countInvalidRows as sharedCountInvalidRows,
-} from '../../_shared/draft/validation';
+import { isValidCidr, rowHasError as sharedRowHasError, countInvalidRows as sharedCountInvalidRows } from '../../../utils';
 import type { PrefixRowItem, PrefixRowErrors } from './types';
 
 /** Validate all fields of a prefix row. Returns null per field if valid. */
 export const validateRow = (row: PrefixRowItem): PrefixRowErrors => ({
-    prefix: isValidCIDR(row.prefix) ? null : (row.prefix ? 'Invalid CIDR' : 'Required'),
+    prefix: isValidCidr(row.prefix) ? null : (row.prefix ? 'Invalid CIDR' : 'Required'),
 });
 
 /** Returns true if the row has any validation error. */

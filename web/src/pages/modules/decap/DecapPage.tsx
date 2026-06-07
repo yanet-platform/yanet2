@@ -12,15 +12,12 @@ import PrefixDrawer from './PrefixDrawer';
 import type { PrefixDrawerHandle } from './PrefixDrawer';
 import PrefixYamlIO from './PrefixYamlIO';
 import { PrefixSaveDiffModal } from './PrefixSaveDiffModal';
-import {
-    AddConfigModal,
-    useDraftShortcuts, useDraftDragDrop, useDraftPageHandlers, computeRowStatuses,
-} from '../../_shared/draft';
-import { DeleteConfigModal, BulkDeleteModal, CommandPaletteHeader } from '../../../components';
+import { AddConfigModal, DeleteConfigModal, BulkDeleteModal, CommandPaletteHeader } from '../../../components';
+import { useDraftShortcuts, useDraftDragDrop, useDraftPageHandlers, computeRowStatuses } from '../../../components/draft';
 import { useTabCycle } from '../../_shared/useTabCycle';
 import { usePalette } from '../../../components/command-palette';
 import type { Command, RowAdapter } from '../../../components/command-palette';
-import '../../../styles/draft-page.scss';
+import '../../../styles/chrome.scss';
 import './decap.scss';
 
 let idCounter = 0;

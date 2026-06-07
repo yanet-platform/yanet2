@@ -65,3 +65,5 @@ export type { DraftYamlIOProps } from './DraftYamlIO';
 export { DraftSaveDiffModal } from './DraftSaveDiffModal';
 export type { DraftSaveDiffModalProps } from './DraftSaveDiffModal';
 export { CidrPrefixField } from './CidrPrefixField';
+export { default as AddConfigModal } from './AddConfigModal';
+export * from './draft';

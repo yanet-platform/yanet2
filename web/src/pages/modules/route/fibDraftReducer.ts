@@ -1,5 +1,5 @@
-import { createDraftReducer } from '../../_shared/draft';
-import type { DraftState, DraftAction } from '../../_shared/draft';
+import { createDraftReducer } from '../../../components/draft';
+import type { DraftState, DraftAction } from '../../../components/draft';
 import type { FIBRowItem } from './types';
 
 export type FIBDraftState = DraftState<FIBRowItem>;

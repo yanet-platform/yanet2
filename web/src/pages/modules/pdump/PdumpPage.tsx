@@ -20,7 +20,7 @@ import type { PdumpConfigInfo, CapturedPacket } from './types';
 import { usePalette } from '../../../components/command-palette';
 import type { Command } from '../../../components/command-palette';
 import { useTabCycle } from '../../_shared/useTabCycle';
-import '../../../styles/draft-page.scss';
+import '../../../styles/chrome.scss';
 import './pdump.scss';
 
 const NEW_PACKET_TTL_MS = 1200;

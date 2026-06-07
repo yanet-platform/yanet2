@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Switch } from '@gravity-ui/uikit';
-import { DraftItemDrawer } from '../../_shared/draft';
+import { DraftItemDrawer } from '../../../components/draft';
 import { ipAddressToString } from '../../../utils/netip';
 import { validatePrefix, validateNexthop } from './utils';
 import type { Route } from '../../../api/routes';

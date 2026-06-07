@@ -2,8 +2,8 @@ import { useCallback } from 'react';
 import { API } from '../../../api';
 import type { PrefixRowItem } from './types';
 import { prefixDraftReducer, initialPrefixDraftState } from './prefixDraftReducer';
-import { useDraft } from '../../_shared/draft';
-import type { UseDraftResult } from '../../_shared/draft';
+import { useDraft } from '../../../components/draft';
+import type { UseDraftResult } from '../../../components/draft';
 
 export type UsePrefixDraftResult = UseDraftResult<PrefixRowItem>;
 

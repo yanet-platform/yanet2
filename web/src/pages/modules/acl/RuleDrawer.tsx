@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { ActionKind, ACTION_KIND_LABELS } from '../../../api/acl';
-import { TrashIcon } from '../../_shared/draft/DraftActionButtons';
+import { TrashIcon } from '../../../components/draft';
 import type { RuleDraft, RuleItem } from './types';
 import { emptyDraft } from './types';
 import { itemToDraft, defaultCounterName, draftToRule, expandRule, deadReasonText } from './hooks';

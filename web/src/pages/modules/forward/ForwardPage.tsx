@@ -19,12 +19,12 @@ import type { RuleDrawerHandle } from './RuleDrawer';
 import YamlIO from './YamlIO';
 import { SaveDiffModal } from './SaveDiffModal';
 import { useForwardRuleCounters } from './useForwardRuleCounters';
-import { AddConfigModal, DRAWER_TRANSITION_MS } from '../../_shared/draft';
-import { DeleteConfigModal, BulkDeleteModal, CommandPaletteHeader } from '../../../components';
+import { AddConfigModal, DeleteConfigModal, BulkDeleteModal, CommandPaletteHeader } from '../../../components';
+import { DRAWER_TRANSITION_MS } from '../../../components/draft';
 import { usePalette } from '../../../components/command-palette';
 import type { Command, RowAdapter } from '../../../components/command-palette';
 import { useTabCycle } from '../../_shared/useTabCycle';
-import '../../../styles/draft-page.scss';
+import '../../../styles/chrome.scss';
 import './forward.scss';
 
 const QP_CONFIG = 'config';

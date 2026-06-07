@@ -12,7 +12,7 @@ import {
     ActionChain,
     ChipList,
 } from './chips';
-import { DraftActionButtons } from '../../_shared/draft';
+import { DraftActionButtons } from '../../../components/draft';
 import type { RuleRate } from './useAclRuleCounters';
 import Sparkline from '../_shared/Sparkline';
 import { VirtualTable, type Column } from '../../../components/VirtualTable';

@@ -23,13 +23,12 @@ import { useUnsavedChangesBlocker } from '../../builtin/_shared/lane-editor';
 import { ipAddressToString, isValidIPAddress, parseIPToBytes, stringToIPAddress, type IPAddressWire } from '../../../utils/netip';
 import { parseMACToBytes } from '../../../utils/mac';
 import { formatBytes, toaster, compareNatural } from '../../../utils';
-import { AddConfigModal } from '../../_shared/draft';
-import { DeleteConfigModal, CommandPaletteHeader } from '../../../components';
-import { SaveIcon, TrashIcon } from '../../_shared/draft/DraftActionButtons';
+import { AddConfigModal, DeleteConfigModal, CommandPaletteHeader } from '../../../components';
+import { SaveIcon, TrashIcon } from '../../../components/draft';
 import { useTabCycle } from '../../_shared/useTabCycle';
 import { usePalette } from '../../../components/command-palette';
 import type { Command } from '../../../components/command-palette';
-import '../../../styles/draft-page.scss';
+import '../../../styles/chrome.scss';
 import './fwstate.scss';
 
 interface DraftConfig {

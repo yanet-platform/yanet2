@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useReducer, useState } from 'react';
-import { toaster } from '../../../utils';
+import { toaster } from '../../utils';
 import type { DraftState, DraftAction } from './draftReducer';
 
 type Reducer<T> = (state: DraftState<T>, action: DraftAction<T>) => DraftState<T>;

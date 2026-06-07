@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button, Icon } from '@gravity-ui/uikit';
 import { ArrowRightToLine, Funnel, Plus } from '@gravity-ui/icons';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, SearchInput, EmptyPagePlaceholder, RowCountDisplay } from '../../../components';
-import { AddConfigModal } from '../../_shared/draft';
+import { AddConfigModal } from '../../../components';
 import { BulkDeleteModal, CommandPaletteHeader } from '../../../components';
 import { usePalette } from '../../../components/command-palette';
 import type { Command, RowAdapter, ShortcutSection } from '../../../components/command-palette';
@@ -19,7 +19,7 @@ import LookupDrawer from './LookupDrawer';
 import { getRouteId, sortComparators, planRouteSubmit, groupByPrefix, filterByFamily } from './utils';
 import type { RouteSortState, RouteSortableColumn, IPFamily } from './types';
 import { FamilyFilter } from '../../../components/VirtualTable';
-import '../../../styles/draft-page.scss';
+import '../../../styles/chrome.scss';
 import './route.scss';
 
 const RoutePage: React.FC = () => {

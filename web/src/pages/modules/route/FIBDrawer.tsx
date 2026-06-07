@@ -1,7 +1,7 @@
 import React, { useEffect, useImperativeHandle, useState } from 'react';
 import type { FIBRowItem, FIBRowErrors } from './types';
 import { validateRow } from './validation';
-import { DraftItemDrawer } from '../../_shared/draft';
+import { DraftItemDrawer } from '../../../components/draft';
 import { CidrPrefixField } from '../../../components';
 
 interface FIBDrawerProps {

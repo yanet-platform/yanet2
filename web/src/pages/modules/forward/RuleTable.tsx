@@ -5,7 +5,7 @@ import DirectionBadge from './DirectionBadge';
 import AnyBadge from './AnyBadge';
 import Sparkline from '../_shared/Sparkline';
 import { formatPps } from '../../../utils';
-import { DraftActionButtons } from '../../_shared/draft';
+import { DraftActionButtons } from '../../../components/draft';
 import { VirtualTable, type Column } from '../../../components/VirtualTable';
 
 /** Compact mono list of values with overflow truncation. */

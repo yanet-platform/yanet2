@@ -3,7 +3,7 @@ import type { FIBRowItem } from './types';
 import { validateRow } from './validation';
 import { VirtualDraftTable, LEADING_TOTAL_WIDTH } from '../../../components/VirtualTable';
 import type { RemovedColumnDescriptor, TableColumnHeader, RowStatus, VirtualDraftTableBaseProps } from '../../../components/VirtualTable';
-import { DraftActionButtons } from '../../_shared/draft';
+import { DraftActionButtons } from '../../../components/draft';
 
 const COLUMN_WIDTHS = {
     prefix: 220,

@@ -1,4 +1,4 @@
-import { dumpYamlDoc, parseYamlList } from '../../_shared/draft/yaml';
+import { dumpYamlDoc, parseYamlList } from '../../../utils';
 import type { PrefixRowItem } from './types';
 
 interface DecapYamlDoc {

@@ -2,7 +2,7 @@
 @use '../../../styles/mixins' as *;
 
 // ACL page styles. Shared chrome (yn-page, yn-tabs, yn-table-*, etc.) lives in
-// web/src/styles/draft-page.scss which this page imports. This file covers only
+// web/src/styles/chrome.scss which this page imports. This file covers only
 // ACL-specific chip colors, action chain, editor elements, and override tweaks.
 
 // Chip list container.
