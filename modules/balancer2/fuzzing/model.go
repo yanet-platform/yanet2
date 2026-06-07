@@ -133,14 +133,36 @@ type Model struct {
 	activeOrder []VsKey
 	// activeVS holds mutable state for every currently-active VS.
 	activeVS map[VsKey]*VSState
+
+	// fixed is the set of VS keys that must remain present in every config
+	// the fuzzer produces. The operation generator never selects a fixed
+	// VS for deletion and the model refuses to remove one. The map is
+	// populated once at construction and never mutated afterwards.
+	fixed map[VsKey]struct{}
+}
+
+// ModelOption configures a Model at construction time.
+type ModelOption func(*Model)
+
+// WithFixedVS marks a set of VS keys as fixed: they must remain present in
+// every config the fuzzer produces. Keys absent from the corpus are
+// ignored here; the runner validates corpus membership before building the
+// model.
+func WithFixedVS(keys []VsKey) ModelOption {
+	return func(m *Model) {
+		for _, key := range keys {
+			m.fixed[key] = struct{}{}
+		}
+	}
 }
 
 // NewModel builds an expected-state model from a parsed corpus. Every VS
 // starts active with the parser's scheduler, all reals enabled at their
 // parsed weight, and zero-valued flags/allowed sources. The parser already
 // guarantees unique VS identities and at least one real per VS, so this
-// constructor performs no extra validation.
-func NewModel(corpus *Corpus) *Model {
+// constructor performs no extra validation. WithFixedVS pins a subset of
+// VSes so they are never deleted during fuzzing.
+func NewModel(corpus *Corpus, options ...ModelOption) *Model {
 	m := &Model{
 		originalOrder:      make([]VsKey, 0, len(corpus.VSs)),
 		originalVS:         make(map[VsKey]*VirtualServer, len(corpus.VSs)),
@@ -148,6 +170,7 @@ func NewModel(corpus *Corpus) *Model {
 		originalRealsByKey: make(map[VsKey]map[RealKey]*RealServer, len(corpus.VSs)),
 		activeOrder:        make([]VsKey, 0, len(corpus.VSs)),
 		activeVS:           make(map[VsKey]*VSState, len(corpus.VSs)),
+		fixed:              map[VsKey]struct{}{},
 	}
 	for _, vs := range corpus.VSs {
 		key := vs.Key
@@ -183,6 +206,9 @@ func NewModel(corpus *Corpus) *Model {
 			realsOrder:     append([]RealKey(nil), order...),
 			realsByKey:     realsState,
 		}
+	}
+	for _, o := range options {
+		o(m)
 	}
 	return m
 }
@@ -240,6 +266,30 @@ func (m *Model) ActiveCount() int {
 func (m *Model) IsActive(key VsKey) bool {
 	_, ok := m.activeVS[key]
 	return ok
+}
+
+// IsFixed reports whether the VS is pinned and must remain present in
+// every config the fuzzer produces.
+func (m *Model) IsFixed(key VsKey) bool {
+	_, ok := m.fixed[key]
+	return ok
+}
+
+// DeletableActiveOrder returns the active VS keys that may be removed, in
+// active order, excluding fixed VSes. When no VS is fixed the active order
+// is returned directly so callers see no extra allocation.
+func (m *Model) DeletableActiveOrder() []VsKey {
+	if len(m.fixed) == 0 {
+		return m.activeOrder
+	}
+	out := make([]VsKey, 0, len(m.activeOrder))
+	for _, key := range m.activeOrder {
+		if _, ok := m.fixed[key]; ok {
+			continue
+		}
+		out = append(out, key)
+	}
+	return out
 }
 
 // ActiveVS returns the mutable state for an active VS, or nil if the VS is
@@ -316,6 +366,7 @@ func (m *Model) Clone() *Model {
 		originalRealsByKey: m.originalRealsByKey,
 		activeOrder:        append([]VsKey(nil), m.activeOrder...),
 		activeVS:           make(map[VsKey]*VSState, len(m.activeVS)),
+		fixed:              m.fixed,
 	}
 	for k, v := range m.activeVS {
 		out.activeVS[k] = v.Clone()

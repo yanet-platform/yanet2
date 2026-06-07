@@ -27,10 +27,10 @@ import (
 // one-to-one.
 const (
 	RPCUpdateConfig = "UpdateConfig"
-	RPCUpdateVS    = "UpdateVS"
-	RPCDeleteVS    = "DeleteVS"
-	RPCUpdateReals = "UpdateReals"
-	RPCGetState    = "GetState"
+	RPCUpdateVS     = "UpdateVS"
+	RPCDeleteVS     = "DeleteVS"
+	RPCUpdateReals  = "UpdateReals"
+	RPCGetState     = "GetState"
 )
 
 // BalancerRPC is the narrow surface the fuzzing runner needs from the

@@ -404,7 +404,11 @@ func TestOperationGeneratorUpdateVSChangesRealSetWhenPossible(t *testing.T) {
 
 	current := model.ActiveVS(first.UpdateVS.Key)
 	require.NotNil(t, current)
-	require.Greater(t, len(model.OriginalReals(first.UpdateVS.Key)), model.MinActiveReals(first.UpdateVS.Key))
+	require.Greater(
+		t,
+		len(model.OriginalReals(first.UpdateVS.Key)),
+		model.MinActiveReals(first.UpdateVS.Key),
+	)
 
 	second := gen.Generate(30)
 	require.Equal(t, OpUpdateVS, second.Type)

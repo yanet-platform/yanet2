@@ -16,3 +16,11 @@ stats_interval: "30s"
 request_timeout: "60s"
 seed: 12345
 
+# Virtual services that must remain present in every config the fuzzer
+# produces. DeleteVS never removes a fixed VS. Each entry is "addr:port" or
+# "addr:port/proto" (proto defaults to tcp); IPv6 uses the bracketed form.
+# Every entry must match a virtual_server defined in the corpus.
+fixed_virtual_services:
+  - "213.180.204.242:443"
+  - "[2a02:6b8::242]:443/tcp"
+

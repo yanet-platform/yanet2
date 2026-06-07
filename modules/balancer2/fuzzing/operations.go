@@ -175,15 +175,22 @@ func (m *OperationGenerator) Generate(opNum uint64) Operation {
 // the 80-100% active-set invariant. Most deletes are intentionally small
 // (1..3 VS) so UpdateVS operations can rebuild the active set and produce
 // a wider long-run amplitude. Occasionally the generator performs a deep
-// drop to exercise lower active-set regimes.
+// drop to exercise lower active-set regimes. Fixed VSes are excluded from
+// the candidate pool so they remain present in every config.
 //
-// If the active count is already at the lower bound, it emits a no-op
-// DeleteVS (empty key list) so the runner still issues the RPC and GetState
-// pair.
+// If no VS can be removed without violating the lower bound or the fixed
+// set, it emits a no-op DeleteVS (empty key list) so the runner still
+// issues the RPC and GetState pair.
 func (m *OperationGenerator) generateDelete(opNum uint64) Operation {
 	active := m.model.ActiveCount()
 	min := m.model.MinActive()
-	if active <= min {
+	deletable := m.model.DeletableActiveOrder()
+
+	maxDelete := active - min
+	if maxDelete > len(deletable) {
+		maxDelete = len(deletable)
+	}
+	if maxDelete <= 0 {
 		return Operation{
 			Type:  OpDeleteVSNoop,
 			OpNum: opNum,
@@ -195,7 +202,6 @@ func (m *OperationGenerator) generateDelete(opNum uint64) Operation {
 		}
 	}
 
-	maxDelete := active - min
 	deleteCount := 1
 	switch {
 	case maxDelete <= 1:
@@ -212,7 +218,7 @@ func (m *OperationGenerator) generateDelete(opNum uint64) Operation {
 		deleteCount = 1 + m.rng.Intn(upper)
 	}
 	targetActive := active - deleteCount
-	keys := m.pickVSSubset(m.model.ActiveOrder(), deleteCount)
+	keys := m.pickVSSubset(deletable, deleteCount)
 	return Operation{
 		Type:  OpDeleteVS,
 		OpNum: opNum,
@@ -698,6 +704,9 @@ func (m *Model) applyDeleteVS(p *DeleteVSPayload) error {
 		return fmt.Errorf("apply delete_vs: nil payload")
 	}
 	for _, k := range p.Keys {
+		if m.IsFixed(k) {
+			return fmt.Errorf("apply delete_vs: VS %v is fixed and cannot be removed", k)
+		}
 		if !m.RemoveActiveVS(k) {
 			return fmt.Errorf("apply delete_vs: VS %v is not active", k)
 		}

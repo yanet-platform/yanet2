@@ -5,10 +5,15 @@ package fuzzing
 
 import (
 	"fmt"
+	"net"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/yanet-platform/yanet2/modules/balancer2/controlplane/balancerpb"
 )
 
 // RuntimeConfig is the sidecar YAML runtime configuration loaded by the
@@ -40,6 +45,13 @@ type RuntimeConfig struct {
 	// zero or missing value causes a non-zero seed to be generated on
 	// load and surfaced through EffectiveSeed for replay logging.
 	Seed int64 `yaml:"seed"`
+	// FixedVirtualServices lists virtual servers that must remain present
+	// in every config the fuzzer produces. DeleteVS never removes a fixed
+	// VS, so each one stays active for the whole run. Each entry is written
+	// as "addr:port" or "addr:port/proto" (proto defaults to tcp); IPv6
+	// addresses use the bracketed form, e.g. "[2001:db8::1]:443". Every
+	// entry must resolve to a virtual server defined in the corpus.
+	FixedVirtualServices []string `yaml:"fixed_virtual_services"`
 }
 
 // seedSource is the source of non-zero seeds used when the YAML seed is zero
@@ -117,7 +129,81 @@ func (m *RuntimeConfig) Validate() error {
 	if m.RequestTimeout <= 0 {
 		return fmt.Errorf("request_timeout: must be a positive duration")
 	}
+	if _, err := m.FixedVSKeys(); err != nil {
+		return err
+	}
 	return nil
+}
+
+// FixedVSKeys parses the configured fixed virtual service specs into VS
+// keys. It returns an error when any spec is malformed. The keys are not
+// checked against the corpus here; the runner performs that cross-check
+// once the corpus has been parsed.
+func (m *RuntimeConfig) FixedVSKeys() ([]VsKey, error) {
+	if len(m.FixedVirtualServices) == 0 {
+		return nil, nil
+	}
+	out := make([]VsKey, 0, len(m.FixedVirtualServices))
+	for _, spec := range m.FixedVirtualServices {
+		key, err := parseFixedVS(spec)
+		if err != nil {
+			return nil, fmt.Errorf("fixed_virtual_services: %w", err)
+		}
+		out = append(out, key)
+	}
+	return out, nil
+}
+
+// parseFixedVS parses a fixed virtual service spec into a VS key. The
+// accepted forms are "addr:port" and "addr:port/proto"; the protocol is
+// optional and defaults to TCP, with tcp and udp the only valid values.
+// IPv6 addresses use the bracketed host:port form, e.g.
+// "[2001:db8::1]:443". Addresses are canonicalised to the 16-byte form so
+// the resulting key matches the corpus parser's identities.
+func parseFixedVS(spec string) (VsKey, error) {
+	var key VsKey
+	s := strings.TrimSpace(spec)
+	if s == "" {
+		return key, fmt.Errorf("empty virtual service spec")
+	}
+
+	proto := balancerpb.TransportProto_TCP
+	if idx := strings.LastIndex(s, "/"); idx >= 0 {
+		switch strings.ToLower(s[idx+1:]) {
+		case "tcp":
+			proto = balancerpb.TransportProto_TCP
+		case "udp":
+			proto = balancerpb.TransportProto_UDP
+		default:
+			return key, fmt.Errorf("unsupported protocol in %q (expected tcp or udp)", spec)
+		}
+		s = s[:idx]
+	}
+
+	host, portStr, err := net.SplitHostPort(s)
+	if err != nil {
+		return key, fmt.Errorf("invalid address %q: %w", spec, err)
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return key, fmt.Errorf("invalid IP literal %q", host)
+	}
+	v16 := ip.To16()
+	if v16 == nil {
+		return key, fmt.Errorf("invalid IP literal %q", host)
+	}
+	port, err := strconv.ParseUint(portStr, 10, 32)
+	if err != nil {
+		return key, fmt.Errorf("invalid port %q: %w", portStr, err)
+	}
+	if port == 0 || port > 65535 {
+		return key, fmt.Errorf("port %d out of range (1..65535)", port)
+	}
+
+	copy(key.IP[:], v16)
+	key.Port = uint16(port)
+	key.Proto = proto
+	return key, nil
 }
 
 // applyEffectiveSeed assigns a non-zero seed when the YAML seed was zero or

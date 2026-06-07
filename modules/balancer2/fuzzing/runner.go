@@ -147,7 +147,20 @@ func NewRunner(
 		return nil, errors.New("runner: stats must not be nil")
 	}
 
-	model := NewModel(corpus)
+	fixed, err := cfg.FixedVSKeys()
+	if err != nil {
+		return nil, err
+	}
+	for _, key := range fixed {
+		if corpus.Lookup(key) == nil {
+			return nil, fmt.Errorf(
+				"runner: fixed virtual service %s is not defined in the corpus",
+				formatVsKey(key),
+			)
+		}
+	}
+
+	model := NewModel(corpus, WithFixedVS(fixed))
 	gen := NewOperationGenerator(model, cfg.UpdateVsEvery, cfg.Seed)
 
 	r := &Runner{
