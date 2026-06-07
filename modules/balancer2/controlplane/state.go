@@ -79,10 +79,11 @@ func (m *ModuleConfig) buildVsState(
 ) *balancerpb.VsState {
 	vsState := &balancerpb.VsState{
 		Config: &balancerpb.VsConfig{
-			Id:        vs.Id,
-			Scheduler: vs.Scheduler,
-			Flags:     vs.Flags,
-			Peers:     vs.Peers,
+			Id:             vs.Id,
+			Scheduler:      vs.Scheduler,
+			Flags:          vs.Flags,
+			Peers:          vs.Peers,
+			AllowedSources: vs.AllowedSources,
 		},
 		Reals:               make([]*balancerpb.RealState, 0, len(vs.Reals)),
 		LastPacketTimestamp: timestamppb.New(time.Unix(0, 0)),
