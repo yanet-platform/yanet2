@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { useDrawerFlush } from '../../../hooks';
 import { ActionKind, ACTION_KIND_LABELS } from '../../../api/acl';
 import { TrashIcon } from '../../../components/draft';
 import type { RuleDraft, RuleItem } from './types';
@@ -77,28 +78,14 @@ const RuleDrawer = React.forwardRef<RuleDrawerHandle, RuleDrawerProps>(({
         setIsDirty(true);
     };
 
-    const buildFlushedDraft = (base: RuleDraft): RuleDraft => {
-        return {
-            ...base,
-            deviceNames: [...base.deviceNames, ...(deviceNamesRef.current?.flush() ?? [])],
-            sourceCidrs: [...base.sourceCidrs, ...(sourceCidrsRef.current?.flush() ?? [])],
-            dstCidrs: [...base.dstCidrs, ...(dstCidrsRef.current?.flush() ?? [])],
-        };
-    };
-
-    const handleApply = useCallback((): void => {
-        const finalDraft = buildFlushedDraft(draft);
-        setDraft(finalDraft);
-        onSave(finalDraft);
-    }, [draft, onSave]);
-
-    useImperativeHandle(ref, () => ({
-        flushAndApply() {
-            if (!open) return false;
-            handleApply();
-            return true;
-        },
-    }), [open, handleApply]);
+    const { handleApply } = useDrawerFlush({
+        draft,
+        setDraft,
+        onSave,
+        refs: { deviceNames: deviceNamesRef, sourceCidrs: sourceCidrsRef, dstCidrs: dstCidrsRef },
+        handleRef: ref,
+        open,
+    });
 
     const handleClose = (): void => {
         if (isDirty) {

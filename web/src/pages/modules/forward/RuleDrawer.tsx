@@ -1,4 +1,5 @@
-import React, { useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useDrawerFlush } from '../../../hooks';
 import { ForwardMode } from '../../../api/forward';
 import { MODE_LABELS } from './types';
 import type { RuleDraft, RuleItem } from './types';
@@ -67,31 +68,15 @@ const RuleDrawer = React.forwardRef<RuleDrawerHandle, RuleDrawerProps>(({
 
     const isValid = draft.target.trim().length > 0;
 
-    /**
-     * Build the final draft by merging any pending chip text that has not yet
-     * been committed via Enter/Tab. Called synchronously before onSave fires so
-     * that text typed without pressing Enter is never lost.
-     */
-    const buildFlushedDraft = (base: RuleDraft): RuleDraft => ({
-        ...base,
-        deviceNames: [...base.deviceNames, ...(deviceNamesRef.current?.flush() ?? [])],
-        sourceCidrs: [...base.sourceCidrs, ...(sourceCidrsRef.current?.flush() ?? [])],
-        dstCidrs:    [...base.dstCidrs,    ...(dstCidrsRef.current?.flush()    ?? [])],
+    const { handleApply } = useDrawerFlush({
+        draft,
+        setDraft,
+        onSave,
+        refs: { deviceNames: deviceNamesRef, sourceCidrs: sourceCidrsRef, dstCidrs: dstCidrsRef },
+        handleRef: ref,
+        open,
+        canApply: isValid,
     });
-
-    const handleApply = (): void => {
-        const finalDraft = buildFlushedDraft(draft);
-        setDraft(finalDraft);
-        onSave(finalDraft);
-    };
-
-    useImperativeHandle(ref, () => ({
-        flushAndApply() {
-            if (!open || !isValid) return false;
-            handleApply();
-            return true;
-        },
-    }), [open, isValid, handleApply]);
 
     const handleClose = (): void => {
         if (isDirty) {
