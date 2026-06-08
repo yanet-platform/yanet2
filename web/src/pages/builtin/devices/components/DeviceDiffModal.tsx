@@ -1,7 +1,7 @@
 import React from 'react';
-import * as yaml from 'js-yaml';
 import type { LocalDevice } from '../types';
 import { SaveDiffModal } from '../../../../components';
+import { dumpYamlDoc } from '../../../../utils';
 
 export interface DeviceDiffModalProps {
     device: LocalDevice;
@@ -28,7 +28,7 @@ const toYaml = (device: LocalDevice): string => {
     if (device.type === 'vlan') {
         obj.vlan_id = device.vlanId ?? 0;
     }
-    return yaml.dump(obj, { sortKeys: false, lineWidth: 120, noRefs: true });
+    return dumpYamlDoc(obj);
 };
 
 /** Modal showing a side-by-side YAML diff of server vs local device edits. */

@@ -1,8 +1,8 @@
 import React from 'react';
-import * as yaml from 'js-yaml';
 import type { Pipeline } from '../types';
 import { localToApi } from '../wire';
 import { SaveDiffModal } from '../../../../components';
+import { dumpYamlDoc } from '../../../../utils';
 
 interface DiffModalProps {
     pipeline: Pipeline;
@@ -12,13 +12,10 @@ interface DiffModalProps {
 }
 
 const toYaml = (pl: Pipeline): string =>
-    yaml.dump(
-        (() => {
-            const { id, ...body } = localToApi(pl);
-            return { name: id?.name ?? '', ...body };
-        })(),
-        { sortKeys: false, lineWidth: 120, noRefs: true },
-    );
+    dumpYamlDoc((() => {
+        const { id, ...body } = localToApi(pl);
+        return { name: id?.name ?? '', ...body };
+    })());
 
 /** Modal showing a side-by-side YAML diff of server vs local pipeline edits. */
 export const DiffModal: React.FC<DiffModalProps> = ({

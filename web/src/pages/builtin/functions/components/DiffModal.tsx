@@ -1,8 +1,8 @@
 import React from 'react';
-import * as yaml from 'js-yaml';
 import type { NetworkFunction } from '../types';
 import { localToApi } from '../wire';
 import { SaveDiffModal } from '../../../../components';
+import { dumpYamlDoc } from '../../../../utils';
 
 interface DiffModalProps {
     fn: NetworkFunction;
@@ -13,13 +13,10 @@ interface DiffModalProps {
 }
 
 const toYaml = (fn: NetworkFunction): string =>
-    yaml.dump(
-        (() => {
-            const { id, ...fnBody } = localToApi(fn);
-            return { name: id?.name ?? '', ...fnBody };
-        })(),
-        { sortKeys: false, lineWidth: 120, noRefs: true },
-    );
+    dumpYamlDoc((() => {
+        const { id, ...fnBody } = localToApi(fn);
+        return { name: id?.name ?? '', ...fnBody };
+    })());
 
 /** Modal showing a side-by-side YAML diff of server vs local function edits. */
 export const DiffModal: React.FC<DiffModalProps> = ({

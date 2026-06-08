@@ -1,9 +1,8 @@
 import React, { useState } from 'react';
 import { Dialog, Text } from '@gravity-ui/uikit';
-import * as yaml from 'js-yaml';
 import type { Rule } from '../../../api/acl';
 import { ActionKind } from '../../../api/acl';
-import { formatIPNet, extractBytes } from '../../../utils';
+import { formatIPNet, extractBytes, dumpYamlDoc } from '../../../utils';
 
 // TODO(acl): structured diff disabled until the per-card layout is reworked.
 
@@ -56,10 +55,7 @@ export const rulesToYamlObjects = (rules: Rule[]): Array<Record<string, unknown>
 
 /** Serialize ACL rules to the canonical YAML schema matching yanet-cli acl show output. */
 export const rulesToDiffYaml = (rules: Rule[]): string =>
-    yaml.dump(
-        { rules: rulesToYamlObjects(rules) },
-        { sortKeys: false, lineWidth: 120, noRefs: true },
-    );
+    dumpYamlDoc({ rules: rulesToYamlObjects(rules) });
 
 interface SaveDiffModalProps {
     configName: string;
