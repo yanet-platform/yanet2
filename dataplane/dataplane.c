@@ -368,7 +368,8 @@ dataplane_init(
 			"acl",
 			"fwstate",
 			"route_mpls",
-			"blackhole"
+			"blackhole",
+			"balancer2"
 		};
 		for (size_t i = 0; i < sizeof(modules) / sizeof(modules[0]);
 		     ++i) {
