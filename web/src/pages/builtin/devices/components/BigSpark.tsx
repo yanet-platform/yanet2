@@ -1,31 +1,5 @@
 import React from 'react';
-
-const pathFor = (values: number[], w: number, h: number, pad = 2): string => {
-    if (!values.length) return '';
-    const max = Math.max(1, ...values);
-    const stepX = (w - pad * 2) / (values.length - 1 || 1);
-    let d = '';
-    for (let idx = 0; idx < values.length; idx++) {
-        const x = pad + idx * stepX;
-        const y = h - pad - (values[idx] / max) * (h - pad * 2);
-        d += (idx === 0 ? 'M' : 'L') + x.toFixed(2) + ' ' + y.toFixed(2) + ' ';
-    }
-    return d;
-};
-
-const areaFor = (values: number[], w: number, h: number, pad = 2): string => {
-    if (!values.length) return '';
-    const max = Math.max(1, ...values);
-    const stepX = (w - pad * 2) / (values.length - 1 || 1);
-    let d = `M${pad} ${h - pad} `;
-    for (let idx = 0; idx < values.length; idx++) {
-        const x = pad + idx * stepX;
-        const y = h - pad - (values[idx] / max) * (h - pad * 2);
-        d += 'L' + x.toFixed(2) + ' ' + y.toFixed(2) + ' ';
-    }
-    d += `L${w - pad} ${h - pad} Z`;
-    return d;
-};
+import { pathFor, areaFor } from './sparkPath';
 
 export interface BigSparkProps {
     /** Unique device name used for SVG gradient ID namespacing. */
@@ -48,8 +22,9 @@ export const BigSpark = ({
     height = 48,
 }: BigSparkProps): React.JSX.Element => {
     const gid = `dv-bg-${deviceId}-${series}`;
-    const path = pathFor(values, width, height);
-    const area = areaFor(values, width, height);
+    const max = Math.max(1, ...values);
+    const path = pathFor(values, width, height, max, 2);
+    const area = areaFor(values, width, height, max, 2);
     return (
         <svg
             width="100%"

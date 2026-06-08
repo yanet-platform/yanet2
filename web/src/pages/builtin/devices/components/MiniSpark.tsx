@@ -1,29 +1,5 @@
 import React from 'react';
-
-const pathFor = (values: number[], w: number, h: number, max: number, pad = 1): string => {
-    if (!values.length) return '';
-    const stepX = (w - pad * 2) / (values.length - 1 || 1);
-    let d = '';
-    for (let idx = 0; idx < values.length; idx++) {
-        const x = pad + idx * stepX;
-        const y = h - pad - (values[idx] / max) * (h - pad * 2);
-        d += (idx === 0 ? 'M' : 'L') + x.toFixed(2) + ' ' + y.toFixed(2) + ' ';
-    }
-    return d;
-};
-
-const areaFor = (values: number[], w: number, h: number, max: number, pad = 1): string => {
-    if (!values.length) return '';
-    const stepX = (w - pad * 2) / (values.length - 1 || 1);
-    let d = `M${pad} ${h - pad} `;
-    for (let idx = 0; idx < values.length; idx++) {
-        const x = pad + idx * stepX;
-        const y = h - pad - (values[idx] / max) * (h - pad * 2);
-        d += 'L' + x.toFixed(2) + ' ' + y.toFixed(2) + ' ';
-    }
-    d += `L${w - pad} ${h - pad} Z`;
-    return d;
-};
+import { pathFor, areaFor } from './sparkPath';
 
 export interface MiniSparkProps {
     /** Unique device name used for SVG gradient ID. */
@@ -38,9 +14,9 @@ export interface MiniSparkProps {
 export const MiniSpark = ({ deviceId, rx, tx, width = 72, height = 24 }: MiniSparkProps): React.JSX.Element => {
     const gid = `dv-g-${deviceId}`;
     const max = Math.max(1, ...rx, ...tx);
-    const rxPath = pathFor(rx, width, height, max);
-    const txPath = pathFor(tx, width, height, max);
-    const rxArea = areaFor(rx, width, height, max);
+    const rxPath = pathFor(rx, width, height, max, 1);
+    const txPath = pathFor(tx, width, height, max, 1);
+    const rxArea = areaFor(rx, width, height, max, 1);
     return (
         <svg
             width={width}
