@@ -1,7 +1,7 @@
 import React from 'react';
 import type { NetworkFunction } from '../types';
 import { localToApi } from '../wire';
-import { SaveDiffModal } from '../../../../components';
+import { EntityDiffModal } from '../../../../components';
 import { dumpYamlDoc } from '../../../../utils';
 
 interface DiffModalProps {
@@ -26,12 +26,13 @@ export const DiffModal: React.FC<DiffModalProps> = ({
     onClose,
     onApply,
 }) => (
-    <SaveDiffModal
+    <EntityDiffModal
         configName={fn.id}
-        beforeYaml={serverFn != null ? toYaml(serverFn) : ''}
-        afterYaml={toYaml(fn)}
-        onApply={onApply}
+        current={fn}
+        server={serverFn}
+        toYaml={toYaml}
+        saveErrors={saveErrors}
         onClose={onClose}
-        headerError={saveErrors.length > 0 ? saveErrors[0] : undefined}
+        onApply={onApply}
     />
 );

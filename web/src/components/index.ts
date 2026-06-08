@@ -67,3 +67,5 @@ export type { DraftSaveDiffModalProps } from './DraftSaveDiffModal';
 export { CidrPrefixField } from './CidrPrefixField';
 export { default as AddConfigModal } from './AddConfigModal';
 export * from './draft';
+export { EntityDiffModal } from './EntityDiffModal';
+export type { EntityDiffModalProps } from './EntityDiffModal';

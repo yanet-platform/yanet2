@@ -1,7 +1,7 @@
 import React from 'react';
 import type { Pipeline } from '../types';
 import { localToApi } from '../wire';
-import { SaveDiffModal } from '../../../../components';
+import { EntityDiffModal } from '../../../../components';
 import { dumpYamlDoc } from '../../../../utils';
 
 interface DiffModalProps {
@@ -24,11 +24,12 @@ export const DiffModal: React.FC<DiffModalProps> = ({
     onClose,
     onApply,
 }) => (
-    <SaveDiffModal
+    <EntityDiffModal
         configName={pipeline.id}
-        beforeYaml={serverPipeline != null ? toYaml(serverPipeline) : ''}
-        afterYaml={toYaml(pipeline)}
-        onApply={onApply}
+        current={pipeline}
+        server={serverPipeline}
+        toYaml={toYaml}
         onClose={onClose}
+        onApply={onApply}
     />
 );
