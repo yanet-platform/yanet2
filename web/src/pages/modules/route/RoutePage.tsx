@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Icon } from '@gravity-ui/uikit';
 import { useSearchParams } from 'react-router-dom';
-import { useSearchParamHelpers, useDirtyConfigSet, useConfigQuerySync } from '../../../hooks';
+import { useSearchParamHelpers, useDirtyConfigSet, useConfigQuerySync, usePageContribution } from '../../../hooks';
 import { Funnel, Plus } from '@gravity-ui/icons';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, SearchInput, EmptyPagePlaceholder, RowCountDisplay } from '../../../components';
 import { useFIBDraft } from './useFIBDraft';
@@ -15,8 +15,7 @@ import { FIBSaveDiffModal } from './FIBSaveDiffModal';
 import { AddConfigModal, DeleteConfigModal, BulkDeleteModal, CommandPaletteHeader } from '../../../components';
 import { useDraftShortcuts, useDraftDragDrop, useDraftPageHandlers, computeRowStatuses } from '../../../components/draft';
 import { isValidCidr as isValidCIDR } from '../../../utils';
-import { usePalette } from '../../../components/command-palette';
-import type { Command, RowAdapter } from '../../../components/command-palette';
+import type { Command, RowAdapter, PagePaletteContribution } from '../../../components/command-palette';
 import { useTabCycle } from '../../_shared/useTabCycle';
 import '../../../styles/chrome.scss';
 import './route.scss';
@@ -113,8 +112,6 @@ const RoutePage: React.FC = () => {
         setDiffModalOpen, setDeleteConfirmOpen, setDeleteConfigOpen,
         dragDrop,
     });
-
-    const { setPageContribution } = usePalette();
 
     const openAdd = useCallback((prefix = ''): void => {
         const newRow: FIBRowItem = { id: makeRowId(), prefix, dst_mac: '', src_mac: '', device: '' };
@@ -232,15 +229,13 @@ const RoutePage: React.FC = () => {
         max: 7,
     }), [rawRows]);
 
-    useEffect(() => {
-        setPageContribution({
-            commands,
-            dynamicCommands,
-            rowAdapter: rowAdapter as RowAdapter<unknown>,
-            placeholder: 'Search routes or run an action…',
-        });
-        return () => setPageContribution(null);
-    }, [commands, dynamicCommands, rowAdapter, setPageContribution]);
+    const contribution = useMemo<PagePaletteContribution>(() => ({
+        commands,
+        dynamicCommands,
+        rowAdapter: rowAdapter as RowAdapter<unknown>,
+        placeholder: 'Search routes or run an action…',
+    }), [commands, dynamicCommands, rowAdapter]);
+    usePageContribution(contribution);
 
     const pageHeader = (
         <CommandPaletteHeader

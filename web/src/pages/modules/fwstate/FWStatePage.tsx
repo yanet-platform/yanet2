@@ -14,7 +14,7 @@ import {
 } from '@gravity-ui/uikit';
 import { CircleInfo, Plus } from '@gravity-ui/icons';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { useSearchParamHelpers } from '../../../hooks';
+import { useSearchParamHelpers, usePageContribution } from '../../../hooks';
 import { API } from '../../../api';
 import { Direction, type FwStateEntry, type ListEntriesRequest, type MapStats } from '../../../api/fwstate';
 import { ConfirmDialog, ConfigTabStrip, PageLayout, PageLoader, EmptyPagePlaceholder } from '../../../components';
@@ -26,8 +26,7 @@ import { formatBytes, toaster, compareNatural } from '../../../utils';
 import { AddConfigModal, DeleteConfigModal, CommandPaletteHeader } from '../../../components';
 import { SaveIcon, TrashIcon } from '../../../components/draft';
 import { useTabCycle } from '../../_shared/useTabCycle';
-import { usePalette } from '../../../components/command-palette';
-import type { Command } from '../../../components/command-palette';
+import type { Command, PagePaletteContribution } from '../../../components/command-palette';
 import '../../../styles/chrome.scss';
 import './fwstate.scss';
 
@@ -1113,8 +1112,6 @@ const FWStatePage: React.FC = () => {
         enabled: !loading,
     });
 
-    const { setPageContribution } = usePalette();
-
     const updateActiveSubTab = useCallback((tab: StateSubTab): void => {
         updateParams({ [QP_TAB]: tab });
     }, [updateParams]);
@@ -1508,13 +1505,11 @@ const FWStatePage: React.FC = () => {
         handleOpenAcl,
     ]);
 
-    useEffect(() => {
-        setPageContribution({
-            commands,
-            placeholder: 'Search FWState actions…',
-        });
-        return () => setPageContribution(null);
-    }, [commands, setPageContribution]);
+    const contribution = useMemo<PagePaletteContribution>(() => ({
+        commands,
+        placeholder: 'Search FWState actions…',
+    }), [commands]);
+    usePageContribution(contribution);
 
     const aclRows = useMemo(() => aclMeta.map((row) => ({ ...row, isLinkedHere: row.fwstateName === currentName })), [aclMeta, currentName]);
 

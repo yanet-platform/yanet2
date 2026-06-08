@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Icon } from '@gravity-ui/uikit';
 import { useSearchParams } from 'react-router-dom';
-import { useSearchParamHelpers, usePageKeyboardShortcuts, useDirtyConfigSet, useConfigQuerySync } from '../../../hooks';
+import { useSearchParamHelpers, usePageKeyboardShortcuts, useDirtyConfigSet, useConfigQuerySync, usePageContribution } from '../../../hooks';
 import { Funnel, Plus } from '@gravity-ui/icons';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, SearchInput, EmptyPagePlaceholder, RowCountDisplay } from '../../../components';
 import { useForwardDraft } from './useForwardDraft';
@@ -21,8 +21,7 @@ import { SaveDiffModal } from './SaveDiffModal';
 import { useForwardRuleCounters } from './useForwardRuleCounters';
 import { AddConfigModal, DeleteConfigModal, BulkDeleteModal, CommandPaletteHeader } from '../../../components';
 import { DRAWER_TRANSITION_MS } from '../../../components/draft';
-import { usePalette } from '../../../components/command-palette';
-import type { Command, RowAdapter } from '../../../components/command-palette';
+import type { Command, RowAdapter, PagePaletteContribution } from '../../../components/command-palette';
 import { useTabCycle } from '../../_shared/useTabCycle';
 import '../../../styles/chrome.scss';
 import './forward.scss';
@@ -219,8 +218,6 @@ const ForwardPage: React.FC = () => {
         setFlashRowId(null);
     }, [currentConfig]);
 
-    const { setPageContribution } = usePalette();
-
     usePageKeyboardShortcuts({
         onNewRule: openAdd,
         onEscape: closeDrawer,
@@ -341,14 +338,12 @@ const ForwardPage: React.FC = () => {
         icon: '→',
     }), [allItems, handleSearchChange, handleJumpToRow]);
 
-    useEffect(() => {
-        setPageContribution({
-            commands,
-            rowAdapter: rowAdapter as RowAdapter<unknown>,
-            placeholder: 'Search rules or run an action…',
-        });
-        return () => setPageContribution(null);
-    }, [commands, rowAdapter, setPageContribution]);
+    const contribution = useMemo<PagePaletteContribution>(() => ({
+        commands,
+        rowAdapter: rowAdapter as RowAdapter<unknown>,
+        placeholder: 'Search rules or run an action…',
+    }), [commands, rowAdapter]);
+    usePageContribution(contribution);
 
     const pageHeader = (
         <CommandPaletteHeader

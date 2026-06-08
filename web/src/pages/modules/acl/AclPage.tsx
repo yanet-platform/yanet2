@@ -3,7 +3,7 @@ import { Button, Icon, Label } from '@gravity-ui/uikit';
 import { Funnel, Pause, Play, Plus } from '@gravity-ui/icons';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, SearchInput, EmptyPagePlaceholder, RowCountDisplay } from '../../../components';
-import { useSearchParamHelpers, usePageKeyboardShortcuts, useDirtyConfigSet, useConfigQuerySync } from '../../../hooks';
+import { useSearchParamHelpers, usePageKeyboardShortcuts, useDirtyConfigSet, useConfigQuerySync, usePageContribution } from '../../../hooks';
 import { useAclDraft } from './useAclDraft';
 import { useUnsavedChangesBlocker } from '../../builtin/_shared/lane-editor';
 import type { Rule } from '../../../api/acl';
@@ -18,8 +18,7 @@ import { SaveDiffModal } from './SaveDiffModal';
 import { useAclRuleCounters } from './useAclRuleCounters';
 import { AddConfigModal, DeleteConfigModal, BulkDeleteModal, CommandPaletteHeader } from '../../../components';
 import { DRAWER_TRANSITION_MS } from '../../../components/draft';
-import { usePalette } from '../../../components/command-palette';
-import type { Command, RowAdapter } from '../../../components/command-palette';
+import type { Command, RowAdapter, PagePaletteContribution } from '../../../components/command-palette';
 import { useTabCycle } from '../../_shared/useTabCycle';
 import '../../../styles/chrome.scss';
 import './acl.scss';
@@ -294,8 +293,6 @@ const AclPage: React.FC = () => {
 
     const currentIsDirty = isDirty(currentConfig);
 
-    const { setPageContribution } = usePalette();
-
     const commands = useMemo((): Command[] => {
         const list: Command[] = [];
         if (currentConfig) {
@@ -404,14 +401,12 @@ const AclPage: React.FC = () => {
         icon: '→',
     }), [allItems, handleSearchChange, handleJumpToRow]);
 
-    useEffect(() => {
-        setPageContribution({
-            commands,
-            rowAdapter: rowAdapter as RowAdapter<unknown>,
-            placeholder: 'Search rules or run an action…',
-        });
-        return () => setPageContribution(null);
-    }, [commands, rowAdapter, setPageContribution]);
+    const contribution = useMemo<PagePaletteContribution>(() => ({
+        commands,
+        rowAdapter: rowAdapter as RowAdapter<unknown>,
+        placeholder: 'Search rules or run an action…',
+    }), [commands, rowAdapter]);
+    usePageContribution(contribution);
 
     const hasStatefulRules = useMemo(() =>
         rawRules.some((rule) => (rule.actions ?? []).some((action) =>

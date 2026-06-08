@@ -1,12 +1,11 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { Button, Icon } from '@gravity-ui/uikit';
 import { ArrowRightToLine, Funnel, Plus } from '@gravity-ui/icons';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, SearchInput, EmptyPagePlaceholder, RowCountDisplay } from '../../../components';
 import { AddConfigModal } from '../../../components';
 import { BulkDeleteModal, CommandPaletteHeader } from '../../../components';
-import { usePalette } from '../../../components/command-palette';
-import type { Command, RowAdapter, ShortcutSection } from '../../../components/command-palette';
-import { useListNavigation } from '../../../hooks';
+import type { Command, RowAdapter, ShortcutSection, PagePaletteContribution } from '../../../components/command-palette';
+import { useListNavigation, usePageContribution } from '../../../hooks';
 import { useTabCycle } from '../../_shared/useTabCycle';
 import { API } from '../../../api';
 import { toaster, parseIPAddress } from '../../../utils';
@@ -100,8 +99,6 @@ const RoutePage: React.FC = () => {
         configs.forEach((c) => m.set(c, (configRoutes.get(c) || []).length));
         return m;
     }, [configs, configRoutes]);
-
-    const { setPageContribution } = usePalette();
 
     useTabCycle({
         tabs: configs,
@@ -392,16 +389,14 @@ const RoutePage: React.FC = () => {
         ],
     }], []);
 
-    useEffect(() => {
-        setPageContribution({
-            commands: routeCommands,
-            dynamicCommands: routeDynamicCommands,
-            rowAdapter: routeRowAdapter as RowAdapter<unknown>,
-            placeholder: 'Search routes, prefixes, or type an IP…',
-            shortcuts,
-        });
-        return () => setPageContribution(null);
-    }, [routeCommands, routeDynamicCommands, routeRowAdapter, setPageContribution, shortcuts]);
+    const contribution = useMemo<PagePaletteContribution>(() => ({
+        commands: routeCommands,
+        dynamicCommands: routeDynamicCommands,
+        rowAdapter: routeRowAdapter as RowAdapter<unknown>,
+        placeholder: 'Search routes, prefixes, or type an IP…',
+        shortcuts,
+    }), [routeCommands, routeDynamicCommands, routeRowAdapter, shortcuts]);
+    usePageContribution(contribution);
 
     const pageHeader = (
         <CommandPaletteHeader

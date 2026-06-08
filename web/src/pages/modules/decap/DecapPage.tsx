@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom';
 import { Button, Icon } from '@gravity-ui/uikit';
 import { Funnel, Plus } from '@gravity-ui/icons';
-import { useSearchParamHelpers, useDirtyConfigSet, useConfigQuerySync } from '../../../hooks';
+import { useSearchParamHelpers, useDirtyConfigSet, useConfigQuerySync, usePageContribution } from '../../../hooks';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, EmptyPagePlaceholder, SearchInput, RowCountDisplay } from '../../../components';
 import { usePrefixDraft } from './usePrefixDraft';
 import { useUnsavedChangesBlocker } from '../../builtin/_shared/lane-editor';
@@ -15,8 +15,7 @@ import { PrefixSaveDiffModal } from './PrefixSaveDiffModal';
 import { AddConfigModal, DeleteConfigModal, BulkDeleteModal, CommandPaletteHeader } from '../../../components';
 import { useDraftShortcuts, useDraftDragDrop, useDraftPageHandlers, computeRowStatuses } from '../../../components/draft';
 import { useTabCycle } from '../../_shared/useTabCycle';
-import { usePalette } from '../../../components/command-palette';
-import type { Command, RowAdapter } from '../../../components/command-palette';
+import type { Command, RowAdapter, PagePaletteContribution } from '../../../components/command-palette';
 import '../../../styles/chrome.scss';
 import './decap.scss';
 
@@ -74,8 +73,6 @@ const DecapPage: React.FC = () => {
         setDiffModalOpen(false);
         handleDragLeave();
     }, [currentConfig, handleDragLeave]);
-
-    const { setPageContribution } = usePalette();
 
     const rawRows: PrefixRowItem[] = draftRows(currentConfig);
     const rawServerRows: PrefixRowItem[] = serverRows(currentConfig);
@@ -210,14 +207,12 @@ const DecapPage: React.FC = () => {
         icon: '→',
     }), [rawRows, updateParams, setActiveRowId, setEditingRowId]);
 
-    useEffect(() => {
-        setPageContribution({
-            commands,
-            rowAdapter: rowAdapter as RowAdapter<unknown>,
-            placeholder: 'Search prefixes or run an action…',
-        });
-        return () => setPageContribution(null);
-    }, [commands, rowAdapter, setPageContribution]);
+    const contribution = useMemo<PagePaletteContribution>(() => ({
+        commands,
+        rowAdapter: rowAdapter as RowAdapter<unknown>,
+        placeholder: 'Search prefixes or run an action…',
+    }), [commands, rowAdapter]);
+    usePageContribution(contribution);
 
     const pageHeader = (
         <CommandPaletteHeader

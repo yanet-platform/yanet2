@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo, useEffect } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import { Button, Icon } from '@gravity-ui/uikit';
 import { Plus } from '@gravity-ui/icons';
 import { PageLayout, PageLoader, EmptyState, CommandPaletteHeader } from '../../../components';
@@ -7,9 +7,8 @@ import { useDragState, useUnsavedChangesBlocker } from '../_shared/lane-editor';
 import { PipelineCard } from './components/PipelineCard';
 import { CreateEntityDialog } from '../../../components';
 import type { Pipeline } from './types';
-import { usePalette } from '../../../components/command-palette';
-import type { Command, RowAdapter, ShortcutSection } from '../../../components/command-palette';
-import { useListNavigation } from '../../../hooks';
+import type { Command, RowAdapter, ShortcutSection, PagePaletteContribution } from '../../../components/command-palette';
+import { useListNavigation, usePageContribution } from '../../../hooks';
 import './PipelinesPage.scss';
 
 /** Builds a space-joined search string for a pipeline (id and function names). */
@@ -52,8 +51,6 @@ const PipelinesPage = (): React.JSX.Element => {
         onActivate: (pl) => setDiffOpenId(pl.id),
         getElementId: (id) => `pl-card-${id}`,
     });
-
-    const { setPageContribution } = usePalette();
 
     const commands = useMemo((): Command[] => {
         const list: Command[] = [];
@@ -101,15 +98,13 @@ const PipelinesPage = (): React.JSX.Element => {
         ],
     }], []);
 
-    useEffect(() => {
-        setPageContribution({
-            commands,
-            rowAdapter: rowAdapter as RowAdapter<unknown>,
-            placeholder: 'Search pipelines or run an action…',
-            shortcuts,
-        });
-        return () => setPageContribution(null);
-    }, [commands, rowAdapter, setPageContribution, shortcuts]);
+    const contribution = useMemo<PagePaletteContribution>(() => ({
+        commands,
+        rowAdapter: rowAdapter as RowAdapter<unknown>,
+        placeholder: 'Search pipelines or run an action…',
+        shortcuts,
+    }), [commands, rowAdapter, shortcuts]);
+    usePageContribution(contribution);
 
     const headerContent = (
         <CommandPaletteHeader

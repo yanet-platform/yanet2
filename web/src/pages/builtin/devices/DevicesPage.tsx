@@ -2,15 +2,14 @@ import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Button, Icon } from '@gravity-ui/uikit';
 import { Plus } from '@gravity-ui/icons';
-import { useSearchParamHelpers, useListNavigation } from '../../../hooks';
+import { useSearchParamHelpers, useListNavigation, usePageContribution } from '../../../hooks';
 import { PageLayout, PageLoader, EmptyState, CommandPaletteHeader } from '../../../components';
 import type { DeviceType } from '../../../api/devices';
 import type { LocalDevice } from './types';
 import { useDeviceCounters } from '../../../hooks';
 import { useCounterHistory } from '../../../hooks/useCounterHistory';
 import { useUnsavedChangesBlocker } from '../_shared/lane-editor';
-import { usePalette } from '../../../components/command-palette';
-import type { Command, RowAdapter, ShortcutSection } from '../../../components/command-palette';
+import type { Command, RowAdapter, ShortcutSection, PagePaletteContribution } from '../../../components/command-palette';
 import {
     DevicesList,
     DeviceDetails,
@@ -124,8 +123,6 @@ const DevicesPage: React.FC = () => {
 
     const canCreate = !loading && !(error && devices.length === 0);
 
-    const { setPageContribution } = usePalette();
-
     const commands = useMemo((): Command[] => {
         const list: Command[] = [];
         if (canCreate) {
@@ -189,15 +186,13 @@ const DevicesPage: React.FC = () => {
         items: [{ keys: '↑ ↓', desc: 'Select previous / next device' }],
     }], []);
 
-    useEffect(() => {
-        setPageContribution({
-            commands,
-            rowAdapter: rowAdapter as RowAdapter<unknown>,
-            placeholder: 'Search devices or run an action…',
-            shortcuts,
-        });
-        return () => setPageContribution(null);
-    }, [commands, rowAdapter, setPageContribution, shortcuts]);
+    const contribution = useMemo<PagePaletteContribution>(() => ({
+        commands,
+        rowAdapter: rowAdapter as RowAdapter<unknown>,
+        placeholder: 'Search devices or run an action…',
+        shortcuts,
+    }), [commands, rowAdapter, shortcuts]);
+    usePageContribution(contribution);
 
     const existingDeviceNames = devices.map(d => d.id.name || '');
 

@@ -2,7 +2,7 @@ import React, { useState, useCallback, useRef, useMemo, useEffect } from 'react'
 import { Button, Icon } from '@gravity-ui/uikit';
 import { ArrowDownToLine, Plus } from '@gravity-ui/icons';
 import { useSearchParams } from 'react-router-dom';
-import { useSearchParamHelpers } from '../../../hooks';
+import { useSearchParamHelpers, usePageContribution } from '../../../hooks';
 import { PageLayout, PageLoader, ConfigTabStrip, EmptyPagePlaceholder, CommandPaletteHeader } from '../../../components';
 import { toaster } from '../../../utils';
 import {
@@ -17,8 +17,7 @@ import ConfigStrip from './ConfigStrip';
 import PacketDrawer from './PacketDrawer';
 import DeleteConfigDialog from './DeleteConfigDialog';
 import type { PdumpConfigInfo, CapturedPacket } from './types';
-import { usePalette } from '../../../components/command-palette';
-import type { Command } from '../../../components/command-palette';
+import type { Command, PagePaletteContribution } from '../../../components/command-palette';
 import { useTabCycle } from '../../_shared/useTabCycle';
 import '../../../styles/chrome.scss';
 import './pdump.scss';
@@ -350,8 +349,6 @@ const PdumpPage: React.FC = () => {
         enabled: !loading,
     });
 
-    const { setPageContribution } = usePalette();
-
     const handleOpenDeleteDialog = useCallback((configName: string) => {
         setDeletingConfigName(configName);
     }, []);
@@ -531,10 +528,11 @@ const PdumpPage: React.FC = () => {
         handleOpenDeleteDialog,
     ]);
 
-    useEffect(() => {
-        setPageContribution({ commands, placeholder: 'Search pdump actions…' });
-        return () => setPageContribution(null);
-    }, [commands, setPageContribution]);
+    const contribution = useMemo<PagePaletteContribution>(() => ({
+        commands,
+        placeholder: 'Search pdump actions…',
+    }), [commands]);
+    usePageContribution(contribution);
 
     const pageHeader = (
         <CommandPaletteHeader

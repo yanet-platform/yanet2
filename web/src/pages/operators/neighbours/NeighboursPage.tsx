@@ -1,12 +1,11 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { useSearchParamHelpers, useListNavigation } from '../../../hooks';
+import { useSearchParamHelpers, useListNavigation, usePageContribution } from '../../../hooks';
 import { Button, Icon } from '@gravity-ui/uikit';
 import { Plus, Layers } from '@gravity-ui/icons';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, EmptyPagePlaceholder } from '../../../components';
 import { BulkDeleteModal, DeleteConfigModal, CommandPaletteHeader } from '../../../components';
-import { usePalette } from '../../../components/command-palette';
-import type { Command, RowAdapter, ShortcutSection } from '../../../components/command-palette';
+import type { Command, RowAdapter, ShortcutSection, PagePaletteContribution } from '../../../components/command-palette';
 import { useTabCycle } from '../../_shared/useTabCycle';
 import { stringToIPAddress, ipAddressToString } from '../../../utils/netip';
 import { parseIPAddress } from '../../../utils';
@@ -104,8 +103,6 @@ const NeighboursPage: React.FC = () => {
     const isBuiltIn = activeTableInfo?.built_in ?? false;
 
     const tabsList = [MERGED_TAB, ...tables.map((t) => t.name || '').filter(Boolean)];
-
-    const { setPageContribution } = usePalette();
 
     const { updateParams } = useSearchParamHelpers(setSearchParams);
 
@@ -511,16 +508,14 @@ const NeighboursPage: React.FC = () => {
         ],
     }], []);
 
-    useEffect(() => {
-        setPageContribution({
-            commands: neighbourCommands,
-            dynamicCommands: neighbourDynamicCommands,
-            rowAdapter: neighbourRowAdapter as RowAdapter<unknown>,
-            placeholder: 'Search neighbours or type an IP…',
-            shortcuts,
-        });
-        return () => setPageContribution(null);
-    }, [neighbourCommands, neighbourDynamicCommands, neighbourRowAdapter, setPageContribution, shortcuts]);
+    const contribution = useMemo<PagePaletteContribution>(() => ({
+        commands: neighbourCommands,
+        dynamicCommands: neighbourDynamicCommands,
+        rowAdapter: neighbourRowAdapter as RowAdapter<unknown>,
+        placeholder: 'Search neighbours or type an IP…',
+        shortcuts,
+    }), [neighbourCommands, neighbourDynamicCommands, neighbourRowAdapter, shortcuts]);
+    usePageContribution(contribution);
 
     const searchActive = family !== 'all' || !!stateFilter;
 

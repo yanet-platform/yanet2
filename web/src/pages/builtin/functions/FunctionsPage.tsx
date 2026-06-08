@@ -10,9 +10,8 @@ import { getAvailableModuleTypesFromInspect } from './moduleTypeOptions';
 import type { NetworkFunction } from './types';
 import { isFnSaveable } from './validation';
 import { API } from '../../../api';
-import { usePalette } from '../../../components/command-palette';
-import type { Command, RowAdapter, ShortcutSection } from '../../../components/command-palette';
-import { useListNavigation } from '../../../hooks';
+import type { Command, RowAdapter, ShortcutSection, PagePaletteContribution } from '../../../components/command-palette';
+import { useListNavigation, usePageContribution } from '../../../hooks';
 import './FunctionsPage.scss';
 
 /** Builds a space-joined search string for a function (id, type, chain names, module names/types). */
@@ -109,8 +108,6 @@ const FunctionsPage = (): React.JSX.Element => {
         getElementId: (id) => `fn-card-${id}`,
     });
 
-    const { setPageContribution } = usePalette();
-
     const commands = useMemo((): Command[] => {
         const list: Command[] = [];
         if (!loading) {
@@ -157,15 +154,13 @@ const FunctionsPage = (): React.JSX.Element => {
         ],
     }], []);
 
-    useEffect(() => {
-        setPageContribution({
-            commands,
-            rowAdapter: rowAdapter as RowAdapter<unknown>,
-            placeholder: 'Search functions or run an action…',
-            shortcuts,
-        });
-        return () => setPageContribution(null);
-    }, [commands, rowAdapter, setPageContribution, shortcuts]);
+    const contribution = useMemo<PagePaletteContribution>(() => ({
+        commands,
+        rowAdapter: rowAdapter as RowAdapter<unknown>,
+        placeholder: 'Search functions or run an action…',
+        shortcuts,
+    }), [commands, rowAdapter, shortcuts]);
+    usePageContribution(contribution);
 
     const headerContent = (
         <CommandPaletteHeader

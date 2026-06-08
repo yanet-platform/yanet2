@@ -3,8 +3,8 @@ import { toaster } from '../../../utils';
 import { API } from '../../../api';
 import type { InstanceInfo } from '../../../api/inspect';
 import { PageLayout, PageLoader, EmptyState, CommandPaletteHeader } from '../../../components';
-import { usePalette } from '../../../components/command-palette';
-import type { Command } from '../../../components/command-palette';
+import type { Command, PagePaletteContribution } from '../../../components/command-palette';
+import { usePageContribution } from '../../../hooks';
 import { InspectPageFooter } from './InspectPageFooter';
 import { InstanceCard } from './InstanceCard';
 import './inspect.scss';
@@ -46,8 +46,6 @@ const InspectPage = (): React.JSX.Element => {
         loadInspect();
     }, [loadInspect]);
 
-    const { setPageContribution } = usePalette();
-
     const commands = useMemo((): Command[] => {
         if (!instanceInfo) {
             return [];
@@ -64,10 +62,11 @@ const InspectPage = (): React.JSX.Element => {
         }));
     }, [instanceInfo]);
 
-    useEffect(() => {
-        setPageContribution({ commands, placeholder: PLACEHOLDER });
-        return () => setPageContribution(null);
-    }, [commands, setPageContribution]);
+    const contribution = useMemo<PagePaletteContribution>(() => ({
+        commands,
+        placeholder: PLACEHOLDER,
+    }), [commands]);
+    usePageContribution(contribution);
 
     const header = (
         <CommandPaletteHeader title="Inspect" placeholder={PLACEHOLDER} />
