@@ -136,6 +136,25 @@
     font-variant-numeric: tabular-nums;
 }
 
+/** Base declarations shared by the toggle-chip selectors (route + neighbours). */
+@mixin toggle-chip-base {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 6px 12px;
+    border-radius: var(--yn-r-md);
+    border: none;
+    box-shadow: inset 0 0 0 1px var(--yn-line-2);
+    background: var(--yn-bg-2);
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--yn-text-2);
+    cursor: pointer;
+    transition: background 0.12s, color 0.12s, box-shadow 0.12s;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
 /** Side-by-side diff dialog chrome — shared by fn-diff-dialog and pl-diff-dialog. */
 @mixin diff-dialog($page-bg, $line) {
     // Override Gravity's size="l" to be wide enough for side-by-side split view.
