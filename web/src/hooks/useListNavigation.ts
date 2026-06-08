@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { usePalette } from '../components/command-palette';
+import { isTypingTarget, isOverlayOpen } from '../utils/keyboard';
 
 interface UseListNavigationOptions<T extends { id: string }> {
     /** Rows to navigate over. */
@@ -48,15 +49,11 @@ export const useListNavigation = <T extends { id: string }>({
             if (e.metaKey || e.ctrlKey || e.altKey) return;
 
             const target = e.target as HTMLElement;
-            if (
-                target.tagName === 'INPUT' ||
-                target.tagName === 'TEXTAREA' ||
-                target.isContentEditable
-            ) {
+            if (isTypingTarget(target)) {
                 return;
             }
 
-            if (document.querySelector('.g-modal, .yn-modal-backdrop, .yn-drawer--open')) {
+            if (isOverlayOpen()) {
                 return;
             }
 

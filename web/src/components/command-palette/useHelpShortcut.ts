@@ -1,4 +1,5 @@
 import React, { useEffect } from 'react';
+import { isTypingTarget, isOverlayOpen } from '../../utils/keyboard';
 
 /** Wires the ? key to toggle the keyboard-shortcuts help overlay, and Escape to close it. */
 export const useHelpShortcut = (
@@ -18,15 +19,11 @@ export const useHelpShortcut = (
                 if (e.metaKey || e.ctrlKey || e.altKey) return;
 
                 const target = e.target as HTMLElement;
-                if (
-                    target.tagName === 'INPUT' ||
-                    target.tagName === 'TEXTAREA' ||
-                    target.isContentEditable
-                ) {
+                if (isTypingTarget(target)) {
                     return;
                 }
 
-                if (document.querySelector('.g-modal, .yn-modal-backdrop, .yn-drawer--open')) return;
+                if (isOverlayOpen()) return;
                 e.preventDefault();
                 setHelpOpen((prev) => !prev);
             }

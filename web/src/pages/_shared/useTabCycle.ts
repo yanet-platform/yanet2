@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { usePalette } from '../../components/command-palette';
+import { isTypingTarget, isOverlayOpen } from '../../utils/keyboard';
 
 interface UseTabCycleOptions {
     /** Ordered list of tab identifiers. */
@@ -29,15 +30,11 @@ export const useTabCycle = ({ tabs, activeTab, onSelect, enabled = true }: UseTa
             if (e.metaKey || e.ctrlKey || e.altKey) return;
 
             const target = e.target as HTMLElement;
-            if (
-                target.tagName === 'INPUT' ||
-                target.tagName === 'TEXTAREA' ||
-                target.isContentEditable
-            ) {
+            if (isTypingTarget(target)) {
                 return;
             }
 
-            if (document.querySelector('.g-modal, .yn-modal-backdrop, .yn-drawer--open')) {
+            if (isOverlayOpen()) {
                 return;
             }
 
