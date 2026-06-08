@@ -38,4 +38,5 @@ export { useLagInterpolated } from './useLagInterpolated';
 export { useRollingWindow } from './useRollingWindow';
 
 export { useListNavigation } from './useListNavigation';
+export { useLaneCardNavigation } from './useLaneCardNavigation';
 export { usePageContribution } from './usePageContribution';

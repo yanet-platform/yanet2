@@ -11,7 +11,7 @@ import type { NetworkFunction } from './types';
 import { isFnSaveable } from './validation';
 import { API } from '../../../api';
 import type { Command, RowAdapter, ShortcutSection, PagePaletteContribution } from '../../../components/command-palette';
-import { useListNavigation, usePageContribution } from '../../../hooks';
+import { useLaneCardNavigation, usePageContribution } from '../../../hooks';
 import './FunctionsPage.scss';
 
 /** Builds a space-joined search string for a function (id, type, chain names, module names/types). */
@@ -35,9 +35,7 @@ const FunctionsPage = (): React.JSX.Element => {
     const [availableModuleConfigNamesByType, setAvailableModuleConfigNamesByType] = useState<Record<string, string[]>>({});
     const [availableModuleConfigNames, setAvailableModuleConfigNames] = useState<string[]>([]);
     const [createDialogOpen, setCreateDialogOpen] = useState(false);
-    const [flashId, setFlashId] = useState<string | null>(null);
     const [diffOpenId, setDiffOpenId] = useState<string | null>(null);
-    const [activeId, setActiveId] = useState<string | null>(null);
     const { dragState, startDrag, endDrag } = useDragState();
 
     useEffect(() => {
@@ -92,20 +90,10 @@ const FunctionsPage = (): React.JSX.Element => {
     const handleDiscard = useCallback((fnId: string) => (): void => discardFn(fnId), [discardFn]);
     const handleDelete = useCallback((fnId: string) => (): Promise<boolean> => deleteFn(fnId), [deleteFn]);
 
-    const jumpToFn = useCallback((id: string): void => {
-        setFlashId(null);
-        setTimeout(() => {
-            setFlashId(id);
-            document.getElementById(`fn-card-${id}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
-        }, 0);
-    }, []);
-
-    useListNavigation<NetworkFunction>({
+    const { activeId, flashId, jumpTo: jumpToFn } = useLaneCardNavigation<NetworkFunction>({
         rows: functions,
-        activeId,
-        setActiveId,
+        cardIdPrefix: 'fn',
         onActivate: (fn) => setDiffOpenId(fn.id),
-        getElementId: (id) => `fn-card-${id}`,
     });
 
     const commands = useMemo((): Command[] => {

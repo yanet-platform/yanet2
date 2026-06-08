@@ -8,7 +8,7 @@ import { PipelineCard } from './components/PipelineCard';
 import { CreateEntityDialog } from '../../../components';
 import type { Pipeline } from './types';
 import type { Command, RowAdapter, ShortcutSection, PagePaletteContribution } from '../../../components/command-palette';
-import { useListNavigation, usePageContribution } from '../../../hooks';
+import { useLaneCardNavigation, usePageContribution } from '../../../hooks';
 import './PipelinesPage.scss';
 
 /** Builds a space-joined search string for a pipeline (id and function names). */
@@ -20,9 +20,7 @@ const plSearchText = (pl: Pipeline): string => [pl.id, ...pl.functions.map(f => 
 const PipelinesPage = (): React.JSX.Element => {
     const { pipelines, loading, isDirty, getServerPipeline, dispatch, savePipeline, discardPipeline, createPipeline, deletePipeline, loadFunctionList } = usePipelinesData();
     const [createDialogOpen, setCreateDialogOpen] = useState(false);
-    const [flashId, setFlashId] = useState<string | null>(null);
     const [diffOpenId, setDiffOpenId] = useState<string | null>(null);
-    const [activeId, setActiveId] = useState<string | null>(null);
     const { dragState, startDrag, endDrag } = useDragState();
 
     const anyDirty = useMemo(
@@ -36,20 +34,10 @@ const PipelinesPage = (): React.JSX.Element => {
     const handleDiscard = useCallback((pipelineId: string) => (): void => discardPipeline(pipelineId), [discardPipeline]);
     const handleDelete = useCallback((pipelineId: string) => (): Promise<boolean> => deletePipeline(pipelineId), [deletePipeline]);
 
-    const jumpToPipeline = useCallback((id: string): void => {
-        setFlashId(null);
-        setTimeout(() => {
-            setFlashId(id);
-            document.getElementById(`pl-card-${id}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
-        }, 0);
-    }, []);
-
-    useListNavigation<Pipeline>({
+    const { activeId, flashId, jumpTo: jumpToPipeline } = useLaneCardNavigation<Pipeline>({
         rows: pipelines,
-        activeId,
-        setActiveId,
+        cardIdPrefix: 'pl',
         onActivate: (pl) => setDiffOpenId(pl.id),
-        getElementId: (id) => `pl-card-${id}`,
     });
 
     const commands = useMemo((): Command[] => {
