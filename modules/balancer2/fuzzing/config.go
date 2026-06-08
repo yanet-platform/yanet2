@@ -62,6 +62,7 @@ type RuntimeConfig struct {
 	//	  - vs: "[2001:db8::1]:443/tcp"
 	//	    src: "2001:db8::1"
 	//	    scheduler: "wrr"
+	//	    flip_reals: false
 	//	    allowed_sources:
 	//	      - "2001:db8::/48"
 	//	    flags:
@@ -75,7 +76,12 @@ type RuntimeConfig struct {
 	// The pinned source is a bare address or a CIDR, also matching the VS
 	// address family; a bare address is treated as a host network. A
 	// present flags mapping pins all three flags, with any omitted key
-	// defaulting to false. The scheduler is one of wrr, wlc, sh, op.
+	// defaulting to false. The scheduler is one of wrr, wlc, sh, op. The
+	// flip_reals key, when set to false, freezes the real set of the VS so
+	// the fuzzer never changes which reals are present or their
+	// enabled/disabled state; only their weights keep being updated. It
+	// defaults to true, which keeps the historic behaviour of churning the
+	// real subset and toggling reals on every update.
 	FixedVirtualServices []FixedVS `yaml:"fixed_virtual_services"`
 }
 
@@ -86,13 +92,18 @@ type RuntimeConfig struct {
 // overriding the corpus-derived source. Flags optionally pins the VS flags
 // so the fuzzer keeps them constant instead of regenerating them. Scheduler
 // optionally pins the scheduler so the fuzzer keeps it constant instead of
-// regenerating it; an empty value leaves the scheduler free.
+// regenerating it; an empty value leaves the scheduler free. FlipReals, when
+// present and false, freezes the real set so the fuzzer never changes which
+// reals are present or their enabled state and only keeps updating their
+// weights; a missing value defaults to true and preserves the historic
+// behaviour of churning the real subset and toggling reals.
 type FixedVS struct {
 	VS             string        `yaml:"vs"`
 	Src            string        `yaml:"src"`
 	Scheduler      string        `yaml:"scheduler"`
 	AllowedSources []string      `yaml:"allowed_sources"`
 	Flags          *FixedVSFlags `yaml:"flags"`
+	FlipReals      *bool         `yaml:"flip_reals"`
 }
 
 // FixedVSFlags pins the three VS flags. A nil FixedVS.Flags leaves the
@@ -122,13 +133,18 @@ func (m *FixedVS) UnmarshalYAML(value *yaml.Node) error {
 
 // FixedVSEntry is a parsed fixed virtual service: its canonical key plus
 // the pinned allowed-source CIDRs, the pinned per-real source, the pinned
-// VS flags, and the pinned scheduler, if any.
+// VS flags, and the pinned scheduler, if any. FreezeReals reports whether
+// the fuzzer must keep the real set of the VS constant: when true the
+// generator never changes which reals are present or their enabled state
+// and only keeps updating weights. Its zero value, false, preserves the
+// default behaviour of flipping reals freely.
 type FixedVSEntry struct {
 	Key            VsKey
 	AllowedSources []CIDR
 	Src            *CIDR
 	Flags          *VsFlags
 	Scheduler      *balancerpb.VsScheduler
+	FreezeReals    bool
 }
 
 // seedSource is the source of non-zero seeds used when the YAML seed is zero
@@ -260,12 +276,17 @@ func (m *RuntimeConfig) FixedVSEntries() ([]FixedVSEntry, error) {
 			}
 			scheduler = &sched
 		}
+		freezeReals := false
+		if entry.FlipReals != nil {
+			freezeReals = !*entry.FlipReals
+		}
 		out = append(out, FixedVSEntry{
 			Key:            key,
 			AllowedSources: sources,
 			Src:            src,
 			Flags:          flags,
 			Scheduler:      scheduler,
+			FreezeReals:    freezeReals,
 		})
 	}
 	return out, nil

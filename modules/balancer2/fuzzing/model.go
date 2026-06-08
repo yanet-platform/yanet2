@@ -160,6 +160,13 @@ type Model struct {
 	// on every update. The map is populated once at construction and never
 	// mutated afterwards.
 	fixedScheduler map[VsKey]*balancerpb.VsScheduler
+
+	// noFlipReals holds the fixed VS keys whose real set is frozen:
+	// the operation generator never changes which reals are present or
+	// their enabled state and only keeps updating their weights. Membership
+	// in this set is the inverse of the entry's flip_reals flag. The map is
+	// populated once at construction and never mutated afterwards.
+	noFlipReals map[VsKey]struct{}
 }
 
 // ModelOption configures a Model at construction time.
@@ -175,9 +182,12 @@ type ModelOption func(*Model)
 // the VS's reals, which the runner overlays onto the bootstrap and update
 // configs, the VS flags, which are likewise seeded into the initial state
 // and emitted verbatim on every update, and the scheduler, which is also
-// seeded into the initial state and emitted verbatim on every update. Keys
-// absent from the corpus are ignored here; the runner validates corpus
-// membership before building the model.
+// seeded into the initial state and emitted verbatim on every update. An
+// entry whose FreezeReals is set additionally freezes the VS's real set so
+// the generator never changes which reals are present or their enabled
+// state and only keeps updating their weights. Keys absent from the corpus
+// are ignored here; the runner validates corpus membership before building
+// the model.
 func WithFixedVS(entries []FixedVSEntry) ModelOption {
 	return func(m *Model) {
 		for _, entry := range entries {
@@ -206,6 +216,9 @@ func WithFixedVS(entries []FixedVSEntry) ModelOption {
 					state.Scheduler = scheduler
 				}
 			}
+			if entry.FreezeReals {
+				m.noFlipReals[entry.Key] = struct{}{}
+			}
 		}
 	}
 }
@@ -228,6 +241,7 @@ func NewModel(corpus *Corpus, options ...ModelOption) *Model {
 		fixedRealSrc:       map[VsKey]*CIDR{},
 		fixedFlags:         map[VsKey]*VsFlags{},
 		fixedScheduler:     map[VsKey]*balancerpb.VsScheduler{},
+		noFlipReals:        map[VsKey]struct{}{},
 	}
 	for _, vs := range corpus.VSs {
 		key := vs.Key
@@ -360,6 +374,15 @@ func (m *Model) FixedScheduler(key VsKey) *balancerpb.VsScheduler {
 	return m.fixedScheduler[key]
 }
 
+// FlipReals reports whether the operation generator may keep changing the
+// real membership and enabled state of the VS. It returns false only for a
+// fixed VS configured with flip_reals: false, whose real set is frozen so
+// the generator updates only real weights; every other VS may flip freely.
+func (m *Model) FlipReals(key VsKey) bool {
+	_, frozen := m.noFlipReals[key]
+	return !frozen
+}
+
 // DeletableActiveOrder returns the active VS keys that may be removed, in
 // active order, excluding fixed VSes. When no VS is fixed the active order
 // is returned directly so callers see no extra allocation.
@@ -455,6 +478,7 @@ func (m *Model) Clone() *Model {
 		fixedRealSrc:       m.fixedRealSrc,
 		fixedFlags:         m.fixedFlags,
 		fixedScheduler:     m.fixedScheduler,
+		noFlipReals:        m.noFlipReals,
 	}
 	for k, v := range m.activeVS {
 		out.activeVS[k] = v.Clone()

@@ -26,9 +26,16 @@ seed: 12345
 # pinned source is a CIDR whose family matches the virtual service family.
 # The optional scheduler is one of wrr, wlc, sh, op; when set the fuzzer
 # keeps it constant for the whole run instead of regenerating it.
+#
+# The optional flip_reals key controls whether the real set may change. It
+# defaults to true, which keeps the fuzzer churning the active real subset
+# and toggling reals on every update. Setting it to false freezes the real
+# set: every real stays present and enabled for the whole run and only the
+# real weights keep being updated.
 fixed_virtual_services:
   - vs: "[2a02:6b8:0:3400:0:853a:0:3]:80/tcp"
     scheduler: "wrr"
+    flip_reals: false
     allowed_sources:
       - "::/0"
     flags:

@@ -287,6 +287,15 @@ func (m *OperationGenerator) generateUpdateVS(opNum uint64) Operation {
 		// a pinned scheduler still gets a random one.
 		scheduler = *pinned
 	}
+	reals := m.randomRealSubset(key, m.model.ActiveVS(key))
+	if !m.model.FlipReals(key) {
+		// A frozen-real fixed VS keeps its whole real set present and
+		// enabled, so the membership and enabled state never change. Weights
+		// keep being updated through the UpdateReals path; existing reals
+		// inherit their current weight here, so the value emitted for them is
+		// not observable.
+		reals = m.fullEnabledRealSet(key)
+	}
 	return Operation{
 		Type:  OpUpdateVS,
 		OpNum: opNum,
@@ -295,9 +304,26 @@ func (m *OperationGenerator) generateUpdateVS(opNum uint64) Operation {
 			Scheduler:      scheduler,
 			Flags:          flags,
 			AllowedSources: sources,
-			Reals:          m.randomRealSubset(key, m.model.ActiveVS(key)),
+			Reals:          reals,
 		},
 	}
+}
+
+// fullEnabledRealSet returns every original real of the VS, all enabled,
+// each with a freshly rolled weight, in the corpus order. It is used for a
+// frozen-real fixed VS so its membership and enabled state stay constant
+// for the whole run while weights keep changing.
+func (m *OperationGenerator) fullEnabledRealSet(key VsKey) []RealMember {
+	original := m.model.OriginalReals(key)
+	out := make([]RealMember, 0, len(original))
+	for _, rk := range original {
+		out = append(out, RealMember{
+			Key:     rk,
+			Enabled: true,
+			Weight:  uint32(realWeightMin + m.rng.Intn(realWeightMax-realWeightMin+1)),
+		})
+	}
+	return out
 }
 
 // generateUpdateReals emits one operation that may update multiple VSes in
@@ -338,7 +364,14 @@ func (m *OperationGenerator) generateUpdateReals(opNum uint64) Operation {
 	for _, key := range selectedVS {
 		vs := m.model.ActiveVS(key)
 		reals := vs.Reals()
-		updates := m.randomRealBatchUpdates(vs, reals)
+		var updates []RealUpdate
+		if m.model.FlipReals(key) {
+			updates = m.randomRealBatchUpdates(vs, reals)
+		} else {
+			// A frozen-real fixed VS only ever reweights its reals; their
+			// enabled state stays whatever the bootstrap established.
+			updates = m.weightOnlyBatchUpdates(reals)
+		}
 		batches = append(batches, UpdateRealsBatch{
 			Key:     key,
 			Updates: updates,
@@ -611,6 +644,36 @@ func (m *OperationGenerator) randomRealBatchUpdates(vs *VSState, reals []RealKey
 			continue
 		}
 		updates = append(updates, *upd)
+	}
+	return updates
+}
+
+// weightOnlyBatchUpdates builds one UpdateReals batch that reweights a
+// random subset of the VS reals and never touches their enabled state. It
+// is used for a frozen-real fixed VS so the enabled set stays constant while
+// weights keep changing. At least one real is reweighted whenever the VS has
+// any reals, so the operation is never empty.
+func (m *OperationGenerator) weightOnlyBatchUpdates(reals []RealKey) []RealUpdate {
+	if len(reals) == 0 {
+		return nil
+	}
+	weightCount := 1 + m.rng.Intn(len(reals))
+	toReweight := m.pickRealSubset(reals, weightCount)
+	reweight := map[RealKey]uint32{}
+	for _, rk := range toReweight {
+		reweight[rk] = uint32(realWeightMin + m.rng.Intn(realWeightMax-realWeightMin+1))
+	}
+	updates := make([]RealUpdate, 0, len(toReweight))
+	for _, rk := range reals {
+		w, ok := reweight[rk]
+		if !ok {
+			continue
+		}
+		weight := w
+		updates = append(updates, RealUpdate{
+			Key:    rk,
+			Weight: &weight,
+		})
 	}
 	return updates
 }

@@ -909,6 +909,130 @@ func TestRunnerUpdateVSAppliesPinnedRealSrc(t *testing.T) {
 	}
 }
 
+func TestFixedVSEntriesFlipReals(t *testing.T) {
+	flipFalse := false
+	flipTrue := true
+	cfg := &RuntimeConfig{
+		FixedVirtualServices: []FixedVS{
+			{VS: "10.0.0.1:80", FlipReals: &flipFalse},
+			{VS: "10.0.0.2:80", FlipReals: &flipTrue},
+			{VS: "10.0.0.3:80"},
+		},
+	}
+	entries, err := cfg.FixedVSEntries()
+	require.NoError(t, err)
+	require.Len(t, entries, 3)
+
+	assert.True(t, entries[0].FreezeReals, "an explicit flip_reals: false freezes the real set")
+	assert.False(t, entries[1].FreezeReals, "an explicit flip_reals: true keeps reals flipping")
+	assert.False(t, entries[2].FreezeReals, "a missing flip_reals defaults to flipping")
+}
+
+func TestLoadRuntimeConfigParsesFlipReals(t *testing.T) {
+	in := validYAML + "fixed_virtual_services:\n" +
+		"  - vs: \"10.0.0.1:80\"\n" +
+		"    flip_reals: false\n"
+	cfg, err := DecodeRuntimeConfig([]byte(in))
+	require.NoError(t, err)
+	require.Len(t, cfg.FixedVirtualServices, 1)
+	require.NotNil(t, cfg.FixedVirtualServices[0].FlipReals)
+	assert.False(t, *cfg.FixedVirtualServices[0].FlipReals)
+
+	entries, err := cfg.FixedVSEntries()
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	assert.True(t, entries[0].FreezeReals)
+}
+
+func TestModelFlipReals(t *testing.T) {
+	corpus := parsedCorpus(t, genCorpusText(5, 4))
+	frozen := vsKeyFor(t, "10.0.0.1", 80, balancerpb.TransportProto_TCP)
+	flipping := vsKeyFor(t, "10.0.0.2", 80, balancerpb.TransportProto_TCP)
+	model := NewModel(corpus, WithFixedVS([]FixedVSEntry{
+		{Key: frozen, FreezeReals: true},
+		{Key: flipping, FreezeReals: false},
+	}))
+
+	assert.False(t, model.FlipReals(frozen), "a flip_reals: false fixed VS has a frozen real set")
+	assert.True(t, model.FlipReals(flipping), "a flip_reals: true fixed VS keeps flipping reals")
+
+	bare := vsKeyFor(t, "10.0.0.3", 80, balancerpb.TransportProto_TCP)
+	assert.True(t, model.FlipReals(bare), "a VS that is not fixed always flips its reals")
+}
+
+// TestOperationGeneratorFreezesFixedVSReals drives the generator against a
+// single-VS model whose only VS is fixed with flip_reals disabled. With one
+// VS the active set stays at 100%, so every UpdateVS and UpdateReals targets
+// the frozen VS. The whole original real set must stay present and enabled
+// throughout, while weights must still change.
+func TestOperationGeneratorFreezesFixedVSReals(t *testing.T) {
+	const steps = uint64(2000)
+	const realsPerVS = 6
+	const n = uint64(5)
+
+	corpus := parsedCorpus(t, genCorpusText(1, realsPerVS))
+	key := vsKeyFor(t, "10.0.0.1", 80, balancerpb.TransportProto_TCP)
+	model := NewModel(corpus, WithFixedVS([]FixedVSEntry{{Key: key, FreezeReals: true}}))
+	gen := NewOperationGenerator(model, n, 12345)
+
+	originalReals := model.OriginalReals(key)
+	require.Len(t, originalReals, realsPerVS)
+
+	initialWeights := map[RealKey]uint32{}
+	for _, rk := range originalReals {
+		initialWeights[rk] = model.ActiveVS(key).Real(rk).Weight
+	}
+
+	sawWeightChange := false
+	for opNum := uint64(1); opNum <= steps; opNum++ {
+		op := gen.Generate(opNum)
+		require.NoError(t, model.Apply(op))
+
+		vs := model.ActiveVS(key)
+		require.NotNil(t, vs)
+		assert.Len(t, vs.Reals(), realsPerVS,
+			"op %d shrank the frozen real set", opNum)
+		for _, rk := range originalReals {
+			real := vs.Real(rk)
+			require.NotNilf(t, real, "op %d dropped frozen real %v", opNum, rk)
+			assert.Truef(t, real.Enabled, "op %d disabled frozen real %v", opNum, rk)
+			if real.Weight != initialWeights[rk] {
+				sawWeightChange = true
+			}
+		}
+	}
+	assert.True(t, sawWeightChange, "a frozen-real fixed VS must still get weight updates")
+}
+
+// TestOperationGeneratorFlippingFixedVSReals confirms back-compat: a fixed
+// VS declared with the default flip_reals still has reals toggled. The
+// single-VS corpus guarantees every UpdateReals targets the fixed VS, so a
+// disabled real must appear within the run.
+func TestOperationGeneratorFlippingFixedVSReals(t *testing.T) {
+	const steps = uint64(2000)
+	const realsPerVS = 6
+	const n = uint64(5)
+
+	corpus := parsedCorpus(t, genCorpusText(1, realsPerVS))
+	key := vsKeyFor(t, "10.0.0.1", 80, balancerpb.TransportProto_TCP)
+	model := NewModel(corpus, WithFixedVS([]FixedVSEntry{{Key: key}}))
+	gen := NewOperationGenerator(model, n, 12345)
+
+	sawDisabled := false
+	for opNum := uint64(1); opNum <= steps; opNum++ {
+		op := gen.Generate(opNum)
+		require.NoError(t, model.Apply(op))
+		vs := model.ActiveVS(key)
+		for _, rk := range vs.Reals() {
+			if !vs.Real(rk).Enabled {
+				sawDisabled = true
+			}
+		}
+	}
+	assert.True(t, sawDisabled,
+		"a fixed VS with default flip_reals must still toggle reals off")
+}
+
 // parsedCorpus parses synthetic corpus text into a Corpus for tests that
 // need to build a model with construction options.
 func parsedCorpus(t *testing.T, text string) *Corpus {
