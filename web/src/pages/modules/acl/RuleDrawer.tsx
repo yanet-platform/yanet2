@@ -8,6 +8,7 @@ import { itemToDraft, defaultCounterName, draftToRule, expandRule, deadReasonTex
 import { isValidCidr, isValidDeviceName } from '../../../utils';
 import ChipInput from './ChipInput';
 import type { ChipInputHandle } from './ChipInput';
+import { DrawerShell } from '../../../components';
 
 /** Insert any-wildcard CIDRs that aren't already in the chip list. */
 const addWildcards = (cidrs: string[]): string[] => {
@@ -121,350 +122,332 @@ const RuleDrawer = React.forwardRef<RuleDrawerHandle, RuleDrawerProps>(({
     })();
 
     return (
-        <>
-            <div
-                className={`yn-backdrop${open ? ' yn-backdrop--open' : ''}`}
-                onClick={handleClose}
-                aria-hidden="true"
-            />
-            <aside
-                className={`yn-drawer${open ? ' yn-drawer--open' : ''}`}
-                role="dialog"
-                aria-modal="true"
-                aria-label={mode === 'add' ? 'Add ACL rule' : 'Edit ACL rule'}
-            >
-                <header className="yn-drawer__head">
-                    <h2 className="yn-drawer__title">
-                        {mode === 'add' ? 'New rule' : (
-                            <>Edit rule <span className="yn-drawer__rule-num">#{ruleItem?.index !== undefined ? ruleItem.index + 1 : ''}</span></>
-                        )}
-                        {draftClassification.isDead && (
-                            <span
-                                className="acl-rule-badge acl-rule-badge--dead"
-                                title={deadReasonText(draftClassification)}
-                            >
-                                dead
-                            </span>
-                        )}
-                        {!draftClassification.isDead && draftClassification.isL2 && (
-                            <span
-                                className="acl-rule-badge acl-rule-badge--l2"
-                                title="No IP filter — matches L2 frames per VLAN/device"
-                            >
-                                L2
-                            </span>
-                        )}
-                    </h2>
-                    <div className="yn-drawer__head-actions">
-                        {mode === 'edit' && ruleItem && (
-                            <>
-                                <button
-                                    type="button"
-                                    className="yn-icon-btn"
-                                    onClick={() => onDuplicate(ruleItem)}
-                                    title="Duplicate rule"
-                                >
-                                    ⎘
-                                </button>
-                                <button
-                                    type="button"
-                                    className="yn-icon-btn yn-icon-btn--danger"
-                                    onClick={() => onDelete(ruleItem)}
-                                    title="Delete rule"
-                                >
-                                    <TrashIcon />
-                                </button>
-                            </>
-                        )}
+        <DrawerShell
+            open={open}
+            ariaLabel={mode === 'add' ? 'Add ACL rule' : 'Edit ACL rule'}
+            onBackdropClick={handleClose}
+            title={<>
+                {mode === 'add' ? 'New rule' : (
+                    <>Edit rule <span className="yn-drawer__rule-num">#{ruleItem?.index !== undefined ? ruleItem.index + 1 : ''}</span></>
+                )}
+                {draftClassification.isDead && (
+                    <span
+                        className="acl-rule-badge acl-rule-badge--dead"
+                        title={deadReasonText(draftClassification)}
+                    >
+                        dead
+                    </span>
+                )}
+                {!draftClassification.isDead && draftClassification.isL2 && (
+                    <span
+                        className="acl-rule-badge acl-rule-badge--l2"
+                        title="No IP filter — matches L2 frames per VLAN/device"
+                    >
+                        L2
+                    </span>
+                )}
+            </>}
+            headActions={<>
+                {mode === 'edit' && ruleItem && (
+                    <>
                         <button
                             type="button"
                             className="yn-icon-btn"
-                            onClick={handleClose}
-                            aria-label="Close drawer"
+                            onClick={() => onDuplicate(ruleItem)}
+                            title="Duplicate rule"
                         >
-                            ✕
-                        </button>
-                    </div>
-                </header>
-
-                <div className="yn-drawer__body">
-                    <section className="yn-section">
-                        <div className="yn-section-h">Actions</div>
-                        <div className="yn-section__body">
-                            <div className="yn-field">
-                                <label className="yn-field__label">
-                                    Action chain
-                                    <span className="yn-field__count">{draft.actions.length} step{draft.actions.length !== 1 ? 's' : ''}</span>
-                                </label>
-                                <div className="acl-action-editor">
-                                    {draft.actions.map((kind, idx) => (
-                                        <div key={idx} className="acl-action-row">
-                                            <span className="acl-action-row__idx">{idx + 1}.</span>
-                                            <select
-                                                className="yn-input acl-action-select"
-                                                value={kind}
-                                                onChange={e => changeAction(idx, parseInt(e.target.value, 10) as ActionKind)}
-                                            >
-                                                {ALL_KINDS.map(k => (
-                                                    <option key={k} value={k}>
-                                                        {ACTION_KIND_LABELS[k]}
-                                                    </option>
-                                                ))}
-                                            </select>
-                                            <button
-                                                type="button"
-                                                className="yn-icon-btn yn-icon-btn--danger"
-                                                onClick={() => removeAction(idx)}
-                                                aria-label={`Remove step ${idx + 1}`}
-                                                title="Remove step"
-                                            >
-                                                ×
-                                            </button>
-                                        </div>
-                                    ))}
-                                    <div className="acl-action-add-row">
-                                        {ALL_KINDS.map(kind => (
-                                            <button
-                                                key={kind}
-                                                type="button"
-                                                className="yn-btn yn-btn--ghost acl-action-preset"
-                                                onClick={() => addAction(kind)}
-                                            >
-                                                + {ACTION_KIND_LABELS[kind]}
-                                            </button>
-                                        ))}
-                                    </div>
-                                </div>
-                                {hasNoTerminal && (
-                                    <span className="yn-field__hint acl-hint--warn">
-                                        No terminal action (pass/deny) — traffic will fall through.
-                                    </span>
-                                )}
-                                {hasUnreachable && (
-                                    <span className="yn-field__hint acl-hint--warn">
-                                        Steps after step {terminalIdx + 1} are unreachable.
-                                    </span>
-                                )}
-                            </div>
-                            <div className="yn-field">
-                                <label className="yn-field__label">
-                                    Counter <span className="yn-field__optional">optional</span>
-                                </label>
-                                <input
-                                    className="yn-input"
-                                    placeholder={mode === 'edit' && ruleItem !== null
-                                        ? `${defaultCounterName(ruleItem.index)} (default)`
-                                        : `${defaultCounterName(nextIndex)} (default)`}
-                                    value={draft.counter}
-                                    onChange={e => updateField('counter', e.target.value)}
-                                />
-                                <span className="yn-field__hint">
-                                    Counter name shown in /stats.
-                                    {ruleItem !== null
-                                        ? ' Leave empty to use the auto-assigned default name (shifts with rule position).'
-                                        : ' Leave empty to use the auto-assigned default name.'}
-                                </span>
-                            </div>
-                        </div>
-                    </section>
-
-                    <section className="yn-section">
-                        <div className="yn-section-h">Match — addresses</div>
-                        <div className="yn-section__body">
-                            <div className="yn-fgrid">
-                                <div className="yn-field">
-                                    <label className="yn-field__label">
-                                        Sources
-                                        <div className="acl-field-label-actions">
-                                            <button
-                                                type="button"
-                                                className="yn-btn yn-btn--ghost yn-btn--sm acl-any-btn"
-                                                onClick={() => {
-                                                    updateField('sourceCidrs', addWildcards(draft.sourceCidrs));
-                                                }}
-                                                title="Add 0.0.0.0/0 and ::/0"
-                                            >
-                                                + any
-                                            </button>
-                                            <span className="yn-field__count">{draft.sourceCidrs.length}</span>
-                                        </div>
-                                    </label>
-                                    <ChipInput
-                                        ref={sourceCidrsRef}
-                                        value={draft.sourceCidrs}
-                                        onChange={v => updateField('sourceCidrs', v)}
-                                        placeholder="10.0.0.0/8…"
-                                        kind="cidr"
-                                        validator={isValidCidr}
-                                    />
-                                    <span className="yn-field__hint">Empty = no IP match.</span>
-                                </div>
-                                <div className="yn-field">
-                                    <label className="yn-field__label">
-                                        Destinations
-                                        <div className="acl-field-label-actions">
-                                            <button
-                                                type="button"
-                                                className="yn-btn yn-btn--ghost yn-btn--sm acl-any-btn"
-                                                onClick={() => {
-                                                    updateField('dstCidrs', addWildcards(draft.dstCidrs));
-                                                }}
-                                                title="Add 0.0.0.0/0 and ::/0"
-                                            >
-                                                + any
-                                            </button>
-                                            <span className="yn-field__count">{draft.dstCidrs.length}</span>
-                                        </div>
-                                    </label>
-                                    <ChipInput
-                                        ref={dstCidrsRef}
-                                        value={draft.dstCidrs}
-                                        onChange={v => updateField('dstCidrs', v)}
-                                        placeholder="192.168.0.0/16…"
-                                        kind="cidr"
-                                        validator={isValidCidr}
-                                    />
-                                    <span className="yn-field__hint">Empty = no IP match.</span>
-                                </div>
-                            </div>
-                        </div>
-                    </section>
-
-                    <section className="yn-section">
-                        <div className="yn-section-h">Match — ports and protocols</div>
-                        <div className="yn-section__body">
-                            <div className="yn-fgrid">
-                                <div className="yn-field">
-                                    <label className="yn-field__label">Src port ranges</label>
-                                    <input
-                                        className="yn-input yn-input--mono"
-                                        placeholder="0-65535"
-                                        value={draft.srcPortRaw}
-                                        onChange={e => updateField('srcPortRaw', e.target.value)}
-                                    />
-                                    <span className="yn-field__hint">e.g. <code>80</code>, <code>80-90</code>, <code>80, 443</code>. Empty = any.</span>
-                                </div>
-                                <div className="yn-field">
-                                    <label className="yn-field__label">Dst port ranges</label>
-                                    <input
-                                        className="yn-input yn-input--mono"
-                                        placeholder="0-65535"
-                                        value={draft.dstPortRaw}
-                                        onChange={e => updateField('dstPortRaw', e.target.value)}
-                                    />
-                                    <span className="yn-field__hint">e.g. <code>80</code>, <code>443</code>, <code>8080-8443</code>. Empty = any.</span>
-                                </div>
-                            </div>
-                            <div className="yn-field">
-                                <label className="yn-field__label">
-                                    Protocol ranges
-                                    <div className="acl-field-label-actions">
-                                        <button
-                                            type="button"
-                                            className="yn-btn yn-btn--ghost yn-btn--sm acl-any-btn"
-                                            onClick={() => updateField('protoRaw', '0-65535')}
-                                            title="Set to full range (any protocol)"
-                                        >
-                                            + any
-                                        </button>
-                                    </div>
-                                </label>
-                                <input
-                                    className="yn-input yn-input--mono"
-                                    placeholder="1536-1791"
-                                    value={draft.protoRaw}
-                                    onChange={e => updateField('protoRaw', e.target.value)}
-                                />
-                                <span className="yn-field__hint">
-                                    Encoded as <code>(ip_proto &lt;&lt; 8) | subtype</code>.
-                                    TCP=<code>1536-1791</code>, UDP=<code>4352-4607</code>, ICMP=<code>256-511</code>.
-                                    Empty = no match.
-                                </span>
-                                <div className="acl-proto-presets">
-                                    {[
-                                        { label: '+ TCP', range: '1536-1791' },
-                                        { label: '+ UDP', range: '4352-4607' },
-                                        { label: '+ ICMP', range: '256-511' },
-                                        { label: '+ ICMPv6', range: '14848-15103' },
-                                        { label: '+ GRE', range: '12032-12287' },
-                                        { label: '+ ESP', range: '12800-13055' },
-                                    ].map(({ label, range }) => (
-                                        <button
-                                            key={range}
-                                            type="button"
-                                            className="yn-btn yn-btn--ghost acl-proto-preset"
-                                            onClick={() => {
-                                                const current = draft.protoRaw.trim();
-                                                if (!current) {
-                                                    updateField('protoRaw', range);
-                                                } else if (!current.includes(range)) {
-                                                    updateField('protoRaw', `${current}, ${range}`);
-                                                }
-                                            }}
-                                        >
-                                            {label}
-                                        </button>
-                                    ))}
-                                </div>
-                            </div>
-                        </div>
-                    </section>
-
-                    <section className="yn-section">
-                        <div className="yn-section-h">Match — L2 / device</div>
-                        <div className="yn-section__body">
-                            <div className="yn-field">
-                                <label className="yn-field__label">VLAN ranges</label>
-                                <input
-                                    className="yn-input yn-input--mono"
-                                    placeholder="0-4095"
-                                    value={draft.vlanRaw}
-                                    onChange={e => updateField('vlanRaw', e.target.value)}
-                                />
-                                <span className="yn-field__hint">
-                                    Single <code>100</code>, range <code>100-200</code>, list <code>100, 200, 300-400</code>. Empty = all VLANs.
-                                </span>
-                            </div>
-                            <div className="yn-field">
-                                <label className="yn-field__label">
-                                    Devices
-                                    <span className="yn-field__count">{draft.deviceNames.length || 'any'}</span>
-                                </label>
-                                <ChipInput
-                                    ref={deviceNamesRef}
-                                    value={draft.deviceNames}
-                                    onChange={v => updateField('deviceNames', v)}
-                                    placeholder="eth0, 0000:81:00.0…"
-                                    kind="device"
-                                    wildcardLabel="Any device"
-                                    validator={isValidDeviceName}
-                                />
-                            </div>
-                        </div>
-                    </section>
-                </div>
-
-                <footer className="yn-drawer__foot">
-                    <span className="yn-drawer__foot-meta">
-                        {mode === 'add'
-                            ? 'Will be appended to config.'
-                            : `Rule #${(ruleItem?.index ?? -1) + 1}`}
-                    </span>
-                    <div className="yn-drawer__foot-actions">
-                        <button type="button" className="yn-btn yn-btn--ghost" onClick={handleClose}>
-                            Cancel
+                            ⎘
                         </button>
                         <button
                             type="button"
-                            className="yn-btn yn-btn--primary"
-                            onClick={handleApply}
+                            className="yn-icon-btn yn-icon-btn--danger"
+                            onClick={() => onDelete(ruleItem)}
+                            title="Delete rule"
                         >
-                            Apply
+                            <TrashIcon />
                         </button>
+                    </>
+                )}
+                <button
+                    type="button"
+                    className="yn-icon-btn"
+                    onClick={handleClose}
+                    aria-label="Close drawer"
+                >
+                    ✕
+                </button>
+            </>}
+            footMeta={mode === 'add'
+                ? 'Will be appended to config.'
+                : `Rule #${(ruleItem?.index ?? -1) + 1}`}
+            footActions={<>
+                <button type="button" className="yn-btn yn-btn--ghost" onClick={handleClose}>
+                    Cancel
+                </button>
+                <button
+                    type="button"
+                    className="yn-btn yn-btn--primary"
+                    onClick={handleApply}
+                >
+                    Apply
+                </button>
+            </>}
+        >
+            <section className="yn-section">
+                <div className="yn-section-h">Actions</div>
+                <div className="yn-section__body">
+                    <div className="yn-field">
+                        <label className="yn-field__label">
+                            Action chain
+                            <span className="yn-field__count">{draft.actions.length} step{draft.actions.length !== 1 ? 's' : ''}</span>
+                        </label>
+                        <div className="acl-action-editor">
+                            {draft.actions.map((kind, idx) => (
+                                <div key={idx} className="acl-action-row">
+                                    <span className="acl-action-row__idx">{idx + 1}.</span>
+                                    <select
+                                        className="yn-input acl-action-select"
+                                        value={kind}
+                                        onChange={e => changeAction(idx, parseInt(e.target.value, 10) as ActionKind)}
+                                    >
+                                        {ALL_KINDS.map(k => (
+                                            <option key={k} value={k}>
+                                                {ACTION_KIND_LABELS[k]}
+                                            </option>
+                                        ))}
+                                    </select>
+                                    <button
+                                        type="button"
+                                        className="yn-icon-btn yn-icon-btn--danger"
+                                        onClick={() => removeAction(idx)}
+                                        aria-label={`Remove step ${idx + 1}`}
+                                        title="Remove step"
+                                    >
+                                        ×
+                                    </button>
+                                </div>
+                            ))}
+                            <div className="acl-action-add-row">
+                                {ALL_KINDS.map(kind => (
+                                    <button
+                                        key={kind}
+                                        type="button"
+                                        className="yn-btn yn-btn--ghost acl-action-preset"
+                                        onClick={() => addAction(kind)}
+                                    >
+                                        + {ACTION_KIND_LABELS[kind]}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                        {hasNoTerminal && (
+                            <span className="yn-field__hint acl-hint--warn">
+                                No terminal action (pass/deny) — traffic will fall through.
+                            </span>
+                        )}
+                        {hasUnreachable && (
+                            <span className="yn-field__hint acl-hint--warn">
+                                Steps after step {terminalIdx + 1} are unreachable.
+                            </span>
+                        )}
                     </div>
-                </footer>
-            </aside>
-        </>
+                    <div className="yn-field">
+                        <label className="yn-field__label">
+                            Counter <span className="yn-field__optional">optional</span>
+                        </label>
+                        <input
+                            className="yn-input"
+                            placeholder={mode === 'edit' && ruleItem !== null
+                                ? `${defaultCounterName(ruleItem.index)} (default)`
+                                : `${defaultCounterName(nextIndex)} (default)`}
+                            value={draft.counter}
+                            onChange={e => updateField('counter', e.target.value)}
+                        />
+                        <span className="yn-field__hint">
+                            Counter name shown in /stats.
+                            {ruleItem !== null
+                                ? ' Leave empty to use the auto-assigned default name (shifts with rule position).'
+                                : ' Leave empty to use the auto-assigned default name.'}
+                        </span>
+                    </div>
+                </div>
+            </section>
+
+            <section className="yn-section">
+                <div className="yn-section-h">Match — addresses</div>
+                <div className="yn-section__body">
+                    <div className="yn-fgrid">
+                        <div className="yn-field">
+                            <label className="yn-field__label">
+                                Sources
+                                <div className="acl-field-label-actions">
+                                    <button
+                                        type="button"
+                                        className="yn-btn yn-btn--ghost yn-btn--sm acl-any-btn"
+                                        onClick={() => {
+                                            updateField('sourceCidrs', addWildcards(draft.sourceCidrs));
+                                        }}
+                                        title="Add 0.0.0.0/0 and ::/0"
+                                    >
+                                        + any
+                                    </button>
+                                    <span className="yn-field__count">{draft.sourceCidrs.length}</span>
+                                </div>
+                            </label>
+                            <ChipInput
+                                ref={sourceCidrsRef}
+                                value={draft.sourceCidrs}
+                                onChange={v => updateField('sourceCidrs', v)}
+                                placeholder="10.0.0.0/8…"
+                                kind="cidr"
+                                validator={isValidCidr}
+                            />
+                            <span className="yn-field__hint">Empty = no IP match.</span>
+                        </div>
+                        <div className="yn-field">
+                            <label className="yn-field__label">
+                                Destinations
+                                <div className="acl-field-label-actions">
+                                    <button
+                                        type="button"
+                                        className="yn-btn yn-btn--ghost yn-btn--sm acl-any-btn"
+                                        onClick={() => {
+                                            updateField('dstCidrs', addWildcards(draft.dstCidrs));
+                                        }}
+                                        title="Add 0.0.0.0/0 and ::/0"
+                                    >
+                                        + any
+                                    </button>
+                                    <span className="yn-field__count">{draft.dstCidrs.length}</span>
+                                </div>
+                            </label>
+                            <ChipInput
+                                ref={dstCidrsRef}
+                                value={draft.dstCidrs}
+                                onChange={v => updateField('dstCidrs', v)}
+                                placeholder="192.168.0.0/16…"
+                                kind="cidr"
+                                validator={isValidCidr}
+                            />
+                            <span className="yn-field__hint">Empty = no IP match.</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section className="yn-section">
+                <div className="yn-section-h">Match — ports and protocols</div>
+                <div className="yn-section__body">
+                    <div className="yn-fgrid">
+                        <div className="yn-field">
+                            <label className="yn-field__label">Src port ranges</label>
+                            <input
+                                className="yn-input yn-input--mono"
+                                placeholder="0-65535"
+                                value={draft.srcPortRaw}
+                                onChange={e => updateField('srcPortRaw', e.target.value)}
+                            />
+                            <span className="yn-field__hint">e.g. <code>80</code>, <code>80-90</code>, <code>80, 443</code>. Empty = any.</span>
+                        </div>
+                        <div className="yn-field">
+                            <label className="yn-field__label">Dst port ranges</label>
+                            <input
+                                className="yn-input yn-input--mono"
+                                placeholder="0-65535"
+                                value={draft.dstPortRaw}
+                                onChange={e => updateField('dstPortRaw', e.target.value)}
+                            />
+                            <span className="yn-field__hint">e.g. <code>80</code>, <code>443</code>, <code>8080-8443</code>. Empty = any.</span>
+                        </div>
+                    </div>
+                    <div className="yn-field">
+                        <label className="yn-field__label">
+                            Protocol ranges
+                            <div className="acl-field-label-actions">
+                                <button
+                                    type="button"
+                                    className="yn-btn yn-btn--ghost yn-btn--sm acl-any-btn"
+                                    onClick={() => updateField('protoRaw', '0-65535')}
+                                    title="Set to full range (any protocol)"
+                                >
+                                    + any
+                                </button>
+                            </div>
+                        </label>
+                        <input
+                            className="yn-input yn-input--mono"
+                            placeholder="1536-1791"
+                            value={draft.protoRaw}
+                            onChange={e => updateField('protoRaw', e.target.value)}
+                        />
+                        <span className="yn-field__hint">
+                            Encoded as <code>(ip_proto &lt;&lt; 8) | subtype</code>.
+                            TCP=<code>1536-1791</code>, UDP=<code>4352-4607</code>, ICMP=<code>256-511</code>.
+                            Empty = no match.
+                        </span>
+                        <div className="acl-proto-presets">
+                            {[
+                                { label: '+ TCP', range: '1536-1791' },
+                                { label: '+ UDP', range: '4352-4607' },
+                                { label: '+ ICMP', range: '256-511' },
+                                { label: '+ ICMPv6', range: '14848-15103' },
+                                { label: '+ GRE', range: '12032-12287' },
+                                { label: '+ ESP', range: '12800-13055' },
+                            ].map(({ label, range }) => (
+                                <button
+                                    key={range}
+                                    type="button"
+                                    className="yn-btn yn-btn--ghost acl-proto-preset"
+                                    onClick={() => {
+                                        const current = draft.protoRaw.trim();
+                                        if (!current) {
+                                            updateField('protoRaw', range);
+                                        } else if (!current.includes(range)) {
+                                            updateField('protoRaw', `${current}, ${range}`);
+                                        }
+                                    }}
+                                >
+                                    {label}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section className="yn-section">
+                <div className="yn-section-h">Match — L2 / device</div>
+                <div className="yn-section__body">
+                    <div className="yn-field">
+                        <label className="yn-field__label">VLAN ranges</label>
+                        <input
+                            className="yn-input yn-input--mono"
+                            placeholder="0-4095"
+                            value={draft.vlanRaw}
+                            onChange={e => updateField('vlanRaw', e.target.value)}
+                        />
+                        <span className="yn-field__hint">
+                            Single <code>100</code>, range <code>100-200</code>, list <code>100, 200, 300-400</code>. Empty = all VLANs.
+                        </span>
+                    </div>
+                    <div className="yn-field">
+                        <label className="yn-field__label">
+                            Devices
+                            <span className="yn-field__count">{draft.deviceNames.length || 'any'}</span>
+                        </label>
+                        <ChipInput
+                            ref={deviceNamesRef}
+                            value={draft.deviceNames}
+                            onChange={v => updateField('deviceNames', v)}
+                            placeholder="eth0, 0000:81:00.0…"
+                            kind="device"
+                            wildcardLabel="Any device"
+                            validator={isValidDeviceName}
+                        />
+                    </div>
+                </div>
+            </section>
+        </DrawerShell>
     );
 });
 
