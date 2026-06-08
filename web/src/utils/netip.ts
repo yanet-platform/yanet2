@@ -231,6 +231,29 @@ export function isValidIPv6Address(ip: string): boolean {
     return result.ok;
 }
 
+/** Parse the common fields of a CIDR prefix string before address parsing. */
+const parsePrefixFields = (
+    prefix: string,
+    maxMask: number,
+): Result<{ ip: string; mask: number }, CIDRParseError> => {
+    if (!prefix || typeof prefix !== 'string') {
+        return err(CIDRParseError.EmptyString);
+    }
+
+    const parts = prefix.split('/');
+    if (parts.length !== 2) {
+        return err(CIDRParseError.InvalidFormat);
+    }
+
+    const [ip, maskStr] = parts;
+    const mask = parseInt(maskStr, 10);
+    if (isNaN(mask) || mask < 0 || mask > maxMask) {
+        return err(CIDRParseError.InvalidPrefixLength);
+    }
+
+    return ok({ ip, mask });
+};
+
 /**
  * IPv4 CIDR Prefix class
  */
@@ -238,32 +261,20 @@ export class IPv4Prefix {
     constructor(public readonly address: IPv4Address, public readonly prefixLength: number) { }
 
     /**
-     * Parse IPv4 CIDR prefix string into IPv4Prefix object
+     * Parse IPv4 CIDR prefix string into IPv4Prefix object.
      */
     static parse(prefix: string): Result<IPv4Prefix, CIDRParseError> {
-        if (!prefix || typeof prefix !== 'string') {
-            return err(CIDRParseError.EmptyString);
+        const fields = parsePrefixFields(prefix, 32);
+        if (!fields.ok) {
+            return fields;
         }
 
-        const parts = prefix.split('/');
-        if (parts.length !== 2) {
-            return err(CIDRParseError.InvalidFormat);
-        }
-
-        const [ip, maskStr] = parts;
-        const mask = parseInt(maskStr, 10);
-
-        // Check mask is valid for IPv4 (0-32)
-        if (isNaN(mask) || mask < 0 || mask > 32) {
-            return err(CIDRParseError.InvalidPrefixLength);
-        }
-
-        const addressResult = IPv4Address.parse(ip);
+        const addressResult = IPv4Address.parse(fields.value.ip);
         if (!addressResult.ok) {
             return err(CIDRParseError.InvalidIPAddress);
         }
 
-        return ok(new IPv4Prefix(addressResult.value, mask));
+        return ok(new IPv4Prefix(addressResult.value, fields.value.mask));
     }
 
     /**
@@ -281,32 +292,20 @@ export class IPv6Prefix {
     constructor(public readonly address: IPv6Address, public readonly prefixLength: number) { }
 
     /**
-     * Parse IPv6 CIDR prefix string into IPv6Prefix object
+     * Parse IPv6 CIDR prefix string into IPv6Prefix object.
      */
     static parse(prefix: string): Result<IPv6Prefix, CIDRParseError> {
-        if (!prefix || typeof prefix !== 'string') {
-            return err(CIDRParseError.EmptyString);
+        const fields = parsePrefixFields(prefix, 128);
+        if (!fields.ok) {
+            return fields;
         }
 
-        const parts = prefix.split('/');
-        if (parts.length !== 2) {
-            return err(CIDRParseError.InvalidFormat);
-        }
-
-        const [ip, maskStr] = parts;
-        const mask = parseInt(maskStr, 10);
-
-        // Check mask is valid for IPv6 (0-128)
-        if (isNaN(mask) || mask < 0 || mask > 128) {
-            return err(CIDRParseError.InvalidPrefixLength);
-        }
-
-        const addressResult = IPv6Address.parse(ip);
+        const addressResult = IPv6Address.parse(fields.value.ip);
         if (!addressResult.ok) {
             return err(CIDRParseError.InvalidIPAddress);
         }
 
-        return ok(new IPv6Prefix(addressResult.value, mask));
+        return ok(new IPv6Prefix(addressResult.value, fields.value.mask));
     }
 
     /**
