@@ -12,6 +12,7 @@ import (
 	plain "github.com/yanet-platform/yanet2/devices/plain/controlplane"
 	vlan "github.com/yanet-platform/yanet2/devices/vlan/controlplane"
 	acl "github.com/yanet-platform/yanet2/modules/acl/controlplane"
+	balancer2 "github.com/yanet-platform/yanet2/modules/balancer2/controlplane"
 	blackhole "github.com/yanet-platform/yanet2/modules/blackhole/controlplane"
 	decap "github.com/yanet-platform/yanet2/modules/decap/controlplane"
 	dscp "github.com/yanet-platform/yanet2/modules/dscp/controlplane"
@@ -111,6 +112,12 @@ func buildServices(
 			name: "blackhole module",
 			new: func() (gateway.Service, error) {
 				return blackhole.NewBlackholeModule(modulesCfg.Blackhole, blackhole.WithLog(log))
+			},
+		},
+		{
+			name: "balancer2 module",
+			new: func() (gateway.Service, error) {
+				return balancer2.NewBalancerModule(modulesCfg.Balancer, balancer2.WithLog(log))
 			},
 		},
 		{
