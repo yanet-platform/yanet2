@@ -67,3 +67,5 @@ export type { DraftSaveDiffModalProps } from './DraftSaveDiffModal';
 export { CidrPrefixField } from './CidrPrefixField';
 export { default as AddConfigModal } from './AddConfigModal';
 export * from './draft';
+export { DrawerShell } from './DrawerShell';
+export type { DrawerShellProps } from './DrawerShell';
