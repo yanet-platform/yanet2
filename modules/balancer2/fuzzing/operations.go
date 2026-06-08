@@ -126,6 +126,11 @@ type OperationGenerator struct {
 	model *Model
 	n     uint64
 	rng   *rand.Rand
+	// targetActive is the active VS count the generator currently steers
+	// toward. It is re-rolled to a fresh value in the 80-100% band at the
+	// start of every delete cadence so the active set sweeps the whole band
+	// over a run instead of settling near the lower bound.
+	targetActive int
 }
 
 const (
@@ -147,10 +152,23 @@ const (
 // is called the same number of times on the same model state.
 func NewOperationGenerator(model *Model, n uint64, seed int64) *OperationGenerator {
 	return &OperationGenerator{
-		model: model,
-		n:     n,
-		rng:   rand.New(rand.NewSource(seed)),
+		model:        model,
+		n:            n,
+		rng:          rand.New(rand.NewSource(seed)),
+		targetActive: model.OriginalCount(),
 	}
+}
+
+// rollActiveTarget returns a fresh active VS count target drawn uniformly
+// from the 80-100% band, i.e. the inclusive interval bounded below by
+// MinActive and above by the corpus total.
+func (m *OperationGenerator) rollActiveTarget() int {
+	min := m.model.MinActive()
+	max := m.model.OriginalCount()
+	if max <= min {
+		return min
+	}
+	return min + m.rng.Intn(max-min+1)
 }
 
 // Generate returns the operation that should fire at the given 1-based
@@ -171,22 +189,27 @@ func (m *OperationGenerator) Generate(opNum uint64) Operation {
 	}
 }
 
-// generateDelete removes a random subset of active VSes while preserving
-// the 80-100% active-set invariant. Most deletes are intentionally small
-// (1..3 VS) so UpdateVS operations can rebuild the active set and produce
-// a wider long-run amplitude. Occasionally the generator performs a deep
-// drop to exercise lower active-set regimes. Fixed VSes are excluded from
-// the candidate pool so they remain present in every config.
+// generateDelete removes a random subset of active VSes to steer the active
+// set toward a freshly rolled target in the 80-100% band. The target is
+// re-rolled at the start of every delete cadence, so the active count sweeps
+// the whole band over a run rather than settling near the lower bound. Most
+// deletes are intentionally small (1..3 VS) so UpdateVS operations can
+// rebuild the active set and produce a wider long-run amplitude. Occasionally
+// the generator performs a deep drop to exercise lower active-set regimes.
+// Fixed VSes are excluded from the candidate pool so they remain present in
+// every config.
 //
-// If no VS can be removed without violating the lower bound or the fixed
-// set, it emits a no-op DeleteVS (empty key list) so the runner still
-// issues the RPC and GetState pair.
+// If the active set is already at or below the rolled target, it emits a
+// no-op DeleteVS (empty key list) so the runner still issues the RPC and
+// GetState pair.
 func (m *OperationGenerator) generateDelete(opNum uint64) Operation {
+	m.targetActive = m.rollActiveTarget()
+
 	active := m.model.ActiveCount()
 	min := m.model.MinActive()
 	deletable := m.model.DeletableActiveOrder()
 
-	maxDelete := active - min
+	maxDelete := active - m.targetActive
 	if maxDelete > len(deletable) {
 		maxDelete = len(deletable)
 	}
@@ -230,14 +253,14 @@ func (m *OperationGenerator) generateDelete(opNum uint64) Operation {
 	}
 }
 
-// generateUpdateVS chooses an UpdateVS target. If active count is below
-// the original total, it picks a currently-inactive key (restoring the
-// active set toward 100%). Otherwise it refreshes a random active VS with
-// new scheduler/flags/ACL/real-subset.
+// generateUpdateVS chooses an UpdateVS target. While the active count is
+// below the current target, it picks a currently-inactive key (restoring the
+// active set toward the target). Otherwise it refreshes a random active VS
+// with new scheduler/flags/ACL/real-subset.
 func (m *OperationGenerator) generateUpdateVS(opNum uint64) Operation {
 	var key VsKey
 	inactive := m.model.InactiveKeys()
-	if len(inactive) > 0 {
+	if m.model.ActiveCount() < m.targetActive && len(inactive) > 0 {
 		key = inactive[m.rng.Intn(len(inactive))]
 	} else {
 		order := m.model.ActiveOrder()
@@ -257,12 +280,19 @@ func (m *OperationGenerator) generateUpdateVS(opNum uint64) Operation {
 		// without pinned flags still gets random ones.
 		flags = *pinned
 	}
+	scheduler := m.randomScheduler()
+	if pinned := m.model.FixedScheduler(key); pinned != nil {
+		// A fixed VS with a pinned scheduler keeps it constant for the whole
+		// run instead of regenerating it on every update. A fixed VS without
+		// a pinned scheduler still gets a random one.
+		scheduler = *pinned
+	}
 	return Operation{
 		Type:  OpUpdateVS,
 		OpNum: opNum,
 		UpdateVS: &UpdateVSPayload{
 			Key:            key,
-			Scheduler:      m.randomScheduler(),
+			Scheduler:      scheduler,
 			Flags:          flags,
 			AllowedSources: sources,
 			Reals:          m.randomRealSubset(key, m.model.ActiveVS(key)),
@@ -273,7 +303,10 @@ func (m *OperationGenerator) generateUpdateVS(opNum uint64) Operation {
 // generateUpdateReals emits one operation that may update multiple VSes in
 // one batch request. If there are at least two usable active VSes, at
 // least two are included. If there is one usable VS, a one-batch update is
-// emitted. If there are none, an empty batch set is emitted.
+// emitted. If there are none, an empty batch set is emitted. Every usable
+// fixed VS is always included on top of the random selection, since a fixed
+// VS is never targeted by DeleteVS and its reals would otherwise change only
+// on the rare occasion the random pick happened to select it.
 func (m *OperationGenerator) generateUpdateReals(opNum uint64) Operation {
 	usable := make([]VsKey, 0, len(m.model.ActiveOrder()))
 	for _, key := range m.model.ActiveOrder() {
@@ -300,7 +333,7 @@ func (m *OperationGenerator) generateUpdateReals(opNum uint64) Operation {
 		batchCount = 2 + m.rng.Intn(len(usable)-1)
 	}
 
-	selectedVS := m.pickVSSubset(usable, batchCount)
+	selectedVS := m.withFixedVS(usable, m.pickVSSubset(usable, batchCount))
 	batches := make([]UpdateRealsBatch, 0, len(selectedVS))
 	for _, key := range selectedVS {
 		vs := m.model.ActiveVS(key)
@@ -319,6 +352,25 @@ func (m *OperationGenerator) generateUpdateReals(opNum uint64) Operation {
 			Batches: batches,
 		},
 	}
+}
+
+// withFixedVS returns selected augmented with every fixed VS in usable that
+// is not already present, preserving usable's order so the output stays
+// deterministic. usable is the ordered candidate set and selected is the
+// random subset already drawn from it.
+func (m *OperationGenerator) withFixedVS(usable, selected []VsKey) []VsKey {
+	chosen := make(map[VsKey]struct{}, len(selected))
+	for _, key := range selected {
+		chosen[key] = struct{}{}
+	}
+	out := make([]VsKey, 0, len(selected)+len(usable))
+	for _, key := range usable {
+		_, picked := chosen[key]
+		if picked || m.model.IsFixed(key) {
+			out = append(out, key)
+		}
+	}
+	return out
 }
 
 // randomScheduler picks one of the four supported schedulers uniformly.
@@ -479,7 +531,10 @@ func (m *OperationGenerator) forceDifferentRealSubset(
 // randomRealBatchUpdates builds one UpdateReals batch for a single VS.
 // Each batch independently chooses which reals to enable, disable, and
 // reweight, while forcing the resulting enabled count into the 40-60%
-// envelope (inclusive, integer-rounded bounds).
+// envelope (inclusive, integer-rounded bounds). When the enabled count is
+// already on target, the batch still rotates membership by swapping one
+// enabled real for one disabled real, so the enabled set keeps changing on
+// every batch rather than freezing once the count is in range.
 func (m *OperationGenerator) randomRealBatchUpdates(vs *VSState, reals []RealKey) []RealUpdate {
 	enabled := make([]RealKey, 0, len(reals))
 	disabled := make([]RealKey, 0, len(reals))
@@ -504,6 +559,14 @@ func (m *OperationGenerator) randomRealBatchUpdates(vs *VSState, reals []RealKey
 	}
 	toEnable := m.pickRealSubset(disabled, enableCount)
 	toDisable := m.pickRealSubset(enabled, disableCount)
+
+	// The count is already on target, so neither side needs correction.
+	// Swap one enabled real for one disabled real to keep the enabled set
+	// moving while holding the count constant inside the envelope.
+	if enableCount == 0 && disableCount == 0 && len(enabled) > 0 && len(disabled) > 0 {
+		toDisable = m.pickRealSubset(enabled, 1)
+		toEnable = m.pickRealSubset(disabled, 1)
+	}
 
 	weightCount := 1 + m.rng.Intn(len(reals))
 	toReweight := m.pickRealSubset(reals, weightCount)

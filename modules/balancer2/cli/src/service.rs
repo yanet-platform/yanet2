@@ -50,8 +50,14 @@ impl Balancer2Service {
     }
 
     async fn update(&mut self, cmd: UpdateCmd) -> Result<(), Box<dyn Error>> {
-        let yaml_config = BalancerConfig::from_yaml_file(&cmd.config)?;
-        let parts: ConfigParts = yaml_config.try_into()?;
+        if cmd.config.is_none() && cmd.sessions.is_none() {
+            return Err("nothing to update: specify --config, --sessions, or both".into());
+        }
+
+        let parts = match &cmd.config {
+            Some(path) => BalancerConfig::from_yaml_file(path)?.try_into()?,
+            None => ConfigParts::default(),
+        };
 
         let request = UpdateConfigRequest {
             config_name: cmd.name.clone(),

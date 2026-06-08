@@ -52,15 +52,16 @@ type RuntimeConfig struct {
 	//
 	// Each entry is written either as a bare string or as a mapping. The
 	// bare-string form pins the VS but lets the fuzzer randomise its
-	// allowed sources and flags on every update. The mapping form
-	// additionally pins the allowed sources so they stay constant for the
-	// whole run, and may pin the source applied to every real of the VS and
-	// the VS flags:
+	// scheduler, allowed sources and flags on every update. The mapping
+	// form additionally pins the allowed sources so they stay constant for
+	// the whole run, and may pin the source applied to every real of the
+	// VS, the VS flags, and the scheduler:
 	//
 	//	fixed_virtual_services:
 	//	  - "10.0.0.1:80"
 	//	  - vs: "[2001:db8::1]:443/tcp"
 	//	    src: "2001:db8::1"
+	//	    scheduler: "wrr"
 	//	    allowed_sources:
 	//	      - "2001:db8::/48"
 	//	    flags:
@@ -74,7 +75,7 @@ type RuntimeConfig struct {
 	// The pinned source is a bare address or a CIDR, also matching the VS
 	// address family; a bare address is treated as a host network. A
 	// present flags mapping pins all three flags, with any omitted key
-	// defaulting to false.
+	// defaulting to false. The scheduler is one of wrr, wlc, sh, op.
 	FixedVirtualServices []FixedVS `yaml:"fixed_virtual_services"`
 }
 
@@ -83,10 +84,13 @@ type RuntimeConfig struct {
 // fuzzer keeps them constant instead of regenerating them on every update.
 // Src optionally pins the tunnel source applied to every real of the VS,
 // overriding the corpus-derived source. Flags optionally pins the VS flags
-// so the fuzzer keeps them constant instead of regenerating them.
+// so the fuzzer keeps them constant instead of regenerating them. Scheduler
+// optionally pins the scheduler so the fuzzer keeps it constant instead of
+// regenerating it; an empty value leaves the scheduler free.
 type FixedVS struct {
 	VS             string        `yaml:"vs"`
 	Src            string        `yaml:"src"`
+	Scheduler      string        `yaml:"scheduler"`
 	AllowedSources []string      `yaml:"allowed_sources"`
 	Flags          *FixedVSFlags `yaml:"flags"`
 }
@@ -117,13 +121,14 @@ func (m *FixedVS) UnmarshalYAML(value *yaml.Node) error {
 }
 
 // FixedVSEntry is a parsed fixed virtual service: its canonical key plus
-// the pinned allowed-source CIDRs, the pinned per-real source, and the
-// pinned VS flags, if any.
+// the pinned allowed-source CIDRs, the pinned per-real source, the pinned
+// VS flags, and the pinned scheduler, if any.
 type FixedVSEntry struct {
 	Key            VsKey
 	AllowedSources []CIDR
 	Src            *CIDR
 	Flags          *VsFlags
+	Scheduler      *balancerpb.VsScheduler
 }
 
 // seedSource is the source of non-zero seeds used when the YAML seed is zero
@@ -247,11 +252,20 @@ func (m *RuntimeConfig) FixedVSEntries() ([]FixedVSEntry, error) {
 				PureL3: entry.Flags.PureL3,
 			}
 		}
+		var scheduler *balancerpb.VsScheduler
+		if strings.TrimSpace(entry.Scheduler) != "" {
+			sched, err := parseScheduler(entry.Scheduler)
+			if err != nil {
+				return nil, fmt.Errorf("fixed_virtual_services: %w", err)
+			}
+			scheduler = &sched
+		}
 		out = append(out, FixedVSEntry{
 			Key:            key,
 			AllowedSources: sources,
 			Src:            src,
 			Flags:          flags,
+			Scheduler:      scheduler,
 		})
 	}
 	return out, nil
@@ -358,6 +372,26 @@ func parseFixedRealSrc(spec string, vsIsIPv4 bool) (CIDR, error) {
 		Addr: append([]byte(nil), network.IP.To16()...),
 		Mask: append([]byte(nil), network.Mask...),
 	}, nil
+}
+
+// parseScheduler parses a scheduler name into its enum value. The accepted
+// values mirror the corpus parser's lvs_sched directive: wrr, wlc, sh, op.
+func parseScheduler(spec string) (balancerpb.VsScheduler, error) {
+	switch strings.ToLower(strings.TrimSpace(spec)) {
+	case "wrr":
+		return balancerpb.VsScheduler_WRR, nil
+	case "wlc":
+		return balancerpb.VsScheduler_WLC, nil
+	case "sh":
+		return balancerpb.VsScheduler_SH, nil
+	case "op":
+		return balancerpb.VsScheduler_OP, nil
+	default:
+		return balancerpb.VsScheduler_WRR, fmt.Errorf(
+			"unknown scheduler %q (expected wrr, wlc, sh, or op)",
+			spec,
+		)
+	}
 }
 
 // parseFixedVS parses a fixed virtual service spec into a VS key. The

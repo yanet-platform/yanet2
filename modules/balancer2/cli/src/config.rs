@@ -146,6 +146,7 @@ fn port_range(r: &Range) -> Result<PortRange, Box<dyn Error>> {
     })
 }
 
+#[derive(Default)]
 pub struct ConfigParts {
     pub vs: Option<balancerpb::VsConfigList>,
     pub timeouts: Option<balancerpb::SessionsTimeouts>,

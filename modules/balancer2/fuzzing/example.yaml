@@ -24,11 +24,19 @@ seed: 12345
 # defaults to tcp; IPv6 uses the bracketed form), or a mapping that also
 # pins the allowed sources so they stay constant for the whole run. Each
 # pinned source is a CIDR whose family matches the virtual service family.
+# The optional scheduler is one of wrr, wlc, sh, op; when set the fuzzer
+# keeps it constant for the whole run instead of regenerating it.
 fixed_virtual_services:
   - vs: "[2a02:6b8:0:3400:0:853a:0:3]:80/tcp"
+    scheduler: "wrr"
     allowed_sources:
       - "::/0"
+    flags:
+      fix_mss: true
+    src: "2a02:6b8:6666::/64"
   - vs: "[2a02:6b8:0:3400:0:853a:0:3]:80/udp"
+    scheduler: "wlc"
     allowed_sources:
       - "::/0"
+    src: "2a02:6b8:6666::/64"
 

@@ -392,6 +392,141 @@ func TestOperationGeneratorUpdateRealsCoversMultipleVS(t *testing.T) {
 	assert.GreaterOrEqual(t, len(seen), 2)
 }
 
+// TestOperationGeneratorUpdateRealsRotatesEnabledSet drives a single-VS
+// corpus whose six reals collapse the 40-60% enabled envelope to exactly
+// three at full membership, mirroring the production fixed VS. It confirms
+// that the enabled set keeps changing across UpdateReals operations while its
+// cardinality stays inside the envelope for the current active subset, so the
+// enabled state does not freeze once the count is in range.
+func TestOperationGeneratorUpdateRealsRotatesEnabledSet(t *testing.T) {
+	model := newModelFromText(t, genCorpusText(1, 6))
+	gen := NewOperationGenerator(model, 10, 12345)
+
+	key := model.OriginalOrder()[0]
+
+	enabledSets := make([]map[RealKey]struct{}, 0)
+	for opNum := uint64(1); opNum <= 200; opNum++ {
+		op := gen.Generate(opNum)
+		require.NoError(t, model.Apply(op))
+		if op.Type != OpUpdateReals || len(op.UpdateReals.Batches) == 0 {
+			continue
+		}
+		vs := model.ActiveVS(key)
+		require.NotNil(t, vs)
+		minEnabled, maxEnabled := enabledCountBounds(len(vs.Reals()))
+		set := map[RealKey]struct{}{}
+		for _, rk := range vs.Reals() {
+			if vs.Real(rk).Enabled {
+				set[rk] = struct{}{}
+			}
+		}
+		assert.GreaterOrEqual(t, len(set), minEnabled,
+			"op %d enabled count below 40%%", opNum)
+		assert.LessOrEqual(t, len(set), maxEnabled,
+			"op %d enabled count above 60%%", opNum)
+		enabledSets = append(enabledSets, set)
+	}
+
+	require.GreaterOrEqual(t, len(enabledSets), 2,
+		"the run must produce at least two UpdateReals snapshots")
+	changed := false
+	for idx := 1; idx < len(enabledSets); idx++ {
+		if !sameKeySet(enabledSets[idx-1], enabledSets[idx]) {
+			changed = true
+			break
+		}
+	}
+	assert.True(t, changed,
+		"the enabled set must change across UpdateReals operations")
+}
+
+// sameKeySet reports whether two real-key sets contain the same members.
+func sameKeySet(a, b map[RealKey]struct{}) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k := range a {
+		if _, ok := b[k]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+// TestOperationGeneratorUpdateRealsAlwaysIncludesFixedVS confirms every
+// UpdateReals operation carries a batch for an active fixed VS, even though
+// the fixed VS is one of many active VSes and the rest are picked at random.
+func TestOperationGeneratorUpdateRealsAlwaysIncludesFixedVS(t *testing.T) {
+	const steps = uint64(500)
+	const n = uint64(5)
+
+	corpus := parsedCorpus(t, genCorpusText(20, 4))
+	fixed := vsKeyFor(t, "10.0.0.1", 80, balancerpb.TransportProto_TCP)
+	model := NewModel(corpus, WithFixedVS([]FixedVSEntry{{Key: fixed}}))
+	gen := NewOperationGenerator(model, n, 12345)
+	require.True(t, model.IsFixed(fixed))
+
+	sawUpdateReals := false
+	for opNum := uint64(1); opNum <= steps; opNum++ {
+		op := gen.Generate(opNum)
+		if op.Type == OpUpdateReals && len(op.UpdateReals.Batches) > 0 {
+			sawUpdateReals = true
+			present := false
+			for _, batch := range op.UpdateReals.Batches {
+				if batch.Key == fixed {
+					present = true
+					break
+				}
+			}
+			assert.True(t, present,
+				"op %d UpdateReals omitted the fixed VS", opNum)
+		}
+		require.NoError(t, model.Apply(op))
+	}
+	assert.True(t, sawUpdateReals, "test must exercise at least one UpdateReals")
+}
+
+// TestOperationGeneratorActiveCountSweepsBand drives a long run and confirms
+// the active VS count sweeps a wide span of the 80-100% band rather than
+// settling at the lower bound, while never leaving the band.
+func TestOperationGeneratorActiveCountSweepsBand(t *testing.T) {
+	const vsCount = 20
+	const realsPerVS = 4
+	const n = uint64(5)
+	const steps = uint64(5000)
+
+	model := newModelFromText(t, genCorpusText(vsCount, realsPerVS))
+	gen := NewOperationGenerator(model, n, 12345)
+
+	minActive := model.MinActive()
+	originalCount := model.OriginalCount()
+
+	seenMin := originalCount
+	seenMax := minActive
+	for opNum := uint64(1); opNum <= steps; opNum++ {
+		op := gen.Generate(opNum)
+		require.NoError(t, model.Apply(op))
+		active := model.ActiveCount()
+		require.GreaterOrEqual(t, active, minActive,
+			"op %d active count below 80%% bound", opNum)
+		require.LessOrEqual(t, active, originalCount,
+			"op %d active count above 100%%", opNum)
+		if active < seenMin {
+			seenMin = active
+		}
+		if active > seenMax {
+			seenMax = active
+		}
+	}
+
+	assert.LessOrEqual(t, seenMin, minActive+1,
+		"run must reach near the lower bound")
+	assert.GreaterOrEqual(t, seenMax, originalCount-1,
+		"run must reach near the full active set")
+	assert.Greater(t, seenMax-seenMin, (originalCount-minActive)/2,
+		"active count must sweep a wide span of the band")
+}
+
 func TestOperationGeneratorUpdateVSChangesRealSetWhenPossible(t *testing.T) {
 	model := newModelFromText(t, genCorpusText(1, 8))
 	gen := NewOperationGenerator(model, 10, 12345)

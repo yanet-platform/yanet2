@@ -326,6 +326,7 @@ func (m *Runner) sendUpdate(ctx context.Context, op Operation) error {
 	m.applyPinnedAllowedSources(list)
 	m.applyPinnedRealSrc(list)
 	m.applyPinnedFlags(list)
+	m.applyPinnedScheduler(list)
 	req := &balancerpb.UpdateConfigRequest{
 		ConfigName: m.cfg.ConfigName,
 		Vs:         list,
@@ -382,6 +383,20 @@ func (m *Runner) applyPinnedFlags(list *balancerpb.VsConfigList) {
 			continue
 		}
 		list.Vs[idx].Flags = flagsToProto(*pinned)
+	}
+}
+
+// applyPinnedScheduler overlays the pinned scheduler of every fixed VS onto
+// the bootstrap config list, overriding the corpus-derived scheduler. The
+// corpus and the list share VS ordering, so each list entry is matched to
+// its corpus key by index.
+func (m *Runner) applyPinnedScheduler(list *balancerpb.VsConfigList) {
+	for idx, vs := range m.corpus.VSs {
+		pinned := m.model.FixedScheduler(vs.Key)
+		if pinned == nil {
+			continue
+		}
+		list.Vs[idx].Scheduler = *pinned
 	}
 }
 

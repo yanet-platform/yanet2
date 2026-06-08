@@ -55,11 +55,13 @@ pub struct UpdateCmd {
     /// Balancer configuration name.
     #[arg(long, short = 'n')]
     pub name: String,
-    /// Path to YAML configuration file.
+    /// Path to YAML configuration file. When omitted, only the sessions state
+    /// binding is updated.
     #[arg(long, short = 'c')]
-    pub config: String,
+    pub config: Option<String>,
     /// Sessions state name to bind this configuration to (required on first
-    /// create; optional on subsequent updates of an existing config).
+    /// create; optional on subsequent updates of an existing config). When the
+    /// config is omitted, only this binding is updated.
     #[arg(long, short = 's')]
     pub sessions: Option<String>,
 }
@@ -112,7 +114,7 @@ pub struct ShowCmd {
     /// Filter by function name.
     #[arg(long, short = 'f')]
     pub function: Option<String>,
-    
+
     /// Filter by chain name.
     #[arg(long)]
     pub chain: Option<String>,

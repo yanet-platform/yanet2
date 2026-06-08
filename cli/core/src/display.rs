@@ -1,3 +1,5 @@
+use std::io::IsTerminal;
+
 use tabled::{
     settings::{
         object::{Columns, Rows},
@@ -41,6 +43,9 @@ pub fn fit_terminal_width(table: &mut Table) {
 }
 
 /// Apply the standard YANET table style to `table`.
+///
+/// Colors are only emitted when stdout is a terminal. Piping into a pager or
+/// `watch` would otherwise leak raw escape sequences into the output.
 fn apply_style(table: &mut Table) {
     table.with(
         Style::modern()
@@ -48,6 +53,8 @@ fn apply_style(table: &mut Table) {
             .remove_frame()
             .remove_horizontal(),
     );
-    table.modify(Columns::new(..), BorderColor::filled(Color::rgb_fg(0x4e, 0x4e, 0x4e)));
-    table.modify(Rows::first(), Color::BOLD);
+    if std::io::stdout().is_terminal() {
+        table.modify(Columns::new(..), BorderColor::filled(Color::rgb_fg(0x4e, 0x4e, 0x4e)));
+        table.modify(Rows::first(), Color::BOLD);
+    }
 }

@@ -561,6 +561,136 @@ func TestRunnerBootstrapAppliesPinnedFlags(t *testing.T) {
 		"a non-fixed VS must bootstrap with all flags false")
 }
 
+func TestFixedVSEntriesPinnedScheduler(t *testing.T) {
+	cfg := &RuntimeConfig{
+		FixedVirtualServices: []FixedVS{
+			{VS: "10.0.0.1:80", Scheduler: "wlc"},
+			{VS: "10.0.0.2:80"},
+		},
+	}
+	entries, err := cfg.FixedVSEntries()
+	require.NoError(t, err)
+	require.Len(t, entries, 2)
+
+	require.NotNil(t, entries[0].Scheduler)
+	assert.Equal(t, balancerpb.VsScheduler_WLC, *entries[0].Scheduler)
+	assert.Nil(t, entries[1].Scheduler, "an entry without a scheduler has none pinned")
+}
+
+func TestFixedVSEntriesRejectsBadScheduler(t *testing.T) {
+	cfg := &RuntimeConfig{
+		FixedVirtualServices: []FixedVS{{VS: "10.0.0.1:80", Scheduler: "bogus"}},
+	}
+	_, err := cfg.FixedVSEntries()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "scheduler")
+}
+
+func TestLoadRuntimeConfigParsesScheduler(t *testing.T) {
+	in := validYAML + "fixed_virtual_services:\n" +
+		"  - vs: \"10.0.0.1:80\"\n" +
+		"    scheduler: \"sh\"\n"
+	cfg, err := DecodeRuntimeConfig([]byte(in))
+	require.NoError(t, err)
+	require.Len(t, cfg.FixedVirtualServices, 1)
+	assert.Equal(t, "sh", cfg.FixedVirtualServices[0].Scheduler)
+
+	entries, err := cfg.FixedVSEntries()
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	require.NotNil(t, entries[0].Scheduler)
+	assert.Equal(t, balancerpb.VsScheduler_SH, *entries[0].Scheduler)
+}
+
+func TestModelFixedScheduler(t *testing.T) {
+	corpus := parsedCorpus(t, genCorpusText(5, 4))
+	key := vsKeyFor(t, "10.0.0.1", 80, balancerpb.TransportProto_TCP)
+	scheduler := balancerpb.VsScheduler_OP
+	model := NewModel(corpus, WithFixedVS([]FixedVSEntry{{Key: key, Scheduler: &scheduler}}))
+
+	got := model.FixedScheduler(key)
+	require.NotNil(t, got)
+	assert.Equal(t, scheduler, *got)
+
+	bare := vsKeyFor(t, "10.0.0.2", 80, balancerpb.TransportProto_TCP)
+	assert.Nil(t, model.FixedScheduler(bare), "a fixed VS without a pinned scheduler has none")
+}
+
+// TestModelSeedsFixedScheduler confirms that a fixed VS with a pinned
+// scheduler starts active with that scheduler, so the expected model matches
+// the bootstrap config the runner pushes.
+func TestModelSeedsFixedScheduler(t *testing.T) {
+	corpus := parsedCorpus(t, genCorpusText(5, 4))
+	key := vsKeyFor(t, "10.0.0.1", 80, balancerpb.TransportProto_TCP)
+	scheduler := balancerpb.VsScheduler_OP
+	model := NewModel(corpus, WithFixedVS([]FixedVSEntry{{Key: key, Scheduler: &scheduler}}))
+
+	state := model.ActiveVS(key)
+	require.NotNil(t, state)
+	assert.Equal(t, scheduler, state.Scheduler)
+}
+
+// TestOperationGeneratorPinsFixedVSScheduler drives the generator against a
+// single-VS model whose only VS is fixed with a pinned scheduler. With one VS
+// the active set stays at 100%, so every UpdateVS necessarily targets the
+// fixed VS, and each must carry the pinned scheduler rather than a random one.
+func TestOperationGeneratorPinsFixedVSScheduler(t *testing.T) {
+	const steps = uint64(2000)
+	const n = uint64(5)
+
+	corpus := parsedCorpus(t, genCorpusText(1, 4))
+	key := vsKeyFor(t, "10.0.0.1", 80, balancerpb.TransportProto_TCP)
+	scheduler := balancerpb.VsScheduler_SH
+	model := NewModel(corpus, WithFixedVS([]FixedVSEntry{{Key: key, Scheduler: &scheduler}}))
+	gen := NewOperationGenerator(model, n, 12345)
+
+	sawFixedUpdate := false
+	for opNum := uint64(1); opNum <= steps; opNum++ {
+		op := gen.Generate(opNum)
+		if op.Type == OpUpdateVS {
+			require.Equal(t, key, op.UpdateVS.Key)
+			sawFixedUpdate = true
+			assert.Equal(t, scheduler, op.UpdateVS.Scheduler,
+				"op %d must pin the fixed VS scheduler", opNum)
+		}
+		require.NoError(t, model.Apply(op))
+	}
+	assert.True(t, sawFixedUpdate, "test must exercise at least one UpdateVS on the fixed VS")
+}
+
+// TestRunnerBootstrapAppliesPinnedScheduler drives a single bootstrap
+// operation and confirms the fixed VS's pinned scheduler reaches the
+// controlplane through the initial UpdateConfig, overriding the
+// corpus-derived scheduler.
+func TestRunnerBootstrapAppliesPinnedScheduler(t *testing.T) {
+	corpus := parsedCorpus(t, genCorpusText(5, 4))
+	key := vsKeyFor(t, "10.0.0.1", 80, balancerpb.TransportProto_TCP)
+
+	cfg := runnerTestConfig()
+	cfg.FixedVirtualServices = []FixedVS{{
+		VS:        "10.0.0.1:80/tcp",
+		Scheduler: "sh",
+	}}
+
+	stats := NewLatencyStats()
+	fake := newRunnerFakeRPC(cfg.ConfigName)
+	fake.stats = stats
+	runner, err := NewRunner(
+		cfg, corpus, fake, stats,
+		WithLogger(&syncBuffer{}),
+		WithSignals(),
+		WithOperationTicker(func(time.Duration) tickerLike { return newManualTicker() }),
+		WithStatsTicker(func(time.Duration) tickerLike { return newManualTicker() }),
+	)
+	require.NoError(t, err)
+
+	require.NoError(t, runner.sendUpdate(context.Background(), Operation{Type: OpUpdate, OpNum: 1}))
+
+	vs := fake.state.vs[key]
+	require.NotNil(t, vs)
+	assert.Equal(t, balancerpb.VsScheduler_SH, vs.scheduler)
+}
+
 func TestModelFixedSources(t *testing.T) {
 	corpus := parsedCorpus(t, genCorpusText(5, 4))
 	key := vsKeyFor(t, "10.0.0.1", 80, balancerpb.TransportProto_TCP)

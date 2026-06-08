@@ -154,6 +154,12 @@ type Model struct {
 	// update. The map is populated once at construction and never mutated
 	// afterwards.
 	fixedFlags map[VsKey]*VsFlags
+
+	// fixedScheduler maps a fixed VS key to the scheduler pinned for the
+	// whole run. A missing entry leaves the scheduler free to be randomised
+	// on every update. The map is populated once at construction and never
+	// mutated afterwards.
+	fixedScheduler map[VsKey]*balancerpb.VsScheduler
 }
 
 // ModelOption configures a Model at construction time.
@@ -167,10 +173,11 @@ type ModelOption func(*Model)
 // pushes, rather than only appearing once a later update happens to
 // target the VS. An entry may also pin the source applied to every one of
 // the VS's reals, which the runner overlays onto the bootstrap and update
-// configs, and the VS flags, which are likewise seeded into the initial
-// state and emitted verbatim on every update. Keys absent from the corpus
-// are ignored here; the runner validates corpus membership before building
-// the model.
+// configs, the VS flags, which are likewise seeded into the initial state
+// and emitted verbatim on every update, and the scheduler, which is also
+// seeded into the initial state and emitted verbatim on every update. Keys
+// absent from the corpus are ignored here; the runner validates corpus
+// membership before building the model.
 func WithFixedVS(entries []FixedVSEntry) ModelOption {
 	return func(m *Model) {
 		for _, entry := range entries {
@@ -190,6 +197,13 @@ func WithFixedVS(entries []FixedVSEntry) ModelOption {
 				m.fixedFlags[entry.Key] = &flags
 				if state, ok := m.activeVS[entry.Key]; ok {
 					state.Flags = flags
+				}
+			}
+			if entry.Scheduler != nil {
+				scheduler := *entry.Scheduler
+				m.fixedScheduler[entry.Key] = &scheduler
+				if state, ok := m.activeVS[entry.Key]; ok {
+					state.Scheduler = scheduler
 				}
 			}
 		}
@@ -213,6 +227,7 @@ func NewModel(corpus *Corpus, options ...ModelOption) *Model {
 		fixedSources:       map[VsKey][]CIDR{},
 		fixedRealSrc:       map[VsKey]*CIDR{},
 		fixedFlags:         map[VsKey]*VsFlags{},
+		fixedScheduler:     map[VsKey]*balancerpb.VsScheduler{},
 	}
 	for _, vs := range corpus.VSs {
 		key := vs.Key
@@ -338,6 +353,13 @@ func (m *Model) FixedFlags(key VsKey) *VsFlags {
 	return m.fixedFlags[key]
 }
 
+// FixedScheduler returns the scheduler pinned for a fixed VS, or nil when
+// the VS is not fixed or has no pinned scheduler. Callers must treat the
+// result as read-only.
+func (m *Model) FixedScheduler(key VsKey) *balancerpb.VsScheduler {
+	return m.fixedScheduler[key]
+}
+
 // DeletableActiveOrder returns the active VS keys that may be removed, in
 // active order, excluding fixed VSes. When no VS is fixed the active order
 // is returned directly so callers see no extra allocation.
@@ -432,6 +454,7 @@ func (m *Model) Clone() *Model {
 		fixedSources:       m.fixedSources,
 		fixedRealSrc:       m.fixedRealSrc,
 		fixedFlags:         m.fixedFlags,
+		fixedScheduler:     m.fixedScheduler,
 	}
 	for k, v := range m.activeVS {
 		out.activeVS[k] = v.Clone()
