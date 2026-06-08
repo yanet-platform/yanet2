@@ -91,7 +91,7 @@ func (m *Module) Endpoint() string {
 }
 
 func (m *Module) ServicesNames() []string {
-	return []string{"balancerpb.Balancer"}
+	return []string{"modules.balancer2.controlplane.balancerpb.v1.Balancer"}
 }
 
 func (m *Module) RegisterService(server *grpc.Server) {
