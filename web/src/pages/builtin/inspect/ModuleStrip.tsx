@@ -1,16 +1,11 @@
-import React, { useMemo } from 'react';
+import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { InstanceInfo } from '../../../api/inspect';
 import { fmtIEC } from './formatters';
 import { MemoryBar } from './MemoryBar';
-import {
-    computeModulePipelineUsage,
-    getModuleCardAgentUsage,
-    getModuleDescription,
-    getModuleRoute,
-    normalizeModuleName,
-} from './utils';
+import { getModuleCardAgentUsage, getModuleRoute } from './utils';
 import type { AgentUsage } from './utils';
+import { useModuleCards } from '../../../hooks/useModuleCards';
 
 export interface ModuleStripProps {
     instance: InstanceInfo;
@@ -21,23 +16,7 @@ export interface ModuleStripProps {
 export const ModuleStrip: React.FC<ModuleStripProps> = ({ instance, usage }) => {
     const navigate = useNavigate();
     const modules = instance.dp_modules ?? [];
-    const configs = instance.cp_configs ?? [];
-
-    const pipeUsage = useMemo(() => computeModulePipelineUsage(instance), [instance]);
-
-    const moduleData = useMemo(
-        () =>
-            modules.map((m, idx) => {
-                const name = m.name ?? '';
-                const key = name || `module-${idx}`;
-                const moduleKey = normalizeModuleName(name);
-                const cfg = configs.filter((c) => normalizeModuleName(c.type ?? '') === moduleKey).length;
-                const pipe = pipeUsage.get(moduleKey) ?? 0;
-                const inUse = cfg > 0 || pipe > 0;
-                return { key, name, cfg, pipe, inUse, desc: getModuleDescription(name) };
-            }),
-        [modules, configs, pipeUsage],
-    );
+    const moduleData = useModuleCards(instance);
 
     return (
         <div id="iv-section-modules" className="iv-module-strip">
