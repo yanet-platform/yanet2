@@ -324,6 +324,7 @@ func (m *Runner) executeMutation(ctx context.Context, op Operation) error {
 func (m *Runner) sendUpdate(ctx context.Context, op Operation) error {
 	list := m.corpus.ToVsConfigList()
 	m.applyPinnedAllowedSources(list)
+	m.applyPinnedRealSrc(list)
 	req := &balancerpb.UpdateConfigRequest{
 		ConfigName: m.cfg.ConfigName,
 		Vs:         list,
@@ -348,6 +349,22 @@ func (m *Runner) applyPinnedAllowedSources(list *balancerpb.VsConfigList) {
 			continue
 		}
 		list.Vs[idx].AllowedSources = cidrsToAllowedSources(pinned)
+	}
+}
+
+// applyPinnedRealSrc overlays the pinned per-real source of every fixed VS
+// onto the bootstrap config list, overriding the corpus-derived source on
+// each real. The corpus and the list share VS ordering, so each list entry
+// is matched to its corpus key by index.
+func (m *Runner) applyPinnedRealSrc(list *balancerpb.VsConfigList) {
+	for idx, vs := range m.corpus.VSs {
+		pinned := m.model.FixedRealSrc(vs.Key)
+		if pinned == nil {
+			continue
+		}
+		for _, real := range list.Vs[idx].Reals {
+			real.Src = cidrToIPNet(pinned)
+		}
 	}
 }
 
@@ -446,6 +463,9 @@ func (m *Runner) toVsConfig(p *UpdateVSPayload) *balancerpb.VsConfig {
 			rc.Enabled = &enabled
 		}
 		rc.Src = sourceForRealMember(r.Key, m.model.OriginalReal(p.Key, r.Key))
+		if pinned := m.model.FixedRealSrc(p.Key); pinned != nil {
+			rc.Src = cidrToIPNet(pinned)
+		}
 		reals = append(reals, rc)
 	}
 	return &balancerpb.VsConfig{
@@ -530,6 +550,17 @@ func cidrsToAllowedSources(cidrs []CIDR) []*balancerpb.AllowedSources {
 		})
 	}
 	return out
+}
+
+// cidrToIPNet translates a single CIDR into a freshly-allocated
+// filterpb.IPNet with independent address and mask copies, so the
+// protobuf message never aliases the model's pinned-source buffers across
+// RPCs.
+func cidrToIPNet(c *CIDR) *filterpb.IPNet {
+	return &filterpb.IPNet{
+		Addr: append([]byte(nil), c.Addr...),
+		Mask: append([]byte(nil), c.Mask...),
+	}
 }
 
 // cloneBoolPtr returns an independent *bool so the protobuf message does

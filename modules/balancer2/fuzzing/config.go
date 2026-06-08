@@ -53,25 +53,32 @@ type RuntimeConfig struct {
 	// Each entry is written either as a bare string or as a mapping. The
 	// bare-string form pins the VS but lets the fuzzer randomise its
 	// allowed sources on every update. The mapping form additionally pins
-	// the allowed sources so they stay constant for the whole run:
+	// the allowed sources so they stay constant for the whole run, and may
+	// pin the source applied to every real of the VS:
 	//
 	//	fixed_virtual_services:
 	//	  - "10.0.0.1:80"
 	//	  - vs: "[2001:db8::1]:443/tcp"
+	//	    src: "2001:db8::1"
 	//	    allowed_sources:
 	//	      - "2001:db8::/48"
 	//
 	// The VS spec is "addr:port" or "addr:port/proto" (proto defaults to
 	// tcp); IPv6 addresses use the bracketed form. Every pinned allowed
 	// source is a CIDR whose address family matches the VS address family.
+	// The pinned source is a bare address or a CIDR, also matching the VS
+	// address family; a bare address is treated as a host network.
 	FixedVirtualServices []FixedVS `yaml:"fixed_virtual_services"`
 }
 
 // FixedVS is a single fixed virtual service entry. VS is the textual VS
 // spec; AllowedSources optionally pins the allowed-source CIDRs so the
 // fuzzer keeps them constant instead of regenerating them on every update.
+// Src optionally pins the tunnel source applied to every real of the VS,
+// overriding the corpus-derived source.
 type FixedVS struct {
 	VS             string   `yaml:"vs"`
+	Src            string   `yaml:"src"`
 	AllowedSources []string `yaml:"allowed_sources"`
 }
 
@@ -92,10 +99,11 @@ func (m *FixedVS) UnmarshalYAML(value *yaml.Node) error {
 }
 
 // FixedVSEntry is a parsed fixed virtual service: its canonical key plus
-// the pinned allowed-source CIDRs, if any.
+// the pinned allowed-source CIDRs and the pinned per-real source, if any.
 type FixedVSEntry struct {
 	Key            VsKey
 	AllowedSources []CIDR
+	Src            *CIDR
 }
 
 // seedSource is the source of non-zero seeds used when the YAML seed is zero
@@ -203,7 +211,15 @@ func (m *RuntimeConfig) FixedVSEntries() ([]FixedVSEntry, error) {
 			}
 			sources = append(sources, cidr)
 		}
-		out = append(out, FixedVSEntry{Key: key, AllowedSources: sources})
+		var src *CIDR
+		if strings.TrimSpace(entry.Src) != "" {
+			cidr, err := parseFixedRealSrc(entry.Src, vsIsIPv4)
+			if err != nil {
+				return nil, fmt.Errorf("fixed_virtual_services: %w", err)
+			}
+			src = &cidr
+		}
+		out = append(out, FixedVSEntry{Key: key, AllowedSources: sources, Src: src})
 	}
 	return out, nil
 }
@@ -242,6 +258,64 @@ func parseAllowedSourceCIDR(spec string, vsIsIPv4 bool) (CIDR, error) {
 		)
 	}
 	if cidrIsIPv4 {
+		return CIDR{
+			Addr: append([]byte(nil), network.IP.To4()...),
+			Mask: append([]byte(nil), network.Mask...),
+		}, nil
+	}
+	return CIDR{
+		Addr: append([]byte(nil), network.IP.To16()...),
+		Mask: append([]byte(nil), network.Mask...),
+	}, nil
+}
+
+// parseFixedRealSrc parses a pinned per-real source. It accepts a CIDR or a
+// bare address; a bare address is treated as a host network (/32 for IPv4,
+// /128 for IPv6). The address family must match the VS VIP family, since the
+// dataplane requires the source to share the real's family and reals share
+// the VS family.
+func parseFixedRealSrc(spec string, vsIsIPv4 bool) (CIDR, error) {
+	s := strings.TrimSpace(spec)
+	if !strings.Contains(s, "/") {
+		ip := net.ParseIP(s)
+		if ip == nil {
+			return CIDR{}, fmt.Errorf("invalid source %q", spec)
+		}
+		srcIsIPv4 := ip.To4() != nil
+		if srcIsIPv4 != vsIsIPv4 {
+			return CIDR{}, fmt.Errorf(
+				"source %q family does not match the virtual service family",
+				spec,
+			)
+		}
+		if srcIsIPv4 {
+			return CIDR{
+				Addr: append([]byte(nil), ip.To4()...),
+				Mask: []byte{0xff, 0xff, 0xff, 0xff},
+			}, nil
+		}
+		mask := make([]byte, net.IPv6len)
+		for idx := range mask {
+			mask[idx] = 0xff
+		}
+		return CIDR{
+			Addr: append([]byte(nil), ip.To16()...),
+			Mask: mask,
+		}, nil
+	}
+
+	_, network, err := net.ParseCIDR(s)
+	if err != nil {
+		return CIDR{}, fmt.Errorf("invalid source %q: %w", spec, err)
+	}
+	srcIsIPv4 := network.IP.To4() != nil
+	if srcIsIPv4 != vsIsIPv4 {
+		return CIDR{}, fmt.Errorf(
+			"source %q family does not match the virtual service family",
+			spec,
+		)
+	}
+	if srcIsIPv4 {
 		return CIDR{
 			Addr: append([]byte(nil), network.IP.To4()...),
 			Mask: append([]byte(nil), network.Mask...),

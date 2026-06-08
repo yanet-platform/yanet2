@@ -321,6 +321,106 @@ func TestFixedVSEntriesRejectsBadSources(t *testing.T) {
 	}
 }
 
+func TestFixedVSEntriesPinnedRealSrc(t *testing.T) {
+	cfg := &RuntimeConfig{
+		FixedVirtualServices: []FixedVS{
+			{VS: "10.0.0.1:80", Src: "10.10.0.1"},
+			{VS: "10.0.0.2:80", Src: "10.10.0.0/24"},
+			{VS: "[2a02:6b8::242]:443/tcp", Src: "2a02:6b8::1"},
+			{VS: "10.0.0.3:80"},
+		},
+	}
+	entries, err := cfg.FixedVSEntries()
+	require.NoError(t, err)
+	require.Len(t, entries, 4)
+
+	require.NotNil(t, entries[0].Src)
+	assert.Equal(t, []byte{10, 10, 0, 1}, entries[0].Src.Addr)
+	assert.Equal(t, []byte{0xff, 0xff, 0xff, 0xff}, entries[0].Src.Mask)
+
+	require.NotNil(t, entries[1].Src)
+	assert.Equal(t, []byte{10, 10, 0, 0}, entries[1].Src.Addr)
+	assert.Equal(t, []byte{0xff, 0xff, 0xff, 0x00}, entries[1].Src.Mask)
+
+	require.NotNil(t, entries[2].Src)
+	assert.Len(t, entries[2].Src.Addr, net.IPv6len)
+	assert.Equal(t, net.CIDRMask(128, 128), net.IPMask(entries[2].Src.Mask))
+
+	assert.Nil(t, entries[3].Src, "an entry without src has no pinned source")
+}
+
+func TestFixedVSEntriesRejectsBadRealSrc(t *testing.T) {
+	tests := []struct {
+		name       string
+		entry      FixedVS
+		wantSubstr string
+	}{
+		{
+			name:       "family mismatch ipv4 src on ipv6 vs",
+			entry:      FixedVS{VS: "[2a02:6b8::242]:443", Src: "10.10.0.1"},
+			wantSubstr: "does not match the virtual service family",
+		},
+		{
+			name:       "family mismatch ipv6 src on ipv4 vs",
+			entry:      FixedVS{VS: "10.0.0.1:80", Src: "2a02:6b8::1"},
+			wantSubstr: "does not match the virtual service family",
+		},
+		{
+			name:       "malformed bare address",
+			entry:      FixedVS{VS: "10.0.0.1:80", Src: "not-an-address"},
+			wantSubstr: "invalid source",
+		},
+		{
+			name:       "malformed cidr",
+			entry:      FixedVS{VS: "10.0.0.1:80", Src: "10.0.0.0/99"},
+			wantSubstr: "invalid source",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &RuntimeConfig{FixedVirtualServices: []FixedVS{tt.entry}}
+			_, err := cfg.FixedVSEntries()
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "fixed_virtual_services")
+			assert.Contains(t, err.Error(), tt.wantSubstr)
+		})
+	}
+}
+
+func TestLoadRuntimeConfigParsesRealSrc(t *testing.T) {
+	in := validYAML + "fixed_virtual_services:\n" +
+		"  - vs: \"10.0.0.1:80\"\n" +
+		"    src: \"10.10.0.1\"\n"
+	cfg, err := DecodeRuntimeConfig([]byte(in))
+	require.NoError(t, err)
+	require.Equal(t, []FixedVS{{VS: "10.0.0.1:80", Src: "10.10.0.1"}}, cfg.FixedVirtualServices)
+
+	entries, err := cfg.FixedVSEntries()
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	require.NotNil(t, entries[0].Src)
+	assert.Equal(t, []byte{10, 10, 0, 1}, entries[0].Src.Addr)
+}
+
+func TestModelFixedRealSrc(t *testing.T) {
+	corpus := parsedCorpus(t, genCorpusText(5, 4))
+	key := vsKeyFor(t, "10.0.0.1", 80, balancerpb.TransportProto_TCP)
+	src := &CIDR{Addr: []byte{10, 10, 0, 1}, Mask: []byte{0xff, 0xff, 0xff, 0xff}}
+	model := NewModel(corpus, WithFixedVS([]FixedVSEntry{{Key: key, Src: src}}))
+
+	got := model.FixedRealSrc(key)
+	require.NotNil(t, got)
+	assert.Equal(t, src.Addr, got.Addr)
+	assert.Equal(t, src.Mask, got.Mask)
+
+	bare := vsKeyFor(t, "10.0.0.2", 80, balancerpb.TransportProto_TCP)
+	assert.Nil(t, model.FixedRealSrc(bare), "a fixed VS without a pinned src has none")
+
+	other := vsKeyFor(t, "203.0.113.9", 80, balancerpb.TransportProto_TCP)
+	assert.Nil(t, model.FixedRealSrc(other), "a non-fixed VS has no pinned src")
+}
+
 func TestModelFixedSources(t *testing.T) {
 	corpus := parsedCorpus(t, genCorpusText(5, 4))
 	key := vsKeyFor(t, "10.0.0.1", 80, balancerpb.TransportProto_TCP)
@@ -445,6 +545,98 @@ func TestRunnerBootstrapAppliesPinnedSources(t *testing.T) {
 	other := vsKeyFor(t, "10.0.0.2", 80, balancerpb.TransportProto_TCP)
 	require.Nil(t, fake.state.vs[other].allowedSources,
 		"a non-fixed VS must bootstrap with no allowed sources")
+}
+
+// TestRunnerBootstrapAppliesPinnedRealSrc drives a single bootstrap
+// operation and confirms the fixed VS's pinned source is applied to every
+// one of its reals, while a non-fixed VS keeps its corpus-derived source.
+func TestRunnerBootstrapAppliesPinnedRealSrc(t *testing.T) {
+	corpus := parsedCorpus(t, genCorpusText(5, 4))
+	key := vsKeyFor(t, "10.0.0.1", 80, balancerpb.TransportProto_TCP)
+	pinned := &CIDR{Addr: []byte{10, 10, 0, 1}, Mask: []byte{0xff, 0xff, 0xff, 0xff}}
+
+	cfg := runnerTestConfig()
+	cfg.FixedVirtualServices = []FixedVS{{VS: "10.0.0.1:80/tcp", Src: "10.10.0.1"}}
+
+	stats := NewLatencyStats()
+	fake := newRunnerFakeRPC(cfg.ConfigName)
+	fake.stats = stats
+	runner, err := NewRunner(
+		cfg, corpus, fake, stats,
+		WithLogger(&syncBuffer{}),
+		WithSignals(),
+		WithOperationTicker(func(time.Duration) tickerLike { return newManualTicker() }),
+		WithStatsTicker(func(time.Duration) tickerLike { return newManualTicker() }),
+	)
+	require.NoError(t, err)
+
+	require.NoError(t, runner.sendUpdate(context.Background(), Operation{Type: OpUpdate, OpNum: 1}))
+
+	vs := fake.state.vs[key]
+	require.NotNil(t, vs)
+	require.NotEmpty(t, vs.reals)
+	for rk, real := range vs.reals {
+		require.NotNilf(t, real.src, "real %v must carry the pinned source", rk)
+		assert.Equal(t, pinned.Addr, real.src.Addr)
+		assert.Equal(t, pinned.Mask, real.src.Mask)
+	}
+
+	other := vsKeyFor(t, "10.0.0.2", 80, balancerpb.TransportProto_TCP)
+	otherVS := fake.state.vs[other]
+	require.NotNil(t, otherVS)
+	for rk, real := range otherVS.reals {
+		require.NotNilf(t, real.src, "real %v must keep its corpus-derived source", rk)
+		assert.NotEqual(t, pinned.Addr, real.src.Addr,
+			"a non-fixed VS must not receive the pinned source")
+	}
+}
+
+// TestRunnerUpdateVSAppliesPinnedRealSrc confirms the UpdateVS path
+// overlays the pinned source onto every real of a fixed VS, overriding
+// the corpus-derived source.
+func TestRunnerUpdateVSAppliesPinnedRealSrc(t *testing.T) {
+	corpus := parsedCorpus(t, genCorpusText(5, 4))
+	key := vsKeyFor(t, "10.0.0.1", 80, balancerpb.TransportProto_TCP)
+	pinned := &CIDR{Addr: []byte{10, 10, 0, 1}, Mask: []byte{0xff, 0xff, 0xff, 0xff}}
+
+	cfg := runnerTestConfig()
+	cfg.FixedVirtualServices = []FixedVS{{VS: "10.0.0.1:80/tcp", Src: "10.10.0.1"}}
+
+	stats := NewLatencyStats()
+	fake := newRunnerFakeRPC(cfg.ConfigName)
+	fake.stats = stats
+	runner, err := NewRunner(
+		cfg, corpus, fake, stats,
+		WithLogger(&syncBuffer{}),
+		WithSignals(),
+		WithOperationTicker(func(time.Duration) tickerLike { return newManualTicker() }),
+		WithStatsTicker(func(time.Duration) tickerLike { return newManualTicker() }),
+	)
+	require.NoError(t, err)
+
+	reals := make([]RealMember, 0)
+	for _, rk := range runner.Model().OriginalReals(key) {
+		reals = append(reals, RealMember{Key: rk, Enabled: true, Weight: 1})
+	}
+	op := Operation{
+		Type:  OpUpdateVS,
+		OpNum: 2,
+		UpdateVS: &UpdateVSPayload{
+			Key:       key,
+			Scheduler: balancerpb.VsScheduler_WRR,
+			Reals:     reals,
+		},
+	}
+	require.NoError(t, runner.sendUpdateVS(context.Background(), op))
+
+	vs := fake.state.vs[key]
+	require.NotNil(t, vs)
+	require.NotEmpty(t, vs.reals)
+	for rk, real := range vs.reals {
+		require.NotNilf(t, real.src, "real %v must carry the pinned source", rk)
+		assert.Equal(t, pinned.Addr, real.src.Addr)
+		assert.Equal(t, pinned.Mask, real.src.Mask)
+	}
 }
 
 // parsedCorpus parses synthetic corpus text into a Corpus for tests that

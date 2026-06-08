@@ -72,6 +72,7 @@ type runnerFakeVS struct {
 type runnerFakeReal struct {
 	enabled bool
 	weight  uint32
+	src     *CIDR
 }
 
 func newRunnerFakeRPC(configName string) *runnerFakeRPC {
@@ -260,7 +261,14 @@ func (m *runnerFakeRPC) applyVsConfigLocked(vs *balancerpb.VsConfig) {
 		if r.Weight != nil {
 			weight = *r.Weight
 		}
-		existing.reals[rk] = &runnerFakeReal{enabled: enabled, weight: weight}
+		var src *CIDR
+		if r.Src != nil {
+			src = &CIDR{
+				Addr: append([]byte(nil), r.Src.Addr...),
+				Mask: append([]byte(nil), r.Src.Mask...),
+			}
+		}
+		existing.reals[rk] = &runnerFakeReal{enabled: enabled, weight: weight, src: src}
 		existing.realsOrder = append(existing.realsOrder, rk)
 	}
 }

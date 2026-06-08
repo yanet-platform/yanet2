@@ -142,6 +142,12 @@ type Model struct {
 	// every update. The map is populated once at construction and never
 	// mutated afterwards.
 	fixedSources map[VsKey][]CIDR
+
+	// fixedRealSrc maps a fixed VS key to the source pinned for every one
+	// of its reals. A missing entry leaves the corpus-derived source in
+	// place. The map is populated once at construction and never mutated
+	// afterwards.
+	fixedRealSrc map[VsKey]*CIDR
 }
 
 // ModelOption configures a Model at construction time.
@@ -153,7 +159,9 @@ type ModelOption func(*Model)
 // sources. Pinned sources are also seeded into the VS's initial active
 // state so the expected model matches the bootstrap config the runner
 // pushes, rather than only appearing once a later update happens to
-// target the VS. Keys absent from the corpus are ignored here; the runner
+// target the VS. An entry may also pin the source applied to every one of
+// the VS's reals, which the runner overlays onto the bootstrap and update
+// configs. Keys absent from the corpus are ignored here; the runner
 // validates corpus membership before building the model.
 func WithFixedVS(entries []FixedVSEntry) ModelOption {
 	return func(m *Model) {
@@ -162,6 +170,12 @@ func WithFixedVS(entries []FixedVSEntry) ModelOption {
 			m.fixedSources[entry.Key] = sources
 			if state, ok := m.activeVS[entry.Key]; ok && len(sources) > 0 {
 				state.AllowedSources = cloneCIDRs(sources)
+			}
+			if entry.Src != nil {
+				m.fixedRealSrc[entry.Key] = &CIDR{
+					Addr: append([]byte(nil), entry.Src.Addr...),
+					Mask: append([]byte(nil), entry.Src.Mask...),
+				}
 			}
 		}
 	}
@@ -182,6 +196,7 @@ func NewModel(corpus *Corpus, options ...ModelOption) *Model {
 		activeOrder:        make([]VsKey, 0, len(corpus.VSs)),
 		activeVS:           make(map[VsKey]*VSState, len(corpus.VSs)),
 		fixedSources:       map[VsKey][]CIDR{},
+		fixedRealSrc:       map[VsKey]*CIDR{},
 	}
 	for _, vs := range corpus.VSs {
 		key := vs.Key
@@ -293,6 +308,13 @@ func (m *Model) FixedSources(key VsKey) []CIDR {
 	return m.fixedSources[key]
 }
 
+// FixedRealSrc returns the source pinned for every real of a fixed VS, or
+// nil when the VS is not fixed or has no pinned source. Callers must treat
+// the result as read-only.
+func (m *Model) FixedRealSrc(key VsKey) *CIDR {
+	return m.fixedRealSrc[key]
+}
+
 // DeletableActiveOrder returns the active VS keys that may be removed, in
 // active order, excluding fixed VSes. When no VS is fixed the active order
 // is returned directly so callers see no extra allocation.
@@ -385,6 +407,7 @@ func (m *Model) Clone() *Model {
 		activeOrder:        append([]VsKey(nil), m.activeOrder...),
 		activeVS:           make(map[VsKey]*VSState, len(m.activeVS)),
 		fixedSources:       m.fixedSources,
+		fixedRealSrc:       m.fixedRealSrc,
 	}
 	for k, v := range m.activeVS {
 		out.activeVS[k] = v.Clone()
