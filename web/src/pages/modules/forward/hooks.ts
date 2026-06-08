@@ -1,6 +1,6 @@
 import type { Rule, VlanRange } from '../../../api/forward';
 import { ForwardMode } from '../../../api/forward';
-import { formatIPNetItem, formatRange, parseCidrsToIPNets } from '../../../utils';
+import { formatIPNetItem, formatRange, parseCidrsToIPNets, parseRangesRaw } from '../../../utils';
 import type { RuleItem, RuleDraft } from './types';
 
 /** Format VlanRange array to a display string. */
@@ -47,19 +47,6 @@ export const rulesToNgItems = (rules: Rule[]): RuleItem[] => {
     });
 };
 
-/** Parse a VLAN range string (e.g. "100-200, 300") to VlanRange array. */
-export const parseVlanRangesStr = (input: string): VlanRange[] => {
-    if (!input.trim()) return [];
-    return input.split(',').map((s) => s.trim()).filter(Boolean).map((part) => {
-        if (part.includes('-')) {
-            const [fromStr, toStr] = part.split('-');
-            return { from: parseInt(fromStr, 10), to: parseInt(toStr, 10) };
-        }
-        const val = parseInt(part, 10);
-        return { from: val, to: val };
-    }).filter((r) => !isNaN(r.from ?? NaN) && !isNaN(r.to ?? NaN));
-};
-
 /** Convert a RuleDraft to a Rule for the API. */
 export const draftToRule = (draft: RuleDraft): Rule => ({
     action: {
@@ -68,7 +55,7 @@ export const draftToRule = (draft: RuleDraft): Rule => ({
         counter: draft.counter || undefined,
     },
     devices: draft.deviceNames.map((name) => ({ name })),
-    vlan_ranges: parseVlanRangesStr(draft.vlansRaw),
+    vlan_ranges: parseRangesRaw(draft.vlansRaw),
     srcs: parseCidrsToIPNets(draft.sourceCidrs),
     dsts: parseCidrsToIPNets(draft.dstCidrs),
 });
