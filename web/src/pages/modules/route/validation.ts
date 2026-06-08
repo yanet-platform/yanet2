@@ -1,8 +1,8 @@
 import type { FIBRowItem, FIBRowErrors } from './types';
-import { isValidCidr, rowHasError as sharedRowHasError, countInvalidRows as sharedCountInvalidRows } from '../../../utils';
+import { isValidCidrPrefix, rowHasError as sharedRowHasError, countInvalidRows as sharedCountInvalidRows } from '../../../utils';
 
-/** Returns true if s is a valid IPv4 or IPv6 CIDR prefix. */
-export const isValidPrefix = isValidCidr;
+/** Returns true if s is a valid IPv4 or IPv6 CIDR prefix with a /mask. */
+export const isValidPrefix = isValidCidrPrefix;
 
 /** Returns true if s is a valid MAC address (colon-separated hex). */
 export const isValidMac = (s: string): boolean =>

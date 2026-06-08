@@ -17,6 +17,18 @@ export const isValidCidr = (s: string): boolean => {
     return false;
 };
 
+/**
+ * Validate a CIDR prefix (IPv4 or IPv6) that must include a /mask.
+ *
+ * Unlike isValidCidr, the mask is mandatory — bare host addresses are
+ * rejected.
+ */
+export const isValidCidrPrefix = (s: string): boolean => {
+    const trimmed = s.trim();
+    if (!trimmed.includes('/')) return false;
+    return isValidCidr(trimmed);
+};
+
 /** Validate device name string. */
 export const isValidDeviceName = (s: string): boolean => /^[a-zA-Z0-9_:.\-]+$/.test(s.trim());
 
