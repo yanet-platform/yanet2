@@ -4,8 +4,8 @@ import (
 	"net"
 	"strconv"
 
-	"github.com/yanet-platform/yanet2/common/commonpb"
-	"github.com/yanet-platform/yanet2/modules/balancer2/controlplane/balancerpb"
+	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	balancerpb "github.com/yanet-platform/yanet2/modules/balancer2/controlplane/balancerpb/v1"
 )
 
 type commonMetricEntry struct {

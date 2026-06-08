@@ -19,7 +19,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/yanet-platform/yanet2/modules/balancer2/controlplane/balancerpb"
+	balancerpb "github.com/yanet-platform/yanet2/modules/balancer2/controlplane/balancerpb/v1"
 )
 
 // dialRPCClient is the dial seam used by RunMain. Tests replace it with

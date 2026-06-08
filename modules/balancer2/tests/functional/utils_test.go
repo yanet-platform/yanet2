@@ -1,4 +1,4 @@
-package test
+package balancer2_test
 
 import (
 	"net"

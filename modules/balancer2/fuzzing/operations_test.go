@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/yanet-platform/yanet2/modules/balancer2/controlplane/balancerpb"
+	balancerpb "github.com/yanet-platform/yanet2/modules/balancer2/controlplane/balancerpb/v1"
 )
 
 // genCorpusText synthesises a deterministic services config with vsCount

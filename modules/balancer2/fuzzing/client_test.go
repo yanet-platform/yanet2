@@ -11,7 +11,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/yanet-platform/yanet2/modules/balancer2/controlplane/balancerpb"
+	balancerpb "github.com/yanet-platform/yanet2/modules/balancer2/controlplane/balancerpb/v1"
 )
 
 // fakeCall captures a single RPC invocation for ordering, deadline, and

@@ -209,7 +209,8 @@ build_vs_acl(
 
 	size_t rule_count = config->allowed_sources_count;
 	if (rule_count == 0) {
-		if (filter_init(&vs->acl, compiler, NULL, 0, mctx) != 0) {
+		if (filter_init(&vs->acl, compiler, NULL, 0, mctx, error) !=
+		    0) {
 			yanet_error_add(error, "compilation failed");
 			return -1;
 		}
@@ -247,7 +248,7 @@ build_vs_acl(
 	}
 
 	res = filter_init(
-		&vs->acl, compiler, rule_ptrs, (uint32_t)rule_count, mctx
+		&vs->acl, compiler, rule_ptrs, (uint32_t)rule_count, mctx, error
 	);
 	if (res != 0) {
 		yanet_error_add(error, "compilation failed");
@@ -856,7 +857,7 @@ build_vs_matcher(
 		}
 	}
 	if (rule_count == 0) {
-		if (filter_init(matcher, compiler, NULL, 0, mctx) != 0) {
+		if (filter_init(matcher, compiler, NULL, 0, mctx, error) != 0) {
 			yanet_error_add(error, "compilation failed");
 			return -1;
 		}
@@ -889,7 +890,7 @@ build_vs_matcher(
 	}
 
 	res = filter_init(
-		matcher, compiler, rule_ptrs, (uint32_t)rule_count, mctx
+		matcher, compiler, rule_ptrs, (uint32_t)rule_count, mctx, error
 	);
 
 cleanup:

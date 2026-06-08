@@ -13,7 +13,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/yanet-platform/yanet2/modules/balancer2/controlplane/balancerpb"
+	balancerpb "github.com/yanet-platform/yanet2/modules/balancer2/controlplane/balancerpb/v1"
 )
 
 // RuntimeConfig is the sidecar YAML runtime configuration loaded by the

@@ -3,7 +3,7 @@ package balancer2
 import (
 	"bytes"
 
-	"github.com/yanet-platform/yanet2/modules/balancer2/controlplane/balancerpb"
+	balancerpb "github.com/yanet-platform/yanet2/modules/balancer2/controlplane/balancerpb/v1"
 )
 
 type stateFilter struct {

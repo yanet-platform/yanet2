@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"net"
 
-	"github.com/yanet-platform/yanet2/common/filterpb"
+	filterpb "github.com/yanet-platform/yanet2/common/filterpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/xnetip"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/balancer2/bindings/go/cbalancer2"
-	"github.com/yanet-platform/yanet2/modules/balancer2/controlplane/balancerpb"
+	"github.com/yanet-platform/yanet2/modules/balancer2/controlplane/balancerpb/v1"
 )
 
 const (

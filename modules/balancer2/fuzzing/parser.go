@@ -23,8 +23,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/yanet-platform/yanet2/common/filterpb"
-	"github.com/yanet-platform/yanet2/modules/balancer2/controlplane/balancerpb"
+	filterpb "github.com/yanet-platform/yanet2/common/filterpb/v1"
+	balancerpb "github.com/yanet-platform/yanet2/modules/balancer2/controlplane/balancerpb/v1"
 )
 
 // VsKey is the immutable identity of a virtual server: address bytes,

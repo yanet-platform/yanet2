@@ -1,16 +1,14 @@
-package test
+package balancer2_test
 
 import (
 	"fmt"
 
 	"github.com/c2h5oh/datasize"
 
+	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	mock "github.com/yanet-platform/yanet2/mock/go"
 	balancer2 "github.com/yanet-platform/yanet2/modules/balancer2/controlplane"
 )
-
-////////////////////////////////////////////////////////////////////////////////
 
 var (
 	defaultDeviceName   string = "01:00.0"
@@ -20,41 +18,39 @@ var (
 	defaultConfigName   string = "balancer0"
 )
 
-////////////////////////////////////////////////////////////////////////////////
+const (
+	cpMemory    = 256 * datasize.MB
+	dpMemory    = 16 * datasize.MB
+	agentMemory = 64 * datasize.MB
+)
 
 type TestConfig struct {
-	mock             *mock.YanetMockConfig
 	balancer         *balancer2.ConfigParams
 	sessionsCapacity uint64
 }
 
 type TestSetup struct {
-	mock     *mock.YanetMock
+	harness  *dataplaneut.Harness
 	agent    *ffi.Agent
 	balancer *balancer2.ModuleConfig
 	sessions *balancer2.SessionsState
 }
 
 func SetupTest(config *TestConfig) (*TestSetup, error) {
-	if config.mock == nil {
-		config.mock = &mock.YanetMockConfig{
-			AgentsMemory: datasize.MB * 64,
-			Workers:      1,
-			Devices: []mock.YanetMockDeviceConfig{
-				{
-					ID:   0,
-					Name: defaultDeviceName,
-				},
-			},
-		}
-	}
-	mock, err := mock.NewYanetMock(config.mock)
+	harness, err := dataplaneut.NewHarness(dataplaneut.Config{
+		CPMemory:      uint64(cpMemory),
+		DPMemory:      uint64(dpMemory),
+		WorkerCount:   1,
+		Devices:       []string{defaultDeviceName},
+		Modules:       []string{"balancer2"},
+		DevicesToLoad: []string{"plain"},
+	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to create new yanet mock: %w", err)
+		return nil, fmt.Errorf("failed to create dataplane harness: %w", err)
 	}
 
-	agent, err := mock.SharedMemory().
-		AgentAttach("balancer2", 0, config.mock.GetAgentsMemory())
+	agent, err := harness.SharedMemory().
+		AgentAttach("balancer2", 0, agentMemory)
 	if err != nil {
 		return nil, fmt.Errorf("failed to attach agent: %w", err)
 	}
@@ -70,11 +66,11 @@ func SetupTest(config *TestConfig) (*TestSetup, error) {
 	}
 
 	if err := setupCp(agent); err != nil {
-		return nil, fmt.Errorf("failed to setup yanet mock: %w", err)
+		return nil, fmt.Errorf("failed to setup control plane: %w", err)
 	}
 
 	return &TestSetup{
-		mock:     mock,
+		harness:  harness,
 		agent:    agent,
 		balancer: module,
 		sessions: sessions,
@@ -156,6 +152,6 @@ func setupCp(agent *ffi.Agent) error {
 func (ctx *TestSetup) Free() {
 	ctx.balancer.Free()
 	ctx.sessions.Free()
-	ctx.agent.Close()
-	ctx.mock.Free()
+	_ = ctx.agent.CleanUp()
+	ctx.harness.Free()
 }

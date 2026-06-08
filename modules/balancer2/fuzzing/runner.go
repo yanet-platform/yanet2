@@ -35,8 +35,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/yanet-platform/yanet2/common/filterpb"
-	"github.com/yanet-platform/yanet2/modules/balancer2/controlplane/balancerpb"
+	filterpb "github.com/yanet-platform/yanet2/common/filterpb/v1"
+	balancerpb "github.com/yanet-platform/yanet2/modules/balancer2/controlplane/balancerpb/v1"
 )
 
 // Runner orchestrates the fuzzing loop. It owns the committed model, the

@@ -14,7 +14,7 @@ package fuzzing
 import (
 	"math"
 
-	"github.com/yanet-platform/yanet2/modules/balancer2/controlplane/balancerpb"
+	balancerpb "github.com/yanet-platform/yanet2/modules/balancer2/controlplane/balancerpb/v1"
 )
 
 // CIDR is a single allowed-source network. The byte slices are independent

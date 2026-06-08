@@ -5,7 +5,7 @@ import (
 	"math"
 	"time"
 
-	"github.com/yanet-platform/yanet2/modules/balancer2/controlplane/balancerpb"
+	balancerpb "github.com/yanet-platform/yanet2/modules/balancer2/controlplane/balancerpb/v1"
 )
 
 func (m *ModuleConfig) collectSessionCounts(now time.Time) map[vsID]map[realID]uint64 {

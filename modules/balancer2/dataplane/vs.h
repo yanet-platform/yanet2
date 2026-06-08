@@ -9,6 +9,8 @@
 
 #include "selector.h"
 
+#include "lib/counters/counters.h"
+
 enum vs_flags {
 	vs_fix_mss = 1u << 0,
 	vs_ops = 1u << 1,
@@ -33,3 +35,28 @@ struct virtual_service {
 
 	struct real_selector *selector;
 };
+
+static inline struct balancer_vs_stats *
+vs_fetch_stats(
+	struct virtual_service *vs,
+	uint32_t worker,
+	struct counter_storage *counter_storage
+) {
+	return (struct balancer_vs_stats *)counter_get_address(
+		vs->counter_id, worker, counter_storage
+	);
+}
+
+static inline uint64_t *
+vs_fetch_acl_stats(
+	struct virtual_service *vs,
+	uint32_t worker,
+	struct counter_storage *counter_storage,
+	uint32_t rule_idx
+) {
+	// Rule counter is undefined if tag is empty
+	uint64_t id = ADDR_OF(&vs->rule_counter_ids)[rule_idx];
+	return id != (uint64_t)-1
+		       ? counter_get_address(id, worker, counter_storage)
+		       : NULL;
+}

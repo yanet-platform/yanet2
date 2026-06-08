@@ -1,4 +1,4 @@
-package test
+package balancer2_test
 
 import (
 	"net"
@@ -6,15 +6,16 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/yanet-platform/yanet2/common/filterpb"
+
+	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
+	filterpb "github.com/yanet-platform/yanet2/common/filterpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
-	mock "github.com/yanet-platform/yanet2/mock/go"
 	balancer2 "github.com/yanet-platform/yanet2/modules/balancer2/controlplane"
-	"github.com/yanet-platform/yanet2/modules/balancer2/controlplane/balancerpb"
+	balancerpb "github.com/yanet-platform/yanet2/modules/balancer2/controlplane/balancerpb/v1"
 )
 
 type testEnv struct {
-	mock      *mock.YanetMock
+	harness   *dataplaneut.Harness
 	packetGen *PacketGenerator
 	setup     *TestSetup
 }
@@ -25,9 +26,10 @@ func setupTestEnv(t *testing.T, balancer *balancer2.ConfigParams) *testEnv {
 		sessionsCapacity: 1024,
 	})
 	require.NoError(t, err)
+	t.Cleanup(setup.Free)
 
 	return &testEnv{
-		mock:      setup.mock,
+		harness:   setup.harness,
 		packetGen: NewPacketGenerator(),
 		setup:     setup,
 	}
@@ -155,7 +157,7 @@ func TestBasic(t *testing.T) {
 		nil,
 	)
 	packet := xpacket.LayersToPacket(t, layers...)
-	result, err := te.mock.HandlePackets(packet)
+	result, err := te.harness.HandlePackets(packet)
 	assert.NoError(t, err, "failed to handle packets")
 	assert.Equal(t, 1, len(result.Drop), "not dropped packet but there is no reals")
 	err = balancer.UpdateReals([]*balancerpb.RealUpdate{
@@ -181,12 +183,12 @@ func TestBasic(t *testing.T) {
 		},
 	})
 	assert.NoError(t, err, "failed to update reals")
-	result, err = te.mock.HandlePackets(packet)
+	result, err = te.harness.HandlePackets(packet)
 	assert.NoError(t, err, "failed to handle packets")
-	assert.Equal(t, 1, len(result.Output), err, "no output packets")
+	require.Equal(t, 1, len(result.Output), "no output packets")
 	assert.True(t, result.Output[0].IsTunneled, "result packet is not tunneled")
 
-	states := balancer.GetState(nil, nil, te.mock.CurrentTime())
+	states := balancer.GetState(nil, nil, te.harness.CurrentTime())
 	assert.Equal(t, 1, len(states))
 	state := states[0]
 	assert.Equal(t, uint64(1), state.Vs[0].Reals[0].Stats.Packets)
@@ -197,7 +199,7 @@ func TestBasic(t *testing.T) {
 	assert.Equal(t, "123", state.Vs[0].AllowedSourcesStats[0].Tag)
 
 	count := 0
-	for range sessions.IterSessions(te.mock.CurrentTime()) {
+	for range sessions.IterSessions(te.harness.CurrentTime()) {
 		count += 1
 	}
 	assert.Equal(t, 1, count)

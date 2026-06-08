@@ -21,7 +21,7 @@ import (
 	"net"
 	"sort"
 
-	"github.com/yanet-platform/yanet2/modules/balancer2/controlplane/balancerpb"
+	balancerpb "github.com/yanet-platform/yanet2/modules/balancer2/controlplane/balancerpb/v1"
 )
 
 // OperationType identifies the operation flavour. Callers switch on this

@@ -4,7 +4,7 @@ import (
 	"strings"
 
 	"github.com/yanet-platform/yanet2/modules/balancer2/bindings/go/cbalancer2"
-	"github.com/yanet-platform/yanet2/modules/balancer2/controlplane/balancerpb"
+	balancerpb "github.com/yanet-platform/yanet2/modules/balancer2/controlplane/balancerpb/v1"
 )
 
 // aggregateCounterValues sums worker-local counter rows into a single row.

@@ -26,7 +26,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/yanet-platform/yanet2/modules/balancer2/controlplane/balancerpb"
+	balancerpb "github.com/yanet-platform/yanet2/modules/balancer2/controlplane/balancerpb/v1"
 )
 
 // CompareState validates that resp contains exactly one BalancerState

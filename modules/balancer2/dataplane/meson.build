@@ -10,6 +10,12 @@ includes = include_directories('.', '../../../')
 
 dp_sources = files(
   'dataplane.c',
+  'l4/handle.c',
+  'l4/select.c',
+  'l4/tunnel.c',
+  'l4/group.c',
+  'l4/session.c',
+  'icmp/handle.c',
 )
 
 lib_balancer2_dp = static_library(
