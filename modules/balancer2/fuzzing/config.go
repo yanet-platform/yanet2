@@ -52,9 +52,10 @@ type RuntimeConfig struct {
 	//
 	// Each entry is written either as a bare string or as a mapping. The
 	// bare-string form pins the VS but lets the fuzzer randomise its
-	// allowed sources on every update. The mapping form additionally pins
-	// the allowed sources so they stay constant for the whole run, and may
-	// pin the source applied to every real of the VS:
+	// allowed sources and flags on every update. The mapping form
+	// additionally pins the allowed sources so they stay constant for the
+	// whole run, and may pin the source applied to every real of the VS and
+	// the VS flags:
 	//
 	//	fixed_virtual_services:
 	//	  - "10.0.0.1:80"
@@ -62,12 +63,18 @@ type RuntimeConfig struct {
 	//	    src: "2001:db8::1"
 	//	    allowed_sources:
 	//	      - "2001:db8::/48"
+	//	    flags:
+	//	      gre: true
+	//	      fix_mss: false
+	//	      pure_l3: true
 	//
 	// The VS spec is "addr:port" or "addr:port/proto" (proto defaults to
 	// tcp); IPv6 addresses use the bracketed form. Every pinned allowed
 	// source is a CIDR whose address family matches the VS address family.
 	// The pinned source is a bare address or a CIDR, also matching the VS
-	// address family; a bare address is treated as a host network.
+	// address family; a bare address is treated as a host network. A
+	// present flags mapping pins all three flags, with any omitted key
+	// defaulting to false.
 	FixedVirtualServices []FixedVS `yaml:"fixed_virtual_services"`
 }
 
@@ -75,11 +82,22 @@ type RuntimeConfig struct {
 // spec; AllowedSources optionally pins the allowed-source CIDRs so the
 // fuzzer keeps them constant instead of regenerating them on every update.
 // Src optionally pins the tunnel source applied to every real of the VS,
-// overriding the corpus-derived source.
+// overriding the corpus-derived source. Flags optionally pins the VS flags
+// so the fuzzer keeps them constant instead of regenerating them.
 type FixedVS struct {
-	VS             string   `yaml:"vs"`
-	Src            string   `yaml:"src"`
-	AllowedSources []string `yaml:"allowed_sources"`
+	VS             string        `yaml:"vs"`
+	Src            string        `yaml:"src"`
+	AllowedSources []string      `yaml:"allowed_sources"`
+	Flags          *FixedVSFlags `yaml:"flags"`
+}
+
+// FixedVSFlags pins the three VS flags. A nil FixedVS.Flags leaves the
+// flags free to be randomised; a present mapping pins all three, with any
+// omitted key defaulting to false.
+type FixedVSFlags struct {
+	Gre    bool `yaml:"gre"`
+	FixMss bool `yaml:"fix_mss"`
+	PureL3 bool `yaml:"pure_l3"`
 }
 
 // UnmarshalYAML accepts both the bare-string form and the mapping form. A
@@ -99,11 +117,13 @@ func (m *FixedVS) UnmarshalYAML(value *yaml.Node) error {
 }
 
 // FixedVSEntry is a parsed fixed virtual service: its canonical key plus
-// the pinned allowed-source CIDRs and the pinned per-real source, if any.
+// the pinned allowed-source CIDRs, the pinned per-real source, and the
+// pinned VS flags, if any.
 type FixedVSEntry struct {
 	Key            VsKey
 	AllowedSources []CIDR
 	Src            *CIDR
+	Flags          *VsFlags
 }
 
 // seedSource is the source of non-zero seeds used when the YAML seed is zero
@@ -219,7 +239,20 @@ func (m *RuntimeConfig) FixedVSEntries() ([]FixedVSEntry, error) {
 			}
 			src = &cidr
 		}
-		out = append(out, FixedVSEntry{Key: key, AllowedSources: sources, Src: src})
+		var flags *VsFlags
+		if entry.Flags != nil {
+			flags = &VsFlags{
+				Gre:    entry.Flags.Gre,
+				FixMss: entry.Flags.FixMss,
+				PureL3: entry.Flags.PureL3,
+			}
+		}
+		out = append(out, FixedVSEntry{
+			Key:            key,
+			AllowedSources: sources,
+			Src:            src,
+			Flags:          flags,
+		})
 	}
 	return out, nil
 }

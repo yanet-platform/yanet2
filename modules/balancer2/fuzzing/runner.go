@@ -325,6 +325,7 @@ func (m *Runner) sendUpdate(ctx context.Context, op Operation) error {
 	list := m.corpus.ToVsConfigList()
 	m.applyPinnedAllowedSources(list)
 	m.applyPinnedRealSrc(list)
+	m.applyPinnedFlags(list)
 	req := &balancerpb.UpdateConfigRequest{
 		ConfigName: m.cfg.ConfigName,
 		Vs:         list,
@@ -365,6 +366,22 @@ func (m *Runner) applyPinnedRealSrc(list *balancerpb.VsConfigList) {
 		for _, real := range list.Vs[idx].Reals {
 			real.Src = cidrToIPNet(pinned)
 		}
+	}
+}
+
+// applyPinnedFlags overlays the pinned flags of every fixed VS onto the
+// bootstrap config list. The corpus parser leaves flags nil, so without
+// this overlay a fixed VS would start with all flags false and keep them
+// until a later update happened to target it. The corpus and the list
+// share VS ordering, so each list entry is matched to its corpus key by
+// index.
+func (m *Runner) applyPinnedFlags(list *balancerpb.VsConfigList) {
+	for idx, vs := range m.corpus.VSs {
+		pinned := m.model.FixedFlags(vs.Key)
+		if pinned == nil {
+			continue
+		}
+		list.Vs[idx].Flags = flagsToProto(*pinned)
 	}
 }
 

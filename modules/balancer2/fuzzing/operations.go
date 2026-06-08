@@ -250,13 +250,20 @@ func (m *OperationGenerator) generateUpdateVS(opNum uint64) Operation {
 		// fixed VS without pinned sources still gets random ones.
 		sources = cloneCIDRs(pinned)
 	}
+	flags := m.randomFlags()
+	if pinned := m.model.FixedFlags(key); pinned != nil {
+		// A fixed VS with pinned flags keeps them constant for the whole
+		// run instead of regenerating them on every update. A fixed VS
+		// without pinned flags still gets random ones.
+		flags = *pinned
+	}
 	return Operation{
 		Type:  OpUpdateVS,
 		OpNum: opNum,
 		UpdateVS: &UpdateVSPayload{
 			Key:            key,
 			Scheduler:      m.randomScheduler(),
-			Flags:          m.randomFlags(),
+			Flags:          flags,
 			AllowedSources: sources,
 			Reals:          m.randomRealSubset(key, m.model.ActiveVS(key)),
 		},

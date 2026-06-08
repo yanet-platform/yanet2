@@ -148,6 +148,12 @@ type Model struct {
 	// place. The map is populated once at construction and never mutated
 	// afterwards.
 	fixedRealSrc map[VsKey]*CIDR
+
+	// fixedFlags maps a fixed VS key to the flags pinned for the whole run.
+	// A missing entry leaves the flags free to be randomised on every
+	// update. The map is populated once at construction and never mutated
+	// afterwards.
+	fixedFlags map[VsKey]*VsFlags
 }
 
 // ModelOption configures a Model at construction time.
@@ -161,8 +167,10 @@ type ModelOption func(*Model)
 // pushes, rather than only appearing once a later update happens to
 // target the VS. An entry may also pin the source applied to every one of
 // the VS's reals, which the runner overlays onto the bootstrap and update
-// configs. Keys absent from the corpus are ignored here; the runner
-// validates corpus membership before building the model.
+// configs, and the VS flags, which are likewise seeded into the initial
+// state and emitted verbatim on every update. Keys absent from the corpus
+// are ignored here; the runner validates corpus membership before building
+// the model.
 func WithFixedVS(entries []FixedVSEntry) ModelOption {
 	return func(m *Model) {
 		for _, entry := range entries {
@@ -175,6 +183,13 @@ func WithFixedVS(entries []FixedVSEntry) ModelOption {
 				m.fixedRealSrc[entry.Key] = &CIDR{
 					Addr: append([]byte(nil), entry.Src.Addr...),
 					Mask: append([]byte(nil), entry.Src.Mask...),
+				}
+			}
+			if entry.Flags != nil {
+				flags := *entry.Flags
+				m.fixedFlags[entry.Key] = &flags
+				if state, ok := m.activeVS[entry.Key]; ok {
+					state.Flags = flags
 				}
 			}
 		}
@@ -197,6 +212,7 @@ func NewModel(corpus *Corpus, options ...ModelOption) *Model {
 		activeVS:           make(map[VsKey]*VSState, len(corpus.VSs)),
 		fixedSources:       map[VsKey][]CIDR{},
 		fixedRealSrc:       map[VsKey]*CIDR{},
+		fixedFlags:         map[VsKey]*VsFlags{},
 	}
 	for _, vs := range corpus.VSs {
 		key := vs.Key
@@ -315,6 +331,13 @@ func (m *Model) FixedRealSrc(key VsKey) *CIDR {
 	return m.fixedRealSrc[key]
 }
 
+// FixedFlags returns the flags pinned for a fixed VS, or nil when the VS is
+// not fixed or has no pinned flags. Callers must treat the result as
+// read-only.
+func (m *Model) FixedFlags(key VsKey) *VsFlags {
+	return m.fixedFlags[key]
+}
+
 // DeletableActiveOrder returns the active VS keys that may be removed, in
 // active order, excluding fixed VSes. When no VS is fixed the active order
 // is returned directly so callers see no extra allocation.
@@ -408,6 +431,7 @@ func (m *Model) Clone() *Model {
 		activeVS:           make(map[VsKey]*VSState, len(m.activeVS)),
 		fixedSources:       m.fixedSources,
 		fixedRealSrc:       m.fixedRealSrc,
+		fixedFlags:         m.fixedFlags,
 	}
 	for k, v := range m.activeVS {
 		out.activeVS[k] = v.Clone()

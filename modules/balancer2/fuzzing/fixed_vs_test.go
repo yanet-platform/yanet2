@@ -421,6 +421,146 @@ func TestModelFixedRealSrc(t *testing.T) {
 	assert.Nil(t, model.FixedRealSrc(other), "a non-fixed VS has no pinned src")
 }
 
+func TestFixedVSEntriesPinnedFlags(t *testing.T) {
+	cfg := &RuntimeConfig{
+		FixedVirtualServices: []FixedVS{
+			{
+				VS:    "10.0.0.1:80",
+				Flags: &FixedVSFlags{Gre: true, FixMss: false, PureL3: true},
+			},
+			{VS: "10.0.0.2:80"},
+		},
+	}
+	entries, err := cfg.FixedVSEntries()
+	require.NoError(t, err)
+	require.Len(t, entries, 2)
+
+	require.NotNil(t, entries[0].Flags)
+	assert.Equal(t, VsFlags{Gre: true, FixMss: false, PureL3: true}, *entries[0].Flags)
+	assert.Nil(t, entries[1].Flags, "an entry without flags has none pinned")
+}
+
+func TestLoadRuntimeConfigParsesFlags(t *testing.T) {
+	in := validYAML + "fixed_virtual_services:\n" +
+		"  - vs: \"10.0.0.1:80\"\n" +
+		"    flags:\n" +
+		"      gre: true\n" +
+		"      pure_l3: true\n"
+	cfg, err := DecodeRuntimeConfig([]byte(in))
+	require.NoError(t, err)
+	require.Len(t, cfg.FixedVirtualServices, 1)
+	require.NotNil(t, cfg.FixedVirtualServices[0].Flags)
+	assert.Equal(t,
+		FixedVSFlags{Gre: true, FixMss: false, PureL3: true},
+		*cfg.FixedVirtualServices[0].Flags)
+
+	entries, err := cfg.FixedVSEntries()
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	require.NotNil(t, entries[0].Flags)
+	assert.Equal(t, VsFlags{Gre: true, PureL3: true}, *entries[0].Flags)
+}
+
+func TestModelFixedFlags(t *testing.T) {
+	corpus := parsedCorpus(t, genCorpusText(5, 4))
+	key := vsKeyFor(t, "10.0.0.1", 80, balancerpb.TransportProto_TCP)
+	flags := &VsFlags{Gre: true, PureL3: true}
+	model := NewModel(corpus, WithFixedVS([]FixedVSEntry{{Key: key, Flags: flags}}))
+
+	got := model.FixedFlags(key)
+	require.NotNil(t, got)
+	assert.Equal(t, *flags, *got)
+
+	bare := vsKeyFor(t, "10.0.0.2", 80, balancerpb.TransportProto_TCP)
+	assert.Nil(t, model.FixedFlags(bare), "a fixed VS without pinned flags has none")
+}
+
+// TestModelSeedsFixedFlags confirms that a fixed VS with pinned flags
+// starts active with those flags rather than all-false, so the expected
+// model matches the bootstrap config the runner pushes.
+func TestModelSeedsFixedFlags(t *testing.T) {
+	corpus := parsedCorpus(t, genCorpusText(5, 4))
+	key := vsKeyFor(t, "10.0.0.1", 80, balancerpb.TransportProto_TCP)
+	flags := &VsFlags{Gre: true, PureL3: true}
+	model := NewModel(corpus, WithFixedVS([]FixedVSEntry{{Key: key, Flags: flags}}))
+
+	state := model.ActiveVS(key)
+	require.NotNil(t, state)
+	assert.Equal(t, *flags, state.Flags)
+
+	bare := model.ActiveVS(vsKeyFor(t, "10.0.0.2", 80, balancerpb.TransportProto_TCP))
+	require.NotNil(t, bare)
+	assert.Equal(t, VsFlags{}, bare.Flags,
+		"a VS that is not fixed must start with all flags false")
+}
+
+// TestOperationGeneratorPinsFixedVSFlags drives the generator against a
+// single-VS model whose only VS is fixed with pinned flags. With one VS
+// the active set stays at 100%, so every UpdateVS necessarily targets the
+// fixed VS, and each must carry exactly the pinned flags rather than random
+// ones.
+func TestOperationGeneratorPinsFixedVSFlags(t *testing.T) {
+	const steps = uint64(2000)
+	const n = uint64(5)
+
+	corpus := parsedCorpus(t, genCorpusText(1, 4))
+	key := vsKeyFor(t, "10.0.0.1", 80, balancerpb.TransportProto_TCP)
+	flags := &VsFlags{Gre: true, FixMss: false, PureL3: true}
+	model := NewModel(corpus, WithFixedVS([]FixedVSEntry{{Key: key, Flags: flags}}))
+	gen := NewOperationGenerator(model, n, 12345)
+
+	sawFixedUpdate := false
+	for opNum := uint64(1); opNum <= steps; opNum++ {
+		op := gen.Generate(opNum)
+		if op.Type == OpUpdateVS {
+			require.Equal(t, key, op.UpdateVS.Key)
+			sawFixedUpdate = true
+			assert.Equal(t, *flags, op.UpdateVS.Flags,
+				"op %d must pin the fixed VS flags", opNum)
+		}
+		require.NoError(t, model.Apply(op))
+	}
+	assert.True(t, sawFixedUpdate, "test must exercise at least one UpdateVS on the fixed VS")
+}
+
+// TestRunnerBootstrapAppliesPinnedFlags drives a single bootstrap
+// operation and confirms the fixed VS's pinned flags reach the
+// controlplane through the initial UpdateConfig, while a non-fixed VS
+// bootstraps with all flags false.
+func TestRunnerBootstrapAppliesPinnedFlags(t *testing.T) {
+	corpus := parsedCorpus(t, genCorpusText(5, 4))
+	key := vsKeyFor(t, "10.0.0.1", 80, balancerpb.TransportProto_TCP)
+
+	cfg := runnerTestConfig()
+	cfg.FixedVirtualServices = []FixedVS{{
+		VS:    "10.0.0.1:80/tcp",
+		Flags: &FixedVSFlags{Gre: true, PureL3: true},
+	}}
+
+	stats := NewLatencyStats()
+	fake := newRunnerFakeRPC(cfg.ConfigName)
+	fake.stats = stats
+	runner, err := NewRunner(
+		cfg, corpus, fake, stats,
+		WithLogger(&syncBuffer{}),
+		WithSignals(),
+		WithOperationTicker(func(time.Duration) tickerLike { return newManualTicker() }),
+		WithStatsTicker(func(time.Duration) tickerLike { return newManualTicker() }),
+	)
+	require.NoError(t, err)
+
+	require.NoError(t, runner.sendUpdate(context.Background(), Operation{Type: OpUpdate, OpNum: 1}))
+
+	vs := fake.state.vs[key]
+	require.NotNil(t, vs)
+	assert.Equal(t, VsFlags{Gre: true, PureL3: true}, vs.flags)
+
+	other := fake.state.vs[vsKeyFor(t, "10.0.0.2", 80, balancerpb.TransportProto_TCP)]
+	require.NotNil(t, other)
+	assert.Equal(t, VsFlags{}, other.flags,
+		"a non-fixed VS must bootstrap with all flags false")
+}
+
 func TestModelFixedSources(t *testing.T) {
 	corpus := parsedCorpus(t, genCorpusText(5, 4))
 	key := vsKeyFor(t, "10.0.0.1", 80, balancerpb.TransportProto_TCP)
