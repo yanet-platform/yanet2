@@ -229,6 +229,9 @@ func applyCounter(
 		if vsState == nil {
 			return
 		}
+		if !configHasAllowedSourceTag(vsState.GetConfig(), tag) {
+			return
+		}
 		values := aggregateCounterValues(counter.Values)
 		if len(values) == 0 {
 			return
@@ -262,6 +265,20 @@ func applyCounter(
 			realState.Stats = realCounterToProto(c)
 		}
 	}
+}
+
+// configHasAllowedSourceTag reports whether the VS config declares an
+// allowed source carrying the given tag. The dataplane keeps ACL pass
+// counters across reconfigurations, so a counter may outlive the allowed
+// source that created it; GetState reports only the sources present in the
+// current config and ignores counters whose tag is no longer configured.
+func configHasAllowedSourceTag(cfg *balancerpb.VsConfig, tag string) bool {
+	for _, a := range cfg.GetAllowedSources() {
+		if a.GetTag() == tag {
+			return true
+		}
+	}
+	return false
 }
 
 func boolPtr(v bool) *bool {
