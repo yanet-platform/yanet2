@@ -15,6 +15,30 @@ import (
 	"github.com/yanet-platform/yanet2/modules/fwstate/controlplane/fwstatepb/v1"
 )
 
+const (
+	// defaultListEntriesBatchSize is the batch size used when the caller
+	// sends zero in the request.
+	defaultListEntriesBatchSize uint32 = 100
+
+	// maxListEntriesBatchSize caps the number of entries fetched per
+	// ListEntries round-trip to prevent unbounded allocation under the
+	// service mutex.
+	maxListEntriesBatchSize uint32 = 10000
+)
+
+// clampBatchSize returns a batch size that is within the allowed range:
+// zero is replaced with defaultListEntriesBatchSize, and values above
+// maxListEntriesBatchSize are clamped to maxListEntriesBatchSize.
+func clampBatchSize(n uint32) uint32 {
+	if n == 0 {
+		return defaultListEntriesBatchSize
+	}
+	if n > maxListEntriesBatchSize {
+		return maxListEntriesBatchSize
+	}
+	return n
+}
+
 // ACLServiceProvider is the interface through which the fwstate service drives
 // ACL config lifecycle. Implementations must be safe for concurrent use.
 type ACLServiceProvider interface {
@@ -363,10 +387,7 @@ func (m *FWStateService) ListEntries(
 			return status.Error(codes.InvalidArgument, "config_name is required")
 		}
 
-		count := req.GetBatchSize()
-		if count == 0 {
-			count = 100
-		}
+		count := clampBatchSize(req.GetBatchSize())
 
 		m.mu.Lock()
 		config, ok := m.configs[configName]

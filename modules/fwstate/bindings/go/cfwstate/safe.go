@@ -15,6 +15,10 @@ import (
 // TTL48Max is the largest TTL (ns) storable in fw_state_value::last_ttl.
 const TTL48Max = uint64(C.FWSTATE_TTL48_MAX)
 
+// maxCursorBatch caps the allocation made by readEntries regardless of the
+// caller-supplied count, providing a defence-in-depth limit at the binding layer.
+const maxCursorBatch uint32 = 10000
+
 type MapConfig struct {
 	IndexSize        uint32
 	ExtraBucketCount uint32
@@ -284,6 +288,9 @@ func (m *ModuleConfig) readEntries(
 
 	if count == 0 {
 		return nil, int64(cursor.key_pos), false, nil
+	}
+	if count > maxCursorBatch {
+		count = maxCursorBatch
 	}
 
 	buf := make([]C.fwstate_cursor_entry_t, count)
