@@ -1,0 +1,13 @@
+syntax = "proto3";
+
+package controlplane.ynpb.v1;
+
+option go_package = "github.com/yanet-platform/yanet2/controlplane/ynpb/v1;ynpb";
+
+import "common/readinesspb/v1/readiness.proto";
+
+// ReadinessService exposes gateway readiness state to external probes.
+service ReadinessService {
+  // Ready returns the current readiness state of the gateway.
+  rpc Ready(common.readinesspb.v1.ReadyRequest) returns (common.readinesspb.v1.ReadyResponse);
+}

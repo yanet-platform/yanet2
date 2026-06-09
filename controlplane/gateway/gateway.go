@@ -115,6 +115,7 @@ type Gateway struct {
 	services       []Service
 	serviceRunners []*ServiceRunner
 	registry       *BackendRegistry
+	readiness      *readinessTracker
 	log            *zap.Logger
 }
 
@@ -184,6 +185,11 @@ func NewGateway(cfg *Config, options ...GatewayOption) (*Gateway, error) {
 	ynpb.RegisterAuthServiceServer(server, authService)
 	log.Info("registered service", zap.String("service", fmt.Sprintf("%T", authService)))
 
+	readinessTracker := newReadinessTracker(log)
+	readinessSvc := NewReadinessService(readinessTracker)
+	ynpb.RegisterReadinessServiceServer(server, readinessSvc)
+	log.Info("registered service", zap.String("service", fmt.Sprintf("%T", readinessSvc)))
+
 	// Dial a single loopback connection shared by services hosted on the
 	// gateway's own gRPC server.
 	//
@@ -199,7 +205,11 @@ func NewGateway(cfg *Config, options ...GatewayOption) (*Gateway, error) {
 		return nil, fmt.Errorf("failed to create loopback backend for gateway-hosted services: %w", err)
 	}
 
-	for _, service := range []string{"controlplane.ynpb.v1.Gateway", "controlplane.ynpb.v1.Auth"} {
+	for _, service := range []string{
+		"controlplane.ynpb.v1.Gateway",
+		"controlplane.ynpb.v1.Auth",
+		ynpb.ReadinessService_ServiceDesc.ServiceName,
+	} {
 		registry.RegisterBackend(service, loopback, BackendKindBuiltin)
 		log.Info("registered built-in service in registry",
 			zap.String("service", service),
@@ -247,6 +257,7 @@ func NewGateway(cfg *Config, options ...GatewayOption) (*Gateway, error) {
 		services:       services,
 		serviceRunners: serviceRunners,
 		registry:       registry,
+		readiness:      readinessTracker,
 		log:            log,
 	}, nil
 }
@@ -330,13 +341,17 @@ func (m *Gateway) Run(ctx context.Context) error {
 			m.log.Info("all built-in modules ready",
 				zap.Int("count", len(m.serviceRunners)),
 			)
+			m.readiness.Ready()
 			return nil
 		})
 	} else {
 		m.log.Info("all built-in modules ready", zap.Int("count", 0))
+		m.readiness.Ready()
 	}
 
 	<-ctx.Done()
+
+	m.readiness.Drain()
 
 	m.log.Info("stopping gRPC gateway", zap.Stringer("addr", listener.Addr()))
 	defer m.log.Info("stopped gRPC gateway", zap.Stringer("addr", listener.Addr()))

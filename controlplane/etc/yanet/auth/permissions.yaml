@@ -7,3 +7,4 @@ permissions:
     - username: anonymous
       permissions:
         - "/controlplane.ynpb.v1.Gateway/Register"
+        - "/controlplane.ynpb.v1.ReadinessService/Ready"
