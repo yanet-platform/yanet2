@@ -1,8 +1,9 @@
-import React, { useEffect, useImperativeHandle, useState } from 'react';
+import React from 'react';
 import type { FIBRowItem, FIBRowErrors } from './types';
 import { validateRow } from './validation';
 import { DraftItemDrawer } from '../../../components/draft';
 import { CidrPrefixField } from '../../../components';
+import { useRowDraft } from '../../../hooks';
 
 interface FIBDrawerProps {
     open: boolean;
@@ -32,38 +33,9 @@ const FIBDrawer = React.forwardRef<FIBDrawerHandle, FIBDrawerProps>(({
     onDelete,
     onJump,
 }, ref) => {
-    const [draft, setDraft] = useState<FIBRowItem | null>(null);
-    const [errors, setErrors] = useState<FIBRowErrors>({ prefix: null, dst_mac: null, src_mac: null, device: null });
-
-    useEffect(() => {
-        if (open && row) {
-            setDraft({ ...row });
-            setErrors({ prefix: null, dst_mac: null, src_mac: null, device: null });
-        }
-    }, [open, row?.id]);
-
-    const updateField = <K extends keyof FIBRowItem>(key: K, val: FIBRowItem[K]): void => {
-        setDraft((prev) => {
-            if (!prev) return prev;
-            const next = { ...prev, [key]: val };
-            setErrors(validateRow(next));
-            return next;
-        });
-    };
-
-    const handleApply = (): void => {
-        if (!draft) return;
-        onChange(draft);
-        onClose();
-    };
-
-    useImperativeHandle(ref, () => ({
-        flushAndApply() {
-            if (!open || !draft) return false;
-            onChange(draft);
-            return true;
-        },
-    }), [open, draft, onChange]);
+    const { draft, errors, updateField, handleApply } = useRowDraft<FIBRowItem, FIBRowErrors>({
+        open, row, emptyErrors: { prefix: null, dst_mac: null, src_mac: null, device: null }, validateRow, onChange, onClose, handleRef: ref,
+    });
 
     return (
         <DraftItemDrawer

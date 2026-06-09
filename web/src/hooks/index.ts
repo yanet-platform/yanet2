@@ -45,3 +45,6 @@ export { useModuleCards } from './useModuleCards';
 export type { ModuleCardData } from './useModuleCards';
 
 export { useDrawerFlush } from './useDrawerFlush';
+
+export { useRowDraft } from './useRowDraft';
+export type { UseRowDraftParams, UseRowDraftResult, RowDraftHandle } from './useRowDraft';
