@@ -795,16 +795,21 @@ icmp_v6_to_v4(
 		uint8_t next_header = ipv6_payload_header->proto;
 		uint8_t count_header = 0;
 		uint16_t offset = sizeof(struct rte_ipv6_hdr);
+		uint32_t embedded_fragment_id = 0;
+		uint16_t embedded_fragment_offset = 0;
+		uint16_t embedded_fragment_flags = 0;
 
 		// Skip extension headers
 		while (next_header == IPPROTO_HOPOPTS ||
 		       next_header == IPPROTO_ROUTING ||
 		       next_header == IPPROTO_DSTOPTS) {
-			if (offset >= remaining_len) {
+			if (offset + sizeof(struct yanet_ipv6_ext_2byte) >
+			    remaining_len) {
 				RTE_LOG(ERR,
 					NAT64,
 					"Reached end of packet while "
 					"validating embedded packet\n");
+				nat64_stats_malformed(nat64_config);
 				return -1;
 			}
 			count_header++;
@@ -869,6 +874,17 @@ icmp_v6_to_v4(
 
 		if (next_header == IPPROTO_FRAGMENT) {
 			is_fragmented = 1;
+			if (offset + sizeof(struct yanet_ipv6_ext_fragment) >
+			    remaining_len) {
+				LOG_DBG(NAT64,
+					"ICMP error embedded packet fragment "
+					"header truncated (offset=%u, "
+					"remaining=%u)\n",
+					offset,
+					remaining_len);
+				nat64_stats_malformed(nat64_config);
+				return -1;
+			}
 			// Skip the fragment header
 			struct yanet_ipv6_ext_fragment *frag_hdr =
 				rte_pktmbuf_mtod_offset(
@@ -886,6 +902,14 @@ icmp_v6_to_v4(
 				return -1;
 			}
 
+			embedded_fragment_id = frag_hdr->identification;
+			uint16_t frag_data =
+				rte_be_to_cpu_16(frag_hdr->offset_flag);
+			embedded_fragment_offset =
+				(frag_data & RTE_IPV6_EHDR_FO_MASK) >>
+				RTE_IPV6_EHDR_FO_SHIFT;
+			embedded_fragment_flags =
+				frag_data & RTE_IPV6_EHDR_MF_MASK;
 			next_header = frag_hdr->next_header;
 			offset += sizeof(struct yanet_ipv6_ext_fragment);
 		}
@@ -937,29 +961,15 @@ icmp_v6_to_v4(
 
 		// Set identification, flags, and fragment offset
 		if (is_fragmented) {
-			struct yanet_ipv6_ext_fragment *frag_hdr =
-				rte_pktmbuf_mtod_offset(
-					mbuf,
-					struct yanet_ipv6_ext_fragment *,
-					packet->transport_header.offset +
-						sizeof(struct yanet_icmp6_hdr) +
-						sizeof(struct rte_ipv6_hdr)
-				);
-
 			new_ipv4_payload_header->packet_id =
-				frag_hdr->identification;
-
-			uint16_t frag_data =
-				rte_be_to_cpu_16(frag_hdr->offset_flag);
-			uint16_t frag_offset =
-				(frag_data & RTE_IPV6_EHDR_FO_MASK) >>
-				RTE_IPV6_EHDR_FO_SHIFT;
-			uint16_t frag_flags = frag_data & RTE_IPV6_EHDR_MF_MASK;
+				embedded_fragment_id;
 
 			new_ipv4_payload_header->fragment_offset =
 				rte_cpu_to_be_16(
-					(frag_offset << 3) |
-					(frag_flags ? RTE_IPV4_HDR_MF_FLAG : 0)
+					(embedded_fragment_offset << 3) |
+					(embedded_fragment_flags
+						 ? RTE_IPV4_HDR_MF_FLAG
+						 : 0)
 				);
 		} else {
 			new_ipv4_payload_header->packet_id = 0;
