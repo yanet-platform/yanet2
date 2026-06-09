@@ -1,8 +1,8 @@
 #include "dataplane.h"
 
 #include "config.h"
-#include "numa.h"
 #include "logging/log.h"
+#include "numa.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -306,12 +306,13 @@ dataplane_init(
 
 	assert((uintptr_t)storage % page_size == 0);
 
-	// Load external module plugins from .a files.
+	// Load external module plugins (.so shared libraries).
 	memset(&dataplane->plugins, 0, sizeof(dataplane->plugins));
 	if (config->plugin_dir[0] != '\0') {
-		if (dp_load_plugins(config->plugin_dir,
-		                    &dataplane->plugins) != 0) {
-			LOG(ERROR, "failed to load plugins from %s",
+		if (dp_load_plugins(config->plugin_dir, &dataplane->plugins) !=
+		    0) {
+			LOG(ERROR,
+			    "failed to load plugins from %s",
 			    config->plugin_dir);
 			return -1;
 		}
@@ -421,10 +422,12 @@ dataplane_init(
 			"blackhole"
 		};
 
-		for (size_t i = 0; i < sizeof(default_modules) /
-		     sizeof(default_modules[0]); ++i) {
+		for (size_t i = 0;
+		     i < sizeof(default_modules) / sizeof(default_modules[0]);
+		     ++i) {
 			if (dp_load_module(
-				    instance->dp_config, bin_hndl,
+				    instance->dp_config,
+				    bin_hndl,
 				    &dataplane->plugins,
 				    default_modules[i]
 			    ) == -1) {
@@ -434,8 +437,9 @@ dataplane_init(
 
 		for (uint64_t i = 0; i < config->module_count; ++i) {
 			bool is_default = false;
-			for (size_t j = 0; j < sizeof(default_modules) /
-			     sizeof(default_modules[0]); ++j) {
+			for (size_t j = 0; j < sizeof(default_modules
+					       ) / sizeof(default_modules[0]);
+			     ++j) {
 				if (strcmp(config->module_names[i],
 					   default_modules[j]) == 0) {
 					is_default = true;
@@ -447,7 +451,8 @@ dataplane_init(
 			}
 
 			if (dp_load_module(
-				    instance->dp_config, bin_hndl,
+				    instance->dp_config,
+				    bin_hndl,
 				    &dataplane->plugins,
 				    config->module_names[i]
 			    ) == -1) {

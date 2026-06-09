@@ -17,8 +17,7 @@
 // Extract module name from filename: "libnat44_dp.so" -> "nat44".
 // Returns 0 on success, -1 if the filename does not match.
 static int
-plugin_name_from_filename(const char *filename, char *name,
-                          size_t name_len) {
+plugin_name_from_filename(const char *filename, char *name, size_t name_len) {
 	size_t prefix_len = strlen(PLUGIN_SO_PREFIX);
 	size_t suffix_len = strlen(PLUGIN_SO_SUFFIX);
 	size_t fn_len = strlen(filename);
@@ -40,8 +39,7 @@ plugin_name_from_filename(const char *filename, char *name,
 }
 
 int
-dp_load_plugins(const char *plugin_dir,
-                struct plugin_registry *registry) {
+dp_load_plugins(const char *plugin_dir, struct plugin_registry *registry) {
 	registry->plugins = NULL;
 	registry->count = 0;
 
@@ -50,21 +48,29 @@ dp_load_plugins(const char *plugin_dir,
 
 	DIR *dir = opendir(plugin_dir);
 	if (dir == NULL) {
-		LOG(WARN, "cannot open plugin directory %s: %s",
-		    plugin_dir, strerror(errno));
+		LOG(WARN,
+		    "cannot open plugin directory %s: %s",
+		    plugin_dir,
+		    strerror(errno));
 		return 0;
 	}
 
 	struct dirent *entry;
 	while ((entry = readdir(dir)) != NULL) {
 		char name[PLUGIN_NAME_LEN];
-		if (plugin_name_from_filename(entry->d_name,
-		                              name, sizeof(name)) != 0)
+		if (plugin_name_from_filename(
+			    entry->d_name, name, sizeof(name)
+		    ) != 0)
 			continue;
 
 		char so_path[512];
-		snprintf(so_path, sizeof(so_path), "%s/%s",
-		         plugin_dir, entry->d_name);
+		snprintf(
+			so_path,
+			sizeof(so_path),
+			"%s/%s",
+			plugin_dir,
+			entry->d_name
+		);
 
 		struct stat st;
 		if (stat(so_path, &st) != 0 || !S_ISREG(st.st_mode))
@@ -72,15 +78,14 @@ dp_load_plugins(const char *plugin_dir,
 
 		void *dl = dlopen(so_path, RTLD_NOW | RTLD_GLOBAL);
 		if (dl == NULL) {
-			LOG(ERROR, "dlopen(%s) failed: %s",
-			    so_path, dlerror());
+			LOG(ERROR, "dlopen(%s) failed: %s", so_path, dlerror());
 			continue;
 		}
 
-		struct plugin_handle *new_plugins = realloc(
-			registry->plugins,
-			sizeof(struct plugin_handle) *
-				(registry->count + 1));
+		struct plugin_handle *new_plugins =
+			realloc(registry->plugins,
+				sizeof(struct plugin_handle) *
+					(registry->count + 1));
 		if (new_plugins == NULL) {
 			LOG(ERROR, "out of memory for plugin %s", name);
 			dlclose(dl);
@@ -99,8 +104,10 @@ dp_load_plugins(const char *plugin_dir,
 
 	closedir(dir);
 
-	LOG(INFO, "loaded %lu external plugin(s) from %s",
-	    (unsigned long)registry->count, plugin_dir);
+	LOG(INFO,
+	    "loaded %lu external plugin(s) from %s",
+	    (unsigned long)registry->count,
+	    plugin_dir);
 	return 0;
 }
 

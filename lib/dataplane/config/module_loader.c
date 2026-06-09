@@ -14,22 +14,27 @@
 #include "lib/logging/log.h"
 
 int
-dp_load_module(struct dp_config *dp_config, void *bin_hndl,
-               const struct plugin_registry *plugins, const char *name) {
+dp_load_module(
+	struct dp_config *dp_config,
+	void *bin_hndl,
+	const struct plugin_registry *plugins,
+	const char *name
+) {
 	LOG(INFO, "load module %s", name);
 	char loader_name[128];
 	snprintf(loader_name, sizeof(loader_name), "%s%s", "new_module_", name);
 
-	// Try plugin handles first (external modules loaded from .a).
+	// Try plugin handles first (external .so modules).
 	module_load_handler loader = NULL;
 	if (plugins != NULL) {
 		for (uint64_t i = 0; i < plugins->count; i++) {
-			loader = (module_load_handler)dlsym(
-				plugins->plugins[i].dl_handle,
-				loader_name);
+			loader = (module_load_handler
+			)dlsym(plugins->plugins[i].dl_handle, loader_name);
 			if (loader != NULL) {
-				LOG(INFO, "module %s found in plugin %s",
-				    name, plugins->plugins[i].name);
+				LOG(INFO,
+				    "module %s found in plugin %s",
+				    name,
+				    plugins->plugins[i].name);
 				break;
 			}
 		}
