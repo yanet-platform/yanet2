@@ -48,3 +48,6 @@ export { useDrawerFlush } from './useDrawerFlush';
 
 export { useRowDraft } from './useRowDraft';
 export type { UseRowDraftParams, UseRowDraftResult, RowDraftHandle } from './useRowDraft';
+
+export { useLaneTrackDnD } from './useLaneTrackDnD';
+export type { UseLaneTrackDnDOptions, UseLaneTrackDnDResult } from './useLaneTrackDnD';

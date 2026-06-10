@@ -1,8 +1,9 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react';
+import React from 'react';
 import type { FunctionRef, DragPayload } from '../types';
 import { getDragPayload, InsertSlot, Endpoint, FlowLink, AddSlotButton } from '../../_shared/lane-editor';
 import { FunctionRefCard } from './FunctionRefCard';
 import type { InterpolatedCounterData } from '../../../../hooks';
+import { useLaneTrackDnD } from '../../../../hooks';
 
 interface LaneTrackProps {
     pipelineId: string;
@@ -33,10 +34,6 @@ export const LaneTrack: React.FC<LaneTrackProps> = ({
     onRemoveRef,
     onAddRef,
 }) => {
-    const [activeSlotIdx, setActiveSlotIdx] = useState<number | null>(null);
-    const containerRef = useRef<HTMLDivElement>(null);
-    const cancelledByEscRef = useRef(false);
-
     const { isDragging, dragPayload } = dragState;
     const isActiveDrag = isDragging && !!dragPayload;
     const isPipelineDrag = isActiveDrag && dragPayload.fromChainId === dragPayload.fromFnId;
@@ -52,98 +49,16 @@ export const LaneTrack: React.FC<LaneTrackProps> = ({
         hiddenSlots.add(fromRefIdx + 1);
     }
 
-    useEffect(() => {
-        if (!isActiveDrag) {
-            cancelledByEscRef.current = false;
-            return;
-        }
-        const handleKeyDown = (e: KeyboardEvent): void => {
-            if (e.key === 'Escape' && isActiveDrag) {
-                cancelledByEscRef.current = true;
-                setActiveSlotIdx(null);
-                onDragEnd();
-            }
-        };
-        window.addEventListener('keydown', handleKeyDown);
-        return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [isActiveDrag, onDragEnd]);
-
-    const handleDragOver = useCallback((e: React.DragEvent<HTMLDivElement>): void => {
-        if (!isPipelineDrag) {
-            return;
-        }
-        e.preventDefault();
-        e.dataTransfer.dropEffect = 'move';
-
-        const container = containerRef.current;
-        if (!container) {
-            return;
-        }
-
-        const slots = container.querySelectorAll<HTMLElement>('[data-slot-idx]');
-        if (slots.length === 0) {
-            return;
-        }
-
-        const cx = e.clientX;
-        const cy = e.clientY;
-        let nearestIdx = 0;
-        let nearestDist = Infinity;
-
-        slots.forEach(slot => {
-            const rect = slot.getBoundingClientRect();
-            const slotCx = rect.left + rect.width / 2;
-            const slotCy = rect.top + rect.height / 2;
-            const dist = Math.sqrt((cx - slotCx) ** 2 + (cy - slotCy) ** 2);
-            const idx = parseInt(slot.getAttribute('data-slot-idx') ?? '0', 10);
-            if (dist < nearestDist) {
-                nearestDist = dist;
-                nearestIdx = idx;
-            }
+    const { activeSlotIdx, containerRef, handleDragOver, handleDragLeave, handleDrop, handleDragEnd } =
+        useLaneTrackDnD<DragPayload>({
+            isItemDrag: isPipelineDrag,
+            isActiveDrag,
+            onDragEnd,
+            getPayload: getDragPayload,
+            acceptPayload: (p) => p.fromChainId === p.fromFnId,
+            sameContainerSrcIdx: (p) => p.fromFnId === pipelineId ? p.fromModIdx : -1,
+            onDropAt: onDrop,
         });
-
-        setActiveSlotIdx(nearestIdx);
-    }, [isPipelineDrag]);
-
-    const handleDragLeave = useCallback((): void => {
-        setActiveSlotIdx(null);
-    }, []);
-
-    const handleDrop = useCallback((e: React.DragEvent<HTMLDivElement>): void => {
-        e.preventDefault();
-        setActiveSlotIdx(null);
-
-        if (cancelledByEscRef.current) {
-            cancelledByEscRef.current = false;
-            return;
-        }
-
-        const payload = getDragPayload();
-        if (!payload || payload.fromChainId !== payload.fromFnId) {
-            return;
-        }
-
-        if (activeSlotIdx === null) {
-            return;
-        }
-
-        const toIdx = activeSlotIdx;
-        if (payload.fromFnId === pipelineId) {
-            const src = payload.fromModIdx;
-            if (toIdx === src || toIdx === src + 1) {
-                return;
-            }
-        }
-
-        onDrop(toIdx);
-    }, [pipelineId, activeSlotIdx, onDrop]);
-
-    const handleDragEnd = useCallback((): void => {
-        setActiveSlotIdx(null);
-        if (!cancelledByEscRef.current) {
-            onDragEnd();
-        }
-    }, [onDragEnd]);
 
     return (
         <div
