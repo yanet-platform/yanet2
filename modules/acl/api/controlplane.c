@@ -278,10 +278,11 @@ check_has_full_dst_port_range(const struct acl_rule *acl_rule) {
 
 static int
 check_has_full_port_range(const struct acl_rule *acl_rule) {
-	return (acl_rule->fragment == FILTER_IP_FRAG_ANY ||
-		acl_rule->fragment == FILTER_IP_FRAG_NONE) &&
-	       check_has_full_src_port_range(acl_rule) &&
-	       check_has_full_dst_port_range(acl_rule);
+	return ((acl_rule->fragment == FILTER_IP_FRAG_ANY ||
+		 acl_rule->fragment == FILTER_IP_FRAG_NONE) &&
+		check_has_full_src_port_range(acl_rule) &&
+		check_has_full_dst_port_range(acl_rule)) ||
+	       acl_rule->fragment == FILTER_IP_FRAG_FRAG;
 }
 
 static int
