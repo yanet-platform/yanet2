@@ -609,18 +609,28 @@ export const IsoScene3D: React.FC<IsoScene3DProps> = ({
             scene.add(grid);
         }
 
-        const wires: WireEntry[] = [];
-        structuralDevices.forEach((d) => {
-            if (!d.pipeIn) return;
+        const deviceEntry = (d: StructuralDevice): {
+            pi: number;
+            pts: THREE.Vector3[];
+        } | null => {
+            if (!d.pipeIn) return null;
             const pi = structuralPipelines.findIndex((p) => p.id === d.pipeIn);
-            if (pi < 0) return;
+            if (pi < 0) return null;
             const pos = devicePositions[d.id];
-            if (!pos) return;
+            if (!pos) return null;
             const pts = [
                 new THREE.Vector3(pos.x + devW, devH / 2, pos.z + devD / 2),
                 new THREE.Vector3(X0 - 6, devH / 2, pos.z + devD / 2),
                 new THREE.Vector3(X0, LANE_THICK + 1, pipeZ[pi]),
             ];
+            return { pi, pts };
+        };
+
+        const wires: WireEntry[] = [];
+        structuralDevices.forEach((d) => {
+            const entry = deviceEntry(d);
+            if (!entry) return;
+            const { pts } = entry;
             const geo = new THREE.BufferGeometry().setFromPoints(pts);
             const mat = new THREE.LineBasicMaterial({
                 color: 0x3a3731,
@@ -629,22 +639,15 @@ export const IsoScene3D: React.FC<IsoScene3DProps> = ({
             });
             const line = new THREE.Line(geo, mat);
             scene.add(line);
-            wires.push({ line, deviceId: d.id, pipeId: d.pipeIn });
+            wires.push({ line, deviceId: d.id, pipeId: d.pipeIn! });
         });
 
         const fwdPaths: FwdPath[] = [];
         structuralDevices.forEach((d) => {
-            if (!d.pipeIn) return;
-            const pi = structuralPipelines.findIndex((p) => p.id === d.pipeIn);
-            if (pi < 0) return;
-            const pos = devicePositions[d.id];
-            if (!pos) return;
-            const pts = [
-                new THREE.Vector3(pos.x + devW, devH / 2, pos.z + devD / 2),
-                new THREE.Vector3(X0 - 6, devH / 2, pos.z + devD / 2),
-                new THREE.Vector3(X0, LANE_THICK + 1, pipeZ[pi]),
-                new THREE.Vector3(X0 + LANE_LEN, LANE_THICK + 1, pipeZ[pi]),
-            ];
+            const entry = deviceEntry(d);
+            if (!entry) return;
+            const { pi, pts } = entry;
+            pts.push(new THREE.Vector3(X0 + LANE_LEN, LANE_THICK + 1, pipeZ[pi]));
             const lens: number[] = [];
             let total = 0;
             for (let i = 1; i < pts.length; i++) {

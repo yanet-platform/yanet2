@@ -5,6 +5,13 @@
 // web/src/styles/chrome.scss which this page imports. This file covers only
 // ACL-specific chip colors, action chain, editor elements, and override tweaks.
 
+@mixin diff-status-border {
+    &--add   { border-left: 3px solid var(--g-color-base-positive-medium); }
+    &--mod   { border-left: 3px solid var(--g-color-base-warning-medium); }
+    &--rem   { border-left: 3px solid var(--g-color-base-danger-medium); }
+    &--reord { border-left: 3px solid var(--g-color-base-misc-medium); }
+}
+
 // Chip list container.
 .acl-chip-list {
     display: inline-flex;
@@ -337,10 +344,7 @@
     overflow: hidden;
     border: 1px solid var(--yn-line);
 
-    &--add  { border-left: 3px solid var(--g-color-base-positive-medium); }
-    &--mod  { border-left: 3px solid var(--g-color-base-warning-medium); }
-    &--rem  { border-left: 3px solid var(--g-color-base-danger-medium); }
-    &--reord { border-left: 3px solid var(--g-color-base-misc-medium); }
+    @include diff-status-border;
 }
 
 .acl-diff-section-head {
@@ -392,10 +396,7 @@
     border-radius: 5px;
     overflow: hidden;
 
-    &--add  { border-left: 3px solid var(--g-color-base-positive-medium); }
-    &--mod  { border-left: 3px solid var(--g-color-base-warning-medium); }
-    &--rem  { border-left: 3px solid var(--g-color-base-danger-medium); }
-    &--reord { border-left: 3px solid var(--g-color-base-misc-medium); }
+    @include diff-status-border;
 }
 
 .acl-diff-card-ref {
