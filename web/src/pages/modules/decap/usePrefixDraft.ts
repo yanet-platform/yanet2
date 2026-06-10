@@ -12,8 +12,8 @@ export type UsePrefixDraftResult = UseDraftResult<PrefixRowItem>;
  *
  * Server state is fetched once on mount. All UI mutations go through
  * dispatchDraft and update only local state until the user explicitly calls
- * commitConfig. On commit the diff between draft and server is computed and
- * the minimal add/remove API calls are made.
+ * commitConfig. On commit the full draft prefix list is sent atomically via
+ * UpdateConfig, replacing the server state entirely.
  */
 export const usePrefixDraft = (): UsePrefixDraftResult => {
     const load = useCallback(async (): Promise<Array<{ name: string; rows: PrefixRowItem[] }>> => {
@@ -39,18 +39,8 @@ export const usePrefixDraft = (): UsePrefixDraftResult => {
     const commit = useCallback(async (
         configName: string,
         draftRows: PrefixRowItem[],
-        serverRowsArg: PrefixRowItem[],
     ): Promise<void> => {
-        const draftPrefixes = new Set(draftRows.map((r) => r.prefix));
-        const serverPrefixes = new Set(serverRowsArg.map((r) => r.prefix));
-        const added = [...draftPrefixes].filter((p) => !serverPrefixes.has(p));
-        const removed = [...serverPrefixes].filter((p) => !draftPrefixes.has(p));
-        if (added.length > 0) {
-            await API.decap.addPrefixes({ name: configName, prefixes: added });
-        }
-        if (removed.length > 0) {
-            await API.decap.removePrefixes({ name: configName, prefixes: removed });
-        }
+        await API.decap.updateConfig({ name: configName, prefixes: draftRows.map((r) => r.prefix) });
     }, []);
 
     return useDraft<PrefixRowItem>({

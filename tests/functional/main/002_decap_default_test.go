@@ -32,7 +32,7 @@ func TestTest_002_decap_default(t *testing.T) {
 		fw.Run("Step_000_Configure_Decap_Environment", func(fw *framework.TestFramework, t *testing.T) {
 			// Configure Decap module
 			commands := []string{
-				"/mnt/target/release/yanet-cli-decap prefix-add --name decap0 -p 1:2:3:4::abcd/128",
+				"/mnt/target/release/yanet-cli-decap update --name decap0 -p 1:2:3:4::abcd/128",
 
 				"/mnt/target/release/yanet-cli-function update --name=test --chains chain2:1=forward:forward0,decap:decap0,route:route0",
 				"/mnt/target/release/yanet-cli-pipeline update --name=test --functions test",

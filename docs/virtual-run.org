@@ -132,7 +132,7 @@ yanet-cli forward l3-add --cfg=forward0 --instance 0 --src 0 --dst 1 --net ff02:
 yanet-cli forward l3-add --cfg=forward0 --instance 0 --src 1 --dst 0 --net 0.0.0.0/0
 yanet-cli forward l3-add --cfg=forward0 --instance 0 --src 1 --dst 0 --net ::/0
 
-yanet-cli decap prefix-add --cfg decap0 --instance 0 -p $DECAP_PREFIX
+yanet-cli-decap update --name decap0 -p $DECAP_PREFIX
 
 yanet-cli route insert --cfg route0 --instance 0 --via $DEFGW6 ::/0
 

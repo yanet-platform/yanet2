@@ -13,10 +13,8 @@ service DecapService {
   // ShowConfig returns the current configuration for the decap module.
   rpc ShowConfig(ShowConfigRequest) returns (ShowConfigResponse) {}
 
-  // AddPrefixes adds prefixes to the decap module configuration.
-  rpc AddPrefixes(AddPrefixesRequest) returns (AddPrefixesResponse) {}
-  // RemovePrefixes removes prefixes from the decap module configuration.
-  rpc RemovePrefixes(RemovePrefixesRequest) returns (RemovePrefixesResponse) {}
+  // UpdateConfig atomically replaces the whole prefix set of the named config.
+  rpc UpdateConfig(UpdateConfigRequest) returns (UpdateConfigResponse) {}
 }
 
 message ListConfigsRequest {}
@@ -24,23 +22,17 @@ message ListConfigsRequest {}
 // ListConfigsResponse contains existing configurations.
 message ListConfigsResponse { repeated string configs = 1; }
 
-// ShowConfigResponse retrieves the runtime configuration for the decap module.
+// ShowConfigRequest retrieves the runtime configuration for the decap module.
 message ShowConfigRequest { string name = 1; }
 
 // ShowConfigResponse contains the configuration details of the decap module.
 message ShowConfigResponse { repeated string prefixes = 1; }
 
-// AddPrefixesRequest adds prefixes to the input filter of the decap module.
-message AddPrefixesRequest {
+// UpdateConfigRequest carries the full desired prefix set for the named config.
+message UpdateConfigRequest {
   string name = 1;
   repeated string prefixes = 2;
 }
-message AddPrefixesResponse {}
 
-// RemovePrefixesRequest removes prefixes from the input filter of the decap
-// module.
-message RemovePrefixesRequest {
-  string name = 1;
-  repeated string prefixes = 2;
-}
-message RemovePrefixesResponse {}
+// UpdateConfigResponse is the response to an UpdateConfig call.
+message UpdateConfigResponse {}

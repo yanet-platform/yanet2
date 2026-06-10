@@ -3,7 +3,7 @@ use core::error::Error;
 use clap::{ArgAction, CommandFactory, Parser, ValueEnum};
 use clap_complete::CompleteEnv;
 use decappb::{
-    AddPrefixesRequest, ListConfigsRequest, RemovePrefixesRequest, ShowConfigRequest, ShowConfigResponse,
+    ListConfigsRequest, ShowConfigRequest, ShowConfigResponse, UpdateConfigRequest,
     decap_service_client::DecapServiceClient,
 };
 use netip::{Contiguous, IpNetwork};
@@ -39,8 +39,7 @@ pub struct Cmd {
 pub enum ModeCmd {
     List,
     Show(ShowConfigCmd),
-    PrefixAdd(AddPrefixesCmd),
-    PrefixRemove(RemovePrefixesCmd),
+    Update(UpdateConfigCmd),
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -54,21 +53,11 @@ pub struct ShowConfigCmd {
 }
 
 #[derive(Debug, Clone, Parser)]
-pub struct AddPrefixesCmd {
+pub struct UpdateConfigCmd {
     /// Decap module name to operate on.
     #[arg(long = "name", short = 'n')]
     pub config_name: String,
-    /// Prefix to be added to the input filter of the decapsulation module.
-    #[arg(long, short)]
-    pub prefix: Vec<Contiguous<IpNetwork>>,
-}
-
-#[derive(Debug, Clone, Parser)]
-pub struct RemovePrefixesCmd {
-    /// Decap module name to operate on.
-    #[arg(long = "name", short = 'n')]
-    pub config_name: String,
-    /// Prefix to be removed from the input filter of the decapsulation module.
+    /// Prefix in the full desired set, replacing the current one entirely.
     #[arg(long, short)]
     pub prefix: Vec<Contiguous<IpNetwork>>,
 }
@@ -100,8 +89,7 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
     match cmd.mode {
         ModeCmd::List => service.list_configs().await,
         ModeCmd::Show(cmd) => service.show_config(cmd).await,
-        ModeCmd::PrefixAdd(cmd) => service.add_prefixes(cmd).await,
-        ModeCmd::PrefixRemove(cmd) => service.remove_prefixes(cmd).await,
+        ModeCmd::Update(cmd) => service.update_config(cmd).await,
     }
 }
 
@@ -147,25 +135,14 @@ impl DecapService {
         Ok(())
     }
 
-    pub async fn add_prefixes(&mut self, cmd: AddPrefixesCmd) -> Result<(), Box<dyn Error>> {
-        let request = AddPrefixesRequest {
+    pub async fn update_config(&mut self, cmd: UpdateConfigCmd) -> Result<(), Box<dyn Error>> {
+        let request = UpdateConfigRequest {
             name: cmd.config_name.clone(),
             prefixes: cmd.prefix.iter().map(|p| p.to_string()).collect(),
         };
-        log::trace!("AddPrefixesRequest: {request:?}");
-        let response = self.client.add_prefixes(request).await?.into_inner();
-        log::debug!("AddPrefixesResponse: {response:?}");
-        Ok(())
-    }
-
-    pub async fn remove_prefixes(&mut self, cmd: RemovePrefixesCmd) -> Result<(), Box<dyn Error>> {
-        let request = RemovePrefixesRequest {
-            name: cmd.config_name.clone(),
-            prefixes: cmd.prefix.iter().map(|p| p.to_string()).collect(),
-        };
-        log::trace!("RemovePrefixesRequest: {request:?}");
-        let response = self.client.remove_prefixes(request).await?.into_inner();
-        log::debug!("RemovePrefixesResponse: {response:?}");
+        log::trace!("update config request: {request:?}");
+        let response = self.client.update_config(request).await?.into_inner();
+        log::debug!("update config response: {response:?}");
         Ok(())
     }
 }

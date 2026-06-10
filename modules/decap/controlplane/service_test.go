@@ -2,16 +2,18 @@ package decap
 
 import (
 	"errors"
+	"fmt"
 	"net/netip"
 	"sync/atomic"
 	"testing"
 
-	"github.com/google/go-cmp/cmp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/google/go-cmp/cmp"
 	"github.com/yanet-platform/yanet2/modules/decap/controlplane/decappb/v1"
 )
 
@@ -44,217 +46,187 @@ func (m *flakyBackend) UpdateModule(
 	name string,
 	prefixes []netip.Prefix,
 ) (ModuleHandle, error) {
-	numCalls := m.numCalls.Add(1)
-
-	if numCalls >= 2 {
+	if m.numCalls.Add(1) >= 2 {
 		return nil, errInjectedBackend
 	}
-
 	return &mockModuleHandle{}, nil
 }
 
-func Test_DecapService_AddShow(t *testing.T) {
-	service := newTestService(t)
+func Test_DecapService_UpdateAndShow(t *testing.T) {
+	svc := newTestService(t)
 	prefix := "10.0.0.0/24"
 
-	{
-		response, err := service.AddPrefixes(
-			t.Context(),
-			&decappb.AddPrefixesRequest{
-				Name:     "decap0",
-				Prefixes: []string{prefix},
-			},
-		)
-		require.NotNil(t, response)
-		require.NoError(t, err)
-	}
+	resp, err := svc.UpdateConfig(t.Context(), &decappb.UpdateConfigRequest{
+		Name:     "decap0",
+		Prefixes: []string{prefix},
+	})
+	require.NotNil(t, resp)
+	require.NoError(t, err)
 
-	{
-		response, err := service.ShowConfig(
-			t.Context(),
-			&decappb.ShowConfigRequest{
-				Name: "decap0",
-			},
-		)
-		require.NotNil(t, response)
-		require.NoError(t, err)
-		require.Empty(t, cmp.Diff([]string{prefix}, response.Prefixes))
-	}
+	show, err := svc.ShowConfig(t.Context(), &decappb.ShowConfigRequest{Name: "decap0"})
+	require.NotNil(t, show)
+	require.NoError(t, err)
+	require.Empty(t, cmp.Diff([]string{prefix}, show.Prefixes))
 }
 
-func Test_DecapService_AddRemovePartial(t *testing.T) {
-	service := newTestService(t)
+func Test_DecapService_UpdateFullyReplaces(t *testing.T) {
+	svc := newTestService(t)
 
-	{
-		response, err := service.AddPrefixes(
-			t.Context(),
-			&decappb.AddPrefixesRequest{
-				Name: "decap0",
-				Prefixes: []string{
-					"10.0.0.0/24",
-					"10.0.1.0/24",
-				},
-			},
-		)
-		require.NotNil(t, response)
-		require.NoError(t, err)
-	}
+	_, err := svc.UpdateConfig(t.Context(), &decappb.UpdateConfigRequest{
+		Name:     "decap0",
+		Prefixes: []string{"10.0.0.0/24", "10.0.1.0/24"},
+	})
+	require.NoError(t, err)
 
-	{
-		response, err := service.RemovePrefixes(
-			t.Context(),
-			&decappb.RemovePrefixesRequest{
-				Name:     "decap0",
-				Prefixes: []string{"10.0.0.0/24"},
-			},
-		)
-		require.NotNil(t, response)
-		require.NoError(t, err)
-	}
+	_, err = svc.UpdateConfig(t.Context(), &decappb.UpdateConfigRequest{
+		Name:     "decap0",
+		Prefixes: []string{"192.168.0.0/16"},
+	})
+	require.NoError(t, err)
 
-	{
-		response, err := service.ShowConfig(
-			t.Context(),
-			&decappb.ShowConfigRequest{
-				Name: "decap0",
-			},
-		)
-		require.NotNil(t, response)
-		require.NoError(t, err)
-		require.Empty(t, cmp.Diff([]string{"10.0.1.0/24"}, response.Prefixes))
-	}
+	show, err := svc.ShowConfig(t.Context(), &decappb.ShowConfigRequest{Name: "decap0"})
+	require.NotNil(t, show)
+	require.NoError(t, err)
+	require.Empty(t, cmp.Diff([]string{"192.168.0.0/16"}, show.Prefixes))
 }
 
-func Test_DecapService_ListAddList(t *testing.T) {
-	service := newTestService(t)
+func Test_DecapService_ListUpdateList(t *testing.T) {
+	svc := newTestService(t)
 	ctx := t.Context()
 
-	{
-		response, err := service.ListConfigs(
-			ctx,
-			&decappb.ListConfigsRequest{},
-		)
-		require.NotNil(t, response)
-		require.NoError(t, err)
+	list, err := svc.ListConfigs(ctx, &decappb.ListConfigsRequest{})
+	require.NotNil(t, list)
+	require.NoError(t, err)
+	assert.Empty(t, list.Configs)
 
-		assert.Empty(t, response.Configs)
-	}
+	_, err = svc.UpdateConfig(ctx, &decappb.UpdateConfigRequest{
+		Name:     "decap0",
+		Prefixes: []string{"10.0.0.0/24"},
+	})
+	require.NoError(t, err)
 
-	{
-		response, err := service.AddPrefixes(
-			ctx, &decappb.AddPrefixesRequest{
-				Name:     "decap0",
-				Prefixes: []string{"10.0.0.0/24"},
-			},
-		)
-		require.NotNil(t, response)
-		require.NoError(t, err)
-	}
-
-	{
-		response, err := service.ListConfigs(ctx, &decappb.ListConfigsRequest{})
-		require.NotNil(t, response)
-		require.NoError(t, err)
-
-		assert.Equal(t, []string{"decap0"}, response.Configs)
-	}
+	list, err = svc.ListConfigs(ctx, &decappb.ListConfigsRequest{})
+	require.NotNil(t, list)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"decap0"}, list.Configs)
 }
 
 func Test_DecapService_EmptyConfigName(t *testing.T) {
-	service := newTestService(t)
+	svc := newTestService(t)
 	ctx := t.Context()
 
-	t.Run("AddPrefixes", func(t *testing.T) {
-		response, err := service.AddPrefixes(
-			ctx,
-			&decappb.AddPrefixesRequest{
-				Name:     "",
-				Prefixes: []string{"10.0.0.0/24"},
-			},
-		)
-		require.Nil(t, response)
+	t.Run("UpdateConfig", func(t *testing.T) {
+		resp, err := svc.UpdateConfig(ctx, &decappb.UpdateConfigRequest{
+			Name:     "",
+			Prefixes: []string{"10.0.0.0/24"},
+		})
+		require.Nil(t, resp)
 		require.Equal(t, codes.InvalidArgument, status.Code(err))
 	})
 
 	t.Run("ShowConfig", func(t *testing.T) {
-		response, err := service.ShowConfig(
-			ctx,
-			&decappb.ShowConfigRequest{},
-		)
-		require.Nil(t, response)
+		resp, err := svc.ShowConfig(ctx, &decappb.ShowConfigRequest{})
+		require.Nil(t, resp)
 		require.Equal(t, codes.InvalidArgument, status.Code(err))
 	})
+}
 
-	t.Run("RemovePrefixes", func(t *testing.T) {
-		response, err := service.RemovePrefixes(
-			ctx,
-			&decappb.RemovePrefixesRequest{
-				Name:     "",
-				Prefixes: []string{"10.0.0.0/24"},
-			},
-		)
-		require.Nil(t, response)
-		require.Equal(t, codes.InvalidArgument, status.Code(err))
+func Test_DecapService_InvalidPrefix(t *testing.T) {
+	svc := newTestService(t)
+
+	resp, err := svc.UpdateConfig(t.Context(), &decappb.UpdateConfigRequest{
+		Name:     "decap0",
+		Prefixes: []string{"not-a-prefix"},
 	})
+	require.Nil(t, resp)
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
 }
 
 func Test_DecapService_UpdateFailureAtomic(t *testing.T) {
-	service := NewDecapService(&flakyBackend{})
+	svc := NewDecapService(&flakyBackend{})
 	ctx := t.Context()
 	name := "decap0"
 
-	{
-		response, err := service.AddPrefixes(ctx, &decappb.AddPrefixesRequest{
-			Name:     name,
-			Prefixes: []string{"10.0.0.0/24"},
-		})
-		require.NotNil(t, response)
-		require.NoError(t, err)
-	}
+	_, err := svc.UpdateConfig(ctx, &decappb.UpdateConfigRequest{
+		Name:     name,
+		Prefixes: []string{"10.0.0.0/24"},
+	})
+	require.NoError(t, err)
 
-	{
-		response, err := service.AddPrefixes(ctx, &decappb.AddPrefixesRequest{
-			Name: name,
-			Prefixes: []string{
-				"10.0.1.0/24",
-			},
-		})
-		require.Nil(t, response)
-		require.Error(t, err)
-		require.Equal(t, codes.Internal, status.Code(err))
-	}
+	_, err = svc.UpdateConfig(ctx, &decappb.UpdateConfigRequest{
+		Name:     name,
+		Prefixes: []string{"10.0.1.0/24"},
+	})
+	require.Error(t, err)
+	require.Equal(t, codes.Internal, status.Code(err))
 
-	{
-		response, err := service.ShowConfig(ctx, &decappb.ShowConfigRequest{Name: name})
-		require.NotNil(t, response)
-		require.NoError(t, err)
-		require.Empty(t, cmp.Diff([]string{"10.0.0.0/24"}, response.Prefixes))
-	}
+	show, err := svc.ShowConfig(ctx, &decappb.ShowConfigRequest{Name: name})
+	require.NotNil(t, show)
+	require.NoError(t, err)
+	require.Empty(t, cmp.Diff([]string{"10.0.0.0/24"}, show.Prefixes))
 }
 
 func Test_DecapService_DeduplicatePrefixes(t *testing.T) {
-	service := newTestService(t)
+	svc := newTestService(t)
 	prefix := "10.0.0.0/24"
 
-	{
-		response, err := service.AddPrefixes(
-			t.Context(),
-			&decappb.AddPrefixesRequest{
-				Name:     "decap0",
-				Prefixes: []string{prefix, prefix, prefix},
-			},
-		)
-		require.NotNil(t, response)
-		require.NoError(t, err)
+	_, err := svc.UpdateConfig(t.Context(), &decappb.UpdateConfigRequest{
+		Name:     "decap0",
+		Prefixes: []string{prefix, prefix, prefix},
+	})
+	require.NoError(t, err)
+
+	show, err := svc.ShowConfig(t.Context(), &decappb.ShowConfigRequest{Name: "decap0"})
+	require.NotNil(t, show)
+	require.NoError(t, err)
+	require.Empty(t, cmp.Diff([]string{prefix}, show.Prefixes))
+}
+
+func Test_DecapService_ConcurrentAccess(t *testing.T) {
+	svc := newTestService(t)
+
+	const goroutines = 10
+	const iterations = 100
+
+	g, ctx := errgroup.WithContext(t.Context())
+
+	for idx := range goroutines {
+		g.Go(func() error {
+			for jdx := range iterations {
+				name := fmt.Sprintf("config-%d-%d", idx, jdx)
+				_, err := svc.UpdateConfig(ctx, &decappb.UpdateConfigRequest{
+					Name:     name,
+					Prefixes: []string{"10.0.0.0/24"},
+				})
+				if err != nil {
+					return err
+				}
+			}
+			return nil
+		})
 	}
 
-	{
-		response, err := service.ShowConfig(
-			t.Context(),
-			&decappb.ShowConfigRequest{Name: "decap0"},
-		)
-		require.NotNil(t, response)
-		require.NoError(t, err)
-		require.Empty(t, cmp.Diff([]string{prefix}, response.Prefixes))
+	for range goroutines {
+		g.Go(func() error {
+			for range iterations {
+				_, err := svc.ListConfigs(ctx, &decappb.ListConfigsRequest{})
+				if err != nil {
+					return err
+				}
+			}
+			return nil
+		})
 	}
+
+	for idx := range goroutines {
+		g.Go(func() error {
+			for jdx := range iterations {
+				name := fmt.Sprintf("config-%d-%d", idx, jdx)
+				svc.ShowConfig(ctx, &decappb.ShowConfigRequest{Name: name})
+			}
+			return nil
+		})
+	}
+
+	require.NoError(t, g.Wait())
 }

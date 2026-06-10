@@ -25,8 +25,7 @@ func testDecap(t *testing.T, fw *framework.TestFramework) {
 	fw.Run("Configure_Decap_Module", func(fw *framework.TestFramework, t *testing.T) {
 		// Decap-specific configuration
 		commands := []string{
-			"/mnt/target/release/yanet-cli-decap prefix-add --name decap0 -p 4.5.6.7/32",
-			"/mnt/target/release/yanet-cli-decap prefix-add --name decap0 -p 1:2:3:4::abcd/128",
+			"/mnt/target/release/yanet-cli-decap update --name decap0 -p 4.5.6.7/32 -p 1:2:3:4::abcd/128",
 
 			"/mnt/target/release/yanet-cli-function update --name=test --chains c0:3=forward:forward0,decap:decap0,route:route0",
 			"/mnt/target/release/yanet-cli-pipeline update --name=test --functions test",

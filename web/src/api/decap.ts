@@ -1,7 +1,5 @@
 import { createService, type CallOptions } from './client';
 
-// Decap types based on decap.proto
-
 export interface ShowConfigRequest {
     name?: string;
 }
@@ -10,30 +8,18 @@ export interface ShowConfigResponse {
     prefixes?: string[];
 }
 
-export interface AddPrefixesRequest {
+export interface DecapUpdateConfigRequest {
     name?: string;
     prefixes?: string[];
 }
 
-export interface AddPrefixesResponse { }
-
-export interface RemovePrefixesRequest {
-    name?: string;
-    prefixes?: string[];
-}
-
-export interface RemovePrefixesResponse { }
+export interface DecapUpdateConfigResponse { }
 
 const decapService = createService('modules.decap.controlplane.decappb.v1.DecapService');
 
 export const decap = {
-    showConfig: (request: ShowConfigRequest, options?: CallOptions): Promise<ShowConfigResponse> => {
-        return decapService.callWithBody<ShowConfigResponse>('ShowConfig', request, options);
-    },
-    addPrefixes: (request: AddPrefixesRequest, options?: CallOptions): Promise<AddPrefixesResponse> => {
-        return decapService.callWithBody<AddPrefixesResponse>('AddPrefixes', request, options);
-    },
-    removePrefixes: (request: RemovePrefixesRequest, options?: CallOptions): Promise<RemovePrefixesResponse> => {
-        return decapService.callWithBody<RemovePrefixesResponse>('RemovePrefixes', request, options);
-    },
+    showConfig: (request: ShowConfigRequest, options?: CallOptions): Promise<ShowConfigResponse> =>
+        decapService.callWithBody<ShowConfigResponse>('ShowConfig', request, options),
+    updateConfig: (request: DecapUpdateConfigRequest, options?: CallOptions): Promise<DecapUpdateConfigResponse> =>
+        decapService.callWithBody<DecapUpdateConfigResponse>('UpdateConfig', request, options),
 };

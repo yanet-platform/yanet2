@@ -35,21 +35,16 @@ type config struct {
 	Module   ModuleHandle
 }
 
-func (m *config) Clone() *config {
-	return &config{
-		Prefixes: slices.Clone(m.Prefixes),
-		Module:   m.Module,
-	}
-}
-
+// DecapService implements the DecapService gRPC server.
 type DecapService struct {
 	decappb.UnimplementedDecapServiceServer
 
-	mu      sync.RWMutex
+	mu      sync.Mutex
 	backend Backend
 	configs map[string]*config
 }
 
+// NewDecapService constructs a DecapService backed by the given Backend.
 func NewDecapService(backend Backend) *DecapService {
 	return &DecapService{
 		backend: backend,
@@ -57,63 +52,60 @@ func NewDecapService(backend Backend) *DecapService {
 	}
 }
 
+// ListConfigs returns all known config names across all dataplane instances.
 func (m *DecapService) ListConfigs(
 	ctx context.Context,
-	request *decappb.ListConfigsRequest,
+	req *decappb.ListConfigsRequest,
 ) (*decappb.ListConfigsResponse, error) {
-	response := &decappb.ListConfigsResponse{
-		Configs: make([]string, 0),
-	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
+	names := make([]string, 0, len(m.configs))
 	for name := range m.configs {
-		response.Configs = append(response.Configs, name)
+		names = append(names, name)
 	}
 
-	return response, nil
+	return &decappb.ListConfigsResponse{Configs: names}, nil
 }
 
+// ShowConfig returns the current prefix set for the named config.
 func (m *DecapService) ShowConfig(
 	ctx context.Context,
-	request *decappb.ShowConfigRequest,
+	req *decappb.ShowConfigRequest,
 ) (*decappb.ShowConfigResponse, error) {
-	name := request.GetName()
+	name := req.GetName()
 	if name == "" {
 		return nil, errConfigNameRequired
 	}
 
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
 	entry, ok := m.configs[name]
 	if !ok {
 		return nil, status.Error(codes.NotFound, "no config found")
 	}
 
-	response := &decappb.ShowConfigResponse{
-		Prefixes: make([]string, 0, len(entry.Prefixes)),
-	}
-
+	prefixes := make([]string, 0, len(entry.Prefixes))
 	for _, p := range entry.Prefixes {
-		response.Prefixes = append(response.Prefixes, p.String())
+		prefixes = append(prefixes, p.String())
 	}
 
-	return response, nil
+	return &decappb.ShowConfigResponse{Prefixes: prefixes}, nil
 }
 
-func (m *DecapService) AddPrefixes(
+// UpdateConfig atomically replaces the whole prefix set of the named config.
+func (m *DecapService) UpdateConfig(
 	ctx context.Context,
-	request *decappb.AddPrefixesRequest,
-) (*decappb.AddPrefixesResponse, error) {
-	name := request.GetName()
+	req *decappb.UpdateConfigRequest,
+) (*decappb.UpdateConfigResponse, error) {
+	name := req.GetName()
 	if name == "" {
 		return nil, errConfigNameRequired
 	}
 
-	toAdd := make([]netip.Prefix, 0, len(request.GetPrefixes()))
-	for _, p := range request.GetPrefixes() {
+	prefixes := make([]netip.Prefix, 0, len(req.GetPrefixes()))
+	for _, p := range req.GetPrefixes() {
 		prefix, err := netip.ParsePrefix(p)
 		if err != nil {
 			return nil, status.Errorf(
@@ -121,74 +113,20 @@ func (m *DecapService) AddPrefixes(
 				"failed to parse prefix %q: %v", p, err,
 			)
 		}
-
-		toAdd = append(toAdd, prefix.Masked())
+		prefixes = append(prefixes, prefix.Masked())
 	}
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	// Create a new config to-be-updated either from scratch or from the
-	// current config.
-	cfg := &config{}
-	if currConfig, ok := m.configs[name]; ok {
-		cfg = currConfig.Clone()
-	}
-
-	cfg.Prefixes = slices.Compact(
+	prefixes = slices.Compact(
 		slices.SortedFunc(
-			slices.Values(slices.Concat(cfg.Prefixes, toAdd)),
+			slices.Values(prefixes),
 			xnetip.PrefixCompare,
 		),
 	)
 
-	if err := m.updateConfig(name, cfg); err != nil {
-		return nil, status.Errorf(
-			codes.Internal,
-			"failed to update module config %q: %v", name, err,
-		)
-	}
-
-	return &decappb.AddPrefixesResponse{}, nil
-}
-
-func (m *DecapService) RemovePrefixes(
-	ctx context.Context,
-	request *decappb.RemovePrefixesRequest,
-) (*decappb.RemovePrefixesResponse, error) {
-	name := request.GetName()
-	if name == "" {
-		return nil, errConfigNameRequired
-	}
-
-	toRemove := make([]netip.Prefix, 0, len(request.GetPrefixes()))
-	for _, p := range request.GetPrefixes() {
-		prefix, err := netip.ParsePrefix(p)
-		if err != nil {
-			return nil, err
-		}
-		toRemove = append(toRemove, prefix.Masked())
-	}
-
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// Create a new config to-be-updated either from scratch or from the
-	// current config.
-	cfg := &config{}
-	if currConfig, ok := m.configs[name]; ok {
-		cfg = currConfig.Clone()
-	}
-
-	cfg.Prefixes = slices.DeleteFunc(
-		cfg.Prefixes,
-		func(prefix netip.Prefix) bool {
-			return slices.Contains(toRemove, prefix)
-		},
-	)
-
-	// Note that we don't remove the FFI config in case of empty prefixes left.
-
+	cfg := &config{Prefixes: prefixes}
 	if err := m.updateConfig(name, cfg); err != nil {
 		return nil, status.Errorf(
 			codes.Internal,
@@ -196,21 +134,21 @@ func (m *DecapService) RemovePrefixes(
 		)
 	}
 
-	return &decappb.RemovePrefixesResponse{}, nil
+	return &decappb.UpdateConfigResponse{}, nil
 }
 
+// updateConfig calls the backend to publish cfg and, on success, frees the old
+// module handle and stores the new config. The caller must hold m.mu.
 func (m *DecapService) updateConfig(name string, cfg *config) error {
 	mod, err := m.backend.UpdateModule(name, cfg.Prefixes)
 	if err != nil {
 		return fmt.Errorf("failed to update module config %q: %w", name, err)
 	}
 
-	if cfg.Module != nil {
-		cfg.Module.Free()
+	if old, ok := m.configs[name]; ok && old.Module != nil {
+		old.Module.Free()
 	}
 
-	// Atomic semantics: either we update the config or we don't in case of
-	// errors.
 	m.configs[name] = &config{
 		Prefixes: cfg.Prefixes,
 		Module:   mod,

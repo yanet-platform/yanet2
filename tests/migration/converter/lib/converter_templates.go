@@ -452,20 +452,24 @@ func (c *Converter) generateACLTestTemplate(testData *GoTestData, functions []st
 func (c *Converter) generateDecapTestTemplate(testData *GoTestData, functions []string) string {
 	header := c.generateTestHeader(testData.TestName, testData.OriginalTestName, testData.TestType)
 
-	// Generate decap configuration commands from parsed config
+	// Generate decap configuration commands from parsed config.
+	//
+	// All prefixes for a single module are aggregated into one update command
+	// so that the dataplane receives the full desired set atomically.
 	var decapCommands []string
 	if testData.ParsedConfig != nil {
 		for moduleName, module := range testData.ParsedConfig.Modules {
 			if module.Type == "decap" {
-				// Add IPv4 destination prefixes
-				for _, prefix := range module.IPv4DestinationPrefixes {
+				var allPrefixes []string
+				allPrefixes = append(allPrefixes, module.IPv4DestinationPrefixes...)
+				allPrefixes = append(allPrefixes, module.IPv6DestinationPrefixes...)
+				if len(allPrefixes) > 0 {
+					var args []string
+					for _, prefix := range allPrefixes {
+						args = append(args, "-p "+prefix)
+					}
 					decapCommands = append(decapCommands,
-						fmt.Sprintf(`"%s prefix-add --cfg %s -p %s"`, framework.CLIDecap, moduleName, prefix))
-				}
-				// Add IPv6 destination prefixes
-				for _, prefix := range module.IPv6DestinationPrefixes {
-					decapCommands = append(decapCommands,
-						fmt.Sprintf(`"%s prefix-add --cfg %s -p %s"`, framework.CLIDecap, moduleName, prefix))
+						fmt.Sprintf(`"%s update --name %s %s"`, framework.CLIDecap, moduleName, strings.Join(args, " ")))
 				}
 			}
 		}
