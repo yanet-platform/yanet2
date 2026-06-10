@@ -1,11 +1,9 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import React, { useCallback, useMemo, useRef } from 'react';
 import { Button, Icon } from '@gravity-ui/uikit';
 import { Funnel, Plus } from '@gravity-ui/icons';
-import { useSearchParamHelpers, useDirtyConfigSet, useConfigQuerySync, usePageContribution } from '../../../hooks';
+import { usePageContribution } from '../../../hooks';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, EmptyPagePlaceholder, SearchInput, RowCountDisplay } from '../../../components';
 import { usePrefixDraft } from './usePrefixDraft';
-import { useUnsavedChangesBlocker } from '../../builtin/_shared/lane-editor';
 import type { PrefixRowItem } from './types';
 import { PrefixTable } from './PrefixTable';
 import PrefixDrawer from './PrefixDrawer';
@@ -13,7 +11,7 @@ import type { PrefixDrawerHandle } from './PrefixDrawer';
 import PrefixYamlIO from './PrefixYamlIO';
 import { PrefixSaveDiffModal } from './PrefixSaveDiffModal';
 import { AddConfigModal, DeleteConfigModal, BulkDeleteModal, CommandPaletteHeader } from '../../../components';
-import { useDraftShortcuts, useDraftDragDrop, useDraftPageHandlers, computeRowStatuses } from '../../../components/draft';
+import { useDraftShortcuts, useDraftPageHandlers, useDraftPageState, useDraftPageDerived } from '../../../components/draft';
 import { useTabCycle } from '../../_shared/useTabCycle';
 import type { Command, RowAdapter, PagePaletteContribution } from '../../../components/command-palette';
 import { buildConfigCommands } from '../../../components/command-palette';
@@ -25,36 +23,34 @@ const makeRowId = (): string => `new-${++idCounter}-${Date.now()}`;
 const QP_CONFIG = 'config';
 const QP_SEARCH = 'search';
 
+const matchesPrefixSearch = (r: PrefixRowItem, q: string): boolean =>
+    r.prefix.toLowerCase().includes(q);
+
+const prefixRowsEqual = (s: PrefixRowItem, r: PrefixRowItem): boolean =>
+    s.prefix === r.prefix;
+
 const DecapPage: React.FC = () => {
     const {
         draftConfigs, loading, draftRows, serverRows, isDirty, anyDirty,
         dispatchDraft, commitConfig, discardConfig,
     } = usePrefixDraft();
-    const [searchParams, setSearchParams] = useSearchParams();
 
-    const queryConfig = useMemo(() => searchParams.get(QP_CONFIG), [searchParams]);
-    const search = useMemo(() => searchParams.get(QP_SEARCH) || '', [searchParams]);
-    const [activeRowId, setActiveRowId] = useState<string | null>(null);
-    const [editingRowId, setEditingRowId] = useState<string | null>(null);
-    const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-    const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
-    const [diffModalOpen, setDiffModalOpen] = useState(false);
-    const [addConfigOpen, setAddConfigOpen] = useState(false);
-    const [deleteConfigOpen, setDeleteConfigOpen] = useState(false);
+    const pageState = useDraftPageState({
+        loading,
+        draftConfigs,
+        anyDirty,
+        configParamKey: QP_CONFIG,
+        searchParamKey: QP_SEARCH,
+    });
+    const {
+        search, activeRowId, setActiveRowId, editingRowId, setEditingRowId,
+        selectedIds, setSelectedIds, deleteConfirmOpen, setDeleteConfirmOpen,
+        diffModalOpen, setDiffModalOpen, addConfigOpen, setAddConfigOpen,
+        deleteConfigOpen, setDeleteConfigOpen, dragDrop, updateParams,
+        setActiveConfig, currentConfig,
+    } = pageState;
 
     const drawerRef = useRef<PrefixDrawerHandle>(null);
-    const dragDrop = useDraftDragDrop();
-    const { handleDragLeave } = dragDrop;
-
-    useUnsavedChangesBlocker(anyDirty);
-
-    const { updateParams } = useSearchParamHelpers(setSearchParams);
-
-    const setActiveConfig = useCallback((configName: string): void => {
-        updateParams({ [QP_CONFIG]: configName || null });
-    }, [updateParams]);
-
-    const currentConfig = (queryConfig && (loading || draftConfigs.includes(queryConfig))) ? queryConfig : (draftConfigs[0] || '');
 
     useTabCycle({
         tabs: draftConfigs,
@@ -63,41 +59,21 @@ const DecapPage: React.FC = () => {
         enabled: !loading,
     });
 
-    useConfigQuerySync({ currentConfig, loading, queryConfig, paramKey: QP_CONFIG, searchParams, updateParams });
-
-    useEffect(() => {
-        setActiveRowId(null);
-        setEditingRowId(null);
-        setSelectedIds(new Set());
-        setDeleteConfirmOpen(false);
-        setDeleteConfigOpen(false);
-        setDiffModalOpen(false);
-        handleDragLeave();
-    }, [currentConfig, handleDragLeave]);
-
-    const rawRows: PrefixRowItem[] = draftRows(currentConfig);
-    const rawServerRows: PrefixRowItem[] = serverRows(currentConfig);
-    const currentIsDirty = isDirty(currentConfig);
-
-    const prefixCounts = useMemo((): Map<string, number> => {
-        const m = new Map<string, number>();
-        draftConfigs.forEach((c) => m.set(c, draftRows(c).length));
-        return m;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [draftConfigs, draftRows]);
-
-    const dirtySet = useDirtyConfigSet(draftConfigs, isDirty);
-
-    const visibleRows = useMemo((): PrefixRowItem[] => {
-        const q = search.trim().toLowerCase();
-        if (!q) return rawRows;
-        return rawRows.filter((r) => r.prefix.toLowerCase().includes(q));
-    }, [rawRows, search]);
-
-    const { statusById, removedRows } = useMemo(
-        () => computeRowStatuses(rawRows, rawServerRows, (s, r) => s.prefix === r.prefix),
-        [rawRows, rawServerRows],
-    );
+    const derived = useDraftPageDerived<PrefixRowItem>({
+        pageState,
+        draftRows,
+        serverRows,
+        isDirty,
+        draftConfigs,
+        loading,
+        configParamKey: QP_CONFIG,
+        matchesSearch: matchesPrefixSearch,
+        rowsEqual: prefixRowsEqual,
+    });
+    const {
+        rawRows, rawServerRows, currentIsDirty, rowCounts: prefixCounts,
+        dirtySet, visibleRows, statusById, removedRows,
+    } = derived;
 
     const editingIndex = editingRowId ? rawRows.findIndex((r) => r.id === editingRowId) : -1;
     const editingRow = editingIndex >= 0 ? rawRows[editingIndex] : null;
