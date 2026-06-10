@@ -498,6 +498,7 @@ dataplane_init(
 		}
 
 		cp_config_unlock(cp_config);
+		dp_config_mark_ready(dp_config);
 	}
 
 	return 0;

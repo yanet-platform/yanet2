@@ -83,3 +83,10 @@ dp_storage_init(
 
 	return 0;
 }
+
+void
+dp_config_mark_ready(struct dp_config *dp_config) {
+	__atomic_store_n(
+		&dp_config->ready_magic, DP_CONFIG_READY_MAGIC, __ATOMIC_RELEASE
+	);
+}

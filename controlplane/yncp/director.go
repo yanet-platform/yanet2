@@ -2,15 +2,22 @@ package yncp
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"time"
 
 	"go.uber.org/zap"
 
+	"github.com/yanet-platform/yanet2/common/go/xbackoff"
 	"github.com/yanet-platform/yanet2/controlplane/builtin"
 	"github.com/yanet-platform/yanet2/controlplane/bundle"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/controlplane/gateway"
 )
+
+// dataplaneReadyTimeout is the maximum time NewDirector will wait for the
+// dataplane to finish initializing its shared memory before returning an error.
+const dataplaneReadyTimeout = 60 * time.Second
 
 type options struct {
 	Log      *zap.Logger
@@ -68,11 +75,36 @@ func NewDirector(cfg *Config, options ...DirectorOption) (*Director, error) {
 	log.Info("initializing YANET controlplane ...")
 	log.Info("parsed config", zap.Any("config", cfg))
 
-	shm, err := ffi.AttachSharedMemory(cfg.MemoryPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to attach to shared memory %q: %w", cfg.MemoryPath, err)
+	log.Debug("waiting for dataplane shared memory",
+		zap.String("path", cfg.MemoryPath),
+		zap.Uint32("instance_id", cfg.Gateway.InstanceID),
+	)
+	waitCtx, cancel := context.WithTimeout(context.Background(), dataplaneReadyTimeout)
+	defer cancel()
+	var shm *ffi.SharedMemory
+	bo := xbackoff.New(100*time.Millisecond, xbackoff.WithMax(2*time.Second))
+	if err := bo.RunContext(waitCtx, func() error {
+		if shm == nil {
+			attached, err := ffi.AttachSharedMemory(cfg.MemoryPath)
+			if err != nil {
+				return fmt.Errorf("failed to attach to shared memory %q: %w", cfg.MemoryPath, err)
+			}
+			shm = attached
+		}
+		if !shm.DataplaneReady(cfg.Gateway.InstanceID) {
+			return errors.New("dataplane shared memory not ready")
+		}
+		return nil
+	}); err != nil {
+		return nil, fmt.Errorf(
+			"dataplane shared memory not ready after %s: %w",
+			dataplaneReadyTimeout,
+			err,
+		)
 	}
-	log.Debug("attached to shared memory", zap.String("path", cfg.MemoryPath))
+	log.Info("dataplane shared memory ready",
+		zap.Uint32("instance_id", cfg.Gateway.InstanceID),
+	)
 
 	bundle, err := bundle.NewBundle(cfg.Modules, cfg.Devices, log)
 	if err != nil {

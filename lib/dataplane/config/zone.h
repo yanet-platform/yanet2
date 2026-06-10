@@ -67,6 +67,15 @@ struct dp_worker {
 	uint32_t queue_id;
 	uint32_t rx_burst_size;
 };
+
+// Value written to dp_config.ready_magic by dp_config_mark_ready once the
+// instance is fully initialised and cp_config has been released.
+//
+// The writer uses release ordering; readers use acquire ordering before
+// attempting to attach, so observing this value guarantees the instance is
+// ready and its cp_config lock is free.
+#define DP_CONFIG_READY_MAGIC UINT64_C(0xDEAD10CC00000001)
+
 struct dp_config {
 	uint32_t instance_count;
 	uint32_t instance_idx;
@@ -99,6 +108,14 @@ struct dp_config {
 	struct counter_storage_allocator counter_storage_allocator;
 	struct counter_registry worker_counters;
 	struct counter_storage *worker_counter_storage;
+
+	// Written by dp_config_mark_ready with release ordering after the
+	// dataplane releases cp_config and finishes initialising the instance.
+	//
+	// Readers check this with acquire ordering before attaching. Observing
+	// the magic guarantees the instance is fully initialised and that
+	// cp_config is not held, so an attacher will not block on the lock.
+	uint64_t ready_magic;
 };
 
 /*

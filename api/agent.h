@@ -64,6 +64,17 @@ yanet_shm_detach(struct yanet_shm *shm);
 struct dp_config *
 yanet_shm_dp_config(struct yanet_shm *shm, uint32_t instance_idx);
 
+// Returns 1 if the dataplane instance has finished initialising its shared
+// memory, 0 otherwise.
+//
+// Safe to call on a zeroed (not yet initialised) segment — the magic field
+// will simply read 0. Does not allocate an agent or acquire any lock.
+//
+// @param shm Handle to shared memory segment
+// @param instance_idx Index of the dataplane instance
+int
+agent_dp_config_ready(struct yanet_shm *shm, uint32_t instance_idx);
+
 // Attaches a module agent to shared memory.
 //
 // Creates a new agent for a specific module in the given dataplane instance.

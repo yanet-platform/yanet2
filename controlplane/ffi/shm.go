@@ -70,6 +70,12 @@ func (m *SharedMemory) DPConfig(instanceIdx uint32) *DPConfig {
 	return &DPConfig{ptr: ptr}
 }
 
+// DataplaneReady reports whether the dataplane instance has finished
+// initializing its shared memory.
+func (m *SharedMemory) DataplaneReady(instanceIdx uint32) bool {
+	return C.agent_dp_config_ready(m.ptr, C.uint32_t(instanceIdx)) != 0
+}
+
 // AgentAttach attaches a module agent to shared memory on the dataplane instance.
 func (m *SharedMemory) AgentAttach(
 	name string,

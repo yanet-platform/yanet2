@@ -22,3 +22,10 @@ dp_storage_init(
 	struct dp_config **res_dp_config,
 	struct cp_config **res_cp_config
 );
+
+// Publish the readiness marker for this instance.
+//
+// Call this after releasing cp_config, once the instance is fully initialised
+// and ready for attach.
+void
+dp_config_mark_ready(struct dp_config *dp_config);

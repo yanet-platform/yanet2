@@ -72,6 +72,19 @@ yanet_shm_dp_config(struct yanet_shm *shm, uint32_t instance_idx) {
 	return dp_config_nextk((struct dp_config *)shm, instance_idx);
 }
 
+int
+agent_dp_config_ready(struct yanet_shm *shm, uint32_t instance_idx) {
+	uint32_t count = __atomic_load_n(
+		&((struct dp_config *)shm)->instance_count, __ATOMIC_ACQUIRE
+	);
+	if (instance_idx >= count) {
+		return 0;
+	}
+	struct dp_config *dp_config = yanet_shm_dp_config(shm, instance_idx);
+	return __atomic_load_n(&dp_config->ready_magic, __ATOMIC_ACQUIRE) ==
+	       DP_CONFIG_READY_MAGIC;
+}
+
 uint32_t
 yanet_shm_instance_count(struct yanet_shm *shm) {
 	struct dp_config *dp_config = yanet_shm_dp_config(shm, 0);
@@ -97,6 +110,25 @@ agent_attach(
 	yanet_error **err
 ) {
 	struct dp_config *dp_config = yanet_shm_dp_config(shm, instance_idx);
+
+	// Guard against attaching before the dataplane finishes initialising
+	// the shared memory instance. A zeroed segment has ready_magic == 0,
+	// so ADDR_OF(&dp_config->cp_config) would yield NULL and the subsequent
+	// cp_config_lock call would fault. Acquire ordering pairs with the
+	// release store in dp_config_mark_ready, published once the dataplane
+	// has released cp_config, guaranteeing the cp_config offset pointer is
+	// fully visible once we pass this check.
+	uint64_t magic =
+		__atomic_load_n(&dp_config->ready_magic, __ATOMIC_ACQUIRE);
+	if (magic != DP_CONFIG_READY_MAGIC) {
+		yanet_error_add(
+			err,
+			"dataplane shared memory instance %u is not yet "
+			"initialised",
+			instance_idx
+		);
+		return NULL;
+	}
 
 	struct cp_config *cp_config = ADDR_OF(&dp_config->cp_config);
 
@@ -359,6 +391,19 @@ agent_reattach(
 	yanet_error **err
 ) {
 	struct dp_config *dp_config = yanet_shm_dp_config(shm, instance_idx);
+
+	// Same readiness guard as in agent_attach — see comment there.
+	uint64_t magic =
+		__atomic_load_n(&dp_config->ready_magic, __ATOMIC_ACQUIRE);
+	if (magic != DP_CONFIG_READY_MAGIC) {
+		yanet_error_add(
+			err,
+			"dataplane shared memory instance %u is not yet "
+			"initialised",
+			instance_idx
+		);
+		return NULL;
+	}
 
 	struct cp_config *cp_config = ADDR_OF(&dp_config->cp_config);
 
