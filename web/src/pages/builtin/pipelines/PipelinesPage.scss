@@ -1,5 +1,6 @@
 @use '../../../styles/variables' as *;
 @use '../../../styles/mixins' as *;
+@use '../../../styles/lane-chrome' as lane-chrome;
 @use '../_shared/lane-editor/lane-editor';
 @use '../_shared/lane-editor/palette' as palette;
 
@@ -76,26 +77,7 @@
 // ─── Add function ref ghost button ────────────────────────────────────────────
 
 .pl-add-ref-btn {
-    background: var(--pl-bg-2);
-    border: 1px dashed var(--pl-line-2);
-    border-radius: var(--pl-r-md);
-    color: var(--pl-text-3);
-    font-size: 12px;
-    font-family: var(--pl-font-ui);
-    padding: 10px 14px;
-    cursor: pointer;
-    white-space: nowrap;
-    flex-shrink: 0;
-    margin-left: 8px;
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    transition: border-color 0.12s, color 0.12s;
-
-    &:hover {
-        border-color: var(--pl-accent);
-        color: var(--pl-accent);
-    }
+    @include lane-chrome.lane-add-btn('pl');
 }
 
 @include palette.lane-drawer('pl');

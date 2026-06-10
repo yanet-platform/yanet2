@@ -1,0 +1,22 @@
+@mixin lane-add-btn($p) {
+    background: var(--#{$p}-bg-2);
+    border: 1px dashed var(--#{$p}-line-2);
+    border-radius: var(--#{$p}-r-md);
+    color: var(--#{$p}-text-3);
+    font-size: 12px;
+    font-family: var(--#{$p}-font-ui);
+    padding: 10px 14px;
+    cursor: pointer;
+    white-space: nowrap;
+    flex-shrink: 0;
+    margin-left: 8px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: border-color 0.12s, color 0.12s;
+
+    &:hover {
+        border-color: var(--#{$p}-accent);
+        color: var(--#{$p}-accent);
+    }
+}

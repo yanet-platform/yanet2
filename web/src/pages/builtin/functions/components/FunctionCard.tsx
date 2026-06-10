@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useMemo } from 'react';
+import { useInterpolatedCounterMap } from '../../../../hooks';
 import type { NetworkFunction, FunctionsAction, DragPayload, Module, Chain } from '../types';
 import { useModuleCounters, type ModuleInfo } from '../hooks/useModuleCounters';
 import { getDragPayload, useSparklineHistory } from '../../_shared/lane-editor';
@@ -8,7 +9,6 @@ import { Lane } from './Lane';
 import { AddChainButton } from './AddChainButton';
 import { Drawer } from './Drawer';
 import { DiffModal } from './DiffModal';
-import type { InterpolatedCounterData } from '../../../../hooks';
 
 interface FunctionCardProps {
     fn: NetworkFunction;
@@ -85,13 +85,7 @@ export const FunctionCard: React.FC<FunctionCardProps> = ({
 
     const { counters } = useModuleCounters(fn.id, moduleInfoList);
 
-    const counterMap: Map<string, InterpolatedCounterData> = useMemo(() => {
-        const map = new Map<string, InterpolatedCounterData>();
-        for (const [key, val] of counters.entries()) {
-            map.set(key, val);
-        }
-        return map;
-    }, [counters]);
+    const counterMap = useInterpolatedCounterMap(counters);
 
     const totalPps = useMemo(() => {
         let sum = 0;

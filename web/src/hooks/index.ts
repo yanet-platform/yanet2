@@ -51,3 +51,5 @@ export type { UseRowDraftParams, UseRowDraftResult, RowDraftHandle } from './use
 
 export { useLaneTrackDnD } from './useLaneTrackDnD';
 export type { UseLaneTrackDnDOptions, UseLaneTrackDnDResult } from './useLaneTrackDnD';
+
+export { useInterpolatedCounterMap } from './useInterpolatedCounterMap';

@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useMemo } from 'react';
+import { useInterpolatedCounterMap } from '../../../../hooks';
 import type { Pipeline, PipelinesAction, DragPayload, FunctionRef } from '../types';
 import { useFunctionRefCounters, type FunctionRefInfo, PIPELINE_COUNTER_KEY } from '../hooks/useFunctionRefCounters';
 import { getDragPayload, useSparklineHistory } from '../../_shared/lane-editor';
@@ -6,7 +7,6 @@ import { PipelineCardHeader } from './PipelineCardHeader';
 import { LaneTrack } from './LaneTrack';
 import { Drawer } from './Drawer';
 import { DiffModal } from './DiffModal';
-import type { InterpolatedCounterData } from '../../../../hooks';
 import type { FunctionId } from '../../../../api/pipelines';
 import type { DragState } from '../../_shared/lane-editor';
 
@@ -60,13 +60,7 @@ export const PipelineCard: React.FC<PipelineCardProps> = ({
 
     const { counters } = useFunctionRefCounters(pipeline.id, refInfoList);
 
-    const counterMap: Map<string, InterpolatedCounterData> = useMemo(() => {
-        const map = new Map<string, InterpolatedCounterData>();
-        for (const [key, val] of counters.entries()) {
-            map.set(key, val);
-        }
-        return map;
-    }, [counters]);
+    const counterMap = useInterpolatedCounterMap(counters);
 
     const totalPps = useMemo(() => {
         if (pipeline.functions.length === 0) {

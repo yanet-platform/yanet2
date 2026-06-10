@@ -1,4 +1,4 @@
-import type { NetworkFunction, Chain, FunctionsAction } from './types';
+import type { NetworkFunction, Chain, Module, FunctionsAction } from './types';
 import { localToApi } from './wire';
 import type { EntityState, BaseEntityAction } from '../_shared/editableEntityStore';
 import {
@@ -16,6 +16,26 @@ const findFn = (state: FunctionsState, fnId: string): NetworkFunction | undefine
 
 const updateFn = (state: FunctionsState, fnId: string, updated: NetworkFunction): FunctionsState =>
     applyEntityUpdate(state, fnId, updated, localToApi);
+
+const updateModuleIn = (
+    state: FunctionsState,
+    fnId: string,
+    moduleId: string,
+    transform: (m: Module) => Module,
+): FunctionsState => {
+    const fn = findFn(state, fnId);
+    if (!fn) {
+        return state;
+    }
+    const updated: NetworkFunction = {
+        ...fn,
+        chains: fn.chains.map(c => ({
+            ...c,
+            modules: c.modules.map(m => (m.id === moduleId ? transform(m) : m)),
+        })),
+    };
+    return updateFn(state, fnId, updated);
+};
 
 const mapChains = (fn: NetworkFunction, chainId: string, mapper: (c: Chain) => Chain): NetworkFunction => ({
     ...fn,
@@ -116,39 +136,11 @@ export const functionsReducer = (
             return updateFn(state, action.fnId, updated);
         }
 
-        case 'RENAME_MODULE': {
-            const fn = findFn(state, action.fnId);
-            if (!fn) {
-                return state;
-            }
-            const updated: NetworkFunction = {
-                ...fn,
-                chains: fn.chains.map(c => ({
-                    ...c,
-                    modules: c.modules.map(m =>
-                        m.id === action.moduleId ? { ...m, name: action.name } : m
-                    ),
-                })),
-            };
-            return updateFn(state, action.fnId, updated);
-        }
+        case 'RENAME_MODULE':
+            return updateModuleIn(state, action.fnId, action.moduleId, m => ({ ...m, name: action.name }));
 
-        case 'UPDATE_MODULE_CONFIG': {
-            const fn = findFn(state, action.fnId);
-            if (!fn) {
-                return state;
-            }
-            const updated: NetworkFunction = {
-                ...fn,
-                chains: fn.chains.map(c => ({
-                    ...c,
-                    modules: c.modules.map(m =>
-                        m.id === action.moduleId ? { ...m, ...action.patch } : m
-                    ),
-                })),
-            };
-            return updateFn(state, action.fnId, updated);
-        }
+        case 'UPDATE_MODULE_CONFIG':
+            return updateModuleIn(state, action.fnId, action.moduleId, m => ({ ...m, ...action.patch }));
 
         case 'UPDATE_CHAIN': {
             const fn = findFn(state, action.fnId);

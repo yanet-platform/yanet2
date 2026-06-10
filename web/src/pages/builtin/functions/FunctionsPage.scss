@@ -1,5 +1,6 @@
 @use '../../../styles/variables' as *;
 @use '../../../styles/mixins' as *;
+@use '../../../styles/lane-chrome' as lane-chrome;
 @use '../_shared/lane-editor/lane-editor';
 @use '../_shared/lane-editor/palette' as palette;
 
@@ -254,26 +255,7 @@
 // ─── Add module / chain ghost buttons ─────────────────────────────────────────
 
 .fn-add-module-btn {
-    background: var(--fn-bg-2);
-    border: 1px dashed var(--fn-line-2);
-    border-radius: var(--fn-r-md);
-    color: var(--fn-text-3);
-    font-size: 12px;
-    font-family: var(--fn-font-ui);
-    padding: 10px 14px;
-    cursor: pointer;
-    white-space: nowrap;
-    flex-shrink: 0;
-    margin-left: 8px;
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    transition: border-color 0.12s, color 0.12s;
-
-    &:hover {
-        border-color: var(--fn-accent);
-        color: var(--fn-accent);
-    }
+    @include lane-chrome.lane-add-btn('fn');
 }
 
 // ─── Inline edit ──────────────────────────────────────────────────────────────
