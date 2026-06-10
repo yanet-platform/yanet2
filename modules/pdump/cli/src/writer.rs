@@ -138,7 +138,9 @@ impl PdumpWriter {
     }
 
     fn write_text(writer: &mut Text, rec: pdumppb::Record) -> Result<usize, Box<dyn Error>> {
-        let mut meta = rec.meta.unwrap();
+        let mut meta = rec
+            .meta
+            .ok_or_else(|| -> Box<dyn Error> { "pdump record missing metadata".into() })?;
 
         let ts = match &writer.base_ts {
             None => {
@@ -163,14 +165,18 @@ impl PdumpWriter {
     }
 
     fn write_pcap(writer: &mut Pcap, rec: pdumppb::Record) -> Result<usize, Box<dyn Error>> {
-        let meta = rec.meta.unwrap();
+        let meta = rec
+            .meta
+            .ok_or_else(|| -> Box<dyn Error> { "pdump record missing metadata".into() })?;
         let ts = Duration::from_nanos(meta.timestamp);
         let packet = PcapPacket::new_owned(ts, meta.packet_len, rec.data);
         Ok(writer.inner.write_packet(&packet)?)
     }
 
     fn write_pcapng(writer: &mut PcapNg, rec: pdumppb::Record) -> Result<usize, Box<dyn Error>> {
-        let meta = rec.meta.unwrap();
+        let meta = rec
+            .meta
+            .ok_or_else(|| -> Box<dyn Error> { "pdump record missing metadata".into() })?;
         let ts = Duration::from_nanos(meta.timestamp);
 
         let mut packet_block = EnhancedPacketBlock::default();
