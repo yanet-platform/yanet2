@@ -22,4 +22,5 @@ usr/bin/yanet-cli-balancer2
 usr/bin/yanet-cli-operator-pipeline
 usr/bin/yanet-cli-operator-neighbour
 usr/bin/yanet-cli-operator-route
+usr/bin/yanet-cli-operator-decap
 usr/bin/yanet-cli-operator-forward

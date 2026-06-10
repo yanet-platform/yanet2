@@ -3378,6 +3378,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "yanet-cli-operator-decap"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "clap_complete",
+ "colored",
+ "log",
+ "prost",
+ "prost-types",
+ "tabled",
+ "tokio",
+ "tonic",
+ "tonic-build",
+ "yanet-cli",
+ "yanet-readinesspb",
+]
+
+[[package]]
 name = "yanet-cli-operator-forward"
 version = "0.1.0"
 dependencies = [
