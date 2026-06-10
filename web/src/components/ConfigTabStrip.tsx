@@ -16,6 +16,8 @@ export interface ConfigTabStripProps {
     onSelect: (configName: string) => void;
     /** Called when the user clicks the "+" add-config button. */
     onAddConfig: () => void;
+    /** When true the "+" add-config button is rendered disabled. */
+    addConfigDisabled?: boolean;
     /** Accessible label for the "add config" button tooltip. Defaults to "Add config". */
     addLabel?: string;
     /** Optional leading icon renderer — return a node to prepend before the tab label. */
@@ -36,6 +38,7 @@ export const ConfigTabStrip: React.FC<ConfigTabStripProps> = ({
     dirtyConfigs,
     onSelect,
     onAddConfig,
+    addConfigDisabled,
     addLabel = 'Add config',
     leadingIcon,
     trailingIcon,
@@ -59,7 +62,7 @@ export const ConfigTabStrip: React.FC<ConfigTabStripProps> = ({
                 <span className="yn-tab__count">{counts.get(cfg) ?? 0}</span>
             </button>
         ))}
-        <Button view="flat" size="s" onClick={onAddConfig} className="yn-tabs__add" title={addLabel}>
+        <Button view="flat" size="s" onClick={onAddConfig} disabled={addConfigDisabled} className="yn-tabs__add" title={addLabel}>
             <Icon data={Plus} size={14} />
         </Button>
     </div>

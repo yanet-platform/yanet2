@@ -22,6 +22,8 @@ export interface UseForwardDraftResult {
     draftConfigs: string[];
     /** Loading flag — true until the first server fetch completes. */
     loading: boolean;
+    /** True when the initial load failed and no configs were seeded; cleared on a successful reload. */
+    loadFailed: boolean;
     /** Returns the current draft rules for a config. */
     draftRules: (configName: string) => Rule[];
     /** Returns the server snapshot rules for a config. */
@@ -56,6 +58,7 @@ export interface UseForwardDraftResult {
 export const useForwardDraft = (): UseForwardDraftResult => {
     const [state, rawDispatch] = useReducer(forwardDraftReducer, initialDraftState);
     const [loading, setLoading] = useState(true);
+    const [loadFailed, setLoadFailed] = useState(false);
 
     const dispatchDraft = useCallback((action: ForwardDraftAction): void => {
         rawDispatch(action);
@@ -79,8 +82,10 @@ export const useForwardDraft = (): UseForwardDraftResult => {
             );
 
             rawDispatch({ type: 'LOAD_ALL_CONFIGS', configs });
+            setLoadFailed(false);
         } catch (err) {
             toaster.error('yn-draft-load', 'Failed to load forward configurations', err);
+            setLoadFailed(true);
         } finally {
             setLoading(false);
         }
@@ -146,6 +151,7 @@ export const useForwardDraft = (): UseForwardDraftResult => {
     return {
         draftConfigs,
         loading,
+        loadFailed,
         draftRules: draftRulesFor,
         serverRules: serverRulesFor,
         isDirty,

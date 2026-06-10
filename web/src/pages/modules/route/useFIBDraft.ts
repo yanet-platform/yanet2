@@ -70,12 +70,8 @@ export const useFIBDraft = (): UseFIBDraftResult => {
         const configNames = configsResp.configs ?? [];
         return Promise.all(
             configNames.map(async (name): Promise<{ name: string; rows: FIBRowItem[] }> => {
-                try {
-                    const fibResp = await API.route.showFIB({ name });
-                    return { name, rows: flattenFIBEntries(fibResp.entries ?? []) };
-                } catch {
-                    return { name, rows: [] };
-                }
+                const fibResp = await API.route.showFIB({ name });
+                return { name, rows: flattenFIBEntries(fibResp.entries ?? []) };
             }),
         );
     }, []);

@@ -31,7 +31,7 @@ const prefixRowsEqual = (s: PrefixRowItem, r: PrefixRowItem): boolean =>
 
 const DecapPage: React.FC = () => {
     const {
-        draftConfigs, loading, draftRows, serverRows, isDirty, anyDirty,
+        draftConfigs, loading, loadFailed, draftRows, serverRows, isDirty, anyDirty,
         dispatchDraft, commitConfig, discardConfig,
     } = usePrefixDraft();
 
@@ -99,6 +99,8 @@ const DecapPage: React.FC = () => {
         onDeleteRow: handlers.handleDeleteRow,
     });
 
+    const canCreate = !loading && !loadFailed;
+
     const commands = useMemo((): Command[] => {
         const list: Command[] = [
             {
@@ -135,6 +137,7 @@ const DecapPage: React.FC = () => {
             addConfigSub: 'Create a new decap configuration',
             withKeywords: true,
             onAddConfig: () => setAddConfigOpen(true),
+            addConfigDisabled: !canCreate,
             onDeleteConfig: () => setDeleteConfigOpen(true),
             onSwitchConfig: (name) => setActiveConfig(name),
         }));
@@ -147,7 +150,7 @@ const DecapPage: React.FC = () => {
         });
         return list;
     }, [
-        currentIsDirty, currentConfig, draftConfigs, dirtySet,
+        canCreate, currentIsDirty, currentConfig, draftConfigs, dirtySet,
         openAdd, handlers, setAddConfigOpen, setDeleteConfigOpen, setActiveConfig, updateParams,
     ]);
 
@@ -195,6 +198,7 @@ const DecapPage: React.FC = () => {
                         message="No decap configurations found."
                         actionLabel="Add Config"
                         onAction={() => setAddConfigOpen(true)}
+                        actionDisabled={!canCreate}
                     />
                 ) : (
                     <>
@@ -205,6 +209,7 @@ const DecapPage: React.FC = () => {
                             dirtyConfigs={dirtySet}
                             onSelect={setActiveConfig}
                             onAddConfig={() => setAddConfigOpen(true)}
+                            addConfigDisabled={!canCreate}
                         />
                         <div className="yn-toolbar-bordered">
                             <div style={{ flex: 1 }} />

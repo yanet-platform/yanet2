@@ -39,7 +39,7 @@ const fibRowsEqual = (s: FIBRowItem, r: FIBRowItem): boolean =>
 
 const RoutePage: React.FC = () => {
     const {
-        draftConfigs, loading, draftRows, serverRows, isDirty, anyDirty,
+        draftConfigs, loading, loadFailed, draftRows, serverRows, isDirty, anyDirty,
         dispatchDraft, commitConfig, discardConfig,
     } = useFIBDraft();
 
@@ -115,6 +115,8 @@ const RoutePage: React.FC = () => {
         onDeleteRow: handlers.handleDeleteRow,
     });
 
+    const canCreate = !loading && !loadFailed;
+
     const commands = useMemo((): Command[] => {
         const list: Command[] = [
             {
@@ -144,6 +146,7 @@ const RoutePage: React.FC = () => {
             draftConfigs,
             dirtySet,
             onAddConfig: () => setAddConfigOpen(true),
+            addConfigDisabled: !canCreate,
             onDeleteConfig: () => setDeleteConfigOpen(true),
             onSwitchConfig: (name) => handleConfigSelect(name),
         }));
@@ -157,7 +160,7 @@ const RoutePage: React.FC = () => {
             });
         }
         return list;
-    }, [currentIsDirty, currentConfig, draftConfigs, dirtySet, search, handlers, handleConfigSelect, handleSearchChange, openAdd]);
+    }, [canCreate, currentIsDirty, currentConfig, draftConfigs, dirtySet, search, handlers, handleConfigSelect, handleSearchChange, openAdd]);
 
     const dynamicCommands = useCallback((q: string): Command[] => {
         if (isValidCIDR(q.trim())) {
@@ -229,6 +232,7 @@ const RoutePage: React.FC = () => {
                         message="No FIB configurations found."
                         actionLabel="Add Config"
                         onAction={() => setAddConfigOpen(true)}
+                        actionDisabled={!canCreate}
                     />
                 ) : (
                     <>
@@ -239,6 +243,7 @@ const RoutePage: React.FC = () => {
                             dirtyConfigs={dirtySet}
                             onSelect={handleConfigSelect}
                             onAddConfig={() => setAddConfigOpen(true)}
+                            addConfigDisabled={!canCreate}
                         />
                         <div className="yn-toolbar-bordered">
                             <div style={{ flex: 1 }} />

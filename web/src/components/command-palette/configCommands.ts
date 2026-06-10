@@ -14,6 +14,8 @@ export interface ConfigCommandsOptions {
     withKeywords?: boolean;
     /** Called when the user selects "Add config". */
     onAddConfig: () => void;
+    /** When true the "Add config" command is omitted from the palette. */
+    addConfigDisabled?: boolean;
     /** Called when the user selects "Delete config". */
     onDeleteConfig: () => void;
     /** Called with the target config name when the user selects a switch item. */
@@ -34,20 +36,23 @@ export const buildConfigCommands = (options: ConfigCommandsOptions): Command[] =
         addConfigSub,
         withKeywords,
         onAddConfig,
+        addConfigDisabled,
         onDeleteConfig,
         onSwitchConfig,
     } = options;
 
     const list: Command[] = [];
 
-    list.push({
-        id: '__add_config',
-        icon: '▤',
-        label: 'Add config',
-        sub: addConfigSub,
-        keywords: withKeywords ? 'add config create new' : undefined,
-        onSelect: onAddConfig,
-    });
+    if (!addConfigDisabled) {
+        list.push({
+            id: '__add_config',
+            icon: '▤',
+            label: 'Add config',
+            sub: addConfigSub,
+            keywords: withKeywords ? 'add config create new' : undefined,
+            onSelect: onAddConfig,
+        });
+    }
 
     if (currentConfig) {
         list.push({

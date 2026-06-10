@@ -34,6 +34,7 @@ const ForwardPage: React.FC = () => {
     const {
         draftConfigs,
         loading,
+        loadFailed,
         draftRules,
         serverRules,
         isDirty,
@@ -232,6 +233,8 @@ const ForwardPage: React.FC = () => {
         enabled: !loading,
     });
 
+    const canCreate = !loading && !loadFailed;
+
     const currentIsDirty = isDirty(currentConfig);
 
     const commands = useMemo((): Command[] => {
@@ -270,6 +273,7 @@ const ForwardPage: React.FC = () => {
             addConfigSub: 'Create a new forward configuration',
             withKeywords: true,
             onAddConfig: () => setAddConfigOpen(true),
+            addConfigDisabled: !canCreate,
             onDeleteConfig: () => setDeleteConfigOpen(true),
             onSwitchConfig: (name) => handleTabSelect(name),
         }));
@@ -302,7 +306,7 @@ const ForwardPage: React.FC = () => {
             onSelect: () => { setModeFilter('all'); handleSearchChange(''); },
         });
         return list;
-    }, [currentIsDirty, currentConfig, draftConfigs, dirtySet, handleTabSelect, openAdd, handleSavePress, handleDiscard, handleSearchChange]);
+    }, [canCreate, currentIsDirty, currentConfig, draftConfigs, dirtySet, handleTabSelect, openAdd, handleSavePress, handleDiscard, handleSearchChange]);
 
     const rowAdapter = useMemo((): RowAdapter<RuleItem> => ({
         rows: allItems,
@@ -362,6 +366,7 @@ const ForwardPage: React.FC = () => {
                         message="No forward configurations found."
                         actionLabel="Add Config"
                         onAction={() => setAddConfigOpen(true)}
+                        actionDisabled={!canCreate}
                     />
                 ) : (
                     <>
@@ -372,6 +377,7 @@ const ForwardPage: React.FC = () => {
                             dirtyConfigs={dirtySet}
                             onSelect={handleTabSelect}
                             onAddConfig={() => setAddConfigOpen(true)}
+                            addConfigDisabled={!canCreate}
                         />
 
                         <div className="yn-toolbar-bordered">

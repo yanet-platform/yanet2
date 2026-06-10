@@ -20,6 +20,8 @@ interface UseDraftOpts<T> {
 export interface UseDraftResult<T> {
     draftConfigs: string[];
     loading: boolean;
+    /** True when the initial load failed and no configs were seeded; cleared on a successful reload. */
+    loadFailed: boolean;
     draftRows: (configName: string) => T[];
     serverRows: (configName: string) => T[];
     isDirty: (configName: string) => boolean;
@@ -47,6 +49,7 @@ export function useDraft<T extends { id?: unknown }>({
 }: UseDraftOpts<T>): UseDraftResult<T> {
     const [state, rawDispatch] = useReducer(reducer, initialState);
     const [loading, setLoading] = useState(true);
+    const [loadFailed, setLoadFailed] = useState(false);
 
     const dispatchDraft = useCallback((action: DraftAction<T>): void => {
         rawDispatch(action);
@@ -57,8 +60,10 @@ export function useDraft<T extends { id?: unknown }>({
         try {
             const configs = await load();
             rawDispatch({ type: 'LOAD_ALL_CONFIGS', configs });
+            setLoadFailed(false);
         } catch (err) {
             toaster.error(`${toastSubject}-draft-load`, `Failed to load ${errorSubject} configurations`, err);
+            setLoadFailed(true);
         } finally {
             setLoading(false);
         }
@@ -114,6 +119,7 @@ export function useDraft<T extends { id?: unknown }>({
     return {
         draftConfigs,
         loading,
+        loadFailed,
         draftRows: draftRowsFor,
         serverRows: serverRowsFor,
         isDirty,
