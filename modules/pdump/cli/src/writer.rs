@@ -206,11 +206,7 @@ pub fn pdump_write(
         }
     };
     let mut count = 0;
-    while let Some(rec) = rx.blocking_recv() {
-        if let Err(e) = writer.write(rec) {
-            log::error!("failed to write record: {e}");
-            break;
-        };
+    loop {
         if let Some(limit) = packet_limit
             && count >= limit
         {
@@ -218,6 +214,16 @@ pub fn pdump_write(
 
             break;
         }
+
+        let Some(rec) = rx.blocking_recv() else {
+            break;
+        };
+
+        if let Err(e) = writer.write(rec) {
+            log::error!("failed to write record: {e}");
+            break;
+        };
+
         count += 1;
     }
     _ = writer.flush().map_err(|e| {
