@@ -57,9 +57,9 @@ pub struct UpdateConfigCmd {
     /// Decap module name to operate on.
     #[arg(long = "name", short = 'n')]
     pub config_name: String,
-    /// Prefix in the full desired set, replacing the current one entirely.
+    /// Prefixes in the full desired set, replacing the current one entirely.
     #[arg(long, short)]
-    pub prefix: Vec<Contiguous<IpNetwork>>,
+    pub prefixes: Vec<Contiguous<IpNetwork>>,
 }
 
 /// Output format options.
@@ -138,7 +138,7 @@ impl DecapService {
     pub async fn update_config(&mut self, cmd: UpdateConfigCmd) -> Result<(), Box<dyn Error>> {
         let request = UpdateConfigRequest {
             name: cmd.config_name.clone(),
-            prefixes: cmd.prefix.iter().map(|p| p.to_string()).collect(),
+            prefixes: cmd.prefixes.iter().map(|p| p.to_string()).collect(),
         };
         log::trace!("update config request: {request:?}");
         let response = self.client.update_config(request).await?.into_inner();
