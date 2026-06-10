@@ -12,7 +12,7 @@ import {
     ActionChain,
     ChipList,
 } from './chips';
-import { DraftActionButtons } from '../../../components/draft';
+import { ruleTableCommonProps } from '../../../components/draft';
 import type { RuleRate } from './useAclRuleCounters';
 import Sparkline from '../_shared/Sparkline';
 import { VirtualTable, type Column } from '../../../components/VirtualTable';
@@ -294,19 +294,18 @@ const RuleTable: React.FC<RuleTableProps> = ({
             indexWidth={48}
             cellPaddingRight={8}
             indexFontSize={12}
-            emptyMessage="No rules match your search."
-            selectedIds={selectedIds}
-            onSelectionChange={onSelectionChange}
-            sortState={{ column: null, direction: 'asc' }}
-            onSort={() => {}}
-            onEditRow={(id) => {
-                const it = items.find((item) => item.id === id);
-                if (it) onEditRule(it);
-            }}
-            editAriaLabel={(item) => `Edit rule ${item.index + 1}`}
-            editTitle="Edit rule"
-            activeRowId={activeRowId}
-            flashRowId={flashRowId}
+            {...ruleTableCommonProps({
+                items,
+                onEditRule,
+                selectedIds,
+                onSelectionChange,
+                activeRowId,
+                flashRowId,
+                currentIsDirty,
+                onSave,
+                onDiscard,
+                onDeleteConfig,
+            })}
             renderIndexAdornment={(item) => {
                 const expanded = expandRuleItem(item.rule);
                 if (expanded.isDead) {
@@ -331,21 +330,6 @@ const RuleTable: React.FC<RuleTableProps> = ({
                 }
                 return null;
             }}
-            headerActions={
-                <DraftActionButtons
-                    currentIsDirty={currentIsDirty}
-                    onSave={onSave}
-                    onDiscard={onDiscard}
-                    onDeleteConfig={onDeleteConfig}
-                />
-            }
-            footerExtra={
-                selectedIds.size > 0 ? (
-                    <span className="yn-toolbar__count" style={{ color: 'var(--yn-accent)' }}>
-                        {selectedIds.size.toLocaleString()} selected
-                    </span>
-                ) : undefined
-            }
         />
     );
 };

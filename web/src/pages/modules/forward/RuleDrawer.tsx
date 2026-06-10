@@ -9,6 +9,7 @@ import { isValidCidr, isValidDeviceName } from '../../../utils';
 import ChipInput from './ChipInput';
 import type { ChipInputHandle } from './ChipInput';
 import { DrawerShell } from '../../../components';
+import { RuleDrawerHeadActions, RuleDrawerFootActions, ruleDrawerFootMeta } from '../../../components/draft';
 
 interface RuleDrawerProps {
     open: boolean;
@@ -101,52 +102,19 @@ const RuleDrawer = React.forwardRef<RuleDrawerHandle, RuleDrawerProps>(({
             title={mode === 'add' ? 'New rule' : (
                 <>Edit rule <span className="yn-drawer__rule-num">#{ruleItem?.index !== undefined ? ruleItem.index + 1 : ''}</span></>
             )}
-            headActions={<>
-                {mode === 'edit' && ruleItem && (
-                    <>
-                        <button
-                            type="button"
-                            className="yn-icon-btn"
-                            onClick={() => onDuplicate(ruleItem)}
-                            title="Duplicate rule"
-                        >
-                            ⎘
-                        </button>
-                        <button
-                            type="button"
-                            className="yn-icon-btn yn-icon-btn--danger"
-                            onClick={() => onDelete(ruleItem)}
-                            title="Delete rule"
-                        >
-                            🗑
-                        </button>
-                    </>
-                )}
-                <button
-                    type="button"
-                    className="yn-icon-btn"
-                    onClick={handleClose}
-                    aria-label="Close drawer"
-                >
-                    ✕
-                </button>
-            </>}
-            footMeta={mode === 'add'
-                ? 'Will be appended to config.'
-                : `Rule #${(ruleItem?.index ?? -1) + 1}`}
-            footActions={<>
-                <button type="button" className="yn-btn yn-btn--ghost" onClick={handleClose}>
-                    Cancel
-                </button>
-                <button
-                    type="button"
-                    className="yn-btn yn-btn--primary"
-                    disabled={!isValid}
-                    onClick={handleApply}
-                >
-                    Apply
-                </button>
-            </>}
+            headActions={<RuleDrawerHeadActions
+                showEditActions={mode === 'edit' && !!ruleItem}
+                onDuplicate={() => { if (ruleItem) onDuplicate(ruleItem); }}
+                onDelete={() => { if (ruleItem) onDelete(ruleItem); }}
+                deleteIcon="🗑"
+                onClose={handleClose}
+            />}
+            footMeta={ruleDrawerFootMeta(mode, ruleItem)}
+            footActions={<RuleDrawerFootActions
+                onCancel={handleClose}
+                onApply={handleApply}
+                applyDisabled={!isValid}
+            />}
         >
             <section className="yn-section">
                 <div className="yn-section-h">Identity</div>

@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useDrawerFlush } from '../../../hooks';
 import { ActionKind, ACTION_KIND_LABELS } from '../../../api/acl';
-import { TrashIcon } from '../../../components/draft';
+import { TrashIcon, RuleDrawerHeadActions, RuleDrawerFootActions, ruleDrawerFootMeta } from '../../../components/draft';
 import type { RuleDraft, RuleItem } from './types';
 import { emptyDraft } from './types';
 import { itemToDraft, defaultCounterName, draftToRule, expandRule, deadReasonText } from './hooks';
@@ -147,51 +147,18 @@ const RuleDrawer = React.forwardRef<RuleDrawerHandle, RuleDrawerProps>(({
                     </span>
                 )}
             </>}
-            headActions={<>
-                {mode === 'edit' && ruleItem && (
-                    <>
-                        <button
-                            type="button"
-                            className="yn-icon-btn"
-                            onClick={() => onDuplicate(ruleItem)}
-                            title="Duplicate rule"
-                        >
-                            ⎘
-                        </button>
-                        <button
-                            type="button"
-                            className="yn-icon-btn yn-icon-btn--danger"
-                            onClick={() => onDelete(ruleItem)}
-                            title="Delete rule"
-                        >
-                            <TrashIcon />
-                        </button>
-                    </>
-                )}
-                <button
-                    type="button"
-                    className="yn-icon-btn"
-                    onClick={handleClose}
-                    aria-label="Close drawer"
-                >
-                    ✕
-                </button>
-            </>}
-            footMeta={mode === 'add'
-                ? 'Will be appended to config.'
-                : `Rule #${(ruleItem?.index ?? -1) + 1}`}
-            footActions={<>
-                <button type="button" className="yn-btn yn-btn--ghost" onClick={handleClose}>
-                    Cancel
-                </button>
-                <button
-                    type="button"
-                    className="yn-btn yn-btn--primary"
-                    onClick={handleApply}
-                >
-                    Apply
-                </button>
-            </>}
+            headActions={<RuleDrawerHeadActions
+                showEditActions={mode === 'edit' && !!ruleItem}
+                onDuplicate={() => { if (ruleItem) onDuplicate(ruleItem); }}
+                onDelete={() => { if (ruleItem) onDelete(ruleItem); }}
+                deleteIcon={<TrashIcon />}
+                onClose={handleClose}
+            />}
+            footMeta={ruleDrawerFootMeta(mode, ruleItem)}
+            footActions={<RuleDrawerFootActions
+                onCancel={handleClose}
+                onApply={handleApply}
+            />}
         >
             <section className="yn-section">
                 <div className="yn-section-h">Actions</div>

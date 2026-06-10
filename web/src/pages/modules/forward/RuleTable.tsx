@@ -5,7 +5,7 @@ import DirectionBadge from './DirectionBadge';
 import AnyBadge from './AnyBadge';
 import Sparkline from '../_shared/Sparkline';
 import { formatPps } from '../../../utils';
-import { DraftActionButtons } from '../../../components/draft';
+import { ruleTableCommonProps } from '../../../components/draft';
 import { VirtualTable, type Column } from '../../../components/VirtualTable';
 
 /** Compact mono list of values with overflow truncation. */
@@ -142,34 +142,18 @@ const RuleTable: React.FC<RuleTableProps> = ({
             columns={columns}
             getRowId={(item) => item.id}
             minWidth={MIN_WIDTH}
-            emptyMessage="No rules match your search."
-            selectedIds={selectedIds}
-            onSelectionChange={onSelectionChange}
-            sortState={{ column: null, direction: 'asc' }}
-            onSort={() => {}}
-            onEditRow={(id) => {
-                const it = items.find((item) => item.id === id);
-                if (it) onEditRule(it);
-            }}
-            editAriaLabel={(item) => `Edit rule ${item.index + 1}`}
-            editTitle="Edit rule"
-            activeRowId={activeRowId}
-            flashRowId={flashRowId}
-            headerActions={
-                <DraftActionButtons
-                    currentIsDirty={currentIsDirty}
-                    onSave={onSave}
-                    onDiscard={onDiscard}
-                    onDeleteConfig={onDeleteConfig}
-                />
-            }
-            footerExtra={
-                selectedIds.size > 0 ? (
-                    <span className="yn-toolbar__count" style={{ color: 'var(--yn-accent)' }}>
-                        {selectedIds.size.toLocaleString()} selected
-                    </span>
-                ) : undefined
-            }
+            {...ruleTableCommonProps({
+                items,
+                onEditRule,
+                selectedIds,
+                onSelectionChange,
+                activeRowId,
+                flashRowId,
+                currentIsDirty,
+                onSave,
+                onDiscard,
+                onDeleteConfig,
+            })}
         />
     );
 };
