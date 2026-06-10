@@ -7,10 +7,17 @@ import {
     initialAclDraftState,
 } from './draftReducer';
 import type { AclDraftAction } from './draftReducer';
+import { useConfigPersistence, type ConfigPersistenceDispatch } from '../../../components/draft/useConfigPersistence';
 
 const EMPTY_RULES: Rule[] = [];
 const EMPTY_IDS: string[] = [];
 const EMPTY_FWSTATE_NAME = '';
+
+const aclUpdateConfig = (name: string, rules: Rule[]): Promise<unknown> =>
+    API.acl.updateConfig({ name, rules });
+
+const aclDeleteConfig = (name: string): Promise<unknown> =>
+    API.acl.deleteConfig({ name });
 
 export interface UseAclDraftResult {
     draftConfigs: string[];
@@ -71,52 +78,16 @@ export const useAclDraft = (): UseAclDraftResult => {
         load();
     }, [load]);
 
-    const saveConfig = useCallback(async (configName: string): Promise<void> => {
-        const isPendingDelete = state.pendingDeleteConfigs.has(configName);
-
-        if (isPendingDelete) {
-            try {
-                await API.acl.deleteConfig({ name: configName });
-                rawDispatch({ type: 'MARK_SAVED', configName });
-                toaster.success(`acl-save-${configName}`, `Config "${configName}" deleted.`);
-            } catch (err) {
-                toaster.error(`acl-save-err-${configName}`, `Failed to delete "${configName}"`, err);
-                throw err;
-            }
-            return;
-        }
-
-        const rules = state.draft[configName] ?? [];
-        try {
-            await API.acl.updateConfig({ name: configName, rules });
-            rawDispatch({ type: 'MARK_SAVED', configName });
-            toaster.success(`acl-save-${configName}`, `Config "${configName}" saved.`);
-        } catch (err) {
-            toaster.error(`acl-save-err-${configName}`, `Failed to save "${configName}"`, err);
-            throw err;
-        }
-    }, [state.draft, state.pendingDeleteConfigs]);
-
-    const commitDeleteConfig = useCallback(async (configName: string): Promise<void> => {
-        const isLocalOnly = state.localOnlyConfigs.includes(configName);
-        rawDispatch({ type: 'DELETE_CONFIG', configName });
-        if (isLocalOnly) {
-            return;
-        }
-        try {
-            await API.acl.deleteConfig({ name: configName });
-            rawDispatch({ type: 'MARK_SAVED', configName });
-            toaster.success(`acl-save-${configName}`, `Config "${configName}" deleted.`);
-        } catch (err) {
-            rawDispatch({ type: 'DISCARD_CONFIG', configName });
-            toaster.error(`acl-save-err-${configName}`, `Failed to delete "${configName}"`, err);
-            throw err;
-        }
-    }, [state.localOnlyConfigs]);
-
-    const discardConfig = useCallback((configName: string): void => {
-        rawDispatch({ type: 'DISCARD_CONFIG', configName });
-    }, []);
+    const { saveConfig, commitDeleteConfig, discardConfig } = useConfigPersistence<Rule>({
+        updateConfig: aclUpdateConfig,
+        deleteConfig: aclDeleteConfig,
+        toastKeyPrefix: 'acl-save',
+        rollbackActionType: 'DISCARD_CONFIG',
+        rawDispatch: rawDispatch as ConfigPersistenceDispatch,
+        draft: state.draft,
+        pendingDeleteConfigs: state.pendingDeleteConfigs,
+        localOnlyConfigs: state.localOnlyConfigs,
+    });
 
     const draftRulesFor = useCallback((configName: string): Rule[] =>
         state.draft[configName] ?? EMPTY_RULES, [state.draft]);

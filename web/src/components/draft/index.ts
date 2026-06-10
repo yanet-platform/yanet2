@@ -16,3 +16,5 @@ export { useDraftPageState } from './useDraftPageState';
 export type { UseDraftPageStateOptions, UseDraftPageStateResult } from './useDraftPageState';
 export { useDraftPageDerived } from './useDraftPageDerived';
 export type { UseDraftPageDerivedOptions, UseDraftPageDerivedResult } from './useDraftPageDerived';
+export { useConfigPersistence } from './useConfigPersistence';
+export type { UseConfigPersistenceOptions, UseConfigPersistenceResult, ConfigPersistenceDispatch } from './useConfigPersistence';

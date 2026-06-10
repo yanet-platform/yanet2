@@ -7,8 +7,15 @@ import {
     initialDraftState,
 } from './draftReducer';
 import type { ForwardDraftAction } from './draftReducer';
+import { useConfigPersistence, type ConfigPersistenceDispatch } from '../../../components/draft/useConfigPersistence';
 
 const EMPTY_RULES: Rule[] = [];
+
+const forwardUpdateConfig = (name: string, rules: Rule[]): Promise<unknown> =>
+    API.forward.updateConfig({ name, rules });
+
+const forwardDeleteConfig = (name: string): Promise<unknown> =>
+    API.forward.deleteConfig({ name });
 
 export interface UseForwardDraftResult {
     /** Union of server configs and local-only draft configs, minus pending-delete ones (for display). */
@@ -87,52 +94,16 @@ export const useForwardDraft = (): UseForwardDraftResult => {
         load();
     }, [load]);
 
-    const saveConfig = useCallback(async (configName: string): Promise<void> => {
-        const isPendingDelete = state.pendingDeleteConfigs.has(configName);
-
-        if (isPendingDelete) {
-            try {
-                await API.forward.deleteConfig({ name: configName });
-                rawDispatch({ type: 'MARK_SAVED', configName });
-                toaster.success(`yn-save-${configName}`, `Config "${configName}" deleted.`);
-            } catch (err) {
-                toaster.error(`yn-save-err-${configName}`, `Failed to delete "${configName}"`, err);
-                throw err;
-            }
-            return;
-        }
-
-        const rules = state.draft[configName] ?? [];
-        try {
-            await API.forward.updateConfig({ name: configName, rules });
-            rawDispatch({ type: 'MARK_SAVED', configName });
-            toaster.success(`yn-save-${configName}`, `Config "${configName}" saved.`);
-        } catch (err) {
-            toaster.error(`yn-save-err-${configName}`, `Failed to save "${configName}"`, err);
-            throw err;
-        }
-    }, [state.draft, state.pendingDeleteConfigs]);
-
-    const commitDeleteConfig = useCallback(async (configName: string): Promise<void> => {
-        const isLocalOnly = state.localOnlyConfigs.includes(configName);
-        rawDispatch({ type: 'DELETE_CONFIG', configName });
-        if (isLocalOnly) {
-            return;
-        }
-        try {
-            await API.forward.deleteConfig({ name: configName });
-            rawDispatch({ type: 'MARK_SAVED', configName });
-            toaster.success(`yn-save-${configName}`, `Config "${configName}" deleted.`);
-        } catch (err) {
-            rawDispatch({ type: 'CANCEL_PENDING_DELETE', configName });
-            toaster.error(`yn-save-err-${configName}`, `Failed to delete "${configName}"`, err);
-            throw err;
-        }
-    }, [state.localOnlyConfigs]);
-
-    const discardConfig = useCallback((configName: string): void => {
-        rawDispatch({ type: 'DISCARD_CONFIG', configName });
-    }, []);
+    const { saveConfig, commitDeleteConfig, discardConfig } = useConfigPersistence<Rule>({
+        updateConfig: forwardUpdateConfig,
+        deleteConfig: forwardDeleteConfig,
+        toastKeyPrefix: 'yn-save',
+        rollbackActionType: 'CANCEL_PENDING_DELETE',
+        rawDispatch: rawDispatch as ConfigPersistenceDispatch,
+        draft: state.draft,
+        pendingDeleteConfigs: state.pendingDeleteConfigs,
+        localOnlyConfigs: state.localOnlyConfigs,
+    });
 
     const saveAll = useCallback(async (): Promise<void> => {
         const dirtyConfigs = [
