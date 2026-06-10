@@ -22,6 +22,10 @@ counter_registry_init(
 
 	SET_OFFSET_OF(&registry->names, NULL);
 
+	if (str_index_init(&registry->str_index, memory_context)) {
+		return -1;
+	}
+
 	return 0;
 }
 
@@ -38,23 +42,35 @@ counter_registry_fini(struct counter_registry *registry) {
 		);
 	}
 
+	str_index_fini(&registry->str_index);
+
 	// Reset to zero-init state so a second fini is a safe no-op.
 	memset(registry, 0, sizeof(*registry));
 }
 
+static inline const char *
+counter_registry_read_index(uint32_t index, const void *data) {
+	const struct counter_registry *registry =
+		(struct counter_registry *)data;
+
+	struct counter *names = ADDR_OF(&registry->names);
+	return names[index].name;
+}
+
 uint64_t
 counter_registry_lookup_index(
-	struct counter_registry *registry, const char *name, uint64_t size
+	struct counter_registry *registry, const char *name
 ) {
-	struct counter *names = ADDR_OF(&registry->names);
+	uint32_t index = str_index_lookup(
+		&registry->str_index,
+		name,
+		COUNTER_NAME_LEN,
+		counter_registry_read_index,
+		registry
+	);
 
-	// FIXME: use hash index
-	for (uint64_t idx = 0; idx < registry->count; ++idx) {
-		if (!strncmp(name, names[idx].name, COUNTER_NAME_LEN) &&
-		    names[idx].size == size) {
-			return idx;
-		}
-	}
+	if (index != STR_INDEX_INVALID)
+		return index;
 
 	return (uint64_t)-1;
 }
@@ -133,6 +149,18 @@ counter_registry_insert(
 		}
 	}
 
+	if (str_index_insert(
+		    &registry->str_index,
+		    name,
+		    COUNTER_NAME_LEN,
+		    registry->count,
+		    counter_registry_read_index,
+		    registry
+	    )) {
+		yanet_error_add(err, "failed to insert counter registry index");
+		return -1;
+	}
+
 	struct counter *names = ADDR_OF(&registry->names);
 
 	struct counter *new_name = names + registry->count;
@@ -172,11 +200,17 @@ counter_registry_register(
 		return -1;
 	}
 
-	uint64_t idx = counter_registry_lookup_index(registry, name, size);
+	uint64_t idx = counter_registry_lookup_index(registry, name);
 
 	if (idx != (uint64_t)-1) {
 		struct counter *name = ADDR_OF(&registry->names) + idx;
 		name->gen = registry->gen;
+		if (name->size != size) {
+			yanet_error_add(
+				err, "counter redeclared with different size"
+			);
+			return -1;
+		}
 
 		return idx;
 	}
@@ -207,7 +241,7 @@ counter_registry_link(
 				continue;
 
 			uint64_t dst_idx = counter_registry_lookup_index(
-				dst, src_name->name, src_name->size
+				dst, src_name->name
 			);
 			if (dst_idx == (uint64_t)-1) {
 				dst_idx = counter_registry_insert(
@@ -217,6 +251,17 @@ counter_registry_link(
 					src_name->gen,
 					err
 				);
+			} else {
+				struct counter *dst_name =
+					ADDR_OF(&dst->names) + dst_idx;
+				if (dst_name->size != src_name->size) {
+					yanet_error_add(
+						err,
+						"counter redeclared with "
+						"different size"
+					);
+					return -1;
+				}
 			}
 			if (dst_idx == (uint64_t)-1) {
 				return -1;

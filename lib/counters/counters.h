@@ -3,6 +3,7 @@
 #include <stdint.h>
 
 #include "common/memory.h"
+#include "common/str_index.h"
 #include "lib/errors/errors.h"
 
 #define COUNTER_MAX_SIZE_EXP 6
@@ -32,6 +33,7 @@ struct counter_registry {
 	uint64_t counts[COUNTER_POOL_SIZE];
 
 	struct counter *names;
+	struct str_index str_index;
 };
 
 int
