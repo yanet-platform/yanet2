@@ -1,0 +1,13 @@
+syntax = "proto3";
+
+package operators.decap.operatorpb.v1;
+
+option go_package = "github.com/yanet-platform/yanet2/operators/decap/operatorpb/v1;operatorpb";
+
+import "common/readinesspb/v1/readiness.proto";
+
+// ReadinessService exposes per-gateway readiness of the decap operator.
+service ReadinessService {
+  // Ready returns the current per-gateway readiness state.
+  rpc Ready(common.readinesspb.v1.ReadyRequest) returns (common.readinesspb.v1.ReadyResponse);
+}

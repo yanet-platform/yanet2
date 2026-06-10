@@ -105,3 +105,11 @@ Depends: ${shlibs:Depends}
 Description: YANET2 forward operator
  Periodic reconciler that pushes a forward-rules YAML to one or
  more YANET2 gateways via FunctionService.
+
+Package: yanet2-decap-operator
+Architecture: any
+Depends: ${shlibs:Depends}
+ , ${misc:Depends}
+Description: YANET2 decap operator
+ Periodic reconciler that pushes decap prefix sets to one or more
+ YANET2 gateways via FunctionService.

@@ -1,0 +1,3 @@
+usr/bin/yanet-decap-operator
+etc/yanet2/decap.d/default.yaml
+etc/yanet2/yanet-decap-operator-default.yaml

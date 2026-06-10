@@ -229,6 +229,8 @@ install: dataplane cli-install
 	install -d $(DESTDIR)/etc/yanet2/forward.d
 	install -m 644 operators/forward/etc/yanet/forward.d/vlan-phy-default.yaml $(DESTDIR)/etc/yanet2/forward.d/vlan-phy-default.yaml
 	install -m 644 operators/forward/etc/yanet/forward.d/phy-vlan-default.yaml $(DESTDIR)/etc/yanet2/forward.d/phy-vlan-default.yaml
+	install -d $(DESTDIR)/etc/yanet2/decap.d
+	install -m 644 operators/decap/etc/yanet/decap.d/default.yaml $(DESTDIR)/etc/yanet2/decap.d/default.yaml
 
 clean: go-cache-clean cli-clean
 	@echo "Cleaning build directories..."

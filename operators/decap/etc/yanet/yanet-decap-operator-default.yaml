@@ -1,0 +1,24 @@
+logging:
+  level: info
+
+server:
+  endpoint: "[::1]:50004"
+
+gateways:
+  - name: numa0
+    endpoint: "[::1]:8080"
+
+register:
+  interval: 30s
+
+reconcile:
+  interval: 30s
+  initial_backoff: 500ms
+  max_backoff: 30s
+
+functions:
+  - name: "fn:decap"
+    chain: "default"
+    weight: 1
+    module: "decap0"
+    prefixes_file: "/etc/yanet2/decap.d/default.yaml"
