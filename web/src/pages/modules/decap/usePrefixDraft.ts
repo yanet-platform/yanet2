@@ -25,13 +25,9 @@ export const usePrefixDraft = (): UsePrefixDraftResult => {
             .filter(Boolean);
         return Promise.all(
             configNames.map(async (name): Promise<{ name: string; rows: PrefixRowItem[] }> => {
-                try {
-                    const resp = await API.decap.showConfig({ name });
-                    const rows: PrefixRowItem[] = (resp.prefixes ?? []).map((p) => ({ id: p, prefix: p }));
-                    return { name, rows };
-                } catch {
-                    return { name, rows: [] };
-                }
+                const resp = await API.decap.showConfig({ name });
+                const rows: PrefixRowItem[] = (resp.prefixes ?? []).map((p) => ({ id: p, prefix: p }));
+                return { name, rows };
             }),
         );
     }, []);
