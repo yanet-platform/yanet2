@@ -73,12 +73,8 @@ export const useForwardDraft = (): UseForwardDraftResult => {
 
             const configs: Array<{ name: string; rules: Rule[] }> = await Promise.all(
                 forwardNames.map(async (name): Promise<{ name: string; rules: Rule[] }> => {
-                    try {
-                        const resp = await API.forward.showConfig({ name });
-                        return { name, rules: resp.rules ?? [] };
-                    } catch {
-                        return { name, rules: [] };
-                    }
+                    const resp = await API.forward.showConfig({ name });
+                    return { name, rules: resp.rules ?? [] };
                 }),
             );
 
