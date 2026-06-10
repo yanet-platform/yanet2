@@ -12,7 +12,7 @@ const chrome: ModuleCardsChrome = {
     rootClass: 'dash-modules',
     headClass: 'dash-modules__head',
     gridClass: 'dash-modules__grid',
-    gridTemplateColumns: (n) => `repeat(${Math.min(9, Math.max(1, n))}, minmax(0, 1fr))`,
+    gridTemplateColumns: (n) => `repeat(${Math.min(8, Math.max(1, n))}, minmax(0, 1fr))`,
     cardClass: 'dash-module-card',
     dotClass: 'dash-dot',
     countStyle: { color: 'var(--iv-text-dim)' },
