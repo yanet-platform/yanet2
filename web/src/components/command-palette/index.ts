@@ -9,4 +9,6 @@ export { useHelpShortcut } from './useHelpShortcut';
 export { PaletteProvider, usePalette } from './PaletteContext';
 export type { PagePaletteContribution } from './PaletteContext';
 export { navigationCommands } from './navigationCommands';
+export { buildConfigCommands } from './configCommands';
+export type { ConfigCommandsOptions } from './configCommands';
 export { default as ShortcutsHelp } from './ShortcutsHelp';

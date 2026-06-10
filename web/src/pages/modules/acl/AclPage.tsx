@@ -19,6 +19,7 @@ import { useAclRuleCounters } from './useAclRuleCounters';
 import { AddConfigModal, DeleteConfigModal, BulkDeleteModal, CommandPaletteHeader } from '../../../components';
 import { DRAWER_TRANSITION_MS } from '../../../components/draft';
 import type { Command, RowAdapter, PagePaletteContribution } from '../../../components/command-palette';
+import { buildConfigCommands } from '../../../components/command-palette';
 import { useTabCycle } from '../../_shared/useTabCycle';
 import '../../../styles/chrome.scss';
 import './acl.scss';
@@ -323,36 +324,16 @@ const AclPage: React.FC = () => {
                 onSelect: () => { closeDrawer(); handleDiscard(); },
             });
         }
-        list.push({
-            id: '__add_config',
-            icon: '▤',
-            label: 'Add config',
-            sub: 'Create a new ACL configuration',
-            keywords: 'add config create new',
-            onSelect: () => setAddConfigOpen(true),
-        });
-        if (currentConfig) {
-            list.push({
-                id: '__delete_config',
-                icon: '✕',
-                label: 'Delete config',
-                sub: `Delete "${currentConfig}"`,
-                keywords: 'delete remove config',
-                onSelect: () => handleOpenDeleteConfig(),
-            });
-        }
-        for (const cfg of draftConfigs) {
-            if (cfg === currentConfig) continue;
-            const name = cfg;
-            list.push({
-                id: `__config_${name}`,
-                icon: '⇥',
-                label: `Switch to config ${name}`,
-                sub: dirtySet.has(name) ? 'unsaved changes' : undefined,
-                keywords: `switch config tab ${name}`,
-                onSelect: () => handleTabSelect(name),
-            });
-        }
+        list.push(...buildConfigCommands({
+            currentConfig,
+            draftConfigs,
+            dirtySet,
+            addConfigSub: 'Create a new ACL configuration',
+            withKeywords: true,
+            onAddConfig: () => setAddConfigOpen(true),
+            onDeleteConfig: () => handleOpenDeleteConfig(),
+            onSwitchConfig: (name) => handleTabSelect(name),
+        }));
         if (enabledCounterNames.size > 0) {
             list.push({
                 id: '__pause_resume',

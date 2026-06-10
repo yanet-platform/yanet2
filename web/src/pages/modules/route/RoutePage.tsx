@@ -16,6 +16,7 @@ import { AddConfigModal, DeleteConfigModal, BulkDeleteModal, CommandPaletteHeade
 import { useDraftShortcuts, useDraftDragDrop, useDraftPageHandlers, computeRowStatuses } from '../../../components/draft';
 import { isValidCidr as isValidCIDR } from '../../../utils';
 import type { Command, RowAdapter, PagePaletteContribution } from '../../../components/command-palette';
+import { buildConfigCommands } from '../../../components/command-palette';
 import { useTabCycle } from '../../_shared/useTabCycle';
 import '../../../styles/chrome.scss';
 import './route.scss';
@@ -164,33 +165,14 @@ const RoutePage: React.FC = () => {
                 onSelect: () => handlers.handleDiscard(),
             });
         }
-        list.push({
-            id: '__add_config',
-            icon: '▤',
-            label: 'Add config',
-            onSelect: () => setAddConfigOpen(true),
-        });
-        if (currentConfig) {
-            list.push({
-                id: '__delete_config',
-                icon: '✕',
-                label: 'Delete config',
-                sub: `Delete "${currentConfig}"`,
-                onSelect: () => setDeleteConfigOpen(true),
-            });
-        }
-        for (const cfg of draftConfigs) {
-            if (cfg === currentConfig) continue;
-            const name = cfg;
-            list.push({
-                id: `__config_${name}`,
-                icon: '⇥',
-                label: `Switch to config ${name}`,
-                sub: dirtySet.has(name) ? 'unsaved changes' : undefined,
-                keywords: `switch config tab ${name}`,
-                onSelect: () => handleConfigSelect(name),
-            });
-        }
+        list.push(...buildConfigCommands({
+            currentConfig,
+            draftConfigs,
+            dirtySet,
+            onAddConfig: () => setAddConfigOpen(true),
+            onDeleteConfig: () => setDeleteConfigOpen(true),
+            onSwitchConfig: (name) => handleConfigSelect(name),
+        }));
         if (search) {
             list.push({
                 id: '__clear',

@@ -16,6 +16,7 @@ import { AddConfigModal, DeleteConfigModal, BulkDeleteModal, CommandPaletteHeade
 import { useDraftShortcuts, useDraftDragDrop, useDraftPageHandlers, computeRowStatuses } from '../../../components/draft';
 import { useTabCycle } from '../../_shared/useTabCycle';
 import type { Command, RowAdapter, PagePaletteContribution } from '../../../components/command-palette';
+import { buildConfigCommands } from '../../../components/command-palette';
 import '../../../styles/chrome.scss';
 import './decap.scss';
 
@@ -151,36 +152,16 @@ const DecapPage: React.FC = () => {
                 onSelect: () => handlers.handleDiscard(),
             });
         }
-        list.push({
-            id: '__add_config',
-            icon: '▤',
-            label: 'Add config',
-            sub: 'Create a new decap configuration',
-            keywords: 'add config create new',
-            onSelect: () => setAddConfigOpen(true),
-        });
-        if (currentConfig) {
-            list.push({
-                id: '__delete_config',
-                icon: '✕',
-                label: 'Delete config',
-                sub: `Delete "${currentConfig}"`,
-                keywords: 'delete remove config',
-                onSelect: () => setDeleteConfigOpen(true),
-            });
-        }
-        for (const cfg of draftConfigs) {
-            if (cfg === currentConfig) continue;
-            const name = cfg;
-            list.push({
-                id: `__config_${name}`,
-                icon: '⇥',
-                label: `Switch to config ${name}`,
-                sub: dirtySet.has(name) ? 'unsaved changes' : undefined,
-                keywords: `switch config tab ${name}`,
-                onSelect: () => setActiveConfig(name),
-            });
-        }
+        list.push(...buildConfigCommands({
+            currentConfig,
+            draftConfigs,
+            dirtySet,
+            addConfigSub: 'Create a new decap configuration',
+            withKeywords: true,
+            onAddConfig: () => setAddConfigOpen(true),
+            onDeleteConfig: () => setDeleteConfigOpen(true),
+            onSwitchConfig: (name) => setActiveConfig(name),
+        }));
         list.push({
             id: '__clear_search',
             icon: '✕',
