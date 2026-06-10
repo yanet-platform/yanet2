@@ -1,6 +1,6 @@
-import React, { useMemo } from 'react';
+import React from 'react';
 import type { DeviceCounterData } from '../../../hooks';
-import { useRollingSeries } from '../inspect/hooks';
+import { useAggregateThroughput, useRollingSeries } from '../inspect/hooks';
 import { Sparkline } from '../inspect/Sparkline';
 import { fmtBps, fmtPps } from '../inspect/formatters';
 
@@ -11,16 +11,7 @@ export interface ThroughputProps {
 
 /** Aggregate throughput hero with a full-width sparkline beneath. */
 export const Throughput: React.FC<ThroughputProps> = ({ rateCounters, physicalDeviceNames }) => {
-    const { aggregatePps, aggregateBps } = useMemo(() => {
-        let pps = 0;
-        let bps = 0;
-        rateCounters.forEach((d, name) => {
-            if (!physicalDeviceNames.has(name)) return;
-            pps += d.rx?.pps ?? 0;
-            bps += d.rx?.bps ?? 0;
-        });
-        return { aggregatePps: pps, aggregateBps: bps };
-    }, [rateCounters, physicalDeviceNames]);
+    const { aggregatePps, aggregateBps } = useAggregateThroughput(rateCounters, physicalDeviceNames);
 
     const throughputSeries = useRollingSeries(aggregatePps, 60);
 

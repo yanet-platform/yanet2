@@ -509,18 +509,7 @@
     }
 
     &--clickable {
-        cursor: pointer;
-
-        &:hover {
-            border-top-color: var(--iv-text-dim);
-            border-right-color: var(--iv-text-dim);
-            border-bottom-color: var(--iv-text-dim);
-        }
-
-        &:focus-visible {
-            outline: 1px solid var(--iv-accent);
-            outline-offset: 1px;
-        }
+        @include module-card-clickable;
     }
 
     &__top {

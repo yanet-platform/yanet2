@@ -1,7 +1,7 @@
-import React, { useMemo } from 'react';
+import React from 'react';
 import type { InstanceInfo } from '../../../api/inspect';
 import type { DeviceCounterData } from '../../../hooks';
-import { useRollingSeries } from './hooks';
+import { useAggregateThroughput, useRollingSeries } from './hooks';
 import { HeroSparkline } from './HeroSparkline';
 import { Crosshair } from './Crosshair';
 import { RadialPulse } from './RadialPulse';
@@ -67,16 +67,7 @@ export const HudHero: React.FC<HudHeroProps> = ({
     const modules = instance.dp_modules ?? [];
     const configs = instance.cp_configs ?? [];
 
-    const { aggregatePps, aggregateBps } = useMemo(() => {
-        let pps = 0;
-        let bps = 0;
-        rateCounters.forEach((d, name) => {
-            if (!physicalDeviceNames.has(name)) return;
-            pps += d.rx?.pps ?? 0;
-            bps += d.rx?.bps ?? 0;
-        });
-        return { aggregatePps: pps, aggregateBps: bps };
-    }, [rateCounters, physicalDeviceNames]);
+    const { aggregatePps, aggregateBps } = useAggregateThroughput(rateCounters, physicalDeviceNames);
 
     const throughputSeries = useRollingSeries(aggregatePps, 90);
 

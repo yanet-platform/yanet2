@@ -45,6 +45,21 @@
     letter-spacing: 1.6px;
 }
 
+@mixin module-card-clickable {
+    cursor: pointer;
+
+    &:hover {
+        border-top-color: var(--iv-text-dim);
+        border-right-color: var(--iv-text-dim);
+        border-bottom-color: var(--iv-text-dim);
+    }
+
+    &:focus-visible {
+        outline: 1px solid var(--iv-accent);
+        outline-offset: 1px;
+    }
+}
+
 @mixin iv-thin-scrollbar($thumb-radius: null) {
     scrollbar-width: thin;
     scrollbar-color: var(--iv-border-strong) transparent;

@@ -6,6 +6,28 @@ import { useInterpolatedCounters } from '../../../hooks/useInterpolatedCounters'
 import { useRollingWindow } from '../../../hooks/useRollingWindow';
 import { groupCounterGroupsByTagsAndName, makeGroupedCounterKey } from '../../../utils';
 
+/**
+ * Aggregate RX packet-rate and bit-rate across physical devices only.
+ *
+ * Filters by physicalDeviceNames to avoid double-counting traffic that also
+ * appears on stacked virtual devices (e.g. vlan).
+ */
+export const useAggregateThroughput = (
+    rateCounters: Map<string, DeviceCounterData>,
+    physicalDeviceNames: Set<string>,
+): { aggregatePps: number; aggregateBps: number } => {
+    return useMemo(() => {
+        let pps = 0;
+        let bps = 0;
+        rateCounters.forEach((d, name) => {
+            if (!physicalDeviceNames.has(name)) return;
+            pps += d.rx?.pps ?? 0;
+            bps += d.rx?.bps ?? 0;
+        });
+        return { aggregatePps: pps, aggregateBps: bps };
+    }, [rateCounters, physicalDeviceNames]);
+};
+
 const DEFAULT_INTERVAL_MS = 1500;
 const DEFAULT_MAX_LEN = 30;
 
