@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render, screen, cleanup, fireEvent } from '@testing-library/react';
 import DeleteConfigModal from './DeleteConfigModal';
+import { describeDialogKeyboardShortcuts } from './dialogShortcutTests';
 
 describe('DeleteConfigModal', () => {
     afterEach(() => {
@@ -61,47 +62,14 @@ describe('DeleteConfigModal', () => {
         expect(screen.getByText('my-table')).toBeInTheDocument();
     });
 
-    it('calls onConfirm when Ctrl+Enter is pressed', () => {
-        const onConfirm = vi.fn();
-        render(
-            <DeleteConfigModal
-                open
-                configName="main"
-                onClose={() => {}}
-                onConfirm={onConfirm}
-            />,
-        );
-        fireEvent.keyDown(document, { key: 'Enter', ctrlKey: true });
-        expect(onConfirm).toHaveBeenCalledTimes(1);
-    });
-
-    it('calls onConfirm when Cmd+Enter is pressed', () => {
-        const onConfirm = vi.fn();
-        render(
-            <DeleteConfigModal
-                open
-                configName="main"
-                onClose={() => {}}
-                onConfirm={onConfirm}
-            />,
-        );
-        fireEvent.keyDown(document, { key: 'Enter', metaKey: true });
-        expect(onConfirm).toHaveBeenCalledTimes(1);
-    });
-
-    it('calls onClose when Escape is pressed', () => {
-        const onClose = vi.fn();
-        render(
-            <DeleteConfigModal
-                open
-                configName="main"
-                onClose={onClose}
-                onConfirm={() => {}}
-            />,
-        );
-        fireEvent.keyDown(document, { key: 'Escape' });
-        expect(onClose).toHaveBeenCalledTimes(1);
-    });
+    describeDialogKeyboardShortcuts(({ onConfirm, onClose }) => (
+        <DeleteConfigModal
+            open
+            configName="main"
+            onClose={onClose}
+            onConfirm={onConfirm}
+        />
+    ));
 
     it('does not call onConfirm when dialog is closed and Ctrl+Enter is pressed', () => {
         const onConfirm = vi.fn();

@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render, screen, cleanup, fireEvent } from '@testing-library/react';
 import BulkDeleteModal from './BulkDeleteModal';
+import { describeDialogKeyboardShortcuts } from './dialogShortcutTests';
 
 describe('BulkDeleteModal', () => {
     afterEach(() => {
@@ -65,53 +66,16 @@ describe('BulkDeleteModal', () => {
         expect(screen.getByText(/Changes are staged in the draft/i)).toBeInTheDocument();
     });
 
-    it('calls onConfirm when Ctrl+Enter is pressed', () => {
-        const onConfirm = vi.fn();
-        render(
-            <BulkDeleteModal
-                open
-                count={3}
-                itemNoun="route"
-                configName="main"
-                onClose={() => {}}
-                onConfirm={onConfirm}
-            />,
-        );
-        fireEvent.keyDown(document, { key: 'Enter', ctrlKey: true });
-        expect(onConfirm).toHaveBeenCalledTimes(1);
-    });
-
-    it('calls onConfirm when Cmd+Enter is pressed', () => {
-        const onConfirm = vi.fn();
-        render(
-            <BulkDeleteModal
-                open
-                count={3}
-                itemNoun="route"
-                configName="main"
-                onClose={() => {}}
-                onConfirm={onConfirm}
-            />,
-        );
-        fireEvent.keyDown(document, { key: 'Enter', metaKey: true });
-        expect(onConfirm).toHaveBeenCalledTimes(1);
-    });
-
-    it('calls onClose when Escape is pressed', () => {
-        const onClose = vi.fn();
-        render(
-            <BulkDeleteModal
-                open
-                count={3}
-                itemNoun="route"
-                configName="main"
-                onClose={onClose}
-                onConfirm={() => {}}
-            />,
-        );
-        fireEvent.keyDown(document, { key: 'Escape' });
-        expect(onClose).toHaveBeenCalledTimes(1);
-    });
+    describeDialogKeyboardShortcuts(({ onConfirm, onClose }) => (
+        <BulkDeleteModal
+            open
+            count={3}
+            itemNoun="route"
+            configName="main"
+            onClose={onClose}
+            onConfirm={onConfirm}
+        />
+    ));
 
     it('does not call onConfirm when dialog is closed and Ctrl+Enter is pressed', () => {
         const onConfirm = vi.fn();
