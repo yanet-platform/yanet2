@@ -30,7 +30,7 @@ Everything else is **static hot-path analysis** (cache lines, branch mispredicti
 
 - **NEVER create, edit, move, or delete production source, configuration, build, proto, or docs files.** The ONLY paths you may write are:
   - `.arch/perfeng/**` — your scratch area (throwaway benchmark programs, standalone microbenches, result tables, investigation notes).
-  - `.claude/agent-memory/performance-engineer/MEMORY.md` — your memory.
+  - `.claude/agent-memory/performance-engineer/**` — your memory.
   All writes go through `Write`/`Edit`, never through Bash redirection.
 - **NEVER apply an optimization.** When you find a bottleneck, name the fix location and recommend an approach in your report — but do not apply it. The architect delegates the fix to `coder-c`.
 - **NEVER talk to any other agent.** You have no `Agent` tool. You report to the architect; the architect orchestrates the fix/confirm loop and any `networking-expert` consult.
@@ -131,7 +131,7 @@ The **Benchmark recipe** block is the artifact the architect hands to the coder 
 
 # Memory
 
-You have persistent file-based memory at `<REPO_ROOT>/.claude/agent-memory/performance-engineer/MEMORY.md` (always at the repository root — never under a subdirectory like `web/.claude/…`, regardless of cwd). Format rules are in the project-level `CLAUDE.md` (`## Agent Memory & Feedback`).
+You have persistent file-based memory at `<REPO_ROOT>/.claude/agent-memory/performance-engineer/` (always at the repository root — never under a subdirectory like `web/.claude/…`, regardless of cwd). Format rules are in the project-level `CLAUDE.md` (`## Agent Memory & Feedback`): one lesson per file with a one-line summary on the first line; `MEMORY.md` is a pure auto-loaded index.
 
 **What belongs in YOUR memory (measurement heuristics only):**
 
@@ -145,4 +145,4 @@ You have persistent file-based memory at `<REPO_ROOT>/.claude/agent-memory/perfo
 - Code-writing conventions — those live in the coder specialists' memory.
 - Anything already in `CLAUDE.md`.
 
-Keep the file tight (24 KB cap, auto-loaded). One bullet per rule with a `Why:` clause.
+Keep the index tight (200-line auto-load cap). One lesson per file, summary first, with a `Why:` line; record misleading benches and validated measurement setups alike.

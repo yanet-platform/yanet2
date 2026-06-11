@@ -265,7 +265,7 @@ If no issues in a category, omit that category entirely. If the verdict is CHANG
 
 # Memory
 
-You have persistent file-based memory at `<REPO_ROOT>/.claude/agent-memory/reviewer/MEMORY.md` (always at the repository root — never under a subdirectory like `web/.claude/…`, regardless of cwd). Format rules are in the project-level `CLAUDE.md` (`## Agent Memory & Feedback`).
+You have persistent file-based memory at `<REPO_ROOT>/.claude/agent-memory/reviewer/` (always at the repository root — never under a subdirectory like `web/.claude/…`, regardless of cwd). Format rules are in the project-level `CLAUDE.md` (`## Agent Memory & Feedback`): one lesson per file with a one-line summary on the first line; `MEMORY.md` is a pure auto-loaded index.
 
 **What to remember in YOUR memory:**
 
@@ -273,31 +273,32 @@ You have persistent file-based memory at `<REPO_ROOT>/.claude/agent-memory/revie
 - Common build/test failure modes and how to triage them.
 - Heuristics for spotting log-only RPC stubs, stale proto regen, scope creep, and similar systemic specialist drift.
 
-**What does NOT belong in your memory:** language-specific coding conventions — those go in the specialist's `MEMORY.md` (see below).
+**What does NOT belong in your memory:** language-specific coding conventions — those go in the specialist's memory (see below).
 
 ## Specialist Memory Co-Ownership
 
-You share responsibility for keeping the specialist `MEMORY.md` files honest and up to date. The architect can no longer be the sole writer; that path caused 30 KB of bloat in `architect/MEMORY.md` because everything funneled through it.
+You share responsibility for keeping the specialist memory directories honest and up to date. The architect can no longer be the sole writer; that path caused 30 KB of bloat in the architect's memory because everything funneled through it.
 
 ### When you catch a recurring issue
 
-If you flag the same class of issue **twice in the same specialist** (within one review, or across two consecutive reviews of the same agent), you must `Edit` that specialist's `MEMORY.md` directly to add the rule:
+If you flag the same class of issue **twice in the same specialist** (within one review, or across two consecutive reviews of the same agent), you must write the lesson directly into that specialist's memory:
 
-- Path: `<REPO_ROOT>/.claude/agent-memory/coder-<lang>/MEMORY.md`.
-- One-line entry under the appropriate `## Rules` subsection.
-- Annotate `(seen: 2)`. If the rule already exists with `(seen: 2)`, bump to `(seen: 3)`.
-- When `(seen: 3)` is reached, the rule has earned promotion to `CLAUDE.md` (the project-level `## Coding Conventions` section). Promote it there and remove from the specialist `MEMORY.md`. Mention the promotion in your review verdict so the architect is aware.
+- Path: `<REPO_ROOT>/.claude/agent-memory/coder-<lang>/`.
+- A new lesson file (one-line summary on the first line, then the rule with a `Why:` line, plus a `How to apply:` line when the trigger isn't obvious from the rule) plus its index line in that agent's `MEMORY.md`, under `## Rules`. The index line text must be identical to the file's first line.
+- Annotate the summary `(seen: 2)`. If the lesson already exists with `(seen: 2)`, update it in place and bump to `(seen: 3)`.
+- When `(seen: 3)` is reached, the rule has earned promotion to `CLAUDE.md` (the project-level `## Coding Conventions` section). Promote it there and delete the lesson file + index line. Mention the promotion in your review verdict so the architect is aware.
 
 ### After every APPROVED verdict
 
-Run a quick hygiene sweep on the `MEMORY.md` files of the specialists that touched code in this review:
+Run a quick hygiene sweep on the memory directories of the specialists that touched code in this review:
 
-- Look for duplicate rules (same lesson, different wording) — merge them.
+- Look for duplicate notes (same lesson, different wording or split across files) — merge into one file, delete the other, fix the index.
 - Look for `(seen: 3)` candidates — promote to `CLAUDE.md`.
-- Look for any entry that reads like a TODO, design log, or migration milestone — those belong in `.arch/<PLAN>.md` or `TODO.md`, not in `MEMORY.md`. Flag the architect to relocate; do not silently delete.
+- Look for any note that reads like a TODO, design log, or migration milestone — those belong in `.arch/<PLAN>.md` or `TODO.md`, not in agent memory. Flag the architect to relocate; do not silently delete.
+- Check every index line points at an existing lesson file and vice versa.
 
-Mention the sweep result in your verdict ("Specialist MEMORY clean" or "Found N duplicates, merged"). If you found nothing, one line is enough.
+Mention the sweep result in your verdict ("Specialist memory clean" or "Found N duplicates, merged"). If you found nothing, one line is enough.
 
 ### Size cap
 
-Every `MEMORY.md` is capped at 24 KB (matches the auto-load truncation limit). If a file reaches that size and you are about to add to it, you must first run the hygiene sweep above and bring it back under the cap. Treat this like a failing lint.
+Every `MEMORY.md` index is capped at 200 lines (the auto-load truncation limit); each line is a single summary + link, summaries aiming for ≤ ~150 chars. If an index reaches the cap and you are about to add to it, you must first run the hygiene sweep above and bring it back under the cap. Treat this like a failing lint.

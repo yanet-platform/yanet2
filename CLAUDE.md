@@ -282,6 +282,10 @@ Meson orchestrates C/DPDK builds and Go binary compilation (via `custom_target` 
 
 - Always use braces for `if`/`else`/`for`/`while`, even single-line bodies.
 - Format with `clang-format`.
+- **Functions with > 6 parameters are a code smell.** Split into smaller
+  composable primitives, or introduce a config struct (`struct foo_config`
+  + designated initializer) to bring the call site to 3–4 args. "Omnibus
+  init" functions (16–17 args) are the wrong shape for testable C.
 
 ### TypeScript/React
 
@@ -296,7 +300,9 @@ Web UI lives in `web/` (`package.json`, `index.html`, `dist/`).
   backtick-quoted symbol names).
 - **Do not** add `Co-Authored-By: Claude …` / `Generated with Claude Code`
   footers.
-- PR title: `<feat|refactor|chore|perf|docs>: <short description>`.
+- PR title: `<feat|fix|refactor|chore|perf|docs>(<scope>): <short description>`
+  — MUST include the scope, exactly like commit subjects. A scopeless
+  `feat: …` title is a convention violation.
 - PR body: bullets start with capital, end with period. Add
   `Closes #<number>.` when applicable. **Do not** include a
   `## Summary` header — content goes directly. **Do not** include a
@@ -304,40 +310,31 @@ Web UI lives in `web/` (`package.json`, `index.html`, `dist/`).
 
 ## Agent Memory & Feedback
 
-**`<REPO_ROOT>/.claude/agent-memory/<agent>/MEMORY.md`** — single flat file per agent, **always at the repository root**, never under a subdirectory like `web/.claude/…` or `controlplane/.claude/…`. The path is `<repo>/.claude/agent-memory/<agent>/MEMORY.md` regardless of the agent's current working directory. If you would write to a `.claude/` path that is not directly under the repo root, you are wrong — walk up to the repo root first. No backing files, no YAML frontmatter. The file is auto-loaded into conversation context, so keep it tight.
+**`<REPO_ROOT>/.claude/agent-memory/<agent>/`** — one memory directory per agent, **always at the repository root**, never under a subdirectory like `web/.claude/…` or `controlplane/.claude/…`. The path is `<repo>/.claude/agent-memory/<agent>/` regardless of the agent's current working directory. If you would write to a `.claude/` path that is not directly under the repo root, you are wrong — walk up to the repo root first.
 
-### Format
+### Structure
 
-```markdown
-# <agent> memory
+- **One lesson per file**, named `kebab-case-slug.md`. The **first line is a one-line summary** of the lesson (≤ 150 chars, imperative for rules). After a blank line, a short body: the full rule or fact, a `Why:` line (what happened and why it mattered — a correction, an incident, a confirmed approach), and a `How to apply:` line when the trigger isn't obvious from the rule. No YAML frontmatter. Keep a lesson file under ~20 lines.
+- **`MEMORY.md` is a pure index, not a memory.** It is the only auto-loaded file, so keep it tight: `# <agent> memory` heading, then one line per lesson: `- [<one-line summary>](<slug>.md)`. Group under optional `## Rules` / `## Project context` / `## References` headings; optional `###` topic sub-headings are allowed within them but count toward the cap. Hard cap: 200 lines (auto-load truncates beyond that). Never write lesson bodies into `MEMORY.md`.
+- User-profile facts are lesson files too, summary prefixed `User: …`, indexed under `## Rules`.
 
-## Rules
-- <imperative rule>. Why: <one-clause reason>.
+### What to record
 
-## Project context
-- <fact / pattern>. Why: <one-clause reason>.
-
-## References
-- <external resource>: <where>.
-```
-
-- One bullet per rule, ≤ 200 chars. No multi-line bodies, no examples, no code fences.
-- All sections optional — omit empty ones.
-- Section determines memory type (rule = feedback, project context = project, references = reference). User-profile facts go under `## Rules` prefixed `User: …`.
+- **Corrections and confirmed approaches alike.** Corrections ("don't do X", "stop doing Y") are easy to notice; confirmations ("yes, exactly", a non-obvious choice accepted without pushback) are quieter — record both, or you will avoid past mistakes while drifting away from approaches already validated.
+- **Always include why it mattered.** The `Why:` line is what lets a future reader judge edge cases instead of blindly pattern-matching the rule.
 
 ### What NOT to save
 
 - Anything already in this `CLAUDE.md` (Coding Conventions, Architecture, etc.) — duplicates waste tokens.
-- Code patterns, file paths, architecture — derivable from the codebase.
-- Git history or recent changes — use `git log` / `git blame`.
-- Debugging fix recipes — the fix is in the code; the commit message has the context.
-- Ephemeral task state.
+- Anything the repo or chat history already records: code patterns, file paths, architecture (read the code); git history (`git log` / `git blame`); debugging fix recipes (the fix is in the code, the context in the commit message).
+- Ephemeral task state, TODOs, design logs — those go in plans, `.arch/`, or `TODO.md`.
 
 ### Hygiene
 
-- Update an existing line in place; never duplicate.
-- Before acting on a memory, verify the referenced file/symbol still exists — trust the code over a stale line.
-- Promote a recurring lesson into this `CLAUDE.md` after 3+ occurrences, then delete its line from agent memory.
+- **Update an existing note rather than create a duplicate.** Before writing, scan the index for a note on the same lesson; if found, update that file in place and append `(seen: N)` to its summary (in both the file's first line and the index line), starting at `(seen: 2)`.
+- At `(seen: 3)` the lesson graduates into this `CLAUDE.md`: add it to the appropriate section, then delete the lesson file and its index line.
+- **Delete notes that turn out to be wrong or stale.** Before acting on a note, verify the referenced file/symbol still exists — trust the code over the note, and remove or fix the note when they disagree.
+- When updating a note, keep its first line and its index line identical.
 
 ## Key Dependencies
 
