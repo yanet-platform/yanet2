@@ -360,7 +360,7 @@ merge_net6_range(
 	}
 
 	radix_free(&rdx);
-	value_registry_free(&net_registry);
+	value_registry_fini(&net_registry);
 
 	// FIXME: free temporary resources
 

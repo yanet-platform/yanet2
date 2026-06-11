@@ -42,7 +42,7 @@ value_collector_init(
 }
 
 static inline void
-value_collector_free(struct value_collector *collector) {
+value_collector_fini(struct value_collector *collector) {
 	uint32_t **use_map = ADDR_OF(&collector->use_map);
 
 	if (use_map != NULL) {
@@ -267,8 +267,8 @@ value_registry_collect(struct value_registry *registry, uint32_t value) {
 }
 
 static inline void
-value_registry_free(struct value_registry *registry) {
-	value_collector_free(&registry->collector);
+value_registry_fini(struct value_registry *registry) {
+	value_collector_fini(&registry->collector);
 
 	for (uint64_t idx = 0; idx < registry->range_count; ++idx) {
 		struct value_range *range = ADDR_OF(&registry->ranges) + idx;

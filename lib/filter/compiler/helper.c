@@ -15,12 +15,12 @@ init_dummy_registry(
 	for (uint32_t i = 0; i < actions; ++i) {
 		res = value_registry_start(registry);
 		if (res < 0) {
-			value_registry_free(registry);
+			value_registry_fini(registry);
 			return res;
 		}
 		res = value_registry_collect(registry, 0);
 		if (res < 0) {
-			value_registry_free(registry);
+			value_registry_fini(registry);
 			return res;
 		}
 	}

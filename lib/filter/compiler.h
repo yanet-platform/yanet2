@@ -53,14 +53,14 @@ filter_free(
 		SET_OFFSET_OF(&v->data, NULL);
 	}
 	for (size_t i = 1; i < 2 * filter_compiler->lookup_count; ++i) {
-		value_registry_free(&filter->v[i].registry);
+		value_registry_fini(&filter->v[i].registry);
 	}
 	for (size_t i = 1; i < filter_compiler->lookup_count; ++i) {
 		value_table_free(&filter->v[i].table);
 	}
 	if (filter_compiler->lookup_count == 1) {
 		struct filter_vertex *v0 = filter->v;
-		value_registry_free(&v0->registry);
+		value_registry_fini(&v0->registry);
 		value_table_free(&v0->table);
 	}
 	memory_context_fini(&filter->memory_context);
@@ -135,7 +135,7 @@ filter_init(
 				err,
 				"out of memory: failed to init dummy registry"
 			);
-			value_registry_free(&dummy);
+			value_registry_fini(&dummy);
 			goto init_failed;
 		}
 
@@ -149,11 +149,11 @@ filter_init(
 				err,
 				"out of memory: failed to merge registry values"
 			);
-			value_registry_free(&dummy);
+			value_registry_fini(&dummy);
 			goto init_failed;
 		}
 
-		value_registry_free(&dummy);
+		value_registry_fini(&dummy);
 		goto init_finish;
 	}
 

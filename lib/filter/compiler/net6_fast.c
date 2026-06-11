@@ -143,13 +143,13 @@ init_classifier(
 		    rules,
 		    rules_count
 	    ) != 0) {
-		value_registry_free(&high_registry);
+		value_registry_fini(&high_registry);
 		return -1;
 	}
 
 	struct value_registry low_registry;
 	if (value_registry_init(&low_registry, mctx) != 0) {
-		value_registry_free(&high_registry);
+		value_registry_fini(&high_registry);
 		free_classifier_part(&classifier->high, mctx);
 		return -1;
 	}
@@ -164,8 +164,8 @@ init_classifier(
 		    rules,
 		    rules_count
 	    ) != 0) {
-		value_registry_free(&high_registry);
-		value_registry_free(&low_registry);
+		value_registry_fini(&high_registry);
+		value_registry_fini(&low_registry);
 		free_classifier_part(&classifier->high, mctx);
 		return -1;
 	}
@@ -177,15 +177,15 @@ init_classifier(
 		    &classifier->comb,
 		    registry
 	    ) != 0) {
-		value_registry_free(&high_registry);
-		value_registry_free(&low_registry);
+		value_registry_fini(&high_registry);
+		value_registry_fini(&low_registry);
 		free_classifier_part(&classifier->high, mctx);
 		free_classifier_part(&classifier->low, mctx);
 		return -1;
 	}
 
-	value_registry_free(&high_registry);
-	value_registry_free(&low_registry);
+	value_registry_fini(&high_registry);
+	value_registry_fini(&low_registry);
 
 	return 0;
 }
