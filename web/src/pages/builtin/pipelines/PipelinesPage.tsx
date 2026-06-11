@@ -3,12 +3,12 @@ import { Button, Icon } from '@gravity-ui/uikit';
 import { Plus } from '@gravity-ui/icons';
 import { PageLayout, PageLoader, EmptyState, CommandPaletteHeader } from '../../../components';
 import { usePipelinesData } from './hooks/usePipelinesData';
-import { useDragState, useUnsavedChangesBlocker } from '../_shared/lane-editor';
+import { useDragState } from '../_shared/lane-editor';
 import { PipelineCard } from './components/PipelineCard';
 import { CreateEntityDialog } from '../../../components';
 import type { Pipeline } from './types';
 import type { Command, RowAdapter, ShortcutSection, PagePaletteContribution } from '../../../components/command-palette';
-import { useLaneCardNavigation, usePageContribution } from '../../../hooks';
+import { useLaneCardNavigation, usePageContribution, useUnsavedChangesBlocker } from '../../../hooks';
 import './PipelinesPage.scss';
 
 /** Builds a space-joined search string for a pipeline (id and function names). */

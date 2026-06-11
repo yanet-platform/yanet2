@@ -1,6 +1,6 @@
 import React, { useCallback, useMemo, useRef } from 'react';
 import { Button, Icon } from '@gravity-ui/uikit';
-import { usePageContribution } from '../../../hooks';
+import { usePageContribution, useTabCycle } from '../../../hooks';
 import { Funnel, Plus } from '@gravity-ui/icons';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, SearchInput, EmptyPagePlaceholder, RowCountDisplay } from '../../../components';
 import { useFIBDraft } from './useFIBDraft';
@@ -15,7 +15,6 @@ import { useDraftShortcuts, useDraftPageHandlers, useDraftPageState, useDraftPag
 import { isValidCidr as isValidCIDR } from '../../../utils';
 import type { Command, RowAdapter, PagePaletteContribution } from '../../../components/command-palette';
 import { buildConfigCommands } from '../../../components/command-palette';
-import { useTabCycle } from '../../_shared/useTabCycle';
 import '../../../styles/chrome.scss';
 import './route.scss';
 

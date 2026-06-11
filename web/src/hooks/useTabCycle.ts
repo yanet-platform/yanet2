@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
-import { usePalette } from '../../components/command-palette';
-import { isTypingTarget, isOverlayOpen } from '../../utils/keyboard';
+import { usePalette } from '../components/command-palette';
+import { isTypingTarget, isOverlayOpen } from '../utils/keyboard';
 
 interface UseTabCycleOptions {
     /** Ordered list of tab identifiers. */

@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { useSidebarContext } from '../../../../types';
+import { useSidebarContext } from '../types';
 
 // TODO: also block react-router navigation (back/forward, useNavigate,
 // redirect routes). Requires migrating App.tsx from <BrowserRouter> to

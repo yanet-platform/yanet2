@@ -2,7 +2,7 @@ import React, { useState, useCallback, useRef, useMemo, useEffect } from 'react'
 import { Button, Icon } from '@gravity-ui/uikit';
 import { ArrowDownToLine, Plus } from '@gravity-ui/icons';
 import { useSearchParams } from 'react-router-dom';
-import { useSearchParamHelpers, usePageContribution } from '../../../hooks';
+import { useSearchParamHelpers, usePageContribution, useTabCycle } from '../../../hooks';
 import { PageLayout, PageLoader, ConfigTabStrip, EmptyPagePlaceholder, CommandPaletteHeader } from '../../../components';
 import { toaster } from '../../../utils';
 import {
@@ -18,7 +18,6 @@ import PacketDrawer from './PacketDrawer';
 import DeleteConfigDialog from './DeleteConfigDialog';
 import type { PdumpConfigInfo, CapturedPacket } from './types';
 import type { Command, PagePaletteContribution } from '../../../components/command-palette';
-import { useTabCycle } from '../../_shared/useTabCycle';
 import '../../../styles/chrome.scss';
 import './pdump.scss';
 

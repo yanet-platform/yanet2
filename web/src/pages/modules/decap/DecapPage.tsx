@@ -1,7 +1,7 @@
 import React, { useCallback, useMemo, useRef } from 'react';
 import { Button, Icon } from '@gravity-ui/uikit';
 import { Funnel, Plus } from '@gravity-ui/icons';
-import { usePageContribution } from '../../../hooks';
+import { usePageContribution, useTabCycle } from '../../../hooks';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, EmptyPagePlaceholder, SearchInput, RowCountDisplay } from '../../../components';
 import { usePrefixDraft } from './usePrefixDraft';
 import type { PrefixRowItem } from './types';
@@ -12,7 +12,6 @@ import PrefixYamlIO from './PrefixYamlIO';
 import { PrefixSaveDiffModal } from './PrefixSaveDiffModal';
 import { AddConfigModal, DeleteConfigModal, BulkDeleteModal, CommandPaletteHeader } from '../../../components';
 import { useDraftShortcuts, useDraftPageHandlers, useDraftPageState, useDraftPageDerived } from '../../../components/draft';
-import { useTabCycle } from '../../_shared/useTabCycle';
 import type { Command, RowAdapter, PagePaletteContribution } from '../../../components/command-palette';
 import { buildConfigCommands } from '../../../components/command-palette';
 import '../../../styles/chrome.scss';

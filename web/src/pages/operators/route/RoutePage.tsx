@@ -5,8 +5,7 @@ import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, SearchInput, EmptyPage
 import { AddConfigModal } from '../../../components';
 import { BulkDeleteModal, CommandPaletteHeader } from '../../../components';
 import type { Command, RowAdapter, ShortcutSection, PagePaletteContribution } from '../../../components/command-palette';
-import { useListNavigation, usePageContribution } from '../../../hooks';
-import { useTabCycle } from '../../_shared/useTabCycle';
+import { useListNavigation, usePageContribution, useTabCycle } from '../../../hooks';
 import { API } from '../../../api';
 import { toaster, parseIPAddress } from '../../../utils';
 import { stringToIPAddress, ipAddressToString } from '../../../utils/netip';

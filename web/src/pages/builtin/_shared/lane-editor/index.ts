@@ -5,7 +5,6 @@ export { InsertSlot } from './InsertSlot';
 export { useDragState, getDragPayload, setDragPayload } from './useDragState';
 export type { DragPayload, DragState } from './useDragState';
 export { useSparklineHistory } from './useSparklineHistory';
-export { useUnsavedChangesBlocker } from './useUnsavedChangesBlocker';
 export { AddSlotButton } from './AddSlotButton';
 export { formatPps } from './laneFormat';
 export { LaneStat } from './LaneStat';

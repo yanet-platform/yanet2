@@ -1,12 +1,11 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { useSearchParamHelpers, useListNavigation, usePageContribution } from '../../../hooks';
+import { useSearchParamHelpers, useListNavigation, usePageContribution, useTabCycle } from '../../../hooks';
 import { Button, Icon } from '@gravity-ui/uikit';
 import { Plus, Layers } from '@gravity-ui/icons';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, EmptyPagePlaceholder } from '../../../components';
 import { BulkDeleteModal, DeleteConfigModal, CommandPaletteHeader } from '../../../components';
 import type { Command, RowAdapter, ShortcutSection, PagePaletteContribution } from '../../../components/command-palette';
-import { useTabCycle } from '../../_shared/useTabCycle';
 import { stringToIPAddress, ipAddressToString } from '../../../utils/netip';
 import { parseIPAddress } from '../../../utils';
 import type { Neighbour, NeighbourTableInfo } from '../../../api/neighbours';

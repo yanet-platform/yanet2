@@ -1,11 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Icon } from '@gravity-ui/uikit';
 import { useSearchParams } from 'react-router-dom';
-import { useSearchParamHelpers, usePageKeyboardShortcuts, useDirtyConfigSet, useConfigQuerySync, usePageContribution } from '../../../hooks';
+import { useSearchParamHelpers, usePageKeyboardShortcuts, useDirtyConfigSet, useConfigQuerySync, usePageContribution, useTabCycle, useUnsavedChangesBlocker } from '../../../hooks';
 import { Funnel, Plus } from '@gravity-ui/icons';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, SearchInput, EmptyPagePlaceholder, RowCountDisplay } from '../../../components';
 import { useForwardDraft } from './useForwardDraft';
-import { useUnsavedChangesBlocker } from '../../builtin/_shared/lane-editor';
 import type { Rule } from '../../../api/forward';
 import { ForwardMode } from '../../../api/forward';
 import type { RuleItem, RuleDraft } from './types';
@@ -23,7 +22,6 @@ import { AddConfigModal, DeleteConfigModal, BulkDeleteModal, CommandPaletteHeade
 import { DRAWER_TRANSITION_MS } from '../../../components/draft';
 import type { Command, RowAdapter, PagePaletteContribution } from '../../../components/command-palette';
 import { buildConfigCommands } from '../../../components/command-palette';
-import { useTabCycle } from '../../_shared/useTabCycle';
 import '../../../styles/chrome.scss';
 import './forward.scss';
 

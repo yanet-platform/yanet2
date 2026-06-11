@@ -3,7 +3,7 @@ import { Button, Icon } from '@gravity-ui/uikit';
 import { Plus } from '@gravity-ui/icons';
 import { PageLayout, PageLoader, EmptyState, CommandPaletteHeader } from '../../../components';
 import { useFunctionsData } from './hooks/useFunctionsData';
-import { useDragState, useUnsavedChangesBlocker } from '../_shared/lane-editor';
+import { useDragState } from '../_shared/lane-editor';
 import { FunctionCard } from './components/FunctionCard';
 import { CreateEntityDialog } from '../../../components';
 import { getAvailableModuleTypesFromInspect } from './moduleTypeOptions';
@@ -11,7 +11,7 @@ import type { NetworkFunction } from './types';
 import { isFnSaveable } from './validation';
 import { API } from '../../../api';
 import type { Command, RowAdapter, ShortcutSection, PagePaletteContribution } from '../../../components/command-palette';
-import { useLaneCardNavigation, usePageContribution } from '../../../hooks';
+import { useLaneCardNavigation, usePageContribution, useUnsavedChangesBlocker } from '../../../hooks';
 import './FunctionsPage.scss';
 
 /** Builds a space-joined search string for a function (id, type, chain names, module names/types). */

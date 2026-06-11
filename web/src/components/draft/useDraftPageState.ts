@@ -1,7 +1,6 @@
 import { useCallback, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { useSearchParamHelpers } from '../../hooks';
-import { useUnsavedChangesBlocker } from '../../pages/builtin/_shared/lane-editor';
+import { useSearchParamHelpers, useUnsavedChangesBlocker } from '../../hooks';
 import { useDraftDragDrop } from './useDraftDragDrop';
 import type { UseDraftDragDropResult } from './useDraftDragDrop';
 

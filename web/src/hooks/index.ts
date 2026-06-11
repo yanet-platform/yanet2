@@ -53,3 +53,7 @@ export { useLaneTrackDnD } from './useLaneTrackDnD';
 export type { UseLaneTrackDnDOptions, UseLaneTrackDnDResult } from './useLaneTrackDnD';
 
 export { useInterpolatedCounterMap } from './useInterpolatedCounterMap';
+
+export { useTabCycle } from './useTabCycle';
+
+export { useUnsavedChangesBlocker } from './useUnsavedChangesBlocker';
