@@ -32,7 +32,7 @@ dataplane:
           rx_queue_len: 128
           tx_queue_len: 4096
   connections:
-    - src_device_id: 0
-      dst_device_id: 1
-    - src_device_id: 1
-      dst_device_id: 0
+    - src_device: 07:00.0
+      dst_device: virtio_user_kni0
+    - src_device: virtio_user_kni0
+      dst_device: 07:00.0

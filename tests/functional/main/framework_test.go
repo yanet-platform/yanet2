@@ -49,10 +49,10 @@ dataplane:
           tx_queue_len: 1024
           num_mbufs: 2048
   connections:
-    - src_device_id: 0
-      dst_device_id: 1
-    - src_device_id: 1
-      dst_device_id: 0
+    - src_device: 01:00.0
+      dst_device: virtio_user_kni0
+    - src_device: virtio_user_kni0
+      dst_device: 01:00.0
 `
 }
 

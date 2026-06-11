@@ -5,6 +5,45 @@
 
 #include "common/strutils.h"
 
+static int
+resolve_connections(struct dataplane_config *config) {
+	for (uint64_t conn_idx = 0; conn_idx < config->connection_count;
+	     ++conn_idx) {
+		struct dataplane_connection_config *conn =
+			config->connections + conn_idx;
+
+		if (conn->src_device[0] == '\0' ||
+		    conn->dst_device[0] == '\0') {
+			return -1;
+		}
+
+		int64_t src_id = -1, dst_id = -1;
+		for (uint64_t dev_idx = 0; dev_idx < config->device_count;
+		     ++dev_idx) {
+			const char *name = config->devices[dev_idx].device_name;
+			if (!strcmp(name, conn->src_device)) {
+				if (src_id >= 0) {
+					return -1;
+				}
+				src_id = (int64_t)dev_idx;
+			}
+			if (!strcmp(name, conn->dst_device)) {
+				if (dst_id >= 0) {
+					return -1;
+				}
+				dst_id = (int64_t)dev_idx;
+			}
+		}
+		if (src_id < 0 || dst_id < 0) {
+			return -1;
+		}
+
+		conn->src_device_id = (uint64_t)src_id;
+		conn->dst_device_id = (uint64_t)dst_id;
+	}
+	return 0;
+}
+
 enum state {
 	state_empty,
 	state_dataplane,
@@ -228,17 +267,15 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 				break;
 
 			case state_connection_src:
-				connection->src_device_id =
-					strtol(start, &end, 10);
-				if (*end != '\0')
-					goto error;
+				strtcpy(connection->src_device,
+					start,
+					sizeof(connection->src_device));
 				state = state_connection;
 				break;
 			case state_connection_dst:
-				connection->dst_device_id =
-					strtol(start, &end, 10);
-				if (*end != '\0')
-					goto error;
+				strtcpy(connection->dst_device,
+					start,
+					sizeof(connection->dst_device));
 				state = state_connection;
 				break;
 
@@ -320,9 +357,9 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 				}
 				break;
 			case state_connection: {
-				if (!strcmp("src_device_id", start)) {
+				if (!strcmp("src_device", start)) {
 					state = state_connection_src;
-				} else if (!strcmp("dst_device_id", start)) {
+				} else if (!strcmp("dst_device", start)) {
 					state = state_connection_dst;
 				} else {
 					goto error;
@@ -447,6 +484,9 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 					       dataplane_connection_config
 					) * dataplane->connection_count
 				);
+				if (mem == NULL) {
+					goto error;
+				}
 				dataplane->connections =
 					(struct dataplane_connection_config *)
 						mem;
@@ -500,6 +540,9 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 		yaml_parser_parse(&parser, &event);
 	}
 	yaml_event_delete(&event);
+
+	if (resolve_connections(dataplane) != 0)
+		goto error;
 
 	yaml_parser_delete(&parser);
 
