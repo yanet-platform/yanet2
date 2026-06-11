@@ -75,7 +75,7 @@
  * rcu_init(&rcu, mctx, worker_count);
  * atomic_ulong shared_value = 0;
  * // ...later, on teardown:
- * rcu_free(&rcu, mctx);
+ * rcu_fini(&rcu, mctx);
  * @endcode
  *
  * @subsection rcu_reader_example Reader (Worker Thread)
@@ -481,7 +481,7 @@ rcu_update(rcu_t *rcu, atomic_ulong *value, uint64_t upd) {
  *
  * Allocates the per-worker state array from the given memory context and
  * sets the global epoch and every worker slot to zero (idle, epoch 0).
- * Must be called before any other RCU operation and paired with rcu_free.
+ * Must be called before any other RCU operation and paired with rcu_fini.
  *
  * Returns 0 on success, -1 if the per-worker array could not be allocated.
  *
@@ -509,7 +509,7 @@ rcu_init(rcu_t *rcu, struct memory_context *mctx, size_t worker_count) {
  * After this call the RCU structure must not be used.
  */
 static inline void
-rcu_free(rcu_t *rcu, struct memory_context *mctx) {
+rcu_fini(rcu_t *rcu, struct memory_context *mctx) {
 	memory_bfree(
 		mctx,
 		ADDR_OF(&rcu->workers),
