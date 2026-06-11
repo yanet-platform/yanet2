@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import type { Pipeline } from '../types';
 import { Sparkline, formatPps, LaneStat, LaneCardActions, LaneCollapseButton } from '../../_shared/lane-editor';
-import { ConfirmDialog } from '../../../../components';
+import { EntityConfirmDialogs } from '../../../../components';
 
 interface PipelineCardHeaderProps {
     pipeline: Pipeline;
@@ -80,26 +80,15 @@ export const PipelineCardHeader: React.FC<PipelineCardHeaderProps> = ({
                 />
             </div>
 
-            <ConfirmDialog
-                open={confirmDelete}
-                onClose={() => setConfirmDelete(false)}
-                onConfirm={() => { setConfirmDelete(false); onDelete(); }}
-                title="Delete pipeline"
-                message={`Delete pipeline "${pipeline.id}"? This cannot be undone.`}
-                confirmText="Delete"
-                cancelText="Cancel"
-                danger
-            />
-
-            <ConfirmDialog
-                open={confirmDiscard}
-                onClose={() => setConfirmDiscard(false)}
-                onConfirm={() => { setConfirmDiscard(false); onDiscard(); }}
-                title={`Discard changes to "${pipeline.id}"?`}
-                message="All local edits to this pipeline will be discarded."
-                confirmText="Discard"
-                cancelText="Cancel"
-                danger
+            <EntityConfirmDialogs
+                noun="pipeline"
+                entityId={pipeline.id}
+                deleteOpen={confirmDelete}
+                discardOpen={confirmDiscard}
+                onDeleteClose={() => setConfirmDelete(false)}
+                onDiscardClose={() => setConfirmDiscard(false)}
+                onDelete={onDelete}
+                onDiscard={onDiscard}
             />
         </div>
     );

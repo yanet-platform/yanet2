@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import type { NetworkFunction } from '../types';
 import { metaFor } from '../moduleMeta';
 import { Sparkline, formatPps, LaneStat, LaneCardActions, LaneCollapseButton } from '../../_shared/lane-editor';
-import { ConfirmDialog } from '../../../../components';
+import { EntityConfirmDialogs } from '../../../../components';
 
 interface FunctionCardHeaderProps {
     fn: NetworkFunction;
@@ -133,26 +133,15 @@ export const FunctionCardHeader: React.FC<FunctionCardHeaderProps> = ({
                 />
             </div>
 
-            <ConfirmDialog
-                open={confirmDelete}
-                onClose={() => setConfirmDelete(false)}
-                onConfirm={() => { setConfirmDelete(false); onDelete(); }}
-                title="Delete function"
-                message={`Delete function "${fn.id}"? This cannot be undone.`}
-                confirmText="Delete"
-                cancelText="Cancel"
-                danger
-            />
-
-            <ConfirmDialog
-                open={confirmDiscard}
-                onClose={() => setConfirmDiscard(false)}
-                onConfirm={() => { setConfirmDiscard(false); onDiscard(); }}
-                title={`Discard changes to "${fn.id}"?`}
-                message="All local edits to this function will be discarded."
-                confirmText="Discard"
-                cancelText="Cancel"
-                danger
+            <EntityConfirmDialogs
+                noun="function"
+                entityId={fn.id}
+                deleteOpen={confirmDelete}
+                discardOpen={confirmDiscard}
+                onDeleteClose={() => setConfirmDelete(false)}
+                onDiscardClose={() => setConfirmDiscard(false)}
+                onDelete={onDelete}
+                onDiscard={onDiscard}
             />
         </div>
     );
