@@ -111,7 +111,7 @@ static void
 free_classifier_part(
 	struct segments_u64_classifier *classifier, struct memory_context *mctx
 ) {
-	segments_classifier_u64_free(classifier, mctx);
+	segments_classifier_u64_fini(classifier, mctx);
 }
 
 static int

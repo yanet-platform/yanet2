@@ -21,7 +21,7 @@ segments_classifier_u16_init(
 );
 
 void
-segments_classifier_u16_free(
+segments_classifier_u16_fini(
 	struct segment_u16_classifier *classifier, struct memory_context *mctx
 );
 
@@ -43,7 +43,7 @@ segments_classifier_u32_init(
 );
 
 void
-segments_classifier_u32_free(
+segments_classifier_u32_fini(
 	struct segments_u32_classifier *classifier, struct memory_context *mctx
 );
 
@@ -64,6 +64,6 @@ segments_classifier_u64_init(
 );
 
 void
-segments_classifier_u64_free(
+segments_classifier_u64_fini(
 	struct segments_u64_classifier *classifier, struct memory_context *mctx
 );

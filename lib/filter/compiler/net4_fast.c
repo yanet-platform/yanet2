@@ -170,7 +170,7 @@ FILTER_ATTR_COMPILER_FREE_FUNC(net4_fast_src)(
 ) {
 	struct segments_u32_classifier *classifier =
 		(struct segments_u32_classifier *)data;
-	segments_classifier_u32_free(classifier, memory_context);
+	segments_classifier_u32_fini(classifier, memory_context);
 	memory_bfree(
 		memory_context,
 		classifier,
@@ -184,7 +184,7 @@ FILTER_ATTR_COMPILER_FREE_FUNC(net4_fast_dst)(
 ) {
 	struct segments_u32_classifier *classifier =
 		(struct segments_u32_classifier *)data;
-	segments_classifier_u32_free(classifier, memory_context);
+	segments_classifier_u32_fini(classifier, memory_context);
 	memory_bfree(
 		memory_context,
 		classifier,

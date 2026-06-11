@@ -133,7 +133,7 @@ FILTER_ATTR_COMPILER_FREE_FUNC(port_fast_src)(
 ) {
 	struct segment_u16_classifier *classifier =
 		(struct segment_u16_classifier *)data;
-	segments_classifier_u16_free(classifier, memory_context);
+	segments_classifier_u16_fini(classifier, memory_context);
 	memory_bfree(
 		memory_context,
 		classifier,
@@ -147,7 +147,7 @@ FILTER_ATTR_COMPILER_FREE_FUNC(port_fast_dst)(
 ) {
 	struct segment_u16_classifier *classifier =
 		(struct segment_u16_classifier *)data;
-	segments_classifier_u16_free(classifier, memory_context);
+	segments_classifier_u16_fini(classifier, memory_context);
 	memory_bfree(
 		memory_context,
 		classifier,

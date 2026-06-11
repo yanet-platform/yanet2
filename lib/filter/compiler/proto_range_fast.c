@@ -102,7 +102,7 @@ FILTER_ATTR_COMPILER_FREE_FUNC(proto_range_fast)(
 		return;
 	struct proto_range_fast_classifier *c =
 		(struct proto_range_fast_classifier *)data;
-	segments_classifier_u16_free(&c->classifier, memory_context);
+	segments_classifier_u16_fini(&c->classifier, memory_context);
 	memory_bfree(memory_context, c, sizeof(*c));
 }
 
