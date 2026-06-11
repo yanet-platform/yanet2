@@ -6,5 +6,5 @@ export { Throughput } from './Throughput';
 export { SystemState } from './SystemState';
 export { DataplaneModules } from './DataplaneModules';
 export { SceneErrorBoundary } from './SceneErrorBoundary';
-export type { StructuralDevice, StructuralPipeline, StructuralFunction, SelectedItem, LiveSnapshot } from './Inspector';
+export type { StructuralDevice, StructuralPipeline, StructuralFunction, SelectedItem, LiveSnapshot } from './types';
 export { default } from './DashboardPage';

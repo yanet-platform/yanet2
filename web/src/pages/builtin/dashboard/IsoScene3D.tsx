@@ -5,7 +5,7 @@ import type { DeviceCounterData, DeviceAbsoluteData } from '../../../hooks';
 import { usePipelineCounters, useFunctionCounters, useDeviceTrendSeries } from '../inspect/hooks';
 import { fmtPps } from '../inspect/formatters';
 import { Inspector } from './Inspector';
-import type { SelectedItem } from './Inspector';
+import type { SelectedItem, StructuralDevice, StructuralPipeline, StructuralFunction, LiveSnapshot } from './types';
 import type { AgentUsage } from '../inspect/utils';
 import { metaFor } from '../functions/moduleMeta';
 
@@ -92,56 +92,6 @@ interface ThreeRefs {
     labelSources: Omit<LabelInfo, 'sx' | 'sy'>[];
     wires: WireEntry[];
     sceneCenter: THREE.Vector3 | null;
-}
-
-/** Structural device data derived only from instance topology (no live counters). */
-interface StructuralDevice {
-    id: string;
-    name: string;
-    kind: 'plain' | 'vlan';
-    vlan?: number;
-    parent?: string;
-    mtu?: number;
-    speed?: string;
-    pipeIn?: string;
-    pipeOut?: string;
-}
-
-/** Structural pipeline data derived only from instance topology. */
-interface StructuralPipeline {
-    id: string;
-    name: string;
-    fns: string[];
-}
-
-/** Structural function data derived only from instance topology. */
-interface StructuralFunction {
-    id: string;
-    mod: string;
-    chains: number;
-}
-
-/** Per-frame live snapshot: rates, trends, statuses. Updated every counter tick. */
-interface LiveSnapshot {
-    devicesById: Map<string, {
-        rxPps: number;
-        rxBps: number;
-        txPps: number;
-        txBps: number;
-        status: 'ok' | 'idle';
-        trendRx: number[];
-        trendTx: number[];
-    }>;
-    pipelinesById: Map<string, {
-        pps: number;
-        trend: number[];
-        status: 'ok' | 'idle';
-    }>;
-    functionsById: Map<string, {
-        pps: number;
-        trend: number[];
-        status: 'ok' | 'idle';
-    }>;
 }
 
 // Reference pps denominator and maximum height multiplier for fn cubes.
