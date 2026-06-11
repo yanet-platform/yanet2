@@ -92,7 +92,7 @@ main(void) {
 	pthread_join(prod, NULL);
 	pthread_join(cons, NULL);
 
-	data_pipe_free(&shared_pipe);
+	data_pipe_fini(&shared_pipe);
 
 	printf("Done.\n");
 	return 0;

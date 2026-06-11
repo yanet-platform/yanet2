@@ -114,9 +114,9 @@ data_pipe_init(struct data_pipe *pipe, size_t size) {
 	return 0;
 }
 
-// Free resources allocated by data_pipe_init().
+// Release resources allocated by data_pipe_init().
 static inline void
-data_pipe_free(struct data_pipe *pipe) {
+data_pipe_fini(struct data_pipe *pipe) {
 	free(pipe->data);
 	free(pipe->w_pos);
 }
