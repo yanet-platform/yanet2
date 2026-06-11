@@ -66,7 +66,7 @@ test_btree_u32_init_free() {
 	// Verify the tree was initialized
 	TEST_ASSERT(tree.array.size > 0, "btree array size should be > 0");
 
-	btree_u32_free(&tree);
+	btree_u32_fini(&tree);
 
 	// Verify cleanup (array should be zeroed)
 	TEST_ASSERT_EQUAL(tree.array.size, 0, "btree not properly freed");
@@ -103,7 +103,7 @@ test_btree_u32_empty() {
 	int ret = btree_u32_init(&tree, data, n, &mctx);
 	TEST_ASSERT_EQUAL(ret, 0, "empty btree_u32 initialization failed");
 
-	btree_u32_free(&tree);
+	btree_u32_fini(&tree);
 
 	memory_context_fini(&mctx);
 	free(raw_mem);
@@ -158,7 +158,7 @@ test_btree_u32_single_element() {
 	idx = btree_u32_upper_bound(&tree, 0);
 	TEST_ASSERT_EQUAL(idx, 0, "upper_bound(0) should return 0");
 
-	btree_u32_free(&tree);
+	btree_u32_fini(&tree);
 
 	memory_context_fini(&mctx);
 	free(raw_mem);
@@ -222,7 +222,7 @@ test_btree_u32_lower_bound() {
 		idx, n, "lower_bound(100) should return n (past end)"
 	);
 
-	btree_u32_free(&tree);
+	btree_u32_fini(&tree);
 
 	memory_context_fini(&mctx);
 	free(raw_mem);
@@ -286,7 +286,7 @@ test_btree_u32_upper_bound() {
 		idx, n, "upper_bound(100) should return n (past end)"
 	);
 
-	btree_u32_free(&tree);
+	btree_u32_fini(&tree);
 
 	memory_context_fini(&mctx);
 	free(raw_mem);
@@ -323,7 +323,7 @@ test_btree_u16_init_free() {
 	// Verify the tree was initialized
 	TEST_ASSERT(tree.array.size > 0, "btree array size should be > 0");
 
-	btree_u16_free(&tree);
+	btree_u16_fini(&tree);
 
 	// Verify cleanup (array should be zeroed)
 	TEST_ASSERT_EQUAL(tree.array.size, 0, "btree not properly freed");
@@ -360,7 +360,7 @@ test_btree_u16_empty() {
 	int ret = btree_u16_init(&tree, data, n, &mctx);
 	TEST_ASSERT_EQUAL(ret, 0, "empty btree_u16 initialization failed");
 
-	btree_u16_free(&tree);
+	btree_u16_fini(&tree);
 
 	memory_context_fini(&mctx);
 	free(raw_mem);
@@ -415,7 +415,7 @@ test_btree_u16_single_element() {
 	idx = btree_u16_upper_bound(&tree, 0);
 	TEST_ASSERT_EQUAL(idx, 0, "upper_bound(0) should return 0");
 
-	btree_u16_free(&tree);
+	btree_u16_fini(&tree);
 
 	memory_context_fini(&mctx);
 	free(raw_mem);
@@ -479,7 +479,7 @@ test_btree_u16_lower_bound() {
 		idx, n, "lower_bound(100) should return n (past end)"
 	);
 
-	btree_u16_free(&tree);
+	btree_u16_fini(&tree);
 
 	memory_context_fini(&mctx);
 	free(raw_mem);
@@ -543,7 +543,7 @@ test_btree_u16_upper_bound() {
 		idx, n, "upper_bound(100) should return n (past end)"
 	);
 
-	btree_u16_free(&tree);
+	btree_u16_fini(&tree);
 
 	memory_context_fini(&mctx);
 	free(raw_mem);
@@ -602,7 +602,7 @@ test_btree_u16_large_dataset() {
 		idx, 235, "lower_bound(2345) should return 235 (element 2350)"
 	);
 
-	btree_u16_free(&tree);
+	btree_u16_fini(&tree);
 	free(data);
 	memory_context_fini(&mctx);
 	free(raw_mem);
@@ -659,7 +659,7 @@ test_btree_u16_duplicates() {
 		idx >= 11, "upper_bound(20) should return index past last 20"
 	);
 
-	btree_u16_free(&tree);
+	btree_u16_fini(&tree);
 
 	memory_context_fini(&mctx);
 	free(raw_mem);
@@ -706,7 +706,7 @@ test_btree_u16_sequential_searches() {
 		);
 	}
 
-	btree_u16_free(&tree);
+	btree_u16_fini(&tree);
 
 	memory_context_fini(&mctx);
 	free(raw_mem);
@@ -751,7 +751,7 @@ test_btree_u16_boundary_values() {
 	idx = btree_u16_upper_bound(&tree, 9);
 	TEST_ASSERT_EQUAL(idx, n, "upper_bound(9) should return n");
 
-	btree_u16_free(&tree);
+	btree_u16_fini(&tree);
 
 	memory_context_fini(&mctx);
 	free(raw_mem);
@@ -795,7 +795,7 @@ test_btree_u16_power_of_2_sizes() {
 		idx, 16, "lower_bound(77) should return 16 (element 80)"
 	);
 
-	btree_u16_free(&tree32);
+	btree_u16_fini(&tree32);
 
 	// Test with 64 elements (power of 2)
 	uint16_t data64[64];
@@ -836,7 +836,7 @@ test_btree_u16_power_of_2_sizes() {
 		);
 	}
 
-	btree_u16_free(&tree64);
+	btree_u16_fini(&tree64);
 
 	memory_context_fini(&mctx);
 	free(raw_mem);
@@ -896,7 +896,7 @@ test_btree_u16_various_n(size_t n) {
 		);
 	}
 
-	btree_u16_free(&tree);
+	btree_u16_fini(&tree);
 	free(data);
 	memory_context_fini(&mctx);
 	free(raw_mem);
@@ -952,7 +952,7 @@ test_btree_u16_upper_bounds_batch() {
 	TEST_ASSERT_EQUAL(count, 1, "upper_bounds should process 1 value");
 	TEST_ASSERT_EQUAL(single_result, 5, "upper_bound(20) should return 5");
 
-	btree_u16_free(&tree);
+	btree_u16_fini(&tree);
 	memory_context_fini(&mctx);
 	free(raw_mem);
 	LOG(INFO, "✓ btree_u16_upper_bounds batch test passed");
@@ -1010,7 +1010,7 @@ test_btree_u16_upper_bounds_large_batch() {
 		results[1], 4, "upper_bound(35) should return 4 (element 40)"
 	);
 
-	btree_u16_free(&tree);
+	btree_u16_fini(&tree);
 	free(data);
 	memory_context_fini(&mctx);
 	free(raw_mem);
@@ -1054,7 +1054,7 @@ test_btree_u64_basic() {
 		idx, 5, "upper_bound(5000) should return 5 (element 6000)"
 	);
 
-	btree_u64_free(&tree);
+	btree_u64_fini(&tree);
 
 	memory_context_fini(&mctx);
 	free(raw_mem);
@@ -1091,7 +1091,7 @@ test_btree_u64_init_free() {
 	// Verify the tree was initialized
 	TEST_ASSERT(tree.array.size > 0, "btree array size should be > 0");
 
-	btree_u64_free(&tree);
+	btree_u64_fini(&tree);
 
 	// Verify cleanup (array should be zeroed)
 	TEST_ASSERT_EQUAL(tree.array.size, 0, "btree not properly freed");
@@ -1128,7 +1128,7 @@ test_btree_u64_empty() {
 	int ret = btree_u64_init(&tree, data, n, &mctx);
 	TEST_ASSERT_EQUAL(ret, 0, "empty btree_u64 initialization failed");
 
-	btree_u64_free(&tree);
+	btree_u64_fini(&tree);
 
 	memory_context_fini(&mctx);
 	free(raw_mem);
@@ -1183,7 +1183,7 @@ test_btree_u64_single_element() {
 	idx = btree_u64_upper_bound(&tree, 0);
 	TEST_ASSERT_EQUAL(idx, 0, "upper_bound(0) should return 0");
 
-	btree_u64_free(&tree);
+	btree_u64_fini(&tree);
 
 	memory_context_fini(&mctx);
 	free(raw_mem);
@@ -1247,7 +1247,7 @@ test_btree_u64_lower_bound() {
 		idx, n, "lower_bound(100) should return n (past end)"
 	);
 
-	btree_u64_free(&tree);
+	btree_u64_fini(&tree);
 
 	memory_context_fini(&mctx);
 	free(raw_mem);
@@ -1311,7 +1311,7 @@ test_btree_u64_upper_bound() {
 		idx, n, "upper_bound(100) should return n (past end)"
 	);
 
-	btree_u64_free(&tree);
+	btree_u64_fini(&tree);
 
 	memory_context_fini(&mctx);
 	free(raw_mem);
@@ -1370,7 +1370,7 @@ test_btree_u64_large_dataset() {
 		idx, 235, "lower_bound(2345) should return 235 (element 2350)"
 	);
 
-	btree_u64_free(&tree);
+	btree_u64_fini(&tree);
 	free(data);
 	memory_context_fini(&mctx);
 	free(raw_mem);
@@ -1427,7 +1427,7 @@ test_btree_u64_duplicates() {
 		idx >= 11, "upper_bound(20) should return index past last 20"
 	);
 
-	btree_u64_free(&tree);
+	btree_u64_fini(&tree);
 
 	memory_context_fini(&mctx);
 	free(raw_mem);
@@ -1474,7 +1474,7 @@ test_btree_u64_sequential_searches() {
 		);
 	}
 
-	btree_u64_free(&tree);
+	btree_u64_fini(&tree);
 
 	memory_context_fini(&mctx);
 	free(raw_mem);
@@ -1519,7 +1519,7 @@ test_btree_u64_boundary_values() {
 	idx = btree_u64_upper_bound(&tree, 9);
 	TEST_ASSERT_EQUAL(idx, n, "upper_bound(9) should return n");
 
-	btree_u64_free(&tree);
+	btree_u64_fini(&tree);
 
 	memory_context_fini(&mctx);
 	free(raw_mem);
@@ -1563,7 +1563,7 @@ test_btree_u64_power_of_2_sizes() {
 		idx, 4, "lower_bound(17) should return 4 (element 20)"
 	);
 
-	btree_u64_free(&tree8);
+	btree_u64_fini(&tree8);
 
 	// Test with 64 elements (power of 2)
 	uint64_t data64[64];
@@ -1604,7 +1604,7 @@ test_btree_u64_power_of_2_sizes() {
 		);
 	}
 
-	btree_u64_free(&tree64);
+	btree_u64_fini(&tree64);
 
 	memory_context_fini(&mctx);
 	free(raw_mem);
@@ -1663,7 +1663,7 @@ test_btree_u32_large_dataset() {
 		idx, 235, "lower_bound(2345) should return 235 (element 2350)"
 	);
 
-	btree_u32_free(&tree);
+	btree_u32_fini(&tree);
 	free(data);
 	memory_context_fini(&mctx);
 	free(raw_mem);
@@ -1720,7 +1720,7 @@ test_btree_u32_duplicates() {
 		idx >= 11, "upper_bound(20) should return index past last 20"
 	);
 
-	btree_u32_free(&tree);
+	btree_u32_fini(&tree);
 
 	memory_context_fini(&mctx);
 	free(raw_mem);
@@ -1767,7 +1767,7 @@ test_btree_u32_sequential_searches() {
 		);
 	}
 
-	btree_u32_free(&tree);
+	btree_u32_fini(&tree);
 
 	memory_context_fini(&mctx);
 	free(raw_mem);
@@ -1812,7 +1812,7 @@ test_btree_u32_boundary_values() {
 	idx = btree_u32_upper_bound(&tree, 9);
 	TEST_ASSERT_EQUAL(idx, n, "upper_bound(9) should return n");
 
-	btree_u32_free(&tree);
+	btree_u32_fini(&tree);
 
 	memory_context_fini(&mctx);
 	free(raw_mem);
@@ -1856,7 +1856,7 @@ test_btree_u32_power_of_2_sizes() {
 		idx, 8, "lower_bound(37) should return 8 (element 40)"
 	);
 
-	btree_u32_free(&tree16);
+	btree_u32_fini(&tree16);
 
 	// Test with 64 elements (power of 2)
 	uint32_t data64[64];
@@ -1897,7 +1897,7 @@ test_btree_u32_power_of_2_sizes() {
 		);
 	}
 
-	btree_u32_free(&tree64);
+	btree_u32_fini(&tree64);
 
 	memory_context_fini(&mctx);
 	free(raw_mem);
@@ -1957,7 +1957,7 @@ test_btree_u32_various_n(size_t n) {
 		);
 	}
 
-	btree_u32_free(&tree);
+	btree_u32_fini(&tree);
 	free(data);
 	memory_context_fini(&mctx);
 	free(raw_mem);
@@ -2018,7 +2018,7 @@ test_btree_u64_various_n(size_t n) {
 		);
 	}
 
-	btree_u64_free(&tree);
+	btree_u64_fini(&tree);
 	free(data);
 	memory_context_fini(&mctx);
 	free(raw_mem);
@@ -2073,7 +2073,7 @@ test_btree_u32_upper_bounds_batch() {
 	TEST_ASSERT_EQUAL(count, 1, "upper_bounds should process 1 value");
 	TEST_ASSERT_EQUAL(single_result, 5, "upper_bound(20) should return 5");
 
-	btree_u32_free(&tree);
+	btree_u32_fini(&tree);
 	memory_context_fini(&mctx);
 	free(raw_mem);
 	LOG(INFO, "✓ btree_u32_upper_bounds batch test passed");
@@ -2127,7 +2127,7 @@ test_btree_u64_upper_bounds_batch() {
 	TEST_ASSERT_EQUAL(count, 1, "upper_bounds should process 1 value");
 	TEST_ASSERT_EQUAL(single_result, 5, "upper_bound(20) should return 5");
 
-	btree_u64_free(&tree);
+	btree_u64_fini(&tree);
 	memory_context_fini(&mctx);
 	free(raw_mem);
 	LOG(INFO, "✓ btree_u64_upper_bounds batch test passed");
@@ -2185,7 +2185,7 @@ test_btree_u32_upper_bounds_large_batch() {
 		results[1], 4, "upper_bound(35) should return 4 (element 40)"
 	);
 
-	btree_u32_free(&tree);
+	btree_u32_fini(&tree);
 	free(data);
 	memory_context_fini(&mctx);
 	free(raw_mem);
@@ -2244,7 +2244,7 @@ test_btree_u64_upper_bounds_large_batch() {
 		results[1], 4, "upper_bound(35) should return 4 (element 40)"
 	);
 
-	btree_u64_free(&tree);
+	btree_u64_fini(&tree);
 	free(data);
 	memory_context_fini(&mctx);
 	free(raw_mem);
@@ -2292,7 +2292,7 @@ test_btree_u16_sentinel_high_bit() {
 	idx = btree_u16_upper_bound(&tree, high);
 	TEST_ASSERT_EQUAL(idx, n, "must return n");
 
-	btree_u16_free(&tree);
+	btree_u16_fini(&tree);
 	memory_context_fini(&mctx);
 	free(raw_mem);
 	LOG(INFO, "✓ u16 high-bit sentinel test passed");
@@ -2339,7 +2339,7 @@ test_btree_u32_sentinel_high_bit() {
 	idx = btree_u32_upper_bound(&tree, high);
 	TEST_ASSERT_EQUAL(idx, n, "must return n");
 
-	btree_u32_free(&tree);
+	btree_u32_fini(&tree);
 	memory_context_fini(&mctx);
 	free(raw_mem);
 	LOG(INFO, "✓ u32 high-bit sentinel test passed");
@@ -2386,7 +2386,7 @@ test_btree_u64_sentinel_high_bit() {
 	idx = btree_u64_upper_bound(&tree, high);
 	TEST_ASSERT_EQUAL(idx, n, "must return n");
 
-	btree_u64_free(&tree);
+	btree_u64_fini(&tree);
 	memory_context_fini(&mctx);
 	free(raw_mem);
 	LOG(INFO, "✓ u64 high-bit sentinel test passed");

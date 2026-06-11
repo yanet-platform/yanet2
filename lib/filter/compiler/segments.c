@@ -232,7 +232,7 @@ void
 segments_classifier_u16_free(
 	struct segment_u16_classifier *classifier, struct memory_context *mctx
 ) {
-	btree_u16_free(&classifier->btree);
+	btree_u16_fini(&classifier->btree);
 	memory_bfree(
 		mctx,
 		ADDR_OF(&classifier->open),
@@ -427,7 +427,7 @@ void
 segments_classifier_u32_free(
 	struct segments_u32_classifier *classifier, struct memory_context *mctx
 ) {
-	btree_u32_free(&classifier->btree);
+	btree_u32_fini(&classifier->btree);
 	memory_bfree(
 		mctx,
 		ADDR_OF(&classifier->open),
@@ -623,7 +623,7 @@ void
 segments_classifier_u64_free(
 	struct segments_u64_classifier *classifier, struct memory_context *mctx
 ) {
-	btree_u64_free(&classifier->btree);
+	btree_u64_fini(&classifier->btree);
 	memory_bfree(
 		mctx,
 		ADDR_OF(&classifier->open),

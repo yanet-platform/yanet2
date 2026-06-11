@@ -188,7 +188,7 @@ benchmark_btree_u64(size_t num_elements) {
 	uint64_t *search_values =
 		(uint64_t *)allocate_hugepage_memory(search_size);
 	if (search_values == NULL) {
-		btree_u64_free(&tree);
+		btree_u64_fini(&tree);
 		munmap(data, data_size);
 		memory_context_fini(&mctx);
 		munmap(raw_mem, ARENA_SIZE);
@@ -288,7 +288,7 @@ benchmark_btree_u64(size_t num_elements) {
 
 	// Cleanup
 	munmap(search_values, search_size);
-	btree_u64_free(&tree);
+	btree_u64_fini(&tree);
 	munmap(data, data_size);
 	memory_context_fini(&mctx);
 	munmap(raw_mem, ARENA_SIZE);
@@ -358,7 +358,7 @@ benchmark_btree_u64_upper_bounds(size_t num_elements) {
 	uint64_t *search_values =
 		(uint64_t *)allocate_hugepage_memory(search_size);
 	if (search_values == NULL) {
-		btree_u64_free(&tree);
+		btree_u64_fini(&tree);
 		munmap(data, data_size);
 		memory_context_fini(&mctx);
 		munmap(raw_mem, ARENA_SIZE);
@@ -458,7 +458,7 @@ benchmark_btree_u64_upper_bounds(size_t num_elements) {
 
 	// Cleanup
 	munmap(search_values, search_size);
-	btree_u64_free(&tree);
+	btree_u64_fini(&tree);
 	munmap(data, data_size);
 	memory_context_fini(&mctx);
 	munmap(raw_mem, ARENA_SIZE);

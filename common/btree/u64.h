@@ -38,7 +38,7 @@
  * // idx = 3 (index of 1500, first element >= 1200)
  *
  * // Cleanup
- * btree_u64_free(&tree);
+ * btree_u64_fini(&tree);
  * @endcode
  */
 
@@ -321,24 +321,24 @@ btree_u64_init(
 }
 
 /**
- * @brief Free all memory associated with a btree
+ * @brief Release all memory associated with a btree
  *
  * Releases all allocated memory and zeros the structure.
  * Safe to call multiple times on the same btree.
  *
- * @param btree Pointer to btree to free
+ * @param btree Pointer to btree to finalize
  *
  * After calling this function, the btree structure is zeroed and
  * cannot be used until re-initialized with btree_u64_init().
  *
  * Example:
  * @code
- * btree_u64_free(&tree);
+ * btree_u64_fini(&tree);
  * // tree is now safe to re-initialize or discard
  * @endcode
  */
 static inline void
-btree_u64_free(struct btree_u64 *btree) {
+btree_u64_fini(struct btree_u64 *btree) {
 	big_array_fini(&btree->array);
 }
 
