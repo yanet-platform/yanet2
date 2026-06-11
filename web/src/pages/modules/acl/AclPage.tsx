@@ -1,9 +1,9 @@
-import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { Button, Icon, Label } from '@gravity-ui/uikit';
 import { Funnel, Pause, Play, Plus } from '@gravity-ui/icons';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, SearchInput, EmptyPagePlaceholder, RowCountDisplay } from '../../../components';
-import { useSearchParamHelpers, usePageKeyboardShortcuts, useDirtyConfigSet, useConfigQuerySync, usePageContribution, useTabCycle, useUnsavedChangesBlocker } from '../../../hooks';
+import { usePageContribution } from '../../../hooks';
 import { useAclDraft } from './useAclDraft';
 import type { Rule } from '../../../api/acl';
 import { ActionKind } from '../../../api/acl';
@@ -16,14 +16,15 @@ import YamlIO, { type ImportMode } from './YamlIO';
 import { SaveDiffModal } from './SaveDiffModal';
 import { useAclRuleCounters } from './useAclRuleCounters';
 import { AddConfigModal, DeleteConfigModal, BulkDeleteModal, CommandPaletteHeader } from '../../../components';
-import { DRAWER_TRANSITION_MS } from '../../../components/draft';
+import { useRulePageState } from '../../../components/draft';
 import type { Command, RowAdapter, PagePaletteContribution } from '../../../components/command-palette';
 import { buildConfigCommands } from '../../../components/command-palette';
 import '../../../styles/chrome.scss';
 import './acl.scss';
 
 const QP_CONFIG = 'config';
-const QP_SEARCH = 'search';
+
+const cloneRuleItem = (item: RuleItem): RuleItem => ({ ...item, rule: { ...item.rule } });
 
 const AclPage: React.FC = () => {
     const {
@@ -40,39 +41,66 @@ const AclPage: React.FC = () => {
         commitDeleteConfig,
         discardConfig,
     } = useAclDraft();
-    const [searchParams, setSearchParams] = useSearchParams();
 
     const [paused, setPaused] = useState(false);
     const [enabledCounterNames, setEnabledCounterNames] = useState<Set<string>>(new Set());
-    const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-    const [activeRowId, setActiveRowId] = useState<string | null>(null);
-    const [drawer, setDrawer] = useState<{ open: boolean; mode: 'add' | 'edit'; item: RuleItem | null }>({
-        open: false,
-        mode: 'add',
-        item: null,
-    });
-    const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
-    const [addConfigOpen, setAddConfigOpen] = useState(false);
-    const [deleteConfigOpen, setDeleteConfigOpen] = useState(false);
-    const [diffModalOpen, setDiffModalOpen] = useState(false);
-    const [flashRowId, setFlashRowId] = useState<string | null>(null);
     const [deleteConfigTarget, setDeleteConfigTarget] = useState<string | null>(null);
-    const [deleteInFlightConfig, setDeleteInFlightConfig] = useState<string | null>(null);
     const [bulkDeleteConfig, setBulkDeleteConfig] = useState<string | null>(null);
     const [bulkDeleteRuleIds, setBulkDeleteRuleIds] = useState<string[]>([]);
-    const drawerRef = useRef<RuleDrawerHandle>(null);
     const navigate = useNavigate();
-    const queryConfig = useMemo(() => searchParams.get(QP_CONFIG), [searchParams]);
-    const search = useMemo(() => searchParams.get(QP_SEARCH) || '', [searchParams]);
 
-    const currentConfig = (queryConfig && (loading || draftConfigs.includes(queryConfig) || queryConfig === deleteInFlightConfig))
-        ? queryConfig
-        : (draftConfigs[0] || '');
-    const { updateParams, clearConfigParamIfCurrent } = useSearchParamHelpers(setSearchParams, QP_CONFIG);
-
-    useConfigQuerySync({ currentConfig, loading, queryConfig, paramKey: QP_CONFIG, searchParams, updateParams });
-
-    useUnsavedChangesBlocker(anyDirty);
+    const {
+        currentConfig,
+        search,
+        updateParams,
+        clearConfigParamIfCurrent,
+        selectedIds,
+        setSelectedIds,
+        activeRowId,
+        setActiveRowId,
+        drawer,
+        setDrawer,
+        deleteConfirmOpen,
+        setDeleteConfirmOpen,
+        addConfigOpen,
+        setAddConfigOpen,
+        deleteConfigOpen,
+        setDeleteConfigOpen,
+        diffModalOpen,
+        setDiffModalOpen,
+        flashRowId,
+        setFlashRowId,
+        setDeleteInFlightConfig,
+        drawerRef,
+        ruleCounts,
+        dirtySet,
+        currentIsDirty,
+        openAdd,
+        openEdit,
+        closeDrawer,
+        handleDrawerApply,
+        handleDeleteItem,
+        handleDuplicate,
+        handleSave,
+        handleSavePress,
+        handleDiscard,
+        handleSearchChange,
+        handleJumpToRow,
+        handleTabSelect,
+    } = useRulePageState<Rule, RuleItem, RuleDraft, RuleDrawerHandle>({
+        draftConfigs,
+        loading,
+        anyDirty,
+        isDirty,
+        draftRules,
+        dispatchDraft,
+        saveConfig,
+        discardConfig,
+        toRule: draftToRule,
+        cloneItem: cloneRuleItem,
+        requireConfigForAdd: true,
+        clearSelectionOnTabSelect: false,
+    });
 
     useEffect(() => {
         setSelectedIds(new Set());
@@ -96,15 +124,6 @@ const AclPage: React.FC = () => {
 
     const { rates } = useAclRuleCounters(currentConfig, allItems, enabledCounterNames, !paused);
 
-    const ruleCounts = useMemo((): Map<string, number> => {
-        const m = new Map<string, number>();
-        draftConfigs.forEach(c => m.set(c, draftRules(c).length));
-        return m;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [draftConfigs, draftRules]);
-
-    const dirtySet = useDirtyConfigSet(draftConfigs, isDirty);
-
     const deferredSearch = useDeferredValue(search);
 
     const visibleItems = useMemo((): RuleItem[] => {
@@ -112,47 +131,6 @@ const AclPage: React.FC = () => {
         if (!q) return allItems;
         return allItems.filter(item => item.searchText.includes(q));
     }, [allItems, deferredSearch]);
-
-    const openAdd = useCallback((): void => {
-        if (!currentConfig) {
-            return;
-        }
-        setActiveRowId(null);
-        setDrawer({ open: true, mode: 'add', item: null });
-    }, [currentConfig]);
-
-    const openEdit = useCallback((item: RuleItem): void => {
-        setActiveRowId(item.id);
-        setDrawer({ open: true, mode: 'edit', item });
-    }, []);
-
-    const closeDrawer = useCallback((): void => {
-        setDrawer(d => ({ ...d, open: false }));
-        setTimeout(() => {
-            setActiveRowId(null);
-            setDrawer(d => ({ ...d, item: null }));
-        }, DRAWER_TRANSITION_MS);
-    }, []);
-
-    const handleDrawerApply = useCallback((draft: RuleDraft): void => {
-        const rule = draftToRule(draft);
-        if (drawer.mode === 'add') {
-            dispatchDraft({ type: 'ADD_RULE', configName: currentConfig, rule });
-        } else if (drawer.item) {
-            dispatchDraft({ type: 'UPDATE_RULE_AT_INDEX', configName: currentConfig, index: drawer.item.index, rule });
-        }
-        closeDrawer();
-    }, [drawer, currentConfig, dispatchDraft, closeDrawer]);
-
-    const handleDeleteItem = useCallback((item: RuleItem): void => {
-        dispatchDraft({ type: 'REMOVE_RULES', configName: currentConfig, indices: [item.index] });
-        closeDrawer();
-    }, [currentConfig, dispatchDraft, closeDrawer]);
-
-    const handleDuplicate = useCallback((item: RuleItem): void => {
-        setActiveRowId(null);
-        setDrawer({ open: true, mode: 'add', item: { ...item, rule: { ...item.rule } } });
-    }, []);
 
     const handleOpenBulkDelete = useCallback((): void => {
         if (!currentConfig) {
@@ -218,18 +196,6 @@ const AclPage: React.FC = () => {
         }
     }, [deleteConfigTarget, commitDeleteConfig, clearConfigParamIfCurrent]);
 
-    const handleSave = useCallback(async (): Promise<void> => {
-        await saveConfig(currentConfig);
-        setDiffModalOpen(false);
-    }, [currentConfig, saveConfig]);
-
-    const handleSavePress = useCallback((): void => {
-        if (drawer.open) {
-            drawerRef.current?.flushAndApply();
-        }
-        setDiffModalOpen(true);
-    }, [drawer.open]);
-
     const handleToggleCounter = useCallback((counterName: string): void => {
         setEnabledCounterNames(prev => {
             const next = new Set(prev);
@@ -242,10 +208,6 @@ const AclPage: React.FC = () => {
         });
     }, []);
 
-    const handleDiscard = useCallback((): void => {
-        discardConfig(currentConfig);
-    }, [currentConfig, discardConfig]);
-
     const handleImportYaml = useCallback((importedConfigName: string, rules: Rule[], mode: ImportMode): void => {
         const target = importedConfigName || currentConfig;
         if (mode === 'append') {
@@ -257,40 +219,12 @@ const AclPage: React.FC = () => {
         updateParams({ [QP_CONFIG]: target || null });
     }, [currentConfig, draftRules, dispatchDraft, updateParams]);
 
-    const handleTabSelect = useCallback((cfg: string): void => {
-        updateParams({ [QP_CONFIG]: cfg || null });
-    }, [updateParams]);
-
-    useTabCycle({
-        tabs: draftConfigs,
-        activeTab: currentConfig,
-        onSelect: handleTabSelect,
-        enabled: !loading,
-    });
-
-    const handleSearchChange = useCallback((value: string): void => {
-        updateParams({ [QP_SEARCH]: value || null });
-    }, [updateParams]);
-
-    const handleJumpToRow = useCallback((id: string): void => {
-        setFlashRowId(null);
-        setTimeout(() => setFlashRowId(id), 0);
-    }, []);
-
     const handleOpenLinkedFwstate = useCallback((): void => {
         if (!currentFwStateName) {
             return;
         }
         navigate(`/modules/fwstate?config=${encodeURIComponent(currentFwStateName)}`);
     }, [currentFwStateName, navigate]);
-
-    usePageKeyboardShortcuts({
-        onNewRule: openAdd,
-        onEscape: closeDrawer,
-        drawerOpen: drawer.open,
-    });
-
-    const currentIsDirty = isDirty(currentConfig);
 
     const commands = useMemo((): Command[] => {
         const list: Command[] = [];

@@ -1,7 +1,6 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button, Icon } from '@gravity-ui/uikit';
-import { useSearchParams } from 'react-router-dom';
-import { useSearchParamHelpers, usePageKeyboardShortcuts, useDirtyConfigSet, useConfigQuerySync, usePageContribution, useTabCycle, useUnsavedChangesBlocker } from '../../../hooks';
+import { usePageContribution } from '../../../hooks';
 import { Funnel, Plus } from '@gravity-ui/icons';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, SearchInput, EmptyPagePlaceholder, RowCountDisplay } from '../../../components';
 import { useForwardDraft } from './useForwardDraft';
@@ -19,14 +18,15 @@ import YamlIO from './YamlIO';
 import { SaveDiffModal } from './SaveDiffModal';
 import { useForwardRuleCounters } from './useForwardRuleCounters';
 import { AddConfigModal, DeleteConfigModal, BulkDeleteModal, CommandPaletteHeader } from '../../../components';
-import { DRAWER_TRANSITION_MS } from '../../../components/draft';
+import { useRulePageState } from '../../../components/draft';
 import type { Command, RowAdapter, PagePaletteContribution } from '../../../components/command-palette';
 import { buildConfigCommands } from '../../../components/command-palette';
 import '../../../styles/chrome.scss';
 import './forward.scss';
 
 const QP_CONFIG = 'config';
-const QP_SEARCH = 'search';
+
+const cloneRuleItem = (item: RuleItem): RuleItem => ({ ...item });
 
 const ForwardPage: React.FC = () => {
     const {
@@ -42,45 +42,66 @@ const ForwardPage: React.FC = () => {
         commitDeleteConfig,
         discardConfig,
     } = useForwardDraft();
-    const [searchParams, setSearchParams] = useSearchParams();
 
-    const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-    const [activeRowId, setActiveRowId] = useState<string | null>(null);
-    const [drawer, setDrawer] = useState<{ open: boolean; mode: 'add' | 'edit'; item: RuleItem | null }>({
-        open: false,
-        mode: 'add',
-        item: null,
-    });
-    const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
-    const [addConfigOpen, setAddConfigOpen] = useState(false);
-    const [deleteConfigOpen, setDeleteConfigOpen] = useState(false);
-    const [deleteInFlightConfig, setDeleteInFlightConfig] = useState<string | null>(null);
-    const [diffModalOpen, setDiffModalOpen] = useState(false);
     const [modeFilter, setModeFilter] = useState<ModeFilterValue>('all');
-    const [flashRowId, setFlashRowId] = useState<string | null>(null);
-    const drawerRef = useRef<RuleDrawerHandle>(null);
-    const queryConfig = useMemo(() => searchParams.get(QP_CONFIG), [searchParams]);
-    const search = useMemo(() => searchParams.get(QP_SEARCH) || '', [searchParams]);
-    const currentConfig = (queryConfig && (loading || draftConfigs.includes(queryConfig) || queryConfig === deleteInFlightConfig)) ? queryConfig : (draftConfigs[0] || '');
-    const { updateParams, clearConfigParamIfCurrent } = useSearchParamHelpers(setSearchParams, QP_CONFIG);
 
-    useUnsavedChangesBlocker(anyDirty);
-
-    useConfigQuerySync({ currentConfig, loading, queryConfig, paramKey: QP_CONFIG, searchParams, updateParams });
+    const {
+        currentConfig,
+        search,
+        updateParams,
+        clearConfigParamIfCurrent,
+        selectedIds,
+        setSelectedIds,
+        activeRowId,
+        setActiveRowId,
+        drawer,
+        setDrawer,
+        deleteConfirmOpen,
+        setDeleteConfirmOpen,
+        addConfigOpen,
+        setAddConfigOpen,
+        deleteConfigOpen,
+        setDeleteConfigOpen,
+        diffModalOpen,
+        setDiffModalOpen,
+        flashRowId,
+        setFlashRowId,
+        setDeleteInFlightConfig,
+        drawerRef,
+        ruleCounts,
+        dirtySet,
+        currentIsDirty,
+        openAdd,
+        openEdit,
+        closeDrawer,
+        handleDrawerApply,
+        handleDeleteItem,
+        handleDuplicate,
+        handleSave,
+        handleSavePress,
+        handleDiscard,
+        handleSearchChange,
+        handleJumpToRow,
+        handleTabSelect,
+    } = useRulePageState<Rule, RuleItem, RuleDraft, RuleDrawerHandle>({
+        draftConfigs,
+        loading,
+        anyDirty,
+        isDirty,
+        draftRules,
+        dispatchDraft,
+        saveConfig,
+        discardConfig,
+        toRule: draftToRule,
+        cloneItem: cloneRuleItem,
+        requireConfigForAdd: false,
+        clearSelectionOnTabSelect: true,
+    });
 
     const rawRules: Rule[] = draftRules(currentConfig);
     const allItems = useMemo(() => rulesToNgItems(rawRules), [rawRules]);
 
     const { rates } = useForwardRuleCounters(currentConfig, allItems, true);
-
-    const ruleCounts = useMemo((): Map<string, number> => {
-        const m = new Map<string, number>();
-        draftConfigs.forEach(c => m.set(c, draftRules(c).length));
-        return m;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [draftConfigs, draftRules]);
-
-    const dirtySet = useDirtyConfigSet(draftConfigs, isDirty);
 
     const visibleItems = useMemo((): RuleItem[] => {
         let res = allItems;
@@ -108,45 +129,6 @@ const ForwardPage: React.FC = () => {
         return res;
     }, [allItems, search, modeFilter]);
 
-    const openAdd = useCallback((): void => {
-        setActiveRowId(null);
-        setDrawer({ open: true, mode: 'add', item: null });
-    }, []);
-
-    const openEdit = useCallback((item: RuleItem): void => {
-        setActiveRowId(item.id);
-        setDrawer({ open: true, mode: 'edit', item });
-    }, []);
-
-    const closeDrawer = useCallback((): void => {
-        setDrawer((d) => ({ ...d, open: false }));
-        setTimeout(() => {
-            setActiveRowId(null);
-            setDrawer((d) => ({ ...d, item: null }));
-        }, DRAWER_TRANSITION_MS);
-    }, []);
-
-    /** Apply a rule draft to local state only; no API call. */
-    const handleDrawerApply = useCallback((draft: RuleDraft): void => {
-        const rule = draftToRule(draft);
-        if (drawer.mode === 'add') {
-            dispatchDraft({ type: 'ADD_RULE', configName: currentConfig, rule });
-        } else if (drawer.item) {
-            dispatchDraft({ type: 'UPDATE_RULE_AT_INDEX', configName: currentConfig, index: drawer.item.index, rule });
-        }
-        closeDrawer();
-    }, [drawer, currentConfig, dispatchDraft, closeDrawer]);
-
-    const handleDeleteItem = useCallback((item: RuleItem): void => {
-        dispatchDraft({ type: 'REMOVE_RULES', configName: currentConfig, indices: [item.index] });
-        closeDrawer();
-    }, [currentConfig, dispatchDraft, closeDrawer]);
-
-    const handleDuplicate = useCallback((item: RuleItem): void => {
-        setActiveRowId(null);
-        setDrawer({ open: true, mode: 'add', item: { ...item } });
-    }, []);
-
     const handleBulkDelete = useCallback((): void => {
         const indices = visibleItems
             .filter((item) => selectedIds.has(item.id))
@@ -170,42 +152,11 @@ const ForwardPage: React.FC = () => {
         }
     }, [currentConfig, commitDeleteConfig, clearConfigParamIfCurrent]);
 
-    const handleSave = useCallback(async (): Promise<void> => {
-        await saveConfig(currentConfig);
-        setDiffModalOpen(false);
-    }, [currentConfig, saveConfig]);
-
-    const handleSavePress = useCallback((): void => {
-        if (drawer.open) {
-            drawerRef.current?.flushAndApply();
-        }
-        setDiffModalOpen(true);
-    }, [drawer.open]);
-
-    const handleDiscard = useCallback((): void => {
-        discardConfig(currentConfig);
-    }, [currentConfig, discardConfig]);
-
     const handleImportYaml = useCallback((importedConfigName: string, rules: Rule[]): void => {
         const target = importedConfigName || currentConfig;
         dispatchDraft({ type: 'REPLACE_ALL_RULES', configName: target, rules });
         updateParams({ [QP_CONFIG]: target || null });
     }, [currentConfig, dispatchDraft, updateParams]);
-
-    const handleTabSelect = useCallback((cfg: string): void => {
-        updateParams({ [QP_CONFIG]: cfg || null });
-        setSelectedIds(new Set());
-        setActiveRowId(null);
-    }, [updateParams]);
-
-    const handleSearchChange = useCallback((value: string): void => {
-        updateParams({ [QP_SEARCH]: value || null });
-    }, [updateParams]);
-
-    const handleJumpToRow = useCallback((id: string): void => {
-        setFlashRowId(null);
-        setTimeout(() => setFlashRowId(id), 0);
-    }, []);
 
     useEffect(() => {
         setSelectedIds(new Set());
@@ -218,22 +169,7 @@ const ForwardPage: React.FC = () => {
         setFlashRowId(null);
     }, [currentConfig]);
 
-    usePageKeyboardShortcuts({
-        onNewRule: openAdd,
-        onEscape: closeDrawer,
-        drawerOpen: drawer.open,
-    });
-
-    useTabCycle({
-        tabs: draftConfigs,
-        activeTab: currentConfig,
-        onSelect: handleTabSelect,
-        enabled: !loading,
-    });
-
     const canCreate = !loading && !loadFailed;
-
-    const currentIsDirty = isDirty(currentConfig);
 
     const commands = useMemo((): Command[] => {
         const list: Command[] = [

@@ -22,3 +22,5 @@ export { useDraftPageDerived } from './useDraftPageDerived';
 export type { UseDraftPageDerivedOptions, UseDraftPageDerivedResult } from './useDraftPageDerived';
 export { useConfigPersistence } from './useConfigPersistence';
 export type { UseConfigPersistenceOptions, UseConfigPersistenceResult, ConfigPersistenceDispatch } from './useConfigPersistence';
+export { useRulePageState } from './useRulePageState';
+export type { UseRulePageStateOptions, UseRulePageStateResult } from './useRulePageState';
