@@ -1,11 +1,10 @@
-use core::error::Error;
 use std::{collections::HashMap, fs::File, path::Path};
 
 use aclpb::{
     DeleteConfigRequest, GetMetricsRequest, ListConfigsRequest, ShowConfigRequest, UpdateConfigRequest,
     acl_service_client::AclServiceClient,
 };
-use args::{DeleteCmd, MetricsCmd, ModeCmd, OutputFormat, ShowCmd, UpdateCmd};
+use args::{DeleteCmd, MetricsCmd, ModeCmd, ShowCmd, UpdateCmd};
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
 use metric::Metric;
@@ -15,7 +14,8 @@ use tonic::codec::CompressionEncoding;
 use ync::{
     client::{ConnectionArgs, LayeredChannel},
     display::print_table_from_entries,
-    logging,
+    errors::Error,
+    output::{self, CommonFormat},
 };
 
 mod args;
@@ -165,11 +165,6 @@ fn metric_display_name(name: &str) -> String {
 }
 
 fn print_metrics_table(metrics: &[Metric]) {
-    if metrics.is_empty() {
-        println!("No metrics found.");
-        return;
-    }
-
     struct CounterPair {
         display: String,
         packets: Option<u64>,
@@ -356,7 +351,7 @@ pub struct ACLConfig {
 }
 
 impl ACLConfig {
-    pub fn load<P>(path: P) -> Result<Self, Box<dyn Error>>
+    pub fn load<P>(path: P) -> Result<Self, Box<dyn core::error::Error>>
     where
         P: AsRef<Path>,
     {
@@ -367,7 +362,7 @@ impl ACLConfig {
     }
 }
 
-/// ACL module
+/// ACL module CLI.
 #[derive(Debug, Clone, Parser)]
 #[command(version, about)]
 pub struct Cmd {
@@ -375,63 +370,136 @@ pub struct Cmd {
     pub mode: ModeCmd,
     #[command(flatten)]
     pub connection: ConnectionArgs,
+    #[arg(long, default_value = "human", global = true)]
+    pub format: CommonFormat,
     /// Log verbosity level.
     #[clap(short, action = ArgAction::Count, global = true)]
     pub verbose: u8,
 }
 
+/// The fully-qualified gRPC service name used in error messages.
+const SERVICE_NAME: &str = "modules.acl.controlplane.aclpb.v1.ACLService";
+
 pub struct ACLService {
     client: AclServiceClient<LayeredChannel>,
+    endpoint: String,
 }
 
 impl ACLService {
-    pub async fn new(connection: &ConnectionArgs) -> Result<Self, Box<dyn Error>> {
-        let channel = ync::client::connect(connection).await?;
+    pub async fn new(connection: &ConnectionArgs) -> Result<Self, Error> {
+        let channel = ync::client::connect(connection)
+            .await
+            .map_err(|e| Error::from_connection(e, "connect", &connection.endpoint))?;
         let client = AclServiceClient::new(channel)
             .max_decoding_message_size(256 * 1024 * 1024)
             .max_encoding_message_size(256 * 1024 * 1024)
             .send_compressed(CompressionEncoding::Gzip)
             .accept_compressed(CompressionEncoding::Gzip);
-        Ok(Self { client })
+
+        Ok(Self {
+            client,
+            endpoint: connection.endpoint.clone(),
+        })
     }
 
-    pub async fn list_configs(&mut self) -> Result<(), Box<dyn Error>> {
-        let request = ListConfigsRequest {};
-        let response = self.client.list_configs(request).await?.into_inner();
-        println!("{}", serde_json::to_string(&response.configs)?);
-        Ok(())
+    fn map_err<'a>(&'a self, action: &'a str) -> impl FnOnce(tonic::Status) -> Error + 'a {
+        let endpoint = self.endpoint.clone();
+        move |status| Error::from_status(status, action, endpoint, SERVICE_NAME)
     }
 
-    pub async fn show_config(&mut self, cmd: ShowCmd) -> Result<(), Box<dyn Error>> {
-        let request = ShowConfigRequest { name: cmd.config_name.clone() };
-        let response = self.client.show_config(request).await?.into_inner();
-        println!(
-            "{}",
-            serde_json::to_string(&response).expect("ShowConfigResponse serialization must not fail")
+    pub async fn list_configs(&mut self) -> Result<(), Error> {
+        let response = self
+            .client
+            .list_configs(ListConfigsRequest {})
+            .await
+            .map_err(self.map_err("list"))?
+            .into_inner();
+
+        output::data(
+            &response.configs,
+            response.configs.is_empty(),
+            format_args!("no configurations"),
+            || {
+                for name in &response.configs {
+                    println!("{name}");
+                }
+            },
         );
+
         Ok(())
     }
 
-    pub async fn delete_config(&mut self, cmd: DeleteCmd) -> Result<(), Box<dyn Error>> {
+    pub async fn show_config(&mut self, cmd: ShowCmd) -> Result<(), Error> {
+        let request = ShowConfigRequest { name: cmd.config_name.clone() };
+        let response = self
+            .client
+            .show_config(request)
+            .await
+            .map_err(self.map_err("show"))?
+            .into_inner();
+
+        output::data(&response, false, format_args!(""), || {
+            let config = ACLConfig { rules: response.rules.clone() };
+            print!(
+                "{}",
+                serde_yaml::to_string(&config).expect("ACL config YAML serialization must not fail")
+            );
+        });
+
+        Ok(())
+    }
+
+    pub async fn delete_config(&mut self, cmd: DeleteCmd) -> Result<(), Error> {
         let request = DeleteConfigRequest { name: cmd.config_name.clone() };
-        self.client.delete_config(request).await?.into_inner();
+        self.client
+            .delete_config(request)
+            .await
+            .map_err(self.map_err("delete"))?
+            .into_inner();
+
+        output::success("delete", format_args!("deleted {}", cmd.config_name));
+
         Ok(())
     }
 
-    pub async fn update_config(&mut self, cmd: UpdateCmd) -> Result<(), Box<dyn Error>> {
-        let config = ACLConfig::load(&cmd.rules)?;
+    pub async fn update_config(&mut self, cmd: UpdateCmd) -> Result<(), Error> {
+        let config = ACLConfig::load(&cmd.rules).map_err(|err| {
+            Error::from_status(
+                tonic::Status::invalid_argument(format!("failed to load rules from {}: {err}", cmd.rules.display())),
+                "update",
+                self.endpoint.clone(),
+                SERVICE_NAME,
+            )
+        })?;
+        let rule_count = config.rules.len();
         let request = UpdateConfigRequest {
             name: cmd.config_name.clone(),
             rules: config.rules,
         };
         log::trace!("UpdateConfigRequest: {request:?}");
-        let response = self.client.update_config(request).await?.into_inner();
+        let response = self
+            .client
+            .update_config(request)
+            .await
+            .map_err(self.map_err("update"))?
+            .into_inner();
         log::debug!("UpdateConfigResponse: {response:?}");
+
+        output::success(
+            "update",
+            format_args!("updated {} ({} rules)", cmd.config_name, rule_count),
+        );
+
         Ok(())
     }
 
-    pub async fn metrics(&mut self, cmd: MetricsCmd) -> Result<(), Box<dyn Error>> {
-        let response = self.client.get_metrics(GetMetricsRequest {}).await?.into_inner();
+    pub async fn metrics(&mut self, cmd: MetricsCmd) -> Result<(), Error> {
+        let response = self
+            .client
+            .get_metrics(GetMetricsRequest {})
+            .await
+            .map_err(self.map_err("metrics"))?
+            .into_inner();
         let label_filters: Vec<(&str, &str)> = cmd
             .labels
             .iter()
@@ -455,16 +523,15 @@ impl ACLService {
             })
             .collect();
 
-        match cmd.format {
-            OutputFormat::Json => println!("{}", serde_json::to_string(&metrics)?),
-            OutputFormat::Table => print_metrics_table(&metrics),
-        }
+        output::data(&metrics, metrics.is_empty(), format_args!("no metrics"), || {
+            print_metrics_table(&metrics)
+        });
 
         Ok(())
     }
 }
 
-async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
+async fn run(cmd: Cmd) -> Result<(), Error> {
     let mut service = ACLService::new(&cmd.connection).await?;
     match cmd.mode {
         ModeCmd::List => service.list_configs().await,
@@ -479,11 +546,11 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
 pub async fn main() {
     CompleteEnv::with_factory(Cmd::command).complete();
     let cmd = Cmd::parse();
-    logging::init(cmd.verbose as usize).expect("initialize logging");
+    ync::init(cmd.verbose, cmd.format);
 
     if let Err(err) = run(cmd).await {
-        log::error!("ERROR: {err}");
-        std::process::exit(1);
+        output::failure(&err);
+        std::process::exit(err.exit_code());
     }
 }
 

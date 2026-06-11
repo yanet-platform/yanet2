@@ -41,14 +41,6 @@ pub struct ShowCmd {
     pub config_name: String,
 }
 
-#[derive(Debug, Clone, clap::ValueEnum, PartialEq, Default)]
-pub enum OutputFormat {
-    #[default]
-    Json,
-    /// Human-readable grouped tables
-    Table,
-}
-
 #[derive(Debug, Clone, clap::ValueEnum)]
 pub enum MetricName {
     /// Packet counters (acl_*_packets)
@@ -87,9 +79,6 @@ impl MetricName {
 
 #[derive(Debug, Clone, Parser, Default)]
 pub struct MetricsCmd {
-    /// Output format
-    #[arg(long, short, value_enum, default_value = "json")]
-    pub format: OutputFormat,
     /// Label filter, e.g. --label config=my-acl --label device=eth0
     #[arg(long = "label", short = 'l', value_name = "KEY=VALUE")]
     pub labels: Vec<String>,
