@@ -77,7 +77,7 @@ test_init_and_free_basic(void) {
 	);
 
 	// Free the array
-	big_array_free(&array);
+	big_array_fini(&array);
 
 	// Verify cleanup
 	TEST_ASSERT(
@@ -147,7 +147,7 @@ test_init_large_array(void) {
 	    array.subarrays_count,
 	    subarray_size);
 
-	big_array_free(&array);
+	big_array_fini(&array);
 	memory_context_fini(&mctx);
 	free(raw_mem);
 	return TEST_SUCCESS;
@@ -191,7 +191,7 @@ test_init_exact_boundary(void) {
 		array.subarrays_count
 	);
 
-	big_array_free(&array);
+	big_array_fini(&array);
 	memory_context_fini(&mctx);
 	free(raw_mem);
 	return TEST_SUCCESS;
@@ -231,7 +231,7 @@ test_init_zero_size(void) {
 	);
 
 	// Free should be safe even with zero size
-	big_array_free(&array);
+	big_array_fini(&array);
 
 	memory_context_fini(&mctx);
 	free(raw_mem);
@@ -305,7 +305,7 @@ test_get_access_patterns(void) {
 		);
 	}
 
-	big_array_free(&array);
+	big_array_fini(&array);
 	memory_context_fini(&mctx);
 	free(raw_mem);
 	return TEST_SUCCESS;
@@ -376,7 +376,7 @@ test_get_multiple_subarrays(void) {
 	    array.subarrays_count,
 	    subarray_size);
 
-	big_array_free(&array);
+	big_array_fini(&array);
 	memory_context_fini(&mctx);
 	free(raw_mem);
 	return TEST_SUCCESS;
@@ -409,10 +409,10 @@ test_double_free_safety(void) {
 	TEST_ASSERT(res == 0, "big_array_init failed");
 
 	// First free
-	big_array_free(&array);
+	big_array_fini(&array);
 
 	// Second free should be safe (no crash)
-	big_array_free(&array);
+	big_array_fini(&array);
 
 	// Verify array is properly zeroed
 	TEST_ASSERT(
@@ -503,7 +503,7 @@ test_size_bigger_than_max(void) {
 		}
 	}
 
-	big_array_free(&array);
+	big_array_fini(&array);
 	memory_context_fini(&mctx);
 	free(raw_mem);
 	return TEST_SUCCESS;
@@ -549,7 +549,7 @@ test_last_subarray_size_optimization(void) {
 	size_t balloc_size_before_free = array.mctx.balloc_size;
 
 	// Free and verify memory accounting
-	big_array_free(&array);
+	big_array_fini(&array);
 
 	// Verify all memory was freed in child context
 	TEST_ASSERT(

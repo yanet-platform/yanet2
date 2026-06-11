@@ -340,7 +340,7 @@ btree_u16_init(
  */
 static inline void
 btree_u16_free(struct btree_u16 *btree) {
-	big_array_free(&btree->array);
+	big_array_fini(&btree->array);
 }
 
 static inline size_t

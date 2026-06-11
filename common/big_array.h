@@ -61,7 +61,7 @@
  * *ptr = 0x42;
  *
  * // Cleanup
- * big_array_free(&array);
+ * big_array_fini(&array);
  * ```
  *
  * ## Performance Characteristics
@@ -136,7 +136,7 @@ struct big_array {
 };
 
 static inline void
-big_array_free(struct big_array *array);
+big_array_fini(struct big_array *array);
 
 /**
  * @brief Initialize a big_array with the specified size
@@ -153,7 +153,7 @@ big_array_free(struct big_array *array);
  *
  * @return 0 on success, -1 on allocation failure
  *
- * @note On failure, the function calls big_array_free() to clean up any
+ * @note On failure, the function calls big_array_fini() to clean up any
  *       partial allocations, so the array is left in a safe state.
  * @note If size is 0, the function succeeds but allocates no subarrays.
  *
@@ -212,7 +212,7 @@ big_array_init(
 	return 0;
 
 free_on_error:
-	big_array_free(array);
+	big_array_fini(array);
 	return -1;
 }
 
@@ -231,7 +231,7 @@ free_on_error:
  * @warning The caller must ensure that index is within the bounds of the
  *          array size passed to big_array_init(). No bounds checking is
  *          performed for performance reasons.
- * @warning The returned pointer is only valid until big_array_free() is called.
+ * @warning The returned pointer is only valid until big_array_fini() is called.
  *
  * Implementation details:
  * - Uses bit shift (index >> subarray_len_exp) to find subarray index
@@ -259,7 +259,7 @@ big_array_get(struct big_array *array, size_t index) {
 }
 
 /**
- * @brief Free all memory associated with a big_array
+ * @brief Release all memory associated with a big_array
  *
  * Releases all subarrays and the subarray pointer array, then zeros out
  * the big_array structure. This function is safe to call multiple times
@@ -269,7 +269,7 @@ big_array_get(struct big_array *array, size_t index) {
  * may have a smaller size than the others if the total array size was not
  * evenly divisible by MEMORY_BLOCK_ALLOCATOR_MAX_SIZE.
  *
- * @param array Pointer to big_array to free
+ * @param array Pointer to big_array to finalize
  *
  * @note After calling this function, the array structure is zeroed and
  *       cannot be used until re-initialized with big_array_init().
@@ -279,12 +279,12 @@ big_array_get(struct big_array *array, size_t index) {
  *
  * Example:
  * ```c
- * big_array_free(&array);
+ * big_array_fini(&array);
  * // array is now safe to re-initialize or discard
  * ```
  */
 static inline void
-big_array_free(struct big_array *array) {
+big_array_fini(struct big_array *array) {
 	if (array->subarrays != NULL) {
 		void **subarrays = ADDR_OF(&array->subarrays);
 		size_t subarray_size = 1 << array->subarray_len_exp;

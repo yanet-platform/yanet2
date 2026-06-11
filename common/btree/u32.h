@@ -329,7 +329,7 @@ btree_u32_init(
  */
 static inline void
 btree_u32_free(struct btree_u32 *btree) {
-	big_array_free(&btree->array);
+	big_array_fini(&btree->array);
 }
 
 static inline size_t
