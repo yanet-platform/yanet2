@@ -83,7 +83,7 @@ cp_device_entry_alloc_size(uint64_t pipeline_count) {
 }
 
 static struct cp_device_entry *
-cp_device_entry_create(
+cp_device_entry_new(
 	struct memory_context *memory_context,
 	struct cp_device_entry_config *cp_device_entry_config,
 	yanet_error **err
@@ -169,9 +169,8 @@ cp_device_init(
 
 	struct memory_context *memory_context = &self->memory_context;
 
-	struct cp_device_entry *input = cp_device_entry_create(
-		memory_context, cfg->input_pipelines, err
-	);
+	struct cp_device_entry *input =
+		cp_device_entry_new(memory_context, cfg->input_pipelines, err);
 	if (input == NULL) {
 		yanet_error_add(
 			err,
@@ -182,9 +181,8 @@ cp_device_init(
 	}
 	SET_OFFSET_OF(&self->input_pipelines, input);
 
-	struct cp_device_entry *output = cp_device_entry_create(
-		memory_context, cfg->output_pipelines, err
-	);
+	struct cp_device_entry *output =
+		cp_device_entry_new(memory_context, cfg->output_pipelines, err);
 	if (output == NULL) {
 		yanet_error_add(
 			err,
