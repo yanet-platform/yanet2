@@ -14,7 +14,7 @@ FILTER_COMPILER_DECLARE(FILTER_IP4_TAG, net4_dst);
 FILTER_COMPILER_DECLARE(FILTER_IP6_TAG, net6_dst);
 
 struct cp_module *
-route_mpls_module_config_create(
+route_mpls_module_config_new(
 	struct agent *agent, const char *name, yanet_error **err
 ) {
 	struct module_config *config = (struct module_config *)memory_balloc(
@@ -51,7 +51,7 @@ target_memory_size(uint64_t nexthop_map_size) {
 }
 
 static void
-route_mpls_module_config_destroy(struct module_config *config) {
+route_mpls_module_config_fini(struct module_config *config) {
 	struct memory_context *memory_context =
 		&config->cp_module.memory_context;
 
@@ -94,7 +94,7 @@ route_mpls_module_config_free(struct cp_module *cp_module) {
 	struct module_config *config =
 		container_of(cp_module, struct module_config, cp_module);
 
-	route_mpls_module_config_destroy(config);
+	route_mpls_module_config_fini(config);
 
 	struct agent *agent = ADDR_OF(&cp_module->agent);
 
@@ -240,7 +240,7 @@ route_mpls_module_init_ip6(
 }
 
 static struct target *
-route_mpls_rule_target_create(
+route_mpls_rule_target_new(
 	struct cp_module *cp_module,
 	struct route_mpls_rule *route_mpls_rule,
 	yanet_error **err
@@ -361,7 +361,7 @@ route_mpls_module_config_update(
 	config->target_count = route_mpls_rule_count;
 
 	for (uint64_t idx = 0; idx < route_mpls_rule_count; ++idx) {
-		struct target *target = route_mpls_rule_target_create(
+		struct target *target = route_mpls_rule_target_new(
 			cp_module, route_mpls_rules + idx, err
 		);
 
@@ -424,7 +424,7 @@ error_rules:
 
 error:
 
-	route_mpls_module_config_destroy(config);
+	route_mpls_module_config_fini(config);
 
 	return -1;
 }

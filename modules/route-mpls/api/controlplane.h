@@ -47,7 +47,7 @@ struct route_mpls_rule {
 };
 
 struct cp_module *
-route_mpls_module_config_create(
+route_mpls_module_config_new(
 	struct agent *agent, const char *name, yanet_error **err
 );
 
