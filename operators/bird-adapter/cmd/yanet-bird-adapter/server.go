@@ -51,8 +51,10 @@ type ServerConfig struct {
 	Logging logging.Config `yaml:"logging"`
 	// ListenAddr is the gRPC endpoint to listen on (e.g., "localhost:50051").
 	ListenAddr string `yaml:"listen_addr"`
-	// GatewayEndpoint is the gRPC endpoint of the RouteService gateway for RIB updates.
-	GatewayEndpoint string `yaml:"gateway_endpoint"`
+	// RouteOperatorEndpoint is the gRPC endpoint serving the route operator's
+	// RouteService for RIB updates — either the route operator directly or the
+	// gateway that proxies it.
+	RouteOperatorEndpoint string `yaml:"route_operator_endpoint"`
 }
 
 func (m *ServerConfig) Default() {
@@ -65,8 +67,8 @@ func DefaultServerConfig() *ServerConfig {
 		Logging: logging.Config{
 			Level: zapcore.InfoLevel,
 		},
-		ListenAddr:      "localhost:50051",
-		GatewayEndpoint: "localhost:50052",
+		ListenAddr:            "localhost:50051",
+		RouteOperatorEndpoint: "localhost:50052",
 	}
 }
 
@@ -84,11 +86,11 @@ func runServer() error {
 
 	log.Info("starting BIRD adapter service",
 		zap.String("listen_addr", cfg.ListenAddr),
-		zap.String("gateway_endpoint", cfg.GatewayEndpoint),
+		zap.String("route_operator_endpoint", cfg.RouteOperatorEndpoint),
 	)
 
 	// Create the adapter service
-	adapterService := birdAdapter.NewAdapterService(cfg.GatewayEndpoint, log)
+	adapterService := birdAdapter.NewAdapterService(cfg.RouteOperatorEndpoint, log)
 
 	// Create gRPC server
 	grpcServer := grpc.NewServer()

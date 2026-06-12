@@ -15,10 +15,10 @@ BIRD daemon → Unix Socket → bird-adapter server → gRPC → route service �
 ### Server ([`server.go`](server.go:1))
 gRPC server managing BIRD route imports:
 - Listens on `listen_addr` for configuration requests
-- Connects to `gateway_endpoint` (route service) to send route updates
+- Connects to `route_operator_endpoint` (route service) to send route updates
 - Manages multiple imports simultaneously
 
-**Note:** `gateway_endpoint` is the address where the controlplane gateway listens. The gateway knows how to forward requests to the route module agent.
+**Note:** `route_operator_endpoint` is the endpoint serving the route operator's RouteService. The adapter can connect to the route operator directly or through the gateway, which proxies by service name. MPLS route updates (RouteMPLSService) are only available through the gateway.
 
 ### Client ([`client.go`](client.go:1))
 CLI for configuring the server:
@@ -45,7 +45,7 @@ yanet-bird-adapter server -c config.yaml
 logging:
   level: info
 listen_addr: "localhost:50051"
-gateway_endpoint: "localhost:8080"
+route_operator_endpoint: "localhost:8080"
 ```
 
 ### Configure Import

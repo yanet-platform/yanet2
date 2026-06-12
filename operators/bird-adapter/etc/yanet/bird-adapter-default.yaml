@@ -8,5 +8,6 @@ logging:
 # gRPC endpoint to listen on for adapter service
 listen_addr: "localhost:50051"
 
-# gRPC endpoint of the RouteService gateway for RIB updates
-gateway_endpoint: "localhost:8080"
+# gRPC endpoint serving the route operator's RouteService for RIB updates.
+# Connect directly to the route operator or to the gateway that proxies it.
+route_operator_endpoint: "localhost:8080"

@@ -47,22 +47,22 @@ func (c *levelFilterCore) Check(ent zapcore.Entry, ce *zapcore.CheckedEntry) *za
 type AdapterService struct {
 	adapterpb.UnimplementedAdapterServiceServer
 
-	importsMu       sync.Mutex
-	imports         map[string]*importHolder
-	gatewayEndpoint string    // gRPC endpoint of the RouteService (gateway) for RIB updates
-	quitCh          chan bool // Signals all background BIRD import loops to stop
-	log             *zap.Logger
+	importsMu             sync.Mutex
+	imports               map[string]*importHolder
+	routeOperatorEndpoint string    // gRPC endpoint of the route operator's RouteService for RIB updates
+	quitCh                chan bool // Signals all background BIRD import loops to stop
+	log                   *zap.Logger
 }
 
 func NewAdapterService(
-	gatewayEndpoint string,
+	routeOperatorEndpoint string,
 	log *zap.Logger,
 ) *AdapterService {
 	return &AdapterService{
-		imports:         make(map[string]*importHolder),
-		gatewayEndpoint: gatewayEndpoint,
-		quitCh:          make(chan bool),
-		log:             log,
+		imports:               make(map[string]*importHolder),
+		routeOperatorEndpoint: routeOperatorEndpoint,
+		quitCh:                make(chan bool),
+		log:                   log,
 	}
 }
 
@@ -167,12 +167,12 @@ func (m *AdapterService) SetupConfig(
 	}
 
 	conn, err := grpc.NewClient(
-		m.gatewayEndpoint,
+		m.routeOperatorEndpoint,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithDefaultCallOptions(grpc.UseCompressor(gzip.Name)),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to the gateway: %w", err)
+		return nil, fmt.Errorf("failed to connect to the route operator endpoint: %w", err)
 	}
 
 	// And then add dynamic routes, if any.
@@ -192,7 +192,7 @@ var errStreamClosed = fmt.Errorf("stream closed")
 type importHolder struct {
 	export        *bird.Export                                                       // Reads/parses routes from BIRD
 	cancel        context.CancelFunc                                                 // Stops this import's goroutines (runBirdImportLoop, export.Run)
-	conn          *grpc.ClientConn                                                   // gRPC connection to RouteService (gateway)
+	conn          *grpc.ClientConn                                                   // gRPC connection to the route operator's RouteService
 	currentStream *grpc.ClientStreamingClient[routepb.Update, routepb.UpdateSummary] // Active gRPC stream for RIB updates; replaced on reconnect
 	sockets       []string                                                           // Unix socket paths being read from
 	createdAt     time.Time                                                          // Timestamp when the session was created
@@ -200,9 +200,11 @@ type importHolder struct {
 }
 
 // processBirdImport streams BIRD route updates to the control plane RIB.
+//
 // Handles automatic reconnection and graceful cleanup of existing imports.
-// It establishes the initial gRPC stream to the RouteService (gateway), sets up
-// callbacks for the bird.Export reader, and manages replacement of existing imports.
+// It establishes the initial gRPC stream to the route operator's RouteService,
+// sets up callbacks for the bird.Export reader, and manages replacement of
+// existing imports.
 func (m *AdapterService) processBirdImport(
 	conn *grpc.ClientConn,
 	cfg *bird.Config,
