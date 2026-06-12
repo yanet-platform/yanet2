@@ -116,8 +116,9 @@ pub struct RouteInsertCmd {
     /// Configuration name.
     #[arg(long = "name", short = 'n')]
     pub name: String,
-    /// Next-hop IP address(es); repeat to specify multiple nexthops for ECMP.
-    #[arg(long = "via", num_args = 1.., required = true)]
+    /// Next-hop IP address(es); repeat `--via` to specify multiple nexthops for
+    /// ECMP.
+    #[arg(long = "via", required = true)]
     pub nexthop_addrs: Vec<IpAddr>,
     /// Route source type (static or bird). Defaults to static.
     #[arg(long = "source", default_value = "static")]
@@ -131,8 +132,9 @@ pub struct RouteRemoveCmd {
     /// Configuration name.
     #[arg(long = "name", short = 'n')]
     pub name: String,
-    /// Next-hop IP address(es); repeat to specify multiple nexthops for ECMP.
-    #[arg(long = "via", num_args = 1.., required = true)]
+    /// Next-hop IP address(es); repeat `--via` to specify multiple nexthops for
+    /// ECMP.
+    #[arg(long = "via", required = true)]
     pub nexthop_addrs: Vec<IpAddr>,
     /// Route source type (static or bird). Defaults to static.
     #[arg(long = "source", default_value = "static")]
@@ -749,6 +751,80 @@ where
 #[cfg(test)]
 mod test {
     use super::*;
+
+    /// `--via ADDR PREFIX` must not consume the positional prefix as a second
+    /// nexthop.
+    #[test]
+    fn insert_via_does_not_consume_prefix() {
+        let cmd = Cmd::try_parse_from([
+            "yanet-cli-operator-route",
+            "insert",
+            "--via",
+            "192.0.2.1",
+            "10.0.0.0/8",
+            "-n",
+            "cfg",
+        ])
+        .expect("parse must succeed");
+
+        let ModeCmd::Insert(insert) = cmd.mode else {
+            panic!("expected Insert variant");
+        };
+
+        assert_eq!("10.0.0.0/8", insert.prefix.to_string());
+        assert_eq!(1, insert.nexthop_addrs.len());
+        assert_eq!("192.0.2.1", insert.nexthop_addrs[0].to_string());
+    }
+
+    /// Repeating `--via` accumulates nexthops for ECMP routes.
+    #[test]
+    fn insert_via_repeated_accumulates_nexthops() {
+        let cmd = Cmd::try_parse_from([
+            "yanet-cli-operator-route",
+            "insert",
+            "--via",
+            "192.0.2.1",
+            "--via",
+            "192.0.2.2",
+            "10.0.0.0/8",
+            "-n",
+            "cfg",
+        ])
+        .expect("parse must succeed");
+
+        let ModeCmd::Insert(insert) = cmd.mode else {
+            panic!("expected Insert variant");
+        };
+
+        assert_eq!("10.0.0.0/8", insert.prefix.to_string());
+        assert_eq!(2, insert.nexthop_addrs.len());
+        assert_eq!("192.0.2.1", insert.nexthop_addrs[0].to_string());
+        assert_eq!("192.0.2.2", insert.nexthop_addrs[1].to_string());
+    }
+
+    /// `--via ADDR PREFIX` in remove must not consume the positional prefix as
+    /// a second nexthop.
+    #[test]
+    fn remove_via_does_not_consume_prefix() {
+        let cmd = Cmd::try_parse_from([
+            "yanet-cli-operator-route",
+            "remove",
+            "--via",
+            "192.0.2.1",
+            "10.0.0.0/8",
+            "-n",
+            "cfg",
+        ])
+        .expect("parse must succeed");
+
+        let ModeCmd::Remove(remove) = cmd.mode else {
+            panic!("expected Remove variant");
+        };
+
+        assert_eq!("10.0.0.0/8", remove.prefix.to_string());
+        assert_eq!(1, remove.nexthop_addrs.len());
+        assert_eq!("192.0.2.1", remove.nexthop_addrs[0].to_string());
+    }
 
     #[test]
     fn format_age_none_returns_dash() {
