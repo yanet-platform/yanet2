@@ -2,6 +2,7 @@ package operatorpb
 
 import (
 	"fmt"
+	"math"
 	"net/netip"
 	"time"
 
@@ -90,9 +91,11 @@ func ToRIBRoute(route *Route, toRemove bool) (*rib.Route, error) {
 		OriginAS:         route.GetOriginAs(),
 		Med:              route.GetMed(),
 		Pref:             route.GetPref(),
-		ASPathLen:        uint8(route.GetAsPathLen()),
-		SourceID:         sourceID,
-		ToRemove:         toRemove,
+		// Wire field is uint32; saturate so absurdly long paths stay worst
+		// instead of wrapping to best.
+		ASPathLen: uint8(min(route.GetAsPathLen(), uint32(math.MaxUint8))),
+		SourceID:  sourceID,
+		ToRemove:  toRemove,
 	}, nil
 }
 
