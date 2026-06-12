@@ -893,6 +893,9 @@ yanet_get_cp_function_list_info(struct dp_config *dp_config) {
 				sizeof(struct cp_chain_info *) *
 					cp_function->chain_count
 			);
+		if (function_info == NULL) {
+			goto error_free;
+		}
 
 		strtcpy(function_info->name,
 			cp_function->name,
@@ -914,6 +917,7 @@ yanet_get_cp_function_list_info(struct dp_config *dp_config) {
 						cp_chain->length
 				);
 			if (chain_info == NULL) {
+				cp_function_info_free(function_info);
 				goto error_free;
 			}
 
