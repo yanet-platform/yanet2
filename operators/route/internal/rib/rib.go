@@ -84,7 +84,7 @@ func (m *RIB) RemoveUnicastRoute(prefix netip.Prefix, nexthopAddr netip.Addr, so
 			// Filter out only static routes with matching nexthop.
 			newRoutes := make([]Route, 0, len(routesList.Routes))
 			for _, r := range routesList.Routes {
-				if r.NextHop == nexthopAddr && r.SourceID == sourceID {
+				if r.NextHop.Unmap() == nexthopAddr.Unmap() && r.SourceID == sourceID {
 					found++
 					continue // skip means remove
 				}

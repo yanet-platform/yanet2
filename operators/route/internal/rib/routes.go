@@ -76,13 +76,14 @@ type Route struct {
 // path (RFC 4271), so BGP ECMP arises across peers. Static routes are
 // peerless independent entries, so their identity includes the nexthop,
 // allowing multiple static routes for the same prefix with distinct nexthops
-// to coexist.
+// to coexist. Static nexthops are compared in normalized (unmapped) form
+// because the API accepts both native IPv4 and IPv4-in-IPv6 encodings.
 func (m Route) isSameIdentity(other Route) bool {
 	if m.SourceID != other.SourceID || m.Peer != other.Peer {
 		return false
 	}
 	if m.SourceID == RouteSourceStatic {
-		return m.NextHop == other.NextHop
+		return m.NextHop.Unmap() == other.NextHop.Unmap()
 	}
 	return true
 }
