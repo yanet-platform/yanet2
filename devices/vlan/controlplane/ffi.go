@@ -44,7 +44,7 @@ func NewDeviceConfig(
 	output := device.GetOutput()
 
 	var cErr *C.struct_yanet_error
-	cCfg := C.cp_device_vlan_config_create(cName, C.uint64_t(len(input)), C.uint64_t(len(output)), C.uint16_t(vlan), &cErr)
+	cCfg := C.cp_device_vlan_config_new(cName, C.uint64_t(len(input)), C.uint64_t(len(output)), C.uint16_t(vlan), &cErr)
 	if cCfg == nil {
 		return nil, fmt.Errorf("failed to initialize vlan device config: %w", cerrors.FromC(unsafe.Pointer(cErr)))
 	}
@@ -72,7 +72,7 @@ func NewDeviceConfig(
 		)
 	}
 
-	ptr := C.cp_device_vlan_create((*C.struct_agent)(agent.AsRawPtr()), cCfg, &cErr)
+	ptr := C.cp_device_vlan_new((*C.struct_agent)(agent.AsRawPtr()), cCfg, &cErr)
 	if ptr == nil {
 		return nil, fmt.Errorf("failed to create vlan device: %w", cerrors.FromC(unsafe.Pointer(cErr)))
 	}

@@ -11,7 +11,7 @@
 #include "lib/errors/errors.h"
 
 struct cp_device *
-cp_device_vlan_create(
+cp_device_vlan_new(
 	struct agent *agent,
 	const struct cp_device_vlan_config *config,
 	yanet_error **err
@@ -58,7 +58,7 @@ cp_device_vlan_free(struct cp_device *cp_device) {
 }
 
 struct cp_device_vlan_config *
-cp_device_vlan_config_create(
+cp_device_vlan_config_new(
 	const char *name,
 	uint64_t input_count,
 	uint64_t output_count,
