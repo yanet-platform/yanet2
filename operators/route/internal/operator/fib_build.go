@@ -34,6 +34,8 @@ type FIBBuildStats struct {
 	NeighbourNotFound int
 	HardwareRoutes    int
 	PrefixesAdded     int
+	// FilteredRoutes counts routes excluded by the per-source best-group filter.
+	FilteredRoutes int
 }
 
 // BuildFIB resolves a RIB dump against the supplied neighbour view and
@@ -56,8 +58,11 @@ func BuildFIB(
 
 			stats.TotalRoutes += len(routesList.Routes)
 
-			nexthops := make([]neigh.HardwareRoute, 0, len(routesList.Routes))
-			for _, r := range routesList.Routes {
+			bestRoutes := routesList.BestPerSource()
+			stats.FilteredRoutes += len(routesList.Routes) - len(bestRoutes)
+
+			nexthops := make([]neigh.HardwareRoute, 0, len(bestRoutes))
+			for _, r := range bestRoutes {
 				entry, ok := neighbours.Lookup(r.NextHop.Unmap())
 				if !ok {
 					stats.NeighbourNotFound++
