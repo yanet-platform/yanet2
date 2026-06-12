@@ -132,12 +132,15 @@ module_ectx_create(
 			cp_module->type,
 			cp_module->name
 		);
-		goto error;
+		goto error_storage;
 	}
 
 	SET_OFFSET_OF(&module_ectx->counter_storage, counter_storage);
 
 	return module_ectx;
+
+error_storage:
+	counter_storage_free(counter_storage);
 
 error:
 	memory_bfree(memory_context, module_ectx, ectx_size);
