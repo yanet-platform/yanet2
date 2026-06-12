@@ -13,7 +13,7 @@
 #include "dataplane/config/zone.h"
 
 struct cp_module *
-dscp_module_config_create(
+dscp_module_config_new(
 	struct agent *agent, const char *name, yanet_error **err
 ) {
 	// Allocate a new dscp module config
@@ -59,7 +59,7 @@ dscp_module_config_free(struct cp_module *cp_module) {
 	struct dscp_module_config *config =
 		container_of(cp_module, struct dscp_module_config, cp_module);
 
-	dscp_module_config_data_destroy(config);
+	dscp_module_config_data_fini(config);
 
 	struct agent *agent = ADDR_OF(&cp_module->agent);
 
@@ -91,7 +91,7 @@ dscp_module_config_data_init(
 }
 
 void
-dscp_module_config_data_destroy(struct dscp_module_config *config) {
+dscp_module_config_data_fini(struct dscp_module_config *config) {
 	lpm_free(&config->lpm_v4);
 	lpm_free(&config->lpm_v6);
 }

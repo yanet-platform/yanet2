@@ -11,7 +11,7 @@ struct dscp_module_config;
 
 // Create a new configuration for the DSCP module
 struct cp_module *
-dscp_module_config_create(
+dscp_module_config_new(
 	struct agent *agent, const char *name, yanet_error **err
 );
 
@@ -24,7 +24,7 @@ dscp_module_config_data_init(
 );
 
 void
-dscp_module_config_data_destroy(struct dscp_module_config *config);
+dscp_module_config_data_fini(struct dscp_module_config *config);
 
 // Add IPv4 prefix to the DSCP module configuration
 int
