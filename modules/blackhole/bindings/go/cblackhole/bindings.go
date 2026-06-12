@@ -29,7 +29,7 @@ func NewModuleConfig(agent *ffi.Agent, name string) (*ModuleConfig, error) {
 	defer C.free(unsafe.Pointer(cName))
 
 	var cErr *C.yanet_error
-	ptr := C.blackhole_module_config_init((*C.struct_agent)(agent.AsRawPtr()), cName, &cErr)
+	ptr := C.blackhole_module_config_new((*C.struct_agent)(agent.AsRawPtr()), cName, &cErr)
 	if ptr == nil {
 		return nil, fmt.Errorf(
 			"failed to initialize module config: %w",

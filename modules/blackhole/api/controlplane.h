@@ -6,7 +6,7 @@ struct agent;
 #include "lib/errors/errors.h"
 
 struct cp_module *
-blackhole_module_config_init(
+blackhole_module_config_new(
 	struct agent *agent, const char *name, yanet_error **error
 );
 
