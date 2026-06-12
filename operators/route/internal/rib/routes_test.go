@@ -9,14 +9,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func addr(s string) netip.Addr {
-	return netip.MustParseAddr(s)
-}
-
-func peer(s string) netip.Addr {
-	return netip.MustParseAddr(s)
-}
-
 func TestRouteComparator(t *testing.T) {
 	a, b, c := Route{}, Route{}, Route{}
 	a.Prefix = netip.MustParsePrefix("::aaaa/128")
@@ -64,8 +56,8 @@ func TestRouteComparator(t *testing.T) {
 // coexist as ECMP entries while a re-announced nexthop replaces in place.
 func TestRoutesListStaticECMP(t *testing.T) {
 	pfx := netip.MustParsePrefix("10.0.0.0/24")
-	nh1 := addr("10.0.0.1")
-	nh2 := addr("10.0.0.2")
+	nh1 := netip.MustParseAddr("10.0.0.1")
+	nh2 := netip.MustParseAddr("10.0.0.2")
 	unspec := netip.IPv6Unspecified()
 
 	t.Run("two static routes different nexthops both present", func(t *testing.T) {
@@ -109,7 +101,7 @@ func TestRoutesListStaticECMP(t *testing.T) {
 	})
 
 	t.Run("bird implicit replace preserves list length", func(t *testing.T) {
-		birdPeer := peer("192.0.2.1")
+		birdPeer := netip.MustParseAddr("192.0.2.1")
 		var list RoutesList
 		r1 := Route{Prefix: pfx, NextHop: nh1, Peer: birdPeer, SourceID: RouteSourceBird}
 		r2 := Route{Prefix: pfx, NextHop: nh2, Peer: birdPeer, SourceID: RouteSourceBird}
