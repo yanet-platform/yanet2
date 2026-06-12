@@ -207,10 +207,10 @@ dataplane_ut_new(const struct dataplane_ut_config *cfg) {
 	// Create the initial cp_config_gen so agents can register modules
 	// and pipelines.
 	yanet_error *err = NULL;
-	struct cp_config_gen *cp_config_gen = cp_config_gen_create(agent, &err);
+	struct cp_config_gen *cp_config_gen = cp_config_gen_new(agent, &err);
 	if (cp_config_gen == NULL) {
 		LOG(ERROR,
-		    "dataplane_ut_new: cp_config_gen_create failed: %s",
+		    "dataplane_ut_new: cp_config_gen_new failed: %s",
 		    yanet_error_message(err));
 		yanet_error_free(err);
 		dataplane_ut_free(ut);

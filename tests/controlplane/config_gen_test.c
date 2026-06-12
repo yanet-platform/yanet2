@@ -71,8 +71,8 @@ main(void) {
 	SET_OFFSET_OF(&agent.cp_config, cp);
 
 	yanet_error *err = NULL;
-	struct cp_config_gen *gen = cp_config_gen_create(&agent, &err);
-	TEST_ASSERT_NOT_NULL(gen, "cp_config_gen_create failed");
+	struct cp_config_gen *gen = cp_config_gen_new(&agent, &err);
+	TEST_ASSERT_NOT_NULL(gen, "cp_config_gen_new failed");
 
 	// Reproduce the worker's code path:
 	//   config_gen_ectx = ADDR_OF(&cp_config_gen->config_gen_ectx);

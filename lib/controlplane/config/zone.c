@@ -56,15 +56,13 @@ cp_config_unlock(struct cp_config *cp_config) {
 	);
 }
 
-// ------------ cp_config_gen
-
 static inline void
 cp_config_gen_free(
 	struct cp_config *cp_config, struct cp_config_gen *config_gen
 );
 
 static inline struct cp_config_gen *
-cp_config_gen_create_from(
+cp_config_gen_new_from(
 	struct cp_config *cp_config,
 	struct cp_config_gen *old_config_gen,
 	yanet_error **err
@@ -220,7 +218,7 @@ cp_config_delete_module(
 		ADDR_OF(&cp_config->cp_config_gen);
 
 	struct cp_config_gen *new_config_gen =
-		cp_config_gen_create_from(cp_config, old_config_gen, err);
+		cp_config_gen_new_from(cp_config, old_config_gen, err);
 	if (new_config_gen == NULL) {
 		goto error_unlock;
 	}
@@ -264,7 +262,7 @@ cp_config_update_modules(
 	struct cp_config_gen *old_config_gen =
 		ADDR_OF(&cp_config->cp_config_gen);
 	struct cp_config_gen *new_config_gen =
-		cp_config_gen_create_from(cp_config, old_config_gen, err);
+		cp_config_gen_new_from(cp_config, old_config_gen, err);
 	if (new_config_gen == NULL) {
 		goto error_unlock;
 	}
@@ -319,7 +317,7 @@ cp_config_update_functions(
 	struct cp_config_gen *old_config_gen =
 		ADDR_OF(&cp_config->cp_config_gen);
 	struct cp_config_gen *new_config_gen =
-		cp_config_gen_create_from(cp_config, old_config_gen, err);
+		cp_config_gen_new_from(cp_config, old_config_gen, err);
 	if (new_config_gen == NULL) {
 		goto error_unlock;
 	}
@@ -396,7 +394,7 @@ cp_config_delete_function(
 		ADDR_OF(&cp_config->cp_config_gen);
 
 	struct cp_config_gen *new_config_gen =
-		cp_config_gen_create_from(cp_config, old_config_gen, err);
+		cp_config_gen_new_from(cp_config, old_config_gen, err);
 	if (new_config_gen == NULL) {
 		goto error_unlock;
 	}
@@ -438,7 +436,7 @@ cp_config_update_pipelines(
 	struct cp_config_gen *old_config_gen =
 		ADDR_OF(&cp_config->cp_config_gen);
 	struct cp_config_gen *new_config_gen =
-		cp_config_gen_create_from(cp_config, old_config_gen, err);
+		cp_config_gen_new_from(cp_config, old_config_gen, err);
 
 	if (new_config_gen == NULL) {
 		goto error_unlock;
@@ -521,7 +519,7 @@ cp_config_delete_pipeline(
 	}
 
 	struct cp_config_gen *new_config_gen =
-		cp_config_gen_create_from(cp_config, old_config_gen, err);
+		cp_config_gen_new_from(cp_config, old_config_gen, err);
 	if (new_config_gen == NULL) {
 		goto error_unlock;
 	}
@@ -606,7 +604,7 @@ cp_config_update_devices(
 	struct cp_config_gen *old_config_gen =
 		ADDR_OF(&cp_config->cp_config_gen);
 	struct cp_config_gen *new_config_gen =
-		cp_config_gen_create_from(cp_config, old_config_gen, err);
+		cp_config_gen_new_from(cp_config, old_config_gen, err);
 	if (new_config_gen == NULL) {
 		goto error_unlock;
 	}
@@ -642,7 +640,7 @@ error_unlock:
 }
 
 struct cp_config_gen *
-cp_config_gen_create(struct agent *agent, yanet_error **err) {
+cp_config_gen_new(struct agent *agent, yanet_error **err) {
 	struct dp_config *dp_config = ADDR_OF(&agent->dp_config);
 	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
 	struct cp_config_gen *cp_config_gen =

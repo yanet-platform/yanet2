@@ -374,7 +374,7 @@ dataplane_init(
 
 		// System agent for this instance.
 		//
-		// Owns the phy devices created in cp_config_gen_create
+		// Owns the phy devices created in cp_config_gen_new
 		// and lives in shm so their parent_memory_context offsets
 		// remain valid in every process that maps the same shm region.
 		//
@@ -471,7 +471,7 @@ dataplane_init(
 		}
 
 		struct cp_config_gen *cp_config_gen =
-			cp_config_gen_create(agent, &err);
+			cp_config_gen_new(agent, &err);
 		if (cp_config_gen == NULL) {
 			LOG(ERROR,
 			    "failed to create cp_config_gen: %s",

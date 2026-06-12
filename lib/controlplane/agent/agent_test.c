@@ -173,8 +173,8 @@ test_attach_initialised_segment_succeeds() {
 
 	yanet_error *setup_err = NULL;
 	struct cp_config_gen *cp_config_gen =
-		cp_config_gen_create(sys_agent, &setup_err);
-	TEST_ASSERT_NOT_NULL(cp_config_gen, "cp_config_gen_create failed");
+		cp_config_gen_new(sys_agent, &setup_err);
+	TEST_ASSERT_NOT_NULL(cp_config_gen, "cp_config_gen_new failed");
 	SET_OFFSET_OF(&cp_config->cp_config_gen, cp_config_gen);
 
 	dp_config->instance_count = 1;

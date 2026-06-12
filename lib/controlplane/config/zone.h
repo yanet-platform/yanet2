@@ -194,7 +194,7 @@ cp_config_update_devices(
 );
 
 struct cp_config_gen *
-cp_config_gen_create(struct agent *agent, yanet_error **err);
+cp_config_gen_new(struct agent *agent, yanet_error **err);
 
 static inline struct cp_module *
 cp_config_gen_get_module(struct cp_config_gen *config_gen, uint64_t index) {
