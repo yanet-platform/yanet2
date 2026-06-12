@@ -129,18 +129,18 @@ type fibIter struct {
 	ptr *C.struct_fib_iter
 }
 
-// newFIBIter maps 1:1 to fib_iter_create.
+// newFIBIter maps 1:1 to fib_iter_new.
 func newFIBIter(config *ModuleConfig) (*fibIter, error) {
-	ptr := C.fib_iter_create(config.asRawPtr())
+	ptr := C.fib_iter_new(config.asRawPtr())
 	if ptr == nil {
-		return nil, fmt.Errorf("fib_iter_create: allocation failure")
+		return nil, fmt.Errorf("fib_iter_new: allocation failure")
 	}
 	return &fibIter{ptr: ptr}, nil
 }
 
-// destroy maps 1:1 to fib_iter_destroy.
+// destroy maps 1:1 to fib_iter_free.
 func (m *fibIter) destroy() {
-	C.fib_iter_destroy(m.ptr)
+	C.fib_iter_free(m.ptr)
 }
 
 // next maps 1:1 to fib_iter_next.

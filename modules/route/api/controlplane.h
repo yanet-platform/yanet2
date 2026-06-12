@@ -70,11 +70,11 @@ route_module_config_add_prefix_v6(
 //
 // Returns NULL on allocation failure.
 struct fib_iter *
-fib_iter_create(struct cp_module *cp_module);
+fib_iter_new(struct cp_module *cp_module);
 
-// Destroy a FIB iterator created by fib_iter_create.
+// Free a FIB iterator created by fib_iter_new.
 void
-fib_iter_destroy(struct fib_iter *it);
+fib_iter_free(struct fib_iter *it);
 
 // Advance to the next LPM range.
 //

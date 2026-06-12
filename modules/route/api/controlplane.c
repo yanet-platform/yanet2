@@ -249,7 +249,7 @@ route_module_config_add_prefix_v6(
 }
 
 struct fib_iter *
-fib_iter_create(struct cp_module *cp_module) {
+fib_iter_new(struct cp_module *cp_module) {
 	struct fib_iter *it = calloc(1, sizeof(*it));
 	if (it == NULL)
 		return NULL;
@@ -259,7 +259,7 @@ fib_iter_create(struct cp_module *cp_module) {
 }
 
 void
-fib_iter_destroy(struct fib_iter *it) {
+fib_iter_free(struct fib_iter *it) {
 	free(it);
 }
 
