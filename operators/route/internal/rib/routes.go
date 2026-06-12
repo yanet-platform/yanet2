@@ -98,7 +98,8 @@ func routeCompare(a Route, b Route) int {
 	if asPathLenDiff := int(b.ASPathLen) - int(a.ASPathLen); asPathLenDiff != 0 {
 		return asPathLenDiff
 	}
-	return int(a.Med) - int(b.Med)
+	// lower MED is better (RFC 4271 §9.1.2.2)
+	return int(b.Med) - int(a.Med)
 }
 
 func routeCompareRev(a Route, b Route) int {
