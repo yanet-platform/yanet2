@@ -39,7 +39,7 @@ enum pdump_log_level {
 
 // Create a new configuration for the pdump module
 struct cp_module *
-pdump_module_config_create(
+pdump_module_config_new(
 	struct agent *agent, const char *name, yanet_error **err
 );
 

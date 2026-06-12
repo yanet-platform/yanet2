@@ -102,7 +102,7 @@ pdump_module_config_data_init(
 }
 
 struct cp_module *
-pdump_module_config_create(
+pdump_module_config_new(
 	struct agent *agent, const char *name, yanet_error **err
 ) {
 	struct pdump_module_config *config =

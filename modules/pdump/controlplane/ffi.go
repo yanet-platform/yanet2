@@ -106,7 +106,7 @@ func NewModuleConfig(agent *ffi.Agent, name string) (*ModuleConfig, error) {
 
 	// Create a new module config using the C API
 	var cErr *C.yanet_error
-	ptr := C.pdump_module_config_create((*C.struct_agent)(agent.AsRawPtr()), cName, &cErr)
+	ptr := C.pdump_module_config_new((*C.struct_agent)(agent.AsRawPtr()), cName, &cErr)
 	if ptr == nil {
 		return nil, fmt.Errorf("failed to create module config: %w", cerrors.FromC(unsafe.Pointer(cErr)))
 	}
