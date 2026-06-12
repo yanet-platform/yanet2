@@ -71,8 +71,12 @@ type Route struct {
 	//
 	// This field participates in route cost calculation.
 	Pref uint32
-	// Encode sequence of ASes to reach the target
+	// ASPath encodes the sequence of ASes to reach the target.
 	ASPath []uint32
+	// ASPathLen is the BGP decision-process AS-path length per RFC 4271 §9.1.2.2
+	// and RFC 5065 §5.3: AS_SEQUENCE segments contribute their ASN count,
+	// AS_SET contributes 1, AS_CONFED_SEQUENCE and AS_CONFED_SET contribute 0.
+	ASPathLen uint32
 	// Label stack corresponding to the route
 	MplsLabelStack []uint32
 	// Cluster list used to detect announce loops
@@ -118,7 +122,7 @@ func ToPBRoute(route *Route) *routepb.Route {
 		OriginAs:         originAS,
 		Med:              route.Med,
 		Pref:             route.Pref,
-		AsPathLen:        uint32(len(route.ASPath)),
+		AsPathLen:        route.ASPathLen,
 		Source:           routepb.RouteSourceID(route.SourceID),
 		LargeCommunities: communities,
 	}

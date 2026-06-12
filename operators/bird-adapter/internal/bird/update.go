@@ -58,10 +58,10 @@ const (
 	// AIGP           AttributeType = 0x1a /* RFC 7311 */
 	// OnlyToCustomer AttributeType = 0x23 /* RFC 9234 */
 
-	// ASPathSet      = 1 /* Types of path segments */
+	ASPathSet            = 1 /* Types of path segments */
 	ASPathSequence       = 2
 	ASPathConfedSequence = 3
-	// ASPathConfedSet      = 4
+	ASPathConfedSet      = 4
 
 	OpInsert Operation = 1
 	OpRemove Operation = 2
@@ -353,7 +353,11 @@ func (m *updateDecoder) decodeComplexAttribute(route *rib.Route, data []byte, ty
 	case AttrOrigin, AttrLocalPref, AttrMultiExitDisc, AttrOriginatorID:
 	case AttrASPath:
 		// https://datatracker.ietf.org/doc/html/rfc4271#section-5.1.2
-		for len(data) >= 2 { // traverse all segments
+		// Traverse all segments to compute the decision-process path length per
+		// RFC 4271 §9.1.2.2 and RFC 5065 §5.3, and extract ASNs from the first
+		// AS_SEQUENCE or AS_CONFED_SEQUENCE for peer/origin AS determination.
+		asPathExtracted := false
+		for len(data) >= 2 {
 			segmentType := data[0]
 			asPathLen := data[1]
 			if asPathLen == 0 {
@@ -362,30 +366,30 @@ func (m *updateDecoder) decodeComplexAttribute(route *rib.Route, data []byte, ty
 			data = data[2:]
 			asPathBytesSize := int(asPathLen) * int(sizeOfUint32)
 
-			// OriginAS is the last one
 			if asPathBytesSize > len(data) {
 				return fmt.Errorf("ASPath attribute truncated want=%d, actual=%d: %w",
 					asPathBytesSize, len(data), ErrAttrsUnexpectedEOD)
 			}
 
-			if segmentType != ASPathSequence && segmentType != ASPathConfedSequence {
-				// return fmt.Errorf("unsupported ASPath segment type: %d", segmentType)
-				// Silently skip unsupported AS path segment types (e.g., AS_SET, AS_CONFED_SET).
-				// These segment types are valid per RFC 4271, but we only process sequence types
-				// for determining peer and origin AS values.
-				// Note: Routes with only AS_SET or AS_CONFED_SET segments (no sequence types)
-				// will have empty peer/origin AS values, which is acceptable as these routes
-				// typically represent aggregated paths where specific AS information is less relevant.
-				data = data[asPathBytesSize:]
-				continue
+			// Accumulate decision-process path length: AS_SEQUENCE counts each ASN,
+			// AS_SET counts as 1, AS_CONFED_SEQUENCE and AS_CONFED_SET count as 0.
+			switch segmentType {
+			case ASPathSequence:
+				route.ASPathLen += uint32(asPathLen)
+			case ASPathSet:
+				route.ASPathLen++
 			}
 
-			for idx := uint8(0); idx < asPathLen; idx++ {
-				route.ASPath = append(route.ASPath, binary.BigEndian.Uint32(data[int(idx)*int(sizeOfUint32):]))
+			// Extract ASNs from the first AS_SEQUENCE or AS_CONFED_SEQUENCE segment
+			// to populate route.ASPath for peer/origin AS resolution.
+			if !asPathExtracted && (segmentType == ASPathSequence || segmentType == ASPathConfedSequence) {
+				for idx := uint8(0); idx < asPathLen; idx++ {
+					route.ASPath = append(route.ASPath, binary.BigEndian.Uint32(data[int(idx)*int(sizeOfUint32):]))
+				}
+				asPathExtracted = true
 			}
 
-			// stop decoding upon encountering the first successful match
-			return nil
+			data = data[asPathBytesSize:]
 		}
 		if len(data) != 0 {
 			return fmt.Errorf("unhandled ASPath attribute data len=%d: %#v: %w", len(data), data, ErrAttrsUnexpectedEOD)

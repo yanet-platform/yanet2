@@ -108,12 +108,13 @@ func TestDecodeUpdate(t *testing.T) {
 			name: "OK ipv6 update",
 			data: dataIPv6WithLargeCommunities,
 			expected: rib.Route{
-				Prefix:  netip.MustParsePrefix("2001:200:c000::/35"),
-				NextHop: netip.MustParseAddr("2a02:2891:9:200::13"),
-				Peer:    netip.MustParseAddr("::1"),
-				ASPath:  []uint32{51185, 7500, 23634},
-				Med:     0,
-				Pref:    100,
+				Prefix:    netip.MustParsePrefix("2001:200:c000::/35"),
+				NextHop:   netip.MustParseAddr("2a02:2891:9:200::13"),
+				Peer:      netip.MustParseAddr("::1"),
+				ASPath:    []uint32{51185, 7500, 23634},
+				ASPathLen: 3,
+				Med:       0,
+				Pref:      100,
 				Communities: []rib.Community{
 					rib.Community{
 						ASN:   2,
@@ -220,11 +221,12 @@ func TestDecodeUpdate(t *testing.T) {
 				0x13, 0x5, 0, 0x0,
 			},
 			expected: rib.Route{
-				Prefix:  netip.MustParsePrefix("1.0.4.0/22"),
-				NextHop: netip.AddrFrom16([16]byte{10: 0xff, 11: 0xff, 12: 0xc3, 0x42, 0xe2, 0xfe}),
-				Peer:    netip.IPv6Loopback(),
-				ASPath:  []uint32{0x0000bbc6, 1299, 7545, 2764, 38803, 38803, 0x00009793},
-				Pref:    0x64,
+				Prefix:    netip.MustParsePrefix("1.0.4.0/22"),
+				NextHop:   netip.AddrFrom16([16]byte{10: 0xff, 11: 0xff, 12: 0xc3, 0x42, 0xe2, 0xfe}),
+				Peer:      netip.IPv6Loopback(),
+				ASPath:    []uint32{0x0000bbc6, 1299, 7545, 2764, 38803, 38803, 0x00009793},
+				ASPathLen: 7,
+				Pref:      0x64,
 				Communities: []rib.Community{
 					rib.Community{
 						ASN:   100,
@@ -251,10 +253,11 @@ func TestDecodeUpdate(t *testing.T) {
 				0, 0, 0, 8, 4, 0, 0, 4, 0, 0, 0, 0xb8, 0x88, 0x13, 0x5,
 			},
 			expected: rib.Route{
-				Prefix:  netip.MustParsePrefix("1.0.7.0/24"),
-				NextHop: netip.MustParseAddr("::ffff:206.82.104.185"),
-				Peer:    netip.IPv6Loopback(),
-				ASPath:  []uint32{398465, 1299, 7545, 38803},
+				Prefix:    netip.MustParsePrefix("1.0.7.0/24"),
+				NextHop:   netip.MustParseAddr("::ffff:206.82.104.185"),
+				Peer:      netip.IPv6Loopback(),
+				ASPath:    []uint32{398465, 1299, 7545, 38803},
+				ASPathLen: 4,
 				Communities: []rib.Community{
 					rib.Community{
 						ASN:   35000,
@@ -263,6 +266,104 @@ func TestDecodeUpdate(t *testing.T) {
 				},
 				Pref:     100,
 				ToRemove: true, // NOTE: ToRemove test
+			},
+		},
+		{
+			// AS_SEQUENCE of 3 ASNs: decision length = 3.
+			name: "OK ASPathLen plain AS_SEQUENCE",
+			data: []byte{
+				0: 0x1,    // NetIP4
+				1: 0x8,    // prefix len 8
+				2: 0x8, 0, // NetAddrUnion length 8
+				4: 0, 0, 0, 1, // prefix 1.0.0.0 LE u32
+				40: 0x1, 0, 0, 0, // opType insert
+				// peer addr all zero
+				60: 22, 0, 0, 0, // attrsAreaSize = 4+4+14 = 22
+				// AS_PATH attr: type + PROTOCOL_BGP
+				64: 0x2, 0x4, 0, 0,
+				// attr data size = 14 bytes
+				68: 14, 0, 0, 0,
+				// AS_SEQUENCE, 3 ASNs
+				72: 2, 3,
+				// ASN 1 (BE u32)
+				74: 0, 0, 0, 1,
+				// ASN 2 (BE u32)
+				78: 0, 0, 0, 2,
+				// ASN 3 (BE u32)
+				82: 0, 0, 0, 3,
+			},
+			expected: rib.Route{
+				Prefix:    netip.MustParsePrefix("1.0.0.0/8"),
+				Peer:      netip.IPv6Unspecified(),
+				ASPath:    []uint32{1, 2, 3},
+				ASPathLen: 3,
+			},
+		},
+		{
+			// AS_CONFED_SEQUENCE(2) followed by AS_SEQUENCE(3): decision length = 3
+			// (confed contributes 0). ASPath extracted from first CONFED_SEQUENCE segment.
+			name: "OK ASPathLen confed-sequence then sequence",
+			data: []byte{
+				0: 0x1,    // NetIP4
+				1: 0x8,    // prefix len 8
+				2: 0x8, 0, // NetAddrUnion length 8
+				4: 0, 0, 0, 1, // prefix 1.0.0.0 LE u32
+				40: 0x1, 0, 0, 0, // opType insert
+				// peer addr all zero
+				60: 32, 0, 0, 0, // attrsAreaSize = 4+4+24 = 32
+				// AS_PATH attr: type + PROTOCOL_BGP
+				64: 0x2, 0x4, 0, 0,
+				// attr data size = 24 bytes (2+8 + 2+12)
+				68: 24, 0, 0, 0,
+				// AS_CONFED_SEQUENCE, 2 ASNs
+				72: 3, 2,
+				// ASN 10 (BE u32)
+				74: 0, 0, 0, 10,
+				// ASN 20 (BE u32)
+				78: 0, 0, 0, 20,
+				// AS_SEQUENCE, 3 ASNs
+				82: 2, 3,
+				// ASN 100 (BE u32)
+				84: 0, 0, 0, 100,
+				// ASN 200 (BE u32)
+				88: 0, 0, 0, 200,
+				// ASN 300 (BE u32)
+				92: 0, 0, 1, 44,
+			},
+			expected: rib.Route{
+				Prefix:    netip.MustParsePrefix("1.0.0.0/8"),
+				Peer:      netip.IPv6Unspecified(),
+				ASPath:    []uint32{10, 20},
+				ASPathLen: 3,
+			},
+		},
+		{
+			// AS_SET with 2 ASNs contributes exactly 1 to decision length.
+			// No sequence segment → ASPath remains nil.
+			name: "OK ASPathLen AS_SET contributes 1",
+			data: []byte{
+				0: 0x1,    // NetIP4
+				1: 0x8,    // prefix len 8
+				2: 0x8, 0, // NetAddrUnion length 8
+				4: 0, 0, 0, 1, // prefix 1.0.0.0 LE u32
+				40: 0x1, 0, 0, 0, // opType insert
+				// peer addr all zero
+				60: 18, 0, 0, 0, // attrsAreaSize = 4+4+10 = 18
+				// AS_PATH attr: type + PROTOCOL_BGP
+				64: 0x2, 0x4, 0, 0,
+				// attr data size = 10 bytes (2+8)
+				68: 10, 0, 0, 0,
+				// AS_SET, 2 ASNs
+				72: 1, 2,
+				// ASN 1 (BE u32)
+				74: 0, 0, 0, 1,
+				// ASN 2 (BE u32)
+				78: 0, 0, 0, 2,
+			},
+			expected: rib.Route{
+				Prefix:    netip.MustParsePrefix("1.0.0.0/8"),
+				Peer:      netip.IPv6Unspecified(),
+				ASPathLen: 1,
 			},
 		},
 		{
