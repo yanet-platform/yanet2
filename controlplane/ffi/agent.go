@@ -63,7 +63,7 @@ type ShmDeviceConfig struct {
 // NewShmDeviceConfig wraps a raw C pointer into a ShmDeviceConfig.
 //
 // The pointer must originate from a device-specific C constructor (e.g.
-// cp_device_plain_create).
+// cp_device_plain_new).
 // The caller is responsible for ensuring the pointer's validity and lifetime.
 func NewShmDeviceConfig(ptr unsafe.Pointer) ShmDeviceConfig {
 	return ShmDeviceConfig{
@@ -202,7 +202,7 @@ func (m *Agent) UpdatePlainDevices(devices []DeviceConfig) error {
 		defer C.free(unsafe.Pointer(cName))
 
 		var cErr *C.struct_yanet_error
-		cCfg := C.cp_device_plain_config_create(
+		cCfg := C.cp_device_plain_config_new(
 			cName,
 			C.uint64_t(len(input)),
 			C.uint64_t(len(output)),
@@ -237,7 +237,7 @@ func (m *Agent) UpdatePlainDevices(devices []DeviceConfig) error {
 			)
 		}
 
-		ptr := C.cp_device_plain_create(
+		ptr := C.cp_device_plain_new(
 			(*C.struct_agent)(m.AsRawPtr()),
 			cCfg,
 			&cErr,
