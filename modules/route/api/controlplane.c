@@ -22,7 +22,7 @@ struct fib_iter {
 };
 
 struct cp_module *
-route_module_config_create(
+route_module_config_new(
 	struct agent *agent, const char *name, yanet_error **err
 ) {
 	struct route_module_config *config =
@@ -86,7 +86,7 @@ route_module_config_data_init(
 }
 
 void
-route_module_config_data_destroy(struct route_module_config *config) {
+route_module_config_data_fini(struct route_module_config *config) {
 	struct route *routes = ADDR_OF(&config->routes);
 	mem_array_free_exp(
 		&config->cp_module.memory_context,
@@ -120,7 +120,7 @@ route_module_config_free(struct cp_module *cp_module) {
 	struct route_module_config *config =
 		container_of(cp_module, struct route_module_config, cp_module);
 
-	route_module_config_data_destroy(config);
+	route_module_config_data_fini(config);
 
 	struct agent *agent = ADDR_OF(&cp_module->agent);
 

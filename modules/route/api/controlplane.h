@@ -23,7 +23,7 @@ struct route_module_config;
 struct fib_iter;
 
 struct cp_module *
-route_module_config_create(
+route_module_config_new(
 	struct agent *agent, const char *name, yanet_error **err
 );
 

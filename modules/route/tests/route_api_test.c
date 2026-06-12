@@ -1,5 +1,5 @@
 /*
- * Tests that route_module_config_create does not leak memory when
+ * Tests that route_module_config_new does not leak memory when
  * route_module_config_data_init fails due to OOM after cp_module_init
  * succeeds.
  *
@@ -42,7 +42,7 @@ run_test(struct yanet_shm *shm) {
 
 	size_t baseline = block_allocator_free_size(&agent->block_allocator);
 
-	struct cp_module *cp = route_module_config_create(agent, "probe", &err);
+	struct cp_module *cp = route_module_config_new(agent, "probe", &err);
 	TEST_ASSERT_NULL(cp, "create unexpectedly succeeded");
 
 	const char *errmsg = (err != NULL) ? yanet_error_message(err) : "";
