@@ -118,6 +118,7 @@ func ToPBRoute(route *Route) *routepb.Route {
 		OriginAs:         originAS,
 		Med:              route.Med,
 		Pref:             route.Pref,
+		AsPathLen:        uint32(len(route.ASPath)),
 		Source:           routepb.RouteSourceID(route.SourceID),
 		LargeCommunities: communities,
 	}
