@@ -13,7 +13,7 @@
 #include "dataplane/config/zone.h"
 
 struct cp_module *
-decap_module_config_create(
+decap_module_config_new(
 	struct agent *agent, const char *name, yanet_error **err
 ) {
 	struct decap_module_config *config =
@@ -58,7 +58,7 @@ decap_module_config_free(struct cp_module *cp_module) {
 	struct decap_module_config *config =
 		container_of(cp_module, struct decap_module_config, cp_module);
 
-	decap_module_config_data_destroy(config);
+	decap_module_config_data_fini(config);
 
 	struct agent *agent = ADDR_OF(&cp_module->agent);
 
@@ -90,7 +90,7 @@ error_lpm_v6:
 }
 
 void
-decap_module_config_data_destroy(struct decap_module_config *config) {
+decap_module_config_data_fini(struct decap_module_config *config) {
 	lpm_free(&config->prefixes4);
 	lpm_free(&config->prefixes6);
 }

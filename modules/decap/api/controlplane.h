@@ -10,7 +10,7 @@ struct memory_context;
 struct decap_module_config;
 
 struct cp_module *
-decap_module_config_create(
+decap_module_config_new(
 	struct agent *agent, const char *name, yanet_error **err
 );
 
@@ -24,7 +24,7 @@ decap_module_config_data_init(
 );
 
 void
-decap_module_config_data_destroy(struct decap_module_config *config);
+decap_module_config_data_fini(struct decap_module_config *config);
 
 int
 decap_module_config_add_prefix_v4(
