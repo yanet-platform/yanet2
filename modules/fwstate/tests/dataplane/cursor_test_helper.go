@@ -80,13 +80,13 @@ func readCursorForward(
 	now uint64, count uint32,
 ) ([]CursorResult, int64, error) {
 	var cursor C.fwstate_cursor_t
-	rc := C.fwstate_config_cursor_create(
+	rc := C.fwstate_config_cursor_init(
 		cpModule, &cursor,
 		C.bool(isIPv6), C.uint32_t(layerIndex),
 		C.int64_t(index), C.bool(includeExpired),
 	)
 	if rc != 0 {
-		return nil, 0, fmt.Errorf("fwstate_config_cursor_create failed: %d", rc)
+		return nil, 0, fmt.Errorf("fwstate_config_cursor_init failed: %d", rc)
 	}
 
 	fwmap := C.fwstate_config_resolve_map(cpModule, C.bool(isIPv6), C.uint32_t(layerIndex))
@@ -132,13 +132,13 @@ func readCursorBackward(
 	now uint64, count uint32,
 ) ([]CursorResult, int64, error) {
 	var cursor C.fwstate_cursor_t
-	rc := C.fwstate_config_cursor_create(
+	rc := C.fwstate_config_cursor_init(
 		cpModule, &cursor,
 		C.bool(isIPv6), C.uint32_t(layerIndex),
 		C.int64_t(index), C.bool(includeExpired),
 	)
 	if rc != 0 {
-		return nil, 0, fmt.Errorf("fwstate_config_cursor_create failed: %d", rc)
+		return nil, 0, fmt.Errorf("fwstate_config_cursor_init failed: %d", rc)
 	}
 
 	fwmap := C.fwstate_config_resolve_map(cpModule, C.bool(isIPv6), C.uint32_t(layerIndex))

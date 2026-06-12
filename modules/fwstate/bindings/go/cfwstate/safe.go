@@ -270,7 +270,7 @@ func (m *ModuleConfig) readEntries(
 	backward bool,
 ) ([]CursorEntry, int64, bool, error) {
 	var cursor C.fwstate_cursor_t
-	rc := C.fwstate_config_cursor_create(
+	rc := C.fwstate_config_cursor_init(
 		m.asRawPtr(), &cursor,
 		C.bool(isIPv6), C.uint32_t(layerIndex),
 		C.int64_t(index), C.bool(includeExpired),

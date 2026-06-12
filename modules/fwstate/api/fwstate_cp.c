@@ -11,7 +11,7 @@
 #include "modules/fwstate/dataplane/config.h"
 
 static void
-fwstate_config_destroy(struct fwstate_config *config, struct agent *agent) {
+fwstate_config_fini(struct fwstate_config *config, struct agent *agent) {
 	if (config->fw4state != NULL) {
 		fwmap_t *node = ADDR_OF(&config->fw4state);
 		while (node != NULL) {
@@ -45,7 +45,7 @@ fwstate_config_set_defaults(struct fwstate_config *config) {
 }
 
 struct cp_module *
-fwstate_module_config_init(
+fwstate_module_config_new(
 	struct agent *agent, const char *name, yanet_error **err
 ) {
 	struct fwstate_module_config *config =
@@ -99,7 +99,7 @@ fwstate_module_config_free(struct cp_module *cp_module) {
 	// Capture agent before fini zeroes it.
 	struct agent *agent = ADDR_OF(&cp_module->agent);
 
-	fwstate_config_destroy(&config->cfg, agent);
+	fwstate_config_fini(&config->cfg, agent);
 
 	cp_module_fini(cp_module);
 
@@ -455,7 +455,7 @@ fwstate_config_resolve_map(
 }
 
 int
-fwstate_config_cursor_create(
+fwstate_config_cursor_init(
 	struct cp_module *cp_module,
 	fwstate_cursor_t *cursor,
 	bool is_ipv6,

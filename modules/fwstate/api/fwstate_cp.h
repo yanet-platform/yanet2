@@ -17,7 +17,7 @@ struct layermap_list;
 typedef struct fwstate_outdated_layers fwstate_outdated_layers_t;
 
 struct cp_module *
-fwstate_module_config_init(
+fwstate_module_config_new(
 	struct agent *agent, const char *name, yanet_error **err
 );
 
@@ -85,7 +85,7 @@ fwstate_config_resolve_map(
 // Sets key_pos from the provided `index` parameter.
 // Returns 0 on success, -1 if map/layer cannot be resolved.
 int
-fwstate_config_cursor_create(
+fwstate_config_cursor_init(
 	struct cp_module *cp_module,
 	fwstate_cursor_t *cursor,
 	bool is_ipv6,

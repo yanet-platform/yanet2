@@ -134,7 +134,7 @@ func fwstateModuleConfig(memCtx testutils.MemoryContext) *C.struct_cp_module {
 	defer C.free(unsafe.Pointer(cName))
 
 	var cErr *C.yanet_error
-	cpModule := C.fwstate_module_config_init(agent, cName, &cErr)
+	cpModule := C.fwstate_module_config_new(agent, cName, &cErr)
 	if cpModule == nil {
 		panic(fmt.Sprintf("failed to initialize fwstate module config: %v", cerrors.FromC(unsafe.Pointer(cErr))))
 	}
