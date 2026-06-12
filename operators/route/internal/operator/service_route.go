@@ -195,6 +195,15 @@ func (m *RouteService) InsertRoute(
 	}
 
 	sourceID := req.RouteSourceID()
+
+	// Non-static sources use peer identity to distinguish routes: the unary
+	// InsertRoute API carries no peer, so consecutive AddUnicastRoute calls
+	// for the same (prefix, source) would silently replace one another.
+	// Reject the ambiguous case early rather than keeping only the last nexthop.
+	if sourceID != rib.RouteSourceStatic && len(nexthops) > 1 {
+		return nil, status.Error(codes.InvalidArgument, "multiple nexthops are only supported for static routes")
+	}
+
 	holder := m.getOrCreateRib(name)
 
 	for _, nexthopAddr := range nexthops {
