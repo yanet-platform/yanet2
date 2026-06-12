@@ -119,9 +119,9 @@ func (m *RouteService) ShowRoutes(
 				continue
 			}
 
+			bestMask := routesList.BestPerSourceMask()
 			for idx, r := range routesList.Routes {
-				isBest := idx == 0
-				response.Routes = append(response.Routes, operatorpb.FromRIBRoute(&r, isBest))
+				response.Routes = append(response.Routes, operatorpb.FromRIBRoute(&r, bestMask[idx]))
 			}
 		}
 	}
@@ -158,9 +158,9 @@ func (m *RouteService) LookupRoute(
 		Routes: make([]*operatorpb.Route, 0, len(routes.Routes)),
 	}
 
+	bestMask := routes.BestPerSourceMask()
 	for idx, r := range routes.Routes {
-		isBest := idx == 0
-		response.Routes = append(response.Routes, operatorpb.FromRIBRoute(&r, isBest))
+		response.Routes = append(response.Routes, operatorpb.FromRIBRoute(&r, bestMask[idx]))
 	}
 
 	return response, nil

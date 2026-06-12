@@ -134,6 +134,10 @@ message Route {
   uint32 as_path_len = 9;
   RouteSourceID source = 10;
   repeated LargeCommunity large_communities = 11;
+  // IsBest reports whether this route is a member of its source's best-cost
+  // group and is therefore selected for forwarding (installed into the FIB).
+  // All equal-cost members of the per-source best group carry this flag,
+  // including every static ECMP nexthop and every equal-cost BIRD path.
   bool is_best = 12;
 }
 

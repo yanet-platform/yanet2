@@ -133,6 +133,32 @@ func (m *RoutesList) Insert(route Route) bool {
 	return insertedIdx == -1
 }
 
+// BestPerSourceMask returns a boolean slice, aligned index-for-index with
+// Routes, where true means the route at that index is a member of its
+// source's best-cost group.
+//
+// The list is assumed to be sorted best-first by routeCompareRev. For each
+// source, the first route seen establishes the best cost; every subsequent
+// route of the same source with equal cost is also marked true. Routes
+// strictly worse than their source's best are false.
+func (m *RoutesList) BestPerSourceMask() []bool {
+	mask := make([]bool, len(m.Routes))
+	best := map[RouteSourceID]Route{}
+
+	for idx, r := range m.Routes {
+		b, seen := best[r.SourceID]
+		if !seen {
+			best[r.SourceID] = r
+			mask[idx] = true
+			continue
+		}
+		if routeCompare(r, b) == 0 {
+			mask[idx] = true
+		}
+	}
+	return mask
+}
+
 // BestPerSource returns the best-cost group of routes for each distinct
 // SourceID.
 //
@@ -142,18 +168,11 @@ func (m *RoutesList) Insert(route Route) bool {
 // slice preserves the original order, which is deterministic because the input
 // slice is always sorted.
 func (m *RoutesList) BestPerSource() []Route {
-	// best stores the lowest-cost route seen so far for each SourceID.
-	best := map[RouteSourceID]Route{}
+	mask := m.BestPerSourceMask()
 
 	var result []Route
-	for _, r := range m.Routes {
-		b, seen := best[r.SourceID]
-		if !seen {
-			best[r.SourceID] = r
-			result = append(result, r)
-			continue
-		}
-		if routeCompare(r, b) == 0 {
+	for idx, r := range m.Routes {
+		if mask[idx] {
 			result = append(result, r)
 		}
 	}

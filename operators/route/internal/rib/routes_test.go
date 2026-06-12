@@ -223,6 +223,112 @@ func TestBestPerSource(t *testing.T) {
 	})
 }
 
+// TestBestPerSourceMask verifies that BestPerSourceMask returns a mask
+// aligned with Routes that matches the set returned by BestPerSource.
+func TestBestPerSourceMask(t *testing.T) {
+	pfx := netip.MustParsePrefix("10.0.0.0/24")
+	unspec := netip.IPv6Unspecified()
+	p1 := netip.MustParseAddr("192.0.2.1")
+	p2 := netip.MustParseAddr("192.0.2.2")
+
+	t.Run("worse-Pref route masked false", func(t *testing.T) {
+		list := RoutesList{
+			Routes: []Route{
+				{Prefix: pfx, NextHop: netip.MustParseAddr("10.0.0.1"), Peer: p1, SourceID: RouteSourceBird, Pref: 200},
+				{Prefix: pfx, NextHop: netip.MustParseAddr("10.0.0.2"), Peer: p2, SourceID: RouteSourceBird, Pref: 100},
+			},
+		}
+		slices.SortFunc(list.Routes, routeCompareRev)
+
+		mask := list.BestPerSourceMask()
+		require.Len(t, mask, 2)
+		require.True(t, mask[0], "best route must be true")
+		require.False(t, mask[1], "worse-Pref route must be false")
+	})
+
+	t.Run("equal-cost peers all true", func(t *testing.T) {
+		list := RoutesList{
+			Routes: []Route{
+				{Prefix: pfx, NextHop: netip.MustParseAddr("10.0.0.1"), Peer: p1, SourceID: RouteSourceBird, Pref: 100},
+				{Prefix: pfx, NextHop: netip.MustParseAddr("10.0.0.2"), Peer: p2, SourceID: RouteSourceBird, Pref: 100},
+			},
+		}
+		slices.SortFunc(list.Routes, routeCompareRev)
+
+		mask := list.BestPerSourceMask()
+		require.Len(t, mask, 2)
+		require.True(t, mask[0])
+		require.True(t, mask[1])
+	})
+
+	t.Run("static and bird both sources true", func(t *testing.T) {
+		list := RoutesList{
+			Routes: []Route{
+				{Prefix: pfx, NextHop: netip.MustParseAddr("10.0.0.1"), Peer: p1, SourceID: RouteSourceBird, Pref: 200},
+				{Prefix: pfx, NextHop: netip.MustParseAddr("10.0.0.2"), Peer: unspec, SourceID: RouteSourceStatic, Pref: 100},
+			},
+		}
+		slices.SortFunc(list.Routes, routeCompareRev)
+
+		mask := list.BestPerSourceMask()
+		require.Len(t, mask, 2)
+		require.True(t, mask[0], "bird best must be true")
+		require.True(t, mask[1], "static best must be true")
+	})
+
+	t.Run("lower-MED wins higher-MED masked false", func(t *testing.T) {
+		list := RoutesList{
+			Routes: []Route{
+				{Prefix: pfx, NextHop: netip.MustParseAddr("10.0.0.1"), Peer: p1, SourceID: RouteSourceBird, Pref: 100, Med: 10},
+				{Prefix: pfx, NextHop: netip.MustParseAddr("10.0.0.2"), Peer: p2, SourceID: RouteSourceBird, Pref: 100, Med: 20},
+			},
+		}
+		slices.SortFunc(list.Routes, routeCompareRev)
+
+		mask := list.BestPerSourceMask()
+		require.Len(t, mask, 2)
+		require.True(t, mask[0], "lower-MED route must be true")
+		require.False(t, mask[1], "higher-MED route must be false")
+	})
+
+	t.Run("mask aligns with BestPerSource on all scenarios", func(t *testing.T) {
+		scenarios := []RoutesList{
+			{Routes: []Route{
+				{Prefix: pfx, NextHop: netip.MustParseAddr("10.0.0.1"), Peer: p1, SourceID: RouteSourceBird, Pref: 200},
+				{Prefix: pfx, NextHop: netip.MustParseAddr("10.0.0.2"), Peer: p2, SourceID: RouteSourceBird, Pref: 100},
+			}},
+			{Routes: []Route{
+				{Prefix: pfx, NextHop: netip.MustParseAddr("10.0.0.1"), Peer: p1, SourceID: RouteSourceBird, Pref: 100},
+				{Prefix: pfx, NextHop: netip.MustParseAddr("10.0.0.2"), Peer: p2, SourceID: RouteSourceBird, Pref: 100},
+			}},
+			{Routes: []Route{
+				{Prefix: pfx, NextHop: netip.MustParseAddr("10.0.0.1"), Peer: p1, SourceID: RouteSourceBird, Pref: 200},
+				{Prefix: pfx, NextHop: netip.MustParseAddr("10.0.0.2"), Peer: unspec, SourceID: RouteSourceStatic, Pref: 100},
+			}},
+		}
+
+		for _, list := range scenarios {
+			slices.SortFunc(list.Routes, routeCompareRev)
+			mask := list.BestPerSourceMask()
+			best := list.BestPerSource()
+
+			// Collect nexthops flagged true by the mask.
+			var masked []netip.Addr
+			for idx, r := range list.Routes {
+				if mask[idx] {
+					masked = append(masked, r.NextHop)
+				}
+			}
+			// Collect nexthops from BestPerSource.
+			var fromBest []netip.Addr
+			for _, r := range best {
+				fromBest = append(fromBest, r.NextHop)
+			}
+			require.Equal(t, fromBest, masked, "mask must agree with BestPerSource")
+		}
+	})
+}
+
 func TestRoutesListDeletion(t *testing.T) {
 	list := RoutesList{
 		Routes: []Route{

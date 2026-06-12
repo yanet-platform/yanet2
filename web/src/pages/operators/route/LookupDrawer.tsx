@@ -206,10 +206,10 @@ const LookupDrawer: React.FC<LookupDrawerProps> = ({
                                             {result.routes.map((r, idx) => (
                                                 <tr
                                                     key={idx}
-                                                    className={idx === 0 ? 'ro-lookup-table__best-row' : ''}
+                                                    className={r.is_best ? 'ro-lookup-table__best-row' : ''}
                                                 >
                                                     <td>
-                                                        <BestPill isBest={idx === 0} />
+                                                        <BestPill isBest={r.is_best ?? false} />
                                                     </td>
                                                     <td className="yn-cell-mono yn-cell-strong">
                                                         {r.prefix || '—'}
