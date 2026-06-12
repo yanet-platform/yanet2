@@ -69,8 +69,8 @@ message InsertRouteRequest {
   string name = 1;
   // The destination prefix of the route.
   string prefix = 2;
-  // The IP address of the nexthop router.
-  common.commonpb.v1.IPAddress nexthop_addr = 3;
+  // NexthopAddrs is the list of nexthop IP addresses.
+  repeated common.commonpb.v1.IPAddress nexthop_addrs = 3;
 
   // Indicates whether the RIB should be flushed to the FIB after this
   // request.
@@ -87,7 +87,8 @@ message InsertRouteResponse {}
 message DeleteRouteRequest {
   string name = 1;
   string prefix = 2;
-  common.commonpb.v1.IPAddress nexthop_addr = 3;
+  // NexthopAddrs is the list of nexthop IP addresses.
+  repeated common.commonpb.v1.IPAddress nexthop_addrs = 3;
 
   bool do_flush = 4;
   RouteSourceID source_id = 5;

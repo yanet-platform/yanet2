@@ -116,9 +116,9 @@ pub struct RouteInsertCmd {
     /// Configuration name.
     #[arg(long = "name", short = 'n')]
     pub name: String,
-    /// Next-hop IP address.
-    #[arg(long = "via")]
-    pub nexthop_addr: IpAddr,
+    /// Next-hop IP address(es); repeat to specify multiple nexthops for ECMP.
+    #[arg(long = "via", num_args = 1.., required = true)]
+    pub nexthop_addrs: Vec<IpAddr>,
     /// Route source type (static or bird). Defaults to static.
     #[arg(long = "source", default_value = "static")]
     pub source: RouteSource,
@@ -131,9 +131,9 @@ pub struct RouteRemoveCmd {
     /// Configuration name.
     #[arg(long = "name", short = 'n')]
     pub name: String,
-    /// Next-hop IP address.
-    #[arg(long = "via")]
-    pub nexthop_addr: IpAddr,
+    /// Next-hop IP address(es); repeat to specify multiple nexthops for ECMP.
+    #[arg(long = "via", num_args = 1.., required = true)]
+    pub nexthop_addrs: Vec<IpAddr>,
     /// Route source type (static or bird). Defaults to static.
     #[arg(long = "source", default_value = "static")]
     pub source: RouteSource,
@@ -312,10 +312,12 @@ impl RouteService {
     }
 
     pub async fn insert_route(&mut self, cmd: RouteInsertCmd) -> Result<(), Error> {
+        let nexthop_addrs = cmd.nexthop_addrs.iter().copied().map(Into::into).collect();
+
         let request = InsertRouteRequest {
             name: cmd.name.clone(),
             prefix: cmd.prefix.to_string(),
-            nexthop_addr: Some(cmd.nexthop_addr.into()),
+            nexthop_addrs,
             do_flush: true,
             source_id: cmd.source.to_proto().into(),
         };
@@ -325,12 +327,19 @@ impl RouteService {
             .await
             .map_err(self.map_err("insert"))?;
 
+        let via = cmd
+            .nexthop_addrs
+            .iter()
+            .map(|a| a.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+
         output::success(
             "insert",
             format_args!(
                 "inserted {} via {} in {} (source: {})",
                 cmd.prefix,
-                cmd.nexthop_addr,
+                via,
                 cmd.name,
                 cmd.source.as_str()
             ),
@@ -340,10 +349,12 @@ impl RouteService {
     }
 
     pub async fn remove_route(&mut self, cmd: RouteRemoveCmd) -> Result<(), Error> {
+        let nexthop_addrs = cmd.nexthop_addrs.iter().copied().map(Into::into).collect();
+
         let request = DeleteRouteRequest {
             name: cmd.name.clone(),
             prefix: cmd.prefix.to_string(),
-            nexthop_addr: Some(cmd.nexthop_addr.into()),
+            nexthop_addrs,
             do_flush: true,
             source_id: cmd.source.to_proto().into(),
         };
@@ -353,12 +364,19 @@ impl RouteService {
             .await
             .map_err(self.map_err("remove"))?;
 
+        let via = cmd
+            .nexthop_addrs
+            .iter()
+            .map(|a| a.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+
         output::success(
             "remove",
             format_args!(
                 "removed {} via {} from {} (source: {})",
                 cmd.prefix,
-                cmd.nexthop_addr,
+                via,
                 cmd.name,
                 cmd.source.as_str()
             ),

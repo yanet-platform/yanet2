@@ -8,7 +8,7 @@ import type { Command, RowAdapter, ShortcutSection, PagePaletteContribution } fr
 import { useListNavigation, usePageContribution, useTabCycle } from '../../../hooks';
 import { API } from '../../../api';
 import { toaster, parseIPAddress } from '../../../utils';
-import { stringToIPAddress, ipAddressToString } from '../../../utils/netip';
+import { stringToIPAddress, ipAddressToString, type IPAddressWire } from '../../../utils/netip';
 import { RouteSourceID, type Route } from '../../../api/routes';
 import { useRIB } from './useRIB';
 import { RIBTable } from './RIBTable';
@@ -138,20 +138,21 @@ const RoutePage: React.FC = () => {
         setDrawer((prev) => ({ ...prev, open: false }));
     }, []);
 
-    const handleSubmitRoute = useCallback(async (params: { prefix: string; nexthopAddr: string; doFlush: boolean }): Promise<void> => {
-        const nexthopIp = stringToIPAddress(params.nexthopAddr);
-        if (!nexthopIp) {
-            toaster.error('route-nexthop-error', 'Invalid next-hop address');
+    const handleSubmitRoute = useCallback(async (params: { prefix: string; nexthopAddrs: string[]; doFlush: boolean }): Promise<void> => {
+        const parsed = params.nexthopAddrs.map((addr) => stringToIPAddress(addr));
+        if (parsed.some((ip) => !ip) || parsed.length === 0) {
+            toaster.error('route-nexthop-error', 'One or more next-hop addresses are invalid');
             return;
         }
+        const nexthopIps = parsed as IPAddressWire[];
 
         const isEdit = drawer.mode === 'edit';
         const original = drawer.route;
-        const newNexthopStr = ipAddressToString(nexthopIp);
+        const newNexthopStr = ipAddressToString(nexthopIps[0]);
         const originalNexthopStr = ipAddressToString(original?.next_hop);
         const ops = planRouteSubmit(
             drawer.mode,
-            { prefix: params.prefix, nexthopIp, doFlush: params.doFlush },
+            { prefix: params.prefix, nexthopIps, doFlush: params.doFlush },
             newNexthopStr,
             original,
             originalNexthopStr,
@@ -163,7 +164,7 @@ const RoutePage: React.FC = () => {
                     await API.route.deleteRoute({
                         name: currentConfig,
                         prefix: op.prefix,
-                        nexthop_addr: op.nexthop,
+                        nexthop_addrs: [op.nexthop],
                         do_flush: false,
                         source_id: RouteSourceID.STATIC,
                     });
@@ -171,7 +172,7 @@ const RoutePage: React.FC = () => {
                     await API.route.insertRoute({
                         name: currentConfig,
                         prefix: op.prefix,
-                        nexthop_addr: op.nexthop,
+                        nexthop_addrs: op.nexthops,
                         do_flush: op.doFlush,
                         source_id: RouteSourceID.STATIC,
                     });
@@ -195,7 +196,7 @@ const RoutePage: React.FC = () => {
             await API.route.deleteRoute({
                 name: currentConfig,
                 prefix: route.prefix,
-                nexthop_addr: route.next_hop,
+                nexthop_addrs: [route.next_hop],
                 do_flush: true,
                 source_id: RouteSourceID.STATIC,
             });
@@ -243,7 +244,7 @@ const RoutePage: React.FC = () => {
                 await API.route.deleteRoute({
                     name: currentConfig,
                     prefix: route.prefix,
-                    nexthop_addr: route.next_hop,
+                    nexthop_addrs: [route.next_hop],
                     do_flush: true,
                     source_id: RouteSourceID.STATIC,
                 });

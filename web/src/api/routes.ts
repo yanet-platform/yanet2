@@ -47,7 +47,7 @@ export interface ShowRoutesResponse {
 export interface InsertRouteRequest {
     name?: string;
     prefix?: string;
-    nexthop_addr?: IPAddressWire;
+    nexthop_addrs?: IPAddressWire[];
     do_flush?: boolean;
     source_id?: RouteSourceID;
 }
@@ -58,7 +58,7 @@ export interface InsertRouteResponse {
 export interface DeleteRouteRequest {
     name?: string;
     prefix?: string;
-    nexthop_addr?: IPAddressWire;
+    nexthop_addrs?: IPAddressWire[];
     do_flush?: boolean;
     source_id?: RouteSourceID;
 }

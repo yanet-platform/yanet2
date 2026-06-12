@@ -48,6 +48,58 @@
     @include toggle-chip-badge;
 }
 
+.ro-nexthop-section-hint {
+    margin-left: 8px;
+    font-size: 11px;
+    font-weight: 400;
+    color: var(--yn-text-3);
+    text-transform: none;
+    letter-spacing: 0;
+}
+
+.ro-nexthop-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.ro-nexthop-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+
+    &__field {
+        flex: 1;
+        margin: 0 !important;
+    }
+
+    &__remove {
+        flex-shrink: 0;
+        margin-top: 22px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 28px;
+        height: 28px;
+        border: none;
+        background: none;
+        border-radius: var(--yn-r-sm);
+        color: var(--yn-text-3);
+        cursor: pointer;
+        transition: color 0.1s, background 0.1s;
+
+        &:hover {
+            color: var(--g-color-text-danger);
+            background: color-mix(in srgb, var(--g-color-text-danger) 10%, transparent);
+        }
+    }
+}
+
+.ro-nexthop-add-row {
+    display: flex;
+}
+
 // ─── Lookup drawer ─────────────────────────────────────────────────────────────
 
 .ro-lookup-drawer {

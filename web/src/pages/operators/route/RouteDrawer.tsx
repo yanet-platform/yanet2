@@ -1,5 +1,6 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { Switch } from '@gravity-ui/uikit';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Button, Icon, Switch } from '@gravity-ui/uikit';
+import { Plus, TrashBin } from '@gravity-ui/icons';
 import { DraftItemDrawer } from '../../../components/draft';
 import { ipAddressToString } from '../../../utils/netip';
 import { validatePrefix, validateNexthop } from './utils';
@@ -12,11 +13,11 @@ export interface RouteDrawerProps {
     route: Route | null;
     configName: string;
     onClose: () => void;
-    onSubmit: (params: { prefix: string; nexthopAddr: string; doFlush: boolean }) => Promise<void>;
+    onSubmit: (params: { prefix: string; nexthopAddrs: string[]; doFlush: boolean }) => Promise<void>;
     onDelete?: (route: Route) => Promise<void>;
 }
 
-/** Drawer for adding or editing a single RIB route. */
+/** Drawer for adding or editing a RIB route with one or more ECMP nexthops. */
 const RouteDrawer: React.FC<RouteDrawerProps> = ({
     open,
     mode,
@@ -27,28 +28,52 @@ const RouteDrawer: React.FC<RouteDrawerProps> = ({
     onDelete,
 }) => {
     const [prefix, setPrefix] = useState('');
-    const [nexthopAddr, setNexthopAddr] = useState('');
+    const [nexthopRows, setNexthopRows] = useState<string[]>(['']);
     const [doFlush, setDoFlush] = useState(false);
     const [submitting, setSubmitting] = useState(false);
 
     useEffect(() => {
         if (open) {
             setPrefix(mode === 'edit' && route ? (route.prefix || '') : '');
-            setNexthopAddr(mode === 'edit' && route ? ipAddressToString(route.next_hop) : '');
+            setNexthopRows(mode === 'edit' && route ? [ipAddressToString(route.next_hop)] : ['']);
             setDoFlush(false);
             setSubmitting(false);
         }
     }, [open, mode, route?.prefix, route?.next_hop]);
 
+    const nexthopErrors = nexthopRows.map((v) => validateNexthop(v));
     const prefixError = validatePrefix(prefix);
-    const nexthopError = validateNexthop(nexthopAddr);
-    const canSubmit = prefix.trim() !== '' && nexthopAddr.trim() !== '' && !prefixError && !nexthopError && !submitting;
+
+    const allFilled = nexthopRows.length > 0
+        && nexthopRows.every((v) => v.trim() !== '')
+        && nexthopErrors.every((e) => !e);
+
+    const canSubmit = prefix.trim() !== ''
+        && !prefixError
+        && allFilled
+        && !submitting;
+
+    const handleChangeRow = useCallback((idx: number, value: string): void => {
+        setNexthopRows((prev) => prev.map((v, i) => (i === idx ? value : v)));
+    }, []);
+
+    const handleAddRow = useCallback((): void => {
+        setNexthopRows((prev) => [...prev, '']);
+    }, []);
+
+    const handleRemoveRow = useCallback((idx: number): void => {
+        setNexthopRows((prev) => prev.length > 1 ? prev.filter((_, i) => i !== idx) : prev);
+    }, []);
 
     const handleApply = async (): Promise<void> => {
         if (!canSubmit) return;
         setSubmitting(true);
         try {
-            await onSubmit({ prefix: prefix.trim(), nexthopAddr: nexthopAddr.trim(), doFlush });
+            await onSubmit({
+                prefix: prefix.trim(),
+                nexthopAddrs: nexthopRows.map((v) => v.trim()),
+                doFlush,
+            });
             onClose();
         } finally {
             setSubmitting(false);
@@ -115,21 +140,46 @@ const RouteDrawer: React.FC<RouteDrawerProps> = ({
             </section>
 
             <section className="yn-section">
-                <div className="yn-section-h">Next Hop</div>
+                <div className="yn-section-h">
+                    Next Hops
+                    <span className="ro-nexthop-section-hint">ECMP — one per row</span>
+                </div>
                 <div className="yn-section__body">
-                    <div className="yn-field">
-                        <label className="yn-field__label">
-                            Next Hop IP <span className="yn-field__req">*</span>
-                        </label>
-                        <input
-                            className={`yn-input yn-input--mono${nexthopError ? ' yn-input--invalid' : ''}`}
-                            value={nexthopAddr}
-                            placeholder="192.168.1.1 or 2001:db8::1"
-                            onChange={(e) => setNexthopAddr(e.target.value)}
-                        />
-                        {nexthopError && (
-                            <span className="yn-field__hint yn-field__error">{nexthopError}</span>
-                        )}
+                    <div className="ro-nexthop-list">
+                        {nexthopRows.map((val, idx) => (
+                            <div key={idx} className="ro-nexthop-row">
+                                <div className="yn-field ro-nexthop-row__field">
+                                    <label className="yn-field__label">
+                                        Next Hop IP <span className="yn-field__req">*</span>
+                                    </label>
+                                    <input
+                                        className={`yn-input yn-input--mono${nexthopErrors[idx] ? ' yn-input--invalid' : ''}`}
+                                        value={val}
+                                        placeholder="192.168.1.1 or 2001:db8::1"
+                                        onChange={(e) => handleChangeRow(idx, e.target.value)}
+                                    />
+                                    {nexthopErrors[idx] && (
+                                        <span className="yn-field__hint yn-field__error">{nexthopErrors[idx]}</span>
+                                    )}
+                                </div>
+                                {nexthopRows.length > 1 && (
+                                    <button
+                                        type="button"
+                                        className="ro-nexthop-row__remove"
+                                        title="Remove this nexthop"
+                                        onClick={() => handleRemoveRow(idx)}
+                                    >
+                                        <Icon data={TrashBin} size={14} />
+                                    </button>
+                                )}
+                            </div>
+                        ))}
+                    </div>
+                    <div className="ro-nexthop-add-row">
+                        <Button view="outlined" size="s" onClick={handleAddRow}>
+                            <Icon data={Plus} size={14} />
+                            Add nexthop
+                        </Button>
                     </div>
                 </div>
             </section>

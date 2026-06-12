@@ -5,17 +5,18 @@ import type { RouteSortableColumn, IPFamily } from './types';
 
 export interface RouteSubmitParams {
     prefix: string;
-    nexthopIp: IPAddressWire;
+    nexthopIps: IPAddressWire[];
     doFlush: boolean;
 }
 
 export type RouteSubmitOp =
     | { type: 'delete'; prefix: string; nexthop: IPAddressWire }
-    | { type: 'insert'; prefix: string; nexthop: IPAddressWire; doFlush: boolean };
+    | { type: 'insert'; prefix: string; nexthops: IPAddressWire[]; doFlush: boolean };
 
 /** Plan API operations for submitting a route. In add mode, just insert.
  *
- * In edit mode, delete the original first when its key changed. */
+ * In edit mode, delete the original first when its key changed. The insert
+ * carries all nexthop addresses for ECMP. */
 export const planRouteSubmit = (
     mode: 'add' | 'edit',
     params: RouteSubmitParams,
@@ -30,7 +31,7 @@ export const planRouteSubmit = (
     if (keyChanged && original?.prefix && original.next_hop) {
         ops.push({ type: 'delete', prefix: original.prefix, nexthop: original.next_hop });
     }
-    ops.push({ type: 'insert', prefix: params.prefix, nexthop: params.nexthopIp, doFlush: params.doFlush });
+    ops.push({ type: 'insert', prefix: params.prefix, nexthops: params.nexthopIps, doFlush: params.doFlush });
     return ops;
 };
 

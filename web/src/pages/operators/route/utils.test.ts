@@ -10,10 +10,10 @@ import type { Route } from '../../../api/routes';
 describe('planRouteSubmit', () => {
     const ip = (s: string) => stringToIPAddress(s)!;
 
-    it('add mode: produces a single insert op', () => {
+    it('add mode: produces a single insert op with one nexthop', () => {
         const ops = planRouteSubmit(
             'add',
-            { prefix: '10.0.0.0/8', nexthopIp: ip('192.168.1.1'), doFlush: false },
+            { prefix: '10.0.0.0/8', nexthopIps: [ip('192.168.1.1')], doFlush: false },
             '192.168.1.1',
             null,
             '',
@@ -22,7 +22,23 @@ describe('planRouteSubmit', () => {
         expect(ops[0].type).toBe('insert');
         if (ops[0].type === 'insert') {
             expect(ops[0].prefix).toBe('10.0.0.0/8');
+            expect(ops[0].nexthops).toHaveLength(1);
             expect(ops[0].doFlush).toBe(false);
+        }
+    });
+
+    it('add mode: produces a single insert op with multiple ECMP nexthops', () => {
+        const ops = planRouteSubmit(
+            'add',
+            { prefix: '10.0.0.0/8', nexthopIps: [ip('192.168.1.1'), ip('192.168.1.2')], doFlush: false },
+            '192.168.1.1',
+            null,
+            '',
+        );
+        expect(ops).toHaveLength(1);
+        expect(ops[0].type).toBe('insert');
+        if (ops[0].type === 'insert') {
+            expect(ops[0].nexthops).toHaveLength(2);
         }
     });
 
@@ -30,7 +46,7 @@ describe('planRouteSubmit', () => {
         const original: Route = { prefix: '10.0.0.0/8', next_hop: ip('192.168.1.1') };
         const ops = planRouteSubmit(
             'edit',
-            { prefix: '10.0.0.0/8', nexthopIp: ip('192.168.1.1'), doFlush: false },
+            { prefix: '10.0.0.0/8', nexthopIps: [ip('192.168.1.1')], doFlush: false },
             '192.168.1.1',
             original,
             '192.168.1.1',
@@ -43,7 +59,7 @@ describe('planRouteSubmit', () => {
         const original: Route = { prefix: '10.0.0.0/8', next_hop: ip('192.168.1.1') };
         const ops = planRouteSubmit(
             'edit',
-            { prefix: '172.16.0.0/12', nexthopIp: ip('192.168.1.1'), doFlush: false },
+            { prefix: '172.16.0.0/12', nexthopIps: [ip('192.168.1.1')], doFlush: false },
             '192.168.1.1',
             original,
             '192.168.1.1',
@@ -63,7 +79,7 @@ describe('planRouteSubmit', () => {
         const original: Route = { prefix: '10.0.0.0/8', next_hop: ip('192.168.1.1') };
         const ops = planRouteSubmit(
             'edit',
-            { prefix: '10.0.0.0/8', nexthopIp: ip('10.0.0.1'), doFlush: true },
+            { prefix: '10.0.0.0/8', nexthopIps: [ip('10.0.0.1')], doFlush: true },
             '10.0.0.1',
             original,
             '192.168.1.1',
@@ -80,7 +96,7 @@ describe('planRouteSubmit', () => {
         const original: Route = { prefix: '10.0.0.0/8', next_hop: ip('192.168.1.1') };
         const ops = planRouteSubmit(
             'edit',
-            { prefix: '172.16.0.0/12', nexthopIp: ip('10.0.0.1'), doFlush: false },
+            { prefix: '172.16.0.0/12', nexthopIps: [ip('10.0.0.1')], doFlush: false },
             '10.0.0.1',
             original,
             '192.168.1.1',
@@ -94,7 +110,7 @@ describe('planRouteSubmit', () => {
         const original: Route = { next_hop: ip('192.168.1.1') };
         const ops = planRouteSubmit(
             'edit',
-            { prefix: '10.0.0.0/8', nexthopIp: ip('192.168.1.1'), doFlush: false },
+            { prefix: '10.0.0.0/8', nexthopIps: [ip('192.168.1.1')], doFlush: false },
             '192.168.1.1',
             original,
             '192.168.1.1',
@@ -107,7 +123,7 @@ describe('planRouteSubmit', () => {
         const original: Route = { prefix: '10.0.0.0/8' };
         const ops = planRouteSubmit(
             'edit',
-            { prefix: '172.16.0.0/12', nexthopIp: ip('192.168.1.1'), doFlush: false },
+            { prefix: '172.16.0.0/12', nexthopIps: [ip('192.168.1.1')], doFlush: false },
             '192.168.1.1',
             original,
             '',
