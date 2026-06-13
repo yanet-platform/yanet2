@@ -10,4 +10,11 @@ import "common/readinesspb/v1/readiness.proto";
 service ReadinessService {
   // Ready returns the current readiness state for all scopes.
   rpc Ready(common.readinesspb.v1.ReadyRequest) returns (common.readinesspb.v1.ReadyResponse);
+
+  // Watch streams readiness state changes.
+  //
+  // The first message carries the current state of every selected scope;
+  // each subsequent message carries only the scopes whose state or reason
+  // changed.
+  rpc Watch(common.readinesspb.v1.ReadyRequest) returns (stream common.readinesspb.v1.ReadyResponse);
 }

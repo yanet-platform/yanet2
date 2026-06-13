@@ -46,6 +46,10 @@ pub struct Cmd {
     /// Be verbose: shows debug log lines and raw gRPC error details.
     #[clap(short, action = ArgAction::Count, global = true)]
     pub verbose: u8,
+    /// Stream readiness changes until interrupted instead of exiting after one
+    /// snapshot.
+    #[arg(long, default_value_t = false)]
+    pub watch: bool,
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -66,8 +70,17 @@ pub async fn main() {
     }
 }
 
-/// Run the readiness probe.
+/// Run the readiness probe, dispatching to one-shot or streaming mode.
 async fn run(cmd: Cmd) -> Result<bool, Error> {
+    if cmd.watch {
+        run_watch(cmd).await.map(|()| true)
+    } else {
+        run_once(cmd).await
+    }
+}
+
+/// Run a single unary `Ready` call and return whether all scopes are ready.
+async fn run_once(cmd: Cmd) -> Result<bool, Error> {
     let response: ReadyResponse = ync::client::invoke_unary(
         &cmd.connection,
         "ready",
@@ -132,6 +145,32 @@ async fn run(cmd: Cmd) -> Result<bool, Error> {
     );
 
     Ok(all_ready)
+}
+
+/// Stream readiness updates via `Watch` until the server closes the connection.
+///
+/// The first message is a full snapshot of all selected scopes; each
+/// subsequent message carries only the scopes that changed. Returns `Ok(())`
+/// on clean stream close.
+async fn run_watch(cmd: Cmd) -> Result<(), Error> {
+    ync::client::invoke_server_stream::<ReadyRequest, ReadyResponse, _>(
+        &cmd.connection,
+        "ready",
+        &cmd.name,
+        "Watch",
+        ReadyRequest { scopes: cmd.scopes.clone() },
+        |resp| {
+            let mut rows: Vec<ReadinessRow> = resp.scopes.iter().map(ReadinessRow::from).collect();
+            rows.sort_by(|a, b| a.scope.cmp(&b.scope));
+
+            output::data(&resp.scopes, resp.scopes.is_empty(), format_args!("no scopes"), || {
+                if !rows.is_empty() {
+                    print_readiness_table(rows);
+                }
+            });
+        },
+    )
+    .await
 }
 
 /// Wraps a readiness state for colored display in the table.

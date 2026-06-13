@@ -1,6 +1,8 @@
 package readiness
 
 import (
+	"context"
+	"errors"
 	"sync"
 	"time"
 
@@ -9,6 +11,12 @@ import (
 
 	readinesspb "github.com/yanet-platform/yanet2/common/readinesspb/v1"
 )
+
+// readinessWatchBuffer is the per-subscriber channel capacity.
+const readinessWatchBuffer = 16
+
+// errSlowConsumer is returned by Watch when a subscriber's buffer overflows.
+var errSlowConsumer = errors.New("readiness watch subscriber too slow")
 
 // scopeState holds the mutable readiness state for one scope.
 type scopeState struct {
@@ -19,6 +27,14 @@ type scopeState struct {
 	lastTransitionTime time.Time
 }
 
+// subscriber holds state for one active Watch call.
+type subscriber struct {
+	// filter is the set of scope names this subscriber wants; empty means all.
+	filter  map[string]struct{}
+	ch      chan *readinesspb.ReadyResponse
+	dropped chan struct{}
+}
+
 // Tracker tracks readiness state across named scopes.
 //
 // Each scope is an independent readiness dimension (e.g. "neighbours", "rib",
@@ -27,6 +43,7 @@ type scopeState struct {
 type Tracker struct {
 	mu           sync.Mutex
 	scopes       map[string]*scopeState
+	subscribers  map[*subscriber]struct{}
 	latchOnDrain bool
 	drained      bool
 	log          *zap.Logger
@@ -86,6 +103,7 @@ func NewTracker(scopeNames []string, options ...Option) *Tracker {
 
 	return &Tracker{
 		scopes:       scopes,
+		subscribers:  map[*subscriber]struct{}{},
 		latchOnDrain: opts.LatchOnDrain,
 		log:          opts.Log,
 	}
@@ -110,6 +128,110 @@ func (m *Tracker) logTransition(name string, prev, next readinesspb.State, reaso
 		}
 	}
 	m.log.Info("readiness scope transitioned", fields...)
+}
+
+// reasonEqual reports whether two Reason values are equal by Code and Message.
+func reasonEqual(a, b *readinesspb.Reason) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return a.GetCode() == b.GetCode() && a.GetMessage() == b.GetMessage()
+}
+
+// scopeToProto converts a scopeState to its proto representation.
+func scopeToProto(s *scopeState) *readinesspb.Scope {
+	var reasons []*readinesspb.Reason
+	if s.reason != nil {
+		reasons = []*readinesspb.Reason{s.reason}
+	}
+	scope := &readinesspb.Scope{
+		Name:    s.name,
+		State:   s.state,
+		Reasons: reasons,
+	}
+	if !s.observedAt.IsZero() {
+		scope.ObservedAt = timestamppb.New(s.observedAt)
+		scope.LastTransitionTime = timestamppb.New(s.lastTransitionTime)
+	}
+	return scope
+}
+
+// snapshotLocked builds a ReadyResponse from the current state of all scopes
+// matching filter. An empty filter returns all scopes. Caller must hold m.mu.
+func (m *Tracker) snapshotLocked(filter map[string]struct{}) *readinesspb.ReadyResponse {
+	var out []*readinesspb.Scope
+	for _, s := range m.scopes {
+		if len(filter) > 0 {
+			if _, ok := filter[s.name]; !ok {
+				continue
+			}
+		}
+		out = append(out, scopeToProto(s))
+	}
+	return &readinesspb.ReadyResponse{Scopes: out}
+}
+
+// notifySubscribersLocked fans out changed scopes to all registered subscribers.
+//
+// Each subscriber receives only the subset of changed scopes that match its
+// filter. The send is non-blocking: a subscriber whose channel is full is
+// dropped (its dropped channel is closed and it is removed from the registry).
+// Caller must hold m.mu.
+func (m *Tracker) notifySubscribersLocked(changed []*readinesspb.Scope) {
+	if len(m.subscribers) == 0 || len(changed) == 0 {
+		return
+	}
+
+	for sub := range m.subscribers {
+		var matching []*readinesspb.Scope
+		for _, sc := range changed {
+			if len(sub.filter) == 0 {
+				matching = append(matching, sc)
+				continue
+			}
+			if _, ok := sub.filter[sc.Name]; ok {
+				matching = append(matching, sc)
+			}
+		}
+		if len(matching) == 0 {
+			continue
+		}
+		resp := &readinesspb.ReadyResponse{Scopes: matching}
+		select {
+		case sub.ch <- resp:
+		default:
+			close(sub.dropped)
+			delete(m.subscribers, sub)
+		}
+	}
+}
+
+// subscribe registers a new subscriber and atomically captures the initial
+// snapshot. It returns the subscriber and the snapshot to send as the first
+// streamed message.
+func (m *Tracker) subscribe(filter map[string]struct{}) (*subscriber, *readinesspb.ReadyResponse) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	sub := &subscriber{
+		filter:  filter,
+		ch:      make(chan *readinesspb.ReadyResponse, readinessWatchBuffer),
+		dropped: make(chan struct{}),
+	}
+	m.subscribers[sub] = struct{}{}
+	snapshot := m.snapshotLocked(filter)
+	return sub, snapshot
+}
+
+// unsubscribe removes a subscriber from the registry. It is idempotent.
+func (m *Tracker) unsubscribe(sub *subscriber) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	delete(m.subscribers, sub)
 }
 
 // Observe records the outcome of one apply attempt for the named gateway.
@@ -151,7 +273,8 @@ func (m *Tracker) Observe(gatewayID string, err error) {
 		}
 	}
 
-	prev := s.state
+	prevState := s.state
+	prevReason := s.reason
 	if s.observedAt.IsZero() || s.state != next {
 		s.lastTransitionTime = now
 	}
@@ -159,7 +282,11 @@ func (m *Tracker) Observe(gatewayID string, err error) {
 	s.reason = reason
 	s.observedAt = now
 
-	m.logTransition(s.name, prev, next, reason)
+	m.logTransition(s.name, prevState, next, reason)
+
+	if prevState != next || !reasonEqual(prevReason, reason) {
+		m.notifySubscribersLocked([]*readinesspb.Scope{scopeToProto(s)})
+	}
 }
 
 // Set transitions the named scope to the given state with no reason.
@@ -196,7 +323,8 @@ func (m *Tracker) set(scope string, state readinesspb.State, reason *readinesspb
 		m.scopes[scope] = s
 	}
 
-	prev := s.state
+	prevState := s.state
+	prevReason := s.reason
 	if s.observedAt.IsZero() || s.state != state {
 		s.lastTransitionTime = now
 	}
@@ -204,7 +332,11 @@ func (m *Tracker) set(scope string, state readinesspb.State, reason *readinesspb
 	s.reason = reason
 	s.observedAt = now
 
-	m.logTransition(s.name, prev, state, reason)
+	m.logTransition(s.name, prevState, state, reason)
+
+	if prevState != state || !reasonEqual(prevReason, reason) {
+		m.notifySubscribersLocked([]*readinesspb.Scope{scopeToProto(s)})
+	}
 }
 
 // Touch advances observed_at for an existing scope without changing its state.
@@ -236,8 +368,11 @@ func (m *Tracker) Drain() {
 
 	now := time.Now()
 	reason := &readinesspb.Reason{Code: "SHUTTING_DOWN"}
+
+	var changed []*readinesspb.Scope
 	for _, s := range m.scopes {
-		prev := s.state
+		prevState := s.state
+		prevReason := s.reason
 		if s.state != readinesspb.State_STATE_NOT_READY {
 			s.lastTransitionTime = now
 		}
@@ -245,8 +380,14 @@ func (m *Tracker) Drain() {
 		s.reason = reason
 		s.observedAt = now
 
-		m.logTransition(s.name, prev, readinesspb.State_STATE_NOT_READY, reason)
+		m.logTransition(s.name, prevState, readinesspb.State_STATE_NOT_READY, reason)
+
+		if prevState != readinesspb.State_STATE_NOT_READY || !reasonEqual(prevReason, reason) {
+			changed = append(changed, scopeToProto(s))
+		}
 	}
+
+	m.notifySubscribersLocked(changed)
 
 	if m.latchOnDrain {
 		m.drained = true
@@ -264,29 +405,50 @@ func (m *Tracker) Ready(req *readinesspb.ReadyRequest) *readinesspb.ReadyRespons
 		filter[name] = struct{}{}
 	}
 
-	var out []*readinesspb.Scope
-	for _, s := range m.scopes {
-		if len(filter) > 0 {
-			if _, ok := filter[s.name]; !ok {
-				continue
-			}
-		}
+	return m.snapshotLocked(filter)
+}
 
-		var reasons []*readinesspb.Reason
-		if s.reason != nil {
-			reasons = []*readinesspb.Reason{s.reason}
-		}
-		scope := &readinesspb.Scope{
-			Name:    s.name,
-			State:   s.state,
-			Reasons: reasons,
-		}
-		if !s.observedAt.IsZero() {
-			scope.ObservedAt = timestamppb.New(s.observedAt)
-			scope.LastTransitionTime = timestamppb.New(s.lastTransitionTime)
-		}
-		out = append(out, scope)
+// Watch streams readiness state changes to the caller via send.
+//
+// The first message carries the current state of every scope matching the
+// request filter (same semantics as Ready). Each subsequent message carries
+// only the scopes whose state or reason changed since the previous message.
+// A pure observed_at refresh (Touch) never emits. A no-op mutation (same
+// state and same reason) never emits.
+//
+// Watch returns nil on ctx cancellation, returns the send error on stream
+// write failure, and returns errSlowConsumer if the subscriber's buffer
+// overflows.
+func (m *Tracker) Watch(
+	ctx context.Context,
+	req *readinesspb.ReadyRequest,
+	send func(*readinesspb.ReadyResponse) error,
+) error {
+	filter := map[string]struct{}{}
+	for _, name := range req.GetScopes() {
+		filter[name] = struct{}{}
 	}
 
-	return &readinesspb.ReadyResponse{Scopes: out}
+	sub, snapshot := m.subscribe(filter)
+	defer m.unsubscribe(sub)
+
+	if err := send(snapshot); err != nil {
+		return err
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-sub.dropped:
+			return errSlowConsumer
+		case resp, ok := <-sub.ch:
+			if !ok {
+				return errSlowConsumer
+			}
+			if err := send(resp); err != nil {
+				return err
+			}
+		}
+	}
 }

@@ -1,6 +1,7 @@
 package readiness_test
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest/observer"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/yanet-platform/yanet2/common/go/readiness"
 	readinesspb "github.com/yanet-platform/yanet2/common/readinesspb/v1"
@@ -537,4 +539,342 @@ func TestTracker_DrainLatch_SetAfterDrainIsNoop(t *testing.T) {
 			}
 		})
 	}
+}
+
+// collectWatch starts a Watch goroutine that feeds received messages into a
+// buffered channel. The caller reads from the returned channel to inspect
+// messages in order. The goroutine terminates when ctx is cancelled, which
+// also unblocks the returned errgroup entry. eg must be waited on by the
+// caller after cancelling ctx.
+func collectWatch(
+	t *testing.T,
+	ctx context.Context,
+	tracker *readiness.Tracker,
+	req *readinesspb.ReadyRequest,
+	bufSize int,
+) (<-chan *readinesspb.ReadyResponse, *errgroup.Group) {
+	t.Helper()
+	ch := make(chan *readinesspb.ReadyResponse, bufSize)
+	eg, ctx2 := errgroup.WithContext(ctx)
+	eg.Go(func() error {
+		return tracker.Watch(ctx2, req, func(resp *readinesspb.ReadyResponse) error {
+			ch <- resp
+			return nil
+		})
+	})
+	return ch, eg
+}
+
+// scopeByName finds a Scope by name in a ReadyResponse, returning nil if not
+// present.
+func scopeByName(resp *readinesspb.ReadyResponse, name string) *readinesspb.Scope {
+	for _, s := range resp.GetScopes() {
+		if s.GetName() == name {
+			return s
+		}
+	}
+	return nil
+}
+
+// recvTimeout reads one message from ch, failing the test if nothing arrives
+// within the given timeout.
+func recvTimeout(t *testing.T, ch <-chan *readinesspb.ReadyResponse, timeout time.Duration) *readinesspb.ReadyResponse {
+	t.Helper()
+	select {
+	case msg := <-ch:
+		return msg
+	case <-time.After(timeout):
+		t.Fatal("timed out waiting for Watch message")
+		return nil
+	}
+}
+
+// assertNoMsg asserts that no message arrives on ch within the given window.
+func assertNoMsg(t *testing.T, ch <-chan *readinesspb.ReadyResponse, window time.Duration) {
+	t.Helper()
+	select {
+	case msg := <-ch:
+		t.Fatalf("unexpected Watch message: %v", msg)
+	case <-time.After(window):
+	}
+}
+
+const watchTimeout = 200 * time.Millisecond
+const watchQuietWindow = 30 * time.Millisecond
+
+func TestWatch_InitialSnapshot_AllScopes(t *testing.T) {
+	r := readiness.NewTracker([]string{"gw-a", "gw-b"})
+	r.Set("gw-a", readinesspb.State_STATE_READY)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	ch, eg := collectWatch(t, ctx, r, &readinesspb.ReadyRequest{}, 8)
+
+	snap := recvTimeout(t, ch, watchTimeout)
+	require.Len(t, snap.Scopes, 2)
+
+	sa := scopeByName(snap, "gw-a")
+	require.NotNil(t, sa)
+	assert.Equal(t, readinesspb.State_STATE_READY, sa.State)
+
+	sb := scopeByName(snap, "gw-b")
+	require.NotNil(t, sb)
+	assert.Equal(t, readinesspb.State_STATE_UNKNOWN, sb.State)
+
+	cancel()
+	require.NoError(t, eg.Wait())
+}
+
+func TestWatch_InitialSnapshot_HonorsFilter(t *testing.T) {
+	r := readiness.NewTracker([]string{"gw-a", "gw-b", "gw-c"})
+	r.Set("gw-a", readinesspb.State_STATE_READY)
+	r.Set("gw-b", readinesspb.State_STATE_NOT_READY)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	ch, eg := collectWatch(t, ctx, r, &readinesspb.ReadyRequest{Scopes: []string{"gw-a"}}, 8)
+
+	snap := recvTimeout(t, ch, watchTimeout)
+	require.Len(t, snap.Scopes, 1)
+	assert.Equal(t, "gw-a", snap.Scopes[0].Name)
+	assert.Equal(t, readinesspb.State_STATE_READY, snap.Scopes[0].State)
+
+	cancel()
+	require.NoError(t, eg.Wait())
+}
+
+func TestWatch_StateChange_EmitsDelta(t *testing.T) {
+	r := readiness.NewTracker([]string{"gw-a", "gw-b"})
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	ch, eg := collectWatch(t, ctx, r, &readinesspb.ReadyRequest{}, 8)
+
+	// Consume the initial snapshot.
+	recvTimeout(t, ch, watchTimeout)
+
+	r.Set("gw-a", readinesspb.State_STATE_READY)
+
+	delta := recvTimeout(t, ch, watchTimeout)
+	require.Len(t, delta.Scopes, 1)
+	assert.Equal(t, "gw-a", delta.Scopes[0].Name)
+	assert.Equal(t, readinesspb.State_STATE_READY, delta.Scopes[0].State)
+
+	cancel()
+	require.NoError(t, eg.Wait())
+}
+
+func TestWatch_ReasonOnlyChange_EmitsDelta(t *testing.T) {
+	r := readiness.NewTracker([]string{"gw-a"})
+	r.SetWithReason("gw-a", readinesspb.State_STATE_DEGRADED, &readinesspb.Reason{Code: "OLD"})
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	ch, eg := collectWatch(t, ctx, r, &readinesspb.ReadyRequest{}, 8)
+
+	// Consume the initial snapshot.
+	recvTimeout(t, ch, watchTimeout)
+
+	// Same state, different reason — must emit.
+	r.SetWithReason("gw-a", readinesspb.State_STATE_DEGRADED, &readinesspb.Reason{Code: "NEW"})
+
+	delta := recvTimeout(t, ch, watchTimeout)
+	require.Len(t, delta.Scopes, 1)
+	assert.Equal(t, "gw-a", delta.Scopes[0].Name)
+	assert.Equal(t, readinesspb.State_STATE_DEGRADED, delta.Scopes[0].State)
+	require.Len(t, delta.Scopes[0].Reasons, 1)
+	assert.Equal(t, "NEW", delta.Scopes[0].Reasons[0].Code)
+
+	cancel()
+	require.NoError(t, eg.Wait())
+}
+
+func TestWatch_Touch_EmitsNothing(t *testing.T) {
+	r := readiness.NewTracker([]string{"gw-a"})
+	r.Set("gw-a", readinesspb.State_STATE_READY)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	ch, eg := collectWatch(t, ctx, r, &readinesspb.ReadyRequest{}, 8)
+
+	recvTimeout(t, ch, watchTimeout)
+
+	r.Touch("gw-a")
+
+	assertNoMsg(t, ch, watchQuietWindow)
+
+	cancel()
+	require.NoError(t, eg.Wait())
+}
+
+func TestWatch_NoopSet_EmitsNothing(t *testing.T) {
+	r := readiness.NewTracker([]string{"gw-a"})
+	r.Set("gw-a", readinesspb.State_STATE_READY)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	ch, eg := collectWatch(t, ctx, r, &readinesspb.ReadyRequest{}, 8)
+
+	recvTimeout(t, ch, watchTimeout)
+
+	// Same state, same reason (nil) — must not emit.
+	r.Set("gw-a", readinesspb.State_STATE_READY)
+
+	assertNoMsg(t, ch, watchQuietWindow)
+
+	cancel()
+	require.NoError(t, eg.Wait())
+}
+
+func TestWatch_DeltaFilteredForDifferentScope(t *testing.T) {
+	r := readiness.NewTracker([]string{"gw-a", "gw-b"})
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	// Watch only gw-b.
+	ch, eg := collectWatch(t, ctx, r, &readinesspb.ReadyRequest{Scopes: []string{"gw-b"}}, 8)
+
+	recvTimeout(t, ch, watchTimeout)
+
+	// Mutate gw-a — subscriber watches gw-b only, so no message.
+	r.Set("gw-a", readinesspb.State_STATE_READY)
+
+	assertNoMsg(t, ch, watchQuietWindow)
+
+	// Mutate gw-b — now a message must arrive.
+	r.Set("gw-b", readinesspb.State_STATE_NOT_READY)
+
+	delta := recvTimeout(t, ch, watchTimeout)
+	require.Len(t, delta.Scopes, 1)
+	assert.Equal(t, "gw-b", delta.Scopes[0].Name)
+
+	cancel()
+	require.NoError(t, eg.Wait())
+}
+
+func TestWatch_Drain_EmitsChangedScopes(t *testing.T) {
+	r := readiness.NewTracker([]string{"gw-a", "gw-b"})
+	r.Set("gw-a", readinesspb.State_STATE_READY)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	ch, eg := collectWatch(t, ctx, r, &readinesspb.ReadyRequest{}, 8)
+
+	recvTimeout(t, ch, watchTimeout)
+
+	r.Drain()
+
+	delta := recvTimeout(t, ch, watchTimeout)
+	// Both scopes transitioned: gw-a READY->NOT_READY, gw-b UNKNOWN->NOT_READY.
+	require.Len(t, delta.Scopes, 2)
+	for _, s := range delta.Scopes {
+		assert.Equal(t, readinesspb.State_STATE_NOT_READY, s.State)
+		require.Len(t, s.Reasons, 1)
+		assert.Equal(t, "SHUTTING_DOWN", s.Reasons[0].Code)
+	}
+
+	cancel()
+	require.NoError(t, eg.Wait())
+}
+
+func TestWatch_CtxCancel_ReturnsNil(t *testing.T) {
+	r := readiness.NewTracker([]string{"gw-a"})
+
+	ctx, cancel := context.WithCancel(t.Context())
+
+	eg, ctx2 := errgroup.WithContext(ctx)
+	eg.Go(func() error {
+		return r.Watch(ctx2, &readinesspb.ReadyRequest{}, func(_ *readinesspb.ReadyResponse) error {
+			return nil
+		})
+	})
+
+	// Give Watch time to register and send the snapshot.
+	time.Sleep(5 * time.Millisecond)
+	cancel()
+
+	require.NoError(t, eg.Wait())
+}
+
+func TestWatch_GatewayStyle_DrainLatch(t *testing.T) {
+	r := readiness.NewTracker([]string{"gateway"}, readiness.WithDrainLatch())
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	ch, eg := collectWatch(t, ctx, r, &readinesspb.ReadyRequest{}, 8)
+
+	// Initial snapshot: gateway is UNKNOWN.
+	snap := recvTimeout(t, ch, watchTimeout)
+	require.Len(t, snap.Scopes, 1)
+	assert.Equal(t, readinesspb.State_STATE_UNKNOWN, snap.Scopes[0].State)
+
+	// Set to READY — delta must arrive.
+	r.Set("gateway", readinesspb.State_STATE_READY)
+	delta1 := recvTimeout(t, ch, watchTimeout)
+	require.Len(t, delta1.Scopes, 1)
+	assert.Equal(t, readinesspb.State_STATE_READY, delta1.Scopes[0].State)
+
+	// Drain — NOT_READY + SHUTTING_DOWN delta.
+	r.Drain()
+	delta2 := recvTimeout(t, ch, watchTimeout)
+	require.Len(t, delta2.Scopes, 1)
+	assert.Equal(t, readinesspb.State_STATE_NOT_READY, delta2.Scopes[0].State)
+	require.Len(t, delta2.Scopes[0].Reasons, 1)
+	assert.Equal(t, "SHUTTING_DOWN", delta2.Scopes[0].Reasons[0].Code)
+
+	// With latch active, Set is a no-op — no more messages.
+	r.Set("gateway", readinesspb.State_STATE_READY)
+	assertNoMsg(t, ch, watchQuietWindow)
+
+	cancel()
+	require.NoError(t, eg.Wait())
+}
+
+func TestWatch_ConcurrentSubscribersAndMutators(t *testing.T) {
+	r := readiness.NewTracker([]string{"gw-a", "gw-b"})
+
+	const (
+		numSubscribers = 8
+		numMutations   = 50
+	)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	subEg, _ := errgroup.WithContext(t.Context())
+	for range numSubscribers {
+		subEg.Go(func() error {
+			_ = r.Watch(ctx, &readinesspb.ReadyRequest{}, func(_ *readinesspb.ReadyResponse) error {
+				return nil
+			})
+			return nil
+		})
+	}
+
+	eg, _ := errgroup.WithContext(t.Context())
+	eg.Go(func() error {
+		for idx := range numMutations {
+			if idx%3 == 0 {
+				r.Set("gw-a", readinesspb.State_STATE_READY)
+			} else if idx%3 == 1 {
+				r.Set("gw-b", readinesspb.State_STATE_NOT_READY)
+			} else {
+				r.Touch("gw-a")
+			}
+		}
+		return nil
+	})
+	require.NoError(t, eg.Wait())
+
+	cancel()
+	require.NoError(t, subEg.Wait())
 }

@@ -3,6 +3,8 @@ package operator
 import (
 	"context"
 
+	"google.golang.org/grpc"
+
 	"github.com/yanet-platform/yanet2/common/go/readiness"
 	readinesspb "github.com/yanet-platform/yanet2/common/readinesspb/v1"
 	operatorpb "github.com/yanet-platform/yanet2/operators/pipeline/operatorpb/v1"
@@ -28,4 +30,12 @@ func (m *ReadinessService) Ready(
 	req *readinesspb.ReadyRequest,
 ) (*readinesspb.ReadyResponse, error) {
 	return m.tracker.Ready(req), nil
+}
+
+// Watch streams readiness changes for the pipeline operator scopes.
+func (m *ReadinessService) Watch(
+	req *readinesspb.ReadyRequest,
+	stream grpc.ServerStreamingServer[readinesspb.ReadyResponse],
+) error {
+	return m.tracker.Watch(stream.Context(), req, stream.Send)
 }
