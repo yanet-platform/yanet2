@@ -25,4 +25,3 @@ breaking:
     - PACKAGE
   ignore:
     - modules/balancer2
-    - operators/route/operatorpb
