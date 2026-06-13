@@ -1,13 +1,10 @@
-package route_mpls
+package croutempls
 
-//#cgo CFLAGS: -I../../../ -I../../../lib
-//#cgo LDFLAGS: -L../../../build/modules/route-mpls/api -lroute_mpls_cp
+//#cgo CFLAGS: -I../../../../../ -I../../../../../lib
+//#cgo LDFLAGS: -L../../../../../build/modules/route-mpls/api -lroute_mpls_cp
+//#cgo LDFLAGS: -L../../../../../build/lib/filter -lfilter_compiler
 //
 //#include <errno.h>
-//
-//static void reset_errno() {
-//    errno = 0;
-//}
 //
 //#include "api/agent.h"
 //#include "modules/route-mpls/api/controlplane.h"
@@ -27,7 +24,6 @@ import "C"
 
 import (
 	"fmt"
-	"net/netip"
 	"runtime"
 	"unsafe"
 
@@ -36,10 +32,13 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 )
 
+// ModuleConfig is an opaque handle to the route-mpls module configuration in
+// shared memory.
 type ModuleConfig struct {
 	ptr ffi.ModuleConfig
 }
 
+// NewModuleConfig allocates a new route-mpls module configuration via the C API.
 func NewModuleConfig(agent *ffi.Agent, name string) (*ModuleConfig, error) {
 	cName := C.CString(name)
 	defer C.free(unsafe.Pointer(cName))
@@ -59,75 +58,51 @@ func (m *ModuleConfig) asRawPtr() *C.struct_cp_module {
 	return (*C.struct_cp_module)(m.ptr.AsRawPtr())
 }
 
+// AsFFIModule returns the underlying common module config handle.
 func (m *ModuleConfig) AsFFIModule() ffi.ModuleConfig {
 	return m.ptr
 }
 
-// Free frees the route module configuration
+// Free releases the underlying C memory.
+//
+// Safe to call multiple times: subsequent calls are no-ops.
 func (m *ModuleConfig) Free() {
-	C.route_mpls_module_config_free(m.asRawPtr())
+	if ptr := m.asRawPtr(); ptr != nil {
+		C.route_mpls_module_config_free(ptr)
+		m.ptr = ffi.ModuleConfig{}
+	}
 }
 
-type routeMPLSKind uint16
-
-const (
-	routeMPLSKindNone routeMPLSKind = iota
-	routeMPLSKindTun
-)
-
-type routeMPLSNextHop struct {
-	Kind        routeMPLSKind
-	Source      netip.Addr
-	Destination netip.Addr
-	MPLSLabel   uint32
-	Weight      uint64
-	Counter     string
-}
-
-type routeMPLSRule struct {
-	Dst4s    filter.IPNets
-	Dst6s    filter.IPNets
-	NextHops []routeMPLSNextHop
-}
-
-func (m *routeMPLSRule) CBuild(pinner *runtime.Pinner) C.struct_route_mpls_rule {
-	cRule := C.struct_route_mpls_rule{}
-
-	filter.CBuildNet4s(&cRule.net4s, m.Dst4s, pinner)
-	filter.CBuildNet6s(&cRule.net6s, m.Dst6s, pinner)
-
-	return cRule
-}
-
-func (m *ModuleConfig) Update(rules []routeMPLSRule) error {
+// Update marshals rules into C structs and calls route_mpls_module_config_update.
+func (m *ModuleConfig) Update(rules []Rule) error {
 	pinner := &runtime.Pinner{}
 	defer pinner.Unpin()
 
 	cRules := make([]C.struct_route_mpls_rule, len(rules))
 
 	for idx, rule := range rules {
-		cNextHops := make([]C.struct_route_mpls_nexthop, len(rule.NextHops))
+		cNextHops := make([]C.struct_route_mpls_nexthop, len(rule.Nexthops))
 
-		for idx, nextHop := range rule.NextHops {
-			cNextHops[idx].weight = C.uint64_t(nextHop.Weight)
-			cCounter := C.CString(nextHop.Counter)
-			C.strncpy(&cNextHops[idx].counter[0], cCounter, C.COUNTER_NAME_LEN)
+		for jdx, nexthop := range rule.Nexthops {
+			cNextHops[jdx].weight = C.uint64_t(nexthop.Weight)
+			cCounter := C.CString(nexthop.Counter)
+			C.strncpy(&cNextHops[jdx].counter[0], cCounter, C.COUNTER_NAME_LEN)
 			C.free(unsafe.Pointer(cCounter))
 
-			if nextHop.Kind == routeMPLSKindNone {
-				cNextHops[idx].kind = C.ROUTE_MPLS_TYPE_NONE
+			if nexthop.Kind == KindNone {
+				cNextHops[jdx].kind = C.ROUTE_MPLS_TYPE_NONE
 				continue
 			}
 
-			if nextHop.Destination.BitLen() == 32 {
-				cNextHops[idx].kind = C.ROUTE_MPLS_TYPE_V4
-				C.set_ip4_tunnel(&cNextHops[idx], (*C.uint8_t)(&nextHop.Source.AsSlice()[0]), (*C.uint8_t)(&nextHop.Destination.AsSlice()[0]))
+			if nexthop.Destination.BitLen() == 32 {
+				cNextHops[jdx].kind = C.ROUTE_MPLS_TYPE_V4
+				C.set_ip4_tunnel(&cNextHops[jdx], (*C.uint8_t)(&nexthop.Source.AsSlice()[0]), (*C.uint8_t)(&nexthop.Destination.AsSlice()[0]))
 			} else {
-				cNextHops[idx].kind = C.ROUTE_MPLS_TYPE_V6
-				C.set_ip6_tunnel(&cNextHops[idx], (*C.uint8_t)(&nextHop.Source.AsSlice()[0]), (*C.uint8_t)(&nextHop.Destination.AsSlice()[0]))
+				cNextHops[jdx].kind = C.ROUTE_MPLS_TYPE_V6
+				C.set_ip6_tunnel(&cNextHops[jdx], (*C.uint8_t)(&nexthop.Source.AsSlice()[0]), (*C.uint8_t)(&nexthop.Destination.AsSlice()[0]))
 			}
 
-			cNextHops[idx].mpls_label = C.uint32_t(nextHop.MPLSLabel)
+			cNextHops[jdx].mpls_label = C.uint32_t(nexthop.MPLSLabel)
 		}
 
 		cRule := &cRules[idx]

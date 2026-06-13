@@ -68,7 +68,7 @@ func buildServices(
 		{
 			name: "route mpls module",
 			new: func() (gateway.Service, error) {
-				return route_mpls.NewRouteMPLSModule(modulesCfg.RouteMPLS, log)
+				return route_mpls.NewRouteMPLSModule(modulesCfg.RouteMPLS, route_mpls.WithLog(log))
 			},
 		},
 		{
