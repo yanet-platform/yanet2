@@ -432,6 +432,11 @@ void
 agent_cleanup(struct agent *agent) {
 	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
 
+	// Finalize the agent context before freeing the arenas that back any
+	// child contexts (e.g. module contexts), so the detach walk in
+	// memory_context_fini never touches freed arena memory.
+	memory_context_fini(&agent->memory_context);
+
 	struct agent_arena *arenas = ADDR_OF(&agent->arenas);
 	if (arenas) {
 		for (uint64_t arena_idx = 0; arena_idx < agent->arena_count;
@@ -460,7 +465,6 @@ agent_cleanup(struct agent *agent) {
 		storage = next;
 	}
 
-	memory_context_fini(&agent->memory_context);
 	memory_bfree(&cp_config->memory_context, agent, sizeof(struct agent));
 }
 

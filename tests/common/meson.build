@@ -72,6 +72,15 @@ balloc_test = executable(
 )
 test('balloc', balloc_test, suite: ['common'])
 
+memory_context_tree_test = executable(
+  'memory_context_tree_test',
+  ['memory_context_tree_test.c'],
+  c_args: yanet_test_c_args,
+  link_args: yanet_link_args,
+  dependencies: dependencies,
+)
+test('memory_context_tree', memory_context_tree_test, suite: ['common'])
+
 executable(
   'balloc_bench',
   ['balloc_bench.c'],

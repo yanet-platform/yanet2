@@ -8,7 +8,6 @@
 #include "memory_block.h"
 #include "strutils.h"
 
-// TODO: link parent and child context
 struct memory_context {
 	struct block_allocator *block_allocator;
 	size_t balloc_count;
@@ -17,6 +16,17 @@ struct memory_context {
 	size_t bfree_size;
 
 	char name[64];
+
+	// Tree links for per-subsystem memory diagnostics.
+	//
+	// All three are shared-memory offset pointers. Use ADDR_OF and
+	// SET_OFFSET_OF to dereference or assign them.
+	//
+	// A NULL parent marks a root context, e.g. an agent, the dataplane
+	// bootstrap context, or the cp_config bootstrap context.
+	struct memory_context *parent;
+	struct memory_context *first_child;
+	struct memory_context *next_sibling;
 };
 
 static inline int
@@ -32,6 +42,11 @@ memory_context_init(
 
 	SET_OFFSET_OF(&context->block_allocator, block_allocator);
 	(void)strtcpy(context->name, name, sizeof(context->name));
+
+	// A root context has no parent and no children yet.
+	SET_OFFSET_OF(&context->parent, NULL);
+	SET_OFFSET_OF(&context->first_child, NULL);
+	SET_OFFSET_OF(&context->next_sibling, NULL);
 
 	return 0;
 }
@@ -52,15 +67,53 @@ memory_context_init_from(
 	);
 	(void)strtcpy(context->name, name, sizeof(context->name));
 
+	// Remember which context contains us, needed to unlink on teardown.
+	SET_OFFSET_OF(&context->parent, parent);
+	SET_OFFSET_OF(&context->first_child, NULL);
+
+	// Insert at the head of the parent's child list. Capture the current
+	// head into next_sibling before overwriting first_child so the ordering
+	// is correct.
+	EQUATE_OFFSET(&context->next_sibling, &parent->first_child);
+	SET_OFFSET_OF(&parent->first_child, context);
+
 	return 0;
 }
 
 // Reset a memory_context to the zero-init state.
 //
-// The context owns no allocations of its own — it only stores a name and an
-// offset to the upstream block allocator... at least for now.
+// Unlinks the context from its parent's child list, then detaches any
+// remaining children so finalising a parent before its children can never
+// leave a child pointing at freed memory. Idempotent and order-independent.
 static inline void
 memory_context_fini(struct memory_context *self) {
+	struct memory_context *parent = ADDR_OF(&self->parent);
+	if (parent != NULL) {
+		// Walk the sibling chain and bridge over ourselves.
+		struct memory_context **cursor = &parent->first_child;
+		for (;;) {
+			struct memory_context *child = ADDR_OF(cursor);
+			if (child == NULL) {
+				break;
+			}
+			if (child == self) {
+				EQUATE_OFFSET(cursor, &self->next_sibling);
+				break;
+			}
+			cursor = &child->next_sibling;
+		}
+	}
+
+	// Detach any remaining children so their parent link never dangles
+	// after our own storage is reused.
+	struct memory_context *child = ADDR_OF(&self->first_child);
+	while (child != NULL) {
+		struct memory_context *next = ADDR_OF(&child->next_sibling);
+		SET_OFFSET_OF(&child->parent, NULL);
+		SET_OFFSET_OF(&child->next_sibling, NULL);
+		child = next;
+	}
+
 	memset(self, 0, sizeof(*self));
 }
 
