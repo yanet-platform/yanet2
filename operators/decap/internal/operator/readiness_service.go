@@ -3,7 +3,7 @@ package operator
 import (
 	"context"
 
-	"github.com/yanet-platform/yanet2/common/go/operator"
+	"github.com/yanet-platform/yanet2/common/go/readiness"
 	readinesspb "github.com/yanet-platform/yanet2/common/readinesspb/v1"
 	operatorpb "github.com/yanet-platform/yanet2/operators/decap/operatorpb/v1"
 )
@@ -14,11 +14,11 @@ import (
 type ReadinessService struct {
 	operatorpb.UnimplementedReadinessServiceServer
 
-	tracker *operator.Readiness
+	tracker *readiness.Tracker
 }
 
 // NewReadinessService constructs a ReadinessService backed by tracker.
-func NewReadinessService(tracker *operator.Readiness) *ReadinessService {
+func NewReadinessService(tracker *readiness.Tracker) *ReadinessService {
 	return &ReadinessService{tracker: tracker}
 }
 

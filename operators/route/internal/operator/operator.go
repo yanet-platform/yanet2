@@ -11,6 +11,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/yanet-platform/yanet2/common/go/operator"
+	"github.com/yanet-platform/yanet2/common/go/readiness"
 	readinesspb "github.com/yanet-platform/yanet2/common/readinesspb/v1"
 	"github.com/yanet-platform/yanet2/operators/route/internal/discovery/neigh"
 	"github.com/yanet-platform/yanet2/operators/route/internal/rib"
@@ -70,8 +71,8 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 	if cfg.Readiness.ExpectBird {
 		scopeNames = append(scopeNames, "bird-session")
 	}
-	tracker := operator.NewReadiness(scopeNames,
-		operator.WithReadinessLog(log.With(zap.String("operator", "route"))),
+	tracker := readiness.NewTracker(scopeNames,
+		readiness.WithLog(log.With(zap.String("operator", "route"))),
 	)
 
 	neighTable := neigh.NewNeighTable()

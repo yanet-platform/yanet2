@@ -8,7 +8,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/yanet-platform/yanet2/common/go/operator"
+	"github.com/yanet-platform/yanet2/common/go/readiness"
 	readinesspb "github.com/yanet-platform/yanet2/common/readinesspb/v1"
 )
 
@@ -18,7 +18,7 @@ func newRIBReadiness(
 	cfg ReadinessConfig,
 	store *RIBStore,
 	name string,
-	tracker *operator.Readiness,
+	tracker *readiness.Tracker,
 	log *zap.Logger,
 ) ribReadiness {
 	if cfg.ExpectBird {
@@ -40,7 +40,7 @@ func newRIBReadiness(
 type birdRIBReadiness struct {
 	store      *RIBStore
 	configName string
-	tracker    *operator.Readiness
+	tracker    *readiness.Tracker
 
 	// counter is the total number of route updates applied in the current
 	// session. Written by OnUpdate on the FeedRIB hot path; read by Run.
@@ -74,7 +74,7 @@ func newBirdRIBReadiness(
 	cfg ReadinessConfig,
 	store *RIBStore,
 	configName string,
-	tracker *operator.Readiness,
+	tracker *readiness.Tracker,
 	log *zap.Logger,
 ) *birdRIBReadiness {
 	m := &birdRIBReadiness{
@@ -301,7 +301,7 @@ func (m *birdRIBReadiness) tick(now time.Time, rate float64) {
 type staticRIBReadiness struct {
 	store          *RIBStore
 	configName     string
-	tracker        *operator.Readiness
+	tracker        *readiness.Tracker
 	sampleInterval time.Duration
 	log            *zap.Logger
 }
@@ -314,7 +314,7 @@ type staticRIBReadiness struct {
 func newStaticRIBReadiness(
 	store *RIBStore,
 	configName string,
-	tracker *operator.Readiness,
+	tracker *readiness.Tracker,
 	sampleInterval time.Duration,
 	log *zap.Logger,
 ) *staticRIBReadiness {

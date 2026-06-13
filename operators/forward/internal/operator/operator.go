@@ -8,6 +8,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/yanet-platform/yanet2/common/go/operator"
+	"github.com/yanet-platform/yanet2/common/go/readiness"
 	operatorpb "github.com/yanet-platform/yanet2/operators/forward/operatorpb/v1"
 )
 
@@ -45,8 +46,8 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 	for idx, gw := range cfg.Gateways {
 		scopeNames[idx] = fmt.Sprintf("config:%s", gw.Name)
 	}
-	tracker := operator.NewReadiness(scopeNames,
-		operator.WithReadinessLog(log.With(zap.String("operator", "forward"))),
+	tracker := readiness.NewTracker(scopeNames,
+		readiness.WithLog(log.With(zap.String("operator", "forward"))),
 	)
 
 	actuators := make([]operator.Actuator[State], 0, len(cfg.Gateways))

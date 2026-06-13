@@ -1,4 +1,4 @@
-package operator
+package readiness
 
 import (
 	"sync"
@@ -10,7 +10,7 @@ import (
 	readinesspb "github.com/yanet-platform/yanet2/common/readinesspb/v1"
 )
 
-// scopeState holds the mutable readiness state for one gateway scope.
+// scopeState holds the mutable readiness state for one scope.
 type scopeState struct {
 	name               string
 	state              readinesspb.State
@@ -19,66 +19,81 @@ type scopeState struct {
 	lastTransitionTime time.Time
 }
 
-// Readiness tracks readiness state across named scopes.
+// Tracker tracks readiness state across named scopes.
 //
 // Each scope is an independent readiness dimension (e.g. "neighbours", "rib",
 // or a gateway ID). State transitions and observation timestamps are
 // maintained independently per scope.
-type Readiness struct {
-	mu     sync.Mutex
-	scopes map[string]*scopeState
-	log    *zap.Logger
+type Tracker struct {
+	mu           sync.Mutex
+	scopes       map[string]*scopeState
+	latchOnDrain bool
+	drained      bool
+	log          *zap.Logger
 }
 
-// ReadinessOption configures NewReadiness.
-type ReadinessOption func(*readinessOptions)
+// Option configures NewTracker.
+type Option func(*options)
 
-type readinessOptions struct {
-	Log *zap.Logger
+type options struct {
+	Log          *zap.Logger
+	LatchOnDrain bool
 }
 
-func newReadinessOptions() *readinessOptions {
-	return &readinessOptions{
+func newOptions() *options {
+	return &options{
 		Log: zap.NewNop(),
 	}
 }
 
-// WithReadinessLog sets the logger used by the Readiness tracker.
+// WithLog sets the logger used by the Tracker.
 //
 // The caller is responsible for pre-tagging the logger with any
 // operator or context attributes (e.g. via log.With(zap.String("operator",
 // "route"))). The tracker itself adds only the scope field on each transition.
-func WithReadinessLog(log *zap.Logger) ReadinessOption {
-	return func(o *readinessOptions) {
+func WithLog(log *zap.Logger) Option {
+	return func(o *options) {
 		o.Log = log
 	}
 }
 
-// NewReadiness creates a Readiness tracker pre-seeded with the supplied
-// gateway IDs, each starting at STATE_UNKNOWN.
-func NewReadiness(gatewayIDs []string, options ...ReadinessOption) *Readiness {
-	opts := newReadinessOptions()
+// WithDrainLatch enables the drain latch.
+//
+// When active, once Drain has been called any subsequent Set or Observe calls
+// on the tracker are no-ops. This prevents a late Ready signal from flipping a
+// drained tracker back to READY.
+func WithDrainLatch() Option {
+	return func(o *options) {
+		o.LatchOnDrain = true
+	}
+}
+
+// NewTracker creates a Tracker pre-seeded with the supplied scope names, each
+// starting at STATE_UNKNOWN.
+func NewTracker(scopeNames []string, options ...Option) *Tracker {
+	opts := newOptions()
 	for _, o := range options {
 		o(opts)
 	}
 
 	scopes := map[string]*scopeState{}
-	for _, id := range gatewayIDs {
+	for _, id := range scopeNames {
 		scopes[id] = &scopeState{
 			name:  id,
 			state: readinesspb.State_STATE_UNKNOWN,
 		}
 	}
 
-	return &Readiness{
-		scopes: scopes,
-		log:    opts.Log,
+	return &Tracker{
+		scopes:       scopes,
+		latchOnDrain: opts.LatchOnDrain,
+		log:          opts.Log,
 	}
 }
 
 // logTransition logs a state change for a scope at Info level when prev and
 // next differ. The reason code and message are included when reason is non-nil.
-func (m *Readiness) logTransition(name string, prev, next readinesspb.State, reason *readinesspb.Reason) {
+func (m *Tracker) logTransition(name string, prev, next readinesspb.State, reason *readinesspb.Reason) {
 	if prev == next {
 		return
 	}
@@ -102,9 +117,13 @@ func (m *Readiness) logTransition(name string, prev, next readinesspb.State, rea
 // A failed apply holds the scope at DEGRADED when it was previously applied,
 // and drops to NOT_READY only when it was never applied. observed_at always
 // advances; last_transition_time changes only on a state transition.
-func (m *Readiness) Observe(gatewayID string, err error) {
+func (m *Tracker) Observe(gatewayID string, err error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	if m.drained {
+		return
+	}
 
 	s, ok := m.scopes[gatewayID]
 	if !ok {
@@ -147,7 +166,7 @@ func (m *Readiness) Observe(gatewayID string, err error) {
 //
 // It creates the scope if absent. last_transition_time is updated only when
 // the state value changes.
-func (m *Readiness) Set(scope string, state readinesspb.State) {
+func (m *Tracker) Set(scope string, state readinesspb.State) {
 	m.set(scope, state, nil)
 }
 
@@ -156,14 +175,18 @@ func (m *Readiness) Set(scope string, state readinesspb.State) {
 //
 // It creates the scope if absent. last_transition_time is updated only when
 // the state value changes.
-func (m *Readiness) SetWithReason(scope string, state readinesspb.State, reason *readinesspb.Reason) {
+func (m *Tracker) SetWithReason(scope string, state readinesspb.State, reason *readinesspb.Reason) {
 	m.set(scope, state, reason)
 }
 
 // set is the shared implementation for Set and SetWithReason.
-func (m *Readiness) set(scope string, state readinesspb.State, reason *readinesspb.Reason) {
+func (m *Tracker) set(scope string, state readinesspb.State, reason *readinesspb.Reason) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	if m.drained {
+		return
+	}
 
 	now := time.Now()
 
@@ -190,7 +213,7 @@ func (m *Readiness) set(scope string, state readinesspb.State, reason *readiness
 // freshness consumers can distinguish a live scope from one whose last event
 // was long ago. Touch is a no-op for unknown scopes — it never creates a
 // scope. state, reason, and lastTransitionTime are left unchanged.
-func (m *Readiness) Touch(scope string) {
+func (m *Tracker) Touch(scope string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -204,8 +227,10 @@ func (m *Readiness) Touch(scope string) {
 
 // Drain marks every scope as STATE_NOT_READY with a SHUTTING_DOWN reason.
 //
-// last_transition_time is updated only for scopes that change state.
-func (m *Readiness) Drain() {
+// last_transition_time is updated only for scopes that change state. When
+// the Tracker was constructed with WithDrainLatch, subsequent Set and Observe
+// calls become no-ops after Drain returns.
+func (m *Tracker) Drain() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -222,11 +247,15 @@ func (m *Readiness) Drain() {
 
 		m.logTransition(s.name, prev, readinesspb.State_STATE_NOT_READY, reason)
 	}
+
+	if m.latchOnDrain {
+		m.drained = true
+	}
 }
 
 // Ready builds a ReadyResponse for the given request, honoring the scope
 // filter. An empty scopes list in the request returns all known scopes.
-func (m *Readiness) Ready(req *readinesspb.ReadyRequest) *readinesspb.ReadyResponse {
+func (m *Tracker) Ready(req *readinesspb.ReadyRequest) *readinesspb.ReadyResponse {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 

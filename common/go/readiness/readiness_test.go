@@ -1,4 +1,4 @@
-package operator_test
+package readiness_test
 
 import (
 	"errors"
@@ -11,12 +11,12 @@ import (
 	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest/observer"
 
-	"github.com/yanet-platform/yanet2/common/go/operator"
+	"github.com/yanet-platform/yanet2/common/go/readiness"
 	readinesspb "github.com/yanet-platform/yanet2/common/readinesspb/v1"
 )
 
-func TestReadiness_InitialState(t *testing.T) {
-	r := operator.NewReadiness([]string{"gw-a", "gw-b"})
+func TestTracker_InitialState(t *testing.T) {
+	r := readiness.NewTracker([]string{"gw-a", "gw-b"})
 	resp := r.Ready(&readinesspb.ReadyRequest{})
 
 	require.Len(t, resp.Scopes, 2)
@@ -28,7 +28,7 @@ func TestReadiness_InitialState(t *testing.T) {
 	}
 }
 
-func TestReadiness_Transitions(t *testing.T) {
+func TestTracker_Transitions(t *testing.T) {
 	applyErr := errors.New("connection refused")
 
 	tests := []struct {
@@ -54,7 +54,7 @@ func TestReadiness_Transitions(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			r := operator.NewReadiness([]string{"gw-a"})
+			r := readiness.NewTracker([]string{"gw-a"})
 			r.Observe("gw-a", tt.observeErr)
 
 			resp := r.Ready(&readinesspb.ReadyRequest{})
@@ -76,27 +76,27 @@ func TestReadiness_Transitions(t *testing.T) {
 	}
 }
 
-// TestReadiness_ObserveHoldOnRegression verifies the state-aware Observe
+// TestTracker_ObserveHoldOnRegression verifies the state-aware Observe
 // semantics: a failure from READY or DEGRADED holds at DEGRADED (last-good
 // state live), while a failure from UNKNOWN or NOT_READY produces NOT_READY.
-func TestReadiness_ObserveHoldOnRegression(t *testing.T) {
+func TestTracker_ObserveHoldOnRegression(t *testing.T) {
 	boom := errors.New("push failed")
 
 	tests := []struct {
 		name       string
-		seed       func(r *operator.Readiness) // sets up pre-condition
+		seed       func(r *readiness.Tracker) // sets up pre-condition
 		wantState  readinesspb.State
 		wantReason string
 	}{
 		{
 			name:       "UNKNOWN + err -> NOT_READY",
-			seed:       func(_ *operator.Readiness) {},
+			seed:       func(_ *readiness.Tracker) {},
 			wantState:  readinesspb.State_STATE_NOT_READY,
 			wantReason: "APPLY_FAILED",
 		},
 		{
 			name: "READY + err -> DEGRADED",
-			seed: func(r *operator.Readiness) {
+			seed: func(r *readiness.Tracker) {
 				r.Observe("gw", nil) // UNKNOWN -> READY
 			},
 			wantState:  readinesspb.State_STATE_DEGRADED,
@@ -104,7 +104,7 @@ func TestReadiness_ObserveHoldOnRegression(t *testing.T) {
 		},
 		{
 			name: "DEGRADED + err -> DEGRADED",
-			seed: func(r *operator.Readiness) {
+			seed: func(r *readiness.Tracker) {
 				r.Observe("gw", nil)  // UNKNOWN -> READY
 				r.Observe("gw", boom) // READY -> DEGRADED
 			},
@@ -113,7 +113,7 @@ func TestReadiness_ObserveHoldOnRegression(t *testing.T) {
 		},
 		{
 			name: "NOT_READY + err -> NOT_READY",
-			seed: func(r *operator.Readiness) {
+			seed: func(r *readiness.Tracker) {
 				r.Observe("gw", boom) // UNKNOWN -> NOT_READY
 			},
 			wantState:  readinesspb.State_STATE_NOT_READY,
@@ -121,7 +121,7 @@ func TestReadiness_ObserveHoldOnRegression(t *testing.T) {
 		},
 		{
 			name: "DEGRADED + ok -> READY",
-			seed: func(r *operator.Readiness) {
+			seed: func(r *readiness.Tracker) {
 				r.Observe("gw", nil)  // UNKNOWN -> READY
 				r.Observe("gw", boom) // READY -> DEGRADED
 			},
@@ -130,7 +130,7 @@ func TestReadiness_ObserveHoldOnRegression(t *testing.T) {
 		},
 		{
 			name: "NOT_READY + ok -> READY",
-			seed: func(r *operator.Readiness) {
+			seed: func(r *readiness.Tracker) {
 				r.Observe("gw", boom) // UNKNOWN -> NOT_READY
 			},
 			wantState:  readinesspb.State_STATE_READY,
@@ -140,7 +140,7 @@ func TestReadiness_ObserveHoldOnRegression(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			r := operator.NewReadiness([]string{"gw"})
+			r := readiness.NewTracker([]string{"gw"})
 			tt.seed(r)
 
 			var finalErr error
@@ -163,8 +163,8 @@ func TestReadiness_ObserveHoldOnRegression(t *testing.T) {
 	}
 }
 
-func TestReadiness_LastTransitionTime_OnlyChangesOnStateChange(t *testing.T) {
-	r := operator.NewReadiness([]string{"gw-a"})
+func TestTracker_LastTransitionTime_OnlyChangesOnStateChange(t *testing.T) {
+	r := readiness.NewTracker([]string{"gw-a"})
 
 	// First observation: UNKNOWN -> READY.
 	r.Observe("gw-a", nil)
@@ -195,8 +195,8 @@ func TestReadiness_LastTransitionTime_OnlyChangesOnStateChange(t *testing.T) {
 		"last_transition_time must advance on READY -> DEGRADED")
 }
 
-func TestReadiness_ScopeFilter(t *testing.T) {
-	r := operator.NewReadiness([]string{"gw-a", "gw-b", "gw-c"})
+func TestTracker_ScopeFilter(t *testing.T) {
+	r := readiness.NewTracker([]string{"gw-a", "gw-b", "gw-c"})
 	r.Observe("gw-a", nil)
 	r.Observe("gw-b", errors.New("down"))
 
@@ -206,14 +206,14 @@ func TestReadiness_ScopeFilter(t *testing.T) {
 	assert.Equal(t, readinesspb.State_STATE_NOT_READY, resp.Scopes[0].State)
 }
 
-func TestReadiness_ScopeFilter_Empty_ReturnsAll(t *testing.T) {
-	r := operator.NewReadiness([]string{"gw-a", "gw-b"})
+func TestTracker_ScopeFilter_Empty_ReturnsAll(t *testing.T) {
+	r := readiness.NewTracker([]string{"gw-a", "gw-b"})
 	resp := r.Ready(&readinesspb.ReadyRequest{})
 	assert.Len(t, resp.Scopes, 2)
 }
 
-func TestReadiness_UnknownGatewayIgnored(t *testing.T) {
-	r := operator.NewReadiness([]string{"gw-a"})
+func TestTracker_UnknownGatewayIgnored(t *testing.T) {
+	r := readiness.NewTracker([]string{"gw-a"})
 	// Observe on an unknown id must not panic.
 	r.Observe("gw-x", nil)
 
@@ -223,8 +223,8 @@ func TestReadiness_UnknownGatewayIgnored(t *testing.T) {
 	assert.Equal(t, readinesspb.State_STATE_UNKNOWN, resp.Scopes[0].State)
 }
 
-func TestReadiness_Drain(t *testing.T) {
-	r := operator.NewReadiness([]string{"gw-a", "gw-b"})
+func TestTracker_Drain(t *testing.T) {
+	r := readiness.NewTracker([]string{"gw-a", "gw-b"})
 
 	// Bring gw-a to READY.
 	r.Observe("gw-a", nil)
@@ -241,8 +241,8 @@ func TestReadiness_Drain(t *testing.T) {
 	}
 }
 
-func TestReadiness_Drain_TransitionTimeOnlyOnChange(t *testing.T) {
-	r := operator.NewReadiness([]string{"gw-a"})
+func TestTracker_Drain_TransitionTimeOnlyOnChange(t *testing.T) {
+	r := readiness.NewTracker([]string{"gw-a"})
 
 	// Put gw-a in NOT_READY already via a failed observe.
 	r.Observe("gw-a", errors.New("boom"))
@@ -258,8 +258,8 @@ func TestReadiness_Drain_TransitionTimeOnlyOnChange(t *testing.T) {
 		"draining a scope already in NOT_READY must not update last_transition_time")
 }
 
-func TestReadiness_Set_UpsertNewScope(t *testing.T) {
-	r := operator.NewReadiness([]string{"gw-a"})
+func TestTracker_Set_UpsertNewScope(t *testing.T) {
+	r := readiness.NewTracker([]string{"gw-a"})
 
 	// Set a scope that was not in the initial list.
 	r.Set("rib", readinesspb.State_STATE_READY)
@@ -279,8 +279,8 @@ func TestReadiness_Set_UpsertNewScope(t *testing.T) {
 	assert.NotNil(t, ribScope.LastTransitionTime)
 }
 
-func TestReadiness_Set_TransitionTimeOnlyOnStateChange(t *testing.T) {
-	r := operator.NewReadiness([]string{"gw-a"})
+func TestTracker_Set_TransitionTimeOnlyOnStateChange(t *testing.T) {
+	r := readiness.NewTracker([]string{"gw-a"})
 
 	r.Set("gw-a", readinesspb.State_STATE_READY)
 	resp1 := r.Ready(&readinesspb.ReadyRequest{})
@@ -303,8 +303,8 @@ func TestReadiness_Set_TransitionTimeOnlyOnStateChange(t *testing.T) {
 		"last_transition_time must advance on state change via Set")
 }
 
-func TestReadiness_Set_ReasonsUpdated(t *testing.T) {
-	r := operator.NewReadiness([]string{"gw-a"})
+func TestTracker_Set_ReasonsUpdated(t *testing.T) {
+	r := readiness.NewTracker([]string{"gw-a"})
 
 	r.SetWithReason("gw-a", readinesspb.State_STATE_NOT_READY,
 		&readinesspb.Reason{Code: "SYNCING"})
@@ -320,8 +320,8 @@ func TestReadiness_Set_ReasonsUpdated(t *testing.T) {
 	assert.Empty(t, resp2.Scopes[0].Reasons)
 }
 
-func TestReadiness_Touch_AdvancesObservedAt(t *testing.T) {
-	r := operator.NewReadiness([]string{"neighbours"})
+func TestTracker_Touch_AdvancesObservedAt(t *testing.T) {
+	r := readiness.NewTracker([]string{"neighbours"})
 
 	// Drive the scope to a known state.
 	r.SetWithReason("neighbours",
@@ -357,8 +357,8 @@ func TestReadiness_Touch_AdvancesObservedAt(t *testing.T) {
 	assert.Equal(t, wantReason, s2.Reasons[0].Code, "Touch must not change reason")
 }
 
-func TestReadiness_Touch_UnknownScope_NoOp(t *testing.T) {
-	r := operator.NewReadiness([]string{"neighbours"})
+func TestTracker_Touch_UnknownScope_NoOp(t *testing.T) {
+	r := readiness.NewTracker([]string{"neighbours"})
 
 	// Touch an unknown scope must not panic and must not create the scope.
 	r.Touch("bird-session")
@@ -368,22 +368,21 @@ func TestReadiness_Touch_UnknownScope_NoOp(t *testing.T) {
 	assert.Equal(t, "neighbours", resp.Scopes[0].Name)
 }
 
-// newObservedReadiness constructs a Readiness tracker backed by a zap
-// observer so tests can inspect emitted log entries. The operatorName is
-// pre-tagged on the logger before passing it to the tracker, matching the
-// expected caller pattern.
-func newObservedReadiness(t *testing.T, scopes []string, operatorName string) (*operator.Readiness, *observer.ObservedLogs) {
+// newObservedTracker constructs a Tracker backed by a zap observer so tests
+// can inspect emitted log entries. The operatorName is pre-tagged on the
+// logger before passing it to the tracker, matching the expected caller pattern.
+func newObservedTracker(t *testing.T, scopes []string, operatorName string) (*readiness.Tracker, *observer.ObservedLogs) {
 	t.Helper()
 	core, logs := observer.New(zapcore.InfoLevel)
-	r := operator.NewReadiness(
+	r := readiness.NewTracker(
 		scopes,
-		operator.WithReadinessLog(zap.New(core).With(zap.String("operator", operatorName))),
+		readiness.WithLog(zap.New(core).With(zap.String("operator", operatorName))),
 	)
 	return r, logs
 }
 
-func TestReadiness_Log_SetTransitionLogsEntry(t *testing.T) {
-	r, logs := newObservedReadiness(t, []string{"gw-a"}, "route")
+func TestTracker_Log_SetTransitionLogsEntry(t *testing.T) {
+	r, logs := newObservedTracker(t, []string{"gw-a"}, "route")
 
 	r.SetWithReason("gw-a", readinesspb.State_STATE_READY,
 		&readinesspb.Reason{Code: "SYNCED", Message: "all good"})
@@ -402,8 +401,8 @@ func TestReadiness_Log_SetTransitionLogsEntry(t *testing.T) {
 	assert.Equal(t, "all good", fields["reason_message"])
 }
 
-func TestReadiness_Log_SetNoopLogs_Nothing(t *testing.T) {
-	r, logs := newObservedReadiness(t, []string{"gw-a"}, "route")
+func TestTracker_Log_SetNoopLogs_Nothing(t *testing.T) {
+	r, logs := newObservedTracker(t, []string{"gw-a"}, "route")
 
 	// First Set: UNKNOWN -> READY (transition, will log).
 	r.Set("gw-a", readinesspb.State_STATE_READY)
@@ -414,8 +413,8 @@ func TestReadiness_Log_SetNoopLogs_Nothing(t *testing.T) {
 	assert.Equal(t, 1, logs.Len(), "no-op Set must not emit a log entry")
 }
 
-func TestReadiness_Log_SetReasonOnlyChange_LogsNothing(t *testing.T) {
-	r, logs := newObservedReadiness(t, []string{"gw-a"}, "route")
+func TestTracker_Log_SetReasonOnlyChange_LogsNothing(t *testing.T) {
+	r, logs := newObservedTracker(t, []string{"gw-a"}, "route")
 
 	r.SetWithReason("gw-a", readinesspb.State_STATE_DEGRADED,
 		&readinesspb.Reason{Code: "RECONNECTING"})
@@ -427,8 +426,8 @@ func TestReadiness_Log_SetReasonOnlyChange_LogsNothing(t *testing.T) {
 	assert.Equal(t, 1, logs.Len(), "reason-only change must not emit a log entry")
 }
 
-func TestReadiness_Log_ObserveReadyToDegraded(t *testing.T) {
-	r, logs := newObservedReadiness(t, []string{"gw"}, "forward")
+func TestTracker_Log_ObserveReadyToDegraded(t *testing.T) {
+	r, logs := newObservedTracker(t, []string{"gw"}, "forward")
 
 	// UNKNOWN -> READY: one log entry.
 	r.Observe("gw", nil)
@@ -446,8 +445,8 @@ func TestReadiness_Log_ObserveReadyToDegraded(t *testing.T) {
 	assert.Equal(t, readinesspb.State_STATE_DEGRADED.String(), fields["to"])
 }
 
-func TestReadiness_Log_ObserveRepeatedFailure_LogsNothing(t *testing.T) {
-	r, logs := newObservedReadiness(t, []string{"gw"}, "forward")
+func TestTracker_Log_ObserveRepeatedFailure_LogsNothing(t *testing.T) {
+	r, logs := newObservedTracker(t, []string{"gw"}, "forward")
 
 	boom := errors.New("push failed")
 
@@ -460,8 +459,8 @@ func TestReadiness_Log_ObserveRepeatedFailure_LogsNothing(t *testing.T) {
 	assert.Equal(t, 1, logs.Len(), "repeated failing Observe must not emit additional log entries")
 }
 
-func TestReadiness_Log_DrainLogsPerChangedScope(t *testing.T) {
-	r, logs := newObservedReadiness(t, []string{"gw-a", "gw-b"}, "route")
+func TestTracker_Log_DrainLogsPerChangedScope(t *testing.T) {
+	r, logs := newObservedTracker(t, []string{"gw-a", "gw-b"}, "route")
 
 	// Bring gw-a to READY (logs one transition).
 	r.Observe("gw-a", nil)
@@ -475,8 +474,8 @@ func TestReadiness_Log_DrainLogsPerChangedScope(t *testing.T) {
 		"Drain must log one entry per scope that changes state")
 }
 
-func TestReadiness_Log_DrainAlreadyNotReady_NoLog(t *testing.T) {
-	r, logs := newObservedReadiness(t, []string{"gw-a"}, "route")
+func TestTracker_Log_DrainAlreadyNotReady_NoLog(t *testing.T) {
+	r, logs := newObservedTracker(t, []string{"gw-a"}, "route")
 
 	// Force gw-a to NOT_READY first (UNKNOWN -> NOT_READY: one log entry).
 	r.Observe("gw-a", errors.New("boom"))
@@ -486,4 +485,56 @@ func TestReadiness_Log_DrainAlreadyNotReady_NoLog(t *testing.T) {
 	r.Drain()
 	assert.Equal(t, 1, logs.Len(),
 		"Drain on a scope already in NOT_READY must not emit a log entry")
+}
+
+// TestTracker_DrainLatch_SetAfterDrainIsNoop verifies that with WithDrainLatch,
+// a Set call after Drain is silently ignored (the latch prevents mutation).
+//
+// Without WithDrainLatch, Set after Drain takes effect normally (documents the
+// opt-in nature of the latch).
+func TestTracker_DrainLatch_SetAfterDrainIsNoop(t *testing.T) {
+	tests := []struct {
+		name       string
+		latch      bool
+		wantState  readinesspb.State
+		wantReason string
+	}{
+		{
+			name:       "with latch: Set after Drain is no-op",
+			latch:      true,
+			wantState:  readinesspb.State_STATE_NOT_READY,
+			wantReason: "SHUTTING_DOWN",
+		},
+		{
+			name:       "without latch: Set after Drain takes effect",
+			latch:      false,
+			wantState:  readinesspb.State_STATE_READY,
+			wantReason: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			opts := []readiness.Option{}
+			if tt.latch {
+				opts = append(opts, readiness.WithDrainLatch())
+			}
+			r := readiness.NewTracker([]string{"gw"}, opts...)
+
+			r.Drain()
+			r.Set("gw", readinesspb.State_STATE_READY)
+
+			resp := r.Ready(&readinesspb.ReadyRequest{})
+			require.Len(t, resp.Scopes, 1)
+			s := resp.Scopes[0]
+
+			assert.Equal(t, tt.wantState, s.State)
+			if tt.wantReason != "" {
+				require.Len(t, s.Reasons, 1)
+				assert.Equal(t, tt.wantReason, s.Reasons[0].Code)
+			} else {
+				assert.Empty(t, s.Reasons)
+			}
+		})
+	}
 }

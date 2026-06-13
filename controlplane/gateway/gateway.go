@@ -14,6 +14,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/yanet-platform/yanet2/common/go/readiness"
+	readinesspb "github.com/yanet-platform/yanet2/common/readinesspb/v1"
 	"github.com/yanet-platform/yanet2/controlplane/httpproxy"
 	"github.com/yanet-platform/yanet2/controlplane/internal/auth"
 	"github.com/yanet-platform/yanet2/controlplane/internal/xgrpc"
@@ -110,13 +112,13 @@ func WithAtomicLogLevel(level *zap.AtomicLevel) GatewayOption {
 //
 // Think of it as gRPC middleware if it were a single process.
 type Gateway struct {
-	cfg            *Config
-	server         *grpc.Server
-	services       []Service
-	serviceRunners []*ServiceRunner
-	registry       *BackendRegistry
-	readiness      *readinessTracker
-	log            *zap.Logger
+	cfg              *Config
+	server           *grpc.Server
+	services         []Service
+	serviceRunners   []*ServiceRunner
+	registry         *BackendRegistry
+	readinessTracker *readiness.Tracker
+	log              *zap.Logger
 }
 
 // NewGateway creates a new Gateway API.
@@ -185,8 +187,12 @@ func NewGateway(cfg *Config, options ...GatewayOption) (*Gateway, error) {
 	ynpb.RegisterAuthServiceServer(server, authService)
 	log.Info("registered service", zap.String("service", fmt.Sprintf("%T", authService)))
 
-	readinessTracker := newReadinessTracker(log)
-	readinessSvc := NewReadinessService(readinessTracker)
+	rdTracker := readiness.NewTracker(
+		[]string{gatewayReadinessScope},
+		readiness.WithDrainLatch(),
+		readiness.WithLog(log),
+	)
+	readinessSvc := NewReadinessService(rdTracker)
 	ynpb.RegisterReadinessServiceServer(server, readinessSvc)
 	log.Info("registered service", zap.String("service", fmt.Sprintf("%T", readinessSvc)))
 
@@ -252,13 +258,13 @@ func NewGateway(cfg *Config, options ...GatewayOption) (*Gateway, error) {
 	}
 
 	return &Gateway{
-		cfg:            cfg,
-		server:         server,
-		services:       services,
-		serviceRunners: serviceRunners,
-		registry:       registry,
-		readiness:      readinessTracker,
-		log:            log,
+		cfg:              cfg,
+		server:           server,
+		services:         services,
+		serviceRunners:   serviceRunners,
+		registry:         registry,
+		readinessTracker: rdTracker,
+		log:              log,
 	}, nil
 }
 
@@ -341,17 +347,17 @@ func (m *Gateway) Run(ctx context.Context) error {
 			m.log.Info("all built-in modules ready",
 				zap.Int("count", len(m.serviceRunners)),
 			)
-			m.readiness.Ready()
+			m.readinessTracker.Set(gatewayReadinessScope, readinesspb.State_STATE_READY)
 			return nil
 		})
 	} else {
 		m.log.Info("all built-in modules ready", zap.Int("count", 0))
-		m.readiness.Ready()
+		m.readinessTracker.Set(gatewayReadinessScope, readinesspb.State_STATE_READY)
 	}
 
 	<-ctx.Done()
 
-	m.readiness.Drain()
+	m.readinessTracker.Drain()
 
 	m.log.Info("stopping gRPC gateway", zap.Stringer("addr", listener.Addr()))
 	defer m.log.Info("stopped gRPC gateway", zap.Stringer("addr", listener.Addr()))

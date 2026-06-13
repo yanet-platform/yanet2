@@ -6,17 +6,22 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
+	"github.com/yanet-platform/yanet2/common/go/readiness"
 	readinesspb "github.com/yanet-platform/yanet2/common/readinesspb/v1"
 )
 
-func newTestTracker() *readinessTracker {
-	return newReadinessTracker(zap.NewNop())
+func newTestTracker() *readiness.Tracker {
+	return readiness.NewTracker(
+		[]string{gatewayReadinessScope},
+		readiness.WithDrainLatch(),
+		readiness.WithLog(zap.NewNop()),
+	)
 }
 
 func TestReadinessTracker_InitialState(t *testing.T) {
 	tracker := newTestTracker()
 
-	resp := tracker.Snapshot(&readinesspb.ReadyRequest{})
+	resp := tracker.Ready(&readinesspb.ReadyRequest{})
 	require.Len(t, resp.GetScopes(), 1)
 
 	scope := resp.GetScopes()[0]
@@ -28,9 +33,9 @@ func TestReadinessTracker_InitialState(t *testing.T) {
 
 func TestReadinessTracker_AfterReady(t *testing.T) {
 	tracker := newTestTracker()
-	tracker.Ready()
+	tracker.Set(gatewayReadinessScope, readinesspb.State_STATE_READY)
 
-	resp := tracker.Snapshot(&readinesspb.ReadyRequest{})
+	resp := tracker.Ready(&readinesspb.ReadyRequest{})
 	require.Len(t, resp.GetScopes(), 1)
 
 	scope := resp.GetScopes()[0]
@@ -42,10 +47,10 @@ func TestReadinessTracker_AfterReady(t *testing.T) {
 
 func TestReadinessTracker_AfterDrain(t *testing.T) {
 	tracker := newTestTracker()
-	tracker.Ready()
+	tracker.Set(gatewayReadinessScope, readinesspb.State_STATE_READY)
 	tracker.Drain()
 
-	resp := tracker.Snapshot(&readinesspb.ReadyRequest{})
+	resp := tracker.Ready(&readinesspb.ReadyRequest{})
 	require.Len(t, resp.GetScopes(), 1)
 
 	scope := resp.GetScopes()[0]
@@ -85,9 +90,9 @@ func TestReadinessTracker_SnapshotFilter(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			tracker := newTestTracker()
-			tracker.Ready()
+			tracker.Set(gatewayReadinessScope, readinesspb.State_STATE_READY)
 
-			resp := tracker.Snapshot(&readinesspb.ReadyRequest{Scopes: tc.filter})
+			resp := tracker.Ready(&readinesspb.ReadyRequest{Scopes: tc.filter})
 			require.Len(t, resp.GetScopes(), tc.wantScopes)
 
 			if tc.wantGateway {
@@ -99,11 +104,11 @@ func TestReadinessTracker_SnapshotFilter(t *testing.T) {
 
 func TestReadinessTracker_ReadyAfterDrainIsNoop(t *testing.T) {
 	tracker := newTestTracker()
-	tracker.Ready()
+	tracker.Set(gatewayReadinessScope, readinesspb.State_STATE_READY)
 	tracker.Drain()
-	tracker.Ready()
+	tracker.Set(gatewayReadinessScope, readinesspb.State_STATE_READY)
 
-	resp := tracker.Snapshot(&readinesspb.ReadyRequest{})
+	resp := tracker.Ready(&readinesspb.ReadyRequest{})
 	require.Len(t, resp.GetScopes(), 1)
 
 	scope := resp.GetScopes()[0]
@@ -114,7 +119,7 @@ func TestReadinessTracker_ReadyAfterDrainIsNoop(t *testing.T) {
 
 func TestReadinessService_Ready(t *testing.T) {
 	tracker := newTestTracker()
-	tracker.Ready()
+	tracker.Set(gatewayReadinessScope, readinesspb.State_STATE_READY)
 
 	svc := NewReadinessService(tracker)
 	resp, err := svc.Ready(t.Context(), &readinesspb.ReadyRequest{})
