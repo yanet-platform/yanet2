@@ -234,6 +234,46 @@ func (m *Tracker) unsubscribe(sub *subscriber) {
 	delete(m.subscribers, sub)
 }
 
+// applyLocked writes next and reason onto s, advancing timestamps, logging
+// the transition, and notifying Watch subscribers.
+//
+// observed_at always advances; last_transition_time changes only on a state
+// change; subscribers are notified only when state or reason changed. Must
+// be called with m.mu held.
+func (m *Tracker) applyLocked(s *scopeState, next readinesspb.State, reason *readinesspb.Reason) {
+	now := time.Now()
+	prevState := s.state
+	prevReason := s.reason
+	if s.observedAt.IsZero() || s.state != next {
+		s.lastTransitionTime = now
+	}
+	s.state = next
+	s.reason = reason
+	s.observedAt = now
+	m.logTransition(s.name, prevState, next, reason)
+	if prevState != next || !reasonEqual(prevReason, reason) {
+		m.notifySubscribersLocked([]*readinesspb.Scope{scopeToProto(s)})
+	}
+}
+
+// observeOutcome derives the next state and reason for an apply attempt
+// whose result is err, given the scope's current state.
+//
+// A nil err yields READY. A failure holds a previously-applied scope at
+// DEGRADED and drops a never-applied scope to NOT_READY.
+func observeOutcome(current readinesspb.State, err error) (readinesspb.State, *readinesspb.Reason) {
+	if err == nil {
+		return readinesspb.State_STATE_READY, nil
+	}
+	reason := &readinesspb.Reason{Code: "APPLY_FAILED", Message: err.Error()}
+	switch current {
+	case readinesspb.State_STATE_READY, readinesspb.State_STATE_DEGRADED:
+		return readinesspb.State_STATE_DEGRADED, reason
+	default:
+		return readinesspb.State_STATE_NOT_READY, reason
+	}
+}
+
 // Observe records the outcome of one apply attempt for the named gateway.
 //
 // A failed apply holds the scope at DEGRADED when it was previously applied,
@@ -252,41 +292,8 @@ func (m *Tracker) Observe(gatewayID string, err error) {
 		return
 	}
 
-	now := time.Now()
-
-	var (
-		next   readinesspb.State
-		reason *readinesspb.Reason
-	)
-
-	if err == nil {
-		next = readinesspb.State_STATE_READY
-	} else {
-		reason = &readinesspb.Reason{Code: "APPLY_FAILED", Message: err.Error()}
-		switch s.state {
-		case readinesspb.State_STATE_READY, readinesspb.State_STATE_DEGRADED:
-			// Last successfully applied state is still live — hold at DEGRADED.
-			next = readinesspb.State_STATE_DEGRADED
-		default:
-			// Never successfully applied — no valid state to fall back to.
-			next = readinesspb.State_STATE_NOT_READY
-		}
-	}
-
-	prevState := s.state
-	prevReason := s.reason
-	if s.observedAt.IsZero() || s.state != next {
-		s.lastTransitionTime = now
-	}
-	s.state = next
-	s.reason = reason
-	s.observedAt = now
-
-	m.logTransition(s.name, prevState, next, reason)
-
-	if prevState != next || !reasonEqual(prevReason, reason) {
-		m.notifySubscribersLocked([]*readinesspb.Scope{scopeToProto(s)})
-	}
+	next, reason := observeOutcome(s.state, err)
+	m.applyLocked(s, next, reason)
 }
 
 // Set transitions the named scope to the given state with no reason.
@@ -315,28 +322,13 @@ func (m *Tracker) set(scope string, state readinesspb.State, reason *readinesspb
 		return
 	}
 
-	now := time.Now()
-
 	s, ok := m.scopes[scope]
 	if !ok {
 		s = &scopeState{name: scope}
 		m.scopes[scope] = s
 	}
 
-	prevState := s.state
-	prevReason := s.reason
-	if s.observedAt.IsZero() || s.state != state {
-		s.lastTransitionTime = now
-	}
-	s.state = state
-	s.reason = reason
-	s.observedAt = now
-
-	m.logTransition(s.name, prevState, state, reason)
-
-	if prevState != state || !reasonEqual(prevReason, reason) {
-		m.notifySubscribersLocked([]*readinesspb.Scope{scopeToProto(s)})
-	}
+	m.applyLocked(s, state, reason)
 }
 
 // Touch advances observed_at for an existing scope without changing its state.
