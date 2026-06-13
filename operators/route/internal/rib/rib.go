@@ -77,14 +77,20 @@ func (m *RIB) RemoveUnicastRoute(prefix netip.Prefix, nexthopAddr netip.Addr, so
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	candidate := Route{
+		Prefix:   prefix,
+		NextHop:  nexthopAddr,
+		Peer:     netip.IPv6Unspecified(),
+		SourceID: sourceID,
+	}
+
 	found := 0
 	m.routes.UpdateOrDelete(
 		prefix,
 		func(routesList RoutesList) (RoutesList, bool) {
-			// Filter out only static routes with matching nexthop.
 			newRoutes := make([]Route, 0, len(routesList.Routes))
 			for _, r := range routesList.Routes {
-				if r.NextHop.Unmap() == nexthopAddr.Unmap() && r.SourceID == sourceID {
+				if r.isSameIdentity(candidate) {
 					found++
 					continue // skip means remove
 				}
