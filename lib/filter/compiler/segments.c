@@ -8,8 +8,8 @@
 #include <stdlib.h>
 
 enum point_type {
-	open = 1,
-	close = -1,
+	POINT_OPEN = 1,
+	POINT_CLOSE = -1,
 };
 
 struct point {
@@ -74,12 +74,12 @@ create_points_from_segments_u16(
 		struct segment_u16 *segment = &segments[segment_idx];
 		points[points_cnt++] = (struct point){
 			.x = segment->from,
-			.type = open,
+			.type = POINT_OPEN,
 		};
 		if (segment->to < UINT16_MAX) {
 			points[points_cnt++] = (struct point){
 				.x = segment->to + 1,
-				.type = close,
+				.type = POINT_CLOSE,
 			};
 		}
 	}
@@ -269,12 +269,12 @@ create_points_from_segments_u32(
 		struct segment_u32 *segment = &segments[segment_idx];
 		points[points_cnt++] = (struct point){
 			.x = segment->from,
-			.type = open,
+			.type = POINT_OPEN,
 		};
 		if (segment->to < UINT32_MAX) {
 			points[points_cnt++] = (struct point){
 				.x = segment->to + 1,
-				.type = close,
+				.type = POINT_CLOSE,
 			};
 		}
 	}
@@ -464,13 +464,13 @@ create_points_from_segments_u64(
 		struct segment_u64 *segment = &segments[segment_idx];
 		points[points_cnt++] = (struct point){
 			.x = segment->from,
-			.type = open,
+			.type = POINT_OPEN,
 		};
 
 		if (segment->to < UINT64_MAX) {
 			points[points_cnt++] = (struct point){
 				.x = segment->to + 1,
-				.type = close,
+				.type = POINT_CLOSE,
 			};
 		}
 	}
