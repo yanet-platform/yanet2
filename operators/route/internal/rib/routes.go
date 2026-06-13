@@ -128,7 +128,7 @@ func (m *RoutesList) Insert(route Route) bool {
 	}
 	if len(m.Routes) > 1 {
 		// Sorting an almost-sorted slice should be relatively efficient
-		slices.SortFunc(m.Routes, routeCompareRev) // for DESC order
+		slices.SortStableFunc(m.Routes, routeCompareRev) // for DESC order
 	}
 	return insertedIdx == -1
 }

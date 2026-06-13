@@ -329,6 +329,101 @@ func TestBestPerSourceMask(t *testing.T) {
 	})
 }
 
+// TestRoutesListInsertStableOrder verifies that equal-cost static ECMP routes
+// preserve their relative insertion order after each Insert call.
+//
+// slices.SortStableFunc guarantees that elements comparing equal retain their
+// previous relative order, so inserting N equal-cost routes with distinct
+// nexthops must yield a final slice ordered by insertion sequence. Two
+// independently built lists fed the same sequence must be identical.
+func TestRoutesListInsertStableOrder(t *testing.T) {
+	pfx := netip.MustParsePrefix("10.0.0.0/24")
+	unspec := netip.IPv6Unspecified()
+
+	makeRoute := func(t *testing.T, nhStr string) Route {
+		t.Helper()
+		return Route{
+			Prefix:   pfx,
+			NextHop:  netip.MustParseAddr(nhStr),
+			Peer:     unspec,
+			SourceID: RouteSourceStatic,
+			// All cost fields are zero — every pair is equal-cost.
+		}
+	}
+
+	nexthops := []string{
+		"10.0.0.1",
+		"10.0.0.2",
+		"10.0.0.3",
+		"10.0.0.4",
+	}
+
+	buildList := func(t *testing.T) RoutesList {
+		t.Helper()
+		var list RoutesList
+		for _, nh := range nexthops {
+			list.Insert(makeRoute(t, nh))
+		}
+		return list
+	}
+
+	t.Run("insertion order preserved after each insert", func(t *testing.T) {
+		var list RoutesList
+		for idx, nh := range nexthops {
+			list.Insert(makeRoute(t, nh))
+			// After inserting route idx, the first idx+1 routes must appear in
+			// the same order they were inserted (all are equal-cost).
+			require.Len(t, list.Routes, idx+1)
+			for jdx := 0; jdx <= idx; jdx++ {
+				require.Equal(
+					t,
+					netip.MustParseAddr(nexthops[jdx]),
+					list.Routes[jdx].NextHop,
+					"route at position %d after %d inserts", jdx, idx+1,
+				)
+			}
+		}
+	})
+
+	t.Run("two independent lists are identical", func(t *testing.T) {
+		listA := buildList(t)
+		listB := buildList(t)
+		require.Equal(t, len(listA.Routes), len(listB.Routes))
+		for idx := range listA.Routes {
+			require.Equal(
+				t,
+				listA.Routes[idx].NextHop,
+				listB.Routes[idx].NextHop,
+				"nexthop mismatch at index %d", idx,
+			)
+		}
+	})
+
+	t.Run("re-insert of existing nexthop does not shift peers", func(t *testing.T) {
+		list := buildList(t)
+		// Re-insert the second nexthop with an updated Pref so it is no longer
+		// equal-cost. It should move to the front (highest cost), and the
+		// remaining routes must keep the original relative order among themselves.
+		updated := makeRoute(t, nexthops[1])
+		updated.Pref = 100
+		added := list.Insert(updated)
+		require.False(t, added, "re-insert must replace, not append")
+		require.Len(t, list.Routes, len(nexthops))
+		// The updated (best) route must be at index 0.
+		require.Equal(t, netip.MustParseAddr(nexthops[1]), list.Routes[0].NextHop)
+		// The remaining three must preserve their original insertion order.
+		remaining := []string{nexthops[0], nexthops[2], nexthops[3]}
+		for idx, nh := range remaining {
+			require.Equal(
+				t,
+				netip.MustParseAddr(nh),
+				list.Routes[idx+1].NextHop,
+				"remaining route at position %d", idx+1,
+			)
+		}
+	})
+}
+
 func TestRoutesListDeletion(t *testing.T) {
 	list := RoutesList{
 		Routes: []Route{
