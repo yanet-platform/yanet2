@@ -8,6 +8,7 @@ use core::{
     fmt::{self, Display, Formatter},
     net::IpAddr,
 };
+use std::collections::HashMap;
 
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
@@ -280,6 +281,7 @@ impl RouteService {
             || {
                 let mut entries: Vec<RouteEntry> = response.routes.iter().cloned().map(RouteEntry::from).collect();
                 entries.sort_by_key(|entry| entry.prefix.0);
+                annotate_ecmp_groups(&mut entries);
                 print_route_table(entries);
             },
         );
@@ -305,7 +307,8 @@ impl RouteService {
             response.routes.is_empty(),
             format_args!("no routes for {}", cmd.addr),
             || {
-                let entries: Vec<RouteEntry> = response.routes.iter().cloned().map(RouteEntry::from).collect();
+                let mut entries: Vec<RouteEntry> = response.routes.iter().cloned().map(RouteEntry::from).collect();
+                annotate_ecmp_groups(&mut entries);
                 print_route_table(entries);
             },
         );
@@ -506,20 +509,32 @@ impl Display for Communities {
     }
 }
 
-/// Wraps a prefix with its best-route flag.
+/// Wraps a prefix with its best-route flag and ECMP group size.
 ///
-/// `Ord` and `Eq` are by the address/prefix pair only; the `is_best` field
-/// is a render-only hint and intentionally excluded from identity.
+/// `Ord` and `Eq` are by the address/prefix pair only; `is_best` and
+/// `ecmp_size` are render-only hints intentionally excluded from identity.
+/// `ecmp_size` is set to 1 initially and updated by `annotate_ecmp_groups`
+/// when multiple best routes share the same prefix.
 #[derive(Debug)]
-pub struct Prefix(pub Contiguous<IpNetwork>, pub bool);
+pub struct Prefix(pub Contiguous<IpNetwork>, pub bool, pub usize);
 
 impl Display for Prefix {
     fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
-        let Prefix(prefix, is_best) = self;
+        let Prefix(prefix, is_best, ecmp_size) = self;
         let s = prefix.to_string();
 
-        if output::is_colored() && !is_best {
-            write!(f, "{}", s.truecolor(127, 127, 127))
+        if output::is_colored() {
+            if *is_best {
+                if *ecmp_size > 1 {
+                    write!(f, "{} {}", s, "⇉".green())
+                } else {
+                    write!(f, "{s}")
+                }
+            } else {
+                write!(f, "{}", s.truecolor(127, 127, 127))
+            }
+        } else if *is_best && *ecmp_size > 1 {
+            write!(f, "{s} ⇉")
         } else {
             write!(f, "{s}")
         }
@@ -574,7 +589,7 @@ impl From<operatorpb::Route> for RouteEntry {
         let prefix = Contiguous::<IpNetwork>::parse(&route.prefix).expect("must be valid prefix");
 
         Self {
-            prefix: Prefix(prefix, route.is_best),
+            prefix: Prefix(prefix, route.is_best, 1),
             next_hop: route.next_hop.as_ref().map(|a| a.to_string()).unwrap_or_default(),
             peer: route.peer.as_ref().map(|a| a.to_string()).unwrap_or_default(),
             source: route_source_name(route.source),
@@ -583,6 +598,32 @@ impl From<operatorpb::Route> for RouteEntry {
             pref: route.pref,
             med: route.med,
             communities: Communities(communities),
+        }
+    }
+}
+
+/// Annotates each `RouteEntry` in the slice with its ECMP group size.
+///
+/// An ECMP group is the set of best routes sharing the same prefix (across
+/// all sources). When such a group has more than one member, the `ecmp_size`
+/// field of each best `Prefix` in that group is set to the group count;
+/// entries that are not best, or whose prefix has only one best route,
+/// retain size 1 (unmarked).
+fn annotate_ecmp_groups(entries: &mut [RouteEntry]) {
+    let mut best_counts: HashMap<String, usize> = HashMap::new();
+
+    for entry in entries.iter() {
+        if entry.prefix.1 {
+            let key = entry.prefix.0.to_string();
+            *best_counts.entry(key).or_insert(0) += 1;
+        }
+    }
+
+    for entry in entries.iter_mut() {
+        if entry.prefix.1 {
+            let key = entry.prefix.0.to_string();
+            let count = best_counts.get(&key).copied().unwrap_or(1);
+            entry.prefix.2 = count;
         }
     }
 }
@@ -871,5 +912,73 @@ mod test {
             nanos: 0,
         };
         assert_eq!("2h3m ago", format_age(Some(&ts)));
+    }
+
+    fn make_entry(prefix_str: &str, source: &str, is_best: bool) -> RouteEntry {
+        let prefix = Contiguous::<IpNetwork>::parse(prefix_str).expect("must be valid prefix");
+        RouteEntry {
+            prefix: Prefix(prefix, is_best, 1),
+            next_hop: String::new(),
+            peer: String::new(),
+            source: source.to_string(),
+            peer_as: 0,
+            origin_as: 0,
+            pref: 0,
+            med: 0,
+            communities: Communities(vec![]),
+        }
+    }
+
+    /// Two best routes sharing a prefix are marked with ECMP size 2; a prefix
+    /// with one best and one non-best route remains at size 1; a single best
+    /// route remains at size 1.
+    #[test]
+    fn annotate_ecmp_groups_marks_multi_best_prefixes() {
+        let mut entries = vec![
+            make_entry("10.0.0.0/8", "static", true),
+            make_entry("10.0.0.0/8", "static", true),
+            make_entry("192.168.0.0/24", "static", true),
+            make_entry("192.168.0.0/24", "static", false),
+            make_entry("172.16.0.0/12", "static", true),
+        ];
+
+        annotate_ecmp_groups(&mut entries);
+
+        assert_eq!(2, entries[0].prefix.2);
+        assert_eq!(2, entries[1].prefix.2);
+        assert_eq!(1, entries[2].prefix.2);
+        assert_eq!(1, entries[3].prefix.2);
+        assert_eq!(1, entries[4].prefix.2);
+    }
+
+    /// One best `static` route and one best `bird` route on the same prefix
+    /// ARE grouped — `BuildFIB` merges best routes from all sources into one
+    /// FIB entry, so the CLI reflects the actual forwarding group width.
+    #[test]
+    fn annotate_ecmp_groups_different_sources_are_grouped() {
+        let mut entries = vec![
+            make_entry("10.0.0.0/8", "static", true),
+            make_entry("10.0.0.0/8", "bird", true),
+        ];
+
+        annotate_ecmp_groups(&mut entries);
+
+        assert_eq!(2, entries[0].prefix.2);
+        assert_eq!(2, entries[1].prefix.2);
+    }
+
+    /// Two best routes on the same prefix from the same source form an ECMP
+    /// group of size 2.
+    #[test]
+    fn annotate_ecmp_groups_same_source_grouped() {
+        let mut entries = vec![
+            make_entry("10.0.0.0/8", "bird", true),
+            make_entry("10.0.0.0/8", "bird", true),
+        ];
+
+        annotate_ecmp_groups(&mut entries);
+
+        assert_eq!(2, entries[0].prefix.2);
+        assert_eq!(2, entries[1].prefix.2);
     }
 }
