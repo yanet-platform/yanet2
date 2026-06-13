@@ -7,6 +7,12 @@ import { validatePrefix, validateNexthop } from './utils';
 import type { Route } from '../../../api/routes';
 import { CidrPrefixField } from '../../../components';
 
+/** A single nexthop row with a stable identity. */
+interface NexthopRow {
+    id: number;
+    value: string;
+}
+
 export interface RouteDrawerProps {
     open: boolean;
     mode: 'add' | 'edit';
@@ -28,24 +34,36 @@ const RouteDrawer: React.FC<RouteDrawerProps> = ({
     onDelete,
 }) => {
     const [prefix, setPrefix] = useState('');
-    const [nexthopRows, setNexthopRows] = useState<string[]>(['']);
+    const [nexthopRows, setNexthopRows] = useState<NexthopRow[]>([{ id: 0, value: '' }]);
     const [doFlush, setDoFlush] = useState(false);
     const [submitting, setSubmitting] = useState(false);
+
+    const nextIdRef = useRef(1);
+
+    const makeRow = (value: string): NexthopRow => {
+        const id = nextIdRef.current;
+        nextIdRef.current += 1;
+        return { id, value };
+    };
 
     useEffect(() => {
         if (open) {
             setPrefix(mode === 'edit' && route ? (route.prefix || '') : '');
-            setNexthopRows(mode === 'edit' && route ? [ipAddressToString(route.next_hop)] : ['']);
+            setNexthopRows(
+                mode === 'edit' && route
+                    ? [makeRow(ipAddressToString(route.next_hop))]
+                    : [makeRow('')],
+            );
             setDoFlush(false);
             setSubmitting(false);
         }
     }, [open, mode, route?.prefix, route?.next_hop]);
 
-    const nexthopErrors = nexthopRows.map((v) => validateNexthop(v));
+    const nexthopErrors = nexthopRows.map((row) => validateNexthop(row.value));
     const prefixError = validatePrefix(prefix);
 
     const allFilled = nexthopRows.length > 0
-        && nexthopRows.every((v) => v.trim() !== '')
+        && nexthopRows.every((row) => row.value.trim() !== '')
         && nexthopErrors.every((e) => !e);
 
     const canSubmit = prefix.trim() !== ''
@@ -54,11 +72,11 @@ const RouteDrawer: React.FC<RouteDrawerProps> = ({
         && !submitting;
 
     const handleChangeRow = useCallback((idx: number, value: string): void => {
-        setNexthopRows((prev) => prev.map((v, i) => (i === idx ? value : v)));
+        setNexthopRows((prev) => prev.map((row, i) => (i === idx ? { ...row, value } : row)));
     }, []);
 
     const handleAddRow = useCallback((): void => {
-        setNexthopRows((prev) => [...prev, '']);
+        setNexthopRows((prev) => [...prev, makeRow('')]);
     }, []);
 
     const handleRemoveRow = useCallback((idx: number): void => {
@@ -71,7 +89,7 @@ const RouteDrawer: React.FC<RouteDrawerProps> = ({
         try {
             await onSubmit({
                 prefix: prefix.trim(),
-                nexthopAddrs: nexthopRows.map((v) => v.trim()),
+                nexthopAddrs: nexthopRows.map((row) => row.value.trim()),
                 doFlush,
             });
             onClose();
@@ -146,15 +164,15 @@ const RouteDrawer: React.FC<RouteDrawerProps> = ({
                 </div>
                 <div className="yn-section__body">
                     <div className="ro-nexthop-list">
-                        {nexthopRows.map((val, idx) => (
-                            <div key={idx} className="ro-nexthop-row">
+                        {nexthopRows.map((row, idx) => (
+                            <div key={row.id} className="ro-nexthop-row">
                                 <div className="yn-field ro-nexthop-row__field">
                                     <label className="yn-field__label">
                                         Next Hop IP <span className="yn-field__req">*</span>
                                     </label>
                                     <input
                                         className={`yn-input yn-input--mono${nexthopErrors[idx] ? ' yn-input--invalid' : ''}`}
-                                        value={val}
+                                        value={row.value}
                                         placeholder="192.168.1.1 or 2001:db8::1"
                                         onChange={(e) => handleChangeRow(idx, e.target.value)}
                                     />
