@@ -204,6 +204,16 @@ Meson orchestrates C/DPDK builds and Go binary compilation (via `custom_target` 
   rule the user has repeated many times across C, Rust, Go, and shell; treat
   any occurrence as a blocking review finding, never a non-blocking nit.
 
+- **Doc-comment shape (fields, structs, functions) — every language.** A short
+  one-line brief (what/why), then a blank comment line, then the detail
+  paragraph (concise, no fanaticism). Never glue brief and detail into one
+  run-on block, and never cram multiple ideas onto consecutive comment lines
+  without the blank separator. Applies to `//`, `///`, `#`, and `/* */`.
+  Single-sentence comments need no blank line; inline implementation comments
+  inside function bodies are exempt. This is a hard rule the user has repeated
+  many times (C and Go alike); treat a crammed multi-idea doc comment as a
+  blocking review finding, not a nit.
+
 ### Go
 
 - **Receiver names**: always `m`. No type-letter mnemonics.
@@ -277,6 +287,11 @@ Meson orchestrates C/DPDK builds and Go binary compilation (via `custom_target` 
   direct `self.0`. Trait bounds in `where` clauses, not inline.
   Import type names directly (`use serde::Serialize;` then `T: Serialize`),
   not module-qualified (`serde::Serialize`).
+- **Struct-literal field order**: list fields in the same order they are
+  declared in the struct definition. Applies to proto-generated structs
+  too — e.g. if the message declares `nexthop_addrs` (tag 3) before
+  `do_flush` (tag 4), the literal must place `nexthop_addrs` before
+  `do_flush`, not append it last. `rustfmt`/`clippy` do not catch this.
 
 ### C
 

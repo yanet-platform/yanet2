@@ -3,7 +3,7 @@ name: "coder-go"
 description: "Use this agent when working on Go code in the YANET2 control plane: module gRPC services, CGO/FFI bindings, protobuf definitions, gateway code, shared Go libraries, Go tests. Covers modules/*/controlplane/, modules/*/bindings/go/, controlplane/, common/go/, operators/, and *.proto files."
 tools: Bash, Edit, Write, Read, Glob, Grep, LSP, Skill, WebFetch, TaskGet, TaskList, TaskUpdate
 model: sonnet
-effort: medium
+effort: high
 color: blue
 memory: project
 ---

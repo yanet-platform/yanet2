@@ -3,6 +3,7 @@ name: "coder-c"
 description: "Use this agent when the task involves writing or modifying C code in the YANET2 dataplane, module packet handlers, C API layers (shared memory FFI), Meson build files, fuzzing targets, or C-level tests. Covers dataplane/, modules/*/dataplane/, modules/*/api/, lib/, common/*.h, filter/, modules/*/fuzzing/, modules/*/tests/, and meson.build files."
 tools: Bash, Edit, Write, Read, Glob, Grep, LSP, Skill, TaskGet, TaskList, TaskUpdate
 model: sonnet
+effort: high
 color: blue
 memory: project
 ---
