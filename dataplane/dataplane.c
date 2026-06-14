@@ -43,6 +43,8 @@
 #include <fcntl.h>
 #include <sys/mman.h>
 
+#define DEFAULT_NET_RING_LEN 1024
+
 static int
 dataplane_worker_connect(
 	struct dataplane *dataplane,
@@ -176,6 +178,56 @@ dataplane_create_devices(
 		sizeof(struct dataplane_device) * dataplane->device_count
 	);
 
+	/*
+	 * Scan device list for yanet_ring devices. Such device consists of
+	 * two ring - rx and tx where rx for one device is a tx for another and
+	 * vice versa. The code scans out all rx ring names and instantiates
+	 * them. The format of port name is:
+	 *  net_ring_:<socket_id>:<rx_name>:<tx_name>
+	 */
+	for (uint64_t dev_idx = 0; dev_idx < device_count; ++dev_idx) {
+		struct dataplane_device_config *device_config =
+			device_configs + dev_idx;
+		if (strncmp(device_config->port_name,
+			    "net_ring_:",
+			    strlen("net_ring_:"))) {
+			continue;
+		}
+
+		char *parse = device_config->port_name + strlen("net_ring_:");
+		// Lookup for socket_id and two ring descriptors split with :
+		char *split;
+		uint32_t socket_id = strtol(parse, &split, 10);
+		if (split[0] != ':') {
+			LOG(ERROR,
+			    "failed to parse net_ring %s",
+			    device_config->port_name);
+			return -1;
+		}
+
+		parse = split + 1;
+		split = strchr(parse, ':');
+		if (split == NULL) {
+			LOG(ERROR,
+			    "failed to parse net_ring %s",
+			    device_config->port_name);
+			return -1;
+		}
+		// FIXME: do not use hardcoded constants here
+		char ring_name[split - parse + 1];
+		strncpy(ring_name, parse, split - parse);
+		ring_name[split - parse] = 0;
+		if (rte_ring_create(
+			    ring_name,
+			    DEFAULT_NET_RING_LEN,
+			    socket_id,
+			    RING_F_SP_ENQ | RING_F_SC_DEQ
+		    ) == NULL) {
+			LOG(ERROR, "failed to create ring %s", ring_name);
+			return -1;
+		}
+	}
+
 	for (uint64_t dev_idx = 0; dev_idx < device_count; ++dev_idx) {
 		struct dataplane_device_config *device_config =
 			device_configs + dev_idx;
@@ -193,6 +245,19 @@ dataplane_create_devices(
 			    )) {
 				LOG(ERROR,
 				    "failed to add vdev port %s",
+				    device_config->port_name);
+				return -1;
+			}
+		}
+
+		if (!strncmp(
+			    device_config->port_name,
+			    "net_ring_:",
+			    strlen("net_ring_:")
+		    )) {
+			if (dpdk_add_ring_port(device_config->port_name)) {
+				LOG(ERROR,
+				    "failed to add yanet ring port %s",
 				    device_config->port_name);
 				return -1;
 			}
@@ -499,7 +564,9 @@ dataplane_init(
 			config->devices + dev_idx;
 		if (strncmp(device->port_name,
 			    "virtio_user_",
-			    strlen("virtio_user_"))) {
+			    strlen("virtio_user_")) &&
+		    strncmp(device->port_name, "net_ring_", strlen("net_ring_")
+		    )) {
 			pci_port_names[pci_port_count++] = device->port_name;
 		}
 	}

@@ -7,6 +7,7 @@
 #include <rte_eal.h>
 #include <rte_ether.h>
 
+#include <rte_eth_ring.h>
 #include <rte_ethdev.h>
 
 #include "logging/log.h"
@@ -118,6 +119,52 @@ dpdk_add_vdev_port(
 }
 
 int
+dpdk_add_ring_port(const char *port_name) {
+	const char *parse = port_name + strlen("net_ring_:");
+	const char *split = strchr(parse, ':');
+	if (split == NULL) {
+		LOG(ERROR, "invalid ring dev port format");
+		return -1;
+	}
+
+	uint32_t socket_id = strtol(parse, NULL, 10);
+
+	parse = split + 1;
+	split = strchr(parse, ':');
+	if (split == NULL) {
+		LOG(ERROR, "invalid ring dev port format");
+		return -1;
+	}
+
+	char rx_name[split - parse + 1];
+	strncpy(rx_name, parse, split - parse);
+	rx_name[split - parse] = 0;
+	struct rte_ring *rx_ring = rte_ring_lookup(rx_name);
+	if (rx_ring == NULL) {
+		LOG(ERROR, "unknown ring %s", rx_name);
+		return -1;
+	}
+
+	const char *tx_name = split + 1;
+	struct rte_ring *tx_ring = rte_ring_lookup(tx_name);
+	if (tx_ring == NULL) {
+		LOG(ERROR, "unknown ring %s", tx_name);
+		return -1;
+	}
+
+	rte_eth_from_rings(
+		port_name + strlen("net_ring_"),
+		&rx_ring,
+		1,
+		&tx_ring,
+		1,
+		socket_id
+	);
+
+	return 0;
+}
+
+int
 dpdk_port_init(
 	const char *name,
 	uint16_t *port_id,
@@ -173,7 +220,7 @@ dpdk_port_init(
 		}
 	}
 
-	if ((rc = rte_eth_dev_set_mtu(*port_id, mtu))) {
+	if (mtu && (rc = rte_eth_dev_set_mtu(*port_id, mtu))) {
 		LOG(ERROR,
 		    "failed to set mtu for port id %d (%s): %d",
 		    *port_id,

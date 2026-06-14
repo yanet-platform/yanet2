@@ -23,6 +23,9 @@ dpdk_add_vdev_port(
 );
 
 int
+dpdk_add_ring_port(const char *port_name);
+
+int
 dpdk_port_init(
 	const char *name,
 	uint16_t *port_id,
