@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { Action } from '../../../api/acl';
 import { ActionKind, ACTION_KIND_LABELS } from '../../../api/acl';
-import { formatIPNet, toaster, copyToClipboard, extractBytes } from '../../../utils';
+import { toaster, copyToClipboard } from '../../../utils';
 import { getProtocolTone, IpAddressChip, ProtoChip as SharedProtoChip } from '../_shared/chips';
 
 // Protocol names per IANA IP protocol number.
@@ -119,14 +119,6 @@ interface IpNetChipProps {
 /** Renders a CIDR chip, colored differently for IPv4 vs IPv6. */
 export const IpNetChip: React.FC<IpNetChipProps> = ({ cidr }) => {
     return <IpAddressChip value={cidr} />;
-};
-
-/** Format an IPNet wire object to a CIDR string. */
-export const formatIPNetChip = (net: { addr?: string | Uint8Array | number[]; mask?: string | Uint8Array | number[] }): string => {
-    const addrBytes = extractBytes(net.addr);
-    const maskBytes = extractBytes(net.mask);
-    if (!addrBytes || addrBytes.length === 0) return '';
-    return formatIPNet(addrBytes, maskBytes);
 };
 
 interface ChipListModalProps<T> {

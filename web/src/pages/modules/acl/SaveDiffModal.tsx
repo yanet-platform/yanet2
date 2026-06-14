@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Dialog, Text } from '@gravity-ui/uikit';
 import type { Rule } from '../../../api/acl';
 import { ActionKind } from '../../../api/acl';
-import { formatIPNet, extractBytes, dumpYamlDoc } from '../../../utils';
+import { formatIPNetItem, dumpYamlDoc } from '../../../utils';
 
 // TODO(acl): structured diff disabled until the per-card layout is reworked.
 
@@ -18,14 +18,8 @@ const ACTION_KIND_YAML_NAMES: Record<ActionKind, string> = {
 /** Build the serialisable object array for a set of ACL rules. Used by both YAML and JSON export. */
 export const rulesToYamlObjects = (rules: Rule[]): Array<Record<string, unknown>> => {
     return rules.map(r => {
-        const fmtIPNet = (net: { addr?: string | Uint8Array | number[]; mask?: string | Uint8Array | number[] }): string => {
-            const addrBytes = extractBytes(net.addr);
-            const maskBytes = extractBytes(net.mask);
-            if (!addrBytes) return '';
-            return formatIPNet(addrBytes, maskBytes);
-        };
-        const srcs = (r.srcs ?? []).map(fmtIPNet).filter(Boolean);
-        const dsts = (r.dsts ?? []).map(fmtIPNet).filter(Boolean);
+        const srcs = (r.srcs ?? []).map(formatIPNetItem).filter(Boolean);
+        const dsts = (r.dsts ?? []).map(formatIPNetItem).filter(Boolean);
         const fmtRange = (rng: { from?: number; to?: number }): { from: number; to: number } => ({
             from: rng.from ?? 0,
             to: rng.to ?? 0,

@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import type { Rule } from '../../../api/forward';
 import { ForwardMode } from '../../../api/forward';
-import { formatIPNet, extractBytes, dumpYamlDoc } from '../../../utils';
+import { formatIPNetItem, dumpYamlDoc } from '../../../utils';
 import { SaveDiffModal as SharedSaveDiffModal } from '../../../components';
 
 /** Serialize a rules array into the canonical YAML schema for diff display. */
@@ -14,18 +14,8 @@ export const rulesToDiffYaml = (rules: Rule[]): string => {
         };
 
         const devices = (r.devices ?? []).map(d => d.name ?? '').filter(Boolean);
-        const srcs = (r.srcs ?? []).map(net => {
-            const addrBytes = extractBytes(net.addr);
-            const maskBytes = extractBytes(net.mask);
-            if (!addrBytes) return '';
-            return formatIPNet(addrBytes, maskBytes);
-        }).filter(Boolean);
-        const dsts = (r.dsts ?? []).map(net => {
-            const addrBytes = extractBytes(net.addr);
-            const maskBytes = extractBytes(net.mask);
-            if (!addrBytes) return '';
-            return formatIPNet(addrBytes, maskBytes);
-        }).filter(Boolean);
+        const srcs = (r.srcs ?? []).map(formatIPNetItem).filter(Boolean);
+        const dsts = (r.dsts ?? []).map(formatIPNetItem).filter(Boolean);
         const vlan_ranges = (r.vlan_ranges ?? []).map(vr => ({
             from: vr.from ?? 0,
             to: vr.to ?? 0,
