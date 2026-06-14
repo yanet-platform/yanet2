@@ -13,7 +13,7 @@ import { PrefixSaveDiffModal } from './PrefixSaveDiffModal';
 import { AddConfigModal, DeleteConfigModal, BulkDeleteModal, CommandPaletteHeader } from '../../../components';
 import { useDraftShortcuts, useDraftPageHandlers, useDraftPageState, useDraftPageDerived } from '../../../components/draft';
 import type { Command, RowAdapter, PagePaletteContribution } from '../../../components/command-palette';
-import { buildConfigCommands } from '../../../components/command-palette';
+import { buildConfigCommands, buildDraftCommands } from '../../../components/command-palette';
 import '../../../styles/chrome.scss';
 import './decap.scss';
 
@@ -111,24 +111,11 @@ const DecapPage: React.FC = () => {
                 onSelect: () => openAdd(),
             },
         ];
-        if (currentIsDirty) {
-            list.push({
-                id: '__save',
-                icon: '✓',
-                label: 'Save changes',
-                sub: 'Open the diff and save dialog',
-                keywords: 'save commit apply',
-                onSelect: () => handlers.handleCommitPress(),
-            });
-            list.push({
-                id: '__discard',
-                icon: '⟲',
-                label: 'Discard changes',
-                sub: 'Revert to the last saved state',
-                keywords: 'discard revert undo reset',
-                onSelect: () => handlers.handleDiscard(),
-            });
-        }
+        list.push(...buildDraftCommands({
+            currentIsDirty,
+            onSave: () => handlers.handleCommitPress(),
+            onDiscard: () => handlers.handleDiscard(),
+        }));
         list.push(...buildConfigCommands({
             currentConfig,
             draftConfigs,

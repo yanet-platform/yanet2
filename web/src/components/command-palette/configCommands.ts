@@ -80,3 +80,45 @@ export const buildConfigCommands = (options: ConfigCommandsOptions): Command[] =
 
     return list;
 };
+
+/** Options for building the draft save/discard command pair. */
+export interface DraftCommandsOptions {
+    /** Whether the active config has unsaved changes. */
+    currentIsDirty: boolean;
+    /** Called when the user selects "Save changes". */
+    onSave: () => void;
+    /** Called when the user selects "Discard changes". */
+    onDiscard: () => void;
+}
+
+/**
+ * Builds the Save / Discard command pair shown when the active draft config
+ * has unsaved changes.
+ *
+ * Returns an empty list when the config is clean, so call sites can always
+ * spread the result unconditionally.
+ */
+export const buildDraftCommands = (options: DraftCommandsOptions): Command[] => {
+    const { currentIsDirty, onSave, onDiscard } = options;
+    if (!currentIsDirty) {
+        return [];
+    }
+    return [
+        {
+            id: '__save',
+            icon: '✓',
+            label: 'Save changes',
+            sub: 'Open the diff and save dialog',
+            keywords: 'save commit apply',
+            onSelect: onSave,
+        },
+        {
+            id: '__discard',
+            icon: '⟲',
+            label: 'Discard changes',
+            sub: 'Revert to the last saved state',
+            keywords: 'discard revert undo reset',
+            onSelect: onDiscard,
+        },
+    ];
+};

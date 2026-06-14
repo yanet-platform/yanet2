@@ -18,7 +18,7 @@ import { useAclRuleCounters } from './useAclRuleCounters';
 import { AddConfigModal, DeleteConfigModal, BulkDeleteModal, CommandPaletteHeader } from '../../../components';
 import { useRulePageState } from '../../../components/draft';
 import type { Command, RowAdapter, PagePaletteContribution } from '../../../components/command-palette';
-import { buildConfigCommands } from '../../../components/command-palette';
+import { buildConfigCommands, buildDraftCommands } from '../../../components/command-palette';
 import '../../../styles/chrome.scss';
 import './acl.scss';
 
@@ -238,24 +238,11 @@ const AclPage: React.FC = () => {
                 onSelect: () => openAdd(),
             });
         }
-        if (currentIsDirty) {
-            list.push({
-                id: '__save',
-                icon: '✓',
-                label: 'Save changes',
-                sub: 'Open the diff and save dialog',
-                keywords: 'save commit apply',
-                onSelect: () => handleSavePress(),
-            });
-            list.push({
-                id: '__discard',
-                icon: '⟲',
-                label: 'Discard changes',
-                sub: 'Revert to the last saved state',
-                keywords: 'discard revert undo reset',
-                onSelect: () => { closeDrawer(); handleDiscard(); },
-            });
-        }
+        list.push(...buildDraftCommands({
+            currentIsDirty,
+            onSave: () => handleSavePress(),
+            onDiscard: () => { closeDrawer(); handleDiscard(); },
+        }));
         list.push(...buildConfigCommands({
             currentConfig,
             draftConfigs,
