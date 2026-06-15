@@ -4,6 +4,7 @@ subdir('acl') # depends on fwstate
 subdir('route')
 subdir('route-mpls')
 subdir('forward')
+subdir('mirror')
 subdir('dscp')
 subdir('nat64')
 subdir('pdump')

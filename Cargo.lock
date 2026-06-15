@@ -3357,6 +3357,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "yanet-cli-mirror"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "clap_complete",
+ "colored",
+ "log",
+ "netip",
+ "prost",
+ "prost-types",
+ "ptree",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tokio",
+ "tonic",
+ "tonic-build",
+ "yanet-cli",
+ "yanet-filterpb",
+]
+
+[[package]]
 name = "yanet-cli-nat64"
 version = "0.1.0"
 dependencies = [

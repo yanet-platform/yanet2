@@ -16,6 +16,7 @@ import (
 	decap "github.com/yanet-platform/yanet2/modules/decap/controlplane"
 	dscp "github.com/yanet-platform/yanet2/modules/dscp/controlplane"
 	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
+	mirror "github.com/yanet-platform/yanet2/modules/mirror/controlplane"
 	nat64 "github.com/yanet-platform/yanet2/modules/nat64/controlplane"
 	pdump "github.com/yanet-platform/yanet2/modules/pdump/controlplane"
 	route_mpls "github.com/yanet-platform/yanet2/modules/route-mpls/controlplane"
@@ -87,6 +88,12 @@ func buildServices(
 			name: "forward module",
 			new: func() (gateway.Service, error) {
 				return forward.NewForwardModule(modulesCfg.Forward, log)
+			},
+		},
+		{
+			name: "mirror module",
+			new: func() (gateway.Service, error) {
+				return mirror.NewMirrorModule(modulesCfg.Mirror, log)
 			},
 		},
 		{

@@ -1,0 +1,396 @@
+#include <errno.h>
+
+#include "controlplane.h"
+
+#include "config.h"
+
+#include <filter/compiler.h>
+
+#include "common/container_of.h"
+#include "lib/errors/errors.h"
+
+#include "controlplane/agent/agent.h"
+#include "controlplane/config/cp_module.h"
+
+FILTER_COMPILER_DECLARE(FWD_FILTER_VLAN_TAG, device, vlan);
+
+FILTER_COMPILER_DECLARE(FWD_FILTER_IP4_TAG, device, vlan, net4_src, net4_dst);
+
+FILTER_COMPILER_DECLARE(FWD_FILTER_IP6_TAG, device, vlan, net6_src, net6_dst);
+
+struct cp_module *
+mirror_module_config_init(
+	struct agent *agent, const char *name, yanet_error **err
+) {
+	struct mirror_module_config *config =
+		(struct mirror_module_config *)memory_balloc(
+			&agent->memory_context,
+			sizeof(struct mirror_module_config)
+		);
+	if (config == NULL) {
+		yanet_error_add(err, "failed to allocate config");
+		return NULL;
+	}
+
+	if (cp_module_init(&config->cp_module, agent, "mirror", name, err)) {
+		yanet_error_add(err, "failed to init module");
+		memory_bfree(
+			&agent->memory_context,
+			config,
+			sizeof(struct mirror_module_config)
+		);
+		return NULL;
+	}
+
+	SET_OFFSET_OF(&config->targets, NULL);
+	config->target_count = 0;
+
+	memset(&config->filter_vlan, 0, sizeof(config->filter_vlan));
+
+	memset(&config->filter_ip4, 0, sizeof(config->filter_ip4));
+
+	memset(&config->filter_ip6, 0, sizeof(config->filter_ip6));
+
+	return &config->cp_module;
+}
+
+void
+mirror_module_config_free(struct cp_module *cp_module) {
+	struct mirror_module_config *config =
+		container_of(cp_module, struct mirror_module_config, cp_module);
+
+	memory_bfree(
+		&cp_module->memory_context,
+		ADDR_OF(&config->targets),
+		sizeof(struct mirror_target) * config->target_count
+	);
+
+	filter_free(&config->filter_vlan, FWD_FILTER_VLAN_TAG);
+	filter_free(&config->filter_ip4, FWD_FILTER_IP4_TAG);
+	filter_free(&config->filter_ip6, FWD_FILTER_IP6_TAG);
+
+	// Capture agent before fini zeroes it.
+	struct agent *agent = ADDR_OF(&cp_module->agent);
+
+	cp_module_fini(cp_module);
+
+	memory_bfree(
+		&agent->memory_context,
+		config,
+		sizeof(struct mirror_module_config)
+	);
+}
+
+typedef int (*mirror_rule_check_func)(const struct mirror_rule *mirror_rule);
+
+static void
+make_filter_rules(
+	struct mirror_rule *mirror_rules,
+	uint32_t mirror_rule_count,
+	struct filter_rule *filter_rules
+) {
+	for (uint32_t mirror_rule_idx = 0; mirror_rule_idx < mirror_rule_count;
+	     ++mirror_rule_idx) {
+		struct mirror_rule *mirror_rule =
+			mirror_rules + mirror_rule_idx;
+
+		struct filter_rule *filter_rule =
+			filter_rules + mirror_rule_idx;
+		filter_rule->device_count = mirror_rule->devices.count;
+		filter_rule->devices = mirror_rule->devices.items;
+
+		filter_rule->vlan_range_count = mirror_rule->vlan_ranges.count;
+		filter_rule->vlan_ranges = mirror_rule->vlan_ranges.items;
+
+		filter_rule->net4.src_count = mirror_rule->src_net4s.count;
+		filter_rule->net4.srcs = mirror_rule->src_net4s.items;
+		filter_rule->net4.dst_count = mirror_rule->dst_net4s.count;
+		filter_rule->net4.dsts = mirror_rule->dst_net4s.items;
+
+		filter_rule->net6.src_count = mirror_rule->src_net6s.count;
+		filter_rule->net6.srcs = mirror_rule->src_net6s.items;
+		filter_rule->net6.dst_count = mirror_rule->dst_net6s.count;
+		filter_rule->net6.dsts = mirror_rule->dst_net6s.items;
+	}
+}
+
+static uint32_t
+filter_mirror_rules(
+	struct mirror_rule *mirror_rules,
+	uint32_t mirror_rule_count,
+	const struct filter_rule *filter_rules,
+	const struct filter_rule **filter_rule_ptrs,
+	mirror_rule_check_func check
+) {
+	uint32_t filter_rule_idx = 0;
+	for (uint32_t mirror_rule_idx = 0; mirror_rule_idx < mirror_rule_count;
+	     ++mirror_rule_idx) {
+		struct mirror_rule *mirror_rule =
+			mirror_rules + mirror_rule_idx;
+
+		if (!check(mirror_rule)) {
+			filter_rule_ptrs[mirror_rule_idx] = NULL;
+		} else {
+			filter_rule_ptrs[mirror_rule_idx] =
+				filter_rules + mirror_rule_idx;
+			++filter_rule_idx;
+		}
+	}
+
+	return filter_rule_idx;
+}
+
+static int
+check_mirror_rule_l2(const struct mirror_rule *mirror_rule) {
+	return !mirror_rule->src_net6s.count && !mirror_rule->dst_net6s.count &&
+	       !mirror_rule->src_net4s.count && !mirror_rule->dst_net4s.count;
+}
+
+static int
+check_has_ip4(const struct mirror_rule *mirror_rule) {
+	return mirror_rule->src_net4s.count && mirror_rule->dst_net4s.count;
+}
+
+static int
+check_has_ip6(const struct mirror_rule *mirror_rule) {
+	return mirror_rule->src_net6s.count && mirror_rule->dst_net6s.count;
+}
+
+static int
+check_mirror_rule_ip4(const struct mirror_rule *mirror_rule) {
+	return check_has_ip4(mirror_rule);
+}
+
+static int
+check_mirror_rule_ip6(const struct mirror_rule *mirror_rule) {
+	return check_has_ip6(mirror_rule);
+}
+
+static int
+mirror_module_init_l2(
+	struct cp_module *cp_module,
+	struct mirror_rule *mirror_rules,
+	uint32_t mirror_rule_count,
+	struct filter_rule *filter_rules,
+	const struct filter_rule **filter_rule_ptrs,
+	yanet_error **err
+) {
+	struct mirror_module_config *config =
+		container_of(cp_module, struct mirror_module_config, cp_module);
+
+	filter_mirror_rules(
+		mirror_rules,
+		mirror_rule_count,
+		filter_rules,
+		filter_rule_ptrs,
+		check_mirror_rule_l2
+	);
+
+	int rc = filter_init(
+		&config->filter_vlan,
+		FWD_FILTER_VLAN_TAG,
+		filter_rule_ptrs,
+		mirror_rule_count,
+		&cp_module->memory_context,
+		err
+	);
+	if (rc) {
+		yanet_error_add(err, "failed to init filter_vlan");
+	}
+	return rc;
+}
+
+static int
+mirror_module_init_ip4(
+	struct cp_module *cp_module,
+	struct mirror_rule *mirror_rules,
+	uint32_t mirror_rule_count,
+	struct filter_rule *filter_rules,
+	const struct filter_rule **filter_rule_ptrs,
+	yanet_error **err
+) {
+	struct mirror_module_config *config =
+		container_of(cp_module, struct mirror_module_config, cp_module);
+
+	filter_mirror_rules(
+		mirror_rules,
+		mirror_rule_count,
+		filter_rules,
+		filter_rule_ptrs,
+		check_mirror_rule_ip4
+	);
+
+	int rc = filter_init(
+		&config->filter_ip4,
+		FWD_FILTER_IP4_TAG,
+		filter_rule_ptrs,
+		mirror_rule_count,
+		&cp_module->memory_context,
+		err
+	);
+	if (rc) {
+		yanet_error_add(err, "failed to init filter_ip4");
+	}
+	return rc;
+}
+
+static int
+mirror_module_init_ip6(
+	struct cp_module *cp_module,
+	struct mirror_rule *mirror_rules,
+	uint32_t mirror_rule_count,
+	struct filter_rule *filter_rules,
+	const struct filter_rule **filter_rule_ptrs,
+	yanet_error **err
+) {
+	struct mirror_module_config *config =
+		container_of(cp_module, struct mirror_module_config, cp_module);
+
+	filter_mirror_rules(
+		mirror_rules,
+		mirror_rule_count,
+		filter_rules,
+		filter_rule_ptrs,
+		check_mirror_rule_ip6
+	);
+
+	int rc = filter_init(
+		&config->filter_ip6,
+		FWD_FILTER_IP6_TAG,
+		filter_rule_ptrs,
+		mirror_rule_count,
+		&cp_module->memory_context,
+		err
+	);
+	if (rc) {
+		yanet_error_add(err, "failed to init filter_ip6");
+	}
+	return rc;
+}
+
+int
+mirror_module_config_update(
+	struct cp_module *cp_module,
+	struct mirror_rule *mirror_rules,
+	uint32_t rule_count,
+	yanet_error **err
+) {
+	struct mirror_module_config *config =
+		container_of(cp_module, struct mirror_module_config, cp_module);
+
+	struct mirror_target *targets = (struct mirror_target *)memory_balloc(
+		&cp_module->memory_context,
+		sizeof(struct mirror_target) * rule_count
+	);
+	if (targets == NULL) {
+		goto error;
+	}
+
+	SET_OFFSET_OF(&config->targets, targets);
+	config->target_count = rule_count;
+
+	// Just collect and link all devices
+	for (uint32_t idx = 0; idx < rule_count; ++idx) {
+		struct mirror_rule *rule = mirror_rules + idx;
+
+		if (cp_module_link_device(
+			    cp_module,
+			    rule->target,
+			    &targets[idx].device_id,
+			    err
+		    )) {
+			goto error_target;
+		}
+
+		targets[idx].mode = rule->mode;
+
+		if ((targets[idx].counter_id = counter_registry_register(
+			     &cp_module->counter_registry, rule->counter, 2, err
+		     )) == (uint64_t)-1) {
+			goto error_target;
+		}
+
+		for (uint32_t idx = 0; idx < rule->devices.count; ++idx) {
+			if (cp_module_link_device(
+				    cp_module,
+				    rule->devices.items[idx].name,
+				    &rule->devices.items[idx].id,
+				    err
+			    )) {
+				goto error_target;
+			}
+		}
+	}
+
+	// Create per filter rule list
+	struct filter_rule *filter_rules = (struct filter_rule *)malloc(
+		sizeof(struct filter_rule) * rule_count
+	);
+	if (filter_rules == NULL) {
+		goto error_target;
+	}
+
+	make_filter_rules(mirror_rules, rule_count, filter_rules);
+
+	const struct filter_rule **filter_rule_ptrs =
+		(const struct filter_rule **)malloc(
+			sizeof(struct filter_rule *) * rule_count
+		);
+	if (filter_rule_ptrs == NULL) {
+		goto error_rules;
+	}
+
+	if (mirror_module_init_l2(
+		    cp_module,
+		    mirror_rules,
+		    rule_count,
+		    filter_rules,
+		    filter_rule_ptrs,
+		    err
+	    ))
+		goto error_rule_ptrs;
+
+	if (mirror_module_init_ip4(
+		    cp_module,
+		    mirror_rules,
+		    rule_count,
+		    filter_rules,
+		    filter_rule_ptrs,
+		    err
+	    ))
+		goto error_rule_ptrs;
+
+	if (mirror_module_init_ip6(
+		    cp_module,
+		    mirror_rules,
+		    rule_count,
+		    filter_rules,
+		    filter_rule_ptrs,
+		    err
+	    ))
+		goto error_rule_ptrs;
+
+	free(filter_rule_ptrs);
+	free(filter_rules);
+
+	return 0;
+
+error_rule_ptrs:
+	free(filter_rule_ptrs);
+
+error_rules:
+	free(filter_rules);
+
+error_target:
+	memory_bfree(
+		&cp_module->memory_context,
+		targets,
+		sizeof(struct mirror_target) * rule_count
+	);
+	SET_OFFSET_OF(&config->targets, NULL);
+	config->target_count = 0;
+
+error:
+
+	return -1;
+}

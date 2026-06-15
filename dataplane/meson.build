@@ -44,6 +44,7 @@ dependencies = lib_dependencies + [
   lib_dscp_dp_dep,
   lib_acl_dp_dep,
   lib_forward_dp_dep,
+  lib_mirror_dp_dep,
   lib_route_dp_dep,
   lib_route_mpls_dp_dep,
   lib_nat64_dp_dep,

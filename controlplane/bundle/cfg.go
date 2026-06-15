@@ -8,6 +8,7 @@ import (
 	decap "github.com/yanet-platform/yanet2/modules/decap/controlplane"
 	dscp "github.com/yanet-platform/yanet2/modules/dscp/controlplane"
 	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
+	mirror "github.com/yanet-platform/yanet2/modules/mirror/controlplane"
 	nat64 "github.com/yanet-platform/yanet2/modules/nat64/controlplane"
 	pdump "github.com/yanet-platform/yanet2/modules/pdump/controlplane"
 	route_mpls "github.com/yanet-platform/yanet2/modules/route-mpls/controlplane"
@@ -29,6 +30,8 @@ type ModulesConfig struct {
 	DSCP *dscp.Config `yaml:"dscp"`
 	// Forward is the configuration for the forward module.
 	Forward *forward.Config `yaml:"forward"`
+	// Mirror is the configuration for the mirror module.
+	Mirror *mirror.Config `yaml:"mirror"`
 	// NAT64 is the configuration for the NAT64 module.
 	NAT64 *nat64.Config `yaml:"nat64"`
 	// Pdump is the configuration for the packet dump module.
@@ -55,6 +58,7 @@ func DefaultModulesConfig() ModulesConfig {
 		Decap:     decap.DefaultConfig(),
 		DSCP:      dscp.DefaultConfig(),
 		Forward:   forward.DefaultConfig(),
+		Mirror:    mirror.DefaultConfig(),
 		NAT64:     nat64.DefaultConfig(),
 		Pdump:     pdump.DefaultConfig(),
 		ACL:       acl.DefaultConfig(),
@@ -83,6 +87,9 @@ func (m *ModulesConfig) Validate() error {
 	}
 	if m.Forward == nil {
 		return fmt.Errorf("forward module is not configured")
+	}
+	if m.Mirror == nil {
+		return fmt.Errorf("mirror module is not configured")
 	}
 	if m.NAT64 == nil {
 		return fmt.Errorf("nat64 module is not configured")

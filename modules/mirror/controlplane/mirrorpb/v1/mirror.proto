@@ -1,0 +1,72 @@
+syntax = "proto3";
+
+package modules.mirror.controlplane.mirrorpb.v1;
+
+import "common/filterpb/v1/filter.proto";
+
+option go_package = "github.com/yanet-platform/yanet2/modules/mirror/controlplane/mirrorpb/v1;mirrorpb";
+
+// MirrorService is a controlplane service for mirroring module.
+service MirrorService {
+  // ListConfigs returns all mirror module configurations.
+  rpc ListConfigs(ListConfigsRequest) returns (ListConfigsResponse);
+
+  // ShowConfig returns the current configuration for the mirror module.
+  rpc ShowConfig(ShowConfigRequest) returns (ShowConfigResponse);
+
+  rpc UpdateConfig(UpdateConfigRequest) returns (UpdateConfigResponse);
+
+  // Allows to delete mirror config if it is not referenced
+  // by any pipeline.
+  rpc DeleteConfig(DeleteConfigRequest) returns (DeleteConfigResponse);
+}
+
+message ListConfigsRequest {}
+
+// ListConfigsResponse contains existing configurations.
+message ListConfigsResponse { repeated string configs = 1; }
+
+// ShowConfigResponse retrieves the runtime configuration for the mirror
+// module.
+message ShowConfigRequest { string name = 1; }
+
+// ShowConfigResponse contains the configuration details of the mirror module.
+message ShowConfigResponse {
+  string name = 1;
+  repeated Rule rules = 2;
+}
+
+enum MirrorMode {
+  NONE = 0;
+  IN = 1;
+  OUT = 2;
+}
+
+message Rule {
+  Action action = 1;
+
+  repeated common.filterpb.v1.Device devices = 2;
+  repeated common.filterpb.v1.VlanRange vlan_ranges = 3;
+  repeated common.filterpb.v1.IPNet srcs = 4;
+  repeated common.filterpb.v1.IPNet dsts = 5;
+}
+
+message Action {
+  string target = 1;
+  MirrorMode mode = 2;
+  string counter = 3;
+}
+
+message UpdateConfigRequest {
+  string name = 1;
+  repeated Rule rules = 2;
+}
+
+message UpdateConfigResponse { string error = 1; }
+
+// Delete config with specified name.
+message DeleteConfigRequest {
+  string name = 1;
+}
+
+message DeleteConfigResponse { bool deleted = 1; }

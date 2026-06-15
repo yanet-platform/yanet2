@@ -13,6 +13,7 @@ package dataplaneut
 #cgo LDFLAGS: -L../../../build/modules/acl/dataplane
 #cgo LDFLAGS: -L../../../build/modules/fwstate/dataplane
 #cgo LDFLAGS: -L../../../build/modules/forward/dataplane
+#cgo LDFLAGS: -L../../../build/modules/mirror/dataplane
 #cgo LDFLAGS: -L../../../build/modules/route/dataplane
 #cgo LDFLAGS: -L../../../build/modules/nat64/dataplane
 #cgo LDFLAGS: -L../../../build/modules/pdump/dataplane
@@ -37,7 +38,7 @@ package dataplaneut
 // references between them (fwstate->acl, worker->pipeline, etc.).
 // fwstate depends on acl — acl must come first inside the group.
 #cgo LDFLAGS: -Wl,--start-group
-#cgo LDFLAGS: -lblackhole_dp -ldecap_dp -ldscp_dp -lacl_dp -lfwstate_dp -lforward_dp -lroute_dp -lnat64_dp -lpdump_dp
+#cgo LDFLAGS: -lblackhole_dp -ldecap_dp -ldscp_dp -lacl_dp -lfwstate_dp -lforward_dp -lmirror_dp -lroute_dp -lnat64_dp -lpdump_dp
 #cgo LDFLAGS: -lplain_dp -lvlan_dp
 #cgo LDFLAGS: -ldataplane_ut -lpipeline -lmodule -lworker_dp -lconfig_dp -lpacket
 #cgo LDFLAGS: -llogging -lagent -lconfig_cp -lcounters -lerrors -lfilter_compiler -lfwstate -llib_utils
@@ -96,6 +97,7 @@ keep_refs(void **ptrs) {
 	extern struct module *new_module_acl(void);
 	extern struct module *new_module_fwstate(void);
 	extern struct module *new_module_forward(void);
+	extern struct module *new_module_mirror(void);
 	extern struct module *new_module_route(void);
 	extern struct module *new_module_nat64(void);
 	extern struct module *new_module_pdump(void);
@@ -110,6 +112,7 @@ keep_refs(void **ptrs) {
 		new_module_acl,
 		new_module_fwstate,
 		new_module_forward,
+		new_module_mirror,
 		new_module_route,
 		new_module_nat64,
 		new_module_pdump,
