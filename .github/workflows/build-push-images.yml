@@ -11,6 +11,8 @@ on:
   push:
     tags:
       - 'v*'
+  pull_request:
+    branches: ["**"]
 
 jobs:
   build-deb:
@@ -98,6 +100,12 @@ jobs:
           - component: route-operator
             image: ghcr.io/yanet-platform/yanet2/route-operator
             dockerfile: deploy/yanet-route-operator.Dockerfile
+          - component: forward-operator
+            image: ghcr.io/yanet-platform/yanet2/forward-operator
+            dockerfile: deploy/yanet-forward-operator.Dockerfile
+          - component: decap-operator
+            image: ghcr.io/yanet-platform/yanet2/decap-operator
+            dockerfile: deploy/yanet-decap-operator.Dockerfile
     steps:
       - uses: actions/checkout@v4
 
@@ -126,6 +134,7 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
+            type=sha,format=short,enable=${{ github.event_name == 'pull_request' }}
             type=raw,value=${{ inputs.tag }},enable=${{ github.event_name == 'workflow_dispatch' && inputs.tag != '' }}
             type=raw,value=latest,enable=${{ github.event_name == 'workflow_dispatch' && inputs.tag == '' }}
 
