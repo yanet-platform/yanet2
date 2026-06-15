@@ -1,6 +1,5 @@
 #include "worker.h"
 
-#include "../../utils/mbuf.h"
 #include "lib/dataplane/packet/data.h"
 #include "lib/dataplane/packet/packet.h"
 
@@ -19,7 +18,9 @@ worker_packet_alloc(struct dp_worker *dp_worker) {
 
 struct packet *
 worker_clone_packet(struct dp_worker *dp_worker, struct packet *packet) {
-	struct rte_mbuf *mbuf = rte_pktmbuf_alloc(dp_worker->rx_mempool);
+	struct rte_mbuf *mbuf = rte_pktmbuf_copy(
+		packet->mbuf, dp_worker->rx_mempool, 0, UINT32_MAX
+	);
 	if (mbuf == NULL) {
 		return NULL;
 	}
@@ -29,7 +30,6 @@ worker_clone_packet(struct dp_worker *dp_worker, struct packet *packet) {
 	packet_clone->mbuf = mbuf;
 	packet_clone->next = NULL;
 
-	mbuf_copy(packet_clone->mbuf, packet->mbuf);
 	packet_refresh_data_len(packet_clone);
 	return packet_clone;
 }

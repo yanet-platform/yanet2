@@ -95,3 +95,18 @@ zone_test = executable(
   include_directories: yanet_rootdir,
 )
 test('zone', zone_test, suite: 'lib_dataplane')
+
+worker_clone_test = executable(
+  'worker_clone_test',
+  'worker_clone_test.c',
+  c_args: yanet_c_args,
+  link_args: yanet_link_args,
+  dependencies: [
+    lib_worker_dp_dep,
+    lib_dataplane_ut_dep,
+    lib_logging_dep,
+    libdpdk_dep,
+  ],
+  include_directories: yanet_rootdir,
+)
+test('worker_clone', worker_clone_test, suite: 'lib_worker')
