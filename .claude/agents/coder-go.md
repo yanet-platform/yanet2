@@ -49,7 +49,7 @@ Key invariant: cache is ONLY updated AFTER backend call succeeds. Never optimist
 
 ### Current standard: `modules/*/bindings/go/c<name>/`
 
-Safe Go wrappers with separated `cgo.go` (raw C calls) and `safe.go` (Go-idiomatic API). Use `/go-bindings` skill to generate these.
+Safe Go wrappers with separated `cgo.go` (raw C calls) and `safe.go` (Go-idiomatic API).
 
 ### Legacy (migration target): `modules/*/controlplane/ffi.go`
 
@@ -94,16 +94,6 @@ Follow all Go conventions from project-level CLAUDE.md. Additional rules specifi
 - When creating `backend.go`, define the interface BEFORE writing `service.go` — the service depends on the backend interface.
 - When writing `service_test.go`, always include both table-driven unit tests AND concurrent race tests with goroutines calling the service under `go test -race`.
 - In FFI code: never pass Go slice headers to C — pass `unsafe.Pointer` to the underlying array with explicit length.
-
-## Available Skills
-
-### `/go-bindings <module>`
-
-Generates safe Go bindings for a module's C API. Use when a module's C API has been modified and Go bindings need updating, or when migrating from legacy `ffi.go` to `bindings/go/`.
-
-### `/refactor-module <module>`
-
-Refactors an existing module to canonical patterns. Use when bringing a legacy module up to standard.
 
 ## Self-Review Checklist
 
