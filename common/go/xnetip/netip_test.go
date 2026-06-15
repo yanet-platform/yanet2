@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"pgregory.net/rapid"
 )
 
 func TestLastAddr(t *testing.T) {
@@ -580,4 +581,108 @@ func BenchmarkRangeToCIDR(b *testing.B) {
 			}
 		})
 	}
+}
+
+// genV4Addr generates pure IPv4 addresses via AddrFrom4.
+//
+// IPv4-in-IPv6 (Is4In6) addresses are deliberately excluded — the impl
+// branches on Is4() and does not special-case the mapped form.
+var genV4Addr = rapid.Custom(func(t *rapid.T) netip.Addr {
+	raw := rapid.SliceOfN(rapid.Byte(), 4, 4).Draw(t, "v4bytes")
+	return netip.AddrFrom4([4]byte(raw))
+})
+
+// genV6Addr generates pure IPv6 addresses via AddrFrom16.
+//
+// IPv4-in-IPv6 (Is4In6) addresses are deliberately excluded — the impl
+// branches on Is4() and does not special-case the mapped form.
+var genV6Addr = rapid.Custom(func(t *rapid.T) netip.Addr {
+	raw := rapid.SliceOfN(rapid.Byte(), 16, 16).Draw(t, "v6bytes")
+	return netip.AddrFrom16([16]byte(raw))
+})
+
+// genBitsV4 generates IPv4 prefix lengths, concentrating on boundary values.
+var genBitsV4 = rapid.OneOf(
+	rapid.SampledFrom([]int{0, 1, 31, 32}),
+	rapid.IntRange(0, 32),
+)
+
+// genBitsV6 generates IPv6 prefix lengths, concentrating on boundary values.
+var genBitsV6 = rapid.OneOf(
+	rapid.SampledFrom([]int{0, 1, 63, 64, 65, 127, 128}),
+	rapid.IntRange(0, 128),
+)
+
+// genPrefix draws an unmasked prefix from either address family.
+//
+// Unmasked prefixes exercise LastAddr's host-bit OR path.
+var genPrefix = rapid.Custom(func(t *rapid.T) netip.Prefix {
+	if rapid.Bool().Draw(t, "isV4") {
+		addr := genV4Addr.Draw(t, "addr")
+		b := genBitsV4.Draw(t, "bits")
+		return netip.PrefixFrom(addr, b)
+	}
+	addr := genV6Addr.Draw(t, "addr")
+	b := genBitsV6.Draw(t, "bits")
+	return netip.PrefixFrom(addr, b)
+})
+
+// genRangeSameFamily draws two addresses of the same family, ordered so that
+// from <= to (by Compare).
+func genRangeSameFamily(t *rapid.T) (from, to netip.Addr) {
+	if rapid.Bool().Draw(t, "isV4") {
+		a := genV4Addr.Draw(t, "addrA")
+		b := genV4Addr.Draw(t, "addrB")
+		if a.Compare(b) <= 0 {
+			return a, b
+		}
+		return b, a
+	}
+	a := genV6Addr.Draw(t, "addrA")
+	b := genV6Addr.Draw(t, "addrB")
+	if a.Compare(b) <= 0 {
+		return a, b
+	}
+	return b, a
+}
+
+// TestRangeToCIDRRoundTripPBT verifies that every masked prefix round-trips
+// through RangeToCIDR: RangeToCIDR(p.Addr(), LastAddr(p)) == (p, true).
+func TestRangeToCIDRRoundTripPBT(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		raw := genPrefix.Draw(t, "prefix")
+		p := raw.Masked()
+
+		got, ok := RangeToCIDR(p.Addr(), LastAddr(p))
+		require.True(t, ok, "RangeToCIDR(%s, %s) returned false", p.Addr(), LastAddr(p))
+		require.Equal(t, p, got)
+	})
+}
+
+// TestRangeToCIDRsStructuralPBT checks structural invariants of RangeToCIDRs
+// output: every prefix is masked, has the correct family, and adjacent
+// prefixes are contiguous, with the first starting at from and the last
+// ending at to.
+func TestRangeToCIDRsStructuralPBT(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		from, to := genRangeSameFamily(t)
+		prefixes, ok := RangeToCIDRs(from, to)
+		require.True(t, ok)
+		require.NotEmpty(t, prefixes)
+
+		for idx, p := range prefixes {
+			assert.Equal(t, p.Masked(), p, "prefix[%d] %s is not masked", idx, p)
+			assert.Equal(t, from.Is4(), p.Addr().Is4(), "prefix[%d] family mismatch", idx)
+		}
+
+		assert.Equal(t, from, prefixes[0].Addr(), "first prefix must start at from")
+		assert.Equal(t, to, LastAddr(prefixes[len(prefixes)-1]), "last prefix must end at to")
+
+		for idx := 1; idx < len(prefixes); idx++ {
+			prev := LastAddr(prefixes[idx-1])
+			next := prefixes[idx].Addr()
+			assert.Equal(t, prev.Next(), next,
+				"gap between prefixes[%d] and prefixes[%d]", idx-1, idx)
+		}
+	})
 }
