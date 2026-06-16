@@ -45,6 +45,13 @@ struct dataplane_config {
 	char storage[80];
 	uint64_t dpdk_memory;
 
+	// IOVA mode passed to DPDK EAL via --iova-mode.
+	// Empty string means "do not pass the flag" (EAL autodetect).
+	// Valid values: "pa" (physical addresses, required for vfio
+	// no-iommu / uio in VMs without an IOMMU) or "va" (virtual
+	// addresses, required by virtio_user with the vhost-net backend).
+	char iova_mode[8];
+
 	uint16_t numa_count;
 
 	uint16_t instance_count;

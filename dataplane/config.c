@@ -49,6 +49,7 @@ enum state {
 	state_dataplane,
 	state_dataplane_storage,
 	state_dataplane_dpdk_memory,
+	state_dataplane_iova_mode,
 
 	state_instances,
 	state_instance,
@@ -145,6 +146,12 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 					strtol(start, &end, 10);
 				if (*end != '\0')
 					goto error;
+				state = state_dataplane;
+				break;
+			case state_dataplane_iova_mode:
+				strtcpy(dataplane->iova_mode,
+					start,
+					sizeof(dataplane->iova_mode));
 				state = state_dataplane;
 				break;
 			case state_loglevel:
@@ -291,6 +298,8 @@ dataplane_config_init(FILE *file, struct dataplane_config **config) {
 					state = state_dataplane_storage;
 				} else if (!strcmp("dpdk_memory", start)) {
 					state = state_dataplane_dpdk_memory;
+				} else if (!strcmp("iova_mode", start)) {
+					state = state_dataplane_iova_mode;
 				} else if (!strcmp("instances", start)) {
 					state = state_instances;
 				} else if (!strcmp("devices", start)) {

@@ -505,7 +505,11 @@ dataplane_init(
 
 	LOG(INFO, "initialize dpdk");
 	int rc = dpdk_init(
-		binary, config->dpdk_memory, pci_port_count, pci_port_names
+		binary,
+		config->dpdk_memory,
+		config->iova_mode,
+		pci_port_count,
+		pci_port_names
 	);
 	free(pci_port_names);
 	if (rc == -1) {

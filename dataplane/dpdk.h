@@ -9,6 +9,7 @@ int
 dpdk_init(
 	const char *binary,
 	uint64_t dpdk_memory,
+	const char *iova_mode,
 	size_t port_count,
 	const char *const *port_names
 );

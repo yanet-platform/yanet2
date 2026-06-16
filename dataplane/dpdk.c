@@ -48,6 +48,7 @@ int
 dpdk_init(
 	const char *binary,
 	uint64_t dpdk_memory,
+	const char *iova_mode,
 	size_t port_count,
 	const char *const *port_names
 ) {
@@ -71,6 +72,19 @@ dpdk_init(
 	}
 	if (eal_args_add(&args, "%lu", dpdk_memory)) {
 		goto error;
+	}
+
+	// Explicitly pin the IOVA mode when requested via configuration.
+	// This is required inside VMs without an IOMMU, where devices are
+	// bound to vfio-pci in no-iommu mode (or uio): such devices need
+	// IOVA as physical addresses ("pa"), but EAL may otherwise pick
+	// "va" (e.g. because of a virtio_user/vhost-net port), which makes
+	// the no-iommu PCI device fail to probe.
+	if (iova_mode != NULL && iova_mode[0] != '\0') {
+		LOG(INFO, "force DPDK IOVA mode to '%s'", iova_mode);
+		if (eal_args_add(&args, "--iova-mode=%s", iova_mode)) {
+			goto error;
+		}
 	}
 
 	args.argv[args.argc] = NULL;
