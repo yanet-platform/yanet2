@@ -1,6 +1,6 @@
 #include "pipeline_round.h"
 
-#include "common/memory_address.h"
+#include "lib/controlplane/config/econtext.h"
 #include "lib/controlplane/config/zone.h"
 #include "lib/dataplane/config/zone.h"
 #include "lib/dataplane/module/packet_front.h"
@@ -16,6 +16,16 @@ worker_pipeline_round(
 ) {
 	uint64_t device_count =
 		cp_config_gen->device_registry.registry.capacity;
+
+	/*
+	 * Force a full traversal on the first iteration.
+	 *
+	 * Every device, and through it every pipeline, function, chain and
+	 * module, runs once per tick even when no packets arrived, so periodic
+	 * work has a chance to make progress. Later iterations only revisit
+	 * entities that received recirculated packets.
+	 */
+	int force_poll = 1;
 
 	while (1) {
 		struct packet_front schedule_input[device_count];
@@ -48,20 +58,24 @@ worker_pipeline_round(
 			);
 		}
 
-		if (empty) {
+		if (empty && !force_poll) {
 			break;
 		}
 
-		struct device_ectx **devices = config_gen_ectx->devices;
-
 		for (uint64_t idx = 0; idx < device_count; ++idx) {
-			if (packet_list_first(&schedule_input[idx].output) ==
-			    NULL) {
+			struct device_ectx *device_ectx =
+				config_gen_ectx_get_device(
+					config_gen_ectx, idx
+				);
+			if (device_ectx == NULL) {
 				continue;
 			}
 
-			struct device_ectx *device_ectx =
-				ADDR_OF(devices + idx);
+			if (!force_poll &&
+			    packet_list_first(&schedule_input[idx].output) ==
+				    NULL) {
+				continue;
+			}
 
 			device_ectx_process_input(
 				dp_worker, device_ectx, schedule_input + idx
@@ -71,13 +85,19 @@ worker_pipeline_round(
 		}
 
 		for (uint64_t idx = 0; idx < device_count; ++idx) {
-			if (packet_list_first(&schedule_output[idx].output) ==
-			    NULL) {
+			struct device_ectx *device_ectx =
+				config_gen_ectx_get_device(
+					config_gen_ectx, idx
+				);
+			if (device_ectx == NULL) {
 				continue;
 			}
 
-			struct device_ectx *device_ectx =
-				ADDR_OF(devices + idx);
+			if (!force_poll &&
+			    packet_list_first(&schedule_output[idx].output) ==
+				    NULL) {
+				continue;
+			}
 
 			device_ectx_process_output(
 				dp_worker, device_ectx, schedule_output + idx
@@ -85,5 +105,7 @@ worker_pipeline_round(
 
 			packet_front_merge(packet_front, schedule_output + idx);
 		}
+
+		force_poll = 0;
 	}
 }
