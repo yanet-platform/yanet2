@@ -2,7 +2,7 @@ use std::{collections::HashMap, fs::File, path::Path};
 
 use aclpb::{
     DeleteConfigRequest, GetMetricsRequest, ListConfigsRequest, ShowConfigRequest, UpdateConfigRequest,
-    acl_service_client::AclServiceClient,
+    acl_service_client::AclServiceClient, metrics_service_client::MetricsServiceClient,
 };
 use args::{DeleteCmd, MetricsCmd, ModeCmd, ShowCmd, UpdateCmd};
 use clap::{ArgAction, CommandFactory, Parser};
@@ -66,9 +66,19 @@ struct GaugeRow {
 }
 
 #[derive(Tabled)]
-struct HistRow {
-    #[tabled(rename = "Handler")]
-    handler: String,
+struct GrpcCallRow {
+    #[tabled(rename = "Method")]
+    method: String,
+    #[tabled(rename = "Code")]
+    code: String,
+    #[tabled(rename = "Handled")]
+    handled: String,
+}
+
+#[derive(Tabled)]
+struct GrpcLatRow {
+    #[tabled(rename = "Method")]
+    method: String,
     #[tabled(rename = "Total Calls")]
     total: String,
     #[tabled(rename = "P50")]
@@ -175,11 +185,21 @@ fn print_metrics_table(metrics: &[Metric]) {
     let mut location_map: HashMap<String, Vec<&Metric>> = HashMap::new();
     let mut gauge_keys: Vec<String> = Vec::new();
     let mut gauge_map: HashMap<String, Vec<&Metric>> = HashMap::new();
-    let mut histograms: Vec<&Metric> = Vec::new();
+    let mut grpc_counters: Vec<&Metric> = Vec::new();
+    let mut grpc_histograms: Vec<&Metric> = Vec::new();
 
     for m in metrics {
+        if m.name.starts_with("grpc_") {
+            match m.kind {
+                metric::Kind::Counter => grpc_counters.push(m),
+                metric::Kind::Histogram => grpc_histograms.push(m),
+                _ => {}
+            }
+            continue;
+        }
+
         match m.kind {
-            metric::Kind::Histogram => histograms.push(m),
+            metric::Kind::Histogram => {}
             metric::Kind::Gauge => {
                 let cfg = m.label_value("config").unwrap_or("global").to_string();
                 if !gauge_map.contains_key(&cfg) {
@@ -316,23 +336,74 @@ fn print_metrics_table(metrics: &[Metric]) {
         println!();
     }
 
-    if !histograms.is_empty() {
-        println!("ACL HANDLER LATENCIES");
+    if !grpc_counters.is_empty() {
+        // Collect started counts keyed by grpc_method.
+        let mut started: HashMap<String, u64> = HashMap::new();
+        // Collect handled counts keyed by (grpc_method, grpc_code), preserving order.
+        let mut handled_keys: Vec<(String, String)> = Vec::new();
+        let mut handled: HashMap<(String, String), u64> = HashMap::new();
+
+        for m in &grpc_counters {
+            let method = m.label_value("grpc_method").unwrap_or("").to_string();
+            if m.name == "grpc_server_started_total" {
+                let count = m.value.unwrap_or(0.0) as u64;
+                *started.entry(method).or_default() += count;
+            } else if m.name == "grpc_server_handled_total" {
+                let code = m.label_value("grpc_code").unwrap_or("").to_string();
+                let key = (method, code);
+                if !handled.contains_key(&key) {
+                    handled_keys.push(key.clone());
+                }
+                *handled.entry(key).or_default() += m.value.unwrap_or(0.0) as u64;
+            }
+        }
+
+        if !handled_keys.is_empty() || !started.is_empty() {
+            println!();
+            println!("GRPC CALLS");
+            println!();
+        }
+
+        if !handled_keys.is_empty() {
+            let rows: Vec<GrpcCallRow> = handled_keys
+                .iter()
+                .map(|(method, code)| GrpcCallRow {
+                    method: method.clone(),
+                    code: code.clone(),
+                    handled: format_number(handled[&(method.clone(), code.clone())]),
+                })
+                .collect();
+            print_table_from_entries(rows);
+        }
+
+        if !started.is_empty() {
+            println!();
+            let mut started_methods: Vec<&String> = started.keys().collect();
+            started_methods.sort();
+            for method in started_methods {
+                println!("  started  {method}: {}", format_number(started[method]));
+            }
+        }
+    }
+
+    if !grpc_histograms.is_empty() {
         println!();
-        let rows: Vec<HistRow> = histograms
+        println!("GRPC HANDLING LATENCIES");
+        println!();
+        let rows: Vec<GrpcLatRow> = grpc_histograms
             .iter()
             .map(|m| {
-                let handler = m.label_value("handler").unwrap_or("unknown").to_string();
+                let method = m.label_value("grpc_method").unwrap_or("unknown").to_string();
                 match &m.histogram {
-                    Some(h) => HistRow {
-                        handler,
+                    Some(h) => GrpcLatRow {
+                        method,
                         total: format_number(h.total_count),
                         p50: metric::histogram_percentile(&h.buckets, h.total_count, 50.0),
                         p95: metric::histogram_percentile(&h.buckets, h.total_count, 95.0),
                         p99: metric::histogram_percentile(&h.buckets, h.total_count, 99.0),
                     },
-                    None => HistRow {
-                        handler,
+                    None => GrpcLatRow {
+                        method,
                         total: "-".into(),
                         p50: "-".into(),
                         p95: "-".into(),
@@ -382,6 +453,7 @@ const SERVICE_NAME: &str = "modules.acl.controlplane.aclpb.v1.ACLService";
 
 pub struct ACLService {
     client: AclServiceClient<LayeredChannel>,
+    metrics_client: MetricsServiceClient<LayeredChannel>,
     endpoint: String,
 }
 
@@ -390,7 +462,12 @@ impl ACLService {
         let channel = ync::client::connect(connection)
             .await
             .map_err(|e| Error::from_connection(e, "connect", &connection.endpoint))?;
-        let client = AclServiceClient::new(channel)
+        let client = AclServiceClient::new(channel.clone())
+            .max_decoding_message_size(256 * 1024 * 1024)
+            .max_encoding_message_size(256 * 1024 * 1024)
+            .send_compressed(CompressionEncoding::Gzip)
+            .accept_compressed(CompressionEncoding::Gzip);
+        let metrics_client = MetricsServiceClient::new(channel)
             .max_decoding_message_size(256 * 1024 * 1024)
             .max_encoding_message_size(256 * 1024 * 1024)
             .send_compressed(CompressionEncoding::Gzip)
@@ -398,6 +475,7 @@ impl ACLService {
 
         Ok(Self {
             client,
+            metrics_client,
             endpoint: connection.endpoint.clone(),
         })
     }
@@ -495,7 +573,7 @@ impl ACLService {
 
     pub async fn metrics(&mut self, cmd: MetricsCmd) -> Result<(), Error> {
         let response = self
-            .client
+            .metrics_client
             .get_metrics(GetMetricsRequest {})
             .await
             .map_err(self.map_err("metrics"))?

@@ -10,7 +10,6 @@ import (
 	"github.com/gopacket/gopacket/layers"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
 
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
 	"github.com/yanet-platform/yanet2/bindings/go/filter"
@@ -281,7 +280,7 @@ func TestACL_EmptyRules_Drop(t *testing.T) {
 	pkt := xpacket.LayersToPacket(t, &eth, &ip4, &udp)
 
 	h, agent, backend := setupACLHarness(t, []string{"port0"})
-	svc := acl.NewACLService(backend, zap.NewNop())
+	svc := acl.NewACLService(backend)
 	_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
 		Name:  "test",
 		Rules: nil,

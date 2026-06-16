@@ -6,10 +6,11 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
+	"github.com/yanet-platform/yanet2/common/go/grpcmetrics"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	"github.com/yanet-platform/yanet2/modules/acl/controlplane/aclpb/v1"
+	aclpb "github.com/yanet-platform/yanet2/modules/acl/controlplane/aclpb/v1"
 	fwstate "github.com/yanet-platform/yanet2/modules/fwstate/controlplane"
-	"github.com/yanet-platform/yanet2/modules/fwstate/controlplane/fwstatepb/v1"
+	fwstatepb "github.com/yanet-platform/yanet2/modules/fwstate/controlplane/fwstatepb/v1"
 )
 
 const (
@@ -19,17 +20,18 @@ const (
 )
 
 // ACLModule is a control-plane component for ACL (Access Control List) module
-// with integrated firewall state management
+// with integrated firewall state management.
 type ACLModule struct {
 	cfg            *Config
 	shm            *ffi.SharedMemory
 	agent          *ffi.Agent
 	aclService     *ACLService
+	metricsService *MetricsService
 	fwstateService *fwstate.FWStateService
 	log            *zap.Logger
 }
 
-// NewACLModule creates a new ACL module instance
+// NewACLModule creates a new ACL module instance.
 func NewACLModule(cfg *Config, log *zap.Logger) (*ACLModule, error) {
 	log = log.With(zap.String("module", serviceName))
 
@@ -48,7 +50,16 @@ func NewACLModule(cfg *Config, log *zap.Logger) (*ACLModule, error) {
 		return nil, fmt.Errorf("failed to attach agent to shared memory: %w", err)
 	}
 
-	aclService := NewACLService(NewBackend(agent, uint64(cfg.MemoryRequirements.Unwrap().Bytes())), log)
+	aclService := NewACLService(
+		NewBackend(agent, uint64(cfg.MemoryRequirements.Unwrap().Bytes())),
+		WithLog(log),
+		WithMetrics(grpcmetrics.NewFactory(
+			grpcmetrics.WithLabeler(labeler),
+		)),
+	)
+
+	metricsService := NewMetricsService(aclService)
+
 	aclAdapter := NewACLAdapter(aclService)
 	fwstateService := fwstate.NewFWStateService(agent, aclAdapter, log)
 
@@ -57,6 +68,7 @@ func NewACLModule(cfg *Config, log *zap.Logger) (*ACLModule, error) {
 		shm:            shm,
 		agent:          agent,
 		aclService:     aclService,
+		metricsService: metricsService,
 		fwstateService: fwstateService,
 		log:            log,
 	}, nil
@@ -71,15 +83,26 @@ func (m *ACLModule) Endpoint() string {
 }
 
 func (m *ACLModule) ServicesNames() []string {
-	return []string{serviceName, fwstateServiceName}
+	return []string{serviceName, aclpb.MetricsService_ServiceDesc.ServiceName, fwstateServiceName}
 }
 
 func (m *ACLModule) RegisterService(server *grpc.Server) {
 	aclpb.RegisterACLServiceServer(server, m.aclService)
+	aclpb.RegisterMetricsServiceServer(server, m.metricsService)
 	fwstatepb.RegisterFWStateServiceServer(server, m.fwstateService)
 }
 
-// ACLAdapter returns an adapter for fwstate module integration
+// UnaryServerInterceptors returns the gRPC unary interceptors for this module.
+func (m *ACLModule) UnaryServerInterceptors() []grpc.UnaryServerInterceptor {
+	si := m.aclService.UnaryServerInterceptor()
+	if si == nil {
+		return nil
+	}
+
+	return []grpc.UnaryServerInterceptor{si}
+}
+
+// ACLAdapter returns an adapter for fwstate module integration.
 func (m *ACLModule) ACLAdapter() *ACLAdapter {
 	return NewACLAdapter(m.aclService)
 }

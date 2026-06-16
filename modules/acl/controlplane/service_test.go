@@ -6,7 +6,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -135,7 +134,7 @@ func (m *fakeBackend) SetNewModuleErr(err error) {
 }
 
 func newTestService(b Backend) *ACLService {
-	return NewACLService(b, zap.NewNop())
+	return NewACLService(b)
 }
 
 // TestConvertRulesCounter verifies that the counter field from a proto Rule

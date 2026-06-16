@@ -1,88 +1,37 @@
 package acl
 
 import (
-	"time"
+	"context"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
-	"github.com/yanet-platform/yanet2/common/go/metrics"
+	aclpb "github.com/yanet-platform/yanet2/modules/acl/controlplane/aclpb/v1"
 )
 
-type handlersMetrics struct {
-	callLatencies *metrics.MetricMap[*metrics.Histogram]
+// metricsSource provides the module's collected metrics.
+type metricsSource interface {
+	Metrics() ([]*commonpb.Metric, error)
 }
 
-func newHandlersMetrics() handlersMetrics {
-	return handlersMetrics{
-		callLatencies: metrics.NewMetricMap[*metrics.Histogram](),
+// MetricsService exposes ACL module metrics over its own gRPC service.
+type MetricsService struct {
+	aclpb.UnimplementedMetricsServiceServer
+
+	source metricsSource
+}
+
+// NewMetricsService creates a MetricsService backed by source.
+func NewMetricsService(source metricsSource) *MetricsService {
+	return &MetricsService{source: source}
+}
+
+// GetMetrics returns a snapshot of all ACL module metrics.
+func (m *MetricsService) GetMetrics(ctx context.Context, req *aclpb.GetMetricsRequest) (*aclpb.GetMetricsResponse, error) {
+	all, err := m.source.Metrics()
+	if err != nil {
+		return nil, err
 	}
-}
 
-func (m *handlersMetrics) collect() []*commonpb.Metric {
-	return commonpb.MetricRefsToProto(m.callLatencies.Metrics())
-}
-
-var defaultLatencyBoundsMS = []float64{
-	1,
-	2,
-	5,
-	10,
-	25,
-	50,
-	75,
-	100,
-	150,
-	200,
-	300,
-	400,
-	500,
-	600,
-	700,
-	800,
-	900,
-	1000,
-	1500,
-	2000,
-	3000,
-	4000,
-	5000,
-}
-
-type handlerMetricTracker struct {
-	metricID  metrics.MetricID
-	startTime time.Time
-	metrics   *handlersMetrics
-	latencies []float64
-}
-
-func newHandlerMetricTracker(
-	handlerName string,
-	handlerMetrics *handlersMetrics,
-	latencies []float64,
-	labels metrics.Labels,
-) *handlerMetricTracker {
-	if handlerMetrics == nil || latencies == nil {
-		return nil
-	}
-	id := metrics.MetricID{
-		Name:   handlerName,
-		Labels: labels,
-	}
-	return &handlerMetricTracker{
-		metricID:  id,
-		startTime: time.Now(),
-		metrics:   handlerMetrics,
-		latencies: latencies,
-	}
-}
-
-func (m *handlerMetricTracker) Fix() {
-	if m == nil {
-		return
-	}
-	duration := time.Since(m.startTime)
-	m.metrics.callLatencies.GetOrCreate(m.metricID, func() *metrics.Histogram {
-		return metrics.NewHistogram(m.latencies)
-	}).Observe(float64(duration.Milliseconds()))
+	return &aclpb.GetMetricsResponse{Metrics: all}, nil
 }
 
 func makeGauge(name string, value float64, labels ...*commonpb.Label) *commonpb.Metric {
@@ -101,27 +50,38 @@ func makeCounter(name string, value uint64, labels ...*commonpb.Label) *commonpb
 	}
 }
 
-// Metrics collects all ACL module metrics including per-pipeline packet counters,
-// per-rule counters, ACL compilation info, and handler call latencies
+// Metrics returns all ACL module metrics: per-pipeline packet counters,
+// per-rule counters, ACL compilation info, and gRPC call metrics.
 //
-// All metric names are prefixed with "acl_". Counter metrics are omitted when
-// all worker values are zero to reduce noise in the output
+// Counter metrics are omitted when all worker values are zero to reduce output
+// noise.
 //
 // Labels:
-//   - config:   ACL config name (all counter metrics)
-//   - device:   dataplane device name (all counter metrics)
-//   - pipeline: pipeline name (all counter metrics)
-//   - function: pipeline function name (all counter metrics)
-//   - chain:    pipeline chain name (all counter metrics)
-//   - counter:  ACL rule counter name (acl_rule_packets / acl_rule_bytes only)
-//   - handler:  gRPC handler name (acl_handler_call_latency_ms only)
+//   - config:        ACL config name (all counter metrics)
+//   - device:        dataplane device name (all counter metrics)
+//   - pipeline:      pipeline name (all counter metrics)
+//   - function:      pipeline function name (all counter metrics)
+//   - chain:         pipeline chain name (all counter metrics)
+//   - counter:       ACL rule counter name (acl_rule_packets / acl_rule_bytes only)
+//   - grpc_type:     always "unary" (gRPC metrics)
+//   - grpc_service:  fully-qualified gRPC service name (gRPC metrics)
+//   - grpc_method:   RPC name (gRPC metrics)
+//   - grpc_code:     gRPC status code string (grpc_server_handled_total only)
 func (m *ACLService) Metrics() ([]*commonpb.Metric, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.collectMetrics()
+	metrics, err := m.collectDataplaneMetrics()
+	if err != nil {
+		return nil, err
+	}
+	if m.metrics != nil {
+		metrics = append(metrics, m.metrics.Collect()...)
+	}
+	return metrics, nil
 }
 
-func (m *ACLService) collectMetrics() ([]*commonpb.Metric, error) {
+func (m *ACLService) collectDataplaneMetrics() ([]*commonpb.Metric, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	dpConfig := m.backend.DPConfig()
 	if dpConfig == nil {
 		return []*commonpb.Metric{}, nil
@@ -153,7 +113,6 @@ func (m *ACLService) collectMetrics() ([]*commonpb.Metric, error) {
 		)
 
 		for _, counter := range counters {
-			// Sum values across all workers
 			var packets, bytes uint64
 			for _, workerVals := range counter.Values {
 				if len(workerVals) > 0 {
@@ -164,7 +123,6 @@ func (m *ACLService) collectMetrics() ([]*commonpb.Metric, error) {
 				}
 			}
 
-			// Skip counters with no traffic to reduce output noise
 			if packets == 0 && bytes == 0 {
 				continue
 			}
@@ -267,8 +225,6 @@ func (m *ACLService) collectMetrics() ([]*commonpb.Metric, error) {
 			}
 		}
 	}
-
-	result = append(result, m.handlerMetrics.collect()...)
 
 	return result, nil
 }

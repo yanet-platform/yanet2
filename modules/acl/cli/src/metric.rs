@@ -97,6 +97,8 @@ impl Metric {
     }
 }
 
+/// Computes the p-th percentile bucket label for a histogram whose upper
+/// bounds are in seconds.
 pub fn histogram_percentile(buckets: &[Bucket], total: u64, p: f64) -> String {
     if total == 0 || buckets.is_empty() {
         return "-".to_string();
@@ -105,9 +107,10 @@ pub fn histogram_percentile(buckets: &[Bucket], total: u64, p: f64) -> String {
     for b in buckets {
         if b.count >= target {
             return if b.upper_bound.is_infinite() {
-                format!(">{}ms", buckets[buckets.len().saturating_sub(2)].upper_bound as u64)
+                let prev = buckets[buckets.len().saturating_sub(2)].upper_bound;
+                format!(">{:.3}s", prev)
             } else {
-                format!("≤{}ms", b.upper_bound as u64)
+                format!("≤{:.3}s", b.upper_bound)
             };
         }
     }

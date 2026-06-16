@@ -18,7 +18,11 @@ service ACLService {
   rpc ShowConfig(ShowConfigRequest) returns (ShowConfigResponse);
   // List all ACL configurations across instances
   rpc ListConfigs(ListConfigsRequest) returns (ListConfigsResponse);
-  // Returns module-level metrics
+}
+
+// MetricsService exposes ACL module metrics.
+service MetricsService {
+  // GetMetrics returns a snapshot of ACL module metrics.
   rpc GetMetrics(GetMetricsRequest) returns (GetMetricsResponse);
 }
 

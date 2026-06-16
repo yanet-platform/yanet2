@@ -15,6 +15,14 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/internal/xgrpc"
 )
 
+// UnaryInterceptedService is implemented by services that contribute their own
+// unary interceptors to their out-of-process gRPC server.
+//
+// ServiceRunner appends these after the framework access-log interceptor.
+type UnaryInterceptedService interface {
+	UnaryServerInterceptors() []grpc.UnaryServerInterceptor
+}
+
 // ServiceRunner runs an out-of-process Service on its own listener and
 // registers it with the gateway.
 type ServiceRunner struct {
@@ -35,12 +43,17 @@ func NewServiceRunner(
 ) *ServiceRunner {
 	log = log.Named(module.Name()).With(zap.String("module", module.Name()))
 
+	interceptors := []grpc.UnaryServerInterceptor{xgrpc.AccessLogInterceptor(log)}
+	if provider, ok := module.(UnaryInterceptedService); ok {
+		interceptors = append(interceptors, provider.UnaryServerInterceptors()...)
+	}
+
 	return &ServiceRunner{
 		module:          module,
 		gatewayEndpoint: gatewayEndpoint,
 		gatewayTLS:      gatewayTLS,
 		server: grpc.NewServer(
-			grpc.ChainUnaryInterceptor(xgrpc.AccessLogInterceptor(log)),
+			grpc.ChainUnaryInterceptor(interceptors...),
 			grpc.MaxRecvMsgSize(1024*1024*256), grpc.MaxSendMsgSize(1024*1024*256),
 		),
 		ready: make(chan struct{}),

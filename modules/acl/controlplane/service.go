@@ -5,16 +5,18 @@ import (
 	"sync"
 
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	"google.golang.org/protobuf/proto"
 
 	filterpb "github.com/yanet-platform/yanet2/common/filterpb/v1"
+	"github.com/yanet-platform/yanet2/common/go/grpcmetrics"
 	"github.com/yanet-platform/yanet2/common/go/metrics"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/acl/bindings/go/cacl"
-	"github.com/yanet-platform/yanet2/modules/acl/controlplane/aclpb/v1"
+	aclpb "github.com/yanet-platform/yanet2/modules/acl/controlplane/aclpb/v1"
 )
 
 // ModuleHandle is a handle to an ACL module configuration written to
@@ -46,15 +48,35 @@ type Backend interface {
 	DPConfig() *ffi.DPConfig
 }
 
-type ACLService struct {
-	aclpb.UnimplementedACLServiceServer
+// Option configures an ACLService.
+type Option func(*options)
 
-	mu             sync.Mutex
-	backend        Backend
-	configs        map[string]aclConfig
-	handlerMetrics handlersMetrics
+// options holds the optional parameters for ACLService construction.
+type options struct {
+	Metrics grpcmetrics.Factory
+	Log     *zap.Logger
+}
 
-	log *zap.Logger
+func newOptions() *options {
+	return &options{
+		Log: zap.NewNop(),
+	}
+}
+
+// WithLog sets the service logger.
+func WithLog(log *zap.Logger) Option {
+	return func(o *options) {
+		o.Log = log
+	}
+}
+
+// WithMetrics sets the gRPC metrics factory.
+//
+// When unset, no metrics are collected.
+func WithMetrics(factory grpcmetrics.Factory) Option {
+	return func(o *options) {
+		o.Metrics = factory
+	}
 }
 
 type aclConfig struct {
@@ -63,35 +85,79 @@ type aclConfig struct {
 	fwstateName string
 }
 
+// ACLService implements the gRPC ACL service.
+type ACLService struct {
+	aclpb.UnimplementedACLServiceServer
+
+	mu      sync.Mutex
+	backend Backend
+	configs map[string]aclConfig
+	metrics *grpcmetrics.ServerMetrics
+
+	log *zap.Logger
+}
+
 // NewACLService creates an ACL gRPC service backed by the given Backend.
-func NewACLService(backend Backend, log *zap.Logger) *ACLService {
-	return &ACLService{
-		backend:        backend,
-		configs:        map[string]aclConfig{},
-		handlerMetrics: newHandlersMetrics(),
-		log:            log,
+func NewACLService(backend Backend, options ...Option) *ACLService {
+	opts := newOptions()
+	for _, o := range options {
+		o(opts)
+	}
+
+	m := &ACLService{
+		backend: backend,
+		configs: map[string]aclConfig{},
+		log:     opts.Log,
+	}
+	if opts.Metrics != nil {
+		m.metrics = opts.Metrics(m.retention)
+	}
+
+	return m
+}
+
+// UnaryServerInterceptor returns the service's gRPC metrics interceptor, or nil
+// when metrics are not configured.
+func (m *ACLService) UnaryServerInterceptor() grpc.UnaryServerInterceptor {
+	if m.metrics == nil {
+		return nil
+	}
+
+	return m.metrics.UnaryServerInterceptor()
+}
+
+// retention snapshots the live ACL config names and returns a predicate that
+// keeps series whose "config" label is still live (or absent).
+func (m *ACLService) retention() func(metrics.MetricID) bool {
+	m.mu.Lock()
+	configNames := make(map[string]struct{}, len(m.configs))
+	for name := range m.configs {
+		configNames[name] = struct{}{}
+	}
+	m.mu.Unlock()
+
+	return func(id metrics.MetricID) bool {
+		config := id.Labels["config"]
+		if config == "" {
+			return true
+		}
+
+		_, ok := configNames[config]
+		return ok
 	}
 }
 
-// newHandlerTracker creates a latency tracker for a gRPC handler.
-//
-// Usage pattern in handlers:
-//
-//	tracker := m.newHandlerTracker("HandlerName")
-//	m.mu.Lock()
-//	defer m.mu.Unlock()
-//	defer tracker.Fix()
-//
-// Defers execute LIFO, so tracker.Fix() runs before m.mu.Unlock().
-// This is intentional: the recorded latency covers the full time the
-// handler holds the lock, which is where the actual work happens.
-func (m *ACLService) newHandlerTracker(name string) *handlerMetricTracker {
-	return newHandlerMetricTracker(
-		"acl_handler_call_latency_ms",
-		&m.handlerMetrics,
-		defaultLatencyBoundsMS,
-		metrics.Labels{"handler": name},
-	)
+func labeler(fullMethod string, req any) metrics.Labels {
+	switch r := req.(type) {
+	case *aclpb.UpdateConfigRequest:
+		return metrics.Labels{"config": r.GetName()}
+	case *aclpb.DeleteConfigRequest:
+		return metrics.Labels{"config": r.GetName()}
+	case *aclpb.ShowConfigRequest:
+		return metrics.Labels{"config": r.GetName()}
+	default:
+		return nil
+	}
 }
 
 func convertRules(reqRules []*aclpb.Rule) ([]cacl.AclRule, error) {
@@ -181,10 +247,8 @@ func (m *ACLService) UpdateConfig(
 		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
 
-	tracker := m.newHandlerTracker("UpdateConfig")
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	defer tracker.Fix()
 
 	if existing, ok := m.configs[name]; ok && rulesEqual(existing.rules, req.Rules) {
 		return &aclpb.UpdateConfigResponse{}, nil
@@ -233,10 +297,8 @@ func (m *ACLService) ShowConfig(
 	ctx context.Context,
 	req *aclpb.ShowConfigRequest,
 ) (*aclpb.ShowConfigResponse, error) {
-	tracker := m.newHandlerTracker("ShowConfig")
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	defer tracker.Fix()
 
 	name := req.GetName()
 	if name == "" {
@@ -261,10 +323,8 @@ func (m *ACLService) ListConfigs(
 	ctx context.Context,
 	req *aclpb.ListConfigsRequest,
 ) (*aclpb.ListConfigsResponse, error) {
-	tracker := m.newHandlerTracker("ListConfigs")
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	defer tracker.Fix()
 
 	response := &aclpb.ListConfigsResponse{
 		Configs: make([]string, 0, len(m.configs)),
@@ -281,10 +341,8 @@ func (m *ACLService) DeleteConfig(
 	ctx context.Context,
 	req *aclpb.DeleteConfigRequest,
 ) (*aclpb.DeleteConfigResponse, error) {
-	tracker := m.newHandlerTracker("DeleteConfig")
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	defer tracker.Fix()
 
 	name := req.GetName()
 	if name == "" {
@@ -323,23 +381,4 @@ func (m *ACLService) GetInfo(name string) *cacl.AclConfigInfo {
 	}
 
 	return cfg.acl.GetInfo()
-}
-
-func (m *ACLService) GetMetrics(
-	ctx context.Context,
-	req *aclpb.GetMetricsRequest,
-) (*aclpb.GetMetricsResponse, error) {
-	tracker := m.newHandlerTracker("GetMetrics")
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	defer tracker.Fix()
-
-	metrics, err := m.collectMetrics()
-	if err != nil {
-		return nil, err
-	}
-
-	return &aclpb.GetMetricsResponse{
-		Metrics: metrics,
-	}, nil
 }
