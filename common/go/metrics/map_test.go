@@ -181,6 +181,95 @@ func TestMetricMapIntegration(t *testing.T) {
 	})
 }
 
+// TestMetricMapDeleteWhere verifies that DeleteWhere removes exactly the entries
+// matching the predicate and cleans up empty internal buckets.
+func TestMetricMapDeleteWhere(t *testing.T) {
+	t.Run("DeleteNone", func(t *testing.T) {
+		m := NewMetricMap[*Counter]()
+		for idx := range 3 {
+			id := MetricID{Name: fmt.Sprintf("metric%d", idx)}
+			m.GetOrCreate(id, func() *Counter { return &Counter{} })
+		}
+
+		n := m.DeleteWhere(func(MetricID, *Counter) bool { return false })
+
+		assert.Equal(t, 0, n, "DeleteWhere(false) should remove nothing")
+		assert.Len(t, m.Metrics(), 3, "all metrics should remain")
+	})
+
+	t.Run("DeleteSome", func(t *testing.T) {
+		m := NewMetricMap[*Counter]()
+		for idx := range 4 {
+			id := MetricID{Name: fmt.Sprintf("metric%d", idx)}
+			m.GetOrCreate(id, func() *Counter { return &Counter{} })
+		}
+
+		n := m.DeleteWhere(func(id MetricID, _ *Counter) bool {
+			return id.Name == "metric1" || id.Name == "metric3"
+		})
+
+		assert.Equal(t, 2, n, "DeleteWhere should return count of removed metrics")
+		refs := m.Metrics()
+		assert.Len(t, refs, 2, "two metrics should remain")
+		for _, ref := range refs {
+			assert.NotEqual(t, "metric1", ref.ID.Name, "metric1 should be removed")
+			assert.NotEqual(t, "metric3", ref.ID.Name, "metric3 should be removed")
+		}
+	})
+
+	t.Run("DeleteAll", func(t *testing.T) {
+		m := NewMetricMap[*Counter]()
+		for idx := range 3 {
+			id := MetricID{Name: fmt.Sprintf("metric%d", idx)}
+			m.GetOrCreate(id, func() *Counter { return &Counter{} })
+		}
+
+		n := m.DeleteWhere(func(MetricID, *Counter) bool { return true })
+
+		assert.Equal(t, 3, n, "DeleteWhere(true) should remove all metrics")
+		assert.Empty(t, m.Metrics(), "map should be empty after deleting all")
+	})
+
+	t.Run("EmptyBucketCleanup", func(t *testing.T) {
+		m := NewMetricMap[*Counter]()
+		id := MetricID{Name: "only"}
+		m.GetOrCreate(id, func() *Counter { return &Counter{} })
+
+		m.DeleteWhere(func(MetricID, *Counter) bool { return true })
+
+		// The internal bucket map should have no entries after emptying.
+		m.mu.RLock()
+		bucketCount := len(m.entries)
+		m.mu.RUnlock()
+
+		assert.Equal(t, 0, bucketCount, "empty buckets should be removed from the map")
+	})
+
+	t.Run("DeleteByValue", func(t *testing.T) {
+		m := NewMetricMap[*Counter]()
+		for idx := range 4 {
+			id := MetricID{Name: fmt.Sprintf("metric%d", idx)}
+			c := m.GetOrCreate(id, func() *Counter { return &Counter{} })
+			// Give odd-indexed metrics a non-zero count.
+			if idx%2 != 0 {
+				c.Add(uint64(idx * 10))
+			}
+		}
+
+		// Delete only metrics whose counter value is zero (keying off the value).
+		n := m.DeleteWhere(func(_ MetricID, c *Counter) bool {
+			return c.Load() == 0
+		})
+
+		assert.Equal(t, 2, n, "should remove the two zero-value metrics")
+		refs := m.Metrics()
+		assert.Len(t, refs, 2, "two non-zero metrics should remain")
+		for _, ref := range refs {
+			assert.NotZero(t, ref.Value.Load(), "remaining metrics should have non-zero value")
+		}
+	})
+}
+
 // Benchmarks
 
 func BenchmarkGetOrCreate(b *testing.B) {

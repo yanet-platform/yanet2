@@ -27,19 +27,20 @@ func NewMetricMap[T any]() *MetricMap[T] {
 	return &MetricMap[T]{entries: map[uint64][]metricEntry[T]{}}
 }
 
-func (m *MetricMap[T]) tryGet(id MetricID, h uint64) *T {
+func (m *MetricMap[T]) tryGet(id MetricID, h uint64) (T, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	if bucket, ok := m.entries[h]; ok {
 		for idx := range bucket {
 			if bucket[idx].id.Equals(id) {
-				return &bucket[idx].metric
+				return bucket[idx].metric, true
 			}
 		}
 	}
 
-	return nil
+	var zero T
+	return zero, false
 }
 
 func (m *MetricMap[T]) create(id MetricID, h uint64, create func() T) T {
@@ -62,11 +63,39 @@ func (m *MetricMap[T]) create(id MetricID, h uint64, create func() T) T {
 func (m *MetricMap[T]) GetOrCreate(id MetricID, create func() T) T {
 	h := hashID(id)
 
-	if existent := m.tryGet(id, h); existent != nil {
-		return *existent
+	if metric, ok := m.tryGet(id, h); ok {
+		return metric
 	}
 
 	return m.create(id, h, create)
+}
+
+// DeleteWhere removes every stored metric whose (ID, metric) satisfies pred.
+//
+// Returns the number of metrics removed.
+//
+// The predicate receives a cloned MetricID so it cannot mutate stored map
+// state. Buckets are compacted in place. Hash buckets that become empty are
+// deleted so the map does not accumulate empty slots.
+func (m *MetricMap[T]) DeleteWhere(pred func(MetricID, T) bool) int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	removed := 0
+	for h, bucket := range m.entries {
+		kept := slices.DeleteFunc(bucket, func(entry metricEntry[T]) bool {
+			return pred(entry.id.Clone(), entry.metric)
+		})
+		removed += len(bucket) - len(kept)
+
+		if len(kept) == 0 {
+			delete(m.entries, h)
+		} else {
+			m.entries[h] = kept
+		}
+	}
+
+	return removed
 }
 
 // Metrics returns a slice of references of all stored metrics.
