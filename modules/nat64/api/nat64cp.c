@@ -128,6 +128,7 @@ nat64_module_config_data_init(
 
 	config->mappings.drop_unknown_mapping = false;
 	config->prefixes.drop_unknown_prefix = false;
+	config->stats.malformed_packets = 0;
 
 	return 0;
 

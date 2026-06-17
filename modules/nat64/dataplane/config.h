@@ -78,4 +78,18 @@ struct nat64_module_config {
 		uint16_t ipv4; /**< IPv4 MTU limit */
 		uint16_t ipv6; /**< IPv6 MTU limit */
 	} mtu;
+
+	/* Runtime statistics */
+	struct {
+		/**
+		 * @brief Packets dropped because of malformed/truncated ICMP
+		 * error payloads
+		 *
+		 * Incremented when a guard rejects a packet whose embedded
+		 * transport header or ICMP error payload does not fit into the
+		 * mbuf data. Updated atomically because dataplane workers may
+		 * run concurrently.
+		 */
+		uint64_t malformed_packets;
+	} stats;
 };

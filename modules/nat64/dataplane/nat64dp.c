@@ -73,6 +73,21 @@ RTE_LOG_REGISTER_DEFAULT(nat64_logtype, INFO);
 #define RTE_LOGTYPE_NAT64 nat64_logtype
 
 /**
+ * @brief Increment malformed-packet counter
+ *
+ * Helper used by bounds guards that reject packets because the embedded
+ * ICMP error payload or transport header does not fit in the mbuf.
+ *
+ * @param config NAT64 module configuration whose counter is updated
+ */
+static inline void
+nat64_stats_malformed(struct nat64_module_config *config) {
+	__atomic_fetch_add(
+		&config->stats.malformed_packets, 1, __ATOMIC_RELAXED
+	);
+}
+
+/**
  * @brief Finds a mapping from IPv6 to IPv4 address
  *
  * This function searches the LPM (Longest Prefix Match) table for a mapping
@@ -662,6 +677,15 @@ icmp_v6_to_v4(
 					   sizeof(struct yanet_icmp6_hdr);
 
 		// RFC7915: Validate minimum length requirements
+		if (embedded_offset > rte_pktmbuf_data_len(mbuf)) {
+			LOG_DBG(NAT64,
+				"Embedded offset (%u) exceeds mbuf "
+				"data_len (%u)\n",
+				embedded_offset,
+				rte_pktmbuf_data_len(mbuf));
+			nat64_stats_malformed(nat64_config);
+			return -1;
+		}
 		uint16_t remaining_len =
 			rte_pktmbuf_data_len(mbuf) - embedded_offset;
 		if (remaining_len < sizeof(struct rte_ipv6_hdr)) {
@@ -956,6 +980,17 @@ icmp_v6_to_v4(
 				sizeof(struct yanet_icmp6_hdr) +
 				sizeof(struct rte_ipv4_hdr) + delta;
 
+			if (transport_offset + sizeof(struct rte_icmp_hdr) >
+			    rte_pktmbuf_data_len(mbuf)) {
+				LOG_DBG(NAT64,
+					"Embedded transport offset (%u) "
+					"exceeds mbuf data_len (%u)\n",
+					transport_offset,
+					rte_pktmbuf_data_len(mbuf));
+				nat64_stats_malformed(nat64_config);
+				return -1;
+			}
+
 			switch (new_ipv4_payload_header->next_proto_id) {
 			case IPPROTO_ICMPV6: {
 				// Embedded ICMPv6 header needs to be translated
@@ -1184,6 +1219,15 @@ icmp_v6_to_v4(
 	uint16_t icmp_len = ipv4_total_len - ipv4_hdr_len;
 
 	// Validate ICMP length doesn't exceed available data
+	if (packet->transport_header.offset > rte_pktmbuf_data_len(mbuf)) {
+		LOG_DBG(NAT64,
+			"Transport offset (%u) exceeds mbuf "
+			"data_len (%u)\n",
+			packet->transport_header.offset,
+			rte_pktmbuf_data_len(mbuf));
+		nat64_stats_malformed(nat64_config);
+		return -1;
+	}
 	uint16_t available_len =
 		rte_pktmbuf_data_len(mbuf) - packet->transport_header.offset;
 
@@ -2481,9 +2525,19 @@ icmp_v4_to_v6(
 
 		uint16_t move_len =
 			new_payload_len - sizeof(struct rte_icmp_hdr);
-		uint16_t available_for_move = rte_pktmbuf_data_len(mbuf) -
-					      (packet->transport_header.offset +
-					       sizeof(struct rte_icmp_hdr));
+		uint16_t move_offset = packet->transport_header.offset +
+				       sizeof(struct rte_icmp_hdr);
+		if (move_offset > rte_pktmbuf_data_len(mbuf)) {
+			LOG_DBG(NAT64,
+				"ICMP move offset (%u) exceeds mbuf "
+				"data_len (%u)\n",
+				move_offset,
+				rte_pktmbuf_data_len(mbuf));
+			nat64_stats_malformed(nat64_config);
+			return -1;
+		}
+		uint16_t available_for_move =
+			rte_pktmbuf_data_len(mbuf) - move_offset;
 		if (move_len > available_for_move) {
 			LOG_DBG(NAT64,
 				"ICMP payload move length (%u) "
@@ -2545,6 +2599,16 @@ icmp_v4_to_v6(
 				sizeof(struct rte_icmp_hdr) +
 				sizeof(struct rte_ipv6_hdr) +
 				(is_fragmented ? RTE_IPV6_FRAG_HDR_SIZE : 0);
+			if (payload_offset + sizeof(struct rte_icmp_hdr) >
+			    rte_pktmbuf_data_len(mbuf)) {
+				LOG_DBG(NAT64,
+					"Embedded payload offset (%u) "
+					"exceeds mbuf data_len (%u)\n",
+					payload_offset,
+					rte_pktmbuf_data_len(mbuf));
+				nat64_stats_malformed(nat64_config);
+				return -1;
+			}
 			switch (new_ipv6_payload_header->proto) {
 			case IPPROTO_ICMP:
 				new_ipv6_payload_header->proto = IPPROTO_ICMPV6;
@@ -2672,6 +2736,15 @@ icmp_v4_to_v6(
 	uint16_t icmp6_len = rte_be_to_cpu_16(new_ipv6_header->payload_len);
 
 	// Validate ICMPv6 length doesn't exceed available data
+	if (packet->transport_header.offset > rte_pktmbuf_data_len(mbuf)) {
+		LOG_DBG(NAT64,
+			"Transport offset (%u) exceeds mbuf "
+			"data_len (%u)\n",
+			packet->transport_header.offset,
+			rte_pktmbuf_data_len(mbuf));
+		nat64_stats_malformed(nat64_config);
+		return -1;
+	}
 	uint16_t available_len =
 		rte_pktmbuf_data_len(mbuf) - packet->transport_header.offset;
 

@@ -5439,6 +5439,442 @@ test_nat64_icmp_v4tov6_memmove_overflow(void) {
 }
 
 /**
+ * @brief Test v6->v4 ICMP error with zero-length embedded transport payload
+ *
+ * Constructs an ICMPv6 Destination Unreachable with an embedded IPv6 header
+ * whose payload_len is 0 and proto is TCP. After translation the embedded
+ * IPv4 header is written but transport_offset lands exactly at end of mbuf
+ * (offset == data_len). The guard must reject the packet before dereferencing
+ * a TCP header at one-past-end.
+ *
+ * Regression test for Codex review finding on the bounds-check fix.
+ *
+ * @return TEST_SUCCESS on success, error code on failure
+ */
+static inline int
+test_nat64_icmp_v6tov4_empty_embedded_transport(void) {
+	packet_list_cleanup(&test_params.packet_front.input);
+	packet_list_cleanup(&test_params.packet_front.output);
+	packet_list_cleanup(&test_params.packet_front.drop);
+
+	nat64_module_config_data_destroy(
+		&test_params.module_config, test_params.memory_context
+	);
+	TEST_ASSERT_SUCCESS(
+		nat64_test_config(&test_params.module_config),
+		"nat64_test_config failed\n"
+	);
+
+	// Embedded IPv6 header: payload_len=0, proto=TCP (no TCP data follows)
+	struct rte_ipv6_hdr emb_ipv6 = {
+		.vtc_flow = RTE_BE32(0x60000000),
+		.payload_len = 0,
+		.proto = IPPROTO_TCP,
+		.hop_limits = 64,
+	};
+	uint8_t prefix[12] = {0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0};
+	SET_IPV4_MAPPED_IPV6(
+		&emb_ipv6.src_addr, prefix, &config_data.mapping[0].ip4
+	);
+	rte_memcpy(&emb_ipv6.dst_addr, &config_data.mapping[1].ip6, 16);
+
+	struct upkt pkt = {
+		.eth =
+			{
+				.dst_addr.addr_bytes =
+					{0xff, 0xff, 0xff, 0xff, 0xff, 0xff},
+				.src_addr.addr_bytes =
+					{0x02, 0x00, 0x00, 0x00, 0x00, 0x00},
+				.ether_type = RTE_BE16(RTE_ETHER_TYPE_IPV6),
+			},
+		.ip.ipv6 =
+			{
+				.vtc_flow = RTE_BE32(0x60000000),
+				.payload_len = RTE_BE16(
+					sizeof(struct icmp6_hdr) +
+					sizeof(struct rte_ipv6_hdr)
+				),
+				.proto = IPPROTO_ICMPV6,
+				.hop_limits = 64,
+			},
+		.proto.icmp6 =
+			{
+				.icmp6_type = ICMP6_DST_UNREACH,
+				.icmp6_code = ICMP6_DST_UNREACH_NOPORT,
+			},
+		.data_len = sizeof(emb_ipv6),
+		.data = &emb_ipv6,
+	};
+	rte_memcpy(&pkt.ip.ipv6.src_addr, &config_data.mapping[0].ip6, 16);
+	SET_IPV4_MAPPED_IPV6(
+		&pkt.ip.ipv6.dst_addr, prefix, &config_data.mapping[0].ip4
+	);
+
+	TEST_ASSERT_SUCCESS(
+		push_packet_malformed(&pkt, 0, 0),
+		"Failed to push malformed ICMPv6 packet\n"
+	);
+
+	// Manually set offsets (push_packet_malformed skips parse_packet)
+	struct packet *packet = test_params.packet_front.input.first;
+	packet->network_header.type = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6);
+	packet->network_header.offset = sizeof(struct rte_ether_hdr);
+	packet->transport_header.type = IPPROTO_ICMPV6;
+	packet->transport_header.offset =
+		sizeof(struct rte_ether_hdr) + sizeof(struct rte_ipv6_hdr);
+
+	struct module_ectx module_ectx;
+	SET_OFFSET_OF(
+		&module_ectx.cp_module, &test_params.module_config.cp_module
+	);
+	test_params.module->handler(
+		NULL, &module_ectx, &test_params.packet_front
+	);
+
+	int output_count = packet_list_count(&test_params.packet_front.output);
+	int drop_count = packet_list_count(&test_params.packet_front.drop);
+
+	TEST_ASSERT_EQUAL(
+		drop_count,
+		1,
+		"Expected drop for empty embedded transport payload, "
+		"got %d drops\n",
+		drop_count
+	);
+	TEST_ASSERT_EQUAL(
+		output_count,
+		0,
+		"Empty embedded transport payload: packet must not be "
+		"forwarded, got %d outputs\n",
+		output_count
+	);
+	TEST_ASSERT_EQUAL(
+		test_params.module_config.stats.malformed_packets,
+		1,
+		"Malformed-packet counter should be 1 after drop, got %lu\n",
+		test_params.module_config.stats.malformed_packets
+	);
+
+	return TEST_SUCCESS;
+}
+
+/**
+ * @brief Test v4->v6 ICMP error with truncated embedded transport payload
+ *
+ * Constructs an ICMPv4 Destination Unreachable where the mbuf truly ends
+ * right after the embedded IPv4 header -- no transport header bytes exist.
+ * The embedded IPv4 claims next_proto_id=ICMP and total_length includes an
+ * ICMP header, but the outer IPv4 total_length is set so that the mbuf
+ * contains only the embedded IPv4 header. After v4->v6 translation
+ * payload_offset lands past the end of the mbuf. The guard must reject the
+ * packet before dereferencing an ICMP header past the allocation.
+ *
+ * Regression test for Codex review finding on the bounds-check fix.
+ *
+ * @return TEST_SUCCESS on success, error code on failure
+ */
+static inline int
+test_nat64_icmp_v4tov6_empty_embedded_transport(void) {
+	packet_list_cleanup(&test_params.packet_front.input);
+	packet_list_cleanup(&test_params.packet_front.output);
+	packet_list_cleanup(&test_params.packet_front.drop);
+
+	nat64_module_config_data_destroy(
+		&test_params.module_config, test_params.memory_context
+	);
+	TEST_ASSERT_SUCCESS(
+		nat64_test_config(&test_params.module_config),
+		"nat64_test_config failed\n"
+	);
+
+	// Embedded buffer: bare IPv4 header only (no transport bytes).
+	// total_length lies -- claims an ICMP header follows.
+	struct rte_ipv4_hdr emb_hdr = {
+		.version_ihl = RTE_IPV4_VHL_DEF,
+		.total_length = RTE_BE16(
+			sizeof(struct rte_ipv4_hdr) + sizeof(struct icmphdr)
+		),
+		.next_proto_id = IPPROTO_ICMP,
+		.time_to_live = 64,
+		.src_addr = config_data.mapping[0].ip4,
+		.dst_addr = outer_ip4,
+	};
+
+	uint16_t outer_total = sizeof(struct rte_ipv4_hdr) +
+			       sizeof(struct icmphdr) +
+			       sizeof(struct rte_ipv4_hdr);
+	struct upkt pkt = build_icmp_dest_unreach_pkt(
+		outer_total, &emb_hdr, sizeof(emb_hdr)
+	);
+
+	TEST_ASSERT_SUCCESS(
+		push_packet_malformed(&pkt, outer_total, 0),
+		"Failed to push malformed ICMP packet\n"
+	);
+
+	// Manually set offsets (push_packet_malformed skips parse_packet)
+	struct packet *packet = test_params.packet_front.input.first;
+	packet->network_header.type = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4);
+	packet->network_header.offset = sizeof(struct rte_ether_hdr);
+	packet->transport_header.type = IPPROTO_ICMP;
+	packet->transport_header.offset =
+		sizeof(struct rte_ether_hdr) + sizeof(struct rte_ipv4_hdr);
+
+	struct module_ectx module_ectx;
+	SET_OFFSET_OF(
+		&module_ectx.cp_module, &test_params.module_config.cp_module
+	);
+	test_params.module->handler(
+		NULL, &module_ectx, &test_params.packet_front
+	);
+
+	int output_count = packet_list_count(&test_params.packet_front.output);
+	int drop_count = packet_list_count(&test_params.packet_front.drop);
+
+	TEST_ASSERT_EQUAL(
+		drop_count,
+		1,
+		"Truncated embedded transport: expected drop=1, got %d\n",
+		drop_count
+	);
+	TEST_ASSERT_EQUAL(
+		output_count,
+		0,
+		"Truncated embedded transport: packet must not be forwarded, "
+		"got %d outputs\n",
+		output_count
+	);
+
+	return TEST_SUCCESS;
+}
+
+/*
+ * Coverage note for defensive bounds guards in nat64dp.c
+ * ---------------------------------------------------------------
+ * The following guards were added as part of the heap-overflow fix
+ * but are NOT covered by targeted tests, by design:
+ *
+ *   nat64dp.c:640  (embedded_offset > data_len, icmp_v6_to_v4)
+ *   nat64dp.c:1179 (transport_header.offset > data_len, icmp_v6_to_v4
+ *                   outer checksum)
+ *   nat64dp.c:2484 (move_offset > data_len, icmp_v4_to_v6 memmove)
+ *   nat64dp.c:2691 (transport_header.offset > data_len, icmp_v4_to_v6
+ *                   outer checksum)
+ *
+ * Reason: these guards exist solely to prevent uint16 underflow in the
+ * subsequent subtraction `available = data_len - offset`. Arithmetic
+ * analysis shows that for all four sites, the preceding code path
+ * (parse_packet validation + the mbuf mutations that happen before the
+ * guard) makes `offset > data_len` unreachable through valid packet
+ * construction with standard MTU values. The downstream size checks
+ * (e.g. `remaining_len < sizeof(struct rte_ipv6_hdr)` at nat64dp.c:650,
+ * `icmp_len < sizeof(struct rte_icmp_hdr)` at nat64dp.c:1199/2711, and
+ * `move_len > available_for_move` at nat64dp.c:2494) catch the actual
+ * size violations and are covered by existing tests.
+ *
+ * A previous attempt to write targeted tests by manually overriding
+ * `packet->transport_header.offset` past `data_len` caused OOB writes
+ * during test setup and was reverted. Rather than ship unstable tests,
+ * these guards are documented as defensive-only. Each guard increments
+ * `nat64_config->stats.malformed_packets` so malformed drops remain
+ * observable in production.
+ */
+
+/**
+ * @brief Positive test: a well-formed ICMPv4 error must translate to ICMPv6
+ *
+ * Counterpart to the drop/overflow tests above. Constructs an ICMPv4
+ * Destination Unreachable with a complete, length-consistent embedded
+ * IPv4+ICMP echo and asserts that the NAT64 handler forwards the
+ * translated ICMPv6 packet to output (output_count == 1, drop_count == 0).
+ *
+ * Purpose: guard against over-restrictive bounds checks silently dropping
+ * valid ICMP error traffic. Without this test, none of the new tests prove
+ * that legitimate packets still pass after the bounds fixes.
+ *
+ * @return TEST_SUCCESS on success, error code on failure
+ */
+static inline int
+test_nat64_icmp_v4tov6_valid_error_translates(void) {
+	packet_list_cleanup(&test_params.packet_front.input);
+	packet_list_cleanup(&test_params.packet_front.output);
+	packet_list_cleanup(&test_params.packet_front.drop);
+
+	TEST_ASSERT_SUCCESS(
+		nat64_test_config(&test_params.module_config),
+		"nat64_test_config failed\n"
+	);
+
+	// Build a complete embedded IPv4+ICMP echo with total_length matching
+	// the actual buffer (no inflation).
+	uint16_t embedded_len;
+	uint16_t embedded_total =
+		sizeof(struct rte_ipv4_hdr) + sizeof(struct icmphdr);
+	uint8_t *embedded =
+		build_embedded_icmp_echo(embedded_total, &embedded_len);
+	TEST_ASSERT_NOT_NULL(embedded, "Failed to build embedded packet\n");
+
+	// Outer IPv4 total_length must be consistent with the real buffer size.
+	uint16_t outer_total = sizeof(struct rte_ipv4_hdr) +
+			       sizeof(struct icmphdr) + embedded_len;
+	struct upkt pkt = build_icmp_dest_unreach_pkt(
+		outer_total, embedded, embedded_len
+	);
+
+	TEST_ASSERT_SUCCESS(push_packet(&pkt), "Failed to push ICMP packet\n");
+
+	rte_free(embedded);
+
+	struct module_ectx module_ectx;
+	SET_OFFSET_OF(
+		&module_ectx.cp_module, &test_params.module_config.cp_module
+	);
+	test_params.module->handler(
+		NULL, &module_ectx, &test_params.packet_front
+	);
+
+	int output_count = packet_list_count(&test_params.packet_front.output);
+	int drop_count = packet_list_count(&test_params.packet_front.drop);
+
+	TEST_ASSERT_EQUAL(
+		output_count,
+		1,
+		"Valid ICMPv4 error should translate and forward, "
+		"got output=%d\n",
+		output_count
+	);
+	TEST_ASSERT_EQUAL(
+		drop_count,
+		0,
+		"Valid ICMPv4 error should not be dropped, got drop=%d\n",
+		drop_count
+	);
+	TEST_ASSERT_EQUAL(
+		test_params.module_config.stats.malformed_packets,
+		0,
+		"Valid packet should not increment malformed counter, got "
+		"%lu\n",
+		test_params.module_config.stats.malformed_packets
+	);
+
+	packet_list_cleanup(&test_params.packet_front.pending_input);
+	packet_list_cleanup(&test_params.packet_front.pending_output);
+
+	return TEST_SUCCESS;
+}
+
+/**
+ * @brief Regression test replaying the exact fuzz crash input from CI run #124
+ *
+ * Replays the 90-byte packet that triggered a heap-buffer-overflow in
+ * __rte_raw_cksum via icmp_v4_to_v6, in the embedded-payload memmove path
+ * of the ICMPv4->ICMPv6 error translator. The crash was found by
+ * the nat64w fuzzer on 2026-06-17.
+ *
+ * The packet is an ICMPv4 error with embedded IPv4/ICMP headers that, after
+ * translation, produce an embedded IPv6 payload_len exceeding the available
+ * mbuf data.
+ *
+ * @return TEST_SUCCESS on success, error code on failure
+ */
+static inline int
+test_nat64_icmp_v4tov6_fuzz_crash_regression(void) {
+	nat64_module_config_data_destroy(
+		&test_params.module_config, test_params.memory_context
+	);
+	TEST_ASSERT_SUCCESS(
+		nat64_test_config(&test_params.module_config),
+		"nat64_test_config failed\n"
+	);
+
+	// Exact crash input from CI run #124 (base64-decoded, 90 bytes)
+	// artifact: crash-f1bc76de58e681605fd71a54f7632eb3f0fa6da9
+	//
+	// Byte layout of the raw L2 packet:
+	//   [0..13]   Ethernet header (dst 00:30:00:90:14:00,
+	//              src 76:c1:87:dd:00:47, type 0x0800 IPv4)
+	//   [14..33]  Outer IPv4 header
+	//   [34..41]  Outer ICMPv4 error header
+	//   [42..61]  Embedded IPv4 header (inside the ICMP error payload)
+	//   [62..69]  Embedded ICMPv4 header
+	//   [70..89]  Trailing payload bytes
+	//
+	// The embedded IPv4 total_length is crafted so that, after translation
+	// to IPv6, the resulting ICMPv6 payload_len exceeds the remaining mbuf
+	// space. This triggers the memmove/checksum path that was reading past
+	// the allocation before the fix.
+	static const uint8_t crash_input[] = {
+		0x00, 0x30, 0x00, 0x90, 0x14, 0x00, 0x76, 0xc1, 0x87, 0xdd,
+		0x00, 0x47, 0x08, 0x00, 0x09, 0x01, 0x00, 0x2c, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x01, 0x00, 0xc0, 0x00, 0x00, 0xcd, 0xc6,
+		0xc6, 0x33, 0x64, 0x01, 0x01, 0x00, 0x00, 0x30, 0x76, 0xc1,
+		0xb3, 0x02, 0x01, 0xb3, 0x49, 0x0a, 0x90, 0x50, 0x08, 0x00,
+		0x0b, 0x01, 0x00, 0x2c, 0x2c, 0x0b, 0xc1, 0xb3, 0x49, 0x01,
+		0x90, 0x52, 0x00, 0x00, 0x00, 0x64, 0x01, 0x01, 0x00, 0x00,
+		0x30, 0x76, 0xc1, 0xb3, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+		0xff, 0x21, 0x02, 0x01, 0xb3, 0x49, 0x90, 0xa2, 0x90, 0x52,
+	};
+
+	struct rte_mbuf *mbuf = rte_pktmbuf_alloc(test_params.mbuf_pool);
+	TEST_ASSERT_NOT_NULL(mbuf, "Failed to allocate mbuf\n");
+
+	rte_pktmbuf_append(mbuf, sizeof(crash_input));
+	char *pkt_data = rte_pktmbuf_mtod(mbuf, char *);
+	rte_memcpy(pkt_data, crash_input, sizeof(crash_input));
+
+	struct packet *packet = mbuf_to_packet(mbuf);
+	memset(packet, 0, sizeof(struct packet));
+	packet->mbuf = mbuf;
+	packet->mbuf->port = 0;
+
+	struct packet_front pf;
+	packet_front_init(&pf);
+	packet_list_add(&pf.input, packet);
+
+	(void)parse_packet(packet);
+
+	struct module_ectx module_ectx;
+	SET_OFFSET_OF(
+		&module_ectx.cp_module, &test_params.module_config.cp_module
+	);
+	test_params.module->handler(NULL, &module_ectx, &pf);
+
+	// The packet must be dropped, not cause a crash or OOB read
+	// (drop==1 implies input==0 for a single-input packet front).
+	int output_count = packet_list_count(&pf.output);
+	int drop_count = packet_list_count(&pf.drop);
+
+	TEST_ASSERT_EQUAL(
+		drop_count,
+		1,
+		"Fuzz crash input: expected drop=1, got %d\n",
+		drop_count
+	);
+	TEST_ASSERT_EQUAL(
+		output_count,
+		0,
+		"Fuzz crash input: packet must not be forwarded, "
+		"got %d outputs\n",
+		output_count
+	);
+	TEST_ASSERT_EQUAL(
+		test_params.module_config.stats.malformed_packets,
+		1,
+		"Fuzz crash input should increment malformed counter, got "
+		"%lu\n",
+		test_params.module_config.stats.malformed_packets
+	);
+
+	packet_list_cleanup(&pf.input);
+	packet_list_cleanup(&pf.output);
+	packet_list_cleanup(&pf.drop);
+	packet_list_cleanup(&pf.pending_input);
+	packet_list_cleanup(&pf.pending_output);
+
+	return TEST_SUCCESS;
+}
+
+/**
  * @brief Clean up test suite resources
  *
  * Performs cleanup after test suite execution:
@@ -5527,7 +5963,22 @@ static struct unit_test_suite nat64_test_suite =
 			 "test_nat64_icmp_v4tov6_memmove_overflow",
 			 test_nat64_icmp_v4tov6_memmove_overflow
 		 ),
-
+		 TEST_CASE_NAMED(
+			 "test_nat64_icmp_v6tov4_empty_embedded_transport",
+			 test_nat64_icmp_v6tov4_empty_embedded_transport
+		 ),
+		 TEST_CASE_NAMED(
+			 "test_nat64_icmp_v4tov6_empty_embedded_transport",
+			 test_nat64_icmp_v4tov6_empty_embedded_transport
+		 ),
+		 TEST_CASE_NAMED(
+			 "test_nat64_icmp_v4tov6_valid_error_translates",
+			 test_nat64_icmp_v4tov6_valid_error_translates
+		 ),
+		 TEST_CASE_NAMED(
+			 "test_nat64_icmp_v4tov6_fuzz_crash_regression",
+			 test_nat64_icmp_v4tov6_fuzz_crash_regression
+		 ),
 		 TEST_CASES_END() /**< NULL terminate unit test array */
 	 }};
 
