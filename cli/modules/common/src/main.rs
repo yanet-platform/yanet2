@@ -111,7 +111,7 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
                 .await
                 .map_err(|status| Error::from_status(status, action, endpoint.clone(), LOGGING_SERVICE))?;
 
-            output::success(action, format_args!("set log level to {:?}", cmd.level));
+            output::success(action, format_args!("Set log level to {:?}.", cmd.level));
         }
     }
 

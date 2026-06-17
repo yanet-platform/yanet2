@@ -342,7 +342,7 @@ impl RouteService {
         output::success(
             "insert",
             format_args!(
-                "inserted {} via {} in {} (source: {})",
+                "Inserted {} via {} in {} (source: {}).",
                 cmd.prefix,
                 via,
                 cmd.name,
@@ -379,7 +379,7 @@ impl RouteService {
         output::success(
             "remove",
             format_args!(
-                "removed {} via {} from {} (source: {})",
+                "Removed {} via {} from {} (source: {}).",
                 cmd.prefix,
                 via,
                 cmd.name,
@@ -395,7 +395,7 @@ impl RouteService {
 
         self.client.flush_routes(request).await.map_err(self.map_err("flush"))?;
 
-        output::success("flush", format_args!("flushed {}", cmd.name));
+        output::success("flush", format_args!("Flushed {}.", cmd.name));
 
         Ok(())
     }

@@ -535,7 +535,7 @@ impl ACLService {
             .map_err(self.map_err("delete"))?
             .into_inner();
 
-        output::success("delete", format_args!("deleted {}", cmd.config_name));
+        output::success("delete", format_args!("Deleted {}.", cmd.config_name));
 
         Ok(())
     }
@@ -565,7 +565,7 @@ impl ACLService {
 
         output::success(
             "update",
-            format_args!("updated {} ({} rules)", cmd.config_name, rule_count),
+            format_args!("Updated {} ({} rules).", cmd.config_name, rule_count),
         );
 
         Ok(())
