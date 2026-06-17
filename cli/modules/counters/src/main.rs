@@ -249,10 +249,7 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
         Some(ModeCmd::Workers) => {
             let response = service.workers().await?;
             output::data(&response, false, format_args!(""), || {
-                print!(
-                    "{}",
-                    serde_yaml::to_string(&response).expect("worker counters YAML serialization must not fail")
-                );
+                format_worker_counters(&response);
             });
         }
         mode => {
@@ -359,6 +356,360 @@ impl CountersService {
             .await
             .map_err(self.map_err())?
             .into_inner())
+    }
+}
+
+/// Display a formatted summary and per-worker histogram for all workers.
+fn format_worker_counters(response: &WorkerCountersResponse) {
+    if response.workers.is_empty() {
+        println!("no worker counters");
+        return;
+    }
+
+    format_worker_summary(response);
+    println!();
+
+    for worker in &response.workers {
+        format_single_worker(worker);
+        println!();
+    }
+}
+
+/// Print the aggregate header box across all workers.
+fn format_worker_summary(response: &WorkerCountersResponse) {
+    let total_workers = response.workers.len() as u64;
+    let total_iterations: u64 = response.workers.iter().map(|w| w.iterations).sum();
+    let total_rx: u64 = response.workers.iter().map(|w| w.rx_packets).sum();
+    let total_tx: u64 = response.workers.iter().map(|w| w.tx_packets).sum();
+    let total_remote_rx: u64 = response.workers.iter().map(|w| w.remote_rx_packets).sum();
+    let total_remote_tx: u64 = response.workers.iter().map(|w| w.remote_tx_packets).sum();
+    let total_rx_bytes: u64 = response.workers.iter().map(|w| w.rx_bytes).sum();
+    let total_tx_bytes: u64 = response.workers.iter().map(|w| w.tx_bytes).sum();
+
+    println!(
+        "{}",
+        "╔══════════════════════════════════════════════════════════════════════════╗".bright_cyan()
+    );
+    let title = "Worker Counters";
+    let title_pad = 74usize.saturating_sub(display_width(title));
+    let title_left = title_pad / 2;
+    let title_right = title_pad - title_left;
+    println!(
+        "{}{}{}{}{}",
+        "║".bright_cyan(),
+        " ".repeat(title_left),
+        title.bright_cyan(),
+        " ".repeat(title_right),
+        "║".bright_cyan()
+    );
+    println!(
+        "{}",
+        "╠══════════════════════════════════════════════════════════════════════════╣".bright_cyan()
+    );
+
+    let workers_str = format!("workers: {total_workers}");
+    let iters_str = format!("iterations: {}", format_number(total_iterations));
+    let left_content = format!("  {workers_str}   {iters_str}");
+    let left_width = display_width(&left_content);
+    let left_pad = 74usize.saturating_sub(left_width);
+    println!(
+        "{}{}{}{}",
+        "║".bright_cyan(),
+        left_content.bright_white(),
+        " ".repeat(left_pad),
+        "║".bright_cyan()
+    );
+
+    let rx_str = if total_rx_bytes > 0 {
+        format!(
+            "rx: {} packets ({})",
+            format_number(total_rx),
+            format_bytes(total_rx_bytes)
+        )
+    } else {
+        format!("rx: {} packets", format_number(total_rx))
+    };
+    let tx_str = if total_tx_bytes > 0 {
+        format!(
+            "tx: {} packets ({})",
+            format_number(total_tx),
+            format_bytes(total_tx_bytes)
+        )
+    } else {
+        format!("tx: {} packets", format_number(total_tx))
+    };
+    let rx_width = display_width(&rx_str);
+    let tx_width = display_width(&tx_str);
+    let sep = " │ ";
+    let inner = 74usize;
+    let used = 2 + rx_width + 3 + tx_width;
+    let trailing = inner.saturating_sub(used);
+    println!(
+        "{}  {}{}{}{}{}",
+        "║".bright_cyan(),
+        rx_str.bright_green(),
+        sep.bright_black(),
+        tx_str.bright_green(),
+        " ".repeat(trailing),
+        "║".bright_cyan()
+    );
+
+    let remote_str = format!(
+        "remote rx: {}   remote tx: {}",
+        format_number(total_remote_rx),
+        format_number(total_remote_tx)
+    );
+    let remote_content = format!("  {remote_str}");
+    let remote_pad = 74usize.saturating_sub(display_width(&remote_content));
+    println!(
+        "{}{}{}{}",
+        "║".bright_cyan(),
+        remote_content.bright_white(),
+        " ".repeat(remote_pad),
+        "║".bright_cyan()
+    );
+
+    println!(
+        "{}",
+        "╚══════════════════════════════════════════════════════════════════════════╝".bright_cyan()
+    );
+}
+
+/// Print a single worker block with stats and rx-burst histogram.
+fn format_single_worker(worker: &ynpb::pb::WorkerCounter) {
+    const TABLE_WIDTH: usize = 74;
+
+    let header_text = format!(
+        " Worker {} · core {} · device {} · queue {} ",
+        worker.worker_idx, worker.core_id, worker.device_id, worker.queue_id
+    );
+    let dashes = TABLE_WIDTH.saturating_sub(display_width(&header_text) + 1);
+    println!(
+        "{}{}{}{}",
+        "┌─".bright_black(),
+        header_text.bright_yellow(),
+        "─".repeat(dashes).bright_black(),
+        "┐".bright_black()
+    );
+
+    let bursts = &worker.rx_bursts;
+    let total_polls: u64 = bursts.iter().sum();
+    let empty_polls = bursts.first().copied().unwrap_or(0);
+    let non_empty_polls = total_polls.saturating_sub(empty_polls);
+
+    let empty_pct = if total_polls > 0 {
+        empty_polls as f64 / total_polls as f64 * 100.0
+    } else {
+        0.0
+    };
+    let busy_pct = if total_polls > 0 {
+        non_empty_polls as f64 / total_polls as f64 * 100.0
+    } else {
+        0.0
+    };
+    let avg_burst = if non_empty_polls > 0 {
+        format!("{:.1}", worker.rx_packets as f64 / non_empty_polls as f64)
+    } else {
+        "n/a".to_string()
+    };
+
+    let iter_line = format!("  iterations: {}", format_number(worker.iterations));
+    let iter_pad = TABLE_WIDTH.saturating_sub(display_width(&iter_line));
+    println!(
+        "{}{}{}{}",
+        "│".bright_black(),
+        iter_line.bright_white(),
+        " ".repeat(iter_pad),
+        "│".bright_black()
+    );
+
+    let rx_line = if worker.rx_bytes > 0 {
+        format!(
+            "  rx: {} packets ({})",
+            format_number(worker.rx_packets),
+            format_bytes(worker.rx_bytes)
+        )
+    } else {
+        format!("  rx: {} packets", format_number(worker.rx_packets))
+    };
+    let rx_pad = TABLE_WIDTH.saturating_sub(display_width(&rx_line));
+    println!(
+        "{}{}{}{}",
+        "│".bright_black(),
+        rx_line.bright_white(),
+        " ".repeat(rx_pad),
+        "│".bright_black()
+    );
+
+    let tx_line = if worker.tx_bytes > 0 {
+        format!(
+            "  tx: {} packets ({})",
+            format_number(worker.tx_packets),
+            format_bytes(worker.tx_bytes)
+        )
+    } else {
+        format!("  tx: {} packets", format_number(worker.tx_packets))
+    };
+    let tx_pad = TABLE_WIDTH.saturating_sub(display_width(&tx_line));
+    println!(
+        "{}{}{}{}",
+        "│".bright_black(),
+        tx_line.bright_white(),
+        " ".repeat(tx_pad),
+        "│".bright_black()
+    );
+
+    let remote_line = format!(
+        "  remote rx: {}   remote tx: {}",
+        format_number(worker.remote_rx_packets),
+        format_number(worker.remote_tx_packets)
+    );
+    let remote_pad = TABLE_WIDTH.saturating_sub(display_width(&remote_line));
+    println!(
+        "{}{}{}{}",
+        "│".bright_black(),
+        remote_line.bright_white(),
+        " ".repeat(remote_pad),
+        "│".bright_black()
+    );
+
+    let poll_line = format!(
+        "  empty polls: {:.1}%   busy: {:.1}%   avg burst: {}",
+        empty_pct, busy_pct, avg_burst
+    );
+    let poll_pad = TABLE_WIDTH.saturating_sub(display_width(&poll_line));
+    println!(
+        "{}{}{}{}",
+        "│".bright_black(),
+        poll_line.bright_white(),
+        " ".repeat(poll_pad),
+        "│".bright_black()
+    );
+
+    if !bursts.is_empty() {
+        println!(
+            "{}{}{}",
+            "├".bright_black(),
+            "─".repeat(TABLE_WIDTH).bright_black(),
+            "┤".bright_black()
+        );
+
+        let max_label_width = {
+            let last_idx = bursts.len().saturating_sub(1);
+            let last_label = worker_burst_label(last_idx, worker.max_burst_size as usize);
+            display_width(&last_label).max(5)
+        };
+        let max_count_width = {
+            let max_count = bursts.iter().copied().max().unwrap_or(0);
+            display_width(&format_number(max_count)).max(3)
+        };
+
+        const BAR_WIDTH: usize = 32;
+
+        let mut idx = 0;
+        while idx < bursts.len() {
+            let count = bursts[idx];
+
+            if count == 0 {
+                let mut end = idx;
+                while end < bursts.len() && bursts[end] == 0 {
+                    end += 1;
+                }
+
+                let label = worker_burst_label(idx, worker.max_burst_size as usize);
+                let label_pad = max_label_width.saturating_sub(display_width(&label));
+                let count_str = format!("{:>width$}", format_number(0), width = max_count_width);
+                let row_content = format!(
+                    " {}{} │ {} │ {} ( 0.0%)",
+                    " ".repeat(label_pad),
+                    label,
+                    " ".repeat(BAR_WIDTH),
+                    count_str
+                );
+                let extra = TABLE_WIDTH.saturating_sub(display_width(&row_content));
+                println!(
+                    "{} {}{} {} {} {} {} ( 0.0%){}{}",
+                    "│".bright_black(),
+                    " ".repeat(label_pad),
+                    label.bright_white(),
+                    "│".bright_black(),
+                    " ".repeat(BAR_WIDTH),
+                    "│".bright_black(),
+                    count_str.bright_white(),
+                    " ".repeat(extra),
+                    "│".bright_black()
+                );
+
+                idx = end;
+                continue;
+            }
+
+            let label = worker_burst_label(idx, worker.max_burst_size as usize);
+            let label_pad = max_label_width.saturating_sub(display_width(&label));
+            let pct = if total_polls > 0 {
+                count as f64 / total_polls as f64 * 100.0
+            } else {
+                0.0
+            };
+            let bar_len = if total_polls > 0 {
+                let calculated = (count as f64 / total_polls as f64 * BAR_WIDTH as f64) as usize;
+                if calculated == 0 {
+                    1
+                } else {
+                    calculated
+                }
+            } else {
+                0
+            };
+            let bar = "█".repeat(bar_len);
+            let bar_pad = BAR_WIDTH.saturating_sub(bar_len);
+            let count_str = format!("{:>width$}", format_number(count), width = max_count_width);
+            let pct_str = format!("{:>4.1}%", pct);
+            let row_content = format!(
+                " {}{} │ {}{} │ {} ({})",
+                " ".repeat(label_pad),
+                label,
+                bar,
+                " ".repeat(bar_pad),
+                count_str,
+                pct_str
+            );
+            let extra = TABLE_WIDTH.saturating_sub(display_width(&row_content));
+            println!(
+                "{} {}{} {} {}{} {} {} ({}){}{}",
+                "│".bright_black(),
+                " ".repeat(label_pad),
+                label.bright_white(),
+                "│".bright_black(),
+                bar.bright_green(),
+                " ".repeat(bar_pad),
+                "│".bright_black(),
+                count_str.bright_white(),
+                pct_str,
+                " ".repeat(extra),
+                "│".bright_black()
+            );
+
+            idx += 1;
+        }
+    }
+
+    println!(
+        "{}{}{}",
+        "└".bright_black(),
+        "─".repeat(TABLE_WIDTH).bright_black(),
+        "┘".bright_black()
+    );
+}
+
+/// Return the histogram row label for a given burst bucket index.
+fn worker_burst_label(idx: usize, max_burst_size: usize) -> String {
+    if idx == 0 {
+        "empty".to_string()
+    } else if idx >= max_burst_size && max_burst_size > 0 {
+        format!("{} (full)", idx)
+    } else {
+        idx.to_string()
     }
 }
 
@@ -1187,5 +1538,90 @@ mod test {
 
         println!("\n=== Asymmetric RX/TX Test ===\n");
         format_perf_counters(&response);
+    }
+
+    #[test]
+    fn test_worker_counters_output() {
+        use ynpb::pb::WorkerCounter;
+
+        let busy_bursts: Vec<u64> = vec![
+            100_757_782_070,
+            11_024_138_205,
+            6_222_815_776,
+            4_137_973_230,
+            3_012_845_112,
+            2_308_192_004,
+            1_821_034_561,
+            1_503_219_880,
+            1_244_712_309,
+            1_038_892_177,
+            872_345_018,
+            742_109_334,
+            633_821_445,
+            542_018_772,
+            466_315_901,
+            401_732_108,
+            347_219_564,
+            302_817_445,
+            263_410_982,
+            230_118_773,
+            201_534_662,
+            176_218_334,
+            154_710_092,
+            135_893_441,
+            119_241_328,
+            104_617_892,
+            91_834_556,
+            80_618_223,
+            70_812_334,
+            62_119_882,
+            54_517_334,
+            47_912_889,
+            820_345_119,
+        ];
+
+        let idle_bursts: Vec<u64> = {
+            let mut v = vec![2_032_148_322_173u64, 2_697_386, 3_399, 8, 0];
+            v.resize(33, 0);
+            v
+        };
+
+        let response = WorkerCountersResponse {
+            workers: vec![
+                WorkerCounter {
+                    worker_idx: 0,
+                    core_id: 20,
+                    device_id: 0,
+                    queue_id: 0,
+                    max_burst_size: 32,
+                    rx_bursts: busy_bursts,
+                    iterations: 136_085_306_808,
+                    rx_packets: 197_055_447_802,
+                    rx_bytes: 0,
+                    tx_packets: 1_809_919,
+                    tx_bytes: 0,
+                    remote_rx_packets: 1_809_919,
+                    remote_tx_packets: 3_035_732,
+                },
+                WorkerCounter {
+                    worker_idx: 2,
+                    core_id: 2,
+                    device_id: 1,
+                    queue_id: 0,
+                    max_burst_size: 32,
+                    rx_bursts: idle_bursts,
+                    iterations: 2_032_151_022_964,
+                    rx_packets: 2_704_225,
+                    rx_bytes: 0,
+                    tx_packets: 0,
+                    tx_bytes: 0,
+                    remote_rx_packets: 0,
+                    remote_tx_packets: 0,
+                },
+            ],
+        };
+
+        println!("\n=== Worker Counters Output ===\n");
+        format_worker_counters(&response);
     }
 }
