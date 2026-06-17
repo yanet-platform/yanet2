@@ -22,6 +22,7 @@ type GatewayActuator struct {
 	conn        *grpc.ClientConn
 	routes      routepb.RouteServiceClient
 	funcApplier *operator.FunctionApplier
+	devices     map[string]struct{}
 	log         *zap.Logger
 }
 
@@ -49,6 +50,13 @@ func NewGatewayActuator(
 		return nil, fmt.Errorf("failed to dial gateway %q at %q: %w", cfg.Name, endpoint, err)
 	}
 
+	deviceSet := map[string]struct{}{}
+	for _, d := range opts.Devices {
+		if d != "" {
+			deviceSet[d] = struct{}{}
+		}
+	}
+
 	fn := opts.Function
 	spec := operator.FunctionChainSpec{
 		Name:   fn.Name.Unwrap(),
@@ -69,6 +77,7 @@ func NewGatewayActuator(
 			spec,
 			operator.WithIgnorePdump(fn.IgnorePdump),
 		),
+		devices: deviceSet,
 		log: opts.Log.With(
 			zap.String("gateway", cfg.Name),
 			zap.String("function", fn.Name.Unwrap()),
@@ -120,8 +129,9 @@ func (m *GatewayActuator) applyFunction(ctx context.Context) error {
 
 // pushFIB applies fib to the gateway via the UpdateFIB unary RPC.
 func (m *GatewayActuator) pushFIB(ctx context.Context, fib FIB) error {
-	entries := make([]*routepb.FIBEntry, len(fib.Entries))
-	for idx, entry := range fib.Entries {
+	filtered := filterFIBEntries(fib.Entries, m.devices)
+	entries := make([]*routepb.FIBEntry, len(filtered))
+	for idx, entry := range filtered {
 		entries[idx] = fibEntryToProto(entry)
 	}
 

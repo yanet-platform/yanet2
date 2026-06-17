@@ -146,6 +146,7 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 			gw,
 			WithGatewayActuatorLog(log),
 			WithGatewayActuatorFunction(cfg.Function),
+			WithGatewayActuatorDevices(cfg.GatewayDevices[gw.Name]),
 		)
 		if err != nil {
 			for _, a := range actuators {

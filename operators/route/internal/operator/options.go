@@ -176,6 +176,7 @@ type OperatorServiceOption func(*operatorServiceOptions)
 
 type gatewayActuatorOptions struct {
 	Function FunctionConfig
+	Devices  []string
 	Log      *zap.Logger
 }
 
@@ -200,5 +201,16 @@ func WithGatewayActuatorLog(log *zap.Logger) GatewayActuatorOption {
 func WithGatewayActuatorFunction(fn FunctionConfig) GatewayActuatorOption {
 	return func(o *gatewayActuatorOptions) {
 		o.Function = fn
+	}
+}
+
+// WithGatewayActuatorDevices restricts the actuator to nexthops on the named
+// egress devices.
+//
+// An empty slice means the actuator owns all devices and forwards the full FIB
+// unfiltered.
+func WithGatewayActuatorDevices(devices []string) GatewayActuatorOption {
+	return func(o *gatewayActuatorOptions) {
+		o.Devices = devices
 	}
 }

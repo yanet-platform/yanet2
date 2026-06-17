@@ -48,6 +48,12 @@ type Config struct {
 	RIBTTL         time.Duration        `yaml:"rib_ttl"`
 	NetlinkMonitor NetlinkMonitorConfig `yaml:"netlink_monitor"`
 	Readiness      ReadinessConfig      `yaml:"readiness"`
+	// GatewayDevices maps each gateway name to the egress device names its
+	// dataplane instance owns.
+	//
+	// A gateway absent from the map or mapped to an empty list owns every
+	// device and receives the full FIB unfiltered.
+	GatewayDevices map[string][]string `yaml:"gateway_devices"`
 }
 
 // ReadinessConfig controls the operator's readiness reporting.
@@ -124,8 +130,9 @@ func DefaultConfig() *Config {
 			Weight: 1,
 			Module: xcfg.MustNonEmptyString("route0"),
 		},
-		RIBTTL:  DefaultRIBTTL,
-		LinkMap: map[string]string{},
+		RIBTTL:         DefaultRIBTTL,
+		LinkMap:        map[string]string{},
+		GatewayDevices: map[string][]string{},
 		NetlinkMonitor: NetlinkMonitorConfig{
 			TableName:       "kernel",
 			DefaultPriority: 100,

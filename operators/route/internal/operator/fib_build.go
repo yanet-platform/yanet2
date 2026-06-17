@@ -38,6 +38,34 @@ type FIBBuildStats struct {
 	FilteredRoutes int
 }
 
+// filterFIBEntries returns the subset of entries whose nexthops include at
+// least one device present in the given set.
+//
+// When the device set is empty every entry is returned unchanged.
+func filterFIBEntries(entries []FIBEntry, devices map[string]struct{}) []FIBEntry {
+	if len(devices) == 0 {
+		return entries
+	}
+
+	result := make([]FIBEntry, 0, len(entries))
+	for _, entry := range entries {
+		kept := make([]neigh.HardwareRoute, 0, len(entry.Nexthops))
+		for idx := range entry.Nexthops {
+			if _, ok := devices[entry.Nexthops[idx].Device]; ok {
+				kept = append(kept, entry.Nexthops[idx])
+			}
+		}
+		if len(kept) == 0 {
+			continue
+		}
+		result = append(result, FIBEntry{
+			Prefix:   entry.Prefix,
+			Nexthops: kept,
+		})
+	}
+	return result
+}
+
 // BuildFIB resolves a RIB dump against the supplied neighbour view and
 // produces a deduplicated FIB.
 func BuildFIB(

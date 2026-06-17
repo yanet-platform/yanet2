@@ -136,6 +136,79 @@ func Test_BuildFIB_StaticAndBirdBothInFIB(t *testing.T) {
 	require.Len(t, fib.Entries[0].Nexthops, 2, "both sources' nexthops should be in FIB")
 }
 
+// Test_FilterFIBEntries verifies device-scoped nexthop filtering.
+func Test_FilterFIBEntries(t *testing.T) {
+	mac1 := mustParseMAC(t, "0a:00:00:00:00:01")
+	mac2 := mustParseMAC(t, "0a:00:00:00:00:02")
+	mac3 := mustParseMAC(t, "0a:00:00:00:00:03")
+
+	nh := func(device string, src [6]byte) neigh.HardwareRoute {
+		return neigh.HardwareRoute{SourceMAC: src, Device: device}
+	}
+
+	entries := []FIBEntry{
+		{
+			Prefix:   netip.MustParsePrefix("10.0.0.0/24"),
+			Nexthops: []neigh.HardwareRoute{nh("eth0", mac1), nh("eth1", mac2)},
+		},
+		{
+			Prefix:   netip.MustParsePrefix("10.0.1.0/24"),
+			Nexthops: []neigh.HardwareRoute{nh("eth1", mac3)},
+		},
+	}
+
+	tests := []struct {
+		name            string
+		devices         map[string]struct{}
+		wantPrefixes    []string
+		wantNexthopDevs [][]string
+	}{
+		{
+			name:            "empty device set returns all entries unchanged",
+			devices:         map[string]struct{}{},
+			wantPrefixes:    []string{"10.0.0.0/24", "10.0.1.0/24"},
+			wantNexthopDevs: [][]string{{"eth0", "eth1"}, {"eth1"}},
+		},
+		{
+			name:            "one entry dropped when its nexthops are all on other devices",
+			devices:         map[string]struct{}{"eth0": {}},
+			wantPrefixes:    []string{"10.0.0.0/24"},
+			wantNexthopDevs: [][]string{{"eth0"}},
+		},
+		{
+			name:            "all entries dropped when device owns no nexthops",
+			devices:         map[string]struct{}{"eth2": {}},
+			wantPrefixes:    []string{},
+			wantNexthopDevs: [][]string{},
+		},
+	}
+
+	// Capture nexthop counts before any call to detect mutations of the input.
+	nexthopCounts := make([]int, len(entries))
+	for idx := range entries {
+		nexthopCounts[idx] = len(entries[idx].Nexthops)
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := filterFIBEntries(entries, tc.devices)
+			require.Len(t, got, len(tc.wantPrefixes))
+			for idx, wantPrefix := range tc.wantPrefixes {
+				require.Equal(t, netip.MustParsePrefix(wantPrefix), got[idx].Prefix)
+				devs := make([]string, len(got[idx].Nexthops))
+				for hrIdx, hr := range got[idx].Nexthops {
+					devs[hrIdx] = hr.Device
+				}
+				require.Equal(t, tc.wantNexthopDevs[idx], devs)
+			}
+			// Verify the input entries were not mutated.
+			for idx := range entries {
+				require.Len(t, entries[idx].Nexthops, nexthopCounts[idx])
+			}
+		})
+	}
+}
+
 func Test_BuildFIB_DedupsNexthops(t *testing.T) {
 	cache := rcucache.NewEmptyCache[netip.Addr, neigh.NeighbourEntry]()
 	routeFor := func(addr, sourceMAC, destinationMAC string, device string) {

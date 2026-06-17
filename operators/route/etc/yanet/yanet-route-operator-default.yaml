@@ -9,12 +9,17 @@ server:
   endpoint: "[::1]:50002"
 
 # One entry per dataplane instance (typically one per NUMA node).
-#
-# The operator pushes the same computed FIB to every gateway listed
-# below via the route-module UpdateFIB RPC.
 gateways:
   - name: numa0
     endpoint: "[::1]:8080"
+
+# Per-gateway device ownership: maps a gateway name to the devices its
+# dataplane instance owns. The operator pushes each gateway only the FIB
+# nexthops on its devices. An empty or unlisted gateway gets the full FIB.
+#
+#   gateway_devices:
+#     numa0: [kni0, eth0]
+gateway_devices: {}
 
 # Heartbeat interval for self-registration with each gateway's module
 # registry.
