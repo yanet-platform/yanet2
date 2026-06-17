@@ -326,6 +326,8 @@ impl CountersService {
             .await
             .map_err(|err| Error::from_connection(err, action, connection.endpoint.clone()))?;
         let client = CountersServiceClient::new(channel)
+            .max_decoding_message_size(256 * 1024 * 1024)
+            .max_encoding_message_size(256 * 1024 * 1024)
             .send_compressed(CompressionEncoding::Gzip)
             .accept_compressed(CompressionEncoding::Gzip);
 
