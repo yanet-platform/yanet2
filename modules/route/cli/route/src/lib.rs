@@ -1,5 +1,6 @@
 use commonpb::pb::MacAddress;
 use netip::MacAddr;
+use serde::Serialize;
 use tabled::Tabled;
 
 #[allow(clippy::all, non_snake_case)]
@@ -19,7 +20,7 @@ fn format_mac(mac: Option<MacAddress>) -> String {
 }
 
 /// FIB entry for display in the CLI table.
-#[derive(Debug, Tabled)]
+#[derive(Clone, Debug, Serialize, Tabled)]
 pub struct FibDisplayEntry {
     #[tabled(rename = "Prefix")]
     pub prefix: String,

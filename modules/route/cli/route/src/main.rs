@@ -26,7 +26,7 @@ use yanet_cli_route::{
 };
 use ync::{
     client::{ConnectionArgs, LayeredChannel},
-    logging,
+    output::{self, CommonFormat},
 };
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -99,6 +99,8 @@ pub struct Cmd {
     pub mode: ModeCmd,
     #[command(flatten)]
     pub connection: ConnectionArgs,
+    #[arg(long, default_value = "human", global = true)]
+    pub format: CommonFormat,
     /// Be verbose in terms of logging.
     #[clap(short, action = ArgAction::Count, global = true)]
     pub verbose: u8,
@@ -154,7 +156,7 @@ pub async fn main() {
     CompleteEnv::with_factory(Cmd::command).complete();
 
     let cmd = Cmd::parse();
-    logging::init(cmd.verbose as usize).expect("no error expected");
+    ync::init(cmd.verbose, cmd.format);
 
     if let Err(err) = run(cmd).await {
         log::error!("ERROR: {err}");
@@ -194,22 +196,33 @@ impl RouteService {
             .into_iter()
             .map(routepb::FibEntry::try_from)
             .collect::<Result<Vec<_>, _>>()?;
+        let entry_count = entries.len();
         let request = UpdateFibRequest {
-            module_name: cmd.config_name,
+            module_name: cmd.config_name.clone(),
             entries,
         };
         self.client.update_fib(request).await?;
 
-        println!("OK");
+        output::success(
+            "update",
+            format_args!("Updated FIB '{}' ({} entries).", cmd.config_name, entry_count),
+        );
         Ok(())
     }
 
     pub async fn list_fibs(&mut self) -> Result<(), Box<dyn Error>> {
         let response = self.client.list_configs(ListConfigsRequest {}).await?.into_inner();
 
-        for name in response.configs {
-            println!("{name}");
-        }
+        output::data(
+            &response.configs,
+            response.configs.is_empty(),
+            format_args!("No FIB configs found."),
+            || {
+                for name in &response.configs {
+                    println!("{name}");
+                }
+            },
+        );
         Ok(())
     }
 
@@ -228,12 +241,12 @@ impl RouteService {
             .flat_map(FibDisplayEntry::from_range_entry)
             .collect();
 
-        if entries.is_empty() {
-            log::info!("No FIB entries found for {}", cmd.config_name);
-            return Ok(());
-        }
-
-        print_table(entries);
+        output::data(
+            &entries,
+            entries.is_empty(),
+            format_args!("No FIB entries found for {}.", cmd.config_name),
+            || print_table(entries.clone()),
+        );
 
         Ok(())
     }
