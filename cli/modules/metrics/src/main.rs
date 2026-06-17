@@ -194,27 +194,6 @@ fn format_bound(value: f64) -> String {
     format!("{value}")
 }
 
-/// Returns the bar length for a bucket, scaled to `BAR_MAX`.
-///
-/// Returns `0` when `max_count` is `0`. Non-zero counts that round to `0`
-/// are bumped to `1` so every populated bucket shows at least one bar
-/// character.
-fn bar_len(count: u64, max_count: u64) -> usize {
-    const BAR_MAX: usize = 20;
-
-    if max_count == 0 {
-        return 0;
-    }
-
-    let mut n = ((count as f64 / max_count as f64) * BAR_MAX as f64).round() as usize;
-
-    if count > 0 && n == 0 {
-        n = 1;
-    }
-
-    n
-}
-
 /// Prints a single histogram block to stdout.
 fn print_histogram(name: &str, labels: &[Label], histogram: &Histogram) {
     let label_str = format_labels(labels);
@@ -248,34 +227,11 @@ fn print_histogram(name: &str, labels: &[Label], histogram: &Histogram) {
     let wc = buckets.iter().map(|b| b.count.to_string().len()).max().unwrap_or(0);
 
     for (bucket, (lower, upper)) in buckets.iter().zip(bounds.iter()) {
-        let bars = "∎".repeat(bar_len(bucket.count, max_count));
+        let bars = "∎".repeat(ync::display::bar_len(bucket.count, max_count));
         let count = bucket.count;
         println!("  {lower:>wl$} .. {upper:>wu$} [ {count:>wc$} ] {bars}");
     }
 
     println!("  count = {}", histogram.total_count);
     println!();
-}
-
-#[cfg(test)]
-mod test {
-    use super::bar_len;
-
-    #[test]
-    fn bar_len_scaling() {
-        // Full scale.
-        assert_eq!(20, bar_len(310, 310));
-        // Partial scale.
-        assert_eq!(3, bar_len(45, 310));
-        // Zero count produces zero bars.
-        assert_eq!(0, bar_len(0, 310));
-    }
-
-    #[test]
-    fn bar_len_edge_cases() {
-        // Non-zero count that rounds below 1 is bumped to 1.
-        assert_eq!(1, bar_len(1, 1000));
-        // Zero max guard — never divide by zero.
-        assert_eq!(0, bar_len(5, 0));
-    }
 }

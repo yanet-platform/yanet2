@@ -3170,6 +3170,7 @@ dependencies = [
  "clap_complete",
  "colored",
  "serde_yaml",
+ "tabled",
  "tokio",
  "tonic",
  "yanet-cli",

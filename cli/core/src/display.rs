@@ -51,3 +51,42 @@ fn apply_style(table: &mut Table) {
     table.modify(Columns::new(..), BorderColor::filled(Color::rgb_fg(0x4e, 0x4e, 0x4e)));
     table.modify(Rows::first(), Color::BOLD);
 }
+
+/// Returns the bar length for a histogram bucket, scaled to `BAR_MAX`.
+///
+/// Returns `0` when `max_count` is `0`. Non-zero counts that round to `0`
+/// are bumped to `1` so every populated bucket shows at least one bar
+/// character.
+pub fn bar_len(count: u64, max_count: u64) -> usize {
+    const BAR_MAX: usize = 20;
+
+    if max_count == 0 {
+        return 0;
+    }
+
+    let mut n = ((count as f64 / max_count as f64) * BAR_MAX as f64).round() as usize;
+
+    if count > 0 && n == 0 {
+        n = 1;
+    }
+
+    n
+}
+
+#[cfg(test)]
+mod test {
+    use super::bar_len;
+
+    #[test]
+    fn bar_len_scaling() {
+        assert_eq!(20, bar_len(310, 310));
+        assert_eq!(3, bar_len(45, 310));
+        assert_eq!(0, bar_len(0, 310));
+    }
+
+    #[test]
+    fn bar_len_edge_cases() {
+        assert_eq!(1, bar_len(1, 1000));
+        assert_eq!(0, bar_len(5, 0));
+    }
+}

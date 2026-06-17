@@ -13,5 +13,6 @@ clap = { version = "4.5", features = ["derive"] }
 clap_complete = { version = "4.5", features = ["unstable-dynamic"] }
 tokio = { version = "1", features = ["rt", "net", "time", "macros", "sync"] }
 tonic = { version = "0.13", features = ["gzip"] }
+tabled = { version = "0.18", features = ["ansi"] }
 colored = "3"
 serde_yaml = "0.9"
