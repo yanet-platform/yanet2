@@ -1670,6 +1670,19 @@ yanet_get_counter_value(
 	return counter_handle_get_value(value_handle, worker_idx)[value_idx];
 }
 
+void
+yanet_get_counter_values(
+	struct counter_value_handle *value_handle,
+	uint64_t size,
+	uint64_t instance_count,
+	uint64_t *values
+) {
+	for (uint64_t iidx = 0; iidx < instance_count; ++iidx) {
+		uint64_t *src = counter_handle_get_value(value_handle, iidx);
+		memcpy(values + iidx * size, src, size * sizeof(uint64_t));
+	}
+}
+
 struct counter_handle_list *
 yanet_get_worker_counters(struct dp_config *dp_config) {
 	struct counter_registry *counter_registry = &dp_config->worker_counters;

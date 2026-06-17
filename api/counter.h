@@ -97,6 +97,21 @@ yanet_get_counter_value(
 	uint64_t worker_idx
 );
 
+// Copy all values for every instance of a counter into a flat caller-supplied
+// buffer in a single call.
+//
+// values must have room for instance_count * size uint64 elements and is
+// filled instance-major: instance i occupies values[i*size .. i*size + size).
+// Performs the same reads as yanet_get_counter_value but batched into one
+// call, avoiding per-value CGO overhead when reading counters from Go.
+void
+yanet_get_counter_values(
+	struct counter_value_handle *value_handle,
+	uint64_t size,
+	uint64_t instance_count,
+	uint64_t *values
+);
+
 // Return counters that satisfy every predicate in tags and match at
 // least one name in query. Pass tag_count == 0 to impose no per-tag
 // constraint and query_count == -1 to match any name.

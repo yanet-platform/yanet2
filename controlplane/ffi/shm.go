@@ -430,24 +430,27 @@ func decodeCounterHandle(
 	handle *C.struct_counter_handle,
 	instanceCount C.uint64_t,
 ) CounterInfo {
-	counterInfo := CounterInfo{
-		Name:   C.GoString(&handle.name[0]),
-		Values: make([][]uint64, 0, instanceCount),
-	}
+	size := uint64(handle.size)
+	instances := uint64(instanceCount)
 
-	for iidx := C.uint64_t(0); iidx < instanceCount; iidx++ {
-		values := make([]uint64, 0, int(handle.size))
-		for vidx := C.uint64_t(0); vidx < handle.size; vidx++ {
-			values = append(values, uint64(C.yanet_get_counter_value(
-				handle.value_handle,
-				vidx,
-				iidx,
-			)))
+	values := make([][]uint64, instances)
+	if total := instances * size; total > 0 {
+		flat := make([]uint64, total)
+		C.yanet_get_counter_values(
+			handle.value_handle,
+			handle.size,
+			instanceCount,
+			(*C.uint64_t)(unsafe.Pointer(&flat[0])),
+		)
+		for iidx := range instances {
+			values[iidx] = flat[iidx*size : (iidx+1)*size : (iidx+1)*size]
 		}
-		counterInfo.Values = append(counterInfo.Values, values)
 	}
 
-	return counterInfo
+	return CounterInfo{
+		Name:   C.GoString(&handle.name[0]),
+		Values: values,
+	}
 }
 
 func (m *DPConfig) encodeCounters(
