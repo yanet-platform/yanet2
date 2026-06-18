@@ -214,6 +214,7 @@ parse_packet(struct packet *packet) {
 	packet->hash = 0;
 	packet->flags = 0;
 	packet->fragment_offset = 0;
+	packet->data_len = rte_pktmbuf_data_len(packet_to_mbuf(packet));
 
 	if (parse_ether_header(packet, &type, &offset)) {
 		return -1;
@@ -553,15 +554,6 @@ logtrace_rte_mbuf(struct rte_mbuf *mbuf) {
 #else
 	(void)mbuf;
 #endif // ENABLE_TRACE_LOG
-}
-
-uint64_t
-packet_list_bytes_sum(struct packet_list *list) {
-	uint64_t bytes = 0;
-	for (struct packet *pkt = list->first; pkt != NULL; pkt = pkt->next) {
-		bytes += packet_data_len(pkt);
-	}
-	return bytes;
 }
 
 void

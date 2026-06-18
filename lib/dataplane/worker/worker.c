@@ -30,6 +30,7 @@ worker_clone_packet(struct dp_worker *dp_worker, struct packet *packet) {
 	packet_clone->next = NULL;
 
 	mbuf_copy(packet_clone->mbuf, packet->mbuf);
+	packet_refresh_data_len(packet_clone);
 	return packet_clone;
 }
 

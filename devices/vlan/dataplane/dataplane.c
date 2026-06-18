@@ -94,6 +94,7 @@ vlan_output_handle(
 				rte_pktmbuf_mtod(mbuf, char *),
 				sizeof(struct rte_ether_hdr));
 			rte_pktmbuf_adj(mbuf, sizeof(struct rte_vlan_hdr));
+			packet_refresh_data_len(packet);
 
 			packet_front_output(packet_front, packet);
 			goto next;
@@ -123,6 +124,7 @@ vlan_output_handle(
 		// Inject new vlan header
 		// FIXME: check error
 		rte_pktmbuf_prepend(mbuf, sizeof(struct rte_vlan_hdr));
+		packet_refresh_data_len(packet);
 		memmove(rte_pktmbuf_mtod(mbuf, char *),
 			rte_pktmbuf_mtod_offset(
 				mbuf, char *, sizeof(struct rte_vlan_hdr)

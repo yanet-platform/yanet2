@@ -241,6 +241,7 @@ insert_mss_option(
 	if (unlikely(rc != packet_set_mss_ok)) {
 		return rc;
 	}
+	packet_refresh_data_len(packet);
 
 	struct tcp_option *opt =
 		write_into_mss_gap(mbuf, prefix_len, insert_mss);

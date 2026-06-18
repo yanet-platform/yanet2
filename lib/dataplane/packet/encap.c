@@ -22,6 +22,7 @@ packet_prepend(struct packet *packet, const void *header, const size_t size) {
 
 	packet->network_header.offset += size;
 	packet->transport_header.offset += size;
+	packet_refresh_data_len(packet);
 
 	return 0;
 }
@@ -49,6 +50,7 @@ packet_network_prepend(
 	packet->network_header.type = type;
 
 	packet->transport_header.offset += size;
+	packet_refresh_data_len(packet);
 
 	// FIXME previous header type (ex: vlan)
 	uint16_t *next_hdr_type = rte_pktmbuf_mtod_offset(

@@ -88,6 +88,7 @@ packet_decap(struct packet *packet) {
 	}
 	/* Copy ether header (and vlans) over rather than moving whole packet */
 	memmove(new_start, prev_start, packet->network_header.offset);
+	packet_refresh_data_len(packet);
 
 	// Update ether type
 	uint16_t *prev_eth_type = rte_pktmbuf_mtod_offset(

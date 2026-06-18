@@ -1143,6 +1143,7 @@ icmp_v6_to_v4(
 			RTE_LOG(ERR, NAT64, "Failed to trim mbuf\n");
 			return -1;
 		}
+		packet_refresh_data_len(packet);
 		new_ipv4_header->total_length = rte_cpu_to_be_16(
 			rte_be_to_cpu_16(new_ipv4_header->total_length) - delta
 		);
@@ -1897,6 +1898,7 @@ nat64_handle_v6(
 		RTE_LOG(ERR, NAT64, "adjust mbuf failed. Delta: %d\n", delta);
 		return -1;
 	}
+	packet_refresh_data_len(packet);
 
 	// adjust new transport header offset
 	packet->transport_header.offset =
@@ -2450,6 +2452,7 @@ icmp_v4_to_v6(
 				return -1;
 			}
 		}
+		packet_refresh_data_len(packet);
 
 		uint16_t move_len =
 			new_payload_len - sizeof(struct rte_icmp_hdr);
@@ -2869,6 +2872,7 @@ nat64_handle_v4(
 		RTE_LOG(ERR, NAT64, "Failed to resize mbuf\n");
 		return -1;
 	}
+	packet_refresh_data_len(packet);
 
 	rte_memcpy(
 		rte_pktmbuf_mtod(mbuf, char *),

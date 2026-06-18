@@ -32,3 +32,8 @@ static inline uint16_t
 packet_data_offset(struct packet *packet) {
 	return packet_to_mbuf(packet)->data_off;
 }
+
+static inline void
+packet_refresh_data_len(struct packet *packet) {
+	packet->data_len = rte_pktmbuf_data_len(packet_to_mbuf(packet));
+}

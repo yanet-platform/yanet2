@@ -216,6 +216,7 @@ fwstate_craft_state_sync_packet(
 	sync_pkt->network_header.offset = ipv6_offset;
 	sync_pkt->transport_header.type = IPPROTO_UDP;
 	sync_pkt->transport_header.offset = udp_offset;
+	packet_refresh_data_len(sync_pkt);
 
 	return 0;
 }
