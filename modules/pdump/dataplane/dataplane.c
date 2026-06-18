@@ -19,33 +19,60 @@
 
 static inline bool
 mbuf_is_timestamp_enabled(const struct rte_mbuf *mbuf) {
-	static uint64_t timestamp_rx_dynflag;
+	// Returns true when the mbuf carries a hardware RX timestamp.
+	//
+	// -2 means the dynflag offset has not been resolved yet; negative
+	// values other than -2 mean the flag is absent (ENOENT from the
+	// registry). The offset is cached with a relaxed atomic store so
+	// the lookup runs at most once per worker thread without taking any
+	// registry lock on the hot path.
+	static int timestamp_rx_dynflag_offset = -2;
 
-	if (timestamp_rx_dynflag == 0) {
-		int timestamp_rx_dynflag_offset = rte_mbuf_dynflag_lookup(
+	int offset =
+		__atomic_load_n(&timestamp_rx_dynflag_offset, __ATOMIC_RELAXED);
+	if (offset == -2) {
+		offset = rte_mbuf_dynflag_lookup(
 			RTE_MBUF_DYNFLAG_RX_TIMESTAMP_NAME, NULL
 		);
-		if (timestamp_rx_dynflag_offset < 0)
-			return false;
-		timestamp_rx_dynflag = RTE_BIT64(timestamp_rx_dynflag_offset);
+		__atomic_store_n(
+			&timestamp_rx_dynflag_offset, offset, __ATOMIC_RELAXED
+		);
 	}
 
-	return (mbuf->ol_flags & timestamp_rx_dynflag) != 0;
+	if (offset < 0) {
+		return false;
+	}
+
+	return (mbuf->ol_flags & RTE_BIT64(offset)) != 0;
 }
 
 static inline rte_mbuf_timestamp_t
 mbuf_get_timestamp(const struct rte_mbuf *mbuf) {
-	static int timestamp_dynfield_offset = -1;
+	// Returns the hardware RX timestamp stored in a dynamic field.
+	//
+	// -2 means the dynfield offset has not been resolved yet; negative
+	// values other than -2 mean the field is absent (ENOENT from the
+	// registry). The offset is cached with a relaxed atomic store so
+	// the lookup runs at most once per worker thread without taking any
+	// registry lock on the hot path.
+	static int timestamp_dynfield_offset = -2;
 
-	if (timestamp_dynfield_offset < 0) {
-		timestamp_dynfield_offset = rte_mbuf_dynfield_lookup(
+	int offset =
+		__atomic_load_n(&timestamp_dynfield_offset, __ATOMIC_RELAXED);
+	if (offset == -2) {
+		offset = rte_mbuf_dynfield_lookup(
 			RTE_MBUF_DYNFIELD_TIMESTAMP_NAME, NULL
 		);
-		if (timestamp_dynfield_offset < 0)
-			return 0;
+		__atomic_store_n(
+			&timestamp_dynfield_offset, offset, __ATOMIC_RELAXED
+		);
 	}
 
-	return *RTE_MBUF_DYNFIELD(mbuf, timestamp_dynfield_offset, rte_mbuf_timestamp_t *);
+	if (offset < 0) {
+		return 0;
+	}
+
+	return *RTE_MBUF_DYNFIELD(mbuf, offset, rte_mbuf_timestamp_t *);
 }
 
 static inline void
