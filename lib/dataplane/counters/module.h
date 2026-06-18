@@ -24,7 +24,7 @@
  *
  * Linear buckets provide fine-grained resolution for typical packet processing
  * latencies. With 24 buckets and a 100ns step size, this covers latencies from
- * 100ns to 2400ns with precise granularity.
+ * 100ns to 2500ns with precise granularity.
  */
 #define MODULE_ECTX_PERF_COUNTER_LINEAR_HISTS 24
 
@@ -59,11 +59,11 @@ struct module_ectx_perf_counter_layout {
 	uint64_t packets;
 	/** Total number of bytes processed */
 	uint64_t bytes;
-	/** Histogram of batch counts across latency buckets (linear +
-	 * exponential) */
+	/** Histogram of batch counts across all buckets: underflow, linear,
+	 * exponential, overflow. */
 	uint64_t batch_count
 		[MODULE_ECTX_PERF_COUNTER_LINEAR_HISTS +
-		 MODULE_ECTX_PERF_COUNTER_EXP_HISTS];
+		 MODULE_ECTX_PERF_COUNTER_EXP_HISTS + 2];
 };
 
 #define MODULE_ECTX_PERF_COUNTER_SIZE                                          \
@@ -74,14 +74,21 @@ static_assert(
 	MODULE_ECTX_PERF_COUNTER_SIZE <= (1 << COUNTER_MAX_SIZE_EXP),
 	"module_ectx_perf_counter is too large for single counter"
 );
+static_assert(
+	sizeof(((struct module_ectx_perf_counter_layout *)0)->batch_count) /
+			sizeof(uint64_t) ==
+		MODULE_ECTX_PERF_COUNTER_LINEAR_HISTS +
+			MODULE_ECTX_PERF_COUNTER_EXP_HISTS + 2,
+	"batch_count must hold underflow + linear + exp + overflow buckets"
+);
 
 /**
  * Hybrid histogram configuration for module performance counters.
  *
  * This histogram tracks packet processing latency in nanoseconds with:
- * - Minimum value: 10 ns
- * - Linear buckets: 20 buckets with 50 ns step (covering 10-1010 ns)
- * - Exponential buckets: 9 buckets for larger latencies
+ * - Minimum value: 100 ns
+ * - Linear buckets: 24 buckets with 100 ns step (covering 100-2500 ns)
+ * - Exponential buckets: 5 buckets for larger latencies
  *
  * The hybrid approach provides fine-grained resolution for typical latencies
  * (linear buckets) while efficiently covering outliers (exponential buckets).
