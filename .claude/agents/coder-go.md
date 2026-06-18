@@ -19,7 +19,7 @@ You own these directories:
 - `modules/*/bindings/go/` — Safe Go bindings via generated wrappers (newest pattern)
 - `controlplane/` — Gateway server, director, common FFI
 - `common/go/` — Shared Go libraries (metrics, xgrpc, logging, dataplane, etc.)
-- `operators/` — External operators (bird-adapter, route, pipeline)
+- `operators/` — External operators (bird-adapter, pipeline, decap, forward, route)
 - All `*.proto` files (in `modules/*/controlplane/*pb/`, `controlplane/ynpb/`, `common/*pb/`)
 - `go.mod`, `go.sum`
 

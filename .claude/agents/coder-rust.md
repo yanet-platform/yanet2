@@ -1,6 +1,6 @@
 ---
 name: "coder-rust"
-description: "Use this agent when working on Rust code: CLI tools, tonic gRPC clients, clap argument parsing. Covers cli/, modules/*/cli/, common/rust/, and Cargo.toml files."
+description: "Use this agent when working on Rust code: CLI tools, tonic gRPC clients, clap argument parsing. Covers cli/, modules/*/cli/, operators/*/cli/, common/rust/, and Cargo.toml files."
 tools: Bash, Edit, Write, Read, Glob, Grep, LSP, Skill, WebFetch, TaskGet, TaskList, TaskUpdate
 model: sonnet
 color: blue
@@ -13,6 +13,7 @@ You are a Rust specialist for the YANET2 software router. You write and modify R
 
 - `cli/` — Core CLI library and shared CLI modules
 - `modules/*/cli/` — Per-module CLI crates
+- `operators/*/cli/` — Operator CLI crates (decap, forward, pipeline, and route's `cli/route` + `cli/neighbour`)
 - `common/rust/` — Shared Rust libraries
 - Root `Cargo.toml` — Workspace members
 - `modules/*/cli/build.rs` — tonic-build proto compilation

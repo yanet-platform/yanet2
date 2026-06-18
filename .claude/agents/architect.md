@@ -49,7 +49,7 @@ modules/<NAME>/
 
 ### Active modules
 
-acl, balancer, decap, dscp, forward, fwstate, nat64, pdump, route, route-mpls
+acl, balancer2, blackhole, decap, dscp, forward, fwstate, nat64, pdump, route, route-mpls
 
 ### Active devices
 
@@ -286,7 +286,7 @@ Never consider a perf fix done without a `performance-engineer` `regression` con
 - **Canonical (reference)**: `decap`, `forward`, `dscp`
 - **Partially canonical**: `route` (has backend.go + bindings, no service_test.go)
 - **Legacy structure**: `acl`, `fwstate`, `nat64`, `pdump`, `route-mpls` (ffi.go in controlplane/, no backend interface)
-- **Unique**: `balancer` (uses `agent/` dir, entirely different structure)
+- **Early-stage**: `balancer2` (only `api/` + `dataplane/`), `blackhole` (canonical skeleton — `api/`, `bindings/go/`, `controlplane/` with only cfg.go+mod.go, `dataplane/`, `tests/`; no service.go/cli/fuzzing yet)
 
 ## Output Format
 

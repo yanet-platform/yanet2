@@ -123,12 +123,14 @@ modules/<name>/
 **Legacy** (acl, fwstate, nat64, pdump, route-mpls): no `bindings/`,
 CGO calls live directly in `controlplane/ffi.go`, no `backend.go`.
 
-**Special**: `balancer2` is an early-stage module — only `api/` and `dataplane/`
-exist today.
+**Early-stage**: `balancer2` has only `api/` and `dataplane/`. `blackhole` has
+the canonical skeleton (`api/`, `bindings/go/`, `controlplane/`, `dataplane/`,
+`tests/`) but its `controlplane/` is only `cfg.go` + `mod.go` so far — no
+`service.go`/`backend.go`/`cli/`/`fuzzing/` yet.
 
 Module dataplane symbols are exported via meson linker defsym: `new_module_<name>`.
 
-Active modules: `route, acl, balancer2, forward, decap, nat64,
+Active modules: `route, acl, balancer2, blackhole, forward, decap, nat64,
 fwstate, dscp, pdump, route-mpls`.
 
 ### Devices
@@ -142,9 +144,11 @@ Active devices: `plain`, `vlan`.
 `operators/` holds long-running Go control-plane processes that orchestrate
 the dataplane through the gateway, distinct from per-module gRPC services.
 
-- `operators/yanet-pipeline-operator` — declarative reconciliation operator
-  (`cmd/`, `internal/`, `operatorpb/`). Structural template for future
-  operators (route, acl).
+- `operators/pipeline` — declarative reconciliation operator (`cmd/`,
+  `internal/`, `operatorpb/`, Rust `cli/`). Its structural template has been
+  replicated by per-module operators `operators/{decap,forward,route}`, each
+  with `cmd/` + `internal/` + `operatorpb/` + a Rust `cli/` (route ships two
+  CLI crates: `cli/route` and `cli/neighbour`).
 - `operators/bird-adapter` — BIRD routing-daemon adapter (canonical agent
   layout: `adapterpb/`, `internal/`, `service.go`). Note:
   `modules/route/bird-adapter/` is a separate proto-contract subtree
