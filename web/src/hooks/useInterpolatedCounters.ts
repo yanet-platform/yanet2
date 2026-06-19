@@ -96,6 +96,14 @@ export const useInterpolatedCounters = <K extends string = string>(
     const [ppsSamples, setPpsSamples] = useState<Map<K, number>>(() => new Map());
     // bps samples fed into useLagInterpolated.
     const [bpsSamples, setBpsSamples] = useState<Map<K, number>>(() => new Map());
+
+    // Mirror refs so doFetch can read the latest published maps without
+    // capturing stale closure values (the effect deps list only needs keysKey,
+    // not these maps).
+    const ppsSamplesRef = useRef<Map<K, number>>(ppsSamples);
+    const bpsSamplesRef = useRef<Map<K, number>>(bpsSamples);
+    ppsSamplesRef.current = ppsSamples;
+    bpsSamplesRef.current = bpsSamples;
     // Absolute packet samples (cumulative BigInt -> Number snapshot).
     const [packetSamples, setPacketSamples] = useState<Map<K, number>>(() => new Map());
     // Absolute byte samples.
@@ -113,8 +121,12 @@ export const useInterpolatedCounters = <K extends string = string>(
     // across config switches.
     useEffect(() => {
         snapshotsRef.current = [];
-        setPpsSamples(new Map());
-        setBpsSamples(new Map());
+        const emptyPps = new Map<K, number>();
+        const emptyBps = new Map<K, number>();
+        ppsSamplesRef.current = emptyPps;
+        bpsSamplesRef.current = emptyBps;
+        setPpsSamples(emptyPps);
+        setBpsSamples(emptyBps);
         setPacketSamples(new Map());
         setBytesSamples(new Map());
     }, [keysKey]);
@@ -124,6 +136,7 @@ export const useInterpolatedCounters = <K extends string = string>(
         if (!enabled || keys.length === 0) return;
 
         let cancelled = false;
+        let timerId: ReturnType<typeof setTimeout> | undefined;
 
         const doFetch = async (): Promise<void> => {
             if (cancelled) return;
@@ -134,7 +147,7 @@ export const useInterpolatedCounters = <K extends string = string>(
                 const newValues = await fetchCountersRef.current();
                 if (cancelled) return;
 
-                const now = Date.now();
+                const now = performance.now();
                 const newSnapshot: RawCounterSnapshot<K> = {
                     timestamp: now,
                     values: newValues,
@@ -145,26 +158,29 @@ export const useInterpolatedCounters = <K extends string = string>(
                 if (prevSnapshot) {
                     const dtSeconds = (now - prevSnapshot.timestamp) / 1000;
 
-                    if (dtSeconds > 0) {
-                        const nextPps = new Map<K, number>();
-                        const nextBps = new Map<K, number>();
+                    let updatedPps: Map<K, number> | null = null;
+                    let updatedBps: Map<K, number> | null = null;
 
-                        for (const key of currentKeys) {
-                            const prev = prevSnapshot.values.get(key);
-                            const cur = newValues.get(key);
+                    for (const key of currentKeys) {
+                        const prev = prevSnapshot.values.get(key);
+                        const cur = newValues.get(key);
 
-                            if (prev && cur) {
-                                const { pps, bps } = computeRate(prev, cur, dtSeconds);
-                                nextPps.set(key, pps);
-                                nextBps.set(key, bps);
-                            } else {
-                                nextPps.set(key, 0);
-                                nextBps.set(key, 0);
+                        if (prev && cur) {
+                            const rate = computeRate(prev, cur, dtSeconds);
+                            if (rate !== null) {
+                                if (updatedPps === null) {
+                                    updatedPps = new Map<K, number>(ppsSamplesRef.current);
+                                    updatedBps = new Map<K, number>(bpsSamplesRef.current);
+                                }
+                                updatedPps.set(key, rate.pps);
+                                updatedBps!.set(key, rate.bps);
                             }
                         }
+                    }
 
-                        setPpsSamples(nextPps);
-                        setBpsSamples(nextBps);
+                    if (updatedPps !== null) {
+                        setPpsSamples(updatedPps);
+                        setBpsSamples(updatedBps!);
                     }
                 }
 
@@ -185,14 +201,17 @@ export const useInterpolatedCounters = <K extends string = string>(
                 }
             } catch {
                 // tolerate fetch failures.
+            } finally {
+                if (!cancelled) {
+                    timerId = setTimeout(() => { void doFetch(); }, pollingInterval);
+                }
             }
         };
 
-        doFetch();
-        const id = setInterval(doFetch, pollingInterval);
+        void doFetch();
         return () => {
             cancelled = true;
-            clearInterval(id);
+            clearTimeout(timerId);
         };
     }, [enabled, keysKey, pollingInterval]);
 

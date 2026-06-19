@@ -19,18 +19,28 @@ export const clampProgress = (now: number, sampleTs: number, intervalMs: number)
 };
 
 /**
- * Compute per-second packet and byte rates from two cumulative counter
- * snapshots.
+ * Minimum elapsed time (in seconds) required to compute a valid rate sample.
  *
- * A negative delta (counter reset) is mapped to 0 rather than producing a
- * large negative spike.
+ * Samples with a shorter dt are discarded to prevent division by a tiny
+ * number producing physically-impossible rates when two fetches settle close
+ * together.
+ */
+export const MIN_DT_SECONDS = 0.1;
+
+/**
+ * Compute per-second packet and byte rates from two cumulative counter snapshots.
+ *
+ * Returns null when dtSeconds is below MIN_DT_SECONDS (including zero and
+ * negative values) so the caller can carry forward the previous sample instead
+ * of publishing a bogus rate. A negative delta (counter reset) is mapped to 0
+ * on the normal path rather than producing a large negative spike.
  */
 export const computeRate = (
     prev: { packets: bigint; bytes: bigint },
     cur: { packets: bigint; bytes: bigint },
     dtSeconds: number,
-): { pps: number; bps: number } => {
-    if (dtSeconds <= 0) return { pps: 0, bps: 0 };
+): { pps: number; bps: number } | null => {
+    if (dtSeconds < MIN_DT_SECONDS) return null;
     const dp = Number(cur.packets - prev.packets);
     const db = Number(cur.bytes - prev.bytes);
     return {
