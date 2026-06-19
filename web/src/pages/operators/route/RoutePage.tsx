@@ -132,6 +132,8 @@ const RoutePage: React.FC = () => {
         activeId: activeRowId,
         setActiveId: setActiveRowId,
         onActivate: (row) => handleEditRow(row.id),
+        onDelete: (row) => handleDeleteRowRequest(row.id),
+        enabled: !drawer.open,
     });
 
     const handleCloseDrawer = useCallback((): void => {
@@ -493,10 +495,9 @@ const RoutePage: React.FC = () => {
                                 selectedIds={currentSelected}
                                 sortState={sortState}
                                 onSort={handleSort}
-                                onEditRow={handleEditRow}
+                                onRowClick={handleEditRow}
                                 onSelectionChange={(ids) => setSelected(currentConfig, ids)}
                                 emptyMessage={search || family !== 'all' || bestOnly || conflictsOnly ? 'No routes match the current filters.' : 'No routes.'}
-                                onDeleteRow={handleDeleteRowRequest}
                                 conflictMap={conflictMap}
                                 flashRowId={flashRowId}
                                 activeRowId={activeRowId}

@@ -60,7 +60,6 @@ export const PrefixTable: React.FC<PrefixTableProps> = (props) => {
             columnHeaders={COLUMN_HEADERS}
             renderDataCells={renderPrefixDataCells}
             removedColumns={REMOVED_COLUMNS}
-            itemNoun="prefix"
             emptyMessage="No prefixes match your search."
             flushFooter
             headerActions={

@@ -16,25 +16,23 @@ export interface RIBTableProps {
     selectedIds: Set<string>;
     sortState: RouteSortState;
     onSort: (col: RouteSortableColumn) => void;
-    onEditRow: (id: string) => void;
+    onRowClick: (id: string) => void;
     onSelectionChange: (ids: Set<string>) => void;
     emptyMessage: string;
-    onDeleteRow: (id: string) => void;
     conflictMap?: Map<string, number>;
     flashRowId?: string | null;
     activeRowId?: string | null;
 }
 
-/** Read-only virtualized table for the RIB (Route Information Base). */
+/** Virtualized table for the RIB (Route Information Base). */
 export const RIBTable: React.FC<RIBTableProps> = ({
     rows,
     selectedIds,
     sortState,
     onSort,
-    onEditRow,
+    onRowClick,
     onSelectionChange,
     emptyMessage,
-    onDeleteRow,
     conflictMap,
     flashRowId,
     activeRowId,
@@ -150,13 +148,7 @@ export const RIBTable: React.FC<RIBTableProps> = ({
             onSelectionChange={onSelectionChange}
             sortState={adaptedSortState}
             onSort={handleSort}
-            onEditRow={onEditRow}
-            onDeleteRow={onDeleteRow}
-            canEditRow={true}
-            editAriaLabel={(_route, idx) => `Edit route ${idx + 1}`}
-            deleteAriaLabel={(route) => `Delete route ${route.prefix || ''}`.trim()}
-            editTitle="Edit route"
-            deleteTitle="Delete route"
+            onRowClick={onRowClick}
             flashRowId={flashRowId}
             activeRowId={activeRowId}
             scrollActiveIntoView

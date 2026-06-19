@@ -306,6 +306,7 @@ const RuleTable: React.FC<RuleTableProps> = ({
                 onDiscard,
                 onDeleteConfig,
             })}
+            scrollActiveIntoView
             renderIndexAdornment={(item) => {
                 const expanded = expandRuleItem(item.rule);
                 if (expanded.isDead) {

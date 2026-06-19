@@ -20,15 +20,13 @@ interface RuleTableCommonOptions<T extends RuleItemShape> {
     onDeleteConfig: () => void;
 }
 
-interface RuleTableCommonResult<T extends RuleItemShape> {
+interface RuleTableCommonResult {
     emptyMessage: string;
     selectedIds: Set<string>;
     onSelectionChange: (ids: Set<string>) => void;
     sortState: { column: null; direction: 'asc' };
     onSort: () => void;
-    onEditRow: (id: string) => void;
-    editAriaLabel: (item: T) => string;
-    editTitle: string;
+    onRowClick: (id: string) => void;
     activeRowId: string | null;
     flashRowId?: string | null;
     headerActions: React.ReactNode;
@@ -38,7 +36,7 @@ interface RuleTableCommonResult<T extends RuleItemShape> {
 /** Returns the VirtualTable prop subset that is identical across ACL and Forward rule tables. */
 const ruleTableCommonProps = <T extends RuleItemShape>(
     options: RuleTableCommonOptions<T>,
-): RuleTableCommonResult<T> => {
+): RuleTableCommonResult => {
     const {
         items,
         onEditRule,
@@ -58,12 +56,10 @@ const ruleTableCommonProps = <T extends RuleItemShape>(
         onSelectionChange,
         sortState: { column: null, direction: 'asc' },
         onSort: () => {},
-        onEditRow: (id: string) => {
+        onRowClick: (id: string) => {
             const it = items.find((item) => item.id === id);
             if (it) onEditRule(it);
         },
-        editAriaLabel: (item: T) => `Edit rule ${item.index + 1}`,
-        editTitle: 'Edit rule',
         activeRowId,
         flashRowId,
         headerActions: (

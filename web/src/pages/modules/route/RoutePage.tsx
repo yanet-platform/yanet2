@@ -1,6 +1,6 @@
 import React, { useCallback, useMemo, useRef } from 'react';
 import { Button, Icon } from '@gravity-ui/uikit';
-import { usePageContribution, useTabCycle } from '../../../hooks';
+import { useListNavigation, usePageContribution, useTabCycle } from '../../../hooks';
 import { Funnel, Plus } from '@gravity-ui/icons';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, SearchInput, EmptyPagePlaceholder, RowCountDisplay } from '../../../components';
 import { useFIBDraft } from './useFIBDraft';
@@ -11,7 +11,7 @@ import type { FIBDrawerHandle } from './FIBDrawer';
 import FIBYamlIO from './FIBYamlIO';
 import { FIBSaveDiffModal } from './FIBSaveDiffModal';
 import { AddConfigModal, DeleteConfigModal, BulkDeleteModal, CommandPaletteHeader } from '../../../components';
-import { useDraftShortcuts, useDraftPageHandlers, useDraftPageState, useDraftPageDerived } from '../../../components/draft';
+import { useDraftPageHandlers, useDraftPageState, useDraftPageDerived } from '../../../components/draft';
 import { isValidCidr as isValidCIDR } from '../../../utils';
 import type { Command, RowAdapter, PagePaletteContribution } from '../../../components/command-palette';
 import { buildConfigCommands } from '../../../components/command-palette';
@@ -109,9 +109,17 @@ const RoutePage: React.FC = () => {
         enabled: !loading,
     });
 
-    useDraftShortcuts({
-        rows: rawRows, activeRowId, setActiveRowId, editingRowId, setEditingRowId,
-        onDeleteRow: handlers.handleDeleteRow,
+    const navRows = useMemo(() => rawRows.map((r) => ({ id: r.id })), [rawRows]);
+    useListNavigation({
+        rows: navRows,
+        activeId: activeRowId,
+        setActiveId: setActiveRowId,
+        onActivate: (row) => { setActiveRowId(row.id); setEditingRowId(row.id); },
+        onDelete: (row) => {
+            const r = rawRows.find((x) => x.id === row.id);
+            if (r) handlers.handleDeleteRow(r);
+        },
+        enabled: !editingRowId,
     });
 
     const canCreate = !loading && !loadFailed;

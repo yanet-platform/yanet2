@@ -1,7 +1,7 @@
 import React, { useCallback, useMemo, useRef } from 'react';
 import { Button, Icon } from '@gravity-ui/uikit';
 import { Funnel, Plus } from '@gravity-ui/icons';
-import { usePageContribution, useTabCycle } from '../../../hooks';
+import { useListNavigation, usePageContribution, useTabCycle } from '../../../hooks';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, EmptyPagePlaceholder, SearchInput, RowCountDisplay } from '../../../components';
 import { usePrefixDraft } from './usePrefixDraft';
 import type { PrefixRowItem } from './types';
@@ -11,7 +11,7 @@ import type { PrefixDrawerHandle } from './PrefixDrawer';
 import PrefixYamlIO from './PrefixYamlIO';
 import { PrefixSaveDiffModal } from './PrefixSaveDiffModal';
 import { AddConfigModal, DeleteConfigModal, BulkDeleteModal, CommandPaletteHeader } from '../../../components';
-import { useDraftShortcuts, useDraftPageHandlers, useDraftPageState, useDraftPageDerived } from '../../../components/draft';
+import { useDraftPageHandlers, useDraftPageState, useDraftPageDerived } from '../../../components/draft';
 import type { Command, RowAdapter, PagePaletteContribution } from '../../../components/command-palette';
 import { buildConfigCommands, buildDraftCommands } from '../../../components/command-palette';
 import '../../../styles/chrome.scss';
@@ -93,9 +93,17 @@ const DecapPage: React.FC = () => {
         setEditingRowId(newRow.id);
     }, [currentConfig, dispatchDraft, setActiveRowId, setEditingRowId]);
 
-    useDraftShortcuts({
-        rows: rawRows, activeRowId, setActiveRowId, editingRowId, setEditingRowId,
-        onDeleteRow: handlers.handleDeleteRow,
+    const navRows = useMemo(() => rawRows.map((r) => ({ id: r.id })), [rawRows]);
+    useListNavigation({
+        rows: navRows,
+        activeId: activeRowId,
+        setActiveId: setActiveRowId,
+        onActivate: (row) => { setActiveRowId(row.id); setEditingRowId(row.id); },
+        onDelete: (row) => {
+            const r = rawRows.find((x) => x.id === row.id);
+            if (r) handlers.handleDeleteRow(r);
+        },
+        enabled: !editingRowId,
     });
 
     const canCreate = !loading && !loadFailed;

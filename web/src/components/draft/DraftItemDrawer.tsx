@@ -1,4 +1,5 @@
-import React, { useEffect } from 'react';
+import React from 'react';
+import { useDrawerKeyboard } from '../../hooks';
 
 interface DraftItemDrawerProps {
     open: boolean;
@@ -12,6 +13,8 @@ interface DraftItemDrawerProps {
     hideIndex?: boolean;
     onClose: () => void;
     onApply: () => void;
+    /** When false, Ctrl/Cmd+Enter does not apply. Defaults to true. */
+    canApply?: boolean;
     onDelete?: () => void;
     onJump: (delta: number) => void;
     ariaLabel: string;
@@ -33,21 +36,13 @@ const DraftItemDrawer: React.FC<DraftItemDrawerProps> = ({
     hideIndex,
     onClose,
     onApply,
+    canApply = true,
     onDelete,
     onJump,
     ariaLabel,
     children,
 }) => {
-    useEffect(() => {
-        if (!open) return;
-        const handler = (e: KeyboardEvent): void => {
-            if (e.key === 'Escape') {
-                onClose();
-            }
-        };
-        window.addEventListener('keydown', handler);
-        return () => window.removeEventListener('keydown', handler);
-    }, [open, onClose]);
+    useDrawerKeyboard({ open, onClose, onApply, canApply });
 
     return (
     <>

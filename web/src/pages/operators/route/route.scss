@@ -309,3 +309,21 @@ $_ro-col-med:      42px;
 }
 
 
+.ro-attr-grid {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 8px 16px;
+    margin: 0;
+    align-items: center;
+
+    dt {
+        color: var(--yn-text-3);
+        font-size: 12px;
+    }
+
+    dd {
+        margin: 0;
+        color: var(--yn-text-2);
+        font-size: 12.5px;
+    }
+}

@@ -161,11 +161,6 @@ const NeighboursPage: React.FC = () => {
         setPanel({ open: true, mode: 'add', neighbour: null });
     }, []);
 
-    const handleEditRow = useCallback((id: string): void => {
-        const neighbour = allRows.find((n) => getNeighbourId(n) === id) || null;
-        setPanel({ open: true, mode: 'edit', neighbour });
-    }, [allRows]);
-
     const handleClosePanel = useCallback((): void => {
         setPanel((prev) => ({ ...prev, open: false }));
     }, []);
@@ -182,6 +177,8 @@ const NeighboursPage: React.FC = () => {
         activeId: activeRowId,
         setActiveId: setActiveRowId,
         onActivate: (row) => handleRowClick(row.id),
+        onDelete: isMergedView ? undefined : (row) => handleDeleteRowRequest(row.id),
+        enabled: !panel.open,
     });
 
     const handleSubmitNeighbour = useCallback(async (table: string, entry: Neighbour): Promise<void> => {
@@ -632,15 +629,12 @@ const NeighboursPage: React.FC = () => {
                                 sortState={sortState}
                                 onSort={handleSort}
                                 onRowClick={handleRowClick}
-                                onEditRow={handleEditRow}
                                 onSelectionChange={setSelectedIds}
                                 emptyMessage={searchActive ? 'No neighbours match the current filters.' : 'No neighbours.'}
                                 canEditTable={canEditTable}
                                 canDeleteTable={canDeleteTable}
                                 onEditTable={() => setEditTableOpen(true)}
                                 onDeleteTable={() => setDeleteTableOpen(true)}
-                                onDeleteRow={isMergedView ? undefined : handleDeleteRowRequest}
-                                canEditRow={!isMergedView}
                                 isMergedView={isMergedView}
                                 cache={cache}
                                 tables={tables}

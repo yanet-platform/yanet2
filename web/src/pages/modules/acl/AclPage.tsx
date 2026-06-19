@@ -3,12 +3,12 @@ import { Button, Icon, Label } from '@gravity-ui/uikit';
 import { Funnel, Pause, Play, Plus } from '@gravity-ui/icons';
 import { useNavigate } from 'react-router-dom';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, SearchInput, EmptyPagePlaceholder, RowCountDisplay } from '../../../components';
-import { usePageContribution } from '../../../hooks';
+import { useListNavigation, usePageContribution } from '../../../hooks';
 import { useAclDraft } from './useAclDraft';
 import type { Rule } from '../../../api/acl';
 import { ActionKind } from '../../../api/acl';
 import type { RuleItem, RuleDraft } from './types';
-import { rulesToNgItems, draftToRule } from './hooks';
+import { rulesToNgItems, draftToRule, itemToDraft } from './hooks';
 import RuleTable from './RuleTable';
 import RuleDrawer from './RuleDrawer';
 import type { RuleDrawerHandle } from './RuleDrawer';
@@ -97,6 +97,7 @@ const AclPage: React.FC = () => {
         saveConfig,
         discardConfig,
         toRule: draftToRule,
+        itemToDraft,
         cloneItem: cloneRuleItem,
         requireConfigForAdd: true,
         clearSelectionOnTabSelect: false,
@@ -131,6 +132,22 @@ const AclPage: React.FC = () => {
         if (!q) return allItems;
         return allItems.filter(item => item.searchText.includes(q));
     }, [allItems, deferredSearch]);
+
+    const navRows = useMemo(() => visibleItems.map((it) => ({ id: it.id })), [visibleItems]);
+    useListNavigation({
+        rows: navRows,
+        activeId: activeRowId,
+        setActiveId: setActiveRowId,
+        onActivate: (row) => {
+            const it = visibleItems.find((i) => i.id === row.id);
+            if (it) openEdit(it);
+        },
+        onDelete: (row) => {
+            const it = visibleItems.find((i) => i.id === row.id);
+            if (it) handleDeleteItem(it);
+        },
+        enabled: !drawer.open,
+    });
 
     const handleOpenBulkDelete = useCallback((): void => {
         if (!currentConfig) {

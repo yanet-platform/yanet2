@@ -2,8 +2,6 @@ import './table.scss';
 import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { Checkbox, Tooltip } from '@gravity-ui/uikit';
-import { useRowHoverOverlay } from './useRowHoverOverlay';
-import RowHoverEditOverlay from './RowHoverEditOverlay';
 import { useContainerHeight } from '../../hooks/useContainerHeight';
 
 export const ROW_HEIGHT = 44;
@@ -50,17 +48,8 @@ export interface VirtualTableProps<T> {
     sortState: SortState<string>;
     onSort: (key: string) => void;
 
-    onEditRow: (id: string) => void;
-    onDeleteRow?: (id: string) => void;
-    canEditRow?: boolean;
-    editAriaLabel?: (row: T, idx: number) => string;
-    deleteAriaLabel?: (row: T, idx: number) => string;
-    editTitle?: string;
-    deleteTitle?: string;
-    editIcon?: React.ReactNode;
-    deleteIcon?: React.ReactNode;
-
-    onRowClick?: (id: string) => void;
+    /** Opens the edit/detail window for a row. Bound to row click and keyboard activation. */
+    onRowClick: (id: string) => void;
     activeRowId?: string | null;
     /** When true, scrolls the active row into view as activeRowId changes. Off by default so existing callers are unaffected. */
     scrollActiveIntoView?: boolean;
@@ -164,15 +153,6 @@ export function VirtualTable<T>({
     selectionDisabledTooltip,
     sortState,
     onSort,
-    onEditRow,
-    onDeleteRow,
-    canEditRow,
-    editAriaLabel,
-    deleteAriaLabel,
-    editTitle = 'Edit',
-    deleteTitle = 'Delete',
-    editIcon,
-    deleteIcon,
     onRowClick,
     activeRowId,
     scrollActiveIntoView,
@@ -192,19 +172,9 @@ export function VirtualTable<T>({
     const bodyHeight = useContainerHeight(scrollRef as React.RefObject<HTMLElement | null>, 300, FOOTER_HEIGHT);
     const [flashingId, setFlashingId] = React.useState<string | null>(null);
 
-    const {
-        hoveredRow,
-        overlayTopOffset,
-        handleHoverChange,
-        handleOverlayMouseEnter,
-        handleOverlayMouseLeave,
-        attachScrollEl,
-    } = useRowHoverOverlay<T>(HEADER_HEIGHT);
-
     const setScrollRef = useCallback((el: HTMLDivElement | null): void => {
         (scrollRef as React.MutableRefObject<HTMLDivElement | null>).current = el;
-        attachScrollEl(el);
-    }, [attachScrollEl]);
+    }, []);
 
     const rowVirtualizer = useVirtualizer({
         count: rows.length,
@@ -258,12 +228,6 @@ export function VirtualTable<T>({
         if (checked) next.add(id); else next.delete(id);
         onSelectionChange(next);
     }, [selectedIds, onSelectionChange]);
-
-    const handleOverlayEdit = useCallback((): void => {
-        if (hoveredRow) {
-            onEditRow(getRowId(hoveredRow));
-        }
-    }, [hoveredRow, onEditRow, getRowId]);
 
     const virtualRows = rowVirtualizer.getVirtualItems();
 
@@ -396,9 +360,7 @@ export function VirtualTable<T>({
                                     key={id || virtualRow.index}
                                     className={`${rowClasses} yn-tbl-line`}
                                     data-row-id={id}
-                                    onMouseEnter={() => handleHoverChange(row, virtualRow.start)}
-                                    onMouseLeave={() => handleHoverChange(null, 0)}
-                                    onClick={onRowClick ? () => onRowClick(id) : undefined}
+                                    onClick={() => onRowClick(id)}
                                     style={{
                                         position: 'absolute',
                                         top: virtualRow.start,
@@ -407,7 +369,8 @@ export function VirtualTable<T>({
                                         width: '100%',
                                         borderBottom: '1px solid var(--yn-line)',
                                         backgroundColor: rowBg,
-                                        cursor: onRowClick ? 'pointer' : 'default',
+                                        cursor: 'pointer',
+                                        userSelect: 'none',
                                         ...gridStyle,
                                     }}
                                 >
@@ -446,23 +409,6 @@ export function VirtualTable<T>({
                 <span className="yn-toolbar__count">{footerText}</span>
                 {footerExtra}
             </div>
-
-            {canEditRow !== false && hoveredRow !== null && (
-                <RowHoverEditOverlay
-                    top={overlayTopOffset}
-                    rowHeight={ROW_HEIGHT}
-                    onEdit={handleOverlayEdit}
-                    editAriaLabel={editAriaLabel ? editAriaLabel(hoveredRow, rows.indexOf(hoveredRow)) : editTitle}
-                    editTitle={editTitle}
-                    onDelete={onDeleteRow ? () => onDeleteRow(getRowId(hoveredRow)) : undefined}
-                    deleteAriaLabel={deleteAriaLabel ? deleteAriaLabel(hoveredRow, rows.indexOf(hoveredRow)) : deleteTitle}
-                    deleteTitle={deleteTitle}
-                    onMouseEnter={handleOverlayMouseEnter}
-                    onMouseLeave={handleOverlayMouseLeave}
-                    editIcon={editIcon}
-                    deleteIcon={deleteIcon}
-                />
-            )}
         </div>
     );
 }

@@ -27,15 +27,12 @@ export interface NeighbourTableProps {
     sortState: SortState;
     onSort: (col: SortableColumn) => void;
     onRowClick: (id: string) => void;
-    onEditRow: (id: string) => void;
     onSelectionChange: (ids: Set<string>) => void;
     emptyMessage: string;
     canEditTable: boolean;
     canDeleteTable: boolean;
     onEditTable: () => void;
     onDeleteTable: () => void;
-    onDeleteRow?: (id: string) => void;
-    canEditRow?: boolean;
     isMergedView?: boolean;
     cache?: Map<string, Neighbour[]>;
     tables?: NeighbourTableInfo[];
@@ -140,15 +137,12 @@ export const NeighbourTable: React.FC<NeighbourTableProps> = ({
     sortState,
     onSort,
     onRowClick,
-    onEditRow,
     onSelectionChange,
     emptyMessage,
     canEditTable,
     canDeleteTable,
     onEditTable,
     onDeleteTable,
-    onDeleteRow,
-    canEditRow,
     isMergedView,
     cache,
     tables,
@@ -262,11 +256,6 @@ export const NeighbourTable: React.FC<NeighbourTableProps> = ({
         onSort(key as SortableColumn);
     };
 
-    const handleEditRow = (id: string): void => {
-        onRowClick(id);
-        onEditRow(id);
-    };
-
     const mergedDisabledTooltip = 'Merged is read-only — open a table tab to select and delete.';
 
     const showTableActions = canEditTable || canDeleteTable;
@@ -314,15 +303,6 @@ export const NeighbourTable: React.FC<NeighbourTableProps> = ({
             selectionDisabledTooltip={mergedDisabledTooltip}
             sortState={adaptedSortState}
             onSort={handleSort}
-            onEditRow={handleEditRow}
-            onDeleteRow={onDeleteRow ? (id) => onDeleteRow(id) : undefined}
-            canEditRow={canEditRow}
-            editAriaLabel={(neighbour) => `Edit neighbour ${ipAddressToString(neighbour.next_hop) || ''}`}
-            deleteAriaLabel={(neighbour) => `Delete neighbour ${ipAddressToString(neighbour.next_hop) || ''}`.trim()}
-            editTitle="Edit neighbour"
-            deleteTitle="Delete neighbour"
-            editIcon={<Pencil width={14} height={14} />}
-            deleteIcon={<TrashBin width={14} height={14} />}
             onRowClick={onRowClick}
             activeRowId={activeRowId}
             scrollActiveIntoView

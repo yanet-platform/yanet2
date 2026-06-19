@@ -1,13 +1,15 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { useDrawerFlush } from '../../../hooks';
+import { useDrawerFlush, useDrawerKeyboard } from '../../../hooks';
 import { ForwardMode } from '../../../api/forward';
 import { MODE_LABELS } from './types';
 import type { RuleDraft, RuleItem } from './types';
 import { emptyDraft } from './types';
 import { itemToDraft } from './hooks';
-import { isValidCidr, isValidDeviceName } from '../../../utils';
+import { isValidCidr, isValidDeviceName, formatPps } from '../../../utils';
 import ChipInput from './ChipInput';
 import type { ChipInputHandle } from './ChipInput';
+import Sparkline from '../_shared/Sparkline';
+import type { RuleRate } from './useForwardRuleCounters';
 import { DrawerShell } from '../../../components';
 import { RuleDrawerHeadActions, RuleDrawerFootActions, ruleDrawerFootMeta } from '../../../components/draft';
 
@@ -15,6 +17,8 @@ interface RuleDrawerProps {
     open: boolean;
     mode: 'add' | 'edit';
     ruleItem: RuleItem | null;
+    /** Live counter rate for the edited rule, shown read-only in the drawer. */
+    rate?: RuleRate;
     onClose: () => void;
     /** Called when the user confirms the rule form. Applies to local draft only — no API call. */
     onSave: (draft: RuleDraft) => void;
@@ -38,6 +42,7 @@ const RuleDrawer = React.forwardRef<RuleDrawerHandle, RuleDrawerProps>(({
     open,
     mode,
     ruleItem,
+    rate,
     onClose,
     onSave,
     onDelete,
@@ -87,6 +92,8 @@ const RuleDrawer = React.forwardRef<RuleDrawerHandle, RuleDrawerProps>(({
         }
         onClose();
     };
+
+    useDrawerKeyboard({ open, onClose: handleClose, onApply: handleApply, canApply: isValid });
 
     const modeOptions = useMemo(() => MODES_ORDER.map((m) => ({
         value: m,
@@ -234,6 +241,23 @@ const RuleDrawer = React.forwardRef<RuleDrawerHandle, RuleDrawerProps>(({
                     </div>
                 </div>
             </section>
+
+            {mode === 'edit' && (
+                <section className="yn-section">
+                    <div className="yn-section-h">Live counter</div>
+                    <div className="yn-section__body">
+                        <div className="yn-field" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                            <Sparkline
+                                values={rate?.history ?? null}
+                                width={120}
+                                height={24}
+                                emptyTitle="No counter history available from backend"
+                            />
+                            <span className="yn-cell-pps">{rate ? formatPps(rate.pps) : '— pps'}</span>
+                        </div>
+                    </div>
+                </section>
+            )}
         </DrawerShell>
     );
 });

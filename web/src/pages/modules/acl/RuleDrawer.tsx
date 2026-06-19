@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { useDrawerFlush } from '../../../hooks';
+import { useDrawerFlush, useDrawerKeyboard } from '../../../hooks';
 import { ActionKind, ACTION_KIND_LABELS } from '../../../api/acl';
 import { TrashIcon, RuleDrawerHeadActions, RuleDrawerFootActions, ruleDrawerFootMeta } from '../../../components/draft';
 import type { RuleDraft, RuleItem } from './types';
@@ -95,6 +95,8 @@ const RuleDrawer = React.forwardRef<RuleDrawerHandle, RuleDrawerProps>(({
         }
         onClose();
     };
+
+    useDrawerKeyboard({ open, onClose: handleClose, onApply: handleApply });
 
     const addAction = (kind: ActionKind): void => {
         updateField('actions', [...draft.actions, kind]);

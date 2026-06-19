@@ -83,7 +83,6 @@ export const FIBTable: React.FC<FIBTableProps> = (props) => {
             columnHeaders={COLUMN_HEADERS}
             renderDataCells={renderFIBDataCells}
             removedColumns={REMOVED_COLUMNS}
-            itemNoun="route"
             emptyMessage="No routes match your search."
             flushFooter
             headerActions={

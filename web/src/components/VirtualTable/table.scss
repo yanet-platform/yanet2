@@ -1,7 +1,4 @@
 // Virtualized table container.
-// position:relative is required so the floating edit-button overlay
-// (.yn-row-action-slot) can use position:absolute with right:0 to
-// pin to the wrap's right edge — unaffected by the body's h-scroll.
 .yn-table-wrap {
     flex: 1;
     min-height: 0;
@@ -159,7 +156,11 @@
 
 // Virtual rows
 .yn-vrow {
-    cursor: default;
+    // Rows are clickable: clicking opens the edit/detail window. Text selection
+    // is disabled so a drag-select does not fight the click; all row data is
+    // surfaced in the window instead.
+    cursor: pointer;
+    user-select: none;
     transition: background-color 0.06s;
 
     &:hover { background-color: var(--yn-bg-hover) !important; }
@@ -245,48 +246,8 @@
     border: 1px solid var(--yn-line-2);
 }
 
-/*
- * Floating edit-button overlay.  Direct child of .yn-table-wrap (position:relative,
- * overflow:hidden).
- *
- *   right: 0   — resolves against .yn-table-wrap's right edge = wrap_right.
- *                Never shifts during horizontal scroll because the overlay lives
- *                OUTSIDE the scroll body.
- *   top        — set from JS: HEADER_HEIGHT + virtualizer_start − body.scrollTop
- *                This keeps the slot aligned with the hovered row even as the
- *                body scrolls vertically.
- *
- * Width geometry (aligned with header delete button):
- *   slot: 40px wide, padding-right 8px → effective centering region: 32px
- *   button: 26px centered in 32px:
- *     left padding before button = (32 − 26) / 2 = 3px
- *     button center from slot right = 8 + 3 + 13 = 24px
- *   slot_right = wrap_right  →  button center = wrap_right − 24px
- *
- *   header delete: 32px wide, .yn-table-actions padding-right: 8px
- *     → delete center = wrap_right − 8 − 16 = wrap_right − 24px  ✓
- *
- * The overlay is clipped by .yn-table-wrap (overflow:hidden) at the header/footer
- * boundaries, so the button disappears naturally when the row scrolls out of view.
- */
-.yn-row-action-slot {
-    position: absolute;
-    right: 0;
-    width: 40px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding-right: 8px;
-    z-index: 3;
-    pointer-events: auto;
-    background: transparent;
-
-    &--wide {
-        width: 76px;
-        gap: 4px;
-    }
-}
-
+// Square icon button used by table-level header actions (e.g. edit / delete
+// table on the Neighbours page).
 .yn-row-edit-btn {
     width: 32px;
     height: 32px;

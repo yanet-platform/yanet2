@@ -25,6 +25,13 @@ export interface UseRulePageStateOptions<TRule, TItem extends { id: string; inde
     saveConfig: (config: string) => Promise<void>;
     discardConfig: (config: string) => void;
     toRule: (draft: TDraft) => TRule;
+    /**
+     * Rebuilds a draft from an existing item.
+     *
+     * Used to canonicalize the rule being edited so an apply that did not
+     * change anything is detected and skipped (avoids a spurious dirty flag).
+     */
+    itemToDraft: (item: TItem) => TDraft;
     cloneItem: (item: TItem) => TItem;
     requireConfigForAdd: boolean;
     clearSelectionOnTabSelect: boolean;
@@ -82,6 +89,7 @@ export const useRulePageState = <TRule, TItem extends { id: string; index: numbe
     saveConfig,
     discardConfig,
     toRule,
+    itemToDraft,
     cloneItem,
     requireConfigForAdd,
     clearSelectionOnTabSelect,
@@ -144,9 +152,10 @@ export const useRulePageState = <TRule, TItem extends { id: string; index: numbe
     }, []);
 
     const closeDrawer = useCallback((): void => {
+        // Keep activeRowId so the highlighted row stays selected after the
+        // editor closes — the user can keep arrow-navigating from there.
         setDrawer(d => ({ ...d, open: false }));
         setTimeout(() => {
-            setActiveRowId(null);
             setDrawer(d => ({ ...d, item: null }));
         }, DRAWER_TRANSITION_MS);
     }, []);
@@ -156,10 +165,17 @@ export const useRulePageState = <TRule, TItem extends { id: string; index: numbe
         if (drawer.mode === 'add') {
             dispatchDraft({ type: 'ADD_RULE', configName: currentConfig, rule });
         } else if (drawer.item) {
-            dispatchDraft({ type: 'UPDATE_RULE_AT_INDEX', configName: currentConfig, index: drawer.item.index, rule });
+            // Skip the update when nothing changed. Both sides are compared in
+            // canonical (toRule) form so the round-trip's array/key normalization
+            // does not look like an edit and flip the config dirty on a no-op
+            // apply (e.g. opening a rule and pressing Ctrl/Cmd+Enter).
+            const original = toRule(itemToDraft(drawer.item));
+            if (JSON.stringify(rule) !== JSON.stringify(original)) {
+                dispatchDraft({ type: 'UPDATE_RULE_AT_INDEX', configName: currentConfig, index: drawer.item.index, rule });
+            }
         }
         closeDrawer();
-    }, [drawer, currentConfig, dispatchDraft, toRule, closeDrawer]);
+    }, [drawer, currentConfig, dispatchDraft, toRule, itemToDraft, closeDrawer]);
 
     const handleDeleteItem = useCallback((item: TItem): void => {
         dispatchDraft({ type: 'REMOVE_RULES', configName: currentConfig, indices: [item.index] });
@@ -213,8 +229,6 @@ export const useRulePageState = <TRule, TItem extends { id: string; index: numbe
 
     usePageKeyboardShortcuts({
         onNewRule: openAdd,
-        onEscape: closeDrawer,
-        drawerOpen: drawer.open,
     });
 
     return {

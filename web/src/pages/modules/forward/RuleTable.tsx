@@ -154,6 +154,7 @@ const RuleTable: React.FC<RuleTableProps> = ({
                 onDiscard,
                 onDeleteConfig,
             })}
+            scrollActiveIntoView
         />
     );
 };

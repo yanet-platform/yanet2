@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Bulb, CircleInfo, Layers } from '@gravity-ui/icons';
 import { Select } from '@gravity-ui/uikit';
+import { useDrawerKeyboard } from '../../../hooks';
 import { DotBadge } from '../../../components/VirtualTable';
 import { ipAddressToString, stringToIPAddress } from '../../../utils/netip';
 import { formatUnixSeconds } from '../../../utils';
@@ -156,15 +157,6 @@ const NeighbourPanel: React.FC<NeighbourPanelProps> = ({
         }
     }, [open, mode]);
 
-    useEffect(() => {
-        if (!open) return;
-        const handler = (e: KeyboardEvent): void => {
-            if (e.key === 'Escape') onClose();
-        };
-        window.addEventListener('keydown', handler);
-        return () => window.removeEventListener('keydown', handler);
-    }, [open, onClose]);
-
     const nextHopError = mode === 'add' ? validateNextHop(nextHop) : undefined;
     const linkAddrError = (mode === 'add' || mode === 'edit') ? validateMAC(linkAddr, { required: true }) : undefined;
     const hardwareAddrError = (mode === 'add' || mode === 'edit') ? validateMAC(hardwareAddr, { required: true }) : undefined;
@@ -209,6 +201,13 @@ const NeighbourPanel: React.FC<NeighbourPanelProps> = ({
         if (!neighbour || mode !== 'edit') return;
         onDeleteRequest(neighbour);
     };
+
+    useDrawerKeyboard({
+        open,
+        onClose,
+        onApply: mode === 'view' ? undefined : () => void handleApply(),
+        canApply: canSubmit,
+    });
 
     const ip = neighbour ? (ipAddressToString(neighbour.next_hop) || '—') : '—';
     const family = ip !== '—' ? getFamily(ip) : '';

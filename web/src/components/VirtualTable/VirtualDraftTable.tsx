@@ -2,9 +2,7 @@ import React, { useCallback, useMemo, useRef, memo } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { Checkbox } from '@gravity-ui/uikit';
 import { useContainerHeight } from '../../hooks/useContainerHeight';
-import { useRowHoverOverlay } from './useRowHoverOverlay';
 import RemovedRowsSection from './RemovedRowsSection';
-import RowHoverEditOverlay from './RowHoverEditOverlay';
 import type { RemovedColumnDescriptor } from './RemovedRowsSection';
 
 const ROW_HEIGHT = 44;
@@ -62,7 +60,7 @@ interface VirtualRowShellProps<T extends { id: string }> {
     selected: boolean;
     dragOver: 'top' | 'bottom' | null;
     totalWidth: number;
-    onHoverChange: (row: T | null, start: number) => void;
+    onClick: () => void;
     onDragStart: (e: React.DragEvent) => void;
     onDragOver: (e: React.DragEvent) => void;
     onDragLeave: () => void;
@@ -82,7 +80,7 @@ const VirtualRowShell = memo(<T extends { id: string }>({
     selected,
     dragOver,
     totalWidth,
-    onHoverChange,
+    onClick,
     onDragStart,
     onDragOver,
     onDragLeave,
@@ -90,14 +88,6 @@ const VirtualRowShell = memo(<T extends { id: string }>({
     onCheckboxChange,
     renderDataCells,
 }: VirtualRowShellProps<T>) => {
-    const handleMouseEnter = useCallback((): void => {
-        onHoverChange(row, start);
-    }, [onHoverChange, row, start]);
-
-    const handleMouseLeave = useCallback((): void => {
-        onHoverChange(null, 0);
-    }, [onHoverChange]);
-
     let rowBg = 'transparent';
     if (selected) rowBg = 'var(--yn-accent-soft)';
     else if (active || editing) rowBg = 'var(--yn-accent-soft)';
@@ -112,8 +102,7 @@ const VirtualRowShell = memo(<T extends { id: string }>({
         <div
             className={`yn-vrow yn-tbl-line${active ? ' yn-vrow--active' : ''}${dragCls}${selected ? ' yn-vrow--selected' : ''}`}
             data-row-id={row.id}
-            onMouseEnter={handleMouseEnter}
-            onMouseLeave={handleMouseLeave}
+            onClick={onClick}
             onDragOver={onDragOver}
             onDragLeave={onDragLeave}
             onDrop={onDrop}
@@ -128,6 +117,8 @@ const VirtualRowShell = memo(<T extends { id: string }>({
                 alignItems: 'center',
                 borderBottom: '1px solid var(--yn-line)',
                 backgroundColor: rowBg,
+                cursor: 'pointer',
+                userSelect: 'none',
             }}
         >
             <div
@@ -187,8 +178,6 @@ export interface VirtualDraftTableProps<T extends { id: string }> {
     renderDataCells: RenderDataCells<T>;
     /** Columns used in the removed-rows ghost section. */
     removedColumns: RemovedColumnDescriptor<T>[];
-    /** Noun shown in the hover edit button aria-label and title, e.g. "route". */
-    itemNoun: string;
     /** Message shown when visibleRows is empty. */
     emptyMessage: string;
     /**
@@ -257,7 +246,6 @@ export const VirtualDraftTable = <T extends { id: string }>({
     columnHeaders,
     renderDataCells,
     removedColumns,
-    itemNoun,
     emptyMessage,
     flushFooter = false,
     headerActions,
@@ -266,19 +254,9 @@ export const VirtualDraftTable = <T extends { id: string }>({
     const wrapRef = useRef<HTMLDivElement>(null);
     const bodyHeight = useContainerHeight(scrollRef as React.RefObject<HTMLElement | null>, 300, flushFooter ? FOOTER_HEIGHT : FOOTER_HEIGHT + 20);
 
-    const {
-        hoveredRow,
-        overlayTopOffset,
-        handleHoverChange,
-        handleOverlayMouseEnter,
-        handleOverlayMouseLeave,
-        attachScrollEl,
-    } = useRowHoverOverlay<T>(HEADER_HEIGHT);
-
     const setScrollRef = useCallback((el: HTMLDivElement | null): void => {
         (scrollRef as React.MutableRefObject<HTMLDivElement | null>).current = el;
-        attachScrollEl(el);
-    }, [attachScrollEl]);
+    }, []);
 
     const rowVirtualizer = useVirtualizer({
         count: visibleRows.length,
@@ -287,12 +265,10 @@ export const VirtualDraftTable = <T extends { id: string }>({
         overscan: OVERSCAN,
     });
 
-    const handleOverlayEdit = useCallback((): void => {
-        if (hoveredRow) {
-            onRowClick(hoveredRow.id);
-            onEditRow(hoveredRow.id);
-        }
-    }, [hoveredRow, onRowClick, onEditRow]);
+    const handleRowClick = useCallback((id: string): void => {
+        onRowClick(id);
+        onEditRow(id);
+    }, [onRowClick, onEditRow]);
 
     const isAllSelected = visibleRows.length > 0 && visibleRows.every((r) => selectedIds.has(r.id));
     const isIndeterminate = !isAllSelected && visibleRows.some((r) => selectedIds.has(r.id));
@@ -365,7 +341,7 @@ export const VirtualDraftTable = <T extends { id: string }>({
                                     selected={selectedIds.has(row.id)}
                                     dragOver={dragOverState.id === row.id ? dragOverState.where : null}
                                     totalWidth={totalWidth}
-                                    onHoverChange={handleHoverChange}
+                                    onClick={() => handleRowClick(row.id)}
                                     onDragStart={(e) => onDragStart(row.id, e)}
                                     onDragOver={(e) => onDragOver(row.id, e)}
                                     onDragLeave={onDragLeave}
@@ -391,18 +367,6 @@ export const VirtualDraftTable = <T extends { id: string }>({
             <div className="yn-vtbl-footer" style={{ height: FOOTER_HEIGHT }}>
                 <span className="yn-toolbar__count">{footerText}</span>
             </div>
-
-            {hoveredRow !== null && (
-                <RowHoverEditOverlay
-                    top={overlayTopOffset}
-                    rowHeight={ROW_HEIGHT}
-                    onEdit={handleOverlayEdit}
-                    editAriaLabel={`Edit ${itemNoun} ${allRows.findIndex((r) => r.id === hoveredRow.id) + 1}`}
-                    editTitle={`Edit ${itemNoun}`}
-                    onMouseEnter={handleOverlayMouseEnter}
-                    onMouseLeave={handleOverlayMouseLeave}
-                />
-            )}
         </div>
     );
 };

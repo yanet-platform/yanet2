@@ -4,6 +4,9 @@ export type { UseAsyncDataOptions, UseAsyncDataResult } from './useAsyncData';
 export { useDialogKeyboardShortcut } from './useDialogKeyboardShortcut';
 export type { UseDialogKeyboardShortcutOptions } from './useDialogKeyboardShortcut';
 
+export { useDrawerKeyboard } from './useDrawerKeyboard';
+export type { UseDrawerKeyboardOptions } from './useDrawerKeyboard';
+
 
 export { useInterpolatedCounters } from './useInterpolatedCounters';
 export type {

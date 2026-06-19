@@ -6,7 +6,6 @@ export { createDraftReducer } from './draftReducer';
 export type { DraftState, DraftAction, CreateDraftReducerOptions } from './draftReducer';
 export { default as DraftActionButtons, SaveIcon, TrashIcon } from './DraftActionButtons';
 export { default as DraftItemDrawer } from './DraftItemDrawer';
-export { useDraftShortcuts } from './useDraftShortcuts';
 export { useDraft } from './useDraft';
 export type { UseDraftResult } from './useDraft';
 export { useDraftDragDrop } from './useDraftDragDrop';

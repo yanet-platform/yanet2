@@ -6,6 +6,7 @@ import { ipAddressToString } from '../../../utils/netip';
 import { validatePrefix, validateNexthop } from './utils';
 import type { Route } from '../../../api/routes';
 import { CidrPrefixField } from '../../../components';
+import { BestPill, SourceChip } from './cells';
 
 /** A single nexthop row with a stable identity. */
 interface NexthopRow {
@@ -109,25 +110,6 @@ const RouteDrawer: React.FC<RouteDrawerProps> = ({
         }
     };
 
-    // Keep a ref so the keydown handler always sees the latest canSubmit/handleApply
-    // without re-registering on every render (react-compiler safe).
-    const submitRef = useRef({ canSubmit, apply: handleApply });
-    submitRef.current = { canSubmit, apply: handleApply };
-
-    useEffect(() => {
-        if (!open) return;
-        const handler = (e: KeyboardEvent): void => {
-            if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
-                e.preventDefault();
-                if (submitRef.current.canSubmit) {
-                    void submitRef.current.apply();
-                }
-            }
-        };
-        window.addEventListener('keydown', handler);
-        return () => window.removeEventListener('keydown', handler);
-    }, [open]);
-
     const title = mode === 'add' ? 'Add route' : 'Edit route';
 
     return (
@@ -140,6 +122,7 @@ const RouteDrawer: React.FC<RouteDrawerProps> = ({
             hideIndex={mode === 'add'}
             onClose={onClose}
             onApply={handleApply}
+            canApply={canSubmit}
             onDelete={mode === 'edit' && route && onDelete ? handleDelete : undefined}
             onJump={() => {}}
             ariaLabel={title}
@@ -214,6 +197,26 @@ const RouteDrawer: React.FC<RouteDrawerProps> = ({
                     </div>
                 </div>
             </section>
+
+            {mode === 'edit' && route && (
+                <section className="yn-section">
+                    <div className="yn-section-h">Attributes</div>
+                    <div className="yn-section__body">
+                        <dl className="ro-attr-grid">
+                            <dt>Peer</dt>
+                            <dd className="yn-cell-mono">{ipAddressToString(route.peer) || '—'}</dd>
+                            <dt>Best</dt>
+                            <dd><BestPill isBest={route.is_best ?? false} /></dd>
+                            <dt>Pref</dt>
+                            <dd className="yn-cell-mono">{route.pref ?? '—'}</dd>
+                            <dt>AS path length</dt>
+                            <dd className="yn-cell-mono">{route.as_path_len ?? '—'}</dd>
+                            <dt>Source</dt>
+                            <dd><SourceChip source={route.source} /></dd>
+                        </dl>
+                    </div>
+                </section>
+            )}
         </DraftItemDrawer>
     );
 };

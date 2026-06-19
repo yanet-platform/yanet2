@@ -4,10 +4,6 @@ export type { Column, SortState, VirtualTableProps } from './VirtualTable';
 export { VirtualDraftTable, LEADING_CELL_WIDTHS, LEADING_TOTAL_WIDTH } from './VirtualDraftTable';
 export type { VirtualDraftTableProps, VirtualDraftTableBaseProps, TableColumnHeader, RowStatus, RenderDataCells } from './VirtualDraftTable';
 
-export { default as RowHoverEditOverlay } from './RowHoverEditOverlay';
-export { useRowHoverOverlay } from './useRowHoverOverlay';
-export type { UseRowHoverOverlayResult } from './useRowHoverOverlay';
-
 export { default as RemovedRowsSection } from './RemovedRowsSection';
 export type { RemovedColumnDescriptor } from './RemovedRowsSection';
 

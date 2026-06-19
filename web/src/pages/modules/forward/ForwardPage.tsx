@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button, Icon } from '@gravity-ui/uikit';
-import { usePageContribution } from '../../../hooks';
+import { useListNavigation, usePageContribution } from '../../../hooks';
 import { Funnel, Plus } from '@gravity-ui/icons';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, SearchInput, EmptyPagePlaceholder, RowCountDisplay } from '../../../components';
 import { useForwardDraft } from './useForwardDraft';
@@ -10,7 +10,7 @@ import type { RuleItem, RuleDraft } from './types';
 import { MODE_LABELS } from './types';
 import { ModeFilter } from './ModeFilter';
 import type { ModeFilterValue } from './ModeFilter';
-import { rulesToNgItems, draftToRule } from './hooks';
+import { rulesToNgItems, draftToRule, itemToDraft } from './hooks';
 import RuleTable from './RuleTable';
 import RuleDrawer from './RuleDrawer';
 import type { RuleDrawerHandle } from './RuleDrawer';
@@ -93,6 +93,7 @@ const ForwardPage: React.FC = () => {
         saveConfig,
         discardConfig,
         toRule: draftToRule,
+        itemToDraft,
         cloneItem: cloneRuleItem,
         requireConfigForAdd: false,
         clearSelectionOnTabSelect: true,
@@ -128,6 +129,22 @@ const ForwardPage: React.FC = () => {
         }
         return res;
     }, [allItems, search, modeFilter]);
+
+    const navRows = useMemo(() => visibleItems.map((it) => ({ id: it.id })), [visibleItems]);
+    useListNavigation({
+        rows: navRows,
+        activeId: activeRowId,
+        setActiveId: setActiveRowId,
+        onActivate: (row) => {
+            const it = visibleItems.find((i) => i.id === row.id);
+            if (it) openEdit(it);
+        },
+        onDelete: (row) => {
+            const it = visibleItems.find((i) => i.id === row.id);
+            if (it) handleDeleteItem(it);
+        },
+        enabled: !drawer.open,
+    });
 
     const handleBulkDelete = useCallback((): void => {
         const indices = visibleItems
@@ -377,6 +394,7 @@ const ForwardPage: React.FC = () => {
                     open={drawer.open}
                     mode={drawer.mode}
                     ruleItem={drawer.item}
+                    rate={drawer.item ? rates.get(drawer.item.id) : undefined}
                     onClose={closeDrawer}
                     onSave={handleDrawerApply}
                     onDelete={handleDeleteItem}
