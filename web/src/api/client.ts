@@ -3,6 +3,13 @@ export interface CallOptions {
     compress?: boolean;
 }
 
+let apiBase = '';
+
+/** Set the base URL prefix for all API calls. An empty string means same-origin. */
+export const setApiBase = (base: string): void => {
+    apiBase = base;
+};
+
 const compressGzip = async (data: string): Promise<Blob> => {
     const stream = new Blob([data]).stream();
     const compressedStream = stream.pipeThrough(new CompressionStream('gzip'));
@@ -47,7 +54,7 @@ const callGRPCServiceWithBody = async <T>(
         headers['Content-Encoding'] = 'gzip';
     }
 
-    const response = await fetch(`/api/${servicePath}`, {
+    const response = await fetch(`${apiBase}/api/${servicePath}`, {
         method: 'POST',
         headers,
         body: requestBody,
@@ -130,7 +137,7 @@ const streamGRPCService = async <T>(
     signal?: AbortSignal
 ): Promise<void> => {
     try {
-        const response = await fetch(`/api/${servicePath}`, {
+        const response = await fetch(`${apiBase}/api/${servicePath}`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',

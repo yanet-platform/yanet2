@@ -1,0 +1,381 @@
+// Status indicator colors — the one set not covered by global --yn-* tokens.
+// These are intentionally stable across themes (they map to semantic signal colors).
+:root {
+    --gw-status-online:   #54c98a;
+    --gw-status-degraded: #e6a34d;
+    --gw-status-offline:  #d4675a;
+    --gw-status-checking: #5e8fd0;
+}
+
+@keyframes gwFadeIn {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+}
+
+@keyframes gwPulseDot {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0.35; }
+}
+
+.gw-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 98;
+    background: rgba(0, 0, 0, 0.55);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s ease-out;
+
+    &--open {
+        opacity: 1;
+        pointer-events: auto;
+        animation: gwFadeIn 0.15s ease-out;
+    }
+}
+
+// Left-edge drawer — slides in from the left flush to the sidebar.
+// Carries yn-drawer so --yn-* light-mode overrides cascade to children.
+.gw-drawer {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    width: 620px;
+    z-index: 110;
+    background: var(--yn-panel);
+    border-right: 1px solid var(--yn-line-2);
+    box-shadow: 30px 0 60px rgba(0, 0, 0, 0.4);
+    display: flex;
+    flex-direction: column;
+    transform: translateX(-100%);
+    transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+    pointer-events: none;
+
+    &--open {
+        transform: translateX(0);
+        pointer-events: auto;
+    }
+}
+
+.gw-drawer__header {
+    flex: none;
+    padding: 24px 28px 18px;
+    border-bottom: 1px solid var(--yn-line-2);
+}
+
+.gw-drawer__header-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.gw-drawer__title {
+    margin: 0 0 6px;
+    font-size: 21px;
+    font-weight: 600;
+    color: var(--yn-text);
+    letter-spacing: -0.01em;
+}
+
+.gw-drawer__subtitle {
+    margin: 0;
+    font-size: 13px;
+    color: var(--yn-text-3);
+    line-height: 1.5;
+    max-width: 440px;
+}
+
+.gw-drawer__header-bottom {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-top: 18px;
+}
+
+.gw-drawer__body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px 28px 28px;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+}
+
+.gw-close-btn {
+    flex: none;
+    width: 34px;
+    height: 34px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--yn-bg-2);
+    border: 1px solid var(--yn-line-2);
+    border-radius: 9px;
+    color: var(--yn-text-2);
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+
+    &:hover {
+        background: var(--yn-bg-hover);
+        color: var(--yn-text);
+    }
+}
+
+.gw-legend {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    font-size: 12.5px;
+    color: var(--yn-text-2);
+}
+
+.gw-legend__item {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+}
+
+.gw-dot {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex: none;
+
+    &--sm {
+        width: 8px;
+        height: 8px;
+    }
+
+    &--pulse {
+        animation: gwPulseDot 1.2s ease-in-out infinite;
+    }
+}
+
+.gw-group {
+    margin-bottom: 24px;
+}
+
+.gw-group__header {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    margin-bottom: 12px;
+}
+
+.gw-group__host {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--yn-text-3);
+    font-family: var(--yn-font-mono);
+}
+
+.gw-group__count {
+    font-size: 11px;
+    color: var(--yn-text-3);
+}
+
+.gw-group__line {
+    flex: 1;
+    height: 1px;
+    background: var(--yn-line-2);
+}
+
+.gw-group__nodes {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.gw-card {
+    border: 1px solid var(--yn-line-2);
+    background: var(--yn-bg-2);
+    border-radius: 13px;
+    padding: 16px 18px;
+    transition: border-color 0.15s, background 0.15s;
+
+    &--active {
+        border-color: rgba(255, 192, 97, 0.45);
+        background: var(--yn-accent-soft);
+    }
+
+    &--activatable {
+        cursor: pointer;
+
+        &:hover {
+            border-color: var(--yn-line-2);
+            background: var(--yn-bg-hover);
+        }
+    }
+
+    &--offline {
+        cursor: default;
+        opacity: 0.65;
+    }
+}
+
+.gw-card__header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+}
+
+.gw-card__info {
+    flex: 1;
+    min-width: 0;
+}
+
+.gw-card__title-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 3px;
+}
+
+.gw-card__numa {
+    font-size: 15.5px;
+    font-weight: 600;
+    color: var(--yn-text);
+}
+
+.gw-card__status {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: capitalize;
+}
+
+.gw-card__addr {
+    font-size: 13px;
+    color: var(--yn-text-2);
+    font-family: var(--yn-font-mono);
+}
+
+.gw-card__actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: none;
+}
+
+.gw-badge {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    padding: 2px 8px;
+    border-radius: 6px;
+    text-transform: uppercase;
+
+    &--active {
+        color: #1a140a;
+        background: var(--yn-accent);
+    }
+
+    &--hidden {
+        visibility: hidden;
+    }
+}
+
+// "Add gateway" accent button — uses the accent-tinted style from the design.
+.gw-btn--add {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px;
+    font-size: 13px;
+    font-family: inherit;
+    font-weight: 600;
+    border-radius: 8px;
+    cursor: pointer;
+    background: var(--yn-accent-soft);
+    border: 1px solid rgba(255, 192, 97, 0.32);
+    color: var(--yn-accent);
+    transition: background 0.15s;
+
+    &:hover { background: rgba(255, 192, 97, 0.22); }
+}
+
+.gw-form {
+    display: flex;
+    flex-direction: column;
+    gap: 11px;
+    border: 1px solid rgba(255, 192, 97, 0.45);
+    background: var(--yn-accent-soft);
+    border-radius: 13px;
+    padding: 16px 18px;
+    animation: gwFadeIn 0.13s ease-out;
+}
+
+.gw-form__title {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--yn-text);
+    margin-bottom: 3px;
+}
+
+.gw-form__row {
+    display: flex;
+    gap: 10px;
+}
+
+.gw-form__field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+
+    &--grow { flex: 1; }
+    &--numa { width: 104px; }
+}
+
+.gw-form__label {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.07em;
+    color: var(--yn-text-2);
+    text-transform: uppercase;
+}
+
+.gw-form__actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 3px;
+}
+
+.gw-add-form-wrapper {
+    margin-bottom: 24px;
+}
+
+.gw-config-note {
+    display: flex;
+    align-items: flex-start;
+    gap: 11px;
+    padding: 14px 16px;
+    background: var(--yn-bg-2);
+    border: 1px solid var(--yn-line-2);
+    border-radius: 11px;
+    font-size: 12.5px;
+    color: var(--yn-text-3);
+    line-height: 1.55;
+    margin-top: 4px;
+}
+
+// Light-mode token overrides scoped to .gw-drawer, matching the
+// same surface values that tokens.scss applies to .yn-drawer.
+[data-theme="light"] .gw-drawer {
+    --yn-page-bg:  #FAF7F2;
+    --yn-panel:    #FFFFFF;
+    --yn-bg-2:     #F3EFE9;
+    --yn-bg-3:     #EBE6DE;
+    --yn-bg-hover: #EBE6DE;
+    --yn-line:     rgba(80, 60, 30, 0.08);
+    --yn-line-2:   rgba(80, 60, 30, 0.16);
+    --yn-text:     #1A1410;
+    --yn-text-2:   #5C4E3A;
+    --yn-text-3:   #9C8B74;
+}

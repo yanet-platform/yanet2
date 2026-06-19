@@ -94,6 +94,7 @@ const CommandPalette = <T,>({
     } else {
         const scoredPage: Array<{ item: PaletteItem; score: number }> = [];
         const scoredNav: Array<{ item: PaletteItem; score: number }> = [];
+        const scoredGateways: Array<{ item: PaletteItem; score: number }> = [];
         for (const cmd of commands) {
             const searchTarget = cmd.label + (cmd.keywords ? ' ' + cmd.keywords : '');
             const match = fuzzyMatch(q, searchTarget);
@@ -113,6 +114,8 @@ const CommandPalette = <T,>({
                 };
                 if (cmd.group === 'Go to') {
                     scoredNav.push(entry);
+                } else if (cmd.group === 'Gateways') {
+                    scoredGateways.push(entry);
                 } else {
                     scoredPage.push(entry);
                 }
@@ -120,10 +123,14 @@ const CommandPalette = <T,>({
         }
         scoredPage.sort((a, b) => b.score - a.score);
         scoredNav.sort((a, b) => b.score - a.score);
+        scoredGateways.sort((a, b) => b.score - a.score);
         for (const entry of scoredPage) {
             items.push(entry.item);
         }
         for (const entry of scoredNav) {
+            items.push(entry.item);
+        }
+        for (const entry of scoredGateways) {
             items.push(entry.item);
         }
     }

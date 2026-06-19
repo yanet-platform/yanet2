@@ -6,6 +6,8 @@ import type { PageId, SidebarContextValue } from './types';
 import { PAGE_IDS, SidebarContext } from './types';
 import { PaletteProvider, usePalette, CommandPalette, navigationCommands, ShortcutsHelp } from './components/command-palette';
 import type { RowAdapter, Command } from './components/command-palette';
+import { GatewayProvider, GatewayDrawer, useGateways, gatewayCommands } from './gateways';
+import { setApiBase } from './api';
 
 const importInspect = () => import('./pages/builtin/inspect/InspectPage');
 const importDashboard = () => import('./pages/builtin/dashboard/DashboardPage');
@@ -56,8 +58,15 @@ type RequestIdleCallback = (cb: () => void, opts?: { timeout: number }) => IdleH
 type CancelIdleCallback = (id: IdleHandle) => void;
 
 /** Global command palette instance that reads contributions from context at render time. */
-const GlobalPalette = ({ handlePageChange }: { handlePageChange: (id: PageId) => void }): React.JSX.Element => {
+const GlobalPalette = ({
+    handlePageChange,
+    onOpenGatewayDrawer,
+}: {
+    handlePageChange: (id: PageId) => void;
+    onOpenGatewayDrawer: () => void;
+}): React.JSX.Element => {
     const { open, closePalette, contribution, helpOpen, closeHelp, helpShortcuts, openHelp } = usePalette();
+    const { gateways, activeGateway, setActive } = useGateways();
     const navCmds = useMemo(() => navigationCommands(handlePageChange), [handlePageChange]);
 
     const showShortcutsCmd = useMemo((): Command => ({
@@ -70,10 +79,15 @@ const GlobalPalette = ({ handlePageChange }: { handlePageChange: (id: PageId) =>
         onSelect: () => setTimeout(openHelp, 0),
     }), [openHelp]);
 
+    const gwCmds = useMemo(
+        () => gatewayCommands(gateways, activeGateway?.id ?? null, setActive, onOpenGatewayDrawer),
+        [gateways, activeGateway, setActive, onOpenGatewayDrawer],
+    );
+
     const commands = useMemo(() => {
         const pageCmds = contribution?.commands ?? [];
-        return [...pageCmds, ...navCmds, showShortcutsCmd];
-    }, [contribution, navCmds, showShortcutsCmd]);
+        return [...pageCmds, ...navCmds, showShortcutsCmd, ...gwCmds];
+    }, [contribution, gwCmds, navCmds, showShortcutsCmd]);
 
     const dynamicCommands = useMemo(() => {
         const pageDynamic = contribution?.dynamicCommands;
@@ -103,11 +117,32 @@ const GlobalPalette = ({ handlePageChange }: { handlePageChange: (id: PageId) =>
     );
 };
 
-const AppContent = (): React.JSX.Element => {
+const AppContentInner = (): React.JSX.Element => {
     const location = useLocation();
     const navigate = useNavigate();
     const [sidebarDisabled, setSidebarDisabled] = useState(false);
+    const [gatewayDrawerOpen, setGatewayDrawerOpen] = useState(false);
+    const [asideSize, setAsideSize] = useState<number>(0);
     const unsavedGuardRef = useRef<(() => boolean) | null>(null);
+    const { activeGateway } = useGateways();
+
+    useEffect(() => {
+        if (activeGateway) {
+            setApiBase(activeGateway.baseUrl);
+        }
+    }, [activeGateway]);
+
+    const handleOpenGatewayDrawer = useCallback(() => {
+        setGatewayDrawerOpen(true);
+    }, []);
+
+    const handleCloseGatewayDrawer = useCallback(() => {
+        setGatewayDrawerOpen(false);
+    }, []);
+
+    const handleToggleGatewayDrawer = useCallback(() => {
+        setGatewayDrawerOpen((prev) => !prev);
+    }, []);
 
     useEffect(() => {
         let cancelled = false;
@@ -187,15 +222,20 @@ const AppContent = (): React.JSX.Element => {
     return (
         <SidebarContext.Provider value={sidebarContextValue}>
             <PaletteProvider>
-                <GlobalPalette handlePageChange={handlePageChange} />
+                <GlobalPalette handlePageChange={handlePageChange} onOpenGatewayDrawer={handleOpenGatewayDrawer} />
+                <GatewayDrawer open={gatewayDrawerOpen} onClose={handleCloseGatewayDrawer} asideSize={asideSize} />
                 <MainMenu
                     currentPage={currentPage}
                     onPageChange={handlePageChange}
                     disabled={sidebarDisabled}
+                    onOpenGatewayDrawer={handleOpenGatewayDrawer}
+                    onToggleGatewayDrawer={handleToggleGatewayDrawer}
+                    gatewayDrawerOpen={gatewayDrawerOpen}
+                    onAsideSize={setAsideSize}
                     renderContent={() => (
                         <div className="app-surface">
                             <Suspense fallback={<PageLoader loading size="l" />}>
-                                <Routes>
+                                <Routes key={`${activeGateway?.id ?? ''}:${activeGateway?.baseUrl ?? ''}`}>
                                     <Route path="/" element={<Navigate to="/builtin/dashboard" replace />} />
                                     <Route path="/builtin/inspect" element={<InspectPage />} />
                                     <Route path="/builtin/dashboard" element={<DashboardPage />} />
@@ -232,6 +272,12 @@ const AppContent = (): React.JSX.Element => {
         </SidebarContext.Provider>
     );
 };
+
+const AppContent = (): React.JSX.Element => (
+    <GatewayProvider>
+        <AppContentInner />
+    </GatewayProvider>
+);
 
 const App = (): React.JSX.Element => {
     return (

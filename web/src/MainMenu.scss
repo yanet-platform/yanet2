@@ -12,6 +12,11 @@
     background-color: var(--yn-surface-bg);
 }
 
+// Stack the sidebar above the gw-drawer (z-index 110) so it slides under rather than over the nav items.
+.gn-aside-header__aside {
+    --gn-aside-header-z-index: 120;
+}
+
 .main-menu__section-label {
     display: block;
     padding: 4px 12px;
