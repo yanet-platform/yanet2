@@ -256,10 +256,17 @@ interface GatewayDrawerProps {
     onClose: () => void;
     /** Measured sidebar pixel width used to position the drawer flush to the sidebar edge. */
     asideSize?: number;
+    /**
+     * Called when the user clicks a gateway card to activate it.
+     *
+     * Defaults to the context's setActive when omitted. App passes a guarded
+     * handler that checks for unsaved changes before switching.
+     */
+    onSetActive?: (id: string) => void;
 }
 
 /** Full-overlay drawer listing all gateway nodes, grouped by host. */
-export const GatewayDrawer: React.FC<GatewayDrawerProps> = ({ open, onClose, asideSize }) => {
+export const GatewayDrawer: React.FC<GatewayDrawerProps> = ({ open, onClose, asideSize, onSetActive }) => {
     const { gateways, activeGateway, addGateway, updateGateway, deleteGateway, setActive } = useGateways();
     const [isAdding, setIsAdding] = useState(false);
     const [editingId, setEditingId] = useState<string | null>(null);
@@ -325,8 +332,8 @@ export const GatewayDrawer: React.FC<GatewayDrawerProps> = ({ open, onClose, asi
     }, [deleteGateway]);
 
     const handleSetActive = useCallback((id: string) => {
-        setActive(id);
-    }, [setActive]);
+        (onSetActive ?? setActive)(id);
+    }, [onSetActive, setActive]);
 
     const onlineCount = gateways.filter((g) => g.status === 'online').length;
     const degradedCount = gateways.filter((g) => g.status === 'degraded').length;

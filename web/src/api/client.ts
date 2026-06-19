@@ -49,7 +49,9 @@ const callGRPCServiceWithBody = async <T>(
 
     let requestBody: string | Blob = jsonBody;
 
-    if (options?.compress) {
+    // Only compress for same-origin requests; cross-origin gateways don't allow
+    // Content-Encoding in CORS preflight, so skip compression when apiBase is set.
+    if (options?.compress && !apiBase) {
         requestBody = await compressGzip(jsonBody);
         headers['Content-Encoding'] = 'gzip';
     }

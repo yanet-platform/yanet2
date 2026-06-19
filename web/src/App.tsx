@@ -61,12 +61,14 @@ type CancelIdleCallback = (id: IdleHandle) => void;
 const GlobalPalette = ({
     handlePageChange,
     onOpenGatewayDrawer,
+    onSetActiveGateway,
 }: {
     handlePageChange: (id: PageId) => void;
     onOpenGatewayDrawer: () => void;
+    onSetActiveGateway: (id: string) => void;
 }): React.JSX.Element => {
     const { open, closePalette, contribution, helpOpen, closeHelp, helpShortcuts, openHelp } = usePalette();
-    const { gateways, activeGateway, setActive } = useGateways();
+    const { gateways, activeGateway } = useGateways();
     const navCmds = useMemo(() => navigationCommands(handlePageChange), [handlePageChange]);
 
     const showShortcutsCmd = useMemo((): Command => ({
@@ -80,8 +82,8 @@ const GlobalPalette = ({
     }), [openHelp]);
 
     const gwCmds = useMemo(
-        () => gatewayCommands(gateways, activeGateway?.id ?? null, setActive, onOpenGatewayDrawer),
-        [gateways, activeGateway, setActive, onOpenGatewayDrawer],
+        () => gatewayCommands(gateways, activeGateway?.id ?? null, onSetActiveGateway, onOpenGatewayDrawer),
+        [gateways, activeGateway, onSetActiveGateway, onOpenGatewayDrawer],
     );
 
     const commands = useMemo(() => {
@@ -124,13 +126,13 @@ const AppContentInner = (): React.JSX.Element => {
     const [gatewayDrawerOpen, setGatewayDrawerOpen] = useState(false);
     const [asideSize, setAsideSize] = useState<number>(0);
     const unsavedGuardRef = useRef<(() => boolean) | null>(null);
-    const { activeGateway } = useGateways();
+    const { activeGateway, setActive } = useGateways();
 
-    useEffect(() => {
-        if (activeGateway) {
-            setApiBase(activeGateway.baseUrl);
-        }
-    }, [activeGateway]);
+    // Apply the base URL synchronously so it's already set before the keyed
+    // <Routes> subtree mounts — page mount effects must not see a stale base.
+    if (activeGateway) {
+        setApiBase(activeGateway.baseUrl);
+    }
 
     const handleOpenGatewayDrawer = useCallback(() => {
         setGatewayDrawerOpen(true);
@@ -206,6 +208,18 @@ const AppContentInner = (): React.JSX.Element => {
         navigate(`/${pageId}`);
     }, [navigate]);
 
+    /** Switches the active gateway with the same unsaved-changes guard as page navigation. */
+    const handleSetActiveGateway = useCallback((id: string): void => {
+        const guard = unsavedGuardRef.current;
+        if (guard && guard()) {
+            const ok = window.confirm('You have unsaved changes. Leave this page anyway?');
+            if (!ok) {
+                return;
+            }
+        }
+        setActive(id);
+    }, [setActive]);
+
     const handleSetSidebarDisabled = useCallback((disabled: boolean) => {
         setSidebarDisabled(disabled);
     }, []);
@@ -222,8 +236,8 @@ const AppContentInner = (): React.JSX.Element => {
     return (
         <SidebarContext.Provider value={sidebarContextValue}>
             <PaletteProvider>
-                <GlobalPalette handlePageChange={handlePageChange} onOpenGatewayDrawer={handleOpenGatewayDrawer} />
-                <GatewayDrawer open={gatewayDrawerOpen} onClose={handleCloseGatewayDrawer} asideSize={asideSize} />
+                <GlobalPalette handlePageChange={handlePageChange} onOpenGatewayDrawer={handleOpenGatewayDrawer} onSetActiveGateway={handleSetActiveGateway} />
+                <GatewayDrawer open={gatewayDrawerOpen} onClose={handleCloseGatewayDrawer} asideSize={asideSize} onSetActive={handleSetActiveGateway} />
                 <MainMenu
                     currentPage={currentPage}
                     onPageChange={handlePageChange}
