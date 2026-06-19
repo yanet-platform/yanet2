@@ -13,6 +13,19 @@ const CHECKBOX_TRACK = '38px';
 const DEFAULT_INDEX_TRACK = 52;
 const DEFAULT_COLUMN_GAP = 14;
 
+/** Selector matching interactive controls that handle their own clicks. */
+const INTERACTIVE_TARGET_SELECTOR = 'button, select, a[href], [role="button"], [role="menuitem"]';
+
+/**
+ * Reports whether an event target sits inside an interactive control.
+ *
+ * Used to keep row activation from firing when a nested button, link, or menu
+ * item inside the row was the real click target. Mirrors the keyboard
+ * activation guard in useListNavigation so mouse and keyboard behave alike.
+ */
+export const isInteractiveTarget = (target: EventTarget | null): boolean =>
+    target instanceof Element && target.closest(INTERACTIVE_TARGET_SELECTOR) !== null;
+
 /** Column definition for VirtualTable. */
 export interface Column<T> {
     /** Unique key, used as React key. */
@@ -360,7 +373,11 @@ export function VirtualTable<T>({
                                     key={id || virtualRow.index}
                                     className={`${rowClasses} yn-tbl-line`}
                                     data-row-id={id}
-                                    onClick={() => onRowClick(id)}
+                                    onClick={(e) => {
+                                        // Let nested controls handle their own clicks.
+                                        if (isInteractiveTarget(e.target)) return;
+                                        onRowClick(id);
+                                    }}
                                     style={{
                                         position: 'absolute',
                                         top: virtualRow.start,
