@@ -50,6 +50,7 @@ export const DeviceTile: React.FC<DeviceTileProps> = ({ device, name, rateRow, a
                 h={16}
                 color={kind === 'vlan' ? 'var(--iv-link)' : 'var(--iv-accent)'}
                 fill
+                responsive
             />
         </div>
     );

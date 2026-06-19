@@ -8,6 +8,8 @@ export interface SparklineProps {
     h?: number;
     fill?: boolean;
     strokeWidth?: number;
+    /** When true, the SVG stretches to fill its container width with no overflow. */
+    responsive?: boolean;
 }
 
 const isFlat = (data: number[]): boolean => {
@@ -23,14 +25,19 @@ export const Sparkline: React.FC<SparklineProps> = ({
     h = 22,
     fill = true,
     strokeWidth = 1.25,
+    responsive = false,
 }) => {
     const gradientUid = useId();
     const gradientId = `spark-fill-${gradientUid.replace(/[^a-zA-Z0-9_-]/g, '')}`;
 
+    const svgWidth = responsive ? '100%' : w;
+    const svgStyle = responsive ? { display: 'block' } : { overflow: 'visible', display: 'block' };
+    const svgPAR = responsive ? 'none' : undefined;
+
     if (isFlat(data ?? [])) {
         const cy = h / 2;
         return (
-            <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} aria-hidden style={{ overflow: 'visible', display: 'block' }}>
+            <svg width={svgWidth} height={h} viewBox={`0 0 ${w} ${h}`} preserveAspectRatio={svgPAR} aria-hidden style={svgStyle}>
                 <line
                     x1={0} y1={cy} x2={w} y2={cy}
                     stroke="var(--g-color-line-generic)"
@@ -60,11 +67,12 @@ export const Sparkline: React.FC<SparklineProps> = ({
 
     return (
         <svg
-            width={w}
+            width={svgWidth}
             height={h}
             viewBox={`0 0 ${w} ${h}`}
+            preserveAspectRatio={svgPAR}
             aria-hidden
-            style={{ overflow: 'visible', display: 'block' }}
+            style={svgStyle}
         >
             {fill && area && (
                 <defs>
