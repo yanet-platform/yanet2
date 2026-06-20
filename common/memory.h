@@ -131,7 +131,7 @@ memory_balloc(struct memory_context *context, size_t size) {
 
 static inline void
 memory_bfree(struct memory_context *context, void *block, size_t size) {
-	if (!size)
+	if (block == NULL || !size)
 		return;
 	++context->bfree_count;
 	context->bfree_size += size;
