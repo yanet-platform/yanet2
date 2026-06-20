@@ -23,7 +23,9 @@ SCOPE = "lib dataplane common api modules devices".split()
 # old suffix list and held a real garbage-read defect).
 CTOR = "new|create|spawn|copy|clone|dup|build|make"
 DTOR = "fini|free|destroy|release|cleanup|deinit"
-LIFECYCLE = re.compile(rf"_({CTOR}|{DTOR})$")
+# init allocates no struct (so it is not a CTOR), but it fills a caller-owned
+# struct, owns an error path, and allocates field memory — it must be scanned.
+LIFECYCLE = re.compile(rf"_({CTOR}|init|{DTOR})$")
 
 
 def is_noise(path):
@@ -41,7 +43,11 @@ for d in SCOPE:
 prod = [f for f in files if "subprojects/" not in f and not is_noise(f)]
 
 defn = re.compile(r"^([a-z_][a-z0-9_]*)\(")
-rettype = re.compile(r"^(void|int|struct|[a-z_].*\*|uint\d+_t|size_t|bool)")
+# Return type on its own line, optionally storage-/inline-qualified: the repo's
+# common `static void` / `static inline int` two-line definitions must match.
+rettype = re.compile(
+    r"^(static\s+)?(inline\s+)?(void|int|struct|[a-z_].*\*|uint\d+_t|size_t|bool)"
+)
 
 funcs = []
 for f in prod:
@@ -53,25 +59,50 @@ for f in prod:
             lines[idx - 1].strip()
         ):
             name, ret = m.group(1), lines[idx - 1].strip()
-            cursor, depth, opened, body = idx, 0, False, []
+            cursor, depth, opened, proto, body = idx, 0, False, False, []
             while cursor < len(lines):
-                body.append(lines[cursor])
-                depth += lines[cursor].count("{") - lines[cursor].count("}")
-                if "{" in lines[cursor]:
+                line = lines[cursor]
+                body.append(line)
+                if "{" in line:
                     opened = True
+                # A ';' before any '{' means this is a forward declaration,
+                # not a definition (the widened static/inline return-type
+                # match would otherwise swallow the next function as a body).
+                if not opened and ";" in line:
+                    proto = True
+                    break
+                depth += line.count("{") - line.count("}")
                 if opened and depth <= 0:
                     break
                 cursor += 1
+            if proto:
+                idx += 1
+                continue
             funcs.append((name, ret, f, idx + 1, "\n".join(body)))
             idx = cursor + 1
         else:
             idx += 1
 
 
-def first_arg(body):
-    sig = body.split(")")[0]
-    a0 = sig.split(",")[0]
-    return a0.split("*")[-1].strip().split()[-1] if "*" in a0 else None
+def self_param(name, body):
+    # The lifecycle object is usually the first pointer parameter, but some
+    # static helpers take a context first (e.g. module_ectx_free(cfg, ectx)),
+    # so prefer the pointer parameter whose name matches the function's object.
+    head = name[: LIFECYCLE.search(name).start()]
+    tail = head.split("_")[-1]
+    sig = body.split("(", 1)[1].split(")")[0] if "(" in body else ""
+    ptr_idents = []
+    for p in (q.strip() for q in sig.split(",")):
+        if "*" not in p:
+            continue
+        toks = p.split("*")[-1].strip().split()
+        if not toks:
+            continue
+        ident = toks[-1]
+        if ident == head or ident == tail or head.endswith("_" + ident):
+            return ident
+        ptr_idents.append(ident)
+    return ptr_idents[0] if ptr_idents else None
 
 
 def has_cleanup_label(body):
@@ -85,6 +116,7 @@ for name, ret, f, ln, body in funcs:
     verb = LIFECYCLE.search(name).group(1)
     head = name[: LIFECYCLE.search(name).start()]
     is_ctor = bool(re.match(rf".*_({CTOR})$", name))
+    is_init = name.endswith("_init")
     is_dtor = bool(re.match(rf".*_({DTOR})$", name))
 
     if is_ctor:
@@ -93,6 +125,18 @@ for name, ret, f, ln, body in funcs:
         if allocs and has_cleanup_label(body) and not zeroes:
             no_zero.append((name, f"{f}:{ln}"))
 
+        if verb in ("new", "create"):
+            looks_fused = (
+                re.search(rf"\b{re.escape(head)}_init\s*\(", body)
+                or len(re.findall(r"memory_balloc|\b\w+_init\s*\(", body)) >= 2
+                or re.search(r"\bfor\s*\(|\bwhile\s*\(", body)
+            )
+            if looks_fused:
+                fused.append((name, f"{f}:{ln}"))
+
+    # init allocates field memory too, so an unchecked allocation there is a
+    # real OOM-deref candidate (the filter-compiler attr_init class).
+    if is_ctor or is_init:
         for am in re.finditer(
             r"\b([A-Za-z_]\w*)\s*=\s*(?:\([^)]*\)\s*)?"
             r"(memory_balloc|malloc|calloc|rte_zmalloc|rte_malloc|rte_calloc)\b",
@@ -110,22 +154,13 @@ for name, ret, f, ln, body in funcs:
             if not checked:
                 unchecked.append((name, f"{f}:{ln}", v))
 
-        if verb in ("new", "create"):
-            looks_fused = (
-                re.search(rf"\b{re.escape(head)}_init\s*\(", body)
-                or len(re.findall(r"memory_balloc|\b\w+_init\s*\(", body)) >= 2
-                or re.search(r"\bfor\s*\(|\bwhile\s*\(", body)
-            )
-            if looks_fused:
-                fused.append((name, f"{f}:{ln}"))
-
     if verb in ("init", "create") or name.endswith("_init"):
         labels = sorted(set(re.findall(r"^\s*(err\w*|error\w*)\s*:", body, re.M)))
         if len(labels) > 1:
             multi_label.append((name, f"{f}:{ln}", ",".join(labels)))
 
     if is_dtor:
-        arg = first_arg(body)
+        arg = self_param(name, body)
         inner = body.split("{", 1)[1] if "{" in body else ""
         # NULL self-safety: free(NULL)/memory_bfree(NULL,0) are already no-ops,
         # so a guardless free is a B4 defect ONLY when the body DEREFERENCES the
