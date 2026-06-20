@@ -107,21 +107,33 @@ collect_net6_range(
 	}
 
 	if (range_index_init(ri, memory_context)) {
-		// FIXME error
-		goto error_collector;
+		goto error_ri_init;
 	}
 
 	if (range_collector_collect(&collector, 8, lpm, ri)) {
-		goto error_collector;
+		goto error_collect;
 	}
 
 	range_collector_free(&collector, 8);
 
 	return 0;
 
+error_collect:
+	range_index_free(ri);
+	lpm_free(lpm);
+	range_collector_free(&collector, 8);
+	return -1;
+
+error_ri_init:
+	lpm_free(lpm);
+	range_collector_free(&collector, 8);
+	return -1;
+
 error_lpm:
+	lpm_free(lpm);
 
 error_collector:
+	range_collector_free(&collector, 8);
 
 error:
 	return -1;
@@ -316,7 +328,7 @@ merge_net6_range(
 							    values_lo[idx_lo]
 						    )
 					    )) {
-						return -1;
+						goto error_late;
 					}
 				}
 			}
@@ -330,7 +342,7 @@ merge_net6_range(
 	     ++action_ptr) {
 		// A value range should be created even for empty rules
 		if (value_registry_start(registry))
-			return -1;
+			goto error_late;
 
 		if (*action_ptr == NULL)
 			continue;
@@ -353,7 +365,7 @@ merge_net6_range(
 				if (value_registry_collect(
 					    registry, vls[idx]
 				    )) {
-					return -1;
+					goto error_late;
 				}
 			}
 		}
@@ -362,11 +374,16 @@ merge_net6_range(
 	radix_free(&rdx);
 	value_registry_fini(&net_registry);
 
-	// FIXME: free temporary resources
-
 	return 0;
 
+error_late:
+	radix_free(&rdx);
+	value_registry_fini(&net_registry);
+	value_table_free(table);
+	return -1;
+
 error_touch:
+	radix_free(&rdx);
 	remap_table_free(&remap_table);
 
 error_remap_table:
@@ -447,6 +464,7 @@ error_lo:
 	lpm_free(&net6->hi);
 
 error_hi:
+	SET_OFFSET_OF(data, NULL);
 	memory_bfree(memory_context, net6, sizeof(struct net6_classifier));
 
 	return -1;
