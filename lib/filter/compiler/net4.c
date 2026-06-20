@@ -128,7 +128,7 @@ collect_net4_values(
 		}
 	}
 	if (lpm_init(lpm, memory_context)) {
-		goto error_collector;
+		goto error_lpm;
 	}
 	struct range_index range_index;
 	if (range_index_init(&range_index, memory_context)) {
@@ -229,15 +229,23 @@ FILTER_ATTR_COMPILER_INIT_FUNC(net4_src)(
 	struct memory_context *memory_context
 ) {
 	struct lpm *lpm = memory_balloc(memory_context, sizeof(struct lpm));
+	if (lpm == NULL) {
+		return -1;
+	}
 	SET_OFFSET_OF(data, lpm);
-	return collect_net4_values(
-		memory_context,
-		actions,
-		actions_count,
-		action_get_net4_src,
-		lpm,
-		registry
-	);
+	if (collect_net4_values(
+		    memory_context,
+		    actions,
+		    actions_count,
+		    action_get_net4_src,
+		    lpm,
+		    registry
+	    )) {
+		SET_OFFSET_OF(data, NULL);
+		memory_bfree(memory_context, lpm, sizeof(struct lpm));
+		return -1;
+	}
+	return 0;
 }
 
 // Allows to initialize attribute for IPv4 destination address.
@@ -250,15 +258,23 @@ FILTER_ATTR_COMPILER_INIT_FUNC(net4_dst)(
 	struct memory_context *memory_context
 ) {
 	struct lpm *lpm = memory_balloc(memory_context, sizeof(struct lpm));
+	if (lpm == NULL) {
+		return -1;
+	}
 	SET_OFFSET_OF(data, lpm);
-	return collect_net4_values(
-		memory_context,
-		actions,
-		actions_count,
-		action_get_net4_dst,
-		lpm,
-		registry
-	);
+	if (collect_net4_values(
+		    memory_context,
+		    actions,
+		    actions_count,
+		    action_get_net4_dst,
+		    lpm,
+		    registry
+	    )) {
+		SET_OFFSET_OF(data, NULL);
+		memory_bfree(memory_context, lpm, sizeof(struct lpm));
+		return -1;
+	}
+	return 0;
 }
 
 // Allows to free data for IPv4 classification.
