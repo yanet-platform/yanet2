@@ -135,9 +135,9 @@ message SyncConfig {
   common.commonpb.v1.IPAddress src_addr = 1;           // IPv6 source address;
   common.commonpb.v1.MACAddress dst_ether = 2;         // Destination MAC address;
   common.commonpb.v1.IPAddress dst_addr_multicast = 3; // Multicast IPv6 address;
-  uint32 port_multicast = 4;                 // Multicast port;
+  uint32 port_multicast = 4;                           // Multicast port;
   common.commonpb.v1.IPAddress dst_addr_unicast = 5;   // Unicast IPv6 address;
-  uint32 port_unicast = 6;                   // Unicast port;
+  uint32 port_unicast = 6;                             // Unicast port;
 
   // Connection timeouts
   uint64 tcp_syn_ack = 7; // TCP SYN-ACK timeout in nanoseconds;
