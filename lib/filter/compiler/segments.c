@@ -212,6 +212,7 @@ segments_classifier_u16_init(
 	if (fill_registry_from_segments_u16(
 		    classifier, registry, segment_count, segments, x_coords
 	    ) != 0) {
+		btree_u16_fini(&classifier->btree);
 		memory_bfree(
 			mctx,
 			ADDR_OF(&classifier->open),
@@ -407,6 +408,7 @@ segments_classifier_u32_init(
 	if (fill_registry_from_segments_u32(
 		    classifier, registry, segment_count, segments, x_coords
 	    ) != 0) {
+		btree_u32_fini(&classifier->btree);
 		memory_bfree(
 			mctx,
 			ADDR_OF(&classifier->open),
@@ -603,6 +605,7 @@ segments_classifier_u64_init(
 	if (fill_registry_from_segments_u64(
 		    classifier, registry, segment_count, segments, x_coords
 	    ) != 0) {
+		btree_u64_fini(&classifier->btree);
 		memory_bfree(
 			mctx,
 			ADDR_OF(&classifier->open),
