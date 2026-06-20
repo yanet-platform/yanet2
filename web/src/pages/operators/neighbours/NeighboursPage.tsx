@@ -1,6 +1,6 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { useSearchParamHelpers, useListNavigation, usePageContribution, useTabCycle } from '../../../hooks';
+import { useConfigListCache, useSearchParamHelpers, useListNavigation, usePageContribution, useTabCycle } from '../../../hooks';
 import { Button, Icon } from '@gravity-ui/uikit';
 import { Plus, Layers } from '@gravity-ui/icons';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, EmptyPagePlaceholder } from '../../../components';
@@ -97,11 +97,30 @@ const NeighboursPage: React.FC = () => {
     const [editTableOpen, setEditTableOpen] = useState(false);
     const [deleteTableOpen, setDeleteTableOpen] = useState(false);
 
+    const { configs: cachedConfigs, counts: cachedCounts, write: writeCache } = useConfigListCache('neighbours');
+
+    // Cache table names and entry counts so the tab strip renders instantly on
+    // remount instead of blanking while ListTables refetches.
+    useEffect(() => {
+        if (!loading && tables.length > 0) {
+            writeCache({
+                configs: tables.map((t) => t.name || '').filter(Boolean),
+                counts: Object.fromEntries([
+                    [MERGED_TAB, tables.reduce((sum, t) => sum + Number(t.entry_count ?? 0), 0)],
+                    ...tables.filter((t) => t.name).map((t) => [t.name as string, Number(t.entry_count ?? 0)]),
+                ]),
+            });
+        }
+    }, [tables, loading, writeCache]);
+
     const isMergedView = activeTab === MERGED_TAB;
     const activeTableInfo: NeighbourTableInfo | null = tables.find((t) => t.name === activeTab) ?? null;
     const isBuiltIn = activeTableInfo?.built_in ?? false;
 
-    const tabsList = [MERGED_TAB, ...tables.map((t) => t.name || '').filter(Boolean)];
+    // While a warm cache exists, drive the tab strip from cached table names so
+    // it does not blink on remount; the rows below still reload.
+    const effectiveTableNames = loading ? cachedConfigs : tables.map((t) => t.name || '').filter(Boolean);
+    const tabsList = [MERGED_TAB, ...effectiveTableNames];
 
     const { updateParams } = useSearchParamHelpers(setSearchParams);
 
@@ -156,6 +175,8 @@ const NeighboursPage: React.FC = () => {
         });
         return m;
     }, [tables]);
+
+    const effectiveCounts = loading ? cachedCounts : counts;
 
     const openAdd = useCallback((): void => {
         setPanel({ open: true, mode: 'add', neighbour: null });
@@ -532,7 +553,7 @@ const NeighboursPage: React.FC = () => {
         />
     );
 
-    if (loading) {
+    if (loading && cachedConfigs.length === 0) {
         return (
             <PageLayout header={pageHeader} className="yn-flat-layout">
                 <PageLoader loading size="l" />
@@ -543,7 +564,7 @@ const NeighboursPage: React.FC = () => {
     return (
         <PageLayout header={pageHeader} className="yn-flat-layout">
             <div className="yn-page nb-page yn-flat-page">
-                {tables.length === 0 ? (
+                {effectiveTableNames.length === 0 ? (
                     <EmptyPagePlaceholder
                         message="No neighbour tables found."
                         actionLabel="Create table"
@@ -558,7 +579,7 @@ const NeighboursPage: React.FC = () => {
                                 counts={(() => {
                                     const m = new Map<string, number>();
                                     tabsList.forEach((t) => {
-                                        m.set(displayLabel(t), counts.get(t) ?? 0);
+                                        m.set(displayLabel(t), effectiveCounts.get(t) ?? 0);
                                     });
                                     return m;
                                 })()}
@@ -568,6 +589,7 @@ const NeighboursPage: React.FC = () => {
                                     handleTabSelect(tab);
                                 }}
                                 onAddConfig={() => setCreateTableOpen(true)}
+                                addConfigDisabled={loading}
                                 addLabel="Add table"
                                 leadingIcon={(label) =>
                                     label === 'Merged' ? (
@@ -580,68 +602,74 @@ const NeighboursPage: React.FC = () => {
                                 }
                             />
                         </div>
-                        <div className="nb-toolbar">
-                            <FamilyFilter
-                                value={family}
-                                onChange={(f) => updateParams({ [QP_FAMILY]: f === 'all' ? null : f })}
-                            />
-                            {distinctStates.length > 0 && (
-                                <>
-                                    <div className="nb-toolbar-sep" />
-                                    {distinctStates.map((stateName) => {
-                                        const isActive = stateFilter === stateName;
-                                        const color = STATE_META[stateName]?.color ?? STATE_META['UNKNOWN'].color;
-                                        const count = stateCounts.get(stateName) ?? 0;
-                                        return (
-                                            <button
-                                                key={stateName}
-                                                type="button"
-                                                className={`nb-state-chip${isActive ? ' nb-state-chip--active' : ''}`}
-                                                style={{ '--chip-color': color } as React.CSSProperties}
-                                                onClick={() => updateParams({ [QP_STATE]: isActive ? null : stateName })}
-                                                title={isActive ? `Clear state filter (${stateName})` : `Filter by state: ${stateName}`}
-                                            >
-                                                {stateName}
-                                                <span className="nb-state-chip__badge">{count}</span>
-                                            </button>
-                                        );
-                                    })}
-                                </>
-                            )}
-                        </div>
-                        <div className="yn-content">
-                            <NeighbourTable
-                                rows={visibleRows}
-                                totalCount={allRows.length}
-                                searchActive={searchActive}
-                                readOnlyNote={
-                                    isMergedView ? (
-                                        <span className="nb-footer-note">
-                                            Merged is read-only — resolved by priority (lower value wins) across {tables.length} tables
-                                        </span>
-                                    ) : activeTableInfo?.name === 'kernel' ? (
-                                        <span className="nb-footer-note">
-                                            kernel is populated from netlink — manual edits are overwritten
-                                        </span>
-                                    ) : undefined
-                                }
-                                selectedIds={selectedIds}
-                                sortState={sortState}
-                                onSort={handleSort}
-                                onRowClick={handleRowClick}
-                                onSelectionChange={setSelectedIds}
-                                emptyMessage={searchActive ? 'No neighbours match the current filters.' : 'No neighbours.'}
-                                canEditTable={canEditTable}
-                                canDeleteTable={canDeleteTable}
-                                onEditTable={() => setEditTableOpen(true)}
-                                onDeleteTable={() => setDeleteTableOpen(true)}
-                                isMergedView={isMergedView}
-                                cache={cache}
-                                tables={tables}
-                                flashRowId={flashRowId}
-                                activeRowId={activeRowId}
-                            />
-                        </div>
+                        {loading ? (
+                            <PageLoader loading size="l" />
+                        ) : (
+                            <>
+                                <div className="nb-toolbar">
+                                    <FamilyFilter
+                                        value={family}
+                                        onChange={(f) => updateParams({ [QP_FAMILY]: f === 'all' ? null : f })}
+                                    />
+                                    {distinctStates.length > 0 && (
+                                        <>
+                                            <div className="nb-toolbar-sep" />
+                                            {distinctStates.map((stateName) => {
+                                                const isActive = stateFilter === stateName;
+                                                const color = STATE_META[stateName]?.color ?? STATE_META['UNKNOWN'].color;
+                                                const count = stateCounts.get(stateName) ?? 0;
+                                                return (
+                                                    <button
+                                                        key={stateName}
+                                                        type="button"
+                                                        className={`nb-state-chip${isActive ? ' nb-state-chip--active' : ''}`}
+                                                        style={{ '--chip-color': color } as React.CSSProperties}
+                                                        onClick={() => updateParams({ [QP_STATE]: isActive ? null : stateName })}
+                                                        title={isActive ? `Clear state filter (${stateName})` : `Filter by state: ${stateName}`}
+                                                    >
+                                                        {stateName}
+                                                        <span className="nb-state-chip__badge">{count}</span>
+                                                    </button>
+                                                );
+                                            })}
+                                        </>
+                                    )}
+                                </div>
+                                <div className="yn-content">
+                                    <NeighbourTable
+                                        rows={visibleRows}
+                                        totalCount={allRows.length}
+                                        searchActive={searchActive}
+                                        readOnlyNote={
+                                            isMergedView ? (
+                                                <span className="nb-footer-note">
+                                                    Merged is read-only — resolved by priority (lower value wins) across {tables.length} tables
+                                                </span>
+                                            ) : activeTableInfo?.name === 'kernel' ? (
+                                                <span className="nb-footer-note">
+                                                    kernel is populated from netlink — manual edits are overwritten
+                                                </span>
+                                            ) : undefined
+                                        }
+                                        selectedIds={selectedIds}
+                                        sortState={sortState}
+                                        onSort={handleSort}
+                                        onRowClick={handleRowClick}
+                                        onSelectionChange={setSelectedIds}
+                                        emptyMessage={searchActive ? 'No neighbours match the current filters.' : 'No neighbours.'}
+                                        canEditTable={canEditTable}
+                                        canDeleteTable={canDeleteTable}
+                                        onEditTable={() => setEditTableOpen(true)}
+                                        onDeleteTable={() => setDeleteTableOpen(true)}
+                                        isMergedView={isMergedView}
+                                        cache={cache}
+                                        tables={tables}
+                                        flashRowId={flashRowId}
+                                        activeRowId={activeRowId}
+                                    />
+                                </div>
+                            </>
+                        )}
                     </>
                 )}
 

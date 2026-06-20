@@ -1,7 +1,7 @@
 import React, { useCallback, useMemo, useRef } from 'react';
 import { Button, Icon } from '@gravity-ui/uikit';
 import { Funnel, Plus } from '@gravity-ui/icons';
-import { useListNavigation, usePageContribution, useTabCycle } from '../../../hooks';
+import { useConfigListCache, useListNavigation, usePageContribution, useTabCycle } from '../../../hooks';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, EmptyPagePlaceholder, SearchInput, RowCountDisplay } from '../../../components';
 import { usePrefixDraft } from './usePrefixDraft';
 import type { PrefixRowItem } from './types';
@@ -33,6 +33,8 @@ const DecapPage: React.FC = () => {
         draftConfigs, loading, loadFailed, draftRows, serverRows, isDirty, anyDirty,
         dispatchDraft, commitConfig, discardConfig,
     } = usePrefixDraft();
+
+    const { configs: cachedConfigs, counts: cachedCounts } = useConfigListCache('decap');
 
     const pageState = useDraftPageState({
         loading,
@@ -182,12 +184,19 @@ const DecapPage: React.FC = () => {
         />
     );
 
-    if (loading) return <PageLayout header={pageHeader} className="yn-flat-layout"><PageLoader loading size="l" /></PageLayout>;
+    // While a warm cache exists, keep the tab strip mounted from cached names
+    // and counts so it does not blink on remount; only the rows below reload.
+    const tabConfigs = loading ? cachedConfigs : draftConfigs;
+    const tabCounts = loading ? cachedCounts : prefixCounts;
+
+    if (loading && cachedConfigs.length === 0) {
+        return <PageLayout header={pageHeader} className="yn-flat-layout"><PageLoader loading size="l" /></PageLayout>;
+    }
 
     return (
         <PageLayout header={pageHeader} className="yn-flat-layout">
             <div className="yn-page yn-flat-page">
-                {draftConfigs.length === 0 ? (
+                {tabConfigs.length === 0 ? (
                     <EmptyPagePlaceholder
                         message="No decap configurations found."
                         actionLabel="Add Config"
@@ -197,52 +206,58 @@ const DecapPage: React.FC = () => {
                 ) : (
                     <>
                         <ConfigTabStrip
-                            configs={draftConfigs}
+                            configs={tabConfigs}
                             activeConfig={currentConfig}
-                            counts={prefixCounts}
+                            counts={tabCounts}
                             dirtyConfigs={dirtySet}
                             onSelect={setActiveConfig}
                             onAddConfig={() => setAddConfigOpen(true)}
                             addConfigDisabled={!canCreate}
                         />
-                        <div className="yn-toolbar-bordered">
-                            <div style={{ flex: 1 }} />
-                            <div style={{ flexBasis: 230, flexShrink: 1 }}>
-                                <SearchInput
-                                    value={search}
-                                    onUpdate={(value) => updateParams({ [QP_SEARCH]: value || null })}
-                                    placeholder="Filter prefixes…"
-                                    enableFocusShortcut={false}
-                                    showShortcutHint={false}
-                                    icon={Funnel}
-                                />
-                            </div>
-                            <RowCountDisplay filtered={visibleRows.length} total={rawRows.length} />
-                        </div>
-                        <div className="yn-content">
-                            <PrefixTable
-                                allRows={rawRows}
-                                visibleRows={visibleRows}
-                                statusById={statusById}
-                                removedRows={search ? [] : removedRows}
-                                activeRowId={activeRowId}
-                                editingRowId={editingRowId}
-                                selectedIds={selectedIds}
-                                dragOverState={dragDrop.dragOverState}
-                                onRowClick={setActiveRowId}
-                                onEditRow={(id) => { setActiveRowId(id); setEditingRowId(id); }}
-                                onRestoreRow={handlers.handleRestoreRow}
-                                onSelectionChange={setSelectedIds}
-                                onDragStart={dragDrop.handleDragStart}
-                                onDragOver={dragDrop.handleDragOver}
-                                onDragLeave={dragDrop.handleDragLeave}
-                                onDrop={handlers.handleDrop}
-                                currentIsDirty={currentIsDirty}
-                                onSave={handlers.handleCommitPress}
-                                onDiscard={handlers.handleDiscard}
-                                onDeleteConfig={() => setDeleteConfigOpen(true)}
-                            />
-                        </div>
+                        {loading ? (
+                            <PageLoader loading size="l" />
+                        ) : (
+                            <>
+                                <div className="yn-toolbar-bordered">
+                                    <div style={{ flex: 1 }} />
+                                    <div style={{ flexBasis: 230, flexShrink: 1 }}>
+                                        <SearchInput
+                                            value={search}
+                                            onUpdate={(value) => updateParams({ [QP_SEARCH]: value || null })}
+                                            placeholder="Filter prefixes…"
+                                            enableFocusShortcut={false}
+                                            showShortcutHint={false}
+                                            icon={Funnel}
+                                        />
+                                    </div>
+                                    <RowCountDisplay filtered={visibleRows.length} total={rawRows.length} />
+                                </div>
+                                <div className="yn-content">
+                                    <PrefixTable
+                                        allRows={rawRows}
+                                        visibleRows={visibleRows}
+                                        statusById={statusById}
+                                        removedRows={search ? [] : removedRows}
+                                        activeRowId={activeRowId}
+                                        editingRowId={editingRowId}
+                                        selectedIds={selectedIds}
+                                        dragOverState={dragDrop.dragOverState}
+                                        onRowClick={setActiveRowId}
+                                        onEditRow={(id) => { setActiveRowId(id); setEditingRowId(id); }}
+                                        onRestoreRow={handlers.handleRestoreRow}
+                                        onSelectionChange={setSelectedIds}
+                                        onDragStart={dragDrop.handleDragStart}
+                                        onDragOver={dragDrop.handleDragOver}
+                                        onDragLeave={dragDrop.handleDragLeave}
+                                        onDrop={handlers.handleDrop}
+                                        currentIsDirty={currentIsDirty}
+                                        onSave={handlers.handleCommitPress}
+                                        onDiscard={handlers.handleDiscard}
+                                        onDeleteConfig={() => setDeleteConfigOpen(true)}
+                                    />
+                                </div>
+                            </>
+                        )}
                     </>
                 )}
 

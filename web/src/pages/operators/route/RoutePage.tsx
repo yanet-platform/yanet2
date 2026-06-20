@@ -21,7 +21,7 @@ import '../../../styles/chrome.scss';
 import './route.scss';
 
 const RoutePage: React.FC = () => {
-    const { configs, configRoutes, selectedIds, loading, refreshing, reload, addLocalConfig, setSelected } = useRIB();
+    const { configs, configRoutes, selectedIds, loading, refreshing, reload, addLocalConfig, setSelected, cachedConfigs, cachedCounts } = useRIB();
 
     const [activeConfig, setActiveConfig] = useState('');
     const [search, setSearch] = useState('');
@@ -417,7 +417,12 @@ const RoutePage: React.FC = () => {
         />
     );
 
-    if (loading && configs.length === 0) {
+    // While a warm cache exists, keep the tab strip mounted from cached names
+    // and counts so it does not blink on remount; only the body below reloads.
+    const tabConfigs = loading ? cachedConfigs : configs;
+    const tabCounts = loading ? cachedCounts : counts;
+
+    if (loading && cachedConfigs.length === 0) {
         return (
             <PageLayout header={pageHeader} className="yn-flat-layout">
                 <PageLoader loading size="l" />
@@ -428,7 +433,7 @@ const RoutePage: React.FC = () => {
     return (
         <PageLayout header={pageHeader} className="yn-flat-layout">
             <div className="yn-page yn-flat-page" aria-busy={refreshing}>
-                {configs.length === 0 ? (
+                {tabConfigs.length === 0 ? (
                     <EmptyPagePlaceholder
                         message="No route configurations found."
                         actionLabel="Add Config"
@@ -437,72 +442,79 @@ const RoutePage: React.FC = () => {
                 ) : (
                     <>
                         <ConfigTabStrip
-                            configs={configs}
+                            configs={tabConfigs}
                             activeConfig={currentConfig}
-                            counts={counts}
+                            counts={tabCounts}
                             dirtyConfigs={new Set()}
                             onSelect={(c) => {
                                 setActiveConfig(c);
                             }}
                             onAddConfig={() => setAddConfigOpen(true)}
+                            addConfigDisabled={loading}
                         />
-                        <div className="ro-toolbar">
-                            <FamilyFilter value={family} onChange={setFamily} />
-                            <button
-                                type="button"
-                                className={`ro-chip ro-chip--best${bestOnly ? ' ro-chip--active' : ''}`}
-                                onClick={() => setBestOnly((v) => !v)}
-                                title="Show only the best route for each prefix"
-                            >
-                                <svg width={13} height={13} viewBox="0 0 24 24" fill={bestOnly ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
-                                    <path d="M13 2 3 14h9l-1 8 10-12h-9l1-8Z" />
-                                </svg>
-                                Best only
-                            </button>
-                            <button
-                                type="button"
-                                className={`ro-chip ro-chip--conflict${conflictsOnly ? ' ro-chip--active' : ''}`}
-                                onClick={() => setConflictsOnly((v) => !v)}
-                                title="Show only prefixes with multiple candidate routes"
-                            >
-                                <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
-                                    <path d="M6 3v12" />
-                                    <path d="M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" />
-                                    <path d="M6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" />
-                                    <path d="M15 6a9 9 0 0 1-9 9" />
-                                </svg>
-                                Conflicts
-                                {conflictCount > 0 && (
-                                    <span className="ro-chip__badge">{conflictCount}</span>
-                                )}
-                            </button>
-                            <div style={{ flex: 1 }} />
-                            <div style={{ flexBasis: 230, flexShrink: 1 }}>
-                                <SearchInput
-                                    value={search}
-                                    onUpdate={setSearch}
-                                    placeholder="Filter rows…"
-                                    enableFocusShortcut={false}
-                                    showShortcutHint={false}
-                                    icon={Funnel}
-                                />
-                            </div>
-                            <RowCountDisplay filtered={visibleRows.length} total={allRows.length} />
-                        </div>
-                        <div className="yn-content">
-                            <RIBTable
-                                rows={visibleRows}
-                                selectedIds={currentSelected}
-                                sortState={sortState}
-                                onSort={handleSort}
-                                onRowClick={handleEditRow}
-                                onSelectionChange={(ids) => setSelected(currentConfig, ids)}
-                                emptyMessage={search || family !== 'all' || bestOnly || conflictsOnly ? 'No routes match the current filters.' : 'No routes.'}
-                                conflictMap={conflictMap}
-                                flashRowId={flashRowId}
-                                activeRowId={activeRowId}
-                            />
-                        </div>
+                        {loading ? (
+                            <PageLoader loading size="l" />
+                        ) : (
+                            <>
+                                <div className="ro-toolbar">
+                                    <FamilyFilter value={family} onChange={setFamily} />
+                                    <button
+                                        type="button"
+                                        className={`ro-chip ro-chip--best${bestOnly ? ' ro-chip--active' : ''}`}
+                                        onClick={() => setBestOnly((v) => !v)}
+                                        title="Show only the best route for each prefix"
+                                    >
+                                        <svg width={13} height={13} viewBox="0 0 24 24" fill={bestOnly ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+                                            <path d="M13 2 3 14h9l-1 8 10-12h-9l1-8Z" />
+                                        </svg>
+                                        Best only
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className={`ro-chip ro-chip--conflict${conflictsOnly ? ' ro-chip--active' : ''}`}
+                                        onClick={() => setConflictsOnly((v) => !v)}
+                                        title="Show only prefixes with multiple candidate routes"
+                                    >
+                                        <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+                                            <path d="M6 3v12" />
+                                            <path d="M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" />
+                                            <path d="M6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" />
+                                            <path d="M15 6a9 9 0 0 1-9 9" />
+                                        </svg>
+                                        Conflicts
+                                        {conflictCount > 0 && (
+                                            <span className="ro-chip__badge">{conflictCount}</span>
+                                        )}
+                                    </button>
+                                    <div style={{ flex: 1 }} />
+                                    <div style={{ flexBasis: 230, flexShrink: 1 }}>
+                                        <SearchInput
+                                            value={search}
+                                            onUpdate={setSearch}
+                                            placeholder="Filter rows…"
+                                            enableFocusShortcut={false}
+                                            showShortcutHint={false}
+                                            icon={Funnel}
+                                        />
+                                    </div>
+                                    <RowCountDisplay filtered={visibleRows.length} total={allRows.length} />
+                                </div>
+                                <div className="yn-content">
+                                    <RIBTable
+                                        rows={visibleRows}
+                                        selectedIds={currentSelected}
+                                        sortState={sortState}
+                                        onSort={handleSort}
+                                        onRowClick={handleEditRow}
+                                        onSelectionChange={(ids) => setSelected(currentConfig, ids)}
+                                        emptyMessage={search || family !== 'all' || bestOnly || conflictsOnly ? 'No routes match the current filters.' : 'No routes.'}
+                                        conflictMap={conflictMap}
+                                        flashRowId={flashRowId}
+                                        activeRowId={activeRowId}
+                                    />
+                                </div>
+                            </>
+                        )}
                     </>
                 )}
 

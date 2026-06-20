@@ -76,7 +76,7 @@ const createPcapBuffer = (records: CapturedPacket[]): ArrayBuffer => {
 };
 
 const PdumpPage: React.FC = () => {
-    const { configs, loading, refetch, deleteConfig } = usePdumpConfigs();
+    const { configs, cachedConfigs, loading, refetch, deleteConfig } = usePdumpConfigs();
     const [searchParams, setSearchParams] = useSearchParams();
     const queryConfig = useMemo(() => searchParams.get(QP_CONFIG), [searchParams]);
     const searchQuery = useMemo(() => searchParams.get(QP_SEARCH) || '', [searchParams]);
@@ -550,7 +550,11 @@ const PdumpPage: React.FC = () => {
         />
     );
 
-    if (loading) {
+    // While a warm cache exists, keep the tab strip mounted from cached names
+    // so it does not blink on remount; only the body below reloads.
+    const tabConfigs = loading ? cachedConfigs : configs.map(c => c.name);
+
+    if (loading && cachedConfigs.length === 0) {
         return (
             <PageLayout header={pageHeader} className="yn-flat-layout">
                 <PageLoader loading size="l" />
@@ -561,7 +565,7 @@ const PdumpPage: React.FC = () => {
     return (
         <PageLayout header={pageHeader} className="yn-flat-layout">
             <div className="yn-page pdump-page yn-flat-page">
-                {configs.length === 0 ? (
+                {tabConfigs.length === 0 ? (
                     <EmptyPagePlaceholder
                         message="No pdump configurations found."
                         actionLabel="New Configuration"
@@ -570,15 +574,19 @@ const PdumpPage: React.FC = () => {
                 ) : (
                     <>
                         <ConfigTabStrip
-                            configs={configs.map(c => c.name)}
+                            configs={tabConfigs}
                             activeConfig={currentConfig}
                             counts={packetCounts}
                             dirtyConfigs={EMPTY_DIRTY_SET}
                             onSelect={handleSelectTab}
                             onAddConfig={() => setIsCreateDialogOpen(true)}
+                            addConfigDisabled={loading}
                             leadingIcon={(cfg) => cfg === capture.liveConfig ? <span className="yn-tab__dot yn-tab__dot--live" aria-label="live capture" /> : null}
                         />
 
+                        {loading ? (
+                            <PageLoader loading size="l" />
+                        ) : (
                         <div className="yn-content pdump-page__content">
                             {currentConfigInfo && (
                                 <>
@@ -616,6 +624,7 @@ const PdumpPage: React.FC = () => {
                                 />
                             </div>
                         </div>
+                        )}
                     </>
                 )}
 

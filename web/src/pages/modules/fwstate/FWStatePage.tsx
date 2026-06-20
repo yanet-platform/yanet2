@@ -14,7 +14,7 @@ import {
 } from '@gravity-ui/uikit';
 import { CircleInfo, Plus } from '@gravity-ui/icons';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { useSearchParamHelpers, usePageContribution, useContainerHeight, useTabCycle, useUnsavedChangesBlocker } from '../../../hooks';
+import { useConfigListCache, useSearchParamHelpers, usePageContribution, useContainerHeight, useTabCycle, useUnsavedChangesBlocker } from '../../../hooks';
 import { API } from '../../../api';
 import { Direction, type FwStateEntry, type ListEntriesRequest, type MapStats } from '../../../api/fwstate';
 import { ConfirmDialog, ConfigTabStrip, PageLayout, PageLoader, EmptyPagePlaceholder } from '../../../components';
@@ -1297,6 +1297,19 @@ const FWStatePage: React.FC = () => {
         return m;
     }, [configNames, configs]);
 
+    const { configs: cachedConfigs, counts: cachedCounts, write: writeCache } = useConfigListCache('fwstate');
+
+    // Cache config names and linked-ACL counts so the config tab strip renders
+    // instantly on remount instead of blanking while ListConfigs refetches.
+    useEffect(() => {
+        if (!loading && configNames.length > 0) {
+            writeCache({
+                configs: configNames,
+                counts: Object.fromEntries(configNames.map((name) => [name, configs[name]?.linkedAcls.length ?? 0])),
+            });
+        }
+    }, [loading, configNames, configs, writeCache]);
+
     const updateCurrent = (patch: Partial<DraftConfig>): void => {
         if (!currentName) return;
         setConfigs((prev) => ({ ...prev, [currentName]: { ...prev[currentName], ...patch } }));
@@ -1582,7 +1595,12 @@ const FWStatePage: React.FC = () => {
         />
     );
 
-    if (loading) {
+    // While a warm cache exists, keep the config tab strip mounted from cached
+    // names and counts so it does not blink on remount; only the body reloads.
+    const tabConfigs = loading ? cachedConfigs : configNames;
+    const tabCounts = loading ? cachedCounts : counts;
+
+    if (loading && cachedConfigs.length === 0) {
         return <PageLayout header={pageHeader} className="yn-flat-layout"><PageLoader loading size="l" /></PageLayout>;
     }
 
@@ -1807,7 +1825,7 @@ const FWStatePage: React.FC = () => {
     return (
         <PageLayout header={pageHeader} className="yn-flat-layout">
             <div className="yn-page yn-flat-page">
-                {configNames.length === 0 ? (
+                {tabConfigs.length === 0 ? (
                     <EmptyPagePlaceholder
                         message="No FWState configurations found."
                         actionLabel="Add Config"
@@ -1818,16 +1836,20 @@ const FWStatePage: React.FC = () => {
                         <div className="fwstate-config-bar">
                             <div className="fwstate-config-bar__tabs">
                                 <ConfigTabStrip
-                                    configs={configNames}
+                                    configs={tabConfigs}
                                     activeConfig={currentName}
-                                    counts={counts}
+                                    counts={tabCounts}
                                     dirtyConfigs={dirtyConfigs}
                                     onSelect={updateActiveConfig}
                                     onAddConfig={() => setAddConfigOpen(true)}
+                                    addConfigDisabled={loading}
                                 />
                             </div>
                         </div>
 
+                        {loading ? (
+                            <PageLoader loading size="l" />
+                        ) : (
                         <div className="yn-content fwstate-content">
                             {current && (
                                 <div className="fwstate-settings-layout">
@@ -1876,6 +1898,7 @@ const FWStatePage: React.FC = () => {
                                 </div>
                             )}
                         </div>
+                        )}
                     </>
                 )}
             </div>

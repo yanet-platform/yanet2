@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useReducer, useState } from 'react';
+import { useConfigListCache } from '../../hooks/useConfigListCache';
 import { toaster } from '../../utils';
 import type { DraftState, DraftAction } from './draftReducer';
 
@@ -15,6 +16,8 @@ interface UseDraftOpts<T> {
     toastSubject: string;
     /** Human-readable subject used in error messages (e.g. 'FIB' or 'decap prefix'). */
     errorSubject: string;
+    /** Gateway-scoped cache key for the config tab strip (e.g. 'decap' or 'route'). */
+    cacheKey: string;
 }
 
 export interface UseDraftResult<T> {
@@ -46,10 +49,12 @@ export function useDraft<T extends { id?: unknown }>({
     initialState,
     toastSubject,
     errorSubject,
+    cacheKey,
 }: UseDraftOpts<T>): UseDraftResult<T> {
     const [state, rawDispatch] = useReducer(reducer, initialState);
     const [loading, setLoading] = useState(true);
     const [loadFailed, setLoadFailed] = useState(false);
+    const { write: writeCache } = useConfigListCache(cacheKey);
 
     const dispatchDraft = useCallback((action: DraftAction<T>): void => {
         rawDispatch(action);
@@ -60,6 +65,10 @@ export function useDraft<T extends { id?: unknown }>({
         try {
             const configs = await load();
             rawDispatch({ type: 'LOAD_ALL_CONFIGS', configs });
+            writeCache({
+                configs: configs.map((cfg) => cfg.name),
+                counts: Object.fromEntries(configs.map((cfg) => [cfg.name, cfg.rows.length])),
+            });
             setLoadFailed(false);
         } catch (err) {
             toaster.error(`${toastSubject}-draft-load`, `Failed to load ${errorSubject} configurations`, err);
@@ -67,7 +76,7 @@ export function useDraft<T extends { id?: unknown }>({
         } finally {
             setLoading(false);
         }
-    }, [load, toastSubject, errorSubject]);
+    }, [load, toastSubject, errorSubject, writeCache]);
 
     useEffect(() => {
         doLoad();

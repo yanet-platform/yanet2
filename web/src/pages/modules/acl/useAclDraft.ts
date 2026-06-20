@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useReducer, useState } from 'react';
 import { API } from '../../../api';
+import { useConfigListCache } from '../../../hooks';
 import { toaster, compareNatural } from '../../../utils';
 import type { Rule } from '../../../api/acl';
 import {
@@ -44,6 +45,7 @@ export interface UseAclDraftResult {
 export const useAclDraft = (): UseAclDraftResult => {
     const [state, rawDispatch] = useReducer(aclDraftReducer, initialAclDraftState);
     const [loading, setLoading] = useState(true);
+    const { write: writeCache } = useConfigListCache('acl');
 
     const dispatchDraft = useCallback((action: AclDraftAction): void => {
         rawDispatch(action);
@@ -67,12 +69,16 @@ export const useAclDraft = (): UseAclDraftResult => {
             );
 
             rawDispatch({ type: 'LOAD_ALL_CONFIGS', configs });
+            writeCache({
+                configs: [...names].sort((a, b) => compareNatural(a, b)),
+                counts: Object.fromEntries(configs.map(cfg => [cfg.name, cfg.rules.length])),
+            });
         } catch (err) {
             toaster.error('acl-load', 'Failed to load ACL configurations', err);
         } finally {
             setLoading(false);
         }
-    }, []);
+    }, [writeCache]);
 
     useEffect(() => {
         load();

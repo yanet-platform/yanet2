@@ -46,5 +46,6 @@ export const usePrefixDraft = (): UsePrefixDraftResult => {
         initialState: initialPrefixDraftState,
         toastSubject: 'prefix',
         errorSubject: 'Decap',
+        cacheKey: 'decap',
     });
 };

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { API } from '../../../api';
+import { useConfigListCache } from '../../../hooks';
 import { toaster, compareNatural } from '../../../utils';
 import type { Route } from '../../../api/routes';
 
@@ -12,6 +13,10 @@ export interface UseRIBResult {
     reload: () => Promise<void>;
     addLocalConfig: (name: string) => void;
     setSelected: (configName: string, ids: Set<string>) => void;
+    /** Cached config names from the previous visit, for an instant tab strip. */
+    cachedConfigs: string[];
+    /** Cached per-config route counts, for instant tab badges. */
+    cachedCounts: Map<string, number>;
 }
 
 const sortConfigs = (a: string, b: string): number =>
@@ -24,6 +29,7 @@ export const useRIB = (): UseRIBResult => {
     const [selectedIds, setSelectedIds] = useState<Map<string, Set<string>>>(new Map());
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
+    const { configs: cachedConfigs, counts: cachedCounts, write: writeCache } = useConfigListCache('operators-route');
 
     const loadAll = useCallback(async (opts?: { initial?: boolean; isCancelled?: () => boolean }): Promise<void> => {
         const isInitial = opts?.initial !== false;
@@ -51,6 +57,10 @@ export const useRIB = (): UseRIBResult => {
             if (opts?.isCancelled?.()) return;
             setConfigs([...configsList].sort(sortConfigs));
             setConfigRoutes(routesMap);
+            writeCache({
+                configs: [...configsList].sort(sortConfigs),
+                counts: Object.fromEntries(configsList.map((name) => [name, routesMap.get(name)?.length ?? 0])),
+            });
         } catch (err) {
             if (opts?.isCancelled?.()) return;
             toaster.error('rib-configs-error', 'Failed to fetch RIB configs', err);
@@ -63,7 +73,7 @@ export const useRIB = (): UseRIBResult => {
                 }
             }
         }
-    }, []);
+    }, [writeCache]);
 
     useEffect(() => {
         let cancelled = false;
@@ -92,5 +102,5 @@ export const useRIB = (): UseRIBResult => {
         });
     }, []);
 
-    return { configs, configRoutes, selectedIds, loading, refreshing, reload, addLocalConfig, setSelected };
+    return { configs, configRoutes, selectedIds, loading, refreshing, reload, addLocalConfig, setSelected, cachedConfigs, cachedCounts };
 };

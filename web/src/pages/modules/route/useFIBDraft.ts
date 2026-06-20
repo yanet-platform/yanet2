@@ -88,5 +88,6 @@ export const useFIBDraft = (): UseFIBDraftResult => {
         initialState: initialFIBDraftState,
         toastSubject: 'fib',
         errorSubject: 'FIB',
+        cacheKey: 'route',
     });
 };

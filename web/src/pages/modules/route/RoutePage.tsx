@@ -1,6 +1,6 @@
 import React, { useCallback, useMemo, useRef } from 'react';
 import { Button, Icon } from '@gravity-ui/uikit';
-import { useListNavigation, usePageContribution, useTabCycle } from '../../../hooks';
+import { useConfigListCache, useListNavigation, usePageContribution, useTabCycle } from '../../../hooks';
 import { Funnel, Plus } from '@gravity-ui/icons';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, SearchInput, EmptyPagePlaceholder, RowCountDisplay } from '../../../components';
 import { useFIBDraft } from './useFIBDraft';
@@ -41,6 +41,8 @@ const RoutePage: React.FC = () => {
         draftConfigs, loading, loadFailed, draftRows, serverRows, isDirty, anyDirty,
         dispatchDraft, commitConfig, discardConfig,
     } = useFIBDraft();
+
+    const { configs: cachedConfigs, counts: cachedCounts } = useConfigListCache('route');
 
     const pageState = useDraftPageState({
         loading,
@@ -223,7 +225,12 @@ const RoutePage: React.FC = () => {
         />
     );
 
-    if (loading) {
+    // While a warm cache exists, keep the tab strip mounted from cached names
+    // and counts so it does not blink on remount; only the rows below reload.
+    const tabConfigs = loading ? cachedConfigs : draftConfigs;
+    const tabCounts = loading ? cachedCounts : routeCounts;
+
+    if (loading && cachedConfigs.length === 0) {
         return (
             <PageLayout header={pageHeader} className="yn-flat-layout">
                 <PageLoader loading size="l" />
@@ -234,7 +241,7 @@ const RoutePage: React.FC = () => {
     return (
         <PageLayout header={pageHeader} className="yn-flat-layout">
             <div className="yn-page yn-flat-page">
-                {draftConfigs.length === 0 ? (
+                {tabConfigs.length === 0 ? (
                     <EmptyPagePlaceholder
                         message="No FIB configurations found."
                         actionLabel="Add Config"
@@ -244,52 +251,58 @@ const RoutePage: React.FC = () => {
                 ) : (
                     <>
                         <ConfigTabStrip
-                            configs={draftConfigs}
+                            configs={tabConfigs}
                             activeConfig={currentConfig}
-                            counts={routeCounts}
+                            counts={tabCounts}
                             dirtyConfigs={dirtySet}
                             onSelect={handleConfigSelect}
                             onAddConfig={() => setAddConfigOpen(true)}
                             addConfigDisabled={!canCreate}
                         />
-                        <div className="yn-toolbar-bordered">
-                            <div style={{ flex: 1 }} />
-                            <div style={{ flexBasis: 230, flexShrink: 1 }}>
-                                <SearchInput
-                                    value={search}
-                                    onUpdate={handleSearchChange}
-                                    placeholder="Filter routes…"
-                                    enableFocusShortcut={false}
-                                    showShortcutHint={false}
-                                    icon={Funnel}
-                                />
-                            </div>
-                            <RowCountDisplay filtered={visibleRows.length} total={rawRows.length} />
-                        </div>
-                        <div className="yn-content">
-                            <FIBTable
-                                allRows={rawRows}
-                                visibleRows={visibleRows}
-                                statusById={statusById}
-                                removedRows={search ? [] : removedRows}
-                                activeRowId={activeRowId}
-                                editingRowId={editingRowId}
-                                selectedIds={selectedIds}
-                                dragOverState={dragDrop.dragOverState}
-                                onRowClick={setActiveRowId}
-                                onEditRow={(id) => { setActiveRowId(id); setEditingRowId(id); }}
-                                onRestoreRow={handlers.handleRestoreRow}
-                                onSelectionChange={setSelectedIds}
-                                onDragStart={dragDrop.handleDragStart}
-                                onDragOver={dragDrop.handleDragOver}
-                                onDragLeave={dragDrop.handleDragLeave}
-                                onDrop={handlers.handleDrop}
-                                currentIsDirty={currentIsDirty}
-                                onSave={handlers.handleCommitPress}
-                                onDiscard={handlers.handleDiscard}
-                                onDeleteConfig={() => setDeleteConfigOpen(true)}
-                            />
-                        </div>
+                        {loading ? (
+                            <PageLoader loading size="l" />
+                        ) : (
+                            <>
+                                <div className="yn-toolbar-bordered">
+                                    <div style={{ flex: 1 }} />
+                                    <div style={{ flexBasis: 230, flexShrink: 1 }}>
+                                        <SearchInput
+                                            value={search}
+                                            onUpdate={handleSearchChange}
+                                            placeholder="Filter routes…"
+                                            enableFocusShortcut={false}
+                                            showShortcutHint={false}
+                                            icon={Funnel}
+                                        />
+                                    </div>
+                                    <RowCountDisplay filtered={visibleRows.length} total={rawRows.length} />
+                                </div>
+                                <div className="yn-content">
+                                    <FIBTable
+                                        allRows={rawRows}
+                                        visibleRows={visibleRows}
+                                        statusById={statusById}
+                                        removedRows={search ? [] : removedRows}
+                                        activeRowId={activeRowId}
+                                        editingRowId={editingRowId}
+                                        selectedIds={selectedIds}
+                                        dragOverState={dragDrop.dragOverState}
+                                        onRowClick={setActiveRowId}
+                                        onEditRow={(id) => { setActiveRowId(id); setEditingRowId(id); }}
+                                        onRestoreRow={handlers.handleRestoreRow}
+                                        onSelectionChange={setSelectedIds}
+                                        onDragStart={dragDrop.handleDragStart}
+                                        onDragOver={dragDrop.handleDragOver}
+                                        onDragLeave={dragDrop.handleDragLeave}
+                                        onDrop={handlers.handleDrop}
+                                        currentIsDirty={currentIsDirty}
+                                        onSave={handlers.handleCommitPress}
+                                        onDiscard={handlers.handleDiscard}
+                                        onDeleteConfig={() => setDeleteConfigOpen(true)}
+                                    />
+                                </div>
+                            </>
+                        )}
                     </>
                 )}
 

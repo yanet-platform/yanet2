@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button, Icon } from '@gravity-ui/uikit';
-import { useListNavigation, usePageContribution } from '../../../hooks';
+import { useConfigListCache, useListNavigation, usePageContribution } from '../../../hooks';
 import { Funnel, Plus } from '@gravity-ui/icons';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, SearchInput, EmptyPagePlaceholder, RowCountDisplay } from '../../../components';
 import { useForwardDraft } from './useForwardDraft';
@@ -42,6 +42,8 @@ const ForwardPage: React.FC = () => {
         commitDeleteConfig,
         discardConfig,
     } = useForwardDraft();
+
+    const { configs: cachedConfigs, counts: cachedCounts } = useConfigListCache('forward');
 
     const [modeFilter, setModeFilter] = useState<ModeFilterValue>('all');
 
@@ -288,7 +290,12 @@ const ForwardPage: React.FC = () => {
         />
     );
 
-    if (loading) {
+    // While a warm cache exists, keep the tab strip mounted from cached names
+    // and counts so it does not blink on remount; only the rows below reload.
+    const tabConfigs = loading ? cachedConfigs : draftConfigs;
+    const tabCounts = loading ? cachedCounts : ruleCounts;
+
+    if (loading && cachedConfigs.length === 0) {
         return (
             <PageLayout header={pageHeader} className="yn-flat-layout">
                 <PageLoader loading size="l" />
@@ -299,7 +306,7 @@ const ForwardPage: React.FC = () => {
     return (
         <PageLayout header={pageHeader} className="yn-flat-layout">
             <div className="yn-page yn-flat-page">
-                {draftConfigs.length === 0 ? (
+                {tabConfigs.length === 0 ? (
                     <EmptyPagePlaceholder
                         message="No forward configurations found."
                         actionLabel="Add Config"
@@ -309,46 +316,52 @@ const ForwardPage: React.FC = () => {
                 ) : (
                     <>
                         <ConfigTabStrip
-                            configs={draftConfigs}
+                            configs={tabConfigs}
                             activeConfig={currentConfig}
-                            counts={ruleCounts}
+                            counts={tabCounts}
                             dirtyConfigs={dirtySet}
                             onSelect={handleTabSelect}
                             onAddConfig={() => setAddConfigOpen(true)}
                             addConfigDisabled={!canCreate}
                         />
 
-                        <div className="yn-toolbar-bordered">
-                            <ModeFilter value={modeFilter} onChange={setModeFilter} />
-                            <div style={{ flex: 1 }} />
-                            <div style={{ flexBasis: 230, flexShrink: 1 }}>
-                                <SearchInput
-                                    value={search}
-                                    onUpdate={handleSearchChange}
-                                    placeholder="Filter rows…"
-                                    enableFocusShortcut={false}
-                                    showShortcutHint={false}
-                                    icon={Funnel}
-                                />
-                            </div>
-                            <RowCountDisplay filtered={visibleItems.length} total={allItems.length} />
-                        </div>
+                        {loading ? (
+                            <PageLoader loading size="l" />
+                        ) : (
+                            <>
+                                <div className="yn-toolbar-bordered">
+                                    <ModeFilter value={modeFilter} onChange={setModeFilter} />
+                                    <div style={{ flex: 1 }} />
+                                    <div style={{ flexBasis: 230, flexShrink: 1 }}>
+                                        <SearchInput
+                                            value={search}
+                                            onUpdate={handleSearchChange}
+                                            placeholder="Filter rows…"
+                                            enableFocusShortcut={false}
+                                            showShortcutHint={false}
+                                            icon={Funnel}
+                                        />
+                                    </div>
+                                    <RowCountDisplay filtered={visibleItems.length} total={allItems.length} />
+                                </div>
 
-                        <div className="yn-content">
-                            <RuleTable
-                                items={visibleItems}
-                                selectedIds={selectedIds}
-                                activeRowId={activeRowId}
-                                rateValues={rates}
-                                onSelectionChange={setSelectedIds}
-                                onEditRule={openEdit}
-                                currentIsDirty={currentIsDirty}
-                                onSave={handleSavePress}
-                                onDiscard={handleDiscard}
-                                onDeleteConfig={() => setDeleteConfigOpen(true)}
-                                flashRowId={flashRowId}
-                            />
-                        </div>
+                                <div className="yn-content">
+                                    <RuleTable
+                                        items={visibleItems}
+                                        selectedIds={selectedIds}
+                                        activeRowId={activeRowId}
+                                        rateValues={rates}
+                                        onSelectionChange={setSelectedIds}
+                                        onEditRule={openEdit}
+                                        currentIsDirty={currentIsDirty}
+                                        onSave={handleSavePress}
+                                        onDiscard={handleDiscard}
+                                        onDeleteConfig={() => setDeleteConfigOpen(true)}
+                                        flashRowId={flashRowId}
+                                    />
+                                </div>
+                            </>
+                        )}
                     </>
                 )}
 

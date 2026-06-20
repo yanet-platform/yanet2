@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useReducer, useState } from 'react';
 import { API } from '../../../api';
+import { useConfigListCache } from '../../../hooks';
 import { toaster } from '../../../utils';
 import type { Rule } from '../../../api/forward';
 import {
@@ -59,6 +60,7 @@ export const useForwardDraft = (): UseForwardDraftResult => {
     const [state, rawDispatch] = useReducer(forwardDraftReducer, initialDraftState);
     const [loading, setLoading] = useState(true);
     const [loadFailed, setLoadFailed] = useState(false);
+    const { write: writeCache } = useConfigListCache('forward');
 
     const dispatchDraft = useCallback((action: ForwardDraftAction): void => {
         rawDispatch(action);
@@ -82,6 +84,10 @@ export const useForwardDraft = (): UseForwardDraftResult => {
             );
 
             rawDispatch({ type: 'LOAD_ALL_CONFIGS', configs });
+            writeCache({
+                configs: configs.map(cfg => cfg.name),
+                counts: Object.fromEntries(configs.map(cfg => [cfg.name, cfg.rules.length])),
+            });
             setLoadFailed(false);
         } catch (err) {
             toaster.error('yn-draft-load', 'Failed to load forward configurations', err);
@@ -89,7 +95,7 @@ export const useForwardDraft = (): UseForwardDraftResult => {
         } finally {
             setLoading(false);
         }
-    }, []);
+    }, [writeCache]);
 
     useEffect(() => {
         load();

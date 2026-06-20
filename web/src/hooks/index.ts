@@ -59,4 +59,7 @@ export { useInterpolatedCounterMap } from './useInterpolatedCounterMap';
 
 export { useTabCycle } from './useTabCycle';
 
+export { useConfigListCache } from './useConfigListCache';
+export type { ConfigListSnapshot, UseConfigListCacheResult } from './useConfigListCache';
+
 export { useUnsavedChangesBlocker } from './useUnsavedChangesBlocker';

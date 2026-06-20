@@ -3,7 +3,7 @@ import { Button, Icon, Label } from '@gravity-ui/uikit';
 import { Funnel, Pause, Play, Plus } from '@gravity-ui/icons';
 import { useNavigate } from 'react-router-dom';
 import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, SearchInput, EmptyPagePlaceholder, RowCountDisplay } from '../../../components';
-import { useListNavigation, usePageContribution } from '../../../hooks';
+import { useConfigListCache, useListNavigation, usePageContribution } from '../../../hooks';
 import { useAclDraft } from './useAclDraft';
 import type { Rule } from '../../../api/acl';
 import { ActionKind } from '../../../api/acl';
@@ -41,6 +41,8 @@ const AclPage: React.FC = () => {
         commitDeleteConfig,
         discardConfig,
     } = useAclDraft();
+
+    const { configs: cachedConfigs, counts: cachedCounts } = useConfigListCache('acl');
 
     const [paused, setPaused] = useState(false);
     const [enabledCounterNames, setEnabledCounterNames] = useState<Set<string>>(new Set());
@@ -267,6 +269,7 @@ const AclPage: React.FC = () => {
             addConfigSub: 'Create a new ACL configuration',
             withKeywords: true,
             onAddConfig: () => setAddConfigOpen(true),
+            addConfigDisabled: loading,
             onDeleteConfig: () => handleOpenDeleteConfig(),
             onSwitchConfig: (name) => handleTabSelect(name),
         }));
@@ -298,7 +301,7 @@ const AclPage: React.FC = () => {
         });
         return list;
     }, [
-        currentIsDirty, currentConfig, draftConfigs, dirtySet,
+        loading, currentIsDirty, currentConfig, draftConfigs, dirtySet,
         enabledCounterNames, paused, currentFwStateName,
         openAdd, handleSavePress, handleDiscard, closeDrawer,
         handleTabSelect, handleOpenDeleteConfig, handleSearchChange, handleOpenLinkedFwstate,
@@ -354,7 +357,12 @@ const AclPage: React.FC = () => {
         />
     );
 
-    if (loading) {
+    // While a warm cache exists, keep the tab strip mounted from cached names
+    // and counts so it does not blink on remount; only the rows below reload.
+    const tabConfigs = loading ? cachedConfigs : draftConfigs;
+    const tabCounts = loading ? cachedCounts : ruleCounts;
+
+    if (loading && cachedConfigs.length === 0) {
         return (
             <PageLayout header={pageHeader} className="yn-flat-layout">
                 <PageLoader loading size="l" />
@@ -365,7 +373,7 @@ const AclPage: React.FC = () => {
     return (
         <PageLayout header={pageHeader} className="yn-flat-layout">
             <div className="yn-page yn-flat-page">
-                {draftConfigs.length === 0 ? (
+                {tabConfigs.length === 0 ? (
                     <EmptyPagePlaceholder
                         message="No ACL configurations found."
                         actionLabel="Add Config"
@@ -374,53 +382,60 @@ const AclPage: React.FC = () => {
                 ) : (
                     <>
                         <ConfigTabStrip
-                            configs={draftConfigs}
+                            configs={tabConfigs}
                             activeConfig={currentConfig}
-                            counts={ruleCounts}
+                            counts={tabCounts}
                             dirtyConfigs={dirtySet}
                             onSelect={handleTabSelect}
                             onAddConfig={() => setAddConfigOpen(true)}
+                            addConfigDisabled={loading}
                         />
-                        <div className="yn-toolbar-bordered">
-                            {currentFwStateName && (
-                                <Button size="s" view="outlined" onClick={handleOpenLinkedFwstate}>
-                                    FWState: {currentFwStateName}
-                                </Button>
-                            )}
-                            {!currentFwStateName && hasStatefulRules && (
-                                <Label theme="warning">Stateful rules without FWState</Label>
-                            )}
-                            <div style={{ flex: 1 }} />
-                            <div style={{ flexBasis: 320, flexShrink: 1 }}>
-                                <SearchInput
-                                    value={search}
-                                    onUpdate={handleSearchChange}
-                                    placeholder="Search rules…"
-                                    icon={Funnel}
-                                    enableFocusShortcut={false}
-                                    showShortcutHint={false}
-                                />
-                            </div>
-                            <RowCountDisplay filtered={visibleItems.length} total={allItems.length} />
-                        </div>
+                        {loading ? (
+                            <PageLoader loading size="l" />
+                        ) : (
+                            <>
+                                <div className="yn-toolbar-bordered">
+                                    {currentFwStateName && (
+                                        <Button size="s" view="outlined" onClick={handleOpenLinkedFwstate}>
+                                            FWState: {currentFwStateName}
+                                        </Button>
+                                    )}
+                                    {!currentFwStateName && hasStatefulRules && (
+                                        <Label theme="warning">Stateful rules without FWState</Label>
+                                    )}
+                                    <div style={{ flex: 1 }} />
+                                    <div style={{ flexBasis: 320, flexShrink: 1 }}>
+                                        <SearchInput
+                                            value={search}
+                                            onUpdate={handleSearchChange}
+                                            placeholder="Search rules…"
+                                            icon={Funnel}
+                                            enableFocusShortcut={false}
+                                            showShortcutHint={false}
+                                        />
+                                    </div>
+                                    <RowCountDisplay filtered={visibleItems.length} total={allItems.length} />
+                                </div>
 
-                        <div className="yn-content">
-                            <RuleTable
-                                items={visibleItems}
-                                selectedIds={selectedIds}
-                                activeRowId={activeRowId}
-                                flashRowId={flashRowId}
-                                onSelectionChange={setSelectedIds}
-                                onEditRule={openEdit}
-                                currentIsDirty={currentIsDirty}
-                                onSave={handleSavePress}
-                                onDiscard={handleDiscard}
-                                onDeleteConfig={handleOpenDeleteConfig}
-                                rates={rates}
-                                enabledCounterNames={enabledCounterNames}
-                                onToggleCounter={handleToggleCounter}
-                            />
-                        </div>
+                                <div className="yn-content">
+                                    <RuleTable
+                                        items={visibleItems}
+                                        selectedIds={selectedIds}
+                                        activeRowId={activeRowId}
+                                        flashRowId={flashRowId}
+                                        onSelectionChange={setSelectedIds}
+                                        onEditRule={openEdit}
+                                        currentIsDirty={currentIsDirty}
+                                        onSave={handleSavePress}
+                                        onDiscard={handleDiscard}
+                                        onDeleteConfig={handleOpenDeleteConfig}
+                                        rates={rates}
+                                        enabledCounterNames={enabledCounterNames}
+                                        onToggleCounter={handleToggleCounter}
+                                    />
+                                </div>
+                            </>
+                        )}
                     </>
                 )}
 

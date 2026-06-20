@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState, useEffect } from 'react';
 import { useAsyncData } from '../../../hooks/useAsyncData';
+import { useConfigListCache } from '../../../hooks/useConfigListCache';
 import { pdumpApi, type PdumpConfig, type PdumpRecord } from '../../../api/pdump';
 import { base64ToUint8Array, parsePacket, toaster } from '../../../utils';
 import type { PdumpConfigInfo, CapturedPacket } from './types';
@@ -38,6 +39,16 @@ export const usePdumpConfigs = () => {
         errorMessage: 'Failed to load pdump configs',
     });
 
+    // Cache the config-name list so the tab strip renders instantly on remount
+    // instead of blanking while ListConfigs refetches. Counts come from live
+    // capture state, so only names are cached.
+    const { configs: cachedConfigs, write: writeCache } = useConfigListCache('pdump');
+    useEffect(() => {
+        if (data) {
+            writeCache({ configs: data.map((c) => c.name), counts: {} });
+        }
+    }, [data, writeCache]);
+
     const deleteConfig = useCallback(async (configName: string): Promise<boolean> => {
         try {
             await pdumpApi.deleteConfig(configName);
@@ -52,6 +63,7 @@ export const usePdumpConfigs = () => {
 
     return {
         configs: data ?? [],
+        cachedConfigs,
         loading,
         error,
         refetch,
