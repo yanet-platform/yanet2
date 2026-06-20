@@ -150,14 +150,19 @@ FILTER_ATTR_COMPILER_INIT_FUNC(port_dst)(
 		return -1;
 	}
 	SET_OFFSET_OF(data, table);
-	return collect_port_values(
-		memory_context,
-		actions,
-		actions_count,
-		get_port_range_dst,
-		table,
-		registry
-	);
+	if (collect_port_values(
+		    memory_context,
+		    actions,
+		    actions_count,
+		    get_port_range_dst,
+		    table,
+		    registry
+	    )) {
+		SET_OFFSET_OF(data, NULL);
+		memory_bfree(memory_context, table, sizeof(struct value_table));
+		return -1;
+	}
+	return 0;
 }
 
 int
@@ -183,6 +188,7 @@ FILTER_ATTR_COMPILER_INIT_FUNC(port_src)(
 		    registry
 	    )) {
 		SET_OFFSET_OF(data, NULL);
+		memory_bfree(memory_context, table, sizeof(struct value_table));
 		return -1;
 	}
 
