@@ -147,10 +147,18 @@ FILTER_ATTR_COMPILER_INIT_FUNC(proto)(
 ) {
 	struct proto_classifier *c =
 		memory_balloc(memory_context, sizeof(struct proto_classifier));
+	if (c == NULL) {
+		return -1;
+	}
 	SET_OFFSET_OF(data, c);
-	return proto_classifier_init_internal(
-		registry, c, rules, rule_count, memory_context
-	);
+	if (proto_classifier_init_internal(
+		    registry, c, rules, rule_count, memory_context
+	    )) {
+		SET_OFFSET_OF(data, NULL);
+		memory_bfree(memory_context, c, sizeof(*c));
+		return -1;
+	}
+	return 0;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -160,6 +168,9 @@ FILTER_ATTR_COMPILER_FREE_FUNC(proto)(
 	void *data, struct memory_context *memory_context
 ) {
 	struct proto_classifier *c = (struct proto_classifier *)data;
+	if (c == NULL) {
+		return;
+	}
 	value_table_free(&c->tcp_flags);
 	memory_bfree(memory_context, c, sizeof(*c));
 }
