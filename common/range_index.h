@@ -107,6 +107,10 @@ range_index_remap(
 
 static inline void
 range_index_free(struct range_index *range_index) {
+	if (range_index->count == 0) {
+		radix_free(&range_index->radix);
+		return;
+	}
 	uint64_t capacity = 1 << uint64_log_up(range_index->count);
 	memory_bfree(
 		ADDR_OF(&range_index->memory_context),
