@@ -91,13 +91,28 @@ worker_read(struct dataplane_worker *worker, struct packet_list *packets) {
 	}
 }
 
+struct worker_push_ctx {
+	struct dataplane_worker *worker;
+	struct rte_mbuf *mbuf;
+};
+
 static size_t
 worker_connection_push_cb(void **item, size_t count, void *data) {
+	struct worker_push_ctx *push_ctx = (struct worker_push_ctx *)data;
+	struct dataplane_worker *worker = push_ctx->worker;
+	uint32_t num_mbufs =
+		worker->config.num_mbufs ? worker->config.num_mbufs : 16384;
+
 	if (count > 0) {
-		struct packet *packet = (struct packet *)data;
-		struct rte_mbuf *mbuf = packet_to_mbuf(packet);
-		rte_mbuf_refcnt_update(mbuf, 1);
-		memcpy(item, &data, sizeof(struct packet *));
+		uint32_t ref_cnt =
+			rte_mbuf_refcnt_update(push_ctx->mbuf, 1) - 1;
+		memcpy(item, &push_ctx->mbuf, sizeof(struct rte_mbuf *));
+
+		uint32_t ofs = worker->pending_mbuf_stop % num_mbufs;
+		worker->pending_mbufs[ofs].mbuf = push_ctx->mbuf;
+		worker->pending_mbufs[ofs].ref_cnt = ref_cnt;
+		++worker->pending_mbuf_stop;
+
 		return 1;
 	}
 	return 0;
@@ -106,26 +121,16 @@ worker_connection_push_cb(void **item, size_t count, void *data) {
 static size_t
 worker_rx_pipe_pop_cb(void **item, size_t count, void *data) {
 	struct dataplane_worker *worker = (struct dataplane_worker *)data;
-	struct packet **packets = (struct packet **)item;
+	struct rte_mbuf **mbufs = (struct rte_mbuf **)item;
 
 	(*worker->dp_worker->remote_rx_count) += count;
-
-	struct rte_mbuf *mbufs[count];
-	for (size_t idx = 0; idx < count; ++idx) {
-		mbufs[idx] = packet_to_mbuf(packets[idx]);
-	}
 
 	size_t written = rte_eth_tx_burst(
 		worker->port_id, worker->queue_id, mbufs, count
 	);
 	*(worker->dp_worker->tx_count) += written;
 
-	for (size_t idx = 0; idx < written; ++idx) {
-		packets[idx]->tx_result = 0;
-	}
-
 	for (size_t idx = written; idx < count; ++idx) {
-		packets[idx]->tx_result = -1;
 		rte_pktmbuf_free(mbufs[idx]);
 	}
 
@@ -134,12 +139,9 @@ worker_rx_pipe_pop_cb(void **item, size_t count, void *data) {
 
 static size_t
 worker_connection_free_cb(void **item, size_t count, void *data) {
-	struct packet_list *sent = (struct packet_list *)data;
+	(void)item;
+	(void)data;
 
-	for (size_t idx = 0; idx < count; ++idx) {
-		struct packet *packet = ((struct packet **)item)[idx];
-		packet_list_add(sent, packet);
-	}
 	return count;
 }
 
@@ -148,21 +150,32 @@ worker_connection_free_cb(void **item, size_t count, void *data) {
  * using corresponding data pipe so the routine name might be confusing.
  */
 static int
-worker_send_to_port(struct worker_write_ctx *ctx, struct packet *packet) {
+worker_send_to_port(struct dataplane_worker *worker, struct packet *packet) {
 	struct worker_tx_connection *tx_conn =
-		ctx->tx_connections + packet->tx_device_id;
+		worker->write_ctx.tx_connections + packet->tx_device_id;
 
 	if (!tx_conn->count) {
-		LOG(ERROR, "no available data pipe for the port");
 		return -1;
 	}
+
+	uint32_t num_mbufs =
+		worker->config.num_mbufs ? worker->config.num_mbufs : 16384;
+	if (worker->pending_mbuf_stop - worker->pending_mbuf_stop >=
+	    num_mbufs) {
+		// To many pending mbufs
+		return -1;
+	}
+
+	struct worker_push_ctx push_ctx = {
+		.worker = worker,
+		.mbuf = packet_to_mbuf(packet),
+	};
 
 	if (data_pipe_item_push(
 		    tx_conn->pipes + packet->hash % tx_conn->count,
 		    worker_connection_push_cb,
-		    packet
+		    &push_ctx
 	    ) != 1) {
-		LOG(ERROR, "data pipe is full");
 		return -1;
 	}
 
@@ -170,9 +183,7 @@ worker_send_to_port(struct worker_write_ctx *ctx, struct packet *packet) {
 }
 
 static void
-worker_collect_from_port(
-	struct dataplane_worker *worker, struct packet_list *sent
-) {
+worker_collect_from_port(struct dataplane_worker *worker) {
 	for (uint32_t conn_idx = 0; conn_idx < worker->dataplane->device_count;
 	     ++conn_idx) {
 		struct worker_tx_connection *tx_conn =
@@ -182,7 +193,7 @@ worker_collect_from_port(
 			data_pipe_item_free(
 				tx_conn->pipes + pipe_idx,
 				worker_connection_free_cb,
-				sent
+				worker
 			);
 		}
 	}
@@ -235,7 +246,7 @@ worker_write(struct dataplane_worker *worker, struct packet_list *packets) {
 			mbufs[to_write] = packet_to_mbuf(packet);
 			++to_write;
 		} else {
-			if (worker_send_to_port(ctx, packet)) {
+			if (worker_send_to_port(worker, packet)) {
 				packet_list_add(&failed, packet);
 			} else {
 				*(worker->dp_worker->remote_tx_count) += 1;
@@ -249,24 +260,32 @@ worker_write(struct dataplane_worker *worker, struct packet_list *packets) {
 
 	struct packet_list sent;
 	packet_list_init(&sent);
-	worker_collect_from_port(worker, &sent);
-	while ((packet = packet_list_pop(&sent)) != NULL) {
-		if (packet->tx_result) {
-			packet_list_add(&failed, packet);
-			continue;
+	worker_collect_from_port(worker);
+
+	// FIXME: handle pending mbufs for each data pipe
+	uint32_t num_mbufs =
+		worker->config.num_mbufs ? worker->config.num_mbufs : 16384;
+	uint64_t pending_mbuf_stop = worker->pending_mbuf_stop;
+	while (worker->pending_mbuf_start < pending_mbuf_stop) {
+		uint32_t ofs = worker->pending_mbuf_start % num_mbufs;
+		struct worker_pending_mbuf pending_mbuf =
+			worker->pending_mbufs[ofs];
+
+		if (rte_mbuf_refcnt_read(pending_mbuf.mbuf) >
+		    pending_mbuf.ref_cnt) {
+			uint32_t ofs = worker->pending_mbuf_stop % num_mbufs;
+			worker->pending_mbufs[ofs] = pending_mbuf;
+			++worker->pending_mbuf_stop;
+		} else {
+			rte_pktmbuf_free(pending_mbuf.mbuf);
 		}
 
-		// FIXME: per-pipe pending queue
-		packet_list_add(&worker->pending, packet);
+		++worker->pending_mbuf_start;
 	}
-
-	while ((packet = packet_list_first(&worker->pending)) != NULL) {
-		struct rte_mbuf *mbuf = packet_to_mbuf(packet);
-		if (rte_mbuf_refcnt_read(mbuf) != 1)
-			break;
-
-		(void)packet_list_pop(&worker->pending);
-		rte_pktmbuf_free(mbuf);
+	// Value overflow protection
+	if (worker->pending_mbuf_start > num_mbufs) {
+		worker->pending_mbuf_start -= num_mbufs;
+		worker->pending_mbuf_stop -= num_mbufs;
 	}
 
 	packet_list_concat(packets, &failed);
@@ -416,8 +435,6 @@ dataplane_worker_init(
 	dp_worker->queue_id = queue_id;
 	dp_worker->rx_burst_size = WORKER_RX_BURST_SIZE;
 
-	packet_list_init(&worker->pending);
-
 	// Initialize device rx and tx queue
 	if (rte_eth_tx_queue_setup(
 		    device->port_id, queue_id, 4096, config->instance_id, NULL
@@ -439,6 +456,17 @@ dataplane_worker_init(
 	);
 
 	uint32_t num_mbufs = config->num_mbufs ? config->num_mbufs : 16384;
+
+	worker->pending_mbufs = (struct worker_pending_mbuf *)memory_balloc(
+		&dp_config->memory_context,
+		sizeof(struct worker_pending_mbuf) * num_mbufs
+	);
+	if (worker->pending_mbufs == NULL) {
+		LOG(ERROR, "failed to create worker pending list");
+		return -1;
+	}
+	worker->pending_mbuf_start = 0;
+	worker->pending_mbuf_stop = 0;
 
 	worker->rx_mempool = rte_mempool_create(
 		mempool_name,

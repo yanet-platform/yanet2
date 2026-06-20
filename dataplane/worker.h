@@ -35,6 +35,11 @@ struct worker_write_ctx {
 	struct data_pipe *rx_pipes;
 };
 
+struct worker_pending_mbuf {
+	struct rte_mbuf *mbuf;
+	uint64_t ref_cnt;
+};
+
 struct dataplane_worker {
 	struct dataplane *dataplane;
 	// TODO: use it to attach worker to the local NUMA
@@ -54,7 +59,9 @@ struct dataplane_worker {
 	struct worker_read_ctx read_ctx;
 	struct worker_write_ctx write_ctx;
 
-	struct packet_list pending;
+	struct worker_pending_mbuf *pending_mbufs;
+	uint64_t pending_mbuf_start;
+	uint64_t pending_mbuf_stop;
 
 	struct dataplane_device_worker_config config;
 };
