@@ -129,6 +129,7 @@ FILTER_ATTR_COMPILER_INIT_FUNC(proto_range)(
 		    mctx, rules, rule_count, &classifier->table, registry
 	    )) {
 		SET_OFFSET_OF(data, NULL);
+		memory_bfree(mctx, classifier, sizeof(*classifier));
 		return -1;
 	}
 
