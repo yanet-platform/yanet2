@@ -37,6 +37,13 @@
     gap: 10px;
     padding: 12px 20px;
     flex-shrink: 0;
+
+    // Grow the filter/search input to a 32px box (30px control + 1px top and
+    // bottom border) so it matches the 32px segmented filter control, keeping
+    // every toolbar row the same height across pages.
+    .g-text-input_size_m .g-text-input__control {
+        height: 30px;
+    }
 }
 
 /** Function/pipeline card-header chrome — shared by fn-card-header and pl-card-header. */
