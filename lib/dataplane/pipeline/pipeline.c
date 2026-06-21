@@ -237,6 +237,7 @@ pipeline_ectx_process(
 	);
 }
 
+// Switch the packet front and run the device entry handler.
 static inline void
 device_entry_ectx_process(
 	struct dp_worker *dp_worker,
@@ -246,7 +247,15 @@ device_entry_ectx_process(
 ) {
 	packet_front_switch(packet_front);
 	entry_ectx->handler(dp_worker, device_ectx, packet_front);
+}
 
+// Demultiplex the handler output across the entry's pipelines.
+static inline void
+device_entry_ectx_dispatch(
+	struct dp_worker *dp_worker,
+	struct device_entry_ectx *entry_ectx,
+	struct packet_front *packet_front
+) {
 	if (!entry_ectx->pipeline_map_size) {
 		packet_list_concat(&packet_front->drop, &packet_front->output);
 		packet_list_init(&packet_front->output);
@@ -286,6 +295,13 @@ device_ectx_process_input(
 	struct device_ectx *device_ectx,
 	struct packet_front *packet_front
 ) {
+	struct device_entry_ectx *entry_ectx =
+		ADDR_OF(&device_ectx->input_pipelines);
+
+	device_entry_ectx_process(
+		dp_worker, device_ectx, entry_ectx, packet_front
+	);
+
 	counter_add_packets_bytes(
 		device_ectx->counter_packet_rx_count,
 		device_ectx->counter_packet_rx_bytes,
@@ -295,11 +311,7 @@ device_ectx_process_input(
 		packet_list_bytes_sum(&packet_front->output)
 	);
 
-	struct device_entry_ectx *entry_ectx =
-		ADDR_OF(&device_ectx->input_pipelines);
-	device_entry_ectx_process(
-		dp_worker, device_ectx, entry_ectx, packet_front
-	);
+	device_entry_ectx_dispatch(dp_worker, entry_ectx, packet_front);
 }
 
 void
@@ -308,6 +320,13 @@ device_ectx_process_output(
 	struct device_ectx *device_ectx,
 	struct packet_front *packet_front
 ) {
+	struct device_entry_ectx *entry_ectx =
+		ADDR_OF(&device_ectx->output_pipelines);
+
+	device_entry_ectx_process(
+		dp_worker, device_ectx, entry_ectx, packet_front
+	);
+
 	counter_add_packets_bytes(
 		device_ectx->counter_packet_tx_count,
 		device_ectx->counter_packet_tx_bytes,
@@ -317,9 +336,5 @@ device_ectx_process_output(
 		packet_list_bytes_sum(&packet_front->output)
 	);
 
-	struct device_entry_ectx *entry_ectx =
-		ADDR_OF(&device_ectx->output_pipelines);
-	device_entry_ectx_process(
-		dp_worker, device_ectx, entry_ectx, packet_front
-	);
+	device_entry_ectx_dispatch(dp_worker, entry_ectx, packet_front);
 }
