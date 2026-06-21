@@ -16,10 +16,9 @@ export default defineConfig({
         }),
     ],
     resolve: {
-        // Shared core is imported as @yanet/core/*. Interim target is src/;
-        // phase 2 repoints it to src/core once those dirs physically move.
+        // Shared core lives in src/core and is imported as @yanet/core/*.
         alias: {
-            '@yanet/core': fileURLToPath(new URL('./src', import.meta.url)),
+            '@yanet/core': fileURLToPath(new URL('./src/core', import.meta.url)),
         },
         // Co-located module web sources (phase 4+) live outside web/ and have
         // no node_modules ancestor; force a single React copy to avoid a

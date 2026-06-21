@@ -4,7 +4,7 @@ import {
     computeModulePipelineUsage,
     getModuleDescription,
     normalizeModuleName,
-} from '../pages/builtin/inspect/utils';
+} from '../../pages/builtin/inspect/utils';
 
 export interface ModuleCardData {
     key: string;
