@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback, useEffect, useRef, lazy, Suspense } from 'react';
+import React, { useState, useMemo, useCallback, useEffect, useRef, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, useLocation, useNavigate, Navigate } from 'react-router-dom';
 import MainMenu from './MainMenu';
 import { PageLoader } from '@yanet/core/components';
@@ -8,50 +8,7 @@ import { PaletteProvider, usePalette, CommandPalette, navigationCommands, Shortc
 import type { RowAdapter, Command } from '@yanet/core/components/command-palette';
 import { GatewayProvider, GatewayDrawer, useGateways, gatewayCommands } from '@yanet/core/gateways';
 import { setApiBase } from '@yanet/core/api';
-
-const importInspect = () => import('./pages/builtin/inspect/InspectPage');
-const importDashboard = () => import('./pages/builtin/dashboard/DashboardPage');
-const importFunctions = () => import('./pages/builtin/functions/FunctionsPage');
-const importPipelines = () => import('./pages/builtin/pipelines/PipelinesPage');
-const importDevices = () => import('./pages/builtin/devices/DevicesPage');
-const importForward = () => import('./pages/modules/forward/ForwardPage');
-const importDecap = () => import('./pages/modules/decap/DecapPage');
-const importAcl = () => import('./pages/modules/acl/AclPage');
-const importFwState = () => import('./pages/modules/fwstate/FWStatePage');
-const importPdump = () => import('./pages/modules/pdump/PdumpPage');
-const importModulesRoute = () => import('./pages/modules/route/RoutePage');
-const importOperatorsRoute = () => import('./pages/operators/route/RoutePage');
-const importNeighbours = () => import('./pages/operators/neighbours/NeighboursPage');
-
-const pageImporters = [
-    importInspect,
-    importDashboard,
-    importFunctions,
-    importPipelines,
-    importDevices,
-    importForward,
-    importDecap,
-    importAcl,
-    importFwState,
-    importPdump,
-    importModulesRoute,
-    importOperatorsRoute,
-    importNeighbours,
-];
-
-const InspectPage = lazy(importInspect);
-const DashboardPage = lazy(importDashboard);
-const FunctionsPage = lazy(importFunctions);
-const PipelinesPage = lazy(importPipelines);
-const DevicesPage = lazy(importDevices);
-const ForwardPage = lazy(importForward);
-const DecapPage = lazy(importDecap);
-const AclPage = lazy(importAcl);
-const FWStatePage = lazy(importFwState);
-const PdumpPage = lazy(importPdump);
-const ModulesRoutePage = lazy(importModulesRoute);
-const OperatorsRoutePage = lazy(importOperatorsRoute);
-const NeighboursPage = lazy(importNeighbours);
+import { routes, prefetchers, defaultRoute, navItems } from './registry';
 
 type IdleHandle = number;
 type RequestIdleCallback = (cb: () => void, opts?: { timeout: number }) => IdleHandle;
@@ -69,7 +26,7 @@ const GlobalPalette = ({
 }): React.JSX.Element => {
     const { open, closePalette, contribution, helpOpen, closeHelp, helpShortcuts, openHelp } = usePalette();
     const { gateways, activeGateway } = useGateways();
-    const navCmds = useMemo(() => navigationCommands(handlePageChange), [handlePageChange]);
+    const navCmds = useMemo(() => navigationCommands(navItems, handlePageChange), [handlePageChange]);
 
     const showShortcutsCmd = useMemo((): Command => ({
         id: '__show_shortcuts',
@@ -153,8 +110,8 @@ const AppContentInner = (): React.JSX.Element => {
                 return;
             }
             // Fire all imports; failures are non-fatal (e.g. transient network).
-            pageImporters.forEach((fn) => {
-                fn().catch(() => {});
+            prefetchers.forEach((load) => {
+                load().catch(() => {});
             });
         };
 
@@ -250,33 +207,13 @@ const AppContentInner = (): React.JSX.Element => {
                         <div className="app-surface">
                             <Suspense fallback={<PageLoader loading size="l" />}>
                                 <Routes key={`${activeGateway?.id ?? ''}:${activeGateway?.baseUrl ?? ''}`}>
-                                    <Route path="/" element={<Navigate to="/builtin/dashboard" replace />} />
-                                    <Route path="/builtin/inspect" element={<InspectPage />} />
-                                    <Route path="/builtin/dashboard" element={<DashboardPage />} />
-                                    <Route path="/builtin/functions" element={<FunctionsPage />} />
-                                    <Route path="/builtin/functions-ng" element={<Navigate to="/builtin/functions" replace />} />
-                                    <Route path="/builtin/pipelines" element={<PipelinesPage />} />
-                                    <Route path="/builtin/devices" element={<DevicesPage />} />
-                                    <Route path="/modules/forward" element={<ForwardPage />} />
-                                    <Route path="/modules/decap" element={<DecapPage />} />
-                                    <Route path="/modules/acl" element={<AclPage />} />
-                                    <Route path="/modules/fwstate" element={<FWStatePage />} />
-                                    <Route path="/modules/pdump" element={<PdumpPage />} />
-                                    <Route path="/modules/route" element={<ModulesRoutePage />} />
-                                    <Route path="/operators/route" element={<OperatorsRoutePage />} />
-                                    <Route path="/operators/neighbours" element={<NeighboursPage />} />
-                                    <Route path="/inspect" element={<Navigate to="/builtin/inspect" replace />} />
-                                    <Route path="/dashboard" element={<Navigate to="/builtin/dashboard" replace />} />
-                                    <Route path="/functions" element={<Navigate to="/builtin/functions" replace />} />
-                                    <Route path="/pipelines" element={<Navigate to="/builtin/pipelines" replace />} />
-                                    <Route path="/devices" element={<Navigate to="/builtin/devices" replace />} />
-                                    <Route path="/forward" element={<Navigate to="/modules/forward" replace />} />
-                                    <Route path="/decap" element={<Navigate to="/modules/decap" replace />} />
-                                    <Route path="/acl" element={<Navigate to="/modules/acl" replace />} />
-                                    <Route path="/fwstate" element={<Navigate to="/modules/fwstate" replace />} />
-                                    <Route path="/pdump" element={<Navigate to="/modules/pdump" replace />} />
-                                    <Route path="/route" element={<Navigate to="/operators/route" replace />} />
-                                    <Route path="/neighbours" element={<Navigate to="/operators/neighbours" replace />} />
+                                    <Route path="/" element={<Navigate to={defaultRoute} replace />} />
+                                    {routes.flatMap(({ manifest, Component }) => [
+                                        <Route key={manifest.route} path={manifest.route} element={<Component />} />,
+                                        ...(manifest.redirects ?? []).map((from) => (
+                                            <Route key={from} path={from} element={<Navigate to={manifest.route} replace />} />
+                                        )),
+                                    ])}
                                 </Routes>
                             </Suspense>
                         </div>

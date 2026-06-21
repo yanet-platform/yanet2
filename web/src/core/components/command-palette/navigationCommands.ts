@@ -1,9 +1,12 @@
 import type { PageId } from '../../../types';
-import { navItems } from '../../../navItems';
+import type { NavItem } from '../../registry';
 import type { Command } from './types';
 
-/** Builds "Go to" navigation commands from the shared navItems list. */
-export const navigationCommands = (onNavigate: (id: PageId) => void): Command[] => {
+/** Builds "Go to" navigation commands from the page nav items. */
+export const navigationCommands = (
+    navItems: readonly NavItem[],
+    onNavigate: (id: PageId) => void,
+): Command[] => {
     const titleCounts = new Map<string, number>();
     for (const item of navItems) {
         titleCounts.set(item.title, (titleCounts.get(item.title) ?? 0) + 1);

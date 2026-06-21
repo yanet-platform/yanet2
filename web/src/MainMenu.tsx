@@ -5,8 +5,8 @@ import type { MenuItem as AsideHeaderMenuItem } from '@gravity-ui/navigation';
 import { Server } from '@gravity-ui/icons';
 import Logo from '@yanet/core/icons/Logo';
 import type { PageId } from './types';
-import { navItems } from './navItems';
-import type { NavSection } from './navItems';
+import { navItems } from './registry';
+import type { NavSection } from '@yanet/core/registry';
 import { useGateways } from '@yanet/core/gateways';
 import './MainMenu.scss';
 
