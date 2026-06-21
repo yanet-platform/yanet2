@@ -5,12 +5,18 @@ on:
     tags: ["v*"]
     paths-ignore:
       - "web/**"
+      - "modules/**/web/**"
+      - "devices/**/web/**"
+      - "operators/**/web/**"
       - "package.json"
       - "package-lock.json"
   pull_request:
     branches: ["**"]
     paths-ignore:
       - "web/**"
+      - "modules/**/web/**"
+      - "devices/**/web/**"
+      - "operators/**/web/**"
       - "package.json"
       - "package-lock.json"
   workflow_dispatch:

@@ -7,10 +7,15 @@ const SECTION_ORDER: Record<NavSection, number> = {
     Operators: 2,
 };
 
-const discovered = import.meta.glob<PageManifest>('./pages/**/manifest.ts', {
-    eager: true,
-    import: 'manifest',
-});
+const discovered = import.meta.glob<PageManifest>(
+    [
+        './pages/**/manifest.ts',
+        '../../modules/*/web/manifest.ts',
+        '../../devices/*/web/manifest.ts',
+        '../../operators/*/web/manifest.ts',
+    ],
+    { eager: true, import: 'manifest' },
+);
 
 /** All page manifests discovered under pages/, ordered for the sidebar. */
 export const manifests: PageManifest[] = Object.values(discovered).sort((a, b) => {
