@@ -33,6 +33,15 @@ export default defineConfig({
         environment: 'jsdom',
         setupFiles: ['./src/test-setup.ts'],
         css: true,
+        // Co-located feature specs live outside web/ (phase 4+). Vitest's
+        // default include is web-relative, so the sibling roots are listed
+        // explicitly or their *.test.* files silently stop running in CI.
+        include: [
+            '**/*.{test,spec}.?(c|m)[jt]s?(x)',
+            '../modules/*/web/**/*.{test,spec}.?(c|m)[jt]s?(x)',
+            '../operators/*/web/**/*.{test,spec}.?(c|m)[jt]s?(x)',
+            '../devices/*/web/**/*.{test,spec}.?(c|m)[jt]s?(x)',
+        ],
         server: {
             deps: {
                 // Gravity UI ships CSS files alongside ESM; instruct the Vite
