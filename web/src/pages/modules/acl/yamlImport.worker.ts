@@ -9,8 +9,8 @@
  */
 
 import yaml from 'js-yaml';
-import { ActionKind } from '../../../api/acl';
-import type { Rule } from '../../../api/acl';
+import { ActionKind } from '@yanet/core/api/acl';
+import type { Rule } from '@yanet/core/api/acl';
 import { parseCidrsToIPNets } from './parseHelpers';
 
 /** Raw shape of an action entry in the YAML schema. */

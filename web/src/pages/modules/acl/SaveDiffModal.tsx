@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { Dialog, Text } from '@gravity-ui/uikit';
-import type { Rule } from '../../../api/acl';
-import { ActionKind } from '../../../api/acl';
-import { formatIPNetItem, dumpYamlDoc } from '../../../utils';
+import type { Rule } from '@yanet/core/api/acl';
+import { ActionKind } from '@yanet/core/api/acl';
+import { formatIPNetItem, dumpYamlDoc } from '@yanet/core/utils';
 
 // TODO(acl): structured diff disabled until the per-card layout is reworked.
 

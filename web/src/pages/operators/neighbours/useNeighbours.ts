@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { API } from '../../../api';
-import { toaster } from '../../../utils';
-import type { IPAddressWire } from '../../../utils/netip';
-import type { Neighbour, NeighbourTableInfo } from '../../../api/neighbours';
+import { API } from '@yanet/core/api';
+import { toaster } from '@yanet/core/utils';
+import type { IPAddressWire } from '@yanet/core/utils/netip';
+import type { Neighbour, NeighbourTableInfo } from '@yanet/core/api/neighbours';
 import { MERGED_TAB } from './types';
 
 const REFRESH_INTERVAL_MS = 5000;

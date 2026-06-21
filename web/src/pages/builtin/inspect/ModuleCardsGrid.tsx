@@ -1,11 +1,11 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import type { InstanceInfo } from '../../../api/inspect';
+import type { InstanceInfo } from '@yanet/core/api/inspect';
 import { fmtIEC } from './formatters';
 import { MemoryBar } from './MemoryBar';
 import { getModuleCardAgentUsage, getModuleRoute } from './utils';
 import type { AgentUsage } from './utils';
-import { useModuleCards } from '../../../hooks/useModuleCards';
+import { useModuleCards } from '@yanet/core/hooks/useModuleCards';
 
 /** Visual knobs that differ between the inspect and dashboard renderings. */
 export interface ModuleCardsChrome {

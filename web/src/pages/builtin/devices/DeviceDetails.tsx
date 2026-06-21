@@ -9,13 +9,13 @@ import {
 } from './components/Icons';
 import { DeviceDiffModal } from './components/DeviceDiffModal';
 import { BigSpark } from './components/BigSpark';
-import { formatBps, formatPps } from '../../../utils';
+import { formatBps, formatPps } from '@yanet/core/utils';
 import { PipelineTable } from './PipelineTable';
 import type { LocalDevice } from './types';
-import type { PipelineId } from '../../../api/pipelines';
-import type { DevicePipeline } from '../../../api/devices';
-import type { DeviceCounterData } from '../../../hooks/useDeviceCounters';
-import type { CounterHistoryEntry } from '../../../hooks/useCounterHistory';
+import type { PipelineId } from '@yanet/core/api/pipelines';
+import type { DevicePipeline } from '@yanet/core/api/devices';
+import type { DeviceCounterData } from '@yanet/core/hooks/useDeviceCounters';
+import type { CounterHistoryEntry } from '@yanet/core/hooks/useCounterHistory';
 
 export interface DeviceDetailsProps {
     device: LocalDevice | null;

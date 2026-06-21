@@ -1,9 +1,9 @@
 import { useCallback } from 'react';
-import { API } from '../../../api';
+import { API } from '@yanet/core/api';
 import type { PrefixRowItem } from './types';
 import { prefixDraftReducer, initialPrefixDraftState } from './prefixDraftReducer';
-import { useDraft } from '../../../components/draft';
-import type { UseDraftResult } from '../../../components/draft';
+import { useDraft } from '@yanet/core/components/draft';
+import type { UseDraftResult } from '@yanet/core/components/draft';
 
 export type UsePrefixDraftResult = UseDraftResult<PrefixRowItem>;
 

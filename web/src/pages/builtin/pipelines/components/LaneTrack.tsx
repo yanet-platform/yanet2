@@ -2,8 +2,8 @@ import React from 'react';
 import type { FunctionRef, DragPayload } from '../types';
 import { getDragPayload, InsertSlot, Endpoint, FlowLink, AddSlotButton } from '../../_shared/lane-editor';
 import { FunctionRefCard } from './FunctionRefCard';
-import type { InterpolatedCounterData } from '../../../../hooks';
-import { useLaneTrackDnD } from '../../../../hooks';
+import type { InterpolatedCounterData } from '@yanet/core/hooks';
+import { useLaneTrackDnD } from '@yanet/core/hooks';
 
 interface LaneTrackProps {
     pipelineId: string;

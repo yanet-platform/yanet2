@@ -1,7 +1,7 @@
 import React from 'react';
 import type { PrefixRowItem } from './types';
 import { rowsToYaml, yamlToRows } from './yaml';
-import DraftYamlIO from '../../../components/DraftYamlIO';
+import DraftYamlIO from '@yanet/core/components/DraftYamlIO';
 
 interface PrefixYamlIOProps {
     configName: string;

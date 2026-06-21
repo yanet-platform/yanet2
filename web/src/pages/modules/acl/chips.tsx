@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import type { Action } from '../../../api/acl';
-import { ActionKind, ACTION_KIND_LABELS } from '../../../api/acl';
-import { toaster, copyToClipboard } from '../../../utils';
+import type { Action } from '@yanet/core/api/acl';
+import { ActionKind, ACTION_KIND_LABELS } from '@yanet/core/api/acl';
+import { toaster, copyToClipboard } from '@yanet/core/utils';
 import { getProtocolTone, IpAddressChip, ProtoChip as SharedProtoChip } from '../_shared/chips';
 
 // Protocol names per IANA IP protocol number.

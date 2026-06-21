@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
-import { API } from '../../../api';
-import { useConfigListCache } from '../../../hooks';
-import { toaster, compareNatural } from '../../../utils';
-import type { Route } from '../../../api/routes';
+import { API } from '@yanet/core/api';
+import { useConfigListCache } from '@yanet/core/hooks';
+import { toaster, compareNatural } from '@yanet/core/utils';
+import type { Route } from '@yanet/core/api/routes';
 
 export interface UseRIBResult {
     configs: string[];

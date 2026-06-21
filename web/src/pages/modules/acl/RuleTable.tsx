@@ -12,10 +12,10 @@ import {
     ActionChain,
     ChipList,
 } from './chips';
-import { ruleTableCommonProps } from '../../../components/draft';
+import { ruleTableCommonProps } from '@yanet/core/components/draft';
 import type { RuleRate } from './useAclRuleCounters';
 import Sparkline from '../_shared/Sparkline';
-import { VirtualTable, type Column } from '../../../components/VirtualTable';
+import { VirtualTable, type Column } from '@yanet/core/components/VirtualTable';
 
 const COLUMN_WIDTHS = {
     srcs: 180,

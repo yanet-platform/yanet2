@@ -1,7 +1,7 @@
 import React from 'react';
 import { Icon } from '@gravity-ui/uikit';
 import { ArrowLeft, ArrowRight } from '@gravity-ui/icons';
-import { ForwardMode } from '../../../api/forward';
+import { ForwardMode } from '@yanet/core/api/forward';
 import { MODE_LABELS } from './types';
 
 interface DirectionBadgeProps {

@@ -1,4 +1,4 @@
-import type { Rule } from '../../../api/acl';
+import type { Rule } from '@yanet/core/api/acl';
 
 /** Monotonically increasing counter for generating stable tmp- ids. */
 let tmpIdCounter = 0;

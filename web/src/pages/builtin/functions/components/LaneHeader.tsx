@@ -2,8 +2,8 @@ import React, { useCallback } from 'react';
 import type { Chain } from '../types';
 import { InlineEdit } from './InlineEdit';
 import { WeightBadge } from './WeightBadge';
-import { formatPps } from '../../../../utils';
-import type { InterpolatedCounterData } from '../../../../hooks';
+import { formatPps } from '@yanet/core/utils';
+import type { InterpolatedCounterData } from '@yanet/core/hooks';
 
 const CHAIN_NAME_REGEX = /^[a-z0-9_-]+$/;
 

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { resolveSubmitTable, validateMAC, validateNextHop, sortComparators } from './utils';
 import { MERGED_TAB } from './types';
-import type { Neighbour } from '../../../api/neighbours';
+import type { Neighbour } from '@yanet/core/api/neighbours';
 
 // ---------------------------------------------------------------------------
 // resolveSubmitTable

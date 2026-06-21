@@ -1,4 +1,4 @@
-import type { Rule } from '../../../api/forward';
+import type { Rule } from '@yanet/core/api/forward';
 
 export interface ForwardDraftState {
     /** Server-authoritative rule snapshots, keyed by config name. */

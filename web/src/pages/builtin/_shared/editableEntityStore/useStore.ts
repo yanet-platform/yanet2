@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
-import { toaster } from '../../../../utils';
+import { toaster } from '@yanet/core/utils';
 import type { EntityState, BaseEntityAction } from './reducer';
 
 /** API surface required by the generic store. */

@@ -16,6 +16,11 @@
         "isolatedModules": true,
         "noEmit": true,
         "jsx": "react-jsx",
+        "paths": {
+            "@yanet/core/*": [
+                "./src/*"
+            ]
+        },
         /* Linting */
         "strict": true,
         "noUnusedLocals": true,

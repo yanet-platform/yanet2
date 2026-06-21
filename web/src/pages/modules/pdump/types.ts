@@ -1,5 +1,5 @@
-import type { PdumpConfig, PdumpRecord } from '../../../api/pdump';
-import type { ParsedPacket } from '../../../utils';
+import type { PdumpConfig, PdumpRecord } from '@yanet/core/api/pdump';
+import type { ParsedPacket } from '@yanet/core/utils';
 
 export interface PdumpConfigInfo {
     name: string;

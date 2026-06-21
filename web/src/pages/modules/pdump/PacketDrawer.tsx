@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { ChevronDown } from '@gravity-ui/icons';
 import { Icon } from '@gravity-ui/uikit';
-import { formatTCPFlags } from '../../../utils';
-import type { ParsedPacket } from '../../../utils/packetParser';
+import { formatTCPFlags } from '@yanet/core/utils';
+import type { ParsedPacket } from '@yanet/core/utils/packetParser';
 import type { CapturedPacket } from './types';
 
 interface PacketDrawerProps {

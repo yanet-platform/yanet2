@@ -1,17 +1,17 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button, Icon } from '@gravity-ui/uikit';
 import { Plus } from '@gravity-ui/icons';
-import { PageLayout, PageLoader, EmptyState, CommandPaletteHeader } from '../../../components';
+import { PageLayout, PageLoader, EmptyState, CommandPaletteHeader } from '@yanet/core/components';
 import { useFunctionsData } from './hooks/useFunctionsData';
 import { useDragState } from '../_shared/lane-editor';
 import { FunctionCard } from './components/FunctionCard';
-import { CreateEntityDialog } from '../../../components';
+import { CreateEntityDialog } from '@yanet/core/components';
 import { getAvailableModuleTypesFromInspect } from './moduleTypeOptions';
 import type { NetworkFunction } from './types';
 import { isFnSaveable } from './validation';
-import { API } from '../../../api';
-import type { Command, RowAdapter, ShortcutSection, PagePaletteContribution } from '../../../components/command-palette';
-import { useLaneCardNavigation, usePageContribution, useUnsavedChangesBlocker } from '../../../hooks';
+import { API } from '@yanet/core/api';
+import type { Command, RowAdapter, ShortcutSection, PagePaletteContribution } from '@yanet/core/components/command-palette';
+import { useLaneCardNavigation, usePageContribution, useUnsavedChangesBlocker } from '@yanet/core/hooks';
 import './FunctionsPage.scss';
 
 /** Builds a space-joined search string for a function (id, type, chain names, module names/types). */

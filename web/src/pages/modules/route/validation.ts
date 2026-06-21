@@ -1,5 +1,5 @@
 import type { FIBRowItem, FIBRowErrors } from './types';
-import { isValidCidrPrefix, rowHasError as sharedRowHasError, countInvalidRows as sharedCountInvalidRows } from '../../../utils';
+import { isValidCidrPrefix, rowHasError as sharedRowHasError, countInvalidRows as sharedCountInvalidRows } from '@yanet/core/utils';
 
 /** Returns true if s is a valid IPv4 or IPv6 CIDR prefix with a /mask. */
 export const isValidPrefix = isValidCidrPrefix;

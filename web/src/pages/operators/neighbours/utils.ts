@@ -1,4 +1,4 @@
-import type { Neighbour } from '../../../api/neighbours';
+import type { Neighbour } from '@yanet/core/api/neighbours';
 import {
     compareMACAddressValues,
     compareNullableNumbers,
@@ -6,8 +6,8 @@ import {
     getMACAddressValue,
     getUnixSecondsValue,
     isValidMAC,
-} from '../../../utils';
-import { ipAddressToString, stringToIPAddress } from '../../../utils/netip';
+} from '@yanet/core/utils';
+import { ipAddressToString, stringToIPAddress } from '@yanet/core/utils/netip';
 import type { SortableColumn } from './types';
 import { MERGED_TAB } from './types';
 

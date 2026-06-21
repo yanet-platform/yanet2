@@ -1,6 +1,6 @@
-@use '../../../styles/variables' as *;
-@use '../../../styles/mixins' as *;
-@use '../../../components/command-palette/command-palette' as *;
+@use '@yanet/core/styles/variables' as *;
+@use '@yanet/core/styles/mixins' as *;
+@use '@yanet/core/components/command-palette/command-palette' as *;
 
 // Route Operator page – ro-* class prefix.
 // All colors use existing --yn-* tokens or Gravity --g-color-* tokens.

@@ -1,9 +1,9 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { API } from '../../../api';
-import type { DeviceType } from '../../../api/devices';
-import type { PipelineId } from '../../../api/pipelines';
-import type { InspectResponse, DeviceInfo } from '../../../api/inspect';
-import { toaster } from '../../../utils';
+import { API } from '@yanet/core/api';
+import type { DeviceType } from '@yanet/core/api/devices';
+import type { PipelineId } from '@yanet/core/api/pipelines';
+import type { InspectResponse, DeviceInfo } from '@yanet/core/api/inspect';
+import { toaster } from '@yanet/core/utils';
 import type { LocalDevice } from './types';
 
 export interface UseDeviceDataResult {

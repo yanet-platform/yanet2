@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useMemo } from 'react';
-import { useInterpolatedCounterMap } from '../../../../hooks';
+import { useInterpolatedCounterMap } from '@yanet/core/hooks';
 import type { NetworkFunction, FunctionsAction, DragPayload, Module, Chain } from '../types';
 import { useModuleCounters, type ModuleInfo } from '../hooks/useModuleCounters';
 import { getDragPayload, useSparklineHistory } from '../../_shared/lane-editor';

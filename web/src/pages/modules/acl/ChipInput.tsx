@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import { Dialog, TextInput } from '@gravity-ui/uikit';
-import { useChipInput, Chip } from '../../../components/chip-input';
-import type { ChipInputProps, ChipInputHandle } from '../../../components/chip-input';
+import { useChipInput, Chip } from '@yanet/core/components/chip-input';
+import type { ChipInputProps, ChipInputHandle } from '@yanet/core/components/chip-input';
 
 export type { ChipInputHandle };
 

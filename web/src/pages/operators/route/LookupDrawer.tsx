@@ -1,9 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { API } from '../../../api';
-import { toaster } from '../../../utils';
-import { stringToIPAddress, ipAddressToString } from '../../../utils/netip';
-import { parseIPAddress } from '../../../utils';
-import type { Route } from '../../../api/routes';
+import { API } from '@yanet/core/api';
+import { toaster } from '@yanet/core/utils';
+import { stringToIPAddress, ipAddressToString } from '@yanet/core/utils/netip';
+import { parseIPAddress } from '@yanet/core/utils';
+import type { Route } from '@yanet/core/api/routes';
 import { bestPathReason } from './utils';
 import { BestPill, SourceChip } from './cells';
 

@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
-import type { DeviceInfo } from '../../../api/inspect';
-import type { DeviceCounterData, DeviceAbsoluteData } from '../../../hooks';
+import type { DeviceInfo } from '@yanet/core/api/inspect';
+import type { DeviceCounterData, DeviceAbsoluteData } from '@yanet/core/hooks';
 import { Sparkline } from './Sparkline';
 import { IconPort, IconTag } from './icons';
 import { fmtBps, fmtPps } from './formatters';

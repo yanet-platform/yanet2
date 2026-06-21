@@ -1,4 +1,4 @@
-@use '../../../styles/iv-tokens' as *;
+@use '@yanet/core/styles/iv-tokens' as *;
 
 @mixin dash-ambient-scan {
     position: relative;

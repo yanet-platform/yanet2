@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
 import yaml from 'js-yaml';
-import type { Rule } from '../../../api/forward';
-import { ForwardMode } from '../../../api/forward';
-import { toaster } from '../../../utils';
-import { parseCidrsToIPNets } from '../../../utils';
+import type { Rule } from '@yanet/core/api/forward';
+import { ForwardMode } from '@yanet/core/api/forward';
+import { toaster } from '@yanet/core/utils';
+import { parseCidrsToIPNets } from '@yanet/core/utils';
 import { rulesToDiffYaml } from './SaveDiffModal';
-import YamlIOModal from '../../../components/YamlIOModal';
+import YamlIOModal from '@yanet/core/components/YamlIOModal';
 
 /** Raw shape of a rule entry in the new YAML schema. */
 interface YamlVlanRange {

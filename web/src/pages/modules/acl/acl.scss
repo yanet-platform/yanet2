@@ -1,5 +1,5 @@
-@use '../../../styles/variables' as *;
-@use '../../../styles/mixins' as *;
+@use '@yanet/core/styles/variables' as *;
+@use '@yanet/core/styles/mixins' as *;
 
 // ACL page styles. Shared chrome (yn-page, yn-tabs, yn-table-*, etc.) lives in
 // web/src/styles/chrome.scss which this page imports. This file covers only

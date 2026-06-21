@@ -1,8 +1,8 @@
 import React from 'react';
-import { parseModeFlags } from '../../../api/pdump';
-import { formatPps } from '../../../utils';
+import { parseModeFlags } from '@yanet/core/api/pdump';
+import { formatPps } from '@yanet/core/utils';
 import type { PdumpConfigInfo } from './types';
-import { MetricSparkline } from '../../../components';
+import { MetricSparkline } from '@yanet/core/components';
 
 interface ConfigStripProps {
     config: PdumpConfigInfo;

@@ -1,5 +1,5 @@
-import { createDraftReducer } from '../../../components/draft';
-import type { DraftState, DraftAction } from '../../../components/draft';
+import { createDraftReducer } from '@yanet/core/components/draft';
+import type { DraftState, DraftAction } from '@yanet/core/components/draft';
 import type { PrefixRowItem } from './types';
 
 export type PrefixDraftState = DraftState<PrefixRowItem>;

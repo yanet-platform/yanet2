@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { planRouteSubmit, validatePrefix, validateNexthop, sortComparators, prefixIPFamily, groupByPrefix, filterByFamily, bestPathReason, getRouteId } from './utils';
-import { stringToIPAddress } from '../../../utils/netip';
-import type { Route } from '../../../api/routes';
+import { stringToIPAddress } from '@yanet/core/utils/netip';
+import type { Route } from '@yanet/core/api/routes';
 
 // ---------------------------------------------------------------------------
 // planRouteSubmit

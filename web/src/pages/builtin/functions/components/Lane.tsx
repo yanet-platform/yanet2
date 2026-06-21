@@ -2,7 +2,7 @@ import React, { useMemo } from 'react';
 import type { Chain, DragPayload, FunctionsAction } from '../types';
 import { LaneHeader } from './LaneHeader';
 import { LaneTrack } from './LaneTrack';
-import type { InterpolatedCounterData } from '../../../../hooks';
+import type { InterpolatedCounterData } from '@yanet/core/hooks';
 
 const MIN_LANE_HEIGHT = 76;
 const MAX_LANE_HEIGHT = 132;

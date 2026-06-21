@@ -1,6 +1,6 @@
 import React from 'react';
-import type { InstanceInfo } from '../../../api/inspect';
-import type { DeviceCounterData } from '../../../hooks';
+import type { InstanceInfo } from '@yanet/core/api/inspect';
+import type { DeviceCounterData } from '@yanet/core/hooks';
 import { useAggregateThroughput, useRollingSeries } from './hooks';
 import { HeroSparkline } from './HeroSparkline';
 import { Crosshair } from './Crosshair';

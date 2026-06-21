@@ -1,17 +1,17 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { useDrawerFlush, useDrawerKeyboard } from '../../../hooks';
-import { ForwardMode } from '../../../api/forward';
+import { useDrawerFlush, useDrawerKeyboard } from '@yanet/core/hooks';
+import { ForwardMode } from '@yanet/core/api/forward';
 import { MODE_LABELS } from './types';
 import type { RuleDraft, RuleItem } from './types';
 import { emptyDraft } from './types';
 import { itemToDraft } from './hooks';
-import { isValidCidr, isValidDeviceName, formatPps } from '../../../utils';
+import { isValidCidr, isValidDeviceName, formatPps } from '@yanet/core/utils';
 import ChipInput from './ChipInput';
 import type { ChipInputHandle } from './ChipInput';
 import Sparkline from '../_shared/Sparkline';
 import type { RuleRate } from './useForwardRuleCounters';
-import { DrawerShell } from '../../../components';
-import { RuleDrawerHeadActions, RuleDrawerFootActions, ruleDrawerFootMeta } from '../../../components/draft';
+import { DrawerShell } from '@yanet/core/components';
+import { RuleDrawerHeadActions, RuleDrawerFootActions, ruleDrawerFootMeta } from '@yanet/core/components/draft';
 
 interface RuleDrawerProps {
     open: boolean;

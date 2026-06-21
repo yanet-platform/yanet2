@@ -1,11 +1,11 @@
 import React from 'react';
-import type { Route } from '../../../api/routes';
-import { ipAddressToString } from '../../../utils/netip';
+import type { Route } from '@yanet/core/api/routes';
+import { ipAddressToString } from '@yanet/core/utils/netip';
 import { getRouteId } from './utils';
 import { BestPill, SourceChip, FamilyBadge, ConflictBadge } from './cells';
 import type { RouteSortableColumn, RouteSortState } from './types';
-import { VirtualTable } from '../../../components/VirtualTable';
-import type { Column, SortState } from '../../../components/VirtualTable';
+import { VirtualTable } from '@yanet/core/components/VirtualTable';
+import type { Column, SortState } from '@yanet/core/components/VirtualTable';
 
 /** Minimum total width before a horizontal scrollbar appears on very narrow viewports. */
 const RIB_MIN_WIDTH = 860;

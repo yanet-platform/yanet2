@@ -1,6 +1,6 @@
-@use '../../../styles/variables' as *;
-@use '../../../styles/mixins' as *;
-@use '../../../styles/lane-chrome' as lane-chrome;
+@use '@yanet/core/styles/variables' as *;
+@use '@yanet/core/styles/mixins' as *;
+@use '@yanet/core/styles/lane-chrome' as lane-chrome;
 @use '../_shared/lane-editor/lane-editor';
 @use '../_shared/lane-editor/palette' as palette;
 

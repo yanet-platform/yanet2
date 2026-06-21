@@ -1,4 +1,4 @@
-import type { DeviceId, DevicePipeline, DeviceType } from '../../../api/devices';
+import type { DeviceId, DevicePipeline, DeviceType } from '@yanet/core/api/devices';
 
 export interface LocalDevice {
     id: DeviceId;

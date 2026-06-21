@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import type { NeighbourTableInfo } from '../../../api/neighbours';
+import type { NeighbourTableInfo } from '@yanet/core/api/neighbours';
 
 interface CreateMode {
     mode: 'create';

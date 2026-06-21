@@ -1,5 +1,5 @@
-import { useModuleRuleCounters } from '../../../hooks/useModuleRuleCounters';
-import type { RuleRate } from '../../../hooks/useModuleRuleCounters';
+import { useModuleRuleCounters } from '@yanet/core/hooks/useModuleRuleCounters';
+import type { RuleRate } from '@yanet/core/hooks/useModuleRuleCounters';
 import type { RuleItem } from './types';
 
 export type { RuleRate };

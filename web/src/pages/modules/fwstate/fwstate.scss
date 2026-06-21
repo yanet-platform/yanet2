@@ -1,4 +1,4 @@
-@use '../../../styles/variables' as *;
+@use '@yanet/core/styles/variables' as *;
 
 /** Uppercase tracked micro-label typography shared by fwstate field/section labels. */
 @mixin micro-label {

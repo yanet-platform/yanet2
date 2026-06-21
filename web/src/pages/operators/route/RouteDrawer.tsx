@@ -1,11 +1,11 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Button, Icon, Switch } from '@gravity-ui/uikit';
 import { Plus, TrashBin } from '@gravity-ui/icons';
-import { DraftItemDrawer } from '../../../components/draft';
-import { ipAddressToString } from '../../../utils/netip';
+import { DraftItemDrawer } from '@yanet/core/components/draft';
+import { ipAddressToString } from '@yanet/core/utils/netip';
 import { validatePrefix, validateNexthop } from './utils';
-import type { Route } from '../../../api/routes';
-import { CidrPrefixField } from '../../../components';
+import type { Route } from '@yanet/core/api/routes';
+import { CidrPrefixField } from '@yanet/core/components';
 import { BestPill, SourceChip } from './cells';
 
 /** A single nexthop row with a stable identity. */

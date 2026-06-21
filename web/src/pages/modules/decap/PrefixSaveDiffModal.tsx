@@ -2,7 +2,7 @@ import React from 'react';
 import type { PrefixRowItem } from './types';
 import { rowsToDiffYaml } from './yaml';
 import { countInvalidRows } from './validation';
-import { DraftSaveDiffModal } from '../../../components';
+import { DraftSaveDiffModal } from '@yanet/core/components';
 
 interface PrefixSaveDiffModalProps {
     configName: string;

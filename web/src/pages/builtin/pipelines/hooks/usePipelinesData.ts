@@ -1,8 +1,8 @@
 import { useCallback } from 'react';
-import { API } from '../../../../api';
-import { toaster } from '../../../../utils';
+import { API } from '@yanet/core/api';
+import { toaster } from '@yanet/core/utils';
 import type { Pipeline, PipelinesAction } from '../types';
-import type { FunctionId } from '../../../../api/pipelines';
+import type { FunctionId } from '@yanet/core/api/pipelines';
 import { pipelinesReducer, initialState } from '../reducer';
 import { apiToLocal, localToApi } from '../wire';
 import { useEditableEntityStore } from '../../_shared/editableEntityStore';

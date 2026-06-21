@@ -1,5 +1,5 @@
 import React from 'react';
-import { MetricSparkline } from '../../../components';
+import { MetricSparkline } from '@yanet/core/components';
 
 interface SparklineProps {
     /** Data points to render. Null means no data is available. */

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { API } from '../../../api';
+import { API } from '@yanet/core/api';
 
 /**
  * Infer total worker count from a device counter response. Each counter

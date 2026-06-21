@@ -1,4 +1,4 @@
-import { isValidCidrPrefix, rowHasError as sharedRowHasError, countInvalidRows as sharedCountInvalidRows } from '../../../utils';
+import { isValidCidrPrefix, rowHasError as sharedRowHasError, countInvalidRows as sharedCountInvalidRows } from '@yanet/core/utils';
 import type { PrefixRowItem, PrefixRowErrors } from './types';
 
 /** Validate all fields of a prefix row. Returns null per field if valid. */

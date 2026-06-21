@@ -1,7 +1,7 @@
 import React, { useCallback, useMemo } from 'react';
 import { IconPlus, IconTrash } from './components/Icons';
-import type { DevicePipeline } from '../../../api/devices';
-import type { PipelineId } from '../../../api/pipelines';
+import type { DevicePipeline } from '@yanet/core/api/devices';
+import type { PipelineId } from '@yanet/core/api/pipelines';
 
 export interface PipelineTableProps {
     pipelineLabel: string;

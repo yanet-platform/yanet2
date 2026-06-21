@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import type { NetworkFunction } from '../types';
 import { metaFor } from '../moduleMeta';
 import { Sparkline, formatPps, LaneStat, LaneCardActions, LaneCollapseButton } from '../../_shared/lane-editor';
-import { EntityConfirmDialogs } from '../../../../components';
+import { EntityConfirmDialogs } from '@yanet/core/components';
 
 interface FunctionCardHeaderProps {
     fn: NetworkFunction;

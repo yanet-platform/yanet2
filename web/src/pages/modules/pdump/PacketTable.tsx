@@ -1,8 +1,8 @@
 import React, { useRef, useMemo, useCallback, useEffect, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { TextInput } from '@gravity-ui/uikit';
-import { EmptyState } from '../../../components';
-import { useContainerHeight } from '../../../hooks';
+import { EmptyState } from '@yanet/core/components';
+import { useContainerHeight } from '@yanet/core/hooks';
 import { ROW_HEIGHT, SEARCH_BAR_HEIGHT, HEADER_HEIGHT, FOOTER_HEIGHT, OVERSCAN, TOTAL_WIDTH } from './constants';
 import { PacketTableRow } from './PacketTableRow';
 import { PacketTableHeader } from './PacketTableHeader';

@@ -2,9 +2,9 @@ import React, { useState, useCallback, useRef, useMemo, useEffect } from 'react'
 import { Button, Icon } from '@gravity-ui/uikit';
 import { ArrowDownToLine, Plus } from '@gravity-ui/icons';
 import { useSearchParams } from 'react-router-dom';
-import { useSearchParamHelpers, usePageContribution, useTabCycle } from '../../../hooks';
-import { PageLayout, PageLoader, ConfigTabStrip, EmptyPagePlaceholder, CommandPaletteHeader } from '../../../components';
-import { toaster } from '../../../utils';
+import { useSearchParamHelpers, usePageContribution, useTabCycle } from '@yanet/core/hooks';
+import { PageLayout, PageLoader, ConfigTabStrip, EmptyPagePlaceholder, CommandPaletteHeader } from '@yanet/core/components';
+import { toaster } from '@yanet/core/utils';
 import {
     usePdumpConfigs,
     usePdumpCapture,
@@ -17,8 +17,8 @@ import ConfigStrip from './ConfigStrip';
 import PacketDrawer from './PacketDrawer';
 import DeleteConfigDialog from './DeleteConfigDialog';
 import type { PdumpConfigInfo, CapturedPacket } from './types';
-import type { Command, PagePaletteContribution } from '../../../components/command-palette';
-import '../../../styles/chrome.scss';
+import type { Command, PagePaletteContribution } from '@yanet/core/components/command-palette';
+import '@yanet/core/styles/chrome.scss';
 import './pdump.scss';
 
 const NEW_PACKET_TTL_MS = 1200;

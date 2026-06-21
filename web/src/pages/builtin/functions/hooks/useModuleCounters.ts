@@ -1,8 +1,8 @@
 import { useCallback } from 'react';
-import { API } from '../../../../api';
-import { useInterpolatedCounters } from '../../../../hooks';
-import type { InterpolatedCounterData } from '../../../../hooks';
-import { groupCounterGroupsByTagsAndName, makeGroupedCounterKey } from '../../../../utils';
+import { API } from '@yanet/core/api';
+import { useInterpolatedCounters } from '@yanet/core/hooks';
+import type { InterpolatedCounterData } from '@yanet/core/hooks';
+import { groupCounterGroupsByTagsAndName, makeGroupedCounterKey } from '@yanet/core/utils';
 
 export interface ModuleInfo {
     nodeId: string;

@@ -2,8 +2,8 @@ import React, { memo, useCallback } from 'react';
 import type { FunctionRef, DragPayload } from '../types';
 import { Sparkline, useSparklineHistory } from '../../_shared/lane-editor';
 import { TrashIcon } from '../../_shared/icons';
-import { formatPps } from '../../../../utils';
-import type { InterpolatedCounterData } from '../../../../hooks';
+import { formatPps } from '@yanet/core/utils';
+import type { InterpolatedCounterData } from '@yanet/core/hooks';
 
 /** Small pencil icon. */
 const PencilIcon = (): React.JSX.Element => (

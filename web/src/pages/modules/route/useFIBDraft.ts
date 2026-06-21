@@ -1,11 +1,11 @@
 import { useCallback } from 'react';
-import { API } from '../../../api';
-import type { FIBEntry, FIBNexthop, FIBRangeEntry } from '../../../api/routes';
-import { ipRangeToCIDRs } from '../../../utils/netip';
+import { API } from '@yanet/core/api';
+import type { FIBEntry, FIBNexthop, FIBRangeEntry } from '@yanet/core/api/routes';
+import { ipRangeToCIDRs } from '@yanet/core/utils/netip';
 import type { FIBRowItem } from './types';
 import { fibDraftReducer, initialFIBDraftState } from './fibDraftReducer';
-import { useDraft } from '../../../components/draft';
-import type { UseDraftResult } from '../../../components/draft';
+import { useDraft } from '@yanet/core/components/draft';
+import type { UseDraftResult } from '@yanet/core/components/draft';
 
 let rowIdCounter = 0;
 const newRowId = (): string => `row-${++rowIdCounter}-${Date.now()}`;

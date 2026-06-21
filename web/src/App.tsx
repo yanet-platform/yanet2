@@ -1,13 +1,13 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef, lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, useLocation, useNavigate, Navigate } from 'react-router-dom';
 import MainMenu from './MainMenu';
-import { PageLoader } from './components';
+import { PageLoader } from '@yanet/core/components';
 import type { PageId, SidebarContextValue } from './types';
 import { PAGE_IDS, SidebarContext } from './types';
-import { PaletteProvider, usePalette, CommandPalette, navigationCommands, ShortcutsHelp } from './components/command-palette';
-import type { RowAdapter, Command } from './components/command-palette';
-import { GatewayProvider, GatewayDrawer, useGateways, gatewayCommands } from './gateways';
-import { setApiBase } from './api';
+import { PaletteProvider, usePalette, CommandPalette, navigationCommands, ShortcutsHelp } from '@yanet/core/components/command-palette';
+import type { RowAdapter, Command } from '@yanet/core/components/command-palette';
+import { GatewayProvider, GatewayDrawer, useGateways, gatewayCommands } from '@yanet/core/gateways';
+import { setApiBase } from '@yanet/core/api';
 
 const importInspect = () => import('./pages/builtin/inspect/InspectPage');
 const importDashboard = () => import('./pages/builtin/dashboard/DashboardPage');

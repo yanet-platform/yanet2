@@ -1,5 +1,5 @@
 import type { Pipeline, FunctionRef } from './types';
-import type { Pipeline as APIPipeline, FunctionId } from '../../../api/pipelines';
+import type { Pipeline as APIPipeline, FunctionId } from '@yanet/core/api/pipelines';
 
 const makeRefId = (pipelineName: string, idx: number, fnName: string): string =>
     `pl:${pipelineName}::ref:${idx}::${fnName}`;

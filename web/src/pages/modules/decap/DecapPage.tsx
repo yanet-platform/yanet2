@@ -1,8 +1,8 @@
 import React, { useCallback, useMemo, useRef } from 'react';
 import { Button, Icon } from '@gravity-ui/uikit';
 import { Funnel, Plus } from '@gravity-ui/icons';
-import { useConfigListCache, useListNavigation, usePageContribution, useTabCycle } from '../../../hooks';
-import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, EmptyPagePlaceholder, SearchInput, RowCountDisplay } from '../../../components';
+import { useConfigListCache, useListNavigation, usePageContribution, useTabCycle } from '@yanet/core/hooks';
+import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, EmptyPagePlaceholder, SearchInput, RowCountDisplay } from '@yanet/core/components';
 import { usePrefixDraft } from './usePrefixDraft';
 import type { PrefixRowItem } from './types';
 import { PrefixTable } from './PrefixTable';
@@ -10,11 +10,11 @@ import PrefixDrawer from './PrefixDrawer';
 import type { PrefixDrawerHandle } from './PrefixDrawer';
 import PrefixYamlIO from './PrefixYamlIO';
 import { PrefixSaveDiffModal } from './PrefixSaveDiffModal';
-import { AddConfigModal, DeleteConfigModal, BulkDeleteModal, CommandPaletteHeader } from '../../../components';
-import { useDraftPageHandlers, useDraftPageState, useDraftPageDerived } from '../../../components/draft';
-import type { Command, RowAdapter, PagePaletteContribution } from '../../../components/command-palette';
-import { buildConfigCommands, buildDraftCommands } from '../../../components/command-palette';
-import '../../../styles/chrome.scss';
+import { AddConfigModal, DeleteConfigModal, BulkDeleteModal, CommandPaletteHeader } from '@yanet/core/components';
+import { useDraftPageHandlers, useDraftPageState, useDraftPageDerived } from '@yanet/core/components/draft';
+import type { Command, RowAdapter, PagePaletteContribution } from '@yanet/core/components/command-palette';
+import { buildConfigCommands, buildDraftCommands } from '@yanet/core/components/command-palette';
+import '@yanet/core/styles/chrome.scss';
 import './decap.scss';
 
 let idCounter = 0;

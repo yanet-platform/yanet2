@@ -4,8 +4,8 @@ import { metaFor } from '../moduleMeta';
 import { InlineEdit } from './InlineEdit';
 import { useSparklineHistory, LaneDrawerShell, DrawerAction, DrawerCounterSection } from '../../_shared/lane-editor';
 import { CloseIcon, TrashIcon } from '../../_shared/icons';
-import { ConfirmDialog } from '../../../../components';
-import type { InterpolatedCounterData } from '../../../../hooks';
+import { ConfirmDialog } from '@yanet/core/components';
+import type { InterpolatedCounterData } from '@yanet/core/hooks';
 
 /** Props for module-mode drawer. */
 interface DrawerModuleProps {

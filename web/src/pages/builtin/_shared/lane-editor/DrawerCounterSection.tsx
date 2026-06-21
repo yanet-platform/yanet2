@@ -1,6 +1,6 @@
 import React from 'react';
-import type { InterpolatedCounterData } from '../../../../hooks';
-import { formatPps, formatBps } from '../../../../utils';
+import type { InterpolatedCounterData } from '@yanet/core/hooks';
+import { formatPps, formatBps } from '@yanet/core/utils';
 import { DrawerBigStat } from './DrawerBigStat';
 import { Sparkline } from './Sparkline';
 

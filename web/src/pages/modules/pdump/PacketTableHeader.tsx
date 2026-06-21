@@ -1,6 +1,6 @@
 import React from 'react';
 import { Box, Text } from '@gravity-ui/uikit';
-import { SortableTableHeader } from '../../../components';
+import { SortableTableHeader } from '@yanet/core/components';
 import { cellStyles, TOTAL_WIDTH, HEADER_HEIGHT } from './constants';
 import type { PacketSortState, PacketSortColumn } from './types';
 import './pdump.scss';

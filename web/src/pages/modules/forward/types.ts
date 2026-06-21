@@ -1,5 +1,5 @@
-import type { Rule } from '../../../api/forward';
-import { ForwardMode } from '../../../api/forward';
+import type { Rule } from '@yanet/core/api/forward';
+import { ForwardMode } from '@yanet/core/api/forward';
 
 export type { Rule };
 export { ForwardMode };

@@ -4,9 +4,9 @@ import type { RuleRate } from './useForwardRuleCounters';
 import DirectionBadge from './DirectionBadge';
 import AnyBadge from './AnyBadge';
 import Sparkline from '../_shared/Sparkline';
-import { formatPps } from '../../../utils';
-import { ruleTableCommonProps } from '../../../components/draft';
-import { VirtualTable, type Column } from '../../../components/VirtualTable';
+import { formatPps } from '@yanet/core/utils';
+import { ruleTableCommonProps } from '@yanet/core/components/draft';
+import { VirtualTable, type Column } from '@yanet/core/components/VirtualTable';
 
 /** Compact mono list of values with overflow truncation. */
 const ValueCell: React.FC<{ values: string[] }> = ({ values }) => {

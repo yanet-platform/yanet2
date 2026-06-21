@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
-import type { InstanceInfo } from '../../../api/inspect';
-import { useDeviceCounters } from '../../../hooks';
+import type { InstanceInfo } from '@yanet/core/api/inspect';
+import { useDeviceCounters } from '@yanet/core/hooks';
 import { computeAgentUsage, computeMemoryTotals } from '../inspect/utils';
 
 /** Shared data preamble for dashboard and inspect InstanceCard components. */

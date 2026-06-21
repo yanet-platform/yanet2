@@ -1,6 +1,6 @@
-import type { Rule, PortRange, VlanRange, ProtoRange, Action } from '../../../api/acl';
-import { ActionKind } from '../../../api/acl';
-import { extractBytes, formatIPNetItem, formatRange } from '../../../utils';
+import type { Rule, PortRange, VlanRange, ProtoRange, Action } from '@yanet/core/api/acl';
+import { ActionKind } from '@yanet/core/api/acl';
+import { extractBytes, formatIPNetItem, formatRange } from '@yanet/core/utils';
 import type { RuleDraft, RuleItem } from './types';
 import { parseCidrsToIPNets, parseRangesRaw, parseProtoRangesRaw } from './parseHelpers';
 export { parseCidrsToIPNets, parseRangesRaw, parseProtoRangesRaw } from './parseHelpers';

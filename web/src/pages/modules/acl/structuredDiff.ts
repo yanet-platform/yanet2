@@ -1,5 +1,5 @@
-import type { Rule, Action } from '../../../api/acl';
-import { formatIPNetItem } from '../../../utils';
+import type { Rule, Action } from '@yanet/core/api/acl';
+import { formatIPNetItem } from '@yanet/core/utils';
 
 /** Serialize a range {from, to} to a canonical string for equality comparison. */
 const fmtRange = (r: { from?: number; to?: number }): string =>

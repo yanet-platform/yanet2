@@ -1,5 +1,5 @@
 import React from 'react';
-import type { InstanceInfo } from '../../../api/inspect';
+import type { InstanceInfo } from '@yanet/core/api/inspect';
 import { HudHero } from './HudHero';
 import { DeviceWall } from './DeviceWall';
 import { ModuleStrip } from './ModuleStrip';

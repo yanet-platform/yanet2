@@ -1,4 +1,4 @@
-import type { AgentInfo, InstanceInfo } from '../../../api/inspect';
+import type { AgentInfo, InstanceInfo } from '@yanet/core/api/inspect';
 
 /** Per-module deep-link route. Modules without a dedicated page are absent. */
 export const MODULE_ROUTES: Record<string, string> = {

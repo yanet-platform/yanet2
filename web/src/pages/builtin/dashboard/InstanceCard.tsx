@@ -1,5 +1,5 @@
 import React from 'react';
-import type { InstanceInfo } from '../../../api/inspect';
+import type { InstanceInfo } from '@yanet/core/api/inspect';
 import { SystemState } from './SystemState';
 import { useWorkerCount } from './hooks';
 import { KpiStrip } from './KpiStrip';

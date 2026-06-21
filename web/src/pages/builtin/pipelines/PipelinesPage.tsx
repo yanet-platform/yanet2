@@ -1,14 +1,14 @@
 import React, { useState, useCallback, useMemo } from 'react';
 import { Button, Icon } from '@gravity-ui/uikit';
 import { Plus } from '@gravity-ui/icons';
-import { PageLayout, PageLoader, EmptyState, CommandPaletteHeader } from '../../../components';
+import { PageLayout, PageLoader, EmptyState, CommandPaletteHeader } from '@yanet/core/components';
 import { usePipelinesData } from './hooks/usePipelinesData';
 import { useDragState } from '../_shared/lane-editor';
 import { PipelineCard } from './components/PipelineCard';
-import { CreateEntityDialog } from '../../../components';
+import { CreateEntityDialog } from '@yanet/core/components';
 import type { Pipeline } from './types';
-import type { Command, RowAdapter, ShortcutSection, PagePaletteContribution } from '../../../components/command-palette';
-import { useLaneCardNavigation, usePageContribution, useUnsavedChangesBlocker } from '../../../hooks';
+import type { Command, RowAdapter, ShortcutSection, PagePaletteContribution } from '@yanet/core/components/command-palette';
+import { useLaneCardNavigation, usePageContribution, useUnsavedChangesBlocker } from '@yanet/core/hooks';
 import './PipelinesPage.scss';
 
 /** Builds a space-joined search string for a pipeline (id and function names). */

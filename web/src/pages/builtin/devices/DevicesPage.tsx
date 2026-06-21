@@ -2,13 +2,13 @@ import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Button, Icon } from '@gravity-ui/uikit';
 import { Plus } from '@gravity-ui/icons';
-import { useSearchParamHelpers, useListNavigation, usePageContribution, useUnsavedChangesBlocker } from '../../../hooks';
-import { PageLayout, PageLoader, EmptyState, CommandPaletteHeader } from '../../../components';
-import type { DeviceType } from '../../../api/devices';
+import { useSearchParamHelpers, useListNavigation, usePageContribution, useUnsavedChangesBlocker } from '@yanet/core/hooks';
+import { PageLayout, PageLoader, EmptyState, CommandPaletteHeader } from '@yanet/core/components';
+import type { DeviceType } from '@yanet/core/api/devices';
 import type { LocalDevice } from './types';
-import { useDeviceCounters } from '../../../hooks';
-import { useCounterHistory } from '../../../hooks/useCounterHistory';
-import type { Command, RowAdapter, ShortcutSection, PagePaletteContribution } from '../../../components/command-palette';
+import { useDeviceCounters } from '@yanet/core/hooks';
+import { useCounterHistory } from '@yanet/core/hooks/useCounterHistory';
+import type { Command, RowAdapter, ShortcutSection, PagePaletteContribution } from '@yanet/core/components/command-palette';
 import {
     DevicesList,
     DeviceDetails,

@@ -1,6 +1,6 @@
-import type { Rule, VlanRange } from '../../../api/forward';
-import { ForwardMode } from '../../../api/forward';
-import { formatIPNetItem, formatRange, parseCidrsToIPNets, parseRangesRaw } from '../../../utils';
+import type { Rule, VlanRange } from '@yanet/core/api/forward';
+import { ForwardMode } from '@yanet/core/api/forward';
+import { formatIPNetItem, formatRange, parseCidrsToIPNets, parseRangesRaw } from '@yanet/core/utils';
 import type { RuleItem, RuleDraft } from './types';
 
 /** Format VlanRange array to a display string. */

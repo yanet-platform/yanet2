@@ -1,8 +1,8 @@
 import React, { useMemo } from 'react';
-import type { Rule } from '../../../api/forward';
-import { ForwardMode } from '../../../api/forward';
-import { formatIPNetItem, dumpYamlDoc } from '../../../utils';
-import { SaveDiffModal as SharedSaveDiffModal } from '../../../components';
+import type { Rule } from '@yanet/core/api/forward';
+import { ForwardMode } from '@yanet/core/api/forward';
+import { formatIPNetItem, dumpYamlDoc } from '@yanet/core/utils';
+import { SaveDiffModal as SharedSaveDiffModal } from '@yanet/core/components';
 
 /** Serialize a rules array into the canonical YAML schema for diff display. */
 export const rulesToDiffYaml = (rules: Rule[]): string => {

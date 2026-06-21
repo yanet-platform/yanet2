@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import type { Rule } from '../../../api/acl';
-import { toaster } from '../../../utils';
+import type { Rule } from '@yanet/core/api/acl';
+import { toaster } from '@yanet/core/utils';
 import { rulesToDiffYaml, rulesToYamlObjects } from './SaveDiffModal';
-import YamlIOModal from '../../../components/YamlIOModal';
-import type { ParseProgress } from '../../../components/YamlIOModal';
+import YamlIOModal from '@yanet/core/components/YamlIOModal';
+import type { ParseProgress } from '@yanet/core/components/YamlIOModal';
 import YamlImportWorker from './yamlImport.worker.ts?worker';
 
 /** Worker message types sent from worker to main thread. */

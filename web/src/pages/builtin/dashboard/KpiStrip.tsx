@@ -1,5 +1,5 @@
 import React from 'react';
-import type { InstanceInfo } from '../../../api/inspect';
+import type { InstanceInfo } from '@yanet/core/api/inspect';
 
 export interface KpiStripProps {
     instance: InstanceInfo;

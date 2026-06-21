@@ -1,9 +1,9 @@
 import React, { useMemo } from 'react';
 import type { FIBRowItem } from './types';
 import { validateRow } from './validation';
-import { VirtualDraftTable, LEADING_TOTAL_WIDTH } from '../../../components/VirtualTable';
-import type { RemovedColumnDescriptor, TableColumnHeader, RowStatus, VirtualDraftTableBaseProps } from '../../../components/VirtualTable';
-import { DraftActionButtons } from '../../../components/draft';
+import { VirtualDraftTable, LEADING_TOTAL_WIDTH } from '@yanet/core/components/VirtualTable';
+import type { RemovedColumnDescriptor, TableColumnHeader, RowStatus, VirtualDraftTableBaseProps } from '@yanet/core/components/VirtualTable';
+import { DraftActionButtons } from '@yanet/core/components/draft';
 
 const COLUMN_WIDTHS = {
     prefix: 220,

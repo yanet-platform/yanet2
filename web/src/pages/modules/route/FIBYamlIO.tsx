@@ -1,7 +1,7 @@
 import React from 'react';
 import type { FIBRowItem } from './types';
 import { rowsToYaml, yamlToRows } from './yaml';
-import DraftYamlIO from '../../../components/DraftYamlIO';
+import DraftYamlIO from '@yanet/core/components/DraftYamlIO';
 
 interface FIBYamlIOProps {
     configName: string;

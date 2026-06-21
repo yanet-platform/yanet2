@@ -1,6 +1,6 @@
-import type { Route } from '../../../api/routes';
-import { parseCIDRPrefix, parseIPAddress, CIDRParseError, IPParseError } from '../../../utils';
-import { ipAddressToString, type IPAddressWire } from '../../../utils/netip';
+import type { Route } from '@yanet/core/api/routes';
+import { parseCIDRPrefix, parseIPAddress, CIDRParseError, IPParseError } from '@yanet/core/utils';
+import { ipAddressToString, type IPAddressWire } from '@yanet/core/utils/netip';
 import type { RouteSortableColumn, IPFamily } from './types';
 
 export interface RouteSubmitParams {

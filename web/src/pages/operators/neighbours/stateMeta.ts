@@ -1,4 +1,4 @@
-import { NUD_STATE_MAP } from '../../../utils/nud';
+import { NUD_STATE_MAP } from '@yanet/core/utils/nud';
 
 /** Metadata for a single NUD state — descriptions and action guidance. */
 export interface StateMetaEntry {

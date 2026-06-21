@@ -14,17 +14,17 @@ import {
 } from '@gravity-ui/uikit';
 import { CircleInfo, Plus } from '@gravity-ui/icons';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { useConfigListCache, useSearchParamHelpers, usePageContribution, useContainerHeight, useTabCycle, useUnsavedChangesBlocker } from '../../../hooks';
-import { API } from '../../../api';
-import { Direction, type FwStateEntry, type ListEntriesRequest, type MapStats } from '../../../api/fwstate';
-import { ConfirmDialog, ConfigTabStrip, PageLayout, PageLoader, EmptyPagePlaceholder } from '../../../components';
-import { ipAddressToString, isValidIPAddress, parseIPToBytes, stringToIPAddress, type IPAddressWire } from '../../../utils/netip';
-import { parseMACToBytes } from '../../../utils/mac';
-import { formatBytes, toaster, compareNatural } from '../../../utils';
-import { AddConfigModal, DeleteConfigModal, CommandPaletteHeader } from '../../../components';
-import { SaveIcon, TrashIcon } from '../../../components/draft';
-import type { Command, PagePaletteContribution } from '../../../components/command-palette';
-import '../../../styles/chrome.scss';
+import { useConfigListCache, useSearchParamHelpers, usePageContribution, useContainerHeight, useTabCycle, useUnsavedChangesBlocker } from '@yanet/core/hooks';
+import { API } from '@yanet/core/api';
+import { Direction, type FwStateEntry, type ListEntriesRequest, type MapStats } from '@yanet/core/api/fwstate';
+import { ConfirmDialog, ConfigTabStrip, PageLayout, PageLoader, EmptyPagePlaceholder } from '@yanet/core/components';
+import { ipAddressToString, isValidIPAddress, parseIPToBytes, stringToIPAddress, type IPAddressWire } from '@yanet/core/utils/netip';
+import { parseMACToBytes } from '@yanet/core/utils/mac';
+import { formatBytes, toaster, compareNatural } from '@yanet/core/utils';
+import { AddConfigModal, DeleteConfigModal, CommandPaletteHeader } from '@yanet/core/components';
+import { SaveIcon, TrashIcon } from '@yanet/core/components/draft';
+import type { Command, PagePaletteContribution } from '@yanet/core/components/command-palette';
+import '@yanet/core/styles/chrome.scss';
 import './fwstate.scss';
 
 interface DraftConfig {

@@ -1,10 +1,10 @@
 import React from 'react';
 import { IconPlain, IconVlan } from './components/Icons';
 import { MiniSpark } from './components/MiniSpark';
-import { formatPps } from '../../../utils';
+import { formatPps } from '@yanet/core/utils';
 import type { LocalDevice } from './types';
-import type { CounterHistoryEntry } from '../../../hooks/useCounterHistory';
-import type { DeviceCounterData } from '../../../hooks/useDeviceCounters';
+import type { CounterHistoryEntry } from '@yanet/core/hooks/useCounterHistory';
+import type { DeviceCounterData } from '@yanet/core/hooks/useDeviceCounters';
 
 export interface DeviceListItemProps {
     device: LocalDevice;

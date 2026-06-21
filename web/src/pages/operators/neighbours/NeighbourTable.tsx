@@ -1,17 +1,17 @@
 import React from 'react';
 import { Pencil, TrashBin } from '@gravity-ui/icons';
 import { Tooltip } from '@gravity-ui/uikit';
-import { DotBadge } from '../../../components/VirtualTable';
-import type { Neighbour, NeighbourTableInfo } from '../../../api/neighbours';
-import { formatUnixSeconds } from '../../../utils';
-import { ipAddressToString } from '../../../utils/netip';
+import { DotBadge } from '@yanet/core/components/VirtualTable';
+import type { Neighbour, NeighbourTableInfo } from '@yanet/core/api/neighbours';
+import { formatUnixSeconds } from '@yanet/core/utils';
+import { ipAddressToString } from '@yanet/core/utils/netip';
 import { getNeighbourId } from './utils';
 import { nudStateToName, getStateMeta } from './stateMeta';
 import { getMergeDebug } from './mergeDebug';
 import type { SortableColumn, SortState } from './types';
-import { VirtualTable } from '../../../components/VirtualTable';
-import type { Column, SortState as VTSortState } from '../../../components/VirtualTable';
-import { FamilyBadge } from '../../../components/VirtualTable';
+import { VirtualTable } from '@yanet/core/components/VirtualTable';
+import type { Column, SortState as VTSortState } from '@yanet/core/components/VirtualTable';
+import { FamilyBadge } from '@yanet/core/components/VirtualTable';
 
 const NEIGH_MIN_WIDTH = 1256;
 

@@ -1,4 +1,4 @@
-import { dumpYamlDoc, parseYamlList } from '../../../utils';
+import { dumpYamlDoc, parseYamlList } from '@yanet/core/utils';
 import type { FIBRowItem } from './types';
 
 /** Single-config YAML shape: { config, routes: [...] }. Mirrors Forward's envelope style. */

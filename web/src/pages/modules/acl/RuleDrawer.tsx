@@ -1,14 +1,14 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { useDrawerFlush, useDrawerKeyboard } from '../../../hooks';
-import { ActionKind, ACTION_KIND_LABELS } from '../../../api/acl';
-import { TrashIcon, RuleDrawerHeadActions, RuleDrawerFootActions, ruleDrawerFootMeta } from '../../../components/draft';
+import { useDrawerFlush, useDrawerKeyboard } from '@yanet/core/hooks';
+import { ActionKind, ACTION_KIND_LABELS } from '@yanet/core/api/acl';
+import { TrashIcon, RuleDrawerHeadActions, RuleDrawerFootActions, ruleDrawerFootMeta } from '@yanet/core/components/draft';
 import type { RuleDraft, RuleItem } from './types';
 import { emptyDraft } from './types';
 import { itemToDraft, defaultCounterName, draftToRule, expandRule, deadReasonText } from './hooks';
-import { isValidCidr, isValidDeviceName } from '../../../utils';
+import { isValidCidr, isValidDeviceName } from '@yanet/core/utils';
 import ChipInput from './ChipInput';
 import type { ChipInputHandle } from './ChipInput';
-import { DrawerShell } from '../../../components';
+import { DrawerShell } from '@yanet/core/components';
 
 /** Insert any-wildcard CIDRs that aren't already in the chip list. */
 const addWildcards = (cidrs: string[]): string[] => {

@@ -6,7 +6,7 @@ import { toaster } from '@gravity-ui/uikit/toaster-singleton';
 import App from './App';
 import '@gravity-ui/uikit/styles/fonts.css';
 import '@gravity-ui/uikit/styles/styles.css';
-import './styles/tokens.scss';
+import '@yanet/core/styles/tokens.scss';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
     <React.StrictMode>

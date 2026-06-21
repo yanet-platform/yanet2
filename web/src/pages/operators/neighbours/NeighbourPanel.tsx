@@ -1,11 +1,11 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Bulb, CircleInfo, Layers } from '@gravity-ui/icons';
 import { Select } from '@gravity-ui/uikit';
-import { useDrawerKeyboard } from '../../../hooks';
-import { DotBadge } from '../../../components/VirtualTable';
-import { ipAddressToString, stringToIPAddress } from '../../../utils/netip';
-import { formatUnixSeconds } from '../../../utils';
-import type { Neighbour, NeighbourTableInfo } from '../../../api/neighbours';
+import { useDrawerKeyboard } from '@yanet/core/hooks';
+import { DotBadge } from '@yanet/core/components/VirtualTable';
+import { ipAddressToString, stringToIPAddress } from '@yanet/core/utils/netip';
+import { formatUnixSeconds } from '@yanet/core/utils';
+import type { Neighbour, NeighbourTableInfo } from '@yanet/core/api/neighbours';
 import { validateMAC, validateNextHop, resolveSubmitTable } from './utils';
 import { nudStateToName, getStateMeta } from './stateMeta';
 import { getMergeDebug } from './mergeDebug';

@@ -1,10 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { toaster } from '../../../utils';
-import { API } from '../../../api';
-import type { InstanceInfo } from '../../../api/inspect';
-import { PageLayout, PageLoader, EmptyState, CommandPaletteHeader } from '../../../components';
-import type { Command, PagePaletteContribution } from '../../../components/command-palette';
-import { usePageContribution } from '../../../hooks';
+import { toaster } from '@yanet/core/utils';
+import { API } from '@yanet/core/api';
+import type { InstanceInfo } from '@yanet/core/api/inspect';
+import { PageLayout, PageLoader, EmptyState, CommandPaletteHeader } from '@yanet/core/components';
+import type { Command, PagePaletteContribution } from '@yanet/core/components/command-palette';
+import { usePageContribution } from '@yanet/core/hooks';
 import { InspectPageFooter } from './InspectPageFooter';
 import { InstanceCard } from './InstanceCard';
 import './inspect.scss';

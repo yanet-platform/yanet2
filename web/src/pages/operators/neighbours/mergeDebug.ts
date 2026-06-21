@@ -1,5 +1,5 @@
-import type { Neighbour, NeighbourTableInfo } from '../../../api/neighbours';
-import { ipAddressToString } from '../../../utils/netip';
+import type { Neighbour, NeighbourTableInfo } from '@yanet/core/api/neighbours';
+import { ipAddressToString } from '@yanet/core/utils/netip';
 
 const ZERO_MAC = '00:00:00:00:00:00';
 

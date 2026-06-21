@@ -1,7 +1,7 @@
 import React from 'react';
 import type { LocalDevice } from '../types';
-import { SaveDiffModal } from '../../../../components';
-import { dumpYamlDoc } from '../../../../utils';
+import { SaveDiffModal } from '@yanet/core/components';
+import { dumpYamlDoc } from '@yanet/core/utils';
 
 export interface DeviceDiffModalProps {
     device: LocalDevice;

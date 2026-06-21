@@ -1,5 +1,5 @@
 import React from 'react';
-import type { DeviceCounterData } from '../../../hooks';
+import type { DeviceCounterData } from '@yanet/core/hooks';
 import { useAggregateThroughput, useRollingSeries } from '../inspect/hooks';
 import { Sparkline } from '../inspect/Sparkline';
 import { fmtBps, fmtPps } from '../inspect/formatters';

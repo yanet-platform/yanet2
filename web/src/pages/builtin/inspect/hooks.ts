@@ -1,10 +1,10 @@
 import { useMemo } from 'react';
-import { API } from '../../../api';
-import type { CounterTag } from '../../../api/counters';
-import type { DeviceCounterData } from '../../../hooks';
-import { useInterpolatedCounters } from '../../../hooks/useInterpolatedCounters';
-import { useRollingWindow } from '../../../hooks/useRollingWindow';
-import { groupCounterGroupsByTagsAndName, makeGroupedCounterKey } from '../../../utils';
+import { API } from '@yanet/core/api';
+import type { CounterTag } from '@yanet/core/api/counters';
+import type { DeviceCounterData } from '@yanet/core/hooks';
+import { useInterpolatedCounters } from '@yanet/core/hooks/useInterpolatedCounters';
+import { useRollingWindow } from '@yanet/core/hooks/useRollingWindow';
+import { groupCounterGroupsByTagsAndName, makeGroupedCounterKey } from '@yanet/core/utils';
 
 /**
  * Aggregate RX packet-rate and bit-rate across physical devices only.

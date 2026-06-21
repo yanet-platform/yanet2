@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import { API } from '../../../../api';
+import { API } from '@yanet/core/api';
 import type { NetworkFunction, FunctionsAction } from '../types';
 import { functionsReducer, initialState } from '../reducer';
 import { apiToLocal, localToApi } from '../wire';

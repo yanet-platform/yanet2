@@ -1,4 +1,4 @@
-import type { Rule, ActionKind } from '../../../api/acl';
+import type { Rule, ActionKind } from '@yanet/core/api/acl';
 
 export type { Rule, ActionKind };
 

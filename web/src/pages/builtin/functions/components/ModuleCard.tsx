@@ -3,8 +3,8 @@ import type { Module, DragPayload } from '../types';
 import { metaFor } from '../moduleMeta';
 import { InlineEdit } from './InlineEdit';
 import { Sparkline, useSparklineHistory } from '../../_shared/lane-editor';
-import { formatPps } from '../../../../utils';
-import type { InterpolatedCounterData } from '../../../../hooks';
+import { formatPps } from '@yanet/core/utils';
+import type { InterpolatedCounterData } from '@yanet/core/hooks';
 
 interface ModuleCardProps {
     module: Module;

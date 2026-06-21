@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useMemo } from 'react';
 import * as THREE from 'three';
-import type { InstanceInfo } from '../../../api/inspect';
-import type { DeviceCounterData, DeviceAbsoluteData } from '../../../hooks';
+import type { InstanceInfo } from '@yanet/core/api/inspect';
+import type { DeviceCounterData, DeviceAbsoluteData } from '@yanet/core/hooks';
 import { usePipelineCounters, useFunctionCounters, useDeviceTrendSeries } from '../inspect/hooks';
 import { fmtPps } from '../inspect/formatters';
 import { Inspector } from './Inspector';

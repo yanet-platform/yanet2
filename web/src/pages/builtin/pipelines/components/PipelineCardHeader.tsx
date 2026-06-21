@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import type { Pipeline } from '../types';
 import { Sparkline, formatPps, LaneStat, LaneCardActions, LaneCollapseButton } from '../../_shared/lane-editor';
-import { EntityConfirmDialogs } from '../../../../components';
+import { EntityConfirmDialogs } from '@yanet/core/components';
 
 interface PipelineCardHeaderProps {
     pipeline: Pipeline;

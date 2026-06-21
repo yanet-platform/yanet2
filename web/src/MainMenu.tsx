@@ -3,11 +3,11 @@ import { useNavigate } from 'react-router-dom';
 import { AsideHeader, FooterItem } from '@gravity-ui/navigation';
 import type { MenuItem as AsideHeaderMenuItem } from '@gravity-ui/navigation';
 import { Server } from '@gravity-ui/icons';
-import Logo from './icons/Logo';
+import Logo from '@yanet/core/icons/Logo';
 import type { PageId } from './types';
 import { navItems } from './navItems';
 import type { NavSection } from './navItems';
-import { useGateways } from './gateways';
+import { useGateways } from '@yanet/core/gateways';
 import './MainMenu.scss';
 
 interface MainMenuProps {

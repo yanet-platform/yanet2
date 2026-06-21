@@ -1,5 +1,5 @@
 import React from 'react';
-import { ConfirmModal } from '../../../components';
+import { ConfirmModal } from '@yanet/core/components';
 
 interface DeleteConfigDialogProps {
     name: string;

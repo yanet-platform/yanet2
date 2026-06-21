@@ -1,5 +1,5 @@
-@use '../../../styles/variables' as *;
-@use '../../../styles/mixins' as *;
+@use '@yanet/core/styles/variables' as *;
+@use '@yanet/core/styles/mixins' as *;
 
 // Live tab dot — pulsing green indicator for the streaming config tab.
 .yn-tab__dot--live {

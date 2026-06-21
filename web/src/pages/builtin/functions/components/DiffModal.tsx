@@ -1,8 +1,8 @@
 import React from 'react';
 import type { NetworkFunction } from '../types';
 import { localToApi } from '../wire';
-import { EntityDiffModal } from '../../../../components';
-import { dumpYamlDoc } from '../../../../utils';
+import { EntityDiffModal } from '@yanet/core/components';
+import { dumpYamlDoc } from '@yanet/core/utils';
 
 interface DiffModalProps {
     fn: NetworkFunction;

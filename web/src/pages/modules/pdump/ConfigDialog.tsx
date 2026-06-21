@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { pdumpApi, parseModeFlags, modeFlagsToNumber, type PdumpConfig } from '../../../api/pdump';
-import { toaster } from '../../../utils';
+import { pdumpApi, parseModeFlags, modeFlagsToNumber, type PdumpConfig } from '@yanet/core/api/pdump';
+import { toaster } from '@yanet/core/utils';
 import BpfTokens from './BpfTokens';
 import PdumpModal from './PdumpModal';
 import { loadRecentFilters, pushRecentFilter } from './recentFilters';

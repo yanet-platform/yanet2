@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useReducer, useState } from 'react';
-import { API } from '../../../api';
-import { useConfigListCache } from '../../../hooks';
-import { toaster, compareNatural } from '../../../utils';
-import type { Rule } from '../../../api/acl';
+import { API } from '@yanet/core/api';
+import { useConfigListCache } from '@yanet/core/hooks';
+import { toaster, compareNatural } from '@yanet/core/utils';
+import type { Rule } from '@yanet/core/api/acl';
 import {
     aclDraftReducer,
     initialAclDraftState,
 } from './draftReducer';
 import type { AclDraftAction } from './draftReducer';
-import { useConfigPersistence, type ConfigPersistenceDispatch } from '../../../components/draft/useConfigPersistence';
+import { useConfigPersistence, type ConfigPersistenceDispatch } from '@yanet/core/components/draft/useConfigPersistence';
 
 const EMPTY_RULES: Rule[] = [];
 const EMPTY_IDS: string[] = [];

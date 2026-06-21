@@ -1,5 +1,5 @@
 import React from 'react';
-import type { InstanceInfo } from '../../../api/inspect';
+import type { InstanceInfo } from '@yanet/core/api/inspect';
 import type { AgentUsage } from '../inspect/utils';
 import { ModuleCardsGrid, type ModuleCardsChrome } from '../inspect/ModuleCardsGrid';
 

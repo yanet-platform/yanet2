@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useMemo } from 'react';
-import { useInterpolatedCounterMap } from '../../../../hooks';
+import { useInterpolatedCounterMap } from '@yanet/core/hooks';
 import type { Pipeline, PipelinesAction, DragPayload, FunctionRef } from '../types';
 import { useFunctionRefCounters, type FunctionRefInfo, PIPELINE_COUNTER_KEY } from '../hooks/useFunctionRefCounters';
 import { getDragPayload, useSparklineHistory } from '../../_shared/lane-editor';
@@ -7,7 +7,7 @@ import { PipelineCardHeader } from './PipelineCardHeader';
 import { LaneTrack } from './LaneTrack';
 import { Drawer } from './Drawer';
 import { DiffModal } from './DiffModal';
-import type { FunctionId } from '../../../../api/pipelines';
+import type { FunctionId } from '@yanet/core/api/pipelines';
 import type { DragState } from '../../_shared/lane-editor';
 
 interface PipelineCardProps {

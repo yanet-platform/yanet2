@@ -2,9 +2,9 @@ import React, { useCallback, useEffect, useState } from 'react';
 import type { FunctionRef } from '../types';
 import { useSparklineHistory, LaneDrawerShell, DrawerAction, DrawerCounterSection } from '../../_shared/lane-editor';
 import { CloseIcon, TrashIcon } from '../../_shared/icons';
-import { ConfirmDialog } from '../../../../components';
-import type { InterpolatedCounterData } from '../../../../hooks';
-import type { FunctionId } from '../../../../api/pipelines';
+import { ConfirmDialog } from '@yanet/core/components';
+import type { InterpolatedCounterData } from '@yanet/core/hooks';
+import type { FunctionId } from '@yanet/core/api/pipelines';
 
 interface DrawerProps {
     ref_: FunctionRef;

@@ -1,5 +1,5 @@
 import type { NetworkFunction, Chain, Module } from './types';
-import type { Function as APIFunction, FunctionChain, ModuleId } from '../../../api/functions';
+import type { Function as APIFunction, FunctionChain, ModuleId } from '@yanet/core/api/functions';
 
 /** Synthesize a stable chain id from function/chain names and position. */
 const makeChainId = (fnName: string, chainName: string, chainIdx: number): string =>

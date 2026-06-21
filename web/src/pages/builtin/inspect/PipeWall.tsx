@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import type { InstanceInfo } from '../../../api/inspect';
+import type { InstanceInfo } from '@yanet/core/api/inspect';
 import { usePipelineCounters } from './hooks';
 import { PipelineRow } from './PipelineRow';
 

@@ -1,4 +1,4 @@
-import { dumpYamlDoc, parseYamlList } from '../../../utils';
+import { dumpYamlDoc, parseYamlList } from '@yanet/core/utils';
 import type { PrefixRowItem } from './types';
 
 interface DecapYamlDoc {

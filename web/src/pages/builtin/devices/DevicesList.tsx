@@ -2,8 +2,8 @@ import React, { useMemo } from 'react';
 import { DeviceListItem } from './DeviceListItem';
 import { IconStack } from './components/Icons';
 import type { LocalDevice } from './types';
-import type { CounterHistoryEntry } from '../../../hooks/useCounterHistory';
-import type { DeviceCounterData } from '../../../hooks/useDeviceCounters';
+import type { CounterHistoryEntry } from '@yanet/core/hooks/useCounterHistory';
+import type { DeviceCounterData } from '@yanet/core/hooks/useDeviceCounters';
 
 export type FilterKind = 'all' | 'plain' | 'vlan';
 type GroupingMode = 'flat' | 'type' | 'parent';

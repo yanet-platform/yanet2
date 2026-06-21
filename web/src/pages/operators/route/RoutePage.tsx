@@ -1,23 +1,23 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { Button, Icon } from '@gravity-ui/uikit';
 import { ArrowRightToLine, Funnel, Plus } from '@gravity-ui/icons';
-import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, SearchInput, EmptyPagePlaceholder, RowCountDisplay } from '../../../components';
-import { AddConfigModal } from '../../../components';
-import { BulkDeleteModal, CommandPaletteHeader } from '../../../components';
-import type { Command, RowAdapter, ShortcutSection, PagePaletteContribution } from '../../../components/command-palette';
-import { useListNavigation, usePageContribution, useTabCycle } from '../../../hooks';
-import { API } from '../../../api';
-import { toaster, parseIPAddress } from '../../../utils';
-import { stringToIPAddress, ipAddressToString, type IPAddressWire } from '../../../utils/netip';
-import { RouteSourceID, type Route } from '../../../api/routes';
+import { PageLayout, PageLoader, ConfigTabStrip, BulkBar, SearchInput, EmptyPagePlaceholder, RowCountDisplay } from '@yanet/core/components';
+import { AddConfigModal } from '@yanet/core/components';
+import { BulkDeleteModal, CommandPaletteHeader } from '@yanet/core/components';
+import type { Command, RowAdapter, ShortcutSection, PagePaletteContribution } from '@yanet/core/components/command-palette';
+import { useListNavigation, usePageContribution, useTabCycle } from '@yanet/core/hooks';
+import { API } from '@yanet/core/api';
+import { toaster, parseIPAddress } from '@yanet/core/utils';
+import { stringToIPAddress, ipAddressToString, type IPAddressWire } from '@yanet/core/utils/netip';
+import { RouteSourceID, type Route } from '@yanet/core/api/routes';
 import { useRIB } from './useRIB';
 import { RIBTable } from './RIBTable';
 import RouteDrawer from './RouteDrawer';
 import LookupDrawer from './LookupDrawer';
 import { getRouteId, sortComparators, planRouteSubmit, groupByPrefix, filterByFamily } from './utils';
 import type { RouteSortState, RouteSortableColumn, IPFamily } from './types';
-import { FamilyFilter } from '../../../components/VirtualTable';
-import '../../../styles/chrome.scss';
+import { FamilyFilter } from '@yanet/core/components/VirtualTable';
+import '@yanet/core/styles/chrome.scss';
 import './route.scss';
 
 const RoutePage: React.FC = () => {

@@ -1,9 +1,9 @@
 import React from 'react';
 import type { PrefixRowItem, PrefixRowErrors } from './types';
 import { validateRow } from './validation';
-import { DraftItemDrawer } from '../../../components/draft';
-import { CidrPrefixField } from '../../../components';
-import { useRowDraft } from '../../../hooks';
+import { DraftItemDrawer } from '@yanet/core/components/draft';
+import { CidrPrefixField } from '@yanet/core/components';
+import { useRowDraft } from '@yanet/core/hooks';
 
 interface PrefixDrawerProps {
     open: boolean;
