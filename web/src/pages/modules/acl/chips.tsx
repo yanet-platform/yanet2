@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import type { Action } from '@yanet/core/api/acl';
 import { ActionKind, ACTION_KIND_LABELS } from '@yanet/core/api/acl';
 import { toaster, copyToClipboard } from '@yanet/core/utils';
-import { getProtocolTone, IpAddressChip, ProtoChip as SharedProtoChip } from '../_shared/chips';
+import { getProtocolTone, IpAddressChip, ProtoChip as SharedProtoChip } from '@yanet/core/components/chips';
 
 // Protocol names per IANA IP protocol number.
 const IP_PROTOS: Record<number, string> = {

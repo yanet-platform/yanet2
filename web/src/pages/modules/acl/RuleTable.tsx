@@ -14,7 +14,7 @@ import {
 } from './chips';
 import { ruleTableCommonProps } from '@yanet/core/components/draft';
 import type { RuleRate } from './useAclRuleCounters';
-import Sparkline from '../_shared/Sparkline';
+import Sparkline from '@yanet/core/components/Sparkline';
 import { VirtualTable, type Column } from '@yanet/core/components/VirtualTable';
 
 const COLUMN_WIDTHS = {

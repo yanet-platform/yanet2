@@ -3,7 +3,7 @@ import type { RuleItem } from './types';
 import type { RuleRate } from './useForwardRuleCounters';
 import DirectionBadge from './DirectionBadge';
 import AnyBadge from './AnyBadge';
-import Sparkline from '../_shared/Sparkline';
+import Sparkline from '@yanet/core/components/Sparkline';
 import { formatPps } from '@yanet/core/utils';
 import { ruleTableCommonProps } from '@yanet/core/components/draft';
 import { VirtualTable, type Column } from '@yanet/core/components/VirtualTable';

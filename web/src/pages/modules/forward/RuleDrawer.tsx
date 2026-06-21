@@ -8,7 +8,7 @@ import { itemToDraft } from './hooks';
 import { isValidCidr, isValidDeviceName, formatPps } from '@yanet/core/utils';
 import ChipInput from './ChipInput';
 import type { ChipInputHandle } from './ChipInput';
-import Sparkline from '../_shared/Sparkline';
+import Sparkline from '@yanet/core/components/Sparkline';
 import type { RuleRate } from './useForwardRuleCounters';
 import { DrawerShell } from '@yanet/core/components';
 import { RuleDrawerHeadActions, RuleDrawerFootActions, ruleDrawerFootMeta } from '@yanet/core/components/draft';
