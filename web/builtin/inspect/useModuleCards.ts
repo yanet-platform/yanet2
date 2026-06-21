@@ -1,10 +1,10 @@
 import { useMemo } from 'react';
-import type { InstanceInfo } from '../api/inspect';
+import type { InstanceInfo } from '@yanet/core/api/inspect';
 import {
     computeModulePipelineUsage,
     getModuleDescription,
     normalizeModuleName,
-} from '../../pages/builtin/inspect/utils';
+} from './utils';
 
 export interface ModuleCardData {
     key: string;

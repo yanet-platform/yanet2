@@ -5,7 +5,7 @@ import { fmtIEC } from './formatters';
 import { MemoryBar } from './MemoryBar';
 import { getModuleCardAgentUsage, getModuleRoute } from './utils';
 import type { AgentUsage } from './utils';
-import { useModuleCards } from '@yanet/core/hooks/useModuleCards';
+import { useModuleCards } from './useModuleCards';
 
 /** Visual knobs that differ between the inspect and dashboard renderings. */
 export interface ModuleCardsChrome {

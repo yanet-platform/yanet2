@@ -9,7 +9,7 @@ const SECTION_ORDER: Record<NavSection, number> = {
 
 const discovered = import.meta.glob<PageManifest>(
     [
-        './pages/**/manifest.ts',
+        '../builtin/*/manifest.ts',
         '../../modules/*/web/manifest.ts',
         '../../devices/*/web/manifest.ts',
         '../../operators/*/web/manifest.ts',
@@ -17,7 +17,7 @@ const discovered = import.meta.glob<PageManifest>(
     { eager: true, import: 'manifest' },
 );
 
-/** All page manifests discovered under pages/, ordered for the sidebar. */
+/** All page manifests discovered across the web roots, ordered for the sidebar. */
 export const manifests: PageManifest[] = Object.values(discovered).sort((a, b) => {
     const bySection = SECTION_ORDER[a.section] - SECTION_ORDER[b.section];
     return bySection !== 0 ? bySection : a.navOrder - b.navOrder;
