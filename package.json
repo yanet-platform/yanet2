@@ -1,0 +1,7 @@
+{
+    "name": "yanet2",
+    "private": true,
+    "workspaces": [
+        "web"
+    ]
+}

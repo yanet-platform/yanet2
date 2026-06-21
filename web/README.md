@@ -4,26 +4,27 @@ Web interface for YANET2 built with React and Gravity UI.
 
 ## Development
 
-Install dependencies:
+The web UI is an npm workspace, so dependencies install from the repository
+root (a single hoisted `node_modules`):
 
 ```bash
 npm install
 ```
 
-Run development server:
+Run the development server (from the repo root, or `cd web` and drop the flag):
 
 ```bash
-npm run dev
+npm run dev -w web
 ```
 
 The development server will run on `http://localhost:3000` and proxy API requests to the backend.
 
 ## Build
 
-Build for production:
+Build for production (from the repo root, or `cd web` and drop the flag):
 
 ```bash
-npm run build
+npm run build -w web
 ```
 
-The built files will be in the `dist/` directory and will be served by the HTTP gateway.
+The built files will be in the `web/dist/` directory and will be served by the HTTP gateway.

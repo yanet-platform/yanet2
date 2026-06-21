@@ -5,11 +5,21 @@ on:
     branches: ["main"]
     paths:
       - "web/**"
+      - "modules/**/web/**"
+      - "devices/**/web/**"
+      - "operators/**/web/**"
+      - "package.json"
+      - "package-lock.json"
       - ".github/workflows/web-check.yml"
   pull_request:
     branches: ["main"]
     paths:
       - "web/**"
+      - "modules/**/web/**"
+      - "devices/**/web/**"
+      - "operators/**/web/**"
+      - "package.json"
+      - "package-lock.json"
       - ".github/workflows/web-check.yml"
 
 jobs:
@@ -22,8 +32,6 @@ jobs:
         with:
           node-version: 22
           cache: 'npm'
-          cache-dependency-path: 'web/package-lock.json'
+          cache-dependency-path: 'package-lock.json'
       - run: npm ci
-        working-directory: web
-      - run: npm run test
-        working-directory: web
+      - run: npm run test -w web

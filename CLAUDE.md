@@ -25,7 +25,7 @@ make all                      # builds dataplane + CLI
 make dataplane                # meson compile -C build
 make cli                      # cargo build --release --workspace
 cd controlplane && go build ./...
-cd web && npm install && npm run build
+npm ci && npm run build -w web   # web is an npm workspace; install at repo root
 
 # Debug/sanitizer builds
 make setup-debug              # debug build without sanitizers
