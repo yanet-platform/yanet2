@@ -12,6 +12,13 @@ export * from './forward';
 export { fwstate } from './fwstate';
 export * from './counters';
 
+// Several module clients each declare their own ShowConfigRequest /
+// ShowConfigResponse / Device; re-export one explicitly so the barrel is
+// unambiguous. Consumers that need a specific module's shape import it from
+// that module's subpath rather than this barrel.
+export type { ShowConfigRequest, ShowConfigResponse } from './decap';
+export type { Device } from './devices';
+
 import { neighbours } from './neighbours';
 import { inspect } from './inspect';
 import { route, routeOperator } from './routes';

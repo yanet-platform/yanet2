@@ -175,7 +175,6 @@ export const computeAgentUsage = (instance: InstanceInfo): Map<string, AgentUsag
             if (g > maxGen) maxGen = g;
         }
         const used = Math.max(0, limit - free);
-        const pct = limit > 0 ? used / limit : 0;
 
         const prev = result.get(resultName);
         result.set(resultName, {

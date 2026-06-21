@@ -28,7 +28,11 @@
         "noFallthroughCasesInSwitch": true
     },
     "include": [
-        "src"
+        "src",
+        "builtin",
+        "../modules/*/web",
+        "../devices/*/web",
+        "../operators/*/web"
     ],
     "references": [
         {
