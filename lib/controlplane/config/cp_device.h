@@ -22,6 +22,18 @@ struct cp_device_entry {
 	struct cp_device_pipeline pipelines[];
 };
 
+// Maximum number of subclass-owned auxiliary allocations a device may attach.
+#define CP_DEVICE_AUX_MAX 8
+
+// One subclass-owned allocation living in a device's memory_context.
+//
+// Held as an offset pointer and a size — never a function pointer — so the
+// teardown is safe to run from any process and across restarts.
+struct cp_device_aux {
+	void *ptr;
+	uint64_t size;
+};
+
 struct cp_device {
 	// Offset pointer to the memory_context used to allocate this struct.
 	//
@@ -59,6 +71,14 @@ struct cp_device {
 	uint64_t counter_packet_tx_count;
 	uint64_t counter_packet_rx_bytes;
 	uint64_t counter_packet_tx_bytes;
+
+	// Subclass-owned allocations in memory_context, reclaimed by
+	// cp_device_fini.
+	//
+	// Lets a device subclass (e.g. trafgen) attach extra shared-memory
+	// buffers without a type-specific destructor.
+	uint64_t aux_count;
+	struct cp_device_aux aux[CP_DEVICE_AUX_MAX];
 };
 
 struct dp_config;
@@ -126,9 +146,17 @@ cp_device_init(
 
 // Tear down resources acquired by cp_device_init.
 //
-// Idempotent on zero-init.
+// Reclaims the device's tracked auxiliary allocations, then its base
+// resources. Idempotent on zero-init.
 void
 cp_device_fini(struct cp_device *self);
+
+// Track a subclass allocation so cp_device_fini reclaims it.
+//
+// ptr must be allocated from self->memory_context. Returns -1 if the device
+// already holds CP_DEVICE_AUX_MAX allocations.
+int
+cp_device_track_aux(struct cp_device *self, void *ptr, uint64_t size);
 
 /*
  * Pipeline registry contains all existing devices.

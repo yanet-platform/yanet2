@@ -273,9 +273,33 @@ cp_device_entry_free(
 	);
 }
 
+int
+cp_device_track_aux(struct cp_device *self, void *ptr, uint64_t size) {
+	if (self->aux_count >= CP_DEVICE_AUX_MAX) {
+		return -1;
+	}
+
+	struct cp_device_aux *aux = self->aux + self->aux_count;
+	SET_OFFSET_OF(&aux->ptr, ptr);
+	aux->size = size;
+	self->aux_count += 1;
+
+	return 0;
+}
+
 void
 cp_device_fini(struct cp_device *self) {
 	struct memory_context *memory_context = &self->memory_context;
+
+	// Reclaim subclass-owned allocations before the sub-context is
+	// unlinked.
+	for (uint64_t idx = 0; idx < self->aux_count; ++idx) {
+		void *ptr = ADDR_OF(&self->aux[idx].ptr);
+		if (ptr != NULL) {
+			memory_bfree(memory_context, ptr, self->aux[idx].size);
+		}
+	}
+	self->aux_count = 0;
 
 	// Release the device's counter table.
 	counter_registry_fini(&self->counter_registry);
