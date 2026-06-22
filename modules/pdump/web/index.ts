@@ -1,6 +1,5 @@
 export * from './types';
 export * from './hooks';
-export * from './constants';
 export { ConfigDialog } from './ConfigDialog';
 export { PacketTable } from './PacketTable';
 export { default as FilterRow } from './FilterRow';

@@ -1,0 +1,324 @@
+@use '../../styles/variables' as *;
+@use '../../styles/mixins' as *;
+
+// Row-flash animation for newly arrived packets.
+@keyframes pkt-row-in {
+    from { background-color: rgba(110, 198, 140, 0.1); }
+    to   { background-color: transparent; }
+}
+
+.packet-table__row--new {
+    animation: pkt-row-in .5s ease-out forwards;
+}
+
+.packet-table__row {
+    transition: background-color 0.08s;
+}
+
+// !important overrides the per-row inline backgroundColor (stripe tint).
+.packet-table__row--selected {
+    background-color: var(--yn-accent-soft) !important;
+}
+
+// Hover must not clobber selected or new-flash states.
+.packet-table__row:not(.packet-table__row--selected):not(.packet-table__row--new):hover {
+    background-color: var(--yn-bg-hover) !important;
+}
+
+// Protocol colour badges in table cells.
+.pdump-proto-badge {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-family: var(--yn-font-mono);
+    letter-spacing: 0.03em;
+}
+
+.pdump-proto-tcp {
+    color: #6a9ed1;
+    background: rgba(106, 158, 209, 0.13);
+}
+
+.pdump-proto-udp {
+    color: #a98ad6;
+    background: rgba(169, 138, 214, 0.13);
+}
+
+.pdump-proto-icmp {
+    color: #d9a154;
+    background: rgba(217, 161, 84, 0.12);
+}
+
+.pdump-proto-arp {
+    color: #4cb685;
+    background: rgba(76, 182, 133, 0.10);
+}
+
+// Packet table chrome.
+.packet-table {
+    @include flex-column;
+    background: var(--yn-panel);
+    border: 1px solid var(--yn-line-2);
+    border-radius: var(--yn-r-lg, 10px);
+    overflow: hidden;
+
+    &__container { height: 100%; }
+
+    &__toolbar {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 0 12px;
+        border-bottom: 1px solid var(--yn-line-2);
+        background: var(--yn-panel);
+        flex-shrink: 0;
+    }
+
+    &__search { width: 280px; flex-shrink: 0; }
+
+    &__toolbar-info {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+    }
+
+    &__stats {
+        font-size: 12px;
+        color: var(--yn-text-3);
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+    }
+
+    &__live-badge {
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        padding: 2px 6px;
+        border-radius: 3px;
+        background: rgba(76, 182, 133, 0.14);
+        color: #4cb685;
+        border: 1px solid rgba(76, 182, 133, 0.28);
+
+        &--paused {
+            background: rgba(217, 161, 84, 0.12);
+            color: var(--yn-accent);
+            border-color: rgba(255, 192, 97, 0.22);
+        }
+    }
+
+    &__toolbar-actions {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-shrink: 0;
+    }
+
+    &__btn--active {
+        color: var(--yn-accent) !important;
+        border-color: rgba(255, 192, 97, 0.3) !important;
+        background: var(--yn-accent-soft) !important;
+    }
+
+    &__wrapper {
+        flex: 1;
+        @include flex-column;
+        overflow: hidden;
+        min-height: 0;
+    }
+
+    &__body {
+        overflow: auto;
+        contain: strict;
+        flex: 1;
+        user-select: none;
+        -webkit-user-select: none;
+    }
+
+    &__virtual-container { position: relative; }
+
+    &__empty {
+        padding: 40px 20px;
+        text-align: center;
+    }
+
+    &__footer {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 12px;
+        border-top: 1px solid var(--yn-line-2);
+        background: var(--yn-panel);
+        flex-shrink: 0;
+    }
+
+    &__footer-text {
+        font-size: 11px;
+        color: var(--yn-text-3);
+    }
+}
+
+// Packet table header row.
+.packet-table-header {
+    @include flex-row($spacing-sm);
+    padding: 0 $spacing-sm;
+    border-bottom: 1px solid var(--yn-line-2);
+    background: var(--yn-bg-2);
+    font-weight: $font-weight-medium;
+    box-sizing: border-box;
+    flex-shrink: 0;
+}
+
+// Flat-surface overrides: re-apply insets and strip boxed-panel chrome
+// so the packet table reads flush on the flat background.
+.yn-flat-page {
+    .packet-table {
+        background: transparent;
+        border: none;
+        border-radius: 0;
+    }
+
+    .packet-table__toolbar {
+        background: transparent;
+    }
+
+    .packet-table__footer {
+        background: transparent;
+    }
+
+    .packet-table-header {
+        background: transparent;
+    }
+}
+
+// Collapsible packet-detail sections (shared across packet inspectors).
+.pdump-section {
+    border: 1px solid var(--yn-line-2);
+    border-radius: 8px;
+    margin-bottom: 10px;
+    background: var(--yn-bg-2);
+
+    &__head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 9px 14px;
+        cursor: pointer;
+        user-select: none;
+    }
+
+    &__head-left {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    &__marker {
+        width: 8px;
+        height: 8px;
+        border-radius: 2px;
+        background: var(--yn-text-3);
+        flex-shrink: 0;
+    }
+
+    &__title {
+        font-size: 12.5px;
+        font-weight: 600;
+        color: var(--yn-text);
+    }
+
+    &__sub {
+        font-family: var(--yn-font-mono);
+        font-size: 11.5px;
+        color: var(--yn-text-3);
+    }
+
+    &__chevron {
+        color: var(--yn-text-3);
+        transition: transform 0.18s ease;
+        display: flex;
+        align-items: center;
+    }
+
+    &__body {
+        padding: 6px 14px 12px;
+    }
+
+    &--collapsed {
+        .pdump-section__body { display: none; }
+        .pdump-section__chevron { transform: rotate(-90deg); }
+    }
+
+    &--eth   .pdump-section__marker { background: var(--yn-text-3); }
+    &--vlan  .pdump-section__marker { background: #d9a154; }
+    &--ipv4  .pdump-section__marker { background: var(--g-color-text-positive); }
+    &--ipv6  .pdump-section__marker { background: var(--g-color-text-positive); }
+    &--tcp   .pdump-section__marker { background: var(--g-color-text-info); }
+    &--udp   .pdump-section__marker { background: var(--g-color-text-misc); }
+    &--icmp  .pdump-section__marker { background: #c07a45; }
+    &--meta  .pdump-section__marker { background: var(--yn-accent); }
+    &--http  .pdump-section__marker { background: var(--yn-accent); }
+}
+
+// KV rows inside sections.
+.pdump-kv-row {
+    display: grid;
+    grid-template-columns: 130px 1fr;
+    gap: 14px;
+    padding: 4px 0;
+    font-family: var(--yn-font-mono);
+    font-size: 12px;
+}
+
+.pdump-kv-k { color: var(--yn-text-3); }
+
+.pdump-kv-v {
+    color: var(--yn-text);
+    word-break: break-all;
+}
+
+.pdump-kv-flag {
+    display: inline-block;
+    padding: 0 5px;
+    border-radius: 3px;
+    background: rgba(106, 158, 209, 0.14);
+    color: var(--g-color-text-info);
+    margin-right: 4px;
+    font-size: 10.5px;
+}
+
+// Colourised hex dump component.
+.pdump-hex-dump {
+    font-family: var(--yn-font-mono);
+    font-size: 11.5px;
+    line-height: 1.55;
+    padding: 10px 0 4px;
+    color: var(--yn-text-3);
+    overflow-x: auto;
+}
+
+.pdump-hex-line {
+    display: flex;
+    gap: 16px;
+}
+
+.pdump-hex-offset { color: var(--yn-text-3); }
+.pdump-hex-bytes  { color: var(--yn-text); letter-spacing: 0.02em; }
+.pdump-hex-ascii  { color: var(--yn-text-3); }
+
+.pdump-hex-bytes {
+    .hl-eth     { color: var(--yn-text-2); background: rgba(255, 255, 255, 0.04); padding: 0 1px; border-radius: 1px; }
+    .hl-ip      { color: var(--g-color-text-positive); background: rgba(76, 182, 133, 0.12); padding: 0 1px; }
+    .hl-l4      { color: var(--g-color-text-info); background: rgba(106, 158, 209, 0.14); padding: 0 1px; }
+    .hl-payload { color: var(--yn-accent); background: rgba(217, 161, 84, 0.12); padding: 0 1px; }
+}
+
+.pdump-drawer-empty {
+    color: var(--yn-text-3);
+    font-size: 13px;
+    text-align: center;
+    padding: 40px 0;
+}

@@ -1,19 +1,21 @@
 import React from 'react';
-import { formatTCPFlags } from '@yanet/core/utils';
-import { cellStyles, TOTAL_WIDTH, ROW_HEIGHT } from './constants';
-import type { CapturedPacket } from './types';
+import { formatTCPFlags } from '../../utils';
+import { pktCellStyles, PKT_TOTAL_WIDTH, PKT_ROW_HEIGHT } from './constants';
+import type { PacketRow } from './types';
 
-export interface PacketTableRowProps {
-    packet: CapturedPacket;
+export interface SharedPacketTableRowProps {
+    packet: PacketRow;
     index: number;
     start: number;
     isSelected: boolean;
     isNew: boolean;
-    onSelect: (packet: CapturedPacket) => void;
+    onSelect: (packet: PacketRow) => void;
+    /** Whether to render the Time cell. Must match the header's showTime. */
+    showTime?: boolean;
 }
 
 const formatTime = (date: Date): string => {
-    const pad = (n: number, len: number = 2) => n.toString().padStart(len, '0');
+    const pad = (n: number, len: number = 2): string => n.toString().padStart(len, '0');
     return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}.${pad(date.getMilliseconds(), 3)}`;
 };
 
@@ -26,13 +28,14 @@ const getProtocolClass = (protocol: string): string => {
     return '';
 };
 
-const PacketTableRowImpl: React.FC<PacketTableRowProps> = ({
+const SharedPacketTableRowImpl: React.FC<SharedPacketTableRowProps> = ({
     packet,
     index,
     start,
     isSelected,
     isNew,
     onSelect,
+    showTime = true,
 }) => {
     const { parsed } = packet;
 
@@ -97,8 +100,8 @@ const PacketTableRowImpl: React.FC<PacketTableRowProps> = ({
                 top: 0,
                 left: 0,
                 width: '100%',
-                minWidth: TOTAL_WIDTH,
-                height: ROW_HEIGHT,
+                minWidth: PKT_TOTAL_WIDTH,
+                height: PKT_ROW_HEIGHT,
                 transform: `translateY(${start}px)`,
                 display: 'flex',
                 alignItems: 'center',
@@ -109,21 +112,25 @@ const PacketTableRowImpl: React.FC<PacketTableRowProps> = ({
                 cursor: 'pointer',
             }}
         >
-            <div style={cellStyles.index}>{packet.id + 1}</div>
-            <div style={cellStyles.time}>{formatTime(packet.timestamp)}</div>
-            <div style={cellStyles.source} title={src}>{src || '-'}</div>
-            <div style={cellStyles.destination} title={dst}>{dst || '-'}</div>
-            <div style={cellStyles.protocol}>
+            <div style={pktCellStyles.index}>{packet.id + 1}</div>
+            {showTime && (
+                <div style={pktCellStyles.time}>
+                    {packet.timestamp ? formatTime(packet.timestamp) : '—'}
+                </div>
+            )}
+            <div style={pktCellStyles.source} title={src}>{src || '-'}</div>
+            <div style={pktCellStyles.destination} title={dst}>{dst || '-'}</div>
+            <div style={pktCellStyles.protocol}>
                 {protocol ? (
                     <span className={`pdump-proto-badge${protoClass ? ` ${protoClass}` : ''}`}>
                         {protocol}
                     </span>
                 ) : '-'}
             </div>
-            <div style={cellStyles.length}>{parsed.raw.length}</div>
-            <div style={cellStyles.info} title={info}>{info || '-'}</div>
+            <div style={pktCellStyles.length}>{parsed.raw.length}</div>
+            <div style={pktCellStyles.info} title={info}>{info || '-'}</div>
         </div>
     );
 };
 
-export const PacketTableRow = React.memo(PacketTableRowImpl);
+export const SharedPacketTableRow = React.memo(SharedPacketTableRowImpl);

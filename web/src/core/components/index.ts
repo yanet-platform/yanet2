@@ -69,3 +69,5 @@ export { EntityDiffModal } from './EntityDiffModal';
 export type { EntityDiffModalProps } from './EntityDiffModal';
 export { DrawerShell } from './DrawerShell';
 export type { DrawerShellProps } from './DrawerShell';
+export { PacketTable, PacketInspector } from './packet';
+export type { PacketTableProps, PacketInspectorProps, PacketRow, PacketSortColumn, PacketSortDirection, PacketSortState } from './packet';

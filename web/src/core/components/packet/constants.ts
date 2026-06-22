@@ -1,33 +1,35 @@
 import type React from 'react';
 
-// Table dimensions
-export const ROW_HEIGHT = 32;
-export const HEADER_HEIGHT = 40;
-export const SEARCH_BAR_HEIGHT = 52;
-export const TOOLBAR_HEIGHT = 48;
-export const FOOTER_HEIGHT = 28;
-export const OVERSCAN = 20;
+/** Height of a single packet row in pixels. */
+export const PKT_ROW_HEIGHT = 32;
+/** Height of the column header bar in pixels. */
+export const PKT_HEADER_HEIGHT = 40;
+/** Height of the search/toolbar bar in pixels. */
+export const PKT_SEARCH_BAR_HEIGHT = 52;
+/** Height of the footer status bar in pixels. */
+export const PKT_FOOTER_HEIGHT = 28;
+/** Number of rows to render outside the visible window. */
+export const PKT_OVERSCAN = 20;
+/** Minimum total table width in pixels. */
+export const PKT_TOTAL_WIDTH = 800;
 
-// Column widths for packet table (flexible layout)
-export const COLUMN_WIDTHS = {
+/** Column widths for the shared packet table. */
+export const PKT_COLUMN_WIDTHS = {
     index: 50,
     time: 100,
-    source: 1, // flex
-    destination: 1, // flex
+    source: 1,       // flex
+    destination: 1,  // flex
     protocol: 70,
     length: 55,
-    info: 2, // flex (wider)
+    info: 2,         // flex (wider)
 } as const;
 
-// Fixed columns total width (for min-width calculation)
-export const FIXED_COLUMNS_WIDTH = 50 + 100 + 70 + 55 + 16; // index + time + protocol + length + padding
-
-// Pre-computed cell styles
-export const cellStyles: Record<keyof typeof COLUMN_WIDTHS, React.CSSProperties> = {
+/** Pre-computed cell styles shared across header and rows. */
+export const pktCellStyles: Record<keyof typeof PKT_COLUMN_WIDTHS, React.CSSProperties> = {
     index: {
-        width: COLUMN_WIDTHS.index,
-        minWidth: COLUMN_WIDTHS.index,
-        maxWidth: COLUMN_WIDTHS.index,
+        width: PKT_COLUMN_WIDTHS.index,
+        minWidth: PKT_COLUMN_WIDTHS.index,
+        maxWidth: PKT_COLUMN_WIDTHS.index,
         paddingRight: 8,
         textAlign: 'right',
         color: 'var(--g-color-text-secondary)',
@@ -36,9 +38,9 @@ export const cellStyles: Record<keyof typeof COLUMN_WIDTHS, React.CSSProperties>
         flexShrink: 0,
     },
     time: {
-        width: COLUMN_WIDTHS.time,
-        minWidth: COLUMN_WIDTHS.time,
-        maxWidth: COLUMN_WIDTHS.time,
+        width: PKT_COLUMN_WIDTHS.time,
+        minWidth: PKT_COLUMN_WIDTHS.time,
+        maxWidth: PKT_COLUMN_WIDTHS.time,
         paddingRight: 8,
         fontFamily: 'var(--g-font-family-monospace)',
         fontSize: 12,
@@ -65,18 +67,18 @@ export const cellStyles: Record<keyof typeof COLUMN_WIDTHS, React.CSSProperties>
         fontSize: 12,
     },
     protocol: {
-        width: COLUMN_WIDTHS.protocol,
-        minWidth: COLUMN_WIDTHS.protocol,
-        maxWidth: COLUMN_WIDTHS.protocol,
+        width: PKT_COLUMN_WIDTHS.protocol,
+        minWidth: PKT_COLUMN_WIDTHS.protocol,
+        maxWidth: PKT_COLUMN_WIDTHS.protocol,
         paddingRight: 8,
         fontFamily: 'var(--g-font-family-monospace)',
         fontSize: 12,
         flexShrink: 0,
     },
     length: {
-        width: COLUMN_WIDTHS.length,
-        minWidth: COLUMN_WIDTHS.length,
-        maxWidth: COLUMN_WIDTHS.length,
+        width: PKT_COLUMN_WIDTHS.length,
+        minWidth: PKT_COLUMN_WIDTHS.length,
+        maxWidth: PKT_COLUMN_WIDTHS.length,
         paddingRight: 8,
         textAlign: 'right',
         fontFamily: 'var(--g-font-family-monospace)',
@@ -95,6 +97,3 @@ export const cellStyles: Record<keyof typeof COLUMN_WIDTHS, React.CSSProperties>
         fontSize: 12,
     },
 };
-
-// Minimum total width
-export const TOTAL_WIDTH = 800;

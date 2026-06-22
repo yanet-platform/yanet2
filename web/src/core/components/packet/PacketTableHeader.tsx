@@ -1,63 +1,67 @@
 import React from 'react';
 import { Box, Text } from '@gravity-ui/uikit';
-import { SortableTableHeader } from '@yanet/core/components';
-import { cellStyles, TOTAL_WIDTH, HEADER_HEIGHT } from './constants';
+import { SortableTableHeader } from '../SortableTableHeader';
+import { pktCellStyles, PKT_TOTAL_WIDTH, PKT_HEADER_HEIGHT } from './constants';
 import type { PacketSortState, PacketSortColumn } from './types';
-import './pdump.scss';
 
-export interface PacketTableHeaderProps {
+export interface SharedPacketTableHeaderProps {
     sortState: PacketSortState;
     onSort: (column: PacketSortColumn) => void;
+    /** Whether to render the Time column. Defaults to true. */
+    showTime?: boolean;
 }
 
-export const PacketTableHeader: React.FC<PacketTableHeaderProps> = ({
+export const SharedPacketTableHeader: React.FC<SharedPacketTableHeaderProps> = ({
     sortState,
     onSort,
+    showTime = true,
 }) => {
     return (
         <Box
             className="packet-table-header"
-            style={{ height: HEADER_HEIGHT, minWidth: TOTAL_WIDTH }}
+            style={{ height: PKT_HEADER_HEIGHT, minWidth: PKT_TOTAL_WIDTH }}
         >
-            <Box style={cellStyles.index}>
+            <Box style={pktCellStyles.index}>
                 <Text variant="subheader-1">#</Text>
             </Box>
-            <SortableTableHeader
-                column="time"
-                label="Time"
-                style={cellStyles.time}
-                sortState={sortState}
-                onSort={onSort}
-            />
+            {showTime && (
+                <SortableTableHeader
+                    column="time"
+                    label="Time"
+                    style={pktCellStyles.time}
+                    sortState={sortState}
+                    onSort={onSort}
+                />
+            )}
             <SortableTableHeader
                 column="source"
                 label="Source"
-                style={cellStyles.source}
+                style={pktCellStyles.source}
                 sortState={sortState}
                 onSort={onSort}
             />
             <SortableTableHeader
                 column="destination"
                 label="Destination"
-                style={cellStyles.destination}
+                style={pktCellStyles.destination}
                 sortState={sortState}
                 onSort={onSort}
             />
             <SortableTableHeader
                 column="protocol"
                 label="Protocol"
-                style={cellStyles.protocol}
+                style={pktCellStyles.protocol}
                 sortState={sortState}
                 onSort={onSort}
             />
             <SortableTableHeader
                 column="length"
                 label="Length"
-                style={cellStyles.length}
+                style={pktCellStyles.length}
                 sortState={sortState}
                 onSort={onSort}
             />
-            <Box style={cellStyles.info}>
+            <Box style={pktCellStyles.info}>
                 <Text variant="subheader-1">Info</Text>
             </Box>
         </Box>
