@@ -65,8 +65,6 @@ message UpdateConfigRequest {
 message UpdateConfigResponse { string error = 1; }
 
 // Delete config with specified name.
-message DeleteConfigRequest {
-  string name = 1;
-}
+message DeleteConfigRequest { string name = 1; }
 
 message DeleteConfigResponse { bool deleted = 1; }

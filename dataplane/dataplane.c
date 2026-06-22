@@ -58,9 +58,9 @@ dataplane_worker_connect(
 	(void)wrk_tx;
 
 	if (!(tx_conn->count & (tx_conn->count + 1))) {
-		struct data_pipe *pipes = (struct data_pipe *)realloc(
+		struct worker_tx_pipe *pipes = (struct worker_tx_pipe *)realloc(
 			tx_conn->pipes,
-			sizeof(struct data_pipe) * 2 * (tx_conn->count + 1)
+			sizeof(struct worker_tx_pipe) * 2 * (tx_conn->count + 1)
 		);
 		if (pipes == NULL)
 			return -1;
@@ -79,14 +79,27 @@ dataplane_worker_connect(
 		wrk_rx->write_ctx.rx_pipes = pipes;
 	}
 
-	struct data_pipe *pipe = tx_conn->pipes + tx_conn->count;
-	if (data_pipe_init(pipe, 10))
+	struct worker_tx_pipe *tx_pipe = tx_conn->pipes + tx_conn->count;
+	if (data_pipe_init(&tx_pipe->pipe, WORKER_TX_PIPE_SIZE))
 		return -1;
+
+	uint32_t pending_capacity =
+		1u << (WORKER_TX_PIPE_SIZE + WORKER_TX_PIPE_PENDING_SHIFT);
+	tx_pipe->pending_mbufs = (struct worker_pending_mbuf *)malloc(
+		sizeof(struct worker_pending_mbuf) * pending_capacity
+	);
+	if (tx_pipe->pending_mbufs == NULL) {
+		data_pipe_fini(&tx_pipe->pipe);
+		return -1;
+	}
+	tx_pipe->pending_mask = pending_capacity - 1;
+	tx_pipe->pending_start = 0;
+	tx_pipe->pending_stop = 0;
 
 	++tx_conn->count;
 
 	*(wrk_rx->write_ctx.rx_pipes + wrk_rx->write_ctx.rx_pipe_count++) =
-		*pipe;
+		tx_pipe->pipe;
 
 	return 0;
 }
