@@ -435,9 +435,18 @@ dataplane_worker_init(
 	dp_worker->queue_id = queue_id;
 	dp_worker->rx_burst_size = WORKER_RX_BURST_SIZE;
 
+	uint16_t rx_queue_len =
+		config->rx_queue_len ? config->rx_queue_len : 4096;
+	uint16_t tx_queue_len =
+		config->tx_queue_len ? config->tx_queue_len : 4096;
+
 	// Initialize device rx and tx queue
 	if (rte_eth_tx_queue_setup(
-		    device->port_id, queue_id, 4096, config->instance_id, NULL
+		    device->port_id,
+		    queue_id,
+		    tx_queue_len,
+		    config->instance_id,
+		    NULL
 	    )) {
 		LOG(ERROR,
 		    "failed to setup TX queue for port id=%u instance=%u",
@@ -490,7 +499,7 @@ dataplane_worker_init(
 	if (rte_eth_rx_queue_setup(
 		    device->port_id,
 		    queue_id,
-		    4096,
+		    rx_queue_len,
 		    config->instance_id,
 		    NULL,
 		    worker->rx_mempool

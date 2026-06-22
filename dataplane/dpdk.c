@@ -102,7 +102,8 @@ dpdk_add_vdev_port(
 	const char *port_name,
 	const char *name,
 	const char *mac_addr,
-	uint16_t queue_count
+	uint16_t queue_count,
+	uint16_t queue_size
 ) {
 	char vdev_args[256];
 	snprintf(
@@ -110,7 +111,7 @@ dpdk_add_vdev_port(
 		sizeof(vdev_args),
 		"path=/dev/vhost-net,queues=%d,queue_size=%d,iface=%s,mac=%s",
 		queue_count,
-		4096,
+		queue_size,
 		name,
 		mac_addr
 	);

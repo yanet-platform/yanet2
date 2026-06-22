@@ -236,12 +236,33 @@ dataplane_create_devices(
 			    "virtio_user_",
 			    strlen("virtio_user_")
 		    )) {
+			// The vdev exposes a single virtqueue depth for both
+			// directions, so size it to the largest configured rx
+			// or tx queue length across the device workers.
+			uint16_t queue_size = 0;
+			for (uint32_t wrk_idx = 0;
+			     wrk_idx < device_config->worker_count;
+			     ++wrk_idx) {
+				struct dataplane_device_worker_config *worker =
+					device_config->workers + wrk_idx;
+				if (worker->rx_queue_len > queue_size) {
+					queue_size = worker->rx_queue_len;
+				}
+				if (worker->tx_queue_len > queue_size) {
+					queue_size = worker->tx_queue_len;
+				}
+			}
+			if (queue_size == 0) {
+				queue_size = 4096;
+			}
+
 			if (dpdk_add_vdev_port(
 				    device_config->port_name,
 				    device_config->port_name +
 					    strlen("virtio_user_"),
 				    device_config->mac_addr,
-				    device_config->worker_count
+				    device_config->worker_count,
+				    queue_size
 			    )) {
 				LOG(ERROR,
 				    "failed to add vdev port %s",
