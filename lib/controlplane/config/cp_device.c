@@ -1,5 +1,7 @@
 #include "cp_device.h"
 
+#include <stdlib.h>
+
 #include "common/container_of.h"
 
 #include "controlplane/agent/agent.h"
@@ -273,6 +275,47 @@ cp_device_entry_free(
 	);
 }
 
+struct cp_device_type_fini_entry {
+	char type[80];
+	cp_device_type_fini_fn fini;
+	struct cp_device_type_fini_entry *next;
+};
+
+// Process-local table of per-type device teardown handlers.
+//
+// Populated once at startup and never freed. It lives in normal process
+// memory, so each process resolves the handler from its own table — nothing
+// is written to shared memory.
+static struct cp_device_type_fini_entry *cp_device_type_fini_head = NULL;
+
+int
+cp_device_register_type_fini(const char *type, cp_device_type_fini_fn fini) {
+	struct cp_device_type_fini_entry *entry = malloc(sizeof(*entry));
+	if (entry == NULL) {
+		return -1;
+	}
+
+	strtcpy(entry->type, type, sizeof(entry->type));
+	entry->fini = fini;
+	entry->next = cp_device_type_fini_head;
+	cp_device_type_fini_head = entry;
+
+	return 0;
+}
+
+static cp_device_type_fini_fn
+cp_device_type_fini_lookup(const char *type) {
+	for (struct cp_device_type_fini_entry *entry = cp_device_type_fini_head;
+	     entry != NULL;
+	     entry = entry->next) {
+		if (!strncmp(entry->type, type, sizeof(entry->type))) {
+			return entry->fini;
+		}
+	}
+
+	return NULL;
+}
+
 void
 cp_device_fini(struct cp_device *self) {
 	struct memory_context *memory_context = &self->memory_context;
@@ -331,6 +374,18 @@ cp_device_registry_item_free_cb(struct registry_item *item, void *data) {
 	(void)data;
 	struct cp_device *device =
 		container_of(item, struct cp_device, config_item);
+
+	// The device is fully constructed and being removed from the registry
+	// (on replacement or generation retirement): run its per-type subclass
+	// teardown before releasing the base resources. Resolving it here
+	// rather than in cp_device_fini keeps the init-failure rollback, which
+	// also calls cp_device_fini, from dispatching to a half-built subclass.
+	cp_device_type_fini_fn type_fini =
+		cp_device_type_fini_lookup(device->type);
+	if (type_fini != NULL) {
+		type_fini(device);
+	}
+
 	cp_device_fini(device);
 	cp_device_free(device);
 }

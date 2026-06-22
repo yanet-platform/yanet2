@@ -11,6 +11,24 @@
 #include "lib/errors/errors.h"
 
 struct agent;
+struct cp_device;
+
+// Type-specific teardown for a device subclass, resolved by device type.
+//
+// Registered per type via cp_device_register_type_fini and run when a fully
+// constructed device is removed from the registry (on replacement or
+// generation retirement), before its base resources are released. It is
+// resolved from a process-local table keyed by the device's type string, so
+// nothing is stored in shared memory and teardown stays valid across processes
+// and restarts.
+typedef void (*cp_device_type_fini_fn)(struct cp_device *self);
+
+// Register a teardown handler for a device type.
+//
+// Call once at startup from the device type's control-plane library. There is
+// no limit on the number of registered types.
+int
+cp_device_register_type_fini(const char *type, cp_device_type_fini_fn fini);
 
 struct cp_device_pipeline {
 	char name[CP_PIPELINE_NAME_LEN];
@@ -126,7 +144,9 @@ cp_device_init(
 
 // Tear down resources acquired by cp_device_init.
 //
-// Idempotent on zero-init.
+// Base teardown only: the per-type subclass teardown is run separately when a
+// device is removed from the registry, so this is safe to call from an
+// init-failure rollback. Idempotent on zero-init.
 void
 cp_device_fini(struct cp_device *self);
 
