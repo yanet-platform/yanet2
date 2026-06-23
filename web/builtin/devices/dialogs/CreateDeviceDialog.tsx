@@ -1,7 +1,8 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { Box, TextInput, Select, Text } from '@gravity-ui/uikit';
 import { FormDialog } from '@yanet/core/components';
-import { DEVICE_TYPES, type DeviceType } from '@yanet/core/api/devices';
+import type { DeviceType } from '@yanet/core/api/devices';
+import { deviceTypes } from '@yanet/core/registry';
 import '../devices.scss';
 
 export interface CreateDeviceDialogProps {
@@ -18,14 +19,14 @@ export const CreateDeviceDialog: React.FC<CreateDeviceDialogProps> = ({
     existingNames = [],
 }) => {
     const [name, setName] = useState('');
-    const [type, setType] = useState<DeviceType>('plain');
+    const [type, setType] = useState<DeviceType>(deviceTypes[0]?.type ?? '');
     const [error, setError] = useState<string | null>(null);
 
     // Reset form when dialog opens
     useEffect(() => {
         if (open) {
             setName('');
-            setType('plain');
+            setType(deviceTypes[0]?.type ?? '');
             setError(null);
         }
     }, [open]);
@@ -56,14 +57,14 @@ export const CreateDeviceDialog: React.FC<CreateDeviceDialogProps> = ({
     }, []);
 
     const handleTypeChange = useCallback((value: string[]) => {
-        if (value.length > 0 && DEVICE_TYPES.includes(value[0] as DeviceType)) {
-            setType(value[0] as DeviceType);
+        if (value.length > 0 && deviceTypes.some(m => m.type === value[0])) {
+            setType(value[0]);
         }
     }, []);
 
-    const typeOptions = DEVICE_TYPES.map(t => ({
-        value: t,
-        content: t,
+    const typeOptions = deviceTypes.map(m => ({
+        value: m.type,
+        content: m.label,
     }));
 
     return (

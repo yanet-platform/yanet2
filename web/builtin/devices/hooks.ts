@@ -1,8 +1,9 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { API } from '@yanet/core/api';
-import type { DeviceType } from '@yanet/core/api/devices';
+import { parseWeight, type DeviceType } from '@yanet/core/api/devices';
 import type { PipelineId } from '@yanet/core/api/pipelines';
 import type { InspectResponse, DeviceInfo } from '@yanet/core/api/inspect';
+import { deviceTypeManifest } from '@yanet/core/registry';
 import { toaster } from '@yanet/core/utils';
 import type { LocalDevice } from './types';
 
@@ -15,19 +16,15 @@ export interface UseDeviceDataResult {
     updateDevice: (deviceName: string, updates: Partial<LocalDevice>) => void;
     saveDevice: (device: LocalDevice) => Promise<boolean>;
     loadPipelineList: () => Promise<PipelineId[]>;
+    loadDeviceExt: (device: LocalDevice) => Promise<void>;
     getServerDevice: (name: string) => LocalDevice | null;
 }
 
-const parseWeight = (weight: string | number | undefined): number => {
-    if (weight === undefined) return 0;
-    if (typeof weight === 'number') return weight;
-    return parseInt(weight, 10) || 0;
-};
-
-/** Returns true when two LocalDevice values are structurally equal (same type, vlanId, and pipeline arrays in order). */
-const localDeviceEquals = (a: LocalDevice, b: LocalDevice): boolean => {
+// Returns true when two devices have equal type and pipeline arrays in order.
+//
+// Type-specific ext is compared separately by each type's extDirty hook.
+const pipelinesEqual = (a: LocalDevice, b: LocalDevice): boolean => {
     if (a.type !== b.type) return false;
-    if (a.vlanId !== b.vlanId) return false;
     if (a.inputPipelines.length !== b.inputPipelines.length) return false;
     if (a.outputPipelines.length !== b.outputPipelines.length) return false;
     for (let idx = 0; idx < a.inputPipelines.length; idx++) {
@@ -43,8 +40,16 @@ const localDeviceEquals = (a: LocalDevice, b: LocalDevice): boolean => {
     return true;
 };
 
+// Recompute the dirty flag across pipelines and the type-specific ext.
+const computeDirty = (device: LocalDevice, snapshot: LocalDevice | undefined): boolean => {
+    if (device.isNew || !snapshot || !pipelinesEqual(device, snapshot)) {
+        return true;
+    }
+    return deviceTypeManifest(device.type)?.extDirty?.(device, snapshot) ?? false;
+};
+
 const deviceInfoToLocal = (info: DeviceInfo): LocalDevice => {
-    const type = (info.type === 'vlan' ? 'vlan' : 'plain') as DeviceType;
+    const type = info.type ?? '';
     return {
         id: { type: info.type, name: info.name },
         type,
@@ -58,6 +63,8 @@ const deviceInfoToLocal = (info: DeviceInfo): LocalDevice => {
         })),
         isNew: false,
         isDirty: false,
+        loaded: !deviceTypeManifest(type)?.loadData,
+        ext: {},
     };
 };
 
@@ -104,14 +111,16 @@ export const useDeviceData = (): UseDeviceDataResult => {
     }, [loadDevices]);
 
     const createDevice = useCallback((name: string, type: DeviceType): void => {
+        const extDefaults = deviceTypeManifest(type)?.createDefaults?.();
         const newDevice: LocalDevice = {
             id: { type, name },
             type,
             inputPipelines: [],
             outputPipelines: [],
-            vlanId: type === 'vlan' ? 0 : undefined,
             isNew: true,
             isDirty: true,
+            loaded: true,
+            ext: extDefaults ? { [type]: extDefaults } : {},
         };
 
         setDevices(prev => [...prev, newDevice]);
@@ -124,68 +133,79 @@ export const useDeviceData = (): UseDeviceDataResult => {
         setDevices(prev => prev.map(device => {
             if (device.id.name === deviceName) {
                 const updated = { ...device, ...updates };
-                const serverSnapshot = serverSnapshotRef.current.get(deviceName);
-                const isDirty = updated.isNew
-                    || !serverSnapshot
-                    || !localDeviceEquals(updated, serverSnapshot);
-                return { ...updated, isDirty };
+                const snapshot = serverSnapshotRef.current.get(deviceName);
+                return { ...updated, isDirty: computeDirty(updated, snapshot) };
             }
             return device;
+        }));
+    }, []);
+
+    // loadDeviceExt hydrates a device's type-specific ext from the server the
+    // first time it is opened, for types that declare a loadData hook.
+    //
+    // Types without loadData and already-loaded devices are a no-op.
+    const loadDeviceExt = useCallback(async (device: LocalDevice): Promise<void> => {
+        const manifest = deviceTypeManifest(device.type);
+        if (!manifest?.loadData || device.loaded) {
+            return;
+        }
+
+        const name = device.id.name || '';
+        const ext = await manifest.loadData(device);
+
+        // Refresh the clean snapshot first so the dirty check below compares
+        // against the freshly loaded server ext, not the empty baseline.
+        const snapshot = serverSnapshotRef.current.get(name);
+        if (snapshot) {
+            const newSnapshot: LocalDevice = {
+                ...snapshot,
+                ext: { ...snapshot.ext, [device.type]: ext },
+                loaded: true,
+            };
+            serverSnapshotRef.current = new Map(serverSnapshotRef.current).set(name, newSnapshot);
+        }
+
+        setDevices(prev => prev.map(d => {
+            if (d.id.name !== name) return d;
+            const next: LocalDevice = {
+                ...d,
+                ext: { ...d.ext, [device.type]: ext },
+                loaded: true,
+            };
+            return { ...next, isDirty: computeDirty(next, serverSnapshotRef.current.get(name)) };
         }));
     }, []);
 
     const saveDevice = useCallback(async (
         device: LocalDevice
     ): Promise<boolean> => {
+        const name = device.id.name || '';
+        const manifest = deviceTypeManifest(device.type);
+        if (!manifest) {
+            toaster.error('device-save-error', `Unknown device type "${device.type}"`);
+            return false;
+        }
+
         try {
-            const devicePayload = {
-                input: device.inputPipelines.map(p => ({
-                    name: p.name,
-                    weight: parseWeight(p.weight),
-                })),
-                output: device.outputPipelines.map(p => ({
-                    name: p.name,
-                    weight: parseWeight(p.weight),
-                })),
+            const snapshot = serverSnapshotRef.current.get(name);
+            const ext = await manifest.save(device, snapshot);
+
+            const savedDevice: LocalDevice = {
+                ...device,
+                isDirty: false,
+                isNew: false,
+                loaded: true,
+                ext: { ...device.ext, [device.type]: ext },
             };
-
-            let response;
-            if (device.type === 'vlan') {
-                response = await API.devices.updateVlan({
-                    name: device.id.name,
-                    device: devicePayload,
-                    vlan: device.vlanId ?? 0,
-                });
-            } else {
-                response = await API.devices.updatePlain({
-                    name: device.id.name,
-                    device: devicePayload,
-                });
+            if (name) {
+                serverSnapshotRef.current = new Map(serverSnapshotRef.current).set(name, savedDevice);
             }
+            setDevices(prev => prev.map(d => (d.id.name === name ? savedDevice : d)));
 
-            if (response.error) {
-                throw new Error(response.error);
-            }
-
-            // Mark device as clean and update the server snapshot.
-            const savedDevice = { ...device, isDirty: false, isNew: false };
-            if (device.id.name) {
-                serverSnapshotRef.current = new Map(serverSnapshotRef.current).set(
-                    device.id.name,
-                    savedDevice,
-                );
-            }
-            setDevices(prev => prev.map(d => {
-                if (d.id.name === device.id.name) {
-                    return savedDevice;
-                }
-                return d;
-            }));
-
-            toaster.success('device-save-success', `Device "${device.id.name}" saved`);
+            toaster.success('device-save-success', `Device "${name}" saved`);
             return true;
         } catch (err) {
-            toaster.error('device-save-error', `Failed to save device "${device.id.name}"`, err);
+            toaster.error('device-save-error', `Failed to save device "${name}"`, err);
             return false;
         }
     }, []);
@@ -213,6 +233,7 @@ export const useDeviceData = (): UseDeviceDataResult => {
         updateDevice,
         saveDevice,
         loadPipelineList,
+        loadDeviceExt,
         getServerDevice,
     };
 };

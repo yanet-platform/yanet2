@@ -1,6 +1,7 @@
 import React from 'react';
 import type { LocalDevice } from '../types';
 import { SaveDiffModal } from '@yanet/core/components';
+import { deviceTypeManifest } from '@yanet/core/registry';
 import { dumpYamlDoc } from '@yanet/core/utils';
 
 export interface DeviceDiffModalProps {
@@ -10,24 +11,14 @@ export interface DeviceDiffModalProps {
     onApply: () => Promise<void>;
 }
 
-interface DeviceYaml {
-    name: string;
-    type: string;
-    vlan_id?: number;
-    input_pipelines: { name: string; weight: number }[];
-    output_pipelines: { name: string; weight: number }[];
-}
-
 const toYaml = (device: LocalDevice): string => {
-    const obj: DeviceYaml = {
+    const obj: Record<string, unknown> = {
         name: device.id.name || '',
         type: device.type,
         input_pipelines: device.inputPipelines.map(p => ({ name: p.name || '', weight: typeof p.weight === 'number' ? p.weight : parseInt(String(p.weight), 10) || 0 })),
         output_pipelines: device.outputPipelines.map(p => ({ name: p.name || '', weight: typeof p.weight === 'number' ? p.weight : parseInt(String(p.weight), 10) || 0 })),
+        ...(deviceTypeManifest(device.type)?.diffYaml?.(device) ?? {}),
     };
-    if (device.type === 'vlan') {
-        obj.vlan_id = device.vlanId ?? 0;
-    }
     return dumpYamlDoc(obj);
 };
 

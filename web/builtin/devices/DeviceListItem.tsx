@@ -1,7 +1,7 @@
 import React from 'react';
-import { IconPlain, IconVlan } from './components/Icons';
 import { MiniSpark } from './components/MiniSpark';
 import { formatPps } from '@yanet/core/utils';
+import { deviceTypeManifest } from '@yanet/core/registry';
 import type { LocalDevice } from './types';
 import type { CounterHistoryEntry } from '@yanet/core/hooks/useCounterHistory';
 import type { DeviceCounterData } from '@yanet/core/hooks/useDeviceCounters';
@@ -21,8 +21,11 @@ export const DeviceListItem: React.FC<DeviceListItemProps> = ({
     history,
     onClick,
 }) => {
-    const isVlan = device.type === 'vlan';
-    const iconColor = isVlan ? 'var(--violet)' : 'var(--teal)';
+    const manifest = deviceTypeManifest(device.type);
+    const Icon = manifest?.icon;
+    const iconColor = manifest?.accentColor ?? 'var(--teal)';
+    const badge = manifest?.rowBadge?.(device);
+    const subtitle = manifest?.rowSubtitle?.(device) ?? '— · —';
     const name = device.id.name || '';
     const rxPps = counterData?.rx.pps ?? 0;
     const txPps = counterData?.tx.pps ?? 0;
@@ -36,23 +39,17 @@ export const DeviceListItem: React.FC<DeviceListItemProps> = ({
             onClick={onClick}
         >
             <span className="dv-row-icon" style={{ color: iconColor }}>
-                {isVlan ? <IconVlan /> : <IconPlain />}
+                {Icon && <Icon />}
             </span>
 
             <span className="dv-row-main">
                 <span className="dv-row-name">
                     <span className="dv-row-name-text">{name}</span>
-                    {isVlan && device.vlanId !== undefined && (
-                        <span className="dv-vid">{device.vlanId}</span>
+                    {badge !== undefined && (
+                        <span className="dv-vid">{badge}</span>
                     )}
                 </span>
-                <span className="dv-row-sub">
-                    {isVlan ? (
-                        <>vlan · <span className="muted">—</span></>
-                    ) : (
-                        <>— · —</>
-                    )}
-                </span>
+                <span className="dv-row-sub">{subtitle}</span>
             </span>
 
             <span className="dv-row-spark">

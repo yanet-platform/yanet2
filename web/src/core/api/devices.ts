@@ -45,9 +45,24 @@ export interface UpdateDeviceVlanResponse {
     error?: string;
 }
 
-// Device types enum
-export const DEVICE_TYPES = ['plain', 'vlan'] as const;
-export type DeviceType = typeof DEVICE_TYPES[number];
+/** Device type discriminator; the concrete set is owned by the device registry. */
+export type DeviceType = string;
+
+/** Parse a pipeline weight that may arrive as a uint64 string or a number. */
+export const parseWeight = (weight: string | number | undefined): number => {
+    if (weight === undefined) return 0;
+    if (typeof weight === 'number') return weight;
+    return parseInt(weight, 10) || 0;
+};
+
+/** Build the wire Device payload from a device's input/output pipelines. */
+export const toDevicePayload = (
+    inputPipelines: DevicePipeline[],
+    outputPipelines: DevicePipeline[],
+): Device => ({
+    input: inputPipelines.map((p) => ({ name: p.name, weight: parseWeight(p.weight) })),
+    output: outputPipelines.map((p) => ({ name: p.name, weight: parseWeight(p.weight) })),
+});
 
 const deviceService = createService('controlplane.ynpb.v1.DeviceService');
 const plainService = createService('devices.plain.controlplane.plainpb.v1.DevicePlainService');

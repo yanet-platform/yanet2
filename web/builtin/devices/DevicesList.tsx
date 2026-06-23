@@ -1,11 +1,13 @@
 import React, { useMemo } from 'react';
 import { DeviceListItem } from './DeviceListItem';
 import { IconStack } from './components/Icons';
+import { deviceTypes } from '@yanet/core/registry';
 import type { LocalDevice } from './types';
 import type { CounterHistoryEntry } from '@yanet/core/hooks/useCounterHistory';
 import type { DeviceCounterData } from '@yanet/core/hooks/useDeviceCounters';
 
-export type FilterKind = 'all' | 'plain' | 'vlan';
+// Active device-type filter: 'all', or a registered device type.
+export type FilterKind = string;
 type GroupingMode = 'flat' | 'type' | 'parent';
 
 export interface DevicesListProps {
@@ -33,30 +35,28 @@ const nextGrouping = (current: GroupingMode): GroupingMode => {
 };
 
 export const filterDevices = (devices: LocalDevice[], filter: FilterKind): LocalDevice[] =>
-    devices.filter(d => {
-        if (filter === 'plain' && d.type !== 'plain') return false;
-        if (filter === 'vlan' && d.type !== 'vlan') return false;
-        return true;
-    });
+    filter === 'all' ? devices : devices.filter(d => d.type === filter);
 
 export const buildGroups = (devices: LocalDevice[], grouping: GroupingMode): DeviceGroup[] => {
     if (grouping === 'type') {
-        return [
-            { key: 'plain', label: 'Physical', items: devices.filter(d => d.type === 'plain') },
-            { key: 'vlan', label: 'VLAN', items: devices.filter(d => d.type === 'vlan') },
-        ].filter(g => g.items.length > 0);
+        return deviceTypes
+            .map(m => ({ key: m.type, label: m.pluralLabel, items: devices.filter(d => d.type === m.type) }))
+            .filter(g => g.items.length > 0);
     }
     if (grouping === 'parent') {
-        // Plain devices each get their own group; all vlans go under one group.
+        // Types with parentMode 'instances' get one group per device; the rest
+        // collapse into a single group under their parent label.
         const groups: DeviceGroup[] = [];
-        for (const d of devices) {
-            if (d.type === 'plain') {
-                groups.push({ key: d.id.name || '', label: d.id.name || '', items: [d] });
+        for (const m of deviceTypes) {
+            const items = devices.filter(d => d.type === m.type);
+            if (items.length === 0) continue;
+            if (m.parentMode === 'instances') {
+                for (const d of items) {
+                    groups.push({ key: d.id.name || '', label: d.id.name || '', items: [d] });
+                }
+            } else {
+                groups.push({ key: m.type, label: m.parentGroupLabel ?? m.pluralLabel, items });
             }
-        }
-        const vlans = devices.filter(d => d.type === 'vlan');
-        if (vlans.length > 0) {
-            groups.push({ key: 'vlan', label: '∅ orphan VLANs', items: vlans });
         }
         return groups;
     }
@@ -75,11 +75,18 @@ export const DevicesList: React.FC<DevicesListProps> = ({
     onFilterChange,
 }) => {
 
-    const counts = useMemo(() => ({
-        all: devices.length,
-        plain: devices.filter(d => d.type === 'plain').length,
-        vlan: devices.filter(d => d.type === 'vlan').length,
-    }), [devices]);
+    const counts = useMemo(() => {
+        const byType: Record<string, number> = {};
+        for (const m of deviceTypes) {
+            byType[m.type] = 0;
+        }
+        for (const d of devices) {
+            if (byType[d.type] !== undefined) {
+                byType[d.type] += 1;
+            }
+        }
+        return { all: devices.length, byType };
+    }, [devices]);
 
     const filtered = useMemo(() => filterDevices(devices, filter), [devices, filter]);
 
@@ -87,15 +94,18 @@ export const DevicesList: React.FC<DevicesListProps> = ({
 
     const chipDefs: [FilterKind, string, number][] = [
         ['all', 'All', counts.all],
-        ['plain', 'Physical', counts.plain],
-        ['vlan', 'VLAN', counts.vlan],
+        ...deviceTypes.map(m => [m.type, m.pluralLabel, counts.byType[m.type] ?? 0] as [FilterKind, string, number]),
     ];
+
+    const summary = deviceTypes
+        .map(m => `${counts.byType[m.type] ?? 0} ${m.pluralLabel.toLowerCase()}`)
+        .join(' · ');
 
     return (
         <div className="dv-list">
             <div className="dv-list-hd">
                 <div className="dv-list-counts">
-                    {counts.plain} physical · {counts.vlan} vlan
+                    {summary}
                 </div>
                 <div className="dv-filter-row">
                     <div className="dv-chips">

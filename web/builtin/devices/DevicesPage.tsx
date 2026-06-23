@@ -4,6 +4,7 @@ import { Button, Icon } from '@gravity-ui/uikit';
 import { Plus } from '@gravity-ui/icons';
 import { useSearchParamHelpers, useListNavigation, usePageContribution, useUnsavedChangesBlocker } from '@yanet/core/hooks';
 import { PageLayout, PageLoader, EmptyState, CommandPaletteHeader } from '@yanet/core/components';
+import { deviceTypeManifest } from '@yanet/core/registry';
 import type { DeviceType } from '@yanet/core/api/devices';
 import type { LocalDevice } from './types';
 import { useDeviceCounters } from '@yanet/core/hooks';
@@ -33,6 +34,7 @@ const DevicesPage: React.FC = () => {
         updateDevice,
         saveDevice,
         loadPipelineList,
+        loadDeviceExt,
         getServerDevice,
     } = useDeviceData();
 
@@ -172,10 +174,8 @@ const DevicesPage: React.FC = () => {
         rows: devices,
         getId: (d) => d.id.name || '',
         getLabel: (d) => d.id.name || '(unnamed)',
-        getSub: (d) => d.type === 'vlan'
-            ? `vlan${d.vlanId !== undefined ? ' · ' + d.vlanId : ''}`
-            : 'physical',
-        searchText: (d) => [d.id.name, d.type, d.vlanId].filter(Boolean).join(' '),
+        getSub: (d) => deviceTypeManifest(d.type)?.label.toLowerCase() ?? d.type,
+        searchText: (d) => [d.id.name, d.type].filter(Boolean).join(' '),
         onSelect: (id) => { setDeviceFilter('all'); handleSelectDevice(id); },
         icon: '→',
     }), [devices, handleSelectDevice]);
@@ -237,6 +237,7 @@ const DevicesPage: React.FC = () => {
                         <DeviceDetails
                             device={selectedDevice}
                             loadPipelineList={loadPipelineList}
+                            loadDeviceExt={loadDeviceExt}
                             counterData={selectedCounterData}
                             history={selectedHistory}
                             onUpdate={handleUpdateDevice}
