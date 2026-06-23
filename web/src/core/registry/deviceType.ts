@@ -72,6 +72,14 @@ export interface DeviceTypeManifest {
     /** Human description for the Properties "Type" row. */
     typeDescription: string;
 
+    /** Whether this device originates traffic into the dataplane.
+     *
+     * A root interface (a NIC or a generator) sets this so its counters are
+     * summed into aggregate throughput. Stacked/virtual devices (e.g. vlan)
+     * omit it to avoid double-counting traffic already counted on their parent.
+     */
+    trafficSource?: boolean;
+
     /** One-line subtitle for a list row. */
     rowSubtitle?: (device: BaseDevice) => string;
 

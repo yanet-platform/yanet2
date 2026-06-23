@@ -6,12 +6,12 @@ import { fmtBps, fmtPps } from '../inspect/formatters';
 
 export interface ThroughputProps {
     rateCounters: Map<string, DeviceCounterData>;
-    physicalDeviceNames: Set<string>;
+    sourceDeviceNames: Set<string>;
 }
 
 /** Aggregate throughput hero with a full-width sparkline beneath. */
-export const Throughput: React.FC<ThroughputProps> = ({ rateCounters, physicalDeviceNames }) => {
-    const { aggregatePps, aggregateBps } = useAggregateThroughput(rateCounters, physicalDeviceNames);
+export const Throughput: React.FC<ThroughputProps> = ({ rateCounters, sourceDeviceNames }) => {
+    const { aggregatePps, aggregateBps } = useAggregateThroughput(rateCounters, sourceDeviceNames);
 
     const throughputSeries = useRollingSeries(aggregatePps, 60);
 

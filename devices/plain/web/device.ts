@@ -22,6 +22,7 @@ export const deviceType: DeviceTypeManifest = {
     accentColor: 'var(--teal)',
     kindTag: () => 'PHYSICAL',
     typeDescription: 'physical (plain)',
+    trafficSource: true,
     rowSubtitle: () => '— · —',
     parentMode: 'instances',
     propertyRows: () => [

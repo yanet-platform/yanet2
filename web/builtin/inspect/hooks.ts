@@ -7,25 +7,25 @@ import { useRollingWindow } from '@yanet/core/hooks/useRollingWindow';
 import { groupCounterGroupsByTagsAndName, makeGroupedCounterKey } from '@yanet/core/utils';
 
 /**
- * Aggregate RX packet-rate and bit-rate across physical devices only.
+ * Aggregate RX packet-rate and bit-rate across traffic-source devices.
  *
- * Filters by physicalDeviceNames to avoid double-counting traffic that also
+ * Filters by sourceDeviceNames to avoid double-counting traffic that also
  * appears on stacked virtual devices (e.g. vlan).
  */
 export const useAggregateThroughput = (
     rateCounters: Map<string, DeviceCounterData>,
-    physicalDeviceNames: Set<string>,
+    sourceDeviceNames: Set<string>,
 ): { aggregatePps: number; aggregateBps: number } => {
     return useMemo(() => {
         let pps = 0;
         let bps = 0;
         rateCounters.forEach((d, name) => {
-            if (!physicalDeviceNames.has(name)) return;
+            if (!sourceDeviceNames.has(name)) return;
             pps += d.rx?.pps ?? 0;
             bps += d.rx?.bps ?? 0;
         });
         return { aggregatePps: pps, aggregateBps: bps };
-    }, [rateCounters, physicalDeviceNames]);
+    }, [rateCounters, sourceDeviceNames]);
 };
 
 const DEFAULT_INTERVAL_MS = 1500;
@@ -52,18 +52,18 @@ export const useRollingSeries = (
 };
 
 /**
- * Aggregate device pps over physical devices only and produce a rolling
- * throughput series. Restricting to physical devices avoids double-counting
+ * Aggregate device pps over traffic-source devices and produce a rolling
+ * throughput series. Restricting to source devices avoids double-counting
  * traffic that also appears on stacked virtual devices (e.g. vlan).
  */
 export const useThroughputSeries = (
     deviceCounters: Map<string, DeviceCounterData>,
-    physicalDeviceNames: Set<string>,
+    sourceDeviceNames: Set<string>,
     maxLen: number = DEFAULT_MAX_LEN,
 ): { current: number; series: number[] } => {
     let current = 0;
     deviceCounters.forEach((d, name) => {
-        if (!physicalDeviceNames.has(name)) return;
+        if (!sourceDeviceNames.has(name)) return;
         current += (d.rx?.pps ?? 0) + (d.tx?.pps ?? 0);
     });
     const series = useRollingSeries(current, maxLen);

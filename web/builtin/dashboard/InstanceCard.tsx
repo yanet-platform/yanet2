@@ -16,7 +16,7 @@ export interface InstanceCardProps {
 
 /** Root layout for a single YANET instance: system state, KPI strip, 3D scene, modules. */
 export const InstanceCard: React.FC<InstanceCardProps> = ({ instance }) => {
-    const { deviceNames, rateCounters, absoluteCounters, physicalDeviceNames, usage, memTotals } = useInstanceData(instance);
+    const { deviceNames, rateCounters, absoluteCounters, sourceDeviceNames, usage, memTotals } = useInstanceData(instance);
 
     const workerCount = useWorkerCount(deviceNames);
 
@@ -28,7 +28,7 @@ export const InstanceCard: React.FC<InstanceCardProps> = ({ instance }) => {
                     <KpiStrip instance={instance} />
                 </div>
                 <div className="dash-top-row__right">
-                    <Throughput rateCounters={rateCounters} physicalDeviceNames={physicalDeviceNames} />
+                    <Throughput rateCounters={rateCounters} sourceDeviceNames={sourceDeviceNames} />
                 </div>
             </div>
             <SceneErrorBoundary>

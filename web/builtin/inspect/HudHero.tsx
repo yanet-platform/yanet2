@@ -13,7 +13,7 @@ import type { MemoryTotals } from './utils';
 export interface HudHeroProps {
     instance: InstanceInfo;
     rateCounters: Map<string, DeviceCounterData>;
-    physicalDeviceNames: Set<string>;
+    sourceDeviceNames: Set<string>;
     memTotals: MemoryTotals;
 }
 
@@ -58,7 +58,7 @@ const SideKpiMemory: React.FC<SideKpiMemoryProps> = ({ totals }) => (
 export const HudHero: React.FC<HudHeroProps> = ({
     instance,
     rateCounters,
-    physicalDeviceNames,
+    sourceDeviceNames,
     memTotals,
 }) => {
     const devices = instance.devices ?? [];
@@ -67,7 +67,7 @@ export const HudHero: React.FC<HudHeroProps> = ({
     const modules = instance.dp_modules ?? [];
     const configs = instance.cp_configs ?? [];
 
-    const { aggregatePps, aggregateBps } = useAggregateThroughput(rateCounters, physicalDeviceNames);
+    const { aggregatePps, aggregateBps } = useAggregateThroughput(rateCounters, sourceDeviceNames);
 
     const throughputSeries = useRollingSeries(aggregatePps, 90);
 

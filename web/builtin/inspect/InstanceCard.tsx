@@ -14,14 +14,14 @@ export interface InstanceCardProps {
 
 /** Root HUD layout for a single YANET instance. */
 export const InstanceCard: React.FC<InstanceCardProps> = ({ instance }) => {
-    const { rateCounters, absoluteCounters, physicalDeviceNames, usage: agentUsage, memTotals } = useInstanceData(instance);
+    const { rateCounters, absoluteCounters, sourceDeviceNames, usage: agentUsage, memTotals } = useInstanceData(instance);
 
     return (
         <div className="iv-instance">
             <HudHero
                 instance={instance}
                 rateCounters={rateCounters}
-                physicalDeviceNames={physicalDeviceNames}
+                sourceDeviceNames={sourceDeviceNames}
                 memTotals={memTotals}
             />
             <DeviceWall
