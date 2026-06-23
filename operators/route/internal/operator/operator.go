@@ -35,13 +35,13 @@ const (
 
 // Actuator applies a desired set of FIBs to one or more downstream
 // targets (gateways).
-type Actuator = operator.Actuator[[]FIB]
+type Actuator = operator.Actuator[RouteSnapshot]
 
 // Operator is the route operator's thin wrapper around the generic
 // operator framework.
 type Operator struct {
 	cfg          *Config
-	app          *operator.Operator[[]FIB]
+	app          *operator.Operator[RouteSnapshot]
 	routeSvc     *RouteService
 	neighTable   *neigh.NeighTable
 	neighMonitor *neigh.NeighMonitor

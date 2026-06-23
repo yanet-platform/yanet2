@@ -42,9 +42,9 @@ func Test_RouteSource_SnapshotEmptyOK(t *testing.T) {
 		newRIBStore(zap.NewNop()),
 	)
 
-	fibs, ok := source.Snapshot()
+	snapshot, ok := source.Snapshot()
 	require.True(t, ok, "Snapshot must always return ok=true to keep the function publish alive")
-	require.Empty(t, fibs)
+	require.Empty(t, snapshot.RIBs)
 }
 
 func Test_RouteSource_SnapshotDrainsWake(t *testing.T) {
@@ -91,9 +91,13 @@ func Test_RouteSource_SnapshotIncludesRIBs(t *testing.T) {
 		rib.RouteSourceStatic,
 	)
 
-	fibs, ok := source.Snapshot()
+	snapshot, ok := source.Snapshot()
 	require.True(t, ok)
-	require.Len(t, fibs, 1)
+	require.Len(t, snapshot.RIBs, 1)
+	require.Contains(t, snapshot.RIBs, "route0")
+
+	fib, _ := BuildFIB(snapshot.RIBs["route0"], snapshot.Neighbours)
+	fib.Name = "route0"
 
 	expected := FIB{
 		Name: "route0",
@@ -110,5 +114,5 @@ func Test_RouteSource_SnapshotIncludesRIBs(t *testing.T) {
 			},
 		},
 	}
-	require.Equal(t, expected, fibs[0])
+	require.Equal(t, expected, fib)
 }

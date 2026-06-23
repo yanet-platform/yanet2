@@ -24,6 +24,33 @@ type NexthopCache = rcucache.Cache[netip.Addr, NeighbourEntry]
 // NexthopCacheView is a read-only view of the nexthop cache.
 type NexthopCacheView = rcucache.CacheView[netip.Addr, NeighbourEntry]
 
+// FilterByDevices returns a view exposing only the entries whose hardware
+// route egresses through one of the named devices.
+//
+// An empty device list returns the original view unchanged, meaning the
+// caller accepts every neighbour regardless of egress device.
+func FilterByDevices(view NexthopCacheView, devices []string) NexthopCacheView {
+	set := make(map[string]struct{}, len(devices))
+	for _, d := range devices {
+		if d != "" {
+			set[d] = struct{}{}
+		}
+	}
+	if len(set) == 0 {
+		return view
+	}
+
+	entries, n := view.All()
+	filtered := make(map[netip.Addr]NeighbourEntry, n)
+	for addr, entry := range entries {
+		if _, ok := set[entry.HardwareRoute.Device]; ok {
+			filtered[addr] = entry
+		}
+	}
+
+	return rcucache.NewCache(filtered).View()
+}
+
 // Option is a function that configures the neighbour monitor.
 type Option func(*options)
 

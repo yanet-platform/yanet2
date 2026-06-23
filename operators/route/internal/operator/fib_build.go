@@ -34,40 +34,19 @@ type FIBBuildStats struct {
 	NeighbourNotFound int
 	HardwareRoutes    int
 	PrefixesAdded     int
-	// FilteredRoutes counts routes excluded by the per-source best-group filter.
+	// FilteredRoutes counts eligible routes dropped because a better route
+	// of the same source exists.
 	FilteredRoutes int
-}
-
-// filterFIBEntries returns the subset of entries whose nexthops include at
-// least one device present in the given set.
-//
-// When the device set is empty every entry is returned unchanged.
-func filterFIBEntries(entries []FIBEntry, devices map[string]struct{}) []FIBEntry {
-	if len(devices) == 0 {
-		return entries
-	}
-
-	result := make([]FIBEntry, 0, len(entries))
-	for _, entry := range entries {
-		kept := make([]neigh.HardwareRoute, 0, len(entry.Nexthops))
-		for idx := range entry.Nexthops {
-			if _, ok := devices[entry.Nexthops[idx].Device]; ok {
-				kept = append(kept, entry.Nexthops[idx])
-			}
-		}
-		if len(kept) == 0 {
-			continue
-		}
-		result = append(result, FIBEntry{
-			Prefix:   entry.Prefix,
-			Nexthops: kept,
-		})
-	}
-	return result
 }
 
 // BuildFIB resolves a RIB dump against the supplied neighbour view and
 // produces a deduplicated FIB.
+//
+// A route is eligible only when its nexthop resolves in the neighbour view;
+// pass a device-filtered view to restrict a gateway to its own egress
+// devices. The best routes per source are chosen among the eligible routes,
+// so a gateway can fall back to a lower-priority route it can actually reach
+// rather than a globally best one it cannot.
 func BuildFIB(
 	ribDump maptrie.MapTrie[netip.Prefix, netip.Addr, rib.RoutesList],
 	neighbours neigh.NexthopCacheView,
@@ -86,23 +65,31 @@ func BuildFIB(
 
 			stats.TotalRoutes += len(routesList.Routes)
 
-			bestRoutes := routesList.BestPerSource()
-			stats.FilteredRoutes += len(routesList.Routes) - len(bestRoutes)
-
-			nexthops := make([]neigh.HardwareRoute, 0, len(bestRoutes))
-			for _, r := range bestRoutes {
-				entry, ok := neighbours.Lookup(r.NextHop.Unmap())
-				if !ok {
+			local := make([]rib.Route, 0, len(routesList.Routes))
+			for _, r := range routesList.Routes {
+				if _, ok := neighbours.Lookup(r.NextHop.Unmap()); !ok {
 					stats.NeighbourNotFound++
 					continue
 				}
 
-				routeHardware := entry.HardwareRoute
-				nexthops = append(nexthops, routeHardware)
+				local = append(local, r)
 			}
 
-			if len(nexthops) == 0 {
+			if len(local) == 0 {
 				continue
+			}
+
+			// The best route of each source is chosen among the resolvable
+			// routes only, so the gateway falls back to a reachable route
+			// when its source's best one has no neighbour.
+			localList := rib.RoutesList{Routes: local}
+			bestRoutes := localList.BestPerSource()
+			stats.FilteredRoutes += len(local) - len(bestRoutes)
+
+			nexthops := make([]neigh.HardwareRoute, 0, len(bestRoutes))
+			for _, r := range bestRoutes {
+				entry, _ := neighbours.Lookup(r.NextHop.Unmap())
+				nexthops = append(nexthops, entry.HardwareRoute)
 			}
 
 			slices.SortFunc(nexthops, neigh.HardwareRoute.Compare)

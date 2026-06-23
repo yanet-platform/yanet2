@@ -1,6 +1,9 @@
 package operator
 
 import (
+	"net/netip"
+
+	"github.com/yanet-platform/yanet2/common/go/maptrie"
 	"github.com/yanet-platform/yanet2/operators/route/internal/discovery/neigh"
 	"github.com/yanet-platform/yanet2/operators/route/internal/rib"
 )
@@ -9,13 +12,22 @@ type routeSnapshot interface {
 	Snapshot() map[string]*rib.RIB
 }
 
-// RouteSource is the operator.StateSource[[]FIB] used by the route
+// RouteSnapshot is the desired state for one reconcile pass: the
+// per-module RIB dumps and the neighbour view each gateway needs to build
+// its FIB.
+type RouteSnapshot struct {
+	// RIBs maps each module config name to its route dump.
+	RIBs map[string]maptrie.MapTrie[netip.Prefix, netip.Addr, rib.RoutesList]
+	// Neighbours is the neighbour view used to resolve route nexthops.
+	Neighbours neigh.NexthopCacheView
+}
+
+// RouteSource is the operator.StateSource[RouteSnapshot] used by the route
 // operator.
 //
-// On every Snapshot it pulls a fresh snapshot of the RIBs from the
-// RouteSource reader, joins them with the current neighbour-table view and
-// builds a per-RIB FIB. The resulting slice is the desired state for
-// the next reconcile pass.
+// On every Snapshot it pulls a fresh dump of the RIBs from the route
+// reader and the current neighbour-table view, which each gateway actuator
+// turns into its own FIB.
 //
 // Wake is signalled by the wake callbacks wired into RouteService and
 // NeighbourService whenever their state mutates; it preempts the
@@ -43,36 +55,32 @@ func NewRouteSource(
 	}
 }
 
-// Snapshot builds the current desired FIB set.
+// Snapshot returns the current desired state: the per-module RIB dumps
+// and the neighbour view.
 //
-// The route operator publishes its single network function on every
-// reconcile pass, so an empty FIB set is still a valid state worth
-// applying — Snapshot always returns ok=true. The framework would
-// otherwise skip the apply pass on an empty slice and the function
-// would never be republished while no RIBs exist.
-func (m *RouteSource) Snapshot() ([]FIB, bool) {
+// It always reports ok=true, even with no RIBs: the operator republishes
+// its network function on every reconcile pass, and an empty state would
+// otherwise make the framework skip the pass and never republish.
+func (m *RouteSource) Snapshot() (RouteSnapshot, bool) {
 	select {
 	case <-m.wakeCh:
 	default:
 	}
 
 	ribs := m.routeReader.Snapshot()
-	view := m.neighTable.View()
 
-	fibs := make([]FIB, 0, len(ribs))
+	dumps := make(map[string]maptrie.MapTrie[netip.Prefix, netip.Addr, rib.RoutesList], len(ribs))
 	for name, ribRef := range ribs {
-		fib, _ := BuildFIB(ribRef.DumpRoutes(), view)
-		fib.Name = name
-		fibs = append(fibs, fib)
+		dumps[name] = ribRef.DumpRoutes()
 	}
-	return fibs, true
+	return RouteSnapshot{RIBs: dumps, Neighbours: m.neighTable.View()}, true
 }
 
 func (m *RouteSource) Wake() <-chan struct{} {
 	return m.wakeCh
 }
 
-func (m *RouteSource) Advance(fibs []FIB) {}
+func (m *RouteSource) Advance(snapshot RouteSnapshot) {}
 
 // WakeFunc returns a non-blocking sender suitable for wiring into the
 // RouteService and NeighbourService OnChanged callbacks.

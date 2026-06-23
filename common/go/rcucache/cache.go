@@ -76,3 +76,8 @@ func (m CacheView[K, V]) Lookup(key K) (V, bool) {
 func (m CacheView[K, V]) Entries() (iter.Seq[V], int) {
 	return maps.Values(m.cache), len(m.cache)
 }
+
+// All returns the cache entries as a key-value iterator.
+func (m CacheView[K, V]) All() (iter.Seq2[K, V], int) {
+	return maps.All(m.cache), len(m.cache)
+}

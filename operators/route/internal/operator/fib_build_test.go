@@ -27,7 +27,7 @@ func mustParseMAC(t *testing.T, value string) [6]byte {
 // the same source are excluded when a strictly better route exists for that source.
 func Test_BuildFIB_BestPerSourceFiltersWorse(t *testing.T) {
 	cache := rcucache.NewEmptyCache[netip.Addr, neigh.NeighbourEntry]()
-	routeFor := func(addr, sourceMAC, destinationMAC string, device string) {
+	routeFor := func(addr, sourceMAC, destinationMAC, device string) {
 		cache.Set(netip.MustParseAddr(addr), neigh.NeighbourEntry{
 			HardwareRoute: neigh.HardwareRoute{
 				SourceMAC:      mustParseMAC(t, sourceMAC),
@@ -65,7 +65,7 @@ func Test_BuildFIB_BestPerSourceFiltersWorse(t *testing.T) {
 // different peers are all included in the FIB as ECMP nexthops.
 func Test_BuildFIB_EqualCostECMPPreserved(t *testing.T) {
 	cache := rcucache.NewEmptyCache[netip.Addr, neigh.NeighbourEntry]()
-	routeFor := func(addr, sourceMAC, destinationMAC string, device string) {
+	routeFor := func(addr, sourceMAC, destinationMAC, device string) {
 		cache.Set(netip.MustParseAddr(addr), neigh.NeighbourEntry{
 			HardwareRoute: neigh.HardwareRoute{
 				SourceMAC:      mustParseMAC(t, sourceMAC),
@@ -102,7 +102,7 @@ func Test_BuildFIB_EqualCostECMPPreserved(t *testing.T) {
 // the same prefix each contribute their best nexthop to the FIB independently.
 func Test_BuildFIB_StaticAndBirdBothInFIB(t *testing.T) {
 	cache := rcucache.NewEmptyCache[netip.Addr, neigh.NeighbourEntry]()
-	routeFor := func(addr, sourceMAC, destinationMAC string, device string) {
+	routeFor := func(addr, sourceMAC, destinationMAC, device string) {
 		cache.Set(netip.MustParseAddr(addr), neigh.NeighbourEntry{
 			HardwareRoute: neigh.HardwareRoute{
 				SourceMAC:      mustParseMAC(t, sourceMAC),
@@ -136,82 +136,259 @@ func Test_BuildFIB_StaticAndBirdBothInFIB(t *testing.T) {
 	require.Len(t, fib.Entries[0].Nexthops, 2, "both sources' nexthops should be in FIB")
 }
 
-// Test_FilterFIBEntries verifies device-scoped nexthop filtering.
-func Test_FilterFIBEntries(t *testing.T) {
-	mac1 := mustParseMAC(t, "0a:00:00:00:00:01")
-	mac2 := mustParseMAC(t, "0a:00:00:00:00:02")
-	mac3 := mustParseMAC(t, "0a:00:00:00:00:03")
-
-	nh := func(device string, src [6]byte) neigh.HardwareRoute {
-		return neigh.HardwareRoute{SourceMAC: src, Device: device}
+// Test_BuildFIB_PerGatewayDeviceFilter verifies that best-per-source
+// selection runs over the gateway's device-scoped local RIB.
+//
+// A gateway whose device set excludes the globally best route must fall
+// back to a lower-priority route on one of its own devices rather than
+// being starved.
+func Test_BuildFIB_PerGatewayDeviceFilter(t *testing.T) {
+	cache := rcucache.NewEmptyCache[netip.Addr, neigh.NeighbourEntry]()
+	routeFor := func(addr, sourceMAC, destinationMAC, device string) {
+		cache.Set(netip.MustParseAddr(addr), neigh.NeighbourEntry{
+			HardwareRoute: neigh.HardwareRoute{
+				SourceMAC:      mustParseMAC(t, sourceMAC),
+				DestinationMAC: mustParseMAC(t, destinationMAC),
+				Device:         device,
+			},
+		})
 	}
 
-	entries := []FIBEntry{
-		{
-			Prefix:   netip.MustParsePrefix("10.0.0.0/24"),
-			Nexthops: []neigh.HardwareRoute{nh("eth0", mac1), nh("eth1", mac2)},
-		},
-		{
-			Prefix:   netip.MustParsePrefix("10.0.1.0/24"),
-			Nexthops: []neigh.HardwareRoute{nh("eth1", mac3)},
+	routeFor("10.0.0.1", "0a:00:00:00:00:01", "0a:00:00:00:10:00", "eth1")
+	routeFor("10.0.0.2", "0a:00:00:00:00:02", "0a:00:00:00:20:00", "eth2")
+
+	p1 := netip.MustParseAddr("192.0.2.1")
+	p2 := netip.MustParseAddr("192.0.2.2")
+
+	ribDump := maptrie.NewMapTrie[netip.Prefix, netip.Addr, rib.RoutesList](2)
+	ribDump[24][netip.MustParsePrefix("10.0.0.0/24")] = rib.RoutesList{
+		Routes: []rib.Route{
+			// Globally best bird route (Pref=200) egresses through eth2.
+			{NextHop: netip.MustParseAddr("10.0.0.2"), Peer: p2, SourceID: rib.RouteSourceBird, Pref: 200},
+			// Worse bird route (Pref=100) egresses through eth1.
+			{NextHop: netip.MustParseAddr("10.0.0.1"), Peer: p1, SourceID: rib.RouteSourceBird, Pref: 100},
 		},
 	}
 
 	tests := []struct {
-		name            string
-		devices         map[string]struct{}
-		wantPrefixes    []string
-		wantNexthopDevs [][]string
+		name       string
+		devices    []string
+		wantDevice string
 	}{
 		{
-			name:            "empty device set returns all entries unchanged",
-			devices:         map[string]struct{}{},
-			wantPrefixes:    []string{"10.0.0.0/24", "10.0.1.0/24"},
-			wantNexthopDevs: [][]string{{"eth0", "eth1"}, {"eth1"}},
+			name:       "no filter selects the global best on eth2",
+			devices:    nil,
+			wantDevice: "eth2",
 		},
 		{
-			name:            "one entry dropped when its nexthops are all on other devices",
-			devices:         map[string]struct{}{"eth0": {}},
-			wantPrefixes:    []string{"10.0.0.0/24"},
-			wantNexthopDevs: [][]string{{"eth0"}},
+			name:       "gateway without eth2 falls back to its eth1 route",
+			devices:    []string{"eth1"},
+			wantDevice: "eth1",
 		},
 		{
-			name:            "all entries dropped when device owns no nexthops",
-			devices:         map[string]struct{}{"eth2": {}},
-			wantPrefixes:    []string{},
-			wantNexthopDevs: [][]string{},
+			name:       "gateway with eth2 keeps the global best",
+			devices:    []string{"eth2"},
+			wantDevice: "eth2",
 		},
-	}
-
-	// Capture nexthop counts before any call to detect mutations of the input.
-	nexthopCounts := make([]int, len(entries))
-	for idx := range entries {
-		nexthopCounts[idx] = len(entries[idx].Nexthops)
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := filterFIBEntries(entries, tc.devices)
-			require.Len(t, got, len(tc.wantPrefixes))
-			for idx, wantPrefix := range tc.wantPrefixes {
-				require.Equal(t, netip.MustParsePrefix(wantPrefix), got[idx].Prefix)
-				devs := make([]string, len(got[idx].Nexthops))
-				for hrIdx, hr := range got[idx].Nexthops {
-					devs[hrIdx] = hr.Device
-				}
-				require.Equal(t, tc.wantNexthopDevs[idx], devs)
-			}
-			// Verify the input entries were not mutated.
-			for idx := range entries {
-				require.Len(t, entries[idx].Nexthops, nexthopCounts[idx])
-			}
+			view := neigh.FilterByDevices(cache.View(), tc.devices)
+			fib, _ := BuildFIB(ribDump, view)
+			require.Len(t, fib.Entries, 1)
+			require.Len(t, fib.Entries[0].Nexthops, 1)
+			require.Equal(t, tc.wantDevice, fib.Entries[0].Nexthops[0].Device)
 		})
 	}
 }
 
+// Test_BuildFIB_DeviceFilterStarvesPrefix verifies that a prefix with no
+// route on any of the gateway's devices is omitted entirely.
+func Test_BuildFIB_DeviceFilterStarvesPrefix(t *testing.T) {
+	cache := rcucache.NewEmptyCache[netip.Addr, neigh.NeighbourEntry]()
+	cache.Set(netip.MustParseAddr("10.0.0.1"), neigh.NeighbourEntry{
+		HardwareRoute: neigh.HardwareRoute{
+			SourceMAC:      mustParseMAC(t, "0a:00:00:00:00:01"),
+			DestinationMAC: mustParseMAC(t, "0a:00:00:00:10:00"),
+			Device:         "eth1",
+		},
+	})
+
+	ribDump := maptrie.NewMapTrie[netip.Prefix, netip.Addr, rib.RoutesList](2)
+	ribDump[24][netip.MustParsePrefix("10.0.0.0/24")] = rib.RoutesList{
+		Routes: []rib.Route{
+			{NextHop: netip.MustParseAddr("10.0.0.1"), Peer: netip.MustParseAddr("192.0.2.1"), SourceID: rib.RouteSourceBird},
+		},
+	}
+
+	view := neigh.FilterByDevices(cache.View(), []string{"eth2"})
+	fib, stats := BuildFIB(ribDump, view)
+	require.Empty(t, fib.Entries)
+	require.Equal(t, 1, stats.NeighbourNotFound)
+}
+
+// Test_BuildFIB_FallsBackToLiveRouteWhenBestUnresolvable verifies that an
+// unresolvable best route yields to a worse but resolvable route of the
+// same source.
+//
+// This is the live-best behaviour and fires independently of any device
+// filter, so the device set is left empty here.
+func Test_BuildFIB_FallsBackToLiveRouteWhenBestUnresolvable(t *testing.T) {
+	cache := rcucache.NewEmptyCache[netip.Addr, neigh.NeighbourEntry]()
+	// Only the worse route's nexthop is resolvable; the best route's
+	// nexthop has no neighbour entry.
+	cache.Set(netip.MustParseAddr("10.0.0.1"), neigh.NeighbourEntry{
+		HardwareRoute: neigh.HardwareRoute{
+			SourceMAC:      mustParseMAC(t, "0a:00:00:00:00:01"),
+			DestinationMAC: mustParseMAC(t, "0a:00:00:00:10:00"),
+			Device:         "eth1",
+		},
+	})
+
+	p1 := netip.MustParseAddr("192.0.2.1")
+	p2 := netip.MustParseAddr("192.0.2.2")
+
+	ribDump := maptrie.NewMapTrie[netip.Prefix, netip.Addr, rib.RoutesList](2)
+	ribDump[24][netip.MustParsePrefix("10.0.0.0/24")] = rib.RoutesList{
+		Routes: []rib.Route{
+			// Best bird route (Pref=200) — its nexthop is unresolvable.
+			{NextHop: netip.MustParseAddr("10.0.0.2"), Peer: p2, SourceID: rib.RouteSourceBird, Pref: 200},
+			// Worse bird route (Pref=100) — resolvable on eth1.
+			{NextHop: netip.MustParseAddr("10.0.0.1"), Peer: p1, SourceID: rib.RouteSourceBird, Pref: 100},
+		},
+	}
+
+	fib, stats := BuildFIB(ribDump, cache.View())
+
+	require.Len(t, fib.Entries, 1)
+	require.Len(t, fib.Entries[0].Nexthops, 1)
+	require.Equal(t, "eth1", fib.Entries[0].Nexthops[0].Device)
+	require.Equal(t, 1, stats.NeighbourNotFound)
+	require.Equal(t, 0, stats.FilteredRoutes, "the single live local route is its source's best")
+}
+
+// Test_BuildFIB_MultiSourceWithDeviceFilter verifies that best-per-source
+// selection is scoped to the gateway's devices.
+//
+// A source whose best route is on an excluded device falls back to its
+// route on an owned device, while a different source on an owned device is
+// kept independently.
+func Test_BuildFIB_MultiSourceWithDeviceFilter(t *testing.T) {
+	cache := rcucache.NewEmptyCache[netip.Addr, neigh.NeighbourEntry]()
+	routeFor := func(addr, sourceMAC, destinationMAC, device string) {
+		cache.Set(netip.MustParseAddr(addr), neigh.NeighbourEntry{
+			HardwareRoute: neigh.HardwareRoute{
+				SourceMAC:      mustParseMAC(t, sourceMAC),
+				DestinationMAC: mustParseMAC(t, destinationMAC),
+				Device:         device,
+			},
+		})
+	}
+
+	routeFor("10.0.0.1", "0a:00:00:00:00:01", "0a:00:00:00:10:00", "eth1")
+	routeFor("10.0.0.2", "0a:00:00:00:00:02", "0a:00:00:00:20:00", "eth2")
+	routeFor("10.0.0.3", "0a:00:00:00:00:03", "0a:00:00:00:30:00", "eth1")
+
+	p2 := netip.MustParseAddr("192.0.2.2")
+	p3 := netip.MustParseAddr("192.0.2.3")
+	unspec := netip.IPv6Unspecified()
+
+	ribDump := maptrie.NewMapTrie[netip.Prefix, netip.Addr, rib.RoutesList](2)
+	ribDump[24][netip.MustParsePrefix("10.0.0.0/24")] = rib.RoutesList{
+		Routes: []rib.Route{
+			// Bird best (Pref=200) egresses through the excluded eth2.
+			{NextHop: netip.MustParseAddr("10.0.0.2"), Peer: p2, SourceID: rib.RouteSourceBird, Pref: 200},
+			// Bird fallback (Pref=100) egresses through the owned eth1.
+			{NextHop: netip.MustParseAddr("10.0.0.3"), Peer: p3, SourceID: rib.RouteSourceBird, Pref: 100},
+			// Static route egresses through the owned eth1.
+			{NextHop: netip.MustParseAddr("10.0.0.1"), Peer: unspec, SourceID: rib.RouteSourceStatic, Pref: 100},
+		},
+	}
+
+	view := neigh.FilterByDevices(cache.View(), []string{"eth1"})
+	fib, stats := BuildFIB(ribDump, view)
+
+	require.Len(t, fib.Entries, 1)
+	require.Len(t, fib.Entries[0].Nexthops, 2, "bird fallback and static, both on eth1")
+	for _, nh := range fib.Entries[0].Nexthops {
+		require.Equal(t, "eth1", nh.Device)
+	}
+	require.Equal(t, 1, stats.NeighbourNotFound, "the bird route on eth2 is dropped")
+}
+
+// Test_BuildFIB_MultiPrefix verifies that each prefix gets its own
+// nexthops and that the per-pass counters accumulate across prefixes.
+//
+// The two prefixes have different surviving-route counts and live at
+// different prefix lengths, so any cross-prefix bleed would corrupt the
+// smaller prefix's result.
+func Test_BuildFIB_MultiPrefix(t *testing.T) {
+	cache := rcucache.NewEmptyCache[netip.Addr, neigh.NeighbourEntry]()
+	routeFor := func(addr, sourceMAC, destinationMAC, device string) {
+		cache.Set(netip.MustParseAddr(addr), neigh.NeighbourEntry{
+			HardwareRoute: neigh.HardwareRoute{
+				SourceMAC:      mustParseMAC(t, sourceMAC),
+				DestinationMAC: mustParseMAC(t, destinationMAC),
+				Device:         device,
+			},
+		})
+	}
+
+	routeFor("10.0.0.1", "0a:00:00:00:00:01", "0a:00:00:00:10:00", "eth1")
+	routeFor("10.0.0.2", "0a:00:00:00:00:02", "0a:00:00:00:20:00", "eth1")
+	routeFor("10.0.0.3", "0a:00:00:00:00:03", "0a:00:00:00:30:00", "eth2")
+	routeFor("10.1.0.1", "0a:00:00:00:00:04", "0a:00:00:00:40:00", "eth1")
+
+	p1 := netip.MustParseAddr("192.0.2.1")
+	p2 := netip.MustParseAddr("192.0.2.2")
+	p3 := netip.MustParseAddr("192.0.2.3")
+	p4 := netip.MustParseAddr("192.0.2.4")
+
+	ribDump := maptrie.NewMapTrie[netip.Prefix, netip.Addr, rib.RoutesList](2)
+	// Wider prefix: three equal-cost bird routes; one egresses through the
+	// excluded eth2, leaving two ECMP nexthops on eth1.
+	ribDump[24][netip.MustParsePrefix("10.0.0.0/24")] = rib.RoutesList{
+		Routes: []rib.Route{
+			{NextHop: netip.MustParseAddr("10.0.0.1"), Peer: p1, SourceID: rib.RouteSourceBird, Pref: 100},
+			{NextHop: netip.MustParseAddr("10.0.0.2"), Peer: p2, SourceID: rib.RouteSourceBird, Pref: 100},
+			{NextHop: netip.MustParseAddr("10.0.0.3"), Peer: p3, SourceID: rib.RouteSourceBird, Pref: 100},
+		},
+	}
+	// Narrower prefix at a different length: a single live route on eth1.
+	ribDump[16][netip.MustParsePrefix("10.1.0.0/16")] = rib.RoutesList{
+		Routes: []rib.Route{
+			{NextHop: netip.MustParseAddr("10.1.0.1"), Peer: p4, SourceID: rib.RouteSourceBird, Pref: 100},
+		},
+	}
+
+	view := neigh.FilterByDevices(cache.View(), []string{"eth1"})
+	fib, stats := BuildFIB(ribDump, view)
+
+	require.Len(t, fib.Entries, 2)
+	require.Equal(t, 1, stats.NeighbourNotFound, "only the eth2 route of the wider prefix is dropped")
+
+	byPrefix := map[string]FIBEntry{}
+	for _, entry := range fib.Entries {
+		byPrefix[entry.Prefix.String()] = entry
+	}
+
+	wide, ok := byPrefix["10.0.0.0/24"]
+	require.True(t, ok)
+	require.Len(t, wide.Nexthops, 2, "two eth1 ECMP nexthops survive the device filter")
+	for _, nh := range wide.Nexthops {
+		require.Equal(t, "eth1", nh.Device)
+	}
+
+	narrow, ok := byPrefix["10.1.0.0/16"]
+	require.True(t, ok)
+	require.Len(t, narrow.Nexthops, 1, "buffer reuse must not leak the wider prefix's routes")
+	require.Equal(t, "eth1", narrow.Nexthops[0].Device)
+}
+
 func Test_BuildFIB_DedupsNexthops(t *testing.T) {
 	cache := rcucache.NewEmptyCache[netip.Addr, neigh.NeighbourEntry]()
-	routeFor := func(addr, sourceMAC, destinationMAC string, device string) {
+	routeFor := func(addr, sourceMAC, destinationMAC, device string) {
 		cache.Set(netip.MustParseAddr(addr), neigh.NeighbourEntry{
 			HardwareRoute: neigh.HardwareRoute{
 				SourceMAC:      mustParseMAC(t, sourceMAC),

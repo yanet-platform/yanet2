@@ -13,6 +13,7 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/operator"
 	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 	"github.com/yanet-platform/yanet2/modules/route/controlplane/routepb/v1"
+	"github.com/yanet-platform/yanet2/operators/route/internal/discovery/neigh"
 )
 
 // GatewayActuator applies route-operator state to a single Gateway via
@@ -22,7 +23,7 @@ type GatewayActuator struct {
 	conn        *grpc.ClientConn
 	routes      routepb.RouteServiceClient
 	funcApplier *operator.FunctionApplier
-	devices     map[string]struct{}
+	devices     []string
 	log         *zap.Logger
 }
 
@@ -50,13 +51,6 @@ func NewGatewayActuator(
 		return nil, fmt.Errorf("failed to dial gateway %q at %q: %w", cfg.Name, endpoint, err)
 	}
 
-	deviceSet := map[string]struct{}{}
-	for _, d := range opts.Devices {
-		if d != "" {
-			deviceSet[d] = struct{}{}
-		}
-	}
-
 	fn := opts.Function
 	spec := operator.FunctionChainSpec{
 		Name:   fn.Name.Unwrap(),
@@ -77,7 +71,7 @@ func NewGatewayActuator(
 			spec,
 			operator.WithIgnorePdump(fn.IgnorePdump),
 		),
-		devices: deviceSet,
+		devices: opts.Devices,
 		log: opts.Log.With(
 			zap.String("gateway", cfg.Name),
 			zap.String("function", fn.Name.Unwrap()),
@@ -90,18 +84,23 @@ func (m *GatewayActuator) Close() error {
 	return m.conn.Close()
 }
 
-// Apply pushes every FIB in fibs to the gateway via UpdateFIB.
+// Apply builds and pushes the FIB for each module config to the gateway,
+// then republishes the operator's network function.
 //
-// Errors from individual FIBs are joined; the reconcile loop applies
-// backoff, so each Apply pass tries every FIB regardless of partial
-// failures.
-func (m *GatewayActuator) Apply(ctx context.Context, fibs []FIB) error {
+// Every FIB is attempted and the function is published even on a partial
+// failure; the joined errors let the reconcile loop retry under backoff.
+func (m *GatewayActuator) Apply(ctx context.Context, snapshot RouteSnapshot) error {
+	neighbours := neigh.FilterByDevices(snapshot.Neighbours, m.devices)
+
 	var err error
-	for _, fib := range fibs {
-		if fib.Name == "" {
+	for name, dump := range snapshot.RIBs {
+		if name == "" {
 			err = errors.Join(err, fmt.Errorf("FIB is missing module config name"))
 			continue
 		}
+
+		fib, _ := BuildFIB(dump, neighbours)
+		fib.Name = name
 		if e := m.pushFIB(ctx, fib); e != nil {
 			err = errors.Join(err, fmt.Errorf("failed to push FIB to gateway %q: %w", m.name, e))
 		}
@@ -129,9 +128,8 @@ func (m *GatewayActuator) applyFunction(ctx context.Context) error {
 
 // pushFIB applies fib to the gateway via the UpdateFIB unary RPC.
 func (m *GatewayActuator) pushFIB(ctx context.Context, fib FIB) error {
-	filtered := filterFIBEntries(fib.Entries, m.devices)
-	entries := make([]*routepb.FIBEntry, len(filtered))
-	for idx, entry := range filtered {
+	entries := make([]*routepb.FIBEntry, len(fib.Entries))
+	for idx, entry := range fib.Entries {
 		entries[idx] = fibEntryToProto(entry)
 	}
 
