@@ -11,6 +11,7 @@
 #include "lib/errors/errors.h"
 
 struct agent;
+struct cp_device;
 
 struct cp_device_pipeline {
 	char name[CP_PIPELINE_NAME_LEN];
@@ -21,6 +22,14 @@ struct cp_device_entry {
 	uint64_t pipeline_count;
 	struct cp_device_pipeline pipelines[];
 };
+
+// Teardown for a device subclass, run by the owning agent when it drains its
+// unused_device list.
+//
+// Passed in-process at drain time (never stored in shared memory), so it stays
+// valid across processes and restarts. It must release the subclass's own
+// allocations, then call cp_device_fini and cp_device_free.
+typedef void (*cp_device_free_fn)(struct cp_device *self);
 
 struct cp_device {
 	// Offset pointer to the memory_context used to allocate this struct.
@@ -59,6 +68,9 @@ struct cp_device {
 	uint64_t counter_packet_tx_count;
 	uint64_t counter_packet_rx_bytes;
 	uint64_t counter_packet_tx_bytes;
+
+	// Link to the previous parked device.
+	struct cp_device *prev;
 };
 
 struct dp_config;
@@ -124,11 +136,22 @@ cp_device_init(
 	yanet_error **err
 );
 
-// Tear down resources acquired by cp_device_init.
+// Tear down the base resources acquired by cp_device_init.
 //
-// Idempotent on zero-init.
+// Base only: a subclass frees its own allocations in its cp_device_free_fn
+// before calling this. Safe to call from an init-failure rollback. Idempotent
+// on zero-init.
 void
 cp_device_fini(struct cp_device *self);
+
+// Reclaim every device parked on the agent's unused_device list.
+//
+// Detaches the list and runs free_fn on each device. Call it from the owning
+// control plane after the retiring generation no longer references the parked
+// devices (i.e. after the device-update wait-for-gen), passing the device
+// type's free function.
+void
+cp_device_agent_drain_unused(struct agent *agent, cp_device_free_fn free_fn);
 
 /*
  * Pipeline registry contains all existing devices.
