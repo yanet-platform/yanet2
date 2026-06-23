@@ -1,14 +1,44 @@
 /// <reference types="vitest" />
 import { fileURLToPath } from 'node:url';
-import { defineConfig, searchForWorkspaceRoot } from 'vite';
+import { defineConfig, searchForWorkspaceRoot, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 
 const ReactCompilerConfig = {};
 
 const rootDir = fileURLToPath(new URL('.', import.meta.url));
 
+// Serve the SPA shell for HTML navigations whose path collides with a
+// co-located source directory.
+//
+// Built-in pages live under web/builtin/<page>/ with an index.ts barrel while
+// their routes are /builtin/<page>. On a hard reload the dev server otherwise
+// resolves the bare path to that directory's index module and serves it as
+// JavaScript instead of index.html. Rewriting extensionless HTML GET requests
+// to / forces the SPA fallback before that directory-index resolution runs.
+const spaHtmlFallback = (): Plugin => ({
+    name: 'yanet-spa-html-fallback',
+    configureServer(server) {
+        server.middlewares.use((req, _res, next) => {
+            const accept = String(req.headers.accept ?? '');
+            const url = (req.url ?? '').split('?')[0];
+            if (
+                req.method === 'GET' &&
+                accept.includes('text/html') &&
+                url !== '/' &&
+                !url.startsWith('/@') &&
+                !url.startsWith('/api') &&
+                !/\.[^/]+$/.test(url)
+            ) {
+                req.url = '/';
+            }
+            next();
+        });
+    },
+});
+
 export default defineConfig({
     plugins: [
+        spaHtmlFallback(),
         react({
             babel: {
                 plugins: [['babel-plugin-react-compiler', ReactCompilerConfig]],
