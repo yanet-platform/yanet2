@@ -15,6 +15,7 @@ import (
 	route "github.com/yanet-platform/yanet2/modules/route/controlplane"
 
 	plain "github.com/yanet-platform/yanet2/devices/plain/controlplane"
+	trafgen "github.com/yanet-platform/yanet2/devices/trafgen/controlplane"
 	vlan "github.com/yanet-platform/yanet2/devices/vlan/controlplane"
 )
 
@@ -48,6 +49,8 @@ type DevicesConfig struct {
 	Plain *plain.Config `yaml:"plain"`
 	// Vlan is the configuration for the vlan device.
 	Vlan *vlan.Config `yaml:"vlan"`
+	// Trafgen is the configuration for the traffic generator device.
+	Trafgen *trafgen.Config `yaml:"trafgen"`
 }
 
 // DefaultModulesConfig returns the default config for the bundled modules.
@@ -69,8 +72,9 @@ func DefaultModulesConfig() ModulesConfig {
 // DefaultDevicesConfig returns the default config for the bundled devices.
 func DefaultDevicesConfig() DevicesConfig {
 	return DevicesConfig{
-		Plain: plain.DefaultConfig(),
-		Vlan:  vlan.DefaultConfig(),
+		Plain:   plain.DefaultConfig(),
+		Vlan:    vlan.DefaultConfig(),
+		Trafgen: trafgen.DefaultConfig(),
 	}
 }
 

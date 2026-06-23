@@ -10,6 +10,7 @@ import (
 	// operatorpb services.
 	"github.com/yanet-platform/yanet2/controlplane/gateway"
 	plain "github.com/yanet-platform/yanet2/devices/plain/controlplane"
+	trafgen "github.com/yanet-platform/yanet2/devices/trafgen/controlplane"
 	vlan "github.com/yanet-platform/yanet2/devices/vlan/controlplane"
 	acl "github.com/yanet-platform/yanet2/modules/acl/controlplane"
 	blackhole "github.com/yanet-platform/yanet2/modules/blackhole/controlplane"
@@ -130,6 +131,12 @@ func buildServices(
 			name: "vlan device",
 			new: func() (gateway.Service, error) {
 				return vlan.NewDeviceVlanDevice(devicesCfg.Vlan, log)
+			},
+		},
+		{
+			name: "trafgen device",
+			new: func() (gateway.Service, error) {
+				return trafgen.NewTrafgenDevice(devicesCfg.Trafgen, trafgen.WithLog(log))
 			},
 		},
 	}

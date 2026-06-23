@@ -1,0 +1,99 @@
+syntax = "proto3";
+
+package devices.trafgen.controlplane.trafgenpb.v1;
+
+import "common/commonpb/v1/target.proto";
+
+option go_package = "github.com/yanet-platform/yanet2/devices/trafgen/controlplane/trafgenpb/v1;trafgenpb";
+
+// TrafgenService configures the traffic generator device.
+//
+// Pipeline routing, the pcap and the target rate are configured independently:
+// UpdateDevice binds the input/output pipelines the generated traffic flows
+// into, UploadPcap loads the frames to replay, and SetRate sets the constant
+// aggregate packet rate. Each can change without disturbing the others.
+service TrafgenService {
+  // UpdateDevice binds the input and output pipelines of the named generator,
+  // exactly like a physical device.
+  //
+  // Generated traffic is demultiplexed into the configured input pipelines, so
+  // a generator with no input pipeline emits nothing usable.
+  rpc UpdateDevice(UpdateDeviceRequest) returns (UpdateDeviceResponse);
+
+  // ListConfigs returns all generator configurations of the dataplane
+  // instance.
+  rpc ListConfigs(ListConfigsRequest) returns (ListConfigsResponse);
+
+  // ShowConfig returns the current configuration for the named generator.
+  rpc ShowConfig(ShowConfigRequest) returns (ShowConfigResponse) {}
+
+  // ShowPackets returns the raw frames loaded for the named generator so a
+  // client can decode and display them.
+  rpc ShowPackets(ShowPacketsRequest) returns (ShowPacketsResponse) {}
+
+  // UploadPcap loads the frames to replay from a pcap, keeping the current
+  // rate.
+  rpc UploadPcap(UploadPcapRequest) returns (UploadPcapResponse) {}
+
+  // SetRate sets the constant aggregate packet rate without touching the
+  // loaded pcap.
+  rpc SetRate(SetRateRequest) returns (SetRateResponse) {}
+}
+
+// UpdateDeviceRequest binds the input/output pipelines of a generator.
+message UpdateDeviceRequest {
+  string name = 1;
+  common.commonpb.v1.Device device = 2;
+}
+
+// UpdateDeviceResponse is the response to an UpdateDevice call.
+message UpdateDeviceResponse {}
+
+message ListConfigsRequest {}
+
+// ListConfigsResponse contains existing configuration names.
+message ListConfigsResponse { repeated string configs = 1; }
+
+// ShowConfigRequest retrieves the runtime configuration for a generator.
+message ShowConfigRequest { string name = 1; }
+
+// ShowConfigResponse describes the loaded frames and the target rate.
+message ShowConfigResponse {
+  // Target aggregate packet rate in packets per second.
+  uint64 rate_pps = 1;
+  // Number of frames extracted from the loaded pcap.
+  uint32 frame_count = 2;
+  // Total byte length of the loaded frames.
+  uint64 total_bytes = 3;
+}
+
+// ShowPacketsRequest retrieves the loaded frames for a generator.
+message ShowPacketsRequest { string name = 1; }
+
+// ShowPacketsResponse carries the raw frames in pcap order.
+message ShowPacketsResponse {
+  // Raw L2 frames; one entry per loaded packet.
+  repeated bytes packets = 1;
+  // True when the returned list was capped and omits trailing frames.
+  bool truncated = 2;
+}
+
+// UploadPcapRequest carries the raw pcap bytes whose packets become the frames.
+message UploadPcapRequest {
+  string name = 1;
+  // Raw contents of a pcap file to replay.
+  bytes pcap = 2;
+}
+
+// UploadPcapResponse is the response to an UploadPcap call.
+message UploadPcapResponse {}
+
+// SetRateRequest carries the target aggregate packet rate.
+message SetRateRequest {
+  string name = 1;
+  // Target aggregate packet rate in packets per second; 0 stops generation.
+  uint64 rate_pps = 2;
+}
+
+// SetRateResponse is the response to a SetRate call.
+message SetRateResponse {}

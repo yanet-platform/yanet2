@@ -28,6 +28,7 @@ custom_target(
         route_mpls_protoc_gen,
         pdump_protoc_gen,
         acl_protoc_gen,
+        trafgen_protoc_gen,
         plain_protoc_gen,
         vlan_protoc_gen,
 
@@ -52,6 +53,8 @@ custom_target(
         lib_route_dp,
         lib_blackhole_cp,
         lib_blackhole_dp,
+        lib_dev_trafgen_api,
+        lib_dev_trafgen_dp,
         lib_filter_compiler,
     ],
     install: true,

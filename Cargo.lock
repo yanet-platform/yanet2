@@ -3219,6 +3219,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "yanet-cli-device-trafgen"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "clap_complete",
+ "prost",
+ "serde",
+ "tokio",
+ "tonic",
+ "tonic-build",
+ "yanet-cli",
+ "yanet-commonpb",
+]
+
+[[package]]
 name = "yanet-cli-device-vlan"
 version = "0.1.0"
 dependencies = [

@@ -547,7 +547,7 @@ dataplane_init(
 			}
 		}
 
-		static const char *devices[] = {"plain", "vlan"};
+		static const char *devices[] = {"plain", "vlan", "trafgen"};
 		for (size_t i = 0; i < sizeof(devices) / sizeof(devices[0]);
 		     ++i) {
 			if (dp_load_device(

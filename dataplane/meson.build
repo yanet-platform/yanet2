@@ -55,6 +55,7 @@ dependencies = lib_dependencies + [
   #devices
   lib_dev_plain_dp_dep,
   lib_dev_vlan_dp_dep,
+  lib_dev_trafgen_dp_dep,
 ]
 
 sources = files(

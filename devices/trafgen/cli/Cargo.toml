@@ -1,0 +1,20 @@
+[package]
+name = "yanet-cli-device-trafgen"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+rust-version = "1.85"
+
+[dependencies]
+commonpb = { path = "../../../common/rust/commonpb", version = "0.1", package = "yanet-commonpb" }
+ync = { path = "../../../cli/core", version = "0.1", package = "yanet-cli" }
+clap = { version = "4.5", features = ["derive"] }
+clap_complete = { version = "4.5", features = ["unstable-dynamic"] }
+tokio = { version = "1", features = ["rt", "net", "time", "macros", "sync"] }
+prost = "0.13"
+tonic = { version = "0.13", features = ["gzip"] }
+serde = { version = "1", features = ["derive"] }
+
+[build-dependencies]
+tonic-build = "0.13"
