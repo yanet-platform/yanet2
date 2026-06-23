@@ -19,13 +19,7 @@
 
 #define TRAFGEN_NS_PER_SEC 1000000000ULL
 
-// Fallback per-tick packet cap when the worker has no configured burst size.
-//
-// The cap bounds packets emitted in a single tick and the token bucket depth,
-// so a worker that was idle (or had its config just swapped) cannot release a
-// huge burst on the next tick. The worker's rx_burst_size is preferred when
-// set, matching the dataplane's RX batching.
-#define TRAFGEN_DEFAULT_MAX_BURST 32
+#define TRAFGEN_MAX_BURST 1024
 
 struct device_trafgen {
 	struct device device;
@@ -120,9 +114,7 @@ trafgen_input_handle(
 	// One packet costs 1e9 * worker_count credit, so each worker emits
 	// rate_pps / worker_count packets per second.
 	uint64_t threshold = TRAFGEN_NS_PER_SEC * config->worker_count;
-	uint64_t max_burst = dp_worker->rx_burst_size != 0
-				     ? dp_worker->rx_burst_size
-				     : TRAFGEN_DEFAULT_MAX_BURST;
+	uint64_t max_burst = TRAFGEN_MAX_BURST;
 	uint64_t credit_cap = threshold * max_burst;
 
 	uint64_t credit = state->credit + elapsed * config->rate_pps;
