@@ -228,11 +228,15 @@ worker_write(struct dataplane_worker *worker, struct packet_list *packets) {
 	struct rte_mbuf *mbufs[ctx->write_size];
 
 	uint16_t to_write = 0;
+	// Packets handed to the local NIC tx queue this iteration, counting
+	// both local output and packets relayed from other workers' pipes.
+	size_t tx_submitted = 0;
 
 	struct packet *packet;
 	while ((packet = packet_list_pop(packets)) != NULL) {
 		if (to_write == ctx->write_size) {
 			worker_submit_burst(worker, mbufs, to_write, &failed);
+			tx_submitted += to_write;
 			to_write = 0;
 		}
 
@@ -256,6 +260,7 @@ worker_write(struct dataplane_worker *worker, struct packet_list *packets) {
 
 	if (to_write > 0) {
 		worker_submit_burst(worker, mbufs, to_write, &failed);
+		tx_submitted += to_write;
 	}
 
 	struct packet_list sent;
@@ -291,9 +296,17 @@ worker_write(struct dataplane_worker *worker, struct packet_list *packets) {
 	packet_list_concat(packets, &failed);
 
 	for (uint32_t pipe_idx = 0; pipe_idx < ctx->rx_pipe_count; ++pipe_idx) {
-		data_pipe_item_pop(
+		tx_submitted += data_pipe_item_pop(
 			ctx->rx_pipes + pipe_idx, worker_rx_pipe_pop_cb, worker
 		);
+	}
+
+	// Nothing was offered to the NIC tx queue this iteration. Some PMDs
+	// only reclaim transmitted mbufs during a tx burst, so force the
+	// driver to free completed descriptors to keep the mbuf pool and the
+	// deferred-free pending ring from stalling while idle.
+	if (tx_submitted == 0) {
+		rte_eth_tx_done_cleanup(worker->port_id, worker->queue_id, 0);
 	}
 }
 
