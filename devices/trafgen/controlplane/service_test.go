@@ -286,6 +286,28 @@ func Test_TrafgenService_InvalidPcap(t *testing.T) {
 	require.Equal(t, codes.InvalidArgument, status.Code(err))
 }
 
+func Test_TrafgenService_OversizedFrame(t *testing.T) {
+	svc, _ := newTestService()
+
+	var buf bytes.Buffer
+	writer := pcapgo.NewWriter(&buf)
+	require.NoError(t, writer.WriteFileHeader(maxFrameLen+1, layers.LinkTypeEthernet))
+
+	frame := bytes.Repeat([]byte{0x01}, maxFrameLen+1)
+	require.NoError(t, writer.WritePacket(gopacket.CaptureInfo{
+		Timestamp:     time.Unix(0, 0),
+		CaptureLength: len(frame),
+		Length:        len(frame),
+	}, frame))
+
+	resp, err := svc.UploadPcap(t.Context(), &trafgenpb.UploadPcapRequest{
+		Name: "trafgen0",
+		Pcap: buf.Bytes(),
+	})
+	require.Nil(t, resp)
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+}
+
 func Test_TrafgenService_EmptyPcap(t *testing.T) {
 	svc, _ := newTestService()
 

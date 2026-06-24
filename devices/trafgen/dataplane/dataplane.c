@@ -1,5 +1,6 @@
 #include "dataplane.h"
 
+#include <stdint.h>
 #include <string.h>
 
 #include "config.h"
@@ -41,6 +42,14 @@ trafgen_emit_frame(
 	const uint32_t *lengths = ADDR_OF(&config->frame_lengths);
 
 	uint32_t len = lengths[frame_idx];
+
+	// rte_pktmbuf_append() reserves tailroom with a 16-bit length, so a
+	// larger frame would wrap and let the copy below overrun the mbuf. The
+	// control plane rejects such frames at upload; guard the copy
+	// regardless.
+	if (len > UINT16_MAX) {
+		return 1;
+	}
 
 	struct packet *packet = worker_packet_alloc(dp_worker);
 	if (packet == NULL) {

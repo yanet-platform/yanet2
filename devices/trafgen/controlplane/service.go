@@ -19,6 +19,12 @@ import (
 
 var errConfigNameRequired = status.Error(codes.InvalidArgument, "config name is required")
 
+// maxFrameLen is the largest replay frame the dataplane can emit.
+//
+// The dataplane reserves mbuf tailroom with a 16-bit length, so a frame above
+// this bound would wrap and corrupt the mbuf; reject such frames at upload.
+const maxFrameLen = 65535
+
 // Pipeline is a weighted input/output pipeline assignment for the generator.
 type Pipeline struct {
 	Name   string
@@ -319,6 +325,12 @@ func parsePcap(pcap []byte) ([][]byte, error) {
 		}
 		if err != nil {
 			return nil, fmt.Errorf("failed to read packet: %w", err)
+		}
+		if len(data) > maxFrameLen {
+			return nil, fmt.Errorf(
+				"frame %d is %d bytes, exceeds the %d-byte limit",
+				len(packets), len(data), maxFrameLen,
+			)
 		}
 		frame := make([]byte, len(data))
 		copy(frame, data)
