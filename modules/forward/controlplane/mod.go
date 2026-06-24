@@ -10,7 +10,10 @@ import (
 	forwardpb "github.com/yanet-platform/yanet2/modules/forward/controlplane/forwardpb/v1"
 )
 
-const agentName = "forward"
+const (
+	agentName   = "forward"
+	serviceName = "modules.forward.controlplane.forwardpb.v1.ForwardService"
+)
 
 // ForwardModule is a control-plane component of a module that is responsible for
 // forwarding traffic between devices.
@@ -19,11 +22,12 @@ type ForwardModule struct {
 	shm            *cpffi.SharedMemory
 	agent          *cpffi.Agent
 	forwardService *ForwardService
+	metricsService *MetricsService
 	log            *zap.Logger
 }
 
 func NewForwardModule(cfg *Config, log *zap.Logger) (*ForwardModule, error) {
-	log = log.With(zap.String("module", "modules.forward.controlplane.forwardpb.v1.ForwardService"))
+	log = log.With(zap.String("module", serviceName))
 
 	shm, err := cpffi.AttachSharedMemory(cfg.MemoryPath.Unwrap())
 	if err != nil {
@@ -41,12 +45,14 @@ func NewForwardModule(cfg *Config, log *zap.Logger) (*ForwardModule, error) {
 	}
 
 	forwardService := NewForwardService(NewBackend(agent))
+	metricsService := NewMetricsService(forwardService)
 
 	return &ForwardModule{
 		cfg:            cfg,
 		shm:            shm,
 		agent:          agent,
 		forwardService: forwardService,
+		metricsService: metricsService,
 		log:            log,
 	}, nil
 }
@@ -60,11 +66,12 @@ func (m *ForwardModule) Endpoint() string {
 }
 
 func (m *ForwardModule) ServicesNames() []string {
-	return []string{"modules.forward.controlplane.forwardpb.v1.ForwardService"}
+	return []string{serviceName, forwardpb.MetricsService_ServiceDesc.ServiceName}
 }
 
 func (m *ForwardModule) RegisterService(server *grpc.Server) {
 	forwardpb.RegisterForwardServiceServer(server, m.forwardService)
+	forwardpb.RegisterMetricsServiceServer(server, m.metricsService)
 }
 
 // Close closes the module.
