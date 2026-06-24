@@ -108,10 +108,14 @@ worker_connection_push_cb(void **item, size_t count, void *data) {
 			rte_mbuf_refcnt_update(push_ctx->mbuf, 1) - 1;
 		memcpy(item, &push_ctx->mbuf, sizeof(struct rte_mbuf *));
 
-		uint32_t ofs = worker->pending_mbuf_stop % num_mbufs;
-		worker->pending_mbufs[ofs].mbuf = push_ctx->mbuf;
-		worker->pending_mbufs[ofs].ref_cnt = ref_cnt;
-		++worker->pending_mbuf_stop;
+		pending_ring_push(
+			worker->pending_mbufs,
+			&worker->pending_mbuf_start,
+			&worker->pending_mbuf_stop,
+			num_mbufs,
+			push_ctx->mbuf,
+			ref_cnt
+		);
 
 		return 1;
 	}
@@ -160,9 +164,9 @@ worker_send_to_port(struct dataplane_worker *worker, struct packet *packet) {
 
 	uint32_t num_mbufs =
 		worker->config.num_mbufs ? worker->config.num_mbufs : 16384;
-	if (worker->pending_mbuf_stop - worker->pending_mbuf_stop >=
+	if (worker->pending_mbuf_stop - worker->pending_mbuf_start >=
 	    num_mbufs) {
-		// To many pending mbufs
+		// Too many pending mbufs
 		return -1;
 	}
 

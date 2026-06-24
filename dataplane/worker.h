@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 #include "config.h"
+#include "pending_ring.h"
 
 #include "lib/dataplane/packet/packet.h"
 
@@ -33,11 +34,6 @@ struct worker_write_ctx {
 	// pipes to read from another workers
 	uint32_t rx_pipe_count;
 	struct data_pipe *rx_pipes;
-};
-
-struct worker_pending_mbuf {
-	struct rte_mbuf *mbuf;
-	uint64_t ref_cnt;
 };
 
 struct dataplane_worker {
