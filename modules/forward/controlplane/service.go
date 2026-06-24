@@ -9,6 +9,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	filterpb "github.com/yanet-platform/yanet2/common/filterpb/v1"
+	"github.com/yanet-platform/yanet2/common/go/grpcmetrics"
 	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
 	forwardpb "github.com/yanet-platform/yanet2/modules/forward/controlplane/forwardpb/v1"
 )
@@ -25,6 +26,8 @@ type Backend interface {
 	UpdateModule(name string, rules []cforward.ForwardRule) (ModuleHandle, error)
 	// DeleteModule removes a module config.
 	DeleteModule(name string) error
+	// ModuleCounters returns dataplane counters collected for a module config.
+	ModuleCounters(name string) []CounterView
 }
 
 type forwardConfig struct {
@@ -38,6 +41,7 @@ type ForwardService struct {
 	mu      sync.Mutex
 	backend Backend
 	configs map[string]forwardConfig
+	metrics *grpcmetrics.ServerMetrics
 }
 
 func NewForwardService(backend Backend) *ForwardService {

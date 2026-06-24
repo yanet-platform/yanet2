@@ -16,6 +16,7 @@
 
 struct agent;
 struct cp_module;
+struct dp_config;
 
 struct cp_module *
 forward_module_config_init(
@@ -24,6 +25,9 @@ forward_module_config_init(
 
 void
 forward_module_config_free(struct cp_module *cp_module);
+
+struct dp_config *
+forward_module_dp_config(struct cp_module *cp_module);
 
 struct forward_rule {
 	char target[CP_DEVICE_NAME_LEN];

@@ -82,6 +82,11 @@ forward_module_config_free(struct cp_module *cp_module) {
 	);
 }
 
+struct dp_config *
+forward_module_dp_config(struct cp_module *cp_module) {
+	return agent_dp_config(cp_module->agent);
+}
+
 typedef int (*forward_rule_check_func)(const struct forward_rule *forward_rule);
 
 static void
