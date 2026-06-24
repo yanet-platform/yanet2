@@ -42,6 +42,9 @@ const DevicesPage: React.FC = () => {
     const [createDialogOpen, setCreateDialogOpen] = useState(false);
     const [grouping, setGrouping] = useState<GroupingMode>('type');
     const [deviceFilter, setDeviceFilter] = useState<FilterKind>('all');
+    const [listCollapsed, setListCollapsed] = useState(false);
+
+    const toggleListCollapsed = useCallback(() => setListCollapsed(v => !v), []);
 
     const deviceNames = useMemo(() => devices.map(d => d.id.name || ''), [devices]);
 
@@ -167,8 +170,15 @@ const DevicesPage: React.FC = () => {
             keywords: 'group parent hierarchy',
             onSelect: () => setGrouping('parent'),
         });
+        list.push({
+            id: '__toggle_list',
+            icon: '⇔',
+            label: listCollapsed ? 'Expand device list' : 'Collapse device list',
+            keywords: 'collapse expand list rail sidebar',
+            onSelect: () => toggleListCollapsed(),
+        });
         return list;
-    }, [canCreate, selectedDevice, handleCreateDevice, handleSaveDevice]);
+    }, [canCreate, selectedDevice, handleCreateDevice, handleSaveDevice, listCollapsed, toggleListCollapsed]);
 
     const rowAdapter = useMemo((): RowAdapter<LocalDevice> => ({
         rows: devices,
@@ -222,7 +232,7 @@ const DevicesPage: React.FC = () => {
                 <EmptyState message={error} />
             ) : (
                 <div className="devices-page-v2">
-                    <div className="dv-workspace">
+                    <div className={"dv-workspace" + (listCollapsed ? " dv-workspace--rail" : "")}>
                         <DevicesList
                             devices={devices}
                             selectedDeviceName={selectedDeviceName}
@@ -233,6 +243,8 @@ const DevicesPage: React.FC = () => {
                             history={history}
                             filter={deviceFilter}
                             onFilterChange={setDeviceFilter}
+                            collapsed={listCollapsed}
+                            onToggleCollapse={toggleListCollapsed}
                         />
                         <DeviceDetails
                             device={selectedDevice}

@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { DeviceListItem } from './DeviceListItem';
-import { IconStack } from './components/Icons';
+import { DeviceRail } from './DeviceRail';
+import { IconStack, IconCaret } from './components/Icons';
 import { deviceTypes } from '@yanet/core/registry';
 import type { LocalDevice } from './types';
 import type { CounterHistoryEntry } from '@yanet/core/hooks/useCounterHistory';
@@ -20,6 +21,8 @@ export interface DevicesListProps {
     history: Map<string, CounterHistoryEntry>;
     filter: FilterKind;
     onFilterChange: (filter: FilterKind) => void;
+    collapsed: boolean;
+    onToggleCollapse: () => void;
 }
 
 interface DeviceGroup {
@@ -73,6 +76,8 @@ export const DevicesList: React.FC<DevicesListProps> = ({
     history,
     filter,
     onFilterChange,
+    collapsed,
+    onToggleCollapse,
 }) => {
 
     const counts = useMemo(() => {
@@ -92,6 +97,8 @@ export const DevicesList: React.FC<DevicesListProps> = ({
 
     const groups = useMemo(() => buildGroups(filtered, grouping), [filtered, grouping]);
 
+    const flatVisible = useMemo(() => groups.flatMap(g => g.items), [groups]);
+
     const chipDefs: [FilterKind, string, number][] = [
         ['all', 'All', counts.all],
         ...deviceTypes.map(m => [m.type, m.pluralLabel, counts.byType[m.type] ?? 0] as [FilterKind, string, number]),
@@ -101,31 +108,52 @@ export const DevicesList: React.FC<DevicesListProps> = ({
         .map(m => `${counts.byType[m.type] ?? 0} ${m.pluralLabel.toLowerCase()}`)
         .join(' · ');
 
+    if (collapsed) {
+        return (
+            <DeviceRail
+                devices={flatVisible}
+                selectedDeviceName={selectedDeviceName}
+                onSelectDevice={onSelectDevice}
+                onExpand={onToggleCollapse}
+                counters={counters}
+                history={history}
+            />
+        );
+    }
+
     return (
         <div className="dv-list">
             <div className="dv-list-hd">
-                <div className="dv-list-counts">
-                    {summary}
-                </div>
-                <div className="dv-filter-row">
-                    <div className="dv-chips">
-                        {chipDefs.map(([k, label, n]) => (
-                            <button
-                                key={k}
-                                className={"dv-chip" + (filter === k ? ' chip-on' : '')}
-                                onClick={() => onFilterChange(k)}
-                            >
-                                {label} <span className="dv-chip-n">{n}</span>
-                            </button>
-                        ))}
+                <div className="dv-list-hd-top">
+                    <span className="dv-list-counts">{summary}</span>
+                    <div className="dv-list-actions">
+                        <button
+                            className="dv-icon-btn dv-icon-btn-wide"
+                            onClick={() => onGroupingChange(nextGrouping(grouping))}
+                            title="Toggle grouping"
+                        >
+                            <IconStack /> {grouping}
+                        </button>
+                        <button
+                            className="dv-icon-btn"
+                            onClick={onToggleCollapse}
+                            title="Collapse list"
+                        >
+                            <IconCaret dir="left" />
+                        </button>
                     </div>
-                    <button
-                        className="dv-group-btn"
-                        onClick={() => onGroupingChange(nextGrouping(grouping))}
-                        title="Toggle grouping"
-                    >
-                        <IconStack /> {grouping}
-                    </button>
+                </div>
+                <div className="dv-filter">
+                    {chipDefs.map(([k, label, n]) => (
+                        <button
+                            key={k}
+                            className={"dv-filter-seg" + (filter === k ? ' seg-on' : '')}
+                            onClick={() => onFilterChange(k)}
+                        >
+                            <span className="dv-filter-seg-lbl">{label}</span>
+                            <span className="dv-filter-seg-n">{n}</span>
+                        </button>
+                    ))}
                 </div>
             </div>
 

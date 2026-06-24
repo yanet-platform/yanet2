@@ -7,15 +7,6 @@ import { trafgen } from './api';
 import { trafgenExt } from './types';
 import { IconGenerator } from './icon';
 
-/** Encode a Uint8Array as base64. */
-const uint8ArrayToBase64 = (bytes: Uint8Array): string => {
-    let binary = '';
-    for (let idx = 0; idx < bytes.length; idx++) {
-        binary += String.fromCharCode(bytes[idx]);
-    }
-    return btoa(binary);
-};
-
 /** Decode base64 L2 frames into displayable packet rows. */
 const framesToPackets = (frames: string[] | undefined): PacketRow[] => {
     let idx = 0;
@@ -38,23 +29,21 @@ const loadData = async (device: BaseDevice): Promise<Record<string, unknown>> =>
     } catch {
         // No server-side config yet; fall through with the empty defaults.
     }
-    return { ratePps, framePackets, truncated, stagedPcapBytes: null };
+    return { ratePps, framePackets, truncated };
 };
 
+// Persists only the pipeline assignments. Rate and pcap are applied live from
+// the detail panel through their own API calls, independent of Save.
 const save = async (
     device: BaseDevice,
     snapshot: BaseDevice | undefined,
 ): Promise<Record<string, unknown>> => {
     const name = device.id.name ?? '';
     const ext = trafgenExt(device);
-    const snapExt = snapshot ? trafgenExt(snapshot) : undefined;
 
     const pipelinesDirty = device.isNew || !snapshot
         || JSON.stringify(device.inputPipelines) !== JSON.stringify(snapshot.inputPipelines)
         || JSON.stringify(device.outputPipelines) !== JSON.stringify(snapshot.outputPipelines);
-    const rateDirty = device.isNew
-        || (snapExt != null && ext.ratePps !== snapExt.ratePps);
-    const pcapStaged = ext.stagedPcapBytes != null;
 
     if (pipelinesDirty) {
         await trafgen.updateDevice({
@@ -62,25 +51,11 @@ const save = async (
             device: toDevicePayload(device.inputPipelines, device.outputPipelines),
         });
     }
-    if (rateDirty) {
-        await trafgen.setRate({ name, rate_pps: ext.ratePps });
-    }
-
-    let framePackets = ext.framePackets;
-    let truncated = ext.truncated;
-    if (pcapStaged && ext.stagedPcapBytes) {
-        await trafgen.uploadPcap({ name, pcap: uint8ArrayToBase64(ext.stagedPcapBytes) });
-        const pkts = await trafgen.showPackets(name);
-        framePackets = framesToPackets(pkts.packets);
-        truncated = pkts.truncated ?? false;
-    }
 
     return {
         ratePps: ext.ratePps,
-        framePackets,
-        truncated,
-        stagedPcapBytes: null,
-        stagedFramePackets: undefined,
+        framePackets: ext.framePackets,
+        truncated: ext.truncated,
     };
 };
 
@@ -106,17 +81,9 @@ export const deviceType: DeviceTypeManifest = {
         ratePps: 0,
         framePackets: [],
         truncated: false,
-        stagedPcapBytes: null,
     }),
     loadData,
     save,
-    extDirty: (device, snapshot) => {
-        const ext = trafgenExt(device);
-        const snapExt = snapshot ? trafgenExt(snapshot) : undefined;
-        return device.isNew
-            || (snapExt != null && ext.ratePps !== snapExt.ratePps)
-            || ext.stagedPcapBytes != null;
-    },
     confirmViaDiff: false,
     loadDetail: () => import('./TrafgenDetail'),
 };

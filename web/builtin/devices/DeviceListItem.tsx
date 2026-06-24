@@ -64,12 +64,12 @@ export const DeviceListItem: React.FC<DeviceListItemProps> = ({
 
             <span className="dv-row-metric">
                 <span className="dv-row-pps-entry">
-                    <span className="dv-row-pps-lbl dv-lbl-rx">RX</span>
                     <span className="dv-row-pps mono">{formatPps(rxPps)}</span>
+                    <span className="dv-row-pps-lbl dv-lbl-rx">RX</span>
                 </span>
                 <span className="dv-row-pps-entry">
-                    <span className="dv-row-pps-lbl dv-lbl-tx">TX</span>
                     <span className="dv-row-pps mono">{formatPps(txPps)}</span>
+                    <span className="dv-row-pps-lbl dv-lbl-tx">TX</span>
                 </span>
             </span>
 

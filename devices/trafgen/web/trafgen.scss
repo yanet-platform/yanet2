@@ -5,19 +5,132 @@
         border: 1px solid rgba(232, 161, 60, 0.22);
     }
 
-    .dv-gen-controls {
-        display: flex;
-        align-items: center;
-        gap: 16px;
-        flex-wrap: wrap;
+    .dv-gen-cards {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 14px;
+
+        @media (max-width: 1100px) {
+            grid-template-columns: 1fr;
+        }
     }
 
-    .dv-gen-group {
+    .dv-gen-card {
+        background: var(--bg-1);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 14px 15px;
+        display: flex;
+        flex-direction: column;
+        gap: 11px;
+    }
+
+    .dv-gen-card-hd {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+    }
+
+    .dv-gen-card-title {
+        font-size: 12.5px;
+        font-weight: 500;
+        color: var(--fg-1);
+    }
+
+    .dv-gen-card-meta {
+        font-size: 11px;
+        color: var(--fg-3);
+    }
+
+    .dv-gen-card-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+
+    .dv-gen-card-note {
+        font-size: 11.5px;
+        color: var(--fg-3);
+    }
+
+    // Clickable file box — opens a local pcap preview without uploading.
+    .dv-gen-file {
+        flex: 1;
+        min-width: 0;
         display: flex;
         align-items: center;
         gap: 8px;
+        background: var(--bg-2);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 7px 11px;
+        color: var(--fg-3);
+        font: inherit;
+        text-align: left;
+        cursor: pointer;
+        transition: border-color 0.12s ease, background 0.12s ease;
+
+        &:hover {
+            border-color: var(--accent-mid);
+            background: var(--bg-3);
+        }
+
+        &--preview {
+            border-color: var(--accent-mid);
+            background: var(--accent-soft);
+        }
     }
 
+    .dv-gen-file-name {
+        font-size: 12px;
+        color: var(--fg-1);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .dv-gen-preview-note {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 11.5px;
+        color: var(--accent);
+    }
+
+    .dv-gen-link {
+        background: transparent;
+        border: 0;
+        padding: 0;
+        color: var(--fg-2);
+        font-family: var(--sans);
+        font-size: 11.5px;
+        text-decoration: underline;
+        cursor: pointer;
+
+        &:hover {
+            color: var(--red);
+        }
+    }
+
+    .dv-gen-card-flag {
+        font-size: 11px;
+        color: var(--accent);
+
+        &--err {
+            color: var(--red);
+        }
+    }
+
+    .dv-gen-apply {
+        margin-left: auto;
+        flex: none;
+        min-width: 116px;
+        justify-content: center;
+    }
+
+    // Actionable secondary button — accent-highlighted while enabled, clearly
+    // muted (grey, not-allowed) once disabled.
     .btn-secondary {
         display: inline-flex;
         align-items: center;
@@ -25,9 +138,9 @@
         height: 30px;
         box-sizing: border-box;
         padding: 0 12px;
-        background: var(--bg-2);
-        color: var(--fg-1);
-        border: 1px solid var(--border-strong);
+        background: var(--accent-soft);
+        color: var(--accent);
+        border: 1px solid var(--accent-mid);
         border-radius: 5px;
         font-family: var(--sans);
         font-size: 13px;
@@ -35,24 +148,22 @@
         cursor: pointer;
         transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
 
-        &:hover {
-            background: var(--bg-3);
+        &:not(:disabled):hover {
+            background: var(--accent-mid);
             border-color: var(--accent);
-            color: var(--fg);
         }
 
-        &:active {
+        &:disabled {
             background: var(--bg-3);
+            color: var(--fg-3);
+            border-color: var(--border);
+            opacity: 0.55;
+            cursor: not-allowed;
         }
-    }
-
-    .dv-gen-lbl {
-        font-size: 12px;
-        color: var(--fg-2);
     }
 
     .dv-gen-rate {
-        width: 130px;
+        width: 120px;
         height: 30px;
         box-sizing: border-box;
         background: var(--bg-2);
@@ -67,15 +178,20 @@
         &:focus {
             border-color: var(--accent);
         }
+
+        &:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        &--invalid,
+        &--invalid:focus {
+            border-color: var(--red);
+        }
     }
 
     .dv-gen-unit {
         font-size: 12px;
-        color: var(--fg-3);
-    }
-
-    .dv-gen-hint {
-        font-size: 11px;
         color: var(--fg-3);
     }
 
@@ -85,11 +201,57 @@
         margin-top: 8px;
     }
 
+    .dv-frames-toggle {
+        width: 100%;
+        display: flex;
+        align-items: center;
+        gap: 11px;
+        background: var(--bg-1);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 12px 14px;
+        margin-bottom: 12px;
+        color: var(--fg);
+        cursor: pointer;
+        font-family: var(--sans);
+
+        &:hover {
+            background: var(--bg-3);
+        }
+    }
+
+    .dv-frames-chevron {
+        color: var(--fg-2);
+        transition: transform 0.18s ease;
+
+        &.open {
+            transform: rotate(90deg);
+        }
+    }
+
+    .dv-frames-toggle-lbl {
+        font-size: 10.5px;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--fg-3);
+    }
+
+    .dv-frames-toggle-count {
+        font-size: 12px;
+        color: var(--fg-2);
+    }
+
+    .dv-frames-toggle-hint {
+        margin-left: auto;
+        font-size: 12px;
+        color: var(--fg-3);
+    }
+
     .dv-gen-frames {
-        // Full-bleed past the scroll padding so the shared packet table
-        // (min-width 800px) fits without clipping or horizontal scroll.
-        // The table sizes its own height and carries its own border.
-        margin: 0 -16px;
+        // Aligned with the Frames toggle and the rest of the detail content:
+        // the table sizes to the section width (it carries its own border and
+        // scrolls horizontally only when narrower than its min content width).
         min-height: 300px;
         display: flex;
         flex-direction: column;

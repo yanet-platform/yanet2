@@ -62,7 +62,7 @@ const MetricBlock = ({
             series={series}
             values={history}
             color={color}
-            height={48}
+            height={56}
         />
     </div>
 );
@@ -190,24 +190,6 @@ const DeviceBody = ({
 
     return (
         <>
-            <div className="dv-section">
-                <div className="dv-section-hd"><span>Counters</span></div>
-                <div className="dv-err-strip">
-                    <div className="dv-err-chip">
-                        <span className="dv-err-chip-lbl">Errors</span>
-                        <span className="dv-err-chip-val mono">0</span>
-                    </div>
-                    <div className="dv-err-chip">
-                        <span className="dv-err-chip-lbl">Drops</span>
-                        <span className="dv-err-chip-val mono">0</span>
-                    </div>
-                    <div className="dv-err-chip">
-                        <span className="dv-err-chip-lbl">Discards</span>
-                        <span className="dv-err-chip-val mono">0</span>
-                    </div>
-                </div>
-            </div>
-
             <div className="dv-section">
                 <div className="dv-section-hd"><span>Properties</span></div>
                 <div className="dv-prop-grid">
@@ -348,29 +330,39 @@ export const DeviceDetails: React.FC<DeviceDetailsProps> = ({
         <div className="dv-detail">
             <div className="dv-detail-hd">
                 <div className="dv-detail-hd-left">
-                    <span className="dv-detail-icon" style={{ color: iconColor }}>
-                        {Icon && <Icon size={20} />}
-                    </span>
-                    <div className="dv-detail-title-wrap">
-                        <div className="dv-detail-title">
-                            <span className="dv-detail-name">{name}</span>
-                            <span className={"dv-kind-tag kind-" + device.type}>
-                                {kindTag}
-                            </span>
-                            {(device.isDirty || device.isNew) && (
-                                <span className="dv-unsaved">unsaved changes</span>
-                            )}
-                        </div>
-                        <div className="dv-detail-sub">
-                            <span className="dv-link-pill link-unknown">
-                                <span className="dv-link-pill-dot" />
-                                Link unknown
-                            </span>
-                            <span className="dv-meta-sep">·</span>
-                            <span>— · —</span>
-                            <span className="dv-meta-sep">·</span>
-                            <span>NUMA —</span>
-                        </div>
+                    <div className="dv-detail-title">
+                        <span className="dv-detail-icon" style={{ color: iconColor }}>
+                            {Icon && <Icon size={18} />}
+                        </span>
+                        <span className="dv-detail-name">{name}</span>
+                        <span className={"dv-kind-tag kind-" + device.type}>
+                            {kindTag}
+                        </span>
+                        {(device.isDirty || device.isNew) && (
+                            <span className="dv-unsaved">unsaved changes</span>
+                        )}
+                    </div>
+                    <div className="dv-detail-sub">
+                        <span className="dv-link-pill link-unknown">
+                            <span className="dv-link-pill-dot" />
+                            Link unknown
+                        </span>
+                        <span className="dv-meta-item">Speed <span className="mono">—</span></span>
+                        <span className="dv-meta-item">Duplex <span className="mono">—</span></span>
+                        <span className="dv-meta-item">NUMA <span className="mono">—</span></span>
+                        <span className="dv-meta-divider" />
+                        <span className="dv-counter-pill">
+                            <span className="dv-counter-dot dot-err" />
+                            Errors <span className="dv-counter-val mono">0</span>
+                        </span>
+                        <span className="dv-counter-pill">
+                            <span className="dv-counter-dot dot-drop" />
+                            Drops <span className="dv-counter-val mono">0</span>
+                        </span>
+                        <span className="dv-counter-pill">
+                            <span className="dv-counter-dot dot-discard" />
+                            Discards <span className="dv-counter-val mono">0</span>
+                        </span>
                     </div>
                 </div>
                 <div className="dv-detail-hd-actions">
