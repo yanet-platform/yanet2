@@ -134,24 +134,40 @@ chain_ectx_process(
 	}
 }
 
-void
-function_ectx_process(
+// Run the function's only chain.
+//
+// With a single chain every packet maps to chain 0, so the per-packet hash
+// demux is skipped: the whole list is moved to a private front in one step.
+// The chain still runs on its own front, so drops accumulated by earlier
+// functions stay hidden from this chain's modules, matching the isolation the
+// per-chain demux provided.
+static void
+function_ectx_run_single_chain(
 	struct dp_worker *dp_worker,
 	struct function_ectx *function_ectx,
 	struct packet_front *packet_front
 ) {
-	struct counter_storage *storage =
-		ADDR_OF(&function_ectx->counter_storage);
+	struct packet_front schedule;
+	packet_front_init(&schedule);
+	packet_list_concat(&schedule.output, &packet_front->output);
+	packet_list_init(&packet_front->output);
 
-	counter_add_packets_bytes(
-		function_ectx->counter_packet_in_count,
-		function_ectx->counter_packet_in_bytes,
-		dp_worker->idx,
-		storage,
-		packet_front->output.count,
-		packet_list_bytes_sum(&packet_front->output)
-	);
+	struct chain_ectx **chains = ADDR_OF(&function_ectx->chains);
+	chain_ectx_process(dp_worker, ADDR_OF(chains), &schedule);
 
+	packet_front_merge(packet_front, &schedule);
+}
+
+// Demultiplex packets across the function's chains by hash.
+//
+// Each chain is processed on its own packet front and the results are merged
+// back into the caller's front.
+static void
+function_ectx_run_chains(
+	struct dp_worker *dp_worker,
+	struct function_ectx *function_ectx,
+	struct packet_front *packet_front
+) {
 	// FIXME: do not create schedule for each invocation
 	struct packet_front schedule[function_ectx->chain_count];
 	for (uint64_t idx = 0; idx < function_ectx->chain_count; ++idx)
@@ -173,6 +189,40 @@ function_ectx_process(
 		chain_ectx_process(dp_worker, chain_ectx, schedule + idx);
 
 		packet_front_merge(packet_front, schedule + idx);
+	}
+}
+
+void
+function_ectx_process(
+	struct dp_worker *dp_worker,
+	struct function_ectx *function_ectx,
+	struct packet_front *packet_front
+) {
+	struct counter_storage *storage =
+		ADDR_OF(&function_ectx->counter_storage);
+
+	counter_add_packets_bytes(
+		function_ectx->counter_packet_in_count,
+		function_ectx->counter_packet_in_bytes,
+		dp_worker->idx,
+		storage,
+		packet_front->output.count,
+		packet_list_bytes_sum(&packet_front->output)
+	);
+
+	if (function_ectx->chain_map_size == 0) {
+		// Every chain is zero-weight (disabled): there is no chain to
+		// route to, so drop, mirroring the empty device dispatch map.
+		packet_list_concat(&packet_front->drop, &packet_front->output);
+		packet_list_init(&packet_front->output);
+	} else if (function_ectx->chain_count == 1) {
+		function_ectx_run_single_chain(
+			dp_worker, function_ectx, packet_front
+		);
+	} else {
+		function_ectx_run_chains(
+			dp_worker, function_ectx, packet_front
+		);
 	}
 
 	counter_add_packets_bytes(
