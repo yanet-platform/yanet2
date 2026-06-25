@@ -31,10 +31,14 @@ import (
 )
 
 // Memory sizes for the dispatch regression harness.
+//
+// They are generous because a single test compiles two ACL modules in one
+// agent arena, and the ACL filter compilation must still fit under sanitizer
+// (ASan redzone) builds.
 const (
-	dispatchCPSize  = 64 * datasize.MB
-	dispatchDPSize  = 4 * datasize.MB
-	dispatchMemSize = 16 * datasize.MB
+	dispatchCPSize  = 256 * datasize.MB
+	dispatchDPSize  = 16 * datasize.MB
+	dispatchMemSize = 128 * datasize.MB
 )
 
 // dispatchUDPPacket builds a single Ethernet/IPv4/UDP packet whose source and
