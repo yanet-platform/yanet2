@@ -195,11 +195,9 @@ merge_net6_range(
 			struct net6 net6;
 			net6_normalize(rule_net, &net6);
 
-			if (radix_lookup(&rdx, 32, net6.addr) !=
+			if (radix_lookup(&rdx, 32, net6.addr) ==
 			    RADIX_VALUE_INVALID)
-				continue;
-
-			radix_insert(&rdx, 32, net6.addr, net_cnt++);
+				radix_insert(&rdx, 32, net6.addr, net_cnt++);
 
 			uint8_t *from_hi;
 			uint8_t *mask_hi;
