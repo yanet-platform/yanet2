@@ -192,6 +192,24 @@ function_ectx_run_chains(
 	}
 }
 
+// Drain a function whose chains are all zero-weight (chain_map_size == 0).
+//
+// There is no chain to route packets to, so the output is dropped. The chains
+// are still scheduled on now-empty fronts so the worker keeps force-polling
+// every module once per tick for periodic work, exactly as the demux path did
+// for a function with no packets to route.
+static void
+function_ectx_drain(
+	struct dp_worker *dp_worker,
+	struct function_ectx *function_ectx,
+	struct packet_front *packet_front
+) {
+	packet_list_concat(&packet_front->drop, &packet_front->output);
+	packet_list_init(&packet_front->output);
+
+	function_ectx_run_chains(dp_worker, function_ectx, packet_front);
+}
+
 void
 function_ectx_process(
 	struct dp_worker *dp_worker,
@@ -211,10 +229,7 @@ function_ectx_process(
 	);
 
 	if (function_ectx->chain_map_size == 0) {
-		// Every chain is zero-weight (disabled): there is no chain to
-		// route to, so drop, mirroring the empty device dispatch map.
-		packet_list_concat(&packet_front->drop, &packet_front->output);
-		packet_list_init(&packet_front->output);
+		function_ectx_drain(dp_worker, function_ectx, packet_front);
 	} else if (function_ectx->chain_count == 1) {
 		function_ectx_run_single_chain(
 			dp_worker, function_ectx, packet_front
