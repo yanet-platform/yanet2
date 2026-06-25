@@ -192,7 +192,7 @@ function_ectx_run_chains(
 	}
 }
 
-// Drain a function whose chains are all zero-weight (chain_map_size == 0).
+// Drain a function whose chains are all zero-weight (fully disabled).
 //
 // There is no chain to route packets to, so the output is dropped. The chains
 // are still scheduled on now-empty fronts so the worker keeps force-polling

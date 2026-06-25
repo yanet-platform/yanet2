@@ -4,8 +4,8 @@
 // The tests here lock in two correctness rules introduced by the
 // single-chain fast path added to function_ectx_process:
 //
-//  1. A function whose chains are all zero-weight (chain_map_size == 0)
-//     must DROP all packets rather than route them to a disabled chain.
+//  1. A function whose chains are all zero-weight must DROP all packets
+//     rather than route them to a disabled chain.
 //
 //  2. The single-chain fast path runs each function on its own packet front,
 //     so two single-chain functions chained in one pipeline hand packets from
@@ -123,21 +123,19 @@ func publishMatchAllACL(t *testing.T, backend acl.Backend, name string, action u
 }
 
 // TestZeroWeightFunctionDropsAllPackets verifies that a function whose only
-// chain has weight 0 (chain_map_size == 0) drops every packet instead of
-// running its disabled chain.
+// chain has weight 0 drops every packet instead of running its disabled chain.
 //
 // The chain is an allow-all ACL that would forward every packet if it ran, so
-// the drop is observable as an empty output. Without the guard in
-// function_ectx_process the zero-weight chain would run (forwarding the
-// packets) or divide by zero in the chain-map modulo.
+// the drop is observable as an empty output. Without the dispatch guard a
+// zero-weight chain would instead process traffic.
 func TestZeroWeightFunctionDropsAllPackets(t *testing.T) {
 	const configName = "zw-acl"
 
 	h, agent, backend := setupACLBackend(t, "zw-test")
 	publishMatchAllACL(t, backend, configName, cacl.ActionAllow)
 
-	// Register an ACL function whose single chain has Weight 0.  The
-	// dataplane builds chain_map_size = 0 for this function.
+	// Register an ACL function whose single chain has weight 0, which the
+	// dataplane treats as fully disabled.
 	require.NoError(t, agent.UpdateFunction(ffi.FunctionConfig{
 		Name: configName,
 		Chains: []ffi.FunctionChainConfig{{
