@@ -150,7 +150,6 @@ function_ectx_run_single_chain(
 	struct packet_front schedule;
 	packet_front_init(&schedule);
 	packet_list_concat(&schedule.output, &packet_front->output);
-	packet_list_init(&packet_front->output);
 
 	struct chain_ectx **chains = ADDR_OF(&function_ectx->chains);
 	chain_ectx_process(dp_worker, ADDR_OF(chains), &schedule);
@@ -205,7 +204,6 @@ function_ectx_drain(
 	struct packet_front *packet_front
 ) {
 	packet_list_concat(&packet_front->drop, &packet_front->output);
-	packet_list_init(&packet_front->output);
 
 	function_ectx_run_chains(dp_worker, function_ectx, packet_front);
 }
@@ -323,7 +321,6 @@ device_entry_ectx_dispatch(
 ) {
 	if (!entry_ectx->pipeline_map_size) {
 		packet_list_concat(&packet_front->drop, &packet_front->output);
-		packet_list_init(&packet_front->output);
 		return;
 	}
 

@@ -83,6 +83,7 @@ packet_list_first(struct packet_list *list) {
 	return list->first;
 }
 
+// Move every packet from src into dst, leaving src empty.
 static inline void
 packet_list_concat(struct packet_list *dst, struct packet_list *src) {
 	// Nothing to do if src is empty
@@ -92,6 +93,7 @@ packet_list_concat(struct packet_list *dst, struct packet_list *src) {
 	// Replace dst with src if dst is empty
 	if (dst->first == NULL) {
 		*dst = *src;
+		packet_list_init(src);
 		return;
 	}
 
@@ -99,6 +101,8 @@ packet_list_concat(struct packet_list *dst, struct packet_list *src) {
 	dst->last = src->last;
 	dst->count += src->count;
 	dst->bytes += src->bytes;
+
+	packet_list_init(src);
 }
 
 static inline struct packet *

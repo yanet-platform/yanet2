@@ -52,11 +52,9 @@ packet_front_drop(struct packet_front *packet_front, struct packet *packet) {
 static inline void
 packet_front_switch(struct packet_front *packet_front) {
 	packet_list_concat(&packet_front->input, &packet_front->output);
-	packet_list_init(&packet_front->output);
 }
 
 static inline void
 packet_front_pass(struct packet_front *packet_front) {
 	packet_list_concat(&packet_front->output, &packet_front->input);
-	packet_list_init(&packet_front->input);
 }

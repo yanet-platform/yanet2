@@ -386,7 +386,6 @@ dataplane_ut_run(
 	packet_front_init(&packet_front);
 
 	packet_list_concat(&packet_front.pending_input, input);
-	packet_list_init(input);
 
 	packet_list_init(&result->output);
 	packet_list_init(&result->drop);
