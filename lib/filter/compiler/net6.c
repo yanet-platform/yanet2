@@ -150,6 +150,102 @@ merge_net6_range(
 	struct value_table *table,
 	struct value_registry *registry
 ) {
+	struct net6 *all_nets = NULL;
+	uint64_t net_cnt = 0;
+	struct radix net_radix;
+	radix_init(&net_radix, memory_context);
+
+	for (const struct filter_rule **action_ptr = actions;
+	     action_ptr < actions + count;
+	     ++action_ptr) {
+
+		if (*action_ptr == NULL)
+			continue;
+		const struct filter_rule *action = *action_ptr;
+
+		struct net6 *nets;
+		uint32_t net_count;
+		get_net6(action, &nets, &net_count);
+
+		for (struct net6 *rule_net = nets; rule_net < nets + net_count;
+		     ++rule_net) {
+			struct net6 net6;
+			net6_normalize(rule_net, &net6);
+
+			if (radix_lookup(&net_radix, 32, net6.addr) !=
+			    RADIX_VALUE_INVALID)
+				continue;
+
+			radix_insert(&net_radix, 32, net6.addr, net_cnt);
+			mem_array_expand_exp(
+				memory_context,
+				(void **)&all_nets,
+				sizeof(*all_nets),
+				&net_cnt
+			);
+			all_nets[net_cnt - 1] = net6;
+		}
+	}
+
+	struct value_table net_table;
+	if (value_table_init(&net_table, memory_context, 1, net_cnt)) {
+//FIXME
+		return -1;
+	}
+
+	struct remap_table net_remap;
+	if (remap_table_init(&net_remap, memory_context, net_cnt)) {
+//FIXME
+		return -1;
+	}
+
+	for (const struct filter_rule **action_ptr = actions;
+	     action_ptr < actions + count;
+	     ++action_ptr) {
+
+		if (*action_ptr == NULL)
+			continue;
+		const struct filter_rule *action = *action_ptr;
+
+		remap_table_new_gen(&net_remap);
+
+		struct net6 *nets;
+		uint32_t net_count;
+		get_net6(action, &nets, &net_count);
+
+		for (struct net6 *rule_net = nets; rule_net < nets + net_count;
+		     ++rule_net) {
+			struct net6 net6;
+			net6_normalize(rule_net, &net6);
+
+			uint32_t net_idx = radix_lookup(&net_radix, 32, net6.addr);
+			uint32_t *v = value_table_get_ptr(&net_table, 0, net_idx);
+			remap_table_touch(&net_remap, *v, v);
+		}
+	}
+
+	remap_table_compact(&net_remap);
+	value_table_compact(&net_table, &net_remap);
+	remap_table_free(&net_remap);
+
+	uint32_t net_range_count = 0;
+	for (uint32_t idx = 0; idx < net_cnt; ++idx)
+		if (value_table_get(&net_table, 0, idx) >= net_range_count)
+			net_range_count = value_table_get(&net_table, 0, idx) + 1;
+	struct value_range *net_ranges;
+	net_ranges = (struct value_range *)memory_balloc(
+		memory_context,
+		sizeof(struct value_range) * net_range_count
+	);
+	memset(net_ranges, 0, sizeof(struct value_range) * net_range_count);
+
+	for (uint32_t net_idx = 0; net_idx < net_cnt; ++net_idx) {
+		value_range_append(
+			memory_context,
+			net_ranges + value_table_get(&net_table, 0, net_idx),
+			net_idx);
+	}
+
 	if (value_table_init(
 		    table,
 		    memory_context,
@@ -168,36 +264,15 @@ merge_net6_range(
 		goto error_remap_table;
 	}
 
-	uint32_t net_cnt = 0;
-
-	struct radix rdx;
-	radix_init(&rdx, memory_context);
-
-	for (const struct filter_rule **action_ptr = actions;
-	     action_ptr < actions + count;
-	     ++action_ptr) {
-
-		if (*action_ptr == NULL)
-			continue;
-		const struct filter_rule *action = *action_ptr;
-
-		remap_table_new_gen(&remap_table);
-
 		uint32_t *values_hi = ADDR_OF(&ri_hi->values);
 		uint32_t *values_lo = ADDR_OF(&ri_lo->values);
 
-		struct net6 *nets;
-		uint32_t net_count;
-		get_net6(action, &nets, &net_count);
+	for (uint32_t net_range_idx = 0; net_range_idx < net_range_count; ++net_range_idx) {
+		uint32_t *values = ADDR_OF(&net_ranges[net_range_idx].values);
+		for (uint32_t idx = 0; idx < net_ranges[net_range_idx].count; ++idx) {
+			struct net6 net6 = all_nets[values[idx]];
 
-		for (struct net6 *rule_net = nets; rule_net < nets + net_count;
-		     ++rule_net) {
-			struct net6 net6;
-			net6_normalize(rule_net, &net6);
 
-			if (radix_lookup(&rdx, 32, net6.addr) ==
-			    RADIX_VALUE_INVALID)
-				radix_insert(&rdx, 32, net6.addr, net_cnt++);
 
 			uint8_t *from_hi;
 			uint8_t *mask_hi;
@@ -254,12 +329,13 @@ merge_net6_range(
 					}
 				}
 			}
+
 		}
 	}
-	remap_table_free(&remap_table);
 
-	uint32_t *values_hi = ADDR_OF(&ri_hi->values);
-	uint32_t *values_lo = ADDR_OF(&ri_lo->values);
+	remap_table_compact(&remap_table);
+	value_table_compact(table, &remap_table);
+	remap_table_free(&remap_table);
 
 	struct value_registry net_registry;
 	value_registry_init(&net_registry, memory_context);
@@ -281,7 +357,7 @@ merge_net6_range(
 			struct net6 net6;
 			net6_normalize(rule_net, &net6);
 
-			uint32_t net_idx = radix_lookup(&rdx, 32, net6.addr);
+			uint32_t net_idx = radix_lookup(&net_radix, 32, net6.addr);
 			if (net_idx < net_registry.range_count)
 				continue;
 
@@ -354,7 +430,7 @@ merge_net6_range(
 			struct net6 net6;
 			net6_normalize(rule_net, &net6);
 
-			uint32_t net_idx = radix_lookup(&rdx, 32, net6.addr);
+			uint32_t net_idx = radix_lookup(&net_radix, 32, net6.addr);
 
 			struct value_range *rng =
 				ADDR_OF(&net_registry.ranges) + net_idx;
@@ -369,19 +445,19 @@ merge_net6_range(
 		}
 	}
 
-	radix_free(&rdx);
+	radix_free(&net_radix);
 	value_registry_fini(&net_registry);
 
 	return 0;
 
 error_late:
-	radix_free(&rdx);
+	radix_free(&net_radix);
 	value_registry_fini(&net_registry);
 	value_table_free(table);
 	return -1;
 
 error_touch:
-	radix_free(&rdx);
+	radix_free(&net_radix);
 	remap_table_free(&remap_table);
 
 error_remap_table:
