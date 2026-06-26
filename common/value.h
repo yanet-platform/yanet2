@@ -92,12 +92,16 @@ static inline uint32_t *
 value_table_get_ptr(
 	struct value_table *value_table, uint32_t v_idx, uint32_t h_idx
 ) {
-	uint32_t **values = ADDR_OF(&value_table->values);
+	// values and the chunk pointers are set at init and cleared only by
+	// value_table_free, which never races a lookup — so on the query path
+	// they are never NULL and the NULL test in ADDR_OF is pure per-lookup
+	// overhead.
+	uint32_t **values = ADDR_OF_NONNULL(&value_table->values);
 	uint64_t idx = v_idx;
 	idx *= value_table->h_dim;
 	idx += h_idx;
 
-	return ADDR_OF(values + idx / VALUE_TABLE_CHUNK_SIZE) +
+	return ADDR_OF_NONNULL(values + idx / VALUE_TABLE_CHUNK_SIZE) +
 	       idx % VALUE_TABLE_CHUNK_SIZE;
 }
 

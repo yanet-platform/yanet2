@@ -274,7 +274,9 @@ lpm_lookup(const struct lpm *lpm, uint8_t key_size, const uint8_t *key) {
 		value = page->values + key[hop];
 		if (value->value & LPM_VALUE_FLAG)
 			break;
-		page = ADDR_OF(&value->page);
+		// An intermediate node (flag clear) always has a child page, so
+		// the relative pointer is never NULL here — skip the NULL test.
+		page = ADDR_OF_NONNULL(&value->page);
 	}
 
 	return LPM_VALUE_GET(value->value);

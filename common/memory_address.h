@@ -20,6 +20,23 @@
 	})
 
 /**
+ * @brief Convert a known-non-NULL relative pointer to a virtual address.
+ *
+ * Same as ADDR_OF but skips the NULL test. The compiler cannot prove the
+ * stored offset is non-zero (it is data), so ADDR_OF always emits a branch /
+ * cmov. On hot pointer-chases where the relative pointer is structurally never
+ * NULL — e.g. an intermediate LPM trie node always has a child page — this
+ * drops that per-hop cmov. If the offset is in fact 0 the result is the slot
+ * address itself, a wrong value but never a crash.
+ */
+#define ADDR_OF_NONNULL(OFFSET)                                                \
+	__extension__({                                                        \
+		typeof(*(OFFSET)) offset_val = *(OFFSET);                      \
+		(typeof(offset_val))((uintptr_t)offset_val +                   \
+				     (uintptr_t)(OFFSET));                     \
+	})
+
+/**
  * @brief Set a relative pointer to point to a virtual address
  *
  * This macro sets a relative pointer to point to a specified virtual address.
