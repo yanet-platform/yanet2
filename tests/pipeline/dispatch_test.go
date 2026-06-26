@@ -1,8 +1,9 @@
 // Package pipeline_test holds regression tests for the dataplane pipeline
 // dispatch logic implemented in lib/dataplane/pipeline/pipeline.c.
 //
-// The tests here lock in two correctness rules introduced by the
-// single-chain fast path added to function_ectx_process:
+// The tests here lock in the correctness rules of the single-chain fast path
+// added to function_ectx_process and of its device-entry counterpart added to
+// device_entry_ectx_dispatch:
 //
 //  1. A function whose chains are all zero-weight must DROP all packets
 //     rather than route them to a disabled chain.
@@ -10,6 +11,12 @@
 //  2. The single-chain fast path runs each function on its own packet front,
 //     so two single-chain functions chained in one pipeline hand packets from
 //     the first to the second intact and drop exactly what the chain drops.
+//
+//  3. A device entry whose pipelines are all zero-weight must DROP all packets
+//     rather than route them to a disabled pipeline.
+//
+//  4. The single-pipeline fast path delivers the whole batch to the one bound
+//     pipeline intact.
 package pipeline_test
 
 import (
@@ -244,4 +251,139 @@ func TestSequentialSingleChainFunctions(t *testing.T) {
 	byName := dataplaneut.SingleValueCounters(counters)
 	require.Equal(t, uint64(packetCount), byName["input"],
 		"funcB must receive exactly the packets funcA forwarded (all N)")
+}
+
+// TestZeroWeightDeviceEntryDropsAllPackets verifies that a device entry whose
+// only input pipeline has weight 0 drops every packet instead of routing it to
+// the disabled pipeline.
+//
+// The pipeline is an allow-all ACL that would forward every packet if it ran,
+// so the drop is observable as an empty output. This is the device-entry analog
+// of the zero-weight function rule: a zero pipeline-map size must drop, not
+// dispatch.
+func TestZeroWeightDeviceEntryDropsAllPackets(t *testing.T) {
+	const configName = "zw-dev-acl"
+
+	h, agent, backend := setupACLBackend(t, "zw-dev-test")
+	publishMatchAllACL(t, backend, configName, cacl.ActionAllow)
+
+	require.NoError(t, agent.UpdateFunction(ffi.FunctionConfig{
+		Name: configName,
+		Chains: []ffi.FunctionChainConfig{{
+			Weight: 1,
+			Chain: ffi.ChainConfig{
+				Name:    configName + "_chain",
+				Modules: []ffi.ChainModuleConfig{{Type: "acl", Name: configName}},
+			},
+		}},
+	}))
+	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{
+		Name:      configName,
+		Functions: []string{configName},
+	}))
+	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{Name: "dummy"}))
+
+	// Bind the input pipeline with weight 0, which leaves the device entry's
+	// pipeline-map size at 0, so every packet is unroutable.
+	require.NoError(t, agent.UpdatePlainDevices([]ffi.DeviceConfig{{
+		Name:   "port0",
+		Input:  []ffi.DevicePipelineConfig{{Name: configName, Weight: 0}},
+		Output: []ffi.DevicePipelineConfig{{Name: "dummy", Weight: 1}},
+	}}))
+
+	const packetCount = 4
+	pkts := make([]gopacket.Packet, packetCount)
+	for idx := range packetCount {
+		pkts[idx] = dispatchUDPPacket(t)
+	}
+
+	result, err := h.HandlePackets(pkts...)
+	require.NoError(t, err)
+	require.Empty(t, result.Output,
+		"zero-weight device entry must not forward any packet to output")
+	require.Len(t, result.Drop, packetCount,
+		"zero-weight device entry must drop all packets")
+}
+
+// TestSinglePipelineDeviceForwardsAllPackets verifies that a device entry with a
+// single bound pipeline delivers every packet to that pipeline via the
+// single-pipeline fast path, rather than losing or duplicating any.
+//
+// The pipeline is an allow-all ACL; its function input counter must equal the
+// number of packets handed in, confirming the fast path delivered the whole
+// batch to pipeline 0 intact.
+func TestSinglePipelineDeviceForwardsAllPackets(t *testing.T) {
+	const configName = "sp-dev-acl"
+
+	h, agent, backend := setupACLBackend(t, "sp-dev-test")
+	publishMatchAllACL(t, backend, configName, cacl.ActionAllow)
+
+	require.NoError(t, agent.UpdateFunction(ffi.FunctionConfig{
+		Name: configName,
+		Chains: []ffi.FunctionChainConfig{{
+			Weight: 1,
+			Chain: ffi.ChainConfig{
+				Name:    configName + "_chain",
+				Modules: []ffi.ChainModuleConfig{{Type: "acl", Name: configName}},
+			},
+		}},
+	}))
+	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{
+		Name:      configName,
+		Functions: []string{configName},
+	}))
+	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{Name: "dummy"}))
+	require.NoError(t, agent.UpdatePlainDevices([]ffi.DeviceConfig{{
+		Name:   "port0",
+		Input:  []ffi.DevicePipelineConfig{{Name: configName, Weight: 1}},
+		Output: []ffi.DevicePipelineConfig{{Name: "dummy", Weight: 1}},
+	}}))
+
+	const packetCount = 5
+	pkts := make([]gopacket.Packet, packetCount)
+	for idx := range packetCount {
+		pkts[idx] = dispatchUDPPacket(t)
+	}
+
+	result, err := h.HandlePackets(pkts...)
+	require.NoError(t, err)
+	require.Empty(t, result.Drop,
+		"allow-all single-pipeline device must not drop any packet")
+
+	counters := h.SharedMemory().DPConfig(0).FunctionCounters("port0", configName, configName)
+	byName := dataplaneut.SingleValueCounters(counters)
+	require.Equal(t, uint64(packetCount), byName["input"],
+		"single-pipeline device dispatch must deliver every packet to the pipeline")
+}
+
+// TestEmptyPipelineDeviceDropsAllPackets verifies that a device entry with no
+// bound input pipelines drops every packet without entering the demux.
+//
+// This is the no-pipeline edge of the zero-weight rule: there is nothing to
+// route to and nothing to force-poll, so the entry must drop and return rather
+// than size a zero-length scheduling array in the demux.
+func TestEmptyPipelineDeviceDropsAllPackets(t *testing.T) {
+	h, agent, _ := setupACLBackend(t, "empty-dev-test")
+
+	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{Name: "dummy"}))
+	// The device input binds no pipeline at all, so the entry has nothing to
+	// dispatch to.
+	require.NoError(t, agent.UpdatePlainDevices([]ffi.DeviceConfig{{
+		Name:   "port0",
+		Input:  []ffi.DevicePipelineConfig{},
+		Output: []ffi.DevicePipelineConfig{{Name: "dummy", Weight: 1}},
+	}}))
+
+	const packetCount = 4
+	pkts := make([]gopacket.Packet, packetCount)
+	for idx := range packetCount {
+		pkts[idx] = dispatchUDPPacket(t)
+	}
+
+	result, err := h.HandlePackets(pkts...)
+	require.NoError(t, err)
+	require.Empty(t, result.Output,
+		"device entry with no pipeline must not forward any packet")
+	require.Len(t, result.Drop, packetCount,
+		"device entry with no pipeline must drop all packets")
 }

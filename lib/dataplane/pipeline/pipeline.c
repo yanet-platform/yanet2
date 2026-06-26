@@ -312,18 +312,39 @@ device_entry_ectx_process(
 	entry_ectx->handler(dp_worker, device_ectx, packet_front);
 }
 
-// Demultiplex the handler output across the entry's pipelines.
+// Run the entry's only pipeline.
+//
+// With a single pipeline every packet maps to pipeline 0, so the per-packet
+// hash demux is skipped: the whole list is moved to a private front in one
+// step. The pipeline still runs on its own front, so drops accumulated by the
+// device handler stay hidden from its functions, matching the isolation the
+// per-pipeline demux provided.
 static inline void
-device_entry_ectx_dispatch(
+device_entry_ectx_dispatch_single(
 	struct dp_worker *dp_worker,
 	struct device_entry_ectx *entry_ectx,
 	struct packet_front *packet_front
 ) {
-	if (!entry_ectx->pipeline_map_size) {
-		packet_list_concat(&packet_front->drop, &packet_front->output);
-		return;
-	}
+	struct packet_front schedule;
+	packet_front_init(&schedule);
+	packet_list_concat(&schedule.output, &packet_front->output);
 
+	struct pipeline_ectx **pipelines = ADDR_OF(&entry_ectx->pipelines);
+	pipeline_ectx_process(dp_worker, ADDR_OF(pipelines), &schedule);
+
+	packet_front_merge(packet_front, &schedule);
+}
+
+// Demultiplex the handler output across the entry's pipelines by hash.
+//
+// Each pipeline is processed on its own packet front and the results are merged
+// back into the caller's front.
+static inline void
+device_entry_ectx_dispatch_many(
+	struct dp_worker *dp_worker,
+	struct device_entry_ectx *entry_ectx,
+	struct packet_front *packet_front
+) {
 	// FIXME do not create front for each invocation
 	struct packet_front schedule[entry_ectx->pipeline_count];
 	for (uint64_t idx = 0; idx < entry_ectx->pipeline_count; ++idx) {
@@ -348,6 +369,50 @@ device_entry_ectx_dispatch(
 		pipeline_ectx_process(dp_worker, pipeline_ectx, schedule + idx);
 
 		packet_front_merge(packet_front, schedule + idx);
+	}
+}
+
+// Drain a device entry that has no routable pipeline.
+//
+// The unroutable output is dropped. If the entry has pipelines but they are all
+// zero-weight, they are still scheduled on now-empty fronts so the worker keeps
+// force-polling every module once per tick for periodic work; reusing the demux
+// is safe once the output list is empty, since its per-packet loop never runs
+// and the modulo by the zero pipeline-map size is never reached. An entry with
+// no pipelines at all has nothing to poll, so the demux — which would size a
+// zero-length scheduling array — is skipped.
+static inline void
+device_entry_ectx_drain(
+	struct dp_worker *dp_worker,
+	struct device_entry_ectx *entry_ectx,
+	struct packet_front *packet_front
+) {
+	packet_list_concat(&packet_front->drop, &packet_front->output);
+
+	if (entry_ectx->pipeline_count > 0) {
+		device_entry_ectx_dispatch_many(
+			dp_worker, entry_ectx, packet_front
+		);
+	}
+}
+
+// Demultiplex the handler output across the entry's pipelines.
+static inline void
+device_entry_ectx_dispatch(
+	struct dp_worker *dp_worker,
+	struct device_entry_ectx *entry_ectx,
+	struct packet_front *packet_front
+) {
+	if (entry_ectx->pipeline_map_size == 0) {
+		device_entry_ectx_drain(dp_worker, entry_ectx, packet_front);
+	} else if (entry_ectx->pipeline_count == 1) {
+		device_entry_ectx_dispatch_single(
+			dp_worker, entry_ectx, packet_front
+		);
+	} else {
+		device_entry_ectx_dispatch_many(
+			dp_worker, entry_ectx, packet_front
+		);
 	}
 }
 
