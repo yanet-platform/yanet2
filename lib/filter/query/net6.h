@@ -30,22 +30,9 @@ FILTER_ATTR_QUERY_FUNC(net6_dst)(
 			packets[idx]->network_header.offset
 		);
 
-		hi_values[idx] = lpm8_lookup(
-			&c->hi, (const uint8_t *)ipv6_hdr->dst_addr
-		);
-	}
-
-	for (uint32_t idx = 0; idx < count; ++idx) {
-		struct rte_mbuf *mbuf = packet_to_mbuf(packets[idx]);
-		struct rte_ipv6_hdr *ipv6_hdr = rte_pktmbuf_mtod_offset(
-			mbuf,
-			struct rte_ipv6_hdr *,
-			packets[idx]->network_header.offset
-		);
-
-		lo_values[idx] = lpm8_lookup(
-			&c->lo, (const uint8_t *)ipv6_hdr->dst_addr + 8
-		);
+		const uint8_t *addr = (const uint8_t *)ipv6_hdr->dst_addr;
+		hi_values[idx] = lpm8_lookup(&c->hi, addr);
+		lo_values[idx] = lpm8_lookup(&c->lo, addr + 8);
 	}
 
 	for (uint32_t idx = 0; idx < count; ++idx) {
@@ -75,22 +62,9 @@ FILTER_ATTR_QUERY_FUNC(net6_src)(
 			packets[idx]->network_header.offset
 		);
 
-		hi_values[idx] = lpm8_lookup(
-			&c->hi, (const uint8_t *)ipv6_hdr->src_addr
-		);
-	}
-
-	for (uint32_t idx = 0; idx < count; ++idx) {
-		struct rte_mbuf *mbuf = packet_to_mbuf(packets[idx]);
-		struct rte_ipv6_hdr *ipv6_hdr = rte_pktmbuf_mtod_offset(
-			mbuf,
-			struct rte_ipv6_hdr *,
-			packets[idx]->network_header.offset
-		);
-
-		lo_values[idx] = lpm8_lookup(
-			&c->lo, (const uint8_t *)ipv6_hdr->src_addr + 8
-		);
+		const uint8_t *addr = (const uint8_t *)ipv6_hdr->src_addr;
+		hi_values[idx] = lpm8_lookup(&c->hi, addr);
+		lo_values[idx] = lpm8_lookup(&c->lo, addr + 8);
 	}
 
 	for (uint32_t idx = 0; idx < count; ++idx) {

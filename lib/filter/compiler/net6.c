@@ -9,6 +9,10 @@
 
 #include "declare.h"
 
+#include <stdbool.h>
+#include <stdlib.h>
+#include <string.h>
+
 ////////////////////////////////////////////////////////////////////////////////
 
 typedef void (*action_get_net6_func)(
@@ -139,6 +143,93 @@ error:
 	return -1;
 }
 
+// Marks each action that is the first to use its network set.
+//
+// Actions that repeat an earlier action's network set refine the value table
+// the same way, so only the first one needs a generation. A null result means
+// scratch memory ran out and every action must be processed.
+static bool *
+net6_first_occurrence_mask(
+	const struct filter_rule **actions,
+	uint32_t count,
+	action_get_net6_func get_net6
+) {
+	bool *first = (bool *)malloc(count * sizeof(bool));
+	if (first == NULL)
+		return NULL;
+
+	// Size the scratch table to keep the load factor at one half. Fall back
+	// to processing every action if the count is too large to size for.
+	uint64_t need = (uint64_t)count * 2;
+	if (need > ((uint64_t)1 << 31)) {
+		free(first);
+		return NULL;
+	}
+	uint32_t cap = 8;
+	while (cap < need)
+		cap <<= 1;
+
+	uint32_t *slot = (uint32_t *)malloc(cap * sizeof(uint32_t));
+	uint64_t *slot_hash = (uint64_t *)malloc(cap * sizeof(uint64_t));
+	if (slot == NULL || slot_hash == NULL) {
+		free(first);
+		free(slot);
+		free(slot_hash);
+		return NULL;
+	}
+	for (uint32_t idx = 0; idx < cap; ++idx)
+		slot[idx] = UINT32_MAX;
+
+	for (uint32_t idx = 0; idx < count; ++idx) {
+		first[idx] = false;
+		if (actions[idx] == NULL)
+			continue;
+
+		struct net6 *nets;
+		uint32_t net_count;
+		get_net6(actions[idx], &nets, &net_count);
+
+		uint32_t byte_count = net_count * (uint32_t)sizeof(struct net6);
+		uint64_t hash = 1469598103934665603ULL;
+		const uint8_t *bytes = (const uint8_t *)nets;
+		for (uint32_t b = 0; b < byte_count; ++b) {
+			hash ^= bytes[b];
+			hash *= 1099511628211ULL;
+		}
+
+		uint32_t pos = (uint32_t)(hash & (cap - 1));
+		bool duplicate = false;
+		while (slot[pos] != UINT32_MAX) {
+			if (slot_hash[pos] == hash) {
+				struct net6 *other;
+				uint32_t other_count;
+				get_net6(
+					actions[slot[pos]], &other, &other_count
+				);
+				if (other_count == net_count &&
+				    (net_count == 0 ||
+				     memcmp(nets, other, byte_count) == 0)) {
+					duplicate = true;
+					break;
+				}
+			}
+			pos = (pos + 1) & (cap - 1);
+		}
+
+		if (duplicate)
+			continue;
+
+		slot[pos] = idx;
+		slot_hash[pos] = hash;
+		first[idx] = true;
+	}
+
+	free(slot);
+	free(slot_hash);
+
+	return first;
+}
+
 static inline int
 merge_net6_range(
 	struct memory_context *memory_context,
@@ -168,6 +259,10 @@ merge_net6_range(
 		goto error_remap_table;
 	}
 
+	// Actions that share a network set refine the table the same way, so
+	// the loop below runs a generation only for the first of each set.
+	bool *first_set = net6_first_occurrence_mask(actions, count, get_net6);
+
 	uint32_t net_cnt = 0;
 
 	struct radix rdx;
@@ -178,6 +273,8 @@ merge_net6_range(
 	     ++action_ptr) {
 
 		if (*action_ptr == NULL)
+			continue;
+		if (first_set != NULL && !first_set[action_ptr - actions])
 			continue;
 		const struct filter_rule *action = *action_ptr;
 
@@ -258,6 +355,13 @@ merge_net6_range(
 			}
 		}
 	}
+
+	free(first_set);
+
+	// Pack the combined values into a dense range before building the
+	// registry, so the value tables stacked on top stay small.
+	remap_table_compact(&remap_table);
+	value_table_compact(table, &remap_table);
 	remap_table_free(&remap_table);
 
 	uint32_t *values_hi = ADDR_OF(&ri_hi->values);
@@ -383,6 +487,7 @@ error_late:
 	return -1;
 
 error_touch:
+	free(first_set);
 	radix_free(&rdx);
 	remap_table_free(&remap_table);
 
