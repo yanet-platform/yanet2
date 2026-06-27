@@ -64,12 +64,14 @@ registry_pair_representatives(
 			struct value_range *o2 = &ranges2[other];
 			if (slot_hash[pos] == hash && o1->count == r1->count &&
 			    o2->count == r2->count &&
-			    memcmp(ADDR_OF(&o1->values),
-				   v1,
-				   r1->count * sizeof(uint32_t)) == 0 &&
-			    memcmp(ADDR_OF(&o2->values),
-				   v2,
-				   r2->count * sizeof(uint32_t)) == 0) {
+			    (r1->count == 0 ||
+			     memcmp(ADDR_OF(&o1->values),
+				    v1,
+				    r1->count * sizeof(uint32_t)) == 0) &&
+			    (r2->count == 0 ||
+			     memcmp(ADDR_OF(&o2->values),
+				    v2,
+				    r2->count * sizeof(uint32_t)) == 0)) {
 				found = other;
 				break;
 			}

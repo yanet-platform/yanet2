@@ -207,7 +207,8 @@ net6_first_occurrence_mask(
 					actions[slot[pos]], &other, &other_count
 				);
 				if (other_count == net_count &&
-				    memcmp(nets, other, byte_count) == 0) {
+				    (net_count == 0 ||
+				     memcmp(nets, other, byte_count) == 0)) {
 					duplicate = true;
 					break;
 				}
