@@ -22,7 +22,7 @@ import (
 const (
 	mirCPSize  = 64 * datasize.MB
 	mirDPSize  = 4 * datasize.MB
-	mirMemSize = 8 * datasize.MB
+	mirMemSize = 16 * datasize.MB
 )
 
 // setupMirrorHarness builds a dataplane harness with the mirror module

@@ -171,6 +171,7 @@ net6_range_index_bounds(
 	uint8_t *mask;
 	net6_get_hi_part(net6, &from, &mask);
 	net6_part_range_index_bound(range_index_hi, from, mask, start_hi, stop_hi);
+	net6_get_lo_part(net6, &from, &mask);
 	net6_part_range_index_bound(range_index_lo, from, mask, start_lo, stop_lo);
 }
 
@@ -202,9 +203,11 @@ touch_network_ranges(
 		for (uint32_t idx = 0; idx < net_ranges[net_range_idx].count; ++idx) {
 			struct net6 net6 = all_nets[values[idx]];
 
-			if (*(uint64_t *)net6.mask == 0xffffffffffffffff &&
-			    *(uint64_t *)(net6.mask + 8) == 0xffffffffffffffff)
+			if (*(uint64_t *)net6.mask == 0 &&
+			    *(uint64_t *)(net6.mask + 8) == 0)
 				continue;
+
+			remap_table_new_gen(&remap_table);
 
 			uint32_t start_hi;
 			uint32_t stop_hi;
@@ -397,7 +400,7 @@ build_net6_info(
 
 			uint32_t net_idx = radix_lookup(net_radix, 32, net6.addr);
 			uint32_t *v = value_table_get_ptr(&net_table, 0, net_idx);
-			if (remap_table_touch(&net_remap, *v, v)) {
+			if (remap_table_touch(&net_remap, *v, v) < 0) {
 				goto error_touch;
 			}
 		}
