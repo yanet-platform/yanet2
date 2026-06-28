@@ -7,7 +7,7 @@ project(
     'buildtype=release',
     'warning_level=2',
     'werror=true',
-    'optimization=0',
+    'optimization=2',
     'prefix=/usr',
     'libdir=lib',
     'bindir=bin',

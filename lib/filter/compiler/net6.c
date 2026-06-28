@@ -365,7 +365,7 @@ build_net6_info(
 		}
 	}
 
-	if (net_count == 0) {
+	if (*net_count == 0) {
 		return 0;
 	}
 
