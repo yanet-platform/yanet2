@@ -1099,7 +1099,7 @@ cp_device_list_info_free(struct cp_device_list_info *device_list_info) {
 }
 
 static struct cp_device_info *
-yanet_build_device_info(struct cp_device *device) {
+yanet_build_device_info(struct cp_device *device, uint64_t index) {
 	struct cp_device_entry *input = ADDR_OF(&device->input_pipelines);
 	struct cp_device_entry *output = ADDR_OF(&device->output_pipelines);
 
@@ -1114,6 +1114,7 @@ yanet_build_device_info(struct cp_device *device) {
 
 	strtcpy(device_info->type, device->type, CP_DEVICE_TYPE_LEN);
 	strtcpy(device_info->name, device->name, CP_DEVICE_NAME_LEN);
+	device_info->index = index;
 
 	device_info->input_count = input->pipeline_count;
 	device_info->output_count = output->pipeline_count;
@@ -1169,7 +1170,7 @@ yanet_get_cp_device_list_info(struct dp_config *dp_config) {
 			continue;
 		}
 		struct cp_device_info *device_info =
-			yanet_build_device_info(cp_device);
+			yanet_build_device_info(cp_device, idx);
 		if (device_info == NULL) {
 			cp_device_list_info_free(device_list_info);
 			device_list_info = NULL;

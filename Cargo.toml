@@ -16,6 +16,7 @@ members = [
     "cli/modules/gateway",
     "cli/modules/ready",
     "cli/modules/metrics",
+    "cli/modules/device",
     "modules/acl/cli",
     "modules/fwstate/cli",
     "modules/decap/cli",

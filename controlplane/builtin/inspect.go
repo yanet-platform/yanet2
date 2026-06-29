@@ -182,6 +182,7 @@ func (m *Inspect) devices(dpConfig *ffi.DPConfig) []*ynpb.DeviceInfo {
 		deviceInfo := &ynpb.DeviceInfo{
 			Type:            device.Type,
 			Name:            device.Name,
+			Index:           device.Index,
 			InputPipelines:  make([]*ynpb.DevicePipelineInfo, len(device.InputPipelines)),
 			OutputPipelines: make([]*ynpb.DevicePipelineInfo, len(device.OutputPipelines)),
 		}

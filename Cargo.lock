@@ -3199,6 +3199,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "yanet-cli-device-list"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "clap_complete",
+ "colored",
+ "tokio",
+ "tonic",
+ "yanet-cli",
+ "yanet-ynpb",
+]
+
+[[package]]
 name = "yanet-cli-device-plain"
 version = "0.1.0"
 dependencies = [

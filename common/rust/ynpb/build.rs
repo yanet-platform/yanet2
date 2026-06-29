@@ -16,6 +16,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
         .compile_protos(
             &[
                 "controlplane/ynpb/v1/logging.proto",
+                "controlplane/ynpb/v1/device.proto",
                 "controlplane/ynpb/v1/function.proto",
                 "controlplane/ynpb/v1/pipeline.proto",
                 "controlplane/ynpb/v1/inspect.proto",

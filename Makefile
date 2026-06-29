@@ -10,6 +10,7 @@ RELEASE_DIR := $(TARGET_DIR)/release
 # Core CLI packages/binaries that live in cli workspace.
 CLI_CORE_MODULES := \
 	common \
+	device-list \
 	inspect \
 	pipeline \
 	function \

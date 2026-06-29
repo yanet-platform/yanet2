@@ -358,6 +358,7 @@ type DevicePipelineInfo struct {
 type DeviceInfo struct {
 	Type            string
 	Name            string
+	Index           uint32
 	InputPipelines  []DevicePipelineInfo
 	OutputPipelines []DevicePipelineInfo
 }
@@ -412,6 +413,7 @@ func (m *DPConfig) Devices() []DeviceInfo {
 		out[idx] = DeviceInfo{
 			Type:            C.GoString(&deviceInfo._type[0]),
 			Name:            C.GoString(&deviceInfo.name[0]),
+			Index:           uint32(deviceInfo.index),
 			InputPipelines:  inputPipelines,
 			OutputPipelines: outputPipelines,
 		}

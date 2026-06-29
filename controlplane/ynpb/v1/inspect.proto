@@ -224,6 +224,8 @@ message DeviceInfo {
   repeated DevicePipelineInfo input_pipelines = 3;
   // Pipelines which are executed on outgoing traffic from this device.
   repeated DevicePipelineInfo output_pipelines = 4;
+  // Device registry index.
+  uint32 index = 5;
 }
 message DevicePipelineInfo {
   // Name of the pipeline associated with this device.

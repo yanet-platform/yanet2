@@ -153,6 +153,7 @@ struct cp_device_pipeline_info {
 struct cp_device_info {
 	char type[CP_DEVICE_TYPE_LEN];
 	char name[CP_DEVICE_NAME_LEN];
+	uint64_t index;
 	uint64_t input_count;
 	uint64_t output_count;
 

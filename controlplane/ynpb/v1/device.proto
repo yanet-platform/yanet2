@@ -4,9 +4,10 @@ package controlplane.ynpb.v1;
 
 option go_package = "github.com/yanet-platform/yanet2/controlplane/ynpb/v1;ynpb";
 
-// TODO: docs
+// DeviceService provides information about network devices configured
+// in the dataplane.
 service DeviceService {
-  // Lists all configured devices
+  // List returns all configured devices.
   rpc List(ListDevicesRequest) returns (ListDevicesResponse);
 }
 
@@ -17,4 +18,6 @@ message ListDevicesResponse { repeated DeviceId ids = 1; }
 message DeviceId {
   string type = 1;
   string name = 2;
+  // Device registry index.
+  uint32 index = 3;
 }
