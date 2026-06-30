@@ -240,27 +240,39 @@ value_registry_start(struct value_registry *registry) {
 }
 
 static inline int
+value_range_append(
+	struct memory_context *memory_context,
+	struct value_range *value_range,
+	uint32_t value
+) {
+	uint32_t *values = ADDR_OF(&value_range->values);
+
+	if (mem_array_expand_exp(
+		    memory_context,
+		    (void **)&values,
+		    sizeof(*values),
+		    &value_range->count
+	    )) {
+		return -1;
+	}
+
+	values[value_range->count - 1] = value;
+
+	SET_OFFSET_OF(&value_range->values, values);
+
+	return 0;
+}
+
+static inline int
 value_registry_collect(struct value_registry *registry, uint32_t value) {
 	if (value_collector_collect(&registry->collector, value) == 1) {
 		struct value_range *range =
 			ADDR_OF(&registry->ranges) + registry->range_count - 1;
-		uint32_t *values = ADDR_OF(&range->values);
-
-		if (mem_array_expand_exp(
-			    registry->memory_context,
-			    (void **)&values,
-			    sizeof(*values),
-			    &range->count
-		    )) {
+		if (value_range_append(registry->memory_context, range, value))
 			return -1;
-		}
-
-		values[range->count - 1] = value;
 
 		if (value > registry->max_value)
 			registry->max_value = value;
-
-		SET_OFFSET_OF(&range->values, values);
 	}
 
 	return 0;
