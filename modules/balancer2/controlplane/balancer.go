@@ -45,10 +45,10 @@ func (m vsID) String() string {
 	return fmt.Sprintf("%s/unknown", addrPort)
 }
 
-// vsIDFromString parses the exact output of vsID.String() back into a
-// vsID. The expected format is "<addrPort>/tcp" or "<addrPort>/udp";
-// any deviation (missing slash, empty parts, extra slashes, unknown or
-// differently-cased proto) is rejected.
+// vsIDFromString parses a virtual-service identifier string back into a vsID.
+//
+// Recognizes "addr:port/tcp" and "addr:port/udp"; anything else, including a
+// missing slash, empty parts, extra slashes, or an unknown protocol, is rejected.
 func vsIDFromString(id string) (vsID, error) {
 	addrPortStr, proto, ok := strings.Cut(id, "/")
 	if !ok {
@@ -85,9 +85,10 @@ func (m realID) String() string {
 	return m.addr.String()
 }
 
-// realIDFromString parses the exact output of realID.String() back
-// into a realID. The expected format is a bare IP address; addr:port
-// strings, empty input, and any other deviation are rejected.
+// realIDFromString parses a real-server identifier string back into a realID.
+//
+// Expects a bare IP address; addr:port strings, empty input, and any other
+// deviation are rejected.
 func realIDFromString(id string) (realID, error) {
 	if id == "" {
 		return realID{}, errors.New("invalid real id: empty")
@@ -159,7 +160,12 @@ func NewModuleConfig(
 }
 
 func (m *ModuleConfig) Update(newConfig *ConfigParams, st *SessionsState) error {
+	// Stop before acquiring the lock: the refresh goroutine takes m.mu inside
+	// its tick handler, so driving the loop lifecycle outside the lock avoids
+	// a deadlock between Stop's drain wait and the goroutine's lock attempt.
+	m.wlcLoop.Stop()
 	m.mu.Lock()
+	defer m.wlcLoop.Reset(context.Background())
 	defer m.mu.Unlock()
 
 	merged := mergeConfig(m.cfg, newConfig)
@@ -177,15 +183,15 @@ func (m *ModuleConfig) Update(newConfig *ConfigParams, st *SessionsState) error 
 	m.cfg = merged
 	m.sessions = st
 	m.index = index
-	m.wlcLoop.Reset(context.Background())
 
 	return nil
 }
 
 func (m *ModuleConfig) Free() {
+	// Stop before acquiring the lock for the same reason as in Update.
+	m.wlcLoop.Stop()
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.wlcLoop.Stop()
 	m.handle.Free(m.agent)
 }
 
@@ -423,10 +429,6 @@ func (m *ModuleConfig) GetState(
 	filter *balancerpb.Filter,
 	now time.Time,
 ) []*balancerpb.BalancerState {
-	if m == nil {
-		return nil
-	}
-
 	dpConfig := m.agent.DPConfig()
 
 	matcher := newStateFilter(filter)
@@ -442,6 +444,7 @@ func (m *ModuleConfig) GetState(
 
 		m.mu.Lock()
 		state, lookup := m.buildBaseState(&position, matcher)
+		sess := m.sessions
 		m.mu.Unlock()
 
 		counters := dpConfig.ModuleCounters(
@@ -455,7 +458,7 @@ func (m *ModuleConfig) GetState(
 		)
 		applyCounters(state, lookup, counters)
 
-		applySessions(state, lookup, m.sessions.IterSessions(now))
+		applySessions(state, lookup, sess.IterSessions(now))
 
 		states = append(states, state)
 	}

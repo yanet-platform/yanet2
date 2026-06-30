@@ -323,7 +323,7 @@ func (m *Service) GetState(
 ) (*balancerpb.GetStateResponse, error) {
 	name := req.GetConfigName()
 	if name == "" {
-		return nil, errSessionsStateNameRequired
+		return nil, errConfigNameRequired
 	}
 
 	m.mu.Lock()
@@ -426,18 +426,17 @@ func (m *Service) GetMetrics(
 	for name := range m.moduleConfigs {
 		names = append(names, name)
 	}
-	m.mu.Unlock()
 	sort.Strings(names)
+	mcs := make([]*ModuleConfig, 0, len(names))
+	for _, name := range names {
+		if mc, ok := m.moduleConfigs[name]; ok {
+			mcs = append(mcs, mc)
+		}
+	}
+	m.mu.Unlock()
 
 	var result []*commonpb.Metric
-	for _, name := range names {
-		m.mu.Lock()
-		mc, ok := m.moduleConfigs[name]
-		if !ok {
-			continue
-		}
-		m.mu.Unlock()
-
+	for _, mc := range mcs {
 		states := mc.GetState(nil, nil, now)
 		for _, state := range states {
 			result = append(result, collectStateMetrics(state)...)
