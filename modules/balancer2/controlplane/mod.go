@@ -55,7 +55,7 @@ func NewBalancerModule(cfg *Config, options ...Option) (*Module, error) {
 		o(opts)
 	}
 
-	log := opts.Log.With(zap.String("module", "balancerpb.Balancer"))
+	log := opts.Log.With(zap.String("module", "balancer2"))
 
 	shm, err := ffi.AttachSharedMemory(cfg.MemoryPath.Unwrap())
 	if err != nil {

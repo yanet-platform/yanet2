@@ -198,7 +198,7 @@ fill_acl_rule(
 }
 
 static int
-build_vs_acl(
+create_vs_acl(
 	struct memory_context *mctx,
 	struct virtual_service *vs,
 	const struct balancer_vs_config *config,
@@ -270,10 +270,10 @@ build_real(struct real *real, const struct balancer_real_config *config) {
 		real->addr.v4 = config->dst.v4;
 		real->src.v4 = config->src.v4;
 		/*
-		 * The dataplane requires the source network to
-		 * have host bits cleared (addr & mask == addr) so that client
-		 * source bits can be embedded directly into the unmasked
-		 * positions. Mask here so callers do not need to pre-mask.
+		 * The dataplane requires the source network to have host bits
+		 * cleared so that client source bits can be embedded directly
+		 * into the unmasked positions. Mask here so callers do not
+		 * need to pre-mask.
 		 */
 		for (size_t idx = 0; idx < NET4_LEN; ++idx) {
 			real->src.v4.addr[idx] &= real->src.v4.mask[idx];
@@ -290,16 +290,15 @@ build_real(struct real *real, const struct balancer_real_config *config) {
 	}
 
 	/*
-	 * Reals start disabled. The controlplane must call
-	 * balancer_vs_update_real_states with state=true before traffic
-	 * is forwarded to a given real.
+	 * Reals start disabled and only receive traffic after the control
+	 * plane enables them via a weight and state update.
 	 */
 
 	real->counter_id = COUNTER_INVALID;
 }
 
 static int
-build_vs_reals_map(
+create_vs_reals_map(
 	struct memory_context *mctx,
 	struct virtual_service *vs,
 	const struct balancer_vs_config *config,
@@ -361,7 +360,7 @@ build_vs_reals_map(
 }
 
 static int
-build_vs_reals(
+create_vs_reals(
 	struct memory_context *mctx,
 	struct virtual_service *vs,
 	const struct balancer_vs_config *config,
@@ -378,7 +377,7 @@ build_vs_reals(
 		build_real(reals + idx, config->reals + idx);
 	}
 
-	if (build_vs_reals_map(mctx, vs, config, error) != 0) {
+	if (create_vs_reals_map(mctx, vs, config, error) != 0) {
 		memory_bfree(
 			mctx, reals, sizeof(struct real) * config->real_count
 		);
@@ -409,7 +408,7 @@ build_vs_flags(const struct balancer_vs_config *config) {
 }
 
 static int
-build_real_selector(
+create_real_selector(
 	struct memory_context *mctx,
 	struct virtual_service *vs,
 	size_t workers,
@@ -593,17 +592,17 @@ init_vs(struct memory_context *mctx,
 
 	vs->flags = build_vs_flags(config);
 
-	if (build_vs_acl(mctx, vs, config, error) != 0) {
+	if (create_vs_acl(mctx, vs, config, error) != 0) {
 		yanet_error_add(error, "acl");
 		return -1;
 	}
 
-	if (build_vs_reals(mctx, vs, config, error) != 0) {
+	if (create_vs_reals(mctx, vs, config, error) != 0) {
 		yanet_error_add(error, "real");
 		goto err_acl;
 	}
 
-	if (build_real_selector(mctx, vs, workers, config, error) != 0) {
+	if (create_real_selector(mctx, vs, workers, config, error) != 0) {
 		goto err_reals;
 	}
 
@@ -716,7 +715,7 @@ validate_vs(const struct balancer_vs_config *vs, yanet_error **error) {
 }
 
 static struct virtual_service *
-build_vs_array(
+create_vs_array(
 	struct memory_context *mctx,
 	struct counter_registry *registry,
 	const struct balancer_vs_config *configs,
@@ -839,7 +838,7 @@ err:
 }
 
 static int
-build_vs_matcher(
+create_vs_matcher(
 	struct memory_context *mctx,
 	struct filter *matcher,
 	enum ip_family family,
@@ -904,14 +903,14 @@ cleanup:
 }
 
 static int
-build_vs_matchers(
+create_vs_matchers(
 	struct memory_context *mctx,
 	struct balancer_module_config *cfg,
 	const struct balancer_vs_config *configs,
 	size_t count,
 	yanet_error **error
 ) {
-	if (build_vs_matcher(
+	if (create_vs_matcher(
 		    mctx,
 		    &cfg->vs_matcher_ip4,
 		    ip_family_ip4,
@@ -922,7 +921,7 @@ build_vs_matchers(
 		return -1;
 	}
 
-	if (build_vs_matcher(
+	if (create_vs_matcher(
 		    mctx,
 		    &cfg->vs_matcher_ip6,
 		    ip_family_ip6,
@@ -989,7 +988,7 @@ init_module_config(
 	}
 
 	if (vs_count > 0) {
-		struct virtual_service *vs = build_vs_array(
+		struct virtual_service *vs = create_vs_array(
 			mctx, registry, vs_configs, vs_count, workers, error
 		);
 		if (vs == NULL) {
@@ -999,7 +998,7 @@ init_module_config(
 		cfg->vs_count = (uint32_t)vs_count;
 	}
 
-	if (build_vs_matchers(mctx, cfg, vs_configs, vs_count, error) != 0) {
+	if (create_vs_matchers(mctx, cfg, vs_configs, vs_count, error) != 0) {
 		yanet_error_add(error, "VS matcher");
 		goto err_vs_array;
 	}
@@ -1126,12 +1125,12 @@ balancer_free(struct agent *agent, struct balancer_handle *handle) {
 	cp_config_unlock(cp_config);
 }
 
-/* This procedure does not respect disabled reals.
- * It is expected user manually sets zero weights for disabled reals
- * if needed.
+/*
+ * Weights are used as-is; the caller must zero the weight of any real
+ * that should not receive traffic.
  */
 static int
-build_ring(
+create_ring(
 	struct ring *ring,
 	const uint32_t *weights,
 	uint32_t reals_count,
@@ -1140,8 +1139,8 @@ build_ring(
 	yanet_error **error
 ) {
 	uint64_t total_weight = 0;
-	for (uint32_t i = 0; i < reals_count; ++i) {
-		total_weight += weights[i];
+	for (uint32_t idx = 0; idx < reals_count; ++idx) {
+		total_weight += weights[idx];
 	}
 
 	if (total_weight == 0) {
@@ -1156,23 +1155,23 @@ build_ring(
 	}
 
 	size_t pos = 0;
-	for (uint32_t i = 0; i < reals_count; ++i) {
-		for (uint32_t j = 0; j < weights[i]; ++j) {
+	for (uint32_t idx = 0; idx < reals_count; ++idx) {
+		for (uint32_t inner = 0; inner < weights[idx]; ++inner) {
 			uint32_t *slot = big_array_get(
 				&ring->real_ids, pos * sizeof(uint32_t)
 			);
-			*slot = i;
+			*slot = idx;
 			++pos;
 		}
 	}
 
 	uint64_t rng = 0xdeadbeef ^ shuffle_seed;
-	for (size_t i = pos; i > 1; --i) {
+	for (size_t idx = pos; idx > 1; --idx) {
 		uint32_t *a = big_array_get(
-			&ring->real_ids, (i - 1) * sizeof(uint32_t)
+			&ring->real_ids, (idx - 1) * sizeof(uint32_t)
 		);
 		uint32_t *b = big_array_get(
-			&ring->real_ids, (rng % i) * sizeof(uint32_t)
+			&ring->real_ids, (rng % idx) * sizeof(uint32_t)
 		);
 		uint32_t tmp = *a;
 		*a = *b;
@@ -1214,10 +1213,6 @@ balancer_vs_update_reals(
 	struct virtual_service *vs = ADDR_OF(&cfg->vs) + vs_idx;
 	struct real_selector *selector = ADDR_OF(&vs->selector);
 
-	size_t cur_ring =
-		atomic_load_explicit(&selector->ring_id, memory_order_relaxed);
-	size_t new_ring = cur_ring ^ 1;
-
 	size_t reals_count = vs->reals_count;
 	struct real *reals = ADDR_OF(&vs->reals);
 
@@ -1238,7 +1233,11 @@ balancer_vs_update_reals(
 	struct cp_config *cp_config = ADDR_OF(&agent->cp_config);
 	cp_config_lock(cp_config);
 
-	if (build_ring(
+	size_t cur_ring =
+		atomic_load_explicit(&selector->ring_id, memory_order_relaxed);
+	size_t new_ring = cur_ring ^ 1;
+
+	if (create_ring(
 		    &selector->rings[new_ring],
 		    ring_weights,
 		    reals_count,
@@ -1330,11 +1329,10 @@ balancer_create_session_table(
 }
 
 /*
- * Slot mapping for the chain follows
- *   idx(gen) = ((gen + 1) & 0b11) >> 1
- * so even gens are steady (only the front slot is used; back is NULL)
- * and odd gens are transitions (both slots populated, workers fall
- * back to the back map for sessions that have not migrated yet).
+ * Even generations are steady states with only the front slot active;
+ * odd generations are transitions with both slots populated, so
+ * workers fall back to the back table for sessions that have not
+ * migrated yet.
  */
 
 int

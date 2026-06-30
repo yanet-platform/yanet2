@@ -263,8 +263,10 @@ pub fn bytes_to_ip(bytes: &[u8]) -> Result<IpAddr, BytesToIpError> {
     }
 }
 
-/// Format an IP/port pair. Port 0 means a pure-L3 VS or "same port as VS"
-/// for reals, so the port is omitted from the output.
+/// Format an IP/port pair.
+///
+/// Port 0 means a pure-L3 VS or "same port as VS" for reals, so the port is
+/// omitted from the output.
 pub fn format_ip_port(ip: IpAddr, port: u16) -> String {
     if port == 0 {
         ip.to_string()

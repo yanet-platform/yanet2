@@ -136,14 +136,18 @@ pub struct Range {
     pub to: u16,
 }
 
-fn port_range(r: &Range) -> Result<PortRange, Box<dyn Error>> {
-    if r.from > r.to {
-        return Err(format!("port 'from' value {} is greater than 'to' value {}", r.from, r.to).into());
+impl TryFrom<&Range> for PortRange {
+    type Error = Box<dyn Error>;
+
+    fn try_from(r: &Range) -> Result<Self, Self::Error> {
+        if r.from > r.to {
+            return Err(format!("port 'from' value {} is greater than 'to' value {}", r.from, r.to).into());
+        }
+        Ok(Self {
+            from: u32::from(r.from),
+            to: u32::from(r.to),
+        })
     }
-    Ok(PortRange {
-        from: u32::from(r.from),
-        to: u32::from(r.to),
-    })
 }
 
 #[derive(Default)]
@@ -209,7 +213,7 @@ impl TryFrom<VirtualService> for balancerpb::VsConfig {
         let allowed_sources = vs
             .allowed_sources
             .into_iter()
-            .map(allowed_source)
+            .map(TryInto::try_into)
             .collect::<Result<_, _>>()?;
         let reals = vs.reals.into_iter().map(Into::into).collect();
 
@@ -228,18 +232,22 @@ impl TryFrom<VirtualService> for balancerpb::VsConfig {
     }
 }
 
-fn allowed_source(entry: AllowedSrcEntry) -> Result<balancerpb::AllowedSources, Box<dyn Error>> {
-    match entry {
-        AllowedSrcEntry::Simple(network) => Ok(balancerpb::AllowedSources {
-            nets: vec![IpNet::from(network)],
-            ports: vec![],
-            tag: None,
-        }),
-        AllowedSrcEntry::Structured { network, ports, tag } => Ok(balancerpb::AllowedSources {
-            nets: vec![IpNet::from(network)],
-            ports: ports.iter().map(port_range).collect::<Result<_, _>>()?,
-            tag,
-        }),
+impl TryFrom<AllowedSrcEntry> for balancerpb::AllowedSources {
+    type Error = Box<dyn Error>;
+
+    fn try_from(entry: AllowedSrcEntry) -> Result<Self, Self::Error> {
+        match entry {
+            AllowedSrcEntry::Simple(network) => Ok(Self {
+                nets: vec![IpNet::from(network)],
+                ports: vec![],
+                tag: None,
+            }),
+            AllowedSrcEntry::Structured { network, ports, tag } => Ok(Self {
+                nets: vec![IpNet::from(network)],
+                ports: ports.iter().map(TryInto::try_into).collect::<Result<_, _>>()?,
+                tag,
+            }),
+        }
     }
 }
 

@@ -332,8 +332,8 @@ struct RealBasicRow {
     effective_weight: u64,
 }
 
-// Streaming session output uses fixed-width columns rather than `Tabled`,
-// which would buffer the full result set.
+// Streaming session output uses fixed-width columns rather than the buffered
+// table renderer, which would hold the whole result set in memory.
 pub fn print_sessions_header() {
     println!(
         "{:<40} {:<40} {:<50} {:<8} {:<8} {:<8}",
@@ -341,8 +341,10 @@ pub fn print_sessions_header() {
     );
 }
 
-/// Format a wire-format addr+port pair. Returns None on bad address bytes
-/// or u16 overflow; port 0 is omitted from the output.
+/// Format a wire-format addr+port pair.
+///
+/// Returns nothing when the address bytes are invalid or the port value does
+/// not fit in 16 bits; port 0 is omitted from the output.
 fn fmt_addr_port(addr: &[u8], port: u32) -> Option<String> {
     let ip = bytes_to_ip(addr).ok()?;
     let port = u16::try_from(port).ok()?;
@@ -459,10 +461,10 @@ fn prettify_enum(
     key: &str,
     to_str: fn(i32) -> Option<&'static str>,
 ) {
-    if let Some(val) = map.get(key).and_then(|v| v.as_i64())
-        && let Some(name) = to_str(val as i32)
-    {
-        map.insert(key.to_string(), serde_json::Value::String(name.to_string()));
+    if let Some(val) = map.get(key).and_then(|v| v.as_i64()) {
+        if let Some(name) = to_str(val as i32) {
+            map.insert(key.to_string(), serde_json::Value::String(name.to_string()));
+        }
     }
 }
 

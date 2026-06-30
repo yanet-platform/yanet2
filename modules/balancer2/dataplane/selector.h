@@ -5,7 +5,7 @@
 
 #include "common/big_array.h"
 
-/**
+/*
  * Ring containing real indices.
  *
  * Each backend appears multiple times according to its weight.
@@ -21,16 +21,12 @@ struct ring {
 	struct big_array real_ids;
 };
 
-/**
- * Round-robin counter.
- *
- * Used to track the position of the current real in the ring.
- */
+/* Padded to a cache line to prevent false sharing across workers. */
 struct rr_counter {
 	uint64_t value;
 } __attribute__((aligned(64)));
 
-/**
+/*
  * Real backend selector.
  *
  * Maintains two rings for RCU-swapped updates and per-worker RR counters.
@@ -44,9 +40,14 @@ struct real_selector {
 	/* Active ring index. */
 	_Atomic uint64_t ring_id;
 
-	/* TODO: docs */
+	/*
+	 * Bitmask applied to the ring index: bits covered by the mask come
+	 * from the packet hash, the remaining bits from the per-worker
+	 * counter. This blends hash-based affinity with round-robin
+	 * distribution.
+	 */
 	uint64_t packet_hash_mask;
 
-	/* Array of per-worker round-robin counters. */
+	/* Per-worker round-robin counters. */
 	struct rr_counter workers_rr_counter[];
 };

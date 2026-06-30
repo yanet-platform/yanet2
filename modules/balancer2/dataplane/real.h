@@ -20,17 +20,9 @@ struct real {
 	/*
 	 * Source network for the outer tunnel header.
 	 *
-	 * Contains both the base address (src.v4.addr / src.v6.addr)
-	 * and the mask (src.v4.mask / src.v6.mask).
-	 *
-	 * INVARIANT: the address bytes must be pre-masked by the
-	 * controlplane, i.e. (addr[i] & mask[i]) == addr[i] for every
-	 * byte i. The tunnel code relies on this to embed client source
-	 * IP bits into the unmasked positions without an extra AND:
-	 *
-	 *   outer_src[i] = addr[i] | (client_src[i] & ~mask[i])
-	 *
-	 * Use v4 when real_ip6 is clear, v6 when set.
+	 * The control plane guarantees the host bits are already cleared,
+	 * so the tunnel code can embed client source bits into the unmasked
+	 * positions with a single bitwise-OR, without an extra mask step.
 	 */
 	struct net src;
 

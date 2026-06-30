@@ -111,8 +111,8 @@ filter_vs_group(
  * 3. Batch ACL per group — drop packets that fail.
  *
  * Returns the number of packets that passed both checks.
- * is_ipv6 is a compile-time constant so the compiler
- * eliminates the dead branches after inlining.
+ * The boolean parameter is constant at each call site, so the
+ * compiler can eliminate the unreachable branch after inlining.
  */
 static size_t
 service_lookup(

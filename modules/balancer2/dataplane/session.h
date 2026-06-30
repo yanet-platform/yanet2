@@ -59,10 +59,15 @@ st_chain_end_cs(
 	RCU_READ_END(&st_chain->rcu, worker);
 }
 
+/*
+ * Even generations are steady state; during odd generations (transitions),
+ * both maps must be consulted as sessions may not yet have migrated to the
+ * front table. The front-table index therefore advances only every second
+ * generation.
+ */
 static inline uint32_t
 st_chain_current_session_table_index(uint64_t gen) {
 	return ((gen + 1) & 0b11) >> 1;
-	;
 }
 
 static inline void
@@ -109,9 +114,9 @@ st_chain_prev_table_used(uint64_t table_gen) {
  * Returns SESSION_TABLE_OVERFLOW if the current map is full and
  * no slot could be allocated. In this case no lock is held.
  *
- * On SESSION_FOUND or SESSION_CREATED, the returned session_state
- * is locked via *lock. The caller must call st_unlock_session
- * after modifying the state.
+ * On SESSION_FOUND or SESSION_CREATED, the returned session_state is
+ * locked via *lock. The caller must release the lock after modifying
+ * the state.
  */
 static inline int
 st_chain_get_or_create_session(

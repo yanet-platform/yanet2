@@ -32,11 +32,11 @@ type RealConfig struct {
 	CounterName string
 }
 
-// AllowedSources describes one entry in a virtual service's source allow
-// list. A packet is admitted only if its source address matches one of the
-// listed networks AND its source port matches one of the listed ranges. An
-// empty set of networks disallows all networks; an empty set of ports allows
-// all ports.
+// AllowedSources describes one entry in a virtual service's source allow list.
+//
+// A packet is admitted only if its source address matches one of the listed
+// networks AND its source port matches one of the listed ranges. An empty set
+// of networks disallows all networks; an empty set of ports allows all ports.
 type AllowedSources struct {
 	Net4s       filter.IPNets
 	Net6s       filter.IPNets
@@ -86,14 +86,16 @@ func NewSessionTable(agent *ffi.Agent, capacity uint64) (*SessionTable, error) {
 	return createSessionTable(agent, capacity)
 }
 
-// NewSessionTableChain creates a session table chain seeded with the given
-// front table. The table is not owned by the chain and must outlive it.
+// NewSessionTableChain creates a session table chain seeded with the given front table.
+//
+// The table is not owned by the chain and must outlive it.
 func NewSessionTableChain(agent *ffi.Agent, front *SessionTable) (*SessionTableChain, error) {
 	return createSessionTableChain(agent, front)
 }
 
-// ParseCommonCounter decodes a raw counter row into a CommonCounter. Returns
-// nil if the row's length does not match the dataplane counter layout.
+// ParseCommonCounter decodes a raw counter row into a CommonCounter.
+//
+// Returns nil if the row's length does not match the dataplane counter layout.
 func ParseCommonCounter(counter []uint64) *CommonCounter {
 	if len(counter) != 8 {
 		return nil
@@ -110,8 +112,9 @@ func ParseCommonCounter(counter []uint64) *CommonCounter {
 	}
 }
 
-// ParseL4Counter decodes a raw counter row into an L4Counter. Returns nil if
-// the row's length does not match the dataplane counter layout.
+// ParseL4Counter decodes a raw counter row into an L4Counter.
+//
+// Returns nil if the row's length does not match the dataplane counter layout.
 func ParseL4Counter(counter []uint64) *L4Counter {
 	if len(counter) != 5 {
 		return nil
@@ -125,8 +128,9 @@ func ParseL4Counter(counter []uint64) *L4Counter {
 	}
 }
 
-// ParseVsCounter decodes a raw counter row into a VsCounter. Returns nil if
-// the row's length does not match the dataplane counter layout.
+// ParseVsCounter decodes a raw counter row into a VsCounter.
+//
+// Returns nil if the row's length does not match the dataplane counter layout.
 func ParseVsCounter(counter []uint64) *VsCounter {
 	if len(counter) != 16 {
 		return nil
@@ -151,8 +155,9 @@ func ParseVsCounter(counter []uint64) *VsCounter {
 	}
 }
 
-// ParseRealCounter decodes a raw counter row into a RealCounter. Returns nil
-// if the row's length does not match the dataplane counter layout.
+// ParseRealCounter decodes a raw counter row into a RealCounter.
+//
+// Returns nil if the row's length does not match the dataplane counter layout.
 func ParseRealCounter(counter []uint64) *RealCounter {
 	if len(counter) != 5 {
 		return nil

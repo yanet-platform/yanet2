@@ -7,7 +7,7 @@ struct packet_context;
  *
  * Encapsulates the packet in an IP-in-IP tunnel towards the resolved
  * real server, embeds the client source IP into the outer header,
- * optionally wraps in GRE, and updates forwarding statistics.
+ * and optionally wraps in GRE.
  *
  * MSS clamping is not performed — it only applies to inner IPv6.
  */
@@ -19,9 +19,10 @@ tunnel_ip4_packet(struct packet_context *pkt_ctx);
  *
  * Encapsulates the packet in an IP-in-IP tunnel towards the resolved
  * real server, embeds the client source IP into the outer header,
- * optionally wraps in GRE, and updates forwarding statistics.
+ * and optionally wraps in GRE.
  *
- * MSS clamping is applied when the VS has balancer_vs_fix_mss set.
+ * MSS clamping is applied when the virtual service is configured
+ * to enforce a maximum segment size.
  */
 int
 tunnel_ip6_packet(struct packet_context *pkt_ctx);

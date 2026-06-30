@@ -8,7 +8,8 @@ import (
 )
 
 // aggregateCounterValues sums worker-local counter rows into a single row.
-// Returns nil if there are no rows.
+//
+// Returns nil if there are no rows or if rows have inconsistent widths.
 func aggregateCounterValues(values [][]uint64) []uint64 {
 	if len(values) == 0 {
 		return nil

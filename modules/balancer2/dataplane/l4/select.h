@@ -5,7 +5,6 @@
 struct worker_context;
 struct session;
 struct packet_context;
-struct balancer_real;
 struct balancer_session_table_chain;
 
 /*
@@ -15,10 +14,9 @@ struct balancer_session_table_chain;
  * assigned to a real via the selector ring. No session is created
  * or consulted.
  *
- * Otherwise, a session slot is acquired from the session table via
- * st_get_or_create_session, which either finds an existing entry or
- * allocates a new one. In both cases a locked pointer to the
- * session_state is returned. The slot is used as follows:
+ * Otherwise, a session slot is acquired from the session table. The
+ * slot is either an existing entry or a freshly allocated one, and
+ * it is returned under a lock. The slot is used as follows:
  *
  * - Session found, real is valid and enabled:
  *   The session is prolonged (timestamps and timeout updated)

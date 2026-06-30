@@ -1,3 +1,4 @@
+#include <assert.h>
 #include <netinet/in.h>
 #include <rte_ether.h>
 #include <stdio.h>
@@ -21,6 +22,10 @@
 #include "l4/handle.h"
 
 #define MAX_BATCH_SIZE 64
+static_assert(
+	MAX_BATCH_SIZE <= 256,
+	"MAX_BATCH_SIZE must fit in a uint8_t index"
+);
 
 typedef void (*batch_handler)(
 	struct worker_context *context,
@@ -96,8 +101,10 @@ valid_packet_network(uint16_t network_type) {
 
 static inline bool
 valid_packet_transport(uint16_t transport_type) {
-	/* For now, ICMP packets are invalid for the balancer module. */
-	/* Further, we will handle ICMP packets as well. */
+	/*
+	 * ICMP is not load-balanced; only connection-bearing transport
+	 * protocols are forwarded to reals.
+	 */
 	return transport_type == IPPROTO_TCP || transport_type == IPPROTO_UDP;
 }
 

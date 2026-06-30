@@ -20,8 +20,8 @@
 #define INSERT_MSS 576
 
 /*
- * Build an outer IPv4 tunnel source by embedding client source bits into
- * the unmasked positions of the configured src network address:
+ * Builds the outer IPv4 tunnel source address by embedding client source
+ * bits into the unmasked positions of the configured source network.
  */
 static inline void
 build_outer_src4(
@@ -47,23 +47,24 @@ build_outer_src6(
 }
 
 /*
- * Encapsulate an inner-IPv4 packet in an IP tunnel and embed the
- * client source address into the outer header.
+ * Shared encapsulation logic for both inner-IPv4 and inner-IPv6 packets.
+ * client_src points to the client source address in the inner header;
+ * client_src_len is its byte length (4 for IPv4, 16 for IPv6).
  */
-static int
-encapsulate_ipv4(struct packet *packet, struct real *real, bool gre) {
-	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
+static inline int
+encapsulate(
+	struct packet *packet,
+	struct real *real,
+	bool gre,
+	const uint8_t *client_src,
+	uint8_t client_src_len
+) {
 	bool is_outer_ipv6 = real_flags(real) & real_ip6;
-
-	struct rte_ipv4_hdr *inner = rte_pktmbuf_mtod_offset(
-		mbuf, struct rte_ipv4_hdr *, packet->network_header.offset
-	);
-	const uint8_t *client_src = (const uint8_t *)&inner->src_addr;
 
 	if (is_outer_ipv6) {
 		uint8_t outer_src[NET6_LEN];
 		build_outer_src6(
-			outer_src, client_src, NET4_LEN, &real->src.v6
+			outer_src, client_src, client_src_len, &real->src.v6
 		);
 		if (!gre) {
 			return packet_ip6_encap(
@@ -90,42 +91,25 @@ encapsulate_ipv4(struct packet *packet, struct real *real, bool gre) {
 }
 
 static int
+encapsulate_ipv4(struct packet *packet, struct real *real, bool gre) {
+	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
+	struct rte_ipv4_hdr *inner = rte_pktmbuf_mtod_offset(
+		mbuf, struct rte_ipv4_hdr *, packet->network_header.offset
+	);
+	return encapsulate(
+		packet, real, gre, (const uint8_t *)&inner->src_addr, NET4_LEN
+	);
+}
+
+static int
 encapsulate_ipv6(struct packet *packet, struct real *real, bool gre) {
 	struct rte_mbuf *mbuf = packet_to_mbuf(packet);
-	bool is_outer_ipv6 = real_flags(real) & real_ip6;
-
 	struct rte_ipv6_hdr *inner = rte_pktmbuf_mtod_offset(
 		mbuf, struct rte_ipv6_hdr *, packet->network_header.offset
 	);
-	const uint8_t *client_src = (const uint8_t *)inner->src_addr;
-
-	if (is_outer_ipv6) {
-		uint8_t outer_src[NET6_LEN];
-		build_outer_src6(
-			outer_src, client_src, NET6_LEN, &real->src.v6
-		);
-		if (!gre) {
-			return packet_ip6_encap(
-				packet, real->addr.v6.bytes, outer_src
-			);
-		} else {
-			return packet_ip6_encap_gre(
-				packet, real->addr.v6.bytes, outer_src
-			);
-		}
-	} else {
-		uint8_t outer_src[NET4_LEN];
-		build_outer_src4(outer_src, client_src, &real->src.v4);
-		if (!gre) {
-			return packet_ip4_encap(
-				packet, real->addr.v4.bytes, outer_src
-			);
-		} else {
-			return packet_ip4_encap_gre(
-				packet, real->addr.v4.bytes, outer_src
-			);
-		}
-	}
+	return encapsulate(
+		packet, real, gre, (const uint8_t *)inner->src_addr, NET6_LEN
+	);
 }
 
 /*

@@ -71,7 +71,8 @@ func build(
 	return handle, index, nil
 }
 
-// Prepares virtual service reals for balancer config before installing it into dataplane.
+// prepareVSReals seeds initial enabled/weight state for a virtual service's
+// reals before the balancer handle is installed into the dataplane.
 func prepareVSReals(handle *cbalancer2.Balancer, vsIdx uint32, slot *vsSlot) error {
 	states := make([]bool, len(slot.reals))
 	weights := make([]uint32, len(slot.reals))
@@ -253,6 +254,8 @@ func toCScheduler(s balancerpb.VsScheduler) (cbalancer2.VSScheduler, error) {
 	case balancerpb.VsScheduler_WRR:
 		return cbalancer2.VSSchedulerWRR, nil
 	case balancerpb.VsScheduler_WLC:
+		// The dataplane always runs weighted round-robin; for WLC the control
+		// plane recomputes effective weights periodically in the refresh loop.
 		return cbalancer2.VSSchedulerWRR, nil
 	case balancerpb.VsScheduler_OP:
 		return cbalancer2.VSSchedulerOP, nil

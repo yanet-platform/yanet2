@@ -17,13 +17,13 @@ struct packet_context;
 /*
  * Parse packet headers into session state for a batch of packets.
  *
- * For each packet in pkt_ctxs, fills the corresponding entry in
- * sessions with the session id (vs_id + client_ip + client_port),
- * the timeout derived from the transport protocol, and the
- * can_reschedule flag that tells select_real whether a new real
- * may be assigned to this flow.
+ * For each packet, the session identity captures the client and
+ * virtual-service endpoints (addresses and ports) together with the
+ * transport protocol and IP family. Each entry also receives the
+ * timeout derived from the transport protocol and a flag indicating
+ * whether the packet may trigger session creation or rescheduling.
  *
- * pkt_ctxs and sessions are parallel arrays of pkt_ctx_count
+ * The two arrays are parallel and must each have at least count
  * elements.
  */
 void

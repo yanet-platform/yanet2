@@ -43,7 +43,6 @@ static uint32_t
 selector_select(
 	struct real_selector *selector, uint32_t worker, uint32_t hash
 ) {
-	// TODO: dont need atomic here?
 	size_t ring_id =
 		atomic_load_explicit(&selector->ring_id, memory_order_relaxed);
 
@@ -101,7 +100,6 @@ try_reuse_session_real(
 	struct virtual_service *vs = pkt_ctx->matched_vs;
 	struct balancer_vs_stats *vs_stats = pkt_ctx->matched_vs_stats;
 
-	/* TODO: lookup real with hashtable. */
 	struct real *real = vs_lookup_real(vs, &session_state->real_ip);
 	if (unlikely(real == NULL)) {
 		return NULL;
@@ -190,12 +188,9 @@ select_real(
 	}
 
 	/*
-	 * Acquire a session slot from the session table.
-	 *
-	 * st_get_or_create_session either finds an existing entry
-	 * or allocates a new one. In both cases it returns a locked
-	 * pointer to the session_state. The caller must eventually
-	 * call st_unlock_session to release the lock.
+	 * Acquire a session slot from the session table. The slot is either
+	 * an existing entry or a freshly allocated one, returned under a lock
+	 * that must be released before this function returns.
 	 *
 	 * Possible results:
 	 * - SESSION_FOUND:    existing entry, session_state is populated.

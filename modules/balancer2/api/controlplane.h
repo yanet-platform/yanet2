@@ -188,16 +188,24 @@ balancer_create_session_table(
 
 struct balancer_session_table_iter;
 
+/*
+ * Creates an iterator for walking the entries of a session table.
+ * Returns NULL if the table is NULL or allocation fails.
+ */
 struct balancer_session_table_iter *
 balancer_session_table_create_iter(struct balancer_session_table *session_table
 );
 
 enum { balancer_session_table_iter_bucket_size = TTLMAP_BUCKET_SIZE };
 
-// Returns the number of entries copied into session_ids/session_states, or -1
-// when iteration is exhausted.
-// The arrays must hold at least balancer_session_table_iter_bucket_size
-// entries.
+/*
+ * Advances the iterator and copies the next bucket's entries into the
+ * caller-supplied arrays.
+ *
+ * Returns the number of entries written, or -1 when iteration is
+ * exhausted. Each call fills at most one bucket; the arrays must be
+ * sized to hold a full bucket.
+ */
 ssize_t
 balancer_session_table_iter_next_bucket(
 	struct balancer_session_table_iter *iter,
@@ -206,6 +214,7 @@ balancer_session_table_iter_next_bucket(
 	struct balancer_session_state *session_states
 );
 
+/* Frees an iterator created by the session table create-iterator function. */
 void
 balancer_session_table_iter_free(struct balancer_session_table_iter *iter);
 
@@ -239,13 +248,11 @@ balancer_session_table_chain_pop_back(
 	yanet_error **error
 );
 
+/* Frees a session table previously created by the session-table create function. */
 void
 balancer_free_session_table(
 	struct agent *agent, struct balancer_session_table *table
 );
-
-// TODO:
-// session table iter.
 
 /*
  * Creates a session table chain seeded with the given front table.

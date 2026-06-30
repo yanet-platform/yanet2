@@ -71,9 +71,10 @@ type SessionTableChain struct {
 	ptr *C.struct_balancer_session_table_chain
 }
 
-// Install installs the balancer handle in the dataplane. If a balancer with
-// the same name is already installed, it is replaced and the previous handle
-// becomes unused; the caller is responsible for freeing it.
+// Install installs the balancer handle in the dataplane.
+//
+// If a balancer with the same name is already installed, it is replaced and
+// the previous handle becomes unused; the caller is responsible for freeing it.
 func (m *Balancer) Install(agent *ffi.Agent) error {
 	var cErr *C.yanet_error
 	if rc := C.balancer_install((*C.struct_agent)(agent.AsRawPtr()), m.ptr, &cErr); rc != 0 {
@@ -82,10 +83,10 @@ func (m *Balancer) Install(agent *ffi.Agent) error {
 	return nil
 }
 
-// Free releases the balancer handle. The session table chain attached to the
-// balancer is not freed.
+// Free releases the balancer handle.
 //
-// Safe to call multiple times: subsequent calls are no-ops.
+// The session table chain attached to the balancer is not freed. Safe to call
+// multiple times: subsequent calls are no-ops.
 func (m *Balancer) Free(agent *ffi.Agent) {
 	if m.ptr != nil {
 		C.balancer_free((*C.struct_agent)(agent.AsRawPtr()), m.ptr)
@@ -94,23 +95,24 @@ func (m *Balancer) Free(agent *ffi.Agent) {
 }
 
 // UpdateVSReals updates per-real weights and states for the VS at the given index.
-// The weights and states slices must have length equal to the number of reals configured
-// for the VS and be indexed in the same order they were passed at VS
-// creation.
+//
+// The weights and states slices must have length equal to the number of reals
+// configured for the VS and be indexed in the same order they were passed at
+// VS creation.
 func (m *Balancer) UpdateVSReals(vsIdx uint32, weights []uint32, states []bool) error {
 	var cWeightsPtr *C.uint32_t
 	if len(weights) > 0 {
 		cWeights := make([]C.uint32_t, len(weights))
-		for i, w := range weights {
-			cWeights[i] = C.uint32_t(w)
+		for idx, w := range weights {
+			cWeights[idx] = C.uint32_t(w)
 		}
 		cWeightsPtr = &cWeights[0]
 	}
 	var cStatesPtr *C.bool
 	if len(states) > 0 {
 		cStates := make([]C.bool, len(states))
-		for i, state := range states {
-			cStates[i] = C.bool(state)
+		for idx, state := range states {
+			cStates[idx] = C.bool(state)
 		}
 		cStatesPtr = &cStates[0]
 	}
@@ -135,10 +137,10 @@ func (m *SessionTable) Free(agent *ffi.Agent) {
 	}
 }
 
-// Free releases the session table chain. The session tables it referenced
-// are not freed.
+// Free releases the session table chain.
 //
-// Safe to call multiple times: subsequent calls are no-ops.
+// The session tables it referenced are not freed. Safe to call multiple times:
+// subsequent calls are no-ops.
 func (m *SessionTableChain) Free(agent *ffi.Agent) {
 	if m.ptr != nil {
 		C.balancer_free_session_table_chain(
@@ -150,6 +152,7 @@ func (m *SessionTableChain) Free(agent *ffi.Agent) {
 }
 
 // PushFront pushes the given table as the new front (primary) session table.
+//
 // Workers look up sessions in the front table first and fall back to the
 // previous (back) table; new sessions are always created in the front table.
 // Returns an error if two tables are already attached.
@@ -161,8 +164,9 @@ func (m *SessionTableChain) PushFront(table *SessionTable) error {
 	return nil
 }
 
-// PopBack detaches the back session table. Returns an error if only one
-// session table is attached.
+// PopBack detaches the back session table.
+//
+// Returns an error if only one session table is attached.
 func (m *SessionTableChain) PopBack() error {
 	var cErr *C.yanet_error
 	if rc := C.balancer_session_table_chain_pop_back(m.ptr, &cErr); rc != 0 {
@@ -236,13 +240,13 @@ func (m *VSConfig) cBuild(pinner *runtime.Pinner) (cVSConfig, error) {
 	if len(m.Reals) > 0 {
 		out.reals = make([]cRealConfig, len(m.Reals))
 		cReals := make([]C.struct_balancer_real_config, len(m.Reals))
-		for i := range m.Reals {
-			cReal, err := m.Reals[i].cBuild()
+		for idx := range m.Reals {
+			cReal, err := m.Reals[idx].cBuild()
 			if err != nil {
-				return cVSConfig{}, fmt.Errorf("real[%d]: %w", i, err)
+				return cVSConfig{}, fmt.Errorf("real[%d]: %w", idx, err)
 			}
-			out.reals[i] = cReal
-			cReals[i] = cReal.c
+			out.reals[idx] = cReal
+			cReals[idx] = cReal.c
 		}
 		pinner.Pin(&cReals[0])
 		out.c.reals = &cReals[0]
@@ -252,9 +256,9 @@ func (m *VSConfig) cBuild(pinner *runtime.Pinner) (cVSConfig, error) {
 	if len(m.AllowedSources) > 0 {
 		out.allowed = make([]cAllowedSources, len(m.AllowedSources))
 		cAS := make([]C.struct_balancer_allowed_sources, len(m.AllowedSources))
-		for i := range m.AllowedSources {
-			out.allowed[i] = m.AllowedSources[i].cBuild(pinner)
-			cAS[i] = out.allowed[i].c
+		for idx := range m.AllowedSources {
+			out.allowed[idx] = m.AllowedSources[idx].cBuild(pinner)
+			cAS[idx] = out.allowed[idx].c
 		}
 		pinner.Pin(&cAS[0])
 		out.c.allowed_sources = &cAS[0]
@@ -267,12 +271,12 @@ func (m *VSConfig) cBuild(pinner *runtime.Pinner) (cVSConfig, error) {
 }
 
 func (m *cVSConfig) free() {
-	for i := range m.reals {
-		m.reals[i].free()
+	for idx := range m.reals {
+		m.reals[idx].free()
 	}
 	m.reals = nil
-	for i := range m.allowed {
-		m.allowed[i].free()
+	for idx := range m.allowed {
+		m.allowed[idx].free()
 	}
 	m.allowed = nil
 	if m.counterName != nil {
@@ -366,21 +370,21 @@ func createBalancer(
 
 	cVSConfigs := make([]cVSConfig, len(vs))
 	defer func() {
-		for i := range cVSConfigs {
-			cVSConfigs[i].free()
+		for idx := range cVSConfigs {
+			cVSConfigs[idx].free()
 		}
 	}()
 
 	var cVSPtr *C.struct_balancer_vs_config
 	if len(vs) > 0 {
 		cVS := make([]C.struct_balancer_vs_config, len(vs))
-		for i := range vs {
-			cfg, err := vs[i].cBuild(pinner)
+		for idx := range vs {
+			cfg, err := vs[idx].cBuild(pinner)
 			if err != nil {
-				return nil, fmt.Errorf("vs[%d]: %w", i, err)
+				return nil, fmt.Errorf("vs[%d]: %w", idx, err)
 			}
-			cVSConfigs[i] = cfg
-			cVS[i] = cfg.c
+			cVSConfigs[idx] = cfg
+			cVS[idx] = cfg.c
 		}
 		pinner.Pin(&cVS[0])
 		cVSPtr = &cVS[0]
@@ -432,6 +436,8 @@ func createSessionTableChain(agent *ffi.Agent, front *SessionTable) (*SessionTab
 
 func netipToCNetAddr(addr netip.Addr) (C.struct_net_addr, C.enum_ip_family) {
 	var cAddr C.struct_net_addr
+	// The C address union stores the address as a contiguous byte sequence
+	// with no padding, so the bytes can be written directly at offset zero.
 	if addr.Is4() {
 		v4 := addr.As4()
 		bytes := (*[4]byte)(unsafe.Pointer(&cAddr))
@@ -448,6 +454,9 @@ func netWithMaskToCNet(n xnetip.NetWithMask) (C.struct_net, error) {
 	var cNet C.struct_net
 	addr := n.Addr
 
+	// The C network type is a union laid out as address bytes followed
+	// immediately by mask bytes with no padding, so both can be written
+	// directly at their respective fixed offsets.
 	if addr.Is4() {
 		if len(n.Mask) != 4 {
 			return cNet, fmt.Errorf("mask length %d does not match IPv4", len(n.Mask))
@@ -494,6 +503,8 @@ type SessionState struct {
 const sessionTableIterBucketSize = C.balancer_session_table_iter_bucket_size
 
 func cNetAddrToNetip(addr C.struct_net_addr, family C.enum_ip_family) netip.Addr {
+	// The C address union stores the address as a contiguous byte sequence
+	// with no padding, so the bytes can be read directly from offset zero.
 	if family == C.ip_family_ip4 {
 		return netip.AddrFrom4(*(*[4]byte)(unsafe.Pointer(&addr)))
 	}
