@@ -71,18 +71,19 @@ type Route struct {
 
 // isSameIdentity reports whether two routes share the same RIB identity.
 //
-// BGP-sourced routes are identified by peer because of BGP implicit replace:
-// a peer re-announcing a prefix with a new nexthop must replace its previous
-// path (RFC 4271), so BGP ECMP arises across peers. Static routes are
-// peerless independent entries, so their identity includes the nexthop,
-// allowing multiple static routes for the same prefix with distinct nexthops
-// to coexist. Static nexthops are compared in normalized (unmapped) form
-// because the API accepts both native IPv4 and IPv4-in-IPv6 encodings.
+// A route learned from a BGP peer is identified by that peer: under BGP
+// implicit replace (RFC 4271) a peer that re-announces a prefix with a new
+// nexthop replaces its own earlier path, so multiple BGP paths for one prefix
+// come from different peers. When no usable peer is present the nexthop is the
+// only discriminator, so routes with distinct nexthops coexist as ECMP instead
+// of replacing each other. This covers static routes and BGP routes whose peer
+// address is unset. Nexthops are compared unmapped because the API accepts both
+// native IPv4 and IPv4-in-IPv6 encodings.
 func (m Route) isSameIdentity(other Route) bool {
 	if m.SourceID != other.SourceID || m.Peer != other.Peer {
 		return false
 	}
-	if m.SourceID == RouteSourceStatic {
+	if !m.Peer.IsValid() || m.Peer.IsUnspecified() {
 		return m.NextHop.Unmap() == other.NextHop.Unmap()
 	}
 	return true

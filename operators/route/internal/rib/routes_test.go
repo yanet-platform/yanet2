@@ -142,6 +142,24 @@ func TestRoutesListStaticECMP(t *testing.T) {
 	})
 }
 
+// TestRoutesListBirdECMPUnspecifiedPeer verifies that BGP routes advertised for
+// one prefix with an unset peer address keep distinct nexthops as ECMP instead
+// of overwriting each other.
+func TestRoutesListBirdECMPUnspecifiedPeer(t *testing.T) {
+	pfx := netip.MustParsePrefix("2a02:6b8:2:a::/64")
+	nh1 := netip.MustParseAddr("fe80::1c")
+	nh2 := netip.MustParseAddr("fe80::1d")
+	unspec := netip.IPv6Unspecified()
+
+	var list RoutesList
+	r1 := Route{Prefix: pfx, NextHop: nh1, Peer: unspec, SourceID: RouteSourceBird}
+	r2 := Route{Prefix: pfx, NextHop: nh2, Peer: unspec, SourceID: RouteSourceBird}
+
+	require.True(t, list.Insert(r1), "first bird route should be added")
+	require.True(t, list.Insert(r2), "distinct-nexthop bird route with unset peer must coexist")
+	require.Len(t, list.Routes, 2)
+}
+
 // TestBestPerSource verifies that BestPerSource returns the equal-cost group
 // for each source and filters routes that are strictly worse than the source's best.
 func TestBestPerSource(t *testing.T) {
