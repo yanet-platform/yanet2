@@ -1,0 +1,51 @@
+syntax = "proto3";
+
+package modules.blackhole.controlplane.blackholepb.v1;
+
+option go_package = "github.com/yanet-platform/yanet2/modules/blackhole/controlplane/blackholepb/v1;blackholepb";
+
+// BlackholeService is a controlplane service for the blackhole module.
+service BlackholeService {
+  // ListConfigs returns all blackhole module configurations of all
+  // dataplane instances.
+  rpc ListConfigs(ListConfigsRequest) returns (ListConfigsResponse);
+
+  // ShowConfig returns the current configuration for the blackhole module.
+  rpc ShowConfig(ShowConfigRequest) returns (ShowConfigResponse);
+
+  // UpdateConfig creates or replaces the named blackhole config and publishes
+  // it to the dataplane.
+  rpc UpdateConfig(UpdateConfigRequest) returns (UpdateConfigResponse);
+
+  // DeleteConfig removes the named blackhole config when it is no longer
+  // referenced by any pipeline.
+  rpc DeleteConfig(DeleteConfigRequest) returns (DeleteConfigResponse);
+}
+
+message ListConfigsRequest {}
+
+// ListConfigsResponse contains existing configurations.
+message ListConfigsResponse { repeated string configs = 1; }
+
+// ShowConfigRequest retrieves the runtime configuration for the blackhole
+// module.
+message ShowConfigRequest { string name = 1; }
+
+// ShowConfigResponse contains the configuration details of the blackhole
+// module.
+message ShowConfigResponse { string name = 1; }
+
+// UpdateConfigRequest names the config to create or replace.
+//
+// The blackhole config carries no payload, since the module unconditionally
+// drops every packet routed to it.
+message UpdateConfigRequest { string name = 1; }
+
+// UpdateConfigResponse is the response to an UpdateConfig call.
+message UpdateConfigResponse {}
+
+// DeleteConfigRequest names the config to delete.
+message DeleteConfigRequest { string name = 1; }
+
+// DeleteConfigResponse is the response to a DeleteConfig call.
+message DeleteConfigResponse { bool deleted = 1; }

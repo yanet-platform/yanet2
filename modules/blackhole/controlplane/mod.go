@@ -5,15 +5,15 @@ import (
 	"fmt"
 
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
-	"github.com/yanet-platform/yanet2/modules/blackhole/bindings/go/cblackhole"
+	blackholepb "github.com/yanet-platform/yanet2/modules/blackhole/controlplane/blackholepb/v1"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
 
 const (
-	agentName  = "blackhole"
-	moduleName = "blackhole"
-	configName = "blackhole0"
+	agentName   = "blackhole"
+	moduleName  = "blackhole"
+	serviceName = "modules.blackhole.controlplane.blackholepb.v1.BlackholeService"
 )
 
 // Option configures the BlackholeModule constructor.
@@ -38,10 +38,11 @@ func WithLog(log *zap.Logger) Option {
 
 // BlackholeModule is a controlplane component for blackhole module.
 type BlackholeModule struct {
-	config *cblackhole.ModuleConfig
-	shm    *ffi.SharedMemory
-	agent  *ffi.Agent
-	log    *zap.Logger
+	cfg              *Config
+	shm              *ffi.SharedMemory
+	agent            *ffi.Agent
+	blackholeService *BlackholeService
+	log              *zap.Logger
 }
 
 // NewBlackholeModule creates a new BlackholeModule.
@@ -51,7 +52,7 @@ func NewBlackholeModule(cfg *Config, options ...Option) (*BlackholeModule, error
 		o(opts)
 	}
 
-	log := opts.Log.With(zap.String("module", moduleName))
+	log := opts.Log.With(zap.String("module", serviceName))
 
 	shm, err := ffi.AttachSharedMemory(cfg.MemoryPath.Unwrap())
 	if err != nil {
@@ -68,18 +69,14 @@ func NewBlackholeModule(cfg *Config, options ...Option) (*BlackholeModule, error
 		return nil, fmt.Errorf("failed to attach agent to shared memory: %w", err)
 	}
 
-	config, err := cblackhole.NewModuleConfig(agent, configName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create module config: %w", err)
-	}
-
-	log.Info("created module config", zap.String("name", configName))
+	blackholeService := NewBlackholeService(NewBackend(agent))
 
 	return &BlackholeModule{
-		config: config,
-		shm:    shm,
-		agent:  agent,
-		log:    log,
+		cfg:              cfg,
+		shm:              shm,
+		agent:            agent,
+		blackholeService: blackholeService,
+		log:              log,
 	}, nil
 }
 
@@ -90,16 +87,17 @@ func (m *BlackholeModule) Name() string {
 
 // Endpoint returns the gRPC endpoint for the blackhole module.
 func (m *BlackholeModule) Endpoint() string {
-	return ""
+	return m.cfg.Endpoint.Unwrap()
 }
 
 // ServicesNames returns the gRPC service names exposed by the module.
 func (m *BlackholeModule) ServicesNames() []string {
-	return nil
+	return []string{serviceName}
 }
 
 // RegisterService registers the blackhole module's gRPC service.
 func (m *BlackholeModule) RegisterService(server *grpc.Server) {
+	blackholepb.RegisterBlackholeServiceServer(server, m.blackholeService)
 }
 
 // Close releases shared memory resources held by the module.

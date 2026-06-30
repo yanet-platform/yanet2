@@ -19,6 +19,7 @@ custom_target(
         # go proto gen deps
         ynpb_gen,
         common_protoc_gen,
+        blackhole_protoc_gen,
         decap_protoc_gen,
         dscp_protoc_gen,
         forward_protoc_gen,
@@ -35,6 +36,8 @@ custom_target(
         # cgo linker deps
         lib_acl_cp,
         lib_acl_dp,
+        lib_blackhole_cp,
+        lib_blackhole_dp,
         lib_decap_cp,
         lib_decap_dp,
         lib_dscp_cp,
@@ -51,8 +54,6 @@ custom_target(
         lib_pdump_dp,
         lib_route_cp,
         lib_route_dp,
-        lib_blackhole_cp,
-        lib_blackhole_dp,
         lib_dev_trafgen_api,
         lib_dev_trafgen_dp,
         lib_filter_compiler,

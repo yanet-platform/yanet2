@@ -27,6 +27,7 @@ CLI_CORE_BINARIES := yanet-cli $(addprefix yanet-cli-,$(CLI_CORE_MODULES))
 CLI_MODULES := \
 	acl \
 	balancer2 \
+	blackhole \
 	decap \
 	device-plain \
 	device-vlan \
