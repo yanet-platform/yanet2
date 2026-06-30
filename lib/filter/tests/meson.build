@@ -82,6 +82,15 @@ test_filter_net4_ports = executable(
 )
 test('net4_ports', test_filter_net4_ports, suite: ['filter'])
 
+test_filter_net6_overlap = executable('net6_overlap',
+  ['net6_overlap.c'],
+  c_args: yanet_test_c_args,
+  link_args: yanet_link_args,
+  dependencies: test_deps,
+  link_language: 'c'
+)
+test('net6_overlap', test_filter_net6_overlap, suite: ['filter'])
+
 # test memory reuse
 test_filter_memory = executable('memory',
   ['memory.c'],
