@@ -442,11 +442,11 @@ dataplane_ut_run_rounds(
 	uint64_t rounds,
 	int reset_payload
 ) {
-	if (rounds == 0 || input->count == 0) {
+	size_t count = (size_t)packet_list_count(input);
+	if (rounds == 0 || count == 0) {
 		return;
 	}
 
-	size_t count = (size_t)input->count;
 	struct saved_packet *saved =
 		malloc(count * sizeof(struct saved_packet));
 	if (saved == NULL) {

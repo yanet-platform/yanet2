@@ -161,7 +161,11 @@ func (packetList *PacketList) First() *Packet {
 }
 
 func (packetList *PacketList) Count() int {
-	return int((*C.struct_packet_list)(packetList).count)
+	count := 0
+	for packet := packetList.First(); packet != nil; packet = packet.Next() {
+		count++
+	}
+	return count
 }
 
 func (packetList *PacketList) Add(packet *Packet) {
@@ -255,14 +259,20 @@ func NewPacketFront(
 
 	if input != nil {
 		packetFront.input = *(*C.struct_packet_list)(input)
+		packetFront.input_count = C.packet_list_count(&packetFront.input)
+		packetFront.input_bytes = C.packet_list_bytes(&packetFront.input)
 	}
 
 	if output != nil {
 		packetFront.output = *(*C.struct_packet_list)(output)
+		packetFront.output_count = C.packet_list_count(&packetFront.output)
+		packetFront.output_bytes = C.packet_list_bytes(&packetFront.output)
 	}
 
 	if drop != nil {
 		packetFront.drop = *(*C.struct_packet_list)(drop)
+		packetFront.drop_count = C.packet_list_count(&packetFront.drop)
+		packetFront.drop_bytes = C.packet_list_bytes(&packetFront.drop)
 	}
 
 	return (*PacketFront)(&packetFront)

@@ -46,7 +46,7 @@ struct packet {
 
 	uint16_t fragment_offset;
 
-	// Cached first-segment byte length; mirrors the mbuf so packet_list
+	// Cached first-segment byte length; mirrors the mbuf so packet_front
 	// can sum bytes without touching DPDK.
 	uint16_t data_len;
 
@@ -57,16 +57,12 @@ struct packet {
 struct packet_list {
 	struct packet *first;
 	struct packet **last;
-	uint64_t count;
-	uint64_t bytes;
 };
 
 static inline void
 packet_list_init(struct packet_list *list) {
 	list->first = NULL;
 	list->last = &list->first;
-	list->count = 0;
-	list->bytes = 0;
 }
 
 static inline void
@@ -74,8 +70,6 @@ packet_list_add(struct packet_list *list, struct packet *packet) {
 	*list->last = packet;
 	packet->next = NULL;
 	list->last = &packet->next;
-	list->count += 1;
-	list->bytes += packet->data_len;
 }
 
 static inline struct packet *
@@ -99,8 +93,6 @@ packet_list_concat(struct packet_list *dst, struct packet_list *src) {
 
 	*dst->last = packet_list_first(src);
 	dst->last = src->last;
-	dst->count += src->count;
-	dst->bytes += src->bytes;
 
 	packet_list_init(src);
 }
@@ -114,22 +106,31 @@ packet_list_pop(struct packet_list *packets) {
 	packets->first = res->next;
 	if (packets->first == NULL)
 		packets->last = &packets->first;
-	packets->count -= 1;
-	packets->bytes -= res->data_len;
 
 	return res;
 }
 
 static inline uint64_t
 packet_list_count(struct packet_list *packets) {
-	return packets->count;
+	uint64_t count = 0;
+	for (struct packet *pkt = packets->first; pkt != NULL;
+	     pkt = pkt->next) {
+		count += 1;
+	}
+	return count;
 }
 
 static inline uint64_t
-packet_list_bytes_sum(struct packet_list *list) {
-	return list->bytes;
-}
+packet_list_bytes(struct packet_list *packets) {
+	uint64_t bytes = 0;
 
+	for (struct packet *pkt = packets->first; pkt != NULL;
+	     pkt = pkt->next) {
+		bytes += pkt->data_len;
+	}
+
+	return bytes;
+}
 int
 parse_ipv4_header(struct packet *packet, uint16_t *type, uint16_t *offset);
 
