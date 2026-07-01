@@ -16,7 +16,7 @@ import (
 // but the old parser code was incorrectly subtracting 4 from it again.
 func TestParserNext(t *testing.T) {
 	// Use existing test data from update_test.go
-	// This data is 64 bytes (update struct without the chunk size prefix)
+	// This data is 68 bytes (update struct without the chunk size prefix)
 	updateData := []byte{
 		// NetAddrUnion 40 bytes
 		0: 0x2,     // NetAddr type NetIP6
@@ -30,8 +30,10 @@ func TestParserNext(t *testing.T) {
 		40: 0x1, 0, 0, 0,
 		// peer addr
 		44: 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+		// global_id LE u32 == 0
+		60: 0, 0, 0, 0,
 		// attrsAreaSize EXCLUDING sizeof(attrsAreaSize) - 0x0 => no attributes
-		60: 0x0, 0, 0, 0x0,
+		64: 0x0, 0, 0, 0x0,
 	}
 
 	// BIRD protocol: chunk size EXCLUDES the 4-byte size field itself

@@ -84,6 +84,7 @@ func ToRIBRoute(route *Route, toRemove bool) (*rib.Route, error) {
 		Prefix:           prefix,
 		NextHop:          nexthop,
 		Peer:             peer,
+		GlobalID:         route.GetGlobalId(),
 		RD:               route.GetRouteDistinguisher(),
 		LargeCommunities: largeCommunities,
 		UpdatedAt:        time.Now(),

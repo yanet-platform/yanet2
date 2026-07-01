@@ -44,56 +44,58 @@ var dataIPv6WithLargeCommunities = []byte{
 	40: 0x1, 0, 0, 0,
 	//  peer addr 16 bytes as 4 LE u32
 	44: 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x1, 0, 0, 0,
+	// global_id 4 bytes LE u32 == 0x2a == 42
+	60: 0x2a, 0, 0, 0,
 	// attrsAreaSize 4 bytes LE u32 - 0x76 == 118 (EXCLUDING the 4-byte size field itself)
-	60: 0x76, 0, 0, 0,
+	64: 0x76, 0, 0, 0,
 
 	// attributes
-	// AttrOrigin 0x01 - first byte;  65: PROTOCOL_BGP = 0x4, 0, 0 - packed LE int
-	64: 0x1, 65: 0x4, 0, 0,
+	// AttrOrigin 0x01 - first byte;  69: PROTOCOL_BGP = 0x4, 0, 0 - packed LE int
+	68: 0x1, 69: 0x4, 0, 0,
 	// value of the AttrOrigin - LE u32
-	68: 0x2, 0, 0, 0,
+	72: 0x2, 0, 0, 0,
 
 	//  AttrASPath = 0x2 : PROTOCOL_BGP = 0x4, 0, 0
-	72: 0x2, 0x4, 0, 0,
+	76: 0x2, 0x4, 0, 0,
 	//  Complex attribute length LE u32 0xe == 14
-	76: 0xe, 0, 0, 0,
-	// Segment Type 0x2 = ASPathSequence; 81: Segment Size 0x3 = 3 AS
-	80: 0x2, 81: 0x3,
+	80: 0xe, 0, 0, 0,
+	// Segment Type 0x2 = ASPathSequence; 85: Segment Size 0x3 = 3 AS
+	84: 0x2, 85: 0x3,
 	// AS#3 - PeerAS LE u32 - 0x0000c7fa = 51194 - nearest to us
-	82: 0, 0, 0xc7, 0xf1,
+	86: 0, 0, 0xc7, 0xf1,
 	// AS#2 - next after origin AS = 0x00001d4c = 7500
-	86: 0, 0, 0x1d, 0x4c,
+	90: 0, 0, 0x1d, 0x4c,
 	// AS#1 - OriginAS = 0x00005c52 = 23634
-	90: 0, 0, 0x5c, 0x52,
+	94: 0, 0, 0x5c, 0x52,
 
 	// AttrNextHop 0x3; PROTOCOL_BGP
-	94: 0x3, 0x4, 0, 0,
+	98: 0x3, 0x4, 0, 0,
 	// Complex attribute length LE u32 0x10 == 16 - one ipv6 addr
-	98: 0x10, 0, 0, 0,
+	102: 0x10, 0, 0, 0,
 	//  NextHop addr 16 bytes as 4 LE u32 == "2a02:2891:9:200::13"
-	102: 0x91, 0x28, 0x2, 0x2a, 0, 0x2, 0x9, 0, 0, 0, 0, 0, 0x13, 0, 0, 0,
+	106: 0x91, 0x28, 0x2, 0x2a, 0, 0x2, 0x9, 0, 0, 0, 0, 0, 0x13, 0, 0, 0,
 
 	// AttrLocalPref 0x5; PROTOCOL_BGP - simple u32 attributes
-	118: 0x5, 0x4, 0, 0,
+	122: 0x5, 0x4, 0, 0,
 	// LocalPref 0x64 == 100
-	122: 0x64, 0, 0, 0,
+	126: 0x64, 0, 0, 0,
 	// AttrCommunity 0x8; PROTOCOL_BGP
-	126: 0x8, 0x4, 0, 0,
+	130: 0x8, 0x4, 0, 0,
 	// AttrCommunity length - 16
-	130: 0x10, 0, 0, 0,
-	134: 0x2, 0, 0xf1, 0xc7, 0xf6, 0x1, 0xf1, 0xc7, 0x9a, 0x2, 0xf1, 0xc7, 0x12, 0x8, 0xf1, 0xc7,
+	134: 0x10, 0, 0, 0,
+	138: 0x2, 0, 0xf1, 0xc7, 0xf6, 0x1, 0xf1, 0xc7, 0x9a, 0x2, 0xf1, 0xc7, 0x12, 0x8, 0xf1, 0xc7,
 
 	// AttrLargeCommunity 0x20; PROTOCOL_BGP
-	150: 0x20, 0x4, 0, 0,
+	154: 0x20, 0x4, 0, 0,
 	// Complex attribute length 0x18 = 24
-	154: 0x18, 0, 0, 0,
+	158: 0x18, 0, 0, 0,
 	// 12 bytes
-	158: 0xfa, 0xc9, 0, 0, 0xe8, 0x3, 0, 0, 0x1, 0, 0, 0,
+	162: 0xfa, 0xc9, 0, 0, 0xe8, 0x3, 0, 0, 0x1, 0, 0, 0,
 	// 11 bytes
-	170: 0xfa, 0xc9, 0, 0, 0xe9, 0x3, 0, 0, 0x1, 0, 0,
+	174: 0xfa, 0xc9, 0, 0, 0xe9, 0x3, 0, 0, 0x1, 0, 0,
 	// last byte
 	// attributes data len respects the value of attrsAreaSize
-	64 - /* - sizeOf(attrsAreaSize)*/ 4 + ( /*len - 1*/ 122 - 1): 0,
+	attrAreaSizeOffset + ( /*len - 1*/ 122 - 1): 0,
 }
 
 func TestDecodeUpdate(t *testing.T) {
@@ -111,6 +113,7 @@ func TestDecodeUpdate(t *testing.T) {
 				Prefix:    netip.MustParsePrefix("2001:200:c000::/35"),
 				NextHop:   netip.MustParseAddr("2a02:2891:9:200::13"),
 				Peer:      netip.MustParseAddr("::1"),
+				GlobalID:  42,
 				ASPath:    []uint32{51185, 7500, 23634},
 				ASPathLen: 3,
 				Med:       0,
@@ -163,8 +166,10 @@ func TestDecodeUpdate(t *testing.T) {
 				40: 0x1, 0, 0, 0,
 				// peer addr
 				44: 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+				// global_id LE u32 == 0
+				60: 0, 0, 0, 0,
 				// attrsAreaSize EXCLUDING sizeof(attrsAreaSize) - 0x0 => no attributes
-				60: 0x0, 0, 0, 0x0,
+				64: 0x0, 0, 0, 0x0,
 			},
 			expected: rib.Route{
 				Prefix: netip.MustParsePrefix("2307:db8:4::/48"),
@@ -187,17 +192,19 @@ func TestDecodeUpdate(t *testing.T) {
 				40: 0x1, 0, 0, 0,
 				// peer addr 16 byte as 4 LE u32 = ::1
 				44: 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x1, 0, 0, 0,
+				// global_id LE u32 == 0
+				60: 0, 0, 0, 0,
 
 				// attributes
 				// attrsAreaSize 0x6e == 110 bytes (EXCLUDING the 4-byte size field itself)
-				60: 0x6e, 0, 0, 0,
+				64: 0x6e, 0, 0, 0,
 				// attributes data
 				// ORIGIN
-				64: 0x1, 0x4, 0, 0 /* origin value */, 0, 0, 0, 0,
+				68: 0x1, 0x4, 0, 0 /* origin value */, 0, 0, 0, 0,
 				// ASPath
-				72: 0x2, 0x4, 0, 0,
-				76: 0x1e, 0, 0, 0, // ASPath area size = 30 bytes
-				80: 0x2, 81: 0x7, // 80: ASPathSequence; 81: ASPathLen == 0x7
+				76: 0x2, 0x4, 0, 0,
+				80: 0x1e, 0, 0, 0, // ASPath area size = 30 bytes
+				84: 0x2, 85: 0x7, // 84: ASPathSequence; 85: ASPathLen == 0x7
 				0, 0, 0xbb, 0xc6, // 1
 				0, 0, 0x5, 0x13, // 2
 				0, 0, 0x1d, 0x79, // 3
@@ -205,13 +212,13 @@ func TestDecodeUpdate(t *testing.T) {
 				0, 0, 0x97, 0x93, // 5
 				0, 0, 0x97, 0x93, // 6
 				0, 0, 0x97, 0x93, // 7
-				110: 0x3, 0x4, 0, 0, // 0x3 = AttrNextHop; PROTOCOL_BGP
-				114: 0x10, 0, 0, 0, // NextHop size LE u32 = 16 bytes
+				114: 0x3, 0x4, 0, 0, // 0x3 = AttrNextHop; PROTOCOL_BGP
+				118: 0x10, 0, 0, 0, // NextHop size LE u32 = 16 bytes
 				// nextHop ::ffff:c342:e2fe == ::ffff:195.66.226.254
-				118: 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, 0, 0, 0xfe, 0xe2, 0x42, 0xc3,
-				134: 0x5, 0x4, 0, 0, // AttrLocalPref = 0x5; PROTOCOL_BGP
-				138: 0x64, 0, 0, 0, // LE u32 == 100
-				142: 0x8, 0x4, 0, 0, // AttrCommunity; PROTOCOL_BGP
+				122: 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, 0, 0, 0xfe, 0xe2, 0x42, 0xc3,
+				138: 0x5, 0x4, 0, 0, // AttrLocalPref = 0x5; PROTOCOL_BGP
+				142: 0x64, 0, 0, 0, // LE u32 == 100
+				146: 0x8, 0x4, 0, 0, // AttrCommunity; PROTOCOL_BGP
 				0x4, 0, 0, 0, // 4 bytes
 				0x64, 0, 0xc6, 0xbb,
 				0x20, 0x4, 0, 0, // AttrLargeCommunity; PROTOCOL_BGP
@@ -246,10 +253,12 @@ func TestDecodeUpdate(t *testing.T) {
 			name: "OK ToRemove",
 			data: []byte{
 				1, 0x18, 8, 5: 7, 7: 1, 24: 0x10, 0x92, 0x53, 9, 0x1c, 0x5b, 32: 1,
-				0x11, 8, 0, 0, 0x80, 0, 1, 2, 56: 1, 60: 0x4e, 0, 0, 0, 1, 4, // attrsAreaSize=0x4e=78
-				72: 2, 4, 0, 0, 0x12, 0, 0, 0, 2, 4, 0, 6, 0x14, 0x81, 0, 0, 5,
-				89: 0x13, 0, 0, 0x1d, 0x79, 0, 0, 0x97, 0x93, 3, 4, 0, 0, 0x10,
-				114: 0xff, 0xff, 0, 0, 0xb9, 0x68, 0x52, 0xce, 5, 4, 0, 0, 0x64,
+				0x11, 8, 0, 0, 0x80, 0, 1, 2, 56: 1,
+				// global_id at 60 (zero); attrsAreaSize=0x4e=78 at 64
+				64: 0x4e, 0, 0, 0, 1, 4,
+				76: 2, 4, 0, 0, 0x12, 0, 0, 0, 2, 4, 0, 6, 0x14, 0x81, 0, 0, 5,
+				93: 0x13, 0, 0, 0x1d, 0x79, 0, 0, 0x97, 0x93, 3, 4, 0, 0, 0x10,
+				118: 0xff, 0xff, 0, 0, 0xb9, 0x68, 0x52, 0xce, 5, 4, 0, 0, 0x64,
 				0, 0, 0, 8, 4, 0, 0, 4, 0, 0, 0, 0xb8, 0x88, 0x13, 0x5,
 			},
 			expected: rib.Route{
@@ -278,19 +287,20 @@ func TestDecodeUpdate(t *testing.T) {
 				4: 0, 0, 0, 1, // prefix 1.0.0.0 LE u32
 				40: 0x1, 0, 0, 0, // opType insert
 				// peer addr all zero
-				60: 22, 0, 0, 0, // attrsAreaSize = 4+4+14 = 22
+				// global_id at 60 (zero)
+				64: 22, 0, 0, 0, // attrsAreaSize = 4+4+14 = 22
 				// AS_PATH attr: type + PROTOCOL_BGP
-				64: 0x2, 0x4, 0, 0,
+				68: 0x2, 0x4, 0, 0,
 				// attr data size = 14 bytes
-				68: 14, 0, 0, 0,
+				72: 14, 0, 0, 0,
 				// AS_SEQUENCE, 3 ASNs
-				72: 2, 3,
+				76: 2, 3,
 				// ASN 1 (BE u32)
-				74: 0, 0, 0, 1,
+				78: 0, 0, 0, 1,
 				// ASN 2 (BE u32)
-				78: 0, 0, 0, 2,
+				82: 0, 0, 0, 2,
 				// ASN 3 (BE u32)
-				82: 0, 0, 0, 3,
+				86: 0, 0, 0, 3,
 			},
 			expected: rib.Route{
 				Prefix:    netip.MustParsePrefix("1.0.0.0/8"),
@@ -310,25 +320,26 @@ func TestDecodeUpdate(t *testing.T) {
 				4: 0, 0, 0, 1, // prefix 1.0.0.0 LE u32
 				40: 0x1, 0, 0, 0, // opType insert
 				// peer addr all zero
-				60: 32, 0, 0, 0, // attrsAreaSize = 4+4+24 = 32
+				// global_id at 60 (zero)
+				64: 32, 0, 0, 0, // attrsAreaSize = 4+4+24 = 32
 				// AS_PATH attr: type + PROTOCOL_BGP
-				64: 0x2, 0x4, 0, 0,
+				68: 0x2, 0x4, 0, 0,
 				// attr data size = 24 bytes (2+8 + 2+12)
-				68: 24, 0, 0, 0,
+				72: 24, 0, 0, 0,
 				// AS_CONFED_SEQUENCE, 2 ASNs
-				72: 3, 2,
+				76: 3, 2,
 				// ASN 10 (BE u32)
-				74: 0, 0, 0, 10,
+				78: 0, 0, 0, 10,
 				// ASN 20 (BE u32)
-				78: 0, 0, 0, 20,
+				82: 0, 0, 0, 20,
 				// AS_SEQUENCE, 3 ASNs
-				82: 2, 3,
+				86: 2, 3,
 				// ASN 100 (BE u32)
-				84: 0, 0, 0, 100,
+				88: 0, 0, 0, 100,
 				// ASN 200 (BE u32)
-				88: 0, 0, 0, 200,
+				92: 0, 0, 0, 200,
 				// ASN 300 (BE u32)
-				92: 0, 0, 1, 44,
+				96: 0, 0, 1, 44,
 			},
 			expected: rib.Route{
 				Prefix:    netip.MustParsePrefix("1.0.0.0/8"),
@@ -348,17 +359,18 @@ func TestDecodeUpdate(t *testing.T) {
 				4: 0, 0, 0, 1, // prefix 1.0.0.0 LE u32
 				40: 0x1, 0, 0, 0, // opType insert
 				// peer addr all zero
-				60: 18, 0, 0, 0, // attrsAreaSize = 4+4+10 = 18
+				// global_id at 60 (zero)
+				64: 18, 0, 0, 0, // attrsAreaSize = 4+4+10 = 18
 				// AS_PATH attr: type + PROTOCOL_BGP
-				64: 0x2, 0x4, 0, 0,
+				68: 0x2, 0x4, 0, 0,
 				// attr data size = 10 bytes (2+8)
-				68: 10, 0, 0, 0,
+				72: 10, 0, 0, 0,
 				// AS_SET, 2 ASNs
-				72: 1, 2,
+				76: 1, 2,
 				// ASN 1 (BE u32)
-				74: 0, 0, 0, 1,
+				78: 0, 0, 0, 1,
 				// ASN 2 (BE u32)
-				78: 0, 0, 0, 2,
+				82: 0, 0, 0, 2,
 			},
 			expected: rib.Route{
 				Prefix:    netip.MustParsePrefix("1.0.0.0/8"),
@@ -382,8 +394,9 @@ func TestDecodeUpdate(t *testing.T) {
 				// RD LE u64 (bytes in the reverse order as described in the RFC)
 				24: 0, 0, 0, 0, 0, 0, 0x1, 0,
 				40: 0x1, 0, 0, 0, // update type LE u32
-				44: 0,            // ... peer addr all zero
-				60: 0x0, 0, 0, 0, // attrsAreaSize=0 (no attrs)
+				44: 0, // ... peer addr all zero
+				// global_id at 60 (zero)
+				64: 0x0, 0, 0, 0, // attrsAreaSize=0 (no attrs)
 			},
 			errDecode: ErrBadPrefix,
 		},
@@ -403,7 +416,8 @@ func TestDecodeUpdate(t *testing.T) {
 				0: 0xa,     // ERROR: NetMAX unsupported prefix
 				1: 0x8,     // prefix len
 				2: 0x14, 0, // NetAddr struct size
-				60: 0, 0, 0, 0, // attrsAreaSize=0
+				// global_id at 60 (zero)
+				64: 0, 0, 0, 0, // attrsAreaSize=0
 			},
 			errDecode: ErrUnsupportedPrefix,
 		},
@@ -415,9 +429,9 @@ func TestDecodeUpdate(t *testing.T) {
 				1: 0x8,     // prefix len
 				2: 0x14, 0, // NetAddr struct size
 				8: 0, 0, 0, 0, 0, 0, 0x1, 0, // RD LE u64
-				// attrsAreaSize expected at idx == 60
-				60: 2,    // ERROR attrsAreaSize=2 but only 2 bytes available (need at least 4 for attr type)
-				64: 0, 0, // truncated attrs data
+				// global_id at 60 (zero); attrsAreaSize at 64
+				64: 2,    // ERROR attrsAreaSize=2 but only 2 bytes available (need at least 4 for attr type)
+				68: 0, 0, // truncated attrs data
 			},
 			errDecode: ErrAttrsUnexpectedEOD,
 		},
@@ -429,9 +443,10 @@ func TestDecodeUpdate(t *testing.T) {
 				1: 0x8,     // prefix len
 				2: 0x14, 0, // NetAddr struct size
 				8: 0, 0, 0, 0, 0, 0, 0x1, 0, // RD LE u64
-				60: 4 + /* ERROR: not enough storage for U32 attribute */ 2,
-				64: 0x1 /* < ORIGIN: PROTOCOL_BGP > */, 0x4, 0, 0,
-				68: 0, 0, // ... truncated
+				// global_id at 60 (zero)
+				64: 4 + /* ERROR: not enough storage for U32 attribute */ 2,
+				68: 0x1 /* < ORIGIN: PROTOCOL_BGP > */, 0x4, 0, 0,
+				72: 0, 0, // ... truncated
 			},
 			errDecode: ErrAttributesTruncated,
 		},
@@ -443,10 +458,11 @@ func TestDecodeUpdate(t *testing.T) {
 				1: 0x8,     // prefix len
 				2: 0x14, 0, // NetAddr struct size
 				8: 0, 0, 0, 0, 0, 0, 0x1, 0, // RD LE u64
-				60: 4 + 4 + 4,
-				64: 0x2 /* < AS_PATH: PROTOCOL_BGP > */, 0x4, 0, 0,
-				68: 100, 5, 0, 0, // ERROR: size of complex attribute too big
-				72: 0, 0, 0, 0,
+				// global_id at 60 (zero)
+				64: 4 + 4 + 4,
+				68: 0x2 /* < AS_PATH: PROTOCOL_BGP > */, 0x4, 0, 0,
+				72: 100, 5, 0, 0, // ERROR: size of complex attribute too big
+				76: 0, 0, 0, 0,
 			},
 			errDecode: ErrAttributesTruncated,
 		},
@@ -457,10 +473,11 @@ func TestDecodeUpdate(t *testing.T) {
 				0: 0x3,     // NetVPN4
 				1: 0x8,     // prefix len
 				2: 0x14, 0, // NetAddr struct size
-				60: 4 + 4 + 4,
-				64: 0x2 /* < AS_PATH: PROTOCOL_BGP > */, 0x4, 0, 0,
-				68: 2, 0, 0, 0, // size of ASPath attribute
-				72: 2, 100, // ERROR: 100 segments but not enough data
+				// global_id at 60 (zero)
+				64: 4 + 4 + 4,
+				68: 0x2 /* < AS_PATH: PROTOCOL_BGP > */, 0x4, 0, 0,
+				72: 2, 0, 0, 0, // size of ASPath attribute
+				76: 2, 100, // ERROR: 100 segments but not enough data
 			},
 			errNew: ErrAttributesTruncated,
 		},

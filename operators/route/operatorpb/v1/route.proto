@@ -139,6 +139,9 @@ message Route {
   // All equal-cost members of the per-source best group carry this flag,
   // including every static ECMP nexthop and every equal-cost BIRD path.
   bool is_best = 12;
+  // GlobalID identifies the peer globally, as reported by BIRD on the wire
+  // immediately after the peer address.
+  uint32 global_id = 13;
 }
 
 // LargeCommunity represents a BGP Large Community value.
