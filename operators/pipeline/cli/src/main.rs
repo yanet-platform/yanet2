@@ -32,6 +32,9 @@ pub mod operatorpb {
 /// The fully-qualified gRPC service name used in error messages.
 const SERVICE_NAME: &str = "operators.pipeline.operatorpb.v1.ReadinessService";
 
+/// The fully-qualified metrics service name used in error messages.
+const METRICS_SERVICE_NAME: &str = "operators.pipeline.operatorpb.v1.MetricsService";
+
 /// Exit code used when the RPC succeeds but not all scopes are `STATE_READY`.
 const EXIT_NOT_READY: i32 = 2;
 
@@ -92,24 +95,18 @@ pub async fn main() {
 async fn run(cmd: Cmd) -> Result<bool, Error> {
     match cmd.mode {
         ModeCmd::Metrics => {
-            let channel = ync::client::connect(&cmd.connection)
-                .await
-                .map_err(|e| Error::from_connection(e, "connect", &cmd.connection.endpoint))?;
-            let mut client = MetricsServiceClient::new(channel)
-                .send_compressed(CompressionEncoding::Gzip)
-                .accept_compressed(CompressionEncoding::Gzip);
+            let mut service = Service::connect(&cmd.connection, METRICS_SERVICE_NAME, |channel| {
+                MetricsServiceClient::new(channel)
+                    .send_compressed(CompressionEncoding::Gzip)
+                    .accept_compressed(CompressionEncoding::Gzip)
+            })
+            .await?;
 
-            let response = client
+            let response = service
+                .client()
                 .get_metrics(GetMetricsRequest {})
                 .await
-                .map_err(|status| {
-                    Error::from_status(
-                        status,
-                        "get_metrics",
-                        cmd.connection.endpoint.clone(),
-                        "operators.pipeline.operatorpb.v1.MetricsService",
-                    )
-                })?
+                .map_err(service.status("get_metrics"))?
                 .into_inner();
 
             let data = serde_json::to_string(&response).expect("metrics serialization must not fail");
