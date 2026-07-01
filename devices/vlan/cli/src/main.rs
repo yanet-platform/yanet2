@@ -1,13 +1,12 @@
-use core::error::Error;
-
-use clap::{ArgAction, CommandFactory, Parser, ValueEnum};
+use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
 use code::{UpdateDeviceVlanRequest, device_vlan_service_client::DeviceVlanServiceClient};
 use commonpb::pb::Device;
 use tonic::codec::CompressionEncoding;
 use ync::{
     client::{ConnectionArgs, LayeredChannel},
-    logging,
+    errors::Error,
+    output::{self, CommonFormat},
 };
 
 #[allow(non_snake_case)]
@@ -26,18 +25,12 @@ pub struct Cmd {
     pub mode: ModeCmd,
     #[command(flatten)]
     pub connection: ConnectionArgs,
+    /// Output format.
+    #[arg(long, default_value = "human", global = true)]
+    pub format: CommonFormat,
     /// Log verbosity level.
     #[clap(short, action = ArgAction::Count, global = true)]
     pub verbose: u8,
-}
-
-/// Output format options.
-#[derive(Debug, Clone, ValueEnum)]
-pub enum OutputFormat {
-    /// Tree structure with colored output (default).
-    Tree,
-    /// JSON format.
-    Json,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -61,45 +54,75 @@ pub struct UpdateCmd {
     pub vlan: u16,
 }
 
+/// The fully-qualified gRPC service name used in error messages.
+const SERVICE_NAME: &str = "devices.vlan.controlplane.vlanpb.v1.DeviceVlanService";
+
 pub struct DeviceVlanService {
     client: DeviceVlanServiceClient<LayeredChannel>,
+    endpoint: String,
 }
 
 impl DeviceVlanService {
-    pub async fn new(connection: &ConnectionArgs) -> Result<Self, Box<dyn Error>> {
-        let channel = ync::client::connect(connection).await?;
+    pub async fn new(connection: &ConnectionArgs) -> Result<Self, Error> {
+        let channel = ync::client::connect(connection)
+            .await
+            .map_err(|e| Error::from_connection(e, "connect", &connection.endpoint))?;
         let client = DeviceVlanServiceClient::new(channel)
             .send_compressed(CompressionEncoding::Gzip)
             .accept_compressed(CompressionEncoding::Gzip);
-        Ok(Self { client })
+
+        Ok(Self {
+            client,
+            endpoint: connection.endpoint.clone(),
+        })
     }
 
-    pub async fn update_config(&mut self, cmd: UpdateCmd) -> Result<(), Box<dyn Error>> {
+    fn map_err<'a>(&'a self, action: &'a str) -> impl FnOnce(tonic::Status) -> Error + 'a {
+        let endpoint = self.endpoint.clone();
+        move |status| Error::from_status(status, action, endpoint, SERVICE_NAME)
+    }
+
+    fn invalid_argument(&self, action: &'static str, message: String) -> Error {
+        Error::from_status(
+            tonic::Status::invalid_argument(message),
+            action,
+            self.endpoint.clone(),
+            SERVICE_NAME,
+        )
+    }
+
+    pub async fn update_config(&mut self, cmd: UpdateCmd) -> Result<(), Error> {
+        let input = cmd
+            .input
+            .into_iter()
+            .map(|s| s.parse::<commonpb::pb::DevicePipeline>())
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|err| self.invalid_argument("update", err.to_string()))?;
+        let output = cmd
+            .output
+            .into_iter()
+            .map(|s| s.parse::<commonpb::pb::DevicePipeline>())
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|err| self.invalid_argument("update", err.to_string()))?;
+
         let request = UpdateDeviceVlanRequest {
-            name: cmd.name,
-            device: Some(Device {
-                input: cmd
-                    .input
-                    .into_iter()
-                    .map(|s| s.parse())
-                    .collect::<Result<Vec<_>, _>>()?,
-                output: cmd
-                    .output
-                    .into_iter()
-                    .map(|s| s.parse())
-                    .collect::<Result<Vec<_>, _>>()?,
-            }),
+            name: cmd.name.clone(),
+            device: Some(Device { input, output }),
             vlan: cmd.vlan as u32,
         };
 
-        self.client.update_device(request).await?;
-        log::info!("Successfully updated device");
+        self.client
+            .update_device(request)
+            .await
+            .map_err(self.map_err("update"))?;
+
+        output::success("update", format_args!("Updated device {}.", cmd.name));
 
         Ok(())
     }
 }
 
-async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
+async fn run(cmd: Cmd) -> Result<(), Error> {
     let mut service = DeviceVlanService::new(&cmd.connection).await?;
 
     match cmd.mode {
@@ -111,10 +134,10 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
 pub async fn main() {
     CompleteEnv::with_factory(Cmd::command).complete();
     let cmd = Cmd::parse();
-    logging::init(cmd.verbose as usize).expect("initialize logging");
+    ync::init(cmd.verbose, cmd.format);
 
     if let Err(err) = run(cmd).await {
-        log::error!("ERROR: {err}");
-        std::process::exit(1);
+        output::failure(&err);
+        std::process::exit(err.exit_code());
     }
 }
