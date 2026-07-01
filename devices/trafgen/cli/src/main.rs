@@ -9,7 +9,7 @@ use trafgenpb::{
     trafgen_service_client::TrafgenServiceClient,
 };
 use ync::{
-    client::{ConnectionArgs, LayeredChannel},
+    client::{ConnectionArgs, LayeredChannel, Service},
     errors::Error,
     output::{self, CommonFormat},
 };
@@ -96,39 +96,21 @@ pub struct SetRateCmd {
 const SERVICE_NAME: &str = "devices.trafgen.controlplane.trafgenpb.v1.TrafgenService";
 
 pub struct TrafgenService {
-    client: TrafgenServiceClient<LayeredChannel>,
-    endpoint: String,
+    service: Service<TrafgenServiceClient<LayeredChannel>>,
 }
 
 impl TrafgenService {
     pub async fn new(connection: &ConnectionArgs) -> Result<Self, Error> {
-        let channel = ync::client::connect(connection)
-            .await
-            .map_err(|e| Error::from_connection(e, "connect", &connection.endpoint))?;
-        let client = TrafgenServiceClient::new(channel)
-            .max_decoding_message_size(256 * 1024 * 1024)
-            .max_encoding_message_size(256 * 1024 * 1024)
-            .send_compressed(CompressionEncoding::Gzip)
-            .accept_compressed(CompressionEncoding::Gzip);
-
-        Ok(Self {
-            client,
-            endpoint: connection.endpoint.clone(),
+        let service = Service::connect(connection, SERVICE_NAME, |channel| {
+            TrafgenServiceClient::new(channel)
+                .max_decoding_message_size(256 * 1024 * 1024)
+                .max_encoding_message_size(256 * 1024 * 1024)
+                .send_compressed(CompressionEncoding::Gzip)
+                .accept_compressed(CompressionEncoding::Gzip)
         })
-    }
+        .await?;
 
-    fn map_err<'a>(&'a self, action: &'a str) -> impl FnOnce(tonic::Status) -> Error + 'a {
-        let endpoint = self.endpoint.clone();
-        move |status| Error::from_status(status, action, endpoint, SERVICE_NAME)
-    }
-
-    fn invalid_argument(&self, action: &'static str, message: String) -> Error {
-        Error::from_status(
-            tonic::Status::invalid_argument(message),
-            action,
-            self.endpoint.clone(),
-            SERVICE_NAME,
-        )
+        Ok(Self { service })
     }
 
     pub async fn update_device(&mut self, cmd: UpdateCmd) -> Result<(), Error> {
@@ -137,22 +119,23 @@ impl TrafgenService {
             .into_iter()
             .map(|s| s.parse::<commonpb::pb::DevicePipeline>())
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|err| self.invalid_argument("update", err.to_string()))?;
+            .map_err(|err| self.service.invalid("update", err.to_string()))?;
         let output = cmd
             .output
             .into_iter()
             .map(|s| s.parse::<commonpb::pb::DevicePipeline>())
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|err| self.invalid_argument("update", err.to_string()))?;
+            .map_err(|err| self.service.invalid("update", err.to_string()))?;
 
         let request = UpdateDeviceRequest {
             name: cmd.config_name.clone(),
             device: Some(Device { input, output }),
         };
-        self.client
+        self.service
+            .client()
             .update_device(request)
             .await
-            .map_err(self.map_err("update"))?
+            .map_err(self.service.status("update"))?
             .into_inner();
 
         output::success("update", format_args!("Updated device {}.", cmd.config_name));
@@ -162,10 +145,11 @@ impl TrafgenService {
 
     pub async fn list_configs(&mut self) -> Result<(), Error> {
         let response = self
-            .client
+            .service
+            .client()
             .list_configs(ListConfigsRequest {})
             .await
-            .map_err(self.map_err("list"))?
+            .map_err(self.service.status("list"))?
             .into_inner();
 
         output::data(
@@ -185,10 +169,11 @@ impl TrafgenService {
     pub async fn show_config(&mut self, cmd: ShowConfigCmd) -> Result<(), Error> {
         let request = ShowConfigRequest { name: cmd.config_name.clone() };
         let response = self
-            .client
+            .service
+            .client()
             .show_config(request)
             .await
-            .map_err(self.map_err("show"))?
+            .map_err(self.service.status("show"))?
             .into_inner();
 
         output::data(&response, false, format_args!(""), || {
@@ -202,14 +187,16 @@ impl TrafgenService {
 
     pub async fn upload_pcap(&mut self, cmd: UploadPcapCmd) -> Result<(), Error> {
         let pcap = std::fs::read(&cmd.pcap).map_err(|err| {
-            self.invalid_argument("upload", format!("failed to read pcap {}: {err}", cmd.pcap.display()))
+            self.service
+                .invalid("upload", format!("failed to read pcap {}: {err}", cmd.pcap.display()))
         })?;
 
         let request = UploadPcapRequest { name: cmd.config_name.clone(), pcap };
-        self.client
+        self.service
+            .client()
             .upload_pcap(request)
             .await
-            .map_err(self.map_err("upload"))?
+            .map_err(self.service.status("upload"))?
             .into_inner();
 
         output::success("upload", format_args!("Uploaded pcap to {}.", cmd.config_name));
@@ -222,10 +209,11 @@ impl TrafgenService {
             name: cmd.config_name.clone(),
             rate_pps: cmd.rate,
         };
-        self.client
+        self.service
+            .client()
             .set_rate(request)
             .await
-            .map_err(self.map_err("rate"))?
+            .map_err(self.service.status("rate"))?
             .into_inner();
 
         output::success(

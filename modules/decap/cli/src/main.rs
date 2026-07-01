@@ -8,7 +8,7 @@ use netip::{Contiguous, IpNetwork};
 use ptree::TreeBuilder;
 use tonic::codec::CompressionEncoding;
 use ync::{
-    client::{ConnectionArgs, LayeredChannel},
+    client::{ConnectionArgs, LayeredChannel, Service},
     errors::Error,
     output::{self, CommonFormat},
 };
@@ -87,38 +87,30 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
 }
 
 pub struct DecapService {
-    client: DecapServiceClient<LayeredChannel>,
-    endpoint: String,
+    service: Service<DecapServiceClient<LayeredChannel>>,
 }
 
 impl DecapService {
     pub async fn new(connection: &ConnectionArgs) -> Result<Self, Error> {
-        let channel = ync::client::connect(connection)
-            .await
-            .map_err(|e| Error::from_connection(e, "connect", &connection.endpoint))?;
-        let client = DecapServiceClient::new(channel)
-            .send_compressed(CompressionEncoding::Gzip)
-            .accept_compressed(CompressionEncoding::Gzip);
-
-        Ok(Self {
-            client,
-            endpoint: connection.endpoint.clone(),
+        let service = Service::connect(connection, SERVICE_NAME, |channel| {
+            DecapServiceClient::new(channel)
+                .send_compressed(CompressionEncoding::Gzip)
+                .accept_compressed(CompressionEncoding::Gzip)
         })
-    }
+        .await?;
 
-    fn map_err<'a>(&'a self, action: &'a str) -> impl FnOnce(tonic::Status) -> Error + 'a {
-        let endpoint = self.endpoint.clone();
-        move |status| Error::from_status(status, action, endpoint, SERVICE_NAME)
+        Ok(Self { service })
     }
 
     pub async fn list_configs(&mut self) -> Result<(), Error> {
         let request = ListConfigsRequest {};
         log::trace!("list configs request: {request:?}");
         let response = self
-            .client
+            .service
+            .client()
             .list_configs(request)
             .await
-            .map_err(self.map_err("list"))?
+            .map_err(self.service.status("list"))?
             .into_inner();
         log::debug!("list configs response: {response:?}");
 
@@ -142,10 +134,11 @@ impl DecapService {
         let request = ShowConfigRequest { name: cmd.config_name.to_owned() };
         log::trace!("show config request: {request:?}");
         let response = self
-            .client
+            .service
+            .client()
             .show_config(request)
             .await
-            .map_err(self.map_err("show"))?
+            .map_err(self.service.status("show"))?
             .into_inner();
         log::debug!("show config response: {response:?}");
 
@@ -161,10 +154,11 @@ impl DecapService {
         };
         log::trace!("update config request: {request:?}");
         let response = self
-            .client
+            .service
+            .client()
             .update_config(request)
             .await
-            .map_err(self.map_err("update"))?
+            .map_err(self.service.status("update"))?
             .into_inner();
         log::debug!("update config response: {response:?}");
 

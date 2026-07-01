@@ -74,6 +74,82 @@ pub async fn connect(args: &ConnectionArgs) -> Result<LayeredChannel, Connection
     Ok(auth.layer(channel))
 }
 
+/// A connected gRPC client bundled with its endpoint and service name.
+///
+/// Wraps a tonic-generated client together with the endpoint it reached and
+/// its fully-qualified service name. This lets a CLI stop threading
+/// `endpoint` through its own service struct and stop re-declaring the
+/// per-command error-mapping helpers: [`status`](Service::status) and
+/// [`invalid`](Service::invalid) live here once.
+///
+/// It holds a single client, matching the common one-service CLI. A CLI that
+/// drives several clients over one shared channel keeps them as separate
+/// fields instead.
+pub struct Service<C> {
+    client: C,
+    endpoint: String,
+    name: &'static str,
+}
+
+impl<C> Service<C> {
+    /// Wrap an already-built `client` with its `endpoint` and service `name`.
+    ///
+    /// Prefer [`Service::connect`], which also establishes the channel. Use
+    /// this only when the channel is built elsewhere.
+    pub fn new(client: C, endpoint: impl Into<String>, name: &'static str) -> Self {
+        Self {
+            client,
+            endpoint: endpoint.into(),
+            name,
+        }
+    }
+
+    /// Connect to `connection` and build the client via `build`.
+    ///
+    /// `name` is the fully-qualified gRPC service name embedded in error
+    /// messages. `build` receives the layered channel and returns the
+    /// tonic-generated client, configuring compression and message sizes.
+    pub async fn connect<F>(connection: &ConnectionArgs, name: &'static str, build: F) -> Result<Self, Error>
+    where
+        F: FnOnce(LayeredChannel) -> C,
+    {
+        let channel = connect(connection)
+            .await
+            .map_err(|err| Error::from_connection(err, "connect", &connection.endpoint))?;
+
+        Ok(Self::new(build(channel), connection.endpoint.clone(), name))
+    }
+
+    /// Mutable access to the inner client for issuing RPCs.
+    pub fn client(&mut self) -> &mut C {
+        &mut self.client
+    }
+
+    /// A closure mapping a gRPC [`Status`] to a structured [`Error`].
+    ///
+    /// `action` is the user-facing verb (e.g. `"list"`); pass the returned
+    /// closure to `Result::map_err` on an RPC result. The closure owns its
+    /// captures, so it never borrows `self`.
+    pub fn status(&self, action: &'static str) -> impl FnOnce(Status) -> Error {
+        let endpoint = self.endpoint.clone();
+        let name = self.name;
+
+        move |status| Error::from_status(status, action, endpoint, name)
+    }
+
+    /// Build an invalid-argument [`Error`] for input rejected locally.
+    ///
+    /// Use when the CLI detects a bad argument before issuing the RPC.
+    pub fn invalid(&self, action: &'static str, message: impl Into<String>) -> Error {
+        Error::from_status(
+            Status::invalid_argument(message.into()),
+            action,
+            self.endpoint.clone(),
+            self.name,
+        )
+    }
+}
+
 /// Invoke a unary RPC on an arbitrary gRPC service by its fully-qualified
 /// name, without a generated client.
 ///
@@ -185,4 +261,29 @@ where
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod test {
+    use tonic::Status;
+
+    use super::Service;
+    use crate::errors::ErrorKind;
+
+    #[test]
+    fn status_maps_grpc_code() {
+        let service = Service::new((), "grpc://[::1]:8080", "test.Service");
+        let err = (service.status("list"))(Status::not_found("missing"));
+
+        assert_eq!(ErrorKind::NotFound, err.kind);
+    }
+
+    #[test]
+    fn invalid_builds_invalid_argument() {
+        let service = Service::new((), "grpc://[::1]:8080", "test.Service");
+        let err = service.invalid("update", "bad input");
+
+        assert_eq!(ErrorKind::InvalidArgument, err.kind);
+        assert_eq!("bad input", err.message);
+    }
 }
