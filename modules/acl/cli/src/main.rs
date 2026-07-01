@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use tabled::Tabled;
 use tonic::codec::CompressionEncoding;
 use ync::{
-    client::{ConnectionArgs, LayeredChannel},
+    client::{ConnectionArgs, LayeredChannel, Service},
     display::print_table_from_entries,
     errors::Error,
     output::{self, CommonFormat},
@@ -452,9 +452,8 @@ pub struct Cmd {
 const SERVICE_NAME: &str = "modules.acl.controlplane.aclpb.v1.ACLService";
 
 pub struct ACLService {
-    client: AclServiceClient<LayeredChannel>,
-    metrics_client: MetricsServiceClient<LayeredChannel>,
-    endpoint: String,
+    service: Service<AclServiceClient<LayeredChannel>>,
+    metrics: Service<MetricsServiceClient<LayeredChannel>>,
 }
 
 impl ACLService {
@@ -462,35 +461,35 @@ impl ACLService {
         let channel = ync::client::connect(connection)
             .await
             .map_err(|e| Error::from_connection(e, "connect", &connection.endpoint))?;
-        let client = AclServiceClient::new(channel.clone())
-            .max_decoding_message_size(256 * 1024 * 1024)
-            .max_encoding_message_size(256 * 1024 * 1024)
-            .send_compressed(CompressionEncoding::Gzip)
-            .accept_compressed(CompressionEncoding::Gzip);
-        let metrics_client = MetricsServiceClient::new(channel)
-            .max_decoding_message_size(256 * 1024 * 1024)
-            .max_encoding_message_size(256 * 1024 * 1024)
-            .send_compressed(CompressionEncoding::Gzip)
-            .accept_compressed(CompressionEncoding::Gzip);
+        let service = Service::new(
+            AclServiceClient::new(channel.clone())
+                .max_decoding_message_size(256 * 1024 * 1024)
+                .max_encoding_message_size(256 * 1024 * 1024)
+                .send_compressed(CompressionEncoding::Gzip)
+                .accept_compressed(CompressionEncoding::Gzip),
+            connection.endpoint.clone(),
+            SERVICE_NAME,
+        );
+        let metrics = Service::new(
+            MetricsServiceClient::new(channel)
+                .max_decoding_message_size(256 * 1024 * 1024)
+                .max_encoding_message_size(256 * 1024 * 1024)
+                .send_compressed(CompressionEncoding::Gzip)
+                .accept_compressed(CompressionEncoding::Gzip),
+            connection.endpoint.clone(),
+            SERVICE_NAME,
+        );
 
-        Ok(Self {
-            client,
-            metrics_client,
-            endpoint: connection.endpoint.clone(),
-        })
-    }
-
-    fn map_err<'a>(&'a self, action: &'a str) -> impl FnOnce(tonic::Status) -> Error + 'a {
-        let endpoint = self.endpoint.clone();
-        move |status| Error::from_status(status, action, endpoint, SERVICE_NAME)
+        Ok(Self { service, metrics })
     }
 
     pub async fn list_configs(&mut self) -> Result<(), Error> {
         let response = self
-            .client
+            .service
+            .client()
             .list_configs(ListConfigsRequest {})
             .await
-            .map_err(self.map_err("list"))?
+            .map_err(self.service.status("list"))?
             .into_inner();
 
         output::data(
@@ -510,10 +509,11 @@ impl ACLService {
     pub async fn show_config(&mut self, cmd: ShowCmd) -> Result<(), Error> {
         let request = ShowConfigRequest { name: cmd.config_name.clone() };
         let response = self
-            .client
+            .service
+            .client()
             .show_config(request)
             .await
-            .map_err(self.map_err("show"))?
+            .map_err(self.service.status("show"))?
             .into_inner();
 
         output::data(&response, false, format_args!(""), || {
@@ -529,10 +529,11 @@ impl ACLService {
 
     pub async fn delete_config(&mut self, cmd: DeleteCmd) -> Result<(), Error> {
         let request = DeleteConfigRequest { name: cmd.config_name.clone() };
-        self.client
+        self.service
+            .client()
             .delete_config(request)
             .await
-            .map_err(self.map_err("delete"))?
+            .map_err(self.service.status("delete"))?
             .into_inner();
 
         output::success("delete", format_args!("Deleted {}.", cmd.config_name));
@@ -542,11 +543,9 @@ impl ACLService {
 
     pub async fn update_config(&mut self, cmd: UpdateCmd) -> Result<(), Error> {
         let config = ACLConfig::load(&cmd.rules).map_err(|err| {
-            Error::from_status(
-                tonic::Status::invalid_argument(format!("failed to load rules from {}: {err}", cmd.rules.display())),
+            self.service.invalid(
                 "update",
-                self.endpoint.clone(),
-                SERVICE_NAME,
+                format!("failed to load rules from {}: {err}", cmd.rules.display()),
             )
         })?;
         let rule_count = config.rules.len();
@@ -556,10 +555,11 @@ impl ACLService {
         };
         log::trace!("UpdateConfigRequest: {request:?}");
         let response = self
-            .client
+            .service
+            .client()
             .update_config(request)
             .await
-            .map_err(self.map_err("update"))?
+            .map_err(self.service.status("update"))?
             .into_inner();
         log::debug!("UpdateConfigResponse: {response:?}");
 
@@ -573,10 +573,11 @@ impl ACLService {
 
     pub async fn metrics(&mut self, cmd: MetricsCmd) -> Result<(), Error> {
         let response = self
-            .metrics_client
+            .metrics
+            .client()
             .get_metrics(GetMetricsRequest {})
             .await
-            .map_err(self.map_err("metrics"))?
+            .map_err(self.metrics.status("metrics"))?
             .into_inner();
         let label_filters: Vec<(&str, &str)> = cmd
             .labels
