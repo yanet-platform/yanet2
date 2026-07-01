@@ -5,7 +5,7 @@ use clap_complete::CompleteEnv;
 use commonpb::pb::FunctionId;
 use tonic::{codec::CompressionEncoding, Status};
 use ync::{
-    client::{ConnectionArgs, LayeredChannel},
+    client::{ConnectionArgs, LayeredChannel, Service},
     errors::{Error, NotFoundMapper},
     output::{self, CommonFormat},
 };
@@ -137,8 +137,7 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
 }
 
 pub struct FunctionService {
-    client: FunctionServiceClient<LayeredChannel>,
-    endpoint: String,
+    service: Service<FunctionServiceClient<LayeredChannel>>,
 }
 
 impl FunctionService {
@@ -151,17 +150,17 @@ impl FunctionService {
             .accept_compressed(CompressionEncoding::Gzip);
 
         Ok(Self {
-            client,
-            endpoint: connection.endpoint.clone(),
+            service: Service::new(client, connection.endpoint.clone(), FUNCTION_SERVICE),
         })
     }
 
     pub async fn list_functions(&mut self) -> Result<Vec<FunctionId>, Error> {
         let response = self
-            .client
+            .service
+            .client()
             .list(ListFunctionsRequest {})
             .await
-            .map_err(|status| NOT_FOUND.map(status, "list functions", &self.endpoint, None))?
+            .map_err(|status| NOT_FOUND.map(status, "list functions", self.service.endpoint(), None))?
             .into_inner();
 
         Ok(response.ids)
@@ -173,14 +172,15 @@ impl FunctionService {
         };
 
         let response = self
-            .client
+            .service
+            .client()
             .get(request)
             .await
             .map_err(|status| {
                 NOT_FOUND.map(
                     status,
                     "show function",
-                    &self.endpoint,
+                    self.service.endpoint(),
                     Some(&format!("function '{name}'")),
                 )
             })?
@@ -190,7 +190,7 @@ impl FunctionService {
             Error::from_status(
                 Status::not_found(format!("function '{name}' not found")),
                 "show function",
-                self.endpoint.clone(),
+                self.service.endpoint(),
                 FUNCTION_SERVICE,
             )
         })?;
@@ -206,11 +206,11 @@ impl FunctionService {
             }),
         };
 
-        self.client.update(request).await.map_err(|status| {
+        self.service.client().update(request).await.map_err(|status| {
             NOT_FOUND.map(
                 status,
                 "update function",
-                &self.endpoint,
+                self.service.endpoint(),
                 Some(&format!("function '{name}'", name = cmd.name)),
             )
         })?;
@@ -221,7 +221,8 @@ impl FunctionService {
     pub async fn delete_function(&mut self, cmd: DeleteCmd) -> Result<(), Error> {
         let name = cmd.name;
 
-        self.client
+        self.service
+            .client()
             .delete(DeleteFunctionRequest {
                 id: Some(FunctionId { name: name.clone() }),
             })
@@ -230,7 +231,7 @@ impl FunctionService {
                 NOT_FOUND.map(
                     status,
                     "delete function",
-                    &self.endpoint,
+                    self.service.endpoint(),
                     Some(&format!("function '{name}'")),
                 )
             })?;

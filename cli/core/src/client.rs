@@ -125,6 +125,15 @@ impl<C> Service<C> {
         &mut self.client
     }
 
+    /// The endpoint this client reached.
+    ///
+    /// Exposed for the few call sites that build errors through a helper
+    /// other than [`status`](Service::status) / [`invalid`](Service::invalid)
+    /// (for example a [`NotFoundMapper`](crate::errors::NotFoundMapper)).
+    pub fn endpoint(&self) -> &str {
+        &self.endpoint
+    }
+
     /// A closure mapping a gRPC [`Status`] to a structured [`Error`].
     ///
     /// `action` is the user-facing verb (e.g. `"list"`); pass the returned
@@ -285,5 +294,12 @@ mod test {
 
         assert_eq!(ErrorKind::InvalidArgument, err.kind);
         assert_eq!("bad input", err.message);
+    }
+
+    #[test]
+    fn endpoint_returns_configured_value() {
+        let service = Service::new((), "grpc://[::1]:8080", "test.Service");
+
+        assert_eq!("grpc://[::1]:8080", service.endpoint());
     }
 }
