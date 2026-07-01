@@ -202,8 +202,6 @@ fwstate_process_sync_v4(
 
 	if (result < 0) {
 		// FIXME: counters
-		// FIXME: ratelimit this errors
-		LOG(ERROR, "failed to insert IPv4 state: %s", strerror(errno));
 	}
 
 	if (lock) {
@@ -241,8 +239,6 @@ fwstate_process_sync_v6(
 
 	if (result < 0) {
 		// FIXME: counters
-		// FIXME: ratelimit this errors
-		LOG(ERROR, "failed to insert IPv6 state: %s", strerror(errno));
 	}
 
 	if (lock) {
