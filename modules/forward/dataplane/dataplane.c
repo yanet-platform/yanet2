@@ -31,16 +31,16 @@ forward_handle_packets(
 		cp_module
 	);
 
-	struct packet *vlan_packets[packet_list_count(&packet_front->input)];
-	uint32_t vlan_result[packet_list_count(&packet_front->input)];
+	struct packet *vlan_packets[packet_front_input_count(packet_front)];
+	uint32_t vlan_result[packet_front_input_count(packet_front)];
 	uint64_t vlan_idx = 0;
 
-	struct packet *ip4_packets[packet_list_count(&packet_front->input)];
-	uint32_t ip4_result[packet_list_count(&packet_front->input)];
+	struct packet *ip4_packets[packet_front_input_count(packet_front)];
+	uint32_t ip4_result[packet_front_input_count(packet_front)];
 	uint64_t ip4_idx = 0;
 
-	struct packet *ip6_packets[packet_list_count(&packet_front->input)];
-	uint32_t ip6_result[packet_list_count(&packet_front->input)];
+	struct packet *ip6_packets[packet_front_input_count(packet_front)];
+	uint32_t ip6_result[packet_front_input_count(packet_front)];
 	uint64_t ip6_idx = 0;
 
 	for (struct packet *packet = packet_list_first(&packet_front->input);

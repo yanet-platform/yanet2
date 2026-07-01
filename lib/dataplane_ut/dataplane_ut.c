@@ -359,6 +359,19 @@ dataplane_ut_alloc_mbuf(struct dataplane_ut *ut) {
 	return rte_pktmbuf_alloc(ut->mempool);
 }
 
+// Count the packets in a bare packet_list by walking it.
+//
+// packet_list no longer caches a count; the test harness needs one for the
+// no-active-pipeline drop path and for round recycling.
+static uint64_t
+packet_list_length(struct packet_list *list) {
+	uint64_t count = 0;
+	for (struct packet *pkt = list->first; pkt != NULL; pkt = pkt->next) {
+		count += 1;
+	}
+	return count;
+}
+
 void
 dataplane_ut_run(
 	struct dataplane_ut *ut,
@@ -393,12 +406,17 @@ dataplane_ut_run(
 	if (config_gen_ectx == NULL) {
 		// No active pipeline: drop everything.
 		packet_list_concat(&result->drop, &packet_front.pending_input);
+		result->output_count = 0;
+		result->drop_count = packet_list_length(&result->drop);
 		return;
 	}
 
 	worker_pipeline_round(
 		dp_worker, cp_config_gen, config_gen_ectx, &packet_front
 	);
+
+	result->output_count = packet_front_output_count(&packet_front);
+	result->drop_count = packet_front_drop_count(&packet_front);
 
 	packet_list_concat(&result->output, &packet_front.output);
 	packet_list_concat(&result->drop, &packet_front.drop);
@@ -419,11 +437,11 @@ dataplane_ut_run_rounds(
 	struct packet_list *input,
 	uint64_t rounds
 ) {
-	if (rounds == 0 || input->count == 0) {
+	size_t count = (size_t)packet_list_length(input);
+	if (rounds == 0 || count == 0) {
 		return;
 	}
 
-	size_t count = (size_t)input->count;
 	struct saved_packet *saved =
 		malloc(count * sizeof(struct saved_packet));
 	if (saved == NULL) {

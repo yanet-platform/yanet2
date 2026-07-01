@@ -74,7 +74,7 @@ dscp_handle_packets(
 		while ((packet = packet_list_pop(&packet_front->input)) != NULL
 		) {
 			dscp_handle(dscp_config, packet);
-			packet_list_add(&packet_front->output, packet);
+			packet_front_output(packet_front, packet);
 		}
 	} else {
 		packet_front_pass(packet_front);

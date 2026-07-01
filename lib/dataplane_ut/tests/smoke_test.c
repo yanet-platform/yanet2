@@ -56,12 +56,12 @@ main(void) {
 		struct dataplane_ut_round_result result;
 		dataplane_ut_run(ut, 0, &empty, &result);
 		TEST_ASSERT_EQUAL(
-			(long)packet_list_count(&result.output),
+			(long)result.output_count,
 			0L,
 			"empty input must yield empty output"
 		);
 		TEST_ASSERT_EQUAL(
-			(long)packet_list_count(&result.drop),
+			(long)result.drop_count,
 			0L,
 			"empty input must yield empty drop"
 		);

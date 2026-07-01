@@ -3970,6 +3970,19 @@ packet_list_cleanup(struct packet_list *list) {
 	packet_list_init(list);
 }
 
+// Count the packets currently linked in a bare packet_list.
+//
+// packet_list no longer caches a count; the tests assert on the current
+// occupancy of a front's output/drop lists, so walk them directly.
+static inline int
+packet_list_len(struct packet_list *list) {
+	int count = 0;
+	for (struct packet *pkt = list->first; pkt != NULL; pkt = pkt->next) {
+		count += 1;
+	}
+	return count;
+}
+
 /**
  * @brief Test UDP checksum calculation during NAT64 translation
  *
@@ -4086,7 +4099,7 @@ test_nat64_udp_checksum() {
 	);
 
 	// Verify output
-	int count = packet_list_count(&test_params.packet_front.output);
+	int count = packet_list_len(&test_params.packet_front.output);
 	TEST_ASSERT_EQUAL(
 		count, 1, "Expected 1 packet output, got %d\n", count
 	);
@@ -4165,18 +4178,18 @@ process_test_case(struct test_case *tc) {
 	);
 
 	if (tc->pkt_expected.eth.dst_addr.addr_bytes[0] == 0) {
-		int count = packet_list_count(&test_params.packet_front.drop);
+		int count = packet_list_len(&test_params.packet_front.drop);
 		TEST_ASSERT_EQUAL(
 			count, 1, "Expected 1 packet droped, got %d\n", count
 		);
-		count = packet_list_count(&test_params.packet_front.output);
+		count = packet_list_len(&test_params.packet_front.output);
 		TEST_ASSERT_EQUAL(
 			count, 0, "Expected 0 packet output, got %d\n", count
 		);
 		return TEST_SUCCESS;
 	}
 
-	int count = packet_list_count(&test_params.packet_front.output);
+	int count = packet_list_len(&test_params.packet_front.output);
 	TEST_ASSERT_EQUAL(
 		count,
 		1,
@@ -4184,7 +4197,7 @@ process_test_case(struct test_case *tc) {
 		tc->name,
 		count
 	);
-	count = packet_list_count(&test_params.packet_front.drop);
+	count = packet_list_len(&test_params.packet_front.drop);
 	TEST_ASSERT_EQUAL(
 		count,
 		0,
@@ -4859,7 +4872,7 @@ test_nat64_bounds_validation(void) {
 
 		// Expect drop
 		int drop_count =
-			packet_list_count(&test_params.packet_front.drop);
+			packet_list_len(&test_params.packet_front.drop);
 		TEST_ASSERT_EQUAL(
 			drop_count,
 			1,
@@ -4940,7 +4953,7 @@ test_nat64_bounds_validation(void) {
 
 		// Expect drop due to UDP length mismatch
 		int drop_count =
-			packet_list_count(&test_params.packet_front.drop);
+			packet_list_len(&test_params.packet_front.drop);
 		TEST_ASSERT_EQUAL(
 			drop_count,
 			1,
@@ -5110,7 +5123,7 @@ test_nat64_icmp_embedded_overflow(void) {
 	test_params.module->handler(NULL, &module_ectx, &pf);
 
 	// Packet should be dropped due to payload_len overflow
-	int drop_count = packet_list_count(&pf.drop);
+	int drop_count = packet_list_len(&pf.drop);
 	TEST_ASSERT_EQUAL(
 		drop_count,
 		1,
@@ -5355,7 +5368,7 @@ test_nat64_icmp_v4tov6_embedded_cksum_overflow(void) {
 		NULL, &module_ectx, &test_params.packet_front
 	);
 
-	int drop_count = packet_list_count(&test_params.packet_front.drop);
+	int drop_count = packet_list_len(&test_params.packet_front.drop);
 	TEST_ASSERT_EQUAL(
 		drop_count,
 		1,
@@ -5426,7 +5439,7 @@ test_nat64_icmp_v4tov6_memmove_overflow(void) {
 		NULL, &module_ectx, &test_params.packet_front
 	);
 
-	int drop_count = packet_list_count(&test_params.packet_front.drop);
+	int drop_count = packet_list_len(&test_params.packet_front.drop);
 	TEST_ASSERT_EQUAL(
 		drop_count,
 		1,

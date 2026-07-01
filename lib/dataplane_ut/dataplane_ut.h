@@ -62,9 +62,15 @@ dataplane_ut_alloc_mbuf(struct dataplane_ut *ut);
 
 // Result of one pipeline round. The caller owns the mbufs in both lists
 // and must free them when done.
+//
+// output_count and drop_count record how many packets each list holds; the
+// packet lists themselves are bare and no longer carry a count.
 struct dataplane_ut_round_result {
 	struct packet_list output;
 	struct packet_list drop;
+
+	uint64_t output_count;
+	uint64_t drop_count;
 };
 
 // Run one pipeline round on worker_idx with the given input.
@@ -104,8 +110,8 @@ dataplane_ut_build_optimized(void);
 // holds all packets in a consistent state for freeing. The snapshot array is
 // freed before returning.
 //
-// Returns immediately (leaving input intact) when rounds == 0 or
-// input->count == 0. Returns immediately on malloc failure.
+// Returns immediately (leaving input intact) when rounds == 0 or input is
+// empty. Returns immediately on malloc failure.
 //
 // Caveat: this primitive assumes each round's handlers only forward or drop the
 // fixed packet set. A handler that allocates, frees, or replicates packets per

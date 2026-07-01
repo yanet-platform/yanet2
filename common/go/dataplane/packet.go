@@ -161,7 +161,11 @@ func (packetList *PacketList) First() *Packet {
 }
 
 func (packetList *PacketList) Count() int {
-	return int((*C.struct_packet_list)(packetList).count)
+	count := 0
+	for packet := packetList.First(); packet != nil; packet = packet.Next() {
+		count++
+	}
+	return count
 }
 
 func (packetList *PacketList) Add(packet *Packet) {
