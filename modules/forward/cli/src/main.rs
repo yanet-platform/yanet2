@@ -1,4 +1,3 @@
-use core::error::Error;
 use std::{
     fs::File,
     path::{Path, PathBuf},
@@ -14,8 +13,9 @@ use netip::{Contiguous, IpNetwork};
 use serde::{Deserialize, Serialize};
 use tonic::codec::CompressionEncoding;
 use ync::{
-    client::{ConnectionArgs, LayeredChannel},
-    logging,
+    client::{ConnectionArgs, LayeredChannel, Service},
+    errors::Error,
+    output::{self, CommonFormat},
 };
 
 #[allow(non_snake_case)]
@@ -34,6 +34,9 @@ pub struct Cmd {
     pub mode: ModeCmd,
     #[command(flatten)]
     pub connection: ConnectionArgs,
+    /// Output format.
+    #[arg(long, default_value = "human", global = true)]
+    pub format: CommonFormat,
     /// Log verbosity level.
     #[clap(short, action = ArgAction::Count, global = true)]
     pub verbose: u8,
@@ -102,7 +105,7 @@ struct ForwardRule {
 }
 
 impl TryFrom<ForwardRule> for forwardpb::Rule {
-    type Error = Box<dyn Error>;
+    type Error = Box<dyn std::error::Error>;
 
     fn try_from(forward_rule: ForwardRule) -> Result<Self, Self::Error> {
         Ok(Self {
@@ -137,7 +140,7 @@ pub struct ForwardConfig {
 }
 
 impl TryFrom<ForwardConfig> for Vec<forwardpb::Rule> {
-    type Error = Box<dyn Error>;
+    type Error = Box<dyn std::error::Error>;
 
     fn try_from(config: ForwardConfig) -> Result<Self, Self::Error> {
         config.rules.into_iter().map(forwardpb::Rule::try_from).collect()
@@ -145,7 +148,7 @@ impl TryFrom<ForwardConfig> for Vec<forwardpb::Rule> {
 }
 
 impl ForwardConfig {
-    pub fn load<P>(path: P) -> Result<Self, Box<dyn Error>>
+    pub fn load<P>(path: P) -> Result<Self, Box<dyn std::error::Error>>
     where
         P: AsRef<Path>,
     {
@@ -156,55 +159,101 @@ impl ForwardConfig {
     }
 }
 
+/// The fully-qualified gRPC service name used in error messages.
+const SERVICE_NAME: &str = "modules.forward.controlplane.forwardpb.v1.ForwardService";
+
 pub struct ForwardService {
-    client: ForwardServiceClient<LayeredChannel>,
+    service: Service<ForwardServiceClient<LayeredChannel>>,
 }
 
 impl ForwardService {
-    pub async fn new(connection: &ConnectionArgs) -> Result<Self, Box<dyn Error>> {
-        let channel = ync::client::connect(connection).await?;
-        let client = ForwardServiceClient::new(channel)
-            .send_compressed(CompressionEncoding::Gzip)
-            .accept_compressed(CompressionEncoding::Gzip);
-        Ok(Self { client })
+    pub async fn new(connection: &ConnectionArgs) -> Result<Self, Error> {
+        let service = Service::connect(connection, SERVICE_NAME, |channel| {
+            ForwardServiceClient::new(channel)
+                .send_compressed(CompressionEncoding::Gzip)
+                .accept_compressed(CompressionEncoding::Gzip)
+        })
+        .await?;
+
+        Ok(Self { service })
     }
 
-    pub async fn show_config(&mut self, cmd: ShowCmd) -> Result<(), Box<dyn Error>> {
+    pub async fn show_config(&mut self, cmd: ShowCmd) -> Result<(), Error> {
         let request = ShowConfigRequest { name: cmd.config_name.clone() };
-        let response = self.client.show_config(request).await?.into_inner();
+        let response = self
+            .service
+            .client()
+            .show_config(request)
+            .await
+            .map_err(self.service.status("show"))?
+            .into_inner();
 
-        println!("{}", serde_json::to_string(&response)?);
+        output::data(&response, false, format_args!(""), || {
+            print!(
+                "{}",
+                serde_yaml::to_string(&response).expect("forward config YAML serialization must not fail")
+            );
+        });
+
         Ok(())
     }
 
-    pub async fn list_configs(&mut self) -> Result<(), Box<dyn Error>> {
+    pub async fn list_configs(&mut self) -> Result<(), Error> {
         let request = ListConfigsRequest {};
-        let response = self.client.list_configs(request).await?.into_inner();
+        let response = self
+            .service
+            .client()
+            .list_configs(request)
+            .await
+            .map_err(self.service.status("list"))?
+            .into_inner();
 
-        println!("{}", serde_json::to_string(&response.configs)?);
+        output::data(
+            &response.configs,
+            response.configs.is_empty(),
+            format_args!("no forward configs"),
+            || {
+                for name in &response.configs {
+                    println!("{name}");
+                }
+            },
+        );
+
         Ok(())
     }
 
-    pub async fn delete_config(&mut self, cmd: DeleteCmd) -> Result<(), Box<dyn Error>> {
+    pub async fn delete_config(&mut self, cmd: DeleteCmd) -> Result<(), Error> {
         let request = DeleteConfigRequest { name: cmd.config.clone() };
-        self.client.delete_config(request).await?;
+        self.service
+            .client()
+            .delete_config(request)
+            .await
+            .map_err(self.service.status("delete"))?;
 
-        println!("OK");
+        output::success("delete", format_args!("Deleted forward config {}.", cmd.config));
+
         Ok(())
     }
 
-    pub async fn update_config(&mut self, cmd: UpdateCmd) -> Result<(), Box<dyn Error>> {
-        let config = ForwardConfig::load(&cmd.rules)?;
-        let rules: Vec<forwardpb::Rule> = config.try_into()?;
+    pub async fn update_config(&mut self, cmd: UpdateCmd) -> Result<(), Error> {
+        let config = ForwardConfig::load(&cmd.rules).map_err(|e| self.service.invalid("update", e.to_string()))?;
+        let rules: Vec<forwardpb::Rule> = config
+            .try_into()
+            .map_err(|e: Box<dyn std::error::Error>| self.service.invalid("update", e.to_string()))?;
         let request = UpdateConfigRequest { name: cmd.config.clone(), rules };
-        self.client.update_config(request).await?;
+        self.service
+            .client()
+            .update_config(request)
+            .await
+            .map_err(self.service.status("update"))?;
 
-        println!("OK");
+        output::success("update", format_args!("Updated forward config {}.", cmd.config));
+
         Ok(())
     }
 }
 
-async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
+async fn run(cmd: Cmd) -> Result<(), Error> {
     let mut service = ForwardService::new(&cmd.connection).await?;
 
     match cmd.mode {
@@ -219,10 +268,10 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
 pub async fn main() {
     CompleteEnv::with_factory(Cmd::command).complete();
     let cmd = Cmd::parse();
-    logging::init(cmd.verbose as usize).expect("initialize logging");
+    ync::init(cmd.verbose, cmd.format);
 
     if let Err(err) = run(cmd).await {
-        log::error!("ERROR: {err}");
-        std::process::exit(1);
+        output::failure(&err);
+        std::process::exit(err.exit_code());
     }
 }
