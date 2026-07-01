@@ -11,7 +11,6 @@ clap_complete = "4.5"
 log = "0.4"
 colored = "3"
 serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
 tokio = { version = "1", features = ["rt", "macros"] }
 tonic = { version = "0.13", features = ["gzip"] }
 prost = "0.13"

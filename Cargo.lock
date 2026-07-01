@@ -3284,7 +3284,6 @@ dependencies = [
  "prost",
  "ptree",
  "serde",
- "serde_json",
  "tokio",
  "tonic",
  "tonic-build",
