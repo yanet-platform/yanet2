@@ -15,7 +15,7 @@ use tabled::{
 };
 use tonic::codec::CompressionEncoding;
 use ync::{
-    client::{ConnectionArgs, LayeredChannel},
+    client::{ConnectionArgs, LayeredChannel, Service},
     errors::Error,
     output::{self, CommonFormat},
 };
@@ -320,49 +320,51 @@ fn tags_request(mode: Option<ModeCmd>, by_tags: ByTagsCmd) -> CountersByTagsRequ
 }
 
 pub struct CountersService {
-    client: CountersServiceClient<LayeredChannel>,
-    endpoint: String,
+    service: Service<CountersServiceClient<LayeredChannel>>,
     action: &'static str,
 }
 
 impl CountersService {
     pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
-        let channel = ync::client::connect(connection)
-            .await
-            .map_err(|err| Error::from_connection(err, action, connection.endpoint.clone()))?;
-        let client = CountersServiceClient::new(channel)
-            .max_decoding_message_size(256 * 1024 * 1024)
-            .max_encoding_message_size(256 * 1024 * 1024)
-            .send_compressed(CompressionEncoding::Gzip)
-            .accept_compressed(CompressionEncoding::Gzip);
-
-        Ok(Self {
-            client,
-            endpoint: connection.endpoint.clone(),
-            action,
+        let service = Service::connect(connection, COUNTERS_SERVICE, |channel| {
+            CountersServiceClient::new(channel)
+                .max_decoding_message_size(256 * 1024 * 1024)
+                .max_encoding_message_size(256 * 1024 * 1024)
+                .send_compressed(CompressionEncoding::Gzip)
+                .accept_compressed(CompressionEncoding::Gzip)
         })
-    }
+        .await?;
 
-    fn map_err(&self) -> impl FnOnce(tonic::Status) -> Error + '_ {
-        let endpoint = self.endpoint.clone();
-        let action = self.action;
-        move |status| Error::from_status(status, action, endpoint, COUNTERS_SERVICE)
+        Ok(Self { service, action })
     }
 
     pub async fn by_tags(&mut self, request: CountersByTagsRequest) -> Result<CountersByTagsResponse, Error> {
-        Ok(self.client.by_tags(request).await.map_err(self.map_err())?.into_inner())
+        Ok(self
+            .service
+            .client()
+            .by_tags(request)
+            .await
+            .map_err(self.service.status(self.action))?
+            .into_inner())
     }
 
     pub async fn perf(&mut self, request: PerfCountersRequest) -> Result<PerfCountersResponse, Error> {
-        Ok(self.client.perf(request).await.map_err(self.map_err())?.into_inner())
+        Ok(self
+            .service
+            .client()
+            .perf(request)
+            .await
+            .map_err(self.service.status(self.action))?
+            .into_inner())
     }
 
     pub async fn workers(&mut self) -> Result<WorkerCountersResponse, Error> {
         Ok(self
-            .client
+            .service
+            .client()
             .workers(WorkerCountersRequest {})
             .await
-            .map_err(self.map_err())?
+            .map_err(self.service.status(self.action))?
             .into_inner())
     }
 }
