@@ -101,7 +101,7 @@ trafgen_input_handle(
 
 	// Forward anything that arrived on this device unchanged; a generator
 	// has no real RX, so this is normally empty.
-	packet_list_concat(&packet_front->output, &packet_front->input);
+	packet_front_pass(packet_front);
 
 	if (config->frame_count == 0 || config->rate_pps == 0 ||
 	    config->worker_count == 0) {
@@ -165,7 +165,7 @@ trafgen_output_handle(
 	(void)dp_worker;
 	(void)device_ectx;
 
-	packet_list_concat(&packet_front->output, &packet_front->input);
+	packet_front_pass(packet_front);
 }
 
 struct device *

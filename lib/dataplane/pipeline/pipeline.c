@@ -46,7 +46,7 @@ module_ectx_process(
 	struct packet_front *packet_front
 
 ) {
-	const size_t packets_count = packet_front->input.count;
+	const size_t packets_count = packet_front_input_count(packet_front);
 
 	for (struct packet *packet = packet_front->input.first; packet != NULL;
 	     packet = packet->next) {
@@ -58,8 +58,7 @@ module_ectx_process(
 	struct counter_storage *storage =
 		ADDR_OF(&module_ectx->counter_storage);
 
-	const uint64_t input_bytes =
-		packet_list_bytes_sum(&packet_front->input);
+	const uint64_t input_bytes = packet_front_input_bytes(packet_front);
 	counter_add_packets_bytes(
 		module_ectx->rx_counter_id,
 		module_ectx->rx_bytes_counter_id,
@@ -101,8 +100,8 @@ module_ectx_process(
 		module_ectx->tx_bytes_counter_id,
 		dp_worker->idx,
 		storage,
-		packet_front->output.count,
-		packet_list_bytes_sum(&packet_front->output)
+		packet_front_output_count(packet_front),
+		packet_front_output_bytes(packet_front)
 	);
 }
 
@@ -112,7 +111,7 @@ chain_ectx_process(
 	struct chain_ectx *chain_ectx,
 	struct packet_front *packet_front
 ) {
-	uint64_t input_size = packet_list_count(&packet_front->input);
+	uint64_t input_size = packet_front_input_count(packet_front);
 
 	uint64_t tsc_start = rte_rdtsc();
 
@@ -153,7 +152,7 @@ function_ectx_run_single_chain(
 ) {
 	struct packet_front schedule;
 	packet_front_init(&schedule);
-	packet_list_concat(&schedule.output, &packet_front->output);
+	packet_front_take_output(&schedule, packet_front);
 
 	struct chain_ectx **chains = ADDR_OF(&function_ectx->chains);
 	chain_ectx_process(dp_worker, ADDR_OF(chains), &schedule);
@@ -184,6 +183,8 @@ function_ectx_run_chains(
 		packet_front_output(schedule + chain_idx, packet);
 		packet = packet_list_pop(&packet_front->output);
 	}
+	packet_front->output_count = 0;
+	packet_front->output_bytes = 0;
 
 	struct chain_ectx **chains = ADDR_OF(&function_ectx->chains);
 	for (uint64_t idx = 0; idx < function_ectx->chain_count; ++idx) {
@@ -207,7 +208,7 @@ function_ectx_drain(
 	struct function_ectx *function_ectx,
 	struct packet_front *packet_front
 ) {
-	packet_list_concat(&packet_front->drop, &packet_front->output);
+	packet_front_drop_output(packet_front);
 
 	function_ectx_run_chains(dp_worker, function_ectx, packet_front);
 }
@@ -226,8 +227,8 @@ function_ectx_process(
 		function_ectx->counter_packet_in_bytes,
 		dp_worker->idx,
 		storage,
-		packet_front->output.count,
-		packet_list_bytes_sum(&packet_front->output)
+		packet_front_output_count(packet_front),
+		packet_front_output_bytes(packet_front)
 	);
 
 	if (function_ectx->chain_map_size == 0) {
@@ -247,16 +248,16 @@ function_ectx_process(
 		function_ectx->counter_packet_out_bytes,
 		dp_worker->idx,
 		storage,
-		packet_front->output.count,
-		packet_list_bytes_sum(&packet_front->output)
+		packet_front_output_count(packet_front),
+		packet_front_output_bytes(packet_front)
 	);
 	counter_add_packets_bytes(
 		function_ectx->counter_packet_drop_count,
 		function_ectx->counter_packet_drop_bytes,
 		dp_worker->idx,
 		storage,
-		packet_front->drop.count,
-		packet_list_bytes_sum(&packet_front->drop)
+		packet_front_drop_count(packet_front),
+		packet_front_drop_bytes(packet_front)
 	);
 }
 
@@ -275,8 +276,8 @@ pipeline_ectx_process(
 		pipeline_ectx->counter_packet_in_bytes,
 		dp_worker->idx,
 		storage,
-		packet_front->output.count,
-		packet_list_bytes_sum(&packet_front->output)
+		packet_front_output_count(packet_front),
+		packet_front_output_bytes(packet_front)
 	);
 
 	for (uint64_t idx = 0; idx < pipeline_ectx->length; ++idx) {
@@ -291,16 +292,16 @@ pipeline_ectx_process(
 		pipeline_ectx->counter_packet_out_bytes,
 		dp_worker->idx,
 		storage,
-		packet_front->output.count,
-		packet_list_bytes_sum(&packet_front->output)
+		packet_front_output_count(packet_front),
+		packet_front_output_bytes(packet_front)
 	);
 	counter_add_packets_bytes(
 		pipeline_ectx->counter_packet_drop_count,
 		pipeline_ectx->counter_packet_drop_bytes,
 		dp_worker->idx,
 		storage,
-		packet_front->drop.count,
-		packet_list_bytes_sum(&packet_front->drop)
+		packet_front_drop_count(packet_front),
+		packet_front_drop_bytes(packet_front)
 	);
 }
 
@@ -331,7 +332,7 @@ device_entry_ectx_dispatch_single(
 ) {
 	struct packet_front schedule;
 	packet_front_init(&schedule);
-	packet_list_concat(&schedule.output, &packet_front->output);
+	packet_front_take_output(&schedule, packet_front);
 
 	struct pipeline_ectx **pipelines = ADDR_OF(&entry_ectx->pipelines);
 	pipeline_ectx_process(dp_worker, ADDR_OF(pipelines), &schedule);
@@ -365,6 +366,8 @@ device_entry_ectx_dispatch_many(
 
 		packet = packet_list_pop(&packet_front->output);
 	}
+	packet_front->output_count = 0;
+	packet_front->output_bytes = 0;
 
 	struct pipeline_ectx **pipelines = ADDR_OF(&entry_ectx->pipelines);
 	for (uint64_t idx = 0; idx < entry_ectx->pipeline_count; ++idx) {
@@ -391,7 +394,7 @@ device_entry_ectx_drain(
 	struct device_entry_ectx *entry_ectx,
 	struct packet_front *packet_front
 ) {
-	packet_list_concat(&packet_front->drop, &packet_front->output);
+	packet_front_drop_output(packet_front);
 
 	if (entry_ectx->pipeline_count > 0) {
 		device_entry_ectx_dispatch_many(
@@ -438,8 +441,8 @@ device_ectx_process_input(
 		device_ectx->counter_packet_rx_bytes,
 		dp_worker->idx,
 		ADDR_OF(&device_ectx->counter_storage),
-		packet_list_count(&packet_front->output),
-		packet_list_bytes_sum(&packet_front->output)
+		packet_front_output_count(packet_front),
+		packet_front_output_bytes(packet_front)
 	);
 
 	device_entry_ectx_dispatch(dp_worker, entry_ectx, packet_front);
@@ -463,8 +466,8 @@ device_ectx_process_output(
 		device_ectx->counter_packet_tx_bytes,
 		dp_worker->idx,
 		ADDR_OF(&device_ectx->counter_storage),
-		packet_list_count(&packet_front->output),
-		packet_list_bytes_sum(&packet_front->output)
+		packet_front_output_count(packet_front),
+		packet_front_output_bytes(packet_front)
 	);
 
 	device_entry_ectx_dispatch(dp_worker, entry_ectx, packet_front);

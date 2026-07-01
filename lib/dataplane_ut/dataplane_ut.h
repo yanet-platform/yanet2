@@ -117,7 +117,7 @@ dataplane_ut_build_optimized(void);
 // without payload reset.
 //
 // Returns immediately (leaving input intact) when rounds == 0 or
-// input->count == 0. Returns immediately on malloc failure.
+// input is empty. Returns immediately on malloc failure.
 //
 // Caveat: this primitive assumes each round's handlers only forward or drop the
 // fixed packet set. A handler that allocates, frees, or replicates packets per

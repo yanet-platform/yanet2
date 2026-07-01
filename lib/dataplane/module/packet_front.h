@@ -12,6 +12,12 @@
  *
  * RX and TX are considered as separated stages of packet processing working
  * before and after pipeline processing.
+ *
+ * The count/byte counters for the input, output and drop lists live here
+ * rather than on the packet lists themselves: they reflect the role a list
+ * plays in the front. The input counters are a snapshot taken when output is
+ * switched into input; output and drop counters accumulate as packets are
+ * emitted. The pending lists are not counted.
  */
 struct packet_front {
 	struct packet_list pending_input;
@@ -20,6 +26,15 @@ struct packet_front {
 	struct packet_list input;
 	struct packet_list output;
 	struct packet_list drop;
+
+	uint64_t input_count;
+	uint64_t input_bytes;
+
+	uint64_t output_count;
+	uint64_t output_bytes;
+
+	uint64_t drop_count;
+	uint64_t drop_bytes;
 };
 
 static inline void
@@ -29,6 +44,13 @@ packet_front_init(struct packet_front *packet_front) {
 	packet_list_init(&packet_front->input);
 	packet_list_init(&packet_front->output);
 	packet_list_init(&packet_front->drop);
+
+	packet_front->input_count = 0;
+	packet_front->input_bytes = 0;
+	packet_front->output_count = 0;
+	packet_front->output_bytes = 0;
+	packet_front->drop_count = 0;
+	packet_front->drop_bytes = 0;
 }
 
 static inline void
@@ -37,24 +59,107 @@ packet_front_merge(struct packet_front *dst, struct packet_front *src) {
 	packet_list_concat(&dst->drop, &src->drop);
 	packet_list_concat(&dst->pending_input, &src->pending_input);
 	packet_list_concat(&dst->pending_output, &src->pending_output);
+
+	dst->output_count += src->output_count;
+	dst->output_bytes += src->output_bytes;
+	dst->drop_count += src->drop_count;
+	dst->drop_bytes += src->drop_bytes;
 }
 
 static inline void
 packet_front_output(struct packet_front *packet_front, struct packet *packet) {
 	packet_list_add(&packet_front->output, packet);
+	packet_front->output_count += 1;
+	packet_front->output_bytes += packet->data_len;
 }
 
 static inline void
 packet_front_drop(struct packet_front *packet_front, struct packet *packet) {
 	packet_list_add(&packet_front->drop, packet);
+	packet_front->drop_count += 1;
+	packet_front->drop_bytes += packet->data_len;
 }
 
 static inline void
 packet_front_switch(struct packet_front *packet_front) {
 	packet_list_concat(&packet_front->input, &packet_front->output);
+
+	packet_front->input_count = packet_front->output_count;
+	packet_front->input_bytes = packet_front->output_bytes;
+	packet_front->output_count = 0;
+	packet_front->output_bytes = 0;
 }
 
 static inline void
 packet_front_pass(struct packet_front *packet_front) {
 	packet_list_concat(&packet_front->output, &packet_front->input);
+
+	packet_front->output_count += packet_front->input_count;
+	packet_front->output_bytes += packet_front->input_bytes;
+	packet_front->input_count = 0;
+	packet_front->input_bytes = 0;
+}
+
+// Move the whole output list of src into dst, transferring the output
+// counters.
+//
+// Used by the single-chain and single-pipeline fast paths that schedule a
+// front on a fresh packet_front; dst->output is empty on entry, so its first
+// packet_front_switch reads the transferred counters.
+static inline void
+packet_front_take_output(struct packet_front *dst, struct packet_front *src) {
+	packet_list_concat(&dst->output, &src->output);
+
+	dst->output_count = src->output_count;
+	dst->output_bytes = src->output_bytes;
+	src->output_count = 0;
+	src->output_bytes = 0;
+}
+
+// Move the whole output list into the drop list, transferring the counters.
+//
+// Used by drain paths that discard unroutable output.
+static inline void
+packet_front_drop_output(struct packet_front *packet_front) {
+	packet_list_concat(&packet_front->drop, &packet_front->output);
+
+	packet_front->drop_count += packet_front->output_count;
+	packet_front->drop_bytes += packet_front->output_bytes;
+	packet_front->output_count = 0;
+	packet_front->output_bytes = 0;
+}
+
+static inline struct packet_list *
+packet_front_input(struct packet_front *packet_front) {
+	return &packet_front->input;
+}
+
+static inline uint64_t
+packet_front_input_count(struct packet_front *packet_front) {
+	return packet_front->input_count;
+}
+
+static inline uint64_t
+packet_front_input_bytes(struct packet_front *packet_front) {
+	return packet_front->input_bytes;
+}
+
+static inline uint64_t
+packet_front_output_count(struct packet_front *packet_front) {
+	return packet_front->output_count;
+}
+
+static inline uint64_t
+packet_front_output_bytes(struct packet_front *packet_front) {
+	return packet_front->output_bytes;
+}
+
+static inline uint64_t
+packet_front_drop_count(struct packet_front *packet_front) {
+	return packet_front->drop_count;
+}
+
+static inline uint64_t
+packet_front_drop_bytes(struct packet_front *packet_front) {
+	return packet_front->drop_bytes;
 }
