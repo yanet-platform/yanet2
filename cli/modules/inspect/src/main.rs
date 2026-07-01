@@ -6,7 +6,7 @@ use clap_complete::CompleteEnv;
 use ptree::TreeBuilder;
 use tonic::codec::CompressionEncoding;
 use ync::{
-    client::{ConnectionArgs, LayeredChannel},
+    client::{ConnectionArgs, LayeredChannel, Service},
     errors::Error,
     output::{self, CommonFormat},
 };
@@ -52,31 +52,28 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
 }
 
 pub struct InspectService {
-    client: InspectServiceClient<LayeredChannel>,
-    endpoint: String,
+    service: Service<InspectServiceClient<LayeredChannel>>,
 }
 
 impl InspectService {
     pub async fn new(connection: &ConnectionArgs) -> Result<Self, Error> {
-        let channel = ync::client::connect(connection)
-            .await
-            .map_err(|err| Error::from_connection(err, "inspect", connection.endpoint.clone()))?;
-        let client = InspectServiceClient::new(channel)
-            .send_compressed(CompressionEncoding::Gzip)
-            .accept_compressed(CompressionEncoding::Gzip);
-
-        Ok(Self {
-            client,
-            endpoint: connection.endpoint.clone(),
+        let service = Service::connect(connection, INSPECT_SERVICE, |channel| {
+            InspectServiceClient::new(channel)
+                .send_compressed(CompressionEncoding::Gzip)
+                .accept_compressed(CompressionEncoding::Gzip)
         })
+        .await?;
+
+        Ok(Self { service })
     }
 
     pub async fn inspect(&mut self) -> Result<InspectResponse, Error> {
         let response = self
-            .client
+            .service
+            .client()
             .inspect(InspectRequest {})
             .await
-            .map_err(|status| Error::from_status(status, "inspect", self.endpoint.clone(), INSPECT_SERVICE))?
+            .map_err(self.service.status("inspect"))?
             .into_inner();
 
         Ok(response)
