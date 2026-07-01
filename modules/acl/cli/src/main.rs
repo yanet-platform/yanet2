@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use tabled::Tabled;
 use tonic::codec::CompressionEncoding;
 use ync::{
-    client::{ConnectionArgs, LayeredChannel, Service},
+    client::{Connection, ConnectionArgs, LayeredChannel, Service},
     display::print_table_from_entries,
     errors::Error,
     output::{self, CommonFormat},
@@ -458,27 +458,21 @@ pub struct ACLService {
 
 impl ACLService {
     pub async fn new(connection: &ConnectionArgs) -> Result<Self, Error> {
-        let channel = ync::client::connect(connection)
-            .await
-            .map_err(|e| Error::from_connection(e, "connect", &connection.endpoint))?;
-        let service = Service::new(
-            AclServiceClient::new(channel.clone())
+        let conn = Connection::connect(connection).await?;
+        let service = Service::new(&conn, SERVICE_NAME, |channel| {
+            AclServiceClient::new(channel)
                 .max_decoding_message_size(256 * 1024 * 1024)
                 .max_encoding_message_size(256 * 1024 * 1024)
                 .send_compressed(CompressionEncoding::Gzip)
-                .accept_compressed(CompressionEncoding::Gzip),
-            connection.endpoint.clone(),
-            SERVICE_NAME,
-        );
-        let metrics = Service::new(
+                .accept_compressed(CompressionEncoding::Gzip)
+        });
+        let metrics = Service::new(&conn, SERVICE_NAME, |channel| {
             MetricsServiceClient::new(channel)
                 .max_decoding_message_size(256 * 1024 * 1024)
                 .max_encoding_message_size(256 * 1024 * 1024)
                 .send_compressed(CompressionEncoding::Gzip)
-                .accept_compressed(CompressionEncoding::Gzip),
-            connection.endpoint.clone(),
-            SERVICE_NAME,
-        );
+                .accept_compressed(CompressionEncoding::Gzip)
+        });
 
         Ok(Self { service, metrics })
     }

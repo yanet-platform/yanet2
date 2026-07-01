@@ -74,6 +74,30 @@ pub async fn connect(args: &ConnectionArgs) -> Result<LayeredChannel, Connection
     Ok(auth.layer(channel))
 }
 
+/// An established, authenticated channel to one endpoint.
+///
+/// Connect once, then build one [`Service`] per gRPC service over it with
+/// [`Service::new`]. Single-service CLIs skip this and use
+/// [`Service::connect`], which establishes the connection for them.
+pub struct Connection {
+    channel: LayeredChannel,
+    endpoint: String,
+}
+
+impl Connection {
+    /// Establish the authenticated channel to `args.endpoint`.
+    pub async fn connect(args: &ConnectionArgs) -> Result<Self, Error> {
+        let channel = connect(args)
+            .await
+            .map_err(|err| Error::from_connection(err, "connect", &args.endpoint))?;
+
+        Ok(Self {
+            channel,
+            endpoint: args.endpoint.clone(),
+        })
+    }
+}
+
 /// A connected gRPC client bundled with its endpoint and service name.
 ///
 /// Wraps a tonic-generated client together with the endpoint it reached and
@@ -83,8 +107,8 @@ pub async fn connect(args: &ConnectionArgs) -> Result<LayeredChannel, Connection
 /// [`invalid`](Service::invalid) live here once.
 ///
 /// It holds a single client, matching the common one-service CLI. A CLI that
-/// drives several clients over one shared channel keeps them as separate
-/// fields instead.
+/// drives several clients over one shared channel builds each from a shared
+/// [`Connection`] instead.
 pub struct Service<C> {
     client: C,
     endpoint: String,
@@ -92,11 +116,11 @@ pub struct Service<C> {
 }
 
 impl<C> Service<C> {
-    /// Wrap an already-built `client` with its `endpoint` and service `name`.
+    /// Wrap an already-built `client` with a hand-supplied `endpoint` + `name`.
     ///
-    /// Prefer [`Service::connect`], which also establishes the channel. Use
-    /// this only when the channel is built elsewhere.
-    pub fn new(client: C, endpoint: impl Into<String>, name: &'static str) -> Self {
+    /// Internal building block behind [`Service::new`] / [`Service::connect`]
+    /// and the tests; a CLI never wraps a raw client directly.
+    pub(crate) fn from_parts(client: C, endpoint: impl Into<String>, name: &'static str) -> Self {
         Self {
             client,
             endpoint: endpoint.into(),
@@ -104,20 +128,29 @@ impl<C> Service<C> {
         }
     }
 
-    /// Connect to `connection` and build the client via `build`.
+    /// Wrap a `name` service client over an existing [`Connection`].
+    ///
+    /// `build` receives a clone of the connection's channel and returns the
+    /// tonic-generated client (compression and message sizes are configured
+    /// there — they are inherent client methods and cannot be defaulted here).
+    /// A CLI driving several services connects once and calls this per client.
+    pub fn new<F>(connection: &Connection, name: &'static str, build: F) -> Self
+    where
+        F: FnOnce(LayeredChannel) -> C,
+    {
+        Self::from_parts(build(connection.channel.clone()), connection.endpoint.clone(), name)
+    }
+
+    /// Connect to `connection` and wrap a single `name` service.
     ///
     /// `name` is the fully-qualified gRPC service name embedded in error
-    /// messages. `build` receives the layered channel and returns the
-    /// tonic-generated client, configuring compression and message sizes.
+    /// messages. Equivalent to connecting a [`Connection`] and calling
+    /// [`Service::new`]; a CLI driving several services does that itself.
     pub async fn connect<F>(connection: &ConnectionArgs, name: &'static str, build: F) -> Result<Self, Error>
     where
         F: FnOnce(LayeredChannel) -> C,
     {
-        let channel = connect(connection)
-            .await
-            .map_err(|err| Error::from_connection(err, "connect", &connection.endpoint))?;
-
-        Ok(Self::new(build(channel), connection.endpoint.clone(), name))
+        Ok(Self::new(&Connection::connect(connection).await?, name, build))
     }
 
     /// Mutable access to the inner client for issuing RPCs.
@@ -281,7 +314,7 @@ mod test {
 
     #[test]
     fn status_maps_grpc_code() {
-        let service = Service::new((), "grpc://[::1]:8080", "test.Service");
+        let service = Service::from_parts((), "grpc://[::1]:8080", "test.Service");
         let err = (service.status("list"))(Status::not_found("missing"));
 
         assert_eq!(ErrorKind::NotFound, err.kind);
@@ -289,7 +322,7 @@ mod test {
 
     #[test]
     fn invalid_builds_invalid_argument() {
-        let service = Service::new((), "grpc://[::1]:8080", "test.Service");
+        let service = Service::from_parts((), "grpc://[::1]:8080", "test.Service");
         let err = service.invalid("update", "bad input");
 
         assert_eq!(ErrorKind::InvalidArgument, err.kind);
@@ -298,7 +331,7 @@ mod test {
 
     #[test]
     fn endpoint_returns_configured_value() {
-        let service = Service::new((), "grpc://[::1]:8080", "test.Service");
+        let service = Service::from_parts((), "grpc://[::1]:8080", "test.Service");
 
         assert_eq!("grpc://[::1]:8080", service.endpoint());
     }

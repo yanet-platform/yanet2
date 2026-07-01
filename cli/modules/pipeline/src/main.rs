@@ -143,17 +143,14 @@ pub struct PipelineService {
 
 impl PipelineService {
     pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
-        let channel = ync::client::connect(connection)
-            .await
-            .map_err(|err| Error::from_connection(err, action, connection.endpoint.clone()))?;
-        let client = PipelineServiceClient::new(channel)
-            .send_compressed(CompressionEncoding::Gzip)
-            .accept_compressed(CompressionEncoding::Gzip);
-
-        Ok(Self {
-            service: Service::new(client, connection.endpoint.clone(), PIPELINE_SERVICE),
-            action,
+        let service = Service::connect(connection, PIPELINE_SERVICE, |channel| {
+            PipelineServiceClient::new(channel)
+                .send_compressed(CompressionEncoding::Gzip)
+                .accept_compressed(CompressionEncoding::Gzip)
         })
+        .await?;
+
+        Ok(Self { service, action })
     }
 
     pub async fn list_pipelines(&mut self) -> Result<Vec<PipelineId>, Error> {

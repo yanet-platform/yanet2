@@ -46,17 +46,6 @@ pub enum ModeCmd {
     Delete(DeleteCmd),
 }
 
-impl ModeCmd {
-    pub fn action(&self) -> &'static str {
-        match self {
-            ModeCmd::List => "list functions",
-            ModeCmd::Show(..) => "show function",
-            ModeCmd::Update(..) => "update function",
-            ModeCmd::Delete(..) => "delete function",
-        }
-    }
-}
-
 #[derive(Debug, Clone, Parser)]
 pub struct ShowCmd {
     /// Function name.
@@ -99,8 +88,7 @@ pub async fn main() {
 }
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
-    let action = cmd.mode.action();
-    let mut service = FunctionService::new(&cmd.connection, action).await?;
+    let mut service = FunctionService::new(&cmd.connection).await?;
 
     match cmd.mode {
         ModeCmd::List => {
@@ -141,17 +129,15 @@ pub struct FunctionService {
 }
 
 impl FunctionService {
-    pub async fn new(connection: &ConnectionArgs, action: &'static str) -> Result<Self, Error> {
-        let channel = ync::client::connect(connection)
-            .await
-            .map_err(|err| Error::from_connection(err, action, connection.endpoint.clone()))?;
-        let client = FunctionServiceClient::new(channel)
-            .send_compressed(CompressionEncoding::Gzip)
-            .accept_compressed(CompressionEncoding::Gzip);
-
-        Ok(Self {
-            service: Service::new(client, connection.endpoint.clone(), FUNCTION_SERVICE),
+    pub async fn new(connection: &ConnectionArgs) -> Result<Self, Error> {
+        let service = Service::connect(connection, FUNCTION_SERVICE, |channel| {
+            FunctionServiceClient::new(channel)
+                .send_compressed(CompressionEncoding::Gzip)
+                .accept_compressed(CompressionEncoding::Gzip)
         })
+        .await?;
+
+        Ok(Self { service })
     }
 
     pub async fn list_functions(&mut self) -> Result<Vec<FunctionId>, Error> {

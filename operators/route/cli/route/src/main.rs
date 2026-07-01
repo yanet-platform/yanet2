@@ -24,7 +24,7 @@ use tabled::{
 };
 use tonic::codec::CompressionEncoding;
 use ync::{
-    client::{ConnectionArgs, LayeredChannel, Service},
+    client::{Connection, ConnectionArgs, LayeredChannel, Service},
     errors::Error,
     output::{self, CommonFormat},
 };
@@ -215,23 +215,17 @@ pub struct RouteService {
 
 impl RouteService {
     pub async fn new(connection: &ConnectionArgs) -> Result<Self, Error> {
-        let channel = ync::client::connect(connection)
-            .await
-            .map_err(|e| Error::from_connection(e, "connect", &connection.endpoint))?;
-        let service = Service::new(
-            RouteServiceClient::new(channel.clone())
+        let conn = Connection::connect(connection).await?;
+        let service = Service::new(&conn, SERVICE_NAME, |channel| {
+            RouteServiceClient::new(channel)
                 .send_compressed(CompressionEncoding::Gzip)
-                .accept_compressed(CompressionEncoding::Gzip),
-            connection.endpoint.clone(),
-            SERVICE_NAME,
-        );
-        let readiness = Service::new(
+                .accept_compressed(CompressionEncoding::Gzip)
+        });
+        let readiness = Service::new(&conn, READINESS_SERVICE_NAME, |channel| {
             ReadinessServiceClient::new(channel)
                 .send_compressed(CompressionEncoding::Gzip)
-                .accept_compressed(CompressionEncoding::Gzip),
-            connection.endpoint.clone(),
-            READINESS_SERVICE_NAME,
-        );
+                .accept_compressed(CompressionEncoding::Gzip)
+        });
 
         Ok(Self { service, readiness })
     }
