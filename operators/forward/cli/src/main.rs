@@ -18,7 +18,7 @@ use tabled::{
 };
 use tonic::codec::CompressionEncoding;
 use ync::{
-    client::{ConnectionArgs, LayeredChannel},
+    client::{ConnectionArgs, LayeredChannel, Service},
     errors::Error,
     output::{self, CommonFormat},
 };
@@ -96,33 +96,30 @@ async fn run(cmd: Cmd) -> Result<bool, Error> {
 }
 
 pub struct ForwardOperatorService {
-    client: ReadinessServiceClient<LayeredChannel>,
-    endpoint: String,
+    service: Service<ReadinessServiceClient<LayeredChannel>>,
 }
 
 impl ForwardOperatorService {
     pub async fn new(connection: &ConnectionArgs) -> Result<Self, Error> {
-        let channel = ync::client::connect(connection)
-            .await
-            .map_err(|e| Error::from_connection(e, "connect", &connection.endpoint))?;
-        let client = ReadinessServiceClient::new(channel)
-            .send_compressed(CompressionEncoding::Gzip)
-            .accept_compressed(CompressionEncoding::Gzip);
-
-        Ok(Self {
-            client,
-            endpoint: connection.endpoint.clone(),
+        let service = Service::connect(connection, SERVICE_NAME, |channel| {
+            ReadinessServiceClient::new(channel)
+                .send_compressed(CompressionEncoding::Gzip)
+                .accept_compressed(CompressionEncoding::Gzip)
         })
+        .await?;
+
+        Ok(Self { service })
     }
 
     pub async fn ready(&mut self, cmd: ReadyCmd) -> Result<bool, Error> {
         let request = readinesspb::pb::ReadyRequest { scopes: cmd.scopes.clone() };
 
         let response = self
-            .client
+            .service
+            .client()
             .ready(request)
             .await
-            .map_err(|status| Error::from_status(status, "ready", self.endpoint.clone(), SERVICE_NAME))?
+            .map_err(self.service.status("ready"))?
             .into_inner();
 
         let returned_names: std::collections::HashSet<&str> =
