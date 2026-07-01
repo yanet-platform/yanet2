@@ -1,6 +1,6 @@
 //! CLI for YANET "route-mpls" module.
 
-use core::{error::Error, net::IpAddr, ops::Deref};
+use core::{net::IpAddr, ops::Deref};
 
 #[allow(non_snake_case)]
 pub mod filterpb {
@@ -23,8 +23,12 @@ use routemplspb::{
     route_mpls_service_client::RouteMplsServiceClient, update_event::Event, CreateConfigRequest, DeleteConfigRequest,
     ListConfigsRequest, NextHop, Rule, ShowConfigRequest, UpdateConfigRequest, UpdateEvent,
 };
-use tonic::{codec::CompressionEncoding, transport::Channel};
-use ync::logging;
+use tonic::codec::CompressionEncoding;
+use ync::{
+    client::{ConnectionArgs, LayeredChannel, Service},
+    errors::Error,
+    output::{self, CommonFormat},
+};
 
 /// Route module.
 #[derive(Debug, Clone, Parser)]
@@ -33,9 +37,11 @@ use ync::logging;
 pub struct Cmd {
     #[clap(subcommand)]
     pub mode: ModeCmd,
-    /// gRPC endpoint URL.
-    #[clap(long, default_value = "grpc://[::1]:8080", global = true)]
-    pub endpoint: String,
+    #[command(flatten)]
+    pub connection: ConnectionArgs,
+    /// Output format.
+    #[arg(long, default_value = "human", global = true)]
+    pub format: CommonFormat,
     /// Be verbose in terms of logging.
     #[clap(short, action = ArgAction::Count, global = true)]
     pub verbose: u8,
@@ -120,7 +126,7 @@ pub struct RouteWithdrawCmd {
 }
 
 impl TryFrom<Contiguous<IpNetwork>> for filterpb::IpPrefix {
-    type Error = Box<dyn Error>;
+    type Error = Box<dyn std::error::Error>;
 
     fn try_from(net: Contiguous<IpNetwork>) -> Result<Self, Self::Error> {
         let length = net.prefix() as u32;
@@ -138,21 +144,24 @@ impl TryFrom<Contiguous<IpNetwork>> for filterpb::IpPrefix {
     }
 }
 
+/// The fully-qualified gRPC service name used in error messages.
+const SERVICE_NAME: &str = "modules.route_mpls.controlplane.routemplspb.v1.RouteMPLSService";
+
 #[tokio::main(flavor = "current_thread")]
 pub async fn main() {
     CompleteEnv::with_factory(Cmd::command).complete();
 
     let cmd = Cmd::parse();
-    logging::init(cmd.verbose as usize).expect("no error expected");
+    ync::init(cmd.verbose, cmd.format);
 
     if let Err(err) = run(cmd).await {
-        log::error!("ERROR: {err}");
-        std::process::exit(1);
+        output::failure(&err);
+        std::process::exit(err.exit_code());
     }
 }
 
-async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
-    let mut service = RouteMplsService::new(cmd.endpoint).await?;
+async fn run(cmd: Cmd) -> Result<(), Error> {
+    let mut service = RouteMplsService::new(&cmd.connection).await?;
 
     match cmd.mode {
         ModeCmd::List => service.list_configs().await,
@@ -165,53 +174,105 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
 }
 
 pub struct RouteMplsService {
-    client: RouteMplsServiceClient<Channel>,
+    service: Service<RouteMplsServiceClient<LayeredChannel>>,
 }
 
 impl RouteMplsService {
-    pub async fn new(endpoint: String) -> Result<Self, Box<dyn Error>> {
-        let client = RouteMplsServiceClient::connect(endpoint).await?;
-        let client = client
-            .send_compressed(CompressionEncoding::Gzip)
-            .accept_compressed(CompressionEncoding::Gzip);
-        Ok(Self { client })
+    pub async fn new(connection: &ConnectionArgs) -> Result<Self, Error> {
+        let service = Service::connect(connection, SERVICE_NAME, |channel| {
+            RouteMplsServiceClient::new(channel)
+                .send_compressed(CompressionEncoding::Gzip)
+                .accept_compressed(CompressionEncoding::Gzip)
+        })
+        .await?;
+
+        Ok(Self { service })
     }
 
-    pub async fn list_configs(&mut self) -> Result<(), Box<dyn Error>> {
+    pub async fn list_configs(&mut self) -> Result<(), Error> {
         let request = ListConfigsRequest {};
-        let response = self.client.list_configs(request).await?.into_inner();
-        println!("{}", serde_json::to_string(&response.configs)?);
+        let response = self
+            .service
+            .client()
+            .list_configs(request)
+            .await
+            .map_err(self.service.status("list"))?
+            .into_inner();
+
+        output::data(
+            &response.configs,
+            response.configs.is_empty(),
+            format_args!("no route-mpls configs"),
+            || {
+                for name in &response.configs {
+                    println!("{name}");
+                }
+            },
+        );
+
         Ok(())
     }
 
-    pub async fn show_config(&mut self, cmd: RouteShowCmd) -> Result<(), Box<dyn Error>> {
+    pub async fn show_config(&mut self, cmd: RouteShowCmd) -> Result<(), Error> {
         let request = ShowConfigRequest { name: cmd.config_name.clone() };
-        let response = self.client.show_config(request).await?.into_inner();
-        println!("{}", serde_json::to_string(&response)?);
+        let response = self
+            .service
+            .client()
+            .show_config(request)
+            .await
+            .map_err(self.service.status("show"))?
+            .into_inner();
+
+        output::data(&response, false, format_args!(""), || {
+            print!(
+                "{}",
+                serde_yaml::to_string(&response).expect("route-mpls config YAML serialization must not fail")
+            )
+        });
+
         Ok(())
     }
 
-    pub async fn create_config(&mut self, cmd: RouteCreateCmd) -> Result<(), Box<dyn Error>> {
+    pub async fn create_config(&mut self, cmd: RouteCreateCmd) -> Result<(), Error> {
         let request = CreateConfigRequest {
             name: cmd.config_name.clone(),
             rules: Vec::<Rule>::new(),
         };
-        self.client.create_config(request).await?.into_inner();
+        self.service
+            .client()
+            .create_config(request)
+            .await
+            .map_err(self.service.status("create"))?
+            .into_inner();
+
+        output::success("create", format_args!("Created route-mpls config {}.", cmd.config_name));
+
         Ok(())
     }
 
-    pub async fn delete_config(&mut self, cmd: RouteDeleteCmd) -> Result<(), Box<dyn Error>> {
+    pub async fn delete_config(&mut self, cmd: RouteDeleteCmd) -> Result<(), Error> {
         let request = DeleteConfigRequest { name: cmd.config_name.clone() };
-        self.client.delete_config(request).await?.into_inner();
+        self.service
+            .client()
+            .delete_config(request)
+            .await
+            .map_err(self.service.status("delete"))?
+            .into_inner();
+
+        output::success("delete", format_args!("Deleted route-mpls config {}.", cmd.config_name));
+
         Ok(())
     }
 
-    pub async fn update_route(&mut self, cmd: RouteUpdateCmd) -> Result<(), Box<dyn Error>> {
+    pub async fn update_route(&mut self, cmd: RouteUpdateCmd) -> Result<(), Error> {
         let request = UpdateConfigRequest {
             name: cmd.config_name.clone(),
             updates: vec![UpdateEvent {
                 event: Some(Event::Update(Rule {
-                    prefix: Some(filterpb::IpPrefix::try_from(cmd.prefix)?),
+                    prefix: Some(
+                        filterpb::IpPrefix::try_from(cmd.prefix)
+                            .map_err(|e| self.service.invalid("update", e.to_string()))?,
+                    ),
                     nexthop: Some(NextHop {
                         kind: routemplspb::ActionKind::Tunnel.into(),
                         label: cmd.mpls_label,
@@ -223,16 +284,27 @@ impl RouteMplsService {
                 })),
             }],
         };
-        self.client.update_config(request).await?.into_inner();
+        self.service
+            .client()
+            .update_config(request)
+            .await
+            .map_err(self.service.status("update"))?
+            .into_inner();
+
+        output::success("update", format_args!("Updated route in {}.", cmd.config_name));
+
         Ok(())
     }
 
-    pub async fn withdraw_route(&mut self, cmd: RouteWithdrawCmd) -> Result<(), Box<dyn Error>> {
+    pub async fn withdraw_route(&mut self, cmd: RouteWithdrawCmd) -> Result<(), Error> {
         let request = UpdateConfigRequest {
             name: cmd.config_name.clone(),
             updates: vec![UpdateEvent {
                 event: Some(Event::Withdraw(Rule {
-                    prefix: Some(filterpb::IpPrefix::try_from(cmd.prefix)?),
+                    prefix: Some(
+                        filterpb::IpPrefix::try_from(cmd.prefix)
+                            .map_err(|e| self.service.invalid("withdraw", e.to_string()))?,
+                    ),
                     nexthop: Some(NextHop {
                         kind: routemplspb::ActionKind::Tunnel.into(),
                         label: cmd.mpls_label,
@@ -244,7 +316,15 @@ impl RouteMplsService {
                 })),
             }],
         };
-        self.client.update_config(request).await?.into_inner();
+        self.service
+            .client()
+            .update_config(request)
+            .await
+            .map_err(self.service.status("withdraw"))?
+            .into_inner();
+
+        output::success("withdraw", format_args!("Withdrew route from {}.", cmd.config_name));
+
         Ok(())
     }
 }
