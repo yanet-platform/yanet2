@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdbool.h>
 #include <stddef.h>
 
 #include "common/memory.h"
@@ -11,6 +12,12 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 typedef struct ttlmap ttlmap_t;
+
+struct ttlmap_bucket_iter {
+	ttlmap_t *map;
+	size_t bucket_idx;
+	size_t bucket_count;
+};
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -40,6 +47,11 @@ typedef struct ttlmap ttlmap_t;
 #define TTLMAP_ITER(map_ptr, key_type, value_type, now, cb, data)              \
 	__TTLMAP_ITER_INTERNAL(map_ptr, key_type, value_type, now, cb, data)
 
+#define TTLMAP_ITER_NEXT(iter_ptr, key_type, value_type, now, cb, data)        \
+	__TTLMAP_ITER_NEXT_INTERNAL(                                           \
+		iter_ptr, key_type, value_type, now, cb, data                  \
+	)
+
 #define TTLMAP_PREFETCH(map_ptr, key_ptr, value_type, ...)                     \
 	__TTLMAP_PREFETCH(map_ptr, key_ptr, value_type, ##__VA_ARGS__)
 
@@ -54,6 +66,30 @@ static inline void
 ttlmap_init_empty(ttlmap_t *map) {
 	memset(map, 0, sizeof(*map));
 	map->buckets_exp = -1;
+}
+
+static inline void
+ttlmap_bucket_iter_init(struct ttlmap_bucket_iter *iter, ttlmap_t *map) {
+	if (iter == NULL) {
+		return;
+	}
+
+	iter->map = map;
+	iter->bucket_idx = 0;
+	iter->bucket_count = 0;
+	if (map == NULL || map->buckets_exp == (size_t)-1) {
+		return;
+	}
+
+	iter->bucket_count = 1ull << map->buckets_exp;
+}
+
+static inline bool
+ttlmap_bucket_iter_done(const struct ttlmap_bucket_iter *iter) {
+	if (iter == NULL) {
+		return true;
+	}
+	return iter->bucket_idx >= iter->bucket_count;
 }
 
 static inline uint64_t
