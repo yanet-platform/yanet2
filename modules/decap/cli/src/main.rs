@@ -1,6 +1,4 @@
-use core::error::Error;
-
-use clap::{ArgAction, CommandFactory, Parser, ValueEnum};
+use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
 use decappb::{
     ListConfigsRequest, ShowConfigRequest, ShowConfigResponse, UpdateConfigRequest,
@@ -11,7 +9,8 @@ use ptree::TreeBuilder;
 use tonic::codec::CompressionEncoding;
 use ync::{
     client::{ConnectionArgs, LayeredChannel},
-    logging,
+    errors::Error,
+    output::{self, CommonFormat},
 };
 
 #[allow(non_snake_case)]
@@ -30,6 +29,9 @@ pub struct Cmd {
     pub mode: ModeCmd,
     #[command(flatten)]
     pub connection: ConnectionArgs,
+    /// Output format.
+    #[arg(long, default_value = "human", global = true)]
+    pub format: CommonFormat,
     /// Log verbosity level.
     #[clap(short, action = ArgAction::Count, global = true)]
     pub verbose: u8,
@@ -47,9 +49,6 @@ pub struct ShowConfigCmd {
     /// Decap module name to operate on.
     #[arg(long = "name", short = 'n')]
     pub config_name: String,
-    /// Output format.
-    #[clap(long, value_enum, default_value_t = OutputFormat::Tree)]
-    pub format: OutputFormat,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -62,28 +61,22 @@ pub struct UpdateConfigCmd {
     pub prefixes: Vec<Contiguous<IpNetwork>>,
 }
 
-/// Output format options.
-#[derive(Debug, Clone, ValueEnum)]
-pub enum OutputFormat {
-    /// Tree structure with colored output (default).
-    Tree,
-    /// JSON format.
-    Json,
-}
+/// The fully-qualified gRPC service name used in error messages.
+const SERVICE_NAME: &str = "modules.decap.controlplane.decappb.v1.DecapService";
 
 #[tokio::main(flavor = "current_thread")]
 pub async fn main() {
     CompleteEnv::with_factory(Cmd::command).complete();
     let cmd = Cmd::parse();
-    logging::init(cmd.verbose as usize).expect("initialize logging");
+    ync::init(cmd.verbose, cmd.format);
 
     if let Err(err) = run(cmd).await {
-        log::error!("ERROR: {err}");
-        std::process::exit(1);
+        output::failure(&err);
+        std::process::exit(err.exit_code());
     }
 }
 
-async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
+async fn run(cmd: Cmd) -> Result<(), Error> {
     let mut service = DecapService::new(&cmd.connection).await?;
 
     match cmd.mode {
@@ -95,72 +88,98 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
 
 pub struct DecapService {
     client: DecapServiceClient<LayeredChannel>,
+    endpoint: String,
 }
 
 impl DecapService {
-    pub async fn new(connection: &ConnectionArgs) -> Result<Self, Box<dyn Error>> {
-        let channel = ync::client::connect(connection).await?;
+    pub async fn new(connection: &ConnectionArgs) -> Result<Self, Error> {
+        let channel = ync::client::connect(connection)
+            .await
+            .map_err(|e| Error::from_connection(e, "connect", &connection.endpoint))?;
         let client = DecapServiceClient::new(channel)
             .send_compressed(CompressionEncoding::Gzip)
             .accept_compressed(CompressionEncoding::Gzip);
-        Ok(Self { client })
+
+        Ok(Self {
+            client,
+            endpoint: connection.endpoint.clone(),
+        })
     }
 
-    pub async fn list_configs(&mut self) -> Result<(), Box<dyn Error>> {
+    fn map_err<'a>(&'a self, action: &'a str) -> impl FnOnce(tonic::Status) -> Error + 'a {
+        let endpoint = self.endpoint.clone();
+        move |status| Error::from_status(status, action, endpoint, SERVICE_NAME)
+    }
+
+    pub async fn list_configs(&mut self) -> Result<(), Error> {
         let request = ListConfigsRequest {};
         log::trace!("list configs request: {request:?}");
-        let response = self.client.list_configs(request).await?.into_inner();
+        let response = self
+            .client
+            .list_configs(request)
+            .await
+            .map_err(self.map_err("list"))?
+            .into_inner();
         log::debug!("list configs response: {response:?}");
 
-        let mut tree = TreeBuilder::new("List Decap Configs".to_string());
-        for config in response.configs {
-            tree.add_empty_child(config);
-        }
-        let tree = tree.build();
-        ptree::print_tree(&tree)?;
+        output::data(
+            &response.configs,
+            response.configs.is_empty(),
+            format_args!("no decap configs"),
+            || {
+                let mut tree = TreeBuilder::new("List Decap Configs".to_string());
+                for config in &response.configs {
+                    tree.add_empty_child(config.clone());
+                }
+                let _ = ptree::print_tree(&tree.build());
+            },
+        );
+
         Ok(())
     }
 
-    pub async fn show_config(&mut self, cmd: ShowConfigCmd) -> Result<(), Box<dyn Error>> {
+    pub async fn show_config(&mut self, cmd: ShowConfigCmd) -> Result<(), Error> {
         let request = ShowConfigRequest { name: cmd.config_name.to_owned() };
         log::trace!("show config request: {request:?}");
-        let response = self.client.show_config(request).await?.into_inner();
+        let response = self
+            .client
+            .show_config(request)
+            .await
+            .map_err(self.map_err("show"))?
+            .into_inner();
         log::debug!("show config response: {response:?}");
 
-        match cmd.format {
-            OutputFormat::Json => print_json(&response)?,
-            OutputFormat::Tree => print_tree(&response)?,
-        }
+        output::data(&response, false, format_args!(""), || print_tree(&response));
 
         Ok(())
     }
 
-    pub async fn update_config(&mut self, cmd: UpdateConfigCmd) -> Result<(), Box<dyn Error>> {
+    pub async fn update_config(&mut self, cmd: UpdateConfigCmd) -> Result<(), Error> {
         let request = UpdateConfigRequest {
             name: cmd.config_name.clone(),
             prefixes: cmd.prefixes.iter().map(|p| p.to_string()).collect(),
         };
         log::trace!("update config request: {request:?}");
-        let response = self.client.update_config(request).await?.into_inner();
+        let response = self
+            .client
+            .update_config(request)
+            .await
+            .map_err(self.map_err("update"))?
+            .into_inner();
         log::debug!("update config response: {response:?}");
+
+        output::success("update", format_args!("Updated decap {}.", cmd.config_name));
+
         Ok(())
     }
 }
 
-pub fn print_json(resp: &ShowConfigResponse) -> Result<(), Box<dyn Error>> {
-    println!("{}", serde_json::to_string(resp)?);
-    Ok(())
-}
-
-pub fn print_tree(resp: &ShowConfigResponse) -> Result<(), Box<dyn Error>> {
+fn print_tree(resp: &ShowConfigResponse) {
     let mut tree = TreeBuilder::new("Decap Prefixes".to_string());
 
     for (idx, prefix) in resp.prefixes.iter().enumerate() {
         tree.add_empty_child(format!("{idx}: {prefix}"));
     }
 
-    let tree = tree.build();
-    ptree::print_tree(&tree)?;
-
-    Ok(())
+    let _ = ptree::print_tree(&tree.build());
 }
