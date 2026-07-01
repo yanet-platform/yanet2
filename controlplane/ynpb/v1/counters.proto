@@ -8,6 +8,7 @@ service CountersService {
   rpc Perf(PerfCountersRequest) returns (PerfCountersResponse);
   rpc ByTags(CountersByTagsRequest) returns (CountersByTagsResponse);
   rpc Workers(WorkerCountersRequest) returns (WorkerCountersResponse);
+  rpc Ports(PortCountersRequest) returns (PortCountersResponse);
 }
 
 message CounterTag {
@@ -67,6 +68,24 @@ message WorkerCounter {
   uint64 remote_rx_packets = 12;
   // Total packets sent to remote workers.
   uint64 remote_tx_packets = 13;
+}
+
+// Requests a snapshot of raw cumulative per-port extended stats counters.
+message PortCountersRequest {}
+
+// Returns the counters of every DPDK port, grouped per port.
+message PortCountersResponse { repeated PortCountersGroup ports = 1; }
+
+// Counters of a single DPDK port.
+message PortCountersGroup {
+  uint32 port_id = 1;
+  string port_name = 2;
+  repeated PortCounter counters = 3;
+}
+
+message PortCounter {
+  string name = 1;
+  uint64 value = 2;
 }
 
 // Request message for retrieving module performance counters.

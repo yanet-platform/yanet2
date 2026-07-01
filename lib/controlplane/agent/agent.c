@@ -1684,12 +1684,11 @@ yanet_get_counter_values(
 	}
 }
 
-struct counter_handle_list *
-yanet_get_worker_counters(struct dp_config *dp_config) {
-	struct counter_registry *counter_registry = &dp_config->worker_counters;
-	struct counter_storage *storage =
-		ADDR_OF(&dp_config->worker_counter_storage);
-
+static struct counter_handle_list *
+counter_handle_list_build(
+	struct counter_registry *counter_registry,
+	struct counter_storage *storage
+) {
 	uint64_t count = counter_registry->count;
 	struct counter *names = ADDR_OF(&counter_registry->names);
 
@@ -1715,6 +1714,14 @@ yanet_get_worker_counters(struct dp_config *dp_config) {
 	}
 
 	return list;
+}
+
+struct counter_handle_list *
+yanet_get_worker_counters(struct dp_config *dp_config) {
+	return counter_handle_list_build(
+		&dp_config->worker_counters,
+		ADDR_OF(&dp_config->worker_counter_storage)
+	);
 }
 
 int
@@ -1747,6 +1754,63 @@ yanet_get_worker_counter_metadata(
 	metadata->rx_burst_size = worker->rx_burst_size;
 
 	return 0;
+}
+
+struct port_counter_group_list *
+yanet_get_port_counters(struct dp_config *dp_config) {
+	uint64_t port_count = dp_config->port_count;
+	struct dp_port_counters *port_counters =
+		ADDR_OF(&dp_config->port_counters);
+
+	struct port_counter_group_list *groups =
+		(struct port_counter_group_list *)malloc(
+			sizeof(struct port_counter_group_list) +
+			sizeof(struct port_counter_group) * port_count
+		);
+	if (groups == NULL)
+		return NULL;
+	groups->port_count = port_count;
+
+	for (uint64_t idx = 0; idx < port_count; ++idx) {
+		struct dp_port_counters *pc = port_counters + idx;
+		struct port_counter_group *group = groups->ports + idx;
+
+		group->port_id = pc->port_id;
+		strtcpy(group->port_name,
+			pc->port_name,
+			sizeof(group->port_name));
+		group->counters = counter_handle_list_build(
+			&pc->registry, ADDR_OF(&pc->storage)
+		);
+		if (group->counters == NULL) {
+			groups->port_count = idx;
+			yanet_port_counter_group_list_free(groups);
+			return NULL;
+		}
+	}
+
+	return groups;
+}
+
+struct port_counter_group *
+yanet_get_port_counter_group(
+	struct port_counter_group_list *groups, uint64_t idx
+) {
+	if (groups == NULL || idx >= groups->port_count) {
+		return NULL;
+	}
+	return groups->ports + idx;
+}
+
+void
+yanet_port_counter_group_list_free(struct port_counter_group_list *groups) {
+	if (groups == NULL) {
+		return;
+	}
+	for (uint64_t idx = 0; idx < groups->port_count; ++idx) {
+		yanet_counter_handle_list_free(groups->ports[idx].counters);
+	}
+	free(groups);
 }
 
 void

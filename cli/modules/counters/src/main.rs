@@ -21,8 +21,8 @@ use ync::{
 };
 use ynpb::pb::{
     counters_service_client::CountersServiceClient, CounterTag, CountersByTagsRequest, CountersByTagsResponse,
-    LatencyRangeCounter, PerfCounter, PerfCountersRequest, PerfCountersResponse, WorkerCounter, WorkerCountersRequest,
-    WorkerCountersResponse,
+    LatencyRangeCounter, PerfCounter, PerfCountersRequest, PerfCountersResponse, PortCountersRequest,
+    PortCountersResponse, WorkerCounter, WorkerCountersRequest, WorkerCountersResponse,
 };
 
 const COUNTERS_SERVICE: &str = "controlplane.ynpb.v1.CountersService";
@@ -113,6 +113,8 @@ pub enum ModeCmd {
     Perf(PerfCmd),
     /// Show worker counters.
     Workers,
+    /// Show port counters.
+    Ports,
 }
 
 impl ModeCmd {
@@ -125,6 +127,7 @@ impl ModeCmd {
             ModeCmd::Module(..) => "show module counters",
             ModeCmd::Perf(..) => "show perf counters",
             ModeCmd::Workers => "show worker counters",
+            ModeCmd::Ports => "show port counters",
         }
     }
 }
@@ -260,6 +263,15 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
                 format_worker_counters(&response);
             });
         }
+        Some(ModeCmd::Ports) => {
+            let response = service.ports().await?;
+            output::data(&response, false, format_args!(""), || {
+                print!(
+                    "{}",
+                    serde_yaml::to_string(&response).expect("counters YAML serialization must not fail")
+                );
+            });
+        }
         mode => {
             let request = tags_request(mode, cmd.by_tags);
             let response = service.by_tags(request).await?;
@@ -315,7 +327,7 @@ fn tags_request(mode: Option<ModeCmd>, by_tags: ByTagsCmd) -> CountersByTagsRequ
             ("module_type", cmd.module_type),
             ("module_name", cmd.module_name),
         ]),
-        Some(ModeCmd::Perf(..)) | Some(ModeCmd::Workers) => unreachable!(),
+        Some(ModeCmd::Perf(..)) | Some(ModeCmd::Workers) | Some(ModeCmd::Ports) => unreachable!(),
     }
 }
 
@@ -363,6 +375,16 @@ impl CountersService {
             .service
             .client()
             .workers(WorkerCountersRequest {})
+            .await
+            .map_err(self.service.status(self.action))?
+            .into_inner())
+    }
+
+    pub async fn ports(&mut self) -> Result<PortCountersResponse, Error> {
+        Ok(self
+            .service
+            .client()
+            .ports(PortCountersRequest {})
             .await
             .map_err(self.service.status(self.action))?
             .into_inner())

@@ -186,3 +186,34 @@ func (m *Counters) Workers(
 
 	return response, nil
 }
+
+func (m *Counters) Ports(
+	ctx context.Context,
+	request *ynpb.PortCountersRequest,
+) (*ynpb.PortCountersResponse, error) {
+	dpConfig := m.shm.DPConfig(m.instanceID)
+	counters, err := dpConfig.PortCounters()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ynpb.PortCountersResponse{
+		Ports: make([]*ynpb.PortCountersGroup, 0, len(counters)),
+	}
+	for _, group := range counters {
+		counterValues := make([]*ynpb.PortCounter, 0, len(group.Counters))
+		for _, counter := range group.Counters {
+			counterValues = append(counterValues, &ynpb.PortCounter{
+				Name:  counter.Name,
+				Value: counter.Value,
+			})
+		}
+		response.Ports = append(response.Ports, &ynpb.PortCountersGroup{
+			PortId:   uint32(group.PortID),
+			PortName: group.PortName,
+			Counters: counterValues,
+		})
+	}
+
+	return response, nil
+}

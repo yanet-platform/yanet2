@@ -27,6 +27,18 @@ struct dp_device {
 	device_handler output_handler;
 };
 
+// Per-DPDK-port counter registry and storage.
+//
+// Each physical port owns a distinct registry (xstat schema) and storage
+// (values), so a port's counter lifecycle is independent of the others. All
+// port storages are spawned from the single shared allocator on dp_config.
+struct dp_port_counters {
+	uint16_t port_id;
+	char port_name[80];
+	struct counter_registry registry;
+	struct counter_storage *storage;
+};
+
 struct dp_worker {
 	uint64_t idx;
 
@@ -108,6 +120,10 @@ struct dp_config {
 	struct counter_storage_allocator counter_storage_allocator;
 	struct counter_registry worker_counters;
 	struct counter_storage *worker_counter_storage;
+
+	struct counter_storage_allocator port_counter_storage_allocator;
+	uint64_t port_count;
+	struct dp_port_counters *port_counters;
 
 	// Written by dp_config_mark_ready with release ordering after the
 	// dataplane releases cp_config and finishes initialising the instance.

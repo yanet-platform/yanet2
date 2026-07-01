@@ -73,6 +73,37 @@ yanet_get_module_counters(
 struct counter_handle_list *
 yanet_get_worker_counters(struct dp_config *dp_config);
 
+// Counters of a single DPDK port.
+//
+// port_id/port_name identify the port; counters holds that port's xstats as a
+// standard counter_handle_list.
+struct port_counter_group {
+	uint16_t port_id;
+	char port_name[80];
+	struct counter_handle_list *counters;
+};
+
+// Per-port counter groups for every DPDK port of an instance.
+struct port_counter_group_list {
+	uint64_t port_count;
+	struct port_counter_group ports[];
+};
+
+// Collect counters for every DPDK port, grouped per port.
+//
+// The returned list must be released with yanet_port_counter_group_list_free.
+// Returns NULL on allocation failure.
+struct port_counter_group_list *
+yanet_get_port_counters(struct dp_config *dp_config);
+
+struct port_counter_group *
+yanet_get_port_counter_group(
+	struct port_counter_group_list *groups, uint64_t idx
+);
+
+void
+yanet_port_counter_group_list_free(struct port_counter_group_list *groups);
+
 struct worker_counter_metadata {
 	uint32_t core_id;
 	uint32_t device_id;

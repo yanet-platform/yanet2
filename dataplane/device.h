@@ -18,6 +18,7 @@ struct dataplane_device {
 	char port_name[80];
 
 	uint16_t port_id;
+	uint32_t xstat_count;
 };
 
 int

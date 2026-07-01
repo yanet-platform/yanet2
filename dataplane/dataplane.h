@@ -11,6 +11,7 @@ struct dataplane_device;
 struct dataplane_instance {
 	struct dp_config *dp_config;
 	struct cp_config *cp_config;
+	uint32_t **device_xstat_map;
 };
 
 #define DATAPLANE_MAX_INSTANCES 8
