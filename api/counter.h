@@ -3,6 +3,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "lib/counters/counters.h"
 #include "lib/errors/errors.h"
 
 struct dp_config;
@@ -15,7 +16,7 @@ struct counter_tag {
 };
 
 struct counter_handle {
-	char name[60];
+	char name[COUNTER_NAME_LEN];
 	uint64_t size;
 	uint64_t gen;
 	struct counter_tag *tags;
