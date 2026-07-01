@@ -142,6 +142,56 @@ func TestRoutesListStaticECMP(t *testing.T) {
 	})
 }
 
+// TestRoutesListBGPGlobalID verifies that BGP paths from the same peer are
+// distinguished by GlobalID: distinct GlobalIDs coexist as ECMP, while a
+// re-announced GlobalID replaces its previous path in place.
+func TestRoutesListBGPGlobalID(t *testing.T) {
+	pfx := netip.MustParsePrefix("10.0.0.0/24")
+	nh1 := netip.MustParseAddr("10.0.0.1")
+	nh2 := netip.MustParseAddr("10.0.0.2")
+	peer := netip.MustParseAddr("192.0.2.1")
+
+	t.Run("same peer different global_id both present", func(t *testing.T) {
+		var list RoutesList
+		r1 := Route{Prefix: pfx, NextHop: nh1, Peer: peer, GlobalID: 1, SourceID: RouteSourceBird}
+		r2 := Route{Prefix: pfx, NextHop: nh2, Peer: peer, GlobalID: 2, SourceID: RouteSourceBird}
+
+		added1 := list.Insert(r1)
+		added2 := list.Insert(r2)
+
+		require.True(t, added1, "first bird route should be added")
+		require.True(t, added2, "bird route with different global_id should be added")
+		require.Len(t, list.Routes, 2)
+	})
+
+	t.Run("re-announce same global_id replaces in place", func(t *testing.T) {
+		var list RoutesList
+		r1 := Route{Prefix: pfx, NextHop: nh1, Peer: peer, GlobalID: 7, SourceID: RouteSourceBird}
+		r1Updated := Route{Prefix: pfx, NextHop: nh2, Peer: peer, GlobalID: 7, SourceID: RouteSourceBird}
+
+		list.Insert(r1)
+		added := list.Insert(r1Updated)
+
+		require.False(t, added, "re-announce of same global_id should replace, not append")
+		require.Len(t, list.Routes, 1)
+		require.Equal(t, nh2, list.Routes[0].NextHop)
+	})
+
+	t.Run("remove by global_id leaves the other path", func(t *testing.T) {
+		var list RoutesList
+		r1 := Route{Prefix: pfx, NextHop: nh1, Peer: peer, GlobalID: 1, SourceID: RouteSourceBird}
+		r2 := Route{Prefix: pfx, NextHop: nh2, Peer: peer, GlobalID: 2, SourceID: RouteSourceBird}
+		list.Insert(r1)
+		list.Insert(r2)
+
+		removed := list.Remove(Route{Prefix: pfx, Peer: peer, GlobalID: 1, SourceID: RouteSourceBird})
+
+		require.True(t, removed)
+		require.Len(t, list.Routes, 1)
+		require.Equal(t, uint32(2), list.Routes[0].GlobalID)
+	})
+}
+
 // TestBestPerSource verifies that BestPerSource returns the equal-cost group
 // for each source and filters routes that are strictly worse than the source's best.
 func TestBestPerSource(t *testing.T) {

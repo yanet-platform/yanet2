@@ -33,6 +33,7 @@ func FromRIBRoute(route *rib.Route, isBest bool) *Route {
 		Source:           RouteSourceID(route.SourceID),
 		LargeCommunities: communities,
 		IsBest:           isBest,
+		GlobalId:         route.GlobalID,
 	}
 }
 
@@ -84,6 +85,7 @@ func ToRIBRoute(route *Route, toRemove bool) (*rib.Route, error) {
 		Prefix:           prefix,
 		NextHop:          nexthop,
 		Peer:             peer,
+		GlobalID:         route.GetGlobalId(),
 		RD:               route.GetRouteDistinguisher(),
 		LargeCommunities: largeCommunities,
 		UpdatedAt:        time.Now(),

@@ -581,6 +581,8 @@ pub struct RouteEntry {
     pub pref: u32,
     #[tabled(rename = "MED")]
     pub med: u32,
+    #[tabled(rename = "Global ID")]
+    pub global_id: u32,
     #[tabled(rename = "Communities")]
     pub communities: Communities,
 }
@@ -599,6 +601,7 @@ impl From<operatorpb::Route> for RouteEntry {
             origin_as: route.origin_as,
             pref: route.pref,
             med: route.med,
+            global_id: route.global_id,
             communities: Communities(communities),
         }
     }

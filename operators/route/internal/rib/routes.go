@@ -37,6 +37,13 @@ type Route struct {
 	// This field is used to distinguish similar routes from different peers.
 	// The same routes can have different costs.
 	Peer netip.Addr
+	// GlobalID is the route identifier reported by BIRD, used together with
+	// the peer to identify a BGP path within a prefix.
+	//
+	// BIRD emits it on the wire immediately after the peer address; a peer
+	// re-announcing a prefix reuses the same GlobalID, so it drives the BGP
+	// implicit-replace decision.
+	GlobalID uint32
 	// RD stands for Route Distinguisher, as defined in RFC 4364.
 	//
 	// This field is used to distinguish similar routes to different systems.
@@ -71,13 +78,14 @@ type Route struct {
 
 // isSameIdentity reports whether two routes share the same RIB identity.
 //
-// BGP-sourced routes are identified by peer because of BGP implicit replace:
-// a peer re-announcing a prefix with a new nexthop must replace its previous
-// path (RFC 4271), so BGP ECMP arises across peers. Static routes are
-// peerless independent entries, so their identity includes the nexthop,
-// allowing multiple static routes for the same prefix with distinct nexthops
-// to coexist. Static nexthops are compared in normalized (unmapped) form
-// because the API accepts both native IPv4 and IPv4-in-IPv6 encodings.
+// BGP-sourced routes are identified by peer and GlobalID because of BGP
+// implicit replace: a peer re-announcing a prefix reuses its GlobalID and must
+// replace its previous path (RFC 4271), so BGP ECMP arises across distinct
+// (peer, GlobalID) paths. Static routes are peerless independent entries, so
+// their identity includes the nexthop, allowing multiple static routes for the
+// same prefix with distinct nexthops to coexist. Static nexthops are compared
+// in normalized (unmapped) form because the API accepts both native IPv4 and
+// IPv4-in-IPv6 encodings.
 func (m Route) isSameIdentity(other Route) bool {
 	if m.SourceID != other.SourceID || m.Peer != other.Peer {
 		return false
@@ -85,7 +93,7 @@ func (m Route) isSameIdentity(other Route) bool {
 	if m.SourceID == RouteSourceStatic {
 		return m.NextHop.Unmap() == other.NextHop.Unmap()
 	}
-	return true
+	return m.GlobalID == other.GlobalID
 }
 
 func routeCompare(a Route, b Route) int {

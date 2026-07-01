@@ -52,6 +52,9 @@ type Route struct {
 	// This field is used to distinguish similar routes from different peers.
 	// The same routes can have different costs.
 	Peer netip.Addr
+	// GlobalID identifies the peer globally, as reported by BIRD on the wire
+	// immediately after the peer address.
+	GlobalID uint32
 	// RD stands for Route Distinguisher, as defined in RFC 4364.
 	//
 	// This field is used to distinguish similar routes to different systems.
@@ -125,6 +128,7 @@ func ToPBRoute(route *Route) *routepb.Route {
 		AsPathLen:        route.ASPathLen,
 		Source:           routepb.RouteSourceID(route.SourceID),
 		LargeCommunities: communities,
+		GlobalId:         route.GlobalID,
 	}
 }
 

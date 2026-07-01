@@ -188,6 +188,7 @@ type update struct {
 	baseTail      [sizeOfBaseTypeTail]byte // NetAddrUnion data
 	opType        Operation
 	peerAddr      IP6Addr
+	globalID      uint32
 	attrsAreaSize uint32
 }
 
@@ -241,6 +242,7 @@ func (m *updateDecoder) Decode(route *rib.Route) error {
 			m.update.base.String(), m.update.base.length, sizeOfNetAddrUnion, ErrUnknownAddrUnion)
 	}
 	route.Peer = netipAddrFrom4U32(m.update.peerAddr)
+	route.GlobalID = m.update.globalID
 	route.ToRemove = m.update.opType.isRemove()
 
 	if err := m.decodePrefixAndRD(route); err != nil {
