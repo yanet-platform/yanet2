@@ -12,7 +12,7 @@ use tabled::{
 };
 use tonic::codec::CompressionEncoding;
 use ync::{
-    client::{ConnectionArgs, LayeredChannel},
+    client::{ConnectionArgs, LayeredChannel, Service},
     errors::Error,
     output::{self, CommonFormat},
 };
@@ -66,31 +66,28 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
 }
 
 pub struct GatewayService {
-    client: GatewayClient<LayeredChannel>,
-    endpoint: String,
+    service: Service<GatewayClient<LayeredChannel>>,
 }
 
 impl GatewayService {
     pub async fn new(connection: &ConnectionArgs) -> Result<Self, Error> {
-        let channel = ync::client::connect(connection)
-            .await
-            .map_err(|err| Error::from_connection(err, "gateway", connection.endpoint.clone()))?;
-        let client = GatewayClient::new(channel)
-            .send_compressed(CompressionEncoding::Gzip)
-            .accept_compressed(CompressionEncoding::Gzip);
-
-        Ok(Self {
-            client,
-            endpoint: connection.endpoint.clone(),
+        let service = Service::connect(connection, GATEWAY_SERVICE, |channel| {
+            GatewayClient::new(channel)
+                .send_compressed(CompressionEncoding::Gzip)
+                .accept_compressed(CompressionEncoding::Gzip)
         })
+        .await?;
+
+        Ok(Self { service })
     }
 
     pub async fn list_services(&mut self) -> Result<(), Error> {
         let response = self
-            .client
+            .service
+            .client()
             .list_services(ListServicesRequest {})
             .await
-            .map_err(|status| Error::from_status(status, "gateway", self.endpoint.clone(), GATEWAY_SERVICE))?
+            .map_err(self.service.status("gateway"))?
             .into_inner();
 
         let rows: Vec<ServiceRow> = response.services.iter().map(ServiceRow::from).collect();
