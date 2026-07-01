@@ -4,7 +4,7 @@ use code::{UpdateDeviceVlanRequest, device_vlan_service_client::DeviceVlanServic
 use commonpb::pb::Device;
 use tonic::codec::CompressionEncoding;
 use ync::{
-    client::{ConnectionArgs, LayeredChannel},
+    client::{ConnectionArgs, LayeredChannel, Service},
     errors::Error,
     output::{self, CommonFormat},
 };
@@ -58,37 +58,19 @@ pub struct UpdateCmd {
 const SERVICE_NAME: &str = "devices.vlan.controlplane.vlanpb.v1.DeviceVlanService";
 
 pub struct DeviceVlanService {
-    client: DeviceVlanServiceClient<LayeredChannel>,
-    endpoint: String,
+    service: Service<DeviceVlanServiceClient<LayeredChannel>>,
 }
 
 impl DeviceVlanService {
     pub async fn new(connection: &ConnectionArgs) -> Result<Self, Error> {
-        let channel = ync::client::connect(connection)
-            .await
-            .map_err(|e| Error::from_connection(e, "connect", &connection.endpoint))?;
-        let client = DeviceVlanServiceClient::new(channel)
-            .send_compressed(CompressionEncoding::Gzip)
-            .accept_compressed(CompressionEncoding::Gzip);
-
-        Ok(Self {
-            client,
-            endpoint: connection.endpoint.clone(),
+        let service = Service::connect(connection, SERVICE_NAME, |channel| {
+            DeviceVlanServiceClient::new(channel)
+                .send_compressed(CompressionEncoding::Gzip)
+                .accept_compressed(CompressionEncoding::Gzip)
         })
-    }
+        .await?;
 
-    fn map_err<'a>(&'a self, action: &'a str) -> impl FnOnce(tonic::Status) -> Error + 'a {
-        let endpoint = self.endpoint.clone();
-        move |status| Error::from_status(status, action, endpoint, SERVICE_NAME)
-    }
-
-    fn invalid_argument(&self, action: &'static str, message: String) -> Error {
-        Error::from_status(
-            tonic::Status::invalid_argument(message),
-            action,
-            self.endpoint.clone(),
-            SERVICE_NAME,
-        )
+        Ok(Self { service })
     }
 
     pub async fn update_config(&mut self, cmd: UpdateCmd) -> Result<(), Error> {
@@ -97,13 +79,13 @@ impl DeviceVlanService {
             .into_iter()
             .map(|s| s.parse::<commonpb::pb::DevicePipeline>())
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|err| self.invalid_argument("update", err.to_string()))?;
+            .map_err(|err| self.service.invalid("update", err.to_string()))?;
         let output = cmd
             .output
             .into_iter()
             .map(|s| s.parse::<commonpb::pb::DevicePipeline>())
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|err| self.invalid_argument("update", err.to_string()))?;
+            .map_err(|err| self.service.invalid("update", err.to_string()))?;
 
         let request = UpdateDeviceVlanRequest {
             name: cmd.name.clone(),
@@ -111,10 +93,11 @@ impl DeviceVlanService {
             vlan: cmd.vlan as u32,
         };
 
-        self.client
+        self.service
+            .client()
             .update_device(request)
             .await
-            .map_err(self.map_err("update"))?;
+            .map_err(self.service.status("update"))?;
 
         output::success("update", format_args!("Updated device {}.", cmd.name));
 
