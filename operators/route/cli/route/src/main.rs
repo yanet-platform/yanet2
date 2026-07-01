@@ -24,7 +24,7 @@ use tabled::{
 };
 use tonic::codec::CompressionEncoding;
 use ync::{
-    client::{ConnectionArgs, LayeredChannel},
+    client::{ConnectionArgs, LayeredChannel, Service},
     errors::Error,
     output::{self, CommonFormat},
 };
@@ -209,9 +209,8 @@ async fn run(cmd: Cmd) -> Result<bool, Error> {
 }
 
 pub struct RouteService {
-    client: RouteServiceClient<LayeredChannel>,
-    readiness: ReadinessServiceClient<LayeredChannel>,
-    endpoint: String,
+    service: Service<RouteServiceClient<LayeredChannel>>,
+    readiness: Service<ReadinessServiceClient<LayeredChannel>>,
 }
 
 impl RouteService {
@@ -219,31 +218,31 @@ impl RouteService {
         let channel = ync::client::connect(connection)
             .await
             .map_err(|e| Error::from_connection(e, "connect", &connection.endpoint))?;
-        let client = RouteServiceClient::new(channel.clone())
-            .send_compressed(CompressionEncoding::Gzip)
-            .accept_compressed(CompressionEncoding::Gzip);
-        let readiness = ReadinessServiceClient::new(channel)
-            .send_compressed(CompressionEncoding::Gzip)
-            .accept_compressed(CompressionEncoding::Gzip);
+        let service = Service::new(
+            RouteServiceClient::new(channel.clone())
+                .send_compressed(CompressionEncoding::Gzip)
+                .accept_compressed(CompressionEncoding::Gzip),
+            connection.endpoint.clone(),
+            SERVICE_NAME,
+        );
+        let readiness = Service::new(
+            ReadinessServiceClient::new(channel)
+                .send_compressed(CompressionEncoding::Gzip)
+                .accept_compressed(CompressionEncoding::Gzip),
+            connection.endpoint.clone(),
+            READINESS_SERVICE_NAME,
+        );
 
-        Ok(Self {
-            client,
-            readiness,
-            endpoint: connection.endpoint.clone(),
-        })
-    }
-
-    fn map_err<'a>(&'a self, action: &'a str) -> impl FnOnce(tonic::Status) -> Error + 'a {
-        let endpoint = self.endpoint.clone();
-        move |status| Error::from_status(status, action, endpoint, SERVICE_NAME)
+        Ok(Self { service, readiness })
     }
 
     pub async fn list_configs(&mut self) -> Result<(), Error> {
         let response = self
-            .client
+            .service
+            .client()
             .list_configs(ListConfigsRequest {})
             .await
-            .map_err(self.map_err("list"))?
+            .map_err(self.service.status("list"))?
             .into_inner();
 
         output::data(
@@ -268,10 +267,11 @@ impl RouteService {
         };
 
         let response = self
-            .client
+            .service
+            .client()
             .show_routes(request)
             .await
-            .map_err(self.map_err("show"))?
+            .map_err(self.service.status("show"))?
             .into_inner();
 
         output::data(
@@ -296,10 +296,11 @@ impl RouteService {
         };
 
         let response = self
-            .client
+            .service
+            .client()
             .lookup_route(request)
             .await
-            .map_err(self.map_err("lookup"))?
+            .map_err(self.service.status("lookup"))?
             .into_inner();
 
         output::data(
@@ -327,10 +328,11 @@ impl RouteService {
             source_id: cmd.source.to_proto().into(),
         };
 
-        self.client
+        self.service
+            .client()
             .insert_route(request)
             .await
-            .map_err(self.map_err("insert"))?;
+            .map_err(self.service.status("insert"))?;
 
         let via = cmd
             .nexthop_addrs
@@ -364,10 +366,11 @@ impl RouteService {
             source_id: cmd.source.to_proto().into(),
         };
 
-        self.client
+        self.service
+            .client()
             .delete_route(request)
             .await
-            .map_err(self.map_err("remove"))?;
+            .map_err(self.service.status("remove"))?;
 
         let via = cmd
             .nexthop_addrs
@@ -393,7 +396,11 @@ impl RouteService {
     pub async fn flush_routes(&mut self, cmd: RouteFlushCmd) -> Result<(), Error> {
         let request = FlushRoutesRequest { name: cmd.name.clone() };
 
-        self.client.flush_routes(request).await.map_err(self.map_err("flush"))?;
+        self.service
+            .client()
+            .flush_routes(request)
+            .await
+            .map_err(self.service.status("flush"))?;
 
         output::success("flush", format_args!("Flushed {}.", cmd.name));
 
@@ -405,9 +412,10 @@ impl RouteService {
 
         let response = self
             .readiness
+            .client()
             .ready(request)
             .await
-            .map_err(|status| Error::from_status(status, "ready", self.endpoint.clone(), READINESS_SERVICE_NAME))?
+            .map_err(self.readiness.status("ready"))?
             .into_inner();
 
         let returned_names: std::collections::HashSet<&str> =
