@@ -5,7 +5,7 @@ use clap_complete::CompleteEnv;
 use commonpb::pb::{FunctionId, PipelineId};
 use tonic::codec::CompressionEncoding;
 use ync::{
-    client::{ConnectionArgs, LayeredChannel},
+    client::{ConnectionArgs, LayeredChannel, Service},
     errors::{Error, NotFoundMapper},
     output::{self, CommonFormat},
 };
@@ -137,8 +137,7 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
 }
 
 pub struct PipelineService {
-    client: PipelineServiceClient<LayeredChannel>,
-    endpoint: String,
+    service: Service<PipelineServiceClient<LayeredChannel>>,
     action: &'static str,
 }
 
@@ -152,18 +151,18 @@ impl PipelineService {
             .accept_compressed(CompressionEncoding::Gzip);
 
         Ok(Self {
-            client,
-            endpoint: connection.endpoint.clone(),
+            service: Service::new(client, connection.endpoint.clone(), PIPELINE_SERVICE),
             action,
         })
     }
 
     pub async fn list_pipelines(&mut self) -> Result<Vec<PipelineId>, Error> {
         let response = self
-            .client
+            .service
+            .client()
             .list(ListPipelinesRequest {})
             .await
-            .map_err(|status| NOT_FOUND.map(status, self.action, &self.endpoint, Some("pipeline service")))?
+            .map_err(|status| NOT_FOUND.map(status, self.action, self.service.endpoint(), Some("pipeline service")))?
             .into_inner();
 
         Ok(response.ids)
@@ -174,17 +173,25 @@ impl PipelineService {
             id: Some(PipelineId { name: name.to_string() }),
         };
         let response = self
-            .client
+            .service
+            .client()
             .get(request)
             .await
-            .map_err(|status| NOT_FOUND.map(status, self.action, &self.endpoint, Some(&format!("pipeline '{name}'"))))?
+            .map_err(|status| {
+                NOT_FOUND.map(
+                    status,
+                    self.action,
+                    self.service.endpoint(),
+                    Some(&format!("pipeline '{name}'")),
+                )
+            })?
             .into_inner();
 
         let pipeline = response.pipeline.ok_or_else(|| {
             Error::from_status(
                 tonic::Status::not_found(format!("pipeline {name} not found")),
                 self.action,
-                self.endpoint.clone(),
+                self.service.endpoint(),
                 PIPELINE_SERVICE,
             )
         })?;
@@ -205,11 +212,11 @@ impl PipelineService {
             }),
         };
 
-        self.client.update(request).await.map_err(|status| {
+        self.service.client().update(request).await.map_err(|status| {
             NOT_FOUND.map(
                 status,
                 self.action,
-                &self.endpoint,
+                self.service.endpoint(),
                 Some(&format!("pipeline '{pipeline_name}'")),
             )
         })?;
@@ -223,8 +230,13 @@ impl PipelineService {
         };
 
         let name = request.id.as_ref().expect("pipeline id").name.clone();
-        self.client.delete(request).await.map_err(|status| {
-            NOT_FOUND.map(status, self.action, &self.endpoint, Some(&format!("pipeline '{name}'")))
+        self.service.client().delete(request).await.map_err(|status| {
+            NOT_FOUND.map(
+                status,
+                self.action,
+                self.service.endpoint(),
+                Some(&format!("pipeline '{name}'")),
+            )
         })?;
 
         Ok(())
