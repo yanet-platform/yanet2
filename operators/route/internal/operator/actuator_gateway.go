@@ -24,6 +24,7 @@ type GatewayActuator struct {
 	routes      routepb.RouteServiceClient
 	funcApplier *operator.FunctionApplier
 	devices     []string
+	onFIBBuilt  func(module string, stats FIBBuildStats)
 	log         *zap.Logger
 }
 
@@ -71,7 +72,8 @@ func NewGatewayActuator(
 			spec,
 			operator.WithIgnorePdump(fn.IgnorePdump),
 		),
-		devices: opts.Devices,
+		devices:    opts.Devices,
+		onFIBBuilt: opts.OnFIBBuilt,
 		log: opts.Log.With(
 			zap.String("gateway", cfg.Name),
 			zap.String("function", fn.Name.Unwrap()),
@@ -99,8 +101,9 @@ func (m *GatewayActuator) Apply(ctx context.Context, snapshot RouteSnapshot) err
 			continue
 		}
 
-		fib, _ := BuildFIB(dump, neighbours)
+		fib, stats := BuildFIB(dump, neighbours)
 		fib.Name = name
+		m.onFIBBuilt(name, stats)
 		if e := m.pushFIB(ctx, fib); e != nil {
 			err = errors.Join(err, fmt.Errorf("failed to push FIB to gateway %q: %w", m.name, e))
 		}

@@ -9,12 +9,14 @@ import (
 )
 
 type options struct {
-	Log *zap.Logger
+	Log     *zap.Logger
+	Metrics MetricsFactory
 }
 
 func newOptions() *options {
 	return &options{
-		Log: zap.NewNop(),
+		Log:     zap.NewNop(),
+		Metrics: NewMetrics,
 	}
 }
 
@@ -25,6 +27,17 @@ type Option func(*options)
 func WithLog(log *zap.Logger) Option {
 	return func(o *options) {
 		o.Log = log
+	}
+}
+
+// WithMetrics overrides the factory used to construct the metrics sink.
+//
+// The default factory is NewMetrics; use this to wrap or extend the
+// default sink, for example to share it with an externally owned
+// metrics-service registration.
+func WithMetrics(factory MetricsFactory) Option {
+	return func(o *options) {
+		o.Metrics = factory
 	}
 }
 
@@ -175,14 +188,16 @@ func newOperatorServiceOptions() *operatorServiceOptions {
 type OperatorServiceOption func(*operatorServiceOptions)
 
 type gatewayActuatorOptions struct {
-	Function FunctionConfig
-	Devices  []string
-	Log      *zap.Logger
+	Function   FunctionConfig
+	Devices    []string
+	OnFIBBuilt func(module string, stats FIBBuildStats)
+	Log        *zap.Logger
 }
 
 func newGatewayActuatorOptions() *gatewayActuatorOptions {
 	return &gatewayActuatorOptions{
-		Log: zap.NewNop(),
+		OnFIBBuilt: func(string, FIBBuildStats) {},
+		Log:        zap.NewNop(),
 	}
 }
 
@@ -212,5 +227,13 @@ func WithGatewayActuatorFunction(fn FunctionConfig) GatewayActuatorOption {
 func WithGatewayActuatorDevices(devices []string) GatewayActuatorOption {
 	return func(o *gatewayActuatorOptions) {
 		o.Devices = devices
+	}
+}
+
+// WithGatewayActuatorOnFIBBuilt registers a callback invoked with the build
+// statistics of every FIB built during Apply.
+func WithGatewayActuatorOnFIBBuilt(fn func(module string, stats FIBBuildStats)) GatewayActuatorOption {
+	return func(o *gatewayActuatorOptions) {
+		o.OnFIBBuilt = fn
 	}
 }

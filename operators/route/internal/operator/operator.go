@@ -56,9 +56,11 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 	}
 
 	log := opts.Log
-	metrics := NewMetrics()
 
 	moduleName := cfg.Function.Module.Unwrap()
+
+	routeRIBStore := newRIBStore(log)
+	metrics := opts.Metrics(routeRIBStore, !cfg.NetlinkMonitor.Disabled)
 
 	// Build the readiness tracker scope list: one fib:<gateway>:<module> scope per
 	// gateway, plus a neighbours scope, a rib scope, and optionally a bird-session scope.
@@ -93,18 +95,22 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 		neighOpts := []neigh.Option{
 			neigh.WithOnSynced(func() {
 				tracker.Set("neighbours", readinesspb.State_STATE_READY)
+				metrics.OnNeighbourSynced()
 			}),
 			neigh.WithOnError(func(err error) {
 				tracker.SetWithReason("neighbours",
 					readinesspb.State_STATE_DEGRADED,
 					&readinesspb.Reason{Code: "RESYNC", Message: err.Error()},
 				)
+				metrics.OnNeighbourError(err)
 			}),
 			neigh.WithOnResynced(func() {
 				tracker.Set("neighbours", readinesspb.State_STATE_READY)
+				metrics.OnNeighbourResynced()
 			}),
 			neigh.WithOnHealthy(func() {
 				tracker.Touch("neighbours")
+				metrics.OnNeighbourHealthy()
 			}),
 		}
 
@@ -115,7 +121,6 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 		neighMonitor = monitor
 	}
 
-	routeRIBStore := newRIBStore(log)
 	source := NewRouteSource(neighTable, routeRIBStore)
 	wake := source.WakeFunc()
 	ribHelper := newRIBReadiness(cfg.Readiness, routeRIBStore, moduleName, tracker, log)
@@ -126,9 +131,18 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 		WithRouteServiceRIBTTL(ribTTL(cfg)),
 		WithRouteServiceOnChanged(wake),
 		WithRouteServiceLog(log),
-		WithRouteServiceOnRIBSessionStart(ribHelper.OnSessionStart),
-		WithRouteServiceOnRIBUpdate(ribHelper.OnUpdate),
-		WithRouteServiceOnRIBSessionEnd(ribHelper.OnSessionEnd),
+		WithRouteServiceOnRIBSessionStart(func(name string, sessionID uint64) {
+			ribHelper.OnSessionStart(name, sessionID)
+			metrics.OnRIBSessionStart(name, sessionID)
+		}),
+		WithRouteServiceOnRIBUpdate(func(n int) {
+			ribHelper.OnUpdate(n)
+			metrics.OnRIBUpdate(n)
+		}),
+		WithRouteServiceOnRIBSessionEnd(func(name string, sessionID uint64) {
+			ribHelper.OnSessionEnd(name, sessionID)
+			metrics.OnRIBSessionEnd(name, sessionID)
+		}),
 	)
 
 	neighbourSvc := NewNeighbourService(
@@ -142,11 +156,14 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 
 	actuators := make([]Actuator, 0, len(cfg.Gateways))
 	for _, gw := range cfg.Gateways {
+		gatewayMetrics := metrics.Gateway(gw.Name)
+
 		actuator, err := NewGatewayActuator(
 			gw,
 			WithGatewayActuatorLog(log),
 			WithGatewayActuatorFunction(cfg.Function),
 			WithGatewayActuatorDevices(cfg.GatewayDevices[gw.Name]),
+			WithGatewayActuatorOnFIBBuilt(gatewayMetrics.OnFIBBuilt),
 		)
 		if err != nil {
 			for _, a := range actuators {
@@ -155,8 +172,10 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 			return nil, fmt.Errorf("failed to construct gateway actuator %q: %w", gw.Name, err)
 		}
 
-		// Wrap each actuator so that apply outcomes drive the per-gateway fib scope.
-		observed := operator.NewObservedActuator(actuator, fmt.Sprintf("fib:%s:%s", gw.Name, moduleName), tracker.Observe)
+		// Wrap each actuator so that apply outcomes drive the per-gateway apply
+		// metrics, then so that they drive the per-gateway fib readiness scope.
+		metered := newMeteredActuator(actuator, gatewayMetrics)
+		observed := operator.NewObservedActuator(metered, fmt.Sprintf("fib:%s:%s", gw.Name, moduleName), tracker.Observe)
 		actuators = append(actuators, observed)
 	}
 
