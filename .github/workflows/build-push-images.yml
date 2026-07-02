@@ -32,10 +32,10 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-24.04
 
-      - uses: awalsh128/cache-apt-pkgs-action@latest
-        with:
-          packages: devscripts equivs
-          version: 1.1
+      - name: Install packaging tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends devscripts equivs
 
       - uses: actions/setup-go@v5
         with:
