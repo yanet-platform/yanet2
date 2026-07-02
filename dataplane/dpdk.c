@@ -5,6 +5,7 @@
 
 #include <rte_dev.h>
 #include <rte_eal.h>
+#include <rte_errno.h>
 #include <rte_ether.h>
 
 #include <rte_eth_ring.h>
@@ -153,14 +154,20 @@ dpdk_add_ring_port(const char *port_name) {
 		return -1;
 	}
 
-	rte_eth_from_rings(
-		port_name + strlen("net_ring_"),
-		&rx_ring,
-		1,
-		&tx_ring,
-		1,
-		socket_id
-	);
+	if (rte_eth_from_rings(
+		    port_name + strlen("net_ring_"),
+		    &rx_ring,
+		    1,
+		    &tx_ring,
+		    1,
+		    socket_id
+	    ) < 0) {
+		LOG(ERROR,
+		    "failed to create eth device from rings for %s: %s",
+		    port_name,
+		    rte_strerror(rte_errno));
+		return -1;
+	}
 
 	return 0;
 }

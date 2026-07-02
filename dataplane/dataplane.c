@@ -289,6 +289,17 @@ dataplane_create_devices(
 			    "net_ring_:",
 			    strlen("net_ring_:")
 		    )) {
+			// The rings are single-producer/single-consumer and
+			// the device exposes exactly one rx/tx queue pair,
+			// so only one worker may poll it.
+			if (device_config->worker_count != 1) {
+				LOG(ERROR,
+				    "ring device %s requires exactly one "
+				    "worker, got %u",
+				    device_config->port_name,
+				    device_config->worker_count);
+				return -1;
+			}
 			if (dpdk_add_ring_port(device_config->port_name)) {
 				LOG(ERROR,
 				    "failed to add yanet ring port %s",
