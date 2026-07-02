@@ -18,7 +18,7 @@ type RIBStore struct {
 func newRIBStore(log *zap.Logger) *RIBStore {
 	return &RIBStore{
 		ribs: map[string]*rib.RIB{},
-		log:  zap.NewNop(),
+		log:  log,
 	}
 }
 
