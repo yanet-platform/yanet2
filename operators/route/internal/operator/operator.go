@@ -60,7 +60,6 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 	moduleName := cfg.Function.Module.Unwrap()
 
 	routeRIBStore := newRIBStore(log)
-	metrics := opts.Metrics(routeRIBStore, !cfg.NetlinkMonitor.Disabled)
 
 	// Build the readiness tracker scope list: one fib:<gateway>:<module> scope per
 	// gateway, plus a neighbours scope, a rib scope, and optionally a bird-session scope.
@@ -80,6 +79,12 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 	if _, err := neighTable.CreateSource("static", staticTablePriority, true); err != nil {
 		return nil, fmt.Errorf("failed to create static neighbour source: %w", err)
 	}
+
+	metricsOptions := []MetricsOption{}
+	if !cfg.NetlinkMonitor.Disabled {
+		metricsOptions = append(metricsOptions, WithNetlinkMonitorMetrics())
+	}
+	metrics := opts.Metrics(routeRIBStore, neighTable, metricsOptions...)
 
 	// Propagate the neighbours scope based on netlink monitor config, and
 	// construct the monitor itself only when it is enabled.

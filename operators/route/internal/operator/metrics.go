@@ -7,6 +7,7 @@ import (
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/metrics"
 	"github.com/yanet-platform/yanet2/common/go/operator"
+	"github.com/yanet-platform/yanet2/operators/route/internal/discovery/neigh"
 )
 
 // applyDurationBounds are the histogram bucket upper bounds, in seconds,
@@ -28,8 +29,9 @@ var reconcilerStateNames = map[operator.ReconcilerState]string{
 // pulled from thread-safe snapshots at Collect time, and gateway sinks
 // are created on demand by Gateway.
 type Metrics struct {
-	ribs                *RIBStore
-	neighMonitorEnabled bool
+	ribs                  *RIBStore
+	neighTable            *neigh.NeighTable
+	netlinkMonitorEnabled bool
 
 	reconcileTotal  metrics.Counter
 	reconcileErrors metrics.Counter
@@ -50,29 +52,61 @@ type Metrics struct {
 
 // NewMetrics constructs the Metrics sink from the operator-owned
 // dependencies it pulls from at Collect time.
-func NewMetrics(ribs *RIBStore, neighMonitorEnabled bool) *Metrics {
+func NewMetrics(ribs *RIBStore, neighTable *neigh.NeighTable, options ...MetricsOption) *Metrics {
+	opts := newMetricsOptions()
+	for _, o := range options {
+		o(opts)
+	}
+
 	states := make(map[operator.ReconcilerState]*metrics.Gauge, len(reconcilerStateNames))
 	for state := range reconcilerStateNames {
 		states[state] = &metrics.Gauge{}
 	}
 
 	return &Metrics{
-		ribs:                ribs,
-		neighMonitorEnabled: neighMonitorEnabled,
-		states:              states,
-		ribSessionStarts:    metrics.NewMetricMap[*metrics.Counter](),
-		ribSessionEnds:      metrics.NewMetricMap[*metrics.Counter](),
-		gateways:            map[string]*GatewayMetrics{},
+		ribs:                  ribs,
+		neighTable:            neighTable,
+		netlinkMonitorEnabled: opts.NetlinkMonitorEnabled,
+		states:                states,
+		ribSessionStarts:      metrics.NewMetricMap[*metrics.Counter](),
+		ribSessionEnds:        metrics.NewMetricMap[*metrics.Counter](),
+		gateways:              map[string]*GatewayMetrics{},
 	}
 }
 
 // MetricsFactory constructs the operator metrics sink from the
 // operator-owned dependencies.
 //
-// NewOperator invokes the factory once the RIB store exists, so a custom
-// factory can wrap or extend the default sink while still receiving the
-// real pull sources.
-type MetricsFactory func(ribs *RIBStore, neighMonitorEnabled bool) *Metrics
+// NewOperator invokes the factory once the RIB store and neighbour table
+// exist, so a custom factory can wrap or extend the default sink while
+// still receiving the real pull sources.
+type MetricsFactory func(ribs *RIBStore, neighTable *neigh.NeighTable, options ...MetricsOption) *Metrics
+
+// metricsOptions holds the configurable toggles for NewMetrics.
+type metricsOptions struct {
+	NetlinkMonitorEnabled bool
+}
+
+func newMetricsOptions() *metricsOptions {
+	return &metricsOptions{}
+}
+
+// MetricsOption configures NewMetrics.
+type MetricsOption func(*metricsOptions)
+
+// WithNetlinkMonitorMetrics enables the netlink-monitor health metric
+// family.
+//
+// This covers route_operator_neighbour_monitor_healthy,
+// route_operator_neighbour_resyncs_total, and
+// route_operator_neighbour_syncs_total. Pass this option only when the
+// netlink monitor actually runs, so a deliberately disabled monitor does
+// not read as unhealthy.
+func WithNetlinkMonitorMetrics() MetricsOption {
+	return func(o *metricsOptions) {
+		o.NetlinkMonitorEnabled = true
+	}
+}
 
 // OnReconcileCompleted records the outcome of one reconcile pass.
 func (m *Metrics) OnReconcileCompleted(err error) {
@@ -202,6 +236,16 @@ func (m *Metrics) Collect() []*commonpb.Metric {
 		)
 	}
 
+	for _, src := range m.neighTable.ListSources() {
+		out = append(out, makeGauge(
+			"route_operator_neighbour_entries",
+			float64(src.EntryCount),
+			makeLabel("table", src.Name),
+		))
+	}
+	_, nexthops := m.neighTable.View().Entries()
+	out = append(out, makeGauge("route_operator_neighbour_nexthops", float64(nexthops)))
+
 	for _, entry := range m.ribSessionStarts.Metrics() {
 		out = append(out, makeCounter(
 			"route_operator_rib_session_starts_total",
@@ -218,7 +262,7 @@ func (m *Metrics) Collect() []*commonpb.Metric {
 	}
 	out = append(out, makeCounter("route_operator_rib_feed_updates_total", m.ribFeedUpdates.Load()))
 
-	if m.neighMonitorEnabled {
+	if m.netlinkMonitorEnabled {
 		out = append(out,
 			makeGauge("route_operator_neighbour_monitor_healthy", m.neighbourHealthy.Load()),
 			makeCounter("route_operator_neighbour_resyncs_total", m.neighbourResyncs.Load()),
