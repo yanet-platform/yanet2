@@ -1,5 +1,6 @@
-// Package grpcmetrics provides an opt-in gRPC unary server interceptor that
-// records per-call metrics and renders them to commonpb.Metric.
+// Package grpcmetrics provides opt-in gRPC unary and stream server
+// interceptors that record per-call metrics and render them to
+// commonpb.Metric.
 //
 // Each ServerMetrics instance tracks three metric families:
 //   - grpc_server_started_total    — counter per {grpc_type, grpc_service, grpc_method[, config]}
@@ -7,17 +8,28 @@
 //   - grpc_server_handling_seconds — histogram per {grpc_type, grpc_service, grpc_method[, config]}
 //
 // Label names follow the go-grpc-prometheus (go-grpc-middleware/providers/prometheus)
-// server convention. grpc_type is always "unary"; streaming is a documented
-// future follow-up. The optional "config" label is emitted when the
+// server convention. grpc_type is "unary" for UnaryServerInterceptor calls and
+// one of "client_stream", "server_stream", or "bidi_stream" for
+// StreamServerInterceptor calls, depending on the direction flags on
+// grpc.StreamServerInfo. The optional "config" label is emitted when the
 // Labeler provides it.
 //
-// Stale series are pruned via a retention predicate.
+// A transparent gRPC proxy (such as the gateway's unknown-service handler)
+// registers every proxied method, including originally unary ones, as a
+// bidirectional stream at the transport level. Calls recorded through such a
+// proxy therefore carry grpc_type="bidi_stream" even when the underlying RPC
+// is unary — this reflects transport-level truth, not a labeling bug.
+//
+// A service filter rejects calls for unknown services before any series or
+// per-service method bookkeeping is allocated, and stale series are pruned
+// via a retention predicate.
 package grpcmetrics
 
 import (
 	"context"
 	"maps"
 	"strings"
+	"sync"
 	"time"
 
 	"google.golang.org/grpc"
@@ -29,13 +41,28 @@ import (
 )
 
 const (
-	labelType    = "grpc_type"
-	labelService = "grpc_service"
-	labelMethod  = "grpc_method"
-	labelCode    = "grpc_code"
+	labelType   = "grpc_type"
+	labelMethod = "grpc_method"
+	labelCode   = "grpc_code"
 )
 
-const grpcTypeUnary = "unary"
+// methodOverflow is the grpc_method label value recorded once a service's
+// distinct method count has reached the WithPerServiceMethodLimit cap.
+const methodOverflow = "other"
+
+// ServiceLabel is the label key holding the fully-qualified gRPC service name
+// on every recorded series.
+//
+// Retention predicates that key off the proxied service name, rather than a
+// Labeler-supplied label, read id.Labels[ServiceLabel].
+const ServiceLabel = "grpc_service"
+
+const (
+	grpcTypeUnary        = "unary"
+	grpcTypeClientStream = "client_stream"
+	grpcTypeServerStream = "server_stream"
+	grpcTypeBidiStream   = "bidi_stream"
+)
 
 // DefaultBuckets is the default histogram bucket boundary set in seconds.
 //
@@ -49,7 +76,10 @@ var DefaultBuckets = []float64{
 // Labeler derives extra per-call labels from a unary request.
 //
 // It is called once per RPC before the handler runs. A nil return means no
-// extra labels are attached.
+// extra labels are attached. Stream calls have no single request message, so
+// StreamServerInterceptor invokes the Labeler with a nil req; a Labeler that
+// only type-switches on req (the common case) naturally yields no extra
+// labels for streams.
 type Labeler func(fullMethod string, req any) metrics.Labels
 
 // Retention reports which series to keep when pruning stale metrics.
@@ -118,13 +148,18 @@ func (m *codeSeries) Record() {
 
 // ServerMetrics records unary gRPC server call metrics.
 type ServerMetrics struct {
-	buckets   []float64
-	labeler   Labeler
-	retention Retention
-	clock     func() time.Time
+	buckets               []float64
+	labeler               Labeler
+	retention             Retention
+	clock                 func() time.Time
+	perServiceMethodLimit int
+	serviceFilter         func(service string) bool
 
 	calls   *metrics.MetricMap[*callSeries]
 	handled *metrics.MetricMap[*codeSeries]
+
+	methodsMu sync.Mutex
+	methods   map[string]map[string]struct{}
 }
 
 // Factory builds a ServerMetrics bound to a caller-supplied retention
@@ -156,13 +191,49 @@ func New(options ...Option) *ServerMetrics {
 		o(opts)
 	}
 	return &ServerMetrics{
-		buckets:   opts.Buckets,
-		labeler:   opts.Labeler,
-		retention: opts.Retention,
-		clock:     opts.Clock,
-		calls:     metrics.NewMetricMap[*callSeries](),
-		handled:   metrics.NewMetricMap[*codeSeries](),
+		buckets:               opts.Buckets,
+		labeler:               opts.Labeler,
+		retention:             opts.Retention,
+		clock:                 opts.Clock,
+		perServiceMethodLimit: opts.PerServiceMethodLimit,
+		serviceFilter:         opts.ServiceFilter,
+		calls:                 metrics.NewMetricMap[*callSeries](),
+		handled:               metrics.NewMetricMap[*codeSeries](),
+		methods:               map[string]map[string]struct{}{},
 	}
+}
+
+// resolveMethod applies the per-service method cardinality cap and returns
+// the label value to record under grpc_method.
+//
+// The decision is made once per call and reused for the started, handled,
+// and handling series alike. A method already tracked for the service keeps
+// its own name. A new method is admitted while the service is under the
+// limit; once the limit is reached, further new methods are folded into the
+// methodOverflow label instead. A limit of 0 disables the cap.
+func (m *ServerMetrics) resolveMethod(service, method string) string {
+	if m.perServiceMethodLimit <= 0 {
+		return method
+	}
+
+	m.methodsMu.Lock()
+	defer m.methodsMu.Unlock()
+
+	seen := m.methods[service]
+	if _, ok := seen[method]; ok {
+		return method
+	}
+	if len(seen) >= m.perServiceMethodLimit {
+		return methodOverflow
+	}
+
+	if seen == nil {
+		seen = map[string]struct{}{}
+		m.methods[service] = seen
+	}
+	seen[method] = struct{}{}
+
+	return method
 }
 
 // UnaryServerInterceptor returns a gRPC unary server interceptor that records
@@ -174,12 +245,17 @@ func (m *ServerMetrics) UnaryServerInterceptor() grpc.UnaryServerInterceptor {
 		info *grpc.UnaryServerInfo,
 		handler grpc.UnaryHandler,
 	) (resp any, err error) {
+		service, method := splitFullMethod(info.FullMethod)
+		if !m.serviceFilter(service) {
+			return handler(ctx, req)
+		}
+
 		start := m.clock()
 
 		extra := m.labeler(info.FullMethod, req)
 
-		service, method := splitFullMethod(info.FullMethod)
-		callID := m.callID(service, method, extra)
+		method = m.resolveMethod(service, method)
+		callID := m.callID(grpcTypeUnary, service, method, extra)
 		call := m.calls.GetOrCreate(callID, func() *callSeries {
 			return newCallSeries(m.buckets)
 		})
@@ -193,7 +269,7 @@ func (m *ServerMetrics) UnaryServerInterceptor() grpc.UnaryServerInterceptor {
 			} else {
 				code = status.Code(err)
 			}
-			m.recordExit(call, service, method, extra, code, start)
+			m.recordExit(grpcTypeUnary, call, service, method, extra, code, start)
 			if r != nil {
 				panic(r)
 			}
@@ -204,7 +280,73 @@ func (m *ServerMetrics) UnaryServerInterceptor() grpc.UnaryServerInterceptor {
 	}
 }
 
+// StreamServerInterceptor returns a gRPC stream server interceptor that
+// records started, handled, and handling-latency metrics for every call.
+//
+// The grpc_type label is derived from the direction flags on
+// grpc.StreamServerInfo; see the package doc for the transparent-proxy
+// caveat.
+func (m *ServerMetrics) StreamServerInterceptor() grpc.StreamServerInterceptor {
+	return func(
+		srv any,
+		stream grpc.ServerStream,
+		info *grpc.StreamServerInfo,
+		handler grpc.StreamHandler,
+	) (err error) {
+		service, method := splitFullMethod(info.FullMethod)
+		if !m.serviceFilter(service) {
+			return handler(srv, stream)
+		}
+
+		start := m.clock()
+
+		grpcType := streamGRPCType(info)
+		extra := m.labeler(info.FullMethod, nil)
+
+		method = m.resolveMethod(service, method)
+		callID := m.callID(grpcType, service, method, extra)
+		call := m.calls.GetOrCreate(callID, func() *callSeries {
+			return newCallSeries(m.buckets)
+		})
+		call.RecordStart()
+
+		defer func() {
+			r := recover()
+			var code codes.Code
+			if r != nil {
+				code = codes.Unknown
+			} else {
+				code = status.Code(err)
+			}
+			m.recordExit(grpcType, call, service, method, extra, code, start)
+			if r != nil {
+				panic(r)
+			}
+		}()
+
+		err = handler(srv, stream)
+		return err
+	}
+}
+
+// streamGRPCType classifies a stream call per the go-grpc-prometheus
+// convention: bidirectional when both direction flags are set, otherwise the
+// single direction that is set.
+func streamGRPCType(info *grpc.StreamServerInfo) string {
+	switch {
+	case info.IsClientStream && info.IsServerStream:
+		return grpcTypeBidiStream
+	case info.IsClientStream:
+		return grpcTypeClientStream
+	case info.IsServerStream:
+		return grpcTypeServerStream
+	default:
+		return grpcTypeBidiStream
+	}
+}
+
 func (m *ServerMetrics) recordExit(
+	grpcType string,
 	call *callSeries,
 	service string,
 	method string,
@@ -215,7 +357,7 @@ func (m *ServerMetrics) recordExit(
 	durationSeconds := m.clock().Sub(start).Seconds()
 	call.RecordFinish(durationSeconds)
 
-	handledID := m.handledID(service, method, code.String(), extra)
+	handledID := m.handledID(grpcType, service, method, code.String(), extra)
 	handled := m.handled.GetOrCreate(handledID, func() *codeSeries {
 		return &codeSeries{}
 	})
@@ -249,20 +391,20 @@ func (m *ServerMetrics) reconcile() {
 	})
 }
 
-func (m *ServerMetrics) callID(service, method string, extra metrics.Labels) metrics.MetricID {
+func (m *ServerMetrics) callID(grpcType, service, method string, extra metrics.Labels) metrics.MetricID {
 	labels := metrics.Labels{
-		labelType:    grpcTypeUnary,
-		labelService: service,
+		labelType:    grpcType,
+		ServiceLabel: service,
 		labelMethod:  method,
 	}
 	maps.Copy(labels, extra)
 	return metrics.MetricID{Labels: labels}
 }
 
-func (m *ServerMetrics) handledID(service, method, code string, extra metrics.Labels) metrics.MetricID {
+func (m *ServerMetrics) handledID(grpcType, service, method, code string, extra metrics.Labels) metrics.MetricID {
 	labels := metrics.Labels{
-		labelType:    grpcTypeUnary,
-		labelService: service,
+		labelType:    grpcType,
+		ServiceLabel: service,
 		labelMethod:  method,
 		labelCode:    code,
 	}
