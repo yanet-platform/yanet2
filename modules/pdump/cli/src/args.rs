@@ -67,7 +67,7 @@ pub struct ReadCmd {
     pub output: Option<String>,
 
     /// The number of packets to capture before exiting.
-    #[arg(long, short)]
+    #[arg(long)]
     pub num: Option<u64>,
 }
 
