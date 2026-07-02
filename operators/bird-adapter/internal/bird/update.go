@@ -39,6 +39,7 @@ const (
 	AttrLocalPref     AttributeType = 0x05 /* WD */
 	AttrMultiExitDisc AttributeType = 0x04 /* ON */
 	AttrOriginatorID  AttributeType = 0x09 /* RFC 4456 */ /* ON */
+	AttrIfindex       AttributeType = 0x12 /* yanet: egress interface index (u32) */
 
 	AttrASPath         AttributeType = 0x02 /* WM */
 	AttrNextHop        AttributeType = 0x03 /* WM */
@@ -54,7 +55,7 @@ const (
 	// AtomicAggr     AttributeType = 0x06 /* WD */
 	// Aggregator     AttributeType = 0x07 /* OT */
 	// AS4Path        AttributeType = 0x11 /* RFC 6793 */
-	// AS4Aggregator  AttributeType = 0x12 /* RFC 6793 */
+	// 0x12 was AS4Aggregator (RFC 6793); reused by AttrIfindex above.
 	// AIGP           AttributeType = 0x1a /* RFC 7311 */
 	// OnlyToCustomer AttributeType = 0x23 /* RFC 9234 */
 
@@ -91,6 +92,8 @@ func (m AttributeType) String() string {
 		return "MED"
 	case AttrOriginatorID:
 		return "ORIGINATOR_ID"
+	case AttrIfindex:
+		return "IFINDEX"
 	case AttrASPath:
 		return "AS_PATH"
 	case AttrNextHop:
@@ -120,6 +123,7 @@ func (m AttributeType) isU32Attribute() bool {
 	case AttrOriginatorID:
 	case AttrLocalPref:
 	case AttrMultiExitDisc:
+	case AttrIfindex:
 	default:
 		return false
 	}
@@ -331,6 +335,8 @@ func (m *updateDecoder) decodeAttributes(route *rib.Route) error {
 				route.Pref = val
 			case AttrMultiExitDisc:
 				route.Med = val
+			case AttrIfindex:
+				route.Ifindex = val
 			}
 		} else {
 			attrSize = binary.LittleEndian.Uint32(data)

@@ -44,6 +44,9 @@ type Route struct {
 	// re-announcing a prefix reuses the same GlobalID, so it drives the BGP
 	// implicit-replace decision.
 	GlobalID uint32
+	// Ifindex is the egress interface index advertised by BIRD as a u32
+	// route attribute.
+	Ifindex uint32
 	// RD stands for Route Distinguisher, as defined in RFC 4364.
 	//
 	// This field is used to distinguish similar routes to different systems.

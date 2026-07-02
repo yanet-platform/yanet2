@@ -65,6 +65,10 @@ type Route struct {
 	ExtCommunities []ExtCommunity
 	// LargeCommunities are used to encode complementary route information
 	LargeCommunities []LargeCommunity
+	// Ifindex is the egress interface index advertised by BIRD.
+	//
+	// BIRD sends it as a u32 attribute (id 0x12) in the route update.
+	Ifindex uint32
 	// Med (MULTI_EXIT_DISC) guides route selection, per RFC 4271 Section 5.1.4.
 	//
 	// This field participates in route cost calculation.
@@ -129,6 +133,7 @@ func ToPBRoute(route *Route) *routepb.Route {
 		Source:           routepb.RouteSourceID(route.SourceID),
 		LargeCommunities: communities,
 		GlobalId:         route.GlobalID,
+		Ifindex:          route.Ifindex,
 	}
 }
 
