@@ -40,13 +40,12 @@ type Actuator = operator.Actuator[RouteSnapshot]
 // Operator is the route operator's thin wrapper around the generic
 // operator framework.
 type Operator struct {
-	cfg          *Config
-	app          *operator.Operator[RouteSnapshot]
-	routeSvc     *RouteService
-	neighTable   *neigh.NeighTable
-	neighMonitor *neigh.NeighMonitor
-	source       *RouteSource
-	log          *zap.Logger
+	cfg        *Config
+	app        *operator.Operator[RouteSnapshot]
+	routeSvc   *RouteService
+	neighTable *neigh.NeighTable
+	source     *RouteSource
+	log        *zap.Logger
 }
 
 // NewOperator constructs an Operator from the supplied configuration.
@@ -80,18 +79,18 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 		return nil, fmt.Errorf("failed to create static neighbour source: %w", err)
 	}
 
-	// Propagate the neighbours scope based on netlink monitor config.
-	var neighOpts []neigh.Option
+	// Propagate the neighbours scope based on netlink monitor config, and
+	// construct the monitor itself only when it is enabled.
+	var neighMonitor *neigh.NeighMonitor
 	if cfg.NetlinkMonitor.Disabled {
 		tracker.Set("neighbours", readinesspb.State_STATE_READY)
-		neighOpts = []neigh.Option{neigh.WithOnSynced(func() {})}
 	} else {
 		// Seed the neighbours scope at NOT_READY(SYNCING) before the monitor starts.
 		tracker.SetWithReason("neighbours",
 			readinesspb.State_STATE_NOT_READY,
 			&readinesspb.Reason{Code: "SYNCING"},
 		)
-		neighOpts = []neigh.Option{
+		neighOpts := []neigh.Option{
 			neigh.WithOnSynced(func() {
 				tracker.Set("neighbours", readinesspb.State_STATE_READY)
 			}),
@@ -108,11 +107,12 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 				tracker.Touch("neighbours")
 			}),
 		}
-	}
 
-	neighMonitor, err := newNeighbourMonitor(cfg, neighTable, log, neighOpts...)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create neighbour monitor: %w", err)
+		monitor, err := newNeighbourMonitor(cfg, neighTable, log, neighOpts...)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create neighbour monitor: %w", err)
+		}
+		neighMonitor = monitor
 	}
 
 	routeRIBStore := newRIBStore(log)
@@ -191,13 +191,15 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 	}
 
 	workers := []operator.Runner{
-		neighbourMonitorRunner(neighMonitor),
 		func(ctx context.Context) error {
 			<-ctx.Done()
 			tracker.Drain()
 			return nil
 		},
 		ribHelper.Run,
+	}
+	if !cfg.NetlinkMonitor.Disabled {
+		workers = append(workers, neighMonitor.Run)
 	}
 
 	app := operator.NewOperator(
@@ -225,13 +227,12 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 	)
 
 	return &Operator{
-		cfg:          cfg,
-		app:          app,
-		routeSvc:     routeSvc,
-		neighTable:   neighTable,
-		neighMonitor: neighMonitor,
-		source:       source,
-		log:          log,
+		cfg:        cfg,
+		app:        app,
+		routeSvc:   routeSvc,
+		neighTable: neighTable,
+		source:     source,
+		log:        log,
 	}, nil
 }
 
@@ -244,18 +245,16 @@ func ribTTL(cfg *Config) time.Duration {
 	return DefaultRIBTTL
 }
 
-// newNeighbourMonitor constructs the netlink-backed neighbour monitor
-// when enabled in the config; otherwise returns nil.
+// newNeighbourMonitor constructs the netlink-backed neighbour monitor.
+//
+// Callers must only invoke this when the netlink monitor is enabled in
+// the config.
 func newNeighbourMonitor(
 	cfg *Config,
 	neighTable *neigh.NeighTable,
 	log *zap.Logger,
 	extraOpts ...neigh.Option,
 ) (*neigh.NeighMonitor, error) {
-	if cfg.NetlinkMonitor.Disabled {
-		return nil, nil
-	}
-
 	source, err := neighTable.CreateSource(
 		cfg.NetlinkMonitor.TableName,
 		cfg.NetlinkMonitor.DefaultPriority,
@@ -286,18 +285,6 @@ func (m *Operator) Close() error {
 // Run drives the operator until the supplied context is cancelled.
 func (m *Operator) Run(ctx context.Context) error {
 	return m.app.Run(ctx)
-}
-
-// neighbourMonitorRunner adapts a NeighMonitor (or its absence) to the
-// framework's Runner type.
-func neighbourMonitorRunner(monitor *neigh.NeighMonitor) operator.Runner {
-	return func(ctx context.Context) error {
-		if monitor == nil {
-			return nil
-		}
-
-		return monitor.Run(ctx)
-	}
 }
 
 // applyStaticSeed seeds the operator state from the YAML static config.
