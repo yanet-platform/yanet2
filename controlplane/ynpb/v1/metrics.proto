@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package controlplane.ynpb.v1;
+
+option go_package = "github.com/yanet-platform/yanet2/controlplane/ynpb/v1;ynpb";
+
+import "common/commonpb/v1/metric.proto";
+
+// MetricsService exposes gateway runtime metrics.
+service MetricsService {
+  // GetMetrics returns a snapshot of gateway runtime metrics.
+  rpc GetMetrics(GetMetricsRequest) returns (GetMetricsResponse);
+}
+
+message GetMetricsRequest {}
+
+message GetMetricsResponse { repeated common.commonpb.v1.Metric metrics = 1; }

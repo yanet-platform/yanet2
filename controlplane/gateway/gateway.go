@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/siderolabs/grpc-proxy/proxy"
@@ -14,6 +15,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/yanet-platform/yanet2/common/go/grpcmetrics"
+	"github.com/yanet-platform/yanet2/common/go/metrics"
 	"github.com/yanet-platform/yanet2/common/go/readiness"
 	readinesspb "github.com/yanet-platform/yanet2/common/readinesspb/v1"
 	"github.com/yanet-platform/yanet2/controlplane/httpproxy"
@@ -55,15 +58,35 @@ type serviceEntry struct {
 	kind    BackendKind
 }
 
+// defaultPerServiceMethodLimit caps the number of distinct grpc_method label
+// values the default metrics factory tracks per grpc_service.
+const defaultPerServiceMethodLimit = 64
+
+// MetricsFactory constructs the gateway's gRPC server metrics from the
+// gateway-owned per-call bounds.
+//
+// NewGateway invokes the factory once the backend registry and the gRPC
+// server exist, so a custom factory receives the same retention and
+// service-filter hooks as the default one.
+type MetricsFactory func(retention grpcmetrics.Retention, serviceFilter func(service string) bool) *grpcmetrics.ServerMetrics
+
 type gatewayOptions struct {
-	Services []serviceEntry
-	Log      *zap.Logger
-	LogLevel *zap.AtomicLevel
+	Services       []serviceEntry
+	Log            *zap.Logger
+	LogLevel       *zap.AtomicLevel
+	MetricsFactory MetricsFactory
 }
 
 func newGatewayOptions() *gatewayOptions {
 	return &gatewayOptions{
 		Log: zap.NewNop(),
+		MetricsFactory: func(retention grpcmetrics.Retention, serviceFilter func(service string) bool) *grpcmetrics.ServerMetrics {
+			return grpcmetrics.New(
+				grpcmetrics.WithPerServiceMethodLimit(defaultPerServiceMethodLimit),
+				grpcmetrics.WithRetention(retention),
+				grpcmetrics.WithServiceFilter(serviceFilter),
+			)
+		},
 	}
 }
 
@@ -97,6 +120,19 @@ func WithLog(log *zap.Logger) GatewayOption {
 func WithAtomicLogLevel(level *zap.AtomicLevel) GatewayOption {
 	return func(o *gatewayOptions) {
 		o.LogLevel = level
+	}
+}
+
+// WithGRPCMetricsFactory overrides the factory used to build the gateway's
+// gRPC server metrics collector.
+//
+// Primarily useful in tests to inject a factory with a deterministic clock
+// or custom buckets. The retention and service-filter arguments the factory
+// receives still come from NewGateway, since they depend on the registry and
+// gRPC server that only exist once NewGateway starts running.
+func WithGRPCMetricsFactory(factory MetricsFactory) GatewayOption {
+	return func(o *gatewayOptions) {
+		o.MetricsFactory = factory
 	}
 }
 
@@ -156,12 +192,79 @@ func NewGateway(cfg *Config, options ...GatewayOption) (*Gateway, error) {
 		return proxy.One2One, []proxy.Backend{backend}, nil
 	}
 
+	// server is assigned below, after the metrics retention predicate and
+	// service filter are built. Neither reads server before Serve is called:
+	// the retention closure only reads server.GetServiceInfo() at Collect
+	// time, and serviceKnown defers its own server.GetServiceInfo() read to
+	// its first call, which an RPC can only trigger after Serve — by then
+	// registration is complete. The forward reference is safe.
+	var server *grpc.Server
+
+	// serviceKnown snapshots the gateway's own statically registered gRPC
+	// services exactly once, on first use, rather than on every call.
+	//
+	// server.GetServiceInfo() allocates a fresh map on every call, and the
+	// service filter runs on the interceptor hot path, so the snapshot is
+	// taken lazily via sync.OnceValue instead of eagerly here or repeatedly
+	// per call. The gateway's own services are static once NewGateway
+	// returns, so a single snapshot never goes stale.
+	serviceKnown := sync.OnceValue(func() map[string]struct{} {
+		known := map[string]struct{}{}
+		for name := range server.GetServiceInfo() {
+			known[name] = struct{}{}
+		}
+		return known
+	})
+
+	// serviceFilter rejects any service the gateway does not know about,
+	// stopping metric series and per-service method bookkeeping allocation
+	// at the source for unauthenticated scans against random service names.
+	// A registry backend lookup is mutex-guarded and cheap; the gateway's
+	// own registered services are read from the cached serviceKnown snapshot.
+	serviceFilter := func(service string) bool {
+		if _, ok := registry.GetBackend(service); ok {
+			return true
+		}
+		_, ok := serviceKnown()[service]
+		return ok
+	}
+
+	// retention keeps a series iff its grpc_service is a registry backend
+	// (built-in or proxied module) or is registered directly on the
+	// gateway's own gRPC server.
+	//
+	// Three complementary bounds keep the metric label space finite: the
+	// service filter stops unknown-service allocation at the source, the
+	// per-service method limit bounds grpc_method cardinality for known
+	// services, and this retention predicate prunes series for services
+	// that were known but have since disappeared from the registry.
+	retention := func() func(metrics.MetricID) bool {
+		// Snapshot live service names outside the metric maps' lock, as
+		// required by the Retention contract.
+		live := map[string]struct{}{}
+		for _, entry := range registry.ListBackends() {
+			live[entry.Service()] = struct{}{}
+		}
+		for name := range server.GetServiceInfo() {
+			live[name] = struct{}{}
+		}
+
+		return func(id metrics.MetricID) bool {
+			_, ok := live[id.Labels[grpcmetrics.ServiceLabel]]
+			return ok
+		}
+	}
+
+	serverMetrics := opts.MetricsFactory(retention, serviceFilter)
+
 	serverOpts := []grpc.ServerOption{
 		grpc.ChainUnaryInterceptor(
+			serverMetrics.UnaryServerInterceptor(),
 			auth.UnaryServerInterceptor(authManager, log),
 			xgrpc.AccessLogInterceptor(log),
 		),
 		grpc.ChainStreamInterceptor(
+			serverMetrics.StreamServerInterceptor(),
 			auth.StreamServerInterceptor(authManager, log),
 		),
 		grpc.MaxRecvMsgSize(1024 * 1024 * 256),
@@ -178,7 +281,7 @@ func NewGateway(cfg *Config, options ...GatewayOption) (*Gateway, error) {
 		}
 		serverOpts = append(serverOpts, grpc.Creds(creds))
 	}
-	server := grpc.NewServer(serverOpts...)
+	server = grpc.NewServer(serverOpts...)
 
 	gatewayService := NewGatewayService(registry, log)
 	ynpb.RegisterGatewayServer(server, gatewayService)
@@ -195,6 +298,10 @@ func NewGateway(cfg *Config, options ...GatewayOption) (*Gateway, error) {
 	readinessSvc := NewReadinessService(rdTracker)
 	ynpb.RegisterReadinessServiceServer(server, readinessSvc)
 	log.Info("registered service", zap.String("service", fmt.Sprintf("%T", readinessSvc)))
+
+	metricsService := NewMetricsService(serverMetrics)
+	ynpb.RegisterMetricsServiceServer(server, metricsService)
+	log.Info("registered service", zap.String("service", fmt.Sprintf("%T", metricsService)))
 
 	// Dial a single loopback connection shared by services hosted on the
 	// gateway's own gRPC server.
@@ -215,6 +322,7 @@ func NewGateway(cfg *Config, options ...GatewayOption) (*Gateway, error) {
 		"controlplane.ynpb.v1.Gateway",
 		"controlplane.ynpb.v1.Auth",
 		ynpb.ReadinessService_ServiceDesc.ServiceName,
+		ynpb.MetricsService_ServiceDesc.ServiceName,
 	} {
 		registry.RegisterBackend(service, loopback, BackendKindBuiltin)
 		log.Info("registered built-in service in registry",

@@ -13,6 +13,7 @@ ynpb_proto_files = [
     join_paths(ynpb_dir, 'v1', 'counters.proto'),
     join_paths(ynpb_dir, 'v1', 'auth.proto'),
     join_paths(ynpb_dir, 'v1', 'readiness.proto'),
+    join_paths(ynpb_dir, 'v1', 'metrics.proto'),
 ]
 
 # Generate protobuf files
@@ -39,6 +40,8 @@ ynpb_gen = custom_target(
         'auth_grpc.pb.go',
         'readiness.pb.go',
         'readiness_grpc.pb.go',
+        'metrics.pb.go',
+        'metrics_grpc.pb.go',
     ],
     input: ynpb_proto_files,
     command: [
