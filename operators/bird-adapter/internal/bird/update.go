@@ -35,28 +35,29 @@ const (
 	//NetMAX     = 11
 
 	// yabird/proto/export/export.c#L94
-	AttrOrigin        AttributeType = 0x01 /* RFC 4271 */ /* WM */
-	AttrLocalPref     AttributeType = 0x05 /* WD */
-	AttrMultiExitDisc AttributeType = 0x04 /* ON */
-	AttrOriginatorID  AttributeType = 0x09 /* RFC 4456 */ /* ON */
+	AttrOrigin        AttributeType = 0x0401 /* RFC 4271 */ /* WM */
+	AttrLocalPref     AttributeType = 0x0405 /* WD */
+	AttrMultiExitDisc AttributeType = 0x0404 /* ON */
+	AttrOriginatorID  AttributeType = 0x0409 /* RFC 4456 */ /* ON */
+	AttrIfindex       AttributeType = 0x1200 /* yanet: egress interface index (u32) */
 
-	AttrASPath         AttributeType = 0x02 /* WM */
-	AttrNextHop        AttributeType = 0x03 /* WM */
-	AttrCommunity      AttributeType = 0x08 /* RFC 1997 */ /* OT */
-	AttrExtCommunity   AttributeType = 0x10 /* RFC 4360 */
-	AttrLargeCommunity AttributeType = 0x20 /* RFC 8092 */
-	AttrMPLSLabelStack AttributeType = 0xfe /* MPLS label stack transfer attribute */
-	AttrClusterList    AttributeType = 0x0a /* RFC 4456 */ /* ON */
+	AttrASPath         AttributeType = 0x0402 /* WM */
+	AttrNextHop        AttributeType = 0x0403 /* WM */
+	AttrCommunity      AttributeType = 0x0408 /* RFC 1997 */ /* OT */
+	AttrExtCommunity   AttributeType = 0x0410 /* RFC 4360 */
+	AttrLargeCommunity AttributeType = 0x0420 /* RFC 8092 */
+	AttrMPLSLabelStack AttributeType = 0x04fe /* MPLS label stack transfer attribute */
+	AttrClusterList    AttributeType = 0x040a /* RFC 4456 */ /* ON */
 
-	AttrMPReachNLRI   AttributeType = 0x0e /* RFC 4760 */
-	AttrMPUnreachNLRI AttributeType = 0x0f /* RFC 4760 */
+	AttrMPReachNLRI   AttributeType = 0x040e /* RFC 4760 */
+	AttrMPUnreachNLRI AttributeType = 0x040f /* RFC 4760 */
 
-	// AtomicAggr     AttributeType = 0x06 /* WD */
-	// Aggregator     AttributeType = 0x07 /* OT */
-	// AS4Path        AttributeType = 0x11 /* RFC 6793 */
-	// AS4Aggregator  AttributeType = 0x12 /* RFC 6793 */
-	// AIGP           AttributeType = 0x1a /* RFC 7311 */
-	// OnlyToCustomer AttributeType = 0x23 /* RFC 9234 */
+	// AtomicAggr     AttributeType = 0x0406 /* WD */
+	// Aggregator     AttributeType = 0x0407 /* OT */
+	// AS4Path        AttributeType = 0x0411 /* RFC 6793 */
+	// AS4Aggregator  AttributeType = 0x0412 /* RFC 6793 */
+	// AIGP           AttributeType = 0x041a /* RFC 7311 */
+	// OnlyToCustomer AttributeType = 0x0423 /* RFC 9234 */
 
 	ASPathSet            = 1 /* Types of path segments */
 	ASPathSequence       = 2
@@ -79,7 +80,7 @@ var (
 	ErrUnsupportedRDType = errors.New("ErrUnsupportedRDType")
 )
 
-type AttributeType uint8
+type AttributeType uint16
 
 func (m AttributeType) String() string {
 	switch m {
@@ -91,6 +92,8 @@ func (m AttributeType) String() string {
 		return "MED"
 	case AttrOriginatorID:
 		return "ORIGINATOR_ID"
+	case AttrIfindex:
+		return "IFINDEX"
 	case AttrASPath:
 		return "AS_PATH"
 	case AttrNextHop:
@@ -110,7 +113,7 @@ func (m AttributeType) String() string {
 	case AttrMPUnreachNLRI:
 		return "MP_UNREACH_NLRI"
 	default:
-		return fmt.Sprintf("UNKNOWN: %x", uint8(m))
+		return fmt.Sprintf("UNKNOWN: %x", uint16(m))
 	}
 }
 
@@ -120,6 +123,7 @@ func (m AttributeType) isU32Attribute() bool {
 	case AttrOriginatorID:
 	case AttrLocalPref:
 	case AttrMultiExitDisc:
+	case AttrIfindex:
 	default:
 		return false
 	}
@@ -294,7 +298,7 @@ func (m *updateDecoder) decodePrefixAndRD(route *rib.Route) error {
 }
 
 func ExtendedAttributeID(attributeID uint32) AttributeType {
-	return AttributeType(attributeID & 0xff)
+	return AttributeType(attributeID & 0xffff)
 }
 
 func (m *updateDecoder) decodeAttributes(route *rib.Route) error {
@@ -331,6 +335,8 @@ func (m *updateDecoder) decodeAttributes(route *rib.Route) error {
 				route.Pref = val
 			case AttrMultiExitDisc:
 				route.Med = val
+			case AttrIfindex:
+				route.Ifindex = val
 			}
 		} else {
 			attrSize = binary.LittleEndian.Uint32(data)

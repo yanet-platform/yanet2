@@ -142,6 +142,9 @@ message Route {
   // GlobalID identifies the peer globally, as reported by BIRD on the wire
   // immediately after the peer address.
   uint32 global_id = 13;
+  // Ifindex is the egress interface index advertised by BIRD as a u32
+  // route attribute.
+  uint32 ifindex = 14;
 }
 
 // LargeCommunity represents a BGP Large Community value.

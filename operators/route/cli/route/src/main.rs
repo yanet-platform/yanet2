@@ -583,6 +583,8 @@ pub struct RouteEntry {
     pub med: u32,
     #[tabled(rename = "Global ID")]
     pub global_id: u32,
+    #[tabled(rename = "Ifindex")]
+    pub ifindex: u32,
     #[tabled(rename = "Communities")]
     pub communities: Communities,
 }
@@ -602,6 +604,7 @@ impl From<operatorpb::Route> for RouteEntry {
             pref: route.pref,
             med: route.med,
             global_id: route.global_id,
+            ifindex: route.ifindex,
             communities: Communities(communities),
         }
     }
@@ -931,6 +934,7 @@ mod test {
             pref: 0,
             med: 0,
             global_id: 1,
+            ifindex: 1,
             communities: Communities(vec![]),
         }
     }

@@ -379,6 +379,29 @@ func TestDecodeUpdate(t *testing.T) {
 			},
 		},
 		{
+			name: "OK ifindex attribute",
+			data: []byte{
+				0: 0x1,    // NetIP4
+				1: 0x8,    // prefix len 8
+				2: 0x8, 0, // NetAddrUnion length 8
+				4: 0, 0, 0, 1, // prefix 1.0.0.0 LE u32
+				40: 0x1, 0, 0, 0, // opType insert
+				// peer addr all zero
+				// global_id at 60 (zero)
+				64: 8, 0, 0, 0, // attrsAreaSize = 4 (type) + 4 (value) = 8
+				// AttrIfindex 0x1200: class 0x12 high byte, id 0x00 low byte
+				// (not a BGP attribute). LE u32 -> 0x1200.
+				68: 0x0, 0x12, 0, 0,
+				// ifindex value LE u32 == 10
+				72: 0xa, 0, 0, 0,
+			},
+			expected: rib.Route{
+				Prefix:  netip.MustParsePrefix("1.0.0.0/8"),
+				Peer:    netip.IPv6Unspecified(),
+				Ifindex: 10,
+			},
+		},
+		{
 			name:   "ERR Empty",
 			data:   []byte{},
 			errNew: ErrDataTooSmall,
