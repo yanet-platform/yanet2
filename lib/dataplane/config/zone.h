@@ -105,9 +105,15 @@ struct dp_config {
 	uint64_t worker_count;
 	struct dp_worker **workers;
 
-	struct counter_storage_allocator counter_storage_allocator;
 	struct counter_registry worker_counters;
-	struct counter_storage *worker_counter_storage;
+
+	// Per-worker worker-counter storages.
+	//
+	// worker_counter_storages points to an array of
+	// worker_counter_storage_count offset pointers, one single-instance
+	// storage per worker.
+	uint64_t worker_counter_storage_count;
+	struct counter_storage **worker_counter_storages;
 
 	// Written by dp_config_mark_ready with release ordering after the
 	// dataplane releases cp_config and finishes initialising the instance.

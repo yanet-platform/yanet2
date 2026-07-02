@@ -75,35 +75,18 @@ struct counter_storage_pool {
 	struct counter_storage_block **blocks;
 };
 
-struct counter_storage_allocator {
-	struct memory_context memory_context;
-	uint64_t instance_count;
-};
-
-void
-counter_storage_allocator_init(
-	struct counter_storage_allocator *counter_storage_allocator,
-	struct memory_context *memory_context,
-	uint64_t instance_count
-);
-
-void
-counter_storage_allocator_fini(struct counter_storage_allocator *self);
-
 struct counter_value_handle;
 
 struct counter_storage {
 	struct memory_context *memory_context;
 	struct counter_value_handle **counter_value_handles;
 	struct counter_registry *registry;
-	struct counter_storage_allocator *allocator;
 	struct counter_storage_pool pools[COUNTER_POOL_SIZE];
 };
 
 struct counter_storage *
 counter_storage_spawn(
 	struct memory_context *memory_context,
-	struct counter_storage_allocator *allocator,
 	struct counter_storage *old_counter_storage,
 	struct counter_registry *registry
 );
@@ -121,39 +104,29 @@ counter_get_value_handle(
 }
 
 static inline uint64_t *
-counter_handle_get_value(
-	struct counter_value_handle *value_handle, uint64_t instance_id
-) {
-	return (uint64_t *)((uintptr_t)value_handle +
-			    COUNTER_STORAGE_PAGE_SIZE * instance_id);
+counter_handle_get_value(struct counter_value_handle *value_handle) {
+	return (uint64_t *)value_handle;
 }
 
 static inline uint64_t *
-counter_get_address(
-	uint64_t counter_id,
-	uint64_t instance_id,
-	struct counter_storage *storage
-) {
+counter_get_address(uint64_t counter_id, struct counter_storage *storage) {
 	struct counter_value_handle *value_handle =
 		counter_get_value_handle(counter_id, storage);
 
 #ifdef COUNTERS_CHECK
 	if (value_handle == NULL)
 		return NULL;
-	if (instance_id >= instances)
-		return NULL;
 #endif
 
-	return counter_handle_get_value(value_handle, instance_id);
+	return counter_handle_get_value(value_handle);
 }
 
 struct counter_handle;
 
-// Accumulates `instances` counters into one `accum` counter.
+// Copies a single counter's values into `accum`.
 void
 counter_handle_accum(
 	uint64_t *accum,
-	size_t instances,
 	size_t counter_size,
 	struct counter_value_handle *handle
 );

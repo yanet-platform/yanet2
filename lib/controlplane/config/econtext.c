@@ -49,6 +49,8 @@ module_ectx_create(
 	struct pipeline_ectx *pipeline_ectx,
 	struct function_ectx *function_ectx,
 	struct chain_ectx *chain_ectx,
+	uint64_t worker_idx,
+	uint64_t worker_count,
 	yanet_error **err
 ) {
 	struct cp_config *cp_config = ADDR_OF(&cp_config_gen->cp_config);
@@ -96,12 +98,12 @@ module_ectx_create(
 			cp_function->name,
 			cp_chain->name,
 			cp_module->type,
-			cp_module->name
+			cp_module->name,
+			worker_idx
 		);
 
 	struct counter_storage *counter_storage = counter_storage_spawn(
 		&cp_config->counter_storage_memory_context,
-		&cp_config->counter_storage_allocator,
 		old_counter_storage,
 		&cp_module->counter_registry
 	);
@@ -124,6 +126,8 @@ module_ectx_create(
 		    cp_module->type,
 		    cp_module->name,
 		    counter_storage,
+		    worker_idx,
+		    worker_count,
 		    err
 	    )) {
 		yanet_error_add(
@@ -186,6 +190,8 @@ chain_ectx_create(
 	struct device_ectx *device_ectx,
 	struct pipeline_ectx *pipeline_ectx,
 	struct function_ectx *function_ectx,
+	uint64_t worker_idx,
+	uint64_t worker_count,
 	yanet_error **err
 ) {
 	struct cp_config *cp_config = ADDR_OF(&cp_config_gen->cp_config);
@@ -218,12 +224,12 @@ chain_ectx_create(
 			cp_device->name,
 			cp_pipeline->name,
 			cp_function->name,
-			cp_chain->name
+			cp_chain->name,
+			worker_idx
 		);
 
 	struct counter_storage *counter_storage = counter_storage_spawn(
 		&cp_config->counter_storage_memory_context,
-		&cp_config->counter_storage_allocator,
 		old_counter_storage,
 		&cp_chain->counter_registry
 	);
@@ -243,6 +249,8 @@ chain_ectx_create(
 		    cp_function->name,
 		    cp_chain->name,
 		    counter_storage,
+		    worker_idx,
+		    worker_count,
 		    err
 	    )) {
 		yanet_error_add(
@@ -285,6 +293,8 @@ chain_ectx_create(
 			pipeline_ectx,
 			function_ectx,
 			chain_ectx,
+			worker_idx,
+			worker_count,
 			err
 		);
 		if (module_ectx == NULL) {
@@ -356,6 +366,8 @@ function_ectx_create(
 	struct config_gen_ectx *config_gen_ectx,
 	struct device_ectx *device_ectx,
 	struct pipeline_ectx *pipeline_ectx,
+	uint64_t worker_idx,
+	uint64_t worker_count,
 	yanet_error **err
 ) {
 	struct cp_config *cp_config = ADDR_OF(&cp_config_gen->cp_config);
@@ -410,12 +422,12 @@ function_ectx_create(
 			&old_config_gen->counter_storage_registry,
 			cp_device->name,
 			cp_pipeline->name,
-			cp_function->name
+			cp_function->name,
+			worker_idx
 		);
 
 	struct counter_storage *counter_storage = counter_storage_spawn(
 		&cp_config->counter_storage_memory_context,
-		&cp_config->counter_storage_allocator,
 		old_counter_storage,
 		&cp_function->counter_registry
 	);
@@ -434,6 +446,8 @@ function_ectx_create(
 		    cp_pipeline->name,
 		    cp_function->name,
 		    counter_storage,
+		    worker_idx,
+		    worker_count,
 		    err
 	    )) {
 		yanet_error_add(
@@ -470,6 +484,8 @@ function_ectx_create(
 			device_ectx,
 			pipeline_ectx,
 			function_ectx,
+			worker_idx,
+			worker_count,
 			err
 		);
 		if (chain_ectx == NULL) {
@@ -527,6 +543,8 @@ pipeline_ectx_create(
 	struct cp_config_gen *old_config_gen,
 	struct config_gen_ectx *config_gen_ectx,
 	struct device_ectx *device_ectx,
+	uint64_t worker_idx,
+	uint64_t worker_count,
 	yanet_error **err
 ) {
 	struct cp_config *cp_config = ADDR_OF(&cp_config_gen->cp_config);
@@ -555,12 +573,12 @@ pipeline_ectx_create(
 		cp_config_counter_storage_registry_lookup_pipeline(
 			&old_config_gen->counter_storage_registry,
 			cp_device->name,
-			cp_pipeline->name
+			cp_pipeline->name,
+			worker_idx
 		);
 
 	struct counter_storage *counter_storage = counter_storage_spawn(
 		&cp_config->counter_storage_memory_context,
-		&cp_config->counter_storage_allocator,
 		old_counter_storage,
 		&cp_pipeline->counter_registry
 	);
@@ -578,6 +596,8 @@ pipeline_ectx_create(
 		    cp_device->name,
 		    cp_pipeline->name,
 		    counter_storage,
+		    worker_idx,
+		    worker_count,
 		    err
 	    )) {
 		yanet_error_add(
@@ -623,6 +643,8 @@ pipeline_ectx_create(
 			config_gen_ectx,
 			device_ectx,
 			pipeline_ectx,
+			worker_idx,
+			worker_count,
 			err
 		);
 		if (function_ectx == NULL) {
@@ -683,6 +705,8 @@ device_entry_ectx_create(
 	device_handler handler,
 	struct cp_device_entry *cp_device_entry,
 	struct cp_config_gen *old_config_gen,
+	uint64_t worker_idx,
+	uint64_t worker_count,
 	yanet_error **err
 ) {
 	struct cp_config *cp_config = ADDR_OF(&new_config_gen->cp_config);
@@ -757,6 +781,8 @@ device_entry_ectx_create(
 			old_config_gen,
 			config_gen_ectx,
 			device_ectx,
+			worker_idx,
+			worker_count,
 			err
 		);
 		if (pipeline_ectx == NULL) {
@@ -811,6 +837,8 @@ device_ectx_create(
 	struct cp_device *cp_device,
 	struct config_gen_ectx *config_gen_ectx,
 	struct cp_config_gen *old_config_gen,
+	uint64_t worker_idx,
+	uint64_t worker_count,
 	yanet_error **err
 ) {
 	struct cp_config *cp_config = ADDR_OF(&cp_config_gen->cp_config);
@@ -835,12 +863,12 @@ device_ectx_create(
 	struct counter_storage *old_counter_storage =
 		cp_config_counter_storage_registry_lookup_device(
 			&old_config_gen->counter_storage_registry,
-			cp_device->name
+			cp_device->name,
+			worker_idx
 		);
 
 	struct counter_storage *counter_storage = counter_storage_spawn(
 		&cp_config->counter_storage_memory_context,
-		&cp_config->counter_storage_allocator,
 		old_counter_storage,
 		&cp_device->counter_registry
 	);
@@ -857,6 +885,8 @@ device_ectx_create(
 		    &cp_config_gen->counter_storage_registry,
 		    cp_device->name,
 		    counter_storage,
+		    worker_idx,
+		    worker_count,
 		    err
 	    )) {
 		yanet_error_add(
@@ -887,6 +917,8 @@ device_ectx_create(
 		dp_device->input_handler,
 		ADDR_OF(&cp_device->input_pipelines),
 		old_config_gen,
+		worker_idx,
+		worker_count,
 		err
 	);
 	if (input == NULL) {
@@ -901,6 +933,8 @@ device_ectx_create(
 		dp_device->output_handler,
 		ADDR_OF(&cp_device->output_pipelines),
 		old_config_gen,
+		worker_idx,
+		worker_count,
 		err
 	);
 	if (output == NULL) {
@@ -1232,10 +1266,12 @@ error:
 	return -1;
 }
 
-struct config_gen_ectx *
+static struct config_gen_ectx *
 config_gen_ectx_create(
 	struct cp_config_gen *cp_config_gen,
 	struct cp_config_gen *old_config_gen,
+	uint64_t worker_idx,
+	uint64_t worker_count,
 	yanet_error **err
 ) {
 	struct cp_config *cp_config = ADDR_OF(&cp_config_gen->cp_config);
@@ -1282,6 +1318,8 @@ config_gen_ectx_create(
 			cp_device,
 			config_gen_ectx,
 			old_config_gen,
+			worker_idx,
+			worker_count,
 			err
 		);
 		if (device_ectx == NULL) {
@@ -1305,5 +1343,75 @@ config_gen_ectx_create(
 error:
 	config_gen_ectx_free(cp_config_gen, config_gen_ectx);
 
+	return NULL;
+}
+
+struct config_gen_ectx **
+config_gen_ectxs_create(
+	struct cp_config_gen *cp_config_gen,
+	struct cp_config_gen *old_config_gen,
+	uint64_t worker_count,
+	yanet_error **err
+) {
+	struct cp_config *cp_config = ADDR_OF(&cp_config_gen->cp_config);
+	struct memory_context *memory_context = &cp_config->ectx_memory_context;
+
+	if (worker_count == 0) {
+		yanet_error_add(
+			err,
+			"cannot build execution context for zero workers"
+		);
+		return NULL;
+	}
+
+	struct config_gen_ectx **ectxs = (struct config_gen_ectx **)
+		memory_balloc(
+			memory_context,
+			sizeof(struct config_gen_ectx *) * worker_count
+		);
+	if (ectxs == NULL) {
+		yanet_error_add(
+			err,
+			"failed to allocate per-worker execution context array"
+		);
+		return NULL;
+	}
+	memset(ectxs, 0, sizeof(struct config_gen_ectx *) * worker_count);
+
+	for (uint64_t worker_idx = 0; worker_idx < worker_count; ++worker_idx) {
+		struct config_gen_ectx *config_gen_ectx =
+			config_gen_ectx_create(
+				cp_config_gen,
+				old_config_gen,
+				worker_idx,
+				worker_count,
+				err
+			);
+		if (config_gen_ectx == NULL) {
+			yanet_error_add(
+				err,
+				"failed to build execution context for "
+				"worker %lu",
+				worker_idx
+			);
+			goto error;
+		}
+		SET_OFFSET_OF(ectxs + worker_idx, config_gen_ectx);
+	}
+
+	return ectxs;
+
+error:
+	for (uint64_t worker_idx = 0; worker_idx < worker_count; ++worker_idx) {
+		struct config_gen_ectx *config_gen_ectx =
+			ADDR_OF(ectxs + worker_idx);
+		if (config_gen_ectx != NULL)
+			config_gen_ectx_free(cp_config_gen, config_gen_ectx);
+	}
+	memory_bfree(
+		memory_context,
+		ectxs,
+		sizeof(struct config_gen_ectx *) * worker_count
+	);
 	return NULL;
 }

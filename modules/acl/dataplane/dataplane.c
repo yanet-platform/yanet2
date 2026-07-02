@@ -74,49 +74,41 @@ acl_handle_packets(
 
 	uint64_t *pass_cnt = counter_get_address(
 		acl_config->action_allow_counter_id,
-		dp_worker->idx,
 		ADDR_OF(&module_ectx->counter_storage)
 	);
 
 	uint64_t *deny_cnt = counter_get_address(
 		acl_config->action_deny_counter_id,
-		dp_worker->idx,
 		ADDR_OF(&module_ectx->counter_storage)
 	);
 
 	uint64_t *create_cnt = counter_get_address(
 		acl_config->action_create_state_counter_id,
-		dp_worker->idx,
 		ADDR_OF(&module_ectx->counter_storage)
 	);
 
 	uint64_t *check_pass_cnt = counter_get_address(
 		acl_config->action_check_pass_counter_id,
-		dp_worker->idx,
 		ADDR_OF(&module_ectx->counter_storage)
 	);
 
 	uint64_t *check_miss_cnt = counter_get_address(
 		acl_config->action_check_miss_counter_id,
-		dp_worker->idx,
 		ADDR_OF(&module_ectx->counter_storage)
 	);
 
 	uint64_t *sync_cnt = counter_get_address(
 		acl_config->sync_sent_counter_id,
-		dp_worker->idx,
 		ADDR_OF(&module_ectx->counter_storage)
 	);
 
 	uint64_t *invalid_cnt = counter_get_address(
 		acl_config->action_invalid_counter_id,
-		dp_worker->idx,
 		ADDR_OF(&module_ectx->counter_storage)
 	);
 
 	uint64_t *non_term_cnt = counter_get_address(
 		acl_config->action_non_term_counter_id,
-		dp_worker->idx,
 		ADDR_OF(&module_ectx->counter_storage)
 	);
 
@@ -294,7 +286,6 @@ acl_handle_packets(
 				case ACTION_COUNT: {
 					uint64_t *counters = counter_get_address(
 						target->counter_id,
-						dp_worker->idx,
 						ADDR_OF(&module_ectx
 								 ->counter_storage
 						)
@@ -388,7 +379,6 @@ acl_handle_packets(
 		} else {
 			uint64_t *c = counter_get_address(
 				acl_config->no_match_counter_id,
-				dp_worker->idx,
 				ADDR_OF(&module_ectx->counter_storage)
 			);
 			c[0] += 1;

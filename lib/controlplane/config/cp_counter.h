@@ -19,7 +19,13 @@ struct cp_counter_tag {
 struct cp_counter_storage {
 	struct cp_counter_tag tags[MAX_TAG_COUNT];
 	size_t tag_count;
-	struct counter_storage *storage;
+
+	// Per-worker counter storages for this entity.
+	//
+	// worker_count is fixed for the generation; storages points to an array
+	// of worker_count offset pointers, one storage per worker.
+	uint64_t worker_count;
+	struct counter_storage **storages;
 };
 
 struct cp_config_counter_storage_registry {
@@ -42,6 +48,8 @@ cp_config_counter_storage_registry_insert(
 	const struct counter_tag *tags,
 	size_t tag_count,
 	struct counter_storage *counter_storage,
+	uint64_t worker_idx,
+	uint64_t worker_count,
 	yanet_error **err
 );
 
@@ -61,7 +69,8 @@ cp_config_counter_storage_registry_fini(
 struct counter_storage *
 cp_config_counter_storage_registry_lookup_device(
 	struct cp_config_counter_storage_registry *registry,
-	const char *device_name
+	const char *device_name,
+	uint64_t worker_idx
 );
 
 int
@@ -69,6 +78,8 @@ cp_config_counter_storage_registry_insert_device(
 	struct cp_config_counter_storage_registry *registry,
 	const char *device_name,
 	struct counter_storage *counter_storage,
+	uint64_t worker_idx,
+	uint64_t worker_count,
 	yanet_error **err
 );
 
@@ -76,7 +87,8 @@ struct counter_storage *
 cp_config_counter_storage_registry_lookup_pipeline(
 	struct cp_config_counter_storage_registry *registry,
 	const char *device_name,
-	const char *pipeline_name
+	const char *pipeline_name,
+	uint64_t worker_idx
 );
 
 int
@@ -85,6 +97,8 @@ cp_config_counter_storage_registry_insert_pipeline(
 	const char *device_name,
 	const char *pipeline_name,
 	struct counter_storage *counter_storage,
+	uint64_t worker_idx,
+	uint64_t worker_count,
 	yanet_error **err
 );
 
@@ -93,7 +107,8 @@ cp_config_counter_storage_registry_lookup_function(
 	struct cp_config_counter_storage_registry *registry,
 	const char *device_name,
 	const char *pipeline_name,
-	const char *function_name
+	const char *function_name,
+	uint64_t worker_idx
 );
 
 int
@@ -103,6 +118,8 @@ cp_config_counter_storage_registry_insert_function(
 	const char *pipeline_name,
 	const char *function_name,
 	struct counter_storage *counter_storage,
+	uint64_t worker_idx,
+	uint64_t worker_count,
 	yanet_error **err
 );
 
@@ -112,7 +129,8 @@ cp_config_counter_storage_registry_lookup_chain(
 	const char *device_name,
 	const char *pipeline_name,
 	const char *function_name,
-	const char *chain_name
+	const char *chain_name,
+	uint64_t worker_idx
 );
 
 int
@@ -123,6 +141,8 @@ cp_config_counter_storage_registry_insert_chain(
 	const char *function_name,
 	const char *chain_name,
 	struct counter_storage *counter_storage,
+	uint64_t worker_idx,
+	uint64_t worker_count,
 	yanet_error **err
 );
 
@@ -134,7 +154,8 @@ cp_config_counter_storage_registry_lookup_module(
 	const char *function_name,
 	const char *chain_name,
 	const char *module_type,
-	const char *module_name
+	const char *module_name,
+	uint64_t worker_idx
 );
 
 int
@@ -147,5 +168,7 @@ cp_config_counter_storage_registry_insert_module(
 	const char *module_type,
 	const char *module_name,
 	struct counter_storage *counter_storage,
+	uint64_t worker_idx,
+	uint64_t worker_count,
 	yanet_error **err
 );

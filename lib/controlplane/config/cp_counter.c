@@ -111,12 +111,11 @@ normalize_tags(
 	return 0;
 }
 
-static int
-check_already_exists(
+static struct cp_counter_storage *
+find_existing(
 	struct cp_config_counter_storage_registry *registry,
 	struct counter_tag *tags,
-	size_t tag_count,
-	yanet_error **err
+	size_t tag_count
 ) {
 	struct cp_counter_storage *items = ADDR_OF(&registry->items);
 	for (size_t i = 0; i < registry->count; ++i) {
@@ -133,11 +132,10 @@ check_already_exists(
 			}
 		}
 		if (equals) {
-			yanet_error_add(err, "already exists");
-			return -1;
+			return cur;
 		}
 	}
-	return 0;
+	return NULL;
 }
 
 int
@@ -146,10 +144,21 @@ cp_config_counter_storage_registry_insert(
 	const struct counter_tag *const_tags,
 	size_t tag_count,
 	struct counter_storage *storage,
+	uint64_t worker_idx,
+	uint64_t worker_count,
 	yanet_error **err
 ) {
 	if (tag_count > MAX_TAG_COUNT) {
 		yanet_error_add(err, "tag count exceeds max %d", MAX_TAG_COUNT);
+		return -1;
+	}
+	if (worker_idx >= worker_count) {
+		yanet_error_add(
+			err,
+			"worker index %lu out of range %lu",
+			worker_idx,
+			worker_count
+		);
 		return -1;
 	}
 	struct counter_tag tags[MAX_TAG_COUNT];
@@ -162,13 +171,20 @@ cp_config_counter_storage_registry_insert(
 		return -1;
 	}
 
-	if (check_already_exists(registry, tags, tag_count, err) != 0) {
-		return -1;
+	struct memory_context *mctx = ADDR_OF(&registry->memory_context);
+
+	// A registry entity is inserted once per worker: the first insert
+	// creates the item and its per-worker storages array, later inserts
+	// only fill their worker's slot.
+	struct cp_counter_storage *item =
+		find_existing(registry, tags, tag_count);
+	if (item != NULL) {
+		struct counter_storage **storages = ADDR_OF(&item->storages);
+		SET_OFFSET_OF(storages + worker_idx, storage);
+		return 0;
 	}
 
 	if (registry->count == registry->capacity) {
-		struct memory_context *mctx =
-			ADDR_OF(&registry->memory_context);
 		struct cp_counter_storage *items = memory_balloc(
 			mctx, registry->capacity * 2 * sizeof(*items)
 		);
@@ -183,7 +199,8 @@ cp_config_counter_storage_registry_insert(
 			struct cp_counter_storage *src = prev_items + i;
 			memcpy(dst->tags, src->tags, sizeof(dst->tags));
 			dst->tag_count = src->tag_count;
-			EQUATE_OFFSET(&dst->storage, &src->storage);
+			dst->worker_count = src->worker_count;
+			EQUATE_OFFSET(&dst->storages, &src->storages);
 		}
 		memory_bfree(
 			mctx, prev_items, registry->count * sizeof(*items)
@@ -192,9 +209,20 @@ cp_config_counter_storage_registry_insert(
 		registry->capacity *= 2;
 	}
 
+	struct counter_storage **storages = memory_balloc(
+		mctx, worker_count * sizeof(struct counter_storage *)
+	);
+	if (storages == NULL) {
+		yanet_error_add(err, "failed to allocate per-worker storages");
+		return -1;
+	}
+	memset(storages, 0, worker_count * sizeof(struct counter_storage *));
+
 	struct cp_counter_storage *dst =
 		ADDR_OF(&registry->items) + registry->count;
-	SET_OFFSET_OF(&dst->storage, storage);
+	dst->worker_count = worker_count;
+	SET_OFFSET_OF(&dst->storages, storages);
+	SET_OFFSET_OF(storages + worker_idx, storage);
 	dst->tag_count = tag_count;
 	for (size_t i = 0; i < tag_count; ++i) {
 		struct cp_counter_tag *dst_tag = &dst->tags[i];
@@ -299,6 +327,19 @@ cp_config_counter_storage_registry_fini(
 		return;
 	}
 	struct cp_counter_storage *items = ADDR_OF(&registry->items);
+	// The counter_storage objects are owned by the ectx; here only the
+	// per-item per-worker pointer arrays are released.
+	for (size_t i = 0; i < registry->count; ++i) {
+		struct counter_storage **storages = ADDR_OF(&items[i].storages);
+		if (storages != NULL) {
+			memory_bfree(
+				mctx,
+				storages,
+				items[i].worker_count *
+					sizeof(struct counter_storage *)
+			);
+		}
+	}
 	memory_bfree(mctx, items, sizeof(*items) * registry->capacity);
 	memset(registry, 0, sizeof(*registry));
 }
@@ -306,30 +347,37 @@ cp_config_counter_storage_registry_fini(
 static struct counter_storage *
 get_one(struct cp_config_counter_storage_registry *registry,
 	struct counter_tag *tags,
-	size_t tag_count) {
-	struct cp_counter_storage **storages =
+	size_t tag_count,
+	uint64_t worker_idx) {
+	struct cp_counter_storage **items =
 		cp_config_counter_storage_registry_find(
 			registry, tags, tag_count, NULL
 		);
-	if (storages == NULL || storages[0] == NULL) {
-		free(storages);
+	if (items == NULL || items[0] == NULL) {
+		free(items);
 		return NULL;
 	}
-	struct counter_storage *result = ADDR_OF(&storages[0]->storage);
-	free(storages);
+	struct counter_storage *result = NULL;
+	if (worker_idx < items[0]->worker_count) {
+		struct counter_storage **storages =
+			ADDR_OF(&items[0]->storages);
+		result = ADDR_OF(storages + worker_idx);
+	}
+	free(items);
 	return result;
 }
 
 struct counter_storage *
 cp_config_counter_storage_registry_lookup_device(
 	struct cp_config_counter_storage_registry *registry,
-	const char *device_name
+	const char *device_name,
+	uint64_t worker_idx
 ) {
 	struct counter_tag tags[] = {
 		{.key = "device", .value = device_name},
 		{.key = "pipeline", .value = ""}
 	};
-	return get_one(registry, tags, 2);
+	return get_one(registry, tags, 2, worker_idx);
 }
 
 int
@@ -337,11 +385,19 @@ cp_config_counter_storage_registry_insert_device(
 	struct cp_config_counter_storage_registry *registry,
 	const char *device_name,
 	struct counter_storage *counter_storage,
+	uint64_t worker_idx,
+	uint64_t worker_count,
 	yanet_error **err
 ) {
 	struct counter_tag tag = {.key = "device", .value = device_name};
 	return cp_config_counter_storage_registry_insert(
-		registry, &tag, 1, counter_storage, err
+		registry,
+		&tag,
+		1,
+		counter_storage,
+		worker_idx,
+		worker_count,
+		err
 	);
 }
 
@@ -349,7 +405,8 @@ struct counter_storage *
 cp_config_counter_storage_registry_lookup_pipeline(
 	struct cp_config_counter_storage_registry *registry,
 	const char *device_name,
-	const char *pipeline_name
+	const char *pipeline_name,
+	uint64_t worker_idx
 ) {
 	struct counter_tag tags[] = {
 		{.key = "device", .value = device_name},
@@ -359,7 +416,7 @@ cp_config_counter_storage_registry_lookup_pipeline(
 			.value = "",
 		}
 	};
-	return get_one(registry, tags, 3);
+	return get_one(registry, tags, 3, worker_idx);
 }
 
 int
@@ -368,6 +425,8 @@ cp_config_counter_storage_registry_insert_pipeline(
 	const char *device_name,
 	const char *pipeline_name,
 	struct counter_storage *counter_storage,
+	uint64_t worker_idx,
+	uint64_t worker_count,
 	yanet_error **err
 ) {
 	struct counter_tag tags[] = {
@@ -375,7 +434,13 @@ cp_config_counter_storage_registry_insert_pipeline(
 		{.key = "pipeline", .value = pipeline_name}
 	};
 	return cp_config_counter_storage_registry_insert(
-		registry, tags, 2, counter_storage, err
+		registry,
+		tags,
+		2,
+		counter_storage,
+		worker_idx,
+		worker_count,
+		err
 	);
 }
 
@@ -384,7 +449,8 @@ cp_config_counter_storage_registry_lookup_function(
 	struct cp_config_counter_storage_registry *registry,
 	const char *device_name,
 	const char *pipeline_name,
-	const char *function_name
+	const char *function_name,
+	uint64_t worker_idx
 ) {
 	struct counter_tag tags[] = {
 		{.key = "device", .value = device_name},
@@ -395,7 +461,7 @@ cp_config_counter_storage_registry_lookup_function(
 		},
 		{.key = "chain", .value = ""}
 	};
-	return get_one(registry, tags, 4);
+	return get_one(registry, tags, 4, worker_idx);
 }
 
 int
@@ -405,6 +471,8 @@ cp_config_counter_storage_registry_insert_function(
 	const char *pipeline_name,
 	const char *function_name,
 	struct counter_storage *counter_storage,
+	uint64_t worker_idx,
+	uint64_t worker_count,
 	yanet_error **err
 ) {
 	struct counter_tag tags[] = {
@@ -413,7 +481,13 @@ cp_config_counter_storage_registry_insert_function(
 		{.key = "function", .value = function_name}
 	};
 	return cp_config_counter_storage_registry_insert(
-		registry, tags, 3, counter_storage, err
+		registry,
+		tags,
+		3,
+		counter_storage,
+		worker_idx,
+		worker_count,
+		err
 	);
 }
 
@@ -423,7 +497,8 @@ cp_config_counter_storage_registry_lookup_chain(
 	const char *device_name,
 	const char *pipeline_name,
 	const char *function_name,
-	const char *chain_name
+	const char *chain_name,
+	uint64_t worker_idx
 ) {
 	struct counter_tag tags[] = {
 		{.key = "device", .value = device_name},
@@ -435,7 +510,7 @@ cp_config_counter_storage_registry_lookup_chain(
 		{.key = "chain", .value = chain_name},
 		{.key = "module_type", .value = ""}
 	};
-	return get_one(registry, tags, 5);
+	return get_one(registry, tags, 5, worker_idx);
 }
 
 int
@@ -446,6 +521,8 @@ cp_config_counter_storage_registry_insert_chain(
 	const char *function_name,
 	const char *chain_name,
 	struct counter_storage *counter_storage,
+	uint64_t worker_idx,
+	uint64_t worker_count,
 	yanet_error **err
 ) {
 	struct counter_tag tags[] = {
@@ -455,7 +532,13 @@ cp_config_counter_storage_registry_insert_chain(
 		{.key = "chain", .value = chain_name}
 	};
 	return cp_config_counter_storage_registry_insert(
-		registry, tags, 4, counter_storage, err
+		registry,
+		tags,
+		4,
+		counter_storage,
+		worker_idx,
+		worker_count,
+		err
 	);
 }
 
@@ -467,7 +550,8 @@ cp_config_counter_storage_registry_lookup_module(
 	const char *function_name,
 	const char *chain_name,
 	const char *module_type,
-	const char *module_name
+	const char *module_name,
+	uint64_t worker_idx
 ) {
 	struct counter_tag tags[] = {
 		{.key = "device", .value = device_name},
@@ -480,7 +564,7 @@ cp_config_counter_storage_registry_lookup_module(
 		{.key = "module_type", .value = module_type},
 		{.key = "module_name", .value = module_name}
 	};
-	return get_one(registry, tags, 6);
+	return get_one(registry, tags, 6, worker_idx);
 }
 
 int
@@ -493,6 +577,8 @@ cp_config_counter_storage_registry_insert_module(
 	const char *module_type,
 	const char *module_name,
 	struct counter_storage *counter_storage,
+	uint64_t worker_idx,
+	uint64_t worker_count,
 	yanet_error **err
 ) {
 	struct counter_tag tags[] = {
@@ -504,6 +590,12 @@ cp_config_counter_storage_registry_insert_module(
 		{.key = "module_name", .value = module_name}
 	};
 	return cp_config_counter_storage_registry_insert(
-		registry, tags, 6, counter_storage, err
+		registry,
+		tags,
+		6,
+		counter_storage,
+		worker_idx,
+		worker_count,
+		err
 	);
 }

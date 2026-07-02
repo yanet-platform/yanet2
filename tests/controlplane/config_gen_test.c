@@ -75,12 +75,13 @@ main(void) {
 	TEST_ASSERT_NOT_NULL(gen, "cp_config_gen_new failed");
 
 	// Reproduce the worker's code path:
-	//   config_gen_ectx = ADDR_OF(&cp_config_gen->config_gen_ectx);
+	//   config_gen_ectx = cp_config_gen_worker_ectx(cp_config_gen, idx);
 	//
 	// Without the fix, this resolves the stale offset into a wild
 	// pointer. Accessing it triggers ASAN use-after-poison / SIGSEGV.
-	// With the fix, ADDR_OF returns NULL and the access is skipped.
-	struct config_gen_ectx *ectx = ADDR_OF(&gen->config_gen_ectx);
+	// With the fix, the fresh gen reports zero worker ectx and the
+	// accessor returns NULL.
+	struct config_gen_ectx *ectx = cp_config_gen_worker_ectx(gen, 0);
 	if (ectx != NULL) {
 		volatile uint64_t x = ectx->device_count;
 		(void)x;

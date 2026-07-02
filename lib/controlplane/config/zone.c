@@ -80,7 +80,8 @@ cp_config_gen_new_from(
 	}
 
 	new_config_gen->gen = old_config_gen->gen + 1;
-	new_config_gen->config_gen_ectx = NULL;
+	new_config_gen->config_gen_ectx_count = 0;
+	new_config_gen->config_gen_ectxs = NULL;
 
 	SET_OFFSET_OF(
 		&new_config_gen->dp_config, ADDR_OF(&old_config_gen->dp_config)
@@ -153,12 +154,27 @@ static inline void
 cp_config_gen_free(
 	struct cp_config *cp_config, struct cp_config_gen *config_gen
 ) {
-	// Free ectx first, as its internals reference
+	// Free per-worker ectx first, as their internals reference
 	// module configs, chains, functions and pipelines
-	struct config_gen_ectx *config_gen_ectx =
-		ADDR_OF(&config_gen->config_gen_ectx);
-	if (config_gen_ectx != NULL)
-		config_gen_ectx_free(config_gen, config_gen_ectx);
+	struct config_gen_ectx **config_gen_ectxs =
+		ADDR_OF(&config_gen->config_gen_ectxs);
+	if (config_gen_ectxs != NULL) {
+		for (uint64_t idx = 0; idx < config_gen->config_gen_ectx_count;
+		     ++idx) {
+			struct config_gen_ectx *config_gen_ectx =
+				ADDR_OF(config_gen_ectxs + idx);
+			if (config_gen_ectx != NULL)
+				config_gen_ectx_free(
+					config_gen, config_gen_ectx
+				);
+		}
+		memory_bfree(
+			&cp_config->ectx_memory_context,
+			config_gen_ectxs,
+			sizeof(struct config_gen_ectx *) *
+				config_gen->config_gen_ectx_count
+		);
+	}
 
 	// Then, free registries of module configs, chains,
 	// functions and pipelines
@@ -189,13 +205,17 @@ cp_config_gen_install(
 	struct cp_config_gen *old_config_gen =
 		ADDR_OF(&cp_config->cp_config_gen);
 
-	struct config_gen_ectx *new_config_gen_ectx =
-		config_gen_ectx_create(new_config_gen, old_config_gen, err);
-	if (new_config_gen_ectx == NULL) {
+	uint64_t worker_count = dp_config->worker_count;
+
+	struct config_gen_ectx **new_config_gen_ectxs = config_gen_ectxs_create(
+		new_config_gen, old_config_gen, worker_count, err
+	);
+	if (new_config_gen_ectxs == NULL) {
 		return -1;
 	}
 
-	SET_OFFSET_OF(&new_config_gen->config_gen_ectx, new_config_gen_ectx);
+	SET_OFFSET_OF(&new_config_gen->config_gen_ectxs, new_config_gen_ectxs);
+	new_config_gen->config_gen_ectx_count = worker_count;
 
 	SET_OFFSET_OF(&cp_config->cp_config_gen, new_config_gen);
 	dp_config_wait_for_gen(dp_config, new_config_gen->gen);
@@ -656,7 +676,8 @@ cp_config_gen_new(struct agent *agent, yanet_error **err) {
 	}
 
 	cp_config_gen->gen = 0;
-	cp_config_gen->config_gen_ectx = NULL;
+	cp_config_gen->config_gen_ectx_count = 0;
+	cp_config_gen->config_gen_ectxs = NULL;
 	SET_OFFSET_OF(
 		&cp_config_gen->dp_config, ADDR_OF(&cp_config->dp_config)
 	);

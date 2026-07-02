@@ -1486,22 +1486,45 @@ cp_counter_storage_copy_tags(const struct cp_counter_storage *storage) {
 	return tags;
 }
 
-static void
+// Build a per-worker value-handle array for one counter and stash it behind
+// the opaque counter_handle.value_handle.
+//
+// Each worker has its own single-instance storage, so a counter no longer
+// resolves to one strided base. The array (worker_count entries) is read back
+// by yanet_get_counter_value(s) and released by yanet_counter_handle_list_free.
+static int
 fill_counter_handle(
 	struct counter_handle *dst,
-	struct counter_storage *counter_storage,
+	struct counter_storage **storages,
+	uint64_t worker_count,
 	uint64_t idx,
 	struct counter_tag *tags,
 	size_t tag_count
 ) {
-	struct counter_registry *reg = ADDR_OF(&counter_storage->registry);
+	struct counter_storage *storage0 = ADDR_OF(storages + 0);
+	struct counter_registry *reg = ADDR_OF(&storage0->registry);
 	struct counter *counters = ADDR_OF(&reg->names);
 	strtcpy(dst->name, counters[idx].name, sizeof(dst->name));
 	dst->size = counters[idx].size;
 	dst->gen = counters[idx].gen;
-	dst->value_handle = counter_get_value_handle(idx, counter_storage);
+
+	// Attach the tags before the fallible allocation so the list free path
+	// reclaims them even when this handle's value array is left NULL.
 	dst->tags = tags;
 	dst->tag_count = tag_count;
+
+	struct counter_value_handle **bases =
+		malloc(worker_count * sizeof(*bases));
+	if (bases == NULL) {
+		return -1;
+	}
+	for (uint64_t worker_idx = 0; worker_idx < worker_count; ++worker_idx) {
+		struct counter_storage *storage =
+			ADDR_OF(storages + worker_idx);
+		bases[worker_idx] = counter_get_value_handle(idx, storage);
+	}
+	dst->value_handle = (struct counter_value_handle *)bases;
+	return 0;
 }
 
 struct counter_handle_list *
@@ -1533,8 +1556,10 @@ yanet_get_counters_by_tags(
 
 	size_t match_count = 0;
 	for (size_t i = 0; storages[i] != NULL; ++i) {
+		struct counter_storage **worker_storages =
+			ADDR_OF(&storages[i]->storages);
 		struct counter_storage *storage =
-			ADDR_OF(&storages[i]->storage);
+			ADDR_OF(worker_storages + 0);
 		match_count += counter_registry_match_count(
 			ADDR_OF(&storage->registry), query, query_count
 		);
@@ -1555,7 +1580,10 @@ yanet_get_counters_by_tags(
 	size_t next = 0;
 	for (size_t i = 0; storages[i] != NULL; ++i) {
 		struct cp_counter_storage *cp_storage = storages[i];
-		struct counter_storage *storage = ADDR_OF(&cp_storage->storage);
+		struct counter_storage **worker_storages =
+			ADDR_OF(&cp_storage->storages);
+		struct counter_storage *storage =
+			ADDR_OF(worker_storages + 0);
 		struct counter_registry *registry = ADDR_OF(&storage->registry);
 		struct counter *counters = ADDR_OF(&registry->names);
 		struct counter_tag *storage_tags = NULL;
@@ -1574,13 +1602,17 @@ yanet_get_counters_by_tags(
 					goto err_list;
 				}
 			}
-			fill_counter_handle(
-				&list->counters[next++],
-				storage,
-				idx,
-				storage_tags,
-				cp_storage->tag_count
-			);
+			if (fill_counter_handle(
+				    &list->counters[next++],
+				    worker_storages,
+				    cp_storage->worker_count,
+				    idx,
+				    storage_tags,
+				    cp_storage->tag_count
+			    )) {
+				yanet_error_add(err, "malloc failed");
+				goto err_list;
+			}
 		}
 	}
 
@@ -1668,7 +1700,9 @@ yanet_get_counter_value(
 	uint64_t value_idx,
 	uint64_t worker_idx
 ) {
-	return counter_handle_get_value(value_handle, worker_idx)[value_idx];
+	struct counter_value_handle **bases =
+		(struct counter_value_handle **)value_handle;
+	return counter_handle_get_value(bases[worker_idx])[value_idx];
 }
 
 void
@@ -1678,8 +1712,10 @@ yanet_get_counter_values(
 	uint64_t instance_count,
 	uint64_t *values
 ) {
+	struct counter_value_handle **bases =
+		(struct counter_value_handle **)value_handle;
 	for (uint64_t iidx = 0; iidx < instance_count; ++iidx) {
-		uint64_t *src = counter_handle_get_value(value_handle, iidx);
+		uint64_t *src = counter_handle_get_value(bases[iidx]);
 		memcpy(values + iidx * size, src, size * sizeof(uint64_t));
 	}
 }
@@ -1687,11 +1723,11 @@ yanet_get_counter_values(
 struct counter_handle_list *
 yanet_get_worker_counters(struct dp_config *dp_config) {
 	struct counter_registry *counter_registry = &dp_config->worker_counters;
-	struct counter_storage *storage =
-		ADDR_OF(&dp_config->worker_counter_storage);
+	struct counter_storage **storages =
+		ADDR_OF(&dp_config->worker_counter_storages);
+	uint64_t worker_count = dp_config->worker_counter_storage_count;
 
 	uint64_t count = counter_registry->count;
-	struct counter *names = ADDR_OF(&counter_registry->names);
 
 	struct counter_handle_list *list = (struct counter_handle_list *)malloc(
 		sizeof(struct counter_handle_list) +
@@ -1700,18 +1736,28 @@ yanet_get_worker_counters(struct dp_config *dp_config) {
 
 	if (list == NULL)
 		return NULL;
-	list->instance_count = ADDR_OF(&storage->allocator)->instance_count;
+	list->instance_count = worker_count;
 	list->count = count;
 	struct counter_handle *handlers = list->counters;
 
 	for (uint64_t idx = 0; idx < count; ++idx) {
-		strtcpy(handlers[idx].name, names[idx].name, 60);
-		handlers[idx].size = names[idx].size;
-		handlers[idx].gen = names[idx].gen;
-		handlers[idx].value_handle =
-			counter_get_value_handle(idx, storage);
 		handlers[idx].tag_count = 0;
 		handlers[idx].tags = NULL;
+		handlers[idx].value_handle = NULL;
+	}
+
+	for (uint64_t idx = 0; idx < count; ++idx) {
+		if (fill_counter_handle(
+			    &handlers[idx],
+			    storages,
+			    worker_count,
+			    idx,
+			    NULL,
+			    0
+		    )) {
+			yanet_counter_handle_list_free(list);
+			return NULL;
+		}
 	}
 
 	return list;
@@ -1759,6 +1805,8 @@ yanet_counter_handle_list_free(struct counter_handle_list *counters) {
 		if (i == 0 || handles[i].tags != handles[i - 1].tags) {
 			free(handles[i].tags);
 		}
+		// Each counter owns its own per-worker value-handle array.
+		free(handles[i].value_handle);
 	}
 	free(counters);
 }
