@@ -24,13 +24,7 @@ vlan_input_handle(
 	(void)dp_worker;
 	(void)device_ectx;
 
-	struct packet *packet = packet_list_pop(&packet_front->input);
-
-	while (packet != NULL) {
-		packet_front_output(packet_front, packet);
-
-		packet = packet_list_pop(&packet_front->input);
-	}
+	packet_list_concat(&packet_front->output, &packet_front->input);
 }
 
 static void
