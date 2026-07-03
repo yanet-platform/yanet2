@@ -528,9 +528,9 @@ dataplane_worker_start(struct dataplane_worker *worker) {
 	struct dp_worker *dp_worker = worker->dp_worker;
 	struct dp_config *dp_config = worker->instance->dp_config;
 	struct counter_storage **worker_counter_storages =
-		ADDR_OF(&dp_config->worker_counter_storages);
+		ADDR_OF_NONNULL(&dp_config->worker_counter_storages);
 	struct counter_storage *worker_counter_storage =
-		ADDR_OF(worker_counter_storages + dp_worker->idx);
+		ADDR_OF_NONNULL(worker_counter_storages + dp_worker->idx);
 	// FIXME: do not use hard-coded counter identifiers
 	dp_worker->iterations = counter_get_address(0, worker_counter_storage);
 

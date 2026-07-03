@@ -99,8 +99,8 @@ counter_get_value_handle(
 	uint64_t counter_id, struct counter_storage *counter_storage
 ) {
 	struct counter_value_handle **handles =
-		ADDR_OF(&counter_storage->counter_value_handles);
-	return ADDR_OF(handles + counter_id);
+		ADDR_OF_NONNULL(&counter_storage->counter_value_handles);
+	return ADDR_OF_NONNULL(handles + counter_id);
 }
 
 static inline uint64_t *
