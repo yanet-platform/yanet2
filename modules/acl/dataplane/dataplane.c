@@ -72,44 +72,39 @@ acl_handle_packets(
 	fwmap_t *fw6state = ADDR_OF(&fwstate_config->fw6state);
 	fwmap_t *state_table = NULL;
 
+	struct counter_storage *counter_storage =
+		ADDR_OF_NONNULL(&module_ectx->counter_storage);
+
 	uint64_t *pass_cnt = counter_get_address(
-		acl_config->action_allow_counter_id,
-		ADDR_OF(&module_ectx->counter_storage)
+		acl_config->action_allow_counter_id, counter_storage
 	);
 
 	uint64_t *deny_cnt = counter_get_address(
-		acl_config->action_deny_counter_id,
-		ADDR_OF(&module_ectx->counter_storage)
+		acl_config->action_deny_counter_id, counter_storage
 	);
 
 	uint64_t *create_cnt = counter_get_address(
-		acl_config->action_create_state_counter_id,
-		ADDR_OF(&module_ectx->counter_storage)
+		acl_config->action_create_state_counter_id, counter_storage
 	);
 
 	uint64_t *check_pass_cnt = counter_get_address(
-		acl_config->action_check_pass_counter_id,
-		ADDR_OF(&module_ectx->counter_storage)
+		acl_config->action_check_pass_counter_id, counter_storage
 	);
 
 	uint64_t *check_miss_cnt = counter_get_address(
-		acl_config->action_check_miss_counter_id,
-		ADDR_OF(&module_ectx->counter_storage)
+		acl_config->action_check_miss_counter_id, counter_storage
 	);
 
 	uint64_t *sync_cnt = counter_get_address(
-		acl_config->sync_sent_counter_id,
-		ADDR_OF(&module_ectx->counter_storage)
+		acl_config->sync_sent_counter_id, counter_storage
 	);
 
 	uint64_t *invalid_cnt = counter_get_address(
-		acl_config->action_invalid_counter_id,
-		ADDR_OF(&module_ectx->counter_storage)
+		acl_config->action_invalid_counter_id, counter_storage
 	);
 
 	uint64_t *non_term_cnt = counter_get_address(
-		acl_config->action_non_term_counter_id,
-		ADDR_OF(&module_ectx->counter_storage)
+		acl_config->action_non_term_counter_id, counter_storage
 	);
 
 	// Time in nanoseconds is sufficient for keeping state up to 500 years
@@ -284,12 +279,11 @@ acl_handle_packets(
 					goto apply;
 				}
 				case ACTION_COUNT: {
-					uint64_t *counters = counter_get_address(
-						target->counter_id,
-						ADDR_OF(&module_ectx
-								 ->counter_storage
-						)
-					);
+					uint64_t *counters =
+						counter_get_address(
+							target->counter_id,
+							counter_storage
+						);
 					counters[0] += 1;
 					counters[1] += pkt_len;
 
@@ -378,8 +372,7 @@ acl_handle_packets(
 			}
 		} else {
 			uint64_t *c = counter_get_address(
-				acl_config->no_match_counter_id,
-				ADDR_OF(&module_ectx->counter_storage)
+				acl_config->no_match_counter_id, counter_storage
 			);
 			c[0] += 1;
 

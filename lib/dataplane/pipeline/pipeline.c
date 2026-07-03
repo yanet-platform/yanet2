@@ -52,7 +52,7 @@ module_ectx_process(
 	}
 
 	struct counter_storage *storage =
-		ADDR_OF(&module_ectx->counter_storage);
+		ADDR_OF_NONNULL(&module_ectx->counter_storage);
 
 	const uint64_t input_bytes = packet_front_input_bytes(packet_front);
 	counter_add_packets_bytes(
@@ -118,7 +118,7 @@ chain_ectx_process(
 		uint64_t tsc_stop = rte_rdtsc();
 		counter_hist_exp2_inc(
 			chain_ectx->modules[idx].tsc_counter_id,
-			ADDR_OF(&chain_ectx->counter_storage),
+			ADDR_OF_NONNULL(&chain_ectx->counter_storage),
 			0,
 			7,
 			input_size,
@@ -211,7 +211,7 @@ function_ectx_process(
 	struct packet_front *packet_front
 ) {
 	struct counter_storage *storage =
-		ADDR_OF(&function_ectx->counter_storage);
+		ADDR_OF_NONNULL(&function_ectx->counter_storage);
 
 	counter_add_packets_bytes(
 		function_ectx->counter_packet_in_count,
@@ -256,7 +256,7 @@ pipeline_ectx_process(
 	struct packet_front *packet_front
 ) {
 	struct counter_storage *storage =
-		ADDR_OF(&pipeline_ectx->counter_storage);
+		ADDR_OF_NONNULL(&pipeline_ectx->counter_storage);
 
 	// Packets arrive in output list, count them before processing
 	counter_add_packets_bytes(
@@ -424,7 +424,7 @@ device_ectx_process_input(
 	counter_add_packets_bytes(
 		device_ectx->counter_packet_rx_count,
 		device_ectx->counter_packet_rx_bytes,
-		ADDR_OF(&device_ectx->counter_storage),
+		ADDR_OF_NONNULL(&device_ectx->counter_storage),
 		packet_front_output_count(packet_front),
 		packet_front_output_bytes(packet_front)
 	);
@@ -448,7 +448,7 @@ device_ectx_process_output(
 	counter_add_packets_bytes(
 		device_ectx->counter_packet_tx_count,
 		device_ectx->counter_packet_tx_bytes,
-		ADDR_OF(&device_ectx->counter_storage),
+		ADDR_OF_NONNULL(&device_ectx->counter_storage),
 		packet_front_output_count(packet_front),
 		packet_front_output_bytes(packet_front)
 	);
