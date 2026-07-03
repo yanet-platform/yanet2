@@ -83,10 +83,11 @@ func datasetActionKind(t testing.TB, kind string) uint32 {
 		return uint32(cacl.ActionDeny)
 	case "ACTION_KIND_COUNT":
 		return uint32(cacl.ActionCount)
-	case "ACTION_KIND_CHECK_STATE":
-		return uint32(cacl.ActionCheckState)
-	case "ACTION_KIND_CREATE_STATE":
-		return uint32(cacl.ActionCreateState)
+	case "ACTION_KIND_CHECK_STATE", "ACTION_KIND_CREATE_STATE":
+		// Stateful actions are neutralized: the benchmark recycles one
+		// packet list across rounds and wires no state backend, so
+		// per-round state traffic would only distort the measurement.
+		return uint32(cacl.ActionCount)
 	case "ACTION_KIND_LOG":
 		return uint32(cacl.ActionLog)
 	default:
@@ -439,6 +440,30 @@ func loadDatasetPackets(path string, limit int) ([]gopacket.Packet, error) {
 	return packets, nil
 }
 
+// setProtocol stamps the transport protocol into either IP version.
+func setProtocol(network gopacket.NetworkLayer, proto layers.IPProtocol) {
+	switch header := network.(type) {
+	case *layers.IPv4:
+		header.Protocol = proto
+	case *layers.IPv6:
+		header.NextHeader = proto
+	}
+}
+
+// hostInNet4 is the IPv4 counterpart of hostInNet.
+func hostInNet4(network filter.IPNet, hostBits int) net.IP {
+	addr := network.Addr.As4()
+	mask := network.Mask.As4()
+	pattern := [4]byte{
+		0, byte(hostBits >> 16), byte(hostBits >> 8), byte(hostBits),
+	}
+	out := make(net.IP, 4)
+	for idx := range out {
+		out[idx] = addr[idx] | (^mask[idx] & pattern[idx])
+	}
+	return out
+}
+
 // hostInNet places index-derived host bits into the free (mask-zero)
 // bits of a rule network, producing an address inside the rule's prefix.
 func hostInNet(network filter.IPNet, hostBits int) net.IP {
@@ -472,16 +497,21 @@ func synthesizeDatasetPackets(
 		// constrained, so rule-specific table regions are exercised.
 		dstPort uint16
 		udp     bool
+		ipv4    bool
 	}
 	seeds := make([]flowSeed, 0, limit)
 	for _, rule := range rules {
-		if len(rule.Src6s) == 0 || len(rule.Dst6s) == 0 {
+		seed := flowSeed{dstPort: 443}
+		switch {
+		case len(rule.Src6s) > 0 && len(rule.Dst6s) > 0:
+			seed.src = rule.Src6s[0]
+			seed.dst = rule.Dst6s[0]
+		case len(rule.Src4s) > 0 && len(rule.Dst4s) > 0:
+			seed.src = rule.Src4s[0]
+			seed.dst = rule.Dst4s[0]
+			seed.ipv4 = true
+		default:
 			continue
-		}
-		seed := flowSeed{
-			src:     rule.Src6s[0],
-			dst:     rule.Dst6s[0],
-			dstPort: 443,
 		}
 		if len(rule.DstPortRanges) > 0 {
 			seed.dstPort = rule.DstPortRanges[0].From
@@ -494,54 +524,63 @@ func synthesizeDatasetPackets(
 	}
 	require.NotEmpty(b, seeds)
 
-	stride := len(seeds) / limit
-	if stride == 0 {
-		stride = 1
-	}
-
 	packets := make([]gopacket.Packet, 0, limit)
 	for idx := 0; len(packets) < limit; idx++ {
-		seed := seeds[(idx*stride)%len(seeds)]
+		// Spread samples evenly over the whole seed list even when its
+		// length is close to the requested packet count.
+		seed := seeds[idx*len(seeds)/limit%len(seeds)]
 		eth := layers.Ethernet{
 			SrcMAC:       net.HardwareAddr{0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff},
 			DstMAC:       net.HardwareAddr{0x11, 0x22, 0x33, 0x44, 0x55, 0x66},
 			EthernetType: layers.EthernetTypeIPv6,
 		}
-		ip6 := layers.IPv6{
-			Version:    6,
-			HopLimit:   64,
-			NextHeader: layers.IPProtocolTCP,
-			SrcIP:      hostInNet(seed.src, idx),
-			DstIP:      hostInNet(seed.dst, idx*7),
+		var network gopacket.NetworkLayer
+		if seed.ipv4 {
+			eth.EthernetType = layers.EthernetTypeIPv4
+			network = &layers.IPv4{
+				Version:  4,
+				TTL:      64,
+				Protocol: layers.IPProtocolTCP,
+				SrcIP:    hostInNet4(seed.src, idx),
+				DstIP:    hostInNet4(seed.dst, idx*7),
+			}
+		} else {
+			network = &layers.IPv6{
+				Version:    6,
+				HopLimit:   64,
+				NextHeader: layers.IPProtocolTCP,
+				SrcIP:      hostInNet(seed.src, idx),
+				DstIP:      hostInNet(seed.dst, idx*7),
+			}
 		}
-		var packet gopacket.Packet
-		var err error
+		var transport gopacket.SerializableLayer
 		if seed.udp {
-			ip6.NextHeader = layers.IPProtocolUDP
-			udp := layers.UDP{
+			setProtocol(network, layers.IPProtocolUDP)
+			udp := &layers.UDP{
 				SrcPort: layers.UDPPort(1024 + idx%60000),
 				DstPort: layers.UDPPort(seed.dstPort),
 			}
 			require.NoError(
-				b, udp.SetNetworkLayerForChecksum(&ip6),
+				b, udp.SetNetworkLayerForChecksum(network),
 			)
-			packet, err = xpacket.LayersToPacketChecked(
-				&eth, &ip6, &udp,
-			)
+			transport = udp
 		} else {
-			tcp := layers.TCP{
+			tcp := &layers.TCP{
 				SrcPort: layers.TCPPort(1024 + idx%60000),
 				DstPort: layers.TCPPort(seed.dstPort),
 				ACK:     true,
 				Window:  1024,
 			}
 			require.NoError(
-				b, tcp.SetNetworkLayerForChecksum(&ip6),
+				b, tcp.SetNetworkLayerForChecksum(network),
 			)
-			packet, err = xpacket.LayersToPacketChecked(
-				&eth, &ip6, &tcp,
-			)
+			transport = tcp
 		}
+		packet, err := xpacket.LayersToPacketChecked(
+			&eth,
+			network.(gopacket.SerializableLayer),
+			transport,
+		)
 		require.NoError(b, err)
 		packets = append(packets, packet)
 	}
