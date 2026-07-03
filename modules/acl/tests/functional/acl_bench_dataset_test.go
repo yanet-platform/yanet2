@@ -468,8 +468,10 @@ func synthesizeDatasetPackets(
 	type flowSeed struct {
 		src filter.IPNet
 		dst filter.IPNet
-		// Destination port picked from the rule when constrained.
+		// Destination port and protocol picked from the rule when
+		// constrained, so rule-specific table regions are exercised.
 		dstPort uint16
+		udp     bool
 	}
 	seeds := make([]flowSeed, 0, limit)
 	for _, rule := range rules {
@@ -483,6 +485,10 @@ func synthesizeDatasetPackets(
 		}
 		if len(rule.DstPortRanges) > 0 {
 			seed.dstPort = rule.DstPortRanges[0].From
+		}
+		if len(rule.ProtoRanges) > 0 &&
+			rule.ProtoRanges[0] == datasetProtoUDP {
+			seed.udp = true
 		}
 		seeds = append(seeds, seed)
 	}
@@ -508,14 +514,34 @@ func synthesizeDatasetPackets(
 			SrcIP:      hostInNet(seed.src, idx),
 			DstIP:      hostInNet(seed.dst, idx*7),
 		}
-		tcp := layers.TCP{
-			SrcPort: layers.TCPPort(1024 + idx%60000),
-			DstPort: layers.TCPPort(seed.dstPort),
-			ACK:     true,
-			Window:  1024,
+		var packet gopacket.Packet
+		var err error
+		if seed.udp {
+			ip6.NextHeader = layers.IPProtocolUDP
+			udp := layers.UDP{
+				SrcPort: layers.UDPPort(1024 + idx%60000),
+				DstPort: layers.UDPPort(seed.dstPort),
+			}
+			require.NoError(
+				b, udp.SetNetworkLayerForChecksum(&ip6),
+			)
+			packet, err = xpacket.LayersToPacketChecked(
+				&eth, &ip6, &udp,
+			)
+		} else {
+			tcp := layers.TCP{
+				SrcPort: layers.TCPPort(1024 + idx%60000),
+				DstPort: layers.TCPPort(seed.dstPort),
+				ACK:     true,
+				Window:  1024,
+			}
+			require.NoError(
+				b, tcp.SetNetworkLayerForChecksum(&ip6),
+			)
+			packet, err = xpacket.LayersToPacketChecked(
+				&eth, &ip6, &tcp,
+			)
 		}
-		require.NoError(b, tcp.SetNetworkLayerForChecksum(&ip6))
-		packet, err := xpacket.LayersToPacketChecked(&eth, &ip6, &tcp)
 		require.NoError(b, err)
 		packets = append(packets, packet)
 	}
@@ -528,6 +554,7 @@ type datasetBenchState struct {
 	harness *dataplaneut.Harness
 	agent   *ffi.Agent
 	packets []gopacket.Packet
+	device  string
 }
 
 var (
@@ -573,11 +600,25 @@ func datasetBenchSetup(b *testing.B) *datasetBenchState {
 			packets = synthesizeDatasetPackets(b, rules, 4096)
 		}
 
+		// Register the harness device under the device name the rules
+		// reference most often, so device-scoped rules from real dumps
+		// stay matchable instead of falling to the catch-all.
+		device := "port0"
+		nameHits := map[string]int{}
+		for _, rule := range rules {
+			for _, ruleDevice := range rule.Devices {
+				nameHits[ruleDevice.Name]++
+				if nameHits[ruleDevice.Name] > nameHits[device] {
+					device = ruleDevice.Name
+				}
+			}
+		}
+
 		cfg := dataplaneut.Config{
 			CPMemory:      uint64(cpMemory),
 			DPMemory:      uint64(64 * datasize.MB),
 			WorkerCount:   1,
-			Devices:       []string{"port0"},
+			Devices:       []string{device},
 			Modules:       []string{"acl"},
 			DevicesToLoad: []string{"plain"},
 		}
@@ -610,6 +651,7 @@ func datasetBenchSetup(b *testing.B) *datasetBenchState {
 			harness: harness,
 			agent:   agent,
 			packets: packets,
+			device:  device,
 		}
 	})
 	require.NoError(b, datasetBenchErr)
@@ -628,7 +670,7 @@ func BenchmarkACLDataset(b *testing.B) {
 	state := datasetBenchSetup(b)
 	b.Logf("distinct flows loaded: %d", len(state.packets))
 
-	wireACLPipeline(b, state.agent, "port0", "dataset")
+	wireACLPipeline(b, state.agent, state.device, "dataset")
 
 	for _, batchSize := range []int{32, 512, 4096} {
 		if batchSize > len(state.packets) {
