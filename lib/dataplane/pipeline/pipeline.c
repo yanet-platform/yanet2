@@ -31,6 +31,10 @@ counter_add_packets_bytes(
 	uint64_t packets,
 	uint64_t bytes
 ) {
+	if (packets == 0) {
+		return;
+	}
+
 	counter_add(packets_id, worker_idx, storage, packets);
 	counter_add(bytes_id, worker_idx, storage, bytes);
 }
