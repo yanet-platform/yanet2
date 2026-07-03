@@ -56,8 +56,9 @@ enum {
 // dp_config before calling this.
 static void
 wire_worker_counters(struct dp_worker *dp_worker, struct dp_config *dp_config) {
-	struct counter_storage *storage = ADDR_OF(
-		ADDR_OF(&dp_config->worker_counter_storages) + dp_worker->idx
+	struct counter_storage *storage = ADDR_OF_NONNULL(
+		ADDR_OF_NONNULL(&dp_config->worker_counter_storages) +
+		dp_worker->idx
 	);
 
 	dp_worker->iterations =
