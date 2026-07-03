@@ -57,10 +57,10 @@ var routeNextHop = FIBNexthop{
 // applyFIB, because the route module config must exist in shared memory
 // before UpdatePlainDevices resolves chain module references.
 func setupRouteHarness(
-	t *testing.T,
+	tb testing.TB,
 	deviceName string,
 ) (*dataplaneut.Harness, *ffi.Agent, route.Backend) {
-	t.Helper()
+	tb.Helper()
 
 	cfg := dataplaneut.Config{
 		CPMemory:      uint64(routeCPSize),
@@ -71,13 +71,13 @@ func setupRouteHarness(
 		DevicesToLoad: []string{"plain"},
 	}
 	h, err := dataplaneut.NewHarness(cfg)
-	require.NoError(t, err)
-	t.Cleanup(h.Free)
+	require.NoError(tb, err)
+	tb.Cleanup(h.Free)
 
 	shm := h.SharedMemory()
 	agent, err := shm.AgentAttach("r-test", 0, routeMemSize)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = agent.CleanUp() })
+	require.NoError(tb, err)
+	tb.Cleanup(func() { _ = agent.CleanUp() })
 
 	backend := route.NewBackend(agent)
 	return h, agent, backend
@@ -90,13 +90,13 @@ func setupRouteHarness(
 // configName is already present in shared memory when the pipeline resolves
 // its chain module references.
 func wirePipeline(
-	t *testing.T,
+	tb testing.TB,
 	agent *ffi.Agent,
 	deviceName, configName string,
 ) {
-	t.Helper()
+	tb.Helper()
 
-	require.NoError(t, agent.UpdateFunction(ffi.FunctionConfig{
+	require.NoError(tb, agent.UpdateFunction(ffi.FunctionConfig{
 		Name: configName,
 		Chains: []ffi.FunctionChainConfig{{
 			Weight: 1,
@@ -108,14 +108,14 @@ func wirePipeline(
 			},
 		}},
 	}))
-	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{
+	require.NoError(tb, agent.UpdatePipeline(ffi.PipelineConfig{
 		Name:      configName,
 		Functions: []string{configName},
 	}))
-	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{
+	require.NoError(tb, agent.UpdatePipeline(ffi.PipelineConfig{
 		Name: "dummy",
 	}))
-	require.NoError(t, agent.UpdatePlainDevices([]ffi.DeviceConfig{{
+	require.NoError(tb, agent.UpdatePlainDevices([]ffi.DeviceConfig{{
 		Name:   deviceName,
 		Input:  []ffi.DevicePipelineConfig{{Name: configName, Weight: 1}},
 		Output: []ffi.DevicePipelineConfig{{Name: "dummy", Weight: 1}},
@@ -125,14 +125,14 @@ func wirePipeline(
 // applyFIB pushes entries via backend.UpdateModule and registers cleanup.
 //
 // Returns the route.ModuleHandle; the caller may inspect it. The handle is
-// freed via t.Cleanup.
+// freed via tb.Cleanup.
 func applyFIB(
-	t *testing.T,
+	tb testing.TB,
 	backend route.Backend,
 	name string,
 	entries []FIBEntry,
 ) route.ModuleHandle {
-	t.Helper()
+	tb.Helper()
 
 	pbEntries := make([]*routepb.FIBEntry, 0, len(entries))
 	for _, e := range entries {
@@ -151,8 +151,8 @@ func applyFIB(
 	}
 
 	handle, err := backend.UpdateModule(name, pbEntries)
-	require.NoError(t, err)
-	t.Cleanup(handle.Free)
+	require.NoError(tb, err)
+	tb.Cleanup(handle.Free)
 	return handle
 }
 

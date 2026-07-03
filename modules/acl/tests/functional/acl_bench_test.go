@@ -65,7 +65,7 @@ func BenchmarkACLAllow(b *testing.B) {
 				require.NoError(b, err)
 				pkts[idx] = pkt
 			}
-			h.Bench(b, pkts...)
+			h.Bench(b, pkts)
 		})
 	}
 }
@@ -114,7 +114,7 @@ func BenchmarkACLDeny(b *testing.B) {
 				require.NoError(b, err)
 				pkts[idx] = pkt
 			}
-			h.Bench(b, pkts...)
+			h.Bench(b, pkts)
 		})
 	}
 }
@@ -237,7 +237,7 @@ func BenchmarkACLAllowRuleScale(b *testing.B) {
 			for idx := range benchRuleScaleBatch {
 				pkts[idx] = benchDiversePacket(b, idx*n/benchRuleScaleBatch)
 			}
-			h.Bench(b, pkts...)
+			h.Bench(b, pkts)
 		})
 	}
 }
@@ -270,7 +270,7 @@ func BenchmarkACLAllowDiverseFlow(b *testing.B) {
 			for idx := range n {
 				pkts[idx] = benchDiversePacket(b, idx)
 			}
-			h.Bench(b, pkts...)
+			h.Bench(b, pkts)
 		})
 	}
 }

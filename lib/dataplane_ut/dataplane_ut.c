@@ -23,6 +23,7 @@
 #include "lib/dataplane/config/topology.h"
 #include "lib/dataplane/config/zone.h"
 #include "lib/dataplane/module/packet_front.h"
+#include "lib/dataplane/packet/data.h"
 #include "lib/dataplane/worker/counters.h"
 #include "lib/dataplane/worker/pipeline_round.h"
 #include "lib/dataplane_ut/mempool.h"
@@ -410,6 +411,10 @@ struct saved_packet {
 	struct packet *pkt;
 	uint16_t tx_device_id;
 	uint16_t rx_device_id;
+	// Payload snapshot (all segments) restored between rounds when
+	// requested, so header-mutating modules see fresh input every round.
+	uint8_t *data;
+	uint32_t data_len;
 };
 
 void
@@ -417,7 +422,8 @@ dataplane_ut_run_rounds(
 	struct dataplane_ut *ut,
 	size_t worker,
 	struct packet_list *input,
-	uint64_t rounds
+	uint64_t rounds,
+	int reset_payload
 ) {
 	if (rounds == 0 || input->count == 0) {
 		return;
@@ -436,6 +442,28 @@ dataplane_ut_run_rounds(
 		saved[idx].pkt = pkt;
 		saved[idx].tx_device_id = pkt->tx_device_id;
 		saved[idx].rx_device_id = pkt->rx_device_id;
+		saved[idx].data = NULL;
+		saved[idx].data_len = 0;
+		if (reset_payload) {
+			struct rte_mbuf *mbuf = packet_to_mbuf(pkt);
+			saved[idx].data_len = rte_pktmbuf_pkt_len(mbuf);
+			saved[idx].data = malloc(saved[idx].data_len);
+			if (saved[idx].data == NULL) {
+				LOG(ERROR,
+				    "run_rounds: no memory for a payload "
+				    "snapshot; packet %zu runs without reset",
+				    idx);
+				continue;
+			}
+			uint32_t offset = 0;
+			for (struct rte_mbuf *seg = mbuf; seg != NULL;
+			     seg = seg->next) {
+				memcpy(saved[idx].data + offset,
+				       rte_pktmbuf_mtod(seg, void *),
+				       seg->data_len);
+				offset += seg->data_len;
+			}
+		}
 	}
 
 	// Assumes a fixed packet set: handlers forward or drop without
@@ -448,6 +476,17 @@ dataplane_ut_run_rounds(
 			pkt->next = NULL;
 			pkt->tx_device_id = saved[idx].tx_device_id;
 			pkt->rx_device_id = saved[idx].rx_device_id;
+			if (saved[idx].data != NULL) {
+				uint32_t offset = 0;
+				for (struct rte_mbuf *seg = packet_to_mbuf(pkt);
+				     seg != NULL;
+				     seg = seg->next) {
+					memcpy(rte_pktmbuf_mtod(seg, void *),
+					       saved[idx].data + offset,
+					       seg->data_len);
+					offset += seg->data_len;
+				}
+			}
 			packet_list_add(input, pkt);
 		}
 
@@ -462,6 +501,7 @@ dataplane_ut_run_rounds(
 		pkt->tx_device_id = saved[idx].tx_device_id;
 		pkt->rx_device_id = saved[idx].rx_device_id;
 		packet_list_add(input, pkt);
+		free(saved[idx].data);
 	}
 
 	free(saved);

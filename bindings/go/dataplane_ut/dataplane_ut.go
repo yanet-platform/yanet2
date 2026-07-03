@@ -406,13 +406,46 @@ func (m *Harness) handlePackets(
 // at most once per process regardless of how many benchmarks call Bench.
 var warnUnoptimizedOnce sync.Once
 
+// benchOptions configures a Bench run.
+type benchOptions struct {
+	resetPayload bool
+}
+
+func newBenchOptions() *benchOptions {
+	return &benchOptions{}
+}
+
+// BenchOption customizes a Bench run.
+type BenchOption func(*benchOptions)
+
+// WithPayloadReset restores every packet payload to its captured state
+// between rounds.
+//
+// Required for modules that rewrite packet contents in place, such as
+// route decrementing TTL; costs one payload copy per packet per round.
+// Only the bytes are restored, so geometry-changing modules stay out of
+// scope.
+func WithPayloadReset() BenchOption {
+	return func(opts *benchOptions) {
+		opts.resetPayload = true
+	}
+}
+
 // Bench runs b.N pipeline rounds over the given packets on worker 0,
 // timing only the C-side loop.
 //
 // Harness, config, and packet-build setup done by the caller before this
-// call is excluded from the measurement.
-func (m *Harness) Bench(b *testing.B, packets ...gopacket.Packet) {
+// call is excluded from the measurement. Packet payloads are reused as
+// is between rounds unless WithPayloadReset is given.
+func (m *Harness) Bench(
+	b *testing.B, packets []gopacket.Packet, options ...BenchOption,
+) {
 	b.Helper()
+
+	opts := newBenchOptions()
+	for _, o := range options {
+		o(opts)
+	}
 
 	warnUnoptimizedOnce.Do(func() {
 		if C.dataplane_ut_build_optimized() == 0 {
@@ -446,12 +479,18 @@ func (m *Harness) Bench(b *testing.B, packets ...gopacket.Packet) {
 	}
 	numPkts := len(payloads)
 
+	reset := C.int(0)
+	if opts.resetPayload {
+		reset = C.int(1)
+	}
+
 	b.ResetTimer()
 	C.dataplane_ut_run_rounds(
 		m.ptr,
 		C.size_t(0),
 		(*C.struct_packet_list)(unsafe.Pointer(packetList)),
 		C.uint64_t(b.N),
+		reset,
 	)
 	b.StopTimer()
 

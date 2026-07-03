@@ -716,7 +716,7 @@ func BenchmarkACLDataset(b *testing.B) {
 			continue
 		}
 		b.Run(fmt.Sprintf("batch=%d", batchSize), func(b *testing.B) {
-			state.harness.Bench(b, state.packets[:batchSize]...)
+			state.harness.Bench(b, state.packets[:batchSize])
 		})
 	}
 }

@@ -84,7 +84,7 @@ func BenchmarkPipelineRound(b *testing.B) {
 				require.NoError(b, err)
 				pkts[idx] = pkt
 			}
-			h.Bench(b, pkts...)
+			h.Bench(b, pkts)
 		})
 	}
 }

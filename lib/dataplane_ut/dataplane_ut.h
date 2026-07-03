@@ -104,6 +104,14 @@ dataplane_ut_build_optimized(void);
 // holds all packets in a consistent state for freeing. The snapshot array is
 // freed before returning.
 //
+// When reset_payload is nonzero, each packet's payload bytes are also
+// snapshotted at capture and restored before every round, so modules that
+// rewrite headers in place (for example route decrementing TTL) see fresh
+// input each round. Only the bytes are restored: mbuf geometry and parse
+// metadata are not, so modules that grow, shrink, or re-slice packets stay
+// out of scope. A failed per-packet snapshot allocation leaves that packet
+// without payload reset.
+//
 // Returns immediately (leaving input intact) when rounds == 0 or
 // input->count == 0. Returns immediately on malloc failure.
 //
@@ -119,5 +127,6 @@ dataplane_ut_run_rounds(
 	struct dataplane_ut *ut,
 	size_t worker,
 	struct packet_list *input,
-	uint64_t rounds
+	uint64_t rounds,
+	int reset_payload
 );

@@ -207,7 +207,7 @@ func BenchmarkScheduler(b *testing.B) {
 		for _, batch := range schedBatchSizes {
 			b.Run(fmt.Sprintf("devices=%d/batch=%d", devices, batch), func(b *testing.B) {
 				h, pkts := buildBench(b, devices, batch)
-				h.Bench(b, pkts...)
+				h.Bench(b, pkts)
 			})
 		}
 	}
