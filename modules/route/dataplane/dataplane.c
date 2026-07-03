@@ -149,8 +149,16 @@ route_handle_packets(
 
 		// TODO: Route selection should be based on hash/NUMA/dp
 		// instance/etc
-		uint64_t route_index = ADDR_OF(&route_config->route_indexes
-		)[route_list->start + packet->hash % route_list->count];
+		//
+		// Single-route lists skip the per-packet modulo: the hash
+		// demux divide is pure overhead when there is nothing to
+		// balance between.
+		uint64_t route_offset = route_list->start;
+		if (route_list->count > 1) {
+			route_offset += packet->hash % route_list->count;
+		}
+		uint64_t route_index =
+			ADDR_OF(&route_config->route_indexes)[route_offset];
 
 		struct route *route =
 			ADDR_OF(&route_config->routes) + route_index;
