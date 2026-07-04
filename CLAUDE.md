@@ -221,6 +221,10 @@ Meson orchestrates C/DPDK builds and Go binary compilation (via `custom_target` 
 ### Go
 
 - **Receiver names**: always `m`. No type-letter mnemonics.
+- **No abbreviated identifiers** — spell them out (`labels` not `lbls`,
+  `metrics` not `mtr`, `durationSeconds` not `durSeconds`), in production
+  code and tests alike. Keep only the universal Go idioms: `ok`, `err`,
+  `ctx`, `idx`, and short-scope type-assert temporaries.
 - **Naming**: `*Config` (not `*Cfg`); constructors are `NewStore`,
   `NewClient` — never bare `New`.
 - **Loop index**: use `idx`, not `i`, in `for`-range and indexed loops.
