@@ -844,3 +844,86 @@ func TestNAT64_ICMPv6PacketTooBigToICMPv4FragNeeded(t *testing.T) {
 	require.Equal(t, byte(4), l4[1])
 	require.Equal(t, uint16(1260), binary.BigEndian.Uint16(l4[6:8]))
 }
+
+// TestNAT64_ICMPv6PacketTooBigMTUFloor verifies that the ICMPv4 next-hop MTU
+// derived from an ICMPv6 Packet Too Big never underflows below the IPv4
+// minimum, regardless of the attacker-controlled wire MTU value.
+func TestNAT64_ICMPv6PacketTooBigMTUFloor(t *testing.T) {
+	tests := []struct {
+		name    string
+		wireMTU uint32
+		cfg4    uint32
+		cfg6    uint32
+		want    uint16
+	}{
+		{name: "underflow_1", wireMTU: 1, cfg4: 1450, cfg6: 1280, want: 68},
+		{name: "underflow_19", wireMTU: 19, cfg4: 1450, cfg6: 1280, want: 68},
+		{name: "equals_header_delta_20", wireMTU: 20, cfg4: 1450, cfg6: 1280, want: 68},
+		{name: "below_ipv4_minimum_21", wireMTU: 21, cfg4: 1450, cfg6: 1280, want: 68},
+		{name: "exactly_at_floor_88", wireMTU: 88, cfg4: 1450, cfg6: 1280, want: 68},
+		{name: "just_above_floor_89", wireMTU: 89, cfg4: 1450, cfg6: 1280, want: 69},
+		{name: "normal_100", wireMTU: 100, cfg4: 1450, cfg6: 1280, want: 80},
+		{name: "clamped_by_ipv6_mtu_1400", wireMTU: 1400, cfg4: 1450, cfg6: 1280, want: 1260},
+		{name: "rfc1191_remap_wire0", wireMTU: 0, cfg4: 1450, cfg6: 1280, want: 1260},
+		{name: "ipv4_unset_wire0_falls_back_to_ipv6", wireMTU: 0, cfg4: 0, cfg6: 1280, want: 1260},
+		{name: "both_config_zero_wire0", wireMTU: 0, cfg4: 0, cfg6: 0, want: 68},
+		{name: "cap_at_uint16_max", wireMTU: 100000, cfg4: 0, cfg6: 0, want: 65535},
+		{name: "tiny_ipv6_config_clamps_to_floor", wireMTU: 1400, cfg4: 1450, cfg6: 10, want: 68},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h, svc := setupNAT64Harness(t)
+			mustAddPrefix(t, svc, "nat64-test", nat64Prefix96)
+			mustAddMapping(t, svc, "nat64-test", "192.0.2.30", "2001:db8::30", 0)
+			mustSetMTU(t, svc, "nat64-test", tt.cfg4, tt.cfg6)
+
+			innerIP6 := layers.IPv6{
+				Version:    6,
+				HopLimit:   32,
+				NextHeader: layers.IPProtocolUDP,
+				SrcIP:      net.ParseIP("2001:db8::30"),
+				DstIP:      net.ParseIP("2001:db8::198.51.100.2"),
+			}
+			innerUDP := layers.UDP{SrcPort: 2233, DstPort: 3344}
+			require.NoError(t, innerUDP.SetNetworkLayerForChecksum(&innerIP6))
+			innerBuf := gopacket.NewSerializeBuffer()
+			require.NoError(t, gopacket.SerializeLayers(
+				innerBuf,
+				gopacket.SerializeOptions{FixLengths: true, ComputeChecksums: true},
+				&innerIP6,
+				&innerUDP,
+			))
+			inner := innerBuf.Bytes()
+			require.GreaterOrEqual(t, len(inner), 48)
+
+			icmp6 := make([]byte, 8+48)
+			icmp6[0] = 2 // Packet Too Big
+			icmp6[1] = 0
+			binary.BigEndian.PutUint32(icmp6[4:8], tt.wireMTU)
+			copy(icmp6[8:], inner[:48])
+			pkt := packetWithIPv6RawExt(
+				t,
+				net.ParseIP("2001:db8::30"),
+				net.ParseIP("2001:db8::198.51.100.2"),
+				byte(layers.IPProtocolICMPv6),
+				icmp6,
+			)
+
+			result, err := h.HandlePackets(pkt)
+			require.NoError(t, err)
+			out := parseOneOutput(t, result)
+			ip4 := out.Layer(layers.LayerTypeIPv4).(*layers.IPv4)
+			require.Equal(t, net.ParseIP("192.0.2.30").To4(), ip4.SrcIP.To4())
+			require.Equal(t, net.ParseIP("198.51.100.2").To4(), ip4.DstIP.To4())
+
+			l4 := ip4.Payload
+			require.GreaterOrEqual(t, len(l4), 8)
+			require.Equal(t, byte(layers.ICMPv4TypeDestinationUnreachable), l4[0])
+			require.Equal(t, byte(4), l4[1])
+			// RFC792 unused field must always be zero.
+			require.Equal(t, uint16(0), binary.BigEndian.Uint16(l4[4:6]))
+			require.Equal(t, tt.want, binary.BigEndian.Uint16(l4[6:8]))
+		})
+	}
+}

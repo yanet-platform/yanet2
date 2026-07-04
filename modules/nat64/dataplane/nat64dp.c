@@ -390,28 +390,49 @@ icmp_v6_to_v4(
 		// Big Message)-20, MTU_of_IPv4_nexthop,
 		// (MTU_of_IPv6_nexthop)-20).
 		if (mtu == 0) {
-			// Router doesn't implement RFC1191, use cfg
+			// Router doesn't implement RFC1191, use cfg. Prefer
+			// the configured IPv4 MTU, falling back to the IPv6
+			// MTU when the IPv4 one is unset.
 			mtu = nat64_config->mtu.ipv4;
+			if (mtu == 0) {
+				mtu = nat64_config->mtu.ipv6;
+			}
 		}
 
 		// Calculate header size difference
 		uint16_t delta = sizeof(struct rte_ipv6_hdr) -
 				 sizeof(struct rte_ipv4_hdr);
 
-		// RFC7915: Adjust MTU for header size difference
-		uint16_t adjusted_mtu = mtu - delta;
+		// RFC7915: Adjust MTU for header size difference. Use a
+		// saturating subtraction so a wire MTU at or below delta
+		// cannot wrap around in an unsigned type.
+		uint32_t adjusted_mtu = (mtu > delta) ? (mtu - delta) : 0;
 
 		if (nat64_config->mtu.ipv6 > 0) {
-			adjusted_mtu =
-				RTE_MIN(adjusted_mtu,
-					nat64_config->mtu.ipv6 - delta);
+			// Saturate to 0 rather than wrapping when the
+			// configured IPv6 next-hop MTU is nonzero but at or
+			// below delta; the floor below then raises it to 68.
+			uint32_t ipv6_limit =
+				(nat64_config->mtu.ipv6 > delta)
+					? (uint32_t)nat64_config->mtu.ipv6 -
+						  delta
+					: 0;
+			adjusted_mtu = RTE_MIN(adjusted_mtu, ipv6_limit);
 		}
 
 		if (nat64_config->mtu.ipv4 > 0) {
 			// Account for IPv4->IPv6 translation overhead
 			adjusted_mtu =
-				RTE_MIN(adjusted_mtu, nat64_config->mtu.ipv4);
+				RTE_MIN(adjusted_mtu,
+					(uint32_t)nat64_config->mtu.ipv4);
 		}
+
+		// RFC7915/RFC1191: an underflowed or sub-minimum MTU here
+		// would black-hole PMTUD, so floor at the IPv4 minimum MTU
+		// and cap at what the 16-bit ICMPv4 next-hop MTU field can
+		// hold.
+		adjusted_mtu = RTE_MAX(adjusted_mtu, 68U);
+		adjusted_mtu = RTE_MIN(adjusted_mtu, (uint32_t)UINT16_MAX);
 
 		LOG_DBG(NAT64,
 			"MTU adjustment:\n"
@@ -428,9 +449,13 @@ icmp_v6_to_v4(
 
 		LOG_DBG(NAT64, "Adjusted ICMPv4 MTU: %u\n", mtu);
 
-		// Store the adjusted MTU in the ICMPv4 header
+		// Store the adjusted MTU in the ICMPv4 header. The ICMPv4
+		// next-hop-MTU layout reuses only the low 16 bits, so the
+		// RFC792 unused high half must be cleared, otherwise it
+		// would retain the top bits of the 32-bit ICMPv6 MTU.
 		struct yanet_icmp_hdr *icmp_hdr =
 			(struct yanet_icmp_hdr *)icmp_header;
+		icmp_hdr->icmp_hun.ih_pmtu.ipm_void = 0;
 		icmp_hdr->yanet_icmp_nextmtu = rte_cpu_to_be_16(mtu);
 		break;
 
