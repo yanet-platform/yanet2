@@ -756,6 +756,137 @@ lpm8_compact(struct lpm *lpm8) {
 	return lpm_compact(lpm8, 8);
 }
 
+// Read-only packed form of an 8-byte-key trie.
+//
+// One contiguous arena of 256-slot pages. A slot is a uint32_t: bit
+// zero set marks a leaf holding the value in the upper 31 bits, bit
+// zero clear marks an inner node holding the child page byte offset
+// inside the arena — pages are 1KB-sized so the offset's low bit is
+// naturally clear and a hop costs one load, one flag test and one add,
+// the same as the mutable walk. LPM_VALUE_INVALID leaves are stored as
+// all-ones slots since the value does not fit 31 bits. Pages shrink
+// from 2KB to 1KB against the mutable trie and the arena is position
+// independent, so it needs no pointer fixups in shared memory.
+struct lpm8_packed {
+	uint32_t *pages;
+	uint32_t page_count;
+};
+
+#define LPM8_PACKED_INVALID_SLOT 0xffffffffu
+
+struct lpm8_pack_ctx {
+	uint32_t *pages;
+	uint32_t next;
+	uint32_t page_cap;
+};
+
+// Depth-first copy of one mutable page; returns the packed page index
+// or -1 when a value exceeds 31 bits or the page budget is out.
+static inline int64_t
+lpm8_pack_page(struct lpm8_pack_ctx *ctx, const struct lpm_page *page) {
+	if (ctx->next >= ctx->page_cap) {
+		return -1;
+	}
+	uint32_t page_idx = ctx->next++;
+	uint32_t *slots = ctx->pages + (size_t)page_idx * 256;
+
+	for (size_t idx = 0; idx < 256; ++idx) {
+		uint64_t value = page->values[idx].value;
+		if (value & LPM_VALUE_FLAG) {
+			uint32_t leaf = (uint32_t)(value >> 1);
+			if (leaf == LPM_VALUE_INVALID) {
+				slots[idx] = LPM8_PACKED_INVALID_SLOT;
+				continue;
+			}
+			if (leaf >= LPM8_PACKED_INVALID_SLOT >> 1) {
+				return -1;
+			}
+			slots[idx] = (leaf << 1) | LPM_VALUE_FLAG;
+			continue;
+		}
+		const struct lpm_page *child =
+			ADDR_OF_NONNULL(&page->values[idx].page);
+		int64_t child_idx = lpm8_pack_page(ctx, child);
+		if (child_idx < 0) {
+			return -1;
+		}
+		slots[idx] = (uint32_t)child_idx * 256 * sizeof(uint32_t);
+	}
+
+	return page_idx;
+}
+
+// Freeze a mutable 8-byte-key trie into a packed arena.
+//
+// The mutable trie stays untouched; the caller decides whether to keep
+// or release it. On failure nothing is allocated and -1 is returned.
+static inline int
+lpm8_pack(
+	struct memory_context *memory_context,
+	const struct lpm *lpm8,
+	struct lpm8_packed *out
+) {
+	// The child byte offset must fit a uint32_t slot.
+	if (lpm8->page_count == 0 || lpm8->page_count > (1u << 22)) {
+		return -1;
+	}
+
+	uint64_t size = (uint64_t)lpm8->page_count * 256 * sizeof(uint32_t);
+	uint32_t *pages = (uint32_t *)memory_balloc(memory_context, size);
+	if (pages == NULL) {
+		return -1;
+	}
+
+	struct lpm8_pack_ctx ctx = {
+		.pages = pages,
+		.next = 0,
+		.page_cap = lpm8->page_count,
+	};
+	if (lpm8_pack_page(&ctx, lpm_page((struct lpm *)lpm8, 0)) < 0) {
+		memory_bfree(memory_context, pages, size);
+		return -1;
+	}
+
+	SET_OFFSET_OF(&out->pages, pages);
+	out->page_count = lpm8->page_count;
+	return 0;
+}
+
+static inline uint32_t
+lpm8_packed_lookup(const uint32_t *pages, const uint8_t *key) {
+	const uint32_t *slots = pages;
+	uint32_t slot = 0;
+
+	for (uint8_t hop = 0; hop < 8; ++hop) {
+		slot = slots[key[hop]];
+		if (slot & LPM_VALUE_FLAG) {
+			break;
+		}
+		slots = (const uint32_t *)((const uint8_t *)pages + slot);
+	}
+
+	if (slot == LPM8_PACKED_INVALID_SLOT) {
+		return LPM_VALUE_INVALID;
+	}
+	return slot >> 1;
+}
+
+// Safe on a zeroed structure and repeatable.
+static inline void
+lpm8_packed_free(
+	struct memory_context *memory_context, struct lpm8_packed *packed
+) {
+	uint32_t *pages = ADDR_OF(&packed->pages);
+	if (pages != NULL) {
+		memory_bfree(
+			memory_context,
+			pages,
+			(uint64_t)packed->page_count * 256 * sizeof(uint32_t)
+		);
+	}
+	memset(packed, 0, sizeof(*packed));
+}
+
 static inline int
 lpm4_insert(
 	struct lpm *lpm4, const uint8_t *from, const uint8_t *to, uint32_t value

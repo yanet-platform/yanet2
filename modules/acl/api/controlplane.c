@@ -1,5 +1,8 @@
 #include <errno.h>
+#include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <time.h>
 
 #include "controlplane.h"
@@ -94,6 +97,10 @@ acl_module_config_init(
 	memset(&config->filter_ip6, 0, sizeof(config->filter_ip6));
 	memset(&config->filter_ip6_port, 0, sizeof(config->filter_ip6_port));
 
+	memset(&config->net6_share_src, 0, sizeof(config->net6_share_src));
+	memset(&config->net6_share_dst, 0, sizeof(config->net6_share_dst));
+	config->net6_share_enabled = 0;
+
 	// Initialize fwstate_cfg with NULL pointers
 	memset(&config->fwstate_cfg, 0, sizeof(struct fwstate_config));
 
@@ -159,6 +166,13 @@ acl_module_config_free(struct cp_module *cp_module) {
 	filter_free(&config->filter_ip4_port, ACL_FILTER_IP4_PROTO_PORT_TAG);
 	filter_free(&config->filter_ip6, ACL_FILTER_IP6_TAG);
 	filter_free(&config->filter_ip6_port, ACL_FILTER_IP6_PROTO_PORT_TAG);
+
+	filter_net6_share_dir_free(
+		&cp_module->memory_context, &config->net6_share_src
+	);
+	filter_net6_share_dir_free(
+		&cp_module->memory_context, &config->net6_share_dst
+	);
 
 	// Capture agent before fini zeroes it.
 	struct agent *agent = ADDR_OF(&cp_module->agent);
@@ -274,6 +288,35 @@ check_has_full_dst_port_range(const struct acl_rule *acl_rule) {
 	return acl_rule->dst_port_ranges.count == 0 ||
 	       (acl_rule->dst_port_ranges.items[0].from == 0 &&
 		acl_rule->dst_port_ranges.items[0].to == 65535);
+}
+
+// Testing aid guarded by the ACL_NET6_SHARE_STATS environment variable.
+//
+// Reports, per local net6 half-classifier, how many hi classes map to a
+// constant comb row, i.e. ignore the lo address half entirely.
+static void
+acl_net6_share_dump_rows(
+	const char *name, const struct net6_classifier *classifier
+) {
+	struct value_table *comb = (struct value_table *)&classifier->comb;
+	uint64_t constant_rows = 0;
+	for (uint32_t hi = 0; hi < comb->v_dim; ++hi) {
+		uint32_t first = value_table_get(comb, hi, 0);
+		bool is_constant = true;
+		for (uint32_t lo = 1; lo < comb->h_dim; ++lo) {
+			if (value_table_get(comb, hi, lo) != first) {
+				is_constant = false;
+				break;
+			}
+		}
+		constant_rows += is_constant;
+	}
+	fprintf(stderr,
+		"net6 share rows %s: hi=%u lo=%u const_rows=%lu\n",
+		name,
+		comb->v_dim,
+		comb->h_dim,
+		constant_rows);
 }
 
 static int
@@ -475,6 +518,100 @@ acl_module_init_ip6_port(
 	return rc;
 }
 
+static int
+acl_module_init_net6_share(
+	struct cp_module *cp_module,
+	struct acl_rule *acl_rules,
+	uint32_t acl_rule_count,
+	struct filter_rule *filter_rules,
+	const struct filter_rule **filter_rule_ptrs,
+	yanet_error **err
+) {
+	struct acl_module_config *config =
+		container_of(cp_module, struct acl_module_config, cp_module);
+
+	memset(&config->net6_share_src, 0, sizeof(config->net6_share_src));
+	memset(&config->net6_share_dst, 0, sizeof(config->net6_share_dst));
+	config->net6_share_enabled = 0;
+
+	// Sharing pays off only when both v6 filters are populated.
+	if (config->filter_rule_count_ip6 == 0 ||
+	    config->filter_rule_count_ip6_port == 0) {
+		return 0;
+	}
+
+	// Operational kill switch: keep the classic per-filter walk path
+	// active without rebuilding anything.
+	if (getenv("YANET_ACL_NET6_SHARE_DISABLE") != NULL) {
+		return 0;
+	}
+
+	// The union projection is every v6 rule, which is exactly the two
+	// disjoint per-filter projections taken together.
+	filter_acl_rules(
+		acl_rules,
+		acl_rule_count,
+		filter_rules,
+		filter_rule_ptrs,
+		check_has_ip6
+	);
+
+	// The local half-classifiers live in the leaf vertices of the two
+	// v6 filters, at the slots of their net6 attributes.
+	const struct net6_classifier *ip6_src = (const struct net6_classifier *)
+		ADDR_OF(&config->filter_ip6.v[8].data);
+	const struct net6_classifier *ip6_dst = (const struct net6_classifier *)
+		ADDR_OF(&config->filter_ip6.v[9].data);
+	const struct net6_classifier *ip6_port_src =
+		(const struct net6_classifier *)ADDR_OF(
+			&config->filter_ip6_port.v[9].data
+		);
+	const struct net6_classifier *ip6_port_dst =
+		(const struct net6_classifier *)ADDR_OF(
+			&config->filter_ip6_port.v[10].data
+		);
+
+	if (filter_net6_share_init(
+		    &cp_module->memory_context,
+		    filter_rule_ptrs,
+		    acl_rule_count,
+		    1,
+		    ip6_src,
+		    ip6_port_src,
+		    &config->net6_share_src
+	    )) {
+		yanet_error_add(err, "failed to init shared net6 src");
+		return -1;
+	}
+
+	if (filter_net6_share_init(
+		    &cp_module->memory_context,
+		    filter_rule_ptrs,
+		    acl_rule_count,
+		    0,
+		    ip6_dst,
+		    ip6_port_dst,
+		    &config->net6_share_dst
+	    )) {
+		filter_net6_share_dir_free(
+			&cp_module->memory_context, &config->net6_share_src
+		);
+		yanet_error_add(err, "failed to init shared net6 dst");
+		return -1;
+	}
+
+	config->net6_share_enabled = 1;
+
+	if (getenv("ACL_NET6_SHARE_STATS") != NULL) {
+		acl_net6_share_dump_rows("ip6 src", ip6_src);
+		acl_net6_share_dump_rows("ip6 dst", ip6_dst);
+		acl_net6_share_dump_rows("ip6_port src", ip6_port_src);
+		acl_net6_share_dump_rows("ip6_port dst", ip6_port_dst);
+	}
+
+	return 0;
+}
+
 int
 acl_module_config_update(
 	struct cp_module *cp_module,
@@ -637,6 +774,16 @@ acl_module_config_update(
 		goto error_rule_ptrs;
 
 	if (acl_module_init_ip6_port(
+		    cp_module,
+		    acl_rules,
+		    rule_count,
+		    filter_rules,
+		    filter_rule_ptrs,
+		    err
+	    ))
+		goto error_rule_ptrs;
+
+	if (acl_module_init_net6_share(
 		    cp_module,
 		    acl_rules,
 		    rule_count,

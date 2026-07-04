@@ -2,6 +2,7 @@
 
 #include "controlplane/config/cp_module.h"
 
+#include "lib/filter/classifiers/net6.h"
 #include "lib/filter/filter.h"
 #include "lib/fwstate/config.h"
 
@@ -29,6 +30,15 @@ struct acl_module_config {
 	struct filter filter_ip6;
 	struct filter filter_ip6_port;
 	struct filter filter_vlan;
+
+	// Shared v6 half-address classification for the two v6 filters.
+	//
+	// Built only when both filter_ip6 and filter_ip6_port compiled
+	// non-empty, so a single union trie walk classifies the address
+	// halves for both of them. net6_share_enabled is zero otherwise.
+	struct net6_share_dir net6_share_src;
+	struct net6_share_dir net6_share_dst;
+	uint32_t net6_share_enabled;
 
 	uint64_t target_count;
 	struct acl_target *targets;
