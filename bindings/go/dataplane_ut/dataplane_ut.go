@@ -416,8 +416,8 @@ var warnUnoptimizedOnce sync.Once
 
 // benchOptions configures a Bench run.
 type benchOptions struct {
-	resetPayload bool
-	deviceIDs    []uint16
+	ResetPayload bool
+	DeviceIDs    []uint16
 }
 
 func newBenchOptions() *benchOptions {
@@ -436,7 +436,7 @@ type BenchOption func(*benchOptions)
 // scope.
 func WithPayloadReset() BenchOption {
 	return func(opts *benchOptions) {
-		opts.resetPayload = true
+		opts.ResetPayload = true
 	}
 }
 
@@ -448,7 +448,7 @@ func WithPayloadReset() BenchOption {
 // via the harness packet snapshot.
 func WithDeviceIDs(ids []uint16) BenchOption {
 	return func(opts *benchOptions) {
-		opts.deviceIDs = ids
+		opts.DeviceIDs = ids
 	}
 }
 
@@ -480,7 +480,7 @@ func (m *Harness) Bench(
 	// The round dispatch indexes per-device scheduling arrays by the
 	// packet device id, so an id outside the registered topology would
 	// corrupt memory on the C side.
-	for idx, deviceID := range opts.deviceIDs {
+	for idx, deviceID := range opts.DeviceIDs {
 		if int(deviceID) >= m.deviceCount {
 			b.Fatalf(
 				"device id %d at packet %d exceeds topology device count %d",
@@ -495,9 +495,9 @@ func (m *Harness) Bench(
 	data := make([]dataplane.PacketData, 0, len(payloads))
 	for idx := range payloads {
 		packetData := dataplane.PacketData{Payload: payloads[idx]}
-		if idx < len(opts.deviceIDs) {
-			packetData.TxDeviceId = opts.deviceIDs[idx]
-			packetData.RxDeviceId = opts.deviceIDs[idx]
+		if idx < len(opts.DeviceIDs) {
+			packetData.TxDeviceId = opts.DeviceIDs[idx]
+			packetData.RxDeviceId = opts.DeviceIDs[idx]
 		}
 		data = append(data, packetData)
 	}
@@ -516,7 +516,7 @@ func (m *Harness) Bench(
 	numPkts := len(payloads)
 
 	reset := C.int(0)
-	if opts.resetPayload {
+	if opts.ResetPayload {
 		reset = C.int(1)
 	}
 
