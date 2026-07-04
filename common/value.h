@@ -8,6 +8,7 @@
 #include <stdint.h>
 
 #include "memory.h"
+#include "memory_block.h"
 #include "remap.h"
 
 #define VALUE_TABLE_CHUNK_SIZE 16384
@@ -16,6 +17,12 @@ struct value_table {
 	struct memory_context *memory_context;
 	uint32_t v_dim;
 	uint32_t h_dim;
+	// Nonzero when the table lives in one contiguous allocation.
+	//
+	// In flat mode values is a relative pointer straight to the uint32_t
+	// data block, so a lookup costs a single dependent load. In chunked
+	// mode values points to a directory of fixed-size chunks.
+	uint32_t flat;
 	uint32_t **values;
 };
 
@@ -26,6 +33,19 @@ value_table_free(struct value_table *value_table) {
 
 	uint64_t value_count = value_table->v_dim;
 	value_count *= value_table->h_dim;
+
+	if (value_table->flat) {
+		uint32_t *flat_values =
+			(uint32_t *)ADDR_OF(&value_table->values);
+		memory_bfree(
+			memory_context,
+			flat_values,
+			value_count * sizeof(uint32_t)
+		);
+		SET_OFFSET_OF(&value_table->values, NULL);
+		return;
+	}
+
 	uint32_t chunk_count = (value_count + VALUE_TABLE_CHUNK_SIZE - 1) /
 			       VALUE_TABLE_CHUNK_SIZE;
 
@@ -56,10 +76,31 @@ value_table_init(
 
 	value_table->v_dim = v_dim;
 	value_table->h_dim = h_dim;
+	value_table->flat = 0;
 
 	uint64_t value_count = v_dim;
 	value_count *= h_dim;
 
+	// Prefer one contiguous allocation: a flat table spends one dependent
+	// load per lookup instead of two. Compare in value units so the byte
+	// count cannot overflow.
+	if (value_count > 0 &&
+	    value_count <= MEMORY_BLOCK_ALLOCATOR_MAX_SIZE / sizeof(uint32_t)) {
+		uint32_t *flat_values = (uint32_t *)memory_balloc(
+			memory_context, value_count * sizeof(uint32_t)
+		);
+		if (flat_values != NULL) {
+			memset(flat_values, 0, value_count * sizeof(uint32_t));
+			SET_OFFSET_OF(
+				&value_table->values, (uint32_t **)flat_values
+			);
+			value_table->flat = 1;
+			return 0;
+		}
+	}
+
+	// The table is too large for a single allocator block or the flat
+	// allocation failed: fall back to the chunked directory layout.
 	uint32_t chunk_count = (value_count + VALUE_TABLE_CHUNK_SIZE - 1) /
 			       VALUE_TABLE_CHUNK_SIZE;
 
@@ -92,15 +133,19 @@ static inline uint32_t *
 value_table_get_ptr(
 	struct value_table *value_table, uint32_t v_idx, uint32_t h_idx
 ) {
-	// values and the chunk pointers are set at init and cleared only by
-	// value_table_free, which never races a lookup — so on the query path
-	// they are never NULL and the NULL test in ADDR_OF is pure per-lookup
-	// overhead.
-	uint32_t **values = ADDR_OF_NONNULL(&value_table->values);
 	uint64_t idx = v_idx;
 	idx *= value_table->h_dim;
 	idx += h_idx;
 
+	// values (flat base or chunk directory) and the chunk pointers are set
+	// at init and cleared only by value_table_free, which never races a
+	// lookup — so on the query path they are never NULL and the NULL test
+	// in ADDR_OF is pure per-lookup overhead.
+	if (value_table->flat) {
+		return (uint32_t *)ADDR_OF_NONNULL(&value_table->values) + idx;
+	}
+
+	uint32_t **values = ADDR_OF_NONNULL(&value_table->values);
 	return ADDR_OF_NONNULL(values + idx / VALUE_TABLE_CHUNK_SIZE) +
 	       idx % VALUE_TABLE_CHUNK_SIZE;
 }
