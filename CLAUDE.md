@@ -309,6 +309,31 @@ Meson orchestrates C/DPDK builds and Go binary compilation (via `custom_target` 
   composable primitives, or introduce a config struct (`struct foo_config`
   + designated initializer) to bring the call site to 3–4 args. "Omnibus
   init" functions (16–17 args) are the wrong shape for testable C.
+- **Multi-segment mbufs**: `rte_pktmbuf_data_len()` covers only the head
+  segment. Whole-packet operations (snapshot/restore, checksum, copy) must
+  walk the `mbuf->next` chain / use `rte_pktmbuf_pkt_len()`, or explicitly
+  reject chained packets.
+- **Zero-valued config limits mean "unset / no clamp"** across the dataplane.
+  Never feed the sentinel into min/subtraction arithmetic, and clamp (do not
+  bypass) accepted-but-degenerate values below internal header deltas.
+- **Write wire-format fields at their full declared width** when recycling a
+  header in place: a 16-bit store into a reused 32-bit field leaves stale
+  upper bytes and a malformed packet.
+
+### Tests & Benchmarks
+
+- **A benchmark must demonstrably exercise the path it claims to measure**:
+  synthesized traffic matches the ruleset (protocols, device scoping,
+  address families), sampling covers the whole dataset (no integer-division
+  `stride == 1` prefix bias), and every documented input mode works
+  end-to-end.
+- **dataplane_ut `Bench`/`run_rounds` recycles a fixed packet set**: module
+  actions that allocate or emit packets (e.g., ACL `CREATE_STATE` sync)
+  must be rejected or neutralized in benchmarks, or they leak mbufs and
+  shift what is measured.
+- **Exported Go APIs whose arguments cross CGO into C-side array indexing**
+  (device IDs, queue/worker indices) validate the range on the Go side
+  before the call.
 
 ### TypeScript/React
 
