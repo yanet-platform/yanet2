@@ -176,6 +176,10 @@ type RawResult struct {
 // struct holds self-referential pointers.
 type Harness struct {
 	ptr *C.struct_dataplane_ut
+	// Registered topology device count; device ids passed to bench runs
+	// must stay below it. An empty Devices config still exposes the
+	// implicit device slot zero.
+	deviceCount int
 }
 
 // NewHarness constructs a Harness from cfg.
@@ -226,7 +230,11 @@ func NewHarness(cfg Config) (*Harness, error) {
 		return nil, fmt.Errorf("failed to create dataplane harness: dataplane_ut_new returned NULL")
 	}
 
-	return &Harness{ptr: ptr}, nil
+	deviceCount := len(cfg.Devices)
+	if deviceCount == 0 {
+		deviceCount = 1
+	}
+	return &Harness{ptr: ptr, deviceCount: deviceCount}, nil
 }
 
 // Free tears down the harness. Nil-safe.
@@ -409,6 +417,7 @@ var warnUnoptimizedOnce sync.Once
 // benchOptions configures a Bench run.
 type benchOptions struct {
 	resetPayload bool
+	deviceIDs    []uint16
 }
 
 func newBenchOptions() *benchOptions {
@@ -428,6 +437,18 @@ type BenchOption func(*benchOptions)
 func WithPayloadReset() BenchOption {
 	return func(opts *benchOptions) {
 		opts.resetPayload = true
+	}
+}
+
+// WithDeviceIDs assigns per-packet rx/tx device ids before the run.
+//
+// ids[i] is written into packets[i]; packets past len(ids) keep device 0.
+// The round dispatch then splits the burst into per-device fronts the way
+// a real multi-device worker round does. Ids persist across bench rounds
+// via the harness packet snapshot.
+func WithDeviceIDs(ids []uint16) BenchOption {
+	return func(opts *benchOptions) {
+		opts.deviceIDs = ids
 	}
 }
 
@@ -456,14 +477,29 @@ func (m *Harness) Bench(
 	pinner := runtime.Pinner{}
 	defer pinner.Unpin()
 
+	// The round dispatch indexes per-device scheduling arrays by the
+	// packet device id, so an id outside the registered topology would
+	// corrupt memory on the C side.
+	for idx, deviceID := range opts.deviceIDs {
+		if int(deviceID) >= m.deviceCount {
+			b.Fatalf(
+				"device id %d at packet %d exceeds topology device count %d",
+				deviceID,
+				idx,
+				m.deviceCount,
+			)
+		}
+	}
+
 	payloads := xpacket.PacketsGoPayload(packets...)
 	data := make([]dataplane.PacketData, 0, len(payloads))
 	for idx := range payloads {
-		data = append(data, dataplane.PacketData{
-			Payload:    payloads[idx],
-			TxDeviceId: 0,
-			RxDeviceId: 0,
-		})
+		packetData := dataplane.PacketData{Payload: payloads[idx]}
+		if idx < len(opts.deviceIDs) {
+			packetData.TxDeviceId = opts.deviceIDs[idx]
+			packetData.RxDeviceId = opts.deviceIDs[idx]
+		}
+		data = append(data, packetData)
 	}
 
 	packetList, err := dataplane.NewPacketListFromData(&pinner, data...)

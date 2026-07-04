@@ -10,7 +10,7 @@ package acl_test
 // ruleset and the traffic are synthesized deterministically with a
 // production-like shape, so the benchmark runs standalone:
 //
-//	go test -run '^$' -bench BenchmarkACLDataset -benchtime 1s -count 6 \
+//	go test -run '^$' -bench 'BenchmarkACLDataset$' -benchtime 1s -count 6 \
 //	    ./modules/acl/tests/functional/
 //
 // Real data can be supplied instead (never committed to the repo):
@@ -19,8 +19,11 @@ package acl_test
 //	ACL_DATASET_PCAP=/path/traffic.pcap  pcap or pcapng traffic sample
 //	ACL_DATASET_RULE_COUNT=8192          synthetic ruleset size override
 //
-// The expensive compile runs once per process and is shared by all
-// sub-benchmarks and -count repetitions.
+// The expensive compile runs once per benchmark family and is shared by
+// its sub-benchmarks and -count repetitions. BenchmarkACLDatasetTopo
+// replays the same dataset through the production-shaped device
+// topology and builds a separate harness, so an unanchored -bench
+// pattern selecting both families pays two compiles.
 
 import (
 	"encoding/json"
@@ -587,6 +590,40 @@ func synthesizeDatasetPackets(
 	return packets
 }
 
+// datasetBenchRules resolves the benchmark ruleset and the harness
+// memory sizes it needs: a real dump from ACL_DATASET_RULES or the
+// synthesized production-shaped set.
+func datasetBenchRules(
+	b *testing.B,
+) ([]cacl.AclRule, datasize.ByteSize, datasize.ByteSize, error) {
+	if path := os.Getenv("ACL_DATASET_RULES"); path != "" {
+		rules := loadDatasetRules(b, path)
+		return rules, 24 * datasize.GB, 16 * datasize.GB, nil
+	}
+	count := 8192
+	if v := os.Getenv("ACL_DATASET_RULE_COUNT"); v != "" {
+		parsed, err := strconv.Atoi(v)
+		if err != nil || parsed <= 0 {
+			return nil, 0, 0, fmt.Errorf(
+				"invalid ACL_DATASET_RULE_COUNT %q", v,
+			)
+		}
+		count = parsed
+	}
+	return generateDatasetRules(count), 8 * datasize.GB, 6 * datasize.GB, nil
+}
+
+// datasetBenchPackets resolves the benchmark traffic: a real capture
+// from ACL_DATASET_PCAP or flows synthesized from the ruleset.
+func datasetBenchPackets(
+	b *testing.B, rules []cacl.AclRule,
+) ([]gopacket.Packet, error) {
+	if path := os.Getenv("ACL_DATASET_PCAP"); path != "" {
+		return loadDatasetPackets(path, 4096)
+	}
+	return synthesizeDatasetPackets(b, rules, 4096), nil
+}
+
 // datasetBenchState holds the lazily-built harness shared by every
 // sub-benchmark in the process, so the expensive compile runs once.
 type datasetBenchState struct {
@@ -604,39 +641,16 @@ var (
 
 func datasetBenchSetup(b *testing.B) *datasetBenchState {
 	datasetBenchOnce.Do(func() {
-		var rules []cacl.AclRule
-		cpMemory := 8 * datasize.GB
-		agentMemory := 6 * datasize.GB
-		if path := os.Getenv("ACL_DATASET_RULES"); path != "" {
-			rules = loadDatasetRules(b, path)
-			cpMemory = 24 * datasize.GB
-			agentMemory = 16 * datasize.GB
-		} else {
-			count := 8192
-			if v := os.Getenv("ACL_DATASET_RULE_COUNT"); v != "" {
-				parsed, err := strconv.Atoi(v)
-				if err != nil || parsed <= 0 {
-					datasetBenchErr = fmt.Errorf(
-						"invalid ACL_DATASET_RULE_COUNT %q",
-						v,
-					)
-					return
-				}
-				count = parsed
-			}
-			rules = generateDatasetRules(count)
+		rules, cpMemory, agentMemory, err := datasetBenchRules(b)
+		if err != nil {
+			datasetBenchErr = err
+			return
 		}
 
-		var packets []gopacket.Packet
-		if path := os.Getenv("ACL_DATASET_PCAP"); path != "" {
-			var err error
-			packets, err = loadDatasetPackets(path, 4096)
-			if err != nil {
-				datasetBenchErr = err
-				return
-			}
-		} else {
-			packets = synthesizeDatasetPackets(b, rules, 4096)
+		packets, err := datasetBenchPackets(b, rules)
+		if err != nil {
+			datasetBenchErr = err
+			return
 		}
 
 		// Register the harness device under the device name the rules
@@ -717,6 +731,218 @@ func BenchmarkACLDataset(b *testing.B) {
 		}
 		b.Run(fmt.Sprintf("batch=%d", batchSize), func(b *testing.B) {
 			state.harness.Bench(b, state.packets[:batchSize])
+		})
+	}
+}
+
+// datasetTopoDevices mirrors the production device topology: every rule
+// in the production dumps is device-scoped and traffic reaches ACL
+// through per-vlan devices sharing one pipeline, so a single-device run
+// leaves most device classes cold and overstates batch locality.
+var datasetTopoDevices = []string{
+	"lp.kni0.802",
+	"lp.kni0.1600",
+	"lp.kni0.1619",
+	"lp.kni0.1802",
+	"lp.kni0.2000",
+	"lp.kni0.2600",
+	"lp.kni0.2619",
+}
+
+// datasetTopoACLDevices lists positions in datasetTopoDevices whose
+// input pipeline runs ACL; the .2000 device carries the fwstate path in
+// production and bypasses ACL.
+var datasetTopoACLDevices = []uint16{0, 1, 2, 3, 5, 6}
+
+var (
+	topoBenchOnce sync.Once
+	topoBench     *datasetBenchState
+	topoBenchErr  error
+)
+
+// assignDatasetTopoDevices scopes device-less rules to the topology
+// devices with a production-like skew.
+//
+// Production dumps scope every rule explicitly, so real rulesets pass
+// through untouched. Synthesized rules carry no device scopes, which
+// would collapse the device classifier column to a single class and
+// reduce the topology benchmark to batch splitting; the catch-all rule
+// spans every rule-bearing device the way per-device catch-alls do in
+// production. The remaining replayed devices deliberately stay
+// rule-free: in the production dump they carry traffic but no rules,
+// so their share of the replay exercises the genuine no-match path.
+func assignDatasetTopoDevices(rules []cacl.AclRule) {
+	ruleBearing := []filter.Device{
+		{Name: "lp.kni0.1619"},
+		{Name: "lp.kni0.1600"},
+		{Name: "lp.kni0.802"},
+		{Name: "lp.kni0.2000"},
+	}
+	for idx := range rules {
+		rule := &rules[idx]
+		if len(rule.Devices) > 0 {
+			continue
+		}
+		if rule.Counter == "dataset_catch_all" {
+			rule.Devices = append(rule.Devices, ruleBearing...)
+			continue
+		}
+		switch pick := idx % 10; {
+		case pick < 4:
+			rule.Devices = []filter.Device{ruleBearing[0]}
+		case pick < 7:
+			rule.Devices = []filter.Device{ruleBearing[1]}
+		case pick < 8:
+			rule.Devices = []filter.Device{ruleBearing[2]}
+		case pick < 9:
+			rule.Devices = []filter.Device{ruleBearing[3]}
+		default:
+			rule.Devices = []filter.Device{
+				ruleBearing[0], ruleBearing[1],
+			}
+		}
+	}
+}
+
+// datasetTopoBenchSetup builds the production-topology harness once per
+// process, compiling the same ruleset as the single-device benchmark.
+func datasetTopoBenchSetup(b *testing.B) *datasetBenchState {
+	topoBenchOnce.Do(func() {
+		rules, cpMemory, agentMemory, err := datasetBenchRules(b)
+		if err != nil {
+			topoBenchErr = err
+			return
+		}
+		assignDatasetTopoDevices(rules)
+
+		packets, err := datasetBenchPackets(b, rules)
+		if err != nil {
+			topoBenchErr = err
+			return
+		}
+
+		cfg := dataplaneut.Config{
+			CPMemory:      uint64(cpMemory),
+			DPMemory:      uint64(64 * datasize.MB),
+			WorkerCount:   1,
+			Devices:       datasetTopoDevices,
+			Modules:       []string{"acl"},
+			DevicesToLoad: []string{"plain"},
+		}
+		harness, err := dataplaneut.NewHarness(cfg)
+		if err != nil {
+			topoBenchErr = err
+			return
+		}
+		agent, err := harness.SharedMemory().AgentAttach(
+			"acl-dataset-topo", 0, agentMemory,
+		)
+		if err != nil {
+			topoBenchErr = err
+			return
+		}
+		backend := acl.NewBackend(agent, uint64(agentMemory))
+
+		handle, err := backend.NewModule("dataset")
+		if err != nil {
+			topoBenchErr = err
+			return
+		}
+		if topoBenchErr = handle.UpdateRules(rules); topoBenchErr != nil {
+			return
+		}
+		if topoBenchErr = backend.UpdateModule(handle); topoBenchErr != nil {
+			return
+		}
+		topoBench = &datasetBenchState{
+			harness: harness,
+			agent:   agent,
+			packets: packets,
+		}
+	})
+	require.NoError(b, topoBenchErr)
+	require.NotNil(
+		b, topoBench, "topology setup failed in an earlier run",
+	)
+	return topoBench
+}
+
+// wireACLTopoPipeline binds the ACL pipeline to the ACL-facing topology
+// devices and a pass-through pipeline to the rest.
+func wireACLTopoPipeline(tb testing.TB, agent *ffi.Agent, configName string) {
+	tb.Helper()
+
+	require.NoError(tb, agent.UpdateFunction(ffi.FunctionConfig{
+		Name: configName,
+		Chains: []ffi.FunctionChainConfig{{
+			Weight: 1,
+			Chain: ffi.ChainConfig{
+				Name: configName + "_chain",
+				Modules: []ffi.ChainModuleConfig{
+					{Type: "acl", Name: configName},
+				},
+			},
+		}},
+	}))
+	require.NoError(tb, agent.UpdatePipeline(ffi.PipelineConfig{
+		Name:      configName,
+		Functions: []string{configName},
+	}))
+	require.NoError(tb, agent.UpdatePipeline(ffi.PipelineConfig{
+		Name: "dummy-in",
+	}))
+	require.NoError(tb, agent.UpdatePipeline(ffi.PipelineConfig{
+		Name: "dummy-out",
+	}))
+
+	aclInput := map[uint16]bool{}
+	for _, deviceIdx := range datasetTopoACLDevices {
+		aclInput[deviceIdx] = true
+	}
+	devices := make([]ffi.DeviceConfig, 0, len(datasetTopoDevices))
+	for idx, name := range datasetTopoDevices {
+		input := "dummy-in"
+		if aclInput[uint16(idx)] {
+			input = configName
+		}
+		devices = append(devices, ffi.DeviceConfig{
+			Name:   name,
+			Input:  []ffi.DevicePipelineConfig{{Name: input, Weight: 1}},
+			Output: []ffi.DevicePipelineConfig{{Name: "dummy-out", Weight: 1}},
+		})
+	}
+	require.NoError(tb, agent.UpdatePlainDevices(devices))
+}
+
+// BenchmarkACLDatasetTopo replays the dataset traffic through the
+// production-shaped device topology.
+//
+// Flows spread round-robin across the ACL-facing vlan devices and the
+// round dispatch splits every batch into per-device fronts the way the
+// production vlan demux does, so per-device rule slices, the device
+// classifier column and batch fragmentation all behave as in production.
+func BenchmarkACLDatasetTopo(b *testing.B) {
+	state := datasetTopoBenchSetup(b)
+	b.Logf("distinct flows loaded: %d", len(state.packets))
+
+	wireACLTopoPipeline(b, state.agent, "dataset")
+
+	deviceIDs := make([]uint16, len(state.packets))
+	for idx := range deviceIDs {
+		deviceIDs[idx] =
+			datasetTopoACLDevices[idx%len(datasetTopoACLDevices)]
+	}
+
+	for _, batchSize := range []int{32, 512, 4096} {
+		if batchSize > len(state.packets) {
+			continue
+		}
+		b.Run(fmt.Sprintf("batch=%d", batchSize), func(b *testing.B) {
+			state.harness.Bench(
+				b,
+				state.packets[:batchSize],
+				dataplaneut.WithDeviceIDs(deviceIDs[:batchSize]),
+			)
 		})
 	}
 }
