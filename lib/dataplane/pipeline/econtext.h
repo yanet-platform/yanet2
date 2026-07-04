@@ -8,6 +8,7 @@
 
 #include "lib/dataplane/counters/module.h"
 
+struct counter_value_handle;
 struct counter_storage;
 
 struct cp_module;
@@ -23,11 +24,12 @@ struct module_ectx {
 	module_handler handler;
 	struct cp_module *cp_module;
 
-	uint64_t rx_counter_id;
-	uint64_t tx_counter_id;
-	uint64_t rx_bytes_counter_id;
-	uint64_t tx_bytes_counter_id;
-	uint64_t perf_counters_indices[MODULE_ECTX_PERF_COUNTERS];
+	struct counter_value_handle *rx_counter;
+	struct counter_value_handle *tx_counter;
+	struct counter_value_handle *rx_bytes_counter;
+	struct counter_value_handle *tx_bytes_counter;
+
+	struct counter_value_handle *perf_counters[MODULE_ECTX_PERF_COUNTERS];
 
 	struct counter_storage *counter_storage;
 	struct config_gen_ectx *config_gen_ectx;
@@ -53,7 +55,7 @@ module_ectx_decode_device(struct module_ectx *module_ectx, uint64_t index) {
 
 struct chain_module_ectx {
 	struct module_ectx *module_ectx;
-	uint64_t tsc_counter_id;
+	struct counter_value_handle *tsc_counter;
 };
 
 struct chain_ectx {
@@ -65,12 +67,12 @@ struct chain_ectx {
 
 struct function_ectx {
 	struct cp_function *cp_function;
-	uint64_t counter_packet_in_count;
-	uint64_t counter_packet_in_bytes;
-	uint64_t counter_packet_out_count;
-	uint64_t counter_packet_out_bytes;
-	uint64_t counter_packet_drop_count;
-	uint64_t counter_packet_drop_bytes;
+	struct counter_value_handle *counter_packet_in_count;
+	struct counter_value_handle *counter_packet_in_bytes;
+	struct counter_value_handle *counter_packet_out_count;
+	struct counter_value_handle *counter_packet_out_bytes;
+	struct counter_value_handle *counter_packet_drop_count;
+	struct counter_value_handle *counter_packet_drop_bytes;
 	struct counter_storage *counter_storage;
 	uint64_t chain_count;
 	struct chain_ectx **chains;
@@ -80,12 +82,12 @@ struct function_ectx {
 
 struct pipeline_ectx {
 	struct cp_pipeline *cp_pipeline;
-	uint64_t counter_packet_in_count;
-	uint64_t counter_packet_in_bytes;
-	uint64_t counter_packet_out_count;
-	uint64_t counter_packet_out_bytes;
-	uint64_t counter_packet_drop_count;
-	uint64_t counter_packet_drop_bytes;
+	struct counter_value_handle *counter_packet_in_count;
+	struct counter_value_handle *counter_packet_in_bytes;
+	struct counter_value_handle *counter_packet_out_count;
+	struct counter_value_handle *counter_packet_out_bytes;
+	struct counter_value_handle *counter_packet_drop_count;
+	struct counter_value_handle *counter_packet_drop_bytes;
 	struct counter_storage *counter_storage;
 	uint64_t length;
 	struct function_ectx *functions[];
@@ -101,10 +103,10 @@ struct device_entry_ectx {
 
 struct device_ectx {
 	struct cp_device *cp_device;
-	uint64_t counter_packet_rx_count;
-	uint64_t counter_packet_rx_bytes;
-	uint64_t counter_packet_tx_count;
-	uint64_t counter_packet_tx_bytes;
+	struct counter_value_handle *counter_packet_rx_count;
+	struct counter_value_handle *counter_packet_rx_bytes;
+	struct counter_value_handle *counter_packet_tx_count;
+	struct counter_value_handle *counter_packet_tx_bytes;
 	struct counter_storage *counter_storage;
 	struct device_entry_ectx *input_pipelines;
 	struct device_entry_ectx *output_pipelines;
