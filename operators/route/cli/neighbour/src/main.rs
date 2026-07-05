@@ -5,7 +5,6 @@
 //! has propagated) and drives the operator-owned neighbour tables.
 
 use core::{
-    error::Error,
     fmt::{self, Display, Formatter},
     net::IpAddr,
     time::Duration,
@@ -19,14 +18,15 @@ use netip::MacAddr;
 use tabled::Tabled;
 use tonic::codec::CompressionEncoding;
 use ync::{
-    client::{ConnectionArgs, LayeredChannel},
+    client::{ConnectionArgs, LayeredChannel, Service},
     display::print_table_from_entries,
-    logging,
+    errors::{Error, NotFoundMapper},
+    output::{self, CommonFormat},
 };
 
 use crate::operatorpb::{
     CreateNeighbourTableRequest, ListNeighbourTablesRequest, ListNeighboursRequest,
-    NeighbourEntry as ProtoNeighbourEntry, RemoveNeighbourTableRequest, RemoveNeighboursRequest,
+    NeighbourEntry as ProtoNeighbourEntry, NeighbourTableInfo, RemoveNeighbourTableRequest, RemoveNeighboursRequest,
     UpdateNeighbourTableRequest, UpdateNeighboursRequest, neighbour_service_client::NeighbourServiceClient,
 };
 
@@ -34,6 +34,12 @@ use crate::operatorpb::{
 pub mod operatorpb {
     tonic::include_proto!("operators.route.operatorpb.v1");
 }
+
+/// The fully-qualified gRPC service name used in error messages.
+const SERVICE_NAME: &str = "operators.route.operatorpb.v1.NeighbourService";
+
+/// Maps a genuine "table not found" status into a friendly message.
+const NOT_FOUND: NotFoundMapper = NotFoundMapper::new(SERVICE_NAME, "requested table");
 
 /// Neighbour operator CLI (neighbour table management).
 #[derive(Debug, Clone, Parser)]
@@ -44,6 +50,9 @@ pub struct Cmd {
     pub mode: ModeCmd,
     #[command(flatten)]
     pub connection: ConnectionArgs,
+    /// Output format.
+    #[arg(long, default_value = "human", global = true)]
+    pub format: CommonFormat,
     /// Be verbose in terms of logging.
     #[clap(short, action = ArgAction::Count, global = true)]
     pub verbose: u8,
@@ -147,19 +156,19 @@ pub async fn main() {
     CompleteEnv::with_factory(Cmd::command).complete();
 
     let cmd = Cmd::parse();
-    logging::init(cmd.verbose as usize).expect("no error expected");
+    ync::init(cmd.verbose, cmd.format);
 
     if let Err(err) = run(cmd).await {
-        log::error!("ERROR: {err}");
-        std::process::exit(1);
+        output::failure(&err);
+        std::process::exit(err.exit_code());
     }
 }
 
-async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
+async fn run(cmd: Cmd) -> Result<(), Error> {
     let mut service = NeighbourService::new(&cmd.connection).await?;
 
     match cmd.mode {
-        ModeCmd::Show(args) => service.show_neighbours(args.table).await,
+        ModeCmd::Show(args) => service.show_neighbours(args).await,
         ModeCmd::Add(args) => service.update_neighbour(args).await,
         ModeCmd::Remove(args) => service.remove_neighbours(args).await,
         ModeCmd::Table(cmd) => match cmd.action {
@@ -172,148 +181,200 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
 }
 
 pub struct NeighbourService {
-    client: NeighbourServiceClient<LayeredChannel>,
+    service: Service<NeighbourServiceClient<LayeredChannel>>,
 }
 
 impl NeighbourService {
-    pub async fn new(connection: &ConnectionArgs) -> Result<Self, Box<dyn Error>> {
-        let channel = ync::client::connect(connection).await?;
-        let client = NeighbourServiceClient::new(channel)
-            .send_compressed(CompressionEncoding::Gzip)
-            .accept_compressed(CompressionEncoding::Gzip);
-        Ok(Self { client })
+    pub async fn new(connection: &ConnectionArgs) -> Result<Self, Error> {
+        let service = Service::connect(connection, SERVICE_NAME, |channel| {
+            NeighbourServiceClient::new(channel)
+                .send_compressed(CompressionEncoding::Gzip)
+                .accept_compressed(CompressionEncoding::Gzip)
+        })
+        .await?;
+
+        Ok(Self { service })
     }
 
-    pub async fn show_neighbours(&mut self, table: Option<String>) -> Result<(), Box<dyn Error>> {
-        let request = ListNeighboursRequest { table: table.unwrap_or_default() };
-        let response = self.client.list(request).await?.into_inner();
+    pub async fn show_neighbours(&mut self, cmd: ShowCmd) -> Result<(), Error> {
+        let request = ListNeighboursRequest {
+            table: cmd.table.clone().unwrap_or_default(),
+        };
+        let resource = cmd.table.as_ref().map(|table| format!("table '{table}'"));
 
-        let mut entries = response
-            .neighbours
-            .into_iter()
-            .map(|entry| -> Result<NeighbourEntry, Box<dyn Error>> {
-                let updated_at = UNIX_EPOCH + Duration::from_secs(entry.updated_at as u64);
-                let next_hop: IpAddr =
-                    IpAddr::try_from(entry.next_hop.as_ref().ok_or("neighbour entry missing next_hop")?)?;
+        let response = self
+            .service
+            .client()
+            .list(request)
+            .await
+            .map_err(|status| NOT_FOUND.map(status, "show", self.service.endpoint(), resource.as_deref()))?
+            .into_inner();
 
-                let link_addr = match entry.link_addr {
-                    Some(v) => MacAddr::try_from(&v)?,
-                    None => MacAddr::from(0),
-                };
-                let hardware_addr = match entry.hardware_addr {
-                    Some(v) => MacAddr::try_from(&v)?,
-                    None => MacAddr::from(0),
-                };
+        let empty_message = match &cmd.table {
+            Some(table) => format!("no neighbours in {table}"),
+            None => "no neighbours".to_owned(),
+        };
 
-                Ok(NeighbourEntry {
-                    next_hop,
-                    link_addr,
-                    hardware_addr,
-                    device: entry.device,
-                    state: State(entry.state),
-                    age: Age(updated_at),
-                    source: entry.source,
-                    priority: entry.priority,
-                })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+        output::data(
+            &response.neighbours,
+            response.neighbours.is_empty(),
+            format_args!("{empty_message}"),
+            || {
+                let mut entries: Vec<NeighbourEntry> =
+                    response.neighbours.iter().cloned().map(NeighbourEntry::from).collect();
+                entries.sort_by(|a, b| (a.state, &a.next_hop).cmp(&(b.state, &b.next_hop)));
+                print_table_from_entries(entries);
+            },
+        );
 
-        entries.sort_by(|a, b| (a.state, &a.next_hop).cmp(&(b.state, &b.next_hop)));
-
-        print_table_from_entries(entries);
         Ok(())
     }
 
-    pub async fn update_neighbour(&mut self, args: AddCmd) -> Result<(), Box<dyn Error>> {
-        let link_addr = parse_mac(&args.link_addr)?;
-        let hardware_addr = parse_mac(&args.hardware_addr)?;
+    pub async fn update_neighbour(&mut self, cmd: AddCmd) -> Result<(), Error> {
+        let link_addr = parse_mac(&cmd.link_addr).map_err(|err| self.service.invalid("add", err))?;
+        let hardware_addr = parse_mac(&cmd.hardware_addr).map_err(|err| self.service.invalid("add", err))?;
+        let next_hop = cmd
+            .next_hop
+            .parse::<IpAddress>()
+            .map_err(|err| self.service.invalid("add", err.to_string()))?;
+        let table = cmd.table.clone().unwrap_or_else(|| "static".to_owned());
 
         let request = UpdateNeighboursRequest {
-            table: args.table.unwrap_or_default(),
+            table: cmd.table.clone().unwrap_or_default(),
             entries: vec![ProtoNeighbourEntry {
-                next_hop: Some(args.next_hop.parse::<IpAddress>()?),
+                next_hop: Some(next_hop),
                 link_addr: Some(link_addr),
                 hardware_addr: Some(hardware_addr),
-                device: args.device.unwrap_or_default(),
-                priority: args.priority.unwrap_or_default(),
+                priority: cmd.priority.unwrap_or_default(),
+                device: cmd.device.clone().unwrap_or_default(),
                 ..Default::default()
             }],
         };
 
-        self.client.update_neighbours(request).await?;
-        println!("OK");
+        self.service
+            .client()
+            .update_neighbours(request)
+            .await
+            .map_err(self.service.status("add"))?;
+
+        output::success(
+            "add",
+            format_args!(
+                "Added neighbour {} ({}) to table {}.",
+                cmd.next_hop, cmd.link_addr, table
+            ),
+        );
+
         Ok(())
     }
 
-    pub async fn remove_neighbours(&mut self, args: RemoveCmd) -> Result<(), Box<dyn Error>> {
-        let next_hops = args
+    pub async fn remove_neighbours(&mut self, cmd: RemoveCmd) -> Result<(), Error> {
+        let next_hops = cmd
             .next_hops
-            .into_iter()
-            .map(|s| s.parse::<IpAddress>())
-            .collect::<Result<Vec<_>, _>>()?;
+            .iter()
+            .map(|next_hop| next_hop.parse::<IpAddress>().map_err(|err| err.to_string()))
+            .collect::<Result<Vec<_>, String>>()
+            .map_err(|err| self.service.invalid("remove", err))?;
+        let table = cmd.table.clone().unwrap_or_else(|| "static".to_owned());
+
         let request = RemoveNeighboursRequest {
-            table: args.table.unwrap_or_default(),
+            table: cmd.table.clone().unwrap_or_default(),
             next_hops,
         };
 
-        self.client.remove_neighbours(request).await?;
-        println!("OK");
+        self.service
+            .client()
+            .remove_neighbours(request)
+            .await
+            .map_err(self.service.status("remove"))?;
+
+        output::success(
+            "remove",
+            format_args!("Removed {} from table {}.", cmd.next_hops.join(", "), table),
+        );
+
         Ok(())
     }
 
-    pub async fn list_tables(&mut self) -> Result<(), Box<dyn Error>> {
+    pub async fn list_tables(&mut self) -> Result<(), Error> {
         let response = self
-            .client
+            .service
+            .client()
             .list_tables(ListNeighbourTablesRequest {})
-            .await?
+            .await
+            .map_err(self.service.status("list tables"))?
             .into_inner();
 
-        let entries: Vec<TableEntry> = response
-            .tables
-            .into_iter()
-            .map(|t| TableEntry {
-                name: t.name,
-                default_priority: t.default_priority,
-                entry_count: t.entry_count,
-                built_in: t.built_in,
-            })
-            .collect();
+        output::data(
+            &response.tables,
+            response.tables.is_empty(),
+            format_args!("no neighbour tables"),
+            || {
+                let entries: Vec<TableEntry> = response.tables.iter().cloned().map(TableEntry::from).collect();
+                print_table_from_entries(entries);
+            },
+        );
 
-        print_table_from_entries(entries);
         Ok(())
     }
 
-    pub async fn create_table(&mut self, args: CreateTableCmd) -> Result<(), Box<dyn Error>> {
+    pub async fn create_table(&mut self, cmd: CreateTableCmd) -> Result<(), Error> {
         let request = CreateNeighbourTableRequest {
-            name: args.name,
-            default_priority: args.default_priority,
+            name: cmd.name.clone(),
+            default_priority: cmd.default_priority,
         };
-        self.client.create_table(request).await?;
-        println!("OK");
+
+        self.service
+            .client()
+            .create_table(request)
+            .await
+            .map_err(self.service.status("create table"))?;
+
+        output::success("create table", format_args!("Created neighbour table {}.", cmd.name));
+
         Ok(())
     }
 
-    pub async fn update_table(&mut self, args: UpdateTableCmd) -> Result<(), Box<dyn Error>> {
+    pub async fn update_table(&mut self, cmd: UpdateTableCmd) -> Result<(), Error> {
         let request = UpdateNeighbourTableRequest {
-            name: args.name,
-            default_priority: args.default_priority,
+            name: cmd.name.clone(),
+            default_priority: cmd.default_priority,
         };
-        self.client.update_table(request).await?;
-        println!("OK");
+
+        self.service
+            .client()
+            .update_table(request)
+            .await
+            .map_err(self.service.status("update table"))?;
+
+        output::success(
+            "update table",
+            format_args!(
+                "Updated neighbour table {} (default priority {}).",
+                cmd.name, cmd.default_priority
+            ),
+        );
+
         Ok(())
     }
 
-    pub async fn remove_table(&mut self, args: RemoveTableCmd) -> Result<(), Box<dyn Error>> {
-        let request = RemoveNeighbourTableRequest { name: args.name };
-        self.client.remove_table(request).await?;
-        println!("OK");
+    pub async fn remove_table(&mut self, cmd: RemoveTableCmd) -> Result<(), Error> {
+        let request = RemoveNeighbourTableRequest { name: cmd.name.clone() };
+
+        self.service
+            .client()
+            .remove_table(request)
+            .await
+            .map_err(self.service.status("remove table"))?;
+
+        output::success("remove table", format_args!("Removed neighbour table {}.", cmd.name));
+
         Ok(())
     }
 }
 
-fn parse_mac(s: &str) -> Result<MacAddress, Box<dyn Error>> {
-    let mac: MacAddr = s.parse()?;
-    Ok(mac.into())
+fn parse_mac(s: &str) -> Result<MacAddress, String> {
+    s.parse::<MacAddr>().map(MacAddr::into).map_err(|err| err.to_string())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -370,6 +431,35 @@ pub struct NeighbourEntry {
     pub priority: u32,
 }
 
+impl From<ProtoNeighbourEntry> for NeighbourEntry {
+    fn from(entry: ProtoNeighbourEntry) -> Self {
+        let updated_at = UNIX_EPOCH + Duration::from_secs(entry.updated_at as u64);
+        let next_hop = IpAddr::try_from(entry.next_hop.as_ref().expect("neighbour entry missing next_hop"))
+            .expect("neighbour entry has invalid next_hop");
+        let link_addr = entry
+            .link_addr
+            .as_ref()
+            .map(|addr| MacAddr::try_from(addr).expect("neighbour entry has invalid link_addr"))
+            .unwrap_or_else(|| MacAddr::from(0));
+        let hardware_addr = entry
+            .hardware_addr
+            .as_ref()
+            .map(|addr| MacAddr::try_from(addr).expect("neighbour entry has invalid hardware_addr"))
+            .unwrap_or_else(|| MacAddr::from(0));
+
+        Self {
+            next_hop,
+            link_addr,
+            hardware_addr,
+            device: entry.device,
+            state: State(entry.state),
+            age: Age(updated_at),
+            source: entry.source,
+            priority: entry.priority,
+        }
+    }
+}
+
 #[derive(Debug, Tabled)]
 pub struct TableEntry {
     #[tabled(rename = "NAME")]
@@ -380,4 +470,15 @@ pub struct TableEntry {
     pub entry_count: i64,
     #[tabled(rename = "BUILT-IN")]
     pub built_in: bool,
+}
+
+impl From<NeighbourTableInfo> for TableEntry {
+    fn from(table: NeighbourTableInfo) -> Self {
+        Self {
+            name: table.name,
+            default_priority: table.default_priority,
+            entry_count: table.entry_count,
+            built_in: table.built_in,
+        }
+    }
 }

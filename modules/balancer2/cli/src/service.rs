@@ -1,4 +1,4 @@
-use std::{error::Error, net::IpAddr, time};
+use std::{net::IpAddr, time};
 
 use ptree::TreeBuilder;
 use tonic::codec::CompressionEncoding;
@@ -7,7 +7,11 @@ use yanet_cli_balancer2::balancerpb::{
     ListSessionsStatesRequest, PacketHandlerRef, RealUpdate, UpdateConfigRequest, UpdateRealsRequest,
     UpdateSessionsStateRequest, balancer_client::BalancerClient,
 };
-use ync::client::{ConnectionArgs, LayeredChannel};
+use ync::{
+    client::{ConnectionArgs, LayeredChannel, Service},
+    errors::Error,
+    output::{self, CommonFormat},
+};
 
 use crate::{
     ConfigCmd, MetricsCmd, ModeCmd, ShowCmd, UpdateCmd, VsId,
@@ -17,20 +21,26 @@ use crate::{
     sessions::{SessionsMode, SessionsShowCmd, SessionsUpdateCmd},
 };
 
+/// The fully-qualified gRPC service name used in error messages.
+const SERVICE_NAME: &str = "modules.balancer2.controlplane.balancerpb.v1.Balancer";
+
 pub struct Balancer2Service {
-    client: BalancerClient<LayeredChannel>,
+    service: Service<BalancerClient<LayeredChannel>>,
 }
 
 impl Balancer2Service {
-    pub async fn connect(connection: &ConnectionArgs) -> Result<Self, Box<dyn Error>> {
-        let channel = ync::client::connect(connection).await?;
-        let client = BalancerClient::new(channel)
-            .send_compressed(CompressionEncoding::Gzip)
-            .accept_compressed(CompressionEncoding::Gzip);
-        Ok(Self { client })
+    pub async fn connect(connection: &ConnectionArgs) -> Result<Self, Error> {
+        let service = Service::connect(connection, SERVICE_NAME, |channel| {
+            BalancerClient::new(channel)
+                .send_compressed(CompressionEncoding::Gzip)
+                .accept_compressed(CompressionEncoding::Gzip)
+        })
+        .await?;
+
+        Ok(Self { service })
     }
 
-    pub async fn handle(&mut self, mode: ModeCmd) -> Result<(), Box<dyn Error>> {
+    pub async fn handle(&mut self, mode: ModeCmd, format: CommonFormat) -> Result<(), Error> {
         match mode {
             ModeCmd::Update(cmd) => self.update(cmd).await,
             ModeCmd::List => self.list().await,
@@ -38,7 +48,7 @@ impl Balancer2Service {
             ModeCmd::Show(cmd) => self.show(cmd).await,
             ModeCmd::Sessions(cmd) => match cmd.mode {
                 SessionsMode::List => self.sessions_list().await,
-                SessionsMode::Show(cmd) => self.sessions_show(cmd).await,
+                SessionsMode::Show(cmd) => self.sessions_show(cmd, format).await,
                 SessionsMode::Update(cmd) => self.sessions_update(cmd).await,
             },
             ModeCmd::Metrics(cmd) => self.metrics(cmd).await,
@@ -49,9 +59,12 @@ impl Balancer2Service {
         }
     }
 
-    async fn update(&mut self, cmd: UpdateCmd) -> Result<(), Box<dyn Error>> {
-        let yaml_config = BalancerConfig::from_yaml_file(&cmd.config)?;
-        let parts: ConfigParts = yaml_config.try_into()?;
+    async fn update(&mut self, cmd: UpdateCmd) -> Result<(), Error> {
+        let yaml_config = BalancerConfig::from_yaml_file(&cmd.config)
+            .map_err(|err| self.service.invalid("update", err.to_string()))?;
+        let parts: ConfigParts = yaml_config
+            .try_into()
+            .map_err(|err: Box<dyn std::error::Error>| self.service.invalid("update", err.to_string()))?;
 
         let request = UpdateConfigRequest {
             config_name: cmd.name.clone(),
@@ -63,46 +76,71 @@ impl Balancer2Service {
         };
         log::trace!("update config request: {request:?}");
 
-        let response = self.client.update_config(request).await?.into_inner();
-        log::debug!("update config response: {response:?}");
+        self.service
+            .client()
+            .update_config(request)
+            .await
+            .map_err(self.service.status("update"))?;
 
-        println!("balancer '{}' updated", cmd.name);
+        output::success("update", format_args!("Updated balancer {}.", cmd.name));
+
         Ok(())
     }
 
-    async fn list(&mut self) -> Result<(), Box<dyn Error>> {
+    async fn list(&mut self) -> Result<(), Error> {
         let request = ListConfigsRequest {};
         log::trace!("list configs request: {request:?}");
 
-        let response = self.client.list_configs(request).await?.into_inner();
+        let response = self
+            .service
+            .client()
+            .list_configs(request)
+            .await
+            .map_err(self.service.status("list"))?
+            .into_inner();
         log::debug!("list configs response: {response:?}");
 
-        let mut tree = TreeBuilder::new("Balancers".to_string());
-        for name in &response.names {
-            tree.add_empty_child(name.clone());
-        }
-        let tree = tree.build();
-        ptree::print_tree(&tree)?;
+        output::data(
+            &response.names,
+            response.names.is_empty(),
+            format_args!("no balancer configs"),
+            || {
+                let mut tree = TreeBuilder::new("Balancers".to_owned());
+                for name in &response.names {
+                    tree.add_empty_child(name.clone());
+                }
+                let _ = ptree::print_tree(&tree.build());
+            },
+        );
 
         Ok(())
     }
 
-    async fn config(&mut self, cmd: ConfigCmd) -> Result<(), Box<dyn Error>> {
+    async fn config(&mut self, cmd: ConfigCmd) -> Result<(), Error> {
         let request = GetConfigRequest { config_name: cmd.name };
         log::trace!("get config request: {request:?}");
 
-        let response = self.client.get_config(request).await?.into_inner();
+        let response = self
+            .service
+            .client()
+            .get_config(request)
+            .await
+            .map_err(self.service.status("config"))?
+            .into_inner();
         log::debug!("get config response: {response:?}");
 
-        let mut json_value = serde_json::to_value(&response)?;
-        display::prettify_json(&mut json_value);
-        let yaml = serde_yaml::to_string(&json_value)?;
-        print!("{yaml}");
+        output::data(&response, false, format_args!(""), || {
+            let mut json_value =
+                serde_json::to_value(&response).expect("balancer config JSON conversion must not fail");
+            display::prettify_json(&mut json_value);
+            let yaml = serde_yaml::to_string(&json_value).expect("balancer config YAML serialization must not fail");
+            print!("{yaml}");
+        });
 
         Ok(())
     }
 
-    async fn show(&mut self, cmd: ShowCmd) -> Result<(), Box<dyn Error>> {
+    async fn show(&mut self, cmd: ShowCmd) -> Result<(), Error> {
         let opts = display::ShowOptions {
             stats: cmd.stats || cmd.detail,
             acl: cmd.acl || cmd.detail,
@@ -130,113 +168,172 @@ impl Balancer2Service {
         };
         log::trace!("get state request: {request:?}");
 
-        let response = self.client.get_state(request).await?.into_inner();
+        let response = self
+            .service
+            .client()
+            .get_state(request)
+            .await
+            .map_err(self.service.status("show"))?
+            .into_inner();
         log::debug!("get state response: {response:?}");
 
-        if response.states.is_empty() {
-            log::info!("no balancer state found");
-            return Ok(());
-        }
-
-        display::print_table_view(&response.states, &opts);
+        output::data(
+            &response.states,
+            response.states.is_empty(),
+            format_args!("no balancer state found"),
+            || display::print_table_view(&response.states, &opts),
+        );
 
         Ok(())
     }
 
-    async fn sessions_list(&mut self) -> Result<(), Box<dyn Error>> {
+    async fn sessions_list(&mut self) -> Result<(), Error> {
         let request = ListSessionsStatesRequest {};
         log::trace!("list sessions states request: {request:?}");
 
-        let response = self.client.list_sessions_states(request).await?.into_inner();
+        let response = self
+            .service
+            .client()
+            .list_sessions_states(request)
+            .await
+            .map_err(self.service.status("sessions list"))?
+            .into_inner();
         log::debug!("list sessions states response: {response:?}");
 
-        let mut tree = TreeBuilder::new("Sessions States".to_string());
-        for name in &response.names {
-            tree.add_empty_child(name.clone());
-        }
-        let tree = tree.build();
-        ptree::print_tree(&tree)?;
+        output::data(
+            &response.names,
+            response.names.is_empty(),
+            format_args!("no sessions states"),
+            || {
+                let mut tree = TreeBuilder::new("Sessions States".to_owned());
+                for name in &response.names {
+                    tree.add_empty_child(name.clone());
+                }
+                let _ = ptree::print_tree(&tree.build());
+            },
+        );
 
         Ok(())
     }
 
-    async fn sessions_show(&mut self, cmd: SessionsShowCmd) -> Result<(), Box<dyn Error>> {
+    async fn sessions_show(&mut self, cmd: SessionsShowCmd, format: CommonFormat) -> Result<(), Error> {
         let request = ListSessionsRequest {
             sessions_state_name: cmd.name,
             filter: cmd.filter.to_proto(),
         };
         log::trace!("list sessions request: {request:?}");
 
-        let mut stream = self.client.list_sessions(request).await?.into_inner();
+        let mut stream = self
+            .service
+            .client()
+            .list_sessions(request)
+            .await
+            .map_err(self.service.status("sessions show"))?
+            .into_inner();
 
-        display::print_sessions_header();
+        if format == CommonFormat::Human {
+            display::print_sessions_header();
+        }
+
         let now = time::SystemTime::now()
             .duration_since(time::UNIX_EPOCH)
             .expect("system clock before UNIX epoch")
             .as_secs() as i64;
         let mut printed = 0usize;
-        while let Some(session) = stream.message().await? {
-            display::print_session(&session, now);
+
+        while let Some(session) = stream.message().await.map_err(self.service.status("sessions show"))? {
+            match format {
+                CommonFormat::Human => display::print_session(&session, now),
+                CommonFormat::Json => println!(
+                    "{}",
+                    serde_json::to_string(&session).expect("balancer session JSON serialization must not fail")
+                ),
+            }
             printed += 1;
         }
 
-        if printed == 0 {
-            log::info!("no sessions");
+        if printed == 0 && format == CommonFormat::Human {
+            eprintln!("no sessions");
         }
 
         Ok(())
     }
 
-    async fn sessions_update(&mut self, cmd: SessionsUpdateCmd) -> Result<(), Box<dyn Error>> {
+    async fn sessions_update(&mut self, cmd: SessionsUpdateCmd) -> Result<(), Error> {
         let request = UpdateSessionsStateRequest {
             sessions_state_name: cmd.name.clone(),
             capacity: cmd.capacity,
         };
         log::trace!("update sessions state request: {request:?}");
 
-        let response = self.client.update_sessions_state(request).await?.into_inner();
-        log::debug!("update sessions state response: {response:?}");
+        self.service
+            .client()
+            .update_sessions_state(request)
+            .await
+            .map_err(self.service.status("sessions update"))?;
 
-        println!("sessions state '{}' updated (capacity: {})", cmd.name, cmd.capacity);
+        output::success(
+            "sessions update",
+            format_args!("Updated sessions state {} (capacity: {}).", cmd.name, cmd.capacity),
+        );
+
         Ok(())
     }
 
-    async fn metrics(&mut self, _cmd: MetricsCmd) -> Result<(), Box<dyn Error>> {
+    async fn metrics(&mut self, _cmd: MetricsCmd) -> Result<(), Error> {
         let request = GetMetricsRequest {};
         log::trace!("get metrics request: {request:?}");
 
-        let response = self.client.get_metrics(request).await?.into_inner();
+        let response = self
+            .service
+            .client()
+            .get_metrics(request)
+            .await
+            .map_err(self.service.status("metrics"))?
+            .into_inner();
         log::debug!("get metrics response: {response:?}");
 
-        let mut json_value = serde_json::to_value(&response)?;
-        display::prettify_json(&mut json_value);
-        let json = serde_json::to_string(&json_value)?;
-        println!("{json}");
+        output::data(&response, false, format_args!(""), || {
+            let mut json_value =
+                serde_json::to_value(&response).expect("balancer metrics JSON conversion must not fail");
+            display::prettify_json(&mut json_value);
+            let json = serde_json::to_string(&json_value).expect("balancer metrics JSON serialization must not fail");
+            println!("{json}");
+        });
 
         Ok(())
     }
 
-    async fn enable_real(&mut self, cmd: EnableRealCmd) -> Result<(), Box<dyn Error>> {
+    async fn enable_real(&mut self, cmd: EnableRealCmd) -> Result<(), Error> {
         let updates = build_real_updates(&cmd.vs, &cmd.reals, Some(true), cmd.weight);
-        self.send_real_updates(cmd.name, updates).await
+        self.send_real_updates("enable", cmd.name, updates).await
     }
 
-    async fn disable_real(&mut self, cmd: DisableRealCmd) -> Result<(), Box<dyn Error>> {
+    async fn disable_real(&mut self, cmd: DisableRealCmd) -> Result<(), Error> {
         let updates = build_real_updates(&cmd.vs, &cmd.reals, Some(false), None);
-        self.send_real_updates(cmd.name, updates).await
+        self.send_real_updates("disable", cmd.name, updates).await
     }
 
-    async fn send_real_updates(&mut self, config_name: String, updates: Vec<RealUpdate>) -> Result<(), Box<dyn Error>> {
+    async fn send_real_updates(
+        &mut self,
+        action: &'static str,
+        config_name: String,
+        updates: Vec<RealUpdate>,
+    ) -> Result<(), Error> {
         let request = UpdateRealsRequest {
             config_name: config_name.clone(),
             updates,
         };
         log::trace!("update reals request: {request:?}");
 
-        let response = self.client.update_reals(request).await?.into_inner();
-        log::debug!("update reals response: {response:?}");
+        self.service
+            .client()
+            .update_reals(request)
+            .await
+            .map_err(self.service.status(action))?;
 
-        println!("balancer '{config_name}' reals updated");
+        output::success(action, format_args!("Updated reals for balancer {config_name}."));
+
         Ok(())
     }
 }

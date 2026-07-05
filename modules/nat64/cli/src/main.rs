@@ -1,9 +1,6 @@
-use core::{
-    error::Error,
-    net::{Ipv4Addr, Ipv6Addr},
-};
+use core::net::{Ipv4Addr, Ipv6Addr};
 
-use clap::{ArgAction, CommandFactory, Parser, Subcommand, ValueEnum};
+use clap::{ArgAction, CommandFactory, Parser, Subcommand};
 use clap_complete::CompleteEnv;
 use commonpb::pb::IpAddress;
 use nat64pb::{
@@ -15,8 +12,9 @@ use netip::{Contiguous, Ipv6Network};
 use ptree::TreeBuilder;
 use tonic::codec::CompressionEncoding;
 use ync::{
-    client::{ConnectionArgs, LayeredChannel},
-    logging,
+    client::{ConnectionArgs, LayeredChannel, Service},
+    errors::{Error, NotFoundMapper},
+    output::{self, CommonFormat},
 };
 
 #[allow(non_snake_case)]
@@ -24,6 +22,12 @@ pub mod nat64pb {
     use serde::Serialize;
     tonic::include_proto!("modules.nat64.controlplane.nat64pb.v1");
 }
+
+/// The fully-qualified gRPC service name used in error messages.
+const SERVICE_NAME: &str = "modules.nat64.controlplane.nat64pb.v1.NAT64Service";
+
+/// Maps a genuine "config not found" status into a friendly message.
+const NOT_FOUND: NotFoundMapper = NotFoundMapper::new(SERVICE_NAME, "requested config");
 
 /// NAT64 module CLI.
 #[derive(Debug, Clone, Parser)]
@@ -34,6 +38,9 @@ pub struct Cmd {
     pub mode: ModeCmd,
     #[command(flatten)]
     pub connection: ConnectionArgs,
+    /// Output format.
+    #[arg(long, default_value = "human", global = true)]
+    pub format: CommonFormat,
     /// Log verbosity level.
     #[clap(short, action = ArgAction::Count, global = true)]
     pub verbose: u8,
@@ -82,9 +89,6 @@ pub struct ShowConfigCmd {
     /// The name of the config to operate on.
     #[arg(long = "name", short = 'n')]
     pub config_name: String,
-    /// Output format.
-    #[clap(long, value_enum, default_value_t = OutputFormat::Tree)]
-    pub format: OutputFormat,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -160,28 +164,19 @@ pub struct DropCmd {
     pub drop_unknown_mapping: bool,
 }
 
-/// Output format options.
-#[derive(Debug, Clone, ValueEnum)]
-pub enum OutputFormat {
-    /// Tree structure with colored output (default).
-    Tree,
-    /// JSON format.
-    Json,
-}
-
 #[tokio::main(flavor = "current_thread")]
 pub async fn main() {
     CompleteEnv::with_factory(Cmd::command).complete();
     let cmd = Cmd::parse();
-    logging::init(cmd.verbose as usize).expect("initialize logging");
+    ync::init(cmd.verbose, cmd.format);
 
     if let Err(err) = run(cmd).await {
-        log::error!("ERROR: {err}");
-        std::process::exit(1);
+        output::failure(&err);
+        std::process::exit(err.exit_code());
     }
 }
 
-async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
+async fn run(cmd: Cmd) -> Result<(), Error> {
     let mut service = NAT64Service::new(&cmd.connection).await?;
 
     match cmd.mode {
@@ -201,71 +196,114 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
 }
 
 pub struct NAT64Service {
-    client: Nat64ServiceClient<LayeredChannel>,
+    service: Service<Nat64ServiceClient<LayeredChannel>>,
 }
 
 impl NAT64Service {
-    pub async fn new(connection: &ConnectionArgs) -> Result<Self, Box<dyn Error>> {
-        let channel = ync::client::connect(connection).await?;
-        let client = Nat64ServiceClient::new(channel)
-            .send_compressed(CompressionEncoding::Gzip)
-            .accept_compressed(CompressionEncoding::Gzip);
-        Ok(Self { client })
+    pub async fn new(connection: &ConnectionArgs) -> Result<Self, Error> {
+        let service = Service::connect(connection, SERVICE_NAME, |channel| {
+            Nat64ServiceClient::new(channel)
+                .send_compressed(CompressionEncoding::Gzip)
+                .accept_compressed(CompressionEncoding::Gzip)
+        })
+        .await?;
+
+        Ok(Self { service })
     }
 
-    pub async fn list_configs(&mut self) -> Result<(), Box<dyn Error>> {
+    pub async fn list_configs(&mut self) -> Result<(), Error> {
         let request = ListConfigsRequest {};
         log::trace!("list configs request: {request:?}");
-        let response = self.client.list_configs(request).await?.into_inner();
+        let response = self
+            .service
+            .client()
+            .list_configs(request)
+            .await
+            .map_err(self.service.status("list"))?
+            .into_inner();
         log::debug!("list configs response: {response:?}");
 
-        let mut tree = TreeBuilder::new("List NAT64 Configs".to_string());
-        for config in response.configs {
-            tree.add_empty_child(config);
-        }
-        let tree = tree.build();
-        ptree::print_tree(&tree)?;
+        output::data(
+            &response.configs,
+            response.configs.is_empty(),
+            format_args!("no nat64 configs"),
+            || {
+                let mut tree = TreeBuilder::new("List NAT64 Configs".to_owned());
+                for config in &response.configs {
+                    tree.add_empty_child(config.clone());
+                }
+                let _ = ptree::print_tree(&tree.build());
+            },
+        );
+
         Ok(())
     }
 
-    pub async fn show_config(&mut self, cmd: ShowConfigCmd) -> Result<(), Box<dyn Error>> {
-        let request = ShowConfigRequest { name: cmd.config_name.to_owned() };
+    pub async fn show_config(&mut self, cmd: ShowConfigCmd) -> Result<(), Error> {
+        let request = ShowConfigRequest { name: cmd.config_name.clone() };
         log::trace!("show config request: {request:?}");
-        let response = self.client.show_config(request).await?.into_inner();
+        let response = self
+            .service
+            .client()
+            .show_config(request)
+            .await
+            .map_err(|status| {
+                NOT_FOUND.map(
+                    status,
+                    "show",
+                    self.service.endpoint(),
+                    Some(&format!("config '{}'", cmd.config_name)),
+                )
+            })?
+            .into_inner();
         log::debug!("show config response: {response:?}");
 
-        match cmd.format {
-            OutputFormat::Json => print_json(&response)?,
-            OutputFormat::Tree => print_tree(&response)?,
-        }
+        output::data(&response, false, format_args!(""), || print_tree(&response));
+
         Ok(())
     }
 
-    pub async fn add_prefix(&mut self, cmd: AddPrefixCmd) -> Result<(), Box<dyn Error>> {
+    pub async fn add_prefix(&mut self, cmd: AddPrefixCmd) -> Result<(), Error> {
         let request = AddPrefixRequest {
             name: cmd.config_name.clone(),
             prefix: cmd.prefix.addr().octets()[..12].to_vec(),
         };
         log::debug!("AddPrefixRequest: {request:?}");
-        self.client.add_prefix(request).await?;
+        self.service
+            .client()
+            .add_prefix(request)
+            .await
+            .map_err(self.service.status("add prefix"))?;
 
-        println!("OK");
+        output::success(
+            "add prefix",
+            format_args!("Added prefix {} to {}.", cmd.prefix, cmd.config_name),
+        );
+
         Ok(())
     }
 
-    pub async fn remove_prefix(&mut self, cmd: RemovePrefixCmd) -> Result<(), Box<dyn Error>> {
+    pub async fn remove_prefix(&mut self, cmd: RemovePrefixCmd) -> Result<(), Error> {
         let request = RemovePrefixRequest {
             name: cmd.config_name.clone(),
             prefix: cmd.prefix.addr().octets()[..12].to_vec(),
         };
         log::debug!("RemovePrefixRequest: {request:?}");
-        self.client.remove_prefix(request).await?;
+        self.service
+            .client()
+            .remove_prefix(request)
+            .await
+            .map_err(self.service.status("remove prefix"))?;
 
-        println!("OK");
+        output::success(
+            "remove prefix",
+            format_args!("Removed prefix {} from {}.", cmd.prefix, cmd.config_name),
+        );
+
         Ok(())
     }
 
-    pub async fn add_mapping(&mut self, cmd: AddMappingCmd) -> Result<(), Box<dyn Error>> {
+    pub async fn add_mapping(&mut self, cmd: AddMappingCmd) -> Result<(), Error> {
         let request = AddMappingRequest {
             name: cmd.config_name.clone(),
             ipv4: Some(IpAddress { addr: cmd.ipv4.octets().to_vec() }),
@@ -273,25 +311,44 @@ impl NAT64Service {
             prefix_index: cmd.prefix_index,
         };
         log::debug!("AddMappingRequest: {request:?}");
-        self.client.add_mapping(request).await?;
+        self.service
+            .client()
+            .add_mapping(request)
+            .await
+            .map_err(self.service.status("add mapping"))?;
 
-        println!("OK");
+        output::success(
+            "add mapping",
+            format_args!(
+                "Added mapping {} -> {} (prefix {}) to {}.",
+                cmd.ipv4, cmd.ipv6, cmd.prefix_index, cmd.config_name
+            ),
+        );
+
         Ok(())
     }
 
-    pub async fn remove_mapping(&mut self, cmd: RemoveMappingCmd) -> Result<(), Box<dyn Error>> {
+    pub async fn remove_mapping(&mut self, cmd: RemoveMappingCmd) -> Result<(), Error> {
         let request = RemoveMappingRequest {
             name: cmd.config_name.clone(),
             ipv4: Some(IpAddress { addr: cmd.ipv4.octets().to_vec() }),
         };
         log::debug!("RemoveMappingRequest: {request:?}");
-        self.client.remove_mapping(request).await?;
+        self.service
+            .client()
+            .remove_mapping(request)
+            .await
+            .map_err(self.service.status("remove mapping"))?;
 
-        println!("OK");
+        output::success(
+            "remove mapping",
+            format_args!("Removed mapping for {} from {}.", cmd.ipv4, cmd.config_name),
+        );
+
         Ok(())
     }
 
-    pub async fn set_mtu(&mut self, cmd: MtuCmd) -> Result<(), Box<dyn Error>> {
+    pub async fn set_mtu(&mut self, cmd: MtuCmd) -> Result<(), Error> {
         let request = SetMtuRequest {
             name: cmd.config_name.clone(),
             mtu: Some(nat64pb::MtuConfig {
@@ -300,42 +357,59 @@ impl NAT64Service {
             }),
         };
         log::debug!("SetMtuRequest: {request:?}");
-        self.client.set_mtu(request).await?;
+        self.service
+            .client()
+            .set_mtu(request)
+            .await
+            .map_err(self.service.status("set mtu"))?;
 
-        println!("OK");
+        output::success(
+            "set mtu",
+            format_args!(
+                "Set MTU for {} (IPv4: {}, IPv6: {}).",
+                cmd.config_name, cmd.ipv4_mtu, cmd.ipv6_mtu
+            ),
+        );
+
         Ok(())
     }
 
-    pub async fn set_drop_unknown(&mut self, cmd: DropCmd) -> Result<(), Box<dyn Error>> {
+    pub async fn set_drop_unknown(&mut self, cmd: DropCmd) -> Result<(), Error> {
         let request = SetDropUnknownRequest {
             name: cmd.config_name.clone(),
             drop_unknown_prefix: cmd.drop_unknown_prefix,
             drop_unknown_mapping: cmd.drop_unknown_mapping,
         };
         log::debug!("SetDropUnknownRequest: {request:?}");
-        self.client.set_drop_unknown(request).await?;
+        self.service
+            .client()
+            .set_drop_unknown(request)
+            .await
+            .map_err(self.service.status("set drop"))?;
 
-        println!("OK");
+        output::success(
+            "set drop",
+            format_args!(
+                "Set drop flags for {} (unknown prefix: {}, unknown mapping: {}).",
+                cmd.config_name, cmd.drop_unknown_prefix, cmd.drop_unknown_mapping
+            ),
+        );
+
         Ok(())
     }
 }
 
-pub fn print_json(config: &ShowConfigResponse) -> Result<(), Box<dyn Error>> {
-    println!("{}", serde_json::to_string(config)?);
-    Ok(())
-}
-
-pub fn print_tree(resp: &ShowConfigResponse) -> Result<(), Box<dyn Error>> {
-    let mut tree = TreeBuilder::new("NAT64 Config".to_string());
+fn print_tree(resp: &ShowConfigResponse) {
+    let mut tree = TreeBuilder::new("NAT64 Config".to_owned());
 
     if let Some(config) = &resp.config {
-        tree.begin_child("Prefixes".to_string());
+        tree.begin_child("Prefixes".to_owned());
         for (idx, prefix) in config.prefixes.iter().enumerate() {
             tree.add_empty_child(format!("{}: {:?}", idx, prefix.prefix));
         }
         tree.end_child();
 
-        tree.begin_child("Mappings".to_string());
+        tree.begin_child("Mappings".to_owned());
         for mapping in &config.mappings {
             let ipv4 = mapping.ipv4.as_ref().map(|a| a.to_string()).unwrap_or_default();
             let ipv6 = mapping.ipv6.as_ref().map(|a| a.to_string()).unwrap_or_default();
@@ -348,7 +422,7 @@ pub fn print_tree(resp: &ShowConfigResponse) -> Result<(), Box<dyn Error>> {
         tree.end_child();
 
         if let Some(mtu) = &config.mtu {
-            tree.begin_child("MTU".to_string());
+            tree.begin_child("MTU".to_owned());
             tree.add_empty_child(format!("IPv4: {}", mtu.ipv4_mtu));
             tree.add_empty_child(format!("IPv6: {}", mtu.ipv6_mtu));
             tree.end_child();
@@ -358,8 +432,5 @@ pub fn print_tree(resp: &ShowConfigResponse) -> Result<(), Box<dyn Error>> {
         tree.add_empty_child(format!("DropUnknownMapping: {}", config.drop_unknown_mapping));
     }
 
-    let tree = tree.build();
-    ptree::print_tree(&tree)?;
-
-    Ok(())
+    let _ = ptree::print_tree(&tree.build());
 }

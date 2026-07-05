@@ -106,7 +106,7 @@ func testFWStateListEntries(t *testing.T, fw *framework.TestFramework) {
 	// 5. Forward listing with JSON: parse and verify key fields.
 	fw.Run("Forward_listing_json", func(fw *framework.TestFramework, t *testing.T) {
 		output, err := fw.ExecuteCommand(
-			framework.CLIFWState + " entries --name fwstate0 --batch 100 --direction forward --include-expired --json",
+			framework.CLIFWState + " entries --name fwstate0 --batch 100 --direction forward --include-expired --format json",
 		)
 		require.NoError(t, err, "list-entries forward json failed")
 		t.Log("JSON output:\n", output)
@@ -693,7 +693,7 @@ func testFWStateExternalSyncFrame(t *testing.T, fw *framework.TestFramework) {
 	// 6. Verify the state entry is marked as external via JSON listing.
 	fw.Run("Verify_state_is_external", func(fw *framework.TestFramework, t *testing.T) {
 		output, err := fw.ExecuteCommand(
-			framework.CLIFWState + " entries --name fwstate_ext --batch 100 --direction forward --include-expired --json",
+			framework.CLIFWState + " entries --name fwstate_ext --batch 100 --direction forward --include-expired --format json",
 		)
 		require.NoError(t, err, "list-entries forward json failed")
 		t.Log("JSON entries:\n", output)

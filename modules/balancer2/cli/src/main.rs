@@ -5,7 +5,6 @@ mod service;
 mod sessions;
 
 use std::{
-    error::Error,
     fmt::{self, Display, Formatter},
     net::{AddrParseError, IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     str::FromStr,
@@ -14,7 +13,11 @@ use std::{
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
 use yanet_cli_balancer2::balancerpb;
-use ync::logging;
+use ync::{
+    client::ConnectionArgs,
+    errors::Error,
+    output::{self, CommonFormat},
+};
 
 use crate::service::Balancer2Service;
 
@@ -26,7 +29,10 @@ pub struct Cmd {
     #[clap(subcommand)]
     pub mode: ModeCmd,
     #[command(flatten)]
-    pub connection: ync::client::ConnectionArgs,
+    pub connection: ConnectionArgs,
+    /// Output format.
+    #[arg(long, default_value = "human", global = true)]
+    pub format: CommonFormat,
     /// Be verbose in terms of logging.
     #[clap(short, action = ArgAction::Count, global = true)]
     pub verbose: u8,
@@ -169,8 +175,8 @@ impl Display for VsIdParseError {
     }
 }
 
-impl Error for VsIdParseError {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
+impl std::error::Error for VsIdParseError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::InvalidSocket(e) => Some(e),
             _ => None,
@@ -242,7 +248,7 @@ impl Display for BytesToIpError {
     }
 }
 
-impl Error for BytesToIpError {}
+impl std::error::Error for BytesToIpError {}
 
 pub fn bytes_to_ip(bytes: &[u8]) -> Result<IpAddr, BytesToIpError> {
     match bytes.len() {
@@ -292,19 +298,19 @@ impl FilterFlags {
     }
 }
 
-async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
+async fn run(cmd: Cmd) -> Result<(), Error> {
     let mut service = Balancer2Service::connect(&cmd.connection).await?;
-    service.handle(cmd.mode).await
+    service.handle(cmd.mode, cmd.format).await
 }
 
 #[tokio::main(flavor = "current_thread")]
 pub async fn main() {
     CompleteEnv::with_factory(Cmd::command).complete();
     let cmd = Cmd::parse();
-    logging::init(cmd.verbose as usize).expect("failed to initialize logging");
+    ync::init(cmd.verbose, cmd.format);
 
     if let Err(err) = run(cmd).await {
-        log::error!("{err}");
-        std::process::exit(1);
+        output::failure(&err);
+        std::process::exit(err.exit_code());
     }
 }

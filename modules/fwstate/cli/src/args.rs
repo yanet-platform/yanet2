@@ -160,8 +160,4 @@ pub struct EntriesCmd {
     /// Starting cursor position (0 = beginning)
     #[arg(long, default_value = "0")]
     pub index: u32,
-
-    /// Output as JSON
-    #[arg(long)]
-    pub json: bool,
 }

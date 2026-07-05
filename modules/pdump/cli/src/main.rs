@@ -1,7 +1,4 @@
-use core::error::Error;
-use std::io::ErrorKind;
-
-use args::{ConfigOutputFormat, DeleteCmd, ModeCmd, ReadCmd, SetConfigCmd, ShowConfigCmd};
+use args::{DeleteCmd, ModeCmd, ReadCmd, SetConfigCmd, ShowConfigCmd};
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
 use pdumppb::{
@@ -14,10 +11,11 @@ use tokio::{
     task::JoinSet,
 };
 use tokio_util::sync::CancellationToken;
-use tonic::codec::CompressionEncoding;
+use tonic::{Status, codec::CompressionEncoding};
 use ync::{
-    client::{ConnectionArgs, LayeredChannel},
-    logging,
+    client::{ConnectionArgs, LayeredChannel, Service},
+    errors::Error,
+    output::{self, CommonFormat},
 };
 
 use crate::pdumppb::SetConfigRequest;
@@ -43,12 +41,15 @@ pub struct Cmd {
     pub mode: ModeCmd,
     #[command(flatten)]
     pub connection: ConnectionArgs,
+    /// Output format.
+    #[arg(long, default_value = "human", global = true)]
+    pub format: CommonFormat,
     /// Log verbosity level.
     #[clap(short, action = ArgAction::Count, global = true)]
     pub verbose: u8,
 }
 
-async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
+async fn run(cmd: Cmd) -> Result<(), Error> {
     let mut service = PdumpService::new(&cmd.connection).await?;
 
     match cmd.mode {
@@ -60,54 +61,76 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
     }
 }
 
+/// The fully-qualified gRPC service name used in error messages.
+const SERVICE_NAME: &str = "modules.pdump.controlplane.pdumppb.v1.PdumpService";
+
 pub struct PdumpService {
-    client: PdumpServiceClient<LayeredChannel>,
+    service: Service<PdumpServiceClient<LayeredChannel>>,
 }
 
 impl PdumpService {
-    pub async fn new(connection: &ConnectionArgs) -> Result<Self, Box<dyn Error>> {
-        let channel = ync::client::connect(connection).await?;
-        let client = PdumpServiceClient::new(channel)
-            .send_compressed(CompressionEncoding::Gzip)
-            .accept_compressed(CompressionEncoding::Gzip);
-        Ok(Self { client })
+    pub async fn new(connection: &ConnectionArgs) -> Result<Self, Error> {
+        let service = Service::connect(connection, SERVICE_NAME, |channel| {
+            PdumpServiceClient::new(channel)
+                .send_compressed(CompressionEncoding::Gzip)
+                .accept_compressed(CompressionEncoding::Gzip)
+        })
+        .await?;
+
+        Ok(Self { service })
     }
 
-    async fn get_config(&mut self, name: &str) -> Result<ShowConfigResponse, Box<dyn Error>> {
+    async fn get_config(&mut self, name: &str) -> Result<ShowConfigResponse, Error> {
         let request = ShowConfigRequest { name: name.to_owned() };
         log::trace!("show config request: {request:?}");
-        let response = self.client.show_config(request).await?.into_inner();
+        let response = self
+            .service
+            .client()
+            .show_config(request)
+            .await
+            .map_err(self.service.status("show"))?
+            .into_inner();
         log::debug!("show config response: {response:?}");
         Ok(response)
     }
 
-    pub async fn list_configs(&mut self) -> Result<(), Box<dyn Error>> {
+    pub async fn list_configs(&mut self) -> Result<(), Error> {
         let request = ListConfigsRequest {};
         log::trace!("list configs request: {request:?}");
-        let response = self.client.list_configs(request).await?.into_inner();
+        let response = self
+            .service
+            .client()
+            .list_configs(request)
+            .await
+            .map_err(self.service.status("list"))?
+            .into_inner();
         log::debug!("list configs response: {response:?}");
 
-        let mut tree = TreeBuilder::new("List Pdump Configs".to_string());
-        for config in response.configs {
-            tree.add_empty_child(config);
-        }
-        let tree = tree.build();
-        ptree::print_tree(&tree)?;
-        Ok(())
-    }
-
-    pub async fn show_config(&mut self, cmd: ShowConfigCmd) -> Result<(), Box<dyn Error>> {
-        let config = self.get_config(&cmd.config_name).await?;
-
-        match cmd.format {
-            ConfigOutputFormat::Json => print_json(&config)?,
-            ConfigOutputFormat::Tree => print_tree(&config)?,
-        }
+        output::data(
+            &response.configs,
+            response.configs.is_empty(),
+            format_args!("no pdump configs"),
+            || {
+                let mut tree = TreeBuilder::new("List Pdump Configs".to_owned());
+                for config in &response.configs {
+                    tree.add_empty_child(config.clone());
+                }
+                let _ = ptree::print_tree(&tree.build());
+            },
+        );
 
         Ok(())
     }
 
-    pub async fn set_config(&mut self, cmd: SetConfigCmd) -> Result<(), Box<dyn Error>> {
+    pub async fn show_config(&mut self, cmd: ShowConfigCmd) -> Result<(), Error> {
+        let response = self.get_config(&cmd.config_name).await?;
+
+        output::data(&response, false, format_args!(""), || print_tree(&response));
+
+        Ok(())
+    }
+
+    pub async fn set_config(&mut self, cmd: SetConfigCmd) -> Result<(), Error> {
         let mut request = SetConfigRequest {
             name: cmd.config_name.clone(),
             ..Default::default()
@@ -138,20 +161,32 @@ impl PdumpService {
         request.config = Some(cfg);
         request.update_mask = Some(mask);
         log::trace!("set config request: {request:?}");
-        let response = self.client.set_config(request).await?.into_inner();
-        log::debug!("set config response: {response:?}");
+        self.service
+            .client()
+            .set_config(request)
+            .await
+            .map_err(self.service.status("set"))?;
+
+        output::success("set", format_args!("Set pdump config {}.", cmd.config_name));
+
         Ok(())
     }
 
-    pub async fn delete_config(&mut self, cmd: DeleteCmd) -> Result<(), Box<dyn Error>> {
+    pub async fn delete_config(&mut self, cmd: DeleteCmd) -> Result<(), Error> {
         let request = DeleteConfigRequest { name: cmd.config_name.clone() };
         log::trace!("delete config request: {request:?}");
-        self.client.delete_config(request).await?.into_inner();
-        log::info!("config {} deleted", cmd.config_name);
+        self.service
+            .client()
+            .delete_config(request)
+            .await
+            .map_err(self.service.status("delete"))?;
+
+        output::success("delete", format_args!("Deleted pdump config {}.", cmd.config_name));
+
         Ok(())
     }
 
-    pub async fn read_dump(&mut self, cmd: ReadCmd) -> Result<(), Box<dyn Error>> {
+    pub async fn read_dump(&mut self, cmd: ReadCmd) -> Result<(), Error> {
         let cancellation_token = CancellationToken::new();
         let done = cancellation_token.clone();
 
@@ -161,15 +196,23 @@ impl PdumpService {
         log::debug!("request current pdump configuration");
         let config = self.get_config(&cmd.config_name).await?;
         let Some(config) = config.config else {
-            return Err(Box::new(std::io::Error::new(
-                ErrorKind::NotFound,
-                format!("Configuration {} not found", cmd.config_name),
-            )));
+            return Err(Error::from_status(
+                Status::not_found(format!("config '{}' not found", cmd.config_name)),
+                "read",
+                self.service.endpoint(),
+                SERVICE_NAME,
+            ));
         };
 
         let request = ReadDumpRequest { name: cmd.config_name.clone() };
         log::trace!("read_data request: {request:?}");
-        let stream = self.client.read_dump(request).await?.into_inner();
+        let stream = self
+            .service
+            .client()
+            .read_dump(request)
+            .await
+            .map_err(self.service.status("read"))?
+            .into_inner();
         log::debug!("read_data successfully acquired data stream for {}", cmd.config_name,);
 
         reader_set.spawn(writer::pdump_stream_reader(stream, tx.clone(), done.clone()));
@@ -178,10 +221,10 @@ impl PdumpService {
         // Spawn outside the reader_set to get unpinable join handler.
         let mut write_jh = tokio::task::spawn_blocking(move || {
             let output = cmd.output.unwrap_or("-".to_string());
-            writer::pdump_write(vec![config], rx, cmd.num, cmd.format, &output)
+            writer::pdump_write(vec![config], rx, cmd.num, cmd.dump_format, &output)
         });
 
-        let mut sig_pipe = unix::signal(SignalKind::pipe())?;
+        let mut sig_pipe = unix::signal(SignalKind::pipe()).expect("failed to register SIGPIPE handler");
 
         tokio::select! {
             _ = sig_pipe.recv() => {
@@ -213,13 +256,8 @@ impl PdumpService {
     }
 }
 
-pub fn print_json(resp: &ShowConfigResponse) -> Result<(), Box<dyn Error>> {
-    println!("{}", serde_json::to_string(resp)?);
-    Ok(())
-}
-
-pub fn print_tree(resp: &ShowConfigResponse) -> Result<(), Box<dyn Error>> {
-    let mut tree = TreeBuilder::new("Pdump Config".to_string());
+fn print_tree(resp: &ShowConfigResponse) {
+    let mut tree = TreeBuilder::new("Pdump Config".to_owned());
 
     if let Some(config) = &resp.config {
         tree.add_empty_child(format!("Filter: {}", config.filter));
@@ -228,20 +266,17 @@ pub fn print_tree(resp: &ShowConfigResponse) -> Result<(), Box<dyn Error>> {
         tree.add_empty_child(format!("PerWorkerRingSize: {}", config.ring_size));
     }
 
-    let tree = tree.build();
-    ptree::print_tree(&tree)?;
-
-    Ok(())
+    let _ = ptree::print_tree(&tree.build());
 }
 
 #[tokio::main(flavor = "current_thread")]
 pub async fn main() {
     CompleteEnv::with_factory(Cmd::command).complete();
     let cmd = Cmd::parse();
-    logging::init(cmd.verbose as usize).expect("initialize logging");
+    ync::init(cmd.verbose, cmd.format);
 
     if let Err(err) = run(cmd).await {
-        log::error!("run failed: {err}");
-        std::process::exit(1);
+        output::failure(&err);
+        std::process::exit(err.exit_code());
     }
 }

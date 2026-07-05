@@ -1,8 +1,5 @@
-use core::{error::Error, net::Ipv6Addr};
-use std::{
-    fmt,
-    time::{Duration, UNIX_EPOCH},
-};
+use core::{fmt, net::Ipv6Addr, time::Duration};
+use std::time::UNIX_EPOCH;
 
 use args::{DeleteCmd, DirectionArg, EntriesCmd, LinkCmd, ModeCmd, ShowCmd, StatsCmd, UpdateCmd};
 use clap::{ArgAction, CommandFactory, Parser};
@@ -16,10 +13,11 @@ use netip::MacAddr;
 use serde::Serialize;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
-use tonic::codec::CompressionEncoding;
+use tonic::{Status, codec::CompressionEncoding};
 use ync::{
-    client::{ConnectionArgs, LayeredChannel},
-    logging,
+    client::{ConnectionArgs, LayeredChannel, Service},
+    errors::Error,
+    output::{self, CommonFormat},
 };
 
 mod args;
@@ -31,6 +29,9 @@ pub mod fwstatepb {
     tonic::include_proto!("modules.fwstate.controlplane.fwstatepb.v1");
 }
 
+/// The fully-qualified gRPC service name used in error messages.
+const SERVICE_NAME: &str = "modules.fwstate.controlplane.fwstatepb.v1.FWStateService";
+
 /// FWState module CLI.
 #[derive(Debug, Clone, Parser)]
 #[command(version, about)]
@@ -40,60 +41,110 @@ pub struct Cmd {
     pub mode: ModeCmd,
     #[command(flatten)]
     pub connection: ConnectionArgs,
+    /// Output format.
+    #[arg(long, default_value = "human", global = true)]
+    pub format: CommonFormat,
     /// Log verbosity level.
     #[clap(short, action = ArgAction::Count, global = true)]
     pub verbose: u8,
 }
 
 /// Parse IPv6 address string into an `IpAddress` proto message.
-fn parse_ipv6(s: &str) -> Result<IpAddress, Box<dyn Error>> {
-    let addr: Ipv6Addr = s.parse()?;
+fn parse_ipv6(s: &str) -> Result<IpAddress, String> {
+    let addr = s.parse::<Ipv6Addr>().map_err(|err| err.to_string())?;
     Ok(IpAddress { addr: addr.octets().to_vec() })
 }
 
+/// Parse a MAC address string.
+fn parse_mac(s: &str) -> Result<MacAddr, String> {
+    s.parse::<MacAddr>().map_err(|err| err.to_string())
+}
+
 pub struct FWStateService {
-    client: FwStateServiceClient<LayeredChannel>,
+    service: Service<FwStateServiceClient<LayeredChannel>>,
 }
 
 impl FWStateService {
-    pub async fn new(connection: &ConnectionArgs) -> Result<Self, Box<dyn Error>> {
-        let channel = ync::client::connect(connection).await?;
-        let client = FwStateServiceClient::new(channel)
-            .send_compressed(CompressionEncoding::Gzip)
-            .accept_compressed(CompressionEncoding::Gzip);
-        Ok(Self { client })
+    pub async fn new(connection: &ConnectionArgs) -> Result<Self, Error> {
+        let service = Service::connect(connection, SERVICE_NAME, |channel| {
+            FwStateServiceClient::new(channel)
+                .send_compressed(CompressionEncoding::Gzip)
+                .accept_compressed(CompressionEncoding::Gzip)
+        })
+        .await?;
+
+        Ok(Self { service })
     }
 
-    pub async fn list_configs(&mut self) -> Result<(), Box<dyn Error>> {
+    pub async fn list_configs(&mut self) -> Result<(), Error> {
         let request = ListConfigsRequest {};
-        let response = self.client.list_configs(request).await?.into_inner();
-        println!("{}", serde_json::to_string(&response.configs)?);
+        let response = self
+            .service
+            .client()
+            .list_configs(request)
+            .await
+            .map_err(self.service.status("list"))?
+            .into_inner();
+
+        output::data(
+            &response.configs,
+            response.configs.is_empty(),
+            format_args!("no fwstate configs"),
+            || {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&response.configs)
+                        .expect("fwstate config list JSON serialization must not fail")
+                );
+            },
+        );
+
         Ok(())
     }
 
-    pub async fn show_config(&mut self, cmd: ShowCmd) -> Result<(), Box<dyn Error>> {
+    pub async fn show_config(&mut self, cmd: ShowCmd) -> Result<(), Error> {
         let request = ShowConfigRequest {
             name: cmd.config_name.clone(),
             ok_if_not_found: false,
         };
-        let response = self.client.show_config(request).await?.into_inner();
-        println!("{}", serde_json::to_string(&response)?);
+        let response = self
+            .service
+            .client()
+            .show_config(request)
+            .await
+            .map_err(self.service.status("show"))?
+            .into_inner();
+
+        output::data(&response, false, format_args!(""), || {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&response).expect("fwstate config JSON serialization must not fail")
+            );
+        });
+
         Ok(())
     }
 
-    pub async fn delete_config(&mut self, cmd: DeleteCmd) -> Result<(), Box<dyn Error>> {
+    pub async fn delete_config(&mut self, cmd: DeleteCmd) -> Result<(), Error> {
         let request = DeleteConfigRequest { name: cmd.config_name.clone() };
-        self.client.delete_config(request).await?.into_inner();
+        self.service
+            .client()
+            .delete_config(request)
+            .await
+            .map_err(self.service.status("delete"))?;
+
+        output::success("delete", format_args!("Deleted fwstate config {}.", cmd.config_name));
+
         Ok(())
     }
 
-    pub async fn update_config(&mut self, cmd: UpdateCmd) -> Result<(), Box<dyn Error>> {
+    pub async fn update_config(&mut self, cmd: UpdateCmd) -> Result<(), Error> {
         // First, fetch the current config to merge with new values
         let current_request = ShowConfigRequest {
             name: cmd.config_name.clone(),
             ok_if_not_found: true,
         };
-        let current_response = self.client.show_config(current_request).await;
+        let current_response = self.service.client().show_config(current_request).await;
         let (mut map_config, mut sync_config) = match current_response {
             Ok(resp) => {
                 let msg = resp.into_inner();
@@ -113,16 +164,17 @@ impl FWStateService {
 
         // Update only the fields that were provided
         if let Some(ref src_addr) = cmd.src_addr {
-            sync_config.src_addr = Some(parse_ipv6(src_addr)?);
+            sync_config.src_addr = Some(parse_ipv6(src_addr).map_err(|err| self.service.invalid("update", err))?);
         }
 
         if let Some(ref dst_ether) = cmd.dst_ether {
-            let mac: MacAddr = dst_ether.parse()?;
+            let mac = parse_mac(dst_ether).map_err(|err| self.service.invalid("update", err))?;
             sync_config.dst_ether = Some(mac.into());
         }
 
         if let Some(ref dst_addr_multicast) = cmd.dst_addr_multicast {
-            sync_config.dst_addr_multicast = Some(parse_ipv6(dst_addr_multicast)?);
+            sync_config.dst_addr_multicast =
+                Some(parse_ipv6(dst_addr_multicast).map_err(|err| self.service.invalid("update", err))?);
         }
 
         if let Some(port_multicast) = cmd.port_multicast {
@@ -130,7 +182,8 @@ impl FWStateService {
         }
 
         if let Some(ref dst_addr_unicast) = cmd.dst_addr_unicast {
-            sync_config.dst_addr_unicast = Some(parse_ipv6(dst_addr_unicast)?);
+            sync_config.dst_addr_unicast =
+                Some(parse_ipv6(dst_addr_unicast).map_err(|err| self.service.invalid("update", err))?);
         }
 
         if let Some(port_unicast) = cmd.port_unicast {
@@ -168,31 +221,63 @@ impl FWStateService {
             sync_config: Some(sync_config),
         };
         log::trace!("UpdateConfigRequest: {request:?}");
-        let response = self.client.update_config(request).await?.into_inner();
-        log::debug!("UpdateConfigResponse: {response:?}");
+        self.service
+            .client()
+            .update_config(request)
+            .await
+            .map_err(self.service.status("update"))?;
+
+        output::success("update", format_args!("Updated fwstate config {}.", cmd.config_name));
+
         Ok(())
     }
 
-    pub async fn link_fwstate(&mut self, cmd: LinkCmd) -> Result<(), Box<dyn Error>> {
+    pub async fn link_fwstate(&mut self, cmd: LinkCmd) -> Result<(), Error> {
         let request = LinkFwStateRequest {
             fwstate_name: cmd.config_name.clone(),
             acl_config_names: cmd.acl_configs.clone(),
         };
         log::trace!("LinkFwStateRequest: {request:?}");
-        let response = self.client.link_fw_state(request).await?.into_inner();
-        log::debug!("LinkFwStateResponse: {response:?}");
+        self.service
+            .client()
+            .link_fw_state(request)
+            .await
+            .map_err(self.service.status("link"))?;
+
+        output::success(
+            "link",
+            format_args!(
+                "Linked fwstate {} to ACL config(s) {}.",
+                cmd.config_name,
+                cmd.acl_configs.join(", ")
+            ),
+        );
+
         Ok(())
     }
 
-    pub async fn get_stats(&mut self, cmd: StatsCmd) -> Result<(), Box<dyn Error>> {
+    pub async fn get_stats(&mut self, cmd: StatsCmd) -> Result<(), Error> {
         let request = GetStatsRequest { name: cmd.config_name.clone() };
         log::trace!("GetStatsRequest: {request:?}");
-        let response = self.client.get_stats(request).await?.into_inner();
-        println!("{}", serde_json::to_string_pretty(&response)?);
+        let response = self
+            .service
+            .client()
+            .get_stats(request)
+            .await
+            .map_err(self.service.status("stats"))?
+            .into_inner();
+
+        output::data(&response, false, format_args!(""), || {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&response).expect("fwstate stats JSON serialization must not fail")
+            );
+        });
+
         Ok(())
     }
 
-    pub async fn list_entries(&mut self, cmd: EntriesCmd) -> Result<(), Box<dyn Error>> {
+    pub async fn list_entries(&mut self, cmd: EntriesCmd, format: CommonFormat) -> Result<(), Error> {
         let direction = match cmd.direction {
             DirectionArg::Forward => Direction::Forward,
             DirectionArg::Backward => Direction::Backward,
@@ -210,45 +295,53 @@ impl FWStateService {
             batch_size: cmd.batch,
             index: cmd.index as i64,
         };
-        tx.send(initial_req).await.map_err(|e| format!("send error: {e}"))?;
+        tx.send(initial_req)
+            .await
+            .map_err(|err| self.service.status("list entries")(Status::internal(format!("send error: {err}"))))?;
 
-        let mut response_stream = self.client.list_entries(stream).await?.into_inner();
+        let mut response_stream = self
+            .service
+            .client()
+            .list_entries(stream)
+            .await
+            .map_err(self.service.status("list entries"))?
+            .into_inner();
 
-        let json_output = cmd.json;
         let limit = cmd.count;
         let mut total: u32 = 0;
 
-        if !json_output {
+        if format == CommonFormat::Human {
             println!(
                 "{:<6} {:<45} {:<45} {:<8} {:<9} {:<7}",
                 "IDX", "SRC", "DST", "PROTO", "FLAGS S|D", "EXPRD"
             );
         }
 
-        loop {
-            let resp = match response_stream.message().await? {
-                Some(r) => r,
-                None => break,
-            };
-
+        while let Some(resp) = response_stream
+            .message()
+            .await
+            .map_err(self.service.status("list entries"))?
+        {
             for entry in &resp.entries {
                 if limit > 0 && total >= limit {
                     break;
                 }
-                if json_output {
-                    let je = JsonEntry::from_entry(entry);
-                    println!("{}", serde_json::to_string(&je)?);
-                } else {
-                    print_entry(entry);
+
+                match format {
+                    CommonFormat::Human => print_entry(entry),
+                    CommonFormat::Json => {
+                        let json_entry = JsonEntry::from_entry(entry);
+                        println!(
+                            "{}",
+                            serde_json::to_string(&json_entry).expect("fwstate entry JSON serialization must not fail")
+                        );
+                    }
                 }
+
                 total += 1;
             }
 
-            if limit > 0 && total >= limit {
-                break;
-            }
-
-            if !resp.has_more {
+            if (limit > 0 && total >= limit) || !resp.has_more {
                 break;
             }
 
@@ -261,7 +354,9 @@ impl FWStateService {
                 batch_size: cmd.batch,
                 index: resp.index,
             };
-            tx.send(next_req).await.map_err(|e| format!("send error: {e}"))?;
+            tx.send(next_req)
+                .await
+                .map_err(|err| self.service.status("list entries")(Status::internal(format!("send error: {err}"))))?;
         }
 
         Ok(())
@@ -444,8 +539,9 @@ fn print_entry(entry: &fwstatepb::FwStateEntry) {
     );
 }
 
-async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
+async fn run(cmd: Cmd) -> Result<(), Error> {
     let mut service = FWStateService::new(&cmd.connection).await?;
+    let format = cmd.format;
 
     match cmd.mode {
         ModeCmd::List => service.list_configs().await,
@@ -454,7 +550,7 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
         ModeCmd::Show(cmd) => service.show_config(cmd).await,
         ModeCmd::Link(cmd) => service.link_fwstate(cmd).await,
         ModeCmd::Stats(cmd) => service.get_stats(cmd).await,
-        ModeCmd::Entries(cmd) => service.list_entries(cmd).await,
+        ModeCmd::Entries(cmd) => service.list_entries(cmd, format).await,
     }
 }
 
@@ -462,10 +558,10 @@ async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {
 pub async fn main() {
     CompleteEnv::with_factory(Cmd::command).complete();
     let cmd = Cmd::parse();
-    logging::init(cmd.verbose as usize).expect("initialize logging");
+    ync::init(cmd.verbose, cmd.format);
 
     if let Err(err) = run(cmd).await {
-        log::error!("ERROR: {err}");
-        std::process::exit(1);
+        output::failure(&err);
+        std::process::exit(err.exit_code());
     }
 }

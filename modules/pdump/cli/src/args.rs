@@ -24,9 +24,6 @@ pub struct ShowConfigCmd {
     /// Pdump config name to operate on.
     #[arg(long = "name", short = 'n')]
     pub config_name: String,
-    /// Output format.
-    #[clap(long, value_enum, default_value_t = ConfigOutputFormat::Tree)]
-    pub format: ConfigOutputFormat,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -58,9 +55,12 @@ pub struct ReadCmd {
     #[arg(long = "name", short = 'n')]
     pub config_name: String,
 
-    /// Dump output format.
+    /// Packet-dump encoding for the captured stream.
+    ///
+    /// Distinct from the global `--format`, which controls how CLI messages
+    /// (errors, success, structured data) are rendered.
     #[clap(long, short = 'f', value_enum, default_value_t = DumpOutputFormat::Text)]
-    pub format: DumpOutputFormat,
+    pub dump_format: DumpOutputFormat,
 
     /// Dump output destination.
     #[clap(long, short = 'o')]
@@ -118,13 +118,4 @@ pub enum DumpOutputFormat {
     Pcap,
     /// PCAP Next Generation (pcapng) Capture File Format
     PcapNg,
-}
-
-/// Config output format options.
-#[derive(Debug, Clone, ValueEnum)]
-pub enum ConfigOutputFormat {
-    /// Tree structure with colored output (default).
-    Tree,
-    /// JSON format.
-    Json,
 }
