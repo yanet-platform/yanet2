@@ -992,19 +992,21 @@ icmp_v6_to_v4(
 				sizeof(struct yanet_icmp6_hdr) +
 				sizeof(struct rte_ipv4_hdr) + delta;
 
-			if (transport_offset + sizeof(struct rte_icmp_hdr) >
-			    rte_pktmbuf_data_len(mbuf)) {
-				LOG_DBG(NAT64,
-					"Embedded transport offset (%u) "
-					"exceeds mbuf data_len (%u)\n",
-					transport_offset,
-					rte_pktmbuf_data_len(mbuf));
-				nat64_stats_malformed(nat64_config);
-				return -1;
-			}
-
 			switch (new_ipv4_payload_header->next_proto_id) {
 			case IPPROTO_ICMPV6: {
+				if (transport_offset +
+					    sizeof(struct yanet_icmp6_hdr) >
+				    rte_pktmbuf_data_len(mbuf)) {
+					LOG_DBG(NAT64,
+						"Embedded ICMPv6 header offset "
+						"(%u) exceeds mbuf data_len "
+						"(%u)\n",
+						transport_offset,
+						rte_pktmbuf_data_len(mbuf));
+					nat64_stats_malformed(nat64_config);
+					return -1;
+				}
+
 				// Embedded ICMPv6 header needs to be translated
 				// to ICMPv4
 				struct yanet_icmp6_hdr *embedded_icmp6 =
@@ -1077,6 +1079,19 @@ icmp_v6_to_v4(
 				break;
 			}
 			case IPPROTO_UDP: {
+				if (transport_offset +
+					    sizeof(struct rte_udp_hdr) >
+				    rte_pktmbuf_data_len(mbuf)) {
+					LOG_DBG(NAT64,
+						"Embedded UDP header offset "
+						"(%u) exceeds mbuf data_len "
+						"(%u)\n",
+						transport_offset,
+						rte_pktmbuf_data_len(mbuf));
+					nat64_stats_malformed(nat64_config);
+					return -1;
+				}
+
 				// Recalculate UDP checksum
 				struct rte_udp_hdr *udp_hdr =
 					rte_pktmbuf_mtod_offset(
@@ -2624,18 +2639,21 @@ icmp_v4_to_v6(
 				sizeof(struct rte_icmp_hdr) +
 				sizeof(struct rte_ipv6_hdr) +
 				(is_fragmented ? RTE_IPV6_FRAG_HDR_SIZE : 0);
-			if (payload_offset + sizeof(struct rte_icmp_hdr) >
-			    rte_pktmbuf_data_len(mbuf)) {
-				LOG_DBG(NAT64,
-					"Embedded payload offset (%u) "
-					"exceeds mbuf data_len (%u)\n",
-					payload_offset,
-					rte_pktmbuf_data_len(mbuf));
-				nat64_stats_malformed(nat64_config);
-				return -1;
-			}
 			switch (new_ipv6_payload_header->proto) {
 			case IPPROTO_ICMP:
+				if (payload_offset +
+					    sizeof(struct rte_icmp_hdr) >
+				    rte_pktmbuf_data_len(mbuf)) {
+					LOG_DBG(NAT64,
+						"Embedded ICMP header offset "
+						"(%u) exceeds mbuf data_len "
+						"(%u)\n",
+						payload_offset,
+						rte_pktmbuf_data_len(mbuf));
+					nat64_stats_malformed(nat64_config);
+					return -1;
+				}
+
 				new_ipv6_payload_header->proto = IPPROTO_ICMPV6;
 
 				struct rte_icmp_hdr *icmp_header_payload =
@@ -2694,6 +2712,19 @@ icmp_v4_to_v6(
 				break;
 
 			case IPPROTO_UDP: {
+				if (payload_offset +
+					    sizeof(struct rte_udp_hdr) >
+				    rte_pktmbuf_data_len(mbuf)) {
+					LOG_DBG(NAT64,
+						"Embedded UDP header offset "
+						"(%u) exceeds mbuf data_len "
+						"(%u)\n",
+						payload_offset,
+						rte_pktmbuf_data_len(mbuf));
+					nat64_stats_malformed(nat64_config);
+					return -1;
+				}
+
 				struct rte_udp_hdr *udp_header =
 					rte_pktmbuf_mtod_offset(
 						mbuf,

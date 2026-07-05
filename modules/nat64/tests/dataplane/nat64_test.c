@@ -6218,6 +6218,224 @@ test_nat64_icmp_v6tov4_nested_icmp_zero_payload(void) {
 }
 
 /**
+ * @brief Test v6->v4 ICMP error with a non-transport embedded protocol
+ *
+ * Verifies that a v6->v4 ICMP error quoting an embedded IPv6 packet whose
+ * proto is a non-transport value (IPPROTO_NONE) is still TRANSLATED, not
+ * dropped, even though the embedded transport area is empty. The embedded
+ * switch has no case for IPPROTO_NONE, so it must fall through untouched
+ * instead of being rejected by a guard meant only for ICMPv6/UDP/TCP cases.
+ *
+ * Regression test for the over-strict pre-switch guard removed alongside
+ * per-protocol guards.
+ *
+ * @return TEST_SUCCESS on success, error code on failure
+ */
+static inline int
+test_nat64_icmp_v6tov4_nontransport_embedded_translated(void) {
+	packet_list_cleanup(&test_params.packet_front.input);
+	packet_list_cleanup(&test_params.packet_front.output);
+	packet_list_cleanup(&test_params.packet_front.drop);
+
+	nat64_module_config_data_destroy(
+		&test_params.module_config, test_params.memory_context
+	);
+	TEST_ASSERT_SUCCESS(
+		nat64_test_config(&test_params.module_config),
+		"nat64_test_config failed\n"
+	);
+
+	// Embedded IPv6 header with proto=IPPROTO_NONE and payload_len=0, i.e.
+	// no transport bytes follow the embedded header at all.
+	struct rte_ipv6_hdr embedded = {
+		.vtc_flow = RTE_BE32(0x60000000),
+		.payload_len = 0,
+		.proto = IPPROTO_NONE,
+		.hop_limits = 64,
+	};
+	uint8_t prefix[12] = {0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0};
+	SET_IPV4_MAPPED_IPV6(
+		&embedded.src_addr, prefix, &config_data.mapping[0].ip4
+	);
+	rte_memcpy(&embedded.dst_addr, &config_data.mapping[1].ip6, 16);
+
+	struct upkt pkt = {
+		.eth =
+			{
+				.dst_addr.addr_bytes =
+					{0xff, 0xff, 0xff, 0xff, 0xff, 0xff},
+				.src_addr.addr_bytes =
+					{0x02, 0x00, 0x00, 0x00, 0x00, 0x00},
+				.ether_type = RTE_BE16(RTE_ETHER_TYPE_IPV6),
+			},
+		.ip.ipv6 =
+			{
+				.vtc_flow = RTE_BE32(0x60000000),
+				.payload_len = RTE_BE16(
+					sizeof(struct icmp6_hdr) +
+					sizeof(embedded)
+				),
+				.proto = IPPROTO_ICMPV6,
+				.hop_limits = 64,
+			},
+		.proto.icmp6 =
+			{
+				.icmp6_type = ICMP6_DST_UNREACH,
+				.icmp6_code = ICMP6_DST_UNREACH_NOPORT,
+			},
+		.data_len = sizeof(embedded),
+		.data = &embedded,
+	};
+	rte_memcpy(&pkt.ip.ipv6.src_addr, &config_data.mapping[0].ip6, 16);
+	SET_IPV4_MAPPED_IPV6(
+		&pkt.ip.ipv6.dst_addr, prefix, &config_data.mapping[0].ip4
+	);
+
+	TEST_ASSERT_SUCCESS(
+		push_packet_malformed(&pkt, 0, 0),
+		"Failed to push malformed ICMPv6 packet\n"
+	);
+
+	// Manually set offsets (push_packet_malformed skips parse_packet)
+	struct packet *packet = test_params.packet_front.input.first;
+	packet->network_header.type = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6);
+	packet->network_header.offset = sizeof(struct rte_ether_hdr);
+	packet->transport_header.type = IPPROTO_ICMPV6;
+	packet->transport_header.offset =
+		sizeof(struct rte_ether_hdr) + sizeof(struct rte_ipv6_hdr);
+
+	struct module_ectx module_ectx;
+	SET_OFFSET_OF(
+		&module_ectx.cp_module, &test_params.module_config.cp_module
+	);
+	test_params.module->handler(
+		NULL, &module_ectx, &test_params.packet_front
+	);
+
+	int output_count = packet_list_count(&test_params.packet_front.output);
+	int drop_count = packet_list_count(&test_params.packet_front.drop);
+
+	TEST_ASSERT_EQUAL(
+		output_count,
+		1,
+		"Non-transport embedded protocol should translate and "
+		"forward, got output=%d\n",
+		output_count
+	);
+	TEST_ASSERT_EQUAL(
+		drop_count,
+		0,
+		"Non-transport embedded protocol should not be dropped, "
+		"got drop=%d\n",
+		drop_count
+	);
+	TEST_ASSERT_EQUAL(
+		test_params.module_config.stats.malformed_packets,
+		0,
+		"Non-transport embedded protocol should not increment the "
+		"malformed counter, got %lu\n",
+		test_params.module_config.stats.malformed_packets
+	);
+
+	return TEST_SUCCESS;
+}
+
+/**
+ * @brief Test v4->v6 ICMP error with a non-transport embedded protocol
+ *
+ * Verifies that a v4->v6 ICMP error quoting an embedded IPv4 packet whose
+ * next_proto_id is a non-transport value (IPPROTO_NONE) is still
+ * TRANSLATED, not dropped, even though no transport bytes follow the
+ * embedded header. IPPROTO_NONE reaches the switch's default case, which
+ * only logs and does not dereference anything, so it must not be rejected
+ * by a guard meant only for the ICMP/UDP/TCP cases.
+ *
+ * Regression test for the over-strict pre-switch guard removed alongside
+ * per-protocol guards.
+ *
+ * @return TEST_SUCCESS on success, error code on failure
+ */
+static inline int
+test_nat64_icmp_v4tov6_nontransport_embedded_translated(void) {
+	packet_list_cleanup(&test_params.packet_front.input);
+	packet_list_cleanup(&test_params.packet_front.output);
+	packet_list_cleanup(&test_params.packet_front.drop);
+
+	nat64_module_config_data_destroy(
+		&test_params.module_config, test_params.memory_context
+	);
+	TEST_ASSERT_SUCCESS(
+		nat64_test_config(&test_params.module_config),
+		"nat64_test_config failed\n"
+	);
+
+	// Embedded IPv4 header only (next_proto_id=IPPROTO_NONE); no
+	// transport bytes follow.
+	struct rte_ipv4_hdr embedded = {
+		.version_ihl = RTE_IPV4_VHL_DEF,
+		.total_length = RTE_BE16(sizeof(struct rte_ipv4_hdr)),
+		.next_proto_id = IPPROTO_NONE,
+		.time_to_live = 64,
+		.src_addr = config_data.mapping[0].ip4,
+		.dst_addr = outer_ip4,
+	};
+
+	uint16_t outer_total = sizeof(struct rte_ipv4_hdr) +
+			       sizeof(struct icmphdr) + sizeof(embedded);
+	struct upkt pkt = build_icmp_dest_unreach_pkt(
+		outer_total, &embedded, sizeof(embedded)
+	);
+
+	TEST_ASSERT_SUCCESS(
+		push_packet_malformed(&pkt, outer_total, 0),
+		"Failed to push malformed ICMP packet\n"
+	);
+
+	// Manually set offsets (push_packet_malformed skips parse_packet)
+	struct packet *packet = test_params.packet_front.input.first;
+	packet->network_header.type = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4);
+	packet->network_header.offset = sizeof(struct rte_ether_hdr);
+	packet->transport_header.type = IPPROTO_ICMP;
+	packet->transport_header.offset =
+		sizeof(struct rte_ether_hdr) + sizeof(struct rte_ipv4_hdr);
+
+	struct module_ectx module_ectx;
+	SET_OFFSET_OF(
+		&module_ectx.cp_module, &test_params.module_config.cp_module
+	);
+	test_params.module->handler(
+		NULL, &module_ectx, &test_params.packet_front
+	);
+
+	int output_count = packet_list_count(&test_params.packet_front.output);
+	int drop_count = packet_list_count(&test_params.packet_front.drop);
+
+	TEST_ASSERT_EQUAL(
+		output_count,
+		1,
+		"Non-transport embedded protocol should translate and "
+		"forward, got output=%d\n",
+		output_count
+	);
+	TEST_ASSERT_EQUAL(
+		drop_count,
+		0,
+		"Non-transport embedded protocol should not be dropped, "
+		"got drop=%d\n",
+		drop_count
+	);
+	TEST_ASSERT_EQUAL(
+		test_params.module_config.stats.malformed_packets,
+		0,
+		"Non-transport embedded protocol should not increment the "
+		"malformed counter, got %lu\n",
+		test_params.module_config.stats.malformed_packets
+	);
+
+	return TEST_SUCCESS;
+}
+
+/**
  * @brief Clean up test suite resources
  *
  * Performs cleanup after test suite execution:
@@ -6333,6 +6551,16 @@ static struct unit_test_suite nat64_test_suite =
 		 TEST_CASE_NAMED(
 			 "test_nat64_icmp_v6tov4_nested_icmp_zero_payload",
 			 test_nat64_icmp_v6tov4_nested_icmp_zero_payload
+		 ),
+		 TEST_CASE_NAMED(
+			 "test_nat64_icmp_v6tov4_nontransport_embedded_"
+			 "translated",
+			 test_nat64_icmp_v6tov4_nontransport_embedded_translated
+		 ),
+		 TEST_CASE_NAMED(
+			 "test_nat64_icmp_v4tov6_nontransport_embedded_"
+			 "translated",
+			 test_nat64_icmp_v4tov6_nontransport_embedded_translated
 		 ),
 		 TEST_CASES_END() /**< NULL terminate unit test array */
 	 }};
