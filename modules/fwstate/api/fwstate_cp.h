@@ -61,11 +61,24 @@ fwstate_config_get_map_stats(const struct cp_module *cp_module, bool is_ipv6);
 struct fwstate_sync_config
 fwstate_config_get_sync_config(const struct cp_module *cp_module);
 
-// Trim stale layers from both IPv4 and IPv6 maps
-// Returns handle to outdated layers that should be freed after UpdateModules
-// Returns NULL on error (errno is set)
-fwstate_outdated_layers_t *
-fwstate_config_trim_stale_layers(struct cp_module *cp_module, uint64_t now);
+// Trims stale layers from both the IPv4 and IPv6 maps.
+//
+// Returns 0 when both maps were fully trimmed, or -1 with errno set when
+// trimming stopped early because a bookkeeping-node allocation failed. On
+// success *outdated is always non-NULL, though it holds no layers when
+// nothing was stale. On failure it is non-NULL only when at least one layer
+// was collected, which marks a genuine partial trim. It is NULL when the
+// outdated-layers structure itself cannot be allocated, and when trimming
+// failed before collecting anything - in both cases the layer chain is left
+// untouched. Collected layers must still be released with
+// fwstate_outdated_layers_free after the new config is published, regardless
+// of the return value.
+int
+fwstate_config_trim_stale_layers(
+	struct cp_module *cp_module,
+	uint64_t now,
+	fwstate_outdated_layers_t **outdated
+);
 
 // Free outdated layers after successful UpdateModules
 void

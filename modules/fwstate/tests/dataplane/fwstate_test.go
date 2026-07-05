@@ -298,7 +298,7 @@ func TestFWStateTrimStaleLayers(t *testing.T) {
 	futureTime := GetCurrentTime() + 200e9 // 200 seconds in the future
 
 	// Trim stale layers
-	TrimStaleLayers(cpModule, futureTime)
+	require.NoError(t, TrimStaleLayers(cpModule, futureTime))
 
 	// Check layer count after trim
 	_, layerCountAfter := GetLayerCount(cpModule)

@@ -371,13 +371,32 @@ func stateValueFromC(value *C.struct_fw_state_value) StateValue {
 }
 
 // TrimStaleLayers trims stale layers from both IPv4 and IPv6 maps.
-func (m *ModuleConfig) TrimStaleLayers(now uint64) *OutdatedLayers {
-	ptr := C.fwstate_config_trim_stale_layers(m.asRawPtr(), C.uint64_t(now))
-	if ptr == nil {
-		return nil
+//
+// On failure, the returned handle is non-nil only when at least one layer
+// was actually collected and unlinked before the failure; that handle must
+// still be freed after the new config is published. A nil handle with an
+// error means nothing was collected and the chain is untouched. Stale
+// layers that were not collected stay linked and are retried on the next
+// trim.
+func (m *ModuleConfig) TrimStaleLayers(now uint64) (*OutdatedLayers, error) {
+	var outdated *C.fwstate_outdated_layers_t
+	rc, cErr := C.fwstate_config_trim_stale_layers(m.asRawPtr(), C.uint64_t(now), &outdated)
+
+	var handle *OutdatedLayers
+	if outdated != nil {
+		// A non-nil handle means layers may have been unlinked on success
+		// and were unlinked on failure, so readers paging by layer_index
+		// must observe a possible topology shift. Over-reporting a shift
+		// is benign, under-reporting is not.
+		handle = &OutdatedLayers{ptr: unsafe.Pointer(outdated)}
+		m.generation++
 	}
-	m.generation++
-	return &OutdatedLayers{ptr: unsafe.Pointer(ptr)}
+
+	if rc != 0 {
+		return handle, fmt.Errorf("failed to trim stale layers: error code=%d, cErr=%v", rc, cErr)
+	}
+
+	return handle, nil
 }
 
 func htons(v uint16) uint16 {

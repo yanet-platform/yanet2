@@ -243,20 +243,38 @@ func (m *FWStateService) UpdateConfig(
 	if oldConfig != nil {
 		newConfig.PropagateConfig(oldConfig)
 
-		// Trim stale layers from the transferred configuration
-		// Layers with expired deadlines will be collected and added to pending list
-		// They will be freed after successful UpdateModules
+		// Trim stale layers from the transferred configuration.
+		// Layers with expired deadlines are collected and added to the
+		// pending list; they are freed after successful UpdateModules.
 		now := uint64(time.Now().UnixNano())
-		outdatedLayers := newConfig.TrimStaleLayers(now)
-		if outdatedLayers == nil {
-			// Only nil on memory allocation failure
-			newConfig.DetachMaps()
-			newConfig.Free()
-			m.log.Error("failed to allocate memory for outdated layers", zap.String("config", name))
-			return nil, status.Error(codes.Internal, "failed to allocate memory for outdated layer list")
+		outdatedLayers, err := newConfig.TrimStaleLayers(now)
+		if outdatedLayers != nil {
+			m.pendingOutdatedLayers = append(m.pendingOutdatedLayers, outdatedLayers)
 		}
-		// Always add to pending list - will be freed after successful UpdateModules
-		m.pendingOutdatedLayers = append(m.pendingOutdatedLayers, outdatedLayers)
+		if err != nil {
+			if outdatedLayers == nil {
+				// Nothing was collected, so nothing was unlinked: the chain
+				// is untouched and it is safe to abort the update.
+				newConfig.DetachMaps()
+				newConfig.Free()
+				m.log.Error("failed to trim stale fwstate layers",
+					zap.String("config", name),
+					zap.Error(err),
+				)
+				return nil, status.Errorf(codes.Internal, "failed to trim stale fwstate layers: %v", err)
+			}
+
+			// Partial trim: some layers were collected and are already
+			// pending, so continuing lets the upcoming successful publish
+			// free them and relieve the memory pressure that caused the
+			// failure. The layers that were not collected stay linked in
+			// the chain and are retried on the next update. Aborting here
+			// would prevent exactly the publish that frees memory.
+			m.log.Warn("trimmed stale layers only partially",
+				zap.String("config", name),
+				zap.Error(err),
+			)
+		}
 	}
 
 	// Set sync config

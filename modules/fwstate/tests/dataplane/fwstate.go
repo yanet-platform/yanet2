@@ -582,10 +582,18 @@ func GetCurrentTime() uint64 {
 	return uint64(C.clock_get_time_ns(nil))
 }
 
-// TrimStaleLayers trims stale layers using the C API
-func TrimStaleLayers(cpModule *C.struct_cp_module, now uint64) {
-	outdated := C.fwstate_config_trim_stale_layers(cpModule, C.uint64_t(now))
+// TrimStaleLayers trims stale layers using the C API.
+//
+// It immediately frees whatever layers were collected, since the test
+// harness has no publish step to defer the free to.
+func TrimStaleLayers(cpModule *C.struct_cp_module, now uint64) error {
+	var outdated *C.fwstate_outdated_layers_t
+	rc, cErr := C.fwstate_config_trim_stale_layers(cpModule, C.uint64_t(now), &outdated)
 	if outdated != nil {
 		C.fwstate_outdated_layers_free(outdated, cpModule)
 	}
+	if rc != 0 {
+		return fmt.Errorf("failed to trim stale layers: error code=%d, cErr=%v", rc, cErr)
+	}
+	return nil
 }

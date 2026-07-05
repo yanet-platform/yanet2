@@ -28,16 +28,21 @@ layermap_trim_stale_layers_cp(
 
 	while (layer) {
 		if (layermap_is_layer_outdated(layer, now)) {
-			// Unlink the outdated layer
-			fwmap_t *next_layer = (fwmap_t *)ADDR_OF(&layer->next);
-			ATOMIC_SET_OFFSET_OF(prev_next, next_layer);
-
-			// Add to outdated layers list
+			// Allocate the bookkeeping node before unlinking, so
+			// that a failed allocation leaves the layer in place
+			// to be retried on the next trim instead of being
+			// orphaned.
 			layermap_list_t *node =
 				memory_balloc(ctx, sizeof(layermap_list_t));
 			if (!node) {
 				return -1;
 			}
+
+			// Unlink the outdated layer
+			fwmap_t *next_layer = (fwmap_t *)ADDR_OF(&layer->next);
+			ATOMIC_SET_OFFSET_OF(prev_next, next_layer);
+
+			// Add to outdated layers list
 			SET_OFFSET_OF(&node->layer, layer);
 			SET_OFFSET_OF(&node->next, *outdated_layers);
 			*outdated_layers = node;

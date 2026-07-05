@@ -383,48 +383,70 @@ struct fwstate_outdated_layers {
 	layermap_list_t *v6_layers;
 };
 
-fwstate_outdated_layers_t *
-fwstate_config_trim_stale_layers(struct cp_module *cp_module, uint64_t now) {
+int
+fwstate_config_trim_stale_layers(
+	struct cp_module *cp_module,
+	uint64_t now,
+	fwstate_outdated_layers_t **outdated
+) {
 	struct fwstate_module_config *config = container_of(
 		cp_module, struct fwstate_module_config, cp_module
 	);
 	struct agent *agent = ADDR_OF(&cp_module->agent);
 
 	// Allocate structure to hold outdated layers
-	fwstate_outdated_layers_t *outdated =
-		memory_balloc(&agent->memory_context, sizeof(*outdated));
-	if (!outdated) {
+	fwstate_outdated_layers_t *layers =
+		memory_balloc(&agent->memory_context, sizeof(*layers));
+	if (!layers) {
 		errno = ENOMEM;
-		return NULL;
+		*outdated = NULL;
+		return -1;
 	}
-	outdated->v4_layers = NULL;
-	outdated->v6_layers = NULL;
+	layers->v4_layers = NULL;
+	layers->v6_layers = NULL;
+	*outdated = layers;
 
-	// Trim IPv4 layers if map exists
-	// Always return the structure even if trim fails, to avoid leaking
-	// already collected layers
+	// Attempt both maps unconditionally so each collects independently -
+	// a v4 allocation failure must not skip v6 trimming.
+	bool failed = false;
+
 	if (config->cfg.fw4state) {
-		layermap_trim_stale_layers_cp(
-			&config->cfg.fw4state,
-			&agent->memory_context,
-			now,
-			&outdated->v4_layers
-		);
-		// Ignore errors - we'll return what we collected
+		if (layermap_trim_stale_layers_cp(
+			    &config->cfg.fw4state,
+			    &agent->memory_context,
+			    now,
+			    &layers->v4_layers
+		    )) {
+			failed = true;
+		}
 	}
 
-	// Trim IPv6 layers if map exists
 	if (config->cfg.fw6state) {
-		layermap_trim_stale_layers_cp(
-			&config->cfg.fw6state,
-			&agent->memory_context,
-			now,
-			&outdated->v6_layers
-		);
-		// Ignore errors - we'll return what we collected
+		if (layermap_trim_stale_layers_cp(
+			    &config->cfg.fw6state,
+			    &agent->memory_context,
+			    now,
+			    &layers->v6_layers
+		    )) {
+			failed = true;
+		}
 	}
 
-	return outdated;
+	if (failed) {
+		errno = ENOMEM;
+		if (layers->v4_layers == NULL && layers->v6_layers == NULL) {
+			// Nothing was collected: the reordered layermap trim
+			// fails before mutating the chain, so this is
+			// equivalent to the outer allocation failing.
+			memory_bfree(
+				&agent->memory_context, layers, sizeof(*layers)
+			);
+			*outdated = NULL;
+		}
+		return -1;
+	}
+
+	return 0;
 }
 
 void
