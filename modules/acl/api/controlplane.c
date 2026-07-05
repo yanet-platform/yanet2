@@ -277,6 +277,32 @@ check_has_full_dst_port_range(const struct acl_rule *acl_rule) {
 }
 
 static int
+check_has_tcp(const struct acl_rule *acl_rule) {
+	if (acl_rule->fragment == FILTER_IP_FRAG_FRAG)
+		return 0;
+	for (uint32_t idx = 0; idx < acl_rule->proto_ranges.count; ++idx) {
+		uint16_t from_proto = acl_rule->proto_ranges.items[idx].from >> 8;
+		uint16_t to_proto = acl_rule->proto_ranges.items[idx].to >> 8;
+		if (from_proto <= IPPROTO_TCP && to_proto >= IPPROTO_TCP)
+			return 1;
+	}
+	return 0;
+}
+
+static int
+check_has_udp(const struct acl_rule *acl_rule) {
+	if (acl_rule->fragment == FILTER_IP_FRAG_FRAG)
+		return 0;
+	for (uint32_t idx = 0; idx < acl_rule->proto_ranges.count; ++idx) {
+		uint16_t from_proto = acl_rule->proto_ranges.items[idx].from >> 8;
+		uint16_t to_proto = acl_rule->proto_ranges.items[idx].to >> 8;
+		if (from_proto <= IPPROTO_UDP && to_proto >= IPPROTO_UDP)
+			return 1;
+	}
+	return 0;
+}
+
+static int
 check_has_full_port_range(const struct acl_rule *acl_rule) {
 	return ((acl_rule->fragment == FILTER_IP_FRAG_ANY ||
 		 acl_rule->fragment == FILTER_IP_FRAG_NONE) &&
@@ -297,12 +323,14 @@ check_acl_rule_ip6(const struct acl_rule *acl_rule) {
 
 static int
 check_acl_rule_ip4_port(const struct acl_rule *acl_rule) {
-	return check_has_ip4(acl_rule) && !check_has_full_port_range(acl_rule);
+	return check_has_ip4(acl_rule) &&
+		(check_has_tcp(acl_rule) || check_has_udp(acl_rule));
 }
 
 static int
 check_acl_rule_ip6_port(const struct acl_rule *acl_rule) {
-	return check_has_ip6(acl_rule) && !check_has_full_port_range(acl_rule);
+	return check_has_ip6(acl_rule) &&
+		(check_has_tcp(acl_rule) || check_has_udp(acl_rule));
 }
 
 static int

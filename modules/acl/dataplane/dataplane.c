@@ -160,23 +160,23 @@ acl_handle_packets(
 
 		if (packet->network_header.type ==
 		    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
-			ip4_packets[ip4_idx++] = packet;
-
 			if (packet->fragment_offset == 0 &&
 			    (packet->transport_header.type == IPPROTO_TCP ||
 			     packet->transport_header.type == IPPROTO_UDP)) {
 				ip4_port_packets[ip4_port_idx++] = packet;
+			} else {
+				ip4_packets[ip4_idx++] = packet;
 			}
 		}
 
 		if (packet->network_header.type ==
 		    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
-			ip6_packets[ip6_idx++] = packet;
-
 			if (packet->fragment_offset == 0 &&
 			    (packet->transport_header.type == IPPROTO_TCP ||
 			     packet->transport_header.type == IPPROTO_UDP)) {
 				ip6_port_packets[ip6_port_idx++] = packet;
+			} else {
+				ip6_packets[ip6_idx++] = packet;
 			}
 		}
 	}
@@ -239,12 +239,6 @@ acl_handle_packets(
 		    rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
 			state_table = fw4state;
 
-			if (ip4_result[ip4_idx] < action) {
-				action = ip4_result[ip4_idx];
-			}
-
-			++ip4_idx;
-
 			if (packet->fragment_offset == 0 &&
 			    (packet->transport_header.type == IPPROTO_TCP ||
 			     packet->transport_header.type == IPPROTO_UDP)) {
@@ -252,16 +246,15 @@ acl_handle_packets(
 					action = ip4_port_result[ip4_port_idx];
 				}
 				++ip4_port_idx;
+			} else {
+				if (ip4_result[ip4_idx] < action) {
+					action = ip4_result[ip4_idx];
+				}
+				++ip4_idx;
 			}
 		} else if (packet->network_header.type ==
 			   rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
 			state_table = fw6state;
-
-			if (ip6_result[ip6_idx] < action) {
-				action = ip6_result[ip6_idx];
-			}
-
-			++ip6_idx;
 
 			if (packet->fragment_offset == 0 &&
 			    (packet->transport_header.type == IPPROTO_TCP ||
@@ -270,6 +263,11 @@ acl_handle_packets(
 					action = ip6_port_result[ip6_port_idx];
 				}
 				++ip6_port_idx;
+			} else {
+				if (ip6_result[ip6_idx] < action) {
+					action = ip6_result[ip6_idx];
+				}
+				++ip6_idx;
 			}
 		}
 
