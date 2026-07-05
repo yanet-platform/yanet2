@@ -743,6 +743,18 @@ icmp_v6_to_v4(
 
 		// RFC7915: Check for nested ICMP errors (not allowed)
 		if (ipv6_payload_header->proto == IPPROTO_ICMPV6) {
+			if (embedded_offset + sizeof(struct rte_ipv6_hdr) +
+				    sizeof(struct yanet_icmp6_hdr) >
+			    rte_pktmbuf_data_len(mbuf)) {
+				LOG_DBG(NAT64,
+					"Embedded ICMPv6 header offset (%u) "
+					"exceeds mbuf data_len (%u)\n",
+					embedded_offset,
+					rte_pktmbuf_data_len(mbuf));
+				nat64_stats_malformed(nat64_config);
+				return -1;
+			}
+
 			struct yanet_icmp6_hdr *embedded_icmp =
 				rte_pktmbuf_mtod_offset(
 					mbuf,
@@ -1122,6 +1134,19 @@ icmp_v6_to_v4(
 				break;
 			}
 			case IPPROTO_TCP: {
+				if (transport_offset +
+					    sizeof(struct rte_tcp_hdr) >
+				    rte_pktmbuf_data_len(mbuf)) {
+					LOG_DBG(NAT64,
+						"Embedded TCP header offset "
+						"(%u) exceeds mbuf data_len "
+						"(%u)\n",
+						transport_offset,
+						rte_pktmbuf_data_len(mbuf));
+					nat64_stats_malformed(nat64_config);
+					return -1;
+				}
+
 				// Recalculate TCP checksum
 				struct rte_tcp_hdr *tcp_hdr =
 					rte_pktmbuf_mtod_offset(
@@ -2695,6 +2720,19 @@ icmp_v4_to_v6(
 				break;
 			}
 			case IPPROTO_TCP: {
+				if (payload_offset +
+					    sizeof(struct rte_tcp_hdr) >
+				    rte_pktmbuf_data_len(mbuf)) {
+					LOG_DBG(NAT64,
+						"Embedded TCP header offset "
+						"(%u) exceeds mbuf data_len "
+						"(%u)\n",
+						payload_offset,
+						rte_pktmbuf_data_len(mbuf));
+					nat64_stats_malformed(nat64_config);
+					return -1;
+				}
+
 				struct rte_tcp_hdr *tcp_header =
 					rte_pktmbuf_mtod_offset(
 						mbuf,

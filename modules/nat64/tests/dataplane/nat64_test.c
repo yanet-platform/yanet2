@@ -5875,6 +5875,349 @@ test_nat64_icmp_v4tov6_fuzz_crash_regression(void) {
 }
 
 /**
+ * @brief Test v6->v4 ICMP error with truncated embedded TCP header
+ *
+ * Verifies that a v6->v4 ICMP error whose embedded IPv6 payload is TCP but
+ * carries fewer than sizeof(struct rte_tcp_hdr) bytes is dropped. Constructs
+ * an ICMPv6 Destination Unreachable with an embedded IPv6 header (proto=TCP)
+ * followed by only 12 bytes of TCP header data, which passes the 8-byte
+ * pre-switch guard but must be rejected by the TCP-specific 20-byte guard
+ * before the checksum recalculation writes/reads past the mbuf.
+ *
+ * Regression test for Codex review finding on the bounds-check fix.
+ *
+ * @return TEST_SUCCESS on success, error code on failure
+ */
+static inline int
+test_nat64_icmp_v6tov4_truncated_embedded_tcp(void) {
+	packet_list_cleanup(&test_params.packet_front.input);
+	packet_list_cleanup(&test_params.packet_front.output);
+	packet_list_cleanup(&test_params.packet_front.drop);
+
+	nat64_module_config_data_destroy(
+		&test_params.module_config, test_params.memory_context
+	);
+	TEST_ASSERT_SUCCESS(
+		nat64_test_config(&test_params.module_config),
+		"nat64_test_config failed\n"
+	);
+
+	// Embedded IPv6 header (proto=TCP) followed by a truncated TCP header
+	// of only 12 bytes (less than sizeof(struct rte_tcp_hdr) == 20).
+	const uint16_t truncated_tcp_len = 12;
+	struct {
+		struct rte_ipv6_hdr hdr;
+		uint8_t tcp_partial[12];
+	} embedded = {0};
+	embedded.hdr.vtc_flow = RTE_BE32(0x60000000);
+	embedded.hdr.payload_len = RTE_BE16(truncated_tcp_len);
+	embedded.hdr.proto = IPPROTO_TCP;
+	embedded.hdr.hop_limits = 64;
+	uint8_t prefix[12] = {0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0};
+	SET_IPV4_MAPPED_IPV6(
+		&embedded.hdr.src_addr, prefix, &config_data.mapping[0].ip4
+	);
+	rte_memcpy(&embedded.hdr.dst_addr, &config_data.mapping[1].ip6, 16);
+
+	struct upkt pkt = {
+		.eth =
+			{
+				.dst_addr.addr_bytes =
+					{0xff, 0xff, 0xff, 0xff, 0xff, 0xff},
+				.src_addr.addr_bytes =
+					{0x02, 0x00, 0x00, 0x00, 0x00, 0x00},
+				.ether_type = RTE_BE16(RTE_ETHER_TYPE_IPV6),
+			},
+		.ip.ipv6 =
+			{
+				.vtc_flow = RTE_BE32(0x60000000),
+				.payload_len = RTE_BE16(
+					sizeof(struct icmp6_hdr) +
+					sizeof(embedded)
+				),
+				.proto = IPPROTO_ICMPV6,
+				.hop_limits = 64,
+			},
+		.proto.icmp6 =
+			{
+				.icmp6_type = ICMP6_DST_UNREACH,
+				.icmp6_code = ICMP6_DST_UNREACH_NOPORT,
+			},
+		.data_len = sizeof(embedded),
+		.data = &embedded,
+	};
+	rte_memcpy(&pkt.ip.ipv6.src_addr, &config_data.mapping[0].ip6, 16);
+	SET_IPV4_MAPPED_IPV6(
+		&pkt.ip.ipv6.dst_addr, prefix, &config_data.mapping[0].ip4
+	);
+
+	TEST_ASSERT_SUCCESS(
+		push_packet_malformed(&pkt, 0, 0),
+		"Failed to push malformed ICMPv6 packet\n"
+	);
+
+	// Manually set offsets (push_packet_malformed skips parse_packet)
+	struct packet *packet = test_params.packet_front.input.first;
+	packet->network_header.type = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6);
+	packet->network_header.offset = sizeof(struct rte_ether_hdr);
+	packet->transport_header.type = IPPROTO_ICMPV6;
+	packet->transport_header.offset =
+		sizeof(struct rte_ether_hdr) + sizeof(struct rte_ipv6_hdr);
+
+	struct module_ectx module_ectx;
+	SET_OFFSET_OF(
+		&module_ectx.cp_module, &test_params.module_config.cp_module
+	);
+	test_params.module->handler(
+		NULL, &module_ectx, &test_params.packet_front
+	);
+
+	int output_count = packet_list_count(&test_params.packet_front.output);
+	int drop_count = packet_list_count(&test_params.packet_front.drop);
+
+	TEST_ASSERT_EQUAL(
+		drop_count,
+		1,
+		"Truncated embedded TCP header: expected drop=1, got %d\n",
+		drop_count
+	);
+	TEST_ASSERT_EQUAL(
+		output_count,
+		0,
+		"Truncated embedded TCP header: packet must not be forwarded, "
+		"got %d outputs\n",
+		output_count
+	);
+	TEST_ASSERT_EQUAL(
+		test_params.module_config.stats.malformed_packets,
+		1,
+		"Malformed-packet counter should be 1 after drop, got %lu\n",
+		test_params.module_config.stats.malformed_packets
+	);
+
+	return TEST_SUCCESS;
+}
+
+/**
+ * @brief Test v4->v6 ICMP error with truncated embedded TCP header
+ *
+ * Verifies that a v4->v6 ICMP error whose embedded IPv4 payload is TCP but
+ * carries fewer than sizeof(struct rte_tcp_hdr) bytes is dropped. Constructs
+ * an ICMPv4 Destination Unreachable with an embedded IPv4 header
+ * (next_proto_id=TCP) followed by only 12 bytes of TCP header data, which
+ * passes the 8-byte pre-switch guard but must be rejected by the
+ * TCP-specific 20-byte guard before the checksum recalculation writes/reads
+ * past the mbuf.
+ *
+ * Regression test for Codex review finding on the bounds-check fix.
+ *
+ * @return TEST_SUCCESS on success, error code on failure
+ */
+static inline int
+test_nat64_icmp_v4tov6_truncated_embedded_tcp(void) {
+	packet_list_cleanup(&test_params.packet_front.input);
+	packet_list_cleanup(&test_params.packet_front.output);
+	packet_list_cleanup(&test_params.packet_front.drop);
+
+	nat64_module_config_data_destroy(
+		&test_params.module_config, test_params.memory_context
+	);
+	TEST_ASSERT_SUCCESS(
+		nat64_test_config(&test_params.module_config),
+		"nat64_test_config failed\n"
+	);
+
+	// Embedded IPv4 header (next_proto_id=TCP) followed by a truncated
+	// TCP header of only 12 bytes (less than sizeof(struct rte_tcp_hdr)
+	// == 20).
+	const uint16_t truncated_tcp_len = 12;
+	struct {
+		struct rte_ipv4_hdr hdr;
+		uint8_t tcp_partial[12];
+	} embedded = {0};
+	embedded.hdr.version_ihl = RTE_IPV4_VHL_DEF;
+	embedded.hdr.total_length =
+		RTE_BE16(sizeof(struct rte_ipv4_hdr) + truncated_tcp_len);
+	embedded.hdr.next_proto_id = IPPROTO_TCP;
+	embedded.hdr.time_to_live = 64;
+	embedded.hdr.src_addr = config_data.mapping[0].ip4;
+	embedded.hdr.dst_addr = outer_ip4;
+
+	uint16_t outer_total = sizeof(struct rte_ipv4_hdr) +
+			       sizeof(struct icmphdr) + sizeof(embedded);
+	struct upkt pkt = build_icmp_dest_unreach_pkt(
+		outer_total, &embedded, sizeof(embedded)
+	);
+
+	TEST_ASSERT_SUCCESS(
+		push_packet_malformed(&pkt, outer_total, 0),
+		"Failed to push malformed ICMP packet\n"
+	);
+
+	// Manually set offsets (push_packet_malformed skips parse_packet)
+	struct packet *packet = test_params.packet_front.input.first;
+	packet->network_header.type = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4);
+	packet->network_header.offset = sizeof(struct rte_ether_hdr);
+	packet->transport_header.type = IPPROTO_ICMP;
+	packet->transport_header.offset =
+		sizeof(struct rte_ether_hdr) + sizeof(struct rte_ipv4_hdr);
+
+	struct module_ectx module_ectx;
+	SET_OFFSET_OF(
+		&module_ectx.cp_module, &test_params.module_config.cp_module
+	);
+	test_params.module->handler(
+		NULL, &module_ectx, &test_params.packet_front
+	);
+
+	int output_count = packet_list_count(&test_params.packet_front.output);
+	int drop_count = packet_list_count(&test_params.packet_front.drop);
+
+	TEST_ASSERT_EQUAL(
+		drop_count,
+		1,
+		"Truncated embedded TCP header: expected drop=1, got %d\n",
+		drop_count
+	);
+	TEST_ASSERT_EQUAL(
+		output_count,
+		0,
+		"Truncated embedded TCP header: packet must not be forwarded, "
+		"got %d outputs\n",
+		output_count
+	);
+	TEST_ASSERT_EQUAL(
+		test_params.module_config.stats.malformed_packets,
+		1,
+		"Malformed-packet counter should be 1 after drop, got %lu\n",
+		test_params.module_config.stats.malformed_packets
+	);
+
+	return TEST_SUCCESS;
+}
+
+/**
+ * @brief Test v6->v4 ICMP error with a nested ICMPv6 header at end-of-mbuf
+ *
+ * Verifies that a v6->v4 ICMP error with an embedded IPv6 header whose
+ * proto is ICMPv6 and payload_len is 0 is dropped. After the embedded IPv6
+ * header, no bytes remain in the mbuf, so the nested-ICMP-error check must
+ * reject the packet before dereferencing the nested ICMPv6 header one byte
+ * past the allocation.
+ *
+ * Regression test for Codex review finding on the bounds-check fix.
+ *
+ * @return TEST_SUCCESS on success, error code on failure
+ */
+static inline int
+test_nat64_icmp_v6tov4_nested_icmp_zero_payload(void) {
+	packet_list_cleanup(&test_params.packet_front.input);
+	packet_list_cleanup(&test_params.packet_front.output);
+	packet_list_cleanup(&test_params.packet_front.drop);
+
+	nat64_module_config_data_destroy(
+		&test_params.module_config, test_params.memory_context
+	);
+	TEST_ASSERT_SUCCESS(
+		nat64_test_config(&test_params.module_config),
+		"nat64_test_config failed\n"
+	);
+
+	// Embedded IPv6 header: payload_len=0, proto=ICMPv6 (nested error, no
+	// bytes for the nested ICMPv6 header follow the embedded IPv6 header)
+	struct rte_ipv6_hdr emb_ipv6 = {
+		.vtc_flow = RTE_BE32(0x60000000),
+		.payload_len = 0,
+		.proto = IPPROTO_ICMPV6,
+		.hop_limits = 64,
+	};
+	uint8_t prefix[12] = {0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0};
+	SET_IPV4_MAPPED_IPV6(
+		&emb_ipv6.src_addr, prefix, &config_data.mapping[0].ip4
+	);
+	rte_memcpy(&emb_ipv6.dst_addr, &config_data.mapping[1].ip6, 16);
+
+	struct upkt pkt = {
+		.eth =
+			{
+				.dst_addr.addr_bytes =
+					{0xff, 0xff, 0xff, 0xff, 0xff, 0xff},
+				.src_addr.addr_bytes =
+					{0x02, 0x00, 0x00, 0x00, 0x00, 0x00},
+				.ether_type = RTE_BE16(RTE_ETHER_TYPE_IPV6),
+			},
+		.ip.ipv6 =
+			{
+				.vtc_flow = RTE_BE32(0x60000000),
+				.payload_len = RTE_BE16(
+					sizeof(struct icmp6_hdr) +
+					sizeof(struct rte_ipv6_hdr)
+				),
+				.proto = IPPROTO_ICMPV6,
+				.hop_limits = 64,
+			},
+		.proto.icmp6 =
+			{
+				.icmp6_type = ICMP6_DST_UNREACH,
+				.icmp6_code = ICMP6_DST_UNREACH_NOPORT,
+			},
+		.data_len = sizeof(emb_ipv6),
+		.data = &emb_ipv6,
+	};
+	rte_memcpy(&pkt.ip.ipv6.src_addr, &config_data.mapping[0].ip6, 16);
+	SET_IPV4_MAPPED_IPV6(
+		&pkt.ip.ipv6.dst_addr, prefix, &config_data.mapping[0].ip4
+	);
+
+	TEST_ASSERT_SUCCESS(
+		push_packet_malformed(&pkt, 0, 0),
+		"Failed to push malformed ICMPv6 packet\n"
+	);
+
+	// Manually set offsets (push_packet_malformed skips parse_packet)
+	struct packet *packet = test_params.packet_front.input.first;
+	packet->network_header.type = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6);
+	packet->network_header.offset = sizeof(struct rte_ether_hdr);
+	packet->transport_header.type = IPPROTO_ICMPV6;
+	packet->transport_header.offset =
+		sizeof(struct rte_ether_hdr) + sizeof(struct rte_ipv6_hdr);
+
+	struct module_ectx module_ectx;
+	SET_OFFSET_OF(
+		&module_ectx.cp_module, &test_params.module_config.cp_module
+	);
+	test_params.module->handler(
+		NULL, &module_ectx, &test_params.packet_front
+	);
+
+	int output_count = packet_list_count(&test_params.packet_front.output);
+	int drop_count = packet_list_count(&test_params.packet_front.drop);
+
+	TEST_ASSERT_EQUAL(
+		drop_count,
+		1,
+		"Expected drop for nested ICMPv6 error at end-of-mbuf, "
+		"got %d drops\n",
+		drop_count
+	);
+	TEST_ASSERT_EQUAL(
+		output_count,
+		0,
+		"Nested ICMPv6 error at end-of-mbuf: packet must not be "
+		"forwarded, got %d outputs\n",
+		output_count
+	);
+	TEST_ASSERT_EQUAL(
+		test_params.module_config.stats.malformed_packets,
+		1,
+		"Malformed-packet counter should be 1 after drop, got %lu\n",
+		test_params.module_config.stats.malformed_packets
+	);
+
+	return TEST_SUCCESS;
+}
+
+/**
  * @brief Clean up test suite resources
  *
  * Performs cleanup after test suite execution:
@@ -5978,6 +6321,18 @@ static struct unit_test_suite nat64_test_suite =
 		 TEST_CASE_NAMED(
 			 "test_nat64_icmp_v4tov6_fuzz_crash_regression",
 			 test_nat64_icmp_v4tov6_fuzz_crash_regression
+		 ),
+		 TEST_CASE_NAMED(
+			 "test_nat64_icmp_v6tov4_truncated_embedded_tcp",
+			 test_nat64_icmp_v6tov4_truncated_embedded_tcp
+		 ),
+		 TEST_CASE_NAMED(
+			 "test_nat64_icmp_v4tov6_truncated_embedded_tcp",
+			 test_nat64_icmp_v4tov6_truncated_embedded_tcp
+		 ),
+		 TEST_CASE_NAMED(
+			 "test_nat64_icmp_v6tov4_nested_icmp_zero_payload",
+			 test_nat64_icmp_v6tov4_nested_icmp_zero_payload
 		 ),
 		 TEST_CASES_END() /**< NULL terminate unit test array */
 	 }};
