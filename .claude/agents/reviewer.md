@@ -124,6 +124,23 @@ For every changed function or code path:
    "input/config X reaches changed line Y and produces wrong outcome Z". A
    semantic finding without a triggering input is not ready to report.
 
+**Any change that narrows the accepted input domain — a new validation,
+bounds guard, early return, or drop/error path — has two failure modes;
+audit both.** Proving the check blocks the unsafe input it was added for is
+only half the review; the other half is proving it blocks nothing else.
+Weigh its placement scope: a check at a shared point (function entry, above
+a `switch` or dispatch loop) constrains every path downstream of it, so its
+precondition must hold on all of them — a precondition required by only one
+branch belongs inside that branch, and a check sized for one case silently
+rejects inputs the other cases handled fine. Over-rejection is a silent
+correctness/liveness regression — valid traffic dropped, valid configs
+refused, previously working calls failing — and it survives review precisely
+because extra validation "looks safe". For each new rejection path, hunt for
+a legal input it now rejects that the pre-change code accepted — that input
+is the concrete trigger a finding needs. If you can neither produce one nor
+prove none exists, do not report a speculative finding; flag the rejection
+path in the verdict as an unresolved input class instead.
+
 If a behavioral diff produces zero semantic findings, list in the verdict
 which input classes you traced and why each is safe. "No issues found" without
 that enumeration is an incomplete review.
