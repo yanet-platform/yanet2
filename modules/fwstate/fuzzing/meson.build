@@ -8,6 +8,7 @@ fuzzing_targets += {
       lib_fwstate_dep,
       lib_lib_utils_dep,
       lib_time_dp_dep,
+      lib_counters_dep,
     ],
     'module_dir': '..',
   }

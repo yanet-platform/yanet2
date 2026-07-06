@@ -70,6 +70,56 @@ fwstate_module_config_new(
 		return NULL;
 	}
 	fwstate_config_set_defaults(&config->cfg);
+
+	// Register module-level counters.
+	// size=2 counters hold [packets, bytes]; size=1 counters hold
+	// [packets].
+	struct {
+		const char *name;
+		uint64_t size;
+		uint64_t *dst;
+	} counters[] = {
+		{"fwstate_sync_packets", 2, &config->sync_packets_counter_id},
+		{"fwstate_passthrough", 2, &config->passthrough_counter_id},
+		{"fwstate_sync_v4_inserted",
+		 1,
+		 &config->sync_v4_inserted_counter_id},
+		{"fwstate_sync_v6_inserted",
+		 1,
+		 &config->sync_v6_inserted_counter_id},
+		{"fwstate_sync_v4_insert_failed",
+		 1,
+		 &config->sync_v4_insert_failed_counter_id},
+		{"fwstate_sync_v6_insert_failed",
+		 1,
+		 &config->sync_v6_insert_failed_counter_id},
+		{"fwstate_external_dropped",
+		 2,
+		 &config->external_dropped_counter_id},
+		{"fwstate_internal_forwarded",
+		 2,
+		 &config->internal_forwarded_counter_id},
+	};
+
+	for (size_t i = 0; i < sizeof(counters) / sizeof(counters[0]); ++i) {
+		uint64_t id = counter_registry_register(
+			&config->cp_module.counter_registry,
+			counters[i].name,
+			counters[i].size,
+			err
+		);
+		if (id == (uint64_t)-1) {
+			yanet_error_add(
+				err,
+				"failed to register counter '%s'",
+				counters[i].name
+			);
+			fwstate_module_config_free(&config->cp_module);
+			return NULL;
+		}
+		*counters[i].dst = id;
+	}
+
 	return &config->cp_module;
 }
 

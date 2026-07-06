@@ -180,7 +180,9 @@ fwstate_process_sync_v4(
 	struct fw_state_sync_frame *sync_frame,
 	bool is_external,
 	uint64_t now,
-	struct fwstate_timeouts *timeouts
+	struct fwstate_timeouts *timeouts,
+	uint64_t *inserted_cnt,
+	uint64_t *insert_failed_cnt
 ) {
 	struct fw4_state_key key = {
 		.hdr.proto = sync_frame->proto,
@@ -201,9 +203,11 @@ fwstate_process_sync_v4(
 	);
 
 	if (result < 0) {
-		// FIXME: counters
 		// FIXME: ratelimit this errors
 		LOG(ERROR, "failed to insert IPv4 state: %s", strerror(errno));
+		insert_failed_cnt[0] += 1;
+	} else {
+		inserted_cnt[0] += 1;
 	}
 
 	if (lock) {
@@ -219,7 +223,9 @@ fwstate_process_sync_v6(
 	struct fw_state_sync_frame *sync_frame,
 	bool is_external,
 	uint64_t now,
-	struct fwstate_timeouts *timeouts
+	struct fwstate_timeouts *timeouts,
+	uint64_t *inserted_cnt,
+	uint64_t *insert_failed_cnt
 ) {
 	struct fw6_state_key key = {
 		.hdr.proto = sync_frame->proto,
@@ -240,9 +246,11 @@ fwstate_process_sync_v6(
 	);
 
 	if (result < 0) {
-		// FIXME: counters
 		// FIXME: ratelimit this errors
 		LOG(ERROR, "failed to insert IPv6 state: %s", strerror(errno));
+		insert_failed_cnt[0] += 1;
+	} else {
+		inserted_cnt[0] += 1;
 	}
 
 	if (lock) {
@@ -268,6 +276,50 @@ fwstate_handle_packets(
 
 	uint64_t now = dp_worker->current_time;
 
+	// Resolve per-worker counter addresses.
+	// size=2 counters: [0]=packets, [1]=bytes; size=1 counters:
+	// [0]=packets.
+	uint64_t *sync_packets_cnt = counter_get_address(
+		fwstate_module->sync_packets_counter_id,
+		dp_worker->idx,
+		ADDR_OF(&module_ectx->counter_storage)
+	);
+	uint64_t *passthrough_cnt = counter_get_address(
+		fwstate_module->passthrough_counter_id,
+		dp_worker->idx,
+		ADDR_OF(&module_ectx->counter_storage)
+	);
+	uint64_t *sync_v4_inserted_cnt = counter_get_address(
+		fwstate_module->sync_v4_inserted_counter_id,
+		dp_worker->idx,
+		ADDR_OF(&module_ectx->counter_storage)
+	);
+	uint64_t *sync_v6_inserted_cnt = counter_get_address(
+		fwstate_module->sync_v6_inserted_counter_id,
+		dp_worker->idx,
+		ADDR_OF(&module_ectx->counter_storage)
+	);
+	uint64_t *sync_v4_insert_failed_cnt = counter_get_address(
+		fwstate_module->sync_v4_insert_failed_counter_id,
+		dp_worker->idx,
+		ADDR_OF(&module_ectx->counter_storage)
+	);
+	uint64_t *sync_v6_insert_failed_cnt = counter_get_address(
+		fwstate_module->sync_v6_insert_failed_counter_id,
+		dp_worker->idx,
+		ADDR_OF(&module_ectx->counter_storage)
+	);
+	uint64_t *external_dropped_cnt = counter_get_address(
+		fwstate_module->external_dropped_counter_id,
+		dp_worker->idx,
+		ADDR_OF(&module_ectx->counter_storage)
+	);
+	uint64_t *internal_forwarded_cnt = counter_get_address(
+		fwstate_module->internal_forwarded_counter_id,
+		dp_worker->idx,
+		ADDR_OF(&module_ectx->counter_storage)
+	);
+
 	struct packet *packet;
 	while ((packet = packet_list_pop(&packet_front->input)) != NULL) {
 		// FIXME: accumulate multiple internal sync frames into one
@@ -277,12 +329,17 @@ fwstate_handle_packets(
 			    packet, &fwstate_config->sync_config
 		    )) {
 			// Not a sync packet, pass through
+			passthrough_cnt[0] += 1;
+			passthrough_cnt[1] += packet_to_mbuf(packet)->pkt_len;
 			packet_front_output(packet_front, packet);
 			continue;
 		}
 
 		// This is a sync packet - process it
 		struct rte_mbuf *mbuf = packet_to_mbuf(packet);
+
+		sync_packets_cnt[0] += 1;
+		sync_packets_cnt[1] += mbuf->pkt_len;
 
 		// Extract sync frames from UDP payload
 		const uint16_t vlan_offset = sizeof(struct rte_ether_hdr);
@@ -331,7 +388,9 @@ fwstate_handle_packets(
 					sync_frame,
 					is_external,
 					now,
-					&fwstate_config->sync_config.timeouts
+					&fwstate_config->sync_config.timeouts,
+					sync_v4_inserted_cnt,
+					sync_v4_insert_failed_cnt
 				);
 			} else if (sync_frame->addr_type ==
 				   FW_STATE_ADDR_TYPE_IP6) {
@@ -341,7 +400,9 @@ fwstate_handle_packets(
 					sync_frame,
 					is_external,
 					now,
-					&fwstate_config->sync_config.timeouts
+					&fwstate_config->sync_config.timeouts,
+					sync_v6_inserted_cnt,
+					sync_v6_insert_failed_cnt
 				);
 			}
 		}
@@ -350,6 +411,8 @@ fwstate_handle_packets(
 		// processing. Pass through internal packets (from our ACL) to
 		// reach other firewalls.
 		if (is_external) {
+			external_dropped_cnt[0] += 1;
+			external_dropped_cnt[1] += mbuf->pkt_len;
 			packet_front_drop(packet_front, packet);
 		} else {
 			rte_memcpy(
@@ -363,6 +426,8 @@ fwstate_handle_packets(
 			udp_hdr->dgram_cksum = 0;
 			udp_hdr->dgram_cksum =
 				rte_ipv6_udptcp_cksum(ipv6_hdr, udp_hdr);
+			internal_forwarded_cnt[0] += 1;
+			internal_forwarded_cnt[1] += mbuf->pkt_len;
 			packet_front_output(packet_front, packet);
 		}
 	}

@@ -2,6 +2,8 @@ use std::time::Duration;
 
 use clap::Parser;
 
+use crate::metric::{Kind, Metric};
+
 /// Parse duration from string (e.g., "60s", "5m", "1h")
 fn parse_duration(s: &str) -> Result<Duration, String> {
     humantime::parse_duration(s).map_err(|e| e.to_string())
@@ -24,6 +26,8 @@ pub enum ModeCmd {
     Stats(StatsCmd),
     /// List entries from fwstate map
     Entries(EntriesCmd),
+    /// Show fwstate metrics
+    Metrics(MetricsCmd),
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -160,4 +164,38 @@ pub struct EntriesCmd {
     /// Starting cursor position (0 = beginning)
     #[arg(long, default_value = "0")]
     pub index: u32,
+}
+
+#[derive(Debug, Clone, clap::ValueEnum)]
+pub enum MetricName {
+    /// Dataplane packet/byte counters (fwstate_*_packets, fwstate_*_bytes)
+    Counters,
+    /// Map statistics gauges: index_size, total_elements, memory_bytes, etc.
+    MapStats,
+    /// Sync-related counters (fwstate_sync_*)
+    Sync,
+    /// gRPC server metrics: call counts and handling latency histograms
+    Grpc,
+}
+
+impl MetricName {
+    /// Returns true when the metric belongs to this category.
+    pub fn matches(&self, m: &Metric) -> bool {
+        match self {
+            Self::Counters => m.kind == Kind::Counter && m.name.starts_with("fwstate_"),
+            Self::MapStats => m.kind == Kind::Gauge && m.name.starts_with("fwstate_"),
+            Self::Sync => m.kind == Kind::Counter && m.name.starts_with("fwstate_sync_"),
+            Self::Grpc => m.name.starts_with("grpc_"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Parser, Default)]
+pub struct MetricsCmd {
+    /// Label filter, e.g. --label config=my-fwstate --label af=ipv4
+    #[arg(long = "label", short = 'l', value_name = "KEY=VALUE")]
+    pub labels: Vec<String>,
+    /// Show only metrics matching this category
+    #[arg(long, short, value_enum)]
+    pub name: Option<MetricName>,
 }

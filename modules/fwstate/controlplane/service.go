@@ -11,9 +11,53 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/yanet-platform/yanet2/common/go/grpcmetrics"
+	"github.com/yanet-platform/yanet2/common/go/metrics"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/fwstate/controlplane/fwstatepb/v1"
 )
+
+// Option configures an FWStateService.
+type Option func(*options)
+
+// options holds the optional parameters for FWStateService construction.
+type options struct {
+	// MetricsOpts holds the extra grpcmetrics options (e.g. custom
+	// histogram buckets) to apply when collecting gRPC call metrics.
+	// A non-nil slice enables metrics collection; the labeler and
+	// retention predicate are bound by the service itself.
+	MetricsOpts []grpcmetrics.Option
+	Log         *zap.Logger
+}
+
+func newOptions() *options {
+	return &options{
+		Log: zap.NewNop(),
+	}
+}
+
+// WithLog sets the service logger.
+func WithLog(log *zap.Logger) Option {
+	return func(o *options) {
+		o.Log = log
+	}
+}
+
+// WithMetrics enables collection of gRPC call metrics and attaches the supplied
+// extra grpcmetrics options (e.g. custom histogram buckets).
+//
+// The [grpcmetrics.Labeler] and [grpcmetrics.Retention] predicate are bound by
+// the service itself, so callers do not need to know about them. When this
+// option is unset, no gRPC call metrics are collected.
+func WithMetrics(opts ...grpcmetrics.Option) Option {
+	return func(o *options) {
+		// Always initialize to a non-nil slice so that a later
+		// MetricsOpts != nil check reliably detects that WithMetrics
+		// was called, even when no extra options were passed.
+		o.MetricsOpts = make([]grpcmetrics.Option, 0, len(opts))
+		o.MetricsOpts = append(o.MetricsOpts, opts...)
+	}
+}
 
 const (
 	// defaultListEntriesBatchSize is the batch size used when the caller
@@ -77,6 +121,7 @@ type FWStateService struct {
 	agent       *ffi.Agent
 	configs     map[string]*FwStateConfig
 	aclProvider ACLServiceProvider
+	metrics     *grpcmetrics.ServerMetrics
 
 	// Pending outdated layers to be freed after successful UpdateModules
 	pendingOutdatedLayers []*OutdatedLayers
@@ -84,13 +129,59 @@ type FWStateService struct {
 	log *zap.Logger
 }
 
-// NewFWStateService creates a new FWState service
-func NewFWStateService(agent *ffi.Agent, aclProvider ACLServiceProvider, log *zap.Logger) *FWStateService {
-	return &FWStateService{
+// NewFWStateService creates a new FWState service.
+//
+// When the WithMetrics option is supplied, gRPC call metrics are collected and
+// exposed through the module's MetricsService.
+func NewFWStateService(
+	agent *ffi.Agent,
+	aclProvider ACLServiceProvider,
+	options ...Option,
+) *FWStateService {
+	opts := newOptions()
+	for _, o := range options {
+		o(opts)
+	}
+
+	m := &FWStateService{
 		agent:       agent,
 		configs:     make(map[string]*FwStateConfig),
 		aclProvider: aclProvider,
-		log:         log,
+		log:         opts.Log,
+	}
+	if opts.MetricsOpts != nil {
+		metricsOpts := make([]grpcmetrics.Option, 0, len(opts.MetricsOpts)+2)
+		metricsOpts = append(metricsOpts, grpcmetrics.WithLabeler(labeler))
+		metricsOpts = append(metricsOpts, opts.MetricsOpts...)
+		metricsOpts = append(metricsOpts, grpcmetrics.WithRetention(m.retention))
+		m.metrics = grpcmetrics.New(metricsOpts...)
+	}
+
+	return m
+}
+
+// UnaryServerInterceptor returns the service's gRPC metrics interceptor, or
+// nil when metrics are not configured.
+func (m *FWStateService) UnaryServerInterceptor() grpc.UnaryServerInterceptor {
+	if m.metrics == nil {
+		return nil
+	}
+
+	return m.metrics.UnaryServerInterceptor()
+}
+
+func labeler(fullMethod string, req any) metrics.Labels {
+	switch r := req.(type) {
+	case *fwstatepb.UpdateConfigRequest:
+		return metrics.Labels{"config": r.GetName()}
+	case *fwstatepb.DeleteConfigRequest:
+		return metrics.Labels{"config": r.GetName()}
+	case *fwstatepb.ShowConfigRequest:
+		return metrics.Labels{"config": r.GetName()}
+	case *fwstatepb.GetStatsRequest:
+		return metrics.Labels{"config": r.GetName()}
+	default:
+		return nil
 	}
 }
 

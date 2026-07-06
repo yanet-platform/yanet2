@@ -3,6 +3,7 @@ package fwstate
 //#cgo CFLAGS: -I../../../.. -I../../../../lib -I../../../../common
 //#cgo LDFLAGS: -L../../../../build/modules/fwstate/dataplane -lfwstate_dp
 //#cgo LDFLAGS: -L../../../../build/modules/fwstate/api -lfwstate_cp
+//#cgo LDFLAGS: -L../../../../build/lib/counters -lcounters
 //#cgo LDFLAGS: -L../../../../build/lib/dataplane/packet -lpacket
 //#cgo LDFLAGS: -L../../../../build/lib/fwstate -lfwstate
 //#cgo LDFLAGS: -L../../../../build/lib/logging -llogging
@@ -20,6 +21,7 @@ package fwstate
 #include "lib/fwstate/types.h"
 #include "lib/dataplane/time/clock.h"
 #include "lib/controlplane/agent/agent.h"
+#include "lib/counters/counters.h"
 #include "common/memory.h"
 
 // Forward declaration of fwstate_handle_packets from dataplane module
@@ -39,7 +41,33 @@ test_fwstate_handle_packets(
 ) {
 	struct module_ectx module_ectx = {};
 	SET_OFFSET_OF(&module_ectx.cp_module, cp_module);
+
+	// The dataplane resolves per-worker counter addresses via
+	// counter_get_address(), which dereferences module_ectx.counter_storage.
+	// Reproduce the real dataplane setup: link the registry (assigns counter
+	// offsets) and spawn a per-worker counter storage.
+	struct counter_registry *registry = &cp_module->counter_registry;
+
+	yanet_error *err = NULL;
+	if (counter_registry_link(registry, NULL, &err)) {
+		fwstate_handle_packets(dp_worker, &module_ectx, packet_front);
+		return;
+	}
+
+	struct counter_storage_allocator allocator;
+	counter_storage_allocator_init(
+		&allocator, &cp_module->memory_context, dp_worker->idx + 1
+	);
+
+	struct counter_storage *storage = counter_storage_spawn(
+		&cp_module->memory_context, &allocator, NULL, registry
+	);
+	SET_OFFSET_OF(&module_ectx.counter_storage, storage);
+
 	fwstate_handle_packets(dp_worker, &module_ectx, packet_front);
+
+	counter_storage_free(storage);
+	counter_storage_allocator_fini(&allocator);
 }
 
 // Helper to get actual pointer from offset pointer
@@ -85,12 +113,23 @@ cp_module_init(
 	// Set agent offset
 	SET_OFFSET_OF(&cp_module->agent, agent);
 
+    // Initialize the counter registry. fwstate_module_config_new registers
+    // module-level counters right after cp_module_init, and
+    // counter_registry_register dereferences registry->memory_context (an
+    // offset pointer).
+	if (counter_registry_init(
+		    &cp_module->counter_registry, &cp_module->memory_context, 0
+	    )) {
+		yanet_error_add(err, "failed to init counter registry");
+		return -1;
+	}
+
 	return 0;
 }
 
 void
 cp_module_fini(struct cp_module *cp_module) {
-	(void) cp_module;
+	counter_registry_fini(&cp_module->counter_registry);
 }
 
 */

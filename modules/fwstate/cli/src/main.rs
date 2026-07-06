@@ -1,26 +1,31 @@
 use core::{fmt, net::Ipv6Addr, time::Duration};
-use std::time::UNIX_EPOCH;
+use std::{collections::HashMap, time::UNIX_EPOCH};
 
-use args::{DeleteCmd, DirectionArg, EntriesCmd, LinkCmd, ModeCmd, ShowCmd, StatsCmd, UpdateCmd};
+use args::{DeleteCmd, DirectionArg, EntriesCmd, LinkCmd, MetricsCmd, ModeCmd, ShowCmd, StatsCmd, UpdateCmd};
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
 use commonpb::pb::IpAddress;
 use fwstatepb::{
-    DeleteConfigRequest, Direction, GetStatsRequest, LinkFwStateRequest, ListConfigsRequest, ListEntriesRequest,
-    ShowConfigRequest, UpdateConfigRequest, fw_state_service_client::FwStateServiceClient,
+    DeleteConfigRequest, Direction, GetMetricsRequest, GetStatsRequest, LinkFwStateRequest, ListConfigsRequest,
+    ListEntriesRequest, ShowConfigRequest, UpdateConfigRequest, fw_state_service_client::FwStateServiceClient,
+    metrics_service_client::MetricsServiceClient,
 };
+use metric::Metric;
 use netip::MacAddr;
 use serde::Serialize;
+use tabled::Tabled;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Status, codec::CompressionEncoding};
 use ync::{
     client::{ConnectionArgs, LayeredChannel, Service},
+    display::print_table_from_entries,
     errors::Error,
     output::{self, CommonFormat},
 };
 
 mod args;
+mod metric;
 
 #[allow(non_snake_case)]
 pub mod fwstatepb {
@@ -31,6 +36,9 @@ pub mod fwstatepb {
 
 /// The fully-qualified gRPC service name used in error messages.
 const SERVICE_NAME: &str = "modules.fwstate.controlplane.fwstatepb.v1.FWStateService";
+
+/// The fully-qualified gRPC service name for the metrics service.
+const METRICS_SERVICE_NAME: &str = "modules.fwstate.controlplane.fwstatepb.v1.MetricsService";
 
 /// FWState module CLI.
 #[derive(Debug, Clone, Parser)]
@@ -62,6 +70,7 @@ fn parse_mac(s: &str) -> Result<MacAddr, String> {
 
 pub struct FWStateService {
     service: Service<FwStateServiceClient<LayeredChannel>>,
+    metrics: Service<MetricsServiceClient<LayeredChannel>>,
 }
 
 impl FWStateService {
@@ -73,7 +82,14 @@ impl FWStateService {
         })
         .await?;
 
-        Ok(Self { service })
+        let metrics = Service::connect(connection, METRICS_SERVICE_NAME, |channel| {
+            MetricsServiceClient::new(channel)
+                .send_compressed(CompressionEncoding::Gzip)
+                .accept_compressed(CompressionEncoding::Gzip)
+        })
+        .await?;
+
+        Ok(Self { service, metrics })
     }
 
     pub async fn list_configs(&mut self) -> Result<(), Error> {
@@ -361,6 +377,44 @@ impl FWStateService {
 
         Ok(())
     }
+
+    pub async fn metrics(&mut self, cmd: MetricsCmd) -> Result<(), Error> {
+        let response = self
+            .metrics
+            .client()
+            .get_metrics(GetMetricsRequest {})
+            .await
+            .map_err(self.metrics.status("metrics"))?
+            .into_inner();
+        let label_filters: Vec<(&str, &str)> = cmd
+            .labels
+            .iter()
+            .filter_map(|s| {
+                let mut it = s.splitn(2, '=');
+                Some((it.next()?, it.next()?))
+            })
+            .collect();
+
+        let metrics: Vec<Metric> = response
+            .metrics
+            .into_iter()
+            .map(Metric::from_proto)
+            .filter(|m| {
+                if let Some(ref f) = cmd.name {
+                    if !f.matches(m) {
+                        return false;
+                    }
+                }
+                label_filters.iter().all(|(k, v)| m.label_value(k) == Some(v))
+            })
+            .collect();
+
+        output::data(&metrics, metrics.is_empty(), format_args!("no metrics"), || {
+            print_metrics_table(&metrics)
+        });
+
+        Ok(())
+    }
 }
 
 fn format_addr(addr: Option<&IpAddress>) -> String {
@@ -539,6 +593,315 @@ fn print_entry(entry: &fwstatepb::FwStateEntry) {
     );
 }
 
+#[derive(Tabled)]
+struct CounterRow {
+    #[tabled(rename = "Counter")]
+    counter: String,
+    #[tabled(rename = "Packets")]
+    packets: String,
+    #[tabled(rename = "Bytes")]
+    bytes: String,
+}
+
+#[derive(Tabled)]
+struct GaugeRow {
+    #[tabled(rename = "Metric")]
+    metric: String,
+    #[tabled(rename = "Value")]
+    value: String,
+}
+
+#[derive(Tabled)]
+struct GrpcCallRow {
+    #[tabled(rename = "Method")]
+    method: String,
+    #[tabled(rename = "Code")]
+    code: String,
+    #[tabled(rename = "Handled")]
+    handled: String,
+}
+
+#[derive(Tabled)]
+struct GrpcLatRow {
+    #[tabled(rename = "Method")]
+    method: String,
+    #[tabled(rename = "Total Calls")]
+    total: String,
+    #[tabled(rename = "P50")]
+    p50: String,
+    #[tabled(rename = "P95")]
+    p95: String,
+    #[tabled(rename = "P99")]
+    p99: String,
+}
+
+fn format_number(n: u64) -> String {
+    let s = n.to_string();
+    let mut result = String::new();
+    for (i, c) in s.chars().rev().enumerate() {
+        if i > 0 && i % 3 == 0 {
+            result.push(',');
+        }
+        result.push(c);
+    }
+    result.chars().rev().collect()
+}
+
+fn format_gauge_value(name: &str, value: f64) -> String {
+    if name.ends_with("_ns") {
+        if value < 1_000.0 {
+            format!("{:.0}ns", value)
+        } else if value < 1_000_000.0 {
+            format!("{:.2}µs", value / 1_000.0)
+        } else if value < 1_000_000_000.0 {
+            format!("{:.2}ms", value / 1_000_000.0)
+        } else {
+            format!("{:.2}s", value / 1_000_000_000.0)
+        }
+    } else if name.ends_with("_bytes") {
+        if value < 1024.0 {
+            format!("{:.0} B", value)
+        } else if value < 1024.0 * 1024.0 {
+            format!("{:.2} KB", value / 1024.0)
+        } else if value < 1024.0 * 1024.0 * 1024.0 {
+            format!("{:.2} MB", value / (1024.0 * 1024.0))
+        } else {
+            format!("{:.2} GB", value / (1024.0 * 1024.0 * 1024.0))
+        }
+    } else {
+        format_number(value as u64)
+    }
+}
+
+fn metric_display_name(name: &str) -> String {
+    let stripped = name.strip_prefix("fwstate_").unwrap_or(name);
+    stripped
+        .split('_')
+        .map(|word| {
+            let mut c = word.chars();
+            match c.next() {
+                None => String::new(),
+                Some(first) => first.to_uppercase().collect::<String>() + c.as_str(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn print_metrics_table(metrics: &[Metric]) {
+    struct CounterPair {
+        display: String,
+        packets: Option<u64>,
+        bytes: Option<u64>,
+    }
+
+    let mut counter_keys: Vec<String> = Vec::new();
+    let mut counter_map: HashMap<String, Vec<&Metric>> = HashMap::new();
+    let mut gauge_keys: Vec<String> = Vec::new();
+    let mut gauge_map: HashMap<String, Vec<&Metric>> = HashMap::new();
+    let mut grpc_counters: Vec<&Metric> = Vec::new();
+    let mut grpc_histograms: Vec<&Metric> = Vec::new();
+
+    for m in metrics {
+        if m.name.starts_with("grpc_") {
+            match m.kind {
+                metric::Kind::Counter => grpc_counters.push(m),
+                metric::Kind::Histogram => grpc_histograms.push(m),
+                _ => {}
+            }
+            continue;
+        }
+
+        match m.kind {
+            metric::Kind::Gauge => {
+                let cfg = format!(
+                    "{}\0{}",
+                    m.label_value("config").unwrap_or("global"),
+                    m.label_value("af").unwrap_or(""),
+                );
+                if !gauge_map.contains_key(&cfg) {
+                    gauge_keys.push(cfg.clone());
+                }
+                gauge_map.entry(cfg).or_default().push(m);
+            }
+            metric::Kind::Counter => {
+                let key = format!(
+                    "{}\0{}\0{}\0{}\0{}",
+                    m.label_value("config").unwrap_or(""),
+                    m.label_value("device").unwrap_or(""),
+                    m.label_value("pipeline").unwrap_or(""),
+                    m.label_value("function").unwrap_or(""),
+                    m.label_value("chain").unwrap_or(""),
+                );
+                if !counter_map.contains_key(&key) {
+                    counter_keys.push(key.clone());
+                }
+                counter_map.entry(key).or_default().push(m);
+            }
+            _ => {}
+        }
+    }
+
+    for key in &counter_keys {
+        let counters = &counter_map[key];
+        let parts: Vec<&str> = key.split('\0').collect();
+        let (config, device, pipeline, function, chain) = (parts[0], parts[1], parts[2], parts[3], parts[4]);
+        println!(
+            "FWSTATE COUNTERS  config={config} device={device} pipeline={pipeline} function={function} chain={chain}"
+        );
+        println!();
+
+        let mut pair_order: Vec<String> = Vec::new();
+        let mut pair_map: HashMap<String, CounterPair> = HashMap::new();
+
+        for m in counters {
+            let val = m.value.unwrap_or(0.0) as u64;
+            let stripped = m.name.strip_prefix("fwstate_").unwrap_or(&m.name);
+            if let Some(base) = stripped.strip_suffix("_packets") {
+                let pair = pair_map.entry(base.to_string()).or_insert_with(|| {
+                    pair_order.push(base.to_string());
+                    CounterPair {
+                        display: metric_display_name(base),
+                        packets: None,
+                        bytes: None,
+                    }
+                });
+                pair.packets = Some(val);
+            } else if let Some(base) = stripped.strip_suffix("_bytes") {
+                let pair = pair_map.entry(base.to_string()).or_insert_with(|| {
+                    pair_order.push(base.to_string());
+                    CounterPair {
+                        display: metric_display_name(base),
+                        packets: None,
+                        bytes: None,
+                    }
+                });
+                pair.bytes = Some(val);
+            } else {
+                // Counter without a _packets/_bytes suffix (e.g. insert
+                // counters that only track packets).
+                let pair = pair_map.entry(stripped.to_string()).or_insert_with(|| {
+                    pair_order.push(stripped.to_string());
+                    CounterPair {
+                        display: metric_display_name(stripped),
+                        packets: None,
+                        bytes: None,
+                    }
+                });
+                pair.packets = Some(val);
+            }
+        }
+
+        let rows: Vec<CounterRow> = pair_order
+            .iter()
+            .map(|base| {
+                let p = &pair_map[base];
+                CounterRow {
+                    counter: p.display.clone(),
+                    packets: p.packets.map(format_number).unwrap_or_else(|| "-".into()),
+                    bytes: p.bytes.map(format_number).unwrap_or_else(|| "-".into()),
+                }
+            })
+            .collect();
+        print_table_from_entries(rows);
+        println!();
+    }
+
+    for cfg in &gauge_keys {
+        let gauges = &gauge_map[cfg];
+        let parts: Vec<&str> = cfg.split('\0').collect();
+        let (config, af) = (parts[0], parts[1]);
+        println!("FWSTATE MAP STATS  config={config} af={af}");
+        println!();
+        let rows: Vec<GaugeRow> = gauges
+            .iter()
+            .map(|m| GaugeRow {
+                metric: metric_display_name(&m.name),
+                value: format_gauge_value(&m.name, m.value.unwrap_or(0.0)),
+            })
+            .collect();
+        print_table_from_entries(rows);
+        println!();
+    }
+
+    if !grpc_counters.is_empty() {
+        let mut started: HashMap<String, u64> = HashMap::new();
+        let mut handled_keys: Vec<(String, String)> = Vec::new();
+        let mut handled: HashMap<(String, String), u64> = HashMap::new();
+
+        for m in &grpc_counters {
+            let method = m.label_value("grpc_method").unwrap_or("").to_string();
+            if m.name == "grpc_server_started_total" {
+                let count = m.value.unwrap_or(0.0) as u64;
+                *started.entry(method).or_default() += count;
+            } else if m.name == "grpc_server_handled_total" {
+                let code = m.label_value("grpc_code").unwrap_or("").to_string();
+                let key = (method, code);
+                if !handled.contains_key(&key) {
+                    handled_keys.push(key.clone());
+                }
+                *handled.entry(key).or_default() += m.value.unwrap_or(0.0) as u64;
+            }
+        }
+
+        if !handled_keys.is_empty() || !started.is_empty() {
+            println!();
+            println!("GRPC CALLS");
+            println!();
+        }
+
+        if !handled_keys.is_empty() {
+            let rows: Vec<GrpcCallRow> = handled_keys
+                .iter()
+                .map(|(method, code)| GrpcCallRow {
+                    method: method.clone(),
+                    code: code.clone(),
+                    handled: format_number(handled[&(method.clone(), code.clone())]),
+                })
+                .collect();
+            print_table_from_entries(rows);
+        }
+
+        if !started.is_empty() {
+            println!();
+            let mut started_methods: Vec<&String> = started.keys().collect();
+            started_methods.sort();
+            for method in started_methods {
+                println!("  started  {method}: {}", format_number(started[method]));
+            }
+        }
+    }
+
+    if !grpc_histograms.is_empty() {
+        println!();
+        println!("GRPC HANDLING LATENCIES");
+        println!();
+        let rows: Vec<GrpcLatRow> = grpc_histograms
+            .iter()
+            .map(|m| {
+                let method = m.label_value("grpc_method").unwrap_or("unknown").to_string();
+                match &m.histogram {
+                    Some(h) => GrpcLatRow {
+                        method,
+                        total: format_number(h.total_count),
+                        p50: metric::histogram_percentile(&h.buckets, h.total_count, 50.0),
+                        p95: metric::histogram_percentile(&h.buckets, h.total_count, 95.0),
+                        p99: metric::histogram_percentile(&h.buckets, h.total_count, 99.0),
+                    },
+                    None => GrpcLatRow {
+                        method,
+                        total: "-".into(),
+                        p50: "-".into(),
+                        p95: "-".into(),
+                        p99: "-".into(),
+                    },
+                }
+            })
+            .collect();
+        print_table_from_entries(rows);
+    }
+}
+
 async fn run(cmd: Cmd) -> Result<(), Error> {
     let mut service = FWStateService::new(&cmd.connection).await?;
     let format = cmd.format;
@@ -551,6 +914,7 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
         ModeCmd::Link(cmd) => service.link_fwstate(cmd).await,
         ModeCmd::Stats(cmd) => service.get_stats(cmd).await,
         ModeCmd::Entries(cmd) => service.list_entries(cmd, format).await,
+        ModeCmd::Metrics(cmd) => service.metrics(cmd).await,
     }
 }
 

@@ -11,6 +11,7 @@
 #include <rte_ip.h>
 #include <rte_udp.h>
 
+#include "counters/counters.h"
 #include "lib/dataplane/time/clock.h"
 #include "lib/fwstate/config.h"
 #include "lib/fwstate/fwmap.h"
@@ -49,6 +50,84 @@ fwstate_test_config(struct cp_module **cp_module) {
 
 	config->cp_module.dp_module_idx = 0;
 	config->cp_module.agent = NULL;
+
+	// The fwstate handler unconditionally resolves per-worker counter
+	// addresses via counter_get_address(), so a valid counter_registry and
+	// counter_storage must be provided or the handler dereferences NULL.
+	// size=2 counters hold [packets, bytes]; size=1 counters hold
+	// [packets].
+	if (counter_registry_init(
+		    &config->cp_module.counter_registry,
+		    &config->cp_module.memory_context,
+		    0
+	    )) {
+		return -ENOMEM;
+	}
+
+	struct {
+		const char *name;
+		uint64_t size;
+		uint64_t *dst;
+	} counters[] = {
+		{"fwstate_sync_packets", 2, &config->sync_packets_counter_id},
+		{"fwstate_passthrough", 2, &config->passthrough_counter_id},
+		{"fwstate_sync_v4_inserted",
+		 1,
+		 &config->sync_v4_inserted_counter_id},
+		{"fwstate_sync_v6_inserted",
+		 1,
+		 &config->sync_v6_inserted_counter_id},
+		{"fwstate_sync_v4_insert_failed",
+		 1,
+		 &config->sync_v4_insert_failed_counter_id},
+		{"fwstate_sync_v6_insert_failed",
+		 1,
+		 &config->sync_v6_insert_failed_counter_id},
+		{"fwstate_external_dropped",
+		 2,
+		 &config->external_dropped_counter_id},
+		{"fwstate_internal_forwarded",
+		 2,
+		 &config->internal_forwarded_counter_id},
+	};
+
+	for (size_t i = 0; i < sizeof(counters) / sizeof(counters[0]); ++i) {
+		uint64_t id = counter_registry_register(
+			&config->cp_module.counter_registry,
+			counters[i].name,
+			counters[i].size,
+			NULL
+		);
+		if (id == (uint64_t)-1) {
+			return -ENOMEM;
+		}
+		*counters[i].dst = id;
+	}
+
+	if (counter_registry_link(
+		    &config->cp_module.counter_registry, NULL, NULL
+	    )) {
+		return -ENOMEM;
+	}
+
+	struct counter_storage_allocator *alloc = memory_balloc(
+		&fuzz_params.mctx, sizeof(struct counter_storage_allocator)
+	);
+	if (alloc == NULL) {
+		return -ENOMEM;
+	}
+	counter_storage_allocator_init(alloc, &fuzz_params.mctx, 1);
+
+	struct counter_storage *cs = counter_storage_spawn(
+		&fuzz_params.mctx,
+		alloc,
+		NULL,
+		&config->cp_module.counter_registry
+	);
+	if (cs == NULL) {
+		return -ENOMEM;
+	}
+	SET_OFFSET_OF(&fuzz_params.module_ectx.counter_storage, cs);
 
 	// Create fw4state and fw6state maps
 	fwmap_config_t fw4config = {

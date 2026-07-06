@@ -1,0 +1,246 @@
+package fwstate
+
+import (
+	"context"
+
+	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	"github.com/yanet-platform/yanet2/common/go/metrics"
+	fwstatepb "github.com/yanet-platform/yanet2/modules/fwstate/controlplane/fwstatepb/v1"
+)
+
+// metricsSource provides the module's collected metrics.
+type metricsSource interface {
+	Metrics() ([]*commonpb.Metric, error)
+}
+
+// MetricsService exposes FWState module metrics over its own gRPC service.
+type MetricsService struct {
+	fwstatepb.UnimplementedMetricsServiceServer
+
+	source metricsSource
+}
+
+// NewMetricsService creates a MetricsService backed by source.
+func NewMetricsService(source metricsSource) *MetricsService {
+	return &MetricsService{source: source}
+}
+
+// GetMetrics returns a snapshot of all FWState module metrics.
+func (m *MetricsService) GetMetrics(
+	ctx context.Context,
+	req *fwstatepb.GetMetricsRequest,
+) (*fwstatepb.GetMetricsResponse, error) {
+	all, err := m.source.Metrics()
+	if err != nil {
+		return nil, err
+	}
+
+	return &fwstatepb.GetMetricsResponse{Metrics: all}, nil
+}
+
+func makeGauge(name string, value float64, labels ...*commonpb.Label) *commonpb.Metric {
+	return &commonpb.Metric{
+		Name:   name,
+		Labels: labels,
+		Value:  &commonpb.Metric_Gauge{Gauge: value},
+	}
+}
+
+func makeCounter(name string, value uint64, labels ...*commonpb.Label) *commonpb.Metric {
+	return &commonpb.Metric{
+		Name:   name,
+		Labels: labels,
+		Value:  &commonpb.Metric_Counter{Counter: value},
+	}
+}
+
+// Metrics returns all FWState module metrics: per-config map statistics
+// (gauge) and gRPC call metrics.
+//
+// Gauge metrics are emitted per address family (af=ipv4|ipv6) for every
+// loaded fwstate config.
+//
+// Labels:
+//   - config:        fwstate config name (all metrics)
+//   - af:            address family, "ipv4" or "ipv6" (map stats only)
+//   - grpc_type:     always "unary" (gRPC metrics)
+//   - grpc_service:  fully-qualified gRPC service name (gRPC metrics)
+//   - grpc_method:   RPC name (gRPC metrics)
+//   - grpc_code:     gRPC status code string (grpc_server_handled_total only)
+func (m *FWStateService) Metrics() ([]*commonpb.Metric, error) {
+	// Collect map-stat gauges and dataplane counters under a single m.mu lock
+	// so both halves observe the same set of configs. The lock is released
+	// before collecting gRPC metrics: m.metrics.Collect() invokes the retention
+	// callback, which takes m.mu itself.
+	m.mu.Lock()
+	metrics := m.collectMapStats()
+	dpMetrics, err := m.collectDataplaneMetrics()
+	m.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	metrics = append(metrics, dpMetrics...)
+	if m.metrics != nil {
+		metrics = append(metrics, m.metrics.Collect()...)
+	}
+	return metrics, nil
+}
+
+// collectMapStats emits gauge metrics derived from the per-config map
+// statistics (GetMapsStats) for both IPv4 and IPv6 address families.
+//
+// The caller must hold m.mu.
+func (m *FWStateService) collectMapStats() []*commonpb.Metric {
+	var result []*commonpb.Metric
+	for name, config := range m.configs {
+		mapsStats := config.GetMapsStats()
+
+		result = append(result, collectMapStatsForAF(name, "ipv4", mapsStats.IPv4)...)
+		result = append(result, collectMapStatsForAF(name, "ipv6", mapsStats.IPv6)...)
+	}
+
+	return result
+}
+
+// collectDataplaneMetrics emits per-config packet/byte counters read from the
+// dataplane counter storage via DPConfig.
+//
+// Counter metrics are omitted when all worker values are zero to reduce
+// output noise.
+//
+// The caller must hold m.mu.
+//
+// Labels:
+//   - config:   fwstate config name
+//   - device:   dataplane device name
+//   - pipeline: pipeline name
+//   - function: pipeline function name
+//   - chain:    pipeline chain name
+func (m *FWStateService) collectDataplaneMetrics() ([]*commonpb.Metric, error) {
+	dpConfig := m.agent.DPConfig()
+	if dpConfig == nil {
+		return []*commonpb.Metric{}, nil
+	}
+
+	positions := dpConfig.AllModulePositions("fwstate")
+
+	result := make([]*commonpb.Metric, 0)
+	for pos := range positions {
+		configName := pos.ModuleName
+
+		baseLabels := []*commonpb.Label{
+			{Name: "config", Value: configName},
+			{Name: "device", Value: pos.Device},
+			{Name: "pipeline", Value: pos.Pipeline},
+			{Name: "function", Value: pos.Function},
+			{Name: "chain", Value: pos.Chain},
+		}
+
+		counters := dpConfig.ModuleCounters(
+			pos.Device,
+			pos.Pipeline,
+			pos.Function,
+			pos.Chain,
+			"fwstate",
+			configName,
+			nil,
+		)
+
+		for _, counter := range counters {
+			var packets, bytes uint64
+			for _, workerVals := range counter.Values {
+				if len(workerVals) > 0 {
+					packets += workerVals[0]
+				}
+				if len(workerVals) > 1 {
+					bytes += workerVals[1]
+				}
+			}
+
+			if packets == 0 && bytes == 0 {
+				continue
+			}
+
+			switch counter.Name {
+			case "fwstate_sync_packets":
+				result = append(result,
+					makeCounter("fwstate_sync_packets_packets", packets, baseLabels...),
+					makeCounter("fwstate_sync_packets_bytes", bytes, baseLabels...),
+				)
+			case "fwstate_passthrough":
+				result = append(result,
+					makeCounter("fwstate_passthrough_packets", packets, baseLabels...),
+					makeCounter("fwstate_passthrough_bytes", bytes, baseLabels...),
+				)
+			case "fwstate_sync_v4_inserted":
+				result = append(result,
+					makeCounter("fwstate_sync_v4_inserted_packets", packets, baseLabels...),
+				)
+			case "fwstate_sync_v6_inserted":
+				result = append(result,
+					makeCounter("fwstate_sync_v6_inserted_packets", packets, baseLabels...),
+				)
+			case "fwstate_sync_v4_insert_failed":
+				result = append(result,
+					makeCounter("fwstate_sync_v4_insert_failed_packets", packets, baseLabels...),
+				)
+			case "fwstate_sync_v6_insert_failed":
+				result = append(result,
+					makeCounter("fwstate_sync_v6_insert_failed_packets", packets, baseLabels...),
+				)
+			case "fwstate_external_dropped":
+				result = append(result,
+					makeCounter("fwstate_external_dropped_packets", packets, baseLabels...),
+					makeCounter("fwstate_external_dropped_bytes", bytes, baseLabels...),
+				)
+			case "fwstate_internal_forwarded":
+				result = append(result,
+					makeCounter("fwstate_internal_forwarded_packets", packets, baseLabels...),
+					makeCounter("fwstate_internal_forwarded_bytes", bytes, baseLabels...),
+				)
+			}
+		}
+	}
+
+	return result, nil
+}
+
+// collectMapStatsForAF builds the gauge metric set for a single address
+// family of a single fwstate config.
+func collectMapStatsForAF(configName, af string, stats mapStats) []*commonpb.Metric {
+	labels := []*commonpb.Label{
+		{Name: "config", Value: configName},
+		{Name: "af", Value: af},
+	}
+
+	return []*commonpb.Metric{
+		makeGauge("fwstate_index_size", float64(stats.IndexSize), labels...),
+		makeGauge("fwstate_extra_bucket_count", float64(stats.ExtraBucketCount), labels...),
+		makeGauge("fwstate_max_chain_length", float64(stats.MaxChainLength), labels...),
+		makeGauge("fwstate_layer_count", float64(stats.LayerCount), labels...),
+		makeGauge("fwstate_total_elements", float64(stats.TotalElements), labels...),
+		makeGauge("fwstate_max_deadline_ns", float64(stats.MaxDeadline), labels...),
+		makeGauge("fwstate_memory_bytes", float64(stats.MemoryUsed), labels...),
+	}
+}
+
+// retention snapshots the live fwstate config names and returns a predicate
+// that keeps series whose "config" label is still live (or absent).
+func (m *FWStateService) retention() func(metrics.MetricID) bool {
+	m.mu.Lock()
+	configNames := make(map[string]struct{}, len(m.configs))
+	for name := range m.configs {
+		configNames[name] = struct{}{}
+	}
+	m.mu.Unlock()
+
+	return func(id metrics.MetricID) bool {
+		config := id.Labels["config"]
+		if config == "" {
+			return true
+		}
+
+		_, ok := configNames[config]
+		return ok
+	}
+}
