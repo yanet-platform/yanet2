@@ -930,6 +930,7 @@ mod test {
             origin_as: 0,
             pref: 0,
             med: 0,
+            global_id: 1,
             communities: Communities(vec![]),
         }
     }
