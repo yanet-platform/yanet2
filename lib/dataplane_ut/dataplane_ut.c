@@ -20,6 +20,7 @@
 #include "lib/dataplane/config/bootstrap.h"
 #include "lib/dataplane/config/counter_storage.h"
 #include "lib/dataplane/config/module_loader.h"
+#include "lib/dataplane/config/plugin_loader.h"
 #include "lib/dataplane/config/topology.h"
 #include "lib/dataplane/config/zone.h"
 #include "lib/dataplane/module/packet_front.h"
@@ -38,6 +39,7 @@ struct dataplane_ut {
 	struct agent *agent;
 	struct rte_mempool *mempool;
 	uint64_t mock_time_ns;
+	struct plugin_registry plugins;
 };
 
 // Counter indices used by wire_worker_counters to address the
@@ -146,10 +148,23 @@ dataplane_ut_new(const struct dataplane_ut_config *cfg) {
 		return NULL;
 	}
 
+	// Load module .so plugins so their symbols take priority over the
+	// statically-linked built-ins when resolving new_module_<name>.
+	if (dp_load_plugins(cfg->plugin_dir, &ut->plugins) == -1) {
+		LOG(ERROR,
+		    "dataplane_ut_new: failed to load plugins from %s",
+		    cfg->plugin_dir);
+		dataplane_ut_free(ut);
+		return NULL;
+	}
+
 	// Load requested packet-processing modules.
 	for (size_t idx = 0; idx < cfg->module_count; ++idx) {
 		if (dp_load_module(
-			    ut->dp_config, bin_hndl, NULL, cfg->modules[idx]
+			    ut->dp_config,
+			    bin_hndl,
+			    &ut->plugins,
+			    cfg->modules[idx]
 		    ) == -1) {
 			LOG(ERROR,
 			    "dataplane_ut_new: failed to load module %s",
@@ -335,6 +350,8 @@ dataplane_ut_free(struct dataplane_ut *ut) {
 		free(ut->arena);
 		ut->arena = NULL;
 	}
+
+	dp_unload_plugins(&ut->plugins);
 
 	free(ut);
 }

@@ -152,6 +152,9 @@ type Config struct {
 	Devices       []string
 	Modules       []string
 	DevicesToLoad []string
+	// PluginDir is the directory scanned for module .so plugins. An empty
+	// value loads only the statically-linked built-ins.
+	PluginDir string
 }
 
 // Result of one pipeline round.
@@ -223,6 +226,11 @@ func NewHarness(cfg Config) (*Harness, error) {
 		cArr := C.alloc_cptr_array(&cDevicesToLoad[0], C.size_t(len(cDevicesToLoad)))
 		defer C.free_cptr_array(cArr)
 		cCfg.devices_to_load = cArr
+	}
+	if cfg.PluginDir != "" {
+		cPluginDir := C.CString(cfg.PluginDir)
+		defer C.free(unsafe.Pointer(cPluginDir))
+		cCfg.plugin_dir = cPluginDir
 	}
 
 	ptr := C.dataplane_ut_new(&cCfg)

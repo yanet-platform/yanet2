@@ -24,6 +24,10 @@ struct dataplane_ut_config {
 	const char *const *modules;
 	size_t module_count;
 
+	// Directory scanned for module .so plugins. NULL or empty loads
+	// only statically-linked built-ins.
+	const char *plugin_dir;
+
 	const char *const *devices_to_load;
 	size_t devices_to_load_count;
 };
