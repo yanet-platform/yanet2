@@ -7,6 +7,8 @@
 #include "common/exp_array.h"
 #include "common/memory_address.h"
 #include "common/strutils.h"
+// Included purely for its compile-time ABI-size tripwire assertions.
+#include "lib/dataplane/config/plugin_abi_assert.h" // IWYU pragma: keep
 #include "lib/dataplane/config/plugin_loader.h"
 #include "lib/dataplane/config/zone.h"
 #include "lib/dataplane/device/device.h"

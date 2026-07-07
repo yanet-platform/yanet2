@@ -2,6 +2,19 @@
 
 #define MODULE_TYPE_LEN 80
 
+// Dataplane <-> module .so ABI version.
+//
+// Bump this monotonically whenever the layout of a struct or function
+// signature shared between the dataplane binary and a module .so changes.
+//
+// The dataplane's plugin loader rejects a .so whose exported version does
+// not match this constant.
+#define YANET_MODULE_ABI_VERSION 1
+
+// Symbol name a module .so exports carrying its compiled-against
+// YANET_MODULE_ABI_VERSION, as a uint32_t global.
+#define YANET_MODULE_ABI_VERSION_SYMBOL "yanet_module_abi_version"
+
 struct packet_front;
 struct module_ectx;
 struct dp_worker;

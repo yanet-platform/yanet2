@@ -16,8 +16,13 @@ struct plugin_registry {
 
 // Scan plugin_dir for lib*_dp.so files and dlopen each one.
 // Returns 0 on success, -1 on fatal error.
-// Individual plugin failures are logged but do not prevent other
-// plugins from loading.
+//
+// An empty plugin_dir is a clean no-op. Any other failure is fatal and
+// returns -1 with the registry left empty: a plugin_dir that cannot be
+// opened, a dlopen failure, an out-of-memory condition, a plugin missing
+// the ABI version symbol, or an exported ABI version that does not match
+// YANET_MODULE_ABI_VERSION. A present-but-broken plugin aborts startup
+// rather than silently running without the configured module.
 int
 dp_load_plugins(const char *plugin_dir, struct plugin_registry *registry);
 
