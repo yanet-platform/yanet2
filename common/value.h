@@ -24,12 +24,15 @@ value_table_free(struct value_table *value_table) {
 	struct memory_context *memory_context =
 		ADDR_OF(&value_table->memory_context);
 
+	uint32_t **values = ADDR_OF(&value_table->values);
+	if (values == NULL)
+		return;
+
 	uint64_t value_count = value_table->v_dim;
 	value_count *= value_table->h_dim;
 	uint32_t chunk_count = (value_count + VALUE_TABLE_CHUNK_SIZE - 1) /
 			       VALUE_TABLE_CHUNK_SIZE;
 
-	uint32_t **values = ADDR_OF(&value_table->values);
 	for (uint32_t chunk_idx = 0; chunk_idx < chunk_count; ++chunk_idx) {
 		uint32_t *chunk = ADDR_OF(values + chunk_idx);
 		if (chunk == NULL)
@@ -56,6 +59,7 @@ value_table_init(
 
 	value_table->v_dim = v_dim;
 	value_table->h_dim = h_dim;
+	SET_OFFSET_OF(&value_table->values, NULL);
 
 	uint64_t value_count = v_dim;
 	value_count *= h_dim;

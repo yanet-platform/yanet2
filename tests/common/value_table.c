@@ -3,8 +3,32 @@
 #include <assert.h>
 #include <stdio.h>
 
+// value_table_free must be a no-op on an object whose value_table_init
+// failed, e.g. when the backing allocator cannot satisfy the values array.
+// Before the fix the values field was left uninitialized and the subsequent
+// free dereferenced it.
+static void
+test_free_after_failed_init(void) {
+	struct block_allocator alloc;
+	block_allocator_init(&alloc);
+
+	struct memory_context mem_ctx;
+	int res = memory_context_init(&mem_ctx, "fail", &alloc);
+	assert(res == 0);
+
+	struct value_table table;
+	memset(&table, 0xa5, sizeof(table));
+
+	res = value_table_init(&table, &mem_ctx, 1, 10);
+	assert(res == -1);
+
+	value_table_free(&table);
+}
+
 int
 main() {
+	test_free_after_failed_init();
+
 	void *arena0 = malloc(1 << 24); // 16MB
 	if (arena0 == NULL) {
 		return 1;
