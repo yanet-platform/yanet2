@@ -68,6 +68,7 @@ var CLIBinaryNames = []string{
 type GuestPaths struct {
 	CLIBase        string // directory with yanet-cli-* binaries
 	BuildDir       string // directory with yanet-dataplane, yanet-controlplane
+	PluginDir      string // directory with dataplane module .so plugins
 	ConfigDir      string // directory for config files
 	LogDir         string // directory for log files
 	DPDKDevbindDir string // directory containing dpdk-devbind.py
@@ -80,6 +81,7 @@ func DefaultGuestPaths() GuestPaths {
 	return GuestPaths{
 		CLIBase:        "/mnt/target/release",
 		BuildDir:       "/mnt/build",
+		PluginDir:      "/mnt/build/plugins",
 		ConfigDir:      "/mnt/config",
 		LogDir:         "/mnt/logs",
 		DPDKDevbindDir: "/mnt/yanet2/subprojects/dpdk/usertools",
@@ -95,6 +97,7 @@ func LocalGuestPaths() GuestPaths {
 	return GuestPaths{
 		CLIBase:        "/tmp/yanet/cli",
 		BuildDir:       "/tmp/yanet/build",
+		PluginDir:      "/tmp/yanet/build/plugins",
 		ConfigDir:      "/tmp/yanet/config",
 		LogDir:         "/tmp/yanet/logs",
 		DPDKDevbindDir: "/tmp/yanet/tools",
@@ -1403,11 +1406,22 @@ func (f *TestFramework) PrepareLocalStorage() error {
 
 	// Copy files step by step to avoid serial terminal line-length limits.
 	// Each command is kept short enough for reliable serial transmission.
+	//
+	// Dataplane module .so plugins are copied onto local tmpfs too: a
+	// dataplane that loads a plugin keeps its .so mmap'd, which would block
+	// unmounting the 9P share before savevm, so the plugin must not live on
+	// 9P once YANET is running.
+	//
+	// The build's plugin directory holds host symlinks that dangle inside
+	// the guest, so copy the real plugin objects from their module build
+	// directories, renaming each from lib<name>_dp_plugin.so to the
+	// lib<name>_dp.so form the dataplane's plugin loader recognizes.
 	copyCommands := []string{
-		"mkdir -p /tmp/yanet/build/dataplane /tmp/yanet/build/controlplane /tmp/yanet/cli /tmp/yanet/config /tmp/yanet/logs /tmp/yanet/tools",
+		"mkdir -p /tmp/yanet/build/dataplane /tmp/yanet/build/controlplane /tmp/yanet/build/plugins /tmp/yanet/cli /tmp/yanet/config /tmp/yanet/logs /tmp/yanet/tools",
 		"cp /mnt/build/dataplane/yanet-dataplane /tmp/yanet/build/dataplane/",
 		"cp /mnt/build/controlplane/yanet-controlplane /tmp/yanet/build/controlplane/",
 		"cp /mnt/yanet2/subprojects/dpdk/usertools/dpdk-devbind.py /tmp/yanet/tools/",
+		"for f in /mnt/build/modules/*/dataplane/*_dp_plugin.so; do [ -e \"$f\" ] || continue; b=$(basename \"$f\"); cp \"$f\" /tmp/yanet/build/plugins/${b%_plugin.so}.so; done",
 	}
 
 	// Copy CLI binaries individually -- serial terminals truncate long lines.
