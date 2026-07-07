@@ -10,3 +10,7 @@ subdir('nat64')
 subdir('pdump')
 subdir('balancer2')
 subdir('blackhole')
+
+foreach extra_module : get_option('extra_modules')
+  subdir(extra_module)
+endforeach
