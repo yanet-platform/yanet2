@@ -17,6 +17,9 @@ import (
 // memory.
 type ModuleHandle interface {
 	DumpFIB() ([]croute.FIBEntry, error)
+	// FIBRangeCount returns the number of FIB ranges, equivalent to
+	// len(DumpFIB()) but far cheaper to compute.
+	FIBRangeCount() (int, error)
 	Free()
 }
 
