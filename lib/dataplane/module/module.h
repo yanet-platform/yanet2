@@ -15,6 +15,13 @@
 // YANET_MODULE_ABI_VERSION, as a uint32_t global.
 #define YANET_MODULE_ABI_VERSION_SYMBOL "yanet_module_abi_version"
 
+// Marks the module constructor symbol for export from the module object.
+//
+// Module dataplane objects are compiled with hidden visibility, so the
+// new_module_<name> constructor would otherwise be unreachable by the
+// plugin loader. Default visibility exports exactly that one symbol.
+#define YANET_MODULE_EXPORT __attribute__((visibility("default")))
+
 struct packet_front;
 struct module_ectx;
 struct dp_worker;
