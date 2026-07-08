@@ -268,11 +268,11 @@ func (m *RouteService) UpdateFIB(
 //   - grpc_method:  RPC name (gRPC metrics)
 //   - grpc_code:    gRPC status code string (grpc_server_handled_total only)
 func (m *RouteService) Metrics() ([]*commonpb.Metric, error) {
-	metrics := m.collectConfigMetrics()
+	result := m.collectConfigMetrics()
 	if m.metrics != nil {
-		metrics = append(metrics, m.metrics.Collect()...)
+		result = append(result, m.metrics.Collect()...)
 	}
-	return metrics, nil
+	return result, nil
 }
 
 // collectConfigMetrics gathers per-config gauges on a best-effort basis: a

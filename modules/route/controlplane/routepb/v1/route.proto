@@ -28,7 +28,7 @@ service RouteService {
 // MetricsService exposes route module metrics.
 service MetricsService {
   // GetMetrics returns a snapshot of route module metrics.
-  rpc GetMetrics(GetMetricsRequest) returns (GetMetricsResponse);
+  rpc GetMetrics(common.commonpb.v1.GetMetricsRequest) returns (common.commonpb.v1.GetMetricsResponse);
 }
 
 // ListConfigsRequest is the request to list configurations.
@@ -97,9 +97,3 @@ message UpdateFIBRequest {
 
 // UpdateFIBResponse is the empty ack for UpdateFIB.
 message UpdateFIBResponse {}
-
-// GetMetricsRequest is the empty request for GetMetrics.
-message GetMetricsRequest {}
-
-// GetMetricsResponse contains a snapshot of route module metrics.
-message GetMetricsResponse { repeated common.commonpb.v1.Metric metrics = 1; }

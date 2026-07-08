@@ -121,12 +121,12 @@ func (m *RouteModule) RegisterService(server *grpc.Server) {
 // UnaryServerInterceptors returns the gRPC unary interceptors for this
 // module.
 func (m *RouteModule) UnaryServerInterceptors() []grpc.UnaryServerInterceptor {
-	si := m.service.UnaryServerInterceptor()
-	if si == nil {
+	interceptor := m.service.UnaryServerInterceptor()
+	if interceptor == nil {
 		return nil
 	}
 
-	return []grpc.UnaryServerInterceptor{si}
+	return []grpc.UnaryServerInterceptor{interceptor}
 }
 
 // Close closes the module.
