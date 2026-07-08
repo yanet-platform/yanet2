@@ -17,18 +17,8 @@ members = [
     "cli/modules/ready",
     "cli/modules/metrics",
     "cli/modules/device",
-    "modules/acl/cli",
-    "modules/blackhole/cli",
-    "modules/fwstate/cli",
-    "modules/decap/cli",
-    "modules/dscp/cli",
-    "modules/forward/cli",
-    "modules/mirror/cli",
-    "modules/nat64/cli",
-    "modules/pdump/cli",
-    "modules/balancer2/cli",
+    "modules/*/cli",
     "modules/route/cli/route",
-    "modules/route-mpls/cli",
     "devices/plain/cli",
     "devices/vlan/cli",
     "devices/trafgen/cli",
@@ -38,6 +28,8 @@ members = [
     "operators/route/cli/route",
     "operators/route/cli/neighbour",
 ]
+
+exclude = ["modules/route/cli"]
 
 [profile.release]
 panic = "abort"
