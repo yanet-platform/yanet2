@@ -286,7 +286,7 @@ func (m *RouteService) collectConfigMetrics() []*commonpb.Metric {
 	for name, module := range m.configs {
 		labels := []*commonpb.Label{{Name: "config", Value: name}}
 
-		entries, err := module.DumpFIB()
+		count, err := module.FIBRangeCount()
 		if err != nil {
 			m.log.Warn("failed to collect fib metrics for config",
 				zap.String("config", name),
@@ -295,7 +295,7 @@ func (m *RouteService) collectConfigMetrics() []*commonpb.Metric {
 			continue
 		}
 
-		result = append(result, makeGauge("route_fib_entries", float64(len(entries)), labels...))
+		result = append(result, makeGauge("route_fib_entries", float64(count), labels...))
 	}
 
 	return result
