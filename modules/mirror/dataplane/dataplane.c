@@ -129,7 +129,6 @@ mirror_handle_packets(
 		if (target != NULL) {
 			uint64_t *counters = counter_get_address(
 				target->counter_id,
-				dp_worker->idx,
 				ADDR_OF(&module_ectx->counter_storage)
 			);
 			counters[0] += 1;

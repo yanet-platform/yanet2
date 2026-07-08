@@ -467,6 +467,10 @@ cp_module_parse_performance_counter(
 	counter->min_batch_size = batch_sizes[counter_idx];
 	counter->latency_ranges_count = hist_buckets;
 
+	// Per-worker value handles are stored behind the opaque handle.
+	struct counter_value_handle **bases =
+		(struct counter_value_handle **)counter_handle->value_handle;
+
 	// Salc summary tx and summary latency
 	counter->summary_latency = 0;
 	counter->packets = 0;
@@ -474,10 +478,7 @@ cp_module_parse_performance_counter(
 	for (size_t instance_idx = 0; instance_idx < workers; ++instance_idx) {
 		struct module_ectx_perf_counter_layout *perf_counter =
 			(struct module_ectx_perf_counter_layout *)
-				counter_handle_get_value(
-					counter_handle->value_handle,
-					instance_idx
-				);
+				counter_handle_get_value(bases[instance_idx]);
 		counter->summary_latency += perf_counter->summary_latency;
 		counter->packets += perf_counter->packets;
 		counter->bytes += perf_counter->bytes;
@@ -501,8 +502,7 @@ cp_module_parse_performance_counter(
 			struct module_ectx_perf_counter_layout *perf_counter =
 				(struct module_ectx_perf_counter_layout *)
 					counter_handle_get_value(
-						counter_handle->value_handle,
-						worker_idx
+						bases[worker_idx]
 					);
 			latency_range->batches +=
 				perf_counter->batch_count[range_idx];
@@ -554,11 +554,12 @@ cp_module_parse_tx_rx(
 	}
 
 	// Aggregate counter values across all workers
+	struct counter_value_handle **bases =
+		(struct counter_value_handle **)counter_handle->value_handle;
 	uint64_t total = 0;
 	for (size_t worker_idx = 0; worker_idx < workers; ++worker_idx) {
-		uint64_t *counter_values = counter_handle_get_value(
-			counter_handle->value_handle, worker_idx
-		);
+		uint64_t *counter_values =
+			counter_handle_get_value(bases[worker_idx]);
 		// Simple counters have size=1, so we access index 0
 		total += counter_values[0];
 	}

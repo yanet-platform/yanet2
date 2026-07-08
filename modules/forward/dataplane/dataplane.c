@@ -25,6 +25,8 @@ forward_handle_packets(
 	struct module_ectx *module_ectx,
 	struct packet_front *packet_front
 ) {
+	(void)dp_worker;
+
 	struct forward_module_config *forward_config = container_of(
 		ADDR_OF(&module_ectx->cp_module),
 		struct forward_module_config,
@@ -113,7 +115,6 @@ forward_handle_packets(
 		if (target != NULL) {
 			uint64_t *counters = counter_get_address(
 				target->counter_id,
-				dp_worker->idx,
 				ADDR_OF(&module_ectx->counter_storage)
 			);
 			counters[0] += 1;

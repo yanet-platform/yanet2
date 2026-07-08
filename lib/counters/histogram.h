@@ -33,7 +33,6 @@ counter_hist_bucket_exp2(
  * and the corresponding counter is incremented by the specified value.
  *
  * @param counter_id The ID of the counter in the counter registry
- * @param instance_id The instance ID for multi-instance counters
  * @param counter_storage Pointer to the counter storage structure
  * @param min_bucket The minimum bucket index (log2 scale)
  * @param max_bucket The maximum bucket index (log2 scale)
@@ -43,7 +42,6 @@ counter_hist_bucket_exp2(
 static inline void
 counter_hist_exp2_inc(
 	uint64_t counter_id,
-	uint64_t instance_id,
 	struct counter_storage *counter_storage,
 	uint64_t min_bucket,
 	uint64_t max_bucket,
@@ -52,8 +50,7 @@ counter_hist_exp2_inc(
 ) {
 	uint64_t bucket = counter_hist_bucket_exp2(key, min_bucket, max_bucket);
 
-	counter_get_address(counter_id, instance_id, counter_storage)[bucket] +=
-		value;
+	counter_get_address(counter_id, counter_storage)[bucket] += value;
 }
 
 ////////////////////////////////////////////////////////////////////////////////

@@ -776,7 +776,7 @@ stat_thread_collect_xstat(struct dataplane *dataplane) {
 				uint32_t counter_id =
 					instance->device_xstat_map[device_idx]
 								  [xstat_idx];
-				*counter_get_address(counter_id, 0, storage) =
+				*counter_get_address(counter_id, storage) =
 					xstats[xstat_idx].value;
 			}
 		}

@@ -42,14 +42,19 @@ struct cp_config_gen {
 
 	struct cp_config *cp_config;
 	struct dp_config *dp_config;
-	struct config_gen_ectx *config_gen_ectx;
+
+	// Per-worker execution contexts.
+	//
+	// config_gen_ectxs points to an array of config_gen_ectx_count offset
+	// pointers, one execution context per worker, each with its own
+	// single-instance counter storages.
+	uint64_t config_gen_ectx_count;
+	struct config_gen_ectx **config_gen_ectxs;
 
 	struct cp_module_registry module_registry;
 	struct cp_function_registry function_registry;
 	struct cp_pipeline_registry pipeline_registry;
 	struct cp_device_registry device_registry;
-
-	struct cp_config_counter_storage_registry counter_storage_registry;
 };
 
 /*
@@ -106,10 +111,6 @@ struct cp_config {
 	 * memory zone.
 	 */
 	struct cp_agent_registry *agent_registry;
-	/*
-	 * Allocator for counter backend storage
-	 */
-	struct counter_storage_allocator counter_storage_allocator;
 };
 
 /*
@@ -214,6 +215,20 @@ cp_config_gen_get_pipeline(struct cp_config_gen *config_gen, uint64_t index) {
 static inline struct cp_device *
 cp_config_gen_get_device(struct cp_config_gen *config_gen, uint64_t index) {
 	return cp_device_registry_get(&config_gen->device_registry, index);
+}
+
+// Return the execution context built for the given worker, or NULL when the
+// worker index is out of range or no execution context has been installed yet.
+static inline struct config_gen_ectx *
+cp_config_gen_worker_ectx(
+	struct cp_config_gen *config_gen, uint64_t worker_idx
+) {
+	if (worker_idx >= config_gen->config_gen_ectx_count)
+		return NULL;
+	struct config_gen_ectx **ectxs = ADDR_OF(&config_gen->config_gen_ectxs);
+	if (ectxs == NULL)
+		return NULL;
+	return ADDR_OF(ectxs + worker_idx);
 }
 
 struct cp_module *

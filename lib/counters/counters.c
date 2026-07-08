@@ -287,57 +287,20 @@ counter_registry_link(
 	return 0;
 }
 
-void
-counter_storage_allocator_init(
-	struct counter_storage_allocator *counter_storage_allocator,
-	struct memory_context *memory_context,
-	uint64_t instance_count
-) {
-	memory_context_init_from(
-		&counter_storage_allocator->memory_context,
-		memory_context,
-		"counter storage pages"
-	);
-	counter_storage_allocator->instance_count = instance_count;
-}
-
-void
-counter_storage_allocator_fini(struct counter_storage_allocator *self) {
-	if (self == NULL) {
-		return;
-	}
-
-	memory_context_fini(&self->memory_context);
-	self->instance_count = 0;
-}
-
+// Allocate one zeroed counter storage page from the given memory context.
+//
+// Each block now backs a single instance's counters; the per-instance page
+// striding was removed together with the counter storage allocator.
 static struct counter_storage_page *
-counter_storage_allocator_new_pages(struct counter_storage_allocator *allocator
-) {
-	struct counter_storage_page *pages =
+counter_storage_new_page(struct memory_context *memory_context) {
+	struct counter_storage_page *page =
 		(struct counter_storage_page *)memory_balloc(
-			&allocator->memory_context,
-			sizeof(struct counter_storage_page) *
-				allocator->instance_count
+			memory_context, sizeof(struct counter_storage_page)
 		);
-	if (pages == NULL)
+	if (page == NULL)
 		return NULL;
-	memset(pages,
-	       0,
-	       sizeof(struct counter_storage_page) * allocator->instance_count);
-	return pages;
-}
-
-static void
-counter_storage_allocator_free_pages(
-	struct counter_storage_allocator *allocator,
-	struct counter_storage_page *pages
-) {
-	memory_bfree(
-		&allocator->memory_context,
-		pages,
-		sizeof(struct counter_storage_page) * allocator->instance_count
-	);
+	memset(page, 0, sizeof(struct counter_storage_page));
+	return page;
 }
 
 // Initialize a counter_storage_pool to the zero-init state.
@@ -353,11 +316,9 @@ static void
 counter_storage_init(
 	struct memory_context *memory_context,
 	struct counter_storage *storage,
-	struct counter_storage_allocator *allocator,
 	struct counter_registry *registry
 ) {
 	SET_OFFSET_OF(&storage->memory_context, memory_context);
-	SET_OFFSET_OF(&storage->allocator, allocator);
 	SET_OFFSET_OF(&storage->registry, registry);
 	for (uint64_t idx = 0; idx < COUNTER_POOL_SIZE; ++idx) {
 		counter_storage_pool_init(storage->pools + idx);
@@ -367,21 +328,16 @@ counter_storage_init(
 struct counter_storage *
 counter_storage_spawn(
 	struct memory_context *memory_context,
-	struct counter_storage_allocator *allocator,
 	struct counter_storage *old_counter_storage,
 	struct counter_registry *counter_registry
 ) {
-	if (old_counter_storage != NULL &&
-	    ADDR_OF(&old_counter_storage->allocator) != allocator)
-		return NULL;
-
 	struct counter_storage *new_counter_storage = (struct counter_storage *)
 		memory_balloc(memory_context, sizeof(struct counter_storage));
 	if (new_counter_storage == NULL)
 		return NULL;
 
 	counter_storage_init(
-		memory_context, new_counter_storage, allocator, counter_registry
+		memory_context, new_counter_storage, counter_registry
 	);
 
 	for (uint64_t pool_idx = 0; pool_idx < COUNTER_POOL_SIZE; ++pool_idx) {
@@ -445,7 +401,7 @@ counter_storage_spawn(
 				);
 			block->refcnt = 1;
 			struct counter_storage_page *pages =
-				counter_storage_allocator_new_pages(allocator);
+				counter_storage_new_page(memory_context);
 			if (pages == NULL) {
 				goto error;
 			}
@@ -517,9 +473,10 @@ counter_storage_pool_fini(
 			continue;
 
 		if (--block->refcnt == 0) {
-			counter_storage_allocator_free_pages(
-				ADDR_OF(&storage->allocator),
-				ADDR_OF(&block->pages)
+			memory_bfree(
+				memory_context,
+				ADDR_OF(&block->pages),
+				sizeof(struct counter_storage_page)
 			);
 			memory_bfree(
 				memory_context,
@@ -566,18 +523,12 @@ counter_storage_free(struct counter_storage *storage) {
 void
 counter_handle_accum(
 	uint64_t *accum,
-	size_t instances,
 	size_t counter_size,
 	struct counter_value_handle *handle
 ) {
 	// counter_size is the number of uint64_t elements, not bytes
-	memset(accum, 0, counter_size * sizeof(uint64_t));
-	for (size_t instance_idx = 0; instance_idx < instances;
-	     ++instance_idx) {
-		uint64_t *value =
-			counter_handle_get_value(handle, instance_idx);
-		for (size_t idx = 0; idx < counter_size; ++idx) {
-			accum[idx] += value[idx];
-		}
+	uint64_t *value = counter_handle_get_value(handle);
+	for (size_t idx = 0; idx < counter_size; ++idx) {
+		accum[idx] = value[idx];
 	}
 }

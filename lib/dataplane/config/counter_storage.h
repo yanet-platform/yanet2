@@ -5,10 +5,10 @@
 struct cp_config;
 struct dp_config;
 
-// Initialise per-zone counter storage and link the worker counter registry.
+// Link the worker counter registry and spawn its per-worker storages.
 //
-// Allocates counter_storage_allocator instances for both zones, links the
-// worker counter registry, and spawns its backing storage. Caller must have
+// Links the worker counter registry and spawns one single-instance backing
+// storage per worker into dp_config->worker_counter_storages. Caller must have
 // registered the worker counters into dp_config->worker_counters before
 // invoking.
 //

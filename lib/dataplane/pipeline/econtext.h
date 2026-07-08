@@ -17,6 +17,7 @@ struct cp_pipeline;
 struct cp_device;
 
 struct cp_config_gen;
+struct cp_config_counter_storage_registry;
 
 struct module_ectx {
 	module_handler handler;
@@ -112,6 +113,8 @@ struct device_ectx {
 struct config_gen_ectx {
 	struct cp_config_gen *cp_config_gen;
 	struct phy_device_map *phy_device_maps;
+
+	struct cp_config_counter_storage_registry *counter_storage_registry;
 
 	uint64_t device_count;
 	struct device_ectx *devices[];

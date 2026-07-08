@@ -55,34 +55,30 @@ enum {
 
 // Wire counter address pointers for a single dp_worker.
 //
-// The worker_counter_storage must already be spawned and wired into
+// The worker's counter storage must already be spawned and wired into
 // dp_config before calling this.
 static void
 wire_worker_counters(struct dp_worker *dp_worker, struct dp_config *dp_config) {
 	struct counter_storage *storage =
-		ADDR_OF(&dp_config->worker_counter_storage);
-	uint64_t idx = dp_worker->idx;
+		ADDR_OF(ADDR_OF(&dp_config->worker_counter_storages) +
+			dp_worker->idx);
 
 	dp_worker->iterations =
-		counter_get_address(WORKER_CTR_ITERATIONS, idx, storage);
+		counter_get_address(WORKER_CTR_ITERATIONS, storage);
 
-	dp_worker->rx_count =
-		counter_get_address(WORKER_CTR_RX, idx, storage) + 0;
-	dp_worker->rx_size =
-		counter_get_address(WORKER_CTR_RX, idx, storage) + 1;
+	dp_worker->rx_count = counter_get_address(WORKER_CTR_RX, storage) + 0;
+	dp_worker->rx_size = counter_get_address(WORKER_CTR_RX, storage) + 1;
 
-	dp_worker->tx_count =
-		counter_get_address(WORKER_CTR_TX, idx, storage) + 0;
-	dp_worker->tx_size =
-		counter_get_address(WORKER_CTR_TX, idx, storage) + 1;
+	dp_worker->tx_count = counter_get_address(WORKER_CTR_TX, storage) + 0;
+	dp_worker->tx_size = counter_get_address(WORKER_CTR_TX, storage) + 1;
 
 	dp_worker->remote_rx_count =
-		counter_get_address(WORKER_CTR_REMOTE_RX, idx, storage) + 0;
+		counter_get_address(WORKER_CTR_REMOTE_RX, storage) + 0;
 
 	dp_worker->remote_tx_count =
-		counter_get_address(WORKER_CTR_REMOTE_TX, idx, storage) + 0;
+		counter_get_address(WORKER_CTR_REMOTE_TX, storage) + 0;
 	dp_worker->rx_bursts =
-		counter_get_address(WORKER_CTR_RX_BURSTS, idx, storage);
+		counter_get_address(WORKER_CTR_RX_BURSTS, storage);
 }
 
 struct dataplane_ut *
@@ -333,16 +329,10 @@ dataplane_ut_free(struct dataplane_ut *ut) {
 	}
 
 	if (ut->cp_config != NULL) {
-		counter_storage_allocator_fini(
-			&ut->cp_config->counter_storage_allocator
-		);
 		memory_context_fini(&ut->cp_config->memory_context);
 	}
 
 	if (ut->dp_config != NULL) {
-		counter_storage_allocator_fini(
-			&ut->dp_config->counter_storage_allocator
-		);
 		memory_context_fini(&ut->dp_config->memory_context);
 	}
 
@@ -395,7 +385,7 @@ dataplane_ut_run(
 	struct cp_config_gen *cp_config_gen =
 		ADDR_OF(&ut->cp_config->cp_config_gen);
 	struct config_gen_ectx *config_gen_ectx =
-		ADDR_OF(&cp_config_gen->config_gen_ectx);
+		cp_config_gen_worker_ectx(cp_config_gen, worker_idx);
 
 	__atomic_store_n(&dp_worker->gen, cp_config_gen->gen, __ATOMIC_RELEASE);
 	*dp_worker->iterations += 1;
