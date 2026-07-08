@@ -14,19 +14,15 @@
 
 static inline void
 counter_add(
-	uint64_t counter_id,
-	uint64_t worker_idx,
-	struct counter_storage *storage,
-	uint64_t count
+	uint64_t counter_id, struct counter_storage *storage, uint64_t count
 ) {
-	counter_get_address(counter_id, worker_idx, storage)[0] += count;
+	counter_get_address(counter_id, storage)[0] += count;
 }
 
 static inline void
 counter_add_packets_bytes(
 	uint64_t packets_id,
 	uint64_t bytes_id,
-	uint64_t worker_idx,
 	struct counter_storage *storage,
 	uint64_t packets,
 	uint64_t bytes
@@ -35,8 +31,8 @@ counter_add_packets_bytes(
 		return;
 	}
 
-	counter_add(packets_id, worker_idx, storage, packets);
-	counter_add(bytes_id, worker_idx, storage, bytes);
+	counter_add(packets_id, storage, packets);
+	counter_add(bytes_id, storage, bytes);
 }
 
 void
@@ -62,7 +58,6 @@ module_ectx_process(
 	counter_add_packets_bytes(
 		module_ectx->rx_counter_id,
 		module_ectx->rx_bytes_counter_id,
-		dp_worker->idx,
 		storage,
 		packets_count,
 		input_bytes
@@ -86,9 +81,7 @@ module_ectx_process(
 		);
 		struct module_ectx_perf_counter_layout *counter =
 			(struct module_ectx_perf_counter_layout *)
-				counter_get_address(
-					counter_idx, dp_worker->idx, storage
-				);
+				counter_get_address(counter_idx, storage);
 		counter->summary_latency += elapsed_ns;
 		counter->packets += packets_count;
 		counter->bytes += input_bytes;
@@ -98,7 +91,6 @@ module_ectx_process(
 	counter_add_packets_bytes(
 		module_ectx->tx_counter_id,
 		module_ectx->tx_bytes_counter_id,
-		dp_worker->idx,
 		storage,
 		packet_front_output_count(packet_front),
 		packet_front_output_bytes(packet_front)
@@ -126,7 +118,6 @@ chain_ectx_process(
 		uint64_t tsc_stop = rte_rdtsc();
 		counter_hist_exp2_inc(
 			chain_ectx->modules[idx].tsc_counter_id,
-			dp_worker->idx,
 			ADDR_OF(&chain_ectx->counter_storage),
 			0,
 			7,
@@ -225,7 +216,6 @@ function_ectx_process(
 	counter_add_packets_bytes(
 		function_ectx->counter_packet_in_count,
 		function_ectx->counter_packet_in_bytes,
-		dp_worker->idx,
 		storage,
 		packet_front_output_count(packet_front),
 		packet_front_output_bytes(packet_front)
@@ -246,7 +236,6 @@ function_ectx_process(
 	counter_add_packets_bytes(
 		function_ectx->counter_packet_out_count,
 		function_ectx->counter_packet_out_bytes,
-		dp_worker->idx,
 		storage,
 		packet_front_output_count(packet_front),
 		packet_front_output_bytes(packet_front)
@@ -254,7 +243,6 @@ function_ectx_process(
 	counter_add_packets_bytes(
 		function_ectx->counter_packet_drop_count,
 		function_ectx->counter_packet_drop_bytes,
-		dp_worker->idx,
 		storage,
 		packet_front_drop_count(packet_front),
 		packet_front_drop_bytes(packet_front)
@@ -274,7 +262,6 @@ pipeline_ectx_process(
 	counter_add_packets_bytes(
 		pipeline_ectx->counter_packet_in_count,
 		pipeline_ectx->counter_packet_in_bytes,
-		dp_worker->idx,
 		storage,
 		packet_front_output_count(packet_front),
 		packet_front_output_bytes(packet_front)
@@ -290,7 +277,6 @@ pipeline_ectx_process(
 	counter_add_packets_bytes(
 		pipeline_ectx->counter_packet_out_count,
 		pipeline_ectx->counter_packet_out_bytes,
-		dp_worker->idx,
 		storage,
 		packet_front_output_count(packet_front),
 		packet_front_output_bytes(packet_front)
@@ -298,7 +284,6 @@ pipeline_ectx_process(
 	counter_add_packets_bytes(
 		pipeline_ectx->counter_packet_drop_count,
 		pipeline_ectx->counter_packet_drop_bytes,
-		dp_worker->idx,
 		storage,
 		packet_front_drop_count(packet_front),
 		packet_front_drop_bytes(packet_front)
@@ -439,7 +424,6 @@ device_ectx_process_input(
 	counter_add_packets_bytes(
 		device_ectx->counter_packet_rx_count,
 		device_ectx->counter_packet_rx_bytes,
-		dp_worker->idx,
 		ADDR_OF(&device_ectx->counter_storage),
 		packet_front_output_count(packet_front),
 		packet_front_output_bytes(packet_front)
@@ -464,7 +448,6 @@ device_ectx_process_output(
 	counter_add_packets_bytes(
 		device_ectx->counter_packet_tx_count,
 		device_ectx->counter_packet_tx_bytes,
-		dp_worker->idx,
 		ADDR_OF(&device_ectx->counter_storage),
 		packet_front_output_count(packet_front),
 		packet_front_output_bytes(packet_front)

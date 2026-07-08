@@ -299,8 +299,9 @@ worker_loop_round(struct dataplane_worker *worker) {
 	struct cp_config *cp_config = worker->instance->cp_config;
 	struct cp_config_gen *cp_config_gen =
 		ADDR_OF(&cp_config->cp_config_gen);
-	struct config_gen_ectx *config_gen_ectx =
-		ADDR_OF(&cp_config_gen->config_gen_ectx);
+	struct config_gen_ectx *config_gen_ectx = cp_config_gen_worker_ectx(
+		cp_config_gen, worker->dp_worker->idx
+	);
 
 	__atomic_store_n(
 		&worker->dp_worker->gen, cp_config_gen->gen, __ATOMIC_RELEASE
@@ -526,57 +527,27 @@ dataplane_worker_start(struct dataplane_worker *worker) {
 
 	struct dp_worker *dp_worker = worker->dp_worker;
 	struct dp_config *dp_config = worker->instance->dp_config;
+	struct counter_storage **worker_counter_storages =
+		ADDR_OF(&dp_config->worker_counter_storages);
+	struct counter_storage *worker_counter_storage =
+		ADDR_OF(worker_counter_storages + dp_worker->idx);
 	// FIXME: do not use hard-coded counter identifiers
-	dp_worker->iterations = counter_get_address(
-		0, dp_worker->idx, ADDR_OF(&dp_config->worker_counter_storage)
-	);
+	dp_worker->iterations = counter_get_address(0, worker_counter_storage);
 
 	dp_worker->rx_count =
-		counter_get_address(
-			1,
-			dp_worker->idx,
-			ADDR_OF(&dp_config->worker_counter_storage)
-		) +
-		0;
-	dp_worker->rx_size = counter_get_address(
-				     1,
-				     dp_worker->idx,
-				     ADDR_OF(&dp_config->worker_counter_storage)
-			     ) +
-			     1;
+		counter_get_address(1, worker_counter_storage) + 0;
+	dp_worker->rx_size = counter_get_address(1, worker_counter_storage) + 1;
 
 	dp_worker->tx_count =
-		counter_get_address(
-			2,
-			dp_worker->idx,
-			ADDR_OF(&dp_config->worker_counter_storage)
-		) +
-		0;
-	dp_worker->tx_size = counter_get_address(
-				     2,
-				     dp_worker->idx,
-				     ADDR_OF(&dp_config->worker_counter_storage)
-			     ) +
-			     1;
+		counter_get_address(2, worker_counter_storage) + 0;
+	dp_worker->tx_size = counter_get_address(2, worker_counter_storage) + 1;
 
 	dp_worker->remote_rx_count =
-		counter_get_address(
-			3,
-			dp_worker->idx,
-			ADDR_OF(&dp_config->worker_counter_storage)
-		) +
-		0;
+		counter_get_address(3, worker_counter_storage) + 0;
 
 	dp_worker->remote_tx_count =
-		counter_get_address(
-			4,
-			dp_worker->idx,
-			ADDR_OF(&dp_config->worker_counter_storage)
-		) +
-		0;
-	dp_worker->rx_bursts = counter_get_address(
-		5, dp_worker->idx, ADDR_OF(&dp_config->worker_counter_storage)
-	);
+		counter_get_address(4, worker_counter_storage) + 0;
+	dp_worker->rx_bursts = counter_get_address(5, worker_counter_storage);
 
 	pthread_attr_t wrk_th_attr;
 	pthread_attr_init(&wrk_th_attr);

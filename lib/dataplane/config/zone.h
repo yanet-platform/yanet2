@@ -31,7 +31,7 @@ struct dp_device {
 //
 // Each physical port owns a distinct registry (xstat schema) and storage
 // (values), so a port's counter lifecycle is independent of the others. All
-// port storages are spawned from the single shared allocator on dp_config.
+// port storages are spawned directly from the dp_config memory context.
 struct dp_port_counters {
 	uint16_t port_id;
 	char port_name[80];
@@ -117,11 +117,16 @@ struct dp_config {
 	uint64_t worker_count;
 	struct dp_worker **workers;
 
-	struct counter_storage_allocator counter_storage_allocator;
 	struct counter_registry worker_counters;
-	struct counter_storage *worker_counter_storage;
 
-	struct counter_storage_allocator port_counter_storage_allocator;
+	// Per-worker worker-counter storages.
+	//
+	// worker_counter_storages points to an array of
+	// worker_counter_storage_count offset pointers, one single-instance
+	// storage per worker.
+	uint64_t worker_counter_storage_count;
+	struct counter_storage **worker_counter_storages;
+
 	uint64_t port_count;
 	struct dp_port_counters *port_counters;
 

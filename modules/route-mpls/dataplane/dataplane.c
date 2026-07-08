@@ -131,7 +131,6 @@ route_mpls_handle_packets(
 			ADDR_OF(&target->nexthops) + nexthop_idx;
 		uint64_t *counters = counter_get_address(
 			nexthop->counter_id,
-			dp_worker->idx,
 			ADDR_OF(&module_ectx->counter_storage)
 		);
 		counters[0] += 1;
