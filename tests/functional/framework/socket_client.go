@@ -466,6 +466,73 @@ func (sc *SocketClient) ReceiveAllPackets(timeout time.Duration, dumpPath string
 	return packets, nil
 }
 
+// ReceiveAllPacketsUnfiltered receives every packet observed on the socket
+// during a fixed window of timeout, without the destination-MAC filtering
+// ReceiveAllPackets applies.
+//
+// Solicited responses to injected traffic always carry the host's simulated
+// MAC as destination, which is what that filter matches. Traffic the
+// dataplane emits on its own initiative often addresses a multicast
+// destination instead and would otherwise be silently dropped, so callers
+// that need to observe unsolicited traffic must use this method.
+//
+// Unlike ReceiveAllPackets, which stops as soon as the link falls idle for
+// timeout, this method always reads for the entire window: a source that
+// emits periodic unsolicited traffic more often than timeout never falls
+// idle, so an idle-based cutoff would never return.
+func (sc *SocketClient) ReceiveAllPacketsUnfiltered(timeout time.Duration, dumpPath string) ([][]byte, error) {
+	if sc.inner.conn == nil {
+		return nil, fmt.Errorf("not connected to socket")
+	}
+
+	deadline := time.Now().Add(timeout)
+	var packets [][]byte
+
+	for {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			break
+		}
+
+		// Read the packet length prefix (4 bytes)
+		lengthPrefix, err := sc.readFull(4, remaining)
+		if err != nil {
+			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				// The capture window elapsed; stop reading.
+				break
+			}
+			return packets, fmt.Errorf("failed to read packet length prefix: %w", err)
+		}
+
+		packetLength := binary.BigEndian.Uint32(lengthPrefix)
+		if packetLength > 9000 {
+			return packets, fmt.Errorf("packet length %d exceeds maximum buffer size", packetLength)
+		}
+
+		// Read the packet data. A timeout here means the window expired
+		// mid-frame; the length prefix was already consumed from the reused
+		// connection, so returning an error (rather than breaking) fails the
+		// caller loudly instead of leaving the stream desynchronized for the
+		// next receive.
+		packetData, err := sc.readFull(int(packetLength), time.Until(deadline))
+		if err != nil {
+			return packets, fmt.Errorf("failed to read packet data: %w", err)
+		}
+
+		// Write raw socket data to dump file
+		packetWithLength := make([]byte, 0, 4+len(packetData))
+		packetWithLength = append(append(packetWithLength, lengthPrefix...), packetData...)
+		if err := writeToDumpFile(dumpPath, packetWithLength); err != nil {
+			sc.log.Warnf("Failed to write to dump file: %v", err)
+		}
+
+		packets = append(packets, packetData)
+		sc.log.Debugf("Received unfiltered packet, total: %d", len(packets))
+	}
+
+	return packets, nil
+}
+
 // Close gracefully terminates the socket connection and releases associated
 // network resources. This method should be called when the socket client is
 // no longer needed to prevent resource leaks.
