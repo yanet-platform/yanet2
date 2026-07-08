@@ -10,6 +10,8 @@
 #include <assert.h>
 #include <pthread.h>
 #include <stdalign.h>
+#include <stdbool.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -511,6 +513,336 @@ ttlmap_iter(void *memory, size_t memory_size) {
 	memory_context_fini(&mctx);
 }
 
+////////////////////////////////////////////////////////////////////////////////
+
+struct bucket_iter_ctx {
+	ttlmap_t *map;
+	size_t lookup_bucket_id;
+	size_t count;
+	size_t stop_after;
+	bool mutate_copies;
+	bool lookup_same_bucket;
+};
+
+static test_key_t
+bucket_iter_key(size_t key_id) {
+	return (test_key_t){.ip_dst = key_id + 0x01010,
+			    .ip_src = key_id + 0x10101,
+			    .port_dst = 10,
+			    .port_src = 20,
+			    .proto = 55,
+			    .tcp_flags = key_id,
+			    .pad = {0, 0, 0}};
+}
+
+static void
+ttlmap_test_insert_bucket(
+	ttlmap_t *map,
+	size_t bucket_id,
+	size_t key_id,
+	size_t counter1,
+	uint32_t now,
+	uint32_t timeout
+) {
+	void *bucket = __TTLMAP_BUCKET_FIND_WITH_ID(
+		map, bucket_id, test_key_t, test_value_t
+	);
+	test_key_t key = bucket_iter_key(key_id);
+	test_value_t *value;
+	ttlmap_lock_t *lock;
+	int res = __TTLMAP_BUCKET_GET(
+		bucket, &key, &value, &lock, now, timeout, 0
+	);
+	assert(TTLMAP_STATUS(res) == TTLMAP_INSERTED);
+	assert(value != NULL);
+	assert(lock != NULL);
+	*value = (test_value_t
+	){.counter1 = counter1, .counter2 = counter1 + 1, .session_id = 0};
+	ttlmap_release_lock(lock);
+}
+
+static int
+bucket_iter_callback(test_key_t *key, test_value_t *value, void *data) {
+	struct bucket_iter_ctx *ctx = data;
+	assert(key->proto == 55);
+	assert(key->port_dst == 10);
+	assert(key->port_src == 20);
+	assert(value->session_id == 0);
+	assert(value->counter2 - value->counter1 == 1);
+
+	if (ctx->lookup_same_bucket) {
+		void *bucket = __TTLMAP_BUCKET_FIND_WITH_ID(
+			ctx->map,
+			ctx->lookup_bucket_id,
+			test_key_t,
+			test_value_t
+		);
+		test_value_t *lookup_value;
+		ttlmap_lock_t *lock;
+		int res = __TTLMAP_BUCKET_GET(
+			bucket, key, &lookup_value, &lock, (uint32_t)9, 10, 0
+		);
+		assert(TTLMAP_STATUS(res) == TTLMAP_FOUND);
+		assert(lookup_value->counter2 - lookup_value->counter1 == 1);
+		ttlmap_release_lock(lock);
+	}
+
+	++ctx->count;
+	if (ctx->mutate_copies) {
+		key->proto = 0;
+		value->counter1 = 1000;
+		value->counter2 = 1000;
+	}
+	if (ctx->stop_after != 0 && ctx->count >= ctx->stop_after) {
+		return 1;
+	}
+	return 0;
+}
+
+void
+ttlmap_bucket_iter(void *memory, size_t memory_size) {
+	int res;
+	const uint32_t live_now = 9;
+	const uint32_t expired_now = 10;
+
+	struct block_allocator alloc;
+	res = block_allocator_init(&alloc);
+	assert(res == 0);
+	block_allocator_put_arena(&alloc, memory, memory_size);
+
+	struct memory_context mctx;
+	res = memory_context_init(&mctx, "test", &alloc);
+	assert(res == 0);
+
+	ttlmap_t empty_map;
+	ttlmap_init_empty(&empty_map);
+	struct ttlmap_bucket_iter iter;
+	ttlmap_bucket_iter_init(NULL, &empty_map);
+	ttlmap_bucket_iter_init(&iter, &empty_map);
+	assert(ttlmap_bucket_iter_done(&iter));
+	assert(ttlmap_bucket_iter_done(NULL));
+	struct bucket_iter_ctx ctx = {0};
+	assert(TTLMAP_ITER_NEXT(
+		       &iter,
+		       test_key_t,
+		       test_value_t,
+		       live_now,
+		       bucket_iter_callback,
+		       &ctx
+	       ) == 0);
+	assert(TTLMAP_ITER_NEXT(
+		       &iter,
+		       test_key_t,
+		       test_value_t,
+		       live_now,
+		       bucket_iter_callback,
+		       &ctx
+	       ) == 0);
+	ttlmap_bucket_iter_init(&iter, NULL);
+	assert(ttlmap_bucket_iter_done(&iter));
+	assert(TTLMAP_ITER_NEXT(
+		       &iter,
+		       test_key_t,
+		       test_value_t,
+		       live_now,
+		       bucket_iter_callback,
+		       &ctx
+	       ) == 0);
+	assert(TTLMAP_ITER_NEXT(
+		       NULL,
+		       test_key_t,
+		       test_value_t,
+		       live_now,
+		       bucket_iter_callback,
+		       &ctx
+	       ) == 0);
+
+	ttlmap_t map;
+	res = TTLMAP_INIT(&map, &mctx, test_key_t, test_value_t, 64);
+	assert(res == 0);
+	assert((1ull << map.buckets_exp) == 4);
+
+	ttlmap_test_insert_bucket(&map, 0, 10, 10, 0, 10);
+	ttlmap_test_insert_bucket(&map, 2, 20, 20, 0, 10);
+	ttlmap_test_insert_bucket(&map, 2, 21, 21, 0, 10);
+
+	// Full drain via the done predicate; each call handles one bucket.
+	ctx = (struct bucket_iter_ctx){0};
+	ttlmap_bucket_iter_init(&iter, &map);
+	while (!ttlmap_bucket_iter_done(&iter)) {
+		TTLMAP_ITER_NEXT(
+			&iter,
+			test_key_t,
+			test_value_t,
+			live_now,
+			bucket_iter_callback,
+			&ctx
+		);
+	}
+	assert(ctx.count == 3);
+	assert(iter.bucket_idx == iter.bucket_count);
+	assert(ttlmap_bucket_iter_done(&iter));
+	assert(TTLMAP_ITER_NEXT(
+		       &iter,
+		       test_key_t,
+		       test_value_t,
+		       live_now,
+		       bucket_iter_callback,
+		       &ctx
+	       ) == 0);
+	assert(iter.bucket_idx == iter.bucket_count);
+
+	// Everything expired: a single call still touches exactly one bucket
+	// and never walks the whole map looking for something live.
+	ctx = (struct bucket_iter_ctx){0};
+	ttlmap_bucket_iter_init(&iter, &map);
+	size_t prev_idx = iter.bucket_idx;
+	while (!ttlmap_bucket_iter_done(&iter)) {
+		res = TTLMAP_ITER_NEXT(
+			&iter,
+			test_key_t,
+			test_value_t,
+			expired_now,
+			bucket_iter_callback,
+			&ctx
+		);
+		assert(res == 0);
+		assert(iter.bucket_idx == prev_idx + 1);
+		prev_idx = iter.bucket_idx;
+	}
+	assert(ctx.count == 0);
+	assert(iter.bucket_idx == iter.bucket_count);
+
+	// Empty buckets are no longer silently skipped within a call: empty
+	// bucket 1 returns 0 and advances by exactly one bucket.
+	ctx = (struct bucket_iter_ctx){0};
+	ttlmap_bucket_iter_init(&iter, &map);
+	assert(TTLMAP_ITER_NEXT(
+		       &iter,
+		       test_key_t,
+		       test_value_t,
+		       live_now,
+		       bucket_iter_callback,
+		       &ctx
+	       ) == 1);
+	assert(ctx.count == 1);
+	assert(iter.bucket_idx == 1);
+	assert(TTLMAP_ITER_NEXT(
+		       &iter,
+		       test_key_t,
+		       test_value_t,
+		       live_now,
+		       bucket_iter_callback,
+		       &ctx
+	       ) == 0);
+	assert(ctx.count == 1);
+	assert(iter.bucket_idx == 2);
+	assert(TTLMAP_ITER_NEXT(
+		       &iter,
+		       test_key_t,
+		       test_value_t,
+		       live_now,
+		       bucket_iter_callback,
+		       &ctx
+	       ) == 1);
+	assert(ctx.count == 3);
+	assert(iter.bucket_idx == 3);
+
+	// Callback pointers reference a per-bucket copy; mutating them and
+	// doing a same-bucket lookup from inside the callback leaves storage
+	// intact.
+	ctx = (struct bucket_iter_ctx){.map = &map,
+				       .lookup_bucket_id = 2,
+				       .mutate_copies = true,
+				       .lookup_same_bucket = true};
+	ttlmap_bucket_iter_init(&iter, &map);
+	iter.bucket_idx = 2;
+	assert(TTLMAP_ITER_NEXT(
+		       &iter,
+		       test_key_t,
+		       test_value_t,
+		       live_now,
+		       bucket_iter_callback,
+		       &ctx
+	       ) == 1);
+	assert(iter.bucket_idx == 3);
+	void *bucket =
+		__TTLMAP_BUCKET_FIND_WITH_ID(&map, 2, test_key_t, test_value_t);
+	test_key_t lookup_key = bucket_iter_key(20);
+	test_value_t *stored_value;
+	ttlmap_lock_t *stored_lock;
+	res = __TTLMAP_BUCKET_GET(
+		bucket,
+		&lookup_key,
+		&stored_value,
+		&stored_lock,
+		live_now,
+		10,
+		0
+	);
+	assert(TTLMAP_STATUS(res) == TTLMAP_FOUND);
+	assert(stored_value->counter1 == 20);
+	assert(stored_value->counter2 == 21);
+	ttlmap_release_lock(stored_lock);
+
+	TTLMAP_FREE(&map);
+
+	// Early stop inside a bucket skips the rest of that bucket, still
+	// reports delivered, and advances by exactly one bucket.
+	res = TTLMAP_INIT(&map, &mctx, test_key_t, test_value_t, 64);
+	assert(res == 0);
+	ttlmap_test_insert_bucket(&map, 1, 100, 100, 0, 10);
+	ttlmap_test_insert_bucket(&map, 1, 101, 101, 0, 10);
+	ttlmap_test_insert_bucket(&map, 3, 300, 300, 0, 10);
+	ctx = (struct bucket_iter_ctx){.stop_after = 1};
+	ttlmap_bucket_iter_init(&iter, &map);
+	iter.bucket_idx = 1;
+	assert(TTLMAP_ITER_NEXT(
+		       &iter,
+		       test_key_t,
+		       test_value_t,
+		       live_now,
+		       bucket_iter_callback,
+		       &ctx
+	       ) == 1);
+	assert(ctx.count == 1);
+	assert(iter.bucket_idx == 2);
+	ctx.stop_after = 0;
+	assert(TTLMAP_ITER_NEXT(
+		       &iter,
+		       test_key_t,
+		       test_value_t,
+		       live_now,
+		       bucket_iter_callback,
+		       &ctx
+	       ) == 0);
+	assert(ctx.count == 1);
+	assert(iter.bucket_idx == 3);
+	assert(TTLMAP_ITER_NEXT(
+		       &iter,
+		       test_key_t,
+		       test_value_t,
+		       live_now,
+		       bucket_iter_callback,
+		       &ctx
+	       ) == 1);
+	assert(ctx.count == 2);
+	assert(iter.bucket_idx == 4);
+	assert(ttlmap_bucket_iter_done(&iter));
+	assert(TTLMAP_ITER_NEXT(
+		       &iter,
+		       test_key_t,
+		       test_value_t,
+		       live_now,
+		       bucket_iter_callback,
+		       &ctx
+	       ) == 0);
+	assert(iter.bucket_idx == 4);
+
+	TTLMAP_FREE(&map);
+	memory_context_fini(&mctx);
+}
+
 int
 main() {
 	log_enable_name("debug");
@@ -557,6 +889,9 @@ main() {
 
 	LOG(INFO, "test ttlmap_iter...");
 	ttlmap_iter(memory, memory_size);
+
+	LOG(INFO, "test ttlmap_bucket_iter...");
+	ttlmap_bucket_iter(memory, memory_size);
 
 	LOG(INFO, "free memory");
 	free(memory);

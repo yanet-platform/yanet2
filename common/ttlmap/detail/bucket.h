@@ -1,5 +1,7 @@
 #pragma once
 
+#include <stdalign.h>
+
 #include "key_value.h"
 
 #include "../../container_of.h"
@@ -196,11 +198,14 @@ __ttlmap_bucket_count(size_t kv_entries) { // NOLINT
 		__count;                                                       \
 	})
 
-#define __TTLMAP_BUCKET_ITER(                                                  \
+#define __TTLMAP_BUCKET_SCAN_DELIVERED (0b01)
+#define __TTLMAP_BUCKET_SCAN_STOP (0b10)
+
+#define __TTLMAP_BUCKET_SCAN(                                                  \
 	map_ptr, bucket_id, key_type, value_type, now, cb, data                \
 )                                                                              \
 	__extension__({                                                        \
-		int __result = 0;                                              \
+		int __flags = 0;                                               \
 		void *__addr = __TTLMAP_BUCKET_FIND_WITH_ID(                   \
 			map_ptr, bucket_id, key_type, value_type               \
 		);                                                             \
@@ -214,15 +219,48 @@ __ttlmap_bucket_count(size_t kv_entries) { // NOLINT
 		__ttlmap_unlock(&__bucket->lock);                              \
 		for (size_t __i = 0; __i < __TTLMAP_BUCKET_ENTRIES; ++__i) {   \
 			if (__entries_copy[__i].deadline > (now)) {            \
+				__flags |= __TTLMAP_BUCKET_SCAN_DELIVERED;     \
 				if ((cb)(&__entries_copy[__i].key,             \
 					 &__entries_copy[__i].value,           \
 					 (data))) {                            \
-					__result = 1;                          \
+					__flags |= __TTLMAP_BUCKET_SCAN_STOP;  \
 					break;                                 \
 				}                                              \
 			}                                                      \
 		}                                                              \
-		__result;                                                      \
+		__flags;                                                       \
+	})
+
+#define __TTLMAP_BUCKET_ITER(                                                  \
+	map_ptr, bucket_id, key_type, value_type, now, cb, data                \
+)                                                                              \
+	__extension__({                                                        \
+		(__TTLMAP_BUCKET_SCAN(                                         \
+			 map_ptr,                                              \
+			 bucket_id,                                            \
+			 key_type,                                             \
+			 value_type,                                           \
+			 now,                                                  \
+			 cb,                                                   \
+			 data                                                  \
+		 ) &                                                           \
+		 __TTLMAP_BUCKET_SCAN_STOP) != 0;                              \
+	})
+
+#define __TTLMAP_BUCKET_ITER_NEXT(                                             \
+	map_ptr, bucket_id, key_type, value_type, now, cb, data                \
+)                                                                              \
+	__extension__({                                                        \
+		(__TTLMAP_BUCKET_SCAN(                                         \
+			 map_ptr,                                              \
+			 bucket_id,                                            \
+			 key_type,                                             \
+			 value_type,                                           \
+			 now,                                                  \
+			 cb,                                                   \
+			 data                                                  \
+		 ) &                                                           \
+		 __TTLMAP_BUCKET_SCAN_DELIVERED) != 0;                         \
 	})
 
 #define __TTLMAP_BUCKET_PREFETCH(bucket, entry, bucket_size, ...)              \
