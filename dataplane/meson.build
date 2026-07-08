@@ -51,6 +51,7 @@ dependencies = lib_dependencies + [
   lib_pdump_dp_dep,
   lib_fwstate_dp_dep,
   lib_blackhole_dp_dep,
+  lib_balancer2_dp_dep,
 
   #devices
   lib_dev_plain_dp_dep,
