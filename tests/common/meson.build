@@ -140,6 +140,15 @@ hash_index_test = executable(
 )
 test('hash_index', hash_index_test, suite: ['common'])
 
+str_index_test = executable(
+  'str_index_test',
+  ['str_index_test.c',],
+  c_args: yanet_test_c_args,
+  link_args: yanet_link_args,
+  dependencies: dependencies,
+)
+test('str_index', str_index_test, suite: ['common'])
+
 thread_dep = dependency('threads')
 
 data_pipe_test = executable(
