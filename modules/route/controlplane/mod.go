@@ -6,6 +6,7 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
+	"github.com/yanet-platform/yanet2/common/go/grpcmetrics"
 	cpffi "github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/route/controlplane/routepb/v1"
 )
@@ -41,11 +42,12 @@ func WithLog(log *zap.Logger) Option {
 // yanet-route-operator agent rebuilds the FIB and pushes it via
 // UpdateFIB.
 type RouteModule struct {
-	cfg     *Config
-	shm     *cpffi.SharedMemory
-	agent   *cpffi.Agent
-	service *RouteService
-	log     *zap.Logger
+	cfg            *Config
+	shm            *cpffi.SharedMemory
+	agent          *cpffi.Agent
+	service        *RouteService
+	metricsService *MetricsService
+	log            *zap.Logger
 }
 
 // NewRouteModule creates a new RouteModule.
@@ -72,14 +74,23 @@ func NewRouteModule(cfg *Config, options ...Option) (*RouteModule, error) {
 		return nil, fmt.Errorf("failed to attach agent to shared memory: %w", err)
 	}
 
-	service := NewRouteService(NewBackend(agent), WithRouteServiceLog(log))
+	service := NewRouteService(
+		NewBackend(agent),
+		WithRouteServiceLog(log),
+		WithMetrics(grpcmetrics.NewFactory(
+			grpcmetrics.WithLabeler(labeler),
+		)),
+	)
+
+	metricsService := NewMetricsService(service)
 
 	return &RouteModule{
-		cfg:     cfg,
-		shm:     shm,
-		agent:   agent,
-		service: service,
-		log:     log,
+		cfg:            cfg,
+		shm:            shm,
+		agent:          agent,
+		service:        service,
+		metricsService: metricsService,
+		log:            log,
 	}, nil
 }
 
@@ -97,12 +108,25 @@ func (m *RouteModule) Endpoint() string {
 func (m *RouteModule) ServicesNames() []string {
 	return []string{
 		"modules.route.controlplane.routepb.v1.RouteService",
+		routepb.MetricsService_ServiceDesc.ServiceName,
 	}
 }
 
 // RegisterService registers the route module's gRPC service.
 func (m *RouteModule) RegisterService(server *grpc.Server) {
 	routepb.RegisterRouteServiceServer(server, m.service)
+	routepb.RegisterMetricsServiceServer(server, m.metricsService)
+}
+
+// UnaryServerInterceptors returns the gRPC unary interceptors for this
+// module.
+func (m *RouteModule) UnaryServerInterceptors() []grpc.UnaryServerInterceptor {
+	interceptor := m.service.UnaryServerInterceptor()
+	if interceptor == nil {
+		return nil
+	}
+
+	return []grpc.UnaryServerInterceptor{interceptor}
 }
 
 // Close closes the module.

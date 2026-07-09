@@ -6,6 +6,7 @@ option go_package = "github.com/yanet-platform/yanet2/modules/route/controlplane
 
 import "common/commonpb/v1/iprange.proto";
 import "common/commonpb/v1/macaddr.proto";
+import "common/commonpb/v1/metric.proto";
 
 service RouteService {
   // ListConfigs returns all route module configurations known to the
@@ -22,6 +23,12 @@ service RouteService {
   // UpdateFIB pushes a freshly-built FIB to the route module and
   // applies it atomically.
   rpc UpdateFIB(UpdateFIBRequest) returns (UpdateFIBResponse);
+}
+
+// MetricsService exposes route module metrics.
+service MetricsService {
+  // GetMetrics returns a snapshot of route module metrics.
+  rpc GetMetrics(common.commonpb.v1.GetMetricsRequest) returns (common.commonpb.v1.GetMetricsResponse);
 }
 
 // ListConfigsRequest is the request to list configurations.

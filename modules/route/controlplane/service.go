@@ -6,10 +6,13 @@ import (
 	"sync"
 
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
+	"github.com/yanet-platform/yanet2/common/go/grpcmetrics"
+	"github.com/yanet-platform/yanet2/common/go/metrics"
 	"github.com/yanet-platform/yanet2/modules/route/bindings/go/croute"
 	"github.com/yanet-platform/yanet2/modules/route/controlplane/routepb/v1"
 )
@@ -18,7 +21,8 @@ import (
 type RouteServiceOption func(*routeServiceOptions)
 
 type routeServiceOptions struct {
-	Log *zap.Logger
+	Metrics grpcmetrics.Factory
+	Log     *zap.Logger
 }
 
 func newRouteServiceOptions() *routeServiceOptions {
@@ -34,6 +38,15 @@ func WithRouteServiceLog(log *zap.Logger) RouteServiceOption {
 	}
 }
 
+// WithMetrics sets the gRPC metrics factory.
+//
+// When unset, no metrics are collected.
+func WithMetrics(factory grpcmetrics.Factory) RouteServiceOption {
+	return func(o *routeServiceOptions) {
+		o.Metrics = factory
+	}
+}
+
 // RouteService is the gRPC service implementation backing the slim
 // route-module shim.
 type RouteService struct {
@@ -46,6 +59,8 @@ type RouteService struct {
 	shmLock sync.RWMutex
 	configs map[string]ModuleHandle
 
+	metrics *grpcmetrics.ServerMetrics
+
 	log *zap.Logger
 }
 
@@ -56,10 +71,59 @@ func NewRouteService(backend Backend, options ...RouteServiceOption) *RouteServi
 		o(opts)
 	}
 
-	return &RouteService{
+	m := &RouteService{
 		backend: backend,
 		configs: map[string]ModuleHandle{},
 		log:     opts.Log,
+	}
+	if opts.Metrics != nil {
+		m.metrics = opts.Metrics(m.retention)
+	}
+
+	return m
+}
+
+// UnaryServerInterceptor returns the service's gRPC metrics interceptor, or
+// nil when metrics are not configured.
+func (m *RouteService) UnaryServerInterceptor() grpc.UnaryServerInterceptor {
+	if m.metrics == nil {
+		return nil
+	}
+
+	return m.metrics.UnaryServerInterceptor()
+}
+
+// retention snapshots the live route config names and returns a predicate
+// that keeps series whose "config" label is still live (or absent).
+func (m *RouteService) retention() func(metrics.MetricID) bool {
+	m.shmLock.RLock()
+	configNames := make(map[string]struct{}, len(m.configs))
+	for name := range m.configs {
+		configNames[name] = struct{}{}
+	}
+	m.shmLock.RUnlock()
+
+	return func(id metrics.MetricID) bool {
+		config := id.Labels["config"]
+		if config == "" {
+			return true
+		}
+
+		_, ok := configNames[config]
+		return ok
+	}
+}
+
+func labeler(fullMethod string, req any) metrics.Labels {
+	switch r := req.(type) {
+	case *routepb.DeleteConfigRequest:
+		return metrics.Labels{"config": r.GetName()}
+	case *routepb.ShowFIBRequest:
+		return metrics.Labels{"config": r.GetName()}
+	case *routepb.UpdateFIBRequest:
+		return metrics.Labels{"config": r.GetModuleName()}
+	default:
+		return nil
 	}
 }
 
@@ -192,4 +256,47 @@ func (m *RouteService) UpdateFIB(
 	m.configs[name] = module
 
 	return &routepb.UpdateFIBResponse{}, nil
+}
+
+// Metrics returns all route module metrics: per-config FIB size gauges, plus
+// gRPC call metrics.
+//
+// Labels:
+//   - config:       route config name (all gauge metrics)
+//   - grpc_type:    always "unary" (gRPC metrics)
+//   - grpc_service: fully-qualified gRPC service name (gRPC metrics)
+//   - grpc_method:  RPC name (gRPC metrics)
+//   - grpc_code:    gRPC status code string (grpc_server_handled_total only)
+func (m *RouteService) Metrics() ([]*commonpb.Metric, error) {
+	result := m.collectConfigMetrics()
+	if m.metrics != nil {
+		result = append(result, m.metrics.Collect()...)
+	}
+	return result, nil
+}
+
+// collectConfigMetrics gathers per-config gauges on a best-effort basis: a
+// dump failure for one config is logged and skipped so the remaining configs
+// still contribute their series.
+func (m *RouteService) collectConfigMetrics() []*commonpb.Metric {
+	m.shmLock.RLock()
+	defer m.shmLock.RUnlock()
+
+	result := make([]*commonpb.Metric, 0, len(m.configs))
+	for name, module := range m.configs {
+		labels := []*commonpb.Label{{Name: "config", Value: name}}
+
+		count, err := module.FIBRangeCount()
+		if err != nil {
+			m.log.Warn("failed to collect fib metrics for config",
+				zap.String("config", name),
+				zap.Error(err),
+			)
+			continue
+		}
+
+		result = append(result, makeGauge("route_fib_entries", float64(count), labels...))
+	}
+
+	return result
 }
