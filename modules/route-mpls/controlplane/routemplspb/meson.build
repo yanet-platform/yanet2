@@ -7,7 +7,7 @@ proto_files = [
 
 protoc_gen = custom_target(
     'route-mpls-protoc',
-    output: ['route-mpls.pb.go', 'route-mpls_grpc.pb.go'],
+    output: ['routempls.pb.go', 'routempls_grpc.pb.go'],
     input: proto_files,
     command: [
         protoc,
