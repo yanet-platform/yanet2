@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/modules/fwstate/controlplane/fwstatepb/v1"
@@ -47,6 +49,66 @@ func TestClampBatchSize(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			require.Equal(t, tc.want, clampBatchSize(tc.input))
+		})
+	}
+}
+
+// TestValidateSyncPorts verifies that ports above the uint16 range are
+// rejected with InvalidArgument, while zero and boundary values pass.
+func TestValidateSyncPorts(t *testing.T) {
+	cases := []struct {
+		name          string
+		portMulticast uint32
+		portUnicast   uint32
+		wantErr       bool
+	}{
+		{
+			name:          "both zero",
+			portMulticast: 0,
+			portUnicast:   0,
+			wantErr:       false,
+		},
+		{
+			name:          "boundary value",
+			portMulticast: 65535,
+			portUnicast:   65535,
+			wantErr:       false,
+		},
+		{
+			name:          "multicast port just above boundary",
+			portMulticast: 65536,
+			portUnicast:   0,
+			wantErr:       true,
+		},
+		{
+			name:          "unicast port far above boundary",
+			portMulticast: 0,
+			portUnicast:   70000,
+			wantErr:       true,
+		},
+		{
+			name:          "one valid one out of range",
+			portMulticast: 1,
+			portUnicast:   70000,
+			wantErr:       true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &fwstatepb.SyncConfig{
+				PortMulticast: tc.portMulticast,
+				PortUnicast:   tc.portUnicast,
+			}
+
+			err := validateSyncPorts(cfg)
+			if !tc.wantErr {
+				require.NoError(t, err)
+				return
+			}
+
+			require.Error(t, err)
+			require.Equal(t, codes.InvalidArgument, status.Code(err))
 		})
 	}
 }

@@ -24,6 +24,10 @@ const (
 	// ListEntries round-trip to prevent unbounded allocation under the
 	// service mutex.
 	maxListEntriesBatchSize uint32 = 10000
+
+	// maxSyncPort is the highest value accepted for port_multicast and
+	// port_unicast, matching the width of the C-side uint16 port field.
+	maxSyncPort uint32 = 65535
 )
 
 // clampBatchSize returns a batch size that is within the allowed range:
@@ -105,6 +109,9 @@ func (m *FWStateService) UpdateConfig(
 	}
 	if req.MapConfig == nil {
 		return nil, status.Error(codes.InvalidArgument, "map_config is required")
+	}
+	if err := validateSyncPorts(req.SyncConfig); err != nil {
+		return nil, err
 	}
 
 	m.log.Debug("update fwstate config", zap.String("config", name))
@@ -439,6 +446,22 @@ func (m *FWStateService) ListEntries(
 			return err
 		}
 	}
+}
+
+// validateSyncPorts rejects sync config ports that do not fit into the
+// C-side uint16 port field.
+//
+// A zero port means "unset / keep current" and is allowed here. The
+// required-destination-pair check in validateSyncConfig rejects a request
+// that leaves both destinations unset.
+func validateSyncPorts(cfg *fwstatepb.SyncConfig) error {
+	if portMulticast := cfg.GetPortMulticast(); portMulticast > maxSyncPort {
+		return status.Errorf(codes.InvalidArgument, "port_multicast %d exceeds maximum allowed value %d", portMulticast, maxSyncPort)
+	}
+	if portUnicast := cfg.GetPortUnicast(); portUnicast > maxSyncPort {
+		return status.Errorf(codes.InvalidArgument, "port_unicast %d exceeds maximum allowed value %d", portUnicast, maxSyncPort)
+	}
+	return nil
 }
 
 // validateSyncConfig validates that required sync config fields are set
