@@ -39,12 +39,12 @@ func NewMetricsService(collectors ...metricsCollector) *MetricsService {
 // service-specific metrics.
 func (m *MetricsService) GetMetrics(
 	ctx context.Context,
-	req *ynpb.GetMetricsRequest,
-) (*ynpb.GetMetricsResponse, error) {
+	req *commonpb.GetMetricsRequest,
+) (*commonpb.GetMetricsResponse, error) {
 	metrics := make([]*commonpb.Metric, 0)
 	for _, collector := range m.collectors {
 		metrics = append(metrics, collector.Collect()...)
 	}
 
-	return &ynpb.GetMetricsResponse{Metrics: metrics}, nil
+	return &commonpb.GetMetricsResponse{Metrics: metrics}, nil
 }
