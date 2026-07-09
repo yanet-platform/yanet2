@@ -162,10 +162,10 @@ func (m *FWStateService) collectDataplaneMetrics() ([]*commonpb.Metric, error) {
 			}
 
 			switch counter.Name {
-			case "fwstate_sync_packets":
+			case "fwstate_sync":
 				result = append(result,
-					makeCounter("fwstate_sync_packets_packets", packets, baseLabels...),
-					makeCounter("fwstate_sync_packets_bytes", bytes, baseLabels...),
+					makeCounter("fwstate_sync_packets", packets, baseLabels...),
+					makeCounter("fwstate_sync_bytes", bytes, baseLabels...),
 				)
 			case "fwstate_passthrough":
 				result = append(result,

@@ -69,7 +69,7 @@ fwstate_test_config(struct cp_module **cp_module) {
 		uint64_t size;
 		uint64_t *dst;
 	} counters[] = {
-		{"fwstate_sync_packets", 2, &config->sync_packets_counter_id},
+		{"fwstate_sync", 2, &config->sync_packets_counter_id},
 		{"fwstate_passthrough", 2, &config->passthrough_counter_id},
 		{"fwstate_sync_v4_inserted",
 		 1,
