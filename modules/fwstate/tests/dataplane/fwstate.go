@@ -54,20 +54,14 @@ test_fwstate_handle_packets(
 		return;
 	}
 
-	struct counter_storage_allocator allocator;
-	counter_storage_allocator_init(
-		&allocator, &cp_module->memory_context, dp_worker->idx + 1
-	);
-
 	struct counter_storage *storage = counter_storage_spawn(
-		&cp_module->memory_context, &allocator, NULL, registry
+		&cp_module->memory_context, NULL, registry
 	);
 	SET_OFFSET_OF(&module_ectx.counter_storage, storage);
 
 	fwstate_handle_packets(dp_worker, &module_ectx, packet_front);
 
 	counter_storage_free(storage);
-	counter_storage_allocator_fini(&allocator);
 }
 
 // Helper to get actual pointer from offset pointer

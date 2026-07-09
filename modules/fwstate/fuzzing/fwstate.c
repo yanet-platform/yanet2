@@ -110,19 +110,8 @@ fwstate_test_config(struct cp_module **cp_module) {
 		return -ENOMEM;
 	}
 
-	struct counter_storage_allocator *alloc = memory_balloc(
-		&fuzz_params.mctx, sizeof(struct counter_storage_allocator)
-	);
-	if (alloc == NULL) {
-		return -ENOMEM;
-	}
-	counter_storage_allocator_init(alloc, &fuzz_params.mctx, 1);
-
 	struct counter_storage *cs = counter_storage_spawn(
-		&fuzz_params.mctx,
-		alloc,
-		NULL,
-		&config->cp_module.counter_registry
+		&fuzz_params.mctx, NULL, &config->cp_module.counter_registry
 	);
 	if (cs == NULL) {
 		return -ENOMEM;

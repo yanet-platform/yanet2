@@ -4,10 +4,10 @@ use std::{collections::HashMap, time::UNIX_EPOCH};
 use args::{DeleteCmd, DirectionArg, EntriesCmd, LinkCmd, MetricsCmd, ModeCmd, ShowCmd, StatsCmd, UpdateCmd};
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
-use commonpb::pb::IpAddress;
+use commonpb::pb::{GetMetricsRequest, IpAddress};
 use fwstatepb::{
-    DeleteConfigRequest, Direction, GetMetricsRequest, GetStatsRequest, LinkFwStateRequest, ListConfigsRequest,
-    ListEntriesRequest, ShowConfigRequest, UpdateConfigRequest, fw_state_service_client::FwStateServiceClient,
+    DeleteConfigRequest, Direction, GetStatsRequest, LinkFwStateRequest, ListConfigsRequest, ListEntriesRequest,
+    ShowConfigRequest, UpdateConfigRequest, fw_state_service_client::FwStateServiceClient,
     metrics_service_client::MetricsServiceClient,
 };
 use metric::Metric;

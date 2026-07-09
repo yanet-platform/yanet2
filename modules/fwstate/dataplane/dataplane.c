@@ -279,45 +279,34 @@ fwstate_handle_packets(
 	// Resolve per-worker counter addresses.
 	// size=2 counters: [0]=packets, [1]=bytes; size=1 counters:
 	// [0]=packets.
+	struct counter_storage *counter_storage =
+		ADDR_OF_NONNULL(&module_ectx->counter_storage);
+
 	uint64_t *sync_packets_cnt = counter_get_address(
-		fwstate_module->sync_packets_counter_id,
-		dp_worker->idx,
-		ADDR_OF(&module_ectx->counter_storage)
+		fwstate_module->sync_packets_counter_id, counter_storage
 	);
 	uint64_t *passthrough_cnt = counter_get_address(
-		fwstate_module->passthrough_counter_id,
-		dp_worker->idx,
-		ADDR_OF(&module_ectx->counter_storage)
+		fwstate_module->passthrough_counter_id, counter_storage
 	);
 	uint64_t *sync_v4_inserted_cnt = counter_get_address(
-		fwstate_module->sync_v4_inserted_counter_id,
-		dp_worker->idx,
-		ADDR_OF(&module_ectx->counter_storage)
+		fwstate_module->sync_v4_inserted_counter_id, counter_storage
 	);
 	uint64_t *sync_v6_inserted_cnt = counter_get_address(
-		fwstate_module->sync_v6_inserted_counter_id,
-		dp_worker->idx,
-		ADDR_OF(&module_ectx->counter_storage)
+		fwstate_module->sync_v6_inserted_counter_id, counter_storage
 	);
 	uint64_t *sync_v4_insert_failed_cnt = counter_get_address(
 		fwstate_module->sync_v4_insert_failed_counter_id,
-		dp_worker->idx,
-		ADDR_OF(&module_ectx->counter_storage)
+		counter_storage
 	);
 	uint64_t *sync_v6_insert_failed_cnt = counter_get_address(
 		fwstate_module->sync_v6_insert_failed_counter_id,
-		dp_worker->idx,
-		ADDR_OF(&module_ectx->counter_storage)
+		counter_storage
 	);
 	uint64_t *external_dropped_cnt = counter_get_address(
-		fwstate_module->external_dropped_counter_id,
-		dp_worker->idx,
-		ADDR_OF(&module_ectx->counter_storage)
+		fwstate_module->external_dropped_counter_id, counter_storage
 	);
 	uint64_t *internal_forwarded_cnt = counter_get_address(
-		fwstate_module->internal_forwarded_counter_id,
-		dp_worker->idx,
-		ADDR_OF(&module_ectx->counter_storage)
+		fwstate_module->internal_forwarded_counter_id, counter_storage
 	);
 
 	struct packet *packet;
