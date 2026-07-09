@@ -172,21 +172,26 @@ func (m *FWStateService) collectDataplaneMetrics() ([]*commonpb.Metric, error) {
 					makeCounter("fwstate_passthrough_packets", packets, baseLabels...),
 					makeCounter("fwstate_passthrough_bytes", bytes, baseLabels...),
 				)
+			// The *_inserted / *_insert_failed counters track state-table
+			// entries (sync frames), not packets: a single sync packet
+			// carries multiple frames and each frame bumps the counter once.
+			// Export them with an _entries suffix so they are not rendered
+			// under a packet/byte column.
 			case "fwstate_sync_v4_inserted":
 				result = append(result,
-					makeCounter("fwstate_sync_v4_inserted_packets", packets, baseLabels...),
+					makeCounter("fwstate_sync_v4_inserted_entries", packets, baseLabels...),
 				)
 			case "fwstate_sync_v6_inserted":
 				result = append(result,
-					makeCounter("fwstate_sync_v6_inserted_packets", packets, baseLabels...),
+					makeCounter("fwstate_sync_v6_inserted_entries", packets, baseLabels...),
 				)
 			case "fwstate_sync_v4_insert_failed":
 				result = append(result,
-					makeCounter("fwstate_sync_v4_insert_failed_packets", packets, baseLabels...),
+					makeCounter("fwstate_sync_v4_insert_failed_entries", packets, baseLabels...),
 				)
 			case "fwstate_sync_v6_insert_failed":
 				result = append(result,
-					makeCounter("fwstate_sync_v6_insert_failed_packets", packets, baseLabels...),
+					makeCounter("fwstate_sync_v6_insert_failed_entries", packets, baseLabels...),
 				)
 			case "fwstate_external_dropped":
 				result = append(result,

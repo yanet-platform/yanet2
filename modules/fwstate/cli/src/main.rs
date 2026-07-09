@@ -601,6 +601,8 @@ struct CounterRow {
     packets: String,
     #[tabled(rename = "Bytes")]
     bytes: String,
+    #[tabled(rename = "Entries")]
+    entries: String,
 }
 
 #[derive(Tabled)]
@@ -693,6 +695,7 @@ fn print_metrics_table(metrics: &[Metric]) {
         display: String,
         packets: Option<u64>,
         bytes: Option<u64>,
+        entries: Option<u64>,
     }
 
     let mut counter_keys: Vec<String> = Vec::new();
@@ -764,6 +767,7 @@ fn print_metrics_table(metrics: &[Metric]) {
                         display: metric_display_name(base),
                         packets: None,
                         bytes: None,
+                        entries: None,
                     }
                 });
                 pair.packets = Some(val);
@@ -774,21 +778,34 @@ fn print_metrics_table(metrics: &[Metric]) {
                         display: metric_display_name(base),
                         packets: None,
                         bytes: None,
+                        entries: None,
                     }
                 });
                 pair.bytes = Some(val);
+            } else if let Some(base) = stripped.strip_suffix("_entries") {
+                // State-table entry counters (e.g. sync insert counters)
+                // count frames, not packets/bytes; render under Entries.
+                let pair = pair_map.entry(base.to_string()).or_insert_with(|| {
+                    pair_order.push(base.to_string());
+                    CounterPair {
+                        display: metric_display_name(base),
+                        packets: None,
+                        bytes: None,
+                        entries: None,
+                    }
+                });
+                pair.entries = Some(val);
             } else {
-                // Counter without a _packets/_bytes suffix (e.g. insert
-                // counters that only track packets).
                 let pair = pair_map.entry(stripped.to_string()).or_insert_with(|| {
                     pair_order.push(stripped.to_string());
                     CounterPair {
                         display: metric_display_name(stripped),
                         packets: None,
                         bytes: None,
+                        entries: None,
                     }
                 });
-                pair.packets = Some(val);
+                pair.entries = Some(val);
             }
         }
 
@@ -800,6 +817,7 @@ fn print_metrics_table(metrics: &[Metric]) {
                     counter: p.display.clone(),
                     packets: p.packets.map(format_number).unwrap_or_else(|| "-".into()),
                     bytes: p.bytes.map(format_number).unwrap_or_else(|| "-".into()),
+                    entries: p.entries.map(format_number).unwrap_or_else(|| "-".into()),
                 }
             })
             .collect();
