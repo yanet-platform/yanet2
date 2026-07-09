@@ -23,7 +23,7 @@ service ACLService {
 // MetricsService exposes ACL module metrics.
 service MetricsService {
   // GetMetrics returns a snapshot of ACL module metrics.
-  rpc GetMetrics(GetMetricsRequest) returns (GetMetricsResponse);
+  rpc GetMetrics(common.commonpb.v1.GetMetricsRequest) returns (common.commonpb.v1.GetMetricsResponse);
 }
 
 message UpdateConfigRequest {
@@ -79,7 +79,3 @@ message DeleteConfigResponse { bool deleted = 1; }
 message ListConfigsRequest {}
 
 message ListConfigsResponse { repeated string configs = 1; }
-
-message GetMetricsRequest {}
-
-message GetMetricsResponse { repeated common.commonpb.v1.Metric metrics = 1; }

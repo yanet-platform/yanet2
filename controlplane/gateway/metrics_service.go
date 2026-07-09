@@ -28,7 +28,7 @@ func NewMetricsService(collector metricsCollector) *MetricsService {
 // GetMetrics returns a snapshot of all gateway gRPC server metrics.
 func (m *MetricsService) GetMetrics(
 	ctx context.Context,
-	req *ynpb.GetMetricsRequest,
-) (*ynpb.GetMetricsResponse, error) {
-	return &ynpb.GetMetricsResponse{Metrics: m.collector.Collect()}, nil
+	req *commonpb.GetMetricsRequest,
+) (*commonpb.GetMetricsResponse, error) {
+	return &commonpb.GetMetricsResponse{Metrics: m.collector.Collect()}, nil
 }

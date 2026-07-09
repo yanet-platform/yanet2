@@ -26,7 +26,7 @@ service RouteOperatorService {
 // MetricsService exposes operator runtime metrics.
 service MetricsService {
   // GetMetrics returns a snapshot of operator runtime metrics.
-  rpc GetMetrics(GetMetricsRequest) returns (GetMetricsResponse);
+  rpc GetMetrics(common.commonpb.v1.GetMetricsRequest) returns (common.commonpb.v1.GetMetricsResponse);
 }
 
 message SwitchRequest {}
@@ -36,7 +36,3 @@ message SwitchResponse {}
 message StatusRequest {}
 
 message StatusResponse {}
-
-message GetMetricsRequest {}
-
-message GetMetricsResponse { repeated common.commonpb.v1.Metric metrics = 1; }

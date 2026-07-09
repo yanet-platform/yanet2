@@ -25,13 +25,13 @@ func NewMetricsService(source metricsSource) *MetricsService {
 }
 
 // GetMetrics returns a snapshot of all ACL module metrics.
-func (m *MetricsService) GetMetrics(ctx context.Context, req *aclpb.GetMetricsRequest) (*aclpb.GetMetricsResponse, error) {
+func (m *MetricsService) GetMetrics(ctx context.Context, req *commonpb.GetMetricsRequest) (*commonpb.GetMetricsResponse, error) {
 	all, err := m.source.Metrics()
 	if err != nil {
 		return nil, err
 	}
 
-	return &aclpb.GetMetricsResponse{Metrics: all}, nil
+	return &commonpb.GetMetricsResponse{Metrics: all}, nil
 }
 
 func makeGauge(name string, value float64, labels ...*commonpb.Label) *commonpb.Metric {

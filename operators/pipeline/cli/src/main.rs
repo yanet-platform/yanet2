@@ -5,6 +5,7 @@ use core::fmt::{self, Display, Formatter};
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
 use colored::Colorize;
+use commonpb::pb::GetMetricsRequest;
 use tabled::{
     Table, Tabled,
     settings::{
@@ -21,7 +22,7 @@ use ync::{
 };
 
 use crate::operatorpb::{
-    GetMetricsRequest, metrics_service_client::MetricsServiceClient, readiness_service_client::ReadinessServiceClient,
+    metrics_service_client::MetricsServiceClient, readiness_service_client::ReadinessServiceClient,
 };
 
 #[allow(clippy::all, non_snake_case)]
