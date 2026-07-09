@@ -143,3 +143,22 @@ deploy/packages/
 .assets/
 .docs/
 .secrets/
+
+# Ignore out-of-tree modules by default.
+#
+# Public modules are whitelisted below, so adding a new private module needs
+# no change here.
+/modules/*
+!/modules/meson.build
+!/modules/acl/
+!/modules/balancer2/
+!/modules/blackhole/
+!/modules/decap/
+!/modules/dscp/
+!/modules/forward/
+!/modules/fwstate/
+!/modules/mirror/
+!/modules/nat64/
+!/modules/pdump/
+!/modules/route/
+!/modules/route-mpls/
