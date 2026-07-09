@@ -1,7 +1,7 @@
 use std::{collections::HashMap, fs::File, path::Path};
 
 use aclpb::{
-    DeleteConfigRequest, GetMetricsRequest, ListConfigsRequest, ShowConfigRequest, UpdateConfigRequest,
+    DeleteConfigRequest, ListConfigsRequest, ShowConfigRequest, UpdateConfigRequest,
     acl_service_client::AclServiceClient, metrics_service_client::MetricsServiceClient,
 };
 use args::{DeleteCmd, MetricsCmd, ModeCmd, ShowCmd, UpdateCmd};
@@ -22,6 +22,7 @@ mod args;
 mod metric;
 
 use ::commonpb::pb as commonpb;
+use commonpb::GetMetricsRequest;
 
 #[allow(non_snake_case)]
 pub mod aclpb {

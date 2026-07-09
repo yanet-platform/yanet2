@@ -1,11 +1,12 @@
 use std::{net::IpAddr, time};
 
+use commonpb::pb::GetMetricsRequest;
 use ptree::TreeBuilder;
 use tonic::codec::CompressionEncoding;
 use yanet_cli_balancer2::balancerpb::{
-    self, GetConfigRequest, GetMetricsRequest, GetStateRequest, ListConfigsRequest, ListSessionsRequest,
-    ListSessionsStatesRequest, PacketHandlerRef, RealUpdate, UpdateConfigRequest, UpdateRealsRequest,
-    UpdateSessionsStateRequest, balancer_client::BalancerClient,
+    self, GetConfigRequest, GetStateRequest, ListConfigsRequest, ListSessionsRequest, ListSessionsStatesRequest,
+    PacketHandlerRef, RealUpdate, UpdateConfigRequest, UpdateRealsRequest, UpdateSessionsStateRequest,
+    balancer_client::BalancerClient,
 };
 use ync::{
     client::{ConnectionArgs, LayeredChannel, Service},

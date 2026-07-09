@@ -39,9 +39,9 @@ func NewMetricsService(options ...MetricsServiceOption) *MetricsService {
 // an error.
 func (m *MetricsService) GetMetrics(
 	ctx context.Context,
-	req *operatorpb.GetMetricsRequest,
-) (*operatorpb.GetMetricsResponse, error) {
-	return &operatorpb.GetMetricsResponse{
+	req *commonpb.GetMetricsRequest,
+) (*commonpb.GetMetricsResponse, error) {
+	return &commonpb.GetMetricsResponse{
 		Metrics: m.metrics.Collect(),
 	}, nil
 }

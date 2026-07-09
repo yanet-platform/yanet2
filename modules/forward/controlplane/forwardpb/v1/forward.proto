@@ -26,7 +26,7 @@ service ForwardService {
 // MetricsService exposes Forward module per-rule metrics.
 service MetricsService {
   // GetMetrics returns a snapshot of Forward per-rule metrics.
-  rpc GetMetrics(GetMetricsRequest) returns (GetMetricsResponse);
+  rpc GetMetrics(common.commonpb.v1.GetMetricsRequest) returns (common.commonpb.v1.GetMetricsResponse);
 }
 
 message Config {
@@ -84,7 +84,3 @@ message DeleteConfigRequest {
 }
 
 message DeleteConfigResponse { bool deleted = 1; }
-
-message GetMetricsRequest {}
-
-message GetMetricsResponse { repeated common.commonpb.v1.Metric metrics = 1; }

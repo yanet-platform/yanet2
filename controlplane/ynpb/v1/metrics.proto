@@ -9,9 +9,5 @@ import "common/commonpb/v1/metric.proto";
 // MetricsService exposes gateway runtime metrics.
 service MetricsService {
   // GetMetrics returns a snapshot of gateway runtime metrics.
-  rpc GetMetrics(GetMetricsRequest) returns (GetMetricsResponse);
+  rpc GetMetrics(common.commonpb.v1.GetMetricsRequest) returns (common.commonpb.v1.GetMetricsResponse);
 }
-
-message GetMetricsRequest {}
-
-message GetMetricsResponse { repeated common.commonpb.v1.Metric metrics = 1; }

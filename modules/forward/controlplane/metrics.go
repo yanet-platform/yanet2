@@ -25,13 +25,13 @@ func NewMetricsService(source metricsSource) *MetricsService {
 }
 
 // GetMetrics returns a snapshot of Forward per-rule metrics.
-func (m *MetricsService) GetMetrics(ctx context.Context, req *forwardpb.GetMetricsRequest) (*forwardpb.GetMetricsResponse, error) {
+func (m *MetricsService) GetMetrics(ctx context.Context, req *commonpb.GetMetricsRequest) (*commonpb.GetMetricsResponse, error) {
 	all, err := m.source.Metrics()
 	if err != nil {
 		return nil, err
 	}
 
-	return &forwardpb.GetMetricsResponse{Metrics: all}, nil
+	return &commonpb.GetMetricsResponse{Metrics: all}, nil
 }
 
 // makeCounter builds a counter metric with the provided name, value, and labels.

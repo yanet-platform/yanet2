@@ -42,11 +42,11 @@ func NewService(options ...ServiceOption) *Service {
 // error.
 func (m *Service) GetMetrics(
 	ctx context.Context,
-	req *operatorpb.GetMetricsRequest,
-) (*operatorpb.GetMetricsResponse, error) {
+	req *commonpb.GetMetricsRequest,
+) (*commonpb.GetMetricsResponse, error) {
 	metrics := m.metrics.Collect()
 
-	return &operatorpb.GetMetricsResponse{
+	return &commonpb.GetMetricsResponse{
 		Metrics: metrics,
 	}, nil
 }

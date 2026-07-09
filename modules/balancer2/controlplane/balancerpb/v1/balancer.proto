@@ -35,7 +35,7 @@ service Balancer {
 
   rpc ListSessions(ListSessionsRequest) returns (stream Session);
 
-  rpc GetMetrics(GetMetricsRequest) returns (GetMetricsResponse);
+  rpc GetMetrics(common.commonpb.v1.GetMetricsRequest) returns (common.commonpb.v1.GetMetricsResponse);
 }
 
 // On create (first update), all fields are required.
@@ -122,7 +122,3 @@ message UpdateSessionsStateRequest {
 }
 
 message UpdateSessionsStateResponse {}
-
-message GetMetricsRequest {}
-
-message GetMetricsResponse { repeated common.commonpb.v1.Metric metrics = 1; }
