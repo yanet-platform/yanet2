@@ -299,7 +299,7 @@ func NewGateway(cfg *Config, options ...GatewayOption) (*Gateway, error) {
 	ynpb.RegisterReadinessServiceServer(server, readinessSvc)
 	log.Info("registered service", zap.String("service", fmt.Sprintf("%T", readinessSvc)))
 
-	metricsService := NewMetricsService(serverMetrics)
+	metricsService := NewMetricsService(metricsCollectors(serverMetrics, opts.Services)...)
 	ynpb.RegisterMetricsServiceServer(server, metricsService)
 	log.Info("registered service", zap.String("service", fmt.Sprintf("%T", metricsService)))
 
