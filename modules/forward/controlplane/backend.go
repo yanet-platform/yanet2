@@ -7,6 +7,15 @@ import (
 	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
 )
 
+type CounterView struct {
+	Device   string
+	Pipeline string
+	Function string
+	Chain    string
+	Name     string
+	Values   [][]uint64
+}
+
 // backend is the real Backend implementation backed by shared memory.
 type backend struct {
 	agent *ffi.Agent
@@ -40,4 +49,37 @@ func (m *backend) UpdateModule(name string, rules []cforward.ForwardRule) (Modul
 
 func (m *backend) DeleteModule(name string) error {
 	return m.agent.DeleteModuleConfig(name)
+}
+
+func (m *backend) ModuleCounters(name string, counterNames []string) []CounterView {
+	dpConfig := m.agent.DPConfig()
+
+	var views []CounterView
+	for pos := range dpConfig.AllModulePositions(agentName) {
+		if pos.ModuleName != name {
+			continue
+		}
+
+		infos := dpConfig.ModuleCounters(
+			pos.Device,
+			pos.Pipeline,
+			pos.Function,
+			pos.Chain,
+			agentName,
+			name,
+			counterNames,
+		)
+		for _, info := range infos {
+			views = append(views, CounterView{
+				Device:   pos.Device,
+				Pipeline: pos.Pipeline,
+				Function: pos.Function,
+				Chain:    pos.Chain,
+				Name:     info.Name,
+				Values:   info.Values,
+			})
+		}
+	}
+
+	return views
 }

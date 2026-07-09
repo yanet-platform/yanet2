@@ -25,6 +25,9 @@ type Backend interface {
 	UpdateModule(name string, rules []cforward.ForwardRule) (ModuleHandle, error)
 	// DeleteModule removes a module config.
 	DeleteModule(name string) error
+	// ModuleCounters returns selected dataplane counters collected for a module config.
+	// If counterNames is nil or empty, it returns all counters for the module config.
+	ModuleCounters(name string, counterNames []string) []CounterView
 }
 
 type forwardConfig struct {

@@ -27,6 +27,10 @@ func (m *mockBackend) DeleteModule(name string) error {
 	return nil
 }
 
+func (m *mockBackend) ModuleCounters(name string, counterNames []string) []forward.CounterView {
+	return nil
+}
+
 // Run with: go test -race
 func TestForwardServiceConcurrentAccess(t *testing.T) {
 	svc := forward.NewForwardService(&mockBackend{})

@@ -3,6 +3,7 @@ syntax = "proto3";
 package modules.forward.controlplane.forwardpb.v1;
 
 import "common/filterpb/v1/filter.proto";
+import "common/commonpb/v1/metric.proto";
 
 option go_package = "github.com/yanet-platform/yanet2/modules/forward/controlplane/forwardpb/v1;forwardpb";
 
@@ -20,6 +21,12 @@ service ForwardService {
   // Allows to delete forward config if it is not referenced
   // by any pipeline.
   rpc DeleteConfig(DeleteConfigRequest) returns (DeleteConfigResponse);
+}
+
+// MetricsService exposes Forward module per-rule metrics.
+service MetricsService {
+  // GetMetrics returns a snapshot of Forward per-rule metrics.
+  rpc GetMetrics(GetMetricsRequest) returns (GetMetricsResponse);
 }
 
 message Config {
@@ -77,3 +84,7 @@ message DeleteConfigRequest {
 }
 
 message DeleteConfigResponse { bool deleted = 1; }
+
+message GetMetricsRequest {}
+
+message GetMetricsResponse { repeated common.commonpb.v1.Metric metrics = 1; }
