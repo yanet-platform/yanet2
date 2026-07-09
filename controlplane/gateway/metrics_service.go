@@ -7,28 +7,44 @@ import (
 	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 )
 
-// metricsCollector provides the gateway's collected gRPC server metrics.
+// metricsCollector provides collected metrics.
 type metricsCollector interface {
 	Collect() []*commonpb.Metric
 }
 
-// MetricsService exposes gateway gRPC server metrics over its own gRPC
-// service.
+// MetricsService exposes gateway gRPC server metrics and service-specific
+// metrics over its own gRPC service.
 type MetricsService struct {
 	ynpb.UnimplementedMetricsServiceServer
 
-	collector metricsCollector
+	collectors []metricsCollector
 }
 
 // NewMetricsService creates a MetricsService backed by collector.
-func NewMetricsService(collector metricsCollector) *MetricsService {
-	return &MetricsService{collector: collector}
+func NewMetricsService(collectors ...metricsCollector) *MetricsService {
+	return &MetricsService{collectors: collectors}
 }
 
-// GetMetrics returns a snapshot of all gateway gRPC server metrics.
+// GetMetrics returns a snapshot of all gateway gRPC server metrics plus
+// service-specific metrics.
 func (m *MetricsService) GetMetrics(
 	ctx context.Context,
 	req *commonpb.GetMetricsRequest,
 ) (*commonpb.GetMetricsResponse, error) {
-	return &commonpb.GetMetricsResponse{Metrics: m.collector.Collect()}, nil
+	metrics := make([]*commonpb.Metric, 0)
+	for _, collector := range m.collectors {
+		metrics = append(metrics, collector.Collect()...)
+	}
+
+	return &commonpb.GetMetricsResponse{Metrics: metrics}, nil
+}
+
+func metricsCollectors(server metricsCollector, entries []serviceEntry) []metricsCollector {
+	collectors := []metricsCollector{server}
+	for _, entry := range entries {
+		if collector, ok := entry.service.(metricsCollector); ok {
+			collectors = append(collectors, collector)
+		}
+	}
+	return collectors
 }

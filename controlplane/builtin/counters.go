@@ -2,9 +2,11 @@ package builtin
 
 import (
 	"context"
+	"strconv"
 
 	"google.golang.org/grpc"
 
+	"github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	ynpb "github.com/yanet-platform/yanet2/controlplane/ynpb/v1"
 )
@@ -216,4 +218,41 @@ func (m *Counters) Ports(
 	}
 
 	return response, nil
+}
+
+// Collect returns a generic metrics snapshot for port counters.
+func (m *Counters) Collect() []*commonpb.Metric {
+	dpConfig := m.shm.DPConfig(m.instanceID)
+
+	ports, err := dpConfig.PortCounters()
+	if err != nil {
+		return nil
+	}
+
+	return portMetrics(ports)
+}
+
+func portMetrics(ports []ffi.PortGroup) []*commonpb.Metric {
+	metrics := make([]*commonpb.Metric, 0)
+	for _, port := range ports {
+		portID := strconv.FormatUint(uint64(port.PortID), 10)
+		for _, counter := range port.Counters {
+			metrics = append(metrics, makeCounter(
+				"yanet_port_counter_value",
+				counter.Value,
+				&commonpb.Label{Name: "port_id", Value: portID},
+				&commonpb.Label{Name: "port_name", Value: port.PortName},
+				&commonpb.Label{Name: "counter", Value: counter.Name},
+			))
+		}
+	}
+	return metrics
+}
+
+func makeCounter(name string, value uint64, labels ...*commonpb.Label) *commonpb.Metric {
+	return &commonpb.Metric{
+		Name:   name,
+		Labels: labels,
+		Value:  &commonpb.Metric_Counter{Counter: value},
+	}
 }
