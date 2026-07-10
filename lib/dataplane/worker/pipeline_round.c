@@ -81,6 +81,14 @@ worker_pipeline_round(
 				dp_worker, device_ectx, schedule_input + idx
 			);
 
+			/*
+			 * Input entry point processing has no packet
+			 * transmission allowed so drop the whole output.
+			 * The only chance for a packet to be survived is
+			 * being scheduled into pending input/output queues.
+			 */
+			packet_front_drop_output(schedule_input + idx);
+
 			packet_front_merge(packet_front, schedule_input + idx);
 		}
 

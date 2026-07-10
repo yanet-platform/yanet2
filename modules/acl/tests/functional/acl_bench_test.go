@@ -178,7 +178,7 @@ func setupACLHarnessLarge(b *testing.B, devices []string) (*dataplaneut.Harness,
 		DPMemory:      uint64(largeDPSize),
 		WorkerCount:   1,
 		Devices:       devices,
-		Modules:       []string{"acl"},
+		Modules:       []string{"acl", "forward"},
 		DevicesToLoad: []string{"plain"},
 	}
 	h, err := dataplaneut.NewHarness(cfg)

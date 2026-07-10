@@ -12,10 +12,13 @@ import (
 	"github.com/stretchr/testify/require"
 
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
+	"github.com/yanet-platform/yanet2/bindings/go/filter"
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/xerror"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
+	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
 	nat64 "github.com/yanet-platform/yanet2/modules/nat64/controlplane"
 	nat64pb "github.com/yanet-platform/yanet2/modules/nat64/controlplane/nat64pb/v1"
 )
@@ -36,7 +39,7 @@ func setupNAT64Harness(t *testing.T) (*dataplaneut.Harness, *nat64.NAT64Service)
 		DPMemory:      uint64(nat64DPSize),
 		WorkerCount:   1,
 		Devices:       []string{"port0"},
-		Modules:       []string{"nat64"},
+		Modules:       []string{"nat64", "forward"},
 		DevicesToLoad: []string{"plain"},
 	})
 	require.NoError(t, err)
@@ -55,16 +58,37 @@ func setupNAT64Harness(t *testing.T) (*dataplaneut.Harness, *nat64.NAT64Service)
 func wireNAT64Pipeline(t *testing.T, agent *ffi.Agent, name string) {
 	t.Helper()
 
+	sinkName := name + "-sink"
+	sinkRules := []cforward.ForwardRule{
+		{
+			Target:  "port0",
+			Mode:    cforward.ModeOut,
+			Counter: "sink4",
+			Src4s:   filter.IPNets{filter.UnspecifiedIPv4},
+			Dst4s:   filter.IPNets{filter.UnspecifiedIPv4},
+		},
+		{
+			Target:  "port0",
+			Mode:    cforward.ModeOut,
+			Counter: "sink6",
+			Src6s:   filter.IPNets{filter.UnspecifiedIPv6},
+			Dst6s:   filter.IPNets{filter.UnspecifiedIPv6},
+		},
+	}
+	sinkHandle, err := forward.NewBackend(agent).UpdateModule(sinkName, sinkRules)
+	require.NoError(t, err)
+	t.Cleanup(sinkHandle.Free)
+
 	require.NoError(t, agent.UpdateFunction(ffi.FunctionConfig{
 		Name: name,
 		Chains: []ffi.FunctionChainConfig{{
 			Weight: 1,
 			Chain: ffi.ChainConfig{
 				Name: name + "_chain",
-				Modules: []ffi.ChainModuleConfig{{
-					Type: "nat64",
-					Name: name,
-				}},
+				Modules: []ffi.ChainModuleConfig{
+					{Type: "nat64", Name: name},
+					{Type: "forward", Name: sinkName},
+				},
 			},
 		}},
 	}))

@@ -19,6 +19,8 @@ import (
 	"github.com/yanet-platform/yanet2/modules/acl/bindings/go/cacl"
 	acl "github.com/yanet-platform/yanet2/modules/acl/controlplane"
 	"github.com/yanet-platform/yanet2/modules/acl/controlplane/aclpb/v1"
+	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
+	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
 )
 
 // Memory sizes for the ACL functional harness.
@@ -67,7 +69,7 @@ func setupACLHarness(
 		DPMemory:      uint64(aclDPSize),
 		WorkerCount:   1,
 		Devices:       devices,
-		Modules:       []string{"acl"},
+		Modules:       []string{"acl", "forward"},
 		DevicesToLoad: []string{"plain"},
 	}
 	h, err := dataplaneut.NewHarness(cfg)
@@ -102,8 +104,13 @@ func applyACLRules(
 	return handle
 }
 
-// wireACLPipeline wires chain[acl:configName] -> function -> pipeline ->
-// plain-device topology so the harness routes packets through the ACL module.
+// wireACLPipeline wires chain[acl:configName -> forward:sink] -> function ->
+// pipeline -> plain-device topology so the harness routes packets through the
+// ACL module and then forwards allowed packets to the device output stage.
+//
+// The input entry point is not allowed to transmit directly, so a catch-all
+// forward rule with ModeOut routes any packet that survives the ACL (i.e. was
+// allowed) to the output stage via pending_output.
 //
 // Must be called after applyACLRules, because the ACL module config must exist
 // before UpdatePlainDevices resolves chain module references.
@@ -114,6 +121,23 @@ func wireACLPipeline(
 ) {
 	tb.Helper()
 
+	sinkName := configName + "-sink"
+	sinkRules := []cforward.ForwardRule{
+		{
+			Target:  device,
+			Mode:    cforward.ModeOut,
+			Counter: "sink4",
+		},
+		{
+			Target:  device,
+			Mode:    cforward.ModeOut,
+			Counter: "sink6",
+		},
+	}
+	sinkHandle, err := forward.NewBackend(agent).UpdateModule(sinkName, sinkRules)
+	require.NoError(tb, err)
+	tb.Cleanup(sinkHandle.Free)
+
 	require.NoError(tb, agent.UpdateFunction(ffi.FunctionConfig{
 		Name: configName,
 		Chains: []ffi.FunctionChainConfig{{
@@ -122,6 +146,7 @@ func wireACLPipeline(
 				Name: configName + "_chain",
 				Modules: []ffi.ChainModuleConfig{
 					{Type: "acl", Name: configName},
+					{Type: "forward", Name: sinkName},
 				},
 			},
 		}},

@@ -35,6 +35,8 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/acl/bindings/go/cacl"
 	acl "github.com/yanet-platform/yanet2/modules/acl/controlplane"
+	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
+	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
 )
 
 // Memory sizes for the dispatch regression harness.
@@ -309,22 +311,43 @@ func TestZeroWeightDeviceEntryDropsAllPackets(t *testing.T) {
 // single bound pipeline delivers every packet to that pipeline via the
 // single-pipeline fast path, rather than losing or duplicating any.
 //
-// The pipeline is an allow-all ACL; its function input counter must equal the
-// number of packets handed in, confirming the fast path delivered the whole
-// batch to pipeline 0 intact.
+// The pipeline chain allows every packet through an ACL and then forwards it to
+// the device's output stage via a forward rule, so reaching egress proves the
+// fast path delivered the whole batch intact. The input entry point is not
+// allowed to transmit directly: only packets routed to the output stage survive.
+// Accordingly the function input counter must equal the number of packets handed
+// in.
 func TestSinglePipelineDeviceForwardsAllPackets(t *testing.T) {
 	const configName = "sp-dev-acl"
+	const forwardName = configName + "-fwd"
 
-	h, agent, backend := setupACLBackend(t, "sp-dev-test")
+	h, agent, backend := setupACLBackend(t, "sp-dev-test", "forward")
 	publishMatchAllACL(t, backend, configName, cacl.ActionAllow)
+
+	forwardBackend := forward.NewBackend(agent)
+	rule := cforward.ForwardRule{
+		Target:  "port0",
+		Mode:    cforward.ModeOut,
+		Counter: forwardName,
+		Src4s:   filter.IPNets{filter.UnspecifiedIPv4},
+		Dst4s:   filter.IPNets{filter.MustParseIPNet("10.0.0.0/8")},
+	}
+	handle, err := forwardBackend.UpdateModule(
+		forwardName, []cforward.ForwardRule{rule},
+	)
+	require.NoError(t, err)
+	t.Cleanup(handle.Free)
 
 	require.NoError(t, agent.UpdateFunction(ffi.FunctionConfig{
 		Name: configName,
 		Chains: []ffi.FunctionChainConfig{{
 			Weight: 1,
 			Chain: ffi.ChainConfig{
-				Name:    configName + "_chain",
-				Modules: []ffi.ChainModuleConfig{{Type: "acl", Name: configName}},
+				Name: configName + "_chain",
+				Modules: []ffi.ChainModuleConfig{
+					{Type: "acl", Name: configName},
+					{Type: "forward", Name: forwardName},
+				},
 			},
 		}},
 	}))
@@ -347,8 +370,10 @@ func TestSinglePipelineDeviceForwardsAllPackets(t *testing.T) {
 
 	result, err := h.HandlePackets(pkts...)
 	require.NoError(t, err)
+	require.Len(t, result.Output, packetCount,
+		"single-pipeline device must forward every packet to egress")
 	require.Empty(t, result.Drop,
-		"allow-all single-pipeline device must not drop any packet")
+		"single-pipeline device must not drop any packet")
 
 	counters := h.SharedMemory().DPConfig(0).FunctionCounters("port0", configName, configName)
 	byName := dataplaneut.SingleValueCounters(counters)

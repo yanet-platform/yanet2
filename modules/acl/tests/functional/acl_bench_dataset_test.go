@@ -50,6 +50,8 @@ import (
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/acl/bindings/go/cacl"
 	acl "github.com/yanet-platform/yanet2/modules/acl/controlplane"
+	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
+	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
 )
 
 type datasetRange struct {
@@ -672,7 +674,7 @@ func datasetBenchSetup(b *testing.B) *datasetBenchState {
 			DPMemory:      uint64(64 * datasize.MB),
 			WorkerCount:   1,
 			Devices:       []string{device},
-			Modules:       []string{"acl"},
+			Modules:       []string{"acl", "forward"},
 			DevicesToLoad: []string{"plain"},
 		}
 		harness, err := dataplaneut.NewHarness(cfg)
@@ -826,7 +828,7 @@ func datasetTopoBenchSetup(b *testing.B) *datasetBenchState {
 			DPMemory:      uint64(64 * datasize.MB),
 			WorkerCount:   1,
 			Devices:       datasetTopoDevices,
-			Modules:       []string{"acl"},
+			Modules:       []string{"acl", "forward"},
 			DevicesToLoad: []string{"plain"},
 		}
 		harness, err := dataplaneut.NewHarness(cfg)
@@ -867,10 +869,29 @@ func datasetTopoBenchSetup(b *testing.B) *datasetBenchState {
 	return topoBench
 }
 
-// wireACLTopoPipeline binds the ACL pipeline to the ACL-facing topology
-// devices and a pass-through pipeline to the rest.
+// wireACLTopoPipeline binds the ACL pipeline (with a forward sink) to the
+// ACL-facing topology devices and a pass-through pipeline to the rest.
+//
+// The input entry point is not allowed to transmit directly, so a forward
+// sink with per-device ModeOut rules routes allowed packets to their
+// ingress device's output stage via pending_output.
 func wireACLTopoPipeline(tb testing.TB, agent *ffi.Agent, configName string) {
 	tb.Helper()
+
+	sinkName := configName + "-sink"
+	sinkRules := make([]cforward.ForwardRule, 0, len(datasetTopoACLDevices))
+	for _, deviceIdx := range datasetTopoACLDevices {
+		dev := datasetTopoDevices[deviceIdx]
+		sinkRules = append(sinkRules, cforward.ForwardRule{
+			Target:  dev,
+			Mode:    cforward.ModeOut,
+			Counter: "sink_" + dev,
+			Devices: filter.Devices{{Name: dev}},
+		})
+	}
+	sinkHandle, err := forward.NewBackend(agent).UpdateModule(sinkName, sinkRules)
+	require.NoError(tb, err)
+	tb.Cleanup(sinkHandle.Free)
 
 	require.NoError(tb, agent.UpdateFunction(ffi.FunctionConfig{
 		Name: configName,
@@ -880,6 +901,7 @@ func wireACLTopoPipeline(tb testing.TB, agent *ffi.Agent, configName string) {
 				Name: configName + "_chain",
 				Modules: []ffi.ChainModuleConfig{
 					{Type: "acl", Name: configName},
+					{Type: "forward", Name: sinkName},
 				},
 			},
 		}},

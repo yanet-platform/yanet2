@@ -11,8 +11,11 @@ import (
 	"github.com/stretchr/testify/require"
 
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
+	"github.com/yanet-platform/yanet2/bindings/go/filter"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
+	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
 	"github.com/yanet-platform/yanet2/modules/fwstate/bindings/go/cfwstate"
 )
 
@@ -40,7 +43,7 @@ func setupFWStateHarness(t *testing.T) (*dataplaneut.Harness, *ffi.Agent) {
 		DPMemory:      uint64(fwsDPSize),
 		WorkerCount:   1,
 		Devices:       []string{"port0"},
-		Modules:       []string{"fwstate"},
+		Modules:       []string{"fwstate", "forward"},
 		DevicesToLoad: []string{"plain"},
 	}
 	h, err := dataplaneut.NewHarness(cfg)
@@ -85,9 +88,35 @@ func configureFWState(t *testing.T, agent *ffi.Agent, name string) {
 	require.NoError(t, agent.UpdateModules([]ffi.ModuleConfig{modCfg.AsFFIModule()}))
 }
 
-// wireFWSPipeline wires chain[fwstate:name] into a pipeline bound to port0.
+// wireFWSPipeline wires chain[fwstate:name -> forward:sink] into a pipeline
+// bound to port0.
+//
+// The input entry point is not allowed to transmit directly, so a catch-all
+// forward rule with ModeOut routes packets that pass through fwstate to the
+// device output stage via pending_output.
 func wireFWSPipeline(t *testing.T, agent *ffi.Agent, name string) {
 	t.Helper()
+
+	sinkName := name + "-sink"
+	sinkRules := []cforward.ForwardRule{
+		{
+			Target:  "port0",
+			Mode:    cforward.ModeOut,
+			Counter: "sink4",
+			Src4s:   filter.IPNets{filter.UnspecifiedIPv4},
+			Dst4s:   filter.IPNets{filter.UnspecifiedIPv4},
+		},
+		{
+			Target:  "port0",
+			Mode:    cforward.ModeOut,
+			Counter: "sink6",
+			Src6s:   filter.IPNets{filter.UnspecifiedIPv6},
+			Dst6s:   filter.IPNets{filter.UnspecifiedIPv6},
+		},
+	}
+	sinkHandle, err := forward.NewBackend(agent).UpdateModule(sinkName, sinkRules)
+	require.NoError(t, err)
+	t.Cleanup(sinkHandle.Free)
 
 	require.NoError(t, agent.UpdateFunction(ffi.FunctionConfig{
 		Name: name,
@@ -97,6 +126,7 @@ func wireFWSPipeline(t *testing.T, agent *ffi.Agent, name string) {
 				Name: name + "_chain",
 				Modules: []ffi.ChainModuleConfig{
 					{Type: "fwstate", Name: name},
+					{Type: "forward", Name: sinkName},
 				},
 			},
 		}},

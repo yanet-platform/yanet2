@@ -14,6 +14,8 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/xerror"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
+	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
 	"github.com/yanet-platform/yanet2/modules/mirror/bindings/go/cmirror"
 	mirror "github.com/yanet-platform/yanet2/modules/mirror/controlplane"
 )
@@ -22,7 +24,7 @@ import (
 const (
 	mirCPSize  = 64 * datasize.MB
 	mirDPSize  = 4 * datasize.MB
-	mirMemSize = 8 * datasize.MB
+	mirMemSize = 16 * datasize.MB
 )
 
 // setupMirrorHarness builds a dataplane harness with the mirror module
@@ -42,7 +44,7 @@ func setupMirrorHarness(
 		DPMemory:      uint64(mirDPSize),
 		WorkerCount:   1,
 		Devices:       devices,
-		Modules:       []string{"mirror"},
+		Modules:       []string{"mirror", "forward"},
 		DevicesToLoad: []string{"plain"},
 	}
 	h, err := dataplaneut.NewHarness(cfg)
@@ -77,12 +79,43 @@ func applyRules(
 	return handle
 }
 
-// wireMirrorPipeline wires a chain[mirror:configName] -> function -> pipeline
-// -> plain-device topology.
+// catchAllForwardRules returns forward rules with ModeOut that match every
+// packet type (IPv4, IPv6, and non-IP L2) and route them to the given device's
+// output stage.
 //
-// Each name in extraDevices gets its own dummy input/output pipelines so that
-// ModeIn and ModeOut packet re-routing resolves without looping. Must be
-// called after applyRules.
+// The input entry point is not allowed to transmit directly, so pass-through
+// packets need a catch-all ModeOut rule to reach egress via pending_output.
+func catchAllForwardRules(device string) []cforward.ForwardRule {
+	return []cforward.ForwardRule{
+		{
+			Target:  device,
+			Mode:    cforward.ModeOut,
+			Counter: "sink4",
+			Src4s:   filter.IPNets{filter.UnspecifiedIPv4},
+			Dst4s:   filter.IPNets{filter.UnspecifiedIPv4},
+		},
+		{
+			Target:  device,
+			Mode:    cforward.ModeOut,
+			Counter: "sink6",
+			Src6s:   filter.IPNets{filter.UnspecifiedIPv6},
+			Dst6s:   filter.IPNets{filter.UnspecifiedIPv6},
+		},
+		{
+			Target:  device,
+			Mode:    cforward.ModeOut,
+			Counter: "sink_l2",
+			Devices: filter.Devices{{Name: device}},
+		},
+	}
+}
+
+// wireMirrorPipeline wires a chain[mirror:configName -> forward:sink] ->
+// function -> pipeline -> plain-device topology.
+//
+// Each name in extraDevices gets its own input pipeline with a forward sink so
+// mirrored packets re-routed via ModeIn reach the output stage. Must be called
+// after applyRules.
 func wireMirrorPipeline(
 	t *testing.T,
 	agent *ffi.Agent,
@@ -90,6 +123,42 @@ func wireMirrorPipeline(
 	extraDevices []string,
 ) {
 	t.Helper()
+
+	fwdBackend := forward.NewBackend(agent)
+
+	// Primary device sink: appended after the test module in the chain so
+	// packets that pass through (originals and ModeNone mirrors) reach the
+	// output stage.
+	primarySink := configName + "-sink"
+	primarySinkHandle, err := fwdBackend.UpdateModule(primarySink, catchAllForwardRules(primaryDevice))
+	require.NoError(t, err)
+	t.Cleanup(primarySinkHandle.Free)
+
+	// Extra device sinks: each gets its own input pipeline with a forward
+	// sink so mirrored packets re-routed via ModeIn reach the output stage.
+	for _, dev := range extraDevices {
+		sinkName := configName + "-sink-" + dev
+		sinkHandle, err := fwdBackend.UpdateModule(sinkName, catchAllForwardRules(dev))
+		require.NoError(t, err)
+		t.Cleanup(sinkHandle.Free)
+
+		require.NoError(t, agent.UpdateFunction(ffi.FunctionConfig{
+			Name: sinkName,
+			Chains: []ffi.FunctionChainConfig{{
+				Weight: 1,
+				Chain: ffi.ChainConfig{
+					Name: sinkName + "_chain",
+					Modules: []ffi.ChainModuleConfig{
+						{Type: "forward", Name: sinkName},
+					},
+				},
+			}},
+		}))
+		require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{
+			Name:      "sink_in_" + dev,
+			Functions: []string{sinkName},
+		}))
+	}
 
 	require.NoError(t, agent.UpdateFunction(ffi.FunctionConfig{
 		Name: configName,
@@ -99,6 +168,7 @@ func wireMirrorPipeline(
 				Name: configName + "_chain",
 				Modules: []ffi.ChainModuleConfig{
 					{Type: "mirror", Name: configName},
+					{Type: "forward", Name: primarySink},
 				},
 			},
 		}},
@@ -113,16 +183,11 @@ func wireMirrorPipeline(
 		Name: "dummy",
 	}))
 
-	// Additional dummy pipelines for extra devices — each output must use a
-	// distinct pipeline name to avoid counter-key collisions.
+	// Additional dummy output pipelines for extra devices — each output must
+	// use a distinct pipeline name to avoid counter-key collisions.
 	for _, dev := range extraDevices {
-		pipeName := "dummy_extra_out_" + dev
 		require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{
-			Name: pipeName,
-		}))
-		pipeName2 := "dummy_extra_in_" + dev
-		require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{
-			Name: pipeName2,
+			Name: "dummy_extra_out_" + dev,
 		}))
 	}
 
@@ -137,7 +202,7 @@ func wireMirrorPipeline(
 	for _, dev := range extraDevices {
 		allDevices = append(allDevices, ffi.DeviceConfig{
 			Name:   dev,
-			Input:  []ffi.DevicePipelineConfig{{Name: "dummy_extra_in_" + dev, Weight: 1}},
+			Input:  []ffi.DevicePipelineConfig{{Name: "sink_in_" + dev, Weight: 1}},
 			Output: []ffi.DevicePipelineConfig{{Name: "dummy_extra_out_" + dev, Weight: 1}},
 		})
 	}

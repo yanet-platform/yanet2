@@ -14,10 +14,13 @@ import (
 	"github.com/stretchr/testify/require"
 
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
+	"github.com/yanet-platform/yanet2/bindings/go/filter"
 	"github.com/yanet-platform/yanet2/common/go/xerror"
 	"github.com/yanet-platform/yanet2/common/go/xpacket"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	decap "github.com/yanet-platform/yanet2/modules/decap/controlplane"
+	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
+	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
 )
 
 const (
@@ -34,7 +37,7 @@ func setupDecapHarness(t *testing.T) (*dataplaneut.Harness, *ffi.Agent, decap.Ba
 		DPMemory:      uint64(decapDPSize),
 		WorkerCount:   1,
 		Devices:       []string{"port0"},
-		Modules:       []string{"decap"},
+		Modules:       []string{"decap", "forward"},
 		DevicesToLoad: []string{"plain"},
 	})
 	require.NoError(t, err)
@@ -51,6 +54,33 @@ func setupDecapHarness(t *testing.T) (*dataplaneut.Harness, *ffi.Agent, decap.Ba
 func wireDecapPipeline(t *testing.T, agent *ffi.Agent, configName string) {
 	t.Helper()
 
+	sinkName := configName + "-sink"
+	sinkRules := []cforward.ForwardRule{
+		{
+			Target:  "port0",
+			Mode:    cforward.ModeOut,
+			Counter: "sink4",
+			Src4s:   filter.IPNets{filter.UnspecifiedIPv4},
+			Dst4s:   filter.IPNets{filter.UnspecifiedIPv4},
+		},
+		{
+			Target:  "port0",
+			Mode:    cforward.ModeOut,
+			Counter: "sink6",
+			Src6s:   filter.IPNets{filter.UnspecifiedIPv6},
+			Dst6s:   filter.IPNets{filter.UnspecifiedIPv6},
+		},
+		{
+			Target:  "port0",
+			Mode:    cforward.ModeOut,
+			Counter: "sink_l2",
+			Devices: filter.Devices{{Name: "port0"}},
+		},
+	}
+	sinkHandle, err := forward.NewBackend(agent).UpdateModule(sinkName, sinkRules)
+	require.NoError(t, err)
+	t.Cleanup(sinkHandle.Free)
+
 	require.NoError(t, agent.UpdateFunction(ffi.FunctionConfig{
 		Name: configName,
 		Chains: []ffi.FunctionChainConfig{{
@@ -59,6 +89,7 @@ func wireDecapPipeline(t *testing.T, agent *ffi.Agent, configName string) {
 				Name: configName + "_chain",
 				Modules: []ffi.ChainModuleConfig{
 					{Type: "decap", Name: configName},
+					{Type: "forward", Name: sinkName},
 				},
 			},
 		}},
