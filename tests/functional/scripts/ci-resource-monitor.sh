@@ -47,7 +47,7 @@ collect_sample() {
   local timestamp load1 load5 load15 mem_avail swap_free mem_current mem_max cpu_max
   local qemu_count qemu_rss qemu_cpu go_count root_free work_free
 
-  timestamp="$(date -Is)"
+  timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   read -r load1 load5 load15 _ < /proc/loadavg
   mem_avail="$(awk '/MemAvailable:/ {print $2}' /proc/meminfo)"
   swap_free="$(awk '/SwapFree:/ {print $2}' /proc/meminfo)"
@@ -89,9 +89,10 @@ collect_sample() {
 }
 
 write_snapshot() {
-  local timestamp snapshot_file
-  timestamp="$(date -Is)"
-  snapshot_file="$OUTDIR/snapshot-${LABEL}-${timestamp}.log"
+  local timestamp filename_timestamp snapshot_file
+  timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  filename_timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+  snapshot_file="$OUTDIR/snapshot-${LABEL}-${filename_timestamp}.log"
 
   {
     echo "=== TIMESTAMP ==="
@@ -147,7 +148,14 @@ handle_exit() {
   write_kernel_logs
 }
 
-trap handle_exit EXIT INT TERM
+handle_signal() {
+  trap - EXIT INT TERM
+  handle_exit
+  exit 0
+}
+
+trap handle_exit EXIT
+trap handle_signal INT TERM
 
 write_snapshot
 while true; do
