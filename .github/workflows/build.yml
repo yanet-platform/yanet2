@@ -416,14 +416,10 @@ jobs:
           fi
 
   functional-tests:
-    name: Run Functional Tests (pool=${{ matrix.pool_size }})
+    name: Run Functional Tests
     runs-on: ubuntu-24.04
     timeout-minutes: 150
     needs: build-release-artifacts
-    strategy:
-      fail-fast: false
-      matrix:
-        pool_size: [1, 5]
 
     steps:
       - uses: actions/checkout@v4
@@ -483,11 +479,8 @@ jobs:
         with:
           path: |
             tests/functional/yanet-test.qcow2
-            tests/functional/yanet-test-booted.qcow2
             tests/functional/*.iso
-          key: ${{ runner.os }}-qemu-image-${{ hashFiles('tests/functional/Makefile') }}-${{ hashFiles('tests/functional/cloud-init-user-data.yaml') }}-${{ hashFiles('tests/functional/meta-data') }}
-          restore-keys: |
-            ${{ runner.os }}-qemu-image-
+          key: ${{ runner.os }}-qemu-disk-v2-${{ hashFiles('tests/functional/Makefile') }}-${{ hashFiles('tests/functional/cloud-init-user-data.yaml') }}-${{ hashFiles('tests/functional/meta-data') }}
 
       - name: Normalize cached VM artifact timestamps
         if: steps.cache-qemu-image.outputs.cache-hit == 'true' || steps.cache-ubuntu-image.outputs.cache-hit == 'true'
@@ -509,10 +502,6 @@ jobs:
 
           if [ -f yanet-test.qcow2 ]; then
               touch yanet-test.qcow2
-          fi
-
-          if [ -f yanet-test-booted.qcow2 ]; then
-              touch yanet-test-booted.qcow2
           fi
 
       - name: Download YANET binaries from build job
@@ -587,20 +576,9 @@ jobs:
         run: |
           set +e
           export YANET_TEST_DEBUG=1
-          export YANET_VM_POOL_SIZE=${{ matrix.pool_size }}
-
-          RESOURCE_DIR="resource-logs/pool-${{ matrix.pool_size }}"
-          mkdir -p "$RESOURCE_DIR"
-          bash ./scripts/ci-resource-monitor.sh "$RESOURCE_DIR" "pool-${{ matrix.pool_size }}" 10 &
-          MONITOR_PID=$!
-
+          export YANET_VM_POOL_SIZE=5
           make test
           ret=$?
-
-          if kill -0 "$MONITOR_PID" 2>/dev/null; then
-              kill "$MONITOR_PID"
-          fi
-          wait "$MONITOR_PID" 2>/dev/null || true
 
           echo "=== main/test.log (last 100 lines) ==="
           tail -n 100 main/test.log 2>/dev/null || echo "main/test.log not found"
@@ -616,8 +594,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: functional-test-logs-pool-${{ matrix.pool_size }}
+          name: functional-test-logs
           path: |
             tests/functional/main/test.log
             tests/functional/converted/test.log
-            tests/functional/resource-logs/
