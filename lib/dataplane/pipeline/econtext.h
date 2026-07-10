@@ -26,8 +26,6 @@ struct module_ectx {
 
 	struct counter_value_handle *rx_counter;
 	struct counter_value_handle *tx_counter;
-	struct counter_value_handle *rx_bytes_counter;
-	struct counter_value_handle *tx_bytes_counter;
 
 	struct counter_value_handle *perf_counters[MODULE_ECTX_PERF_COUNTERS];
 
@@ -67,12 +65,9 @@ struct chain_ectx {
 
 struct function_ectx {
 	struct cp_function *cp_function;
-	struct counter_value_handle *counter_packet_in_count;
-	struct counter_value_handle *counter_packet_in_bytes;
-	struct counter_value_handle *counter_packet_out_count;
-	struct counter_value_handle *counter_packet_out_bytes;
-	struct counter_value_handle *counter_packet_drop_count;
-	struct counter_value_handle *counter_packet_drop_bytes;
+	struct counter_value_handle *counter_packet_in;
+	struct counter_value_handle *counter_packet_out;
+	struct counter_value_handle *counter_packet_drop;
 	struct counter_storage *counter_storage;
 	uint64_t chain_count;
 	struct chain_ectx **chains;
@@ -82,12 +77,9 @@ struct function_ectx {
 
 struct pipeline_ectx {
 	struct cp_pipeline *cp_pipeline;
-	struct counter_value_handle *counter_packet_in_count;
-	struct counter_value_handle *counter_packet_in_bytes;
-	struct counter_value_handle *counter_packet_out_count;
-	struct counter_value_handle *counter_packet_out_bytes;
-	struct counter_value_handle *counter_packet_drop_count;
-	struct counter_value_handle *counter_packet_drop_bytes;
+	struct counter_value_handle *counter_packet_in;
+	struct counter_value_handle *counter_packet_out;
+	struct counter_value_handle *counter_packet_drop;
 	struct counter_storage *counter_storage;
 	uint64_t length;
 	struct function_ectx *functions[];
@@ -103,10 +95,8 @@ struct device_entry_ectx {
 
 struct device_ectx {
 	struct cp_device *cp_device;
-	struct counter_value_handle *counter_packet_rx_count;
-	struct counter_value_handle *counter_packet_rx_bytes;
-	struct counter_value_handle *counter_packet_tx_count;
-	struct counter_value_handle *counter_packet_tx_bytes;
+	struct counter_value_handle *counter_packet_rx;
+	struct counter_value_handle *counter_packet_tx;
 	struct counter_storage *counter_storage;
 	struct device_entry_ectx *input_pipelines;
 	struct device_entry_ectx *output_pipelines;

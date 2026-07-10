@@ -89,7 +89,7 @@ cp_module_init(
 	}
 
 	cp_module->rx_counter_id = counter_registry_register(
-		&cp_module->counter_registry, "rx", 1, err
+		&cp_module->counter_registry, "rx", 2, err
 	);
 	if (cp_module->rx_counter_id == COUNTER_INVALID) {
 		yanet_error_add(
@@ -101,38 +101,12 @@ cp_module_init(
 		goto fail;
 	}
 	cp_module->tx_counter_id = counter_registry_register(
-		&cp_module->counter_registry, "tx", 1, err
+		&cp_module->counter_registry, "tx", 2, err
 	);
 	if (cp_module->tx_counter_id == COUNTER_INVALID) {
 		yanet_error_add(
 			err,
 			"failed to register 'tx' counter for module '%s:%s'",
-			module_type,
-			module_name
-		);
-		goto fail;
-	}
-	cp_module->rx_bytes_counter_id = counter_registry_register(
-		&cp_module->counter_registry, "rx_bytes", 1, err
-	);
-	if (cp_module->rx_bytes_counter_id == COUNTER_INVALID) {
-		yanet_error_add(
-			err,
-			"failed to register 'rx_bytes' counter for module "
-			"'%s:%s'",
-			module_type,
-			module_name
-		);
-		goto fail;
-	}
-	cp_module->tx_bytes_counter_id = counter_registry_register(
-		&cp_module->counter_registry, "tx_bytes", 1, err
-	);
-	if (cp_module->tx_bytes_counter_id == COUNTER_INVALID) {
-		yanet_error_add(
-			err,
-			"failed to register 'tx_bytes' counter for module "
-			"'%s:%s'",
 			module_type,
 			module_name
 		);
@@ -524,46 +498,44 @@ cp_module_parse_tx_rx(
 	uint64_t *tx_bytes,
 	uint64_t *rx_bytes
 ) {
-	// Validate inputs
 	if (counter_handle == NULL || workers == 0) {
 		errno = EINVAL;
 		return -1;
 	}
 
-	// Determine which counter this is by checking the name
 	const char *name = counter_handle->name;
-	uint64_t *target = NULL;
+
+	uint64_t *packets_target = NULL;
+	uint64_t *bytes_target = NULL;
 
 	if (strcmp(name, "tx") == 0) {
-		target = tx;
+		packets_target = tx;
+		bytes_target = tx_bytes;
 	} else if (strcmp(name, "rx") == 0) {
-		target = rx;
-	} else if (strcmp(name, "tx_bytes") == 0) {
-		target = tx_bytes;
-	} else if (strcmp(name, "rx_bytes") == 0) {
-		target = rx_bytes;
+		packets_target = rx;
+		bytes_target = rx_bytes;
 	} else {
-		// Not a tx/rx counter, return 1 to indicate no match
 		return 1;
 	}
 
-	// Validate target pointer
-	if (target == NULL) {
+	if (packets_target == NULL || bytes_target == NULL) {
 		errno = EINVAL;
 		return -1;
 	}
 
-	// Aggregate counter values across all workers
 	struct counter_value_handle **bases =
 		(struct counter_value_handle **)counter_handle->value_handle;
-	uint64_t total = 0;
+	uint64_t total_packets = 0;
+	uint64_t total_bytes = 0;
 	for (size_t worker_idx = 0; worker_idx < workers; ++worker_idx) {
 		uint64_t *counter_values =
 			counter_handle_get_value(bases[worker_idx]);
-		// Simple counters have size=1, so we access index 0
-		total += counter_values[0];
+		// size-2 counter: [0] = packets, [1] = bytes
+		total_packets += counter_values[0];
+		total_bytes += counter_values[1];
 	}
 
-	*target = total;
+	*packets_target = total_packets;
+	*bytes_target = total_bytes;
 	return 0;
 }

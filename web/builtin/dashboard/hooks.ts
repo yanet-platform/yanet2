@@ -3,9 +3,8 @@ import { API } from '@yanet/core/api';
 
 /**
  * Infer total worker count from a device counter response. Each counter
- * instance corresponds to one dataplane (NUMA) instance, and each value
- * slot in `values[]` corresponds to one worker on that instance. Polling
- * a single device is enough — every counter is sized the same way.
+ * instance corresponds to one dataplane worker. Polling a single device
+ * is enough — every counter is sized the same way.
  *
  * Returns null while the first fetch is in flight, or if no device names
  * are available, or on error.
@@ -34,10 +33,7 @@ export const useWorkerCount = (deviceNames: string[]): number | null => {
                     if (!cancelled) setCount(null);
                     return;
                 }
-                let total = 0;
-                for (const inst of counter.instances) {
-                    total += inst.values?.length ?? 0;
-                }
+                let total = counter.instances.length;
                 if (!cancelled) setCount(total > 0 ? total : null);
             } catch {
                 if (!cancelled) setCount(null);

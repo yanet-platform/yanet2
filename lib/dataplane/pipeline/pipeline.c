@@ -13,23 +13,16 @@
 #include <rte_cycles.h>
 
 static inline void
-counter_add(struct counter_value_handle *counter, uint64_t count) {
-	counter_handle_get_value(counter)[0] += count;
-}
-
-static inline void
 counter_add_packets_bytes(
-	struct counter_value_handle *packets_counter,
-	struct counter_value_handle *bytes_counter,
-	uint64_t packets,
-	uint64_t bytes
+	struct counter_value_handle *counter, uint64_t packets, uint64_t bytes
 ) {
 	if (packets == 0) {
 		return;
 	}
 
-	counter_add(packets_counter, packets);
-	counter_add(bytes_counter, bytes);
+	uint64_t *values = counter_handle_get_value(counter);
+	values[0] += packets;
+	values[1] += bytes;
 }
 
 void
@@ -51,7 +44,6 @@ module_ectx_process(
 	const uint64_t input_bytes = packet_front_input_bytes(packet_front);
 	counter_add_packets_bytes(
 		ADDR_OF_NONNULL(&module_ectx->rx_counter),
-		ADDR_OF_NONNULL(&module_ectx->rx_bytes_counter),
 		packets_count,
 		input_bytes
 	);
@@ -83,7 +75,6 @@ module_ectx_process(
 
 	counter_add_packets_bytes(
 		ADDR_OF_NONNULL(&module_ectx->tx_counter),
-		ADDR_OF_NONNULL(&module_ectx->tx_bytes_counter),
 		packet_front_output_count(packet_front),
 		packet_front_output_bytes(packet_front)
 	);
@@ -202,8 +193,7 @@ function_ectx_process(
 	struct packet_front *packet_front
 ) {
 	counter_add_packets_bytes(
-		ADDR_OF_NONNULL(&function_ectx->counter_packet_in_count),
-		ADDR_OF_NONNULL(&function_ectx->counter_packet_in_bytes),
+		ADDR_OF_NONNULL(&function_ectx->counter_packet_in),
 		packet_front_output_count(packet_front),
 		packet_front_output_bytes(packet_front)
 	);
@@ -221,14 +211,12 @@ function_ectx_process(
 	}
 
 	counter_add_packets_bytes(
-		ADDR_OF_NONNULL(&function_ectx->counter_packet_out_count),
-		ADDR_OF_NONNULL(&function_ectx->counter_packet_out_bytes),
+		ADDR_OF_NONNULL(&function_ectx->counter_packet_out),
 		packet_front_output_count(packet_front),
 		packet_front_output_bytes(packet_front)
 	);
 	counter_add_packets_bytes(
-		ADDR_OF_NONNULL(&function_ectx->counter_packet_drop_count),
-		ADDR_OF_NONNULL(&function_ectx->counter_packet_drop_bytes),
+		ADDR_OF_NONNULL(&function_ectx->counter_packet_drop),
 		packet_front_drop_count(packet_front),
 		packet_front_drop_bytes(packet_front)
 	);
@@ -242,8 +230,7 @@ pipeline_ectx_process(
 ) {
 	// Packets arrive in output list, count them before processing
 	counter_add_packets_bytes(
-		ADDR_OF_NONNULL(&pipeline_ectx->counter_packet_in_count),
-		ADDR_OF_NONNULL(&pipeline_ectx->counter_packet_in_bytes),
+		ADDR_OF_NONNULL(&pipeline_ectx->counter_packet_in),
 		packet_front_output_count(packet_front),
 		packet_front_output_bytes(packet_front)
 	);
@@ -256,14 +243,12 @@ pipeline_ectx_process(
 	}
 
 	counter_add_packets_bytes(
-		ADDR_OF_NONNULL(&pipeline_ectx->counter_packet_out_count),
-		ADDR_OF_NONNULL(&pipeline_ectx->counter_packet_out_bytes),
+		ADDR_OF_NONNULL(&pipeline_ectx->counter_packet_out),
 		packet_front_output_count(packet_front),
 		packet_front_output_bytes(packet_front)
 	);
 	counter_add_packets_bytes(
-		ADDR_OF_NONNULL(&pipeline_ectx->counter_packet_drop_count),
-		ADDR_OF_NONNULL(&pipeline_ectx->counter_packet_drop_bytes),
+		ADDR_OF_NONNULL(&pipeline_ectx->counter_packet_drop),
 		packet_front_drop_count(packet_front),
 		packet_front_drop_bytes(packet_front)
 	);
@@ -401,8 +386,7 @@ device_ectx_process_input(
 	);
 
 	counter_add_packets_bytes(
-		ADDR_OF_NONNULL(&device_ectx->counter_packet_rx_count),
-		ADDR_OF_NONNULL(&device_ectx->counter_packet_rx_bytes),
+		ADDR_OF_NONNULL(&device_ectx->counter_packet_rx),
 		packet_front_output_count(packet_front),
 		packet_front_output_bytes(packet_front)
 	);
@@ -424,8 +408,7 @@ device_ectx_process_output(
 	);
 
 	counter_add_packets_bytes(
-		ADDR_OF_NONNULL(&device_ectx->counter_packet_tx_count),
-		ADDR_OF_NONNULL(&device_ectx->counter_packet_tx_bytes),
+		ADDR_OF_NONNULL(&device_ectx->counter_packet_tx),
 		packet_front_output_count(packet_front),
 		packet_front_output_bytes(packet_front)
 	);

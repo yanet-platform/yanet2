@@ -119,21 +119,9 @@ module_ectx_create(
 		)
 	);
 	SET_OFFSET_OF(
-		&module_ectx->rx_bytes_counter,
-		counter_get_value_handle(
-			cp_module->rx_bytes_counter_id, counter_storage
-		)
-	);
-	SET_OFFSET_OF(
 		&module_ectx->tx_counter,
 		counter_get_value_handle(
 			cp_module->tx_counter_id, counter_storage
-		)
-	);
-	SET_OFFSET_OF(
-		&module_ectx->tx_bytes_counter,
-		counter_get_value_handle(
-			cp_module->tx_bytes_counter_id, counter_storage
 		)
 	);
 
@@ -495,39 +483,21 @@ function_ectx_create(
 
 	SET_OFFSET_OF(&function_ectx->counter_storage, counter_storage);
 	SET_OFFSET_OF(
-		&function_ectx->counter_packet_in_count,
+		&function_ectx->counter_packet_in,
 		counter_get_value_handle(
-			cp_function->counter_packet_in_count, counter_storage
+			cp_function->counter_packet_in, counter_storage
 		)
 	);
 	SET_OFFSET_OF(
-		&function_ectx->counter_packet_in_bytes,
+		&function_ectx->counter_packet_out,
 		counter_get_value_handle(
-			cp_function->counter_packet_in_bytes, counter_storage
+			cp_function->counter_packet_out, counter_storage
 		)
 	);
 	SET_OFFSET_OF(
-		&function_ectx->counter_packet_out_count,
+		&function_ectx->counter_packet_drop,
 		counter_get_value_handle(
-			cp_function->counter_packet_out_count, counter_storage
-		)
-	);
-	SET_OFFSET_OF(
-		&function_ectx->counter_packet_out_bytes,
-		counter_get_value_handle(
-			cp_function->counter_packet_out_bytes, counter_storage
-		)
-	);
-	SET_OFFSET_OF(
-		&function_ectx->counter_packet_drop_count,
-		counter_get_value_handle(
-			cp_function->counter_packet_drop_count, counter_storage
-		)
-	);
-	SET_OFFSET_OF(
-		&function_ectx->counter_packet_drop_bytes,
-		counter_get_value_handle(
-			cp_function->counter_packet_drop_bytes, counter_storage
+			cp_function->counter_packet_drop, counter_storage
 		)
 	);
 
@@ -669,39 +639,21 @@ pipeline_ectx_create(
 
 	SET_OFFSET_OF(&pipeline_ectx->counter_storage, counter_storage);
 	SET_OFFSET_OF(
-		&pipeline_ectx->counter_packet_in_count,
+		&pipeline_ectx->counter_packet_in,
 		counter_get_value_handle(
-			cp_pipeline->counter_packet_in_count, counter_storage
+			cp_pipeline->counter_packet_in, counter_storage
 		)
 	);
 	SET_OFFSET_OF(
-		&pipeline_ectx->counter_packet_in_bytes,
+		&pipeline_ectx->counter_packet_out,
 		counter_get_value_handle(
-			cp_pipeline->counter_packet_in_bytes, counter_storage
+			cp_pipeline->counter_packet_out, counter_storage
 		)
 	);
 	SET_OFFSET_OF(
-		&pipeline_ectx->counter_packet_out_count,
+		&pipeline_ectx->counter_packet_drop,
 		counter_get_value_handle(
-			cp_pipeline->counter_packet_out_count, counter_storage
-		)
-	);
-	SET_OFFSET_OF(
-		&pipeline_ectx->counter_packet_out_bytes,
-		counter_get_value_handle(
-			cp_pipeline->counter_packet_out_bytes, counter_storage
-		)
-	);
-	SET_OFFSET_OF(
-		&pipeline_ectx->counter_packet_drop_count,
-		counter_get_value_handle(
-			cp_pipeline->counter_packet_drop_count, counter_storage
-		)
-	);
-	SET_OFFSET_OF(
-		&pipeline_ectx->counter_packet_drop_bytes,
-		counter_get_value_handle(
-			cp_pipeline->counter_packet_drop_bytes, counter_storage
+			cp_pipeline->counter_packet_drop, counter_storage
 		)
 	);
 
@@ -980,27 +932,15 @@ device_ectx_create(
 
 	SET_OFFSET_OF(&device_ectx->counter_storage, counter_storage);
 	SET_OFFSET_OF(
-		&device_ectx->counter_packet_rx_count,
+		&device_ectx->counter_packet_rx,
 		counter_get_value_handle(
-			cp_device->counter_packet_rx_count, counter_storage
+			cp_device->counter_packet_rx, counter_storage
 		)
 	);
 	SET_OFFSET_OF(
-		&device_ectx->counter_packet_rx_bytes,
+		&device_ectx->counter_packet_tx,
 		counter_get_value_handle(
-			cp_device->counter_packet_rx_bytes, counter_storage
-		)
-	);
-	SET_OFFSET_OF(
-		&device_ectx->counter_packet_tx_count,
-		counter_get_value_handle(
-			cp_device->counter_packet_tx_count, counter_storage
-		)
-	);
-	SET_OFFSET_OF(
-		&device_ectx->counter_packet_tx_bytes,
-		counter_get_value_handle(
-			cp_device->counter_packet_tx_bytes, counter_storage
+			cp_device->counter_packet_tx, counter_storage
 		)
 	);
 

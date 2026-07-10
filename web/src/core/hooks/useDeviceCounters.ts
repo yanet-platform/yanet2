@@ -1,6 +1,6 @@
 import { useCallback, useMemo } from 'react';
 import { API } from '../api';
-import { groupCounterGroupsByTagsAndName, makeGroupedCounterKey } from '../utils';
+import { groupCounterPacketsAndBytes, makeGroupedCounterKey } from '../utils';
 import {
     useInterpolatedCounters,
     type InterpolatedCounterData,
@@ -48,7 +48,7 @@ export interface UseDeviceCountersResult {
  * Uses the generic useInterpolatedCounters hook with device-specific fetch logic.
  * - Polls counters every 1 second from backend
  * - Updates visual every 30ms using linear interpolation
- * - Returns both RX (rx, rx_bytes) and TX (tx, tx_bytes) rates per device
+ * - Returns both RX (rx) and TX (tx) rates per device
  * - Also returns interpolated absolute values for cumulative display
  *
  * @param deviceNames - Array of device names to track counters for
@@ -83,19 +83,17 @@ export const useDeviceCounters = (
                     { key: 'device', value: '*' },
                     { key: 'pipeline', value: '' },
                 ],
-                query: ['rx', 'rx_bytes', 'tx', 'tx_bytes'],
+                query: ['rx', 'tx'],
             });
 
-            const grouped = groupCounterGroupsByTagsAndName(response.groups, ['device'], 0);
+            const grouped = groupCounterPacketsAndBytes(response.groups, ['device']);
 
             for (const deviceName of deviceNames) {
-                const rxPackets = grouped.get(makeGroupedCounterKey([deviceName], 'rx'))?.value ?? BigInt(0);
-                const rxBytes = grouped.get(makeGroupedCounterKey([deviceName], 'rx_bytes'))?.value ?? BigInt(0);
-                const txPackets = grouped.get(makeGroupedCounterKey([deviceName], 'tx'))?.value ?? BigInt(0);
-                const txBytes = grouped.get(makeGroupedCounterKey([deviceName], 'tx_bytes'))?.value ?? BigInt(0);
+                const rx = grouped.get(makeGroupedCounterKey([deviceName], 'rx')) ?? { packets: BigInt(0), bytes: BigInt(0) };
+                const tx = grouped.get(makeGroupedCounterKey([deviceName], 'tx')) ?? { packets: BigInt(0), bytes: BigInt(0) };
 
-                newValues.set(`${deviceName}:rx`, { packets: rxPackets, bytes: rxBytes });
-                newValues.set(`${deviceName}:tx`, { packets: txPackets, bytes: txBytes });
+                newValues.set(`${deviceName}:rx`, rx);
+                newValues.set(`${deviceName}:tx`, tx);
             }
         } catch {
             // Ignore global counters fetch errors.

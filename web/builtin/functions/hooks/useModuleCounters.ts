@@ -2,7 +2,7 @@ import { useCallback } from 'react';
 import { API } from '@yanet/core/api';
 import { useInterpolatedCounters } from '@yanet/core/hooks';
 import type { InterpolatedCounterData } from '@yanet/core/hooks';
-import { groupCounterGroupsByTagsAndName, makeGroupedCounterKey } from '@yanet/core/utils';
+import { groupCounterPacketsAndBytes, makeGroupedCounterKey } from '@yanet/core/utils';
 
 export interface ModuleInfo {
     nodeId: string;
@@ -41,12 +41,11 @@ export const useModuleCounters = (
         try {
             const response = await API.counters.byTags({
                 tags: [{ key: 'module_type', value: '*' }],
-                query: ['rx', 'rx_bytes'],
+                query: ['rx'],
             });
-            const grouped = groupCounterGroupsByTagsAndName(
+            const grouped = groupCounterPacketsAndBytes(
                 response.groups,
                 ['function', 'chain', 'module_type', 'module_name'],
-                0
             );
 
             for (const moduleInfo of moduleInfoList) {
@@ -56,13 +55,9 @@ export const useModuleCounters = (
                     moduleInfo.moduleType,
                     moduleInfo.moduleName,
                 ];
-                const rxPackets = grouped.get(makeGroupedCounterKey(keyPrefix, 'rx'))?.value ?? BigInt(0);
-                const rxBytes = grouped.get(makeGroupedCounterKey(keyPrefix, 'rx_bytes'))?.value ?? BigInt(0);
+                const rx = grouped.get(makeGroupedCounterKey(keyPrefix, 'rx')) ?? { packets: BigInt(0), bytes: BigInt(0) };
 
-                newValues.set(moduleInfo.nodeId, {
-                    packets: rxPackets,
-                    bytes: rxBytes,
-                });
+                newValues.set(moduleInfo.nodeId, rx);
             }
         } catch {
             // tolerate fetch failures.

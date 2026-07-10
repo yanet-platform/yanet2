@@ -589,7 +589,7 @@ func TestRoute_Counters(t *testing.T) {
 		require.Len(t, result.Output, 1, "expected one forwarded packet")
 		require.Empty(t, result.Drop, "expected no dropped packets")
 
-		byName := dataplaneut.SingleValueCounters(h.SharedMemory().DPConfig(0).PipelineCounters("port0", "test"))
+		byName := dataplaneut.ValueCounters(h.SharedMemory().DPConfig(0).PipelineCounters("port0", "test"))
 
 		// The route module dispatches forwarded packets to the device output
 		// queue inside the pipeline, so packet_front->output is empty at the
@@ -600,20 +600,20 @@ func TestRoute_Counters(t *testing.T) {
 		//
 		// The distinguishing property of a forwarded packet is that
 		// drop == 0 while input == 1.
-		require.Equal(t, uint64(1), byName["input"], "input counter must equal 1")
-		require.Equal(t, uint64(0), byName["output"], "routed packet leaves via device queue, not pipeline output list")
-		require.Equal(t, uint64(0), byName["drop"], "drop counter must equal 0")
-		require.Equal(t, pktSize, byName["input_bytes"], "input_bytes must equal packet size")
-		require.Equal(t, uint64(0), byName["output_bytes"], "output_bytes must equal 0 for device-dispatched packet")
-		require.Equal(t, uint64(0), byName["drop_bytes"], "drop_bytes must equal 0")
+		require.Equal(t, uint64(1), byName["input"][0], "input counter must equal 1")
+		require.Equal(t, uint64(0), byName["output"][0], "routed packet leaves via device queue, not pipeline output list")
+		require.Equal(t, uint64(0), byName["drop"][0], "drop counter must equal 0")
+		require.Equal(t, pktSize, byName["input"][1], "input_bytes must equal packet size")
+		require.Equal(t, uint64(0), byName["output"][1], "output_bytes must equal 0 for device-dispatched packet")
+		require.Equal(t, uint64(0), byName["drop"][1], "drop_bytes must equal 0")
 
 		// Device tx counter is the real pass signal: device_ectx_process_output
 		// increments tx when the packet is handed off to the NIC queue.
-		byDevName := dataplaneut.SingleValueCounters(h.SharedMemory().DPConfig(0).DeviceCounters("port0"))
-		require.Equal(t, uint64(1), byDevName["rx"], "device rx must equal 1")
-		require.Equal(t, uint64(1), byDevName["tx"], "device tx (pass) must equal 1")
-		require.Equal(t, pktSize, byDevName["rx_bytes"], "device rx_bytes must equal packet size")
-		require.Equal(t, pktSize, byDevName["tx_bytes"], "device tx_bytes (pass) must equal packet size")
+		byDevName := dataplaneut.ValueCounters(h.SharedMemory().DPConfig(0).DeviceCounters("port0"))
+		require.Equal(t, uint64(1), byDevName["rx"][0], "device rx must equal 1")
+		require.Equal(t, uint64(1), byDevName["tx"][0], "device tx (pass) must equal 1")
+		require.Equal(t, pktSize, byDevName["rx"][1], "device rx_bytes must equal packet size")
+		require.Equal(t, pktSize, byDevName["tx"][1], "device tx_bytes (pass) must equal packet size")
 	})
 
 	t.Run("drop", func(t *testing.T) {
@@ -634,21 +634,21 @@ func TestRoute_Counters(t *testing.T) {
 		require.Empty(t, result.Output, "expected no forwarded packets")
 		require.Len(t, result.Drop, 1, "expected one dropped packet")
 
-		byName := dataplaneut.SingleValueCounters(h.SharedMemory().DPConfig(0).PipelineCounters("port0", "test"))
-		require.Equal(t, uint64(1), byName["input"], "input counter must equal 1")
-		require.Equal(t, uint64(0), byName["output"], "output counter must equal 0")
-		require.Equal(t, uint64(1), byName["drop"], "drop counter must equal 1")
-		require.Equal(t, pktSize, byName["input_bytes"], "input_bytes must equal packet size")
-		require.Equal(t, uint64(0), byName["output_bytes"], "output_bytes must equal 0")
-		require.Equal(t, pktSize, byName["drop_bytes"], "drop_bytes must equal packet size")
+		byName := dataplaneut.ValueCounters(h.SharedMemory().DPConfig(0).PipelineCounters("port0", "test"))
+		require.Equal(t, uint64(1), byName["input"][0], "input counter must equal 1")
+		require.Equal(t, uint64(0), byName["output"][0], "output counter must equal 0")
+		require.Equal(t, uint64(1), byName["drop"][0], "drop counter must equal 1")
+		require.Equal(t, pktSize, byName["input"][1], "input_bytes must equal packet size")
+		require.Equal(t, uint64(0), byName["output"][1], "output_bytes must equal 0")
+		require.Equal(t, pktSize, byName["drop"][1], "drop_bytes must equal packet size")
 
 		// Device tx stays zero for a dropped packet: device_ectx_process_output
 		// is never reached, so no tx increment occurs.
-		byDevName := dataplaneut.SingleValueCounters(h.SharedMemory().DPConfig(0).DeviceCounters("port0"))
-		require.Equal(t, uint64(1), byDevName["rx"], "device rx must equal 1")
-		require.Equal(t, uint64(0), byDevName["tx"], "device tx must equal 0 — packet dropped")
-		require.Equal(t, pktSize, byDevName["rx_bytes"], "device rx_bytes must equal packet size")
-		require.Equal(t, uint64(0), byDevName["tx_bytes"], "device tx_bytes must equal 0")
+		byDevName := dataplaneut.ValueCounters(h.SharedMemory().DPConfig(0).DeviceCounters("port0"))
+		require.Equal(t, uint64(1), byDevName["rx"][0], "device rx must equal 1")
+		require.Equal(t, uint64(0), byDevName["tx"][0], "device tx must equal 0 — packet dropped")
+		require.Equal(t, pktSize, byDevName["rx"][1], "device rx_bytes must equal packet size")
+		require.Equal(t, uint64(0), byDevName["tx"][1], "device tx_bytes must equal 0")
 	})
 }
 

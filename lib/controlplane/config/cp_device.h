@@ -64,10 +64,8 @@ struct cp_device {
 	struct cp_device_entry *input_pipelines;
 	struct cp_device_entry *output_pipelines;
 
-	uint64_t counter_packet_rx_count;
-	uint64_t counter_packet_tx_count;
-	uint64_t counter_packet_rx_bytes;
-	uint64_t counter_packet_tx_bytes;
+	uint64_t counter_packet_rx;
+	uint64_t counter_packet_tx;
 
 	// Link to the previous parked device.
 	struct cp_device *prev;

@@ -51,14 +51,10 @@ struct cp_module {
 	// Counters declared inside module data
 	struct counter_registry counter_registry;
 
-	// Rx packet counter
+	// Rx packet/byte counter (size 2: [packets, bytes])
 	uint64_t rx_counter_id;
-	// Tx packet counter
+	// Tx packet/byte counter (size 2: [packets, bytes])
 	uint64_t tx_counter_id;
-	// Rx bytes counter
-	uint64_t rx_bytes_counter_id;
-	// Tx bytes counter
-	uint64_t tx_bytes_counter_id;
 
 	// Runtime indices for the performance histogram counters.
 	// These indices map to the actual counter storage locations for

@@ -71,3 +71,15 @@ func SingleValueCounters(counters []ffi.CounterInfo) map[string]uint64 {
 	}
 	return byName
 }
+
+// ValueCounters flattens a CounterInfo slice into a map of
+// counter name -> first worker's values.
+func ValueCounters(counters []ffi.CounterInfo) map[string][]uint64 {
+	byName := map[string][]uint64{}
+	for _, c := range counters {
+		if len(c.Values) > 0 && len(c.Values[0]) > 0 {
+			byName[c.Name] = c.Values[0]
+		}
+	}
+	return byName
+}

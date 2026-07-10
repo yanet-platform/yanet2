@@ -4,7 +4,7 @@ import type { CounterTag } from '@yanet/core/api/counters';
 import type { DeviceCounterData } from '@yanet/core/hooks';
 import { useInterpolatedCounters } from '@yanet/core/hooks/useInterpolatedCounters';
 import { useRollingWindow } from '@yanet/core/hooks/useRollingWindow';
-import { groupCounterGroupsByTagsAndName, makeGroupedCounterKey } from '@yanet/core/utils';
+import { groupCounterPacketsAndBytes, makeGroupedCounterKey } from '@yanet/core/utils';
 
 /**
  * Aggregate RX packet-rate and bit-rate across traffic-source devices.
@@ -93,7 +93,7 @@ interface RatesAndSeries {
     series: Map<string, number[]>;
 }
 
-const COUNTER_QUERY = ['input', 'input_bytes'];
+const COUNTER_QUERY = ['input'];
 
 /**
  * Poll counters selected by tag filter and produce per-key rate and
@@ -118,12 +118,11 @@ const useTagCounterSeries = (
                 tags: filterTags,
                 query: COUNTER_QUERY,
             });
-            const grouped = groupCounterGroupsByTagsAndName(response.groups, groupTagKeys, 0);
+            const grouped = groupCounterPacketsAndBytes(response.groups, groupTagKeys);
             for (const k of keys) {
-                totals.set(k, {
-                    packets: grouped.get(makeGroupedCounterKey([k], 'input'))?.value ?? BigInt(0),
-                    bytes: grouped.get(makeGroupedCounterKey([k], 'input_bytes'))?.value ?? BigInt(0),
-                });
+                totals.set(k,
+                    grouped.get(makeGroupedCounterKey([k], 'input')) ?? { packets: BigInt(0), bytes: BigInt(0) }
+                );
             }
         } catch {
             // tolerate fetch failures.

@@ -204,10 +204,10 @@ cp_device_init(
 		goto err_out;
 	}
 
-	self->counter_packet_rx_count = counter_registry_register(
-		&self->counter_registry, "rx", 1, err
+	self->counter_packet_rx = counter_registry_register(
+		&self->counter_registry, "rx", 2, err
 	);
-	if (self->counter_packet_rx_count == COUNTER_INVALID) {
+	if (self->counter_packet_rx == COUNTER_INVALID) {
 		yanet_error_add(
 			err,
 			"failed to register 'rx' counter for device '%s'",
@@ -216,37 +216,13 @@ cp_device_init(
 		goto err_out;
 	}
 
-	self->counter_packet_tx_count = counter_registry_register(
-		&self->counter_registry, "tx", 1, err
+	self->counter_packet_tx = counter_registry_register(
+		&self->counter_registry, "tx", 2, err
 	);
-	if (self->counter_packet_tx_count == COUNTER_INVALID) {
+	if (self->counter_packet_tx == COUNTER_INVALID) {
 		yanet_error_add(
 			err,
 			"failed to register 'tx' counter for device '%s'",
-			cfg->name
-		);
-		goto err_out;
-	}
-
-	self->counter_packet_rx_bytes = counter_registry_register(
-		&self->counter_registry, "rx_bytes", 1, err
-	);
-	if (self->counter_packet_rx_bytes == COUNTER_INVALID) {
-		yanet_error_add(
-			err,
-			"failed to register 'rx_bytes' counter for device '%s'",
-			cfg->name
-		);
-		goto err_out;
-	}
-
-	self->counter_packet_tx_bytes = counter_registry_register(
-		&self->counter_registry, "tx_bytes", 1, err
-	);
-	if (self->counter_packet_tx_bytes == COUNTER_INVALID) {
-		yanet_error_add(
-			err,
-			"failed to register 'tx_bytes' counter for device '%s'",
 			cfg->name
 		);
 		goto err_out;

@@ -2,7 +2,7 @@ import { useCallback } from 'react';
 import { API } from '@yanet/core/api';
 import { useInterpolatedCounters } from '@yanet/core/hooks';
 import type { InterpolatedCounterData } from '@yanet/core/hooks';
-import { groupCounterGroupsByTagsAndName, makeGroupedCounterKey } from '@yanet/core/utils';
+import { groupCounterPacketsAndBytes, makeGroupedCounterKey } from '@yanet/core/utils';
 
 /** Well-known key for pipeline-level fallthrough counters. */
 export const PIPELINE_COUNTER_KEY = '__pipeline__';
@@ -52,16 +52,15 @@ export const useFunctionRefCounters = (
                         { key: 'function', value: '*' },
                         { key: 'chain', value: '' },
                     ],
-                    query: ['input', 'input_bytes'],
+                    query: ['input'],
                 });
-                const grouped = groupCounterGroupsByTagsAndName(response.groups, ['pipeline', 'function'], 0);
+                const grouped = groupCounterPacketsAndBytes(response.groups, ['pipeline', 'function']);
 
                 for (const ref of refs) {
                     const tagValues = [pipelineName, ref.functionName];
-                    const packets = grouped.get(makeGroupedCounterKey(tagValues, 'input'))?.value ?? BigInt(0);
-                    const bytes = grouped.get(makeGroupedCounterKey(tagValues, 'input_bytes'))?.value ?? BigInt(0);
+                    const val = grouped.get(makeGroupedCounterKey(tagValues, 'input')) ?? { packets: BigInt(0), bytes: BigInt(0) };
 
-                    newValues.set(ref.nodeId, { packets, bytes });
+                    newValues.set(ref.nodeId, val);
                 }
             } catch {
                 // tolerate fetch failures.
@@ -75,13 +74,12 @@ export const useFunctionRefCounters = (
                         { key: 'pipeline', value: pipelineName },
                         { key: 'function', value: '' },
                     ],
-                    query: ['input', 'input_bytes'],
+                    query: ['input'],
                 });
-                const grouped = groupCounterGroupsByTagsAndName(response.groups, ['pipeline'], 0);
-                newValues.set(PIPELINE_COUNTER_KEY, {
-                    packets: grouped.get(makeGroupedCounterKey([pipelineName], 'input'))?.value ?? BigInt(0),
-                    bytes: grouped.get(makeGroupedCounterKey([pipelineName], 'input_bytes'))?.value ?? BigInt(0),
-                });
+                const grouped = groupCounterPacketsAndBytes(response.groups, ['pipeline']);
+                newValues.set(PIPELINE_COUNTER_KEY,
+                    grouped.get(makeGroupedCounterKey([pipelineName], 'input')) ?? { packets: BigInt(0), bytes: BigInt(0) }
+                );
             } catch {
                 // tolerate fetch failures.
             }
