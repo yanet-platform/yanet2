@@ -501,7 +501,7 @@ func (m *baselineSetup) configure(fw *TestFramework) error {
 	if err := fw.CreateForwardConfig(m.forward); err != nil {
 		return err
 	}
-	if err := fw.CreateConfigFile("route0.yaml", m.route); err != nil {
+	if err := fw.createGuestFile(fw.Paths.ConfigDir+"/route0.yaml", m.route); err != nil {
 		return err
 	}
 

@@ -38,6 +38,15 @@ type poolResult struct {
 	err error
 }
 
+func guestPathsForTemplate(snapshotName string) GuestPaths {
+	if snapshotName == "baseline" {
+		// Baseline templates are captured after PrepareLocalStorage, so their
+		// binaries and configuration live in guest tmpfs rather than on 9P.
+		return LocalGuestPaths()
+	}
+	return DefaultGuestPaths()
+}
+
 // runWithRecovery runs fn in the current goroutine, sending the result to ch.
 // If fn panics, the panic is recovered and reported as an error result.
 func (p *VMPool) runWithRecovery(idx int, ch chan<- poolResult, fn func() error) {
@@ -95,6 +104,8 @@ func NewVMPool(size int, baseName string, qemuImage string, bootedTemplate strin
 		}
 	}()
 
+	paths := guestPathsForTemplate(templateSnapshotName)
+
 	for i := range size {
 		name := baseName
 		if size > 1 {
@@ -109,7 +120,7 @@ func NewVMPool(size int, baseName string, qemuImage string, bootedTemplate strin
 		fw := &TestFramework{
 			qemu:  qemu,
 			log:   log.Named(name),
-			Paths: DefaultGuestPaths(),
+			Paths: paths,
 			socketClients: &socketClientsCache{
 				clients: make(map[int]*SocketClient),
 			},

@@ -137,9 +137,6 @@ func HasBaselineSnapshot() bool {
 // and local tmpfs layouts.
 func (f *TestFramework) CommonConfigCommands() []string {
 	p := f.Paths
-	// Config files (route0.yaml, etc.) are always written via CreateConfigFile
-	// to the host-side config dir, accessible in the guest as /mnt/config/.
-	// Use the 9P guest path for rule files regardless of local/remote mode.
 	return []string{
 		// Configure kni0 network interface
 		"ip link set kni0 up",
@@ -151,8 +148,7 @@ func (f *TestFramework) CommonConfigCommands() []string {
 		p.CLI("yanet-cli-forward") + " update --name=forward0 --rules " + p.ForwardYAML,
 
 		// Bootstrap the default IPv4/IPv6 FIB for the "route0" config.
-		// route0.yaml is always at /mnt/config/ (written via host 9P).
-		p.CLI("yanet-cli-route") + " fib update --name=route0 --rules /mnt/config/route0.yaml",
+		p.CLI("yanet-cli-route") + " fib update --name=route0 --rules " + p.ConfigDir + "/route0.yaml",
 
 		p.CLI("yanet-cli-function") + " update --name=virt --chains chain0:10=forward:forward0",
 		p.CLI("yanet-cli-function") + " update --name=test --chains chain2:1=forward:forward0,route:route0",
