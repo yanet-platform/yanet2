@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { loadFromStorage, saveToStorage } from './storage';
 import { SEED_GATEWAYS, SEED_ACTIVE_ID, BUILTIN_GATEWAY } from './seed';
+import type { RuntimeConfig } from './runtimeConfig';
 
 const STORAGE_KEY = 'yanet_gateways_v1';
 
@@ -89,5 +90,47 @@ describe('saveToStorage + loadFromStorage round-trip', () => {
         const builtin = result.gateways.find((g) => g.builtin === true);
         expect(builtin).toBeDefined();
         expect(builtin).toEqual(BUILTIN_GATEWAY);
+    });
+});
+
+describe('loadFromStorage with runtime config', () => {
+    let mockStorage: Storage;
+
+    beforeEach(() => {
+        mockStorage = makeMockStorage();
+        vi.stubGlobal('localStorage', mockStorage);
+    });
+
+    it('returns config-derived seed when localStorage is empty', () => {
+        const config: RuntimeConfig = {
+            defaultBackendUrl: 'http://gw1:8081',
+            gateways: [{ host: 'gw2', numa: 0, addr: 'gw2:8081' }],
+        };
+        const result = loadFromStorage(config);
+        expect(result.gateways).toHaveLength(2);
+        expect(result.gateways[0].baseUrl).toBe('http://gw1:8081');
+        expect(result.gateways[0].builtin).toBe(true);
+        expect(result.gateways[1].host).toBe('gw2');
+        expect(result.activeId).toBe('localhost');
+    });
+
+    it('re-injects config-derived builtin when stored list lacks one', () => {
+        const config: RuntimeConfig = {
+            defaultBackendUrl: 'http://gw1:8081',
+            gateways: [],
+        };
+        const stored = {
+            gateways: [{ id: 'x', host: 'other', numa: 0, addr: '1.2.3.4:80', baseUrl: 'http://1.2.3.4:80', status: 'online' as const }],
+            activeId: 'x',
+        };
+        mockStorage.setItem(STORAGE_KEY, JSON.stringify(stored));
+        const result = loadFromStorage(config);
+        expect(result.gateways[0].builtin).toBe(true);
+        expect(result.gateways[0].baseUrl).toBe('http://gw1:8081');
+    });
+
+    it('returns same-origin seed when config is empty', () => {
+        const result = loadFromStorage({ defaultBackendUrl: '', gateways: [] });
+        expect(result.gateways).toEqual(SEED_GATEWAYS);
     });
 });

@@ -7,6 +7,19 @@ const ReactCompilerConfig = {};
 
 const rootDir = fileURLToPath(new URL('.', import.meta.url));
 
+// Backend gateway HTTP URL for the dev proxy. Supports a full URL so the
+// dev server can target a gateway on any host:port, enabling multiple dev
+// instances each talking to a different backend.
+//
+//   VITE_BACKEND_URL=http://10.0.0.5:8081 npm run dev -w web
+//
+// Falls back to http://localhost:8081 when unset.
+const backendUrl = process.env.VITE_BACKEND_URL || 'http://localhost:8081';
+
+// Dev server port. Override to run multiple dev instances side by side.
+//   VITE_DEV_PORT=3001 npm run dev -w web
+const devPort = parseInt(process.env.VITE_DEV_PORT || '3000', 10);
+
 // Serve the SPA shell for HTML navigations whose path collides with a
 // co-located source directory.
 //
@@ -83,7 +96,7 @@ export default defineConfig({
     },
     server: {
         host: '::',
-        port: 3000,
+        port: devPort,
         allowedHosts: ['yanet-dev-esafronov.vla.yp-c.yandex.net'],
         // Allow the dev server to read co-located module web sources above
         // web/ (phase 4+). Keep searchForWorkspaceRoot or auto workspace
@@ -96,7 +109,7 @@ export default defineConfig({
         },
         proxy: {
             '/api': {
-                target: 'http://localhost:8081',
+                target: backendUrl,
                 changeOrigin: true,
             },
         },

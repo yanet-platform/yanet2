@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { deriveBaseUrl } from './GatewayDrawer';
+import { deriveBaseUrl } from './deriveBaseUrl';
 
 describe('deriveBaseUrl', () => {
     it('returns empty string for an empty input', () => {

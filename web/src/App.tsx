@@ -7,6 +7,7 @@ import { PAGE_IDS, SidebarContext } from './types';
 import { PaletteProvider, usePalette, CommandPalette, navigationCommands, ShortcutsHelp } from '@yanet/core/components/command-palette';
 import type { RowAdapter, Command } from '@yanet/core/components/command-palette';
 import { GatewayProvider, GatewayDrawer, useGateways, gatewayCommands } from '@yanet/core/gateways';
+import type { RuntimeConfig } from '@yanet/core/gateways';
 import { setApiBase } from '@yanet/core/api';
 import { routes, prefetchers, defaultRoute, navItems } from './registry';
 
@@ -224,16 +225,16 @@ const AppContentInner = (): React.JSX.Element => {
     );
 };
 
-const AppContent = (): React.JSX.Element => (
-    <GatewayProvider>
+const AppContent = ({ runtimeConfig }: { runtimeConfig?: RuntimeConfig }): React.JSX.Element => (
+    <GatewayProvider runtimeConfig={runtimeConfig}>
         <AppContentInner />
     </GatewayProvider>
 );
 
-const App = (): React.JSX.Element => {
+const App = ({ runtimeConfig }: { runtimeConfig?: RuntimeConfig }): React.JSX.Element => {
     return (
         <BrowserRouter>
-            <AppContent />
+            <AppContent runtimeConfig={runtimeConfig} />
         </BrowserRouter>
     );
 };

@@ -1,6 +1,7 @@
 import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
 import type { Gateway } from './types';
 import { loadFromStorage, saveToStorage } from './storage';
+import type { RuntimeConfig } from './runtimeConfig';
 
 export interface GatewayContextValue {
     gateways: Gateway[];
@@ -20,9 +21,15 @@ export const GatewayContext = createContext<GatewayContextValue>({
     setActive: () => {},
 });
 
+export interface GatewayProviderProps {
+    children: React.ReactNode;
+    /** Runtime config from `/config.json` — overrides the default seed. */
+    runtimeConfig?: RuntimeConfig;
+}
+
 /** Provides gateway list and active-selection state to the entire app. */
-export const GatewayProvider = ({ children }: { children: React.ReactNode }): React.JSX.Element => {
-    const initial = useMemo(() => loadFromStorage(), []);
+export const GatewayProvider = ({ children, runtimeConfig }: GatewayProviderProps): React.JSX.Element => {
+    const initial = useMemo(() => loadFromStorage(runtimeConfig), [runtimeConfig]);
     const [gateways, setGateways] = useState<Gateway[]>(initial.gateways);
     const [activeId, setActiveId] = useState<string>(initial.activeId);
 
