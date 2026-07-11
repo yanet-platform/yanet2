@@ -133,4 +133,26 @@ describe('loadFromStorage with runtime config', () => {
         const result = loadFromStorage({ defaultBackendUrl: '', gateways: [] });
         expect(result.gateways).toEqual(SEED_GATEWAYS);
     });
+
+    it('replaces stored same-origin builtin with config-derived one', () => {
+        const config: RuntimeConfig = {
+            defaultBackendUrl: 'http://gw1:8081',
+            gateways: [],
+        };
+        const stored = {
+            gateways: [
+                { id: 'localhost', host: 'localhost', numa: 0, addr: 'same-origin', baseUrl: '', status: 'online' as const, builtin: true },
+                { id: 'gw-01', host: 'other', numa: 0, addr: '10.0.0.10:8080', baseUrl: 'http://10.0.0.10:8080', status: 'online' as const },
+            ],
+            activeId: 'localhost',
+        };
+        mockStorage.setItem(STORAGE_KEY, JSON.stringify(stored));
+        const result = loadFromStorage(config);
+        const builtin = result.gateways.find((g) => g.builtin === true);
+        expect(builtin).toBeDefined();
+        expect(builtin!.baseUrl).toBe('http://gw1:8081');
+        expect(result.gateways).toHaveLength(2);
+        const nonBuiltin = result.gateways.find((g) => !g.builtin);
+        expect(nonBuiltin!.host).toBe('other');
+    });
 });

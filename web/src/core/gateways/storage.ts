@@ -21,14 +21,19 @@ interface StoredState {
  * If the stored list has no builtin entry (e.g. saved before this feature was
  * added), the builtin is prepended so the invariant holds after every load.
  *
- * When a runtime config is provided, the builtin reflects the configured
- * `defaultBackendUrl` rather than the plain same-origin default.
+ * When a runtime config is provided, any stored builtin is replaced with the
+ * config-derived one so `defaultBackendUrl` changes take effect even for
+ * users who previously saved a same-origin builtin.
  */
 const ensureBuiltin = (gateways: Gateway[], config?: RuntimeConfig): Gateway[] => {
+    const builtin = config ? builtinFromConfig(config) : BUILTIN_GATEWAY;
+    if (config) {
+        const rest = gateways.filter((g) => !g.builtin);
+        return [builtin, ...rest];
+    }
     if (gateways.some((g) => g.builtin === true)) {
         return gateways;
     }
-    const builtin = config ? builtinFromConfig(config) : BUILTIN_GATEWAY;
     return [builtin, ...gateways];
 };
 
