@@ -26,7 +26,7 @@ export const useWorkerCount = (deviceNames: string[]): number | null => {
                         { key: 'device', value: firstDevice },
                         { key: 'pipeline', value: '' },
                     ],
-                    query: ['rx'],
+                    query: ['input_rx'],
                 });
                 const counter = resp.groups?.[0]?.counters?.[0];
                 if (!counter?.instances) {

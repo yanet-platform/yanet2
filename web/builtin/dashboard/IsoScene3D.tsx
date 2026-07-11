@@ -236,8 +236,8 @@ export const IsoScene3D: React.FC<IsoScene3DProps> = ({
         deviceNames.length > 0 && pipelineNames.length > 0 && functionNames.length > 0,
     );
 
-    const trendRxMap = useDeviceTrendSeries(rateCounters, 'rx');
-    const trendTxMap = useDeviceTrendSeries(rateCounters, 'tx');
+    const trendRxMap = useDeviceTrendSeries(rateCounters, 'inputRx');
+    const trendTxMap = useDeviceTrendSeries(rateCounters, 'outputTx');
 
     const liveRef = useRef<LiveSnapshot>({
         devicesById: new Map(),
@@ -257,12 +257,12 @@ export const IsoScene3D: React.FC<IsoScene3DProps> = ({
         structuralDevices.forEach((d) => {
             const counters = rateCounters.get(d.id);
             const abs = absoluteCounters.get(d.id);
-            const rxPps = counters?.rx?.pps ?? 0;
-            const rxBps = counters?.rx?.bps ?? 0;
-            const txPps = counters?.tx?.pps ?? 0;
-            const txBps = counters?.tx?.bps ?? 0;
+            const rxPps = counters?.inputRx?.pps ?? 0;
+            const rxBps = counters?.inputRx?.bps ?? 0;
+            const txPps = counters?.outputTx?.pps ?? 0;
+            const txBps = counters?.outputTx?.bps ?? 0;
             const status: 'ok' | 'idle' =
-                abs && (abs.rx.packets > 0 || abs.tx.packets > 0) ? 'ok' : 'idle';
+                abs && (abs.inputRx.packets > 0 || abs.outputTx.packets > 0) ? 'ok' : 'idle';
             devicesById.set(d.id, {
                 rxPps,
                 rxBps,

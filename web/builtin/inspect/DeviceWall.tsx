@@ -18,7 +18,7 @@ export const DeviceWall: React.FC<DeviceWallProps> = ({
 }) => {
     const devices = instance.devices ?? [];
 
-    const rxTrend = useDeviceTrendSeries(rateCounters, 'rx');
+    const rxTrend = useDeviceTrendSeries(rateCounters, 'inputRx');
 
     const phyCount = useMemo(
         () => devices.filter((d) => d.type === 'plain').length,

@@ -769,6 +769,33 @@ device_entry_ectx_create(
 	memset(device_entry_ectx, 0, ectx_size);
 	device_entry_ectx->handler = handler;
 
+	struct counter_storage *counter_storage =
+		ADDR_OF(&device_ectx->counter_storage);
+	SET_OFFSET_OF(
+		&device_entry_ectx->counter_packet_rx,
+		counter_get_value_handle(
+			cp_device_entry->counter_packet_rx, counter_storage
+		)
+	);
+	SET_OFFSET_OF(
+		&device_entry_ectx->counter_packet_entry,
+		counter_get_value_handle(
+			cp_device_entry->counter_packet_entry, counter_storage
+		)
+	);
+	SET_OFFSET_OF(
+		&device_entry_ectx->counter_packet_tx,
+		counter_get_value_handle(
+			cp_device_entry->counter_packet_tx, counter_storage
+		)
+	);
+	SET_OFFSET_OF(
+		&device_entry_ectx->counter_packet_drop,
+		counter_get_value_handle(
+			cp_device_entry->counter_packet_drop, counter_storage
+		)
+	);
+
 	struct pipeline_ectx **pipelines =
 		(struct pipeline_ectx **)memory_balloc(
 			memory_context,
@@ -931,18 +958,6 @@ device_ectx_create(
 	}
 
 	SET_OFFSET_OF(&device_ectx->counter_storage, counter_storage);
-	SET_OFFSET_OF(
-		&device_ectx->counter_packet_rx,
-		counter_get_value_handle(
-			cp_device->counter_packet_rx, counter_storage
-		)
-	);
-	SET_OFFSET_OF(
-		&device_ectx->counter_packet_tx,
-		counter_get_value_handle(
-			cp_device->counter_packet_tx, counter_storage
-		)
-	);
 
 	struct dp_device *dp_device =
 		ADDR_OF(&dp_config->dp_devices) + cp_device->dp_device_idx;

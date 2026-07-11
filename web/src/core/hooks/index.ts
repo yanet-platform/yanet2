@@ -17,7 +17,12 @@ export type {
 } from './useInterpolatedCounters';
 
 export { useDeviceCounters } from './useDeviceCounters';
-export type { DeviceCounterData, DeviceAbsoluteData, UseDeviceCountersResult } from './useDeviceCounters';
+export type {
+    DeviceCounterData,
+    DeviceAbsoluteData,
+    DeviceCounterField,
+    UseDeviceCountersResult,
+} from './useDeviceCounters';
 
 export { useContainerHeight } from './useContainerHeight';
 

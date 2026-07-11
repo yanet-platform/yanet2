@@ -254,18 +254,6 @@ pipeline_ectx_process(
 	);
 }
 
-// Switch the packet front and run the device entry handler.
-static inline void
-device_entry_ectx_process(
-	struct dp_worker *dp_worker,
-	struct device_ectx *device_ectx,
-	struct device_entry_ectx *entry_ectx,
-	struct packet_front *packet_front
-) {
-	packet_front_switch(packet_front);
-	entry_ectx->handler(dp_worker, device_ectx, packet_front);
-}
-
 // Run the entry's only pipeline.
 //
 // With a single pipeline every packet maps to pipeline 0, so the per-packet
@@ -372,6 +360,43 @@ device_entry_ectx_dispatch(
 	}
 }
 
+static inline void
+device_ectx_process_entry(
+	struct dp_worker *dp_worker,
+	struct device_ectx *device_ectx,
+	struct device_entry_ectx *entry_ectx,
+	struct packet_front *packet_front
+) {
+	packet_front_switch(packet_front);
+
+	counter_add_packets_bytes(
+		ADDR_OF_NONNULL(&entry_ectx->counter_packet_rx),
+		packet_front_input_count(packet_front),
+		packet_front_input_bytes(packet_front)
+	);
+
+	entry_ectx->handler(dp_worker, device_ectx, packet_front);
+
+	counter_add_packets_bytes(
+		ADDR_OF_NONNULL(&entry_ectx->counter_packet_entry),
+		packet_front_output_count(packet_front),
+		packet_front_output_bytes(packet_front)
+	);
+
+	device_entry_ectx_dispatch(dp_worker, entry_ectx, packet_front);
+
+	counter_add_packets_bytes(
+		ADDR_OF_NONNULL(&entry_ectx->counter_packet_tx),
+		packet_front_output_count(packet_front),
+		packet_front_output_bytes(packet_front)
+	);
+	counter_add_packets_bytes(
+		ADDR_OF_NONNULL(&entry_ectx->counter_packet_drop),
+		packet_front_drop_count(packet_front),
+		packet_front_drop_bytes(packet_front)
+	);
+}
+
 void
 device_ectx_process_input(
 	struct dp_worker *dp_worker,
@@ -381,17 +406,9 @@ device_ectx_process_input(
 	struct device_entry_ectx *entry_ectx =
 		ADDR_OF(&device_ectx->input_pipelines);
 
-	device_entry_ectx_process(
+	device_ectx_process_entry(
 		dp_worker, device_ectx, entry_ectx, packet_front
 	);
-
-	counter_add_packets_bytes(
-		ADDR_OF_NONNULL(&device_ectx->counter_packet_rx),
-		packet_front_output_count(packet_front),
-		packet_front_output_bytes(packet_front)
-	);
-
-	device_entry_ectx_dispatch(dp_worker, entry_ectx, packet_front);
 }
 
 void
@@ -403,15 +420,7 @@ device_ectx_process_output(
 	struct device_entry_ectx *entry_ectx =
 		ADDR_OF(&device_ectx->output_pipelines);
 
-	device_entry_ectx_process(
+	device_ectx_process_entry(
 		dp_worker, device_ectx, entry_ectx, packet_front
 	);
-
-	counter_add_packets_bytes(
-		ADDR_OF_NONNULL(&device_ectx->counter_packet_tx),
-		packet_front_output_count(packet_front),
-		packet_front_output_bytes(packet_front)
-	);
-
-	device_entry_ectx_dispatch(dp_worker, entry_ectx, packet_front);
 }

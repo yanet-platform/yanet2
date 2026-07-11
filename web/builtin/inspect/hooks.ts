@@ -1,13 +1,16 @@
 import { useMemo } from 'react';
 import { API } from '@yanet/core/api';
 import type { CounterTag } from '@yanet/core/api/counters';
-import type { DeviceCounterData } from '@yanet/core/hooks';
+import type { DeviceCounterData, DeviceCounterField } from '@yanet/core/hooks';
 import { useInterpolatedCounters } from '@yanet/core/hooks/useInterpolatedCounters';
 import { useRollingWindow } from '@yanet/core/hooks/useRollingWindow';
 import { groupCounterPacketsAndBytes, makeGroupedCounterKey } from '@yanet/core/utils';
 
 /**
- * Aggregate RX packet-rate and bit-rate across traffic-source devices.
+ * Aggregate ingress packet-rate and bit-rate across traffic-source devices.
+ *
+ * Uses the inputRx counter (packets entering the input handler from the NIC)
+ * as the device-side ingress throughput measure.
  *
  * Filters by sourceDeviceNames to avoid double-counting traffic that also
  * appears on stacked virtual devices (e.g. vlan).
@@ -21,8 +24,8 @@ export const useAggregateThroughput = (
         let bps = 0;
         rateCounters.forEach((d, name) => {
             if (!sourceDeviceNames.has(name)) return;
-            pps += d.rx?.pps ?? 0;
-            bps += d.rx?.bps ?? 0;
+            pps += d.inputRx?.pps ?? 0;
+            bps += d.inputRx?.bps ?? 0;
         });
         return { aggregatePps: pps, aggregateBps: bps };
     }, [rateCounters, sourceDeviceNames]);
@@ -64,24 +67,24 @@ export const useThroughputSeries = (
     let current = 0;
     deviceCounters.forEach((d, name) => {
         if (!sourceDeviceNames.has(name)) return;
-        current += (d.rx?.pps ?? 0) + (d.tx?.pps ?? 0);
+        current += (d.inputRx?.pps ?? 0) + (d.outputTx?.pps ?? 0);
     });
     const series = useRollingSeries(current, maxLen);
     return { current, series };
 };
 
 /**
- * Per-device rolling pps series for a given direction.
+ * Per-device rolling pps series for a given logical counter field.
  */
 export const useDeviceTrendSeries = (
     deviceCounters: Map<string, DeviceCounterData>,
-    kind: 'rx' | 'tx',
+    kind: DeviceCounterField,
     maxLen: number = DEFAULT_MAX_LEN,
 ): Map<string, number[]> => {
     const samples = useMemo(() => {
         const m = new Map<string, number>();
         deviceCounters.forEach((d, name) => {
-            m.set(name, (kind === 'rx' ? d.rx?.pps : d.tx?.pps) ?? 0);
+            m.set(name, d[kind]?.pps ?? 0);
         });
         return m;
     }, [deviceCounters, kind]);

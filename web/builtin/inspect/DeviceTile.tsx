@@ -19,7 +19,7 @@ export const DeviceTile: React.FC<DeviceTileProps> = ({ device, name, rateRow, a
 
     const status = useMemo((): 'ok' | 'idle' => {
         if (!absRow) return 'idle';
-        return absRow.rx.packets > 0 || absRow.tx.packets > 0 ? 'ok' : 'idle';
+        return absRow.inputRx.packets > 0 || absRow.outputTx.packets > 0 ? 'ok' : 'idle';
     }, [absRow]);
 
     const accentColor = kind === 'vlan' ? 'var(--iv-link)' : 'var(--iv-accent)';
@@ -41,8 +41,8 @@ export const DeviceTile: React.FC<DeviceTileProps> = ({ device, name, rateRow, a
                 />
             </div>
             <div className="iv-device-tile__rates">
-                <span className="iv-device-tile__pps">{fmtPps(rateRow?.rx?.pps ?? 0)}</span>
-                <span className="iv-device-tile__bps">{fmtBps(rateRow?.rx?.bps ?? 0)}bps</span>
+                <span className="iv-device-tile__pps">{fmtPps(rateRow?.inputRx?.pps ?? 0)}</span>
+                <span className="iv-device-tile__bps">{fmtBps(rateRow?.inputRx?.bps ?? 0)}bps</span>
             </div>
             <Sparkline
                 data={trend}

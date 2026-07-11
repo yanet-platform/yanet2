@@ -204,25 +204,103 @@ cp_device_init(
 		goto err_out;
 	}
 
-	self->counter_packet_rx = counter_registry_register(
-		&self->counter_registry, "rx", 2, err
+	input->counter_packet_rx = counter_registry_register(
+		&self->counter_registry, "input_rx", 2, err
 	);
-	if (self->counter_packet_rx == COUNTER_INVALID) {
+	if (input->counter_packet_rx == COUNTER_INVALID) {
 		yanet_error_add(
 			err,
-			"failed to register 'rx' counter for device '%s'",
+			"failed to register 'input_rx' counter for device '%s'",
 			cfg->name
 		);
 		goto err_out;
 	}
 
-	self->counter_packet_tx = counter_registry_register(
-		&self->counter_registry, "tx", 2, err
+	input->counter_packet_entry = counter_registry_register(
+		&self->counter_registry, "input_entry", 2, err
 	);
-	if (self->counter_packet_tx == COUNTER_INVALID) {
+	if (input->counter_packet_entry == COUNTER_INVALID) {
 		yanet_error_add(
 			err,
-			"failed to register 'tx' counter for device '%s'",
+			"failed to register 'input_entry' counter for device "
+			"'%s'",
+			cfg->name
+		);
+		goto err_out;
+	}
+
+	input->counter_packet_tx = counter_registry_register(
+		&self->counter_registry, "input_tx", 2, err
+	);
+	if (input->counter_packet_tx == COUNTER_INVALID) {
+		yanet_error_add(
+			err,
+			"failed to register 'input_tx' counter for device '%s'",
+			cfg->name
+		);
+		goto err_out;
+	}
+
+	input->counter_packet_drop = counter_registry_register(
+		&self->counter_registry, "input_drop", 2, err
+	);
+	if (input->counter_packet_drop == COUNTER_INVALID) {
+		yanet_error_add(
+			err,
+			"failed to register 'input_drop' counter for device "
+			"'%s'",
+			cfg->name
+		);
+		goto err_out;
+	}
+
+	output->counter_packet_rx = counter_registry_register(
+		&self->counter_registry, "output_rx", 2, err
+	);
+	if (output->counter_packet_rx == COUNTER_INVALID) {
+		yanet_error_add(
+			err,
+			"failed to register 'output_rx' counter for device "
+			"'%s'",
+			cfg->name
+		);
+		goto err_out;
+	}
+
+	output->counter_packet_entry = counter_registry_register(
+		&self->counter_registry, "output_entry", 2, err
+	);
+	if (output->counter_packet_entry == COUNTER_INVALID) {
+		yanet_error_add(
+			err,
+			"failed to register 'output_entry' counter for device "
+			"'%s'",
+			cfg->name
+		);
+		goto err_out;
+	}
+
+	output->counter_packet_tx = counter_registry_register(
+		&self->counter_registry, "output_tx", 2, err
+	);
+	if (output->counter_packet_tx == COUNTER_INVALID) {
+		yanet_error_add(
+			err,
+			"failed to register 'output_tx' counter for device "
+			"'%s'",
+			cfg->name
+		);
+		goto err_out;
+	}
+
+	output->counter_packet_drop = counter_registry_register(
+		&self->counter_registry, "output_drop", 2, err
+	);
+	if (output->counter_packet_drop == COUNTER_INVALID) {
+		yanet_error_add(
+			err,
+			"failed to register 'output_drop' counter for device "
+			"'%s'",
 			cfg->name
 		);
 		goto err_out;

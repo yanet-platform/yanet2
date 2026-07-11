@@ -69,14 +69,14 @@ const DeviceRailItem = ({
                     <div className="dv-rail-pop-type">{typeLabel}</div>
                     <MiniSpark
                         deviceId={`rail-${name}`}
-                        rx={history?.rx ?? []}
-                        tx={history?.tx ?? []}
+                        rx={history?.inputRx ?? []}
+                        tx={history?.outputTx ?? []}
                         width={198}
                         height={34}
                     />
                     <div className="dv-rail-pop-metric">
-                        <span><span className="lbl">RX </span>{formatPps(counterData?.rx.pps ?? 0)}</span>
-                        <span><span className="lbl">TX </span>{formatPps(counterData?.tx.pps ?? 0)}</span>
+                        <span><span className="lbl">RX </span>{formatPps(counterData?.inputRx.pps ?? 0)}</span>
+                        <span><span className="lbl">TX </span>{formatPps(counterData?.outputTx.pps ?? 0)}</span>
                     </div>
                 </div>
             )}

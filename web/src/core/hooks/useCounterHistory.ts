@@ -5,10 +5,12 @@ import { useRollingWindow } from './useRollingWindow';
 export const HISTORY_SIZE = 60;
 
 export interface CounterHistoryEntry {
-    rx: number[];
-    tx: number[];
-    rxBytes: number[];
-    txBytes: number[];
+    inputRx: number[];
+    inputTx: number[];
+    inputDrop: number[];
+    outputRx: number[];
+    outputTx: number[];
+    outputDrop: number[];
 }
 
 /** Returns a new array with v appended, capped at cap elements. */
@@ -33,46 +35,78 @@ export const appendCapped = (arr: number[], v: number, cap: number): number[] =>
 export const useCounterHistory = (
     counters: Map<string, DeviceCounterData>
 ): Map<string, CounterHistoryEntry> => {
-    const rxSamples = useMemo(() => {
+    // One rolling series per logical field; each samples the pps rate.
+    const inputRxSamples = useMemo(() => {
         const m = new Map<string, number>();
-        counters.forEach((d, name) => m.set(name, d.rx.pps));
+        counters.forEach((d, name) => m.set(name, d.inputRx.pps));
         return m;
     }, [counters]);
 
-    const txSamples = useMemo(() => {
+    const inputTxSamples = useMemo(() => {
         const m = new Map<string, number>();
-        counters.forEach((d, name) => m.set(name, d.tx.pps));
+        counters.forEach((d, name) => m.set(name, d.inputTx.pps));
         return m;
     }, [counters]);
 
-    const rxBytesSamples = useMemo(() => {
+    const inputDropSamples = useMemo(() => {
         const m = new Map<string, number>();
-        counters.forEach((d, name) => m.set(name, d.rx.bps));
+        counters.forEach((d, name) => m.set(name, d.inputDrop.pps));
         return m;
     }, [counters]);
 
-    const txBytesSamples = useMemo(() => {
+    const outputRxSamples = useMemo(() => {
         const m = new Map<string, number>();
-        counters.forEach((d, name) => m.set(name, d.tx.bps));
+        counters.forEach((d, name) => m.set(name, d.outputRx.pps));
         return m;
     }, [counters]);
 
-    const rxHistory = useRollingWindow(rxSamples, HISTORY_SIZE, 1000);
-    const txHistory = useRollingWindow(txSamples, HISTORY_SIZE, 1000);
-    const rxBytesHistory = useRollingWindow(rxBytesSamples, HISTORY_SIZE, 1000);
-    const txBytesHistory = useRollingWindow(txBytesSamples, HISTORY_SIZE, 1000);
+    const outputTxSamples = useMemo(() => {
+        const m = new Map<string, number>();
+        counters.forEach((d, name) => m.set(name, d.outputTx.pps));
+        return m;
+    }, [counters]);
+
+    const outputDropSamples = useMemo(() => {
+        const m = new Map<string, number>();
+        counters.forEach((d, name) => m.set(name, d.outputDrop.pps));
+        return m;
+    }, [counters]);
+
+    const inputRxHistory = useRollingWindow(inputRxSamples, HISTORY_SIZE, 1000);
+    const inputTxHistory = useRollingWindow(inputTxSamples, HISTORY_SIZE, 1000);
+    const inputDropHistory = useRollingWindow(inputDropSamples, HISTORY_SIZE, 1000);
+    const outputRxHistory = useRollingWindow(outputRxSamples, HISTORY_SIZE, 1000);
+    const outputTxHistory = useRollingWindow(outputTxSamples, HISTORY_SIZE, 1000);
+    const outputDropHistory = useRollingWindow(outputDropSamples, HISTORY_SIZE, 1000);
 
     return useMemo(() => {
         const result = new Map<string, CounterHistoryEntry>();
         counters.forEach((_, name) => {
-            const rx = rxHistory.get(name);
-            const tx = txHistory.get(name);
-            const rxBytes = rxBytesHistory.get(name);
-            const txBytes = txBytesHistory.get(name);
-            if (rx && tx && rxBytes && txBytes) {
-                result.set(name, { rx, tx, rxBytes, txBytes });
+            const inputRx = inputRxHistory.get(name);
+            const inputTx = inputTxHistory.get(name);
+            const inputDrop = inputDropHistory.get(name);
+            const outputRx = outputRxHistory.get(name);
+            const outputTx = outputTxHistory.get(name);
+            const outputDrop = outputDropHistory.get(name);
+            if (inputRx && inputTx && inputDrop && outputRx && outputTx && outputDrop) {
+                result.set(name, {
+                    inputRx,
+                    inputTx,
+                    inputDrop,
+                    outputRx,
+                    outputTx,
+                    outputDrop,
+                });
             }
         });
         return result;
-    }, [counters, rxHistory, txHistory, rxBytesHistory, txBytesHistory]);
+    }, [
+        counters,
+        inputRxHistory,
+        inputTxHistory,
+        inputDropHistory,
+        outputRxHistory,
+        outputTxHistory,
+        outputDropHistory,
+    ]);
 };

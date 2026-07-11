@@ -3,6 +3,7 @@ import {
     IconHdd,
     IconArrowDown,
     IconArrowUp,
+    IconWarning,
     IconSave,
 } from './components/Icons';
 import { DeviceDiffModal } from './components/DeviceDiffModal';
@@ -28,35 +29,37 @@ export interface DeviceDetailsProps {
 }
 
 interface MetricBlockProps {
-    subLabel: string;
-    isRx: boolean;
-    isPps: boolean;
-    value: number;
+    label: string;
+    labelClass: string;
+    pps: number;
+    bps: number;
     deviceId: string;
     series: string;
     color: string;
     history: number[];
+    icon: React.ReactNode;
 }
 
 const MetricBlock = ({
-    subLabel,
-    isRx,
-    isPps,
-    value,
+    label,
+    labelClass,
+    pps,
+    bps,
     deviceId,
     series,
     color,
     history,
+    icon,
 }: MetricBlockProps): React.JSX.Element => (
     <div className="dv-metric">
         <div className="dv-metric-hd">
             <span className="dv-metric-dir">
-                {isRx ? <IconArrowDown /> : <IconArrowUp />}
-                <span style={{ color }}>{isRx ? 'RX' : 'TX'}</span>
+                {icon}
+                <span className={labelClass} style={{ color }}>{label}</span>
             </span>
-            <span className="dv-metric-lbl">{subLabel}</span>
+            <span className="dv-metric-lbl mono">{formatBps(bps)}</span>
         </div>
-        <div className="dv-metric-val mono">{isPps ? formatPps(value) : formatBps(value)}</div>
+        <div className="dv-metric-val mono">{formatPps(pps)}</div>
         <BigSpark
             deviceId={deviceId}
             series={series}
@@ -86,65 +89,101 @@ interface DeviceMetricsProps {
     history: CounterHistoryEntry | undefined;
 }
 
-// Live RX/TX metric grid for the selected device.
+// Live metric grid for the selected device, organised by direction.
+//
+// The dataplane exposes rx/tx/drop counters per input (from NIC) and output
+// (toward NIC) handler. This renders two sections — Input and Output — each
+// with a throughput (RX), forward (TX) and drop (DROP) card.
 //
 // This is the only part of the detail panel that consumes interpolated
 // counters, which refresh on every animation frame. Keeping it in its own
 // component lets the compiler skip re-rendering the heavier config sections
 // (DeviceBody) when only the counters tick.
 const DeviceMetrics = ({ deviceId, counterData, history }: DeviceMetricsProps): React.JSX.Element => {
-    const rxPps = counterData?.rx.pps ?? 0;
-    const rxBps = counterData?.rx.bps ?? 0;
-    const txPps = counterData?.tx.pps ?? 0;
-    const txBps = counterData?.tx.bps ?? 0;
-
-    const rxPpsHistory = history?.rx ?? [];
-    const txPpsHistory = history?.tx ?? [];
-    const rxBpsHistory = history?.rxBytes ?? [];
-    const txBpsHistory = history?.txBytes ?? [];
-
     return (
-        <div className="dv-metric-grid">
-            <MetricBlock
-                subLabel="packets / sec"
-                isRx={true}
-                isPps={true}
-                value={rxPps}
-                deviceId={deviceId}
-                series="rx-pps"
-                color="var(--teal)"
-                history={rxPpsHistory}
-            />
-            <MetricBlock
-                subLabel="bytes / sec"
-                isRx={true}
-                isPps={false}
-                value={rxBps}
-                deviceId={deviceId}
-                series="rx-bps"
-                color="var(--teal)"
-                history={rxBpsHistory}
-            />
-            <MetricBlock
-                subLabel="packets / sec"
-                isRx={false}
-                isPps={true}
-                value={txPps}
-                deviceId={deviceId}
-                series="tx-pps"
-                color="var(--blue)"
-                history={txPpsHistory}
-            />
-            <MetricBlock
-                subLabel="bytes / sec"
-                isRx={false}
-                isPps={false}
-                value={txBps}
-                deviceId={deviceId}
-                series="tx-bps"
-                color="var(--blue)"
-                history={txBpsHistory}
-            />
+        <div className="dv-metrics">
+            <div className="dv-metric-section">
+                <div className="dv-metric-section-hd">
+                    <span>Input</span>
+                    <span className="dv-metric-section-sub">from NIC → pipeline</span>
+                </div>
+                <div className="dv-metric-grid dv-metric-grid--3">
+                    <MetricBlock
+                        label="RX"
+                        labelClass="dv-lbl-rx"
+                        pps={counterData?.inputRx.pps ?? 0}
+                        bps={counterData?.inputRx.bps ?? 0}
+                        deviceId={deviceId}
+                        series="input-rx"
+                        color="var(--teal)"
+                        history={history?.inputRx ?? []}
+                        icon={<IconArrowDown />}
+                    />
+                    <MetricBlock
+                        label="TX"
+                        labelClass="dv-lbl-tx"
+                        pps={counterData?.inputTx.pps ?? 0}
+                        bps={counterData?.inputTx.bps ?? 0}
+                        deviceId={deviceId}
+                        series="input-tx"
+                        color="var(--teal)"
+                        history={history?.inputTx ?? []}
+                        icon={<IconArrowUp />}
+                    />
+                    <MetricBlock
+                        label="DROP"
+                        labelClass="dv-lbl-drop"
+                        pps={counterData?.inputDrop.pps ?? 0}
+                        bps={counterData?.inputDrop.bps ?? 0}
+                        deviceId={deviceId}
+                        series="input-drop"
+                        color="var(--red)"
+                        history={history?.inputDrop ?? []}
+                        icon={<IconWarning />}
+                    />
+                </div>
+            </div>
+            <div className="dv-metric-section">
+                <div className="dv-metric-section-hd">
+                    <span>Output</span>
+                    <span className="dv-metric-section-sub">from pipeline → NIC</span>
+                </div>
+                <div className="dv-metric-grid dv-metric-grid--3">
+                    <MetricBlock
+                        label="RX"
+                        labelClass="dv-lbl-rx"
+                        pps={counterData?.outputRx.pps ?? 0}
+                        bps={counterData?.outputRx.bps ?? 0}
+                        deviceId={deviceId}
+                        series="output-rx"
+                        color="var(--blue)"
+                        history={history?.outputRx ?? []}
+                        icon={<IconArrowDown />}
+                    />
+                    <MetricBlock
+                        label="TX"
+                        labelClass="dv-lbl-tx"
+                        pps={counterData?.outputTx.pps ?? 0}
+                        bps={counterData?.outputTx.bps ?? 0}
+                        deviceId={deviceId}
+                        series="output-tx"
+                        color="var(--blue)"
+                        history={history?.outputTx ?? []}
+                        icon={<IconArrowUp />}
+                    />
+                    <MetricBlock
+                        label="DROP"
+                        labelClass="dv-lbl-drop"
+                        pps={counterData?.outputDrop.pps ?? 0}
+                        bps={counterData?.outputDrop.bps ?? 0}
+                        deviceId={deviceId}
+                        series="output-drop"
+                        color="var(--red)"
+                        history={history?.outputDrop ?? []}
+                        icon={<IconWarning />}
+                    />
+                </div>
+            </div>
         </div>
     );
 };

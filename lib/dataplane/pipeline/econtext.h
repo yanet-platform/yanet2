@@ -87,6 +87,10 @@ struct pipeline_ectx {
 
 struct device_entry_ectx {
 	device_handler handler;
+	struct counter_value_handle *counter_packet_rx;
+	struct counter_value_handle *counter_packet_entry;
+	struct counter_value_handle *counter_packet_tx;
+	struct counter_value_handle *counter_packet_drop;
 	uint64_t pipeline_count;
 	struct pipeline_ectx **pipelines;
 	uint64_t pipeline_map_size;
@@ -95,8 +99,6 @@ struct device_entry_ectx {
 
 struct device_ectx {
 	struct cp_device *cp_device;
-	struct counter_value_handle *counter_packet_rx;
-	struct counter_value_handle *counter_packet_tx;
 	struct counter_storage *counter_storage;
 	struct device_entry_ectx *input_pipelines;
 	struct device_entry_ectx *output_pipelines;

@@ -607,13 +607,24 @@ func TestRoute_Counters(t *testing.T) {
 		require.Equal(t, uint64(0), byName["output"][1], "output_bytes must equal 0 for device-dispatched packet")
 		require.Equal(t, uint64(0), byName["drop"][1], "drop_bytes must equal 0")
 
-		// Device tx counter is the real pass signal: device_ectx_process_output
-		// increments tx when the packet is handed off to the NIC queue.
+		// size-2 vector: [0] = packets, [1] = bytes.
 		byDevName := dataplaneut.ValueCounters(h.SharedMemory().DPConfig(0).DeviceCounters("port0"))
-		require.Equal(t, uint64(1), byDevName["rx"][0], "device rx must equal 1")
-		require.Equal(t, uint64(1), byDevName["tx"][0], "device tx (pass) must equal 1")
-		require.Equal(t, pktSize, byDevName["rx"][1], "device rx_bytes must equal packet size")
-		require.Equal(t, pktSize, byDevName["tx"][1], "device tx_bytes (pass) must equal packet size")
+		require.Equal(t, uint64(1), byDevName["input_rx"][0], "device input_rx must equal 1")
+		require.Equal(t, uint64(1), byDevName["input_entry"][0], "device input_entry (handler output) must equal 1")
+		require.Equal(t, uint64(0), byDevName["input_tx"][0], "device input_tx (survived input handler) must equal 0")
+		require.Equal(t, uint64(0), byDevName["input_drop"][0], "device input_drop must equal 0")
+		require.Equal(t, uint64(1), byDevName["output_rx"][0], "device output_rx must equal 1")
+		require.Equal(t, uint64(1), byDevName["output_entry"][0], "device output_entry (handler output) must equal 1")
+		require.Equal(t, uint64(1), byDevName["output_tx"][0], "device output_tx (pass) must equal 1")
+		require.Equal(t, uint64(0), byDevName["output_drop"][0], "device output_drop must equal 0")
+		require.Equal(t, pktSize, byDevName["input_rx"][1], "device input_rx bytes must equal packet size")
+		require.Equal(t, pktSize, byDevName["input_entry"][1], "device input_entry bytes must equal packet size")
+		require.Equal(t, uint64(0), byDevName["input_tx"][1], "device input_tx bytes must equal 0")
+		require.Equal(t, uint64(0), byDevName["input_drop"][1], "device input_drop bytes must equal 0")
+		require.Equal(t, pktSize, byDevName["output_rx"][1], "device output_rx bytes must equal packet size")
+		require.Equal(t, pktSize, byDevName["output_entry"][1], "device output_entry bytes must equal packet size")
+		require.Equal(t, pktSize, byDevName["output_tx"][1], "device output_tx bytes (pass) must equal packet size")
+		require.Equal(t, uint64(0), byDevName["output_drop"][1], "device output_drop bytes must equal 0")
 	})
 
 	t.Run("drop", func(t *testing.T) {
@@ -642,13 +653,24 @@ func TestRoute_Counters(t *testing.T) {
 		require.Equal(t, uint64(0), byName["output"][1], "output_bytes must equal 0")
 		require.Equal(t, pktSize, byName["drop"][1], "drop_bytes must equal packet size")
 
-		// Device tx stays zero for a dropped packet: device_ectx_process_output
-		// is never reached, so no tx increment occurs.
+		// size-2 vector: [0] = packets, [1] = bytes.
 		byDevName := dataplaneut.ValueCounters(h.SharedMemory().DPConfig(0).DeviceCounters("port0"))
-		require.Equal(t, uint64(1), byDevName["rx"][0], "device rx must equal 1")
-		require.Equal(t, uint64(0), byDevName["tx"][0], "device tx must equal 0 — packet dropped")
-		require.Equal(t, pktSize, byDevName["rx"][1], "device rx_bytes must equal packet size")
-		require.Equal(t, uint64(0), byDevName["tx"][1], "device tx_bytes must equal 0")
+		require.Equal(t, uint64(1), byDevName["input_rx"][0], "device input_rx must equal 1")
+		require.Equal(t, uint64(1), byDevName["input_entry"][0], "device input_entry (handler output) must equal 1")
+		require.Equal(t, uint64(0), byDevName["input_tx"][0], "device input_tx must equal 0")
+		require.Equal(t, uint64(1), byDevName["input_drop"][0], "device input_drop must equal 1")
+		require.Equal(t, uint64(0), byDevName["output_rx"][0], "device output_rx must equal 0 — packet never reached output handler")
+		require.Equal(t, uint64(0), byDevName["output_entry"][0], "device output_entry must equal 0 — packet never reached output handler")
+		require.Equal(t, uint64(0), byDevName["output_tx"][0], "device output_tx must equal 0 — packet dropped")
+		require.Equal(t, uint64(0), byDevName["output_drop"][0], "device output_drop must equal 0")
+		require.Equal(t, pktSize, byDevName["input_rx"][1], "device input_rx bytes must equal packet size")
+		require.Equal(t, pktSize, byDevName["input_entry"][1], "device input_entry bytes must equal packet size")
+		require.Equal(t, uint64(0), byDevName["input_tx"][1], "device input_tx bytes must equal 0")
+		require.Equal(t, pktSize, byDevName["input_drop"][1], "device input_drop bytes must equal packet size")
+		require.Equal(t, uint64(0), byDevName["output_rx"][1], "device output_rx bytes must equal 0")
+		require.Equal(t, uint64(0), byDevName["output_entry"][1], "device output_entry bytes must equal 0")
+		require.Equal(t, uint64(0), byDevName["output_tx"][1], "device output_tx bytes must equal 0")
+		require.Equal(t, uint64(0), byDevName["output_drop"][1], "device output_drop bytes must equal 0")
 	})
 }
 

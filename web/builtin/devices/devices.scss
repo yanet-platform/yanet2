@@ -848,6 +848,40 @@
         }
     }
 
+    // Three-column metric grid (rx/tx/drop per direction).
+    .dv-metric-grid--3 {
+        grid-template-columns: repeat(3, 1fr);
+    }
+
+    .dv-metric-section {
+        margin-bottom: 22px;
+    }
+
+    .dv-metric-section-hd {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        font-size: 10.5px;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--fg-3);
+        margin-bottom: 10px;
+
+        .dv-metric-section-sub {
+            text-transform: none;
+            letter-spacing: 0;
+            font-weight: 400;
+            color: var(--fg-4, var(--fg-3));
+            font-size: 10px;
+        }
+    }
+
+    .dv-lbl-drop {
+        color: var(--red);
+        opacity: 0.85;
+    }
+
     .dv-metric {
         background: var(--bg-1);
         border: 1px solid var(--border);

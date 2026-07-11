@@ -27,10 +27,10 @@ export const DeviceListItem: React.FC<DeviceListItemProps> = ({
     const badge = manifest?.rowBadge?.(device);
     const subtitle = manifest?.rowSubtitle?.(device) ?? '— · —';
     const name = device.id.name || '';
-    const rxPps = counterData?.rx.pps ?? 0;
-    const txPps = counterData?.tx.pps ?? 0;
-    const rxHistory = history?.rx ?? [];
-    const txHistory = history?.tx ?? [];
+    const rxPps = counterData?.inputRx.pps ?? 0;
+    const txPps = counterData?.outputTx.pps ?? 0;
+    const rxHistory = history?.inputRx ?? [];
+    const txHistory = history?.outputTx ?? [];
 
     return (
         <button
