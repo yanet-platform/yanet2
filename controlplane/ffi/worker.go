@@ -26,6 +26,9 @@ type WorkerCounter struct {
 	TxBytes         uint64
 	RemoteRxPackets uint64
 	RemoteTxPackets uint64
+	LocalTxDrops    uint64
+	RemoteTxDrops   uint64
+	Drops           uint64
 }
 
 func (m *DPConfig) WorkerCounters() ([]WorkerCounter, error) {
@@ -50,6 +53,9 @@ func (m *DPConfig) WorkerCounters() ([]WorkerCounter, error) {
 	txHandle := counterByName["tx"]
 	remoteRxHandle := counterByName["remote_rx"]
 	remoteTxHandle := counterByName["remote_tx"]
+	localTxDropsHandle := counterByName["local_tx_drops"]
+	remoteTxDropsHandle := counterByName["remote_tx_drops"]
+	dropsHandle := counterByName["drops"]
 
 	workerCount := counters.instance_count
 	result := make([]WorkerCounter, workerCount)
@@ -97,6 +103,21 @@ func (m *DPConfig) WorkerCounters() ([]WorkerCounter, error) {
 			RemoteTxPackets: uint64(C.yanet_get_counter_value(
 				remoteTxHandle.value_handle,
 				workerCounterPacketsValueIdx,
+				idx,
+			)),
+			LocalTxDrops: uint64(C.yanet_get_counter_value(
+				localTxDropsHandle.value_handle,
+				workerCounterSingleValueIdx,
+				idx,
+			)),
+			RemoteTxDrops: uint64(C.yanet_get_counter_value(
+				remoteTxDropsHandle.value_handle,
+				workerCounterSingleValueIdx,
+				idx,
+			)),
+			Drops: uint64(C.yanet_get_counter_value(
+				dropsHandle.value_handle,
+				workerCounterSingleValueIdx,
 				idx,
 			)),
 		}

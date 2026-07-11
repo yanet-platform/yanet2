@@ -183,6 +183,9 @@ func (m *Counters) Workers(
 			TxBytes:         worker.TxBytes,
 			RemoteRxPackets: worker.RemoteRxPackets,
 			RemoteTxPackets: worker.RemoteTxPackets,
+			LocalTxDrops:    worker.LocalTxDrops,
+			RemoteTxDrops:   worker.RemoteTxDrops,
+			Drops:           worker.Drops,
 		})
 	}
 

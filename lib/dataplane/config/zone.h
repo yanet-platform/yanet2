@@ -71,6 +71,14 @@ struct dp_worker {
 	uint64_t *remote_rx_count;
 	uint64_t *remote_tx_count;
 
+	// Packets dropped because the local NIC TX burst could not accept them.
+	uint64_t *local_tx_drops;
+	// Packets dropped because the inter-worker data pipe was full or
+	// absent.
+	uint64_t *remote_tx_drops;
+	// Total packets dropped by this worker for any reason.
+	uint64_t *drop_count;
+
 	struct rte_mempool *rx_mempool;
 
 	uint64_t *rx_bursts;

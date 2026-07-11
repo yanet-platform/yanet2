@@ -60,7 +60,9 @@
 #include <rte_ethdev.h>
 
 static void
-worker_read(struct dataplane_worker *worker, struct packet_list *packets) {
+worker_read(
+	struct dataplane_worker *worker, struct packet_front *packet_front
+) {
 	struct worker_read_ctx *ctx = &worker->read_ctx;
 	struct rte_mbuf *mbufs[ctx->read_size];
 
@@ -85,9 +87,10 @@ worker_read(struct dataplane_worker *worker, struct packet_list *packets) {
 		if (parse_packet(packet)) {
 			struct rte_mbuf *mbuf = packet_to_mbuf(packet);
 			rte_pktmbuf_free(mbuf);
+			*(worker->dp_worker->drop_count) += 1;
 			continue;
 		}
-		packet_list_add(packets, packet);
+		packet_front_pending_input(packet_front, packet);
 	}
 }
 
@@ -127,6 +130,12 @@ worker_rx_pipe_pop_cb(void **item, size_t count, void *data) {
 		worker->port_id, worker->queue_id, mbufs, count
 	);
 	*(worker->dp_worker->tx_count) += written;
+
+	size_t dropped = count - written;
+	if (dropped > 0) {
+		*(worker->dp_worker->local_tx_drops) += dropped;
+		*(worker->dp_worker->drop_count) += dropped;
+	}
 
 	for (size_t idx = written; idx < count; ++idx) {
 		rte_pktmbuf_free(mbufs[idx]);
@@ -227,13 +236,20 @@ worker_submit_burst(
 
 	*(worker->dp_worker->tx_count) += written;
 
+	uint16_t dropped = count - written;
+	if (dropped > 0) {
+		*(worker->dp_worker->local_tx_drops) += dropped;
+	}
+
 	for (uint16_t idx = written; idx < count; ++idx) {
 		packet_list_add(failed, mbuf_to_packet(mbufs[idx]));
 	}
 }
 
 static void
-worker_write(struct dataplane_worker *worker, struct packet_list *packets) {
+worker_write(
+	struct dataplane_worker *worker, struct packet_front *packet_front
+) {
 	struct dp_config *dp_config = worker->instance->dp_config;
 
 	struct packet_list failed;
@@ -245,10 +261,15 @@ worker_write(struct dataplane_worker *worker, struct packet_list *packets) {
 	// Free all ready mbufs from tx write channels
 	worker_collect_from_port(worker);
 
+	// Drain the output list; transmitted packets are freed and failures
+	// are re-added via packet_front_output, so reset the counters first.
+	packet_front->output_count = 0;
+	packet_front->output_bytes = 0;
+
 	uint16_t to_write = 0;
 
 	struct packet *packet;
-	while ((packet = packet_list_pop(packets)) != NULL) {
+	while ((packet = packet_list_pop(&packet_front->output)) != NULL) {
 		if (to_write == ctx->write_size) {
 			worker_submit_burst(worker, mbufs, to_write, &failed);
 			to_write = 0;
@@ -265,6 +286,7 @@ worker_write(struct dataplane_worker *worker, struct packet_list *packets) {
 			++to_write;
 		} else {
 			if (worker_send_to_port(worker, packet)) {
+				*(worker->dp_worker->remote_tx_drops) += 1;
 				packet_list_add(&failed, packet);
 			} else {
 				*(worker->dp_worker->remote_tx_count) += 1;
@@ -276,7 +298,11 @@ worker_write(struct dataplane_worker *worker, struct packet_list *packets) {
 		worker_submit_burst(worker, mbufs, to_write, &failed);
 	}
 
-	packet_list_concat(packets, &failed);
+	// Move failures back to the output list, restoring counters.
+	struct packet *failed_packet;
+	while ((failed_packet = packet_list_pop(&failed)) != NULL) {
+		packet_front_output(packet_front, failed_packet);
+	}
 
 	// Read incoming mbufs from remote workers and write them to device
 	for (uint32_t pipe_idx = 0; pipe_idx < ctx->rx_pipe_count; ++pipe_idx) {
@@ -311,15 +337,14 @@ worker_loop_round(struct dataplane_worker *worker) {
 	struct packet_front packet_front;
 	packet_front_init(&packet_front);
 
-	worker_read(worker, &packet_front.pending_input);
+	worker_read(worker, &packet_front);
 
 	if (config_gen_ectx == NULL) {
-		worker_write(worker, &packet_front.drop);
+		worker_write(worker, &packet_front);
 
-		packet_list_concat(
-			&packet_front.drop, &packet_front.pending_input
-		);
+		packet_front_drop_pending_input(&packet_front);
 
+		*(worker->dp_worker->drop_count) += packet_front.drop_count;
 		dataplane_drop_packets(worker->dataplane, &packet_front.drop);
 
 		return;
@@ -329,14 +354,15 @@ worker_loop_round(struct dataplane_worker *worker) {
 		worker->dp_worker, cp_config_gen, config_gen_ectx, &packet_front
 	);
 
-	worker_write(worker, &packet_front.output);
+	worker_write(worker, &packet_front);
 
 	/*
-	 * `output_packets` now contains failed-to-transmit packets which
-	 * should be freed.
+	 * `output` now contains failed-to-transmit packets which should be
+	 * freed.
 	 */
-	packet_list_concat(&packet_front.drop, &packet_front.output);
+	packet_front_drop_output(&packet_front);
 
+	*(worker->dp_worker->drop_count) += packet_front.drop_count;
 	dataplane_drop_packets(worker->dataplane, &packet_front.drop);
 }
 
@@ -548,6 +574,12 @@ dataplane_worker_start(struct dataplane_worker *worker) {
 	dp_worker->remote_tx_count =
 		counter_get_address(4, worker_counter_storage) + 0;
 	dp_worker->rx_bursts = counter_get_address(5, worker_counter_storage);
+
+	dp_worker->local_tx_drops =
+		counter_get_address(6, worker_counter_storage);
+	dp_worker->remote_tx_drops =
+		counter_get_address(7, worker_counter_storage);
+	dp_worker->drop_count = counter_get_address(8, worker_counter_storage);
 
 	pthread_attr_t wrk_th_attr;
 	pthread_attr_init(&wrk_th_attr);

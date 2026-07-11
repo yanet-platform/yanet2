@@ -13,11 +13,11 @@
  * RX and TX are considered as separated stages of packet processing working
  * before and after pipeline processing.
  *
- * The count/byte counters for the input, output and drop lists live here
- * rather than on the packet lists themselves: they reflect the role a list
- * plays in the front. The input counters are a snapshot taken when output is
- * switched into input; output and drop counters accumulate as packets are
- * emitted. The pending lists are not counted.
+ * The count/byte counters for the input, output, drop and pending lists
+ * live here rather than on the packet lists themselves: they reflect the
+ * role a list plays in the front. The input counters are a snapshot taken
+ * when output is switched into input; output, drop and pending counters
+ * accumulate as packets are emitted.
  */
 struct packet_front {
 	struct packet_list pending_input;
@@ -26,6 +26,12 @@ struct packet_front {
 	struct packet_list input;
 	struct packet_list output;
 	struct packet_list drop;
+
+	uint64_t pending_input_count;
+	uint64_t pending_input_bytes;
+
+	uint64_t pending_output_count;
+	uint64_t pending_output_bytes;
 
 	uint64_t input_count;
 	uint64_t input_bytes;
@@ -45,6 +51,10 @@ packet_front_init(struct packet_front *packet_front) {
 	packet_list_init(&packet_front->output);
 	packet_list_init(&packet_front->drop);
 
+	packet_front->pending_input_count = 0;
+	packet_front->pending_input_bytes = 0;
+	packet_front->pending_output_count = 0;
+	packet_front->pending_output_bytes = 0;
 	packet_front->input_count = 0;
 	packet_front->input_bytes = 0;
 	packet_front->output_count = 0;
@@ -60,10 +70,32 @@ packet_front_merge(struct packet_front *dst, struct packet_front *src) {
 	packet_list_concat(&dst->pending_input, &src->pending_input);
 	packet_list_concat(&dst->pending_output, &src->pending_output);
 
+	dst->pending_input_count += src->pending_input_count;
+	dst->pending_input_bytes += src->pending_input_bytes;
+	dst->pending_output_count += src->pending_output_count;
+	dst->pending_output_bytes += src->pending_output_bytes;
 	dst->output_count += src->output_count;
 	dst->output_bytes += src->output_bytes;
 	dst->drop_count += src->drop_count;
 	dst->drop_bytes += src->drop_bytes;
+}
+
+static inline void
+packet_front_pending_input(
+	struct packet_front *packet_front, struct packet *packet
+) {
+	packet_list_add(&packet_front->pending_input, packet);
+	packet_front->pending_input_count += 1;
+	packet_front->pending_input_bytes += packet->data_len;
+}
+
+static inline void
+packet_front_pending_output(
+	struct packet_front *packet_front, struct packet *packet
+) {
+	packet_list_add(&packet_front->pending_output, packet);
+	packet_front->pending_output_count += 1;
+	packet_front->pending_output_bytes += packet->data_len;
 }
 
 static inline void
@@ -127,6 +159,21 @@ packet_front_drop_output(struct packet_front *packet_front) {
 	packet_front->drop_bytes += packet_front->output_bytes;
 	packet_front->output_count = 0;
 	packet_front->output_bytes = 0;
+}
+
+// Move the whole pending_input list into the drop list, transferring the
+// counters.
+//
+// Used by drain paths that discard all pending input (e.g. when no
+// pipeline is configured).
+static inline void
+packet_front_drop_pending_input(struct packet_front *packet_front) {
+	packet_list_concat(&packet_front->drop, &packet_front->pending_input);
+
+	packet_front->drop_count += packet_front->pending_input_count;
+	packet_front->drop_bytes += packet_front->pending_input_bytes;
+	packet_front->pending_input_count = 0;
+	packet_front->pending_input_bytes = 0;
 }
 
 static inline struct packet_list *

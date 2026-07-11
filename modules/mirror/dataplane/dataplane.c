@@ -23,7 +23,8 @@ static void
 mirror_clone(
 	struct dp_worker *worker,
 	struct packet *packet,
-	struct packet_list *pending,
+	struct packet_front *packet_front,
+	void (*add)(struct packet_front *, struct packet *),
 	uint16_t device_id
 ) {
 	struct packet *clone = worker_clone_packet(worker, packet);
@@ -32,7 +33,7 @@ mirror_clone(
 	}
 
 	clone->tx_device_id = device_id;
-	packet_list_add(pending, clone);
+	add(packet_front, clone);
 }
 
 static void
@@ -143,14 +144,16 @@ mirror_handle_packets(
 					mirror_clone(
 						dp_worker,
 						packet,
-						&packet_front->pending_input,
+						packet_front,
+						packet_front_pending_input,
 						device_id
 					);
 				} else if (target->mode == MIRROR_MODE_OUT) {
 					mirror_clone(
 						dp_worker,
 						packet,
-						&packet_front->pending_output,
+						packet_front,
+						packet_front_pending_output,
 						device_id
 					);
 				}

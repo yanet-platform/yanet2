@@ -275,8 +275,8 @@ dataplane_ut_new(const struct dataplane_ut_config *cfg) {
 	);
 	if (workers_array == NULL) {
 		LOG(ERROR,
-		    "dataplane_ut_new: failed to allocate workers pointer array"
-		);
+		    "dataplane_ut_new: failed to allocate workers pointer "
+		    "array");
 		dataplane_ut_free(ut);
 		return NULL;
 	}
@@ -394,14 +394,18 @@ dataplane_ut_run(
 	struct packet_front packet_front;
 	packet_front_init(&packet_front);
 
-	packet_list_concat(&packet_front.pending_input, input);
+	struct packet *packet;
+	while ((packet = packet_list_pop(input)) != NULL) {
+		packet_front_pending_input(&packet_front, packet);
+	}
 
 	packet_list_init(&result->output);
 	packet_list_init(&result->drop);
 
 	if (config_gen_ectx == NULL) {
 		// No active pipeline: drop everything.
-		packet_list_concat(&result->drop, &packet_front.pending_input);
+		packet_front_drop_pending_input(&packet_front);
+		packet_list_concat(&result->drop, &packet_front.drop);
 		return;
 	}
 

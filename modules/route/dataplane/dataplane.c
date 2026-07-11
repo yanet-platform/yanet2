@@ -166,7 +166,7 @@ route_handle_packets(
 
 		route_set_packet_destination(packet, route);
 		packet->tx_device_id = device_id;
-		packet_list_add(&packet_front->pending_output, packet);
+		packet_front_pending_output(packet_front, packet);
 	}
 }
 

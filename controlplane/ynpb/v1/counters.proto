@@ -68,6 +68,12 @@ message WorkerCounter {
   uint64 remote_rx_packets = 12;
   // Total packets sent to remote workers.
   uint64 remote_tx_packets = 13;
+  // Packets dropped because the local NIC TX burst could not accept them.
+  uint64 local_tx_drops = 14;
+  // Packets dropped because the inter-worker data pipe was full or absent.
+  uint64 remote_tx_drops = 15;
+  // Total packets dropped by this worker for any reason.
+  uint64 drops = 16;
 }
 
 // Requests a snapshot of raw cumulative per-port extended stats counters.
