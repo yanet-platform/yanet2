@@ -100,10 +100,9 @@ export const builtinFromConfig = (config: RuntimeConfig): Gateway => {
     };
 };
 
-/** Builds the full seed gateway list from a runtime config. */
-export const seedGatewaysFromConfig = (config: RuntimeConfig): Gateway[] => {
-    const builtin = builtinFromConfig(config);
-    const extras: Gateway[] = config.gateways.map((g, i) => ({
+/** Builds the extra (non-builtin) gateway list from a runtime config. */
+export const extraGatewaysFromConfig = (config: RuntimeConfig): Gateway[] => {
+    return config.gateways.map((g, i) => ({
         id: `seed-${i}-${g.host}-${g.numa}`,
         host: g.host,
         numa: g.numa,
@@ -111,5 +110,9 @@ export const seedGatewaysFromConfig = (config: RuntimeConfig): Gateway[] => {
         baseUrl: deriveBaseUrl(g.addr),
         status: 'online',
     }));
-    return [builtin, ...extras];
+};
+
+/** Builds the full seed gateway list from a runtime config. */
+export const seedGatewaysFromConfig = (config: RuntimeConfig): Gateway[] => {
+    return [builtinFromConfig(config), ...extraGatewaysFromConfig(config)];
 };

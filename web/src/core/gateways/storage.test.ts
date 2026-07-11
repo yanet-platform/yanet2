@@ -155,4 +155,49 @@ describe('loadFromStorage with runtime config', () => {
         const nonBuiltin = result.gateways.find((g) => !g.builtin);
         expect(nonBuiltin!.host).toBe('other');
     });
+
+    it('merges config extras into stored list for returning users', () => {
+        const config: RuntimeConfig = {
+            defaultBackendUrl: 'http://gw1:8081',
+            gateways: [
+                { host: 'gw2', numa: 0, addr: 'gw2:8081' },
+                { host: 'gw3', numa: 0, addr: 'gw3:8081' },
+            ],
+        };
+        const stored = {
+            gateways: [
+                { id: 'localhost', host: 'localhost', numa: 0, addr: 'same-origin', baseUrl: '', status: 'online' as const, builtin: true },
+                { id: 'gw-01', host: 'other', numa: 0, addr: '10.0.0.10:8080', baseUrl: 'http://10.0.0.10:8080', status: 'online' as const },
+            ],
+            activeId: 'localhost',
+        };
+        mockStorage.setItem(STORAGE_KEY, JSON.stringify(stored));
+        const result = loadFromStorage(config);
+        // builtin + stored non-builtin + 2 config extras
+        expect(result.gateways).toHaveLength(4);
+        expect(result.gateways[0].builtin).toBe(true);
+        expect(result.gateways[0].baseUrl).toBe('http://gw1:8081');
+        expect(result.gateways[1].host).toBe('other');
+        expect(result.gateways[2].host).toBe('gw2');
+        expect(result.gateways[3].host).toBe('gw3');
+    });
+
+    it('dedupes config extras by addr when stored list has matching entry', () => {
+        const config: RuntimeConfig = {
+            defaultBackendUrl: '',
+            gateways: [{ host: 'gw2', numa: 0, addr: 'gw2:8081' }],
+        };
+        const stored = {
+            gateways: [
+                { id: 'localhost', host: 'localhost', numa: 0, addr: 'same-origin', baseUrl: '', status: 'online' as const, builtin: true },
+                { id: 'gw-01', host: 'gw2', numa: 0, addr: 'gw2:8081', baseUrl: 'http://gw2:8081', status: 'online' as const },
+            ],
+            activeId: 'localhost',
+        };
+        mockStorage.setItem(STORAGE_KEY, JSON.stringify(stored));
+        const result = loadFromStorage(config);
+        // builtin + stored gw2 (config gw2 is deduped)
+        expect(result.gateways).toHaveLength(2);
+        expect(result.gateways[1].addr).toBe('gw2:8081');
+    });
 });

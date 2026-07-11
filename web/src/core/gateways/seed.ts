@@ -1,5 +1,5 @@
 import type { Gateway } from './types';
-import { builtinFromConfig, seedGatewaysFromConfig } from './runtimeConfig';
+import { builtinFromConfig, seedGatewaysFromConfig, extraGatewaysFromConfig } from './runtimeConfig';
 import type { RuntimeConfig } from './runtimeConfig';
 
 const EMPTY_CONFIG: RuntimeConfig = { defaultBackendUrl: '', gateways: [] };
@@ -19,5 +19,5 @@ export const BUILTIN_GATEWAY: Gateway = builtinFromConfig(EMPTY_CONFIG);
 
 export const SEED_ACTIVE_ID = 'localhost';
 
-export { builtinFromConfig, seedGatewaysFromConfig };
+export { builtinFromConfig, seedGatewaysFromConfig, extraGatewaysFromConfig };
 export type { RuntimeConfig, ConfigGateway } from './runtimeConfig';

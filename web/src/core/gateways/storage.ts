@@ -5,6 +5,7 @@ import {
     BUILTIN_GATEWAY,
     builtinFromConfig,
     seedGatewaysFromConfig,
+    extraGatewaysFromConfig,
 } from './seed';
 import type { RuntimeConfig } from './runtimeConfig';
 
@@ -16,25 +17,32 @@ interface StoredState {
 }
 
 /**
- * Ensures the builtin gateway is always the first entry.
+ * Merges stored gateways with the runtime config.
  *
- * If the stored list has no builtin entry (e.g. saved before this feature was
- * added), the builtin is prepended so the invariant holds after every load.
+ * When a config is provided:
+ * - The stored builtin is replaced with the config-derived one so
+ *   `defaultBackendUrl` changes take effect for returning users.
+ * - Config-defined extra gateways are appended, deduped by `addr` so
+ *   users who already added the same backend don't get a duplicate.
  *
- * When a runtime config is provided, any stored builtin is replaced with the
- * config-derived one so `defaultBackendUrl` changes take effect even for
- * users who previously saved a same-origin builtin.
+ * Without a config, the stored builtin is kept as-is (or the default
+ * same-origin one is prepended if missing).
  */
-const ensureBuiltin = (gateways: Gateway[], config?: RuntimeConfig): Gateway[] => {
+const mergeWithConfig = (gateways: Gateway[], config?: RuntimeConfig): Gateway[] => {
     const builtin = config ? builtinFromConfig(config) : BUILTIN_GATEWAY;
-    if (config) {
-        const rest = gateways.filter((g) => !g.builtin);
-        return [builtin, ...rest];
+
+    if (!config) {
+        if (gateways.some((g) => g.builtin === true)) {
+            return gateways;
+        }
+        return [builtin, ...gateways];
     }
-    if (gateways.some((g) => g.builtin === true)) {
-        return gateways;
-    }
-    return [builtin, ...gateways];
+
+    const rest = gateways.filter((g) => !g.builtin);
+    const existingAddrs = new Set(rest.map((g) => g.addr));
+    const extras = extraGatewaysFromConfig(config).filter((g) => !existingAddrs.has(g.addr));
+
+    return [builtin, ...rest, ...extras];
 };
 
 /** Load gateways and active id from localStorage, falling back to the seed on any error. */
@@ -55,7 +63,7 @@ export const loadFromStorage = (config?: RuntimeConfig): StoredState => {
             return { gateways: seed, activeId: SEED_ACTIVE_ID };
         }
         const state = parsed as StoredState;
-        return { gateways: ensureBuiltin(state.gateways, config), activeId: state.activeId };
+        return { gateways: mergeWithConfig(state.gateways, config), activeId: state.activeId };
     } catch {
         return { gateways: seed, activeId: SEED_ACTIVE_ID };
     }
