@@ -56,6 +56,11 @@ struct cp_module {
 	// Tx packet/byte counter (size 2: [packets, bytes])
 	uint64_t tx_counter_id;
 
+	// Pending-input packet/byte counter (size 2: [packets, bytes])
+	uint64_t pending_input_counter_id;
+	// Pending-output packet/byte counter (size 2: [packets, bytes])
+	uint64_t pending_output_counter_id;
+
 	// Runtime indices for the performance histogram counters.
 	// These indices map to the actual counter storage locations for
 	// the performance counters defined in cp_module->perf_counters_indices.

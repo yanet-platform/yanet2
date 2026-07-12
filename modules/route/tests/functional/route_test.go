@@ -606,6 +606,10 @@ func TestRoute_Counters(t *testing.T) {
 		require.Equal(t, pktSize, byName["input"][1], "input_bytes must equal packet size")
 		require.Equal(t, uint64(0), byName["output"][1], "output_bytes must equal 0 for device-dispatched packet")
 		require.Equal(t, uint64(0), byName["drop"][1], "drop_bytes must equal 0")
+		require.Equal(t, uint64(0), byName["pending_input"][0], "pipeline pending_input must equal 0")
+		require.Equal(t, uint64(1), byName["pending_output"][0], "pipeline pending_output must equal 1 — route defers packet to output path")
+		require.Equal(t, uint64(0), byName["pending_input"][1], "pipeline pending_input bytes must equal 0")
+		require.Equal(t, pktSize, byName["pending_output"][1], "pipeline pending_output bytes must equal packet size")
 
 		// size-2 vector: [0] = packets, [1] = bytes.
 		byDevName := dataplaneut.ValueCounters(h.SharedMemory().DPConfig(0).DeviceCounters("port0"))
@@ -625,6 +629,10 @@ func TestRoute_Counters(t *testing.T) {
 		require.Equal(t, pktSize, byDevName["output_entry"][1], "device output_entry bytes must equal packet size")
 		require.Equal(t, pktSize, byDevName["output_tx"][1], "device output_tx bytes (pass) must equal packet size")
 		require.Equal(t, uint64(0), byDevName["output_drop"][1], "device output_drop bytes must equal 0")
+		require.Equal(t, uint64(0), byDevName["input_pending_input"][0], "device input_pending_input must equal 0")
+		require.Equal(t, uint64(1), byDevName["input_pending_output"][0], "device input_pending_output must equal 1 — route defers packet to output path")
+		require.Equal(t, uint64(0), byDevName["output_pending_input"][0], "device output_pending_input must equal 0")
+		require.Equal(t, uint64(0), byDevName["output_pending_output"][0], "device output_pending_output must equal 0")
 	})
 
 	t.Run("drop", func(t *testing.T) {
@@ -652,6 +660,8 @@ func TestRoute_Counters(t *testing.T) {
 		require.Equal(t, pktSize, byName["input"][1], "input_bytes must equal packet size")
 		require.Equal(t, uint64(0), byName["output"][1], "output_bytes must equal 0")
 		require.Equal(t, pktSize, byName["drop"][1], "drop_bytes must equal packet size")
+		require.Equal(t, uint64(0), byName["pending_input"][0], "pipeline pending_input must equal 0")
+		require.Equal(t, uint64(0), byName["pending_output"][0], "pipeline pending_output must equal 0")
 
 		// size-2 vector: [0] = packets, [1] = bytes.
 		byDevName := dataplaneut.ValueCounters(h.SharedMemory().DPConfig(0).DeviceCounters("port0"))
@@ -671,6 +681,10 @@ func TestRoute_Counters(t *testing.T) {
 		require.Equal(t, uint64(0), byDevName["output_entry"][1], "device output_entry bytes must equal 0")
 		require.Equal(t, uint64(0), byDevName["output_tx"][1], "device output_tx bytes must equal 0")
 		require.Equal(t, uint64(0), byDevName["output_drop"][1], "device output_drop bytes must equal 0")
+		require.Equal(t, uint64(0), byDevName["input_pending_input"][0], "device input_pending_input must equal 0")
+		require.Equal(t, uint64(0), byDevName["input_pending_output"][0], "device input_pending_output must equal 0")
+		require.Equal(t, uint64(0), byDevName["output_pending_input"][0], "device output_pending_input must equal 0")
+		require.Equal(t, uint64(0), byDevName["output_pending_output"][0], "device output_pending_output must equal 0")
 	})
 }
 

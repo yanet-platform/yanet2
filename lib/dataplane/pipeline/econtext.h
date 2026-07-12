@@ -26,6 +26,8 @@ struct module_ectx {
 
 	struct counter_value_handle *rx_counter;
 	struct counter_value_handle *tx_counter;
+	struct counter_value_handle *pending_input_counter;
+	struct counter_value_handle *pending_output_counter;
 
 	struct counter_value_handle *perf_counters[MODULE_ECTX_PERF_COUNTERS];
 
@@ -59,6 +61,8 @@ struct chain_module_ectx {
 struct chain_ectx {
 	struct cp_chain *cp_chain;
 	struct counter_storage *counter_storage;
+	struct counter_value_handle *counter_packet_pending_input;
+	struct counter_value_handle *counter_packet_pending_output;
 	uint64_t length;
 	struct chain_module_ectx modules[];
 };
@@ -68,6 +72,8 @@ struct function_ectx {
 	struct counter_value_handle *counter_packet_in;
 	struct counter_value_handle *counter_packet_out;
 	struct counter_value_handle *counter_packet_drop;
+	struct counter_value_handle *counter_packet_pending_input;
+	struct counter_value_handle *counter_packet_pending_output;
 	struct counter_storage *counter_storage;
 	uint64_t chain_count;
 	struct chain_ectx **chains;
@@ -80,6 +86,8 @@ struct pipeline_ectx {
 	struct counter_value_handle *counter_packet_in;
 	struct counter_value_handle *counter_packet_out;
 	struct counter_value_handle *counter_packet_drop;
+	struct counter_value_handle *counter_packet_pending_input;
+	struct counter_value_handle *counter_packet_pending_output;
 	struct counter_storage *counter_storage;
 	uint64_t length;
 	struct function_ectx *functions[];
@@ -91,6 +99,8 @@ struct device_entry_ectx {
 	struct counter_value_handle *counter_packet_entry;
 	struct counter_value_handle *counter_packet_tx;
 	struct counter_value_handle *counter_packet_drop;
+	struct counter_value_handle *counter_packet_pending_input;
+	struct counter_value_handle *counter_packet_pending_output;
 	uint64_t pipeline_count;
 	struct pipeline_ectx **pipelines;
 	uint64_t pipeline_map_size;

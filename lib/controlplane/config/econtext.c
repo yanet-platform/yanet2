@@ -124,6 +124,18 @@ module_ectx_create(
 			cp_module->tx_counter_id, counter_storage
 		)
 	);
+	SET_OFFSET_OF(
+		&module_ectx->pending_input_counter,
+		counter_get_value_handle(
+			cp_module->pending_input_counter_id, counter_storage
+		)
+	);
+	SET_OFFSET_OF(
+		&module_ectx->pending_output_counter,
+		counter_get_value_handle(
+			cp_module->pending_output_counter_id, counter_storage
+		)
+	);
 
 	for (size_t counter_idx = 0; counter_idx < MODULE_ECTX_PERF_COUNTERS;
 	     ++counter_idx) {
@@ -280,6 +292,18 @@ chain_ectx_create(
 	}
 
 	SET_OFFSET_OF(&chain_ectx->counter_storage, counter_storage);
+	SET_OFFSET_OF(
+		&chain_ectx->counter_packet_pending_input,
+		counter_get_value_handle(
+			cp_chain->counter_packet_pending_input, counter_storage
+		)
+	);
+	SET_OFFSET_OF(
+		&chain_ectx->counter_packet_pending_output,
+		counter_get_value_handle(
+			cp_chain->counter_packet_pending_output, counter_storage
+		)
+	);
 
 	for (uint64_t idx = 0; idx < cp_chain->length; ++idx) {
 		struct cp_module *cp_module = cp_config_gen_lookup_module(
@@ -500,6 +524,20 @@ function_ectx_create(
 			cp_function->counter_packet_drop, counter_storage
 		)
 	);
+	SET_OFFSET_OF(
+		&function_ectx->counter_packet_pending_input,
+		counter_get_value_handle(
+			cp_function->counter_packet_pending_input,
+			counter_storage
+		)
+	);
+	SET_OFFSET_OF(
+		&function_ectx->counter_packet_pending_output,
+		counter_get_value_handle(
+			cp_function->counter_packet_pending_output,
+			counter_storage
+		)
+	);
 
 	uint64_t pos = 0;
 	for (uint64_t idx = 0; idx < cp_function->chain_count; ++idx) {
@@ -656,6 +694,20 @@ pipeline_ectx_create(
 			cp_pipeline->counter_packet_drop, counter_storage
 		)
 	);
+	SET_OFFSET_OF(
+		&pipeline_ectx->counter_packet_pending_input,
+		counter_get_value_handle(
+			cp_pipeline->counter_packet_pending_input,
+			counter_storage
+		)
+	);
+	SET_OFFSET_OF(
+		&pipeline_ectx->counter_packet_pending_output,
+		counter_get_value_handle(
+			cp_pipeline->counter_packet_pending_output,
+			counter_storage
+		)
+	);
 
 	for (uint64_t idx = 0; idx < cp_pipeline->length; ++idx) {
 		struct cp_function *cp_function = cp_config_gen_lookup_function(
@@ -793,6 +845,20 @@ device_entry_ectx_create(
 		&device_entry_ectx->counter_packet_drop,
 		counter_get_value_handle(
 			cp_device_entry->counter_packet_drop, counter_storage
+		)
+	);
+	SET_OFFSET_OF(
+		&device_entry_ectx->counter_packet_pending_input,
+		counter_get_value_handle(
+			cp_device_entry->counter_packet_pending_input,
+			counter_storage
+		)
+	);
+	SET_OFFSET_OF(
+		&device_entry_ectx->counter_packet_pending_output,
+		counter_get_value_handle(
+			cp_device_entry->counter_packet_pending_output,
+			counter_storage
 		)
 	);
 

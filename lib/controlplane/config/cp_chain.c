@@ -65,6 +65,32 @@ cp_chain_init(
 
 	strtcpy(self->name, cp_chain_config->name, sizeof(self->name));
 
+	self->counter_packet_pending_input = counter_registry_register(
+		&self->counter_registry, "pending_input", 2, err
+	);
+	if (self->counter_packet_pending_input == COUNTER_INVALID) {
+		yanet_error_add(
+			err,
+			"failed to register 'pending_input' counter for chain "
+			"'%s'",
+			cp_chain_config->name
+		);
+		goto err_out;
+	}
+
+	self->counter_packet_pending_output = counter_registry_register(
+		&self->counter_registry, "pending_output", 2, err
+	);
+	if (self->counter_packet_pending_output == COUNTER_INVALID) {
+		yanet_error_add(
+			err,
+			"failed to register 'pending_output' counter for chain "
+			"'%s'",
+			cp_chain_config->name
+		);
+		goto err_out;
+	}
+
 	for (uint64_t idx = 0; idx < cp_chain_config->length; ++idx) {
 		strtcpy(self->modules[idx].type,
 			cp_chain_config->modules[idx].type,

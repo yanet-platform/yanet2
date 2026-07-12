@@ -210,3 +210,23 @@ static inline uint64_t
 packet_front_drop_bytes(struct packet_front *packet_front) {
 	return packet_front->drop_bytes;
 }
+
+static inline uint64_t
+packet_front_pending_input_count(struct packet_front *packet_front) {
+	return packet_front->pending_input_count;
+}
+
+static inline uint64_t
+packet_front_pending_input_bytes(struct packet_front *packet_front) {
+	return packet_front->pending_input_bytes;
+}
+
+static inline uint64_t
+packet_front_pending_output_count(struct packet_front *packet_front) {
+	return packet_front->pending_output_count;
+}
+
+static inline uint64_t
+packet_front_pending_output_bytes(struct packet_front *packet_front) {
+	return packet_front->pending_output_bytes;
+}

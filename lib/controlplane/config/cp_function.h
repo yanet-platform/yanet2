@@ -32,6 +32,9 @@ struct cp_function {
 	uint64_t counter_packet_drop;
 	uint64_t counter_packet_in_hist;
 
+	uint64_t counter_packet_pending_input;
+	uint64_t counter_packet_pending_output;
+
 	char name[CP_PIPELINE_NAME_LEN];
 
 	uint64_t chain_count;

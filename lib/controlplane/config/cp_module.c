@@ -112,6 +112,33 @@ cp_module_init(
 		);
 		goto fail;
 	}
+	cp_module->pending_input_counter_id = counter_registry_register(
+		&cp_module->counter_registry, "pending_input", 2, err
+	);
+	if (cp_module->pending_input_counter_id == COUNTER_INVALID) {
+		yanet_error_add(
+			err,
+			"failed to register 'pending_input' counter for module "
+			"'%s:%s'",
+			module_type,
+			module_name
+		);
+		goto fail;
+	}
+	cp_module->pending_output_counter_id = counter_registry_register(
+		&cp_module->counter_registry, "pending_output", 2, err
+	);
+	if (cp_module->pending_output_counter_id == COUNTER_INVALID) {
+		yanet_error_add(
+			err,
+			"failed to register 'pending_output' counter for "
+			"module "
+			"'%s:%s'",
+			module_type,
+			module_name
+		);
+		goto fail;
+	}
 
 	if (cp_module_build_perf_counters(cp_module, err)) {
 		goto fail;

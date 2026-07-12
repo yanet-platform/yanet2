@@ -254,6 +254,32 @@ cp_device_init(
 		goto err_out;
 	}
 
+	input->counter_packet_pending_input = counter_registry_register(
+		&self->counter_registry, "input_pending_input", 2, err
+	);
+	if (input->counter_packet_pending_input == COUNTER_INVALID) {
+		yanet_error_add(
+			err,
+			"failed to register 'input_pending_input' counter for "
+			"device '%s'",
+			cfg->name
+		);
+		goto err_out;
+	}
+
+	input->counter_packet_pending_output = counter_registry_register(
+		&self->counter_registry, "input_pending_output", 2, err
+	);
+	if (input->counter_packet_pending_output == COUNTER_INVALID) {
+		yanet_error_add(
+			err,
+			"failed to register 'input_pending_output' counter for "
+			"device '%s'",
+			cfg->name
+		);
+		goto err_out;
+	}
+
 	output->counter_packet_rx = counter_registry_register(
 		&self->counter_registry, "output_rx", 2, err
 	);
@@ -301,6 +327,33 @@ cp_device_init(
 			err,
 			"failed to register 'output_drop' counter for device "
 			"'%s'",
+			cfg->name
+		);
+		goto err_out;
+	}
+
+	output->counter_packet_pending_input = counter_registry_register(
+		&self->counter_registry, "output_pending_input", 2, err
+	);
+	if (output->counter_packet_pending_input == COUNTER_INVALID) {
+		yanet_error_add(
+			err,
+			"failed to register 'output_pending_input' counter for "
+			"device '%s'",
+			cfg->name
+		);
+		goto err_out;
+	}
+
+	output->counter_packet_pending_output = counter_registry_register(
+		&self->counter_registry, "output_pending_output", 2, err
+	);
+	if (output->counter_packet_pending_output == COUNTER_INVALID) {
+		yanet_error_add(
+			err,
+			"failed to register 'output_pending_output' counter "
+			"for "
+			"device '%s'",
 			cfg->name
 		);
 		goto err_out;

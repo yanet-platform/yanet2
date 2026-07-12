@@ -78,6 +78,16 @@ module_ectx_process(
 		packet_front_output_count(packet_front),
 		packet_front_output_bytes(packet_front)
 	);
+	counter_add_packets_bytes(
+		ADDR_OF_NONNULL(&module_ectx->pending_input_counter),
+		packet_front_pending_input_count(packet_front),
+		packet_front_pending_input_bytes(packet_front)
+	);
+	counter_add_packets_bytes(
+		ADDR_OF_NONNULL(&module_ectx->pending_output_counter),
+		packet_front_pending_output_count(packet_front),
+		packet_front_pending_output_bytes(packet_front)
+	);
 }
 
 void
@@ -108,6 +118,17 @@ chain_ectx_process(
 		);
 		tsc_start = tsc_stop;
 	}
+
+	counter_add_packets_bytes(
+		ADDR_OF_NONNULL(&chain_ectx->counter_packet_pending_input),
+		packet_front_pending_input_count(packet_front),
+		packet_front_pending_input_bytes(packet_front)
+	);
+	counter_add_packets_bytes(
+		ADDR_OF_NONNULL(&chain_ectx->counter_packet_pending_output),
+		packet_front_pending_output_count(packet_front),
+		packet_front_pending_output_bytes(packet_front)
+	);
 }
 
 // Run the function's only chain.
@@ -220,6 +241,16 @@ function_ectx_process(
 		packet_front_drop_count(packet_front),
 		packet_front_drop_bytes(packet_front)
 	);
+	counter_add_packets_bytes(
+		ADDR_OF_NONNULL(&function_ectx->counter_packet_pending_input),
+		packet_front_pending_input_count(packet_front),
+		packet_front_pending_input_bytes(packet_front)
+	);
+	counter_add_packets_bytes(
+		ADDR_OF_NONNULL(&function_ectx->counter_packet_pending_output),
+		packet_front_pending_output_count(packet_front),
+		packet_front_pending_output_bytes(packet_front)
+	);
 }
 
 void
@@ -251,6 +282,16 @@ pipeline_ectx_process(
 		ADDR_OF_NONNULL(&pipeline_ectx->counter_packet_drop),
 		packet_front_drop_count(packet_front),
 		packet_front_drop_bytes(packet_front)
+	);
+	counter_add_packets_bytes(
+		ADDR_OF_NONNULL(&pipeline_ectx->counter_packet_pending_input),
+		packet_front_pending_input_count(packet_front),
+		packet_front_pending_input_bytes(packet_front)
+	);
+	counter_add_packets_bytes(
+		ADDR_OF_NONNULL(&pipeline_ectx->counter_packet_pending_output),
+		packet_front_pending_output_count(packet_front),
+		packet_front_pending_output_bytes(packet_front)
 	);
 }
 
@@ -394,6 +435,16 @@ device_ectx_process_entry(
 		ADDR_OF_NONNULL(&entry_ectx->counter_packet_drop),
 		packet_front_drop_count(packet_front),
 		packet_front_drop_bytes(packet_front)
+	);
+	counter_add_packets_bytes(
+		ADDR_OF_NONNULL(&entry_ectx->counter_packet_pending_input),
+		packet_front_pending_input_count(packet_front),
+		packet_front_pending_input_bytes(packet_front)
+	);
+	counter_add_packets_bytes(
+		ADDR_OF_NONNULL(&entry_ectx->counter_packet_pending_output),
+		packet_front_pending_output_count(packet_front),
+		packet_front_pending_output_bytes(packet_front)
 	);
 }
 

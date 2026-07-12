@@ -119,6 +119,32 @@ cp_function_init(
 		goto err_out;
 	}
 
+	self->counter_packet_pending_input = counter_registry_register(
+		&self->counter_registry, "pending_input", 2, err
+	);
+	if (self->counter_packet_pending_input == COUNTER_INVALID) {
+		yanet_error_add(
+			err,
+			"failed to register 'pending_input' counter for "
+			"function '%s'",
+			cp_function_config->name
+		);
+		goto err_out;
+	}
+
+	self->counter_packet_pending_output = counter_registry_register(
+		&self->counter_registry, "pending_output", 2, err
+	);
+	if (self->counter_packet_pending_output == COUNTER_INVALID) {
+		yanet_error_add(
+			err,
+			"failed to register 'pending_output' counter for "
+			"function '%s'",
+			cp_function_config->name
+		);
+		goto err_out;
+	}
+
 	for (uint64_t idx = 0; idx < cp_function_config->chain_count; ++idx) {
 		struct cp_chain *new_chain = cp_chain_new(
 			mctx, cp_function_config->chains[idx].chain->length
