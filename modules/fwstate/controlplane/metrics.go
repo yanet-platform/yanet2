@@ -2,6 +2,7 @@ package fwstate
 
 import (
 	"context"
+	"time"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/metrics"
@@ -87,12 +88,14 @@ func (m *FWStateService) collectMapStats() []*commonpb.Metric {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	now := time.Now()
+
 	var result []*commonpb.Metric
 	for name, config := range m.configs {
 		mapsStats := config.GetMapsStats()
 
-		result = append(result, collectMapStatsForAF(name, "ipv4", mapsStats.IPv4)...)
-		result = append(result, collectMapStatsForAF(name, "ipv6", mapsStats.IPv6)...)
+		result = append(result, collectMapStatsForAF(name, "ipv4", now, mapsStats.IPv4)...)
+		result = append(result, collectMapStatsForAF(name, "ipv6", now, mapsStats.IPv6)...)
 	}
 
 	return result
@@ -204,12 +207,20 @@ func (m *FWStateService) collectDataplaneMetrics() ([]*commonpb.Metric, error) {
 	return result, nil
 }
 
-// collectMapStatsForAF builds the gauge metric set for a single address
-// family of a single fwstate config.
-func collectMapStatsForAF(configName, af string, stats mapStats) []*commonpb.Metric {
+// collectMapStatsForAF builds the gauge metric set for a single address family
+// of a single fwstate config.
+func collectMapStatsForAF(configName, af string, now time.Time, stats mapStats) []*commonpb.Metric {
 	labels := []*commonpb.Label{
 		{Name: "config", Value: configName},
 		{Name: "af", Value: af},
+	}
+
+	// MaxDeadline is an absolute timestamp on the dataplane's monotonic clock.
+	// Export the remaining time-to-live (clamped at zero once the deadline has
+	// passed).
+	deadlineTTL := uint64(0)
+	if nowNS := uint64(now.UnixNano()); stats.MaxDeadline > nowNS {
+		deadlineTTL = stats.MaxDeadline - nowNS
 	}
 
 	return []*commonpb.Metric{
@@ -218,7 +229,7 @@ func collectMapStatsForAF(configName, af string, stats mapStats) []*commonpb.Met
 		makeGauge("fwstate_max_chain_length", float64(stats.MaxChainLength), labels...),
 		makeGauge("fwstate_layer_count", float64(stats.LayerCount), labels...),
 		makeGauge("fwstate_total_elements", float64(stats.TotalElements), labels...),
-		makeGauge("fwstate_max_deadline_ns", float64(stats.MaxDeadline), labels...),
+		makeGauge("fwstate_max_deadline_ns", float64(deadlineTTL), labels...),
 		makeGauge("fwstate_memory_bytes", float64(stats.MemoryUsed), labels...),
 	}
 }
