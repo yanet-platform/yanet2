@@ -47,6 +47,16 @@ func guestPathsForTemplate(snapshotName string) GuestPaths {
 	return DefaultGuestPaths()
 }
 
+// configureTemplate prepares every pool slot for the template it will start.
+func (p *VMPool) configureTemplate(templateOverlay string, snapshotName string) {
+	paths := guestPathsForTemplate(snapshotName)
+	for _, entry := range p.vms {
+		entry.manager.TemplateOverlay = templateOverlay
+		entry.manager.TemplateSnapshotName = snapshotName
+		entry.fw.Paths = paths
+	}
+}
+
 // runWithRecovery runs fn in the current goroutine, sending the result to ch.
 // If fn panics, the panic is recovered and reported as an error result.
 func (p *VMPool) runWithRecovery(idx int, ch chan<- poolResult, fn func() error) {
@@ -104,8 +114,6 @@ func NewVMPool(size int, baseName string, qemuImage string, bootedTemplate strin
 		}
 	}()
 
-	paths := guestPathsForTemplate(templateSnapshotName)
-
 	for i := range size {
 		name := baseName
 		if size > 1 {
@@ -120,7 +128,7 @@ func NewVMPool(size int, baseName string, qemuImage string, bootedTemplate strin
 		fw := &TestFramework{
 			qemu:  qemu,
 			log:   log.Named(name),
-			Paths: paths,
+			Paths: DefaultGuestPaths(),
 			socketClients: &socketClientsCache{
 				clients: make(map[int]*SocketClient),
 			},
@@ -233,11 +241,7 @@ func (p *VMPool) validateBootedTemplate() error {
 
 // startAllFromTemplate starts all slots from the given cached template.
 func (p *VMPool) startAllFromTemplate(templateOverlay string, snapshotName string) error {
-	// Point every slot at the template so Start() copies it.
-	for _, entry := range p.vms {
-		entry.manager.TemplateOverlay = templateOverlay
-		entry.manager.TemplateSnapshotName = snapshotName
-	}
+	p.configureTemplate(templateOverlay, snapshotName)
 
 	ch := make(chan poolResult, len(p.vms))
 	for i, entry := range p.vms {

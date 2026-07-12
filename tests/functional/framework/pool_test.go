@@ -5,23 +5,56 @@ import (
 	"testing"
 )
 
-func TestBaselinePoolUsesLocalGuestPaths(t *testing.T) {
-	paths := guestPathsForTemplate("baseline")
-	if !paths.LocalMode {
-		t.Fatal("baseline pool must use guest-local paths")
+func TestConfigureTemplateSetsGuestPathsForSelectedSnapshot(t *testing.T) {
+	pool := &VMPool{
+		vms: []*poolEntry{{
+			manager: &QEMUManager{},
+			fw:      &TestFramework{},
+		}},
 	}
-	if guestPathsForTemplate(BootedSnapshotName).LocalMode {
-		t.Fatal("booted pool must use 9P paths before local storage is prepared")
+	templateOverlay := "template.qcow2"
+
+	testCases := []struct {
+		name             string
+		snapshotName     string
+		expectedPaths    GuestPaths
+		expectedCommands []string
+	}{
+		{
+			name:             "baseline",
+			snapshotName:     "baseline",
+			expectedPaths:    LocalGuestPaths(),
+			expectedCommands: []string{"/tmp/yanet/forward.yaml", "/tmp/yanet/config/route0.yaml"},
+		},
+		{
+			name:             "booted fallback",
+			snapshotName:     BootedSnapshotName,
+			expectedPaths:    DefaultGuestPaths(),
+			expectedCommands: []string{"/mnt/config/forward.yaml", "/mnt/config/route0.yaml"},
+		},
 	}
 
-	fw := &TestFramework{Paths: paths}
-	commands := strings.Join(fw.CommonConfigCommands(), "\n")
-	for _, want := range []string{
-		"/tmp/yanet/forward.yaml",
-		"/tmp/yanet/config/route0.yaml",
-	} {
-		if !strings.Contains(commands, want) {
-			t.Errorf("common configuration commands do not contain %q", want)
-		}
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			pool.configureTemplate(templateOverlay, testCase.snapshotName)
+
+			entry := pool.vms[0]
+			if entry.manager.TemplateOverlay != templateOverlay {
+				t.Errorf("template overlay = %q, want %q", entry.manager.TemplateOverlay, templateOverlay)
+			}
+			if entry.manager.TemplateSnapshotName != testCase.snapshotName {
+				t.Errorf("template snapshot = %q, want %q", entry.manager.TemplateSnapshotName, testCase.snapshotName)
+			}
+			if entry.fw.Paths != testCase.expectedPaths {
+				t.Errorf("guest paths = %#v, want %#v", entry.fw.Paths, testCase.expectedPaths)
+			}
+
+			commands := strings.Join(entry.fw.CommonConfigCommands(), "\n")
+			for _, expectedCommand := range testCase.expectedCommands {
+				if !strings.Contains(commands, expectedCommand) {
+					t.Errorf("common configuration commands do not contain %q", expectedCommand)
+				}
+			}
+		})
 	}
 }
