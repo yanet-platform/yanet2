@@ -107,10 +107,10 @@ cp_module_init(
 	// Set agent offset
 	SET_OFFSET_OF(&cp_module->agent, agent);
 
-    // Initialize the counter registry. fwstate_module_config_new registers
-    // module-level counters right after cp_module_init, and
-    // counter_registry_register dereferences registry->memory_context (an
-    // offset pointer).
+	// Initialize the counter registry. fwstate_module_config_new registers
+	// module-level counters right after cp_module_init, and
+	// counter_registry_register dereferences registry->memory_context (an
+	// offset pointer).
 	if (counter_registry_init(
 		    &cp_module->counter_registry, &cp_module->memory_context, 0
 	    )) {
