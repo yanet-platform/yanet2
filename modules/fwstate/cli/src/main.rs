@@ -18,7 +18,7 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Status, codec::CompressionEncoding};
 use ync::{
-    client::{ConnectionArgs, LayeredChannel, Service},
+    client::{Connection, ConnectionArgs, LayeredChannel, Service},
     display::print_table_from_entries,
     errors::Error,
     output::{self, CommonFormat},
@@ -75,19 +75,17 @@ pub struct FWStateService {
 
 impl FWStateService {
     pub async fn new(connection: &ConnectionArgs) -> Result<Self, Error> {
-        let service = Service::connect(connection, SERVICE_NAME, |channel| {
+        let conn = Connection::connect(connection).await?;
+        let service = Service::new(&conn, SERVICE_NAME, |channel| {
             FwStateServiceClient::new(channel)
                 .send_compressed(CompressionEncoding::Gzip)
                 .accept_compressed(CompressionEncoding::Gzip)
-        })
-        .await?;
-
-        let metrics = Service::connect(connection, METRICS_SERVICE_NAME, |channel| {
+        });
+        let metrics = Service::new(&conn, METRICS_SERVICE_NAME, |channel| {
             MetricsServiceClient::new(channel)
                 .send_compressed(CompressionEncoding::Gzip)
                 .accept_compressed(CompressionEncoding::Gzip)
-        })
-        .await?;
+        });
 
         Ok(Self { service, metrics })
     }
