@@ -125,6 +125,12 @@ module_ectx_create(
 		)
 	);
 	SET_OFFSET_OF(
+		&module_ectx->drop_counter,
+		counter_get_value_handle(
+			cp_module->drop_counter_id, counter_storage
+		)
+	);
+	SET_OFFSET_OF(
 		&module_ectx->pending_input_counter,
 		counter_get_value_handle(
 			cp_module->pending_input_counter_id, counter_storage

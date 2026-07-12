@@ -55,6 +55,8 @@ struct cp_module {
 	uint64_t rx_counter_id;
 	// Tx packet/byte counter (size 2: [packets, bytes])
 	uint64_t tx_counter_id;
+	// Drop packet/byte counter (size 2: [packets, bytes])
+	uint64_t drop_counter_id;
 
 	// Pending-input packet/byte counter (size 2: [packets, bytes])
 	uint64_t pending_input_counter_id;

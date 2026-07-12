@@ -112,6 +112,18 @@ cp_module_init(
 		);
 		goto fail;
 	}
+	cp_module->drop_counter_id = counter_registry_register(
+		&cp_module->counter_registry, "drop", 2, err
+	);
+	if (cp_module->drop_counter_id == COUNTER_INVALID) {
+		yanet_error_add(
+			err,
+			"failed to register 'drop' counter for module '%s:%s'",
+			module_type,
+			module_name
+		);
+		goto fail;
+	}
 	cp_module->pending_input_counter_id = counter_registry_register(
 		&cp_module->counter_registry, "pending_input", 2, err
 	);

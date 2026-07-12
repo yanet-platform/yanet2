@@ -32,6 +32,19 @@ module_ectx_process(
 	struct packet_front *packet_front
 
 ) {
+	uint64_t pending_input_count =
+		packet_front_pending_input_count(packet_front);
+	uint64_t pending_input_bytes =
+		packet_front_pending_input_bytes(packet_front);
+
+	uint64_t pending_output_count =
+		packet_front_pending_output_count(packet_front);
+	uint64_t pending_output_bytes =
+		packet_front_pending_output_bytes(packet_front);
+
+	uint64_t drop_count = packet_front_drop_count(packet_front);
+	uint64_t drop_bytes = packet_front_drop_bytes(packet_front);
+
 	const size_t packets_count = packet_front_input_count(packet_front);
 
 	for (struct packet *packet = packet_front->input.first; packet != NULL;
@@ -79,14 +92,23 @@ module_ectx_process(
 		packet_front_output_bytes(packet_front)
 	);
 	counter_add_packets_bytes(
+		ADDR_OF_NONNULL(&module_ectx->drop_counter),
+		packet_front_drop_count(packet_front) - drop_count,
+		packet_front_drop_bytes(packet_front) - drop_bytes
+	);
+	counter_add_packets_bytes(
 		ADDR_OF_NONNULL(&module_ectx->pending_input_counter),
-		packet_front_pending_input_count(packet_front),
-		packet_front_pending_input_bytes(packet_front)
+		packet_front_pending_input_count(packet_front) -
+			pending_input_count,
+		packet_front_pending_input_bytes(packet_front) -
+			pending_input_bytes
 	);
 	counter_add_packets_bytes(
 		ADDR_OF_NONNULL(&module_ectx->pending_output_counter),
-		packet_front_pending_output_count(packet_front),
-		packet_front_pending_output_bytes(packet_front)
+		packet_front_pending_output_count(packet_front) -
+			pending_output_count,
+		packet_front_pending_output_bytes(packet_front) -
+			pending_output_bytes
 	);
 }
 
@@ -213,6 +235,19 @@ function_ectx_process(
 	struct function_ectx *function_ectx,
 	struct packet_front *packet_front
 ) {
+	uint64_t drop_count = packet_front_drop_count(packet_front);
+	uint64_t drop_bytes = packet_front_drop_bytes(packet_front);
+
+	uint64_t pending_input_count =
+		packet_front_pending_input_count(packet_front);
+	uint64_t pending_input_bytes =
+		packet_front_pending_input_bytes(packet_front);
+
+	uint64_t pending_output_count =
+		packet_front_pending_output_count(packet_front);
+	uint64_t pending_output_bytes =
+		packet_front_pending_output_bytes(packet_front);
+
 	counter_add_packets_bytes(
 		ADDR_OF_NONNULL(&function_ectx->counter_packet_in),
 		packet_front_output_count(packet_front),
@@ -238,18 +273,22 @@ function_ectx_process(
 	);
 	counter_add_packets_bytes(
 		ADDR_OF_NONNULL(&function_ectx->counter_packet_drop),
-		packet_front_drop_count(packet_front),
-		packet_front_drop_bytes(packet_front)
+		packet_front_drop_count(packet_front) - drop_count,
+		packet_front_drop_bytes(packet_front) - drop_bytes
 	);
 	counter_add_packets_bytes(
 		ADDR_OF_NONNULL(&function_ectx->counter_packet_pending_input),
-		packet_front_pending_input_count(packet_front),
-		packet_front_pending_input_bytes(packet_front)
+		packet_front_pending_input_count(packet_front) -
+			pending_input_count,
+		packet_front_pending_input_bytes(packet_front) -
+			pending_input_bytes
 	);
 	counter_add_packets_bytes(
 		ADDR_OF_NONNULL(&function_ectx->counter_packet_pending_output),
-		packet_front_pending_output_count(packet_front),
-		packet_front_pending_output_bytes(packet_front)
+		packet_front_pending_output_count(packet_front) -
+			pending_output_count,
+		packet_front_pending_output_bytes(packet_front) -
+			pending_output_bytes
 	);
 }
 

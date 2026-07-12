@@ -633,6 +633,17 @@ func TestRoute_Counters(t *testing.T) {
 		require.Equal(t, uint64(1), byDevName["input_pending_output"][0], "device input_pending_output must equal 1 — route defers packet to output path")
 		require.Equal(t, uint64(0), byDevName["output_pending_input"][0], "device output_pending_input must equal 0")
 		require.Equal(t, uint64(0), byDevName["output_pending_output"][0], "device output_pending_output must equal 0")
+
+		// The route module forwards a matched packet, so its own drop
+		// counter stays zero (the module-level drop uses a per-module
+		// delta, so it reflects only what this module dropped).
+		routeModulePath := dataplaneut.CounterPath{
+			Device: "port0", Pipeline: "test", Function: "test",
+			Chain: "test_chain", ModuleType: "route", ModuleName: "test",
+		}
+		dataplaneut.RequireModuleCounter(t, h, routeModulePath, "rx", 1, pktSize)
+		dataplaneut.RequireModuleCounter(t, h, routeModulePath, "tx", 0, 0)
+		dataplaneut.RequireModuleCounter(t, h, routeModulePath, "drop", 0, 0)
 	})
 
 	t.Run("drop", func(t *testing.T) {
@@ -685,6 +696,16 @@ func TestRoute_Counters(t *testing.T) {
 		require.Equal(t, uint64(0), byDevName["input_pending_output"][0], "device input_pending_output must equal 0")
 		require.Equal(t, uint64(0), byDevName["output_pending_input"][0], "device output_pending_input must equal 0")
 		require.Equal(t, uint64(0), byDevName["output_pending_output"][0], "device output_pending_output must equal 0")
+
+		// The route module drops an unmatched packet itself, so its own
+		// drop counter records it (rx in, drop out; tx stays zero).
+		routeModulePath := dataplaneut.CounterPath{
+			Device: "port0", Pipeline: "test", Function: "test",
+			Chain: "test_chain", ModuleType: "route", ModuleName: "test",
+		}
+		dataplaneut.RequireModuleCounter(t, h, routeModulePath, "rx", 1, pktSize)
+		dataplaneut.RequireModuleCounter(t, h, routeModulePath, "tx", 0, 0)
+		dataplaneut.RequireModuleCounter(t, h, routeModulePath, "drop", 1, pktSize)
 	})
 }
 

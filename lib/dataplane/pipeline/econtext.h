@@ -26,6 +26,7 @@ struct module_ectx {
 
 	struct counter_value_handle *rx_counter;
 	struct counter_value_handle *tx_counter;
+	struct counter_value_handle *drop_counter;
 	struct counter_value_handle *pending_input_counter;
 	struct counter_value_handle *pending_output_counter;
 
