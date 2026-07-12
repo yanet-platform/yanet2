@@ -42,7 +42,8 @@ func ipToUint32(s string) uint32 {
 func TestCursorForwardRead(t *testing.T) {
 	memCtx := testutils.NewMemoryContext("cursor_fwd", datasize.MB*64)
 	defer memCtx.Free()
-	cpModule := fwstateModuleConfig(memCtx)
+	cpModule, storage := fwstateModuleConfig(memCtx)
+	defer fwstateCounterStorageFree(storage)
 
 	now := uint64(GetCurrentTime())
 
@@ -76,7 +77,8 @@ func TestCursorForwardRead(t *testing.T) {
 func TestCursorBackwardRead(t *testing.T) {
 	memCtx := testutils.NewMemoryContext("cursor_bwd", datasize.MB*64)
 	defer memCtx.Free()
-	cpModule := fwstateModuleConfig(memCtx)
+	cpModule, storage := fwstateModuleConfig(memCtx)
+	defer fwstateCounterStorageFree(storage)
 
 	now := uint64(GetCurrentTime())
 
@@ -109,7 +111,8 @@ func TestCursorBackwardRead(t *testing.T) {
 func TestCursorExpiredFiltering(t *testing.T) {
 	memCtx := testutils.NewMemoryContext("cursor_exp", datasize.MB*64)
 	defer memCtx.Free()
-	cpModule := fwstateModuleConfig(memCtx)
+	cpModule, storage := fwstateModuleConfig(memCtx)
+	defer fwstateCounterStorageFree(storage)
 
 	now := uint64(GetCurrentTime())
 
@@ -164,7 +167,8 @@ func TestCursorExpiredFiltering(t *testing.T) {
 func TestCursorKeyDataCorrectness(t *testing.T) {
 	memCtx := testutils.NewMemoryContext("cursor_key", datasize.MB*64)
 	defer memCtx.Free()
-	cpModule := fwstateModuleConfig(memCtx)
+	cpModule, storage := fwstateModuleConfig(memCtx)
+	defer fwstateCounterStorageFree(storage)
 
 	now := uint64(GetCurrentTime())
 
@@ -196,7 +200,8 @@ func TestCursorKeyDataCorrectness(t *testing.T) {
 func TestCursorValueDataCorrectness(t *testing.T) {
 	memCtx := testutils.NewMemoryContext("cursor_val", datasize.MB*64)
 	defer memCtx.Free()
-	cpModule := fwstateModuleConfig(memCtx)
+	cpModule, storage := fwstateModuleConfig(memCtx)
+	defer fwstateCounterStorageFree(storage)
 
 	now := uint64(GetCurrentTime())
 
@@ -223,7 +228,8 @@ func TestCursorValueDataCorrectness(t *testing.T) {
 func TestCursorInvalidLayer(t *testing.T) {
 	memCtx := testutils.NewMemoryContext("cursor_inv", datasize.MB*64)
 	defer memCtx.Free()
-	cpModule := fwstateModuleConfig(memCtx)
+	cpModule, storage := fwstateModuleConfig(memCtx)
+	defer fwstateCounterStorageFree(storage)
 
 	now := uint64(GetCurrentTime())
 
@@ -237,7 +243,8 @@ func TestCursorInvalidLayer(t *testing.T) {
 func TestCursorPaging(t *testing.T) {
 	memCtx := testutils.NewMemoryContext("cursor_page", datasize.MB*64)
 	defer memCtx.Free()
-	cpModule := fwstateModuleConfig(memCtx)
+	cpModule, storage := fwstateModuleConfig(memCtx)
+	defer fwstateCounterStorageFree(storage)
 
 	now := uint64(GetCurrentTime())
 

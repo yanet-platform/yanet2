@@ -32,36 +32,63 @@ fwstate_handle_packets(
 	struct packet_front *packet_front
 );
 
-// Test wrapper for fwstate_handle_packets that constructs module_ectx from cp_module
-void
-test_fwstate_handle_packets(
-	struct dp_worker *dp_worker,
-	struct cp_module *cp_module,
-	struct packet_front *packet_front
-) {
-	struct module_ectx module_ectx = {};
-	SET_OFFSET_OF(&module_ectx.cp_module, cp_module);
-
-	// The dataplane resolves per-worker counter addresses via
-	// counter_get_address(), which dereferences module_ectx.counter_storage.
-	// Reproduce the real dataplane setup: link the registry (assigns counter
-	// offsets) and spawn a per-worker counter storage.
+// Link the module's counter registry and spawn a per-worker counter storage.
+//
+// The dataplane resolves per-worker counter addresses via counter_get_address(),
+// which dereferences module_ectx.counter_storage. Reproduce the real dataplane
+// setup once at config time and reuse the storage across handle calls so that
+// counter values accumulate across invocations.
+//
+// Returns NULL on failure (the error chain is freed internally).
+struct counter_storage *
+fwstate_test_counter_storage_setup(struct cp_module *cp_module) {
 	struct counter_registry *registry = &cp_module->counter_registry;
 
 	yanet_error *err = NULL;
 	if (counter_registry_link(registry, NULL, &err)) {
-		fwstate_handle_packets(dp_worker, &module_ectx, packet_front);
-		return;
+		// Setup failed: do not run the handler with counter_storage still
+		// zero — ADDR_OF_NONNULL on a zero offset yields the address of the
+		// field itself, so counter_get_address would read and write through
+		// a bogus stack pointer. Free the error chain and bail out.
+		yanet_error_free(err);
+		return NULL;
 	}
 
 	struct counter_storage *storage = counter_storage_spawn(
 		&cp_module->memory_context, NULL, registry
 	);
-	SET_OFFSET_OF(&module_ectx.counter_storage, storage);
+	if (storage == NULL) {
+		// Allocation failed: same bogus-pointer hazard as above if the zero
+		// offset were fed to SET_OFFSET_OF. counter_storage_free(NULL) is
+		// safe, but the handler must not run.
+		return NULL;
+	}
+
+	return storage;
+}
+
+// Free a counter storage allocated by fwstate_test_counter_storage_setup.
+// Safe to call with NULL.
+void
+fwstate_test_counter_storage_free(struct counter_storage *storage) {
+	counter_storage_free(storage);
+}
+
+// Test wrapper for fwstate_handle_packets that constructs module_ectx from
+// cp_module and a pre-spawned counter storage. The storage is owned by the
+// caller and reused across calls so counters accumulate.
+void
+test_fwstate_handle_packets(
+	struct dp_worker *dp_worker,
+	struct cp_module *cp_module,
+	struct counter_storage *counter_storage,
+	struct packet_front *packet_front
+) {
+	struct module_ectx module_ectx = {};
+	SET_OFFSET_OF(&module_ectx.cp_module, cp_module);
+	SET_OFFSET_OF(&module_ectx.counter_storage, counter_storage);
 
 	fwstate_handle_packets(dp_worker, &module_ectx, packet_front);
-
-	counter_storage_free(storage);
 }
 
 // Helper to get actual pointer from offset pointer
@@ -142,7 +169,11 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/testutils"
 )
 
-func fwstateModuleConfig(memCtx testutils.MemoryContext) *C.struct_cp_module {
+// fwstateModuleConfig creates a fwstate module config and spawns a per-worker
+// counter storage that is reused across fwstateHandlePackets calls so that
+// counter values accumulate. The returned storage must be freed with
+// [fwstateCounterStorageFree] (the caller owns it).
+func fwstateModuleConfig(memCtx testutils.MemoryContext) (*C.struct_cp_module, *C.struct_counter_storage) {
 	// Allocate agent in the memory context (it needs to be in the same memory space)
 	agent := (*C.struct_agent)(C.memory_balloc(
 		(*C.struct_memory_context)(memCtx.AsRawPtr()),
@@ -202,10 +233,23 @@ func fwstateModuleConfig(memCtx testutils.MemoryContext) *C.struct_cp_module {
 	m.cfg.sync_config.timeouts.udp = C.uint64_t(30e9)
 	m.cfg.sync_config.timeouts.default_ = C.uint64_t(16e9)
 
-	return cpModule
+	// Link the counter registry and spawn a per-worker counter storage once,
+	// so counter values accumulate across fwstateHandlePackets calls.
+	storage := C.fwstate_test_counter_storage_setup(cpModule)
+	if storage == nil {
+		panic("failed to spawn counter storage")
+	}
+
+	return cpModule, storage
 }
 
-func fwstateHandlePackets(cpModule *C.struct_cp_module, packets ...gopacket.Packet) (*dataplane.PacketFrontPayload, error) {
+// fwstateCounterStorageFree frees a counter storage returned by
+// fwstateModuleConfig. Safe to call with nil.
+func fwstateCounterStorageFree(storage *C.struct_counter_storage) {
+	C.fwstate_test_counter_storage_free(storage)
+}
+
+func fwstateHandlePackets(cpModule *C.struct_cp_module, storage *C.struct_counter_storage, packets ...gopacket.Packet) (*dataplane.PacketFrontPayload, error) {
 	pinner := runtime.Pinner{}
 	defer pinner.Unpin()
 
@@ -219,7 +263,7 @@ func fwstateHandlePackets(cpModule *C.struct_cp_module, packets ...gopacket.Pack
 		idx:          0,
 		current_time: C.clock_get_time_ns(nil),
 	}
-	C.test_fwstate_handle_packets(dpWorker, cpModule, (*C.struct_packet_front)(unsafe.Pointer(pf)))
+	C.test_fwstate_handle_packets(dpWorker, cpModule, storage, (*C.struct_packet_front)(unsafe.Pointer(pf)))
 	result := pf.Payload()
 	return &result, nil
 }
