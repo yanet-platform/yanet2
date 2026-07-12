@@ -74,6 +74,17 @@ const (
 	maxSyncPort uint32 = 65535
 )
 
+// FWStateServiceName and MetricsServiceName are the fully-qualified gRPC
+// service names exposed by this module, derived from the generated service
+// descriptors so they cannot drift from the proto definitions.
+//
+// They are used to scope the module's [grpcmetrics.ServerMetrics] to its own
+// services when several modules share a single [grpc.Server].
+var (
+	FWStateServiceName        = fwstatepb.FWStateService_ServiceDesc.ServiceName
+	FWStateMetricsServiceName = fwstatepb.MetricsService_ServiceDesc.ServiceName
+)
+
 // clampBatchSize returns a batch size that is within the allowed range:
 // zero is replaced with defaultListEntriesBatchSize, and values above
 // maxListEntriesBatchSize are clamped to maxListEntriesBatchSize.
@@ -150,8 +161,23 @@ func NewFWStateService(
 		log:         opts.Log,
 	}
 	if opts.MetricsOpts != nil {
-		metricsOpts := make([]grpcmetrics.Option, 0, len(opts.MetricsOpts)+2)
+		metricsOpts := make([]grpcmetrics.Option, 0, len(opts.MetricsOpts)+3)
 		metricsOpts = append(metricsOpts, grpcmetrics.WithLabeler(labeler))
+
+		// Scope the collector to this module's own services. This module is
+		// designed to be registered on a [grpc.Server] by a parent module,
+		// which may register other services on the same server and chain this
+		// interceptor onto every unary RPC. Without a service filter the
+		// collector would also record those foreign calls, and the resulting
+		// series would never be pruned: the labeler returns nil for foreign
+		// requests, so they carry no "config" label and the retention predicate
+		// keeps label-less series forever.
+		metricsOpts = append(metricsOpts, grpcmetrics.WithServiceFilter(
+			func(service string) bool {
+				return service == FWStateServiceName ||
+					service == FWStateMetricsServiceName
+			},
+		))
 		metricsOpts = append(metricsOpts, opts.MetricsOpts...)
 		metricsOpts = append(metricsOpts, grpcmetrics.WithRetention(m.retention))
 		m.metrics = grpcmetrics.New(metricsOpts...)

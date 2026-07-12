@@ -14,10 +14,8 @@ import (
 )
 
 const (
-	agentName                 = "acl"
-	serviceName               = "modules.acl.controlplane.aclpb.v1.ACLService"
-	fwstateServiceName        = "modules.fwstate.controlplane.fwstatepb.v1.FWStateService"
-	fwstateMetricsServiceName = "modules.fwstate.controlplane.fwstatepb.v1.MetricsService"
+	agentName   = "acl"
+	serviceName = "modules.acl.controlplane.aclpb.v1.ACLService"
 )
 
 // ACLModule is a control-plane component for ACL (Access Control List) module
@@ -95,8 +93,8 @@ func (m *ACLModule) ServicesNames() []string {
 	return []string{
 		serviceName,
 		aclpb.MetricsService_ServiceDesc.ServiceName,
-		fwstateServiceName,
-		fwstateMetricsServiceName,
+		fwstate.FWStateServiceName,
+		fwstate.FWStateMetricsServiceName,
 	}
 }
 
