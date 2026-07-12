@@ -68,29 +68,25 @@ func makeCounter(name string, value uint64, labels ...*commonpb.Label) *commonpb
 //   - grpc_method:   RPC name (gRPC metrics)
 //   - grpc_code:     gRPC status code string (grpc_server_handled_total only)
 func (m *FWStateService) Metrics() ([]*commonpb.Metric, error) {
-	// Collect map-stat gauges and dataplane counters under a single m.mu lock
-	// so both halves observe the same set of configs. The lock is released
-	// before collecting gRPC metrics: m.metrics.Collect() invokes the retention
-	// callback, which takes m.mu itself.
-	m.mu.Lock()
-	metrics := m.collectMapStats()
+	result := m.collectMapStats()
+
 	dpMetrics, err := m.collectDataplaneMetrics()
-	m.mu.Unlock()
 	if err != nil {
 		return nil, err
 	}
-	metrics = append(metrics, dpMetrics...)
+	result = append(result, dpMetrics...)
 	if m.metrics != nil {
-		metrics = append(metrics, m.metrics.Collect()...)
+		result = append(result, m.metrics.Collect()...)
 	}
-	return metrics, nil
+	return result, nil
 }
 
 // collectMapStats emits gauge metrics derived from the per-config map
 // statistics (GetMapsStats) for both IPv4 and IPv6 address families.
-//
-// The caller must hold m.mu.
 func (m *FWStateService) collectMapStats() []*commonpb.Metric {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	var result []*commonpb.Metric
 	for name, config := range m.configs {
 		mapsStats := config.GetMapsStats()
@@ -107,8 +103,6 @@ func (m *FWStateService) collectMapStats() []*commonpb.Metric {
 //
 // Counter metrics are omitted when all worker values are zero to reduce
 // output noise.
-//
-// The caller must hold m.mu.
 //
 // Labels:
 //   - config:   fwstate config name
