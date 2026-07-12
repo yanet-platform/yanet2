@@ -65,7 +65,7 @@ func NewACLModule(cfg *Config, log *zap.Logger) (*ACLModule, error) {
 		agent,
 		aclAdapter,
 		fwstate.WithLog(log),
-		fwstate.WithMetrics(),
+		fwstate.WithMetrics(fwstate.NewMetricsFactory()),
 	)
 	fwstateMetricsService := fwstate.NewMetricsService(fwstateService)
 

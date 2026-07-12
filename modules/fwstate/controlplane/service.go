@@ -22,12 +22,8 @@ type Option func(*options)
 
 // options holds the optional parameters for FWStateService construction.
 type options struct {
-	// MetricsOpts holds the extra grpcmetrics options (e.g. custom
-	// histogram buckets) to apply when collecting gRPC call metrics.
-	// A non-nil slice enables metrics collection; the labeler and
-	// retention predicate are bound by the service itself.
-	MetricsOpts []grpcmetrics.Option
-	Log         *zap.Logger
+	Metrics grpcmetrics.Factory
+	Log     *zap.Logger
 }
 
 func newOptions() *options {
@@ -43,20 +39,37 @@ func WithLog(log *zap.Logger) Option {
 	}
 }
 
-// WithMetrics enables collection of gRPC call metrics and attaches the supplied
-// extra grpcmetrics options (e.g. custom histogram buckets).
+// WithMetrics enables collection of gRPC call metrics using the supplied
+// factory.
 //
-// The [grpcmetrics.Labeler] and [grpcmetrics.Retention] predicate are bound by
-// the service itself, so callers do not need to know about them. When this
-// option is unset, no gRPC call metrics are collected.
-func WithMetrics(opts ...grpcmetrics.Option) Option {
+// The factory owns label extraction and bucketing; the service injects its own
+// retention provider at construction time. Use [NewMetricsFactory] to build a
+// factory scoped to this module's services.
+func WithMetrics(factory grpcmetrics.Factory) Option {
 	return func(o *options) {
-		// Always initialize to a non-nil slice so that a later
-		// MetricsOpts != nil check reliably detects that WithMetrics
-		// was called, even when no extra options were passed.
-		o.MetricsOpts = make([]grpcmetrics.Option, 0, len(opts))
-		o.MetricsOpts = append(o.MetricsOpts, opts...)
+		o.Metrics = factory
 	}
+}
+
+// NewMetricsFactory returns a [grpcmetrics.Factory] pre-bound to this module's
+// own labeler and service filter, applying any extra options (e.g. custom
+// histogram buckets) supplied by the caller.
+//
+// The [grpcmetrics.Retention] is injected by the service itself at construction
+// time, so it must not be passed here.
+func NewMetricsFactory(extra ...grpcmetrics.Option) grpcmetrics.Factory {
+	opts := make([]grpcmetrics.Option, 0, len(extra)+2)
+	opts = append(opts, grpcmetrics.WithLabeler(labeler))
+
+	// Scope the collector to this module's own services.
+	opts = append(opts, grpcmetrics.WithServiceFilter(
+		func(service string) bool {
+			return service == FWStateServiceName ||
+				service == FWStateMetricsServiceName
+		},
+	))
+	opts = append(opts, extra...)
+	return grpcmetrics.NewFactory(opts...)
 }
 
 const (
@@ -160,27 +173,8 @@ func NewFWStateService(
 		aclProvider: aclProvider,
 		log:         opts.Log,
 	}
-	if opts.MetricsOpts != nil {
-		metricsOpts := make([]grpcmetrics.Option, 0, len(opts.MetricsOpts)+3)
-		metricsOpts = append(metricsOpts, grpcmetrics.WithLabeler(labeler))
-
-		// Scope the collector to this module's own services. This module is
-		// designed to be registered on a [grpc.Server] by a parent module,
-		// which may register other services on the same server and chain this
-		// interceptor onto every unary RPC. Without a service filter the
-		// collector would also record those foreign calls, and the resulting
-		// series would never be pruned: the labeler returns nil for foreign
-		// requests, so they carry no "config" label and the retention predicate
-		// keeps label-less series forever.
-		metricsOpts = append(metricsOpts, grpcmetrics.WithServiceFilter(
-			func(service string) bool {
-				return service == FWStateServiceName ||
-					service == FWStateMetricsServiceName
-			},
-		))
-		metricsOpts = append(metricsOpts, opts.MetricsOpts...)
-		metricsOpts = append(metricsOpts, grpcmetrics.WithRetention(m.retention))
-		m.metrics = grpcmetrics.New(metricsOpts...)
+	if opts.Metrics != nil {
+		m.metrics = opts.Metrics(m.retention)
 	}
 
 	return m
