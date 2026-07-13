@@ -6,6 +6,7 @@ import (
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/metrics"
+	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	fwstatepb "github.com/yanet-platform/yanet2/modules/fwstate/controlplane/fwstatepb/v1"
 )
 
@@ -113,6 +114,8 @@ func (m *FWStateService) collectMapStats() []*commonpb.Metric {
 //   - pipeline: pipeline name
 //   - function: pipeline function name
 //   - chain:    pipeline chain name
+//   - counter:  dataplane counter name (fwstate_counter_packets /
+//     fwstate_counter_bytes only)
 func (m *FWStateService) collectDataplaneMetrics() ([]*commonpb.Metric, error) {
 	dpConfig := m.agent.DPConfig()
 	if dpConfig == nil {
@@ -144,67 +147,114 @@ func (m *FWStateService) collectDataplaneMetrics() ([]*commonpb.Metric, error) {
 		)
 
 		for _, counter := range counters {
-			var packets, bytes uint64
-			for _, workerVals := range counter.Values {
-				if len(workerVals) > 0 {
-					packets += workerVals[0]
-				}
-				if len(workerVals) > 1 {
-					bytes += workerVals[1]
-				}
-			}
-
-			if packets == 0 && bytes == 0 {
-				continue
-			}
-
-			switch counter.Name {
-			case "fwstate_sync":
-				result = append(result,
-					makeCounter("fwstate_sync_packets", packets, baseLabels...),
-					makeCounter("fwstate_sync_bytes", bytes, baseLabels...),
-				)
-			case "fwstate_passthrough":
-				result = append(result,
-					makeCounter("fwstate_passthrough_packets", packets, baseLabels...),
-					makeCounter("fwstate_passthrough_bytes", bytes, baseLabels...),
-				)
-			// The *_inserted / *_insert_failed counters track state-table
-			// entries (sync frames), not packets: a single sync packet
-			// carries multiple frames and each frame bumps the counter once.
-			// Export them with an _entries suffix so they are not rendered
-			// under a packet/byte column.
-			case "fwstate_sync_v4_inserted":
-				result = append(result,
-					makeCounter("fwstate_sync_v4_inserted_entries", packets, baseLabels...),
-				)
-			case "fwstate_sync_v6_inserted":
-				result = append(result,
-					makeCounter("fwstate_sync_v6_inserted_entries", packets, baseLabels...),
-				)
-			case "fwstate_sync_v4_insert_failed":
-				result = append(result,
-					makeCounter("fwstate_sync_v4_insert_failed_entries", packets, baseLabels...),
-				)
-			case "fwstate_sync_v6_insert_failed":
-				result = append(result,
-					makeCounter("fwstate_sync_v6_insert_failed_entries", packets, baseLabels...),
-				)
-			case "fwstate_external_dropped":
-				result = append(result,
-					makeCounter("fwstate_external_dropped_packets", packets, baseLabels...),
-					makeCounter("fwstate_external_dropped_bytes", bytes, baseLabels...),
-				)
-			case "fwstate_internal_forwarded":
-				result = append(result,
-					makeCounter("fwstate_internal_forwarded_packets", packets, baseLabels...),
-					makeCounter("fwstate_internal_forwarded_bytes", bytes, baseLabels...),
-				)
-			}
+			result = append(result, emitCounterMetrics(counter, baseLabels)...)
 		}
 	}
 
 	return result, nil
+}
+
+// emitCounterMetrics converts a single dataplane counter into metric series.
+//
+// The dataplane registers a set of well-known fwstate counters (see
+// fwstate_module_config_new) plus the generic per-module rx/tx/rx_bytes/tx_bytes
+// counters registered by cp_module_init. Each known counter is exported under
+// a dedicated metric name with the correct semantic suffix (_packets, _bytes or
+// _entries). Any other counter (one added in the future) is exported through a
+// generic pair labelled with the counter name so it is never silently dropped.
+//
+// Counter series are omitted when all worker values are zero to reduce output
+// noise.
+func emitCounterMetrics(counter ffi.CounterInfo, baseLabels []*commonpb.Label) []*commonpb.Metric {
+	var packets, bytes uint64
+	for _, workerVals := range counter.Values {
+		if len(workerVals) > 0 {
+			packets += workerVals[0]
+		}
+		if len(workerVals) > 1 {
+			bytes += workerVals[1]
+		}
+	}
+
+	if packets == 0 && bytes == 0 {
+		return nil
+	}
+
+	switch counter.Name {
+	case "fwstate_sync":
+		return []*commonpb.Metric{
+			makeCounter("fwstate_sync_packets", packets, baseLabels...),
+			makeCounter("fwstate_sync_bytes", bytes, baseLabels...),
+		}
+	case "fwstate_passthrough":
+		return []*commonpb.Metric{
+			makeCounter("fwstate_passthrough_packets", packets, baseLabels...),
+			makeCounter("fwstate_passthrough_bytes", bytes, baseLabels...),
+		}
+	// The *_inserted / *_insert_failed counters track state-table
+	// entries (sync frames), not packets: a single sync packet
+	// carries multiple frames and each frame bumps the counter once.
+	// Export them with an _entries suffix so they are not rendered
+	// under a packet/byte column.
+	case "fwstate_sync_v4_inserted":
+		return []*commonpb.Metric{
+			makeCounter("fwstate_sync_v4_inserted_entries", packets, baseLabels...),
+		}
+	case "fwstate_sync_v6_inserted":
+		return []*commonpb.Metric{
+			makeCounter("fwstate_sync_v6_inserted_entries", packets, baseLabels...),
+		}
+	case "fwstate_sync_v4_insert_failed":
+		return []*commonpb.Metric{
+			makeCounter("fwstate_sync_v4_insert_failed_entries", packets, baseLabels...),
+		}
+	case "fwstate_sync_v6_insert_failed":
+		return []*commonpb.Metric{
+			makeCounter("fwstate_sync_v6_insert_failed_entries", packets, baseLabels...),
+		}
+	case "fwstate_external_dropped":
+		return []*commonpb.Metric{
+			makeCounter("fwstate_external_dropped_packets", packets, baseLabels...),
+			makeCounter("fwstate_external_dropped_bytes", bytes, baseLabels...),
+		}
+	case "fwstate_internal_forwarded":
+		return []*commonpb.Metric{
+			makeCounter("fwstate_internal_forwarded_packets", packets, baseLabels...),
+			makeCounter("fwstate_internal_forwarded_bytes", bytes, baseLabels...),
+		}
+	// Generic per-module counters registered by cp_module_init for every
+	// module. They are single-valued: rx/tx hold packet counts, rx_bytes/
+	// tx_bytes hold byte counts. Export each under its own metric name so the
+	// value is not mislabelled as packets.
+	case "rx":
+		return []*commonpb.Metric{
+			makeCounter("fwstate_rx_packets", packets, baseLabels...),
+		}
+	case "tx":
+		return []*commonpb.Metric{
+			makeCounter("fwstate_tx_packets", packets, baseLabels...),
+		}
+	case "rx_bytes":
+		return []*commonpb.Metric{
+			makeCounter("fwstate_rx_bytes", packets, baseLabels...),
+		}
+	case "tx_bytes":
+		return []*commonpb.Metric{
+			makeCounter("fwstate_tx_bytes", packets, baseLabels...),
+		}
+	default:
+		// Any counter not listed above (e.g. one added in the future) is
+		// exported through a generic pair labelled with the counter name so it
+		// is never silently dropped.
+		counterLabels := append(
+			baseLabels,
+			&commonpb.Label{Name: "counter", Value: counter.Name},
+		)
+		return []*commonpb.Metric{
+			makeCounter("fwstate_counter_packets", packets, counterLabels...),
+			makeCounter("fwstate_counter_bytes", bytes, counterLabels...),
+		}
+	}
 }
 
 // collectMapStatsForAF builds the gauge metric set for a single address family
