@@ -285,6 +285,52 @@ func TestGatewayMetrics_FIBBuilt(t *testing.T) {
 	require.Equal(t, 5.0, filtered.GetGauge())
 }
 
+// TestGatewayMetrics_ModuleMetrics verifies that the route-module scrape is
+// merged into Collect output tagged with the gateway label, and that a
+// failed scrape is skipped without dropping the operator's own metrics.
+func TestGatewayMetrics_ModuleMetrics(t *testing.T) {
+	t.Run("Merged", func(t *testing.T) {
+		m := NewMetrics(newRIBStore(zap.NewNop()), neigh.NewNeighTable())
+		for _, name := range []string{"gw0", "gw1"} {
+			gateway := m.Gateway(name)
+			gateway.SetModuleMetricsSource(func(ctx context.Context) ([]*commonpb.Metric, error) {
+				return []*commonpb.Metric{
+					makeGauge("route_fib_entries", 42, makeLabel("config", "route0")),
+				}, nil
+			})
+		}
+
+		metricList := m.Collect()
+		for _, name := range []string{"gw0", "gw1"} {
+			entries := findMetric(metricList, "route_fib_entries", map[string]string{
+				"gateway": name,
+				"config":  "route0",
+			})
+			require.NotNil(t, entries)
+			require.Equal(t, 42.0, entries.GetGauge())
+		}
+	})
+
+	t.Run("ScrapeError", func(t *testing.T) {
+		m := NewMetrics(newRIBStore(zap.NewNop()), neigh.NewNeighTable())
+		gateway := m.Gateway("gw0")
+		gateway.SetModuleMetricsSource(func(ctx context.Context) ([]*commonpb.Metric, error) {
+			return nil, errors.New("gateway unreachable")
+		})
+
+		metricList := m.Collect()
+		require.Nil(t, findMetric(metricList, "route_fib_entries", map[string]string{
+			"gateway": "gw0",
+			"config":  "route0",
+		}))
+		require.NotNil(t, findMetric(
+			metricList,
+			"route_operator_gateway_apply_total",
+			map[string]string{"gateway": "gw0"},
+		))
+	})
+}
+
 // TestGatewayMetrics_ObserveApply verifies that ObserveApply updates the
 // apply counters and renders a non-empty duration histogram.
 func TestGatewayMetrics_ObserveApply(t *testing.T) {

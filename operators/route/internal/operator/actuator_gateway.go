@@ -19,13 +19,14 @@ import (
 // GatewayActuator applies route-operator state to a single Gateway via
 // the route module's UpdateFIB unary RPC.
 type GatewayActuator struct {
-	name        string
-	conn        *grpc.ClientConn
-	routes      routepb.RouteServiceClient
-	funcApplier *operator.FunctionApplier
-	devices     []string
-	onFIBBuilt  func(module string, stats FIBBuildStats)
-	log         *zap.Logger
+	name          string
+	conn          *grpc.ClientConn
+	routes        routepb.RouteServiceClient
+	moduleMetrics routepb.MetricsServiceClient
+	funcApplier   *operator.FunctionApplier
+	devices       []string
+	onFIBBuilt    func(module string, stats FIBBuildStats)
+	log           *zap.Logger
 }
 
 // NewGatewayActuator dials the Gateway endpoint and returns a
@@ -64,9 +65,10 @@ func NewGatewayActuator(
 	}
 
 	return &GatewayActuator{
-		name:   cfg.Name,
-		conn:   conn,
-		routes: routepb.NewRouteServiceClient(conn),
+		name:          cfg.Name,
+		conn:          conn,
+		routes:        routepb.NewRouteServiceClient(conn),
+		moduleMetrics: routepb.NewMetricsServiceClient(conn),
 		funcApplier: operator.NewFunctionApplier(
 			ynpb.NewFunctionServiceClient(conn),
 			spec,
@@ -84,6 +86,17 @@ func NewGatewayActuator(
 // Close releases the underlying gRPC connection.
 func (m *GatewayActuator) Close() error {
 	return m.conn.Close()
+}
+
+// ModuleMetrics fetches the route module's metrics snapshot through the
+// gateway connection.
+func (m *GatewayActuator) ModuleMetrics(ctx context.Context) ([]*commonpb.Metric, error) {
+	resp, err := m.moduleMetrics.GetMetrics(ctx, &commonpb.GetMetricsRequest{})
+	if err != nil {
+		return nil, err
+	}
+
+	return resp.GetMetrics(), nil
 }
 
 // Apply builds and pushes the FIB for each module config to the gateway,

@@ -1,14 +1,22 @@
 package operator
 
 import (
+	"context"
 	"sync"
 	"time"
+
+	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/metrics"
 	"github.com/yanet-platform/yanet2/common/go/operator"
 	"github.com/yanet-platform/yanet2/operators/route/internal/discovery/neigh"
 )
+
+// moduleMetricsTimeout bounds the route-module metrics scrape performed
+// during Collect.
+const moduleMetricsTimeout = 5 * time.Second
 
 // applyDurationBounds are the histogram bucket upper bounds, in seconds,
 // used for per-gateway apply latency.
@@ -48,6 +56,8 @@ type Metrics struct {
 
 	gatewaysMu sync.Mutex
 	gateways   map[string]*GatewayMetrics
+
+	log *zap.Logger
 }
 
 // NewMetrics constructs the Metrics sink from the operator-owned
@@ -71,6 +81,7 @@ func NewMetrics(ribs *RIBStore, neighTable *neigh.NeighTable, options ...Metrics
 		ribSessionStarts:      metrics.NewMetricMap[*metrics.Counter](),
 		ribSessionEnds:        metrics.NewMetricMap[*metrics.Counter](),
 		gateways:              map[string]*GatewayMetrics{},
+		log:                   opts.Log,
 	}
 }
 
@@ -85,14 +96,25 @@ type MetricsFactory func(ribs *RIBStore, neighTable *neigh.NeighTable, options .
 // metricsOptions holds the configurable toggles for NewMetrics.
 type metricsOptions struct {
 	NetlinkMonitorEnabled bool
+	Log                   *zap.Logger
 }
 
 func newMetricsOptions() *metricsOptions {
-	return &metricsOptions{}
+	return &metricsOptions{
+		Log: zap.NewNop(),
+	}
 }
 
 // MetricsOption configures NewMetrics.
 type MetricsOption func(*metricsOptions)
+
+// WithMetricsLog sets the logger used to report best-effort collection
+// failures, such as an unreachable route module during a metrics scrape.
+func WithMetricsLog(log *zap.Logger) MetricsOption {
+	return func(o *metricsOptions) {
+		o.Log = log
+	}
+}
 
 // WithNetlinkMonitorMetrics enables the netlink-monitor health metric
 // family.
@@ -192,7 +214,7 @@ func (m *Metrics) Gateway(name string) *GatewayMetrics {
 		return g
 	}
 
-	g := newGatewayMetrics(name)
+	g := newGatewayMetrics(name, m.log)
 	m.gateways[name] = g
 	return g
 }
@@ -277,8 +299,24 @@ func (m *Metrics) Collect() []*commonpb.Metric {
 	}
 	m.gatewaysMu.Unlock()
 
-	for _, g := range gateways {
+	// Scrape every gateway's route module concurrently under one shared
+	// deadline.
+	ctx, cancel := context.WithTimeout(context.Background(), moduleMetricsTimeout)
+	defer cancel()
+
+	moduleMetrics := make([][]*commonpb.Metric, len(gateways))
+	var group errgroup.Group
+	for idx, g := range gateways {
+		group.Go(func() error {
+			moduleMetrics[idx] = g.collectModuleMetrics(ctx)
+			return nil
+		})
+	}
+	_ = group.Wait()
+
+	for idx, g := range gateways {
 		out = append(out, g.collect()...)
+		out = append(out, moduleMetrics[idx]...)
 	}
 
 	return out
@@ -306,15 +344,29 @@ type GatewayMetrics struct {
 
 	fibMu sync.Mutex
 	fib   map[string]*fibGauges
+
+	moduleMetrics func(ctx context.Context) ([]*commonpb.Metric, error)
+
+	log *zap.Logger
 }
 
 // newGatewayMetrics constructs the metrics sink for a single gateway.
-func newGatewayMetrics(name string) *GatewayMetrics {
+func newGatewayMetrics(name string, log *zap.Logger) *GatewayMetrics {
 	return &GatewayMetrics{
 		name:          name,
 		applyDuration: metrics.NewHistogram(applyDurationBounds),
 		fib:           map[string]*fibGauges{},
+		log:           log,
 	}
+}
+
+// SetModuleMetricsSource wires the route-module metrics scrape reached
+// through this gateway.
+//
+// The source is fetched synchronously during Collect; a nil source (the
+// default) leaves the route-module metrics out of the operator's output.
+func (m *GatewayMetrics) SetModuleMetricsSource(fn func(ctx context.Context) ([]*commonpb.Metric, error)) {
+	m.moduleMetrics = fn
 }
 
 // ObserveApply records the outcome and duration of one Apply call.
@@ -370,6 +422,33 @@ func (m *GatewayMetrics) collect() []*commonpb.Metric {
 	}
 
 	return out
+}
+
+// collectModuleMetrics scrapes the route module reached through this
+// gateway and returns its metrics tagged with the gateway label.
+//
+// The scrape is best-effort: a failure is logged and yields no metrics so
+// the operator's own metrics still render.
+func (m *GatewayMetrics) collectModuleMetrics(ctx context.Context) []*commonpb.Metric {
+	if m.moduleMetrics == nil {
+		return nil
+	}
+
+	moduleMetrics, err := m.moduleMetrics(ctx)
+	if err != nil {
+		m.log.Warn("failed to collect route module metrics",
+			zap.String("gateway", m.name),
+			zap.Error(err),
+		)
+		return nil
+	}
+
+	gateway := makeLabel("gateway", m.name)
+	for _, metric := range moduleMetrics {
+		metric.Labels = append(metric.Labels, gateway)
+	}
+
+	return moduleMetrics
 }
 
 func makeLabel(name, value string) *commonpb.Label {

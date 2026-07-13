@@ -80,7 +80,7 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 		return nil, fmt.Errorf("failed to create static neighbour source: %w", err)
 	}
 
-	metricsOptions := []MetricsOption{}
+	metricsOptions := []MetricsOption{WithMetricsLog(log)}
 	if !cfg.NetlinkMonitor.Disabled {
 		metricsOptions = append(metricsOptions, WithNetlinkMonitorMetrics())
 	}
@@ -176,6 +176,10 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 			}
 			return nil, fmt.Errorf("failed to construct gateway actuator %q: %w", gw.Name, err)
 		}
+
+		// Surface the route module's own metrics (installed FIB size, gRPC
+		// stats) through the gateway this actuator already dials.
+		gatewayMetrics.SetModuleMetricsSource(actuator.ModuleMetrics)
 
 		// Wrap each actuator so that apply outcomes drive the per-gateway apply
 		// metrics, then so that they drive the per-gateway fib readiness scope.
