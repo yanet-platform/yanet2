@@ -384,14 +384,17 @@ impl FWStateService {
             .await
             .map_err(self.metrics.status("metrics"))?
             .into_inner();
-        let label_filters: Vec<(&str, &str)> = cmd
-            .labels
-            .iter()
-            .filter_map(|s| {
-                let mut it = s.splitn(2, '=');
-                Some((it.next()?, it.next()?))
-            })
-            .collect();
+        let mut label_filters: Vec<(&str, &str)> = Vec::with_capacity(cmd.labels.len());
+        for s in &cmd.labels {
+            match s.split_once('=') {
+                Some(kv) => label_filters.push(kv),
+                None => {
+                    return Err(self
+                        .metrics
+                        .invalid("metrics", format!("invalid label filter {s:?}, expected KEY=VALUE")));
+                }
+            }
+        }
 
         let metrics: Vec<Metric> = response
             .metrics
@@ -755,62 +758,66 @@ fn print_metrics_table(metrics: &[Metric]) {
         let mut pair_order: Vec<String> = Vec::new();
         let mut pair_map: HashMap<String, CounterPair> = HashMap::new();
 
+        // Generic counters (the default arm of emitCounterMetrics) are all
+        // exported under the shared names fwstate_counter_packets /
+        // fwstate_counter_bytes and distinguished only by the "counter" label.
+        // After stripping the fwstate_ prefix and the _packets/_bytes suffix
+        // they all collapse to the same base "counter", so the pair key must
+        // include the "counter" label value to keep them as separate rows
+        // instead of overwriting each other (last write wins). Dedicated
+        // counters carry no "counter" label, so the suffix is empty and their
+        // base is unaffected.
         for m in counters {
             let val = m.value.unwrap_or(0.0) as u64;
             let stripped = m.name.strip_prefix("fwstate_").unwrap_or(&m.name);
-            if let Some(base) = stripped.strip_suffix("_packets") {
-                let pair = pair_map.entry(base.to_string()).or_insert_with(|| {
-                    pair_order.push(base.to_string());
-                    CounterPair {
-                        display: metric_display_name(base),
-                        packets: None,
-                        bytes: None,
-                        entries: None,
-                    }
-                });
-                pair.packets = Some(val);
-            } else if let Some(base) = stripped.strip_suffix("_bytes") {
-                let pair = pair_map.entry(base.to_string()).or_insert_with(|| {
-                    pair_order.push(base.to_string());
-                    CounterPair {
-                        display: metric_display_name(base),
-                        packets: None,
-                        bytes: None,
-                        entries: None,
-                    }
-                });
-                pair.bytes = Some(val);
-            } else if let Some(base) = stripped.strip_suffix("_entries") {
-                // State-table entry counters (e.g. sync insert counters)
-                // count frames, not packets/bytes; render under Entries.
-                let pair = pair_map.entry(base.to_string()).or_insert_with(|| {
-                    pair_order.push(base.to_string());
-                    CounterPair {
-                        display: metric_display_name(base),
-                        packets: None,
-                        bytes: None,
-                        entries: None,
-                    }
-                });
-                pair.entries = Some(val);
+            let counter_label = m.label_value("counter").unwrap_or("");
+
+            // Determine the semantic suffix and the base name shared by the
+            // packets/bytes series of the same counter. The pair key and the
+            // display name must be built from the base (suffix stripped),
+            // otherwise fwstate_rx_packets and fwstate_rx_bytes get different
+            // keys and end up on two separate rows instead of one.
+            let (base, is_packets, is_bytes) = if let Some(b) = stripped.strip_suffix("_packets") {
+                (b, true, false)
+            } else if let Some(b) = stripped.strip_suffix("_bytes") {
+                (b, false, true)
             } else {
-                let pair = pair_map.entry(stripped.to_string()).or_insert_with(|| {
-                    pair_order.push(stripped.to_string());
-                    CounterPair {
-                        display: metric_display_name(stripped),
-                        packets: None,
-                        bytes: None,
-                        entries: None,
-                    }
-                });
+                (stripped, false, false)
+            };
+
+            let display = if counter_label.is_empty() {
+                metric_display_name(base)
+            } else {
+                metric_display_name(counter_label)
+            };
+            let pair_key = format!("{base}\0{counter_label}");
+
+            let pair = pair_map.entry(pair_key.clone()).or_insert_with(|| {
+                pair_order.push(pair_key.clone());
+                CounterPair {
+                    display,
+                    packets: None,
+                    bytes: None,
+                    entries: None,
+                }
+            });
+
+            if is_packets {
+                pair.packets = Some(val);
+            } else if is_bytes {
+                pair.bytes = Some(val);
+            } else {
+                // State-table entry counters (e.g. sync insert counters) and
+                // any unsuffixed counter count frames/items, not
+                // packets/bytes; render under Entries.
                 pair.entries = Some(val);
             }
         }
 
         let rows: Vec<CounterRow> = pair_order
             .iter()
-            .map(|base| {
-                let p = &pair_map[base];
+            .map(|pair_key| {
+                let p = &pair_map[pair_key];
                 CounterRow {
                     counter: p.display.clone(),
                     packets: p.packets.map(format_number).unwrap_or_else(|| "-".into()),

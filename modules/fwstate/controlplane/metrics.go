@@ -157,11 +157,15 @@ func (m *FWStateService) collectDataplaneMetrics() ([]*commonpb.Metric, error) {
 // emitCounterMetrics converts a single dataplane counter into metric series.
 //
 // The dataplane registers a set of well-known fwstate counters (see
-// fwstate_module_config_new) plus the generic per-module rx/tx/rx_bytes/tx_bytes
-// counters registered by cp_module_init. Each known counter is exported under
-// a dedicated metric name with the correct semantic suffix (_packets, _bytes or
-// _entries). Any other counter (one added in the future) is exported through a
-// generic pair labelled with the counter name so it is never silently dropped.
+// fwstate_module_config_new) plus the generic per-module counters registered
+// by cp_module_init: rx, tx, drop, pending_input, pending_output (each a
+// size-2 [packets, bytes] vector) and hist_0..hist_5 (latency histograms, see
+// skipHistCounters). Each known counter is exported under a dedicated metric
+// name with the correct semantic suffix (_packets, _bytes or _entries). The
+// histogram counters are skipped entirely (proper histogram export is a
+// separate task). Any other counter (one added in the future) is exported
+// through a generic pair labelled with the counter name so it is never
+// silently dropped.
 //
 // Counter series are omitted when all worker values are zero to reduce output
 // noise.
@@ -223,25 +227,39 @@ func emitCounterMetrics(counter ffi.CounterInfo, baseLabels []*commonpb.Label) [
 			makeCounter("fwstate_internal_forwarded_bytes", bytes, baseLabels...),
 		}
 	// Generic per-module counters registered by cp_module_init for every
-	// module. They are single-valued: rx/tx hold packet counts, rx_bytes/
-	// tx_bytes hold byte counts. Export each under its own metric name so the
-	// value is not mislabelled as packets.
+	// module.
 	case "rx":
 		return []*commonpb.Metric{
 			makeCounter("fwstate_rx_packets", packets, baseLabels...),
+			makeCounter("fwstate_rx_bytes", bytes, baseLabels...),
 		}
 	case "tx":
 		return []*commonpb.Metric{
 			makeCounter("fwstate_tx_packets", packets, baseLabels...),
+			makeCounter("fwstate_tx_bytes", bytes, baseLabels...),
 		}
-	case "rx_bytes":
+	// drop counts packets the module dropped itself. For fwstate this is
+	// meaningful: external sync packets are dropped when they cannot be
+	// inserted, so it deserves a dedicated pair like the others rather than
+	// falling through to the generic arm.
+	case "drop":
 		return []*commonpb.Metric{
-			makeCounter("fwstate_rx_bytes", packets, baseLabels...),
+			makeCounter("fwstate_drop_packets", packets, baseLabels...),
+			makeCounter("fwstate_drop_bytes", bytes, baseLabels...),
 		}
-	case "tx_bytes":
+	case "pending_input":
 		return []*commonpb.Metric{
-			makeCounter("fwstate_tx_bytes", packets, baseLabels...),
+			makeCounter("fwstate_pending_input_packets", packets, baseLabels...),
+			makeCounter("fwstate_pending_input_bytes", bytes, baseLabels...),
 		}
+	case "pending_output":
+		return []*commonpb.Metric{
+			makeCounter("fwstate_pending_output_packets", packets, baseLabels...),
+			makeCounter("fwstate_pending_output_bytes", bytes, baseLabels...),
+		}
+	case "hist_0", "hist_1", "hist_2", "hist_3", "hist_4", "hist_5":
+		// TODO: handle
+		return nil
 	default:
 		// Any counter not listed above (e.g. one added in the future) is
 		// exported through a generic pair labelled with the counter name so it

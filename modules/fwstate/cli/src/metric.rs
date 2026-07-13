@@ -104,16 +104,60 @@ pub fn histogram_percentile(buckets: &[Bucket], total: u64, p: f64) -> String {
     }
     let target = ((total as f64 * p / 100.0).ceil() as u64).max(1);
     let mut cumulative: u64 = 0;
-    for b in buckets {
+    for (i, b) in buckets.iter().enumerate() {
         cumulative = cumulative.saturating_add(b.count);
         if cumulative >= target {
             return if b.upper_bound.is_infinite() {
-                let prev = buckets[buckets.len().saturating_sub(2)].upper_bound;
-                format!(">{:.3}s", prev)
+                // Report the last finite bound as the lower edge of the
+                // overflow bucket. When the +Inf bucket is the very first one
+                // there is no finite predecessor to reference.
+                match buckets[..i].iter().rev().find(|p| p.upper_bound.is_finite()) {
+                    Some(prev) => format!(">{:.3}s", prev.upper_bound),
+                    None => "+Inf".to_string(),
+                }
             } else {
                 format!("≤{:.3}s", b.upper_bound)
             };
         }
     }
     "-".to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn bucket(upper_bound: f64, count: u64) -> Bucket {
+        Bucket { upper_bound, count }
+    }
+
+    #[test]
+    fn percentile_empty_or_zero_total() {
+        assert_eq!(histogram_percentile(&[], 0, 50.0), "-");
+        assert_eq!(histogram_percentile(&[bucket(1.0, 0)], 0, 50.0), "-");
+    }
+
+    #[test]
+    fn percentile_finite_bucket() {
+        let buckets = [bucket(0.001, 5), bucket(0.01, 5), bucket(f64::INFINITY, 0)];
+        // total=10, p50 => target=5, cumulative reaches 5 in the first bucket.
+        assert_eq!(histogram_percentile(&buckets, 10, 50.0), "≤0.001s");
+        // p95 => target=ceil(9.5)=10, reached in the second bucket.
+        assert_eq!(histogram_percentile(&buckets, 10, 95.0), "≤0.010s");
+    }
+
+    #[test]
+    fn percentile_overflow_reports_last_finite_bound() {
+        let buckets = [bucket(0.001, 1), bucket(0.01, 1), bucket(f64::INFINITY, 8)];
+        // p99 => target=ceil(9.9)=10, only reached in the +Inf bucket.
+        assert_eq!(histogram_percentile(&buckets, 10, 99.0), ">0.010s");
+    }
+
+    #[test]
+    fn percentile_single_infinite_bucket() {
+        // A histogram with only the +Inf bucket has no finite predecessor;
+        // it must not panic and should fall back to "+Inf".
+        let buckets = [bucket(f64::INFINITY, 4)];
+        assert_eq!(histogram_percentile(&buckets, 4, 50.0), "+Inf");
+    }
 }

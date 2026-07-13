@@ -138,39 +138,73 @@ func TestEmitCounterMetricsKnownCounters(t *testing.T) {
 }
 
 // TestEmitCounterMetricsGenericModuleCounters checks that the generic
-// per-module rx/tx/rx_bytes/tx_bytes counters registered by cp_module_init are
-// exported under their own dedicated metric names (so a byte counter is not
-// mislabelled as packets) and without a "counter" label.
+// per-module counters registered by cp_module_init (rx, tx, drop,
+// pending_input, pending_output) are exported under their own dedicated metric
+// names as [packets, bytes] pairs and without a "counter" label.
 func TestEmitCounterMetricsGenericModuleCounters(t *testing.T) {
 	cases := []struct {
 		name        string
 		counterName string
-		value       uint64
-		wantName    string
+		packets     uint64
+		bytes       uint64
+		wantNames   []string
 	}{
-		{name: "rx", counterName: "rx", value: 11, wantName: "fwstate_rx_packets"},
-		{name: "tx", counterName: "tx", value: 22, wantName: "fwstate_tx_packets"},
-		{name: "rx_bytes", counterName: "rx_bytes", value: 1100, wantName: "fwstate_rx_bytes"},
-		{name: "tx_bytes", counterName: "tx_bytes", value: 2200, wantName: "fwstate_tx_bytes"},
+		{
+			name:        "rx",
+			counterName: "rx",
+			packets:     11,
+			bytes:       1100,
+			wantNames:   []string{"fwstate_rx_packets", "fwstate_rx_bytes"},
+		},
+		{
+			name:        "tx",
+			counterName: "tx",
+			packets:     22,
+			bytes:       2200,
+			wantNames:   []string{"fwstate_tx_packets", "fwstate_tx_bytes"},
+		},
+		{
+			name:        "drop",
+			counterName: "drop",
+			packets:     4,
+			bytes:       400,
+			wantNames:   []string{"fwstate_drop_packets", "fwstate_drop_bytes"},
+		},
+		{
+			name:        "pending_input",
+			counterName: "pending_input",
+			packets:     5,
+			bytes:       500,
+			wantNames:   []string{"fwstate_pending_input_packets", "fwstate_pending_input_bytes"},
+		},
+		{
+			name:        "pending_output",
+			counterName: "pending_output",
+			packets:     6,
+			bytes:       600,
+			wantNames:   []string{"fwstate_pending_output_packets", "fwstate_pending_output_bytes"},
+		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			counter := ffi.CounterInfo{
 				Name:   tc.counterName,
-				Values: [][]uint64{{tc.value}},
+				Values: [][]uint64{{tc.packets, tc.bytes}},
 			}
 
 			metrics := emitCounterMetrics(counter, baseLabels())
-			require.Len(t, metrics, 1)
+			require.Len(t, metrics, len(tc.wantNames))
 
-			m := findMetric(t, metrics, tc.wantName)
-			require.Equal(t, tc.value, counterValue(t, m))
-			// Dedicated counters must not carry the generic "counter" label.
-			require.Equal(t, "", labelValue(m, "counter"))
-			// Base labels must be preserved.
-			require.Equal(t, "cfg", labelValue(m, "config"))
-			require.Equal(t, "dev0", labelValue(m, "device"))
+			for _, wantName := range tc.wantNames {
+				m := findMetric(t, metrics, wantName)
+				require.NotNil(t, m, "expected metric %q", wantName)
+				// Dedicated counters must not carry the generic "counter" label.
+				require.Equal(t, "", labelValue(m, "counter"))
+				// Base labels must be preserved.
+				require.Equal(t, "cfg", labelValue(m, "config"))
+				require.Equal(t, "dev0", labelValue(m, "device"))
+			}
 		})
 	}
 }
@@ -223,7 +257,8 @@ func TestEmitCounterMetricsZeroSuppression(t *testing.T) {
 	cases := []string{
 		"fwstate_sync",
 		"rx",
-		"rx_bytes",
+		"drop",
+		"pending_input",
 		"fwstate_some_future",
 	}
 
