@@ -149,11 +149,11 @@ fn format_gauge_value(name: &str, value: f64) -> String {
         if value < 1024.0 {
             format!("{:.0} B", value)
         } else if value < 1024.0 * 1024.0 {
-            format!("{:.2} KB", value / 1024.0)
+            format!("{:.2} KiB", value / 1024.0)
         } else if value < 1024.0 * 1024.0 * 1024.0 {
-            format!("{:.2} MB", value / (1024.0 * 1024.0))
+            format!("{:.2} MiB", value / (1024.0 * 1024.0))
         } else {
-            format!("{:.2} GB", value / (1024.0 * 1024.0 * 1024.0))
+            format!("{:.2} GiB", value / (1024.0 * 1024.0 * 1024.0))
         }
     } else {
         format_number(value as u64)
