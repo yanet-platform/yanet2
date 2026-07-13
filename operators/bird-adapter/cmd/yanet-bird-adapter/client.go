@@ -92,7 +92,7 @@ func runClient() error {
 	}
 
 	// Load server config to get the adapter address
-	serverCfg, err := xcfg.LoadConfig[ServerConfig](clientCmdArgs.ServerConfigPath)
+	serverCfg, err := xcfg.LoadConfig[ServerConfig](clientCmdArgs.ServerConfigPath, xcfg.WithKnownFields())
 	if err != nil {
 		return fmt.Errorf("failed to load server config: %w", err)
 	}
@@ -164,7 +164,7 @@ func init() {
 
 func runListSessions() error {
 	// Load server config to get the adapter address
-	serverCfg, err := xcfg.LoadConfig[ServerConfig](listSessionsCmdArgs.ServerConfigPath)
+	serverCfg, err := xcfg.LoadConfig[ServerConfig](listSessionsCmdArgs.ServerConfigPath, xcfg.WithKnownFields())
 	if err != nil {
 		return fmt.Errorf("failed to load server config: %w", err)
 	}

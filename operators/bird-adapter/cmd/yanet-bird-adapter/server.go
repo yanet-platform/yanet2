@@ -68,12 +68,12 @@ func DefaultServerConfig() *ServerConfig {
 			Level: zapcore.InfoLevel,
 		},
 		ListenAddr:            "localhost:50051",
-		RouteOperatorEndpoint: "localhost:50052",
+		RouteOperatorEndpoint: "[::1]:8080",
 	}
 }
 
 func runServer() error {
-	cfg, err := xcfg.LoadConfig[ServerConfig](serverCmdArgs.ConfigPath)
+	cfg, err := xcfg.LoadConfig[ServerConfig](serverCmdArgs.ConfigPath, xcfg.WithKnownFields())
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
 	}

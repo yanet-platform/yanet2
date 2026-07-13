@@ -45,7 +45,7 @@ yanet-bird-adapter server -c config.yaml
 logging:
   level: info
 listen_addr: "localhost:50051"
-route_operator_endpoint: "localhost:8080"
+route_operator_endpoint: "[::1]:8080"
 ```
 
 ### Configure Import

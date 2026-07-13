@@ -194,6 +194,87 @@ func Test_Load_SliceElement_SecondElementMissingField(t *testing.T) {
 	require.Equal(t, "items[1].value", pathErr.Path)
 }
 
+func Test_Decode_UnknownField_IgnoredByDefault(t *testing.T) {
+	// By default an unknown key is silently dropped, leaving the rest of the
+	// document to decode normally. This documents the current lenient
+	// behaviour that WithKnownFields is meant to opt out of.
+	type Config struct {
+		Name NonEmptyString `yaml:"name"`
+	}
+
+	var cfg Config
+	err := Decode([]byte("name: foo\nunknown_key: bar"), &cfg)
+	require.NoError(t, err)
+	require.Equal(t, "foo", cfg.Name.Unwrap())
+}
+
+func Test_Decode_UnknownField_RejectedWithKnownFields(t *testing.T) {
+	// With WithKnownFields, an unknown key must fail loudly instead of being
+	// silently dropped, and the error must name the offending key.
+	type Config struct {
+		Name NonEmptyString `yaml:"name"`
+	}
+
+	var cfg Config
+	err := Decode([]byte("name: foo\nunknown_key: bar"), &cfg, WithKnownFields())
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "unknown_key")
+}
+
+func Test_Decode_EmptyDocument_NoErrorInEitherMode(t *testing.T) {
+	// yaml.Decoder.Decode returns io.EOF on an empty document, unlike
+	// yaml.Unmarshal which treats it as a no-op. Both modes must preserve
+	// the lenient behaviour: no error, and defaults left untouched.
+	type Config struct {
+		Name NonEmptyString `yaml:"name"`
+	}
+
+	testCases := []struct {
+		name    string
+		options []Option
+	}{
+		{
+			name:    "lenient",
+			options: nil,
+		},
+		{
+			name:    "known fields",
+			options: []Option{WithKnownFields()},
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			cfg := Config{Name: MustNonEmptyString("default-name")}
+			err := Decode([]byte(""), &cfg, testCase.options...)
+			require.NoError(t, err)
+			require.Equal(t, "default-name", cfg.Name.Unwrap())
+		})
+	}
+}
+
+func Test_Decode_KnownFields_StillValidates(t *testing.T) {
+	// Default()/Validate() behaviour must hold unchanged under
+	// WithKnownFields: valid input decodes cleanly, invalid input is still
+	// rejected by the field's Validate().
+	type Config struct {
+		Name NonEmptyString `yaml:"name"`
+		Path NonEmptyString `yaml:"path"`
+	}
+
+	var validConfig Config
+	require.NoError(t, Decode([]byte("name: foo\npath: /tmp"), &validConfig, WithKnownFields()))
+	require.Equal(t, "foo", validConfig.Name.Unwrap())
+	require.Equal(t, "/tmp", validConfig.Path.Unwrap())
+
+	var invalidConfig Config
+	err := Decode([]byte("name: foo"), &invalidConfig, WithKnownFields())
+
+	var pathErr *PathError
+	require.ErrorAs(t, err, &pathErr)
+	require.Equal(t, "path", pathErr.Path)
+}
+
 func Test_Load_LineErrorUnwrapsFromPathError(t *testing.T) {
 	// Verify that LineError from UnmarshalYAML is accessible via
 	// errors.As through the error chain, even when Decode doesn't
