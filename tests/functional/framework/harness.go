@@ -10,6 +10,18 @@ import (
 	"go.uber.org/zap"
 )
 
+const (
+	baselineSnapshotName    = "baseline"
+	baselineTemplateVersion = "v2"
+)
+
+// baselineTemplatePath returns the versioned overlay path for a baseline
+// snapshot. Bumping the version invalidates locally cached templates when
+// their guest filesystem layout changes.
+func baselineTemplatePath(qemuImage, baselineTag string) string {
+	return SnapshotImagePath(qemuImage, baselineTag+"-"+baselineTemplateVersion)
+}
+
 // DataplaneOptions customizes the baseline dataplane configuration a Harness
 // boots with.
 //
@@ -321,11 +333,11 @@ func SetupHarness(config HarnessConfig) (_ *Harness, cleanup func(), err error) 
 
 	baselineTag := config.BaselineTag
 	if baselineTag == "" {
-		baselineTag = "baseline"
+		baselineTag = baselineSnapshotName
 	}
 
 	bootedTemplate := BootedImagePath(qemuImage)
-	baselineTemplate := SnapshotImagePath(qemuImage, baselineTag)
+	baselineTemplate := baselineTemplatePath(qemuImage, baselineTag)
 
 	baseline := &baselineSetup{
 		dataplane:    dataplane,
@@ -345,7 +357,7 @@ func SetupHarness(config HarnessConfig) (_ *Harness, cleanup func(), err error) 
 
 	pool, err := NewVMPool(
 		PoolSize(), config.PoolName, qemuImage,
-		bootedTemplate, baselineTemplate, "baseline", logger,
+		bootedTemplate, baselineTemplate, baselineSnapshotName, logger,
 	)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create VM pool: %w", err)
@@ -444,7 +456,7 @@ type baselineSetup struct {
 // ensureTemplate makes sure baselineTemplate holds a "baseline" snapshot,
 // bootstrapping it from the booted template when the cache is cold.
 func (m *baselineSetup) ensureTemplate(qemuImage, bootedTemplate, baselineTemplate string) error {
-	if OverlayHasSnapshot(baselineTemplate, "baseline") {
+	if OverlayHasSnapshot(baselineTemplate, baselineSnapshotName) {
 		m.log.Infof("Using cached baseline template: %s", baselineTemplate)
 		return nil
 	}
@@ -477,7 +489,7 @@ func (m *baselineSetup) ensureTemplate(qemuImage, bootedTemplate, baselineTempla
 	if err := m.configure(prepFW); err != nil {
 		return fmt.Errorf("failed to configure baseline: %w", err)
 	}
-	if err := prepFW.SaveSnapshotKeepUnmounted("baseline"); err != nil {
+	if err := prepFW.SaveSnapshotKeepUnmounted(baselineSnapshotName); err != nil {
 		return fmt.Errorf("failed to save baseline snapshot: %w", err)
 	}
 	m.log.Info("Baseline snapshot saved successfully")
@@ -485,8 +497,8 @@ func (m *baselineSetup) ensureTemplate(qemuImage, bootedTemplate, baselineTempla
 	if err := prepFW.ExportCurrentOverlay(baselineTemplate); err != nil {
 		return fmt.Errorf("failed to export baseline template: %w", err)
 	}
-	if !OverlayHasSnapshot(baselineTemplate, "baseline") {
-		return fmt.Errorf("exported baseline template %s is missing snapshot %q", baselineTemplate, "baseline")
+	if !OverlayHasSnapshot(baselineTemplate, baselineSnapshotName) {
+		return fmt.Errorf("exported baseline template %s is missing snapshot %q", baselineTemplate, baselineSnapshotName)
 	}
 
 	m.log.Infof("Baseline template cached at %s", baselineTemplate)
@@ -513,7 +525,7 @@ func (m *baselineSetup) configure(fw *TestFramework) error {
 	}
 	m.log.Info("Pre-yanet snapshot saved")
 
-	// Remount 9P: CommonConfigCommands needs /mnt/config/route0.yaml.
+	// Remount 9P before starting YANET so host-backed logs remain available.
 	if err := fw.Mount9P(); err != nil {
 		return err
 	}
