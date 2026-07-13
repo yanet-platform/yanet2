@@ -186,7 +186,22 @@ layermap_get_value_and_deadline(
 	);
 }
 
+// Result of a layermap_put operation.
+//
+// Values are chosen so that callers can still use the conventional check
+// (>= 0 means success, < 0 means failure).
+enum layermap_put_result {
+	LAYERMAP_PUT_FAILED = -1,
+	LAYERMAP_PUT_UPDATED = 0,
+	LAYERMAP_PUT_INSERTED = 1,
+};
+
 // Inserts or updates a key-value pair in the active layer.
+//
+// Returns LAYERMAP_PUT_INSERTED when a new entry was created in the active
+// layer (including promotion from a stale layer), LAYERMAP_PUT_UPDATED when
+// an existing entry was modified, or LAYERMAP_PUT_FAILED when no slot could
+// be allocated.
 static inline int64_t
 layermap_put(
 	fwmap_t *active_layer,
@@ -197,17 +212,17 @@ layermap_put(
 	const void *value,
 	rwlock_t **lock
 ) {
-	fwmap_copy_key_fn_t copy_key_fn = (fwmap_copy_key_fn_t
-	)fwmap_func_registry[active_layer->copy_key_fn_id];
-	fwmap_update_value_fn_t update_value_fn = (fwmap_update_value_fn_t
-	)fwmap_func_registry[active_layer->update_value_fn_id];
-	fwmap_promote_value_fn_t promote_value_fn = (fwmap_promote_value_fn_t
-	)fwmap_func_registry[active_layer->promote_value_fn_id];
+	fwmap_copy_key_fn_t copy_key_fn = (fwmap_copy_key_fn_t)
+		fwmap_func_registry[active_layer->copy_key_fn_id];
+	fwmap_update_value_fn_t update_value_fn = (fwmap_update_value_fn_t)
+		fwmap_func_registry[active_layer->update_value_fn_id];
+	fwmap_promote_value_fn_t promote_value_fn = (fwmap_promote_value_fn_t)
+		fwmap_func_registry[active_layer->promote_value_fn_id];
 
 	fwmap_entry_t entry =
 		fwmap_entry(active_layer, worker_idx, now, ttl, key, lock);
 	if (!entry.key) {
-		return -1;
+		return LAYERMAP_PUT_FAILED;
 	}
 	if (entry.empty) {
 		copy_key_fn(entry.key, key, active_layer->key_size);
@@ -237,7 +252,7 @@ layermap_put(
 				if (read_lock) {
 					rwlock_read_unlock(read_lock);
 				}
-				return (int64_t)entry.idx;
+				return LAYERMAP_PUT_INSERTED;
 			}
 			if (read_lock) {
 				rwlock_read_unlock(read_lock);
@@ -248,5 +263,6 @@ layermap_put(
 	update_value_fn(
 		entry.value, value, entry.empty, active_layer->value_size
 	);
-	return (int64_t)entry.idx;
+
+	return entry.empty ? LAYERMAP_PUT_INSERTED : LAYERMAP_PUT_UPDATED;
 }

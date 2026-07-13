@@ -3,6 +3,7 @@ package fwstate
 //#cgo CFLAGS: -I../../../.. -I../../../../lib -I../../../../common
 //#cgo LDFLAGS: -L../../../../build/modules/fwstate/dataplane -lfwstate_dp
 //#cgo LDFLAGS: -L../../../../build/modules/fwstate/api -lfwstate_cp
+//#cgo LDFLAGS: -L../../../../build/lib/counters -lcounters
 //#cgo LDFLAGS: -L../../../../build/lib/dataplane/packet -lpacket
 //#cgo LDFLAGS: -L../../../../build/lib/fwstate -lfwstate
 //#cgo LDFLAGS: -L../../../../build/lib/logging -llogging
@@ -10,6 +11,7 @@ package fwstate
 /*
 #include <stdlib.h>
 #include <time.h>
+#include "lib/counters/counters.h"
 #include "lib/errors/errors.h"
 #include "lib/dataplane/pipeline/econtext.h"
 #include "modules/fwstate/dataplane/config.h"
@@ -84,6 +86,13 @@ cp_module_init(
 
 	// Set agent offset
 	SET_OFFSET_OF(&cp_module->agent, agent);
+
+	// Initialize counter registry so module config can register counters
+	if (counter_registry_init(
+		    &cp_module->counter_registry, &cp_module->memory_context, 0
+	    )) {
+		return -1;
+	}
 
 	return 0;
 }

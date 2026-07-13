@@ -11,6 +11,7 @@
 #include "dataplane/module/module.h"
 #include "fwstate/layermap.h"
 #include "fwstate/types.h"
+#include "lib/counters/counters.h"
 #include "lib/dataplane/module/packet_front.h"
 #include "lib/dataplane/packet/data.h"
 #include "lib/dataplane/packet/packet.h"
@@ -23,6 +24,13 @@
 struct fwstate {
 	uint64_t ttl;
 	struct fw_state_value value;
+};
+
+// Resolved addresses for the three state-operation counters.
+struct fwstate_counters {
+	uint64_t *inserted;
+	uint64_t *updated;
+	uint64_t *failed;
 };
 
 // Validate and return the sync-frame payload length from the IPv6 header.
@@ -180,7 +188,8 @@ fwstate_process_sync_v4(
 	struct fw_state_sync_frame *sync_frame,
 	bool is_external,
 	uint64_t now,
-	struct fwstate_timeouts *timeouts
+	struct fwstate_timeouts *timeouts,
+	struct fwstate_counters *counters
 ) {
 	struct fw4_state_key key = {
 		.hdr.proto = sync_frame->proto,
@@ -200,9 +209,12 @@ fwstate_process_sync_v4(
 		fw4state, worker_idx, now, state.ttl, &key, &state.value, &lock
 	);
 
-	if (result < 0) {
-		// FIXME: counters
-		// FIXME: ratelimit this errors
+	if (result == LAYERMAP_PUT_INSERTED) {
+		(*counters->inserted)++;
+	} else if (result == LAYERMAP_PUT_UPDATED) {
+		(*counters->updated)++;
+	} else {
+		(*counters->failed)++;
 		LOG(ERROR, "failed to insert IPv4 state: %s", strerror(errno));
 	}
 
@@ -219,7 +231,8 @@ fwstate_process_sync_v6(
 	struct fw_state_sync_frame *sync_frame,
 	bool is_external,
 	uint64_t now,
-	struct fwstate_timeouts *timeouts
+	struct fwstate_timeouts *timeouts,
+	struct fwstate_counters *counters
 ) {
 	struct fw6_state_key key = {
 		.hdr.proto = sync_frame->proto,
@@ -239,9 +252,12 @@ fwstate_process_sync_v6(
 		fw6state, worker_idx, now, state.ttl, &key, &state.value, &lock
 	);
 
-	if (result < 0) {
-		// FIXME: counters
-		// FIXME: ratelimit this errors
+	if (result == LAYERMAP_PUT_INSERTED) {
+		(*counters->inserted)++;
+	} else if (result == LAYERMAP_PUT_UPDATED) {
+		(*counters->updated)++;
+	} else {
+		(*counters->failed)++;
 		LOG(ERROR, "failed to insert IPv6 state: %s", strerror(errno));
 	}
 
@@ -265,6 +281,24 @@ fwstate_handle_packets(
 	struct fwstate_config *fwstate_config = &fwstate_module->cfg;
 	fwmap_t *fw4state = ADDR_OF(&fwstate_config->fw4state);
 	fwmap_t *fw6state = ADDR_OF(&fwstate_config->fw6state);
+
+	struct counter_storage *counter_storage =
+		ADDR_OF_NONNULL(&module_ectx->counter_storage);
+
+	struct fwstate_counters counters = {
+		.inserted = counter_get_address(
+			fwstate_module->states_inserted_counter_id,
+			counter_storage
+		),
+		.updated = counter_get_address(
+			fwstate_module->states_updated_counter_id,
+			counter_storage
+		),
+		.failed = counter_get_address(
+			fwstate_module->states_failed_counter_id,
+			counter_storage
+		),
+	};
 
 	uint64_t now = dp_worker->current_time;
 
@@ -320,8 +354,7 @@ fwstate_handle_packets(
 					struct fw_state_sync_frame *,
 					payload_offset +
 						idx * sizeof(struct
-							     fw_state_sync_frame
-						      )
+							     fw_state_sync_frame)
 				);
 
 			if (sync_frame->addr_type == FW_STATE_ADDR_TYPE_IP4) {
@@ -331,17 +364,20 @@ fwstate_handle_packets(
 					sync_frame,
 					is_external,
 					now,
-					&fwstate_config->sync_config.timeouts
+					&fwstate_config->sync_config.timeouts,
+					&counters
 				);
-			} else if (sync_frame->addr_type ==
-				   FW_STATE_ADDR_TYPE_IP6) {
+			} else if (
+				sync_frame->addr_type == FW_STATE_ADDR_TYPE_IP6
+			) {
 				fwstate_process_sync_v6(
 					fw6state,
 					(uint16_t)dp_worker->idx,
 					sync_frame,
 					is_external,
 					now,
-					&fwstate_config->sync_config.timeouts
+					&fwstate_config->sync_config.timeouts,
+					&counters
 				);
 			}
 		}

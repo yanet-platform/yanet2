@@ -5,6 +5,7 @@
 
 #include "common/container_of.h"
 #include "controlplane/agent/agent.h"
+#include "lib/counters/counters.h"
 #include "lib/errors/errors.h"
 #include "lib/fwstate/config.h"
 #include "lib/fwstate/layermap.h"
@@ -70,6 +71,37 @@ fwstate_module_config_new(
 		return NULL;
 	}
 	fwstate_config_set_defaults(&config->cfg);
+
+	struct {
+		const char *name;
+		uint64_t *dst;
+	} counters[] = {
+		{"fwstate_states_inserted",
+		 &config->states_inserted_counter_id},
+		{"fwstate_states_updated", &config->states_updated_counter_id},
+		{"fwstate_states_failed", &config->states_failed_counter_id},
+	};
+
+	for (size_t idx = 0; idx < sizeof(counters) / sizeof(counters[0]);
+	     ++idx) {
+		uint64_t id = counter_registry_register(
+			&config->cp_module.counter_registry,
+			counters[idx].name,
+			1,
+			err
+		);
+		if (id == (uint64_t)-1) {
+			yanet_error_add(
+				err,
+				"failed to register counter '%s'",
+				counters[idx].name
+			);
+			fwstate_module_config_free(&config->cp_module);
+			return NULL;
+		}
+		*counters[idx].dst = id;
+	}
+
 	return &config->cp_module;
 }
 
