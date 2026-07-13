@@ -405,7 +405,7 @@ const YamlIOModal: React.FC<YamlIOModalProps> = ({
                             {showModal === 'export' && renderExportFormatToggle()}
                             {isLargeFile ? (
                                 <div className="yn-modal__large-file-notice">
-                                    Large file loaded ({(textContent.current.length / 1_048_576).toFixed(1)} MB) — preview suppressed to avoid browser slowdown.
+                                    Large file loaded ({(textContent.current.length / 1_048_576).toFixed(1)} MiB) — preview suppressed to avoid browser slowdown.
                                 </div>
                             ) : (
                                 <textarea

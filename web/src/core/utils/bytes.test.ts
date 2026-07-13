@@ -89,47 +89,47 @@ describe('formatBytes', () => {
         expect(formatBytes(0n)).toBe('0 B');
     });
 
-    it('formats values below 1 KB', () => {
+    it('formats values below 1 KiB', () => {
         expect(formatBytes(1023n)).toBe('1023 B');
     });
 
-    it('formats exactly 1 KB', () => {
-        expect(formatBytes(1024n)).toBe('1.0 KB');
+    it('formats exactly 1 KiB', () => {
+        expect(formatBytes(1024n)).toBe('1.0 KiB');
     });
 
-    it('formats 1.5 KB', () => {
-        expect(formatBytes(1536n)).toBe('1.5 KB');
+    it('formats 1.5 KiB', () => {
+        expect(formatBytes(1536n)).toBe('1.5 KiB');
     });
 
-    it('formats the last value in the KB range (1 MB - 1 byte)', () => {
-        expect(formatBytes(1024n * 1024n - 1n)).toBe('1.0 MB');
+    it('formats the last value in the KiB range (1 MiB - 1 byte)', () => {
+        expect(formatBytes(1024n * 1024n - 1n)).toBe('1.0 MiB');
     });
 
-    it('formats the last value in the MB range (1 GB - 1 byte)', () => {
-        expect(formatBytes(1024n * 1024n * 1024n - 1n)).toBe('1.00 GB');
+    it('formats the last value in the MiB range (1 GiB - 1 byte)', () => {
+        expect(formatBytes(1024n * 1024n * 1024n - 1n)).toBe('1.00 GiB');
     });
 
-    it('formats the last value in the GB range (1 TB - 1 byte)', () => {
-        expect(formatBytes(1024n ** 4n - 1n)).toBe('1.00 TB');
+    it('formats the last value in the GiB range (1 TiB - 1 byte)', () => {
+        expect(formatBytes(1024n ** 4n - 1n)).toBe('1.00 TiB');
     });
 
-    it('does not overflow past TB (5 exabyte-range value stays in TB)', () => {
-        expect(formatBytes(1024n ** 5n)).toBe('1024.00 TB');
+    it('does not overflow past TiB (5 exabyte-range value stays in TiB)', () => {
+        expect(formatBytes(1024n ** 5n)).toBe('1024.00 TiB');
     });
 
-    it('formats exactly 1 MB', () => {
-        expect(formatBytes(1024n * 1024n)).toBe('1.0 MB');
+    it('formats exactly 1 MiB', () => {
+        expect(formatBytes(1024n * 1024n)).toBe('1.0 MiB');
     });
 
-    it('formats exactly 1 GB', () => {
-        expect(formatBytes(1024n * 1024n * 1024n)).toBe('1.00 GB');
+    it('formats exactly 1 GiB', () => {
+        expect(formatBytes(1024n * 1024n * 1024n)).toBe('1.00 GiB');
     });
 
-    it('formats exactly 1 TB', () => {
-        expect(formatBytes(1024n ** 4n)).toBe('1.00 TB');
+    it('formats exactly 1 TiB', () => {
+        expect(formatBytes(1024n ** 4n)).toBe('1.00 TiB');
     });
 
-    it('formats 5 TB', () => {
-        expect(formatBytes(5n * 1024n ** 4n)).toBe('5.00 TB');
+    it('formats 5 TiB', () => {
+        expect(formatBytes(5n * 1024n ** 4n)).toBe('5.00 TiB');
     });
 });

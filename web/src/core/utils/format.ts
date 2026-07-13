@@ -53,24 +53,24 @@ export const formatSiNumber = (value: number, suffix: string = ''): string => {
 };
 
 /**
- * Format bytes with binary prefixes.
- * Examples: "500 B", "1.2 KB", "3.5 MB", "1.1 GB"
+ * Format bytes with IEC binary prefixes (1024-base).
+ * Examples: "500 B", "1.2 KiB", "3.5 MiB", "1.1 GiB"
  */
 export const formatBytesRate = (bytes: number, suffix: string = '/s'): string => {
     if (bytes < 1024) {
         return `${Math.round(bytes)} B${suffix}`;
     }
     if (bytes < 1024 * 1024) {
-        return `${(bytes / 1024).toFixed(1)} KB${suffix}`;
+        return `${(bytes / 1024).toFixed(1)} KiB${suffix}`;
     }
     if (bytes < 1024 * 1024 * 1024) {
-        return `${(bytes / (1024 * 1024)).toFixed(1)} MB${suffix}`;
+        return `${(bytes / (1024 * 1024)).toFixed(1)} MiB${suffix}`;
     }
-    return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB${suffix}`;
+    return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GiB${suffix}`;
 };
 
 /**
  * Format bytes per second value for display.
- * Examples: "500 B/s", "1.2 KB/s", "3.5 MB/s", "1.1 GB/s"
+ * Examples: "500 B/s", "1.2 KiB/s", "3.5 MiB/s", "1.1 GiB/s"
  */
 export const formatBps = (bps: number): string => formatBytesRate(bps);

@@ -121,7 +121,7 @@ benchmark_performance(void *arena) {
 	printf("    Total elements: %s\n", numfmt(stats.total_elements));
 	printf("    Index size: %u\n", stats.index_size);
 	printf("    Max chain length: %u\n", stats.max_chain_length);
-	printf("    Memory used: %zu KB\n", stats.memory_used / 1024);
+	printf("    Memory used: %zu KiB\n", stats.memory_used / 1024);
 
 	fwmap_free(map, ctx);
 

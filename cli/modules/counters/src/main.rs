@@ -2,6 +2,7 @@
 
 use std::str::FromStr;
 
+use bytesize::ByteSize;
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
 use colored::Colorize;
@@ -449,12 +450,12 @@ impl From<&WorkerCounter> for WorkerRow {
             queue: w.queue_id,
             iterations: format_number(w.iterations),
             rx: if w.rx_bytes > 0 {
-                format!("{} ({})", format_number(w.rx_packets), format_bytes(w.rx_bytes))
+                format!("{} ({})", format_number(w.rx_packets), ByteSize::b(w.rx_bytes))
             } else {
                 format_number(w.rx_packets)
             },
             tx: if w.tx_bytes > 0 {
-                format!("{} ({})", format_number(w.tx_packets), format_bytes(w.tx_bytes))
+                format!("{} ({})", format_number(w.tx_packets), ByteSize::b(w.tx_bytes))
             } else {
                 format_number(w.tx_packets)
             },
@@ -575,12 +576,12 @@ fn format_perf_counters(response: &PerfCountersResponse) {
     let rx_str = format!(
         "RX: {} packets ({})",
         format_number(response.rx),
-        format_bytes(response.rx_bytes)
+        ByteSize::b(response.rx_bytes)
     );
     let tx_str = format!(
         "TX: {} packets ({})",
         format_number(response.tx),
-        format_bytes(response.tx_bytes)
+        ByteSize::b(response.tx_bytes)
     );
 
     // Build the content and pad to exactly 74 chars
@@ -684,7 +685,7 @@ fn format_batch_counter(counter: &PerfCounter, next_min_batch: Option<u32>, widt
         "  Total: {} batches ({} packets, {})",
         format_number(total_batches),
         format_number(total_packets),
-        format_bytes(total_bytes)
+        ByteSize::b(total_bytes)
     );
     let padding1 = TABLE_WIDTH.saturating_sub(display_width(&total_content));
     println!(
@@ -692,7 +693,7 @@ fn format_batch_counter(counter: &PerfCounter, next_min_batch: Option<u32>, widt
         "│".bright_black(),
         format_number(total_batches).bright_white(),
         format_number(total_packets).bright_white(),
-        format_bytes(total_bytes).bright_white(),
+        ByteSize::b(total_bytes).to_string().bright_white(),
         " ".repeat(padding1),
         "│".bright_black()
     );
@@ -1042,28 +1043,6 @@ fn display_width(s: &str) -> usize {
     s.chars().count()
 }
 
-/// Format bytes in appropriate unit (B, KB, MB, GB, TB)
-fn format_bytes(bytes: u64) -> String {
-    const KB: f64 = 1024.0;
-    const MB: f64 = KB * 1024.0;
-    const GB: f64 = MB * 1024.0;
-    const TB: f64 = GB * 1024.0;
-
-    let bytes_f = bytes as f64;
-
-    if bytes_f >= TB {
-        format!("{:.2} TB", bytes_f / TB)
-    } else if bytes_f >= GB {
-        format!("{:.2} GB", bytes_f / GB)
-    } else if bytes_f >= MB {
-        format!("{:.2} MB", bytes_f / MB)
-    } else if bytes_f >= KB {
-        format!("{:.2} KB", bytes_f / KB)
-    } else {
-        format!("{} B", bytes)
-    }
-}
-
 #[cfg(test)]
 mod test {
     use super::*;
@@ -1074,7 +1053,7 @@ mod test {
         let response = PerfCountersResponse {
             tx: 1_234_567,
             rx: 1_234_567,
-            tx_bytes: 1_288_490_188, // ~1.20 GB
+            tx_bytes: 1_288_490_188, // ~1.20 GiB
             rx_bytes: 1_288_490_188,
             counters: vec![
                 // Batch size 1

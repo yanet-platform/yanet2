@@ -25,12 +25,12 @@ describe('formatPps', () => {
 });
 
 describe('formatBps', () => {
-    it('rounds bytes per second below 1 KB', () => {
+    it('rounds bytes per second below 1 KiB', () => {
         expect(formatBps(285.13421819144713)).toBe('285 B/s');
     });
 
-    it('formats rates with binary suffixes above 1 KB', () => {
-        expect(formatBps(1536)).toBe('1.5 KB/s');
-        expect(formatBps(1024 * 1024)).toBe('1.0 MB/s');
+    it('formats rates with binary suffixes above 1 KiB', () => {
+        expect(formatBps(1536)).toBe('1.5 KiB/s');
+        expect(formatBps(1024 * 1024)).toBe('1.0 MiB/s');
     });
 });
