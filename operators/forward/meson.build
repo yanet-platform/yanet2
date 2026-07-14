@@ -1,5 +1,3 @@
-subdir('operatorpb')
-
 install_data(
     'etc/yanet/forward.d/vlan-phy-default.yaml',
     'etc/yanet/forward.d/phy-vlan-default.yaml',
@@ -30,7 +28,8 @@ if not get_option('fuzzing').enabled()
           common_protoc_gen,
           forward_protoc_gen,
           forward_operator_protoc_gen,
-          readiness_protoc_gen,
+          common_readiness_protoc_gen,
+          filter_protoc_gen,
       ],
       install: true,
       install_dir: get_option('bindir'),

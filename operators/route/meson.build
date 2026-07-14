@@ -1,5 +1,3 @@
-subdir('operatorpb')
-
 # Skip route-operator when fuzzing — no CGO but still gets sanitizer flags
 # that interfere with the fuzzing build.
 if not get_option('fuzzing').enabled()
@@ -22,6 +20,8 @@ if not get_option('fuzzing').enabled()
           ynpb_gen,
           common_protoc_gen,
           route_protoc_gen,
+          common_readiness_protoc_gen,
+          route_operator_readiness_protoc_gen,
       ],
       install: true,
       install_dir: get_option('bindir'),

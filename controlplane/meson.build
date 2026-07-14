@@ -32,6 +32,11 @@ custom_target(
         trafgen_protoc_gen,
         plain_protoc_gen,
         vlan_protoc_gen,
+        filter_protoc_gen,
+        fwstate_protoc_gen,
+        common_readiness_protoc_gen,
+        route_operator_protoc_gen,
+        route_operator_readiness_protoc_gen,
 
         # cgo linker deps
         lib_acl_cp,

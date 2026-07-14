@@ -1,5 +1,3 @@
-subdir('adapterpb')
-
 install_data(
     'etc/yanet/yanet2-bird-adapter-bootstrap.service',
     install_dir: '/usr/lib/systemd/system',
@@ -30,10 +28,13 @@ if not get_option('fuzzing').enabled()
       build_by_default: true,
       build_always_stale: true,
       depends: [
-          ynpb_gen,
           bird_adapter_protoc_gen,
-          route_protoc_gen,
           common_protoc_gen,
+          filter_protoc_gen,
+          route_mpls_protoc_gen,
+          common_readiness_protoc_gen,
+          route_operator_protoc_gen,
+          route_operator_readiness_protoc_gen,
       ],
       install: true,
       install_dir: get_option('bindir'),

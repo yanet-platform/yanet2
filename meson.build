@@ -150,6 +150,16 @@ subdir('lib/dataplane_ut/tests')
 subdir('dataplane')
 
 if not dataplane_only
+  # Operator proto targets must exist before their consumers are declared.
+  #
+  # Meson resolves variables in subdir traversal order, so the control-plane
+  # and operator binaries below can only depend on these targets if the
+  # directories that define them are entered first.
+  subdir('operators/bird-adapter/adapterpb')
+  subdir('operators/pipeline/operatorpb')
+  subdir('operators/route/operatorpb')
+  subdir('operators/forward/operatorpb')
+  subdir('operators/decap/operatorpb')
   subdir('controlplane')
   subdir('operators')
   foreach dir : module_test_dirs

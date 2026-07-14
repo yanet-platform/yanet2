@@ -5,7 +5,7 @@ readiness_proto_files = [
     join_paths(readiness_proto_dir, 'v1', 'readiness.proto'),
 ]
 
-readiness_protoc_gen = custom_target(
+common_readiness_protoc_gen = custom_target(
     'readiness-protoc',
     output: [
         'readiness.pb.go',

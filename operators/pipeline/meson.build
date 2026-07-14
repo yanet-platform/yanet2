@@ -1,5 +1,3 @@
-subdir('operatorpb')
-
 # Skip pipeline-operator when fuzzing — no CGO but still gets sanitizer flags
 # that interfere with the fuzzing build.
 if not get_option('fuzzing').enabled()
@@ -20,7 +18,7 @@ if not get_option('fuzzing').enabled()
       depends: [
           pipeline_operator_protoc_gen,
           pipeline_operator_readiness_protoc_gen,
-          readiness_protoc_gen,
+          common_readiness_protoc_gen,
           ynpb_gen,
           common_protoc_gen,
           plain_protoc_gen,

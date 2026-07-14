@@ -1,5 +1,3 @@
-subdir('operatorpb')
-
 install_data(
     'etc/yanet/decap.d/default.yaml',
     install_dir: '/etc/yanet2/decap.d',
@@ -29,7 +27,7 @@ if not get_option('fuzzing').enabled()
           common_protoc_gen,
           decap_protoc_gen,
           decap_operator_protoc_gen,
-          readiness_protoc_gen,
+          common_readiness_protoc_gen,
       ],
       install: true,
       install_dir: get_option('bindir'),
