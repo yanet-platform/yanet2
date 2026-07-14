@@ -2,6 +2,12 @@
 
 resolver = "2"
 
+# Module CLI crates are listed explicitly rather than globbed.
+#
+# A glob would also match out-of-tree (gitignored) modules, and any
+# workspace member necessarily lands in the tracked `Cargo.lock`. Contract:
+# an out-of-tree module's CLI crate is not a workspace member, so it carries
+# its own `[workspace]` table and is built through its own manifest path.
 members = [
     "common/rust/commonpb",
     "common/rust/filterpb",
@@ -17,7 +23,17 @@ members = [
     "cli/modules/ready",
     "cli/modules/metrics",
     "cli/modules/device",
-    "modules/*/cli",
+    "modules/acl/cli",
+    "modules/balancer2/cli",
+    "modules/blackhole/cli",
+    "modules/decap/cli",
+    "modules/dscp/cli",
+    "modules/forward/cli",
+    "modules/fwstate/cli",
+    "modules/mirror/cli",
+    "modules/nat64/cli",
+    "modules/pdump/cli",
+    "modules/route-mpls/cli",
     "modules/route/cli/route",
     "devices/plain/cli",
     "devices/vlan/cli",

@@ -46,6 +46,47 @@ CLI_MODULES := \
 	operator-pipeline \
 	operator-route
 
+# Public module directories, whitelisted in .gitignore under /modules/*.
+#
+# Anything under modules/ that is not listed here is a private, gitignored
+# module (see modules/meson.build's extra_modules option).
+PUBLIC_MODULES := \
+	acl \
+	balancer2 \
+	blackhole \
+	decap \
+	dscp \
+	forward \
+	fwstate \
+	mirror \
+	nat64 \
+	pdump \
+	route \
+	route-mpls
+
+# All directories under modules/, public and private alike.
+MODULE_DIRS := $(notdir $(patsubst %/,%,$(wildcard modules/*/)))
+
+# Private module directories not in the public whitelist.
+EXTRA_MODULES := $(filter-out $(PUBLIC_MODULES),$(MODULE_DIRS))
+
+# Private modules that ship a CLI crate.
+EXTRA_CLI_MODULES := $(foreach m,$(EXTRA_MODULES),$(if $(wildcard modules/$(m)/cli/Cargo.toml),$(m)))
+
+CLI_MODULES += $(EXTRA_CLI_MODULES)
+
+EMPTY :=
+SPACE := $(EMPTY) $(EMPTY)
+COMMA := ,
+
+# -Dextra_modules= flag for `meson setup`/`meson configure`, comma-joining
+# the private module directories.
+#
+# Always emitted, even as a bare -Dextra_modules= on a clean public tree,
+# so that reconfiguring an existing build dir clears the cached array once
+# the last private module is removed.
+EXTRA_MODULES_FLAG := -Dextra_modules=$(subst $(SPACE),$(COMMA),$(EXTRA_MODULES))
+
 CLI_MODULE_BINARIES := $(addprefix yanet-cli-,$(CLI_MODULES))
 
 # Everything we install for CLI.
@@ -79,10 +120,13 @@ CLI_RELEASE_BINARIES := $(addprefix $(RELEASE_DIR)/,$(CLI_BINARIES))
 	cli-build \
 	cli-install \
 	cli-core-install \
-	cli-clean \
-	$(addprefix cli/,$(CLI_MODULES)) \
-	$(addprefix cli-install/,$(CLI_MODULES)) \
-	$(addprefix cli-clean/,$(CLI_MODULES))
+	cli-clean
+
+# cli/% is a chained prerequisite of cli-install/%.
+#
+# Mark it precious so make does not treat its recipe output as a deletable
+# intermediate file once cli-install/% depends on it.
+.PRECIOUS: cli/%
 
 all: dataplane cli
 
@@ -106,17 +150,17 @@ go-cache-clean:
 	go clean -cache
 
 setup:
-	meson setup build
+	meson setup $(EXTRA_MODULES_FLAG) build
 
 setup-debug:
 	@if [ ! -d "build" ]; then \
-		meson setup -Dbuildtype=debug -Doptimization=0 build; \
+		meson setup -Dbuildtype=debug -Doptimization=0 $(EXTRA_MODULES_FLAG) build; \
 	else \
-		meson configure -Dbuildtype=debug -Doptimization=0 -Db_sanitize="" build; \
+		meson configure -Dbuildtype=debug -Doptimization=0 -Db_sanitize="" $(EXTRA_MODULES_FLAG) build; \
 	fi
 
 setup-asan:
-	meson setup -Dbuildtype=debug -Doptimization=0 -Db_sanitize=address,undefined build
+	meson setup -Dbuildtype=debug -Doptimization=0 -Db_sanitize=address,undefined $(EXTRA_MODULES_FLAG) build
 
 dataplane:
 	meson compile -C build
@@ -125,14 +169,20 @@ cli: cli-build
 
 cli-build:
 	$(CARGO) build --release --workspace
+	@set -eu; \
+	for m in $(EXTRA_CLI_MODULES); do \
+		CARGO_TARGET_DIR=$(abspath $(TARGET_DIR)) $(CARGO) build --release --manifest-path modules/$$m/cli/Cargo.toml; \
+	done
 
 # Optional convenience target:
 #   make cli/acl
 #   make cli/forward
 #
-# It builds package yanet-cli-<module>.
+# It builds package yanet-cli-<module>, or, for a private module CLI that is
+# not a workspace member, builds its standalone manifest directly with the
+# repo's target/ directory so the binary still lands in $(RELEASE_DIR).
 cli/%:
-	$(CARGO) build --release --package yanet-cli-$*
+	CARGO_TARGET_DIR=$(abspath $(TARGET_DIR)) $(CARGO) build --release $(if $(filter $*,$(EXTRA_CLI_MODULES)),--manifest-path modules/$*/cli/Cargo.toml,--package yanet-cli-$*)
 
 # Installs all CLI binaries.
 cli-install:
@@ -175,7 +225,7 @@ test-asan: go-cache-clean
 	@if [ ! -d "build" ]; then \
 		$(MAKE) setup-asan; \
 	else \
-		meson configure -Dbuildtype=debug -Doptimization=0 -Dfuzzing=disabled -Db_sanitize=address,undefined build; \
+		meson configure -Dbuildtype=debug -Doptimization=0 -Dfuzzing=disabled -Db_sanitize=address,undefined $(EXTRA_MODULES_FLAG) build; \
 	fi
 	meson compile -C build
 	CGO_CFLAGS="-fsanitize=address,undefined" CGO_LDFLAGS="-fsanitize=address,undefined" go test -count=1 $$(go list ./... | grep -v '^github.com/yanet-platform/yanet2/tests/functional')
@@ -183,9 +233,9 @@ test-asan: go-cache-clean
 
 test-tsan:
 	@if [ ! -d "build-tsan" ]; then \
-		meson setup build-tsan -Dbuildtype=debug -Doptimization=0 -Db_sanitize=thread; \
+		meson setup build-tsan -Dbuildtype=debug -Doptimization=0 -Db_sanitize=thread $(EXTRA_MODULES_FLAG); \
 	else \
-		meson configure -Dbuildtype=debug -Doptimization=0 -Db_sanitize=thread build-tsan; \
+		meson configure -Dbuildtype=debug -Doptimization=0 -Db_sanitize=thread $(EXTRA_MODULES_FLAG) build-tsan; \
 	fi
 	meson test -C build-tsan --suite common --suit fwstate --no-suite large
 
@@ -207,7 +257,7 @@ fuzz:
 		rm -rf build; \
 	fi
 	@if [ ! -d build ]; then \
-		env CC=clang CXX=clang++ meson setup -Dbuildtype=debug -Doptimization=0 -Dfuzzing=enabled build; \
+		env CC=clang CXX=clang++ meson setup -Dbuildtype=debug -Doptimization=0 -Dfuzzing=enabled $(EXTRA_MODULES_FLAG) build; \
 	fi
 	env CC=clang CXX=clang++ meson compile -C build
 	@echo "Ready to fuzz the following modules:"
