@@ -111,6 +111,8 @@ CLI_RELEASE_BINARIES := $(addprefix $(RELEASE_DIR)/,$(CLI_BINARIES))
 	go-cache-clean \
 	proto-lint \
 	proto-breaking \
+	lint-go \
+	hooks \
 	test \
 	test-asan \
 	test-tsan \
@@ -146,6 +148,13 @@ proto-breaking:
 	else \
 		echo "WARN: 'buf' not found, skipping buf breaking (install: https://buf.build/docs/installation)"; \
 	fi
+
+lint-go:
+	go test ./lint/logger/cmd/loglint/
+	go run ./lint/logger/cmd/loglint/
+
+hooks:
+	git config core.hooksPath .githooks
 
 go-cache-clean:
 	go clean -cache

@@ -45,6 +45,8 @@ clang-format -i <file>        # C
 cargo +nightly fmt            # Rust (uses nightly-only options in .rustfmt.toml)
 cargo clippy                  # Rust lints
 make proto-lint               # protobuf formatting check
+make lint-go                  # logger options-pattern linter (lint/logger/)
+make hooks                    # install the pre-commit hook (run once per clone)
 
 # Fuzzing
 make fuzz                     # build fuzz targets
@@ -238,11 +240,13 @@ Meson orchestrates C/DPDK builds and Go binary compilation (via `custom_target` 
   other fields. Per-instance context via `zap.With` on the struct
   logger; avoid count/elapsed noise. `Info` = a just-completed state
   change in past tense.
-- **Constructors accepting `*zap.Logger` MUST use options pattern**:
-  `NewFoo(cfg, WithLog(log))`. Inside the constructor:
+- **Constructors and methods accepting `*zap.Logger` MUST use options
+  pattern**: `NewFoo(cfg, WithLog(log))`. Inside the constructor:
   `opts := newOptions(); for _, o := range options { o(opts) }`.
   Parameter is `options ...Option`, never renamed to `opt`/`optsList`.
-  `WithLog()` is defined per constructor.
+  `WithLog()` is defined per constructor. Enforced mechanically by
+  `lint/logger/` (`make lint-go`); known violations are ledgered in
+  `lint/logger/allowlist.txt` — do not add new rows.
 - **Encapsulation**: mutex and the fields it guards stay private.
 - **gRPC handlers**: never use `_` for `ctx` / `req` — name them.
 - **No log-only RPC stubs**: when a brief names an RPC, actually invoke

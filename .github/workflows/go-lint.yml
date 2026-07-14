@@ -1,0 +1,30 @@
+name: Go Lint
+
+on:
+  push:
+    paths:
+      - '**/*.go'
+      - 'lint/logger/**'
+      - '.github/workflows/go-lint.yml'
+  pull_request:
+    paths:
+      - '**/*.go'
+      - 'lint/logger/**'
+      - '.github/workflows/go-lint.yml'
+
+jobs:
+  loglint:
+    name: Custom loglint linter
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Run tests
+        run: go test ./lint/logger/cmd/loglint/
+
+      - name: Run linter
+        run: go run ./lint/logger/cmd/loglint/

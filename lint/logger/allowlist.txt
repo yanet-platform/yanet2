@@ -1,0 +1,50 @@
+# Allowlist for lint/logger/cmd/loglint.
+#
+# Format: one entry per line, "<key>  # <reason>". A blank line or a
+# whole-line "#" comment is ignored. The key identifies a checked
+# constructor or method that takes a zap logger as a parameter:
+#   - a constructor:      <path>:<FuncName>
+#   - a method:            <path>:<RecvTypeName>.<MethodName>
+#
+# A reason after "#" is mandatory — an entry without one fails the lint run.
+#
+# This file is a debt ledger, not a permanent exemption list. When a listed
+# constructor or method is migrated to the options pattern, its violation
+# disappears from the scan and the corresponding row becomes stale. A stale
+# entry is itself a lint failure, so paying down the debt requires deleting
+# the row — the ledger is self-cleaning by construction.
+
+controlplane/builtin/function.go:NewFunction  # legacy: migrate to the options pattern
+controlplane/builtin/logging.go:NewLogging  # legacy: migrate to the options pattern
+controlplane/builtin/pipeline.go:NewPipeline  # legacy: migrate to the options pattern
+controlplane/bundle/bundle.go:NewBundle  # legacy: migrate to the options pattern
+controlplane/gateway/runner.go:NewServiceRunner  # legacy: migrate to the options pattern
+controlplane/gateway/service.go:NewGatewayService  # legacy: migrate to the options pattern
+controlplane/httpproxy/proxy.go:NewHTTPHandler  # legacy: migrate to the options pattern
+controlplane/internal/auth/basic/factory.go:NewFromConfig  # legacy: migrate to the options pattern
+controlplane/internal/auth/sshcert/factory.go:NewFromConfig  # legacy: migrate to the options pattern
+controlplane/internal/auth/sshkey/factory.go:NewFromConfig  # legacy: migrate to the options pattern
+devices/plain/controlplane/mod.go:NewDevicePlainDevice  # legacy: migrate to the options pattern
+devices/vlan/controlplane/mod.go:NewDeviceVlanDevice  # legacy: migrate to the options pattern
+modules/acl/controlplane/mod.go:NewACLModule  # legacy: migrate to the options pattern
+modules/decap/controlplane/mod.go:NewDecapModule  # legacy: migrate to the options pattern
+modules/dscp/controlplane/mod.go:NewDSCPModule  # legacy: migrate to the options pattern
+modules/forward/controlplane/mod.go:NewForwardModule  # legacy: migrate to the options pattern
+modules/mirror/controlplane/mod.go:NewMirrorModule  # legacy: migrate to the options pattern
+modules/nat64/controlplane/mod.go:NewNAT64Module  # legacy: migrate to the options pattern
+modules/pdump/controlplane/ffi.go:ModuleConfig.SetupRing  # legacy: migrate to the options pattern
+modules/pdump/controlplane/mod.go:NewPdumpModule  # legacy: migrate to the options pattern
+modules/pdump/controlplane/service.go:NewPdumpService  # legacy: migrate to the options pattern
+operators/bird-adapter/internal/bird/export.go:NewExportReader  # legacy: migrate to the options pattern
+operators/bird-adapter/internal/bird/parser.go:NewParser  # legacy: migrate to the options pattern
+operators/bird-adapter/internal/bird/update.go:newUpdateDecoder  # legacy: migrate to the options pattern
+operators/bird-adapter/service.go:AdapterService.processBirdImport  # legacy: migrate to the options pattern
+operators/bird-adapter/service.go:AdapterService.runBirdImportLoop  # legacy: migrate to the options pattern
+operators/bird-adapter/service.go:AdapterService.reconnectStream  # legacy: migrate to the options pattern
+operators/bird-adapter/service.go:NewAdapterService  # legacy: migrate to the options pattern
+operators/route/internal/operator/operator.go:newNeighbourMonitor  # legacy: migrate to the options pattern
+operators/route/internal/operator/rib.go:newRIBStore  # legacy: migrate to the options pattern
+operators/route/internal/operator/rib_readiness.go:newRIBReadiness  # legacy: migrate to the options pattern
+operators/route/internal/operator/rib_readiness.go:newStaticRIBReadiness  # legacy: migrate to the options pattern
+operators/route/internal/operator/rib_readiness.go:newBirdRIBReadiness  # legacy: migrate to the options pattern
+operators/route/internal/rib/rib.go:NewRIB  # legacy: migrate to the options pattern
