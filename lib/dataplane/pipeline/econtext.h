@@ -5,6 +5,7 @@
 #include "common/memory_address.h"
 #include "lib/dataplane/device/device.h"
 #include "lib/dataplane/module/module.h"
+#include "lib/dataplane/module/packet_front.h"
 
 #include "lib/dataplane/counters/module.h"
 
@@ -65,6 +66,7 @@ struct chain_ectx {
 	struct counter_value_handle *counter_packet_pending_input;
 	struct counter_value_handle *counter_packet_pending_output;
 	uint64_t length;
+	struct packet_front schedule;
 	struct chain_module_ectx modules[];
 };
 
@@ -79,7 +81,7 @@ struct function_ectx {
 	uint64_t chain_count;
 	struct chain_ectx **chains;
 	uint64_t chain_map_size;
-	uint64_t chain_map[];
+	struct chain_ectx *chain_map[];
 };
 
 struct pipeline_ectx {
@@ -91,6 +93,7 @@ struct pipeline_ectx {
 	struct counter_value_handle *counter_packet_pending_output;
 	struct counter_storage *counter_storage;
 	uint64_t length;
+	struct packet_front schedule;
 	struct function_ectx *functions[];
 };
 

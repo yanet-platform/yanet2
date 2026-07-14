@@ -62,13 +62,16 @@ struct packet_list {
 static inline void
 packet_list_init(struct packet_list *list) {
 	list->first = NULL;
-	list->last = &list->first;
+	list->last = NULL;
 }
 
 static inline void
 packet_list_add(struct packet_list *list, struct packet *packet) {
-	*list->last = packet;
 	packet->next = NULL;
+	if (list->last == NULL) {
+		list->last = &list->first;
+	}
+	*list->last = packet;
 	list->last = &packet->next;
 }
 
@@ -105,7 +108,7 @@ packet_list_pop(struct packet_list *packets) {
 
 	packets->first = res->next;
 	if (packets->first == NULL)
-		packets->last = &packets->first;
+		packets->last = NULL;
 
 	return res;
 }

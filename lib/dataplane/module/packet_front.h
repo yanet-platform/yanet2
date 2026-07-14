@@ -63,6 +63,12 @@ packet_front_init(struct packet_front *packet_front) {
 	packet_front->drop_bytes = 0;
 }
 
+// Move the whole output, drop and pending lists from src into dst, transferring
+// the counters, and leave src empty.
+//
+// Zeroing src lets a scratch front be reused across rounds without a separate
+// per-round reset: merge moves every packet and counter out, so nothing stale
+// survives into the next round.
 static inline void
 packet_front_merge(struct packet_front *dst, struct packet_front *src) {
 	packet_list_concat(&dst->output, &src->output);
@@ -78,6 +84,8 @@ packet_front_merge(struct packet_front *dst, struct packet_front *src) {
 	dst->output_bytes += src->output_bytes;
 	dst->drop_count += src->drop_count;
 	dst->drop_bytes += src->drop_bytes;
+
+	packet_front_init(src);
 }
 
 static inline void

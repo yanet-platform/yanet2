@@ -568,7 +568,9 @@ function_ectx_create(
 		for (uint64_t weight_idx = 0;
 		     weight_idx < cp_function->chains[idx].weight;
 		     ++weight_idx) {
-			function_ectx->chain_map[pos] = idx;
+			SET_OFFSET_OF(
+				function_ectx->chain_map + pos, chain_ectx
+			);
 			++pos;
 		}
 	}

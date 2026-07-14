@@ -166,14 +166,15 @@ function_ectx_run_single_chain(
 	struct function_ectx *function_ectx,
 	struct packet_front *packet_front
 ) {
-	struct packet_front schedule;
-	packet_front_init(&schedule);
-	packet_front_take_output(&schedule, packet_front);
-
 	struct chain_ectx **chains = ADDR_OF(&function_ectx->chains);
-	chain_ectx_process(dp_worker, ADDR_OF(chains), &schedule);
+	struct chain_ectx *chain_ectx = ADDR_OF(chains);
 
-	packet_front_merge(packet_front, &schedule);
+	struct packet_front *schedule = &chain_ectx->schedule;
+	packet_front_take_output(schedule, packet_front);
+
+	chain_ectx_process(dp_worker, chain_ectx, schedule);
+
+	packet_front_merge(packet_front, schedule);
 }
 
 // Demultiplex packets across the function's chains by hash.
@@ -186,29 +187,29 @@ function_ectx_run_chains(
 	struct function_ectx *function_ectx,
 	struct packet_front *packet_front
 ) {
-	// FIXME: do not create schedule for each invocation
-	struct packet_front schedule[function_ectx->chain_count];
-	for (uint64_t idx = 0; idx < function_ectx->chain_count; ++idx)
-		packet_front_init(schedule + idx);
-
 	struct packet *packet = packet_list_pop(&packet_front->output);
 	while (packet != NULL) {
-		uint64_t chain_idx =
-			function_ectx->chain_map
-				[packet->hash % function_ectx->chain_map_size];
-		packet_front_output(schedule + chain_idx, packet);
+		uint64_t map_idx = packet->hash % function_ectx->chain_map_size;
+
+		struct chain_ectx *chain_ectx =
+			ADDR_OF(function_ectx->chain_map + map_idx);
+		packet_front_output(&chain_ectx->schedule, packet);
+
 		packet = packet_list_pop(&packet_front->output);
 	}
 	packet_front->output_count = 0;
 	packet_front->output_bytes = 0;
 
 	struct chain_ectx **chains = ADDR_OF(&function_ectx->chains);
+
 	for (uint64_t idx = 0; idx < function_ectx->chain_count; ++idx) {
 		struct chain_ectx *chain_ectx = ADDR_OF(chains + idx);
 
-		chain_ectx_process(dp_worker, chain_ectx, schedule + idx);
+		chain_ectx_process(
+			dp_worker, chain_ectx, &chain_ectx->schedule
+		);
 
-		packet_front_merge(packet_front, schedule + idx);
+		packet_front_merge(packet_front, &chain_ectx->schedule);
 	}
 }
 
@@ -347,14 +348,15 @@ device_entry_ectx_dispatch_single(
 	struct device_entry_ectx *entry_ectx,
 	struct packet_front *packet_front
 ) {
-	struct packet_front schedule;
-	packet_front_init(&schedule);
-	packet_front_take_output(&schedule, packet_front);
-
 	struct pipeline_ectx **pipelines = ADDR_OF(&entry_ectx->pipelines);
-	pipeline_ectx_process(dp_worker, ADDR_OF(pipelines), &schedule);
+	struct pipeline_ectx *pipeline_ectx = ADDR_OF(pipelines);
 
-	packet_front_merge(packet_front, &schedule);
+	struct packet_front *schedule = &pipeline_ectx->schedule;
+	packet_front_take_output(schedule, packet_front);
+
+	pipeline_ectx_process(dp_worker, pipeline_ectx, schedule);
+
+	packet_front_merge(packet_front, schedule);
 }
 
 // Demultiplex the handler output across the entry's pipelines by hash.
@@ -367,11 +369,7 @@ device_entry_ectx_dispatch_many(
 	struct device_entry_ectx *entry_ectx,
 	struct packet_front *packet_front
 ) {
-	// FIXME do not create front for each invocation
-	struct packet_front schedule[entry_ectx->pipeline_count];
-	for (uint64_t idx = 0; idx < entry_ectx->pipeline_count; ++idx) {
-		packet_front_init(schedule + idx);
-	}
+	struct pipeline_ectx **pipelines = ADDR_OF(&entry_ectx->pipelines);
 
 	struct packet *packet = packet_list_pop(&packet_front->output);
 	while (packet != NULL) {
@@ -379,20 +377,23 @@ device_entry_ectx_dispatch_many(
 			entry_ectx->pipeline_map
 				[packet->hash % entry_ectx->pipeline_map_size];
 
-		packet_front_output(schedule + pipeline_idx, packet);
+		struct pipeline_ectx *pipeline_ectx =
+			ADDR_OF(pipelines + pipeline_idx);
+		packet_front_output(&pipeline_ectx->schedule, packet);
 
 		packet = packet_list_pop(&packet_front->output);
 	}
 	packet_front->output_count = 0;
 	packet_front->output_bytes = 0;
 
-	struct pipeline_ectx **pipelines = ADDR_OF(&entry_ectx->pipelines);
 	for (uint64_t idx = 0; idx < entry_ectx->pipeline_count; ++idx) {
 		struct pipeline_ectx *pipeline_ectx = ADDR_OF(pipelines + idx);
 
-		pipeline_ectx_process(dp_worker, pipeline_ectx, schedule + idx);
+		pipeline_ectx_process(
+			dp_worker, pipeline_ectx, &pipeline_ectx->schedule
+		);
 
-		packet_front_merge(packet_front, schedule + idx);
+		packet_front_merge(packet_front, &pipeline_ectx->schedule);
 	}
 }
 
