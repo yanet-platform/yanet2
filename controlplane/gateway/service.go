@@ -98,16 +98,17 @@ func (m *GatewayService) Register(
 		)
 	}
 
-	log := m.log.With(
-		zap.String("name", backendDesc.GetName()),
-		zap.String("endpoint", backendDesc.GetEndpoint()),
-	)
-	log.Debug("registering backend")
-
 	kind := BackendKindExternal
 	if req.GetInProcess() {
 		kind = BackendKindInProcess
 	}
+
+	log := m.log.With(
+		zap.String("service", backendDesc.GetName()),
+		zap.String("endpoint", backendDesc.GetEndpoint()),
+		zap.Stringer("kind", kind),
+	)
+	log.Debug("registering service in registry")
 
 	// Fast path: skip dialing when the endpoint is unchanged.
 	//
@@ -115,7 +116,7 @@ func (m *GatewayService) Register(
 	// below is resolved there authoritatively (the redundant connection is
 	// closed), so this check need not be the linearization point.
 	if m.registry.Renew(backendDesc.GetName(), backendDesc.GetEndpoint(), kind) {
-		log.Debug("renewed backend registration")
+		log.Debug("renewed service registration in registry")
 		return &ynpb.RegisterResponse{Status: registrationStatusToProto(RegistrationRenewed)}, nil
 	}
 
@@ -127,11 +128,11 @@ func (m *GatewayService) Register(
 	regStatus := m.registry.RegisterBackend(backendDesc.GetName(), b, kind)
 	switch regStatus {
 	case RegistrationRegistered:
-		log.Info("registered backend")
+		log.Info("registered service in registry")
 	case RegistrationUpdated:
-		log.Info("updated backend endpoint")
+		log.Info("updated service endpoint in registry")
 	default:
-		log.Debug("renewed backend registration")
+		log.Debug("renewed service registration in registry")
 	}
 
 	return &ynpb.RegisterResponse{Status: registrationStatusToProto(regStatus)}, nil
