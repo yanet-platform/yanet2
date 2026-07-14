@@ -12,6 +12,7 @@ Group=yanet
 
 ExecStart=/usr/bin/yanet-controlplane -c /etc/yanet2/controlplane.yaml
 TimeoutSec=1200
+TimeoutStopSec=30
 Restart=always
 RestartSec=1
 LimitCORE=infinity

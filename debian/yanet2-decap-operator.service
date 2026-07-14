@@ -11,6 +11,7 @@ Group=yanet
 
 ExecStart=/usr/bin/yanet-decap-operator -c /etc/yanet2/yanet-decap-operator.yaml
 TimeoutSec=1200
+TimeoutStopSec=30
 Restart=always
 RestartSec=1
 LimitCORE=infinity

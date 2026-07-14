@@ -7,6 +7,8 @@ import (
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+
+	"github.com/yanet-platform/yanet2/common/go/xgrpc"
 )
 
 type grpcServerOptions struct {
@@ -78,7 +80,11 @@ func (m *GRPCServer) Run(ctx context.Context, listener net.Listener) error {
 		m.log.Info("stopping gRPC server", zap.Stringer("addr", listener.Addr()))
 		defer m.log.Info("stopped gRPC server", zap.Stringer("addr", listener.Addr()))
 
-		m.server.GracefulStop()
+		xgrpc.StopGracefully(m.server, xgrpc.GracefulStopTimeout, func() {
+			m.log.Warn("graceful stop timed out, forcing shutdown",
+				zap.Duration("grace_period", xgrpc.GracefulStopTimeout),
+			)
+		})
 		// Drain Serve's return value.
 		if err := <-serveErr; err != nil {
 			return fmt.Errorf("failed to serve gRPC: %w", err)

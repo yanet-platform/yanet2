@@ -12,6 +12,7 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 
+	commonxgrpc "github.com/yanet-platform/yanet2/common/go/xgrpc"
 	"github.com/yanet-platform/yanet2/controlplane/internal/xgrpc"
 )
 
@@ -109,7 +110,11 @@ func (m *ServiceRunner) Run(ctx context.Context) error {
 	m.log.Info("stopping gRPC API", zap.Stringer("addr", listener.Addr()))
 	defer m.log.Info("stopped gRPC API", zap.Stringer("addr", listener.Addr()))
 
-	m.server.GracefulStop()
+	commonxgrpc.StopGracefully(m.server, commonxgrpc.GracefulStopTimeout, func() {
+		m.log.Warn("graceful stop timed out, forcing shutdown",
+			zap.Duration("grace_period", commonxgrpc.GracefulStopTimeout),
+		)
+	})
 
 	return wg.Wait()
 }

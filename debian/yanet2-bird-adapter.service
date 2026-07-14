@@ -10,6 +10,7 @@ User=root
 Group=yanet
 ExecStart=/usr/bin/yanet-bird-adapter server -c /etc/yanet2/bird-adapter.yaml
 TimeoutSec=1200
+TimeoutStopSec=30
 Restart=always
 RestartSec=1
 LimitCORE=infinity

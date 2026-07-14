@@ -17,6 +17,7 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/logging"
 	"github.com/yanet-platform/yanet2/common/go/xcfg"
 	"github.com/yanet-platform/yanet2/common/go/xcmd"
+	"github.com/yanet-platform/yanet2/common/go/xgrpc"
 	birdAdapter "github.com/yanet-platform/yanet2/operators/bird-adapter"
 	adapterpb "github.com/yanet-platform/yanet2/operators/bird-adapter/adapterpb/v1"
 )
@@ -118,7 +119,13 @@ func runServer() error {
 		err := xcmd.WaitInterrupted(ctx)
 		log.Info("caught signal", zap.Error(err))
 		log.Info("shutting down gRPC server")
-		grpcServer.GracefulStop()
+
+		xgrpc.StopGracefully(grpcServer, xgrpc.GracefulStopTimeout, func() {
+			log.Warn("graceful stop timed out, forcing shutdown",
+				zap.Duration("grace_period", xgrpc.GracefulStopTimeout),
+			)
+		})
+
 		return err
 	})
 

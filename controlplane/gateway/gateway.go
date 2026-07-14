@@ -18,6 +18,7 @@ import (
 	"github.com/yanet-platform/yanet2/common/go/grpcmetrics"
 	"github.com/yanet-platform/yanet2/common/go/metrics"
 	"github.com/yanet-platform/yanet2/common/go/readiness"
+	commonxgrpc "github.com/yanet-platform/yanet2/common/go/xgrpc"
 	readinesspb "github.com/yanet-platform/yanet2/common/readinesspb/v1"
 	"github.com/yanet-platform/yanet2/controlplane/httpproxy"
 	"github.com/yanet-platform/yanet2/controlplane/internal/auth"
@@ -470,7 +471,11 @@ func (m *Gateway) Run(ctx context.Context) error {
 	m.log.Info("stopping gRPC gateway", zap.Stringer("addr", listener.Addr()))
 	defer m.log.Info("stopped gRPC gateway", zap.Stringer("addr", listener.Addr()))
 
-	m.server.GracefulStop()
+	commonxgrpc.StopGracefully(m.server, commonxgrpc.GracefulStopTimeout, func() {
+		m.log.Warn("graceful stop timed out, forcing shutdown",
+			zap.Duration("grace_period", commonxgrpc.GracefulStopTimeout),
+		)
+	})
 
 	return wg.Wait()
 }
