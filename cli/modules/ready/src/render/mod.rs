@@ -36,7 +36,7 @@ const REASON_INDENT: usize = 6;
 /// arrow, the header/summary dash, the summary separator, and the
 /// watching-suffix ellipsis.
 ///
-/// Chosen once from the same `colored` flag as [`state_cells`] so every
+/// Chosen once from the same `colored` flag as [`StateStyle`] so every
 /// symbol in the render degrades to plain ASCII together — no glyph can
 /// drift out of sync with the marks in a non-UTF-8 locale or piped run.
 struct Symbols {
@@ -136,6 +136,49 @@ fn print_scope_row(
     print_reason_lines(&scope.reasons, colored, wrap_width);
 }
 
+/// How one `State` renders: its mark glyph and its color.
+///
+/// This is the single place the state → (mark, color) map lives. Both the
+/// snapshot block and the `--watch` transition log build their cells from
+/// here, so a state can never be green in one render and yellow in the
+/// other. `colored` is supplied by the caller — the global color gate is
+/// read once at the top of a render, never here.
+struct StateStyle {
+    mark: &'static str,
+    color: fn(&str) -> String,
+    colored: bool,
+}
+
+impl StateStyle {
+    fn new(state: State, colored: bool) -> Self {
+        let (unicode_mark, ascii_mark, color): (&str, &str, fn(&str) -> String) = match state {
+            State::Ready => ("✓", "[ok]", |s| s.green().to_string()),
+            State::Degraded => ("~", "[!!]", |s| s.yellow().to_string()),
+            State::NotReady => ("✗", "[xx]", |s| s.red().to_string()),
+            State::Unknown | State::Unspecified => ("?", "[??]", |s| s.truecolor(127, 127, 127).to_string()),
+        };
+
+        let mark = if colored { unicode_mark } else { ascii_mark };
+
+        Self { mark, color, colored }
+    }
+
+    /// Returns the mark glyph in the state's color.
+    fn styled_mark(&self) -> String {
+        self.paint(self.mark)
+    }
+
+    /// Paints `text` in the state's color, or returns it as-is when the
+    /// render is not colored.
+    fn paint(&self, text: &str) -> String {
+        if self.colored {
+            (self.color)(text)
+        } else {
+            text.to_string()
+        }
+    }
+}
+
 /// Returns the (mark, label) cell text for `state`, colored when `colored`
 /// is true.
 ///
@@ -143,19 +186,22 @@ fn print_scope_row(
 /// for colored Unicode marks, 4 chars / 9+ chars for the ASCII fallback) so
 /// a double-width glyph can never shift a column.
 fn state_cells(state: State, colored: bool) -> (String, String) {
-    let (unicode_mark, ascii_mark, color): (&str, &str, fn(&str) -> String) = match state {
-        State::Ready => ("✓", "[ok]", |s| s.green().to_string()),
-        State::Degraded => ("~", "[!!]", |s| s.yellow().to_string()),
-        State::NotReady => ("✗", "[xx]", |s| s.red().to_string()),
-        State::Unknown | State::Unspecified => ("?", "[??]", |s| s.truecolor(127, 127, 127).to_string()),
-    };
-
+    let style = StateStyle::new(state, colored);
     let label_cell = format!("{:<width$}", label(state), width = STATE_WIDTH);
 
+    (style.styled_mark(), style.paint(&label_cell))
+}
+
+/// Paints `text` in the grey reserved for secondary text.
+///
+/// Reason text, the `--watch` timestamp, and the transition arrow all share
+/// this one grey, so nothing but the state itself competes for attention on
+/// a transition line.
+fn dim(text: &str, colored: bool) -> String {
     if colored {
-        (color(unicode_mark), color(&label_cell))
+        text.truecolor(127, 127, 127).to_string()
     } else {
-        (ascii_mark.to_string(), label_cell)
+        text.to_string()
     }
 }
 
@@ -206,12 +252,7 @@ fn print_reason_lines(reasons: &[Reason], colored: bool, wrap_width: Option<usiz
         };
 
         for line in lines {
-            let styled = if colored {
-                line.truecolor(127, 127, 127).to_string()
-            } else {
-                line
-            };
-            println!("{indent}{styled}");
+            println!("{indent}{}", dim(&line, colored));
         }
     }
 }
