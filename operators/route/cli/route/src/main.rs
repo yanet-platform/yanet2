@@ -8,7 +8,7 @@ use core::{
     fmt::{self, Display, Formatter},
     net::IpAddr,
 };
-use std::collections::HashMap;
+use std::{collections::HashMap, time::SystemTime};
 
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
@@ -26,6 +26,7 @@ use tonic::codec::CompressionEncoding;
 use ync::{
     client::{Connection, ConnectionArgs, LayeredChannel, Service},
     errors::Error,
+    humanfmt,
     output::{self, CommonFormat},
 };
 
@@ -706,43 +707,12 @@ impl From<&readinesspb::pb::Scope> for ReadinessRow {
         Self {
             scope: scope.name.clone(),
             state: state_cell.to_string(),
-            last_transition: format_age(scope.last_transition_time.as_ref()),
-            observed: format_age(scope.observed_at.as_ref()),
+            last_transition: humanfmt::format_age(scope.last_transition_time.as_ref(), SystemTime::now())
+                .unwrap_or_else(|| "-".to_string()),
+            observed: humanfmt::format_age(scope.observed_at.as_ref(), SystemTime::now())
+                .unwrap_or_else(|| "-".to_string()),
             reasons,
         }
-    }
-}
-
-/// Formats a `prost_types::Timestamp` as a human-readable relative age.
-///
-/// Returns `"-"` when `ts` is `None` or the zero sentinel
-/// (`seconds == 0 && nanos == 0`). Otherwise formats as `Xs ago`,
-/// `XmYs ago`, or `XhYm ago` depending on magnitude.
-pub fn format_age(ts: Option<&prost_types::Timestamp>) -> String {
-    let ts = match ts {
-        Some(ts) if ts.seconds != 0 || ts.nanos != 0 => ts,
-        _ => return "-".to_string(),
-    };
-
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default();
-
-    let ts_secs = ts.seconds.max(0) as u64;
-    let now_secs = now.as_secs();
-
-    let secs = now_secs.saturating_sub(ts_secs);
-
-    if secs < 60 {
-        format!("{secs}s ago")
-    } else if secs < 3600 {
-        let minutes = secs / 60;
-        let remainder = secs % 60;
-        format!("{minutes}m{remainder}s ago")
-    } else {
-        let hours = secs / 3600;
-        let minutes = (secs % 3600) / 60;
-        format!("{hours}h{minutes}m ago")
     }
 }
 
@@ -873,53 +843,6 @@ mod test {
         assert_eq!("10.0.0.0/8", remove.prefix.to_string());
         assert_eq!(1, remove.nexthop_addrs.len());
         assert_eq!("192.0.2.1", remove.nexthop_addrs[0].to_string());
-    }
-
-    #[test]
-    fn format_age_none_returns_dash() {
-        assert_eq!("-", format_age(None));
-    }
-
-    #[test]
-    fn format_age_zero_sentinel_returns_dash() {
-        let ts = prost_types::Timestamp { seconds: 0, nanos: 0 };
-        assert_eq!("-", format_age(Some(&ts)));
-    }
-
-    #[test]
-    fn format_age_seconds() {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap();
-        let ts = prost_types::Timestamp {
-            seconds: now.as_secs() as i64 - 30,
-            nanos: 0,
-        };
-        assert_eq!("30s ago", format_age(Some(&ts)));
-    }
-
-    #[test]
-    fn format_age_minutes() {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap();
-        let ts = prost_types::Timestamp {
-            seconds: now.as_secs() as i64 - 64,
-            nanos: 0,
-        };
-        assert_eq!("1m4s ago", format_age(Some(&ts)));
-    }
-
-    #[test]
-    fn format_age_hours() {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap();
-        let ts = prost_types::Timestamp {
-            seconds: now.as_secs() as i64 - (2 * 3600 + 3 * 60),
-            nanos: 0,
-        };
-        assert_eq!("2h3m ago", format_age(Some(&ts)));
     }
 
     fn make_entry(prefix_str: &str, source: &str, is_best: bool) -> RouteEntry {

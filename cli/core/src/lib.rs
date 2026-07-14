@@ -5,6 +5,7 @@ pub mod client;
 pub mod dispatcher;
 pub mod display;
 pub mod errors;
+pub mod humanfmt;
 pub mod logging;
 pub mod output;
 

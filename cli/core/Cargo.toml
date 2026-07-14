@@ -16,6 +16,7 @@ tabled = { version = "0.18", features = ["ansi"] }
 terminal_size = "0.4"
 tokio = { version = "1", features = ["net", "io-util", "time", "sync"] }
 prost = "0.13"
+prost-types = "0.13"
 tonic = { version = "0.13", features = ["gzip"] }
 tower = "0.5"
 http = "1"
@@ -27,3 +28,4 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 uuid = { version = "1", features = ["v4"] }
 thiserror = "1"
+humantime = "2"

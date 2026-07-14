@@ -14,10 +14,10 @@ use std::time::SystemTime;
 
 use colored::Colorize;
 use readinesspb::pb::{Reason, Scope, State};
-use ync::{display, output};
+use ync::{display, humanfmt, output};
 
 use self::{
-    age::{format_age, is_stale},
+    age::is_stale,
     layout::{normalize_whitespace, wrap_words},
 };
 pub use self::{
@@ -110,7 +110,7 @@ fn print_scope_row(
     let state = State::try_from(scope.state).unwrap_or_default();
     let (mark, label_cell) = state_cells(state, colored);
     let name = format!("{:<width$}", scope.name, width = name_width);
-    let age = format_age(scope.last_transition_time.as_ref(), now);
+    let age = humanfmt::format_age(scope.last_transition_time.as_ref(), now);
     let time = time_cell(age.as_deref());
 
     let mut line = format!("{:width$}{mark} {name} {label_cell} {time}", "", width = ROW_INDENT);
@@ -121,7 +121,7 @@ fn print_scope_row(
         now,
         stale_after,
     ) {
-        let stale_age = format_age(scope.observed_at.as_ref(), now).unwrap_or_default();
+        let stale_age = humanfmt::format_age(scope.observed_at.as_ref(), now).unwrap_or_default();
         let tag = format!("stale {stale_age}");
         let tag = if colored {
             tag.truecolor(180, 140, 0).to_string()
