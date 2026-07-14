@@ -1,25 +1,19 @@
 //! Generic readiness probe CLI.
 
-use core::fmt::{self, Display, Formatter};
+use core::time::Duration;
+use std::collections::BTreeMap;
 
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
 use colored::Colorize;
-use prost_types::Timestamp;
 use readinesspb::pb::{ReadyRequest, ReadyResponse, Scope, State};
-use tabled::{
-    Table, Tabled,
-    settings::{
-        Color, Style,
-        object::{Columns, Rows},
-        style::{BorderColor, HorizontalLine},
-    },
-};
 use ync::{
     client::ConnectionArgs,
     errors::Error,
     output::{self, CommonFormat},
 };
+
+mod render;
 
 /// Exit code used when the RPC succeeds but not all scopes are `STATE_READY`.
 const EXIT_NOT_READY: i32 = 2;
@@ -50,6 +44,23 @@ pub struct Cmd {
     /// snapshot.
     #[arg(long, default_value_t = false)]
     pub watch: bool,
+    /// Minimum time since a scope was last observed before flagging it
+    /// `stale` in human output.
+    ///
+    /// Readiness sources heartbeat on their own, differing cadences — e.g.
+    /// reconcile actuators every 30s, the bird RIB sampler every 1s, and the
+    /// slowest in-tree one, the route operator's neighbour monitor, every
+    /// 5m. Since the CLI cannot know a given scope's expected interval, the
+    /// default is deliberately generous, roughly 3x the slowest known
+    /// heartbeat. Accepts humantime durations (e.g. `30s`, `5m`). `0`
+    /// disables the tag.
+    #[arg(long, default_value = "15m", value_parser = parse_duration)]
+    pub stale_after: Duration,
+}
+
+/// Parses a CLI duration flag via `humantime`.
+fn parse_duration(value: &str) -> Result<Duration, String> {
+    humantime::parse_duration(value).map_err(|err| err.to_string())
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -104,43 +115,20 @@ async fn run_once(cmd: Cmd) -> Result<bool, Error> {
 
     let all_ready = all_scopes_ready && missing.is_empty();
 
-    let total = response.scopes.len();
-    let ready_count = response
-        .scopes
-        .iter()
-        .filter(|scope| scope.state == State::Ready as i32)
-        .count();
-
     output::data(
         &response.scopes,
         response.scopes.is_empty() && missing.is_empty(),
         format_args!("no scopes"),
         || {
-            let mut rows: Vec<ReadinessRow> = response.scopes.iter().map(ReadinessRow::from).collect();
-            rows.sort_by(|a, b| a.scope.cmp(&b.scope));
+            let mut scopes = response.scopes.clone();
+            scopes.sort_by(|a, b| a.name.cmp(&b.name));
 
-            if !rows.is_empty() {
-                print_readiness_table(rows);
+            if !scopes.is_empty() {
+                let width = render::name_width(scopes.iter().map(|scope| scope.name.as_str()));
+                render::print_status_block(&cmd.name, &scopes, width, cmd.stale_after, false);
             }
 
-            if !missing.is_empty() {
-                let missing_list = missing.join(", ");
-                let label = "missing (not registered):";
-
-                if output::is_colored() {
-                    println!("{} {}", label.red(), missing_list.red());
-                } else {
-                    println!("{label} {missing_list}");
-                }
-            }
-
-            let missing_count = missing.len();
-
-            if missing_count > 0 {
-                println!("summary: {ready_count}/{total} ready, {missing_count} requested scope missing");
-            } else {
-                println!("summary: {ready_count}/{total} ready");
-            }
+            print_missing(&missing);
         },
     );
 
@@ -149,10 +137,14 @@ async fn run_once(cmd: Cmd) -> Result<bool, Error> {
 
 /// Stream readiness updates via `Watch` until the server closes the connection.
 ///
-/// The first message is a full snapshot of all selected scopes; each
-/// subsequent message carries only the scopes that changed. Returns `Ok(())`
+/// The first message is a full snapshot of all selected scopes and renders
+/// the status block; each subsequent message carries only the scopes that
+/// changed and renders one append-only log line per scope. Returns `Ok(())`
 /// on clean stream close.
 async fn run_watch(cmd: Cmd) -> Result<(), Error> {
+    let mut snapshot: BTreeMap<String, Scope> = BTreeMap::new();
+    let mut name_width: Option<usize> = None;
+
     ync::client::invoke_server_stream::<ReadyRequest, ReadyResponse, _>(
         &cmd.connection,
         "ready",
@@ -160,12 +152,27 @@ async fn run_watch(cmd: Cmd) -> Result<(), Error> {
         "Watch",
         ReadyRequest { scopes: cmd.scopes.clone() },
         |resp| {
-            let mut rows: Vec<ReadinessRow> = resp.scopes.iter().map(ReadinessRow::from).collect();
-            rows.sort_by(|a, b| a.scope.cmp(&b.scope));
-
             output::data(&resp.scopes, resp.scopes.is_empty(), format_args!("no scopes"), || {
-                if !rows.is_empty() {
-                    print_readiness_table(rows);
+                let mut scopes = resp.scopes.clone();
+                scopes.sort_by(|a, b| a.name.cmp(&b.name));
+
+                match name_width {
+                    None => {
+                        let width = render::name_width(scopes.iter().map(|scope| scope.name.as_str()));
+                        name_width = Some(width);
+
+                        for scope in &scopes {
+                            snapshot.insert(scope.name.clone(), scope.clone());
+                        }
+
+                        render::print_status_block(&cmd.name, &scopes, width, cmd.stale_after, true);
+                    }
+                    Some(width) => {
+                        for scope in &scopes {
+                            let transition = render::record_transition(&mut snapshot, scope);
+                            render::print_transition_line(scope, width, transition);
+                        }
+                    }
                 }
             });
         },
@@ -173,163 +180,19 @@ async fn run_watch(cmd: Cmd) -> Result<(), Error> {
     .await
 }
 
-/// Wraps a readiness state for colored display in the table.
-pub struct StateCell(State);
-
-impl Display for StateCell {
-    fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
-        let StateCell(state) = self;
-        let name = state.as_str_name().strip_prefix("STATE_").unwrap_or_default();
-
-        if output::is_colored() {
-            let colored = match state {
-                State::Ready => name.green().to_string(),
-                State::Degraded => name.yellow().to_string(),
-                State::NotReady => name.red().to_string(),
-                State::Unspecified | State::Unknown => name.truecolor(127, 127, 127).to_string(),
-            };
-            write!(f, "{colored}")
-        } else {
-            write!(f, "{name}")
-        }
+/// Prints the red `missing (not registered): …` line for requested scopes
+/// the server did not return at all.
+fn print_missing(missing: &[&str]) {
+    if missing.is_empty() {
+        return;
     }
-}
 
-/// A displayable row for the readiness table.
-#[derive(Debug, Tabled)]
-pub struct ReadinessRow {
-    #[tabled(rename = "Scope")]
-    pub scope: String,
-    #[tabled(rename = "State")]
-    pub state: String,
-    #[tabled(rename = "Last Transition")]
-    pub last_transition: String,
-    #[tabled(rename = "Observed")]
-    pub observed: String,
-    #[tabled(rename = "Reasons")]
-    pub reasons: String,
-}
-
-impl From<&Scope> for ReadinessRow {
-    fn from(scope: &Scope) -> Self {
-        let state = State::try_from(scope.state).unwrap_or_default();
-        let state_cell = StateCell(state);
-
-        let reasons = scope
-            .reasons
-            .iter()
-            .map(|reason| format!("{}: {}", reason.code, reason.message))
-            .collect::<Vec<_>>()
-            .join(", ");
-
-        Self {
-            scope: scope.name.clone(),
-            state: state_cell.to_string(),
-            last_transition: format_age(scope.last_transition_time.as_ref()),
-            observed: format_age(scope.observed_at.as_ref()),
-            reasons,
-        }
-    }
-}
-
-fn print_readiness_table(rows: Vec<ReadinessRow>) {
-    let mut table = Table::new(&rows);
-    table.with(
-        Style::modern()
-            .horizontals([(1, HorizontalLine::inherit(Style::modern()))])
-            .remove_horizontal(),
-    );
+    let missing_list = missing.join(", ");
+    let label = "missing (not registered):";
 
     if output::is_colored() {
-        table.modify(Columns::new(..), BorderColor::filled(Color::rgb_fg(0x4e, 0x4e, 0x4e)));
-        table.modify(Rows::first(), Color::BOLD);
-    }
-
-    ync::display::fit_terminal_width(&mut table);
-    println!("{table}");
-}
-
-/// Formats a `Timestamp` as a human-readable relative age.
-///
-/// Returns `"-"` when `ts` is `None` or the zero sentinel
-/// (`seconds == 0 && nanos == 0`). Otherwise formats as `Xs ago`,
-/// `XmYs ago`, or `XhYm ago` depending on magnitude.
-pub fn format_age(ts: Option<&Timestamp>) -> String {
-    let ts = match ts {
-        Some(ts) if ts.seconds != 0 || ts.nanos != 0 => ts,
-        _ => return "-".to_string(),
-    };
-
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default();
-
-    let ts_secs = ts.seconds.max(0) as u64;
-    let now_secs = now.as_secs();
-
-    let secs = now_secs.saturating_sub(ts_secs);
-
-    if secs < 60 {
-        format!("{secs}s ago")
-    } else if secs < 3600 {
-        let minutes = secs / 60;
-        let remainder = secs % 60;
-        format!("{minutes}m{remainder}s ago")
+        println!("{} {}", label.red(), missing_list.red());
     } else {
-        let hours = secs / 3600;
-        let minutes = (secs % 3600) / 60;
-        format!("{hours}h{minutes}m ago")
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use super::*;
-
-    #[test]
-    fn format_age_none_returns_dash() {
-        assert_eq!("-", format_age(None));
-    }
-
-    #[test]
-    fn format_age_zero_sentinel_returns_dash() {
-        let ts = Timestamp { seconds: 0, nanos: 0 };
-        assert_eq!("-", format_age(Some(&ts)));
-    }
-
-    #[test]
-    fn format_age_seconds() {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap();
-        let ts = Timestamp {
-            seconds: now.as_secs() as i64 - 30,
-            nanos: 0,
-        };
-        assert_eq!("30s ago", format_age(Some(&ts)));
-    }
-
-    #[test]
-    fn format_age_minutes() {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap();
-        let ts = Timestamp {
-            seconds: now.as_secs() as i64 - 64,
-            nanos: 0,
-        };
-        assert_eq!("1m4s ago", format_age(Some(&ts)));
-    }
-
-    #[test]
-    fn format_age_hours() {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap();
-        let ts = Timestamp {
-            seconds: now.as_secs() as i64 - (2 * 3600 + 3 * 60),
-            nanos: 0,
-        };
-        assert_eq!("2h3m ago", format_age(Some(&ts)));
+        println!("{label} {missing_list}");
     }
 }

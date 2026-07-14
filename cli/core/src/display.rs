@@ -40,6 +40,14 @@ pub fn fit_terminal_width(table: &mut Table) {
     }
 }
 
+/// Returns the current terminal width in columns, detected from stdout.
+///
+/// Returns `None` when stdout is not a TTY (piped or redirected), matching
+/// the same detection [`fit_terminal_width`] uses.
+pub fn terminal_width() -> Option<usize> {
+    terminal_size_of(std::io::stdout()).map(|(terminal_size::Width(cols), _)| cols as usize)
+}
+
 /// Apply the standard YANET table style to `table`.
 fn apply_style(table: &mut Table) {
     table.with(
