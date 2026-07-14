@@ -28,6 +28,20 @@ const (
 	BackendKindExternal
 )
 
+// String returns the human-readable name of the backend kind.
+func (m BackendKind) String() string {
+	switch m {
+	case BackendKindBuiltin:
+		return "builtin"
+	case BackendKindInProcess:
+		return "in_process"
+	case BackendKindExternal:
+		return "external"
+	default:
+		return "unspecified"
+	}
+}
+
 // Backend is a routable, closeable upstream connection tracked by the registry.
 type Backend interface {
 	proxy.Backend

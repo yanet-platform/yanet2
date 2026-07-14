@@ -286,10 +286,8 @@ func NewGateway(cfg *Config, options ...GatewayOption) (*Gateway, error) {
 
 	gatewayService := NewGatewayService(registry, log)
 	ynpb.RegisterGatewayServer(server, gatewayService)
-	log.Info("registered service", zap.String("service", fmt.Sprintf("%T", gatewayService)))
 
 	ynpb.RegisterAuthServiceServer(server, authService)
-	log.Info("registered service", zap.String("service", fmt.Sprintf("%T", authService)))
 
 	rdTracker := readiness.NewTracker(
 		[]string{gatewayReadinessScope},
@@ -298,11 +296,9 @@ func NewGateway(cfg *Config, options ...GatewayOption) (*Gateway, error) {
 	)
 	readinessSvc := NewReadinessService(rdTracker)
 	ynpb.RegisterReadinessServiceServer(server, readinessSvc)
-	log.Info("registered service", zap.String("service", fmt.Sprintf("%T", readinessSvc)))
 
 	metricsService := NewMetricsService(metricsCollectors(serverMetrics, opts.Services)...)
 	ynpb.RegisterMetricsServiceServer(server, metricsService)
-	log.Info("registered service", zap.String("service", fmt.Sprintf("%T", metricsService)))
 
 	// Dial a single loopback connection shared by services hosted on the
 	// gateway's own gRPC server.
@@ -326,8 +322,9 @@ func NewGateway(cfg *Config, options ...GatewayOption) (*Gateway, error) {
 		ynpb.MetricsService_ServiceDesc.ServiceName,
 	} {
 		registry.RegisterBackend(service, loopback, BackendKindBuiltin)
-		log.Info("registered built-in service in registry",
+		log.Info("registered service in registry",
 			zap.String("service", service),
+			zap.Stringer("kind", BackendKindBuiltin),
 		)
 	}
 
@@ -340,21 +337,12 @@ func NewGateway(cfg *Config, options ...GatewayOption) (*Gateway, error) {
 			// point every service name at the shared loopback backend using the
 			// declared kind.
 			entry.service.RegisterService(server)
-			var msg string
-			switch entry.kind {
-			case BackendKindBuiltin:
-				msg = "registered built-in service in registry"
-			default:
-				msg = "registered in-process service in registry"
-			}
-			log.Info(msg,
-				zap.String("service", entry.service.Name()),
-			)
 
 			for _, name := range entry.service.ServicesNames() {
 				registry.RegisterBackend(name, loopback, entry.kind)
-				log.Debug(msg,
+				log.Info("registered service in registry",
 					zap.String("service", name),
+					zap.Stringer("kind", entry.kind),
 				)
 			}
 		} else {
