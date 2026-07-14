@@ -143,6 +143,7 @@ deploy/packages/
 .assets/
 .docs/
 .secrets/
+/TODO.md
 
 # Ignore out-of-tree modules by default.
 #
