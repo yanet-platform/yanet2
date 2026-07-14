@@ -1,5 +1,7 @@
 #!/usr/bin/make -f
 
+include /usr/share/dpkg/pkg-info.mk
+
 # Enable verbose output for debugging
 export DH_VERBOSE = 1
 export DH_OPTIONS=-v
@@ -22,7 +24,8 @@ override_dh_auto_configure:
 	meson setup $(BUILDDIR) \
 			--default-library=static \
 			-Dfuzzing=disabled \
-			-Dtrace=disabled; \
+			-Dtrace=disabled \
+			-Dversion=$(DEB_VERSION); \
 
 # Handle missing files more gracefully
 override_dh_missing:

@@ -1,6 +1,6 @@
 subdir('ynpb')
 
-ld_flags = '-X github.com/yanet-platform/yanet2/controlplane/internal/version.version=' + meson.project_version()
+ld_flags = '-X github.com/yanet-platform/yanet2/controlplane/internal/version.version=' + yanet_version
 
 custom_target(
     'yanet-controlplane',

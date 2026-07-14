@@ -10,7 +10,7 @@ install_data(
     install_dir: '/etc/yanet2',
 )
 
-bird_adapter_ld_flags = '-X github.com/yanet-platform/yanet2/operators/bird-adapter/internal/version.version=' + meson.project_version()
+bird_adapter_ld_flags = '-X github.com/yanet-platform/yanet2/operators/bird-adapter/internal/version.version=' + yanet_version
 
 # Skip bird-adapter when fuzzing — it does not use CGO but still gets sanitizer
 # flags that interfere with the fuzzing build.

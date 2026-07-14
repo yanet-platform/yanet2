@@ -6,6 +6,13 @@ option(
 )
 
 option(
+  'version',
+  type: 'string',
+  value: '',
+  description: 'Override the version reported by the binaries; empty uses the project() version.',
+)
+
+option(
   'trace',
   type: 'feature',
   value: 'disabled',

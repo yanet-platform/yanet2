@@ -25,8 +25,10 @@ yanet_conf.set('ENABLE_TRACE_LOG', get_option('trace').enabled())
 yanet_conf.set('MBUF_MAX_SIZE', get_option('mbuf_max_size'))
 
 # Version and build info
+yanet_version = get_option('version') == '' ? meson.project_version() : get_option('version')
+
 cc = meson.get_compiler('c')
-yanet_conf.set_quoted('YANET_VERSION', meson.project_version())
+yanet_conf.set_quoted('YANET_VERSION', yanet_version)
 yanet_conf.set_quoted('YANET_COMPILER_ID', cc.get_id())
 yanet_conf.set_quoted('YANET_COMPILER_VERSION', cc.version())
 yanet_conf.set_quoted('YANET_BUILD_TYPE', get_option('buildtype'))
