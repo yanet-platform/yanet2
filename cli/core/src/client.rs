@@ -87,14 +87,67 @@ pub struct Connection {
 impl Connection {
     /// Establish the authenticated channel to `args.endpoint`.
     pub async fn connect(args: &ConnectionArgs) -> Result<Self, Error> {
+        Self::connect_for(args, "connect").await
+    }
+
+    /// Establish the channel, blaming a failure on `action` rather than the
+    /// connect step.
+    ///
+    /// The dynamic-dispatch helpers report the verb the user asked for (e.g.
+    /// `ready`) all the way through, so they name their own action here. So
+    /// does a CLI that connects once and then dispatches several RPCs over
+    /// that one connection: a connect failure must read the same as an RPC
+    /// failure of the same command.
+    pub async fn connect_for(args: &ConnectionArgs, action: &str) -> Result<Self, Error> {
         let channel = connect(args)
             .await
-            .map_err(|err| Error::from_connection(err, "connect", &args.endpoint))?;
+            .map_err(|err| Error::from_connection(err, action, &args.endpoint))?;
 
         Ok(Self {
             channel,
             endpoint: args.endpoint.clone(),
         })
+    }
+
+    /// Invoke a unary RPC on an arbitrary gRPC service over this connection.
+    ///
+    /// The dispatch is the free [`invoke_unary`]'s, minus the connect: a CLI
+    /// probing several services builds one [`Connection`] and calls this per
+    /// service, so they all share a single channel.
+    pub async fn invoke_unary<Req, Resp>(
+        &self,
+        action: &str,
+        service: &str,
+        method: &str,
+        request: Req,
+    ) -> Result<Resp, Error>
+    where
+        Req: Message + 'static,
+        Resp: Message + Default + 'static,
+    {
+        let mut grpc = Grpc::new(self.channel.clone())
+            .send_compressed(CompressionEncoding::Gzip)
+            .accept_compressed(CompressionEncoding::Gzip);
+
+        let path = PathAndQuery::try_from(format!("/{service}/{method}")).map_err(|err| {
+            Error::from_status(
+                Status::invalid_argument(err.to_string()),
+                action,
+                &self.endpoint,
+                service,
+            )
+        })?;
+
+        grpc.ready()
+            .await
+            .map_err(|err| Error::from_status(Status::unavailable(err.to_string()), action, &self.endpoint, service))?;
+
+        let codec: ProstCodec<Req, Resp> = ProstCodec::default();
+
+        grpc.unary(Request::new(request), path, codec)
+            .await
+            .map(|response| response.into_inner())
+            .map_err(|status| Error::from_status(status, action, &self.endpoint, service))
     }
 }
 
@@ -210,35 +263,10 @@ where
     Req: Message + 'static,
     Resp: Message + Default + 'static,
 {
-    let endpoint = connection.endpoint.clone();
-
-    let channel = connect(connection)
+    Connection::connect_for(connection, action)
+        .await?
+        .invoke_unary(action, service, method, request)
         .await
-        .map_err(|err| Error::from_connection(err, action, endpoint.clone()))?;
-
-    let mut grpc = Grpc::new(channel)
-        .send_compressed(CompressionEncoding::Gzip)
-        .accept_compressed(CompressionEncoding::Gzip);
-
-    let path = PathAndQuery::try_from(format!("/{service}/{method}")).map_err(|err| {
-        Error::from_status(
-            Status::invalid_argument(err.to_string()),
-            action,
-            endpoint.clone(),
-            service,
-        )
-    })?;
-
-    grpc.ready()
-        .await
-        .map_err(|err| Error::from_status(Status::unavailable(err.to_string()), action, endpoint.clone(), service))?;
-
-    let codec: ProstCodec<Req, Resp> = ProstCodec::default();
-
-    grpc.unary(Request::new(request), path, codec)
-        .await
-        .map(|response| response.into_inner())
-        .map_err(|status| Error::from_status(status, action, endpoint, service))
 }
 
 /// Invoke a server-streaming RPC on an arbitrary gRPC service by its

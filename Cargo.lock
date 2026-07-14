@@ -3571,9 +3571,12 @@ dependencies = [
  "colored",
  "humantime",
  "prost-types",
+ "serde",
  "tokio",
+ "tonic",
  "yanet-cli",
  "yanet-readinesspb",
+ "yanet-ynpb",
 ]
 
 [[package]]

@@ -150,6 +150,67 @@ impl Error {
         }
     }
 
+    /// Build an [`Error`] the CLI decided on itself, carrying an explicit
+    /// `kind`.
+    ///
+    /// No RPC was issued, so there is no `tonic::Status` to map from and no
+    /// service to name. Pass the `kind` the gateway would have reported for
+    /// the same condition — an alias resolved against the live registry that
+    /// matches nothing means exactly what the gateway's `unknown service`
+    /// means — so that both spellings of a condition exit with one code.
+    /// [`Error::invalid_argument`] is the shorthand for the common case.
+    pub fn new(
+        kind: ErrorKind,
+        action: impl Into<String>,
+        endpoint: impl Into<String>,
+        message: impl Into<String>,
+    ) -> Self {
+        Self {
+            action: action.into(),
+            kind,
+            message: message.into(),
+            endpoint: Some(endpoint.into()),
+            service: None,
+            hint: default_hint(kind),
+            raw_code: None,
+            raw_message: None,
+        }
+    }
+
+    /// Build an [`Error`] for input the CLI rejected before issuing any RPC.
+    ///
+    /// Unlike [`Error::from_status`] no service is named: the input was wrong
+    /// on its own terms — a malformed value, an impossible flag combination —
+    /// so the endpoint is the only context worth carrying.
+    pub fn invalid_argument(
+        action: impl Into<String>,
+        endpoint: impl Into<String>,
+        message: impl Into<String>,
+    ) -> Self {
+        Self::new(ErrorKind::InvalidArgument, action, endpoint, message)
+    }
+
+    /// Attach `hint`, replacing the default hint for this error kind.
+    ///
+    /// For the call sites that know more than the generic status mapping can
+    /// — the readiness CLI, say, which can name the services the gateway
+    /// actually has. A multi-line hint renders as aligned continuation lines.
+    pub fn with_hint(mut self, hint: impl Into<String>) -> Self {
+        self.hint = Some(hint.into());
+
+        self
+    }
+
+    /// The category this error was mapped to.
+    pub fn kind(&self) -> ErrorKind {
+        self.kind
+    }
+
+    /// The human-readable message from the RPC or transport layer.
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+
     /// Process exit code for this error.
     pub fn exit_code(&self) -> i32 {
         self.kind.exit_code()
@@ -223,9 +284,30 @@ impl NotFoundMapper {
 mod test {
     use tonic::Status;
 
-    use super::{ErrorKind, NotFoundMapper};
+    use super::{Error, ErrorKind, NotFoundMapper};
 
     const MAPPER: NotFoundMapper = NotFoundMapper::new("test.Service", "requested item");
+
+    #[test]
+    fn new_carries_the_requested_kind() {
+        let err = Error::new(
+            ErrorKind::ServiceUnregistered,
+            "ready",
+            "grpc://[::1]:8080",
+            "unknown readiness service",
+        );
+
+        assert_eq!(ErrorKind::ServiceUnregistered, err.kind());
+        assert_eq!(3, err.exit_code());
+    }
+
+    #[test]
+    fn invalid_argument_is_an_invalid_argument() {
+        let err = Error::invalid_argument("ready", "grpc://[::1]:8080", "bad input");
+
+        assert_eq!(ErrorKind::InvalidArgument, err.kind());
+        assert_eq!(1, err.exit_code());
+    }
 
     #[test]
     fn not_found_resource_is_rewritten() {
