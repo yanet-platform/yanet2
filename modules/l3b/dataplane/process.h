@@ -107,12 +107,15 @@ static inline int
 l3b_real_ring_select(
 	struct real_ring *ring, uint32_t value, uint32_t *real_index
 ) {
-	if (ring->count == 0) {
+	// Acquire the count so the index reads below observe the values
+	// published by the control plane's release store.
+	uint32_t count = __atomic_load_n(&ring->count, __ATOMIC_ACQUIRE);
+	if (count == 0) {
 		return -1;
 	}
 
 	uint32_t *server_indexes = ADDR_OF(&ring->server_indexes);
-	*real_index = server_indexes[value % ring->count];
+	*real_index = server_indexes[value % count];
 	return 0;
 }
 

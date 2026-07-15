@@ -343,9 +343,11 @@ l3b_virtual_service_update_ring(
 		ring_indexes[idx] = server_indexes[idx];
 	}
 
-	// Update the count last so the dataplane never observes indexes beyond
-	// the populated range.
-	vs->real_ring.count = server_index_count;
+	// Release the count after the index writes so the dataplane, on
+	// acquiring it, observes the populated indexes.
+	__atomic_store_n(
+		&vs->real_ring.count, server_index_count, __ATOMIC_RELEASE
+	);
 	return 0;
 }
 
