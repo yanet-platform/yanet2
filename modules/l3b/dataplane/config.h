@@ -53,7 +53,12 @@ struct source_filter {
  */
 struct real_ring {
 	uint32_t *server_indexes;
-	uint32_t size;
+	// Number of indexes currently populated; the dataplane selects among
+	// the first count entries.
+	uint32_t count;
+	// Maximum number of indexes the array can hold; set at configuration
+	// time.
+	uint32_t capacity;
 };
 
 /*

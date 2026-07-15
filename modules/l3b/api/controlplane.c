@@ -249,11 +249,12 @@ l3b_module_config_add_virtual_service(
 		SET_OFFSET_OF(&vs->real_servers, real_servers);
 	}
 
-	// Round-robin index ring over the backends.
-	if (virtual_service->real_server_count > 0) {
+	// Real server ring: allocate capacity slots, count starts empty and is
+	// populated later via l3b_virtual_service_update_ring.
+	uint32_t ring_capacity = virtual_service->ring_capacity;
+	if (ring_capacity > 0) {
 		uint32_t *server_indexes = (uint32_t *)memory_balloc(
-			memory_context,
-			sizeof(uint32_t) * virtual_service->real_server_count
+			memory_context, sizeof(uint32_t) * ring_capacity
 		);
 		if (server_indexes == NULL) {
 			yanet_error_add(
@@ -261,14 +262,10 @@ l3b_module_config_add_virtual_service(
 			);
 			goto error_real_servers;
 		}
-
-		for (uint32_t idx = 0; idx < virtual_service->real_server_count;
-		     ++idx) {
-			server_indexes[idx] = idx;
-		}
 		SET_OFFSET_OF(&vs->real_ring.server_indexes, server_indexes);
 	}
-	vs->real_ring.size = virtual_service->real_server_count;
+	vs->real_ring.capacity = ring_capacity;
+	vs->real_ring.count = 0;
 
 	// Per-service source filters.
 	if (build_source_filters(
@@ -298,11 +295,11 @@ l3b_module_config_add_virtual_service(
 	return handle;
 
 error_ring:
-	if (vs->real_ring.size > 0) {
+	if (vs->real_ring.capacity > 0) {
 		memory_bfree(
 			memory_context,
 			ADDR_OF(&vs->real_ring.server_indexes),
-			sizeof(uint32_t) * vs->real_ring.size
+			sizeof(uint32_t) * vs->real_ring.capacity
 		);
 	}
 

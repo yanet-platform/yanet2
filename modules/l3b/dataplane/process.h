@@ -107,12 +107,12 @@ static inline int
 l3b_real_ring_select(
 	struct real_ring *ring, uint32_t value, uint32_t *real_index
 ) {
-	if (ring->size == 0) {
+	if (ring->count == 0) {
 		return -1;
 	}
 
 	uint32_t *server_indexes = ADDR_OF(&ring->server_indexes);
-	*real_index = server_indexes[value % ring->size];
+	*real_index = server_indexes[value % ring->count];
 	return 0;
 }
 

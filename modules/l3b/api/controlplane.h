@@ -51,6 +51,10 @@ struct l3b_virtual_service {
 
 	uint32_t hash_mask;
 	uint32_t index_mask;
+
+	// Capacity of the real server ring; set at configuration time. The ring
+	// starts empty and is populated via l3b_virtual_service_update_ring.
+	uint32_t ring_capacity;
 };
 
 /*
