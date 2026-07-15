@@ -22,9 +22,9 @@ l3b_handle_packets(
 ) {
 	(void)dp_worker;
 
-	struct l3b_module_config *config = container_of(
+	struct module_config *config = container_of(
 		ADDR_OF(&module_ectx->cp_module),
-		struct l3b_module_config,
+		struct module_config,
 		cp_module
 	);
 
@@ -112,7 +112,7 @@ l3b_handle_packets(
 
 		if (action != FILTER_RULE_INVALID &&
 		    action < config->virtual_service_count) {
-			struct l3b_virtual_service **virtual_services =
+			struct virtual_service **virtual_services =
 				ADDR_OF(&config->virtual_services);
 			int result = l3b_virtual_service_process(
 				ADDR_OF(&virtual_services[action]), packet

@@ -5,9 +5,9 @@
 #include "filter/filter.h"
 #include "filter/rule.h"
 
-enum l3b_real_state {
-	l3b_real_state_disabled = 0,
-	l3b_real_state_enabled = 1,
+enum real_state {
+	real_state_disabled = 0,
+	real_state_enabled = 1,
 };
 
 /*
@@ -16,7 +16,7 @@ enum l3b_real_state {
  * The address family of the tunnel is selected by type; source_net and
  * destination_addr carry the matching union member.
  */
-struct l3b_real_server {
+struct real_server {
 	// Outer tunnel address family (ip_family_ip4 or ip_family_ip6).
 	enum ip_family type;
 	// Source network used to derive the outer source address.
@@ -24,7 +24,7 @@ struct l3b_real_server {
 	// Real server destination address used as the outer destination.
 	struct net_addr destination_addr;
 	// Whether the server is eligible to receive traffic.
-	enum l3b_real_state state;
+	enum real_state state;
 };
 
 /*
@@ -34,7 +34,7 @@ struct l3b_real_server {
  * with a matching count field. A packet matches when it falls into any of the
  * listed networks and port ranges.
  */
-struct l3b_source_filter {
+struct source_filter {
 	uint32_t net6_count;
 	struct net6 *net6s;
 
@@ -51,7 +51,7 @@ struct l3b_source_filter {
  * server_indexes is a relative pointer to an array of real_server array
  * indexes; size is the number of entries the ring holds.
  */
-struct l3b_real_ring {
+struct real_ring {
 	uint32_t *server_indexes;
 	uint32_t size;
 };
@@ -66,13 +66,13 @@ struct l3b_real_ring {
  * before publishing a virtual service; the dataplane queries them directly
  * (value_table_get assumes a non-NULL backing table).
  */
-struct l3b_virtual_service {
+struct virtual_service {
 	// Backends available for this service.
 	uint32_t real_server_count;
-	struct l3b_real_server *real_servers;
+	struct real_server *real_servers;
 
 	// Scheduler index ring over the real_servers array.
-	struct l3b_real_ring real_ring;
+	struct real_ring real_ring;
 
 	// Masks applied to the packet hash to derive a ring slot.
 	uint32_t scheduler_hash_mask;
@@ -93,7 +93,7 @@ struct l3b_virtual_service {
  * controlplane must filter_init both filter_ip6 and filter_ip4 — the
  * dataplane queries them whenever at least one service exists.
  */
-struct l3b_module_config {
+struct module_config {
 	struct cp_module cp_module;
 
 	uint32_t virtual_service_count;
@@ -101,7 +101,7 @@ struct l3b_module_config {
 	// allocated independently so a single service can be installed or
 	// replaced by swapping its slot without rebuilding the array or
 	// touching the module config.
-	struct l3b_virtual_service **virtual_services;
+	struct virtual_service **virtual_services;
 
 	struct filter filter_ip6;
 	struct filter filter_ip4;

@@ -34,9 +34,9 @@ FILTER_QUERY_DECLARE(l3b_filter_ip6, net6_src, port_src, port_dst);
  */
 static inline int
 l3b_real_server_process(
-	struct l3b_real_server *real_server, struct packet *packet
+	struct real_server *real_server, struct packet *packet
 ) {
-	if (real_server->state == l3b_real_state_disabled) {
+	if (real_server->state == real_state_disabled) {
 		return -1;
 	}
 
@@ -100,7 +100,7 @@ l3b_real_server_process(
  */
 static inline int
 l3b_real_ring_select(
-	struct l3b_real_ring *ring, uint32_t value, uint32_t *real_index
+	struct real_ring *ring, uint32_t value, uint32_t *real_index
 ) {
 	if (ring->size == 0) {
 		return -1;
@@ -122,7 +122,7 @@ l3b_real_ring_select(
  */
 static inline int
 l3b_virtual_service_process(
-	struct l3b_virtual_service *virtual_service, struct packet *packet
+	struct virtual_service *virtual_service, struct packet *packet
 ) {
 	uint16_t type = packet->network_header.type;
 	const struct filter_query *query;
@@ -159,7 +159,7 @@ l3b_virtual_service_process(
 		return -1;
 	}
 
-	struct l3b_real_server *real_servers =
+	struct real_server *real_servers =
 		ADDR_OF(&virtual_service->real_servers);
 	return l3b_real_server_process(&real_servers[real_index], packet);
 }
