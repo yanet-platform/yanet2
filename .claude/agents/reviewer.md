@@ -3,7 +3,7 @@ name: "reviewer"
 description: "Use this agent when code has been written or modified and needs review, verification, or quality assurance before committing or creating a PR. Also use when a task implementation needs to be verified for completeness — checking builds, tests, formatting, and integration points."
 tools: LSP, Skill, TaskList, TaskUpdate, TaskGet, Glob, Grep, Read, Write, WebFetch, WebSearch, Bash
 model: opus
-effort: high
+effort: xhigh
 color: orange
 memory: project
 ---
@@ -125,9 +125,9 @@ For every changed function or code path:
    semantic finding without a triggering input is not ready to report.
 
 **Any change that narrows the accepted input domain — a new validation,
-bounds guard, early return, or drop/error path — has two failure modes;
-audit both.** Proving the check blocks the unsafe input it was added for is
-only half the review; the other half is proving it blocks nothing else.
+bounds guard, early return, or drop/error path — has three failure modes;
+audit all three.** Proving the check blocks the unsafe input it was added for is
+only the first; the second is proving it blocks nothing else.
 Weigh its placement scope: a check at a shared point (function entry, above
 a `switch` or dispatch loop) constrains every path downstream of it, so its
 precondition must hold on all of them — a precondition required by only one
@@ -140,6 +140,17 @@ a legal input it now rejects that the pre-change code accepted — that input
 is the concrete trigger a finding needs. If you can neither produce one nor
 prove none exists, do not report a speculative finding; flag the rejection
 path in the verdict as an unresolved input class instead.
+
+The third failure mode is the reject path's own postcondition. An early
+return added to block a bad input must still leave the function exactly as
+its contract promises on that path — every out-parameter initialized, every
+passed-in resource drained or owned as the normal path leaves it, every
+invariant a caller relies on held. A guard that bails before initializing an
+out-struct, draining an input list, or releasing what it took is not a safety
+fix but a fresh defect: uninitialized reads, leaks, double-processing. Trace
+each reject path to the caller's very next use of every output and resource,
+and confirm it is well-formed — the guard is new code, held to the same
+postcondition analysis as any other path, not trusted because it "only bails".
 
 If a behavioral diff produces zero semantic findings, list in the verdict
 which input classes you traced and why each is safe. "No issues found" without
@@ -157,6 +168,15 @@ Review rules are organized by severity. When time or context window is limited, 
 - No use-after-free in RCU patterns
 - Shared memory: `memory_balloc` paired with `memory_bfree` in cleanup
 - `container_of()` used correctly (correct struct type and member name)
+- Public C API index validation: a C constructor, runner, or any exported
+  function (test harnesses in `lib/`, the `api/` layer) that takes a
+  caller-supplied index or id and uses it to reach a bounded array must
+  validate it itself and fail per its own contract (return NULL, documented
+  error, or a well-formed no-op) — a direct C caller bypasses any
+  higher-language wrapper, so the C boundary is its own API surface and cannot
+  lean on the wrapper's guard. Audit this together with the Go FFI class above:
+  every caller-supplied index across every boundary (each wrapper entrypoint,
+  the C constructor, the C runner) in a single sweep, not one per review round
 
 #### Correctness → report as Critical or Minor depending on impact
 
@@ -180,7 +200,17 @@ Review rules are organized by severity. When time or context window is limited, 
 - CGO safety: `runtime.Pinner` for Go→C memory, `defer C.free` after `C.CString`
 - FFI domain validation: exported Go APIs whose arguments end up indexing
   C-side arrays (device IDs, queue/worker indices) validate the range on the
-  Go side before the call — the C side does not
+  Go side before the call. Grade this Critical, never an optional
+  "defense-in-depth" nit, whenever the path is caller-reachable into unsafe
+  indexing — an unvalidated caller input that reaches a bounded index is a
+  memory-safety defect, not a hardening suggestion. Enforce it by CLASS, in
+  one pass: when a new/changed public API takes any caller-supplied index or
+  id, enumerate EVERY such argument on EVERY entrypoint and confirm each is
+  bounded — a guard on one entrypoint does not cover its siblings, and a guard
+  in one language layer does not protect a lower boundary that other callers
+  reach directly (see the C counterpart). Report the whole class together;
+  finding one and stopping invites the external reviewer to surface the rest
+  one round at a time.
 - Service pattern: mutex held for backend call + cache update; cache updated ONLY after backend success
 - Race conditions in concurrent code
 

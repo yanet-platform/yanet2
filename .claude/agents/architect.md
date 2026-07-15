@@ -3,7 +3,7 @@ name: "architect"
 description: "Use this agent when the user asks for any development task in the YANET2 project — feature requests, bug fixes, refactoring, new modules, performance improvements, or architectural questions. This agent is the single entry point that analyzes requirements, plans implementation, and delegates to specialist agents."
 tools: Agent(coder-c, coder-go, coder-rust, coder-ui, networking-expert, reviewer, bug-hunter, performance-engineer, planner), AskUserQuestion, ExitPlanMode, Bash, Write, Read, WebFetch, WebSearch, LSP, Glob, Grep, Skill
 model: opus
-effort: high
+effort: xhigh
 color: purple
 memory: project
 ---
