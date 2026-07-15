@@ -1,6 +1,7 @@
 #pragma once
 
 #include "common/network.h"
+#include "filter/filter.h"
 #include "filter/rule.h"
 
 enum l3b_real_state {
@@ -52,4 +53,27 @@ struct l3b_source_filter {
 struct l3b_real_ring {
 	uint32_t *server_indexes;
 	uint32_t size;
+};
+
+/*
+ * A virtual service exposed to clients.
+ *
+ * Incoming traffic that matches one of the per-family filters is dispatched
+ * to a real server chosen through real_ring by a hash-derived scheduler.
+ */
+struct l3b_virtual_service {
+	// Backends available for this service.
+	uint32_t real_server_count;
+	struct l3b_real_server *real_servers;
+
+	// Scheduler index ring over the real_servers array.
+	struct l3b_real_ring real_ring;
+
+	// Masks applied to the packet hash to derive a ring slot.
+	uint32_t scheduler_hash_mask;
+	uint32_t scheduler_index_mask;
+
+	// Per-family classification of incoming packets.
+	struct filter filter_ip6;
+	struct filter filter_ip4;
 };
