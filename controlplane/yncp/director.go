@@ -106,7 +106,7 @@ func NewDirector(cfg *Config, options ...DirectorOption) (*Director, error) {
 		zap.Uint32("instance_id", cfg.Gateway.InstanceID),
 	)
 
-	bundle, err := bundle.NewBundle(cfg.Modules, cfg.Devices, log)
+	bundle, err := bundle.NewBundle(cfg.Modules, cfg.Devices, bundle.WithLog(log))
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize bundle: %w", err)
 	}

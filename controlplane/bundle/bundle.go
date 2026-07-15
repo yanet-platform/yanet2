@@ -41,13 +41,38 @@ type Bundle struct {
 	services []gateway.Service
 }
 
+// Option configures the NewBundle constructor.
+type Option func(*bundleOptions)
+
+type bundleOptions struct {
+	Log *zap.Logger
+}
+
+func newBundleOptions() *bundleOptions {
+	return &bundleOptions{
+		Log: zap.NewNop(),
+	}
+}
+
+// WithLog sets the logger for the bundle.
+func WithLog(log *zap.Logger) Option {
+	return func(o *bundleOptions) {
+		o.Log = log
+	}
+}
+
 // NewBundle constructs every bundled module and device from the given config.
 func NewBundle(
 	modulesCfg ModulesConfig,
 	devicesCfg DevicesConfig,
-	log *zap.Logger,
+	options ...Option,
 ) (*Bundle, error) {
-	services, err := buildServices(modulesCfg, devicesCfg, log)
+	opts := newBundleOptions()
+	for _, o := range options {
+		o(opts)
+	}
+
+	services, err := buildServices(modulesCfg, devicesCfg, opts.Log)
 	if err != nil {
 		return nil, err
 	}
