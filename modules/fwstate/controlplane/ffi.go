@@ -12,7 +12,6 @@ type FwStateConfig struct {
 
 type CursorEntry = cfwstate.CursorEntry
 type OutdatedLayers = cfwstate.OutdatedLayers
-type mapsStats = cfwstate.MapsStats
 type mapStats = cfwstate.MapStats
 
 func NewFWStateModuleConfig(agent *ffi.Agent, name string) (*FwStateConfig, error) {

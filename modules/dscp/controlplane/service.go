@@ -13,13 +13,6 @@ import (
 	"github.com/yanet-platform/yanet2/modules/dscp/controlplane/dscppb/v1"
 )
 
-var (
-	errConfigNameRequired = status.Error(
-		codes.InvalidArgument,
-		"module config name is required",
-	)
-)
-
 // ModuleHandle is a handle to a module configuration.
 type ModuleHandle interface {
 	Free()

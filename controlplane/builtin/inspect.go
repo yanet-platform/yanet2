@@ -136,9 +136,7 @@ func (m *Inspect) pipelines(dpConfig *ffi.DPConfig) []*ynpb.PipelineInfo {
 			Name: pipeline.Name,
 		}
 
-		for _, function := range pipeline.Functions {
-			pipelineInfo.Functions = append(pipelineInfo.Functions, function)
-		}
+		pipelineInfo.Functions = append(pipelineInfo.Functions, pipeline.Functions...)
 
 		out[idx] = pipelineInfo
 	}

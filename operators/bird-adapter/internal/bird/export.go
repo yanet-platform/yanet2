@@ -23,7 +23,6 @@ type exportSocket struct {
 
 type Export struct {
 	sockets  []exportSocket
-	ch       chan []rib.Route
 	cfg      *Config
 	updater  Updater
 	notifier Notifier

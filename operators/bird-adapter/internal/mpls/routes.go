@@ -128,7 +128,7 @@ func routeListBest(
 	routes []rib.Route,
 ) []rib.Route {
 	if len(routes) < 2 {
-		return routes[:len(routes)]
+		return routes[:]
 	}
 
 	count := 1
