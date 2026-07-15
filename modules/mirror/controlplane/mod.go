@@ -12,6 +12,26 @@ import (
 
 const agentName = "mirror"
 
+// Option configures the MirrorModule constructor.
+type Option func(*moduleOptions)
+
+type moduleOptions struct {
+	Log *zap.Logger
+}
+
+func newModuleOptions() *moduleOptions {
+	return &moduleOptions{
+		Log: zap.NewNop(),
+	}
+}
+
+// WithLog sets the logger for the mirror module.
+func WithLog(log *zap.Logger) Option {
+	return func(o *moduleOptions) {
+		o.Log = log
+	}
+}
+
 // MirrorModule is a control-plane component of a module that is responsible for
 // mirroring traffic between devices.
 type MirrorModule struct {
@@ -22,8 +42,13 @@ type MirrorModule struct {
 	log           *zap.Logger
 }
 
-func NewMirrorModule(cfg *Config, log *zap.Logger) (*MirrorModule, error) {
-	log = log.With(zap.String("module", "modules.mirror.controlplane.mirrorpb.v1.MirrorService"))
+func NewMirrorModule(cfg *Config, options ...Option) (*MirrorModule, error) {
+	opts := newModuleOptions()
+	for _, o := range options {
+		o(opts)
+	}
+
+	log := opts.Log.With(zap.String("module", "modules.mirror.controlplane.mirrorpb.v1.MirrorService"))
 
 	shm, err := cpffi.AttachSharedMemory(cfg.MemoryPath.Unwrap())
 	if err != nil {

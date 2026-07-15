@@ -28,7 +28,6 @@ devices/plain/controlplane/mod.go:NewDevicePlainDevice  # legacy: migrate to the
 devices/vlan/controlplane/mod.go:NewDeviceVlanDevice  # legacy: migrate to the options pattern
 modules/acl/controlplane/mod.go:NewACLModule  # legacy: migrate to the options pattern
 modules/dscp/controlplane/mod.go:NewDSCPModule  # legacy: migrate to the options pattern
-modules/mirror/controlplane/mod.go:NewMirrorModule  # legacy: migrate to the options pattern
 modules/pdump/controlplane/ffi.go:ModuleConfig.SetupRing  # legacy: migrate to the options pattern
 modules/pdump/controlplane/service.go:NewPdumpService  # legacy: migrate to the options pattern
 operators/bird-adapter/internal/bird/export.go:NewExportReader  # legacy: migrate to the options pattern

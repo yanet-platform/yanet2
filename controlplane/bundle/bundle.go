@@ -94,7 +94,7 @@ func buildServices(
 		{
 			name: "mirror module",
 			new: func() (gateway.Service, error) {
-				return mirror.NewMirrorModule(modulesCfg.Mirror, log)
+				return mirror.NewMirrorModule(modulesCfg.Mirror, mirror.WithLog(log))
 			},
 		},
 		{
