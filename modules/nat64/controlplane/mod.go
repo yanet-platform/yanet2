@@ -10,6 +10,26 @@ import (
 	nat64pb "github.com/yanet-platform/yanet2/modules/nat64/controlplane/nat64pb/v1"
 )
 
+// Option configures the NAT64Module constructor.
+type Option func(*moduleOptions)
+
+type moduleOptions struct {
+	Log *zap.Logger
+}
+
+func newModuleOptions() *moduleOptions {
+	return &moduleOptions{
+		Log: zap.NewNop(),
+	}
+}
+
+// WithLog sets the logger for the nat64 module.
+func WithLog(log *zap.Logger) Option {
+	return func(o *moduleOptions) {
+		o.Log = log
+	}
+}
+
 // NAT64Module is a control-plane component responsible for NAT64 translation
 type NAT64Module struct {
 	cfg          *Config
@@ -20,8 +40,13 @@ type NAT64Module struct {
 }
 
 // NewNAT64Module creates a new NAT64 module instance
-func NewNAT64Module(cfg *Config, log *zap.Logger) (*NAT64Module, error) {
-	log = log.With(zap.String("module", "modules.nat64.controlplane.nat64pb.v1.NAT64Service"))
+func NewNAT64Module(cfg *Config, options ...Option) (*NAT64Module, error) {
+	opts := newModuleOptions()
+	for _, o := range options {
+		o(opts)
+	}
+
+	log := opts.Log.With(zap.String("module", "modules.nat64.controlplane.nat64pb.v1.NAT64Service"))
 
 	shm, err := ffi.AttachSharedMemory(cfg.MemoryPath.Unwrap())
 	if err != nil {

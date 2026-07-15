@@ -100,7 +100,7 @@ func buildServices(
 		{
 			name: "nat64 module",
 			new: func() (gateway.Service, error) {
-				return nat64.NewNAT64Module(modulesCfg.NAT64, log)
+				return nat64.NewNAT64Module(modulesCfg.NAT64, nat64.WithLog(log))
 			},
 		},
 		{
