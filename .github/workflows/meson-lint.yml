@@ -1,0 +1,41 @@
+name: Meson Lint
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '**/meson.build'
+      - '**/meson.options'
+      - 'meson_options.txt'
+      - '.github/workflows/meson-lint.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - '**/meson.build'
+      - '**/meson.options'
+      - 'meson_options.txt'
+      - '.github/workflows/meson-lint.yml'
+
+jobs:
+  mesonlint:
+    name: mesonlint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download mesonlint
+        run: |
+          curl -fsSL -o mesonlint.zip https://github.com/JCWasmx86/mesonlsp/releases/download/v5.0.3/mesonlint-x86_64-unknown-linux-musl.zip
+          unzip -q mesonlint.zip
+          chmod +x mesonlint
+
+      - name: Run mesonlint
+        run: |
+          ./mesonlint . 2>&1 | tee mesonlint.out || true
+          findings=$(grep -E '⚠️|🔴' mesonlint.out | grep -v 'subprojects/' || true)
+          if [ -n "$findings" ]; then
+            echo "Meson lint findings (fix these):"
+            echo "$findings"
+            exit 1
+          fi
+          echo "No meson lint findings."
