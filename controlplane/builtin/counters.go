@@ -2,6 +2,7 @@ package builtin
 
 import (
 	"context"
+	"math"
 	"strconv"
 
 	"google.golang.org/grpc"
@@ -223,16 +224,21 @@ func (m *Counters) Ports(
 	return response, nil
 }
 
-// Collect returns a generic metrics snapshot for port counters.
+// Collect returns a generic metrics snapshot for port and worker counters.
 func (m *Counters) Collect() []*commonpb.Metric {
 	dpConfig := m.shm.DPConfig(m.instanceID)
 
-	ports, err := dpConfig.PortCounters()
-	if err != nil {
-		return nil
+	metrics := make([]*commonpb.Metric, 0)
+
+	if ports, err := dpConfig.PortCounters(); err == nil {
+		metrics = append(metrics, portMetrics(ports)...)
 	}
 
-	return portMetrics(ports)
+	if workers, err := dpConfig.WorkerCounters(); err == nil {
+		metrics = append(metrics, workerMetrics(workers)...)
+	}
+
+	return metrics
 }
 
 func portMetrics(ports []ffi.PortGroup) []*commonpb.Metric {
@@ -252,10 +258,74 @@ func portMetrics(ports []ffi.PortGroup) []*commonpb.Metric {
 	return metrics
 }
 
+func workerMetrics(workers []ffi.WorkerCounter) []*commonpb.Metric {
+	metrics := make([]*commonpb.Metric, 0)
+	for _, worker := range workers {
+		labels := []*commonpb.Label{
+			{Name: "worker_idx", Value: strconv.FormatUint(uint64(worker.WorkerIdx), 10)},
+			{Name: "core_id", Value: strconv.FormatUint(uint64(worker.CoreID), 10)},
+			{Name: "device_id", Value: strconv.FormatUint(uint64(worker.DeviceID), 10)},
+			{Name: "queue_id", Value: strconv.FormatUint(uint64(worker.QueueID), 10)},
+		}
+
+		metrics = append(metrics,
+			makeCounter("yanet_worker_iterations", worker.Iterations, labels...),
+			makeCounter("yanet_worker_rx_packets", worker.RxPackets, labels...),
+			makeCounter("yanet_worker_rx_bytes", worker.RxBytes, labels...),
+			makeCounter("yanet_worker_tx_packets", worker.TxPackets, labels...),
+			makeCounter("yanet_worker_tx_bytes", worker.TxBytes, labels...),
+			makeCounter("yanet_worker_remote_rx_packets", worker.RemoteRxPackets, labels...),
+			makeCounter("yanet_worker_remote_tx_packets", worker.RemoteTxPackets, labels...),
+			makeCounter("yanet_worker_local_tx_drops", worker.LocalTxDrops, labels...),
+			makeCounter("yanet_worker_remote_tx_drops", worker.RemoteTxDrops, labels...),
+			makeCounter("yanet_worker_drops", worker.Drops, labels...),
+		)
+
+		if len(worker.RxBursts) > 0 {
+			metrics = append(metrics, makeHistogram(
+				"yanet_worker_rx_bursts",
+				worker.RxBursts,
+				labels...,
+			))
+		}
+	}
+	return metrics
+}
+
 func makeCounter(name string, value uint64, labels ...*commonpb.Label) *commonpb.Metric {
 	return &commonpb.Metric{
 		Name:   name,
 		Labels: labels,
 		Value:  &commonpb.Metric_Counter{Counter: value},
+	}
+}
+
+// makeHistogram builds a histogram metric from a slice of raw per-bucket
+// counts. The bucket at index i holds the number of RX polls that returned
+// exactly i packets, so its upper bound is i (packets per burst).
+func makeHistogram(name string, counts []uint64, labels ...*commonpb.Label) *commonpb.Metric {
+	buckets := make([]*commonpb.Bucket, 0, len(counts)+1)
+	var totalCount uint64
+	for i, count := range counts {
+		totalCount += count
+		buckets = append(buckets, &commonpb.Bucket{
+			Count:      count,
+			UpperBound: float64(i),
+		})
+	}
+	buckets = append(buckets, &commonpb.Bucket{
+		Count:      0,
+		UpperBound: math.Inf(1),
+	})
+
+	return &commonpb.Metric{
+		Name:   name,
+		Labels: labels,
+		Value: &commonpb.Metric_Histogram{
+			Histogram: &commonpb.Histogram{
+				Buckets:    buckets,
+				TotalCount: totalCount,
+			},
+		},
 	}
 }
