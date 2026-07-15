@@ -27,7 +27,6 @@ controlplane/internal/auth/sshkey/factory.go:NewFromConfig  # legacy: migrate to
 devices/plain/controlplane/mod.go:NewDevicePlainDevice  # legacy: migrate to the options pattern
 devices/vlan/controlplane/mod.go:NewDeviceVlanDevice  # legacy: migrate to the options pattern
 modules/acl/controlplane/mod.go:NewACLModule  # legacy: migrate to the options pattern
-modules/decap/controlplane/mod.go:NewDecapModule  # legacy: migrate to the options pattern
 modules/dscp/controlplane/mod.go:NewDSCPModule  # legacy: migrate to the options pattern
 modules/forward/controlplane/mod.go:NewForwardModule  # legacy: migrate to the options pattern
 modules/mirror/controlplane/mod.go:NewMirrorModule  # legacy: migrate to the options pattern

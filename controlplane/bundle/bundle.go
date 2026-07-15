@@ -76,7 +76,7 @@ func buildServices(
 		{
 			name: "decap module",
 			new: func() (gateway.Service, error) {
-				return decap.NewDecapModule(modulesCfg.Decap, log)
+				return decap.NewDecapModule(modulesCfg.Decap, decap.WithLog(log))
 			},
 		},
 		{

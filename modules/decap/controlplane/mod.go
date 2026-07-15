@@ -10,6 +10,26 @@ import (
 	"github.com/yanet-platform/yanet2/modules/decap/controlplane/decappb/v1"
 )
 
+// Option configures the DecapModule constructor.
+type Option func(*moduleOptions)
+
+type moduleOptions struct {
+	Log *zap.Logger
+}
+
+func newModuleOptions() *moduleOptions {
+	return &moduleOptions{
+		Log: zap.NewNop(),
+	}
+}
+
+// WithLog sets the logger for the decap module.
+func WithLog(log *zap.Logger) Option {
+	return func(o *moduleOptions) {
+		o.Log = log
+	}
+}
+
 // DecapModule is a control-plane component of a module that is responsible for
 // decapsulating various kinds of tunnels.
 type DecapModule struct {
@@ -20,8 +40,13 @@ type DecapModule struct {
 	log          *zap.Logger
 }
 
-func NewDecapModule(cfg *Config, log *zap.Logger) (*DecapModule, error) {
-	log = log.With(zap.String("module", "modules.decap.controlplane.decappb.v1.DecapService"))
+func NewDecapModule(cfg *Config, options ...Option) (*DecapModule, error) {
+	opts := newModuleOptions()
+	for _, o := range options {
+		o(opts)
+	}
+
+	log := opts.Log.With(zap.String("module", "modules.decap.controlplane.decappb.v1.DecapService"))
 
 	shm, err := ffi.AttachSharedMemory(cfg.MemoryPath.Unwrap())
 	if err != nil {
