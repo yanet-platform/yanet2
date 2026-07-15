@@ -124,7 +124,7 @@ func buildServices(
 		{
 			name: "plain device",
 			new: func() (gateway.Service, error) {
-				return plain.NewDevicePlainDevice(devicesCfg.Plain, log)
+				return plain.NewDevicePlainDevice(devicesCfg.Plain, plain.WithLog(log))
 			},
 		},
 		{
