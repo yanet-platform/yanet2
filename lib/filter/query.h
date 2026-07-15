@@ -43,43 +43,41 @@ filter_query(
 	uint32_t packet_count
 ) {
 	/* Local slots storage */
-	uint32_t __slots[2 * MAX_ATTRIBUTES * packet_count + 1];
+	uint32_t slots[2 * MAX_ATTRIBUTES * packet_count + 1];
 	/* compute classifiers for leaf attributes into parent slots
 	 */
-	for (size_t __ai = 0; __ai < filter_query->lookup_count; ++__ai) {
-		size_t __vtx = filter_query->lookup_count + __ai;
-		const struct filter_vertex *__v = &(filter)->v[__vtx];
-		filter_query->lookups[__ai](
-			ADDR_OF(&__v->data),
+	for (size_t leaf = 0; leaf < filter_query->lookup_count; ++leaf) {
+		size_t vertex = filter_query->lookup_count + leaf;
+		const struct filter_vertex *vertex_ptr = &(filter)->v[vertex];
+		filter_query->lookups[leaf](
+			ADDR_OF(&vertex_ptr->data),
 			packets,
-			__slots + __vtx * packet_count,
+			slots + vertex * packet_count,
 			packet_count
 		);
 	}
 	/* compute inner vertices except root, pushing up to parent */
-	for (size_t __vtx = filter_query->lookup_count - 1; __vtx >= 2;
-	     --__vtx) {
-		struct filter_vertex *__v = &(filter)->v[__vtx];
+	for (size_t vertex = filter_query->lookup_count - 1; vertex >= 2;
+	     --vertex) {
+		struct filter_vertex *vertex_ptr = &(filter)->v[vertex];
 		for (uint32_t idx = 0; idx < packet_count; ++idx) {
-			uint32_t __c = value_table_get(
-				&__v->table,
-				__slots[(__vtx << 1) * packet_count + idx],
-				__slots[(__vtx << 1 | 1) * packet_count + idx]
+			uint32_t classified = value_table_get(
+				&vertex_ptr->table,
+				slots[(vertex << 1) * packet_count + idx],
+				slots[(vertex << 1 | 1) * packet_count + idx]
 			);
-			__slots[__vtx * packet_count + idx] = __c;
+			slots[vertex * packet_count + idx] = classified;
 		}
 	}
 	/* root (1 when n>1, else 0) */
-	const size_t __root = filter_query->lookup_count > 1;
-	struct filter_vertex *__r = &(filter)->v[__root];
+	const size_t root = filter_query->lookup_count > 1;
+	struct filter_vertex *root_ptr = &(filter)->v[root];
 	for (uint32_t idx = 0; idx < packet_count; ++idx) {
-		uint32_t __res = value_table_get(
-			&__r->table,
-			__root == 0
-				? 0
-				: __slots[(__root << 1) * packet_count + idx],
-			__slots[(__root << 1 | 1) * packet_count + idx]
+		uint32_t result = value_table_get(
+			&root_ptr->table,
+			root == 0 ? 0 : slots[(root << 1) * packet_count + idx],
+			slots[(root << 1 | 1) * packet_count + idx]
 		);
-		(results)[idx] = __res;
+		(results)[idx] = result;
 	}
 }
