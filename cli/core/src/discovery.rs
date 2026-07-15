@@ -1,0 +1,303 @@
+//! Gateway-driven discovery of registered gRPC services.
+//!
+//! The gateway registry holds one entry per registered gRPC service name, so
+//! a family of services — readiness, metrics, and so on — is simply the
+//! entries whose name ends in that family's own trailing segment (e.g.
+//! `ReadinessService`, `MetricsService`): the built-in one plus one per
+//! running operator. That list is what a CLI probes when no service is
+//! named, what a short alias resolves against, and what an error hint
+//! suggests.
+
+use core::time::Duration;
+
+use tonic::codec::CompressionEncoding;
+use ynpb::pb::{gateway_client::GatewayClient, ListServicesRequest};
+
+use crate::{
+    client::{Connection, ConnectionArgs, LayeredChannel, Service},
+    errors::{Error, ErrorKind},
+};
+
+/// Fully-qualified name of the gateway registry service.
+///
+/// Taken from the `Gateway` service declaration in
+/// `controlplane/ynpb/v1/gateway.proto`, the wire contract — not from the
+/// generated tonic module name, which is a Rust-side artefact.
+const GATEWAY_SERVICE: &str = "controlplane.ynpb.v1.Gateway";
+
+/// Budget for a best-effort gateway lookup: an error hint, a shell completion.
+///
+/// Such a lookup only enriches something the CLI can do without, so it must
+/// never be the thing that hangs: a flag-validation error or a tab press would
+/// otherwise stall against a slow or blackholed endpoint until the transport
+/// gives up. Exceeding the budget is simply a failed lookup — the hint or the
+/// candidate list is dropped and the caller carries on. A probe the user did
+/// ask for gets no such budget: there a slow gateway must surface as the error
+/// it is.
+pub const DISCOVERY_TIMEOUT: Duration = Duration::from_secs(1);
+
+/// Outcome of resolving a short alias against the discovered services.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Resolution {
+    /// Exactly one service matched the alias.
+    Resolved(String),
+    /// Several services matched; these are the candidates.
+    Ambiguous(Vec<String>),
+    /// No service matched.
+    Unknown,
+}
+
+/// Lists the fully-qualified names of the services registered with the
+/// gateway whose last dot-separated segment is `suffix`, sorted.
+///
+/// The sort makes probing order — and hence rendered blocks — stable across
+/// runs, since the registry itself is unordered.
+pub async fn list_services(connection: &Connection, suffix: &str) -> Result<Vec<String>, Error> {
+    let mut service = Service::new(connection, GATEWAY_SERVICE, |channel: LayeredChannel| {
+        GatewayClient::new(channel)
+            .send_compressed(CompressionEncoding::Gzip)
+            .accept_compressed(CompressionEncoding::Gzip)
+    });
+
+    let response = service
+        .client()
+        .list_services(ListServicesRequest {})
+        .await
+        .map_err(service.status("discover"))?
+        .into_inner();
+
+    let mut services: Vec<String> = response
+        .services
+        .iter()
+        .filter_map(|registered| registered.backend.as_ref())
+        .map(|backend| backend.name.as_str())
+        .filter(|name| has_suffix(name, suffix))
+        .map(str::to_owned)
+        .collect();
+
+    services.sort();
+    services.dedup();
+
+    Ok(services)
+}
+
+/// Reports whether `name`'s last dot-separated segment is exactly `suffix`,
+/// so that a service merely mentioning it elsewhere in its name is not
+/// mistaken for a match.
+fn has_suffix(name: &str, suffix: &str) -> bool {
+    name.rsplit('.').next() == Some(suffix)
+}
+
+/// Resolves a short alias (e.g. `route`) against the discovered `services`.
+///
+/// A service matches when its name contains the alias as a case-insensitive
+/// substring, which lets both an operator name (`forward`) and a package
+/// segment (`controlplane`) select their service without spelling out the
+/// whole FQN.
+pub fn resolve_alias(alias: &str, services: &[String]) -> Resolution {
+    let alias = alias.to_lowercase();
+
+    let mut matched: Vec<String> = services
+        .iter()
+        .filter(|service| service.to_lowercase().contains(&alias))
+        .cloned()
+        .collect();
+
+    match matched.len() {
+        0 => Resolution::Unknown,
+        1 => Resolution::Resolved(matched.remove(0)),
+        _ => Resolution::Ambiguous(matched),
+    }
+}
+
+/// Connects to the gateway afresh and lists the services whose last segment
+/// is `suffix`, within `budget`.
+///
+/// This is the best-effort half of discovery, and the only half that has to
+/// establish its own connection: every caller reaches an endpoint nothing has
+/// spoken to yet, purely to enrich something — a hint, a completion — which is
+/// why the budget is a parameter here rather than fixed at the call sites.
+/// Discovery the user asked for runs over the [`Connection`] the probe
+/// already established and is deliberately unbounded.
+pub async fn discover_within(args: &ConnectionArgs, suffix: &str, budget: Duration) -> Result<Vec<String>, Error> {
+    let lookup = async {
+        let connection = Connection::connect(args).await?;
+
+        list_services(&connection, suffix).await
+    };
+
+    match tokio::time::timeout(budget, lookup).await {
+        Ok(services) => services,
+        Err(..) => {
+            let formatted_budget = humantime::format_duration(budget);
+            let message = format!("gateway did not answer within {formatted_budget}");
+
+            Err(Error::new(ErrorKind::Unavailable, "discover", &args.endpoint, message))
+        }
+    }
+}
+
+/// Formats a hint listing `services` one per line under a greyed `caption`.
+///
+/// The caption is dimmed so the fully-qualified names it introduces stay the
+/// prominent part, and `output::failure` aligns every line after the first
+/// under it, so the names come out as a column. When no service is
+/// registered the plain `empty_message` is returned in place of the list.
+pub fn services_hint(caption: &str, empty_message: &str, services: &[String]) -> String {
+    if services.is_empty() {
+        return empty_message.to_owned();
+    }
+
+    let mut hint = crate::output::dim(caption);
+
+    for service in services {
+        hint.push('\n');
+        hint.push_str(service);
+    }
+
+    hint
+}
+
+/// Best-effort discovery for shell completion: the services whose last
+/// segment is `suffix`, or an empty list on any failure.
+///
+/// Strictly best-effort — a tab-completion must never print an error nor hang
+/// — so a gateway that is down, slow or refusing us auth yields no candidates
+/// at all, `budget` covering the slow case.
+pub fn candidates(args: &ConnectionArgs, suffix: &str, budget: Duration) -> Vec<String> {
+    let args = args.clone();
+    let suffix = suffix.to_owned();
+
+    // The completer is called from within the binary's `#[tokio::main]`
+    // runtime, which forbids a nested `block_on`, so the lookup gets a thread
+    // and a runtime of its own. A panic in it joins as an error and, like
+    // every other failure here, yields no candidates.
+    std::thread::spawn(move || {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .ok()?;
+
+        runtime.block_on(discover_within(&args, &suffix, budget)).ok()
+    })
+    .join()
+    .ok()
+    .flatten()
+    .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    fn services(suffix: &str) -> Vec<String> {
+        vec![
+            format!("controlplane.ynpb.v1.{suffix}"),
+            format!("operators.decap.operatorpb.v1.{suffix}"),
+            format!("operators.forward.operatorpb.v1.{suffix}"),
+            format!("operators.pipeline.operatorpb.v1.{suffix}"),
+            format!("operators.route.operatorpb.v1.{suffix}"),
+        ]
+    }
+
+    #[test]
+    fn service_is_recognised_by_its_last_segment() {
+        assert!(has_suffix("controlplane.ynpb.v1.ReadinessService", "ReadinessService"));
+        assert!(has_suffix(
+            "operators.route.operatorpb.v1.MetricsService",
+            "MetricsService"
+        ));
+    }
+
+    #[test]
+    fn other_services_do_not_match() {
+        assert!(!has_suffix("controlplane.ynpb.v1.Gateway", "ReadinessService"));
+        assert!(!has_suffix(
+            "operators.route.operatorpb.v1.MetricsService",
+            "ReadinessService"
+        ));
+        assert!(!has_suffix(
+            "operators.route.operatorpb.v1.ReadinessServiceV2",
+            "ReadinessService"
+        ));
+        assert!(!has_suffix("ReadinessService.operators.route", "ReadinessService"));
+    }
+
+    #[test]
+    fn alias_resolves_to_the_only_match() {
+        let services = services("ReadinessService");
+
+        assert_eq!(
+            Resolution::Resolved("operators.route.operatorpb.v1.ReadinessService".to_owned()),
+            resolve_alias("route", &services)
+        );
+    }
+
+    #[test]
+    fn alias_resolution_ignores_case() {
+        let services = services("MetricsService");
+
+        assert_eq!(
+            Resolution::Resolved("operators.decap.operatorpb.v1.MetricsService".to_owned()),
+            resolve_alias("DeCap", &services)
+        );
+    }
+
+    #[test]
+    fn package_segment_resolves_the_built_in_service() {
+        let services = services("ReadinessService");
+
+        assert_eq!(
+            Resolution::Resolved("controlplane.ynpb.v1.ReadinessService".to_owned()),
+            resolve_alias("controlplane", &services)
+        );
+    }
+
+    #[test]
+    fn alias_matching_several_services_is_ambiguous() {
+        let services = services("MetricsService");
+
+        assert_eq!(
+            Resolution::Ambiguous(vec![
+                "operators.decap.operatorpb.v1.MetricsService".to_owned(),
+                "operators.forward.operatorpb.v1.MetricsService".to_owned(),
+                "operators.pipeline.operatorpb.v1.MetricsService".to_owned(),
+                "operators.route.operatorpb.v1.MetricsService".to_owned(),
+            ]),
+            resolve_alias("operatorpb", &services)
+        );
+    }
+
+    #[test]
+    fn unmatched_alias_is_unknown() {
+        let services = services("ReadinessService");
+
+        assert_eq!(Resolution::Unknown, resolve_alias("balancer", &services));
+    }
+
+    #[test]
+    fn any_alias_is_unknown_without_discovered_services() {
+        assert_eq!(Resolution::Unknown, resolve_alias("route", &[]));
+    }
+
+    #[test]
+    fn services_hint_lists_each_service_after_the_caption() {
+        let services = vec!["a.ReadinessService".to_owned(), "b.ReadinessService".to_owned()];
+
+        let hint = services_hint("available:", "no services registered", &services);
+        let lines: Vec<&str> = hint.lines().collect();
+
+        assert_eq!(3, lines.len());
+        assert!(lines[0].contains("available:"));
+        assert_eq!("a.ReadinessService", lines[1]);
+        assert_eq!("b.ReadinessService", lines[2]);
+    }
+
+    #[test]
+    fn services_hint_states_the_registry_is_empty() {
+        assert_eq!(
+            "no services registered",
+            services_hint("available:", "no services registered", &[])
+        );
+    }
+}

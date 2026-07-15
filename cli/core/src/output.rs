@@ -285,6 +285,19 @@ pub fn is_colored() -> bool {
     })
 }
 
+/// Returns `text` greyed for secondary emphasis when colored output is on.
+///
+/// Uses the same grey as the CLI's other secondary text and degrades to the
+/// plain string when `is_colored` is false, so piped or non-TTY output
+/// carries no escape codes.
+pub fn dim(text: &str) -> String {
+    if is_colored() {
+        text.truecolor(127, 127, 127).to_string()
+    } else {
+        text.to_string()
+    }
+}
+
 /// Returns `true` if the current locale advertises UTF-8 encoding.
 fn is_utf8_locale() -> bool {
     for var in ["LC_ALL", "LC_CTYPE", "LANG"] {

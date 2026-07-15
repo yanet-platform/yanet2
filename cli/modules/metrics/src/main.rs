@@ -1,7 +1,10 @@
 //! Generic metrics probe CLI.
 
 use clap::{ArgAction, CommandFactory, Parser};
-use clap_complete::CompleteEnv;
+use clap_complete::{
+    CompleteEnv,
+    engine::{ArgValueCandidates, CompletionCandidate},
+};
 use commonpb::pb::{GetMetricsRequest, GetMetricsResponse, Histogram, Label, Metric, metric::Value};
 use tabled::{
     Table, Tabled,
@@ -12,23 +15,40 @@ use tabled::{
     },
 };
 use ync::{
-    client::ConnectionArgs,
-    errors::Error,
+    client::{Connection, ConnectionArgs},
+    discovery::{self, Resolution},
+    errors::{Error, ErrorKind},
     output::{self, CommonFormat},
 };
+
+/// Trailing segment of every metrics service's fully-qualified name.
+const METRICS_SERVICE: &str = "MetricsService";
+
+/// Caption of the hint that lists every discovered metrics service.
+const AVAILABLE_SERVICES: &str = "available metrics services:";
+
+/// Message used in place of the hint when no metrics service is registered.
+const NO_SERVICES: &str = "no metrics services are registered with the gateway";
 
 /// Generic metrics probe — calls `GetMetrics` on any `MetricsService`.
 ///
 /// Connects to the gateway and invokes `/<FQN>/GetMetrics` using tonic's
-/// low-level dynamic dispatcher with the shared `commonpb` message types.
-/// No per-service generated client is needed.
+/// low-level dynamic dispatcher with the shared `commonpb` message types. No
+/// per-service generated client is needed. The service to probe is resolved
+/// against the gateway registry; a single service's metrics can already be a
+/// large payload, so naming none is a usage error whose hint lists the
+/// available services rather than dumping them all.
 #[derive(Debug, Clone, Parser)]
 #[command(version, about)]
 #[command(flatten_help = true)]
 pub struct Cmd {
-    /// Fully-qualified gRPC service name, e.g.
-    /// `operators.route.operatorpb.v1.MetricsService`.
-    pub name: String,
+    /// Metrics service to probe: either a fully-qualified gRPC service name
+    /// (e.g. `operators.route.operatorpb.v1.MetricsService`) or a short
+    /// alias matched against the discovered services (e.g. `route`).
+    ///
+    /// Omitting it lists the available services as a usage error.
+    #[arg(value_name = "SERVICE", add = ArgValueCandidates::new(service_candidates))]
+    pub name: Option<String>,
     #[command(flatten)]
     pub connection: ConnectionArgs,
     /// Output format.
@@ -55,16 +75,76 @@ pub async fn main() {
     }
 }
 
-/// Run the metrics probe.
+/// Run the metrics probe against the named service.
+///
+/// A service must be named: probing every one is never attempted, since a
+/// single service can already emit an enormous number of metrics. Naming
+/// none is therefore a usage error whose hint lists the services to choose
+/// from.
 async fn run(cmd: Cmd) -> Result<(), Error> {
-    let response: GetMetricsResponse = ync::client::invoke_unary(
-        &cmd.connection,
-        "metrics",
-        &cmd.name,
-        "GetMetrics",
-        GetMetricsRequest {},
-    )
-    .await?;
+    let Some(name) = cmd.name.clone() else {
+        return Err(require_service(&cmd).await);
+    };
+
+    if is_blank(&name) {
+        return Err(Error::invalid_argument(
+            "metrics",
+            &cmd.connection.endpoint,
+            "service name must not be empty",
+        ));
+    }
+
+    let connection = Connection::connect_for(&cmd.connection, "metrics").await?;
+
+    let name = if name.contains('.') {
+        name
+    } else {
+        resolve_alias(&cmd, &connection, &name).await?
+    };
+
+    run_probe(&connection, &name).await
+}
+
+/// Whether a service name is empty or whitespace only.
+///
+/// An empty name is a substring of every service, so as an alias it matches
+/// them all — and with a single metrics service registered it would resolve
+/// to that one and dump its metrics for a caller who never asked for a probe.
+/// `yanet-cli metrics "$SERVICE"` on an unset variable is bad input rather
+/// than a registry condition, so it is rejected as such, and before anything
+/// is discovered.
+fn is_blank(name: &str) -> bool {
+    name.trim().is_empty()
+}
+
+/// Builds the error shown when the command names no metrics service.
+///
+/// A service is required — probing every one is never attempted — so this is
+/// an invalid-argument error, and the discovered services become its hint so
+/// the caller can pick one. Discovery is best-effort: a gateway that is down
+/// or slower than the budget simply leaves the error hintless, since the
+/// usage mistake stands on its own.
+async fn require_service(cmd: &Cmd) -> Error {
+    let err = Error::invalid_argument("metrics", &cmd.connection.endpoint, "no metrics service specified");
+
+    match discovery::discover_within(&cmd.connection, METRICS_SERVICE, discovery::DISCOVERY_TIMEOUT).await {
+        Ok(services) => err.with_hint(discovery::services_hint(AVAILABLE_SERVICES, NO_SERVICES, &services)),
+        Err(..) => err,
+    }
+}
+
+/// Probes one metrics service's `GetMetrics` over the shared connection, and
+/// suggests the services that do exist when the probe finds none under that
+/// name.
+async fn run_probe(connection: &Connection, name: &str) -> Result<(), Error> {
+    let result = connection
+        .invoke_unary::<_, GetMetricsResponse>("metrics", name, "GetMetrics", GetMetricsRequest {})
+        .await;
+
+    let response = match result {
+        Ok(response) => response,
+        Err(err) => return Err(suggest_services(connection, err).await),
+    };
 
     let total = response.metrics.len();
 
@@ -109,6 +189,77 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
     );
 
     Ok(())
+}
+
+/// Resolves a short alias against the services the gateway knows.
+///
+/// An alias that matches nothing describes the same operational condition as
+/// a fully-qualified name the gateway does not know — that metrics service is
+/// not registered, its operator down or not yet up — because the alias is
+/// resolved against the live registry. It therefore carries the same kind the
+/// gateway's own answer would map to, so that a monitoring script gets one
+/// exit code for both spellings of the condition. An ambiguous alias, in
+/// contrast, really is bad input.
+async fn resolve_alias(cmd: &Cmd, connection: &Connection, alias: &str) -> Result<String, Error> {
+    let services = discovery::list_services(connection, METRICS_SERVICE).await?;
+    let endpoint = &cmd.connection.endpoint;
+
+    match discovery::resolve_alias(alias, &services) {
+        Resolution::Resolved(name) => Ok(name),
+        Resolution::Ambiguous(candidates) => {
+            let message = format!("service name \"{alias}\" is ambiguous");
+
+            Err(
+                Error::invalid_argument("metrics", endpoint, message).with_hint(discovery::services_hint(
+                    "matching metrics services:",
+                    NO_SERVICES,
+                    &candidates,
+                )),
+            )
+        }
+        Resolution::Unknown => {
+            let message = format!("unknown metrics service \"{alias}\"");
+
+            Err(Error::new(ErrorKind::ServiceUnregistered, "metrics", endpoint, message)
+                .with_hint(discovery::services_hint(AVAILABLE_SERVICES, NO_SERVICES, &services)))
+        }
+    }
+}
+
+/// Adds the discovered services to `err`'s hint when it reads like the named
+/// service is simply not registered.
+///
+/// Best-effort: a failed discovery leaves `err` exactly as it was, so a
+/// gateway that is down still surfaces the original probe error rather than a
+/// second, more confusing one.
+async fn suggest_services(connection: &Connection, err: Error) -> Error {
+    if !matches!(err.kind(), ErrorKind::ServiceUnregistered | ErrorKind::NotFound) {
+        return err;
+    }
+
+    match discovery::list_services(connection, METRICS_SERVICE).await {
+        Ok(services) => err.with_hint(discovery::services_hint(AVAILABLE_SERVICES, NO_SERVICES, &services)),
+        Err(..) => err,
+    }
+}
+
+/// Completion candidates for the service positional: the metrics services
+/// the gateway currently knows.
+///
+/// Strictly best-effort — a tab-completion must never print an error nor hang
+/// — so a gateway that is down, slow or refusing us auth yields no candidates
+/// at all, `discovery::DISCOVERY_TIMEOUT` covering the slow case. The endpoint
+/// comes from the defaults of the command's own flags, `YANET_ENDPOINT`
+/// included, since the completer cannot see what the user has typed so far.
+fn service_candidates() -> Vec<CompletionCandidate> {
+    let Ok(cmd) = Cmd::try_parse_from([env!("CARGO_BIN_NAME")]) else {
+        return Vec::new();
+    };
+
+    discovery::candidates(&cmd.connection, METRICS_SERVICE, discovery::DISCOVERY_TIMEOUT)
+        .into_iter()
+        .map(CompletionCandidate::new)
+        .collect()
 }
 
 /// A displayable row for the metrics table.
@@ -234,4 +385,38 @@ fn print_histogram(name: &str, labels: &[Label], histogram: &Histogram) {
 
     println!("  count = {}", histogram.total_count);
     println!();
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn an_empty_service_name_is_blank() {
+        assert!(is_blank(""));
+    }
+
+    #[test]
+    fn a_whitespace_only_service_name_is_blank() {
+        assert!(is_blank("  \t "));
+    }
+
+    #[test]
+    fn a_named_service_is_not_blank() {
+        assert!(!is_blank("route"));
+    }
+
+    #[test]
+    fn no_arguments_leaves_the_service_unset() {
+        let cmd = Cmd::try_parse_from(["yanet-cli-metrics"]).expect("no arguments must parse");
+
+        assert!(cmd.name.is_none());
+    }
+
+    #[test]
+    fn naming_a_service_sets_the_service() {
+        let cmd = Cmd::try_parse_from(["yanet-cli-metrics", "route"]).expect("a service name must parse");
+
+        assert_eq!(Some("route".to_owned()), cmd.name);
+    }
 }

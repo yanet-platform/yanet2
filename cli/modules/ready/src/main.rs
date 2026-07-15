@@ -13,13 +13,11 @@ use readinesspb::pb::{ReadyRequest, ReadyResponse, Scope, State};
 use serde::Serialize;
 use ync::{
     client::{self, Connection, ConnectionArgs},
+    discovery::{self, Resolution},
     errors::{Error, ErrorKind},
     output::{self, CommonFormat},
 };
 
-use self::discovery::Resolution;
-
-mod discovery;
 mod render;
 
 /// Exit code used when the RPC succeeds but not all scopes are `STATE_READY`.
@@ -28,16 +26,11 @@ const EXIT_NOT_READY: i32 = 2;
 /// Caption of the hint that lists every discovered readiness service.
 const AVAILABLE_SERVICES: &str = "available readiness services:";
 
-/// Budget for a best-effort gateway lookup: an error hint, a shell completion.
-///
-/// Such a lookup only enriches something the CLI can do without, so it must
-/// never be the thing that hangs: a flag-validation error or a tab press would
-/// otherwise stall against a slow or blackholed endpoint until the transport
-/// gives up. Exceeding the budget is simply a failed lookup — the hint or the
-/// candidate list is dropped and the caller carries on. A probe the user did
-/// ask for gets no such budget: there a slow gateway must surface as the error
-/// it is.
-const DISCOVERY_TIMEOUT: Duration = Duration::from_secs(1);
+/// Message used in place of the hint when no readiness service is registered.
+const NO_SERVICES: &str = "no readiness services are registered with the gateway";
+
+/// Trailing segment of every readiness service's fully-qualified name.
+const READINESS_SERVICE: &str = "ReadinessService";
 
 /// Generic readiness probe — calls `Ready` on any `ReadinessService`.
 ///
@@ -297,7 +290,7 @@ async fn run_aggregate(cmd: Cmd) -> Result<bool, Error> {
     }
 
     let connection = Connection::connect_for(&cmd.connection, "ready").await?;
-    let services = discovery::list_readiness_services(&connection).await?;
+    let services = discovery::list_services(&connection, READINESS_SERVICE).await?;
 
     let mut reports = Vec::with_capacity(services.len());
     for service in services {
@@ -412,7 +405,7 @@ fn print_missing(missing: &[&str]) {
 /// code for both spellings of the condition. An ambiguous alias, in contrast,
 /// really is bad input.
 async fn resolve_alias(cmd: &Cmd, connection: &Connection, alias: &str) -> Result<String, Error> {
-    let services = discovery::list_readiness_services(connection).await?;
+    let services = discovery::list_services(connection, READINESS_SERVICE).await?;
     let endpoint = &cmd.connection.endpoint;
 
     match discovery::resolve_alias(alias, &services) {
@@ -420,14 +413,19 @@ async fn resolve_alias(cmd: &Cmd, connection: &Connection, alias: &str) -> Resul
         Resolution::Ambiguous(candidates) => {
             let message = format!("service name \"{alias}\" is ambiguous");
 
-            Err(Error::invalid_argument("ready", endpoint, message)
-                .with_hint(services_hint("matching readiness services:", &candidates)))
+            Err(
+                Error::invalid_argument("ready", endpoint, message).with_hint(discovery::services_hint(
+                    "matching readiness services:",
+                    NO_SERVICES,
+                    &candidates,
+                )),
+            )
         }
         Resolution::Unknown => {
             let message = format!("unknown readiness service \"{alias}\"");
 
             Err(Error::new(ErrorKind::ServiceUnregistered, "ready", endpoint, message)
-                .with_hint(services_hint(AVAILABLE_SERVICES, &services)))
+                .with_hint(discovery::services_hint(AVAILABLE_SERVICES, NO_SERVICES, &services)))
         }
     }
 }
@@ -435,15 +433,15 @@ async fn resolve_alias(cmd: &Cmd, connection: &Connection, alias: &str) -> Resul
 /// Builds the error for `--watch` without a single service to watch.
 ///
 /// Discovery is best-effort here: the services it finds become the hint, and a
-/// gateway that cannot be reached — or does not answer within the budget
-/// `discover` gives it — simply leaves the error hintless. The flag
-/// combination is wrong either way, and reporting so must not wait on the
-/// network.
+/// gateway that cannot be reached — or does not answer within
+/// `discovery::discover_within`'s budget — simply leaves the error hintless.
+/// The flag combination is wrong either way, and reporting so must not wait
+/// on the network.
 async fn watch_requires_service(cmd: &Cmd) -> Error {
     let err = Error::invalid_argument("ready", &cmd.connection.endpoint, "--watch requires a single service");
 
-    match discover(&cmd.connection).await {
-        Ok(services) => err.with_hint(services_hint(AVAILABLE_SERVICES, &services)),
+    match discovery::discover_within(&cmd.connection, READINESS_SERVICE, discovery::DISCOVERY_TIMEOUT).await {
+        Ok(services) => err.with_hint(discovery::services_hint(AVAILABLE_SERVICES, NO_SERVICES, &services)),
         Err(..) => err,
     }
 }
@@ -459,61 +457,10 @@ async fn suggest_services(connection: &Connection, err: Error) -> Error {
         return err;
     }
 
-    match discovery::list_readiness_services(connection).await {
-        Ok(services) => err.with_hint(services_hint(AVAILABLE_SERVICES, &services)),
+    match discovery::list_services(connection, READINESS_SERVICE).await {
+        Ok(services) => err.with_hint(discovery::services_hint(AVAILABLE_SERVICES, NO_SERVICES, &services)),
         Err(..) => err,
     }
-}
-
-/// Connects to the gateway afresh and lists the readiness services it knows,
-/// within `DISCOVERY_TIMEOUT`.
-///
-/// This is the best-effort half of discovery, and the only half that has to
-/// establish its own connection: every caller reaches an endpoint nothing has
-/// spoken to yet, purely to enrich something — a hint, a completion — which is
-/// why the budget lives here rather than at the call sites. Discovery the user
-/// asked for runs over the `Connection` the probe already established and is
-/// deliberately unbounded.
-async fn discover(connection: &ConnectionArgs) -> Result<Vec<String>, Error> {
-    let lookup = async {
-        let connection = Connection::connect(connection).await?;
-
-        discovery::list_readiness_services(&connection).await
-    };
-
-    match tokio::time::timeout(DISCOVERY_TIMEOUT, lookup).await {
-        Ok(services) => services,
-        Err(..) => {
-            let budget = humantime::format_duration(DISCOVERY_TIMEOUT);
-            let message = format!("gateway did not answer within {budget}");
-
-            Err(Error::new(
-                ErrorKind::Unavailable,
-                "discover",
-                &connection.endpoint,
-                message,
-            ))
-        }
-    }
-}
-
-/// Formats a hint listing `services` one per line under `caption`.
-///
-/// `output::failure` aligns every hint line after the first under the first,
-/// so the names come out as a column.
-fn services_hint(caption: &str, services: &[String]) -> String {
-    if services.is_empty() {
-        return "no readiness services are registered with the gateway".to_owned();
-    }
-
-    let mut hint = String::from(caption);
-
-    for service in services {
-        hint.push('\n');
-        hint.push_str(service);
-    }
-
-    hint
 }
 
 /// Completion candidates for the service positional: the readiness services
@@ -521,32 +468,18 @@ fn services_hint(caption: &str, services: &[String]) -> String {
 ///
 /// Strictly best-effort — a tab-completion must never print an error nor hang
 /// — so a gateway that is down, slow or refusing us auth yields no candidates
-/// at all, `discover`'s time budget covering the slow case. The endpoint comes
-/// from the defaults of the command's own flags, `YANET_ENDPOINT` included,
-/// since the completer cannot see what the user has typed so far.
+/// at all, `discovery::DISCOVERY_TIMEOUT` covering the slow case. The endpoint
+/// comes from the defaults of the command's own flags, `YANET_ENDPOINT`
+/// included, since the completer cannot see what the user has typed so far.
 fn service_candidates() -> Vec<CompletionCandidate> {
     let Ok(cmd) = Cmd::try_parse_from([env!("CARGO_BIN_NAME")]) else {
         return Vec::new();
     };
 
-    // The completer is called from within this binary's `#[tokio::main]`
-    // runtime, which forbids a nested `block_on`, so the lookup gets a thread
-    // and a runtime of its own. A panic in it joins as an error and, like
-    // every other failure here, yields no candidates.
-    let services = std::thread::spawn(move || {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .ok()?;
-
-        runtime.block_on(discover(&cmd.connection)).ok()
-    })
-    .join()
-    .ok()
-    .flatten()
-    .unwrap_or_default();
-
-    services.into_iter().map(CompletionCandidate::new).collect()
+    discovery::candidates(&cmd.connection, READINESS_SERVICE, discovery::DISCOVERY_TIMEOUT)
+        .into_iter()
+        .map(CompletionCandidate::new)
+        .collect()
 }
 
 #[cfg(test)]
@@ -624,24 +557,6 @@ mod test {
     #[test]
     fn a_named_service_is_not_blank() {
         assert!(!is_blank("route"));
-    }
-
-    #[test]
-    fn services_hint_lists_one_service_per_line() {
-        let services = vec!["a.ReadinessService".to_owned(), "b.ReadinessService".to_owned()];
-
-        assert_eq!(
-            "available:\na.ReadinessService\nb.ReadinessService",
-            services_hint("available:", &services)
-        );
-    }
-
-    #[test]
-    fn services_hint_states_the_registry_is_empty() {
-        assert_eq!(
-            "no readiness services are registered with the gateway",
-            services_hint("available:", &[])
-        );
     }
 
     #[test]

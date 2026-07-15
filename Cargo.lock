@@ -3102,6 +3102,7 @@ dependencies = [
  "tonic",
  "tower",
  "uuid",
+ "yanet-ynpb",
 ]
 
 [[package]]
@@ -3573,10 +3574,8 @@ dependencies = [
  "prost-types",
  "serde",
  "tokio",
- "tonic",
  "yanet-cli",
  "yanet-readinesspb",
- "yanet-ynpb",
 ]
 
 [[package]]
