@@ -6,6 +6,7 @@
 
 #include "config.h"
 #include "dataplane.h"
+#include "process.h"
 
 static void
 l3b_handle_packets(
