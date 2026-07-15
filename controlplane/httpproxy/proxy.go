@@ -33,11 +33,36 @@ type TransparentWebGRPCProxy struct {
 	log      *zap.Logger
 }
 
+// Option configures the HTTPHandler constructor.
+type Option func(*handlerOptions)
+
+type handlerOptions struct {
+	Log *zap.Logger
+}
+
+func newHandlerOptions() *handlerOptions {
+	return &handlerOptions{
+		Log: zap.NewNop(),
+	}
+}
+
+// WithLog sets the logger for the HTTP handler.
+func WithLog(log *zap.Logger) Option {
+	return func(o *handlerOptions) {
+		o.Log = log
+	}
+}
+
 // NewHTTPHandler creates a new HTTPHandler.
-func NewHTTPHandler(registry BackendRegistry, log *zap.Logger) *TransparentWebGRPCProxy {
+func NewHTTPHandler(registry BackendRegistry, options ...Option) *TransparentWebGRPCProxy {
+	opts := newHandlerOptions()
+	for _, o := range options {
+		o(opts)
+	}
+
 	return &TransparentWebGRPCProxy{
 		registry: registry,
-		log:      log,
+		log:      opts.Log,
 	}
 }
 

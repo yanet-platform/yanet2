@@ -476,7 +476,7 @@ func (m *Gateway) runHTTPServer(ctx context.Context) error {
 		Handler: httpproxy.GzipMiddleware(
 			httpproxy.NewHTTPHandler(
 				m.registry,
-				m.log,
+				httpproxy.WithLog(m.log),
 			),
 		),
 	}
