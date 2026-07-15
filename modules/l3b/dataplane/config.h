@@ -1,6 +1,7 @@
 #pragma once
 
 #include "common/network.h"
+#include "controlplane/config/cp_module.h"
 #include "filter/filter.h"
 #include "filter/rule.h"
 
@@ -74,6 +75,22 @@ struct l3b_virtual_service {
 	uint32_t scheduler_index_mask;
 
 	// Per-family classification of incoming packets.
+	struct filter filter_ip6;
+	struct filter filter_ip4;
+};
+
+/*
+ * Top-level l3b module configuration published into shared memory.
+ *
+ * The module-level filters classify an incoming packet into a virtual service
+ * index; virtual_services holds the services themselves.
+ */
+struct l3b_module_config {
+	struct cp_module cp_module;
+
+	uint32_t virtual_service_count;
+	struct l3b_virtual_service *virtual_services;
+
 	struct filter filter_ip6;
 	struct filter filter_ip4;
 };
