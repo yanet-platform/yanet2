@@ -45,11 +45,36 @@ type GatewayService struct {
 	log      *zap.Logger
 }
 
+// GatewayServiceOption configures the GatewayService constructor.
+type GatewayServiceOption func(*gatewayServiceOptions)
+
+type gatewayServiceOptions struct {
+	Log *zap.Logger
+}
+
+func newGatewayServiceOptions() *gatewayServiceOptions {
+	return &gatewayServiceOptions{
+		Log: zap.NewNop(),
+	}
+}
+
+// WithGatewayServiceLog sets the logger for the gateway service.
+func WithGatewayServiceLog(log *zap.Logger) GatewayServiceOption {
+	return func(o *gatewayServiceOptions) {
+		o.Log = log
+	}
+}
+
 // NewGatewayService creates a new GatewayService.
-func NewGatewayService(registry *BackendRegistry, log *zap.Logger) *GatewayService {
+func NewGatewayService(registry *BackendRegistry, options ...GatewayServiceOption) *GatewayService {
+	opts := newGatewayServiceOptions()
+	for _, o := range options {
+		o(opts)
+	}
+
 	return &GatewayService{
 		registry: registry,
-		log:      log,
+		log:      opts.Log,
 	}
 }
 

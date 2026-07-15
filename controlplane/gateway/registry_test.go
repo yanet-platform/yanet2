@@ -8,7 +8,6 @@ import (
 
 	"github.com/siderolabs/grpc-proxy/proxy"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials/insecure"
@@ -270,7 +269,7 @@ func TestGatewayService_RegisterKindResolution(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			reg := NewBackendRegistry()
-			svc := NewGatewayService(reg, zap.NewNop())
+			svc := NewGatewayService(reg)
 
 			_, err := svc.Register(t.Context(), &ynpb.RegisterRequest{
 				Backend: &ynpb.BackendDesc{

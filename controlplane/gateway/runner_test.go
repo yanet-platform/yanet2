@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
 	"github.com/stretchr/testify/require"
@@ -103,7 +102,7 @@ func TestServiceRunner_registerClosesGatewayClientConnection(t *testing.T) {
 
 	trackingListener := newConnectionTrackingListener(gatewayListener)
 	backendRegistry := NewBackendRegistry()
-	gatewayService := NewGatewayService(backendRegistry, zap.NewNop())
+	gatewayService := NewGatewayService(backendRegistry)
 
 	gatewayServer := grpc.NewServer()
 	ynpb.RegisterGatewayServer(gatewayServer, gatewayService)
@@ -113,7 +112,7 @@ func TestServiceRunner_registerClosesGatewayClientConnection(t *testing.T) {
 		_ = gatewayServer.Serve(trackingListener)
 	}()
 
-	serviceRunner := NewServiceRunner(&fakeService{}, trackingListener.Addr().String(), nil, zap.NewNop())
+	serviceRunner := NewServiceRunner(&fakeService{}, trackingListener.Addr().String(), nil)
 
 	backendAddrListener, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)

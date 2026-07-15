@@ -284,7 +284,7 @@ func NewGateway(cfg *Config, options ...GatewayOption) (*Gateway, error) {
 	}
 	server = grpc.NewServer(serverOpts...)
 
-	gatewayService := NewGatewayService(registry, log)
+	gatewayService := NewGatewayService(registry, WithGatewayServiceLog(log))
 	ynpb.RegisterGatewayServer(server, gatewayService)
 
 	ynpb.RegisterAuthServiceServer(server, authService)
@@ -347,7 +347,7 @@ func NewGateway(cfg *Config, options ...GatewayOption) (*Gateway, error) {
 			}
 		} else {
 			// Out-of-process: wrap in a ServiceRunner.
-			runner := NewServiceRunner(entry.service, cfg.Server.Endpoint, cfg.Server.TLS, log)
+			runner := NewServiceRunner(entry.service, cfg.Server.Endpoint, cfg.Server.TLS, WithServiceRunnerLog(log))
 			serviceRunners = append(serviceRunners, runner)
 		}
 

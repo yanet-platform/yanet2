@@ -35,14 +35,39 @@ type ServiceRunner struct {
 	log             *zap.Logger
 }
 
+// ServiceRunnerOption configures the ServiceRunner constructor.
+type ServiceRunnerOption func(*serviceRunnerOptions)
+
+type serviceRunnerOptions struct {
+	Log *zap.Logger
+}
+
+func newServiceRunnerOptions() *serviceRunnerOptions {
+	return &serviceRunnerOptions{
+		Log: zap.NewNop(),
+	}
+}
+
+// WithServiceRunnerLog sets the logger for the service runner.
+func WithServiceRunnerLog(log *zap.Logger) ServiceRunnerOption {
+	return func(o *serviceRunnerOptions) {
+		o.Log = log
+	}
+}
+
 // NewServiceRunner creates a new ServiceRunner for the given service.
 func NewServiceRunner(
 	module Service,
 	gatewayEndpoint string,
 	gatewayTLS *TLSConfig,
-	log *zap.Logger,
+	options ...ServiceRunnerOption,
 ) *ServiceRunner {
-	log = log.Named(module.Name()).With(zap.String("module", module.Name()))
+	opts := newServiceRunnerOptions()
+	for _, o := range options {
+		o(opts)
+	}
+
+	log := opts.Log.Named(module.Name()).With(zap.String("module", module.Name()))
 
 	interceptors := []grpc.UnaryServerInterceptor{xgrpc.AccessLogInterceptor(log)}
 	if provider, ok := module.(UnaryInterceptedService); ok {

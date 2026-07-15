@@ -14,8 +14,6 @@
 # entry is itself a lint failure, so paying down the debt requires deleting
 # the row — the ledger is self-cleaning by construction.
 
-controlplane/gateway/runner.go:NewServiceRunner  # legacy: migrate to the options pattern
-controlplane/gateway/service.go:NewGatewayService  # legacy: migrate to the options pattern
 controlplane/internal/auth/basic/factory.go:NewFromConfig  # legacy: migrate to the options pattern
 controlplane/internal/auth/sshcert/factory.go:NewFromConfig  # legacy: migrate to the options pattern
 controlplane/internal/auth/sshkey/factory.go:NewFromConfig  # legacy: migrate to the options pattern

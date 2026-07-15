@@ -191,7 +191,7 @@ func TestServiceRunner_Run_ShutsDownWithOpenStream(t *testing.T) {
 	require.NoError(t, err)
 
 	gatewayServer := grpc.NewServer()
-	ynpb.RegisterGatewayServer(gatewayServer, NewGatewayService(NewBackendRegistry(), zap.NewNop()))
+	ynpb.RegisterGatewayServer(gatewayServer, NewGatewayService(NewBackendRegistry()))
 
 	var gatewayGroup errgroup.Group
 	gatewayGroup.Go(func() error {
@@ -211,7 +211,6 @@ func TestServiceRunner_Run_ShutsDownWithOpenStream(t *testing.T) {
 		&blockingReadinessService{endpoint: backendAddr},
 		gatewayListener.Addr().String(),
 		nil,
-		zap.NewNop(),
 	)
 
 	ctx, cancel := context.WithCancel(t.Context())
