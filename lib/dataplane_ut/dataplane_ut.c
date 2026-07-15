@@ -284,8 +284,25 @@ dataplane_ut_new(const struct dataplane_ut_config *cfg) {
 	ut->dp_config->worker_count = cfg->worker_count;
 	SET_OFFSET_OF(&ut->dp_config->workers, workers_array);
 
+	// Devices are optional: a harness with no explicit device_count still
+	// exposes the implicit device 0, mirroring the Go side's semantics.
+	size_t effective_device_count =
+		cfg->device_count == 0 ? 1 : cfg->device_count;
+
 	struct dp_worker **dp_workers = ADDR_OF(&ut->dp_config->workers);
 	for (size_t idx = 0; idx < cfg->worker_count; ++idx) {
+		if (cfg->workers != NULL &&
+		    cfg->workers[idx].device_id >= effective_device_count) {
+			LOG(ERROR,
+			    "dataplane_ut_new: worker %zu binds out-of-range "
+			    "device_id %u (device_count %zu)",
+			    idx,
+			    cfg->workers[idx].device_id,
+			    effective_device_count);
+			dataplane_ut_free(ut);
+			return NULL;
+		}
+
 		struct dp_worker *dp_worker = (struct dp_worker *)memory_balloc(
 			&ut->dp_config->memory_context, sizeof(struct dp_worker)
 		);
@@ -304,8 +321,13 @@ dataplane_ut_new(const struct dataplane_ut_config *cfg) {
 		dp_worker->gen = DATAPLANE_UT_HIGH_GEN;
 		dp_worker->rx_mempool = ut->mempool;
 		dp_worker->core_id = (uint32_t)idx;
-		dp_worker->device_id = 0;
-		dp_worker->queue_id = (uint32_t)idx;
+		if (cfg->workers != NULL) {
+			dp_worker->device_id = cfg->workers[idx].device_id;
+			dp_worker->queue_id = cfg->workers[idx].queue_id;
+		} else {
+			dp_worker->device_id = 0;
+			dp_worker->queue_id = (uint32_t)idx;
+		}
 		dp_worker->rx_burst_size = WORKER_RX_BURST_SIZE;
 
 		wire_worker_counters(dp_worker, ut->dp_config);
@@ -375,6 +397,33 @@ dataplane_ut_run(
 	struct packet_list *input,
 	struct dataplane_ut_round_result *result
 ) {
+	if (worker_idx >= ut->dp_config->worker_count) {
+		LOG(ERROR,
+		    "dataplane_ut_run: worker_idx %zu is out of range "
+		    "(worker_count %lu)",
+		    worker_idx,
+		    ut->dp_config->worker_count);
+
+		// Mirror the config_gen_ectx == NULL branch below: a caller
+		// must still get a well-formed result (output/drop initialized)
+		// and input must end up drained, so packets are neither leaked
+		// nor re-added to a non-empty list by dataplane_ut_run_rounds.
+		struct packet_front packet_front;
+		packet_front_init(&packet_front);
+
+		struct packet *packet;
+		while ((packet = packet_list_pop(input)) != NULL) {
+			packet_front_pending_input(&packet_front, packet);
+		}
+
+		packet_list_init(&result->output);
+		packet_list_init(&result->drop);
+
+		packet_front_drop_pending_input(&packet_front);
+		packet_list_concat(&result->drop, &packet_front.drop);
+		return;
+	}
+
 	// The harness only manages one instance, so dp_workers lives in
 	// dp_config->workers as a registry of size worker_count.
 	struct dp_worker **workers = ADDR_OF(&ut->dp_config->workers);

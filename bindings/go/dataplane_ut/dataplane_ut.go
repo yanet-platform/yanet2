@@ -89,6 +89,27 @@ free_cptr_array(const char **arr) {
 	free(arr);
 }
 
+// alloc_worker_spec_array copies n entries from src (Go-backed) into a
+// fresh C-heap array and returns it. The caller frees with
+// free_worker_spec_array.
+static struct dataplane_ut_worker_spec *
+alloc_worker_spec_array(const struct dataplane_ut_worker_spec *src, size_t n) {
+	struct dataplane_ut_worker_spec *dst =
+		(struct dataplane_ut_worker_spec *)malloc(
+			n * sizeof(struct dataplane_ut_worker_spec)
+		);
+	if (dst == NULL) {
+		return NULL;
+	}
+	memcpy(dst, src, n * sizeof(struct dataplane_ut_worker_spec));
+	return dst;
+}
+
+static void
+free_worker_spec_array(struct dataplane_ut_worker_spec *arr) {
+	free(arr);
+}
+
 void
 keep_refs(void **ptrs) {
 	extern struct module *new_module_blackhole(void);
@@ -141,6 +162,16 @@ import (
 	"github.com/yanet-platform/yanet2/tests/functional/framework"
 )
 
+// WorkerSpec assigns one worker's ingress device and queue, mirroring the
+// per-worker rx/tx port binding the real dataplane sets up before entering
+// its poll loop.
+//
+// DeviceID indexes into Config.Devices.
+type WorkerSpec struct {
+	DeviceID uint16
+	QueueID  uint16
+}
+
 // Config holds parameters for constructing a Harness.
 //
 // WorkerCount must be >= 1.
@@ -155,6 +186,12 @@ type Config struct {
 	// PluginDir is the directory scanned for module .so plugins. An empty
 	// value loads only the statically-linked built-ins.
 	PluginDir string
+	// Workers optionally assigns each worker's device and queue.
+	//
+	// When nil, every worker defaults to device 0 with queue id equal to
+	// its index — the harness's long-standing single-device behavior.
+	// When set, its length must equal WorkerCount.
+	Workers []WorkerSpec
 }
 
 // Result of one pipeline round.
@@ -183,11 +220,41 @@ type Harness struct {
 	// must stay below it. An empty Devices config still exposes the
 	// implicit device slot zero.
 	deviceCount int
+	// Registered worker count; worker indices passed to run calls must
+	// stay below it.
+	workerCount int
 }
 
 // NewHarness constructs a Harness from cfg.
 // Free must be called when the test is done.
 func NewHarness(cfg Config) (*Harness, error) {
+	if cfg.Workers != nil && uint64(len(cfg.Workers)) != cfg.WorkerCount {
+		return nil, fmt.Errorf(
+			"workers length %d does not match worker count %d",
+			len(cfg.Workers),
+			cfg.WorkerCount,
+		)
+	}
+
+	deviceCount := len(cfg.Devices)
+	if deviceCount == 0 {
+		deviceCount = 1
+	}
+
+	// dp_worker->device_id feeds the same per-device scheduling arrays as
+	// packet->tx_device_id in the real dataplane, so an id outside the
+	// registered topology would corrupt memory on the C side.
+	for idx, worker := range cfg.Workers {
+		if int(worker.DeviceID) >= deviceCount {
+			return nil, fmt.Errorf(
+				"worker %d device id %d exceeds topology device count %d",
+				idx,
+				worker.DeviceID,
+				deviceCount,
+			)
+		}
+	}
+
 	// Convert Go string slices to C string arrays. The *C.char values are
 	// C-heap strings; toCStringArray returns Go-backed pointer slices, so
 	// we copy the pointers into C-heap arrays to satisfy the CGO rule that
@@ -232,17 +299,25 @@ func NewHarness(cfg Config) (*Harness, error) {
 		defer C.free(unsafe.Pointer(cPluginDir))
 		cCfg.plugin_dir = cPluginDir
 	}
+	if len(cfg.Workers) > 0 {
+		cWorkers := make([]C.struct_dataplane_ut_worker_spec, len(cfg.Workers))
+		for idx, worker := range cfg.Workers {
+			cWorkers[idx] = C.struct_dataplane_ut_worker_spec{
+				device_id: C.uint16_t(worker.DeviceID),
+				queue_id:  C.uint16_t(worker.QueueID),
+			}
+		}
+		cArr := C.alloc_worker_spec_array(&cWorkers[0], C.size_t(len(cWorkers)))
+		defer C.free_worker_spec_array(cArr)
+		cCfg.workers = cArr
+	}
 
 	ptr := C.dataplane_ut_new(&cCfg)
 	if ptr == nil {
 		return nil, fmt.Errorf("failed to create dataplane harness: dataplane_ut_new returned NULL")
 	}
 
-	deviceCount := len(cfg.Devices)
-	if deviceCount == 0 {
-		deviceCount = 1
-	}
-	return &Harness{ptr: ptr, deviceCount: deviceCount}, nil
+	return &Harness{ptr: ptr, deviceCount: deviceCount, workerCount: int(cfg.WorkerCount)}, nil
 }
 
 // Free tears down the harness. Nil-safe.
@@ -314,12 +389,61 @@ func (m *Harness) HandlePacketsWithHashes(
 // multi-segment mbuf. The result is returned unparsed so callers can inspect
 // packets that gopacket cannot decode.
 func (m *Harness) HandleSegmentedPackets(packets ...[][]byte) (*RawResult, error) {
+	return m.handleSegmentedPackets(0, 0, 0, packets...)
+}
+
+// HandleSegmentedPacketsOnDevice runs one pipeline round on the given worker
+// where each input packet is supplied as an ordered list of byte segments,
+// producing a chained multi-segment mbuf stamped with rxDeviceID as both its
+// ingress and egress device.
+//
+// This mirrors the real dataplane's ingress stamp, where the polling
+// worker's own device becomes both the packet's rx and tx device (see
+// dataplane/worker.c), letting a test exercise device-keyed module behavior
+// instead of the harness default of device 0 on every packet.
+func (m *Harness) HandleSegmentedPacketsOnDevice(
+	worker int,
+	rxDeviceID uint16,
+	packets ...[][]byte,
+) (*RawResult, error) {
+	// The round dispatch indexes per-device scheduling arrays by the
+	// packet device id, so an id outside the registered topology would
+	// corrupt memory on the C side.
+	if int(rxDeviceID) >= m.deviceCount {
+		return nil, fmt.Errorf(
+			"device id %d exceeds topology device count %d",
+			rxDeviceID,
+			m.deviceCount,
+		)
+	}
+
+	return m.handleSegmentedPackets(worker, rxDeviceID, rxDeviceID, packets...)
+}
+
+// handleSegmentedPackets is the shared implementation for the
+// HandleSegmentedPackets* variants.
+func (m *Harness) handleSegmentedPackets(
+	worker int,
+	txDeviceID, rxDeviceID uint16,
+	packets ...[][]byte,
+) (*RawResult, error) {
+	// dataplane_ut_run indexes ut->dp_config->workers[worker] directly, so
+	// a worker index outside the registered topology would corrupt memory
+	// on the C side.
+	if worker < 0 || worker >= m.workerCount {
+		return nil, fmt.Errorf(
+			"worker %d exceeds topology worker count %d",
+			worker,
+			m.workerCount,
+		)
+	}
+
 	pinner := runtime.Pinner{}
 	defer pinner.Unpin()
 
 	builtPackets := make([]*dataplane.Packet, 0, len(packets))
 	for idx := range packets {
-		pkt, err := dataplane.NewPacketFromSegments(packets[idx], 0, 0)
+		pkt, err := dataplane.NewPacketFromSegments(packets[idx], txDeviceID, rxDeviceID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to build segmented packet at index %d: %w", idx, err)
 		}
@@ -334,7 +458,7 @@ func (m *Harness) HandleSegmentedPackets(packets ...[][]byte) (*RawResult, error
 	var result C.struct_dataplane_ut_round_result
 	C.dataplane_ut_run(
 		m.ptr,
-		C.size_t(0),
+		C.size_t(worker),
 		(*C.struct_packet_list)(unsafe.Pointer(packetList)),
 		&result,
 	)
@@ -370,6 +494,17 @@ func (m *Harness) handlePackets(
 	hashes []uint32,
 	packets ...gopacket.Packet,
 ) (*Result, error) {
+	// dataplane_ut_run indexes ut->dp_config->workers[worker] directly, so
+	// a worker index outside the registered topology would corrupt memory
+	// on the C side.
+	if worker < 0 || worker >= m.workerCount {
+		return nil, fmt.Errorf(
+			"worker %d exceeds topology worker count %d",
+			worker,
+			m.workerCount,
+		)
+	}
+
 	pinner := runtime.Pinner{}
 	defer pinner.Unpin()
 

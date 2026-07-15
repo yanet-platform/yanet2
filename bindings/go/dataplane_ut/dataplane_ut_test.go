@@ -1,12 +1,21 @@
 package dataplaneut
 
 import (
+	"net"
 	"testing"
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/gopacket/gopacket/layers"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/yanet-platform/yanet2/bindings/go/filter"
+	"github.com/yanet-platform/yanet2/common/go/xerror"
+	"github.com/yanet-platform/yanet2/common/go/xpacket"
+	"github.com/yanet-platform/yanet2/controlplane/ffi"
+	"github.com/yanet-platform/yanet2/modules/forward/bindings/go/cforward"
+	forward "github.com/yanet-platform/yanet2/modules/forward/controlplane"
 )
 
 // TestHarnessLifecycle exercises construction, shared-memory access, and
@@ -67,4 +76,234 @@ func TestAgentAttach(t *testing.T) {
 	agent, err := shm.AgentAttach("smoke-agent", 0, datasize.MB*2)
 	require.NoError(t, err)
 	require.NotNil(t, agent)
+}
+
+// TestNewHarness_WorkersLengthMismatch verifies that Config.Workers, when
+// set, must have exactly WorkerCount entries — a mismatched length is
+// rejected instead of silently misassigning or truncating workers.
+func TestNewHarness_WorkersLengthMismatch(t *testing.T) {
+	cfg := Config{
+		CPMemory:    uint64(datasize.MB * 32),
+		DPMemory:    uint64(datasize.MB * 4),
+		WorkerCount: 2,
+		Workers:     []WorkerSpec{{DeviceID: 0, QueueID: 0}},
+	}
+
+	h, err := NewHarness(cfg)
+	require.Error(t, err)
+	require.Nil(t, h)
+}
+
+// Verifies that NewHarness rejects a WorkerSpec.DeviceID at or beyond the
+// configured device count instead of stamping dp_worker->device_id with a
+// value that would later index the C-side per-device scheduling arrays out
+// of bounds.
+func TestNewHarness_WorkerDeviceIDOutOfRange(t *testing.T) {
+	cfg := Config{
+		CPMemory:    uint64(datasize.MB * 32),
+		DPMemory:    uint64(datasize.MB * 4),
+		WorkerCount: 2,
+		Devices:     []string{"port0", "port1"},
+		Workers: []WorkerSpec{
+			{DeviceID: 0, QueueID: 0},
+			{DeviceID: 5, QueueID: 0},
+		},
+	}
+
+	h, err := NewHarness(cfg)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "exceeds topology device count")
+	require.Nil(t, h)
+}
+
+// TestHandleSegmentedPacketsOnDevice_InvalidDeviceID verifies that
+// HandleSegmentedPacketsOnDevice rejects an rxDeviceID at or beyond the
+// harness's registered device count instead of stamping a packet that
+// would index the C-side per-device scheduling arrays out of bounds.
+func TestHandleSegmentedPacketsOnDevice_InvalidDeviceID(t *testing.T) {
+	cfg := Config{
+		CPMemory:    uint64(datasize.MB * 32),
+		DPMemory:    uint64(datasize.MB * 4),
+		WorkerCount: 1,
+	}
+
+	h, err := NewHarness(cfg)
+	require.NoError(t, err)
+	t.Cleanup(h.Free)
+
+	result, err := h.HandleSegmentedPacketsOnDevice(0, 5, [][]byte{{0x00}})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "exceeds topology device count")
+	require.Nil(t, result)
+}
+
+// TestHandleSegmentedPacketsOnDevice_InvalidWorker verifies that
+// HandleSegmentedPacketsOnDevice rejects a worker index at or beyond the
+// harness's registered worker count instead of indexing the C-side worker
+// array out of bounds.
+func TestHandleSegmentedPacketsOnDevice_InvalidWorker(t *testing.T) {
+	cfg := Config{
+		CPMemory:    uint64(datasize.MB * 32),
+		DPMemory:    uint64(datasize.MB * 4),
+		WorkerCount: 1,
+	}
+
+	h, err := NewHarness(cfg)
+	require.NoError(t, err)
+	t.Cleanup(h.Free)
+
+	result, err := h.HandleSegmentedPacketsOnDevice(3, 0, [][]byte{{0x00}})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "exceeds topology worker count")
+	require.Nil(t, result)
+}
+
+// TestHandlePacketsOnWorker_InvalidWorker verifies that HandlePacketsOnWorker
+// rejects a worker index at or beyond the harness's registered worker count
+// instead of indexing the C-side worker array out of bounds.
+func TestHandlePacketsOnWorker_InvalidWorker(t *testing.T) {
+	cfg := Config{
+		CPMemory:    uint64(datasize.MB * 32),
+		DPMemory:    uint64(datasize.MB * 4),
+		WorkerCount: 1,
+	}
+
+	h, err := NewHarness(cfg)
+	require.NoError(t, err)
+	t.Cleanup(h.Free)
+
+	result, err := h.HandlePacketsOnWorker(3)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "exceeds topology worker count")
+	require.Nil(t, result)
+}
+
+// TestHandleSegmentedPacketsOnDevice_ForwardDeviceScopedRule verifies that
+// Config.Workers assigns each worker's own device and that
+// HandleSegmentedPacketsOnDevice stamps the injected packet's ingress
+// device, together letting a forward rule scoped to a non-zero device
+// ("port1") demux the packet to that device's egress.
+//
+// The assertions bracket both knobs: WorkerCounters reads dp_worker's
+// device_id back to prove Config.Workers was honored, and a baseline call
+// through the pre-existing HandleSegmentedPackets (which still pins every
+// packet to device 0) proves the same rule cannot match without the new
+// injection knob.
+func TestHandleSegmentedPacketsOnDevice_ForwardDeviceScopedRule(t *testing.T) {
+	cfg := Config{
+		CPMemory:      uint64(datasize.MB * 64),
+		DPMemory:      uint64(datasize.MB * 4),
+		WorkerCount:   2,
+		Devices:       []string{"port0", "port1"},
+		Modules:       []string{"forward"},
+		DevicesToLoad: []string{"plain"},
+		Workers: []WorkerSpec{
+			{DeviceID: 0, QueueID: 0},
+			{DeviceID: 1, QueueID: 0},
+		},
+	}
+	h, err := NewHarness(cfg)
+	require.NoError(t, err)
+	t.Cleanup(h.Free)
+
+	shm := h.SharedMemory()
+	agent, err := shm.AgentAttach("device-inject-test", 0, datasize.MB*16)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = agent.CleanUp() })
+
+	// Confirm the Workers config threaded through to the C-side dp_worker
+	// fields: without it, both workers would read back device 0.
+	workerCounters, err := shm.DPConfig(0).WorkerCounters()
+	require.NoError(t, err)
+	require.Len(t, workerCounters, 2)
+	assert.Equal(t, uint32(0), workerCounters[0].DeviceID)
+	assert.Equal(t, uint32(1), workerCounters[1].DeviceID)
+
+	backend := forward.NewBackend(agent)
+	rule := cforward.ForwardRule{
+		Target:  "port1",
+		Mode:    cforward.ModeOut,
+		Counter: "port1_rule",
+		Devices: filter.Devices{{Name: "port1"}},
+	}
+	moduleHandle, err := backend.UpdateModule("demux", []cforward.ForwardRule{rule})
+	require.NoError(t, err)
+	t.Cleanup(moduleHandle.Free)
+
+	require.NoError(t, agent.UpdateFunction(ffi.FunctionConfig{
+		Name: "demux",
+		Chains: []ffi.FunctionChainConfig{{
+			Weight: 1,
+			Chain: ffi.ChainConfig{
+				Name:    "demux_chain",
+				Modules: []ffi.ChainModuleConfig{{Type: "forward", Name: "demux"}},
+			},
+		}},
+	}))
+	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{
+		Name:      "demux",
+		Functions: []string{"demux"},
+	}))
+	require.NoError(t, agent.UpdatePipeline(ffi.PipelineConfig{Name: "dummy_out"}))
+
+	// port0 has no output pipeline: the rule never targets it, so an
+	// unmatched packet has nowhere to go but drop.
+	require.NoError(t, agent.UpdatePlainDevices([]ffi.DeviceConfig{
+		{
+			Name:  "port0",
+			Input: []ffi.DevicePipelineConfig{{Name: "demux", Weight: 1}},
+		},
+		{
+			Name:   "port1",
+			Input:  []ffi.DevicePipelineConfig{{Name: "demux", Weight: 1}},
+			Output: []ffi.DevicePipelineConfig{{Name: "dummy_out", Weight: 1}},
+		},
+	}))
+
+	eth := layers.Ethernet{
+		SrcMAC:       xerror.Unwrap(net.ParseMAC("aa:bb:cc:dd:ee:ff")),
+		DstMAC:       xerror.Unwrap(net.ParseMAC("11:22:33:44:55:66")),
+		EthernetType: layers.EthernetTypeIPv4,
+	}
+	ip4 := layers.IPv4{
+		Version:  4,
+		TTL:      64,
+		Protocol: layers.IPProtocolICMPv4,
+		SrcIP:    net.ParseIP("1.2.3.4"),
+		DstIP:    net.ParseIP("10.0.0.5"),
+	}
+	icmp := layers.ICMPv4{
+		TypeCode: layers.CreateICMPv4TypeCode(layers.ICMPv4TypeEchoRequest, 0),
+	}
+	pkt := xpacket.LayersToPacket(t, &eth, &ip4, &icmp)
+	payload := pkt.Data()
+
+	// Baseline: the pre-existing entrypoint pins every packet to device 0,
+	// so the port1-scoped rule cannot match. The packet passes through
+	// unmatched and is dropped by the input entry point's no-transmit
+	// policy.
+	baseline, err := h.HandleSegmentedPackets([][]byte{payload})
+	require.NoError(t, err)
+	assert.Empty(t, baseline.Output, "a packet pinned to device 0 must not match the port1-scoped rule")
+	require.Len(t, baseline.Drop, 1)
+
+	// With the packet's ingress device set to port1 and the round run on
+	// the worker that owns port1, the device-scoped rule matches and
+	// redirects the packet out through port1.
+	result, err := h.HandleSegmentedPacketsOnDevice(1, 1, [][]byte{payload})
+	require.NoError(t, err)
+	require.Len(t, result.Output, 1, "a packet injected on port1 must match the device-scoped rule and reach output")
+	assert.Empty(t, result.Drop)
+
+	// The round ran on worker 1, so the per-rule counter lands in worker
+	// 1's slot rather than worker 0's — RequireModuleCounter always reads
+	// worker 0, so the module counters are read directly here instead.
+	counters := shm.DPConfig(0).ModuleCounters(
+		"port1", "demux", "demux", "demux_chain", "forward", "demux",
+		[]string{"port1_rule"},
+	)
+	require.Len(t, counters, 1)
+	require.GreaterOrEqual(t, len(counters[0].Values), 2)
+	assert.Equal(t, []uint64{0, 0}, counters[0].Values[0], "worker 0 never ran the round")
+	assert.Equal(t, []uint64{1, uint64(len(payload))}, counters[0].Values[1], "worker 1 ran the matching round")
 }

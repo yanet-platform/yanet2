@@ -9,6 +9,13 @@ struct rte_mbuf;
 struct yanet_shm;
 struct dataplane_ut;
 
+// One worker's device and queue assignment, mirroring the per-worker rx/tx
+// port binding the real dataplane sets up before entering its poll loop.
+struct dataplane_ut_worker_spec {
+	uint16_t device_id;
+	uint16_t queue_id;
+};
+
 // Construction parameters for an in-process dataplane harness.
 // worker_count must be >= 1.
 //
@@ -30,6 +37,14 @@ struct dataplane_ut_config {
 
 	const char *const *devices_to_load;
 	size_t devices_to_load_count;
+
+	// Optional per-worker device/queue assignment, one entry per worker.
+	//
+	// NULL reproduces the long-standing default: every worker is assigned
+	// device id 0 with queue id equal to its index. When non-NULL, this
+	// must point to exactly worker_count entries, and entry idx configures
+	// worker idx.
+	const struct dataplane_ut_worker_spec *workers;
 };
 
 // Construct an in-process dataplane harness.
