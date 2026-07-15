@@ -86,6 +86,17 @@ l3b_module_config_add_virtual_service(
 	yanet_error **err
 );
 
+// Populate the real server ring of a virtual service. The count must not
+// exceed the configured capacity and every index must reference a valid real
+// server; indexes are written before the count is updated.
+int
+l3b_virtual_service_update_ring(
+	struct virtual_service **virtual_service,
+	const uint32_t *server_indexes,
+	uint32_t server_index_count,
+	yanet_error **err
+);
+
 // Publish the virtual services referenced by handles and compile the
 // destination filters that route packets to them. Each destination filter
 // rule's virtual_service_index selects a slot in the handles array.

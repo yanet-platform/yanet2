@@ -317,6 +317,38 @@ error_vs:
 	return NULL;
 }
 
+int
+l3b_virtual_service_update_ring(
+	struct virtual_service **virtual_service,
+	const uint32_t *server_indexes,
+	uint32_t server_index_count,
+	yanet_error **err
+) {
+	struct virtual_service *vs = ADDR_OF(virtual_service);
+
+	if (server_index_count > vs->real_ring.capacity) {
+		yanet_error_add(err, "ring count exceeds capacity");
+		return -1;
+	}
+
+	for (uint32_t idx = 0; idx < server_index_count; ++idx) {
+		if (server_indexes[idx] >= vs->real_server_count) {
+			yanet_error_add(err, "invalid real server index");
+			return -1;
+		}
+	}
+
+	uint32_t *ring_indexes = ADDR_OF(&vs->real_ring.server_indexes);
+	for (uint32_t idx = 0; idx < server_index_count; ++idx) {
+		ring_indexes[idx] = server_indexes[idx];
+	}
+
+	// Update the count last so the dataplane never observes indexes beyond
+	// the populated range.
+	vs->real_ring.count = server_index_count;
+	return 0;
+}
+
 // Compile both per-family destination filters of the module config. On failure
 // any partially built filter is released.
 static int
