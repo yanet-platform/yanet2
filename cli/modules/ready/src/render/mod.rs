@@ -27,8 +27,6 @@ pub use self::{
 
 /// Fixed width of the state label cell (`len("NOT_READY")`).
 const STATE_WIDTH: usize = 9;
-/// Leading indent for each scope row.
-const ROW_INDENT: usize = 2;
 /// Leading indent for reason continuation lines.
 const REASON_INDENT: usize = 6;
 
@@ -87,6 +85,11 @@ pub fn print_status_block(name: &str, scopes: &[Scope], name_width: usize, stale
         summary.push_str(symbols.ellipsis);
     }
 
+    let name = if colored {
+        name.bold().to_string()
+    } else {
+        name.to_string()
+    };
     println!("{name}{}{summary}", symbols.dash);
 
     for scope in scopes {
@@ -113,7 +116,7 @@ fn print_scope_row(
     let age = humanfmt::format_age(scope.last_transition_time.as_ref(), now);
     let time = time_cell(age.as_deref());
 
-    let mut line = format!("{:width$}{mark} {name} {label_cell} {time}", "", width = ROW_INDENT);
+    let mut line = format!("{mark} {name} {label_cell} {time}");
 
     if is_stale(
         scope.observed_at.as_ref(),
@@ -152,10 +155,10 @@ struct StateStyle {
 impl StateStyle {
     fn new(state: State, colored: bool) -> Self {
         let (unicode_mark, ascii_mark, color): (&str, &str, fn(&str) -> String) = match state {
-            State::Ready => ("✓", "[ok]", |s| s.green().to_string()),
-            State::Degraded => ("~", "[!!]", |s| s.yellow().to_string()),
-            State::NotReady => ("✗", "[xx]", |s| s.red().to_string()),
-            State::Unknown | State::Unspecified => ("?", "[??]", |s| s.truecolor(127, 127, 127).to_string()),
+            State::Ready => ("[✓]", "[ok]", |s| s.green().to_string()),
+            State::Degraded => ("[~]", "[!!]", |s| s.yellow().to_string()),
+            State::NotReady => ("[✗]", "[xx]", |s| s.red().to_string()),
+            State::Unknown | State::Unspecified => ("[?]", "[??]", |s| s.truecolor(127, 127, 127).to_string()),
         };
 
         let mark = if colored { unicode_mark } else { ascii_mark };
@@ -182,7 +185,7 @@ impl StateStyle {
 /// Returns the (mark, label) cell text for `state`, colored when `colored`
 /// is true.
 ///
-/// Both cells are fixed-width within a given color mode (1 char / 9+ chars
+/// Both cells are fixed-width within a given color mode (3 chars / 9+ chars
 /// for colored Unicode marks, 4 chars / 9+ chars for the ASCII fallback) so
 /// a double-width glyph can never shift a column.
 fn state_cells(state: State, colored: bool) -> (String, String) {
