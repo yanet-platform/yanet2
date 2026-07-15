@@ -56,6 +56,11 @@ l3b_handle_packets(
 		}
 	}
 
+	// The module-level filters stay zeroed until the first virtual service
+	// is published; querying a zeroed filter is undefined (value_table_get
+	// dereferences a relative pointer via ADDR_OF_NONNULL). Skip the query
+	// and treat every TCP/UDP packet as unmatched while there are no
+	// services.
 	if (config->virtual_service_count > 0) {
 		filter_query(
 			&config->filter_ip4,

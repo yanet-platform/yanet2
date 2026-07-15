@@ -53,11 +53,13 @@ l3b_real_server_process(
 		real_mask = real_server->source_net.v4.mask;
 		real_dst = real_server->destination_addr.v4.bytes;
 		width = NET4_LEN;
-	} else {
+	} else if (real_server->type == ip_family_ip6) {
 		real_addr = real_server->source_net.v6.addr;
 		real_mask = real_server->source_net.v6.mask;
 		real_dst = real_server->destination_addr.v6.bytes;
 		width = NET6_LEN;
+	} else {
+		return -1;
 	}
 
 	uint8_t inner_src[NET6_LEN] = {0};

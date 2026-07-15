@@ -61,6 +61,10 @@ struct l3b_real_ring {
  *
  * Incoming traffic that matches one of the per-family filters is dispatched
  * to a real server chosen through real_ring by a hash-derived scheduler.
+ *
+ * Contract: the controlplane must filter_init both filter_ip4 and filter_ip6
+ * before publishing a virtual service; the dataplane queries them directly
+ * (value_table_get assumes a non-NULL backing table).
  */
 struct l3b_virtual_service {
 	// Backends available for this service.
@@ -84,6 +88,10 @@ struct l3b_virtual_service {
  *
  * The module-level filters classify an incoming packet into a virtual service
  * index; virtual_services holds the services themselves.
+ *
+ * Contract: as long as virtual_service_count is greater than zero, the
+ * controlplane must filter_init both filter_ip6 and filter_ip4 — the
+ * dataplane queries them whenever at least one service exists.
  */
 struct l3b_module_config {
 	struct cp_module cp_module;
