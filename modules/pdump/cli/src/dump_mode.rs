@@ -17,13 +17,10 @@ mod mode {
 
 pub use mode::pdump_mode;
 
-#[allow(dead_code)]
 /// Capture input packets mode flag
 pub const INPUT: pdump_mode = mode::pdump_mode_PDUMP_INPUT;
-#[allow(dead_code)]
 /// Capture dropped packets mode flag
 pub const DROPS: pdump_mode = mode::pdump_mode_PDUMP_DROPS;
-#[allow(dead_code)]
 /// Capture all packets (input, drops) mode flag
 pub const ALL: pdump_mode = mode::pdump_mode_PDUMP_ALL;
 
@@ -44,8 +41,8 @@ pub struct Mode {
 }
 
 pub fn to_str(mode: pdump_mode) -> &'static str {
-    let input = mode & mode::pdump_mode_PDUMP_INPUT != 0;
-    let drops = mode & mode::pdump_mode_PDUMP_DROPS != 0;
+    let input = mode & INPUT != 0;
+    let drops = mode & DROPS != 0;
 
     // This match covers all combinations to avoid allocations
     match (input, drops) {
@@ -57,8 +54,8 @@ pub fn to_str(mode: pdump_mode) -> &'static str {
 }
 
 pub fn to_char(mode: pdump_mode) -> char {
-    let input = mode & mode::pdump_mode_PDUMP_INPUT != 0;
-    let drops = mode & mode::pdump_mode_PDUMP_DROPS != 0;
+    let input = mode & INPUT != 0;
+    let drops = mode & DROPS != 0;
     match (input, drops) {
         (true, false) => 'I',
         (false, true) => 'D',
@@ -70,13 +67,13 @@ impl From<Mode> for u32 {
     fn from(val: Mode) -> Self {
         let mut mode: u32 = 0;
         if val.input {
-            mode.bitor_assign(mode::pdump_mode_PDUMP_INPUT);
+            mode.bitor_assign(INPUT);
         }
         if val.drops {
-            mode.bitor_assign(mode::pdump_mode_PDUMP_DROPS);
+            mode.bitor_assign(DROPS);
         }
         if val.all {
-            mode.bitor_assign(mode::pdump_mode_PDUMP_ALL);
+            mode.bitor_assign(ALL);
         }
         mode
     }
