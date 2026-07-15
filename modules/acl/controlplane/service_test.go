@@ -1,20 +1,26 @@
 package acl
 
 import (
+	"context"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	filterpb "github.com/yanet-platform/yanet2/common/filterpb/v1"
+	"github.com/yanet-platform/yanet2/common/go/grpcmetrics"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/acl/bindings/go/cacl"
 	"github.com/yanet-platform/yanet2/modules/acl/controlplane/aclpb/v1"
 )
+
+const metricsConcurrencyTestTimeout = 5 * time.Second
 
 // fakeHandle is an in-memory implementation of ModuleHandle for tests.
 type fakeHandle struct {
@@ -68,6 +74,53 @@ type fakeBackend struct {
 	newModuleErr error
 	deleteErr    error
 	memoryBytes  uint64
+}
+
+type updateBlock struct {
+	entered chan struct{}
+	release chan struct{}
+}
+
+// blockingUpdateBackend can pause one UpdateModule call without holding the
+// fake backend mutex, allowing concurrent metrics collection in the test.
+type blockingUpdateBackend struct {
+	*fakeBackend
+
+	blockMu   sync.Mutex
+	nextBlock *updateBlock
+}
+
+func newBlockingUpdateBackend(memoryBytes uint64) *blockingUpdateBackend {
+	return &blockingUpdateBackend{fakeBackend: newFakeBackend(memoryBytes)}
+}
+
+func (m *blockingUpdateBackend) blockNextUpdate() (<-chan struct{}, func()) {
+	m.blockMu.Lock()
+	defer m.blockMu.Unlock()
+
+	block := &updateBlock{
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	m.nextBlock = block
+
+	return block.entered, sync.OnceFunc(func() {
+		close(block.release)
+	})
+}
+
+func (m *blockingUpdateBackend) UpdateModule(handle ModuleHandle) error {
+	m.blockMu.Lock()
+	block := m.nextBlock
+	m.nextBlock = nil
+	m.blockMu.Unlock()
+
+	if block != nil {
+		close(block.entered)
+		<-block.release
+	}
+
+	return m.fakeBackend.UpdateModule(handle)
 }
 
 func newFakeBackend(memoryBytes uint64) *fakeBackend {
@@ -306,4 +359,102 @@ func TestUpdateConfig_ConcurrentRace(t *testing.T) {
 	}
 
 	require.NoError(t, wg.Wait())
+}
+
+// TestMetrics_DoesNotWaitForUpdateConfig verifies that a config update holding
+// ACLService.mu cannot stall metrics collection.
+func TestMetrics_DoesNotWaitForUpdateConfig(t *testing.T) {
+	backend := newBlockingUpdateBackend(0)
+	svc := NewACLService(backend, WithMetrics(grpcmetrics.NewFactory(
+		grpcmetrics.WithLabeler(labeler),
+	)))
+
+	_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
+		Name: "acl0",
+	})
+	require.NoError(t, err)
+
+	// The fake backend has no dataplane config, so record a gRPC series first
+	// to verify that Metrics returns actual data while the update is blocked.
+	_, err = svc.UnaryServerInterceptor()(
+		t.Context(),
+		&aclpb.ShowConfigRequest{Name: "acl0"},
+		&grpc.UnaryServerInfo{FullMethod: aclpb.ACLService_ShowConfig_FullMethodName},
+		func(context.Context, any) (any, error) {
+			return &aclpb.ShowConfigResponse{}, nil
+		},
+	)
+	require.NoError(t, err)
+
+	updateEntered, releaseUpdate := backend.blockNextUpdate()
+	t.Cleanup(releaseUpdate)
+
+	updateDone := make(chan error, 1)
+	go func() {
+		_, updateErr := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
+			Name: "acl0",
+			Rules: []*aclpb.Rule{{
+				Actions: []*aclpb.Action{{
+					Kind: aclpb.ActionKind_ACTION_KIND_DENY,
+				}},
+			}},
+		})
+		updateDone <- updateErr
+	}()
+
+	select {
+	case <-updateEntered:
+	case <-time.After(metricsConcurrencyTestTimeout):
+		t.Fatal("UpdateConfig did not reach the blocked backend update")
+	}
+
+	type metricsResult struct {
+		count int
+		err   error
+	}
+	metricsDone := make(chan metricsResult, 1)
+	go func() {
+		collected, metricsErr := svc.Metrics()
+		metricsDone <- metricsResult{count: len(collected), err: metricsErr}
+	}()
+
+	select {
+	case result := <-metricsDone:
+		require.NoError(t, result.err)
+		assert.Greater(t, result.count, 0)
+	case <-time.After(metricsConcurrencyTestTimeout):
+		t.Fatal("metrics collection waited for UpdateConfig")
+	}
+
+	releaseUpdate()
+	select {
+	case updateErr := <-updateDone:
+		require.NoError(t, updateErr)
+	case <-time.After(metricsConcurrencyTestTimeout):
+		t.Fatal("UpdateConfig did not finish after the backend was released")
+	}
+}
+
+func TestMetricsSnapshotTracksConfigLifecycle(t *testing.T) {
+	svc := newTestService(newFakeBackend(0))
+
+	_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
+		Name: "acl0",
+	})
+	require.NoError(t, err)
+
+	beforeDelete := svc.metricsState.load()
+	info, ok := beforeDelete.configInfo("acl0")
+	require.True(t, ok)
+	assert.Equal(t, uint64(42), info.CompilationTimeNs)
+	assert.Equal(t, uint64(7), info.FilterRuleCountIp4)
+
+	_, err = svc.DeleteConfig(t.Context(), &aclpb.DeleteConfigRequest{
+		Name: "acl0",
+	})
+	require.NoError(t, err)
+
+	afterDelete := svc.metricsState.load()
+	assert.False(t, afterDelete.containsConfig("acl0"))
+	assert.True(t, beforeDelete.containsConfig("acl0"), "published snapshots must remain immutable")
 }

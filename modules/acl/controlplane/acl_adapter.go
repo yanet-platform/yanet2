@@ -79,6 +79,7 @@ func (m *ACLAdapter) RelinkConfigs(
 			fwstateName: fwstateConfig.Name(),
 		}
 	}
+	m.service.publishMetricsSnapshotLocked()
 
 	return nil
 }
@@ -124,6 +125,7 @@ func (m *ACLAdapter) LinkConfigs(
 			fwstateName: fwstateConfig.Name(),
 		}
 	}
+	m.service.publishMetricsSnapshotLocked()
 
 	return nil
 }

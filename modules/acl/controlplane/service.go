@@ -94,6 +94,8 @@ type ACLService struct {
 	configs map[string]aclConfig
 	metrics *grpcmetrics.ServerMetrics
 
+	metricsState *aclMetricsState
+
 	log *zap.Logger
 }
 
@@ -105,9 +107,10 @@ func NewACLService(backend Backend, options ...Option) *ACLService {
 	}
 
 	m := &ACLService{
-		backend: backend,
-		configs: map[string]aclConfig{},
-		log:     opts.Log,
+		backend:      backend,
+		configs:      map[string]aclConfig{},
+		metricsState: newACLMetricsState(),
+		log:          opts.Log,
 	}
 	if opts.Metrics != nil {
 		m.metrics = opts.Metrics(m.retention)
@@ -126,15 +129,9 @@ func (m *ACLService) UnaryServerInterceptor() grpc.UnaryServerInterceptor {
 	return m.metrics.UnaryServerInterceptor()
 }
 
-// retention snapshots the live ACL config names and returns a predicate that
-// keeps series whose "config" label is still live (or absent).
+// retention keeps metrics for active configs.
 func (m *ACLService) retention() func(metrics.MetricID) bool {
-	m.mu.Lock()
-	configNames := make(map[string]struct{}, len(m.configs))
-	for name := range m.configs {
-		configNames[name] = struct{}{}
-	}
-	m.mu.Unlock()
+	snapshot := m.metricsState.load()
 
 	return func(id metrics.MetricID) bool {
 		config := id.Labels["config"]
@@ -142,9 +139,21 @@ func (m *ACLService) retention() func(metrics.MetricID) bool {
 			return true
 		}
 
-		_, ok := configNames[config]
-		return ok
+		return snapshot.containsConfig(config)
 	}
+}
+
+// publishMetricsSnapshotLocked refreshes metric metadata. Caller must hold m.mu.
+func (m *ACLService) publishMetricsSnapshotLocked() {
+	configInfos := make(map[string]cacl.AclConfigInfo, len(m.configs))
+	for name, cfg := range m.configs {
+		if cfg.acl == nil {
+			continue
+		}
+		configInfos[name] = *cfg.acl.GetInfo()
+	}
+
+	m.metricsState.publish(configInfos)
 }
 
 func labeler(fullMethod string, req any) metrics.Labels {
@@ -289,6 +298,7 @@ func (m *ACLService) UpdateConfig(
 		acl:         handle,
 		fwstateName: oldConfigs.fwstateName,
 	}
+	m.publishMetricsSnapshotLocked()
 
 	return &aclpb.UpdateConfigResponse{}, nil
 }
@@ -363,22 +373,9 @@ func (m *ACLService) DeleteConfig(
 	}
 
 	delete(m.configs, name)
+	m.publishMetricsSnapshotLocked()
 
 	response := &aclpb.DeleteConfigResponse{}
 
 	return response, nil
-}
-
-// GetInfo returns the compiled configuration metadata for the named ACL module,
-// or nil if no config with that name is loaded.
-func (m *ACLService) GetInfo(name string) *cacl.AclConfigInfo {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	cfg, ok := m.configs[name]
-	if !ok {
-		return nil
-	}
-
-	return cfg.acl.GetInfo()
 }

@@ -79,8 +79,7 @@ func (m *ACLService) Metrics() ([]*commonpb.Metric, error) {
 }
 
 func (m *ACLService) collectDataplaneMetrics() ([]*commonpb.Metric, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	snapshot := m.metricsState.load()
 
 	dpConfig := m.backend.DPConfig()
 	if dpConfig == nil {
@@ -192,8 +191,7 @@ func (m *ACLService) collectDataplaneMetrics() ([]*commonpb.Metric, error) {
 				{Name: "config", Value: configName},
 			}
 
-			if cfg, ok := m.configs[configName]; ok && cfg.acl != nil {
-				info := cfg.acl.GetInfo()
+			if info, ok := snapshot.configInfo(configName); ok {
 				result = append(
 					result,
 					makeGauge(
