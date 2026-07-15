@@ -25,7 +25,6 @@ controlplane/internal/auth/basic/factory.go:NewFromConfig  # legacy: migrate to 
 controlplane/internal/auth/sshcert/factory.go:NewFromConfig  # legacy: migrate to the options pattern
 controlplane/internal/auth/sshkey/factory.go:NewFromConfig  # legacy: migrate to the options pattern
 devices/plain/controlplane/mod.go:NewDevicePlainDevice  # legacy: migrate to the options pattern
-devices/vlan/controlplane/mod.go:NewDeviceVlanDevice  # legacy: migrate to the options pattern
 modules/pdump/controlplane/ffi.go:ModuleConfig.SetupRing  # legacy: migrate to the options pattern
 modules/pdump/controlplane/service.go:NewPdumpService  # legacy: migrate to the options pattern
 operators/bird-adapter/internal/bird/export.go:NewExportReader  # legacy: migrate to the options pattern

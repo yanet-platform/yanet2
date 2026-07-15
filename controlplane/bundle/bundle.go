@@ -130,7 +130,7 @@ func buildServices(
 		{
 			name: "vlan device",
 			new: func() (gateway.Service, error) {
-				return vlan.NewDeviceVlanDevice(devicesCfg.Vlan, log)
+				return vlan.NewDeviceVlanDevice(devicesCfg.Vlan, vlan.WithLog(log))
 			},
 		},
 		{
