@@ -27,8 +27,22 @@ pub use self::{
 
 /// Fixed width of the state label cell (`len("NOT_READY")`).
 const STATE_WIDTH: usize = 9;
+/// Display width of a colored mark (e.g. `[✓]`) plus its separating space.
+const REASON_INDENT_COLORED: usize = 3 + 1;
+/// Display width of an ASCII mark (e.g. `[ok]`) plus its separating space.
+const REASON_INDENT_ASCII: usize = 4 + 1;
+
 /// Leading indent for reason continuation lines.
-const REASON_INDENT: usize = 6;
+///
+/// Equal to the state mark's display width plus its one separating space, so
+/// the indent lands directly under the scope-name column regardless of mode.
+fn reason_indent(colored: bool) -> usize {
+    if colored {
+        REASON_INDENT_COLORED
+    } else {
+        REASON_INDENT_ASCII
+    }
+}
 
 /// ASCII/Unicode form for the glyphs that aren't state marks: the watch
 /// arrow, the header/summary dash, the summary separator, and the
@@ -244,13 +258,14 @@ fn format_reason(reason: &Reason) -> String {
 /// hanging indent when `wrap_width` is `Some` (stdout is a TTY); otherwise
 /// it prints as one long, grep-friendly line.
 fn print_reason_lines(reasons: &[Reason], colored: bool, wrap_width: Option<usize>) {
-    let indent = " ".repeat(REASON_INDENT);
+    let reason_indent = reason_indent(colored);
+    let indent = " ".repeat(reason_indent);
 
     for reason in reasons {
         let text = format_reason(reason);
 
         let lines = match wrap_width {
-            Some(width) if width > REASON_INDENT => wrap_words(&text, width - REASON_INDENT),
+            Some(width) if width > reason_indent => wrap_words(&text, width - reason_indent),
             _ => vec![normalize_whitespace(&text)],
         };
 
