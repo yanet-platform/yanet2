@@ -10,6 +10,26 @@ import (
 	"github.com/yanet-platform/yanet2/modules/dscp/controlplane/dscppb/v1"
 )
 
+// Option configures the DscpModule constructor.
+type Option func(*moduleOptions)
+
+type moduleOptions struct {
+	Log *zap.Logger
+}
+
+func newModuleOptions() *moduleOptions {
+	return &moduleOptions{
+		Log: zap.NewNop(),
+	}
+}
+
+// WithLog sets the logger for the dscp module.
+func WithLog(log *zap.Logger) Option {
+	return func(o *moduleOptions) {
+		o.Log = log
+	}
+}
+
 // DscpModule is a control-plane component of a module that is responsible for
 // DSCP marking of packets.
 type DscpModule struct {
@@ -20,8 +40,13 @@ type DscpModule struct {
 	log         *zap.Logger
 }
 
-func NewDSCPModule(cfg *Config, log *zap.Logger) (*DscpModule, error) {
-	log = log.With(zap.String("module", "dscp"))
+func NewDSCPModule(cfg *Config, options ...Option) (*DscpModule, error) {
+	opts := newModuleOptions()
+	for _, o := range options {
+		o(opts)
+	}
+
+	log := opts.Log.With(zap.String("module", "dscp"))
 
 	shm, err := ffi.AttachSharedMemory(cfg.MemoryPath.Unwrap())
 	if err != nil {

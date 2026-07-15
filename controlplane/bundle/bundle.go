@@ -82,7 +82,7 @@ func buildServices(
 		{
 			name: "dscp module",
 			new: func() (gateway.Service, error) {
-				return dscp.NewDSCPModule(modulesCfg.DSCP, log)
+				return dscp.NewDSCPModule(modulesCfg.DSCP, dscp.WithLog(log))
 			},
 		},
 		{
