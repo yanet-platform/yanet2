@@ -88,7 +88,7 @@ func buildServices(
 		{
 			name: "forward module",
 			new: func() (gateway.Service, error) {
-				return forward.NewForwardModule(modulesCfg.Forward, log)
+				return forward.NewForwardModule(modulesCfg.Forward, forward.WithLog(log))
 			},
 		},
 		{

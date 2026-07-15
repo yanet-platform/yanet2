@@ -15,6 +15,26 @@ const (
 	serviceName = "modules.forward.controlplane.forwardpb.v1.ForwardService"
 )
 
+// Option configures the ForwardModule constructor.
+type Option func(*moduleOptions)
+
+type moduleOptions struct {
+	Log *zap.Logger
+}
+
+func newModuleOptions() *moduleOptions {
+	return &moduleOptions{
+		Log: zap.NewNop(),
+	}
+}
+
+// WithLog sets the logger for the forward module.
+func WithLog(log *zap.Logger) Option {
+	return func(o *moduleOptions) {
+		o.Log = log
+	}
+}
+
 // ForwardModule is a control-plane component of a module that is responsible for
 // forwarding traffic between devices.
 type ForwardModule struct {
@@ -26,8 +46,13 @@ type ForwardModule struct {
 	log            *zap.Logger
 }
 
-func NewForwardModule(cfg *Config, log *zap.Logger) (*ForwardModule, error) {
-	log = log.With(zap.String("module", serviceName))
+func NewForwardModule(cfg *Config, options ...Option) (*ForwardModule, error) {
+	opts := newModuleOptions()
+	for _, o := range options {
+		o(opts)
+	}
+
+	log := opts.Log.With(zap.String("module", serviceName))
 
 	shm, err := cpffi.AttachSharedMemory(cfg.MemoryPath.Unwrap())
 	if err != nil {
