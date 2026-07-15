@@ -97,7 +97,11 @@ struct l3b_module_config {
 	struct cp_module cp_module;
 
 	uint32_t virtual_service_count;
-	struct l3b_virtual_service *virtual_services;
+	// Array of relative pointers, one per service. Each service is
+	// allocated independently so a single service can be installed or
+	// replaced by swapping its slot without rebuilding the array or
+	// touching the module config.
+	struct l3b_virtual_service **virtual_services;
 
 	struct filter filter_ip6;
 	struct filter filter_ip4;

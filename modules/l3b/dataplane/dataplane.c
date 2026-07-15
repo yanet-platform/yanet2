@@ -112,10 +112,10 @@ l3b_handle_packets(
 
 		if (action != FILTER_RULE_INVALID &&
 		    action < config->virtual_service_count) {
-			struct l3b_virtual_service *virtual_services =
+			struct l3b_virtual_service **virtual_services =
 				ADDR_OF(&config->virtual_services);
 			int result = l3b_virtual_service_process(
-				&virtual_services[action], packet
+				ADDR_OF(&virtual_services[action]), packet
 			);
 			if (result == 0) {
 				packet_front_output(packet_front, packet);
