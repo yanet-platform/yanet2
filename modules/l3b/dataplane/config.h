@@ -1,6 +1,7 @@
 #pragma once
 
 #include "common/network.h"
+#include "filter/rule.h"
 
 enum l3b_real_state {
 	l3b_real_state_disabled = 0,
@@ -22,4 +23,22 @@ struct l3b_real_server {
 	struct net_addr destination_addr;
 	// Whether the server is eligible to receive traffic.
 	enum l3b_real_state state;
+};
+
+/*
+ * Source-side classification criteria of a virtual service.
+ *
+ * Each array is a relative pointer into module shared memory and is paired
+ * with a matching count field. A packet matches when it falls into any of the
+ * listed networks and port ranges.
+ */
+struct l3b_source_filter {
+	uint32_t net6_count;
+	struct net6 *net6s;
+
+	uint32_t net4_count;
+	struct net4 *net4s;
+
+	uint32_t port_range_count;
+	struct filter_port_range *port_ranges;
 };
