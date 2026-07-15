@@ -6,6 +6,7 @@
 
 struct cp_module;
 struct agent;
+struct virtual_service;
 
 /*
  * Control-plane descriptors used to build the shared-memory configuration.
@@ -70,3 +71,26 @@ l3b_module_config_new(
 
 void
 l3b_module_config_free(struct cp_module *config);
+
+// Allocate a virtual service in shared memory from its control-plane
+// descriptor and return a handle (pointer to the relative-pointer slot that
+// owns it), so the service can be installed or swapped transiently.
+struct virtual_service **
+l3b_module_config_add_virtual_service(
+	struct cp_module *cp_module,
+	const struct l3b_virtual_service *virtual_service,
+	yanet_error **err
+);
+
+// Publish the virtual services referenced by handles and compile the
+// destination filters that route packets to them. Each destination filter
+// rule's virtual_service_index selects a slot in the handles array.
+int
+l3b_module_config_update(
+	struct cp_module *cp_module,
+	const struct l3b_destination_filter_rule *destination_filter_rules,
+	uint32_t destination_filter_rule_count,
+	struct virtual_service ***virtual_services,
+	uint32_t virtual_service_count,
+	yanet_error **err
+);

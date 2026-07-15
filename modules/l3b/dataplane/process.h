@@ -14,10 +14,15 @@
 
 #include <filter/query.h>
 
-// Classification signature shared by the module-level and per-service
-// filters: a packet is matched on its source network and L4 ports.
-FILTER_QUERY_DECLARE(l3b_filter_ip4, net4_src, port_src, port_dst);
-FILTER_QUERY_DECLARE(l3b_filter_ip6, net6_src, port_src, port_dst);
+// Per-service source filter: classifies incoming packets by source network and
+// destination (service) port.
+FILTER_QUERY_DECLARE(l3b_source_filter_ip4, net4_src, port_dst);
+FILTER_QUERY_DECLARE(l3b_source_filter_ip6, net6_src, port_dst);
+
+// Module-level destination filter: classifies incoming packets by destination
+// network and protocol into a virtual service index.
+FILTER_QUERY_DECLARE(l3b_destination_filter_ip4, net4_dst, proto_range);
+FILTER_QUERY_DECLARE(l3b_destination_filter_ip6, net6_dst, proto_range);
 
 /*
  * Encapsulate packet into an IP-in-IP tunnel towards real_server.
@@ -130,10 +135,10 @@ l3b_virtual_service_process(
 
 	if (type == rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
 		filter = &virtual_service->filter_ip4;
-		query = l3b_filter_ip4;
+		query = l3b_source_filter_ip4;
 	} else if (type == rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV6)) {
 		filter = &virtual_service->filter_ip6;
-		query = l3b_filter_ip6;
+		query = l3b_source_filter_ip6;
 	} else {
 		return -1;
 	}

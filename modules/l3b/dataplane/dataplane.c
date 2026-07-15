@@ -64,7 +64,7 @@ l3b_handle_packets(
 	if (config->virtual_service_count > 0) {
 		filter_query(
 			&config->filter_ip4,
-			l3b_filter_ip4,
+			l3b_destination_filter_ip4,
 			ip4_packets,
 			ip4_result,
 			ip4_idx
@@ -72,7 +72,7 @@ l3b_handle_packets(
 
 		filter_query(
 			&config->filter_ip6,
-			l3b_filter_ip6,
+			l3b_destination_filter_ip6,
 			ip6_packets,
 			ip6_result,
 			ip6_idx
