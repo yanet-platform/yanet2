@@ -95,12 +95,12 @@ l3b_handle_packets(
 			continue;
 		}
 
-		uint32_t action = FILTER_RULE_INVALID;
+		uint32_t rule_index = FILTER_RULE_INVALID;
 		if (config->virtual_service_count > 0) {
 			if (type == rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
-				action = ip4_result[ip4_idx];
+				rule_index = ip4_result[ip4_idx];
 			} else {
-				action = ip6_result[ip6_idx];
+				rule_index = ip6_result[ip6_idx];
 			}
 		}
 
@@ -110,12 +110,24 @@ l3b_handle_packets(
 			ip6_idx++;
 		}
 
-		if (action != FILTER_RULE_INVALID &&
-		    action < config->virtual_service_count) {
+		uint32_t virtual_service_index = FILTER_RULE_INVALID;
+		if (rule_index != FILTER_RULE_INVALID &&
+		    rule_index < config->virtual_service_index_count) {
+			uint32_t *virtual_service_indexes =
+				ADDR_OF(&config->virtual_service_indexes);
+			virtual_service_index =
+				virtual_service_indexes[rule_index];
+		}
+
+		if (virtual_service_index != FILTER_RULE_INVALID &&
+		    virtual_service_index < config->virtual_service_count) {
 			struct virtual_service **virtual_services =
 				ADDR_OF(&config->virtual_services);
 			int result = l3b_virtual_service_process(
-				ADDR_OF(&virtual_services[action]), packet
+				ADDR_OF(
+					&virtual_services[virtual_service_index]
+				),
+				packet
 			);
 			if (result == 0) {
 				packet_front_output(packet_front, packet);

@@ -89,6 +89,9 @@ struct virtual_service {
  * The module-level filters classify an incoming packet into a virtual service
  * index; virtual_services holds the services themselves.
  *
+ * The filter query returns the index of the matched destination filter rule;
+ * virtual_service_indexes maps that rule index to a virtual service index.
+ *
  * Contract: as long as virtual_service_count is greater than zero, the
  * controlplane must filter_init both filter_ip6 and filter_ip4 — the
  * dataplane queries them whenever at least one service exists.
@@ -102,6 +105,10 @@ struct module_config {
 	// replaced by swapping its slot without rebuilding the array or
 	// touching the module config.
 	struct virtual_service **virtual_services;
+
+	// One virtual service index per destination filter rule.
+	uint32_t virtual_service_index_count;
+	uint32_t *virtual_service_indexes;
 
 	struct filter filter_ip6;
 	struct filter filter_ip4;

@@ -46,6 +46,9 @@ l3b_module_config_new(
 	config->virtual_service_count = 0;
 	SET_OFFSET_OF(&config->virtual_services, NULL);
 
+	config->virtual_service_index_count = 0;
+	SET_OFFSET_OF(&config->virtual_service_indexes, NULL);
+
 	memset(&config->filter_ip6, 0, sizeof(config->filter_ip6));
 	memset(&config->filter_ip4, 0, sizeof(config->filter_ip4));
 
@@ -89,7 +92,8 @@ make_source_filter_rules(
 }
 
 // Translate the destination filter rules into classifier filter_rule
-// descriptors; the action carries the virtual service index.
+// descriptors. The filter query returns the matched rule's index; the mapping
+// to a virtual service index is kept separately in the module config.
 static void
 make_destination_filter_rules(
 	const struct l3b_destination_filter_rule *destination_filter_rules,
@@ -107,7 +111,6 @@ make_destination_filter_rules(
 		filter_rule->net4.dsts = rule->net4s.items;
 		filter_rule->transport.proto_count = rule->proto_ranges.count;
 		filter_rule->transport.protos = rule->proto_ranges.items;
-		filter_rule->action = rule->virtual_service_index;
 	}
 }
 
@@ -429,6 +432,37 @@ l3b_module_config_update(
 		SET_OFFSET_OF(&config->virtual_services, NULL);
 	}
 	config->virtual_service_count = virtual_service_count;
+
+	// Map each destination filter rule index to its virtual service index;
+	// the filter query returns the rule index, the dataplane looks the
+	// virtual service up through this array.
+	if (destination_filter_rule_count > 0) {
+		uint32_t *virtual_service_indexes = (uint32_t *)memory_balloc(
+			memory_context,
+			sizeof(uint32_t) * destination_filter_rule_count
+		);
+		if (virtual_service_indexes == NULL) {
+			yanet_error_add(
+				err,
+				"failed to allocate virtual service indexes"
+			);
+			return -1;
+		}
+
+		for (uint32_t idx = 0; idx < destination_filter_rule_count;
+		     ++idx) {
+			virtual_service_indexes[idx] =
+				destination_filter_rules[idx]
+					.virtual_service_index;
+		}
+		SET_OFFSET_OF(
+			&config->virtual_service_indexes,
+			virtual_service_indexes
+		);
+	} else {
+		SET_OFFSET_OF(&config->virtual_service_indexes, NULL);
+	}
+	config->virtual_service_index_count = destination_filter_rule_count;
 
 	if (build_destination_filters(
 		    config,
