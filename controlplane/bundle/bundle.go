@@ -112,7 +112,7 @@ func buildServices(
 		{
 			name: "acl module",
 			new: func() (gateway.Service, error) {
-				return acl.NewACLModule(modulesCfg.ACL, log)
+				return acl.NewACLModule(modulesCfg.ACL, acl.WithModuleLog(log))
 			},
 		},
 		{

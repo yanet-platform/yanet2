@@ -18,6 +18,26 @@ const (
 	serviceName = "modules.acl.controlplane.aclpb.v1.ACLService"
 )
 
+// ModuleOption configures the ACLModule constructor.
+type ModuleOption func(*moduleOptions)
+
+type moduleOptions struct {
+	Log *zap.Logger
+}
+
+func newModuleOptions() *moduleOptions {
+	return &moduleOptions{
+		Log: zap.NewNop(),
+	}
+}
+
+// WithModuleLog sets the logger for the ACL module.
+func WithModuleLog(log *zap.Logger) ModuleOption {
+	return func(o *moduleOptions) {
+		o.Log = log
+	}
+}
+
 // ACLModule is a control-plane component for ACL (Access Control List) module
 // with integrated firewall state management.
 type ACLModule struct {
@@ -32,8 +52,13 @@ type ACLModule struct {
 }
 
 // NewACLModule creates a new ACL module instance.
-func NewACLModule(cfg *Config, log *zap.Logger) (*ACLModule, error) {
-	log = log.With(zap.String("module", serviceName))
+func NewACLModule(cfg *Config, options ...ModuleOption) (*ACLModule, error) {
+	opts := newModuleOptions()
+	for _, o := range options {
+		o(opts)
+	}
+
+	log := opts.Log.With(zap.String("module", serviceName))
 
 	shm, err := ffi.AttachSharedMemory(cfg.MemoryPath.Unwrap())
 	if err != nil {
