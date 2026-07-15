@@ -3,13 +3,6 @@ name: Build DEB Packages
 on:
   push:
     tags: ["v*"]
-    paths-ignore:
-      - "web/**"
-      - "modules/**/web/**"
-      - "devices/**/web/**"
-      - "operators/**/web/**"
-      - "package.json"
-      - "package-lock.json"
   pull_request:
     branches: ["**"]
     paths-ignore:
@@ -19,6 +12,9 @@ on:
       - "operators/**/web/**"
       - "package.json"
       - "package-lock.json"
+      - "**.md"
+      - ".claude/**"
+      - "docs/**"
   workflow_dispatch:
     inputs:
       include_2204:
