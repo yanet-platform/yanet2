@@ -42,3 +42,14 @@ struct l3b_source_filter {
 	uint32_t port_range_count;
 	struct filter_port_range *port_ranges;
 };
+
+/*
+ * Round-robin index ring used by the scheduler to pick a real server.
+ *
+ * server_indexes is a relative pointer to an array of real_server array
+ * indexes; size is the number of entries the ring holds.
+ */
+struct l3b_real_ring {
+	uint32_t *server_indexes;
+	uint32_t size;
+};
