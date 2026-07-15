@@ -106,7 +106,7 @@ func buildServices(
 		{
 			name: "pdump module",
 			new: func() (gateway.Service, error) {
-				return pdump.NewPdumpModule(modulesCfg.Pdump, log)
+				return pdump.NewPdumpModule(modulesCfg.Pdump, pdump.WithLog(log))
 			},
 		},
 		{

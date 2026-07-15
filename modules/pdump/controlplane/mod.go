@@ -12,6 +12,26 @@ import (
 	"github.com/yanet-platform/yanet2/modules/pdump/controlplane/pdumppb/v1"
 )
 
+// Option configures the PdumpModule constructor.
+type Option func(*moduleOptions)
+
+type moduleOptions struct {
+	Log *zap.Logger
+}
+
+func newModuleOptions() *moduleOptions {
+	return &moduleOptions{
+		Log: zap.NewNop(),
+	}
+}
+
+// WithLog sets the logger for the pdump module.
+func WithLog(log *zap.Logger) Option {
+	return func(o *moduleOptions) {
+		o.Log = log
+	}
+}
+
 // PdumpModule is a control-plane component of a packet dump module.
 type PdumpModule struct {
 	cfg     *Config
@@ -21,8 +41,13 @@ type PdumpModule struct {
 	log     *zap.Logger
 }
 
-func NewPdumpModule(cfg *Config, log *zap.Logger) (*PdumpModule, error) {
-	log = log.With(zap.String("module", "modules.pdump.controlplane.pdumppb.v1.PdumpService"))
+func NewPdumpModule(cfg *Config, options ...Option) (*PdumpModule, error) {
+	opts := newModuleOptions()
+	for _, o := range options {
+		o(opts)
+	}
+
+	log := opts.Log.With(zap.String("module", "modules.pdump.controlplane.pdumppb.v1.PdumpService"))
 
 	// setup CGO export logger
 	logger = log.WithOptions(
