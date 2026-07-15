@@ -34,12 +34,37 @@ type Function struct {
 	log        *zap.Logger
 }
 
+// FunctionOption configures the Function constructor.
+type FunctionOption func(*functionOptions)
+
+type functionOptions struct {
+	Log *zap.Logger
+}
+
+func newFunctionOptions() *functionOptions {
+	return &functionOptions{
+		Log: zap.NewNop(),
+	}
+}
+
+// WithFunctionLog sets the logger for the function service.
+func WithFunctionLog(log *zap.Logger) FunctionOption {
+	return func(o *functionOptions) {
+		o.Log = log
+	}
+}
+
 // NewFunction creates a new Function service.
-func NewFunction(instanceID uint32, shm *ffi.SharedMemory, log *zap.Logger) *Function {
+func NewFunction(instanceID uint32, shm *ffi.SharedMemory, options ...FunctionOption) *Function {
+	opts := newFunctionOptions()
+	for _, o := range options {
+		o(opts)
+	}
+
 	return &Function{
 		instanceID: instanceID,
 		shm:        shm,
-		log:        log,
+		log:        opts.Log,
 	}
 }
 

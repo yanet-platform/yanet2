@@ -22,11 +22,36 @@ type Logging struct {
 	log  *zap.Logger
 }
 
+// LoggingOption configures the Logging constructor.
+type LoggingOption func(*loggingOptions)
+
+type loggingOptions struct {
+	Log *zap.Logger
+}
+
+func newLoggingOptions() *loggingOptions {
+	return &loggingOptions{
+		Log: zap.NewNop(),
+	}
+}
+
+// WithLoggingLog sets the logger for the logging service.
+func WithLoggingLog(log *zap.Logger) LoggingOption {
+	return func(o *loggingOptions) {
+		o.Log = log
+	}
+}
+
 // NewLogging creates a new Logging service.
-func NewLogging(level *zap.AtomicLevel, log *zap.Logger) *Logging {
+func NewLogging(level *zap.AtomicLevel, options ...LoggingOption) *Logging {
+	opts := newLoggingOptions()
+	for _, o := range options {
+		o(opts)
+	}
+
 	return &Logging{
 		atom: level,
-		log:  log,
+		log:  opts.Log,
 	}
 }
 

@@ -34,12 +34,37 @@ type Pipeline struct {
 	log        *zap.Logger
 }
 
+// PipelineOption configures the Pipeline constructor.
+type PipelineOption func(*pipelineOptions)
+
+type pipelineOptions struct {
+	Log *zap.Logger
+}
+
+func newPipelineOptions() *pipelineOptions {
+	return &pipelineOptions{
+		Log: zap.NewNop(),
+	}
+}
+
+// WithPipelineLog sets the logger for the pipeline service.
+func WithPipelineLog(log *zap.Logger) PipelineOption {
+	return func(o *pipelineOptions) {
+		o.Log = log
+	}
+}
+
 // NewPipeline creates a new Pipeline service.
-func NewPipeline(instanceID uint32, shm *ffi.SharedMemory, log *zap.Logger) *Pipeline {
+func NewPipeline(instanceID uint32, shm *ffi.SharedMemory, options ...PipelineOption) *Pipeline {
+	opts := newPipelineOptions()
+	for _, o := range options {
+		o(opts)
+	}
+
 	return &Pipeline{
 		instanceID: instanceID,
 		shm:        shm,
-		log:        log,
+		log:        opts.Log,
 	}
 }
 

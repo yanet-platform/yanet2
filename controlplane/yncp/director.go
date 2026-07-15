@@ -113,16 +113,16 @@ func NewDirector(cfg *Config, options ...DirectorOption) (*Director, error) {
 
 	gatewayOptions := []gateway.GatewayOption{
 		gateway.WithBuiltinService(
-			builtin.NewLogging(opts.LogLevel, log),
+			builtin.NewLogging(opts.LogLevel, builtin.WithLoggingLog(log)),
 		),
 		gateway.WithBuiltinService(
 			builtin.NewInspect(cfg.Gateway.InstanceID, shm),
 		),
 		gateway.WithBuiltinService(
-			builtin.NewPipeline(cfg.Gateway.InstanceID, shm, log),
+			builtin.NewPipeline(cfg.Gateway.InstanceID, shm, builtin.WithPipelineLog(log)),
 		),
 		gateway.WithBuiltinService(
-			builtin.NewFunction(cfg.Gateway.InstanceID, shm, log),
+			builtin.NewFunction(cfg.Gateway.InstanceID, shm, builtin.WithFunctionLog(log)),
 		),
 		gateway.WithBuiltinService(
 			builtin.NewCounters(cfg.Gateway.InstanceID, shm),
