@@ -84,10 +84,24 @@ func ToIPNet(pb *IPNet) (filter.IPNet, error) {
 		)
 	}
 
-	return filter.IPNet{
+	net := filter.IPNet{
 		Addr: addr,
 		Mask: mask,
-	}, nil
+	}
+	if !net.MaskIsValid() {
+		if mask.Is4() {
+			return filter.IPNet{}, status.Error(
+				codes.InvalidArgument,
+				"network mask must be contiguous",
+			)
+		}
+		return filter.IPNet{}, status.Error(
+			codes.InvalidArgument,
+			"network mask must be bi-contiguous",
+		)
+	}
+
+	return net, nil
 }
 
 // ToNet4sFromPrefixes converts protobuf IPPrefix messages to filter

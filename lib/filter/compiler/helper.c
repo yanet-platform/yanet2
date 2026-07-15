@@ -2,6 +2,35 @@
 #include "common/registry.h"
 #include "lib/filter/filter.h"
 
+#include <endian.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <string.h>
+
+// A fixed-width mask is a contiguous prefix when its inverse is a run of low
+// bits, so incrementing that inverse carries all the way out and clears it.
+static bool
+mask_is_prefix64(uint64_t mask) {
+	uint64_t inv = ~mask;
+	return (inv & (inv + 1)) == 0;
+}
+
+bool
+filter_net4_mask_is_valid(const uint8_t mask[NET4_LEN]) {
+	uint32_t bits;
+	memcpy(&bits, mask, sizeof(bits));
+	uint32_t inv = ~be32toh(bits);
+	return (inv & (inv + 1)) == 0;
+}
+
+bool
+filter_net6_mask_is_valid(const uint8_t mask[NET6_LEN]) {
+	uint64_t hi, lo;
+	memcpy(&hi, mask, sizeof(hi));
+	memcpy(&lo, mask + 8, sizeof(lo));
+	return mask_is_prefix64(be64toh(hi)) && mask_is_prefix64(be64toh(lo));
+}
+
 int
 init_dummy_registry(
 	struct memory_context *memory_context,

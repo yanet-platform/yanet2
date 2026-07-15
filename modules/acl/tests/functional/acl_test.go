@@ -1717,3 +1717,54 @@ func TestACL_IPv6Fragment_LaterFragment(t *testing.T) {
 	require.Len(t, result.Drop, 1, "non-first fragment must be dropped")
 	requireModuleCounterPackets(t, h, aclCounterPath("port0", "test"), "acl_no_match", 1)
 }
+
+// TestACL_RejectsNonContiguousIPv4Mask verifies that an IPv4 rule whose mask
+// is not a contiguous prefix (a hole between set bits) is rejected at config
+// update time instead of being silently mis-classified.
+func TestACL_RejectsNonContiguousIPv4Mask(t *testing.T) {
+	_, _, backend := setupACLHarness(t, []string{"port0"})
+
+	handle, err := backend.NewModule("reject4")
+	require.NoError(t, err)
+	t.Cleanup(handle.Free)
+
+	badMask := netip.AddrFrom4([4]byte{0xff, 0x00, 0xff, 0x00})
+	rules := []cacl.AclRule{
+		allow4Rule(
+			filter.IPNets{{Addr: netip.MustParseAddr("192.0.2.0"), Mask: badMask}},
+			filter.IPNets{filter.UnspecifiedIPv4},
+			udpProto,
+		),
+	}
+
+	err = handle.UpdateRules(rules)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "non-contiguous")
+}
+
+// TestACL_RejectsNonBiContiguousIPv6Mask verifies that an IPv6 rule whose
+// mask has a hole within the high 64-bit half is rejected at config update
+// time instead of being silently mis-classified.
+func TestACL_RejectsNonBiContiguousIPv6Mask(t *testing.T) {
+	_, _, backend := setupACLHarness(t, []string{"port0"})
+
+	handle, err := backend.NewModule("reject6")
+	require.NoError(t, err)
+	t.Cleanup(handle.Free)
+
+	badMask := netip.AddrFrom16([16]byte{
+		0xff, 0x00, 0xff, 0x00, 0, 0, 0, 0,
+		0, 0, 0, 0, 0, 0, 0, 0,
+	})
+	rules := []cacl.AclRule{
+		allow6Rule(
+			filter.IPNets{{Addr: netip.MustParseAddr("2001:db8::"), Mask: badMask}},
+			filter.IPNets{filter.UnspecifiedIPv6},
+			udpProto,
+		),
+	}
+
+	err = handle.UpdateRules(rules)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "bi-contiguous")
+}

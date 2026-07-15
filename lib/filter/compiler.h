@@ -66,6 +66,26 @@ filter_free(
 	memory_context_fini(&filter->memory_context);
 }
 
+static inline bool
+rule_net4_masks_are_valid(const struct net4 *nets, uint32_t count) {
+	for (uint32_t net_idx = 0; net_idx < count; ++net_idx) {
+		if (!filter_net4_mask_is_valid(nets[net_idx].mask)) {
+			return false;
+		}
+	}
+	return true;
+}
+
+static inline bool
+rule_net6_masks_are_valid(const struct net6 *nets, uint32_t count) {
+	for (uint32_t net_idx = 0; net_idx < count; ++net_idx) {
+		if (!filter_net6_mask_is_valid(nets[net_idx].mask)) {
+			return false;
+		}
+	}
+	return true;
+}
+
 static inline int
 filter_init(
 	struct filter *filter,
@@ -78,6 +98,43 @@ filter_init(
 	if (filter_compiler->lookup_count == 0) {
 		yanet_error_add(err, "filter has no lookups configured");
 		return -1;
+	}
+
+	for (uint32_t rule_idx = 0; rule_idx < rule_count; ++rule_idx) {
+		const struct filter_rule *rule = rules[rule_idx];
+		if (rule == NULL) {
+			continue;
+		}
+
+		if (!rule_net4_masks_are_valid(
+			    rule->net4.srcs, rule->net4.src_count
+		    ) ||
+		    !rule_net4_masks_are_valid(
+			    rule->net4.dsts, rule->net4.dst_count
+		    )) {
+			yanet_error_add(
+				err,
+				"filter rule %u has a non-contiguous IPv4 "
+				"network mask",
+				rule_idx
+			);
+			return -1;
+		}
+
+		if (!rule_net6_masks_are_valid(
+			    rule->net6.srcs, rule->net6.src_count
+		    ) ||
+		    !rule_net6_masks_are_valid(
+			    rule->net6.dsts, rule->net6.dst_count
+		    )) {
+			yanet_error_add(
+				err,
+				"filter rule %u has an IPv6 network mask "
+				"that is not bi-contiguous",
+				rule_idx
+			);
+			return -1;
+		}
 	}
 
 	memset(filter, 0, sizeof(struct filter));

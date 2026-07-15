@@ -1,6 +1,7 @@
 package filter
 
 import (
+	"encoding/binary"
 	"net"
 	"net/netip"
 )
@@ -46,6 +47,30 @@ func MustParseIPNet(s string) IPNet {
 		Addr: p.Addr(),
 		Mask: makePrefix6(p.Bits()),
 	}
+}
+
+// MaskIsValid reports whether the mask is a contiguous prefix mask.
+//
+// For IPv4 the whole 32-bit mask must be a single contiguous prefix. For
+// IPv6 the mask must be bi-contiguous: each 64-bit half is independently a
+// contiguous prefix, so a hole exactly at the /64 boundary is allowed while
+// a hole within a half is not.
+func (m IPNet) MaskIsValid() bool {
+	if m.Mask.Is4() {
+		bytes := m.Mask.As4()
+		return maskIsPrefix(binary.BigEndian.Uint32(bytes[:]))
+	}
+
+	bytes := m.Mask.As16()
+	return maskIsPrefix(binary.BigEndian.Uint64(bytes[:8])) &&
+		maskIsPrefix(binary.BigEndian.Uint64(bytes[8:]))
+}
+
+// maskIsPrefix reports whether mask is a contiguous run of 1-bits from the
+// most significant bit, with no gaps.
+func maskIsPrefix[T ~uint32 | ~uint64](mask T) bool {
+	inv := ^mask
+	return inv&(inv+1) == 0
 }
 
 type IPNets []IPNet

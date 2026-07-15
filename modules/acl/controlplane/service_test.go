@@ -10,6 +10,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	filterpb "github.com/yanet-platform/yanet2/common/filterpb/v1"
 	"github.com/yanet-platform/yanet2/controlplane/ffi"
 	"github.com/yanet-platform/yanet2/modules/acl/bindings/go/cacl"
 	"github.com/yanet-platform/yanet2/modules/acl/controlplane/aclpb/v1"
@@ -256,6 +257,31 @@ func TestConvertRules_RejectsUnknownActionKind(t *testing.T) {
 	_, err := convertRules([]*aclpb.Rule{{
 		Actions: []*aclpb.Action{{Kind: aclpb.ActionKind(999)}},
 	}})
+	require.Error(t, err)
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+}
+
+// TestUpdateConfig_RejectsNonContiguousMask verifies that a rule with a
+// non-contiguous network mask is rejected with codes.InvalidArgument before
+// reaching the backend.
+func TestUpdateConfig_RejectsNonContiguousMask(t *testing.T) {
+	svc := newTestService(newFakeBackend(0))
+
+	req := &aclpb.UpdateConfigRequest{
+		Name: "acl0",
+		Rules: []*aclpb.Rule{
+			{
+				Srcs: []*filterpb.IPNet{
+					{
+						Addr: []byte{192, 0, 2, 0},
+						Mask: []byte{0xff, 0x00, 0xff, 0x00},
+					},
+				},
+			},
+		},
+	}
+
+	_, err := svc.UpdateConfig(t.Context(), req)
 	require.Error(t, err)
 	require.Equal(t, codes.InvalidArgument, status.Code(err))
 }
