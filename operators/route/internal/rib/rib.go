@@ -23,7 +23,32 @@ type RIB struct {
 	log               *zap.Logger
 }
 
-func NewRIB(log *zap.Logger) *RIB {
+// Option configures the NewRIB constructor.
+type Option func(*ribOptions)
+
+type ribOptions struct {
+	Log *zap.Logger
+}
+
+func newRIBOptions() *ribOptions {
+	return &ribOptions{
+		Log: zap.NewNop(),
+	}
+}
+
+// WithLog sets the logger for the RIB.
+func WithLog(log *zap.Logger) Option {
+	return func(o *ribOptions) {
+		o.Log = log
+	}
+}
+
+func NewRIB(options ...Option) *RIB {
+	opts := newRIBOptions()
+	for _, o := range options {
+		o(opts)
+	}
+
 	sessionTerminator := &atomic.Pointer[atomic.Bool]{}
 	sessionTerminator.Store(&atomic.Bool{})
 
@@ -32,7 +57,7 @@ func NewRIB(log *zap.Logger) *RIB {
 		stats:             NewRIBStats(),
 		currentSessionId:  &atomic.Uint64{},
 		sessionTerminator: sessionTerminator,
-		log:               log,
+		log:               opts.Log,
 	}
 }
 

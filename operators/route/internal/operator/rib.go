@@ -15,10 +15,33 @@ type RIBStore struct {
 	log  *zap.Logger
 }
 
-func newRIBStore(log *zap.Logger) *RIBStore {
+type ribStoreOption func(*ribStoreOptions)
+
+type ribStoreOptions struct {
+	Log *zap.Logger
+}
+
+func newRIBStoreOptions() *ribStoreOptions {
+	return &ribStoreOptions{
+		Log: zap.NewNop(),
+	}
+}
+
+func withRIBStoreLog(log *zap.Logger) ribStoreOption {
+	return func(o *ribStoreOptions) {
+		o.Log = log
+	}
+}
+
+func newRIBStore(options ...ribStoreOption) *RIBStore {
+	opts := newRIBStoreOptions()
+	for _, o := range options {
+		o(opts)
+	}
+
 	return &RIBStore{
 		ribs: map[string]*rib.RIB{},
-		log:  log,
+		log:  opts.Log,
 	}
 }
 
@@ -59,7 +82,7 @@ func (m *RIBStore) GetOrCreate(name string) *rib.RIB {
 		m.log.Info("created new RIB",
 			zap.String("name", name),
 		)
-		ribRef = rib.NewRIB(m.log)
+		ribRef = rib.NewRIB(rib.WithLog(m.log))
 		m.ribs[name] = ribRef
 	}
 

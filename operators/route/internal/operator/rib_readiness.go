@@ -12,6 +12,24 @@ import (
 	readinesspb "github.com/yanet-platform/yanet2/common/readinesspb/v1"
 )
 
+type ribReadinessOption func(*ribReadinessOptions)
+
+type ribReadinessOptions struct {
+	Log *zap.Logger
+}
+
+func newRIBReadinessOptions() *ribReadinessOptions {
+	return &ribReadinessOptions{
+		Log: zap.NewNop(),
+	}
+}
+
+func withRIBReadinessLog(log *zap.Logger) ribReadinessOption {
+	return func(o *ribReadinessOptions) {
+		o.Log = log
+	}
+}
+
 // newRIBReadiness returns a birdRIBReadiness when cfg.ExpectBird is true,
 // and a staticRIBReadiness otherwise.
 func newRIBReadiness(
@@ -19,12 +37,17 @@ func newRIBReadiness(
 	store *RIBStore,
 	name string,
 	tracker *readiness.Tracker,
-	log *zap.Logger,
+	options ...ribReadinessOption,
 ) ribReadiness {
-	if cfg.ExpectBird {
-		return newBirdRIBReadiness(cfg, store, name, tracker, log)
+	opts := newRIBReadinessOptions()
+	for _, o := range options {
+		o(opts)
 	}
-	return newStaticRIBReadiness(store, name, tracker, cfg.SampleInterval, log)
+
+	if cfg.ExpectBird {
+		return newBirdRIBReadiness(cfg, store, name, tracker, withBirdRIBReadinessLog(opts.Log))
+	}
+	return newStaticRIBReadiness(store, name, tracker, cfg.SampleInterval, withStaticRIBReadinessLog(opts.Log))
 }
 
 // birdRIBReadiness drives the "bird-session" and "rib" readiness scopes
@@ -65,6 +88,24 @@ type birdRIBReadiness struct {
 	log *zap.Logger
 }
 
+type birdRIBReadinessOption func(*birdRIBReadinessOptions)
+
+type birdRIBReadinessOptions struct {
+	Log *zap.Logger
+}
+
+func newBirdRIBReadinessOptions() *birdRIBReadinessOptions {
+	return &birdRIBReadinessOptions{
+		Log: zap.NewNop(),
+	}
+}
+
+func withBirdRIBReadinessLog(log *zap.Logger) birdRIBReadinessOption {
+	return func(o *birdRIBReadinessOptions) {
+		o.Log = log
+	}
+}
+
 // newBirdRIBReadiness constructs a helper from the supplied config.
 //
 // The helper drives both the "bird-session" and "rib" tracker scopes.
@@ -75,8 +116,13 @@ func newBirdRIBReadiness(
 	store *RIBStore,
 	configName string,
 	tracker *readiness.Tracker,
-	log *zap.Logger,
+	options ...birdRIBReadinessOption,
 ) *birdRIBReadiness {
+	opts := newBirdRIBReadinessOptions()
+	for _, o := range options {
+		o(opts)
+	}
+
 	m := &birdRIBReadiness{
 		store:           store,
 		configName:      configName,
@@ -85,7 +131,7 @@ func newBirdRIBReadiness(
 		stabilityWindow: cfg.StabilityWindow,
 		sampleInterval:  cfg.SampleInterval,
 		reconnectGrace:  cfg.ReconnectGrace,
-		log:             log,
+		log:             opts.Log,
 	}
 
 	// Seed initial states: bird-session starts DEGRADED(NO_SESSION),
@@ -306,6 +352,24 @@ type staticRIBReadiness struct {
 	log            *zap.Logger
 }
 
+type staticRIBReadinessOption func(*staticRIBReadinessOptions)
+
+type staticRIBReadinessOptions struct {
+	Log *zap.Logger
+}
+
+func newStaticRIBReadinessOptions() *staticRIBReadinessOptions {
+	return &staticRIBReadinessOptions{
+		Log: zap.NewNop(),
+	}
+}
+
+func withStaticRIBReadinessLog(log *zap.Logger) staticRIBReadinessOption {
+	return func(o *staticRIBReadinessOptions) {
+		o.Log = log
+	}
+}
+
 // newStaticRIBReadiness constructs a static rib-readiness implementation.
 //
 // The initial rib scope is seeded immediately at construction — READY if
@@ -316,14 +380,19 @@ func newStaticRIBReadiness(
 	configName string,
 	tracker *readiness.Tracker,
 	sampleInterval time.Duration,
-	log *zap.Logger,
+	options ...staticRIBReadinessOption,
 ) *staticRIBReadiness {
+	opts := newStaticRIBReadinessOptions()
+	for _, o := range options {
+		o(opts)
+	}
+
 	m := &staticRIBReadiness{
 		store:          store,
 		configName:     configName,
 		tracker:        tracker,
 		sampleInterval: sampleInterval,
-		log:            log,
+		log:            opts.Log,
 	}
 
 	// Seed the initial rib state so there is no UNKNOWN window before Run starts.

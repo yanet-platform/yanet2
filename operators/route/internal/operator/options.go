@@ -53,7 +53,7 @@ type routeServiceOptions struct {
 
 func newRouteServiceOptions() *routeServiceOptions {
 	return &routeServiceOptions{
-		RIBs:              newRIBStore(zap.NewNop()),
+		RIBs:              newRIBStore(),
 		RIBTTL:            DefaultRIBTTL,
 		OnChanged:         func() {},
 		OnRIBSessionStart: func(string, uint64) {},

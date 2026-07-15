@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
 
 	"github.com/yanet-platform/yanet2/operators/route/internal/discovery/neigh"
 	"github.com/yanet-platform/yanet2/operators/route/internal/rib"
@@ -15,7 +14,7 @@ import (
 func Test_RouteSource_WakeFuncCoalesces(t *testing.T) {
 	source := NewRouteSource(
 		neigh.NewNeighTable(),
-		newRIBStore(zap.NewNop()),
+		newRIBStore(),
 	)
 
 	wake := source.WakeFunc()
@@ -39,7 +38,7 @@ func Test_RouteSource_WakeFuncCoalesces(t *testing.T) {
 func Test_RouteSource_SnapshotEmptyOK(t *testing.T) {
 	source := NewRouteSource(
 		neigh.NewNeighTable(),
-		newRIBStore(zap.NewNop()),
+		newRIBStore(),
 	)
 
 	snapshot, ok := source.Snapshot()
@@ -50,7 +49,7 @@ func Test_RouteSource_SnapshotEmptyOK(t *testing.T) {
 func Test_RouteSource_SnapshotDrainsWake(t *testing.T) {
 	source := NewRouteSource(
 		neigh.NewNeighTable(),
-		newRIBStore(zap.NewNop()),
+		newRIBStore(),
 	)
 
 	source.WakeFunc()()
@@ -81,7 +80,7 @@ func Test_RouteSource_SnapshotIncludesRIBs(t *testing.T) {
 		},
 	})
 
-	ribs := newRIBStore(zap.NewNop())
+	ribs := newRIBStore()
 	source := NewRouteSource(nd, ribs)
 
 	r := ribs.GetOrCreate("route0")

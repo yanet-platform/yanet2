@@ -59,7 +59,7 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 
 	moduleName := cfg.Function.Module.Unwrap()
 
-	routeRIBStore := newRIBStore(log)
+	routeRIBStore := newRIBStore(withRIBStoreLog(log))
 
 	// Build the readiness tracker scope list: one fib:<gateway>:<module> scope per
 	// gateway, plus a neighbours scope, a rib scope, and optionally a bird-session scope.
@@ -98,6 +98,7 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 			&readinesspb.Reason{Code: "SYNCING"},
 		)
 		neighOpts := []neigh.Option{
+			neigh.WithLog(log),
 			neigh.WithOnSynced(func() {
 				tracker.Set("neighbours", readinesspb.State_STATE_READY)
 				metrics.OnNeighbourSynced()
@@ -119,7 +120,7 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 			}),
 		}
 
-		monitor, err := newNeighbourMonitor(cfg, neighTable, log, neighOpts...)
+		monitor, err := newNeighbourMonitor(cfg, neighTable, neighOpts...)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create neighbour monitor: %w", err)
 		}
@@ -128,7 +129,7 @@ func NewOperator(cfg *Config, options ...Option) (*Operator, error) {
 
 	source := NewRouteSource(neighTable, routeRIBStore)
 	wake := source.WakeFunc()
-	ribHelper := newRIBReadiness(cfg.Readiness, routeRIBStore, moduleName, tracker, log)
+	ribHelper := newRIBReadiness(cfg.Readiness, routeRIBStore, moduleName, tracker, withRIBReadinessLog(log))
 
 	routeSvc := NewRouteService(
 		neighTable,
@@ -276,7 +277,6 @@ func ribTTL(cfg *Config) time.Duration {
 func newNeighbourMonitor(
 	cfg *Config,
 	neighTable *neigh.NeighTable,
-	log *zap.Logger,
 	extraOpts ...neigh.Option,
 ) (*neigh.NeighMonitor, error) {
 	source, err := neighTable.CreateSource(
@@ -289,7 +289,6 @@ func newNeighbourMonitor(
 	}
 
 	opts := append([]neigh.Option{
-		neigh.WithLog(log),
 		neigh.WithLinkMap(cfg.LinkMap),
 	}, extraOpts...)
 

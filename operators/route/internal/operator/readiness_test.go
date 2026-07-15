@@ -8,7 +8,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/yanet-platform/yanet2/common/go/operator"
@@ -99,9 +98,9 @@ func TestRIBReadiness_SessionStart_SYNCING(t *testing.T) {
 		SampleInterval:  20 * time.Millisecond,
 	}
 
-	store := newRIBStore(zap.NewNop())
+	store := newRIBStore()
 	tracker := readiness.NewTracker([]string{"rib"})
-	helper := newBirdRIBReadiness(cfg, store, "route0", tracker, zap.NewNop())
+	helper := newBirdRIBReadiness(cfg, store, "route0", tracker)
 
 	helper.OnSessionStart("route0", 1)
 
@@ -119,9 +118,9 @@ func TestRIBReadiness_HighRate_SYNCING(t *testing.T) {
 		SampleInterval:  20 * time.Millisecond,
 	}
 
-	store := newRIBStore(zap.NewNop())
+	store := newRIBStore()
 	tracker := readiness.NewTracker([]string{"rib"})
-	helper := newBirdRIBReadiness(cfg, store, "route0", tracker, zap.NewNop())
+	helper := newBirdRIBReadiness(cfg, store, "route0", tracker)
 
 	helper.OnSessionStart("route0", 1)
 
@@ -165,11 +164,11 @@ func TestRIBReadiness_LowRate_READY(t *testing.T) {
 		SampleInterval:  20 * time.Millisecond,
 	}
 
-	store := newRIBStore(zap.NewNop())
+	store := newRIBStore()
 	// Seed a route so that settled && routes>0 produces READY.
 	seedRoute(t, store, "route0")
 	tracker := readiness.NewTracker([]string{"rib"})
-	helper := newBirdRIBReadiness(cfg, store, "route0", tracker, zap.NewNop())
+	helper := newBirdRIBReadiness(cfg, store, "route0", tracker)
 
 	helper.OnSessionStart("route0", 1)
 
@@ -198,9 +197,9 @@ func TestRIBReadiness_MidWindowSpike_ResetsBelowSince(t *testing.T) {
 		SampleInterval:  20 * time.Millisecond,
 	}
 
-	store := newRIBStore(zap.NewNop())
+	store := newRIBStore()
 	tracker := readiness.NewTracker([]string{"rib"})
-	helper := newBirdRIBReadiness(cfg, store, "route0", tracker, zap.NewNop())
+	helper := newBirdRIBReadiness(cfg, store, "route0", tracker)
 
 	helper.OnSessionStart("route0", 1)
 
@@ -238,12 +237,12 @@ func TestRIBReadiness_SessionEnd_Degraded(t *testing.T) {
 		SampleInterval:  15 * time.Millisecond,
 	}
 
-	store := newRIBStore(zap.NewNop())
+	store := newRIBStore()
 	// Seed a route so that the settled state produces READY and the session
 	// end with live routes produces DEGRADED(SESSION_ENDED).
 	seedRoute(t, store, "route0")
 	tracker := readiness.NewTracker([]string{"rib"})
-	helper := newBirdRIBReadiness(cfg, store, "route0", tracker, zap.NewNop())
+	helper := newBirdRIBReadiness(cfg, store, "route0", tracker)
 
 	helper.OnSessionStart("route0", 1)
 
@@ -315,9 +314,9 @@ func TestRIBReadiness_Syncing(t *testing.T) {
 				SampleInterval:  20 * time.Millisecond,
 			}
 
-			store := newRIBStore(zap.NewNop())
+			store := newRIBStore()
 			tracker := readiness.NewTracker([]string{"rib"})
-			helper := newBirdRIBReadiness(cfg, store, "route0", tracker, zap.NewNop())
+			helper := newBirdRIBReadiness(cfg, store, "route0", tracker)
 
 			if tc.seedRoutes {
 				seedRoute(t, store, "route0")
@@ -379,11 +378,11 @@ func TestRIBReadiness_SupersededSession(t *testing.T) {
 		SampleInterval:  20 * time.Millisecond,
 	}
 
-	store := newRIBStore(zap.NewNop())
+	store := newRIBStore()
 	// Seed a route so that the settled state produces READY.
 	seedRoute(t, store, "route0")
 	tracker := readiness.NewTracker([]string{"rib"})
-	helper := newBirdRIBReadiness(cfg, store, "route0", tracker, zap.NewNop())
+	helper := newBirdRIBReadiness(cfg, store, "route0", tracker)
 
 	// Session A starts (id=1) — routes are present so tracker enters
 	// DEGRADED(SYNCING) rather than NOT_READY(SYNCING).
@@ -439,9 +438,9 @@ func TestBirdSession_InitialDegraded(t *testing.T) {
 		ReconnectGrace:  100 * time.Millisecond,
 	}
 
-	store := newRIBStore(zap.NewNop())
+	store := newRIBStore()
 	tracker := readiness.NewTracker([]string{"bird-session", "rib"})
-	newBirdRIBReadiness(cfg, store, "route0", tracker, zap.NewNop())
+	newBirdRIBReadiness(cfg, store, "route0", tracker)
 
 	s := requireScope(t, tracker, "bird-session")
 	assert.Equal(t, readinesspb.State_STATE_DEGRADED, s.State)
@@ -459,9 +458,9 @@ func TestBirdSession_SessionStartReady(t *testing.T) {
 		ReconnectGrace:  100 * time.Millisecond,
 	}
 
-	store := newRIBStore(zap.NewNop())
+	store := newRIBStore()
 	tracker := readiness.NewTracker([]string{"bird-session", "rib"})
-	helper := newBirdRIBReadiness(cfg, store, "route0", tracker, zap.NewNop())
+	helper := newBirdRIBReadiness(cfg, store, "route0", tracker)
 
 	helper.OnSessionStart("route0", 1)
 
@@ -480,9 +479,9 @@ func TestBirdSession_SessionEndReconnecting(t *testing.T) {
 		ReconnectGrace:  500 * time.Millisecond,
 	}
 
-	store := newRIBStore(zap.NewNop())
+	store := newRIBStore()
 	tracker := readiness.NewTracker([]string{"bird-session", "rib"})
-	helper := newBirdRIBReadiness(cfg, store, "route0", tracker, zap.NewNop())
+	helper := newBirdRIBReadiness(cfg, store, "route0", tracker)
 
 	helper.OnSessionStart("route0", 1)
 	helper.OnSessionEnd("route0", 1)
@@ -503,9 +502,9 @@ func TestBirdSession_GraceExpiry(t *testing.T) {
 		ReconnectGrace:  60 * time.Millisecond,
 	}
 
-	store := newRIBStore(zap.NewNop())
+	store := newRIBStore()
 	tracker := readiness.NewTracker([]string{"bird-session", "rib"})
-	helper := newBirdRIBReadiness(cfg, store, "route0", tracker, zap.NewNop())
+	helper := newBirdRIBReadiness(cfg, store, "route0", tracker)
 
 	helper.OnSessionStart("route0", 1)
 	helper.OnSessionEnd("route0", 1)
@@ -538,9 +537,9 @@ func TestBirdSession_NeverNotReady(t *testing.T) {
 		ReconnectGrace:  30 * time.Millisecond,
 	}
 
-	store := newRIBStore(zap.NewNop())
+	store := newRIBStore()
 	tracker := readiness.NewTracker([]string{"bird-session", "rib"})
-	helper := newBirdRIBReadiness(cfg, store, "route0", tracker, zap.NewNop())
+	helper := newBirdRIBReadiness(cfg, store, "route0", tracker)
 
 	helper.OnSessionStart("route0", 1)
 	helper.OnSessionEnd("route0", 1)
@@ -572,9 +571,9 @@ func TestBirdSession_ReconnectFromDown(t *testing.T) {
 		ReconnectGrace:  30 * time.Millisecond,
 	}
 
-	store := newRIBStore(zap.NewNop())
+	store := newRIBStore()
 	tracker := readiness.NewTracker([]string{"bird-session", "rib"})
-	helper := newBirdRIBReadiness(cfg, store, "route0", tracker, zap.NewNop())
+	helper := newBirdRIBReadiness(cfg, store, "route0", tracker)
 
 	helper.OnSessionStart("route0", 1)
 	helper.OnSessionEnd("route0", 1)
@@ -611,10 +610,10 @@ func TestRIBReadiness_SettledNoRoutes(t *testing.T) {
 		ReconnectGrace:  500 * time.Millisecond,
 	}
 
-	store := newRIBStore(zap.NewNop())
+	store := newRIBStore()
 	// No routes seeded — empty RIB.
 	tracker := readiness.NewTracker([]string{"rib"})
-	helper := newBirdRIBReadiness(cfg, store, "route0", tracker, zap.NewNop())
+	helper := newBirdRIBReadiness(cfg, store, "route0", tracker)
 
 	helper.OnSessionStart("route0", 1)
 
@@ -646,10 +645,10 @@ func TestRIBReadiness_SessionEndedWithRoutes(t *testing.T) {
 		ReconnectGrace:  500 * time.Millisecond,
 	}
 
-	store := newRIBStore(zap.NewNop())
+	store := newRIBStore()
 	seedRoute(t, store, "route0")
 	tracker := readiness.NewTracker([]string{"rib"})
-	helper := newBirdRIBReadiness(cfg, store, "route0", tracker, zap.NewNop())
+	helper := newBirdRIBReadiness(cfg, store, "route0", tracker)
 
 	helper.OnSessionStart("route0", 1)
 
@@ -687,10 +686,10 @@ func TestRIBReadiness_TTLPurgeAfterSessionEnd(t *testing.T) {
 		ReconnectGrace:  500 * time.Millisecond,
 	}
 
-	store := newRIBStore(zap.NewNop())
+	store := newRIBStore()
 	seedRoute(t, store, "route0")
 	tracker := readiness.NewTracker([]string{"rib"})
-	helper := newBirdRIBReadiness(cfg, store, "route0", tracker, zap.NewNop())
+	helper := newBirdRIBReadiness(cfg, store, "route0", tracker)
 
 	helper.OnSessionStart("route0", 1)
 
@@ -787,10 +786,10 @@ func TestBirdRestartHoldInvariant(t *testing.T) {
 		ReconnectGrace:  500 * time.Millisecond,
 	}
 
-	store := newRIBStore(zap.NewNop())
+	store := newRIBStore()
 	seedRoute(t, store, "route0")
 	tracker := readiness.NewTracker([]string{"bird-session", "rib"})
-	helper := newBirdRIBReadiness(cfg, store, "route0", tracker, zap.NewNop())
+	helper := newBirdRIBReadiness(cfg, store, "route0", tracker)
 
 	helper.OnSessionStart("route0", 1)
 
@@ -839,13 +838,13 @@ func TestBirdRestartHoldInvariant(t *testing.T) {
 // NOT_READY(NO_ROUTES) once the route is removed, all without ever touching the
 // bird-session scope.
 func TestStaticRIBReadiness_ReadyWhenRoutesPresent(t *testing.T) {
-	store := newRIBStore(zap.NewNop())
+	store := newRIBStore()
 	seedRoute(t, store, "route0")
 
 	// Register both rib and bird-session so we can assert bird-session is never set.
 	tracker := readiness.NewTracker([]string{"rib", "bird-session"})
 
-	helper := newStaticRIBReadiness(store, "route0", tracker, 20*time.Millisecond, zap.NewNop())
+	helper := newStaticRIBReadiness(store, "route0", tracker, 20*time.Millisecond)
 
 	// The constructor must seed rib=READY immediately (route already present).
 	s := requireScope(t, tracker, "rib")
@@ -886,10 +885,10 @@ func TestStaticRIBReadiness_ReadyWhenRoutesPresent(t *testing.T) {
 // TestStaticRIBReadiness_ColdStart verifies that staticRIBReadiness seeds
 // rib=NOT_READY(NO_ROUTES) on construction when the store is empty.
 func TestStaticRIBReadiness_ColdStart(t *testing.T) {
-	store := newRIBStore(zap.NewNop())
+	store := newRIBStore()
 	tracker := readiness.NewTracker([]string{"rib"})
 
-	newStaticRIBReadiness(store, "route0", tracker, 20*time.Millisecond, zap.NewNop())
+	newStaticRIBReadiness(store, "route0", tracker, 20*time.Millisecond)
 
 	s := requireScope(t, tracker, "rib")
 	assert.Equal(t, readinesspb.State_STATE_NOT_READY, s.State)
@@ -902,12 +901,12 @@ func TestStaticRIBReadiness_ColdStart(t *testing.T) {
 // is added before Run starts, the first call to Run must flip rib to READY
 // immediately without waiting for the first ticker tick.
 func TestStaticRIBReadiness_PostPreRunReady(t *testing.T) {
-	store := newRIBStore(zap.NewNop())
+	store := newRIBStore()
 
 	// Empty store at construction — seeds NOT_READY(NO_ROUTES), mirroring the
 	// real operator where PreRun has not yet populated static.routes.
 	tracker := readiness.NewTracker([]string{"rib"})
-	helper := newStaticRIBReadiness(store, "route0", tracker, 500*time.Millisecond, zap.NewNop())
+	helper := newStaticRIBReadiness(store, "route0", tracker, 500*time.Millisecond)
 
 	s := requireScope(t, tracker, "rib")
 	assert.Equal(t, readinesspb.State_STATE_NOT_READY, s.State)
@@ -940,11 +939,11 @@ func TestStaticRIBReadiness_PostPreRunReady(t *testing.T) {
 // TestStaticRIBReadiness_NoopsIgnored verifies that OnSessionStart, OnUpdate,
 // and OnSessionEnd are all no-ops and do not change the rib scope.
 func TestStaticRIBReadiness_NoopsIgnored(t *testing.T) {
-	store := newRIBStore(zap.NewNop())
+	store := newRIBStore()
 	seedRoute(t, store, "route0")
 	tracker := readiness.NewTracker([]string{"rib"})
 
-	helper := newStaticRIBReadiness(store, "route0", tracker, 20*time.Millisecond, zap.NewNop())
+	helper := newStaticRIBReadiness(store, "route0", tracker, 20*time.Millisecond)
 
 	s := requireScope(t, tracker, "rib")
 	assert.Equal(t, readinesspb.State_STATE_READY, s.State)

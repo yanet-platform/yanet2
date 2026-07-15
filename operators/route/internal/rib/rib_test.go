@@ -5,13 +5,12 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
 )
 
 // newTestRIB constructs a RIB suitable for unit tests.
 func newTestRIB(t *testing.T) *RIB {
 	t.Helper()
-	return NewRIB(zap.NewNop())
+	return NewRIB()
 }
 
 // routesForPrefix returns the routes stored for the given prefix, or nil if the

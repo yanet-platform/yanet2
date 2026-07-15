@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
 
 	commonpb "github.com/yanet-platform/yanet2/common/commonpb/v1"
 	"github.com/yanet-platform/yanet2/common/go/operator"
@@ -65,7 +64,7 @@ func (m *fakeActuator) Close() error {
 // TestMetrics_ReconcileEvents verifies that reconcile-loop observer methods
 // update the corresponding counters and gauges rendered by Collect.
 func TestMetrics_ReconcileEvents(t *testing.T) {
-	m := NewMetrics(newRIBStore(zap.NewNop()), neigh.NewNeighTable())
+	m := NewMetrics(newRIBStore(), neigh.NewNeighTable())
 
 	m.OnReconcileCompleted(nil)
 	m.OnReconcileCompleted(errors.New("boom"))
@@ -103,7 +102,7 @@ func TestMetrics_ReconcileEvents(t *testing.T) {
 // TestMetrics_RIBFeedEvents verifies that RIB session and update callbacks
 // are rendered per module, without leaking into other modules' counters.
 func TestMetrics_RIBFeedEvents(t *testing.T) {
-	m := NewMetrics(newRIBStore(zap.NewNop()), neigh.NewNeighTable())
+	m := NewMetrics(newRIBStore(), neigh.NewNeighTable())
 
 	m.OnRIBSessionStart("route0", 1)
 	m.OnRIBSessionStart("route0", 2)
@@ -136,7 +135,7 @@ func TestMetrics_RIBFeedEvents(t *testing.T) {
 // neighbour metrics are absent when the monitor is disabled.
 func TestMetrics_NeighbourEvents(t *testing.T) {
 	t.Run("MonitorEnabled", func(t *testing.T) {
-		m := NewMetrics(newRIBStore(zap.NewNop()), neigh.NewNeighTable(), WithNetlinkMonitorMetrics())
+		m := NewMetrics(newRIBStore(), neigh.NewNeighTable(), WithNetlinkMonitorMetrics())
 
 		m.OnNeighbourSynced()
 		m.OnNeighbourHealthy()
@@ -160,7 +159,7 @@ func TestMetrics_NeighbourEvents(t *testing.T) {
 	})
 
 	t.Run("MonitorDisabled", func(t *testing.T) {
-		m := NewMetrics(newRIBStore(zap.NewNop()), neigh.NewNeighTable())
+		m := NewMetrics(newRIBStore(), neigh.NewNeighTable())
 
 		m.OnNeighbourSynced()
 		m.OnNeighbourHealthy()
@@ -175,7 +174,7 @@ func TestMetrics_NeighbourEvents(t *testing.T) {
 // TestMetrics_PullRIBStats verifies that RIB gauges are pulled from the
 // RIBStore's live snapshot at Collect time.
 func TestMetrics_PullRIBStats(t *testing.T) {
-	store := newRIBStore(zap.NewNop())
+	store := newRIBStore()
 	ribRef := store.GetOrCreate("route0")
 	require.NoError(t, ribRef.AddUnicastRoute(
 		netip.MustParsePrefix("10.0.0.0/24"),
@@ -234,7 +233,7 @@ func TestMetrics_PullNeighbourStats(t *testing.T) {
 		},
 	}))
 
-	m := NewMetrics(newRIBStore(zap.NewNop()), table)
+	m := NewMetrics(newRIBStore(), table)
 
 	metricList := m.Collect()
 
@@ -250,7 +249,7 @@ func TestMetrics_PullNeighbourStats(t *testing.T) {
 // TestGatewayMetrics_FIBBuilt verifies that OnFIBBuilt renders the five FIB
 // gauges from FIBBuildStats, keyed by gateway and module.
 func TestGatewayMetrics_FIBBuilt(t *testing.T) {
-	m := NewMetrics(newRIBStore(zap.NewNop()), neigh.NewNeighTable())
+	m := NewMetrics(newRIBStore(), neigh.NewNeighTable())
 
 	gateway := m.Gateway("gw0")
 	gateway.OnFIBBuilt("route0", FIBBuildStats{
@@ -288,7 +287,7 @@ func TestGatewayMetrics_FIBBuilt(t *testing.T) {
 // TestGatewayMetrics_ObserveApply verifies that ObserveApply updates the
 // apply counters and renders a non-empty duration histogram.
 func TestGatewayMetrics_ObserveApply(t *testing.T) {
-	m := NewMetrics(newRIBStore(zap.NewNop()), neigh.NewNeighTable())
+	m := NewMetrics(newRIBStore(), neigh.NewNeighTable())
 	gateway := m.Gateway("gw0")
 
 	gateway.ObserveApply(10*time.Millisecond, nil)
@@ -321,7 +320,7 @@ func TestGatewayMetrics_ObserveApply(t *testing.T) {
 // Apply call, returns the inner error unchanged, and delegates Close.
 func TestMeteredActuator(t *testing.T) {
 	inner := &fakeActuator{applyErr: errors.New("gateway unreachable")}
-	m := NewMetrics(newRIBStore(zap.NewNop()), neigh.NewNeighTable())
+	m := NewMetrics(newRIBStore(), neigh.NewNeighTable())
 	gateway := m.Gateway("gw0")
 
 	actuator := newMeteredActuator(inner, gateway)
