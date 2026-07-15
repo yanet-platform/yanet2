@@ -87,8 +87,8 @@ func ParseTopLevelKeysBeforeMarkerFromContent(content, marker string) []string {
 		before = strings.Split(content, marker)[0]
 	}
 	var keys []string
-	lines := strings.Split(strings.ReplaceAll(before, "\r\n", "\n"), "\n")
-	for _, raw := range lines {
+	lines := strings.SplitSeq(strings.ReplaceAll(before, "\r\n", "\n"), "\n")
+	for raw := range lines {
 		ln := raw
 		if strings.TrimSpace(ln) == "" {
 			continue

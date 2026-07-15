@@ -3,6 +3,7 @@ package rib
 import (
 	"net/netip"
 	"slices"
+	"strings"
 	"testing"
 	"unsafe"
 
@@ -16,14 +17,14 @@ func TestRouteComparator(t *testing.T) {
 	c.Prefix = netip.MustParsePrefix("::cccc/128")
 
 	s := func(routes ...Route) string {
-		ret := ""
+		var ret strings.Builder
 		for idx, r := range routes {
 			if idx > 0 {
-				ret += ", "
+				ret.WriteString(", ")
 			}
-			ret += r.Prefix.String()
+			ret.WriteString(r.Prefix.String())
 		}
-		return ret
+		return ret.String()
 	}
 
 	require.True(t, routeCompare(a, b) == 0, "routeCompare(%s, %s) != 0", s(a), s(b))

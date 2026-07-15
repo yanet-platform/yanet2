@@ -259,7 +259,7 @@ func packetsMatchIgnoringMACs(expected, actual []byte) bool {
 				if len(ethCopy.BaseLayer.Contents) >= 12 {
 					contentsCopy := make([]byte, len(ethCopy.BaseLayer.Contents))
 					copy(contentsCopy, ethCopy.BaseLayer.Contents)
-					for j := 0; j < 12; j++ {
+					for j := range 12 {
 						contentsCopy[j] = 0
 					}
 					ethCopy.BaseLayer.Contents = contentsCopy

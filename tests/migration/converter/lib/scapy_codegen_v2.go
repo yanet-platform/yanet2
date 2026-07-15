@@ -22,10 +22,10 @@ type IRPacketPattern struct {
 
 // IRVaryingParam represents a parameter that varies across packets
 type IRVaryingParam struct {
-	LayerIndex int           // Which layer (0-based)
-	LayerType  string        // "IP", "IPv6", etc.
-	ParamName  string        // "dst", "src", etc.
-	Values     []interface{} // All values across packets
+	LayerIndex int    // Which layer (0-based)
+	LayerType  string // "IP", "IPv6", etc.
+	ParamName  string // "dst", "src", etc.
+	Values     []any  // All values across packets
 }
 
 // ScapyCodegenV2 generates Go code from IR JSON
@@ -413,11 +413,11 @@ func (cg *ScapyCodegenV2) generateIPOptions(layer IRLayer) string {
 	}
 	// Handle IPv4 options
 	if optionsAny, ok := layer.Params["options"]; ok {
-		if options, ok := optionsAny.([]interface{}); ok && len(options) > 0 {
+		if options, ok := optionsAny.([]any); ok && len(options) > 0 {
 			// Generate helper variables for hex data before the struct literal
 			optVarIndex := 0
 			for _, optAny := range options {
-				if optMap, ok := optAny.(map[string]interface{}); ok {
+				if optMap, ok := optAny.(map[string]any); ok {
 					if d, ok := optMap["data"].(string); ok && d != "" {
 						code.WriteString(fmt.Sprintf(`			optData%d := decodeHex(t, %q)
 `, optVarIndex, d))
@@ -429,7 +429,7 @@ func (cg *ScapyCodegenV2) generateIPOptions(layer IRLayer) string {
 			optVarIndex = 0
 			code.WriteString("\t\t\t\tlib.IPv4Options([]lib.IPv4OptionDef{\n")
 			for _, optAny := range options {
-				if optMap, ok := optAny.(map[string]interface{}); ok {
+				if optMap, ok := optAny.(map[string]any); ok {
 					optType := int(formatValueToInt(optMap["type"]))
 					var optLen int
 					var optData string
@@ -534,11 +534,11 @@ func (cg *ScapyCodegenV2) generateTCPOptions(layer IRLayer) string {
 	}
 	// Handle TCP options
 	if optionsAny, ok := layer.Params["options"]; ok {
-		if options, ok := optionsAny.([]interface{}); ok && len(options) > 0 {
+		if options, ok := optionsAny.([]any); ok && len(options) > 0 {
 			// Generate helper variables for hex data before the struct literal
 			optVarIndex := 0
 			for _, optAny := range options {
-				if optMap, ok := optAny.(map[string]interface{}); ok {
+				if optMap, ok := optAny.(map[string]any); ok {
 					if d, ok := optMap["data"].(string); ok && d != "" {
 						code.WriteString(fmt.Sprintf(`			tcpOptData%d := decodeHex(t, %q)
 `, optVarIndex, d))
@@ -550,7 +550,7 @@ func (cg *ScapyCodegenV2) generateTCPOptions(layer IRLayer) string {
 			optVarIndex = 0
 			code.WriteString("\t\t\t\tlib.TCPOptions([]lib.TCPOptionDef{\n")
 			for _, optAny := range options {
-				if optMap, ok := optAny.(map[string]interface{}); ok {
+				if optMap, ok := optAny.(map[string]any); ok {
 					optKind := int(formatValueToInt(optMap["kind"]))
 					var optLen int
 					var optData string
@@ -817,8 +817,8 @@ func (cg *ScapyCodegenV2) generateIPSecESPOptions(layer IRLayer) string {
 // generateRawOptions generates Raw/Payload options
 func (cg *ScapyCodegenV2) generateRawOptions(layer IRLayer) string {
 	// Check for payload in special handling
-	if special, ok := layer.Params["_special"].(map[string]interface{}); ok {
-		if payload, ok := special["payload"].(map[string]interface{}); ok {
+	if special, ok := layer.Params["_special"].(map[string]any); ok {
+		if payload, ok := special["payload"].(map[string]any); ok {
 			if payloadType, ok := payload["type"].(string); ok && payloadType == "string_mult" {
 				content := payload["content"].(string)
 				count := payload["count"]
@@ -841,9 +841,9 @@ func (cg *ScapyCodegenV2) generateRawOptions(layer IRLayer) string {
 func (cg *ScapyCodegenV2) findPortRange(pkt IRPacketDef) (*IRLayer, string) {
 	for i := range pkt.Layers {
 		layer := &pkt.Layers[i]
-		if special, ok := layer.Params["_special"].(map[string]interface{}); ok {
+		if special, ok := layer.Params["_special"].(map[string]any); ok {
 			for field, handling := range special {
-				if handlingMap, ok := handling.(map[string]interface{}); ok {
+				if handlingMap, ok := handling.(map[string]any); ok {
 					if handlingType, ok := handlingMap["type"].(string); ok && handlingType == "port_range" {
 						return layer, field
 					}
@@ -858,9 +858,9 @@ func (cg *ScapyCodegenV2) findPortRange(pkt IRPacketDef) (*IRLayer, string) {
 func (cg *ScapyCodegenV2) findParamArray(pkt IRPacketDef) (*IRLayer, string) {
 	for i := range pkt.Layers {
 		layer := &pkt.Layers[i]
-		if special, ok := layer.Params["_special"].(map[string]interface{}); ok {
+		if special, ok := layer.Params["_special"].(map[string]any); ok {
 			for field, handling := range special {
-				if handlingMap, ok := handling.(map[string]interface{}); ok {
+				if handlingMap, ok := handling.(map[string]any); ok {
 					if handlingType, ok := handlingMap["type"].(string); ok && handlingType == "param_array" {
 						return layer, field
 					}
@@ -875,9 +875,9 @@ func (cg *ScapyCodegenV2) findParamArray(pkt IRPacketDef) (*IRLayer, string) {
 func (cg *ScapyCodegenV2) findCIDRExpansion(pkt IRPacketDef) (*IRLayer, string) {
 	for i := range pkt.Layers {
 		layer := &pkt.Layers[i]
-		if special, ok := layer.Params["_special"].(map[string]interface{}); ok {
+		if special, ok := layer.Params["_special"].(map[string]any); ok {
 			for field, handling := range special {
-				if handlingMap, ok := handling.(map[string]interface{}); ok {
+				if handlingMap, ok := handling.(map[string]any); ok {
 					if handlingType, ok := handlingMap["type"].(string); ok && handlingType == "cidr_expansion" {
 						return layer, field
 					}
@@ -893,9 +893,9 @@ func (cg *ScapyCodegenV2) generatePortRangePackets(pkt IRPacketDef, idx int, por
 	var code strings.Builder
 
 	// Extract range from special handling
-	special := portLayer.Params["_special"].(map[string]interface{})
-	rangeInfo := special[field].(map[string]interface{})
-	rangeVals := rangeInfo["range"].([]interface{})
+	special := portLayer.Params["_special"].(map[string]any)
+	rangeInfo := special[field].(map[string]any)
+	rangeVals := rangeInfo["range"].([]any)
 	start := int(rangeVals[0].(float64))
 	end := int(rangeVals[1].(float64))
 
@@ -926,9 +926,9 @@ func (cg *ScapyCodegenV2) generateParamArrayPackets(pkt IRPacketDef, idx int, pa
 	var code strings.Builder
 
 	// Extract values from special handling
-	special := paramLayer.Params["_special"].(map[string]interface{})
-	arrayInfo := special[field].(map[string]interface{})
-	values := arrayInfo["values"].([]interface{})
+	special := paramLayer.Params["_special"].(map[string]any)
+	arrayInfo := special[field].(map[string]any)
+	values := arrayInfo["values"].([]any)
 
 	code.WriteString(fmt.Sprintf("\t// Generate packets with different %s values\n", field))
 	code.WriteString("\tfor _, val := range []int{")
@@ -973,8 +973,8 @@ func (cg *ScapyCodegenV2) generateCIDRExpansionPackets(pkt IRPacketDef, idx int,
 	var code strings.Builder
 
 	// Extract CIDR from special handling
-	special := cidrLayer.Params["_special"].(map[string]interface{})
-	cidrInfo := special[field].(map[string]interface{})
+	special := cidrLayer.Params["_special"].(map[string]any)
+	cidrInfo := special[field].(map[string]any)
 	cidrStr := cidrInfo["cidr"].(string)
 
 	code.WriteString(fmt.Sprintf("\t// Generate packets for all IPs in CIDR %s\n", cidrStr))
@@ -1054,14 +1054,14 @@ func (cg *ScapyCodegenV2) generateFragmentedPacket(pkt IRPacketDef, idx int, fra
 
 // stripCIDR removes CIDR notation from IP addresses
 func stripCIDR(s string) string {
-	if idx := strings.Index(s, "/"); idx != -1 {
-		return s[:idx]
+	if before, _, ok := strings.Cut(s, "/"); ok {
+		return before
 	}
 	return s
 }
 
 // formatValueToInt converts a value to int for protocol checking
-func formatValueToInt(val interface{}) int64 {
+func formatValueToInt(val any) int64 {
 	switch v := val.(type) {
 	case float64:
 		return int64(v)
@@ -1079,7 +1079,7 @@ func formatValueToInt(val interface{}) int64 {
 }
 
 // formatValue formats a value for Go code
-func formatValue(val interface{}) string {
+func formatValue(val any) string {
 	switch v := val.(type) {
 	case string:
 		// Check if it's a variable reference
@@ -1136,7 +1136,7 @@ func (cg *ScapyCodegenV2) detectIRPacketPattern(packets []IRPacketDef) *IRPacket
 	bestEnd := 0
 	bestCount := 0
 
-	for start := 0; start < len(packets); start++ {
+	for start := range packets {
 		refPacket := packets[start]
 
 		// Skip packets with special handling
@@ -1201,7 +1201,7 @@ func (cg *ScapyCodegenV2) detectIRPacketPattern(packets []IRPacketDef) *IRPacket
 
 	// For each layer
 	for layerIdx, refLayer := range refPacket.Layers {
-		commonParams := make(map[string]interface{})
+		commonParams := make(map[string]any)
 		varyingParamNames := make(map[string]bool)
 
 		// Check each parameter
@@ -1212,12 +1212,12 @@ func (cg *ScapyCodegenV2) detectIRPacketPattern(packets []IRPacketDef) *IRPacket
 			}
 
 			// Skip map parameters (like _special) - they can't be compared directly
-			if _, isMap := refValue.(map[string]interface{}); isMap {
+			if _, isMap := refValue.(map[string]any); isMap {
 				continue
 			}
 
 			isConstant := true
-			values := []interface{}{refValue}
+			values := []any{refValue}
 
 			// Compare with all other packets in the group
 			for _, pkt := range groupPackets[1:] {
@@ -1228,7 +1228,7 @@ func (cg *ScapyCodegenV2) detectIRPacketPattern(packets []IRPacketDef) *IRPacket
 				}
 
 				// Skip map parameters in comparison
-				if _, isMap := otherValue.(map[string]interface{}); isMap {
+				if _, isMap := otherValue.(map[string]any); isMap {
 					continue
 				}
 
@@ -1573,7 +1573,7 @@ func (cg *ScapyCodegenV2) makeParamName(layerType, paramName string) string {
 }
 
 // inferFieldTypeForParam infers the type based on layer type, parameter name, and values
-func (cg *ScapyCodegenV2) inferFieldTypeForParam(layerType, paramName string, values []interface{}) string {
+func (cg *ScapyCodegenV2) inferFieldTypeForParam(layerType, paramName string, values []any) string {
 	// Special cases for known parameter types
 	if layerType == "TCP" || layerType == "UDP" {
 		if paramName == "sport" || paramName == "dport" {
@@ -1586,7 +1586,7 @@ func (cg *ScapyCodegenV2) inferFieldTypeForParam(layerType, paramName string, va
 }
 
 // inferFieldTypeFromValues infers the type from all values (not just the first one)
-func (cg *ScapyCodegenV2) inferFieldTypeFromValues(values []interface{}) string {
+func (cg *ScapyCodegenV2) inferFieldTypeFromValues(values []any) string {
 	if len(values) == 0 {
 		return "interface{}"
 	}
@@ -1665,11 +1665,11 @@ func (cg *ScapyCodegenV2) inferFieldTypeFromValues(values []interface{}) string 
 	return "interface{}"
 }
 
-func (cg *ScapyCodegenV2) inferFieldType(value interface{}) string {
-	return cg.inferFieldTypeFromValues([]interface{}{value})
+func (cg *ScapyCodegenV2) inferFieldType(value any) string {
+	return cg.inferFieldTypeFromValues([]any{value})
 }
 
-func (cg *ScapyCodegenV2) formatValueForCode(value interface{}) string {
+func (cg *ScapyCodegenV2) formatValueForCode(value any) string {
 	switch v := value.(type) {
 	case string:
 		return fmt.Sprintf("%q", v)

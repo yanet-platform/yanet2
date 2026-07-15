@@ -311,7 +311,7 @@ func (m *updateDecoder) decodeAttributes(route *rib.Route) error {
 	// SAFETY: newUpdate checks for data boundaries.
 	// Skip the attrsAreaSize field (4 bytes) and get slice of attribute data
 	data := unsafe.Slice((*byte)(
-		unsafe.Pointer(uintptr(unsafe.Pointer(&m.update.attrsAreaSize))+sizeOfUint32)),
+		unsafe.Add(unsafe.Pointer(&m.update.attrsAreaSize), sizeOfUint32)),
 		m.update.attrsAreaSize,
 	)
 
@@ -391,7 +391,7 @@ func (m *updateDecoder) decodeComplexAttribute(route *rib.Route, data []byte, ty
 			// Extract ASNs from the first AS_SEQUENCE or AS_CONFED_SEQUENCE segment
 			// to populate route.ASPath for peer/origin AS resolution.
 			if !asPathExtracted && (segmentType == ASPathSequence || segmentType == ASPathConfedSequence) {
-				for idx := uint8(0); idx < asPathLen; idx++ {
+				for idx := range asPathLen {
 					route.ASPath = append(route.ASPath, binary.BigEndian.Uint32(data[int(idx)*int(sizeOfUint32):]))
 				}
 				asPathExtracted = true

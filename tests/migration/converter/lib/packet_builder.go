@@ -3,6 +3,7 @@ package lib
 import (
 	"fmt"
 	"net"
+	"slices"
 
 	"github.com/gopacket/gopacket"
 	"github.com/gopacket/gopacket/layers"
@@ -432,7 +433,7 @@ func IPv4IHL(ihl uint8) IPv4Option {
 func IPv4DummyOptions(size int) IPv4Option {
 	return func(builder *IPv4Builder) {
 		// Add NOP options to fill the required size
-		for i := 0; i < size; i++ {
+		for range size {
 			builder.layer.Options = append(builder.layer.Options, layers.IPv4Option{
 				OptionType: 1, // NOP
 			})
@@ -940,7 +941,7 @@ func TCPDataOffset(offset uint8) TCPOption {
 func TCPDummyOptions(size int) TCPOption {
 	return func(builder *TCPBuilder) {
 		// Add NOP options to fill the required size
-		for i := 0; i < size; i++ {
+		for range size {
 			builder.layer.Options = append(builder.layer.Options, layers.TCPOption{
 				OptionType: layers.TCPOptionKindNop, // NOP
 			})
@@ -1712,7 +1713,7 @@ func PortRange(start, end uint16) []uint16 {
 // Payload creates a repeated byte slice from string content
 func Payload(content string, repeat int) []byte {
 	result := make([]byte, 0, len(content)*repeat)
-	for i := 0; i < repeat; i++ {
+	for range repeat {
 		result = append(result, []byte(content)...)
 	}
 	return result
@@ -2233,7 +2234,7 @@ func ExpandCIDR(cidr string) []string {
 
 // incIP increments an IP address (helper for ExpandCIDR)
 func incIP(ip net.IP) {
-	for j := len(ip) - 1; j >= 0; j-- {
+	for j := range slices.Backward(ip) {
 		ip[j]++
 		if ip[j] > 0 {
 			break

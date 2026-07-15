@@ -17,8 +17,8 @@ import (
 //   - For malformed packets we prefer to preserve raw lengths/checksums/options
 //     exactly as seen in the original PCAP, even if they are inconsistent.
 type IRLayer struct {
-	Type   string                 `json:"type"`
-	Params map[string]interface{} `json:"params"`
+	Type   string         `json:"type"`
+	Params map[string]any `json:"params"`
 }
 
 // IRPacketDef represents one logical packet reconstructed from a pair of
@@ -29,8 +29,8 @@ type IRLayer struct {
 // GRE flags, or other features that the generator cannot easily infer
 // from individual layers alone.
 type IRPacketDef struct {
-	Layers          []IRLayer              `json:"layers"`
-	SpecialHandling map[string]interface{} `json:"special_handling"`
+	Layers          []IRLayer      `json:"layers"`
+	SpecialHandling map[string]any `json:"special_handling"`
 }
 
 // IRPCAPPair represents a pair of send/expect PCAP files and the reconstructed

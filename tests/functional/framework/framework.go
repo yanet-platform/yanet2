@@ -1373,12 +1373,13 @@ func (f *TestFramework) Unmount9P() error {
 	}
 	// Batch all umounts into a single command to avoid 6 round-trips
 	// through the serial console (~600ms → ~100ms).
-	cmd := "umount"
+	var cmd strings.Builder
+	cmd.WriteString("umount")
 	for _, mp := range guest9PMountPoints {
-		cmd += " " + mp
+		cmd.WriteString(" " + mp)
 	}
-	cmd += " 2>/dev/null; true"
-	if _, err := f.ExecuteCommand(cmd); err != nil {
+	cmd.WriteString(" 2>/dev/null; true")
+	if _, err := f.ExecuteCommand(cmd.String()); err != nil {
 		f.log.Debugf("batch umount returned error (may be already unmounted): %v", err)
 	}
 	f.qemu.Ninepmounted.Store(false)

@@ -391,14 +391,14 @@ func NewConverter(config *Config) (*Converter, error) {
 var ErrTestSkipped = errors.New("test skipped by skiplist")
 
 // debugLog outputs debug information if debug mode is enabled
-func (c *Converter) debugLog(format string, args ...interface{}) {
+func (c *Converter) debugLog(format string, args ...any) {
 	if c.config.Debug {
 		log.Printf("[DEBUG] "+format, args...)
 	}
 }
 
 // verbose outputs verbose information if verbose mode is enabled
-func (c *Converter) verbose(format string, args ...interface{}) {
+func (c *Converter) verbose(format string, args ...any) {
 	if c.config.Verbose {
 		log.Printf(format, args...)
 	}
@@ -656,7 +656,7 @@ func parseTopLevelKeysBeforeMarker(skiplistPath string) (map[string]struct{}, er
 
 // YanetTest represents the structure of a yanet1 test
 type YanetTest struct {
-	Steps []map[string]interface{} `yaml:"steps"`
+	Steps []map[string]any `yaml:"steps"`
 }
 
 // ParseAutotestYAML reads and parses autotest.yaml from the given test directory
@@ -889,7 +889,7 @@ func (c *Converter) ConvertSingleTest(testPath, testName string) error {
 }
 
 // determineTestType determines test type based on parsed config and steps
-func (c *Converter) determineTestType(steps []map[string]interface{}, controlplaneConfig string, parsedConfig *ControlplaneConfig) string {
+func (c *Converter) determineTestType(steps []map[string]any, controlplaneConfig string, parsedConfig *ControlplaneConfig) string {
 	// First priority: use parsed configuration modules if available
 	// Check in priority order: nat64 > balancer > decap > acl
 	if parsedConfig != nil && parsedConfig.Modules != nil {

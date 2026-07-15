@@ -1,0 +1,12 @@
+version: "2"
+
+run:
+  tests: true
+
+linters:
+  default: none
+  enable:
+    - modernize
+  exclusions:
+    paths:
+      - \.pb\.go$

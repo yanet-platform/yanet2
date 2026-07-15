@@ -16,20 +16,20 @@ type ControlplaneConfig struct {
 
 // Module represents a module in yanet1 configuration
 type Module struct {
-	Type                    string                 `json:"type"`
-	PhysicalPort            string                 `json:"physicalPort"`
-	VlanId                  string                 `json:"vlanId"`
-	MacAddress              string                 `json:"macAddress"`
-	NextModule              string                 `json:"nextModule"`
-	NextModules             []string               `json:"nextModules"`
-	IPv6Prefixes            []string               `json:"ipv6_prefixes"`
-	IPv4Prefixes            []string               `json:"ipv4_prefixes"`
-	IPv6DestinationPrefixes []string               `json:"ipv6DestinationPrefixes"`
-	IPv4DestinationPrefixes []string               `json:"ipv4DestinationPrefixes"`
-	Translations            []NAT64Translation     `json:"translations"`
-	Announces               []string               `json:"announces"`
-	Interfaces              map[string]Interface   `json:"interfaces"`
-	RawData                 map[string]interface{} `json:"-"` // For storing other fields
+	Type                    string               `json:"type"`
+	PhysicalPort            string               `json:"physicalPort"`
+	VlanId                  string               `json:"vlanId"`
+	MacAddress              string               `json:"macAddress"`
+	NextModule              string               `json:"nextModule"`
+	NextModules             []string             `json:"nextModules"`
+	IPv6Prefixes            []string             `json:"ipv6_prefixes"`
+	IPv4Prefixes            []string             `json:"ipv4_prefixes"`
+	IPv6DestinationPrefixes []string             `json:"ipv6DestinationPrefixes"`
+	IPv4DestinationPrefixes []string             `json:"ipv4DestinationPrefixes"`
+	Translations            []NAT64Translation   `json:"translations"`
+	Announces               []string             `json:"announces"`
+	Interfaces              map[string]Interface `json:"interfaces"`
+	RawData                 map[string]any       `json:"-"` // For storing other fields
 }
 
 // NAT64Translation represents a NAT64 translation entry

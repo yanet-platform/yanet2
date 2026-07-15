@@ -424,7 +424,7 @@ func (p *PcapAnalyzer) ConvertPacketInfoToIR(packets []*PacketInfo, sendFile str
 					greProtocol := uint16(ipv6Payload[2])<<8 | uint16(ipv6Payload[3])
 
 					// Add GRE layer to IR
-					greParams := make(map[string]interface{})
+					greParams := make(map[string]any)
 					greParams["proto"] = int(greProtocol)
 					greParams["raw_flags"] = int(greFlags)
 					greParams["chksum_present"] = 0
@@ -562,7 +562,7 @@ func (p *PcapAnalyzer) ConvertPacketInfoToIR(packets []*PacketInfo, sendFile str
 						dstIP := net.IP(ipv4Data[16:20])
 
 						// Create IPv4 IR layer
-						ipv4Params := make(map[string]interface{})
+						ipv4Params := make(map[string]any)
 						ipv4Params["src"] = srcIP.String()
 						ipv4Params["dst"] = dstIP.String()
 						ipv4Params["ttl"] = int(ttl)
@@ -606,20 +606,20 @@ func (p *PcapAnalyzer) ConvertPacketInfoToIR(packets []*PacketInfo, sendFile str
 									ipv4Params["raw_options"] = fmt.Sprintf("%x", optionsData)
 								} else {
 									// Try to parse structured options
-									var opts []map[string]interface{}
+									var opts []map[string]any
 									i := 0
 									for i < len(optionsData) {
 										optType := optionsData[i]
 										if optType == 0 || optType == 1 {
 											// EOL or NOP
-											opts = append(opts, map[string]interface{}{
+											opts = append(opts, map[string]any{
 												"type": int(optType),
 											})
 											i++
 										} else if i+1 < len(optionsData) {
 											// Option with length
 											optLen := int(optionsData[i+1])
-											opt := map[string]interface{}{
+											opt := map[string]any{
 												"type": int(optType),
 												"len":  optLen,
 											}
@@ -678,7 +678,7 @@ func (p *PcapAnalyzer) ConvertPacketInfoToIR(packets []*PacketInfo, sendFile str
 								chksum := uint16(payloadData[16])<<8 | uint16(payloadData[17])
 								urgent := uint16(payloadData[18])<<8 | uint16(payloadData[19])
 
-								tcpParams := make(map[string]interface{})
+								tcpParams := make(map[string]any)
 								tcpParams["sport"] = int(sport)
 								tcpParams["dport"] = int(dport)
 								tcpParams["seq"] = int(seq)
@@ -725,18 +725,18 @@ func (p *PcapAnalyzer) ConvertPacketInfoToIR(packets []*PacketInfo, sendFile str
 									optionsLen := int(dataOffset)*4 - 20
 									if optionsLen > 0 && 20+optionsLen <= len(payloadData) {
 										optionsData := payloadData[20 : 20+optionsLen]
-										var opts []map[string]interface{}
+										var opts []map[string]any
 										i := 0
 										for i < len(optionsData) {
 											optKind := optionsData[i]
 											if optKind == 0 || optKind == 1 { // EOL or NOP
-												opts = append(opts, map[string]interface{}{
+												opts = append(opts, map[string]any{
 													"kind": int(optKind),
 												})
 												i++
 											} else if i+1 < len(optionsData) {
 												optLen := int(optionsData[i+1])
-												opt := map[string]interface{}{
+												opt := map[string]any{
 													"kind": int(optKind),
 													"len":  optLen,
 												}
@@ -768,7 +768,7 @@ func (p *PcapAnalyzer) ConvertPacketInfoToIR(packets []*PacketInfo, sendFile str
 									if len(tcpPayload) > 0 {
 										rawPayloadIR := IRLayer{
 											Type:   "Raw",
-											Params: map[string]interface{}{"_arg0": string(tcpPayload)},
+											Params: map[string]any{"_arg0": string(tcpPayload)},
 										}
 										irLayers = append(irLayers, rawPayloadIR)
 									}
@@ -777,7 +777,7 @@ func (p *PcapAnalyzer) ConvertPacketInfoToIR(packets []*PacketInfo, sendFile str
 								// For non-TCP or too short payload, add as Raw
 								rawPayloadIR := IRLayer{
 									Type:   "Raw",
-									Params: map[string]interface{}{"_arg0": string(payloadData)},
+									Params: map[string]any{"_arg0": string(payloadData)},
 								}
 								irLayers = append(irLayers, rawPayloadIR)
 							}
@@ -791,7 +791,7 @@ func (p *PcapAnalyzer) ConvertPacketInfoToIR(packets []*PacketInfo, sendFile str
 		if collapseIPv6ToRaw && len(ipv6PayloadBytes) > 0 {
 			irLayers = append(irLayers, IRLayer{
 				Type:   "Raw",
-				Params: map[string]interface{}{"_arg0": string(ipv6PayloadBytes)},
+				Params: map[string]any{"_arg0": string(ipv6PayloadBytes)},
 			})
 		}
 
@@ -802,7 +802,7 @@ func (p *PcapAnalyzer) ConvertPacketInfoToIR(packets []*PacketInfo, sendFile str
 				if len(payload) > 0 {
 					irLayers = append(irLayers, IRLayer{
 						Type:   "Raw",
-						Params: map[string]interface{}{"_arg0": string(payload)},
+						Params: map[string]any{"_arg0": string(payload)},
 					})
 				}
 			}
@@ -996,7 +996,7 @@ func (p *PcapAnalyzer) ConvertPacketInfoToIR(packets []*PacketInfo, sendFile str
 							chksum := uint16(tcpData[16])<<8 | uint16(tcpData[17])
 							urgent := uint16(tcpData[18])<<8 | uint16(tcpData[19])
 
-							tcpParams := make(map[string]interface{})
+							tcpParams := make(map[string]any)
 							tcpParams["sport"] = int(sport)
 							tcpParams["dport"] = int(dport)
 							tcpParams["seq"] = int(seq)
@@ -1295,7 +1295,7 @@ func (p *PcapAnalyzer) convertLayerToIR(layer gopacket.Layer, opts CodegenOpts) 
 
 // convertEthernetToIR converts Ethernet layer to IR
 func (p *PcapAnalyzer) convertEthernetToIR(eth *layers.Ethernet, opts CodegenOpts) *IRLayer {
-	params := make(map[string]interface{})
+	params := make(map[string]any)
 
 	// Handle MAC addresses based on options
 	if opts.UseFrameworkMACs {
@@ -1323,7 +1323,7 @@ func (p *PcapAnalyzer) convertEthernetToIR(eth *layers.Ethernet, opts CodegenOpt
 
 // convertDot1QToIR converts VLAN layer to IR
 func (p *PcapAnalyzer) convertDot1QToIR(vlan *layers.Dot1Q) *IRLayer {
-	params := make(map[string]interface{})
+	params := make(map[string]any)
 	params["vlan"] = int(vlan.VLANIdentifier)
 
 	return &IRLayer{
@@ -1339,7 +1339,7 @@ func (p *PcapAnalyzer) convertIPv4ToIR(ipv4 *layers.IPv4, opts CodegenOpts) *IRL
 		return nil
 	}
 
-	params := make(map[string]interface{})
+	params := make(map[string]any)
 
 	params["src"] = ipv4.SrcIP.String()
 	params["dst"] = ipv4.DstIP.String()
@@ -1376,9 +1376,9 @@ func (p *PcapAnalyzer) convertIPv4ToIR(ipv4 *layers.IPv4, opts CodegenOpts) *IRL
 	}
 	// Extract IPv4 options as structured data
 	if len(ipv4.Options) > 0 {
-		var opts []map[string]interface{}
+		var opts []map[string]any
 		for _, opt := range ipv4.Options {
-			optMap := map[string]interface{}{
+			optMap := map[string]any{
 				"type": int(opt.OptionType),
 			}
 			if opt.OptionLength > 0 {
@@ -1407,7 +1407,7 @@ func (p *PcapAnalyzer) convertIPv4ToIR(ipv4 *layers.IPv4, opts CodegenOpts) *IRL
 
 // convertIPv6ToIR converts IPv6 layer to IR
 func (p *PcapAnalyzer) convertIPv6ToIR(ipv6 *layers.IPv6, opts CodegenOpts) *IRLayer {
-	params := make(map[string]interface{})
+	params := make(map[string]any)
 
 	params["src"] = ipv6.SrcIP.String()
 	params["dst"] = ipv6.DstIP.String()
@@ -1432,7 +1432,7 @@ func (p *PcapAnalyzer) convertIPv6ToIR(ipv6 *layers.IPv6, opts CodegenOpts) *IRL
 
 // convertTCPToIR converts TCP layer to IR
 func (p *PcapAnalyzer) convertTCPToIR(tcp *layers.TCP) *IRLayer {
-	params := make(map[string]interface{})
+	params := make(map[string]any)
 
 	params["sport"] = int(tcp.SrcPort)
 	params["dport"] = int(tcp.DstPort)
@@ -1451,9 +1451,9 @@ func (p *PcapAnalyzer) convertTCPToIR(tcp *layers.TCP) *IRLayer {
 	}
 	// Extract TCP options as structured data
 	if len(tcp.Options) > 0 {
-		var opts []map[string]interface{}
+		var opts []map[string]any
 		for _, opt := range tcp.Options {
-			optMap := map[string]interface{}{
+			optMap := map[string]any{
 				"kind": int(opt.OptionType),
 			}
 			if opt.OptionLength > 0 {
@@ -1519,7 +1519,7 @@ func (p *PcapAnalyzer) convertTCPToIR(tcp *layers.TCP) *IRLayer {
 
 // convertUDPToIR converts UDP layer to IR
 func (p *PcapAnalyzer) convertUDPToIR(udp *layers.UDP) *IRLayer {
-	params := make(map[string]interface{})
+	params := make(map[string]any)
 
 	params["sport"] = int(udp.SrcPort)
 	params["dport"] = int(udp.DstPort)
@@ -1550,7 +1550,7 @@ func (p *PcapAnalyzer) convertUDPToIR(udp *layers.UDP) *IRLayer {
 
 // convertICMPv4ToIR converts ICMPv4 layer to IR
 func (p *PcapAnalyzer) convertICMPv4ToIR(icmp *layers.ICMPv4) *IRLayer {
-	params := make(map[string]interface{})
+	params := make(map[string]any)
 
 	typeCode := uint16(icmp.TypeCode)
 	params["type"] = int(typeCode >> 8)
@@ -1581,7 +1581,7 @@ func (p *PcapAnalyzer) convertICMPv4ToIR(icmp *layers.ICMPv4) *IRLayer {
 // convertICMPv6ToIR converts ICMPv6 layer to IR
 // For Echo Request/Reply, extracts payload beyond ICMPv6Echo header (4 bytes: Id + Seq)
 func (p *PcapAnalyzer) convertICMPv6ToIR(icmp *layers.ICMPv6) []*IRLayer {
-	params := make(map[string]interface{})
+	params := make(map[string]any)
 
 	typeCode := uint16(icmp.TypeCode)
 	icmpType := int(typeCode >> 8)
@@ -1670,7 +1670,7 @@ func (p *PcapAnalyzer) convertICMPv6ToIR(icmp *layers.ICMPv6) []*IRLayer {
 			if len(actualPayload) > 0 {
 				rawLayer := &IRLayer{
 					Type: "Raw",
-					Params: map[string]interface{}{
+					Params: map[string]any{
 						"_arg0": string(actualPayload),
 					},
 				}
@@ -1688,7 +1688,7 @@ func (p *PcapAnalyzer) convertICMPv6ToIR(icmp *layers.ICMPv6) []*IRLayer {
 
 // convertICMPv6EchoToIR converts ICMPv6 Echo layer to IR
 func (p *PcapAnalyzer) convertICMPv6EchoToIR(echo *layers.ICMPv6Echo) *IRLayer {
-	params := make(map[string]interface{})
+	params := make(map[string]any)
 
 	if echo.Identifier != 0 {
 		params["id"] = int(echo.Identifier)
@@ -1706,7 +1706,7 @@ func (p *PcapAnalyzer) convertICMPv6EchoToIR(echo *layers.ICMPv6Echo) *IRLayer {
 
 // convertMPLSToIR converts MPLS layer to IR
 func (p *PcapAnalyzer) convertMPLSToIR(mpls *layers.MPLS) *IRLayer {
-	params := make(map[string]interface{})
+	params := make(map[string]any)
 
 	if mpls.Label != 0 {
 		params["label"] = int(mpls.Label)
@@ -1732,7 +1732,7 @@ func (p *PcapAnalyzer) convertMPLSToIR(mpls *layers.MPLS) *IRLayer {
 
 // convertGREToIR converts GRE layer to IR
 func (p *PcapAnalyzer) convertGREToIR(gre *layers.GRE) *IRLayer {
-	params := make(map[string]interface{})
+	params := make(map[string]any)
 
 	// Always preserve protocol field from PCAP (even if 0) for exact packet reconstruction
 	params["proto"] = int(gre.Protocol)
@@ -1786,7 +1786,7 @@ func (p *PcapAnalyzer) convertGREToIR(gre *layers.GRE) *IRLayer {
 
 // convertIPv6FragmentToIR converts IPv6 Fragment header to IR
 func (p *PcapAnalyzer) convertIPv6FragmentToIR(frag *layers.IPv6Fragment) *IRLayer {
-	params := make(map[string]interface{})
+	params := make(map[string]any)
 
 	params["id"] = int(frag.Identification)
 	params["offset"] = int(frag.FragmentOffset)
@@ -1808,7 +1808,7 @@ func (p *PcapAnalyzer) convertIPv6FragmentToIR(frag *layers.IPv6Fragment) *IRLay
 func (p *PcapAnalyzer) convertIPv6HopByHopToIR(hbh *layers.IPv6HopByHop) *IRLayer {
 	return &IRLayer{
 		Type:   "Raw",
-		Params: map[string]interface{}{"_arg0": string(hbh.BaseLayer.Contents)},
+		Params: map[string]any{"_arg0": string(hbh.BaseLayer.Contents)},
 	}
 }
 
@@ -1816,7 +1816,7 @@ func (p *PcapAnalyzer) convertIPv6HopByHopToIR(hbh *layers.IPv6HopByHop) *IRLaye
 func (p *PcapAnalyzer) convertIPv6DestinationToIR(dst *layers.IPv6Destination) *IRLayer {
 	return &IRLayer{
 		Type:   "Raw",
-		Params: map[string]interface{}{"_arg0": string(dst.BaseLayer.Contents)},
+		Params: map[string]any{"_arg0": string(dst.BaseLayer.Contents)},
 	}
 }
 
@@ -1824,13 +1824,13 @@ func (p *PcapAnalyzer) convertIPv6DestinationToIR(dst *layers.IPv6Destination) *
 func (p *PcapAnalyzer) convertIPv6RoutingToIR(r *layers.IPv6Routing) *IRLayer {
 	return &IRLayer{
 		Type:   "Raw",
-		Params: map[string]interface{}{"_arg0": string(r.BaseLayer.Contents)},
+		Params: map[string]any{"_arg0": string(r.BaseLayer.Contents)},
 	}
 }
 
 // convertPayloadToIR converts payload to IR
 func (p *PcapAnalyzer) convertPayloadToIR(payload gopacket.Payload) *IRLayer {
-	params := make(map[string]interface{})
+	params := make(map[string]any)
 
 	// Store payload as hex string or raw bytes
 	// For simplicity, we'll use a special _arg0 parameter
@@ -1900,7 +1900,7 @@ func (p *PcapAnalyzer) GenerateTcpdumpComment(pcapPath string, packets []*Packet
 	short := filepath.Base(filepath.Dir(pcapPath)) + "/" + filepath.Base(pcapPath)
 	var b strings.Builder
 
-	for _, line := range strings.Split(string(out), "\n") {
+	for line := range strings.SplitSeq(string(out), "\n") {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
@@ -1917,7 +1917,7 @@ func (p *PcapAnalyzer) GenerateTcpdumpComment(pcapPath string, packets []*Packet
 
 // convertARPToIR converts ARP layer to IR
 func (p *PcapAnalyzer) convertARPToIR(arp *layers.ARP) *IRLayer {
-	params := make(map[string]interface{})
+	params := make(map[string]any)
 
 	params["operation"] = int(arp.Operation)
 	params["hwtype"] = int(arp.AddrType)
@@ -1937,13 +1937,13 @@ func (p *PcapAnalyzer) convertARPToIR(arp *layers.ARP) *IRLayer {
 
 // convertICMPv6RouterSolicitationToIR converts ICMPv6 Router Solicitation to IR
 func (p *PcapAnalyzer) convertICMPv6RouterSolicitationToIR(rs *layers.ICMPv6RouterSolicitation) *IRLayer {
-	params := make(map[string]interface{})
+	params := make(map[string]any)
 
 	// Router Solicitation has minimal fields
 	if len(rs.Options) > 0 {
-		var opts []map[string]interface{}
+		var opts []map[string]any
 		for _, opt := range rs.Options {
-			optMap := map[string]interface{}{
+			optMap := map[string]any{
 				"type": int(opt.Type),
 			}
 			if len(opt.Data) > 0 {
@@ -1962,7 +1962,7 @@ func (p *PcapAnalyzer) convertICMPv6RouterSolicitationToIR(rs *layers.ICMPv6Rout
 
 // convertICMPv6RouterAdvertisementToIR converts ICMPv6 Router Advertisement to IR
 func (p *PcapAnalyzer) convertICMPv6RouterAdvertisementToIR(ra *layers.ICMPv6RouterAdvertisement) *IRLayer {
-	params := make(map[string]interface{})
+	params := make(map[string]any)
 
 	params["hoplimit"] = int(ra.HopLimit)
 	params["flags"] = int(ra.Flags)
@@ -1971,9 +1971,9 @@ func (p *PcapAnalyzer) convertICMPv6RouterAdvertisementToIR(ra *layers.ICMPv6Rou
 	params["retranstimer"] = int(ra.RetransTimer)
 
 	if len(ra.Options) > 0 {
-		var opts []map[string]interface{}
+		var opts []map[string]any
 		for _, opt := range ra.Options {
-			optMap := map[string]interface{}{
+			optMap := map[string]any{
 				"type": int(opt.Type),
 			}
 			if len(opt.Data) > 0 {
@@ -1992,14 +1992,14 @@ func (p *PcapAnalyzer) convertICMPv6RouterAdvertisementToIR(ra *layers.ICMPv6Rou
 
 // convertICMPv6NeighborSolicitationToIR converts ICMPv6 Neighbor Solicitation to IR
 func (p *PcapAnalyzer) convertICMPv6NeighborSolicitationToIR(ns *layers.ICMPv6NeighborSolicitation) *IRLayer {
-	params := make(map[string]interface{})
+	params := make(map[string]any)
 
 	params["targetaddress"] = ns.TargetAddress.String()
 
 	if len(ns.Options) > 0 {
-		var opts []map[string]interface{}
+		var opts []map[string]any
 		for _, opt := range ns.Options {
-			optMap := map[string]interface{}{
+			optMap := map[string]any{
 				"type": int(opt.Type),
 			}
 			if len(opt.Data) > 0 {
@@ -2018,15 +2018,15 @@ func (p *PcapAnalyzer) convertICMPv6NeighborSolicitationToIR(ns *layers.ICMPv6Ne
 
 // convertICMPv6NeighborAdvertisementToIR converts ICMPv6 Neighbor Advertisement to IR
 func (p *PcapAnalyzer) convertICMPv6NeighborAdvertisementToIR(na *layers.ICMPv6NeighborAdvertisement) *IRLayer {
-	params := make(map[string]interface{})
+	params := make(map[string]any)
 
 	params["flags"] = int(na.Flags)
 	params["targetaddress"] = na.TargetAddress.String()
 
 	if len(na.Options) > 0 {
-		var opts []map[string]interface{}
+		var opts []map[string]any
 		for _, opt := range na.Options {
-			optMap := map[string]interface{}{
+			optMap := map[string]any{
 				"type": int(opt.Type),
 			}
 			if len(opt.Data) > 0 {
@@ -2045,7 +2045,7 @@ func (p *PcapAnalyzer) convertICMPv6NeighborAdvertisementToIR(na *layers.ICMPv6N
 
 // convertIPSecESPToIR converts IPSec ESP layer to IR
 func (p *PcapAnalyzer) convertIPSecESPToIR(esp *layers.IPSecESP) *IRLayer {
-	params := make(map[string]interface{})
+	params := make(map[string]any)
 
 	params["spi"] = int(esp.SPI)
 	params["seq"] = int(esp.Seq)
@@ -2063,7 +2063,7 @@ func (p *PcapAnalyzer) convertIPSecESPToIR(esp *layers.IPSecESP) *IRLayer {
 
 // convertIPSecAHToIR converts IPSec AH layer to IR
 func (p *PcapAnalyzer) convertIPSecAHToIR(ah *layers.IPSecAH) *IRLayer {
-	params := make(map[string]interface{})
+	params := make(map[string]any)
 
 	params["spi"] = int(ah.SPI)
 	params["seq"] = int(ah.Seq)

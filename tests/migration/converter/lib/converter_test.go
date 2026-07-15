@@ -11,7 +11,7 @@ func TestConvertCheckCounters_GeneratesValidation(t *testing.T) {
 	require.NoError(t, err)
 
 	// Sample counter check content from YAML - needs to be map[interface{}]interface{}
-	content := map[interface{}]interface{}{
+	content := map[any]any{
 		"counter1": 100,
 		"counter2": 95,
 	}
@@ -36,7 +36,7 @@ func TestConvertCheckCounters_HandlesInvalidContent(t *testing.T) {
 
 	testCases := []struct {
 		name    string
-		content interface{}
+		content any
 	}{
 		{
 			name:    "nil content",
@@ -48,11 +48,11 @@ func TestConvertCheckCounters_HandlesInvalidContent(t *testing.T) {
 		},
 		{
 			name:    "array content",
-			content: []interface{}{},
+			content: []any{},
 		},
 		{
 			name: "missing counters",
-			content: map[string]interface{}{
+			content: map[string]any{
 				"other": "data",
 			},
 		},
@@ -75,7 +75,7 @@ func TestConvertRouteUpdate_IPv4(t *testing.T) {
 	require.NoError(t, err)
 
 	// Route format should be "prefix -> nexthop" as string array
-	content := []interface{}{
+	content := []any{
 		"10.0.0.0/24 -> 192.168.1.1",
 	}
 
@@ -93,7 +93,7 @@ func TestConvertRouteUpdate_IPv6(t *testing.T) {
 	require.NoError(t, err)
 
 	// Route format should be "prefix -> nexthop" as string array
-	content := []interface{}{
+	content := []any{
 		"2001:db8::/32 -> fe80::1",
 	}
 
@@ -111,7 +111,7 @@ func TestConvertRouteUpdate_PreservesOriginalBehavior(t *testing.T) {
 	require.NoError(t, err)
 
 	// Route format should be "prefix -> nexthop" as string array
-	content := []interface{}{
+	content := []any{
 		"10.0.0.0/24 -> 192.168.1.1",
 	}
 
@@ -131,7 +131,7 @@ func TestConvertRouteRemove_Regular(t *testing.T) {
 	converter, err := NewConverter(&Config{})
 	require.NoError(t, err)
 
-	content := []interface{}{
+	content := []any{
 		"10.0.0.0/24 -> 192.168.1.1",
 		"10.1.0.0/24 -> 192.168.1.2",
 	}
@@ -149,7 +149,7 @@ func TestConvertRouteRemove_Labelled(t *testing.T) {
 	converter, err := NewConverter(&Config{})
 	require.NoError(t, err)
 
-	content := []interface{}{
+	content := []any{
 		"10.0.0.0/24 -> 192.168.1.1 label:transport1",
 		"10.1.0.0/24 -> 192.168.1.2 label:transport2",
 	}
@@ -167,7 +167,7 @@ func TestConvertRouteRemove_PreservesOriginalBehavior(t *testing.T) {
 	converter, err := NewConverter(&Config{})
 	require.NoError(t, err)
 
-	content := []interface{}{
+	content := []any{
 		"10.0.0.0/24 -> 192.168.1.1",
 	}
 

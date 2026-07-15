@@ -45,7 +45,8 @@ clang-format -i <file>        # C
 cargo +nightly fmt            # Rust (uses nightly-only options in .rustfmt.toml)
 cargo clippy                  # Rust lints
 make proto-lint               # protobuf formatting check
-make lint-go                  # logger options-pattern linter (lint/logger/)
+make lint-go                  # loglint + golangci-lint modernize (lint/logger/, .golangci.yml)
+make proto-go                 # generate *.pb.go via protoc (needed before go lint locally)
 make hooks                    # install the pre-commit hook (run once per clone)
 
 # Fuzzing

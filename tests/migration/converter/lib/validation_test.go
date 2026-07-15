@@ -177,7 +177,7 @@ func TestValidation_MultiplePackets(t *testing.T) {
 
 	// Create multiple packets
 	packets := make([]gopacket.Packet, 0)
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		pkt, err := NewPacket(nil,
 			Ether(EtherDst("00:11:22:33:44:55"), EtherSrc("00:00:00:00:00:01")),
 			IPv4(IPSrc("1.2.3.4"), IPDst("5.6.7.8"), IPId(uint16(i))),

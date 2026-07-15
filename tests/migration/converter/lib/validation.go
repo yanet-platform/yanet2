@@ -119,12 +119,9 @@ func (v *PacketValidator) ValidateAgainstPCAP(packets []gopacket.Packet, pcapPat
 	}
 
 	// Validate each packet byte-by-byte
-	minCount := len(packets)
-	if len(expectedPackets) < minCount {
-		minCount = len(expectedPackets)
-	}
+	minCount := min(len(expectedPackets), len(packets))
 
-	for i := 0; i < minCount; i++ {
+	for i := range minCount {
 		var err error
 		if v.compareByLayer {
 			err = v.validateSinglePacketByLayers(i, packets[i], expectedPackets[i], result)
@@ -164,7 +161,7 @@ func (v *PacketValidator) validateSinglePacket(index int, got, expected gopacket
 
 		// Find first difference
 		firstDiff := -1
-		for i := 0; i < len(gotData); i++ {
+		for i := range gotData {
 			if gotData[i] != expectedData[i] {
 				firstDiff = i
 				break
@@ -201,17 +198,8 @@ func (v *PacketValidator) createDetailedDiff(got, expected []byte, firstDiff int
 	diff.WriteString(fmt.Sprintf("First difference at byte %d (0x%x)\n", firstDiff, firstDiff))
 
 	// Show context around the difference (HexDumpContextBytes before and after)
-	start := firstDiff - HexDumpContextBytes
-	if start < 0 {
-		start = 0
-	}
-	end := firstDiff + HexDumpContextBytes
-	if end > len(expected) {
-		end = len(expected)
-	}
-	if end > len(got) {
-		end = len(got)
-	}
+	start := max(firstDiff-HexDumpContextBytes, 0)
+	end := min(min(firstDiff+HexDumpContextBytes, len(expected)), len(got))
 
 	diff.WriteString(fmt.Sprintf("\nExpected [%d:%d]:\n", start, end))
 	diff.WriteString(fmt.Sprintf("  %s\n", formatHexDump(expected[start:end], start)))
@@ -268,8 +256,8 @@ func (v *PacketValidator) validateSinglePacketByLayers(index int, got, expected 
 
 // projectPacketForDiff extracts only key semantic fields per layer for stable cmp.Diff.
 // This intentionally ignores checksum-only differences and low-level serialization details.
-func projectPacketForDiff(pkt gopacket.Packet) []interface{} {
-	var out []interface{}
+func projectPacketForDiff(pkt gopacket.Packet) []any {
+	var out []any
 	for _, l := range pkt.Layers() {
 		switch v := l.(type) {
 		case *layers.Ethernet:
@@ -299,7 +287,7 @@ func projectPacketForDiff(pkt gopacket.Packet) []interface{} {
 			}{v.SYN, v.ACK, v.FIN, v.RST, v.PSH, v.URG}
 			out = append(out, struct {
 				Src, Dst uint16
-				Flags    interface{}
+				Flags    any
 			}{Src: uint16(v.SrcPort), Dst: uint16(v.DstPort), Flags: flags})
 		case *layers.UDP:
 			out = append(out, struct {
@@ -383,7 +371,7 @@ func formatHexDump(data []byte, offset int) string {
 		buf.WriteString(fmt.Sprintf("%04x: ", offset+i))
 
 		// Hex bytes
-		for j := 0; j < 16; j++ {
+		for j := range 16 {
 			if i+j < len(data) {
 				buf.WriteString(fmt.Sprintf("%02x ", data[i+j]))
 			} else {

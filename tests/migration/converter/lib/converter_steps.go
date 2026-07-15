@@ -65,10 +65,10 @@ type TestInfo struct {
 
 // StepInfo contains information about a test step
 type StepInfo struct {
-	Index   int         // 1-based step index
-	Name    string      // Formatted step name (e.g., "Step_001")
-	Type    string      // Step type (e.g., "sendPackets", "cli")
-	Content interface{} // Step content from YAML
+	Index   int    // 1-based step index
+	Name    string // Formatted step name (e.g., "Step_001")
+	Type    string // Step type (e.g., "sendPackets", "cli")
+	Content any    // Step content from YAML
 }
 
 // StepCallback is called for each step during iteration
@@ -183,7 +183,7 @@ func IterateSteps(testInfo TestInfo, stepTypeFilter string, onlyStep string, cal
 //   - error: Error if test cannot be parsed or callback returns error
 func IterateSendPacketsSteps(testInfo TestInfo, onlyStep string, callback func(stepInfo StepInfo, sendFile, expectFile string) error) error {
 	return IterateSteps(testInfo, "sendPackets", onlyStep, func(stepInfo StepInfo, testInfo TestInfo) error {
-		packets, ok := stepInfo.Content.([]interface{})
+		packets, ok := stepInfo.Content.([]any)
 		if !ok {
 			// Invalid format, skip this step
 			return nil
@@ -206,15 +206,15 @@ func IterateSendPacketsSteps(testInfo TestInfo, onlyStep string, callback func(s
 
 // ParseSendExpectFiles extracts send and expect file names from a packet entry
 // This is a standalone function that can be used in tests
-func ParseSendExpectFiles(packet interface{}) (sendFile, expectFile string) {
-	if packetMap, ok := packet.(map[interface{}]interface{}); ok {
+func ParseSendExpectFiles(packet any) (sendFile, expectFile string) {
+	if packetMap, ok := packet.(map[any]any); ok {
 		if s, exists := packetMap["send"]; exists {
 			sendFile = fmt.Sprintf("%v", s)
 		}
 		if e, exists := packetMap["expect"]; exists {
 			expectFile = fmt.Sprintf("%v", e)
 		}
-	} else if packetMap, ok := packet.(map[string]interface{}); ok {
+	} else if packetMap, ok := packet.(map[string]any); ok {
 		if s, exists := packetMap["send"]; exists {
 			sendFile = fmt.Sprintf("%v", s)
 		}
@@ -247,7 +247,7 @@ func GetYanet1OnePortDir() (string, error) {
 }
 
 // convertStepsWithSkip applies skiplist/test defaults and passes stripVLAN to sendPackets steps
-func (c *Converter) convertStepsWithSkip(testName string, steps []map[string]interface{}, testPath string) []ConvertedStep {
+func (c *Converter) convertStepsWithSkip(testName string, steps []map[string]any, testPath string) []ConvertedStep {
 	var converted []ConvertedStep
 	c.debugLog("Converting %d steps for test %s", len(steps), testName)
 	for i, step := range steps {
@@ -272,7 +272,7 @@ func (c *Converter) convertStepsWithSkip(testName string, steps []map[string]int
 }
 
 // convertStepWithState converts one step with state information
-func (c *Converter) convertStepWithState(stepType string, content interface{}, testPath string, state StepState, testName string) ConvertedStep {
+func (c *Converter) convertStepWithState(stepType string, content any, testPath string, state StepState, testName string) ConvertedStep {
 	switch stepType {
 	case "ipv4Update":
 		return c.convertRouteUpdate(content, stepType, false)
@@ -369,7 +369,7 @@ func (c *Converter) generateRouteCommands(routeStrings []string, operation strin
 // convertRouteUpdate is a unified function for both IPv4 and IPv6 route updates.
 // It accumulates prefixes into the FIB state and generates code to atomically
 // replace the FIB via yanet-cli-route fib update.
-func (c *Converter) convertRouteUpdate(content interface{}, stepType string, isIPv6 bool) ConvertedStep {
+func (c *Converter) convertRouteUpdate(content any, stepType string, isIPv6 bool) ConvertedStep {
 	protocol := "IPv4"
 	if isIPv6 {
 		protocol = "IPv6"
@@ -382,7 +382,7 @@ func (c *Converter) convertRouteUpdate(content interface{}, stepType string, isI
 	switch v := content.(type) {
 	case string:
 		routeStrings = []string{v}
-	case []interface{}:
+	case []any:
 		for _, route := range v {
 			if routeStr, ok := route.(string); ok {
 				routeStrings = append(routeStrings, routeStr)
@@ -422,19 +422,19 @@ func (c *Converter) convertRouteUpdate(content interface{}, stepType string, isI
 }
 
 // convertIPv4Update converts ipv4Update step - wrapper around convertRouteUpdate
-func (c *Converter) convertIPv4Update(content interface{}, stepType string) ConvertedStep {
+func (c *Converter) convertIPv4Update(content any, stepType string) ConvertedStep {
 	return c.convertRouteUpdate(content, stepType, false)
 }
 
 // convertIPv6Update converts ipv6Update step - wrapper around convertRouteUpdate
-func (c *Converter) convertIPv6Update(content interface{}, stepType string) ConvertedStep {
+func (c *Converter) convertIPv6Update(content any, stepType string) ConvertedStep {
 	return c.convertRouteUpdate(content, stepType, true)
 }
 
 // convertIPv4LabelledUpdate converts ipv4LabelledUpdate step
-func (c *Converter) convertIPv4LabelledUpdate(content interface{}, stepType string) ConvertedStep {
+func (c *Converter) convertIPv4LabelledUpdate(content any, stepType string) ConvertedStep {
 	c.debugLog("Converting ipv4LabelledUpdate step")
-	routes, ok := content.([]interface{})
+	routes, ok := content.([]any)
 	if !ok {
 		return NewSkipStep("ipv4LabelledUpdate", "Invalid ipv4LabelledUpdate format")
 	}
@@ -478,9 +478,9 @@ func (c *Converter) convertIPv4LabelledUpdate(content interface{}, stepType stri
 // convertRouteRemove is a unified function for both regular and labelled route removals.
 // It removes prefixes from the FIB state and generates code to atomically
 // replace the FIB via yanet-cli-route fib update.
-func (c *Converter) convertRouteRemove(content interface{}, stepType string, isLabelled bool) ConvertedStep {
+func (c *Converter) convertRouteRemove(content any, stepType string, isLabelled bool) ConvertedStep {
 	c.debugLog("Converting %s route removal", stepType)
-	routes, ok := content.([]interface{})
+	routes, ok := content.([]any)
 	if !ok {
 		return NewSkipStep(stepType, fmt.Sprintf("Invalid %s format", stepType))
 	}
@@ -538,18 +538,18 @@ func (c *Converter) convertRouteRemove(content interface{}, stepType string, isL
 }
 
 // convertIPv4Remove converts ipv4Remove step - wrapper around convertRouteRemove
-func (c *Converter) convertIPv4Remove(content interface{}, stepType string) ConvertedStep {
+func (c *Converter) convertIPv4Remove(content any, stepType string) ConvertedStep {
 	return c.convertRouteRemove(content, stepType, false)
 }
 
 // convertIPv4LabelledRemove converts ipv4LabelledRemove step - wrapper around convertRouteRemove
-func (c *Converter) convertIPv4LabelledRemove(content interface{}, stepType string) ConvertedStep {
+func (c *Converter) convertIPv4LabelledRemove(content any, stepType string) ConvertedStep {
 	return c.convertRouteRemove(content, stepType, true)
 }
 
 // convertSendPacketsWithASTParser uses new AST-based parser for packet generation
-func (c *Converter) convertSendPacketsWithASTParser(content interface{}, testPath string, testName string, stripVLAN bool) (ConvertedStep, error) {
-	packets, ok := content.([]interface{})
+func (c *Converter) convertSendPacketsWithASTParser(content any, testPath string, testName string, stripVLAN bool) (ConvertedStep, error) {
+	packets, ok := content.([]any)
 	if !ok {
 		return ConvertedStep{}, fmt.Errorf("invalid sendPackets format")
 	}
@@ -706,7 +706,7 @@ func (c *Converter) generatePacketFunctionFromIR(irJSON, pcapFilename, funcName 
 }
 
 // convertSendPacketsWithOptions is like convertSendPackets but supports stripping VLAN at codegen time
-func (c *Converter) convertSendPacketsWithOptions(content interface{}, testPath string, stripVLAN bool, testName string) ConvertedStep {
+func (c *Converter) convertSendPacketsWithOptions(content any, testPath string, stripVLAN bool, testName string) ConvertedStep {
 	c.debugLog("convertSendPacketsWithOptions: testPath=%s, stripVLAN=%v", testPath, stripVLAN)
 
 	// Try AST parser first
@@ -735,7 +735,7 @@ func (c *Converter) convertSendPacketsWithOptions(content interface{}, testPath 
 }
 
 // parseSendExpectFiles extracts send and expect file names from a packet entry
-func (c *Converter) parseSendExpectFiles(packet interface{}) (sendFile, expectFile string) {
+func (c *Converter) parseSendExpectFiles(packet any) (sendFile, expectFile string) {
 	if v, ok := GetStringFromAnyMap(packet, "send"); ok {
 		sendFile = v
 	}
@@ -746,9 +746,9 @@ func (c *Converter) parseSendExpectFiles(packet interface{}) (sendFile, expectFi
 }
 
 // convertSendPacketsWithOptionsLegacy is the original PCAP-based converter
-func (c *Converter) convertSendPacketsWithOptionsLegacy(content interface{}, testPath string, stripVLAN bool, testName string) ConvertedStep {
+func (c *Converter) convertSendPacketsWithOptionsLegacy(content any, testPath string, stripVLAN bool, testName string) ConvertedStep {
 	c.debugLog("convertSendPacketsWithOptionsLegacy: content type=%T", content)
-	packets, ok := content.([]interface{})
+	packets, ok := content.([]any)
 	if !ok {
 		c.debugLog("Invalid sendPackets format: expected []interface{}, got %T", content)
 		return NewSkipStep("sendPackets", fmt.Sprintf("Invalid sendPackets format: expected []interface{}, got %T", content))
@@ -849,9 +849,9 @@ func (c *Converter) convertSendPacketsWithOptionsLegacy(content interface{}, tes
 }
 
 // convertCheckCounters converts checkCounters step
-func (c *Converter) convertCheckCounters(content interface{}) ConvertedStep {
+func (c *Converter) convertCheckCounters(content any) ConvertedStep {
 	// Parse counter validation content with proper error handling
-	contentMap, ok := content.(map[interface{}]interface{})
+	contentMap, ok := content.(map[any]any)
 	if !ok {
 		return ConvertedStep{
 			Type:        "skip",
@@ -941,9 +941,9 @@ func (c *Converter) convertCheckCounters(content interface{}) ConvertedStep {
 }
 
 // convertCLI converts cli step
-func (c *Converter) convertCLI(content interface{}) ConvertedStep {
+func (c *Converter) convertCLI(content any) ConvertedStep {
 	c.debugLog("Converting cli step")
-	commands, ok := content.([]interface{})
+	commands, ok := content.([]any)
 	if !ok {
 		return NewSkipStep("cli", "Invalid cli format")
 	}
@@ -979,7 +979,7 @@ func (c *Converter) convertCLI(content interface{}) ConvertedStep {
 }
 
 // convertCLICheck converts cli_check step
-func (c *Converter) convertCLICheck(content interface{}) ConvertedStep {
+func (c *Converter) convertCLICheck(content any) ConvertedStep {
 	c.debugLog("Converting cli_check step")
 
 	checkContent, ok := content.(string)
@@ -1146,7 +1146,7 @@ func (c *Converter) convertCLICommand(cmd string) string {
 }
 
 // convertSleep converts sleep step
-func (c *Converter) convertSleep(content interface{}) ConvertedStep {
+func (c *Converter) convertSleep(content any) ConvertedStep {
 	c.debugLog("Converting sleep step: %v seconds", content)
 	seconds, ok := content.(int)
 	if !ok {

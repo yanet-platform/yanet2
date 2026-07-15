@@ -45,7 +45,6 @@ func TestPCAPEquivalence(t *testing.T) {
 	require.NotEmpty(t, tests, "No tests found to run")
 
 	for _, testInfo := range tests {
-		testInfo := testInfo // capture loop variable
 		t.Run(testInfo.Name, func(t *testing.T) {
 			runTestEquivalence(t, testInfo, onlyStep)
 		})

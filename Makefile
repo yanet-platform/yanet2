@@ -111,6 +111,7 @@ CLI_RELEASE_BINARIES := $(addprefix $(RELEASE_DIR)/,$(CLI_BINARIES))
 	go-cache-clean \
 	proto-lint \
 	proto-breaking \
+	proto-go \
 	lint-go \
 	hooks \
 	test \
@@ -149,9 +150,29 @@ proto-breaking:
 		echo "WARN: 'buf' not found, skipping buf breaking (install: https://buf.build/docs/installation)"; \
 	fi
 
+proto-go:
+	@command -v protoc >/dev/null 2>&1 || { echo "ERROR: protoc not found (install protobuf-compiler)"; exit 1; }
+	@command -v protoc-gen-go >/dev/null 2>&1 || { echo "ERROR: protoc-gen-go not found (go install google.golang.org/protobuf/cmd/protoc-gen-go@latest)"; exit 1; }
+	@command -v protoc-gen-go-grpc >/dev/null 2>&1 || { echo "ERROR: protoc-gen-go-grpc not found (go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest)"; exit 1; }
+	@set -e; protos=$$(find . \
+		\( -path './subprojects' -o -path './build*' -o -path './.git' \) -prune \
+		-o -name '*.proto' -print \
+		| sort); \
+		test -n "$$protos"; \
+		protoc -I . \
+			--go_out=paths=source_relative:. \
+			--go-grpc_out=paths=source_relative:. \
+			$$protos
+
 lint-go:
 	go test ./lint/logger/cmd/loglint/
 	go run ./lint/logger/cmd/loglint/
+	@if command -v golangci-lint >/dev/null 2>&1; then \
+		$(MAKE) proto-go; \
+		golangci-lint run ./...; \
+	else \
+		echo "WARN: 'golangci-lint' not found, skipping modernize lint (install: https://golangci-lint.run/welcome/install/)"; \
+	fi
 
 hooks:
 	git config core.hooksPath .githooks

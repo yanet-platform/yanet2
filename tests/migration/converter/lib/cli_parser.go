@@ -2,6 +2,7 @@ package lib
 
 import (
 	"fmt"
+	"maps"
 	"strings"
 )
 
@@ -190,8 +191,8 @@ func ExtractParameter(cmd *CLICommand, paramName string) (string, bool) {
 
 	for i, param := range cmd.Parameters {
 		// Check for --param=value format
-		if strings.HasPrefix(param, paramPrefix+"=") {
-			return strings.TrimPrefix(param, paramPrefix+"="), true
+		if after, ok := strings.CutPrefix(param, paramPrefix+"="); ok {
+			return after, true
 		}
 
 		// Check for --param value format
@@ -250,7 +251,7 @@ func FormatYanet2Command(module, action string, params map[string]string, instan
 
 	// Sort keys alphabetically for consistent output
 	sortKeys := func(keys []string) {
-		for i := 0; i < len(keys); i++ {
+		for i := range keys {
 			for j := i + 1; j < len(keys); j++ {
 				if keys[i] > keys[j] {
 					keys[i], keys[j] = keys[j], keys[i]
@@ -412,9 +413,7 @@ func (cb *CommandBuilder) Build() string {
 	}
 
 	// Add custom parameters
-	for k, v := range cb.params {
-		params[k] = v
-	}
+	maps.Copy(params, cb.params)
 
 	return FormatYanet2Command(cb.module, cb.action, params, cb.instances...)
 }

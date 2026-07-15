@@ -45,12 +45,12 @@ func (m Devices) cBuild(pinner *runtime.Pinner) *C.struct_filter_devices {
 
 func (m *IPNet) buildNet4() C.struct_net4 {
 	res := C.struct_net4{
-		addr: [4]C.uint8_t{},
-		mask: [4]C.uint8_t{},
+		addr: [4]C.uint8_t{0},
+		mask: [4]C.uint8_t{0},
 	}
 	addr := m.Addr.As4()
 	mask := m.Mask.As4()
-	for idx := 0; idx < 4; idx++ {
+	for idx := range 4 {
 		res.addr[idx] = C.uint8_t(addr[idx])
 		res.mask[idx] = C.uint8_t(mask[idx])
 	}
@@ -85,7 +85,7 @@ func (m *IPNet) buildNet6() C.struct_net6 {
 	}
 	addr := m.Addr.As16()
 	mask := m.Mask.As16()
-	for idx := 0; idx < 16; idx++ {
+	for idx := range 16 {
 		res.addr[idx] = C.uint8_t(addr[idx])
 		res.mask[idx] = C.uint8_t(mask[idx])
 	}

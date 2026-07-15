@@ -500,7 +500,7 @@ func TestConverter_ParseSendExpectFiles(t *testing.T) {
 	c := &Converter{}
 
 	// Test map[interface{}]interface{} format
-	packet1 := map[interface{}]interface{}{
+	packet1 := map[any]any{
 		"send":   "send1.pcap",
 		"expect": "expect1.pcap",
 	}
@@ -509,7 +509,7 @@ func TestConverter_ParseSendExpectFiles(t *testing.T) {
 	require.Equal(t, "expect1.pcap", expect1)
 
 	// Test map[string]interface{} format
-	packet2 := map[string]interface{}{
+	packet2 := map[string]any{
 		"send":   "send2.pcap",
 		"expect": "expect2.pcap",
 	}
@@ -518,7 +518,7 @@ func TestConverter_ParseSendExpectFiles(t *testing.T) {
 	require.Equal(t, "expect2.pcap", expect2)
 
 	// Test with only send file
-	packet3 := map[string]interface{}{
+	packet3 := map[string]any{
 		"send": "send3.pcap",
 	}
 	send3, expect3 := c.parseSendExpectFiles(packet3)
@@ -657,7 +657,7 @@ func TestCodegenV2_GREWithVLAN(t *testing.T) {
 func TestConverter_CLICheckNegative(t *testing.T) {
 	tests := []struct {
 		name        string
-		content     interface{}
+		content     any
 		expectSkip  bool
 		skipMessage string
 	}{

@@ -5,11 +5,13 @@ on:
     paths:
       - '**/*.go'
       - 'lint/logger/**'
+      - '.golangci.yml'
       - '.github/workflows/go-lint.yml'
   pull_request:
     paths:
       - '**/*.go'
       - 'lint/logger/**'
+      - '.golangci.yml'
       - '.github/workflows/go-lint.yml'
 
 jobs:
@@ -28,3 +30,34 @@ jobs:
 
       - name: Run linter
         run: go run ./lint/logger/cmd/loglint/
+
+  modernize:
+    name: golangci-lint modernize
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - uses: awalsh128/cache-apt-pkgs-action@latest
+        with:
+          packages: protobuf-compiler libpcap-dev
+          version: 1.0
+
+      - name: Install Go protobuf plugins
+        run: |
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+
+      - name: Generate protobuf Go sources
+        run: make proto-go
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.12.2
+          args: --timeout 5m

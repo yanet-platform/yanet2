@@ -7,7 +7,7 @@ import (
 )
 
 // asInt converts common numeric JSON types to int.
-func asInt(v interface{}) (int, bool) {
+func asInt(v any) (int, bool) {
 	switch t := v.(type) {
 	case int:
 		return t, true
@@ -44,11 +44,8 @@ func printPacketDiff(t *testing.T, expected, actual []byte, index int) {
 	t.Logf("Actual (%d bytes):\n%s", len(actual), hex.Dump(actual))
 
 	// Find first difference
-	minLen := len(expected)
-	if len(actual) < minLen {
-		minLen = len(actual)
-	}
-	for i := 0; i < minLen; i++ {
+	minLen := min(len(actual), len(expected))
+	for i := range minLen {
 		if expected[i] != actual[i] {
 			t.Logf("First difference at byte %d: expected 0x%02x, got 0x%02x",
 				i, expected[i], actual[i])

@@ -47,7 +47,6 @@ func TestIRPipeline(t *testing.T) {
 	}
 
 	for _, testInfo := range tests {
-		testInfo := testInfo // capture loop variable
 		t.Run(testInfo.Name, func(t *testing.T) {
 			runIRPipelineTest(t, testInfo, onlyStep)
 		})
@@ -489,10 +488,10 @@ func buildIPv4FromIR(layer IRLayer) LayerBuilder {
 	}
 	// Handle structured IPv4 options
 	if optionsAny, ok := layer.Params["options"]; ok {
-		if options, ok := optionsAny.([]interface{}); ok && len(options) > 0 {
+		if options, ok := optionsAny.([]any); ok && len(options) > 0 {
 			var ipv4Opts []IPv4OptionDef
 			for _, optAny := range options {
-				if optMap, ok := optAny.(map[string]interface{}); ok {
+				if optMap, ok := optAny.(map[string]any); ok {
 					optType := uint8(asIntOrZero(optMap["type"]))
 					optLen := uint8(asIntOrZero(optMap["len"]))
 					var optData []byte
@@ -577,10 +576,10 @@ func buildTCPFromIR(layer IRLayer) LayerBuilder {
 	// Handle TCP options
 	if optionsAny, ok := layer.Params["options"]; ok {
 		// Try []interface{} first (JSON unmarshaled)
-		if options, ok := optionsAny.([]interface{}); ok && len(options) > 0 {
+		if options, ok := optionsAny.([]any); ok && len(options) > 0 {
 			var tcpOpts []TCPOptionDef
 			for _, optAny := range options {
-				if optMap, ok := optAny.(map[string]interface{}); ok {
+				if optMap, ok := optAny.(map[string]any); ok {
 					optKind := layers.TCPOptionKind(asIntOrZero(optMap["kind"]))
 					optLen := uint8(asIntOrZero(optMap["len"]))
 					var optData []byte
@@ -602,7 +601,7 @@ func buildTCPFromIR(layer IRLayer) LayerBuilder {
 				}
 			}
 			opts = append(opts, TCPOptions(tcpOpts))
-		} else if options, ok := optionsAny.([]map[string]interface{}); ok && len(options) > 0 {
+		} else if options, ok := optionsAny.([]map[string]any); ok && len(options) > 0 {
 			// Try []map[string]interface{} (direct from IR construction)
 			var tcpOpts []TCPOptionDef
 			for _, optMap := range options {
@@ -1108,7 +1107,7 @@ func readPCAPPackets(pcapPath string) ([]gopacket.Packet, error) {
 	return packets, nil
 }
 
-func asIntOrZero(v interface{}) int {
+func asIntOrZero(v any) int {
 	if i, ok := asInt(v); ok {
 		return i
 	}
@@ -1256,7 +1255,7 @@ func TestTCPOptionsInIR(t *testing.T) {
 			if opts, ok := layer.Params["options"]; ok {
 				t.Logf("    ✓ TCP options found: %+v", opts)
 				// Check if options is an array
-				if optArray, ok := opts.([]interface{}); ok {
+				if optArray, ok := opts.([]any); ok {
 					t.Logf("    TCP options count: %d", len(optArray))
 					for j, opt := range optArray {
 						t.Logf("      Option %d: %+v", j, opt)

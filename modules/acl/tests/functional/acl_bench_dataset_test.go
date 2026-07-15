@@ -104,9 +104,9 @@ func datasetActionKind(t testing.TB, kind string) uint32 {
 // parseDatasetNet accepts CIDR ("net/bits"), the addr/mask-address form
 // used by non-contiguous production masks, and bare addresses.
 func parseDatasetNet(t testing.TB, s string) filter.IPNet {
-	if idx := strings.IndexByte(s, '/'); idx >= 0 {
-		if mask, err := netip.ParseAddr(s[idx+1:]); err == nil {
-			addr, err := netip.ParseAddr(s[:idx])
+	if before, after, ok := strings.Cut(s, "/"); ok {
+		if mask, err := netip.ParseAddr(after); err == nil {
+			addr, err := netip.ParseAddr(before)
 			require.NoError(t, err)
 			return filter.IPNet{Addr: addr, Mask: mask}
 		}
