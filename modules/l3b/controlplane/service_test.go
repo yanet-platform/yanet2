@@ -75,6 +75,20 @@ func (m *mockBackend) ListModuleConfigs() []string {
 	return names
 }
 
+func (m *mockBackend) UpdateRealServerState(service string, realServerIndex uint32, enabled bool) error {
+	if _, ok := m.services[service]; !ok {
+		return errNotFound
+	}
+	return nil
+}
+
+func (m *mockBackend) UpdateRealServerWeight(service string, realServerIndex uint32, weight uint32) error {
+	if _, ok := m.services[service]; !ok {
+		return errNotFound
+	}
+	return nil
+}
+
 var errNotFound = status.Error(codes.NotFound, "not found")
 
 func newTestService(t *testing.T) (*L3BService, *mockBackend) {

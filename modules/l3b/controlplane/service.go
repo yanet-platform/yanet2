@@ -122,3 +122,37 @@ func (m *L3BService) ListModuleConfigs(
 ) (*l3bpb.ListModuleConfigsResponse, error) {
 	return &l3bpb.ListModuleConfigsResponse{Configs: m.backend.ListModuleConfigs()}, nil
 }
+
+// UpdateRealServerState enables or disables a real server within a named
+// virtual service.
+func (m *L3BService) UpdateRealServerState(
+	ctx context.Context,
+	req *l3bpb.UpdateRealServerStateRequest,
+) (*l3bpb.UpdateRealServerStateResponse, error) {
+	if req.GetService() == "" {
+		return nil, errServiceNameRequired
+	}
+
+	if err := m.backend.UpdateRealServerState(req.GetService(), req.GetRealServerIndex(), req.GetEnabled()); err != nil {
+		return nil, backendError(err)
+	}
+
+	return &l3bpb.UpdateRealServerStateResponse{}, nil
+}
+
+// UpdateRealServerWeight sets the weight of a real server within a named
+// virtual service.
+func (m *L3BService) UpdateRealServerWeight(
+	ctx context.Context,
+	req *l3bpb.UpdateRealServerWeightRequest,
+) (*l3bpb.UpdateRealServerWeightResponse, error) {
+	if req.GetService() == "" {
+		return nil, errServiceNameRequired
+	}
+
+	if err := m.backend.UpdateRealServerWeight(req.GetService(), req.GetRealServerIndex(), req.GetWeight()); err != nil {
+		return nil, backendError(err)
+	}
+
+	return &l3bpb.UpdateRealServerWeightResponse{}, nil
+}

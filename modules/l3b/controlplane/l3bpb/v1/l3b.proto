@@ -30,6 +30,17 @@ service L3bService {
   // ListModuleConfigs returns the names of all module configurations.
   rpc ListModuleConfigs(ListModuleConfigsRequest)
       returns (ListModuleConfigsResponse);
+
+  // UpdateRealServerState enables or disables a single real server within a
+  // named virtual service.
+  rpc UpdateRealServerState(UpdateRealServerStateRequest)
+      returns (UpdateRealServerStateResponse);
+
+  // UpdateRealServerWeight sets the weight of a single real server within a
+  // named virtual service; the scheduler rebuilds the ring so that a server
+  // appears as many times as its weight.
+  rpc UpdateRealServerWeight(UpdateRealServerWeightRequest)
+      returns (UpdateRealServerWeightResponse);
 }
 
 // RealServer is a backend reached through an IP-in-IP tunnel. The address
@@ -111,3 +122,19 @@ message ListModuleConfigsRequest {}
 message ListModuleConfigsResponse {
   repeated string configs = 1;
 }
+
+message UpdateRealServerStateRequest {
+  string service = 1;
+  uint32 real_server_index = 2;
+  bool enabled = 3;
+}
+
+message UpdateRealServerStateResponse {}
+
+message UpdateRealServerWeightRequest {
+  string service = 1;
+  uint32 real_server_index = 2;
+  uint32 weight = 3;
+}
+
+message UpdateRealServerWeightResponse {}

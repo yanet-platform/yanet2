@@ -26,11 +26,20 @@ type Backend interface {
 	UpdateModuleConfig(config *l3bpb.ModuleConfig) error
 	// ListModuleConfigs returns the names of all module configurations.
 	ListModuleConfigs() []string
+	// UpdateRealServerState enables or disables a real server within a
+	// named virtual service.
+	UpdateRealServerState(service string, realServerIndex uint32, enabled bool) error
+	// UpdateRealServerWeight sets the weight of a real server within a named
+	// virtual service and rebuilds its scheduler ring.
+	UpdateRealServerWeight(service string, realServerIndex uint32, weight uint32) error
 }
 
 type managedService struct {
 	virtualService *cl3b.VirtualService
 	handle         *cl3b.VirtualServiceHandle
+	// weights[i] is the current weight of real server i; the scheduler ring
+	// is rebuilt whenever a weight changes.
+	weights []uint32
 }
 
 type managedConfig struct {
@@ -82,6 +91,7 @@ func (m *backend) CreateService(service *l3bpb.VirtualService) error {
 	m.services[name] = &managedService{
 		virtualService: virtualService,
 		handle:         handle,
+		weights:        defaultWeights(len(config.RealServers)),
 	}
 	return nil
 }
@@ -110,6 +120,7 @@ func (m *backend) UpdateService(service *l3bpb.VirtualService) error {
 	// rebuilding the module configuration.
 	existing.handle.Update(virtualService)
 	existing.virtualService = virtualService
+	existing.weights = defaultWeights(len(config.RealServers))
 	return nil
 }
 
@@ -213,6 +224,75 @@ func (m *backend) ListModuleConfigs() []string {
 		names = append(names, name)
 	}
 	return names
+}
+
+func (m *backend) UpdateRealServerState(
+	service string,
+	realServerIndex uint32,
+	enabled bool,
+) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	existing, ok := m.services[service]
+	if !ok {
+		return fmt.Errorf("virtual service %q not found", service)
+	}
+
+	if err := existing.virtualService.SetRealServerState(realServerIndex, enabled); err != nil {
+		return fmt.Errorf("failed to set real server state: %w", err)
+	}
+	return nil
+}
+
+func (m *backend) UpdateRealServerWeight(
+	service string,
+	realServerIndex uint32,
+	weight uint32,
+) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	existing, ok := m.services[service]
+	if !ok {
+		return fmt.Errorf("virtual service %q not found", service)
+	}
+
+	if int(realServerIndex) >= len(existing.weights) {
+		return fmt.Errorf("real server index %d out of range", realServerIndex)
+	}
+
+	existing.weights[realServerIndex] = weight
+	if err := existing.virtualService.UpdateRing(ringFromWeights(existing.weights)); err != nil {
+		return fmt.Errorf("failed to rebuild real server ring: %w", err)
+	}
+	return nil
+}
+
+// defaultWeights returns one weight per real server, defaulting to 1.
+func defaultWeights(realServerCount int) []uint32 {
+	weights := make([]uint32, realServerCount)
+	for idx := range weights {
+		weights[idx] = 1
+	}
+	return weights
+}
+
+// ringFromWeights expands per-server weights into a scheduler ring where a
+// server index appears as many times as its weight.
+func ringFromWeights(weights []uint32) []uint32 {
+	total := uint32(0)
+	for _, weight := range weights {
+		total += weight
+	}
+
+	ring := make([]uint32, 0, total)
+	for serverIndex, weight := range weights {
+		for range weight {
+			ring = append(ring, uint32(serverIndex))
+		}
+	}
+	return ring
 }
 
 func buildVirtualServiceConfig(

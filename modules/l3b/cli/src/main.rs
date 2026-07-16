@@ -2,7 +2,8 @@ use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
 use l3bpb::{
     CreateServiceRequest, DeleteServiceRequest, ListModuleConfigsRequest, ListServicesRequest, ModuleConfig,
-    UpdateModuleConfigRequest, UpdateServiceRequest, VirtualService, l3b_service_client::L3bServiceClient,
+    UpdateModuleConfigRequest, UpdateRealServerStateRequest, UpdateRealServerWeightRequest, UpdateServiceRequest,
+    VirtualService, l3b_service_client::L3bServiceClient,
 };
 use tonic::codec::CompressionEncoding;
 use ync::{
@@ -48,6 +49,10 @@ pub enum ModeCmd {
     UpdateModuleConfig(ModuleConfigCmd),
     /// List module configuration names.
     ListModuleConfigs,
+    /// Enable or disable a real server within a named virtual service.
+    UpdateRealServerState(RealServerCmd),
+    /// Set the weight of a real server within a named virtual service.
+    UpdateRealServerWeight(WeightCmd),
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -83,6 +88,32 @@ pub struct ModuleConfigCmd {
     pub services: Vec<String>,
 }
 
+#[derive(Debug, Clone, Parser)]
+pub struct RealServerCmd {
+    /// Virtual service name.
+    #[arg(long = "name", short = 'n')]
+    pub service: String,
+    /// Index of the real server within the service.
+    #[arg(long = "index")]
+    pub real_server_index: u32,
+    /// Whether the real server is enabled.
+    #[arg(long)]
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Parser)]
+pub struct WeightCmd {
+    /// Virtual service name.
+    #[arg(long = "name", short = 'n')]
+    pub service: String,
+    /// Index of the real server within the service.
+    #[arg(long = "index")]
+    pub real_server_index: u32,
+    /// New weight of the real server.
+    #[arg(long)]
+    pub weight: u32,
+}
+
 /// The fully-qualified gRPC service name used in error messages.
 const SERVICE_NAME: &str = "modules.l3b.controlplane.l3bpb.v1.L3bService";
 
@@ -108,6 +139,8 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
         ModeCmd::ListServices => service.list_services().await,
         ModeCmd::UpdateModuleConfig(cmd) => service.update_module_config(cmd).await,
         ModeCmd::ListModuleConfigs => service.list_module_configs().await,
+        ModeCmd::UpdateRealServerState(cmd) => service.update_real_server_state(cmd).await,
+        ModeCmd::UpdateRealServerWeight(cmd) => service.update_real_server_weight(cmd).await,
     }
 }
 
@@ -251,6 +284,48 @@ impl L3BService {
             },
         );
 
+        Ok(())
+    }
+
+    pub async fn update_real_server_state(&mut self, cmd: RealServerCmd) -> Result<(), Error> {
+        let request = UpdateRealServerStateRequest {
+            service: cmd.service.clone(),
+            real_server_index: cmd.real_server_index,
+            enabled: cmd.enabled,
+        };
+        log::trace!("update real server state request: {request:?}");
+        self.client
+            .update_real_server_state(request)
+            .await
+            .map_err(self.map_err("update-real-server-state"))?;
+        output::success(
+            "update-real-server-state",
+            format_args!(
+                "Set real server {} state of {} to {}.",
+                cmd.real_server_index, cmd.service, cmd.enabled
+            ),
+        );
+        Ok(())
+    }
+
+    pub async fn update_real_server_weight(&mut self, cmd: WeightCmd) -> Result<(), Error> {
+        let request = UpdateRealServerWeightRequest {
+            service: cmd.service.clone(),
+            real_server_index: cmd.real_server_index,
+            weight: cmd.weight,
+        };
+        log::trace!("update real server weight request: {request:?}");
+        self.client
+            .update_real_server_weight(request)
+            .await
+            .map_err(self.map_err("update-real-server-weight"))?;
+        output::success(
+            "update-real-server-weight",
+            format_args!(
+                "Set real server {} weight of {} to {}.",
+                cmd.real_server_index, cmd.service, cmd.weight
+            ),
+        );
         Ok(())
     }
 }
