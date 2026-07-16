@@ -3102,6 +3102,7 @@ dependencies = [
  "tonic",
  "tower",
  "uuid",
+ "yanet-readinesspb",
  "yanet-ynpb",
 ]
 
@@ -3440,10 +3441,8 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "clap_complete",
- "colored",
  "log",
  "prost",
- "tabled",
  "tokio",
  "tonic",
  "tonic-build",
@@ -3457,10 +3456,8 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "clap_complete",
- "colored",
  "log",
  "prost",
- "tabled",
  "tokio",
  "tonic",
  "tonic-build",
@@ -3492,12 +3489,10 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "clap_complete",
- "colored",
  "log",
  "prost",
  "serde",
  "serde_json",
- "tabled",
  "tokio",
  "tonic",
  "tonic-build",

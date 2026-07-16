@@ -3,26 +3,14 @@
 //! Connects to a gRPC endpoint exposing the operator's `ReadinessService`
 //! and reports per-scope readiness state.
 
-use core::fmt::{self, Display, Formatter};
-use std::time::SystemTime;
-
 use clap::{ArgAction, CommandFactory, Parser};
 use clap_complete::CompleteEnv;
-use colored::Colorize;
-use tabled::{
-    Table, Tabled,
-    settings::{
-        Color, Style,
-        object::{Columns, Rows},
-        style::{BorderColor, HorizontalLine},
-    },
-};
 use tonic::codec::CompressionEncoding;
 use ync::{
     client::{ConnectionArgs, LayeredChannel, Service},
     errors::Error,
-    humanfmt,
     output::{self, CommonFormat},
+    readiness,
 };
 
 use crate::operatorpb::readiness_service_client::ReadinessServiceClient;
@@ -124,142 +112,6 @@ impl ForwardOperatorService {
             .map_err(self.service.status("ready"))?
             .into_inner();
 
-        let returned_names: std::collections::HashSet<&str> =
-            response.scopes.iter().map(|scope| scope.name.as_str()).collect();
-
-        let missing: Vec<&str> = cmd
-            .scopes
-            .iter()
-            .map(String::as_str)
-            .filter(|name| !returned_names.contains(name))
-            .collect();
-
-        let all_scopes_ready = response
-            .scopes
-            .iter()
-            .all(|scope| scope.state == readinesspb::pb::State::Ready as i32);
-
-        let all_ready = all_scopes_ready && missing.is_empty();
-
-        let total = response.scopes.len();
-        let ready_count = response
-            .scopes
-            .iter()
-            .filter(|scope| scope.state == readinesspb::pb::State::Ready as i32)
-            .count();
-
-        output::data(
-            &response.scopes,
-            response.scopes.is_empty() && missing.is_empty(),
-            format_args!("no scopes"),
-            || {
-                let mut rows: Vec<ReadinessRow> = response.scopes.iter().map(ReadinessRow::from).collect();
-                rows.sort_by(|a, b| a.scope.cmp(&b.scope));
-
-                if !rows.is_empty() {
-                    print_readiness_table(rows);
-                }
-
-                if !missing.is_empty() {
-                    let missing_list = missing.join(", ");
-                    let label = "missing (not registered):";
-
-                    if output::is_colored() {
-                        println!("{} {}", label.red(), missing_list.red());
-                    } else {
-                        println!("{label} {missing_list}");
-                    }
-                }
-
-                let missing_count = missing.len();
-
-                if missing_count > 0 {
-                    println!("summary: {ready_count}/{total} ready, {missing_count} requested scope missing");
-                } else {
-                    println!("summary: {ready_count}/{total} ready");
-                }
-            },
-        );
-
-        Ok(all_ready)
+        Ok(readiness::report(&response.scopes, &cmd.scopes))
     }
-}
-
-/// Wraps a readiness state for colored display in the table.
-pub struct StateCell(readinesspb::pb::State);
-
-impl Display for StateCell {
-    fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
-        let StateCell(state) = self;
-        let name = state.as_str_name().strip_prefix("STATE_").unwrap_or_default();
-
-        if output::is_colored() {
-            let colored = match state {
-                readinesspb::pb::State::Ready => name.green().to_string(),
-                readinesspb::pb::State::Degraded => name.yellow().to_string(),
-                readinesspb::pb::State::NotReady => name.red().to_string(),
-                readinesspb::pb::State::Unspecified | readinesspb::pb::State::Unknown => {
-                    name.truecolor(127, 127, 127).to_string()
-                }
-            };
-            write!(f, "{colored}")
-        } else {
-            write!(f, "{name}")
-        }
-    }
-}
-
-#[derive(Debug, Tabled)]
-pub struct ReadinessRow {
-    #[tabled(rename = "Scope")]
-    pub scope: String,
-    #[tabled(rename = "State")]
-    pub state: String,
-    #[tabled(rename = "Last Transition")]
-    pub last_transition: String,
-    #[tabled(rename = "Observed")]
-    pub observed: String,
-    #[tabled(rename = "Reasons")]
-    pub reasons: String,
-}
-
-impl From<&readinesspb::pb::Scope> for ReadinessRow {
-    fn from(scope: &readinesspb::pb::Scope) -> Self {
-        let state = readinesspb::pb::State::try_from(scope.state).unwrap_or_default();
-        let state_cell = StateCell(state);
-
-        let reasons = scope
-            .reasons
-            .iter()
-            .map(|reason| format!("{}: {}", reason.code, reason.message))
-            .collect::<Vec<_>>()
-            .join(", ");
-
-        Self {
-            scope: scope.name.clone(),
-            state: state_cell.to_string(),
-            last_transition: humanfmt::format_age(scope.last_transition_time.as_ref(), SystemTime::now())
-                .unwrap_or_else(|| "-".to_string()),
-            observed: humanfmt::format_age(scope.observed_at.as_ref(), SystemTime::now())
-                .unwrap_or_else(|| "-".to_string()),
-            reasons,
-        }
-    }
-}
-
-fn print_readiness_table(rows: Vec<ReadinessRow>) {
-    let mut table = Table::new(&rows);
-    table.with(
-        Style::modern()
-            .horizontals([(1, HorizontalLine::inherit(Style::modern()))])
-            .remove_horizontal(),
-    );
-
-    if output::is_colored() {
-        table.modify(Columns::new(..), BorderColor::filled(Color::rgb_fg(0x4e, 0x4e, 0x4e)));
-        table.modify(Rows::first(), Color::BOLD);
-    }
-
-    ync::display::fit_terminal_width(&mut table);
-    println!("{table}");
 }

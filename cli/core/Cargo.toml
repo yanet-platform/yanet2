@@ -19,6 +19,7 @@ prost = "0.13"
 prost-types = "0.13"
 tonic = { version = "0.13", features = ["gzip"] }
 ynpb = { path = "../../common/rust/ynpb", version = "0.1", package = "yanet-ynpb" }
+readinesspb = { path = "../../common/rust/readinesspb", version = "0.1", package = "yanet-readinesspb" }
 tower = "0.5"
 http = "1"
 ssh-key = "0.6"
