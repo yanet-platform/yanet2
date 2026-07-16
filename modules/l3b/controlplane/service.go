@@ -2,7 +2,6 @@ package l3b
 
 import (
 	"context"
-	"sync"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -10,153 +9,116 @@ import (
 	l3bpb "github.com/yanet-platform/yanet2/modules/l3b/controlplane/l3bpb/v1"
 )
 
-var errConfigNameRequired = status.Error(codes.InvalidArgument, "config name is required")
+var errServiceNameRequired = status.Error(codes.InvalidArgument, "service name is required")
+var errModuleNameRequired = status.Error(codes.InvalidArgument, "module config name is required")
 
-// ModuleHandle is a handle to a module configuration.
-type ModuleHandle interface {
-	Free()
-}
-
-// Backend abstracts shared memory operations.
-type Backend interface {
-	// UpdateModule creates a module config and publishes it to the
-	// dataplane.
-	UpdateModule(name string) (ModuleHandle, error)
-	// DeleteModule removes a module config.
-	DeleteModule(name string) error
-}
-
-type config struct {
-	module ModuleHandle
+// backendError preserves a gRPC status returned by the backend and wraps any
+// other error as Internal.
+func backendError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if _, ok := status.FromError(err); ok {
+		return err
+	}
+	return status.Error(codes.Internal, err.Error())
 }
 
 // L3BService implements the L3BService gRPC server.
 type L3BService struct {
 	l3bpb.UnimplementedL3BServiceServer
 
-	mu      sync.Mutex
 	backend Backend
-	configs map[string]*config
 }
 
 // NewL3BService constructs an L3BService backed by the given Backend.
 func NewL3BService(backend Backend) *L3BService {
 	return &L3BService{
 		backend: backend,
-		configs: map[string]*config{},
 	}
 }
 
-// ListConfigs returns all known config names across all dataplane instances.
-func (m *L3BService) ListConfigs(
+// CreateService creates a named virtual service.
+func (m *L3BService) CreateService(
 	ctx context.Context,
-	req *l3bpb.ListConfigsRequest,
-) (*l3bpb.ListConfigsResponse, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	names := make([]string, 0, len(m.configs))
-	for name := range m.configs {
-		names = append(names, name)
+	req *l3bpb.CreateServiceRequest,
+) (*l3bpb.CreateServiceResponse, error) {
+	service := req.GetService()
+	if service == nil || service.GetName() == "" {
+		return nil, errServiceNameRequired
 	}
 
-	return &l3bpb.ListConfigsResponse{Configs: names}, nil
+	if err := m.backend.CreateService(service); err != nil {
+		return nil, backendError(err)
+	}
+
+	return &l3bpb.CreateServiceResponse{}, nil
 }
 
-// ShowConfig returns the named config when it exists.
-func (m *L3BService) ShowConfig(
+// UpdateService replaces an existing named virtual service.
+func (m *L3BService) UpdateService(
 	ctx context.Context,
-	req *l3bpb.ShowConfigRequest,
-) (*l3bpb.ShowConfigResponse, error) {
+	req *l3bpb.UpdateServiceRequest,
+) (*l3bpb.UpdateServiceResponse, error) {
+	service := req.GetService()
+	if service == nil || service.GetName() == "" {
+		return nil, errServiceNameRequired
+	}
+
+	if err := m.backend.UpdateService(service); err != nil {
+		return nil, backendError(err)
+	}
+
+	return &l3bpb.UpdateServiceResponse{}, nil
+}
+
+// DeleteService removes a named virtual service.
+func (m *L3BService) DeleteService(
+	ctx context.Context,
+	req *l3bpb.DeleteServiceRequest,
+) (*l3bpb.DeleteServiceResponse, error) {
 	name := req.GetName()
 	if name == "" {
-		return nil, errConfigNameRequired
+		return nil, errServiceNameRequired
 	}
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if _, ok := m.configs[name]; !ok {
-		return nil, status.Error(codes.NotFound, "no config found")
+	if err := m.backend.DeleteService(name); err != nil {
+		return nil, backendError(err)
 	}
 
-	return &l3bpb.ShowConfigResponse{Name: name}, nil
+	return &l3bpb.DeleteServiceResponse{Deleted: true}, nil
 }
 
-// UpdateConfig creates or replaces the named config and publishes it to the
-// dataplane.
-func (m *L3BService) UpdateConfig(
+// ListServices returns the names of all virtual services.
+func (m *L3BService) ListServices(
 	ctx context.Context,
-	req *l3bpb.UpdateConfigRequest,
-) (*l3bpb.UpdateConfigResponse, error) {
-	name := req.GetName()
-	if name == "" {
-		return nil, errConfigNameRequired
-	}
-
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if err := m.updateConfig(name); err != nil {
-		return nil, status.Errorf(
-			codes.Internal,
-			"failed to update module config %q: %v", name, err,
-		)
-	}
-
-	return &l3bpb.UpdateConfigResponse{}, nil
+	req *l3bpb.ListServicesRequest,
+) (*l3bpb.ListServicesResponse, error) {
+	return &l3bpb.ListServicesResponse{Services: m.backend.ListServices()}, nil
 }
 
-// updateConfig publishes a fresh config and, on success, frees the old module
-// handle and stores the new one.
-//
-// The caller must hold m.mu.
-func (m *L3BService) updateConfig(name string) error {
-	mod, err := m.backend.UpdateModule(name)
-	if err != nil {
-		return err
-	}
-
-	if old, ok := m.configs[name]; ok && old.module != nil {
-		old.module.Free()
-	}
-
-	m.configs[name] = &config{module: mod}
-
-	return nil
-}
-
-// DeleteConfig removes the named config if it is not referenced by any
-// pipeline.
-func (m *L3BService) DeleteConfig(
+// UpdateModuleConfig installs destination filters and services into a named
+// module configuration.
+func (m *L3BService) UpdateModuleConfig(
 	ctx context.Context,
-	req *l3bpb.DeleteConfigRequest,
-) (*l3bpb.DeleteConfigResponse, error) {
-	name := req.GetName()
-	if name == "" {
-		return nil, errConfigNameRequired
+	req *l3bpb.UpdateModuleConfigRequest,
+) (*l3bpb.UpdateModuleConfigResponse, error) {
+	config := req.GetConfig()
+	if config == nil || config.GetName() == "" {
+		return nil, errModuleNameRequired
 	}
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	entry, ok := m.configs[name]
-	if !ok {
-		return nil, status.Error(codes.NotFound, "no config found")
+	if err := m.backend.UpdateModuleConfig(config); err != nil {
+		return nil, backendError(err)
 	}
 
-	if err := m.backend.DeleteModule(name); err != nil {
-		return nil, status.Errorf(
-			codes.Internal,
-			"failed to delete module config %q: %v", name, err,
-		)
-	}
+	return &l3bpb.UpdateModuleConfigResponse{}, nil
+}
 
-	if entry.module != nil {
-		entry.module.Free()
-	}
-
-	delete(m.configs, name)
-
-	return &l3bpb.DeleteConfigResponse{Deleted: true}, nil
+// ListModuleConfigs returns the names of all module configurations.
+func (m *L3BService) ListModuleConfigs(
+	ctx context.Context,
+	req *l3bpb.ListModuleConfigsRequest,
+) (*l3bpb.ListModuleConfigsResponse, error) {
+	return &l3bpb.ListModuleConfigsResponse{Configs: m.backend.ListModuleConfigs()}, nil
 }

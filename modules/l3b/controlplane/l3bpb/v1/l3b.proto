@@ -2,48 +2,112 @@ syntax = "proto3";
 
 package modules.l3b.controlplane.l3bpb.v1;
 
+import "common/filterpb/v1/filter.proto";
+
 option go_package = "github.com/yanet-platform/yanet2/modules/l3b/controlplane/l3bpb/v1;l3bpb";
 
-// L3bService is a controlplane service for the l3b module.
+// L3bService manages named virtual services and the module configurations
+// that route traffic to them. Virtual services are named in the same manner
+// as module configurations.
 service L3bService {
-  // ListConfigs returns all l3b module configurations of all
-  // dataplane instances.
-  rpc ListConfigs(ListConfigsRequest) returns (ListConfigsResponse);
+  // CreateService creates a named virtual service.
+  rpc CreateService(CreateServiceRequest) returns (CreateServiceResponse);
 
-  // ShowConfig returns the current configuration for the l3b module.
-  rpc ShowConfig(ShowConfigRequest) returns (ShowConfigResponse);
+  // UpdateService replaces an existing named virtual service.
+  rpc UpdateService(UpdateServiceRequest) returns (UpdateServiceResponse);
 
-  // UpdateConfig creates or replaces the named l3b config and publishes
-  // it to the dataplane.
-  rpc UpdateConfig(UpdateConfigRequest) returns (UpdateConfigResponse);
+  // DeleteService removes a named virtual service.
+  rpc DeleteService(DeleteServiceRequest) returns (DeleteServiceResponse);
 
-  // DeleteConfig removes the named l3b config when it is no longer
-  // referenced by any pipeline.
-  rpc DeleteConfig(DeleteConfigRequest) returns (DeleteConfigResponse);
+  // ListServices returns the names of all virtual services.
+  rpc ListServices(ListServicesRequest) returns (ListServicesResponse);
+
+  // UpdateModuleConfig installs destination filter rules and the named
+  // virtual services they route to into a module configuration.
+  rpc UpdateModuleConfig(UpdateModuleConfigRequest)
+      returns (UpdateModuleConfigResponse);
+
+  // ListModuleConfigs returns the names of all module configurations.
+  rpc ListModuleConfigs(ListModuleConfigsRequest)
+      returns (ListModuleConfigsResponse);
 }
 
-message ListConfigsRequest {}
+// RealServer is a backend reached through an IP-in-IP tunnel. The address
+// family is inferred from the byte length of destination_address (4 for IPv4,
+// 16 for IPv6).
+message RealServer {
+  bytes destination_address = 1;
+  common.filterpb.v1.IPNet source_network = 2;
+}
 
-// ListConfigsResponse contains existing configurations.
-message ListConfigsResponse { repeated string configs = 1; }
+// SourceFilterRule is the source-side match criteria of a service.
+message SourceFilterRule {
+  repeated common.filterpb.v1.IPNet net6s = 1;
+  repeated common.filterpb.v1.IPNet net4s = 2;
+  repeated common.filterpb.v1.PortRange port_ranges = 3;
+}
 
-// ShowConfigRequest retrieves the runtime configuration for the l3b
-// module.
-message ShowConfigRequest { string name = 1; }
+// DestinationFilterRule routes matching packets to a named virtual service.
+message DestinationFilterRule {
+  repeated common.filterpb.v1.IPNet net6s = 1;
+  repeated common.filterpb.v1.IPNet net4s = 2;
+  repeated common.filterpb.v1.ProtoRange proto_ranges = 3;
+  string service = 4;
+}
 
-// ShowConfigResponse contains the configuration details of the l3b module.
-message ShowConfigResponse { string name = 1; }
+// VirtualService describes a named virtual service.
+message VirtualService {
+  string name = 1;
+  repeated SourceFilterRule source_filter_rules = 2;
+  repeated RealServer real_servers = 3;
+  uint32 hash_mask = 4;
+  uint32 index_mask = 5;
+  uint32 ring_capacity = 6;
+}
 
-// UpdateConfigRequest names the config to create or replace.
-//
-// The l3b config carries no payload yet, since the module is a skeleton.
-message UpdateConfigRequest { string name = 1; }
+// ModuleConfig describes a named module configuration. services lists the
+// virtual services, in index order, that destination_filter_rule.service
+// names refer to.
+message ModuleConfig {
+  string name = 1;
+  repeated DestinationFilterRule destination_filter_rules = 2;
+  repeated string services = 3;
+}
 
-// UpdateConfigResponse is the response to an UpdateConfig call.
-message UpdateConfigResponse {}
+message CreateServiceRequest {
+  VirtualService service = 1;
+}
 
-// DeleteConfigRequest names the config to delete.
-message DeleteConfigRequest { string name = 1; }
+message CreateServiceResponse {}
 
-// DeleteConfigResponse is the response to a DeleteConfig call.
-message DeleteConfigResponse { bool deleted = 1; }
+message UpdateServiceRequest {
+  VirtualService service = 1;
+}
+
+message UpdateServiceResponse {}
+
+message DeleteServiceRequest {
+  string name = 1;
+}
+
+message DeleteServiceResponse {
+  bool deleted = 1;
+}
+
+message ListServicesRequest {}
+
+message ListServicesResponse {
+  repeated string services = 1;
+}
+
+message UpdateModuleConfigRequest {
+  ModuleConfig config = 1;
+}
+
+message UpdateModuleConfigResponse {}
+
+message ListModuleConfigsRequest {}
+
+message ListModuleConfigsResponse {
+  repeated string configs = 1;
+}

@@ -1,194 +1,172 @@
 package l3b
 
 import (
-	"errors"
-	"fmt"
-	"sync/atomic"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	l3bpb "github.com/yanet-platform/yanet2/modules/l3b/controlplane/l3bpb/v1"
 )
 
-var errInjectedBackend = errors.New("injected backend failure")
-
-type mockModuleHandle struct{}
-
-func (m *mockModuleHandle) Free() {}
-
-type mockBackend struct{}
-
-func (m *mockBackend) UpdateModule(name string) (ModuleHandle, error) {
-	return &mockModuleHandle{}, nil
+type mockBackend struct {
+	services        map[string]*l3bpb.VirtualService
+	moduleConfigs   map[string]*l3bpb.ModuleConfig
+	createErr       error
+	createCallCount int
 }
 
-func (m *mockBackend) DeleteModule(name string) error {
+func newMockBackend() *mockBackend {
+	return &mockBackend{
+		services:      map[string]*l3bpb.VirtualService{},
+		moduleConfigs: map[string]*l3bpb.ModuleConfig{},
+	}
+}
+
+func (m *mockBackend) CreateService(service *l3bpb.VirtualService) error {
+	m.createCallCount++
+	if m.createErr != nil {
+		return m.createErr
+	}
+	m.services[service.GetName()] = service
 	return nil
 }
 
-func newTestService(t *testing.T) *L3BService {
+func (m *mockBackend) UpdateService(service *l3bpb.VirtualService) error {
+	if _, ok := m.services[service.GetName()]; !ok {
+		return errNotFound
+	}
+	m.services[service.GetName()] = service
+	return nil
+}
+
+func (m *mockBackend) DeleteService(name string) error {
+	if _, ok := m.services[name]; !ok {
+		return errNotFound
+	}
+	delete(m.services, name)
+	return nil
+}
+
+func (m *mockBackend) ListServices() []string {
+	names := make([]string, 0, len(m.services))
+	for name := range m.services {
+		names = append(names, name)
+	}
+	return names
+}
+
+func (m *mockBackend) UpdateModuleConfig(config *l3bpb.ModuleConfig) error {
+	for _, serviceName := range config.GetServices() {
+		if _, ok := m.services[serviceName]; !ok {
+			return errNotFound
+		}
+	}
+	m.moduleConfigs[config.GetName()] = config
+	return nil
+}
+
+func (m *mockBackend) ListModuleConfigs() []string {
+	names := make([]string, 0, len(m.moduleConfigs))
+	for name := range m.moduleConfigs {
+		names = append(names, name)
+	}
+	return names
+}
+
+var errNotFound = status.Error(codes.NotFound, "not found")
+
+func newTestService(t *testing.T) (*L3BService, *mockBackend) {
 	t.Helper()
-	return NewL3BService(&mockBackend{})
+	backend := newMockBackend()
+	return NewL3BService(backend), backend
 }
 
-// flakyBackend succeeds on the first UpdateModule call and fails thereafter.
-type flakyBackend struct {
-	numCalls atomic.Int64
-}
-
-func (m *flakyBackend) UpdateModule(name string) (ModuleHandle, error) {
-	if m.numCalls.Add(1) >= 2 {
-		return nil, errInjectedBackend
+func sampleService(name string) *l3bpb.VirtualService {
+	return &l3bpb.VirtualService{
+		Name:         name,
+		HashMask:     0xff,
+		IndexMask:    0x0f,
+		RingCapacity: 4,
 	}
-	return &mockModuleHandle{}, nil
 }
 
-func (m *flakyBackend) DeleteModule(name string) error {
-	return nil
+func Test_L3BService_CreateAndListService(t *testing.T) {
+	svc, backend := newTestService(t)
+
+	_, err := svc.CreateService(t.Context(), &l3bpb.CreateServiceRequest{
+		Service: sampleService("vs0"),
+	})
+	require.NoError(t, err)
+
+	resp, err := svc.ListServices(t.Context(), &l3bpb.ListServicesRequest{})
+	require.NoError(t, err)
+	require.Equal(t, []string{"vs0"}, resp.Services)
+	require.Len(t, backend.services, 1)
 }
 
-func Test_L3BService_UpdateAndShow(t *testing.T) {
-	svc := newTestService(t)
+func Test_L3BService_CreateServiceEmptyName(t *testing.T) {
+	svc, _ := newTestService(t)
 
-	resp, err := svc.UpdateConfig(t.Context(), &l3bpb.UpdateConfigRequest{Name: "l3b0"})
-	require.NotNil(t, resp)
-	require.NoError(t, err)
-
-	show, err := svc.ShowConfig(t.Context(), &l3bpb.ShowConfigRequest{Name: "l3b0"})
-	require.NotNil(t, show)
-	require.NoError(t, err)
-	require.Equal(t, "l3b0", show.Name)
+	_, err := svc.CreateService(t.Context(), &l3bpb.CreateServiceRequest{
+		Service: sampleService(""),
+	})
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
 }
 
-func Test_L3BService_ListUpdateList(t *testing.T) {
-	svc := newTestService(t)
-	ctx := t.Context()
+func Test_L3BService_UpdateServiceMissing(t *testing.T) {
+	svc, _ := newTestService(t)
 
-	list, err := svc.ListConfigs(ctx, &l3bpb.ListConfigsRequest{})
-	require.NotNil(t, list)
-	require.NoError(t, err)
-	assert.Empty(t, list.Configs)
-
-	_, err = svc.UpdateConfig(ctx, &l3bpb.UpdateConfigRequest{Name: "l3b0"})
-	require.NoError(t, err)
-
-	list, err = svc.ListConfigs(ctx, &l3bpb.ListConfigsRequest{})
-	require.NotNil(t, list)
-	require.NoError(t, err)
-	assert.Equal(t, []string{"l3b0"}, list.Configs)
-}
-
-func Test_L3BService_DeleteConfig(t *testing.T) {
-	svc := newTestService(t)
-	ctx := t.Context()
-
-	_, err := svc.UpdateConfig(ctx, &l3bpb.UpdateConfigRequest{Name: "l3b0"})
-	require.NoError(t, err)
-
-	resp, err := svc.DeleteConfig(ctx, &l3bpb.DeleteConfigRequest{Name: "l3b0"})
-	require.NoError(t, err)
-	require.True(t, resp.Deleted)
-
-	_, err = svc.ShowConfig(ctx, &l3bpb.ShowConfigRequest{Name: "l3b0"})
+	_, err := svc.UpdateService(t.Context(), &l3bpb.UpdateServiceRequest{
+		Service: sampleService("absent"),
+	})
 	require.Equal(t, codes.NotFound, status.Code(err))
 }
 
-func Test_L3BService_DeleteMissing(t *testing.T) {
-	svc := newTestService(t)
+func Test_L3BService_DeleteService(t *testing.T) {
+	svc, _ := newTestService(t)
+	ctx := t.Context()
 
-	resp, err := svc.DeleteConfig(t.Context(), &l3bpb.DeleteConfigRequest{Name: "absent"})
-	require.Nil(t, resp)
+	_, err := svc.CreateService(ctx, &l3bpb.CreateServiceRequest{Service: sampleService("vs0")})
+	require.NoError(t, err)
+
+	_, err = svc.DeleteService(ctx, &l3bpb.DeleteServiceRequest{Name: "vs0"})
+	require.NoError(t, err)
+
+	resp, err := svc.ListServices(ctx, &l3bpb.ListServicesRequest{})
+	require.NoError(t, err)
+	require.Empty(t, resp.Services)
+}
+
+func Test_L3BService_UpdateModuleConfigUnknownService(t *testing.T) {
+	svc, _ := newTestService(t)
+
+	_, err := svc.UpdateModuleConfig(t.Context(), &l3bpb.UpdateModuleConfigRequest{
+		Config: &l3bpb.ModuleConfig{
+			Name:     "l3b0",
+			Services: []string{"absent"},
+		},
+	})
 	require.Equal(t, codes.NotFound, status.Code(err))
 }
 
-func Test_L3BService_EmptyConfigName(t *testing.T) {
-	svc := newTestService(t)
+func Test_L3BService_UpdateAndListModuleConfig(t *testing.T) {
+	svc, _ := newTestService(t)
 	ctx := t.Context()
 
-	t.Run("UpdateConfig", func(t *testing.T) {
-		resp, err := svc.UpdateConfig(ctx, &l3bpb.UpdateConfigRequest{})
-		require.Nil(t, resp)
-		require.Equal(t, codes.InvalidArgument, status.Code(err))
-	})
-
-	t.Run("ShowConfig", func(t *testing.T) {
-		resp, err := svc.ShowConfig(ctx, &l3bpb.ShowConfigRequest{})
-		require.Nil(t, resp)
-		require.Equal(t, codes.InvalidArgument, status.Code(err))
-	})
-
-	t.Run("DeleteConfig", func(t *testing.T) {
-		resp, err := svc.DeleteConfig(ctx, &l3bpb.DeleteConfigRequest{})
-		require.Nil(t, resp)
-		require.Equal(t, codes.InvalidArgument, status.Code(err))
-	})
-}
-
-func Test_L3BService_UpdateFailureAtomic(t *testing.T) {
-	svc := NewL3BService(&flakyBackend{})
-	ctx := t.Context()
-	name := "l3b0"
-
-	_, err := svc.UpdateConfig(ctx, &l3bpb.UpdateConfigRequest{Name: name})
+	_, err := svc.CreateService(ctx, &l3bpb.CreateServiceRequest{Service: sampleService("vs0")})
 	require.NoError(t, err)
 
-	_, err = svc.UpdateConfig(ctx, &l3bpb.UpdateConfigRequest{Name: name})
-	require.Error(t, err)
-	require.Equal(t, codes.Internal, status.Code(err))
-
-	show, err := svc.ShowConfig(ctx, &l3bpb.ShowConfigRequest{Name: name})
-	require.NotNil(t, show)
+	_, err = svc.UpdateModuleConfig(ctx, &l3bpb.UpdateModuleConfigRequest{
+		Config: &l3bpb.ModuleConfig{
+			Name:     "l3b0",
+			Services: []string{"vs0"},
+		},
+	})
 	require.NoError(t, err)
-	require.Equal(t, name, show.Name)
-}
 
-func Test_L3BService_ConcurrentAccess(t *testing.T) {
-	svc := newTestService(t)
-
-	const goroutines = 10
-	const iterations = 100
-
-	g, ctx := errgroup.WithContext(t.Context())
-
-	for idx := range goroutines {
-		g.Go(func() error {
-			for jdx := range iterations {
-				name := fmt.Sprintf("config-%d-%d", idx, jdx)
-				_, err := svc.UpdateConfig(ctx, &l3bpb.UpdateConfigRequest{Name: name})
-				if err != nil {
-					return err
-				}
-			}
-			return nil
-		})
-	}
-
-	for range goroutines {
-		g.Go(func() error {
-			for range iterations {
-				_, err := svc.ListConfigs(ctx, &l3bpb.ListConfigsRequest{})
-				if err != nil {
-					return err
-				}
-			}
-			return nil
-		})
-	}
-
-	for idx := range goroutines {
-		g.Go(func() error {
-			for jdx := range iterations {
-				name := fmt.Sprintf("config-%d-%d", idx, jdx)
-				svc.ShowConfig(ctx, &l3bpb.ShowConfigRequest{Name: name})
-			}
-			return nil
-		})
-	}
-
-	require.NoError(t, g.Wait())
+	resp, err := svc.ListModuleConfigs(ctx, &l3bpb.ListModuleConfigsRequest{})
+	require.NoError(t, err)
+	require.Equal(t, []string{"l3b0"}, resp.Configs)
 }
