@@ -60,6 +60,34 @@ pub fn pretty_print_metadata<W: Write>(mut writer: W, meta: &pdumppb::RecordMeta
     Ok(())
 }
 
+/// Formats an L4 protocol summary from its next-header protocol number and
+/// payload.
+///
+/// Produces `TCP:src->dst[flags]`, `UDP:src->dst`, `ICMP`, `ICMPv6`, or
+/// `Proto:N` for unrecognized protocols.
+fn format_l4(proto: IpNextHeaderProtocol, payload: &[u8]) -> String {
+    match proto {
+        IpNextHeaderProtocols::Tcp => {
+            if let Some(tcp) = TcpPacket::new(payload) {
+                let flags = get_tcp_flags_string(tcp.get_flags());
+                format!("TCP:{}->{}[{}]", tcp.get_source(), tcp.get_destination(), flags)
+            } else {
+                "TCP:malformed".to_string()
+            }
+        }
+        IpNextHeaderProtocols::Udp => {
+            if let Some(udp) = UdpPacket::new(payload) {
+                format!("UDP:{}->{}", udp.get_source(), udp.get_destination())
+            } else {
+                "UDP:malformed".to_string()
+            }
+        }
+        IpNextHeaderProtocols::Icmp => "ICMP".to_string(),
+        IpNextHeaderProtocols::Icmpv6 => "ICMPv6".to_string(),
+        _ => format!("Proto:{}", proto.0),
+    }
+}
+
 /// Pretty prints an Ethernet frame in a concise, single-line format.
 ///
 /// # Arguments
@@ -98,26 +126,7 @@ pub fn pretty_print_ethernet_frame_concise<W: Write>(
     let protocol_info = match current_ethertype {
         EtherTypes::Ipv4 => {
             if let Some(ipv4) = Ipv4Packet::new(&current_payload) {
-                let l4_proto = match ipv4.get_next_level_protocol() {
-                    IpNextHeaderProtocols::Tcp => {
-                        if let Some(tcp) = TcpPacket::new(ipv4.payload()) {
-                            let flags = get_tcp_flags_string(tcp.get_flags());
-                            format!("TCP:{}->{}[{}]", tcp.get_source(), tcp.get_destination(), flags)
-                        } else {
-                            "TCP:malformed".to_string()
-                        }
-                    }
-                    IpNextHeaderProtocols::Udp => {
-                        if let Some(udp) = UdpPacket::new(ipv4.payload()) {
-                            format!("UDP:{}->{}", udp.get_source(), udp.get_destination())
-                        } else {
-                            "UDP:malformed".to_string()
-                        }
-                    }
-                    IpNextHeaderProtocols::Icmp => "ICMP".to_string(),
-                    IpNextHeaderProtocols::Icmpv6 => "ICMPv6".to_string(),
-                    _ => format!("Proto:{}", ipv4.get_next_level_protocol().0),
-                };
+                let l4_proto = format_l4(ipv4.get_next_level_protocol(), ipv4.payload());
                 format!("IPv4:{}->{} {}", ipv4.get_source(), ipv4.get_destination(), l4_proto)
             } else {
                 "IPv4:malformed".to_string()
@@ -125,26 +134,7 @@ pub fn pretty_print_ethernet_frame_concise<W: Write>(
         }
         EtherTypes::Ipv6 => {
             if let Some(ipv6) = Ipv6Packet::new(&current_payload) {
-                let l4_proto = match ipv6.get_next_header() {
-                    IpNextHeaderProtocols::Tcp => {
-                        if let Some(tcp) = TcpPacket::new(ipv6.payload()) {
-                            let flags = get_tcp_flags_string(tcp.get_flags());
-                            format!("TCP:{}->{}[{}]", tcp.get_source(), tcp.get_destination(), flags)
-                        } else {
-                            "TCP:malformed".to_string()
-                        }
-                    }
-                    IpNextHeaderProtocols::Udp => {
-                        if let Some(udp) = UdpPacket::new(ipv6.payload()) {
-                            format!("UDP:{}->{}", udp.get_source(), udp.get_destination())
-                        } else {
-                            "UDP:malformed".to_string()
-                        }
-                    }
-                    IpNextHeaderProtocols::Icmp => "ICMP".to_string(),
-                    IpNextHeaderProtocols::Icmpv6 => "ICMPv6".to_string(),
-                    _ => format!("Proto:{}", ipv6.get_next_header().0),
-                };
+                let l4_proto = format_l4(ipv6.get_next_header(), ipv6.payload());
                 format!("IPv6:{}->{} {}", ipv6.get_source(), ipv6.get_destination(), l4_proto)
             } else {
                 "IPv6:malformed".to_string()
@@ -409,6 +399,43 @@ fn pretty_print_udp_packet<W: Write>(mut writer: W, udp_packet: &[u8]) -> io::Re
     Ok(())
 }
 
+/// Prints the identifier, sequence number, and data length carried by an
+/// ICMP or ICMPv6 Echo Request/Reply payload.
+///
+/// Prints a warning instead if `payload` is too short to contain an
+/// identifier and sequence number.
+fn print_echo_details<W: Write>(writer: &mut W, payload: &[u8]) -> io::Result<()> {
+    if payload.len() >= 4 {
+        let identifier = u16::from_be_bytes([payload[0], payload[1]]);
+        let sequence = u16::from_be_bytes([payload[2], payload[3]]);
+        writeln!(writer, "      Identifier:       {identifier}")?;
+        writeln!(writer, "      Sequence Number:  {sequence}")?;
+        writeln!(
+            writer,
+            "      Data Length:      {} bytes",
+            payload.len().saturating_sub(4)
+        )?;
+    } else {
+        writeln!(writer, "      Warning: Echo packet too short for identifier/sequence")?;
+    }
+
+    Ok(())
+}
+
+/// Prints the ICMPv6 Neighbor Solicitation/Advertisement target address.
+///
+/// Does nothing if `payload` is too short to contain a target address.
+fn print_target_address<W: Write>(writer: &mut W, payload: &[u8]) -> io::Result<()> {
+    if payload.len() >= 20 {
+        let mut addr: [u8; 16] = [0; 16];
+        addr.copy_from_slice(&payload[4..20]);
+        let target_addr = Ipv6Addr::from(addr);
+        writeln!(writer, "      Target Address:   {target_addr}")?;
+    }
+
+    Ok(())
+}
+
 /// Pretty prints an ICMP packet with detailed information.
 ///
 /// # Arguments
@@ -444,19 +471,7 @@ fn pretty_print_icmp_packet<W: Write>(mut writer: W, icmp_packet: &[u8]) -> io::
     // Parse type-specific fields based on ICMP type
     match icmp_type {
         IcmpTypes::EchoReply | IcmpTypes::EchoRequest => {
-            if packet.payload().len() >= 4 {
-                let identifier = u16::from_be_bytes([packet.payload()[0], packet.payload()[1]]);
-                let sequence = u16::from_be_bytes([packet.payload()[2], packet.payload()[3]]);
-                writeln!(writer, "      Identifier:       {identifier}")?;
-                writeln!(writer, "      Sequence Number:  {sequence}")?;
-                writeln!(
-                    writer,
-                    "      Data Length:      {} bytes",
-                    packet.payload().len().saturating_sub(4)
-                )?;
-            } else {
-                writeln!(writer, "      Warning: Echo packet too short for identifier/sequence")?;
-            }
+            print_echo_details(&mut writer, packet.payload())?;
         }
         IcmpTypes::DestinationUnreachable => {
             writeln!(
@@ -561,19 +576,7 @@ fn pretty_print_icmpv6_packet<W: Write>(mut writer: W, icmpv6_packet: &[u8]) -> 
     // Parse type-specific fields based on ICMPv6 type
     match icmpv6_type {
         Icmpv6Types::EchoRequest | Icmpv6Types::EchoReply => {
-            if packet.payload().len() >= 4 {
-                let identifier = u16::from_be_bytes([packet.payload()[0], packet.payload()[1]]);
-                let sequence = u16::from_be_bytes([packet.payload()[2], packet.payload()[3]]);
-                writeln!(writer, "      Identifier:       {identifier}")?;
-                writeln!(writer, "      Sequence Number:  {sequence}")?;
-                writeln!(
-                    writer,
-                    "      Data Length:      {} bytes",
-                    packet.payload().len().saturating_sub(4)
-                )?;
-            } else {
-                writeln!(writer, "      Warning: Echo packet too short for identifier/sequence")?;
-            }
+            print_echo_details(&mut writer, packet.payload())?;
         }
         Icmpv6Types::DestinationUnreachable => {
             writeln!(
@@ -662,12 +665,7 @@ fn pretty_print_icmpv6_packet<W: Write>(mut writer: W, icmpv6_packet: &[u8]) -> 
             }
         }
         Icmpv6Types::NeighborSolicit => {
-            if packet.payload().len() >= 20 {
-                let mut addr: [u8; 16] = [0; 16];
-                addr.copy_from_slice(&packet.payload()[4..20]);
-                let target_addr = Ipv6Addr::from(addr);
-                writeln!(writer, "      Target Address:   {target_addr}")?;
-            }
+            print_target_address(&mut writer, packet.payload())?;
         }
         Icmpv6Types::NeighborAdvert => {
             if packet.payload().len() >= 4 {
@@ -676,12 +674,7 @@ fn pretty_print_icmpv6_packet<W: Write>(mut writer: W, icmpv6_packet: &[u8]) -> 
                 writeln!(writer, "      Solicited Flag:   {}", (flags & 0x40) != 0)?;
                 writeln!(writer, "      Override Flag:    {}", (flags & 0x20) != 0)?;
             }
-            if packet.payload().len() >= 20 {
-                let mut addr: [u8; 16] = [0; 16];
-                addr.copy_from_slice(&packet.payload()[4..20]);
-                let target_addr = Ipv6Addr::from(addr);
-                writeln!(writer, "      Target Address:   {target_addr}")?;
-            }
+            print_target_address(&mut writer, packet.payload())?;
         }
         _ => {
             // For other types, just show raw payload info
