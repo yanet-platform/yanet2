@@ -1,8 +1,7 @@
 use std::time::Duration;
 
 use clap::Parser;
-
-use crate::metric::{Kind, Metric};
+use ync::metrics::{Kind, Metric};
 
 /// Parse duration from string (e.g., "60s", "5m", "1h")
 fn parse_duration(s: &str) -> Result<Duration, String> {

@@ -10,7 +10,6 @@ use fwstatepb::{
     ShowConfigRequest, UpdateConfigRequest, fw_state_service_client::FwStateServiceClient,
     metrics_service_client::MetricsServiceClient,
 };
-use metric::Metric;
 use netip::MacAddr;
 use serde::Serialize;
 use tabled::Tabled;
@@ -21,11 +20,11 @@ use ync::{
     client::{Connection, ConnectionArgs, LayeredChannel, Service},
     display::print_table_from_entries,
     errors::Error,
+    metrics::{self, GaugeRow, Kind, Metric},
     output::{self, CommonFormat},
 };
 
 mod args;
-mod metric;
 
 #[allow(non_snake_case)]
 pub mod fwstatepb {
@@ -606,91 +605,6 @@ struct CounterRow {
     entries: String,
 }
 
-#[derive(Tabled)]
-struct GaugeRow {
-    #[tabled(rename = "Metric")]
-    metric: String,
-    #[tabled(rename = "Value")]
-    value: String,
-}
-
-#[derive(Tabled)]
-struct GrpcCallRow {
-    #[tabled(rename = "Method")]
-    method: String,
-    #[tabled(rename = "Code")]
-    code: String,
-    #[tabled(rename = "Handled")]
-    handled: String,
-}
-
-#[derive(Tabled)]
-struct GrpcLatRow {
-    #[tabled(rename = "Method")]
-    method: String,
-    #[tabled(rename = "Total Calls")]
-    total: String,
-    #[tabled(rename = "P50")]
-    p50: String,
-    #[tabled(rename = "P95")]
-    p95: String,
-    #[tabled(rename = "P99")]
-    p99: String,
-}
-
-fn format_number(n: u64) -> String {
-    let s = n.to_string();
-    let mut result = String::new();
-    for (i, c) in s.chars().rev().enumerate() {
-        if i > 0 && i % 3 == 0 {
-            result.push(',');
-        }
-        result.push(c);
-    }
-    result.chars().rev().collect()
-}
-
-fn format_gauge_value(name: &str, value: f64) -> String {
-    if name.ends_with("_ns") {
-        if value < 1_000.0 {
-            format!("{:.0}ns", value)
-        } else if value < 1_000_000.0 {
-            format!("{:.2}µs", value / 1_000.0)
-        } else if value < 1_000_000_000.0 {
-            format!("{:.2}ms", value / 1_000_000.0)
-        } else {
-            format!("{:.2}s", value / 1_000_000_000.0)
-        }
-    } else if name.ends_with("_bytes") {
-        if value < 1024.0 {
-            format!("{:.0} B", value)
-        } else if value < 1024.0 * 1024.0 {
-            format!("{:.2} KiB", value / 1024.0)
-        } else if value < 1024.0 * 1024.0 * 1024.0 {
-            format!("{:.2} MiB", value / (1024.0 * 1024.0))
-        } else {
-            format!("{:.2} GiB", value / (1024.0 * 1024.0 * 1024.0))
-        }
-    } else {
-        format_number(value as u64)
-    }
-}
-
-fn metric_display_name(name: &str) -> String {
-    let stripped = name.strip_prefix("fwstate_").unwrap_or(name);
-    stripped
-        .split('_')
-        .map(|word| {
-            let mut c = word.chars();
-            match c.next() {
-                None => String::new(),
-                Some(first) => first.to_uppercase().collect::<String>() + c.as_str(),
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
 fn print_metrics_table(metrics: &[Metric]) {
     struct CounterPair {
         display: String,
@@ -709,15 +623,15 @@ fn print_metrics_table(metrics: &[Metric]) {
     for m in metrics {
         if m.name.starts_with("grpc_") {
             match m.kind {
-                metric::Kind::Counter => grpc_counters.push(m),
-                metric::Kind::Histogram => grpc_histograms.push(m),
+                Kind::Counter => grpc_counters.push(m),
+                Kind::Histogram => grpc_histograms.push(m),
                 _ => {}
             }
             continue;
         }
 
         match m.kind {
-            metric::Kind::Gauge => {
+            Kind::Gauge => {
                 let cfg = format!(
                     "{}\0{}",
                     m.label_value("config").unwrap_or("global"),
@@ -728,7 +642,7 @@ fn print_metrics_table(metrics: &[Metric]) {
                 }
                 gauge_map.entry(cfg).or_default().push(m);
             }
-            metric::Kind::Counter => {
+            Kind::Counter => {
                 let key = format!(
                     "{}\0{}\0{}\0{}\0{}",
                     m.label_value("config").unwrap_or(""),
@@ -786,9 +700,9 @@ fn print_metrics_table(metrics: &[Metric]) {
             };
 
             let display = if counter_label.is_empty() {
-                metric_display_name(base)
+                metrics::metric_display_name(base, "fwstate_")
             } else {
-                metric_display_name(counter_label)
+                metrics::metric_display_name(counter_label, "fwstate_")
             };
             let pair_key = format!("{base}\0{counter_label}");
 
@@ -820,9 +734,9 @@ fn print_metrics_table(metrics: &[Metric]) {
                 let p = &pair_map[pair_key];
                 CounterRow {
                     counter: p.display.clone(),
-                    packets: p.packets.map(format_number).unwrap_or_else(|| "-".into()),
-                    bytes: p.bytes.map(format_number).unwrap_or_else(|| "-".into()),
-                    entries: p.entries.map(format_number).unwrap_or_else(|| "-".into()),
+                    packets: p.packets.map(metrics::format_number).unwrap_or_else(|| "-".into()),
+                    bytes: p.bytes.map(metrics::format_number).unwrap_or_else(|| "-".into()),
+                    entries: p.entries.map(metrics::format_number).unwrap_or_else(|| "-".into()),
                 }
             })
             .collect();
@@ -839,90 +753,15 @@ fn print_metrics_table(metrics: &[Metric]) {
         let rows: Vec<GaugeRow> = gauges
             .iter()
             .map(|m| GaugeRow {
-                metric: metric_display_name(&m.name),
-                value: format_gauge_value(&m.name, m.value.unwrap_or(0.0)),
+                metric: metrics::metric_display_name(&m.name, "fwstate_"),
+                value: metrics::format_gauge_value(&m.name, m.value.unwrap_or(0.0)),
             })
             .collect();
         print_table_from_entries(rows);
         println!();
     }
 
-    if !grpc_counters.is_empty() {
-        let mut started: HashMap<String, u64> = HashMap::new();
-        let mut handled_keys: Vec<(String, String)> = Vec::new();
-        let mut handled: HashMap<(String, String), u64> = HashMap::new();
-
-        for m in &grpc_counters {
-            let method = m.label_value("grpc_method").unwrap_or("").to_string();
-            if m.name == "grpc_server_started_total" {
-                let count = m.value.unwrap_or(0.0) as u64;
-                *started.entry(method).or_default() += count;
-            } else if m.name == "grpc_server_handled_total" {
-                let code = m.label_value("grpc_code").unwrap_or("").to_string();
-                let key = (method, code);
-                if !handled.contains_key(&key) {
-                    handled_keys.push(key.clone());
-                }
-                *handled.entry(key).or_default() += m.value.unwrap_or(0.0) as u64;
-            }
-        }
-
-        if !handled_keys.is_empty() || !started.is_empty() {
-            println!();
-            println!("GRPC CALLS");
-            println!();
-        }
-
-        if !handled_keys.is_empty() {
-            let rows: Vec<GrpcCallRow> = handled_keys
-                .iter()
-                .map(|(method, code)| GrpcCallRow {
-                    method: method.clone(),
-                    code: code.clone(),
-                    handled: format_number(handled[&(method.clone(), code.clone())]),
-                })
-                .collect();
-            print_table_from_entries(rows);
-        }
-
-        if !started.is_empty() {
-            println!();
-            let mut started_methods: Vec<&String> = started.keys().collect();
-            started_methods.sort();
-            for method in started_methods {
-                println!("  started  {method}: {}", format_number(started[method]));
-            }
-        }
-    }
-
-    if !grpc_histograms.is_empty() {
-        println!();
-        println!("GRPC HANDLING LATENCIES");
-        println!();
-        let rows: Vec<GrpcLatRow> = grpc_histograms
-            .iter()
-            .map(|m| {
-                let method = m.label_value("grpc_method").unwrap_or("unknown").to_string();
-                match &m.histogram {
-                    Some(h) => GrpcLatRow {
-                        method,
-                        total: format_number(h.total_count),
-                        p50: metric::histogram_percentile(&h.buckets, h.total_count, 50.0),
-                        p95: metric::histogram_percentile(&h.buckets, h.total_count, 95.0),
-                        p99: metric::histogram_percentile(&h.buckets, h.total_count, 99.0),
-                    },
-                    None => GrpcLatRow {
-                        method,
-                        total: "-".into(),
-                        p50: "-".into(),
-                        p95: "-".into(),
-                        p99: "-".into(),
-                    },
-                }
-            })
-            .collect();
-        print_table_from_entries(rows);
-    }
+    metrics::print_grpc_metrics(&grpc_counters, &grpc_histograms);
 }
 
 async fn run(cmd: Cmd) -> Result<(), Error> {
