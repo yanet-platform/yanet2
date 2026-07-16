@@ -202,7 +202,7 @@ out:
 	return rc;
 }
 
-struct virtual_service **
+struct virtual_service *
 l3b_virtual_service_create(
 	struct agent *agent,
 	const struct l3b_virtual_service *virtual_service,
@@ -278,21 +278,7 @@ l3b_virtual_service_create(
 		goto error_ring;
 	}
 
-	// Handle: a relative-pointer slot pointing at the virtual service, so a
-	// single service can later be swapped without rebuilding the array.
-	struct virtual_service **handle = (struct virtual_service **)
-		memory_balloc(memory_context, sizeof(struct virtual_service *));
-	if (handle == NULL) {
-		yanet_error_add(
-			err, "failed to allocate virtual service handle"
-		);
-		filter_free(&vs->filter_ip4, L3B_SOURCE_FILTER_IP4_TAG);
-		filter_free(&vs->filter_ip6, L3B_SOURCE_FILTER_IP6_TAG);
-		goto error_ring;
-	}
-	SET_OFFSET_OF(handle, vs);
-
-	return handle;
+	return vs;
 
 error_ring:
 	if (vs->real_ring.capacity > 0) {
@@ -317,28 +303,52 @@ error_vs:
 	return NULL;
 }
 
+struct virtual_service_handle *
+l3b_virtual_service_handle_create(
+	struct agent *agent, struct virtual_service *virtual_service
+) {
+	struct virtual_service_handle *handle =
+		(struct virtual_service_handle *)memory_balloc(
+			&agent->memory_context,
+			sizeof(struct virtual_service_handle)
+		);
+	if (handle == NULL) {
+		return NULL;
+	}
+
+	SET_OFFSET_OF(&handle->virtual_service, virtual_service);
+	return handle;
+}
+
+void
+l3b_virtual_service_handle_update(
+	struct virtual_service_handle *handle,
+	struct virtual_service *virtual_service
+) {
+	SET_OFFSET_OF(&handle->virtual_service, virtual_service);
+}
+
 int
 l3b_virtual_service_update_ring(
-	struct virtual_service **virtual_service,
+	struct virtual_service *virtual_service,
 	const uint32_t *server_indexes,
 	uint32_t server_index_count,
 	yanet_error **err
 ) {
-	struct virtual_service *vs = ADDR_OF(virtual_service);
-
-	if (server_index_count > vs->real_ring.capacity) {
+	if (server_index_count > virtual_service->real_ring.capacity) {
 		yanet_error_add(err, "ring count exceeds capacity");
 		return -1;
 	}
 
 	for (uint32_t idx = 0; idx < server_index_count; ++idx) {
-		if (server_indexes[idx] >= vs->real_server_count) {
+		if (server_indexes[idx] >= virtual_service->real_server_count) {
 			yanet_error_add(err, "invalid real server index");
 			return -1;
 		}
 	}
 
-	uint32_t *ring_indexes = ADDR_OF(&vs->real_ring.server_indexes);
+	uint32_t *ring_indexes =
+		ADDR_OF(&virtual_service->real_ring.server_indexes);
 	for (uint32_t idx = 0; idx < server_index_count; ++idx) {
 		ring_indexes[idx] = server_indexes[idx];
 	}
@@ -346,26 +356,27 @@ l3b_virtual_service_update_ring(
 	// Release the count after the index writes so the dataplane, on
 	// acquiring it, observes the populated indexes.
 	__atomic_store_n(
-		&vs->real_ring.count, server_index_count, __ATOMIC_RELEASE
+		&virtual_service->real_ring.count,
+		server_index_count,
+		__ATOMIC_RELEASE
 	);
 	return 0;
 }
 
 int
 l3b_virtual_service_set_real_server_state(
-	struct virtual_service **virtual_service,
+	struct virtual_service *virtual_service,
 	uint32_t real_server_index,
 	bool enabled,
 	yanet_error **err
 ) {
-	struct virtual_service *vs = ADDR_OF(virtual_service);
-
-	if (real_server_index >= vs->real_server_count) {
+	if (real_server_index >= virtual_service->real_server_count) {
 		yanet_error_add(err, "invalid real server index");
 		return -1;
 	}
 
-	struct real_server *real_servers = ADDR_OF(&vs->real_servers);
+	struct real_server *real_servers =
+		ADDR_OF(&virtual_service->real_servers);
 	real_servers[real_server_index].state =
 		enabled ? real_state_enabled : real_state_disabled;
 	return 0;
@@ -449,7 +460,7 @@ l3b_module_config_update(
 	struct cp_module *cp_module,
 	const struct l3b_destination_filter_rule *destination_filter_rules,
 	uint32_t destination_filter_rule_count,
-	struct virtual_service ***virtual_services,
+	struct virtual_service_handle **virtual_services,
 	uint32_t virtual_service_count,
 	yanet_error **err
 ) {
@@ -457,13 +468,12 @@ l3b_module_config_update(
 		container_of(cp_module, struct module_config, cp_module);
 	struct memory_context *memory_context = &cp_module->memory_context;
 
-	// Install the virtual service array, resolving each handle into a
-	// relative-pointer slot.
+	// Install the virtual service handles, one relative-pointer slot each.
 	if (virtual_service_count > 0) {
-		struct virtual_service **vs_array =
-			(struct virtual_service **)memory_balloc(
+		struct virtual_service_handle **vs_array =
+			(struct virtual_service_handle **)memory_balloc(
 				memory_context,
-				sizeof(struct virtual_service *) *
+				sizeof(struct virtual_service_handle *) *
 					virtual_service_count
 			);
 		if (vs_array == NULL) {
@@ -474,9 +484,7 @@ l3b_module_config_update(
 		}
 
 		for (uint32_t idx = 0; idx < virtual_service_count; ++idx) {
-			SET_OFFSET_OF(
-				&vs_array[idx], ADDR_OF(virtual_services[idx])
-			);
+			SET_OFFSET_OF(&vs_array[idx], virtual_services[idx]);
 		}
 		SET_OFFSET_OF(&config->virtual_services, vs_array);
 	} else {

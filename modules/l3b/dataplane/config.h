@@ -89,10 +89,21 @@ struct virtual_service {
 };
 
 /*
+ * Indirection layer between the module config and a virtual service.
+ *
+ * The handle wraps a relative pointer to a virtual service so the service can
+ * be swapped (via the handle) without rebuilding the module config's service
+ * array; the dataplane dereferences the handle on every lookup.
+ */
+struct virtual_service_handle {
+	struct virtual_service *virtual_service;
+};
+
+/*
  * Top-level l3b module configuration published into shared memory.
  *
  * The module-level filters classify an incoming packet into a virtual service
- * index; virtual_services holds the services themselves.
+ * index; virtual_services holds the handles of the services themselves.
  *
  * The filter query returns the index of the matched destination filter rule;
  * virtual_service_indexes maps that rule index to a virtual service index.
@@ -105,11 +116,9 @@ struct module_config {
 	struct cp_module cp_module;
 
 	uint32_t virtual_service_count;
-	// Array of relative pointers, one per service. Each service is
-	// allocated independently so a single service can be installed or
-	// replaced by swapping its slot without rebuilding the array or
-	// touching the module config.
-	struct virtual_service **virtual_services;
+	// Array of relative pointers to virtual_service_handle, one per
+	// service.
+	struct virtual_service_handle **virtual_services;
 
 	// One virtual service index per destination filter rule.
 	uint32_t virtual_service_index_count;

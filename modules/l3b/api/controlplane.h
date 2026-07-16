@@ -9,6 +9,7 @@
 struct cp_module;
 struct agent;
 struct virtual_service;
+struct virtual_service_handle;
 
 /*
  * Control-plane descriptors used to build the shared-memory configuration.
@@ -79,15 +80,28 @@ void
 l3b_module_config_free(struct cp_module *config);
 
 // Allocate a virtual service in the agent's shared memory from its
-// control-plane descriptor and return a handle (pointer to the relative-pointer
-// slot that owns it). The service is agent-scoped so it can be created
-// independently and later installed into a module config; a single service can
-// also be swapped transiently via its handle.
-struct virtual_service **
+// control-plane descriptor. The service is agent-scoped so it can be created
+// independently and later installed into a module config via a handle.
+struct virtual_service *
 l3b_virtual_service_create(
 	struct agent *agent,
 	const struct l3b_virtual_service *virtual_service,
 	yanet_error **err
+);
+
+// Allocate a handle in the agent's shared memory wrapping a virtual service
+// pointer. The handle is the indirection installed into a module config so the
+// service can be swapped later.
+struct virtual_service_handle *
+l3b_virtual_service_handle_create(
+	struct agent *agent, struct virtual_service *virtual_service
+);
+
+// Point an existing handle at a different virtual service.
+void
+l3b_virtual_service_handle_update(
+	struct virtual_service_handle *handle,
+	struct virtual_service *virtual_service
 );
 
 // Populate the real server ring of a virtual service. The count must not
@@ -95,7 +109,7 @@ l3b_virtual_service_create(
 // server; indexes are written before the count is updated.
 int
 l3b_virtual_service_update_ring(
-	struct virtual_service **virtual_service,
+	struct virtual_service *virtual_service,
 	const uint32_t *server_indexes,
 	uint32_t server_index_count,
 	yanet_error **err
@@ -105,7 +119,7 @@ l3b_virtual_service_update_ring(
 // by its index.
 int
 l3b_virtual_service_set_real_server_state(
-	struct virtual_service **virtual_service,
+	struct virtual_service *virtual_service,
 	uint32_t real_server_index,
 	bool enabled,
 	yanet_error **err
@@ -119,7 +133,7 @@ l3b_module_config_update(
 	struct cp_module *cp_module,
 	const struct l3b_destination_filter_rule *destination_filter_rules,
 	uint32_t destination_filter_rule_count,
-	struct virtual_service ***virtual_services,
+	struct virtual_service_handle **virtual_services,
 	uint32_t virtual_service_count,
 	yanet_error **err
 );
