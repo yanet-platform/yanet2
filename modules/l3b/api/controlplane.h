@@ -4,6 +4,8 @@
 #include "filter/rule.h"
 #include "lib/errors/errors.h"
 
+#include <stdbool.h>
+
 struct cp_module;
 struct agent;
 struct virtual_service;
@@ -96,6 +98,16 @@ l3b_virtual_service_update_ring(
 	struct virtual_service **virtual_service,
 	const uint32_t *server_indexes,
 	uint32_t server_index_count,
+	yanet_error **err
+);
+
+// Enable or disable a single real server within a virtual service, addressed
+// by its index.
+int
+l3b_virtual_service_set_real_server_state(
+	struct virtual_service **virtual_service,
+	uint32_t real_server_index,
+	bool enabled,
 	yanet_error **err
 );
 

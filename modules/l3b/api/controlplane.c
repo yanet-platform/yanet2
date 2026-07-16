@@ -351,6 +351,26 @@ l3b_virtual_service_update_ring(
 	return 0;
 }
 
+int
+l3b_virtual_service_set_real_server_state(
+	struct virtual_service **virtual_service,
+	uint32_t real_server_index,
+	bool enabled,
+	yanet_error **err
+) {
+	struct virtual_service *vs = ADDR_OF(virtual_service);
+
+	if (real_server_index >= vs->real_server_count) {
+		yanet_error_add(err, "invalid real server index");
+		return -1;
+	}
+
+	struct real_server *real_servers = ADDR_OF(&vs->real_servers);
+	real_servers[real_server_index].state =
+		enabled ? real_state_enabled : real_state_disabled;
+	return 0;
+}
+
 // Compile both per-family destination filters of the module config. On failure
 // any partially built filter is released.
 static int
