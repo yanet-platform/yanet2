@@ -2,7 +2,6 @@
 
 #include <bpf_impl.h>
 #include <rte_bpf.h>
-#include <rte_mbuf_dyn.h>
 
 #include "dataplane/config/zone.h"
 #include "dataplane/module/module.h"
@@ -12,79 +11,22 @@
 
 #include "controlplane/config/econtext.h"
 
-#include "dataplane/time/tsc.h"
 #include "ring.h"
-
-#define TSC_SHIFT 32
-
-static inline bool
-mbuf_is_timestamp_enabled(const struct rte_mbuf *mbuf) {
-	// Returns true when the mbuf carries a hardware RX timestamp.
-	//
-	// -2 means the dynflag offset has not been resolved yet; negative
-	// values other than -2 mean the flag is absent (ENOENT from the
-	// registry). The offset is cached with a relaxed atomic store so
-	// the lookup runs at most once per worker thread without taking any
-	// registry lock on the hot path.
-	static int timestamp_rx_dynflag_offset = -2;
-
-	int offset =
-		__atomic_load_n(&timestamp_rx_dynflag_offset, __ATOMIC_RELAXED);
-	if (offset == -2) {
-		offset = rte_mbuf_dynflag_lookup(
-			RTE_MBUF_DYNFLAG_RX_TIMESTAMP_NAME, NULL
-		);
-		__atomic_store_n(
-			&timestamp_rx_dynflag_offset, offset, __ATOMIC_RELAXED
-		);
-	}
-
-	if (offset < 0) {
-		return false;
-	}
-
-	return (mbuf->ol_flags & RTE_BIT64(offset)) != 0;
-}
-
-static inline rte_mbuf_timestamp_t
-mbuf_get_timestamp(const struct rte_mbuf *mbuf) {
-	// Returns the hardware RX timestamp stored in a dynamic field.
-	//
-	// -2 means the dynfield offset has not been resolved yet; negative
-	// values other than -2 mean the field is absent (ENOENT from the
-	// registry). The offset is cached with a relaxed atomic store so
-	// the lookup runs at most once per worker thread without taking any
-	// registry lock on the hot path.
-	static int timestamp_dynfield_offset = -2;
-
-	int offset =
-		__atomic_load_n(&timestamp_dynfield_offset, __ATOMIC_RELAXED);
-	if (offset == -2) {
-		offset = rte_mbuf_dynfield_lookup(
-			RTE_MBUF_DYNFIELD_TIMESTAMP_NAME, NULL
-		);
-		__atomic_store_n(
-			&timestamp_dynfield_offset, offset, __ATOMIC_RELAXED
-		);
-	}
-
-	if (offset < 0) {
-		return 0;
-	}
-
-	return *RTE_MBUF_DYNFIELD(mbuf, offset, rte_mbuf_timestamp_t *);
-}
 
 static inline void
 process_queue(
 	struct packet *first_pkt,
 	struct rte_bpf *bpf,
 	struct ring_buffer *ring,
-	uint32_t worker_idx,
+	const struct dp_worker *dp_worker,
 	uint32_t snaplen,
 	enum pdump_mode queue
 ) {
-	uint64_t tsc_timestamp = ~0ULL;
+	// Stamp every record from the worker clock, which is the same time
+	// base the rest of the dataplane uses. Hardware RX timestamps are not
+	// portable nanoseconds: mlx5 hands over a raw device counter unless
+	// the NIC runs in real-time mode, so they cannot share this field.
+	uint64_t timestamp = dp_worker->current_time;
 
 	uint8_t *ring_data = ADDR_OF(&ring->data);
 
@@ -93,18 +35,6 @@ process_queue(
 
 		int rc = rte_bpf_exec(bpf, (void *)mbuf);
 		if (rc) {
-			uint64_t timestamp;
-			if (mbuf_is_timestamp_enabled(mbuf)) {
-				timestamp = mbuf_get_timestamp(mbuf);
-			} else {
-				// Fallback to the TSC timestamp for the entire
-				// packet list.
-				if (tsc_timestamp == ~0ULL) {
-					tsc_timestamp = tsc_timestamp_ns();
-				}
-				timestamp = tsc_timestamp;
-			}
-
 			// NOTE: We do not support multi-segment mbuf;
 			// therefore, data_len must equal pkt_len.
 			uint16_t packet_len = rte_pktmbuf_data_len(mbuf);
@@ -115,7 +45,7 @@ process_queue(
 				.magic = RING_MSG_MAGIC,
 				.packet_len = packet_len,
 				.timestamp = timestamp,
-				.worker_idx = worker_idx,
+				.worker_idx = dp_worker->idx,
 				// FIXME
 				// .pipeline_idx = pkt->pipeline_idx,
 				.rx_device_id = pkt->rx_device_id,
@@ -156,7 +86,7 @@ pdump_handle_packets(
 			packet_front->drop.first,
 			&bpf,
 			ring,
-			dp_worker->idx,
+			dp_worker,
 			config->snaplen,
 			PDUMP_DROPS
 		);
@@ -168,7 +98,7 @@ pdump_handle_packets(
 			packet_front->input.first,
 			&bpf,
 			ring,
-			dp_worker->idx,
+			dp_worker,
 			config->snaplen,
 			PDUMP_INPUT
 		);

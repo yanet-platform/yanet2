@@ -149,8 +149,10 @@ impl PdumpWriter {
                 writer.base_ts = Some(meta.timestamp);
                 0
             }
-            // Align timestamps relative to the first packet.
-            Some(v) => meta.timestamp - *v,
+            // Align timestamps relative to the first packet. Records arrive in
+            // per-worker arrival order rather than timestamp order, so a record
+            // can predate the baseline -- clamp instead of wrapping.
+            Some(v) => meta.timestamp.saturating_sub(*v),
         };
         meta.timestamp = ts;
 
