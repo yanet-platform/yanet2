@@ -46,11 +46,12 @@ struct dp_worker {
 
 	// Allows to get current worker time.
 	//
-	// Currently, we init it only once
-	// and dont adjust.
-	// So, we have some drift, which is small but...
-	// (see tsc_clock docs). It is not important
-	// for now and fix should be easy, but need discuss.
+	// Currently, we init it only once and never re-adjust it. The TSC
+	// crystal drifts against real time by a small ppm-scale rate (see
+	// tsc_clock docs), so the longer the worker runs without a fresh
+	// tsc_clock_adjust call, the further current_time strays from real
+	// time. It is not important for now and fix should be easy, but
+	// need discuss.
 	//
 	// TODO: FIXME
 	struct tsc_clock clock;
