@@ -47,7 +47,7 @@ func (m *DPConfig) PortCounters() ([]PortGroup, error) {
 				PortCounter{
 					Name: C.GoString(&handle.name[0]),
 					Value: uint64(C.yanet_get_counter_value(
-						handle.value_handle,
+						handle.values,
 						0,
 						0,
 					)),

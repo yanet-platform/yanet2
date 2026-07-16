@@ -71,52 +71,52 @@ func (m *DPConfig) WorkerCounters() ([]WorkerCounter, error) {
 		worker := WorkerCounter{
 			WorkerIdx: uint32(idx),
 			Iterations: uint64(C.yanet_get_counter_value(
-				iterationsHandle.value_handle,
+				iterationsHandle.values,
 				workerCounterSingleValueIdx,
 				idx,
 			)),
 			RxPackets: uint64(C.yanet_get_counter_value(
-				rxHandle.value_handle,
+				rxHandle.values,
 				workerCounterPacketsValueIdx,
 				idx,
 			)),
 			RxBytes: uint64(C.yanet_get_counter_value(
-				rxHandle.value_handle,
+				rxHandle.values,
 				workerCounterBytesValueIdx,
 				idx,
 			)),
 			TxPackets: uint64(C.yanet_get_counter_value(
-				txHandle.value_handle,
+				txHandle.values,
 				workerCounterPacketsValueIdx,
 				idx,
 			)),
 			TxBytes: uint64(C.yanet_get_counter_value(
-				txHandle.value_handle,
+				txHandle.values,
 				workerCounterBytesValueIdx,
 				idx,
 			)),
 			RemoteRxPackets: uint64(C.yanet_get_counter_value(
-				remoteRxHandle.value_handle,
+				remoteRxHandle.values,
 				workerCounterPacketsValueIdx,
 				idx,
 			)),
 			RemoteTxPackets: uint64(C.yanet_get_counter_value(
-				remoteTxHandle.value_handle,
+				remoteTxHandle.values,
 				workerCounterPacketsValueIdx,
 				idx,
 			)),
 			LocalTxDrops: uint64(C.yanet_get_counter_value(
-				localTxDropsHandle.value_handle,
+				localTxDropsHandle.values,
 				workerCounterSingleValueIdx,
 				idx,
 			)),
 			RemoteTxDrops: uint64(C.yanet_get_counter_value(
-				remoteTxDropsHandle.value_handle,
+				remoteTxDropsHandle.values,
 				workerCounterSingleValueIdx,
 				idx,
 			)),
 			Drops: uint64(C.yanet_get_counter_value(
-				dropsHandle.value_handle,
+				dropsHandle.values,
 				workerCounterSingleValueIdx,
 				idx,
 			)),
@@ -126,7 +126,7 @@ func (m *DPConfig) WorkerCounters() ([]WorkerCounter, error) {
 		worker.RxBursts = make([]uint64, rxBurstSize)
 		for burstIdx := C.uint64_t(0); burstIdx < rxBurstsHandle.size; burstIdx++ {
 			worker.RxBursts[burstIdx] = uint64(C.yanet_get_counter_value(
-				rxBurstsHandle.value_handle,
+				rxBurstsHandle.values,
 				burstIdx,
 				idx,
 			))

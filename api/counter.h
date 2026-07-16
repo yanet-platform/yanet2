@@ -8,8 +8,6 @@
 
 struct dp_config;
 
-struct counter_value_handle;
-
 struct counter_tag {
 	const char *key;
 	const char *value;
@@ -21,7 +19,11 @@ struct counter_handle {
 	uint64_t gen;
 	struct counter_tag *tags;
 	size_t tag_count;
-	struct counter_value_handle *value_handle;
+
+	// Per-instance snapshot arrays: values[i] holds size values for
+	// instance i, copied when the list was acquired, remaining valid and
+	// unchanged across controlplane updates until the list is freed.
+	uint64_t **values;
 };
 
 struct counter_handle_list {
@@ -124,24 +126,22 @@ yanet_get_counter(struct counter_handle_list *counters, uint64_t idx);
 
 uint64_t
 yanet_get_counter_value(
-	struct counter_value_handle *value_handle,
-	uint64_t value_idx,
-	uint64_t worker_idx
+	uint64_t **values, uint64_t value_idx, uint64_t worker_idx
 );
 
 // Copy all values for every instance of a counter into a flat caller-supplied
 // buffer in a single call.
 //
-// values must have room for instance_count * size uint64 elements and is
-// filled instance-major: instance i occupies values[i*size .. i*size + size).
-// Performs the same reads as yanet_get_counter_value but batched into one
-// call, avoiding per-value CGO overhead when reading counters from Go.
+// values_out must have room for instance_count * size uint64 elements and is
+// filled instance-major: instance i occupies values_out[i*size .. i*size +
+// size). Performs the same reads as yanet_get_counter_value but batched into
+// one call, avoiding per-value CGO overhead when reading counters from Go.
 void
 yanet_get_counter_values(
-	struct counter_value_handle *value_handle,
+	uint64_t **values,
 	uint64_t size,
 	uint64_t instance_count,
-	uint64_t *values
+	uint64_t *values_out
 );
 
 // Return counters that satisfy every predicate in tags and match at

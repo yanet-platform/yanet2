@@ -439,7 +439,7 @@ func decodeCounterHandle(
 	if total := instances * size; total > 0 {
 		flat := make([]uint64, total)
 		C.yanet_get_counter_values(
-			handle.value_handle,
+			handle.values,
 			handle.size,
 			instanceCount,
 			(*C.uint64_t)(unsafe.Pointer(&flat[0])),

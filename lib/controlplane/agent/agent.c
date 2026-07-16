@@ -1481,19 +1481,44 @@ cp_counter_storage_copy_tags(const struct cp_counter_storage *storage) {
 		return NULL;
 	}
 	for (size_t i = 0; i < storage->tag_count; ++i) {
-		tags[i].key = storage->tags[i].key;
-		tags[i].value = storage->tags[i].value;
+		tags[i].key = NULL;
+		tags[i].value = NULL;
+	}
+	for (size_t i = 0; i < storage->tag_count; ++i) {
+		tags[i].key = strdup(storage->tags[i].key);
+		tags[i].value = strdup(storage->tags[i].value);
+		if (tags[i].key == NULL || tags[i].value == NULL) {
+			for (size_t j = 0; j < storage->tag_count; ++j) {
+				free((void *)tags[j].key);
+				free((void *)tags[j].value);
+			}
+			free(tags);
+			return NULL;
+		}
 	}
 	return tags;
 }
 
-// Build a per-worker value-handle array for one counter and stash it behind
-// the opaque counter_handle.value_handle.
+// Free a per-instance snapshot array as produced by fill_counter_handle.
+static void
+free_counter_values(uint64_t **values, uint64_t instance_count) {
+	if (values == NULL) {
+		return;
+	}
+	for (uint64_t i = 0; i < instance_count; ++i) {
+		free(values[i]);
+	}
+	free(values);
+}
+
+// Snapshot a counter's per-worker values into heap memory and stash the
+// result behind the opaque counter_handle.values.
 //
 // Each worker has its own single-instance storage. The caller gathers one
 // storage per worker into worker_storages (a plain C-pointer array). The
-// result (worker_count entries) is read back by yanet_get_counter_value(s)
-// and released by yanet_counter_handle_list_free.
+// values are copied out of generation-owned shm while the caller still holds
+// cp_config_lock, so the snapshot (worker_count entries) stays valid across
+// controlplane updates until it is released by yanet_counter_handle_list_free.
 static int
 fill_counter_handle(
 	struct counter_handle *dst,
@@ -1515,17 +1540,28 @@ fill_counter_handle(
 	dst->tags = tags;
 	dst->tag_count = tag_count;
 
-	struct counter_value_handle **bases =
-		malloc(worker_count * sizeof(*bases));
-	if (bases == NULL) {
+	uint64_t **values = calloc(worker_count, sizeof(*values));
+	if (values == NULL) {
 		return -1;
 	}
 	for (uint64_t worker_idx = 0; worker_idx < worker_count; ++worker_idx) {
-		bases[worker_idx] = counter_get_value_handle(
+		if (counters[idx].size == 0) {
+			continue;
+		}
+		values[worker_idx] =
+			malloc(counters[idx].size * sizeof(uint64_t));
+		if (values[worker_idx] == NULL) {
+			free_counter_values(values, worker_count);
+			return -1;
+		}
+		struct counter_value_handle *handle = counter_get_value_handle(
 			idx, worker_storages[worker_idx]
 		);
+		memcpy(values[worker_idx],
+		       counter_handle_get_value(handle),
+		       counters[idx].size * sizeof(uint64_t));
 	}
-	dst->value_handle = (struct counter_value_handle *)bases;
+	dst->values = values;
 	return 0;
 }
 
@@ -1619,21 +1655,21 @@ yanet_get_counters_by_tags(
 			    )) {
 				continue;
 			}
+			struct counter_storage **worker_storages =
+				malloc(worker_count * sizeof(*worker_storages));
+			if (worker_storages == NULL) {
+				yanet_error_add(err, "malloc failed");
+				goto err_list;
+			}
 			if (storage_tags == NULL) {
 				storage_tags =
 					cp_counter_storage_copy_tags(cp_storage
 					);
 				if (storage_tags == NULL) {
+					free(worker_storages);
 					yanet_error_add(err, "malloc failed");
 					goto err_list;
 				}
-			}
-			struct counter_storage **worker_storages =
-				malloc(worker_count * sizeof(*worker_storages));
-			if (worker_storages == NULL) {
-				free(worker_storages);
-				yanet_error_add(err, "malloc failed");
-				goto err_list;
 			}
 			for (uint64_t worker_idx = 0; worker_idx < worker_count;
 			     ++worker_idx) {
@@ -1743,27 +1779,25 @@ yanet_get_counter(struct counter_handle_list *counters, uint64_t idx) {
 
 uint64_t
 yanet_get_counter_value(
-	struct counter_value_handle *value_handle,
-	uint64_t value_idx,
-	uint64_t worker_idx
+	uint64_t **values, uint64_t value_idx, uint64_t worker_idx
 ) {
-	struct counter_value_handle **bases =
-		(struct counter_value_handle **)value_handle;
-	return counter_handle_get_value(bases[worker_idx])[value_idx];
+	return values[worker_idx][value_idx];
 }
 
 void
 yanet_get_counter_values(
-	struct counter_value_handle *value_handle,
+	uint64_t **values,
 	uint64_t size,
 	uint64_t instance_count,
-	uint64_t *values
+	uint64_t *values_out
 ) {
-	struct counter_value_handle **bases =
-		(struct counter_value_handle **)value_handle;
+	if (size == 0) {
+		return;
+	}
 	for (uint64_t iidx = 0; iidx < instance_count; ++iidx) {
-		uint64_t *src = counter_handle_get_value(bases[iidx]);
-		memcpy(values + iidx * size, src, size * sizeof(uint64_t));
+		memcpy(values_out + iidx * size,
+		       values[iidx],
+		       size * sizeof(uint64_t));
 	}
 }
 
@@ -1789,7 +1823,7 @@ counter_handle_list_build(
 	for (uint64_t idx = 0; idx < count; ++idx) {
 		handlers[idx].tag_count = 0;
 		handlers[idx].tags = NULL;
-		handlers[idx].value_handle = NULL;
+		handlers[idx].values = NULL;
 	}
 
 	// storages holds one offset-pointer cell per worker; materialize a
@@ -1930,10 +1964,16 @@ yanet_counter_handle_list_free(struct counter_handle_list *counters) {
 	struct counter_handle *handles = counters->counters;
 	for (size_t i = 0; i < counters->count; ++i) {
 		if (i == 0 || handles[i].tags != handles[i - 1].tags) {
+			for (size_t j = 0; j < handles[i].tag_count; ++j) {
+				free((void *)handles[i].tags[j].key);
+				free((void *)handles[i].tags[j].value);
+			}
 			free(handles[i].tags);
 		}
-		// Each counter owns its own per-worker value-handle array.
-		free(handles[i].value_handle);
+		// Each counter owns its own per-worker snapshot array.
+		free_counter_values(
+			handles[i].values, counters->instance_count
+		);
 	}
 	free(counters);
 }
