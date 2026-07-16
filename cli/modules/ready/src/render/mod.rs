@@ -22,7 +22,9 @@ use self::{
 };
 pub use self::{
     layout::name_width,
-    watch::{print_transition_line, record_transition},
+    watch::{
+        ServiceColumn, Transition, print_lifecycle_line, print_lost_line, print_transition_line, record_transition,
+    },
 };
 
 /// Fixed width of the state label cell (`len("NOT_READY")`).
@@ -113,6 +115,23 @@ pub fn print_status_block(name: &str, scopes: &[Scope], name_width: usize, stale
     if watching {
         println!();
     }
+}
+
+/// Prints the standalone `watching…` line aggregate `--watch` shows once,
+/// after every service's status block.
+///
+/// Separated from the blocks above it and the transition log below it by
+/// one blank line on each side. Single-service watch does not use this —
+/// it appends its `watching` suffix straight onto the block's own summary
+/// line via [`print_status_block`]'s `watching` flag instead.
+pub fn print_watching_line() {
+    let colored = output::is_colored();
+    let symbols = Symbols::new(colored);
+    let text = format!("watching{}", symbols.ellipsis);
+
+    println!();
+    println!("{}", dim(&text, colored));
+    println!();
 }
 
 /// Prints one scope's row plus any reason continuation lines.

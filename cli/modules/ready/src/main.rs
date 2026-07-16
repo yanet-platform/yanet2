@@ -19,6 +19,7 @@ use ync::{
 };
 
 mod render;
+mod watch;
 
 /// Exit code used when the RPC succeeds but not all scopes are `STATE_READY`.
 const EXIT_NOT_READY: i32 = 2;
@@ -71,8 +72,12 @@ pub struct Cmd {
     /// Stream readiness changes until interrupted instead of exiting after one
     /// snapshot.
     ///
-    /// Requires a single service: several interleaved transition logs would be
-    /// unreadable.
+    /// With a single service named, streams that one service's transition
+    /// log. Otherwise (the default with no service named, or with `--all`)
+    /// watches every discovered service at once over one shared connection:
+    /// each service gets its own supervisor that reconnects with backoff on
+    /// its own, and every transition lands in one interleaved log, each line
+    /// naming the service it belongs to.
     #[arg(long, default_value_t = false)]
     pub watch: bool,
     /// Minimum time since a scope was last observed before flagging it
@@ -240,7 +245,7 @@ async fn run_once(cmd: &Cmd, connection: &Connection, name: &str) -> Result<bool
 /// changed and renders one append-only log line per scope. Returns `Ok(())`
 /// on clean stream close.
 async fn run_watch(cmd: &Cmd, name: &str) -> Result<(), Error> {
-    let mut snapshot: BTreeMap<String, Scope> = BTreeMap::new();
+    let mut snapshot: BTreeMap<(String, String), Scope> = BTreeMap::new();
     let mut name_width: Option<usize> = None;
 
     client::invoke_server_stream::<ReadyRequest, ReadyResponse, _>(
@@ -260,15 +265,18 @@ async fn run_watch(cmd: &Cmd, name: &str) -> Result<(), Error> {
                         name_width = Some(width);
 
                         for scope in &scopes {
-                            snapshot.insert(scope.name.clone(), scope.clone());
+                            snapshot.insert((name.to_owned(), scope.name.clone()), scope.clone());
                         }
 
                         render::print_status_block(name, &scopes, width, cmd.stale_after, true);
                     }
                     Some(width) => {
                         for scope in &scopes {
-                            let transition = render::record_transition(&mut snapshot, scope);
-                            render::print_transition_line(scope, width, transition);
+                            let transition = render::record_transition(&mut snapshot, name, scope);
+
+                            if transition != render::Transition::Unchanged {
+                                render::print_transition_line(render::ServiceColumn::None, scope, width, transition);
+                            }
                         }
                     }
                 }
@@ -286,7 +294,7 @@ async fn run_watch(cmd: &Cmd, name: &str) -> Result<(), Error> {
 /// jitter from block to block.
 async fn run_aggregate(cmd: Cmd) -> Result<bool, Error> {
     if cmd.watch {
-        return Err(watch_requires_service(&cmd).await);
+        return watch::run(&cmd).await;
     }
 
     let connection = Connection::connect_for(&cmd.connection, "ready").await?;
@@ -427,22 +435,6 @@ async fn resolve_alias(cmd: &Cmd, connection: &Connection, alias: &str) -> Resul
             Err(Error::new(ErrorKind::ServiceUnregistered, "ready", endpoint, message)
                 .with_hint(discovery::services_hint(AVAILABLE_SERVICES, NO_SERVICES, &services)))
         }
-    }
-}
-
-/// Builds the error for `--watch` without a single service to watch.
-///
-/// Discovery is best-effort here: the services it finds become the hint, and a
-/// gateway that cannot be reached — or does not answer within
-/// `discovery::discover_within`'s budget — simply leaves the error hintless.
-/// The flag combination is wrong either way, and reporting so must not wait
-/// on the network.
-async fn watch_requires_service(cmd: &Cmd) -> Error {
-    let err = Error::invalid_argument("ready", &cmd.connection.endpoint, "--watch requires a single service");
-
-    match discovery::discover_within(&cmd.connection, READINESS_SERVICE, discovery::DISCOVERY_TIMEOUT).await {
-        Ok(services) => err.with_hint(discovery::services_hint(AVAILABLE_SERVICES, NO_SERVICES, &services)),
-        Err(..) => err,
     }
 }
 

@@ -1,6 +1,8 @@
-//! `--watch` transition tracking: the merged snapshot diff and the
-//! append-only log line renderer.
+//! `--watch` transition tracking: the merged snapshot diff, the append-only
+//! transition log line renderer, and the transport-lifecycle line renderer
+//! used by aggregate watch's reconnect-with-backoff supervisors.
 
+use core::time::Duration;
 use std::collections::BTreeMap;
 
 use chrono::Local;
@@ -16,31 +18,90 @@ use super::{
 /// it on the same line.
 const REASON_GAP: usize = 3;
 
+/// Trailing tag appended to a [`Transition::FirstSeen`] line, in the same
+/// [`dim`] grey as reason text rather than the `stale` tag's amber — a first
+/// sighting is informational, not a warning about aging data.
+const FIRST_SEEN_TAG: &str = "first seen";
+
 /// The kind of change observed for one scope in a `--watch` delta message.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Transition {
+    /// No entry existed for this scope in the snapshot map — its very first
+    /// observation, whatever its state.
+    ///
+    /// Deliberately distinct from `StateChanged { previous: State::Unknown
+    /// }`: that would claim the scope was once actually seen as `UNKNOWN`,
+    /// which never happened. A service picked up by the re-discovery sweep,
+    /// or one whose initial probe failed, both surface here.
+    FirstSeen,
     /// The scope's state changed away from `previous`.
     StateChanged { previous: State },
     /// The state is unchanged; only the reason changed.
     ReasonChanged,
+    /// Neither the state nor the reason changed — only a heartbeat field
+    /// (e.g. `observed_at`) advanced.
+    Unchanged,
 }
 
 /// Records `scope`'s new data in `snapshot` and classifies the change.
 ///
-/// A scope absent from `snapshot` is treated as having previously been
-/// `STATE_UNKNOWN`. `snapshot` is updated with `scope`'s full data so later
-/// calls can diff against it.
-pub fn record_transition(snapshot: &mut BTreeMap<String, Scope>, scope: &Scope) -> Transition {
-    let next = State::try_from(scope.state).unwrap_or_default();
-    let previous = snapshot
-        .insert(scope.name.clone(), scope.clone())
-        .map(|prev| State::try_from(prev.state).unwrap_or_default())
-        .unwrap_or(State::Unknown);
+/// `snapshot` is keyed by `(service, scope name)`, not scope name alone —
+/// scope names collide across services (several operators share a
+/// `reconcile` scope). A scope absent from `snapshot` returns
+/// [`Transition::FirstSeen`] rather than being diffed against a synthesized
+/// `STATE_UNKNOWN` entry — doing the latter would silently swallow a
+/// genuinely first-seen `UNKNOWN`, reason-less scope, since it would then
+/// compare equal to its own fabricated "previous" and render as nothing at
+/// all. `snapshot` is updated with `scope`'s full data so later calls can
+/// diff against it.
+///
+/// Only `state` and `reasons` are compared: `observed_at` and
+/// `last_transition_time` advance on every heartbeat and must never by
+/// themselves classify a message as changed — this mirrors the server's
+/// own change predicate, which never emits a `Watch` message for a pure
+/// heartbeat in the first place.
+pub fn record_transition(snapshot: &mut BTreeMap<(String, String), Scope>, service: &str, scope: &Scope) -> Transition {
+    let key = (service.to_owned(), scope.name.clone());
+    let previous = snapshot.insert(key, scope.clone());
 
-    if previous == next {
+    let Some(previous) = previous else {
+        return Transition::FirstSeen;
+    };
+
+    let previous_state = State::try_from(previous.state).unwrap_or_default();
+    let next_state = State::try_from(scope.state).unwrap_or_default();
+
+    if previous_state != next_state {
+        return Transition::StateChanged { previous: previous_state };
+    }
+
+    if previous.reasons.as_slice() != scope.reasons.as_slice() {
         Transition::ReasonChanged
     } else {
-        Transition::StateChanged { previous }
+        Transition::Unchanged
+    }
+}
+
+/// The optional service cell prefixing a `--watch` transition line.
+///
+/// [`ServiceColumn::None`] is single-service watch, where every line names
+/// the same service and repeating it would be noise. [`ServiceColumn::Named`]
+/// is aggregate watch: `alias` is padded to `width`, which must be measured
+/// once (via [`super::name_width`]) and held for the whole session.
+#[derive(Debug, Clone, Copy)]
+pub enum ServiceColumn<'a> {
+    None,
+    Named { alias: &'a str, width: usize },
+}
+
+impl ServiceColumn<'_> {
+    /// Renders the cell text: the padded alias plus its separating space,
+    /// or an empty string for [`ServiceColumn::None`].
+    fn cell(self) -> String {
+        match self {
+            Self::None => String::new(),
+            Self::Named { alias, width } => format!("{alias:<width$} "),
+        }
     }
 }
 
@@ -54,18 +115,30 @@ struct Prefix {
     styled: String,
 }
 
-/// Builds the `HH:MM:SS  ✗ name  PREV → NEXT` prefix of a transition line.
+/// Builds the `HH:MM:SS  ✗ [service] name  PREV → NEXT` prefix of a
+/// transition line.
 ///
 /// `name` must already be padded to the scope-name column width. Every part
 /// is rendered twice from the same text: once bare for [`Prefix::plain`] and
 /// once through [`StateStyle`] for [`Prefix::styled`], so the two can never
 /// disagree on the visible width. The mark and both state labels are colored
 /// by their own state — the previous label keeps its old state's color — and
-/// the timestamp and arrow stay grey.
-fn transition_prefix(timestamp: &str, name: &str, state: State, transition: Transition, colored: bool) -> Prefix {
+/// the timestamp, service cell, and arrow stay grey or uncolored.
+/// [`Transition::FirstSeen`] renders the same single-label shape as a
+/// reason-only change; [`print_transition_line`] appends the tag that tells
+/// the two apart.
+fn transition_prefix(
+    timestamp: &str,
+    service: ServiceColumn,
+    name: &str,
+    state: State,
+    transition: Transition,
+    colored: bool,
+) -> Prefix {
     let symbols = Symbols::new(colored);
     let style = StateStyle::new(state, colored);
     let label = super::label(state);
+    let service = service.cell();
 
     let (change, styled_change) = match transition {
         Transition::StateChanged { previous } => {
@@ -82,13 +155,15 @@ fn transition_prefix(timestamp: &str, name: &str, state: State, transition: Tran
                 ),
             )
         }
-        Transition::ReasonChanged => (label.to_string(), style.paint(label)),
+        Transition::ReasonChanged | Transition::Unchanged | Transition::FirstSeen => {
+            (label.to_string(), style.paint(label))
+        }
     };
 
     Prefix {
-        plain: format!("{timestamp}  {} {name} {change}", style.mark),
+        plain: format!("{timestamp}  {} {service}{name} {change}", style.mark),
         styled: format!(
-            "{}  {} {name} {styled_change}",
+            "{}  {} {service}{name} {styled_change}",
             dim(timestamp, colored),
             style.styled_mark()
         ),
@@ -98,23 +173,38 @@ fn transition_prefix(timestamp: &str, name: &str, state: State, transition: Tran
 /// Prints one append-only log line for a `--watch` change.
 ///
 /// A state change shows `PREV → NEXT` on the transition line; a reason-only
-/// change shows the unchanged state instead. Both kinds then render every
-/// `CODE: message` reason (if any) on a wrapped, dim continuation line — the
-/// server never resends an unchanged reason, so a persistent failure's
-/// message would otherwise only ever be shown once. Long reason text wraps
-/// with a hanging indent when stdout is a TTY; a scope with no reasons
-/// prints just the transition line.
-pub fn print_transition_line(scope: &Scope, name_width: usize, transition: Transition) {
+/// change shows the unchanged state instead. [`Transition::FirstSeen`] shows
+/// the unchanged-looking state too, but follows it with a trailing dim
+/// `first seen` tag — otherwise a scope's very first sighting would be
+/// indistinguishable from a reason-only change that happens to land on the
+/// same state. Every kind then renders every `CODE: message` reason (if
+/// any) on a wrapped, dim continuation line — the server never resends an
+/// unchanged reason, so a persistent failure's message would otherwise
+/// only ever be shown once. Long reason text wraps with a hanging indent
+/// when stdout is a TTY; a scope with no reasons prints just the
+/// transition line. `service` names the service the change belongs to in
+/// aggregate watch, and is omitted in single-service watch — see
+/// [`ServiceColumn`]. A caller must not pass [`Transition::Unchanged`]: the
+/// whole point of that variant is that nothing is worth printing.
+pub fn print_transition_line(service: ServiceColumn, scope: &Scope, name_width: usize, transition: Transition) {
     let colored = output::is_colored();
     let wrap_width = display::terminal_width();
     let timestamp = Local::now().format("%H:%M:%S").to_string();
     let state = State::try_from(scope.state).unwrap_or_default();
     let name = format!("{:<width$}", scope.name, width = name_width);
 
-    let prefix = transition_prefix(&timestamp, &name, state, transition, colored);
-    let indent = prefix.plain.chars().count() + REASON_GAP;
+    let prefix = transition_prefix(&timestamp, service, &name, state, transition, colored);
+    let first_seen_tag = matches!(transition, Transition::FirstSeen).then(|| dim(FIRST_SEEN_TAG, colored));
+    let tag_width = first_seen_tag
+        .as_ref()
+        .map_or(0, |_| REASON_GAP + FIRST_SEEN_TAG.chars().count());
+    let indent = prefix.plain.chars().count() + tag_width + REASON_GAP;
 
     print!("{}", prefix.styled);
+
+    if let Some(tag) = &first_seen_tag {
+        print!("{:width$}{tag}", "", width = REASON_GAP);
+    }
 
     let mut is_first_line = true;
     for reason in &scope.reasons {
@@ -140,8 +230,63 @@ pub fn print_transition_line(scope: &Scope, name_width: usize, transition: Trans
     println!();
 }
 
+/// Prints one lifecycle line for a `--watch` supervisor event that is not a
+/// readiness change, given an already-composed `message`: a stream
+/// reattaching, or — via [`print_lost_line`] — one being lost.
+///
+/// `HH:MM:SS  [!] alias  message`, the whole line dim — this is transport
+/// chatter, not a readiness state, and must never borrow a [`StateStyle`]
+/// colour. Long messages wrap with a hanging indent, the same way a
+/// transition line's reason text does.
+pub fn print_lifecycle_line(alias: &str, alias_width: usize, message: &str) {
+    let colored = output::is_colored();
+    let wrap_width = display::terminal_width();
+    let timestamp = Local::now().format("%H:%M:%S").to_string();
+    let mark = if colored { "[!]" } else { "[--]" };
+    let name = format!("{alias:<alias_width$}");
+
+    let prefix = format!("{timestamp}  {mark} {name}  ");
+    let indent = prefix.chars().count();
+
+    print!("{}", dim(&prefix, colored));
+
+    let lines = match wrap_width {
+        Some(width) if width > indent => wrap_words(message, width - indent),
+        _ => vec![normalize_whitespace(message)],
+    };
+
+    for (idx, line) in lines.iter().enumerate() {
+        if idx > 0 {
+            print!("\n{:indent$}", "");
+        }
+        print!("{}", dim(line, colored));
+    }
+
+    println!();
+}
+
+/// Prints one lifecycle line for a `--watch` supervisor losing its stream,
+/// composing the raw disconnect `cause` and the backoff `retry_after` into
+/// one human line.
+///
+/// `stream lost: {cause}{dash}reconnecting in {delay}`, `dash` taken from
+/// [`Symbols`] so it degrades to ASCII off [`output::is_colored`] exactly
+/// like every other glyph in this render. The composition happens here, at
+/// render time, rather than where the event is built, so the
+/// machine-readable payload's `error` field carries `cause` alone.
+pub fn print_lost_line(alias: &str, alias_width: usize, cause: &str, retry_after: Duration) {
+    let colored = output::is_colored();
+    let symbols = Symbols::new(colored);
+    let delay = humantime::format_duration(retry_after);
+    let message = format!("stream lost: {cause}{}reconnecting in {delay}", symbols.dash);
+
+    print_lifecycle_line(alias, alias_width, &message);
+}
+
 #[cfg(test)]
 mod test {
+    use readinesspb::pb::Reason;
+
     use super::*;
 
     fn scope(name: &str, state: State) -> Scope {
@@ -151,6 +296,16 @@ mod test {
             reasons: Vec::new(),
             observed_at: None,
             last_transition_time: None,
+        }
+    }
+
+    fn scope_with_reason(name: &str, state: State, code: &str) -> Scope {
+        Scope {
+            reasons: vec![Reason {
+                code: code.to_owned(),
+                message: String::new(),
+            }],
+            ..scope(name, state)
         }
     }
 
@@ -182,6 +337,7 @@ mod test {
 
         let prefix = transition_prefix(
             "14:32:11",
+            ServiceColumn::None,
             "rib         ",
             State::NotReady,
             Transition::StateChanged { previous: State::Ready },
@@ -197,6 +353,7 @@ mod test {
     fn transition_prefix_uncolored_is_ascii_and_escape_free() {
         let prefix = transition_prefix(
             "14:32:11",
+            ServiceColumn::None,
             "rib         ",
             State::NotReady,
             Transition::StateChanged { previous: State::Ready },
@@ -215,6 +372,7 @@ mod test {
 
         let prefix = transition_prefix(
             "14:32:11",
+            ServiceColumn::None,
             "rib         ",
             State::Degraded,
             Transition::ReasonChanged,
@@ -228,11 +386,37 @@ mod test {
     }
 
     #[test]
+    fn transition_prefix_named_service_adds_a_padded_cell() {
+        let with_service = transition_prefix(
+            "14:32:11",
+            ServiceColumn::Named { alias: "route", width: 10 },
+            "rib         ",
+            State::Ready,
+            Transition::ReasonChanged,
+            false,
+        );
+        let without_service = transition_prefix(
+            "14:32:11",
+            ServiceColumn::None,
+            "rib         ",
+            State::Ready,
+            Transition::ReasonChanged,
+            false,
+        );
+
+        assert!(with_service.plain.contains("route"));
+        assert_eq!(
+            without_service.plain.chars().count() + 11,
+            with_service.plain.chars().count()
+        );
+    }
+
+    #[test]
     fn record_transition_detects_state_change() {
         let mut snapshot = BTreeMap::new();
-        snapshot.insert("rib".to_string(), scope("rib", State::Ready));
+        snapshot.insert(("route".to_owned(), "rib".to_owned()), scope("rib", State::Ready));
 
-        let transition = record_transition(&mut snapshot, &scope("rib", State::Degraded));
+        let transition = record_transition(&mut snapshot, "route", &scope("rib", State::Degraded));
 
         assert_eq!(Transition::StateChanged { previous: State::Ready }, transition);
     }
@@ -240,30 +424,87 @@ mod test {
     #[test]
     fn record_transition_detects_reason_only_change() {
         let mut snapshot = BTreeMap::new();
-        snapshot.insert("rib".to_string(), scope("rib", State::Degraded));
+        snapshot.insert(
+            ("route".to_owned(), "rib".to_owned()),
+            scope_with_reason("rib", State::Degraded, "BIRD_DOWN"),
+        );
 
-        let transition = record_transition(&mut snapshot, &scope("rib", State::Degraded));
+        let transition = record_transition(
+            &mut snapshot,
+            "route",
+            &scope_with_reason("rib", State::Degraded, "TIMEOUT"),
+        );
 
         assert_eq!(Transition::ReasonChanged, transition);
     }
 
     #[test]
-    fn record_transition_treats_unknown_scope_as_previously_unknown() {
+    fn record_transition_is_unchanged_when_state_and_reasons_match() {
+        let mut snapshot = BTreeMap::new();
+        let mut previous = scope_with_reason("rib", State::Degraded, "BIRD_DOWN");
+        previous.observed_at = Some(prost_types::Timestamp { seconds: 1, nanos: 0 });
+        snapshot.insert(("route".to_owned(), "rib".to_owned()), previous);
+
+        // Same state and reason, but `observed_at` advanced — a pure
+        // heartbeat must not be classified as a change.
+        let mut next = scope_with_reason("rib", State::Degraded, "BIRD_DOWN");
+        next.observed_at = Some(prost_types::Timestamp { seconds: 2, nanos: 0 });
+
+        let transition = record_transition(&mut snapshot, "route", &next);
+
+        assert_eq!(Transition::Unchanged, transition);
+    }
+
+    #[test]
+    fn record_transition_first_sighting_is_first_seen_regardless_of_state() {
         let mut snapshot = BTreeMap::new();
 
-        let transition = record_transition(&mut snapshot, &scope("neighbours", State::NotReady));
+        let transition = record_transition(&mut snapshot, "route", &scope("neighbours", State::NotReady));
 
-        assert_eq!(Transition::StateChanged { previous: State::Unknown }, transition);
-        assert!(snapshot.contains_key("neighbours"));
+        assert_eq!(Transition::FirstSeen, transition);
+        assert!(snapshot.contains_key(&("route".to_owned(), "neighbours".to_owned())));
+    }
+
+    #[test]
+    fn record_transition_first_sighting_of_unknown_reasonless_scope_is_not_unchanged() {
+        // This is the exact bug: synthesizing a fake `STATE_UNKNOWN`,
+        // reason-less "previous" for an absent snapshot entry made a
+        // genuinely first-seen `UNKNOWN` scope compare equal to it and
+        // vanish as `Unchanged`.
+        let mut snapshot = BTreeMap::new();
+
+        let transition = record_transition(&mut snapshot, "route", &scope("neighbours", State::Unknown));
+
+        assert_eq!(Transition::FirstSeen, transition);
+        assert_ne!(Transition::Unchanged, transition);
+    }
+
+    #[test]
+    fn record_transition_keys_by_service_and_scope_name() {
+        let mut snapshot = BTreeMap::new();
+        snapshot.insert(
+            ("route".to_owned(), "reconcile".to_owned()),
+            scope("reconcile", State::Ready),
+        );
+
+        // A same-named scope from a different service must not be diffed
+        // against `route`'s entry — it must be a first sighting, not a
+        // comparison against `route`'s `Ready` entry.
+        let transition = record_transition(&mut snapshot, "decap", &scope("reconcile", State::NotReady));
+
+        assert_eq!(Transition::FirstSeen, transition);
     }
 
     #[test]
     fn record_transition_updates_snapshot() {
         let mut snapshot = BTreeMap::new();
-        snapshot.insert("rib".to_string(), scope("rib", State::Ready));
+        snapshot.insert(("route".to_owned(), "rib".to_owned()), scope("rib", State::Ready));
 
-        record_transition(&mut snapshot, &scope("rib", State::NotReady));
+        record_transition(&mut snapshot, "route", &scope("rib", State::NotReady));
 
-        assert_eq!(State::NotReady as i32, snapshot["rib"].state);
+        assert_eq!(
+            State::NotReady as i32,
+            snapshot[&("route".to_owned(), "rib".to_owned())].state
+        );
     }
 }

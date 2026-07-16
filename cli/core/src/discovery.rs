@@ -9,6 +9,7 @@
 //! suggests.
 
 use core::time::Duration;
+use std::collections::BTreeMap;
 
 use tonic::codec::CompressionEncoding;
 use ynpb::pb::{gateway_client::GatewayClient, ListServicesRequest};
@@ -108,6 +109,63 @@ pub fn resolve_alias(alias: &str, services: &[String]) -> Resolution {
         1 => Resolution::Resolved(matched.remove(0)),
         _ => Resolution::Ambiguous(matched),
     }
+}
+
+/// Derives a short display alias from a service FQN — the inverse of
+/// [`resolve_alias`].
+///
+/// Drops the trailing segment (the service name itself, e.g.
+/// `ReadinessService`), then discards any remaining segment that is a bare
+/// version marker (`v1`, `v2`, …) or ends in `pb` (`operatorpb`, `ynpb`,
+/// …), and takes the last segment left. `controlplane.ynpb.v1.ReadinessService`
+/// becomes `controlplane`; `operators.route.operatorpb.v1.ReadinessService`
+/// becomes `route`. Falls back to the full `fqn` when nothing remains, e.g.
+/// a bare `ReadinessService` with no package at all.
+pub fn derive_alias(fqn: &str) -> String {
+    let segments: Vec<&str> = fqn.split('.').collect();
+    let package = &segments[..segments.len().saturating_sub(1)];
+
+    package
+        .iter()
+        .rev()
+        .find(|segment| !is_version_segment(segment) && !segment.ends_with("pb"))
+        .map(|segment| (*segment).to_owned())
+        .unwrap_or_else(|| fqn.to_owned())
+}
+
+/// Reports whether `segment` is a bare version marker: `v` followed by one
+/// or more ASCII digits and nothing else.
+fn is_version_segment(segment: &str) -> bool {
+    let Some(digits) = segment.strip_prefix('v') else {
+        return false;
+    };
+
+    !digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit())
+}
+
+/// Derives a display alias for every service in `services`, keyed by the
+/// service's own FQN.
+///
+/// Two services whose derived alias collides both fall back to their full
+/// FQN — a short alias is only useful when it is unambiguous.
+pub fn alias_map(services: &[String]) -> BTreeMap<String, String> {
+    let mut aliases: BTreeMap<String, String> = services
+        .iter()
+        .map(|service| (service.clone(), derive_alias(service)))
+        .collect();
+
+    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+    for alias in aliases.values() {
+        *counts.entry(alias.clone()).or_insert(0) += 1;
+    }
+
+    for (service, alias) in aliases.iter_mut() {
+        if counts.get(alias.as_str()).copied().unwrap_or(0) > 1 {
+            *alias = service.clone();
+        }
+    }
+
+    aliases
 }
 
 /// Connects to the gateway afresh and lists the services whose last segment
@@ -299,5 +357,48 @@ mod test {
             "no services registered",
             services_hint("available:", "no services registered", &[])
         );
+    }
+
+    #[test]
+    fn derive_alias_drops_version_and_pb_segments() {
+        assert_eq!("controlplane", derive_alias("controlplane.ynpb.v1.ReadinessService"));
+        assert_eq!("route", derive_alias("operators.route.operatorpb.v1.ReadinessService"));
+    }
+
+    #[test]
+    fn derive_alias_handles_double_digit_versions() {
+        assert_eq!("route", derive_alias("operators.route.operatorpb.v12.ReadinessService"));
+    }
+
+    #[test]
+    fn derive_alias_falls_back_to_the_full_name_when_nothing_remains() {
+        assert_eq!("ReadinessService", derive_alias("ReadinessService"));
+        assert_eq!("v1.pb.ReadinessService", derive_alias("v1.pb.ReadinessService"));
+    }
+
+    #[test]
+    fn alias_map_uses_the_derived_alias_when_unique() {
+        let services = vec![
+            "controlplane.ynpb.v1.ReadinessService".to_owned(),
+            "operators.route.operatorpb.v1.ReadinessService".to_owned(),
+        ];
+
+        let aliases = alias_map(&services);
+
+        assert_eq!(Some(&"controlplane".to_owned()), aliases.get(&services[0]));
+        assert_eq!(Some(&"route".to_owned()), aliases.get(&services[1]));
+    }
+
+    #[test]
+    fn alias_map_falls_back_to_the_fqn_on_collision() {
+        let services = vec![
+            "a.route.v1.ReadinessService".to_owned(),
+            "b.route.v2.ReadinessService".to_owned(),
+        ];
+
+        let aliases = alias_map(&services);
+
+        assert_eq!(Some(&services[0]), aliases.get(&services[0]));
+        assert_eq!(Some(&services[1]), aliases.get(&services[1]));
     }
 }

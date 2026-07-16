@@ -34,7 +34,7 @@ pub fn wrap_words(text: &str, width: usize) -> Vec<String> {
     for word in text.split_whitespace() {
         if current.is_empty() {
             current.push_str(word);
-        } else if current.len() + 1 + word.len() <= width {
+        } else if current.chars().count() + 1 + word.chars().count() <= width {
             current.push(' ');
             current.push_str(word);
         } else {
@@ -101,6 +101,14 @@ mod test {
     #[test]
     fn wrap_words_zero_width_returns_single_line() {
         assert_eq!(vec!["one long line".to_string()], wrap_words("one long line", 0));
+    }
+
+    #[test]
+    fn wrap_words_counts_columns_not_bytes() {
+        // Each em dash is 3 UTF-8 bytes but a single display column, so a
+        // width of 5 must fit both of them plus their surrounding letters
+        // on one line — byte-counting would wrap one column early.
+        assert_eq!(vec!["a — b".to_string()], wrap_words("a — b", 5));
     }
 
     #[test]

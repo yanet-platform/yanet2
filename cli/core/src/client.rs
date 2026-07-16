@@ -149,6 +149,63 @@ impl Connection {
             .map(|response| response.into_inner())
             .map_err(|status| Error::from_status(status, action, &self.endpoint, service))
     }
+
+    /// Invoke a server-streaming RPC on an arbitrary gRPC service over this
+    /// connection.
+    ///
+    /// The dispatch is the free [`invoke_server_stream`]'s, minus the
+    /// connect: a CLI watching several services builds one [`Connection`]
+    /// and calls this per service, so they all share a single channel.
+    /// `tonic::Streaming` never leaks to the caller — all stream state is
+    /// contained here.
+    pub async fn invoke_server_stream<Req, Resp, F>(
+        &self,
+        action: &str,
+        service: &str,
+        method: &str,
+        request: Req,
+        mut on_message: F,
+    ) -> Result<(), Error>
+    where
+        Req: Message + Send + Sync + 'static,
+        Resp: Message + Default + Send + Sync + 'static,
+        F: FnMut(Resp),
+    {
+        let mut grpc = Grpc::new(self.channel.clone())
+            .send_compressed(CompressionEncoding::Gzip)
+            .accept_compressed(CompressionEncoding::Gzip);
+
+        let path = PathAndQuery::try_from(format!("/{service}/{method}")).map_err(|err| {
+            Error::from_status(
+                Status::invalid_argument(err.to_string()),
+                action,
+                &self.endpoint,
+                service,
+            )
+        })?;
+
+        grpc.ready()
+            .await
+            .map_err(|err| Error::from_status(Status::unavailable(err.to_string()), action, &self.endpoint, service))?;
+
+        let codec: ProstCodec<Req, Resp> = ProstCodec::default();
+
+        let mut stream = grpc
+            .server_streaming(Request::new(request), path, codec)
+            .await
+            .map_err(|status| Error::from_status(status, action, &self.endpoint, service))?
+            .into_inner();
+
+        while let Some(message) = stream
+            .message()
+            .await
+            .map_err(|status| Error::from_status(status, action, &self.endpoint, service))?
+        {
+            on_message(message);
+        }
+
+        Ok(())
+    }
 }
 
 /// A connected gRPC client bundled with its endpoint and service name.
@@ -284,53 +341,17 @@ pub async fn invoke_server_stream<Req, Resp, F>(
     service: &str,
     method: &str,
     request: Req,
-    mut on_message: F,
+    on_message: F,
 ) -> Result<(), Error>
 where
     Req: Message + Send + Sync + 'static,
     Resp: Message + Default + Send + Sync + 'static,
     F: FnMut(Resp),
 {
-    let endpoint = connection.endpoint.clone();
-
-    let channel = connect(connection)
+    Connection::connect_for(connection, action)
+        .await?
+        .invoke_server_stream(action, service, method, request, on_message)
         .await
-        .map_err(|err| Error::from_connection(err, action, endpoint.clone()))?;
-
-    let mut grpc = Grpc::new(channel)
-        .send_compressed(CompressionEncoding::Gzip)
-        .accept_compressed(CompressionEncoding::Gzip);
-
-    let path = PathAndQuery::try_from(format!("/{service}/{method}")).map_err(|err| {
-        Error::from_status(
-            Status::invalid_argument(err.to_string()),
-            action,
-            endpoint.clone(),
-            service,
-        )
-    })?;
-
-    grpc.ready()
-        .await
-        .map_err(|err| Error::from_status(Status::unavailable(err.to_string()), action, endpoint.clone(), service))?;
-
-    let codec: ProstCodec<Req, Resp> = ProstCodec::default();
-
-    let mut stream = grpc
-        .server_streaming(Request::new(request), path, codec)
-        .await
-        .map_err(|status| Error::from_status(status, action, endpoint.clone(), service))?
-        .into_inner();
-
-    while let Some(message) = stream
-        .message()
-        .await
-        .map_err(|status| Error::from_status(status, action, endpoint.clone(), service))?
-    {
-        on_message(message);
-    }
-
-    Ok(())
 }
 
 #[cfg(test)]
