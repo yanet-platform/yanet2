@@ -76,12 +76,14 @@ l3b_module_config_new(
 void
 l3b_module_config_free(struct cp_module *config);
 
-// Allocate a virtual service in shared memory from its control-plane
-// descriptor and return a handle (pointer to the relative-pointer slot that
-// owns it), so the service can be installed or swapped transiently.
+// Allocate a virtual service in the agent's shared memory from its
+// control-plane descriptor and return a handle (pointer to the relative-pointer
+// slot that owns it). The service is agent-scoped so it can be created
+// independently and later installed into a module config; a single service can
+// also be swapped transiently via its handle.
 struct virtual_service **
-l3b_module_config_add_virtual_service(
-	struct cp_module *cp_module,
+l3b_virtual_service_create(
+	struct agent *agent,
 	const struct l3b_virtual_service *virtual_service,
 	yanet_error **err
 );

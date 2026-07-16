@@ -203,12 +203,12 @@ out:
 }
 
 struct virtual_service **
-l3b_module_config_add_virtual_service(
-	struct cp_module *cp_module,
+l3b_virtual_service_create(
+	struct agent *agent,
 	const struct l3b_virtual_service *virtual_service,
 	yanet_error **err
 ) {
-	struct memory_context *memory_context = &cp_module->memory_context;
+	struct memory_context *memory_context = &agent->memory_context;
 
 	struct virtual_service *vs = (struct virtual_service *)memory_balloc(
 		memory_context, sizeof(struct virtual_service)
