@@ -1,6 +1,7 @@
 #include "errors.h"
 
 #include <errno.h>
+#include <linux/mempolicy.h>
 #include <numaif.h>
 #include <stddef.h>
 #include <stdint.h>
