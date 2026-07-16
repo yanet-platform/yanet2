@@ -664,7 +664,7 @@ fn pretty_print_icmpv6_packet<W: Write>(mut writer: W, icmpv6_packet: &[u8]) -> 
         Icmpv6Types::NeighborSolicit => {
             if packet.payload().len() >= 20 {
                 let mut addr: [u8; 16] = [0; 16];
-                addr.copy_from_slice(&packet.payload()[4..19]);
+                addr.copy_from_slice(&packet.payload()[4..20]);
                 let target_addr = Ipv6Addr::from(addr);
                 writeln!(writer, "      Target Address:   {target_addr}")?;
             }
@@ -678,7 +678,7 @@ fn pretty_print_icmpv6_packet<W: Write>(mut writer: W, icmpv6_packet: &[u8]) -> 
             }
             if packet.payload().len() >= 20 {
                 let mut addr: [u8; 16] = [0; 16];
-                addr.copy_from_slice(&packet.payload()[4..19]);
+                addr.copy_from_slice(&packet.payload()[4..20]);
                 let target_addr = Ipv6Addr::from(addr);
                 writeln!(writer, "      Target Address:   {target_addr}")?;
             }
@@ -1050,6 +1050,89 @@ mod tests {
         frame.extend_from_slice(&[192, 168, 1, 1]); // Sender IP
         frame.extend_from_slice(&[0x00, 0x11, 0x22, 0x33, 0x44, 0x55]); // Target MAC
         frame.extend_from_slice(&[192, 168, 1, 2]); // Target IP
+
+        frame
+    }
+
+    /// Helper function to create an IPv6 frame with an ICMPv6 Neighbor
+    /// Solicitation packet
+    fn create_icmpv6_neighbor_solicit_frame() -> Vec<u8> {
+        let mut frame = Vec::new();
+
+        // Ethernet header (14 bytes)
+        frame.extend_from_slice(&[0x00, 0x11, 0x22, 0x33, 0x44, 0x55]); // Destination MAC
+        frame.extend_from_slice(&[0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF]); // Source MAC
+        frame.extend_from_slice(&[0x86, 0xDD]); // EtherType: IPv6
+
+        // IPv6 header (40 bytes)
+        frame.push(0x60); // Version (6) + Traffic Class (0)
+        frame.extend_from_slice(&[0x00, 0x00, 0x00]); // Traffic Class + Flow Label
+        frame.extend_from_slice(&[0x00, 0x18]); // Payload Length (24 bytes)
+        frame.push(0x3a); // Next Header: ICMPv6
+        frame.push(0xff); // Hop Limit (255, required for NDP)
+        // Source IPv6 address (16 bytes)
+        frame.extend_from_slice(&[
+            0xfe, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+        ]);
+        // Destination IPv6 address (16 bytes)
+        frame.extend_from_slice(&[
+            0xff, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0xff, 0x00, 0x00, 0x02,
+        ]);
+
+        // ICMPv6 header (4 bytes)
+        frame.push(0x87); // Type: Neighbor Solicitation (135)
+        frame.push(0x00); // Code
+        frame.extend_from_slice(&[0x00, 0x00]); // Checksum (placeholder)
+
+        // Reserved (4 bytes)
+        frame.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]);
+
+        // Target Address (16 bytes)
+        frame.extend_from_slice(&[
+            0x20, 0x01, 0x0d, 0xb8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02,
+        ]);
+
+        frame
+    }
+
+    /// Helper function to create an IPv6 frame with an ICMPv6 Neighbor
+    /// Advertisement packet
+    fn create_icmpv6_neighbor_advert_frame() -> Vec<u8> {
+        let mut frame = Vec::new();
+
+        // Ethernet header (14 bytes)
+        frame.extend_from_slice(&[0x00, 0x11, 0x22, 0x33, 0x44, 0x55]); // Destination MAC
+        frame.extend_from_slice(&[0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF]); // Source MAC
+        frame.extend_from_slice(&[0x86, 0xDD]); // EtherType: IPv6
+
+        // IPv6 header (40 bytes)
+        frame.push(0x60); // Version (6) + Traffic Class (0)
+        frame.extend_from_slice(&[0x00, 0x00, 0x00]); // Traffic Class + Flow Label
+        frame.extend_from_slice(&[0x00, 0x18]); // Payload Length (24 bytes)
+        frame.push(0x3a); // Next Header: ICMPv6
+        frame.push(0xff); // Hop Limit (255, required for NDP)
+        // Source IPv6 address (16 bytes)
+        frame.extend_from_slice(&[
+            0x20, 0x01, 0x0d, 0xb8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02,
+        ]);
+        // Destination IPv6 address (16 bytes)
+        frame.extend_from_slice(&[
+            0xfe, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+        ]);
+
+        // ICMPv6 header (4 bytes)
+        frame.push(0x88); // Type: Neighbor Advertisement (136)
+        frame.push(0x00); // Code
+        frame.extend_from_slice(&[0x00, 0x00]); // Checksum (placeholder)
+
+        // Flags (1 byte) + Reserved (3 bytes)
+        frame.push(0xe0); // Flags: Router + Solicited + Override
+        frame.extend_from_slice(&[0x00, 0x00, 0x00]);
+
+        // Target Address (16 bytes)
+        frame.extend_from_slice(&[
+            0x20, 0x01, 0x0d, 0xb8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03,
+        ]);
 
         frame
     }
@@ -1646,5 +1729,39 @@ mod tests {
 
         let output_str = String::from_utf8(output).unwrap();
         assert!(output_str.contains("Packet Queue:   DROPS"));
+    }
+
+    #[test]
+    fn test_pretty_print_ethernet_frame_icmpv6_neighbor_solicit() {
+        let frame = create_icmpv6_neighbor_solicit_frame();
+        let mut output = Vec::new();
+
+        pretty_print_ethernet_frame(&mut output, &frame, frame.len() as u32).unwrap();
+
+        let output_str = String::from_utf8(output).unwrap();
+
+        assert!(
+            output_str.contains("Type:             135 (Neighbor Solicitation)"),
+            "{}",
+            output_str
+        );
+        assert!(output_str.contains("Target Address:   2001:db8::2"), "{}", output_str);
+    }
+
+    #[test]
+    fn test_pretty_print_ethernet_frame_icmpv6_neighbor_advert() {
+        let frame = create_icmpv6_neighbor_advert_frame();
+        let mut output = Vec::new();
+
+        pretty_print_ethernet_frame(&mut output, &frame, frame.len() as u32).unwrap();
+
+        let output_str = String::from_utf8(output).unwrap();
+
+        assert!(
+            output_str.contains("Type:             136 (Neighbor Advertisement)"),
+            "{}",
+            output_str
+        );
+        assert!(output_str.contains("Target Address:   2001:db8::3"), "{}", output_str);
     }
 }
