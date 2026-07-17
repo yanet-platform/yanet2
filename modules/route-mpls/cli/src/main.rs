@@ -17,7 +17,10 @@ pub mod routemplspb {
 }
 
 use clap::{ArgAction, CommandFactory, Parser};
-use clap_complete::CompleteEnv;
+use clap_complete::{
+    engine::{ArgValueCandidates, CompletionCandidate},
+    CompleteEnv,
+};
 use netip::{Contiguous, IpNetwork};
 use routemplspb::{
     route_mpls_service_client::RouteMplsServiceClient, update_event::Event, CreateConfigRequest, DeleteConfigRequest,
@@ -26,6 +29,7 @@ use routemplspb::{
 use tonic::codec::CompressionEncoding;
 use ync::{
     client::{ConnectionArgs, LayeredChannel, Service},
+    completion,
     errors::Error,
     output::{self, CommonFormat},
 };
@@ -66,28 +70,28 @@ pub enum ModeCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct RouteShowCmd {
     /// Route config name.
-    #[arg(long = "name", short = 'n')]
+    #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
     pub config_name: String,
 }
 
 #[derive(Debug, Clone, Parser)]
 pub struct RouteCreateCmd {
     /// Route config name.
-    #[arg(long = "name", short = 'n')]
+    #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
     pub config_name: String,
 }
 
 #[derive(Debug, Clone, Parser)]
 pub struct RouteDeleteCmd {
     /// Route config name.
-    #[arg(long = "name", short = 'n')]
+    #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
     pub config_name: String,
 }
 
 #[derive(Debug, Clone, Parser)]
 pub struct RouteUpdateCmd {
     /// Route config name.
-    #[arg(long = "name", short = 'n')]
+    #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
     pub config_name: String,
     /// Route prefix
     #[arg(long = "prefix", short)]
@@ -112,7 +116,7 @@ pub struct RouteUpdateCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct RouteWithdrawCmd {
     /// Route config name.
-    #[arg(long = "name", short = 'n')]
+    #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
     pub config_name: String,
     /// Route prefix
     #[arg(long = "prefix", short)]
@@ -147,10 +151,13 @@ impl TryFrom<Contiguous<IpNetwork>> for filterpb::IpPrefix {
 /// The fully-qualified gRPC service name used in error messages.
 const SERVICE_NAME: &str = "modules.route_mpls.controlplane.routemplspb.v1.RouteMPLSService";
 
-#[tokio::main(flavor = "current_thread")]
-pub async fn main() {
+fn main() {
     CompleteEnv::with_factory(Cmd::command).complete();
+    start();
+}
 
+#[tokio::main(flavor = "current_thread")]
+async fn start() {
     let cmd = Cmd::parse();
     ync::init(cmd.verbose, cmd.format);
 
@@ -158,6 +165,22 @@ pub async fn main() {
         output::failure(&err);
         std::process::exit(err.exit_code());
     }
+}
+
+/// Completion candidates for a `--name` argument: the route-mpls configs
+/// the module currently knows.
+///
+/// Strictly best-effort — see [`completion::candidates`].
+fn config_candidates() -> Vec<CompletionCandidate> {
+    completion::candidates(
+        Cmd::command,
+        |channel| {
+            RouteMplsServiceClient::new(channel)
+                .send_compressed(CompressionEncoding::Gzip)
+                .accept_compressed(CompressionEncoding::Gzip)
+        },
+        async move |mut client| Ok(client.list_configs(ListConfigsRequest {}).await?.into_inner().configs),
+    )
 }
 
 async fn run(cmd: Cmd) -> Result<(), Error> {

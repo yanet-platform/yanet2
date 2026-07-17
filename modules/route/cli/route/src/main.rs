@@ -7,7 +7,10 @@ use std::{
 };
 
 use clap::{ArgAction, CommandFactory, Parser};
-use clap_complete::CompleteEnv;
+use clap_complete::{
+    engine::{ArgValueCandidates, CompletionCandidate},
+    CompleteEnv,
+};
 use commonpb::pb::MacAddress;
 use netip::MacAddr;
 use serde::{Deserialize, Serialize};
@@ -26,6 +29,7 @@ use yanet_cli_route::{
 };
 use ync::{
     client::{ConnectionArgs, LayeredChannel},
+    completion,
     output::{self, CommonFormat},
 };
 
@@ -131,7 +135,7 @@ pub enum FibAction {
 #[derive(Debug, Clone, Parser)]
 pub struct FibUpdateCmd {
     /// Route module config name.
-    #[arg(long = "name", short = 'n')]
+    #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
     pub config_name: String,
     /// Path to the FIB YAML file.
     #[arg(required = true, long = "rules", value_name = "PATH")]
@@ -147,14 +151,17 @@ pub struct FibShowCmd {
     #[arg(long)]
     pub ipv6: bool,
     /// Route config name.
-    #[arg(long = "name", short = 'n')]
+    #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
     pub config_name: String,
 }
 
-#[tokio::main(flavor = "current_thread")]
-pub async fn main() {
+fn main() {
     CompleteEnv::with_factory(Cmd::command).complete();
+    start();
+}
 
+#[tokio::main(flavor = "current_thread")]
+async fn start() {
     let cmd = Cmd::parse();
     ync::init(cmd.verbose, cmd.format);
 
@@ -162,6 +169,22 @@ pub async fn main() {
         log::error!("ERROR: {err}");
         std::process::exit(1);
     }
+}
+
+/// Completion candidates for a `--name` argument: the route configs the
+/// module currently knows.
+///
+/// Strictly best-effort — see [`completion::candidates`].
+fn config_candidates() -> Vec<CompletionCandidate> {
+    completion::candidates(
+        Cmd::command,
+        |channel| {
+            RouteServiceClient::new(channel)
+                .send_compressed(CompressionEncoding::Gzip)
+                .accept_compressed(CompressionEncoding::Gzip)
+        },
+        async move |mut client| Ok(client.list_configs(ListConfigsRequest {}).await?.into_inner().configs),
+    )
 }
 
 async fn run(cmd: Cmd) -> Result<(), Box<dyn Error>> {

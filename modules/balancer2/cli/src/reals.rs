@@ -1,6 +1,7 @@
 use std::net::IpAddr;
 
 use clap::Parser;
+use clap_complete::engine::ArgValueCandidates;
 
 use crate::VsId;
 
@@ -21,7 +22,7 @@ pub enum RealsMode {
 #[derive(Debug, Clone, Parser)]
 pub struct EnableRealCmd {
     /// Balancer configuration name.
-    #[arg(long, short = 'n')]
+    #[arg(long, short = 'n', add = ArgValueCandidates::new(crate::config_candidates))]
     pub name: String,
     /// Virtual service identifier: "ip:port/proto" or "[ipv6]:port/proto".
     #[arg(long)]
@@ -38,7 +39,7 @@ pub struct EnableRealCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct DisableRealCmd {
     /// Balancer configuration name.
-    #[arg(long, short = 'n')]
+    #[arg(long, short = 'n', add = ArgValueCandidates::new(crate::config_candidates))]
     pub name: String,
     /// Virtual service identifier: "ip:port/proto" or "[ipv6]:port/proto".
     #[arg(long)]

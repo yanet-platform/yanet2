@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 
-rust-version = "1.84"
+rust-version = "1.85"
 
 [dependencies]
 commonpb = { path = "../../../../common/rust/commonpb", version = "0.1", package = "yanet-commonpb" }

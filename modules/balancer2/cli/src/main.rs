@@ -11,10 +11,15 @@ use std::{
 };
 
 use clap::{ArgAction, CommandFactory, Parser};
-use clap_complete::CompleteEnv;
+use clap_complete::{
+    CompleteEnv,
+    engine::{ArgValueCandidates, CompletionCandidate},
+};
+use tonic::codec::CompressionEncoding;
 use yanet_cli_balancer2::balancerpb;
 use ync::{
     client::ConnectionArgs,
+    completion,
     errors::Error,
     output::{self, CommonFormat},
 };
@@ -59,7 +64,7 @@ pub enum ModeCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct UpdateCmd {
     /// Balancer configuration name.
-    #[arg(long, short = 'n')]
+    #[arg(long, short = 'n', add = ArgValueCandidates::new(config_candidates))]
     pub name: String,
     /// Path to YAML configuration file.
     #[arg(long, short = 'c')]
@@ -73,14 +78,14 @@ pub struct UpdateCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct ConfigCmd {
     /// Balancer configuration name.
-    #[arg(long, short = 'n')]
+    #[arg(long, short = 'n', add = ArgValueCandidates::new(config_candidates))]
     pub name: String,
 }
 
 #[derive(Debug, Clone, Parser)]
 pub struct ShowCmd {
     /// Balancer configuration name.
-    #[arg(long, short = 'n')]
+    #[arg(long, short = 'n', add = ArgValueCandidates::new(config_candidates))]
     pub name: String,
 
     /// Show all counters, active sessions and last packet timestamps.
@@ -303,9 +308,13 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
     service.handle(cmd.mode, cmd.format).await
 }
 
-#[tokio::main(flavor = "current_thread")]
-pub async fn main() {
+fn main() {
     CompleteEnv::with_factory(Cmd::command).complete();
+    start();
+}
+
+#[tokio::main(flavor = "current_thread")]
+async fn start() {
     let cmd = Cmd::parse();
     ync::init(cmd.verbose, cmd.format);
 
@@ -313,4 +322,26 @@ pub async fn main() {
         output::failure(&err);
         std::process::exit(err.exit_code());
     }
+}
+
+/// Completion candidates for a `--name` argument: the balancer configs the
+/// module currently knows.
+///
+/// Strictly best-effort — see [`completion::candidates`].
+fn config_candidates() -> Vec<CompletionCandidate> {
+    completion::candidates(
+        Cmd::command,
+        |channel| {
+            balancerpb::balancer_client::BalancerClient::new(channel)
+                .send_compressed(CompressionEncoding::Gzip)
+                .accept_compressed(CompressionEncoding::Gzip)
+        },
+        async move |mut client| {
+            Ok(client
+                .list_configs(balancerpb::ListConfigsRequest {})
+                .await?
+                .into_inner()
+                .names)
+        },
+    )
 }

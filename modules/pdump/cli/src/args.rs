@@ -2,6 +2,7 @@ use core::str::FromStr;
 
 use bytesize::ByteSize;
 use clap::{Parser, ValueEnum};
+use clap_complete::engine::ArgValueCandidates;
 
 #[derive(Debug, Clone, Parser)]
 pub enum ModeCmd {
@@ -15,21 +16,21 @@ pub enum ModeCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct DeleteCmd {
     /// Pdump config name to delete.
-    #[arg(long = "name", short = 'n')]
+    #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(crate::config_candidates))]
     pub config_name: String,
 }
 
 #[derive(Debug, Clone, Parser)]
 pub struct ShowConfigCmd {
     /// Pdump config name to operate on.
-    #[arg(long = "name", short = 'n')]
+    #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(crate::config_candidates))]
     pub config_name: String,
 }
 
 #[derive(Debug, Clone, Parser)]
 pub struct SetConfigCmd {
     /// Pdump config name to operate on.
-    #[arg(long = "name", short = 'n')]
+    #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(crate::config_candidates))]
     pub config_name: String,
 
     /// Filter represents a pcap-style filter expression
@@ -52,7 +53,7 @@ pub struct SetConfigCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct ReadCmd {
     /// Pdump config name to operate on.
-    #[arg(long = "name", short = 'n')]
+    #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(crate::config_candidates))]
     pub config_name: String,
 
     /// Packet-dump encoding for the captured stream.
