@@ -27,12 +27,111 @@ type scopeState struct {
 	lastTransitionTime time.Time
 }
 
+// Name returns the scope's name.
+func (m *scopeState) Name() string {
+	return m.name
+}
+
+// State returns the scope's current state.
+func (m *scopeState) State() readinesspb.State {
+	return m.state
+}
+
+// ToProto converts the scope to its wire representation.
+func (m *scopeState) ToProto() *readinesspb.Scope {
+	var reasons []*readinesspb.Reason
+	if m.reason != nil {
+		reasons = []*readinesspb.Reason{m.reason}
+	}
+	scope := &readinesspb.Scope{
+		Name:    m.name,
+		State:   m.state,
+		Reasons: reasons,
+	}
+	if !m.observedAt.IsZero() {
+		scope.ObservedAt = timestamppb.New(m.observedAt)
+		scope.LastTransitionTime = timestamppb.New(m.lastTransitionTime)
+	}
+	return scope
+}
+
+// Touch advances observedAt to now without changing state, reason, or
+// lastTransitionTime.
+func (m *scopeState) Touch(now time.Time) {
+	m.observedAt = now
+}
+
+// Apply writes next and reason onto the scope, advancing timestamps.
+//
+// observedAt always advances to now. lastTransitionTime advances only when
+// the scope has never been observed before or when the state value changes.
+// It reports the state the scope held prior to the call, and whether the
+// call actually changed state or reason.
+func (m *scopeState) Apply(
+	next readinesspb.State,
+	reason *readinesspb.Reason,
+	now time.Time,
+) (prevState readinesspb.State, changed bool) {
+	prevState = m.state
+	prevReason := m.reason
+	if m.observedAt.IsZero() || m.state != next {
+		m.lastTransitionTime = now
+	}
+	m.state = next
+	m.reason = reason
+	m.observedAt = now
+	changed = prevState != next || !reasonEqual(prevReason, reason)
+	return prevState, changed
+}
+
 // subscriber holds state for one active Watch call.
 type subscriber struct {
 	// filter is the set of scope names this subscriber wants; empty means all.
 	filter  map[string]struct{}
 	ch      chan *readinesspb.ReadyResponse
 	dropped chan struct{}
+}
+
+// Matches reports whether the subscriber wants updates for the named scope.
+//
+// An empty filter matches every scope.
+func (m *subscriber) Matches(name string) bool {
+	if len(m.filter) == 0 {
+		return true
+	}
+	_, ok := m.filter[name]
+	return ok
+}
+
+// Send delivers resp to the subscriber without blocking.
+//
+// It reports false when the subscriber's buffer is full; the caller is
+// responsible for dropping the subscriber in that case.
+func (m *subscriber) Send(resp *readinesspb.ReadyResponse) bool {
+	select {
+	case m.ch <- resp:
+		return true
+	default:
+		return false
+	}
+}
+
+// Drop closes the subscriber's dropped channel, signalling Watch to return
+// errSlowConsumer.
+func (m *subscriber) Drop() {
+	close(m.dropped)
+}
+
+// Dropped returns the channel that is closed when the subscriber is dropped
+// for being too slow.
+func (m *subscriber) Dropped() <-chan struct{} {
+	return m.dropped
+}
+
+// Events returns the channel of readiness updates delivered to the
+// subscriber.
+func (m *subscriber) Events() <-chan *readinesspb.ReadyResponse {
+	return m.ch
 }
 
 // Tracker tracks readiness state across named scopes.
@@ -141,35 +240,17 @@ func reasonEqual(a, b *readinesspb.Reason) bool {
 	return a.GetCode() == b.GetCode() && a.GetMessage() == b.GetMessage()
 }
 
-// scopeToProto converts a scopeState to its proto representation.
-func scopeToProto(s *scopeState) *readinesspb.Scope {
-	var reasons []*readinesspb.Reason
-	if s.reason != nil {
-		reasons = []*readinesspb.Reason{s.reason}
-	}
-	scope := &readinesspb.Scope{
-		Name:    s.name,
-		State:   s.state,
-		Reasons: reasons,
-	}
-	if !s.observedAt.IsZero() {
-		scope.ObservedAt = timestamppb.New(s.observedAt)
-		scope.LastTransitionTime = timestamppb.New(s.lastTransitionTime)
-	}
-	return scope
-}
-
 // snapshotLocked builds a ReadyResponse from the current state of all scopes
 // matching filter. An empty filter returns all scopes. Caller must hold m.mu.
 func (m *Tracker) snapshotLocked(filter map[string]struct{}) *readinesspb.ReadyResponse {
 	var out []*readinesspb.Scope
 	for _, s := range m.scopes {
 		if len(filter) > 0 {
-			if _, ok := filter[s.name]; !ok {
+			if _, ok := filter[s.Name()]; !ok {
 				continue
 			}
 		}
-		out = append(out, scopeToProto(s))
+		out = append(out, s.ToProto())
 	}
 	return &readinesspb.ReadyResponse{Scopes: out}
 }
@@ -188,11 +269,7 @@ func (m *Tracker) notifySubscribersLocked(changed []*readinesspb.Scope) {
 	for sub := range m.subscribers {
 		var matching []*readinesspb.Scope
 		for _, sc := range changed {
-			if len(sub.filter) == 0 {
-				matching = append(matching, sc)
-				continue
-			}
-			if _, ok := sub.filter[sc.Name]; ok {
+			if sub.Matches(sc.Name) {
 				matching = append(matching, sc)
 			}
 		}
@@ -200,10 +277,8 @@ func (m *Tracker) notifySubscribersLocked(changed []*readinesspb.Scope) {
 			continue
 		}
 		resp := &readinesspb.ReadyResponse{Scopes: matching}
-		select {
-		case sub.ch <- resp:
-		default:
-			close(sub.dropped)
+		if !sub.Send(resp) {
+			sub.Drop()
 			delete(m.subscribers, sub)
 		}
 	}
@@ -234,25 +309,16 @@ func (m *Tracker) unsubscribe(sub *subscriber) {
 	delete(m.subscribers, sub)
 }
 
-// applyLocked writes next and reason onto s, advancing timestamps, logging
-// the transition, and notifying Watch subscribers.
+// applyLocked applies next and reason to s, logs the transition, and
+// notifies Watch subscribers.
 //
-// observed_at always advances; last_transition_time changes only on a state
-// change; subscribers are notified only when state or reason changed. Must
-// be called with m.mu held.
+// Subscribers are notified only when the apply actually changed state or
+// reason. Must be called with m.mu held.
 func (m *Tracker) applyLocked(s *scopeState, next readinesspb.State, reason *readinesspb.Reason) {
-	now := time.Now()
-	prevState := s.state
-	prevReason := s.reason
-	if s.observedAt.IsZero() || s.state != next {
-		s.lastTransitionTime = now
-	}
-	s.state = next
-	s.reason = reason
-	s.observedAt = now
-	m.logTransition(s.name, prevState, next, reason)
-	if prevState != next || !reasonEqual(prevReason, reason) {
-		m.notifySubscribersLocked([]*readinesspb.Scope{scopeToProto(s)})
+	prevState, changed := s.Apply(next, reason, time.Now())
+	m.logTransition(s.Name(), prevState, next, reason)
+	if changed {
+		m.notifySubscribersLocked([]*readinesspb.Scope{s.ToProto()})
 	}
 }
 
@@ -292,7 +358,7 @@ func (m *Tracker) Observe(gatewayID string, err error) {
 		return
 	}
 
-	next, reason := observeOutcome(s.state, err)
+	next, reason := observeOutcome(s.State(), err)
 	m.applyLocked(s, next, reason)
 }
 
@@ -346,7 +412,7 @@ func (m *Tracker) Touch(scope string) {
 		return
 	}
 
-	s.observedAt = time.Now()
+	s.Touch(time.Now())
 }
 
 // Drain marks every scope as STATE_NOT_READY with a SHUTTING_DOWN reason.
@@ -361,25 +427,16 @@ func (m *Tracker) Drain() {
 	now := time.Now()
 	reason := &readinesspb.Reason{Code: "SHUTTING_DOWN"}
 
-	var changed []*readinesspb.Scope
+	var changedScopes []*readinesspb.Scope
 	for _, s := range m.scopes {
-		prevState := s.state
-		prevReason := s.reason
-		if s.state != readinesspb.State_STATE_NOT_READY {
-			s.lastTransitionTime = now
-		}
-		s.state = readinesspb.State_STATE_NOT_READY
-		s.reason = reason
-		s.observedAt = now
-
-		m.logTransition(s.name, prevState, readinesspb.State_STATE_NOT_READY, reason)
-
-		if prevState != readinesspb.State_STATE_NOT_READY || !reasonEqual(prevReason, reason) {
-			changed = append(changed, scopeToProto(s))
+		prevState, changed := s.Apply(readinesspb.State_STATE_NOT_READY, reason, now)
+		m.logTransition(s.Name(), prevState, readinesspb.State_STATE_NOT_READY, reason)
+		if changed {
+			changedScopes = append(changedScopes, s.ToProto())
 		}
 	}
 
-	m.notifySubscribersLocked(changed)
+	m.notifySubscribersLocked(changedScopes)
 
 	if m.latchOnDrain {
 		m.drained = true
@@ -432,9 +489,9 @@ func (m *Tracker) Watch(
 		select {
 		case <-ctx.Done():
 			return nil
-		case <-sub.dropped:
+		case <-sub.Dropped():
 			return errSlowConsumer
-		case resp, ok := <-sub.ch:
+		case resp, ok := <-sub.Events():
 			if !ok {
 				return errSlowConsumer
 			}
