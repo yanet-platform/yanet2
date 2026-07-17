@@ -77,6 +77,17 @@ fn default_connection_args() -> ConnectionArgs {
     ConnectionArgs::from_arg_matches(&matches).expect("ConnectionArgs must parse from its own defaults")
 }
 
+/// Recovers the connection flags a completer's user has typed so far.
+///
+/// A completer probing something other than a config-name list — a service
+/// registry, say — still needs to reach the gateway the user is targeting,
+/// not the default one. It supplies its own `Cmd::command`, and the flags
+/// are parsed out of the real completer argv, falling back to their defaults
+/// (`YANET_ENDPOINT` included) when the mid-typed line cannot be parsed.
+pub fn connection_args(command: impl FnOnce() -> Command) -> ConnectionArgs {
+    recover_connection_args(command, std::env::args_os())
+}
+
 /// Best-effort completion candidates for a config-name argument.
 ///
 /// `command` is the caller's own `Cmd::command`, exactly the factory passed
@@ -116,7 +127,7 @@ where
     B: FnOnce(LayeredChannel) -> C,
     F: AsyncFnOnce(C) -> Result<Vec<String>, Status>,
 {
-    let connection = recover_connection_args(command, std::env::args_os());
+    let connection = connection_args(command);
 
     let Ok(runtime) = tokio::runtime::Builder::new_current_thread().enable_all().build() else {
         return Vec::new();

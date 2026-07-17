@@ -13,6 +13,7 @@ use readinesspb::pb::{ReadyRequest, ReadyResponse, Scope, State};
 use serde::Serialize;
 use ync::{
     client::{self, Connection, ConnectionArgs},
+    completion,
     discovery::{self, Resolution},
     errors::{Error, ErrorKind},
     output::{self, CommonFormat},
@@ -460,15 +461,13 @@ async fn suggest_services(connection: &Connection, err: Error) -> Error {
 ///
 /// Strictly best-effort — a tab-completion must never print an error nor hang
 /// — so a gateway that is down, slow or refusing us auth yields no candidates
-/// at all, `discovery::DISCOVERY_TIMEOUT` covering the slow case. The endpoint
-/// comes from the defaults of the command's own flags, `YANET_ENDPOINT`
-/// included, since the completer cannot see what the user has typed so far.
+/// at all, `discovery::DISCOVERY_TIMEOUT` covering the slow case. The
+/// endpoint is recovered from the connection flags the user has actually
+/// typed so far, `YANET_ENDPOINT` included as the fallback.
 fn service_candidates() -> Vec<CompletionCandidate> {
-    let Ok(cmd) = Cmd::try_parse_from([env!("CARGO_BIN_NAME")]) else {
-        return Vec::new();
-    };
+    let connection = completion::connection_args(Cmd::command);
 
-    discovery::candidates(&cmd.connection, READINESS_SERVICE, discovery::DISCOVERY_TIMEOUT)
+    discovery::candidates(&connection, READINESS_SERVICE, discovery::DISCOVERY_TIMEOUT)
         .into_iter()
         .map(CompletionCandidate::new)
         .collect()
