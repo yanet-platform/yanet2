@@ -1,5 +1,8 @@
 use clap::{ArgAction, CommandFactory, Parser};
-use clap_complete::CompleteEnv;
+use clap_complete::{
+    CompleteEnv,
+    engine::{ArgValueCandidates, CompletionCandidate},
+};
 use decappb::{
     ListConfigsRequest, ShowConfigRequest, ShowConfigResponse, UpdateConfigRequest,
     decap_service_client::DecapServiceClient,
@@ -9,6 +12,7 @@ use ptree::TreeBuilder;
 use tonic::codec::CompressionEncoding;
 use ync::{
     client::{ConnectionArgs, LayeredChannel, Service},
+    completion,
     errors::Error,
     output::{self, CommonFormat},
 };
@@ -47,14 +51,14 @@ pub enum ModeCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct ShowConfigCmd {
     /// Decap module name to operate on.
-    #[arg(long = "name", short = 'n')]
+    #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
     pub config_name: String,
 }
 
 #[derive(Debug, Clone, Parser)]
 pub struct UpdateConfigCmd {
     /// Decap module name to operate on.
-    #[arg(long = "name", short = 'n')]
+    #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
     pub config_name: String,
     /// Prefixes in the full desired set, replacing the current one entirely.
     #[arg(long, short)]
@@ -64,9 +68,13 @@ pub struct UpdateConfigCmd {
 /// The fully-qualified gRPC service name used in error messages.
 const SERVICE_NAME: &str = "modules.decap.controlplane.decappb.v1.DecapService";
 
-#[tokio::main(flavor = "current_thread")]
-pub async fn main() {
+fn main() {
     CompleteEnv::with_factory(Cmd::command).complete();
+    start();
+}
+
+#[tokio::main(flavor = "current_thread")]
+async fn start() {
     let cmd = Cmd::parse();
     ync::init(cmd.verbose, cmd.format);
 
@@ -176,4 +184,20 @@ fn print_tree(resp: &ShowConfigResponse) {
     }
 
     let _ = ptree::print_tree(&tree.build());
+}
+
+/// Completion candidates for a `--name` argument: the decap configs the
+/// module currently knows.
+///
+/// Strictly best-effort — see [`completion::candidates`].
+fn config_candidates() -> Vec<CompletionCandidate> {
+    completion::candidates(
+        Cmd::command,
+        |channel| {
+            DecapServiceClient::new(channel)
+                .send_compressed(CompressionEncoding::Gzip)
+                .accept_compressed(CompressionEncoding::Gzip)
+        },
+        async move |mut client| Ok(client.list_configs(ListConfigsRequest {}).await?.into_inner().configs),
+    )
 }
