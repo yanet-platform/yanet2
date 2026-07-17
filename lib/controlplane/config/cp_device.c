@@ -447,7 +447,7 @@ cp_device_registry_item_free_cb(struct registry_item *item, void *data) {
 	// Park the device on its creating agent's unused_device list instead;
 	// the agent reclaims it once no live generation references it.
 	struct agent *agent = ADDR_OF(&device->agent);
-	SET_OFFSET_OF(&device->prev, agent->unused_device);
+	EQUATE_OFFSET(&device->prev, &agent->unused_device);
 	SET_OFFSET_OF(&agent->unused_device, device);
 }
 

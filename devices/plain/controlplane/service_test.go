@@ -63,6 +63,59 @@ func TestUpdateDevice_DrainsUnusedDevices(t *testing.T) {
 	}
 }
 
+// TestUpdateDevices_ParksTwoPredecessorsBackToBack verifies that a single
+// UpdateDevices call replacing two live devices at once drains cleanly.
+//
+// Replacing two devices in one call parks both predecessors onto the
+// agent's unused list back-to-back, before either is drained. That is the
+// only way to link a second entry onto a non-empty unused list, so it is
+// the case a single-device update (one park per drain) can never exercise.
+func TestUpdateDevices_ParksTwoPredecessorsBackToBack(t *testing.T) {
+	harness, err := dataplaneut.NewHarness(dataplaneut.Config{
+		CPMemory:      uint64(datasize.MB * 32),
+		DPMemory:      uint64(datasize.MB * 4),
+		WorkerCount:   1,
+		DevicesToLoad: []string{"plain"},
+	})
+	require.NoError(t, err)
+	t.Cleanup(harness.Free)
+
+	shm := harness.SharedMemory()
+	agent, err := shm.AgentAttach("plain", 0, datasize.MB*2)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = agent.CleanUp() })
+
+	service := NewDevicePlainService(agent)
+
+	for _, name := range []string{"d0", "d1"} {
+		_, err := service.UpdateDevice(t.Context(), &plainpb.UpdateDevicePlainRequest{
+			Name:   name,
+			Device: &commonpb.Device{},
+		})
+		require.NoError(t, err)
+	}
+
+	freeBytesBeforeReplace := freeBytesForAgent(t, shm, "plain")
+
+	deviceConfig0, err := NewDeviceConfig(agent, "d0", &commonpb.Device{})
+	require.NoError(t, err)
+	deviceConfig1, err := NewDeviceConfig(agent, "d1", &commonpb.Device{})
+	require.NoError(t, err)
+
+	err = agent.UpdateDevices([]ffi.ShmDeviceConfig{
+		deviceConfig0.AsFFIDevice(),
+		deviceConfig1.AsFFIDevice(),
+	})
+	require.NoError(t, err)
+
+	DrainUnusedDevices(agent)
+
+	// Both predecessors retired by this replace and both fresh configs
+	// built above are reclaimed, so the arena settles back to the size
+	// it had right before the replace.
+	require.Equal(t, freeBytesBeforeReplace, freeBytesForAgent(t, shm, "plain"))
+}
+
 // freeBytesForAgent returns the free byte count reported for the named
 // agent's first instance.
 func freeBytesForAgent(t *testing.T, shm *ffi.SharedMemory, name string) uint64 {

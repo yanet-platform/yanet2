@@ -272,7 +272,7 @@ cp_module_registry_item_free_cb(struct registry_item *item, void *data) {
 		container_of(item, struct cp_module, config_item);
 
 	struct agent *agent = ADDR_OF(&module->agent);
-	SET_OFFSET_OF(&module->prev, agent->unused_module);
+	EQUATE_OFFSET(&module->prev, &agent->unused_module);
 	SET_OFFSET_OF(&agent->unused_module, module);
 }
 
