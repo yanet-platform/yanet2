@@ -103,7 +103,7 @@ func (m *PdumpModule) RegisterService(server *grpc.Server) {
 func (m *PdumpModule) Run(ctx context.Context) error {
 	<-ctx.Done()
 	m.log.Info("closing pdump service")
-	close(m.service.quitCh)
+	m.service.Shutdown()
 	return nil
 }
 

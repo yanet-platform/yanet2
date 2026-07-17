@@ -206,7 +206,7 @@ func (m *ModuleConfig) SetupRing(ring *ringBuffer, log *zap.Logger) error {
 
 	addr, err := C.pdump_module_config_set_per_worker_ring(
 		m.asRawPtr(),
-		C.uint32_t(ring.perWorkerSize),
+		C.uint32_t(ring.PerWorkerSize),
 		&workerCount,
 		errCtx.Handle(),
 	)

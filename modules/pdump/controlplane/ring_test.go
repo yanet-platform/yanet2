@@ -96,8 +96,8 @@ func createTestRingBuffer(t *testing.T, numWorkers int, opts ...ringBufferOption
 	return &testRingBufferWrapper{
 		rb: &ringBuffer{
 			workers:       workers,
-			perWorkerSize: uint32(config.ringSize),
-			readChunkSize: testReadChunkSize,
+			PerWorkerSize: uint32(config.ringSize),
+			ReadChunkSize: testReadChunkSize,
 		},
 		ww: workerWrappers,
 	}
@@ -175,8 +175,8 @@ func TestRingBufferClone(t *testing.T) {
 	clone := original.rb.Clone()
 
 	// Verify basic properties are copied
-	assert.Equal(t, original.rb.perWorkerSize, clone.perWorkerSize)
-	assert.Equal(t, original.rb.readChunkSize, clone.readChunkSize)
+	assert.Equal(t, original.rb.PerWorkerSize, clone.PerWorkerSize)
+	assert.Equal(t, original.rb.ReadChunkSize, clone.ReadChunkSize)
 	assert.Equal(t, len(original.rb.workers), len(clone.workers))
 
 	// Verify worker areas are properly cloned
@@ -509,7 +509,7 @@ func TestRingBufferRunReaders(t *testing.T) {
 
 		wg, _ := errgroup.WithContext(context.Background())
 		wg.Go(func() error {
-			err := rb.rb.runReaders(ctx, recordCh)
+			err := rb.rb.RunReaders(ctx, recordCh)
 			t.Logf("runReaders return: %v", err)
 			assert.ErrorIs(t, err, context.DeadlineExceeded)
 			return nil
@@ -541,7 +541,7 @@ func TestRingBufferRunReaders(t *testing.T) {
 
 		wg, _ := errgroup.WithContext(context.Background())
 		wg.Go(func() error {
-			err := rb.rb.runReaders(ctx, recordCh)
+			err := rb.rb.RunReaders(ctx, recordCh)
 			t.Logf("runReaders return: %v", err)
 			assert.ErrorIs(t, err, context.DeadlineExceeded)
 			return nil
@@ -572,7 +572,7 @@ func TestRingBufferRunReaders(t *testing.T) {
 
 		errCh := make(chan error, 1)
 		go func() {
-			errCh <- rb.rb.runReaders(ctx, recordCh)
+			errCh <- rb.rb.RunReaders(ctx, recordCh)
 		}()
 
 		// Cancel context
@@ -596,7 +596,7 @@ func TestRingBufferRunReaders(t *testing.T) {
 		runReadersGo := make(chan bool)
 		go func() {
 			close(runReadersGo)
-			rb.rb.runReaders(ctx, recordCh)
+			rb.rb.RunReaders(ctx, recordCh)
 		}()
 
 		// Continuously add data
@@ -652,7 +652,7 @@ func TestRingBufferConcurrency(t *testing.T) {
 			go func() {
 				defer wg.Done()
 				rbClone := rb.rb.Clone()
-				rbClone.runReaders(ctx, recordCh)
+				rbClone.RunReaders(ctx, recordCh)
 			}()
 		}
 
@@ -795,7 +795,7 @@ func TestRingBufferStressTest(t *testing.T) {
 		defer cancel()
 
 		go func() {
-			rb.rb.runReaders(ctx, recordCh)
+			rb.rb.RunReaders(ctx, recordCh)
 		}()
 
 		// Count records received
@@ -821,7 +821,7 @@ func TestRingBufferStressTest(t *testing.T) {
 
 			go func() {
 				rb := rb.rb.Clone()
-				rb.runReaders(ctx, recordCh)
+				rb.RunReaders(ctx, recordCh)
 			}()
 
 			cancel()

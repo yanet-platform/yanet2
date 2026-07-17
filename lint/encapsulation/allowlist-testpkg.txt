@@ -70,7 +70,7 @@ modules/fwstate/controlplane/service_test.go:fwstate  # legacy: migrate to the e
 modules/fwstate/tests/dataplane/cursor_test.go:fwstate  # legacy: migrate to the external test package
 modules/fwstate/tests/dataplane/fwstate_test.go:fwstate  # legacy: migrate to the external test package
 modules/nat64/controlplane/service_test.go:nat64  # legacy: migrate to the external test package
-modules/pdump/controlplane/ring_test.go:pdump  # legacy: migrate to the external test package
+modules/pdump/controlplane/ring_test.go:pdump  # white-box unit test of the lock-free ring buffer's internal read/write index state machine and cgo message-header layout; an external test cannot reach the shared-memory position pointers or the C struct fields it must drive
 modules/route-mpls/controlplane/service_test.go:route_mpls  # legacy: migrate to the external test package
 operators/bird-adapter/internal/bird/layout_test.go:bird  # white-box guard on unsafe struct layout; an external test cannot observe Sizeof of the private union types
 operators/decap/internal/operator/cfg_test.go:operator  # legacy: migrate to the external test package

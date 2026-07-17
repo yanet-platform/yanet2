@@ -51,9 +51,14 @@ func alignToU32(off int) int {
 // ringBuffer manages multiple worker ring buffers for packet capture data.
 type ringBuffer struct {
 	workers       []*workerArea // Per-worker ring buffer areas
-	perWorkerSize uint32        // Size of each worker's ring buffer
+	PerWorkerSize uint32        // Size of each worker's ring buffer
 	// TODO: Implement configurable read chunk size.
-	readChunkSize uint32 // Maximum bytes to read in one operation
+	ReadChunkSize uint32 // Maximum bytes to read in one operation
+}
+
+// WorkerCount returns the number of per-worker ring buffer areas.
+func (m *ringBuffer) WorkerCount() int {
+	return len(m.workers)
 }
 
 // Clone creates a copy of the ring buffer. This is useful when multiple readers
@@ -116,20 +121,20 @@ func (m *ringBuffer) spawnWakers(ctx context.Context) []chan bool {
 	return wakers
 }
 
-// runReaders starts reader goroutines for all workers and processes ring buffer data
+// RunReaders starts reader goroutines for all workers and processes ring buffer data
 // into protobuf records, sending them to the provided channel.
-func (m *ringBuffer) runReaders(ctx context.Context, recordCh chan<- *pdumppb.Record) error {
+func (m *ringBuffer) RunReaders(ctx context.Context, recordCh chan<- *pdumppb.Record) error {
 	wakers := m.spawnWakers(ctx)
 	wg, _ := errgroup.WithContext(ctx)
 	for idx, worker := range m.workers {
 		wg.Go(func() error {
 			// Allocate buffer for accumulating partial reads across ring boundary
-			worker.buf = make([]byte, 0, m.readChunkSize)
+			worker.buf = make([]byte, 0, m.ReadChunkSize)
 
 			waker := wakers[idx]
 			for {
 				// Read available data and convert to protobuf records
-				records := worker.read(m.readChunkSize)
+				records := worker.read(m.ReadChunkSize)
 				for _, rec := range records {
 					select {
 					case <-ctx.Done():
