@@ -8,6 +8,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
+	"github.com/gopacket/gopacket"
 	"github.com/gopacket/gopacket/layers"
 	"github.com/stretchr/testify/require"
 
@@ -749,4 +750,208 @@ func TestRoute_DeviceTranslation_Drop(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, result.Output, "packet with unregistered device must be dropped")
 	require.Len(t, result.Drop, 1, "expected exactly one dropped packet")
+}
+
+// routeCounterNames lists every per-outcome counter registered by the route
+// module in modules/route/api/controlplane.c.
+//
+// TestRoute_PerOutcomeCounters asserts the target counter for each outcome
+// moved by exactly one packet while every sibling stayed at zero.
+var routeCounterNames = []string{
+	"route_forwarded_v4",
+	"route_forwarded_v6",
+	"route_drop_no_route_v4",
+	"route_drop_no_route_v6",
+	"route_drop_ttl_expired_v4",
+	"route_drop_ttl_expired_v6",
+	"route_drop_non_ip",
+	"route_drop_empty_route_list_v4",
+	"route_drop_empty_route_list_v6",
+	"route_drop_device_unresolved_v4",
+	"route_drop_device_unresolved_v6",
+}
+
+// buildRouteIPv4Packet builds an ICMPv4 echo-request Ethernet frame with the
+// given destination address and TTL.
+func buildRouteIPv4Packet(t *testing.T, dstIP string, ttl uint8) gopacket.Packet {
+	t.Helper()
+
+	eth, ip4, _, icmp := testingEtherLayers()
+	ip4.DstIP = net.ParseIP(dstIP)
+	ip4.TTL = ttl
+	return xpacket.LayersToPacket(t, &eth, &ip4, &icmp)
+}
+
+// buildRouteIPv6Packet builds an ICMPv6 echo-request Ethernet frame with the
+// given destination address and hop limit.
+func buildRouteIPv6Packet(t *testing.T, dstIP string, hopLimit uint8) gopacket.Packet {
+	t.Helper()
+
+	_, _, ip6, _ := testingEtherLayers()
+	ip6.DstIP = net.ParseIP(dstIP)
+	ip6.HopLimit = hopLimit
+	eth := layers.Ethernet{
+		SrcMAC:       xerror.Unwrap(net.ParseMAC("aa:bb:cc:dd:ee:ff")),
+		DstMAC:       xerror.Unwrap(net.ParseMAC("11:22:33:44:55:66")),
+		EthernetType: layers.EthernetTypeIPv6,
+	}
+	icmp6 := layers.ICMPv6{
+		TypeCode: layers.CreateICMPv6TypeCode(layers.ICMPv6TypeEchoRequest, 0),
+	}
+	icmp6.SetNetworkLayerForChecksum(&ip6)
+	return xpacket.LayersToPacket(t, &eth, &ip6, &icmp6)
+}
+
+// buildRouteARPPacket builds a non-IP (ARP) Ethernet frame.
+func buildRouteARPPacket(t *testing.T) gopacket.Packet {
+	t.Helper()
+
+	eth := layers.Ethernet{
+		SrcMAC:       xerror.Unwrap(net.ParseMAC("aa:bb:cc:dd:ee:ff")),
+		DstMAC:       xerror.Unwrap(net.ParseMAC("ff:ff:ff:ff:ff:ff")),
+		EthernetType: layers.EthernetTypeARP,
+	}
+	arp := layers.ARP{
+		AddrType:          layers.LinkTypeEthernet,
+		Protocol:          layers.EthernetTypeIPv4,
+		HwAddressSize:     6,
+		ProtAddressSize:   4,
+		Operation:         layers.ARPRequest,
+		SourceHwAddress:   eth.SrcMAC,
+		SourceProtAddress: net.ParseIP("10.0.0.1").To4(),
+		DstHwAddress:      net.HardwareAddr{0, 0, 0, 0, 0, 0},
+		DstProtAddress:    net.ParseIP("10.0.0.2").To4(),
+	}
+	return xpacket.LayersToPacket(t, &eth, &arp)
+}
+
+// TestRoute_PerOutcomeCounters verifies the full dataplane counter chain for
+// each reachable route outcome.
+//
+// A matching packet flows through route_handle_packets, increments the real
+// per-outcome counter_storage slot, and is read back under the exact registered
+// name via DPConfig.ModuleCounters. For every case the target counter must move
+// by exactly one packet and the injected byte length, while every sibling
+// per-outcome counter stays at zero — proving both non-vacuity (the asserted
+// byte count is the real frame length, not merely > 0) and cross-counter
+// isolation.
+//
+// Two of the eleven counters are intentionally uncovered:
+// route_drop_empty_route_list_{v4,v6} is unreachable because the backend skips
+// prefixes with no nexthops, so no packet can ever reach that outcome.
+func TestRoute_PerOutcomeCounters(t *testing.T) {
+	// phantomNextHop names a device that is never wired via
+	// UpdatePlainDevices, leaving mc_index at the sentinel (-1) so
+	// module_ectx_encode_device fails and the packet is dropped — the same
+	// construction as TestRoute_DeviceTranslation_Drop.
+	phantomNextHop := FIBNexthop{
+		DstMAC: xerror.Unwrap(net.ParseMAC("de:ad:00:00:00:ff")),
+		SrcMAC: xerror.Unwrap(net.ParseMAC("ca:fe:00:00:00:ff")),
+		Device: "phantom",
+	}
+
+	// FIB installed so matching packets reach a nexthop; a TTL check fires
+	// before the lookup, so ttl-expired cases still target a real prefix.
+	fib := []FIBEntry{
+		{Prefix: netip.MustParsePrefix("10.0.0.0/24"), Nexthops: []FIBNexthop{routeNextHop}},
+		{Prefix: netip.MustParsePrefix("2001:db8::/32"), Nexthops: []FIBNexthop{routeNextHop}},
+		{Prefix: netip.MustParsePrefix("172.16.0.0/24"), Nexthops: []FIBNexthop{phantomNextHop}},
+		{Prefix: netip.MustParsePrefix("2001:db8:beef::/32"), Nexthops: []FIBNexthop{phantomNextHop}},
+	}
+
+	cases := []struct {
+		name          string
+		packet        func(t *testing.T) gopacket.Packet
+		wantCounter   string
+		wantForwarded bool
+	}{
+		{
+			name:          "forwarded_v4",
+			packet:        func(t *testing.T) gopacket.Packet { return buildRouteIPv4Packet(t, "10.0.0.5", 64) },
+			wantCounter:   "route_forwarded_v4",
+			wantForwarded: true,
+		},
+		{
+			name:          "forwarded_v6",
+			packet:        func(t *testing.T) gopacket.Packet { return buildRouteIPv6Packet(t, "2001:db8::1", 64) },
+			wantCounter:   "route_forwarded_v6",
+			wantForwarded: true,
+		},
+		{
+			name:          "ttl_expired_v4",
+			packet:        func(t *testing.T) gopacket.Packet { return buildRouteIPv4Packet(t, "10.0.0.5", 1) },
+			wantCounter:   "route_drop_ttl_expired_v4",
+			wantForwarded: false,
+		},
+		{
+			name:          "ttl_expired_v6",
+			packet:        func(t *testing.T) gopacket.Packet { return buildRouteIPv6Packet(t, "2001:db8::1", 1) },
+			wantCounter:   "route_drop_ttl_expired_v6",
+			wantForwarded: false,
+		},
+		{
+			name:          "no_route_v4",
+			packet:        func(t *testing.T) gopacket.Packet { return buildRouteIPv4Packet(t, "10.99.99.99", 64) },
+			wantCounter:   "route_drop_no_route_v4",
+			wantForwarded: false,
+		},
+		{
+			name:          "no_route_v6",
+			packet:        func(t *testing.T) gopacket.Packet { return buildRouteIPv6Packet(t, "2002::1", 64) },
+			wantCounter:   "route_drop_no_route_v6",
+			wantForwarded: false,
+		},
+		{
+			name:          "non_ip",
+			packet:        func(t *testing.T) gopacket.Packet { return buildRouteARPPacket(t) },
+			wantCounter:   "route_drop_non_ip",
+			wantForwarded: false,
+		},
+		{
+			name:          "device_unresolved_v4",
+			packet:        func(t *testing.T) gopacket.Packet { return buildRouteIPv4Packet(t, "172.16.0.5", 64) },
+			wantCounter:   "route_drop_device_unresolved_v4",
+			wantForwarded: false,
+		},
+		{
+			name:          "device_unresolved_v6",
+			packet:        func(t *testing.T) gopacket.Packet { return buildRouteIPv6Packet(t, "2001:db8:beef::1", 64) },
+			wantCounter:   "route_drop_device_unresolved_v6",
+			wantForwarded: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			pkt := tc.packet(t)
+			pktSize := uint64(len(pkt.Data()))
+
+			h, agent, backend := setupRouteHarness(t, "port0")
+			applyFIB(t, backend, "test", fib)
+			wirePipeline(t, agent, "port0", "test")
+
+			result, err := h.HandlePackets(pkt)
+			require.NoError(t, err)
+			if tc.wantForwarded {
+				require.Len(t, result.Output, 1, "expected one forwarded packet")
+				require.Empty(t, result.Drop, "expected no dropped packets")
+			} else {
+				require.Empty(t, result.Output, "expected no forwarded packets")
+				require.Len(t, result.Drop, 1, "expected one dropped packet")
+			}
+
+			path := dataplaneut.CounterPath{
+				Device: "port0", Pipeline: "test", Function: "test",
+				Chain: "test_chain", ModuleType: "route", ModuleName: "test",
+			}
+
+			for _, name := range routeCounterNames {
+				if name == tc.wantCounter {
+					dataplaneut.RequireModuleCounter(t, h, path, name, 1, pktSize)
+				} else {
+					dataplaneut.RequireModuleCounter(t, h, path, name, 0, 0)
+				}
+			}
+		})
+	}
 }
