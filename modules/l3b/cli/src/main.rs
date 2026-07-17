@@ -66,9 +66,6 @@ pub struct ServiceCmd {
     /// Scheduler index mask.
     #[arg(long, default_value_t = 0)]
     pub index_mask: u32,
-    /// Real server ring capacity.
-    #[arg(long, default_value_t = 0)]
-    pub ring_capacity: u32,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -174,7 +171,6 @@ impl L3BService {
                 name: cmd.name.clone(),
                 hash_mask: cmd.hash_mask,
                 index_mask: cmd.index_mask,
-                ring_capacity: cmd.ring_capacity,
                 ..Default::default()
             }),
         };
@@ -193,7 +189,6 @@ impl L3BService {
                 name: cmd.name.clone(),
                 hash_mask: cmd.hash_mask,
                 index_mask: cmd.index_mask,
-                ring_capacity: cmd.ring_capacity,
                 ..Default::default()
             }),
         };

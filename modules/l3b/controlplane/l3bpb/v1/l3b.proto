@@ -66,14 +66,15 @@ message DestinationFilterRule {
   string service = 4;
 }
 
-// VirtualService describes a named virtual service.
+// VirtualService describes a named virtual service. The real server ring
+// capacity is derived from the real server count and the maximum weight (see
+// UpdateRealServerWeight).
 message VirtualService {
   string name = 1;
   repeated SourceFilterRule source_filter_rules = 2;
   repeated RealServer real_servers = 3;
   uint32 hash_mask = 4;
   uint32 index_mask = 5;
-  uint32 ring_capacity = 6;
 }
 
 // ModuleConfig describes a named module configuration. services lists the

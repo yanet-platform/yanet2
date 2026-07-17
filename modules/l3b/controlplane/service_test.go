@@ -99,10 +99,9 @@ func newTestService(t *testing.T) (*L3BService, *mockBackend) {
 
 func sampleService(name string) *l3bpb.VirtualService {
 	return &l3bpb.VirtualService{
-		Name:         name,
-		HashMask:     0xff,
-		IndexMask:    0x0f,
-		RingCapacity: 4,
+		Name:      name,
+		HashMask:  0xff,
+		IndexMask: 0x0f,
 	}
 }
 
@@ -183,4 +182,30 @@ func Test_L3BService_UpdateAndListModuleConfig(t *testing.T) {
 	resp, err := svc.ListModuleConfigs(ctx, &l3bpb.ListModuleConfigsRequest{})
 	require.NoError(t, err)
 	require.Equal(t, []string{"l3b0"}, resp.Configs)
+}
+
+func Test_RingFromWeights_WeightedRoundRobin(t *testing.T) {
+	// Each server index must appear exactly as many times as its weight.
+	ring := ringFromWeights([]uint32{3, 1})
+	require.Len(t, ring, 4)
+
+	counts := map[uint32]int{}
+	for _, index := range ring {
+		counts[index]++
+	}
+	require.Equal(t, 3, counts[0])
+	require.Equal(t, 1, counts[1])
+
+	// A heavy server is spread across the ring, not clustered at the start:
+	// with weights [3, 1] the interleaved sequence is [0, 0, 1, 0].
+	require.Equal(t, []uint32{0, 0, 1, 0}, ring)
+}
+
+func Test_RingFromWeights_EqualWeightsRoundRobin(t *testing.T) {
+	ring := ringFromWeights([]uint32{1, 1, 1})
+	require.Equal(t, []uint32{0, 1, 2}, ring)
+}
+
+func Test_RingFromWeights_AllZeroIsEmpty(t *testing.T) {
+	require.Nil(t, ringFromWeights([]uint32{0, 0}))
 }

@@ -76,6 +76,11 @@ func (m *backend) CreateService(service *l3bpb.VirtualService) error {
 		return fmt.Errorf("failed to create virtual service %q: %w", name, err)
 	}
 
+	weights := defaultWeights(len(config.RealServers))
+	if err := virtualService.UpdateRing(ringFromWeights(weights)); err != nil {
+		return fmt.Errorf("failed to populate real server ring: %w", err)
+	}
+
 	handle, err := cl3b.CreateVirtualServiceHandle(m.agent, virtualService)
 	if err != nil {
 		return fmt.Errorf("failed to create virtual service handle %q: %w", name, err)
@@ -91,7 +96,7 @@ func (m *backend) CreateService(service *l3bpb.VirtualService) error {
 	m.services[name] = &managedService{
 		virtualService: virtualService,
 		handle:         handle,
-		weights:        defaultWeights(len(config.RealServers)),
+		weights:        weights,
 	}
 	return nil
 }
@@ -108,6 +113,11 @@ func (m *backend) UpdateService(service *l3bpb.VirtualService) error {
 		return fmt.Errorf("failed to create virtual service %q: %w", name, err)
 	}
 
+	weights := defaultWeights(len(config.RealServers))
+	if err := virtualService.UpdateRing(ringFromWeights(weights)); err != nil {
+		return fmt.Errorf("failed to populate real server ring: %w", err)
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -120,7 +130,7 @@ func (m *backend) UpdateService(service *l3bpb.VirtualService) error {
 	// rebuilding the module configuration.
 	existing.handle.Update(virtualService)
 	existing.virtualService = virtualService
-	existing.weights = defaultWeights(len(config.RealServers))
+	existing.weights = weights
 	return nil
 }
 
@@ -262,12 +272,20 @@ func (m *backend) UpdateRealServerWeight(
 		return fmt.Errorf("real server index %d out of range", realServerIndex)
 	}
 
+	if weight > maxRealServerWeight {
+		weight = maxRealServerWeight
+	}
+
 	existing.weights[realServerIndex] = weight
 	if err := existing.virtualService.UpdateRing(ringFromWeights(existing.weights)); err != nil {
 		return fmt.Errorf("failed to rebuild real server ring: %w", err)
 	}
 	return nil
 }
+
+// maxRealServerWeight is the upper bound on a real server weight; the per-ring
+// capacity is sized so every server could max out at once.
+const maxRealServerWeight uint32 = 1000
 
 // defaultWeights returns one weight per real server, defaulting to 1.
 func defaultWeights(realServerCount int) []uint32 {
@@ -278,19 +296,38 @@ func defaultWeights(realServerCount int) []uint32 {
 	return weights
 }
 
-// ringFromWeights expands per-server weights into a scheduler ring where a
-// server index appears as many times as its weight.
+// ringFromWeights expands per-server weights into a weighted-round-robin
+// scheduler ring: each server index appears as many times as its weight, but
+// the occurrences are interleaved so a heavy server is spread evenly across
+// the ring rather than clustered.
 func ringFromWeights(weights []uint32) []uint32 {
-	total := uint32(0)
+	var total uint32
 	for _, weight := range weights {
 		total += weight
 	}
+	if total == 0 {
+		return nil
+	}
 
+	// Classic interleaved WRR: accumulate each weight every step, emit the
+	// server with the largest accumulated value, then subtract the total from
+	// it. This yields an evenly distributed sequence.
+	current := make([]int64, len(weights))
 	ring := make([]uint32, 0, total)
-	for serverIndex, weight := range weights {
-		for range weight {
-			ring = append(ring, uint32(serverIndex))
+	for range total {
+		for idx := range weights {
+			current[idx] += int64(weights[idx])
 		}
+
+		best := 0
+		for idx := range weights {
+			if current[idx] > current[best] {
+				best = idx
+			}
+		}
+
+		ring = append(ring, uint32(best))
+		current[best] -= int64(total)
 	}
 	return ring
 }
@@ -349,6 +386,6 @@ func buildVirtualServiceConfig(
 		RealServers:       realServers,
 		HashMask:          service.GetHashMask(),
 		IndexMask:         service.GetIndexMask(),
-		RingCapacity:      service.GetRingCapacity(),
+		RingCapacity:      uint32(len(realServers)) * maxRealServerWeight,
 	}, nil
 }
