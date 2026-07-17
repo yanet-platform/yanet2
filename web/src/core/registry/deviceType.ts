@@ -80,6 +80,15 @@ export interface DeviceTypeManifest {
      */
     trafficSource?: boolean;
 
+    /** Whether this type is a purely synthetic traffic source with no wire attachment.
+     *
+     * A generator's output entry never transmits, and its generated frames
+     * often leave the input pipeline via the pending-output list (e.g. when
+     * routed elsewhere), which zeroes `inputTx` too. So list/rail displays
+     * show its generated stream from `inputEntry` instead of `outputTx`.
+     */
+    generator?: boolean;
+
     /** One-line subtitle for a list row. */
     rowSubtitle?: (device: BaseDevice) => string;
 

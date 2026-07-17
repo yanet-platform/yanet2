@@ -3,6 +3,7 @@ import { MiniSpark } from './components/MiniSpark';
 import { IconCaret } from './components/Icons';
 import { formatPps } from '@yanet/core/utils';
 import { deviceTypeManifest } from '@yanet/core/registry';
+import { displayRates } from './displayRates';
 import type { LocalDevice } from './types';
 import type { CounterHistoryEntry } from '@yanet/core/hooks/useCounterHistory';
 import type { DeviceCounterData } from '@yanet/core/hooks/useDeviceCounters';
@@ -44,6 +45,8 @@ const DeviceRailItem = ({
 
     const handleLeave = useCallback(() => setAnchor(null), []);
 
+    const { rxPps, txPps, rxHistory, txHistory } = displayRates(device.type, counterData, history);
+
     return (
         <div
             className={`dv-rail-item${isSelected ? ' rail-sel' : ''}`}
@@ -69,14 +72,14 @@ const DeviceRailItem = ({
                     <div className="dv-rail-pop-type">{typeLabel}</div>
                     <MiniSpark
                         deviceId={`rail-${name}`}
-                        rx={history?.inputRx ?? []}
-                        tx={history?.outputTx ?? []}
+                        rx={rxHistory}
+                        tx={txHistory}
                         width={198}
                         height={34}
                     />
                     <div className="dv-rail-pop-metric">
-                        <span><span className="lbl">RX </span>{formatPps(counterData?.inputRx.pps ?? 0)}</span>
-                        <span><span className="lbl">TX </span>{formatPps(counterData?.outputTx.pps ?? 0)}</span>
+                        <span><span className="lbl">RX </span>{formatPps(rxPps)}</span>
+                        <span><span className="lbl">TX </span>{formatPps(txPps)}</span>
                     </div>
                 </div>
             )}

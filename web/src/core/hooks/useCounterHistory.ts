@@ -7,6 +7,7 @@ export const HISTORY_SIZE = 60;
 export interface CounterHistoryEntry {
     inputRx: number[];
     inputTx: number[];
+    inputEntry: number[];
     inputDrop: number[];
     outputRx: number[];
     outputTx: number[];
@@ -48,6 +49,12 @@ export const useCounterHistory = (
         return m;
     }, [counters]);
 
+    const inputEntrySamples = useMemo(() => {
+        const m = new Map<string, number>();
+        counters.forEach((d, name) => m.set(name, d.inputEntry.pps));
+        return m;
+    }, [counters]);
+
     const inputDropSamples = useMemo(() => {
         const m = new Map<string, number>();
         counters.forEach((d, name) => m.set(name, d.inputDrop.pps));
@@ -74,6 +81,7 @@ export const useCounterHistory = (
 
     const inputRxHistory = useRollingWindow(inputRxSamples, HISTORY_SIZE, 1000);
     const inputTxHistory = useRollingWindow(inputTxSamples, HISTORY_SIZE, 1000);
+    const inputEntryHistory = useRollingWindow(inputEntrySamples, HISTORY_SIZE, 1000);
     const inputDropHistory = useRollingWindow(inputDropSamples, HISTORY_SIZE, 1000);
     const outputRxHistory = useRollingWindow(outputRxSamples, HISTORY_SIZE, 1000);
     const outputTxHistory = useRollingWindow(outputTxSamples, HISTORY_SIZE, 1000);
@@ -84,14 +92,24 @@ export const useCounterHistory = (
         counters.forEach((_, name) => {
             const inputRx = inputRxHistory.get(name);
             const inputTx = inputTxHistory.get(name);
+            const inputEntry = inputEntryHistory.get(name);
             const inputDrop = inputDropHistory.get(name);
             const outputRx = outputRxHistory.get(name);
             const outputTx = outputTxHistory.get(name);
             const outputDrop = outputDropHistory.get(name);
-            if (inputRx && inputTx && inputDrop && outputRx && outputTx && outputDrop) {
+            if (
+                inputRx &&
+                inputTx &&
+                inputEntry &&
+                inputDrop &&
+                outputRx &&
+                outputTx &&
+                outputDrop
+            ) {
                 result.set(name, {
                     inputRx,
                     inputTx,
+                    inputEntry,
                     inputDrop,
                     outputRx,
                     outputTx,
@@ -104,6 +122,7 @@ export const useCounterHistory = (
         counters,
         inputRxHistory,
         inputTxHistory,
+        inputEntryHistory,
         inputDropHistory,
         outputRxHistory,
         outputTxHistory,

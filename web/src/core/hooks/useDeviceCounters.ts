@@ -11,13 +11,19 @@ import {
  * Logical device counter fields.
  *
  * The dataplane exposes 12 device counters organised as rx/tx/drop per
- * input/output direction. Each direction's counter has a packets and a bytes
- * variant; this union names the six logical fields surfaced to the UI
- * (each carries both a rate and an absolute value).
+ * input/output direction, plus `input_entry`. Each direction's counter has a
+ * packets and a bytes variant; this union names the seven logical fields
+ * surfaced to the UI (each carries both a rate and an absolute value).
+ * `inputEntry` counts everything the device handler emitted into its input
+ * pipelines, right after the handler and before dispatch — unlike
+ * `inputTx`, it is not zeroed out when a packet leaves via the pending-output
+ * list (e.g. a routed packet), which makes it the correct transmit-rate
+ * source for generators.
  */
 export type DeviceCounterField =
     | 'inputRx'
     | 'inputTx'
+    | 'inputEntry'
     | 'inputDrop'
     | 'outputRx'
     | 'outputTx'
@@ -28,7 +34,7 @@ export type DeviceCounterField =
  *
  * Each backend counter is a size-2 vector where values[0] = packets and
  * values[1] = bytes. Backend naming convention: `<direction>_<kind>`, where
- * direction is `input`|`output` and kind is `rx`|`tx`|`drop`.
+ * direction is `input`|`output` and kind is `rx`|`tx`|`entry`|`drop`.
  */
 const DEVICE_COUNTER_FIELDS: ReadonlyArray<{
     field: DeviceCounterField;
@@ -36,6 +42,7 @@ const DEVICE_COUNTER_FIELDS: ReadonlyArray<{
 }> = [
     { field: 'inputRx', name: 'input_rx' },
     { field: 'inputTx', name: 'input_tx' },
+    { field: 'inputEntry', name: 'input_entry' },
     { field: 'inputDrop', name: 'input_drop' },
     { field: 'outputRx', name: 'output_rx' },
     { field: 'outputTx', name: 'output_tx' },
@@ -48,6 +55,7 @@ const DEVICE_COUNTER_FIELDS: ReadonlyArray<{
 export interface DeviceCounterData {
     inputRx: InterpolatedCounterData;
     inputTx: InterpolatedCounterData;
+    inputEntry: InterpolatedCounterData;
     inputDrop: InterpolatedCounterData;
     outputRx: InterpolatedCounterData;
     outputTx: InterpolatedCounterData;
@@ -60,6 +68,7 @@ export interface DeviceCounterData {
 export interface DeviceAbsoluteData {
     inputRx: InterpolatedAbsoluteData;
     inputTx: InterpolatedAbsoluteData;
+    inputEntry: InterpolatedAbsoluteData;
     inputDrop: InterpolatedAbsoluteData;
     outputRx: InterpolatedAbsoluteData;
     outputTx: InterpolatedAbsoluteData;

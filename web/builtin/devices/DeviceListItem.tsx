@@ -2,6 +2,7 @@ import React from 'react';
 import { MiniSpark } from './components/MiniSpark';
 import { formatPps } from '@yanet/core/utils';
 import { deviceTypeManifest } from '@yanet/core/registry';
+import { displayRates } from './displayRates';
 import type { LocalDevice } from './types';
 import type { CounterHistoryEntry } from '@yanet/core/hooks/useCounterHistory';
 import type { DeviceCounterData } from '@yanet/core/hooks/useDeviceCounters';
@@ -27,10 +28,7 @@ export const DeviceListItem: React.FC<DeviceListItemProps> = ({
     const badge = manifest?.rowBadge?.(device);
     const subtitle = manifest?.rowSubtitle?.(device) ?? '— · —';
     const name = device.id.name || '';
-    const rxPps = counterData?.inputRx.pps ?? 0;
-    const txPps = counterData?.outputTx.pps ?? 0;
-    const rxHistory = history?.inputRx ?? [];
-    const txHistory = history?.outputTx ?? [];
+    const { rxPps, txPps, rxHistory, txHistory } = displayRates(device.type, counterData, history);
 
     return (
         <button

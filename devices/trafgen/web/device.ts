@@ -69,6 +69,7 @@ export const deviceType: DeviceTypeManifest = {
     kindTag: () => 'GENERATOR',
     typeDescription: 'generator (trafgen)',
     trafficSource: true,
+    generator: true,
     rowSubtitle: () => 'generator · —',
     propertyRows: (device) => {
         const ext = trafgenExt(device);
