@@ -124,24 +124,30 @@ modules/<name>/
   internal/          # Optional: module-private Go packages (route only — discovery, rib).
 ```
 
-**Legacy** (acl, fwstate, nat64, pdump, route-mpls): no `bindings/`,
-CGO calls live directly in `controlplane/ffi.go`, no `backend.go`.
+`acl`, `blackhole`, `mirror`, `nat64`, and `route-mpls` have migrated to
+this layout too; of those, `acl` and `blackhole` have no `fuzzing/` yet,
+and `route-mpls` has neither `tests/` nor `fuzzing/`.
 
-**Early-stage**: `balancer2` has only `api/` and `dataplane/`. `blackhole` has
-the canonical skeleton (`api/`, `bindings/go/`, `controlplane/`, `dataplane/`,
-`tests/`) but its `controlplane/` is only `cfg.go` + `mod.go` so far — no
-`service.go`/`backend.go`/`cli/`/`fuzzing/` yet.
+**Legacy** (pdump): no `bindings/`, CGO calls live directly in
+`controlplane/ffi.go`, no `backend.go`. `fwstate` is partially
+migrated: it has `bindings/go/` but still routes CGO through
+`controlplane/ffi.go` and has no `backend.go`.
+
+**Early-stage** (balancer2): has `api/`, `bindings/go/`, `dataplane/`,
+and `cli/`, but its `controlplane/` holds only `balancerpb/` — no
+`mod.go`/`cfg.go`/`service.go`/`backend.go` — and it has no `tests/`
+or `fuzzing/`.
 
 Module dataplane symbols are exported via meson linker defsym: `new_module_<name>`.
 
 Active modules: `route, acl, balancer2, blackhole, forward, decap, nat64,
-fwstate, dscp, pdump, route-mpls`.
+fwstate, dscp, pdump, route-mpls, mirror`.
 
 ### Devices
 
 `devices/` mirrors `modules/` layout (`api/`, `controlplane/`, `dataplane/`,
 `cli/`) but for device adapters rather than packet-processing modules.
-Active devices: `plain`, `vlan`.
+Active devices: `plain`, `vlan`, `trafgen`.
 
 ### Operators
 
