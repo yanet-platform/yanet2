@@ -124,6 +124,32 @@ func (m *ModuleConfig) addPrefixV6(from [16]byte, to [16]byte, routeListIndex ui
 	return nil
 }
 
+// RouteCount returns the number of distinct hardware nexthops held by the
+// config.
+//
+// Despite the name, which mirrors the C symbol, this is not a route count
+// in the routing sense: it counts the resolved forwarding targets, each a
+// distinct (dst MAC, src MAC, device) triple, that prefixes point at.
+func (m *ModuleConfig) RouteCount() uint64 {
+	return uint64(C.route_module_config_route_count(m.asRawPtr()))
+}
+
+// FIBRangeCountV4 returns the number of IPv4 FIB ranges.
+//
+// The count is computed inside the C API without materializing any range,
+// which makes it cheap enough for a metrics scrape.
+func (m *ModuleConfig) FIBRangeCountV4() uint64 {
+	return uint64(C.route_module_config_fib_range_count_v4(m.asRawPtr()))
+}
+
+// FIBRangeCountV6 returns the number of IPv6 FIB ranges.
+//
+// The count is computed inside the C API without materializing any range,
+// which makes it cheap enough for a metrics scrape.
+func (m *ModuleConfig) FIBRangeCountV6() uint64 {
+	return uint64(C.route_module_config_fib_range_count_v6(m.asRawPtr()))
+}
+
 // fibIter wraps the C fib_iter handle.
 type fibIter struct {
 	ptr *C.struct_fib_iter

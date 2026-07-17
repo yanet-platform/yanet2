@@ -120,20 +120,3 @@ func (m *ModuleConfig) DumpFIB() ([]FIBEntry, error) {
 
 	return entries, nil
 }
-
-// FIBRangeCount returns the number of FIB ranges, equivalent to
-// len(DumpFIB()) but far cheaper — use it when only the count is needed,
-// e.g. for a metrics gauge.
-func (m *ModuleConfig) FIBRangeCount() (int, error) {
-	iter, err := newFIBIter(m)
-	if err != nil {
-		return 0, fmt.Errorf("failed to create FIB iterator: %w", err)
-	}
-	defer iter.destroy()
-
-	count := 0
-	for iter.next() {
-		count++
-	}
-	return count, nil
-}

@@ -17,15 +17,34 @@ import (
 // memory.
 type ModuleHandle interface {
 	DumpFIB() ([]croute.FIBEntry, error)
-	// FIBRangeCount returns the number of FIB ranges, equivalent to
-	// len(DumpFIB()) but far cheaper to compute.
-	FIBRangeCount() (int, error)
+	// RouteCount returns the number of distinct hardware nexthops the
+	// config resolves prefixes to.
+	RouteCount() uint64
+	// FIBRangeCountV4 returns the number of IPv4 FIB ranges, equivalent
+	// to counting the IPv4 entries of DumpFIB but far cheaper.
+	FIBRangeCountV4() uint64
+	// FIBRangeCountV6 returns the number of IPv6 FIB ranges, equivalent
+	// to counting the IPv6 entries of DumpFIB but far cheaper.
+	FIBRangeCountV6() uint64
 	Free()
 }
 
 // Compile-time assertion that *croute.ModuleConfig satisfies the
 // ModuleHandle interface; catches drift in the bindings layer.
 var _ ModuleHandle = (*croute.ModuleConfig)(nil)
+
+// CounterView is a single dataplane counter read back from one position at
+// which a route config is installed.
+type CounterView struct {
+	Device   string
+	Pipeline string
+	Function string
+	Chain    string
+	Name     string
+	// Values holds the counter slots per worker instance, indexed as
+	// [instance][slot].
+	Values [][]uint64
+}
 
 // Backend abstracts shared memory write-path operations for the route
 // module.
@@ -35,6 +54,9 @@ type Backend interface {
 	UpdateModule(name string, entries []*routepb.FIBEntry) (ModuleHandle, error)
 	// DeleteModule removes a module config from the dataplane.
 	DeleteModule(name string) error
+	// ModuleCounters reads the named counters back from every position
+	// at which the named config is installed.
+	ModuleCounters(name string, counterNames []string) []CounterView
 }
 
 // backend is the real Backend implementation backed by shared memory.
@@ -121,6 +143,39 @@ func (m *backend) UpdateModule(name string, entries []*routepb.FIBEntry) (Module
 
 func (m *backend) DeleteModule(name string) error {
 	return m.agent.DeleteModuleConfig(name)
+}
+
+func (m *backend) ModuleCounters(name string, counterNames []string) []CounterView {
+	dpConfig := m.agent.DPConfig()
+
+	var views []CounterView
+	for pos := range dpConfig.AllModulePositions(agentName) {
+		if pos.ModuleName != name {
+			continue
+		}
+
+		infos := dpConfig.ModuleCounters(
+			pos.Device,
+			pos.Pipeline,
+			pos.Function,
+			pos.Chain,
+			agentName,
+			name,
+			counterNames,
+		)
+		for _, info := range infos {
+			views = append(views, CounterView{
+				Device:   pos.Device,
+				Pipeline: pos.Pipeline,
+				Function: pos.Function,
+				Chain:    pos.Chain,
+				Name:     info.Name,
+				Values:   info.Values,
+			})
+		}
+	}
+
+	return views
 }
 
 // HardwareRoute represents a route in the Layer 2 (L2) networking stack.

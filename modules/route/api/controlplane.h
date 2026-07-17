@@ -36,6 +36,16 @@ route_module_config_data_init(
 	struct memory_context *memory_context
 );
 
+// Registers the module-level counters and records their ids in the config.
+//
+// The counter registry must already be initialized. Callers that build a
+// config without route_module_config_new have to invoke this themselves,
+// otherwise the handler reads unregistered counter ids.
+int
+route_module_config_register_counters(
+	struct route_module_config *config, yanet_error **err
+);
+
 int
 route_module_config_add_route(
 	struct cp_module *cp_module,
@@ -65,6 +75,24 @@ route_module_config_add_prefix_v6(
 	const uint8_t *to,
 	uint32_t route_list_index
 );
+
+// Returns the number of distinct hardware routes held by the config.
+uint64_t
+route_module_config_route_count(struct cp_module *cp_module);
+
+// Returns the number of IPv4 FIB ranges.
+//
+// Counts the same ranges a FIB iterator would yield for the IPv4 LPM, without
+// materializing any of them.
+uint64_t
+route_module_config_fib_range_count_v4(struct cp_module *cp_module);
+
+// Returns the number of IPv6 FIB ranges.
+//
+// Counts the same ranges a FIB iterator would yield for the IPv6 LPM, without
+// materializing any of them.
+uint64_t
+route_module_config_fib_range_count_v6(struct cp_module *cp_module);
 
 // Create a FIB iterator for the given module config.
 //

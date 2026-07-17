@@ -20,6 +20,20 @@ struct route_list {
 	uint64_t count;
 };
 
+// Counter ids of a single address family.
+//
+// The ethertype test already selects a family per packet, so the handler
+// points at the matching set there and the shared tail stays family agnostic.
+// The sets live in the config so that selecting one costs a pointer and the
+// handler builds nothing per invocation.
+struct route_family_counter_ids {
+	uint64_t forwarded;
+	uint64_t drop_no_route;
+	uint64_t drop_ttl_expired;
+	uint64_t drop_empty_route_list;
+	uint64_t drop_device_unresolved;
+};
+
 /*
  * Route module configuration. Handler lookups route list index using
  * corresponding lpm and retrieves start position and count of applicable
@@ -43,4 +57,12 @@ struct route_module_config {
 	// Route indexes storage
 	uint64_t route_index_count;
 	uint64_t *route_indexes;
+
+	// Module-level counters, registered by route_module_config_new
+	struct route_family_counter_ids counters_v4;
+	struct route_family_counter_ids counters_v6;
+
+	// A non-IP packet has no address family, so its drop counter is
+	// shared rather than kept in a per-family set.
+	uint64_t drop_non_ip_counter_id;
 };

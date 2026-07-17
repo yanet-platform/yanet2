@@ -76,7 +76,6 @@ func NewRouteModule(cfg *Config, options ...Option) (*RouteModule, error) {
 
 	service := NewRouteService(
 		NewBackend(agent),
-		WithRouteServiceLog(log),
 		WithMetrics(grpcmetrics.NewFactory(
 			grpcmetrics.WithLabeler(labeler),
 		)),

@@ -150,8 +150,6 @@ modules/route/bindings/go/croute/safe.go:ModuleConfig.DumpFIB:iter.nexthopDstMAC
 modules/route/bindings/go/croute/safe.go:ModuleConfig.DumpFIB:iter.nexthopSrcMAC  # legacy: encapsulate behind an exported method or field
 modules/route/bindings/go/croute/safe.go:ModuleConfig.DumpFIB:iter.prefixFrom  # legacy: encapsulate behind an exported method or field
 modules/route/bindings/go/croute/safe.go:ModuleConfig.DumpFIB:iter.prefixTo  # legacy: encapsulate behind an exported method or field
-modules/route/bindings/go/croute/safe.go:ModuleConfig.FIBRangeCount:iter.destroy  # legacy: encapsulate behind an exported method or field
-modules/route/bindings/go/croute/safe.go:ModuleConfig.FIBRangeCount:iter.next  # legacy: encapsulate behind an exported method or field
 modules/route-mpls/controlplane/service.go:routeMPLSConfig.buildRules:nh.toFFI  # legacy: encapsulate behind an exported method or field
 modules/route-mpls/controlplane/service.go:RouteMPLSService.CreateConfig:config.buildRules  # legacy: encapsulate behind an exported method or field
 modules/route-mpls/controlplane/service.go:RouteMPLSService.CreateConfig:config.handle  # legacy: encapsulate behind an exported method or field

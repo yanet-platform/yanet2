@@ -21,6 +21,63 @@ struct fib_iter {
 	enum fib_iter_phase phase;
 };
 
+int
+route_module_config_register_counters(
+	struct route_module_config *config, yanet_error **err
+) {
+	struct {
+		const char *name;
+		uint64_t size;
+		uint64_t *dst;
+	} counters[] = {
+		{"route_forwarded_v4", 2, &config->counters_v4.forwarded},
+		{"route_forwarded_v6", 2, &config->counters_v6.forwarded},
+		{"route_drop_no_route_v4", 2, &config->counters_v4.drop_no_route
+		},
+		{"route_drop_no_route_v6", 2, &config->counters_v6.drop_no_route
+		},
+		{"route_drop_ttl_expired_v4",
+		 2,
+		 &config->counters_v4.drop_ttl_expired},
+		{"route_drop_ttl_expired_v6",
+		 2,
+		 &config->counters_v6.drop_ttl_expired},
+		{"route_drop_non_ip", 2, &config->drop_non_ip_counter_id},
+		{"route_drop_empty_route_list_v4",
+		 2,
+		 &config->counters_v4.drop_empty_route_list},
+		{"route_drop_empty_route_list_v6",
+		 2,
+		 &config->counters_v6.drop_empty_route_list},
+		{"route_drop_device_unresolved_v4",
+		 2,
+		 &config->counters_v4.drop_device_unresolved},
+		{"route_drop_device_unresolved_v6",
+		 2,
+		 &config->counters_v6.drop_device_unresolved},
+	};
+
+	for (size_t i = 0; i < sizeof(counters) / sizeof(counters[0]); ++i) {
+		uint64_t id = counter_registry_register(
+			&config->cp_module.counter_registry,
+			counters[i].name,
+			counters[i].size,
+			err
+		);
+		if (id == (uint64_t)-1) {
+			yanet_error_add(
+				err,
+				"failed to register counter '%s'",
+				counters[i].name
+			);
+			return -1;
+		}
+		*counters[i].dst = id;
+	}
+
+	return 0;
+}
+
 struct cp_module *
 route_module_config_new(
 	struct agent *agent, const char *name, yanet_error **err
@@ -55,6 +112,11 @@ route_module_config_new(
 			config,
 			sizeof(struct route_module_config)
 		);
+		return NULL;
+	}
+
+	if (route_module_config_register_counters(config, err)) {
+		route_module_config_free(&config->cp_module);
 		return NULL;
 	}
 
@@ -246,6 +308,46 @@ route_module_config_add_prefix_v6(
 	struct route_module_config *config =
 		container_of(cp_module, struct route_module_config, cp_module);
 	return lpm_insert(&config->lpm_v6, 16, from, to, route_list_index);
+}
+
+// Counts the LPM ranges over the whole key space of the given tree.
+static uint64_t
+route_lpm_range_count(const struct lpm *lpm, uint8_t key_size) {
+	uint8_t from[LPM_KEY_SIZE_MAX];
+	uint8_t to[LPM_KEY_SIZE_MAX];
+	memset(from, 0x00, key_size);
+	memset(to, 0xff, key_size);
+
+	struct lpm_iter it;
+	lpm_iter_init(&it, lpm, key_size, from, to);
+
+	uint64_t count = 0;
+	while (lpm_iter_next(&it)) {
+		++count;
+	}
+
+	return count;
+}
+
+uint64_t
+route_module_config_route_count(struct cp_module *cp_module) {
+	struct route_module_config *config =
+		container_of(cp_module, struct route_module_config, cp_module);
+	return config->route_count;
+}
+
+uint64_t
+route_module_config_fib_range_count_v4(struct cp_module *cp_module) {
+	struct route_module_config *config =
+		container_of(cp_module, struct route_module_config, cp_module);
+	return route_lpm_range_count(&config->lpm_v4, 4);
+}
+
+uint64_t
+route_module_config_fib_range_count_v6(struct cp_module *cp_module) {
+	struct route_module_config *config =
+		container_of(cp_module, struct route_module_config, cp_module);
+	return route_lpm_range_count(&config->lpm_v6, 16);
 }
 
 struct fib_iter *

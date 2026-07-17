@@ -37,6 +37,15 @@ route_test_config(struct cp_module **cp_module, yanet_error **err) {
 	config->cp_module.device_count = 0;
 	SET_OFFSET_OF(&config->cp_module.devices, NULL);
 
+	// Needed by route_module_config_register_counters.
+	if (counter_registry_init(
+		    &config->cp_module.counter_registry,
+		    &config->cp_module.memory_context,
+		    0
+	    )) {
+		goto error_lpm_v4;
+	}
+
 	struct memory_context *memory_context =
 		&config->cp_module.memory_context;
 	if (lpm_init(&config->lpm_v4, memory_context)) {
@@ -100,6 +109,26 @@ route_test_config(struct cp_module **cp_module, yanet_error **err) {
 	if (rc != 0) {
 		goto error_lpm_v6;
 	}
+
+	// Set up counter storage, because route_handle_packets accesses
+	// counters on every outcome.
+	if (route_module_config_register_counters(config, err)) {
+		goto error_lpm_v6;
+	}
+
+	if (counter_registry_link(
+		    &config->cp_module.counter_registry, NULL, err
+	    )) {
+		goto error_lpm_v6;
+	}
+
+	struct counter_storage *cs = counter_storage_spawn(
+		&fuzz_params.mctx, NULL, &config->cp_module.counter_registry
+	);
+	if (cs == NULL) {
+		goto error_lpm_v6;
+	}
+	SET_OFFSET_OF(&fuzz_params.module_ectx.counter_storage, cs);
 
 	*cp_module = (struct cp_module *)config;
 	return 0;

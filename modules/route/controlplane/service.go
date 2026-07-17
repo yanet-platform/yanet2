@@ -4,8 +4,8 @@ import (
 	"context"
 	"sort"
 	"sync"
+	"time"
 
-	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -22,20 +22,10 @@ type RouteServiceOption func(*routeServiceOptions)
 
 type routeServiceOptions struct {
 	Metrics grpcmetrics.Factory
-	Log     *zap.Logger
 }
 
 func newRouteServiceOptions() *routeServiceOptions {
-	return &routeServiceOptions{
-		Log: zap.NewNop(),
-	}
-}
-
-// WithRouteServiceLog sets the logger for the RouteService.
-func WithRouteServiceLog(log *zap.Logger) RouteServiceOption {
-	return func(o *routeServiceOptions) {
-		o.Log = log
-	}
+	return &routeServiceOptions{}
 }
 
 // WithMetrics sets the gRPC metrics factory.
@@ -45,6 +35,27 @@ func WithMetrics(factory grpcmetrics.Factory) RouteServiceOption {
 	return func(o *routeServiceOptions) {
 		o.Metrics = factory
 	}
+}
+
+// configEntry is one route config applied to shared memory, together with
+// the facts measured at the moment it was applied.
+//
+// A config's FIB is immutable once published: every update builds a fresh
+// handle and retires the previous one. The sizes are therefore measured
+// once here rather than walked out of the LPM keyspace on every scrape.
+type configEntry struct {
+	// Handle owns the published shared-memory config generation.
+	Handle ModuleHandle
+	// FIBRangeCountV4 is the number of IPv4 FIB ranges the config holds.
+	FIBRangeCountV4 uint64
+	// FIBRangeCountV6 is the number of IPv6 FIB ranges the config holds.
+	FIBRangeCountV6 uint64
+	// NexthopCount is the number of distinct hardware nexthops the config
+	// resolves its prefixes to.
+	NexthopCount uint64
+	// UpdatedAt is when the FIB was applied to the dataplane, and backs
+	// the staleness gauge.
+	UpdatedAt time.Time
 }
 
 // RouteService is the gRPC service implementation backing the slim
@@ -57,11 +68,9 @@ type RouteService struct {
 	// shmLock serializes shared-memory mutations and protects the
 	// configs map.
 	shmLock sync.RWMutex
-	configs map[string]ModuleHandle
+	configs map[string]configEntry
 
 	metrics *grpcmetrics.ServerMetrics
-
-	log *zap.Logger
 }
 
 // NewRouteService builds a RouteService bound to the supplied backend.
@@ -73,8 +82,7 @@ func NewRouteService(backend Backend, options ...RouteServiceOption) *RouteServi
 
 	m := &RouteService{
 		backend: backend,
-		configs: map[string]ModuleHandle{},
-		log:     opts.Log,
+		configs: map[string]configEntry{},
 	}
 	if opts.Metrics != nil {
 		m.metrics = opts.Metrics(m.retention)
@@ -162,12 +170,12 @@ func (m *RouteService) ShowFIB(
 	m.shmLock.RLock()
 	defer m.shmLock.RUnlock()
 
-	module, ok := m.configs[name]
+	entry, ok := m.configs[name]
 	if !ok {
 		return &routepb.ShowFIBResponse{}, nil
 	}
 
-	entries, err := module.DumpFIB()
+	entries, err := entry.Handle.DumpFIB()
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to dump FIB: %v", err)
 	}
@@ -218,7 +226,7 @@ func (m *RouteService) DeleteConfig(
 	m.shmLock.Lock()
 	defer m.shmLock.Unlock()
 
-	module, ok := m.configs[name]
+	entry, ok := m.configs[name]
 	if !ok {
 		return &routepb.DeleteConfigResponse{}, nil
 	}
@@ -226,7 +234,7 @@ func (m *RouteService) DeleteConfig(
 	if err := m.backend.DeleteModule(name); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to delete module config %q: %v", name, err)
 	}
-	module.Free()
+	entry.Handle.Free()
 	delete(m.configs, name)
 
 	return &routepb.DeleteConfigResponse{}, nil
@@ -251,51 +259,83 @@ func (m *RouteService) UpdateFIB(
 	}
 
 	if old, ok := m.configs[name]; ok {
-		old.Free()
+		old.Handle.Free()
 	}
-	m.configs[name] = module
+
+	// The counts are read once, here, off the handle just published: the
+	// FIB never changes again for this generation, and each read walks the
+	// LPM keyspace.
+	m.configs[name] = configEntry{
+		Handle:          module,
+		FIBRangeCountV4: module.FIBRangeCountV4(),
+		FIBRangeCountV6: module.FIBRangeCountV6(),
+		NexthopCount:    module.RouteCount(),
+		UpdatedAt:       time.Now(),
+	}
 
 	return &routepb.UpdateFIBResponse{}, nil
 }
 
-// Metrics returns all route module metrics: per-config FIB size gauges, plus
-// gRPC call metrics.
+// Metrics returns all route module metrics: per-config FIB gauges, the
+// module-level dataplane counters, plus gRPC call metrics.
 //
 // Labels:
-//   - config:       route config name (all gauge metrics)
+//   - config:       route config name (all gauge and counter metrics)
+//   - family:       address family, "v4", "v6", or "unknown" when the
+//     ethertype was not IP (route_fib_entries, route_forwarded_*,
+//     route_drop_*)
+//   - device:       dataplane device name (all dataplane counter metrics)
+//   - pipeline:     pipeline name (all dataplane counter metrics)
+//   - function:     pipeline function name (all dataplane counter metrics)
+//   - chain:        pipeline chain name (all dataplane counter metrics)
+//   - reason:       drop cause (route_drop_packets / route_drop_bytes only)
 //   - grpc_type:    always "unary" (gRPC metrics)
 //   - grpc_service: fully-qualified gRPC service name (gRPC metrics)
 //   - grpc_method:  RPC name (gRPC metrics)
 //   - grpc_code:    gRPC status code string (grpc_server_handled_total only)
 func (m *RouteService) Metrics() ([]*commonpb.Metric, error) {
 	result := m.collectConfigMetrics()
+	result = append(result, m.collectDataplaneMetrics()...)
 	if m.metrics != nil {
 		result = append(result, m.metrics.Collect()...)
 	}
 	return result, nil
 }
 
-// collectConfigMetrics gathers per-config gauges on a best-effort basis: a
-// dump failure for one config is logged and skipped so the remaining configs
-// still contribute their series.
+// collectConfigMetrics gathers the gauges describing what each config
+// currently holds in shared memory, and when it was last applied.
+//
+// The FIB size is reported per address family, so the combined total stays
+// derivable as a sum over the family label. Every value was measured when
+// the config was applied, so a scrape costs no shared-memory traversal.
 func (m *RouteService) collectConfigMetrics() []*commonpb.Metric {
 	m.shmLock.RLock()
 	defer m.shmLock.RUnlock()
 
-	result := make([]*commonpb.Metric, 0, len(m.configs))
-	for name, module := range m.configs {
-		labels := []*commonpb.Label{{Name: "config", Value: name}}
-
-		count, err := module.FIBRangeCount()
-		if err != nil {
-			m.log.Warn("failed to collect fib metrics for config",
-				zap.String("config", name),
-				zap.Error(err),
-			)
-			continue
+	result := make([]*commonpb.Metric, 0, 4*len(m.configs))
+	for name, entry := range m.configs {
+		configLabels := []*commonpb.Label{
+			{Name: "config", Value: name},
+		}
+		v4Labels := []*commonpb.Label{
+			{Name: "config", Value: name},
+			{Name: "family", Value: "v4"},
+		}
+		v6Labels := []*commonpb.Label{
+			{Name: "config", Value: name},
+			{Name: "family", Value: "v6"},
 		}
 
-		result = append(result, makeGauge("route_fib_entries", float64(count), labels...))
+		result = append(result,
+			makeGauge("route_fib_entries", float64(entry.FIBRangeCountV4), v4Labels...),
+			makeGauge("route_fib_entries", float64(entry.FIBRangeCountV6), v6Labels...),
+			makeGauge("route_nexthops", float64(entry.NexthopCount), configLabels...),
+			makeGauge(
+				"route_config_updated_timestamp_seconds",
+				float64(entry.UpdatedAt.Unix()),
+				configLabels...,
+			),
+		)
 	}
 
 	return result
