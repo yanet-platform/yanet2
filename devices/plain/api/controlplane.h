@@ -22,6 +22,13 @@ cp_device_plain_new(
 void
 cp_device_plain_free(struct cp_device *cp_device);
 
+// Reclaim plain devices parked on the agent's unused_device list.
+//
+// Call after a device update, once the retiring generation no longer
+// references the parked devices.
+void
+cp_device_plain_drain_unused(struct agent *agent);
+
 struct cp_device_plain_config *
 cp_device_plain_config_new(
 	const char *name,

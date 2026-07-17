@@ -3,6 +3,7 @@ package plain
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -15,6 +16,7 @@ import (
 type DevicePlainService struct {
 	plainpb.UnimplementedDevicePlainServiceServer
 
+	mu    sync.Mutex
 	agent *ffi.Agent
 }
 
@@ -28,6 +30,18 @@ func (m *DevicePlainService) UpdateDevice(
 	ctx context.Context,
 	request *plainpb.UpdateDevicePlainRequest,
 ) (*plainpb.UpdateDevicePlainResponse, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Reclaim devices parked on the agent's unused list, whatever the
+	// outcome of this update.
+	//
+	// The drain is registered before the device config is created on
+	// purpose: once the arena is full, creation fails first, so a drain
+	// registered after that check would never run and the arena could
+	// never recover.
+	defer DrainUnusedDevices(m.agent)
+
 	name := request.GetName()
 	if name == "" {
 		return nil, status.Error(codes.InvalidArgument, "module config name is required")

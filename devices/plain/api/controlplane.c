@@ -55,6 +55,11 @@ cp_device_plain_free(struct cp_device *cp_device) {
 	cp_device_free(cp_device);
 }
 
+void
+cp_device_plain_drain_unused(struct agent *agent) {
+	cp_device_agent_drain_unused(agent, cp_device_plain_free);
+}
+
 struct cp_device_plain_config *
 cp_device_plain_config_new(
 	const char *name,

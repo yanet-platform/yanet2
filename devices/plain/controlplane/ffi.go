@@ -89,3 +89,12 @@ func (m *DeviceConfig) asRawPtr() *C.struct_cp_device {
 func (m *DeviceConfig) AsFFIDevice() ffi.ShmDeviceConfig {
 	return m.ptr
 }
+
+// DrainUnusedDevices reclaims plain devices retired from the config
+// generation and parked on the agent's unused list.
+//
+// Call it after UpdateDevices, once the retiring generation no longer
+// references the parked devices.
+func DrainUnusedDevices(agent *ffi.Agent) {
+	C.cp_device_plain_drain_unused((*C.struct_agent)(agent.AsRawPtr()))
+}

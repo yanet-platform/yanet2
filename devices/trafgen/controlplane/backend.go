@@ -27,6 +27,17 @@ func (m *backend) UpdateDevice(
 	lengths []uint32,
 	ratePps uint64,
 ) error {
+	// Reclaim devices parked on the agent's unused list, whatever the
+	// outcome of this update.
+	//
+	// A device leaving the config generation is parked rather than freed:
+	// both the one replaced by a successful update and the new one rejected
+	// mid-install by a failed update land on the unused list. The drain is
+	// registered before the device config is created on purpose: once the
+	// arena is full, creation fails first, so a drain registered after that
+	// check would never run and the arena could never recover.
+	defer ctrafgen.DrainUnusedDevices(m.agent)
+
 	device, err := ctrafgen.NewDeviceConfig(
 		m.agent,
 		name,
@@ -39,16 +50,6 @@ func (m *backend) UpdateDevice(
 	if err != nil {
 		return fmt.Errorf("failed to create device config: %w", err)
 	}
-
-	// Reclaim devices parked on the agent's unused list once the update
-	// settles, regardless of outcome.
-	//
-	// A device leaving the config generation is parked rather than freed: the
-	// one replaced by a successful update, or the new one rejected mid-install
-	// by a failed update (e.g. an unknown pipeline), both land on the unused
-	// list. Draining on every exit frees them and keeps repeated failed updates
-	// from accumulating dead devices in the agent arena.
-	defer ctrafgen.DrainUnusedDevices(m.agent)
 
 	if err := m.agent.UpdateDevices(
 		[]ffi.ShmDeviceConfig{device.AsFFIDevice()},

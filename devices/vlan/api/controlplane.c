@@ -57,6 +57,11 @@ cp_device_vlan_free(struct cp_device *cp_device) {
 	cp_device_free(cp_device);
 }
 
+void
+cp_device_vlan_drain_unused(struct agent *agent) {
+	cp_device_agent_drain_unused(agent, cp_device_vlan_free);
+}
+
 struct cp_device_vlan_config *
 cp_device_vlan_config_new(
 	const char *name,
