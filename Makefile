@@ -113,6 +113,7 @@ CLI_RELEASE_BINARIES := $(addprefix $(RELEASE_DIR)/,$(CLI_BINARIES))
 	proto-breaking \
 	proto-go \
 	lint-go \
+	lint-commit \
 	hooks \
 	test \
 	test-asan \
@@ -173,6 +174,10 @@ lint-go:
 	else \
 		echo "WARN: 'golangci-lint' not found, skipping modernize lint (install: https://golangci-lint.run/welcome/install/)"; \
 	fi
+
+lint-commit:
+	lint/commit/commitlint_test.sh
+	lint/commit/commitlint.sh --range origin/main..HEAD
 
 hooks:
 	git config core.hooksPath .githooks

@@ -46,8 +46,9 @@ cargo +nightly fmt            # Rust (uses nightly-only options in .rustfmt.toml
 cargo clippy                  # Rust lints
 make proto-lint               # protobuf formatting check
 make lint-go                  # loglint + golangci-lint modernize (lint/logger/, .golangci.yml)
+make lint-commit              # commit-subject convention check (lint/commit/)
 make proto-go                 # generate *.pb.go via protoc (needed before go lint locally)
-make hooks                    # install the pre-commit hook (run once per clone)
+make hooks                    # install the git hooks (run once per clone)
 
 # Fuzzing
 make fuzz                     # build fuzz targets
@@ -348,14 +349,22 @@ Web UI lives in `web/` (`package.json`, `index.html`, `dist/`).
 
 ### Commits & PRs
 
-- Commit format: `feat|fix|perf|chore|refactor(<scope>): brief description`
+- Commit format:
+  `feat|fix|refactor|perf|chore|docs|test|build|ci|style(<scope>): brief description`
   with high-level description (no code-level details, no
   backtick-quoted symbol names).
 - **Do not** add `Co-Authored-By: Claude …` / `Generated with Claude Code`
   footers.
-- PR title: `<feat|fix|refactor|chore|perf|docs>(<scope>): <short description>`
+- PR title:
+  `feat|fix|refactor|perf|chore|docs|test|build|ci|style(<scope>): <short description>`
   — MUST include the scope, exactly like commit subjects. A scopeless
   `feat: …` title is a convention violation.
+- Scope is mandatory (lowercase, comma-separated for multiple scopes); an
+  optional `!` before the colon marks a breaking change (e.g.
+  `feat(route)!: ...`); the brief must not start with an uppercase letter
+  and carries no trailing period. This is enforced mechanically by the
+  `commit-msg` hook (`make hooks`) and the Commit Lint CI job
+  (`lint/commit/`).
 - PR body: bullets start with capital, end with period. Add
   `Closes #<number>.` when applicable. **Do not** include a
   `## Summary` header — content goes directly. **Do not** include a
