@@ -10,6 +10,8 @@ import (
 	"github.com/gopacket/gopacket/layers"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	dataplaneut "github.com/yanet-platform/yanet2/bindings/go/dataplane_ut"
 	"github.com/yanet-platform/yanet2/bindings/go/filter"
@@ -285,40 +287,19 @@ func TestACL_NoMatch_Drop(t *testing.T) {
 	requireModuleCounterPackets(t, h, aclCounterPath("port0", "test"), "acl_no_match", 1)
 }
 
-// TestACL_EmptyRules_Drop verifies that an empty ACL config is valid and
-// behaves as match-nothing with acl_no_match increments.
-func TestACL_EmptyRules_Drop(t *testing.T) {
-	eth := layers.Ethernet{
-		SrcMAC:       xerror.Unwrap(net.ParseMAC("aa:bb:cc:dd:ee:ff")),
-		DstMAC:       xerror.Unwrap(net.ParseMAC("11:22:33:44:55:66")),
-		EthernetType: layers.EthernetTypeIPv4,
-	}
-	ip4 := layers.IPv4{
-		Version:  4,
-		TTL:      64,
-		Protocol: layers.IPProtocolUDP,
-		SrcIP:    net.ParseIP("192.0.2.1"),
-		DstIP:    net.ParseIP("10.0.0.1"),
-	}
-	udp := layers.UDP{SrcPort: 12345, DstPort: 80}
-	udp.SetNetworkLayerForChecksum(&ip4)
-	pkt := xpacket.LayersToPacket(t, &eth, &ip4, &udp)
-
-	h, agent, backend := setupACLHarness(t, []string{"port0"})
+// TestACL_EmptyRules_Rejected verifies that UpdateConfig rejects an empty
+// ruleset with codes.InvalidArgument and never publishes a module config,
+// since an empty ACL would silently drop all traffic.
+func TestACL_EmptyRules_Rejected(t *testing.T) {
+	_, _, backend := setupACLHarness(t, []string{"port0"})
 	svc := acl.NewACLService(backend)
+
 	_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
 		Name:  "test",
 		Rules: nil,
 	})
-	require.NoError(t, err)
-
-	wireACLPipeline(t, agent, "port0", "test")
-
-	result, err := h.HandlePackets(pkt)
-	require.NoError(t, err)
-	require.Empty(t, result.Output, "empty rules config must not match and must not reach output")
-	require.Len(t, result.Drop, 1, "empty rules config must drop packet via no-match")
-	requireModuleCounterPackets(t, h, aclCounterPath("port0", "test"), "acl_no_match", 1)
+	require.Error(t, err)
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
 }
 
 // TestACL_TCP_SYNFlag verifies the proto subtype byte selects on TCP flags.

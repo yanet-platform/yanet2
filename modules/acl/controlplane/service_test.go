@@ -200,7 +200,7 @@ func TestUpdateConfig_Idempotency(t *testing.T) {
 
 	req := &aclpb.UpdateConfigRequest{
 		Name:  "acl0",
-		Rules: []*aclpb.Rule{},
+		Rules: []*aclpb.Rule{{Actions: []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_DENY}}}},
 	}
 
 	_, err := svc.UpdateConfig(t.Context(), req)
@@ -223,9 +223,10 @@ func TestUpdateConfig_ErrorPropagation(t *testing.T) {
 	svc := newTestService(b)
 
 	// Pre-populate a config so we can verify it is unchanged after the error.
+	initialRules := []*aclpb.Rule{{Actions: []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_PASS}}}}
 	_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
 		Name:  "acl0",
-		Rules: []*aclpb.Rule{},
+		Rules: initialRules,
 	})
 	require.NoError(t, err)
 
@@ -248,7 +249,36 @@ func TestUpdateConfig_ErrorPropagation(t *testing.T) {
 	// The original config must still be present and unchanged.
 	resp, err := svc.ShowConfig(t.Context(), &aclpb.ShowConfigRequest{Name: "acl0"})
 	require.NoError(t, err)
-	assert.Empty(t, resp.Rules, "config rules must not have changed after failed update")
+	assert.True(t, rulesEqual(initialRules, resp.Rules), "config rules must not have changed after failed update")
+}
+
+// TestUpdateConfig_RejectsEmptyRuleset verifies that an empty ruleset is
+// rejected with codes.InvalidArgument before reaching the backend, for both
+// a nil and an explicitly empty rule slice.
+func TestUpdateConfig_RejectsEmptyRuleset(t *testing.T) {
+	tests := []struct {
+		name  string
+		rules []*aclpb.Rule
+	}{
+		{name: "nil rules", rules: nil},
+		{name: "empty rules", rules: []*aclpb.Rule{}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			b := newFakeBackend(0)
+			svc := newTestService(b)
+
+			_, err := svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
+				Name:  "acl0",
+				Rules: tc.rules,
+			})
+			require.Error(t, err)
+			assert.Equal(t, codes.InvalidArgument, status.Code(err))
+			assert.Equal(t, 0, b.PublishCalls(), "backend must not be asked to publish")
+			assert.Empty(t, b.modules, "no module must be created")
+		})
+	}
 }
 
 // TestConvertRules_RejectsUnknownActionKind ensures unrecognized action kinds
@@ -297,7 +327,7 @@ func TestUpdateConfig_ConcurrentRace(t *testing.T) {
 			name := "acl0"
 			_, _ = svc.UpdateConfig(t.Context(), &aclpb.UpdateConfigRequest{
 				Name:  name,
-				Rules: []*aclpb.Rule{},
+				Rules: []*aclpb.Rule{{Actions: []*aclpb.Action{{Kind: aclpb.ActionKind_ACTION_KIND_DENY}}}},
 			})
 			_, _ = svc.ShowConfig(t.Context(), &aclpb.ShowConfigRequest{Name: name})
 			_, _ = svc.ListConfigs(t.Context(), &aclpb.ListConfigsRequest{})

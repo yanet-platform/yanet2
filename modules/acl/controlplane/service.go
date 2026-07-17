@@ -246,6 +246,12 @@ func (m *ACLService) UpdateConfig(
 	if name == "" {
 		return nil, status.Error(codes.InvalidArgument, "module config name is required")
 	}
+	// Rejecting an empty ruleset is enforced here in the Go control plane by
+	// design, not in the C shared-memory load path. A matching C-side guard
+	// can be added later if a non-Go caller ever needs the same protection.
+	if len(req.GetRules()) == 0 {
+		return nil, status.Error(codes.InvalidArgument, "at least one rule is required, an empty ruleset would drop all traffic")
+	}
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
