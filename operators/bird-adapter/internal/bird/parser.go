@@ -65,5 +65,5 @@ func (m *Parser) Next() (*updateDecoder, error) {
 		return nil, fmt.Errorf("m.readChunk(%d): %w", readSize, err)
 	}
 
-	return newUpdateDecoder(m.buf[:int(readSize)], m.log)
+	return NewUpdateDecoder(m.buf[:int(readSize)], m.log)
 }

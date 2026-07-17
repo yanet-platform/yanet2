@@ -15,7 +15,7 @@ import (
 
 const (
 	sizeOfUpdateStruct = unsafe.Sizeof(update{})
-	attrAreaSizeOffset = unsafe.Offsetof(update{}.attrsAreaSize)
+	AttrAreaSizeOffset = unsafe.Offsetof(update{}.AttrsAreaSize)
 	sizeOfNetAddrUnion = 40
 	sizeOfBaseType     = unsafe.Sizeof(baseType{})
 	sizeOfBaseTypeTail = sizeOfNetAddrUnion - sizeOfBaseType
@@ -117,7 +117,7 @@ func (m AttributeType) String() string {
 	}
 }
 
-func (m AttributeType) isU32Attribute() bool {
+func (m AttributeType) IsU32Attribute() bool {
 	switch m {
 	case AttrOrigin:
 	case AttrOriginatorID:
@@ -132,7 +132,7 @@ func (m AttributeType) isU32Attribute() bool {
 
 type Operation uint32
 
-func (m Operation) isRemove() bool {
+func (m Operation) IsRemove() bool {
 	return m == OpRemove
 }
 
@@ -140,46 +140,46 @@ type IP4Addr [4]byte
 type IP6Addr [16]byte
 
 type baseType struct {
-	typ       uint8
-	prefixLen uint8
-	length    uint16
+	Typ       uint8
+	PrefixLen uint8
+	Length    uint16
 }
 
 func (m *baseType) String() string {
-	switch m.typ {
+	switch m.Typ {
 	case NetIP4:
-		return fmt.Sprintf("ip4/%d", m.prefixLen)
+		return fmt.Sprintf("ip4/%d", m.PrefixLen)
 	case NetIP6:
-		return fmt.Sprintf("ip6/%d", m.prefixLen)
+		return fmt.Sprintf("ip6/%d", m.PrefixLen)
 	case NetVPN4:
-		return fmt.Sprintf("vpn4/%d", m.prefixLen)
+		return fmt.Sprintf("vpn4/%d", m.PrefixLen)
 	case NetVPN6:
-		return fmt.Sprintf("vpn6/%d", m.prefixLen)
+		return fmt.Sprintf("vpn6/%d", m.PrefixLen)
 	}
-	return fmt.Sprintf("Unknown(%x)/%d", m.typ, m.prefixLen)
+	return fmt.Sprintf("Unknown(%x)/%d", m.Typ, m.PrefixLen)
 }
 
 type netAddrIP4 struct {
 	baseType
-	prefix IP4Addr
+	Prefix IP4Addr
 }
 
 type netAddrIP6 struct {
 	baseType
-	prefix IP6Addr
+	Prefix IP6Addr
 }
 
 type netAddrVPN4 struct {
 	baseType
-	prefix IP4Addr
-	rd     uint64
+	Prefix IP4Addr
+	Rd     uint64
 }
 
 type netAddrVPN6 struct {
 	baseType
-	prefix IP6Addr
+	Prefix IP6Addr
 	_      uint32 // padding
-	rd     uint64
+	Rd     uint64
 }
 
 // update represents a BIRD route update message.
@@ -188,12 +188,12 @@ type netAddrVPN6 struct {
 // that is not represented by any field. Adding fields would shift the memory layout and
 // corrupt access to the trailing attribute data.
 type update struct {
-	base          baseType
+	Base          baseType
 	baseTail      [sizeOfBaseTypeTail]byte // NetAddrUnion data
-	opType        Operation
-	peerAddr      IP6Addr
-	globalID      uint32
-	attrsAreaSize uint32
+	OpType        Operation
+	PeerAddr      IP6Addr
+	GlobalID      uint32
+	AttrsAreaSize uint32
 }
 
 // updateDecoder wraps update with a logger for per-client logging.
@@ -209,22 +209,22 @@ func newUpdate(data []byte) (*update, error) {
 	}
 
 	u := (*update)(unsafe.Pointer(&data[0]))
-	// BIRD writes attrsAreaSize EXCLUDING the 4-byte size field itself
+	// BIRD writes AttrsAreaSize EXCLUDING the 4-byte size field itself
 	// (see yabird/proto/export/export.c:133)
-	// So attrsAreaSize=0 means no attributes
-	actualAttrsAreaSize := len(data[attrAreaSizeOffset:]) // includes size of u.attrsAreaSize field (4 bytes)
-	// attrsAreaSize is the size of attributes data AFTER the attrsAreaSize field
-	// So we need: 4 (attrsAreaSize field) + attrsAreaSize (attributes) <= actualAttrsAreaSize
-	if int64(sizeOfUint32)+int64(u.attrsAreaSize) > int64(actualAttrsAreaSize) {
+	// So AttrsAreaSize=0 means no attributes
+	actualAttrsAreaSize := len(data[AttrAreaSizeOffset:]) // includes size of u.AttrsAreaSize field (4 bytes)
+	// AttrsAreaSize is the size of attributes data AFTER the AttrsAreaSize field
+	// So we need: 4 (AttrsAreaSize field) + AttrsAreaSize (attributes) <= actualAttrsAreaSize
+	if int64(sizeOfUint32)+int64(u.AttrsAreaSize) > int64(actualAttrsAreaSize) {
 		return nil, fmt.Errorf("attributes area is too small want=4+%d, actual=%d: %w",
-			u.attrsAreaSize, actualAttrsAreaSize, ErrAttributesTruncated)
+			u.AttrsAreaSize, actualAttrsAreaSize, ErrAttributesTruncated)
 	}
 	return u, nil
 }
 
-// newUpdateDecoder creates a new updateDecoder from raw data with the provided logger.
+// NewUpdateDecoder creates a new updateDecoder from raw data with the provided logger.
 // If logger is nil, a nop logger will be used.
-func newUpdateDecoder(data []byte, log *zap.Logger) (*updateDecoder, error) {
+func NewUpdateDecoder(data []byte, log *zap.Logger) (*updateDecoder, error) {
 	u, err := newUpdate(data)
 	if err != nil {
 		return nil, err
@@ -241,13 +241,13 @@ func newUpdateDecoder(data []byte, log *zap.Logger) (*updateDecoder, error) {
 }
 
 func (m *updateDecoder) Decode(route *rib.Route) error {
-	if m.update.base.length > sizeOfNetAddrUnion {
+	if m.update.Base.Length > sizeOfNetAddrUnion {
 		return fmt.Errorf("update type(%s) is too big: %d > max known size %d: %w",
-			m.update.base.String(), m.update.base.length, sizeOfNetAddrUnion, ErrUnknownAddrUnion)
+			m.update.Base.String(), m.update.Base.Length, sizeOfNetAddrUnion, ErrUnknownAddrUnion)
 	}
-	route.Peer = netipAddrFrom4U32(m.update.peerAddr)
-	route.GlobalID = m.update.globalID
-	route.ToRemove = m.update.opType.isRemove()
+	route.Peer = netipAddrFrom4U32(m.update.PeerAddr)
+	route.GlobalID = m.update.GlobalID
+	route.ToRemove = m.update.OpType.IsRemove()
 
 	if err := m.decodePrefixAndRD(route); err != nil {
 		return fmt.Errorf("%w: update.decodePrefixAndRD: %w", ErrUpdateDecode, err)
@@ -265,33 +265,33 @@ func isSupportedRDType(rd uint64) bool {
 
 func (m *updateDecoder) decodePrefixAndRD(route *rib.Route) error {
 	var addr netip.Addr
-	switch m.update.base.typ {
+	switch m.update.Base.Typ {
 	case NetIP4:
 		m4 := (*netAddrIP4)(unsafe.Pointer(m.update))
-		addr = netip.AddrFrom4([4]byte{m4.prefix[3], m4.prefix[2], m4.prefix[1], m4.prefix[0]})
+		addr = netip.AddrFrom4([4]byte{m4.Prefix[3], m4.Prefix[2], m4.Prefix[1], m4.Prefix[0]})
 	case NetIP6:
 		m6 := (*netAddrIP6)(unsafe.Pointer(m.update))
-		addr = netipAddrFrom4U32(m6.prefix)
+		addr = netipAddrFrom4U32(m6.Prefix)
 	case NetVPN4:
 		m4 := (*netAddrVPN4)(unsafe.Pointer(m.update))
-		addr = netip.AddrFrom4([4]byte{m4.prefix[3], m4.prefix[2], m4.prefix[1], m4.prefix[0]})
-		if ok := isSupportedRDType(m4.rd); !ok {
+		addr = netip.AddrFrom4([4]byte{m4.Prefix[3], m4.Prefix[2], m4.Prefix[1], m4.Prefix[0]})
+		if ok := isSupportedRDType(m4.Rd); !ok {
 			return ErrUnsupportedRDType
 		}
-		route.RD = m4.rd
+		route.RD = m4.Rd
 	case NetVPN6:
 		m6 := (*netAddrVPN6)(unsafe.Pointer(m.update))
-		addr = netipAddrFrom4U32(m6.prefix)
-		if ok := isSupportedRDType(m6.rd); !ok {
+		addr = netipAddrFrom4U32(m6.Prefix)
+		if ok := isSupportedRDType(m6.Rd); !ok {
 			return ErrUnsupportedRDType
 		}
-		route.RD = m6.rd
+		route.RD = m6.Rd
 	default:
-		return fmt.Errorf("%w: %s", ErrUnsupportedPrefix, m.update.base.String())
+		return fmt.Errorf("%w: %s", ErrUnsupportedPrefix, m.update.Base.String())
 	}
-	prefix, err := addr.Prefix(int(m.update.base.prefixLen))
+	prefix, err := addr.Prefix(int(m.update.Base.PrefixLen))
 	if err != nil {
-		return fmt.Errorf("%w: addr(%s).Prefix(%d): %w", ErrBadPrefix, addr, m.update.base.prefixLen, err)
+		return fmt.Errorf("%w: addr(%s).Prefix(%d): %w", ErrBadPrefix, addr, m.update.Base.PrefixLen, err)
 	}
 	route.Prefix = prefix
 	return nil
@@ -302,17 +302,17 @@ func ExtendedAttributeID(attributeID uint32) AttributeType {
 }
 
 func (m *updateDecoder) decodeAttributes(route *rib.Route) error {
-	// BIRD writes attrsAreaSize EXCLUDING the 4-byte size field itself
-	// So attrsAreaSize=0 means no attributes
-	if m.update.attrsAreaSize == 0 {
+	// BIRD writes AttrsAreaSize EXCLUDING the 4-byte size field itself
+	// So AttrsAreaSize=0 means no attributes
+	if m.update.AttrsAreaSize == 0 {
 		return nil // no attributes
 	}
 
 	// SAFETY: newUpdate checks for data boundaries.
-	// Skip the attrsAreaSize field (4 bytes) and get slice of attribute data
+	// Skip the AttrsAreaSize field (4 bytes) and get slice of attribute data
 	data := unsafe.Slice((*byte)(
-		unsafe.Add(unsafe.Pointer(&m.update.attrsAreaSize), sizeOfUint32)),
-		m.update.attrsAreaSize,
+		unsafe.Add(unsafe.Pointer(&m.update.AttrsAreaSize), sizeOfUint32)),
+		m.update.AttrsAreaSize,
 	)
 
 	for len(data) > int(sizeOfUint32) {
@@ -325,7 +325,7 @@ func (m *updateDecoder) decodeAttributes(route *rib.Route) error {
 		}
 
 		var attrSize uint32
-		if typ.isU32Attribute() {
+		if typ.IsU32Attribute() {
 			attrSize = uint32(sizeOfUint32)
 			val := binary.LittleEndian.Uint32(data)
 			switch typ {

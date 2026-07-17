@@ -1,4 +1,4 @@
-package bird
+package bird_test
 
 import (
 	"bytes"
@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap/zaptest"
 
+	"github.com/yanet-platform/yanet2/operators/bird-adapter/internal/bird"
 	"github.com/yanet-platform/yanet2/operators/bird-adapter/internal/rib"
 )
 
@@ -44,7 +45,7 @@ func TestParserNext(t *testing.T) {
 	buf.Write(updateData)
 
 	reader := bytes.NewReader(buf.Bytes())
-	parser := NewParser(reader, 4096, zaptest.NewLogger(t))
+	parser := bird.NewParser(reader, 4096, zaptest.NewLogger(t))
 
 	// With the fix, this should work correctly
 	decoder, err := parser.Next()

@@ -21,7 +21,7 @@ modules/pdump/controlplane/ffi.go:ModuleConfig.SetupRing  # legacy: migrate to t
 modules/pdump/controlplane/service.go:NewPdumpService  # legacy: migrate to the options pattern
 operators/bird-adapter/internal/bird/export.go:NewExportReader  # legacy: migrate to the options pattern
 operators/bird-adapter/internal/bird/parser.go:NewParser  # legacy: migrate to the options pattern
-operators/bird-adapter/internal/bird/update.go:newUpdateDecoder  # legacy: migrate to the options pattern
+operators/bird-adapter/internal/bird/update.go:NewUpdateDecoder  # legacy: migrate to the options pattern
 operators/bird-adapter/service.go:AdapterService.processBirdImport  # legacy: migrate to the options pattern
 operators/bird-adapter/service.go:AdapterService.runBirdImportLoop  # legacy: migrate to the options pattern
 operators/bird-adapter/service.go:AdapterService.reconnectStream  # legacy: migrate to the options pattern

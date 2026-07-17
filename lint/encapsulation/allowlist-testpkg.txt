@@ -72,8 +72,7 @@ modules/fwstate/tests/dataplane/fwstate_test.go:fwstate  # legacy: migrate to th
 modules/nat64/controlplane/service_test.go:nat64  # legacy: migrate to the external test package
 modules/pdump/controlplane/ring_test.go:pdump  # legacy: migrate to the external test package
 modules/route-mpls/controlplane/service_test.go:route_mpls  # legacy: migrate to the external test package
-operators/bird-adapter/internal/bird/parser_test.go:bird  # legacy: migrate to the external test package
-operators/bird-adapter/internal/bird/update_test.go:bird  # legacy: migrate to the external test package
+operators/bird-adapter/internal/bird/layout_test.go:bird  # white-box guard on unsafe struct layout; an external test cannot observe Sizeof of the private union types
 operators/decap/internal/operator/cfg_test.go:operator  # legacy: migrate to the external test package
 operators/forward/internal/operator/cfg_test.go:operator  # legacy: migrate to the external test package
 operators/pipeline/internal/operator/stage_source_test.go:operator  # legacy: migrate to the external test package

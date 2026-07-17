@@ -1,25 +1,16 @@
-package bird
+package bird_test
 
 import (
 	"errors"
 	"fmt"
 	"net/netip"
 	"testing"
-	"unsafe"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/yanet-platform/yanet2/operators/bird-adapter/internal/bird"
 	"github.com/yanet-platform/yanet2/operators/bird-adapter/internal/rib"
 )
-
-// bird/lib/net.c#L60
-func TestSizeAssert(t *testing.T) {
-	require.EqualValues(t, unsafe.Sizeof(netAddrIP4{}), 8)
-	require.EqualValues(t, unsafe.Sizeof(netAddrIP6{}), 20)
-	require.EqualValues(t, unsafe.Sizeof(netAddrVPN4{}), 16)
-	require.EqualValues(t, unsafe.Sizeof(netAddrVPN6{}), 32)
-	require.EqualValues(t, unsafe.Sizeof(rib.LargeCommunity{}), 12)
-}
 
 var dataIPv6WithLargeCommunities = []byte{
 	// NetAddrUnion 40 bytes
@@ -95,7 +86,7 @@ var dataIPv6WithLargeCommunities = []byte{
 	174: 0xfa, 0xc9, 0, 0, 0xe9, 0x3, 0, 0, 0x1, 0, 0,
 	// last byte
 	// attributes data len respects the value of attrsAreaSize
-	attrAreaSizeOffset + ( /*len - 1*/ 122 - 1): 0,
+	bird.AttrAreaSizeOffset + ( /*len - 1*/ 122 - 1): 0,
 }
 
 func TestDecodeUpdate(t *testing.T) {
@@ -404,7 +395,7 @@ func TestDecodeUpdate(t *testing.T) {
 		{
 			name:   "ERR Empty",
 			data:   []byte{},
-			errNew: ErrDataTooSmall,
+			errNew: bird.ErrDataTooSmall,
 		},
 		{
 			name: "ERR PrefixLen",
@@ -421,7 +412,7 @@ func TestDecodeUpdate(t *testing.T) {
 				// global_id at 60 (zero)
 				64: 0x0, 0, 0, 0, // attrsAreaSize=0 (no attrs)
 			},
-			errDecode: ErrBadPrefix,
+			errDecode: bird.ErrBadPrefix,
 		},
 		{
 			name: "ERR unknown NetAddrUinion size",
@@ -429,9 +420,9 @@ func TestDecodeUpdate(t *testing.T) {
 				0: 0x4,     // NetAddr type NetVPN6
 				1: 0x8,     // prefix len
 				2: 0x40, 0, // ERROR: unknown NetAddrUinion struct size
-				attrAreaSizeOffset: 0, 0, 0, 0, // attrsAreaSize=0
+				bird.AttrAreaSizeOffset: 0, 0, 0, 0, // attrsAreaSize=0
 			},
-			errDecode: ErrUnknownAddrUnion,
+			errDecode: bird.ErrUnknownAddrUnion,
 		},
 		{
 			name: "ERR unsupported prefix",
@@ -442,7 +433,7 @@ func TestDecodeUpdate(t *testing.T) {
 				// global_id at 60 (zero)
 				64: 0, 0, 0, 0, // attrsAreaSize=0
 			},
-			errDecode: ErrUnsupportedPrefix,
+			errDecode: bird.ErrUnsupportedPrefix,
 		},
 		{
 			name: "ERR unexpected end of attributes data ",
@@ -456,7 +447,7 @@ func TestDecodeUpdate(t *testing.T) {
 				64: 2,    // ERROR attrsAreaSize=2 but only 2 bytes available (need at least 4 for attr type)
 				68: 0, 0, // truncated attrs data
 			},
-			errDecode: ErrAttrsUnexpectedEOD,
+			errDecode: bird.ErrAttrsUnexpectedEOD,
 		},
 		{
 			name: "ERR U32 attribute truncated",
@@ -471,7 +462,7 @@ func TestDecodeUpdate(t *testing.T) {
 				68: 0x1 /* < ORIGIN: PROTOCOL_BGP > */, 0x4, 0, 0,
 				72: 0, 0, // ... truncated
 			},
-			errDecode: ErrAttributesTruncated,
+			errDecode: bird.ErrAttributesTruncated,
 		},
 		{
 			name: "ERR Complex attribute truncated",
@@ -487,7 +478,7 @@ func TestDecodeUpdate(t *testing.T) {
 				72: 100, 5, 0, 0, // ERROR: size of complex attribute too big
 				76: 0, 0, 0, 0,
 			},
-			errDecode: ErrAttributesTruncated,
+			errDecode: bird.ErrAttributesTruncated,
 		},
 		{
 			name: "ERR ASPath attribute truncated",
@@ -502,16 +493,16 @@ func TestDecodeUpdate(t *testing.T) {
 				72: 2, 0, 0, 0, // size of ASPath attribute
 				76: 2, 100, // ERROR: 100 segments but not enough data
 			},
-			errNew: ErrAttributesTruncated,
+			errNew: bird.ErrAttributesTruncated,
 		},
 	}
 
 	for idx, c := range cases {
 		t.Run(fmt.Sprintf("case #%d %s", idx, c.name), func(t *testing.T) {
-			decoder, err := newUpdateDecoder(c.data, nil)
+			decoder, err := bird.NewUpdateDecoder(c.data, nil)
 			if c.errNew != nil {
 				require.Error(t, err)
-				require.ErrorIs(t, err, c.errNew, "err from newUpdateDecoder")
+				require.ErrorIs(t, err, c.errNew, "err from NewUpdateDecoder")
 				return
 			}
 			require.NoError(t, err)
@@ -536,7 +527,7 @@ func Benchmark_update_Decode(b *testing.B) {
 
 	b.ResetTimer()
 	for b.Loop() {
-		decoder, err := newUpdateDecoder(dataIPv6WithLargeCommunities, nil)
+		decoder, err := bird.NewUpdateDecoder(dataIPv6WithLargeCommunities, nil)
 		if err != nil {
 			b.Logf("unexpected error: %v", err)
 			b.FailNow()
@@ -576,12 +567,12 @@ func Fuzz_update_Decode(f *testing.F) {
 	f.Add(([]byte)(nil))
 
 	f.Fuzz(func(t *testing.T, data []byte) {
-		decoder, err := newUpdateDecoder(data, nil)
+		decoder, err := bird.NewUpdateDecoder(data, nil)
 		if decoder != nil {
 			route := &rib.Route{}
 			err = decoder.Decode(route)
 		}
-		if err != nil && !errors.Is(err, ErrUpdateDecode) {
+		if err != nil && !errors.Is(err, bird.ErrUpdateDecode) {
 			t.Errorf("unexpected error: %v", err)
 		}
 	})

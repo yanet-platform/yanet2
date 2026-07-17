@@ -17,8 +17,8 @@ type Updater func(context.Context, []rib.Route) error
 type Notifier func() error
 
 type exportSocket struct {
-	path    string
-	bufSize int
+	Path    string
+	BufSize int
 }
 
 type Export struct {
@@ -33,8 +33,8 @@ func NewExportReader(cfg *Config, onUpdate Updater, onFlush Notifier, log *zap.L
 	sockets := make([]exportSocket, 0, len(cfg.Sockets))
 	for _, s := range cfg.Sockets {
 		sockets = append(sockets, exportSocket{
-			path:    s,
-			bufSize: int(cfg.ParserBufSize.Bytes()),
+			Path:    s,
+			BufSize: int(cfg.ParserBufSize.Bytes()),
 		})
 	}
 	return &Export{
@@ -68,11 +68,11 @@ func (m *Export) Run(ctx context.Context) error {
 	for _, socket := range m.sockets {
 		wg.Go(func() error {
 			m.log.Info("starting bird export reader",
-				zap.String("path", socket.path))
+				zap.String("path", socket.Path))
 
-			c, err := net.Dial("unix", socket.path)
+			c, err := net.Dial("unix", socket.Path)
 			if err != nil {
-				return fmt.Errorf("failed to dial bird export socket '%s': %w", socket.path, err)
+				return fmt.Errorf("failed to dial bird export socket '%s': %w", socket.Path, err)
 			}
 			go func() {
 				<-ctx.Done()
@@ -81,7 +81,7 @@ func (m *Export) Run(ctx context.Context) error {
 				}
 			}()
 			reader := bufio.NewReader(c)
-			parser := NewParser(reader, socket.bufSize, m.log)
+			parser := NewParser(reader, socket.BufSize, m.log)
 			for {
 				update, err := parser.Next()
 				if err != nil {
