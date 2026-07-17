@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use clap::Parser;
+use clap_complete::engine::ArgValueCandidates;
 
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Parser)]
@@ -20,14 +21,14 @@ pub enum ModeCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct DeleteCmd {
     /// ACL config name
-    #[arg(long = "name", short = 'n')]
+    #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(crate::config_candidates))]
     pub config_name: String,
 }
 
 #[derive(Debug, Clone, Parser)]
 pub struct UpdateCmd {
     /// ACL config name
-    #[arg(long = "name", short = 'n')]
+    #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(crate::config_candidates))]
     pub config_name: String,
     /// Path to the ruleset YAML file
     #[arg(required = true, long = "rules", value_name = "PATH")]
@@ -37,7 +38,7 @@ pub struct UpdateCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct ShowCmd {
     /// ACL config name
-    #[arg(long = "name", short = 'n')]
+    #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(crate::config_candidates))]
     pub config_name: String,
 }
 

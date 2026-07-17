@@ -1,7 +1,10 @@
 use core::net::{Ipv4Addr, Ipv6Addr};
 
 use clap::{ArgAction, CommandFactory, Parser, Subcommand};
-use clap_complete::CompleteEnv;
+use clap_complete::{
+    engine::{ArgValueCandidates, CompletionCandidate},
+    CompleteEnv,
+};
 use commonpb::pb::IpAddress;
 use nat64pb::{
     nat64_service_client::Nat64ServiceClient, AddMappingRequest, AddPrefixRequest, ListConfigsRequest,
@@ -13,6 +16,7 @@ use ptree::TreeBuilder;
 use tonic::codec::CompressionEncoding;
 use ync::{
     client::{ConnectionArgs, LayeredChannel, Service},
+    completion,
     errors::{Error, NotFoundMapper},
     output::{self, CommonFormat},
 };
@@ -87,14 +91,14 @@ pub enum MappingCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct ShowConfigCmd {
     /// The name of the config to operate on.
-    #[arg(long = "name", short = 'n')]
+    #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
     pub config_name: String,
 }
 
 #[derive(Debug, Clone, Parser)]
 pub struct AddPrefixCmd {
     /// The name of the config to operate on.
-    #[arg(long = "name", short = 'n')]
+    #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
     pub config_name: String,
     /// IPv6 prefix (12 bytes) to be added.
     #[arg(long)]
@@ -104,7 +108,7 @@ pub struct AddPrefixCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct RemovePrefixCmd {
     /// The name of the config to operate on.
-    #[arg(long = "name", short = 'n')]
+    #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
     pub config_name: String,
     /// IPv6 prefix (12 bytes) to be removed.
     #[arg(long)]
@@ -114,7 +118,7 @@ pub struct RemovePrefixCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct AddMappingCmd {
     /// The name of the config to operate on.
-    #[arg(long = "name", short = 'n')]
+    #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
     pub config_name: String,
     /// IPv4 address (4 bytes).
     #[arg(long)]
@@ -130,7 +134,7 @@ pub struct AddMappingCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct RemoveMappingCmd {
     /// The name of the config to operate on.
-    #[arg(long = "name", short = 'n')]
+    #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
     pub config_name: String,
     /// IPv4 address (4 bytes).
     #[arg(long)]
@@ -140,7 +144,7 @@ pub struct RemoveMappingCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct MtuCmd {
     /// The name of the config to operate on.
-    #[arg(long = "name", short = 'n')]
+    #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
     pub config_name: String,
     /// MTU value for IPv4.
     #[arg(long)]
@@ -154,7 +158,7 @@ pub struct MtuCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct DropCmd {
     /// The name of the config to operate on.
-    #[arg(long = "name", short = 'n')]
+    #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
     pub config_name: String,
     /// Drop packets with unknown prefix
     #[arg(long)]
@@ -164,9 +168,13 @@ pub struct DropCmd {
     pub drop_unknown_mapping: bool,
 }
 
-#[tokio::main(flavor = "current_thread")]
-pub async fn main() {
+fn main() {
     CompleteEnv::with_factory(Cmd::command).complete();
+    start();
+}
+
+#[tokio::main(flavor = "current_thread")]
+async fn start() {
     let cmd = Cmd::parse();
     ync::init(cmd.verbose, cmd.format);
 
@@ -433,4 +441,20 @@ fn print_tree(resp: &ShowConfigResponse) {
     }
 
     let _ = ptree::print_tree(&tree.build());
+}
+
+/// Completion candidates for a `--name` argument: the nat64 configs the
+/// module currently knows.
+///
+/// Strictly best-effort — see [`completion::candidates`].
+fn config_candidates() -> Vec<CompletionCandidate> {
+    completion::candidates(
+        Cmd::command,
+        |channel| {
+            Nat64ServiceClient::new(channel)
+                .send_compressed(CompressionEncoding::Gzip)
+                .accept_compressed(CompressionEncoding::Gzip)
+        },
+        async move |mut client| Ok(client.list_configs(ListConfigsRequest {}).await?.into_inner().configs),
+    )
 }

@@ -4,7 +4,10 @@ use std::{
 };
 
 use clap::{ArgAction, CommandFactory, Parser};
-use clap_complete::CompleteEnv;
+use clap_complete::{
+    CompleteEnv,
+    engine::{ArgValueCandidates, CompletionCandidate},
+};
 use mirrorpb::{
     DeleteConfigRequest, ListConfigsRequest, ShowConfigRequest, UpdateConfigRequest,
     mirror_service_client::MirrorServiceClient,
@@ -14,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use tonic::codec::CompressionEncoding;
 use ync::{
     client::{ConnectionArgs, LayeredChannel, Service},
+    completion,
     errors::Error,
     output::{self, CommonFormat},
 };
@@ -53,21 +57,21 @@ pub enum ModeCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct ShowCmd {
     /// The name of the module config to show.
-    #[arg(long = "name", short = 'n')]
+    #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
     pub config_name: String,
 }
 
 #[derive(Debug, Clone, Parser)]
 pub struct DeleteCmd {
     /// The name of the module config to delete.
-    #[arg(long = "name", short = 'n')]
+    #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
     pub config: String,
 }
 
 #[derive(Debug, Clone, Parser)]
 pub struct UpdateCmd {
     /// The name of the module config to operate on.
-    #[arg(long = "name", short = 'n')]
+    #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
     pub config: String,
     /// Ruleset file path.
     #[arg(required = true, long = "rules", value_name = "PATH")]
@@ -264,9 +268,13 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
     }
 }
 
-#[tokio::main(flavor = "current_thread")]
-pub async fn main() {
+fn main() {
     CompleteEnv::with_factory(Cmd::command).complete();
+    start();
+}
+
+#[tokio::main(flavor = "current_thread")]
+async fn start() {
     let cmd = Cmd::parse();
     ync::init(cmd.verbose, cmd.format);
 
@@ -274,4 +282,20 @@ pub async fn main() {
         output::failure(&err);
         std::process::exit(err.exit_code());
     }
+}
+
+/// Completion candidates for a `--name` argument: the mirror configs the
+/// module currently knows.
+///
+/// Strictly best-effort — see [`completion::candidates`].
+fn config_candidates() -> Vec<CompletionCandidate> {
+    completion::candidates(
+        Cmd::command,
+        |channel| {
+            MirrorServiceClient::new(channel)
+                .send_compressed(CompressionEncoding::Gzip)
+                .accept_compressed(CompressionEncoding::Gzip)
+        },
+        async move |mut client| Ok(client.list_configs(ListConfigsRequest {}).await?.into_inner().configs),
+    )
 }

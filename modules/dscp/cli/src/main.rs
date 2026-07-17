@@ -1,5 +1,8 @@
 use clap::{ArgAction, CommandFactory, Parser};
-use clap_complete::CompleteEnv;
+use clap_complete::{
+    CompleteEnv,
+    engine::{ArgValueCandidates, CompletionCandidate},
+};
 use dscppb::{
     AddPrefixesRequest, DscpConfig, RemovePrefixesRequest, SetDscpMarkingRequest, ShowConfigRequest,
     ShowConfigResponse, dscp_service_client::DscpServiceClient,
@@ -9,6 +12,7 @@ use ptree::TreeBuilder;
 use tonic::codec::CompressionEncoding;
 use ync::{
     client::{ConnectionArgs, LayeredChannel, Service},
+    completion,
     errors::Error,
     output::{self, CommonFormat},
 };
@@ -51,14 +55,14 @@ pub enum ModeCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct ShowConfigCmd {
     /// DSCP module name to operate on.
-    #[arg(long = "name", short = 'n')]
+    #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
     pub config_name: String,
 }
 
 #[derive(Debug, Clone, Parser)]
 pub struct AddPrefixesCmd {
     /// DSCP module name to operate on.
-    #[arg(long = "name", short = 'n')]
+    #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
     pub config_name: String,
     /// Prefix to be added to the input filter of the DSCP module.
     #[arg(long, short, required = true)]
@@ -68,7 +72,7 @@ pub struct AddPrefixesCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct RemovePrefixesCmd {
     /// DSCP module name to operate on.
-    #[arg(long = "name", short = 'n')]
+    #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
     pub config_name: String,
     /// Prefix to be removed from the input filter of the DSCP module.
     #[arg(long, short, required = true)]
@@ -78,7 +82,7 @@ pub struct RemovePrefixesCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct SetDscpMarkingCmd {
     /// DSCP module name to operate on.
-    #[arg(long = "name", short = 'n')]
+    #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
     pub config_name: String,
     /// DSCP marking flag: 0 - Never, 1 - Default (only if original DSCP is 0),
     /// 2 - Always
@@ -92,9 +96,13 @@ pub struct SetDscpMarkingCmd {
 /// The fully-qualified gRPC service name used in error messages.
 const SERVICE_NAME: &str = "modules.dscp.controlplane.dscppb.v1.DscpService";
 
-#[tokio::main(flavor = "current_thread")]
-pub async fn main() {
+fn main() {
     CompleteEnv::with_factory(Cmd::command).complete();
+    start();
+}
+
+#[tokio::main(flavor = "current_thread")]
+async fn start() {
     let cmd = Cmd::parse();
     ync::init(cmd.verbose, cmd.format);
 
@@ -284,4 +292,20 @@ fn flag_to_string(flag: u32) -> String {
         2 => "Always".to_string(),
         _ => format!("Unknown ({flag})"),
     }
+}
+
+/// Completion candidates for a `--name` argument: the dscp configs the
+/// module currently knows.
+///
+/// Strictly best-effort — see [`completion::candidates`].
+fn config_candidates() -> Vec<CompletionCandidate> {
+    completion::candidates(
+        Cmd::command,
+        |channel| {
+            DscpServiceClient::new(channel)
+                .send_compressed(CompressionEncoding::Gzip)
+                .accept_compressed(CompressionEncoding::Gzip)
+        },
+        async move |mut client| Ok(client.list_configs(ListConfigsRequest {}).await?.into_inner().configs),
+    )
 }

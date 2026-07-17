@@ -3,10 +3,14 @@ use blackholepb::{
     blackhole_service_client::BlackholeServiceClient,
 };
 use clap::{ArgAction, CommandFactory, Parser};
-use clap_complete::CompleteEnv;
+use clap_complete::{
+    CompleteEnv,
+    engine::{ArgValueCandidates, CompletionCandidate},
+};
 use tonic::codec::CompressionEncoding;
 use ync::{
     client::{ConnectionArgs, LayeredChannel},
+    completion,
     errors::Error,
     output::{self, CommonFormat},
 };
@@ -45,30 +49,34 @@ pub enum ModeCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct ShowConfigCmd {
     /// Blackhole module name to operate on.
-    #[arg(long = "name", short = 'n')]
+    #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
     pub config_name: String,
 }
 
 #[derive(Debug, Clone, Parser)]
 pub struct UpdateConfigCmd {
     /// Blackhole module name to create or replace.
-    #[arg(long = "name", short = 'n')]
+    #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
     pub config_name: String,
 }
 
 #[derive(Debug, Clone, Parser)]
 pub struct DeleteConfigCmd {
     /// Blackhole module name to delete.
-    #[arg(long = "name", short = 'n')]
+    #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
     pub config_name: String,
 }
 
 /// The fully-qualified gRPC service name used in error messages.
 const SERVICE_NAME: &str = "modules.blackhole.controlplane.blackholepb.v1.BlackholeService";
 
-#[tokio::main(flavor = "current_thread")]
-pub async fn main() {
+fn main() {
     CompleteEnv::with_factory(Cmd::command).complete();
+    start();
+}
+
+#[tokio::main(flavor = "current_thread")]
+async fn start() {
     let cmd = Cmd::parse();
     ync::init(cmd.verbose, cmd.format);
 
@@ -187,4 +195,20 @@ impl BlackholeService {
 
         Ok(())
     }
+}
+
+/// Completion candidates for a `--name` argument: the blackhole configs the
+/// module currently knows.
+///
+/// Strictly best-effort — see [`completion::candidates`].
+fn config_candidates() -> Vec<CompletionCandidate> {
+    completion::candidates(
+        Cmd::command,
+        |channel| {
+            BlackholeServiceClient::new(channel)
+                .send_compressed(CompressionEncoding::Gzip)
+                .accept_compressed(CompressionEncoding::Gzip)
+        },
+        async move |mut client| Ok(client.list_configs(ListConfigsRequest {}).await?.into_inner().configs),
+    )
 }

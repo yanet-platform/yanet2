@@ -6,12 +6,13 @@ use aclpb::{
 };
 use args::{DeleteCmd, MetricsCmd, ModeCmd, ShowCmd, UpdateCmd};
 use clap::{ArgAction, CommandFactory, Parser};
-use clap_complete::CompleteEnv;
+use clap_complete::{CompleteEnv, engine::CompletionCandidate};
 use serde::{Deserialize, Serialize};
 use tabled::Tabled;
 use tonic::codec::CompressionEncoding;
 use ync::{
     client::{Connection, ConnectionArgs, LayeredChannel, Service},
+    completion,
     display::print_table_from_entries,
     errors::Error,
     metrics::{self, GaugeRow, Kind, Metric},
@@ -453,9 +454,13 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
     }
 }
 
-#[tokio::main(flavor = "current_thread")]
-pub async fn main() {
+fn main() {
     CompleteEnv::with_factory(Cmd::command).complete();
+    start();
+}
+
+#[tokio::main(flavor = "current_thread")]
+async fn start() {
     let cmd = Cmd::parse();
     ync::init(cmd.verbose, cmd.format);
 
@@ -463,6 +468,24 @@ pub async fn main() {
         output::failure(&err);
         std::process::exit(err.exit_code());
     }
+}
+
+/// Completion candidates for a `--name` argument: the ACL configs the
+/// module currently knows.
+///
+/// Strictly best-effort — see [`completion::candidates`].
+fn config_candidates() -> Vec<CompletionCandidate> {
+    completion::candidates(
+        Cmd::command,
+        |channel| {
+            AclServiceClient::new(channel)
+                .max_decoding_message_size(256 * 1024 * 1024)
+                .max_encoding_message_size(256 * 1024 * 1024)
+                .send_compressed(CompressionEncoding::Gzip)
+                .accept_compressed(CompressionEncoding::Gzip)
+        },
+        async move |mut client| Ok(client.list_configs(ListConfigsRequest {}).await?.into_inner().configs),
+    )
 }
 
 #[cfg(test)]
