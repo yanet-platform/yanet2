@@ -72,7 +72,11 @@ func isExcluded(path string, excludes []string) bool {
 }
 
 // collectProtoFiles walks the directory tree rooted at root and returns a
-// parsed protoFile for every .proto file found, skipping excluded directories.
+// parsed protoFile for every .proto file found.
+//
+// It skips excluded directories and any dot-prefixed directory other than
+// root itself, since dot-directories in this repository host full worktree
+// copies of the repository.
 func collectProtoFiles(root string, excludes []string) ([]protoFile, error) {
 	var files []protoFile
 
@@ -82,6 +86,9 @@ func collectProtoFiles(root string, excludes []string) ([]protoFile, error) {
 		}
 
 		if info.IsDir() {
+			if path != root && strings.HasPrefix(info.Name(), ".") {
+				return filepath.SkipDir
+			}
 			if isExcluded(path, excludes) {
 				return filepath.SkipDir
 			}

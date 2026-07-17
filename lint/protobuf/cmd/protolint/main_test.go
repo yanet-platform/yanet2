@@ -85,6 +85,65 @@ func TestCollectProtoFilesExclude(t *testing.T) {
 	}
 }
 
+// TestCollectProtoFilesSkipsDotDirectories verifies that a .proto file
+// nested under a dot-prefixed directory is not collected, while a .proto
+// file directly under a dot-prefixed root still is.
+func TestCollectProtoFilesSkipsDotDirectories(t *testing.T) {
+	t.Run("dot directory below root is skipped", func(t *testing.T) {
+		root := t.TempDir()
+
+		includedDir := filepath.Join(root, "goodpb")
+		dotDir := filepath.Join(root, ".assets", "cache", "src", "goodpb")
+		for _, d := range []string{includedDir, dotDir} {
+			if err := os.MkdirAll(d, 0o755); err != nil {
+				t.Fatalf("mkdir: %v", err)
+			}
+		}
+
+		writeFile := func(path, content string) {
+			t.Helper()
+			if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+				t.Fatalf("write: %v", err)
+			}
+		}
+
+		writeFile(filepath.Join(includedDir, "good.proto"), "syntax = \"proto3\";\npackage goodpb;\n")
+		writeFile(filepath.Join(dotDir, "stale.proto"), "syntax = \"proto3\";\npackage goodpb;\n")
+
+		files, err := collectProtoFiles(root, nil)
+		if err != nil {
+			t.Fatalf("collectProtoFiles: %v", err)
+		}
+
+		if len(files) != 1 {
+			t.Fatalf("got %d files, want 1: %v", len(files), files)
+		}
+		if files[0].Path != filepath.Join(includedDir, "good.proto") {
+			t.Errorf("collected file = %q, want %q", files[0].Path, filepath.Join(includedDir, "good.proto"))
+		}
+	})
+
+	t.Run("dot-prefixed root is still scanned", func(t *testing.T) {
+		parent := t.TempDir()
+		root := filepath.Join(parent, ".hidden")
+		if err := os.MkdirAll(root, 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "good.proto"), []byte("syntax = \"proto3\";\npackage goodpb;\n"), 0o644); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+
+		files, err := collectProtoFiles(root, nil)
+		if err != nil {
+			t.Fatalf("collectProtoFiles: %v", err)
+		}
+
+		if len(files) != 1 {
+			t.Fatalf("got %d files, want 1: %v", len(files), files)
+		}
+	})
+}
+
 // writeProto creates a temporary .proto file with the given content inside a
 // subdirectory named dirName under a root temp dir. It returns the file path
 // and the root directory.

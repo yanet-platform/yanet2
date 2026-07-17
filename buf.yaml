@@ -4,6 +4,7 @@ modules:
     excludes:
       - subprojects
       - .claude
+      - .assets
 lint:
   use:
     - STANDARD
