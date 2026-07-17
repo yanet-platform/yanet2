@@ -21,18 +21,6 @@
 
 common/go/operator/operator.go:NewOperator:opts.GRPCServer.cfg  # legacy: encapsulate behind an exported method or field
 common/go/operator/operator.go:NewOperator:opts.GRPCServer.services  # legacy: encapsulate behind an exported method or field
-common/go/xbackoff/backoff.go:New:opts.jitter  # legacy: encapsulate behind an exported method or field
-common/go/xbackoff/backoff.go:New:opts.max  # legacy: encapsulate behind an exported method or field
-common/go/xbackoff/backoff.go:New:opts.multiplier  # legacy: encapsulate behind an exported method or field
-common/go/xbackoff/backoff.go:New:opts.onReset  # legacy: encapsulate behind an exported method or field
-common/go/xbackoff/backoff.go:New:opts.onRetry  # legacy: encapsulate behind an exported method or field
-common/go/xbackoff/backoff.go:New:opts.sleeper  # legacy: encapsulate behind an exported method or field
-common/go/xbackoff/backoff.go:WithMax:o.max  # legacy: encapsulate behind an exported method or field
-common/go/xbackoff/backoff.go:WithMultiplier:o.multiplier  # legacy: encapsulate behind an exported method or field
-common/go/xbackoff/backoff.go:WithOnReset:o.onReset  # legacy: encapsulate behind an exported method or field
-common/go/xbackoff/backoff.go:WithOnRetry:o.onRetry  # legacy: encapsulate behind an exported method or field
-common/go/xbackoff/backoff.go:WithRandomization:o.jitter  # legacy: encapsulate behind an exported method or field
-common/go/xbackoff/backoff.go:WithSleeper:o.sleeper  # legacy: encapsulate behind an exported method or field
 common/go/xnetip/uint128.go:uint128.Xor:other.hi  # legacy: encapsulate behind an exported method or field
 common/go/xnetip/uint128.go:uint128.Xor:other.lo  # legacy: encapsulate behind an exported method or field
 controlplane/bundle/bundle.go:buildServices:factory.name  # legacy: encapsulate behind an exported method or field

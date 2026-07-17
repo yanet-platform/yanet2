@@ -8,20 +8,20 @@ import (
 )
 
 type options struct {
-	max        time.Duration
-	multiplier float64
-	jitter     float64
-	sleeper    Sleeper
-	onRetry    func(attempt int, delay time.Duration, err error)
-	onReset    func()
+	Max        time.Duration
+	Multiplier float64
+	Jitter     float64
+	Sleeper    Sleeper
+	OnRetry    func(attempt int, delay time.Duration, err error)
+	OnReset    func()
 }
 
 func newOptions() *options {
 	return &options{
-		max:        backoff.DefaultMaxInterval,
-		multiplier: backoff.DefaultMultiplier,
-		jitter:     backoff.DefaultRandomizationFactor,
-		sleeper:    TimerSleeper{},
+		Max:        backoff.DefaultMaxInterval,
+		Multiplier: backoff.DefaultMultiplier,
+		Jitter:     backoff.DefaultRandomizationFactor,
+		Sleeper:    TimerSleeper{},
 	}
 }
 
@@ -30,23 +30,23 @@ type Option func(*options)
 
 // WithMax overrides the maximum interval between retries.
 func WithMax(d time.Duration) Option {
-	return func(o *options) { o.max = d }
+	return func(o *options) { o.Max = d }
 }
 
 // WithMultiplier overrides the exponential growth multiplier.
 func WithMultiplier(m float64) Option {
-	return func(o *options) { o.multiplier = m }
+	return func(o *options) { o.Multiplier = m }
 }
 
 // WithRandomization overrides the jitter factor applied to each
 // interval.
 func WithRandomization(f float64) Option {
-	return func(o *options) { o.jitter = f }
+	return func(o *options) { o.Jitter = f }
 }
 
 // WithSleeper installs a custom wait strategy.
 func WithSleeper(s Sleeper) Option {
-	return func(o *options) { o.sleeper = s }
+	return func(o *options) { o.Sleeper = s }
 }
 
 // WithOnRetry installs a callback invoked AFTER op returned an error
@@ -54,7 +54,7 @@ func WithSleeper(s Sleeper) Option {
 //
 // Attempt starts at 1 for the first failure.
 func WithOnRetry(f func(attempt int, delay time.Duration, err error)) Option {
-	return func(o *options) { o.onRetry = f }
+	return func(o *options) { o.OnRetry = f }
 }
 
 // WithOnReset installs a callback invoked from RunContext on success
@@ -64,7 +64,7 @@ func WithOnRetry(f func(attempt int, delay time.Duration, err error)) Option {
 // The callback is only fired when the reset is meaningful, so it is safe to
 // use as a "backoff cleared" signal.
 func WithOnReset(f func()) Option {
-	return func(o *options) { o.onReset = f }
+	return func(o *options) { o.OnReset = f }
 }
 
 // Backoff is a retry helper with exponential delay and a pluggable
@@ -91,17 +91,17 @@ func New(initial time.Duration, options ...Option) *Backoff {
 
 	m := &Backoff{
 		initial:    initial,
-		max:        opts.max,
-		multiplier: opts.multiplier,
-		jitter:     opts.jitter,
-		sleeper:    opts.sleeper,
-		onRetry:    opts.onRetry,
-		onReset:    opts.onReset,
+		max:        opts.Max,
+		multiplier: opts.Multiplier,
+		jitter:     opts.Jitter,
+		sleeper:    opts.Sleeper,
+		onRetry:    opts.OnRetry,
+		onReset:    opts.OnReset,
 		inner: backoff.ExponentialBackOff{
 			InitialInterval:     initial,
-			RandomizationFactor: opts.jitter,
-			Multiplier:          opts.multiplier,
-			MaxInterval:         opts.max,
+			RandomizationFactor: opts.Jitter,
+			Multiplier:          opts.Multiplier,
+			MaxInterval:         opts.Max,
 		},
 	}
 	m.inner.Reset()
