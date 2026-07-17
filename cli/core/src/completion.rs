@@ -103,6 +103,14 @@ fn default_connection_args() -> ConnectionArgs {
 /// `lookup` must be a genuine async closure, `async move |client| …`, not a
 /// plain closure returning an `async move` block — the latter cannot infer
 /// `client`'s type and fails to compile.
+///
+/// Do not attach these candidates to an argument that uses clap's
+/// `value_delimiter`, such as a comma-separated list like pipeline's
+/// `--functions acl,route`. `ArgValueCandidates` completes the whole raw
+/// token before delimiter splitting, so a candidate would try to replace the
+/// entire typed token rather than just its trailing element, producing a
+/// wrong insertion — completing a delimited list needs delimiter-aware
+/// candidates, which this helper does not provide.
 pub fn candidates<C, B, F>(command: impl FnOnce() -> Command, build: B, lookup: F) -> Vec<CompletionCandidate>
 where
     B: FnOnce(LayeredChannel) -> C,

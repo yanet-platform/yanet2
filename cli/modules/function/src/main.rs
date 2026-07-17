@@ -1,11 +1,15 @@
 //! CLI for YANET "function" module.
 
 use clap::{ArgAction, CommandFactory, Parser};
-use clap_complete::CompleteEnv;
+use clap_complete::{
+    engine::{ArgValueCandidates, CompletionCandidate},
+    CompleteEnv,
+};
 use commonpb::pb::FunctionId;
 use tonic::{codec::CompressionEncoding, Status};
 use ync::{
     client::{ConnectionArgs, LayeredChannel, Service},
+    completion,
     errors::{Error, NotFoundMapper},
     output::{self, CommonFormat},
 };
@@ -49,7 +53,7 @@ pub enum ModeCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct ShowCmd {
     /// Function name.
-    #[arg(short, long)]
+    #[arg(short, long, add = ArgValueCandidates::new(function_candidates))]
     pub name: String,
 }
 
@@ -60,7 +64,7 @@ pub struct ShowCmd {
 )]
 pub struct UpdateCmd {
     /// Function name.
-    #[arg(short, long)]
+    #[arg(short, long, add = ArgValueCandidates::new(function_candidates))]
     pub name: String,
     /// Chains in format `name:weight=type:name,type:name`.
     #[arg(long, required = true)]
@@ -70,14 +74,17 @@ pub struct UpdateCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct DeleteCmd {
     /// Function name.
-    #[arg(short, long)]
+    #[arg(short, long, add = ArgValueCandidates::new(function_candidates))]
     pub name: String,
 }
 
-#[tokio::main(flavor = "current_thread")]
-pub async fn main() {
+fn main() {
     CompleteEnv::with_factory(Cmd::command).complete();
+    start();
+}
 
+#[tokio::main(flavor = "current_thread")]
+async fn start() {
     let cmd = Cmd::parse();
     ync::init(cmd.verbose, cmd.format);
 
@@ -224,4 +231,29 @@ impl FunctionService {
 
         Ok(())
     }
+}
+
+/// Completion candidates for a `--name` argument: the functions the module
+/// currently knows.
+///
+/// Strictly best-effort — see [`completion::candidates`].
+fn function_candidates() -> Vec<CompletionCandidate> {
+    completion::candidates(
+        Cmd::command,
+        |channel| {
+            FunctionServiceClient::new(channel)
+                .send_compressed(CompressionEncoding::Gzip)
+                .accept_compressed(CompressionEncoding::Gzip)
+        },
+        async move |mut client| {
+            Ok(client
+                .list(ListFunctionsRequest {})
+                .await?
+                .into_inner()
+                .ids
+                .into_iter()
+                .map(|id| id.name)
+                .collect())
+        },
+    )
 }

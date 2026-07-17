@@ -1,11 +1,15 @@
 //! CLI for YANET "pipeline" module.
 
 use clap::{ArgAction, CommandFactory, Parser};
-use clap_complete::CompleteEnv;
+use clap_complete::{
+    engine::{ArgValueCandidates, CompletionCandidate},
+    CompleteEnv,
+};
 use commonpb::pb::{FunctionId, PipelineId};
 use tonic::codec::CompressionEncoding;
 use ync::{
     client::{ConnectionArgs, LayeredChannel, Service},
+    completion,
     errors::{Error, NotFoundMapper},
     output::{self, CommonFormat},
 };
@@ -60,7 +64,7 @@ impl ModeCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct ShowCmd {
     /// Pipeline name.
-    #[arg(short, long)]
+    #[arg(short, long, add = ArgValueCandidates::new(pipeline_candidates))]
     pub name: String,
 }
 
@@ -71,7 +75,7 @@ pub struct ShowCmd {
 )]
 pub struct UpdateCmd {
     /// Pipeline name.
-    #[arg(short, long)]
+    #[arg(short, long, add = ArgValueCandidates::new(pipeline_candidates))]
     pub name: String,
     /// Pipeline functions.
     #[arg(long, value_delimiter = ',')]
@@ -81,14 +85,17 @@ pub struct UpdateCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct DeleteCmd {
     /// Pipeline name.
-    #[arg(short, long)]
+    #[arg(short, long, add = ArgValueCandidates::new(pipeline_candidates))]
     pub name: String,
 }
 
-#[tokio::main(flavor = "current_thread")]
-pub async fn main() {
+fn main() {
     CompleteEnv::with_factory(Cmd::command).complete();
+    start();
+}
 
+#[tokio::main(flavor = "current_thread")]
+async fn start() {
     let cmd = Cmd::parse();
     ync::init(cmd.verbose, cmd.format);
 
@@ -238,4 +245,29 @@ impl PipelineService {
 
         Ok(())
     }
+}
+
+/// Completion candidates for a `--name` argument: the pipelines the module
+/// currently knows.
+///
+/// Strictly best-effort — see [`completion::candidates`].
+fn pipeline_candidates() -> Vec<CompletionCandidate> {
+    completion::candidates(
+        Cmd::command,
+        |channel| {
+            PipelineServiceClient::new(channel)
+                .send_compressed(CompressionEncoding::Gzip)
+                .accept_compressed(CompressionEncoding::Gzip)
+        },
+        async move |mut client| {
+            Ok(client
+                .list(ListPipelinesRequest {})
+                .await?
+                .into_inner()
+                .ids
+                .into_iter()
+                .map(|id| id.name)
+                .collect())
+        },
+    )
 }
