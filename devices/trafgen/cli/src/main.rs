@@ -1,7 +1,10 @@
 use std::path::PathBuf;
 
 use clap::{ArgAction, CommandFactory, Parser};
-use clap_complete::CompleteEnv;
+use clap_complete::{
+    CompleteEnv,
+    engine::{ArgValueCandidates, CompletionCandidate},
+};
 use commonpb::pb::Device;
 use tonic::codec::CompressionEncoding;
 use trafgenpb::{
@@ -10,6 +13,7 @@ use trafgenpb::{
 };
 use ync::{
     client::{ConnectionArgs, LayeredChannel, Service},
+    completion,
     errors::Error,
     output::{self, CommonFormat},
 };
@@ -55,7 +59,7 @@ pub enum ModeCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct UpdateCmd {
     /// Generator device name to operate on.
-    #[arg(long = "name", short = 'n')]
+    #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
     pub config_name: String,
     /// Input pipeline assignments in "pipeline:weight" format.
     #[arg(short, long)]
@@ -68,14 +72,14 @@ pub struct UpdateCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct ShowConfigCmd {
     /// Generator device name to operate on.
-    #[arg(long = "name", short = 'n')]
+    #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
     pub config_name: String,
 }
 
 #[derive(Debug, Clone, Parser)]
 pub struct UploadPcapCmd {
     /// Generator device name to operate on.
-    #[arg(long = "name", short = 'n')]
+    #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
     pub config_name: String,
     /// Path to the pcap file whose packets are replayed.
     #[arg(long, short)]
@@ -85,7 +89,7 @@ pub struct UploadPcapCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct SetRateCmd {
     /// Generator device name to operate on.
-    #[arg(long = "name", short = 'n')]
+    #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
     pub config_name: String,
     /// Target aggregate packet rate in packets per second.
     #[arg(long, short = 'r')]
@@ -237,9 +241,13 @@ async fn run(cmd: Cmd) -> Result<(), Error> {
     }
 }
 
-#[tokio::main(flavor = "current_thread")]
-pub async fn main() {
+fn main() {
     CompleteEnv::with_factory(Cmd::command).complete();
+    start();
+}
+
+#[tokio::main(flavor = "current_thread")]
+async fn start() {
     let cmd = Cmd::parse();
     ync::init(cmd.verbose, cmd.format);
 
@@ -247,4 +255,22 @@ pub async fn main() {
         output::failure(&err);
         std::process::exit(err.exit_code());
     }
+}
+
+/// Completion candidates for a `--name` argument: the generator device
+/// configs the module currently knows.
+///
+/// Strictly best-effort — see [`completion::candidates`].
+fn config_candidates() -> Vec<CompletionCandidate> {
+    completion::candidates(
+        Cmd::command,
+        |channel| {
+            TrafgenServiceClient::new(channel)
+                .max_decoding_message_size(256 * 1024 * 1024)
+                .max_encoding_message_size(256 * 1024 * 1024)
+                .send_compressed(CompressionEncoding::Gzip)
+                .accept_compressed(CompressionEncoding::Gzip)
+        },
+        async move |mut client| Ok(client.list_configs(ListConfigsRequest {}).await?.into_inner().configs),
+    )
 }

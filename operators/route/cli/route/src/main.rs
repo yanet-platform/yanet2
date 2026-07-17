@@ -11,7 +11,10 @@ use core::{
 use std::collections::HashMap;
 
 use clap::{ArgAction, CommandFactory, Parser};
-use clap_complete::CompleteEnv;
+use clap_complete::{
+    CompleteEnv,
+    engine::{ArgValueCandidates, CompletionCandidate},
+};
 use colored::Colorize;
 use netip::{Contiguous, IpNetwork};
 use tabled::{
@@ -25,6 +28,7 @@ use tabled::{
 use tonic::codec::CompressionEncoding;
 use ync::{
     client::{Connection, ConnectionArgs, LayeredChannel, Service},
+    completion,
     errors::Error,
     output::{self, CommonFormat},
     readiness,
@@ -98,7 +102,7 @@ pub struct RouteShowCmd {
     #[arg(long)]
     pub ipv6: bool,
     /// Configuration name.
-    #[arg(long = "name", short = 'n')]
+    #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
     pub name: String,
 }
 
@@ -107,7 +111,7 @@ pub struct RouteLookupCmd {
     /// IP address to look up.
     pub addr: IpAddr,
     /// Configuration name.
-    #[arg(long = "name", short = 'n')]
+    #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
     pub name: String,
 }
 
@@ -116,7 +120,7 @@ pub struct RouteInsertCmd {
     /// Destination prefix in CIDR notation.
     pub prefix: Contiguous<IpNetwork>,
     /// Configuration name.
-    #[arg(long = "name", short = 'n')]
+    #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
     pub name: String,
     /// Next-hop IP address(es); repeat `--via` to specify multiple nexthops for
     /// ECMP.
@@ -132,7 +136,7 @@ pub struct RouteRemoveCmd {
     /// Destination prefix in CIDR notation.
     pub prefix: Contiguous<IpNetwork>,
     /// Configuration name.
-    #[arg(long = "name", short = 'n')]
+    #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
     pub name: String,
     /// Next-hop IP address(es); repeat `--via` to specify multiple nexthops for
     /// ECMP.
@@ -146,7 +150,7 @@ pub struct RouteRemoveCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct RouteFlushCmd {
     /// Configuration name.
-    #[arg(long = "name", short = 'n')]
+    #[arg(long = "name", short = 'n', add = ArgValueCandidates::new(config_candidates))]
     pub name: String,
 }
 
@@ -172,10 +176,13 @@ impl RouteSource {
     }
 }
 
-#[tokio::main(flavor = "current_thread")]
-pub async fn main() {
+fn main() {
     CompleteEnv::with_factory(Cmd::command).complete();
+    start();
+}
 
+#[tokio::main(flavor = "current_thread")]
+async fn start() {
     let cmd = Cmd::parse();
 
     ync::init(cmd.verbose, cmd.format);
@@ -188,6 +195,22 @@ pub async fn main() {
             std::process::exit(err.exit_code());
         }
     }
+}
+
+/// Completion candidates for a `--name` argument: the route operator
+/// configs the operator currently knows.
+///
+/// Strictly best-effort — see [`completion::candidates`].
+fn config_candidates() -> Vec<CompletionCandidate> {
+    completion::candidates(
+        Cmd::command,
+        |channel| {
+            RouteServiceClient::new(channel)
+                .send_compressed(CompressionEncoding::Gzip)
+                .accept_compressed(CompressionEncoding::Gzip)
+        },
+        async move |mut client| Ok(client.list_configs(ListConfigsRequest {}).await?.into_inner().configs),
+    )
 }
 
 /// Run the requested subcommand.
