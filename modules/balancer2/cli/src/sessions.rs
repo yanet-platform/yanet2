@@ -1,4 +1,5 @@
 use clap::Parser;
+use clap_complete::engine::ArgValueCandidates;
 
 use crate::FilterFlags;
 
@@ -21,7 +22,7 @@ pub enum SessionsMode {
 #[derive(Debug, Clone, Parser)]
 pub struct SessionsShowCmd {
     /// Sessions state name.
-    #[arg(long, short = 'n')]
+    #[arg(long, short = 'n', add = ArgValueCandidates::new(crate::sessions_candidates))]
     pub name: String,
 
     #[command(flatten)]
@@ -31,7 +32,7 @@ pub struct SessionsShowCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct SessionsUpdateCmd {
     /// Sessions state name.
-    #[arg(long, short = 'n')]
+    #[arg(long, short = 'n', add = ArgValueCandidates::new(crate::sessions_candidates))]
     pub name: String,
     /// Capacity (number of session entries).
     #[arg(long, short = 'c')]

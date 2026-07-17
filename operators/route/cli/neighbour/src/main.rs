@@ -12,13 +12,17 @@ use core::{
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use clap::{ArgAction, CommandFactory, Parser};
-use clap_complete::CompleteEnv;
+use clap_complete::{
+    CompleteEnv,
+    engine::{ArgValueCandidates, CompletionCandidate},
+};
 use commonpb::pb::{IpAddress, MacAddress};
 use netip::MacAddr;
 use tabled::Tabled;
 use tonic::codec::CompressionEncoding;
 use ync::{
     client::{ConnectionArgs, LayeredChannel, Service},
+    completion,
     display::print_table_from_entries,
     errors::{Error, NotFoundMapper},
     output::{self, CommonFormat},
@@ -92,7 +96,7 @@ pub enum TableAction {
 pub struct ShowCmd {
     /// Show entries from a specific table only. If omitted, shows the
     /// merged view.
-    #[arg(long)]
+    #[arg(long, add = ArgValueCandidates::new(table_candidates))]
     pub table: Option<String>,
 }
 
@@ -110,7 +114,7 @@ pub struct AddCmd {
     #[arg(long)]
     pub device: Option<String>,
     /// Neighbour table name. Defaults to "static".
-    #[arg(long)]
+    #[arg(long, add = ArgValueCandidates::new(table_candidates))]
     pub table: Option<String>,
     /// Priority for this entry (lower wins). Defaults to the table's
     /// default priority.
@@ -123,13 +127,14 @@ pub struct RemoveCmd {
     /// Next-hop IP address(es) to remove.
     pub next_hops: Vec<String>,
     /// Neighbour table name. Defaults to "static".
-    #[arg(long)]
+    #[arg(long, add = ArgValueCandidates::new(table_candidates))]
     pub table: Option<String>,
 }
 
 #[derive(Debug, Clone, Parser)]
 pub struct CreateTableCmd {
     /// Neighbour table name.
+    #[arg(add = ArgValueCandidates::new(table_candidates))]
     pub name: String,
     /// Default priority for entries in this table.
     #[arg(long)]
@@ -139,6 +144,7 @@ pub struct CreateTableCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct UpdateTableCmd {
     /// Neighbour table name.
+    #[arg(add = ArgValueCandidates::new(table_candidates))]
     pub name: String,
     /// New default priority for entries in this table.
     #[arg(long)]
@@ -148,13 +154,17 @@ pub struct UpdateTableCmd {
 #[derive(Debug, Clone, Parser)]
 pub struct RemoveTableCmd {
     /// Table name.
+    #[arg(add = ArgValueCandidates::new(table_candidates))]
     pub name: String,
 }
 
-#[tokio::main(flavor = "current_thread")]
-pub async fn main() {
+fn main() {
     CompleteEnv::with_factory(Cmd::command).complete();
+    start();
+}
 
+#[tokio::main(flavor = "current_thread")]
+async fn start() {
     let cmd = Cmd::parse();
     ync::init(cmd.verbose, cmd.format);
 
@@ -481,4 +491,29 @@ impl From<NeighbourTableInfo> for TableEntry {
             built_in: table.built_in,
         }
     }
+}
+
+/// Completion candidates for a table-name argument: the neighbour tables
+/// the operator currently knows.
+///
+/// Strictly best-effort — see [`completion::candidates`].
+fn table_candidates() -> Vec<CompletionCandidate> {
+    completion::candidates(
+        Cmd::command,
+        |channel| {
+            NeighbourServiceClient::new(channel)
+                .send_compressed(CompressionEncoding::Gzip)
+                .accept_compressed(CompressionEncoding::Gzip)
+        },
+        async move |mut client| {
+            Ok(client
+                .list_tables(ListNeighbourTablesRequest {})
+                .await?
+                .into_inner()
+                .tables
+                .into_iter()
+                .map(|table| table.name)
+                .collect())
+        },
+    )
 }

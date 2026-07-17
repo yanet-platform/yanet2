@@ -71,7 +71,7 @@ pub struct UpdateCmd {
     pub config: String,
     /// Sessions state name to bind this configuration to (required on first
     /// create; optional on subsequent updates of an existing config).
-    #[arg(long, short = 's')]
+    #[arg(long, short = 's', add = ArgValueCandidates::new(sessions_candidates))]
     pub sessions: Option<String>,
 }
 
@@ -339,6 +339,28 @@ fn config_candidates() -> Vec<CompletionCandidate> {
         async move |mut client| {
             Ok(client
                 .list_configs(balancerpb::ListConfigsRequest {})
+                .await?
+                .into_inner()
+                .names)
+        },
+    )
+}
+
+/// Completion candidates for a sessions-state name argument: the sessions
+/// states the module currently knows.
+///
+/// Strictly best-effort — see [`completion::candidates`].
+fn sessions_candidates() -> Vec<CompletionCandidate> {
+    completion::candidates(
+        Cmd::command,
+        |channel| {
+            balancerpb::balancer_client::BalancerClient::new(channel)
+                .send_compressed(CompressionEncoding::Gzip)
+                .accept_compressed(CompressionEncoding::Gzip)
+        },
+        async move |mut client| {
+            Ok(client
+                .list_sessions_states(balancerpb::ListSessionsStatesRequest {})
                 .await?
                 .into_inner()
                 .names)
