@@ -1,4 +1,4 @@
-package metrics
+package metrics_test
 
 import (
 	"fmt"
@@ -9,11 +9,13 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/yanet-platform/yanet2/common/go/metrics"
 )
 
 func TestNewHistogram(t *testing.T) {
 	t.Run("SortsBounds", func(t *testing.T) {
-		h := NewHistogram([]float64{100, 10, 50, 1})
+		h := metrics.NewHistogram([]float64{100, 10, 50, 1})
 		snapshot := h.Snapshot()
 		// Verify bounds are sorted (excluding +Inf)
 		bounds := make([]float64, 0, len(snapshot)-1)
@@ -25,13 +27,13 @@ func TestNewHistogram(t *testing.T) {
 	})
 
 	t.Run("BucketCount", func(t *testing.T) {
-		h := NewHistogram([]float64{1, 5, 10})
+		h := metrics.NewHistogram([]float64{1, 5, 10})
 		snapshot := h.Snapshot()
 		assert.Equal(t, 4, len(snapshot), "should have 4 buckets (3 bounds + inf)")
 	})
 
 	t.Run("EmptyBounds", func(t *testing.T) {
-		h := NewHistogram([]float64{})
+		h := metrics.NewHistogram([]float64{})
 		snapshot := h.Snapshot()
 		assert.Len(t, snapshot, 1, "should have 1 inf bucket")
 		assert.True(t, math.IsInf(snapshot[0].UpperBound, 1), "single bucket should be +Inf")
@@ -40,7 +42,7 @@ func TestNewHistogram(t *testing.T) {
 	t.Run("DoesNotModifyInput", func(t *testing.T) {
 		input := []float64{3, 1, 2}
 		original := slices.Clone(input)
-		_ = NewHistogram(input)
+		_ = metrics.NewHistogram(input)
 		assert.Equal(t, original, input, "input should not be modified")
 	})
 }
@@ -48,7 +50,7 @@ func TestNewHistogram(t *testing.T) {
 func TestHistogramObserve(t *testing.T) {
 	// Bounds: [1, 5, 10]
 	// Buckets: [0]: <=1, [1]: (1,5], [2]: (5,10], [3]: >10 (inf)
-	h := NewHistogram([]float64{1, 5, 10})
+	h := metrics.NewHistogram([]float64{1, 5, 10})
 
 	tests := []struct {
 		name   string
@@ -81,7 +83,7 @@ func TestHistogramObserve(t *testing.T) {
 func TestHistogramObserveNegativeBounds(t *testing.T) {
 	// Bounds: [-10, -5, 0, 5] (sorted)
 	// Buckets: [0]: <=-10, [1]: (-10,-5], [2]: (-5,0], [3]: (0,5], [4]: >5
-	h := NewHistogram([]float64{0, -5, 5, -10})
+	h := metrics.NewHistogram([]float64{0, -5, 5, -10})
 
 	tests := []struct {
 		value  float64
@@ -112,7 +114,7 @@ func TestHistogramObserveNegativeBounds(t *testing.T) {
 }
 
 func TestHistogramObserveEmptyBounds(t *testing.T) {
-	h := NewHistogram([]float64{})
+	h := metrics.NewHistogram([]float64{})
 
 	// All values go to the single inf bucket
 	for _, v := range []float64{-100, 0, 100} {
@@ -128,7 +130,7 @@ func TestHistogramObserveEmptyBounds(t *testing.T) {
 }
 
 func TestHistogramConcurrent(t *testing.T) {
-	h := NewHistogram([]float64{10, 50, 100})
+	h := metrics.NewHistogram([]float64{10, 50, 100})
 	var wg sync.WaitGroup
 	n := 1000
 
@@ -151,7 +153,7 @@ func TestHistogramConcurrent(t *testing.T) {
 
 func TestHistogramSnapshot(t *testing.T) {
 	t.Run("EmptyHistogram", func(t *testing.T) {
-		h := NewHistogram([]float64{10, 50, 100})
+		h := metrics.NewHistogram([]float64{10, 50, 100})
 		snapshot := h.Snapshot()
 
 		require.Len(t, snapshot, 4, "should have 4 buckets")
@@ -169,7 +171,7 @@ func TestHistogramSnapshot(t *testing.T) {
 	})
 
 	t.Run("WithObservations", func(t *testing.T) {
-		h := NewHistogram([]float64{10, 50, 100})
+		h := metrics.NewHistogram([]float64{10, 50, 100})
 		h.Observe(5)   // bucket 0
 		h.Observe(25)  // bucket 1
 		h.Observe(75)  // bucket 2
@@ -193,7 +195,7 @@ func TestHistogramSnapshot(t *testing.T) {
 	})
 
 	t.Run("SnapshotIsImmutable", func(t *testing.T) {
-		h := NewHistogram([]float64{10})
+		h := metrics.NewHistogram([]float64{10})
 		h.Observe(5)
 
 		snapshot1 := h.Snapshot()
@@ -212,7 +214,7 @@ func TestHistogramSnapshot(t *testing.T) {
 	})
 
 	t.Run("EmptyBoundsHistogram", func(t *testing.T) {
-		h := NewHistogram([]float64{})
+		h := metrics.NewHistogram([]float64{})
 		h.Observe(100)
 		h.Observe(-100)
 

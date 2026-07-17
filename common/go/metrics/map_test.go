@@ -1,4 +1,4 @@
-package metrics
+package metrics_test
 
 import (
 	"fmt"
@@ -8,29 +8,31 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/yanet-platform/yanet2/common/go/metrics"
 )
 
 func TestMetricMapGetOrCreate(t *testing.T) {
 	t.Run("CreatesNew", func(t *testing.T) {
-		m := NewMetricMap[*Counter]()
-		id := MetricID{Name: "test", Labels: Labels{"a": "1"}}
+		m := metrics.NewMetricMap[*metrics.Counter]()
+		id := metrics.MetricID{Name: "test", Labels: metrics.Labels{"a": "1"}}
 
 		var calls int
-		c := m.GetOrCreate(id, func() *Counter { calls++; return &Counter{} })
+		c := m.GetOrCreate(id, func() *metrics.Counter { calls++; return &metrics.Counter{} })
 
 		assert.Equal(t, 1, calls, "create should be called once")
 		require.NotNil(t, c, "GetOrCreate should not return nil")
 	})
 
 	t.Run("ReturnsExisting", func(t *testing.T) {
-		m := NewMetricMap[*Counter]()
-		id := MetricID{Name: "test"}
+		m := metrics.NewMetricMap[*metrics.Counter]()
+		id := metrics.MetricID{Name: "test"}
 
-		c1 := m.GetOrCreate(id, func() *Counter { return &Counter{} })
+		c1 := m.GetOrCreate(id, func() *metrics.Counter { return &metrics.Counter{} })
 		c1.Inc()
 
 		var calls int
-		c2 := m.GetOrCreate(id, func() *Counter { calls++; return &Counter{} })
+		c2 := m.GetOrCreate(id, func() *metrics.Counter { calls++; return &metrics.Counter{} })
 
 		assert.Equal(t, 0, calls, "create should not be called for existing metric")
 		assert.Same(t, c1, c2, "should return same pointer for same ID")
@@ -38,12 +40,12 @@ func TestMetricMapGetOrCreate(t *testing.T) {
 	})
 
 	t.Run("DifferentIDs", func(t *testing.T) {
-		m := NewMetricMap[*Counter]()
-		id1 := MetricID{Name: "metric1"}
-		id2 := MetricID{Name: "metric2"}
+		m := metrics.NewMetricMap[*metrics.Counter]()
+		id1 := metrics.MetricID{Name: "metric1"}
+		id2 := metrics.MetricID{Name: "metric2"}
 
-		c1 := m.GetOrCreate(id1, func() *Counter { return &Counter{} })
-		c2 := m.GetOrCreate(id2, func() *Counter { return &Counter{} })
+		c1 := m.GetOrCreate(id1, func() *metrics.Counter { return &metrics.Counter{} })
+		c2 := m.GetOrCreate(id2, func() *metrics.Counter { return &metrics.Counter{} })
 
 		c1.Add(10)
 		c2.Add(20)
@@ -54,13 +56,13 @@ func TestMetricMapGetOrCreate(t *testing.T) {
 }
 
 func TestMetricMapLabelsAreASet(t *testing.T) {
-	m := NewMetricMap[*Counter]()
+	m := metrics.NewMetricMap[*metrics.Counter]()
 
-	id1 := MetricID{Name: "test", Labels: Labels{"a": "1", "b": "2"}}
-	id2 := MetricID{Name: "test", Labels: Labels{"b": "2", "a": "1"}}
+	id1 := metrics.MetricID{Name: "test", Labels: metrics.Labels{"a": "1", "b": "2"}}
+	id2 := metrics.MetricID{Name: "test", Labels: metrics.Labels{"b": "2", "a": "1"}}
 
-	c1 := m.GetOrCreate(id1, func() *Counter { return &Counter{} })
-	c2 := m.GetOrCreate(id2, func() *Counter { return &Counter{} })
+	c1 := m.GetOrCreate(id1, func() *metrics.Counter { return &metrics.Counter{} })
+	c2 := m.GetOrCreate(id2, func() *metrics.Counter { return &metrics.Counter{} })
 
 	assert.Same(t, c1, c2, "same label set should resolve to the same metric")
 
@@ -70,16 +72,16 @@ func TestMetricMapLabelsAreASet(t *testing.T) {
 
 func TestMetricMapMetrics(t *testing.T) {
 	t.Run("Empty", func(t *testing.T) {
-		m := NewMetricMap[*Counter]()
+		m := metrics.NewMetricMap[*metrics.Counter]()
 		refs := m.Metrics()
 		assert.Empty(t, refs, "Metrics() on empty map should return empty slice")
 	})
 
 	t.Run("ReturnsAll", func(t *testing.T) {
-		m := NewMetricMap[*Counter]()
+		m := metrics.NewMetricMap[*metrics.Counter]()
 		for i := range 5 {
-			id := MetricID{Name: fmt.Sprintf("metric%d", i)}
-			m.GetOrCreate(id, func() *Counter { return &Counter{} })
+			id := metrics.MetricID{Name: fmt.Sprintf("metric%d", i)}
+			m.GetOrCreate(id, func() *metrics.Counter { return &metrics.Counter{} })
 		}
 
 		refs := m.Metrics()
@@ -87,9 +89,9 @@ func TestMetricMapMetrics(t *testing.T) {
 	})
 
 	t.Run("LiveReferences", func(t *testing.T) {
-		m := NewMetricMap[*Counter]()
-		id := MetricID{Name: "test"}
-		c := m.GetOrCreate(id, func() *Counter { return &Counter{} })
+		m := metrics.NewMetricMap[*metrics.Counter]()
+		id := metrics.MetricID{Name: "test"}
+		c := m.GetOrCreate(id, func() *metrics.Counter { return &metrics.Counter{} })
 
 		refs := m.Metrics()
 		require.Len(t, refs, 1, "should have 1 metric")
@@ -108,9 +110,9 @@ func TestMetricMapMetrics(t *testing.T) {
 	})
 
 	t.Run("IDsPreserved", func(t *testing.T) {
-		m := NewMetricMap[*Counter]()
-		id := MetricID{Name: "test", Labels: Labels{"env": "prod"}}
-		m.GetOrCreate(id, func() *Counter { return &Counter{} })
+		m := metrics.NewMetricMap[*metrics.Counter]()
+		id := metrics.MetricID{Name: "test", Labels: metrics.Labels{"env": "prod"}}
+		m.GetOrCreate(id, func() *metrics.Counter { return &metrics.Counter{} })
 
 		refs := m.Metrics()
 		assert.True(t, refs[0].ID.Equals(id), "ID should be preserved")
@@ -118,12 +120,12 @@ func TestMetricMapMetrics(t *testing.T) {
 }
 
 func TestMetricMapConcurrent(t *testing.T) {
-	m := NewMetricMap[*Counter]()
+	m := metrics.NewMetricMap[*metrics.Counter]()
 	var wg sync.WaitGroup
 	n := 100
-	ids := make([]MetricID, 10)
+	ids := make([]metrics.MetricID, 10)
 	for i := range ids {
-		ids[i] = MetricID{Name: fmt.Sprintf("metric%d", i)}
+		ids[i] = metrics.MetricID{Name: fmt.Sprintf("metric%d", i)}
 	}
 
 	var createCalls atomic.Int64
@@ -133,9 +135,9 @@ func TestMetricMapConcurrent(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for _, id := range ids {
-				c := m.GetOrCreate(id, func() *Counter {
+				c := m.GetOrCreate(id, func() *metrics.Counter {
 					createCalls.Add(1)
-					return &Counter{}
+					return &metrics.Counter{}
 				})
 				c.Inc()
 			}
@@ -156,9 +158,9 @@ func TestMetricMapConcurrent(t *testing.T) {
 
 func TestMetricMapIntegration(t *testing.T) {
 	t.Run("WithGauge", func(t *testing.T) {
-		m := NewMetricMap[*Gauge]()
-		id := MetricID{Name: "temperature"}
-		g := m.GetOrCreate(id, func() *Gauge { return &Gauge{} })
+		m := metrics.NewMetricMap[*metrics.Gauge]()
+		id := metrics.MetricID{Name: "temperature"}
+		g := m.GetOrCreate(id, func() *metrics.Gauge { return &metrics.Gauge{} })
 		g.Store(36.6)
 
 		refs := m.Metrics()
@@ -166,9 +168,9 @@ func TestMetricMapIntegration(t *testing.T) {
 	})
 
 	t.Run("WithHistogram", func(t *testing.T) {
-		m := NewMetricMap[*Histogram]()
-		id := MetricID{Name: "latency"}
-		h := m.GetOrCreate(id, func() *Histogram { return NewHistogram([]float64{10, 50, 100}) })
+		m := metrics.NewMetricMap[*metrics.Histogram]()
+		id := metrics.MetricID{Name: "latency"}
+		h := m.GetOrCreate(id, func() *metrics.Histogram { return metrics.NewHistogram([]float64{10, 50, 100}) })
 		h.Observe(25)
 
 		refs := m.Metrics()
@@ -185,26 +187,26 @@ func TestMetricMapIntegration(t *testing.T) {
 // matching the predicate and cleans up empty internal buckets.
 func TestMetricMapDeleteWhere(t *testing.T) {
 	t.Run("DeleteNone", func(t *testing.T) {
-		m := NewMetricMap[*Counter]()
+		m := metrics.NewMetricMap[*metrics.Counter]()
 		for idx := range 3 {
-			id := MetricID{Name: fmt.Sprintf("metric%d", idx)}
-			m.GetOrCreate(id, func() *Counter { return &Counter{} })
+			id := metrics.MetricID{Name: fmt.Sprintf("metric%d", idx)}
+			m.GetOrCreate(id, func() *metrics.Counter { return &metrics.Counter{} })
 		}
 
-		n := m.DeleteWhere(func(MetricID, *Counter) bool { return false })
+		n := m.DeleteWhere(func(metrics.MetricID, *metrics.Counter) bool { return false })
 
 		assert.Equal(t, 0, n, "DeleteWhere(false) should remove nothing")
 		assert.Len(t, m.Metrics(), 3, "all metrics should remain")
 	})
 
 	t.Run("DeleteSome", func(t *testing.T) {
-		m := NewMetricMap[*Counter]()
+		m := metrics.NewMetricMap[*metrics.Counter]()
 		for idx := range 4 {
-			id := MetricID{Name: fmt.Sprintf("metric%d", idx)}
-			m.GetOrCreate(id, func() *Counter { return &Counter{} })
+			id := metrics.MetricID{Name: fmt.Sprintf("metric%d", idx)}
+			m.GetOrCreate(id, func() *metrics.Counter { return &metrics.Counter{} })
 		}
 
-		n := m.DeleteWhere(func(id MetricID, _ *Counter) bool {
+		n := m.DeleteWhere(func(id metrics.MetricID, _ *metrics.Counter) bool {
 			return id.Name == "metric1" || id.Name == "metric3"
 		})
 
@@ -218,38 +220,33 @@ func TestMetricMapDeleteWhere(t *testing.T) {
 	})
 
 	t.Run("DeleteAll", func(t *testing.T) {
-		m := NewMetricMap[*Counter]()
+		m := metrics.NewMetricMap[*metrics.Counter]()
 		for idx := range 3 {
-			id := MetricID{Name: fmt.Sprintf("metric%d", idx)}
-			m.GetOrCreate(id, func() *Counter { return &Counter{} })
+			id := metrics.MetricID{Name: fmt.Sprintf("metric%d", idx)}
+			m.GetOrCreate(id, func() *metrics.Counter { return &metrics.Counter{} })
 		}
 
-		n := m.DeleteWhere(func(MetricID, *Counter) bool { return true })
+		n := m.DeleteWhere(func(metrics.MetricID, *metrics.Counter) bool { return true })
 
 		assert.Equal(t, 3, n, "DeleteWhere(true) should remove all metrics")
 		assert.Empty(t, m.Metrics(), "map should be empty after deleting all")
 	})
 
 	t.Run("EmptyBucketCleanup", func(t *testing.T) {
-		m := NewMetricMap[*Counter]()
-		id := MetricID{Name: "only"}
-		m.GetOrCreate(id, func() *Counter { return &Counter{} })
+		m := metrics.NewMetricMap[*metrics.Counter]()
+		id := metrics.MetricID{Name: "only"}
+		m.GetOrCreate(id, func() *metrics.Counter { return &metrics.Counter{} })
 
-		m.DeleteWhere(func(MetricID, *Counter) bool { return true })
+		m.DeleteWhere(func(metrics.MetricID, *metrics.Counter) bool { return true })
 
-		// The internal bucket map should have no entries after emptying.
-		m.mu.RLock()
-		bucketCount := len(m.entries)
-		m.mu.RUnlock()
-
-		assert.Equal(t, 0, bucketCount, "empty buckets should be removed from the map")
+		assert.True(t, m.IsEmpty(), "empty buckets should be removed from the map")
 	})
 
 	t.Run("DeleteByValue", func(t *testing.T) {
-		m := NewMetricMap[*Counter]()
+		m := metrics.NewMetricMap[*metrics.Counter]()
 		for idx := range 4 {
-			id := MetricID{Name: fmt.Sprintf("metric%d", idx)}
-			c := m.GetOrCreate(id, func() *Counter { return &Counter{} })
+			id := metrics.MetricID{Name: fmt.Sprintf("metric%d", idx)}
+			c := m.GetOrCreate(id, func() *metrics.Counter { return &metrics.Counter{} })
 			// Give odd-indexed metrics a non-zero count.
 			if idx%2 != 0 {
 				c.Add(uint64(idx * 10))
@@ -257,7 +254,7 @@ func TestMetricMapDeleteWhere(t *testing.T) {
 		}
 
 		// Delete only metrics whose counter value is zero (keying off the value).
-		n := m.DeleteWhere(func(_ MetricID, c *Counter) bool {
+		n := m.DeleteWhere(func(_ metrics.MetricID, c *metrics.Counter) bool {
 			return c.Load() == 0
 		})
 
@@ -270,42 +267,40 @@ func TestMetricMapDeleteWhere(t *testing.T) {
 	})
 }
 
-// Benchmarks
-
 func BenchmarkGetOrCreate(b *testing.B) {
 	b.Run("New", func(b *testing.B) {
 		for i := range b.N {
-			m := NewMetricMap[*Counter]()
-			id := MetricID{Name: fmt.Sprintf("metric%d", i)}
-			m.GetOrCreate(id, func() *Counter { return &Counter{} })
+			m := metrics.NewMetricMap[*metrics.Counter]()
+			id := metrics.MetricID{Name: fmt.Sprintf("metric%d", i)}
+			m.GetOrCreate(id, func() *metrics.Counter { return &metrics.Counter{} })
 		}
 	})
 
 	b.Run("Existing", func(b *testing.B) {
-		m := NewMetricMap[*Counter]()
-		id := MetricID{Name: "metric", Labels: Labels{"a": "1"}}
-		m.GetOrCreate(id, func() *Counter { return &Counter{} })
+		m := metrics.NewMetricMap[*metrics.Counter]()
+		id := metrics.MetricID{Name: "metric", Labels: metrics.Labels{"a": "1"}}
+		m.GetOrCreate(id, func() *metrics.Counter { return &metrics.Counter{} })
 
 		b.ResetTimer()
 		for range b.N {
-			m.GetOrCreate(id, func() *Counter { return &Counter{} })
+			m.GetOrCreate(id, func() *metrics.Counter { return &metrics.Counter{} })
 		}
 	})
 }
 
 func BenchmarkGetOrCreateParallel(b *testing.B) {
-	m := NewMetricMap[*Counter]()
-	ids := make([]MetricID, 100)
+	m := metrics.NewMetricMap[*metrics.Counter]()
+	ids := make([]metrics.MetricID, 100)
 	for i := range ids {
-		ids[i] = MetricID{Name: fmt.Sprintf("metric%d", i)}
-		m.GetOrCreate(ids[i], func() *Counter { return &Counter{} })
+		ids[i] = metrics.MetricID{Name: fmt.Sprintf("metric%d", i)}
+		m.GetOrCreate(ids[i], func() *metrics.Counter { return &metrics.Counter{} })
 	}
 
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		i := 0
 		for pb.Next() {
-			m.GetOrCreate(ids[i%len(ids)], func() *Counter { return &Counter{} })
+			m.GetOrCreate(ids[i%len(ids)], func() *metrics.Counter { return &metrics.Counter{} })
 			i++
 		}
 	})
@@ -314,10 +309,10 @@ func BenchmarkGetOrCreateParallel(b *testing.B) {
 func BenchmarkMetrics(b *testing.B) {
 	for _, size := range []int{10, 100, 1000} {
 		b.Run(fmt.Sprintf("Size%d", size), func(b *testing.B) {
-			m := NewMetricMap[*Counter]()
+			m := metrics.NewMetricMap[*metrics.Counter]()
 			for i := range size {
-				id := MetricID{Name: fmt.Sprintf("metric%d", i)}
-				m.GetOrCreate(id, func() *Counter { return &Counter{} })
+				id := metrics.MetricID{Name: fmt.Sprintf("metric%d", i)}
+				m.GetOrCreate(id, func() *metrics.Counter { return &metrics.Counter{} })
 			}
 
 			b.ResetTimer()

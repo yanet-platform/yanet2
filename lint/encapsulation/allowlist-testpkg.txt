@@ -27,9 +27,6 @@ common/go/bitset/bitset_test.go:bitset  # legacy: migrate to the external test p
 common/go/dataplane/packet_test.go:dataplane  # legacy: migrate to the external test package
 common/go/grpcmetrics/grpcmetrics_test.go:grpcmetrics  # legacy: migrate to the external test package
 common/go/maptrie/map_trie_test.go:maptrie  # legacy: migrate to the external test package
-common/go/metrics/histogram_test.go:metrics  # legacy: migrate to the external test package
-common/go/metrics/map_test.go:metrics  # legacy: migrate to the external test package
-common/go/metrics/metric_test.go:metrics  # legacy: migrate to the external test package
 common/go/operator/function_test.go:operator  # legacy: migrate to the external test package
 common/go/operator/server_test.go:operator  # legacy: migrate to the external test package
 common/go/xcfg/load_test.go:xcfg  # legacy: migrate to the external test package

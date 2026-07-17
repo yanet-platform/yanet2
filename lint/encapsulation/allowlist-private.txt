@@ -19,21 +19,6 @@
 # stale. A stale entry is itself a lint failure, so paying down the debt
 # requires deleting the row — the ledger is self-cleaning by construction.
 
-common/go/metrics/histogram.go:Histogram.Observe:m.buckets[idx].count  # legacy: encapsulate behind an exported method or field
-common/go/metrics/histogram.go:Histogram.Observe:m.buckets[idx].upperBound  # legacy: encapsulate behind an exported method or field
-common/go/metrics/histogram.go:Histogram.Snapshot:m.buckets[i].count  # legacy: encapsulate behind an exported method or field
-common/go/metrics/histogram.go:Histogram.Snapshot:m.buckets[i].upperBound  # legacy: encapsulate behind an exported method or field
-common/go/metrics/histogram.go:NewHistogram:buckets[i].upperBound  # legacy: encapsulate behind an exported method or field
-common/go/metrics/histogram.go:NewHistogram:buckets[len(sorted)].upperBound  # legacy: encapsulate behind an exported method or field
-common/go/metrics/map.go:MetricMap.create:bucket[idx].id  # legacy: encapsulate behind an exported method or field
-common/go/metrics/map.go:MetricMap.create:bucket[idx].metric  # legacy: encapsulate behind an exported method or field
-common/go/metrics/map.go:MetricMap.create:m.entries[h][len(m.entries[h]) - 1].metric  # legacy: encapsulate behind an exported method or field
-common/go/metrics/map.go:MetricMap.DeleteWhere:entry.id  # legacy: encapsulate behind an exported method or field
-common/go/metrics/map.go:MetricMap.DeleteWhere:entry.metric  # legacy: encapsulate behind an exported method or field
-common/go/metrics/map.go:MetricMap.Metrics:bucket[i].id  # legacy: encapsulate behind an exported method or field
-common/go/metrics/map.go:MetricMap.Metrics:bucket[i].metric  # legacy: encapsulate behind an exported method or field
-common/go/metrics/map.go:MetricMap.tryGet:bucket[idx].id  # legacy: encapsulate behind an exported method or field
-common/go/metrics/map.go:MetricMap.tryGet:bucket[idx].metric  # legacy: encapsulate behind an exported method or field
 common/go/operator/operator.go:NewOperator:opts.GRPCServer.cfg  # legacy: encapsulate behind an exported method or field
 common/go/operator/operator.go:NewOperator:opts.GRPCServer.services  # legacy: encapsulate behind an exported method or field
 common/go/xbackoff/backoff.go:New:opts.jitter  # legacy: encapsulate behind an exported method or field
